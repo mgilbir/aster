@@ -8,6 +8,7 @@
 
 import * as vega from "vega";
 import * as vegaLite from "vega-lite";
+import { resetSVGDefIds } from "vega-scenegraph";
 
 // Create a custom Vega loader that delegates to Go callbacks.
 function createLoader() {
@@ -87,6 +88,10 @@ export function vegaLiteToVega(specJSON) {
  * @returns {Promise<string>} - SVG string
  */
 export async function vegaToSvg(specJSON, theme) {
+  // Reset clip-path/gradient ID counters so each render produces
+  // deterministic IDs regardless of how many renders preceded it.
+  resetSVGDefIds();
+
   const spec = JSON.parse(specJSON);
   const loader = createLoader();
 

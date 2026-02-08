@@ -16,7 +16,7 @@ import (
 	"github.com/go-text/typesetting/fontscan"
 	"github.com/go-text/typesetting/language"
 	"github.com/go-text/typesetting/shaping"
-	"github.com/mgilbir/aster/internal/textmeasure/fonts/dejavu"
+	"github.com/mgilbir/aster/internal/textmeasure/fonts/liberation"
 	"golang.org/x/image/math/fixed"
 )
 
@@ -24,8 +24,9 @@ import (
 type MeasurerOption func(*measurerConfig)
 
 type measurerConfig struct {
-	systemFonts bool
-	fonts       []customFont
+	systemFonts    bool
+	fonts          []customFont
+	fallbackFamily string
 }
 
 type customFont struct {
@@ -48,15 +49,26 @@ func WithFont(family string, ttf []byte) MeasurerOption {
 	}
 }
 
-// Measurer computes text widths using HarfBuzz shaping.
-type Measurer struct {
-	mu      sync.Mutex
-	fontMap *fontscan.FontMap
-	shaper  shaping.HarfbuzzShaper
+// WithDefaultFontFamily sets the font family name used as the fallback when
+// resolving "sans-serif" and other generic CSS font families. Defaults to
+// "Liberation Sans" (the embedded font).
+func WithDefaultFontFamily(family string) MeasurerOption {
+	return func(c *measurerConfig) {
+		c.fallbackFamily = family
+	}
 }
 
-// New creates a Measurer with embedded DejaVu Sans fonts for
-// reproducible text metrics across all platforms.
+// Measurer computes text widths using HarfBuzz shaping.
+type Measurer struct {
+	mu             sync.Mutex
+	fontMap        *fontscan.FontMap
+	shaper         shaping.HarfbuzzShaper
+	fallbackFamily string
+}
+
+// New creates a Measurer with embedded Liberation Sans fonts for
+// reproducible text metrics across all platforms. Liberation Sans is
+// metrically compatible with Arial, matching vl-convert's text measurement.
 func New(opts ...MeasurerOption) (*Measurer, error) {
 	var cfg measurerConfig
 	for _, opt := range opts {
@@ -65,23 +77,24 @@ func New(opts ...MeasurerOption) (*Measurer, error) {
 
 	fm := fontscan.NewFontMap(nil)
 
-	// Register embedded DejaVu fonts first (always-present fallback).
-	dejavuFonts := []struct {
+	// Register embedded Liberation fonts first (always-present fallback).
+	// Liberation Sans is metrically identical to Arial.
+	embeddedFonts := []struct {
 		data   []byte
 		id     string
 		family string
 	}{
-		{dejavu.SansRegular, "dejavu-sans", "DejaVu Sans"},
-		{dejavu.SansBold, "dejavu-sans-bold", "DejaVu Sans"},
-		{dejavu.SansOblique, "dejavu-sans-oblique", "DejaVu Sans"},
-		{dejavu.SansBoldOblique, "dejavu-sans-boldoblique", "DejaVu Sans"},
-		{dejavu.MonoRegular, "dejavu-mono", "DejaVu Sans Mono"},
-		{dejavu.MonoBold, "dejavu-mono-bold", "DejaVu Sans Mono"},
-		{dejavu.MonoOblique, "dejavu-mono-oblique", "DejaVu Sans Mono"},
-		{dejavu.MonoBoldOblique, "dejavu-mono-boldoblique", "DejaVu Sans Mono"},
+		{liberation.SansRegular, "liberation-sans", "Liberation Sans"},
+		{liberation.SansBold, "liberation-sans-bold", "Liberation Sans"},
+		{liberation.SansItalic, "liberation-sans-italic", "Liberation Sans"},
+		{liberation.SansBoldItalic, "liberation-sans-bolditalic", "Liberation Sans"},
+		{liberation.MonoRegular, "liberation-mono", "Liberation Mono"},
+		{liberation.MonoBold, "liberation-mono-bold", "Liberation Mono"},
+		{liberation.MonoItalic, "liberation-mono-italic", "Liberation Mono"},
+		{liberation.MonoBoldItalic, "liberation-mono-bolditalic", "Liberation Mono"},
 	}
 
-	for _, f := range dejavuFonts {
+	for _, f := range embeddedFonts {
 		if err := fm.AddFont(bytes.NewReader(f.data), f.id, f.family); err != nil {
 			return nil, fmt.Errorf("textmeasure: loading %s: %w", f.id, err)
 		}
@@ -102,7 +115,12 @@ func New(opts ...MeasurerOption) (*Measurer, error) {
 		}
 	}
 
-	return &Measurer{fontMap: fm}, nil
+	fallback := cfg.fallbackFamily
+	if fallback == "" {
+		fallback = "Liberation Sans"
+	}
+
+	return &Measurer{fontMap: fm, fallbackFamily: fallback}, nil
 }
 
 // CSSFont represents a parsed CSS font shorthand string.
@@ -126,8 +144,8 @@ func (m *Measurer) MeasureText(text, cssFont string) float64 {
 
 	families := make([]string, 0, len(parsed.Family)+2)
 	families = append(families, parsed.Family...)
-	// Always add DejaVu Sans as fallback.
-	families = append(families, "DejaVu Sans", fontscan.SansSerif)
+	// Always add the configured fallback font family.
+	families = append(families, m.fallbackFamily, fontscan.SansSerif)
 
 	m.fontMap.SetQuery(fontscan.Query{
 		Families: families,

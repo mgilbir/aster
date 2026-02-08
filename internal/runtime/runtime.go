@@ -34,6 +34,7 @@ type Config struct {
 	MemoryLimit  int
 	Timeout      time.Duration
 	Version      string // version set key, e.g. "vl6_4" (default)
+	Timezone     string // IANA timezone name or "UTC" (default: "UTC")
 }
 
 // Runtime wraps a QuickJS engine with Vega/Vega-Lite loaded.
@@ -242,6 +243,38 @@ func (r *Runtime) installPolyfills() error {
 		return fmt.Errorf("aster/runtime: installing polyfills: %w", err)
 	}
 	val.Free()
+
+	// Force UTC timezone by redirecting local Date methods to UTC equivalents.
+	// QuickJS in WASM has no timezone configuration, so we polyfill it.
+	tz := r.config.Timezone
+	if tz == "" {
+		tz = "UTC"
+	}
+	if tz == "UTC" {
+		utcPolyfill := `
+			Date.prototype.getTimezoneOffset = function() { return 0; };
+			Date.prototype.getFullYear = Date.prototype.getUTCFullYear;
+			Date.prototype.getMonth = Date.prototype.getUTCMonth;
+			Date.prototype.getDate = Date.prototype.getUTCDate;
+			Date.prototype.getDay = Date.prototype.getUTCDay;
+			Date.prototype.getHours = Date.prototype.getUTCHours;
+			Date.prototype.getMinutes = Date.prototype.getUTCMinutes;
+			Date.prototype.getSeconds = Date.prototype.getUTCSeconds;
+			Date.prototype.getMilliseconds = Date.prototype.getUTCMilliseconds;
+			Date.prototype.setFullYear = Date.prototype.setUTCFullYear;
+			Date.prototype.setMonth = Date.prototype.setUTCMonth;
+			Date.prototype.setDate = Date.prototype.setUTCDate;
+			Date.prototype.setHours = Date.prototype.setUTCHours;
+			Date.prototype.setMinutes = Date.prototype.setUTCMinutes;
+			Date.prototype.setSeconds = Date.prototype.setUTCSeconds;
+			Date.prototype.setMilliseconds = Date.prototype.setUTCMilliseconds;
+		`
+		val, err := ctx.Eval("__aster_tz__.js", qjs.Code(utcPolyfill))
+		if err != nil {
+			return fmt.Errorf("aster/runtime: installing UTC timezone polyfill: %w", err)
+		}
+		val.Free()
+	}
 
 	return nil
 }

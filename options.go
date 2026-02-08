@@ -14,14 +14,16 @@ type fontEntry struct {
 }
 
 type config struct {
-	loader          Loader
-	theme           string
-	memoryLimit     uint64
-	timeout         time.Duration
-	textMeasure     bool
-	vegaLiteVersion string // version set key, e.g. "vl6_4"
-	systemFonts     bool
-	fonts           []fontEntry
+	loader            Loader
+	theme             string
+	memoryLimit       uint64
+	timeout           time.Duration
+	textMeasure       bool
+	vegaLiteVersion   string // version set key, e.g. "vl6_4"
+	systemFonts       bool
+	fonts             []fontEntry
+	defaultFontFamily string
+	timezone          string
 }
 
 func defaultConfig() *config {
@@ -85,7 +87,7 @@ func WithVegaLiteVersion(v string) Option {
 }
 
 // WithSystemFonts enables scanning of system-installed fonts for text
-// measurement. System fonts supplement the always-present embedded DejaVu Sans.
+// measurement. System fonts supplement the always-present embedded Liberation Sans.
 func WithSystemFonts() Option {
 	return func(c *config) {
 		c.systemFonts = true
@@ -98,5 +100,25 @@ func WithSystemFonts() Option {
 func WithFont(family string, ttf []byte) Option {
 	return func(c *config) {
 		c.fonts = append(c.fonts, fontEntry{family: family, data: ttf})
+	}
+}
+
+// WithDefaultFontFamily sets the font family name used as the fallback when
+// resolving "sans-serif" and other generic CSS font families. Defaults to
+// "Liberation Sans" (the embedded font). Use this with WithFont to switch
+// the primary font used for text measurement.
+func WithDefaultFontFamily(family string) Option {
+	return func(c *config) {
+		c.defaultFontFamily = family
+	}
+}
+
+// WithTimezone sets the timezone for JavaScript Date operations.
+// Defaults to "UTC" for deterministic output. Currently only "UTC" is
+// supported; other values are passed through but have no effect unless
+// the QuickJS WASM runtime supports them.
+func WithTimezone(tz string) Option {
+	return func(c *config) {
+		c.timezone = tz
 	}
 }

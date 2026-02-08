@@ -43,6 +43,9 @@ func New(opts ...Option) (*Converter, error) {
 		for _, f := range cfg.fonts {
 			measurerOpts = append(measurerOpts, textmeasure.WithFont(f.family, f.data))
 		}
+		if cfg.defaultFontFamily != "" {
+			measurerOpts = append(measurerOpts, textmeasure.WithDefaultFontFamily(cfg.defaultFontFamily))
+		}
 		var err error
 		measurer, err = textmeasure.New(measurerOpts...)
 		if err != nil {
@@ -58,6 +61,7 @@ func New(opts ...Option) (*Converter, error) {
 		MemoryLimit:  int(cfg.memoryLimit),
 		Timeout:      cfg.timeout,
 		Version:      cfg.vegaLiteVersion,
+		Timezone:     cfg.timezone,
 	}
 
 	rt, err := runtime.New(rtCfg)
