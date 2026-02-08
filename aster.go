@@ -50,6 +50,7 @@ func New(opts ...Option) (*Converter, error) {
 		Theme:        cfg.theme,
 		MemoryLimit:  int(cfg.memoryLimit),
 		Timeout:      cfg.timeout,
+		Version:      cfg.vegaLiteVersion,
 	}
 
 	rt, err := runtime.New(rtCfg)

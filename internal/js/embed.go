@@ -3,7 +3,7 @@ package js
 
 import "embed"
 
-//go:embed modules/*.js modules/manifest.json
+//go:embed modules/versions.json modules/*/*.js modules/*/manifest.json
 var Modules embed.FS
 
 //go:embed bridge.js

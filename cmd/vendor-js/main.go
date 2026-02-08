@@ -4,11 +4,15 @@
 //
 // It also generates a manifest.json with versions, checksums, and a
 // topological load order suitable for QuickJS module registration.
+//
+// Multiple Vega-Lite versions are supported. Use the -version flag to vendor
+// only a single version set (e.g. -version vl5_8).
 package main
 
 import (
 	"crypto/sha256"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -20,14 +24,34 @@ import (
 	"strings"
 )
 
-const (
-	vegaVersion     = "5.31.0"
-	vegaLiteVersion = "6.4.0"
+const jsdelivrBase = "https://cdn.jsdelivr.net"
 
-	jsdelivrBase = "https://cdn.jsdelivr.net"
-)
+// versionSet defines a Vega-Lite version to vendor.
+// The Vega version is auto-resolved from jsDelivr's transitive dependencies.
+type versionSet struct {
+	key             string // directory name, e.g. "vl5_8"
+	vegaLiteVersion string // e.g. "5.8.0"
+}
 
-// Manifest is written to internal/js/modules/manifest.json.
+var versionSets = []versionSet{
+	{key: "vl5_8", vegaLiteVersion: "5.8.0"},
+	{key: "vl6_4", vegaLiteVersion: "6.4.0"},
+}
+
+// VersionIndex is written to internal/js/modules/versions.json.
+// It lists all available Vega-Lite version sets and the default.
+type VersionIndex struct {
+	Default  string                `json:"default"`
+	Versions map[string]VersionDef `json:"versions"`
+}
+
+// VersionDef describes a single vendored Vega-Lite version set.
+type VersionDef struct {
+	VegaVersion     string `json:"vegaVersion"`
+	VegaLiteVersion string `json:"vegaLiteVersion"`
+}
+
+// Manifest is written to internal/js/modules/{key}/manifest.json.
 type Manifest struct {
 	VegaVersion     string           `json:"vegaVersion"`
 	VegaLiteVersion string           `json:"vegaLiteVersion"`
@@ -62,33 +86,81 @@ func main() {
 	log.SetFlags(0)
 	log.SetPrefix("vendor-js: ")
 
+	versionFlag := flag.String("version", "", "vendor only this version set key (e.g. vl5_8)")
+	flag.Parse()
+
+	sets := versionSets
+	if *versionFlag != "" {
+		var found bool
+		for _, vs := range versionSets {
+			if vs.key == *versionFlag {
+				sets = []versionSet{vs}
+				found = true
+				break
+			}
+		}
+		if !found {
+			var keys []string
+			for _, vs := range versionSets {
+				keys = append(keys, vs.key)
+			}
+			log.Fatalf("unknown version %q, available: %s", *versionFlag, strings.Join(keys, ", "))
+		}
+	}
+
 	outDir := filepath.Join("internal", "js", "modules")
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		log.Fatalf("creating output dir: %v", err)
 	}
 
-	modules := make(map[string]*module) // name → module
-
-	// Seed modules to download.
-	seeds := []struct {
-		name    string
-		version string
-	}{
-		{"vega", vegaVersion},
-		{"vega-lite", vegaLiteVersion},
+	index := VersionIndex{
+		Default:  "vl6_4",
+		Versions: make(map[string]VersionDef),
 	}
 
-	// Download queue.
+	for _, vs := range sets {
+		vegaVer, err := vendorVersion(vs)
+		if err != nil {
+			log.Fatalf("vendoring %s: %v", vs.key, err)
+		}
+		index.Versions[vs.key] = VersionDef{
+			VegaVersion:     vegaVer,
+			VegaLiteVersion: vs.vegaLiteVersion,
+		}
+	}
+
+	// Write top-level versions.json index.
+	indexJSON, err := json.MarshalIndent(index, "", "  ")
+	if err != nil {
+		log.Fatalf("marshaling versions index: %v", err)
+	}
+	indexPath := filepath.Join(outDir, "versions.json")
+	if err := os.WriteFile(indexPath, indexJSON, 0o644); err != nil {
+		log.Fatalf("writing versions index: %v", err)
+	}
+	log.Printf("wrote versions index to %s", indexPath)
+}
+
+func vendorVersion(vs versionSet) (string, error) {
+	outDir := filepath.Join("internal", "js", "modules", vs.key)
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return "", fmt.Errorf("creating output dir: %w", err)
+	}
+
+	modules := make(map[string]*module) // name → module
+
+	// Seed with vega-lite; vega version is auto-resolved from its dependencies.
 	type queueItem struct {
 		name    string
 		version string
 	}
-	queue := make([]queueItem, 0, 64)
-	for _, s := range seeds {
-		queue = append(queue, queueItem{s.name, s.version})
+	queue := []queueItem{
+		{"vega-lite", vs.vegaLiteVersion},
 	}
 
-	log.Printf("downloading Vega %s and Vega-Lite %s from jsDelivr...", vegaVersion, vegaLiteVersion)
+	log.Printf("[%s] downloading Vega-Lite %s from jsDelivr...", vs.key, vs.vegaLiteVersion)
+
+	var vegaVersion string
 
 	for len(queue) > 0 {
 		item := queue[0]
@@ -98,16 +170,21 @@ func main() {
 			continue
 		}
 
-		log.Printf("  fetching %s@%s", item.name, item.version)
+		log.Printf("  [%s] fetching %s@%s", vs.key, item.name, item.version)
 
 		src, err := fetchESM(item.name, item.version)
 		if err != nil {
-			log.Fatalf("fetching %s@%s: %v", item.name, item.version, err)
+			return "", fmt.Errorf("fetching %s@%s: %w", item.name, item.version, err)
 		}
 
 		mod := &module{
 			name:    item.name,
 			version: item.version,
+		}
+
+		// Track vega version as it's resolved.
+		if item.name == "vega" {
+			vegaVersion = item.version
 		}
 
 		// Find all dependencies from import and export statements.
@@ -150,18 +227,22 @@ func main() {
 		modules[item.name] = mod
 	}
 
-	log.Printf("downloaded %d modules, computing load order...", len(modules))
+	if vegaVersion == "" {
+		return "", fmt.Errorf("vega version not resolved from dependencies")
+	}
+
+	log.Printf("[%s] resolved Vega %s, downloaded %d modules, computing load order...", vs.key, vegaVersion, len(modules))
 
 	// Topological sort for load order.
 	order, err := topoSort(modules)
 	if err != nil {
-		log.Fatalf("topological sort: %v", err)
+		return "", fmt.Errorf("topological sort: %w", err)
 	}
 
 	// Write module files and build manifest.
 	manifest := Manifest{
 		VegaVersion:     vegaVersion,
-		VegaLiteVersion: vegaLiteVersion,
+		VegaLiteVersion: vs.vegaLiteVersion,
 		Modules:         make([]ManifestModule, 0, len(order)),
 	}
 
@@ -171,7 +252,7 @@ func main() {
 		outPath := filepath.Join(outDir, filename)
 
 		if err := os.WriteFile(outPath, []byte(mod.source), 0o644); err != nil {
-			log.Fatalf("writing %s: %v", outPath, err)
+			return "", fmt.Errorf("writing %s: %w", outPath, err)
 		}
 
 		hash := sha256.Sum256([]byte(mod.source))
@@ -186,16 +267,18 @@ func main() {
 	manifestPath := filepath.Join(outDir, "manifest.json")
 	manifestJSON, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
-		log.Fatalf("marshaling manifest: %v", err)
+		return "", fmt.Errorf("marshaling manifest: %w", err)
 	}
 	if err := os.WriteFile(manifestPath, manifestJSON, 0o644); err != nil {
-		log.Fatalf("writing manifest: %v", err)
+		return "", fmt.Errorf("writing manifest: %w", err)
 	}
 
-	log.Printf("wrote %d modules + manifest to %s", len(order), outDir)
+	log.Printf("[%s] wrote %d modules + manifest to %s", vs.key, len(order), outDir)
 	for _, m := range manifest.Modules {
-		log.Printf("  %s@%s (%s)", m.Name, m.Version, m.Filename)
+		log.Printf("  [%s] %s@%s (%s)", vs.key, m.Name, m.Version, m.Filename)
 	}
+
+	return vegaVersion, nil
 }
 
 func fetchESM(name, version string) (string, error) {

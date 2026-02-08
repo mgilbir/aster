@@ -33,12 +33,24 @@ type Config struct {
 	Theme        string
 	MemoryLimit  int
 	Timeout      time.Duration
+	Version      string // version set key, e.g. "vl6_4" (default)
 }
 
 // Runtime wraps a QuickJS engine with Vega/Vega-Lite loaded.
 type Runtime struct {
 	rt     *qjs.Runtime
 	config Config
+}
+
+// versionIndex matches the top-level versions.json from the vendoring tool.
+type versionIndex struct {
+	Default  string                    `json:"default"`
+	Versions map[string]versionIndexDef `json:"versions"`
+}
+
+type versionIndexDef struct {
+	VegaVersion     string `json:"vegaVersion"`
+	VegaLiteVersion string `json:"vegaLiteVersion"`
 }
 
 // manifest matches the JSON structure from the vendoring tool.
@@ -69,6 +81,15 @@ func New(cfg Config) (*Runtime, error) {
 	rt, err := qjs.New(opts)
 	if err != nil {
 		return nil, fmt.Errorf("aster/runtime: creating QuickJS runtime: %w", err)
+	}
+
+	if cfg.Version == "" {
+		def, err := readDefaultVersion()
+		if err != nil {
+			rt.Close()
+			return nil, err
+		}
+		cfg.Version = def
 	}
 
 	r := &Runtime{rt: rt, config: cfg}
@@ -225,12 +246,49 @@ func (r *Runtime) installPolyfills() error {
 	return nil
 }
 
+// readDefaultVersion reads the default version key from versions.json.
+func readDefaultVersion() (string, error) {
+	idx, err := readVersionIndex()
+	if err != nil {
+		return "", err
+	}
+	return idx.Default, nil
+}
+
+// readVersionIndex reads and parses the versions.json index.
+func readVersionIndex() (*versionIndex, error) {
+	data, err := fs.ReadFile(asterjs.Modules, "modules/versions.json")
+	if err != nil {
+		return nil, fmt.Errorf("aster/runtime: reading versions index: %w", err)
+	}
+	var idx versionIndex
+	if err := json.Unmarshal(data, &idx); err != nil {
+		return nil, fmt.Errorf("aster/runtime: parsing versions index: %w", err)
+	}
+	return &idx, nil
+}
+
+// AvailableVersions returns the available version set keys and their metadata.
+func AvailableVersions() (map[string]struct{ VegaVersion, VegaLiteVersion string }, error) {
+	idx, err := readVersionIndex()
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]struct{ VegaVersion, VegaLiteVersion string }, len(idx.Versions))
+	for k, v := range idx.Versions {
+		result[k] = struct{ VegaVersion, VegaLiteVersion string }{v.VegaVersion, v.VegaLiteVersion}
+	}
+	return result, nil
+}
+
 // loadModules reads the manifest and loads all vendored JS modules in order.
 func (r *Runtime) loadModules() error {
-	// Read manifest.
-	manifestData, err := fs.ReadFile(asterjs.Modules, "modules/manifest.json")
+	// Read manifest from the versioned subdirectory.
+	ver := r.config.Version
+	manifestPath := "modules/" + ver + "/manifest.json"
+	manifestData, err := fs.ReadFile(asterjs.Modules, manifestPath)
 	if err != nil {
-		return fmt.Errorf("aster/runtime: reading manifest: %w", err)
+		return fmt.Errorf("aster/runtime: reading manifest for %s: %w", ver, err)
 	}
 
 	var m manifest
@@ -242,7 +300,7 @@ func (r *Runtime) loadModules() error {
 
 	// Load each module in topological order.
 	for _, mod := range m.Modules {
-		src, err := fs.ReadFile(asterjs.Modules, "modules/"+mod.Filename)
+		src, err := fs.ReadFile(asterjs.Modules, "modules/"+ver+"/"+mod.Filename)
 		if err != nil {
 			return fmt.Errorf("aster/runtime: reading module %s: %w", mod.Name, err)
 		}
