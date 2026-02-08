@@ -36,8 +36,15 @@ func New(opts ...Option) (*Converter, error) {
 	var measurer *textmeasure.Measurer
 	var tm runtime.TextMeasurer
 	if cfg.textMeasure {
+		var measurerOpts []textmeasure.MeasurerOption
+		if cfg.systemFonts {
+			measurerOpts = append(measurerOpts, textmeasure.WithSystemFonts())
+		}
+		for _, f := range cfg.fonts {
+			measurerOpts = append(measurerOpts, textmeasure.WithFont(f.family, f.data))
+		}
 		var err error
-		measurer, err = textmeasure.New()
+		measurer, err = textmeasure.New(measurerOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("aster: initializing text measurer: %w", err)
 		}

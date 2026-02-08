@@ -8,6 +8,11 @@ import (
 // Option configures a Converter.
 type Option func(*config)
 
+type fontEntry struct {
+	family string
+	data   []byte
+}
+
 type config struct {
 	loader          Loader
 	theme           string
@@ -15,6 +20,8 @@ type config struct {
 	timeout         time.Duration
 	textMeasure     bool
 	vegaLiteVersion string // version set key, e.g. "vl6_4"
+	systemFonts     bool
+	fonts           []fontEntry
 }
 
 func defaultConfig() *config {
@@ -74,5 +81,22 @@ func WithVegaLiteVersion(v string) Option {
 		// Map "5.8" → "vl5_8", "6.4" → "vl6_4", etc.
 		key := "vl" + strings.ReplaceAll(v, ".", "_")
 		c.vegaLiteVersion = key
+	}
+}
+
+// WithSystemFonts enables scanning of system-installed fonts for text
+// measurement. System fonts supplement the always-present embedded DejaVu Sans.
+func WithSystemFonts() Option {
+	return func(c *config) {
+		c.systemFonts = true
+	}
+}
+
+// WithFont registers a custom TTF font with the given family name for text
+// measurement. Custom fonts take priority over system and embedded fonts.
+// Multiple calls append additional fonts; later fonts take higher priority.
+func WithFont(family string, ttf []byte) Option {
+	return func(c *config) {
+		c.fonts = append(c.fonts, fontEntry{family: family, data: ttf})
 	}
 }

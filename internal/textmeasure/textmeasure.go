@@ -16,16 +16,37 @@ import (
 	"github.com/go-text/typesetting/fontscan"
 	"github.com/go-text/typesetting/language"
 	"github.com/go-text/typesetting/shaping"
-	"golang.org/x/image/font/gofont/gobold"
-	"golang.org/x/image/font/gofont/gobolditalic"
-	"golang.org/x/image/font/gofont/goitalic"
-	"golang.org/x/image/font/gofont/gomono"
-	"golang.org/x/image/font/gofont/gomonobold"
-	"golang.org/x/image/font/gofont/gomonobolditalic"
-	"golang.org/x/image/font/gofont/gomonoitalic"
-	"golang.org/x/image/font/gofont/goregular"
+	"github.com/mgilbir/aster/internal/textmeasure/fonts/dejavu"
 	"golang.org/x/image/math/fixed"
 )
+
+// MeasurerOption configures a Measurer.
+type MeasurerOption func(*measurerConfig)
+
+type measurerConfig struct {
+	systemFonts bool
+	fonts       []customFont
+}
+
+type customFont struct {
+	family string
+	data   []byte
+}
+
+// WithSystemFonts enables scanning of system-installed fonts.
+func WithSystemFonts() MeasurerOption {
+	return func(c *measurerConfig) {
+		c.systemFonts = true
+	}
+}
+
+// WithFont registers a custom TTF font with the given family name.
+// Fonts added later take priority over earlier ones.
+func WithFont(family string, ttf []byte) MeasurerOption {
+	return func(c *measurerConfig) {
+		c.fonts = append(c.fonts, customFont{family: family, data: ttf})
+	}
+}
 
 // Measurer computes text widths using HarfBuzz shaping.
 type Measurer struct {
@@ -34,29 +55,50 @@ type Measurer struct {
 	shaper  shaping.HarfbuzzShaper
 }
 
-// New creates a Measurer with embedded Go fonts as fallbacks.
-func New() (*Measurer, error) {
+// New creates a Measurer with embedded DejaVu Sans fonts for
+// reproducible text metrics across all platforms.
+func New(opts ...MeasurerOption) (*Measurer, error) {
+	var cfg measurerConfig
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
 	fm := fontscan.NewFontMap(nil)
 
-	// Register embedded Go fonts.
-	fonts := []struct {
+	// Register embedded DejaVu fonts first (always-present fallback).
+	dejavuFonts := []struct {
 		data   []byte
 		id     string
 		family string
 	}{
-		{goregular.TTF, "goregular", "Go"},
-		{gobold.TTF, "gobold", "Go"},
-		{goitalic.TTF, "goitalic", "Go"},
-		{gobolditalic.TTF, "gobolditalic", "Go"},
-		{gomono.TTF, "gomono", "Go Mono"},
-		{gomonobold.TTF, "gomonobold", "Go Mono"},
-		{gomonobolditalic.TTF, "gomonobolditalic", "Go Mono"},
-		{gomonoitalic.TTF, "gomonoitalic", "Go Mono"},
+		{dejavu.SansRegular, "dejavu-sans", "DejaVu Sans"},
+		{dejavu.SansBold, "dejavu-sans-bold", "DejaVu Sans"},
+		{dejavu.SansOblique, "dejavu-sans-oblique", "DejaVu Sans"},
+		{dejavu.SansBoldOblique, "dejavu-sans-boldoblique", "DejaVu Sans"},
+		{dejavu.MonoRegular, "dejavu-mono", "DejaVu Sans Mono"},
+		{dejavu.MonoBold, "dejavu-mono-bold", "DejaVu Sans Mono"},
+		{dejavu.MonoOblique, "dejavu-mono-oblique", "DejaVu Sans Mono"},
+		{dejavu.MonoBoldOblique, "dejavu-mono-boldoblique", "DejaVu Sans Mono"},
 	}
 
-	for _, f := range fonts {
+	for _, f := range dejavuFonts {
 		if err := fm.AddFont(bytes.NewReader(f.data), f.id, f.family); err != nil {
 			return nil, fmt.Errorf("textmeasure: loading %s: %w", f.id, err)
+		}
+	}
+
+	// Optionally scan system fonts.
+	if cfg.systemFonts {
+		if err := fm.UseSystemFonts(""); err != nil {
+			return nil, fmt.Errorf("textmeasure: scanning system fonts: %w", err)
+		}
+	}
+
+	// Register custom fonts (added last = highest priority among user fonts).
+	for i, f := range cfg.fonts {
+		id := fmt.Sprintf("custom-%d-%s", i, f.family)
+		if err := fm.AddFont(bytes.NewReader(f.data), id, f.family); err != nil {
+			return nil, fmt.Errorf("textmeasure: loading custom font %q: %w", f.family, err)
 		}
 	}
 
@@ -84,8 +126,8 @@ func (m *Measurer) MeasureText(text, cssFont string) float64 {
 
 	families := make([]string, 0, len(parsed.Family)+2)
 	families = append(families, parsed.Family...)
-	// Always add Go fonts as fallback.
-	families = append(families, "Go", fontscan.SansSerif)
+	// Always add DejaVu Sans as fallback.
+	families = append(families, "DejaVu Sans", fontscan.SansSerif)
 
 	m.fontMap.SetQuery(fontscan.Query{
 		Families: families,
