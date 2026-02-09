@@ -15,24 +15,34 @@ type Font struct {
 	Data []byte
 }
 
+// FamilyMapping maps a generic CSS font family (e.g. "sans-serif") to a
+// specific loaded font family name (e.g. "Liberation Sans").
+type FamilyMapping struct {
+	SansSerif string
+	Monospace string
+}
+
 // Renderer renders SVG to PNG via resvg compiled to WASM.
 type Renderer struct {
 	runtime wazero.Runtime
 	module  api.Module
 
-	fnAllocMem   api.Function
-	fnDeallocMem api.Function
-	fnFontDBInit api.Function
-	fnFontDBAdd  api.Function
-	fnRender     api.Function
-	fnResultPtr  api.Function
-	fnResultLen  api.Function
-	fnErrorPtr   api.Function
-	fnErrorLen   api.Function
+	fnAllocMem           api.Function
+	fnDeallocMem         api.Function
+	fnFontDBInit         api.Function
+	fnFontDBAdd          api.Function
+	fnFontDBSetSansSerif api.Function
+	fnFontDBSetMonospace api.Function
+	fnRender             api.Function
+	fnResultPtr          api.Function
+	fnResultLen          api.Function
+	fnErrorPtr           api.Function
+	fnErrorLen           api.Function
 }
 
-// New creates a Renderer, initializes the font database, and loads the given fonts.
-func New(ctx context.Context, fonts []Font) (*Renderer, error) {
+// New creates a Renderer, initializes the font database, loads the given fonts,
+// and configures generic font family mappings.
+func New(ctx context.Context, fonts []Font, families FamilyMapping) (*Renderer, error) {
 	rt := wazero.NewRuntime(ctx)
 
 	if _, err := wasi_snapshot_preview1.Instantiate(ctx, rt); err != nil {
@@ -57,30 +67,34 @@ func New(ctx context.Context, fonts []Font) (*Renderer, error) {
 	}
 
 	r := &Renderer{
-		runtime:      rt,
-		module:       mod,
-		fnAllocMem:   mod.ExportedFunction("alloc_mem"),
-		fnDeallocMem: mod.ExportedFunction("dealloc_mem"),
-		fnFontDBInit: mod.ExportedFunction("font_db_init"),
-		fnFontDBAdd:  mod.ExportedFunction("font_db_add"),
-		fnRender:     mod.ExportedFunction("render"),
-		fnResultPtr:  mod.ExportedFunction("result_ptr"),
-		fnResultLen:  mod.ExportedFunction("result_len"),
-		fnErrorPtr:   mod.ExportedFunction("error_ptr"),
-		fnErrorLen:   mod.ExportedFunction("error_len"),
+		runtime:              rt,
+		module:               mod,
+		fnAllocMem:           mod.ExportedFunction("alloc_mem"),
+		fnDeallocMem:         mod.ExportedFunction("dealloc_mem"),
+		fnFontDBInit:         mod.ExportedFunction("font_db_init"),
+		fnFontDBAdd:          mod.ExportedFunction("font_db_add"),
+		fnFontDBSetSansSerif: mod.ExportedFunction("font_db_set_sans_serif"),
+		fnFontDBSetMonospace: mod.ExportedFunction("font_db_set_monospace"),
+		fnRender:             mod.ExportedFunction("render"),
+		fnResultPtr:          mod.ExportedFunction("result_ptr"),
+		fnResultLen:          mod.ExportedFunction("result_len"),
+		fnErrorPtr:           mod.ExportedFunction("error_ptr"),
+		fnErrorLen:           mod.ExportedFunction("error_len"),
 	}
 
 	// Validate all exports exist.
 	exports := map[string]api.Function{
-		"alloc_mem":    r.fnAllocMem,
-		"dealloc_mem":  r.fnDeallocMem,
-		"font_db_init": r.fnFontDBInit,
-		"font_db_add":  r.fnFontDBAdd,
-		"render":       r.fnRender,
-		"result_ptr":   r.fnResultPtr,
-		"result_len":   r.fnResultLen,
-		"error_ptr":    r.fnErrorPtr,
-		"error_len":    r.fnErrorLen,
+		"alloc_mem":              r.fnAllocMem,
+		"dealloc_mem":            r.fnDeallocMem,
+		"font_db_init":           r.fnFontDBInit,
+		"font_db_add":            r.fnFontDBAdd,
+		"font_db_set_sans_serif": r.fnFontDBSetSansSerif,
+		"font_db_set_monospace":  r.fnFontDBSetMonospace,
+		"render":                 r.fnRender,
+		"result_ptr":             r.fnResultPtr,
+		"result_len":             r.fnResultLen,
+		"error_ptr":              r.fnErrorPtr,
+		"error_len":              r.fnErrorLen,
 	}
 	for name, fn := range exports {
 		if fn == nil {
@@ -103,7 +117,52 @@ func New(ctx context.Context, fonts []Font) (*Renderer, error) {
 		}
 	}
 
+	// Configure generic font family mappings.
+	if families.SansSerif != "" {
+		if err := r.setFamily(ctx, r.fnFontDBSetSansSerif, families.SansSerif); err != nil {
+			rt.Close(ctx)
+			return nil, fmt.Errorf("resvg: set sans-serif family: %w", err)
+		}
+	}
+	if families.Monospace != "" {
+		if err := r.setFamily(ctx, r.fnFontDBSetMonospace, families.Monospace); err != nil {
+			rt.Close(ctx)
+			return nil, fmt.Errorf("resvg: set monospace family: %w", err)
+		}
+	}
+
 	return r, nil
+}
+
+// setFamily writes a family name into WASM memory and calls the given setter function.
+func (r *Renderer) setFamily(ctx context.Context, fn api.Function, name string) error {
+	data := []byte(name)
+	size := uint64(len(data))
+
+	results, err := r.fnAllocMem.Call(ctx, size)
+	if err != nil {
+		return fmt.Errorf("alloc: %w", err)
+	}
+	ptr := results[0]
+
+	if !r.module.Memory().Write(uint32(ptr), data) {
+		r.fnDeallocMem.Call(ctx, ptr, size)
+		return fmt.Errorf("write family name: out of bounds")
+	}
+
+	results, err = fn.Call(ctx, ptr, size)
+	if err != nil {
+		r.fnDeallocMem.Call(ctx, ptr, size)
+		return fmt.Errorf("set family: %w", err)
+	}
+
+	r.fnDeallocMem.Call(ctx, ptr, size)
+
+	if int32(results[0]) < 0 {
+		return fmt.Errorf("set family: %s", r.readError(ctx))
+	}
+
+	return nil
 }
 
 // addFont writes font data into WASM memory and registers it.

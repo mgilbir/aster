@@ -29,6 +29,48 @@ pub extern "C" fn font_db_init() {
 }
 
 #[no_mangle]
+pub extern "C" fn font_db_set_sans_serif(ptr: u32, len: u32) -> i32 {
+    unsafe {
+        let data = slice::from_raw_parts(ptr as *const u8, len as usize);
+        let name = match std::str::from_utf8(data) {
+            Ok(s) => s,
+            Err(e) => {
+                set_error(&format!("invalid UTF-8: {}", e));
+                return -1;
+            }
+        };
+        if let Some(ref mut db) = FONT_DB {
+            Arc::get_mut(db).unwrap().set_sans_serif_family(name);
+            0
+        } else {
+            set_error("font_db not initialized");
+            -1
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn font_db_set_monospace(ptr: u32, len: u32) -> i32 {
+    unsafe {
+        let data = slice::from_raw_parts(ptr as *const u8, len as usize);
+        let name = match std::str::from_utf8(data) {
+            Ok(s) => s,
+            Err(e) => {
+                set_error(&format!("invalid UTF-8: {}", e));
+                return -1;
+            }
+        };
+        if let Some(ref mut db) = FONT_DB {
+            Arc::get_mut(db).unwrap().set_monospace_family(name);
+            0
+        } else {
+            set_error("font_db not initialized");
+            -1
+        }
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn font_db_add(ptr: u32, len: u32) -> i32 {
     unsafe {
         let data = slice::from_raw_parts(ptr as *const u8, len as usize);

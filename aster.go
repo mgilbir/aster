@@ -173,7 +173,11 @@ func (c *Converter) pngRendererInit() (*resvg.Renderer, error) {
 			fonts = append(fonts, resvg.Font{Data: f.data})
 		}
 
-		c.pngRenderer, c.pngErr = resvg.New(context.Background(), fonts)
+		families := resvg.FamilyMapping{
+			SansSerif: "Liberation Sans",
+			Monospace: "Liberation Mono",
+		}
+		c.pngRenderer, c.pngErr = resvg.New(context.Background(), fonts, families)
 		if c.pngErr != nil {
 			c.pngErr = fmt.Errorf("aster: initializing PNG renderer: %w", c.pngErr)
 		}
