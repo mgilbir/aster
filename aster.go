@@ -17,6 +17,7 @@ package aster
 import (
 	"context"
 	"fmt"
+	"io"
 	"sync"
 
 	"github.com/mgilbir/aster/internal/resvg"
@@ -30,6 +31,7 @@ type Converter struct {
 	rt       *runtime.Runtime
 	measurer *textmeasure.Measurer
 	fonts    []fontEntry // stashed for lazy PNG renderer init
+	loader   Loader      // stashed for Close()
 
 	pngOnce     sync.Once
 	pngRenderer *resvg.Renderer
@@ -83,6 +85,7 @@ func New(opts ...Option) (*Converter, error) {
 		rt:       rt,
 		measurer: measurer,
 		fonts:    cfg.fonts,
+		loader:   cfg.loader,
 	}, nil
 }
 
@@ -96,6 +99,11 @@ func (c *Converter) Close() error {
 	}
 	if c.rt != nil {
 		if err := c.rt.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	if closer, ok := c.loader.(io.Closer); ok {
+		if err := closer.Close(); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
