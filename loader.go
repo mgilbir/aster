@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -82,4 +84,40 @@ func (l *HTTPLoader) Sanitize(_ context.Context, uri string) (string, error) {
 	}
 
 	return parsed.String(), nil
+}
+
+// FileLoader serves files from a base directory on disk.
+// It accepts relative paths and rejects absolute URLs and path traversal.
+type FileLoader struct {
+	BaseDir string
+}
+
+func (l *FileLoader) Sanitize(_ context.Context, uri string) (string, error) {
+	parsed, err := url.Parse(uri)
+	if err != nil {
+		return "", fmt.Errorf("aster: invalid URI %q: %w", uri, err)
+	}
+
+	if parsed.Scheme != "" {
+		return "", fmt.Errorf("aster: FileLoader only accepts relative paths, got scheme %q in %q", parsed.Scheme, uri)
+	}
+
+	cleaned := filepath.Clean(uri)
+	if filepath.IsAbs(cleaned) {
+		return "", fmt.Errorf("aster: FileLoader rejects absolute path %q", uri)
+	}
+	if strings.HasPrefix(cleaned, "..") {
+		return "", fmt.Errorf("aster: FileLoader rejects path traversal in %q", uri)
+	}
+
+	return cleaned, nil
+}
+
+func (l *FileLoader) Load(_ context.Context, uri string) ([]byte, error) {
+	path := filepath.Join(l.BaseDir, uri)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("aster: FileLoader failed to read %q: %w", path, err)
+	}
+	return data, nil
 }
