@@ -122,3 +122,24 @@ func WithTimezone(tz string) Option {
 		c.timezone = tz
 	}
 }
+
+// PNGOption configures a single PNG render operation.
+type PNGOption func(*pngConfig)
+
+type pngConfig struct {
+	scale float64
+}
+
+func defaultPNGConfig() *pngConfig {
+	return &pngConfig{
+		scale: 1.0,
+	}
+}
+
+// WithScale sets the scale factor for PNG rendering. A scale of 2.0 produces
+// an image with twice the dimensions. Default is 1.0.
+func WithScale(scale float64) PNGOption {
+	return func(c *pngConfig) {
+		c.scale = scale
+	}
+}

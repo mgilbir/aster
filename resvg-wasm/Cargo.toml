@@ -1,0 +1,15 @@
+[package]
+name = "resvg-wasm"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+resvg = { version = "0.45", default-features = false, features = ["text"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
