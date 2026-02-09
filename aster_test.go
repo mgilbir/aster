@@ -2,6 +2,8 @@ package aster_test
 
 import (
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -141,20 +143,6 @@ func TestNoTextMeasurement(t *testing.T) {
 	if !strings.HasPrefix(svg, "<svg") {
 		t.Errorf("expected SVG output starting with <svg, got: %.100s", svg)
 	}
-}
-
-// specDataType classifies how a Vega-Lite spec references external data.
-// Returns "none" (inline data), "relative" (e.g. "data/cars.json"),
-// or "absolute" (http/https URLs).
-func specDataType(spec []byte) string {
-	s := string(spec)
-	if !strings.Contains(s, `"url"`) {
-		return "none"
-	}
-	if strings.Contains(s, `"url":"http`) || strings.Contains(s, `"url": "http`) {
-		return "absolute"
-	}
-	return "relative"
 }
 
 // knownFailures lists specs that fail due to known runtime limitations
@@ -328,6 +316,67 @@ func loadFont(t *testing.T, path string) []byte {
 	return data
 }
 
+// datasetRedirectTransport rewrites known vega-datasets CDN/GitHub URLs to
+// point at a local httptest server, enabling offline testing of specs that
+// reference absolute URLs.
+type datasetRedirectTransport struct {
+	target    string // local httptest server URL
+	transport http.RoundTripper
+}
+
+func (t *datasetRedirectTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	host := req.URL.Hostname()
+	path := req.URL.Path
+
+	var rewritten string
+	switch host {
+	case "cdn.jsdelivr.net":
+		// /npm/vega-datasets@v1.29.0/data/X → /data/X
+		const prefix = "/npm/vega-datasets@"
+		if strings.HasPrefix(path, prefix) {
+			// Find "/data/" after the version segment.
+			if idx := strings.Index(path, "/data/"); idx >= 0 {
+				rewritten = path[idx:]
+			}
+		}
+	case "raw.githubusercontent.com":
+		// /vega/vega-datasets/{branch}/data/X → /data/X
+		const prefix = "/vega/vega-datasets/"
+		if strings.HasPrefix(path, prefix) {
+			rest := path[len(prefix):]
+			if idx := strings.Index(rest, "/"); idx >= 0 {
+				rewritten = rest[idx:]
+			}
+		}
+	}
+
+	if rewritten != "" {
+		req = req.Clone(req.Context())
+		req.URL.Scheme = "http"
+		req.URL.Host = strings.TrimPrefix(t.target, "http://")
+		req.URL.Path = rewritten
+	}
+
+	return t.transport.RoundTrip(req)
+}
+
+// datasetServer starts a local HTTP server that serves testdata/vega-datasets/
+// and returns an HTTPLoader whose transport rewrites CDN/GitHub dataset URLs
+// to the local server.
+func datasetServer(t *testing.T) *aster.HTTPLoader {
+	t.Helper()
+	srv := httptest.NewServer(http.FileServer(http.Dir("testdata/vega-datasets")))
+	t.Cleanup(srv.Close)
+
+	transport := &datasetRedirectTransport{
+		target:    srv.URL,
+		transport: srv.Client().Transport,
+	}
+	return &aster.HTTPLoader{
+		Client: &http.Client{Transport: transport},
+	}
+}
+
 // dejaVuFontOptions returns aster options that configure DejaVu Sans as the
 // text measurement font. DejaVu Sans is the default sans-serif on Ubuntu,
 // matching the environment used to generate the vega-lite expected SVGs.
@@ -349,7 +398,7 @@ func dejaVuFontOptions(t *testing.T) []aster.Option {
 
 // TestVLConvertSpecs runs the 23 vl-convert test specs against their expected
 // SVGs in testdata/vl-convert/expected/v5_8/.
-// Specs that require external data are skipped.
+// Absolute-URL specs are served via a local httptest server.
 // Expected SVGs are from https://github.com/vega/vl-convert (BSD-3-Clause).
 //
 // Font: Liberation Sans (default embedded font, matching vl-convert's bundled font).
@@ -364,10 +413,14 @@ func TestVLConvertSpecs(t *testing.T) {
 	}
 
 	// Uses Liberation Sans (default) — matches vl-convert's bundled font.
-	// FileLoader serves local vega-datasets files for specs with relative URLs.
+	// FallbackLoader: FileLoader for relative paths, httptest for absolute URLs.
+	httpLoader := datasetServer(t)
 	c, err := aster.New(
 		aster.WithVegaLiteVersion("5.8"),
-		aster.WithLoader(&aster.FileLoader{BaseDir: "testdata/vega-datasets"}),
+		aster.WithLoader(aster.NewFallbackLoader(
+			&aster.FileLoader{BaseDir: "testdata/vega-datasets"},
+			httpLoader,
+		)),
 	)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -378,8 +431,9 @@ func TestVLConvertSpecs(t *testing.T) {
 
 	// VL 5.8 specific known failures.
 	vlConvertKnownFailures := map[string]string{
-		"geoScale":            "geoScale function not available in vendored Vega 5.25",
+		"geoScale":             "geoScale function not available in vendored Vega 5.25",
 		"maptile_background_2": "geoScale function not available in vendored Vega 5.25",
+		"stacked_bar_h":        "sub-pixel rounding with missing custom fonts (Caveat/serif)",
 	}
 
 	for _, specPath := range specs {
@@ -392,10 +446,6 @@ func TestVLConvertSpecs(t *testing.T) {
 			spec, err := os.ReadFile(specPath)
 			if err != nil {
 				t.Fatalf("reading spec: %v", err)
-			}
-
-			if specDataType(spec) == "absolute" {
-				t.Skip("requires absolute URL data")
 			}
 
 			svg, err := c.VegaLiteToSVG(spec)
@@ -424,7 +474,7 @@ func TestVLConvertSpecs(t *testing.T) {
 }
 
 // TestVegaLiteExamples runs the official vega-lite v6.4.0 compiled examples.
-// Specs that require external data are skipped.
+// Absolute-URL specs are served via a local httptest server.
 // Expected SVGs are from https://github.com/vega/vega-lite (BSD-3-Clause).
 //
 // Font: DejaVu Sans (explicitly loaded, matching Ubuntu CI's default sans-serif
@@ -442,10 +492,14 @@ func TestVegaLiteExamples(t *testing.T) {
 	}
 
 	// Uses DejaVu Sans — matches Ubuntu CI where vega-lite generated these SVGs.
-	// FileLoader serves local vega-datasets files for specs with relative URLs.
+	// FallbackLoader: FileLoader for relative paths, httptest for absolute URLs.
+	httpLoader := datasetServer(t)
 	opts := append([]aster.Option{
 		aster.WithVegaLiteVersion("6.4"),
-		aster.WithLoader(&aster.FileLoader{BaseDir: "testdata/vega-datasets"}),
+		aster.WithLoader(aster.NewFallbackLoader(
+			&aster.FileLoader{BaseDir: "testdata/vega-datasets"},
+			httpLoader,
+		)),
 	}, dejaVuFontOptions(t)...)
 	c, err := aster.New(opts...)
 	if err != nil {
@@ -466,10 +520,6 @@ func TestVegaLiteExamples(t *testing.T) {
 			spec, err := os.ReadFile(specPath)
 			if err != nil {
 				t.Fatalf("reading spec: %v", err)
-			}
-
-			if specDataType(spec) == "absolute" {
-				t.Skip("requires absolute URL data")
 			}
 
 			svg, err := c.VegaLiteToSVG(spec)

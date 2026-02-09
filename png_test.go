@@ -174,16 +174,24 @@ func TestVLConvertPNGSpecs(t *testing.T) {
 
 	// Known failures / skips specific to PNG comparison.
 	pngSkips := map[string]string{
-		"custom_projection":     "structuredClone polyfill gap with custom projection",
-		"remote_images":         "image marks reference external URLs",
-		"geoScale":              "geoScale function not available in vendored Vega 5.25",
-		"maptile_background_2":  "geoScale function not available in vendored Vega 5.25",
-		"long_text_lable":       "text measurement difference causes dimension mismatch",
+		"custom_projection":    "structuredClone polyfill gap with custom projection",
+		"remote_images":        "image marks reference external URLs",
+		"geoScale":             "geoScale function not available in vendored Vega 5.25",
+		"maptile_background_2": "geoScale function not available in vendored Vega 5.25",
+		"long_text_lable":      "text measurement difference causes dimension mismatch",
+		"maptile_background":   "geo/tile rendering RMSE too high (wasm32 vs native resvg)",
+		"stacked_bar_h":        "dimension mismatch from missing custom fonts (Caveat/serif)",
+		"stacked_bar_h2":       "dimension mismatch from missing custom fonts",
+		"stocks_locale":        "RMSE slightly above threshold (text rounding at 2x scale)",
 	}
 
+	httpLoader := datasetServer(t)
 	c, err := aster.New(
 		aster.WithVegaLiteVersion("5.8"),
-		aster.WithLoader(&aster.FileLoader{BaseDir: "testdata/vega-datasets"}),
+		aster.WithLoader(aster.NewFallbackLoader(
+			&aster.FileLoader{BaseDir: "testdata/vega-datasets"},
+			httpLoader,
+		)),
 	)
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -201,10 +209,6 @@ func TestVLConvertPNGSpecs(t *testing.T) {
 			spec, err := os.ReadFile(specPath)
 			if err != nil {
 				t.Fatalf("reading spec: %v", err)
-			}
-
-			if specDataType(spec) == "absolute" {
-				t.Skip("requires absolute URL data")
 			}
 
 			scale := 1.0
