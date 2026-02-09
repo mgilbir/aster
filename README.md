@@ -145,7 +145,7 @@ Options passed to `aster.New()`:
 
 ### Loaders
 
-Loaders control how Vega fetches external data. The default denies all loading for security.
+Loaders control how Vega fetches external data. The default denies all loading for security. Loaders that hold resources (like `FileLoader` and `FallbackLoader`) are automatically closed when `Converter.Close()` is called.
 
 ```go
 // Deny all external data (default).
@@ -157,11 +157,48 @@ aster.New(aster.WithLoader(aster.NewHTTPLoader(nil)))
 // Allow HTTP with a custom client (timeouts, proxies, etc).
 aster.New(aster.WithLoader(aster.NewHTTPLoader(customClient)))
 
-// Serve files from a local directory.
+// HTTP with domain whitelisting — only these hosts are permitted.
+aster.New(aster.WithLoader(&aster.HTTPLoader{
+    Client:         http.DefaultClient,
+    AllowedDomains: []string{"cdn.jsdelivr.net"},
+}))
+
+// HTTP with base URL — relative URIs in specs are resolved against it.
+aster.New(aster.WithLoader(&aster.HTTPLoader{
+    Client:  http.DefaultClient,
+    BaseURL: "https://cdn.jsdelivr.net/npm/vega-datasets@v1.29.0/",
+}))
+
+// Serve files from a local directory (uses os.Root for path containment).
 aster.New(aster.WithLoader(&aster.FileLoader{BaseDir: "./data"}))
+
+// Static test data — returns a JSON payload for any URI, no server needed.
+aster.New(aster.WithLoader(&aster.StaticLoader{
+    Value: []map[string]any{{"a": "A", "b": 28}, {"a": "B", "b": 55}},
+}))
+
+// Composite: try local files first, fall back to HTTP.
+aster.New(aster.WithLoader(aster.NewFallbackLoader(
+    &aster.FileLoader{BaseDir: "./data"},
+    aster.NewHTTPLoader(nil),
+)))
 ```
 
-`FileLoader` rejects absolute paths and path traversal (`..`) for safety.
+**Available loaders:**
+
+| Loader | Description |
+|--------|-------------|
+| `DenyLoader` | Rejects all loading (default) |
+| `HTTPLoader` | HTTP/HTTPS with optional `AllowedDomains` and `BaseURL` |
+| `FileLoader` | Local files from a base directory, secured with `os.Root` |
+| `StaticLoader` | Returns a fixed JSON value for any URI (test stub) |
+| `FallbackLoader` | Tries child loaders in order until one succeeds |
+
+`HTTPLoader` rejects non-HTTP schemes (`ftp:`, `javascript:`, `data:`, `file:`), URIs with userinfo (`user:pass@host`), and domains not in the allowlist. Domain matching is case-insensitive.
+
+`FileLoader` rejects absolute paths, path traversal (`..`), and URIs with schemes. It uses Go's `os.Root` for OS-level path containment, which also blocks symlink escapes.
+
+`FallbackLoader` naturally routes by URI shape — `FileLoader` accepts relative paths while `HTTPLoader` accepts absolute URLs — so combining them covers specs that reference both local and remote data.
 
 ### Custom fonts
 
