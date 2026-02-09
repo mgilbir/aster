@@ -21,7 +21,7 @@ Aster embeds the full Vega/Vega-Lite runtime inside [QuickJS](https://bellard.or
 go get github.com/mgilbir/aster
 ```
 
-Requires Go 1.24+.
+Requires Go 1.25+.
 
 ## Quick start
 
@@ -279,6 +279,12 @@ go test ./...
 - **Emoji:** No emoji font is bundled. Specs using emoji characters will render with missing glyphs.
 - **`structuredClone`:** The polyfill does not handle `undefined` values in objects, which affects a few geographic projection specs.
 - **Interactive features:** Selection and signal interactivity are evaluated at initial state only; there is no event loop.
+
+## Acknowledgments
+
+Aster stands on the shoulders of giants. Special thanks to the [vl-convert](https://github.com/vega/vl-convert) project, whose architecture, test suite, and font choices were invaluable references throughout this project's development.
+
+Thanks also to the [Vega](https://vega.github.io/vega/) and [Vega-Lite](https://vega.github.io/vega-lite/) teams for building such excellent visualization grammars, and to the authors of the key dependencies that make this possible: [QuickJS](https://bellard.org/quickjs/) (via [fastschema/qjs](https://github.com/fastschema/qjs)), [wazero](https://github.com/tetratelabs/wazero), [resvg](https://github.com/linebender/resvg), and [go-text/typesetting](https://github.com/go-text/typesetting).
 
 ## License
 
