@@ -39,8 +39,9 @@ type Config struct {
 
 // Runtime wraps a QuickJS engine with Vega/Vega-Lite loaded.
 type Runtime struct {
-	rt     *qjs.Runtime
-	config Config
+	rt      *qjs.Runtime
+	config  Config
+	crashed bool // set after a WASM panic; further calls return errors
 }
 
 // versionIndex matches the top-level versions.json from the vendoring tool.
@@ -114,8 +115,16 @@ func New(cfg Config) (*Runtime, error) {
 }
 
 // Close releases the QuickJS runtime.
-func (r *Runtime) Close() error {
-	if r.rt != nil {
+// If the WASM runtime has crashed, Close silently skips cleanup to avoid
+// secondary panics.
+func (r *Runtime) Close() (err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			err = fmt.Errorf("aster/runtime: panic during close: %v", p)
+		}
+	}()
+
+	if r.rt != nil && !r.crashed {
 		r.rt.Close()
 		r.rt = nil
 	}
@@ -136,20 +145,20 @@ func (r *Runtime) registerBridgeFunctions() error {
 			}
 			url := args[0].String()
 
-			go func() {
-				loadCtx := context.Background()
-				if r.config.Timeout > 0 {
-					var cancel context.CancelFunc
-					loadCtx, cancel = context.WithTimeout(loadCtx, r.config.Timeout)
-					defer cancel()
-				}
-				data, err := r.config.Loader.Load(loadCtx, url)
-				if err != nil {
-					this.Promise().Reject(this.Context().NewError(err))
-					return
-				}
-				this.Promise().Resolve(this.Context().NewString(string(data)))
-			}()
+			// Resolve synchronously — the WASM runtime is not thread-safe,
+			// so we cannot call back from a goroutine.
+			loadCtx := context.Background()
+			if r.config.Timeout > 0 {
+				var cancel context.CancelFunc
+				loadCtx, cancel = context.WithTimeout(loadCtx, r.config.Timeout)
+				defer cancel()
+			}
+			data, err := r.config.Loader.Load(loadCtx, url)
+			if err != nil {
+				this.Promise().Reject(this.Context().NewError(err))
+				return
+			}
+			this.Promise().Resolve(this.Context().NewString(string(data)))
 		})
 
 		// __aster_sanitize(uri) → sync, returns sanitized string
@@ -395,8 +404,22 @@ func (r *Runtime) VegaLiteToVega(specJSON string) (string, error) {
 	return r.evalModule(script)
 }
 
+var errRuntimeCrashed = errors.New("aster/runtime: WASM runtime has crashed; create a new Converter")
+
 // evalModule evaluates an inline ES module and returns its default export as a string.
-func (r *Runtime) evalModule(script string) (string, error) {
+// It recovers from panics in the WASM runtime and converts them to errors.
+func (r *Runtime) evalModule(script string) (result string, err error) {
+	if r.crashed {
+		return "", errRuntimeCrashed
+	}
+
+	defer func() {
+		if p := recover(); p != nil {
+			r.crashed = true
+			err = fmt.Errorf("aster/runtime: WASM panic: %v", p)
+		}
+	}()
+
 	ctx := r.rt.Context()
 	val, err := ctx.Eval("__aster_eval__.js", qjs.Code(script), qjs.TypeModule())
 	if err != nil {
