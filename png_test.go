@@ -23,7 +23,7 @@ func TestSVGToPNG(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	data, err := c.SVGToPNG(svg)
 	if err != nil {
@@ -57,7 +57,7 @@ func TestVegaLiteToPNG(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	data, err := c.VegaLiteToPNG(spec)
 	if err != nil {
@@ -85,7 +85,7 @@ func TestVegaLiteToPNGScale(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	data1x, err := c.VegaLiteToPNG(spec)
 	if err != nil {
@@ -119,7 +119,7 @@ func TestSVGToPNGError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	_, err = c.SVGToPNG("not valid svg at all")
 	if err == nil {
@@ -196,7 +196,7 @@ func TestVLConvertPNGSpecs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	for _, pngPath := range pngs {
 		name := strings.TrimSuffix(filepath.Base(pngPath), ".png")

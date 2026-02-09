@@ -140,7 +140,7 @@ func (r *Runtime) registerBridgeFunctions() error {
 		ctx.SetAsyncFunc("__aster_load", func(this *qjs.This) {
 			args := this.Args()
 			if len(args) == 0 {
-				this.Promise().Reject(this.Context().NewError(errors.New("__aster_load: missing url argument")))
+				_ = this.Promise().Reject(this.Context().NewError(errors.New("__aster_load: missing url argument")))
 				return
 			}
 			url := args[0].String()
@@ -155,10 +155,10 @@ func (r *Runtime) registerBridgeFunctions() error {
 			}
 			data, err := r.config.Loader.Load(loadCtx, url)
 			if err != nil {
-				this.Promise().Reject(this.Context().NewError(err))
+				_ = this.Promise().Reject(this.Context().NewError(err))
 				return
 			}
-			this.Promise().Resolve(this.Context().NewString(string(data)))
+			_ = this.Promise().Resolve(this.Context().NewString(string(data)))
 		})
 
 		// __aster_sanitize(uri) → sync, returns sanitized string

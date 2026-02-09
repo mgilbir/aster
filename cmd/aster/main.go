@@ -42,7 +42,7 @@ func run() error {
 	}
 }
 
-func runSVG(args []string) error {
+func runSVG(args []string) (err error) {
 	fs := flag.NewFlagSet("svg", flag.ExitOnError)
 	input := fs.String("i", "", "input spec file (- or omit for stdin)")
 	output := fs.String("o", "", "output SVG file (omit for stdout)")
@@ -65,7 +65,11 @@ func runSVG(args []string) error {
 	if err != nil {
 		return err
 	}
-	defer c.Close()
+	defer func() {
+		if e := c.Close(); e != nil && err == nil {
+			err = e
+		}
+	}()
 
 	var svg string
 	if isVegaLite(spec) {
@@ -80,7 +84,7 @@ func runSVG(args []string) error {
 	return writeOutput(*output, []byte(svg))
 }
 
-func runCompile(args []string) error {
+func runCompile(args []string) (err error) {
 	fs := flag.NewFlagSet("compile", flag.ExitOnError)
 	input := fs.String("i", "", "input Vega-Lite spec file (- or omit for stdin)")
 	output := fs.String("o", "", "output Vega JSON file (omit for stdout)")
@@ -97,7 +101,11 @@ func runCompile(args []string) error {
 	if err != nil {
 		return err
 	}
-	defer c.Close()
+	defer func() {
+		if e := c.Close(); e != nil && err == nil {
+			err = e
+		}
+	}()
 
 	vgSpec, err := c.VegaLiteToVega(spec)
 	if err != nil {

@@ -46,13 +46,13 @@ func New(ctx context.Context, fonts []Font, families FamilyMapping) (*Renderer, 
 	rt := wazero.NewRuntime(ctx)
 
 	if _, err := wasi_snapshot_preview1.Instantiate(ctx, rt); err != nil {
-		rt.Close(ctx)
+		_ = rt.Close(ctx)
 		return nil, fmt.Errorf("resvg: instantiating WASI: %w", err)
 	}
 
 	compiled, err := rt.CompileModule(ctx, wasmBytes)
 	if err != nil {
-		rt.Close(ctx)
+		_ = rt.Close(ctx)
 		return nil, fmt.Errorf("resvg: compiling WASM module: %w", err)
 	}
 
@@ -62,7 +62,7 @@ func New(ctx context.Context, fonts []Font, families FamilyMapping) (*Renderer, 
 
 	mod, err := rt.InstantiateModule(ctx, compiled, cfg)
 	if err != nil {
-		rt.Close(ctx)
+		_ = rt.Close(ctx)
 		return nil, fmt.Errorf("resvg: instantiating module: %w", err)
 	}
 
@@ -98,21 +98,21 @@ func New(ctx context.Context, fonts []Font, families FamilyMapping) (*Renderer, 
 	}
 	for name, fn := range exports {
 		if fn == nil {
-			rt.Close(ctx)
+			_ = rt.Close(ctx)
 			return nil, fmt.Errorf("resvg: missing WASM export: %s", name)
 		}
 	}
 
 	// Initialize font database.
 	if _, err := r.fnFontDBInit.Call(ctx); err != nil {
-		rt.Close(ctx)
+		_ = rt.Close(ctx)
 		return nil, fmt.Errorf("resvg: font_db_init: %w", err)
 	}
 
 	// Load fonts.
 	for i, f := range fonts {
 		if err := r.addFont(ctx, f.Data); err != nil {
-			rt.Close(ctx)
+			_ = rt.Close(ctx)
 			return nil, fmt.Errorf("resvg: loading font %d: %w", i, err)
 		}
 	}
@@ -120,13 +120,13 @@ func New(ctx context.Context, fonts []Font, families FamilyMapping) (*Renderer, 
 	// Configure generic font family mappings.
 	if families.SansSerif != "" {
 		if err := r.setFamily(ctx, r.fnFontDBSetSansSerif, families.SansSerif); err != nil {
-			rt.Close(ctx)
+			_ = rt.Close(ctx)
 			return nil, fmt.Errorf("resvg: set sans-serif family: %w", err)
 		}
 	}
 	if families.Monospace != "" {
 		if err := r.setFamily(ctx, r.fnFontDBSetMonospace, families.Monospace); err != nil {
-			rt.Close(ctx)
+			_ = rt.Close(ctx)
 			return nil, fmt.Errorf("resvg: set monospace family: %w", err)
 		}
 	}
@@ -146,17 +146,17 @@ func (r *Renderer) setFamily(ctx context.Context, fn api.Function, name string) 
 	ptr := results[0]
 
 	if !r.module.Memory().Write(uint32(ptr), data) {
-		r.fnDeallocMem.Call(ctx, ptr, size)
+		_, _ = r.fnDeallocMem.Call(ctx, ptr, size)
 		return fmt.Errorf("write family name: out of bounds")
 	}
 
 	results, err = fn.Call(ctx, ptr, size)
 	if err != nil {
-		r.fnDeallocMem.Call(ctx, ptr, size)
+		_, _ = r.fnDeallocMem.Call(ctx, ptr, size)
 		return fmt.Errorf("set family: %w", err)
 	}
 
-	r.fnDeallocMem.Call(ctx, ptr, size)
+	_, _ = r.fnDeallocMem.Call(ctx, ptr, size)
 
 	if int32(results[0]) < 0 {
 		return fmt.Errorf("set family: %s", r.readError(ctx))
@@ -176,17 +176,17 @@ func (r *Renderer) addFont(ctx context.Context, data []byte) error {
 	ptr := results[0]
 
 	if !r.module.Memory().Write(uint32(ptr), data) {
-		r.fnDeallocMem.Call(ctx, ptr, size)
+		_, _ = r.fnDeallocMem.Call(ctx, ptr, size)
 		return fmt.Errorf("write font data: out of bounds")
 	}
 
 	results, err = r.fnFontDBAdd.Call(ctx, ptr, size)
 	if err != nil {
-		r.fnDeallocMem.Call(ctx, ptr, size)
+		_, _ = r.fnDeallocMem.Call(ctx, ptr, size)
 		return fmt.Errorf("font_db_add: %w", err)
 	}
 
-	r.fnDeallocMem.Call(ctx, ptr, size)
+	_, _ = r.fnDeallocMem.Call(ctx, ptr, size)
 
 	if int32(results[0]) < 0 {
 		return fmt.Errorf("font_db_add: %s", r.readError(ctx))
@@ -206,18 +206,18 @@ func (r *Renderer) Render(ctx context.Context, svg []byte, scale float64) ([]byt
 	svgPtr := results[0]
 
 	if !r.module.Memory().Write(uint32(svgPtr), svg) {
-		r.fnDeallocMem.Call(ctx, svgPtr, size)
+		_, _ = r.fnDeallocMem.Call(ctx, svgPtr, size)
 		return nil, fmt.Errorf("resvg: write SVG data: out of bounds")
 	}
 
 	scaleBits := math.Float64bits(scale)
 	results, err = r.fnRender.Call(ctx, svgPtr, size, scaleBits)
 	if err != nil {
-		r.fnDeallocMem.Call(ctx, svgPtr, size)
+		_, _ = r.fnDeallocMem.Call(ctx, svgPtr, size)
 		return nil, fmt.Errorf("resvg: render: %w", err)
 	}
 
-	r.fnDeallocMem.Call(ctx, svgPtr, size)
+	_, _ = r.fnDeallocMem.Call(ctx, svgPtr, size)
 
 	if int32(results[0]) < 0 {
 		return nil, fmt.Errorf("resvg: %s", r.readError(ctx))

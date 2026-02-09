@@ -170,7 +170,7 @@ func TestHTTPLoaderBaseURLPathTraversal(t *testing.T) {
 
 func TestHTTPLoaderIntegration(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintln(w, `[{"a":"A","b":28}]`)
+		_, _ = fmt.Fprintln(w, `[{"a":"A","b":28}]`)
 	}))
 	defer ts.Close()
 
@@ -197,11 +197,15 @@ func TestHTTPLoaderIntegration(t *testing.T) {
 
 func TestFileLoaderBasicRead(t *testing.T) {
 	dir := t.TempDir()
-	os.MkdirAll(filepath.Join(dir, "sub"), 0o755)
-	os.WriteFile(filepath.Join(dir, "sub", "data.json"), []byte(`{"ok":true}`), 0o644)
+	if err := os.MkdirAll(filepath.Join(dir, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "sub", "data.json"), []byte(`{"ok":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	l := &aster.FileLoader{BaseDir: dir}
-	defer l.Close()
+	defer func() { _ = l.Close() }()
 
 	ctx := context.Background()
 	sanitized, err := l.Sanitize(ctx, "sub/data.json")
@@ -253,7 +257,9 @@ func TestFileLoaderOSRootBlocksSymlinkEscape(t *testing.T) {
 	dir := t.TempDir()
 	// Create a file outside the base dir.
 	outside := t.TempDir()
-	os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("secret"), 0o644)
+	if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	// Create a symlink inside base dir pointing outside.
 	if err := os.Symlink(outside, filepath.Join(dir, "escape")); err != nil {
@@ -261,7 +267,7 @@ func TestFileLoaderOSRootBlocksSymlinkEscape(t *testing.T) {
 	}
 
 	l := &aster.FileLoader{BaseDir: dir}
-	defer l.Close()
+	defer func() { _ = l.Close() }()
 
 	ctx := context.Background()
 	_, err := l.Load(ctx, "escape/secret.txt")
@@ -357,12 +363,14 @@ func TestFallbackLoaderFirstMatchServes(t *testing.T) {
 
 func TestFallbackLoaderFallsThrough(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "local.json"), []byte(`"from-file"`), 0o644)
+	if err := os.WriteFile(filepath.Join(dir, "local.json"), []byte(`"from-file"`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	file := &aster.FileLoader{BaseDir: dir}
 	http := aster.NewHTTPLoader(nil)
 	l := aster.NewFallbackLoader(file, http)
-	defer l.Close()
+	defer func() { _ = l.Close() }()
 
 	// Relative URI → FileLoader handles it.
 	ctx := context.Background()
@@ -442,7 +450,7 @@ func TestConverterClosesLoader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	c.Close()
+	_ = c.Close()
 	if !tracker.closed {
 		t.Error("expected loader Close to be called")
 	}

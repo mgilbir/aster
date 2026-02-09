@@ -40,7 +40,7 @@ func TestVegaLiteToSVG(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	svg, err := c.VegaLiteToSVG(spec)
 	if err != nil {
@@ -65,7 +65,7 @@ func TestVegaToSVG(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	svg, err := c.VegaToSVG(spec)
 	if err != nil {
@@ -87,7 +87,7 @@ func TestVegaLiteToVega(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	vgSpec, err := c.VegaLiteToVega(spec)
 	if err != nil {
@@ -114,7 +114,7 @@ func TestDenyLoaderPreventsLoading(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	// This should succeed since the spec uses inline data.
 	_, err = c.VegaLiteToSVG(spec)
@@ -133,7 +133,7 @@ func TestNoTextMeasurement(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	svg, err := c.VegaLiteToSVG(spec)
 	if err != nil {
@@ -425,7 +425,7 @@ func TestVLConvertSpecs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	expectedDir := filepath.Join("testdata", "vl-convert", "expected", "v5_8")
 
@@ -505,7 +505,7 @@ func TestVegaLiteExamples(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	for _, specPath := range specs {
 		name := strings.TrimSuffix(filepath.Base(specPath), ".vl.json")

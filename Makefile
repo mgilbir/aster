@@ -1,4 +1,4 @@
-.PHONY: vendor-js vendor-datasets vendor-resvg build test test-all clean
+.PHONY: vendor-js vendor-datasets vendor-resvg build test test-all lint clean
 
 vendor-js:
 	go run ./cmd/vendor-js
@@ -21,6 +21,9 @@ test: vendor-js
 
 test-all: vendor-js
 	go test ./...
+
+lint:
+	golangci-lint run ./...
 
 clean:
 	rm -rf internal/js/modules/

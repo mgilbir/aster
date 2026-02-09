@@ -71,7 +71,7 @@ func (l *HTTPLoader) Load(ctx context.Context, uri string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("aster: failed to load %q: %w", uri, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("aster: HTTP %d loading %q", resp.StatusCode, uri)
