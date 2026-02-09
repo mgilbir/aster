@@ -300,6 +300,24 @@ var knownFailures = map[string]string{
 	"window_cumulative_running_average": "temporal axis SVG differs in UTC",
 }
 
+// slowSpecs lists specs that take >2s to render (mostly geo/TopoJSON).
+// Skipped with -short to keep the development cycle fast.
+var slowSpecs = map[string]bool{
+	"geo_choropleth":               true, // ~9s
+	"geo_circle":                   true, // ~41s
+	"geo_constant_value":           true, // ~4s
+	"geo_layer":                    true, // ~2.5s
+	"geo_line":                     true, // ~2.5s
+	"geo_repeat":                   true, // ~3s
+	"geo_rule":                     true, // ~2.5s
+	"geo_trellis":                  true, // ~11s
+	"interactive_1d_geo_brush":     true, // ~3s
+	"interactive_geo_facet_species": true, // ~13s
+	"interactive_splom":            true, // ~2s
+	"layer_point_line_loess":       true, // ~4s
+	"repeat_splom":                 true, // ~3s
+}
+
 // loadFont reads a TTF file from the fonts directory.
 func loadFont(t *testing.T, path string) []byte {
 	t.Helper()
@@ -440,6 +458,9 @@ func TestVegaLiteExamples(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			if reason, ok := knownFailures[name]; ok {
 				t.Skipf("known failure: %s", reason)
+			}
+			if testing.Short() && slowSpecs[name] {
+				t.Skip("slow spec (use -short=false to run)")
 			}
 
 			spec, err := os.ReadFile(specPath)
