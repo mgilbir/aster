@@ -239,15 +239,15 @@ The rendering pipeline is:
 2. **Vega → SVG** — Vega runtime runs in QuickJS with Go callbacks for text measurement and data loading
 3. **SVG → PNG** — resvg (Rust, compiled to WASM) rasterizes the SVG with embedded fonts
 
-Both WASM runtimes (QuickJS via [qjs](https://github.com/fastschema/qjs), resvg via [wazero](https://github.com/tetratelabs/wazero)) run in pure Go with no CGO.
+Both WASM runtimes ([QuickJS-NG](https://github.com/quickjs-ng/quickjs) built as a WASI reactor, resvg compiled to WASI) are driven by [wazero](https://github.com/tetratelabs/wazero) and run in pure Go with no CGO. The QuickJS binary is built from the pinned upstream release by `quickjs-wasm/` (`make vendor-quickjs`).
 
 ### QuickJS polyfills
 
 The JS environment provides polyfills for APIs that Vega expects but QuickJS lacks:
 
 - `structuredClone` — partial (fails on some geo projection edge cases)
-- `setTimeout` / `clearTimeout` — synchronous (d3-timer, vega-scenegraph)
-- `requestAnimationFrame` — synchronous (vega-view)
+- `setTimeout` / `clearTimeout` — microtask-scheduled, no real delays (d3-timer, vega-scenegraph)
+- `requestAnimationFrame` — microtask-scheduled (vega-view)
 - `performance.now` — monotonic clock
 - `Date` methods — redirected to UTC equivalents (QuickJS WASM has no timezone config)
 
@@ -284,7 +284,7 @@ go test ./...
 
 Aster stands on the shoulders of giants. Special thanks to the [vl-convert](https://github.com/vega/vl-convert) project, whose architecture, test suite, and font choices were invaluable references throughout this project's development.
 
-Thanks also to the [Vega](https://vega.github.io/vega/) and [Vega-Lite](https://vega.github.io/vega-lite/) teams for building such excellent visualization grammars, and to the authors of the key dependencies that make this possible: [QuickJS](https://bellard.org/quickjs/) (via [fastschema/qjs](https://github.com/fastschema/qjs)), [wazero](https://github.com/tetratelabs/wazero), [resvg](https://github.com/linebender/resvg), and [go-text/typesetting](https://github.com/go-text/typesetting).
+Thanks also to the [Vega](https://vega.github.io/vega/) and [Vega-Lite](https://vega.github.io/vega-lite/) teams for building such excellent visualization grammars, and to the authors of the key dependencies that make this possible: [QuickJS](https://bellard.org/quickjs/) (via [QuickJS-NG](https://github.com/quickjs-ng/quickjs)), [fastschema/qjs](https://github.com/fastschema/qjs) (which powered earlier versions and whose WASM build informed ours), [wazero](https://github.com/tetratelabs/wazero), [resvg](https://github.com/linebender/resvg), and [go-text/typesetting](https://github.com/go-text/typesetting).
 
 ## License
 
