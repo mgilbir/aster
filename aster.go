@@ -159,7 +159,14 @@ func (c *Converter) SVGToPNG(svg string, opts ...PNGOption) ([]byte, error) {
 		return nil, err
 	}
 
-	return r.Render(context.Background(), []byte(svg), cfg.scale)
+	out, err := r.Render(context.Background(), []byte(svg), cfg.scale)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.recode {
+		out = recodePNG(out)
+	}
+	return out, nil
 }
 
 // pngRendererInit lazily initializes the PNG renderer on first use.
