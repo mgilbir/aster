@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Compares aster benchmarks on the current wazero (from go.mod) against the
-# mgilbir/wazero fork, without touching go.mod/go.sum: the fork run uses an
-# alternate module file (wazero-fork.mod) via go's -modfile flag.
+# Compares aster benchmarks on the current WASM runtime (github.com/mgilbir/andsifr,
+# from go.mod) against another revision of it, without touching go.mod/go.sum:
+# the comparison run uses an alternate module file (wazero-fork.mod) via go's
+# -modfile flag.
 #
 # Usage:
 #   ./scripts/bench-wazero.sh                 # full run (count=10)
@@ -10,9 +11,9 @@
 # Environment variables:
 #   COUNT   benchmark repetitions per side (default 10; benchstat wants >= 10)
 #   BENCH   -bench regexp (default ".")
-#   FORK    replacement module (default github.com/mgilbir/wazero), or a
-#           local directory (starts with / or ./) holding a wazero checkout
-#   REF     branch/tag/commit of the fork (default tecgonic-perf; ignored
+#   FORK    replacement module (default github.com/mgilbir/andsifr), or a
+#           local directory (starts with / or ./) holding a checkout
+#   REF     branch/tag/commit to compare against (default main; ignored
 #           when FORK is a local directory)
 set -euo pipefail
 
@@ -20,8 +21,8 @@ cd "$(dirname "$0")/.."
 
 COUNT="${COUNT:-10}"
 BENCH="${BENCH:-.}"
-FORK="${FORK:-github.com/mgilbir/wazero}"
-REF="${REF:-tecgonic-perf}"
+FORK="${FORK:-github.com/mgilbir/andsifr}"
+REF="${REF:-main}"
 
 # The fork is fetched directly from GitHub: module proxies (including
 # corporate ones) typically cannot resolve branch names on forks.
@@ -38,7 +39,7 @@ if [ ! -d internal/js/modules ]; then
     go run ./cmd/vendor-js
 fi
 
-echo "==> Baseline: $(go list -m github.com/tetratelabs/wazero)"
+echo "==> Baseline: $(go list -m github.com/mgilbir/andsifr)"
 go test -run '^$' -bench "$BENCH" -benchmem -count "$COUNT" -timeout 60m . | tee "$BASELINE_OUT"
 
 cp go.mod "$FORK_MOD"
@@ -46,7 +47,7 @@ cp go.sum "$FORK_SUM"
 case "$FORK" in
 /* | ./* | ../*)
     echo "==> Using local fork checkout: $FORK"
-    go mod edit -replace "github.com/tetratelabs/wazero=$FORK" "$FORK_MOD"
+    go mod edit -replace "github.com/mgilbir/andsifr=$FORK" "$FORK_MOD"
     ;;
 *)
     echo "==> Resolving $FORK@$REF"
@@ -55,14 +56,14 @@ case "$FORK" in
     # test dependencies of transitive modules through the proxy.
     FORK_VERSION=$(go list -m "$FORK@$REF" | awk '{print $2}')
     echo "    resolved to $FORK_VERSION"
-    go mod edit -replace "github.com/tetratelabs/wazero=$FORK@$FORK_VERSION" "$FORK_MOD"
+    go mod edit -replace "github.com/mgilbir/andsifr=$FORK@$FORK_VERSION" "$FORK_MOD"
     ;;
 esac
 # Build with -mod=mod so go fetches the fork (and any dependencies it adds,
 # e.g. golang.org/x/sys) and records them in wazero-fork.mod/.sum.
 go build -modfile="$FORK_MOD" -mod=mod ./...
 
-echo "==> Fork: $(go list -modfile="$FORK_MOD" -m github.com/tetratelabs/wazero)"
+echo "==> Fork: $(go list -modfile="$FORK_MOD" -m github.com/mgilbir/andsifr)"
 go test -modfile="$FORK_MOD" -run '^$' -bench "$BENCH" -benchmem -count "$COUNT" -timeout 60m . | tee "$FORK_OUT"
 
 echo "==> benchstat (baseline vs fork)"

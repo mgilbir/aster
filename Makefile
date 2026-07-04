@@ -35,7 +35,7 @@ lint:
 bench: vendor-js
 	go test -run '^$$' -bench . -benchmem .
 
-# Compare benchmarks: current wazero vs the mgilbir/wazero fork (tecgonic-perf).
+# Compare benchmarks: current andsifr (WASM runtime) vs another revision of it.
 # Tune with COUNT=, BENCH=, REF= (see scripts/bench-wazero.sh).
 bench-wazero: vendor-js
 	./scripts/bench-wazero.sh

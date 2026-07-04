@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tetratelabs/wazero"
-	"github.com/tetratelabs/wazero/api"
-	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
+	"github.com/mgilbir/andsifr"
+	"github.com/mgilbir/andsifr/api"
+	"github.com/mgilbir/andsifr/imports/wasi_snapshot_preview1"
 )
 
 // JSValue encoding on wasm32 (NaN-boxed): a uint64 with the tag in the high
