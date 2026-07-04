@@ -10,9 +10,8 @@ import (
 	"io/fs"
 	"time"
 
-	"github.com/fastschema/qjs"
-
 	asterjs "github.com/mgilbir/aster/internal/js"
+	"github.com/mgilbir/aster/internal/quickjs"
 )
 
 // Loader is the subset of the aster.Loader interface needed by the runtime.
@@ -39,7 +38,7 @@ type Config struct {
 
 // Runtime wraps a QuickJS engine with Vega/Vega-Lite loaded.
 type Runtime struct {
-	rt      *qjs.Runtime
+	rt      *quickjs.Runtime
 	config  Config
 	crashed bool // set after a WASM panic; further calls return errors
 }
@@ -72,15 +71,11 @@ type manifestModule struct {
 // New creates a new Runtime, loading all vendored JS modules and registering
 // Go bridge functions.
 func New(cfg Config) (*Runtime, error) {
-	opts := qjs.Option{}
-	if cfg.MemoryLimit > 0 {
-		opts.MemoryLimit = cfg.MemoryLimit
-	}
-	if cfg.Timeout > 0 {
-		opts.MaxExecutionTime = int(cfg.Timeout / time.Millisecond)
-	}
-
-	rt, err := qjs.New(opts)
+	rt, err := quickjs.New(quickjs.Config{
+		MemoryLimit: cfg.MemoryLimit,
+		Timeout:     cfg.Timeout,
+		Bridge:      bridgeConfig(cfg),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("aster/runtime: creating QuickJS runtime: %w", err)
 	}
@@ -88,7 +83,7 @@ func New(cfg Config) (*Runtime, error) {
 	if cfg.Version == "" {
 		def, err := readDefaultVersion()
 		if err != nil {
-			rt.Close()
+			_ = rt.Close()
 			return nil, err
 		}
 		cfg.Version = def
@@ -96,18 +91,13 @@ func New(cfg Config) (*Runtime, error) {
 
 	r := &Runtime{rt: rt, config: cfg}
 
-	if err := r.registerBridgeFunctions(); err != nil {
-		rt.Close()
-		return nil, err
-	}
-
 	if err := r.installPolyfills(); err != nil {
-		rt.Close()
+		_ = rt.Close()
 		return nil, err
 	}
 
 	if err := r.loadModules(); err != nil {
-		rt.Close()
+		_ = rt.Close()
 		return nil, err
 	}
 
@@ -125,82 +115,40 @@ func (r *Runtime) Close() (err error) {
 	}()
 
 	if r.rt != nil && !r.crashed {
-		r.rt.Close()
+		_ = r.rt.Close()
 		r.rt = nil
 	}
 	return nil
 }
 
-// registerBridgeFunctions registers Go callbacks that bridge.js will use.
-func (r *Runtime) registerBridgeFunctions() error {
-	ctx := r.rt.Context()
-
-	// __aster_load(url) → async, returns string data
-	if r.config.Loader != nil {
-		ctx.SetAsyncFunc("__aster_load", func(this *qjs.This) {
-			args := this.Args()
-			if len(args) == 0 {
-				_ = this.Promise().Reject(this.Context().NewError(errors.New("__aster_load: missing url argument")))
-				return
-			}
-			url := args[0].String()
-
-			// Resolve synchronously — the WASM runtime is not thread-safe,
-			// so we cannot call back from a goroutine.
+// bridgeConfig adapts the runtime configuration to the Go callbacks that
+// bridge.js reaches through the __aster_* globals. Callbacks execute
+// synchronously on the engine thread, mirroring the previous behavior.
+func bridgeConfig(cfg Config) quickjs.Bridge {
+	var b quickjs.Bridge
+	if cfg.Loader != nil {
+		b.Load = func(url string) ([]byte, error) {
 			loadCtx := context.Background()
-			if r.config.Timeout > 0 {
+			if cfg.Timeout > 0 {
 				var cancel context.CancelFunc
-				loadCtx, cancel = context.WithTimeout(loadCtx, r.config.Timeout)
+				loadCtx, cancel = context.WithTimeout(loadCtx, cfg.Timeout)
 				defer cancel()
 			}
-			data, err := r.config.Loader.Load(loadCtx, url)
-			if err != nil {
-				_ = this.Promise().Reject(this.Context().NewError(err))
-				return
-			}
-			_ = this.Promise().Resolve(this.Context().NewString(string(data)))
-		})
-
-		// __aster_sanitize(uri) → sync, returns sanitized string
-		ctx.SetFunc("__aster_sanitize", func(this *qjs.This) (*qjs.Value, error) {
-			args := this.Args()
-			if len(args) == 0 {
-				return nil, fmt.Errorf("__aster_sanitize: missing uri argument")
-			}
-			uri := args[0].String()
-
-			sanitizeCtx := context.Background()
-			sanitized, err := r.config.Loader.Sanitize(sanitizeCtx, uri)
-			if err != nil {
-				return nil, err
-			}
-			return this.Context().NewString(sanitized), nil
-		})
+			return cfg.Loader.Load(loadCtx, url)
+		}
+		b.Sanitize = func(uri string) (string, error) {
+			return cfg.Loader.Sanitize(context.Background(), uri)
+		}
 	}
-
-	// __aster_measure_text(text, cssFont) → sync, returns number
-	if r.config.TextMeasurer != nil {
-		ctx.SetFunc("__aster_measure_text", func(this *qjs.This) (*qjs.Value, error) {
-			args := this.Args()
-			if len(args) < 2 {
-				return nil, fmt.Errorf("__aster_measure_text: expected 2 arguments")
-			}
-			text := args[0].String()
-			cssFont := args[1].String()
-
-			width := r.config.TextMeasurer.MeasureText(text, cssFont)
-			return this.Context().NewFloat64(width), nil
-		})
+	if cfg.TextMeasurer != nil {
+		b.MeasureText = cfg.TextMeasurer.MeasureText
 	}
-
-	return nil
+	return b
 }
 
 // installPolyfills adds missing global APIs that QuickJS doesn't provide
 // but that Vega/Vega-Lite expect to exist.
 func (r *Runtime) installPolyfills() error {
-	ctx := r.rt.Context()
-
 	polyfills := `
 		// structuredClone — Vega-Lite uses this for deep cloning specs.
 		if (typeof globalThis.structuredClone === 'undefined') {
@@ -210,14 +158,25 @@ func (r *Runtime) installPolyfills() error {
 		}
 
 		// setTimeout/clearTimeout — d3-timer and vega-scenegraph reference these.
-		// In our headless SVG rendering context, we provide minimal stubs.
-		if (typeof globalThis.setTimeout === 'undefined') {
+		// Installed unconditionally: the engine's native timers (QuickJS-NG
+		// provides them) would queue callbacks that our synchronous render
+		// loop never services, leaving render promises pending forever.
+		//
+		// Callbacks run as microtasks rather than synchronously: patterns
+		// like vega-scenegraph's ready(), which polls a counter via
+		// setTimeout while the counter is decremented in a promise .then,
+		// need timer callbacks to interleave with promise reactions.
+		// Endless timer chains are bounded by the Go-side eval watchdog.
+		{
 			const _timers = new Map();
 			let _nextId = 1;
 			globalThis.setTimeout = function(fn, delay) {
 				const id = _nextId++;
-				// Execute immediately since we're in a synchronous rendering context.
-				try { fn(); } catch(e) {}
+				_timers.set(id, true);
+				Promise.resolve().then(() => {
+					if (!_timers.delete(id)) return; // cleared meanwhile
+					try { fn(); } catch(e) {}
+				});
 				return id;
 			};
 			globalThis.clearTimeout = function(id) {
@@ -231,8 +190,9 @@ func (r *Runtime) installPolyfills() error {
 			};
 		}
 
-		// requestAnimationFrame — vega-view may reference this.
-		if (typeof globalThis.requestAnimationFrame === 'undefined') {
+		// requestAnimationFrame — vega-view may reference this. Same
+		// microtask scheduling policy as setTimeout above.
+		{
 			globalThis.requestAnimationFrame = function(fn) {
 				return globalThis.setTimeout(fn, 0);
 			};
@@ -247,11 +207,9 @@ func (r *Runtime) installPolyfills() error {
 		}
 	`
 
-	val, err := ctx.Eval("__aster_polyfills__.js", qjs.Code(polyfills))
-	if err != nil {
+	if err := r.rt.EvalGlobal("__aster_polyfills__.js", polyfills); err != nil {
 		return fmt.Errorf("aster/runtime: installing polyfills: %w", err)
 	}
-	val.Free()
 
 	// Force UTC timezone by redirecting local Date methods to UTC equivalents.
 	// QuickJS in WASM has no timezone configuration, so we polyfill it.
@@ -278,11 +236,9 @@ func (r *Runtime) installPolyfills() error {
 			Date.prototype.setSeconds = Date.prototype.setUTCSeconds;
 			Date.prototype.setMilliseconds = Date.prototype.setUTCMilliseconds;
 		`
-		val, err := ctx.Eval("__aster_tz__.js", qjs.Code(utcPolyfill))
-		if err != nil {
+		if err := r.rt.EvalGlobal("__aster_tz__.js", utcPolyfill); err != nil {
 			return fmt.Errorf("aster/runtime: installing UTC timezone polyfill: %w", err)
 		}
-		val.Free()
 	}
 
 	return nil
@@ -338,8 +294,6 @@ func (r *Runtime) loadModules() error {
 		return fmt.Errorf("aster/runtime: parsing manifest: %w", err)
 	}
 
-	ctx := r.rt.Context()
-
 	// Load each module in topological order.
 	for _, mod := range m.Modules {
 		src, err := fs.ReadFile(asterjs.Modules, "modules/"+ver+"/"+mod.Filename)
@@ -347,19 +301,15 @@ func (r *Runtime) loadModules() error {
 			return fmt.Errorf("aster/runtime: reading module %s: %w", mod.Name, err)
 		}
 
-		val, err := ctx.Load(mod.Name, qjs.Code(string(src)))
-		if err != nil {
+		if err := r.rt.LoadModule(mod.Name, string(src)); err != nil {
 			return fmt.Errorf("aster/runtime: loading module %s: %w", mod.Name, err)
 		}
-		val.Free()
 	}
 
 	// Load the bridge module.
-	val, err := ctx.Load("bridge", qjs.Code(asterjs.BridgeJS))
-	if err != nil {
+	if err := r.rt.LoadModule("bridge", asterjs.BridgeJS); err != nil {
 		return fmt.Errorf("aster/runtime: loading bridge module: %w", err)
 	}
-	val.Free()
 
 	return nil
 }
@@ -420,14 +370,11 @@ func (r *Runtime) evalModule(script string) (result string, err error) {
 		}
 	}()
 
-	ctx := r.rt.Context()
-	val, err := ctx.Eval("__aster_eval__.js", qjs.Code(script), qjs.TypeModule())
+	result, err = r.rt.EvalModule(script)
 	if err != nil {
 		return "", fmt.Errorf("aster/runtime: eval: %w", err)
 	}
-	defer val.Free()
-
-	return val.String(), nil
+	return result, nil
 }
 
 // escapeBackticks escapes backtick characters in a string for use inside
