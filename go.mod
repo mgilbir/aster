@@ -4,7 +4,7 @@ go 1.25.0
 
 require (
 	github.com/go-text/typesetting v0.3.3
-	github.com/mgilbir/andsifr v0.0.0-20260704154319-e8b2bea930ce
+	github.com/mgilbir/andsifr v0.0.0-20260704191521-4e926810b2e0
 	golang.org/x/image v0.35.0
 )
 
