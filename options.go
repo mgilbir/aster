@@ -127,7 +127,8 @@ func WithTimezone(tz string) Option {
 type PNGOption func(*pngConfig)
 
 type pngConfig struct {
-	scale float64
+	scale  float64
+	recode bool
 }
 
 func defaultPNGConfig() *pngConfig {
@@ -141,5 +142,19 @@ func defaultPNGConfig() *pngConfig {
 func WithScale(scale float64) PNGOption {
 	return func(c *pngConfig) {
 		c.scale = scale
+	}
+}
+
+// WithRecodePNG losslessly re-encodes the rendered PNG into its cheapest
+// equivalent color format: 8-bit indexed when the image has at most 256
+// distinct colors, 24-bit truecolor when it is fully opaque. Pixels are
+// unchanged; typical charts shrink several-fold. Worth enabling when the PNG
+// is embedded into documents (PDF, office formats), whose writers decode and
+// re-compress the pixel stream and therefore pay per decoded byte. Costs one
+// extra decode/encode round trip (tens of milliseconds for chart-sized
+// images).
+func WithRecodePNG() PNGOption {
+	return func(c *pngConfig) {
+		c.recode = true
 	}
 }
