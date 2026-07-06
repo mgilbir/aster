@@ -1,0 +1,336 @@
+{
+  "vegaVersion": "5.25.0",
+  "vegaLiteVersion": "5.8.0",
+  "modules": [
+    {
+      "name": "clone",
+      "version": "2.1.2",
+      "sha256": "85a95a1dae5f1338cac8f0b1de2a4ab6ab5401bc5e0722a0f1a570f56a497428",
+      "filename": "clone.js"
+    },
+    {
+      "name": "d3-color",
+      "version": "3.1.0",
+      "sha256": "08bccc81c68a294df86e1d4b413387f67689c90db61e21eccdd690b73ed1e933",
+      "filename": "d3-color.js"
+    },
+    {
+      "name": "d3-dispatch",
+      "version": "3.0.1",
+      "sha256": "63f5c306f23852d810df4450b0372774701c47f77e457d1bec809c31d4a55e77",
+      "filename": "d3-dispatch.js"
+    },
+    {
+      "name": "d3-dsv",
+      "version": "3.0.1",
+      "sha256": "bdbe7743549835097b424da9aec1e93eadb2ba9e6b05fc2bb55d54d65ce20392",
+      "filename": "d3-dsv.js"
+    },
+    {
+      "name": "d3-format",
+      "version": "3.1.0",
+      "sha256": "1c3c0b078e1735ed3a2d7237ad58e9080903ad0902b2b9808cddb86def929b10",
+      "filename": "d3-format.js"
+    },
+    {
+      "name": "d3-hierarchy",
+      "version": "3.1.2",
+      "sha256": "5fdc8749ae698dc7f70f44caa3d2798910b82363523ccdbc6cb96415d4c19c45",
+      "filename": "d3-hierarchy.js"
+    },
+    {
+      "name": "d3-path",
+      "version": "3.1.0",
+      "sha256": "300269356f769c84f768e5cd7afb470459287dffb5e915c842300d50b8262fc7",
+      "filename": "d3-path.js"
+    },
+    {
+      "name": "d3-quadtree",
+      "version": "3.0.1",
+      "sha256": "fd27b5b70e4b15a377b4ffd2e55bd79634e9d703f9409757b4a1e6342fba2289",
+      "filename": "d3-quadtree.js"
+    },
+    {
+      "name": "d3-timer",
+      "version": "3.0.1",
+      "sha256": "0021f52d3c8cd73237be9688861775ef4891494b852bd06e162ae1b4c623610a",
+      "filename": "d3-timer.js"
+    },
+    {
+      "name": "fast-deep-equal",
+      "version": "3.1.3",
+      "sha256": "a6420c9090bca227b625b85ca0d6a76faf7ce231756ae185f62088a126f47a4b",
+      "filename": "fast-deep-equal.js"
+    },
+    {
+      "name": "fast-json-stable-stringify",
+      "version": "2.1.0",
+      "sha256": "bcbf9ac72384cfa5989e0d8e218cf0d90ac5266be85af451ef91dd7ee111d75a",
+      "filename": "fast-json-stable-stringify.js"
+    },
+    {
+      "name": "internmap",
+      "version": "2.0.3",
+      "sha256": "3fb8d63cd1b484f1e3c1ff238c54cad1f5c3d73afe57325b50565dbfcc351eaf",
+      "filename": "internmap.js"
+    },
+    {
+      "name": "robust-predicates",
+      "version": "3.0.0",
+      "sha256": "dd41217f39ed9d7c1ace96bec896667eceeba7f71739148bc9b77b8898feb7e6",
+      "filename": "robust-predicates.js"
+    },
+    {
+      "name": "topojson-client",
+      "version": "3.1.0",
+      "sha256": "cd3c62fa883aad6131a9f3fae09a12e2568eff0c6deb4c2b1b697ce9888da4d3",
+      "filename": "topojson-client.js"
+    },
+    {
+      "name": "vega-canvas",
+      "version": "1.2.7",
+      "sha256": "abe0b82344a3c12a4c86efdc046018f61d24e01d08d01cfc26753047a87f8107",
+      "filename": "vega-canvas.js"
+    },
+    {
+      "name": "vega-event-selector",
+      "version": "3.0.1",
+      "sha256": "c811a97750a986fdbc1b442ab8413321204ff3740f93e39e2c03f1752e4ded63",
+      "filename": "vega-event-selector.js"
+    },
+    {
+      "name": "vega-util",
+      "version": "1.17.2",
+      "sha256": "d408efc99a59c2006f8a34019dd9bed3df2797c6d09ff52c1c3cf3ccc3247bbd",
+      "filename": "vega-util.js"
+    },
+    {
+      "name": "d3-interpolate",
+      "version": "3.0.1",
+      "sha256": "9ea2d7f8e2f593fb48ddbd4d5679f6bf78e34d6854fdc5a5e663dd6532363d66",
+      "filename": "d3-interpolate.js"
+    },
+    {
+      "name": "d3-shape",
+      "version": "3.2.0",
+      "sha256": "322595ce6f336909068d9ce1d206beaab7a19282b50d971104e75a49e1e64079",
+      "filename": "d3-shape.js"
+    },
+    {
+      "name": "d3-force",
+      "version": "3.0.0",
+      "sha256": "1ad0b828fd1d96011e5a9ec32ad8921f39d4051ddc7a6ac67c259b7fa35b3309",
+      "filename": "d3-force.js"
+    },
+    {
+      "name": "d3-array",
+      "version": "3.2.3",
+      "sha256": "d2f27299fa46e0b8689d9df9b97429fbf7d02494a39e20c975f34d84d84d9a03",
+      "filename": "d3-array.js"
+    },
+    {
+      "name": "delaunator",
+      "version": "5.0.0",
+      "sha256": "9cbf45d57ee00d6829c83378fd191d88ee504abba1ff5def3c157527d5c6ef46",
+      "filename": "delaunator.js"
+    },
+    {
+      "name": "vega-expression",
+      "version": "5.1.0",
+      "sha256": "b735d2de298d4fed4d8022518b93b05df9287c2f0b0ea00d91166635d84304ea",
+      "filename": "vega-expression.js"
+    },
+    {
+      "name": "d3-geo",
+      "version": "3.1.0",
+      "sha256": "1c74e4e0e8412d769603537bf384203df278b6b46c02a37fb7550b7be6abd5e1",
+      "filename": "d3-geo.js"
+    },
+    {
+      "name": "d3-time",
+      "version": "3.1.0",
+      "sha256": "266ceb6708e4c058f7be87eef2fa1ec8a24347099be94d00c6b652f77e768d35",
+      "filename": "d3-time.js"
+    },
+    {
+      "name": "vega-statistics",
+      "version": "1.9.0",
+      "sha256": "dff394ecee64848b41f8e382eb583fa7a4d4d18706778f9af01ecf32122e106b",
+      "filename": "vega-statistics.js"
+    },
+    {
+      "name": "d3-delaunay",
+      "version": "6.0.2",
+      "sha256": "08e9fa39eb200f485174990ab85a5fd1da851057ccab96d8fdac0a15de8e502b",
+      "filename": "d3-delaunay.js"
+    },
+    {
+      "name": "vega-selections",
+      "version": "5.4.1",
+      "sha256": "b9480f48ccc924cdca6cc62cc40fe4b714c9143abbef7727a33f38d0742f0d4b",
+      "filename": "vega-selections.js"
+    },
+    {
+      "name": "d3-geo-projection",
+      "version": "4.0.0",
+      "sha256": "8625a1e3d15b36093901f8f164ba1014137b2f5d5327f56547d0aaf4c7b184eb",
+      "filename": "d3-geo-projection.js"
+    },
+    {
+      "name": "d3-time-format",
+      "version": "4.1.0",
+      "sha256": "b309acfa0fffd5d9e160c0433020bbd749e90e078c91c621455172563bbbb0aa",
+      "filename": "d3-time-format.js"
+    },
+    {
+      "name": "vega-time",
+      "version": "2.1.1",
+      "sha256": "8be346b732edb0aab3ff7813e5519b5f8eb210ae5a43a135b4356b312d3e5da0",
+      "filename": "vega-time.js"
+    },
+    {
+      "name": "d3-scale",
+      "version": "4.0.2",
+      "sha256": "9ffd6731bc86ff996b6f2c5b0cfc7358bd96f0d6f443449ea77222479276c516",
+      "filename": "d3-scale.js"
+    },
+    {
+      "name": "vega-format",
+      "version": "1.1.1",
+      "sha256": "5865992a920204023653a013d57c36115ac3e4ea9c35fef325d0954d5e1f0e20",
+      "filename": "vega-format.js"
+    },
+    {
+      "name": "vega-scale",
+      "version": "7.3.0",
+      "sha256": "9551caf6e889f9c8be0708471545aa341d0d527253f585d23c6c96cfe5cce001",
+      "filename": "vega-scale.js"
+    },
+    {
+      "name": "vega-loader",
+      "version": "4.5.1",
+      "sha256": "bbd1bc1b81e8d5320a6d41ba8daa99c0bcc928aa683c6d71d91adf7b386a4362",
+      "filename": "vega-loader.js"
+    },
+    {
+      "name": "vega-projection",
+      "version": "1.6.0",
+      "sha256": "90373e056262aeb9cdd2f49a52e09db6849a61014db4159acf1e8f5ebc524b5f",
+      "filename": "vega-projection.js"
+    },
+    {
+      "name": "vega-dataflow",
+      "version": "5.7.5",
+      "sha256": "3d6adfb97983b772c1cf8486830152cf90ad1d6916244adadd1821d16146b1c5",
+      "filename": "vega-dataflow.js"
+    },
+    {
+      "name": "vega-scenegraph",
+      "version": "4.10.2",
+      "sha256": "e42f3421eb3f28899d803ddbf2c9adcd1cf305c24abbc82ebbd48a9a7d3dd1fc",
+      "filename": "vega-scenegraph.js"
+    },
+    {
+      "name": "vega-crossfilter",
+      "version": "4.1.1",
+      "sha256": "4206a5c541ac14a87c3c49ce9c45f843bc1e105da7541b44e37690465a011e5e",
+      "filename": "vega-crossfilter.js"
+    },
+    {
+      "name": "vega-encode",
+      "version": "4.9.2",
+      "sha256": "c3e081d0f8081a13914b0466d76f49cc8055c373a397692e6d99f6574de4739f",
+      "filename": "vega-encode.js"
+    },
+    {
+      "name": "vega-force",
+      "version": "4.2.0",
+      "sha256": "53b3a93aa5d0cc09ec7413b1917f641e181329b7b1eb0e915a55373a1f8febf5",
+      "filename": "vega-force.js"
+    },
+    {
+      "name": "vega-geo",
+      "version": "4.4.1",
+      "sha256": "45a9259485c28a81cb00c445be49ebd00b954f4d60168b38d70636bcbd3794aa",
+      "filename": "vega-geo.js"
+    },
+    {
+      "name": "vega-hierarchy",
+      "version": "4.1.1",
+      "sha256": "bea9d6742f6818a26f84dc3fefa7abedab0848af923ce49d8c2b1999a7fefbd1",
+      "filename": "vega-hierarchy.js"
+    },
+    {
+      "name": "vega-regression",
+      "version": "1.2.0",
+      "sha256": "0f568ff695c98e1d5d8b35feb325da423d278b3c473ef6eaca281974e7cf58e7",
+      "filename": "vega-regression.js"
+    },
+    {
+      "name": "vega-runtime",
+      "version": "6.1.4",
+      "sha256": "7adc3665d900937c058631e89c54c94d33025a19268b28e314056805fa1ccf41",
+      "filename": "vega-runtime.js"
+    },
+    {
+      "name": "vega-transforms",
+      "version": "4.10.2",
+      "sha256": "d0a59d312aeb0393f88a88d10686898353106c815f4b2024c6c2bb25da3cdf77",
+      "filename": "vega-transforms.js"
+    },
+    {
+      "name": "vega-voronoi",
+      "version": "4.2.1",
+      "sha256": "65be67eb1c90afd36de8eb77e2cc4b4b8952f6193ae79f522329ab3b0ce6b955",
+      "filename": "vega-voronoi.js"
+    },
+    {
+      "name": "vega-wordcloud",
+      "version": "4.1.4",
+      "sha256": "83620b1565ffc53590c253390f52131e146db6f436565fc7a76e9feddfa74fdf",
+      "filename": "vega-wordcloud.js"
+    },
+    {
+      "name": "vega-functions",
+      "version": "5.13.2",
+      "sha256": "cee797ecb4674d4606e00f39779f8bc522b68702fb1a70fe012933d73499dac8",
+      "filename": "vega-functions.js"
+    },
+    {
+      "name": "vega-label",
+      "version": "1.2.1",
+      "sha256": "b2c165cb3f6fbe790171950bf8d4c1c54d8536176ddfc51fcf7c2b20b6170897",
+      "filename": "vega-label.js"
+    },
+    {
+      "name": "vega-view-transforms",
+      "version": "4.5.9",
+      "sha256": "15be8436a13d3c897dd081c830a53dc9b3c0050bcdaa7eee6889b2d8ab217997",
+      "filename": "vega-view-transforms.js"
+    },
+    {
+      "name": "vega-parser",
+      "version": "6.2.0",
+      "sha256": "ee053f87f55377a5fcaeb79f7798801ba9404aa43bed98b011f0b15aa0470693",
+      "filename": "vega-parser.js"
+    },
+    {
+      "name": "vega-view",
+      "version": "5.11.1",
+      "sha256": "c94e278f31e53794d8790d97777c3db92c2b94c9db8b88c485210a36cd5654ce",
+      "filename": "vega-view.js"
+    },
+    {
+      "name": "vega",
+      "version": "5.25.0",
+      "sha256": "2642a39ffc59ae893daf2c9e7b613ae47bfe7ec304918373ba0d9d3e698c5b5f",
+      "filename": "vega.js"
+    },
+    {
+      "name": "vega-lite",
+      "version": "5.8.0",
+      "sha256": "e7ff94cc0c20b931ef39b6cd54439a3aa4109e5e4ab8cf26f45f844fae704c96",
+      "filename": "vega-lite.js"
+    }
+  ]
+}

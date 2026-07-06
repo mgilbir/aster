@@ -1,0 +1,13 @@
+{
+  "default": "vl6_4",
+  "versions": {
+    "vl5_8": {
+      "vegaVersion": "5.25.0",
+      "vegaLiteVersion": "5.8.0"
+    },
+    "vl6_4": {
+      "vegaVersion": "6.2.0",
+      "vegaLiteVersion": "6.4.0"
+    }
+  }
+}

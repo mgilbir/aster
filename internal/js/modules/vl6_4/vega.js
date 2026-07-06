@@ -1,0 +1,8 @@
+/**
+ * Bundled by jsDelivr using Rollup v2.79.2 and Terser v5.39.0.
+ * Original file: /npm/vega@6.2.0/build/vega.module.js
+ *
+ * Do NOT use SRI with dynamically generated files! More information: https://www.jsdelivr.com/using-sri-with-dynamic-files
+ */
+import{extend as e}from"vega-util";export*from"vega-util";import{transforms as m}from"vega-dataflow";export{Dataflow,EventStream,MultiPulse,Operator,Parameters,Pulse,Transform,changeset,definition,ingest,isTuple,transform,transforms,tupleid}from"vega-dataflow";import*as o from"vega-transforms";import*as r from"vega-view-transforms";import*as a from"vega-encode";import*as t from"vega-geo";import*as s from"vega-force";import*as p from"vega-hierarchy";import*as n from"vega-label";import*as i from"vega-regression";import*as f from"vega-voronoi";import*as l from"vega-wordcloud";import*as g from"vega-crossfilter";export*from"vega-statistics";export*from"vega-time";export*from"vega-loader";export*from"vega-scenegraph";export{interpolate,interpolateColors,interpolateRange,quantizeInterpolator,scale,scheme}from"vega-scale";export{projection}from"vega-projection";export{View}from"vega-view";export{defaultLocale,numberFormatDefaultLocale as formatLocale,locale,resetDefaultLocale,timeFormatDefaultLocale as timeFormatLocale}from"vega-format";export{expressionFunction}from"vega-functions";export{parse}from"vega-parser";export{context as runtimeContext}from"vega-runtime";export{codegenExpression,parseExpression}from"vega-expression";export{parseSelector}from"vega-event-selector";e(m,o,r,a,t,s,n,p,i,f,l,g);const v="6.2.0";export{v as version};export default null;
+//# sourceMappingURL=/sm/73b0926b5c3b57f6892853823e41d8b040671ce3ee663b9585fed11f28591bc8.map

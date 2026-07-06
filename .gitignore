@@ -31,9 +31,6 @@ go.work.sum
 # .idea/
 # .vscode/
 
-# Vendored JS modules (downloaded by cmd/vendor-js)
-internal/js/modules/
-
 # Benchmark comparison artifacts (scripts/bench-wazero.sh)
 bench-*.txt
 wazero-fork.mod
