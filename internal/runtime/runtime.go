@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"sort"
+	"strings"
 	"time"
 
 	asterjs "github.com/mgilbir/aster/internal/js"
@@ -30,7 +32,7 @@ type Config struct {
 	Loader       Loader
 	TextMeasurer TextMeasurer
 	Theme        string
-	MemoryLimit  int
+	MemoryLimit  uint64
 	Timeout      time.Duration
 	Version      string // version set key, e.g. "vl6_4" (default)
 	Timezone     string // IANA timezone name or "UTC" (default: "UTC")
@@ -80,13 +82,16 @@ func New(cfg Config) (*Runtime, error) {
 		return nil, fmt.Errorf("aster/runtime: creating QuickJS runtime: %w", err)
 	}
 
+	idx, err := readVersionIndex()
+	if err != nil {
+		_ = rt.Close()
+		return nil, err
+	}
 	if cfg.Version == "" {
-		def, err := readDefaultVersion()
-		if err != nil {
-			_ = rt.Close()
-			return nil, err
-		}
-		cfg.Version = def
+		cfg.Version = idx.Default
+	} else if _, ok := idx.Versions[cfg.Version]; !ok {
+		_ = rt.Close()
+		return nil, fmt.Errorf("aster/runtime: unknown Vega-Lite version set %q; available: %s", cfg.Version, idx.describe())
 	}
 
 	r := &Runtime{rt: rt, config: cfg}
@@ -244,13 +249,15 @@ func (r *Runtime) installPolyfills() error {
 	return nil
 }
 
-// readDefaultVersion reads the default version key from versions.json.
-func readDefaultVersion() (string, error) {
-	idx, err := readVersionIndex()
-	if err != nil {
-		return "", err
+// describe lists the available version sets as "vegaLiteVersion (key)" pairs,
+// sorted, for use in error messages.
+func (idx *versionIndex) describe() string {
+	parts := make([]string, 0, len(idx.Versions))
+	for k, v := range idx.Versions {
+		parts = append(parts, fmt.Sprintf("%s (%s)", v.VegaLiteVersion, k))
 	}
-	return idx.Default, nil
+	sort.Strings(parts)
+	return strings.Join(parts, ", ")
 }
 
 // readVersionIndex reads and parses the versions.json index.
@@ -366,7 +373,7 @@ func (r *Runtime) VegaLiteToVega(specJSON string) (string, error) {
 	return r.evalModule(script)
 }
 
-var errRuntimeCrashed = errors.New("aster/runtime: WASM runtime has crashed; create a new Converter")
+var errRuntimeCrashed = errors.New("aster/runtime: WASM runtime is no longer usable (crashed or timed out); create a new Converter")
 
 // evalModule evaluates an inline ES module and returns its default export as a string.
 // It recovers from panics in the WASM runtime and converts them to errors.
@@ -384,6 +391,14 @@ func (r *Runtime) evalModule(script string) (result string, err error) {
 
 	result, err = r.rt.EvalModule(script)
 	if err != nil {
+		// A render timeout closes the underlying module mid-eval, and every
+		// later call would otherwise fail with an opaque low-level error.
+		// Detect the closed/timed-out state, latch it, and return a clear
+		// sentinel so callers know to build a new Converter.
+		if r.rt.Closed() {
+			r.crashed = true
+			return "", errRuntimeCrashed
+		}
 		return "", fmt.Errorf("aster/runtime: eval: %w", err)
 	}
 	return result, nil

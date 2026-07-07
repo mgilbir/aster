@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"strings"
 	"time"
 
@@ -45,8 +46,9 @@ func isUndefined(v uint64) bool   { return valueTag(v) == jsTagUndefined }
 
 // Config configures a Runtime.
 type Config struct {
-	// MemoryLimit caps the JS heap in bytes (0 = engine default).
-	MemoryLimit int
+	// MemoryLimit caps the JS heap in bytes (0 = engine default). WASM linear
+	// memory is 32-bit addressable, so values above 4 GiB are clamped.
+	MemoryLimit uint64
 	// Timeout bounds each evaluation; on expiry the underlying WASM module
 	// is closed and the Runtime becomes unusable (0 = no limit). The
 	// deadline takes effect at the next host-call boundary (data loading,
@@ -263,7 +265,11 @@ func (r *Runtime) initEngine(ctx context.Context, cfg Config) error {
 	}
 
 	if cfg.MemoryLimit > 0 {
-		if _, err := r.fnSetMemoryLimit.Call(ctx, uint64(r.rtPtr), uint64(uint32(cfg.MemoryLimit))); err != nil {
+		limit := cfg.MemoryLimit
+		if limit > math.MaxUint32 {
+			limit = math.MaxUint32 // WASM linear memory is 32-bit addressable
+		}
+		if _, err := r.fnSetMemoryLimit.Call(ctx, uint64(r.rtPtr), limit); err != nil {
 			return fmt.Errorf("quickjs: JS_SetMemoryLimit: %w", err)
 		}
 	}
@@ -275,6 +281,13 @@ func (r *Runtime) initEngine(ctx context.Context, cfg Config) error {
 		}
 	}
 	return nil
+}
+
+// Closed reports whether the runtime can no longer evaluate code, either
+// because Close was called or because the timeout watchdog closed the module
+// mid-evaluation.
+func (r *Runtime) Closed() bool {
+	return r.closed || r.mod == nil || r.mod.IsClosed()
 }
 
 // Close releases the engine and the underlying WASM runtime.
