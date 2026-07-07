@@ -25,6 +25,7 @@ import (
 
 	"github.com/mgilbir/aster/internal/resvg"
 	"github.com/mgilbir/aster/internal/runtime"
+	"github.com/mgilbir/aster/internal/svgpdf"
 	"github.com/mgilbir/aster/internal/textmeasure"
 )
 
@@ -39,6 +40,13 @@ type Converter struct {
 	pngOnce     sync.Once
 	pngRenderer *resvg.Renderer
 	pngErr      error
+
+	// PDF output shapes text with a Measurer. Normally the converter's own
+	// measurer is reused; when text measurement was disabled via
+	// WithTextMeasurement(false), one is created lazily for PDF use only.
+	pdfMeasurerOnce sync.Once
+	pdfMeasurer     *textmeasure.Measurer
+	pdfMeasurerErr  error
 }
 
 // errConverterClosed is returned by every rendering method after Close.
@@ -224,6 +232,62 @@ func (c *Converter) SVGToPNG(svg string, opts ...PNGOption) ([]byte, error) {
 		out = recodePNG(out)
 	}
 	return out, nil
+}
+
+// VegaToPDF renders a Vega spec (JSON) to a single-page vector PDF.
+func (c *Converter) VegaToPDF(spec []byte) ([]byte, error) {
+	svg, err := c.VegaToSVG(spec)
+	if err != nil {
+		return nil, err
+	}
+	return c.SVGToPDF(svg)
+}
+
+// VegaLiteToPDF renders a Vega-Lite spec (JSON) to a single-page vector PDF.
+func (c *Converter) VegaLiteToPDF(spec []byte) ([]byte, error) {
+	svg, err := c.VegaLiteToSVG(spec)
+	if err != nil {
+		return nil, err
+	}
+	return c.SVGToPDF(svg)
+}
+
+// SVGToPDF converts an SVG string (as produced by the Vega SVG renderer) to
+// a single-page vector PDF. Text is converted to glyph outlines, so no fonts
+// are embedded and the output is fully self-contained — suitable for direct
+// embedding in LaTeX documents via \includegraphics.
+//
+// Only the SVG subset that Vega emits is supported. Unsupported constructs
+// (gradients, images, embedded CSS, ...) return a descriptive error rather
+// than a silently incomplete chart; callers can fall back to SVGToPNG.
+func (c *Converter) SVGToPDF(svg string) ([]byte, error) {
+	m, err := c.pdfMeasurerInit()
+	if err != nil {
+		return nil, err
+	}
+	out, err := svgpdf.Convert(svg, m)
+	if err != nil {
+		return nil, fmt.Errorf("aster: rendering PDF: %w", err)
+	}
+	return out, nil
+}
+
+// pdfMeasurerInit returns the text measurer used to shape text for PDF
+// output. It reuses the converter's measurer when text measurement is
+// enabled (the default) and otherwise builds one on first use from the same
+// fontPlan, so PDF glyph outlines come from the font the SVG was laid out
+// against.
+func (c *Converter) pdfMeasurerInit() (*textmeasure.Measurer, error) {
+	if c.measurer != nil {
+		return c.measurer, nil
+	}
+	c.pdfMeasurerOnce.Do(func() {
+		c.pdfMeasurer, c.pdfMeasurerErr = textmeasure.New(c.fonts.measurerOptions()...)
+		if c.pdfMeasurerErr != nil {
+			c.pdfMeasurerErr = fmt.Errorf("aster: initializing PDF text shaper: %w", c.pdfMeasurerErr)
+		}
+	})
+	return c.pdfMeasurer, c.pdfMeasurerErr
 }
 
 // pngRendererInit lazily initializes the PNG renderer on first use. It draws
