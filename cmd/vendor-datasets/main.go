@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 const (
@@ -111,8 +112,12 @@ License: BSD-3-Clause (see package.json in the source repository)
 	log.Printf("done: %d data files + LICENSE written to %s", len(dataFiles), outDir)
 }
 
+// httpClient bounds each download so a stalled CDN connection cannot hang the
+// build indefinitely.
+var httpClient = &http.Client{Timeout: 60 * time.Second}
+
 func download(url string) ([]byte, error) {
-	resp, err := http.Get(url)
+	resp, err := httpClient.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("HTTP GET %s: %w", url, err)
 	}
