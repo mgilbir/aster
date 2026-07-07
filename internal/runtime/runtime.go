@@ -316,40 +316,52 @@ func (r *Runtime) loadModules() error {
 
 // VegaToSVG renders a Vega spec to SVG.
 func (r *Runtime) VegaToSVG(specJSON string) (string, error) {
-	theme := "undefined"
-	if r.config.Theme != "" {
-		theme = "`" + r.config.Theme + "`"
+	spec, err := jsStringLiteral(specJSON)
+	if err != nil {
+		return "", err
+	}
+	theme, err := themeLiteral(r.config.Theme)
+	if err != nil {
+		return "", err
 	}
 
 	script := fmt.Sprintf(`
 		import { vegaToSvg } from 'bridge';
 		export default await vegaToSvg(%s, %s);
-	`, "`"+escapeBackticks(specJSON)+"`", theme)
+	`, spec, theme)
 
 	return r.evalModule(script)
 }
 
 // VegaLiteToSVG renders a Vega-Lite spec to SVG.
 func (r *Runtime) VegaLiteToSVG(specJSON string) (string, error) {
-	theme := "undefined"
-	if r.config.Theme != "" {
-		theme = "`" + r.config.Theme + "`"
+	spec, err := jsStringLiteral(specJSON)
+	if err != nil {
+		return "", err
+	}
+	theme, err := themeLiteral(r.config.Theme)
+	if err != nil {
+		return "", err
 	}
 
 	script := fmt.Sprintf(`
 		import { vegaLiteToSvg } from 'bridge';
 		export default await vegaLiteToSvg(%s, %s);
-	`, "`"+escapeBackticks(specJSON)+"`", theme)
+	`, spec, theme)
 
 	return r.evalModule(script)
 }
 
 // VegaLiteToVega compiles a Vega-Lite spec to a Vega spec.
 func (r *Runtime) VegaLiteToVega(specJSON string) (string, error) {
+	spec, err := jsStringLiteral(specJSON)
+	if err != nil {
+		return "", err
+	}
 	script := fmt.Sprintf(`
 		import { vegaLiteToVega } from 'bridge';
 		export default vegaLiteToVega(%s);
-	`, "`"+escapeBackticks(specJSON)+"`")
+	`, spec)
 
 	return r.evalModule(script)
 }
@@ -377,18 +389,26 @@ func (r *Runtime) evalModule(script string) (result string, err error) {
 	return result, nil
 }
 
-// escapeBackticks escapes backtick characters in a string for use inside
-// JS template literals.
-func escapeBackticks(s string) string {
-	result := make([]byte, 0, len(s))
-	for i := 0; i < len(s); i++ {
-		if s[i] == '`' {
-			result = append(result, '\\')
-		}
-		if s[i] == '\\' {
-			result = append(result, '\\')
-		}
-		result = append(result, s[i])
+// jsStringLiteral encodes s as a JavaScript string literal (double-quoted).
+// It is used to pass spec/theme text into generated module source as inert
+// data rather than as code: encoding.json escapes quotes, backslashes,
+// control characters, and the U+2028/U+2029 line separators, and HTML-escapes
+// <, >, & — so no byte of s (backticks, ${...}, quotes, newlines) can break
+// out of the literal or be interpreted as a template interpolation.
+func jsStringLiteral(s string) (string, error) {
+	b, err := json.Marshal(s)
+	if err != nil {
+		return "", fmt.Errorf("aster/runtime: encoding string literal: %w", err)
 	}
-	return string(result)
+	return string(b), nil
+}
+
+// themeLiteral encodes the configured theme JSON as a JS string literal, or
+// returns the JS keyword "undefined" when no theme is set. bridge.js
+// JSON.parses the resulting string.
+func themeLiteral(theme string) (string, error) {
+	if theme == "" {
+		return "undefined", nil
+	}
+	return jsStringLiteral(theme)
 }
