@@ -81,7 +81,9 @@ func New(opts ...Option) (*Converter, error) {
 
 	rt, err := runtime.New(rtCfg)
 	if err != nil {
-		return nil, fmt.Errorf("aster: %w", err)
+		// runtime.New already namespaces its errors ("aster/runtime: ...");
+		// don't double-prefix.
+		return nil, err
 	}
 
 	return &Converter{
