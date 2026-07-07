@@ -1,12 +1,18 @@
-FROM rust:latest AS build
+# Pinned toolchain + Cargo.lock so the emitted resvg.wasm is reproducible:
+# an unpinned rebuild could otherwise silently bump resvg (and its rendering
+# behavior) to a newer patch release.
+FROM rust:1.93 AS build
 
 RUN rustup target add wasm32-wasip1
 
 WORKDIR /src
 COPY Cargo.toml Cargo.toml
+COPY Cargo.lock Cargo.lock
 COPY src/ src/
 
-RUN cargo build --target wasm32-wasip1 --release
+# --locked fails the build if Cargo.lock is missing or out of date, rather than
+# silently re-resolving to newer dependency versions.
+RUN cargo build --target wasm32-wasip1 --release --locked
 
 # Install recent binaryen from GitHub (distro version is too old for bulk-memory ops)
 RUN BINARYEN_VERSION=122 && \
