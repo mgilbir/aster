@@ -149,8 +149,6 @@ func TestNoTextMeasurement(t *testing.T) {
 // (e.g. polyfill gaps, unsupported features). These are skipped rather than
 // marked as errors so the test suite stays green while we work on fixes.
 var knownFailures = map[string]string{
-	"geo_sphere": "structuredClone polyfill cannot handle undefined projection params",
-
 	// Timezone: expected SVGs were generated in PDT (UTC-7), not UTC.
 	// These fail because aria-label timestamps differ by 7 hours.
 	"time_parse_local":                   "expected SVGs generated in PDT timezone",
@@ -170,7 +168,6 @@ var knownFailures = map[string]string{
 
 	// Runtime errors in specific specs.
 	"facet_independent_scale_layer_broken": "known broken spec: TypeError in Vega compile",
-	"geo_custom_projection":               "structuredClone polyfill gap with custom projection",
 
 	// Random/sample transforms produce non-deterministic output.
 	"sample_scatterplot":          "non-deterministic sample transform",

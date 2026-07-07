@@ -212,7 +212,6 @@ func TestVLConvertPNGSpecs(t *testing.T) {
 
 	// Known failures / skips specific to PNG comparison.
 	pngSkips := map[string]string{
-		"custom_projection":    "structuredClone polyfill gap with custom projection",
 		"remote_images":        "image marks reference external URLs",
 		"geoScale":             "geoScale function not available in vendored Vega 5.25",
 		"maptile_background_2": "geoScale function not available in vendored Vega 5.25",

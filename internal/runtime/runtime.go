@@ -155,10 +155,47 @@ func bridgeConfig(cfg Config) quickjs.Bridge {
 // but that Vega/Vega-Lite expect to exist.
 func (r *Runtime) installPolyfills() error {
 	polyfills := `
-		// structuredClone — Vega-Lite uses this for deep cloning specs.
+		// structuredClone — Vega/Vega-Lite use this for deep cloning specs.
+		// A JSON round-trip would drop undefined-valued properties (and turn
+		// undefined array holes into null), which breaks specs carrying
+		// explicit undefined projection params (e.g. geo_sphere,
+		// geo_custom_projection). This recursive clone preserves undefined and
+		// handles Date/RegExp/Map/Set/typed arrays and reference cycles.
 		if (typeof globalThis.structuredClone === 'undefined') {
-			globalThis.structuredClone = function(obj) {
-				return JSON.parse(JSON.stringify(obj));
+			globalThis.structuredClone = function(input) {
+				var seen = new Map();
+				function clone(v) {
+					if (v === null || typeof v !== 'object') return v;
+					if (seen.has(v)) return seen.get(v);
+					if (v instanceof Date) return new Date(v.getTime());
+					if (v instanceof RegExp) return new RegExp(v.source, v.flags);
+					if (Array.isArray(v)) {
+						var arr = new Array(v.length);
+						seen.set(v, arr);
+						for (var i = 0; i < v.length; i++) arr[i] = clone(v[i]);
+						return arr;
+					}
+					if (v instanceof Map) {
+						var m = new Map();
+						seen.set(v, m);
+						v.forEach(function(val, key) { m.set(clone(key), clone(val)); });
+						return m;
+					}
+					if (v instanceof Set) {
+						var s = new Set();
+						seen.set(v, s);
+						v.forEach(function(val) { s.add(clone(val)); });
+						return s;
+					}
+					if (ArrayBuffer.isView(v)) return new v.constructor(v);
+					if (v instanceof ArrayBuffer) return v.slice(0);
+					var out = {};
+					seen.set(v, out);
+					var keys = Object.keys(v);
+					for (var k = 0; k < keys.length; k++) out[keys[k]] = clone(v[keys[k]]);
+					return out;
+				}
+				return clone(input);
 			};
 		}
 
