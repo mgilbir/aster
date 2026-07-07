@@ -79,17 +79,28 @@ go install github.com/mgilbir/aster/cmd/aster@latest
 # Render a spec to SVG
 aster svg -i chart.vl.json -o chart.svg
 
+# Render a spec to PNG at 2x scale
+aster png -i chart.vl.json -o chart.png -scale 2
+
 # Pipe from stdin to stdout
 cat chart.vl.json | aster svg > chart.svg
 
 # Compile Vega-Lite to Vega JSON
 aster compile -i chart.vl.json -o chart.vg.json
 
+# Pick a Vega-Lite version and a render timeout
+aster svg -i chart.vl.json -version 5.8 -timeout 60s
+
 # Allow specs that load data over HTTP
 aster svg -i chart.vl.json -o chart.svg -allow-http
+
+# ...restricted to specific hosts
+aster svg -i chart.vl.json -allow-domain cdn.jsdelivr.net
 ```
 
 The CLI auto-detects Vega vs Vega-Lite from the `$schema` field. If absent, Vega-Lite is assumed.
+
+Shared flags: `-i`/`-o` (input/output, stdin/stdout when omitted), `-version`, `-timeout`, `-allow-http`, and `-allow-domain` (repeatable; implies `-allow-http`). `png` also accepts `-scale` and `-recode`.
 
 ## API
 

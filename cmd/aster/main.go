@@ -1,11 +1,11 @@
-// Command aster converts Vega and Vega-Lite specs to SVG.
+// Command aster converts Vega and Vega-Lite specs to SVG and PNG.
 //
 // Usage:
 //
 //	aster svg -i input.vl.json -o output.svg
-//	aster svg -i input.vl.json              # stdout
-//	cat spec.json | aster svg > output.svg  # stdin
-//	aster compile -i input.vl.json          # Vega-Lite → Vega JSON
+//	aster png -i input.vl.json -o output.png -scale 2
+//	cat spec.json | aster svg > output.svg      # stdin/stdout
+//	aster compile -i input.vl.json              # Vega-Lite → Vega JSON
 package main
 
 import (
@@ -15,6 +15,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/mgilbir/aster"
 )
@@ -26,27 +27,82 @@ func main() {
 	}
 }
 
+const usage = `usage: aster <command> [flags]
+
+Commands:
+  svg      Render spec to SVG
+  png      Render spec to PNG
+  compile  Compile Vega-Lite to Vega JSON
+
+Run "aster <command> -h" for command-specific flags.`
+
 func run() error {
 	if len(os.Args) < 2 {
-		return fmt.Errorf("usage: aster <command> [flags]\n\nCommands:\n  svg      Render spec to SVG\n  compile  Compile Vega-Lite to Vega JSON")
+		return fmt.Errorf("%s", usage)
 	}
 
 	command := os.Args[1]
 	switch command {
 	case "svg":
 		return runSVG(os.Args[2:])
+	case "png":
+		return runPNG(os.Args[2:])
 	case "compile":
 		return runCompile(os.Args[2:])
+	case "-h", "--help", "help":
+		fmt.Println(usage)
+		return nil
 	default:
-		return fmt.Errorf("unknown command %q (expected svg or compile)", command)
+		return fmt.Errorf("unknown command %q\n\n%s", command, usage)
 	}
+}
+
+// stringList collects a repeatable string flag.
+type stringList []string
+
+func (s *stringList) String() string     { return strings.Join(*s, ",") }
+func (s *stringList) Set(v string) error { *s = append(*s, v); return nil }
+
+// commonOpts holds flags shared by the rendering subcommands and turns them
+// into aster options.
+type commonOpts struct {
+	allowHTTP    bool
+	allowDomains stringList
+	version      string
+	timeout      time.Duration
+}
+
+func registerCommonOpts(fs *flag.FlagSet) *commonOpts {
+	co := &commonOpts{}
+	fs.BoolVar(&co.allowHTTP, "allow-http", false, "allow HTTP(S) data loading from any host")
+	fs.Var(&co.allowDomains, "allow-domain", "restrict HTTP loading to this host (repeatable); implies -allow-http")
+	fs.StringVar(&co.version, "version", "", "Vega-Lite version, e.g. 5.8 or 6.4 (default: build default)")
+	fs.DurationVar(&co.timeout, "timeout", 0, "max duration per render, e.g. 30s (default: 30s)")
+	return co
+}
+
+func (co *commonOpts) options() []aster.Option {
+	var opts []aster.Option
+	if co.version != "" {
+		opts = append(opts, aster.WithVegaLiteVersion(co.version))
+	}
+	if co.timeout > 0 {
+		opts = append(opts, aster.WithTimeout(co.timeout))
+	}
+	switch {
+	case len(co.allowDomains) > 0:
+		opts = append(opts, aster.WithLoader(&aster.HTTPLoader{AllowedDomains: co.allowDomains}))
+	case co.allowHTTP:
+		opts = append(opts, aster.WithLoader(aster.NewHTTPLoader(nil)))
+	}
+	return opts
 }
 
 func runSVG(args []string) (err error) {
 	fs := flag.NewFlagSet("svg", flag.ExitOnError)
 	input := fs.String("i", "", "input spec file (- or omit for stdin)")
 	output := fs.String("o", "", "output SVG file (omit for stdout)")
-	allowHTTP := fs.Bool("allow-http", false, "allow HTTP(S) data loading")
+	co := registerCommonOpts(fs)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -56,12 +112,7 @@ func runSVG(args []string) (err error) {
 		return err
 	}
 
-	var opts []aster.Option
-	if *allowHTTP {
-		opts = append(opts, aster.WithLoader(aster.NewHTTPLoader(nil)))
-	}
-
-	c, err := aster.New(opts...)
+	c, err := aster.New(co.options()...)
 	if err != nil {
 		return err
 	}
@@ -84,10 +135,13 @@ func runSVG(args []string) (err error) {
 	return writeOutput(*output, []byte(svg))
 }
 
-func runCompile(args []string) (err error) {
-	fs := flag.NewFlagSet("compile", flag.ExitOnError)
-	input := fs.String("i", "", "input Vega-Lite spec file (- or omit for stdin)")
-	output := fs.String("o", "", "output Vega JSON file (omit for stdout)")
+func runPNG(args []string) (err error) {
+	fs := flag.NewFlagSet("png", flag.ExitOnError)
+	input := fs.String("i", "", "input spec file (- or omit for stdin)")
+	output := fs.String("o", "", "output PNG file (omit for stdout)")
+	scale := fs.Float64("scale", 1.0, "scale factor; 2 produces 2x dimensions")
+	recode := fs.Bool("recode", false, "losslessly re-encode the PNG into a smaller equivalent format")
+	co := registerCommonOpts(fs)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -97,7 +151,56 @@ func runCompile(args []string) (err error) {
 		return err
 	}
 
-	c, err := aster.New(aster.WithTextMeasurement(false))
+	c, err := aster.New(co.options()...)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if e := c.Close(); e != nil && err == nil {
+			err = e
+		}
+	}()
+
+	var pngOpts []aster.PNGOption
+	if *scale != 1.0 {
+		pngOpts = append(pngOpts, aster.WithScale(*scale))
+	}
+	if *recode {
+		pngOpts = append(pngOpts, aster.WithRecodePNG())
+	}
+
+	var data []byte
+	if isVegaLite(spec) {
+		data, err = c.VegaLiteToPNG(spec, pngOpts...)
+	} else {
+		data, err = c.VegaToPNG(spec, pngOpts...)
+	}
+	if err != nil {
+		return err
+	}
+
+	return writeOutput(*output, data)
+}
+
+func runCompile(args []string) (err error) {
+	fs := flag.NewFlagSet("compile", flag.ExitOnError)
+	input := fs.String("i", "", "input Vega-Lite spec file (- or omit for stdin)")
+	output := fs.String("o", "", "output Vega JSON file (omit for stdout)")
+	version := fs.String("version", "", "Vega-Lite version, e.g. 5.8 or 6.4 (default: build default)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	spec, err := readInput(*input)
+	if err != nil {
+		return err
+	}
+
+	opts := []aster.Option{aster.WithTextMeasurement(false)}
+	if *version != "" {
+		opts = append(opts, aster.WithVegaLiteVersion(*version))
+	}
+	c, err := aster.New(opts...)
 	if err != nil {
 		return err
 	}
