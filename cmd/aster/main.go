@@ -22,7 +22,15 @@ import (
 
 func main() {
 	if err := run(); err != nil {
-		fmt.Fprintf(os.Stderr, "aster: %v\n", err)
+		// Library errors are already namespaced ("aster:" / "aster/runtime:");
+		// only add the program prefix to errors that aren't (flag parsing,
+		// file I/O) so we don't print "aster: aster: ...".
+		msg := err.Error()
+		if strings.HasPrefix(msg, "aster") {
+			fmt.Fprintln(os.Stderr, msg)
+		} else {
+			fmt.Fprintf(os.Stderr, "aster: %s\n", msg)
+		}
 		os.Exit(1)
 	}
 }
