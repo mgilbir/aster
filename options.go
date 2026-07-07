@@ -14,16 +14,17 @@ type fontEntry struct {
 }
 
 type config struct {
-	loader            Loader
-	theme             string
-	memoryLimit       uint64
-	timeout           time.Duration
-	textMeasure       bool
-	vegaLiteVersion   string // version set key, e.g. "vl6_4"
-	systemFonts       bool
-	fonts             []fontEntry
-	defaultFontFamily string
-	timezone          string
+	loader                 Loader
+	theme                  string
+	memoryLimit            uint64
+	timeout                time.Duration
+	textMeasure            bool
+	vegaLiteVersion        string // version set key, e.g. "vl6_4"
+	systemFonts            bool
+	fonts                  []fontEntry
+	defaultFontFamily      string
+	defaultMonospaceFamily string
+	timezone               string
 }
 
 func defaultConfig() *config {
@@ -106,12 +107,23 @@ func WithFont(family string, ttf []byte) Option {
 }
 
 // WithDefaultFontFamily sets the font family name used as the fallback when
-// resolving "sans-serif" and other generic CSS font families. Defaults to
-// "Liberation Sans" (the embedded font). Use this with WithFont to switch
-// the primary font used for text measurement.
+// resolving the generic "sans-serif" CSS family. It applies to both text
+// measurement (SVG layout) and PNG rasterization. Defaults to "Liberation
+// Sans" (the embedded font). Use this with WithFont to switch the primary
+// font used across both pipelines.
 func WithDefaultFontFamily(family string) Option {
 	return func(c *config) {
 		c.defaultFontFamily = family
+	}
+}
+
+// WithDefaultMonospaceFamily sets the font family name used to resolve the
+// generic "monospace" CSS family for PNG rasterization. Defaults to
+// "Liberation Mono" (the embedded font). Register the matching TTF with
+// WithFont.
+func WithDefaultMonospaceFamily(family string) Option {
+	return func(c *config) {
+		c.defaultMonospaceFamily = family
 	}
 }
 

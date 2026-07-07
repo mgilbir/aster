@@ -142,9 +142,10 @@ Options passed to `aster.New()`:
 | `WithTimeout(d)` | 30s | Max duration per render |
 | `WithMemoryLimit(bytes)` | 0 (unlimited) | QuickJS heap limit |
 | `WithTextMeasurement(bool)` | `true` | HarfBuzz text shaping for accurate layout |
-| `WithFont(family, ttf)` | — | Register a custom TTF font |
-| `WithDefaultFontFamily(name)` | `"Liberation Sans"` | Fallback family for sans-serif resolution |
-| `WithSystemFonts()` | disabled | Scan system-installed fonts |
+| `WithFont(family, ttf)` | — | Register a custom TTF font (used by both measurement and PNG) |
+| `WithDefaultFontFamily(name)` | `"Liberation Sans"` | Family that generic `sans-serif` resolves to (both pipelines) |
+| `WithDefaultMonospaceFamily(name)` | `"Liberation Mono"` | Family that generic `monospace` resolves to (PNG) |
+| `WithSystemFonts()` | disabled | Scan system fonts for **measurement only** (PNG/resvg has no system fonts) |
 | `WithTheme(json)` | — | Vega theme config applied to all renders |
 | `WithTimezone(tz)` | `"UTC"` | Timezone for JS Date operations (only UTC supported) |
 
