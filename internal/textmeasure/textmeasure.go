@@ -140,10 +140,29 @@ type CSSFont struct {
 // MeasureText returns the width in pixels of the given text rendered with
 // the specified CSS font string.
 func (m *Measurer) MeasureText(text, cssFont string) float64 {
-	parsed := ParseCSSFont(cssFont)
+	_, advance := m.ShapeText(text, cssFont)
+	return advance
+}
+
+// ShapedRun is one contiguous run of glyphs shaped with a single font face.
+// Glyph positions (offsets, advances) are fixed.Int26_6 pixel values at the
+// size the run was shaped at; glyph outlines obtained from Face.GlyphData are
+// in font units and must be scaled by size/Face.Upem().
+type ShapedRun struct {
+	Face   *font.Face
+	Glyphs []shaping.Glyph
+	Size   fixed.Int26_6 // font size the run was shaped at (26.6 pixels)
+}
+
+// ShapeText shapes the text with the font selected by the CSS font string
+// and returns the shaped glyph runs plus the total advance width in pixels.
+// The runs carry the concrete font.Face, so callers can extract glyph
+// outlines (Face.GlyphData) for vector output.
+func (m *Measurer) ShapeText(text, cssFont string) ([]ShapedRun, float64) {
 	if len(text) == 0 {
-		return 0
+		return nil, 0
 	}
+	parsed := ParseCSSFont(cssFont)
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -176,13 +195,15 @@ func (m *Measurer) MeasureText(text, cssFont string) float64 {
 	// Split by font face for proper fallback handling.
 	splits := shaping.SplitByFace(input, m.fontMap)
 
+	runs := make([]ShapedRun, 0, len(splits))
 	var totalAdvance fixed.Int26_6
 	for _, split := range splits {
 		out := m.shaper.Shape(split)
 		totalAdvance += out.Advance
+		runs = append(runs, ShapedRun{Face: out.Face, Glyphs: out.Glyphs, Size: out.Size})
 	}
 
-	return float64(totalAdvance) / 64.0
+	return runs, float64(totalAdvance) / 64.0
 }
 
 // cssFontRe matches CSS font shorthand: [style] [weight] size[px|pt|em] family[, family...]
