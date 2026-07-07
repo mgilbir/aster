@@ -163,17 +163,19 @@ func WithRecodePNG() PNGOption {
 // WithQuantizePNG lossily quantizes the rendered PNG to at most maxColors
 // colors (clamped to 2..256) and encodes it 8-bit indexed: a weighted
 // median-cut palette with Floyd-Steinberg dithering. Resolution and layout
-// are untouched; flat areas keep their exact colors (they earn palette slots)
-// and only antialiased edge pixels shift slightly. Compared to WithRecodePNG
+// are untouched; popular colors — a chart's flat areas — normally earn their
+// own palette slots and map exactly, while antialiased edge pixels shift
+// slightly (a quality guard bounds the deviation). Compared to WithRecodePNG
 // this also covers images with more than 256 distinct colors — the common
 // case for antialiased chart renders — shrinking them several-fold and, in
 // consumers that decode the pixel stream (PDF and office embedders), cutting
 // the decoded volume 4x versus RGBA. Costs one decode/encode round trip plus
-// the quantization pass (tens of milliseconds for chart-sized images). When
-// both quantize and recode are requested, quantization applies. Falls back
-// back to the lossless WithRecodePNG behaviour — logging at info level via
-// log/slog — whenever quantization cannot maintain the output within a
-// quality guard or cannot shrink the image, so enabling it is always safe.
+// the quantization pass: roughly tens of milliseconds for chart-sized images,
+// up to ~150ms at double-scale renders. When both quantize and recode are
+// requested, quantization applies. Falls back to the lossless WithRecodePNG
+// behaviour — logging at info level via log/slog — whenever quantization
+// cannot maintain the output within the quality guard or cannot keep the
+// encoded size in check, so enabling it is always safe.
 func WithQuantizePNG(maxColors int) PNGOption {
 	return func(c *pngConfig) {
 		c.quantizeColors = maxColors

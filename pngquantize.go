@@ -7,7 +7,7 @@ import (
 	"image/draw"
 	"image/png"
 	"log/slog"
-	"sort"
+	"slices"
 )
 
 // Quality guard for lossy quantization: when the quantized image deviates
@@ -96,7 +96,7 @@ func quantizePNG(data []byte, maxColors int) (_ []byte, ok bool, reason string) 
 			palette = append(palette, unpackNRGBA(e.key))
 		}
 		out := encodePNG(indexExact(nrgba, palette, exact))
-		if out == nil || len(out) >= len(data) {
+		if out == nil || len(out) > len(data)+len(data)/10 {
 			// The input is already the cheapest form; that still maintains
 			// the output, so it is a success, not a fallback.
 			return data, true, ""
@@ -104,7 +104,9 @@ func quantizePNG(data []byte, maxColors int) (_ []byte, ok bool, reason string) 
 		return out, true, ""
 	}
 
-	boxPalette, boxOf := medianCut(order, maxColors)
+	// medianCut sorts its input in place; hand it a copy so `order` keeps
+	// the first-seen invariant the renumbering below depends on.
+	boxPalette, boxOf := medianCut(append([]colorCount(nil), order...), maxColors)
 	// Re-number the boxes by first pixel occurrence so palette indices keep
 	// scan-order locality (same rationale as above).
 	remap := make([]int, len(boxPalette))
@@ -121,13 +123,17 @@ func quantizePNG(data []byte, maxColors int) (_ []byte, ok bool, reason string) 
 		exact[e.key] = uint8(remap[b])
 	}
 
-	dst := ditherIndex(nrgba, palette, exact)
-	if mean, peak := deviation(nrgba, dst, palette); mean > maxMeanChannelError || peak > maxPeakChannelError {
+	dst, mean, peak := ditherIndex(nrgba, palette, exact)
+	if mean > maxMeanChannelError || peak > maxPeakChannelError {
 		return data, false, "quality guard exceeded"
 	}
 	out := encodePNG(dst)
-	if out == nil || len(out) >= len(data) {
-		return data, false, "not smaller"
+	if out == nil || len(out) > len(data)+len(data)/10 {
+		// The point of quantization is the ~4x cheaper *decode* in embedders,
+		// so a slightly larger file can still be a win — but dithering noise
+		// that bloats the encoding beyond ~10% signals content this palette
+		// cannot represent economically.
+		return data, false, "encoded size grew beyond tolerance"
 	}
 	return out, true, ""
 }
@@ -212,8 +218,8 @@ func medianCut(entries []colorCount, maxColors int) (color.Palette, map[uint32]u
 		}
 		b := boxes[best]
 		channel, _ := widest(b)
-		sort.SliceStable(b.entries, func(i, j int) bool {
-			return channelOf(b.entries[i].key, channel) < channelOf(b.entries[j].key, channel)
+		slices.SortStableFunc(b.entries, func(x, y colorCount) int {
+			return channelOf(x.key, channel) - channelOf(y.key, channel)
 		})
 		// Split at the weighted median so both halves hold ~half the pixels.
 		half, acc, cut := b.pixels/2, 0, 0
@@ -267,10 +273,12 @@ func indexExact(src *image.NRGBA, palette color.Palette, exact map[uint32]uint8)
 	return dst
 }
 
-// ditherIndex maps pixels with Floyd–Steinberg error diffusion. Pixels whose
+// ditherIndex maps pixels with Floyd–Steinberg error diffusion, returning
+// the indexed image together with the mean and peak per-channel deviation
+// from the source (0-255 scale) for the quality guard. Pixels whose
 // error-adjusted color exactly matches a source color take the precomputed
 // slot; the rest do a nearest-palette search memoized per adjusted color.
-func ditherIndex(src *image.NRGBA, palette color.Palette, exact map[uint32]uint8) *image.Paletted {
+func ditherIndex(src *image.NRGBA, palette color.Palette, exact map[uint32]uint8) (_ *image.Paletted, mean float64, peak int) {
 	bounds := src.Bounds()
 	w, h := bounds.Dx(), bounds.Dy()
 	dst := image.NewPaletted(bounds, palette)
@@ -313,6 +321,7 @@ func ditherIndex(src *image.NRGBA, palette color.Palette, exact map[uint32]uint8
 
 	// Error buffers for the current and next row, 4 channels per pixel,
 	// scaled by 16 (the Floyd-Steinberg denominator).
+	var devSum int64
 	cur := make([]int, (w+2)*4)
 	next := make([]int, (w+2)*4)
 	for y := 0; y < h; y++ {
@@ -333,6 +342,16 @@ func ditherIndex(src *image.NRGBA, palette color.Palette, exact map[uint32]uint8
 				next[eo-4+ch] += e * 3
 				next[eo+ch] += e * 5
 				next[eo+4+ch] += e * 1
+				// Deviation is measured against the source pixel, not the
+				// error-adjusted one the diffusion works with.
+				d := int(src.Pix[si+ch]) - p[ch]
+				if d < 0 {
+					d = -d
+				}
+				devSum += int64(d)
+				if d > peak {
+					peak = d
+				}
 			}
 		}
 		cur, next = next, cur
@@ -340,42 +359,10 @@ func ditherIndex(src *image.NRGBA, palette color.Palette, exact map[uint32]uint8
 			next[i] = 0
 		}
 	}
-	return dst
-}
-
-// deviation measures how far the indexed image sits from the source: the
-// mean and peak per-channel absolute difference on the 0-255 scale.
-func deviation(src *image.NRGBA, dst *image.Paletted, palette color.Palette) (mean float64, peak int) {
-	pal := make([][4]int, len(palette))
-	for i, c := range palette {
-		n := c.(color.NRGBA)
-		pal[i] = [4]int{int(n.R), int(n.G), int(n.B), int(n.A)}
+	if total := int64(w) * int64(h) * 4; total > 0 {
+		mean = float64(devSum) / float64(total)
 	}
-	bounds := src.Bounds()
-	w, h := bounds.Dx(), bounds.Dy()
-	var sum int64
-	for y := 0; y < h; y++ {
-		rowOff := src.PixOffset(bounds.Min.X, bounds.Min.Y+y)
-		for x := 0; x < w; x++ {
-			si := rowOff + x*4
-			p := pal[dst.Pix[y*dst.Stride+x]]
-			for ch := 0; ch < 4; ch++ {
-				d := int(src.Pix[si+ch]) - p[ch]
-				if d < 0 {
-					d = -d
-				}
-				sum += int64(d)
-				if d > peak {
-					peak = d
-				}
-			}
-		}
-	}
-	total := int64(w) * int64(h) * 4
-	if total == 0 {
-		return 0, 0
-	}
-	return float64(sum) / float64(total), peak
+	return dst, mean, peak
 }
 
 func encodePNG(img image.Image) []byte {

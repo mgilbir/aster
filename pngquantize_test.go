@@ -157,7 +157,10 @@ func TestQuantizeAlphaSurvives(t *testing.T) {
 	if err := png.Encode(&buf, img); err != nil {
 		t.Fatal(err)
 	}
-	quantized, _, _ := quantizePNG(buf.Bytes(), 64)
+	quantized, ok, reason := quantizePNG(buf.Bytes(), 64)
+	if !ok {
+		t.Fatalf("alpha gradient rejected: %s", reason)
+	}
 	got, err := png.Decode(bytes.NewReader(quantized))
 	if err != nil {
 		t.Fatal(err)
