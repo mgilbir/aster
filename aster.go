@@ -18,6 +18,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
+	"sort"
 	"sync"
 
 	"github.com/mgilbir/aster/internal/resvg"
@@ -71,7 +73,7 @@ func New(opts ...Option) (*Converter, error) {
 		Loader:       cfg.loader,
 		TextMeasurer: tm,
 		Theme:        cfg.theme,
-		MemoryLimit:  int(cfg.memoryLimit),
+		MemoryLimit:  cfg.memoryLimit,
 		Timeout:      cfg.timeout,
 		Version:      cfg.vegaLiteVersion,
 		Timezone:     cfg.timezone,
@@ -89,6 +91,28 @@ func New(opts ...Option) (*Converter, error) {
 		defaultFontFamily: cfg.defaultFontFamily,
 		loader:            cfg.loader,
 	}, nil
+}
+
+// VersionInfo describes an available Vega-Lite version set.
+type VersionInfo struct {
+	Key             string // internal key accepted by the runtime, e.g. "vl6_4"
+	VegaVersion     string // resolved Vega runtime version, e.g. "6.2.0"
+	VegaLiteVersion string // Vega-Lite version, e.g. "6.4.0"
+}
+
+// AvailableVersions reports the Vega-Lite version sets bundled in this build,
+// sorted by key. Pass a VegaLiteVersion (e.g. "6.4") to WithVegaLiteVersion.
+func AvailableVersions() ([]VersionInfo, error) {
+	m, err := runtime.AvailableVersions()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]VersionInfo, 0, len(m))
+	for k, v := range m {
+		out = append(out, VersionInfo{Key: k, VegaVersion: v.VegaVersion, VegaLiteVersion: v.VegaLiteVersion})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
+	return out, nil
 }
 
 // Close releases all resources held by the Converter.
@@ -154,6 +178,10 @@ func (c *Converter) SVGToPNG(svg string, opts ...PNGOption) ([]byte, error) {
 	cfg := defaultPNGConfig()
 	for _, opt := range opts {
 		opt(cfg)
+	}
+
+	if !(cfg.scale > 0) || math.IsInf(cfg.scale, 1) {
+		return nil, fmt.Errorf("aster: invalid PNG scale %v (must be a positive, finite number)", cfg.scale)
 	}
 
 	r, err := c.pngRendererInit()

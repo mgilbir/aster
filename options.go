@@ -51,7 +51,8 @@ func WithTheme(theme string) Option {
 }
 
 // WithMemoryLimit sets the maximum memory (in bytes) for the QuickJS runtime.
-// Zero means no limit.
+// Zero means no limit. WASM linear memory is 32-bit addressable, so values
+// above 4 GiB are clamped to 4 GiB.
 func WithMemoryLimit(bytes uint64) Option {
 	return func(c *config) {
 		c.memoryLimit = bytes
@@ -76,8 +77,9 @@ func WithTextMeasurement(enabled bool) Option {
 
 // WithVegaLiteVersion sets the Vega-Lite version to use.
 // Accepts human-readable versions like "5.8", "6.4" which are mapped to
-// internal version set keys (e.g. "vl5_8", "vl6_4").
-// The default is "6.4".
+// internal version set keys (e.g. "vl5_8", "vl6_4"). The default is "6.4".
+// An unknown version makes New return an error listing the available
+// versions; see AvailableVersions to discover them programmatically.
 func WithVegaLiteVersion(v string) Option {
 	return func(c *config) {
 		// Map "5.8" → "vl5_8", "6.4" → "vl6_4", etc.

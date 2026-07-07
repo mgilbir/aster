@@ -187,6 +187,14 @@ func TestTimeout(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected timeout error")
 	}
+	// After the watchdog closes the module the runtime must report itself
+	// unusable, so callers can surface a clear error instead of retrying.
+	if !r.Closed() {
+		t.Fatal("expected Closed() to be true after a timeout")
+	}
+	if _, err := r.EvalModule(`export default "again";`); err == nil {
+		t.Fatal("expected a subsequent eval on a timed-out runtime to fail")
+	}
 }
 
 func TestMemoryLimit(t *testing.T) {
