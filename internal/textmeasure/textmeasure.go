@@ -17,6 +17,7 @@ import (
 	"github.com/go-text/typesetting/language"
 	"github.com/go-text/typesetting/shaping"
 	"github.com/mgilbir/aster/internal/textmeasure/fonts/liberation"
+	"github.com/mgilbir/aster/internal/textmeasure/fonts/notoemoji"
 	"golang.org/x/image/math/fixed"
 )
 
@@ -92,6 +93,11 @@ func New(opts ...MeasurerOption) (*Measurer, error) {
 		{liberation.MonoBold, "liberation-mono-bold", "Liberation Mono"},
 		{liberation.MonoItalic, "liberation-mono-italic", "Liberation Mono"},
 		{liberation.MonoBoldItalic, "liberation-mono-bolditalic", "Liberation Mono"},
+		// Monochrome Noto Emoji: always-present fallback so emoji codepoints
+		// (which the Latin fonts lack) get correct advance widths and rasterize
+		// in PNG. Registered after the text fonts, so it is only selected for
+		// runes nothing else covers.
+		{notoemoji.Regular, "noto-emoji", notoemoji.Family},
 	}
 
 	for _, f := range embeddedFonts {

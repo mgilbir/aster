@@ -4,6 +4,7 @@ import (
 	"github.com/mgilbir/aster/internal/resvg"
 	"github.com/mgilbir/aster/internal/textmeasure"
 	"github.com/mgilbir/aster/internal/textmeasure/fonts/liberation"
+	"github.com/mgilbir/aster/internal/textmeasure/fonts/notoemoji"
 )
 
 // fontPlan is the single source of truth for the fonts and generic-family
@@ -67,6 +68,8 @@ func (p fontPlan) resvgFonts() ([]resvg.Font, resvg.FamilyMapping) {
 		{Data: liberation.MonoBold},
 		{Data: liberation.MonoItalic},
 		{Data: liberation.MonoBoldItalic},
+		// Monochrome emoji fallback, matching the measurement pipeline.
+		{Data: notoemoji.Regular},
 	}
 	for _, f := range p.custom {
 		fonts = append(fonts, resvg.Font{Data: f.data})

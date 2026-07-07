@@ -9,7 +9,7 @@ Aster embeds the full Vega/Vega-Lite runtime inside [QuickJS](https://bellard.or
 - Vega-Lite to SVG, PNG, or compiled Vega JSON
 - Vega to SVG or PNG
 - Arbitrary SVG to PNG conversion
-- Accurate HarfBuzz text shaping with embedded Liberation Sans
+- Accurate HarfBuzz text shaping with embedded Liberation Sans and monochrome Noto Emoji
 - Configurable scale factor for high-DPI PNG output
 - Multiple Vega-Lite versions (5.8, 6.4)
 - Custom fonts, themes, data loaders, memory limits, and timeouts
@@ -288,7 +288,7 @@ go test ./...
 ### Known limitations
 
 - **Timezone:** Only UTC is supported. Specs with local-time temporal axes will produce different output than browser-rendered charts.
-- **Emoji:** No emoji font is bundled. Specs using emoji characters will render with missing glyphs.
+- **Emoji:** Monochrome [Noto Emoji](https://fonts.google.com/noto/specimen/Noto+Emoji) is bundled as a fallback, so emoji have correct text metrics and rasterize (in black-and-white) in PNG output. Color emoji are not supported — resvg cannot rasterize color-bitmap (CBDT) fonts — so glyphs differ from color-emoji references.
 - **`structuredClone`:** The polyfill does not handle `undefined` values in objects, which affects a few geographic projection specs.
 - **Interactive features:** Selection and signal interactivity are evaluated at initial state only; there is no event loop.
 

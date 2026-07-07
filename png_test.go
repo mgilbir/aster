@@ -189,6 +189,41 @@ func TestPNGMonospaceFamilyHonored(t *testing.T) {
 	}
 }
 
+// Emoji codepoints rasterize via the always-bundled monochrome Noto Emoji:
+// a spec with no custom fonts should still draw actual glyph pixels for an
+// emoji, not a blank/tofu box.
+func TestEmojiRasterizesInPNG(t *testing.T) {
+	c, err := aster.New(aster.WithTextMeasurement(false))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer func() { _ = c.Close() }()
+
+	const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64">` +
+		`<text x="4" y="52" font-family="sans-serif" font-size="48">🍌</text></svg>`
+	data, err := c.SVGToPNG(svg)
+	if err != nil {
+		t.Fatalf("SVGToPNG: %v", err)
+	}
+	img, err := png.Decode(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	painted := 0
+	b := img.Bounds()
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			r, g, bl, a := img.At(x, y).RGBA()
+			if a>>8 > 10 && (r>>8 < 240 || g>>8 < 240 || bl>>8 < 240) {
+				painted++
+			}
+		}
+	}
+	if painted < 100 {
+		t.Fatalf("expected the emoji to rasterize, only %d painted pixels", painted)
+	}
+}
+
 func TestSVGToPNGError(t *testing.T) {
 	c, err := aster.New(aster.WithTextMeasurement(false))
 	if err != nil {
