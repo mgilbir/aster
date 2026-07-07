@@ -147,10 +147,30 @@ func TestQuantizeLosslessUnderBudget(t *testing.T) {
 }
 
 func TestQuantizeAlphaSurvives(t *testing.T) {
-	img := image.NewNRGBA(image.Rect(0, 0, 32, 32))
-	for y := 0; y < 32; y++ {
-		for x := 0; x < 32; x++ {
-			img.SetNRGBA(x, y, color.NRGBA{R: uint8(x * 8), G: 0, B: 255, A: uint8(64 + y*6)})
+	// Chart-like with transparency: four large semi-transparent panels
+	// (popular colors, they earn exact slots) plus a thin varied edge strip
+	// pushing the distinct count past the budget.
+	img := image.NewNRGBA(image.Rect(0, 0, 512, 512))
+	panels := []color.NRGBA{
+		{R: 78, G: 121, B: 167, A: 128},
+		{R: 242, G: 142, B: 43, A: 160},
+		{R: 89, G: 161, B: 79, A: 192},
+		{R: 225, G: 87, B: 89, A: 128},
+	}
+	rnd := uint32(3)
+	for y := 0; y < 512; y++ {
+		for x := 0; x < 512; x++ {
+			if y >= 500 { // edge strip: many rare colors, all near a panel
+				// color (antialiasing-like), so the peak guard holds
+				rnd = rnd*1664525 + 1013904223
+				base := panels[(x/128)%4]
+				img.SetNRGBA(x, y, color.NRGBA{
+					R: base.R + uint8(rnd>>24)%24, G: base.G + uint8(rnd>>16)%24,
+					B: base.B, A: base.A + uint8(rnd>>8)%24,
+				})
+				continue
+			}
+			img.SetNRGBA(x, y, panels[(x/128)%4])
 		}
 	}
 	var buf bytes.Buffer
