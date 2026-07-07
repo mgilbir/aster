@@ -1,6 +1,6 @@
-// Package aster converts Vega and Vega-Lite visualization specs to SVG and PNG.
-// It embeds Vega/Vega-Lite inside QuickJS (via WASM) for a pure-Go,
-// CGO-free solution.
+// Package aster converts Vega and Vega-Lite visualization specs to SVG, PNG
+// and vector PDF. It embeds Vega/Vega-Lite inside QuickJS (via WASM) for a
+// pure-Go, CGO-free solution.
 //
 // Basic usage:
 //
@@ -12,6 +12,7 @@
 //
 //	svg, err := c.VegaLiteToSVG(specJSON)
 //	png, err := c.VegaLiteToPNG(specJSON)
+//	pdf, err := c.VegaLiteToPDF(specJSON)
 package aster
 
 import (
@@ -29,7 +30,7 @@ import (
 	"github.com/mgilbir/aster/internal/textmeasure"
 )
 
-// Converter renders Vega/Vega-Lite specs to SVG and PNG.
+// Converter renders Vega/Vega-Lite specs to SVG, PNG and PDF.
 type Converter struct {
 	rt       *runtime.Runtime
 	measurer *textmeasure.Measurer
