@@ -259,7 +259,7 @@ The JS environment provides polyfills for APIs that Vega expects but QuickJS lac
 - `structuredClone` — partial (fails on some geo projection edge cases)
 - `setTimeout` / `clearTimeout` — microtask-scheduled, no real delays (d3-timer, vega-scenegraph)
 - `requestAnimationFrame` — microtask-scheduled (vega-view)
-- `performance.now` — monotonic clock
+- `performance.now` — wall clock via `Date.now()` (not monotonic; only relative timing is used)
 - `Date` methods — redirected to UTC equivalents (QuickJS WASM has no timezone config)
 
 ### Building from source

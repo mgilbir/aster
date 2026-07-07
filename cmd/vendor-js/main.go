@@ -22,6 +22,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 const jsdelivrBase = "https://cdn.jsdelivr.net"
@@ -166,7 +167,11 @@ func vendorVersion(vs versionSet) (string, error) {
 		item := queue[0]
 		queue = queue[1:]
 
-		if _, exists := modules[item.name]; exists {
+		if existing, exists := modules[item.name]; exists {
+			if existing.version != item.version {
+				log.Printf("  [%s] WARNING: %s requested at %s but already vendored at %s; keeping %s",
+					vs.key, item.name, item.version, existing.version, existing.version)
+			}
 			continue
 		}
 
@@ -281,10 +286,14 @@ func vendorVersion(vs versionSet) (string, error) {
 	return vegaVersion, nil
 }
 
+// httpClient bounds each vendoring download so a stalled CDN connection
+// cannot hang the build indefinitely.
+var httpClient = &http.Client{Timeout: 60 * time.Second}
+
 func fetchESM(name, version string) (string, error) {
 	url := fmt.Sprintf("%s/npm/%s@%s/+esm", jsdelivrBase, name, version)
 
-	resp, err := http.Get(url)
+	resp, err := httpClient.Get(url)
 	if err != nil {
 		return "", fmt.Errorf("HTTP GET %s: %w", url, err)
 	}

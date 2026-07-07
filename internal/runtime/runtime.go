@@ -172,6 +172,12 @@ func (r *Runtime) installPolyfills() error {
 		// setTimeout while the counter is decremented in a promise .then,
 		// need timer callbacks to interleave with promise reactions.
 		// Endless timer chains are bounded by the Go-side eval watchdog.
+		//
+		// The delay argument is ignored: callbacks fire in insertion order as
+		// microtasks, not ordered by delay. Vega's static render path does not
+		// depend on real timer ordering. A throwing callback is swallowed (as
+		// in a browser, where one timer's exception does not abort the others)
+		// so a single failing timer cannot wedge a render.
 		{
 			const _timers = new Map();
 			let _nextId = 1;
