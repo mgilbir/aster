@@ -1,13 +1,21 @@
 use std::alloc::{alloc, dealloc as std_dealloc, Layout};
+use std::cell::RefCell;
 use std::slice;
 use std::sync::Arc;
 
 use resvg::tiny_skia;
 use resvg::usvg;
 
-static mut FONT_DB: Option<Arc<usvg::fontdb::Database>> = None;
-static mut RESULT_BUF: Vec<u8> = Vec::new();
-static mut ERROR_BUF: Vec<u8> = Vec::new();
+// The WASM module is single-threaded (WASI reactor, no threads), so
+// thread-local interior mutability gives sound, panic-free access to the shared
+// state without `static mut` (which is UB-adjacent and requires unsafe on every
+// touch). The font database is kept behind an Arc so each render can hand usvg
+// a cheap clone (a refcount bump) rather than copying the whole font set.
+thread_local! {
+    static FONT_DB: RefCell<Option<Arc<usvg::fontdb::Database>>> = const { RefCell::new(None) };
+    static RESULT_BUF: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
+    static ERROR_BUF: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
+}
 
 #[no_mangle]
 pub extern "C" fn alloc_mem(size: u32) -> u32 {
@@ -23,73 +31,70 @@ pub extern "C" fn dealloc_mem(ptr: u32, size: u32) {
 
 #[no_mangle]
 pub extern "C" fn font_db_init() {
-    unsafe {
-        FONT_DB = Some(Arc::new(usvg::fontdb::Database::new()));
-    }
+    FONT_DB.with(|db| *db.borrow_mut() = Some(Arc::new(usvg::fontdb::Database::new())));
 }
 
 #[no_mangle]
 pub extern "C" fn font_db_set_sans_serif(ptr: u32, len: u32) -> i32 {
-    unsafe {
-        let data = slice::from_raw_parts(ptr as *const u8, len as usize);
-        let name = match std::str::from_utf8(data) {
-            Ok(s) => s,
-            Err(e) => {
-                set_error(&format!("invalid UTF-8: {}", e));
-                return -1;
-            }
-        };
-        if let Some(ref mut db) = FONT_DB {
-            Arc::get_mut(db).unwrap().set_sans_serif_family(name);
-            0
-        } else {
-            set_error("font_db not initialized");
-            -1
+    let data = unsafe { slice::from_raw_parts(ptr as *const u8, len as usize) };
+    let name = match std::str::from_utf8(data) {
+        Ok(s) => s.to_string(),
+        Err(e) => {
+            set_error(&format!("invalid UTF-8: {}", e));
+            return -1;
         }
-    }
+    };
+    with_font_db_mut(|db| db.set_sans_serif_family(name))
 }
 
 #[no_mangle]
 pub extern "C" fn font_db_set_monospace(ptr: u32, len: u32) -> i32 {
-    unsafe {
-        let data = slice::from_raw_parts(ptr as *const u8, len as usize);
-        let name = match std::str::from_utf8(data) {
-            Ok(s) => s,
-            Err(e) => {
-                set_error(&format!("invalid UTF-8: {}", e));
-                return -1;
-            }
-        };
-        if let Some(ref mut db) = FONT_DB {
-            Arc::get_mut(db).unwrap().set_monospace_family(name);
-            0
-        } else {
-            set_error("font_db not initialized");
-            -1
+    let data = unsafe { slice::from_raw_parts(ptr as *const u8, len as usize) };
+    let name = match std::str::from_utf8(data) {
+        Ok(s) => s.to_string(),
+        Err(e) => {
+            set_error(&format!("invalid UTF-8: {}", e));
+            return -1;
         }
-    }
+    };
+    with_font_db_mut(|db| db.set_monospace_family(name))
 }
 
 #[no_mangle]
 pub extern "C" fn font_db_add(ptr: u32, len: u32) -> i32 {
-    unsafe {
-        let data = slice::from_raw_parts(ptr as *const u8, len as usize);
-        if let Some(ref mut db) = FONT_DB {
-            Arc::get_mut(db).unwrap().load_font_data(data.to_vec());
-            0
-        } else {
+    let data = unsafe { slice::from_raw_parts(ptr as *const u8, len as usize) };
+    let owned = data.to_vec();
+    with_font_db_mut(|db| db.load_font_data(owned))
+}
+
+// with_font_db_mut runs f against the mutable font database, returning 0 on
+// success or -1 (with an error message set) when the database is uninitialized
+// or unexpectedly shared. Fonts are loaded once at startup while no render
+// holds a clone, so the Arc is uniquely owned here; the shared case is handled
+// gracefully instead of panicking (the previous Arc::get_mut().unwrap()).
+fn with_font_db_mut<F: FnOnce(&mut usvg::fontdb::Database)>(f: F) -> i32 {
+    FONT_DB.with(|cell| match cell.borrow_mut().as_mut() {
+        Some(arc) => match Arc::get_mut(arc) {
+            Some(db) => {
+                f(db);
+                0
+            }
+            None => {
+                set_error("font_db is in use and cannot be modified");
+                -1
+            }
+        },
+        None => {
             set_error("font_db not initialized");
             -1
         }
-    }
+    })
 }
 
 #[no_mangle]
 pub extern "C" fn render(svg_ptr: u32, svg_len: u32, scale_bits: u64) -> i32 {
-    unsafe {
-        RESULT_BUF.clear();
-        ERROR_BUF.clear();
-    }
+    RESULT_BUF.with(|b| b.borrow_mut().clear());
+    ERROR_BUF.with(|b| b.borrow_mut().clear());
 
     let scale = f64::from_bits(scale_bits);
 
@@ -102,13 +107,11 @@ pub extern "C" fn render(svg_ptr: u32, svg_len: u32, scale_bits: u64) -> i32 {
         }
     };
 
-    let db = unsafe {
-        match FONT_DB.as_ref() {
-            Some(db) => db.clone(),
-            None => {
-                set_error("font_db not initialized");
-                return -1;
-            }
+    let db = match FONT_DB.with(|c| c.borrow().clone()) {
+        Some(db) => db,
+        None => {
+            set_error("font_db not initialized");
+            return -1;
         }
     };
 
@@ -151,34 +154,34 @@ pub extern "C" fn render(svg_ptr: u32, svg_len: u32, scale_bits: u64) -> i32 {
         }
     };
 
-    unsafe {
-        RESULT_BUF = png_data;
-    }
+    RESULT_BUF.with(|b| *b.borrow_mut() = png_data);
     0
 }
 
 #[no_mangle]
 pub extern "C" fn result_ptr() -> u32 {
-    unsafe { RESULT_BUF.as_ptr() as u32 }
+    RESULT_BUF.with(|b| b.borrow().as_ptr() as u32)
 }
 
 #[no_mangle]
 pub extern "C" fn result_len() -> u32 {
-    unsafe { RESULT_BUF.len() as u32 }
+    RESULT_BUF.with(|b| b.borrow().len() as u32)
 }
 
 #[no_mangle]
 pub extern "C" fn error_ptr() -> u32 {
-    unsafe { ERROR_BUF.as_ptr() as u32 }
+    ERROR_BUF.with(|b| b.borrow().as_ptr() as u32)
 }
 
 #[no_mangle]
 pub extern "C" fn error_len() -> u32 {
-    unsafe { ERROR_BUF.len() as u32 }
+    ERROR_BUF.with(|b| b.borrow().len() as u32)
 }
 
 fn set_error(msg: &str) {
-    unsafe {
-        ERROR_BUF = msg.as_bytes().to_vec();
-    }
+    ERROR_BUF.with(|b| {
+        let mut buf = b.borrow_mut();
+        buf.clear();
+        buf.extend_from_slice(msg.as_bytes());
+    });
 }
