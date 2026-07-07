@@ -25,16 +25,14 @@ import (
 	"github.com/mgilbir/aster/internal/resvg"
 	"github.com/mgilbir/aster/internal/runtime"
 	"github.com/mgilbir/aster/internal/textmeasure"
-	"github.com/mgilbir/aster/internal/textmeasure/fonts/liberation"
 )
 
 // Converter renders Vega/Vega-Lite specs to SVG and PNG.
 type Converter struct {
-	rt                *runtime.Runtime
-	measurer          *textmeasure.Measurer
-	fonts             []fontEntry // stashed for lazy PNG renderer init
-	defaultFontFamily string      // stashed for PNG generic sans-serif mapping
-	loader            Loader      // stashed for Close()
+	rt       *runtime.Runtime
+	measurer *textmeasure.Measurer
+	fonts    fontPlan // shared by text measurement and PNG rasterization
+	loader   Loader   // stashed for Close()
 
 	pngOnce     sync.Once
 	pngRenderer *resvg.Renderer
@@ -48,21 +46,15 @@ func New(opts ...Option) (*Converter, error) {
 		opt(cfg)
 	}
 
+	// Both pipelines are configured from a single font plan so SVG layout and
+	// PNG rasterization can't disagree about fonts or generic-family mappings.
+	plan := newFontPlan(cfg)
+
 	var measurer *textmeasure.Measurer
 	var tm runtime.TextMeasurer
 	if cfg.textMeasure {
-		var measurerOpts []textmeasure.MeasurerOption
-		if cfg.systemFonts {
-			measurerOpts = append(measurerOpts, textmeasure.WithSystemFonts())
-		}
-		for _, f := range cfg.fonts {
-			measurerOpts = append(measurerOpts, textmeasure.WithFont(f.family, f.data))
-		}
-		if cfg.defaultFontFamily != "" {
-			measurerOpts = append(measurerOpts, textmeasure.WithDefaultFontFamily(cfg.defaultFontFamily))
-		}
 		var err error
-		measurer, err = textmeasure.New(measurerOpts...)
+		measurer, err = textmeasure.New(plan.measurerOptions()...)
 		if err != nil {
 			return nil, fmt.Errorf("aster: initializing text measurer: %w", err)
 		}
@@ -87,11 +79,10 @@ func New(opts ...Option) (*Converter, error) {
 	}
 
 	return &Converter{
-		rt:                rt,
-		measurer:          measurer,
-		fonts:             cfg.fonts,
-		defaultFontFamily: cfg.defaultFontFamily,
-		loader:            cfg.loader,
+		rt:       rt,
+		measurer: measurer,
+		fonts:    plan,
+		loader:   cfg.loader,
 	}, nil
 }
 
@@ -201,37 +192,13 @@ func (c *Converter) SVGToPNG(svg string, opts ...PNGOption) ([]byte, error) {
 	return out, nil
 }
 
-// pngRendererInit lazily initializes the PNG renderer on first use.
+// pngRendererInit lazily initializes the PNG renderer on first use. It draws
+// its fonts and generic-family mapping from the same fontPlan that configured
+// text measurement, so PNG glyphs are rasterized with the font the SVG layout
+// was measured against.
 func (c *Converter) pngRendererInit() (*resvg.Renderer, error) {
 	c.pngOnce.Do(func() {
-		// Build font list: embedded Liberation Sans + custom fonts.
-		var fonts []resvg.Font
-		fonts = append(fonts,
-			resvg.Font{Data: liberation.SansRegular},
-			resvg.Font{Data: liberation.SansBold},
-			resvg.Font{Data: liberation.SansItalic},
-			resvg.Font{Data: liberation.SansBoldItalic},
-			resvg.Font{Data: liberation.MonoRegular},
-			resvg.Font{Data: liberation.MonoBold},
-			resvg.Font{Data: liberation.MonoItalic},
-			resvg.Font{Data: liberation.MonoBoldItalic},
-		)
-		for _, f := range c.fonts {
-			fonts = append(fonts, resvg.Font{Data: f.data})
-		}
-
-		// Map the generic "sans-serif" family to the same font the text
-		// measurer uses as its fallback, so PNG glyphs are rasterized with the
-		// font the SVG layout was measured against. Defaults to the embedded
-		// Liberation Sans when no custom default family is configured.
-		sansSerif := c.defaultFontFamily
-		if sansSerif == "" {
-			sansSerif = "Liberation Sans"
-		}
-		families := resvg.FamilyMapping{
-			SansSerif: sansSerif,
-			Monospace: "Liberation Mono",
-		}
+		fonts, families := c.fonts.resvgFonts()
 		c.pngRenderer, c.pngErr = resvg.New(context.Background(), fonts, families)
 		if c.pngErr != nil {
 			c.pngErr = fmt.Errorf("aster: initializing PNG renderer: %w", c.pngErr)

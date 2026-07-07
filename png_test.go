@@ -152,6 +152,43 @@ func TestPNGSansSerifFamilyHonored(t *testing.T) {
 	}
 }
 
+// The PNG generic "monospace" mapping must follow WithDefaultMonospaceFamily,
+// mirroring the sans-serif path, so both pipelines resolve monospace to the
+// same font.
+func TestPNGMonospaceFamilyHonored(t *testing.T) {
+	const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="220" height="70">` +
+		`<text x="10" y="48" font-family="monospace" font-size="34">Wave gg</text></svg>`
+
+	libC, err := aster.New(aster.WithTextMeasurement(false))
+	if err != nil {
+		t.Fatalf("New (liberation mono): %v", err)
+	}
+	defer func() { _ = libC.Close() }()
+	libPNG, err := libC.SVGToPNG(svg)
+	if err != nil {
+		t.Fatalf("SVGToPNG liberation mono: %v", err)
+	}
+
+	dejavuMono := loadFont(t, filepath.Join("internal", "textmeasure", "fonts", "dejavu", "DejaVuSansMono.ttf"))
+	dejaC, err := aster.New(
+		aster.WithTextMeasurement(false),
+		aster.WithFont("DejaVu Sans Mono", dejavuMono),
+		aster.WithDefaultMonospaceFamily("DejaVu Sans Mono"),
+	)
+	if err != nil {
+		t.Fatalf("New (dejavu mono): %v", err)
+	}
+	defer func() { _ = dejaC.Close() }()
+	dejaPNG, err := dejaC.SVGToPNG(svg)
+	if err != nil {
+		t.Fatalf("SVGToPNG dejavu mono: %v", err)
+	}
+
+	if bytes.Equal(libPNG, dejaPNG) {
+		t.Fatal("expected monospace glyphs to differ when the default monospace family changes")
+	}
+}
+
 func TestSVGToPNGError(t *testing.T) {
 	c, err := aster.New(aster.WithTextMeasurement(false))
 	if err != nil {
