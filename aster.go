@@ -28,10 +28,11 @@ import (
 
 // Converter renders Vega/Vega-Lite specs to SVG and PNG.
 type Converter struct {
-	rt       *runtime.Runtime
-	measurer *textmeasure.Measurer
-	fonts    []fontEntry // stashed for lazy PNG renderer init
-	loader   Loader      // stashed for Close()
+	rt                *runtime.Runtime
+	measurer          *textmeasure.Measurer
+	fonts             []fontEntry // stashed for lazy PNG renderer init
+	defaultFontFamily string      // stashed for PNG generic sans-serif mapping
+	loader            Loader      // stashed for Close()
 
 	pngOnce     sync.Once
 	pngRenderer *resvg.Renderer
@@ -82,10 +83,11 @@ func New(opts ...Option) (*Converter, error) {
 	}
 
 	return &Converter{
-		rt:       rt,
-		measurer: measurer,
-		fonts:    cfg.fonts,
-		loader:   cfg.loader,
+		rt:                rt,
+		measurer:          measurer,
+		fonts:             cfg.fonts,
+		defaultFontFamily: cfg.defaultFontFamily,
+		loader:            cfg.loader,
 	}, nil
 }
 
@@ -188,8 +190,16 @@ func (c *Converter) pngRendererInit() (*resvg.Renderer, error) {
 			fonts = append(fonts, resvg.Font{Data: f.data})
 		}
 
+		// Map the generic "sans-serif" family to the same font the text
+		// measurer uses as its fallback, so PNG glyphs are rasterized with the
+		// font the SVG layout was measured against. Defaults to the embedded
+		// Liberation Sans when no custom default family is configured.
+		sansSerif := c.defaultFontFamily
+		if sansSerif == "" {
+			sansSerif = "Liberation Sans"
+		}
 		families := resvg.FamilyMapping{
-			SansSerif: "Liberation Sans",
+			SansSerif: sansSerif,
 			Monospace: "Liberation Mono",
 		}
 		c.pngRenderer, c.pngErr = resvg.New(context.Background(), fonts, families)
