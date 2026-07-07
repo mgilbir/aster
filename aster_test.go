@@ -158,10 +158,12 @@ var knownFailures = map[string]string{
 	"layer_line_errorband_pre_aggregated": "expected SVGs generated in PDT timezone",
 	"line_timestamp_domain":              "expected SVGs generated in PDT timezone",
 
-	// Missing emoji glyphs: Liberation/DejaVu Sans lack emoji characters.
-	"isotype_bar_chart_emoji": "no emoji font for text measurement",
-	"isotype_grid":            "no emoji font for text measurement",
-	"layer_bar_fruit":         "no emoji font for text measurement",
+	// The bundled monochrome Noto Emoji fixes isotype_grid and layer_bar_fruit.
+	// isotype_bar_chart_emoji still differs: the reference SVGs were generated
+	// with Noto Color Emoji, whose emoji advances come from color-bitmap
+	// strikes and differ from the monochrome font's; matching would require
+	// embedding the 11MB CBDT font (which resvg can't rasterize anyway).
+	"isotype_bar_chart_emoji": "advance differs from reference Noto Color Emoji (monochrome bundled)",
 
 	// QuickJS formats Infinity as "Infinity" string, not "∞" symbol.
 	"histogram_nonlinear": "QuickJS Infinity formatting differs from Node.js",
