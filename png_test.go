@@ -114,6 +114,44 @@ func TestVegaLiteToPNGScale(t *testing.T) {
 	}
 }
 
+// The PNG generic "sans-serif" mapping must follow WithDefaultFontFamily, so
+// glyphs are rasterized with the same font the SVG was laid out against
+// (audit C4). SVGToPNG bypasses text measurement, so a byte difference here
+// isolates the glyph-rendering font from any layout effect.
+func TestPNGSansSerifFamilyHonored(t *testing.T) {
+	const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="220" height="70">` +
+		`<text x="10" y="48" font-family="sans-serif" font-size="34">Wave gg</text></svg>`
+
+	libC, err := aster.New(aster.WithTextMeasurement(false))
+	if err != nil {
+		t.Fatalf("New (liberation default): %v", err)
+	}
+	defer func() { _ = libC.Close() }()
+	libPNG, err := libC.SVGToPNG(svg)
+	if err != nil {
+		t.Fatalf("SVGToPNG liberation: %v", err)
+	}
+
+	dejavu := loadFont(t, filepath.Join("internal", "textmeasure", "fonts", "dejavu", "DejaVuSans.ttf"))
+	dejaC, err := aster.New(
+		aster.WithTextMeasurement(false),
+		aster.WithFont("DejaVu Sans", dejavu),
+		aster.WithDefaultFontFamily("DejaVu Sans"),
+	)
+	if err != nil {
+		t.Fatalf("New (dejavu default): %v", err)
+	}
+	defer func() { _ = dejaC.Close() }()
+	dejaPNG, err := dejaC.SVGToPNG(svg)
+	if err != nil {
+		t.Fatalf("SVGToPNG dejavu: %v", err)
+	}
+
+	if bytes.Equal(libPNG, dejaPNG) {
+		t.Fatal("expected sans-serif glyphs to differ when the default font family changes")
+	}
+}
+
 func TestSVGToPNGError(t *testing.T) {
 	c, err := aster.New(aster.WithTextMeasurement(false))
 	if err != nil {
