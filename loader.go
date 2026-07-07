@@ -3,8 +3,10 @@ package aster
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -41,10 +43,23 @@ func (DenyLoader) Sanitize(_ context.Context, uri string) (string, error) {
 // AllowedDomains restricts which hostnames may be accessed. If empty, all
 // domains are permitted. BaseURL enables resolution of relative URIs; if
 // empty, only absolute HTTP(S) URLs are accepted.
+//
+// The same scheme/userinfo/AllowedDomains policy is enforced on every HTTP
+// redirect hop, so an allowed host cannot redirect the request to a
+// disallowed one.
+//
+// BlockPrivateNetworks, when set, additionally rejects any request whose host
+// resolves to a loopback, link-local, private, or unspecified address
+// (including cloud metadata endpoints such as 169.254.169.254). It is off by
+// default so that local development and test servers keep working; enable it
+// when rendering specs from untrusted sources. Note that name resolution here
+// happens at policy-check time, so it does not by itself defend against DNS
+// rebinding — pair it with AllowedDomains for untrusted input.
 type HTTPLoader struct {
-	Client         *http.Client
-	AllowedDomains []string // if non-empty, only these hostnames are permitted
-	BaseURL        string   // if set, relative URIs are resolved against this URL
+	Client               *http.Client
+	AllowedDomains       []string // if non-empty, only these hostnames are permitted
+	BaseURL              string   // if set, relative URIs are resolved against this URL
+	BlockPrivateNetworks bool     // if set, reject loopback/link-local/private hosts
 }
 
 // NewHTTPLoader creates a loader that allows HTTP(S) requests.
@@ -62,9 +77,25 @@ func (l *HTTPLoader) Load(ctx context.Context, uri string) ([]byte, error) {
 		return nil, fmt.Errorf("aster: failed to create request for %q: %w", uri, err)
 	}
 
-	client := l.Client
-	if client == nil {
-		client = http.DefaultClient
+	// Re-validate the initial URL independently of Sanitize so Load is safe
+	// even when called directly.
+	if err := l.checkURL(ctx, req.URL); err != nil {
+		return nil, err
+	}
+
+	base := l.Client
+	if base == nil {
+		base = http.DefaultClient
+	}
+	// Shallow-copy the client so the policy-enforcing CheckRedirect below does
+	// not mutate a caller-supplied client. Every redirect target is run
+	// through the same scheme/domain/network policy as the initial URL.
+	client := *base
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return errors.New("aster: stopped after 10 redirects")
+		}
+		return l.checkURL(req.Context(), req.URL)
 	}
 
 	resp, err := client.Do(req)
@@ -85,15 +116,10 @@ func (l *HTTPLoader) Load(ctx context.Context, uri string) ([]byte, error) {
 	return data, nil
 }
 
-func (l *HTTPLoader) Sanitize(_ context.Context, uri string) (string, error) {
+func (l *HTTPLoader) Sanitize(ctx context.Context, uri string) (string, error) {
 	parsed, err := url.Parse(uri)
 	if err != nil {
 		return "", fmt.Errorf("aster: invalid URI %q: %w", uri, err)
-	}
-
-	// Reject URIs with userinfo (e.g. https://user:pass@host/).
-	if parsed.User != nil {
-		return "", fmt.Errorf("aster: URI %q contains userinfo (not allowed)", uri)
 	}
 
 	// Resolve relative URIs against BaseURL if configured.
@@ -108,14 +134,30 @@ func (l *HTTPLoader) Sanitize(_ context.Context, uri string) (string, error) {
 		parsed = base.ResolveReference(parsed)
 	}
 
-	scheme := strings.ToLower(parsed.Scheme)
-	if scheme != "http" && scheme != "https" {
-		return "", fmt.Errorf("aster: unsupported scheme %q in URI %q (only http/https allowed)", scheme, uri)
+	if err := l.checkURL(ctx, parsed); err != nil {
+		return "", err
 	}
 
-	// Check domain allowlist.
+	return parsed.String(), nil
+}
+
+// checkURL enforces the HTTPLoader access policy on a fully-resolved URL:
+// no userinfo, http/https only, host in AllowedDomains (when set), and — when
+// BlockPrivateNetworks is set — a host that does not resolve to a
+// loopback/link-local/private/unspecified address. It is applied to the
+// initial request URL and to every redirect target.
+func (l *HTTPLoader) checkURL(ctx context.Context, u *url.URL) error {
+	if u.User != nil {
+		return fmt.Errorf("aster: URI %q contains userinfo (not allowed)", u.Redacted())
+	}
+
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return fmt.Errorf("aster: unsupported scheme %q in URI %q (only http/https allowed)", scheme, u.String())
+	}
+
+	hostname := u.Hostname()
 	if len(l.AllowedDomains) > 0 {
-		hostname := parsed.Hostname()
 		allowed := false
 		for _, d := range l.AllowedDomains {
 			if strings.EqualFold(hostname, d) {
@@ -124,11 +166,47 @@ func (l *HTTPLoader) Sanitize(_ context.Context, uri string) (string, error) {
 			}
 		}
 		if !allowed {
-			return "", fmt.Errorf("aster: domain %q not in allowed list for URI %q", hostname, uri)
+			return fmt.Errorf("aster: domain %q not in allowed list for URI %q", hostname, u.String())
 		}
 	}
 
-	return parsed.String(), nil
+	if l.BlockPrivateNetworks {
+		private, err := hostResolvesPrivate(ctx, hostname)
+		if err != nil {
+			return fmt.Errorf("aster: resolving host %q: %w", hostname, err)
+		}
+		if private {
+			return fmt.Errorf("aster: host %q resolves to a private/loopback address (blocked)", hostname)
+		}
+	}
+
+	return nil
+}
+
+// hostResolvesPrivate reports whether host (an IP literal or a name) maps to
+// any address in a loopback, link-local, private, or unspecified range.
+func hostResolvesPrivate(ctx context.Context, host string) (bool, error) {
+	if ip := net.ParseIP(host); ip != nil {
+		return isPrivateIP(ip), nil
+	}
+	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return false, err
+	}
+	for _, a := range addrs {
+		if isPrivateIP(a.IP) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func isPrivateIP(ip net.IP) bool {
+	return ip.IsLoopback() ||
+		ip.IsLinkLocalUnicast() ||
+		ip.IsLinkLocalMulticast() ||
+		ip.IsPrivate() ||
+		ip.IsUnspecified()
 }
 
 // FileLoader serves files from a base directory on disk.
@@ -227,6 +305,11 @@ func (l *StaticLoader) Load(_ context.Context, _ string) ([]byte, error) {
 
 // FallbackLoader routes requests to multiple child loaders in order.
 // The first child whose Sanitize accepts the URI handles the request.
+//
+// Order matters: a permissive child shadows every child after it. For
+// example a StaticLoader (whose Sanitize accepts any URI) placed first will
+// answer every request, so put the most specific loaders first and broad
+// catch-alls last.
 type FallbackLoader struct {
 	Loaders []Loader
 }

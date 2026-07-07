@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -191,6 +192,85 @@ func TestHTTPLoaderIntegration(t *testing.T) {
 	if !strings.Contains(string(data), `"a":"A"`) {
 		t.Errorf("unexpected data: %s", data)
 	}
+}
+
+// A redirect to a host outside AllowedDomains must be refused mid-request,
+// not silently followed (audit C2). CheckRedirect runs before the new host is
+// dialed, so pointing at an unreachable external host is enough: if the policy
+// were not enforced the client would attempt the connection and fail
+// differently.
+func TestHTTPLoaderRedirectToDisallowedHostBlocked(t *testing.T) {
+	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "http://blocked.example.invalid/secret.json", http.StatusFound)
+	}))
+	defer redirector.Close()
+
+	l := &aster.HTTPLoader{
+		Client:         redirector.Client(),
+		AllowedDomains: []string{urlHost(t, redirector.URL)},
+	}
+
+	_, err := l.Load(context.Background(), redirector.URL+"/start.json")
+	if err == nil {
+		t.Fatal("expected redirect to disallowed host to be blocked")
+	}
+	if !strings.Contains(err.Error(), "not in allowed list") {
+		t.Fatalf("expected allowlist rejection, got: %v", err)
+	}
+}
+
+// A redirect between two allowed hosts is still followed.
+func TestHTTPLoaderRedirectToAllowedHostFollowed(t *testing.T) {
+	final := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprintln(w, `"ok"`)
+	}))
+	defer final.Close()
+
+	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, final.URL+"/data.json", http.StatusFound)
+	}))
+	defer redirector.Close()
+
+	l := &aster.HTTPLoader{
+		AllowedDomains: []string{urlHost(t, redirector.URL), urlHost(t, final.URL)},
+	}
+
+	data, err := l.Load(context.Background(), redirector.URL+"/start.json")
+	if err != nil {
+		t.Fatalf("Load across allowed redirect: %v", err)
+	}
+	if !strings.Contains(string(data), "ok") {
+		t.Errorf("unexpected data: %s", data)
+	}
+}
+
+// BlockPrivateNetworks rejects loopback targets at policy-check time.
+func TestHTTPLoaderBlockPrivateNetworks(t *testing.T) {
+	l := &aster.HTTPLoader{BlockPrivateNetworks: true}
+	ctx := context.Background()
+	for _, uri := range []string{
+		"http://127.0.0.1/data.json",
+		"http://localhost/data.json",
+		"http://169.254.169.254/latest/meta-data/",
+		"http://[::1]/x",
+	} {
+		if _, err := l.Sanitize(ctx, uri); err == nil {
+			t.Errorf("expected %q to be blocked as private", uri)
+		}
+	}
+	// A public IP literal is allowed through the policy check.
+	if _, err := l.Sanitize(ctx, "http://93.184.216.34/data.json"); err != nil {
+		t.Errorf("public IP should pass policy check: %v", err)
+	}
+}
+
+func urlHost(t *testing.T, raw string) string {
+	t.Helper()
+	u, err := url.Parse(raw)
+	if err != nil {
+		t.Fatalf("parse %q: %v", raw, err)
+	}
+	return u.Hostname()
 }
 
 // ---------- FileLoader: os.Root ----------
