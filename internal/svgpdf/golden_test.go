@@ -263,7 +263,7 @@ func TestConvertCoordinateFlip(t *testing.T) {
 }
 
 // TestPDFAValidatorGaps runs pdf0's PDF/A validator as a structural oracle.
-// The output is deliberately plain PDF 1.7, not PDF/A, so exactly three
+// The output is deliberately plain PDF 1.4, not PDF/A, so exactly three
 // PDF/A-only rules fire (file ID, output intent, XMP metadata); anything
 // else would indicate a structural defect in the generated document.
 func TestPDFAValidatorGaps(t *testing.T) {
@@ -284,7 +284,7 @@ func TestPDFAValidatorGaps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// PDF/A-only requirements a plain PDF 1.7 intentionally does not meet.
+	// PDF/A-only requirements a plain PDF 1.4 intentionally does not meet.
 	allowed := map[string]bool{
 		"6.1.3": true, // trailer must contain /ID array
 		"6.2.4": true, // DeviceRGB requires an OutputIntent

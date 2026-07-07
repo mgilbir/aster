@@ -8,10 +8,13 @@ import (
 	pdf0 "github.com/mgilbir/pdf0"
 )
 
-// buildPDF assembles a single-page PDF 1.7 document around the rendered
-// content stream. pdf0 has no plain-document constructor (only
-// NewPDFADocument), so the Catalog/Pages/Page skeleton is built directly
-// with the object model.
+// buildPDF assembles a single-page PDF document around the rendered content
+// stream. pdf0 has no plain-document constructor (only NewPDFADocument), so
+// the Catalog/Pages/Page skeleton is built directly with the object model.
+//
+// The declared version is 1.4: nothing beyond transparency (ExtGState CA/ca,
+// a 1.4 feature) is used, and a low version keeps strict embedders like
+// xdvipdfmx (LaTeX \includegraphics) from warning about downlevel output.
 //
 // The output is deterministic: fixed object numbering, insertion-ordered
 // dictionaries, no timestamps, no /Info and no /ID.
@@ -67,7 +70,7 @@ func buildPDF(content []byte, gsList []gsEntry, width, height float64) ([]byte, 
 	contents.Dict.Set("Filter", pdf0.Name("FlateDecode"))
 
 	doc := &pdf0.Document{
-		Version: "1.7",
+		Version: "1.4",
 		Objects: map[int]*pdf0.IndirectObject{
 			1: {Number: 1, Value: catalog},
 			2: {Number: 2, Value: pages},
