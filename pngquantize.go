@@ -29,14 +29,15 @@ const (
 // quantizeOrRecodePNG lossily quantizes data to at most maxColors colors,
 // falling back to the lossless recode when quantization cannot maintain the
 // output within the quality guard (or cannot shrink the image). The fallback
-// is logged at info level: it is expected for non-chart-like content and
-// worth noticing when it becomes the norm.
+// is logged at debug level: it is expected for non-chart-like content, and a
+// library should not write to the host's default log output for documented,
+// safe behavior — raise the log level to observe it.
 func quantizeOrRecodePNG(data []byte, maxColors int) []byte {
 	out, ok, reason := quantizePNG(data, maxColors)
 	if ok {
 		return out
 	}
-	slog.Info("aster: png quantization fell back to lossless recode",
+	slog.Debug("aster: png quantization fell back to lossless recode",
 		"reason", reason, "max_colors", maxColors, "bytes", len(data))
 	return recodePNG(data)
 }

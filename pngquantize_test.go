@@ -283,3 +283,25 @@ func TestQuantizeRejectsPhotographicContent(t *testing.T) {
 		t.Fatal("fallback output must be pixel-identical to the source")
 	}
 }
+
+// The option clamps at configuration time: the render path gates on
+// quantizeColors > 0, so an unclamped non-positive value would silently
+// disable quantization instead of honoring the documented 2..256 contract.
+func TestQuantizeOptionClamps(t *testing.T) {
+	cases := []struct{ in, want int }{
+		{-5, 2},
+		{0, 2},
+		{1, 2},
+		{2, 2},
+		{128, 128},
+		{256, 256},
+		{100000, 256},
+	}
+	for _, tc := range cases {
+		cfg := defaultPNGConfig()
+		WithQuantizePNG(tc.in)(cfg)
+		if cfg.quantizeColors != tc.want {
+			t.Errorf("WithQuantizePNG(%d): quantizeColors = %d, want %d", tc.in, cfg.quantizeColors, tc.want)
+		}
+	}
+}

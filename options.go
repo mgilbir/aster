@@ -173,11 +173,21 @@ func WithRecodePNG() PNGOption {
 // the quantization pass: roughly tens of milliseconds for chart-sized images,
 // up to ~150ms at double-scale renders. When both quantize and recode are
 // requested, quantization applies. Falls back to the lossless WithRecodePNG
-// behaviour — logging at info level via log/slog — whenever quantization
+// behaviour — logging at debug level via log/slog — whenever quantization
 // cannot maintain the output within the quality guard or cannot keep the
 // encoded size in check, so enabling it is always safe.
 func WithQuantizePNG(maxColors int) PNGOption {
 	return func(c *pngConfig) {
+		// Clamp here, not just in the quantizer: the render path gates on
+		// quantizeColors > 0, so an unclamped non-positive value would
+		// silently disable quantization instead of honoring the documented
+		// 2..256 contract.
+		if maxColors < 2 {
+			maxColors = 2
+		}
+		if maxColors > 256 {
+			maxColors = 256
+		}
 		c.quantizeColors = maxColors
 	}
 }
