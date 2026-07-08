@@ -185,12 +185,12 @@ func (m *Measurer) MeasureText(text, cssFont string) float64 {
 	return float64(totalAdvance) / 64.0
 }
 
-// cssFontRe matches CSS font shorthand: [style] [weight] size[px|em] family[, family...]
+// cssFontRe matches CSS font shorthand: [style] [weight] size[px|pt|em] family[, family...]
 var cssFontRe = regexp.MustCompile(
 	`(?i)` +
 		`(?:(italic|oblique)\s+)?` + // optional style
 		`(?:(bold|bolder|lighter|[1-9]00)\s+)?` + // optional weight
-		`([\d.]+)(?:px|pt|em)?\s+` + // size (required)
+		`([\d.]+)(px|pt|em)?\s+` + // size with optional unit (required)
 		`(.+)`, // family (required)
 )
 
@@ -226,14 +226,21 @@ func ParseCSSFont(s string) CSSFont {
 		result.Weight = parseWeight(matches[2])
 	}
 
-	// Size
+	// Size, converted to pixels. Vega always emits px; pt/em only reach this
+	// parser through direct API use.
 	if size, err := strconv.ParseFloat(matches[3], 64); err == nil && size > 0 {
+		switch strings.ToLower(matches[4]) {
+		case "pt":
+			size *= 96.0 / 72.0 // CSS: 1pt = 1/72in, 1px = 1/96in
+		case "em":
+			size *= 16 // relative to the CSS default root font size
+		}
 		result.Size = size
 	}
 
 	// Family
-	if matches[4] != "" {
-		result.Family = parseFamilies(matches[4])
+	if matches[5] != "" {
+		result.Family = parseFamilies(matches[5])
 	}
 
 	return result
