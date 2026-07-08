@@ -132,9 +132,9 @@ func WithDefaultSerifFamily(family string) Option {
 }
 
 // WithDefaultMonospaceFamily sets the font family name used to resolve the
-// generic "monospace" CSS family for PNG rasterization. Defaults to
-// "Liberation Mono" (the embedded font). Register the matching TTF with
-// WithFont.
+// generic "monospace" CSS family. It applies to both text measurement (SVG
+// layout) and PNG rasterization. Defaults to "Liberation Mono" (the embedded
+// font). Register the matching TTF with WithFont.
 func WithDefaultMonospaceFamily(family string) Option {
 	return func(c *config) {
 		c.defaultMonospaceFamily = family

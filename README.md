@@ -144,7 +144,8 @@ Options passed to `aster.New()`:
 | `WithTextMeasurement(bool)` | `true` | HarfBuzz text shaping for accurate layout |
 | `WithFont(family, ttf)` | — | Register a custom TTF font (used by both measurement and PNG) |
 | `WithDefaultFontFamily(name)` | `"Liberation Sans"` | Family that generic `sans-serif` resolves to (both pipelines) |
-| `WithDefaultMonospaceFamily(name)` | `"Liberation Mono"` | Family that generic `monospace` resolves to (PNG) |
+| `WithDefaultSerifFamily(name)` | `"Liberation Serif"` | Family that generic `serif` resolves to (both pipelines) |
+| `WithDefaultMonospaceFamily(name)` | `"Liberation Mono"` | Family that generic `monospace` resolves to (both pipelines) |
 | `WithSystemFonts()` | disabled | Scan system fonts for **measurement only** (PNG/resvg has no system fonts) |
 | `WithTheme(json)` | — | Vega theme config applied to all renders |
 | `WithTimezone(tz)` | `"UTC"` | Timezone for JS Date operations; only `"UTC"` is supported, other values make `New` return an error |
