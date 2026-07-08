@@ -25,9 +25,11 @@ import (
 type MeasurerOption func(*measurerConfig)
 
 type measurerConfig struct {
-	systemFonts    bool
-	fonts          []customFont
-	fallbackFamily string
+	systemFonts     bool
+	fonts           []customFont
+	fallbackFamily  string
+	serifFamily     string
+	monospaceFamily string
 }
 
 type customFont struct {
@@ -59,12 +61,34 @@ func WithDefaultFontFamily(family string) MeasurerOption {
 	}
 }
 
+// WithDefaultSerifFamily sets the concrete font family the generic CSS "serif"
+// family resolves to. Defaults to "Liberation Serif" (embedded). It mirrors the
+// resvg rasterization pipeline's serif mapping so SVG layout measurement and
+// PNG rendering agree on what "serif" means.
+func WithDefaultSerifFamily(family string) MeasurerOption {
+	return func(c *measurerConfig) {
+		c.serifFamily = family
+	}
+}
+
+// WithDefaultMonospaceFamily sets the concrete font family the generic CSS
+// "monospace" family resolves to. Defaults to "Liberation Mono" (embedded).
+// It mirrors the resvg rasterization pipeline's monospace mapping so SVG
+// layout measurement and PNG rendering agree on what "monospace" means.
+func WithDefaultMonospaceFamily(family string) MeasurerOption {
+	return func(c *measurerConfig) {
+		c.monospaceFamily = family
+	}
+}
+
 // Measurer computes text widths using HarfBuzz shaping.
 type Measurer struct {
-	mu             sync.Mutex
-	fontMap        *fontscan.FontMap
-	shaper         shaping.HarfbuzzShaper
-	fallbackFamily string
+	mu              sync.Mutex
+	fontMap         *fontscan.FontMap
+	shaper          shaping.HarfbuzzShaper
+	fallbackFamily  string
+	serifFamily     string
+	monospaceFamily string
 }
 
 // New creates a Measurer with embedded Liberation Sans fonts for
@@ -93,6 +117,10 @@ func New(opts ...MeasurerOption) (*Measurer, error) {
 		{liberation.MonoBold, "liberation-mono-bold", "Liberation Mono"},
 		{liberation.MonoItalic, "liberation-mono-italic", "Liberation Mono"},
 		{liberation.MonoBoldItalic, "liberation-mono-bolditalic", "Liberation Mono"},
+		{liberation.SerifRegular, "liberation-serif", "Liberation Serif"},
+		{liberation.SerifBold, "liberation-serif-bold", "Liberation Serif"},
+		{liberation.SerifItalic, "liberation-serif-italic", "Liberation Serif"},
+		{liberation.SerifBoldItalic, "liberation-serif-bolditalic", "Liberation Serif"},
 		// Monochrome Noto Emoji: always-present fallback so emoji codepoints
 		// (which the Latin fonts lack) get correct advance widths and rasterize
 		// in PNG. Registered after the text fonts, so it is only selected for
@@ -125,8 +153,16 @@ func New(opts ...MeasurerOption) (*Measurer, error) {
 	if fallback == "" {
 		fallback = "Liberation Sans"
 	}
+	serif := cfg.serifFamily
+	if serif == "" {
+		serif = "Liberation Serif"
+	}
+	monospace := cfg.monospaceFamily
+	if monospace == "" {
+		monospace = "Liberation Mono"
+	}
 
-	return &Measurer{fontMap: fm, fallbackFamily: fallback}, nil
+	return &Measurer{fontMap: fm, fallbackFamily: fallback, serifFamily: serif, monospaceFamily: monospace}, nil
 }
 
 // CSSFont represents a parsed CSS font shorthand string.
@@ -148,8 +184,25 @@ func (m *Measurer) MeasureText(text, cssFont string) float64 {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	families := make([]string, 0, len(parsed.Family)+2)
-	families = append(families, parsed.Family...)
+	families := make([]string, 0, len(parsed.Family)+3)
+	for _, fam := range parsed.Family {
+		// Resolve the generic CSS families to their configured concrete
+		// families (tried first), mirroring the resvg pipeline so measurement
+		// and rasterization agree on every generic.
+		switch {
+		case strings.EqualFold(fam, "serif") && m.serifFamily != "":
+			families = append(families, m.serifFamily)
+		case strings.EqualFold(fam, "monospace") && m.monospaceFamily != "":
+			families = append(families, m.monospaceFamily)
+		case strings.EqualFold(fam, "cursive") || strings.EqualFold(fam, "fantasy"):
+			// No bundled cursive/fantasy face; both pipelines map these to the
+			// sans-serif fallback (resvg points FamilyMapping.Cursive/Fantasy at
+			// the sans family). Route them explicitly rather than relying on the
+			// trailing fallback so the two pipelines stay in lockstep.
+			families = append(families, m.fallbackFamily)
+		}
+		families = append(families, fam)
+	}
 	// Always add the configured fallback font family.
 	families = append(families, m.fallbackFamily, fontscan.SansSerif)
 

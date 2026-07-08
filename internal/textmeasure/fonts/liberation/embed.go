@@ -1,6 +1,8 @@
-// Package liberation embeds the Liberation Sans and Liberation Mono font families.
+// Package liberation embeds the Liberation Sans, Liberation Mono, and
+// Liberation Serif font families.
 //
-// Liberation Sans is metrically compatible with Arial.
+// Liberation Sans is metrically compatible with Arial, Liberation Serif with
+// Times New Roman, and Liberation Mono with Courier New.
 // See LICENSE in this directory for full copyright and license terms.
 package liberation
 
@@ -29,3 +31,15 @@ var MonoItalic []byte
 
 //go:embed LiberationMono-BoldItalic.ttf
 var MonoBoldItalic []byte
+
+//go:embed LiberationSerif-Regular.ttf
+var SerifRegular []byte
+
+//go:embed LiberationSerif-Bold.ttf
+var SerifBold []byte
+
+//go:embed LiberationSerif-Italic.ttf
+var SerifItalic []byte
+
+//go:embed LiberationSerif-BoldItalic.ttf
+var SerifBoldItalic []byte

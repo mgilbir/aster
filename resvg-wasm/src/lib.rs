@@ -48,6 +48,19 @@ pub extern "C" fn font_db_set_sans_serif(ptr: u32, len: u32) -> i32 {
 }
 
 #[no_mangle]
+pub extern "C" fn font_db_set_serif(ptr: u32, len: u32) -> i32 {
+    let data = unsafe { slice::from_raw_parts(ptr as *const u8, len as usize) };
+    let name = match std::str::from_utf8(data) {
+        Ok(s) => s.to_string(),
+        Err(e) => {
+            set_error(&format!("invalid UTF-8: {}", e));
+            return -1;
+        }
+    };
+    with_font_db_mut(|db| db.set_serif_family(name))
+}
+
+#[no_mangle]
 pub extern "C" fn font_db_set_monospace(ptr: u32, len: u32) -> i32 {
     let data = unsafe { slice::from_raw_parts(ptr as *const u8, len as usize) };
     let name = match std::str::from_utf8(data) {
@@ -58,6 +71,32 @@ pub extern "C" fn font_db_set_monospace(ptr: u32, len: u32) -> i32 {
         }
     };
     with_font_db_mut(|db| db.set_monospace_family(name))
+}
+
+#[no_mangle]
+pub extern "C" fn font_db_set_cursive(ptr: u32, len: u32) -> i32 {
+    let data = unsafe { slice::from_raw_parts(ptr as *const u8, len as usize) };
+    let name = match std::str::from_utf8(data) {
+        Ok(s) => s.to_string(),
+        Err(e) => {
+            set_error(&format!("invalid UTF-8: {}", e));
+            return -1;
+        }
+    };
+    with_font_db_mut(|db| db.set_cursive_family(name))
+}
+
+#[no_mangle]
+pub extern "C" fn font_db_set_fantasy(ptr: u32, len: u32) -> i32 {
+    let data = unsafe { slice::from_raw_parts(ptr as *const u8, len as usize) };
+    let name = match std::str::from_utf8(data) {
+        Ok(s) => s.to_string(),
+        Err(e) => {
+            set_error(&format!("invalid UTF-8: {}", e));
+            return -1;
+        }
+    };
+    with_font_db_mut(|db| db.set_fantasy_family(name))
 }
 
 #[no_mangle]

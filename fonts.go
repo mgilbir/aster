@@ -19,6 +19,7 @@ type fontPlan struct {
 	custom      []fontEntry // user-registered fonts (family name + TTF data)
 	systemFonts bool        // measurement only — see note in measurerOptions
 	sansSerif   string      // generic "sans-serif" family name
+	serif       string      // generic "serif" family name
 	monospace   string      // generic "monospace" family name
 }
 
@@ -26,6 +27,10 @@ func newFontPlan(cfg *config) fontPlan {
 	sans := cfg.defaultFontFamily
 	if sans == "" {
 		sans = "Liberation Sans"
+	}
+	serif := cfg.defaultSerifFamily
+	if serif == "" {
+		serif = "Liberation Serif"
 	}
 	mono := cfg.defaultMonospaceFamily
 	if mono == "" {
@@ -35,6 +40,7 @@ func newFontPlan(cfg *config) fontPlan {
 		custom:      cfg.fonts,
 		systemFonts: cfg.systemFonts,
 		sansSerif:   sans,
+		serif:       serif,
 		monospace:   mono,
 	}
 }
@@ -53,6 +59,8 @@ func (p fontPlan) measurerOptions() []textmeasure.MeasurerOption {
 		opts = append(opts, textmeasure.WithFont(f.family, f.data))
 	}
 	opts = append(opts, textmeasure.WithDefaultFontFamily(p.sansSerif))
+	opts = append(opts, textmeasure.WithDefaultSerifFamily(p.serif))
+	opts = append(opts, textmeasure.WithDefaultMonospaceFamily(p.monospace))
 	return opts
 }
 
@@ -68,11 +76,24 @@ func (p fontPlan) resvgFonts() ([]resvg.Font, resvg.FamilyMapping) {
 		{Data: liberation.MonoBold},
 		{Data: liberation.MonoItalic},
 		{Data: liberation.MonoBoldItalic},
+		{Data: liberation.SerifRegular},
+		{Data: liberation.SerifBold},
+		{Data: liberation.SerifItalic},
+		{Data: liberation.SerifBoldItalic},
 		// Monochrome emoji fallback, matching the measurement pipeline.
 		{Data: notoemoji.Regular},
 	}
 	for _, f := range p.custom {
 		fonts = append(fonts, resvg.Font{Data: f.data})
 	}
-	return fonts, resvg.FamilyMapping{SansSerif: p.sansSerif, Monospace: p.monospace}
+	// cursive and fantasy have no bundled face; point them at the sans family so
+	// both pipelines resolve them identically (the measurer routes them to its
+	// sans fallback too).
+	return fonts, resvg.FamilyMapping{
+		SansSerif: p.sansSerif,
+		Serif:     p.serif,
+		Monospace: p.monospace,
+		Cursive:   p.sansSerif,
+		Fantasy:   p.sansSerif,
+	}
 }
