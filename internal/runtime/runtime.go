@@ -431,13 +431,21 @@ func (r *Runtime) VegaLiteToVega(specJSON string) (string, error) {
 	return r.evalModule(script)
 }
 
-var errRuntimeCrashed = errors.New("aster/runtime: WASM runtime is no longer usable (crashed or timed out); create a new Converter")
+var (
+	errRuntimeCrashed = errors.New("aster/runtime: WASM runtime is no longer usable (crashed or timed out); create a new Converter")
+	errRuntimeClosed  = errors.New("aster/runtime: runtime is closed; create a new Converter")
+)
 
 // evalModule evaluates an inline ES module and returns its default export as a string.
 // It recovers from panics in the WASM runtime and converts them to errors.
 func (r *Runtime) evalModule(script string) (result string, err error) {
 	if r.crashed {
 		return "", errRuntimeCrashed
+	}
+	// Close nils r.rt; without this guard a post-Close call would nil-deref
+	// into the panic recovery below and masquerade as a WASM crash.
+	if r.rt == nil {
+		return "", errRuntimeClosed
 	}
 
 	defer func() {

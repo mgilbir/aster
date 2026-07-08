@@ -26,6 +26,7 @@ type FamilyMapping struct {
 type Renderer struct {
 	runtime wazero.Runtime
 	module  api.Module
+	dead    bool // set after a WASM trap; the guest state can no longer be trusted
 
 	fnAllocMem           api.Function
 	fnDeallocMem         api.Function
@@ -134,23 +135,40 @@ func New(ctx context.Context, fonts []Font, families FamilyMapping) (*Renderer, 
 	return r, nil
 }
 
+// alloc reserves size bytes of guest memory, rejecting zero-size requests
+// (undefined behavior in the guest allocator) and NULL results (allocation
+// failure — without this check the caller would write at guest address 0,
+// silently corrupting the guest's low memory).
+func (r *Renderer) alloc(ctx context.Context, size uint64) (uint64, error) {
+	if size == 0 {
+		return 0, fmt.Errorf("alloc: zero-size allocation")
+	}
+	results, err := r.fnAllocMem.Call(ctx, size)
+	if err != nil {
+		return 0, fmt.Errorf("alloc: %w", err)
+	}
+	if results[0] == 0 {
+		return 0, fmt.Errorf("alloc: guest allocation of %d bytes failed", size)
+	}
+	return results[0], nil
+}
+
 // setFamily writes a family name into WASM memory and calls the given setter function.
 func (r *Renderer) setFamily(ctx context.Context, fn api.Function, name string) error {
 	data := []byte(name)
 	size := uint64(len(data))
 
-	results, err := r.fnAllocMem.Call(ctx, size)
+	ptr, err := r.alloc(ctx, size)
 	if err != nil {
-		return fmt.Errorf("alloc: %w", err)
+		return err
 	}
-	ptr := results[0]
 
 	if !r.module.Memory().Write(uint32(ptr), data) {
 		_, _ = r.fnDeallocMem.Call(ctx, ptr, size)
 		return fmt.Errorf("write family name: out of bounds")
 	}
 
-	results, err = fn.Call(ctx, ptr, size)
+	results, err := fn.Call(ctx, ptr, size)
 	if err != nil {
 		_, _ = r.fnDeallocMem.Call(ctx, ptr, size)
 		return fmt.Errorf("set family: %w", err)
@@ -167,20 +185,22 @@ func (r *Renderer) setFamily(ctx context.Context, fn api.Function, name string) 
 
 // addFont writes font data into WASM memory and registers it.
 func (r *Renderer) addFont(ctx context.Context, data []byte) error {
+	if len(data) == 0 {
+		return fmt.Errorf("font_db_add: empty font data")
+	}
 	size := uint64(len(data))
 
-	results, err := r.fnAllocMem.Call(ctx, size)
+	ptr, err := r.alloc(ctx, size)
 	if err != nil {
-		return fmt.Errorf("alloc: %w", err)
+		return err
 	}
-	ptr := results[0]
 
 	if !r.module.Memory().Write(uint32(ptr), data) {
 		_, _ = r.fnDeallocMem.Call(ctx, ptr, size)
 		return fmt.Errorf("write font data: out of bounds")
 	}
 
-	results, err = r.fnFontDBAdd.Call(ctx, ptr, size)
+	results, err := r.fnFontDBAdd.Call(ctx, ptr, size)
 	if err != nil {
 		_, _ = r.fnDeallocMem.Call(ctx, ptr, size)
 		return fmt.Errorf("font_db_add: %w", err)
@@ -197,13 +217,18 @@ func (r *Renderer) addFont(ctx context.Context, data []byte) error {
 
 // Render converts SVG bytes to PNG at the given scale factor.
 func (r *Renderer) Render(ctx context.Context, svg []byte, scale float64) ([]byte, error) {
+	if r.dead {
+		return nil, fmt.Errorf("resvg: renderer is unusable after a previous WASM failure; create a new Converter")
+	}
+	if len(svg) == 0 {
+		return nil, fmt.Errorf("resvg: empty SVG input")
+	}
 	size := uint64(len(svg))
 
-	results, err := r.fnAllocMem.Call(ctx, size)
+	svgPtr, err := r.alloc(ctx, size)
 	if err != nil {
-		return nil, fmt.Errorf("resvg: alloc: %w", err)
+		return nil, fmt.Errorf("resvg: %w", err)
 	}
-	svgPtr := results[0]
 
 	if !r.module.Memory().Write(uint32(svgPtr), svg) {
 		_, _ = r.fnDeallocMem.Call(ctx, svgPtr, size)
@@ -211,8 +236,12 @@ func (r *Renderer) Render(ctx context.Context, svg []byte, scale float64) ([]byt
 	}
 
 	scaleBits := math.Float64bits(scale)
-	results, err = r.fnRender.Call(ctx, svgPtr, size, scaleBits)
+	results, err := r.fnRender.Call(ctx, svgPtr, size, scaleBits)
 	if err != nil {
+		// A Call error is a trap (or a closed module), not a graceful
+		// renderer error: guest memory may be inconsistent, so refuse
+		// further use instead of failing with opaque errors later.
+		r.dead = true
 		_, _ = r.fnDeallocMem.Call(ctx, svgPtr, size)
 		return nil, fmt.Errorf("resvg: render: %w", err)
 	}

@@ -154,6 +154,7 @@ Options passed to `aster.New()`:
 | Option | Default | Description |
 |--------|---------|-------------|
 | `WithScale(f)` | `1.0` | Scale factor; 2.0 produces 2x dimensions |
+| `WithRecodePNG()` | disabled | Losslessly re-encode into the cheapest equivalent PNG format (indexed/truecolor); same pixels, typically several-fold smaller |
 
 ### Loaders
 
@@ -293,6 +294,7 @@ go test ./...
 - **Emoji:** Monochrome [Noto Emoji](https://fonts.google.com/noto/specimen/Noto+Emoji) is bundled as a fallback, so emoji have correct text metrics and rasterize (in black-and-white) in PNG output. Color emoji are not supported — resvg cannot rasterize color-bitmap (CBDT) fonts — so glyphs differ from color-emoji references.
 - **`structuredClone`:** The polyfill does not handle `undefined` values in objects, which affects a few geographic projection specs.
 - **Interactive features:** Selection and signal interactivity are evaluated at initial state only; there is no event loop.
+- **Remote images in PNG:** Image marks referencing external URLs render in SVG output (the URL is embedded as an `href`), but the PNG rasterizer runs in a sandboxed WASM module with no network access, so those images are blank in PNG output. Embedded `data:` URLs render fine.
 
 ## Acknowledgments
 
