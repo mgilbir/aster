@@ -23,6 +23,7 @@ type config struct {
 	systemFonts            bool
 	fonts                  []fontEntry
 	defaultFontFamily      string
+	defaultSerifFamily     string
 	defaultMonospaceFamily string
 	timezone               string
 }
@@ -117,6 +118,16 @@ func WithFont(family string, ttf []byte) Option {
 func WithDefaultFontFamily(family string) Option {
 	return func(c *config) {
 		c.defaultFontFamily = family
+	}
+}
+
+// WithDefaultSerifFamily sets the font family name used to resolve the generic
+// "serif" CSS family. It applies to both text measurement (SVG layout) and PNG
+// rasterization. Defaults to "Liberation Serif" (the embedded font, metrically
+// compatible with Times New Roman). Register the matching TTF with WithFont.
+func WithDefaultSerifFamily(family string) Option {
+	return func(c *config) {
+		c.defaultSerifFamily = family
 	}
 }
 

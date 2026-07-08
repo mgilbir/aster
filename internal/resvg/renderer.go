@@ -16,10 +16,15 @@ type Font struct {
 }
 
 // FamilyMapping maps a generic CSS font family (e.g. "sans-serif") to a
-// specific loaded font family name (e.g. "Liberation Sans").
+// specific loaded font family name (e.g. "Liberation Sans"). All five CSS
+// generic families are covered so PNG rasterization agrees with the text
+// measurement pipeline on how each resolves.
 type FamilyMapping struct {
 	SansSerif string
+	Serif     string
 	Monospace string
+	Cursive   string
+	Fantasy   string
 }
 
 // Renderer renders SVG to PNG via resvg compiled to WASM.
@@ -33,7 +38,10 @@ type Renderer struct {
 	fnFontDBInit         api.Function
 	fnFontDBAdd          api.Function
 	fnFontDBSetSansSerif api.Function
+	fnFontDBSetSerif     api.Function
 	fnFontDBSetMonospace api.Function
+	fnFontDBSetCursive   api.Function
+	fnFontDBSetFantasy   api.Function
 	fnRender             api.Function
 	fnResultPtr          api.Function
 	fnResultLen          api.Function
@@ -75,7 +83,10 @@ func New(ctx context.Context, fonts []Font, families FamilyMapping) (*Renderer, 
 		fnFontDBInit:         mod.ExportedFunction("font_db_init"),
 		fnFontDBAdd:          mod.ExportedFunction("font_db_add"),
 		fnFontDBSetSansSerif: mod.ExportedFunction("font_db_set_sans_serif"),
+		fnFontDBSetSerif:     mod.ExportedFunction("font_db_set_serif"),
 		fnFontDBSetMonospace: mod.ExportedFunction("font_db_set_monospace"),
+		fnFontDBSetCursive:   mod.ExportedFunction("font_db_set_cursive"),
+		fnFontDBSetFantasy:   mod.ExportedFunction("font_db_set_fantasy"),
 		fnRender:             mod.ExportedFunction("render"),
 		fnResultPtr:          mod.ExportedFunction("result_ptr"),
 		fnResultLen:          mod.ExportedFunction("result_len"),
@@ -90,7 +101,10 @@ func New(ctx context.Context, fonts []Font, families FamilyMapping) (*Renderer, 
 		"font_db_init":           r.fnFontDBInit,
 		"font_db_add":            r.fnFontDBAdd,
 		"font_db_set_sans_serif": r.fnFontDBSetSansSerif,
+		"font_db_set_serif":      r.fnFontDBSetSerif,
 		"font_db_set_monospace":  r.fnFontDBSetMonospace,
+		"font_db_set_cursive":    r.fnFontDBSetCursive,
+		"font_db_set_fantasy":    r.fnFontDBSetFantasy,
 		"render":                 r.fnRender,
 		"result_ptr":             r.fnResultPtr,
 		"result_len":             r.fnResultLen,
@@ -125,10 +139,28 @@ func New(ctx context.Context, fonts []Font, families FamilyMapping) (*Renderer, 
 			return nil, fmt.Errorf("resvg: set sans-serif family: %w", err)
 		}
 	}
+	if families.Serif != "" {
+		if err := r.setFamily(ctx, r.fnFontDBSetSerif, families.Serif); err != nil {
+			_ = rt.Close(ctx)
+			return nil, fmt.Errorf("resvg: set serif family: %w", err)
+		}
+	}
 	if families.Monospace != "" {
 		if err := r.setFamily(ctx, r.fnFontDBSetMonospace, families.Monospace); err != nil {
 			_ = rt.Close(ctx)
 			return nil, fmt.Errorf("resvg: set monospace family: %w", err)
+		}
+	}
+	if families.Cursive != "" {
+		if err := r.setFamily(ctx, r.fnFontDBSetCursive, families.Cursive); err != nil {
+			_ = rt.Close(ctx)
+			return nil, fmt.Errorf("resvg: set cursive family: %w", err)
+		}
+	}
+	if families.Fantasy != "" {
+		if err := r.setFamily(ctx, r.fnFontDBSetFantasy, families.Fantasy); err != nil {
+			_ = rt.Close(ctx)
+			return nil, fmt.Errorf("resvg: set fantasy family: %w", err)
 		}
 	}
 

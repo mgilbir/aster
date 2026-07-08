@@ -159,3 +159,60 @@ func TestWithDefaultMonospaceFamilyOverride(t *testing.T) {
 		t.Fatalf("with monospace overridden to the sans family, advances should match: sans=%.2f mono=%.2f", sans, mono)
 	}
 }
+
+// The generic "serif" family must resolve to the embedded Liberation Serif
+// face, not silently fall back to the sans-serif default. Liberation Serif
+// (Times-metric) and Liberation Sans (Arial-metric) are different typefaces, so
+// their advances for the same text differ; before serif resolution was wired
+// in, "serif" fell through to Liberation Sans and the advances were identical.
+func TestSerifResolvesToSerifFace(t *testing.T) {
+	m, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const probe = "The quick brown fox"
+	sans := m.MeasureText(probe, "13px sans-serif")
+	serif := m.MeasureText(probe, "13px serif")
+	if sans <= 0 || serif <= 0 {
+		t.Fatalf("zero advance: sans=%.2f serif=%.2f", sans, serif)
+	}
+	if serif == sans {
+		t.Fatalf("serif advance %.2f equals sans %.2f — serif likely still falling back to sans", serif, sans)
+	}
+}
+
+// An explicit override family is honored for the serif generic.
+func TestWithDefaultSerifFamilyOverride(t *testing.T) {
+	// Overriding to the sans family collapses the serif/sans distinction.
+	m, err := New(WithDefaultSerifFamily("Liberation Sans"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const probe = "The quick brown fox"
+	sans := m.MeasureText(probe, "13px sans-serif")
+	serif := m.MeasureText(probe, "13px serif")
+	if serif != sans {
+		t.Fatalf("with serif overridden to the sans family, advances should match: sans=%.2f serif=%.2f", sans, serif)
+	}
+}
+
+// "cursive" and "fantasy" have no bundled face; both must resolve to the
+// sans-serif fallback so measurement matches the resvg pipeline (which points
+// its cursive/fantasy mappings at the sans family). Their advances must equal
+// the sans-serif advance for the same text.
+func TestCursiveFantasyResolveToSans(t *testing.T) {
+	m, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const probe = "The quick brown fox"
+	sans := m.MeasureText(probe, "13px sans-serif")
+	cursive := m.MeasureText(probe, "13px cursive")
+	fantasy := m.MeasureText(probe, "13px fantasy")
+	if cursive != sans {
+		t.Fatalf("cursive should resolve to sans: sans=%.2f cursive=%.2f", sans, cursive)
+	}
+	if fantasy != sans {
+		t.Fatalf("fantasy should resolve to sans: sans=%.2f fantasy=%.2f", sans, fantasy)
+	}
+}
