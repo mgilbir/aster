@@ -219,9 +219,22 @@ func runPDF(args []string) (err error) {
 	fs := flag.NewFlagSet("pdf", flag.ExitOnError)
 	input := fs.String("i", "", "input spec file (- or omit for stdin)")
 	output := fs.String("o", "", "output PDF file (omit for stdout)")
+	textMode := fs.String("text", "embed", "PDF text mode: embed (subset fonts, selectable text), named (no font program; the assembling document must embed the same font), or outlines (glyphs as paths)")
 	co := registerCommonOpts(fs)
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+
+	var pdfOpts []aster.PDFOption
+	switch *textMode {
+	case "embed":
+		// library default
+	case "named":
+		pdfOpts = append(pdfOpts, aster.WithPDFText(aster.PDFTextNamed))
+	case "outlines":
+		pdfOpts = append(pdfOpts, aster.WithPDFText(aster.PDFTextOutlines))
+	default:
+		return fmt.Errorf("invalid -text %q (must be embed, named, or outlines)", *textMode)
 	}
 
 	spec, err := readInput(*input)
@@ -245,9 +258,9 @@ func runPDF(args []string) (err error) {
 
 	var data []byte
 	if isVegaLite(spec) {
-		data, err = c.VegaLiteToPDF(spec)
+		data, err = c.VegaLiteToPDF(spec, pdfOpts...)
 	} else {
-		data, err = c.VegaToPDF(spec)
+		data, err = c.VegaToPDF(spec, pdfOpts...)
 	}
 	if err != nil {
 		return err
