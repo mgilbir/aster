@@ -3,8 +3,13 @@
 //
 // It supports exactly the SVG subset Vega emits (rect, g, path, line, text,
 // clipPath); anything outside that subset is a descriptive error, never a
-// silent omission, so callers can fall back to raster (PNG) rendering. Text
-// is converted to filled glyph outlines — no fonts are embedded.
+// silent omission, so callers can fall back to raster (PNG) rendering.
+//
+// Text is represented per Options.Text: as real PDF text with embedded
+// subset fonts (TextEmbed, the default — smallest self-contained output,
+// selectable text), as real PDF text referencing fonts by name only
+// (TextNamed — for pipelines that embed the font once at assembly time), or
+// as filled glyph outlines (TextOutlines — no font machinery at all).
 //
 // Coordinates map 1 SVG px to 1 PDF pt; a chart rendered at 400×300 becomes
 // a 400×300 pt page, which \includegraphics and other embedders can scale
@@ -13,14 +18,14 @@ package svgpdf
 
 // Convert translates an SVG document into PDF bytes. The shaper is required
 // when the SVG contains text elements; pass nil only for text-free charts.
-func Convert(svg string, shaper TextShaper) ([]byte, error) {
+func Convert(svg string, shaper TextShaper, opts Options) ([]byte, error) {
 	root, err := parseSVG(svg)
 	if err != nil {
 		return nil, err
 	}
-	content, gsList, width, height, err := render(root, shaper)
+	content, gsList, fonts, width, height, err := render(root, shaper, opts)
 	if err != nil {
 		return nil, err
 	}
-	return buildPDF(content, gsList, width, height)
+	return buildPDF(content, gsList, fonts, width, height)
 }

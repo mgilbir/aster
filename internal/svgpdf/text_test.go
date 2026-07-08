@@ -48,7 +48,7 @@ func TestTextAnchor(t *testing.T) {
 
 	xs := make(map[string]float64)
 	for _, anchor := range []string{"start", "middle", "end"} {
-		pdf, err := Convert(textSVG(anchor), m)
+		pdf, err := Convert(textSVG(anchor), m, Options{Text: TextOutlines})
 		if err != nil {
 			t.Fatalf("Convert(%s): %v", anchor, err)
 		}
@@ -72,15 +72,15 @@ func within(a, b, tol float64) bool {
 	return d < tol && d > -tol
 }
 
-// TestTextProducesOutlinesNotFonts confirms the no-font-embedding design:
-// the PDF contains no /Font resources and no text-showing operators, only
-// filled path geometry.
+// TestTextProducesOutlinesNotFonts confirms TextOutlines mode: the PDF
+// contains no /Font resources and no text-showing operators, only filled
+// path geometry.
 func TestTextProducesOutlinesNotFonts(t *testing.T) {
 	m, err := textmeasure.New()
 	if err != nil {
 		t.Fatal(err)
 	}
-	pdf, err := Convert(textSVG("start"), m)
+	pdf, err := Convert(textSVG("start"), m, Options{Text: TextOutlines})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestTextWhitespaceOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Convert(svg, m); err != nil {
+	if _, err := Convert(svg, m, Options{}); err != nil {
 		t.Fatalf("Convert: %v", err)
 	}
 }

@@ -215,6 +215,50 @@ func (w *contentWriter) opacity(fillAlpha, strokeAlpha float64) {
 	w.buf.WriteString(" gs\n")
 }
 
+// --- text object operators ---
+
+func (w *contentWriter) beginText() { w.op("BT") }
+func (w *contentWriter) endText()   { w.op("ET") }
+
+func (w *contentWriter) setTextFont(res string, size float64) {
+	w.buf.WriteByte('/')
+	w.buf.WriteString(res)
+	w.buf.WriteByte(' ')
+	w.buf.WriteString(fmtNum(size))
+	w.buf.WriteString(" Tf\n")
+}
+
+func (w *contentWriter) textMatrix(m Matrix) {
+	w.op("Tm", m.A, m.B, m.C, m.D, m.E, m.F)
+}
+
+func (w *contentWriter) textRise(v float64) { w.op("Ts", v) }
+
+// tjItem is one element of a TJ array: either a run of glyph IDs or a pen
+// adjustment (thousandths of text space, subtracted from the pen).
+type tjItem struct {
+	glyphs []uint16
+	adj    float64
+	isAdj  bool
+}
+
+// showGlyphs emits one TJ array.
+func (w *contentWriter) showGlyphs(items []tjItem) {
+	w.buf.WriteByte('[')
+	for _, it := range items {
+		if it.isAdj {
+			w.buf.WriteString(fmtNum(it.adj))
+			continue
+		}
+		w.buf.WriteByte('<')
+		for _, g := range it.glyphs {
+			fmt.Fprintf(&w.buf, "%04X", g)
+		}
+		w.buf.WriteByte('>')
+	}
+	w.buf.WriteString("] TJ\n")
+}
+
 func (w *contentWriter) moveTo(p Point) { w.op("m", p.X, p.Y) }
 func (w *contentWriter) lineTo(p Point) { w.op("l", p.X, p.Y) }
 func (w *contentWriter) closePath()     { w.op("h") }

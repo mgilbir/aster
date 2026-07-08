@@ -21,7 +21,7 @@ func contentAfter(t *testing.T, content, marker string) string {
 
 func convertContent(t *testing.T, svg string) string {
 	t.Helper()
-	pdf, err := Convert(svg, nil)
+	pdf, err := Convert(svg, nil, Options{})
 	if err != nil {
 		t.Fatalf("Convert: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestDeeplyNestedSVGErrors(t *testing.T) {
 	}
 	b.WriteString("</svg>")
 
-	_, err := Convert(b.String(), nil)
+	_, err := Convert(b.String(), nil, Options{})
 	if err == nil {
 		t.Fatal("expected an error for a deeply nested SVG, got none")
 	}
@@ -126,7 +126,7 @@ func TestModestNestingAccepted(t *testing.T) {
 	}
 	b.WriteString("</svg>")
 
-	if _, err := Convert(b.String(), nil); err != nil {
+	if _, err := Convert(b.String(), nil, Options{}); err != nil {
 		t.Fatalf("modestly nested SVG should convert: %v", err)
 	}
 }

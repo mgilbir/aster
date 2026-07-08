@@ -13,12 +13,14 @@ import (
 // the Catalog/Pages/Page skeleton is built directly with the object model.
 //
 // The declared version is 1.4: nothing beyond transparency (ExtGState CA/ca,
-// a 1.4 feature) is used, and a low version keeps strict embedders like
-// xdvipdfmx (LaTeX \includegraphics) from warning about downlevel output.
+// a 1.4 feature) and Type0/CIDFontType2 fonts (1.3) is used, and a low
+// version keeps strict embedders like xdvipdfmx (LaTeX \includegraphics)
+// from warning about downlevel output.
 //
-// The output is deterministic: fixed object numbering, insertion-ordered
-// dictionaries, no timestamps, no /Info and no /ID.
-func buildPDF(content []byte, gsList []gsEntry, width, height float64) ([]byte, error) {
+// The output is deterministic: fixed object numbering (fonts follow the
+// four skeleton objects in first-use order), insertion-ordered dictionaries,
+// no timestamps, no /Info and no /ID.
+func buildPDF(content []byte, gsList []gsEntry, fonts *fontCatalog, width, height float64) ([]byte, error) {
 	// Object 1: Catalog
 	catalog := &pdf0.Dictionary{}
 	catalog.Set("Type", pdf0.Name("Catalog"))
@@ -45,6 +47,21 @@ func buildPDF(content []byte, gsList []gsEntry, width, height float64) ([]byte, 
 		resources.Set("ExtGState", extGState)
 	}
 
+	// Font resources and their objects (Type0/CIDFontType2/descriptor/
+	// font program/ToUnicode), numbered after the fixed skeleton objects.
+	fontObjects := map[int]*pdf0.IndirectObject{}
+	if fonts != nil && len(fonts.list) > 0 {
+		var fontRes *pdf0.Dictionary
+		var err error
+		fontObjects, fontRes, _, err = buildFontObjects(fonts, 5)
+		if err != nil {
+			return nil, err
+		}
+		if len(fontRes.Keys) > 0 {
+			resources.Set("Font", fontRes)
+		}
+	}
+
 	// Object 3: Page
 	page := &pdf0.Dictionary{}
 	page.Set("Type", pdf0.Name("Page"))
@@ -69,14 +86,19 @@ func buildPDF(content []byte, gsList []gsEntry, width, height float64) ([]byte, 
 	contents.Dict.Set("Length", pdf0.Integer(compressed.Len()))
 	contents.Dict.Set("Filter", pdf0.Name("FlateDecode"))
 
+	objects := map[int]*pdf0.IndirectObject{
+		1: {Number: 1, Value: catalog},
+		2: {Number: 2, Value: pages},
+		3: {Number: 3, Value: page},
+		4: {Number: 4, Value: contents},
+	}
+	for n, obj := range fontObjects {
+		objects[n] = obj
+	}
+
 	doc := &pdf0.Document{
 		Version: "1.4",
-		Objects: map[int]*pdf0.IndirectObject{
-			1: {Number: 1, Value: catalog},
-			2: {Number: 2, Value: pages},
-			3: {Number: 3, Value: page},
-			4: {Number: 4, Value: contents},
-		},
+		Objects: objects,
 		Trailer: pdf0.Dictionary{
 			Keys:   []pdf0.Name{"Root"},
 			Values: []pdf0.Object{pdf0.IndirectRef{Number: 1}},

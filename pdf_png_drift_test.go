@@ -46,7 +46,7 @@ func TestVectorPDFMatchesPNG(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	goldens, err := filepath.Glob(filepath.Join("testdata", "vl-convert", "expected", "v5_8", "*.svg"))
 	if err != nil {
@@ -62,53 +62,67 @@ func TestVectorPDFMatchesPNG(t *testing.T) {
 		}
 	}
 
+	// PDFTextNamed is deliberately absent: without the font embedded the
+	// rasterizer substitutes whatever it has, so pixel drift is unbounded by
+	// design. Embed and outline modes must both stay pixel-faithful.
+	modes := []struct {
+		name string
+		mode aster.PDFTextMode
+	}{
+		{"embed", aster.PDFTextEmbed},
+		{"outlines", aster.PDFTextOutlines},
+	}
+
 	for _, g := range goldens {
-		name := filepath.Base(g)
-		t.Run(name, func(t *testing.T) {
-			svg, err := os.ReadFile(g)
-			if err != nil {
-				t.Fatal(err)
-			}
+		for _, tm := range modes {
+			name := filepath.Base(g) + "/" + tm.name
+			t.Run(name, func(t *testing.T) {
+				svg, err := os.ReadFile(g)
+				if err != nil {
+					t.Fatal(err)
+				}
 
-			pngBytes, err := c.SVGToPNG(string(svg), aster.WithScale(driftScale))
-			if err != nil {
-				t.Fatalf("SVGToPNG: %v", err)
-			}
-			pdfBytes, err := c.SVGToPDF(string(svg))
-			if err != nil {
-				t.Fatalf("SVGToPDF: %v", err)
-			}
-			pdfPNG := rasterizePDF(t, pdfBytes)
+				pngBytes, err := c.SVGToPNG(string(svg), aster.WithScale(driftScale))
+				if err != nil {
+					t.Fatalf("SVGToPNG: %v", err)
+				}
+				pdfBytes, err := c.SVGToPDF(string(svg), aster.WithPDFText(tm.mode))
+				if err != nil {
+					t.Fatalf("SVGToPDF: %v", err)
+				}
+				pdfPNG := rasterizePDF(t, pdfBytes)
 
-			ref := decodePNG(t, pngBytes)
-			got := decodePNG(t, pdfPNG)
+				ref := decodePNG(t, pngBytes)
+				got := decodePNG(t, pdfPNG)
 
-			// Rasterizers can round dimensions by a pixel; compare the shared
-			// top-left region and fail only if they diverge materially.
-			w := min(ref.Bounds().Dx(), got.Bounds().Dx())
-			h := min(ref.Bounds().Dy(), got.Bounds().Dy())
-			if dw, dh := absi(ref.Bounds().Dx()-got.Bounds().Dx()), absi(ref.Bounds().Dy()-got.Bounds().Dy()); dw > 2 || dh > 2 {
-				t.Fatalf("dimension mismatch: png %dx%d vs pdf-raster %dx%d",
-					ref.Bounds().Dx(), ref.Bounds().Dy(), got.Bounds().Dx(), got.Bounds().Dy())
-			}
+				// Rasterizers can round dimensions by a pixel; compare the shared
+				// top-left region and fail only if they diverge materially.
+				w := min(ref.Bounds().Dx(), got.Bounds().Dx())
+				h := min(ref.Bounds().Dy(), got.Bounds().Dy())
+				if dw, dh := absi(ref.Bounds().Dx()-got.Bounds().Dx()), absi(ref.Bounds().Dy()-got.Bounds().Dy()); dw > 2 || dh > 2 {
+					t.Fatalf("dimension mismatch: png %dx%d vs pdf-raster %dx%d",
+						ref.Bounds().Dx(), ref.Bounds().Dy(), got.Bounds().Dx(), got.Bounds().Dy())
+				}
 
-			mean, fracOver, diffImg := compareRGBA(ref, got, w, h)
-			t.Logf("%s: mean channel drift %.2f, %.1f%% pixels >32", name, mean, fracOver*100)
+				mean, fracOver, diffImg := compareRGBA(ref, got, w, h)
+				t.Logf("%s: mean channel drift %.2f, %.1f%% pixels >32", name, mean, fracOver*100)
 
-			if dumpDir != "" {
-				base := name[:len(name)-len(".svg")]
-				writePNGFile(t, filepath.Join(dumpDir, base+".png.png"), ref)
-				writePNGFile(t, filepath.Join(dumpDir, base+".pdf.png"), got)
-				writePNGFile(t, filepath.Join(dumpDir, base+".diff.png"), diffImg)
-			}
+				if dumpDir != "" {
+					base := filepath.Base(g)
+					base = base[:len(base)-len(".svg")] + "." + tm.name
+					writePNGFile(t, filepath.Join(dumpDir, base+".png.png"), ref)
+					writePNGFile(t, filepath.Join(dumpDir, base+".pdf.png"), got)
+					writePNGFile(t, filepath.Join(dumpDir, base+".diff.png"), diffImg)
+				}
 
-			if mean > maxMeanChannelDrift {
-				t.Errorf("%s: mean channel drift %.2f exceeds %.2f", name, mean, maxMeanChannelDrift)
-			}
-			if fracOver > maxFracPixelsOver32 {
-				t.Errorf("%s: %.1f%% of pixels drift >32, exceeds %.1f%%", name, fracOver*100, maxFracPixelsOver32*100)
-			}
-		})
+				if mean > maxMeanChannelDrift {
+					t.Errorf("%s: mean channel drift %.2f exceeds %.2f", name, mean, maxMeanChannelDrift)
+				}
+				if fracOver > maxFracPixelsOver32 {
+					t.Errorf("%s: %.1f%% of pixels drift >32, exceeds %.1f%%", name, fracOver*100, maxFracPixelsOver32*100)
+				}
+			})
+		}
 	}
 }
 
