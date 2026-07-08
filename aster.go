@@ -16,6 +16,7 @@ package aster
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -33,11 +34,15 @@ type Converter struct {
 	measurer *textmeasure.Measurer
 	fonts    fontPlan // shared by text measurement and PNG rasterization
 	loader   Loader   // stashed for Close()
+	closed   bool     // set by Close; every entry point checks it
 
 	pngOnce     sync.Once
 	pngRenderer *resvg.Renderer
 	pngErr      error
 }
+
+// errConverterClosed is returned by every rendering method after Close.
+var errConverterClosed = errors.New("aster: converter is closed")
 
 // New creates a new Converter with the given options.
 func New(opts ...Option) (*Converter, error) {
@@ -108,8 +113,13 @@ func AvailableVersions() ([]VersionInfo, error) {
 	return out, nil
 }
 
-// Close releases all resources held by the Converter.
+// Close releases all resources held by the Converter. It is safe to call
+// multiple times; after Close every rendering method returns an error.
 func (c *Converter) Close() error {
+	if c.closed {
+		return nil
+	}
+	c.closed = true
 	var firstErr error
 	if c.pngRenderer != nil {
 		if err := c.pngRenderer.Close(context.Background()); err != nil && firstErr == nil {
@@ -131,16 +141,25 @@ func (c *Converter) Close() error {
 
 // VegaToSVG renders a Vega spec (JSON) to an SVG string.
 func (c *Converter) VegaToSVG(spec []byte) (string, error) {
+	if c.closed {
+		return "", errConverterClosed
+	}
 	return c.rt.VegaToSVG(string(spec))
 }
 
 // VegaLiteToSVG renders a Vega-Lite spec (JSON) to an SVG string.
 func (c *Converter) VegaLiteToSVG(spec []byte) (string, error) {
+	if c.closed {
+		return "", errConverterClosed
+	}
 	return c.rt.VegaLiteToSVG(string(spec))
 }
 
 // VegaLiteToVega compiles a Vega-Lite spec (JSON) to a full Vega spec (JSON).
 func (c *Converter) VegaLiteToVega(spec []byte) ([]byte, error) {
+	if c.closed {
+		return nil, errConverterClosed
+	}
 	result, err := c.rt.VegaLiteToVega(string(spec))
 	if err != nil {
 		return nil, err
@@ -168,6 +187,11 @@ func (c *Converter) VegaLiteToPNG(spec []byte, opts ...PNGOption) ([]byte, error
 
 // SVGToPNG converts an SVG string to a PNG image using resvg.
 func (c *Converter) SVGToPNG(svg string, opts ...PNGOption) ([]byte, error) {
+	if c.closed {
+		// Without this guard a post-Close call would lazily instantiate a
+		// fresh PNG renderer that nothing would ever release.
+		return nil, errConverterClosed
+	}
 	cfg := defaultPNGConfig()
 	for _, opt := range opts {
 		opt(cfg)
