@@ -3,7 +3,9 @@ package aster_test
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/mgilbir/aster"
@@ -21,7 +23,7 @@ func TestVegaLiteToPDF(t *testing.T) {
 	if err != nil {
 		t.Fatalf("creating converter: %v", err)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	pdf, err := c.VegaLiteToPDF(spec)
 	if err != nil {
@@ -50,7 +52,7 @@ func TestVegaToPDF(t *testing.T) {
 	if err != nil {
 		t.Fatalf("creating converter: %v", err)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	pdf, err := c.VegaToPDF(spec)
 	if err != nil {
@@ -74,7 +76,7 @@ func TestSVGToPDFWithoutTextMeasurement(t *testing.T) {
 	if err != nil {
 		t.Fatalf("creating converter: %v", err)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	pdf, err := c.VegaLiteToPDF(spec)
 	if err != nil {
@@ -102,7 +104,7 @@ func TestWriteDemoPDF(t *testing.T) {
 	if err != nil {
 		t.Fatalf("creating converter: %v", err)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	spec, err := os.ReadFile("testdata/bar-chart.vl.json")
 	if err != nil {
@@ -139,5 +141,79 @@ func TestWriteDemoPDF(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Logf("wrote %s (%d bytes)", out, len(pdf))
+	}
+}
+
+// TestPDFTextModes exercises the WithPDFText option end to end and pins the
+// size relationship that motivates the font modes: named < embed < outlines
+// for text-bearing charts.
+func TestPDFTextModes(t *testing.T) {
+	spec, err := os.ReadFile("testdata/bar-chart.vl.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := aster.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Close() }()
+
+	sizes := map[string]int{}
+	for _, tc := range []struct {
+		name string
+		mode aster.PDFTextMode
+	}{
+		{"embed", aster.PDFTextEmbed},
+		{"named", aster.PDFTextNamed},
+		{"outlines", aster.PDFTextOutlines},
+	} {
+		pdf, err := c.VegaLiteToPDF(spec, aster.WithPDFText(tc.mode))
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if !bytes.HasPrefix(pdf, []byte("%PDF-")) {
+			t.Fatalf("%s: not a PDF", tc.name)
+		}
+		sizes[tc.name] = len(pdf)
+	}
+	t.Logf("bar-chart PDF sizes: named=%d embed=%d outlines=%d",
+		sizes["named"], sizes["embed"], sizes["outlines"])
+	if sizes["named"] >= sizes["embed"] || sizes["embed"] >= sizes["outlines"] {
+		t.Errorf("size ordering violated: named=%d embed=%d outlines=%d",
+			sizes["named"], sizes["embed"], sizes["outlines"])
+	}
+}
+
+// TestPDFTextIsExtractable verifies the ToUnicode CMap: text in an
+// embedded-font PDF must survive extraction (selection, search, copy/paste).
+// Gated on pdftotext (poppler).
+func TestPDFTextIsExtractable(t *testing.T) {
+	if _, err := exec.LookPath("pdftotext"); err != nil {
+		t.Skip("pdftotext (poppler) not installed")
+	}
+	c, err := aster.New(aster.WithTextMeasurement(false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Close() }()
+
+	const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="60">` +
+		`<text transform="translate(10,40)" font-size="20">Weighted Average 42</text></svg>`
+	pdf, err := c.SVGToPDF(svg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dir := t.TempDir()
+	in := filepath.Join(dir, "in.pdf")
+	if err := os.WriteFile(in, pdf, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("pdftotext", in, "-").Output()
+	if err != nil {
+		t.Fatalf("pdftotext: %v", err)
+	}
+	if !strings.Contains(string(out), "Weighted Average 42") {
+		t.Errorf("extracted text %q does not contain the source string", strings.TrimSpace(string(out)))
 	}
 }

@@ -6,6 +6,7 @@ package textmeasure
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -89,6 +90,11 @@ type Measurer struct {
 	fallbackFamily  string
 	serifFamily     string
 	monospaceFamily string
+
+	// fontData maps the fileID passed to FontMap.AddFont back to the raw
+	// font bytes, so FontData can recover the source TTF of a shaped face
+	// (needed for font subsetting/embedding in PDF output).
+	fontData map[string][]byte
 }
 
 // New creates a Measurer with embedded Liberation Sans fonts for
@@ -128,10 +134,12 @@ func New(opts ...MeasurerOption) (*Measurer, error) {
 		{notoemoji.Regular, "noto-emoji", notoemoji.Family},
 	}
 
+	fontData := make(map[string][]byte, len(embeddedFonts)+len(cfg.fonts))
 	for _, f := range embeddedFonts {
 		if err := fm.AddFont(bytes.NewReader(f.data), f.id, f.family); err != nil {
 			return nil, fmt.Errorf("textmeasure: loading %s: %w", f.id, err)
 		}
+		fontData[f.id] = f.data
 	}
 
 	// Optionally scan system fonts.
@@ -147,6 +155,7 @@ func New(opts ...MeasurerOption) (*Measurer, error) {
 		if err := fm.AddFont(bytes.NewReader(f.data), id, f.family); err != nil {
 			return nil, fmt.Errorf("textmeasure: loading custom font %q: %w", f.family, err)
 		}
+		fontData[id] = f.data
 	}
 
 	fallback := cfg.fallbackFamily
@@ -162,7 +171,35 @@ func New(opts ...MeasurerOption) (*Measurer, error) {
 		monospace = "Liberation Mono"
 	}
 
-	return &Measurer{fontMap: fm, fallbackFamily: fallback, serifFamily: serif, monospaceFamily: monospace}, nil
+	return &Measurer{fontMap: fm, fallbackFamily: fallback, serifFamily: serif, monospaceFamily: monospace, fontData: fontData}, nil
+}
+
+// FontData returns the raw font file bytes a shaped face was loaded from, or
+// nil when they are not recoverable. Embedded and WithFont-registered fonts
+// are always recoverable; system fonts are read back from disk when they are
+// plain single-face files (collection members and variable-font instances
+// return nil, as a byte-identical standalone face cannot be recovered).
+func (m *Measurer) FontData(face *font.Face) []byte {
+	if face == nil {
+		return nil
+	}
+	m.mu.Lock()
+	loc := m.fontMap.FontLocation(face.Font)
+	m.mu.Unlock()
+
+	if data, ok := m.fontData[loc.File]; ok {
+		return data
+	}
+	// A system font: recover it from disk. Only plain single-face,
+	// non-variable files are usable as-is for embedding.
+	if loc.Index != 0 || loc.Instance != 0 {
+		return nil
+	}
+	data, err := os.ReadFile(loc.File)
+	if err != nil {
+		return nil
+	}
+	return data
 }
 
 // CSSFont represents a parsed CSS font shorthand string.

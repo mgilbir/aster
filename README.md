@@ -9,7 +9,7 @@ Aster embeds the full Vega/Vega-Lite runtime inside [QuickJS](https://bellard.or
 - Vega-Lite to SVG, PNG, vector PDF, or compiled Vega JSON
 - Vega to SVG, PNG, or vector PDF
 - Arbitrary SVG to PNG or vector PDF conversion
-- PDF output is fully vector with text as glyph outlines (no embedded fonts) — ideal for LaTeX `\includegraphics`
+- PDF output is fully vector with subset-embedded fonts (selectable text) — ideal for LaTeX `\includegraphics`
 - Accurate HarfBuzz text shaping with embedded Liberation Sans and monochrome Noto Emoji
 - Configurable scale factor for high-DPI PNG output
 - Multiple Vega-Lite versions (5.8, 6.4)
@@ -130,13 +130,13 @@ defer c.Close()
 |--------|-------|--------|
 | `VegaLiteToSVG(spec)` | Vega-Lite JSON | SVG string |
 | `VegaLiteToPNG(spec, ...PNGOption)` | Vega-Lite JSON | PNG bytes |
-| `VegaLiteToPDF(spec)` | Vega-Lite JSON | PDF bytes |
+| `VegaLiteToPDF(spec, ...PDFOption)` | Vega-Lite JSON | PDF bytes |
 | `VegaLiteToVega(spec)` | Vega-Lite JSON | Vega JSON |
 | `VegaToSVG(spec)` | Vega JSON | SVG string |
 | `VegaToPNG(spec, ...PNGOption)` | Vega JSON | PNG bytes |
-| `VegaToPDF(spec)` | Vega JSON | PDF bytes |
+| `VegaToPDF(spec, ...PDFOption)` | Vega JSON | PDF bytes |
 | `SVGToPNG(svg, ...PNGOption)` | SVG string | PNG bytes |
-| `SVGToPDF(svg)` | SVG string | PDF bytes |
+| `SVGToPDF(svg, ...PDFOption)` | SVG string | PDF bytes |
 
 ### Options
 
@@ -163,6 +163,18 @@ Options passed to `aster.New()`:
 |--------|---------|-------------|
 | `WithScale(f)` | `1.0` | Scale factor; 2.0 produces 2x dimensions |
 | `WithRecodePNG()` | disabled | Losslessly re-encode into the cheapest equivalent PNG format (indexed/truecolor); same pixels, typically several-fold smaller |
+
+**PDF options** passed per render:
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `WithPDFText(mode)` | `PDFTextEmbed` | How text is represented; see below |
+
+PDF text modes:
+
+- **`PDFTextEmbed`** (default) — real PDF text with subset TrueType fonts embedded: only the glyphs a chart uses ship, once, and each occurrence costs two bytes. Self-contained, selectable, searchable. Text whose font cannot be embedded (CFF outlines, unrecoverable system-font instances) falls back to glyph outlines automatically.
+- **`PDFTextNamed`** — the same text structure with fonts referenced by name only, for pipelines that generate many charts and embed the shared font once when assembling the final document. Glyphs are addressed by the IDs of the exact font file used at generation time, so the assembler must embed that same file; standalone viewers will substitute another font and may draw wrong glyphs.
+- **`PDFTextOutlines`** — every glyph occurrence becomes filled path outlines. Largest output and text is not selectable, but no font machinery is involved at all.
 
 ### Loaders
 

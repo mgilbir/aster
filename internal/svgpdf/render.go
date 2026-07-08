@@ -120,6 +120,7 @@ type renderer struct {
 	w      *contentWriter
 	clips  map[string]*element
 	shaper TextShaper
+	fonts  *fontCatalog // nil in TextOutlines mode: all text drawn as paths
 
 	// glyphs memoizes outline extraction per (Face, GlyphID) for the lifetime
 	// of one render: axis labels repeat digits, so the same glyph is drawn
@@ -128,29 +129,33 @@ type renderer struct {
 }
 
 // render translates the parsed SVG root into a content stream plus page
-// dimensions in points (1 SVG px = 1 pt).
-func render(root *element, shaper TextShaper) (content []byte, gsList []gsEntry, width, height float64, err error) {
+// dimensions in points (1 SVG px = 1 pt), along with the font catalog of the
+// text drawn (nil in TextOutlines mode).
+func render(root *element, shaper TextShaper, opts Options) (content []byte, gsList []gsEntry, fonts *fontCatalog, width, height float64, err error) {
 	if err := checkAttrs(root); err != nil {
-		return nil, nil, 0, 0, err
+		return nil, nil, nil, 0, 0, err
 	}
 	width, err = parseLength(root.attrs["width"])
 	if err != nil {
-		return nil, nil, 0, 0, fmt.Errorf("svgpdf: <svg> width: %w", err)
+		return nil, nil, nil, 0, 0, fmt.Errorf("svgpdf: <svg> width: %w", err)
 	}
 	height, err = parseLength(root.attrs["height"])
 	if err != nil {
-		return nil, nil, 0, 0, fmt.Errorf("svgpdf: <svg> height: %w", err)
+		return nil, nil, nil, 0, 0, fmt.Errorf("svgpdf: <svg> height: %w", err)
 	}
 	if width <= 0 || height <= 0 {
-		return nil, nil, 0, 0, fmt.Errorf("svgpdf: <svg> must declare positive width and height")
+		return nil, nil, nil, 0, 0, fmt.Errorf("svgpdf: <svg> must declare positive width and height")
 	}
 
 	clips, err := collectClipPaths(root)
 	if err != nil {
-		return nil, nil, 0, 0, err
+		return nil, nil, nil, 0, 0, err
 	}
 
 	r := &renderer{w: newContentWriter(), clips: clips, shaper: shaper}
+	if opts.Text != TextOutlines && shaper != nil {
+		r.fonts = newFontCatalog(opts.Text, shaper)
+	}
 
 	// SVG's y axis points down, PDF's points up. A global flip mapping
 	// (x, y) → (x, height − y) lets every SVG coordinate pass through
@@ -162,7 +167,7 @@ func render(root *element, shaper TextShaper) (content []byte, gsList []gsEntry,
 	if vb, ok := root.attr("viewBox"); ok {
 		m, err := viewBoxMatrix(vb, width, height)
 		if err != nil {
-			return nil, nil, 0, 0, err
+			return nil, nil, nil, 0, 0, err
 		}
 		if !m.IsIdentity() {
 			r.w.concat(m)
@@ -170,9 +175,9 @@ func render(root *element, shaper TextShaper) (content []byte, gsList []gsEntry,
 	}
 
 	if err := r.children(root, rootState()); err != nil {
-		return nil, nil, 0, 0, err
+		return nil, nil, nil, 0, 0, err
 	}
-	return r.w.bytes(), r.w.gsNames, width, height, nil
+	return r.w.bytes(), r.w.gsNames, r.fonts, width, height, nil
 }
 
 func viewBoxMatrix(vb string, width, height float64) (Matrix, error) {

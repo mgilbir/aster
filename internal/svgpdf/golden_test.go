@@ -38,7 +38,7 @@ func TestConvertGoldenSVGs(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			pdf, err := Convert(string(svg), m)
+			pdf, err := Convert(string(svg), m, Options{})
 			if err != nil {
 				t.Fatalf("Convert: %v", err)
 			}
@@ -113,7 +113,7 @@ func flateDecode(data []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 	return io.ReadAll(r)
 }
 
@@ -164,11 +164,11 @@ func TestConvertDeterministic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a, err := Convert(string(svg), m)
+	a, err := Convert(string(svg), m, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := Convert(string(svg), m)
+	b, err := Convert(string(svg), m, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +200,7 @@ func TestConvertUnsupportedConstructsError(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if _, err := Convert(c.svg, m); err == nil {
+			if _, err := Convert(c.svg, m, Options{}); err == nil {
 				t.Errorf("expected error for %s, got none", c.name)
 			}
 		})
@@ -215,7 +215,7 @@ func TestConvertClipPath(t *testing.T) {
 		`<defs><clipPath id="c0"><rect x="10" y="10" width="50" height="50"/></clipPath></defs>` +
 		`<g clip-path="url(#c0)"><rect x="0" y="0" width="100" height="100" fill="#4c78a8"/></g>` +
 		`</svg>`
-	pdf, err := Convert(svg, nil)
+	pdf, err := Convert(svg, nil, Options{})
 	if err != nil {
 		t.Fatalf("Convert: %v", err)
 	}
@@ -248,7 +248,7 @@ func contentStreamOf(t *testing.T, doc *pdf0.Document) string {
 // TestConvertCoordinateFlip pins the global y-flip: the first operator in
 // the stream must be the "1 0 0 -1 0 H cm" transform.
 func TestConvertCoordinateFlip(t *testing.T) {
-	pdf, err := Convert(`<svg width="40" height="30"><rect width="40" height="30" fill="white"/></svg>`, nil)
+	pdf, err := Convert(`<svg width="40" height="30"><rect width="40" height="30" fill="white"/></svg>`, nil, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +276,7 @@ func TestPDFAValidatorGaps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pdf, err := Convert(string(svg), m)
+	pdf, err := Convert(string(svg), m, Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
