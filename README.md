@@ -1,14 +1,15 @@
 # aster
 
-Go library and CLI for rendering [Vega](https://vega.github.io/vega/) and [Vega-Lite](https://vega.github.io/vega-lite/) visualization specs to SVG and PNG. Pure Go, no CGO required.
+Go library and CLI for rendering [Vega](https://vega.github.io/vega/) and [Vega-Lite](https://vega.github.io/vega-lite/) visualization specs to SVG, PNG and vector PDF. Pure Go, no CGO required.
 
 Aster embeds the full Vega/Vega-Lite runtime inside [QuickJS](https://bellard.org/quickjs/) (compiled to WASM), with accurate text measurement via [go-text/typesetting](https://github.com/go-text/typesetting) and PNG rendering via [resvg](https://github.com/linebender/resvg) (also compiled to WASM). Everything runs in-process with no external dependencies.
 
 ## Features
 
-- Vega-Lite to SVG, PNG, or compiled Vega JSON
-- Vega to SVG or PNG
-- Arbitrary SVG to PNG conversion
+- Vega-Lite to SVG, PNG, vector PDF, or compiled Vega JSON
+- Vega to SVG, PNG, or vector PDF
+- Arbitrary SVG to PNG or vector PDF conversion
+- PDF output is fully vector with text as glyph outlines (no embedded fonts) — ideal for LaTeX `\includegraphics`
 - Accurate HarfBuzz text shaping with embedded Liberation Sans and monochrome Noto Emoji
 - Configurable scale factor for high-DPI PNG output
 - Multiple Vega-Lite versions (5.8, 6.4)
@@ -126,10 +127,13 @@ defer c.Close()
 |--------|-------|--------|
 | `VegaLiteToSVG(spec)` | Vega-Lite JSON | SVG string |
 | `VegaLiteToPNG(spec, ...PNGOption)` | Vega-Lite JSON | PNG bytes |
+| `VegaLiteToPDF(spec)` | Vega-Lite JSON | PDF bytes |
 | `VegaLiteToVega(spec)` | Vega-Lite JSON | Vega JSON |
 | `VegaToSVG(spec)` | Vega JSON | SVG string |
 | `VegaToPNG(spec, ...PNGOption)` | Vega JSON | PNG bytes |
+| `VegaToPDF(spec)` | Vega JSON | PDF bytes |
 | `SVGToPNG(svg, ...PNGOption)` | SVG string | PNG bytes |
+| `SVGToPDF(svg)` | SVG string | PDF bytes |
 
 ### Options
 

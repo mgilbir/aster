@@ -1,10 +1,11 @@
 module github.com/mgilbir/aster
 
-go 1.25.0
+go 1.25.5
 
 require (
 	github.com/go-text/typesetting v0.3.3
 	github.com/mgilbir/andsifr v0.0.0-20260706220517-1793eb745c6f
+	github.com/mgilbir/pdf0 v0.0.0-20260708091534-70a027f18419
 	golang.org/x/image v0.35.0
 )
 
