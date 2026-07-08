@@ -49,6 +49,9 @@ func TestSVGToPDFUsageAndSubset(t *testing.T) {
 		if len(u.GIDs) == 0 {
 			t.Errorf("%s: no GIDs reported", u.PostScriptName)
 		}
+		if !sort.SliceIsSorted(u.GIDs, func(i, j int) bool { return u.GIDs[i] < u.GIDs[j] }) {
+			t.Errorf("%s: GIDs not sorted ascending", u.PostScriptName)
+		}
 
 		subset, ps, err := aster.SubsetFont(u.Source, u.GIDs)
 		if err != nil {
@@ -148,5 +151,49 @@ func TestPDFUsageModeInvariance(t *testing.T) {
 				break
 			}
 		}
+	}
+}
+
+// TestFontUsageSourceIsACopy pins the ownership contract: mutating a returned
+// Source must not affect any other converter — the bytes behind built-in faces
+// are process-global embed data, so handing out the internal slice would let
+// one caller silently corrupt font handling process-wide.
+func TestFontUsageSourceIsACopy(t *testing.T) {
+	const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="50">` +
+		`<text transform="translate(10,30)" font-size="20">copy probe</text></svg>`
+
+	c1, err := aster.New(aster.WithTextMeasurement(false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c1.Close() }()
+	_, uses1, err := c1.SVGToPDFUsage(svg, aster.WithPDFText(aster.PDFTextNamed))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(uses1) == 0 {
+		t.Fatal("no usage")
+	}
+
+	// Vandalize the returned copy, then render again from a fresh converter:
+	// its Source must be pristine.
+	for i := range uses1[0].Source {
+		uses1[0].Source[i] = 0
+	}
+
+	c2, err := aster.New(aster.WithTextMeasurement(false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c2.Close() }()
+	_, uses2, err := c2.SVGToPDFUsage(svg, aster.WithPDFText(aster.PDFTextNamed))
+	if err != nil {
+		t.Fatalf("render after mutating a previous Source: %v", err)
+	}
+	if len(uses2) == 0 || len(uses2[0].Source) == 0 {
+		t.Fatal("no usage from second converter")
+	}
+	if uses2[0].Source[0] == 0 && uses2[0].Source[1] == 0 && uses2[0].Source[2] == 0 && uses2[0].Source[3] == 0 {
+		t.Fatal("second converter's Source reflects the mutation: bytes are shared, not copied")
 	}
 }

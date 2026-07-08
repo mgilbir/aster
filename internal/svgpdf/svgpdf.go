@@ -19,13 +19,6 @@ package svgpdf
 // Convert translates an SVG document into PDF bytes. The shaper is required
 // when the SVG contains text elements; pass nil only for text-free charts.
 func Convert(svg string, shaper TextShaper, opts Options) ([]byte, error) {
-	root, err := parseSVG(svg)
-	if err != nil {
-		return nil, err
-	}
-	content, gsList, fonts, width, height, err := render(root, shaper, opts)
-	if err != nil {
-		return nil, err
-	}
-	return buildPDF(content, gsList, fonts, width, height)
+	pdf, _, err := ConvertWithUsage(svg, shaper, opts)
+	return pdf, err
 }

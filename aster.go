@@ -26,7 +26,6 @@ import (
 
 	"github.com/mgilbir/aster/internal/resvg"
 	"github.com/mgilbir/aster/internal/runtime"
-	"github.com/mgilbir/aster/internal/svgpdf"
 	"github.com/mgilbir/aster/internal/textmeasure"
 )
 
@@ -317,36 +316,10 @@ func (c *Converter) VegaLiteToPDF(spec []byte, opts ...PDFOption) ([]byte, error
 // (gradients, images, embedded CSS, ...) return a descriptive error rather
 // than a silently incomplete chart; callers can fall back to SVGToPNG.
 func (c *Converter) SVGToPDF(svg string, opts ...PDFOption) ([]byte, error) {
-	if c.closed {
-		// Without this guard a post-Close call would lazily build a fresh PDF
-		// measurer (matching SVGToPNG's closed-converter contract).
-		return nil, errConverterClosed
-	}
-	cfg := defaultPDFConfig()
-	for _, opt := range opts {
-		opt(cfg)
-	}
-	var mode svgpdf.TextMode
-	switch cfg.text {
-	case PDFTextEmbed:
-		mode = svgpdf.TextEmbed
-	case PDFTextNamed:
-		mode = svgpdf.TextNamed
-	case PDFTextOutlines:
-		mode = svgpdf.TextOutlines
-	default:
-		return nil, fmt.Errorf("aster: unknown PDF text mode %d", cfg.text)
-	}
-
-	m, err := c.pdfMeasurerInit()
-	if err != nil {
-		return nil, err
-	}
-	out, err := svgpdf.Convert(svg, m, svgpdf.Options{Text: mode})
-	if err != nil {
-		return nil, fmt.Errorf("aster: rendering PDF: %w", err)
-	}
-	return out, nil
+	// Delegates so the option handling and mode mapping live in exactly one
+	// place (SVGToPDFUsage); the usage is simply discarded.
+	out, _, err := c.SVGToPDFUsage(svg, opts...)
+	return out, err
 }
 
 // pdfMeasurerInit returns the text measurer used to shape text for PDF

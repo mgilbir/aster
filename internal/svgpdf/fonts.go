@@ -110,14 +110,22 @@ func (c *fontCatalog) fontFor(face *font.Face) *pdfFont {
 	return f
 }
 
+// PostScriptNameOrFallback returns the name used as /BaseFont for a font with
+// the given PostScript name ("Unknown" when the font carries none). It is the
+// single source of the fallback rule, shared by the document writer, FontUsage
+// reporting, and the public SubsetFont, so the three always agree.
+func PostScriptNameOrFallback(name string) string {
+	if name == "" {
+		return "Unknown"
+	}
+	return name
+}
+
 // baseFontName builds the /BaseFont value. Embedded subsets carry the
 // spec-mandated 6-letter subset prefix, derived deterministically from the
 // font bytes and the used glyph set.
 func (f *pdfFont) baseFontName(mode TextMode) string {
-	name := f.parsed.PostScriptName()
-	if name == "" {
-		name = "Unknown"
-	}
+	name := PostScriptNameOrFallback(f.parsed.PostScriptName())
 	if mode != TextEmbed {
 		return name
 	}

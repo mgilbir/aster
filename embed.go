@@ -87,15 +87,19 @@ func (c *Converter) VegaLiteToPDFUsage(spec []byte, opts ...PDFOption) ([]byte, 
 // higher level and shared by every chart that references the same face.
 //
 // It returns the subset program and the source's PostScript name (matching the
-// PostScriptName reported by FontUsage and the /BaseFont written by TextNamed).
-// Only fonts with TrueType glyph outlines can be subset; others return an error.
+// PostScriptName reported by FontUsage and the /BaseFont written by TextNamed,
+// including the shared fallback for fonts that carry no PostScript name).
+// Only fonts with TrueType glyph outlines can be subset; others return an
+// error. Glyph IDs outside the font's range are ignored — GIDs sourced from
+// FontUsage are always in range, but hand-built inputs are not validated.
 func SubsetFont(source []byte, gids []uint16) (subset []byte, postScriptName string, err error) {
 	f, err := fontsubset.Parse(source)
 	if err != nil {
 		return nil, "", fmt.Errorf("aster: parse font: %w", err)
 	}
+	name := svgpdf.PostScriptNameOrFallback(f.PostScriptName())
 	if !f.CanSubset() {
-		return nil, f.PostScriptName(), fmt.Errorf("aster: font %q has no TrueType outlines to subset", f.PostScriptName())
+		return nil, name, fmt.Errorf("aster: font %q has no TrueType outlines to subset", name)
 	}
 	set := make(map[uint16]bool, len(gids))
 	for _, g := range gids {
@@ -103,7 +107,7 @@ func SubsetFont(source []byte, gids []uint16) (subset []byte, postScriptName str
 	}
 	sub, err := f.Subset(set)
 	if err != nil {
-		return nil, f.PostScriptName(), fmt.Errorf("aster: subset font: %w", err)
+		return nil, name, fmt.Errorf("aster: subset font: %w", err)
 	}
-	return sub, f.PostScriptName(), nil
+	return sub, name, nil
 }
