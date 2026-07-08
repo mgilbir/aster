@@ -144,8 +144,9 @@ func WithTimezone(tz string) Option {
 type PNGOption func(*pngConfig)
 
 type pngConfig struct {
-	scale  float64
-	recode bool
+	scale          float64
+	recode         bool
+	quantizeColors int
 }
 
 func defaultPNGConfig() *pngConfig {
@@ -173,5 +174,37 @@ func WithScale(scale float64) PNGOption {
 func WithRecodePNG() PNGOption {
 	return func(c *pngConfig) {
 		c.recode = true
+	}
+}
+
+// WithQuantizePNG lossily quantizes the rendered PNG to at most maxColors
+// colors (clamped to 2..256) and encodes it 8-bit indexed: a weighted
+// median-cut palette with Floyd-Steinberg dithering. Resolution and layout
+// are untouched; popular colors — a chart's flat areas — normally earn their
+// own palette slots and map exactly, while antialiased edge pixels shift
+// slightly (a quality guard bounds the deviation). Compared to WithRecodePNG
+// this also covers images with more than 256 distinct colors — the common
+// case for antialiased chart renders — shrinking them several-fold and, in
+// consumers that decode the pixel stream (PDF and office embedders), cutting
+// the decoded volume 4x versus RGBA. Costs one decode/encode round trip plus
+// the quantization pass: roughly tens of milliseconds for chart-sized images,
+// up to ~150ms at double-scale renders. When both quantize and recode are
+// requested, quantization applies. Falls back to the lossless WithRecodePNG
+// behaviour — logging at debug level via log/slog — whenever quantization
+// cannot maintain the output within the quality guard or cannot keep the
+// encoded size in check, so enabling it is always safe.
+func WithQuantizePNG(maxColors int) PNGOption {
+	return func(c *pngConfig) {
+		// Clamp here, not just in the quantizer: the render path gates on
+		// quantizeColors > 0, so an unclamped non-positive value would
+		// silently disable quantization instead of honoring the documented
+		// 2..256 contract.
+		if maxColors < 2 {
+			maxColors = 2
+		}
+		if maxColors > 256 {
+			maxColors = 256
+		}
+		c.quantizeColors = maxColors
 	}
 }

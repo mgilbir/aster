@@ -217,7 +217,10 @@ func (c *Converter) SVGToPNG(svg string, opts ...PNGOption) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if cfg.recode {
+	switch {
+	case cfg.quantizeColors > 0:
+		out = quantizeOrRecodePNG(out, cfg.quantizeColors)
+	case cfg.recode:
 		out = recodePNG(out)
 	}
 	return out, nil
