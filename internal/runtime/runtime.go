@@ -130,19 +130,28 @@ func (r *Runtime) Close() (err error) {
 // bridge.js reaches through the __aster_* globals. Callbacks execute
 // synchronously on the engine thread, mirroring the previous behavior.
 func bridgeConfig(cfg Config) quickjs.Bridge {
+	// Both loader callbacks get the render timeout as a context deadline.
+	// This matters for Sanitize too: HTTPLoader.Sanitize can do live DNS
+	// resolution (BlockPrivateNetworks), and the eval watchdog cannot preempt
+	// an in-flight host call — without a deadline here, a hung resolver would
+	// stall the render indefinitely.
+	callCtx := func() (context.Context, context.CancelFunc) {
+		if cfg.Timeout > 0 {
+			return context.WithTimeout(context.Background(), cfg.Timeout)
+		}
+		return context.Background(), func() {}
+	}
 	var b quickjs.Bridge
 	if cfg.Loader != nil {
 		b.Load = func(url string) ([]byte, error) {
-			loadCtx := context.Background()
-			if cfg.Timeout > 0 {
-				var cancel context.CancelFunc
-				loadCtx, cancel = context.WithTimeout(loadCtx, cfg.Timeout)
-				defer cancel()
-			}
-			return cfg.Loader.Load(loadCtx, url)
+			ctx, cancel := callCtx()
+			defer cancel()
+			return cfg.Loader.Load(ctx, url)
 		}
 		b.Sanitize = func(uri string) (string, error) {
-			return cfg.Loader.Sanitize(context.Background(), uri)
+			ctx, cancel := callCtx()
+			defer cancel()
+			return cfg.Loader.Sanitize(ctx, uri)
 		}
 	}
 	if cfg.TextMeasurer != nil {
