@@ -33,7 +33,7 @@ FORK_OUT=bench-fork.txt
 FORK_MOD=wazero-fork.mod
 FORK_SUM=wazero-fork.sum
 
-# JS modules are vendored on demand and gitignored.
+# JS modules are committed; re-vendor only if the tree is missing them.
 if [ ! -d internal/js/modules ]; then
     echo "==> Vendoring JS modules"
     go run ./cmd/vendor-js

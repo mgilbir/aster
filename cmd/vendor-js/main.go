@@ -81,6 +81,9 @@ var (
 
 	// Matches export-from statements: export{...}from"/npm/..."
 	exportPathRe = regexp.MustCompile(`(?:export\s*\{[^}]*\}\s*from|export\s*\*\s*from)\s*"(/npm/([^@]+)@([^/]+)/\+esm)"`)
+
+	// Detects jsDelivr paths that survived rewriting (see check below).
+	leftoverNpmRe = regexp.MustCompile(`"/npm/[^"]+"`)
 )
 
 func main() {
@@ -227,6 +230,14 @@ func vendorVersion(vs versionSet) (string, error) {
 			sub := exportPathRe.FindStringSubmatch(match)
 			return strings.Replace(match, sub[1], sub[2], 1)
 		})
+
+		// Any jsDelivr path surviving the rewrite is an import the regexes
+		// above cannot express (e.g. a scoped package like @scope/pkg). It
+		// would only fail much later, as an unresolvable module import when
+		// the vendored bundle first loads — fail the build here instead.
+		if leftover := leftoverNpmRe.FindString(rewritten); leftover != "" {
+			return "", fmt.Errorf("%s@%s: unrewritten jsDelivr import %q (unsupported import form; extend the rewrite regexes)", item.name, item.version, leftover)
+		}
 
 		mod.source = rewritten
 		modules[item.name] = mod
