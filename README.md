@@ -147,7 +147,7 @@ Options passed to `aster.New()`:
 | `WithDefaultMonospaceFamily(name)` | `"Liberation Mono"` | Family that generic `monospace` resolves to (PNG) |
 | `WithSystemFonts()` | disabled | Scan system fonts for **measurement only** (PNG/resvg has no system fonts) |
 | `WithTheme(json)` | — | Vega theme config applied to all renders |
-| `WithTimezone(tz)` | `"UTC"` | Timezone for JS Date operations (only UTC supported) |
+| `WithTimezone(tz)` | `"UTC"` | Timezone for JS Date operations; only `"UTC"` is supported, other values make `New` return an error |
 
 **PNG options** passed per render:
 

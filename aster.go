@@ -51,6 +51,13 @@ func New(opts ...Option) (*Converter, error) {
 		opt(cfg)
 	}
 
+	// The QuickJS WASM runtime has no timezone database; only UTC (via a Date
+	// polyfill) is implemented. Failing here beats silently rendering with an
+	// unexpected timezone.
+	if cfg.timezone != "" && cfg.timezone != "UTC" {
+		return nil, fmt.Errorf("aster: unsupported timezone %q (only \"UTC\" is supported)", cfg.timezone)
+	}
+
 	// Both pipelines are configured from a single font plan so SVG layout and
 	// PNG rasterization can't disagree about fonts or generic-family mappings.
 	plan := newFontPlan(cfg)
