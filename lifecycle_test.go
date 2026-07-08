@@ -55,6 +55,12 @@ func TestRenderAfterCloseFailsClearly(t *testing.T) {
 	assertClosed("VegaToPDF", err)
 	_, err = c.VegaLiteToPDF(spec)
 	assertClosed("VegaLiteToPDF", err)
+	_, _, err = c.SVGToPDFUsage(tinySVG)
+	assertClosed("SVGToPDFUsage", err)
+	_, _, err = c.VegaToPDFUsage(spec)
+	assertClosed("VegaToPDFUsage", err)
+	_, _, err = c.VegaLiteToPDFUsage(spec)
+	assertClosed("VegaLiteToPDFUsage", err)
 }
 
 // Close is idempotent, including when the PNG renderer was initialized.

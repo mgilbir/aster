@@ -140,6 +140,9 @@ defer c.Close()
 | `VegaToPDF(spec, ...PDFOption)` | Vega JSON | PDF bytes |
 | `SVGToPNG(svg, ...PNGOption)` | SVG string | PNG bytes |
 | `SVGToPDF(svg, ...PDFOption)` | SVG string | PDF bytes |
+| `VegaLiteToPDFUsage(spec, ...PDFOption)` | Vega-Lite JSON | PDF bytes + per-font glyph usage |
+| `VegaToPDFUsage(spec, ...PDFOption)` | Vega JSON | PDF bytes + per-font glyph usage |
+| `SVGToPDFUsage(svg, ...PDFOption)` | SVG string | PDF bytes + per-font glyph usage |
 
 ### Options
 
@@ -178,6 +181,8 @@ PDF text modes:
 - **`PDFTextEmbed`** (default) — real PDF text with subset TrueType fonts embedded: only the glyphs a chart uses ship, once, and each occurrence costs two bytes. Self-contained, selectable, searchable. Text whose font cannot be embedded (CFF outlines, unrecoverable system-font instances) falls back to glyph outlines automatically.
 - **`PDFTextNamed`** — the same text structure with fonts referenced by name only, for pipelines that generate many charts and embed the shared font once when assembling the final document. Glyphs are addressed by the IDs of the exact font file used at generation time, so the assembler must embed that same file; standalone viewers will substitute another font and may draw wrong glyphs.
 - **`PDFTextOutlines`** — every glyph occurrence becomes filled path outlines. Largest output and text is not selectable, but no font machinery is involved at all.
+
+**Shared font embedding** — the payoff of `PDFTextNamed` when composing many charts into one document: render each chart with `...PDFUsage` collecting the reported `FontUsage` (PostScript name, source font bytes, glyph IDs), union the glyph IDs per font across all charts, build one shared subset per font with `SubsetFont`, and embed that single subset in the composed document. `SubsetFont` preserves the source's glyph numbering, so the named output's Identity-encoded glyph references resolve against it without remapping. Each font's glyphs are then stored once, no matter how many charts use them.
 
 ### Loaders
 
