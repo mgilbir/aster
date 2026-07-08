@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/mgilbir/aster"
+	"github.com/mgilbir/aster/internal/textmeasure/fonts/dejavu"
 )
 
 func TestSVGToPNG(t *testing.T) {
@@ -132,10 +133,9 @@ func TestPNGSansSerifFamilyHonored(t *testing.T) {
 		t.Fatalf("SVGToPNG liberation: %v", err)
 	}
 
-	dejavu := loadFont(t, filepath.Join("internal", "textmeasure", "fonts", "dejavu", "DejaVuSans.ttf"))
 	dejaC, err := aster.New(
 		aster.WithTextMeasurement(false),
-		aster.WithFont("DejaVu Sans", dejavu),
+		aster.WithFont("DejaVu Sans", dejavu.SansRegular),
 		aster.WithDefaultFontFamily("DejaVu Sans"),
 	)
 	if err != nil {
@@ -169,10 +169,9 @@ func TestPNGMonospaceFamilyHonored(t *testing.T) {
 		t.Fatalf("SVGToPNG liberation mono: %v", err)
 	}
 
-	dejavuMono := loadFont(t, filepath.Join("internal", "textmeasure", "fonts", "dejavu", "DejaVuSansMono.ttf"))
 	dejaC, err := aster.New(
 		aster.WithTextMeasurement(false),
-		aster.WithFont("DejaVu Sans Mono", dejavuMono),
+		aster.WithFont("DejaVu Sans Mono", dejavu.MonoRegular),
 		aster.WithDefaultMonospaceFamily("DejaVu Sans Mono"),
 	)
 	if err != nil {
@@ -247,11 +246,18 @@ func pngRMSE(a, b image.Image) (float64, error) {
 	}
 	var sum float64
 	n := ab.Dx() * ab.Dy() * 4 // 4 channels: R, G, B, A
+	sq := func(x, y uint32) float64 {
+		// Diff in float64: the per-pixel sum of four squared uint32 diffs can
+		// exceed 2^32 and would wrap, understating RMSE most for the pixels
+		// that differ most.
+		d := float64(x) - float64(y)
+		return d * d
+	}
 	for y := ab.Min.Y; y < ab.Max.Y; y++ {
 		for x := ab.Min.X; x < ab.Max.X; x++ {
 			ar, ag, ab2, aa := a.At(x, y).RGBA()
 			br, bg, bb2, ba := b.At(x, y).RGBA()
-			sum += float64((ar-br)*(ar-br) + (ag-bg)*(ag-bg) + (ab2-bb2)*(ab2-bb2) + (aa-ba)*(aa-ba))
+			sum += sq(ar, br) + sq(ag, bg) + sq(ab2, bb2) + sq(aa, ba)
 		}
 	}
 	return math.Sqrt(sum / float64(n)), nil
@@ -358,9 +364,10 @@ func TestVLConvertPNGSpecs(t *testing.T) {
 			// resvg compiled to wasm32 (aster) vs native x86_64 (vl-convert).
 			// Both use resvg 0.45.1 + Liberation Sans, but sub-pixel glyph
 			// rasterization differs across architectures. Typical RMSE for
-			// text-heavy specs is 1100-1850; structural regressions produce
-			// values well above 2000.
-			const threshold = 2000.0 // out of 65535 ≈ 3% tolerance
+			// text-heavy specs is 1100-2300 (the top of the band comes from
+			// 2x-scale trellis charts); structural regressions (shifted
+			// layers, wrong colors) produce values in the tens of thousands.
+			const threshold = 2500.0 // out of 65535 ≈ 3.8% tolerance
 			t.Logf("RMSE: %.2f (threshold: %.0f, scale: %.1f)", rmse, threshold, scale)
 			if rmse > threshold {
 				t.Errorf("RMSE %.2f exceeds threshold %.0f", rmse, threshold)

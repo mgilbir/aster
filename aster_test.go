@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/mgilbir/aster"
+	"github.com/mgilbir/aster/internal/textmeasure/fonts/dejavu"
 )
 
 // normalizeSVGNumbers rounds all floating-point numbers in an SVG string to
@@ -305,15 +306,6 @@ var slowSpecs = map[string]bool{
 	"repeat_splom":                 true, // ~3s
 }
 
-// loadFont reads a TTF file from the fonts directory.
-func loadFont(t *testing.T, path string) []byte {
-	t.Helper()
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("loading font %s: %v", path, err)
-	}
-	return data
-}
 
 // datasetRedirectTransport rewrites known vega-datasets CDN/GitHub URLs to
 // point at a local httptest server, enabling offline testing of specs that
@@ -381,16 +373,15 @@ func datasetServer(t *testing.T) *aster.HTTPLoader {
 // matching the environment used to generate the vega-lite expected SVGs.
 func dejaVuFontOptions(t *testing.T) []aster.Option {
 	t.Helper()
-	dir := filepath.Join("internal", "textmeasure", "fonts", "dejavu")
 	return []aster.Option{
-		aster.WithFont("DejaVu Sans", loadFont(t, filepath.Join(dir, "DejaVuSans.ttf"))),
-		aster.WithFont("DejaVu Sans", loadFont(t, filepath.Join(dir, "DejaVuSans-Bold.ttf"))),
-		aster.WithFont("DejaVu Sans", loadFont(t, filepath.Join(dir, "DejaVuSans-Oblique.ttf"))),
-		aster.WithFont("DejaVu Sans", loadFont(t, filepath.Join(dir, "DejaVuSans-BoldOblique.ttf"))),
-		aster.WithFont("DejaVu Sans Mono", loadFont(t, filepath.Join(dir, "DejaVuSansMono.ttf"))),
-		aster.WithFont("DejaVu Sans Mono", loadFont(t, filepath.Join(dir, "DejaVuSansMono-Bold.ttf"))),
-		aster.WithFont("DejaVu Sans Mono", loadFont(t, filepath.Join(dir, "DejaVuSansMono-Oblique.ttf"))),
-		aster.WithFont("DejaVu Sans Mono", loadFont(t, filepath.Join(dir, "DejaVuSansMono-BoldOblique.ttf"))),
+		aster.WithFont("DejaVu Sans", dejavu.SansRegular),
+		aster.WithFont("DejaVu Sans", dejavu.SansBold),
+		aster.WithFont("DejaVu Sans", dejavu.SansOblique),
+		aster.WithFont("DejaVu Sans", dejavu.SansBoldOblique),
+		aster.WithFont("DejaVu Sans Mono", dejavu.MonoRegular),
+		aster.WithFont("DejaVu Sans Mono", dejavu.MonoBold),
+		aster.WithFont("DejaVu Sans Mono", dejavu.MonoOblique),
+		aster.WithFont("DejaVu Sans Mono", dejavu.MonoBoldOblique),
 		aster.WithDefaultFontFamily("DejaVu Sans"),
 	}
 }

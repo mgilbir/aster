@@ -269,11 +269,15 @@ The JS environment provides polyfills for APIs that Vega expects but QuickJS lac
 
 ### Building from source
 
+The vendored JS modules and both WASM binaries are committed, so a plain
+`go build ./...` works offline with no extra steps. The `vendor-*` targets
+exist to *regenerate* those assets:
+
 ```bash
-# Vendor JavaScript modules (requires network)
+# Re-vendor JavaScript modules (requires network; rewrites committed files)
 make vendor-js
 
-# Vendor vega-datasets test data
+# Re-vendor vega-datasets test data
 make vendor-datasets
 
 # Rebuild resvg WASM binary (requires Docker)
