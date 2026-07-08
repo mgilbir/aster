@@ -8,8 +8,8 @@ Aster embeds the full Vega/Vega-Lite runtime inside [QuickJS](https://bellard.or
 
 - Vega-Lite to SVG, PNG, vector PDF, or compiled Vega JSON
 - Vega to SVG, PNG, or vector PDF
-- Arbitrary SVG to PNG conversion
-- Vega-Lite → vector PDF (text as glyph outlines, no embedded fonts; ideal for LaTeX `\includegraphics`)
+- Arbitrary SVG to PNG or vector PDF conversion
+- PDF output is fully vector with text as glyph outlines (no embedded fonts) — ideal for LaTeX `\includegraphics`
 - Accurate HarfBuzz text shaping with embedded Liberation Sans and monochrome Noto Emoji
 - Configurable scale factor for high-DPI PNG output
 - Multiple Vega-Lite versions (5.8, 6.4)
