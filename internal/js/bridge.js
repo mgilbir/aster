@@ -72,12 +72,21 @@ if (typeof __aster_measure_text === "function") {
 
 /**
  * Compile a Vega-Lite spec to a Vega spec.
+ *
+ * The theme config must be applied here, at compile time: the Vega-Lite
+ * compiler consumes config keys like `background` and `view.continuousWidth`
+ * and bakes their resolved values into the emitted Vega spec, where they
+ * shadow any config passed later to vega.parse. Applying the theme only at
+ * parse time silently drops those keys.
+ *
  * @param {string} specJSON - Vega-Lite spec as JSON string
+ * @param {string} [theme] - Optional Vega theme config JSON
  * @returns {string} - Vega spec as JSON string
  */
-export function vegaLiteToVega(specJSON) {
+export function vegaLiteToVega(specJSON, theme) {
   const vlSpec = JSON.parse(specJSON);
-  const vgSpec = vegaLite.compile(vlSpec).spec;
+  const opts = theme ? { config: JSON.parse(theme) } : undefined;
+  const vgSpec = vegaLite.compile(vlSpec, opts).spec;
   return JSON.stringify(vgSpec);
 }
 
@@ -121,6 +130,10 @@ export async function vegaToSvg(specJSON, theme) {
  * @returns {Promise<string>} - SVG string
  */
 export async function vegaLiteToSvg(specJSON, theme) {
-  const vgSpecJSON = vegaLiteToVega(specJSON);
+  // Theme goes to both stages: compile-time for the keys the Vega-Lite
+  // compiler consumes (see vegaLiteToVega), parse-time for the rest. Keys
+  // applied at compile time win at parse time (explicit spec values shadow
+  // parse config), so the double application is safe.
+  const vgSpecJSON = vegaLiteToVega(specJSON, theme);
   return await vegaToSvg(vgSpecJSON, theme);
 }

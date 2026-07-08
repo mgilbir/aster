@@ -44,7 +44,10 @@ func WithLoader(l Loader) Option {
 	}
 }
 
-// WithTheme sets a Vega theme configuration (JSON string) applied to all renders.
+// WithTheme sets a Vega theme configuration (JSON string) applied to all
+// renders. The config is passed to the Vega-Lite compiler as well as the Vega
+// runtime, so compile-time keys (background, view.continuousWidth/Height, …)
+// take effect; VegaLiteToVega output therefore also reflects the theme.
 func WithTheme(theme string) Option {
 	return func(c *config) {
 		c.theme = theme
