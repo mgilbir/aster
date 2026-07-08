@@ -16,8 +16,13 @@ import (
 )
 
 // Loader controls how external resources (data files, remote URLs) are fetched.
-// By default, all loading is denied for security. Use AllowHTTPLoader to permit
-// HTTP(S) requests, or implement a custom Loader for fine-grained control.
+// By default, all loading is denied for security. Use HTTPLoader (or
+// NewHTTPLoader) to permit HTTP(S) requests, or implement a custom Loader for
+// fine-grained control.
+//
+// Loaded payloads cross into the JavaScript runtime as UTF-8 text; Vega's
+// supported formats (JSON, CSV, TSV, TopoJSON) are all textual. Binary
+// payloads are not supported and would be corrupted in transit.
 type Loader interface {
 	// Load fetches the content at the given URI.
 	Load(ctx context.Context, uri string) ([]byte, error)
@@ -55,12 +60,21 @@ func (DenyLoader) Sanitize(_ context.Context, uri string) (string, error) {
 // when rendering specs from untrusted sources. Note that name resolution here
 // happens at policy-check time, so it does not by itself defend against DNS
 // rebinding — pair it with AllowedDomains for untrusted input.
+//
+// MaxResponseBytes caps how much of a response body is read. Zero means the
+// default cap (64 MiB); a negative value disables the cap entirely. Responses
+// larger than the cap fail with an error instead of being truncated, so a
+// hostile or misbehaving server cannot stream unbounded data into memory.
 type HTTPLoader struct {
 	Client               *http.Client
 	AllowedDomains       []string // if non-empty, only these hostnames are permitted
 	BaseURL              string   // if set, relative URIs are resolved against this URL
 	BlockPrivateNetworks bool     // if set, reject loopback/link-local/private hosts
+	MaxResponseBytes     int64    // response body cap; 0 = 64 MiB default, negative = unlimited
 }
+
+// defaultMaxResponseBytes bounds response bodies when MaxResponseBytes is 0.
+const defaultMaxResponseBytes = 64 << 20
 
 // NewHTTPLoader creates a loader that allows HTTP(S) requests.
 // If client is nil, http.DefaultClient is used.
@@ -89,13 +103,22 @@ func (l *HTTPLoader) Load(ctx context.Context, uri string) ([]byte, error) {
 	}
 	// Shallow-copy the client so the policy-enforcing CheckRedirect below does
 	// not mutate a caller-supplied client. Every redirect target is run
-	// through the same scheme/domain/network policy as the initial URL.
+	// through the same scheme/domain/network policy as the initial URL, then
+	// through the caller's own CheckRedirect (if any), so a stricter
+	// caller-supplied redirect policy still applies.
 	client := *base
+	callerCheck := base.CheckRedirect
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		if len(via) >= 10 {
 			return errors.New("aster: stopped after 10 redirects")
 		}
-		return l.checkURL(req.Context(), req.URL)
+		if err := l.checkURL(req.Context(), req.URL); err != nil {
+			return err
+		}
+		if callerCheck != nil {
+			return callerCheck(req, via)
+		}
+		return nil
 	}
 
 	resp, err := client.Do(req)
@@ -108,11 +131,27 @@ func (l *HTTPLoader) Load(ctx context.Context, uri string) ([]byte, error) {
 		return nil, fmt.Errorf("aster: HTTP %d loading %q", resp.StatusCode, uri)
 	}
 
-	data, err := io.ReadAll(resp.Body)
+	max := l.MaxResponseBytes
+	if max == 0 {
+		max = defaultMaxResponseBytes
+	}
+	if max < 0 {
+		data, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("aster: failed to read response from %q: %w", uri, err)
+		}
+		return data, nil
+	}
+
+	// Read one byte past the cap to distinguish "exactly at the cap" from
+	// "exceeds it".
+	data, err := io.ReadAll(io.LimitReader(resp.Body, max+1))
 	if err != nil {
 		return nil, fmt.Errorf("aster: failed to read response from %q: %w", uri, err)
 	}
-
+	if int64(len(data)) > max {
+		return nil, fmt.Errorf("aster: response from %q exceeds %d bytes (raise HTTPLoader.MaxResponseBytes to allow larger payloads)", uri, max)
+	}
 	return data, nil
 }
 
@@ -319,8 +358,7 @@ func NewFallbackLoader(loaders ...Loader) *FallbackLoader {
 	return &FallbackLoader{Loaders: loaders}
 }
 
-func (l *FallbackLoader) Sanitize(_ context.Context, uri string) (string, error) {
-	ctx := context.Background()
+func (l *FallbackLoader) Sanitize(ctx context.Context, uri string) (string, error) {
 	var lastErr error
 	for _, child := range l.Loaders {
 		if _, err := child.Sanitize(ctx, uri); err == nil {

@@ -2,6 +2,7 @@ package aster_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mgilbir/aster"
 )
@@ -544,5 +546,106 @@ func TestConverterCloseWithDenyLoader(t *testing.T) {
 	}
 	if err := c.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
+	}
+}
+
+// ---------- HTTPLoader: response size cap ----------
+
+func TestHTTPLoaderResponseCapEnforced(t *testing.T) {
+	big := strings.Repeat("x", 4096)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(big))
+	}))
+	defer ts.Close()
+
+	l := &aster.HTTPLoader{Client: ts.Client(), MaxResponseBytes: 1024}
+	_, err := l.Load(context.Background(), ts.URL+"/big.json")
+	if err == nil {
+		t.Fatal("expected error for response exceeding MaxResponseBytes")
+	}
+	if !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// A response exactly at the cap is allowed.
+	l.MaxResponseBytes = int64(len(big))
+	data, err := l.Load(context.Background(), ts.URL+"/big.json")
+	if err != nil {
+		t.Fatalf("response at cap should load: %v", err)
+	}
+	if len(data) != len(big) {
+		t.Fatalf("truncated response: got %d bytes, want %d", len(data), len(big))
+	}
+
+	// Negative disables the cap.
+	l.MaxResponseBytes = -1
+	if _, err := l.Load(context.Background(), ts.URL+"/big.json"); err != nil {
+		t.Fatalf("negative cap should disable the limit: %v", err)
+	}
+}
+
+// ---------- HTTPLoader: caller redirect policy composes ----------
+
+// A CheckRedirect configured on the caller's client must still run (after
+// aster's own policy check), so a stricter caller policy is not silently
+// replaced.
+func TestHTTPLoaderCallerCheckRedirectStillApplies(t *testing.T) {
+	final := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = fmt.Fprintln(w, `"ok"`)
+	}))
+	defer final.Close()
+	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, final.URL+"/data.json", http.StatusFound)
+	}))
+	defer redirector.Close()
+
+	client := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return errors.New("caller-policy: no redirects")
+		},
+	}
+	l := &aster.HTTPLoader{Client: client}
+
+	_, err := l.Load(context.Background(), redirector.URL+"/start.json")
+	if err == nil {
+		t.Fatal("expected the caller's CheckRedirect to block the redirect")
+	}
+	if !strings.Contains(err.Error(), "caller-policy") {
+		t.Fatalf("expected caller policy error, got: %v", err)
+	}
+
+	// The original client must not have been mutated.
+	if client.CheckRedirect == nil {
+		t.Fatal("caller client was mutated")
+	}
+}
+
+// ---------- FallbackLoader: context propagation ----------
+
+// ctxCheckLoader records whether the ctx passed to Sanitize carried a deadline.
+type ctxCheckLoader struct {
+	sawDeadline bool
+}
+
+func (l *ctxCheckLoader) Sanitize(ctx context.Context, uri string) (string, error) {
+	_, l.sawDeadline = ctx.Deadline()
+	return uri, nil
+}
+
+func (l *ctxCheckLoader) Load(_ context.Context, _ string) ([]byte, error) {
+	return []byte(`[]`), nil
+}
+
+func TestFallbackLoaderSanitizePropagatesContext(t *testing.T) {
+	child := &ctxCheckLoader{}
+	l := aster.NewFallbackLoader(child)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	if _, err := l.Sanitize(ctx, "data.json"); err != nil {
+		t.Fatalf("Sanitize: %v", err)
+	}
+	if !child.sawDeadline {
+		t.Error("child Sanitize did not receive the caller's context deadline")
 	}
 }

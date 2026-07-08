@@ -206,7 +206,9 @@ aster.New(aster.WithLoader(aster.NewFallbackLoader(
 | `StaticLoader` | Returns a fixed JSON value for any URI (test stub) |
 | `FallbackLoader` | Tries child loaders in order until one succeeds |
 
-`HTTPLoader` rejects non-HTTP schemes (`ftp:`, `javascript:`, `data:`, `file:`), URIs with userinfo (`user:pass@host`), and domains not in the allowlist. Domain matching is case-insensitive.
+`HTTPLoader` rejects non-HTTP schemes (`ftp:`, `javascript:`, `data:`, `file:`), URIs with userinfo (`user:pass@host`), and domains not in the allowlist. Domain matching is case-insensitive. The same policy is re-checked on every HTTP redirect hop, so an allowed host cannot redirect a request to a disallowed one; a `CheckRedirect` on your own `http.Client` still applies on top. Response bodies are capped at 64 MiB by default (`MaxResponseBytes` raises or disables the cap).
+
+When rendering specs from untrusted sources, set `BlockPrivateNetworks: true` to additionally reject hosts that resolve to loopback, link-local, or private addresses (including cloud metadata endpoints like `169.254.169.254`), and pair it with `AllowedDomains` — name resolution happens at policy-check time, so the flag alone does not defend against DNS rebinding.
 
 `FileLoader` rejects absolute paths, path traversal (`..`), and URIs with schemes. It uses Go's `os.Root` for OS-level path containment, which also blocks symlink escapes.
 
