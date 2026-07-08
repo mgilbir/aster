@@ -56,3 +56,20 @@ func TestInvalidPNGScaleRejected(t *testing.T) {
 		t.Errorf("valid scale rejected: %v", err)
 	}
 }
+
+func TestUnsupportedTimezoneErrors(t *testing.T) {
+	_, err := aster.New(aster.WithTimezone("Europe/Madrid"))
+	if err == nil {
+		t.Fatal("expected error for unsupported timezone")
+	}
+	if !strings.Contains(err.Error(), "unsupported timezone") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// UTC (and the default) remain accepted.
+	c, err := aster.New(aster.WithTimezone("UTC"), aster.WithTextMeasurement(false))
+	if err != nil {
+		t.Fatalf("UTC should be accepted: %v", err)
+	}
+	_ = c.Close()
+}

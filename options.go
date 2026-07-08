@@ -131,9 +131,9 @@ func WithDefaultMonospaceFamily(family string) Option {
 }
 
 // WithTimezone sets the timezone for JavaScript Date operations.
-// Defaults to "UTC" for deterministic output. Currently only "UTC" is
-// supported; other values are passed through but have no effect unless
-// the QuickJS WASM runtime supports them.
+// Defaults to "UTC" for deterministic output. Only "UTC" is currently
+// supported (the QuickJS WASM runtime has no timezone database); New returns
+// an error for any other value.
 func WithTimezone(tz string) Option {
 	return func(c *config) {
 		c.timezone = tz

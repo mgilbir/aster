@@ -74,6 +74,7 @@ func (s *stringList) Set(v string) error { *s = append(*s, v); return nil }
 // commonOpts holds flags shared by the rendering subcommands and turns them
 // into aster options.
 type commonOpts struct {
+	fs           *flag.FlagSet
 	allowHTTP    bool
 	allowDomains stringList
 	version      string
@@ -81,20 +82,32 @@ type commonOpts struct {
 }
 
 func registerCommonOpts(fs *flag.FlagSet) *commonOpts {
-	co := &commonOpts{}
+	co := &commonOpts{fs: fs}
 	fs.BoolVar(&co.allowHTTP, "allow-http", false, "allow HTTP(S) data loading from any host")
 	fs.Var(&co.allowDomains, "allow-domain", "restrict HTTP loading to this host (repeatable); implies -allow-http")
 	fs.StringVar(&co.version, "version", "", "Vega-Lite version, e.g. 5.8 or 6.4 (default: build default)")
-	fs.DurationVar(&co.timeout, "timeout", 0, "max duration per render, e.g. 30s (default: 30s)")
+	fs.DurationVar(&co.timeout, "timeout", 0, "max duration per render, e.g. 30s; 0 disables the timeout (default: 30s)")
 	return co
 }
 
-func (co *commonOpts) options() []aster.Option {
+func (co *commonOpts) options() ([]aster.Option, error) {
 	var opts []aster.Option
 	if co.version != "" {
 		opts = append(opts, aster.WithVegaLiteVersion(co.version))
 	}
-	if co.timeout > 0 {
+	// Only an explicitly-set -timeout overrides the library default, so that
+	// -timeout 0 means "no timeout" (slow geo specs can exceed 30s) rather
+	// than silently meaning "default".
+	timeoutSet := false
+	co.fs.Visit(func(f *flag.Flag) {
+		if f.Name == "timeout" {
+			timeoutSet = true
+		}
+	})
+	if co.timeout < 0 {
+		return nil, fmt.Errorf("invalid -timeout %v (must be >= 0; 0 disables the timeout)", co.timeout)
+	}
+	if timeoutSet {
 		opts = append(opts, aster.WithTimeout(co.timeout))
 	}
 	switch {
@@ -103,7 +116,7 @@ func (co *commonOpts) options() []aster.Option {
 	case co.allowHTTP:
 		opts = append(opts, aster.WithLoader(aster.NewHTTPLoader(nil)))
 	}
-	return opts
+	return opts, nil
 }
 
 func runSVG(args []string) (err error) {
@@ -120,7 +133,11 @@ func runSVG(args []string) (err error) {
 		return err
 	}
 
-	c, err := aster.New(co.options()...)
+	opts, err := co.options()
+	if err != nil {
+		return err
+	}
+	c, err := aster.New(opts...)
 	if err != nil {
 		return err
 	}
@@ -159,7 +176,11 @@ func runPNG(args []string) (err error) {
 		return err
 	}
 
-	c, err := aster.New(co.options()...)
+	opts, err := co.options()
+	if err != nil {
+		return err
+	}
+	c, err := aster.New(opts...)
 	if err != nil {
 		return err
 	}
