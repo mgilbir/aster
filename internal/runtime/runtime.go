@@ -402,16 +402,22 @@ func (r *Runtime) VegaLiteToSVG(specJSON string) (string, error) {
 	return r.evalModule(script)
 }
 
-// VegaLiteToVega compiles a Vega-Lite spec to a Vega spec.
+// VegaLiteToVega compiles a Vega-Lite spec to a Vega spec. The configured
+// theme is passed to the Vega-Lite compiler, so the compiled spec matches
+// what the render paths produce (compile-then-VegaToSVG ≡ VegaLiteToSVG).
 func (r *Runtime) VegaLiteToVega(specJSON string) (string, error) {
 	spec, err := jsStringLiteral(specJSON)
 	if err != nil {
 		return "", err
 	}
+	theme, err := themeLiteral(r.config.Theme)
+	if err != nil {
+		return "", err
+	}
 	script := fmt.Sprintf(`
 		import { vegaLiteToVega } from 'bridge';
-		export default vegaLiteToVega(%s);
-	`, spec)
+		export default vegaLiteToVega(%s, %s);
+	`, spec, theme)
 
 	return r.evalModule(script)
 }
