@@ -83,6 +83,9 @@ aster svg -i chart.vl.json -o chart.svg
 # Render a spec to PNG at 2x scale
 aster png -i chart.vl.json -o chart.png -scale 2
 
+# Render a spec to vector PDF
+aster pdf -i chart.vl.json -o chart.pdf
+
 # Pipe from stdin to stdout
 cat chart.vl.json | aster svg > chart.svg
 
@@ -101,7 +104,7 @@ aster svg -i chart.vl.json -allow-domain cdn.jsdelivr.net
 
 The CLI auto-detects Vega vs Vega-Lite from the `$schema` field. If absent, Vega-Lite is assumed.
 
-Shared flags: `-i`/`-o` (input/output, stdin/stdout when omitted), `-version`, `-timeout`, `-allow-http`, and `-allow-domain` (repeatable; implies `-allow-http`). `png` also accepts `-scale` and `-recode`.
+Shared flags: `-i`/`-o` (input/output, stdin/stdout when omitted), `-version`, `-timeout`, `-allow-http`, and `-allow-domain` (repeatable; implies `-allow-http`). `png` also accepts `-scale` and `-recode`; these don't apply to `pdf` since it's vector output.
 
 ## API
 
