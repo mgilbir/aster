@@ -235,8 +235,56 @@ func (c *Converter) SVGToPNG(svg string, opts ...PNGOption) ([]byte, error) {
 	return out, nil
 }
 
+// PDFTextMode selects how text is represented in PDF output.
+type PDFTextMode int
+
+const (
+	// PDFTextEmbed (the default) emits real PDF text with subset TrueType
+	// fonts embedded: only the glyphs a chart uses ship, once, in the font
+	// program, and each occurrence costs two bytes. Output is self-contained
+	// and text is selectable and searchable. Text whose font cannot be
+	// embedded (CFF/OTF outlines, unloadable system fonts) falls back to
+	// glyph outlines automatically.
+	PDFTextEmbed PDFTextMode = iota
+
+	// PDFTextNamed emits the same PDF text structure without embedding the
+	// font program: fonts are referenced by name only, so the output is as
+	// small as it gets. Glyphs are addressed by the IDs of the exact font
+	// file used at generation time — the consuming pipeline must embed that
+	// same font file when assembling the final document, or viewers will
+	// substitute a different font and may draw the wrong glyphs. Use this
+	// when generating many charts whose fonts are embedded once at assembly
+	// time.
+	PDFTextNamed
+
+	// PDFTextOutlines converts every glyph occurrence to filled path
+	// outlines. No fonts are referenced or embedded at all; output is much
+	// larger and text is not selectable, but nothing can go wrong with font
+	// handling downstream.
+	PDFTextOutlines
+)
+
+// PDFOption configures a single PDF render operation.
+type PDFOption func(*pdfConfig)
+
+type pdfConfig struct {
+	text PDFTextMode
+}
+
+func defaultPDFConfig() *pdfConfig {
+	return &pdfConfig{text: PDFTextEmbed}
+}
+
+// WithPDFText selects how text is represented in the PDF; see the
+// PDFTextMode constants. The default is PDFTextEmbed.
+func WithPDFText(mode PDFTextMode) PDFOption {
+	return func(c *pdfConfig) {
+		c.text = mode
+	}
+}
+
 // VegaToPDF renders a Vega spec (JSON) to a single-page vector PDF.
-func (c *Converter) VegaToPDF(spec []byte) ([]byte, error) {
+func (c *Converter) VegaToPDF(spec []byte, opts ...PDFOption) ([]byte, error) {
 	if c.closed {
 		return nil, errConverterClosed
 	}
@@ -244,11 +292,11 @@ func (c *Converter) VegaToPDF(spec []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return c.SVGToPDF(svg)
+	return c.SVGToPDF(svg, opts...)
 }
 
 // VegaLiteToPDF renders a Vega-Lite spec (JSON) to a single-page vector PDF.
-func (c *Converter) VegaLiteToPDF(spec []byte) ([]byte, error) {
+func (c *Converter) VegaLiteToPDF(spec []byte, opts ...PDFOption) ([]byte, error) {
 	if c.closed {
 		return nil, errConverterClosed
 	}
@@ -256,28 +304,45 @@ func (c *Converter) VegaLiteToPDF(spec []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return c.SVGToPDF(svg)
+	return c.SVGToPDF(svg, opts...)
 }
 
 // SVGToPDF converts an SVG string (as produced by the Vega SVG renderer) to
-// a single-page vector PDF. Text is converted to glyph outlines, so no fonts
-// are embedded and the output is fully self-contained — suitable for direct
-// embedding in LaTeX documents via \includegraphics.
+// a single-page vector PDF suitable for direct embedding in LaTeX documents
+// via \includegraphics. Text handling is controlled by WithPDFText: by
+// default the fonts a chart uses are subset and embedded, so the output is
+// self-contained and text is selectable.
 //
 // Only the SVG subset that Vega emits is supported. Unsupported constructs
 // (gradients, images, embedded CSS, ...) return a descriptive error rather
 // than a silently incomplete chart; callers can fall back to SVGToPNG.
-func (c *Converter) SVGToPDF(svg string) ([]byte, error) {
+func (c *Converter) SVGToPDF(svg string, opts ...PDFOption) ([]byte, error) {
 	if c.closed {
 		// Without this guard a post-Close call would lazily build a fresh PDF
 		// measurer (matching SVGToPNG's closed-converter contract).
 		return nil, errConverterClosed
 	}
+	cfg := defaultPDFConfig()
+	for _, opt := range opts {
+		opt(cfg)
+	}
+	var mode svgpdf.TextMode
+	switch cfg.text {
+	case PDFTextEmbed:
+		mode = svgpdf.TextEmbed
+	case PDFTextNamed:
+		mode = svgpdf.TextNamed
+	case PDFTextOutlines:
+		mode = svgpdf.TextOutlines
+	default:
+		return nil, fmt.Errorf("aster: unknown PDF text mode %d", cfg.text)
+	}
+
 	m, err := c.pdfMeasurerInit()
 	if err != nil {
 		return nil, err
 	}
-	out, err := svgpdf.Convert(svg, m)
+	out, err := svgpdf.Convert(svg, m, svgpdf.Options{Text: mode})
 	if err != nil {
 		return nil, fmt.Errorf("aster: rendering PDF: %w", err)
 	}

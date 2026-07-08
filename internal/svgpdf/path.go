@@ -291,9 +291,7 @@ func (p *pathParser) arcTo(rel bool) error {
 		return err
 	}
 
-	for _, c := range arcToCubics(p.cur, end, rx, ry, rot, largeArc, sweep) {
-		p.segs = append(p.segs, c)
-	}
+	p.segs = append(p.segs, arcToCubics(p.cur, end, rx, ry, rot, largeArc, sweep)...)
 	p.cur = end
 	p.lastCmd = 'a'
 	return nil

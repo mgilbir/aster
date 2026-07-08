@@ -2,6 +2,7 @@ package svgpdf
 
 import (
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/go-text/typesetting/font"
@@ -10,14 +11,18 @@ import (
 )
 
 // TextShaper shapes a text string with a CSS font specification into
-// positioned glyph runs. *textmeasure.Measurer implements it.
+// positioned glyph runs, and can recover the raw font bytes behind a shaped
+// face (nil when unavailable). *textmeasure.Measurer implements it.
 type TextShaper interface {
 	ShapeText(text, cssFont string) ([]textmeasure.ShapedRun, float64)
+	FontData(face *font.Face) []byte
 }
 
-// drawText converts a <text> element to filled glyph outlines. No fonts are
-// embedded in the PDF: each glyph becomes a path, which keeps the embedder
-// trivial and the output self-contained at the cost of unselectable text.
+// drawText renders a <text> element. Depending on the text mode, glyphs are
+// emitted as real PDF text referencing a (subset) font resource, or as filled
+// path outlines. Runs whose face cannot back a PDF font (unrecoverable bytes,
+// CFF outlines under TextEmbed) fall back to outlines individually, so mixed
+// content still renders.
 //
 // Vega positions text via its transform attribute: the local origin (0, 0)
 // is the alphabetic-baseline anchor point (baseline offsets are baked into
@@ -55,35 +60,150 @@ func (r *renderer) drawText(e *element, st gstate) error {
 
 	r.w.fillColor(st.fill.Color)
 	// Reconcile the alpha (text is fill-only, so fill and stroke alpha match).
-	// setAlpha resets to opaque when a previous sibling left the stream
-	// translucent, which the old conditional "if fillAlpha != 1" could not do.
 	fillAlpha := st.opacity * st.fillOpacity
 	r.w.setAlpha(fillAlpha, fillAlpha)
 
-	emitted := false
+	runes := []rune(text)
 	for _, run := range runs {
-		upem := float64(run.Face.Upem())
-		// Font units → local (px) units at the shaped size.
-		scale := (float64(run.Size) / 64.0) / upem
-		for _, g := range run.Glyphs {
-			outline, ok := r.glyphOutline(run.Face, g.GlyphID)
-			if !ok {
-				return fmt.Errorf("svgpdf: glyph %d has non-outline data; bitmap/SVG fonts are not supported", g.GlyphID)
-			}
-			ox := penX + float64(g.XOffset)/64.0
-			oy := -float64(g.YOffset) / 64.0
-			if emitGlyphOutline(r.w, outline, ox, oy, scale) {
-				emitted = true
-			}
-			penX += float64(g.Advance) / 64.0
+		var f *pdfFont
+		if r.fonts != nil {
+			f = r.fonts.fontFor(run.Face)
 		}
+		var err error
+		if f != nil {
+			penX, err = r.drawTextRunFont(f, run, penX, runes)
+		} else {
+			penX, err = r.drawTextRunOutline(run, penX)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// drawTextRunFont emits one shaped run as a PDF text object: a TJ array of
+// glyph IDs with pen adjustments wherever the shaped position differs from
+// the font's natural advance (kerning, mark positioning).
+//
+// The content stream operates under the global y-flip, so the text matrix
+// negates y again (D = -1) to keep glyphs upright; text-space x then
+// coincides with local x, letting shaped advances map 1:1.
+func (r *renderer) drawTextRunFont(f *pdfFont, run textmeasure.ShapedRun, penX float64, runes []rune) (float64, error) {
+	size := float64(run.Size) / 64.0
+	if size <= 0 {
+		return penX, fmt.Errorf("svgpdf: non-positive font size in shaped run")
+	}
+	upem := float64(f.parsed.UnitsPerEm())
+	penXStart := penX
+
+	r.w.beginText()
+	r.w.setTextFont(f.res, size)
+	r.w.textMatrix(Matrix{A: 1, B: 0, C: 0, D: -1, E: penXStart, F: 0})
+
+	var items []tjItem
+	var cur []uint16
+	flush := func() {
+		if len(cur) > 0 {
+			items = append(items, tjItem{glyphs: cur})
+			cur = nil
+		}
+	}
+	show := func() {
+		flush()
+		if len(items) > 0 {
+			r.w.showGlyphs(items)
+			items = nil
+		}
+	}
+
+	penText := 0.0 // viewer pen position in text space (== local px)
+	rise := 0.0
+	for i, g := range run.Glyphs {
+		gid := uint16(g.GlyphID)
+		f.used[gid] = true
+		r.recordToUnicode(f, run, i, runes)
+
+		// Vertical offset (mark positioning): PDF text rise. Shaping y is
+		// up; under the doubly-flipped text matrix a positive rise moves the
+		// glyph up as well. Rise changes force a TJ break.
+		wantRise := float64(g.YOffset) / 64.0
+		if wantRise != rise {
+			show()
+			r.w.textRise(wantRise)
+			rise = wantRise
+		}
+
+		// Horizontal correction: where the shaped glyph should draw versus
+		// where the viewer pen sits after the previous glyph's font advance.
+		relX := (penX - penXStart) + float64(g.XOffset)/64.0
+		if num := (penText - relX) * 1000 / size; math.Abs(num) >= 0.005 {
+			flush()
+			items = append(items, tjItem{adj: num, isAdj: true})
+			penText -= num * size / 1000
+		}
+
+		cur = append(cur, gid)
+		penText += float64(f.parsed.Advance(gid)) / upem * size
+		penX += float64(g.Advance) / 64.0
+	}
+	show()
+	if rise != 0 {
+		r.w.textRise(0)
+	}
+	r.w.endText()
+	return penX, nil
+}
+
+// recordToUnicode maps a glyph to the source text of its cluster, for the
+// font's ToUnicode CMap (text extraction). The first mapping wins.
+func (r *renderer) recordToUnicode(f *pdfFont, run textmeasure.ShapedRun, i int, runes []rune) {
+	gid := uint16(run.Glyphs[i].GlyphID)
+	if _, ok := f.toUni[gid]; ok {
+		return
+	}
+	start := run.Glyphs[i].TextIndex()
+	if start < 0 || start >= len(runes) {
+		return
+	}
+	end := len(runes)
+	for _, g := range run.Glyphs[i+1:] {
+		if g.TextIndex() != start {
+			end = g.TextIndex()
+			break
+		}
+	}
+	if end <= start {
+		return
+	}
+	f.toUni[gid] = string(runes[start:end])
+}
+
+// drawTextRunOutline emits one shaped run as filled glyph outlines (the
+// font-free representation).
+func (r *renderer) drawTextRunOutline(run textmeasure.ShapedRun, penX float64) (float64, error) {
+	upem := float64(run.Face.Upem())
+	// Font units → local (px) units at the shaped size.
+	scale := (float64(run.Size) / 64.0) / upem
+	emitted := false
+	for _, g := range run.Glyphs {
+		outline, ok := r.glyphOutline(run.Face, g.GlyphID)
+		if !ok {
+			return penX, fmt.Errorf("svgpdf: glyph %d has non-outline data; bitmap/SVG fonts are not supported", g.GlyphID)
+		}
+		ox := penX + float64(g.XOffset)/64.0
+		oy := -float64(g.YOffset) / 64.0
+		if emitGlyphOutline(r.w, outline, ox, oy, scale) {
+			emitted = true
+		}
+		penX += float64(g.Advance) / 64.0
 	}
 	if emitted {
 		// Glyph contours use the nonzero winding rule (TrueType/CFF
 		// convention: counters wind opposite to outer contours).
 		r.w.paint(true, false, false)
 	}
-	return nil
+	return penX, nil
 }
 
 // glyphKey identifies a glyph outline by its font face and glyph id, for the
