@@ -56,6 +56,22 @@ func TestParseCSSFont(t *testing.T) {
 			size:   11,
 			family: "sans-serif",
 		},
+		{
+			// pt is converted to px (1pt = 4/3 px), not silently treated as px.
+			input:  "12pt Arial",
+			style:  font.StyleNormal,
+			weight: font.WeightNormal,
+			size:   16,
+			family: "Arial",
+		},
+		{
+			// em resolves against the CSS default root font size (16px).
+			input:  "1.5em serif",
+			style:  font.StyleNormal,
+			weight: font.WeightNormal,
+			size:   24,
+			family: "serif",
+		},
 	}
 
 	for _, tt := range tests {

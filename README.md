@@ -260,8 +260,9 @@ Both WASM runtimes ([QuickJS-NG](https://github.com/quickjs-ng/quickjs) built as
 
 The JS environment provides polyfills for APIs that Vega expects but QuickJS lacks:
 
-- `structuredClone` — partial (fails on some geo projection edge cases)
+- `structuredClone` — recursive deep clone preserving `undefined`, `Date`/`RegExp`/`Map`/`Set`/typed arrays/`DataView`, and reference cycles
 - `setTimeout` / `clearTimeout` — microtask-scheduled, no real delays (d3-timer, vega-scenegraph)
+- `setInterval` / `clearInterval` — aliased to `setTimeout`, so an interval fires exactly once (a static render has no ongoing time in which to repeat)
 - `requestAnimationFrame` — microtask-scheduled (vega-view)
 - `performance.now` — wall clock via `Date.now()` (not monotonic; only relative timing is used)
 - `Date` methods — redirected to UTC equivalents (QuickJS WASM has no timezone config)
@@ -292,7 +293,6 @@ go test ./...
 
 - **Timezone:** Only UTC is supported. Specs with local-time temporal axes will produce different output than browser-rendered charts.
 - **Emoji:** Monochrome [Noto Emoji](https://fonts.google.com/noto/specimen/Noto+Emoji) is bundled as a fallback, so emoji have correct text metrics and rasterize (in black-and-white) in PNG output. Color emoji are not supported — resvg cannot rasterize color-bitmap (CBDT) fonts — so glyphs differ from color-emoji references.
-- **`structuredClone`:** The polyfill does not handle `undefined` values in objects, which affects a few geographic projection specs.
 - **Interactive features:** Selection and signal interactivity are evaluated at initial state only; there is no event loop.
 - **Remote images in PNG:** Image marks referencing external URLs render in SVG output (the URL is embedded as an `href`), but the PNG rasterizer runs in a sandboxed WASM module with no network access, so those images are blank in PNG output. Embedded `data:` URLs render fine.
 

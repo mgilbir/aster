@@ -196,6 +196,11 @@ func (r *Runtime) installPolyfills() error {
 						v.forEach(function(val) { s.add(clone(val)); });
 						return s;
 					}
+					// DataView before the generic isView branch: its
+					// constructor takes a buffer, not a view.
+					if (v instanceof DataView) {
+						return new DataView(v.buffer.slice(0), v.byteOffset, v.byteLength);
+					}
 					if (ArrayBuffer.isView(v)) return new v.constructor(v);
 					if (v instanceof ArrayBuffer) return v.slice(0);
 					var out = {};
@@ -224,6 +229,11 @@ func (r *Runtime) installPolyfills() error {
 		// depend on real timer ordering. A throwing callback is swallowed (as
 		// in a browser, where one timer's exception does not abort the others)
 		// so a single failing timer cannot wedge a render.
+		//
+		// setInterval is aliased to setTimeout and therefore fires exactly
+		// once. A static render has no ongoing time in which to repeat;
+		// anything that genuinely needs a repeating timer would hang the
+		// synchronous render loop instead.
 		{
 			const _timers = new Map();
 			let _nextId = 1;
