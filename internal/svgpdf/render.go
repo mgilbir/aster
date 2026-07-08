@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/go-text/typesetting/font"
 )
 
 // gstate carries the inherited graphics state down the element tree.
@@ -118,6 +120,11 @@ type renderer struct {
 	w      *contentWriter
 	clips  map[string]*element
 	shaper TextShaper
+
+	// glyphs memoizes outline extraction per (Face, GlyphID) for the lifetime
+	// of one render: axis labels repeat digits, so the same glyph is drawn
+	// many times, and Face.GlyphData re-parses the outline on each call.
+	glyphs map[glyphKey]font.GlyphOutline
 }
 
 // render translates the parsed SVG root into a content stream plus page
@@ -415,24 +422,21 @@ func (r *renderer) setPaintState(st gstate) (fill, stroke bool) {
 	if stroke {
 		r.w.strokeColor(st.stroke.Color)
 		r.w.lineWidth(st.strokeWidth)
-		// PDF's default miter limit is 10, SVG's is 4; always write the
-		// effective SVG value rather than depending on either default.
-		r.w.miterLimit(st.miterLimit)
-		if st.lineCap != 0 {
-			r.w.lineCap(st.lineCap)
-		}
-		if st.lineJoin != 0 {
-			r.w.lineJoin(st.lineJoin)
-		}
-		if len(st.dashPattern) > 0 {
-			r.w.dash(st.dashPattern, st.dashOffset)
-		}
+		// The reconcile setters emit each parameter only when it differs from
+		// the stream's current state, INCLUDING resets to the default (0 J,
+		// 0 j, [] 0 d). This is what stops a dashed/round-capped leaf from
+		// leaking that state into a following bare sibling that shares the same
+		// graphics context (leaves are wrapped in q/Q only for transform/clip).
+		r.w.setMiterLimit(st.miterLimit)
+		r.w.setLineCap(st.lineCap)
+		r.w.setLineJoin(st.lineJoin)
+		r.w.setDash(st.dashPattern, st.dashOffset)
 	}
 	fillAlpha := st.opacity * st.fillOpacity
 	strokeAlpha := st.opacity * st.strokeOpacity
-	if fillAlpha != 1 || strokeAlpha != 1 {
-		r.w.opacity(fillAlpha, strokeAlpha)
-	}
+	// setAlpha reconciles against the current alpha and resets to opaque when
+	// needed, so a translucent leaf cannot leak its alpha forward.
+	r.w.setAlpha(fillAlpha, strokeAlpha)
 	return fill, stroke
 }
 

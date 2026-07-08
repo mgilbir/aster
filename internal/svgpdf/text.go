@@ -54,10 +54,11 @@ func (r *renderer) drawText(e *element, st gstate) error {
 	}
 
 	r.w.fillColor(st.fill.Color)
+	// Reconcile the alpha (text is fill-only, so fill and stroke alpha match).
+	// setAlpha resets to opaque when a previous sibling left the stream
+	// translucent, which the old conditional "if fillAlpha != 1" could not do.
 	fillAlpha := st.opacity * st.fillOpacity
-	if fillAlpha != 1 {
-		r.w.opacity(fillAlpha, fillAlpha)
-	}
+	r.w.setAlpha(fillAlpha, fillAlpha)
 
 	emitted := false
 	for _, run := range runs {
@@ -65,10 +66,9 @@ func (r *renderer) drawText(e *element, st gstate) error {
 		// Font units → local (px) units at the shaped size.
 		scale := (float64(run.Size) / 64.0) / upem
 		for _, g := range run.Glyphs {
-			data := run.Face.GlyphData(g.GlyphID)
-			outline, ok := data.(font.GlyphOutline)
+			outline, ok := r.glyphOutline(run.Face, g.GlyphID)
 			if !ok {
-				return fmt.Errorf("svgpdf: glyph %d has non-outline data (%T); bitmap/SVG fonts are not supported", g.GlyphID, data)
+				return fmt.Errorf("svgpdf: glyph %d has non-outline data; bitmap/SVG fonts are not supported", g.GlyphID)
 			}
 			ox := penX + float64(g.XOffset)/64.0
 			oy := -float64(g.YOffset) / 64.0
@@ -84,6 +84,32 @@ func (r *renderer) drawText(e *element, st gstate) error {
 		r.w.paint(true, false, false)
 	}
 	return nil
+}
+
+// glyphKey identifies a glyph outline by its font face and glyph id, for the
+// per-render memoization cache.
+type glyphKey struct {
+	face *font.Face
+	gid  font.GID
+}
+
+// glyphOutline returns the outline for a glyph, extracting it via GlyphData on
+// first use and caching it for the rest of the render. It reports false when
+// the glyph carries non-outline data (bitmap/SVG/color fonts).
+func (r *renderer) glyphOutline(face *font.Face, gid font.GID) (font.GlyphOutline, bool) {
+	key := glyphKey{face: face, gid: gid}
+	if outline, ok := r.glyphs[key]; ok {
+		return outline, true
+	}
+	outline, ok := face.GlyphData(gid).(font.GlyphOutline)
+	if !ok {
+		return font.GlyphOutline{}, false
+	}
+	if r.glyphs == nil {
+		r.glyphs = make(map[glyphKey]font.GlyphOutline)
+	}
+	r.glyphs[key] = outline
+	return outline, true
 }
 
 // emitGlyphOutline writes one glyph's outline as path operators and reports

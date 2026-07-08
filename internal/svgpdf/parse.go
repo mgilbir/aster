@@ -37,6 +37,14 @@ var supportedElements = map[string]bool{
 	"clipPath": true,
 }
 
+// maxNestingDepth bounds element nesting. SVGToPDF is public API accepting
+// arbitrary SVG, and the tree is later walked recursively (collectClipPaths,
+// renderer.element), so a pathologically nested document could otherwise
+// exhaust the goroutine stack. Vega emits well under 20 levels; 512 leaves a
+// wide margin while turning an abusive document into a clean error. Bounding
+// the tree here bounds every downstream recursion over it.
+const maxNestingDepth = 512
+
 // parseSVG parses an SVG document into an element tree, rejecting elements
 // outside the supported subset.
 func parseSVG(svg string) (*element, error) {
@@ -80,6 +88,9 @@ func parseSVG(svg string) (*element, error) {
 				parent.children = append(parent.children, el)
 			}
 			stack = append(stack, el)
+			if len(stack) > maxNestingDepth {
+				return nil, fmt.Errorf("svgpdf: SVG nesting exceeds %d levels", maxNestingDepth)
+			}
 		case xml.EndElement:
 			if len(stack) == 0 {
 				return nil, fmt.Errorf("svgpdf: unbalanced SVG markup")

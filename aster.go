@@ -237,6 +237,9 @@ func (c *Converter) SVGToPNG(svg string, opts ...PNGOption) ([]byte, error) {
 
 // VegaToPDF renders a Vega spec (JSON) to a single-page vector PDF.
 func (c *Converter) VegaToPDF(spec []byte) ([]byte, error) {
+	if c.closed {
+		return nil, errConverterClosed
+	}
 	svg, err := c.VegaToSVG(spec)
 	if err != nil {
 		return nil, err
@@ -246,6 +249,9 @@ func (c *Converter) VegaToPDF(spec []byte) ([]byte, error) {
 
 // VegaLiteToPDF renders a Vega-Lite spec (JSON) to a single-page vector PDF.
 func (c *Converter) VegaLiteToPDF(spec []byte) ([]byte, error) {
+	if c.closed {
+		return nil, errConverterClosed
+	}
 	svg, err := c.VegaLiteToSVG(spec)
 	if err != nil {
 		return nil, err
@@ -262,6 +268,11 @@ func (c *Converter) VegaLiteToPDF(spec []byte) ([]byte, error) {
 // (gradients, images, embedded CSS, ...) return a descriptive error rather
 // than a silently incomplete chart; callers can fall back to SVGToPNG.
 func (c *Converter) SVGToPDF(svg string) ([]byte, error) {
+	if c.closed {
+		// Without this guard a post-Close call would lazily build a fresh PDF
+		// measurer (matching SVGToPNG's closed-converter contract).
+		return nil, errConverterClosed
+	}
 	m, err := c.pdfMeasurerInit()
 	if err != nil {
 		return nil, err
