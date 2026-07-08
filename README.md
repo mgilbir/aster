@@ -83,6 +83,12 @@ aster svg -i chart.vl.json -o chart.svg
 # Render a spec to PNG at 2x scale
 aster png -i chart.vl.json -o chart.png -scale 2
 
+# Render a spec to vector PDF (subset-embedded fonts, selectable text)
+aster pdf -i chart.vl.json -o chart.pdf
+
+# ...with fonts referenced by name only, for later assembly-time embedding
+aster pdf -i chart.vl.json -o chart.pdf -text named
+
 # Pipe from stdin to stdout
 cat chart.vl.json | aster svg > chart.svg
 
@@ -101,7 +107,7 @@ aster svg -i chart.vl.json -allow-domain cdn.jsdelivr.net
 
 The CLI auto-detects Vega vs Vega-Lite from the `$schema` field. If absent, Vega-Lite is assumed.
 
-Shared flags: `-i`/`-o` (input/output, stdin/stdout when omitted), `-version`, `-timeout`, `-allow-http`, and `-allow-domain` (repeatable; implies `-allow-http`). `png` also accepts `-scale` and `-recode`.
+Shared flags: `-i`/`-o` (input/output, stdin/stdout when omitted), `-version`, `-timeout`, `-allow-http`, and `-allow-domain` (repeatable; implies `-allow-http`). `png` also accepts `-scale` and `-recode`; these don't apply to `pdf` since it's vector output. `pdf` accepts `-text embed|named|outlines` to pick the [PDF text mode](#options) (default `embed`).
 
 ## API
 

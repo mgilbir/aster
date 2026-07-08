@@ -1,9 +1,10 @@
-// Command aster converts Vega and Vega-Lite specs to SVG and PNG.
+// Command aster converts Vega and Vega-Lite specs to SVG, PNG, and PDF.
 //
 // Usage:
 //
 //	aster svg -i input.vl.json -o output.svg
 //	aster png -i input.vl.json -o output.png -scale 2
+//	aster pdf -i input.vl.json -o output.pdf
 //	cat spec.json | aster svg > output.svg      # stdin/stdout
 //	aster compile -i input.vl.json              # Vega-Lite → Vega JSON
 package main
@@ -40,6 +41,7 @@ const usage = `usage: aster <command> [flags]
 Commands:
   svg      Render spec to SVG
   png      Render spec to PNG
+  pdf      Render spec to vector PDF
   compile  Compile Vega-Lite to Vega JSON
 
 Run "aster <command> -h" for command-specific flags.`
@@ -55,6 +57,8 @@ func run() error {
 		return runSVG(os.Args[2:])
 	case "png":
 		return runPNG(os.Args[2:])
+	case "pdf":
+		return runPDF(os.Args[2:])
 	case "compile":
 		return runCompile(os.Args[2:])
 	case "-h", "--help", "help":
@@ -203,6 +207,60 @@ func runPNG(args []string) (err error) {
 		data, err = c.VegaLiteToPNG(spec, pngOpts...)
 	} else {
 		data, err = c.VegaToPNG(spec, pngOpts...)
+	}
+	if err != nil {
+		return err
+	}
+
+	return writeOutput(*output, data)
+}
+
+func runPDF(args []string) (err error) {
+	fs := flag.NewFlagSet("pdf", flag.ExitOnError)
+	input := fs.String("i", "", "input spec file (- or omit for stdin)")
+	output := fs.String("o", "", "output PDF file (omit for stdout)")
+	textMode := fs.String("text", "embed", "PDF text mode: embed (subset fonts, selectable text), named (no font program; the assembling document must embed the same font), or outlines (glyphs as paths)")
+	co := registerCommonOpts(fs)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	var pdfOpts []aster.PDFOption
+	switch *textMode {
+	case "embed":
+		// library default
+	case "named":
+		pdfOpts = append(pdfOpts, aster.WithPDFText(aster.PDFTextNamed))
+	case "outlines":
+		pdfOpts = append(pdfOpts, aster.WithPDFText(aster.PDFTextOutlines))
+	default:
+		return fmt.Errorf("invalid -text %q (must be embed, named, or outlines)", *textMode)
+	}
+
+	spec, err := readInput(*input)
+	if err != nil {
+		return err
+	}
+
+	opts, err := co.options()
+	if err != nil {
+		return err
+	}
+	c, err := aster.New(opts...)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if e := c.Close(); e != nil && err == nil {
+			err = e
+		}
+	}()
+
+	var data []byte
+	if isVegaLite(spec) {
+		data, err = c.VegaLiteToPDF(spec, pdfOpts...)
+	} else {
+		data, err = c.VegaToPDF(spec, pdfOpts...)
 	}
 	if err != nil {
 		return err
