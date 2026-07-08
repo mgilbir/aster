@@ -25,9 +25,10 @@ import (
 type MeasurerOption func(*measurerConfig)
 
 type measurerConfig struct {
-	systemFonts    bool
-	fonts          []customFont
-	fallbackFamily string
+	systemFonts     bool
+	fonts           []customFont
+	fallbackFamily  string
+	monospaceFamily string
 }
 
 type customFont struct {
@@ -59,12 +60,23 @@ func WithDefaultFontFamily(family string) MeasurerOption {
 	}
 }
 
+// WithDefaultMonospaceFamily sets the concrete font family the generic CSS
+// "monospace" family resolves to. Defaults to "Liberation Mono" (embedded).
+// It mirrors the resvg rasterization pipeline's monospace mapping so SVG
+// layout measurement and PNG rendering agree on what "monospace" means.
+func WithDefaultMonospaceFamily(family string) MeasurerOption {
+	return func(c *measurerConfig) {
+		c.monospaceFamily = family
+	}
+}
+
 // Measurer computes text widths using HarfBuzz shaping.
 type Measurer struct {
-	mu             sync.Mutex
-	fontMap        *fontscan.FontMap
-	shaper         shaping.HarfbuzzShaper
-	fallbackFamily string
+	mu              sync.Mutex
+	fontMap         *fontscan.FontMap
+	shaper          shaping.HarfbuzzShaper
+	fallbackFamily  string
+	monospaceFamily string
 }
 
 // New creates a Measurer with embedded Liberation Sans fonts for
@@ -125,8 +137,12 @@ func New(opts ...MeasurerOption) (*Measurer, error) {
 	if fallback == "" {
 		fallback = "Liberation Sans"
 	}
+	monospace := cfg.monospaceFamily
+	if monospace == "" {
+		monospace = "Liberation Mono"
+	}
 
-	return &Measurer{fontMap: fm, fallbackFamily: fallback}, nil
+	return &Measurer{fontMap: fm, fallbackFamily: fallback, monospaceFamily: monospace}, nil
 }
 
 // CSSFont represents a parsed CSS font shorthand string.
@@ -148,8 +164,16 @@ func (m *Measurer) MeasureText(text, cssFont string) float64 {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	families := make([]string, 0, len(parsed.Family)+2)
-	families = append(families, parsed.Family...)
+	families := make([]string, 0, len(parsed.Family)+3)
+	for _, fam := range parsed.Family {
+		// Resolve the generic "monospace" family to the configured concrete
+		// family (tried first), mirroring the resvg pipeline so measurement
+		// and rasterization agree. Other generics fall through to fallback.
+		if strings.EqualFold(fam, "monospace") && m.monospaceFamily != "" {
+			families = append(families, m.monospaceFamily)
+		}
+		families = append(families, fam)
+	}
 	// Always add the configured fallback font family.
 	families = append(families, m.fallbackFamily, fontscan.SansSerif)
 

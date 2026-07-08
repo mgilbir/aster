@@ -53,6 +53,7 @@ func (p fontPlan) measurerOptions() []textmeasure.MeasurerOption {
 		opts = append(opts, textmeasure.WithFont(f.family, f.data))
 	}
 	opts = append(opts, textmeasure.WithDefaultFontFamily(p.sansSerif))
+	opts = append(opts, textmeasure.WithDefaultMonospaceFamily(p.monospace))
 	return opts
 }
 

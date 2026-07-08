@@ -123,3 +123,39 @@ func TestMeasureText(t *testing.T) {
 		t.Errorf("empty text should be 0, got %v", w4)
 	}
 }
+
+// The generic "monospace" family must resolve to the embedded monospace face,
+// not silently fall back to the sans-serif default. Proportional text ("il")
+// is far narrower than fixed-width text in a real monospace font, so the two
+// advances must differ; before monospace resolution was wired in, "monospace"
+// fell through to Liberation Sans and the advances matched.
+func TestMonospaceResolvesToMonoFace(t *testing.T) {
+	m, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const probe = "iiill" // very narrow in a proportional font, uniform in mono
+	sans := m.MeasureText(probe, "13px sans-serif")
+	mono := m.MeasureText(probe, "13px monospace")
+	if sans <= 0 || mono <= 0 {
+		t.Fatalf("zero advance: sans=%.2f mono=%.2f", sans, mono)
+	}
+	if mono <= sans*1.2 {
+		t.Fatalf("monospace advance %.2f not distinctly wider than sans %.2f — monospace likely still falling back to sans", mono, sans)
+	}
+}
+
+// An explicit override family is honored for the monospace generic.
+func TestWithDefaultMonospaceFamilyOverride(t *testing.T) {
+	// Overriding to the sans family collapses the mono/sans distinction.
+	m, err := New(WithDefaultMonospaceFamily("Liberation Sans"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const probe = "iiill"
+	sans := m.MeasureText(probe, "13px sans-serif")
+	mono := m.MeasureText(probe, "13px monospace")
+	if mono != sans {
+		t.Fatalf("with monospace overridden to the sans family, advances should match: sans=%.2f mono=%.2f", sans, mono)
+	}
+}
