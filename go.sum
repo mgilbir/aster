@@ -6,6 +6,8 @@ github.com/mgilbir/andsifr v0.0.0-20260706220517-1793eb745c6f h1:1zvMjWXOWwVoCET
 github.com/mgilbir/andsifr v0.0.0-20260706220517-1793eb745c6f/go.mod h1:Uh3/Oswp1l5MwPdGoLvNMnUbxq1mYDyrE0Vszec79W4=
 github.com/mgilbir/pdf0 v0.0.0-20260708091534-70a027f18419 h1:CRnftl0CLifj8jW7p8xikUy04yhnLPe+eTSMFrstqxk=
 github.com/mgilbir/pdf0 v0.0.0-20260708091534-70a027f18419/go.mod h1:r5SerkxVXSapSBXhomECyMp8gzZsUCOXRQvkOi8xsqw=
+github.com/mgilbir/pdf0 v0.0.0-20260709080448-5166e754d24f h1:Wqa0QGrtcMpQ8BM3oD4uc5zOH2CnaGzanYrOZE/eZSQ=
+github.com/mgilbir/pdf0 v0.0.0-20260709080448-5166e754d24f/go.mod h1:r5SerkxVXSapSBXhomECyMp8gzZsUCOXRQvkOi8xsqw=
 golang.org/x/image v0.35.0 h1:LKjiHdgMtO8z7Fh18nGY6KDcoEtVfsgLDPeLyguqb7I=
 golang.org/x/image v0.35.0/go.mod h1:MwPLTVgvxSASsxdLzKrl8BRFuyqMyGhLwmC+TO1Sybk=
 golang.org/x/sys v0.44.0 h1:ildZl3J4uzeKP07r2F++Op7E9B29JRUy+a27EibtBTQ=
