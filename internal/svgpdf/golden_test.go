@@ -286,9 +286,9 @@ func TestPDFAValidatorGaps(t *testing.T) {
 	}
 	// PDF/A-only requirements a plain PDF 1.4 intentionally does not meet.
 	allowed := map[string]bool{
-		"6.1.3": true, // trailer must contain /ID array
-		"6.2.4": true, // DeviceRGB requires an OutputIntent
-		"6.7.2": true, // catalog must have /Metadata
+		"6.1.3":   true, // trailer must contain /ID array
+		"6.2.3.3": true, // DeviceRGB requires an OutputIntent or DefaultRGB
+		"6.7.2":   true, // catalog must have /Metadata
 	}
 	for _, e := range pdf0.ValidatePDFABytes(doc, pdf0.PDFA1b, pdf) {
 		if !allowed[e.Rule] {
