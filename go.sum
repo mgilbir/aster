@@ -4,10 +4,8 @@ github.com/go-text/typesetting-utils v0.0.0-20250618110550-c820a94c77b8 h1:4KCsc
 github.com/go-text/typesetting-utils v0.0.0-20250618110550-c820a94c77b8/go.mod h1:3/62I4La/HBRX9TcTpBj4eipLiwzf+vhI+7whTc9V7o=
 github.com/mgilbir/andsifr v0.0.0-20260706220517-1793eb745c6f h1:1zvMjWXOWwVoCET7oavSdOIVnCJV4d5hDdtoJUrWDUg=
 github.com/mgilbir/andsifr v0.0.0-20260706220517-1793eb745c6f/go.mod h1:Uh3/Oswp1l5MwPdGoLvNMnUbxq1mYDyrE0Vszec79W4=
-github.com/mgilbir/pdf0 v0.0.0-20260708091534-70a027f18419 h1:CRnftl0CLifj8jW7p8xikUy04yhnLPe+eTSMFrstqxk=
-github.com/mgilbir/pdf0 v0.0.0-20260708091534-70a027f18419/go.mod h1:r5SerkxVXSapSBXhomECyMp8gzZsUCOXRQvkOi8xsqw=
-github.com/mgilbir/pdf0 v0.0.0-20260709080448-5166e754d24f h1:Wqa0QGrtcMpQ8BM3oD4uc5zOH2CnaGzanYrOZE/eZSQ=
-github.com/mgilbir/pdf0 v0.0.0-20260709080448-5166e754d24f/go.mod h1:r5SerkxVXSapSBXhomECyMp8gzZsUCOXRQvkOi8xsqw=
+github.com/mgilbir/pdf0 v0.0.0-20260713132301-d64f4f0850be h1:361k1V33wT/06TddPcktZIyN8COACBb7JiyAUwIn+jw=
+github.com/mgilbir/pdf0 v0.0.0-20260713132301-d64f4f0850be/go.mod h1:r5SerkxVXSapSBXhomECyMp8gzZsUCOXRQvkOi8xsqw=
 golang.org/x/image v0.35.0 h1:LKjiHdgMtO8z7Fh18nGY6KDcoEtVfsgLDPeLyguqb7I=
 golang.org/x/image v0.35.0/go.mod h1:MwPLTVgvxSASsxdLzKrl8BRFuyqMyGhLwmC+TO1Sybk=
 golang.org/x/sys v0.44.0 h1:ildZl3J4uzeKP07r2F++Op7E9B29JRUy+a27EibtBTQ=
