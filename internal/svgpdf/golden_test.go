@@ -12,6 +12,7 @@ import (
 
 	"github.com/mgilbir/aster/internal/textmeasure"
 	pdf0 "github.com/mgilbir/pdf0"
+	"github.com/mgilbir/pdf0/pdfa"
 )
 
 // TestConvertGoldenSVGs translates every checked-in Vega golden SVG and
@@ -290,7 +291,7 @@ func TestPDFAValidatorGaps(t *testing.T) {
 		"6.2.3.3": true, // DeviceRGB requires an OutputIntent or DefaultRGB
 		"6.7.2":   true, // catalog must have /Metadata
 	}
-	for _, e := range pdf0.ValidatePDFABytes(doc, pdf0.PDFA1b, pdf) {
+	for _, e := range pdf0.ValidatePDFA(doc, pdfa.PDFA1b) {
 		if !allowed[e.Rule] {
 			t.Errorf("unexpected validation error: %v", e)
 		}
