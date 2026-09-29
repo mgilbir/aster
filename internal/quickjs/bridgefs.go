@@ -165,10 +165,12 @@ func (m *memFile) Seek(offset int64, whence int) (int64, error) {
 // dirFile is the empty directory served as the bridge mount root.
 type dirFile struct{}
 
-func (dirFile) Stat() (fs.FileInfo, error)               { return dirFileInfo{}, nil }
-func (dirFile) Read([]byte) (int, error)                 { return 0, &fs.PathError{Op: "read", Path: ".", Err: fs.ErrInvalid} }
-func (dirFile) Close() error                             { return nil }
-func (dirFile) ReadDir(int) ([]fs.DirEntry, error)       { return nil, io.EOF }
+func (dirFile) Stat() (fs.FileInfo, error) { return dirFileInfo{}, nil }
+func (dirFile) Read([]byte) (int, error) {
+	return 0, &fs.PathError{Op: "read", Path: ".", Err: fs.ErrInvalid}
+}
+func (dirFile) Close() error                       { return nil }
+func (dirFile) ReadDir(int) ([]fs.DirEntry, error) { return nil, io.EOF }
 
 type dirFileInfo struct{}
 

@@ -57,7 +57,7 @@ func buildPDF(content []byte, gsList []gsEntry, fonts *fontCatalog, width, heigh
 		if err != nil {
 			return nil, err
 		}
-		if len(fontRes.Keys) > 0 {
+		if fontRes.Len() > 0 {
 			resources.Set("Font", fontRes)
 		}
 	}
@@ -99,11 +99,8 @@ func buildPDF(content []byte, gsList []gsEntry, fonts *fontCatalog, width, heigh
 	doc := &pdf0.Document{
 		Version: "1.4",
 		Objects: objects,
-		Trailer: pdf0.Dictionary{
-			Keys:   []pdf0.Name{"Root"},
-			Values: []pdf0.Object{pdf0.IndirectRef{Number: 1}},
-		},
 	}
+	doc.Trailer.Set("Root", pdf0.IndirectRef{Number: 1})
 
 	var out bytes.Buffer
 	if err := doc.Write(&out); err != nil {
