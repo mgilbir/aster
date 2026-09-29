@@ -6,7 +6,8 @@ import (
 )
 
 // Manual microbenchmarks comparing engine hot spots. Run explicitly:
-//   go test ./internal/quickjs/ -run TestPerfProbe -v
+//
+//	go test ./internal/quickjs/ -run TestPerfProbe -v
 func TestPerfProbe(t *testing.T) {
 	if testing.Short() {
 		t.Skip("manual probe")

@@ -39,10 +39,10 @@ const (
 // jsStackSize is the JS engine stack budget; see initEngine for rationale.
 const jsStackSize = 1 << 20
 
-func valueTag(v uint64) int32     { return int32(v >> 32) }
-func valuePtr(v uint64) uint32    { return uint32(v) }
-func isException(v uint64) bool   { return valueTag(v) == jsTagException }
-func isUndefined(v uint64) bool   { return valueTag(v) == jsTagUndefined }
+func valueTag(v uint64) int32   { return int32(v >> 32) }
+func valuePtr(v uint64) uint32  { return uint32(v) }
+func isException(v uint64) bool { return valueTag(v) == jsTagException }
+func isUndefined(v uint64) bool { return valueTag(v) == jsTagUndefined }
 
 // Config configures a Runtime.
 type Config struct {
@@ -72,26 +72,26 @@ type Runtime struct {
 	wrt wazero.Runtime
 	mod api.Module
 
-	fnMalloc              api.Function
-	fnFree                api.Function
-	fnQJSInitArgv         api.Function
-	fnQJSGetContext       api.Function
-	fnQJSDestroy          api.Function
-	fnGetRuntime          api.Function
-	fnSetMemoryLimit      api.Function
-	fnSetMaxStackSize     api.Function
-	fnUpdateStackTop      api.Function
-	fnEval                api.Function
-	fnEvalFunction        api.Function
-	fnExecutePendingJob   api.Function
-	fnPromiseState        api.Function
-	fnPromiseResult       api.Function
-	fnGetModuleNamespace  api.Function
-	fnGetPropertyStr      api.Function
-	fnToCStringLen2       api.Function
-	fnFreeCString         api.Function
-	fnFreeValue           api.Function
-	fnGetException        api.Function
+	fnMalloc             api.Function
+	fnFree               api.Function
+	fnQJSInitArgv        api.Function
+	fnQJSGetContext      api.Function
+	fnQJSDestroy         api.Function
+	fnGetRuntime         api.Function
+	fnSetMemoryLimit     api.Function
+	fnSetMaxStackSize    api.Function
+	fnUpdateStackTop     api.Function
+	fnEval               api.Function
+	fnEvalFunction       api.Function
+	fnExecutePendingJob  api.Function
+	fnPromiseState       api.Function
+	fnPromiseResult      api.Function
+	fnGetModuleNamespace api.Function
+	fnGetPropertyStr     api.Function
+	fnToCStringLen2      api.Function
+	fnFreeCString        api.Function
+	fnFreeValue          api.Function
+	fnGetException       api.Function
 
 	ctxPtr  uint32 // JSContext*
 	rtPtr   uint32 // JSRuntime*

@@ -281,11 +281,11 @@ func TestVLConvertPNGSpecs(t *testing.T) {
 	// Scale factors per spec (from vl-convert test_specs.rs).
 	scale2x := map[string]bool{
 		"bar_chart_trellis_compact": true,
-		"stacked_bar_h":            true,
-		"stacked_bar_h2":           true,
-		"line_with_log_scale":      true,
-		"font_with_quotes":         true,
-		"stocks_locale":            true,
+		"stacked_bar_h":             true,
+		"stacked_bar_h2":            true,
+		"line_with_log_scale":       true,
+		"font_with_quotes":          true,
+		"stocks_locale":             true,
 	}
 
 	// Known failures / skips specific to PNG comparison.

@@ -47,7 +47,7 @@ type Runtime struct {
 
 // versionIndex matches the top-level versions.json from the vendoring tool.
 type versionIndex struct {
-	Default  string                    `json:"default"`
+	Default  string                     `json:"default"`
 	Versions map[string]versionIndexDef `json:"versions"`
 }
 
