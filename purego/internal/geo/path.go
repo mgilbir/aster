@@ -25,6 +25,13 @@ type Path struct {
 	// bctx carries the render's budget and cancellation (see Bind).
 	bctx context.Context
 	bud  *budget.Budget
+	lim  *limitSink // reused wrapper around str or cs, so the projection's pipeline is too
+	cs   *pathContextStream
+
+	// walking is set while a string walk is in progress; still set at the next
+	// call means the last walk was cut short (a limit panic) and left the
+	// cached pipeline in a half-finished state.
+	walking bool
 }
 
 // LimitError is the panic value that stops a path walk whose point budget is
@@ -50,6 +57,9 @@ type limitSink struct {
 	p *Path
 	n int
 }
+
+func (*limitSink) reusableSink()  {}
+func (*pathString) reusableSink() {}
 
 func (s *limitSink) Point(x, y float64) {
 	s.n++
@@ -115,12 +125,25 @@ func (p *Path) restoreRadius(s radiusState) {
 
 func (p *Path) stream(object jsval.Value, sink Stream) {
 	if p.bctx != nil {
-		sink = &limitSink{Stream: sink, p: p}
+		if _, ok := sink.(reusableSink); ok {
+			// The same wrapper every call, so the projection can reuse its pipeline.
+			if p.lim == nil || p.lim.Stream != sink {
+				p.lim = &limitSink{Stream: sink, p: p}
+			}
+			sink = p.lim
+		} else {
+			sink = &limitSink{Stream: sink, p: p}
+		}
 	}
 	if p.proj != nil {
+		if d, ok := p.proj.(interface{ dropStreamCache() }); ok && p.walking {
+			d.dropStreamCache()
+		}
 		sink = p.proj.Stream(sink)
 	}
+	p.walking = true
 	StreamObject(object, sink)
+	p.walking = false
 }
 
 // String renders the object as SVG path data. ok is false when nothing was
@@ -150,13 +173,26 @@ func (p *Path) Draw(object jsval.Value) {
 	if p.ctx == nil || !object.IsTruthy() {
 		return
 	}
-	s := newPathContextStream(p.ctx)
+	s := p.contextStream()
 	if p.radiusFn != nil {
 		s.pointRadius(p.radiusFn(object))
 	} else {
 		s.pointRadius(p.radius)
 	}
 	p.stream(object, s)
+}
+
+// contextStream is the stream drawing onto the path's context. Contexts that
+// declare themselves reusable (they are pointers that outlive one call) keep
+// their stream, and with it the projection's pipeline, from one object to the next.
+func (p *Path) contextStream() *pathContextStream {
+	if _, ok := p.ctx.(ReusableContext); !ok {
+		return newPathContextStream(p.ctx)
+	}
+	if p.cs == nil || p.cs.ctx != p.ctx {
+		p.cs = newPathContextStream(p.ctx)
+	}
+	return p.cs
 }
 
 // Area is the planar area of the projected object.

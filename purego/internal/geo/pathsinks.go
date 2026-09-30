@@ -13,6 +13,12 @@ type PathContext interface {
 	ClosePath()
 }
 
+// ReusableContext is implemented by PathContexts that are comparable pointers
+// living across calls, so a Path may keep a stream for them.
+type ReusableContext interface{ ReusableContext() }
+
+func (*pathContextStream) reusableSink() {}
+
 // pathContextStream is d3-geo's PathContext stream: it draws projected geometry
 // onto a PathContext.
 type pathContextStream struct {

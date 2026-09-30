@@ -16,23 +16,40 @@ defer c.Close()
 svg, err := c.VegaLiteToSVG(spec)
 ```
 
+## Concurrency
+
+A `Converter` is safe for concurrent use by any number of goroutines: share one
+for the whole process instead of creating one per request. Each call renders
+on state of its own and returns what it would return alone; what the calls
+share (fonts and their shaping caches, number and time locales, colour schemes,
+compiled expressions) is immutable or synchronized. One Converter loads fonts and fills caches once, so it costs less memory and start-up time; for peak throughput on many cores, one per goroutine is faster (see Performance). A `Loader`
+given to `WithLoader` is called from several goroutines at once and must be
+safe for that (the loaders in this package are). `Close` may be called at any
+time: it cancels the calls in flight, waits for them, closes the loader, and
+every later call returns an error. The root `aster` Converter, which wraps a
+single JavaScript runtime, is not safe for concurrent use.
+`TestConcurrentConverterSharesNothing` and `TestConcurrentCloseDuringRender`
+check this under `-race`.
+
 ## Status
 
-Measured on the corpus in `testdata/corpus` (260 Vega fixtures, 332 Vega-Lite
-fixtures) plus the root package's 627 Vega-Lite examples and 23 vl-convert
-specs:
+Measured on 1,347 specs: the corpus in `testdata/corpus` (260 Vega fixtures,
+332 Vega-Lite fixtures, upstream Vega's 92 example specs, 13 fuzz-found
+regression cases) plus the root package's 627 Vega-Lite examples and 23
+vl-convert specs:
 
 | Comparison | Result |
 |---|---|
-| SVG vs the root (QuickJS) engine | 1,226 of 1,233 identical or equal within 0.01 px; the other 7 are cases where the reference itself departs from V8 (see below) or that draw the current time |
-| Vega-Lite → Vega vs the root engine | 975 of 975 identical |
-| Vega-Lite → Vega vs upstream vega-lite 6.4.3 | 1,924 corpus specs + 27,513 property-sweep cases byte-identical, key order included |
-| SVG vs upstream Vega 6.4.0 in node | 612 of 627 within 0.5 px; the rest are 1 px width differences from text-advance rounding (both engines round advances like HarfBuzz; node-canvas does not) and emoji fonts |
-| PNG vs resvg | mean absolute error 0.074 / 255 per channel over 624 renders |
+| SVG vs the root (QuickJS) engine | 1,320 identical or equal within 0.01 px, 0 different, 0 purego errors; 15 are rejected by the reference engine too (mostly canvas-only transforms), and 12 are cases where the reference itself departs from V8 (see below) or that draw the current time |
+| Vega-Lite → Vega vs the root engine | 979 of 979 identical |
+| Vega-Lite → Vega vs upstream | vega-lite 6.4.3 and 5.8.0 each: 1,924 corpus specs and 959 themed compilations byte-identical, key order included |
+| SVG vs upstream Vega 6.4.0 in node | 624 of 627 byte-identical, 1 equal within 0.5 px; the 2 others measure emoji with a colour emoji font |
+| PNG vs resvg | mean absolute error 0.073 / 255 per channel over 627 renders |
 
 Specs where the reference engine, not purego, departs from V8 (confirmed
 against node): `Infinity` formatted without Intl, QuickJS's last-bit
-trigonometry, and QuickJS's sort order for inconsistent comparators.
+trigonometry, its sort order for inconsistent comparators, its
+`Date.prototype.toString` zone name and its lenient `Date.parse`.
 
 ## Performance
 
@@ -41,11 +58,25 @@ its own loader):
 
 | Spec | SVG QuickJS | SVG purego | PNG QuickJS | PNG purego |
 |---|---|---|---|---|
-| `bar` | 48 ms | 1.4 ms | 158 ms | 4.5 ms |
-| `trellis_bar` | 96 ms | 2.6 ms | 236 ms | 14.7 ms |
-| `repeat_splom` | 1,783 ms | 34 ms | 2,444 ms | 105 ms |
-| `geo_choropleth` | 6,505 ms | 115 ms | 9,201 ms | 131 ms |
+| `bar` | 48 ms | 0.9 ms | 158 ms | 4.5 ms |
+| `trellis_bar` | 96 ms | 2.4 ms | 236 ms | 14.7 ms |
+| `repeat_splom` | 1,783 ms | 29 ms | 2,444 ms | 105 ms |
+| `geo_choropleth` | 6,505 ms | 85 ms | 9,201 ms | 131 ms |
 | `New` + first render | 238 ms | 3.9 ms | | |
+
+SVG allocations per render (`geo_choropleth`: 1.09 M objects and 116 MB before,
+0.18 M and 46 MB now). Throughput of the `BenchmarkParallel` mix (bar,
+trellis_bar, scatter plot, stacked area, treemap; renders per second, 10 cores):
+
+| Goroutines | 1 | 4 | 10 |
+|---|---|---|---|
+| one shared `Converter` | ~760 | ~1,900 | ~2,300 |
+| one `Converter` each | ~750 | ~2,150 | ~3,000 |
+
+A render is allocation-heavy, and past about four goroutines the garbage
+collector appears to be the limit; `GOGC` / `GOMEMLIMIT` tuning has not been
+measured. A shared `Converter` gives about 25% less throughput than one per
+goroutine at ten goroutines; the remaining contention has not been found.
 
 ## What differs from the root package
 

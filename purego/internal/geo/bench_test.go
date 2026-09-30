@@ -129,3 +129,31 @@ func BenchmarkGeoCentroidBoundsArea(b *testing.B) {
 		GeoCentroid(countries)
 	}
 }
+
+// drawSink is a PathContext that reuses one stream across features, as the
+// scenegraph's bounds pass does.
+type drawSink struct{ n int }
+
+func (d *drawSink) MoveTo(x, y float64)                   { d.n++ }
+func (d *drawSink) LineTo(x, y float64)                   { d.n++ }
+func (d *drawSink) Arc(x, y, r, a0, a1 float64, ccw bool) { d.n++ }
+func (d *drawSink) ClosePath()                            { d.n++ }
+func (*drawSink) ReusableContext()                        {}
+
+// BenchmarkPerFeatureDraw is BenchmarkPerFeaturePath drawing onto a context.
+func BenchmarkPerFeatureDraw(b *testing.B) {
+	_, countries := benchCountries(b)
+	p, _ := NewProjection("naturalEarth1")
+	p.FitSize(960, 500, countries)
+	path := p.Path()
+	ctx := &drawSink{}
+	path.SetContext(ctx)
+	feats := countries.Get("features").Items()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for _, f := range feats {
+			path.Draw(f)
+		}
+	}
+}

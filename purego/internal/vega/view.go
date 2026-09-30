@@ -369,7 +369,7 @@ func (v *runView) initResize() {
 			resetSize()
 			return nil
 		}
-		g.connect(n, n.parameters(map[string]any{"size": v.widthSig}, []string{"size"}, true, false))
+		g.connect(n, n.parameters(single("size", v.widthSig), true, false))
 		n.rank = v.widthSig.rank + 1
 		v.resizeWidth = n
 	}
@@ -382,7 +382,7 @@ func (v *runView) initResize() {
 			resetSize()
 			return nil
 		}
-		g.connect(n, n.parameters(map[string]any{"size": v.heightSig}, []string{"size"}, true, false))
+		g.connect(n, n.parameters(single("size", v.heightSig), true, false))
 		n.rank = v.heightSig.rank + 1
 		v.resizeHeight = n
 	}
@@ -390,7 +390,7 @@ func (v *runView) initResize() {
 		n := g.add("resize-padding", nil)
 		n.ctx = v.root
 		n.update = func(n *opNode, p *opParams) any { resetSize(); return nil }
-		g.connect(n, n.parameters(map[string]any{"pad": v.paddingSig}, []string{"pad"}, true, false))
+		g.connect(n, n.parameters(single("pad", v.paddingSig), true, false))
 		n.rank = v.paddingSig.rank + 1
 	}
 }
@@ -407,7 +407,7 @@ func (v *runView) initBackground() {
 		v.resize = 1
 		return v.bgValue
 	}
-	g.connect(n, n.parameters(map[string]any{"bg": v.backgroundSig}, []string{"bg"}, true, false))
+	g.connect(n, n.parameters(single("bg", v.backgroundSig), true, false))
 }
 
 // run evaluates the dataflow (View.runAsync).
@@ -544,4 +544,11 @@ func (v *runView) addSignalListener(c *rtContext, src, tgt *opNode, u *updateSpe
 	l.argval = newParams()
 	l.addTarget(tgt)
 	g.connect(tgt, []*opNode{l})
+}
+
+// single is a parameter map of one entry.
+func single(name string, v any) *smallMap[any] {
+	m := &smallMap[any]{}
+	m.set(name, v)
+	return m
 }

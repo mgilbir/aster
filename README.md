@@ -275,7 +275,7 @@ Custom fonts are used for both text measurement (SVG layout) and PNG rendering.
 
 ## Pure-Go engine (experimental)
 
-[`purego`](purego/) is a second engine with the same API — `purego.New`, the same options, loaders and conversion methods — written entirely in Go: no QuickJS, no resvg, no WebAssembly. It follows the same Vega 6.4.0 / Vega-Lite 6.4.3 (and compiles Vega-Lite 5.8.0), matches this package's SVG on the comparison corpus, and renders 30–60× faster. See [purego/README.md](purego/README.md) for its status and differences.
+[`purego`](purego/) is a second engine with the same API — `purego.New`, the same options, loaders and conversion methods — written entirely in Go: no QuickJS, no resvg, no WebAssembly. It follows the same Vega 6.4.0 / Vega-Lite 6.4.3 (and compiles Vega-Lite 5.8.0), matches this package's SVG on the comparison corpus, renders SVG 40–75× faster, and a single `Converter` is safe for concurrent use. See [purego/README.md](purego/README.md) for its status and differences.
 
 ## Developer notes
 

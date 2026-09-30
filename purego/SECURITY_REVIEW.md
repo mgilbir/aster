@@ -383,10 +383,12 @@ legend/guide layout, `collide`/`nbody`/link forces (poll per node batch, cap
   About 21,000 type-confusion mutants: panics only in the Vega-Lite compiler (finding 17), none in the Vega runtime, no hang.
   6,000 mutated SVGs through `SVGToPNG` and `SVGToPDF`, and 3,400 structurally mutated fonts through `WithFont`, `VegaToSVG`, `SVGToPNG`,
   `SVGToPDF`, `SubsetFont`: no panic, no "internal error", no crash.
-- **Concurrency**: no data race with 6 Converters (Vega, Vega-Lite 6.4 and 5.8, SVG / PNG / PDF) under `-race`. Package-level state is
-  read-only tables, `sync.Once` initialisations, mutex-guarded caches (`expr` case cache, `format`, `scale` schemes, `raster` fonts),
-  the Vega-Lite `v5` flag under `versionMu`, and `lazyFuncs` keyed by unique objects and cleaned per compile. A Converter itself is, as
-  documented, not safe for concurrent use.
+- **Concurrency**: no data race with 6 Converters (Vega, Vega-Lite 6.4 and 5.8, SVG / PNG / PDF) under `-race`, and none with 12 goroutines
+  sharing one Converter over the whole corpus (`TestConcurrentConverterSharesNothing`, `PUREGO_STRESS_FULL=1`; every SVG equals the serial
+  render) or with `Close` racing renders (`TestConcurrentCloseDuringRender`). Package-level state is read-only tables, `sync.Once`
+  initialisations and mutex-guarded caches (`expr` case, pattern and compiled-program caches, `format`, `scale` schemes, `raster` fonts,
+  custom symbol paths, the SVG buffer pool); everything else (dataflow, scenegraph, projections and their cached geo pipelines, random
+  generator, budgets, deadline) is per render. A Converter is safe for concurrent use; its `Loader` must be too.
 - **Loader policy** for data: every data load goes through `Sanitize` then `Load`; `HTTPLoader` checks userinfo, scheme, domain
   and every redirect hop; `FileLoader` uses `os.Root` and rejects schemes, absolute paths and `..`.
 

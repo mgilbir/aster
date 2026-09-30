@@ -5,6 +5,7 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/mgilbir/aster/purego/internal/jsval"
@@ -76,6 +77,46 @@ func Compile(src string) (*Program, error) {
 		return nil, err
 	}
 	p.src = src
+	return p, nil
+}
+
+// Compiled expressions are shared between renders: a chart compiles the same
+// few dozen expression strings (Vega-Lite emits them from a fixed set of
+// templates) every time it is drawn, and a Program is immutable. The cache is
+// bounded, since specifications choose the strings; it is dropped whole when
+// full and skips long sources.
+const (
+	programCacheMax    = 1024
+	programCacheMaxLen = 2048
+)
+
+var programCache = struct {
+	sync.Mutex
+	m map[string]*Program
+}{m: map[string]*Program{}}
+
+// CompileCached is Compile with a process-wide cache of successful compiles.
+// Errors are not cached. The Program is shared; it is safe for concurrent use.
+func CompileCached(src string) (*Program, error) {
+	if len(src) > programCacheMaxLen {
+		return Compile(src)
+	}
+	programCache.Lock()
+	p := programCache.m[src]
+	programCache.Unlock()
+	if p != nil {
+		return p, nil
+	}
+	p, err := Compile(src)
+	if err != nil {
+		return nil, err
+	}
+	programCache.Lock()
+	if len(programCache.m) >= programCacheMax {
+		clear(programCache.m)
+	}
+	programCache.m[src] = p
+	programCache.Unlock()
 	return p, nil
 }
 

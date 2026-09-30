@@ -3,6 +3,7 @@ package vegalite
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"testing"
 	"time"
 
@@ -100,24 +101,31 @@ func TestLargeSpecsScaleLinearly(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
+	// Allocated bytes are a deterministic measure of the work a compile
+	// does, unlike wall time on a machine running other tests; the
+	// quadratic behaviour this guards against (copy-on-append of signal
+	// lists) shows up in them directly. Wall time keeps a loose backstop.
 	for _, kind := range []string{"params", "layer", "concat", "transform"} {
-		run := func(n int) time.Duration {
+		run := func(n int) (uint64, time.Duration) {
 			spec := bigSpec(kind, n)
-			best := time.Hour
-			for i := 0; i < 2; i++ {
-				start := time.Now()
-				if _, err := Compile(spec, Options{}); err != nil {
-					t.Fatal(err)
-				}
-				if el := time.Since(start); el < best {
-					best = el
-				}
+			var before, after runtime.MemStats
+			runtime.GC()
+			runtime.ReadMemStats(&before)
+			start := time.Now()
+			if _, err := Compile(spec, Options{}); err != nil {
+				t.Fatal(err)
 			}
-			return best
+			el := time.Since(start)
+			runtime.ReadMemStats(&after)
+			return after.TotalAlloc - before.TotalAlloc, el
 		}
-		small, large := run(500), run(2000)
-		if large > 10*small+50*time.Millisecond {
-			t.Errorf("%s: 500 took %v but 2000 took %v (super-linear)", kind, small, large)
+		smallB, smallT := run(500)
+		largeB, largeT := run(2000)
+		if largeB > 8*smallB {
+			t.Errorf("%s: 500 allocated %d bytes but 2000 allocated %d (super-linear)", kind, smallB, largeB)
+		}
+		if largeT > 40*smallT+2*time.Second {
+			t.Errorf("%s: 500 took %v but 2000 took %v (super-linear)", kind, smallT, largeT)
 		}
 	}
 }

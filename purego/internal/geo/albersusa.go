@@ -120,6 +120,12 @@ func (a *albersUSA) Stream(sink Stream) Stream {
 	return &multiplex{a.lower48.Stream(sink), a.alaska.Stream(sink), a.hawaii.Stream(sink)}
 }
 
+func (a *albersUSA) dropStreamCache() {
+	a.lower48.dropStreamCache()
+	a.alaska.dropStreamCache()
+	a.hawaii.dropStreamCache()
+}
+
 func (a *albersUSA) Precision() float64 { return a.lower48.Precision() }
 
 func (a *albersUSA) SetPrecision(v float64) {

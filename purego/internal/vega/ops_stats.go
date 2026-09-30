@@ -192,7 +192,7 @@ func distSpec(p *opParams) transforms.DistSpec {
 
 // forceParam reads a number-or-expression force parameter.
 func forceParam(p *opParams, name string, def float64) force.Param {
-	switch v := p.vals[name].(type) {
+	switch v := p.vals.at(name).(type) {
 	case transforms.Field:
 		return force.Param{Fn: force.Accessor(v.Get)}
 	case *boundExpr:

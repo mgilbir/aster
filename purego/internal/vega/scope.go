@@ -49,35 +49,18 @@ type pTupleID struct{}
 
 // paramList is an ordered name -> P map.
 type paramList struct {
-	names []string
-	m     map[string]P
+	m smallMap[P]
 }
 
-func newParamList() *paramList { return &paramList{m: map[string]P{}} }
+func newParamList() *paramList { return &paramList{} }
 
-func (l *paramList) set(name string, v P) {
-	if _, ok := l.m[name]; !ok {
-		l.names = append(l.names, name)
-	}
-	l.m[name] = v
-}
+func (l *paramList) set(name string, v P) { l.m.set(name, v) }
 
-func (l *paramList) get(name string) P { return l.m[name] }
+func (l *paramList) get(name string) P { return l.m.at(name) }
 
-func (l *paramList) has(name string) bool { _, ok := l.m[name]; return ok }
+func (l *paramList) has(name string) bool { return l.m.has(name) }
 
-func (l *paramList) delete(name string) {
-	if _, ok := l.m[name]; !ok {
-		return
-	}
-	delete(l.m, name)
-	for i, n := range l.names {
-		if n == name {
-			l.names = append(l.names[:i], l.names[i+1:]...)
-			break
-		}
-	}
-}
+func (l *paramList) delete(name string) { l.m.delete(name) }
 
 // tmeta is a transform's definition metadata.
 type tmeta struct {

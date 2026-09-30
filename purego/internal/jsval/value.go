@@ -71,6 +71,101 @@ type Value struct {
 
 type arrayBox struct{ items []Value }
 
+// Small arrays are allocated together with their elements: one allocation
+// instead of two, which matters for the coordinate pairs of a map.
+type (
+	arrayBox1 struct {
+		arrayBox
+		buf [1]Value
+	}
+	arrayBox2 struct {
+		arrayBox
+		buf [2]Value
+	}
+	arrayBox3 struct {
+		arrayBox
+		buf [3]Value
+	}
+	arrayBox4 struct {
+		arrayBox
+		buf [4]Value
+	}
+	arrayBox5 struct {
+		arrayBox
+		buf [5]Value
+	}
+	arrayBox6 struct {
+		arrayBox
+		buf [6]Value
+	}
+	arrayBox7 struct {
+		arrayBox
+		buf [7]Value
+	}
+	arrayBox8 struct {
+		arrayBox
+		buf [8]Value
+	}
+)
+
+// ArrSlab hands out n equally sized arrays from two allocations in all, for
+// decoders that produce one small array per point.
+type ArrSlab struct {
+	boxes []arrayBox
+	vals  []Value
+	dim   int
+}
+
+// NewArrSlab prepares n arrays of dim elements each.
+func NewArrSlab(n, dim int) *ArrSlab {
+	return &ArrSlab{boxes: make([]arrayBox, n), vals: make([]Value, n*dim), dim: dim}
+}
+
+// Next returns the next array and its element slice, to be filled in.
+func (s *ArrSlab) Next() (Value, []Value) {
+	b := &s.boxes[0]
+	b.items = s.vals[:s.dim:s.dim]
+	s.boxes, s.vals = s.boxes[1:], s.vals[s.dim:]
+	return Value{k: KindArr, r: b}, b.items
+}
+
+// MakeArr makes an array of n undefined elements and returns it with its
+// element slice, to be filled in before the array is shared.
+func MakeArr(n int) (Value, []Value) {
+	var b *arrayBox
+	switch {
+	case n <= 0:
+		b = &arrayBox{}
+	case n == 1:
+		x := &arrayBox1{}
+		x.items, b = x.buf[:], &x.arrayBox
+	case n == 2:
+		x := &arrayBox2{}
+		x.items, b = x.buf[:], &x.arrayBox
+	case n == 3:
+		x := &arrayBox3{}
+		x.items, b = x.buf[:], &x.arrayBox
+	case n == 4:
+		x := &arrayBox4{}
+		x.items, b = x.buf[:], &x.arrayBox
+	case n == 5:
+		x := &arrayBox5{}
+		x.items, b = x.buf[:], &x.arrayBox
+	case n == 6:
+		x := &arrayBox6{}
+		x.items, b = x.buf[:], &x.arrayBox
+	case n == 7:
+		x := &arrayBox7{}
+		x.items, b = x.buf[:], &x.arrayBox
+	case n == 8:
+		x := &arrayBox8{}
+		x.items, b = x.buf[:], &x.arrayBox
+	default:
+		b = &arrayBox{items: make([]Value, n)}
+	}
+	return Value{k: KindArr, r: b}, b.items
+}
+
 var (
 	Undefined = Value{}
 	Null      = Value{k: KindNull}

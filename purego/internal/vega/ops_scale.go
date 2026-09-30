@@ -148,7 +148,8 @@ func facScale(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 			s = ns
 			n.value = s
 		}
-		for _, name := range p.names() {
+		for i := 0; i < p.count(); i++ {
+			name := p.nameAt(i)
 			if scaleSkip[name] {
 				continue
 			}
@@ -692,8 +693,9 @@ func configureScheme(typ string, p *opParams, count int) rangeSpec {
 func facProjection(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *opParams) any) {
 	n.modified = true
 	return nil, trFunc(func(n *opNode, p *opParams, pulse *flowPulse) *flowPulse {
-		params := jsval.NewObject(len(p.vals))
-		for _, name := range p.names() {
+		params := jsval.NewObject(p.vals.len())
+		for i := 0; i < p.count(); i++ {
+			name := p.nameAt(i)
 			params.Set(name, projectionParam(p.Get(name)))
 		}
 		cur, _ := n.value.(geo.Projection)

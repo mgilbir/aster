@@ -219,29 +219,24 @@ func (c *rtContext) parseOperatorParameters(e *entry) {
 	if n == nil {
 		fail("invalid operator id")
 	}
-	b := &paramBuilder{raw: map[string]any{}}
+	b := &paramBuilder{}
+	b.raw.grow(e.params.m.len())
 	c.parseParameters(e.params, b)
-	deps := n.parameters(b.raw, b.order, !e.noReact, e.initonly)
+	deps := n.parameters(&b.raw, !e.noReact, e.initonly)
 	c.g.connect(n, deps)
 }
 
 // paramBuilder accumulates the resolved parameters of one operator, including
 // the dependencies that expressions contribute.
 type paramBuilder struct {
-	raw   map[string]any
-	order []string
+	raw smallMap[any]
 }
 
-func (b *paramBuilder) set(name string, v any) {
-	if _, ok := b.raw[name]; !ok {
-		b.order = append(b.order, name)
-	}
-	b.raw[name] = v
-}
+func (b *paramBuilder) set(name string, v any) { b.raw.set(name, v) }
 
 func (c *rtContext) parseParameters(l *paramList, b *paramBuilder) {
-	for _, name := range l.names {
-		b.set(name, c.parseParameter(l.m[name], b))
+	for i := 0; i < l.m.len(); i++ {
+		b.set(l.m.keyAt(i), c.parseParameter(l.m.valAt(i), b))
 	}
 }
 
@@ -450,7 +445,7 @@ func (b *boundExpr) accessor() transforms.Field {
 // the scope, as vega-functions' parseExpression does. Unknown signal names are
 // an error, as upstream.
 func (s *Scope) parseExpression(code string) *exprFn {
-	prog, err := expr.Compile(code)
+	prog, err := expr.CompileCached(code)
 	if err != nil {
 		perr("Expression parse error: %s", code)
 	}

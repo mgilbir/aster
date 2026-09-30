@@ -89,27 +89,26 @@ func (p *flowPulse) modOrReflow() []*scene.Item {
 // Params holds an operator's marshalled parameter values together with which
 // of them changed since the previous marshalling (vega-dataflow Parameters).
 type opParams struct {
-	vals  map[string]any
-	mod   map[string]bool
-	order []string
+	vals smallMap[any]
+	mod  []bool // parallel to vals
 }
 
-func newParams() *opParams { return &opParams{vals: map[string]any{}, mod: map[string]bool{}} }
+func newParams() *opParams { return &opParams{} }
 
 // Get returns a parameter value, or nil.
-func (p *opParams) Get(name string) any { return p.vals[name] }
+func (p *opParams) Get(name string) any { return p.vals.at(name) }
 
 // Value returns the parameter as a jsval.Value (Undefined when absent or of
 // another type).
 func (p *opParams) Value(name string) jsval.Value {
-	if v, ok := p.vals[name].(jsval.Value); ok {
+	if v, ok := p.vals.at(name).(jsval.Value); ok {
 		return v
 	}
 	return jsval.Undefined
 }
 
 // Has reports that the parameter is defined.
-func (p *opParams) Has(name string) bool { _, ok := p.vals[name]; return ok }
+func (p *opParams) Has(name string) bool { return p.vals.has(name) }
 
 // Modified tests whether the named parameters changed; with no names it tests
 // every parameter.
@@ -123,40 +122,37 @@ func (p *opParams) Modified(names ...string) bool {
 		return false
 	}
 	for _, n := range names {
-		if p.mod[n] {
+		if i := p.vals.find(n); i >= 0 && p.mod[i] {
 			return true
 		}
 	}
 	return false
 }
 
-func (p *opParams) set(name string, v any, force bool) {
-	old, had := p.vals[name]
-	if !had {
-		p.order = append(p.order, name)
+func (p *opParams) store(name string, v any) (int, bool) {
+	i, added := p.vals.set(name, v)
+	if added {
+		p.mod = append(p.mod, false)
 	}
-	if !had || force || !sameValue(old, v) {
-		p.vals[name] = v
-		p.mod[name] = true
+	return i, added
+}
+
+func (p *opParams) set(name string, v any, force bool) {
+	i := p.vals.find(name)
+	if i < 0 || force || !sameValue(p.vals.valAt(i), v) {
+		i, _ = p.store(name, v)
+		p.mod[i] = true
 	}
 }
 
 // put records a constant parameter.
-func (p *opParams) put(name string, v any) {
-	if _, had := p.vals[name]; !had {
-		p.order = append(p.order, name)
-	}
-	p.vals[name] = v
-}
+func (p *opParams) put(name string, v any) { p.store(name, v) }
 
-// names lists the parameters in definition order.
-func (p *opParams) names() []string { return p.order }
+// count and nameAt enumerate the parameters in definition order.
+func (p *opParams) count() int          { return p.vals.len() }
+func (p *opParams) nameAt(i int) string { return p.vals.keyAt(i) }
 
-func (p *opParams) clear() {
-	if len(p.mod) > 0 {
-		clear(p.mod)
-	}
-}
+func (p *opParams) clear() { clear(p.mod) }
 
 // sameValue is JavaScript strict identity for parameter values: primitives by
 // value, arrays and objects by reference.
@@ -266,9 +262,11 @@ func (n *opNode) setValue(v any) bool {
 // parameters registers the operator-valued entries of raw as dependencies and
 // records the constants, like Operator.parameters. raw values that are *Node
 // (or []any containing them) are operator references.
-func (n *opNode) parameters(raw map[string]any, order []string, react bool, initonly bool) []*opNode {
+func (n *opNode) parameters(raw *smallMap[any], react bool, initonly bool) []*opNode {
 	if n.argval == nil {
 		n.argval = newParams()
+		n.argval.vals.grow(raw.len())
+		n.argval.mod = make([]bool, 0, raw.len())
 	}
 	var deps []*opNode
 	add := func(name string, index int, v any) {
@@ -283,14 +281,14 @@ func (n *opNode) parameters(raw map[string]any, order []string, react bool, init
 			return
 		}
 		if index >= 0 {
-			arr, _ := n.argval.vals[name].([]any)
+			arr, _ := n.argval.vals.at(name).([]any)
 			arr[index] = v
 			return
 		}
 		n.argval.put(name, v)
 	}
-	for _, name := range order {
-		v := raw[name]
+	for i := 0; i < raw.len(); i++ {
+		name, v := raw.keyAt(i), raw.valAt(i)
 		if name == "pulse" {
 			switch ps := v.(type) {
 			case *opNode:
@@ -335,13 +333,13 @@ func (n *opNode) marshall(stamp int) *opParams {
 	for _, a := range n.argops {
 		mod := a.op.modified && a.op.stamp == stamp
 		if a.index >= 0 {
-			arr := n.argval.vals[a.name].([]any)
+			arr := n.argval.vals.at(a.name).([]any)
 			if arr == nil {
 				continue
 			}
 			if !sameValue(arr[a.index], a.op.value) || mod {
 				arr[a.index] = a.op.value
-				n.argval.mod[a.name] = true
+				n.argval.mod[n.argval.vals.find(a.name)] = true
 			}
 		} else {
 			n.argval.set(a.name, a.op.value, mod)

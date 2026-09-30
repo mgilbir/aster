@@ -24,6 +24,7 @@ import (
 	"math"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/mgilbir/aster/internal/fontsubset"
@@ -68,14 +69,37 @@ var NewFileLoader = loader.NewFileLoader
 // NewFallbackLoader creates a FallbackLoader from the given children.
 var NewFallbackLoader = loader.NewFallbackLoader
 
-// Converter renders Vega/Vega-Lite specs to SVG, PNG and PDF. A Converter is
-// not safe for concurrent use; create one per goroutine.
+// Converter renders Vega/Vega-Lite specs to SVG, PNG and PDF.
+//
+// A Converter is safe for concurrent use by multiple goroutines: any number of
+// rendering calls (VegaToSVG, VegaLiteToPNG, SVGToPDF, ...) may run at once on
+// one Converter, and each call behaves exactly as it would alone. Its
+// configuration is immutable after New, every render owns its own state
+// (dataflow, scenegraph, random generator, budgets, deadline), and the state
+// the calls share (font shaping caches, locale and colour-scheme tables,
+// compiled-expression caches) is either immutable or synchronized. Sharing one
+// Converter is also cheaper than creating one per goroutine, because the fonts
+// are loaded and their caches filled once. A Loader passed to WithLoader is
+// called from several goroutines at once, so it must be safe for concurrent
+// use as well; the loaders in this package are.
+//
+// Close may be called at any time from any goroutine: it cancels the calls in
+// flight (they return an error), waits for them to finish, closes the Loader,
+// and makes every later call fail. Closing more than once is harmless.
 type Converter struct {
 	cfg      *config
 	location *time.Location
 	theme    jsval.Value // parsed WithTheme config; Undefined when none
 	vl       string      // vegalite compiler version (vegalite.Version64, ...)
-	closed   bool
+
+	// closed is set by Close; mu is read-locked for the duration of every
+	// rendering call, so Close can wait for them before releasing the loader.
+	closed    atomic.Bool
+	mu        sync.RWMutex
+	closeOnce sync.Once
+	closeErr  error
+	base      context.Context // canceled by Close; parent of every call's context
+	cancelAll context.CancelFunc
 
 	// Layout text measurement, built on first use.
 	measurerOnce sync.Once
@@ -157,6 +181,7 @@ func New(opts ...Option) (*Converter, error) {
 		cfg.loader = DenyLoader{}
 	}
 	c := &Converter{cfg: cfg, location: loc, vl: vlVersion}
+	c.base, c.cancelAll = context.WithCancel(context.Background())
 	if cfg.theme != "" {
 		theme, err := jsval.ParseJSONString(cfg.theme)
 		if err != nil {
@@ -171,25 +196,44 @@ func New(opts ...Option) (*Converter, error) {
 }
 
 // Close releases all resources held by the Converter. It is safe to call
-// multiple times; after Close every rendering method returns an error.
+// multiple times and concurrently with rendering calls: calls in flight are
+// canceled and awaited, then the Loader is closed. After Close every rendering
+// method returns an error.
 func (c *Converter) Close() error {
-	if c.closed {
-		return nil
+	c.closed.Store(true)
+	if c.cancelAll != nil {
+		c.cancelAll()
 	}
-	c.closed = true
-	if closer, ok := c.cfg.loader.(io.Closer); ok {
-		return closer.Close()
+	c.mu.Lock() // waits for every call in flight
+	defer c.mu.Unlock()
+	c.closeOnce.Do(func() {
+		if closer, ok := c.cfg.loader.(io.Closer); ok {
+			c.closeErr = closer.Close()
+		}
+	})
+	err := c.closeErr
+	c.closeErr = nil // only the first Close reports it
+	return err
+}
+
+// enter registers a rendering call; the returned function ends it. It reports
+// false once the Converter is closed.
+func (c *Converter) enter() (release func(), ok bool) {
+	c.mu.RLock()
+	if c.closed.Load() {
+		c.mu.RUnlock()
+		return nil, false
 	}
-	return nil
+	return c.mu.RUnlock, true
 }
 
 // opContext bounds one public call — every stage of it together — by the
-// converter's timeout.
+// converter's timeout, and by Close.
 func (c *Converter) opContext() (context.Context, context.CancelFunc) {
 	if c.cfg.timeout > 0 {
-		return context.WithTimeout(context.Background(), c.cfg.timeout)
+		return context.WithTimeout(c.base, c.cfg.timeout)
 	}
-	return context.WithCancel(context.Background())
+	return context.WithCancel(c.base)
 }
 
 // stageErr wraps a stage's error, naming the timeout when the call's context
@@ -211,9 +255,11 @@ func recoverInto(err *error) {
 
 // VegaToSVG renders a Vega spec (JSON) to an SVG string.
 func (c *Converter) VegaToSVG(spec []byte) (string, error) {
-	if c.closed {
+	release, ok := c.enter()
+	if !ok {
 		return "", errConverterClosed
 	}
+	defer release()
 	ctx, cancel := c.opContext()
 	defer cancel()
 	return c.vegaSVG(ctx, spec)
@@ -221,9 +267,11 @@ func (c *Converter) VegaToSVG(spec []byte) (string, error) {
 
 // VegaLiteToSVG renders a Vega-Lite spec (JSON) to an SVG string.
 func (c *Converter) VegaLiteToSVG(spec []byte) (string, error) {
-	if c.closed {
+	release, ok := c.enter()
+	if !ok {
 		return "", errConverterClosed
 	}
+	defer release()
 	ctx, cancel := c.opContext()
 	defer cancel()
 	return c.vegaLiteSVG(ctx, spec)
@@ -411,9 +459,11 @@ func (c *Converter) measurerInit() (*text.Measurer, error) {
 
 // VegaLiteToVega compiles a Vega-Lite spec (JSON) to a full Vega spec (JSON).
 func (c *Converter) VegaLiteToVega(spec []byte) ([]byte, error) {
-	if c.closed {
+	release, ok := c.enter()
+	if !ok {
 		return nil, errConverterClosed
 	}
+	defer release()
 	ctx, cancel := c.opContext()
 	defer cancel()
 	vg, err := c.compileVegaLite(ctx, spec)
@@ -439,9 +489,11 @@ func (c *Converter) compileVegaLite(ctx context.Context, spec []byte) (jsval.Val
 
 // VegaToPNG renders a Vega spec (JSON) to a PNG image.
 func (c *Converter) VegaToPNG(spec []byte, opts ...PNGOption) ([]byte, error) {
-	if c.closed {
+	release, ok := c.enter()
+	if !ok {
 		return nil, errConverterClosed
 	}
+	defer release()
 	ctx, cancel := c.opContext()
 	defer cancel()
 	svg, err := c.vegaSVG(ctx, spec)
@@ -453,9 +505,11 @@ func (c *Converter) VegaToPNG(spec []byte, opts ...PNGOption) ([]byte, error) {
 
 // VegaLiteToPNG renders a Vega-Lite spec (JSON) to a PNG image.
 func (c *Converter) VegaLiteToPNG(spec []byte, opts ...PNGOption) ([]byte, error) {
-	if c.closed {
+	release, ok := c.enter()
+	if !ok {
 		return nil, errConverterClosed
 	}
+	defer release()
 	ctx, cancel := c.opContext()
 	defer cancel()
 	svg, err := c.vegaLiteSVG(ctx, spec)
@@ -467,9 +521,11 @@ func (c *Converter) VegaLiteToPNG(spec []byte, opts ...PNGOption) ([]byte, error
 
 // SVGToPNG rasterizes an SVG string to a PNG image.
 func (c *Converter) SVGToPNG(svg string, opts ...PNGOption) ([]byte, error) {
-	if c.closed {
+	release, ok := c.enter()
+	if !ok {
 		return nil, errConverterClosed
 	}
+	defer release()
 	ctx, cancel := c.opContext()
 	defer cancel()
 	return c.svgToPNG(ctx, svg, opts)
@@ -572,9 +628,11 @@ func (c *Converter) SVGToPDF(svg string, opts ...PDFOption) ([]byte, error) {
 
 // SVGToPDFUsage is SVGToPDF plus the per-face glyph usage of the produced PDF.
 func (c *Converter) SVGToPDFUsage(svg string, opts ...PDFOption) ([]byte, []FontUsage, error) {
-	if c.closed {
+	release, ok := c.enter()
+	if !ok {
 		return nil, nil, errConverterClosed
 	}
+	defer release()
 	ctx, cancel := c.opContext()
 	defer cancel()
 	return c.svgToPDF(ctx, svg, opts)
@@ -615,9 +673,11 @@ func (c *Converter) svgToPDF(ctx context.Context, svg string, opts []PDFOption) 
 // VegaToPDFUsage renders a Vega spec to a vector PDF and reports its per-face
 // glyph usage; see SVGToPDFUsage.
 func (c *Converter) VegaToPDFUsage(spec []byte, opts ...PDFOption) ([]byte, []FontUsage, error) {
-	if c.closed {
+	release, ok := c.enter()
+	if !ok {
 		return nil, nil, errConverterClosed
 	}
+	defer release()
 	ctx, cancel := c.opContext()
 	defer cancel()
 	svg, err := c.vegaSVG(ctx, spec)
@@ -630,9 +690,11 @@ func (c *Converter) VegaToPDFUsage(spec []byte, opts ...PDFOption) ([]byte, []Fo
 // VegaLiteToPDFUsage renders a Vega-Lite spec to a vector PDF and reports its
 // per-face glyph usage; see SVGToPDFUsage.
 func (c *Converter) VegaLiteToPDFUsage(spec []byte, opts ...PDFOption) ([]byte, []FontUsage, error) {
-	if c.closed {
+	release, ok := c.enter()
+	if !ok {
 		return nil, nil, errConverterClosed
 	}
+	defer release()
 	ctx, cancel := c.opContext()
 	defer cancel()
 	svg, err := c.vegaLiteSVG(ctx, spec)

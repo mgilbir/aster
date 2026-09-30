@@ -131,7 +131,7 @@ type Run struct {
 
 // Measurer computes text widths and shapes text.
 type Measurer struct {
-	mu    sync.Mutex
+	mu    sync.RWMutex // guards the caches; the width cache is read under RLock
 	exact bool
 
 	entries []*entry // registration order
@@ -241,6 +241,14 @@ func (m *Measurer) MeasureText(text, cssFont string) float64 {
 		return 0
 	}
 	key := widthKey{text, cssFont}
+	// Most measurements repeat (axis labels, legend entries): concurrent
+	// renders on one Measurer hit the cache under a shared lock.
+	m.mu.RLock()
+	w, ok := m.widthCache[key]
+	m.mu.RUnlock()
+	if ok {
+		return w
+	}
 	m.mu.Lock()
 	if w, ok := m.widthCache[key]; ok {
 		m.mu.Unlock()
@@ -249,7 +257,7 @@ func (m *Measurer) MeasureText(text, cssFont string) float64 {
 	p := m.plan(text, cssFont)
 	m.mu.Unlock()
 
-	_, w := m.shapePlan(&p, false)
+	_, w = m.shapePlan(&p, false)
 
 	m.mu.Lock()
 	if len(m.widthCache) >= maxCacheItems {

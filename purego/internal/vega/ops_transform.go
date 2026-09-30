@@ -33,7 +33,7 @@ func (p *opParams) flatten(x any, out *[]any) {
 // list returns a list parameter's elements: a resolved array, the items of an
 // array value, or the single value.
 func (p *opParams) list(name string) []any {
-	x, ok := p.vals[name]
+	x, ok := p.vals.lookup(name)
 	if !ok || x == nil {
 		return nil
 	}
@@ -81,7 +81,7 @@ func asField(x any) transforms.Field {
 }
 
 // field reads a field parameter (the null Field when absent).
-func (p *opParams) field(name string) transforms.Field { return asField(p.vals[name]) }
+func (p *opParams) field(name string) transforms.Field { return asField(p.vals.at(name)) }
 
 // fields reads a list of field parameters; absent entries are null Fields.
 func (p *opParams) fields(name string) []transforms.Field {
@@ -123,7 +123,7 @@ func (p *opParams) strs(name string) []string {
 }
 
 func (p *opParams) has(name string) bool {
-	x, ok := p.vals[name]
+	x, ok := p.vals.lookup(name)
 	if !ok || x == nil {
 		return false
 	}
@@ -163,14 +163,14 @@ func (p *opParams) nums(name string) []float64 {
 }
 
 func (p *opParams) comparator(name string) transforms.Comparator {
-	if c, _ := p.vals[name].(*compareSpec); c != nil {
+	if c, _ := p.vals.at(name).(*compareSpec); c != nil {
 		return c.cmp
 	}
 	return nil
 }
 
 func (p *opParams) compareSpec(name string) *compareSpec {
-	c, _ := p.vals[name].(*compareSpec)
+	c, _ := p.vals.at(name).(*compareSpec)
 	if c == nil || c.cmp == nil {
 		return nil
 	}
@@ -210,7 +210,7 @@ func requireFields(def *transformDef, p *opParams) {
 				}
 			}
 		case !pd.array && pd.required:
-			if _, ok := p.vals[pd.name]; ok && p.field(pd.name).IsNil() {
+			if _, ok := p.vals.lookup(pd.name); ok && p.field(pd.name).IsNil() {
 				fail("TypeError: %s is not a function (empty field name)", pd.name)
 			}
 		}
@@ -403,7 +403,7 @@ func init() {
 			Field: p.field("field"), Key: p.field("key"), GroupBy: p.fields("groupby"),
 			Method: p.str("method"), Value: p.Value("value"),
 		}
-		if kv, ok := valueList(p.vals["keyvals"]); ok {
+		if kv, ok := valueList(p.vals.at("keyvals")); ok {
 			ip.KeyVals = kv
 		}
 		return transforms.Impute(ctxOf(n), in, ip)

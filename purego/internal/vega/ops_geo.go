@@ -131,7 +131,7 @@ func init() {
 func geoAccessor(f transforms.Field) geo.Accessor { return geo.Accessor(f.Get) }
 
 func pointRadius(p *opParams) geo.PointRadius {
-	x := p.vals["pointRadius"]
+	x := p.vals.at("pointRadius")
 	switch v := x.(type) {
 	case jsval.Value:
 		if v.IsNullish() {

@@ -171,6 +171,7 @@ type standard struct {
 	mHasClip           bool
 
 	path *Path
+	pipe *pipeCache
 }
 
 func newStandard(typ string, projectAt func(phi0, phi1 float64) *raw) *standard {
@@ -223,7 +224,51 @@ func (p *standard) Path() *Path {
 	return p.path
 }
 
+// reusableSink marks the sinks a projection may keep a pipeline for: sinks
+// that live as long as their owner (a Path's string builder and its limit
+// wrapper) rather than one per call.
+type reusableSink interface{ reusableSink() }
+
+// pipeKey is everything Stream builds the pipeline from. Every setter that
+// changes the pipeline replaces one of these (the clippers and the transform
+// are allocated afresh), so equal keys mean an equivalent pipeline.
+type pipeKey struct {
+	post   streamer
+	res    *projTransform
+	delta2 float64
+	pre    *clipper
+	rot    rotation
+}
+
+// pipeCache is the last pipeline built for a reusable sink. d3-geo caches the
+// same way (projection.stream); the stages reset themselves at every polygon
+// and line start, and reusing them keeps their buffers instead of growing them
+// again for every feature of a map.
+type pipeCache struct {
+	key    pipeKey
+	sink   Stream
+	stream Stream
+}
+
 func (p *standard) Stream(sink Stream) Stream {
+	_, reusable := sink.(reusableSink)
+	if !reusable {
+		return p.newStream(sink)
+	}
+	k := pipeKey{p.postclip, p.resPt, p.resDelta2, p.preclip, p.rot}
+	if c := p.pipe; c != nil && c.key == k && c.sink == sink {
+		return c.stream
+	}
+	s := p.newStream(sink)
+	p.pipe = &pipeCache{k, sink, s}
+	return s
+}
+
+// dropStreamCache forgets the cached pipeline; a walk that was cut short may
+// have left its stages mid-ring.
+func (p *standard) dropStreamCache() { p.pipe = nil }
+
+func (p *standard) newStream(sink Stream) Stream {
 	if p.postclip != nil {
 		sink = p.postclip.stream(sink)
 	}

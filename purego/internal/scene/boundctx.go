@@ -187,3 +187,6 @@ func cubicAt(t, x0, x1, x2, x3 float64) float64 {
 	s2, t2 := s*s, t*t
 	return float64(s2*s*x0) + float64(3*s2*t*x1) + float64(3*s*t2*x2) + float64(t2*t*x3)
 }
+
+// ReusableContext lets geo.Path keep a stream for this context.
+func (c *boundContext) ReusableContext() {}

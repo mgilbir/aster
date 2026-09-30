@@ -8,7 +8,7 @@ import (
 
 // indexThreshold is the size at which an Object builds a hash index. Below it
 // a linear scan over the keys is faster than hashing.
-const indexThreshold = 12
+const indexThreshold = 32
 
 // Object is an insertion-ordered string-keyed map, the shape of a JavaScript
 // object literal. Setting an existing key overwrites it in place and keeps
@@ -29,8 +29,134 @@ func (o *Object) SetStringer(f func(*Object) string) { o.str = f }
 
 // NewObject makes an empty object with room for n keys.
 func NewObject(n int) *Object {
+	// Objects of a few keys are allocated together with their key and value
+	// arrays: one allocation instead of three, sized exactly.
+	switch {
+	case n <= 0:
+		return &Object{}
+	case n == 1:
+		x := &objectN1{}
+		x.keys, x.vals = x.kbuf[:0], x.vbuf[:0]
+		return &x.Object
+	case n == 2:
+		x := &objectN2{}
+		x.keys, x.vals = x.kbuf[:0], x.vbuf[:0]
+		return &x.Object
+	case n == 3:
+		x := &objectN3{}
+		x.keys, x.vals = x.kbuf[:0], x.vbuf[:0]
+		return &x.Object
+	case n == 4:
+		x := &objectN4{}
+		x.keys, x.vals = x.kbuf[:0], x.vbuf[:0]
+		return &x.Object
+	case n == 5:
+		x := &objectN5{}
+		x.keys, x.vals = x.kbuf[:0], x.vbuf[:0]
+		return &x.Object
+	case n == 6:
+		x := &objectN6{}
+		x.keys, x.vals = x.kbuf[:0], x.vbuf[:0]
+		return &x.Object
+	case n == 7:
+		x := &objectN7{}
+		x.keys, x.vals = x.kbuf[:0], x.vbuf[:0]
+		return &x.Object
+	case n == 8:
+		x := &objectN8{}
+		x.keys, x.vals = x.kbuf[:0], x.vbuf[:0]
+		return &x.Object
+	case n == 9:
+		x := &objectN9{}
+		x.keys, x.vals = x.kbuf[:0], x.vbuf[:0]
+		return &x.Object
+	case n == 10:
+		x := &objectN10{}
+		x.keys, x.vals = x.kbuf[:0], x.vbuf[:0]
+		return &x.Object
+	case n == 11:
+		x := &objectN11{}
+		x.keys, x.vals = x.kbuf[:0], x.vbuf[:0]
+		return &x.Object
+	case n == 12:
+		x := &objectN12{}
+		x.keys, x.vals = x.kbuf[:0], x.vbuf[:0]
+		return &x.Object
+	case n <= 16:
+		x := &objectN16{}
+		x.keys, x.vals = x.kbuf[:0], x.vbuf[:0]
+		return &x.Object
+	}
 	return &Object{keys: make([]string, 0, n), vals: make([]Value, 0, n)}
 }
+
+type (
+	objectN1 struct {
+		Object
+		kbuf [1]string
+		vbuf [1]Value
+	}
+	objectN2 struct {
+		Object
+		kbuf [2]string
+		vbuf [2]Value
+	}
+	objectN3 struct {
+		Object
+		kbuf [3]string
+		vbuf [3]Value
+	}
+	objectN4 struct {
+		Object
+		kbuf [4]string
+		vbuf [4]Value
+	}
+	objectN5 struct {
+		Object
+		kbuf [5]string
+		vbuf [5]Value
+	}
+	objectN6 struct {
+		Object
+		kbuf [6]string
+		vbuf [6]Value
+	}
+	objectN7 struct {
+		Object
+		kbuf [7]string
+		vbuf [7]Value
+	}
+	objectN8 struct {
+		Object
+		kbuf [8]string
+		vbuf [8]Value
+	}
+	objectN9 struct {
+		Object
+		kbuf [9]string
+		vbuf [9]Value
+	}
+	objectN10 struct {
+		Object
+		kbuf [10]string
+		vbuf [10]Value
+	}
+	objectN11 struct {
+		Object
+		kbuf [11]string
+		vbuf [11]Value
+	}
+	objectN12 struct {
+		Object
+		kbuf [12]string
+		vbuf [12]Value
+	}
+	objectN16 struct {
+		Object
+		kbuf [16]string
+		vbuf [16]Value
+	}
+)
 
 // ObjectOf builds an object from alternating key, value pairs.
 func ObjectOf(kv ...any) *Object {
@@ -93,6 +219,9 @@ func (o *Object) Set(key string, v Value) {
 	if i := o.find(key); i >= 0 {
 		o.vals[i] = v
 		return
+	}
+	if o.keys == nil {
+		o.keys, o.vals = make([]string, 0, 4), make([]Value, 0, 4)
 	}
 	o.keys = append(o.keys, key)
 	o.vals = append(o.vals, v)

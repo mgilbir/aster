@@ -131,6 +131,18 @@ upstream computes. Where a constant expression has more than one rounding
 step and feeds output, declare it as a `var` (evaluated at run time with
 per-step rounding) or check it against node.
 
+**Concurrency.** A `Converter` is safe for concurrent use; the engine keeps that
+true by construction. Package-level variables are one of: immutable after
+`init` (tables, registries filled by `init` functions), a `sync.Once`
+initialisation, or a cache behind a mutex or a `sync.Pool` (bounded, because
+specifications choose the keys). Everything a render mutates hangs off values
+the render creates: the dataflow, the scenegraph, projections (and the
+pipelines they cache for a `geo.Path`), the `Random`, the budget. A compiled
+`expr.Program` is immutable and shared between renders through
+`expr.CompileCached`. New package-level mutable state needs a lock and an
+entry in this list; `TestConcurrentConverterSharesNothing` (run it with
+`-race`, and with `PUREGO_STRESS_FULL=1` for the whole corpus) is the guard.
+
 **Performance.** Avoid `interface{}` boxing on hot paths, avoid reflection,
 avoid `fmt` in inner loops, preallocate, compile expressions once to closures.
 Benchmarks live next to the code (`BenchmarkXxx`).

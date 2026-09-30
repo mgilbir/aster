@@ -6,6 +6,7 @@ package svg
 import (
 	"context"
 	"errors"
+	"sync"
 
 	"github.com/mgilbir/aster/purego/internal/scene"
 )
@@ -53,9 +54,26 @@ var errNilScene = errors.New("svg: nil scenegraph")
 // Render produces the SVG document for sg. It checks ctx periodically and
 // returns its error when cancelled.
 func Render(ctx context.Context, sg *scene.Scenegraph, opt Options) (string, error) {
-	b, err := AppendSVG(ctx, nil, sg, opt)
-	return string(b), err
+	// The document is built in a recycled buffer: growing a fresh one per
+	// render throws away about as many bytes as the document holds.
+	bp, _ := svgBufs.Get().(*[]byte)
+	if bp == nil {
+		bp = new([]byte)
+	}
+	b, err := AppendSVG(ctx, (*bp)[:0], sg, opt)
+	out := string(b)
+	if cap(b) <= maxPooledSVG {
+		*bp = b[:0]
+		svgBufs.Put(bp)
+	}
+	return out, err
 }
+
+// maxPooledSVG bounds the buffers kept for reuse, so one huge chart does not
+// pin its memory for the life of the process.
+const maxPooledSVG = 16 << 20
+
+var svgBufs sync.Pool // of *[]byte
 
 // AppendSVG is Render appending to dst.
 func AppendSVG(ctx context.Context, dst []byte, sg *scene.Scenegraph, opt Options) ([]byte, error) {

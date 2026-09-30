@@ -123,9 +123,9 @@ type decoder struct{ t *topology }
 
 // emit decodes one arc position, accumulating the deltas of a quantized
 // topology; it returns the position and the running sums for the next one.
-func (d decoder) emit(a *topoArc, k int, x0, y0 float64) (jsval.Value, float64, float64) {
+func (d decoder) emit(a *topoArc, k int, slab *jsval.ArrSlab, x0, y0 float64) (jsval.Value, float64, float64) {
 	base := k * a.dim
-	out := make([]jsval.Value, a.dim)
+	arr, out := slab.Next()
 	if tr := d.t.transform; tr != nil {
 		x0 += a.v[base]
 		y0 += a.v[base+1]
@@ -138,7 +138,7 @@ func (d decoder) emit(a *topoArc, k int, x0, y0 float64) (jsval.Value, float64, 
 	for j := 2; j < a.dim; j++ {
 		out[j] = jsval.Num(a.v[base+j])
 	}
-	return jsval.Arr(out), x0, y0
+	return arr, x0, y0
 }
 
 // arcInto appends the points of arc i (reversed for negative i) to points,
@@ -153,9 +153,10 @@ func (d decoder) arcInto(i int, points []jsval.Value) ([]jsval.Value, error) {
 	}
 	start := len(points)
 	var x0, y0 float64
+	slab := jsval.NewArrSlab(a.n, a.dim)
 	for k := 0; k < a.n; k++ {
 		var p jsval.Value
-		p, x0, y0 = d.emit(a, k, x0, y0)
+		p, x0, y0 = d.emit(a, k, slab, x0, y0)
 		points = append(points, p)
 	}
 	if i < 0 {

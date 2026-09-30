@@ -62,6 +62,7 @@ type StringPath struct {
 	started bool    // d3's `_x1 !== null`
 	has0    bool    // d3's `_x0 !== null`; Arc never sets _x0
 	k       float64 // rounding factor 10^digits, 0 for none
+	d       int     // digits, when k != 0
 	err     error
 }
 
@@ -96,11 +97,17 @@ func (p *StringPath) SetDigits(d int) {
 		return
 	}
 	p.k = math.Pow10(d)
+	p.d = d
 }
 
 func (p *StringPath) num(f float64) {
 	if p.k != 0 {
-		f = jsRound(float64(f*p.k)) / p.k
+		n := jsRound(float64(f * p.k))
+		if p.d <= 6 && n > -1e15 && n < 1e15 {
+			p.buf = appendScaled(p.buf, int64(n), p.d)
+			return
+		}
+		f = n / p.k
 	}
 	p.buf = AppendNumber(p.buf, f)
 }
@@ -251,3 +258,6 @@ func (p *StringPath) arcTo(r, large, sweep, x, y float64) {
 	p.buf = append(p.buf, ',')
 	p.num(y)
 }
+
+// ReusableContext lets geo.Path keep a stream for this context.
+func (p *StringPath) ReusableContext() {}
