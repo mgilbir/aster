@@ -283,6 +283,9 @@ func (c *Converter) renderSVG(ctx context.Context, spec jsval.Value) (out string
 	if m != nil {
 		opts.TextMeasurer = m
 	}
+	// The label transform paints the marks it avoids, text included; the
+	// shaper is only built if it does.
+	opts.Shaper = lazyShaper{c}
 	res, err := vega.Render(ctx, spec, opts)
 	if err != nil {
 		return "", c.stageErr(ctx, "rendering Vega", err)
@@ -523,17 +526,33 @@ func (c *Converter) svgToPNG(ctx context.Context, svg string, opts []PNGOption) 
 	return out, nil
 }
 
-func (c *Converter) rasterize(ctx context.Context, svg string, scale float64) ([]byte, error) {
+// shaperInit builds, once, the text shaper that draws glyphs at their exact
+// advances (as resvg draws them), with the same fonts and family mapping as
+// layout.
+func (c *Converter) shaperInit() (raster.Shaper, error) {
 	c.shaperOnce.Do(func() {
-		// Glyphs are drawn at their exact advances (as resvg draws them),
-		// with the same fonts and family mapping as layout.
 		c.shaper, c.shaperErr = raster.NewShaperWithOptions(c.fontOptions()...)
 		if c.shaperErr != nil {
 			c.shaperErr = fmt.Errorf("aster: initializing PNG text shaper: %w", c.shaperErr)
 		}
 	})
-	if c.shaperErr != nil {
-		return nil, c.shaperErr
+	return c.shaper, c.shaperErr
+}
+
+// lazyShaper defers building the PNG shaper until text is first drawn.
+type lazyShaper struct{ c *Converter }
+
+func (l lazyShaper) Shape(text string, req raster.FontRequest, size float64) []raster.ShapedGlyph {
+	sh, err := l.c.shaperInit()
+	if err != nil {
+		return nil
+	}
+	return sh.Shape(text, req, size)
+}
+
+func (c *Converter) rasterize(ctx context.Context, svg string, scale float64) ([]byte, error) {
+	if _, err := c.shaperInit(); err != nil {
+		return nil, err
 	}
 	out, err := raster.RenderPNG([]byte(svg), raster.Options{Scale: scale, Shaper: c.shaper, Context: ctx, Limits: c.rasterLimits()})
 	if err != nil {

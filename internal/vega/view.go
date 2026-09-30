@@ -34,6 +34,7 @@ import (
 	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/geo"
 	"github.com/mgilbir/aster/internal/jsval"
+	"github.com/mgilbir/aster/internal/raster"
 	"github.com/mgilbir/aster/internal/scene"
 )
 
@@ -103,6 +104,9 @@ type Options struct {
 	// TextMeasurer measures text for layout and bounds; nil selects Vega's
 	// estimate (0.8 * length * fontSize).
 	TextMeasurer scene.TextMeasurer
+	// Shaper draws text when the label transform paints the marks it avoids;
+	// nil selects the rasterizer's default fonts.
+	Shaper raster.Shaper
 	// Location is the time zone of local-time scales and functions; nil is UTC.
 	Location *time.Location
 	// Config is a theme configuration merged under the specification's own
@@ -156,6 +160,7 @@ type runView struct {
 	now     func() float64
 	rand    *expr.Random
 	bounder *scene.Bounder
+	shaper  raster.Shaper // text for the label transform's painter
 
 	root *rtContext
 
@@ -248,6 +253,7 @@ func newView(ctx context.Context, opts Options, locale jsval.Value) *runView {
 		ctx: ctx, loader: opts.Loader, limits: limits,
 		loc: opts.Location, sg: scene.New(),
 		bounder: scene.NewBounder(opts.TextMeasurer),
+		shaper:  opts.Shaper,
 	}
 	if v.loc == nil {
 		v.loc = time.UTC
