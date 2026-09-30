@@ -1,0 +1,1 @@
+{"data":[{"name":"d","transform":[{"type":"sequence","start":0,"stop":4000000}]}],"marks":[{"type":"symbol","from":{"data":"d"},"encode":{"update":{"x":{"field":"data"}}}}]}

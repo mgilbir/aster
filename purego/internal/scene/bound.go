@@ -1,6 +1,7 @@
 package scene
 
 import (
+	"context"
 	"errors"
 	"math"
 
@@ -23,6 +24,10 @@ type Bounder struct {
 	Metrics
 	ctx  boundContext
 	clip Bounds
+	// Context, when set, is polled while items are bounded (text bounds
+	// shape and measure every string).
+	Context context.Context
+	n       int
 }
 
 // NewBounder returns a Bounder using measurer for text widths (nil selects
@@ -85,6 +90,13 @@ func (bd *Bounder) BoundMark(m *Mark) error {
 	} else {
 		m.Bounds.Clear()
 		for _, it := range m.Items {
+			if bd.Context != nil {
+				if bd.n++; bd.n&127 == 0 {
+					if err := bd.Context.Err(); err != nil {
+						return err
+					}
+				}
+			}
 			it.Bounds.Clear()
 			if err := bd.itemBounds(m.Type, &it.Bounds, it); err != nil {
 				return err

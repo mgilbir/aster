@@ -80,6 +80,9 @@ type Scope struct {
 	// Context is checked periodically inside long loops (sequence, pad,
 	// sort). Nil means never cancelled.
 	Context context.Context
+	// Strings is the render-wide budget for the large strings expressions
+	// build; nil charges nothing (the per-string limit still applies).
+	Strings *StringBudget
 
 	env Env
 	// capability views of env, resolved once in SetEnv
@@ -159,3 +162,52 @@ func (s *Scope) tick() {
 }
 
 type cancelled struct{ err error }
+
+// StringBudget bounds the total size of the large strings one render's
+// expressions build. Strings up to smallString bytes are free (a chart makes
+// millions of labels); a larger one is charged when it is made, so the memory
+// an expression chain can hold is bounded however many signals build on each
+// other.
+type StringBudget struct {
+	left int64
+}
+
+// smallString is the size up to which a string is not charged.
+const smallString = 4096
+
+// NewStringBudget makes a budget of n bytes; n <= 0 is unlimited.
+func NewStringBudget(n int64) *StringBudget {
+	if n <= 0 {
+		return &StringBudget{left: math.MaxInt64}
+	}
+	return &StringBudget{left: n}
+}
+
+// checkLen throws the RangeError V8 throws for a string that is too long, and
+// charges the budget for a large one. n is the byte length about to be built;
+// call it before the allocation.
+func (s *Scope) checkLen(n int) {
+	if n > MaxStringLength {
+		throw("RangeError", "Invalid string length")
+	}
+	s.chargeBytes(n)
+}
+
+// chargeItems charges the budget for an array of n elements an expression is
+// about to build (sequence and friends).
+func (s *Scope) chargeItems(n int) {
+	const perItem = 24
+	if n > 256 {
+		s.chargeBytes(n * perItem)
+	}
+}
+
+func (s *Scope) chargeBytes(n int) {
+	if n <= smallString || s.Strings == nil {
+		return
+	}
+	if int64(n) > s.Strings.left {
+		throw("RangeError", "Invalid string length: the expression string budget of this render is used up")
+	}
+	s.Strings.left -= int64(n)
+}

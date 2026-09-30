@@ -36,6 +36,9 @@ func Sequence(ctx context.Context, p SequenceParams) ([]jsval.Value, error) {
 		return nil, limitErr("sequence length", int(min(c, math.MaxInt32)), MaxSequence)
 	}
 	n := int(c)
+	if err := reserveOut(ctx, n, 0); err != nil {
+		return nil, err
+	}
 	out := make([]jsval.Value, n)
 	for i := 0; i < n; i++ {
 		if err := poll(ctx, i); err != nil {

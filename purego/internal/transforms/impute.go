@@ -91,8 +91,9 @@ func Impute(ctx context.Context, data []jsval.Value, p ImputeParams) ([]jsval.Va
 	}
 
 	type group struct {
-		vals   []jsval.Value // indexed by key domain position; undefined = missing
-		values []jsval.Value
+		vals    []jsval.Value // indexed by key domain position; undefined = missing
+		values  []jsval.Value
+		present int // number of key positions with a tuple
 	}
 	domain := append([]jsval.Value(nil), p.KeyVals...)
 	kMap := make(map[string]int, len(domain))
@@ -100,6 +101,7 @@ func Impute(ctx context.Context, data []jsval.Value, p ImputeParams) ([]jsval.Va
 		kMap[k.AsString()] = i + 1
 	}
 	var groups []*group
+	cells := 0
 	gMap := map[string]*group{}
 	var sb strings.Builder
 	for i, t := range data {
@@ -129,10 +131,30 @@ func Impute(ctx context.Context, data []jsval.Value, p ImputeParams) ([]jsval.Va
 			gMap[sb.String()] = g
 			groups = append(groups, g)
 		}
-		for len(g.vals) < j {
-			g.vals = append(g.vals, jsval.Undefined)
+		if grow := j - len(g.vals); grow > 0 {
+			// One cell per (group, key) pair exists from here on: pay for
+			// them before allocating, or a few thousand distinct groups and
+			// keys cost gigabytes.
+			cells += grow
+			if err := reserveOut(ctx, cells, len(data)); err != nil {
+				return nil, err
+			}
+			for len(g.vals) < j {
+				g.vals = append(g.vals, jsval.Undefined)
+			}
+		}
+		if g.vals[j-1].IsUndefined() {
+			g.present++
 		}
 		g.vals[j-1] = t
+	}
+
+	missing := 0
+	for _, g := range groups {
+		missing += len(domain) - g.present
+	}
+	if err := reserveOut(ctx, len(data)+missing, len(data)); err != nil {
+		return nil, err
 	}
 
 	out := data[:len(data):len(data)]
@@ -142,7 +164,7 @@ func Impute(ctx context.Context, data []jsval.Value, p ImputeParams) ([]jsval.Va
 			if j < len(g.vals) && !g.vals[j].IsUndefined() {
 				continue
 			}
-			if err := poll(ctx, j); err != nil {
+			if err := poll(ctx, len(out)); err != nil {
 				return nil, err
 			}
 			t := jsval.NewObject(len(p.GroupBy) + 3)

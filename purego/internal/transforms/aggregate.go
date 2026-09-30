@@ -2,6 +2,9 @@ package transforms
 
 import (
 	"context"
+	"math"
+
+	"github.com/mgilbir/aster/purego/internal/budget"
 
 	"github.com/mgilbir/aster/purego/internal/jsval"
 )
@@ -35,7 +38,18 @@ type aggCell struct {
 // Aggregate is the group-by aggregation. Output tuples are new objects, one
 // per group in order of first appearance (cross-generated cells last), each
 // holding the group-by fields, then counts, then the other measures.
-func Aggregate(ctx context.Context, data []jsval.Value, p AggregateParams) ([]jsval.Value, error) {
+func Aggregate(ctx context.Context, data []jsval.Value, p AggregateParams) (res []jsval.Value, err error) {
+	// newCell reports a budget failure by panicking with aggAbort, which is
+	// turned back into the returned error here.
+	defer func() {
+		if r := recover(); r != nil {
+			a, ok := r.(aggAbort)
+			if !ok {
+				panic(r)
+			}
+			res, err = nil, a.err
+		}
+	}()
 	measures := p.Measures
 	if len(measures) == 0 {
 		measures = []Measure{{Op: "count"}}
@@ -44,6 +58,9 @@ func Aggregate(ctx context.Context, data []jsval.Value, p AggregateParams) ([]js
 	if err != nil {
 		return nil, err
 	}
+	ms.ctx = ctx
+	tick := budget.NewTicker(ctx)
+	nm := len(ms.names)
 	dims := p.GroupBy
 	dnames := make([]string, len(dims))
 	for i, d := range dims {
@@ -61,6 +78,11 @@ func Aggregate(ctx context.Context, data []jsval.Value, p AggregateParams) ([]js
 	cells := make(map[string]*aggCell)
 	var order []*aggCell
 	newCell := func(key string, t jsval.Value) *aggCell {
+		// Every cell carries state for every measure (pivot makes one
+		// measure per distinct value), so cells*measures is the real size.
+		if err := reserveOut(ctx, int(min(budget.Mul(int64(len(order)+1), int64(16+nm))/16, math.MaxInt32)), len(data)); err != nil {
+			panic(aggAbort{err})
+		}
 		tuple := jsval.NewObject(len(dims) + len(ms.names))
 		for i, d := range dims {
 			tuple.Set(dnames[i], d.Get(t))
@@ -71,8 +93,8 @@ func Aggregate(ctx context.Context, data []jsval.Value, p AggregateParams) ([]js
 		return ac
 	}
 
-	for i, t := range data {
-		if err := poll(ctx, i); err != nil {
+	for _, t := range data {
+		if err := tick.Add(1 + nm); err != nil {
 			return nil, err
 		}
 		keyBuf = keyApp(keyBuf[:0], t)
@@ -94,7 +116,13 @@ func Aggregate(ctx context.Context, data []jsval.Value, p AggregateParams) ([]js
 
 	out := make([]jsval.Value, len(order))
 	for i, ac := range order {
+		if err := poll(ctx, i); err != nil {
+			return nil, err
+		}
 		ms.write(ac.c, ac.tuple)
+		if ms.err != nil {
+			return nil, ms.err
+		}
 		out[i] = jsval.Obj(ac.tuple)
 	}
 	return out, nil
@@ -165,3 +193,6 @@ func crossCells(ctx context.Context, dims []Field, dnames []string, cells map[st
 	}
 	return gen("", 0)
 }
+
+// aggAbort carries a limit error out of the cell constructor.
+type aggAbort struct{ err error }

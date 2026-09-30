@@ -1,6 +1,7 @@
 package transforms
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"slices"
@@ -132,6 +133,10 @@ type measureSet struct {
 	countOnly bool
 	needStore bool // some output reads the tuples of its cell
 	rand      Rand
+	// ctx is polled by the statistics that cost a pass over the data each
+	// (bootstrap intervals); err records its cancellation for the caller.
+	ctx context.Context
+	err error
 	// names lists output field names in the order they were requested.
 	names []string
 }
@@ -142,7 +147,7 @@ func newMeasureSet(ms []Measure, rnd Rand) (*measureSet, error) {
 	if rnd == nil {
 		rnd = DefaultRand
 	}
-	s := &measureSet{countOnly: true, rand: rnd}
+	s := &measureSet{countOnly: true, rand: rnd, ctx: context.Background()}
 	byName := map[string]*measureGroup{}
 	for _, m := range ms {
 		kind, ok := opKinds[m.Op]
@@ -409,7 +414,10 @@ func (g *measureGroup) write(s *measureSet, id int, m *mstate, data []jsval.Valu
 	}
 	ci := func() ([2]float64, bool) {
 		if memo.owner != id || !memo.ciOK {
-			lo, hi, ok := BootstrapCI(data, 1000, 0.05, get, s.rand)
+			lo, hi, ok, err := BootstrapCICtx(s.ctx, data, 1000, 0.05, get, s.rand)
+			if err != nil {
+				s.err = err
+			}
 			memo.ci, memo.ciDone, memo.ciOK, memo.owner = [2]float64{lo, hi}, ok, true, id
 		}
 		return memo.ci, memo.ciDone

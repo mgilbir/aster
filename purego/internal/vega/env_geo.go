@@ -77,6 +77,7 @@ func (c *rtContext) GeoScale(projection, group jsval.Value) jsval.Value {
 func (c *rtContext) GeoShape(projection, geojson, group jsval.Value) jsval.Value {
 	p, _ := c.projectionOf(projection)
 	shp := geo.NewShape(p, func(jsval.Value) jsval.Value { return geojson }, geo.PointRadius{})
+	shp.Bind(c.view.ctx)
 	return c.view.newShape(func(ctx scene.PathContext, _ *scene.Item) string {
 		if p == nil {
 			return ""

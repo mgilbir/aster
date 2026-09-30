@@ -66,7 +66,7 @@ purego/internal/transforms/label/place_mark.go	transforms/label.markPlacer.func2
 purego/internal/transforms/label/scaler.go	transforms/label.(*areaPlacer).floodFill	func (s *scaler) scale(v float64) int  { return toInt32((v + s.padding) / s.ratio) }	# the fused product is x*0.5 (division by 2, a power of two): exact
 purego/internal/transforms/quantile.go	transforms.Quantile	n := math.Max(0, math.Ceil((stop-start)/step))	# start is step*0.5, so (stop-start) fuses an exact power-of-two product
 purego/internal/transforms/quantile.go	transforms.Quantile	probs[i] = start + float64(float64(i)*step)	# start is step*0.5, so (stop-start) fuses an exact power-of-two product
-purego/internal/transforms/stats.go	transforms.BootstrapCI	hi, ok2 := QuantileSorted(mu, 1-alpha/2)	# the fused product is x*0.5 (division by 2, a power of two): exact
+purego/internal/transforms/stats.go	transforms.BootstrapCICtx	hi, ok2 := QuantileSorted(mu, 1-alpha/2)	# the fused product is x*0.5 (division by 2, a power of two): exact
 purego/internal/transforms/voronoi/delaunator.go	transforms/voronoi.(*triangulation).build	dx := ax - bx	# the fused product is a coordinate midpoint (sum*0.5): exact
 purego/internal/transforms/voronoi/delaunator.go	transforms/voronoi.(*triangulation).build	dy := ay - by	# the fused product is a coordinate midpoint (sum*0.5): exact
 purego/internal/transforms/voronoi/diagram.go	transforms/voronoi.(*diagram).init	x = (x1+x3)/2 - float64(a*ey)	# the fused product is x*0.5 (division by 2, a power of two): exact

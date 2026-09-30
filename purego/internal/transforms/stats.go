@@ -1,6 +1,7 @@
 package transforms
 
 import (
+	"context"
 	"math"
 	"math/rand/v2"
 	"slices"
@@ -91,13 +92,23 @@ func Quartiles(data []jsval.Value, f Accessor) [3]float64 {
 // confidence interval of the mean using `samples` resamples. ok is false when
 // the input is empty or no resample has a finite mean (upstream: undefined).
 func BootstrapCI(data []jsval.Value, samples int, alpha float64, f Accessor, rand Rand) (lo, hi float64, ok bool) {
+	lo, hi, ok, _ = BootstrapCICtx(context.Background(), data, samples, alpha, f, rand)
+	return
+}
+
+// BootstrapCICtx is BootstrapCI that stops, with the context's error, when ctx
+// is cancelled: one resample costs as much as the data is long.
+func BootstrapCICtx(ctx context.Context, data []jsval.Value, samples int, alpha float64, f Accessor, rand Rand) (lo, hi float64, ok bool, err error) {
 	if len(data) == 0 {
-		return 0, 0, false
+		return 0, 0, false, nil
 	}
 	values := Numbers(data, f)
 	n := len(values)
 	mu := make([]float64, 0, samples)
 	for j := 0; j < samples; j++ {
+		if err := ctx.Err(); err != nil {
+			return 0, 0, false, err
+		}
 		a := 0.0
 		for i := 0; i < n; i++ {
 			a += values[int(rand()*float64(n))]
@@ -109,7 +120,7 @@ func BootstrapCI(data []jsval.Value, samples int, alpha float64, f Accessor, ran
 	slices.Sort(mu)
 	lo, ok1 := QuantileSorted(mu, alpha/2)
 	hi, ok2 := QuantileSorted(mu, 1-alpha/2)
-	return lo, hi, ok1 && ok2
+	return lo, hi, ok1 && ok2, nil
 }
 
 // DefaultRand is used where a transform needs randomness and the caller gave

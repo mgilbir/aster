@@ -1,6 +1,7 @@
 package vega
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"strings"
@@ -42,8 +43,7 @@ func (v *runView) seedCollect(c *rtContext, n *opNode, e *entry) {
 }
 
 func (v *runView) checkRows(n int) {
-	v.rows += n
-	if v.limits.MaxRows > 0 && v.rows > v.limits.MaxRows {
+	if err := v.bud.AddRows(n); err != nil {
 		fail("data exceeds the limit of %d rows", v.limits.MaxRows)
 	}
 }
@@ -83,6 +83,9 @@ func (v *runView) request(url, fmtSpec jsval.Value) []jsval.Value {
 		}
 		v.g.warn("Loading failed " + uri + ": " + err.Error())
 		return nil
+	}
+	if err := v.bud.Load(int64(len(body))); err != nil {
+		fail("%v", err)
 	}
 	data, err := v.read(jsval.Undefined, body, fmtSpec)
 	if err != nil {
@@ -127,7 +130,14 @@ func (v *runView) read(value jsval.Value, raw []byte, schema jsval.Value) ([]jsv
 			}
 			text = strings.Join(parts, delim[:1]) + "\n" + text
 		}
-		data, columns = parseDSV(text, delim[0])
+		left := v.bud.RowsLeft()
+		data, columns, err = parseDSVLimit(v.ctx, text, delim[0], int(min(left, math.MaxInt32)))
+		if err != nil {
+			if cerr := v.ctx.Err(); cerr != nil {
+				failErr(cerr)
+			}
+			fail("%v", err)
+		}
 	case "topojson":
 		var doc jsval.Value
 		doc, err = jsonDocument(value, raw, schema)
@@ -203,6 +213,15 @@ func readJSON(value jsval.Value, raw []byte, schema jsval.Value) ([]jsval.Value,
 // parseDSV is d3-dsv's parse: the first row names the columns, later rows
 // become objects, and missing cells are empty strings.
 func parseDSV(text string, delim byte) ([]jsval.Value, []string) {
+	rows, cols, _ := parseDSVLimit(context.Background(), text, delim, math.MaxInt)
+	return rows, cols
+}
+
+// parseDSVLimit is parseDSV that fails, before creating the row that would
+// exceed it, once maxRows rows (or 16 cells per allowed row) exist, and stops
+// when ctx is cancelled: a small file of one-character rows would otherwise
+// cost gigabytes before any row budget is looked at.
+func parseDSVLimit(ctx context.Context, text string, delim byte, maxRows int) ([]jsval.Value, []string, error) {
 	N := len(text)
 	I := 0
 	eof := N <= 0
@@ -316,6 +335,14 @@ func parseDSV(text string, delim byte) ([]jsval.Value, []string) {
 			}
 			continue
 		}
+		if len(rows) >= maxRows || (len(rows) > 0 && len(rows)*len(columns) > 16*maxRows && maxRows < math.MaxInt/16) {
+			return nil, nil, fmt.Errorf("data exceeds the limit of %d rows", maxRows)
+		}
+		if len(rows)&1023 == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, nil, err
+			}
+		}
 		o := jsval.NewObject(len(columns))
 		for i, name := range columns {
 			cell := ""
@@ -326,7 +353,7 @@ func parseDSV(text string, delim byte) ([]jsval.Value, []string) {
 		}
 		rows = append(rows, jsval.Obj(o))
 	}
-	return rows, columns
+	return rows, columns, nil
 }
 
 // -- parse types ---------------------------------------------------------------

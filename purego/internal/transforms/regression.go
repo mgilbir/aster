@@ -80,7 +80,11 @@ func Regression(ctx context.Context, data []jsval.Value, p RegressionParams) ([]
 		if len(g.Tuples) <= dof {
 			continue
 		}
-		model, err := FitRegression(method, g.Tuples, p.X.Get, p.Y.Get, p.Order)
+		// A fitted curve is at most 200 points (two for a line).
+		if err := reserveOut(ctx, len(out)+201, len(data)); err != nil {
+			return nil, err
+		}
+		model, err := FitRegressionCtx(ctx, method, g.Tuples, p.X.Get, p.Y.Get, p.Order)
 		if err != nil {
 			return nil, err
 		}

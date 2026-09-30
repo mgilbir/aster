@@ -39,7 +39,14 @@ type Options struct {
 	// Image resolves an image URL. Nil reproduces vega running without a
 	// canvas: the sanitized URL as source and an unknown (0x0) size.
 	Image func(url string) ImageInfo
+	// MaxBytes bounds the size of the document; 0 means unbounded. Rendering
+	// fails as soon as the output passes it, instead of finishing a
+	// document nobody can use.
+	MaxBytes int
 }
+
+// ErrTooLarge is returned when the output exceeds Options.MaxBytes.
+var ErrTooLarge = errors.New("svg: output exceeds the size limit")
 
 var errNilScene = errors.New("svg: nil scenegraph")
 
@@ -144,6 +151,9 @@ func (r *renderer) root(scn *scene.Mark) error {
 // tick reports cancellation every so many rendered items.
 func (r *renderer) tick() error {
 	r.count++
+	if r.opt.MaxBytes > 0 && len(r.w.buf) > r.opt.MaxBytes {
+		return ErrTooLarge
+	}
 	if r.count&1023 == 0 {
 		return r.ctx.Err()
 	}
@@ -226,7 +236,7 @@ func (r *renderer) mark(m *scene.Mark, depth int) error {
 		if err != nil {
 			return err
 		}
-		w.attrRaw("clip-path", ref)
+		w.attr("clip-path", ref)
 	}
 	r.markAria(m)
 	if tag != "g" && m.NonInteractive {
@@ -425,7 +435,7 @@ func (r *renderer) group(m *scene.Mark, it *scene.Item, depth int) error {
 		if err != nil {
 			return err
 		}
-		w.attrRaw("clip-path", ref)
+		w.attr("clip-path", ref)
 	}
 	for _, child := range orderedMarks(it.Items) {
 		if err := r.mark(child, depth+1); err != nil {

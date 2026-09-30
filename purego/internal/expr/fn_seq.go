@@ -91,7 +91,14 @@ func init() {
 			if !it.IsNullish() {
 				b.WriteString(s.str(it))
 			}
+			// Checked while building, so the builder never grows past the
+			// limit by more than one element.
+			if b.Len() > MaxStringLength {
+				s.checkLen(b.Len())
+			}
+			s.tick()
 		}
+		s.checkLen(b.Len())
 		return jsval.Str(b.String())
 	})
 	fn("indexof", func(s *Scope, args []jsval.Value) jsval.Value {
@@ -356,6 +363,7 @@ func init() {
 			throw("RangeError", "sequence length exceeds %d", MaxSequenceLength)
 		}
 		n := int(n32)
+		s.chargeItems(n)
 		out := make([]jsval.Value, n)
 		for i := range out {
 			s.tick()

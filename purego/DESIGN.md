@@ -82,12 +82,30 @@ bug.
 - Bound recursion (expression nesting, group nesting, JSON depth, hierarchy
   depth) and bound work that a spec can make arbitrarily large (`sequence`
   lengths, `bin` step counts, tick counts, `maxbins`, wordcloud/force
-  iterations, string repeats in `pad`, …). Choose limits far above any real
-  chart and return an error when exceeded.
-- Honour `context.Context` cancellation in every loop that can run long.
+  iterations, …). Choose limits far above any real chart and return an error
+  when exceeded.
+- One per-render budget (`internal/budget`, carried in the `context.Context`)
+  counts data rows, loaded bytes and geographic path points; every transform
+  that multiplies tuples (`impute`, `kde`, `quantile`, `flatten`, `fold`,
+  `cross`, `sequence`, `pivot`, `aggregate` cells, `regression`) must charge it
+  with `budget.ReserveOut` **before** it allocates. The expression evaluator
+  has a separate render-wide budget for large strings and arrays
+  (`expr.StringBudget`) and a per-string length limit; every string builder
+  (`+`, `join`, `pad`, `replace`, array stringification) checks it before
+  building. `vega.Limits` holds the defaults; `WithMemoryLimit` scales them.
+- Honour `context.Context` cancellation in loops whose iterations can be long:
+  poll inside the loop (or with `budget.Ticker` when the cost per iteration
+  varies), not only between groups or phases. The converter's timeout covers
+  every stage of a public call (compile, Vega run, SVG writing, PNG, PDF), but
+  Vega-Lite compilation (`internal/vegalite`) and JSON parsing of the spec and
+  of loaded data are not interruptible, so they are bounded by size, not time.
+- Nothing attacker-controlled is written raw into the SVG: every attribute and
+  text goes through the escaping writer (which also drops characters XML 1.0
+  forbids), CSS-bound values (`blend`) are allow-listed, and image and link URLs
+  pass both the `Loader` and vega-loader's scheme allow-list.
 - No reflection-based evaluation, no access to the host from expressions:
   the expression language can only call the whitelisted function table.
-- Data loading only through the configured `Loader`.
+- Data loading and image/link URLs only through the configured `Loader`.
 - Regular expressions run through goecma262's bounded matcher; use its `Err`
   methods for untrusted patterns.
 

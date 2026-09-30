@@ -2,6 +2,7 @@ package transforms
 
 import (
 	"context"
+	"github.com/mgilbir/aster/purego/internal/budget"
 	"github.com/mgilbir/aster/purego/internal/jssort"
 	"math"
 
@@ -69,6 +70,10 @@ func Pivot(ctx context.Context, data []jsval.Value, p PivotParams) ([]jsval.Valu
 		keys = keys[:p.Limit]
 	}
 
+	// Every tuple is offered to every column: rows x columns accessor calls.
+	if work := budget.Mul(int64(len(data)), int64(len(keys))); work > MaxPivotWork {
+		return nil, limitErr("pivot work (rows x columns)", int(min(work, math.MaxInt32)), MaxPivotWork)
+	}
 	measures := make([]Measure, len(keys))
 	for i, k := range keys {
 		k := k

@@ -1,0 +1,1 @@
+{"data": [{"name": "d", "transform": [{"type": "sequence", "start": 0, "stop": 100000}]}], "marks": [{"type": "symbol", "from": {"data": "d"}, "transform": [{"type": "force", "iterations": 300, "forces": [{"force": "collide", "radius": 1000000000.0, "iterations": 10}]}]}]}

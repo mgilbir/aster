@@ -82,6 +82,9 @@ func KDE(ctx context.Context, source []jsval.Value, p KDEParams) ([]jsval.Value,
 		} else {
 			local, valid = valuesExtent(vals)
 		}
+		if err := reserveOut(ctx, len(out)+int(min(maxsteps, MaxSteps))+1, len(source)); err != nil {
+			return nil, err
+		}
 		pts, err := sampleTuples(ctx, f, local, valid, minsteps, maxsteps, names, g.Dims, p.As, scale)
 		if err != nil {
 			return nil, err

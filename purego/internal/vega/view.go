@@ -29,8 +29,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mgilbir/aster/purego/internal/budget"
 	"github.com/mgilbir/aster/purego/internal/expr"
 	"github.com/mgilbir/aster/purego/internal/format"
+	"github.com/mgilbir/aster/purego/internal/geo"
 	"github.com/mgilbir/aster/purego/internal/jsval"
 	"github.com/mgilbir/aster/purego/internal/scene"
 )
@@ -57,11 +59,18 @@ type Limits struct {
 	// MaxSubflows is the number of facet cells (group marks over faceted data),
 	// each of which instantiates its own operators.
 	MaxSubflows int
+	// MaxLoadBytes is the total size of the data the Loader may return.
+	MaxLoadBytes int64
+	// MaxPoints is the number of path points geographic marks may generate.
+	MaxPoints int64
+	// MaxStringBytes is the total size of the large strings (over 4 KiB)
+	// expressions may build.
+	MaxStringBytes int64
 }
 
 func (l Limits) withDefaults() Limits {
 	if l.MaxRows == 0 {
-		l.MaxRows = 5_000_000
+		l.MaxRows = 1_000_000
 	}
 	if l.MaxVisits == 0 {
 		l.MaxVisits = 50_000_000
@@ -70,10 +79,19 @@ func (l Limits) withDefaults() Limits {
 		l.MaxReruns = 16
 	}
 	if l.MaxItems == 0 {
-		l.MaxItems = 5_000_000
+		l.MaxItems = 500_000
 	}
 	if l.MaxSubflows == 0 {
-		l.MaxSubflows = 100_000
+		l.MaxSubflows = 20_000
+	}
+	if l.MaxLoadBytes == 0 {
+		l.MaxLoadBytes = 64 << 20
+	}
+	if l.MaxPoints == 0 {
+		l.MaxPoints = 2_000_000
+	}
+	if l.MaxStringBytes == 0 {
+		l.MaxStringBytes = 128 << 20
 	}
 	return l
 }
@@ -127,7 +145,8 @@ type runView struct {
 	sg     *scene.Scenegraph
 	loader Loader
 	limits Limits
-	rows   int
+	bud    *budget.Budget
+	strs   *expr.StringBudget
 	items  int
 	cells  int
 
@@ -179,6 +198,8 @@ func Render(ctx context.Context, spec jsval.Value, opts Options) (res *Result, e
 				err = e
 			case *opError:
 				err = e.err
+			case *geo.LimitError:
+				err = e.Err
 			case error:
 				err = fmt.Errorf("vega: %w\n%s", e, shortStack())
 			default:
@@ -218,7 +239,12 @@ func shortStack() string {
 
 func newView(ctx context.Context, opts Options, locale jsval.Value) *runView {
 	limits := opts.Limits.withDefaults()
+	// The render's budget travels in the context, so transforms and geo code
+	// charge it (before allocating) without any plumbing.
+	bud := &budget.Budget{MaxRows: limits.MaxRows, MaxLoadBytes: limits.MaxLoadBytes, MaxPoints: limits.MaxPoints}
+	ctx = budget.With(ctx, bud)
 	v := &runView{
+		bud: bud, strs: expr.NewStringBudget(limits.MaxStringBytes),
 		ctx: ctx, loader: opts.Loader, limits: limits,
 		loc: opts.Location, sg: scene.New(),
 		bounder: scene.NewBounder(opts.TextMeasurer),
@@ -249,6 +275,7 @@ func newView(ctx context.Context, opts Options, locale jsval.Value) *runView {
 	if opts.Random != nil {
 		v.rand = &expr.Random{Source: opts.Random}
 	}
+	v.bounder.Context = ctx
 	v.g = newGraph(ctx)
 	v.g.view = v
 	v.g.maxVisits = limits.MaxVisits

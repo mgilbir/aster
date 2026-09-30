@@ -2,7 +2,9 @@ package transforms
 
 import (
 	"context"
+	"math"
 
+	"github.com/mgilbir/aster/purego/internal/budget"
 	"github.com/mgilbir/aster/purego/internal/jsval"
 )
 
@@ -30,6 +32,12 @@ func Cross(ctx context.Context, data []jsval.Value, p CrossParams) ([]jsval.Valu
 	if p.Filter == nil && len(data) > 0 && len(data) > MaxGroupCells/len(data) {
 		return nil, limitErr("cross tuples", len(data)*len(data), MaxGroupCells)
 	}
+	if p.Filter == nil {
+		if err := reserveOut(ctx, int(min(budget.Mul(int64(len(data)), int64(len(data))), math.MaxInt32)), len(data)); err != nil {
+			return nil, err
+		}
+	}
+	room := budget.From(ctx).RowsLeft()
 	var out []jsval.Value
 	n := len(data)
 	work := 0
@@ -48,6 +56,9 @@ func Cross(ctx context.Context, data []jsval.Value, p CrossParams) ([]jsval.Valu
 			if p.Filter == nil || p.Filter(jsval.Obj(t)) {
 				if len(out) >= MaxGroupCells {
 					return nil, limitErr("cross tuples", len(out)+1, MaxGroupCells)
+				}
+				if int64(len(out)) >= room {
+					return nil, reserveOut(ctx, len(out)+1, 0)
 				}
 				out = append(out, jsval.Obj(t))
 				t = jsval.NewObject(2)

@@ -143,6 +143,9 @@ func (f *collideForce) apply(float64) {
 		f.tree.build(f.xs, f.ys)
 		f.tree.visitAfter(prepare)
 		for i := range nodes {
+			if f.s.halt(i) {
+				return
+			}
 			cur = int32(i)
 			ri = radii[i]
 			ri2 = float64(ri * ri)
@@ -287,6 +290,9 @@ func (f *nbodyForce) apply(alpha float64) {
 		return false
 	}
 	for i := range nodes {
+		if f.s.halt(i) {
+			return
+		}
 		cur = int32(i)
 		self = &nodes[i]
 		tree.visit(apply)
@@ -415,6 +421,9 @@ func (f *linkForce) apply(alpha float64) {
 	rng := &f.s.rng
 	for k := 0; k < f.cfg.Iterations && k < MaxForceIterations; k++ {
 		for i := range f.src {
+			if f.s.halt(i) {
+				return
+			}
 			source, target := &nodes[f.src[i]], &nodes[f.tgt[i]]
 			// `|| jiggle`: both zero and NaN trigger the random nudge.
 			x := target.x + target.vx - source.x - source.vx

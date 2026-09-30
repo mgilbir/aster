@@ -93,6 +93,7 @@ func init() {
 				field = geoAccessor(f)
 			}
 			shape := geo.NewShape(proj, field, pointRadius(p))
+			shape.Bind(n.g.ctx)
 			as := p.str("as")
 			if as == "" {
 				as = "shape"

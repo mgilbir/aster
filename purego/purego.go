@@ -238,7 +238,7 @@ func (c *Converter) vegaSVG(ctx context.Context, spec []byte) (string, error) {
 }
 
 func (c *Converter) vegaLiteSVG(ctx context.Context, spec []byte) (string, error) {
-	vg, err := c.compileVegaLite(spec)
+	vg, err := c.compileVegaLite(ctx, spec)
 	if err != nil {
 		return "", err
 	}
@@ -273,6 +273,8 @@ func (c *Converter) renderSVG(ctx context.Context, spec jsval.Value) (out string
 		Width:  res.Width,
 		Height: res.Height,
 		Origin: res.Origin,
+		// An SVG past this size is not a chart anybody can use.
+		MaxBytes: c.maxSVGBytes(),
 	}
 	if res.HasBackground {
 		so.Background = res.Background
@@ -282,12 +284,36 @@ func (c *Converter) renderSVG(ctx context.Context, spec jsval.Value) (out string
 	}
 	// Vega sanitizes every href through the view's loader; the Loader decides
 	// which links a chart may carry, and a rejected URL renders no link.
+	// Vega's vega-loader allow-list (no javascript: and the like) applies as
+	// well: a permissive Loader cannot make a script URL a link.
 	so.Href = func(uri string) ([]svg.HrefAttr, bool) {
+		if _, ok := svg.SanitizeURL(uri, svg.URLOptions{}); !ok {
+			return nil, false
+		}
 		href, err := c.cfg.loader.Sanitize(ctx, uri)
 		if err != nil {
 			return nil, false
 		}
+		if _, ok := svg.SanitizeURL(href, svg.URLOptions{}); !ok {
+			return nil, false
+		}
 		return []svg.HrefAttr{{Name: "xlink:href", Value: href}}, true
+	}
+	// Image URLs go through the Loader like every other resource (upstream's
+	// ResourceLoader.loadImage sanitizes with context "image"); a rejected URL
+	// renders what a failed image load does: no source, no size.
+	so.Image = func(url string) svg.ImageInfo {
+		if url == "" {
+			return svg.ImageInfo{}
+		}
+		u, err := c.cfg.loader.Sanitize(ctx, url)
+		if err != nil {
+			return svg.ImageInfo{}
+		}
+		if src, ok := svg.SanitizeURL(u, svg.URLOptions{}); ok {
+			return svg.ImageInfo{Src: src}
+		}
+		return svg.ImageInfo{}
 	}
 	out, err = svg.Render(ctx, res.Scenegraph, so)
 	if err != nil {
@@ -308,6 +334,15 @@ func (c *Converter) rasterLimits() raster.Limits {
 	return l
 }
 
+// maxSVGBytes bounds the SVG a render may produce: 128 MiB by default, a
+// quarter of WithMemoryLimit when one is set.
+func (c *Converter) maxSVGBytes() int {
+	if n := c.cfg.memoryLimit; n > 0 {
+		return int(min(max(n/4, 1<<20), 1<<40))
+	}
+	return 128 << 20
+}
+
 // randomSeed seeds Vega's random() and every transform that samples.
 const randomSeed = 123456789
 
@@ -320,6 +355,8 @@ func (c *Converter) limits() vega.Limits {
 	if n := c.cfg.memoryLimit; n > 0 {
 		l.MaxRows = int(max(n/bytesPerRow, 1000))
 		l.MaxItems = int(max(n/bytesPerItem, 1000))
+		l.MaxLoadBytes = int64(max(n/2, 1<<20))
+		l.MaxStringBytes = int64(max(n/4, 1<<20))
 	}
 	return l
 }
@@ -377,7 +414,9 @@ func (c *Converter) VegaLiteToVega(spec []byte) ([]byte, error) {
 	if c.closed {
 		return nil, errConverterClosed
 	}
-	vg, err := c.compileVegaLite(spec)
+	ctx, cancel := c.opContext()
+	defer cancel()
+	vg, err := c.compileVegaLite(ctx, spec)
 	if err != nil {
 		return nil, err
 	}
@@ -386,14 +425,14 @@ func (c *Converter) VegaLiteToVega(spec []byte) ([]byte, error) {
 
 // compileVegaLite parses a Vega-Lite spec and compiles it to Vega with the
 // converter's theme and time zone.
-func (c *Converter) compileVegaLite(spec []byte) (jsval.Value, error) {
+func (c *Converter) compileVegaLite(ctx context.Context, spec []byte) (jsval.Value, error) {
 	v, err := jsval.ParseJSON(spec)
 	if err != nil {
 		return jsval.Undefined, fmt.Errorf("purego: parsing Vega-Lite spec: %w", err)
 	}
-	vg, err := vegalite.Compile(v, vegalite.Options{Config: c.theme, Location: c.location, Version: c.vl})
+	vg, err := vegalite.Compile(v, vegalite.Options{Config: c.theme, Location: c.location, Version: c.vl, Context: ctx})
 	if err != nil {
-		return jsval.Undefined, fmt.Errorf("purego: compiling Vega-Lite: %w", err)
+		return jsval.Undefined, c.stageErr(ctx, "compiling Vega-Lite", err)
 	}
 	return vg, nil
 }

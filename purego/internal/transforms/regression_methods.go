@@ -1,6 +1,7 @@
 package transforms
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"slices"
@@ -35,6 +36,12 @@ var regressionMethods = map[string]bool{
 // poly) to the tuples. Points whose x or y is null or not a number are ignored.
 // order only applies to poly.
 func FitRegression(method string, data []jsval.Value, x, y Accessor, order int) (RegressionModel, error) {
+	return FitRegressionCtx(context.Background(), method, data, x, y, order)
+}
+
+// FitRegressionCtx is FitRegression that stops with the context's error when
+// ctx is cancelled (a high-order polynomial fit costs order^2 passes).
+func FitRegressionCtx(ctx context.Context, method string, data []jsval.Value, x, y Accessor, order int) (RegressionModel, error) {
 	switch method {
 	case "constant":
 		return FitConstant(data, x, y), nil
@@ -52,7 +59,7 @@ func FitRegression(method string, data []jsval.Value, x, y Accessor, order int) 
 		if order < 0 || order > MaxPolyOrder {
 			return RegressionModel{}, fmt.Errorf("regression: poly order %d out of range [0,%d]", order, MaxPolyOrder)
 		}
-		return FitPoly(data, x, y, order), nil
+		return fitPoly(ctx, data, x, y, order)
 	}
 	return RegressionModel{}, fmt.Errorf("Invalid regression method: %s", method)
 }
@@ -288,13 +295,18 @@ func FitQuad(data []jsval.Value, x, y Accessor) RegressionModel {
 // equations with Gaussian elimination on mean-centred data. Orders 0, 1 and 2
 // use the constant, linear and quad fits. Coef is ascending in power.
 func FitPoly(data []jsval.Value, x, y Accessor, order int) RegressionModel {
+	m, _ := fitPoly(context.Background(), data, x, y, order)
+	return m
+}
+
+func fitPoly(ctx context.Context, data []jsval.Value, x, y Accessor, order int) (RegressionModel, error) {
 	switch order {
 	case 0:
-		return FitConstant(data, x, y)
+		return FitConstant(data, x, y), nil
 	case 1:
-		return FitLinear(data, x, y)
+		return FitLinear(data, x, y), nil
 	case 2:
-		return FitQuad(data, x, y)
+		return FitQuad(data, x, y), nil
 	}
 	ps := regressionPoints(data, x, y, false)
 	n := len(ps.x)
@@ -302,6 +314,9 @@ func FitPoly(data []jsval.Value, x, y Accessor, order int) RegressionModel {
 	matrix := make([][]float64, 0, k+1)
 	lhs := make([]float64, 0, k)
 	for i := 0; i < k; i++ {
+		if err := ctx.Err(); err != nil {
+			return RegressionModel{}, err
+		}
 		v := 0.0
 		for l := 0; l < n; l++ {
 			v += float64(jsmath.Pow(ps.x[l], float64(i)) * ps.y[l])
@@ -309,6 +324,10 @@ func FitPoly(data []jsval.Value, x, y Accessor, order int) RegressionModel {
 		lhs = append(lhs, v)
 		c := make([]float64, k)
 		for j := 0; j < k; j++ {
+			// One pass over the data per (i, j) pair: poll per pass.
+			if err := ctx.Err(); err != nil {
+				return RegressionModel{}, err
+			}
 			v = 0
 			for l := 0; l < n; l++ {
 				v += jsmath.Pow(ps.x[l], float64(i+j))
@@ -332,7 +351,7 @@ func FitPoly(data []jsval.Value, x, y Accessor, order int) RegressionModel {
 		Coef:     regressionUncenter(k, coef, -ux, uy),
 		Predict:  predict,
 		RSquared: regressionRSquared(data, x, y, uy, predict),
-	}
+	}, nil
 }
 
 // regressionUncenter expands the polynomial back out of mean-centred space.

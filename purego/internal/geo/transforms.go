@@ -149,8 +149,18 @@ type GeoPathParams struct {
 // GeoPath is vega-geo's GeoPath transform: it stores in each tuple's As field
 // the SVG path data of its GeoJSON (null when nothing is drawn). Tuples are
 // modified in place, as upstream does.
-func GeoPath(ctx context.Context, tuples []jsval.Value, p GeoPathParams) error {
+func GeoPath(ctx context.Context, tuples []jsval.Value, p GeoPathParams) (err error) {
 	path := projectionPath(p.Projection)
+	path.Bind(ctx)
+	defer func() {
+		if r := recover(); r != nil {
+			le, ok := r.(*LimitError)
+			if !ok {
+				panic(r)
+			}
+			err = le.Err
+		}
+	}()
 	field := p.Field
 	if field == nil {
 		field = Identity
@@ -234,6 +244,9 @@ type Shape struct {
 	field Accessor
 	pr    PointRadius
 }
+
+// Bind charges the shape's points to the budget carried by ctx; see Path.Bind.
+func (s *Shape) Bind(ctx context.Context) { s.path.Bind(ctx) }
 
 // NewShape is the GeoShape transform's generator. A nil field reads the
 // item's `datum`, the transform's default.

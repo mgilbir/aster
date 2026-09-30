@@ -1,6 +1,9 @@
 package geo
 
 import (
+	"context"
+
+	"github.com/mgilbir/aster/purego/internal/budget"
 	"github.com/mgilbir/aster/purego/internal/jsval"
 )
 
@@ -18,6 +21,49 @@ type Path struct {
 	radiusFn func(jsval.Value) float64
 	ctx      PathContext
 	str      *pathString
+
+	// bctx carries the render's budget and cancellation (see Bind).
+	bctx context.Context
+	bud  *budget.Budget
+}
+
+// LimitError is the panic value that stops a path walk whose point budget is
+// spent or whose context is done; it wraps the cause. The Path methods cannot
+// return errors (they are scenegraph callbacks), so callers that can (GeoPath)
+// recover it, and the renderer's own recover reports the rest.
+type LimitError struct{ Err error }
+
+func (e *LimitError) Error() string { return e.Err.Error() }
+func (e *LimitError) Unwrap() error { return e.Err }
+
+// Bind charges every point the path emits to the budget carried by ctx and
+// stops the walk when ctx is done. Projection resampling can multiply the
+// points of a segment by 2^16, so this is what bounds geographic output.
+func (p *Path) Bind(ctx context.Context) {
+	p.bctx = ctx
+	p.bud = budget.From(ctx)
+}
+
+// limitSink counts the points reaching the output.
+type limitSink struct {
+	Stream
+	p *Path
+	n int
+}
+
+func (s *limitSink) Point(x, y float64) {
+	s.n++
+	if s.p.bud != nil {
+		if err := s.p.bud.Points(1); err != nil {
+			panic(&LimitError{err})
+		}
+	}
+	if s.n&4095 == 0 {
+		if err := s.p.bctx.Err(); err != nil {
+			panic(&LimitError{err})
+		}
+	}
+	s.Stream.Point(x, y)
 }
 
 // NewPath returns a path generator for the projection (nil for none), with
@@ -68,6 +114,9 @@ func (p *Path) restoreRadius(s radiusState) {
 }
 
 func (p *Path) stream(object jsval.Value, sink Stream) {
+	if p.bctx != nil {
+		sink = &limitSink{Stream: sink, p: p}
+	}
 	if p.proj != nil {
 		sink = p.proj.Stream(sink)
 	}

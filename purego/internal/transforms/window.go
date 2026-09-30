@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/mgilbir/aster/purego/internal/budget"
 	"math"
 	"slices"
 
@@ -258,6 +259,7 @@ func Window(ctx context.Context, data []jsval.Value, p WindowParams) ([]jsval.Va
 		if ms, err = newMeasureSet(aggs, p.Rand); err != nil {
 			return nil, err
 		}
+		ms.ctx = ctx
 	}
 	frame := []FrameBound{{Unbounded: true}, {Offset: 0}}
 	if len(p.Frame) == 2 {
@@ -269,6 +271,7 @@ func Window(ctx context.Context, data []jsval.Value, p WindowParams) ([]jsval.Va
 		compare = func(a, b jsval.Value) int { return -1 }
 	}
 
+	tick := budget.NewTicker(ctx)
 	for _, g := range GroupByKey(data, KeyOf(p.GroupBy...)) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -287,7 +290,7 @@ func Window(ctx context.Context, data []jsval.Value, p WindowParams) ([]jsval.Va
 			o.init()
 		}
 		for i := 0; i < n; i++ {
-			if err := poll(ctx, i); err != nil {
+			if err := tick.Add(1); err != nil {
 				return nil, err
 			}
 			w.p0, w.p1 = w.i0, w.i1
@@ -316,7 +319,15 @@ func Window(ctx context.Context, data []jsval.Value, p WindowParams) ([]jsval.Va
 					c.data = rows[w.i0:w.i1]
 				}
 				if t != nil {
+					// Writing costs a pass over the frame (median, quartiles,
+					// bootstrap, ...), so large frames are polled every row.
+					if err := tick.Add(w.i1 - w.i0); err != nil {
+						return nil, err
+					}
 					ms.write(c, t)
+					if ms.err != nil {
+						return nil, ms.err
+					}
 				}
 			}
 			for k, o := range wins {

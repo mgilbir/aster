@@ -327,6 +327,7 @@ func (c *rtContext) scope() *expr.Scope {
 		s.Context = c.view.ctx
 		s.Now = c.view.now
 		s.Rand = c.view.rand
+		s.Strings = c.view.strs
 		c.exprScope = s
 	}
 	return c.exprScope

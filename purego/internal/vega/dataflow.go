@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/mgilbir/aster/purego/internal/geo"
 	"sort"
 
 	"github.com/mgilbir/aster/purego/internal/jsval"
@@ -635,6 +636,8 @@ func (g *flowGraph) evaluate(encode string) (err error) {
 				switch e := r.(type) {
 				case *opError:
 					err = e.err
+				case *geo.LimitError:
+					err = e.Err
 				case error:
 					err = fmt.Errorf("%w\n%s", e, shortStack())
 				default:

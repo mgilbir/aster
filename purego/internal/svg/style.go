@@ -80,19 +80,23 @@ func (r *renderer) style(m *scene.Mark, it *scene.Item, tag string, fill, stroke
 	r.itemNumAttr(it, "strokeMiterLimit", "stroke-miterlimit", it.StrokeMiterLimit)
 	r.itemNumAttr(it, "opacity", "opacity", it.Opacity)
 
-	if smoothOff || it.Blend != "" {
+	blend := it.Blend
+	if !blendModes[blend] {
+		blend = ""
+	}
+	if smoothOff || blend != "" {
 		w.attrName("style")
 		sep := false
 		if smoothOff {
 			w.buf = append(w.buf, "image-rendering: optimizeSpeed; image-rendering: pixelated;"...)
 			sep = true
 		}
-		if it.Blend != "" {
+		if blend != "" {
 			if sep {
 				w.buf = append(w.buf, ' ')
 			}
 			w.buf = append(w.buf, "mix-blend-mode: "...)
-			w.buf = appendEscaped(w.buf, it.Blend, true)
+			w.buf = append(w.buf, blend...)
 			w.buf = append(w.buf, ';')
 		}
 		w.buf = append(w.buf, '"')
@@ -113,7 +117,7 @@ func (r *renderer) itemNumAttr(it *scene.Item, prop, name string, n scene.Num) {
 // rotate(...): the raw value when it was not a number.
 func appendAngle(dst []byte, it *scene.Item) []byte {
 	if v, ok := it.RawValue("angle"); ok {
-		return append(dst, v.AsString()...)
+		return appendEscaped(dst, v.AsString(), true)
 	}
 	return scene.AppendNumber(dst, it.Angle.Val())
 }
@@ -132,7 +136,7 @@ func (r *renderer) paintAttr(name string, p scene.Paint) {
 		return
 	}
 	if g := p.Gradient(); g != nil {
-		r.w.attrRaw(name, r.gradientRef(g))
+		r.w.attr(name, r.gradientRef(g))
 		return
 	}
 	if p.Str() == "transparent" {

@@ -60,9 +60,16 @@ its own loader):
   Vega emits plus common general SVG (no CSS `<style>`, masks, filters,
   patterns or markers).
 - **Time zones**: any IANA zone (`WithTimezone`), not only UTC.
-- **Vega-Lite 5.8** is not available (`WithVegaLiteVersion("5.8")` errors).
-- **`WithMemoryLimit`** bounds the rows and scene items a render may create
-  rather than a heap size.
+- **Vega-Lite 5.8** compiles alongside 6.4 (`WithVegaLiteVersion("5.8")`); both render with the Vega 6.4 runtime.
+- **`WithMemoryLimit`** is not a heap cap. It scales the render's budgets (rows
+  at 256 bytes each, scene items at 512, loaded bytes, the SVG size at a
+  quarter of the limit) and the rasterizer's canvas memory; the budgets are
+  charged before the allocation they pay for. Memory the engine does not count
+  (the text shaper's caches, the Vega-Lite compiler, JSON parsing of the spec,
+  PDF building) is outside it. Without the option the defaults apply: 1M rows,
+  500k scene items, 64 MiB of loaded data, 128 MiB of SVG.
+- **`WithTimeout`** (default 30 s) bounds one public call across all its stages,
+  except that the Vega-Lite compiler is checked only before and after.
 - **Randomness** (`random()`, `sample`, jitter, bootstrap intervals) is seeded
   per render, as in the root engine, so output is reproducible.
 - PDF output uses the same `internal/svgpdf` converter as the root package.

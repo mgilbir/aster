@@ -34,6 +34,7 @@ func JoinAggregate(ctx context.Context, data []jsval.Value, p JoinAggregateParam
 	if err != nil {
 		return nil, err
 	}
+	ms.ctx = ctx
 	cellKey := KeyOf(p.GroupBy...)
 	if !p.Key.IsNil() {
 		g := p.Key.Get
@@ -66,8 +67,14 @@ func JoinAggregate(ctx context.Context, data []jsval.Value, p JoinAggregateParam
 			jc.c.data = append(jc.c.data, t)
 		}
 	}
-	for _, jc := range order {
+	for i, jc := range order {
+		if err := poll(ctx, i); err != nil {
+			return nil, err
+		}
 		ms.write(jc.c, jc.tuple)
+		if ms.err != nil {
+			return nil, ms.err
+		}
 	}
 	for i, t := range data {
 		if err := poll(ctx, i); err != nil {

@@ -70,6 +70,7 @@ func repeatString(s *Scope, c string, reps float64) string {
 	if count*float64(utf16Len(c)) > MaxStringLength {
 		throw("RangeError", "Invalid string length")
 	}
+	s.checkLen(len(c) * int(count))
 	s.tick()
 	return strings.Repeat(c, int(count))
 }
@@ -534,10 +535,16 @@ func init() {
 		}
 		src := s.str(str)
 		if pat.IsPattern() {
+			// A regexp can match at every position, so the result can be
+			// (len(src)+1)*len(repl) long; refuse before it is built.
+			if len(repl) > 1024 && (len(src)+1)*len(repl) > 4*MaxStringLength {
+				throw("RangeError", "Invalid string length")
+			}
 			out, err := pat.PatternOf().Re.ReplaceAllStringErr(src, repl)
 			if err != nil {
 				throw("RangeError", "%v", err)
 			}
+			s.checkLen(len(out))
 			return jsval.Str(out)
 		}
 		needle := pat.StrValue()
@@ -545,7 +552,9 @@ func init() {
 		if i < 0 {
 			return jsval.Str(src)
 		}
-		return jsval.Str(src[:i] + expandReplacement(repl, src, i, i+len(needle)) + src[i+len(needle):])
+		rep := expandReplacement(repl, src, i, i+len(needle))
+		s.checkLen(len(src) + len(rep))
+		return jsval.Str(src[:i] + rep + src[i+len(needle):])
 	})
 
 	fn("pad", func(s *Scope, args []jsval.Value) jsval.Value {

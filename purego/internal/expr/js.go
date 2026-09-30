@@ -104,8 +104,11 @@ func (s *Scope) str(v jsval.Value) string {
 				b = append(b, ',')
 			}
 			if !it.IsNullish() {
-				b = append(b, s.str(it)...)
+				part := s.str(it)
+				s.checkLen(len(b) + len(part))
+				b = append(b, part...)
 			}
+			s.tick()
 		}
 		return string(b)
 	case jsval.KindObj:
@@ -264,7 +267,9 @@ func (s *Scope) add(a, b jsval.Value) jsval.Value {
 	}
 	pa, pb := s.primitive(a, false), s.primitive(b, false)
 	if pa.IsStr() || pb.IsStr() {
-		return jsval.Str(s.str(pa) + s.str(pb))
+		x, y := s.str(pa), s.str(pb)
+		s.checkLen(len(x) + len(y))
+		return jsval.Str(x + y)
 	}
 	return jsval.Num(s.num(pa) + s.num(pb))
 }

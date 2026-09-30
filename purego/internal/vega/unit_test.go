@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -155,5 +156,25 @@ func TestSignalUpdatesAndInit(t *testing.T) {
 	// signal-sourced event handlers do not fire on the initial run
 	if get("d") != 0 {
 		t.Errorf("d=%v", get("d"))
+	}
+}
+
+func TestParseDSVLimitFailsBeforeAllocating(t *testing.T) {
+	text := "a\n" + strings.Repeat("1\n", 10000)
+	if _, _, err := parseDSVLimit(context.Background(), text, ',', 100); err == nil {
+		t.Fatal("10000 rows against a limit of 100 must fail")
+	}
+	rows, _, err := parseDSVLimit(context.Background(), text, ',', 20000)
+	if err != nil || len(rows) != 10000 {
+		t.Fatalf("within the limit: %d rows, %v", len(rows), err)
+	}
+	wide := strings.Repeat("c,", 99) + "c\n" + strings.Repeat("1\n", 2000)
+	if _, _, err := parseDSVLimit(context.Background(), wide, ',', 100); err == nil {
+		t.Fatal("wide rows must be bounded by cells")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, _, err := parseDSVLimit(ctx, text, ',', 1<<30); err == nil {
+		t.Fatal("cancelled context must stop parsing")
 	}
 }

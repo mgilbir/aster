@@ -2,7 +2,9 @@ package transforms
 
 import (
 	"context"
+	"math"
 
+	"github.com/mgilbir/aster/purego/internal/budget"
 	"github.com/mgilbir/aster/purego/internal/jsval"
 )
 
@@ -24,6 +26,9 @@ func Fold(ctx context.Context, data []jsval.Value, p FoldParams) ([]jsval.Value,
 	}
 	if v == "" {
 		v = "value"
+	}
+	if err := reserveOut(ctx, int(min(budget.Mul(int64(len(data)), int64(len(p.Fields))), math.MaxInt32)), len(data)); err != nil {
+		return nil, err
 	}
 	out := make([]jsval.Value, 0, len(data)*len(p.Fields))
 	for i, t := range data {

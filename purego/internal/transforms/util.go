@@ -2,9 +2,9 @@ package transforms
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
+	"github.com/mgilbir/aster/purego/internal/budget"
 	"github.com/mgilbir/aster/purego/internal/jsval"
 )
 
@@ -20,10 +20,12 @@ const (
 	MaxBins = 1_000_000
 	// MaxSteps bounds sampled curve points (density, regression).
 	MaxSteps = 1_000_000
+	// MaxPivotWork bounds rows x distinct values of a pivot.
+	MaxPivotWork = 20_000_000
 )
 
 // ErrLimit is wrapped by errors reporting an exceeded work limit.
-var ErrLimit = errors.New("transforms: limit exceeded")
+var ErrLimit = budget.ErrLimit
 
 func limitErr(what string, n, limit int) error {
 	return fmt.Errorf("%w: %s %d exceeds %d", ErrLimit, what, n, limit)
@@ -47,4 +49,10 @@ func dimValues(fields []Field, t jsval.Value) []jsval.Value {
 		out[i] = f.Get(t)
 	}
 	return out
+}
+
+// reserveOut fails, before anything is allocated, when a transform that turns
+// in input rows into out output rows would exceed the render's row budget.
+func reserveOut(ctx context.Context, out, in int) error {
+	return budget.ReserveOut(ctx, int64(out), int64(in))
 }

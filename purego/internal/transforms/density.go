@@ -159,7 +159,24 @@ func sampleTuples(ctx context.Context, f func(float64) float64, domain [2]float6
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	// f can cost a pass over the data (kde), so poll as it is sampled; a
+	// cancelled run yields NaN samples until SampleCurve's own budget ends.
+	var cerr error
+	calls := 0
+	pf := f
+	f = func(x float64) float64 {
+		if calls++; calls&15 == 0 && cerr == nil {
+			cerr = ctx.Err()
+		}
+		if cerr != nil {
+			return math.NaN()
+		}
+		return pf(x)
+	}
 	pts, err := SampleCurve(f, domain, minsteps, maxsteps)
+	if cerr != nil {
+		return nil, cerr
+	}
 	if err != nil {
 		return nil, err
 	}

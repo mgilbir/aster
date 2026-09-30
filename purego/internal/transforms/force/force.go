@@ -117,6 +117,21 @@ type sim struct {
 	velocityDecay float64 // d3 stores 1 - velocityDecay
 	rng           lcg
 	forces        []force
+	ctx           context.Context
+	err           error // the context's error once it was seen cancelled
+}
+
+// halt reports, polling the context every 256 nodes, whether the simulation
+// must stop: one tick of a collide or many-body force is quadratic in the
+// worst case, so cancellation cannot wait for the tick to end.
+func (s *sim) halt(i int) bool {
+	if s.err != nil {
+		return true
+	}
+	if i&255 == 0 {
+		s.err = s.ctx.Err()
+	}
+	return s.err != nil
 }
 
 // lcg is d3-force's generator (Numerical Recipes constants, seed 1).
@@ -147,6 +162,7 @@ func Run(ctx context.Context, nodes []jsval.Value, p Params) error {
 		alphaDecay:    1 - jsmath.Pow(0.001, 1.0/300),
 		velocityDecay: 1 - 0.4,
 		rng:           lcg{s: 1},
+		ctx:           ctx,
 	}
 	if p.Bound&BoundAlpha != 0 {
 		s.alpha = p.Alpha
@@ -176,7 +192,7 @@ func Run(ctx context.Context, nodes []jsval.Value, p Params) error {
 	if !p.Static {
 		s.tick()
 		s.writeBack()
-		return ctx.Err()
+		return firstErr(s.err, ctx.Err())
 	}
 	// Vega raises alpha to at least _.alpha (or 1) and spreads the decay so the
 	// simulation cools to alphaMin in exactly `iterations` ticks.
@@ -191,9 +207,19 @@ func Run(ctx context.Context, nodes []jsval.Value, p Params) error {
 			return err
 		}
 		s.tick()
+		if s.err != nil {
+			return s.err
+		}
 	}
 	s.writeBack()
 	return nil
+}
+
+func firstErr(a, b error) error {
+	if a != nil {
+		return a
+	}
+	return b
 }
 
 func (s *sim) setNodes(vals []jsval.Value) error {

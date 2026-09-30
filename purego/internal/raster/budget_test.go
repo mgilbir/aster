@@ -45,7 +45,8 @@ func TestPixelOpsBudget(t *testing.T) {
 	}
 }
 
-func TestPixelOpsBudgetUseExpansion(t *testing.T) {
+// useBomb is 2^12 nested <use> copies of a full-canvas rect.
+func useBomb() []byte {
 	var b strings.Builder
 	b.WriteString(`<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="2000" height="2000"><defs><g id="g0"><rect width="2000" height="2000" fill="rgba(0,0,0,.1)"/></g>`)
 	const levels = 12
@@ -54,8 +55,22 @@ func TestPixelOpsBudgetUseExpansion(t *testing.T) {
 		b.WriteString(`<g id="` + id + `"><use xlink:href="#` + prev + `"/><use xlink:href="#` + prev + `"/></g>`)
 	}
 	b.WriteString(`</defs><use xlink:href="#g` + num(levels) + `"/></svg>`)
+	return []byte(b.String())
+}
+
+func TestPixelOpsBudgetUseExpansion(t *testing.T) {
+	// A small budget: the expansion must stop as soon as it is spent.
+	if _, err := Render(useBomb(), Options{Limits: Limits{MaxPixelOps: 20_000_000}}); !errors.Is(err, errLimit) {
+		t.Fatalf("want errLimit, got %v", err)
+	}
+}
+
+func TestPixelOpsDefaultBudgetUseExpansion(t *testing.T) {
+	if testing.Short() {
+		t.Skip("spends the whole default pixel budget (slow under -race)")
+	}
 	start := time.Now()
-	_, err := Render([]byte(b.String()), Options{})
+	_, err := Render(useBomb(), Options{})
 	if !errors.Is(err, errLimit) {
 		t.Fatalf("want errLimit, got %v", err)
 	}
