@@ -299,7 +299,7 @@ The engine is organized along Vega's own module boundaries, under `internal/`:
 
 Upstream is the oracle. `testdata/oracle-node` pins Vega 6.4.0 / Vega-Lite 6.4.3 (and resvg), and `testdata/oracle-node-vl5` Vega-Lite 5.8.0, running in node; `internal/oracle` drives them and caches their answers under `testdata/oracle-cache`, which is recreated on demand and never committed. The engine's SVG, compiled Vega and PNG are compared with what upstream produces for the same spec.
 
-On the 1,347 specs of the corpus (260 Vega fixtures, 332 Vega-Lite fixtures, Vega's 92 example specs, the 627 Vega-Lite examples, 23 vl-convert specs and 13 fuzz-found regressions), 1,331 render identically to upstream or within half a pixel (text is shaped by forme on one side and node-canvas on the other) and 13 draw the current time or advance on timer events; the remaining 3 are the few whose oracle answer depends on the platform node runs on, listed with the reason in `testdata/oracle-expect.txt`; the compiled Vega is identical to upstream's for every Vega-Lite spec.
+On the 1,347 specs of the corpus (260 Vega fixtures, 332 Vega-Lite fixtures, Vega's 92 example specs, the 627 Vega-Lite examples, 23 vl-convert specs and 13 fuzz-found regressions), 1,331 render identically to upstream or within half a pixel (text is shaped by forme on one side and node-canvas on the other) and 13 draw the current time or advance on timer events; the remaining few are those whose oracle answer depends on the platform node runs on, listed with the reason in `testdata/oracle-expect.txt`; the compiled Vega is identical to upstream's for every Vega-Lite spec.
 
 ```bash
 (cd testdata/oracle-node && npm ci)        # node version pinned in package.json (volta)
