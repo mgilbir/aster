@@ -4,8 +4,6 @@ on:
   push:
     branches: [main]
   pull_request:
-  schedule:
-    - cron: "17 3 * * *" # nightly: the slow cross-engine scoreboards
   workflow_dispatch:
 
 permissions:
@@ -57,41 +55,59 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - name: go test -race (purego)
-        run: go test -short -race -timeout 30m ./purego/...
+      - name: go test -race
+        run: go test -short -race -timeout 30m ./...
 
   fmacheck:
-    # purego must not let the compiler fuse multiply-adds where upstream (V8)
-    # rounds each product; the script cross-compiles for arm64 on any host.
+    # The engine must not let the compiler fuse multiply-adds where upstream
+    # (V8) rounds each product; the script cross-compiles for arm64 on any host.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - run: purego/scripts/fmacheck.sh
+      - run: scripts/fmacheck.sh
 
-  scoreboard:
-    # Renders the whole corpus with both engines and against upstream's own
-    # renderings. Slow (the reference engine runs in QuickJS), so nightly.
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+  oracle:
+    # The full suite with the node oracle required: upstream Vega / Vega-Lite
+    # (and resvg) in node, pinned in testdata/oracle-node*, is what the
+    # engine's SVG, compiled Vega and PNG are compared with. Its answers are
+    # cached between runs; the cache key covers the oracle's script and
+    # lockfiles, and entries are keyed by content, so stale ones are unused.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - name: full test suite
-        run: go test -timeout 60m ./...
-      - name: scoreboards
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: testdata/oracle-node/package.json
+      - name: install the oracle
         run: |
-          go test -count=1 -v -timeout 60m \
-            -run 'TestCompareWithReference|TestAgainstUpstreamRenderings' ./purego/ \
-            -args -compare.report="$RUNNER_TEMP/compare-report.md" | tee "$RUNNER_TEMP/scoreboard.txt"
+          (cd testdata/oracle-node && npm ci)
+          (cd testdata/oracle-node-vl5 && npm ci)
+      - uses: actions/cache@v6
+        with:
+          path: testdata/oracle-cache
+          key: oracle-${{ hashFiles('testdata/oracle-node/oracle.mjs', 'testdata/oracle-node*/package-lock.json') }}-${{ github.sha }}
+          restore-keys: oracle-${{ hashFiles('testdata/oracle-node/oracle.mjs', 'testdata/oracle-node*/package-lock.json') }}-
+      - name: full test suite
+        env:
+          ASTER_ORACLE: require
+        run: go test -timeout 60m ./...
+      - name: comparison report
+        if: always()
+        env:
+          ASTER_ORACLE: require
+        run: |
+          go test -count=1 -v -timeout 30m -run TestCompareWithNode . \
+            -args -compare.report="$RUNNER_TEMP/compare-report.md" | tee "$RUNNER_TEMP/compare.txt"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: scoreboard
+          name: compare-with-node
           path: |
             ${{ runner.temp }}/compare-report.md
-            ${{ runner.temp }}/scoreboard.txt
+            ${{ runner.temp }}/compare.txt

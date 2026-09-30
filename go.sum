@@ -1,5 +1,3 @@
-github.com/mgilbir/andsifr v0.0.0-20260706220517-1793eb745c6f h1:1zvMjWXOWwVoCET7oavSdOIVnCJV4d5hDdtoJUrWDUg=
-github.com/mgilbir/andsifr v0.0.0-20260706220517-1793eb745c6f/go.mod h1:Uh3/Oswp1l5MwPdGoLvNMnUbxq1mYDyrE0Vszec79W4=
 github.com/mgilbir/formalis v0.3.1 h1:NyYe/EcRYJ2jUjgaZG98lNXgJ7H+jgy6mq7HXOnQxl8=
 github.com/mgilbir/formalis v0.3.1/go.mod h1:M82rAk4SewJbe1B3bhgQKw0w7ojFOHus7Nm1roqZYEk=
 github.com/mgilbir/forme v0.4.3 h1:2jhGEtD/2NWeCkf0zVLysyDepi4a9A4BPuhJUPGImMM=
@@ -14,7 +12,5 @@ github.com/mgilbir/pdf0 v0.4.0 h1:C/Mg8Hbouc//sv7zRcNzxAveJ5yQnRh9seysoSA9So0=
 github.com/mgilbir/pdf0 v0.4.0/go.mod h1:iwJ15CY5as4UR0yey8IbbfPCZHkrPfOP24nDMmH8Y7s=
 golang.org/x/image v0.35.0 h1:LKjiHdgMtO8z7Fh18nGY6KDcoEtVfsgLDPeLyguqb7I=
 golang.org/x/image v0.35.0/go.mod h1:MwPLTVgvxSASsxdLzKrl8BRFuyqMyGhLwmC+TO1Sybk=
-golang.org/x/sys v0.44.0 h1:ildZl3J4uzeKP07r2F++Op7E9B29JRUy+a27EibtBTQ=
-golang.org/x/sys v0.44.0/go.mod h1:4GL1E5IUh+htKOUEOaiffhrAeqysfVGipDYzABqnCmw=
 golang.org/x/text v0.40.0 h1:Ub2Z6/xjgF1WrYQz2nuITOEegKFtiIy+rieRJ5lHZKs=
 golang.org/x/text v0.40.0/go.mod h1:hpnzDAfGV753zIKo+wk3u1bVKCGPbrnF7+7LBF/UHVY=

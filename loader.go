@@ -11,14 +11,11 @@ import (
 // NewHTTPLoader) to permit HTTP(S) requests, or implement a custom Loader for
 // fine-grained control.
 //
-// Loaded payloads cross into the JavaScript runtime as UTF-8 text; Vega's
-// supported formats (JSON, CSV, TSV, TopoJSON) are all textual. Binary
-// payloads are not supported and would be corrupted in transit.
+// Loaded payloads are read as UTF-8 text: Vega's supported formats (JSON,
+// CSV, TSV, TopoJSON) are all textual, and binary payloads are not supported.
 type Loader = loader.Loader
 
-// The loader implementations are shared with the pure-Go engine
-// (github.com/mgilbir/aster/purego); see internal/loader for their
-// documentation.
+// The loader implementations live in internal/loader, which documents them.
 type (
 	// DenyLoader denies all resource loading. This is the default.
 	DenyLoader = loader.DenyLoader

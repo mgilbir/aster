@@ -1,6 +1,6 @@
 // Package aster converts Vega and Vega-Lite visualization specs to SVG, PNG
-// and vector PDF. It embeds Vega/Vega-Lite inside QuickJS (via WASM) for a
-// pure-Go, CGO-free solution.
+// and vector PDF with an engine written entirely in Go: no JavaScript
+// runtime, no WebAssembly and no CGO.
 //
 // Basic usage:
 //
@@ -21,36 +21,101 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"sort"
+	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
-	"github.com/mgilbir/aster/internal/resvg"
-	"github.com/mgilbir/aster/internal/runtime"
+	"github.com/mgilbir/aster/internal/fontsubset"
+	"github.com/mgilbir/aster/internal/jsval"
+	"github.com/mgilbir/aster/internal/pngopt"
+	"github.com/mgilbir/aster/internal/raster"
+	"github.com/mgilbir/aster/internal/svg"
+	"github.com/mgilbir/aster/internal/svgpdf"
 	"github.com/mgilbir/aster/internal/text"
+	"github.com/mgilbir/aster/internal/transforms"
+	"github.com/mgilbir/aster/internal/vega"
+	"github.com/mgilbir/aster/internal/vegalite"
 )
 
 // Converter renders Vega/Vega-Lite specs to SVG, PNG and PDF.
+//
+// A Converter is safe for concurrent use by multiple goroutines: any number of
+// rendering calls (VegaToSVG, VegaLiteToPNG, SVGToPDF, ...) may run at once on
+// one Converter, and each call behaves exactly as it would alone. Its
+// configuration is immutable after New, every render owns its own state
+// (dataflow, scenegraph, random generator, budgets, deadline), and the state
+// the calls share (font shaping caches, locale and colour-scheme tables,
+// compiled-expression caches) is either immutable or synchronized. Sharing one
+// Converter is also cheaper than creating one per goroutine, because the fonts
+// are loaded and their caches filled once. A Loader passed to WithLoader is
+// called from several goroutines at once, so it must be safe for concurrent
+// use as well; the loaders in this package are.
+//
+// Close may be called at any time from any goroutine: it cancels the calls in
+// flight (they return an error), waits for them to finish, closes the Loader,
+// and makes every later call fail. Closing more than once is harmless.
 type Converter struct {
-	rt       *runtime.Runtime
-	measurer *text.Measurer
-	fonts    fontPlan // shared by text measurement and PNG rasterization
-	loader   Loader   // stashed for Close()
-	closed   bool     // set by Close; every entry point checks it
+	cfg      *config
+	location *time.Location
+	theme    jsval.Value // parsed WithTheme config; Undefined when none
+	vl       string      // vegalite compiler version (vegalite.Version64, ...)
 
-	pngOnce     sync.Once
-	pngRenderer *resvg.Renderer
-	pngErr      error
+	// closed is set by Close; mu is read-locked for the duration of every
+	// rendering call, so Close can wait for them before releasing the loader.
+	closed    atomic.Bool
+	mu        sync.RWMutex
+	closeOnce sync.Once
+	closeErr  error
+	base      context.Context // canceled by Close; parent of every call's context
+	cancelAll context.CancelFunc
 
-	// PDF output shapes text with a Measurer. Normally the converter's own
-	// measurer is reused; when text measurement was disabled via
-	// WithTextMeasurement(false), one is created lazily for PDF use only.
-	pdfMeasurerOnce sync.Once
-	pdfMeasurer     *text.Measurer
-	pdfMeasurerErr  error
+	// Layout text measurement, built on first use.
+	measurerOnce sync.Once
+	measurer     *text.Measurer
+	measurerErr  error
+
+	// PNG text is shaped by one shaper per converter, built on first use.
+	shaperOnce sync.Once
+	shaper     raster.Shaper
+	shaperErr  error
+
+	// PDF output shapes text with the layout measurer when there is one;
+	// with text measurement disabled, one is built on first use.
+	pdfOnce     sync.Once
+	pdfMeasurer *text.Measurer
+	pdfErr      error
 }
 
 // errConverterClosed is returned by every rendering method after Close.
 var errConverterClosed = errors.New("aster: converter is closed")
+
+// supportedVersions are the Vega-Lite versions this engine compiles, sorted
+// by key. Every version renders with the Vega 6.4
+// runtime; VegaVersion says whose behaviour rendering follows.
+var supportedVersions = []VersionInfo{
+	{Key: "vl5_8", VegaVersion: "6.4.0", VegaLiteVersion: "5.8.0"},
+	{Key: "vl6_4", VegaVersion: "6.4.0", VegaLiteVersion: "6.4.3"},
+}
+
+// compilerVersion maps a version set key to the vegalite compiler's version.
+var compilerVersion = map[string]string{
+	"vl5_8": vegalite.Version58,
+	"vl6_4": vegalite.Version64,
+}
+
+// VersionInfo describes an available Vega-Lite version set.
+type VersionInfo struct {
+	Key             string // version set key, e.g. "vl6_4"
+	VegaVersion     string // Vega version whose behaviour the engine follows
+	VegaLiteVersion string // Vega-Lite version the compiler follows
+}
+
+// AvailableVersions reports the Vega-Lite version sets bundled in this build,
+// sorted by key. Pass a VegaLiteVersion (e.g. "6.4") to WithVegaLiteVersion.
+func AvailableVersions() ([]VersionInfo, error) {
+	return append([]VersionInfo(nil), supportedVersions...), nil
+}
 
 // New creates a new Converter with the given options.
 func New(opts ...Option) (*Converter, error) {
@@ -58,178 +123,421 @@ func New(opts ...Option) (*Converter, error) {
 	for _, opt := range opts {
 		opt(cfg)
 	}
-
-	// The QuickJS WASM runtime has no timezone database; only UTC (via a Date
-	// polyfill) is implemented. Failing here beats silently rendering with an
-	// unexpected timezone.
-	if cfg.timezone != "" && cfg.timezone != "UTC" {
-		return nil, fmt.Errorf("aster: unsupported timezone %q (only \"UTC\" is supported)", cfg.timezone)
-	}
-
-	// Both pipelines are configured from a single font plan so SVG layout and
-	// PNG rasterization can't disagree about fonts or generic-family mappings.
-	plan := newFontPlan(cfg)
-
-	var measurer *text.Measurer
-	var tm runtime.TextMeasurer
-	if cfg.textMeasure {
-		var err error
-		measurer, err = text.New(plan.measurerOptions()...)
-		if err != nil {
-			return nil, fmt.Errorf("aster: initializing text measurer: %w", err)
+	vlVersion := vegalite.Version64
+	if v := cfg.vegaLiteVersion; v != "" {
+		key := "vl" + strings.ReplaceAll(v, ".", "_")
+		vlVersion = compilerVersion[key]
+		found := false
+		var names []string
+		for _, s := range supportedVersions {
+			names = append(names, fmt.Sprintf("%s (Vega-Lite %s)", strings.ReplaceAll(strings.TrimPrefix(s.Key, "vl"), "_", "."), s.VegaLiteVersion))
+			if s.Key == key {
+				found = true
+			}
 		}
-		tm = measurer
+		if !found {
+			return nil, fmt.Errorf("aster: unknown Vega-Lite version %q (available: %s)", v, strings.Join(names, ", "))
+		}
 	}
-
-	rtCfg := runtime.Config{
-		Loader:       cfg.loader,
-		TextMeasurer: tm,
-		Theme:        cfg.theme,
-		MemoryLimit:  cfg.memoryLimit,
-		Timeout:      cfg.timeout,
-		Version:      cfg.vegaLiteVersion,
-		Timezone:     cfg.timezone,
+	loc := time.UTC
+	if tz := cfg.timezone; tz != "" && tz != "UTC" {
+		l, err := time.LoadLocation(tz)
+		if err != nil {
+			return nil, fmt.Errorf("aster: unsupported timezone %q: %w", tz, err)
+		}
+		loc = l
 	}
-
-	rt, err := runtime.New(rtCfg)
-	if err != nil {
-		// runtime.New already namespaces its errors ("aster/runtime: ...");
-		// don't double-prefix.
-		return nil, err
+	if cfg.loader == nil {
+		cfg.loader = DenyLoader{}
 	}
-
-	return &Converter{
-		rt:       rt,
-		measurer: measurer,
-		fonts:    plan,
-		loader:   cfg.loader,
-	}, nil
-}
-
-// VersionInfo describes an available Vega-Lite version set.
-type VersionInfo struct {
-	Key             string // internal key accepted by the runtime, e.g. "vl6_4"
-	VegaVersion     string // resolved Vega runtime version, e.g. "6.2.0"
-	VegaLiteVersion string // Vega-Lite version, e.g. "6.4.0"
-}
-
-// AvailableVersions reports the Vega-Lite version sets bundled in this build,
-// sorted by key. Pass a VegaLiteVersion (e.g. "6.4") to WithVegaLiteVersion.
-func AvailableVersions() ([]VersionInfo, error) {
-	m, err := runtime.AvailableVersions()
-	if err != nil {
-		return nil, err
+	c := &Converter{cfg: cfg, location: loc, vl: vlVersion}
+	c.base, c.cancelAll = context.WithCancel(context.Background())
+	if cfg.theme != "" {
+		theme, err := jsval.ParseJSONString(cfg.theme)
+		if err != nil {
+			return nil, fmt.Errorf("aster: invalid theme config: %w", err)
+		}
+		if !theme.IsObj() {
+			return nil, errors.New("aster: invalid theme config: not a JSON object")
+		}
+		c.theme = theme
 	}
-	out := make([]VersionInfo, 0, len(m))
-	for k, v := range m {
-		out = append(out, VersionInfo{Key: k, VegaVersion: v.VegaVersion, VegaLiteVersion: v.VegaLiteVersion})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
-	return out, nil
+	return c, nil
 }
 
 // Close releases all resources held by the Converter. It is safe to call
-// multiple times; after Close every rendering method returns an error.
+// multiple times and concurrently with rendering calls: calls in flight are
+// canceled and awaited, then the Loader is closed. After Close every rendering
+// method returns an error.
 func (c *Converter) Close() error {
-	if c.closed {
-		return nil
+	c.closed.Store(true)
+	if c.cancelAll != nil {
+		c.cancelAll()
 	}
-	c.closed = true
-	var firstErr error
-	if c.pngRenderer != nil {
-		if err := c.pngRenderer.Close(context.Background()); err != nil && firstErr == nil {
-			firstErr = err
+	c.mu.Lock() // waits for every call in flight
+	defer c.mu.Unlock()
+	c.closeOnce.Do(func() {
+		if closer, ok := c.cfg.loader.(io.Closer); ok {
+			c.closeErr = closer.Close()
 		}
+	})
+	err := c.closeErr
+	c.closeErr = nil // only the first Close reports it
+	return err
+}
+
+// enter registers a rendering call; the returned function ends it. It reports
+// false once the Converter is closed.
+func (c *Converter) enter() (release func(), ok bool) {
+	c.mu.RLock()
+	if c.closed.Load() {
+		c.mu.RUnlock()
+		return nil, false
 	}
-	if c.rt != nil {
-		if err := c.rt.Close(); err != nil && firstErr == nil {
-			firstErr = err
-		}
+	return c.mu.RUnlock, true
+}
+
+// opContext bounds one public call — every stage of it together — by the
+// converter's timeout, and by Close.
+func (c *Converter) opContext() (context.Context, context.CancelFunc) {
+	if c.cfg.timeout > 0 {
+		return context.WithTimeout(c.base, c.cfg.timeout)
 	}
-	if closer, ok := c.loader.(io.Closer); ok {
-		if err := closer.Close(); err != nil && firstErr == nil {
-			firstErr = err
-		}
+	return context.WithCancel(c.base)
+}
+
+// stageErr wraps a stage's error, naming the timeout when the call's context
+// expired, so a caller can tell a slow chart from a broken one.
+func (c *Converter) stageErr(ctx context.Context, stage string, err error) error {
+	if ctx.Err() == context.DeadlineExceeded {
+		return fmt.Errorf("aster: %s timed out after %v: %w", stage, c.cfg.timeout, err)
 	}
-	return firstErr
+	return fmt.Errorf("aster: %s: %w", stage, err)
+}
+
+// recoverInto turns a panic into an error. Every layer returns errors for bad
+// input, so a panic is a bug — but it must not take the host process down.
+func recoverInto(err *error) {
+	if r := recover(); r != nil {
+		*err = fmt.Errorf("aster: internal error: %v", r)
+	}
 }
 
 // VegaToSVG renders a Vega spec (JSON) to an SVG string.
 func (c *Converter) VegaToSVG(spec []byte) (string, error) {
-	if c.closed {
+	release, ok := c.enter()
+	if !ok {
 		return "", errConverterClosed
 	}
-	return c.rt.VegaToSVG(string(spec))
+	defer release()
+	ctx, cancel := c.opContext()
+	defer cancel()
+	return c.vegaSVG(ctx, spec)
 }
 
 // VegaLiteToSVG renders a Vega-Lite spec (JSON) to an SVG string.
 func (c *Converter) VegaLiteToSVG(spec []byte) (string, error) {
-	if c.closed {
+	release, ok := c.enter()
+	if !ok {
 		return "", errConverterClosed
 	}
-	return c.rt.VegaLiteToSVG(string(spec))
+	defer release()
+	ctx, cancel := c.opContext()
+	defer cancel()
+	return c.vegaLiteSVG(ctx, spec)
+}
+
+func (c *Converter) vegaSVG(ctx context.Context, spec []byte) (string, error) {
+	v, err := jsval.ParseJSON(spec)
+	if err != nil {
+		return "", fmt.Errorf("aster: parsing Vega spec: %w", err)
+	}
+	return c.renderSVG(ctx, v)
+}
+
+func (c *Converter) vegaLiteSVG(ctx context.Context, spec []byte) (string, error) {
+	vg, err := c.compileVegaLite(ctx, spec)
+	if err != nil {
+		return "", err
+	}
+	return c.renderSVG(ctx, vg)
+}
+
+// renderSVG runs a Vega spec and serializes the resulting scenegraph.
+func (c *Converter) renderSVG(ctx context.Context, spec jsval.Value) (out string, err error) {
+	defer recoverInto(&err)
+	m, err := c.measurerInit()
+	if err != nil {
+		return "", err
+	}
+	opts := vega.Options{
+		Loader:   c.cfg.loader,
+		Location: c.location,
+		Config:   c.theme,
+		Limits:   c.limits(),
+		// Seeded per render so sample, jitter and
+		// bootstrap confidence intervals are reproducible. 123456789 is the
+		// seed Vega-Lite's own example renders use (vg2svg --seed).
+		Random: transforms.LCG(randomSeed),
+	}
+	if m != nil {
+		opts.TextMeasurer = m
+	}
+	res, err := vega.Render(ctx, spec, opts)
+	if err != nil {
+		return "", c.stageErr(ctx, "rendering Vega", err)
+	}
+	so := svg.Options{
+		Width:  res.Width,
+		Height: res.Height,
+		Origin: res.Origin,
+		// An SVG past this size is not a chart anybody can use.
+		MaxBytes: c.maxSVGBytes(),
+	}
+	if res.HasBackground {
+		so.Background = res.Background
+	}
+	if m != nil {
+		so.Measurer = m
+	}
+	// Vega sanitizes every href through the view's loader; the Loader decides
+	// which links a chart may carry, and a rejected URL renders no link.
+	// Vega's vega-loader allow-list (no javascript: and the like) applies as
+	// well: a permissive Loader cannot make a script URL a link.
+	so.Href = func(uri string) ([]svg.HrefAttr, bool) {
+		if _, ok := svg.SanitizeURL(uri, svg.URLOptions{}); !ok {
+			return nil, false
+		}
+		href, err := c.cfg.loader.Sanitize(ctx, uri)
+		if err != nil {
+			return nil, false
+		}
+		if _, ok := svg.SanitizeURL(href, svg.URLOptions{}); !ok {
+			return nil, false
+		}
+		return []svg.HrefAttr{{Name: "xlink:href", Value: href}}, true
+	}
+	// Image URLs go through the Loader like every other resource (upstream's
+	// ResourceLoader.loadImage sanitizes with context "image"); a rejected URL
+	// renders what a failed image load does: no source, no size.
+	so.Image = func(url string) svg.ImageInfo {
+		if url == "" {
+			return svg.ImageInfo{}
+		}
+		u, err := c.cfg.loader.Sanitize(ctx, url)
+		if err != nil {
+			return svg.ImageInfo{}
+		}
+		if src, ok := svg.SanitizeURL(u, svg.URLOptions{}); ok {
+			return svg.ImageInfo{Src: src}
+		}
+		return svg.ImageInfo{}
+	}
+	out, err = svg.Render(ctx, res.Scenegraph, so)
+	if err != nil {
+		return "", c.stageErr(ctx, "writing SVG", err)
+	}
+	return out, nil
+}
+
+// rasterLimits turns WithMemoryLimit into the rasterizer's canvas budget:
+// the bytes of canvas, layers and masks alive at once, and the output size.
+func (c *Converter) rasterLimits() raster.Limits {
+	var l raster.Limits
+	if n := c.cfg.memoryLimit; n > 0 {
+		b := min(max(n, 4<<20), 1<<30)
+		l.MaxCanvasBytes = int(b)
+		l.MaxPixels = int(b / 8)
+	}
+	return l
+}
+
+// maxSVGBytes bounds the SVG a render may produce: 128 MiB by default, a
+// quarter of WithMemoryLimit when one is set.
+func (c *Converter) maxSVGBytes() int {
+	if n := c.cfg.memoryLimit; n > 0 {
+		return int(min(max(n/4, 1<<20), 1<<40))
+	}
+	return 128 << 20
+}
+
+// randomSeed seeds Vega's random() and every transform that samples.
+const randomSeed = 123456789
+
+// limits turns WithMemoryLimit into the engine's work bounds. The engine has
+// no separate heap to cap, so the byte budget is converted into the number of
+// rows and scene items a render may create, at a conservative per-object cost.
+func (c *Converter) limits() vega.Limits {
+	const bytesPerRow, bytesPerItem = 256, 512
+	var l vega.Limits
+	if n := c.cfg.memoryLimit; n > 0 {
+		l.MaxRows = int(max(n/bytesPerRow, 1000))
+		l.MaxItems = int(max(n/bytesPerItem, 1000))
+		l.MaxLoadBytes = int64(max(n/2, 1<<20))
+		l.MaxStringBytes = int64(max(n/4, 1<<20))
+	}
+	return l
+}
+
+// newMeasurer builds a text measurer from the configured fonts.
+// newMeasurer builds the layout text measurer.
+func (c *Converter) newMeasurer() (*text.Measurer, error) {
+	opts := c.fontOptions()
+	if !c.cfg.harfBuzzText {
+		opts = append(opts, text.WithExactAdvances())
+	}
+	return text.New(opts...)
+}
+
+// fontOptions are the font registrations and generic-family mappings shared
+// by layout measurement and PNG text, so both resolve families identically.
+func (c *Converter) fontOptions() []text.Option {
+	var opts []text.Option
+	if c.cfg.systemFonts {
+		opts = append(opts, text.WithSystemFonts())
+	}
+	for _, f := range c.cfg.fonts {
+		opts = append(opts, text.WithFont(f.family, f.data))
+	}
+	if f := c.cfg.defaultFontFamily; f != "" {
+		opts = append(opts, text.WithDefaultFontFamily(f))
+	}
+	if f := c.cfg.defaultSerifFamily; f != "" {
+		opts = append(opts, text.WithDefaultSerifFamily(f))
+	}
+	if f := c.cfg.defaultMonospaceFamily; f != "" {
+		opts = append(opts, text.WithDefaultMonospaceFamily(f))
+	}
+	return opts
+}
+
+// measurerInit builds the text measurer used for layout on first use; it
+// returns nil when text measurement is disabled, which selects Vega's own
+// width estimate.
+func (c *Converter) measurerInit() (*text.Measurer, error) {
+	if !c.cfg.textMeasure {
+		return nil, nil
+	}
+	c.measurerOnce.Do(func() {
+		c.measurer, c.measurerErr = c.newMeasurer()
+		if c.measurerErr != nil {
+			c.measurerErr = fmt.Errorf("aster: initializing text measurer: %w", c.measurerErr)
+		}
+	})
+	return c.measurer, c.measurerErr
 }
 
 // VegaLiteToVega compiles a Vega-Lite spec (JSON) to a full Vega spec (JSON).
 func (c *Converter) VegaLiteToVega(spec []byte) ([]byte, error) {
-	if c.closed {
+	release, ok := c.enter()
+	if !ok {
 		return nil, errConverterClosed
 	}
-	result, err := c.rt.VegaLiteToVega(string(spec))
+	defer release()
+	ctx, cancel := c.opContext()
+	defer cancel()
+	vg, err := c.compileVegaLite(ctx, spec)
 	if err != nil {
 		return nil, err
 	}
-	return []byte(result), nil
+	return jsval.AppendJSON(nil, vg), nil
+}
+
+// compileVegaLite parses a Vega-Lite spec and compiles it to Vega with the
+// converter's theme and time zone.
+func (c *Converter) compileVegaLite(ctx context.Context, spec []byte) (jsval.Value, error) {
+	v, err := jsval.ParseJSON(spec)
+	if err != nil {
+		return jsval.Undefined, fmt.Errorf("aster: parsing Vega-Lite spec: %w", err)
+	}
+	vg, err := vegalite.Compile(v, vegalite.Options{Config: c.theme, Location: c.location, Version: c.vl, Context: ctx})
+	if err != nil {
+		return jsval.Undefined, c.stageErr(ctx, "compiling Vega-Lite", err)
+	}
+	return vg, nil
 }
 
 // VegaToPNG renders a Vega spec (JSON) to a PNG image.
 func (c *Converter) VegaToPNG(spec []byte, opts ...PNGOption) ([]byte, error) {
-	svg, err := c.VegaToSVG(spec)
+	release, ok := c.enter()
+	if !ok {
+		return nil, errConverterClosed
+	}
+	defer release()
+	ctx, cancel := c.opContext()
+	defer cancel()
+	svg, err := c.vegaSVG(ctx, spec)
 	if err != nil {
 		return nil, err
 	}
-	return c.SVGToPNG(svg, opts...)
+	return c.svgToPNG(ctx, svg, opts)
 }
 
 // VegaLiteToPNG renders a Vega-Lite spec (JSON) to a PNG image.
 func (c *Converter) VegaLiteToPNG(spec []byte, opts ...PNGOption) ([]byte, error) {
-	svg, err := c.VegaLiteToSVG(spec)
+	release, ok := c.enter()
+	if !ok {
+		return nil, errConverterClosed
+	}
+	defer release()
+	ctx, cancel := c.opContext()
+	defer cancel()
+	svg, err := c.vegaLiteSVG(ctx, spec)
 	if err != nil {
 		return nil, err
 	}
-	return c.SVGToPNG(svg, opts...)
+	return c.svgToPNG(ctx, svg, opts)
 }
 
-// SVGToPNG converts an SVG string to a PNG image using resvg.
+// SVGToPNG rasterizes an SVG string to a PNG image.
 func (c *Converter) SVGToPNG(svg string, opts ...PNGOption) ([]byte, error) {
-	if c.closed {
-		// Without this guard a post-Close call would lazily instantiate a
-		// fresh PNG renderer that nothing would ever release.
+	release, ok := c.enter()
+	if !ok {
 		return nil, errConverterClosed
 	}
+	defer release()
+	ctx, cancel := c.opContext()
+	defer cancel()
+	return c.svgToPNG(ctx, svg, opts)
+}
+
+func (c *Converter) svgToPNG(ctx context.Context, svg string, opts []PNGOption) (out []byte, err error) {
+	defer recoverInto(&err)
 	cfg := defaultPNGConfig()
 	for _, opt := range opts {
 		opt(cfg)
 	}
-
 	if !(cfg.scale > 0) || math.IsInf(cfg.scale, 1) {
 		return nil, fmt.Errorf("aster: invalid PNG scale %v (must be a positive, finite number)", cfg.scale)
 	}
-
-	r, err := c.pngRendererInit()
-	if err != nil {
-		return nil, err
-	}
-
-	out, err := r.Render(context.Background(), []byte(svg), cfg.scale)
+	out, err = c.rasterize(ctx, svg, cfg.scale)
 	if err != nil {
 		return nil, err
 	}
 	switch {
 	case cfg.quantizeColors > 0:
-		out = quantizeOrRecodePNG(out, cfg.quantizeColors)
+		out = pngopt.QuantizeOrRecode(out, cfg.quantizeColors)
 	case cfg.recode:
-		out = recodePNG(out)
+		out = pngopt.Recode(out)
+	}
+	return out, nil
+}
+
+func (c *Converter) rasterize(ctx context.Context, svg string, scale float64) ([]byte, error) {
+	c.shaperOnce.Do(func() {
+		// Glyphs are drawn at their exact advances (as resvg draws them),
+		// with the same fonts and family mapping as layout.
+		c.shaper, c.shaperErr = raster.NewShaperWithOptions(c.fontOptions()...)
+		if c.shaperErr != nil {
+			c.shaperErr = fmt.Errorf("aster: initializing PNG text shaper: %w", c.shaperErr)
+		}
+	})
+	if c.shaperErr != nil {
+		return nil, c.shaperErr
+	}
+	out, err := raster.RenderPNG([]byte(svg), raster.Options{Scale: scale, Shaper: c.shaper, Context: ctx, Limits: c.rasterLimits()})
+	if err != nil {
+		return nil, c.stageErr(ctx, "rendering PNG", err)
 	}
 	return out, nil
 }
@@ -245,7 +553,6 @@ const (
 	// embedded (CFF/OTF outlines, unloadable system fonts) falls back to
 	// glyph outlines automatically.
 	PDFTextEmbed PDFTextMode = iota
-
 	// PDFTextNamed emits the same PDF text structure without embedding the
 	// font program: fonts are referenced by name only, so the output is as
 	// small as it gets. Glyphs are addressed by the IDs of the exact font
@@ -255,7 +562,6 @@ const (
 	// when generating many charts whose fonts are embedded once at assembly
 	// time.
 	PDFTextNamed
-
 	// PDFTextOutlines converts every glyph occurrence to filled path
 	// outlines. No fonts are referenced or embedded at all; output is much
 	// larger and text is not selectable, but nothing can go wrong with font
@@ -270,10 +576,6 @@ type pdfConfig struct {
 	text PDFTextMode
 }
 
-func defaultPDFConfig() *pdfConfig {
-	return &pdfConfig{text: PDFTextEmbed}
-}
-
 // WithPDFText selects how text is represented in the PDF; see the
 // PDFTextMode constants. The default is PDFTextEmbed.
 func WithPDFText(mode PDFTextMode) PDFOption {
@@ -282,28 +584,27 @@ func WithPDFText(mode PDFTextMode) PDFOption {
 	}
 }
 
+// FontUsage reports the source bytes and referenced glyph IDs of one face in a
+// rendered PDF; see svgpdf.FontUsage.
+//
+// It enables higher-level, file-level font embedding: render many charts with
+// WithPDFText(PDFTextNamed) (which does not embed fonts), union the reported
+// GIDs per face across all of them, build one shared subset with SubsetFont,
+// and embed that single subset into the composed document. Compared with
+// PDFTextEmbed (a subset per chart), this stores each font's glyphs once no
+// matter how many charts share them.
+type FontUsage = svgpdf.FontUsage
+
 // VegaToPDF renders a Vega spec (JSON) to a single-page vector PDF.
 func (c *Converter) VegaToPDF(spec []byte, opts ...PDFOption) ([]byte, error) {
-	if c.closed {
-		return nil, errConverterClosed
-	}
-	svg, err := c.VegaToSVG(spec)
-	if err != nil {
-		return nil, err
-	}
-	return c.SVGToPDF(svg, opts...)
+	out, _, err := c.VegaToPDFUsage(spec, opts...)
+	return out, err
 }
 
 // VegaLiteToPDF renders a Vega-Lite spec (JSON) to a single-page vector PDF.
 func (c *Converter) VegaLiteToPDF(spec []byte, opts ...PDFOption) ([]byte, error) {
-	if c.closed {
-		return nil, errConverterClosed
-	}
-	svg, err := c.VegaLiteToSVG(spec)
-	if err != nil {
-		return nil, err
-	}
-	return c.SVGToPDF(svg, opts...)
+	out, _, err := c.VegaLiteToPDFUsage(spec, opts...)
+	return out, err
 }
 
 // SVGToPDF converts an SVG string (as produced by the Vega SVG renderer) to
@@ -316,41 +617,134 @@ func (c *Converter) VegaLiteToPDF(spec []byte, opts ...PDFOption) ([]byte, error
 // (gradients, images, embedded CSS, ...) return a descriptive error rather
 // than a silently incomplete chart; callers can fall back to SVGToPNG.
 func (c *Converter) SVGToPDF(svg string, opts ...PDFOption) ([]byte, error) {
-	// Delegates so the option handling and mode mapping live in exactly one
-	// place (SVGToPDFUsage); the usage is simply discarded.
 	out, _, err := c.SVGToPDFUsage(svg, opts...)
 	return out, err
 }
 
-// pdfMeasurerInit returns the text measurer used to shape text for PDF
-// output. It reuses the converter's measurer when text measurement is
-// enabled (the default) and otherwise builds one on first use from the same
-// fontPlan, so PDF glyph outlines come from the font the SVG was laid out
-// against.
-func (c *Converter) pdfMeasurerInit() (*text.Measurer, error) {
-	if c.measurer != nil {
-		return c.measurer, nil
+// SVGToPDFUsage is SVGToPDF plus the per-face glyph usage of the produced PDF
+// (see FontUsage). It is intended with WithPDFText(PDFTextNamed): the returned
+// usage is what a caller needs to embed one shared subset across many charts.
+func (c *Converter) SVGToPDFUsage(svg string, opts ...PDFOption) ([]byte, []FontUsage, error) {
+	release, ok := c.enter()
+	if !ok {
+		return nil, nil, errConverterClosed
 	}
-	c.pdfMeasurerOnce.Do(func() {
-		c.pdfMeasurer, c.pdfMeasurerErr = text.New(c.fonts.measurerOptions()...)
-		if c.pdfMeasurerErr != nil {
-			c.pdfMeasurerErr = fmt.Errorf("aster: initializing PDF text shaper: %w", c.pdfMeasurerErr)
-		}
-	})
-	return c.pdfMeasurer, c.pdfMeasurerErr
+	defer release()
+	ctx, cancel := c.opContext()
+	defer cancel()
+	return c.svgToPDF(ctx, svg, opts)
 }
 
-// pngRendererInit lazily initializes the PNG renderer on first use. It draws
-// its fonts and generic-family mapping from the same fontPlan that configured
-// text measurement, so PNG glyphs are rasterized with the font the SVG layout
-// was measured against.
-func (c *Converter) pngRendererInit() (*resvg.Renderer, error) {
-	c.pngOnce.Do(func() {
-		fonts, families := c.fonts.resvgFonts()
-		c.pngRenderer, c.pngErr = resvg.New(context.Background(), fonts, families)
-		if c.pngErr != nil {
-			c.pngErr = fmt.Errorf("aster: initializing PNG renderer: %w", c.pngErr)
+func (c *Converter) svgToPDF(ctx context.Context, svg string, opts []PDFOption) (pdf []byte, uses []FontUsage, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			pdf, uses, err = nil, nil, fmt.Errorf("aster: internal error: %v", r)
+		}
+	}()
+	cfg := &pdfConfig{text: PDFTextEmbed}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+	var mode svgpdf.TextMode
+	switch cfg.text {
+	case PDFTextEmbed:
+		mode = svgpdf.TextEmbed
+	case PDFTextNamed:
+		mode = svgpdf.TextNamed
+	case PDFTextOutlines:
+		mode = svgpdf.TextOutlines
+	default:
+		return nil, nil, fmt.Errorf("aster: unknown PDF text mode %d", cfg.text)
+	}
+	m, err := c.pdfMeasurerInit()
+	if err != nil {
+		return nil, nil, err
+	}
+	pdf, uses, err = svgpdf.ConvertWithUsage(svg, m, svgpdf.Options{Text: mode, Context: ctx})
+	if err != nil {
+		return nil, nil, c.stageErr(ctx, "rendering PDF", err)
+	}
+	return pdf, uses, nil
+}
+
+// VegaToPDFUsage renders a Vega spec (JSON) to a vector PDF and reports its
+// per-face glyph usage; see SVGToPDFUsage.
+func (c *Converter) VegaToPDFUsage(spec []byte, opts ...PDFOption) ([]byte, []FontUsage, error) {
+	release, ok := c.enter()
+	if !ok {
+		return nil, nil, errConverterClosed
+	}
+	defer release()
+	ctx, cancel := c.opContext()
+	defer cancel()
+	svg, err := c.vegaSVG(ctx, spec)
+	if err != nil {
+		return nil, nil, err
+	}
+	return c.svgToPDF(ctx, svg, opts)
+}
+
+// VegaLiteToPDFUsage renders a Vega-Lite spec (JSON) to a vector PDF and
+// reports its per-face glyph usage; see SVGToPDFUsage.
+func (c *Converter) VegaLiteToPDFUsage(spec []byte, opts ...PDFOption) ([]byte, []FontUsage, error) {
+	release, ok := c.enter()
+	if !ok {
+		return nil, nil, errConverterClosed
+	}
+	defer release()
+	ctx, cancel := c.opContext()
+	defer cancel()
+	svg, err := c.vegaLiteSVG(ctx, spec)
+	if err != nil {
+		return nil, nil, err
+	}
+	return c.svgToPDF(ctx, svg, opts)
+}
+
+// pdfMeasurerInit returns the measurer PDF text is shaped with: the layout
+// measurer when text measurement is enabled, so glyphs come from the faces the
+// SVG was laid out against, otherwise one built on first use.
+func (c *Converter) pdfMeasurerInit() (*text.Measurer, error) {
+	if c.cfg.textMeasure {
+		return c.measurerInit()
+	}
+	c.pdfOnce.Do(func() {
+		c.pdfMeasurer, c.pdfErr = c.newMeasurer()
+		if c.pdfErr != nil {
+			c.pdfErr = fmt.Errorf("aster: initializing PDF text shaper: %w", c.pdfErr)
 		}
 	})
-	return c.pngRenderer, c.pngErr
+	return c.pdfMeasurer, c.pdfErr
+}
+
+// SubsetFont builds a TrueType subset of source containing gids, preserving the
+// source's original glyph numbering. Because numbering is preserved, the subset
+// resolves content that references glyphs by original GID through an Identity
+// CIDToGIDMap — as PDFTextNamed output does — so it can be embedded once at a
+// higher level and shared by every chart that references the same face.
+//
+// It returns the subset program and the source's PostScript name (matching the
+// PostScriptName reported by FontUsage and the /BaseFont written by TextNamed,
+// including the shared fallback for fonts that carry no PostScript name).
+// Only fonts with TrueType glyph outlines can be subset; others return an
+// error. Glyph IDs outside the font's range are ignored — GIDs sourced from
+// FontUsage are always in range, but hand-built inputs are not validated.
+func SubsetFont(source []byte, gids []uint16) (subset []byte, postScriptName string, err error) {
+	f, err := fontsubset.Parse(source)
+	if err != nil {
+		return nil, "", fmt.Errorf("aster: parse font: %w", err)
+	}
+	name := svgpdf.PostScriptNameOrFallback(f.PostScriptName())
+	if !f.CanSubset() {
+		return nil, name, fmt.Errorf("aster: font %q has no TrueType outlines to subset", name)
+	}
+	set := make(map[uint16]bool, len(gids))
+	for _, g := range gids {
+		set[g] = true
+	}
+	sub, err := f.Subset(set)
+	if err != nil {
+		return nil, name, fmt.Errorf("aster: subset font: %w", err)
+	}
+	return sub, name, nil
 }

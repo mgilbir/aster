@@ -60,19 +60,20 @@ func TestInvalidPNGScaleRejected(t *testing.T) {
 	}
 }
 
-func TestUnsupportedTimezoneErrors(t *testing.T) {
-	_, err := aster.New(aster.WithTimezone("Europe/Madrid"))
+func TestTimezones(t *testing.T) {
+	_, err := aster.New(aster.WithTimezone("Not/AZone"))
 	if err == nil {
-		t.Fatal("expected error for unsupported timezone")
+		t.Fatal("expected error for an unknown timezone")
 	}
 	if !strings.Contains(err.Error(), "unsupported timezone") {
 		t.Fatalf("unexpected error: %v", err)
 	}
-
-	// UTC (and the default) remain accepted.
-	c, err := aster.New(aster.WithTimezone("UTC"), aster.WithTextMeasurement(false))
-	if err != nil {
-		t.Fatalf("UTC should be accepted: %v", err)
+	// UTC (the default) and any IANA zone are accepted.
+	for _, tz := range []string{"UTC", "Europe/Madrid", "America/Sao_Paulo"} {
+		c, err := aster.New(aster.WithTimezone(tz), aster.WithTextMeasurement(false))
+		if err != nil {
+			t.Fatalf("%s should be accepted: %v", tz, err)
+		}
+		_ = c.Close()
 	}
-	_ = c.Close()
 }

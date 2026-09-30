@@ -1,8 +1,8 @@
-// Command enginebench times the Vega / Vega-Lite engines on the same specs:
-// the root package (QuickJS and resvg on andsifr), purego, and upstream Vega
-// in node (bench.mjs). Each engine runs in its own process so startup and peak
-// memory are its own; every process writes the same JSON result format, and
-// -report merges them into a comparison table. See README.md.
+// Command enginebench times this package's engine and upstream Vega in node
+// (bench.mjs) on the same specs. Each engine runs in its own process so
+// startup and peak memory are its own; every process writes the same JSON
+// result format, and -report merges them into a comparison table. See
+// README.md.
 package main
 
 import (
@@ -23,32 +23,7 @@ import (
 	"time"
 
 	"github.com/mgilbir/aster"
-	"github.com/mgilbir/aster/purego"
 )
-
-// engine is the API the root package and purego share.
-type engine interface {
-	VegaToSVG(spec []byte) (string, error)
-	VegaLiteToSVG(spec []byte) (string, error)
-	VegaLiteToVega(spec []byte) ([]byte, error)
-	Close() error
-}
-
-// pngEngine adapts the two packages' PNG methods, whose option types differ.
-type pngEngine interface {
-	vegaPNG(spec []byte) ([]byte, error)
-	vegaLitePNG(spec []byte) ([]byte, error)
-}
-
-type asterEngine struct{ *aster.Converter }
-
-func (e asterEngine) vegaPNG(s []byte) ([]byte, error)     { return e.VegaToPNG(s) }
-func (e asterEngine) vegaLitePNG(s []byte) ([]byte, error) { return e.VegaLiteToPNG(s) }
-
-type puregoEngine struct{ *purego.Converter }
-
-func (e puregoEngine) vegaPNG(s []byte) ([]byte, error)     { return e.VegaToPNG(s) }
-func (e puregoEngine) vegaLitePNG(s []byte) ([]byte, error) { return e.VegaLiteToPNG(s) }
 
 // Result is one (spec, stage) measurement. The JSON form is shared with
 // bench.mjs.
@@ -60,8 +35,7 @@ type Result struct {
 	Runs   int     `json:"runs,omitempty"`
 	Median float64 `json:"median_ms,omitempty"`
 	Min    float64 `json:"min_ms,omitempty"`
-	// AllocMB is Go heap allocated per run; the root engine's WASM linear
-	// memory is not included. Node reports nothing here.
+	// AllocMB is Go heap allocated per run. Node reports nothing here.
 	AllocMB float64 `json:"alloc_mb,omitempty"`
 }
 
@@ -87,7 +61,7 @@ var stageNames = []string{"vl2vg", "svg", "png"}
 
 func main() {
 	var (
-		engineName = flag.String("engine", "", "engine to time: aster or purego")
+		engineName = flag.String("engine", "aster", "name recorded for this engine in the results")
 		out        = flag.String("out", "", "write the JSON result here (default stdout)")
 		budget     = flag.Duration("budget", 300*time.Millisecond, "time budget for the timed runs of one (spec, stage)")
 		minRuns    = flag.Int("min", 3, "minimum timed runs (a single run over 2s is not repeated)")
@@ -125,25 +99,11 @@ func main() {
 	}
 	rep := Report{Engine: *engineName, Env: env(), Budget: float64(*budget) / 1e6}
 	t0 := time.Now()
-	var e engine
-	switch *engineName {
-	case "aster":
-		c, err := aster.New(aster.WithLoader(loader), aster.WithTimeout(2*time.Minute))
-		if err != nil {
-			fatal(err)
-		}
-		e = asterEngine{c}
-		rep.Version = versionOf(aster.AvailableVersions) + ", QuickJS + resvg (WASM, andsifr)"
-	case "purego":
-		c, err := purego.New(purego.WithLoader(loader), purego.WithTimeout(2*time.Minute))
-		if err != nil {
-			fatal(err)
-		}
-		e = puregoEngine{c}
-		rep.Version = versionOf(purego.AvailableVersions) + ", pure Go"
-	default:
-		fatal(errors.New("-engine must be aster or purego"))
+	e, err := aster.New(aster.WithLoader(loader), aster.WithTimeout(2*time.Minute))
+	if err != nil {
+		fatal(err)
 	}
+	rep.Version = version()
 	defer e.Close()
 	rep.InitMS = ms(time.Since(t0))
 	t0 = time.Now()
@@ -198,8 +158,7 @@ func main() {
 	}
 }
 
-func runner(e engine, s spec, stage string) func() error {
-	p := e.(pngEngine)
+func runner(e *aster.Converter, s spec, stage string) func() error {
 	switch {
 	case stage == "vl2vg":
 		return func() error { _, err := e.VegaLiteToVega(s.data); return err }
@@ -208,9 +167,9 @@ func runner(e engine, s spec, stage string) func() error {
 	case stage == "svg":
 		return func() error { _, err := e.VegaToSVG(s.data); return err }
 	case s.lite:
-		return func() error { _, err := p.vegaLitePNG(s.data); return err }
+		return func() error { _, err := e.VegaLiteToPNG(s.data); return err }
 	default:
-		return func() error { _, err := p.vegaPNG(s.data); return err }
+		return func() error { _, err := e.VegaToPNG(s.data); return err }
 	}
 }
 
@@ -256,7 +215,7 @@ func loadSpecs(root, filter string) ([]spec, error) {
 	var out []spec
 	for _, d := range []struct{ suite, dir, ext string }{
 		{"vl-examples", "testdata/vega-lite/v6.4.3/specs", ".vl.json"},
-		{"vg-gallery", "purego/testdata/corpus/vg-gallery", ".vg.json"},
+		{"vg-gallery", "testdata/corpus/vg-gallery", ".vg.json"},
 	} {
 		files, err := filepath.Glob(filepath.Join(root, d.dir, "*"+d.ext))
 		if err != nil {
@@ -281,7 +240,7 @@ func loadSpecs(root, filter string) ([]spec, error) {
 	return out, nil
 }
 
-// memLoader serves the vega-datasets checkout (and purego's extra test data)
+// memLoader serves the vega-datasets checkout (and testdata/data)
 // from memory, mapping the CDN URLs examples use onto the local copy, so the
 // timings measure the engines and not the file system. bench.mjs does the
 // same.
@@ -293,7 +252,7 @@ type memLoader struct {
 
 func newMemLoader(root string) *memLoader {
 	return &memLoader{
-		dirs: []string{filepath.Join(root, "testdata/vega-datasets"), filepath.Join(root, "purego/testdata/data")},
+		dirs: []string{filepath.Join(root, "testdata/vega-datasets"), filepath.Join(root, "testdata/data")},
 		data: map[string][]byte{},
 	}
 }
@@ -327,15 +286,15 @@ func (m *memLoader) Load(ctx context.Context, uri string) ([]byte, error) {
 	return nil, fmt.Errorf("enginebench: no such dataset: %s", uri)
 }
 
-// versionOf describes the default (Vega-Lite 6.4) engine of either package.
-func versionOf[V aster.VersionInfo | purego.VersionInfo](available func() ([]V, error)) string {
-	vs, err := available()
+// version describes the default (Vega-Lite 6.4) engine.
+func version() string {
+	vs, err := aster.AvailableVersions()
 	if err != nil {
 		return "?"
 	}
 	for _, v := range vs {
-		if x := aster.VersionInfo(v); x.Key == "vl6_4" {
-			return "Vega " + x.VegaVersion + " / Vega-Lite " + x.VegaLiteVersion
+		if v.Key == "vl6_4" {
+			return "Vega " + v.VegaVersion + " / Vega-Lite " + v.VegaLiteVersion + ", pure Go"
 		}
 	}
 	return "?"
@@ -347,7 +306,7 @@ func repoRoot() (string, error) {
 		return "", err
 	}
 	for {
-		if _, err := os.Stat(filepath.Join(dir, "purego", "purego.go")); err == nil {
+		if _, err := os.Stat(filepath.Join(dir, "testdata", "oracle-node")); err == nil {
 			return dir, nil
 		}
 		parent := filepath.Dir(dir)

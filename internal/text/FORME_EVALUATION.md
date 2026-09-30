@@ -1,5 +1,9 @@
 # forme as the text engine for purego: evaluation
 
+> Written while two engines coexisted: "purego" is the pure-Go engine, now the
+> root `aster` package, and "the root engine" the QuickJS one it replaced.
+
+
 Originally measured against `internal/textmeasure` (go-text/typesetting
 v0.3.3, the reference engine), which has since been removed from the module.
 The package now lives at `internal/text`, serves both the root engine and

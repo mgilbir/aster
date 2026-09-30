@@ -291,13 +291,19 @@ func TestVLConvertPNGSpecs(t *testing.T) {
 	// Known failures / skips specific to PNG comparison.
 	pngSkips := map[string]string{
 		"remote_images":        "image marks reference external URLs",
-		"geoScale":             "geoScale function not available in vendored Vega 5.25",
-		"maptile_background_2": "geoScale function not available in vendored Vega 5.25",
-		"long_text_lable":      "text measurement difference causes dimension mismatch",
-		"maptile_background":   "geo/tile rendering RMSE too high (wasm32 vs native resvg)",
-		"stacked_bar_h":        "dimension mismatch from missing custom fonts (Caveat/serif)",
-		"stacked_bar_h2":       "dimension mismatch from missing custom fonts",
-		"stocks_locale":        "RMSE slightly above threshold (text rounding at 2x scale)",
+		"geoScale":             "vl-convert's Vega 5.25 has no geoScale function",
+		"maptile_background_2": "vl-convert's Vega 5.25 has no geoScale function",
+		// The engine renders Vega-Lite 5.8 with its Vega 6.4 runtime; these lay
+		// out differently in Vega 5, which vl-convert uses (checked in node).
+		"circle_binned":          "Vega 6 sizes this size legend taller than Vega 5",
+		"circle_binned_base_url": "Vega 6 sizes this size legend taller than Vega 5",
+		"font_with_quotes":       "Vega 6 is 2px wider than Vega 5 here",
+		"gh_174":                 "Vega 6 is 1px taller than Vega 5 here",
+		"long_text_lable":        "text measurement difference causes dimension mismatch",
+		"maptile_background":     "geo/tile rendering RMSE too high against vl-convert's PNG",
+		"stacked_bar_h":          "dimension mismatch from missing custom fonts (Caveat/serif)",
+		"stacked_bar_h2":         "dimension mismatch from missing custom fonts",
+		"stocks_locale":          "RMSE slightly above threshold (text rounding at 2x scale)",
 	}
 
 	httpLoader := datasetServer(t)

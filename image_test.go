@@ -13,8 +13,8 @@ import (
 
 // These tests pin down raster-image (<image>) support: a correctly-formatted
 // embedded raster renders, while malformed or unsupported payloads are handled
-// gracefully (no panic) rather than rendering garbage. The resvg WASM is built
-// with the "raster-images" feature; this guards that capability and its bounds.
+// gracefully (no panic) rather than rendering garbage. This guards the
+// rasterizer's image support and its bounds.
 
 // validPNGDataURL returns a data: URL for a small solid-red PNG.
 func validPNGDataURL(t *testing.T) string {

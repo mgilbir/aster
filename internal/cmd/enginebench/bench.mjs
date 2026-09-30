@@ -1,12 +1,12 @@
 // The node side of enginebench: times upstream Vega 6.4.0 / Vega-Lite 6.4.3
-// (purego/testdata/oracle-node) on the same specs, with the same in-memory
+// (testdata/oracle-node) on the same specs, with the same in-memory
 // data, seed and timing loop as main.go, and writes the same JSON format.
-// Text is measured by node-canvas with DejaVu, as gen_expected.mjs does; PNG
+// Text is measured by node-canvas with DejaVu, as the test oracle does; PNG
 // is Vega's canvas renderer drawing on node-canvas (cairo) and encoding.
 //
 // Usage, from the repository root (see README.md):
 //
-//   TZ=UTC NODE_PATH=purego/testdata/oracle-node/node_modules \
+//   TZ=UTC NODE_PATH=testdata/oracle-node/node_modules \
 //     node internal/cmd/enginebench/bench.mjs [-budget ms] [-stages vl2vg,svg,png] [-filter re] > node.json
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
@@ -66,7 +66,7 @@ if (vega.textMetrics.width !== vega.textMetrics.measureWidth) {
 
 // In-memory datasets, with the CDN URLs mapped onto the local copy (main.go's
 // memLoader does the same).
-const dataDirs = ['testdata/vega-datasets', 'purego/testdata/data'].map((d) => path.resolve(d));
+const dataDirs = ['testdata/vega-datasets', 'testdata/data'].map((d) => path.resolve(d));
 const cdn = /^https?:\/\/(?:cdn\.jsdelivr\.net\/npm\/vega-datasets@[^/]+|raw\.githubusercontent\.com\/vega\/vega-datasets\/[^/]+|vega\.github\.io\/vega-datasets)\/(data\/.+)$/;
 const cache = new Map();
 const localize = (uri) => {
@@ -129,7 +129,7 @@ function runner(text, lite, stage) {
 const specs = [];
 for (const [suite, dir, ext] of [
   ['vl-examples', 'testdata/vega-lite/v6.4.3/specs', '.vl.json'],
-  ['vg-gallery', 'purego/testdata/corpus/vg-gallery', '.vg.json'],
+  ['vg-gallery', 'testdata/corpus/vg-gallery', '.vg.json'],
 ]) {
   for (const f of fs.readdirSync(dir).filter((f) => f.endsWith(ext)).sort()) {
     const name = f.slice(0, -ext.length);

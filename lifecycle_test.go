@@ -10,8 +10,8 @@ import (
 const tinySVG = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>`
 
 // Every rendering method must fail with a clear "closed" error after Close —
-// not a fake WASM panic (SVG path) or a silent success that leaks a fresh
-// WASM runtime (PNG path).
+// not a panic, and not a silent success that lazily builds fresh state (the
+// PNG shaper, the PDF measurer) after the converter released its own.
 func TestRenderAfterCloseFailsClearly(t *testing.T) {
 	spec := []byte(`{
 		"$schema": "https://vega.github.io/schema/vega-lite/v5.json",
