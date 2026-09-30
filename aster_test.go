@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mgilbir/aster"
 	"github.com/mgilbir/aster/internal/fonts/dejavu"
@@ -289,6 +290,10 @@ func TestVLConvertSpecs(t *testing.T) {
 			&aster.FileLoader{BaseDir: "testdata/vega-datasets"},
 			httpLoader,
 		)),
+		// lookup_urls takes 10-20 s in QuickJS; the default 30 s budget is
+		// too tight on a loaded CI runner, and a timeout poisons the
+		// converter for every spec after it.
+		aster.WithTimeout(2*time.Minute),
 	)
 	if err != nil {
 		t.Fatalf("New: %v", err)
