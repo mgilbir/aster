@@ -9,11 +9,12 @@ vg-gallery/density-heatmaps	engine-error	gap: the heatmap transform (canvas-back
 vg-gallery/labeled-scatter-plot	engine-error	gap: the engine rejects this label transform as needing a canvas; upstream lays it out with node-canvas
 vg-gallery/platformer	differ	node-canvas cannot load a remote image and blanks its href; the engine keeps the URL, as browsers do
 vg-gallery/projections	engine-error	gap: the d3-geo-projection extras (airy, ...) are not implemented
-vg-gallery/warming-stripes	differ	gap: a text extent is measured ~3px wider than node-canvas does (Tahoma → DejaVu Sans); not yet diagnosed
+vg-gallery/warming-stripes	differ|ok	platform: match on Linux; on macOS node-canvas shapes this text slightly differently (probe widths 87.388 vs 87.398 px)
 vg-gallery/word-cloud	engine-error	gap: the engine rejects this wordcloud transform as needing a canvas; upstream lays it out with node-canvas
 vl-convert/geoScale	differ	node-canvas cannot load remote tile images and blanks their href; the engine keeps the URL, as browsers do
 vl-convert/maptile_background	differ	node-canvas cannot load remote tile images and blanks their href; the engine keeps the URL, as browsers do
 vl-convert/maptile_background_2	differ	node-canvas cannot load remote tile images and blanks their href; the engine keeps the URL, as browsers do
 vl-convert/remote_images	differ	node-canvas cannot load remote images and blanks their href; the engine keeps the URL, as browsers do
-vl-examples/isotype_bar_chart_emoji	differ	gap: emoji advances (Noto Emoji) differ from what node-canvas/Pango measures
-vl-examples/layer_bar_fruit	differ	gap: emoji advances (Noto Emoji) differ from what node-canvas/Pango measures
+vl-examples/isotype_bar_chart_emoji	differ|ok	platform: match on Linux; on macOS node-canvas shapes this text slightly differently (probe widths 87.388 vs 87.398 px)
+vl-examples/layer_bar_fruit	differ|ok	platform: match on Linux; on macOS node-canvas shapes this text slightly differently (probe widths 87.388 vs 87.398 px)
+vl-examples/trail_color	ok|differ	platform: V8 on x86-64 computes trigonometry differently in the last bit from V8 on arm64, which the engine follows (jsmath); the trail geometry flips on it, so it differs where node runs on x86-64

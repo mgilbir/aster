@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -56,6 +57,10 @@ var corpusSets = []corpusSet{
 // node-error (only upstream fails) and vega-differ (the compiled Vega is not
 // equal to upstream's). Any other status than the listed one fails the test,
 // a better one too, so the list stays exact; -compare.update rewrites it.
+//
+// A status may list "|"-separated alternatives for the few specs whose
+// oracle answer depends on the platform node runs on (its text shaping, or
+// V8's last-bit trigonometry on x86-64); the reason says which gives which.
 const expectFile = "testdata/oracle-expect.txt"
 
 // svgTolerance absorbs the two text engines (node-canvas and forme) placing
@@ -283,11 +288,14 @@ func checkExpectations(t *testing.T, results []specResult) {
 	expect := readExpectations(t)
 	if *compareUpdate {
 		for _, r := range results {
-			if r.status == "ok" {
+			if r.status == "ok" && !strings.Contains(expect[r.id].status, "|") {
 				delete(expect, r.id)
 				continue
 			}
 			e := expect[r.id]
+			if strings.Contains(e.status, "|") && slices.Contains(strings.Split(e.status, "|"), r.status) {
+				continue // platform-dependent, and this platform is one of them
+			}
 			if e.reason == "" || e.status != r.status {
 				e.reason = "TODO: " + r.detail
 			}
@@ -316,7 +324,7 @@ func checkExpectations(t *testing.T, results []specResult) {
 			want = e.status
 		}
 		switch {
-		case r.status == want:
+		case slices.Contains(strings.Split(want, "|"), r.status):
 		case r.status == "ok":
 			t.Errorf("%s now matches node (was %s): remove it from %s", r.id, want, expectFile)
 		default:
