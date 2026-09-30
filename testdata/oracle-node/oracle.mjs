@@ -24,6 +24,7 @@
 // directory with NODE_PATH pointing there.
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
@@ -50,6 +51,22 @@ const require = createRequire(path.join(path.resolve(process.env.NODE_PATH), 'x.
 // measurement code (trimming, `limit` truncation, caching) runs unmodified.
 // This must happen before vega loads: vega-scenegraph creates its context at
 // import time.
+// Fontconfig (node-canvas's font lookup on Linux) must see only the
+// repository's fonts: with the machine's configuration and fonts, CI's
+// runner resolved the registered faces differently. Set before node-canvas
+// loads, since fontconfig reads its configuration once.
+{
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aster-oracle-fonts-'));
+  const conf = path.join(dir, 'fonts.conf');
+  fs.writeFileSync(
+    conf,
+    `<?xml version="1.0"?>\n<!DOCTYPE fontconfig SYSTEM "fonts.dtd">\n<fontconfig>\n` +
+      ['dejavu', 'liberation', 'notoemoji'].map((d) => `  <dir>${path.join(repo, 'internal/fonts', d)}</dir>\n`).join('') +
+      `  <cachedir>${path.join(dir, 'cache')}</cachedir>\n</fontconfig>\n`,
+  );
+  process.env.FONTCONFIG_FILE = conf;
+  process.on('exit', () => fs.rmSync(dir, { recursive: true, force: true }));
+}
 const canvas = require('canvas');
 const faces = [
   ...[['Sans', ''], ['Sans-Bold', 'bold'], ['Sans-Oblique', 'italic'], ['Sans-BoldOblique', 'bold italic'],
