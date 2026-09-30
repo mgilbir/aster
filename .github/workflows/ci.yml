@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 3 * * *" # nightly: the slow cross-engine scoreboards
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: |
+          unformatted=$(git ls-files -z '*.go' | xargs -0 gofmt -l)
+          if [ -n "$unformatted" ]; then
+            echo "not gofmt-ed:"; echo "$unformatted"; exit 1
+          fi
+      - name: go vet
+        run: go vet ./...
+      - name: go mod tidy
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: go test -short
+        run: go test -short -timeout 30m ./...
+
+  race:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: go test -race (purego)
+        run: go test -short -race -timeout 30m ./purego/...
+
+  fmacheck:
+    # purego must not let the compiler fuse multiply-adds where upstream (V8)
+    # rounds each product; the script cross-compiles for arm64 on any host.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: purego/scripts/fmacheck.sh
+
+  scoreboard:
+    # Renders the whole corpus with both engines and against upstream's own
+    # renderings. Slow (the reference engine runs in QuickJS), so nightly.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: full test suite
+        run: go test -timeout 60m ./...
+      - name: scoreboards
+        run: |
+          go test -count=1 -v -timeout 60m \
+            -run 'TestCompareWithReference|TestAgainstUpstreamRenderings' ./purego/ \
+            -args -compare.report="$RUNNER_TEMP/compare-report.md" | tee "$RUNNER_TEMP/scoreboard.txt"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scoreboard
+          path: |
+            ${{ runner.temp }}/compare-report.md
+            ${{ runner.temp }}/scoreboard.txt
