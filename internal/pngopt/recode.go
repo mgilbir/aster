@@ -1,4 +1,4 @@
-package aster
+package pngopt
 
 import (
 	"bytes"
@@ -8,7 +8,7 @@ import (
 	"image/png"
 )
 
-// recodePNG losslessly re-encodes a PNG into its cheapest equivalent color
+// Recode losslessly re-encodes a PNG into its cheapest equivalent color
 // format: 8-bit indexed when the image has at most 256 distinct colors,
 // 24-bit truecolor when it is fully opaque, unchanged otherwise. Every pixel
 // is preserved exactly; only the storage format changes.
@@ -20,7 +20,7 @@ import (
 // their work roughly fourfold and avoids a separate alpha (soft mask) stream.
 //
 // On any decode failure the input is returned unchanged.
-func recodePNG(data []byte) []byte {
+func Recode(data []byte) []byte {
 	src, err := png.Decode(bytes.NewReader(data))
 	if err != nil {
 		return data

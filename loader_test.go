@@ -649,3 +649,35 @@ func TestFallbackLoaderSanitizePropagatesContext(t *testing.T) {
 		t.Error("child Sanitize did not receive the caller's context deadline")
 	}
 }
+
+// A converter closes its loader; a FileLoader shared with another converter
+// must then fail with an error, not panic.
+func TestFileLoaderLoadAfterClose(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.json"), []byte(`[1]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, eager := range []bool{false, true} {
+		var l *aster.FileLoader
+		if eager {
+			var err error
+			if l, err = aster.NewFileLoader(dir); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			l = &aster.FileLoader{BaseDir: dir}
+			if _, err := l.Load(context.Background(), "a.json"); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := l.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := l.Load(context.Background(), "a.json"); err == nil {
+			t.Errorf("eager=%v: Load after Close succeeded", eager)
+		}
+		if err := l.Close(); err != nil {
+			t.Errorf("second Close: %v", err)
+		}
+	}
+}

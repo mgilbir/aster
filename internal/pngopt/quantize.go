@@ -1,4 +1,4 @@
-package aster
+package pngopt
 
 import (
 	"bytes"
@@ -26,23 +26,23 @@ const (
 	maxPeakChannelError = 64
 )
 
-// quantizeOrRecodePNG lossily quantizes data to at most maxColors colors,
+// QuantizeOrRecode lossily quantizes data to at most maxColors colors,
 // falling back to the lossless recode when quantization cannot maintain the
 // output within the quality guard (or cannot shrink the image). The fallback
 // is logged at debug level: it is expected for non-chart-like content, and a
 // library should not write to the host's default log output for documented,
 // safe behavior — raise the log level to observe it.
-func quantizeOrRecodePNG(data []byte, maxColors int) []byte {
-	out, ok, reason := quantizePNG(data, maxColors)
+func QuantizeOrRecode(data []byte, maxColors int) []byte {
+	out, ok, reason := Quantize(data, maxColors)
 	if ok {
 		return out
 	}
 	slog.Debug("aster: png quantization fell back to lossless recode",
 		"reason", reason, "max_colors", maxColors, "bytes", len(data))
-	return recodePNG(data)
+	return Recode(data)
 }
 
-// quantizePNG re-encodes a PNG as 8-bit indexed with at most maxColors
+// Quantize re-encodes a PNG as 8-bit indexed with at most maxColors
 // colors (clamped to 2..256): a weighted median-cut palette over the image's
 // color histogram, then Floyd–Steinberg error diffusion when mapping pixels.
 // Dimensions and rendering are untouched — only colors move, and only on
@@ -50,10 +50,10 @@ func quantizeOrRecodePNG(data []byte, maxColors int) []byte {
 // antialiased edges; flat chart areas map exactly).
 //
 // Images already within the palette budget take a lossless path identical to
-// recodePNG's indexed case. The boolean reports whether the result honours
+// Recode's indexed case. The boolean reports whether the result honours
 // the quality guard and is smaller than the input; when false, the returned
 // data is the input and reason says why.
-func quantizePNG(data []byte, maxColors int) (_ []byte, ok bool, reason string) {
+func Quantize(data []byte, maxColors int) (_ []byte, ok bool, reason string) {
 	if maxColors < 2 {
 		maxColors = 2
 	}
