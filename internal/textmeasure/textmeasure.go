@@ -300,6 +300,7 @@ func (m *Measurer) ShapeText(text, cssFont string) ([]ShapedRun, float64) {
 var cssFontRe = regexp.MustCompile(
 	`(?i)` +
 		`(?:(italic|oblique)\s+)?` + // optional style
+		`(?:(?:normal|small-caps)\s+)?` + // optional variant: vega.font writes style, variant, weight in that order
 		`(?:(bold|bolder|lighter|[1-9]00)\s+)?` + // optional weight
 		`([\d.]+)(px|pt|em)?\s+` + // size with optional unit (required)
 		`(.+)`, // family (required)

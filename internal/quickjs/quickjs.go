@@ -440,9 +440,35 @@ func (r *Runtime) eval(ctx context.Context, filename, code string, flags int) (u
 	return res[0], nil
 }
 
-// pumpJobs drains the pending-job queue (promise reactions / microtasks).
+// timerTurnScript runs one due timer callback, if the embedder installed a
+// timer queue (see the setTimeout polyfill in internal/runtime), and reports
+// whether one ran. Timers are macrotasks: they run only once the microtask
+// queue is empty, and the queue is drained again after each one, as in a
+// browser event loop.
+const timerTurnScript = `typeof globalThis.__aster_run_timer === "function" && globalThis.__aster_run_timer() ? "1" : "0"`
+
+// pumpJobs runs the event loop to quiescence: it drains the pending-job
+// queue (promise reactions / microtasks), then runs one timer callback, and
+// repeats until neither has work. Endless timer chains are bounded by ctx.
 func (r *Runtime) pumpJobs(ctx context.Context) error {
 	var firstErr error
+	for {
+		if err := r.drainJobs(ctx, &firstErr); err != nil {
+			return err
+		}
+		ran, err := r.runTimer(ctx)
+		if err != nil {
+			return err
+		}
+		if !ran {
+			return firstErr
+		}
+	}
+}
+
+// drainJobs executes pending jobs until the queue is empty, recording the
+// first job exception in firstErr.
+func (r *Runtime) drainJobs(ctx context.Context, firstErr *error) error {
 	for {
 		res, err := r.fnExecutePendingJob.Call(ctx, uint64(r.rtPtr), uint64(r.scratch))
 		if err != nil {
@@ -450,12 +476,29 @@ func (r *Runtime) pumpJobs(ctx context.Context) error {
 		}
 		n := int32(res[0])
 		if n == 0 {
-			return firstErr
+			return nil
 		}
-		if n < 0 && firstErr == nil {
-			firstErr = r.exceptionError(ctx)
+		if n < 0 && *firstErr == nil {
+			*firstErr = r.exceptionError(ctx)
 		}
 	}
+}
+
+// runTimer runs at most one queued timer callback.
+func (r *Runtime) runTimer(ctx context.Context) (bool, error) {
+	val, err := r.eval(ctx, "__aster_timers__.js", timerTurnScript, jsEvalTypeGlobal)
+	if err != nil {
+		return false, err
+	}
+	if isException(val) {
+		return false, r.exceptionError(ctx)
+	}
+	defer r.freeValue(ctx, val)
+	s, err := r.toGoString(ctx, val)
+	if err != nil {
+		return false, err
+	}
+	return s == "1", nil
 }
 
 // checkPromise inspects val; when it is a promise it must be settled, and a
