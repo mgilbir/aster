@@ -56,7 +56,7 @@ func TestSVGToPDF(t *testing.T) {
 }
 
 func TestNewRejectsUnknownOptions(t *testing.T) {
-	if _, err := purego.New(purego.WithVegaLiteVersion("5.8")); err == nil {
+	if _, err := purego.New(purego.WithVegaLiteVersion("9.9")); err == nil {
 		t.Error("unsupported Vega-Lite version accepted")
 	}
 	if _, err := purego.New(purego.WithTimezone("Not/AZone")); err == nil {

@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/go-text/typesetting/font"
+	"github.com/mgilbir/aster/internal/text"
 )
 
 // gstate carries the inherited graphics state down the element tree.
@@ -122,10 +122,10 @@ type renderer struct {
 	shaper TextShaper
 	fonts  *fontCatalog // nil in TextOutlines mode: all text drawn as paths
 
-	// glyphs memoizes outline extraction per (Face, GlyphID) for the lifetime
-	// of one render: axis labels repeat digits, so the same glyph is drawn
-	// many times, and Face.GlyphData re-parses the outline on each call.
-	glyphs map[glyphKey]font.GlyphOutline
+	// glyphs memoizes scaled outlines per (Face, glyph, size) for the
+	// lifetime of one render: axis labels repeat digits, so the same glyph
+	// is drawn many times.
+	glyphs map[glyphKey][]text.Segment
 }
 
 // render translates the parsed SVG root into a content stream plus page

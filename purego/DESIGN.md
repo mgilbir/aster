@@ -42,14 +42,14 @@ All packages live under `purego/internal/` unless noted.
 | `svg` | vega-scenegraph `SVGStringRenderer` | scenegraph → SVG text, byte-compatible with upstream |
 | `vega` | vega-parser, vega-dataflow, vega-runtime, vega-view, vega-view-transforms, vega-encode | spec parsing, the dataflow graph, signals, data loading, scales, mark encoding, guides (axes/legends/titles), layout and autosize; produces a `scene.Scenegraph` |
 | `vegalite` | vega-lite | Vega-Lite → Vega compiler |
-| `text` | (host) | text measurement with `github.com/mgilbir/forme` |
+| `internal/text` (module level) | (host) | text measurement and shaping with `github.com/mgilbir/forme`, shared with the root package and `svgpdf` |
 | `raster` | (resvg) | SVG → RGBA rasterizer for the SVG subset Vega emits, plus PNG encoding |
 
 PDF output reuses `aster/internal/svgpdf` (already pure Go).
 
 Dependency direction (no cycles): `jsval` ← `format` ← `expr` ← `scale` ←
 `transforms`/`geo` ← `scene` ← `vega` ← `purego`; `svg` depends on `scene`;
-`vegalite` depends only on `jsval` (it emits Vega JSON); `raster` and `text`
+`vegalite` depends only on `jsval` (it emits Vega JSON); `raster` and `internal/text`
 depend on nothing engine-specific.
 
 ## Core conventions

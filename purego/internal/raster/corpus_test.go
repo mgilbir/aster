@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-const corpusDir = "../../../testdata/vega-lite/v6.4.0/expected"
+const corpusDir = "../../../testdata/vega-lite/v6.4.3/expected"
 
 func corpusFiles(t testing.TB) []string {
 	files, _ := filepath.Glob(filepath.Join(corpusDir, "*.svg"))
@@ -96,7 +96,9 @@ func TestCorpus(t *testing.T) {
 			t.Errorf("%s: MAE %.3f / %.3f%% >24 exceeds the per-image limit", r.name, r.s.MAE, r.s.PctOver)
 		}
 	}
-	if cnt > 0 && (totMAE/float64(cnt) > 0.15 || totOver/float64(cnt) > 0.1) {
+	// The mean gate is calibrated for the default sample; the 12-image -short
+	// sample is dominated by a few thin-outline geo charts.
+	if !testing.Short() && cnt > 0 && (totMAE/float64(cnt) > 0.15 || totOver/float64(cnt) > 0.1) {
 		t.Errorf("corpus mean MAE %.4f / %%>24 %.4f exceeds the limit", totMAE/float64(cnt), totOver/float64(cnt))
 	}
 	if cnt > 0 {

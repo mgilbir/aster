@@ -68,16 +68,19 @@ var synths = []synth{
 	{"scale-large-coords", svgHead + `<path d="M-1e5 50 L1e5 50" stroke="red" stroke-width="5"/><rect x="-1e6" y="-1e6" width="2e6" height="2e6" fill="none" stroke="blue" stroke-width="3"/></svg>`, 0.5, 1},
 }
 
-func TestSynthetic(t *testing.T) {
+func TestSynthetic(t *testing.T) { runSynths(t, "syn-", synths) }
+
+// runSynths renders each case at scale 1 and 2.5 and compares with resvg.
+func runSynths(t *testing.T, prefix string, list []synth) {
 	dump := os.Getenv("RASTER_DUMP")
-	for _, s := range synths {
+	for _, s := range list {
 		t.Run(s.name, func(t *testing.T) {
 			for _, scale := range []float64{1, 2.5} {
 				ours, err := Render([]byte(s.svg), Options{Scale: scale})
 				if err != nil {
 					t.Fatal(err)
 				}
-				ref := refPNG(t, "syn-"+s.name, []byte(s.svg), scale)
+				ref := refPNG(t, prefix+s.name, []byte(s.svg), scale)
 				if ref == nil {
 					t.Fatal("resvg failed")
 				}
@@ -89,7 +92,8 @@ func TestSynthetic(t *testing.T) {
 				if st.MAE > s.maxMAE || st.PctOver > s.maxPct {
 					t.Errorf("scale %g: MAE %.3f (max %.3f), >24 %.3f%% (max %.3f%%)", scale, st.MAE, s.maxMAE, st.PctOver, s.maxPct)
 					if dump != "" {
-						writeDiff(filepath.Join(dump, "syn-"+s.name+".png"), ours, ref)
+						_ = os.MkdirAll(dump, 0o755)
+						writeDiff(filepath.Join(dump, prefix+s.name+".png"), ours, ref)
 					}
 				}
 			}

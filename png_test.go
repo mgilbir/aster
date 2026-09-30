@@ -12,7 +12,7 @@ import (
 	"testing"
 
 	"github.com/mgilbir/aster"
-	"github.com/mgilbir/aster/internal/textmeasure/fonts/dejavu"
+	"github.com/mgilbir/aster/internal/fonts/dejavu"
 )
 
 func TestSVGToPNG(t *testing.T) {

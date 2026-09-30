@@ -1,14 +1,14 @@
 package aster
 
 import (
+	"github.com/mgilbir/aster/internal/fonts/liberation"
+	"github.com/mgilbir/aster/internal/fonts/notoemoji"
 	"github.com/mgilbir/aster/internal/resvg"
-	"github.com/mgilbir/aster/internal/textmeasure"
-	"github.com/mgilbir/aster/internal/textmeasure/fonts/liberation"
-	"github.com/mgilbir/aster/internal/textmeasure/fonts/notoemoji"
+	"github.com/mgilbir/aster/internal/text"
 )
 
 // fontPlan is the single source of truth for the fonts and generic-family
-// mappings used by BOTH pipelines: go-text text measurement (which drives SVG
+// mappings used by BOTH pipelines: text measurement (which drives SVG
 // layout) and resvg rasterization (which draws PNG glyphs). Building both from
 // one plan keeps them from disagreeing about which custom fonts exist or what
 // "sans-serif" / "monospace" resolve to.
@@ -21,6 +21,7 @@ type fontPlan struct {
 	sansSerif   string      // generic "sans-serif" family name
 	serif       string      // generic "serif" family name
 	monospace   string      // generic "monospace" family name
+	exact       bool        // unrounded advances (the default; see WithHarfBuzzTextMetrics)
 }
 
 func newFontPlan(cfg *config) fontPlan {
@@ -42,25 +43,29 @@ func newFontPlan(cfg *config) fontPlan {
 		sansSerif:   sans,
 		serif:       serif,
 		monospace:   mono,
+		exact:       !cfg.harfBuzzText,
 	}
 }
 
-// measurerOptions produces the go-text measurer configuration.
+// measurerOptions produces the text measurer configuration.
 //
 // systemFonts is honored only here: resvg runs as WASM with no filesystem, so
 // it cannot load OS-installed fonts. WithSystemFonts therefore affects SVG
 // layout measurement but never PNG glyph rasterization.
-func (p fontPlan) measurerOptions() []textmeasure.MeasurerOption {
-	var opts []textmeasure.MeasurerOption
+func (p fontPlan) measurerOptions() []text.Option {
+	var opts []text.Option
 	if p.systemFonts {
-		opts = append(opts, textmeasure.WithSystemFonts())
+		opts = append(opts, text.WithSystemFonts())
 	}
 	for _, f := range p.custom {
-		opts = append(opts, textmeasure.WithFont(f.family, f.data))
+		opts = append(opts, text.WithFont(f.family, f.data))
 	}
-	opts = append(opts, textmeasure.WithDefaultFontFamily(p.sansSerif))
-	opts = append(opts, textmeasure.WithDefaultSerifFamily(p.serif))
-	opts = append(opts, textmeasure.WithDefaultMonospaceFamily(p.monospace))
+	opts = append(opts, text.WithDefaultFontFamily(p.sansSerif))
+	opts = append(opts, text.WithDefaultSerifFamily(p.serif))
+	opts = append(opts, text.WithDefaultMonospaceFamily(p.monospace))
+	if p.exact {
+		opts = append(opts, text.WithExactAdvances())
+	}
 	return opts
 }
 

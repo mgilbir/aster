@@ -1,7 +1,10 @@
 # forme as the text engine for purego: evaluation
 
-Measured against `internal/textmeasure` (go-text/typesetting v0.3.3, the
-reference engine) with forme v0.4.2 (v0.4.1 figures kept where they show the change), on an Apple M1 Pro, Go 1.27.
+Originally measured against `internal/textmeasure` (go-text/typesetting
+v0.3.3, the reference engine), which has since been removed from the module.
+The package now lives at `internal/text`, serves both the root engine and
+purego, and the reference is a recording (see *go-text removal* at the end).
+Figures below were taken with forme v0.4.2 (v0.4.1 figures kept where they show the change), on an Apple M1 Pro, Go 1.27.
 
 ## Verdict
 
@@ -73,7 +76,7 @@ and face-run splitting to the reference.
 
 ## Performance
 
-`go test -bench . ./purego/internal/text` (M1 Pro, arm64, forme v0.4.2):
+`go test -bench . ./internal/text` (M1 Pro, arm64, forme v0.4.2):
 
 | benchmark | this package | textmeasure | ratio |
 |---|---|---|---|
@@ -192,7 +195,56 @@ Both issues filed after the v0.4.2 evaluation are fixed:
   7.3 ms instead of 1.76 s; the slowest of 400 structural corruptions went
   from 1.7 s to 12 ms. Clean loads are unchanged (~0.2 ms).
 
-The comparison against internal/textmeasure is still 3846/3846 exact in the
-default metric model. `FuzzLoadFont` still runs slowly (about 300 executions
-a second on 300 KB mutated seeds); that cost is no longer in `shape.Load`'s
-feature indexing and has not been investigated further.
+The comparison against the recorded go-text output is still 3846/3846 exact in
+the default metric model.
+
+### FuzzLoadFont throughput (investigated after the go-text removal)
+
+The "about 300 executions a second" figure was not shaping or loading cost.
+Measured on forme v0.4.3 (M1 Pro, 10 workers):
+
+* `go test -fuzz FuzzLoadFont -fuzztime 30s` reports 10k to 35k execs/s while
+  it is exploring, but with the default `-fuzzminimizetime` (60 s) it stalls
+  for many seconds at a time with 0 execs/s: every "new interesting" input is
+  a mutated ~400 KB Liberation font, and Go's fuzzing engine minimizes it by
+  re-running the target on it thousands of times, off the exec counter. Over
+  30 s that run counted 313k execs, the last 10 s of them idle. With
+  `-fuzzminimizetime 0` the same target sustains about 40k execs/s
+  (1.1M execs in 30 s). A run that mostly minimizes 400 KB inputs, or a
+  short one dominated by seed replay, looks like a few hundred execs/s.
+* The target's own cost is small. Running the body in-process over 20000
+  random 1 to 4 byte mutations of Liberation Sans Regular (410 KB): load
+  0.3 to 0.5 ms, shaping 0.1 ms, outlines 0.05 to 0.1 ms, `Subset` 0.06 to
+  0.15 ms per input, worst case 189 ms (a GC pause, no pathological input).
+  The profile is dominated by the Go runtime (allocation, `madvise`, GC mark
+  and scan of the ~400 KB copy and its parse tables), then forme's
+  `font.ParseSFNTWithin` (about 19% cumulative, per-glyph map work in
+  `markComposite`) and `sfntChecksum` (2%). This package's own code
+  (`newFace`, the `seen` bitset, the clone pool) is under 1%.
+* So: nothing to fix on our side. Use `-fuzzminimizetime 0` (or a small seed)
+  for throughput runs. If load cost ever matters, the lever is in forme:
+  `ParseSFNTWithin` allocates maps per composite glyph on every `Load`.
+
+## go-text removal
+
+`github.com/go-text/typesetting` is no longer a dependency of the module. The
+root engine (layout measurement, `ShapeText` for PDF), `internal/svgpdf` and
+`internal/fontsubset` all use this package or read font tables themselves, so
+the root engine and purego shape text with the same code.
+
+The reference numbers now come from `testdata/textmeasure_golden.json.gz`,
+recorded from go-text v0.3.3 immediately before removal: the width in 1/64 px
+of every `corpusStrings` x `corpusFonts` pair (96 x 41), the shaped glyph IDs
+and advances of 475 strings (5 fonts x the corpus), and the parsed CSS font of
+every corpus font. `TestCompareTextmeasure` asserts 3846/3846 exact plus the
+two explained classes (30 Hebrew, 60 emoji-aspect cases) against it, and
+`TestShapeTextMatchesReference` compares glyph IDs and advances (skipping the
+explained classes and strings with default-ignorable characters, for which
+go-text keeps a zero-advance glyph and forme none, widths unaffected).
+Benchmarks against go-text, and the go-text figures above, cannot be
+reproduced any more; they are kept as history.
+
+For the root engine the two documented divergences are now real behaviour
+changes: bold or italic emoji measure and rasterize as Noto Emoji rather than
+the sans face's `.notdef`, and Hebrew is shaped with Hebrew rules rather than
+as Latin.

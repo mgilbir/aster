@@ -5,17 +5,15 @@ import (
 	"math"
 	"strings"
 
-	"github.com/go-text/typesetting/font"
-	"github.com/go-text/typesetting/font/opentype"
-	"github.com/mgilbir/aster/internal/textmeasure"
+	"github.com/mgilbir/aster/internal/text"
 )
 
 // TextShaper shapes a text string with a CSS font specification into
 // positioned glyph runs, and can recover the raw font bytes behind a shaped
-// face (nil when unavailable). *textmeasure.Measurer implements it.
+// face (nil when unavailable). *text.Measurer implements it.
 type TextShaper interface {
-	ShapeText(text, cssFont string) ([]textmeasure.ShapedRun, float64)
-	FontData(face *font.Face) []byte
+	ShapeText(s, cssFont string) ([]text.Run, float64)
+	FontData(face *text.Face) []byte
 }
 
 // drawText renders a <text> element. Depending on the text mode, glyphs are
@@ -28,8 +26,8 @@ type TextShaper interface {
 // is the alphabetic-baseline anchor point (baseline offsets are baked into
 // the translate by Vega's SVG renderer), so glyphs are drawn along y = 0.
 func (r *renderer) drawText(e *element, st gstate) error {
-	text := e.text
-	if strings.TrimSpace(text) == "" {
+	str := e.text
+	if strings.TrimSpace(str) == "" {
 		return nil
 	}
 	if len(e.children) > 0 {
@@ -43,7 +41,7 @@ func (r *renderer) drawText(e *element, st gstate) error {
 		return nil
 	}
 
-	runs, advance := r.shaper.ShapeText(text, cssFontString(st))
+	runs, advance := r.shaper.ShapeText(str, cssFontString(st))
 	if len(runs) == 0 {
 		return nil
 	}
@@ -63,15 +61,20 @@ func (r *renderer) drawText(e *element, st gstate) error {
 	fillAlpha := st.opacity * st.fillOpacity
 	r.w.setAlpha(fillAlpha, fillAlpha)
 
-	runes := []rune(text)
-	for _, run := range runs {
+	for k, run := range runs {
 		var f *pdfFont
 		if r.fonts != nil {
 			f = r.fonts.fontFor(run.Face)
 		}
 		var err error
 		if f != nil {
-			penX, err = r.drawTextRunFont(f, run, penX, runes)
+			// The source text a run's last cluster covers ends where the
+			// next run's text begins (or at the end of the string).
+			end := len(str)
+			if k+1 < len(runs) && len(runs[k+1].Glyphs) > 0 {
+				end = runs[k+1].Glyphs[0].Cluster
+			}
+			penX, err = r.drawTextRunFont(f, run, penX, str, end)
 		} else {
 			penX, err = r.drawTextRunOutline(run, penX)
 		}
@@ -89,8 +92,8 @@ func (r *renderer) drawText(e *element, st gstate) error {
 // The content stream operates under the global y-flip, so the text matrix
 // negates y again (D = -1) to keep glyphs upright; text-space x then
 // coincides with local x, letting shaped advances map 1:1.
-func (r *renderer) drawTextRunFont(f *pdfFont, run textmeasure.ShapedRun, penX float64, runes []rune) (float64, error) {
-	size := float64(run.Size) / 64.0
+func (r *renderer) drawTextRunFont(f *pdfFont, run text.Run, penX float64, str string, textEnd int) (float64, error) {
+	size := run.Size
 	if size <= 0 {
 		return penX, fmt.Errorf("svgpdf: non-positive font size in shaped run")
 	}
@@ -120,14 +123,14 @@ func (r *renderer) drawTextRunFont(f *pdfFont, run textmeasure.ShapedRun, penX f
 	penText := 0.0 // viewer pen position in text space (== local px)
 	rise := 0.0
 	for i, g := range run.Glyphs {
-		gid := uint16(g.GlyphID)
+		gid := uint16(g.GID)
 		f.used[gid] = true
-		r.recordToUnicode(f, run, i, runes)
+		r.recordToUnicode(f, run, i, str, textEnd)
 
 		// Vertical offset (mark positioning): PDF text rise. Shaping y is
 		// up; under the doubly-flipped text matrix a positive rise moves the
 		// glyph up as well. Rise changes force a TJ break.
-		wantRise := float64(g.YOffset) / 64.0
+		wantRise := g.YOffset
 		if wantRise != rise {
 			show()
 			r.w.textRise(wantRise)
@@ -136,7 +139,7 @@ func (r *renderer) drawTextRunFont(f *pdfFont, run textmeasure.ShapedRun, penX f
 
 		// Horizontal correction: where the shaped glyph should draw versus
 		// where the viewer pen sits after the previous glyph's font advance.
-		relX := (penX - penXStart) + float64(g.XOffset)/64.0
+		relX := (penX - penXStart) + g.XOffset
 		if num := (penText - relX) * 1000 / size; math.Abs(num) >= 0.005 {
 			flush()
 			items = append(items, tjItem{adj: num, isAdj: true})
@@ -145,7 +148,7 @@ func (r *renderer) drawTextRunFont(f *pdfFont, run textmeasure.ShapedRun, penX f
 
 		cur = append(cur, gid)
 		penText += float64(f.parsed.Advance(gid)) / upem * size
-		penX += float64(g.Advance) / 64.0
+		penX += g.Advance
 	}
 	show()
 	if rise != 0 {
@@ -157,46 +160,43 @@ func (r *renderer) drawTextRunFont(f *pdfFont, run textmeasure.ShapedRun, penX f
 
 // recordToUnicode maps a glyph to the source text of its cluster, for the
 // font's ToUnicode CMap (text extraction). The first mapping wins.
-func (r *renderer) recordToUnicode(f *pdfFont, run textmeasure.ShapedRun, i int, runes []rune) {
-	gid := uint16(run.Glyphs[i].GlyphID)
+func (r *renderer) recordToUnicode(f *pdfFont, run text.Run, i int, str string, textEnd int) {
+	gid := uint16(run.Glyphs[i].GID)
 	if _, ok := f.toUni[gid]; ok {
 		return
 	}
-	start := run.Glyphs[i].TextIndex()
-	if start < 0 || start >= len(runes) {
+	start := run.Glyphs[i].Cluster // byte offset in str
+	if start < 0 || start >= len(str) {
 		return
 	}
-	end := len(runes)
+	end := textEnd
 	for _, g := range run.Glyphs[i+1:] {
-		if g.TextIndex() != start {
-			end = g.TextIndex()
+		if g.Cluster != start {
+			end = g.Cluster
 			break
 		}
 	}
-	if end <= start {
+	if end <= start || end > len(str) {
 		return
 	}
-	f.toUni[gid] = string(runes[start:end])
+	f.toUni[gid] = str[start:end]
 }
 
 // drawTextRunOutline emits one shaped run as filled glyph outlines (the
 // font-free representation).
-func (r *renderer) drawTextRunOutline(run textmeasure.ShapedRun, penX float64) (float64, error) {
-	upem := float64(run.Face.Upem())
-	// Font units → local (px) units at the shaped size.
-	scale := (float64(run.Size) / 64.0) / upem
+func (r *renderer) drawTextRunOutline(run text.Run, penX float64) (float64, error) {
 	emitted := false
 	for _, g := range run.Glyphs {
-		outline, ok := r.glyphOutline(run.Face, g.GlyphID)
+		outline, ok := r.glyphOutline(run.Face, g.GID, run.Size)
 		if !ok {
-			return penX, fmt.Errorf("svgpdf: glyph %d has non-outline data; bitmap/SVG fonts are not supported", g.GlyphID)
+			return penX, fmt.Errorf("svgpdf: glyph %d has non-outline data; bitmap/SVG fonts are not supported", g.GID)
 		}
-		ox := penX + float64(g.XOffset)/64.0
-		oy := -float64(g.YOffset) / 64.0
-		if emitGlyphOutline(r.w, outline, ox, oy, scale) {
+		ox := penX + g.XOffset
+		oy := -g.YOffset
+		if emitGlyphOutline(r.w, outline, ox, oy) {
 			emitted = true
 		}
-		penX += float64(g.Advance) / 64.0
+		penX += g.Advance
 	}
 	if emitted {
 		// Glyph contours use the nonzero winding rule (TrueType/CFF
@@ -206,27 +206,29 @@ func (r *renderer) drawTextRunOutline(run textmeasure.ShapedRun, penX float64) (
 	return penX, nil
 }
 
-// glyphKey identifies a glyph outline by its font face and glyph id, for the
-// per-render memoization cache.
+// glyphKey identifies a scaled glyph outline by its font face, glyph id and
+// size, for the per-render memoization cache.
 type glyphKey struct {
-	face *font.Face
-	gid  font.GID
+	face *text.Face
+	gid  int
+	size float64
 }
 
-// glyphOutline returns the outline for a glyph, extracting it via GlyphData on
-// first use and caching it for the rest of the render. It reports false when
-// the glyph carries non-outline data (bitmap/SVG/color fonts).
-func (r *renderer) glyphOutline(face *font.Face, gid font.GID) (font.GlyphOutline, bool) {
-	key := glyphKey{face: face, gid: gid}
+// glyphOutline returns the outline of a glyph scaled to size (y down, origin
+// on the baseline), extracting it on first use and caching it for the rest
+// of the render. It reports false when the glyph has no vector outline
+// (bitmap/colour fonts).
+func (r *renderer) glyphOutline(face *text.Face, gid int, size float64) ([]text.Segment, bool) {
+	key := glyphKey{face: face, gid: gid, size: size}
 	if outline, ok := r.glyphs[key]; ok {
 		return outline, true
 	}
-	outline, ok := face.GlyphData(gid).(font.GlyphOutline)
-	if !ok {
-		return font.GlyphOutline{}, false
+	outline, err := text.GlyphOutline(face, gid, size)
+	if err != nil {
+		return nil, false
 	}
 	if r.glyphs == nil {
-		r.glyphs = make(map[glyphKey]font.GlyphOutline)
+		r.glyphs = make(map[glyphKey][]text.Segment)
 	}
 	r.glyphs[key] = outline
 	return outline, true
@@ -235,41 +237,41 @@ func (r *renderer) glyphOutline(face *font.Face, gid font.GID) (font.GlyphOutlin
 // emitGlyphOutline writes one glyph's outline as path operators and reports
 // whether anything was emitted (whitespace glyphs have empty outlines).
 //
-// Outline coordinates are font units with y pointing up; the content stream
-// is under the global y-flip, where SVG/local y points down. Negating y here
-// (oy - fontY*scale) pre-flips the glyph so it comes out upright.
-func emitGlyphOutline(w *contentWriter, outline font.GlyphOutline, ox, oy, scale float64) bool {
-	if len(outline.Segments) == 0 {
+// The outline is already scaled to the font size with y pointing down, the
+// orientation of the content stream's local space under the global y-flip,
+// so the glyph only needs translating to its pen position (ox, oy).
+func emitGlyphOutline(w *contentWriter, outline []text.Segment, ox, oy float64) bool {
+	if len(outline) == 0 {
 		return false
 	}
-	pt := func(p opentype.SegmentPoint) Point {
-		return Point{X: ox + float64(p.X)*scale, Y: oy - float64(p.Y)*scale}
-	}
+	pt := func(p text.Point) Point { return Point{X: ox + p.X, Y: oy + p.Y} }
 	var cur Point
-	for _, seg := range outline.Segments {
-		switch seg.Op {
-		case opentype.SegmentOpMoveTo:
-			cur = pt(seg.Args[0])
+	for _, seg := range outline {
+		switch seg.Kind {
+		case text.MoveTo:
+			cur = pt(seg.P[0])
 			w.moveTo(cur)
-		case opentype.SegmentOpLineTo:
-			cur = pt(seg.Args[0])
+		case text.LineTo:
+			cur = pt(seg.P[0])
 			w.lineTo(cur)
-		case opentype.SegmentOpQuadTo:
+		case text.QuadTo:
 			// PDF has no quadratic operator; elevate to the exact cubic.
-			q, end := pt(seg.Args[0]), pt(seg.Args[1])
+			q, end := pt(seg.P[0]), pt(seg.P[1])
 			c1, c2 := quadToCubic(cur, q, end)
 			w.cubicTo(c1, c2, end)
 			cur = end
-		case opentype.SegmentOpCubeTo:
-			c1, c2, end := pt(seg.Args[0]), pt(seg.Args[1]), pt(seg.Args[2])
+		case text.CubicTo:
+			c1, c2, end := pt(seg.P[0]), pt(seg.P[1]), pt(seg.P[2])
 			w.cubicTo(c1, c2, end)
 			cur = end
+		case text.Close:
+			// Filling closes open subpaths implicitly.
 		}
 	}
 	return true
 }
 
-// cssFontString rebuilds the CSS font shorthand that textmeasure parses,
+// cssFontString rebuilds the CSS font shorthand that the text package parses,
 // from the inherited font state: "[style] [weight] <size>px <family>".
 func cssFontString(st gstate) string {
 	var b strings.Builder

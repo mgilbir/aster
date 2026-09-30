@@ -34,6 +34,25 @@ const (
 	tagStop
 	tagStyle
 	tagSwitch
+	tagMask
+	tagFilter
+	tagPattern
+	tagMarker
+	tagFeGaussianBlur
+	tagFeOffset
+	tagFeFlood
+	tagFeColorMatrix
+	tagFeComposite
+	tagFeMerge
+	tagFeMergeNode
+	tagFeBlend
+	tagFeDropShadow
+	tagFeComponentTransfer
+	tagFeFuncR
+	tagFeFuncG
+	tagFeFuncB
+	tagFeFuncA
+	tagFeUnsupported // a filter primitive this renderer does not implement
 )
 
 var tagNames = map[string]tagID{
@@ -43,7 +62,16 @@ var tagNames = map[string]tagID{
 	"polygon": tagPolygon, "text": tagText, "tspan": tagTspan, "image": tagImage,
 	"clipPath": tagClipPath, "linearGradient": tagLinearGradient,
 	"radialGradient": tagRadialGradient, "stop": tagStop, "style": tagStyle,
-	"switch": tagSwitch,
+	"switch": tagSwitch, "mask": tagMask, "filter": tagFilter, "pattern": tagPattern,
+	"marker": tagMarker, "feGaussianBlur": tagFeGaussianBlur, "feOffset": tagFeOffset,
+	"feFlood": tagFeFlood, "feColorMatrix": tagFeColorMatrix, "feComposite": tagFeComposite,
+	"feMerge": tagFeMerge, "feMergeNode": tagFeMergeNode, "feBlend": tagFeBlend,
+	"feDropShadow": tagFeDropShadow, "feComponentTransfer": tagFeComponentTransfer,
+	"feFuncR": tagFeFuncR, "feFuncG": tagFeFuncG, "feFuncB": tagFeFuncB, "feFuncA": tagFeFuncA,
+	"feImage": tagFeUnsupported, "feTile": tagFeUnsupported, "feMorphology": tagFeUnsupported,
+	"feConvolveMatrix": tagFeUnsupported, "feDisplacementMap": tagFeUnsupported,
+	"feTurbulence": tagFeUnsupported, "feDiffuseLighting": tagFeUnsupported,
+	"feSpecularLighting": tagFeUnsupported,
 }
 
 type attrID uint8
@@ -120,6 +148,49 @@ const (
 	aOverflow
 	aTextLength
 	aSystemLanguage
+	aMaskUnits
+	aMaskContentUnits
+	aMaskType
+	aFilter
+	aFilterUnits
+	aPrimitiveUnits
+	aMarkerStart
+	aMarkerMid
+	aMarkerEnd
+	aMarkerUnits
+	aMarkerWidth
+	aMarkerHeight
+	aRefX
+	aRefY
+	aOrient
+	aPatternUnits
+	aPatternContentUnits
+	aPatternTransform
+	aShapeRendering
+	aFloodColor
+	aFloodOpacity
+	aStdDeviation
+	aIn
+	aIn2
+	aResult
+	aMode
+	aType
+	aValues
+	aOperator
+	aK1
+	aK2
+	aK3
+	aK4
+	aLengthAdjust
+	aIsolation
+	aTableValues
+	aSlope
+	aIntercept
+	aAmplitude
+	aExponent
+	aColorInterpolationFilters
+	aPaintOrder
+	aTextRendering
 )
 
 var attrNames = map[string]attrID{
@@ -147,12 +218,50 @@ var attrNames = map[string]attrID{
 	"baseline-shift": aBaselineShift, "class": aClass, "mask": aMask,
 	"overflow": aOverflow, "textLength": aTextLength,
 	"systemLanguage": aSystemLanguage,
+	"maskUnits":      aMaskUnits, "maskContentUnits": aMaskContentUnits, "mask-type": aMaskType,
+	"filter": aFilter, "filterUnits": aFilterUnits, "primitiveUnits": aPrimitiveUnits,
+	"marker-start": aMarkerStart, "marker-mid": aMarkerMid, "marker-end": aMarkerEnd,
+	"markerUnits": aMarkerUnits, "markerWidth": aMarkerWidth, "markerHeight": aMarkerHeight,
+	"refX": aRefX, "refY": aRefY, "orient": aOrient, "patternUnits": aPatternUnits,
+	"patternContentUnits": aPatternContentUnits, "patternTransform": aPatternTransform,
+	"shape-rendering": aShapeRendering, "flood-color": aFloodColor, "flood-opacity": aFloodOpacity,
+	"stdDeviation": aStdDeviation, "in": aIn, "in2": aIn2, "result": aResult, "mode": aMode,
+	"type": aType, "values": aValues, "operator": aOperator, "k1": aK1, "k2": aK2, "k3": aK3,
+	"k4": aK4, "lengthAdjust": aLengthAdjust, "isolation": aIsolation,
+	"tableValues": aTableValues, "slope": aSlope, "intercept": aIntercept,
+	"amplitude": aAmplitude, "exponent": aExponent,
+	"color-interpolation-filters": aColorInterpolationFilters, "paint-order": aPaintOrder,
+	"text-rendering": aTextRendering,
 }
+
+// presentation lists the attributes that a style sheet or a style attribute may
+// set (usvg only accepts presentation attributes there).
+var presentation = func() (t [256]bool) {
+	for _, id := range []attrID{
+		aAlignmentBaseline, aBaselineShift, aClipPath, aClipRule, aColor,
+		aColorInterpolationFilters, aDisplay, aDominantBaseline, aFill, aFillOpacity,
+		aFillRule, aFilter, aFloodColor, aFloodOpacity, aFontFamily, aFontSize,
+		aFontStyle, aFontWeight, aImageRendering, aIsolation, aLetterSpacing,
+		aMarkerStart, aMarkerMid, aMarkerEnd, aMask, aMaskType, aMixBlendMode,
+		aOpacity, aOverflow, aPaintOrder, aShapeRendering, aStopColor, aStopOpacity,
+		aStroke, aStrokeDasharray, aStrokeDashoffset, aStrokeLinecap, aStrokeLinejoin,
+		aStrokeMiterlimit, aStrokeOpacity, aStrokeWidth, aTextAnchor, aTextDecoration,
+		aTextRendering, aTransform, aVisibility, aWordSpacing,
+	} {
+		t[id] = true
+	}
+	return
+}()
 
 type attr struct {
 	id  attrID
+	imp bool // declared !important (style sheets and style attributes only)
 	val string
 }
+
+// rawAttr is an attribute kept verbatim for selector matching. It is only
+// recorded for documents that contain a <style> element.
+type rawAttr struct{ name, val string }
 
 // node is a parsed element (or a run of character data, tagChars).
 type node struct {
@@ -162,6 +271,15 @@ type node struct {
 	kids   []*node
 	text   string // tagChars only
 	parent *node
+
+	css *cssNode // only for documents with a style sheet (selector matching)
+}
+
+// cssNode is what selector matching needs to know about an element.
+type cssNode struct {
+	name string
+	raw  []rawAttr
+	prev *node // previous sibling element
 }
 
 // get returns the value of a non-inherited attribute, honouring style-attribute
@@ -190,6 +308,7 @@ type document struct {
 	root  *node
 	ids   map[string]*node
 	count int
+	css   []string // style sheet sources in document order
 }
 
 // Limits bounds the resources an untrusted SVG may consume. Zero fields select
@@ -205,6 +324,11 @@ type Limits struct {
 	MaxImagePixels  int // pixels of one decoded raster image
 	MaxLayerDepth   int // nested offscreen layers (opacity groups)
 	MaxPathSegments int // segments produced by flattening one path
+	MaxStyleBytes   int // total size of <style> sheets
+	MaxCSSRules     int // rules across all style sheets
+	MaxCSSWork      int // selector-matching steps while applying style sheets
+	MaxFilterPixels int // pixels of one filter region
+	MaxEffectPixels int // pixels processed by filters and pattern tiles in one render
 }
 
 const (
@@ -218,6 +342,11 @@ const (
 	defaultMaxImgPix   = 64 << 20
 	defaultMaxLayers   = 16
 	defaultMaxSegs     = 50_000_000
+	defaultMaxStyle    = 4 << 20
+	defaultMaxRules    = 100_000
+	defaultMaxCSSWork  = 100_000_000
+	defaultMaxFilterPx = 32 << 20
+	defaultMaxEffectPx = 1 << 31
 )
 
 func (l Limits) withDefaults() Limits {
@@ -250,6 +379,21 @@ func (l Limits) withDefaults() Limits {
 	}
 	if l.MaxPathSegments <= 0 {
 		l.MaxPathSegments = defaultMaxSegs
+	}
+	if l.MaxStyleBytes <= 0 {
+		l.MaxStyleBytes = defaultMaxStyle
+	}
+	if l.MaxCSSRules <= 0 {
+		l.MaxCSSRules = defaultMaxRules
+	}
+	if l.MaxCSSWork <= 0 {
+		l.MaxCSSWork = defaultMaxCSSWork
+	}
+	if l.MaxFilterPixels <= 0 {
+		l.MaxFilterPixels = defaultMaxFilterPx
+	}
+	if l.MaxEffectPixels <= 0 {
+		l.MaxEffectPixels = defaultMaxEffectPx
 	}
 	return l
 }
@@ -302,7 +446,11 @@ func parseDocument(src string, lim Limits) (*document, error) {
 	var stack []*node
 	var abuf []attr
 	var sbuf []attr
+	var rbuf []rawAttr
 	var skip int // depth inside an unknown element whose subtree is ignored
+	wantCSS := strings.Contains(src, "<style")
+	var styleBuf strings.Builder // text of the <style> element being read
+	inStyle := false
 	i := 0
 	n := len(src)
 	// Skip UTF-8 BOM.
@@ -322,7 +470,9 @@ func parseDocument(src string, lim Limits) (*document, error) {
 				chunk = src[i : i+j]
 				i += j
 			}
-			if inText > 0 && skip == 0 && len(stack) > 0 {
+			if inStyle && skip == 0 {
+				styleBuf.WriteString(decodeEntities(chunk))
+			} else if inText > 0 && skip == 0 && len(stack) > 0 {
 				top := stack[len(stack)-1]
 				c := ar.newNode()
 				c.tag = tagChars
@@ -348,7 +498,9 @@ func parseDocument(src string, lim Limits) (*document, error) {
 			if j < 0 {
 				return nil, errSyntax
 			}
-			if inText > 0 && skip == 0 && len(stack) > 0 {
+			if inStyle && skip == 0 {
+				styleBuf.WriteString(src[i+9 : i+9+j])
+			} else if inText > 0 && skip == 0 && len(stack) > 0 {
 				top := stack[len(stack)-1]
 				c := ar.newNode()
 				c.tag = tagChars
@@ -404,6 +556,13 @@ func parseDocument(src string, lim Limits) (*document, error) {
 			if top.tag == tagText {
 				inText--
 			}
+			if inStyle && top.tag == tagStyle {
+				inStyle = false
+				if styleBuf.Len() > 0 {
+					doc.css = append(doc.css, styleBuf.String())
+					styleBuf.Reset()
+				}
+			}
 			stack = stack[:len(stack)-1]
 		default:
 			// Start tag.
@@ -417,6 +576,8 @@ func parseDocument(src string, lim Limits) (*document, error) {
 			}
 			abuf = abuf[:0]
 			sbuf = sbuf[:0]
+			rbuf = rbuf[:0]
+			styleType := ""
 			selfClose := false
 			for {
 				for j < n && isSpaceByte(src[j]) {
@@ -474,7 +635,7 @@ func parseDocument(src string, lim Limits) (*document, error) {
 						an = local
 					case "xml":
 						if local == "space" {
-							abuf = append(abuf, attr{aSpace, decodeEntities(val)})
+							abuf = append(abuf, attr{id: aSpace, val: decodeEntities(val)})
 						}
 						continue
 					default:
@@ -484,18 +645,34 @@ func parseDocument(src string, lim Limits) (*document, error) {
 				if an == "xmlns" {
 					continue
 				}
+				if strings.IndexByte(val, '&') >= 0 {
+					val = decodeEntities(val)
+				}
+				if wantCSS && an != "style" {
+					rbuf = append(rbuf, rawAttr{an, val})
+				}
+				if an == "type" {
+					styleType = val
+				}
 				id, ok := attrNames[an]
 				if !ok {
 					continue
-				}
-				if strings.IndexByte(val, '&') >= 0 {
-					val = decodeEntities(val)
 				}
 				if id == aStyle {
 					sbuf = parseStyleDecls(val, sbuf)
 					continue
 				}
-				abuf = append(abuf, attr{id, val})
+				// usvg accepts these only from style sheets and style attributes.
+				if id == aMixBlendMode || id == aIsolation {
+					continue
+				}
+				if id == aImageRendering {
+					switch strings.TrimSpace(val) {
+					case "smooth", "high-quality", "crisp-edges", "pixelated":
+						continue
+					}
+				}
+				abuf = append(abuf, attr{id: id, val: val})
 			}
 			i = j
 
@@ -514,6 +691,12 @@ func parseDocument(src string, lim Limits) (*document, error) {
 			nd.tag = tag
 			nd.attrs = ar.takeAttrs(abuf)
 			nd.style = ar.takeAttrs(sbuf)
+			if wantCSS {
+				nd.css = &cssNode{name: name}
+				if len(rbuf) > 0 {
+					nd.css.raw = append([]rawAttr(nil), rbuf...)
+				}
+			}
 			if len(stack) == 0 {
 				if doc.root != nil {
 					return nil, errors.New("raster: multiple root elements")
@@ -540,6 +723,10 @@ func parseDocument(src string, lim Limits) (*document, error) {
 				if tag == tagText {
 					inText++
 				}
+				if tag == tagStyle && (styleType == "" || styleType == "text/css") {
+					inStyle = true
+					styleBuf.Reset()
+				}
 			}
 		}
 	}
@@ -548,6 +735,9 @@ func parseDocument(src string, lim Limits) (*document, error) {
 	}
 	if len(stack) != 0 {
 		return nil, errors.New("raster: unbalanced markup")
+	}
+	if len(doc.css) > 0 {
+		doc.applyCSS(lim)
 	}
 	return doc, nil
 }
@@ -607,28 +797,45 @@ func decodeEntities(s string) string {
 	return b.String()
 }
 
-// parseStyleDecls parses "name: value; name: value" into attrs, dropping
-// declarations for properties this renderer does not know.
+// parseStyleDecls parses the declarations of a style attribute into attrs,
+// dropping properties that are not presentation attributes.
 func parseStyleDecls(s string, dst []attr) []attr {
-	for len(s) > 0 {
-		var decl string
-		if i := strings.IndexByte(s, ';'); i >= 0 {
-			decl, s = s[:i], s[i+1:]
-		} else {
-			decl, s = s, ""
+	forEachDecl(s, func(name, val string, imp bool) {
+		dst = appendDecl(dst, name, val, imp, true)
+	})
+	return dst
+}
+
+// appendDecl appends the attribute(s) a declaration stands for. When resolve
+// is set an existing declaration for the property is merged following usvg:
+// a later declaration wins unless the earlier one is !important.
+func appendDecl(dst []attr, name, val string, imp, resolve bool) []attr {
+	if val == "" {
+		return dst
+	}
+	if name == "marker" {
+		for _, id := range [3]attrID{aMarkerStart, aMarkerMid, aMarkerEnd} {
+			dst = putDecl(dst, id, val, imp, resolve)
 		}
-		c := strings.IndexByte(decl, ':')
-		if c < 0 {
-			continue
-		}
-		name := strings.TrimSpace(decl[:c])
-		val := strings.TrimSpace(decl[c+1:])
-		if j := strings.Index(val, "!important"); j >= 0 {
-			val = strings.TrimSpace(val[:j])
-		}
-		if id, ok := attrNames[name]; ok && id != aStyle && id != aID && val != "" {
-			dst = append(dst, attr{id, val})
+		return dst
+	}
+	id, ok := attrNames[name]
+	if !ok || !presentation[id] {
+		return dst
+	}
+	return putDecl(dst, id, val, imp, resolve)
+}
+
+func putDecl(dst []attr, id attrID, val string, imp, resolve bool) []attr {
+	if resolve {
+		for i := range dst {
+			if dst[i].id == id {
+				if !dst[i].imp {
+					dst[i] = attr{id: id, imp: imp, val: val}
+				}
+				return dst
+			}
 		}
 	}
-	return dst
+	return append(dst, attr{id: id, imp: imp, val: val})
 }

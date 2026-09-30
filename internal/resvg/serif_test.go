@@ -8,8 +8,8 @@ import (
 	"image/png"
 	"testing"
 
+	"github.com/mgilbir/aster/internal/fonts/liberation"
 	"github.com/mgilbir/aster/internal/resvg"
-	"github.com/mgilbir/aster/internal/textmeasure/fonts/liberation"
 )
 
 // serifFaces returns the four embedded Liberation Serif faces as resvg fonts.

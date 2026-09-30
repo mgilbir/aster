@@ -1,13 +1,14 @@
 package text
 
 import (
+	"compress/gzip"
+	"encoding/json"
 	"fmt"
 	"math"
+	"os"
 	"sort"
 	"strings"
 	"testing"
-
-	"github.com/mgilbir/aster/internal/textmeasure"
 )
 
 // corpusStrings are label-like strings covering the scripts and features the
@@ -86,19 +87,6 @@ func (d *diffStat) String() string {
 		d.n, d.exact, 100*float64(d.exact)/float64(d.n), d.maxAbs, d.sumAbs/float64(d.n), d.maxRel, d.sumRel/float64(d.n), d.over64th, d.worstString, d.worstFont)
 }
 
-func newPair(t testing.TB, opts ...Option) (*Measurer, *textmeasure.Measurer) {
-	t.Helper()
-	m, err := New(opts...)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ref, err := textmeasure.New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return m, ref
-}
-
 // explained classifies the two known, understood sources of disagreement with
 // the reference; it returns "" for a disagreement that has no explanation.
 //
@@ -126,19 +114,84 @@ func explained(m *Measurer, text, css string) string {
 	return ""
 }
 
-// TestCompareTextmeasure measures the corpus with this package and with the
-// go-text based reference. In the default metric model every string must agree
-// exactly except the two explained classes; the exact-advance mode is reported
-// alongside for information.
+// The reference numbers below were recorded from the go-text/typesetting
+// based measurer (go-text v0.3.3, the engine this package replaced) before it
+// was removed from the module, and are read from testdata. They are the
+// widths of every corpusStrings x corpusFonts pair in 1/64 px, the shaped
+// glyph IDs and advances of a subset, and the parsed CSS fonts.
+
+type goldenRun struct {
+	GIDs []int `json:"g"`
+	Adv  []int `json:"a"` // 26.6 units
+	Size int   `json:"s"` // 26.6 units
+}
+
+type goldenShape struct {
+	Text string      `json:"t"`
+	CSS  string      `json:"c"`
+	Runs []goldenRun `json:"r"`
+	Adv  int         `json:"w"`
+}
+
+type goldenCSS struct {
+	Italic bool     `json:"i"`
+	Weight int      `json:"w"`
+	Size   float64  `json:"s"`
+	Family []string `json:"f"`
+}
+
+type golden struct {
+	Strings []string      `json:"strings"`
+	Fonts   []string      `json:"fonts"`
+	Widths  [][]int       `json:"widths"` // [font][string], 1/64 px
+	Shapes  []goldenShape `json:"shapes"`
+	Parsed  []goldenCSS   `json:"parsed"`
+}
+
+func loadGolden(t testing.TB) *golden {
+	t.Helper()
+	f, err := os.Open("testdata/textmeasure_golden.json.gz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	zr, err := gzip.NewReader(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var g golden
+	if err := json.NewDecoder(zr).Decode(&g); err != nil {
+		t.Fatal(err)
+	}
+	// The corpus in this file must be the recorded one, or the indices mean
+	// nothing.
+	if strings.Join(g.Strings, "\x00") != strings.Join(corpusStrings, "\x00") ||
+		strings.Join(g.Fonts, "\x00") != strings.Join(corpusFonts, "\x00") {
+		t.Fatal("corpus differs from the recorded golden data; the golden file needs re-recording")
+	}
+	return &g
+}
+
+// TestCompareTextmeasure measures the corpus with this package and compares
+// it with the recorded widths of the go-text based reference. In the default
+// metric model every string must agree exactly except the two explained
+// classes; the exact-advance mode is reported alongside for information.
 func TestCompareTextmeasure(t *testing.T) {
-	m, ref := newPair(t)
-	exactM, _ := newPair(t, WithExactAdvances())
+	g := loadGolden(t)
+	m, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	exactM, err := New(WithExactAdvances())
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	var compat, exact, unexplained, hebrew, emoji diffStat
 	var bad []string
-	for _, css := range corpusFonts {
-		for _, s := range corpusStrings {
-			want := ref.MeasureText(s, css)
+	for fi, css := range corpusFonts {
+		for si, s := range corpusStrings {
+			want := float64(g.Widths[fi][si]) / 64
 			got := m.MeasureText(s, css)
 			compat.add(s, css, got, want)
 			exact.add(s, css, exactM.MeasureText(s, css), want)
@@ -171,5 +224,74 @@ func TestCompareTextmeasure(t *testing.T) {
 	}
 	if len(bad) > 0 {
 		t.Errorf("%d unexplained differences", len(bad))
+	}
+	if unexplained.exact != unexplained.n || unexplained.n != 3846 || hebrew.n != 30 || emoji.n != 60 {
+		t.Errorf("comparable/unexplained/hebrew/emoji = %d/%d/%d/%d exact %d, want 3846/3846/30/60",
+			unexplained.n, unexplained.n-len(bad), hebrew.n, emoji.n, unexplained.exact)
+	}
+}
+
+// hasIgnorable reports text with default-ignorable characters (zero-width
+// space, soft hyphen, variation selectors). The reference keeps a zero-advance
+// glyph for each; forme drops them, so the glyph lists differ in length while
+// the widths (compared above) agree.
+func hasIgnorable(s string) bool {
+	for _, r := range s {
+		if defaultIgnorable(r) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestShapeTextMatchesReference compares the glyph IDs and advances of
+// ShapeText with the recorded reference runs, outside the two explained
+// classes.
+func TestShapeTextMatchesReference(t *testing.T) {
+	g := loadGolden(t)
+	m, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	checked := 0
+	for _, want := range g.Shapes {
+		if explained(m, want.Text, want.CSS) != "" || hasIgnorable(want.Text) {
+			continue
+		}
+		runs, adv := m.ShapeText(want.Text, want.CSS)
+		if math.Abs(adv*64-float64(want.Adv)) > 1e-9 {
+			t.Errorf("%q @ %q: advance %v, reference %v", want.Text, want.CSS, adv, float64(want.Adv)/64)
+			continue
+		}
+		type gl struct {
+			gid int
+			adv float64
+		}
+		var got, ref []gl
+		for _, r := range runs {
+			for _, x := range r.Glyphs {
+				got = append(got, gl{x.GID, x.Advance})
+			}
+		}
+		for _, r := range want.Runs {
+			for i := range r.GIDs {
+				ref = append(ref, gl{r.GIDs[i], float64(r.Adv[i]) / 64})
+			}
+		}
+		if len(got) != len(ref) {
+			t.Errorf("%q @ %q: %d glyphs, reference %d", want.Text, want.CSS, len(got), len(ref))
+			continue
+		}
+		for i := range got {
+			if got[i] != ref[i] {
+				t.Errorf("%q @ %q: glyph %d = %+v, reference %+v", want.Text, want.CSS, i, got[i], ref[i])
+				break
+			}
+		}
+		checked++
+	}
+	t.Logf("compared %d of %d recorded shapings", checked, len(g.Shapes))
+	if checked == 0 {
+		t.Fatal("nothing compared")
 	}
 }

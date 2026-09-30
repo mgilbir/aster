@@ -8,10 +8,10 @@ import (
 	"sort"
 	"unicode/utf16"
 
-	"github.com/go-text/typesetting/font"
 	pdf0 "github.com/mgilbir/pdf0"
 
 	"github.com/mgilbir/aster/internal/fontsubset"
+	"github.com/mgilbir/aster/internal/text"
 )
 
 // TextMode selects how <text> elements are represented in the PDF.
@@ -59,8 +59,8 @@ type pdfFont struct {
 type fontCatalog struct {
 	mode   TextMode
 	shaper TextShaper
-	fonts  map[*font.Face]*pdfFont
-	failed map[*font.Face]bool
+	fonts  map[*text.Face]*pdfFont
+	failed map[*text.Face]bool
 	list   []*pdfFont // first-use order, for deterministic output
 }
 
@@ -68,14 +68,14 @@ func newFontCatalog(mode TextMode, shaper TextShaper) *fontCatalog {
 	return &fontCatalog{
 		mode:   mode,
 		shaper: shaper,
-		fonts:  make(map[*font.Face]*pdfFont),
-		failed: make(map[*font.Face]bool),
+		fonts:  make(map[*text.Face]*pdfFont),
+		failed: make(map[*text.Face]bool),
 	}
 }
 
 // fontFor returns the PDF font for a shaped face, or nil when the face
 // cannot be represented as a PDF font (the caller then draws outlines).
-func (c *fontCatalog) fontFor(face *font.Face) *pdfFont {
+func (c *fontCatalog) fontFor(face *text.Face) *pdfFont {
 	if f, ok := c.fonts[face]; ok {
 		return f
 	}

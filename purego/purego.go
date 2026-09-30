@@ -30,11 +30,10 @@ import (
 	"github.com/mgilbir/aster/internal/loader"
 	"github.com/mgilbir/aster/internal/pngopt"
 	"github.com/mgilbir/aster/internal/svgpdf"
-	"github.com/mgilbir/aster/internal/textmeasure"
+	"github.com/mgilbir/aster/internal/text"
 	"github.com/mgilbir/aster/purego/internal/jsval"
 	"github.com/mgilbir/aster/purego/internal/raster"
 	"github.com/mgilbir/aster/purego/internal/svg"
-	"github.com/mgilbir/aster/purego/internal/text"
 	"github.com/mgilbir/aster/purego/internal/transforms"
 	"github.com/mgilbir/aster/purego/internal/vega"
 	"github.com/mgilbir/aster/purego/internal/vegalite"
@@ -75,6 +74,7 @@ type Converter struct {
 	cfg      *config
 	location *time.Location
 	theme    jsval.Value // parsed WithTheme config; Undefined when none
+	vl       string      // vegalite compiler version (vegalite.Version64, ...)
 	closed   bool
 
 	// Layout text measurement, built on first use.
@@ -87,19 +87,28 @@ type Converter struct {
 	shaper     raster.Shaper
 	shaperErr  error
 
-	// PDF output shapes text with the same measurer the root package uses,
-	// built on first use.
+	// PDF output shapes text with the layout measurer when there is one;
+	// with text measurement disabled, one is built on first use.
 	pdfOnce     sync.Once
-	pdfMeasurer *textmeasure.Measurer
+	pdfMeasurer *text.Measurer
 	pdfErr      error
 }
 
 // errConverterClosed is returned by every rendering method after Close.
 var errConverterClosed = errors.New("purego: converter is closed")
 
-// supportedVersions are the Vega-Lite versions this engine compiles.
+// supportedVersions are the Vega-Lite versions this engine compiles, sorted
+// by key like the root package's. Every version renders with the Vega 6.4
+// runtime; VegaVersion says whose behaviour rendering follows.
 var supportedVersions = []VersionInfo{
+	{Key: "vl5_8", VegaVersion: "6.4.0", VegaLiteVersion: "5.8.0"},
 	{Key: "vl6_4", VegaVersion: "6.4.0", VegaLiteVersion: "6.4.3"},
+}
+
+// compilerVersion maps a version set key to the vegalite compiler's version.
+var compilerVersion = map[string]string{
+	"vl5_8": vegalite.Version58,
+	"vl6_4": vegalite.Version64,
 }
 
 // VersionInfo describes an available Vega-Lite version set.
@@ -120,8 +129,10 @@ func New(opts ...Option) (*Converter, error) {
 	for _, opt := range opts {
 		opt(cfg)
 	}
+	vlVersion := vegalite.Version64
 	if v := cfg.vegaLiteVersion; v != "" {
 		key := "vl" + strings.ReplaceAll(v, ".", "_")
+		vlVersion = compilerVersion[key]
 		found := false
 		var names []string
 		for _, s := range supportedVersions {
@@ -145,7 +156,7 @@ func New(opts ...Option) (*Converter, error) {
 	if cfg.loader == nil {
 		cfg.loader = DenyLoader{}
 	}
-	c := &Converter{cfg: cfg, location: loc}
+	c := &Converter{cfg: cfg, location: loc, vl: vlVersion}
 	if cfg.theme != "" {
 		theme, err := jsval.ParseJSONString(cfg.theme)
 		if err != nil {
@@ -275,6 +286,38 @@ func (c *Converter) limits() vega.Limits {
 	return l
 }
 
+// newMeasurer builds a text measurer from the configured fonts.
+// newMeasurer builds the layout text measurer.
+func (c *Converter) newMeasurer() (*text.Measurer, error) {
+	opts := c.fontOptions()
+	if !c.cfg.harfBuzzText {
+		opts = append(opts, text.WithExactAdvances())
+	}
+	return text.New(opts...)
+}
+
+// fontOptions are the font registrations and generic-family mappings shared
+// by layout measurement and PNG text, so both resolve families identically.
+func (c *Converter) fontOptions() []text.Option {
+	var opts []text.Option
+	if c.cfg.systemFonts {
+		opts = append(opts, text.WithSystemFonts())
+	}
+	for _, f := range c.cfg.fonts {
+		opts = append(opts, text.WithFont(f.family, f.data))
+	}
+	if f := c.cfg.defaultFontFamily; f != "" {
+		opts = append(opts, text.WithDefaultFontFamily(f))
+	}
+	if f := c.cfg.defaultSerifFamily; f != "" {
+		opts = append(opts, text.WithDefaultSerifFamily(f))
+	}
+	if f := c.cfg.defaultMonospaceFamily; f != "" {
+		opts = append(opts, text.WithDefaultMonospaceFamily(f))
+	}
+	return opts
+}
+
 // measurerInit builds the text measurer used for layout on first use; it
 // returns nil when text measurement is disabled, which selects Vega's own
 // width estimate.
@@ -283,23 +326,7 @@ func (c *Converter) measurerInit() (*text.Measurer, error) {
 		return nil, nil
 	}
 	c.measurerOnce.Do(func() {
-		var opts []text.Option
-		if c.cfg.systemFonts {
-			opts = append(opts, text.WithSystemFonts())
-		}
-		for _, f := range c.cfg.fonts {
-			opts = append(opts, text.WithFont(f.family, f.data))
-		}
-		if f := c.cfg.defaultFontFamily; f != "" {
-			opts = append(opts, text.WithDefaultFontFamily(f))
-		}
-		if f := c.cfg.defaultSerifFamily; f != "" {
-			opts = append(opts, text.WithDefaultSerifFamily(f))
-		}
-		if f := c.cfg.defaultMonospaceFamily; f != "" {
-			opts = append(opts, text.WithDefaultMonospaceFamily(f))
-		}
-		c.measurer, c.measurerErr = text.New(opts...)
+		c.measurer, c.measurerErr = c.newMeasurer()
 		if c.measurerErr != nil {
 			c.measurerErr = fmt.Errorf("purego: initializing text measurer: %w", c.measurerErr)
 		}
@@ -326,7 +353,7 @@ func (c *Converter) compileVegaLite(spec []byte) (jsval.Value, error) {
 	if err != nil {
 		return jsval.Undefined, fmt.Errorf("purego: parsing Vega-Lite spec: %w", err)
 	}
-	vg, err := vegalite.Compile(v, vegalite.Options{Config: c.theme, Location: c.location})
+	vg, err := vegalite.Compile(v, vegalite.Options{Config: c.theme, Location: c.location, Version: c.vl})
 	if err != nil {
 		return jsval.Undefined, fmt.Errorf("purego: compiling Vega-Lite: %w", err)
 	}
@@ -378,11 +405,9 @@ func (c *Converter) SVGToPNG(svg string, opts ...PNGOption) ([]byte, error) {
 
 func (c *Converter) rasterize(svg string, scale float64) ([]byte, error) {
 	c.shaperOnce.Do(func() {
-		fonts := make([]raster.FontData, len(c.cfg.fonts))
-		for i, f := range c.cfg.fonts {
-			fonts[i] = raster.FontData{Family: f.family, Data: f.data}
-		}
-		c.shaper, c.shaperErr = raster.NewShaper(fonts...)
+		// Glyphs are drawn at their exact advances (as resvg draws them),
+		// with the same fonts and family mapping as layout.
+		c.shaper, c.shaperErr = raster.NewShaperWithOptions(c.fontOptions()...)
 		if c.shaperErr != nil {
 			c.shaperErr = fmt.Errorf("purego: initializing PNG text shaper: %w", c.shaperErr)
 		}
@@ -502,25 +527,15 @@ func (c *Converter) VegaLiteToPDFUsage(spec []byte, opts ...PDFOption) ([]byte, 
 	return c.SVGToPDFUsage(svg, opts...)
 }
 
-func (c *Converter) pdfMeasurerInit() (*textmeasure.Measurer, error) {
+// pdfMeasurerInit returns the measurer PDF text is shaped with: the layout
+// measurer when text measurement is enabled, so glyphs come from the faces the
+// SVG was laid out against, otherwise one built on first use.
+func (c *Converter) pdfMeasurerInit() (*text.Measurer, error) {
+	if c.cfg.textMeasure {
+		return c.measurerInit()
+	}
 	c.pdfOnce.Do(func() {
-		var opts []textmeasure.MeasurerOption
-		if c.cfg.systemFonts {
-			opts = append(opts, textmeasure.WithSystemFonts())
-		}
-		for _, f := range c.cfg.fonts {
-			opts = append(opts, textmeasure.WithFont(f.family, f.data))
-		}
-		if f := c.cfg.defaultFontFamily; f != "" {
-			opts = append(opts, textmeasure.WithDefaultFontFamily(f))
-		}
-		if f := c.cfg.defaultSerifFamily; f != "" {
-			opts = append(opts, textmeasure.WithDefaultSerifFamily(f))
-		}
-		if f := c.cfg.defaultMonospaceFamily; f != "" {
-			opts = append(opts, textmeasure.WithDefaultMonospaceFamily(f))
-		}
-		c.pdfMeasurer, c.pdfErr = textmeasure.New(opts...)
+		c.pdfMeasurer, c.pdfErr = c.newMeasurer()
 		if c.pdfErr != nil {
 			c.pdfErr = fmt.Errorf("purego: initializing PDF text shaper: %w", c.pdfErr)
 		}

@@ -6,9 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/go-text/typesetting/font"
-	"github.com/mgilbir/aster/internal/textmeasure"
-	"github.com/mgilbir/aster/internal/textmeasure/fonts/liberation"
+	"github.com/mgilbir/aster/internal/fonts/liberation"
 )
 
 func TestParseCSSFont(t *testing.T) {
@@ -41,13 +39,14 @@ func TestParseCSSFont(t *testing.T) {
 	}
 }
 
-// TestParseMatchesReference checks the parser against the reference parser on
-// every font string of the comparison corpus.
+// TestParseMatchesReference checks the parser against the recorded output of
+// the reference parser on every font string of the comparison corpus.
 func TestParseMatchesReference(t *testing.T) {
-	for _, css := range corpusFonts {
-		got, want := ParseCSSFont(css), textmeasure.ParseCSSFont(css)
+	g := loadGolden(t)
+	for i, css := range corpusFonts {
+		got, want := ParseCSSFont(css), g.Parsed[i]
 		if got.Size != want.Size || strings.Join(got.Family, "|") != strings.Join(want.Family, "|") ||
-			got.Italic != (want.Style == font.StyleItalic) || got.Weight != int(want.Weight) {
+			got.Italic != want.Italic || got.Weight != want.Weight {
 			t.Errorf("%q: got %+v, reference %+v", css, got, want)
 		}
 	}
@@ -277,6 +276,32 @@ func TestSystemFonts(t *testing.T) {
 				t.Errorf("system family %q measured %v", fam, w)
 			}
 			break
+		}
+	}
+}
+
+// The generic families resolve to the configured concrete families, and
+// overriding the mapping to the sans family collapses the distinction.
+func TestGenericFamilyOverrides(t *testing.T) {
+	const probe = "iiill"
+	plain, _ := New()
+	if sans, mono := plain.MeasureText(probe, "13px sans-serif"), plain.MeasureText(probe, "13px monospace"); mono <= sans*1.2 {
+		t.Errorf("monospace %.2f not distinctly wider than sans %.2f", mono, sans)
+	}
+	if sans, serif := plain.MeasureText("The quick brown fox", "13px sans-serif"), plain.MeasureText("The quick brown fox", "13px serif"); serif == sans {
+		t.Errorf("serif advance %.2f equals sans %.2f", serif, sans)
+	}
+	mono, _ := New(WithDefaultMonospaceFamily("Liberation Sans"))
+	if a, b := mono.MeasureText(probe, "13px sans-serif"), mono.MeasureText(probe, "13px monospace"); a != b {
+		t.Errorf("monospace overridden to sans: sans=%.2f mono=%.2f", a, b)
+	}
+	serif, _ := New(WithDefaultSerifFamily("Liberation Sans"))
+	if a, b := serif.MeasureText("The quick brown fox", "13px sans-serif"), serif.MeasureText("The quick brown fox", "13px serif"); a != b {
+		t.Errorf("serif overridden to sans: sans=%.2f serif=%.2f", a, b)
+	}
+	for _, g := range []string{"cursive", "fantasy"} {
+		if a, b := plain.MeasureText("The quick brown fox", "13px sans-serif"), plain.MeasureText("The quick brown fox", "13px "+g); a != b {
+			t.Errorf("%s should resolve to sans: %.2f vs %.2f", g, a, b)
 		}
 	}
 }

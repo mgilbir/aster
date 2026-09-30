@@ -13,9 +13,9 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/mgilbir/aster/internal/fonts/liberation"
+	"github.com/mgilbir/aster/internal/fonts/notoemoji"
 	"github.com/mgilbir/aster/internal/resvg"
-	"github.com/mgilbir/aster/internal/textmeasure/fonts/liberation"
-	"github.com/mgilbir/aster/internal/textmeasure/fonts/notoemoji"
 )
 
 // The reference renderer is resvg (WASM) with the same font plan the root

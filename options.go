@@ -26,6 +26,7 @@ type config struct {
 	defaultSerifFamily     string
 	defaultMonospaceFamily string
 	timezone               string
+	harfBuzzText           bool
 }
 
 func defaultConfig() *config {
@@ -72,7 +73,7 @@ func WithTimeout(d time.Duration) Option {
 }
 
 // WithTextMeasurement controls whether Go-side text measurement is enabled.
-// When enabled, text widths are computed using go-text/typesetting for accurate
+// When enabled, text widths are computed using the forme text engine for accurate
 // layout. When disabled, Vega's default estimation is used.
 func WithTextMeasurement(enabled bool) Option {
 	return func(c *config) {
@@ -138,6 +139,18 @@ func WithDefaultSerifFamily(family string) Option {
 func WithDefaultMonospaceFamily(family string) Option {
 	return func(c *config) {
 		c.defaultMonospaceFamily = family
+	}
+}
+
+// WithHarfBuzzTextMetrics measures text the way HarfBuzz reports advances:
+// the font size rounded up to whole pixels and each glyph advance rounded to
+// 1/64 px. By default advances are unrounded at the exact font size, as
+// browsers and node-canvas measure, which is what upstream Vega lays charts
+// out with; this option restores the rounded model earlier versions of this
+// package used, for output that is byte-stable with them.
+func WithHarfBuzzTextMetrics() Option {
+	return func(c *config) {
+		c.harfBuzzText = true
 	}
 }
 

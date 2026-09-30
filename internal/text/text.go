@@ -1,5 +1,6 @@
-// Package text measures and shapes text for the purego engine using
-// github.com/mgilbir/forme, with no cgo and no external font stack.
+// Package text measures and shapes text for both engines (the root aster
+// package and purego) and for PDF output, using github.com/mgilbir/forme, with
+// no cgo and no external font stack.
 //
 // A Measurer resolves a CSS font shorthand ("italic bold 14px Arial,
 // sans-serif") to a list of registered faces, falls back face by face for
@@ -10,8 +11,9 @@
 // # Metrics
 //
 // By default advances follow the metric model of the go-text/typesetting
-// shaper the reference engine uses, so widths agree with it to the last
-// 1/64 px: the shaping size is the CSS size rounded up to a whole pixel, and
+// shaper the root engine used before it moved to forme (recorded in
+// testdata/textmeasure_golden.json.gz), so widths agree with it to the last
+// 1/64 px and existing layouts do not move: the shaping size is the CSS size rounded up to a whole pixel, and
 // each glyph advance is rounded to 1/64 px. WithExactAdvances switches to
 // unrounded advances at the exact CSS size, which is what a browser lays out
 // with.
@@ -35,8 +37,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/mgilbir/aster/internal/textmeasure/fonts/liberation"
-	"github.com/mgilbir/aster/internal/textmeasure/fonts/notoemoji"
+	"github.com/mgilbir/aster/internal/fonts/liberation"
+	"github.com/mgilbir/aster/internal/fonts/notoemoji"
 	"github.com/mgilbir/forme/shape"
 )
 

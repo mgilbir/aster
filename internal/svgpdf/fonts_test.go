@@ -5,8 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-text/typesetting/font"
-	"github.com/mgilbir/aster/internal/textmeasure"
+	"github.com/mgilbir/aster/internal/text"
 	pdf0 "github.com/mgilbir/pdf0"
 )
 
@@ -17,7 +16,7 @@ const fontProbeSVG = `<svg width="300" height="60">` +
 // referencing a Type0/CIDFontType2 font with an embedded, subset-prefixed
 // font program, a ToUnicode CMap, and a CIDSet.
 func TestEmbedModeStructure(t *testing.T) {
-	m, err := textmeasure.New()
+	m, err := text.New()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +48,7 @@ func TestEmbedModeStructure(t *testing.T) {
 // TestNamedModeStructure: same text structure, no font program — the
 // assembling document embeds the font later.
 func TestNamedModeStructure(t *testing.T) {
-	m, err := textmeasure.New()
+	m, err := text.New()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +72,7 @@ func TestNamedModeStructure(t *testing.T) {
 // TestModeSizeOrdering pins the point of the feature: named < embed <
 // outlines for text-bearing charts.
 func TestModeSizeOrdering(t *testing.T) {
-	m, err := textmeasure.New()
+	m, err := text.New()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +104,7 @@ func TestModeSizeOrdering(t *testing.T) {
 
 // TestEmbedDeterministic: same input, byte-identical output (fonts included).
 func TestEmbedDeterministic(t *testing.T) {
-	m, err := textmeasure.New()
+	m, err := text.New()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,15 +124,15 @@ func TestEmbedDeterministic(t *testing.T) {
 // noFontDataShaper shapes normally but refuses to reveal font bytes,
 // simulating a face whose source cannot be recovered (e.g. a variable
 // system-font instance).
-type noFontDataShaper struct{ *textmeasure.Measurer }
+type noFontDataShaper struct{ *text.Measurer }
 
-func (s noFontDataShaper) FontData(*font.Face) []byte { return nil }
+func (s noFontDataShaper) FontData(*text.Face) []byte { return nil }
 
 // TestEmbedFallsBackToOutlines: a face whose bytes the shaper cannot recover
 // must fall back to outlines rather than fail — mixed documents keep
 // rendering.
 func TestEmbedFallsBackToOutlines(t *testing.T) {
-	m, err := textmeasure.New()
+	m, err := text.New()
 	if err != nil {
 		t.Fatal(err)
 	}

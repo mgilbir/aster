@@ -1,14 +1,45 @@
 // Package raster renders SVG to pixels in pure Go: a scanline rasterizer with
-// exact winding-rule handling, a stroker, gradients, clipping, group opacity,
-// text from glyph outlines and PNG output. It targets the SVG that Vega's SVG
-// renderer emits plus the common general-purpose subset (paths, basic shapes,
-// use/symbol, clipPath, gradients, data: images, text/tspan), and matches
-// resvg's output to within anti-aliasing noise.
+// exact winding-rule handling, a stroker, gradients and patterns, clipping,
+// masks, filters, markers, group opacity, text from glyph outlines and PNG
+// output. It targets the SVG that Vega's SVG renderer emits plus general-purpose
+// SVG (paths, basic shapes, use/symbol/nested svg, clipPath, mask, pattern,
+// marker, the common filter primitives, <style> sheets, data: images and
+// text/tspan) and matches resvg 0.45's output to within anti-aliasing noise;
+// the tests compare both on a corpus and on synthetic documents.
+//
+// Supported beyond the basics:
+//
+//   - CSS: <style> elements (type text/css or none) with type, universal,
+//     class, id, attribute and :first-child selectors, descendant, child and
+//     adjacent-sibling combinators, selector lists, specificity ordering and
+//     !important, following resvg's cascade (presentation attributes < style
+//     sheet < style attribute). Only presentation attributes are taken from
+//     style sheets and style attributes.
+//   - mask (luminance and alpha, maskUnits, maskContentUnits, nested masks),
+//     clipPath with clipPathUnits=objectBoundingBox and <text> children.
+//   - filter: feGaussianBlur, feOffset, feFlood, feColorMatrix, feComposite
+//     (all operators), feMerge, feBlend, feDropShadow, feComponentTransfer,
+//     filterUnits, primitiveUnits, primitive sub-regions, result/in chaining,
+//     color-interpolation-filters. Other primitives yield transparent black.
+//   - pattern fills and strokes (patternUnits, patternContentUnits,
+//     patternTransform, viewBox, href inheritance) and markers (start, mid,
+//     end, orient auto / auto-start-reverse / angle, markerUnits, refX/refY,
+//     viewBox, overflow).
+//   - shape-rendering and text-rendering (crispEdges / optimizeSpeed turn
+//     anti-aliasing off), paint-order, image-rendering, per-character text
+//     rotate, textLength with lengthAdjust, and text decorations and baseline
+//     shifts placed from the font's own metrics.
+//
+// Not implemented: CSS filter functions (blur(), drop-shadow(), ...), feImage,
+// feTile, feMorphology, feConvolveMatrix, feDisplacementMap, feTurbulence and
+// the lighting filters, textPath, context-fill/stroke, external
+// resources, SVG images, and the writing-mode / vertical text.
 //
 // The input is untrusted. Element count, nesting, canvas size, <use>
-// expansion, layer depth and embedded image size are all bounded (see Limits);
-// nothing is fetched from the network or the filesystem; malformed input
-// yields an error or is skipped, never a panic.
+// expansion, layer depth, embedded image size, style sheet size and matching
+// work, filter region size and the pixels spent on filters and pattern tiles
+// are all bounded (see Limits); nothing is fetched from the network or the
+// filesystem; malformed input yields an error or is skipped, never a panic.
 package raster
 
 import (
@@ -127,8 +158,9 @@ func Render(svg []byte, opts Options) (img *image.NRGBA, err error) {
 	}
 	r := &renderer{
 		doc: doc, lim: lim, shaper: shaper,
-		rast: newRasterizer(), cw: cw, ch: ch,
+		rast: newRasterizer(), cw: cw, ch: ch, active: map[*node]bool{},
 	}
+	r.rootState = rootState
 	r.cv = newCanvas(cw, ch)
 	if opts.Background != nil {
 		nc := color.NRGBAModel.Convert(opts.Background).(color.NRGBA)
@@ -164,8 +196,11 @@ func (r *renderer) renderRoot(root *node, st *state) {
 	}
 	if cp, ok := root.get(aClipPath); ok {
 		if id, isURL := parseURLRef(cp); isURL {
-			if cn := r.doc.ids[id]; cn != nil && cn.tag == tagClipPath {
-				m := r.buildClip(cn, st, 0)
+			if cn := r.doc.ids[id]; cn != nil {
+				if cn.tag != tagClipPath {
+					return
+				}
+				m := r.buildClipFor(cn, root, st)
 				if m == nil || m.r.empty() {
 					return
 				}

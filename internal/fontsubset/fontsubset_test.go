@@ -5,21 +5,51 @@ import (
 	"compress/zlib"
 	"testing"
 
-	"github.com/go-text/typesetting/font"
-	"github.com/mgilbir/aster/internal/textmeasure/fonts/liberation"
+	"github.com/mgilbir/aster/internal/fonts/liberation"
+	"github.com/mgilbir/forme/shape"
+	"golang.org/x/image/font/sfnt"
 )
+
+func loadFace(t *testing.T, ttf []byte) *shape.Face {
+	t.Helper()
+	f, err := shape.Load(ttf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return f
+}
+
+// sparse is a parsed subset. forme refuses a subset (its cmap maps no
+// character, by design: PDF addresses glyphs by ID), so subsets are read
+// with x/image's sfnt parser, which does not need one.
+type sparse struct{ f *sfnt.Font }
+
+func loadSparse(t *testing.T, ttf []byte) sparse {
+	t.Helper()
+	f, err := sfnt.Parse(ttf)
+	if err != nil {
+		t.Fatalf("subset does not reparse: %v", err)
+	}
+	return sparse{f}
+}
+
+// segments counts the outline segments of a glyph of the subset.
+func (s sparse) segments(gid uint16) int {
+	var buf sfnt.Buffer
+	segs, err := s.f.LoadGlyph(&buf, sfnt.GlyphIndex(gid), 2048, nil)
+	if err != nil {
+		return -1
+	}
+	return len(segs)
+}
 
 // gidsFor maps runes to glyph IDs via the font's cmap.
 func gidsFor(t *testing.T, ttf []byte, s string) map[uint16]bool {
 	t.Helper()
-	ft, err := font.ParseTTF(bytes.NewReader(ttf))
-	if err != nil {
-		t.Fatal(err)
-	}
-	face := ft
+	face := loadFace(t, ttf)
 	gids := make(map[uint16]bool)
 	for _, r := range s {
-		gid, ok := face.NominalGlyph(r)
+		gid, ok := face.GlyphID(r)
 		if !ok {
 			t.Fatalf("rune %q not in font", r)
 		}
@@ -47,11 +77,7 @@ func TestSubsetKeepsRequestedGlyphs(t *testing.T) {
 
 	// The subset must remain a parseable TrueType font with the same glyph
 	// count and unitsPerEm.
-	subFont, err := font.ParseTTF(bytes.NewReader(sub))
-	if err != nil {
-		t.Fatalf("subset does not reparse: %v", err)
-	}
-	subFace := subFont
+	subFace := loadSparse(t, sub)
 
 	sf, err := Parse(sub)
 	if err != nil {
@@ -66,18 +92,14 @@ func TestSubsetKeepsRequestedGlyphs(t *testing.T) {
 
 	// Kept glyphs still have their outlines (whitespace glyphs are empty in
 	// the original too), with the same advances.
-	srcFace, err := font.ParseTTF(bytes.NewReader(src))
-	if err != nil {
-		t.Fatal(err)
-	}
+	srcFace := loadSparse(t, src)
 	for gid := range gids {
-		orig, _ := srcFace.GlyphData(font.GID(gid)).(font.GlyphOutline)
-		if len(orig.Segments) == 0 {
+		orig := srcFace.segments(gid)
+		if orig <= 0 {
 			continue // e.g. the space glyph: empty by design
 		}
-		out, ok := subFace.GlyphData(font.GID(gid)).(font.GlyphOutline)
-		if !ok || len(out.Segments) != len(orig.Segments) {
-			t.Errorf("glyph %d outline changed in the subset (%d segments, want %d)", gid, len(out.Segments), len(orig.Segments))
+		if out := subFace.segments(gid); out != orig {
+			t.Errorf("glyph %d outline changed in the subset (%d segments, want %d)", gid, out, orig)
 		}
 		if got, want := sf.Advance(gid), f.Advance(gid); got != want {
 			t.Errorf("glyph %d advance changed: %d -> %d", gid, got, want)
@@ -90,7 +112,7 @@ func TestSubsetKeepsRequestedGlyphs(t *testing.T) {
 		if gids[gid] {
 			continue
 		}
-		if out, ok := subFace.GlyphData(font.GID(gid)).(font.GlyphOutline); ok && len(out.Segments) > 0 {
+		if subFace.segments(gid) > 0 {
 			t.Errorf("unused glyph %d kept its outline", gid)
 		}
 	}
@@ -116,22 +138,16 @@ func TestSubsetIncludesCompositeComponents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	subFont, err := font.ParseTTF(bytes.NewReader(sub))
-	if err != nil {
-		t.Fatal(err)
-	}
-	subFace := subFont
+	subFace := loadSparse(t, sub)
 	for gid := range gids {
-		out, ok := subFace.GlyphData(font.GID(gid)).(font.GlyphOutline)
-		if !ok || len(out.Segments) == 0 {
+		if subFace.segments(gid) <= 0 {
 			t.Fatalf("composite glyph %d has no outline in subset", gid)
 		}
 	}
 	// Its base component ("A") must also be present.
 	base := gidsFor(t, src, "A")
 	for gid := range base {
-		out, ok := subFace.GlyphData(font.GID(gid)).(font.GlyphOutline)
-		if !ok || len(out.Segments) == 0 {
+		if subFace.segments(gid) <= 0 {
 			t.Fatalf("component glyph %d missing from composite subset", gid)
 		}
 	}
@@ -174,4 +190,19 @@ func compressedSize(b []byte) int {
 	_, _ = zw.Write(b)
 	_ = zw.Close()
 	return buf.Len()
+}
+
+func TestParseRejectsMalformed(t *testing.T) {
+	good := liberation.SansRegular
+	for name, data := range map[string][]byte{
+		"empty":     nil,
+		"short":     good[:8],
+		"garbage":   []byte("this is not a font, but it is long enough"),
+		"truncated": good[:200],
+		"woff":      append([]byte("wOFF"), good[4:64]...),
+	} {
+		if _, err := Parse(data); err == nil {
+			t.Errorf("%s: Parse succeeded", name)
+		}
+	}
 }

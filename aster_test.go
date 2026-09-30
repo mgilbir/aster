@@ -12,7 +12,7 @@ import (
 	"testing"
 
 	"github.com/mgilbir/aster"
-	"github.com/mgilbir/aster/internal/textmeasure/fonts/dejavu"
+	"github.com/mgilbir/aster/internal/fonts/dejavu"
 )
 
 // normalizeSVGNumbers rounds all floating-point numbers in an SVG string to
@@ -162,21 +162,6 @@ var knownFailures = map[string]string{
 	"trail_color":                  "QuickJS trigonometry differs from V8 in the last bit (trail arc joins)",
 	"bar_grouped_thin":             "QuickJS sort orders an inconsistent mixed-type comparator differently from V8's TimSort",
 	"bar_grouped_thin_minBandSize": "QuickJS sort orders an inconsistent mixed-type comparator differently from V8's TimSort",
-
-	// go-text's advances are rounded to 1/64 px; node-canvas's are not. A few
-	// label or legend widths land on the other side of a pixel boundary.
-	"bar_grouped_repeated":                   "text width rounding (1px)",
-	"config_numberFormatType_test":           "text width rounding (1px)",
-	"line_color_binned":                      "text width rounding (1px)",
-	"point_binned_color":                     "text width rounding (1px)",
-	"point_binned_opacity":                   "text width rounding (1px)",
-	"point_binned_size":                      "text width rounding (1px)",
-	"stacked_bar_count":                      "text width rounding (1px)",
-	"stacked_bar_count_corner_radius_config": "text width rounding (1px)",
-	"stacked_bar_count_corner_radius_mark":   "text width rounding (1px)",
-	"stacked_bar_count_corner_radius_mark_x": "text width rounding (1px)",
-	"stacked_bar_count_corner_radius_stroke": "text width rounding (1px)",
-	"stacked_bar_size":                       "text width rounding (1px)",
 
 	// Runtime errors in specific specs.
 	"facet_independent_scale_layer_broken": "known broken spec: TypeError in Vega compile",

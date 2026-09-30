@@ -1,16 +1,19 @@
 package purego_test
 
 import (
+	"flag"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
 
-	"github.com/mgilbir/aster/internal/textmeasure/fonts/dejavu"
+	"github.com/mgilbir/aster/internal/fonts/dejavu"
 	"github.com/mgilbir/aster/purego"
 	"github.com/mgilbir/aster/purego/internal/svgdiff"
 )
+
+var compareHarfBuzz = flag.Bool("compare.harfbuzz", false, "measure text with WithHarfBuzzTextMetrics in TestAgainstUpstreamRenderings")
 
 // TestAgainstUpstreamRenderings compares purego with the SVGs upstream Vega
 // 6.4.0 / Vega-Lite 6.4.3 render in node for the Vega-Lite examples
@@ -22,13 +25,17 @@ func TestAgainstUpstreamRenderings(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: renders the Vega-Lite example corpus")
 	}
-	c, err := purego.New(
+	extra := []purego.Option{}
+	if *compareHarfBuzz {
+		extra = append(extra, purego.WithHarfBuzzTextMetrics())
+	}
+	c, err := purego.New(append(extra,
 		purego.WithFont("DejaVu Sans", dejavu.SansRegular), purego.WithFont("DejaVu Sans", dejavu.SansBold),
 		purego.WithFont("DejaVu Sans", dejavu.SansOblique), purego.WithFont("DejaVu Sans", dejavu.SansBoldOblique),
 		purego.WithFont("DejaVu Sans Mono", dejavu.MonoRegular), purego.WithFont("DejaVu Sans Mono", dejavu.MonoBold),
 		purego.WithFont("DejaVu Sans Mono", dejavu.MonoOblique), purego.WithFont("DejaVu Sans Mono", dejavu.MonoBoldOblique),
 		purego.WithDefaultFontFamily("DejaVu Sans"), purego.WithDefaultMonospaceFamily("DejaVu Sans Mono"),
-		purego.WithLoader(corpusLoader(t)))
+		purego.WithLoader(corpusLoader(t)))...)
 	if err != nil {
 		t.Fatal(err)
 	}

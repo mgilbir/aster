@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/mgilbir/aster/purego/internal/text"
+	"github.com/mgilbir/aster/internal/text"
 )
 
 // OutlineSink receives glyph outlines in font units with the Y axis pointing
@@ -104,6 +104,30 @@ func NewShaper(fonts ...FontData) (Shaper, error) {
 	return &textShaper{m: m, known: known, faces: map[*text.Face]*textFace{}}, nil
 }
 
+// NewShaperWithOptions returns a Shaper over a text.Measurer built from opts,
+// so text resolves font families exactly as the engine's layout does:
+// WithFont registrations, WithDefaultFontFamily / WithDefaultSerifFamily /
+// WithDefaultMonospaceFamily and WithSystemFonts all apply. Exact advances
+// (what resvg lays out with) are always enabled. Unlike NewShaper there is no
+// serif substitution for unknown families: the measurer's own fallback chain
+// decides, as it does for layout.
+func NewShaperWithOptions(opts ...text.Option) (Shaper, error) {
+	all := append([]text.Option{text.WithExactAdvances()}, opts...)
+	m, err := text.New(all...)
+	if err != nil {
+		return nil, fmt.Errorf("raster: creating text shaper: %w", err)
+	}
+	return NewShaperFromMeasurer(m), nil
+}
+
+// NewShaperFromMeasurer wraps an existing Measurer (which is safe for
+// concurrent use). Glyph advances come from whatever mode the measurer was
+// built with; build it with text.WithExactAdvances for resvg-identical
+// placement. Family resolution is entirely the measurer's.
+func NewShaperFromMeasurer(m *text.Measurer) Shaper {
+	return &textShaper{m: m, faces: map[*text.Face]*textFace{}}
+}
+
 var defaultShaper struct {
 	once sync.Once
 	s    Shaper
@@ -127,7 +151,7 @@ func (s *textShaper) Shape(txt string, req FontRequest, size float64) []ShapedGl
 			continue
 		}
 		fams = append(fams, "'"+f+"'")
-		if s.known[strings.ToLower(f)] {
+		if s.known == nil || s.known[strings.ToLower(f)] {
 			found = true
 		}
 	}
@@ -171,7 +195,18 @@ func (s *textShaper) face(f *text.Face) *textFace {
 	return tf
 }
 
-type textFace struct{ f *text.Face }
+type textFace struct {
+	f    *text.Face
+	once sync.Once
+	fm   FaceMetrics
+	fmOK bool
+}
+
+// Metrics parses the font's hhea, OS/2 and post tables once.
+func (t *textFace) Metrics() (FaceMetrics, bool) {
+	t.once.Do(func() { t.fm, t.fmOK = parseFaceMetrics(t.f.Program(), t.UnitsPerEm()) })
+	return t.fm, t.fmOK
+}
 
 func (t *textFace) UnitsPerEm() float64 {
 	if u := t.f.UnitsPerEm(); u > 0 {
@@ -179,8 +214,19 @@ func (t *textFace) UnitsPerEm() float64 {
 	}
 	return 1000
 }
-func (t *textFace) Ascent() float64  { return 0.9 * t.UnitsPerEm() }
-func (t *textFace) Descent() float64 { return 0.21 * t.UnitsPerEm() }
+func (t *textFace) Ascent() float64 {
+	if m, ok := t.Metrics(); ok {
+		return m.Ascender
+	}
+	return 0.9 * t.UnitsPerEm()
+}
+
+func (t *textFace) Descent() float64 {
+	if m, ok := t.Metrics(); ok {
+		return -m.Descender
+	}
+	return 0.21 * t.UnitsPerEm()
+}
 
 func (t *textFace) Outline(gid uint32, sink OutlineSink) bool {
 	segs, err := text.GlyphOutline(t.f, int(gid), t.UnitsPerEm())

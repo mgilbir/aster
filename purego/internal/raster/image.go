@@ -154,26 +154,32 @@ func (s *imageShader) shadeRow(y, x0 int, dst []uint8) {
 	}
 }
 
+// imageFor decodes (once) the data: image an <image> element refers to.
+// Unsupported or unreachable images yield nil, as they are skipped by resvg.
+func (r *renderer) imageFor(n *node) (*rasterImage, error) {
+	href := n.str(aHref)
+	if href == "" {
+		return nil, nil
+	}
+	if img, cached := r.imgs[n]; cached {
+		return img, nil
+	}
+	img, err := decodeDataURI(href, r.lim)
+	if err != nil {
+		img = nil
+	}
+	if r.imgs == nil {
+		r.imgs = map[*node]*rasterImage{}
+	}
+	r.imgs[n] = img
+	return img, err
+}
+
 func (r *renderer) renderImage(n *node, st *state, opacity float64, blend blendMode) {
 	if !st.visible {
 		return
 	}
-	href := n.str(aHref)
-	if href == "" {
-		return
-	}
-	img, cached := r.imgs[n]
-	if !cached {
-		var err error
-		img, err = decodeDataURI(href, r.lim)
-		if err != nil {
-			img = nil // unsupported or unreachable images are skipped, as resvg does
-		}
-		if r.imgs == nil {
-			r.imgs = map[*node]*rasterImage{}
-		}
-		r.imgs[n] = img
-	}
+	img, _ := r.imageFor(n)
 	if img == nil {
 		return
 	}

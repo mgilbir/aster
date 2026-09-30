@@ -34,7 +34,7 @@ const require = createRequire(path.join(path.resolve(process.env.NODE_PATH), 'x.
 // This must happen before vega loads: vega-scenegraph creates its context at
 // import time.
 const canvas = require('canvas');
-const fontDir = 'internal/textmeasure/fonts/dejavu';
+const fontDir = 'internal/fonts/dejavu';
 for (const [file, family, weight, style] of [
   ['DejaVuSans.ttf', 'DejaVu Sans', 'normal', 'normal'],
   ['DejaVuSans-Bold.ttf', 'DejaVu Sans', 'bold', 'normal'],

@@ -38,9 +38,28 @@ type renderer struct {
 	imgs     map[*node]*rasterImage
 	outlines map[outlineKey]*path
 	grads    map[gradKey]*gradient
+
+	patterns     map[patternKey]*patternTile
+	patternBytes int
+	rootState    state
+	docStates    map[*node]*state
+	active       map[*node]bool // paint servers, masks, filters, markers being expanded
+	inText       bool           // drawing glyphs (text-rendering selects anti-aliasing)
+	effectPx     int            // pixels charged to filters and pattern tiles so far
 }
 
 var errLimit = errors.New("raster: resource limit exceeded")
+
+// chargePixels accounts for n pixels of filter or pattern-tile work and fails
+// the render when the budget is spent.
+func (r *renderer) chargePixels(n int) bool {
+	r.effectPx += n
+	if r.effectPx > r.lim.MaxEffectPixels || r.effectPx < 0 {
+		r.fail(fmt.Errorf("raster: filter and pattern work exceeds %d pixels: %w", r.lim.MaxEffectPixels, errLimit))
+		return false
+	}
+	return r.err == nil
+}
 
 func (r *renderer) fail(err error) {
 	if r.err == nil {
@@ -49,10 +68,12 @@ func (r *renderer) fail(err error) {
 }
 
 func (r *renderer) newLayer() *canvas {
-	if n := len(r.pool); n > 0 {
+	for n := len(r.pool); n > 0; n = len(r.pool) {
 		c := r.pool[n-1]
 		r.pool = r.pool[:n-1]
-		return c
+		if c.w == r.cw && c.h == r.ch {
+			return c
+		}
 	}
 	return newCanvas(r.cw, r.ch)
 }
@@ -118,8 +139,11 @@ func (r *renderer) prepare(n *node, parent *state, st *state) bool {
 	}
 	if cp, ok := n.get(aClipPath); ok {
 		if id, isURL := parseURLRef(cp); isURL {
-			if cn := r.doc.ids[id]; cn != nil && cn.tag == tagClipPath {
-				m := r.buildClip(cn, st, 0)
+			if cn := r.doc.ids[id]; cn != nil {
+				if cn.tag != tagClipPath {
+					return false // a clip-path must reference a clipPath element
+				}
+				m := r.buildClipFor(cn, n, st)
 				if m == nil || m.r.empty() {
 					return false
 				}
@@ -128,6 +152,40 @@ func (r *renderer) prepare(n *node, parent *state, st *state) bool {
 		}
 	}
 	return true
+}
+
+// buildClipFor builds the clip mask of clipPath cn for element n (whose state
+// is st); clipPathUnits=objectBoundingBox needs n's bounding box.
+func (r *renderer) buildClipFor(cn, n *node, st *state) *mask {
+	var bb *rect
+	if r.clipNeedsBBox(cn, 0) {
+		b, ok := nonZero(r.contentBBox(n, st))
+		if !ok {
+			return nil // clipping of zero-sized shapes is not allowed
+		}
+		bb = &b
+	}
+	return r.buildClip(cn, st, 0, bb)
+}
+
+// clipNeedsBBox reports whether cn (or a clipPath it chains to) uses
+// objectBoundingBox units.
+func (r *renderer) clipNeedsBBox(cn *node, depth int) bool {
+	for ; cn != nil && depth < maxClipDepth; depth++ {
+		if strings.TrimSpace(cn.str(aClipPathUnits)) == "objectBoundingBox" {
+			return true
+		}
+		id, isURL := parseURLRef(cn.str(aClipPath))
+		if !isURL {
+			return false
+		}
+		next := r.doc.ids[id]
+		if next == nil || next == cn || next.tag != tagClipPath {
+			return false
+		}
+		cn = next
+	}
+	return false
 }
 
 func (r *renderer) renderElement(n *node, parent *state) {
@@ -155,6 +213,20 @@ func (r *renderer) renderElement(n *node, parent *state) {
 	if v, ok := n.get(aMixBlendMode); ok {
 		blend = blendNames[strings.TrimSpace(v)]
 	}
+	mk, fls, ok := r.effectRefs(n)
+	if !ok {
+		return
+	}
+	if mk != nil || len(fls) > 0 {
+		r.renderEffects(n, &st, opacity, blend, mk, fls)
+		return
+	}
+	r.drawContent(n, &st, opacity, blend)
+}
+
+// drawContent draws the element's own content (children, shape, text or
+// image) with opacity and blend applied as a group when they need a layer.
+func (r *renderer) drawContent(n *node, st *state, opacity float64, blend blendMode) {
 	switch n.tag {
 	case tagSVG, tagG, tagSwitch, tagUse:
 		layered := opacity < 1 || blend != blendNormal
@@ -166,29 +238,29 @@ func (r *renderer) renderElement(n *node, parent *state) {
 		}
 		switch n.tag {
 		case tagG:
-			r.renderChildren(n, &st)
+			r.renderChildren(n, st)
 		case tagSwitch:
 			for _, k := range n.kids {
 				if k.tag == tagChars || !switchAccepts(k) {
 					continue
 				}
-				r.renderElement(k, &st)
+				r.renderElement(k, st)
 				break
 			}
 		case tagSVG:
-			r.renderNestedSVG(n, &st)
+			r.renderNestedSVG(n, st)
 		case tagUse:
-			r.renderUse(n, &st)
+			r.renderUse(n, st)
 		}
 		if layered {
 			r.popLayer(prev, opacity, blend)
 		}
 	case tagText:
-		r.renderText(n, &st, opacity, blend)
+		r.renderText(n, st, opacity, blend)
 	case tagImage:
-		r.renderImage(n, &st, opacity, blend)
+		r.renderImage(n, st, opacity, blend)
 	default:
-		r.renderShape(n, &st, opacity, blend)
+		r.renderShape(n, st, opacity, blend)
 	}
 }
 
@@ -447,7 +519,7 @@ const maxClipDepth = 8
 
 // buildClip resolves a clipPath element for an element whose state is st.
 // Returns nil when the clip is unusable (the element is then not drawn).
-func (r *renderer) buildClip(cn *node, st *state, depth int) *mask {
+func (r *renderer) buildClip(cn *node, st *state, depth int, bb *rect) *mask {
 	if depth > maxClipDepth {
 		return nil
 	}
@@ -460,13 +532,23 @@ func (r *renderer) buildClip(cn *node, st *state, depth int) *mask {
 	}
 	base := st.ctm
 	if tf, ok := cn.get(aTransform); ok {
-		if m, valid := parseTransform(tf); valid {
-			base = base.mul(m)
+		m, valid := parseTransform(tf)
+		if !valid || !m.invertible() {
+			return nil // an invalid clipPath transform disables the whole clip
 		}
+		base = base.mul(m)
+	}
+	if strings.TrimSpace(cn.str(aClipPathUnits)) == "objectBoundingBox" {
+		if bb == nil {
+			return nil
+		}
+		base = base.mul(matrix{bb.w(), 0, 0, bb.h(), bb.x0, bb.y0})
 	}
 	var cs state
-	cs = *st
-	cs.applyProps(cn)
+	cs = *r.inheritedState(cn)
+	cs.ctm = st.ctm
+	cs.clip = st.clip
+	cs.vw, cs.vh = st.vw, st.vh
 	var ps []*path
 	var ms []matrix
 	var eo []bool
@@ -512,8 +594,11 @@ func (r *renderer) buildClip(cn *node, st *state, depth int) *mask {
 					}
 				}
 			case tagText:
-				// Text clip paths would need glyph outlines; approximate by
-				// ignoring them (resvg supports them, Vega never emits them).
+				if p := r.textOutlinePath(k, &kst); p != nil && !p.empty() {
+					ps = append(ps, p)
+					ms = append(ms, m)
+					eo = append(eo, kst.clipEvenOdd)
+				}
 			}
 		}
 	}
@@ -534,7 +619,7 @@ func (r *renderer) buildClip(cn *node, st *state, depth int) *mask {
 			if c2 := r.doc.ids[id]; c2 != nil && c2.tag == tagClipPath && c2 != cn {
 				inner := *st
 				inner.clip = nil
-				m2 := r.buildClip(c2, &inner, depth+1)
+				m2 := r.buildClip(c2, &inner, depth+1, bb)
 				if m2 == nil {
 					return nil
 				}
@@ -648,6 +733,52 @@ func (r *renderer) renderShape(n *node, st *state, opacity float64, blend blendM
 	if !r.buildShape(n, st, &r.pth) {
 		return
 	}
+	if r.hasMarkers(n, st) {
+		// The path and its markers form one group for opacity and blending.
+		p := &path{verbs: append([]uint8(nil), r.pth.verbs...), pts: append([]point(nil), r.pth.pts...)}
+		layered := opacity < 1 || blend != blendNormal
+		var prev *canvas
+		gop, gblend := opacity, blend
+		if layered {
+			if prev = r.pushLayer(); prev == nil {
+				return
+			}
+			opacity, blend = 1, blendNormal
+		}
+		po := st.paintOrder
+		switch {
+		case po[0] == 2:
+			r.drawMarkers(p, st)
+			r.drawPath(p, st, opacity, blend)
+		case po[1] == 2:
+			// Markers between the two paints: draw them separately.
+			for _, k := range [2]uint8{po[0], po[2]} {
+				sub := *st
+				if k == 0 {
+					sub.stroke = paint{kind: pNone}
+				} else {
+					sub.fill = paint{kind: pNone}
+				}
+				r.drawPath(p, &sub, opacity, blend)
+				if k == po[0] {
+					r.drawMarkers(p, st)
+				}
+			}
+		default:
+			r.drawPath(p, st, opacity, blend)
+			r.drawMarkers(p, st)
+		}
+		if layered {
+			r.popLayer(prev, gop, gblend)
+		}
+		return
+	}
+	if st.fill.kind == pURL || st.stroke.kind == pURL {
+		// A pattern fill renders nested shapes, which reuse r.pth.
+		p := &path{verbs: append([]uint8(nil), r.pth.verbs...), pts: append([]point(nil), r.pth.pts...)}
+		r.drawPath(p, st, opacity, blend)
+		return
+	}
 	r.drawPath(&r.pth, st, opacity, blend)
 }
 
@@ -682,33 +813,35 @@ func (r *renderer) drawPath(p *path, st *state, opacity float64, blend blendMode
 		}
 	}
 	var bboxLocal rect
-	bboxOK := false
+	bboxGood, bboxDone := false, false
 	needBBox := func() (rect, bool) {
-		if !bboxOK {
-			var f flat
-			f.flatten(p, identity, shapeTol/math.Max(st.ctm.maxScale(), 1e-9))
-			var b bbox
-			for _, pt := range f.pts {
-				b.add(pt)
-			}
-			bboxLocal, bboxOK = b.r, b.ok
-			if !b.ok {
-				bboxLocal = rect{}
-			}
-			return bboxLocal, b.ok
+		if !bboxDone {
+			bboxLocal, bboxGood = tightBounds(p)
+			bboxDone = true
 		}
-		return bboxLocal, true
+		return bboxLocal, bboxGood
 	}
-	if fill {
-		if ps, ok := r.resolvePaint(st.fill, fo, st, needBBox); ok {
-			r.fl.flatten(p, st.ctm, shapeTol)
-			r.fillPolys(&r.fl, st.evenOdd, ps, st)
+	doFill := func() {
+		if fill {
+			if ps, ok := r.resolvePaint(st.fill, fo, st, needBBox); ok {
+				r.fl.flatten(p, st.ctm, shapeTol)
+				r.fillPolys(&r.fl, st.evenOdd, ps, st)
+			}
 		}
 	}
-	if stroke {
-		if ps, ok := r.resolvePaint(st.stroke, so, st, needBBox); ok {
-			r.strokePath(p, st, ps)
+	doStroke := func() {
+		if stroke {
+			if ps, ok := r.resolvePaint(st.stroke, so, st, needBBox); ok {
+				r.strokePath(p, st, ps)
+			}
 		}
+	}
+	if st.strokeFirst() {
+		doStroke()
+		doFill()
+	} else {
+		doFill()
+		doStroke()
 	}
 	if layered {
 		r.popLayer(prev, opacity, blend)
@@ -783,12 +916,22 @@ func (r *renderer) fillPolys(f *flat, evenOdd bool, ps paintSrc, st *state) {
 	if clip.empty() {
 		return
 	}
+	crisp := st.crisp
+	if r.inText {
+		crisp = st.textCrisp
+	}
+	if crisp {
+		r.rast.setAA(false)
+	}
 	r.rast.begin(clip)
 	r.rast.addPolys(f)
 	r.bl.cv = r.cv
 	r.bl.paint = ps
 	r.bl.mask = st.clip
 	r.rast.fill(evenOdd, &r.bl)
+	if crisp {
+		r.rast.setAA(true)
+	}
 	r.cv.markDirty(clip)
 }
 
@@ -860,6 +1003,9 @@ func (r *renderer) gradStops(n *node) []*node {
 // in which case the fallback colour applies.
 func (r *renderer) serverPaint(p paint, opacity float64, st *state, bbox func() (rect, bool)) (src paintSrc, ok, handled bool) {
 	n := r.doc.ids[p.id]
+	if n != nil && n.tag == tagPattern {
+		return r.patternPaint(n, opacity, st, bbox)
+	}
 	if !isGradient(n) {
 		return paintSrc{}, false, false
 	}

@@ -2,7 +2,7 @@
 
 Go library and CLI for rendering [Vega](https://vega.github.io/vega/) and [Vega-Lite](https://vega.github.io/vega-lite/) visualization specs to SVG, PNG and vector PDF. Pure Go, no CGO required.
 
-Aster embeds the full Vega/Vega-Lite runtime inside [QuickJS](https://bellard.org/quickjs/) (compiled to WASM), with accurate text measurement via [go-text/typesetting](https://github.com/go-text/typesetting) and PNG rendering via [resvg](https://github.com/linebender/resvg) (also compiled to WASM). Everything runs in-process with no external dependencies.
+Aster embeds the full Vega/Vega-Lite runtime inside [QuickJS](https://bellard.org/quickjs/) (compiled to WASM), with accurate text measurement via [forme](https://github.com/mgilbir/forme) and PNG rendering via [resvg](https://github.com/linebender/resvg) (also compiled to WASM). Everything runs in-process with no external dependencies.
 
 ## Features
 
@@ -10,7 +10,7 @@ Aster embeds the full Vega/Vega-Lite runtime inside [QuickJS](https://bellard.or
 - Vega to SVG, PNG, or vector PDF
 - Arbitrary SVG to PNG or vector PDF conversion
 - PDF output is fully vector with subset-embedded fonts (selectable text) — ideal for LaTeX `\includegraphics`
-- Accurate HarfBuzz text shaping with embedded Liberation Sans and monochrome Noto Emoji
+- Accurate text shaping (forme, with the advance rounding of HarfBuzz) with embedded Liberation Sans and monochrome Noto Emoji
 - Configurable scale factor for high-DPI PNG output
 - Multiple Vega-Lite versions (5.8, 6.4)
 - Custom fonts, themes, data loaders, memory limits, and timeouts
@@ -154,7 +154,7 @@ Options passed to `aster.New()`:
 | `WithLoader(l)` | `DenyLoader{}` | Data loading strategy (see [Loaders](#loaders)) |
 | `WithTimeout(d)` | 30s | Max duration per render |
 | `WithMemoryLimit(bytes)` | 0 (unlimited) | QuickJS heap limit |
-| `WithTextMeasurement(bool)` | `true` | HarfBuzz text shaping for accurate layout |
+| `WithTextMeasurement(bool)` | `true` | forme text shaping for accurate layout |
 | `WithFont(family, ttf)` | — | Register a custom TTF font (used by both measurement and PNG) |
 | `WithDefaultFontFamily(name)` | `"Liberation Sans"` | Family that generic `sans-serif` resolves to (both pipelines) |
 | `WithDefaultSerifFamily(name)` | `"Liberation Serif"` | Family that generic `serif` resolves to (both pipelines) |
@@ -332,7 +332,7 @@ go test ./...
 
 Aster stands on the shoulders of giants. Special thanks to the [vl-convert](https://github.com/vega/vl-convert) project, whose architecture, test suite, and font choices were invaluable references throughout this project's development.
 
-Thanks also to the [Vega](https://vega.github.io/vega/) and [Vega-Lite](https://vega.github.io/vega-lite/) teams for building such excellent visualization grammars, and to the authors of the key dependencies that make this possible: [QuickJS](https://bellard.org/quickjs/) (via [QuickJS-NG](https://github.com/quickjs-ng/quickjs)), [fastschema/qjs](https://github.com/fastschema/qjs) (which powered earlier versions and whose WASM build informed ours), [wazero](https://github.com/tetratelabs/wazero) (via [andsifr](https://github.com/mgilbir/andsifr)), [resvg](https://github.com/linebender/resvg), and [go-text/typesetting](https://github.com/go-text/typesetting).
+Thanks also to the [Vega](https://vega.github.io/vega/) and [Vega-Lite](https://vega.github.io/vega-lite/) teams for building such excellent visualization grammars, and to the authors of the key dependencies that make this possible: [QuickJS](https://bellard.org/quickjs/) (via [QuickJS-NG](https://github.com/quickjs-ng/quickjs)), [fastschema/qjs](https://github.com/fastschema/qjs) (which powered earlier versions and whose WASM build informed ours), [wazero](https://github.com/tetratelabs/wazero) (via [andsifr](https://github.com/mgilbir/andsifr)), [resvg](https://github.com/linebender/resvg), and [forme](https://github.com/mgilbir/forme).
 
 ## License
 

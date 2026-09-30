@@ -44,6 +44,8 @@ type rasterizer struct {
 	acc, diff  []int32
 	cov        []uint8
 	covTable   []uint8
+	aaTable    []uint8
+	crispTable []uint8
 	fx0, fx1   float64
 	qx0, qx1   int32
 	aa         bool
@@ -65,12 +67,25 @@ func (r *rasterizer) setAA(aa bool) {
 		r.ssShift, r.subShift = 0, 0
 	}
 	total := 1 << (r.ssShift + r.subShift)
-	if len(r.covTable) != total+1 {
-		r.covTable = make([]uint8, total+1)
-		for i := range r.covTable {
-			r.covTable[i] = uint8((i*255 + total/2) / total)
+	if aa {
+		if len(r.aaTable) != total+1 {
+			r.aaTable = makeCovTable(total)
 		}
+		r.covTable = r.aaTable
+	} else {
+		if len(r.crispTable) != total+1 {
+			r.crispTable = makeCovTable(total)
+		}
+		r.covTable = r.crispTable
 	}
+}
+
+func makeCovTable(total int) []uint8 {
+	t := make([]uint8, total+1)
+	for i := range t {
+		t[i] = uint8((i*255 + total/2) / total)
+	}
+	return t
 }
 
 // begin resets the rasterizer for a new shape clipped to clip.

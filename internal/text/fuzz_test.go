@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mgilbir/aster/internal/textmeasure/fonts/liberation"
+	"github.com/mgilbir/aster/internal/fonts/liberation"
 	"github.com/mgilbir/forme/shape"
 )
 

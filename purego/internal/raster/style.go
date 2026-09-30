@@ -46,7 +46,11 @@ type state struct {
 	color         rgba
 	visible       bool
 	pixelated     bool
-	crisp         bool
+	crisp         bool       // shape-rendering: optimizeSpeed / crispEdges (no anti-aliasing)
+	textCrisp     bool       // text-rendering: optimizeSpeed
+	filterLinear  bool       // color-interpolation-filters: linearRGB (the default)
+	paintOrder    [3]uint8   // 0 fill, 1 stroke, 2 markers, in painting order
+	markers       *[3]string // marker-start, marker-mid, marker-end element ids (shared, copy on write)
 
 	families      []string
 	fontSize      float64
@@ -74,6 +78,8 @@ func initialState(vw, vh float64) state {
 		miter:         4,
 		color:         black,
 		visible:       true,
+		filterLinear:  true,
+		paintOrder:    [3]uint8{0, 1, 2},
 		families:      []string{"serif"},
 		fontSize:      12,
 		fontWeight:    400,
@@ -487,6 +493,42 @@ func (st *state) applyProp(id attrID, val string) {
 		}
 	case aBaselineShift:
 		st.baselineShift = strings.TrimSpace(val)
+	case aMarkerStart, aMarkerMid, aMarkerEnd:
+		i := int(id - aMarkerStart)
+		ref, _ := parseURLRef(val)
+		var m [3]string
+		if st.markers != nil {
+			m = *st.markers
+		}
+		m[i] = ref
+		if m == ([3]string{}) {
+			st.markers = nil
+		} else {
+			st.markers = &m
+		}
+	case aPaintOrder:
+		st.paintOrder = parsePaintOrder(val)
+	case aShapeRendering:
+		switch strings.TrimSpace(val) {
+		case "optimizeSpeed", "crispEdges":
+			st.crisp = true
+		case "auto", "geometricPrecision":
+			st.crisp = false
+		}
+	case aTextRendering:
+		switch strings.TrimSpace(val) {
+		case "optimizeSpeed":
+			st.textCrisp = true
+		case "auto", "optimizeLegibility", "geometricPrecision":
+			st.textCrisp = false
+		}
+	case aColorInterpolationFilters:
+		switch strings.TrimSpace(val) {
+		case "sRGB":
+			st.filterLinear = false
+		case "linearRGB", "auto":
+			st.filterLinear = true
+		}
 	case aImageRendering:
 		switch strings.TrimSpace(val) {
 		case "pixelated", "crisp-edges", "optimizeSpeed":
@@ -590,4 +632,50 @@ func parseTransform(s string) (matrix, bool) {
 		}
 		m = m.mul(t)
 	}
+}
+
+// parsePaintOrder parses paint-order; omitted kinds follow in the default
+// fill, stroke, markers order.
+func parsePaintOrder(val string) [3]uint8 {
+	def := [3]uint8{0, 1, 2}
+	var out [3]uint8
+	var seen [3]bool
+	n := 0
+	for _, f := range strings.Fields(val) {
+		var k int
+		switch f {
+		case "normal":
+			return def
+		case "fill":
+			k = 0
+		case "stroke":
+			k = 1
+		case "markers":
+			k = 2
+		default:
+			return def
+		}
+		if seen[k] {
+			return def
+		}
+		seen[k] = true
+		out[n] = uint8(k)
+		n++
+	}
+	if n == 0 {
+		return def
+	}
+	for k := 0; k < 3; k++ {
+		if !seen[k] {
+			out[n] = uint8(k)
+			n++
+		}
+	}
+	return out
+}
+
+// strokeFirst reports whether the stroke is painted before the fill.
+func (st *state) strokeFirst() bool {
+	po := st.paintOrder
+	return po[0] == 1 || (po[0] == 2 && po[1] == 1)
 }

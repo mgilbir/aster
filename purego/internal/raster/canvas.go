@@ -317,29 +317,55 @@ func compositeLayer(dst, layer *canvas, r irect, opacity float64, m *mask, mode 
 			if s[3] == 0 {
 				continue
 			}
-			c := op
-			if m != nil {
-				c = mul255(c, uint32(m.at(x, y)))
-			}
-			if c == 0 {
-				continue
-			}
-			sr, sg, sb, sa := uint32(s[0]), uint32(s[1]), uint32(s[2]), uint32(s[3])
-			if c != 255 {
-				sr, sg, sb, sa = mul255(sr, c), mul255(sg, c), mul255(sb, c), mul255(sa, c)
-			}
-			d := dst.pix[(y*dst.w+x)*4 : (y*dst.w+x)*4+4 : (y*dst.w+x)*4+4]
-			if mode != blendNormal && sa > 0 {
-				blendPixel(d, sr, sg, sb, sa, mode)
-				continue
-			}
-			ia := 255 - sa
-			d[0] = uint8(sr + mul255(uint32(d[0]), ia))
-			d[1] = uint8(sg + mul255(uint32(d[1]), ia))
-			d[2] = uint8(sb + mul255(uint32(d[2]), ia))
-			d[3] = uint8(sa + mul255(uint32(d[3]), ia))
+			compositePixel(dst.pix[(y*dst.w+x)*4:(y*dst.w+x)*4+4:(y*dst.w+x)*4+4], s, op, m, x, y, mode)
 		}
 	}
+}
+
+// compositeLayerAt draws layer onto dst with its origin at (ox, oy).
+func compositeLayerAt(dst, layer *canvas, ox, oy int, opacity float64, m *mask, mode blendMode) {
+	r := irect{ox, oy, ox + layer.w, oy + layer.h}.intersect(dst.bounds())
+	if m != nil {
+		r = r.intersect(m.r)
+	}
+	if r.empty() {
+		return
+	}
+	dst.markDirty(r)
+	op := uint32(math.Round(math.Max(0, math.Min(1, opacity)) * 255))
+	for y := r.y0; y < r.y1; y++ {
+		for x := r.x0; x < r.x1; x++ {
+			li := ((y-oy)*layer.w + (x - ox)) * 4
+			s := layer.pix[li : li+4 : li+4]
+			if s[3] == 0 {
+				continue
+			}
+			compositePixel(dst.pix[(y*dst.w+x)*4:(y*dst.w+x)*4+4:(y*dst.w+x)*4+4], s, op, m, x, y, mode)
+		}
+	}
+}
+
+func compositePixel(d, s []uint8, op uint32, m *mask, x, y int, mode blendMode) {
+	c := op
+	if m != nil {
+		c = mul255(c, uint32(m.at(x, y)))
+	}
+	if c == 0 {
+		return
+	}
+	sr, sg, sb, sa := uint32(s[0]), uint32(s[1]), uint32(s[2]), uint32(s[3])
+	if c != 255 {
+		sr, sg, sb, sa = mul255(sr, c), mul255(sg, c), mul255(sb, c), mul255(sa, c)
+	}
+	if mode != blendNormal && sa > 0 {
+		blendPixel(d, sr, sg, sb, sa, mode)
+		return
+	}
+	ia := 255 - sa
+	d[0] = uint8(sr + mul255(uint32(d[0]), ia))
+	d[1] = uint8(sg + mul255(uint32(d[1]), ia))
+	d[2] = uint8(sb + mul255(uint32(d[2]), ia))
+	d[3] = uint8(sa + mul255(uint32(d[3]), ia))
 }
 
 // blendPixel applies a separable blend mode with premultiplied inputs (W3C

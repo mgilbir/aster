@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mgilbir/aster/internal/textmeasure"
+	"github.com/mgilbir/aster/internal/text"
 	pdf0 "github.com/mgilbir/pdf0"
 	"github.com/mgilbir/pdf0/pdfa"
 )
@@ -28,9 +28,9 @@ func TestConvertGoldenSVGs(t *testing.T) {
 		t.Fatal("no golden SVGs found")
 	}
 
-	m, err := textmeasure.New()
+	m, err := text.New()
 	if err != nil {
-		t.Fatalf("textmeasure.New: %v", err)
+		t.Fatalf("text.New: %v", err)
 	}
 
 	for _, file := range files {
@@ -161,7 +161,7 @@ func TestConvertDeterministic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m, err := textmeasure.New()
+	m, err := text.New()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +195,7 @@ func TestConvertUnsupportedConstructsError(t *testing.T) {
 		{"style attribute", `<svg width="10" height="10"><rect width="5" height="5" style="fill:red"/></svg>`},
 		{"no dimensions", `<svg><rect width="5" height="5"/></svg>`},
 	}
-	m, err := textmeasure.New()
+	m, err := text.New()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,7 +273,7 @@ func TestPDFAValidatorGaps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m, err := textmeasure.New()
+	m, err := text.New()
 	if err != nil {
 		t.Fatal(err)
 	}

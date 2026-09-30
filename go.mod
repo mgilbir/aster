@@ -3,7 +3,6 @@ module github.com/mgilbir/aster
 go 1.26
 
 require (
-	github.com/go-text/typesetting v0.3.3
 	github.com/mgilbir/andsifr v0.0.0-20260706220517-1793eb745c6f
 	github.com/mgilbir/forme v0.4.3
 	github.com/mgilbir/goecma262 v0.2.0

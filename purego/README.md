@@ -27,7 +27,7 @@ specs:
 | SVG vs the root (QuickJS) engine | 1,226 of 1,233 identical or equal within 0.01 px; the other 7 are cases where the reference itself departs from V8 (see below) or that draw the current time |
 | Vega-Lite → Vega vs the root engine | 975 of 975 identical |
 | Vega-Lite → Vega vs upstream vega-lite 6.4.3 | 1,924 corpus specs + 27,513 property-sweep cases byte-identical, key order included |
-| SVG vs upstream Vega 6.4.0 in node | 612 of 627 within 0.5 px; the rest are 1 px width differences from text-advance rounding (both engines round advances like go-text/HarfBuzz; node-canvas does not) and emoji fonts |
+| SVG vs upstream Vega 6.4.0 in node | 612 of 627 within 0.5 px; the rest are 1 px width differences from text-advance rounding (both engines round advances like HarfBuzz; node-canvas does not) and emoji fonts |
 | PNG vs resvg | mean absolute error 0.074 / 255 per channel over 624 renders |
 
 Specs where the reference engine, not purego, departs from V8 (confirmed
@@ -49,11 +49,13 @@ its own loader):
 
 ## What differs from the root package
 
-- **Text** is shaped with [forme](https://github.com/mgilbir/forme) rather than
-  go-text/typesetting. Widths match go-text exactly on 3,846 test cases; the
-  exceptions are bugs in the latter (bold/italic emoji fall back to `.notdef`,
-  Hebrew is shaped as Latin). See
-  [internal/text/FORME_EVALUATION.md](internal/text/FORME_EVALUATION.md).
+- **Text** is shaped with [forme](https://github.com/mgilbir/forme) in both
+  engines (the shared `internal/text` package); go-text/typesetting, which the
+  root package used before, is gone from the module. Widths match go-text's
+  recorded output exactly on 3,846 test cases; the exceptions are bugs in the
+  latter (bold/italic emoji fall back to `.notdef`, Hebrew is shaped as
+  Latin), which the root engine no longer has either. See
+  [internal/text/FORME_EVALUATION.md](../internal/text/FORME_EVALUATION.md).
 - **PNG** is rasterized by `internal/raster`, not resvg; it covers the SVG
   Vega emits plus common general SVG (no CSS `<style>`, masks, filters,
   patterns or markers).
