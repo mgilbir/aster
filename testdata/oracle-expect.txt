@@ -1,0 +1,20 @@
+# Specs whose comparison with the node oracle is not "ok" (see compare_test.go).
+# set/name<TAB>status<TAB>reason
+regress-vg/stack-groupby-empty-field-name	engine-error	gap: the engine raises the error QuickJS did for an empty groupby field name; upstream in V8 renders it
+vg-fixtures/contour-plot	engine-error	gap: the heatmap transform (canvas-backed upstream) is not implemented
+vg-fixtures/density-heatmaps	engine-error	gap: the heatmap transform (canvas-backed upstream) is not implemented
+vg-fixtures/platformer	differ	node-canvas cannot load a remote image and blanks its href; the engine keeps the URL, as browsers do
+vg-gallery/contour-plot	engine-error	gap: the heatmap transform (canvas-backed upstream) is not implemented
+vg-gallery/density-heatmaps	engine-error	gap: the heatmap transform (canvas-backed upstream) is not implemented
+vg-gallery/labeled-scatter-plot	engine-error	gap: the engine rejects this label transform as needing a canvas; upstream lays it out with node-canvas
+vg-gallery/platformer	differ	node-canvas cannot load a remote image and blanks its href; the engine keeps the URL, as browsers do
+vg-gallery/projections	engine-error	gap: the d3-geo-projection extras (airy, ...) are not implemented
+vg-gallery/warming-stripes	differ|ok	platform: match on Linux; on macOS node-canvas shapes this text slightly differently (probe widths 87.388 vs 87.398 px)
+vg-gallery/word-cloud	engine-error	gap: the engine rejects this wordcloud transform as needing a canvas; upstream lays it out with node-canvas
+vl-convert/geoScale	differ	node-canvas cannot load remote tile images and blanks their href; the engine keeps the URL, as browsers do
+vl-convert/maptile_background	differ	node-canvas cannot load remote tile images and blanks their href; the engine keeps the URL, as browsers do
+vl-convert/maptile_background_2	differ	node-canvas cannot load remote tile images and blanks their href; the engine keeps the URL, as browsers do
+vl-convert/remote_images	differ	node-canvas cannot load remote images and blanks their href; the engine keeps the URL, as browsers do
+vl-examples/isotype_bar_chart_emoji	differ|ok	platform: match on Linux; on macOS node-canvas shapes this text slightly differently (probe widths 87.388 vs 87.398 px)
+vl-examples/layer_bar_fruit	differ|ok	platform: match on Linux; on macOS node-canvas shapes this text slightly differently (probe widths 87.388 vs 87.398 px)
+vl-examples/trail_color	ok|differ	platform: V8 on x86-64 computes trigonometry differently in the last bit from V8 on arm64, which the engine follows (jsmath); the trail geometry flips on it, so it differs where node runs on x86-64

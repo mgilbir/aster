@@ -19,7 +19,7 @@ type config struct {
 	memoryLimit            uint64
 	timeout                time.Duration
 	textMeasure            bool
-	vegaLiteVersion        string // version set key, e.g. "vl6_4"
+	vegaLiteVersion        string // human-readable, e.g. "6.4"
 	systemFonts            bool
 	fonts                  []fontEntry
 	defaultFontFamily      string
@@ -34,11 +34,10 @@ func defaultConfig() *config {
 		loader:      DenyLoader{},
 		timeout:     30 * time.Second,
 		textMeasure: true,
-		// vegaLiteVersion left empty; runtime reads default from versions.json
 	}
 }
 
-// WithLoader sets the resource loader used by Vega for external data.
+// WithLoader sets the resource loader used for external data.
 // By default, all loading is denied (DenyLoader).
 func WithLoader(l Loader) Option {
 	return func(c *config) {
@@ -56,9 +55,10 @@ func WithTheme(theme string) Option {
 	}
 }
 
-// WithMemoryLimit sets the maximum memory (in bytes) for the QuickJS runtime.
-// Zero means no limit. WASM linear memory is 32-bit addressable, so values
-// above 4 GiB are clamped to 4 GiB.
+// WithMemoryLimit bounds the memory a single render may use, in bytes. Zero
+// means no limit. The pure-Go engine has no separate heap to cap, so the limit
+// is enforced as a budget on what a specification can make the engine hold:
+// loaded data, parsed rows and generated scene items.
 func WithMemoryLimit(bytes uint64) Option {
 	return func(c *config) {
 		c.memoryLimit = bytes
@@ -72,9 +72,9 @@ func WithTimeout(d time.Duration) Option {
 	}
 }
 
-// WithTextMeasurement controls whether Go-side text measurement is enabled.
-// When enabled, text widths are computed using the forme text engine for accurate
-// layout. When disabled, Vega's default estimation is used.
+// WithTextMeasurement controls whether font-based text measurement is enabled.
+// When enabled, text widths are computed by shaping with the configured fonts
+// for accurate layout. When disabled, Vega's default estimation is used.
 func WithTextMeasurement(enabled bool) Option {
 	return func(c *config) {
 		c.textMeasure = enabled
@@ -88,23 +88,21 @@ func WithTextMeasurement(enabled bool) Option {
 // versions; see AvailableVersions to discover them programmatically.
 func WithVegaLiteVersion(v string) Option {
 	return func(c *config) {
-		// Map "5.8" → "vl5_8", "6.4" → "vl6_4", etc.
-		key := "vl" + strings.ReplaceAll(v, ".", "_")
-		c.vegaLiteVersion = key
+		c.vegaLiteVersion = strings.TrimPrefix(v, "v")
 	}
 }
 
 // WithSystemFonts enables scanning of system-installed fonts for text
-// measurement. System fonts supplement the always-present embedded Liberation Sans.
+// measurement. System fonts supplement the always-present embedded fonts.
 func WithSystemFonts() Option {
 	return func(c *config) {
 		c.systemFonts = true
 	}
 }
 
-// WithFont registers a custom TTF font with the given family name for text
-// measurement. Custom fonts take priority over system and embedded fonts.
-// Multiple calls append additional fonts; later fonts take higher priority.
+// WithFont registers a custom TTF font with the given family name. Custom
+// fonts take priority over system and embedded fonts. Multiple calls append
+// additional fonts; later fonts take higher priority.
 func WithFont(family string, ttf []byte) Option {
 	return func(c *config) {
 		c.fonts = append(c.fonts, fontEntry{family: family, data: ttf})
@@ -154,10 +152,10 @@ func WithHarfBuzzTextMetrics() Option {
 	}
 }
 
-// WithTimezone sets the timezone for JavaScript Date operations.
-// Defaults to "UTC" for deterministic output. Only "UTC" is currently
-// supported (the QuickJS WASM runtime has no timezone database); New returns
-// an error for any other value.
+// WithTimezone sets the timezone used for local-time operations (time scales,
+// timeFormat, date parsing without a zone). Defaults to "UTC" for
+// deterministic output. Any IANA zone name known to the Go runtime is
+// accepted; New returns an error for an unknown one.
 func WithTimezone(tz string) Option {
 	return func(c *config) {
 		c.timezone = tz
@@ -174,9 +172,7 @@ type pngConfig struct {
 }
 
 func defaultPNGConfig() *pngConfig {
-	return &pngConfig{
-		scale: 1.0,
-	}
+	return &pngConfig{scale: 1.0}
 }
 
 // WithScale sets the scale factor for PNG rendering. A scale of 2.0 produces
@@ -219,16 +215,6 @@ func WithRecodePNG() PNGOption {
 // encoded size in check, so enabling it is always safe.
 func WithQuantizePNG(maxColors int) PNGOption {
 	return func(c *pngConfig) {
-		// Clamp here, not just in the quantizer: the render path gates on
-		// quantizeColors > 0, so an unclamped non-positive value would
-		// silently disable quantization instead of honoring the documented
-		// 2..256 contract.
-		if maxColors < 2 {
-			maxColors = 2
-		}
-		if maxColors > 256 {
-			maxColors = 256
-		}
-		c.quantizeColors = maxColors
+		c.quantizeColors = min(max(maxColors, 2), 256)
 	}
 }

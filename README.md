@@ -1,8 +1,8 @@
 # aster
 
-Go library and CLI for rendering [Vega](https://vega.github.io/vega/) and [Vega-Lite](https://vega.github.io/vega-lite/) visualization specs to SVG, PNG and vector PDF. Pure Go, no CGO required.
+Go library and CLI for rendering [Vega](https://vega.github.io/vega/) and [Vega-Lite](https://vega.github.io/vega-lite/) visualization specs to SVG, PNG and vector PDF. Pure Go: no JavaScript runtime, no WebAssembly, no CGO.
 
-Aster embeds the full Vega/Vega-Lite runtime inside [QuickJS](https://bellard.org/quickjs/) (compiled to WASM), with accurate text measurement via [forme](https://github.com/mgilbir/forme) and PNG rendering via [resvg](https://github.com/linebender/resvg) (also compiled to WASM). Everything runs in-process with no external dependencies.
+Aster is a Go implementation of the Vega runtime and the Vega-Lite compiler, following Vega 6.4.0 and Vega-Lite 6.4.3 (and compiling Vega-Lite 5.8.0), with text measured by [forme](https://github.com/mgilbir/forme), its own SVG rasterizer for PNG and its own PDF writer. Its output is checked against upstream Vega running in node (see [Testing](#testing)). Everything runs in-process with no external dependencies.
 
 ## Features
 
@@ -13,7 +13,8 @@ Aster embeds the full Vega/Vega-Lite runtime inside [QuickJS](https://bellard.or
 - Accurate text shaping with [forme](https://github.com/mgilbir/forme), measured the way browsers measure (unrounded advances), with embedded Liberation fonts and monochrome Noto Emoji
 - Configurable scale factor for high-DPI PNG output
 - Multiple Vega-Lite versions (5.8, 6.4)
-- Custom fonts, themes, data loaders, memory limits, and timeouts
+- Custom fonts, themes, data loaders, memory limits, timeouts, and any IANA timezone
+- A `Converter` is safe for concurrent use; renders take milliseconds (see [Performance](#performance))
 - Works on any platform Go supports — no native libraries needed
 
 ## Install
@@ -22,7 +23,7 @@ Aster embeds the full Vega/Vega-Lite runtime inside [QuickJS](https://bellard.or
 go get github.com/mgilbir/aster
 ```
 
-Requires Go 1.25+.
+Requires Go 1.26+.
 
 ## Quick start
 
@@ -153,16 +154,18 @@ Options passed to `aster.New()`:
 | `WithVegaLiteVersion(v)` | `"6.4"` | Vega-Lite version (`"5.8"` or `"6.4"`) |
 | `WithLoader(l)` | `DenyLoader{}` | Data loading strategy (see [Loaders](#loaders)) |
 | `WithTimeout(d)` | 30s | Max duration per render |
-| `WithMemoryLimit(bytes)` | 0 (unlimited) | QuickJS heap limit |
+| `WithMemoryLimit(bytes)` | 0 (defaults) | Budget for what one render may hold (loaded data, rows, scene items, SVG size, raster canvas); see below |
 | `WithTextMeasurement(bool)` | `true` | forme text shaping for accurate layout |
 | `WithHarfBuzzTextMetrics()` | disabled | Measure with HarfBuzz's rounding (whole-pixel size, 1/64 px advances) instead of exact advances, for output byte-stable with earlier versions |
 | `WithFont(family, ttf)` | — | Register a custom TTF font (used by both measurement and PNG) |
 | `WithDefaultFontFamily(name)` | `"Liberation Sans"` | Family that generic `sans-serif` resolves to (both pipelines) |
 | `WithDefaultSerifFamily(name)` | `"Liberation Serif"` | Family that generic `serif` resolves to (both pipelines) |
 | `WithDefaultMonospaceFamily(name)` | `"Liberation Mono"` | Family that generic `monospace` resolves to (both pipelines) |
-| `WithSystemFonts()` | disabled | Scan system fonts for **measurement only** (PNG/resvg has no system fonts) |
+| `WithSystemFonts()` | disabled | Also use system-installed fonts (both pipelines) |
 | `WithTheme(json)` | — | Vega theme config applied to all renders |
-| `WithTimezone(tz)` | `"UTC"` | Timezone for JS Date operations; only `"UTC"` is supported, other values make `New` return an error |
+| `WithTimezone(tz)` | `"UTC"` | Timezone for local-time operations (time scales, `timeFormat`, parsing dates without a zone); any IANA zone Go knows, others make `New` return an error |
+
+`WithMemoryLimit` is not a heap cap: it scales the render's budgets (rows at 256 bytes each, scene items at 512, loaded bytes, the SVG at a quarter of the limit) and the rasterizer's canvas memory, and each budget is charged before the allocation it pays for. Without it the defaults apply: 1M rows, 500k scene items, 64 MiB of loaded data, 128 MiB of SVG. `WithTimeout` bounds one call across all of its stages.
 
 **PNG options** passed per render:
 
@@ -263,85 +266,70 @@ Custom fonts are used for both text measurement (SVG layout) and PNG rendering.
 
 ## Performance
 
-**Startup:** Creating a `Converter` loads the full Vega/Vega-Lite module graph (~53-55 ES modules) and initializes the QuickJS WASM runtime. This takes roughly 100-200ms. The PNG renderer (resvg WASM) is lazy-initialized on first PNG render.
+A render takes milliseconds: on an Apple M1 Pro the 627 Vega-Lite examples render to SVG in 2.4 ms each (geometric mean) and to PNG in 7.9 ms, 2.5× and 1.7× faster than upstream Vega running in node 24 on the same specs, and a `Converter` is ready for its first chart in under 10 ms. [internal/cmd/enginebench](internal/cmd/enginebench) runs the comparison; [RESULTS.md](internal/cmd/enginebench/RESULTS.md) has the full numbers, including the QuickJS/WASM engine earlier versions of this package used, which was 13–62× slower.
 
-**Rendering:** Most specs render in under 100ms. Geographic visualizations with TopoJSON projections are significantly slower (2-40s) due to the computational cost of coordinate transforms in the JS runtime.
+**Concurrency:** a `Converter` is safe for concurrent use by any number of goroutines, so one can serve a whole process. Each call renders on state of its own; what calls share (fonts and their shaping caches, locales, colour schemes, compiled expressions) is immutable or synchronized. A `Loader` passed to `WithLoader` is called from several goroutines at once and must be safe for that (the loaders in this package are). `Close` may be called at any time: it cancels the calls in flight, waits for them, closes the loader, and every later call returns an error. Throughput of a mixed workload (`BenchmarkParallel`, renders per second, 10 cores):
 
-**Memory:** Each `Converter` holds a QuickJS WASM instance. Use `WithMemoryLimit()` to cap heap usage if running untrusted specs.
+| Goroutines | 1 | 4 | 10 |
+|---|---|---|---|
+| one shared `Converter` | ~760 | ~1,900 | ~2,300 |
+| one `Converter` each | ~750 | ~2,150 | ~3,000 |
 
-**Concurrency:** A `Converter` is **not safe for concurrent use** — the underlying WASM runtime is single-threaded. For parallel rendering, create multiple `Converter` instances.
-
-**Reuse:** A single `Converter` can render many specs sequentially. Amortizing startup across renders is the recommended pattern.
-
-## Pure-Go engine (experimental)
-
-[`purego`](purego/) is a second engine with the same API — `purego.New`, the same options, loaders and conversion methods — written entirely in Go: no QuickJS, no resvg, no WebAssembly. It follows the same Vega 6.4.0 / Vega-Lite 6.4.3 (and compiles Vega-Lite 5.8.0), matches this package's SVG on the comparison corpus, renders SVG 40–75× faster, and a single `Converter` is safe for concurrent use. See [purego/README.md](purego/README.md) for its status and differences.
+Past about four goroutines the garbage collector appears to be the limit.
 
 ## Developer notes
 
 ### Architecture
 
-The rendering pipeline is:
+The engine is organized along Vega's own module boundaries, under `internal/`:
 
-1. **Vega-Lite → Vega** — Vega-Lite compiler runs in QuickJS (WASM)
-2. **Vega → SVG** — Vega runtime runs in QuickJS with Go callbacks for text measurement and data loading
-3. **SVG → PNG** — resvg (Rust, compiled to WASM) rasterizes the SVG with embedded fonts
+| Package | Role |
+|---|---|
+| `vegalite` | the Vega-Lite compiler (6.4.3 and 5.8.0) |
+| `vega` | the Vega parser, dataflow, runtime, guides and layout |
+| `expr` | Vega expressions, compiled to Go closures |
+| `transforms`, `geo`, `scale`, `format` | data transforms (with hierarchy, force, voronoi, contour, label, wordcloud), projections and geo paths, scales and color schemes, d3-format / d3-time-format |
+| `scene`, `svg` | the scenegraph and bounds, and SVG output byte-compatible with Vega's SVG renderer |
+| `raster`, `svgpdf`, `text` | SVG to PNG, SVG to vector PDF, and text shaping with forme |
+| `jsval`, `jsmath`, `jssort` | JavaScript values and JSON, V8-exact `Math`, and V8's sort, so results match upstream bit for bit |
 
-Both WASM runtimes ([QuickJS-NG](https://github.com/quickjs-ng/quickjs) built as a WASI reactor, resvg compiled to WASI) are driven by [andsifr](https://github.com/mgilbir/andsifr), our performance-focused fork of [wazero](https://github.com/tetratelabs/wazero), and run in pure Go with no CGO. The QuickJS binary is built from the pinned upstream release by `quickjs-wasm/` (`make vendor-quickjs`).
+[docs/DESIGN.md](docs/DESIGN.md) describes the conventions that keep it bit-compatible with upstream, and [docs/SECURITY_REVIEW.md](docs/SECURITY_REVIEW.md) the security review and the bounds on what a spec can make the engine do.
 
-### QuickJS polyfills
+### Testing
 
-The JS environment provides polyfills for APIs that Vega expects but QuickJS lacks:
+Upstream is the oracle. `testdata/oracle-node` pins Vega 6.4.0 / Vega-Lite 6.4.3 (and resvg), and `testdata/oracle-node-vl5` Vega-Lite 5.8.0, running in node; `internal/oracle` drives them and caches their answers under `testdata/oracle-cache`, which is recreated on demand and never committed. The engine's SVG, compiled Vega and PNG are compared with what upstream produces for the same spec.
 
-- `structuredClone` — recursive deep clone preserving `undefined`, `Date`/`RegExp`/`Map`/`Set`/typed arrays/`DataView`, and reference cycles
-- `setTimeout` / `clearTimeout` — macrotasks on a virtual clock: the Go side runs one timer only when the microtask queue is empty, as a browser event loop does, and nothing actually waits (d3-timer, vega-scenegraph's resource loading)
-- `setInterval` / `clearInterval` — aliased to `setTimeout`, so an interval fires exactly once (a static render has no ongoing time in which to repeat)
-- `requestAnimationFrame` — scheduled like `setTimeout` (vega-view)
-- `document.createElement('canvas')` — a 1x1 measuring context whose `measureText` calls the Go text measurer, so Vega measures (and truncates to `limit`) text through its own canvas path, as in a browser
-- `performance.now` — wall clock via `Date.now()` (not monotonic; only relative timing is used)
-- `Date` methods — redirected to UTC equivalents (QuickJS WASM has no timezone config)
+On the 1,347 specs of the corpus (260 Vega fixtures, 332 Vega-Lite fixtures, Vega's 92 example specs, the 627 Vega-Lite examples, 23 vl-convert specs and 13 fuzz-found regressions), 1,323 render identically to upstream or within half a pixel (text is shaped by forme on one side and node-canvas on the other), 7 draw the current time, and the rest are listed, each with its reason, in `testdata/oracle-expect.txt` (a few oracle answers depend on the platform node runs on); the compiled Vega is identical to upstream's for every Vega-Lite spec.
 
-Each render also seeds Vega's random source (`randomLCG(123456789)`, the seed Vega-Lite's own example renders use), so `sample`, jitter and bootstrap confidence intervals are reproducible.
+```bash
+(cd testdata/oracle-node && npm ci)        # node version pinned in package.json (volta)
+(cd testdata/oracle-node-vl5 && npm ci)
+go test ./...                               # tests that need the oracle skip without it
+ASTER_ORACLE=require go test ./...          # as in CI: fail instead of skipping
+go test -run TestCompareWithNode -v . -args -compare.report=/tmp/report.md
+scripts/fmacheck.sh                         # fused multiply-add audit
+ASTER_FUZZ=3000 go test -run TestFuzzDifferential -v -timeout 3h .
+```
+
+`go test -short ./...` needs no node: the unit tests replay vectors recorded from upstream (by the generators under each package's `testdata/`).
 
 ### Building from source
 
-The vendored JS modules and both WASM binaries are committed, so a plain
-`go build ./...` works offline with no extra steps. The `vendor-*` targets
-exist to *regenerate* those assets:
-
-```bash
-# Re-vendor JavaScript modules (requires network; rewrites committed files)
-make vendor-js
-
-# Re-vendor vega-datasets test data
-make vendor-datasets
-
-# Rebuild resvg WASM binary (requires Docker)
-make vendor-resvg
-
-# Build
-go build ./...
-
-# Run tests (fast, skips slow geo specs)
-go test -short ./...
-
-# Run full test suite
-go test ./...
-```
+Everything needed is committed, so a plain `go build ./...` works offline. `make vendor-datasets` re-vendors the vega-datasets test data (requires network).
 
 ### Known limitations
 
-- **Timezone:** Only UTC is supported. Specs with local-time temporal axes will produce different output than browser-rendered charts.
-- **Emoji:** Monochrome [Noto Emoji](https://fonts.google.com/noto/specimen/Noto+Emoji) is bundled as a fallback, so emoji have correct text metrics and rasterize (in black-and-white) in PNG output. Color emoji are not supported — resvg cannot rasterize color-bitmap (CBDT) fonts — so glyphs differ from color-emoji references.
+- **Emoji:** Monochrome [Noto Emoji](https://fonts.google.com/noto/specimen/Noto+Emoji) is bundled as a fallback, so emoji have text metrics and rasterize (in black-and-white) in PNG output. Color emoji are not supported.
 - **Interactive features:** Selection and signal interactivity are evaluated at initial state only; there is no event loop.
-- **Remote images in PNG:** Image marks referencing external URLs render in SVG output (the URL is embedded as an `href`), but the PNG rasterizer runs in a sandboxed WASM module with no network access, so those images are blank in PNG output. Embedded `data:` URLs render fine.
+- **Remote images in PNG:** Image marks referencing external URLs render in SVG output (the URL is embedded as an `href`), but the rasterizer does not fetch them, so they are blank in PNG output. Embedded `data:` URLs render fine.
+- **Not yet implemented:** the `heatmap` transform, the canvas-based layout of some `label` and `wordcloud` transforms, and the extra projections of d3-geo-projection (such as `airy`) are rejected with an error.
 
 ## Acknowledgments
 
 Aster stands on the shoulders of giants. Special thanks to the [vl-convert](https://github.com/vega/vl-convert) project, whose architecture, test suite, and font choices were invaluable references throughout this project's development.
 
-Thanks also to the [Vega](https://vega.github.io/vega/) and [Vega-Lite](https://vega.github.io/vega-lite/) teams for building such excellent visualization grammars, and to the authors of the key dependencies that make this possible: [QuickJS](https://bellard.org/quickjs/) (via [QuickJS-NG](https://github.com/quickjs-ng/quickjs)), [fastschema/qjs](https://github.com/fastschema/qjs) (which powered earlier versions and whose WASM build informed ours), [wazero](https://github.com/tetratelabs/wazero) (via [andsifr](https://github.com/mgilbir/andsifr)), [resvg](https://github.com/linebender/resvg), and [forme](https://github.com/mgilbir/forme).
+Thanks also to the [Vega](https://vega.github.io/vega/) and [Vega-Lite](https://vega.github.io/vega-lite/) teams for building such excellent visualization grammars, whose implementations this one follows closely, and to the authors of the dependencies that make this possible: [forme](https://github.com/mgilbir/forme), [goecma262](https://github.com/mgilbir/goecma262) and [pdf0](https://github.com/mgilbir/pdf0). Earlier versions of aster ran Vega in [QuickJS](https://bellard.org/quickjs/) (via [QuickJS-NG](https://github.com/quickjs-ng/quickjs) and [fastschema/qjs](https://github.com/fastschema/qjs)) on [wazero](https://github.com/tetratelabs/wazero) (via [andsifr](https://github.com/mgilbir/andsifr)), with [resvg](https://github.com/linebender/resvg) for PNG; resvg remains the reference the rasterizer is tested against.
 
 ## License
 
-MIT
+[BSD 3-Clause](LICENSE). Third-party notices for the projects the engine derives from are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

@@ -8,7 +8,7 @@ import (
 )
 
 // moviesSpec is a heavier Vega-Lite spec: it loads ~3200 rows from the
-// vendored vega-datasets and does binning + aggregation inside QuickJS.
+// vendored vega-datasets and bins and aggregates them.
 const moviesSpec = `{
   "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
   "data": {"url": "data/movies.json"},
@@ -39,8 +39,8 @@ func benchConverter(b *testing.B, opts ...aster.Option) *aster.Converter {
 	return c
 }
 
-// BenchmarkNew measures converter startup: compiling and instantiating the
-// QuickJS WASM runtime and loading the Vega/Vega-Lite bundles.
+// BenchmarkNew measures converter creation (fonts and text shaping are
+// initialized lazily, on the first render).
 func BenchmarkNew(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
@@ -55,7 +55,7 @@ func BenchmarkNew(b *testing.B) {
 }
 
 // BenchmarkVegaLiteToSVG measures rendering a small inline-data Vega-Lite
-// spec to SVG (QuickJS/wazero execution path).
+// spec to SVG.
 func BenchmarkVegaLiteToSVG(b *testing.B) {
 	spec := benchSpec(b, "testdata/bar-chart.vl.json")
 	c := benchConverter(b)
@@ -81,8 +81,8 @@ func BenchmarkVegaToSVG(b *testing.B) {
 	}
 }
 
-// BenchmarkVegaLiteToVega measures compiling Vega-Lite to Vega (pure
-// QuickJS work, no scenegraph rendering).
+// BenchmarkVegaLiteToVega measures compiling Vega-Lite to Vega (no
+// dataflow or scenegraph).
 func BenchmarkVegaLiteToVega(b *testing.B) {
 	spec := benchSpec(b, "testdata/bar-chart.vl.json")
 	c := benchConverter(b)
@@ -96,7 +96,7 @@ func BenchmarkVegaLiteToVega(b *testing.B) {
 }
 
 // BenchmarkVegaLiteToSVGMovies measures a heavier render: ~3200 rows loaded
-// through the Loader, binned and aggregated inside QuickJS.
+// through the Loader, binned and aggregated.
 func BenchmarkVegaLiteToSVGMovies(b *testing.B) {
 	c := benchConverter(b, aster.WithLoader(&aster.FileLoader{BaseDir: "testdata/vega-datasets"}))
 
@@ -108,7 +108,7 @@ func BenchmarkVegaLiteToSVGMovies(b *testing.B) {
 	}
 }
 
-// BenchmarkSVGToPNG measures the resvg WASM rendering path in isolation.
+// BenchmarkSVGToPNG measures rasterization in isolation.
 // The renderer is warmed up before the loop so one-time module
 // instantiation and font loading are not measured.
 func BenchmarkSVGToPNG(b *testing.B) {
@@ -132,7 +132,7 @@ func BenchmarkSVGToPNG(b *testing.B) {
 }
 
 // BenchmarkVegaLiteToPNG measures the full end-to-end pipeline:
-// QuickJS render to SVG followed by resvg render to PNG.
+// render to SVG followed by rasterization to PNG.
 func BenchmarkVegaLiteToPNG(b *testing.B) {
 	spec := benchSpec(b, "testdata/bar-chart.vl.json")
 	c := benchConverter(b)

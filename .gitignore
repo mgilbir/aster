@@ -31,10 +31,15 @@ go.work.sum
 # .idea/
 # .vscode/
 
-# Benchmark comparison artifacts (scripts/bench-wazero.sh)
+# Benchmark output
 bench-*.txt
-wazero-fork.mod
-wazero-fork.sum
 
 # Claude Code machine-local settings
 .claude/settings.local.json
+enginebench-out/
+
+# Oracle: node modules and cached upstream renderings (recreated on demand)
+testdata/oracle-node/node_modules/
+testdata/oracle-node-vl5/node_modules/
+testdata/oracle-cache/
+testdata/oracle-cache-quickjs/

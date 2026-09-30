@@ -1,26 +1,7 @@
-.PHONY: vendor-js vendor-datasets vendor-resvg vendor-quickjs build test test-all lint clean bench bench-wazero
-
-# The vendored JS modules under internal/js/modules/ are committed; run this
-# only to update them (requires network, rewrites tracked files).
-vendor-js:
-	go run ./cmd/vendor-js
+.PHONY: vendor-datasets build test test-all lint fmacheck clean bench
 
 vendor-datasets:
 	go run ./cmd/vendor-datasets
-
-vendor-resvg:
-	docker build -t aster-resvg-build resvg-wasm/
-	@docker rm aster-resvg-extract 2>/dev/null || true
-	docker create --name aster-resvg-extract aster-resvg-build /nonexistent
-	docker cp aster-resvg-extract:/output/resvg.wasm internal/resvg/resvg.wasm
-	@docker rm aster-resvg-extract 2>/dev/null || true
-
-vendor-quickjs:
-	docker build -t aster-quickjs-build quickjs-wasm/
-	@docker rm aster-quickjs-extract 2>/dev/null || true
-	docker create --name aster-quickjs-extract aster-quickjs-build /nonexistent
-	docker cp aster-quickjs-extract:/output/quickjs.wasm internal/quickjs/quickjs.wasm
-	@docker rm aster-quickjs-extract 2>/dev/null || true
 
 build:
 	go build ./...
@@ -28,21 +9,21 @@ build:
 test:
 	go test -short ./...
 
+# The full suite; tests that compare with upstream need the node oracle:
+# (cd testdata/oracle-node && npm ci) && (cd testdata/oracle-node-vl5 && npm ci)
 test-all:
 	go test ./...
 
 lint:
 	golangci-lint run ./...
 
+fmacheck:
+	scripts/fmacheck.sh
+
 bench:
 	go test -run '^$$' -bench . -benchmem .
 
-# Compare benchmarks: current andsifr (WASM runtime) vs another revision of it.
-# Tune with COUNT=, BENCH=, REF= (see scripts/bench-wazero.sh).
-bench-wazero:
-	./scripts/bench-wazero.sh
-
-# Remove benchmark comparison artifacts and compiled test binaries. Vendored
-# assets are committed sources and are deliberately left alone.
+# Remove compiled test binaries. The oracle cache (testdata/oracle-cache) is
+# recreated on demand; delete it by hand to force fresh answers.
 clean:
-	rm -f bench-baseline.txt bench-fork.txt wazero-fork.mod wazero-fork.sum *.test
+	rm -f *.test
