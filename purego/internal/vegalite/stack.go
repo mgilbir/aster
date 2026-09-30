@@ -35,6 +35,9 @@ func potentialStackedChannel(encoding Value, x string, markDef Value) string {
 	}
 	mark, orient := markDef.Get("type").AsString(), markDef.Get("orient").AsString()
 	isCartesianBarOrArea := x == chX && (mark == "bar" || mark == "area")
+	if v5 {
+		isCartesianBarOrArea = x == chX && mark == "bar"
+	}
 	xDef, yDef := encoding.Get(x), encoding.Get(y)
 	if isFieldDef(xDef) && isFieldDef(yDef) {
 		if isUnbinnedQuantitative(xDef) && isUnbinnedQuantitative(yDef) {
@@ -63,12 +66,12 @@ func potentialStackedChannel(encoding Value, x string, markDef Value) string {
 			return y
 		}
 	} else if isUnbinnedQuantitative(xDef) {
-		if isCartesianBarOrArea && orient == "vertical" {
+		if !v5 && isCartesianBarOrArea && orient == "vertical" {
 			return ""
 		}
 		return x
 	} else if isUnbinnedQuantitative(yDef) {
-		if isCartesianBarOrArea && orient == "horizontal" {
+		if !v5 && isCartesianBarOrArea && orient == "horizontal" {
 			return ""
 		}
 		return y
@@ -173,6 +176,9 @@ func stackOf(m Value, encoding Value) *stackProperties {
 	if encodingIsAggregate(encoding) && len(stackByList) == 0 {
 		return nil
 	}
+	if st := stackedFieldDef.Get("scale").Get("type"); v5 && st.IsTruthy() && !(st.IsStr() && st.StrValue() == "linear") {
+		return nil // 5.8 refuses to stack a non-linear scale
+	}
 	if sec := getSecondaryRangeChannel(fieldChannel); sec != "" && isFieldOrDatumDef(encoding.Get(sec)) {
 		return nil
 	}
@@ -190,8 +196,10 @@ func isPathMarkName(m string) bool { return m == "line" || m == "area" || m == "
 
 func isRectBasedMark(m string) bool {
 	switch m {
-	case "rect", "bar", "image", "arc", "tick":
+	case "rect", "bar", "image", "arc":
 		return true
+	case "tick":
+		return !v5
 	}
 	return false
 }

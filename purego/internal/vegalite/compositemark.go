@@ -247,7 +247,7 @@ func compositeMarkOrient(spec Value, compositeMark string) string {
 // ---- boxplot ----
 
 func boxParamsQuartiles(field string) []Value {
-	aliased := removePathFromField(field)
+	aliased := cmAlias(field)
 	return []Value{
 		mkv("op", "q1", "field", field, "as", "lower_box_"+aliased),
 		mkv("op", "q3", "field", field, "as", "upper_box_"+aliased),
@@ -273,7 +273,7 @@ func normalizeBoxPlot(spec Value, config Value) Value {
 	isTukey := boxPlotType.IsStr() && boxPlotType.StrValue() == "tukey"
 	bp := boxParams(spec, extent, config)
 	contField := bp.continuousAxisChannelDef.Get("field").AsString()
-	aliasedFieldName := removePathFromField(contField)
+	aliasedFieldName := cmAlias(contField)
 	color, size := bp.encodingWithoutContinuousAxis.Get("color"), bp.encodingWithoutContinuousAxis.Get("size")
 	encodingWithoutSizeColorAndContinuousAxis := omit(bp.encodingWithoutContinuousAxis, "color", "size")
 	makePart := func(shared Value) partFactory {
@@ -292,14 +292,16 @@ func normalizeBoxPlot(spec Value, config Value) Value {
 	if size.IsTruthy() {
 		midEnc.Set("size", size)
 	}
-	cond := jsval.NewObject(4)
-	cond.Set("test", jsval.Str(accessWithDatumToUnescapedPath("lower_box_"+contField)+" >= "+accessWithDatumToUnescapedPath("upper_box_"+contField)))
-	if color.IsTruthy() {
-		spread(cond, color)
-	} else {
-		spread(cond, mkv("value", defaultBoxColor))
+	if !v5 {
+		cond := jsval.NewObject(4)
+		cond.Set("test", jsval.Str(accessWithDatumToUnescapedPath("lower_box_"+contField)+" >= "+accessWithDatumToUnescapedPath("upper_box_"+contField)))
+		if color.IsTruthy() {
+			spread(cond, color)
+		} else {
+			spread(cond, mkv("value", defaultBoxColor))
+		}
+		midEnc.Set("color", mkv("condition", jsval.Obj(cond)))
 	}
-	midEnc.Set("color", mkv("condition", jsval.Obj(cond)))
 	makeMidTick := makePart(jsval.Obj(midEnc))
 
 	maxPrefix, minPrefix := "max_", "min_"
@@ -357,13 +359,13 @@ func normalizeBoxPlot(spec Value, config Value) Value {
 		out.Set("layer", jsval.Arr(boxLayers))
 		return jsval.Obj(out)
 	}
-	lowerBoxExpr := accessWithDatumToUnescapedPath("lower_box_" + contField)
-	upperBoxExpr := accessWithDatumToUnescapedPath("upper_box_" + contField)
+	lowerBoxExpr := cmAccess("lower_box_" + contField)
+	upperBoxExpr := cmAccess("upper_box_" + contField)
 	iqrExpr := "(" + upperBoxExpr + " - " + lowerBoxExpr + ")"
 	extentStr := extent.AsString()
 	lowerWhiskerExpr := lowerBoxExpr + " - " + extentStr + " * " + iqrExpr
 	upperWhiskerExpr := upperBoxExpr + " + " + extentStr + " * " + iqrExpr
-	fieldExpr := accessWithDatumToUnescapedPath(contField)
+	fieldExpr := cmAccess(contField)
 	joinaggregate := mkv("joinaggregate", jsval.Arr(boxParamsQuartiles(contField)), "groupby", jsval.Arr(bp.groupby))
 	aggs := []Value{
 		mkv("op", "min", "field", contField, "as", "lower_whisker_"+aliasedFieldName),
@@ -390,7 +392,12 @@ func normalizeBoxPlot(spec Value, config Value) Value {
 	if !scale.IsUndefined() {
 		cd.Set("scale", scale)
 	}
-	if !axis.IsUndefined() {
+	if v5 {
+		// 5.8 keeps the axis title out of the outlier layer's axis.
+		if axis = jsval.Obj(omit(axis, "title")); !isEmptyObj(axis) {
+			cd.Set("axis", axis)
+		}
+	} else if !axis.IsUndefined() {
 		cd.Set("axis", axis)
 	}
 	outEnc.Set(bp.continuousAxis, jsval.Obj(cd))
@@ -433,7 +440,7 @@ func boxParams(spec Value, extent Value, config Value) boxParamsResult {
 	orient := compositeMarkOrient(spec, "boxplot")
 	cai := compositeMarkContinuousAxis(spec, orient, "boxplot")
 	contField := cai.def.Get("field").AsString()
-	aliased := removePathFromField(contField)
+	aliased := cmAlias(contField)
 	boxPlotType := extent
 	if extent.IsNum() {
 		boxPlotType = jsval.Str("tukey")
@@ -452,12 +459,12 @@ func boxParams(spec Value, extent Value, config Value) boxParamsResult {
 	var post []Value
 	if !isMinMax && !isTukey {
 		ext := extent.AsString()
-		up, lo := accessWithDatumToUnescapedPath("upper_box_"+aliased), accessWithDatumToUnescapedPath("lower_box_"+aliased)
-		iqr := accessWithDatumToUnescapedPath("iqr_" + aliased)
+		up, lo := cmAccess("upper_box_"+aliased), cmAccess("lower_box_"+aliased)
+		iqr := cmAccess("iqr_" + aliased)
 		post = []Value{
 			mkv("calculate", up+" - "+lo, "as", "iqr_"+aliased),
-			mkv("calculate", "min("+up+" + "+iqr+" * "+ext+", "+accessWithDatumToUnescapedPath("max_"+aliased)+")", "as", "upper_whisker_"+aliased),
-			mkv("calculate", "max("+lo+" - "+iqr+" * "+ext+", "+accessWithDatumToUnescapedPath("min_"+aliased)+")", "as", "lower_whisker_"+aliased),
+			mkv("calculate", "min("+up+" + "+iqr+" * "+ext+", "+cmAccess("max_"+aliased)+")", "as", "upper_whisker_"+aliased),
+			mkv("calculate", "max("+lo+" - "+iqr+" * "+ext+", "+cmAccess("min_"+aliased)+")", "as", "lower_whisker_"+aliased),
 		}
 	}
 	oldEncodingWithout := omit(spec.Get("encoding"), cai.axis)
@@ -594,7 +601,7 @@ func getTitlePrefix(center, extent, op string) string {
 func errorBarAggregationAndCalculation(markDef, def, def2, defError, defError2 Value, inputType, compositeMark string, config Value) (agg, post []Value, tooltipSummary []tooltipSummaryItem, tooltipTitleWithFieldName bool) {
 	contField := def.Get("field").AsString()
 	contFieldV := def.Get("field")
-	acc := accessWithDatumToUnescapedPath
+	acc := cmAccess
 	if inputType == "raw" {
 		var center string
 		switch {
@@ -674,6 +681,9 @@ func errorBarAggregationAndCalculation(markDef, def, def2, defError, defError2 V
 		for _, c := range post {
 			as := c.Get("as").AsString()
 			calc := strings.ReplaceAll(strings.ReplaceAll(c.Get("calculate").AsString(), "datum['", ""), "']", "")
+			if v5 {
+				calc = strings.ReplaceAll(strings.ReplaceAll(c.Get("calculate").AsString(), `datum["`, ""), `"]`, "")
+			}
 			tooltipSummary = append(tooltipSummary, tooltipSummaryItem{as[:min(6, len(as))], jsval.Str(calc)})
 		}
 	}

@@ -119,7 +119,7 @@ func parseNonUnitLayoutSizeForChannel(m Model, layoutSizeType string) {
 func parseUnitLayoutSize(u *unitModel) {
 	for _, channel := range positionScaleChannels {
 		sizeType := getSizeChannel(channel)
-		if sz := u.size.Lookup(sizeType); !sz.IsNullish() {
+		if sz := u.size.Lookup(sizeType); (v5 && sz.IsTruthy()) || (!v5 && !sz.IsNullish()) {
 			if isStep(sz) {
 				u.comp.layoutSize.set(sizeType, jsval.Str("step"), true)
 			} else {
@@ -176,7 +176,7 @@ func sizeSignals(m Model, sizeType string) []Value {
 		channel = chX
 	}
 	size := b.comp.layoutSize.get(sizeType)
-	if size.IsNullish() || (size.IsStr() && size.StrValue() == "merged") {
+	if (!v5 && size.IsNullish()) || (v5 && !size.IsTruthy()) || (size.IsStr() && size.StrValue() == "merged") {
 		return nil
 	}
 	name := signalOf(b.getSizeSignalRef(sizeType))

@@ -57,7 +57,7 @@ func fieldFilterExpression(p Value, useInRange bool) string {
 	if u := nt.Get("unit"); u.IsTruthy() {
 		unit = u.AsString()
 	}
-	binned := nt.Get("binned").IsTruthy()
+	binned := !v5 && nt.Get("binned").IsTruthy()
 	rawFieldExpr := vgField(p, fieldRefOption{expr: "datum"})
 	fieldExpr := rawFieldExpr
 	if unit != "" {
@@ -93,7 +93,10 @@ func fieldFilterExpression(p Value, useInRange bool) string {
 		}
 		return fieldValidPredicate(fieldExpr, valid)
 	case isFieldRangePredicate(p):
-		rp := replaceExprRefObj(p)
+		rp := p
+		if !v5 {
+			rp = replaceExprRefObj(p)
+		}
 		rng := rp.Get("range")
 		var lower, upper Value
 		if isSignalRef(rng) {
@@ -131,7 +134,12 @@ func fieldValidPredicate(fieldExpr string, valid bool) string {
 func normalizePredicate(f Value) Value {
 	if isFieldPredicate(f) && f.Get("timeUnit").IsTruthy() {
 		o := cloneObj(f.ObjValue())
-		o.Set("timeUnit", normalizeTimeUnit(f.Get("timeUnit")))
+		if v5 {
+			// 5.8 keeps only the unit's name (a UTC unit loses its `utc` flag).
+			o.Set("timeUnit", normalizeTimeUnit(f.Get("timeUnit")).Get("unit"))
+		} else {
+			o.Set("timeUnit", normalizeTimeUnit(f.Get("timeUnit")))
+		}
 		return jsval.Obj(o)
 	}
 	return f

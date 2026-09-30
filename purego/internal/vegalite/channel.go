@@ -112,17 +112,19 @@ func filterOut(in []string, drop ...string) []string {
 	return out
 }
 
-func isChannel(s string) bool                 { return channelSet[s] }
-func isSingleDefUnitChannel(s string) bool    { return singleDefUnitSet[s] }
-func isScaleChannel(s string) bool            { return scaleChannelSet[s] }
-func isGeoPositionChannel(s string) bool      { return geoPositionSet[s] }
-func isPolarPositionChannel(s string) bool    { return polarPositionChannels[s] }
-func isSecondaryRangeChannel(s string) bool   { return getMainRangeChannel(s) != s }
-func isXorY(s string) bool                    { return s == chX || s == chY }
-func isXorYOffset(s string) bool              { return s == chXOffset || s == chYOffset }
-func isTimeChannel(s string) bool             { return s == chTime }
-func isColorChannel(s string) bool            { return s == chColor || s == chFill || s == chStroke }
-func isNonPositionScaleChannel(s string) bool { return nonPositionChannelSet[s] }
+func isChannel(s string) bool               { return channelSet[s] && !(v5 && s == chTime) }
+func isSingleDefUnitChannel(s string) bool  { return singleDefUnitSet[s] && !(v5 && s == chTime) }
+func isScaleChannel(s string) bool          { return scaleChannelSet[s] && !(v5 && s == chTime) }
+func isGeoPositionChannel(s string) bool    { return geoPositionSet[s] }
+func isPolarPositionChannel(s string) bool  { return polarPositionChannels[s] }
+func isSecondaryRangeChannel(s string) bool { return getMainRangeChannel(s) != s }
+func isXorY(s string) bool                  { return s == chX || s == chY }
+func isXorYOffset(s string) bool            { return s == chXOffset || s == chYOffset }
+func isTimeChannel(s string) bool           { return s == chTime }
+func isColorChannel(s string) bool          { return s == chColor || s == chFill || s == chStroke }
+func isNonPositionScaleChannel(s string) bool {
+	return nonPositionChannelSet[s] && !(v5 && s == chTime)
+}
 
 // isNonPositionScaleChannel upstream is hasOwnProperty(NONPOSITION_CHANNEL_INDEX,
 // channel), i.e. it is true for text/tooltip/... as well; keep that.

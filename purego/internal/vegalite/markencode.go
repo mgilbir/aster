@@ -43,6 +43,9 @@ type wrapConditionOpts struct {
 }
 
 func wrapCondition(o wrapConditionOpts) Value {
+	if v5 {
+		return wrapCondition58(o)
+	}
 	var valueRefs []Value
 	if cond := o.channelDef.Get("condition"); isConditionalDef(o.channelDef) && cond.IsTruthy() {
 		for _, c := range arrayOf(cond) {
@@ -87,11 +90,16 @@ func baseEncodeEntry(m *unitModel, ignore encodeIgnore) Value {
 	}
 	o := jsval.NewObject(16)
 	spreadV(o, markDefProperties(m.markDef, ignore))
-	if fill.IsTruthy() {
-		o.Set("fill", fill)
-	}
-	if stroke.IsTruthy() {
-		o.Set("stroke", stroke)
+	if v5 {
+		spreadV(o, wrapAllFieldsInvalid58(m, "fill", fill))
+		spreadV(o, wrapAllFieldsInvalid58(m, "stroke", stroke))
+	} else {
+		if fill.IsTruthy() {
+			o.Set("fill", fill)
+		}
+		if stroke.IsTruthy() {
+			o.Set("stroke", stroke)
+		}
 	}
 	for _, ch := range []string{"opacity", "fillOpacity", "strokeOpacity", "strokeWidth", "strokeDash"} {
 		spreadV(o, nonPosition(ch, m, nonPositionOpts{}))
@@ -206,7 +214,7 @@ func nonPosition(channel string, m *unitModel, opt nonPositionOpts) Value {
 	defaultRef, defaultValue := opt.defaultRef, opt.defaultValue
 	if defaultRef.IsUndefined() {
 		if defaultValue.IsNullish() {
-			defaultValue = getMarkPropOrConfig(channel, markDef, config, opt.vgChannel, !isConditionalDef(channelDef))
+			defaultValue = getMarkPropOrConfig(channel, markDef, config, opt.vgChannel, v5 || !isConditionalDef(channelDef))
 		}
 		if !defaultValue.IsUndefined() {
 			defaultRef = signalOrValueRef(defaultValue)
@@ -214,7 +222,10 @@ func nonPosition(channel string, m *unitModel, opt nonPositionOpts) Value {
 	}
 	scaleName := m.scaleName(channel, false)
 	scale := m.getScaleComponent(channel)
-	invalidRef := getConditionalValueRefForIncludingInvalidValue(channel, channelDef, scale, scaleName, markDef, config)
+	invalidRef := undef
+	if !v5 {
+		invalidRef = getConditionalValueRefForIncludingInvalidValue(channel, channelDef, scale, scaleName, markDef, config)
+	}
 	mainRefFn := func(cd Value) Value {
 		return midPoint(midPointParams{
 			channel: channel, channelDef: cd, markDef: markDef, config: config,
@@ -313,10 +324,17 @@ func descriptionEncode(m *unitModel) Value {
 	var parts []string
 	idx := 0
 	for _, key := range data.keys {
-		if strings.HasPrefix(key, "_") {
-			continue
+		value := data.m[key]
+		if v5 && value == "" {
+			value = "undefined" // 5.8 interpolates a missing expression as is
+		} else if !v5 {
+			// Vega-Lite 6 hides internal (underscore-prefixed) signals from the
+			// description and flattens line breaks; 5.8 prints everything.
+			if strings.HasPrefix(key, "_") {
+				continue
+			}
+			value = strings.ReplaceAll(value, `\n`, " ")
 		}
-		value := strings.ReplaceAll(data.m[key], `\n`, " ")
 		sep := ""
 		if idx > 0 {
 			sep = "; "
@@ -341,7 +359,7 @@ func tooltipEncode(m *unitModel, reactiveGeom bool) Value {
 		datum = "datum.datum"
 	}
 	mainRefFn := func(cd Value) Value {
-		if r := addLineBreaksToTooltip(cd, config, datum); r.IsTruthy() {
+		if r := tooltipTextRef(cd, config, datum); r.IsTruthy() {
 			return r
 		}
 		if cd.IsNull() {
@@ -377,6 +395,9 @@ type tooltipEntry struct {
 // tooltipData maps each tooltip key to its value expression.
 func tooltipData(encoding Value, stack *stackProperties, config Value, reactiveGeom bool) *omap[string] {
 	formatConfig := merged(config, config.Get("tooltipFormat"))
+	if v5 {
+		formatConfig = config.ObjValue()
+	}
 	toSkip := map[string]bool{}
 	expr := "datum"
 	if reactiveGeom {
@@ -401,7 +422,10 @@ func tooltipData(encoding Value, stack *stackProperties, config Value, reactiveG
 		for _, x := range arrayOf(titleV) {
 			titleParts = append(titleParts, x.AsString())
 		}
-		key := strings.ReplaceAll(strings.Join(titleParts, ", "), `"`, `\"`)
+		key := strings.Join(titleParts, ", ")
+		if !v5 {
+			key = strings.ReplaceAll(key, `"`, `\"`)
+		}
 		value := ""
 		hasValue := false
 		if isXorY(channel) {
@@ -425,7 +449,7 @@ func tooltipData(encoding Value, stack *stackProperties, config Value, reactiveG
 			hasValue = true
 		}
 		if !hasValue {
-			value = signalOrEmpty(addLineBreaksToTooltip(fd, jsval.Obj(formatConfig), expr))
+			value = signalOrEmpty(tooltipTextRef(fd, jsval.Obj(formatConfig), expr))
 		}
 		tuples = append(tuples, tooltipEntry{channel, key, value, true})
 	}
@@ -456,6 +480,15 @@ func tooltipRefForEncoding(encoding Value, stack *stackProperties, config Value,
 		return mkv("signal", "{"+strings.Join(kv, ", ")+"}")
 	}
 	return undef
+}
+
+// tooltipTextRef is textRef, which Vega-Lite 6 extends with line breaks for
+// discrete fields (5.8 has none).
+func tooltipTextRef(channelDef Value, config Value, expr string) Value {
+	if v5 {
+		return textRef(channelDef, config, expr)
+	}
+	return addLineBreaksToTooltip(channelDef, config, expr)
 }
 
 func addLineBreaksToTooltip(channelDef Value, config Value, expr string) Value {

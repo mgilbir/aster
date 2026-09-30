@@ -178,7 +178,7 @@ func parseLegendForChannel(m *unitModel, channel string) *legendComponent {
 			if hasSel {
 				o.Set("interactive", jsval.True)
 			}
-			if hasSel {
+			if hasSel && !v5 {
 				u := cloneObj(coalesceObj(value).ObjValue())
 				u.Set("cursor", mkv("value", "pointer"))
 				o.Set("update", jsval.Obj(u))
@@ -769,6 +769,9 @@ type legendEntry struct {
 }
 
 func assembleLegends(m Model) []Value {
+	if v5 {
+		return assembleLegends58(m)
+	}
 	index := m.b().comp.legends
 	byGroup := newOmap[[]*legendEntry]()
 	for _, channel := range index.keyList() {

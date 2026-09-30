@@ -93,6 +93,9 @@ func parseScales(m Model, ignoreRange bool) {
 	parseScaleCore(m)
 	parseScaleDomain(m)
 	for _, prop := range nonTypeDomainRangeVegaScaleProperties {
+		if v5 && prop == "domainRaw" {
+			continue // 5.8 has no domainRaw scale property
+		}
 		parseScaleProperty(m, prop)
 	}
 	if !ignoreRange {
@@ -116,6 +119,9 @@ func parseUnitScaleCore(u *unitModel) *omap[*scaleComponent] {
 			continue
 		}
 		specified := fod.Get("scale")
+		if v5 && isXorYOffset(channel) && !channelHasNestedOffsetScale(u.encoding, getMainChannelFromOffsetChannel(channel)) {
+			continue // 5.8 ignores an offset scale without a nested main scale
+		}
 		if fod.IsTruthy() && !specified.IsNull() && !(specified.IsBool() && !specified.BoolValue()) {
 			if specified.IsUndefined() {
 				specified = mkv()
@@ -219,7 +225,7 @@ func defaultScaleType(channel string, fieldDef Value, mark Value, hasNested bool
 			return "band"
 		}
 		if isXorY(channel) || isXorYOffset(channel) {
-			if contains([]string{"rect", "bar", "image", "rule", "tick"}, markType) {
+			if contains([]string{"rect", "bar", "image", "rule", "tick"}, markType) && !(v5 && markType == "tick") {
 				return "band"
 			}
 			if hasNested {
@@ -435,6 +441,9 @@ func scalePaddingInnerRule(paddingValue Value, channel, mark, scaleType string, 
 			fallback = scaleConfig.Get("barBandPaddingInner")
 		case "tick":
 			fallback = scaleConfig.Get("tickBandPaddingInner")
+			if v5 {
+				fallback = scaleConfig.Get("rectBandPaddingInner")
+			}
 		default:
 			fallback = scaleConfig.Get("rectBandPaddingInner")
 		}
@@ -501,7 +510,12 @@ func scaleZero(channel string, fd Value, specifiedDomain Value, markDef Value, s
 		if hasContinuousDomain(scaleType) {
 			if specifiedDomain.IsArr() {
 				first, last := specifiedDomain.Index(0), specifiedDomain.Index(specifiedDomain.Len()-1)
-				if first.IsNum() && first.NumValue() <= 0 && last.IsNum() && last.NumValue() >= 0 {
+				if v5 {
+					// JavaScript comparison: strings such as "-0.07" count as numbers.
+					if !first.IsUndefined() && !last.IsUndefined() && jsval.ToNumber(first) <= 0 && jsval.ToNumber(last) >= 0 {
+						return jsval.True
+					}
+				} else if first.IsNum() && first.NumValue() <= 0 && last.IsNum() && last.NumValue() >= 0 {
 					return jsval.True
 				}
 			}

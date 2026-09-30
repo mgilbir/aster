@@ -151,7 +151,10 @@ func parseSingleChannelDomain(scaleType string, domain Value, u *unitModel, chan
 	fod := getFieldOrDatumDef(encoding.Get(channel))
 	typ := channelDefType(fod)
 	timeUnit := fod.Get("timeUnit")
-	dsType := getScaleDataSourceForHandlingInvalidValues(getMarkConfig("invalid", markDef, config, ""), isPathMarkName(mark))
+	dsType := dsMain
+	if !v5 {
+		dsType = getScaleDataSourceForHandlingInvalidValues(getMarkConfig("invalid", markDef, config, ""), isPathMarkName(mark))
+	}
 	switch {
 	case isDomainUnionWith(domain):
 		def := parseSingleChannelDomain(scaleType, undef, u, channel)
@@ -224,7 +227,7 @@ func parseSingleChannelDomain(scaleType string, domain Value, u *unitModel, chan
 		if hasBandEnd(fd, fd2, markDef, config) {
 			data := u.requestDataName(dsType)
 			bp := getBandPosition(fd, fd2, markDef, config)
-			isRectWithOffset := isRectBasedMark(mark) && !(bp.IsNum() && bp.NumValue() == 0.5) && isXorY(channel)
+			isRectWithOffset := !v5 && isRectBasedMark(mark) && !(bp.IsNum() && bp.NumValue() == 0.5) && isXorY(channel)
 			startOpt := fieldRefOption{}
 			endSuffix := "end"
 			if isRectWithOffset {

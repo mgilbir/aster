@@ -140,6 +140,9 @@ var markCompilers = map[string]markCompiler{
 		)
 	}},
 	"tick": {vgMark: "rect", encodeEntry: func(m *unitModel) Value {
+		if v5 {
+			return tick58(m)
+		}
 		orient := m.markDef.Get("orient").AsString()
 		vgSizeAxis, vgThicknessAxis, vgThicknessChannel := chY, chX, "width"
 		if orient == "horizontal" {
@@ -167,6 +170,9 @@ func valueIfDefined(prop string, value Value) Value {
 }
 
 func definedEncode(m *unitModel) Value {
+	if v5 {
+		return definedEncode58(m)
+	}
 	fields := newSset()
 	m.forEachFieldDef(func(fd Value, channel string) {
 		if !isScaleChannel(channel) {
@@ -342,6 +348,9 @@ func getSort(m *unitModel) Value {
 		if markDef.Get("orient").AsString() == "horizontal" {
 			dim = chY
 		}
+		if v5 {
+			return getPathSort58(m, dim)
+		}
 		if isFieldDef(encoding.Get(dim)) {
 			return mkv("field", dim)
 		}
@@ -356,7 +365,7 @@ func getMarkGroup(m *unitModel, fromPrefix string) []Value {
 	key := encoding.Get("key")
 	sort := getSort(m)
 	interactive := interactiveFlag(m)
-	if interactive.IsTruthy() {
+	if interactive.IsTruthy() && !v5 {
 		for _, name := range m.comp.selection.keyList() {
 			s := m.comp.selection.lookup(name)
 			if s.typ == "point" && !s.props.Lookup("bind").IsTruthy() && s.props.Lookup("on").AsString() != "pointerover" {
@@ -375,6 +384,9 @@ func getMarkGroup(m *unitModel, fromPrefix string) []Value {
 	}
 	o := mk("name", m.getName("marks"), "type", mc.vgMark)
 	if clip.IsTruthy() {
+		if v5 {
+			clip = jsval.True
+		}
 		o.Set("clip", clip)
 	}
 	if len(style) > 0 {
@@ -430,7 +442,7 @@ func interactiveFlag(m *unitModel) Value {
 		parent = parent.b().parent
 	}
 	if parentCount > 0 {
-		return mkv("interactive", unitCount > 0 || m.mark() == "geoshape" || m.encoding.Get("tooltip").IsTruthy() || m.markDef.Get("tooltip").IsTruthy())
+		return mkv("interactive", unitCount > 0 || m.mark() == "geoshape" || m.encoding.Get("tooltip").IsTruthy() || (!v5 && m.markDef.Get("tooltip").IsTruthy()))
 	}
 	return jsval.Null
 }

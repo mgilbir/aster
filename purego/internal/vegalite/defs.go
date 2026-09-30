@@ -40,6 +40,9 @@ var aggregateOps = strSet([]string{
 func isArgminDef(v Value) bool { return hasProperty(v, "argmin") }
 func isArgmaxDef(v Value) bool { return hasProperty(v, "argmax") }
 func isAggregateOp(v Value) bool {
+	if v5 && v.IsStr() && (v.StrValue() == "exponential" || v.StrValue() == "exponentialb") {
+		return false // 6.x only
+	}
 	return v.IsStr() && aggregateOps[v.StrValue()]
 }
 func isCountingAggregateOp(v Value) bool {
@@ -135,6 +138,9 @@ var sortByChannel = strSet([]string{
 
 func isSortByEncoding(v Value) bool { return hasProperty(v, "encoding") }
 func isSortField(v Value) bool {
+	if v5 {
+		return v.IsTruthy() && (v.Get("op").IsStr() && v.Get("op").StrValue() == "count" || v.Get("field").IsTruthy())
+	}
 	return v.IsObj() && (v.Get("op").IsStr() && v.Get("op").StrValue() == "count" || hasProperty(v, "field"))
 }
 func isSortArray(v Value) bool { return v.IsArr() }
@@ -148,6 +154,9 @@ var timeUnitParts = []string{
 func isLocalSingleTimeUnit(u string) bool { return contains(timeUnitParts, u) }
 
 func isBinnedTimeUnit(tu Value) bool {
+	if v5 {
+		return false // binned time units are a 6.x feature
+	}
 	if isObject(tu) {
 		return tu.Get("binned").IsTruthy()
 	}
@@ -204,7 +213,7 @@ func normalizeTimeUnit(tu Value) Value {
 	switch {
 	case tu.IsStr():
 		s := tu.StrValue()
-		if strings.HasPrefix(s, "binned") {
+		if !v5 && strings.HasPrefix(s, "binned") {
 			params = mk("unit", s[6:], "binned", true)
 		} else {
 			params = mk("unit", s)
@@ -330,7 +339,22 @@ func durationExpr(tu Value, wrap func(string) string) string {
 		}
 		part, st := getDateTimePartAndStep(smallest, step)
 		end := cloneObj(start)
-		end.Set(part, jsval.Num(start.Lookup(part).NumValue()+st))
+		if v5 {
+			// 5.8 bumps the smallest part itself (a quarter is three months);
+			// parts a datetime does not have, week and dayofyear, add nothing.
+			if s := n.Get("step"); !s.IsTruthy() {
+				step = 1
+			}
+			part, st = smallest, step
+			if smallest == "quarter" {
+				part, st = "month", step*3
+			}
+			if start.Has(part) {
+				end.Set(part, jsval.Num(start.Lookup(part).NumValue()+st))
+			}
+		} else {
+			end.Set(part, jsval.Num(start.Lookup(part).NumValue()+st))
+		}
 		if wrap == nil {
 			wrap = func(s string) string { return s }
 		}

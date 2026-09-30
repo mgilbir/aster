@@ -33,12 +33,24 @@ var primitiveMarks = []string{
 
 func defaultConfig() *Object {
 	rectConfig := func() *Object {
+		if v5 {
+			return mk("binSpacing", 0, "continuousBandSize", 5, "timeUnitBandPosition", 0.5)
+		}
 		return mk("binSpacing", 0, "continuousBandSize", 5, "minBandSize", 0.25, "timeUnitBandPosition", 0.5)
 	}
 	bar := rectConfig()
 	bar.Set("binSpacing", jsval.Int(1))
 	tick := rectConfig()
 	tick.Set("thickness", jsval.Int(1))
+	view := mk("continuousWidth", 300, "continuousHeight", 300, "step", defaultStep)
+	markCfg := mk("color", "#4c78a8", "invalid", "break-paths-show-path-domains", "timeUnitBandSize", 1)
+	if v5 {
+		// Vega-Lite 5.8: 200x200 views, mark-level `invalid: filter`, and a tick
+		// config without the rect band options.
+		view = mk("continuousWidth", 200, "continuousHeight", 200, "step", defaultStep)
+		markCfg = mk("color", "#4c78a8", "invalid", "filter", "timeUnitBandSize", 1)
+		tick = mk("thickness", 1)
+	}
 	legend := mk(
 		"gradientHorizontalMaxLength", 200,
 		"gradientHorizontalMinLength", 100,
@@ -51,8 +63,8 @@ func defaultConfig() *Object {
 		"padding", 5,
 		"timeFormat", "%b %d, %Y",
 		"countTitle", "Count of Records",
-		"view", mk("continuousWidth", 300, "continuousHeight", 300, "step", defaultStep),
-		"mark", mk("color", "#4c78a8", "invalid", "break-paths-show-path-domains", "timeUnitBandSize", 1),
+		"view", view,
+		"mark", markCfg,
 		"arc", mk(),
 		"area", mk(),
 		"bar", bar,
@@ -89,6 +101,26 @@ func defaultConfig() *Object {
 const selectionID = "_vgsid_"
 
 func defaultSelectionConfig() *Object {
+	if v5 {
+		return mk(
+			"point", mk(
+				"on", "click",
+				"fields", arr(selectionID),
+				"toggle", "event.shiftKey",
+				"resolve", "global",
+				"clear", "dblclick",
+			),
+			"interval", mk(
+				"on", "[mousedown, window:mouseup] > window:mousemove!",
+				"encodings", arr("x", "y"),
+				"translate", "[mousedown, window:mouseup] > window:mousemove!",
+				"zoom", "wheel!",
+				"mark", mk("fill", "#333", "fillOpacity", 0.125, "stroke", "white"),
+				"resolve", "global",
+				"clear", "dblclick",
+			),
+		)
+	}
 	return mk(
 		"point", mk(
 			"on", "click",
@@ -358,7 +390,9 @@ func initConfig(specified Value) Value {
 	if v := merged.Lookup("legend"); v.IsTruthy() {
 		out.Set("legend", replaceExprRef(v, 0))
 	}
-	if sc := merged.Lookup("scale"); sc.IsTruthy() {
+	if sc := merged.Lookup("scale"); sc.IsTruthy() && v5 {
+		out.Set("scale", replaceExprRef(sc, 0))
+	} else if sc.IsTruthy() {
 		invalid := sc.Get("invalid")
 		other := jsval.Obj(omit(sc, "invalid"))
 		newInvalid := replaceExprRef(invalid, 1)
@@ -408,10 +442,16 @@ func vlOnlyMarkSpecificConfig(markType string) []string {
 	case "area":
 		return []string{"line", "point"}
 	case "bar", "rect":
+		if v5 {
+			return []string{"binSpacing", "continuousBandSize", "discreteBandSize"}
+		}
 		return vlOnlyRectConfig
 	case "line":
 		return []string{"point"}
 	case "tick":
+		if v5 {
+			return []string{"bandSize", "thickness"}
+		}
 		return append([]string{"bandSize", "thickness"}, vlOnlyRectConfig...)
 	}
 	return nil

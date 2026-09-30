@@ -41,10 +41,11 @@ func newUnitModel(spec Value, parent Model, parentGivenName string, parentGivenS
 	var size *Object
 	if isFrameMixins(spec) {
 		size = cloneObj(parentGivenSize)
-		if v := spec.Get("width"); !v.IsUndefined() {
+		// 6.x keeps a falsy size (0); 5.8 ignores it.
+		if v := spec.Get("width"); (v5 && v.IsTruthy()) || (!v5 && !v.IsUndefined()) {
 			size.Set("width", v)
 		}
-		if v := spec.Get("height"); !v.IsUndefined() {
+		if v := spec.Get("height"); (v5 && v.IsTruthy()) || (!v5 && !v.IsUndefined()) {
 			size.Set("height", v)
 		}
 	} else {
@@ -64,7 +65,9 @@ func newUnitModel(spec Value, parent Model, parentGivenName string, parentGivenS
 			u.selection = append(u.selection, p)
 		}
 	}
-	u.alignStackOrderWithColorDomain()
+	if !v5 {
+		u.alignStackOrderWithColorDomain()
+	}
 	return u
 }
 
@@ -250,7 +253,7 @@ func (u *unitModel) correctDataNames(mark Value) Value {
 	from := mark.Get("from")
 	if from.Get("data").IsTruthy() {
 		d := u.lookupDataSource(from.Get("data").AsString())
-		if u.encoding.ObjValue().Has("time") {
+		if !v5 && u.encoding.ObjValue().Has("time") {
 			d += curr
 		}
 		from.ObjValue().Set("data", jsval.Str(d))
@@ -352,7 +355,7 @@ func initMarkdef(original Value, encoding Value, config Value) Value {
 	}
 	so := getMarkPropOrConfigSimple("opacity", mdv, config)
 	sfo := getMarkPropOrConfigSimple("fillOpacity", mdv, config)
-	if so.IsUndefined() && sfo.IsUndefined() {
+	if so.IsUndefined() && (v5 || sfo.IsUndefined()) {
 		md.Set("opacity", markOpacity(md.Lookup("type").AsString(), encoding))
 	}
 	if getMarkPropOrConfigSimple("cursor", mdv, config).IsUndefined() {
@@ -381,6 +384,10 @@ func markOrient(mark string, encoding Value, specifiedOrient Value) string {
 	switch mark {
 	case "point", "circle", "square", "rect", "image":
 		return ""
+	case "text":
+		if v5 {
+			return ""
+		}
 	}
 	x, y, x2, y2 := encoding.Get("x"), encoding.Get("y"), encoding.Get("x2"), encoding.Get("y2")
 	so := ""

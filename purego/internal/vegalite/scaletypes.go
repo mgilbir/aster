@@ -57,6 +57,26 @@ func hasDiscreteDomain(t string) bool {
 }
 
 var defaultScaleConfig = func() *Object {
+	if v5 {
+		return mk(
+			"pointPadding", 0.5,
+			"barBandPaddingInner", 0.1,
+			"rectBandPaddingInner", 0,
+			"bandWithNestedOffsetPaddingInner", 0.2,
+			"bandWithNestedOffsetPaddingOuter", 0.2,
+			"minBandSize", 2,
+			"minFontSize", 8,
+			"maxFontSize", 40,
+			"minOpacity", 0.3,
+			"maxOpacity", 0.8,
+			"minSize", 9,
+			"minStrokeWidth", 1,
+			"maxStrokeWidth", 4,
+			"quantileCount", 4,
+			"quantizeCount", 4,
+			"zero", true,
+		)
+	}
 	return mk(
 		"pointPadding", 0.5,
 		"barBandPaddingInner", 0.1,

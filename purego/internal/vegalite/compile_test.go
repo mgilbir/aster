@@ -250,7 +250,8 @@ func TestExternalCorpus(t *testing.T) {
 //	VEGALITE_FUZZ=<jsonl of {name, spec, vega|error}>
 //
 // Upstream errors must be errors here and vice versa; results must match
-// exactly. Skipped when the variable is unset.
+// exactly. Skipped when the variable is unset. VEGALITE_VERSION selects the
+// Vega-Lite version the recording was made with ("5.8"; default 6.4).
 func TestDifferentialFuzz(t *testing.T) {
 	file := os.Getenv("VEGALITE_FUZZ")
 	if file == "" {
@@ -275,7 +276,7 @@ func TestDifferentialFuzz(t *testing.T) {
 			t.Fatal(err)
 		}
 		name := v.Get("name").StrValue()
-		got, cerr := Compile(v.Get("spec"), Options{Location: goldenZone})
+		got, cerr := Compile(v.Get("spec"), Options{Location: goldenZone, Version: os.Getenv("VEGALITE_VERSION")})
 		wantErr := v.Get("error").IsStr()
 		switch {
 		case wantErr && cerr != nil:
@@ -316,6 +317,8 @@ func TestDifferentialFuzz(t *testing.T) {
 // case of a JSONL corpus for inspection:
 //
 //	VEGALITE_DUMP=<jsonl>:<name>:<outdir>
+//
+// VEGALITE_VERSION selects the Vega-Lite version ("5.8"; default 6.4).
 func TestDumpCase(t *testing.T) {
 	arg := os.Getenv("VEGALITE_DUMP")
 	if arg == "" {
@@ -334,7 +337,7 @@ func TestDumpCase(t *testing.T) {
 		if err != nil || v.Get("name").StrValue() != parts[1] {
 			continue
 		}
-		got, cerr := Compile(v.Get("spec"), Options{Location: goldenZone})
+		got, cerr := Compile(v.Get("spec"), Options{Location: goldenZone, Version: os.Getenv("VEGALITE_VERSION")})
 		_ = os.WriteFile(filepath.Join(parts[2], "spec.json"), jsval.AppendJSONIndent(nil, v.Get("spec"), "  "), 0o644)
 		_ = os.WriteFile(filepath.Join(parts[2], "want.json"), jsval.AppendJSONIndent(nil, v.Get("vega"), "  "), 0o644)
 		if cerr != nil {
@@ -348,6 +351,7 @@ func TestDumpCase(t *testing.T) {
 }
 
 // TestCompileFile compiles VEGALITE_FILE and writes VEGALITE_FILE+".ours.json".
+// VEGALITE_VERSION selects the Vega-Lite version ("5.8"; default 6.4).
 func TestCompileFile(t *testing.T) {
 	file := os.Getenv("VEGALITE_FILE")
 	if file == "" {
@@ -361,7 +365,7 @@ func TestCompileFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, cerr := Compile(spec, Options{Location: goldenZone})
+	out, cerr := Compile(spec, Options{Location: goldenZone, Version: os.Getenv("VEGALITE_VERSION")})
 	if cerr != nil {
 		_ = os.WriteFile(file+".ours.json", []byte("ERROR: "+cerr.Error()), 0o644)
 		return

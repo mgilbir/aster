@@ -3,6 +3,14 @@
 // normalization, model construction, component parsing, dataflow optimization
 // and assembly. The output is a jsval value whose property order matches
 // upstream's JSON.stringify output, so it can be compared byte for byte.
+//
+// Options.Version also selects Vega-Lite 5.8.0, which the package compiles to
+// exactly what vega-lite@5.8.0's compile() produces (Vega schema v5 included).
+// Only the compiler changes: the Vega specification it emits is still run by
+// purego's Vega 6.4 runtime, not by Vega 5.25, so the rendered output of a 5.8
+// specification follows Vega 6.4's behaviour. The 5.8 code paths live behind
+// the version switch (see version.go and vl5.go) and leave the 6.4 output
+// untouched.
 package vegalite
 
 import (
@@ -21,6 +29,9 @@ type Options struct {
 	// read, JavaScript's local time. Nil means UTC; the host's time zone is
 	// never consulted, so output does not depend on the machine.
 	Location *time.Location
+	// Version is the Vega-Lite version to follow: "6.4" (also the default for
+	// "") or "5.8". Anything else is an error.
+	Version string
 }
 
 // Compile turns a Vega-Lite specification into a Vega specification. The input
@@ -40,6 +51,11 @@ func Compile(spec jsval.Value, opts Options) (out jsval.Value, err error) {
 			}
 		}
 	}()
+	release, err := acquireVersion(opts.Version)
+	if err != nil {
+		return jsval.Undefined, err
+	}
+	defer release()
 	if !spec.IsObj() {
 		return jsval.Undefined, compileError{"Invalid spec: a Vega-Lite specification must be an object"}
 	}
@@ -136,7 +152,12 @@ func assembleTopLevelModel(model Model, top *Object, datasets, usermeta jsval.Va
 		vgConfig = stripAndRedirectConfig(b.config)
 	}
 	rootData := assembleRootData(b.comp.data, datasets)
-	data := model.assembleSelectionData(rootData)
+	var data []Value
+	if v5 {
+		data = append(model.assembleSelectionData(nil), rootData...)
+	} else {
+		data = model.assembleSelectionData(rootData)
+	}
 	projections := b.assembleProjections()
 	title := model.assembleTitle()
 	style := model.assembleGroupStyle()
@@ -154,7 +175,11 @@ func assembleTopLevelModel(model Model, top *Object, datasets, usermeta jsval.Va
 	}
 	params := top.Lookup("params")
 	other := omit(jsval.Obj(top), "params")
-	o := mk("$schema", "https://vega.github.io/schema/vega/v6.json")
+	schema := "https://vega.github.io/schema/vega/v6.json"
+	if v5 {
+		schema = "https://vega.github.io/schema/vega/v5.json"
+	}
+	o := mk("$schema", schema)
 	if b.description.IsTruthy() {
 		o.Set("description", b.description)
 	}

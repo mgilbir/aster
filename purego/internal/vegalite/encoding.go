@@ -43,7 +43,7 @@ func channelHasFieldOrDatum(enc Value, channel string) bool {
 func channelHasNestedOffsetScale(enc Value, channel string) bool {
 	if isXorY(channel) {
 		fd := enc.Get(channel)
-		if (isFieldDef(fd) || isDatumDef(fd)) && (isDiscreteType(channelDefType(fd)) || (isFieldDef(fd) && fd.Get("timeUnit").IsTruthy())) {
+		if (isFieldDef(fd) || isDatumDef(fd)) && (isDiscreteType(channelDefType(fd)) || (!v5 && isFieldDef(fd) && fd.Get("timeUnit").IsTruthy())) {
 			return channelHasFieldOrDatum(enc, getOffsetScaleChannel(channel))
 		}
 	}
@@ -220,13 +220,19 @@ func initEncoding(encoding Value, mark string, filled bool, config Value) Value 
 			continue
 		}
 		channelDef := encoding.Get(channel)
+		if v5 && channel == chTime {
+			continue // the time channel is a 6.x feature
+		}
 		if isXorYOffset(channel) {
 			mainChannel := getMainChannelFromOffsetChannel(channel)
 			positionDef := normalized.Lookup(mainChannel)
 			if isFieldDef(positionDef) && isContinuousType(channelDefType(positionDef)) {
-				if isFieldDef(channelDef) && !positionDef.Get("timeUnit").IsTruthy() {
+				if isFieldDef(channelDef) && (v5 || !positionDef.Get("timeUnit").IsTruthy()) {
 					continue
 				}
+			} else if v5 && !isFieldDef(positionDef) {
+				// 5.8 turns an offset without a position into the position itself.
+				channel = mainChannel
 			}
 		}
 		if channel == chAngle && mark == "arc" && !encoding.Get("theta").IsTruthy() {
@@ -297,7 +303,7 @@ func pathGroupingFields(mark string, encoding Value) []string {
 		switch channel {
 		case chX, chY, chHref, chDescription, chURL, chX2, chY2:
 		case chXOffset, chYOffset:
-			if mark == "line" || mark == "area" || mark == "trail" {
+			if !v5 && (mark == "line" || mark == "area" || mark == "trail") {
 				offsetDef := encoding.Get(channel)
 				if isFieldDef(offsetDef) {
 					mainChannel := chX

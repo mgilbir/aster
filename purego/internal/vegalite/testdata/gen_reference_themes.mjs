@@ -2,6 +2,7 @@
 // named theme config of themes.json (the vega-themes configs). Each line:
 //   {"name":"group/file.vl","theme":"dark","vega":{...}}
 // Usage: NODE_PATH=<node_modules with vega-lite@6.4.3> node gen_reference_themes.mjs > reference_themes.jsonl
+// For the Vega-Lite 5.8 references, point NODE_PATH at testdata/oracle-node-vl5/node_modules and write reference_themes_vl5.jsonl.gz.
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import fs from 'node:fs';

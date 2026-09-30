@@ -81,6 +81,9 @@ func isLegendBinding(bind Value) bool {
 func isLegendStreamBinding(bind Value) bool { return isLegendBinding(bind) && isObject(bind) }
 
 func isTimerSelection(s *selectionComponent) bool {
+	if v5 {
+		return false // timer (animation) selections are a 6.x feature
+	}
 	for _, e := range s.events().Items() {
 		if e.IsObj() && e.ObjValue().Has("type") && e.Get("type").IsStr() && e.Get("type").StrValue() == "timer" {
 			return true
@@ -435,7 +438,7 @@ func assembleFacetSignals(m *facetModel, signals []Value) []Value {
 	if m.comp.selection != nil && m.comp.selection.len() > 0 {
 		name := stringValue(jsval.Str(m.getName("cell")))
 		sg := mkv("name", "facet", "value", mkv(), "on", arr(mkv(
-			"events", jsval.Arr(parseSelector("pointermove", "scope")),
+			"events", jsval.Arr(parseSelector(mouseMoveEvent(), "scope")),
 			"update", "isTuple(facet) ? facet : group("+name+").datum")))
 		signals = append([]Value{sg}, signals...)
 	}
@@ -470,7 +473,7 @@ func assembleTopLevelSignals(m Model, signals []Value) []Value {
 	}
 	if hasSelections {
 		if findSignal(signals, "unit") == nil {
-			signals = append([]Value{mkv("name", "unit", "value", mkv(), "on", arr(mkv("events", "pointermove", "update", "isTuple(group()) ? group() : unit")))}, signals...)
+			signals = append([]Value{mkv("name", "unit", "value", mkv(), "on", arr(mkv("events", mouseMoveEvent(), "update", "isTuple(group()) ? group() : unit")))}, signals...)
 		}
 	}
 	return cleanupEmptyOnArray(signals)
@@ -536,6 +539,10 @@ func assembleUnitSelectionData(m *unitModel, data []Value) []Value {
 				}
 			}
 		}
+	}
+	if v5 {
+		// 5.8 appends the stores to the data it was given.
+		return append(append([]Value{}, data...), selectionData...)
 	}
 	out := append(append(selectionData, data...), animationData...)
 	return out
@@ -1082,7 +1089,7 @@ var intervalCompiler = selectionCompiler{
 		switch {
 		case !cursor.IsNullish():
 			vgCursor = cursor
-		case sel.props.Lookup("translate").IsTruthy():
+		case !v5 && sel.props.Lookup("translate").IsTruthy():
 			vgCursor = jsval.Str("move")
 		default:
 			vgCursor = jsval.Null
@@ -1267,6 +1274,11 @@ var inputsCompiler = selectionCompiler{
 
 func isTopLevelLayer(m Model) bool {
 	p := m.b().parent
+	if v5 {
+		// 5.8 writes `!parent.parent ?? isTopLevelLayer(parent.parent)`, which
+		// never recurses: only a layer at the very top counts.
+		return p != nil && isLayerModel(p) && p.b().parent == nil
+	}
 	return p != nil && isLayerModel(p) && (p.b().parent == nil || isTopLevelLayer(p.b().parent))
 }
 
@@ -1422,7 +1434,7 @@ var legendsCompiler = selectionCompiler{
 					o.Set("value", jsval.Null)
 				}
 				o.Set("on", arr(
-					mkv("events", jsval.Arr(events), "update", "isDefined(datum.value) ? datum.value : item().items[0].items[0].datum.value", "force", true),
+					mkv("events", jsval.Arr(events), "update", legendSelectionUpdate(), "force", true),
 					mkv("events", stream.Get("merge"), "update", "!event.item || !datum ? null : "+sgName, "force", true),
 				))
 				signals = append([]Value{jsval.Obj(o)}, signals...)
@@ -1758,11 +1770,17 @@ var nearestCompiler = selectionCompiler{
 			ye = "datum.datum.y || 0"
 		}
 		cellDef := mkv(
-			"name", m.getName("voronoi"), "type", "path", "interactive", true, "aria", false,
+			"name", m.getName("voronoi"), "type", "path", "interactive", true,
 			"from", mkv("data", m.getName("marks")),
 			"encode", mkv("update", jsval.Obj(upd)),
 			"transform", arr(mkv("type", "voronoi", "x", mkv("expr", xe), "y", mkv("expr", ye), "size", arr(m.getSizeSignalRef("width"), m.getSizeSignalRef("height")))),
 		)
+		if !v5 {
+			// 6.x hides the voronoi cells from assistive technology.
+			o := mk("name", m.getName("voronoi"), "type", "path", "interactive", true, "aria", false)
+			spread(o, jsval.Obj(omit(cellDef, "name", "type", "interactive")))
+			cellDef = jsval.Obj(o)
+		}
 		index := 0
 		exists := false
 		firstMarkName := ""

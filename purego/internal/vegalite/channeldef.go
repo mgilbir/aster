@@ -15,6 +15,9 @@ func isRepeatRef(v Value) bool { return !v.IsStr() && hasProperty(v, "repeat") }
 func isSortableFieldDef(fd Value) bool { return hasProperty(fd, "sort") }
 
 func isFieldDef(cd Value) bool {
+	if v5 {
+		return cd.IsObj() && (cd.Get("field").IsTruthy() || aggIs(cd, "count"))
+	}
 	return hasProperty(cd, "field") || (cd.IsObj() && aggIs(cd, "count"))
 }
 
@@ -57,7 +60,9 @@ func isStringFieldOrDatumDef(cd Value) bool {
 
 func isFacetFieldDef(cd Value) bool { return hasProperty(cd, "header") }
 
-func isOrderOnlyDef(cd Value) bool { return hasProperty(cd, "sort") && !hasProperty(cd, "field") }
+func isOrderOnlyDef(cd Value) bool {
+	return !v5 && hasProperty(cd, "sort") && !hasProperty(cd, "field")
+}
 
 func isConditionalDef(cd Value) bool { return hasProperty(cd, "condition") }
 
@@ -562,6 +567,9 @@ func getBandPosition(fd, fd2 Value, markDef, config Value) Value {
 	if isFieldDef(fd) {
 		timeUnit, bin := fd.Get("timeUnit"), fd.Get("bin")
 		if timeUnit.IsTruthy() && !fd2.IsTruthy() {
+			if v5 && isRectBasedMark(markDef.Get("type").AsString()) {
+				return jsval.Int(0)
+			}
 			return getMarkConfig("timeUnitBandPosition", markDef, config, "")
 		} else if isBinning(bin) {
 			return jsval.Num(0.5)

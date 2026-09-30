@@ -239,7 +239,9 @@ func (n *xformNode) assemble() []Value {
 	case "density":
 		o := mk("type", "kde", "field", t.Get("density"))
 		spread(o, jsval.Obj(omit(t, "density")))
-		o.Set("resolve", t.Get("resolve"))
+		if !v5 {
+			o.Set("resolve", t.Get("resolve"))
+		}
 		return []Value{jsval.Obj(o)}
 	case "quantile":
 		o := mk("type", "quantile", "field", t.Get("quantile"))
@@ -422,7 +424,14 @@ func newDensityNode(parent dfNode, t Value) dfNode {
 	as := t.Get("as")
 	o := cloneObj(t.ObjValue())
 	o.Set("as", arr(coalesce(jsIndex(as, 0), jsval.Str("value")), coalesce(jsIndex(as, 1), jsval.Str("density"))))
-	o.Set("resolve", coalesce(t.Get("resolve"), jsval.Str("shared")))
+	if v5 {
+		// 5.8 has no `resolve`; grouped densities default to 200 steps.
+		if t.Get("groupby").IsTruthy() && t.Get("minsteps").IsNullish() && t.Get("maxsteps").IsNullish() && t.Get("steps").IsNullish() {
+			o.Set("steps", jsval.Int(200))
+		}
+	} else {
+		o.Set("resolve", coalesce(t.Get("resolve"), jsval.Str("shared")))
+	}
 	return newXform(parent, "density", jsval.Obj(o))
 }
 
@@ -658,7 +667,7 @@ func makeStackFromEncoding(parent dfNode, m *unitModel) dfNode {
 		var fields, orders []Value
 		seen := map[string]bool{}
 		for _, f := range stackby {
-			if !seen[f] {
+			if v5 || !seen[f] {
 				seen[f] = true
 				fields = append(fields, jsval.Str(f))
 				orders = append(orders, sortOrder)
@@ -690,8 +699,12 @@ func (n *stackNode) assemble() []Value {
 				binStart := vgField(d, fieldRefOption{expr: "datum"})
 				binEnd := vgField(d, fieldRefOption{expr: "datum", binSuffix: "end"})
 				bpS := jsval.JSNumberString(bandPosition)
+				expr := isValidFiniteNumberExpr(binStart) + " ? " + bpS + "*" + binStart + "+" + jsval.JSNumberString(1-bandPosition) + "*" + binEnd + " : " + binStart
+				if v5 {
+					expr = bpS + "*" + binStart + "+" + jsval.JSNumberString(1-bandPosition) + "*" + binEnd
+				}
 				out = append(out, mkv("type", "formula",
-					"expr", isValidFiniteNumberExpr(binStart)+" ? "+bpS+"*"+binStart+"+"+jsval.JSNumberString(1-bandPosition)+"*"+binEnd+" : "+binStart,
+					"expr", expr,
 					"as", vgField(d, fieldRefOption{binSuffix: "mid", forAs: true})))
 			}
 			gb := append(append([]string{}, st.stackby...), st.facetby...)

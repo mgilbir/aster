@@ -158,7 +158,7 @@ func parseLayerAxes(m *layerModel) {
 		if resolve.axis[channel] == "independent" {
 			if list, ok := axes.get(channel); ok && len(list) > 1 {
 				for i, ac := range list {
-					if i > 0 && ac.get("grid").IsTruthy() && !ac.explicit.Lookup("grid").IsTruthy() {
+					if (v5 || i > 0) && ac.get("grid").IsTruthy() && !ac.explicit.Lookup("grid").IsTruthy() {
 						ac.implicit.Set("grid", jsval.False)
 					}
 				}
@@ -416,7 +416,7 @@ var axisRules = map[string]func(p axisRuleParams) Value{
 		return defaultTickCount(p.fod, p.scaleType, size, p.axis.Get("values"))
 	},
 	"tickMinStep": func(p axisRuleParams) Value {
-		if v := p.axis.Get("tickMinStep"); !v.IsNullish() {
+		if v := p.axis.Get("tickMinStep"); !v5 && !v.IsNullish() {
 			return v
 		}
 		return defaultTickMinStep(p.format, p.fod)

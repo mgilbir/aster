@@ -159,7 +159,12 @@ func defaultRange(channel string, u *unitModel) Value {
 	case chXOffset, chYOffset:
 		return getOffsetRange(channel, u, scaleType)
 	case chSize:
-		rangeMin := sizeRangeMin(mark, config)
+		var rangeMin Value
+		if v5 {
+			rangeMin = sizeRangeMin58(mark, merged.get("zero"), config)
+		} else {
+			rangeMin = sizeRangeMin(mark, config)
+		}
 		rangeMax := sizeRangeMax(mark, size, u, config)
 		if isContinuousToDiscrete(scaleType) {
 			return interpolateRange(u.ctx, rangeMin, rangeMax, defaultContinuousToDiscreteCount(scaleType, config, domain, channel))
@@ -172,7 +177,7 @@ func defaultRange(channel string, u *unitModel) Value {
 	case chRadius:
 		return arr(0, lazySignal(u.ctx, func() string {
 			wn, hn := "width", "height"
-			if u.parent != nil && isFacetModel(u.parent) {
+			if !v5 && u.parent != nil && isFacetModel(u.parent) {
 				wn, hn = "child_width", "child_height"
 			}
 			return "min(" + u.getSignalName(wn) + "," + u.getSignalName(hn) + ")/2"
@@ -250,6 +255,9 @@ func getOffsetRange(channel string, u *unitModel, offsetScaleType string) Value 
 	}
 	pc := u.getScaleComponent(positionChannel)
 	if pc == nil {
+		if v5 {
+			throw("Cannot use %s scale if %s scale is not discrete.", channel, positionChannel)
+		}
 		return fullWidthOrHeightRange(positionChannel, u, offsetScaleType, true)
 	}
 	positionScaleType := pc.get("type").AsString()
@@ -265,7 +273,7 @@ func getOffsetRange(channel string, u *unitModel, offsetScaleType string) Value 
 		return arr(0, sig("bandwidth('"+positionScaleName+"')"))
 	}
 	positionDef := u.encoding.Get(positionChannel)
-	if isFieldDef(positionDef) && positionDef.Get("timeUnit").IsTruthy() {
+	if !v5 && isFieldDef(positionDef) && positionDef.Get("timeUnit").IsTruthy() {
 		duration := durationExpr(positionDef.Get("timeUnit"), func(expr string) string {
 			return "scale('" + positionScaleName + "', " + expr + ")"
 		})
@@ -302,7 +310,7 @@ func getDiscretePositionSize(channel string, size *Object, view Value) Value {
 	if channel == chX {
 		sizeChannel = "width"
 	}
-	if v := size.Lookup(sizeChannel); !v.IsUndefined() {
+	if v := size.Lookup(sizeChannel); (v5 && v.IsTruthy()) || (!v5 && !v.IsUndefined()) {
 		return v
 	}
 	return getViewConfigDiscreteSize(view, sizeChannel)

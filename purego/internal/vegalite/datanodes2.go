@@ -11,6 +11,7 @@ import (
 type binComponent struct {
 	bin          Value
 	field        string
+	noField      bool // the field def has no field: upstream throws when it assembles the bin
 	as           [][]string
 	signal       string
 	extentSignal string
@@ -143,7 +144,7 @@ func createBinComponent(t Value, bin Value, m Model, _ bool) (string, *binCompon
 		span = parseSelectionExtent(m, ext.Get("param").AsString(), ext)
 		normalized.Delete("extent")
 	}
-	return key, &binComponent{bin: jsval.Obj(normalized), field: t.Get("field").AsString(), as: [][]string{as}, signal: signal, extentSignal: extentSignal, span: span}
+	return key, &binComponent{bin: jsval.Obj(normalized), field: t.Get("field").AsString(), noField: t.Get("field").IsUndefined(), as: [][]string{as}, signal: signal, extentSignal: extentSignal, span: span}
 }
 
 func rangeFormula(m fieldDefModel, fd Value, channel string, config Value) (formulaAs, formula string) {
@@ -239,6 +240,9 @@ func (n *binNode) assemble() []Value {
 		remainingAs := bin.as[1:]
 		extent := bin.bin.Get("extent")
 		params := omit(bin.bin, "extent")
+		if bin.noField {
+			throw("Cannot read properties of undefined (reading 'length')") // splitAccessPath(undefined)
+		}
 		bt := jsval.NewObject(8)
 		bt.Set("type", jsval.Str("bin"))
 		bt.Set("field", jsval.Str(replacePathInField(bin.field)))
@@ -328,7 +332,10 @@ const (
 func makeTimeUnitFromEncoding(parent dfNode, m fieldDefModel) dfNode {
 	formula := reduceFieldDef(m, func(tc *omap[*Object], fd Value, channel string) *omap[*Object] {
 		field, timeUnit := fd.Get("field"), fd.Get("timeUnit")
-		if timeUnit.IsTruthy() {
+		if timeUnit.IsTruthy() && v5 {
+			component := mk("as", vgField(fd, fieldRefOption{forAs: true}), "field", field, "timeUnit", timeUnit)
+			tc.set(hashOf(jsval.Obj(component)), component)
+		} else if timeUnit.IsTruthy() {
 			var component *Object
 			u, isUnit := m.(*unitModel)
 			if isBinnedTimeUnit(timeUnit) {
@@ -445,6 +452,9 @@ func (n *timeUnitNode) assemble() []Value {
 		rect := f.Lookup("rectBandPosition")
 		nt := normalizeTimeUnit(f.Lookup("timeUnit"))
 		if isTimeUnitTransformComponent(f) {
+			if f.Lookup("field").IsUndefined() {
+				throw("Cannot read properties of undefined (reading 'length')") // splitAccessPath(undefined)
+			}
 			field, as := f.Lookup("field").AsString(), f.Lookup("as").AsString()
 			unit, utc := nt.Get("unit"), nt.Get("utc")
 			params := omit(nt, "unit", "utc")
@@ -537,7 +547,7 @@ func addDimension(dims *sset, channel string, fd Value, m Model) {
 		dims.add(vgField(fd, fieldRefOption{}))
 		dims.add(vgField(fd, fieldRefOption{suffix: "end"}))
 		bp := getBandPosition(fd, undef, u.markDef, u.config)
-		if isRectBasedMark(u.mark()) && !(bp.IsNum() && bp.NumValue() == 0.5) && isXorY(channel) {
+		if !v5 && isRectBasedMark(u.mark()) && !(bp.IsNum() && bp.NumValue() == 0.5) && isXorY(channel) {
 			dims.add(vgField(fd, fieldRefOption{suffix: offsettedRectStartSuffix}))
 			dims.add(vgField(fd, fieldRefOption{suffix: offsettedRectEndSuffix}))
 		}
@@ -640,6 +650,8 @@ func makeAggregateFromTransform(parent dfNode, t Value) *aggregateNode {
 			if op.StrValue() == "count" {
 				ops := ensureMeasureField(meas, "*")
 				ops.set("count", newSset(name))
+			} else if v5 {
+				ensureMeasureField(meas, field.AsString()).set(op.AsString(), newSset(name))
 			} else {
 				measureSet(meas, field.AsString(), op.AsString()).add(name)
 			}

@@ -954,7 +954,12 @@ func (pathOverlayNormalizer) run(spec Value, p *normParams, normalize func(Value
 		first.Set("params", params)
 	}
 	m := jsval.NewObject(4)
-	if markDef.Get("type").AsString() == "area" && getMarkPropOrConfigSimple("opacity", markDef, config).IsNullish() && getMarkPropOrConfigSimple("fillOpacity", markDef, config).IsNullish() {
+	areaOpacity := getMarkPropOrConfigSimple("opacity", markDef, config).IsNullish() && getMarkPropOrConfigSimple("fillOpacity", markDef, config).IsNullish()
+	if v5 {
+		// 5.8 looks at the mark definition only, not at the config.
+		areaOpacity = markDef.Get("opacity").IsUndefined() && markDef.Get("fillOpacity").IsUndefined()
+	}
+	if markDef.Get("type").AsString() == "area" && areaOpacity {
 		m.Set("opacity", jsval.Num(0.7))
 	}
 	spread(m, markDef)
@@ -962,7 +967,11 @@ func (pathOverlayNormalizer) run(spec Value, p *normParams, normalize func(Value
 	first.Set("encoding", jsval.Obj(omit(encoding, "shape")))
 	layer := []Value{jsval.Obj(first)}
 
-	stackProps := stackOf(initMarkdef(markDef, encoding, config), encoding)
+	stackMarkDef := markDef
+	if !v5 {
+		stackMarkDef = initMarkdef(markDef, encoding, config)
+	}
+	stackProps := stackOf(stackMarkDef, encoding)
 	overlayEncoding := encoding
 	if stackProps != nil {
 		oe := cloneObj(encoding.ObjValue())

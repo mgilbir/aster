@@ -115,6 +115,22 @@ func positionRef(p midPointParams) Value {
 func pointPositionDefaultRef(m *unitModel, defaultPos, channel, scaleName string, scale *scaleComponent) func() Value {
 	markDef, config := m.markDef, m.config
 	return func() Value {
+		if v5 {
+			vgChannel := getVgPositionChannel(channel)
+			if def := getMarkPropOrConfig(channel, markDef, config, vgChannel, false); !def.IsUndefined() {
+				return widthHeightValueOrSignalRef(channel, def)
+			}
+			if defaultPos == "mid" {
+				sizeRef := m.height()
+				if getSizeChannel(channel) == "width" {
+					sizeRef = m.width()
+				}
+				o := cloneObj(coalesceObj(sizeRef).ObjValue())
+				o.Set("mult", jsval.Num(0.5))
+				return jsval.Obj(o)
+			}
+			return pointPositionDefaultRef58(m, defaultPos, channel, scaleName, scale)
+		}
 		mainChannel := getMainRangeChannel(channel)
 		vgChannel := getVgPositionChannel(channel)
 		def := getMarkPropOrConfig(channel, markDef, config, vgChannel, false)
@@ -275,6 +291,9 @@ func position2orSize(channel string, markDef Value) Value {
 // ---- rect position ----
 
 func rectPosition(m *unitModel, channel string) Value {
+	if v5 {
+		return rectPosition58(m, channel)
+	}
 	config, encoding, markDef := m.config, m.encoding, m.markDef
 	mark := markDef.Get("type").AsString()
 	channel2 := getSecondaryRangeChannel(channel)

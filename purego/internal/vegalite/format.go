@@ -53,6 +53,10 @@ func formatSignalRef(o formatSignalOpts) Value {
 			utc = tu.Get("utc").IsTruthy()
 		}
 		isUTCScale := utc || (isScaleFieldDef(fod) && fod.Get("scale").Get("type").AsString() == "utc")
+		if v5 {
+			// 5.8 ignores utc time units here.
+			isUTCScale = isScaleFieldDef(fod) && fod.Get("scale").Get("type").AsString() == "utc"
+		}
 		s := timeFormatExpression(field, unit, format, config.Get("timeFormatType"), config.Get("timeFormat"), isUTCScale)
 		if s != "" {
 			return sig(s)
@@ -193,6 +197,9 @@ func binFormatExpression(startField, endField string, format, formatType Value, 
 func timeFormatExpression(field, timeUnit string, format, formatType, rawTimeFormat Value, isUTCScale bool) string {
 	if timeUnit == "" || format.IsTruthy() {
 		if timeUnit == "" && formatType.IsTruthy() {
+			if v5 {
+				return formatType.AsString() + "(" + field + ", '" + format.AsString() + "')"
+			}
 			return formatType.AsString() + "(" + field + ", " + stringifyJS(format) + ")"
 		}
 		if !format.IsStr() {
@@ -201,6 +208,9 @@ func timeFormatExpression(field, timeUnit string, format, formatType, rawTimeFor
 		fn := "time"
 		if isUTCScale {
 			fn = "utc"
+		}
+		if v5 {
+			return fn + "Format(" + field + ", '" + format.AsString() + "')"
 		}
 		return fn + "Format(" + field + ", " + stringifyJS(format) + ")"
 	}

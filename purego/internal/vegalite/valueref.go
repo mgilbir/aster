@@ -28,6 +28,9 @@ type midPointParams struct {
 }
 
 func midPointRefWithPositionInvalidTest(p midPointParams) Value {
+	if v5 {
+		return midPointRefWithPositionInvalidTest58(p)
+	}
 	scaleChannel := getMainRangeChannel(p.channel)
 	mainRef := midPoint(p)
 	inc := getConditionalValueRefForIncludingInvalidValue(scaleChannel, p.channelDef, p.scale, p.scaleName, p.markDef, p.config)
@@ -90,7 +93,9 @@ func interpolatedSignalRef(o interpolatedOpts) Value {
 		endSuffix = "end"
 	}
 	expr := ""
-	if !isSignalRef(bandPosition) && bandPosition.IsNum() && 0 < bandPosition.NumValue() && bandPosition.NumValue() < 1 {
+	if v5 && bandPosition.IsNum() && 0 < bandPosition.NumValue() && bandPosition.NumValue() < 1 {
+		expr = "datum"
+	} else if !v5 && !isSignalRef(bandPosition) && bandPosition.IsNum() && 0 < bandPosition.NumValue() && bandPosition.NumValue() < 1 {
 		expr = "datum"
 	}
 	start := vgField(o.fod, fieldRefOption{expr: expr, suffix: o.startSuffix})
@@ -110,7 +115,16 @@ func interpolatedSignalRef(o interpolatedOpts) Value {
 		}
 	} else {
 		var datum string
-		if isSignalRef(bandPosition) {
+		if v5 {
+			// Vega-Lite 5.8 weights the start by the band position, 6.x the end.
+			if isSignalRef(bandPosition) {
+				bp := signalOf(bandPosition)
+				datum = bp + " * " + start + " + (1-" + bp + ") * " + end
+			} else {
+				bp := bandPosition.NumValue()
+				datum = jsval.JSNumberString(bp) + " * " + start + " + " + jsval.JSNumberString(1-bp) + " * " + end
+			}
+		} else if isSignalRef(bandPosition) {
 			bp := signalOf(bandPosition)
 			datum = "(1-" + bp + ") * " + start + " + " + bp + " * " + end
 		} else {

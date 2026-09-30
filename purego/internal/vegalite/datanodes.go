@@ -366,6 +366,29 @@ func makeFilterInvalid(parent dfNode, m *unitModel, marks, scales string) dfNode
 	return newFilterInvalidNode(parent, filter)
 }
 
+// makeFilterInvalid58 is Vega-Lite 5.8's FilterInvalidNode.make: fields of
+// continuous scales are filtered when the mark's `invalid` is "filter".
+func makeFilterInvalid58(parent dfNode, m *unitModel) dfNode {
+	if invalid := getMarkPropOrConfigSimple("invalid", m.markDef, m.config); !(invalid.IsStr() && invalid.StrValue() == "filter") {
+		return nil
+	}
+	filter := reduceFieldDef(fieldDefModel(m), func(agg *omap[Value], fd Value, channel string) *omap[Value] {
+		if isScaleChannel(channel) {
+			if sc := m.getScaleComponent(channel); sc != nil {
+				agg2 := fd.Get("aggregate")
+				if hasContinuousDomain(sc.get("type").AsString()) && !(agg2.IsStr() && agg2.StrValue() == "count") && !isPathMarkName(m.mark()) {
+					agg.set(fd.Get("field").AsString(), fd)
+				}
+			}
+		}
+		return agg
+	}, newOmap[Value]())
+	if filter.len() == 0 {
+		return nil
+	}
+	return newFilterInvalidNode(parent, filter)
+}
+
 func isValidFiniteNumberExpr(ref string) string {
 	return "isValid(" + ref + ") && isFinite(+" + ref + ")"
 }
@@ -377,9 +400,13 @@ func (n *filterInvalidNode) assemble() Value {
 		ref := vgField(fd, fieldRefOption{expr: "datum"})
 		switch channelDefType(fd) {
 		case "temporal":
-			filters = append(filters, "(isDate("+ref+") || ("+isValidFiniteNumberExpr(ref)+"))")
+			filters = append(filters, "(isDate("+ref+") || (isValid("+ref+") && isFinite(+"+ref+")))")
 		case "quantitative":
-			filters = append(filters, isValidFiniteNumberExpr(ref))
+			if v5 {
+				filters = append(filters, "isValid("+ref+")", "isFinite(+"+ref+")")
+			} else {
+				filters = append(filters, isValidFiniteNumberExpr(ref))
+			}
 		}
 	}
 	if len(filters) > 0 {

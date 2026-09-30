@@ -175,7 +175,7 @@ func parseTransformArray(head dfNode, m Model, ap *ancestorParse) dfNode {
 		case hasProperty(t, "fold"):
 			n := newFoldNode(head, t)
 			head, transformNode, derivedType = n, n, "derived"
-		case hasProperty(t, "extent") && !hasProperty(t, "density") && !hasProperty(t, "regression"):
+		case !v5 && hasProperty(t, "extent") && !hasProperty(t, "density") && !hasProperty(t, "regression"):
 			n := newXform(head, "extent", deepClone(t))
 			head, transformNode, derivedType = n, n, "derived"
 		case hasProperty(t, "flatten"):
@@ -408,7 +408,12 @@ func parseDataFor(m Model) *dataComponent {
 	var preFilterInvalid *outputNode
 	var postFilterInvalid *outputNode
 	var marksMode, scalesMode string
-	if u != nil {
+	if u != nil && v5 {
+		// Vega-Lite 5.8: only `invalid: filter` filters, before the main source.
+		if n := makeFilterInvalid58(head, u); n != nil {
+			head = n
+		}
+	} else if u != nil {
 		invalid := getMarkPropOrConfigSimple("invalid", u.markDef, u.config)
 		marksMode, scalesMode = getDataSourcesForHandlingInvalidValues(invalid, isPathMarkName(u.mark()))
 		if marksMode != scalesMode && scalesMode == "include-invalid-values" {
