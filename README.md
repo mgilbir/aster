@@ -299,7 +299,7 @@ The engine is organized along Vega's own module boundaries, under `internal/`:
 
 Upstream is the oracle. `testdata/oracle-node` pins Vega 6.4.0 / Vega-Lite 6.4.3 (and resvg), and `testdata/oracle-node-vl5` Vega-Lite 5.8.0, running in node; `internal/oracle` drives them and caches their answers under `testdata/oracle-cache`, which is recreated on demand and never committed. The engine's SVG, compiled Vega and PNG are compared with what upstream produces for the same spec.
 
-On the 1,347 specs of the corpus (260 Vega fixtures, 332 Vega-Lite fixtures, Vega's 92 example specs, the 627 Vega-Lite examples, 23 vl-convert specs and 13 fuzz-found regressions), 1,323 render identically to upstream or within half a pixel (text is shaped by forme on one side and node-canvas on the other), 7 draw the current time, and the rest are listed, each with its reason, in `testdata/oracle-expect.txt` (a few oracle answers depend on the platform node runs on); the compiled Vega is identical to upstream's for every Vega-Lite spec.
+On the 1,347 specs of the corpus (260 Vega fixtures, 332 Vega-Lite fixtures, Vega's 92 example specs, the 627 Vega-Lite examples, 23 vl-convert specs and 13 fuzz-found regressions), 1,331 render identically to upstream or within half a pixel (text is shaped by forme on one side and node-canvas on the other) and 13 draw the current time or advance on timer events; the remaining 3 are the few whose oracle answer depends on the platform node runs on, listed with the reason in `testdata/oracle-expect.txt`; the compiled Vega is identical to upstream's for every Vega-Lite spec.
 
 ```bash
 (cd testdata/oracle-node && npm ci)        # node version pinned in package.json (volta)
@@ -322,7 +322,6 @@ Everything needed is committed, so a plain `go build ./...` works offline. `make
 - **Emoji:** Monochrome [Noto Emoji](https://fonts.google.com/noto/specimen/Noto+Emoji) is bundled as a fallback, so emoji have text metrics and rasterize (in black-and-white) in PNG output. Color emoji are not supported.
 - **Interactive features:** Selection and signal interactivity are evaluated at initial state only; there is no event loop.
 - **Remote images in PNG:** Image marks referencing external URLs render in SVG output (the URL is embedded as an `href`), but the rasterizer does not fetch them, so they are blank in PNG output. Embedded `data:` URLs render fine.
-- **Not yet implemented:** the `heatmap` transform, the canvas-based layout of some `label` and `wordcloud` transforms, and the extra projections of d3-geo-projection (such as `airy`) are rejected with an error.
 
 ## Acknowledgments
 
