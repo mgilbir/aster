@@ -41,24 +41,24 @@ func isFieldPredicate(p Value) bool {
 		isFieldLTPredicate(p) || isFieldGTPredicate(p) || isFieldLTEPredicate(p) || isFieldGTEPredicate(p)
 }
 
-func predicateValueExpr(v Value, timeUnit string) string {
+func predicateValueExpr(cc *compileCtx, v Value, timeUnit string) string {
 	tu := undef
 	if timeUnit != "" {
 		tu = jsval.Str(timeUnit)
 	}
-	s, _ := valueExpr(v, tu, "", true, false)
+	s, _ := valueExpr(cc, v, tu, "", true, false)
 	return s
 }
 
-func fieldFilterExpression(p Value, useInRange bool) string {
+func fieldFilterExpression(cc *compileCtx, p Value, useInRange bool) string {
 	field := p.Get("field").AsString()
-	nt := normalizeTimeUnit(p.Get("timeUnit"))
+	nt := normalizeTimeUnit(cc, p.Get("timeUnit"))
 	unit := ""
 	if u := nt.Get("unit"); u.IsTruthy() {
 		unit = u.AsString()
 	}
-	binned := !v5 && nt.Get("binned").IsTruthy()
-	rawFieldExpr := vgField(p, fieldRefOption{expr: "datum"})
+	binned := !cc.v5 && nt.Get("binned").IsTruthy()
+	rawFieldExpr := vgField(cc, p, fieldRefOption{expr: "datum"})
 	fieldExpr := rawFieldExpr
 	if unit != "" {
 		// A timeUnit'ed predicate compares the truncated time, computed from the raw
@@ -71,19 +71,19 @@ func fieldFilterExpression(p Value, useInRange bool) string {
 	}
 	switch {
 	case isFieldEqualPredicate(p):
-		return fieldExpr + "===" + predicateValueExpr(p.Get("equal"), unit)
+		return fieldExpr + "===" + predicateValueExpr(cc, p.Get("equal"), unit)
 	case isFieldLTPredicate(p):
-		return fieldExpr + "<" + predicateValueExpr(p.Get("lt"), unit)
+		return fieldExpr + "<" + predicateValueExpr(cc, p.Get("lt"), unit)
 	case isFieldGTPredicate(p):
-		return fieldExpr + ">" + predicateValueExpr(p.Get("gt"), unit)
+		return fieldExpr + ">" + predicateValueExpr(cc, p.Get("gt"), unit)
 	case isFieldLTEPredicate(p):
-		return fieldExpr + "<=" + predicateValueExpr(p.Get("lte"), unit)
+		return fieldExpr + "<=" + predicateValueExpr(cc, p.Get("lte"), unit)
 	case isFieldGTEPredicate(p):
-		return fieldExpr + ">=" + predicateValueExpr(p.Get("gte"), unit)
+		return fieldExpr + ">=" + predicateValueExpr(cc, p.Get("gte"), unit)
 	case isFieldOneOfPredicate(p):
 		var parts []string
 		for _, v := range p.Get("oneOf").Items() {
-			parts = append(parts, predicateValueExpr(v, unit))
+			parts = append(parts, predicateValueExpr(cc, v, unit))
 		}
 		return "indexof([" + strings.Join(parts, ",") + "], " + fieldExpr + ") !== -1"
 	case isFieldValidPredicate(p):
@@ -94,7 +94,7 @@ func fieldFilterExpression(p Value, useInRange bool) string {
 		return fieldValidPredicate(fieldExpr, valid)
 	case isFieldRangePredicate(p):
 		rp := p
-		if !v5 {
+		if !cc.v5 {
 			rp = replaceExprRefObj(p)
 		}
 		rng := rp.Get("range")
@@ -106,14 +106,14 @@ func fieldFilterExpression(p Value, useInRange bool) string {
 			lower, upper = rng.Index(0), rng.Index(1)
 		}
 		if !lower.IsNull() && !upper.IsNull() && useInRange {
-			return "inrange(" + fieldExpr + ", [" + predicateValueExpr(lower, unit) + ", " + predicateValueExpr(upper, unit) + "])"
+			return "inrange(" + fieldExpr + ", [" + predicateValueExpr(cc, lower, unit) + ", " + predicateValueExpr(cc, upper, unit) + "])"
 		}
 		var exprs []string
 		if !lower.IsNull() {
-			exprs = append(exprs, fieldExpr+" >= "+predicateValueExpr(lower, unit))
+			exprs = append(exprs, fieldExpr+" >= "+predicateValueExpr(cc, lower, unit))
 		}
 		if !upper.IsNull() {
-			exprs = append(exprs, fieldExpr+" <= "+predicateValueExpr(upper, unit))
+			exprs = append(exprs, fieldExpr+" <= "+predicateValueExpr(cc, upper, unit))
 		}
 		if len(exprs) > 0 {
 			return strings.Join(exprs, " && ")
@@ -131,14 +131,14 @@ func fieldValidPredicate(fieldExpr string, valid bool) string {
 	return "!isValid(" + fieldExpr + ") || !isFinite(+" + fieldExpr + ")"
 }
 
-func normalizePredicate(f Value) Value {
+func normalizePredicate(cc *compileCtx, f Value) Value {
 	if isFieldPredicate(f) && f.Get("timeUnit").IsTruthy() {
 		o := cloneObj(f.ObjValue())
-		if v5 {
+		if cc.v5 {
 			// 5.8 keeps only the unit's name (a UTC unit loses its `utc` flag).
-			o.Set("timeUnit", normalizeTimeUnit(f.Get("timeUnit")).Get("unit"))
+			o.Set("timeUnit", normalizeTimeUnit(cc, f.Get("timeUnit")).Get("unit"))
 		} else {
-			o.Set("timeUnit", normalizeTimeUnit(f.Get("timeUnit")))
+			o.Set("timeUnit", normalizeTimeUnit(cc, f.Get("timeUnit")))
 		}
 		return jsval.Obj(o)
 	}

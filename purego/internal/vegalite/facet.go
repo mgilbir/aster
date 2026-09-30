@@ -4,9 +4,9 @@ import (
 	"github.com/mgilbir/aster/purego/internal/jsval"
 )
 
-func facetSortFieldName(fieldDef, sort Value, opt fieldRefOption) string {
-	opt.suffix = "by_" + vgField(fieldDef, fieldRefOption{})
-	return vgField(sort, opt)
+func facetSortFieldName(cc *compileCtx, fieldDef, sort Value, opt fieldRefOption) string {
+	opt.suffix = "by_" + vgField(cc, fieldDef, fieldRefOption{})
+	return vgField(cc, sort, opt)
 }
 
 // facetModel splits one child view into a trellis — vega-lite/src/compile/facet.ts.
@@ -16,14 +16,14 @@ type facetModel struct {
 	child Model
 }
 
-func newFacetModel(spec Value, parent Model, parentGivenName string, config Value, depth int) *facetModel {
+func newFacetModel(cc *compileCtx, spec Value, parent Model, parentGivenName string, config Value, depth int) *facetModel {
 	f := &facetModel{}
 	var resolve *resolveIndex
 	if r := spec.Get("resolve"); r.IsObj() {
 		resolve = resolveFromSpec(r)
 	}
-	f.modelBase = newModelBase(f, spec, "facet", parent, parentGivenName, config, resolve, undef)
-	f.child = buildModel(spec.Get("spec"), f, f.getName("child"), nil, config, depth+1)
+	f.modelBase = newModelBase(cc, f, spec, "facet", parent, parentGivenName, config, resolve, undef)
+	f.child = buildModel(cc, spec.Get("spec"), f, f.getName("child"), nil, config, depth+1)
 	f.facet = f.initFacet(spec.Get("facet"))
 	return f
 }
@@ -50,7 +50,9 @@ func (f *facetModel) initFacet(facet Value) *Object {
 }
 
 func (f *facetModel) initFacetFieldDef(fd Value, channel string) Value {
-	ffd := initFieldDef(fd, channel, false)
+	cc := f.b().ctx
+
+	ffd := initFieldDef(cc, fd, channel, false)
 	o := ffd.ObjValue()
 	if h := o.Lookup("header"); h.IsTruthy() {
 		o.Set("header", replaceExprRef(h, 0))
@@ -66,16 +68,20 @@ func (f *facetModel) channelHasField(channel string) bool {
 func (f *facetModel) fieldDef(channel string) Value { return f.facet.Lookup(channel) }
 
 func (f *facetModel) vgField(channel string, opt fieldRefOption) string {
+	cc := f.b().ctx
+
 	fd := f.fieldDef(channel)
 	if !fd.IsTruthy() {
 		return ""
 	}
-	return vgField(fd, opt)
+	return vgField(cc, fd, opt)
 }
 
 func (f *facetModel) forEachFieldDef(fn func(fd Value, channel string)) {
+	cc := f.b().ctx
+
 	encodingEach(jsval.Obj(f.facet), func(cd Value, c string) {
-		if fd := getFieldDef(cd); fd.IsTruthy() {
+		if fd := getFieldDef(cc, cd); fd.IsTruthy() {
 			fn(fd, c)
 		}
 	})
@@ -203,10 +209,12 @@ func (f *facetModel) assembleGroupStyle() Value { return undef }
 
 // assembleGroup overrides the shared group assembly for nested facets.
 func (f *facetModel) assembleGroupFor(signals []Value) *Object {
+	cc := f.b().ctx
+
 	if f.parent != nil && isFacetModel(f.parent) {
 		o := jsval.NewObject(6)
 		if f.channelHasField("column") {
-			o.Set("encode", mkv("update", mkv("columns", mkv("field", vgField(f.facet.Lookup("column"), fieldRefOption{prefix: "distinct"})))))
+			o.Set("encode", mkv("update", mkv("columns", mkv("field", vgField(cc, f.facet.Lookup("column"), fieldRefOption{prefix: "distinct"})))))
 		}
 		spread(o, jsval.Obj(assembleGroup(f, signals)))
 		return o
@@ -219,10 +227,12 @@ type cardinalityAggregate struct {
 }
 
 func (f *facetModel) getCardinalityAggregateForChild() cardinalityAggregate {
+	cc := f.b().ctx
+
 	var r cardinalityAggregate
 	if cf, ok := f.child.(*facetModel); ok {
 		if cf.channelHasField("column") {
-			field := vgField(cf.facet.Lookup("column"), fieldRefOption{})
+			field := vgField(cc, cf.facet.Lookup("column"), fieldRefOption{})
 			r.fields = append(r.fields, jsval.Str(field))
 			r.ops = append(r.ops, jsval.Str("distinct"))
 			r.as = append(r.as, jsval.Str("distinct_"+field))
@@ -247,6 +257,8 @@ func (f *facetModel) getCardinalityAggregateForChild() cardinalityAggregate {
 }
 
 func (f *facetModel) assembleFacet() Value {
+	cc := f.b().ctx
+
 	root := f.comp.data.facetRoot
 	name, data := root.name, root.data
 	row, column := f.facet.Lookup("row"), f.facet.Lookup("column")
@@ -257,15 +269,15 @@ func (f *facetModel) assembleFacet() Value {
 		if !fd.IsTruthy() {
 			continue
 		}
-		groupby = append(groupby, jsval.Str(vgField(fd, fieldRefOption{})))
+		groupby = append(groupby, jsval.Str(vgField(cc, fd, fieldRefOption{})))
 		bin, sort := fd.Get("bin"), fd.Get("sort")
 		if isBinning(bin) {
-			groupby = append(groupby, jsval.Str(vgField(fd, fieldRefOption{binSuffix: "end"})))
+			groupby = append(groupby, jsval.Str(vgField(cc, fd, fieldRefOption{binSuffix: "end"})))
 		}
-		if isSortField(sort) {
+		if isSortField(cc, sort) {
 			field := sort.Get("field")
 			op := coalesce(sort.Get("op"), jsval.Str(defaultSortOp))
-			outputName := facetSortFieldName(fd, sort, fieldRefOption{})
+			outputName := facetSortFieldName(cc, fd, sort, fieldRefOption{})
 			if row.IsTruthy() && column.IsTruthy() {
 				agg.fields = append(agg.fields, jsval.Str(outputName))
 				agg.ops = append(agg.ops, jsval.Str("max"))
@@ -276,7 +288,7 @@ func (f *facetModel) assembleFacet() Value {
 				agg.as = append(agg.as, jsval.Str(outputName))
 			}
 		} else if sort.IsArr() {
-			outputName := sortArrayIndexField(fd, channel, fieldRefOption{})
+			outputName := sortArrayIndexField(cc, fd, channel, fieldRefOption{})
 			agg.fields = append(agg.fields, jsval.Str(outputName))
 			agg.ops = append(agg.ops, jsval.Str("max"))
 			agg.as = append(agg.as, jsval.Str(outputName))
@@ -300,28 +312,32 @@ func (f *facetModel) assembleFacet() Value {
 }
 
 func (f *facetModel) facetSortFields(channel string) []Value {
+	cc := f.b().ctx
+
 	fd := f.facet.Lookup(channel)
 	if !fd.IsTruthy() {
 		return nil
 	}
 	sort := fd.Get("sort")
 	switch {
-	case isSortField(sort):
-		return []Value{jsval.Str(facetSortFieldName(fd, sort, fieldRefOption{expr: "datum"}))}
+	case isSortField(cc, sort):
+		return []Value{jsval.Str(facetSortFieldName(cc, fd, sort, fieldRefOption{expr: "datum"}))}
 	case sort.IsArr():
-		return []Value{jsval.Str(sortArrayIndexField(fd, channel, fieldRefOption{expr: "datum"}))}
+		return []Value{jsval.Str(sortArrayIndexField(cc, fd, channel, fieldRefOption{expr: "datum"}))}
 	}
-	return []Value{jsval.Str(vgField(fd, fieldRefOption{expr: "datum"}))}
+	return []Value{jsval.Str(vgField(cc, fd, fieldRefOption{expr: "datum"}))}
 }
 
 func (f *facetModel) facetSortOrder(channel string) []Value {
+	cc := f.b().ctx
+
 	fd := f.facet.Lookup(channel)
 	if !fd.IsTruthy() {
 		return nil
 	}
 	sort := fd.Get("sort")
 	var order Value
-	if isSortField(sort) {
+	if isSortField(cc, sort) {
 		order = sort.Get("order")
 	} else if !sort.IsArr() {
 		order = sort
@@ -330,15 +346,17 @@ func (f *facetModel) facetSortOrder(channel string) []Value {
 }
 
 func (f *facetModel) assembleLabelTitle() Value {
+	cc := f.b().ctx
+
 	if fd := f.facet.Lookup("facet"); fd.IsTruthy() {
-		return assembleLabelTitle(fd, "facet", f.config)
+		return assembleLabelTitle(cc, fd, "facet", f.config)
 	}
 	orth := map[string][]string{"row": {"top", "bottom"}, "column": {"left", "right"}}
 	for _, channel := range headerChannels {
 		if fd := f.facet.Lookup(channel); fd.IsTruthy() {
 			lo := getHeaderProperty("labelOrient", fd.Get("header"), f.config, channel)
 			if lo.IsStr() && contains(orth[channel], lo.StrValue()) {
-				return assembleLabelTitle(fd, channel, f.config)
+				return assembleLabelTitle(cc, fd, channel, f.config)
 			}
 		}
 	}

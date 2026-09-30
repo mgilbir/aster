@@ -99,7 +99,7 @@ func parseRangeForChannel(channel string, u *unitModel) withExplicit {
 				positionChannel = chX
 			}
 			pc := u.getScaleComponent(positionChannel)
-			if pc.get("type").AsString() == "band" {
+			if pc != nil && pc.get("type").AsString() == "band" {
 				if step := getOffsetStep(sizeValue, scaleType); step.IsTruthy() {
 					return makeExplicit(step)
 				}
@@ -141,8 +141,10 @@ func fullWidthOrHeightRange(channel string, m *unitModel, scaleType string, cent
 }
 
 func defaultRange(channel string, u *unitModel) Value {
+	cc := u.b().ctx
+
 	size, config, mark, encoding := u.size, u.config, u.mark(), u.encoding
-	typ := channelDefType(getFieldOrDatumDef(encoding.Get(channel)))
+	typ := channelDefType(getFieldOrDatumDef(cc, encoding.Get(channel)))
 	merged := u.getScaleComponent(channel)
 	scaleType := merged.get("type").AsString()
 	spec := u.specifiedScales.Lookup(channel)
@@ -150,7 +152,7 @@ func defaultRange(channel string, u *unitModel) Value {
 	switch channel {
 	case chX, chY:
 		if scaleType == "point" || scaleType == "band" {
-			positionSize := getDiscretePositionSize(channel, size, config.Get("view"))
+			positionSize := getDiscretePositionSize(cc, channel, size, config.Get("view"))
 			if isStep(positionSize) {
 				return mkv("step", getPositionStep(positionSize, u, channel))
 			}
@@ -160,7 +162,7 @@ func defaultRange(channel string, u *unitModel) Value {
 		return getOffsetRange(channel, u, scaleType)
 	case chSize:
 		var rangeMin Value
-		if v5 {
+		if cc.v5 {
 			rangeMin = sizeRangeMin58(mark, merged.get("zero"), config)
 		} else {
 			rangeMin = sizeRangeMin(mark, config)
@@ -177,7 +179,7 @@ func defaultRange(channel string, u *unitModel) Value {
 	case chRadius:
 		return arr(0, lazySignal(u.ctx, func() string {
 			wn, hn := "width", "height"
-			if !v5 && u.parent != nil && isFacetModel(u.parent) {
+			if !cc.v5 && u.parent != nil && isFacetModel(u.parent) {
 				wn, hn = "child_width", "child_height"
 			}
 			return "min(" + u.getSignalName(wn) + "," + u.getSignalName(hn) + ")/2"
@@ -221,12 +223,14 @@ func getStepFor(step Value, offsetIsDiscrete bool) string {
 }
 
 func getPositionStep(step Value, u *unitModel, channel string) Value {
+	cc := u.b().ctx
+
 	encoding := u.encoding
 	merged := u.getScaleComponent(channel)
 	offsetChannel := getOffsetScaleChannel(channel)
 	offsetDef := encoding.Get(offsetChannel)
-	stepFor := getStepFor(step, isFieldOrDatumDef(offsetDef) && isDiscreteType(channelDefType(offsetDef)))
-	if stepFor == "offset" && channelHasFieldOrDatum(encoding, offsetChannel) {
+	stepFor := getStepFor(step, isFieldOrDatumDef(cc, offsetDef) && isDiscreteType(channelDefType(offsetDef)))
+	if stepFor == "offset" && channelHasFieldOrDatum(cc, encoding, offsetChannel) {
 		offsetCmpt := u.getScaleComponent(offsetChannel)
 		offsetScaleName := u.scaleName(offsetChannel, false)
 		stepCount := "domain('" + offsetScaleName + "').length"
@@ -249,13 +253,15 @@ func getOffsetStep(step Value, offsetScaleType string) Value {
 }
 
 func getOffsetRange(channel string, u *unitModel, offsetScaleType string) Value {
+	cc := u.b().ctx
+
 	positionChannel := chY
 	if channel == chXOffset {
 		positionChannel = chX
 	}
 	pc := u.getScaleComponent(positionChannel)
 	if pc == nil {
-		if v5 {
+		if cc.v5 {
 			throw("Cannot use %s scale if %s scale is not discrete.", channel, positionChannel)
 		}
 		return fullWidthOrHeightRange(positionChannel, u, offsetScaleType, true)
@@ -264,7 +270,7 @@ func getOffsetRange(channel string, u *unitModel, offsetScaleType string) Value 
 	positionScaleName := u.scaleName(positionChannel, false)
 	markDef, config := u.markDef, u.config
 	if positionScaleType == "band" {
-		size := getDiscretePositionSize(positionChannel, u.size, u.config.Get("view"))
+		size := getDiscretePositionSize(cc, positionChannel, u.size, u.config.Get("view"))
 		if isStep(size) {
 			if step := getOffsetStep(size, offsetScaleType); step.IsTruthy() {
 				return step
@@ -273,12 +279,12 @@ func getOffsetRange(channel string, u *unitModel, offsetScaleType string) Value 
 		return arr(0, sig("bandwidth('"+positionScaleName+"')"))
 	}
 	positionDef := u.encoding.Get(positionChannel)
-	if !v5 && isFieldDef(positionDef) && positionDef.Get("timeUnit").IsTruthy() {
-		duration := durationExpr(positionDef.Get("timeUnit"), func(expr string) string {
+	if !cc.v5 && isFieldDef(cc, positionDef) && positionDef.Get("timeUnit").IsTruthy() {
+		duration := durationExpr(cc, positionDef.Get("timeUnit"), func(expr string) string {
 			return "scale('" + positionScaleName + "', " + expr + ")"
 		})
 		padding := u.config.Get("scale").Get("bandWithNestedOffsetPaddingInner")
-		bp := getBandPosition(positionDef, undef, markDef, config)
+		bp := getBandPosition(cc, positionDef, undef, markDef, config)
 		bandPositionOffset := bp.AsDouble() - 0.5
 		if bp.IsUndefined() {
 			bandPositionOffset = math.NaN()
@@ -305,12 +311,12 @@ func getOffsetRange(channel string, u *unitModel, offsetScaleType string) Value 
 	return undef
 }
 
-func getDiscretePositionSize(channel string, size *Object, view Value) Value {
+func getDiscretePositionSize(cc *compileCtx, channel string, size *Object, view Value) Value {
 	sizeChannel := "height"
 	if channel == chX {
 		sizeChannel = "width"
 	}
-	if v := size.Lookup(sizeChannel); (v5 && v.IsTruthy()) || (!v5 && !v.IsUndefined()) {
+	if v := size.Lookup(sizeChannel); (cc.v5 && v.IsTruthy()) || (!cc.v5 && !v.IsUndefined()) {
 		return v
 	}
 	return getViewConfigDiscreteSize(view, sizeChannel)

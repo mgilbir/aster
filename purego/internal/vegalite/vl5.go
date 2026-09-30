@@ -21,7 +21,7 @@ func wrapCondition58(o wrapConditionOpts) Value {
 			if isConditionalParameter(c) {
 				test = parseSelectionPredicate(o.model, mkv("param", c.Get("param"), "empty", c.Get("empty")), nil, "datum")
 			} else {
-				test = expression(o.model, c.Get("test"), nil)
+				test = expression(o.model.b().ctx, o.model, c.Get("test"), nil)
 			}
 			r := mk("test", test)
 			spreadV(r, cvr)
@@ -98,14 +98,14 @@ func definedEncode58(m *unitModel) Value {
 
 // midPointRefWithPositionInvalidTest58 prepends the zero reference for invalid
 // values when `invalid` is null.
-func midPointRefWithPositionInvalidTest58(p midPointParams) Value {
-	ref := midPoint(p)
-	if isFieldDef(p.channelDef) && !isCountingAggregateOp(p.channelDef.Get("aggregate")) && p.scale != nil && isContinuousToContinuous(p.scale.get("type").AsString()) {
+func midPointRefWithPositionInvalidTest58(cc *compileCtx, p midPointParams) Value {
+	ref := midPoint(cc, p)
+	if isFieldDef(cc, p.channelDef) && !isCountingAggregateOp(p.channelDef.Get("aggregate")) && p.scale != nil && isContinuousToContinuous(p.scale.get("type").AsString()) {
 		if isPathMarkName(p.markDef.Get("type").AsString()) {
 			return ref
 		}
 		if getMarkPropOrConfigSimple("invalid", p.markDef, p.config).IsNull() {
-			test := fieldValidPredicate(vgField(p.channelDef, fieldRefOption{expr: "datum"}), false)
+			test := fieldValidPredicate(vgField(cc, p.channelDef, fieldRefOption{expr: "datum"}), false)
 			var zero Value
 			if getMainRangeChannel(p.channel) == chY {
 				zero = mkv("test", test, "field", mkv("group", "height"))
@@ -121,22 +121,24 @@ func midPointRefWithPositionInvalidTest58(p midPointParams) Value {
 // getPathSort58 sorts the marks of a path by the dimension field's own sort
 // (6.x sorts by the dimension channel's value alone).
 func getPathSort58(m *unitModel, dim string) Value {
+	cc := m.b().ctx
+
 	def := m.encoding.Get(dim)
-	if !isFieldDef(def) {
+	if !isFieldDef(cc, def) {
 		return undef
 	}
 	s := def.Get("sort")
 	switch {
 	case s.IsArr():
-		return mkv("field", vgField(def, fieldRefOption{prefix: dim, suffix: "sort_index", expr: "datum"}))
-	case isSortField(s):
+		return mkv("field", vgField(cc, def, fieldRefOption{prefix: dim, suffix: "sort_index", expr: "datum"}))
+	case isSortField(cc, s):
 		var agg Value
-		if encodingIsAggregate(m.encoding) {
+		if encodingIsAggregate(cc, m.encoding) {
 			agg = s.Get("op")
 		}
-		return mkv("field", vgField(mkv("aggregate", agg, "field", s.Get("field")), fieldRefOption{expr: "datum"}))
+		return mkv("field", vgField(cc, mkv("aggregate", agg, "field", s.Get("field")), fieldRefOption{expr: "datum"}))
 	case isSortByEncoding(s):
-		return mkv("field", vgField(m.fieldDef(s.Get("encoding").AsString()), fieldRefOption{expr: "datum"}), "order", s.Get("order"))
+		return mkv("field", vgField(cc, m.fieldDef(s.Get("encoding").AsString()), fieldRefOption{expr: "datum"}), "order", s.Get("order"))
 	case s.IsNull():
 		return undef
 	}
@@ -144,7 +146,7 @@ func getPathSort58(m *unitModel, dim string) Value {
 	if m.stack != nil && m.stack.impute {
 		opt.binSuffix = "mid"
 	}
-	return mkv("field", vgField(def, opt))
+	return mkv("field", vgField(cc, def, opt))
 }
 
 // domainDefinitelyIncludesZero58 is 5.8's ScaleComponent.domainDefinitelyIncludesZero.
@@ -197,6 +199,8 @@ func pointPositionDefaultRef58(m *unitModel, defaultPos, channel, scaleName stri
 // ---- rect position (5.8) ----
 
 func rectPosition58(m *unitModel, channel string) Value {
+	cc := m.b().ctx
+
 	config, encoding, markDef := m.config, m.encoding, m.markDef
 	mark := markDef.Get("type").AsString()
 	channel2 := getSecondaryRangeChannel(channel)
@@ -210,12 +214,12 @@ func rectPosition58(m *unitModel, channel string) Value {
 	orient := markDef.Get("orient").AsString()
 	hasSizeDef := coalesce(encoding.Get(sizeChannel), encoding.Get("size"), getMarkPropOrConfig("size", markDef, config, sizeChannel, false))
 	isBarBand := mark == "bar" && ((channel == chX && orient == "vertical") || (channel != chX && orient == "horizontal"))
-	if isFieldDef(channelDef) &&
+	if isFieldDef(cc, channelDef) &&
 		(isBinning(channelDef.Get("bin")) || isBinned(channelDef.Get("bin")) || (channelDef.Get("timeUnit").IsTruthy() && !channelDef2.IsTruthy())) &&
 		!(hasSizeDef.IsTruthy() && !isRelativeBandSize(hasSizeDef)) &&
 		!hasDiscreteDomain(scaleType) {
 		return rectBinPosition58(channelDef, channelDef2, channel, m)
-	} else if ((isFieldOrDatumDef(channelDef) && hasDiscreteDomain(scaleType)) || isBarBand) && !channelDef2.IsTruthy() {
+	} else if ((isFieldOrDatumDef(cc, channelDef) && hasDiscreteDomain(scaleType)) || isBarBand) && !channelDef2.IsTruthy() {
 		return positionAndSize58(channelDef, channel, m)
 	}
 	return rangePosition(channel, m, rangePosOpts{defaultPos: "zeroOrMax", defaultPos2: "zeroOrMin"})
@@ -250,6 +254,8 @@ func defaultSizeRef58(sizeChannel, scaleName string, scale *scaleComponent, conf
 }
 
 func positionAndSize58(fd Value, channel string, m *unitModel) Value {
+	cc := m.b().ctx
+
 	markDef, encoding, config, stack := m.markDef, m.encoding, m.config, m.stack
 	orient := markDef.Get("orient").AsString()
 	scaleName := m.scaleName(channel, false)
@@ -269,7 +275,7 @@ func positionAndSize58(fd Value, channel string, m *unitModel) Value {
 	if scale != nil {
 		scType = scale.get("type").AsString()
 	}
-	bandSize := getBandSize(channel, fd, undef, markDef, config, scType, useVlSizeChannel)
+	bandSize := getBandSize(cc, channel, fd, undef, markDef, config, scType, useVlSizeChannel)
 	if !sizeMixins.IsTruthy() {
 		name := offsetScaleName
 		if name == "" {
@@ -304,7 +310,7 @@ func positionAndSize58(fd Value, channel string, m *unitModel) Value {
 	default:
 		bandPosition = jsval.Int(0)
 	}
-	posRef := midPointRefWithPositionInvalidTest(midPointParams{
+	posRef := midPointRefWithPositionInvalidTest(cc, midPointParams{
 		channel: channel, channelDef: fd, markDef: markDef, config: config, scaleName: scaleName, scale: scale, stack: stack,
 		offset: po.offset, defaultRefFn: pointPositionDefaultRef(m, "mid", channel, scaleName, scale), bandPosition: bandPosition,
 	})
@@ -375,6 +381,8 @@ func getBinSpacing58(channel string, spacing float64, reverse, axisTranslate, of
 }
 
 func rectBinPosition58(fd, fd2 Value, channel string, m *unitModel) Value {
+	cc := m.b().ctx
+
 	config, markDef, encoding := m.config, m.markDef, m.encoding
 	scale := m.getScaleComponent(channel)
 	scaleName := m.scaleName(channel, false)
@@ -384,7 +392,7 @@ func rectBinPosition58(fd, fd2 Value, channel string, m *unitModel) Value {
 		scaleType = scale.get("type").AsString()
 		reverse = scale.get("reverse")
 	}
-	bandSize := getBandSize(channel, fd, undef, markDef, config, scaleType, false)
+	bandSize := getBandSize(cc, channel, fd, undef, markDef, config, scaleType, false)
 	var axis *axisComponent
 	if axes, ok := m.comp.axes.get(channel); ok && len(axes) > 0 {
 		axis = axes[0]
@@ -421,16 +429,16 @@ func rectBinPosition58(fd, fd2 Value, channel string, m *unitModel) Value {
 			second = jsval.Num(1 - bandPosition.NumValue())
 		}
 		return mkv(
-			vgChannel2, rectBinRef58(fd, scaleName, bandPosition, getBinSpacing58(channel2, spacing, reverse, axisTranslate, offset)),
-			vgChannel, rectBinRef58(fd, scaleName, second, getBinSpacing58(channel, spacing, reverse, axisTranslate, offset)),
+			vgChannel2, rectBinRef58(cc, fd, scaleName, bandPosition, getBinSpacing58(channel2, spacing, reverse, axisTranslate, offset)),
+			vgChannel, rectBinRef58(cc, fd, scaleName, second, getBinSpacing58(channel, spacing, reverse, axisTranslate, offset)),
 		)
 	} else if isBinned(fd.Get("bin")) {
-		startRef := valueRefForFieldOrDatumDef(fd, scaleName, fieldRefOption{}, refOffsetBand{offset: getBinSpacing58(channel2, spacing, reverse, axisTranslate, offset)})
-		if isFieldDef(fd2) {
-			return mkv(vgChannel2, startRef, vgChannel, valueRefForFieldOrDatumDef(fd2, scaleName, fieldRefOption{}, refOffsetBand{offset: getBinSpacing58(channel, spacing, reverse, axisTranslate, offset)}))
+		startRef := valueRefForFieldOrDatumDef(cc, fd, scaleName, fieldRefOption{}, refOffsetBand{offset: getBinSpacing58(channel2, spacing, reverse, axisTranslate, offset)})
+		if isFieldDef(cc, fd2) {
+			return mkv(vgChannel2, startRef, vgChannel, valueRefForFieldOrDatumDef(cc, fd2, scaleName, fieldRefOption{}, refOffsetBand{offset: getBinSpacing58(channel, spacing, reverse, axisTranslate, offset)}))
 		} else if isObject(fd.Get("bin")) && fd.Get("bin").Get("step").IsTruthy() {
 			return mkv(vgChannel2, startRef, vgChannel, mkv(
-				"signal", `scale("`+scaleName+`", `+vgField(fd, fieldRefOption{expr: "datum"})+" + "+fd.Get("bin").Get("step").AsString()+")",
+				"signal", `scale("`+scaleName+`", `+vgField(cc, fd, fieldRefOption{expr: "datum"})+" + "+fd.Get("bin").Get("step").AsString()+")",
 				"offset", getBinSpacing58(channel, spacing, reverse, axisTranslate, offset),
 			))
 		}
@@ -438,8 +446,8 @@ func rectBinPosition58(fd, fd2 Value, channel string, m *unitModel) Value {
 	return undef
 }
 
-func rectBinRef58(fd Value, scaleName string, bandPosition, offset Value) Value {
-	return interpolatedSignalRef(interpolatedOpts{scaleName: scaleName, fod: fd, bandPosition: bandPosition, offset: offset})
+func rectBinRef58(cc *compileCtx, fd Value, scaleName string, bandPosition, offset Value) Value {
+	return interpolatedSignalRef(cc, interpolatedOpts{scaleName: scaleName, fod: fd, bandPosition: bandPosition, offset: offset})
 }
 
 // tick58 is 5.8's tick encode entry: a point position with a size and a
@@ -483,8 +491,8 @@ func tickDefaultSize58(m *unitModel) Value {
 
 // mouseMoveEvent is the unit-tracking event: 6.x listens to pointer events,
 // 5.8 to mouse events.
-func mouseMoveEvent() string {
-	if v5 {
+func mouseMoveEvent(cc *compileCtx) string {
+	if cc.v5 {
 		return "mousemove"
 	}
 	return "pointermove"
@@ -504,8 +512,8 @@ func sizeRangeMin58(mark string, zero Value, config Value) Value {
 
 // cmAccess reads a field of the current datum in a composite mark's generated
 // expressions: 6.x escapes it into a quoted path, 5.8 interpolates it as is.
-func cmAccess(p string) string {
-	if v5 {
+func cmAccess(cc *compileCtx, p string) string {
+	if cc.v5 {
 		return `datum["` + p + `"]`
 	}
 	return accessWithDatumToUnescapedPath(p)
@@ -513,16 +521,16 @@ func cmAccess(p string) string {
 
 // cmAlias is the field name composite marks use in the names of their derived
 // fields: 6.x strips the path syntax, 5.8 does not.
-func cmAlias(field string) string {
-	if v5 {
+func cmAlias(cc *compileCtx, field string) string {
+	if cc.v5 {
 		return field
 	}
 	return removePathFromField(field)
 }
 
 // legendSelectionUpdate is the expression reading the clicked legend entry.
-func legendSelectionUpdate() string {
-	if v5 {
+func legendSelectionUpdate(cc *compileCtx) string {
+	if cc.v5 {
 		return "datum.value || item().items[0].items[0].datum.value"
 	}
 	return "isDefined(datum.value) ? datum.value : item().items[0].items[0].datum.value"
@@ -535,7 +543,11 @@ func assembleLegends58(m Model) []Value {
 	byDomain := newOmap[[]*legendComponent]()
 	for _, channel := range index.keyList() {
 		lc, _ := index.get(channel)
-		domainHash := stringify(m.b().getScaleComponent(channel).get("domains"))
+		sc := m.b().getScaleComponent(channel)
+		if sc == nil {
+			throw("No scale found for the %s legend; check the `resolve` property.", channel)
+		}
+		domainHash := stringify(sc.get("domains"))
 		if !byDomain.has(domainHash) {
 			byDomain.set(domainHash, []*legendComponent{lc.cloneLegend()})
 			continue

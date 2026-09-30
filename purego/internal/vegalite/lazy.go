@@ -1,10 +1,9 @@
 package vegalite
 
 import (
+	"context"
 	"strconv"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/mgilbir/aster/purego/internal/jsval"
@@ -14,36 +13,47 @@ import (
 // because signal names get renamed while child layout sizes merge into their
 // parents (upstream's SignalRefWrapper defines `signal` as a getter). A lazy
 // signal is an ordinary {signal: "\x00lazy:N"} object whose real expression is
-// produced by a registered function; resolveLazy rewrites them in the finished
-// output, and deepEqual/signalOf see through them in the meantime.
+// produced by the function attached to it as its string conversion (the
+// object's stringer, which only the compiler sets, so a specification cannot
+// forge one); resolveLazy rewrites them in the finished output, and
+// deepEqual/signalOf see through them in the meantime. Nothing is kept outside
+// the objects themselves, so compilations share no state.
 
 const lazyMarker = "\x00lazy:"
 
-var (
-	lazyFuncs sync.Map // *Object -> func() string
-	lazySeq   atomic.Int64
-)
-
 // compileCtx is the per-compilation state shared by every model of one tree.
 type compileCtx struct {
-	lazies []*Object
+	// v5 selects Vega-Lite 5.8.0 behaviour wherever it differs from 6.4.3.
+	v5 bool
 	// loc is the time zone of local-time datetimes (Options.Location).
 	loc *time.Location
+	// ctx is the caller's context, checked in loops that can run long.
+	ctx context.Context
+	// lazySeq numbers the lazy signals; outputSeq the output nodes' hash keys.
+	lazySeq, outputSeq int64
+	// sigIdx speeds up signal lookups by name (see signalIndex).
+	sigIdx signalIndex
 }
 
-// release forgets every lazy signal registered during the compilation.
-func (c *compileCtx) release() {
-	for _, o := range c.lazies {
-		lazyFuncs.Delete(o)
+// check panics with the context's error once the caller's context is done.
+// Polling is cheap next to the work between two checkpoints.
+func (c *compileCtx) check() {
+	if c == nil || c.ctx == nil {
+		return
 	}
-	c.lazies = nil
+	if err := c.ctx.Err(); err != nil {
+		panic(cancelError{err})
+	}
 }
+
+// cancelError is the panic value Compile turns back into the context's error.
+type cancelError struct{ err error }
 
 // lazySignal makes a signal reference whose expression is computed on demand.
 func lazySignal(c *compileCtx, fn func() string) Value {
-	o := mk("signal", lazyMarker+strconv.FormatInt(lazySeq.Add(1), 10))
-	lazyFuncs.Store(o, fn)
-	c.lazies = append(c.lazies, o)
+	c.lazySeq++
+	o := mk("signal", lazyMarker+strconv.FormatInt(c.lazySeq, 10))
+	o.SetStringer(func(*Object) string { return lazyMarker + fn() })
 	return jsval.Obj(o)
 }
 
@@ -52,11 +62,11 @@ func lazyFn(o *Object) (func() string, bool) {
 	if !s.IsStr() || !strings.HasPrefix(s.StrValue(), lazyMarker) {
 		return nil, false
 	}
-	f, ok := lazyFuncs.Load(o)
-	if !ok {
+	v := jsval.Obj(o)
+	if !strings.HasPrefix(v.AsString(), lazyMarker) {
 		return nil, false
 	}
-	return f.(func() string), true
+	return func() string { return strings.TrimPrefix(v.AsString(), lazyMarker) }, true
 }
 
 // signalOf reads ref.signal, evaluating a lazy signal.
@@ -69,8 +79,7 @@ func signalOf(v Value) string {
 	return v.Get("signal").AsString()
 }
 
-// resolveLazy replaces every lazy signal in v with its evaluated expression
-// and forgets the registrations it consumed.
+// resolveLazy replaces every lazy signal in v with its evaluated expression.
 func resolveLazy(v Value) {
 	switch v.Kind() {
 	case jsval.KindArr:
@@ -81,7 +90,7 @@ func resolveLazy(v Value) {
 		o := v.ObjValue()
 		if fn, ok := lazyFn(o); ok {
 			o.Set("signal", jsval.Str(fn()))
-			lazyFuncs.Delete(o)
+			o.SetStringer(nil)
 		}
 		for i := 0; i < o.Len(); i++ {
 			resolveLazy(o.ValueAt(i))

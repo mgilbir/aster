@@ -4,19 +4,20 @@ import (
 	"github.com/mgilbir/aster/purego/internal/jsval"
 )
 
-func buildModel(spec Value, parent Model, parentGivenName string, unitSize *Object, config Value, depth int) Model {
+func buildModel(cc *compileCtx, spec Value, parent Model, parentGivenName string, unitSize *Object, config Value, depth int) Model {
+	cc.check()
 	if depth > maxDepth {
 		panic(compileError{errDepth.Error()})
 	}
 	switch {
 	case isFacetSpec(spec):
-		return newFacetModel(spec, parent, parentGivenName, config, depth)
+		return newFacetModel(cc, spec, parent, parentGivenName, config, depth)
 	case isLayerSpec(spec):
-		return newLayerModel(spec, parent, parentGivenName, unitSize, config, depth)
+		return newLayerModel(cc, spec, parent, parentGivenName, unitSize, config, depth)
 	case isUnitSpec(spec):
-		return newUnitModel(spec, parent, parentGivenName, unitSize, config)
+		return newUnitModel(cc, spec, parent, parentGivenName, unitSize, config)
 	case isAnyConcatSpec(spec):
-		return newConcatModel(spec, parent, parentGivenName, config, depth)
+		return newConcatModel(cc, spec, parent, parentGivenName, config, depth)
 	}
 	throw("Invalid spec: %s", stringify(spec))
 	return nil
@@ -28,13 +29,13 @@ type layerModel struct {
 	kids []Model
 }
 
-func newLayerModel(spec Value, parent Model, parentGivenName string, parentGivenSize *Object, config Value, depth int) *layerModel {
+func newLayerModel(cc *compileCtx, spec Value, parent Model, parentGivenName string, parentGivenSize *Object, config Value, depth int) *layerModel {
 	l := &layerModel{}
 	var resolve *resolveIndex
 	if r := spec.Get("resolve"); r.IsObj() {
 		resolve = resolveFromSpec(r)
 	}
-	l.modelBase = newModelBase(l, spec, "layer", parent, parentGivenName, config, resolve, spec.Get("view"))
+	l.modelBase = newModelBase(cc, l, spec, "layer", parent, parentGivenName, config, resolve, spec.Get("view"))
 	layoutSize := cloneObj(parentGivenSize)
 	if v := spec.Get("width"); v.IsTruthy() {
 		layoutSize.Set("width", v)
@@ -46,9 +47,9 @@ func newLayerModel(spec Value, parent Model, parentGivenName string, parentGiven
 		name := l.getName("layer_" + jsval.JSNumberString(float64(i)))
 		switch {
 		case isLayerSpec(layer):
-			l.kids = append(l.kids, newLayerModel(layer, l, name, layoutSize, config, depth+1))
+			l.kids = append(l.kids, newLayerModel(cc, layer, l, name, layoutSize, config, depth+1))
 		case isUnitSpec(layer):
-			l.kids = append(l.kids, newUnitModel(layer, l, name, layoutSize, config))
+			l.kids = append(l.kids, newUnitModel(cc, layer, l, name, layoutSize, config))
 		default:
 			throw("Invalid spec: %s", stringify(layer))
 		}
@@ -195,13 +196,13 @@ type concatModel struct {
 	kids []Model
 }
 
-func newConcatModel(spec Value, parent Model, parentGivenName string, config Value, depth int) *concatModel {
+func newConcatModel(cc *compileCtx, spec Value, parent Model, parentGivenName string, config Value, depth int) *concatModel {
 	c := &concatModel{}
 	var resolve *resolveIndex
 	if r := spec.Get("resolve"); r.IsObj() {
 		resolve = resolveFromSpec(r)
 	}
-	c.modelBase = newModelBase(c, spec, "concat", parent, parentGivenName, config, resolve, undef)
+	c.modelBase = newModelBase(cc, c, spec, "concat", parent, parentGivenName, config, resolve, undef)
 	var childSpecs Value
 	switch {
 	case isVConcatSpec(spec):
@@ -212,7 +213,7 @@ func newConcatModel(spec Value, parent Model, parentGivenName string, config Val
 		childSpecs = spec.Get("concat")
 	}
 	for i, child := range childSpecs.Items() {
-		c.kids = append(c.kids, buildModel(child, c, c.getName("concat_"+jsval.JSNumberString(float64(i))), nil, config, depth+1))
+		c.kids = append(c.kids, buildModel(cc, child, c, c.getName("concat_"+jsval.JSNumberString(float64(i))), nil, config, depth+1))
 	}
 	return c
 }

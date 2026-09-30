@@ -110,6 +110,8 @@ func parseUnitAxes(u *unitModel) *omap[[]*axisComponent] {
 var oppositeOrient = map[string]string{"bottom": "top", "top": "bottom", "left": "right", "right": "left"}
 
 func parseLayerAxes(m *layerModel) {
+	cc := m.b().ctx
+
 	axes, resolve := m.comp.axes, m.comp.resolve
 	axisCount := map[string]int{"top": 0, "bottom": 0, "right": 0, "left": 0}
 	for _, child := range m.kids {
@@ -158,7 +160,7 @@ func parseLayerAxes(m *layerModel) {
 		if resolve.axis[channel] == "independent" {
 			if list, ok := axes.get(channel); ok && len(list) > 1 {
 				for i, ac := range list {
-					if (v5 || i > 0) && ac.get("grid").IsTruthy() && !ac.explicit.Lookup("grid").IsTruthy() {
+					if (cc.v5 || i > 0) && ac.get("grid").IsTruthy() && !ac.explicit.Lookup("grid").IsTruthy() {
 						ac.implicit.Set("grid", jsval.False)
 					}
 				}
@@ -268,16 +270,18 @@ type axisRuleParams struct {
 }
 
 func parseAxis(channel string, m *unitModel) *axisComponent {
+	cc := m.b().ctx
+
 	axis := m.axis(channel)
 	axisComponent := newAxisComponent()
-	fod := getFieldOrDatumDef(m.encoding.Get(channel))
+	fod := getFieldOrDatumDef(cc, m.encoding.Get(channel))
 	mark, config := m.mark(), m.config
 	axisChannel := "axisY"
 	if channel == chX {
 		axisChannel = "axisX"
 	}
 	orient := or(axis.Get("orient"), config.Get(axisChannel).Get("orient"), config.Get("axis").Get("orient"), jsval.Str(defaultAxisOrient(channel)))
-	scaleType := m.getScaleComponent(channel).get("type").AsString()
+	scaleType := m.scaleTypeOf(channel)
 	axisConfigs := getAxisConfigs(channel, scaleType, orient, m.config)
 	var disable Value
 	if !axis.IsUndefined() {
@@ -292,9 +296,9 @@ func parseAxis(channel string, m *unitModel) *axisComponent {
 	if axis.IsUndefined() || !axis.IsTruthy() {
 		axis = mkv()
 	}
-	labelAngle := getLabelAngle(fod, axis, channel, config.Get("style"), axisConfigs)
-	formatType := guideFormatType(axis.Get("formatType"), fod, scaleType)
-	format := guideFormat(fod, channelDefType(fod), axis.Get("format"), axis.Get("formatType"), config, true)
+	labelAngle := getLabelAngle(cc, fod, axis, channel, config.Get("style"), axisConfigs)
+	formatType := guideFormatType(cc, axis.Get("formatType"), fod, scaleType)
+	format := guideFormat(cc, fod, channelDefType(fod), axis.Get("format"), axis.Get("formatType"), config, true)
 	rp := axisRuleParams{fod: fod, axis: axis, channel: channel, model: m, scaleType: scaleType, orient: orient, labelAngle: labelAngle,
 		format: format, formatType: formatType, mark: mark, config: config}
 	for _, property := range axisComponentProperties {
@@ -351,9 +355,11 @@ func defaultAxisOrient(channel string) string {
 }
 
 func guideEncodeEntry(encoding Value, m *unitModel) Value {
+	cc := m.b().ctx
+
 	out := jsval.NewObject(4)
 	for _, channel := range keysOf(encoding) {
-		spreadV(out, wrapCondition(wrapConditionOpts{
+		spreadV(out, wrapCondition(cc, wrapConditionOpts{
 			model: m, channelDef: encoding.Get(channel), vgChannel: channel,
 			mainRefFn: func(def Value) Value { return signalOrValueRef(def.Get("value")) },
 		}))
@@ -369,7 +375,7 @@ var axisRules = map[string]func(p axisRuleParams) Value{
 		if g := p.axis.Get("grid"); !g.IsNullish() {
 			return g
 		}
-		return jsval.Bool(defaultGrid(p.scaleType, p.fod))
+		return jsval.Bool(defaultGrid(p.model.ctx, p.scaleType, p.fod))
 	},
 	"gridScale": func(p axisRuleParams) Value { return gridScaleFor(p.model, p.channel) },
 	"labelAlign": func(p axisRuleParams) Value {
@@ -396,10 +402,10 @@ var axisRules = map[string]func(p axisRuleParams) Value{
 			return v
 		}
 		sort := undef
-		if isFieldDef(p.fod) {
+		if isFieldDef(p.model.ctx, p.fod) {
 			sort = p.fod.Get("sort")
 		}
-		return defaultLabelOverlapAxis(channelDefType(p.fod), p.scaleType, isFieldDef(p.fod) && p.fod.Get("timeUnit").IsTruthy(), sort)
+		return defaultLabelOverlapAxis(channelDefType(p.fod), p.scaleType, isFieldDef(p.model.ctx, p.fod) && p.fod.Get("timeUnit").IsTruthy(), sort)
 	},
 	"orient": func(p axisRuleParams) Value { return p.orient },
 	"tickCount": func(p axisRuleParams) Value {
@@ -413,13 +419,13 @@ var axisRules = map[string]func(p axisRuleParams) Value{
 		case chY:
 			size = p.model.getSizeSignalRef("height")
 		}
-		return defaultTickCount(p.fod, p.scaleType, size, p.axis.Get("values"))
+		return defaultTickCount(p.model.ctx, p.fod, p.scaleType, size, p.axis.Get("values"))
 	},
 	"tickMinStep": func(p axisRuleParams) Value {
-		if v := p.axis.Get("tickMinStep"); !v5 && !v.IsNullish() {
+		if v := p.axis.Get("tickMinStep"); !p.model.ctx.v5 && !v.IsNullish() {
 			return v
 		}
-		return defaultTickMinStep(p.format, p.fod)
+		return defaultTickMinStep(p.model.ctx, p.format, p.fod)
 	},
 	"title": func(p axisRuleParams) Value {
 		if t := p.axis.Get("title"); !t.IsUndefined() {
@@ -438,32 +444,32 @@ var axisRules = map[string]func(p axisRuleParams) Value{
 		if fd.IsTruthy() {
 			f1 = []Value{toFieldDefBase(fd)}
 		}
-		if isFieldDef(fd2) {
+		if isFieldDef(p.model.ctx, fd2) {
 			f2 = []Value{toFieldDefBase(fd2)}
 		}
 		return jsval.Arr(mergeTitleFieldDefs(f1, f2))
 	},
-	"values": func(p axisRuleParams) Value { return guideValues(p.axis, p.fod) },
+	"values": func(p axisRuleParams) Value { return guideValues(p.model.ctx, p.axis, p.fod) },
 	"zindex": func(p axisRuleParams) Value {
 		if z := p.axis.Get("zindex"); !z.IsNullish() {
 			return z
 		}
-		return jsval.Int(defaultZindex(p.mark, p.fod))
+		return jsval.Int(defaultZindex(p.model.ctx, p.mark, p.fod))
 	},
 }
 
-func guideValues(guide Value, fod Value) Value {
+func guideValues(cc *compileCtx, guide Value, fod Value) Value {
 	vals := guide.Get("values")
 	if vals.IsArr() {
-		return jsval.Arr(valueArray(fod, vals.Items()))
+		return jsval.Arr(valueArray(cc, fod, vals.Items()))
 	} else if isSignalRef(vals) {
 		return vals
 	}
 	return undef
 }
 
-func defaultGrid(scaleType string, fd Value) bool {
-	return !hasDiscreteDomain(scaleType) && isFieldDef(fd) && !isBinning(fd.Get("bin")) && !isBinned(fd.Get("bin"))
+func defaultGrid(cc *compileCtx, scaleType string, fd Value) bool {
+	return !hasDiscreteDomain(scaleType) && isFieldDef(cc, fd) && !isBinning(fd.Get("bin")) && !isBinned(fd.Get("bin"))
 }
 
 func gridScaleFor(m *unitModel, channel string) Value {
@@ -477,7 +483,7 @@ func gridScaleFor(m *unitModel, channel string) Value {
 	return undef
 }
 
-func getLabelAngle(fod Value, axis Value, channel string, styleConfig Value, axisConfigs axisConfigSet) Value {
+func getLabelAngle(cc *compileCtx, fod Value, axis Value, channel string, styleConfig Value, axisConfigs axisConfigSet) Value {
 	labelAngle := axis.Get("labelAngle")
 	if !labelAngle.IsUndefined() {
 		if isSignalRef(labelAngle) {
@@ -490,7 +496,7 @@ func getLabelAngle(fod Value, axis Value, channel string, styleConfig Value, axi
 		return normalizeAngle(angle)
 	}
 	t := channelDefType(fod)
-	if channel == chX && (t == "nominal" || t == "ordinal") && !(isFieldDef(fod) && fod.Get("timeUnit").IsTruthy()) {
+	if channel == chX && (t == "nominal" || t == "ordinal") && !(isFieldDef(cc, fod) && fod.Get("timeUnit").IsTruthy()) {
 		return jsval.Int(270)
 	}
 	return undef
@@ -645,14 +651,14 @@ func defaultLabelOverlapAxis(typ, scaleType string, hasTimeUnit bool, sort Value
 	return undef
 }
 
-func defaultTickCount(fod Value, scaleType string, size Value, values Value) Value {
+func defaultTickCount(cc *compileCtx, fod Value, scaleType string, size Value, values Value) Value {
 	if !values.IsTruthy() && !hasDiscreteDomain(scaleType) && scaleType != "log" {
-		if isFieldDef(fod) {
+		if isFieldDef(cc, fod) {
 			if isBinning(fod.Get("bin")) {
 				return sig("ceil(" + signalOf(size) + "/10)")
 			}
 			if fod.Get("timeUnit").IsTruthy() {
-				if u := normalizeTimeUnit(fod.Get("timeUnit")).Get("unit"); u.IsStr() && contains([]string{"month", "hours", "day", "quarter"}, u.StrValue()) {
+				if u := normalizeTimeUnit(cc, fod.Get("timeUnit")).Get("unit"); u.IsStr() && contains([]string{"month", "hours", "day", "quarter"}, u.StrValue()) {
 					return undef
 				}
 			}
@@ -662,13 +668,13 @@ func defaultTickCount(fod Value, scaleType string, size Value, values Value) Val
 	return undef
 }
 
-func defaultTickMinStep(format Value, fod Value) Value {
+func defaultTickMinStep(cc *compileCtx, format Value, fod Value) Value {
 	if format.IsStr() && format.StrValue() == "d" {
 		return jsval.Int(1)
 	}
-	if isFieldDef(fod) {
+	if isFieldDef(cc, fod) {
 		if tu := fod.Get("timeUnit"); tu.IsTruthy() {
-			if s := durationExpr(tu, nil); s != "" {
+			if s := durationExpr(cc, tu, nil); s != "" {
 				return sig(s)
 			}
 		}
@@ -704,8 +710,8 @@ func getFieldDefTitle(m *unitModel, channel string) Value {
 	return undef
 }
 
-func defaultZindex(mark string, fd Value) int {
-	if mark == "rect" && isDiscreteDef(fd) {
+func defaultZindex(cc *compileCtx, mark string, fd Value) int {
+	if mark == "rect" && isDiscreteDef(cc, fd) {
 		return 1
 	}
 	return 0
@@ -809,10 +815,12 @@ func arrayStrings(v Value) []string {
 // ---- labels encode ----
 
 func axisLabelsEncode(m *unitModel, channel string, specified Value) Value {
+	cc := m.b().ctx
+
 	encoding, config := m.encoding, m.config
-	fod := getFieldOrDatumDef(encoding.Get(channel))
+	fod := getFieldOrDatumDef(cc, encoding.Get(channel))
 	if !fod.IsTruthy() {
-		fod = getFieldOrDatumDef(encoding.Get(getSecondaryRangeChannel(channel)))
+		fod = getFieldOrDatumDef(cc, encoding.Get(getSecondaryRangeChannel(channel)))
 	}
 	axis := coalesceObj(m.axis(channel))
 	format, formatType := axis.Get("format"), axis.Get("formatType")
@@ -822,17 +830,17 @@ func axisLabelsEncode(m *unitModel, channel string, specified Value) Value {
 		return jsval.Obj(o)
 	}
 	if isCustomFormatType(formatType) {
-		return withText(formatCustomType(fod, format, formatType, "", false, config, "datum.value"))
+		return withText(formatCustomType(cc, fod, format, formatType, "", false, config, "datum.value"))
 	} else if format.IsUndefined() && formatType.IsUndefined() && config.Get("customFormatTypes").IsTruthy() {
 		if channelDefType(fod) == "quantitative" {
 			if isPositionFieldOrDatumDef(fod) && fod.Get("stack").IsStr() && fod.Get("stack").StrValue() == "normalize" && config.Get("normalizedNumberFormatType").IsTruthy() {
-				return withText(formatCustomType(fod, config.Get("normalizedNumberFormat"), config.Get("normalizedNumberFormatType"), "", false, config, "datum.value"))
+				return withText(formatCustomType(cc, fod, config.Get("normalizedNumberFormat"), config.Get("normalizedNumberFormatType"), "", false, config, "datum.value"))
 			} else if config.Get("numberFormatType").IsTruthy() {
-				return withText(formatCustomType(fod, config.Get("numberFormat"), config.Get("numberFormatType"), "", false, config, "datum.value"))
+				return withText(formatCustomType(cc, fod, config.Get("numberFormat"), config.Get("numberFormatType"), "", false, config, "datum.value"))
 			}
 		}
-		if channelDefType(fod) == "temporal" && config.Get("timeFormatType").IsTruthy() && isFieldDef(fod) && !fod.Get("timeUnit").IsTruthy() {
-			return withText(formatCustomType(fod, config.Get("timeFormat"), config.Get("timeFormatType"), "", false, config, "datum.value"))
+		if channelDefType(fod) == "temporal" && config.Get("timeFormatType").IsTruthy() && isFieldDef(cc, fod) && !fod.Get("timeUnit").IsTruthy() {
+			return withText(formatCustomType(cc, fod, config.Get("timeFormat"), config.Get("timeFormatType"), "", false, config, "datum.value"))
 		}
 	}
 	return specified
@@ -840,14 +848,14 @@ func axisLabelsEncode(m *unitModel, channel string, specified Value) Value {
 
 // ---- assemble ----
 
-func assembleAxisTitle(title Value, config Value) Value {
+func assembleAxisTitle(cc *compileCtx, title Value, config Value) Value {
 	if !title.IsTruthy() {
 		return undef
 	}
 	if title.IsArr() && !isText(title) {
 		var parts []string
 		for _, fd := range title.Items() {
-			parts = append(parts, joinItem(defaultTitle(fd, config)))
+			parts = append(parts, joinItem(defaultTitle(cc, fd, config)))
 		}
 		return jsval.Str(strings.Join(parts, ", "))
 	}
@@ -873,7 +881,7 @@ func setAxisEncode(axis *Object, part, vgProp string, vgRef Value) {
 	u.ObjValue().Set(vgProp, vgRef)
 }
 
-func assembleAxis(a *axisComponent, kind string, config Value, header bool) Value {
+func assembleAxis(cc *compileCtx, a *axisComponent, kind string, config Value, header bool) Value {
 	comb := a.combine()
 	disable, orient, scale, labelExpr, title, zindex := comb.Lookup("disable"), comb.Lookup("orient"), comb.Lookup("scale"), comb.Lookup("labelExpr"), comb.Lookup("title"), comb.Lookup("zindex")
 	axis := omap2(omit(jsval.Obj(comb), "disable", "orient", "scale", "labelExpr", "title", "zindex"))
@@ -896,7 +904,7 @@ func assembleAxis(a *axisComponent, kind string, config Value, header bool) Valu
 				var vgRef []Value
 				for _, c := range conditions {
 					test := c.Get("test")
-					o := mk("test", expression(nil, test, nil))
+					o := mk("test", expression(cc, nil, test, nil))
 					spreadV(o, jsval.Obj(omit(c, "test")))
 					vgRef = append(vgRef, jsval.Obj(o))
 				}
@@ -906,7 +914,7 @@ func assembleAxis(a *axisComponent, kind string, config Value, header bool) Valu
 			} else if ok && pi.isNull {
 				var sb strings.Builder
 				for _, c := range conditions {
-					sb.WriteString(expression(nil, c.Get("test"), nil) + " ? " + exprFromValueRefOrSignalRef(jsval.Obj(omit(c, "test"))) + " : ")
+					sb.WriteString(expression(cc, nil, c.Get("test"), nil) + " ? " + exprFromValueRefOrSignalRef(jsval.Obj(omit(c, "test"))) + " : ")
 				}
 				sb.WriteString(exprFromValueRefOrSignalRef(valueOrSignalRef))
 				axis.Set(prop, mkv("signal", sb.String()))
@@ -974,7 +982,7 @@ func assembleAxis(a *axisComponent, kind string, config Value, header bool) Valu
 			axis.Delete("encode")
 		}
 	}
-	titleString := assembleAxisTitle(title, config)
+	titleString := assembleAxisTitle(cc, title, config)
 	o := mk("scale", scale, "orient", orient, "grid", false)
 	if titleString.IsTruthy() {
 		o.Set("title", titleString)
@@ -1013,13 +1021,13 @@ func assembleAxisSignals(m Model) []Value {
 	return signals
 }
 
-func assembleAxes(axisComponents *omap[[]*axisComponent], config Value) []Value {
+func assembleAxes(cc *compileCtx, axisComponents *omap[[]*axisComponent], config Value) []Value {
 	x, _ := axisComponents.get(chX)
 	y, _ := axisComponents.get(chY)
 	var out []Value
 	add := func(list []*axisComponent, kind string) {
 		for _, a := range list {
-			if v := assembleAxis(a, kind, config, false); v.IsTruthy() {
+			if v := assembleAxis(cc, a, kind, config, false); v.IsTruthy() {
 				out = append(out, v)
 			}
 		}

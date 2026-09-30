@@ -142,6 +142,7 @@ func optimizationDataflowHelper(dc *dataComponent, m Model, firstPass bool) bool
 func optimizeDataflow(dc *dataComponent, m Model) {
 	first, second := 0, 0
 	for i := 0; i < maxOptimizationRuns; i++ {
+		m.b().ctx.check()
 		if !optimizationDataflowHelper(dc, m, true) {
 			break
 		}
@@ -482,6 +483,7 @@ func cloneSubtree(facet *facetNode) func(node dfNode) []dfNode {
 	clone = func(node dfNode) []dfNode {
 		if _, isFacet := node.(*facetNode); !isFacet {
 			cp := node.clone()
+			cp.base().cc = node.base().cc
 			if out, ok := cp.(*outputNode); ok {
 				newName := facetScalePrefix + out.getSource()
 				out.setSource(newName)

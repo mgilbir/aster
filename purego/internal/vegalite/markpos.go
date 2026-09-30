@@ -14,11 +14,13 @@ type positionOffsetResult struct {
 }
 
 func positionOffset(baseChannel string, markDef Value, encoding Value, m *unitModel, bandPosition Value) positionOffsetResult {
+	cc := m.b().ctx
+
 	channel := baseChannel + "Offset"
 	defaultValue := markDef.Get(channel)
 	channelDef := encoding.Get(channel)
 	if (channel == "xOffset" || channel == "yOffset") && channelDef.IsTruthy() {
-		ref := midPoint(midPointParams{
+		ref := midPoint(cc, midPointParams{
 			channel: channel, channelDef: channelDef, markDef: markDef, config: m.config,
 			scaleName: m.scaleName(channel, false), scale: m.getScaleComponent(channel),
 			defaultRef: signalOrValueRef(defaultValue), bandPosition: bandPosition,
@@ -66,6 +68,8 @@ type pointPositionOpts struct {
 }
 
 func pointPosition(channel string, m *unitModel, opt pointPositionOpts) Value {
+	cc := m.b().ctx
+
 	encoding, markDef, config, stack := m.encoding, m.markDef, m.config, m.stack
 	channelDef := encoding.Get(channel)
 	channel2Def := encoding.Get(getSecondaryRangeChannel(channel))
@@ -81,7 +85,7 @@ func pointPosition(channel string, m *unitModel, opt pointPositionOpts) Value {
 		if po.offsetType == "encoding" {
 			bp = jsval.Int(0)
 		}
-		valueRef = positionRef(midPointParams{
+		valueRef = positionRef(cc, midPointParams{
 			channel: channel, channelDef: channelDef, channel2Def: channel2Def, markDef: markDef, config: config,
 			scaleName: scaleName, scale: scale, stack: stack, offset: po.offset, defaultRefFn: defaultRefFn, bandPosition: bp,
 		})
@@ -96,26 +100,28 @@ func pointPosition(channel string, m *unitModel, opt pointPositionOpts) Value {
 	return undef
 }
 
-func positionRef(p midPointParams) Value {
-	if isFieldOrDatumDef(p.channelDef) && p.stack != nil && p.channel == p.stack.fieldChannel {
-		if isFieldDef(p.channelDef) {
+func positionRef(cc *compileCtx, p midPointParams) Value {
+	if isFieldOrDatumDef(cc, p.channelDef) && p.stack != nil && p.channel == p.stack.fieldChannel {
+		if isFieldDef(cc, p.channelDef) {
 			bandPosition := p.channelDef.Get("bandPosition")
 			if bandPosition.IsUndefined() && p.markDef.Get("type").AsString() == "text" && (p.channel == chRadius || p.channel == chTheta) {
 				bandPosition = jsval.Num(0.5)
 			}
 			if !bandPosition.IsUndefined() {
-				return interpolatedSignalRef(interpolatedOpts{scaleName: p.scaleName, fod: p.channelDef, startSuffix: "start", bandPosition: bandPosition, offset: p.offset})
+				return interpolatedSignalRef(cc, interpolatedOpts{scaleName: p.scaleName, fod: p.channelDef, startSuffix: "start", bandPosition: bandPosition, offset: p.offset})
 			}
 		}
-		return valueRefForFieldOrDatumDef(p.channelDef, p.scaleName, fieldRefOption{suffix: "end"}, refOffsetBand{offset: p.offset})
+		return valueRefForFieldOrDatumDef(cc, p.channelDef, p.scaleName, fieldRefOption{suffix: "end"}, refOffsetBand{offset: p.offset})
 	}
-	return midPointRefWithPositionInvalidTest(p)
+	return midPointRefWithPositionInvalidTest(cc, p)
 }
 
 func pointPositionDefaultRef(m *unitModel, defaultPos, channel, scaleName string, scale *scaleComponent) func() Value {
+	cc := m.b().ctx
+
 	markDef, config := m.markDef, m.config
 	return func() Value {
-		if v5 {
+		if cc.v5 {
 			vgChannel := getVgPositionChannel(channel)
 			if def := getMarkPropOrConfig(channel, markDef, config, vgChannel, false); !def.IsUndefined() {
 				return widthHeightValueOrSignalRef(channel, def)
@@ -218,6 +224,8 @@ func rangePosition(channel string, m *unitModel, o rangePosOpts) Value {
 }
 
 func pointPosition2OrSize(m *unitModel, defaultPos, channel string) Value {
+	cc := m.b().ctx
+
 	encoding, markDef, stack, config := m.encoding, m.markDef, m.stack, m.config
 	baseChannel := getMainRangeChannel(channel)
 	sizeChannel := getSizeChannel(channel)
@@ -238,7 +246,7 @@ func pointPosition2OrSize(m *unitModel, defaultPos, channel string) Value {
 		}
 		return mkv(vgChannel, mkv("field", m.getName(channel)))
 	}
-	valueRef := position2Ref(midPointParams{
+	valueRef := position2Ref(cc, midPointParams{
 		channel: channel, channelDef: channelDef, channel2Def: encoding.Get(channel), markDef: markDef, config: config,
 		scaleName: scaleName, scale: scale, stack: stack, offset: po.offset,
 	})
@@ -261,11 +269,11 @@ func pointPosition2OrSize(m *unitModel, defaultPos, channel string) Value {
 	return mkv(vgChannel, pointPositionDefaultRef(m, defaultPos, channel, scaleName, scale)())
 }
 
-func position2Ref(p midPointParams) Value {
-	if isFieldOrDatumDef(p.channelDef) && p.stack != nil && p.channel[:1] == p.stack.fieldChannel[:1] {
-		return valueRefForFieldOrDatumDef(p.channelDef, p.scaleName, fieldRefOption{suffix: "start"}, refOffsetBand{offset: p.offset})
+func position2Ref(cc *compileCtx, p midPointParams) Value {
+	if isFieldOrDatumDef(cc, p.channelDef) && p.stack != nil && p.channel[:1] == p.stack.fieldChannel[:1] {
+		return valueRefForFieldOrDatumDef(cc, p.channelDef, p.scaleName, fieldRefOption{suffix: "start"}, refOffsetBand{offset: p.offset})
 	}
-	return midPointRefWithPositionInvalidTest(midPointParams{
+	return midPointRefWithPositionInvalidTest(cc, midPointParams{
 		channel: p.channel, channelDef: p.channel2Def, scaleName: p.scaleName, scale: p.scale, stack: p.stack,
 		markDef: p.markDef, config: p.config, offset: p.offset, defaultRef: p.defaultRef,
 	})
@@ -291,7 +299,9 @@ func position2orSize(channel string, markDef Value) Value {
 // ---- rect position ----
 
 func rectPosition(m *unitModel, channel string) Value {
-	if v5 {
+	cc := m.b().ctx
+
+	if cc.v5 {
 		return rectPosition58(m, channel)
 	}
 	config, encoding, markDef := m.config, m.encoding, m.markDef
@@ -309,13 +319,13 @@ func rectPosition(m *unitModel, channel string) Value {
 	offsetScaleChannel := getOffsetChannel(channel)
 	isBarOrTickBand := (mark == "bar" && ((channel == chX && orient == "vertical") || (channel != chX && orient == "horizontal"))) ||
 		(mark == "tick" && ((channel == chY && orient == "vertical") || (channel != chY && orient == "horizontal")))
-	if isFieldDef(channelDef) &&
+	if isFieldDef(cc, channelDef) &&
 		(isBinning(channelDef.Get("bin")) || isBinned(channelDef.Get("bin")) || (channelDef.Get("timeUnit").IsTruthy() && !channelDef2.IsTruthy())) &&
 		!(hasSizeDef.IsTruthy() && !isRelativeBandSize(hasSizeDef)) &&
 		!encoding.Get(offsetScaleChannel).IsTruthy() &&
 		!hasDiscreteDomain(scaleType) {
 		return rectBinPosition(channelDef, channelDef2, channel, m)
-	} else if ((isFieldOrDatumDef(channelDef) && hasDiscreteDomain(scaleType)) || isBarOrTickBand) && !channelDef2.IsTruthy() {
+	} else if ((isFieldOrDatumDef(cc, channelDef) && hasDiscreteDomain(scaleType)) || isBarOrTickBand) && !channelDef2.IsTruthy() {
 		return positionAndSize(channelDef, channel, m)
 	}
 	return rangePosition(channel, m, rangePosOpts{defaultPos: "zeroOrMax", defaultPos2: "zeroOrMin"})
@@ -373,6 +383,8 @@ func defaultSizeRef(sizeChannel, scaleName string, scale *scaleComponent, config
 }
 
 func positionAndSize(fd Value, channel string, m *unitModel) Value {
+	cc := m.b().ctx
+
 	markDef, encoding, config, stack := m.markDef, m.encoding, m.config, m.stack
 	orient := markDef.Get("orient").AsString()
 	scaleName := m.scaleName(channel, false)
@@ -398,7 +410,7 @@ func positionAndSize(fd Value, channel string, m *unitModel) Value {
 	if sc != nil {
 		scType = sc.get("type").AsString()
 	}
-	bandSize := getBandSize(channel, fd, undef, markDef, config, scType, useVlSizeChannel)
+	bandSize := getBandSize(cc, channel, fd, undef, markDef, config, scType, useVlSizeChannel)
 	if !sizeMixins.IsTruthy() {
 		useScale := offsetScale
 		if useScale == nil {
@@ -422,8 +434,8 @@ func positionAndSize(fd Value, channel string, m *unitModel) Value {
 	}
 	po := positionOffset(channel, markDef, encoding, m, bp0)
 	var timeUnitBandPosition Value
-	if center && po.offsetType != "encoding" && isFieldDef(fd) && fd.Get("timeUnit").IsTruthy() && !encoding.Get(channel2).IsTruthy() {
-		timeUnitBandPosition = getBandPosition(fd, undef, markDef, config)
+	if center && po.offsetType != "encoding" && isFieldDef(cc, fd) && fd.Get("timeUnit").IsTruthy() && !encoding.Get(channel2).IsTruthy() {
+		timeUnitBandPosition = getBandPosition(cc, fd, undef, markDef, config)
 	}
 	var bandPosition Value
 	switch {
@@ -443,7 +455,7 @@ func positionAndSize(fd Value, channel string, m *unitModel) Value {
 	default:
 		bandPosition = jsval.Int(0)
 	}
-	posRef := midPointRefWithPositionInvalidTest(midPointParams{
+	posRef := midPointRefWithPositionInvalidTest(cc, midPointParams{
 		channel: channel, channelDef: fd, markDef: markDef, config: config, scaleName: scaleName, scale: scale, stack: stack,
 		offset: po.offset, defaultRefFn: pointPositionDefaultRef(m, "mid", channel, scaleName, scale), bandPosition: bandPosition,
 	})
@@ -525,6 +537,8 @@ func getBinSpacing(channel string, spacing float64, reverse, axisTranslate, offs
 }
 
 func rectBinPosition(fd, fd2 Value, channel string, m *unitModel) Value {
+	cc := m.b().ctx
+
 	config, markDef, encoding := m.config, m.markDef, m.encoding
 	scale := m.getScaleComponent(channel)
 	scaleName := m.scaleName(channel, false)
@@ -536,7 +550,7 @@ func rectBinPosition(fd, fd2 Value, channel string, m *unitModel) Value {
 	if scale != nil {
 		reverse = scale.get("reverse")
 	}
-	bandSize := getBandSize(channel, fd, undef, markDef, config, scaleType, false)
+	bandSize := getBandSize(cc, channel, fd, undef, markDef, config, scaleType, false)
 	var axis *axisComponent
 	if axes, ok := m.comp.axes.get(channel); ok && len(axes) > 0 {
 		axis = axes[0]
@@ -558,7 +572,7 @@ func rectBinPosition(fd, fd2 Value, channel string, m *unitModel) Value {
 	minBandSize := getMarkConfig("minBandSize", markDef, config, "")
 	po := positionOffset(channel, markDef, encoding, m, jsval.Int(0))
 	po2 := positionOffset(channel2, markDef, encoding, m, jsval.Int(0))
-	bandSizeExprS := binSizeExpr(scaleName, fd)
+	bandSizeExprS := binSizeExpr(cc, scaleName, fd)
 	binSpacingOffset := getBinSpacing(channel, spacing, reverse, axisTranslate, po.offset, minBandSize, bandSizeExprS)
 	offset2 := po2.offset
 	if offset2.IsNullish() {
@@ -574,7 +588,7 @@ func rectBinPosition(fd, fd2 Value, channel string, m *unitModel) Value {
 	default:
 		bandPositionForBandSize = jsval.Num(0.5)
 	}
-	bandPosition := getBandPosition(fd, fd2, markDef, config)
+	bandPosition := getBandPosition(cc, fd, fd2, markDef, config)
 	if isBinning(fd.Get("bin")) || fd.Get("timeUnit").IsTruthy() {
 		useRectOffsetField := fd.Get("timeUnit").IsTruthy() && !(bandPosition.IsNum() && bandPosition.NumValue() == 0.5)
 		var second Value
@@ -584,16 +598,16 @@ func rectBinPosition(fd, fd2 Value, channel string, m *unitModel) Value {
 			second = jsval.Num(1 - bandPositionForBandSize.NumValue())
 		}
 		return mkv(
-			vgChannel2, rectBinRef(fd, scaleName, bandPositionForBandSize, binSpacingOffset2, useRectOffsetField),
-			vgChannel, rectBinRef(fd, scaleName, second, binSpacingOffset, useRectOffsetField),
+			vgChannel2, rectBinRef(cc, fd, scaleName, bandPositionForBandSize, binSpacingOffset2, useRectOffsetField),
+			vgChannel, rectBinRef(cc, fd, scaleName, second, binSpacingOffset, useRectOffsetField),
 		)
 	} else if isBinned(fd.Get("bin")) {
-		startRef := valueRefForFieldOrDatumDef(fd, scaleName, fieldRefOption{}, refOffsetBand{offset: binSpacingOffset2})
-		if isFieldDef(fd2) {
-			return mkv(vgChannel2, startRef, vgChannel, valueRefForFieldOrDatumDef(fd2, scaleName, fieldRefOption{}, refOffsetBand{offset: binSpacingOffset}))
+		startRef := valueRefForFieldOrDatumDef(cc, fd, scaleName, fieldRefOption{}, refOffsetBand{offset: binSpacingOffset2})
+		if isFieldDef(cc, fd2) {
+			return mkv(vgChannel2, startRef, vgChannel, valueRefForFieldOrDatumDef(cc, fd2, scaleName, fieldRefOption{}, refOffsetBand{offset: binSpacingOffset}))
 		} else if isObject(fd.Get("bin")) && fd.Get("bin").Get("step").IsTruthy() {
 			return mkv(vgChannel2, startRef, vgChannel, mkv(
-				"signal", `scale("`+scaleName+`", `+vgField(fd, fieldRefOption{expr: "datum"})+" + "+fd.Get("bin").Get("step").AsString()+")",
+				"signal", `scale("`+scaleName+`", `+vgField(cc, fd, fieldRefOption{expr: "datum"})+" + "+fd.Get("bin").Get("step").AsString()+")",
 				"offset", binSpacingOffset,
 			))
 		}
@@ -601,12 +615,12 @@ func rectBinPosition(fd, fd2 Value, channel string, m *unitModel) Value {
 	return undef
 }
 
-func rectBinRef(fd Value, scaleName string, bandPosition, offset Value, useRectOffsetField bool) Value {
+func rectBinRef(cc *compileCtx, fd Value, scaleName string, bandPosition, offset Value, useRectOffsetField bool) Value {
 	o := interpolatedOpts{scaleName: scaleName, fod: fd, bandPosition: bandPosition, offset: offset}
 	if useRectOffsetField {
 		o.startSuffix, o.endSuffix = offsettedRectStartSuffix, offsettedRectEndSuffix
 	}
-	return interpolatedSignalRef(o)
+	return interpolatedSignalRef(cc, o)
 }
 
 var _ = math.Pi

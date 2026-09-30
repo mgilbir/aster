@@ -74,10 +74,12 @@ func strictEq(a, b Value) bool {
 }
 
 func parseRoot(m Model, sources *sourceList) dfNode {
+	cc := m.b().ctx
+
 	b := m.b()
 	if !b.data.IsUndefined() || b.parent == nil {
 		if b.data.IsNull() {
-			s := newSourceNode(mkv("values", jsval.Arr(nil)))
+			s := newSourceNode(cc, mkv("values", jsval.Arr(nil)))
 			sources.items = append(sources.items, s)
 			return s
 		}
@@ -90,7 +92,7 @@ func parseRoot(m Model, sources *sourceList) dfNode {
 			}
 			return existing
 		}
-		s := newSourceNode(b.data)
+		s := newSourceNode(cc, b.data)
 		sources.items = append(sources.items, s)
 		return s
 	}
@@ -121,8 +123,11 @@ func mergeDeepInto(dest *Object, src Value) {
 }
 
 func parseTransformArray(head dfNode, m Model, ap *ancestorParse) dfNode {
+	cc := m.b().ctx
+
 	lookupCounter := 0
 	for _, t := range m.b().transforms {
+		cc.check()
 		derivedType := ""
 		var transformNode dfNode
 		switch {
@@ -146,10 +151,10 @@ func parseTransformArray(head dfNode, m Model, ap *ancestorParse) dfNode {
 				head = newParseNode(head, mk(field, derivedType))
 				ap.set(field, jsval.Str(derivedType), false)
 			}
-			n := makeTimeUnitFromTransform(head, t)
+			n := makeTimeUnitFromTransform(cc, head, t)
 			head, transformNode = n, n
 		case hasProperty(t, "aggregate"):
-			n := makeAggregateFromTransform(head, t)
+			n := makeAggregateFromTransform(cc, head, t)
 			if n != nil {
 				head, transformNode = n, n
 			} else {
@@ -175,7 +180,7 @@ func parseTransformArray(head dfNode, m Model, ap *ancestorParse) dfNode {
 		case hasProperty(t, "fold"):
 			n := newFoldNode(head, t)
 			head, transformNode, derivedType = n, n, "derived"
-		case !v5 && hasProperty(t, "extent") && !hasProperty(t, "density") && !hasProperty(t, "regression"):
+		case !cc.v5 && hasProperty(t, "extent") && !hasProperty(t, "density") && !hasProperty(t, "regression"):
 			n := newXform(head, "extent", deepClone(t))
 			head, transformNode, derivedType = n, n, "derived"
 		case hasProperty(t, "flatten"):
@@ -190,7 +195,7 @@ func parseTransformArray(head dfNode, m Model, ap *ancestorParse) dfNode {
 			n := newXform(head, "impute", t)
 			head, transformNode, derivedType = n, n, "derived"
 		case hasProperty(t, "density"):
-			n := newDensityNode(head, t)
+			n := newDensityNode(cc, head, t)
 			head, transformNode, derivedType = n, n, "derived"
 		case hasProperty(t, "quantile"):
 			n := newQuantileNode(head, t)
@@ -259,11 +264,13 @@ func getImplicitFromFilterTransform(t Value) *Object {
 }
 
 func getImplicitFromEncoding(m Model) *Object {
+	cc := m.b().ctx
+
 	implicit := jsval.NewObject(4)
 	add := func(fd Value) {
 		field := fd.Get("field").AsString()
 		switch {
-		case isFieldOrDatumDefForTimeFormat(fd):
+		case isFieldOrDatumDefForTimeFormat(cc, fd):
 			jsSet(implicit, field, jsval.Str("date"))
 		case channelDefType(fd) == "quantitative" && isMinMaxOp(fd.Get("aggregate")):
 			jsSet(implicit, field, jsval.Str("number"))
@@ -271,7 +278,7 @@ func getImplicitFromEncoding(m Model) *Object {
 			if !implicit.Has(field) {
 				jsSet(implicit, field, jsval.Str("flatten"))
 			}
-		case isScaleFieldDef(fd) && isSortField(fd.Get("sort")) && accessPathDepth(fd.Get("sort").Get("field").AsString()) > 1:
+		case isScaleFieldDef(fd) && isSortField(cc, fd.Get("sort")) && accessPathDepth(fd.Get("sort").Get("field").AsString()) > 1:
 			sf := fd.Get("sort").Get("field").AsString()
 			if !implicit.Has(sf) {
 				jsSet(implicit, sf, jsval.Str("flatten"))
@@ -298,7 +305,7 @@ func getImplicitFromEncoding(m Model) *Object {
 				dim = chY
 			}
 			dd := u.encoding.Get(dim)
-			if isFieldDef(dd) && channelDefType(dd) == "quantitative" && !implicit.Has(dd.Get("field").AsString()) {
+			if isFieldDef(cc, dd) && channelDefType(dd) == "quantitative" && !implicit.Has(dd.Get("field").AsString()) {
 				jsSet(implicit, dd.Get("field").AsString(), jsval.Str("number"))
 			}
 		}
@@ -331,6 +338,8 @@ func makeOutputNode(t dataSourceType, m Model, head dfNode) *outputNode {
 
 // parseDataFor builds the graph for model m and returns its data component.
 func parseDataFor(m Model) *dataComponent {
+	cc := m.b().ctx
+
 	b := m.b()
 	dc := b.comp.data
 	head := parseRoot(m, dc.sources)
@@ -408,7 +417,7 @@ func parseDataFor(m Model) *dataComponent {
 	var preFilterInvalid *outputNode
 	var postFilterInvalid *outputNode
 	var marksMode, scalesMode string
-	if u != nil && v5 {
+	if u != nil && cc.v5 {
 		// Vega-Lite 5.8: only `invalid: filter` filters, before the main source.
 		if n := makeFilterInvalid58(head, u); n != nil {
 			head = n
@@ -443,7 +452,7 @@ func parseDataFor(m Model) *dataComponent {
 	var facetRoot *facetNode
 	if f, ok := m.(*facetModel); ok {
 		facetName := f.getName("facet")
-		if j := makeJoinAggregateFromFacet(head, f.facet); j != nil {
+		if j := makeJoinAggregateFromFacet(cc, head, f.facet); j != nil {
 			head = j
 		}
 		facetRoot = newFacetNode(head, f, facetName, main.getSource())
@@ -455,18 +464,18 @@ func parseDataFor(m Model) *dataComponent {
 	return &out
 }
 
-func makeJoinAggregateFromFacet(parent dfNode, facet *Object) dfNode {
+func makeJoinAggregateFromFacet(cc *compileCtx, parent dfNode, facet *Object) dfNode {
 	row, column := facet.Lookup("row"), facet.Lookup("column")
 	if row.IsTruthy() && column.IsTruthy() {
 		var newParent dfNode
 		for _, fd := range []Value{row, column} {
-			if isSortField(fd.Get("sort")) {
+			if isSortField(cc, fd.Get("sort")) {
 				sort := fd.Get("sort")
 				field := sort.Get("field")
 				op := coalesce(sort.Get("op"), jsval.Str(defaultSortOp))
 				n := newXform(parent, "joinaggregate", mkv(
-					"joinaggregate", arr(mkv("op", op, "field", field, "as", facetSortFieldName(fd, sort, fieldRefOption{forAs: true}))),
-					"groupby", arr(vgField(fd, fieldRefOption{})),
+					"joinaggregate", arr(mkv("op", op, "field", field, "as", facetSortFieldName(cc, fd, sort, fieldRefOption{forAs: true}))),
+					"groupby", arr(vgField(cc, fd, fieldRefOption{})),
 				))
 				parent, newParent = n, n
 			}

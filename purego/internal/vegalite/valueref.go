@@ -27,13 +27,13 @@ type midPointParams struct {
 	bandPosition            Value
 }
 
-func midPointRefWithPositionInvalidTest(p midPointParams) Value {
-	if v5 {
-		return midPointRefWithPositionInvalidTest58(p)
+func midPointRefWithPositionInvalidTest(cc *compileCtx, p midPointParams) Value {
+	if cc.v5 {
+		return midPointRefWithPositionInvalidTest58(cc, p)
 	}
 	scaleChannel := getMainRangeChannel(p.channel)
-	mainRef := midPoint(p)
-	inc := getConditionalValueRefForIncludingInvalidValue(scaleChannel, p.channelDef, p.scale, p.scaleName, p.markDef, p.config)
+	mainRef := midPoint(cc, p)
+	inc := getConditionalValueRefForIncludingInvalidValue(cc, scaleChannel, p.channelDef, p.scale, p.scaleName, p.markDef, p.config)
 	if !inc.IsUndefined() {
 		return arr(inc, mainRef)
 	}
@@ -45,7 +45,7 @@ type refOffsetBand struct {
 	band   Value
 }
 
-func valueRefForFieldOrDatumDef(fd Value, scaleName string, opt fieldRefOption, encode refOffsetBand) Value {
+func valueRefForFieldOrDatumDef(cc *compileCtx, fd Value, scaleName string, opt fieldRefOption, encode refOffsetBand) Value {
 	ref := jsval.NewObject(4)
 	if scaleName != "" {
 		ref.Set("scale", jsval.Str(scaleName))
@@ -63,7 +63,7 @@ func valueRefForFieldOrDatumDef(fd Value, scaleName string, opt fieldRefOption, 
 			ref.Set("value", datum)
 		}
 	} else {
-		ref.Set("field", jsval.Str(vgField(fd, opt)))
+		ref.Set("field", jsval.Str(vgField(cc, fd, opt)))
 	}
 	if encode.offset.IsTruthy() {
 		ref.Set("offset", encode.offset)
@@ -83,7 +83,7 @@ type interpolatedOpts struct {
 	bandPosition Value
 }
 
-func interpolatedSignalRef(o interpolatedOpts) Value {
+func interpolatedSignalRef(cc *compileCtx, o interpolatedOpts) Value {
 	bandPosition := o.bandPosition
 	if bandPosition.IsUndefined() {
 		bandPosition = jsval.Num(0.5)
@@ -93,17 +93,17 @@ func interpolatedSignalRef(o interpolatedOpts) Value {
 		endSuffix = "end"
 	}
 	expr := ""
-	if v5 && bandPosition.IsNum() && 0 < bandPosition.NumValue() && bandPosition.NumValue() < 1 {
+	if cc.v5 && bandPosition.IsNum() && 0 < bandPosition.NumValue() && bandPosition.NumValue() < 1 {
 		expr = "datum"
-	} else if !v5 && !isSignalRef(bandPosition) && bandPosition.IsNum() && 0 < bandPosition.NumValue() && bandPosition.NumValue() < 1 {
+	} else if !cc.v5 && !isSignalRef(bandPosition) && bandPosition.IsNum() && 0 < bandPosition.NumValue() && bandPosition.NumValue() < 1 {
 		expr = "datum"
 	}
-	start := vgField(o.fod, fieldRefOption{expr: expr, suffix: o.startSuffix})
+	start := vgField(cc, o.fod, fieldRefOption{expr: expr, suffix: o.startSuffix})
 	var end string
 	if !o.fod2.IsUndefined() {
-		end = vgField(o.fod2, fieldRefOption{expr: expr})
+		end = vgField(cc, o.fod2, fieldRefOption{expr: expr})
 	} else {
-		end = vgField(o.fod, fieldRefOption{suffix: endSuffix, expr: expr})
+		end = vgField(cc, o.fod, fieldRefOption{suffix: endSuffix, expr: expr})
 	}
 	ref := jsval.NewObject(4)
 	if bandPosition.IsNum() && (bandPosition.NumValue() == 0 || bandPosition.NumValue() == 1) {
@@ -115,7 +115,7 @@ func interpolatedSignalRef(o interpolatedOpts) Value {
 		}
 	} else {
 		var datum string
-		if v5 {
+		if cc.v5 {
 			// Vega-Lite 5.8 weights the start by the band position, 6.x the end.
 			if isSignalRef(bandPosition) {
 				bp := signalOf(bandPosition)
@@ -139,15 +139,15 @@ func interpolatedSignalRef(o interpolatedOpts) Value {
 	return jsval.Obj(ref)
 }
 
-func binSizeExpr(scaleName string, fd Value) string {
-	start := vgField(fd, fieldRefOption{expr: "datum"})
-	end := vgField(fd, fieldRefOption{expr: "datum", suffix: "end"})
+func binSizeExpr(cc *compileCtx, scaleName string, fd Value) string {
+	start := vgField(cc, fd, fieldRefOption{expr: "datum"})
+	end := vgField(cc, fd, fieldRefOption{expr: "datum", suffix: "end"})
 	return `abs(scale("` + jsName(scaleName) + `", ` + end + `) - scale("` + jsName(scaleName) + `", ` + start + `))`
 }
 
-func midPoint(p midPointParams) Value {
+func midPoint(cc *compileCtx, p midPointParams) Value {
 	if p.channelDef.IsTruthy() {
-		if isFieldOrDatumDef(p.channelDef) {
+		if isFieldOrDatumDef(cc, p.channelDef) {
 			scaleType := ""
 			if p.scale != nil {
 				scaleType = p.scale.get("type").AsString()
@@ -155,25 +155,25 @@ func midPoint(p midPointParams) Value {
 			bandPosition := p.bandPosition
 			if isTypedFieldDef(p.channelDef) {
 				if bandPosition.IsNullish() {
-					bandPosition = getBandPosition(p.channelDef, p.channel2Def, p.markDef, p.config)
+					bandPosition = getBandPosition(cc, p.channelDef, p.channel2Def, p.markDef, p.config)
 				}
 				bin, timeUnit := p.channelDef.Get("bin"), p.channelDef.Get("timeUnit")
 				typ := channelDefType(p.channelDef)
 				if isBinning(bin) || (bandPosition.IsTruthy() && timeUnit.IsTruthy() && typ == "temporal") {
 					if p.stack != nil && p.stack.impute {
-						return valueRefForFieldOrDatumDef(p.channelDef, p.scaleName, fieldRefOption{binSuffix: "mid"}, refOffsetBand{offset: p.offset})
+						return valueRefForFieldOrDatumDef(cc, p.channelDef, p.scaleName, fieldRefOption{binSuffix: "mid"}, refOffsetBand{offset: p.offset})
 					}
 					if bandPosition.IsTruthy() && !hasDiscreteDomain(scaleType) {
-						return interpolatedSignalRef(interpolatedOpts{scaleName: p.scaleName, fod: p.channelDef, bandPosition: bandPosition, offset: p.offset})
+						return interpolatedSignalRef(cc, interpolatedOpts{scaleName: p.scaleName, fod: p.channelDef, bandPosition: bandPosition, offset: p.offset})
 					}
 					opt := fieldRefOption{}
-					if binRequiresRange(p.channelDef, p.channel) {
+					if binRequiresRange(cc, p.channelDef, p.channel) {
 						opt.binSuffix = "range"
 					}
-					return valueRefForFieldOrDatumDef(p.channelDef, p.scaleName, opt, refOffsetBand{offset: p.offset})
+					return valueRefForFieldOrDatumDef(cc, p.channelDef, p.scaleName, opt, refOffsetBand{offset: p.offset})
 				} else if isBinned(bin) {
-					if isFieldDef(p.channel2Def) {
-						return interpolatedSignalRef(interpolatedOpts{scaleName: p.scaleName, fod: p.channelDef, fod2: p.channel2Def, bandPosition: bandPosition, offset: p.offset})
+					if isFieldDef(cc, p.channel2Def) {
+						return interpolatedSignalRef(cc, interpolatedOpts{scaleName: p.scaleName, fod: p.channelDef, fod2: p.channel2Def, bandPosition: bandPosition, offset: p.offset})
 					}
 				}
 			}
@@ -185,7 +185,7 @@ func midPoint(p midPointParams) Value {
 			if scaleType == "band" {
 				band = coalesce(bandPosition, p.channelDef.Get("bandPosition"), jsval.Num(0.5))
 			}
-			return valueRefForFieldOrDatumDef(p.channelDef, p.scaleName, opt, refOffsetBand{offset: p.offset, band: band})
+			return valueRefForFieldOrDatumDef(cc, p.channelDef, p.scaleName, opt, refOffsetBand{offset: p.offset, band: band})
 		} else if isValueDef(p.channelDef) {
 			value := p.channelDef.Get("value")
 			o := cloneObj(widthHeightValueOrSignalRef(p.channel, value).ObjValue())
@@ -225,17 +225,17 @@ func widthHeightValueOrSignalRef(channel string, value Value) Value {
 
 // ---- invalid data value refs ----
 
-func getConditionalValueRefForIncludingInvalidValue(scaleChannel string, channelDef Value, scale *scaleComponent, scaleName string, markDef, config Value) Value {
+func getConditionalValueRefForIncludingInvalidValue(cc *compileCtx, scaleChannel string, channelDef Value, scale *scaleComponent, scaleName string, markDef, config Value) Value {
 	scaleType := ""
 	if scale != nil {
 		scaleType = scale.get("type").AsString()
 	}
-	fd := getFieldDef(channelDef)
+	fd := getFieldDef(cc, channelDef)
 	isCount := fd.IsTruthy() && isCountingAggregateOp(fd.Get("aggregate"))
 	mode := getScaleInvalidDataMode(markDef, config, scaleChannel, scaleType, isCount)
 	if fd.IsTruthy() && mode == "show" {
 		includeAs := coalesce(config.Get("scale").Get("invalid").Get(scaleChannel), jsval.Str("zero-or-min"))
-		o := mk("test", fieldValidPredicate(vgField(fd, fieldRefOption{expr: "datum"}), false))
+		o := mk("test", fieldValidPredicate(vgField(cc, fd, fieldRefOption{expr: "datum"}), false))
 		spread(o, refForInvalidValues(includeAs, scale, scaleName))
 		return jsval.Obj(o)
 	}

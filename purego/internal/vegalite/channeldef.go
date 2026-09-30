@@ -14,8 +14,8 @@ func isRepeatRef(v Value) bool { return !v.IsStr() && hasProperty(v, "repeat") }
 
 func isSortableFieldDef(fd Value) bool { return hasProperty(fd, "sort") }
 
-func isFieldDef(cd Value) bool {
-	if v5 {
+func isFieldDef(cc *compileCtx, cd Value) bool {
+	if cc.v5 {
 		return cd.IsObj() && (cd.Get("field").IsTruthy() || aggIs(cd, "count"))
 	}
 	return hasProperty(cd, "field") || (cd.IsObj() && aggIs(cd, "count"))
@@ -38,7 +38,7 @@ func isDatumDef(cd Value) bool { return hasProperty(cd, "datum") }
 
 func isNumericDataDef(cd Value) bool { return isDatumDef(cd) && cd.Get("datum").IsNum() }
 
-func isFieldOrDatumDef(cd Value) bool { return isFieldDef(cd) || isDatumDef(cd) }
+func isFieldOrDatumDef(cc *compileCtx, cd Value) bool { return isFieldDef(cc, cd) || isDatumDef(cd) }
 
 func isTypedFieldDef(cd Value) bool {
 	return cd.IsTruthy() && (hasProperty(cd, "field") || aggIs(cd, "count")) && hasProperty(cd, "type")
@@ -60,20 +60,20 @@ func isStringFieldOrDatumDef(cd Value) bool {
 
 func isFacetFieldDef(cd Value) bool { return hasProperty(cd, "header") }
 
-func isOrderOnlyDef(cd Value) bool {
-	return !v5 && hasProperty(cd, "sort") && !hasProperty(cd, "field")
+func isOrderOnlyDef(cc *compileCtx, cd Value) bool {
+	return !cc.v5 && hasProperty(cd, "sort") && !hasProperty(cd, "field")
 }
 
 func isConditionalDef(cd Value) bool { return hasProperty(cd, "condition") }
 
-func hasConditionalFieldDef(cd Value) bool {
+func hasConditionalFieldDef(cc *compileCtx, cd Value) bool {
 	c := cd.Get("condition")
-	return c.IsTruthy() && !c.IsArr() && isFieldDef(c)
+	return c.IsTruthy() && !c.IsArr() && isFieldDef(cc, c)
 }
 
-func hasConditionalFieldOrDatumDef(cd Value) bool {
+func hasConditionalFieldOrDatumDef(cc *compileCtx, cd Value) bool {
 	c := cd.Get("condition")
-	return c.IsTruthy() && !c.IsArr() && isFieldOrDatumDef(c)
+	return c.IsTruthy() && !c.IsArr() && isFieldOrDatumDef(cc, c)
 }
 
 func hasConditionalValueDef(cd Value) bool {
@@ -81,8 +81,8 @@ func hasConditionalValueDef(cd Value) bool {
 	return c.IsTruthy() && (c.IsArr() || isValueDef(c))
 }
 
-func isContinuousFieldOrDatumDef(cd Value) bool {
-	return (isTypedFieldDef(cd) && !isDiscreteDef(cd)) || isNumericDataDef(cd)
+func isContinuousFieldOrDatumDef(cc *compileCtx, cd Value) bool {
+	return (isTypedFieldDef(cd) && !isDiscreteDef(cc, cd)) || isNumericDataDef(cd)
 }
 
 func isUnbinnedQuantitativeFieldOrDatumDef(cd Value) bool {
@@ -109,12 +109,12 @@ func toFieldDefBase(fd Value) Value {
 }
 
 // isDiscreteDef is channeldef.ts's isDiscrete: whether a typed def is discrete.
-func isDiscreteDef(def Value) bool {
+func isDiscreteDef(cc *compileCtx, def Value) bool {
 	switch channelDefType(def) {
 	case "nominal", "ordinal", "geojson":
 		return true
 	case "quantitative":
-		return isFieldDef(def) && def.Get("bin").IsTruthy()
+		return isFieldDef(cc, def) && def.Get("bin").IsTruthy()
 	case "temporal":
 		return false
 	}
@@ -136,7 +136,7 @@ type fieldRefOption struct {
 
 // vgField is upstream's vgField: the flattened Vega field name of a field def
 // (or an aggregate/window op def).
-func vgField(fd Value, opt fieldRefOption) string {
+func vgField(cc *compileCtx, fd Value, opt fieldRefOption) string {
 	field := ""
 	if f := fd.Get("field"); !f.IsNullish() {
 		field = f.AsString()
@@ -169,8 +169,8 @@ func vgField(fd Value, opt fieldRefOption) string {
 					} else {
 						fn = aggregate.AsString()
 					}
-				case timeUnit.IsTruthy() && !isBinnedTimeUnit(timeUnit):
-					fn = timeUnitToString(timeUnit)
+				case timeUnit.IsTruthy() && !isBinnedTimeUnit(cc, timeUnit):
+					fn = timeUnitToString(cc, timeUnit)
 					bs := opt.binSuffix
 					if bs == "range" || bs == "mid" {
 						bs = ""
@@ -204,7 +204,7 @@ func vgField(fd Value, opt fieldRefOption) string {
 
 // ---- titles ----
 
-func verbalTitleFormatter(fd Value, config Value) Value {
+func verbalTitleFormatter(cc *compileCtx, fd Value, config Value) Value {
 	field := fd.Get("field")
 	bin, timeUnit, aggregate := fd.Get("bin"), fd.Get("timeUnit"), fd.Get("aggregate")
 	switch {
@@ -212,8 +212,8 @@ func verbalTitleFormatter(fd Value, config Value) Value {
 		return config.Get("countTitle")
 	case isBinning(bin):
 		return jsval.Str(field.AsString() + " (binned)")
-	case timeUnit.IsTruthy() && !isBinnedTimeUnit(timeUnit):
-		if unit := normalizeTimeUnit(timeUnit).Get("unit"); unit.IsTruthy() {
+	case timeUnit.IsTruthy() && !isBinnedTimeUnit(cc, timeUnit):
+		if unit := normalizeTimeUnit(cc, timeUnit).Get("unit"); unit.IsTruthy() {
 			return jsval.Str(field.AsString() + " (" + joinStrings(getTimeUnitParts(unit.AsString()), "-") + ")")
 		}
 	case aggregate.IsTruthy():
@@ -227,7 +227,7 @@ func verbalTitleFormatter(fd Value, config Value) Value {
 	return field
 }
 
-func functionalTitleFormatter(fd Value) Value {
+func functionalTitleFormatter(cc *compileCtx, fd Value) Value {
 	aggregate, bin, timeUnit, field := fd.Get("aggregate"), fd.Get("bin"), fd.Get("timeUnit"), fd.Get("field")
 	if isArgmaxDef(aggregate) {
 		return jsval.Str(field.AsString() + " for argmax(" + aggregate.Get("argmax").AsString() + ")")
@@ -235,8 +235,8 @@ func functionalTitleFormatter(fd Value) Value {
 		return jsval.Str(field.AsString() + " for argmin(" + aggregate.Get("argmin").AsString() + ")")
 	}
 	var tup Value
-	if timeUnit.IsTruthy() && !isBinnedTimeUnit(timeUnit) {
-		tup = normalizeTimeUnit(timeUnit)
+	if timeUnit.IsTruthy() && !isBinnedTimeUnit(cc, timeUnit) {
+		tup = normalizeTimeUnit(cc, timeUnit)
 	}
 	fn := ""
 	switch {
@@ -255,14 +255,14 @@ func functionalTitleFormatter(fd Value) Value {
 	return field
 }
 
-func defaultTitle(fd Value, config Value) Value {
+func defaultTitle(cc *compileCtx, fd Value, config Value) Value {
 	switch config.Get("fieldTitle").AsString() {
 	case "plain":
 		return fd.Get("field")
 	case "functional":
-		return functionalTitleFormatter(fd)
+		return functionalTitleFormatter(cc, fd)
 	}
-	return verbalTitleFormatter(fd, config)
+	return verbalTitleFormatter(cc, fd, config)
 }
 
 // getGuide returns the axis, legend or header object of a def, if any.
@@ -280,14 +280,14 @@ func getGuide(fd Value) Value {
 
 // title is upstream's title(): the guide title, else the def's title, else
 // (when includeDefault) the default formatted title.
-func fieldTitle(fod Value, config Value, allowDisabling, includeDefault bool) Value {
+func fieldTitle(cc *compileCtx, fod Value, config Value, allowDisabling, includeDefault bool) Value {
 	guideTitle := getGuide(fod).Get("title")
-	if !isFieldDef(fod) {
+	if !isFieldDef(cc, fod) {
 		return coalesce(guideTitle, fod.Get("title"))
 	}
 	def := undef
 	if includeDefault {
-		def = defaultTitle(fod, config)
+		def = defaultTitle(cc, fod, config)
 	}
 	if allowDisabling {
 		return firstDefined(guideTitle, fod.Get("title"), def)
@@ -336,19 +336,19 @@ func defaultType(fd Value, channel string) string {
 	return "nominal"
 }
 
-func getFieldDef(cd Value) Value {
-	if isFieldDef(cd) {
+func getFieldDef(cc *compileCtx, cd Value) Value {
+	if isFieldDef(cc, cd) {
 		return cd
-	} else if hasConditionalFieldDef(cd) {
+	} else if hasConditionalFieldDef(cc, cd) {
 		return cd.Get("condition")
 	}
 	return undef
 }
 
-func getFieldOrDatumDef(cd Value) Value {
-	if isFieldOrDatumDef(cd) {
+func getFieldOrDatumDef(cc *compileCtx, cd Value) Value {
+	if isFieldOrDatumDef(cc, cd) {
 		return cd
-	} else if hasConditionalFieldOrDatumDef(cd) {
+	} else if hasConditionalFieldOrDatumDef(cc, cd) {
 		return cd.Get("condition")
 	}
 	return undef
@@ -359,25 +359,25 @@ func isCustomFormatType(ft Value) bool {
 }
 
 // initChannelDef normalizes a channel definition (upstream initChannelDef).
-func initChannelDef(cd Value, channel string, config Value, compositeMark bool) Value {
+func initChannelDef(cc *compileCtx, cd Value, channel string, config Value, compositeMark bool) Value {
 	if cd.IsStr() || cd.IsNum() || cd.IsBool() {
 		return mkv("value", cd)
 	}
-	if isFieldOrDatumDef(cd) {
-		return initFieldOrDatumDef(cd, channel, config, compositeMark)
-	} else if hasConditionalFieldOrDatumDef(cd) {
+	if isFieldOrDatumDef(cc, cd) {
+		return initFieldOrDatumDef(cc, cd, channel, config, compositeMark)
+	} else if hasConditionalFieldOrDatumDef(cc, cd) {
 		o := cloneObj(cd.ObjValue())
-		o.Set("condition", initFieldOrDatumDef(cd.Get("condition"), channel, config, compositeMark))
+		o.Set("condition", initFieldOrDatumDef(cc, cd.Get("condition"), channel, config, compositeMark))
 		return jsval.Obj(o)
 	}
 	return cd
 }
 
-func initFieldOrDatumDef(fd Value, channel string, config Value, compositeMark bool) Value {
+func initFieldOrDatumDef(cc *compileCtx, fd Value, channel string, config Value, compositeMark bool) Value {
 	if isStringFieldOrDatumDef(fd) {
 		formatType := fd.Get("formatType")
 		if isCustomFormatType(formatType) && !config.Get("customFormatTypes").IsTruthy() {
-			return initFieldOrDatumDef(jsval.Obj(omit(fd, "format", "formatType")), channel, config, compositeMark)
+			return initFieldOrDatumDef(cc, jsval.Obj(omit(fd, "format", "formatType")), channel, config, compositeMark)
 		}
 	} else {
 		guideType := ""
@@ -394,12 +394,12 @@ func initFieldOrDatumDef(fd Value, channel string, config Value, compositeMark b
 			if isCustomFormatType(g.Get("formatType")) && !config.Get("customFormatTypes").IsTruthy() {
 				o := cloneObj(fd.ObjValue())
 				o.Set(guideType, jsval.Obj(omit(g, "format", "formatType")))
-				return initFieldOrDatumDef(jsval.Obj(o), channel, config, compositeMark)
+				return initFieldOrDatumDef(cc, jsval.Obj(o), channel, config, compositeMark)
 			}
 		}
 	}
-	if isFieldDef(fd) {
-		return initFieldDef(fd, channel, compositeMark)
+	if isFieldDef(cc, fd) {
+		return initFieldDef(cc, fd, channel, compositeMark)
 	}
 	return initDatumDef(fd)
 }
@@ -425,14 +425,14 @@ func initDatumDef(dd Value) Value {
 
 func isSortByChannel(c string) bool { return sortByChannel[c] }
 
-func initFieldDef(fd Value, channel string, compositeMark bool) Value {
+func initFieldDef(cc *compileCtx, fd Value, channel string, compositeMark bool) Value {
 	aggregate, timeUnit, bin, field := fd.Get("aggregate"), fd.Get("timeUnit"), fd.Get("bin"), fd.Get("field")
 	fieldDef := cloneObj(fd.ObjValue())
-	if !compositeMark && aggregate.IsTruthy() && !isAggregateOp(aggregate) && !isArgmaxDef(aggregate) && !isArgminDef(aggregate) {
+	if !compositeMark && aggregate.IsTruthy() && !isAggregateOp(cc, aggregate) && !isArgmaxDef(aggregate) && !isArgminDef(aggregate) {
 		fieldDef.Delete("aggregate")
 	}
 	if timeUnit.IsTruthy() {
-		fieldDef.Set("timeUnit", normalizeTimeUnit(timeUnit))
+		fieldDef.Set("timeUnit", normalizeTimeUnit(cc, timeUnit))
 	}
 	if field.IsTruthy() {
 		fieldDef.Set("field", jsval.Str(field.AsString()))
@@ -479,23 +479,23 @@ func initFieldDef(fd Value, channel string, compositeMark bool) Value {
 	return jsval.Obj(fieldDef)
 }
 
-func isFieldOrDatumDefForTimeFormat(fd Value) bool {
+func isFieldOrDatumDefForTimeFormat(cc *compileCtx, fd Value) bool {
 	_, ft := getFormatMixins(fd)
-	return (ft.IsStr() && ft.StrValue() == "time") || (!ft.IsTruthy() && isTemporalFieldDef(fd))
+	return (ft.IsStr() && ft.StrValue() == "time") || (!ft.IsTruthy() && isTemporalFieldDef(cc, fd))
 }
 
-func isTemporalFieldDef(def Value) bool {
+func isTemporalFieldDef(cc *compileCtx, def Value) bool {
 	return def.IsTruthy() && ((def.Get("type").IsStr() && def.Get("type").StrValue() == "temporal") ||
-		(isFieldDef(def) && def.Get("timeUnit").IsTruthy()))
+		(isFieldDef(cc, def) && def.Get("timeUnit").IsTruthy()))
 }
 
 // valueExpr renders a value (possibly a date or signal) as an expression.
 // undefinedIfExprNotRequired makes plain values answer ok=false.
-func valueExpr(v Value, timeUnit Value, typ string, wrapTime, undefinedIfExprNotRequired bool) (string, bool) {
+func valueExpr(cc *compileCtx, v Value, timeUnit Value, typ string, wrapTime, undefinedIfExprNotRequired bool) (string, bool) {
 	unit := ""
 	if timeUnit.IsTruthy() {
-		unit = normalizeTimeUnit(timeUnit).Get("unit").AsString()
-		if !normalizeTimeUnit(timeUnit).Get("unit").IsTruthy() {
+		unit = normalizeTimeUnit(cc, timeUnit).Get("unit").AsString()
+		if !normalizeTimeUnit(cc, timeUnit).Get("unit").IsTruthy() {
 			unit = ""
 		}
 	}
@@ -534,15 +534,15 @@ func valueExpr(v Value, timeUnit Value, typ string, wrapTime, undefinedIfExprNot
 }
 
 // valueArray maps values to signals when they need an expression.
-func valueArray(fod Value, values []Value) []Value {
+func valueArray(cc *compileCtx, fod Value, values []Value) []Value {
 	typ := channelDefType(fod)
 	out := make([]Value, len(values))
 	for i, v := range values {
 		tu := undef
-		if isFieldDef(fod) && !isBinnedTimeUnit(fod.Get("timeUnit")) {
+		if isFieldDef(cc, fod) && !isBinnedTimeUnit(cc, fod.Get("timeUnit")) {
 			tu = fod.Get("timeUnit")
 		}
-		if e, ok := valueExpr(v, tu, typ, false, true); ok {
+		if e, ok := valueExpr(cc, v, tu, typ, false, true); ok {
 			out[i] = sig(e)
 		} else {
 			out[i] = v
@@ -551,23 +551,23 @@ func valueArray(fod Value, values []Value) []Value {
 	return out
 }
 
-func binRequiresRange(fd Value, channel string) bool {
+func binRequiresRange(cc *compileCtx, fd Value, channel string) bool {
 	if !isBinning(fd.Get("bin")) {
 		return false
 	}
 	t := channelDefType(fd)
-	return isScaleChannel(channel) && (t == "ordinal" || t == "nominal")
+	return isScaleChannel(cc, channel) && (t == "ordinal" || t == "nominal")
 }
 
 // getBandPosition is upstream's getBandPosition; undefined when there is none.
-func getBandPosition(fd, fd2 Value, markDef, config Value) Value {
-	if isFieldOrDatumDef(fd) && !fd.Get("bandPosition").IsUndefined() {
+func getBandPosition(cc *compileCtx, fd, fd2 Value, markDef, config Value) Value {
+	if isFieldOrDatumDef(cc, fd) && !fd.Get("bandPosition").IsUndefined() {
 		return fd.Get("bandPosition")
 	}
-	if isFieldDef(fd) {
+	if isFieldDef(cc, fd) {
 		timeUnit, bin := fd.Get("timeUnit"), fd.Get("bin")
 		if timeUnit.IsTruthy() && !fd2.IsTruthy() {
-			if v5 && isRectBasedMark(markDef.Get("type").AsString()) {
+			if cc.v5 && isRectBasedMark(cc, markDef.Get("type").AsString()) {
 				return jsval.Int(0)
 			}
 			return getMarkConfig("timeUnitBandPosition", markDef, config, "")
@@ -579,7 +579,7 @@ func getBandPosition(fd, fd2 Value, markDef, config Value) Value {
 }
 
 // getBandSize is upstream's getBandSize: a number, {band}, a signal or undefined.
-func getBandSize(channel string, fd, fd2 Value, markDef, config Value, scaleType string, useVlSizeChannel bool) Value {
+func getBandSize(cc *compileCtx, channel string, fd, fd2 Value, markDef, config Value, scaleType string, useVlSizeChannel bool) Value {
 	sizeChannel := getSizeChannel(channel)
 	sizeProp := sizeChannel
 	if useVlSizeChannel {
@@ -588,7 +588,7 @@ func getBandSize(channel string, fd, fd2 Value, markDef, config Value, scaleType
 	if size := getMarkPropOrConfig(sizeProp, markDef, config, sizeChannel, false); !size.IsUndefined() {
 		return size
 	}
-	if isFieldDef(fd) {
+	if isFieldDef(cc, fd) {
 		timeUnit, bin := fd.Get("timeUnit"), fd.Get("bin")
 		if timeUnit.IsTruthy() && !fd2.IsTruthy() {
 			return mkv("band", getMarkConfig("timeUnitBandSize", markDef, config, ""))
@@ -597,7 +597,7 @@ func getBandSize(channel string, fd, fd2 Value, markDef, config Value, scaleType
 		}
 	}
 	markType := markDef.Get("type").AsString()
-	if isRectBasedMark(markType) {
+	if isRectBasedMark(cc, markType) {
 		mc := config.Get(markType)
 		if scaleType != "" {
 			if hasDiscreteDomain(scaleType) {
@@ -613,9 +613,9 @@ func getBandSize(channel string, fd, fd2 Value, markDef, config Value, scaleType
 	return undef
 }
 
-func hasBandEnd(fd, fd2 Value, markDef, config Value) bool {
+func hasBandEnd(cc *compileCtx, fd, fd2 Value, markDef, config Value) bool {
 	if isBinning(fd.Get("bin")) || (fd.Get("timeUnit").IsTruthy() && isTypedFieldDef(fd) && channelDefType(fd) == "temporal") {
-		return !getBandPosition(fd, fd2, markDef, config).IsUndefined()
+		return !getBandPosition(cc, fd, fd2, markDef, config).IsUndefined()
 	}
 	return false
 }

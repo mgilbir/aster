@@ -12,15 +12,15 @@ import (
 
 type compositeNormalizer struct {
 	name string
-	fn   func(spec Value, config Value) Value
+	fn   func(cc *compileCtx, spec Value, config Value) Value
 }
 
-func (c compositeNormalizer) hasMatchingType(spec Value, _ Value) bool {
+func (c compositeNormalizer) hasMatchingType(spec Value, _ *normParams) bool {
 	return isUnitSpec(spec) && getMarkType(spec.Get("mark")) == c.name
 }
 
 func (c compositeNormalizer) run(spec Value, p *normParams, _ func(Value, *normParams) Value) Value {
-	return c.fn(spec, p.config)
+	return c.fn(p.cc, spec, p.config)
 }
 
 // jsEscape is the legacy global escape(): everything but A-Z a-z 0-9 @*_+-./
@@ -84,7 +84,7 @@ func filterTooltipWithAggregatedField(oldEncoding Value) (customWithout Value, f
 	return customWithout, filtered
 }
 
-func getCompositeMarkTooltip(summary []tooltipSummaryItem, continuousAxisChannelDef Value, encodingWithoutContinuousAxis Value, withFieldName bool) Value {
+func getCompositeMarkTooltip(cc *compileCtx, summary []tooltipSummaryItem, continuousAxisChannelDef Value, encodingWithoutContinuousAxis Value, withFieldName bool) Value {
 	if encodingWithoutContinuousAxis.IsObj() && encodingWithoutContinuousAxis.ObjValue().Has("tooltip") {
 		return mkv("tooltip", encodingWithoutContinuousAxis.Get("tooltip"))
 	}
@@ -107,7 +107,7 @@ func getCompositeMarkTooltip(summary []tooltipSummaryItem, continuousAxisChannel
 		))
 	}
 	seen := map[string]bool{}
-	for _, fd := range fieldDefsOf(encodingWithoutContinuousAxis) {
+	for _, fd := range fieldDefsOf(cc, encodingWithoutContinuousAxis) {
 		sfd := toStringFieldDef(fd)
 		h := hashOf(sfd)
 		if !seen[h] {
@@ -202,19 +202,19 @@ func compositeMarkContinuousAxis(spec Value, orient, compositeMark string) conti
 	}
 }
 
-func compositeMarkOrient(spec Value, compositeMark string) string {
+func compositeMarkOrient(cc *compileCtx, spec Value, compositeMark string) string {
 	mark, encoding := spec.Get("mark"), spec.Get("encoding")
 	x, y := encoding.Get("x"), encoding.Get("y")
 	if isMarkDef(mark) && mark.Get("orient").IsTruthy() {
 		return mark.Get("orient").AsString()
 	}
-	if isContinuousFieldOrDatumDef(x) {
-		if isContinuousFieldOrDatumDef(y) {
+	if isContinuousFieldOrDatumDef(cc, x) {
+		if isContinuousFieldOrDatumDef(cc, y) {
 			xAgg, yAgg := "", ""
-			if isFieldDef(x) {
+			if isFieldDef(cc, x) {
 				xAgg = x.Get("aggregate").AsString()
 			}
-			if isFieldDef(y) {
+			if isFieldDef(cc, y) {
 				yAgg = y.Get("aggregate").AsString()
 			}
 			if x.Get("aggregate").IsUndefined() {
@@ -231,13 +231,13 @@ func compositeMarkOrient(spec Value, compositeMark string) string {
 			case xAgg == compositeMark && yAgg == compositeMark:
 				throw("Both x and y cannot have aggregate")
 			}
-			if isFieldOrDatumDefForTimeFormat(y) && !isFieldOrDatumDefForTimeFormat(x) {
+			if isFieldOrDatumDefForTimeFormat(cc, y) && !isFieldOrDatumDefForTimeFormat(cc, x) {
 				return "horizontal"
 			}
 			return "vertical"
 		}
 		return "horizontal"
-	} else if isContinuousFieldOrDatumDef(y) {
+	} else if isContinuousFieldOrDatumDef(cc, y) {
 		return "vertical"
 	}
 	throw("Need a valid continuous axis for %ss", compositeMark)
@@ -246,17 +246,17 @@ func compositeMarkOrient(spec Value, compositeMark string) string {
 
 // ---- boxplot ----
 
-func boxParamsQuartiles(field string) []Value {
-	aliased := cmAlias(field)
+func boxParamsQuartiles(cc *compileCtx, field string) []Value {
+	aliased := cmAlias(cc, field)
 	return []Value{
 		mkv("op", "q1", "field", field, "as", "lower_box_"+aliased),
 		mkv("op", "q3", "field", field, "as", "upper_box_"+aliased),
 	}
 }
 
-func normalizeBoxPlot(spec Value, config Value) Value {
+func normalizeBoxPlot(cc *compileCtx, spec Value, config Value) Value {
 	so := cloneObj(spec.ObjValue())
-	so.Set("encoding", normalizeEncoding(spec.Get("encoding"), config))
+	so.Set("encoding", normalizeEncoding(cc, spec.Get("encoding"), config))
 	spec = jsval.Obj(so)
 	mark, params := spec.Get("mark"), spec.Get("params")
 	_ = params
@@ -271,9 +271,9 @@ func normalizeBoxPlot(spec Value, config Value) Value {
 	}
 	isMinMax := boxPlotType.IsStr() && boxPlotType.StrValue() == "min-max"
 	isTukey := boxPlotType.IsStr() && boxPlotType.StrValue() == "tukey"
-	bp := boxParams(spec, extent, config)
+	bp := boxParams(cc, spec, extent, config)
 	contField := bp.continuousAxisChannelDef.Get("field").AsString()
-	aliasedFieldName := cmAlias(contField)
+	aliasedFieldName := cmAlias(cc, contField)
 	color, size := bp.encodingWithoutContinuousAxis.Get("color"), bp.encodingWithoutContinuousAxis.Get("size")
 	encodingWithoutSizeColorAndContinuousAxis := omit(bp.encodingWithoutContinuousAxis, "color", "size")
 	makePart := func(shared Value) partFactory {
@@ -292,7 +292,7 @@ func normalizeBoxPlot(spec Value, config Value) Value {
 	if size.IsTruthy() {
 		midEnc.Set("size", size)
 	}
-	if !v5 {
+	if !cc.v5 {
 		cond := jsval.NewObject(4)
 		cond.Set("test", jsval.Str(accessWithDatumToUnescapedPath("lower_box_"+contField)+" >= "+accessWithDatumToUnescapedPath("upper_box_"+contField)))
 		if color.IsTruthy() {
@@ -308,7 +308,7 @@ func normalizeBoxPlot(spec Value, config Value) Value {
 	if isMinMax {
 		maxPrefix, minPrefix = "upper_whisker_", "lower_whisker_"
 	}
-	fiveSummary := getCompositeMarkTooltip([]tooltipSummaryItem{
+	fiveSummary := getCompositeMarkTooltip(cc, []tooltipSummaryItem{
 		{maxPrefix, jsval.Str("Max")},
 		{"upper_box_", jsval.Str("Q3")},
 		{"mid_box_", jsval.Str("Median")},
@@ -318,7 +318,7 @@ func normalizeBoxPlot(spec Value, config Value) Value {
 	endTick := mkv("type", "tick", "color", "black", "opacity", 1, "orient", bp.ticksOrient, "invalid", invalid, "aria", false)
 	whiskerTooltip := fiveSummary
 	if !isMinMax {
-		whiskerTooltip = getCompositeMarkTooltip([]tooltipSummaryItem{
+		whiskerTooltip = getCompositeMarkTooltip(cc, []tooltipSummaryItem{
 			{"upper_whisker_", jsval.Str("Upper Whisker")},
 			{"lower_whisker_", jsval.Str("Lower Whisker")},
 		}, bp.continuousAxisChannelDef, bp.encodingWithoutContinuousAxis, true)
@@ -359,14 +359,14 @@ func normalizeBoxPlot(spec Value, config Value) Value {
 		out.Set("layer", jsval.Arr(boxLayers))
 		return jsval.Obj(out)
 	}
-	lowerBoxExpr := cmAccess("lower_box_" + contField)
-	upperBoxExpr := cmAccess("upper_box_" + contField)
+	lowerBoxExpr := cmAccess(cc, "lower_box_"+contField)
+	upperBoxExpr := cmAccess(cc, "upper_box_"+contField)
 	iqrExpr := "(" + upperBoxExpr + " - " + lowerBoxExpr + ")"
 	extentStr := extent.AsString()
 	lowerWhiskerExpr := lowerBoxExpr + " - " + extentStr + " * " + iqrExpr
 	upperWhiskerExpr := upperBoxExpr + " + " + extentStr + " * " + iqrExpr
-	fieldExpr := cmAccess(contField)
-	joinaggregate := mkv("joinaggregate", jsval.Arr(boxParamsQuartiles(contField)), "groupby", jsval.Arr(bp.groupby))
+	fieldExpr := cmAccess(cc, contField)
+	joinaggregate := mkv("joinaggregate", jsval.Arr(boxParamsQuartiles(cc, contField)), "groupby", jsval.Arr(bp.groupby))
 	aggs := []Value{
 		mkv("op", "min", "field", contField, "as", "lower_whisker_"+aliasedFieldName),
 		mkv("op", "max", "field", contField, "as", "upper_whisker_"+aliasedFieldName),
@@ -392,7 +392,7 @@ func normalizeBoxPlot(spec Value, config Value) Value {
 	if !scale.IsUndefined() {
 		cd.Set("scale", scale)
 	}
-	if v5 {
+	if cc.v5 {
 		// 5.8 keeps the axis title out of the outlier layer's axis.
 		if axis = jsval.Obj(omit(axis, "title")); !isEmptyObj(axis) {
 			cd.Set("axis", axis)
@@ -436,11 +436,11 @@ type boxParamsResult struct {
 	customTooltipWithoutAggregatedField            Value
 }
 
-func boxParams(spec Value, extent Value, config Value) boxParamsResult {
-	orient := compositeMarkOrient(spec, "boxplot")
+func boxParams(cc *compileCtx, spec Value, extent Value, config Value) boxParamsResult {
+	orient := compositeMarkOrient(cc, spec, "boxplot")
 	cai := compositeMarkContinuousAxis(spec, orient, "boxplot")
 	contField := cai.def.Get("field").AsString()
-	aliased := cmAlias(contField)
+	aliased := cmAlias(cc, contField)
 	boxPlotType := extent
 	if extent.IsNum() {
 		boxPlotType = jsval.Str("tukey")
@@ -451,7 +451,7 @@ func boxParams(spec Value, extent Value, config Value) boxParamsResult {
 	if isMinMax {
 		minAs, maxAs = "lower_whisker_", "upper_whisker_"
 	}
-	specific := append(boxParamsQuartiles(contField),
+	specific := append(boxParamsQuartiles(cc, contField),
 		mkv("op", "median", "field", contField, "as", "mid_box_"+aliased),
 		mkv("op", "min", "field", contField, "as", minAs+aliased),
 		mkv("op", "max", "field", contField, "as", maxAs+aliased),
@@ -459,17 +459,17 @@ func boxParams(spec Value, extent Value, config Value) boxParamsResult {
 	var post []Value
 	if !isMinMax && !isTukey {
 		ext := extent.AsString()
-		up, lo := cmAccess("upper_box_"+aliased), cmAccess("lower_box_"+aliased)
-		iqr := cmAccess("iqr_" + aliased)
+		up, lo := cmAccess(cc, "upper_box_"+aliased), cmAccess(cc, "lower_box_"+aliased)
+		iqr := cmAccess(cc, "iqr_"+aliased)
 		post = []Value{
 			mkv("calculate", up+" - "+lo, "as", "iqr_"+aliased),
-			mkv("calculate", "min("+up+" + "+iqr+" * "+ext+", "+cmAccess("max_"+aliased)+")", "as", "upper_whisker_"+aliased),
-			mkv("calculate", "max("+lo+" - "+iqr+" * "+ext+", "+cmAccess("min_"+aliased)+")", "as", "lower_whisker_"+aliased),
+			mkv("calculate", "min("+up+" + "+iqr+" * "+ext+", "+cmAccess(cc, "max_"+aliased)+")", "as", "upper_whisker_"+aliased),
+			mkv("calculate", "max("+lo+" - "+iqr+" * "+ext+", "+cmAccess(cc, "min_"+aliased)+")", "as", "lower_whisker_"+aliased),
 		}
 	}
 	oldEncodingWithout := omit(spec.Get("encoding"), cai.axis)
 	customTooltip, filteredEncoding := filterTooltipWithAggregatedField(jsval.Obj(oldEncodingWithout))
-	ex := extractTransformsFromEncoding(jsval.Obj(filteredEncoding), config)
+	ex := extractTransformsFromEncoding(cc, jsval.Obj(filteredEncoding), config)
 	ticksOrient := "vertical"
 	if orient == "vertical" {
 		ticksOrient = "horizontal"
@@ -487,16 +487,16 @@ func boxParams(spec Value, extent Value, config Value) boxParamsResult {
 
 // ---- errorbar ----
 
-func isFOD(v Value) bool { return isFieldOrDatumDef(v) }
+func isFOD(cc *compileCtx, v Value) bool { return isFieldOrDatumDef(cc, v) }
 
-func errorBarOrientAndInputType(spec Value, compositeMark string) (orient, inputType string) {
+func errorBarOrientAndInputType(cc *compileCtx, spec Value, compositeMark string) (orient, inputType string) {
 	encoding := spec.Get("encoding")
-	if (isFOD(encoding.Get("x")) || isFOD(encoding.Get("y"))) && !isFOD(encoding.Get("x2")) && !isFOD(encoding.Get("y2")) &&
-		!isFOD(encoding.Get("xError")) && !isFOD(encoding.Get("xError2")) && !isFOD(encoding.Get("yError")) && !isFOD(encoding.Get("yError2")) {
-		return compositeMarkOrient(spec, compositeMark), "raw"
+	if (isFOD(cc, encoding.Get("x")) || isFOD(cc, encoding.Get("y"))) && !isFOD(cc, encoding.Get("x2")) && !isFOD(cc, encoding.Get("y2")) &&
+		!isFOD(cc, encoding.Get("xError")) && !isFOD(cc, encoding.Get("xError2")) && !isFOD(cc, encoding.Get("yError")) && !isFOD(cc, encoding.Get("yError2")) {
+		return compositeMarkOrient(cc, spec, compositeMark), "raw"
 	}
-	isUpperLower := isFOD(encoding.Get("x2")) || isFOD(encoding.Get("y2"))
-	isError := isFOD(encoding.Get("xError")) || isFOD(encoding.Get("xError2")) || isFOD(encoding.Get("yError")) || isFOD(encoding.Get("yError2"))
+	isUpperLower := isFOD(cc, encoding.Get("x2")) || isFOD(cc, encoding.Get("y2"))
+	isError := isFOD(cc, encoding.Get("xError")) || isFOD(cc, encoding.Get("xError2")) || isFOD(cc, encoding.Get("yError")) || isFOD(cc, encoding.Get("yError2"))
 	x, y := encoding.Get("x"), encoding.Get("y")
 	if isUpperLower {
 		if isError {
@@ -504,15 +504,15 @@ func errorBarOrientAndInputType(spec Value, compositeMark string) (orient, input
 		}
 		x2, y2 := encoding.Get("x2"), encoding.Get("y2")
 		switch {
-		case isFOD(x2) && isFOD(y2):
+		case isFOD(cc, x2) && isFOD(cc, y2):
 			throw("%s cannot have both x2 and y2", compositeMark)
-		case isFOD(x2):
-			if isContinuousFieldOrDatumDef(x) {
+		case isFOD(cc, x2):
+			if isContinuousFieldOrDatumDef(cc, x) {
 				return "horizontal", "aggregated-upper-lower"
 			}
 			throw("Both x and x2 have to be quantitative in %s", compositeMark)
-		case isFOD(y2):
-			if isContinuousFieldOrDatumDef(y) {
+		case isFOD(cc, y2):
+			if isContinuousFieldOrDatumDef(cc, y) {
 				return "vertical", "aggregated-upper-lower"
 			}
 			throw("Both y and y2 have to be quantitative in %s", compositeMark)
@@ -520,22 +520,22 @@ func errorBarOrientAndInputType(spec Value, compositeMark string) (orient, input
 		throw("No ranged axis")
 	}
 	xError, xError2, yError, yError2 := encoding.Get("xError"), encoding.Get("xError2"), encoding.Get("yError"), encoding.Get("yError2")
-	if isFOD(xError2) && !isFOD(xError) {
+	if isFOD(cc, xError2) && !isFOD(cc, xError) {
 		throw("%s cannot have xError2 without xError", compositeMark)
 	}
-	if isFOD(yError2) && !isFOD(yError) {
+	if isFOD(cc, yError2) && !isFOD(cc, yError) {
 		throw("%s cannot have yError2 without yError", compositeMark)
 	}
 	switch {
-	case isFOD(xError) && isFOD(yError):
+	case isFOD(cc, xError) && isFOD(cc, yError):
 		throw("%s cannot have both xError and yError with both are quantiative", compositeMark)
-	case isFOD(xError):
-		if isContinuousFieldOrDatumDef(x) {
+	case isFOD(cc, xError):
+		if isContinuousFieldOrDatumDef(cc, x) {
 			return "horizontal", "aggregated-error"
 		}
 		throw("All x, xError, and xError2 (if exist) have to be quantitative")
-	case isFOD(yError):
-		if isContinuousFieldOrDatumDef(y) {
+	case isFOD(cc, yError):
+		if isContinuousFieldOrDatumDef(cc, y) {
 			return "vertical", "aggregated-error"
 		}
 		throw("All y, yError, and yError2 (if exist) have to be quantitative")
@@ -555,13 +555,13 @@ type errorBarParamsResult struct {
 	tooltipEncoding               Value
 }
 
-func errorBarParams(spec Value, compositeMark string, config Value) errorBarParamsResult {
+func errorBarParams(cc *compileCtx, spec Value, compositeMark string, config Value) errorBarParamsResult {
 	mark, encoding := spec.Get("mark"), spec.Get("encoding")
 	outerSpec := omit(spec, "mark", "encoding", "params", "projection")
 	markDef := markDefOf(mark)
-	orient, inputType := errorBarOrientAndInputType(spec, compositeMark)
+	orient, inputType := errorBarOrientAndInputType(cc, spec, compositeMark)
 	cai := compositeMarkContinuousAxis(spec, orient, compositeMark)
-	agg, post, tooltipSummary, tooltipTitleWithFieldName := errorBarAggregationAndCalculation(markDef, cai.def, cai.def2, cai.defError, cai.defError2, inputType, compositeMark, config)
+	agg, post, tooltipSummary, tooltipTitleWithFieldName := errorBarAggregationAndCalculation(cc, markDef, cai.def, cai.def2, cai.defError, cai.defError2, inputType, compositeMark, config)
 	var axis2, err, err2 string
 	if cai.axis == "x" {
 		axis2, err, err2 = "x2", "xError", "xError2"
@@ -569,13 +569,13 @@ func errorBarParams(spec Value, compositeMark string, config Value) errorBarPara
 		axis2, err, err2 = "y2", "yError", "yError2"
 	}
 	oldWithout := omit(encoding, cai.axis, axis2, err, err2)
-	ex := extractTransformsFromEncoding(jsval.Obj(oldWithout), config)
+	ex := extractTransformsFromEncoding(cc, jsval.Obj(oldWithout), config)
 	aggregate := append(append([]Value{}, ex.aggregate...), agg...)
 	groupby := ex.groupby
 	if inputType != "raw" {
 		groupby = nil
 	}
-	tooltipEncoding := getCompositeMarkTooltip(tooltipSummary, cai.def, jsval.Obj(ex.encoding), tooltipTitleWithFieldName)
+	tooltipEncoding := getCompositeMarkTooltip(cc, tooltipSummary, cai.def, jsval.Obj(ex.encoding), tooltipTitleWithFieldName)
 	transform := append([]Value{}, arrayOf(outerSpec.Lookup("transform"))...)
 	transform = append(transform, ex.bins...)
 	transform = append(transform, ex.timeUnits...)
@@ -598,10 +598,10 @@ func getTitlePrefix(center, extent, op string) string {
 	return titleCase(center) + " " + op + " " + extent
 }
 
-func errorBarAggregationAndCalculation(markDef, def, def2, defError, defError2 Value, inputType, compositeMark string, config Value) (agg, post []Value, tooltipSummary []tooltipSummaryItem, tooltipTitleWithFieldName bool) {
+func errorBarAggregationAndCalculation(cc *compileCtx, markDef, def, def2, defError, defError2 Value, inputType, compositeMark string, config Value) (agg, post []Value, tooltipSummary []tooltipSummaryItem, tooltipTitleWithFieldName bool) {
 	contField := def.Get("field").AsString()
 	contFieldV := def.Get("field")
-	acc := cmAccess
+	acc := func(s string) string { return cmAccess(cc, s) }
 	if inputType == "raw" {
 		var center string
 		switch {
@@ -653,7 +653,7 @@ func errorBarAggregationAndCalculation(markDef, def, def2, defError, defError2 V
 				mkv("op", centerOp, "field", contFieldV, "as", "center_"+contField),
 			}
 			mkTitle := func(op string) Value {
-				return fieldTitle(mkv("field", contFieldV, "aggregate", op, "type", "quantitative"), config, false, true)
+				return fieldTitle(cc, mkv("field", contFieldV, "aggregate", op, "type", "quantitative"), config, false, true)
 			}
 			tooltipSummary = []tooltipSummaryItem{
 				{"upper_", mkTitle(upperOp)},
@@ -681,7 +681,7 @@ func errorBarAggregationAndCalculation(markDef, def, def2, defError, defError2 V
 		for _, c := range post {
 			as := c.Get("as").AsString()
 			calc := strings.ReplaceAll(strings.ReplaceAll(c.Get("calculate").AsString(), "datum['", ""), "']", "")
-			if v5 {
+			if cc.v5 {
 				calc = strings.ReplaceAll(strings.ReplaceAll(c.Get("calculate").AsString(), `datum["`, ""), `"]`, "")
 			}
 			tooltipSummary = append(tooltipSummary, tooltipSummaryItem{as[:min(6, len(as))], jsval.Str(calc)})
@@ -690,11 +690,11 @@ func errorBarAggregationAndCalculation(markDef, def, def2, defError, defError2 V
 	return
 }
 
-func normalizeErrorBar(spec Value, config Value) Value {
+func normalizeErrorBar(cc *compileCtx, spec Value, config Value) Value {
 	so := cloneObj(spec.ObjValue())
-	so.Set("encoding", normalizeEncoding(spec.Get("encoding"), config))
+	so.Set("encoding", normalizeEncoding(cc, spec.Get("encoding"), config))
 	spec = jsval.Obj(so)
-	r := errorBarParams(spec, "errorbar", config)
+	r := errorBarParams(cc, spec, "errorbar", config)
 	r.encodingWithoutContinuousAxis.Delete("size")
 	makePart := makeCompositeAggregatePartFactory(r.markDef, r.continuousAxis, r.continuousAxisChannelDef, jsval.Obj(r.encodingWithoutContinuousAxis), config.Get("errorbar"))
 	thickness, size := r.markDef.Get("thickness"), r.markDef.Get("size")
@@ -724,11 +724,11 @@ func normalizeErrorBar(spec Value, config Value) Value {
 	return jsval.Obj(out)
 }
 
-func normalizeErrorBand(spec Value, config Value) Value {
+func normalizeErrorBand(cc *compileCtx, spec Value, config Value) Value {
 	so := cloneObj(spec.ObjValue())
-	so.Set("encoding", normalizeEncoding(spec.Get("encoding"), config))
+	so.Set("encoding", normalizeEncoding(cc, spec.Get("encoding"), config))
 	spec = jsval.Obj(so)
-	r := errorBarParams(spec, "errorband", config)
+	r := errorBarParams(cc, spec, "errorband", config)
 	def := r.markDef
 	makePart := makeCompositeAggregatePartFactory(def, r.continuousAxis, r.continuousAxisChannelDef, jsval.Obj(r.encodingWithoutContinuousAxis), config.Get("errorband"))
 	is2D := spec.Get("encoding").Get("x").IsUndefined() == false && spec.Get("encoding").Get("y").IsUndefined() == false

@@ -90,10 +90,12 @@ func parseGuideResolve(resolve *resolveIndex, channel string) string {
 }
 
 func parseScales(m Model, ignoreRange bool) {
+	cc := m.b().ctx
+
 	parseScaleCore(m)
 	parseScaleDomain(m)
 	for _, prop := range nonTypeDomainRangeVegaScaleProperties {
-		if v5 && prop == "domainRaw" {
+		if cc.v5 && prop == "domainRaw" {
 			continue // 5.8 has no domainRaw scale property
 		}
 		parseScaleProperty(m, prop)
@@ -112,22 +114,24 @@ func parseScaleCore(m Model) {
 }
 
 func parseUnitScaleCore(u *unitModel) *omap[*scaleComponent] {
+	cc := u.b().ctx
+
 	scales := newOmap[*scaleComponent]()
 	for _, channel := range scaleChannels {
-		fod := getFieldOrDatumDef(u.encoding.Get(channel))
+		fod := getFieldOrDatumDef(cc, u.encoding.Get(channel))
 		if fod.IsTruthy() && u.mark() == "geoshape" && channel == chShape && channelDefType(fod) == "geojson" {
 			continue
 		}
 		specified := fod.Get("scale")
-		if v5 && isXorYOffset(channel) && !channelHasNestedOffsetScale(u.encoding, getMainChannelFromOffsetChannel(channel)) {
+		if cc.v5 && isXorYOffset(channel) && !channelHasNestedOffsetScale(cc, u.encoding, getMainChannelFromOffsetChannel(channel)) {
 			continue // 5.8 ignores an offset scale without a nested main scale
 		}
 		if fod.IsTruthy() && !specified.IsNull() && !(specified.IsBool() && !specified.BoolValue()) {
 			if specified.IsUndefined() {
 				specified = mkv()
 			}
-			hasNested := channelHasNestedOffsetScale(u.encoding, channel)
-			sType := computeScaleType(specified, channel, fod, u.markDef, hasNested)
+			hasNested := channelHasNestedOffsetScale(cc, u.encoding, channel)
+			sType := computeScaleType(cc, specified, channel, fod, u.markDef, hasNested)
 			scales.set(channel, newScaleComponent(u.scaleName(channel, true), withExplicit{
 				value:    strOrUndef(sType),
 				explicit: specified.Get("type").IsStr() && specified.Get("type").StrValue() == sType,
@@ -195,18 +199,18 @@ func parseNonUnitScaleCore(m Model) *omap[*scaleComponent] {
 
 // computeScaleType is upstream's scaleType(): the specified type when the
 // channel and data type support it, else the default.
-func computeScaleType(specified Value, channel string, fieldDef Value, mark Value, hasNested bool) string {
-	def := defaultScaleType(channel, fieldDef, mark, hasNested)
+func computeScaleType(cc *compileCtx, specified Value, channel string, fieldDef Value, mark Value, hasNested bool) string {
+	def := defaultScaleType(cc, channel, fieldDef, mark, hasNested)
 	t := specified.Get("type")
-	if !isScaleChannel(channel) {
+	if !isScaleChannel(cc, channel) {
 		return ""
 	}
 	if !t.IsUndefined() {
 		ts := t.AsString()
-		if !channelSupportScaleType(channel, ts, false) {
+		if !channelSupportScaleType(cc, channel, ts, false) {
 			return def
 		}
-		if isFieldDef(fieldDef) && !scaleTypeSupportDataType(ts, channelDefType(fieldDef)) {
+		if isFieldDef(cc, fieldDef) && !scaleTypeSupportDataType(ts, channelDefType(fieldDef)) {
 			return def
 		}
 		return ts
@@ -214,7 +218,7 @@ func computeScaleType(specified Value, channel string, fieldDef Value, mark Valu
 	return def
 }
 
-func defaultScaleType(channel string, fieldDef Value, mark Value, hasNested bool) string {
+func defaultScaleType(cc *compileCtx, channel string, fieldDef Value, mark Value, hasNested bool) string {
 	markType := mark.Get("type").AsString()
 	switch channelDefType(fieldDef) {
 	case "nominal", "ordinal":
@@ -225,7 +229,7 @@ func defaultScaleType(channel string, fieldDef Value, mark Value, hasNested bool
 			return "band"
 		}
 		if isXorY(channel) || isXorYOffset(channel) {
-			if contains([]string{"rect", "bar", "image", "rule", "tick"}, markType) && !(v5 && markType == "tick") {
+			if contains([]string{"rect", "bar", "image", "rule", "tick"}, markType) && !(cc.v5 && markType == "tick") {
 				return "band"
 			}
 			if hasNested {
@@ -249,7 +253,7 @@ func defaultScaleType(channel string, fieldDef Value, mark Value, hasNested bool
 			return "time"
 		case rangeType(channel) == "discrete":
 			return "ordinal"
-		case isFieldDef(fieldDef) && fieldDef.Get("timeUnit").IsTruthy() && normalizeTimeUnit(fieldDef.Get("timeUnit")).Get("utc").IsTruthy():
+		case isFieldDef(cc, fieldDef) && fieldDef.Get("timeUnit").IsTruthy() && normalizeTimeUnit(cc, fieldDef.Get("timeUnit")).Get("utc").IsTruthy():
 			return "utc"
 		case isTimeChannel(channel):
 			return "band"
@@ -258,7 +262,7 @@ func defaultScaleType(channel string, fieldDef Value, mark Value, hasNested bool
 	case "quantitative":
 		switch {
 		case isColorChannel(channel):
-			if isFieldDef(fieldDef) && isBinning(fieldDef.Get("bin")) {
+			if isFieldDef(cc, fieldDef) && isBinning(fieldDef.Get("bin")) {
 				return "bin-ordinal"
 			}
 			return "linear"
@@ -288,13 +292,15 @@ func parseScaleProperty(m Model, property string) {
 }
 
 func parseUnitScaleProperty(u *unitModel, property string) {
+	cc := u.b().ctx
+
 	local := u.comp.scales
 	config := u.config
 	for _, channel := range local.keyList() {
 		specifiedScale := u.specifiedScales.Lookup(channel)
 		localCmpt, _ := local.get(channel)
 		merged := u.getScaleComponent(channel)
-		fod := getFieldOrDatumDef(u.encoding.Get(channel))
+		fod := getFieldOrDatumDef(cc, u.encoding.Get(channel))
 		specifiedValue := specifiedScale.Get(property)
 		scaleType := merged.get("type").AsString()
 		scalePadding := merged.get("padding")
@@ -307,7 +313,7 @@ func parseUnitScaleProperty(u *unitModel, property string) {
 				case "domainMax", "domainMin":
 					timeUnit, typ := fod.Get("timeUnit"), channelDefType(fod)
 					if isDateTime(specifiedValue) || typ == "temporal" || timeUnit.IsTruthy() {
-						e, _ := valueExpr(specifiedValue, timeUnit, typ, false, false)
+						e, _ := valueExpr(cc, specifiedValue, timeUnit, typ, false, false)
 						localCmpt.set(property, sig(e), true)
 					} else {
 						localCmpt.set(property, specifiedValue, true)
@@ -323,7 +329,7 @@ func parseUnitScaleProperty(u *unitModel, property string) {
 						scalePadding: scalePadding, scalePaddingInner: scalePaddingInner,
 						domain: specifiedScale.Get("domain"), domainMin: specifiedScale.Get("domainMin"), domainMax: specifiedScale.Get("domainMax"),
 						markDef: u.markDef, config: config,
-						hasNestedOffsetScale:     channelHasNestedOffsetScale(u.encoding, channel),
+						hasNestedOffsetScale:     channelHasNestedOffsetScale(cc, u.encoding, channel),
 						hasSecondaryRangeChannel: u.encoding.Get(getSecondaryRangeChannel(channel)).IsTruthy(),
 					})
 				} else {
@@ -351,7 +357,7 @@ type scaleRuleParams struct {
 
 var scaleRules = map[string]func(p scaleRuleParams) Value{
 	"bins": func(p scaleRuleParams) Value {
-		if isFieldDef(p.fod) {
+		if isFieldDef(p.model.ctx, p.fod) {
 			return scaleBins(p.model, p.fod)
 		}
 		return undef
@@ -363,26 +369,26 @@ var scaleRules = map[string]func(p scaleRuleParams) Value{
 		return undef
 	},
 	"nice": func(p scaleRuleParams) Value {
-		return scaleNice(p.scaleType, p.channel, p.domain, p.domainMin, p.domainMax, p.fod)
+		return scaleNice(p.model.ctx, p.scaleType, p.channel, p.domain, p.domainMin, p.domainMax, p.fod)
 	},
 	"padding": func(p scaleRuleParams) Value {
-		return scalePaddingRule(p.channel, p.scaleType, p.config.Get("scale"), p.fod, p.markDef, p.config.Get("bar"))
+		return scalePaddingRule(p.model.ctx, p.channel, p.scaleType, p.config.Get("scale"), p.fod, p.markDef, p.config.Get("bar"))
 	},
 	"paddingInner": func(p scaleRuleParams) Value {
-		return scalePaddingInnerRule(p.scalePadding, p.channel, p.markDef.Get("type").AsString(), p.scaleType, p.config.Get("scale"), p.hasNestedOffsetScale)
+		return scalePaddingInnerRule(p.model.ctx, p.scalePadding, p.channel, p.markDef.Get("type").AsString(), p.scaleType, p.config.Get("scale"), p.hasNestedOffsetScale)
 	},
 	"paddingOuter": func(p scaleRuleParams) Value {
 		return scalePaddingOuterRule(p.scalePadding, p.channel, p.scaleType, p.scalePaddingInner, p.config.Get("scale"), p.hasNestedOffsetScale)
 	},
 	"reverse": func(p scaleRuleParams) Value {
 		sort := undef
-		if isFieldDef(p.fod) {
+		if isFieldDef(p.model.ctx, p.fod) {
 			sort = p.fod.Get("sort")
 		}
 		return scaleReverse(p.scaleType, sort, p.channel, p.config.Get("scale"))
 	},
 	"zero": func(p scaleRuleParams) Value {
-		return scaleZero(p.channel, p.fod, p.domain, p.markDef, p.scaleType, p.config.Get("scale"), p.hasSecondaryRangeChannel)
+		return scaleZero(p.model.ctx, p.channel, p.fod, p.domain, p.markDef, p.scaleType, p.config.Get("scale"), p.hasSecondaryRangeChannel)
 	},
 }
 
@@ -397,8 +403,8 @@ func scaleBins(m *unitModel, fd Value) Value {
 	return undef
 }
 
-func scaleNice(scaleType, channel string, domain, domainMin, domainMax, fod Value) Value {
-	if getFieldDef(fod).Get("bin").IsTruthy() || domain.IsArr() || !domainMax.IsNullish() || !domainMin.IsNullish() || scaleType == "time" || scaleType == "utc" {
+func scaleNice(cc *compileCtx, scaleType, channel string, domain, domainMin, domainMax, fod Value) Value {
+	if getFieldDef(cc, fod).Get("bin").IsTruthy() || domain.IsArr() || !domainMax.IsNullish() || !domainMin.IsNullish() || scaleType == "time" || scaleType == "utc" {
 		return undef
 	}
 	if isXorY(channel) {
@@ -407,14 +413,14 @@ func scaleNice(scaleType, channel string, domain, domainMin, domainMax, fod Valu
 	return undef
 }
 
-func scalePaddingRule(channel, scaleType string, scaleConfig Value, fod Value, markDef Value, barConfig Value) Value {
+func scalePaddingRule(cc *compileCtx, channel, scaleType string, scaleConfig Value, fod Value, markDef Value, barConfig Value) Value {
 	if isXorY(channel) {
 		if isContinuousToContinuous(scaleType) {
 			if cp := scaleConfig.Get("continuousPadding"); !cp.IsUndefined() {
 				return cp
 			}
 			typ, orient := markDef.Get("type").AsString(), markDef.Get("orient").AsString()
-			if typ == "bar" && !(isFieldDef(fod) && (fod.Get("bin").IsTruthy() || fod.Get("timeUnit").IsTruthy())) {
+			if typ == "bar" && !(isFieldDef(cc, fod) && (fod.Get("bin").IsTruthy() || fod.Get("timeUnit").IsTruthy())) {
 				if (orient == "vertical" && channel == chX) || (orient == "horizontal" && channel == chY) {
 					return barConfig.Get("continuousBandSize")
 				}
@@ -427,7 +433,7 @@ func scalePaddingRule(channel, scaleType string, scaleConfig Value, fod Value, m
 	return undef
 }
 
-func scalePaddingInnerRule(paddingValue Value, channel, mark, scaleType string, scaleConfig Value, hasNested bool) Value {
+func scalePaddingInnerRule(cc *compileCtx, paddingValue Value, channel, mark, scaleType string, scaleConfig Value, hasNested bool) Value {
 	if !paddingValue.IsUndefined() {
 		return undef
 	}
@@ -441,7 +447,7 @@ func scalePaddingInnerRule(paddingValue Value, channel, mark, scaleType string, 
 			fallback = scaleConfig.Get("barBandPaddingInner")
 		case "tick":
 			fallback = scaleConfig.Get("tickBandPaddingInner")
-			if v5 {
+			if cc.v5 {
 				fallback = scaleConfig.Get("rectBandPaddingInner")
 			}
 		default:
@@ -504,13 +510,13 @@ func scaleReverse(scaleType string, sort Value, channel string, scaleConfig Valu
 	return undef
 }
 
-func scaleZero(channel string, fd Value, specifiedDomain Value, markDef Value, scaleType string, scaleConfig Value, hasSecondary bool) Value {
+func scaleZero(cc *compileCtx, channel string, fd Value, specifiedDomain Value, markDef Value, scaleType string, scaleConfig Value, hasSecondary bool) Value {
 	hasCustomDomain := specifiedDomain.IsTruthy() && !(specifiedDomain.IsStr() && specifiedDomain.StrValue() == "unaggregated")
 	if hasCustomDomain {
 		if hasContinuousDomain(scaleType) {
 			if specifiedDomain.IsArr() {
 				first, last := specifiedDomain.Index(0), specifiedDomain.Index(specifiedDomain.Len()-1)
-				if v5 {
+				if cc.v5 {
 					// JavaScript comparison: strings such as "-0.07" count as numbers.
 					if !first.IsUndefined() && !last.IsUndefined() && jsval.ToNumber(first) <= 0 && jsval.ToNumber(last) >= 0 {
 						return jsval.True
@@ -525,7 +531,7 @@ func scaleZero(channel string, fd Value, specifiedDomain Value, markDef Value, s
 	if channel == chSize && channelDefType(fd) == "quantitative" && !isContinuousToDiscrete(scaleType) {
 		return jsval.True
 	}
-	if !(isFieldDef(fd) && fd.Get("bin").IsTruthy()) && (channel == chX || channel == chY || channel == chTheta || channel == chRadius) {
+	if !(isFieldDef(cc, fd) && fd.Get("bin").IsTruthy()) && (channel == chX || channel == chY || channel == chTheta || channel == chRadius) {
 		orient, typ := markDef.Get("orient").AsString(), markDef.Get("type").AsString()
 		if contains([]string{"bar", "area", "line", "trail"}, typ) {
 			if (orient == "horizontal" && channel == chY) || (orient == "vertical" && channel == chX) {

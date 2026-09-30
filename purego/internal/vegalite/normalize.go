@@ -18,6 +18,7 @@ type selectionState struct {
 // normParams is upstream's NormalizerParams. It is passed by pointer and
 // copied (shallowly) wherever upstream spreads it.
 type normParams struct {
+	cc               *compileCtx
 	config           Value
 	parentEncoding   Value
 	parentProjection Value
@@ -128,10 +129,10 @@ func (b *baseMapper) mapRepeat(spec Value, p *normParams) Value {
 // ---- entry point ----
 
 // normalize returns the normalized spec (with an autosize object when it is not Vega's default).
-func normalize(spec Value, config Value) Value {
-	p := &normParams{config: config, sel: &selectionState{}}
+func normalize(cc *compileCtx, spec Value, config Value) Value {
+	p := &normParams{cc: cc, config: config, sel: &selectionState{}}
 	compat := newSelectionCompatNormalizer()
-	core := newCoreNormalizer()
+	core := newCoreNormalizer(cc)
 	top := newTopLevelSelectionsNormalizer()
 	s := compat.mapTop(spec, p)
 	s = core.mapTop(s, p)
@@ -281,12 +282,14 @@ func normalizeTransforms(spec Value, p *normParams) Value {
 }
 
 func normalizeChannelDefCompat(obj Value, p *normParams) Value {
+	cc := p.cc
+
 	if !obj.IsObj() {
 		return obj
 	}
 	enc := deepClone(obj)
 	eo := enc.ObjValue()
-	if isFieldDef(enc) && isObject(enc.Get("bin")) {
+	if isFieldDef(cc, enc) && isObject(enc.Get("bin")) {
 		eo.Set("bin", normalizeBinExtent(enc.Get("bin")))
 	}
 	if isScaleFieldDef(enc) && enc.Get("scale").Get("domain").Get("selection").IsTruthy() {
@@ -470,7 +473,7 @@ func (n *topLevelSelectionsNormalizer) mapLayer(spec Value, p *normParams) Value
 // ---- core normalizer ----
 
 type nonFacetUnitNormalizer interface {
-	hasMatchingType(spec Value, config Value) bool
+	hasMatchingType(spec Value, p *normParams) bool
 	run(spec Value, p *normParams, normalize func(Value, *normParams) Value) Value
 }
 
@@ -479,7 +482,7 @@ type coreNormalizer struct {
 	unitNormalizers []nonFacetUnitNormalizer
 }
 
-func newCoreNormalizer() *coreNormalizer {
+func newCoreNormalizer(cc *compileCtx) *coreNormalizer {
 	n := &coreNormalizer{}
 	n.self = n
 	n.unitNormalizers = []nonFacetUnitNormalizer{
@@ -493,9 +496,11 @@ func newCoreNormalizer() *coreNormalizer {
 }
 
 func (n *coreNormalizer) mapTop(spec Value, p *normParams) Value {
+	cc := p.cc
+
 	if isUnitSpec(spec) {
 		enc := spec.Get("encoding")
-		if channelHasField(enc, chRow) || channelHasField(enc, chColumn) || channelHasField(enc, chFacet) {
+		if channelHasField(cc, enc, chRow) || channelHasField(cc, enc, chColumn) || channelHasField(cc, enc, chFacet) {
 			return n.mapFacetedUnit(spec, p.deeper())
 		}
 	}
@@ -513,7 +518,9 @@ func joinNonEmpty(parts ...string) string {
 }
 
 func (n *coreNormalizer) mapUnit(spec Value, p *normParams) Value {
-	encoding := replaceRepeaterInEncoding(spec.Get("encoding"), p.repeater)
+	cc := p.cc
+
+	encoding := replaceRepeaterInEncoding(cc, spec.Get("encoding"), p.repeater)
 	swre := cloneObj(spec.ObjValue())
 	if spec.Get("name").IsTruthy() {
 		swre.Set("name", jsval.Str(joinNonEmpty(p.repeaterPrefix, spec.Get("name").AsString())))
@@ -526,7 +533,7 @@ func (n *coreNormalizer) mapUnit(spec Value, p *normParams) Value {
 		return n.mapUnitWithParentEncodingOrProjection(sv, p)
 	}
 	for _, un := range n.unitNormalizers {
-		if un.hasMatchingType(sv, p.config) {
+		if un.hasMatchingType(sv, p) {
 			return un.run(sv, p, func(s Value, pp *normParams) Value { return n.mapLayerOrUnit(s, pp) })
 		}
 	}
@@ -676,9 +683,11 @@ func (n *coreNormalizer) mapFacet(spec Value, p *normParams) Value {
 }
 
 func (n *coreNormalizer) mapUnitWithParentEncodingOrProjection(spec Value, p *normParams) Value {
+	cc := p.cc
+
 	encoding, projection := spec.Get("encoding"), spec.Get("projection")
 	mergedProjection := mergeProjection(p.parentProjection, projection)
-	mergedEncoding := mergeEncoding(p.parentEncoding, replaceRepeaterInEncoding(encoding, p.repeater), false)
+	mergedEncoding := mergeEncoding(cc, p.parentEncoding, replaceRepeaterInEncoding(cc, encoding, p.repeater), false)
 	o := cloneObj(spec.ObjValue())
 	if mergedProjection.IsTruthy() {
 		o.Set("projection", mergedProjection)
@@ -687,19 +696,21 @@ func (n *coreNormalizer) mapUnitWithParentEncodingOrProjection(spec Value, p *no
 		o.Set("encoding", mergedEncoding)
 	}
 	return n.mapUnit(jsval.Obj(o), &normParams{
-		config: p.config, emptySelections: p.emptySelections, selectionPredicates: p.selectionPredicates,
+		cc: p.cc, config: p.config, emptySelections: p.emptySelections, selectionPredicates: p.selectionPredicates,
 		sel: p.sel, path: p.path, depth: p.depth,
 	})
 }
 
 func (n *coreNormalizer) mapFacetedUnit(spec Value, p *normParams) Value {
+	cc := p.cc
+
 	enc := spec.Get("encoding")
 	row, column, facet := enc.Get("row"), enc.Get("column"), enc.Get("facet")
 	encoding := omit(enc, "row", "column", "facet")
 	mark, width, projection, height, view, params := spec.Get("mark"), spec.Get("width"), spec.Get("projection"), spec.Get("height"), spec.Get("view"), spec.Get("params")
 	outerSpec := omit(spec, "mark", "width", "projection", "height", "view", "params", "encoding")
 	facetMapping, layout := n.getFacetMappingAndLayout(row, column, facet, p)
-	newEncoding := replaceRepeaterInEncoding(jsval.Obj(encoding), p.repeater)
+	newEncoding := replaceRepeaterInEncoding(cc, jsval.Obj(encoding), p.repeater)
 	inner := jsval.NewObject(8)
 	if width.IsTruthy() {
 		inner.Set("width", width)
@@ -726,6 +737,8 @@ func (n *coreNormalizer) mapFacetedUnit(spec Value, p *normParams) Value {
 }
 
 func (n *coreNormalizer) getFacetMappingAndLayout(row, column, facet Value, p *normParams) (Value, *Object) {
+	cc := p.cc
+
 	if row.IsTruthy() || column.IsTruthy() {
 		facetMapping := jsval.NewObject(2)
 		layout := jsval.NewObject(3)
@@ -759,14 +772,16 @@ func (n *coreNormalizer) getFacetMappingAndLayout(row, column, facet Value, p *n
 			layout.Set(k, v)
 		}
 	}
-	return replaceRepeaterInFacet(jsval.Obj(facetMapping), p.repeater), layout
+	return replaceRepeaterInFacet(cc, jsval.Obj(facetMapping), p.repeater), layout
 }
 
 func (n *coreNormalizer) mapLayer(spec Value, p *normParams) Value {
+	cc := p.cc
+
 	encoding, projection := spec.Get("encoding"), spec.Get("projection")
 	rest := omit(spec, "encoding", "projection")
 	cp := p.clone()
-	cp.parentEncoding = mergeEncoding(p.parentEncoding, encoding, true)
+	cp.parentEncoding = mergeEncoding(cc, p.parentEncoding, encoding, true)
 	cp.parentProjection = mergeProjection(p.parentProjection, projection)
 	cp.deeper()
 	if spec.Get("name").IsTruthy() {
@@ -776,7 +791,7 @@ func (n *coreNormalizer) mapLayer(spec Value, p *normParams) Value {
 }
 
 // mergeEncoding merges a layer's shared encoding into a child's encoding.
-func mergeEncoding(parentEncoding, encoding Value, layer bool) Value {
+func mergeEncoding(cc *compileCtx, parentEncoding, encoding Value, layer bool) Value {
 	if !encoding.IsTruthy() && !encoding.IsObj() {
 		encoding = mkv()
 	}
@@ -795,15 +810,15 @@ func mergeEncoding(parentEncoding, encoding Value, layer bool) Value {
 			channelDef := encoding.Get(channel)
 			parentChannelDef := parentEncoding.Get(channel)
 			switch {
-			case isFieldOrDatumDef(channelDef):
+			case isFieldOrDatumDef(cc, channelDef):
 				merged.Set(channel, jsval.Obj(merged2(parentChannelDef, channelDef)))
-			case hasConditionalFieldOrDatumDef(channelDef):
+			case hasConditionalFieldOrDatumDef(cc, channelDef):
 				o := cloneObj(channelDef.ObjValue())
 				o.Set("condition", jsval.Obj(merged2(parentChannelDef, channelDef.Get("condition"))))
 				merged.Set(channel, jsval.Obj(o))
 			case channelDef.IsTruthy() || channelDef.IsNull():
 				merged.Set(channel, channelDef)
-			case layer || isValueDef(parentChannelDef) || isSignalRef(parentChannelDef) || isFieldOrDatumDef(parentChannelDef) || parentChannelDef.IsArr():
+			case layer || isValueDef(parentChannelDef) || isSignalRef(parentChannelDef) || isFieldOrDatumDef(cc, parentChannelDef) || parentChannelDef.IsArr():
 				merged.Set(channel, parentChannelDef)
 			}
 		}
@@ -907,7 +922,8 @@ func getMarkType(m Value) string {
 	return m.AsString()
 }
 
-func (pathOverlayNormalizer) hasMatchingType(spec Value, config Value) bool {
+func (pathOverlayNormalizer) hasMatchingType(spec Value, p *normParams) bool {
+	config := p.config
 	if !isUnitSpec(spec) {
 		return false
 	}
@@ -938,10 +954,12 @@ func overlayTruthy(markDef, config, encoding Value, typ string, withLine bool) b
 }
 
 func (pathOverlayNormalizer) run(spec Value, p *normParams, normalize func(Value, *normParams) Value) Value {
+	cc := p.cc
+
 	config := p.config
 	params, projection, mark, name, e := spec.Get("params"), spec.Get("projection"), spec.Get("mark"), spec.Get("name"), spec.Get("encoding")
 	outerSpec := omit(spec, "params", "projection", "mark", "name", "encoding")
-	encoding := normalizeEncoding(e, config)
+	encoding := normalizeEncoding(cc, e, config)
 	markDef := markDefOf(mark)
 	pointOverlay, hasPoint := getPointOverlay(markDef, config.Get(markDef.Get("type").AsString()), encoding)
 	lineOverlay, hasLine := undef, false
@@ -955,7 +973,7 @@ func (pathOverlayNormalizer) run(spec Value, p *normParams, normalize func(Value
 	}
 	m := jsval.NewObject(4)
 	areaOpacity := getMarkPropOrConfigSimple("opacity", markDef, config).IsNullish() && getMarkPropOrConfigSimple("fillOpacity", markDef, config).IsNullish()
-	if v5 {
+	if cc.v5 {
 		// 5.8 looks at the mark definition only, not at the config.
 		areaOpacity = markDef.Get("opacity").IsUndefined() && markDef.Get("fillOpacity").IsUndefined()
 	}
@@ -968,10 +986,10 @@ func (pathOverlayNormalizer) run(spec Value, p *normParams, normalize func(Value
 	layer := []Value{jsval.Obj(first)}
 
 	stackMarkDef := markDef
-	if !v5 {
-		stackMarkDef = initMarkdef(markDef, encoding, config)
+	if !cc.v5 {
+		stackMarkDef = initMarkdef(cc, markDef, encoding, config)
 	}
-	stackProps := stackOf(stackMarkDef, encoding)
+	stackProps := stackOf(cc, stackMarkDef, encoding)
 	overlayEncoding := encoding
 	if stackProps != nil {
 		oe := cloneObj(encoding.ObjValue())
@@ -1018,7 +1036,9 @@ func (pathOverlayNormalizer) run(spec Value, p *normParams, normalize func(Value
 
 type ruleForRangedLineNormalizer struct{}
 
-func (ruleForRangedLineNormalizer) hasMatchingType(spec Value, _ Value) bool {
+func (ruleForRangedLineNormalizer) hasMatchingType(spec Value, p *normParams) bool {
+	cc := p.cc
+
 	if !isUnitSpec(spec) {
 		return false
 	}
@@ -1027,7 +1047,7 @@ func (ruleForRangedLineNormalizer) hasMatchingType(spec Value, _ Value) bool {
 		for _, channel := range secondaryRangeChannels {
 			mainDef := encoding.Get(getMainRangeChannel(channel))
 			if encoding.Get(channel).IsTruthy() {
-				if (isFieldDef(mainDef) && !isBinned(mainDef.Get("bin"))) || isDatumDef(mainDef) {
+				if (isFieldDef(cc, mainDef) && !isBinned(mainDef.Get("bin"))) || isDatumDef(mainDef) {
 					return true
 				}
 			}
@@ -1049,21 +1069,21 @@ func (ruleForRangedLineNormalizer) run(spec Value, p *normParams, normalize func
 
 // ---- repeater ----
 
-func replaceRepeaterInFacet(facet, repeater Value) Value {
+func replaceRepeaterInFacet(cc *compileCtx, facet, repeater Value) Value {
 	if !repeater.IsTruthy() {
 		return facet
 	}
 	if isFacetMapping(facet) {
-		return replaceRepeaterInMapping(facet, repeater)
+		return replaceRepeaterInMapping(cc, facet, repeater)
 	}
-	return replaceRepeaterInFieldDef(facet, repeater)
+	return replaceRepeaterInFieldDef(cc, facet, repeater)
 }
 
-func replaceRepeaterInEncoding(encoding, repeater Value) Value {
+func replaceRepeaterInEncoding(cc *compileCtx, encoding, repeater Value) Value {
 	if !repeater.IsTruthy() {
 		return encoding
 	}
-	return replaceRepeaterInMapping(encoding, repeater)
+	return replaceRepeaterInMapping(cc, encoding, repeater)
 }
 
 // replaceRepeatInProp substitutes {repeat: 'x'} in o[prop]. ok=false means the
@@ -1081,13 +1101,13 @@ func replaceRepeatInProp(prop string, o, repeater Value) (Value, bool) {
 	return o, true
 }
 
-func replaceRepeaterInFieldDef(fd, repeater Value) Value {
+func replaceRepeaterInFieldDef(cc *compileCtx, fd, repeater Value) Value {
 	fd2, ok := replaceRepeatInProp("field", fd, repeater)
 	if !ok {
 		return undef
 	}
 	fd = fd2
-	if isSortableFieldDef(fd) && isSortField(fd.Get("sort")) {
+	if isSortableFieldDef(fd) && isSortField(cc, fd.Get("sort")) {
 		if sort, ok := replaceRepeatInProp("field", fd.Get("sort"), repeater); ok && sort.IsTruthy() {
 			c := cloneObj(fd.ObjValue())
 			c.Set("sort", sort)
@@ -1097,9 +1117,9 @@ func replaceRepeaterInFieldDef(fd, repeater Value) Value {
 	return fd
 }
 
-func replaceRepeaterInFieldOrDatumDef(def, repeater Value) Value {
-	if isFieldDef(def) {
-		return replaceRepeaterInFieldDef(def, repeater)
+func replaceRepeaterInFieldOrDatumDef(cc *compileCtx, def, repeater Value) Value {
+	if isFieldDef(cc, def) {
+		return replaceRepeaterInFieldDef(cc, def, repeater)
 	}
 	dd, ok := replaceRepeatInProp("datum", def, repeater)
 	if !ok {
@@ -1111,17 +1131,17 @@ func replaceRepeaterInFieldOrDatumDef(def, repeater Value) Value {
 	return dd
 }
 
-func replaceRepeaterInChannelDef(cd, repeater Value) Value {
-	if isFieldOrDatumDef(cd) {
-		if fd := replaceRepeaterInFieldOrDatumDef(cd, repeater); fd.IsTruthy() {
+func replaceRepeaterInChannelDef(cc *compileCtx, cd, repeater Value) Value {
+	if isFieldOrDatumDef(cc, cd) {
+		if fd := replaceRepeaterInFieldOrDatumDef(cc, cd, repeater); fd.IsTruthy() {
 			return fd
 		} else if isConditionalDef(cd) {
 			return mkv("condition", cd.Get("condition"))
 		}
 		return undef
 	}
-	if hasConditionalFieldOrDatumDef(cd) {
-		if fd := replaceRepeaterInFieldOrDatumDef(cd.Get("condition"), repeater); fd.IsTruthy() {
+	if hasConditionalFieldOrDatumDef(cc, cd) {
+		if fd := replaceRepeaterInFieldOrDatumDef(cc, cd.Get("condition"), repeater); fd.IsTruthy() {
 			c := cloneObj(cd.ObjValue())
 			c.Set("condition", fd)
 			return jsval.Obj(c)
@@ -1131,7 +1151,7 @@ func replaceRepeaterInChannelDef(cd, repeater Value) Value {
 	return cd
 }
 
-func replaceRepeaterInMapping(mapping, repeater Value) Value {
+func replaceRepeaterInMapping(cc *compileCtx, mapping, repeater Value) Value {
 	out := jsval.NewObject(mapping.Len())
 	for _, channel := range keysOf(mapping) {
 		if !hasProperty(mapping, channel) {
@@ -1141,12 +1161,12 @@ func replaceRepeaterInMapping(mapping, repeater Value) Value {
 		if cd.IsArr() {
 			var items []Value
 			for _, x := range cd.Items() {
-				if r := replaceRepeaterInChannelDef(x, repeater); r.IsTruthy() {
+				if r := replaceRepeaterInChannelDef(cc, x, repeater); r.IsTruthy() {
 					items = append(items, r)
 				}
 			}
 			out.Set(channel, jsval.Arr(items))
-		} else if r := replaceRepeaterInChannelDef(cd, repeater); !r.IsUndefined() {
+		} else if r := replaceRepeaterInChannelDef(cc, cd, repeater); !r.IsUndefined() {
 			out.Set(channel, r)
 		}
 	}

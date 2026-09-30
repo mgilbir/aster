@@ -39,11 +39,11 @@ func getViewConfigDiscreteStep(view Value, channel string) float64 {
 }
 
 // initLayoutSize drops a step size for a continuous position channel (mutating size, as upstream does).
-func initLayoutSize(encoding Value, size *Object) *Object {
+func initLayoutSize(cc *compileCtx, encoding Value, size *Object) *Object {
 	for _, channel := range positionScaleChannels {
 		sizeType := getSizeChannel(channel)
 		if isStep(size.Lookup(sizeType)) {
-			if isContinuousFieldOrDatumDef(encoding.Get(channel)) {
+			if isContinuousFieldOrDatumDef(cc, encoding.Get(channel)) {
 				size.Delete(sizeType)
 			}
 		}
@@ -117,9 +117,11 @@ func parseNonUnitLayoutSizeForChannel(m Model, layoutSizeType string) {
 }
 
 func parseUnitLayoutSize(u *unitModel) {
+	cc := u.b().ctx
+
 	for _, channel := range positionScaleChannels {
 		sizeType := getSizeChannel(channel)
-		if sz := u.size.Lookup(sizeType); (v5 && sz.IsTruthy()) || (!v5 && !sz.IsNullish()) {
+		if sz := u.size.Lookup(sizeType); (cc.v5 && sz.IsTruthy()) || (!cc.v5 && !sz.IsNullish()) {
 			if isStep(sz) {
 				u.comp.layoutSize.set(sizeType, jsval.Str("step"), true)
 			} else {
@@ -170,13 +172,15 @@ func assembleLayoutSignals(m Model) []Value {
 }
 
 func sizeSignals(m Model, sizeType string) []Value {
+	cc := m.b().ctx
+
 	b := m.b()
 	channel := chY
 	if sizeType == "width" {
 		channel = chX
 	}
 	size := b.comp.layoutSize.get(sizeType)
-	if (!v5 && size.IsNullish()) || (v5 && !size.IsTruthy()) || (size.IsStr() && size.StrValue() == "merged") {
+	if (!cc.v5 && size.IsNullish()) || (cc.v5 && !size.IsTruthy()) || (size.IsStr() && size.StrValue() == "merged") {
 		return nil
 	}
 	name := signalOf(b.getSizeSignalRef(sizeType))

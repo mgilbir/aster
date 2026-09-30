@@ -59,9 +59,11 @@ func parseUnitProjection(u *unitModel) *projectionComponent {
 }
 
 func gatherFitData(u *unitModel) []Value {
+	cc := u.b().ctx
+
 	var data []Value
 	for _, pair := range [][2]string{{chLongitude, chLatitude}, {chLongitude2, chLatitude2}} {
-		if getFieldOrDatumDef(u.encoding.Get(pair[0])).IsTruthy() || getFieldOrDatumDef(u.encoding.Get(pair[1])).IsTruthy() {
+		if getFieldOrDatumDef(cc, u.encoding.Get(pair[0])).IsTruthy() || getFieldOrDatumDef(cc, u.encoding.Get(pair[1])).IsTruthy() {
 			data = append(data, mkv("signal", u.getName("geojson_"+jsval.JSNumberString(float64(len(data))))))
 		}
 	}

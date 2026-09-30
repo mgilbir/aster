@@ -106,12 +106,14 @@ func parseFacetHeaders(m *facetModel) {
 }
 
 func parseFacetHeader(m *facetModel, channel string) {
+	cc := m.b().ctx
+
 	if !m.channelHasField(channel) {
 		return
 	}
 	fd := m.facet.Lookup(channel)
 	titleConfig := getHeaderProperty("title", jsval.Null, m.config, channel)
-	title := fieldTitle(fd, m.config, true, titleConfig.IsUndefined() || titleConfig.IsTruthy())
+	title := fieldTitle(cc, fd, m.config, true, titleConfig.IsUndefined() || titleConfig.IsTruthy())
 	childLH := m.child.b().comp.layoutHeaders[channel]
 	if childLH.title.IsTruthy() {
 		var t string
@@ -171,6 +173,8 @@ func makeHeaderComponent(m *facetModel, channel string, labels Value) *headerCom
 }
 
 func mergeChildAxis(m *facetModel, channel string) {
+	cc := m.b().ctx
+
 	child := m.child
 	childAxes, ok := child.b().comp.axes.get(channel)
 	if !ok || childAxes == nil {
@@ -195,7 +199,7 @@ func mergeChildAxis(m *facetModel, channel string) {
 					lh.footer = list
 				}
 			}
-			if mainAxis := assembleAxis(ac, "main", m.config, true); mainAxis.IsTruthy() {
+			if mainAxis := assembleAxis(cc, ac, "main", m.config, true); mainAxis.IsTruthy() {
 				list[0].axes = append(list[0].axes, mainAxis)
 			}
 			ac.mainExtracted = true
@@ -272,27 +276,27 @@ func assembleHeaderGroups(m Model, channel string) []Value {
 	return groups
 }
 
-func headerGetSort(fd Value, channel string) Value {
+func headerGetSort(cc *compileCtx, fd Value, channel string) Value {
 	sort := fd.Get("sort")
 	switch {
-	case isSortField(sort):
-		return mkv("field", vgField(sort, fieldRefOption{expr: "datum"}), "order", coalesce(sort.Get("order"), jsval.Str("ascending")))
+	case isSortField(cc, sort):
+		return mkv("field", vgField(cc, sort, fieldRefOption{expr: "datum"}), "order", coalesce(sort.Get("order"), jsval.Str("ascending")))
 	case sort.IsArr():
-		return mkv("field", sortArrayIndexField(fd, channel, fieldRefOption{expr: "datum"}), "order", "ascending")
+		return mkv("field", sortArrayIndexField(cc, fd, channel, fieldRefOption{expr: "datum"}), "order", "ascending")
 	}
-	return mkv("field", vgField(fd, fieldRefOption{expr: "datum"}), "order", coalesce(sort, jsval.Str("ascending")))
+	return mkv("field", vgField(cc, fd, fieldRefOption{expr: "datum"}), "order", coalesce(sort, jsval.Str("ascending")))
 }
 
-func assembleLabelTitle(fd Value, channel string, config Value) Value {
+func assembleLabelTitle(cc *compileCtx, fd Value, channel string, config Value) Value {
 	props := getHeaderProperties([]string{"format", "formatType", "labelAngle", "labelAnchor", "labelOrient", "labelExpr"}, fd.Get("header"), config, channel)
-	titleTextExpr := signalOf(formatSignalRef(formatSignalOpts{
+	titleTextExpr := signalOf(formatSignalRef(cc, formatSignalOpts{
 		fieldOrDatumDef: fd, format: props.Lookup("format"), formatType: props.Lookup("formatType"), expr: "parent", config: config,
 	}))
 	labelOrient := props.Lookup("labelOrient")
 	headerChannel := getHeaderChannel(channel, labelOrient.AsString())
 	var text string
 	if labelExpr := props.Lookup("labelExpr"); labelExpr.IsTruthy() {
-		text = strings.ReplaceAll(strings.ReplaceAll(labelExpr.AsString(), "datum.label", titleTextExpr), "datum.value", vgField(fd, fieldRefOption{expr: "parent"}))
+		text = strings.ReplaceAll(strings.ReplaceAll(labelExpr.AsString(), "datum.label", titleTextExpr), "datum.value", vgField(cc, fd, fieldRefOption{expr: "parent"}))
 	} else {
 		text = titleTextExpr
 	}
@@ -310,6 +314,8 @@ func assembleLabelTitle(fd Value, channel string, config Value) Value {
 }
 
 func assembleHeaderGroup(m Model, channel, headerType string, lh *layoutHeaderComponent, hc *headerComponent) Value {
+	cc := m.b().ctx
+
 	if hc == nil {
 		return jsval.Null
 	}
@@ -321,7 +327,7 @@ func assembleHeaderGroup(m Model, channel, headerType string, lh *layoutHeaderCo
 		labelOrient := getHeaderProperty("labelOrient", fd.Get("header"), config, channel)
 		lo := labelOrient.AsString()
 		if (channel == "row" && lo != "top" && lo != "bottom") || (channel == "column" && lo != "left" && lo != "right") {
-			title = assembleLabelTitle(fd, channel, config)
+			title = assembleLabelTitle(cc, fd, channel, config)
 		}
 	}
 	f, _ := m.(*facetModel)
@@ -335,7 +341,7 @@ func assembleHeaderGroup(m Model, channel, headerType string, lh *layoutHeaderCo
 		o := mk("name", b.getName(channel+"_"+headerType), "type", "group", "role", channel+"-"+headerType)
 		if lh.facetFieldDef.IsTruthy() {
 			o.Set("from", mkv("data", b.getName(channel+"_domain")))
-			o.Set("sort", headerGetSort(fd, channel))
+			o.Set("sort", headerGetSort(cc, fd, channel))
 		}
 		if hasAxes && isFacetWithoutRowCol {
 			o.Set("from", mkv("data", b.getName("facet_domain_"+channel)))

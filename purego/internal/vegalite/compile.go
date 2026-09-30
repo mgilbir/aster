@@ -14,7 +14,9 @@
 package vegalite
 
 import (
+	"context"
 	"fmt"
+	"runtime/debug"
 	"time"
 
 	"github.com/mgilbir/aster/purego/internal/jsval"
@@ -32,7 +34,15 @@ type Options struct {
 	// Version is the Vega-Lite version to follow: "6.4" (also the default for
 	// "") or "5.8". Anything else is an error.
 	Version string
+	// Context, when set, bounds the compilation: it is checked in the loops
+	// that can run long and Compile returns the context's error once it is
+	// done. Nil means no bound.
+	Context context.Context
 }
+
+// panicHook, when set (by tests, before any compilation starts), receives the
+// stack of every panic Compile turns into an "internal error".
+var panicHook func(stack []byte)
 
 // Compile turns a Vega-Lite specification into a Vega specification. The input
 // is not modified. Errors are returned for invalid specifications; Compile does
@@ -42,25 +52,35 @@ func Compile(spec jsval.Value, opts Options) (out jsval.Value, err error) {
 		if r := recover(); r != nil {
 			out = jsval.Undefined
 			switch e := r.(type) {
+			case cancelError:
+				err = e.err
 			case compileError:
 				err = e
 			case exprSyntaxError:
 				err = compileError{"Invalid expression: " + e.msg}
 			default:
+				if panicHook != nil {
+					panicHook(debug.Stack())
+				}
 				err = fmt.Errorf("vegalite: internal error: %v", r)
 			}
 		}
 	}()
-	release, err := acquireVersion(opts.Version)
+	v5, err := isVersion58(opts.Version)
 	if err != nil {
 		return jsval.Undefined, err
 	}
-	defer release()
+	cc := &compileCtx{v5: v5, loc: opts.Location, ctx: opts.Context}
 	if !spec.IsObj() {
 		return jsval.Undefined, compileError{"Invalid spec: a Vega-Lite specification must be an object"}
 	}
+	if opts.Context != nil {
+		if err := opts.Context.Err(); err != nil {
+			return jsval.Undefined, err
+		}
+	}
 	input := deepClone(spec)
-	return compileSpec(input, opts), nil
+	return compileSpec(cc, input, opts), nil
 }
 
 // CompileJSON compiles a specification (and optional config) given as JSON text
@@ -85,12 +105,10 @@ func CompileJSON(specJSON []byte, configJSON string) ([]byte, error) {
 	return jsval.AppendJSON(nil, out), nil
 }
 
-func compileSpec(inputSpec jsval.Value, opts Options) jsval.Value {
-	config := initConfig(jsval.Obj(mergeConfig(opts.Config, inputSpec.Get("config"))))
-	spec := normalize(inputSpec, config)
-	model := buildModel(spec, nil, "", jsval.NewObject(0), config, 0)
-	defer model.b().ctx.release()
-	model.b().ctx.loc = opts.Location
+func compileSpec(cc *compileCtx, inputSpec jsval.Value, opts Options) jsval.Value {
+	config := initConfig(cc, jsval.Obj(mergeConfig(opts.Config, inputSpec.Get("config"))))
+	spec := normalize(cc, inputSpec, config)
+	model := buildModel(cc, spec, nil, "", jsval.NewObject(0), config, 0)
 	parseModel(model)
 	optimizeDataflow(model.b().comp.data, model)
 	top := getTopLevelProperties(inputSpec, spec.Get("autosize"), config, model)
@@ -146,14 +164,16 @@ func getTopLevelProperties(inputSpec jsval.Value, autosize jsval.Value, config j
 }
 
 func assembleTopLevelModel(model Model, top *Object, datasets, usermeta jsval.Value) jsval.Value {
+	cc := model.b().ctx
+
 	b := model.b()
 	vgConfig := undef
 	if b.config.IsTruthy() {
-		vgConfig = stripAndRedirectConfig(b.config)
+		vgConfig = stripAndRedirectConfig(cc, b.config)
 	}
 	rootData := assembleRootData(b.comp.data, datasets)
 	var data []Value
-	if v5 {
+	if cc.v5 {
 		data = append(model.assembleSelectionData(nil), rootData...)
 	} else {
 		data = model.assembleSelectionData(rootData)
@@ -176,7 +196,7 @@ func assembleTopLevelModel(model Model, top *Object, datasets, usermeta jsval.Va
 	params := top.Lookup("params")
 	other := omit(jsval.Obj(top), "params")
 	schema := "https://vega.github.io/schema/vega/v6.json"
-	if v5 {
+	if cc.v5 {
 		schema = "https://vega.github.io/schema/vega/v5.json"
 	}
 	o := mk("$schema", schema)

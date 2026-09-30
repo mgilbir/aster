@@ -47,13 +47,15 @@ func parseLegend(m Model) {
 }
 
 func parseUnitLegend(u *unitModel) *omap[*legendComponent] {
+	cc := u.b().ctx
+
 	out := newOmap[*legendComponent]()
 	for _, channel := range append([]string{chColor}, legendScaleChannels...) {
-		def := getFieldOrDatumDef(u.encoding.Get(channel))
+		def := getFieldOrDatumDef(cc, u.encoding.Get(channel))
 		if !def.IsTruthy() || u.getScaleComponent(channel) == nil {
 			continue
 		}
-		if channel == chShape && isFieldDef(def) && channelDefType(def) == "geojson" {
+		if channel == chShape && isFieldDef(cc, def) && channelDefType(def) == "geojson" {
 			continue
 		}
 		out.set(channel, parseLegendForChannel(u, channel))
@@ -105,6 +107,8 @@ type legendRuleParams struct {
 }
 
 func parseLegendForChannel(m *unitModel, channel string) *legendComponent {
+	cc := m.b().ctx
+
 	legend := m.legend(channel)
 	markDef, encoding, config := m.markDef, m.encoding, m.config
 	legendConfig := config.Get("legend")
@@ -123,11 +127,11 @@ func parseLegendForChannel(m *unitModel, channel string) *legendComponent {
 	if !legend.IsTruthy() {
 		legend = mkv()
 	}
-	scaleType := m.getScaleComponent(channel).get("type").AsString()
-	fod := getFieldOrDatumDef(encoding.Get(channel))
+	scaleType := m.scaleTypeOf(channel)
+	fod := getFieldOrDatumDef(cc, encoding.Get(channel))
 	timeUnit := ""
-	if isFieldDef(fod) {
-		if u := normalizeTimeUnit(fod.Get("timeUnit")).Get("unit"); u.IsTruthy() {
+	if isFieldDef(cc, fod) {
+		if u := normalizeTimeUnit(cc, fod.Get("timeUnit")).Get("unit"); u.IsTruthy() {
 			timeUnit = u.AsString()
 		}
 	}
@@ -172,13 +176,13 @@ func parseLegendForChannel(m *unitModel, channel string) *legendComponent {
 		}
 		if !value.IsUndefined() && !isEmptyObj(value) {
 			o := jsval.NewObject(4)
-			if hasSel && isFieldDef(fod) {
+			if hasSel && isFieldDef(cc, fod) {
 				o.Set("name", jsval.Str(varName(fod.Get("field").AsString())+"_legend_"+part))
 			}
 			if hasSel {
 				o.Set("interactive", jsval.True)
 			}
-			if hasSel && !v5 {
+			if hasSel && !cc.v5 {
 				u := cloneObj(coalesceObj(value).ObjValue())
 				u.Set("cursor", mkv("value", "pointer"))
 				o.Set("update", jsval.Obj(u))
@@ -281,10 +285,10 @@ func deleteNestedProperty(obj Value, props []string) bool {
 var legendRules = map[string]func(p legendRuleParams) Value{
 	"direction": func(p legendRuleParams) Value { return p.direction },
 	"format": func(p legendRuleParams) Value {
-		return guideFormat(p.fod, channelDefType(p.fod), p.legend.Get("format"), p.legend.Get("formatType"), p.config, false)
+		return guideFormat(p.model.ctx, p.fod, channelDefType(p.fod), p.legend.Get("format"), p.legend.Get("formatType"), p.config, false)
 	},
 	"formatType": func(p legendRuleParams) Value {
-		return guideFormatType(p.legend.Get("formatType"), p.fod, p.scaleType)
+		return guideFormatType(p.model.ctx, p.legend.Get("formatType"), p.fod, p.scaleType)
 	},
 	"gradientLength": func(p legendRuleParams) Value {
 		if v := p.legend.Get("gradientLength"); !v.IsNullish() {
@@ -313,7 +317,7 @@ var legendRules = map[string]func(p legendRuleParams) Value{
 		}
 		return defaultSymbolType(p.markDef.Get("type").AsString(), p.channel, p.encoding.Get("shape"), p.markDef.Get("shape"))
 	},
-	"title": func(p legendRuleParams) Value { return fieldTitle(p.fod, p.config, true, true) },
+	"title": func(p legendRuleParams) Value { return fieldTitle(p.model.ctx, p.fod, p.config, true, true) },
 	"type": func(p legendRuleParams) Value {
 		if isColorChannel(p.channel) && isContinuousToContinuous(p.scaleType) {
 			if p.legendType == "gradient" {
@@ -324,7 +328,7 @@ var legendRules = map[string]func(p legendRuleParams) Value{
 		}
 		return strOrUndef(p.legendType)
 	},
-	"values": func(p legendRuleParams) Value { return guideValues(p.legend, p.fod) },
+	"values": func(p legendRuleParams) Value { return guideValues(p.model.ctx, p.legend, p.fod) },
 }
 
 func defaultSymbolType(mark, channel string, shapeChannelDef, markShape Value) Value {
@@ -454,6 +458,8 @@ func selectedCondition(m *unitModel, cmpt *legendComponent, fd Value) string {
 }
 
 func legendSymbolsEncode(symbolsSpec Value, fod Value, m *unitModel, channel string, cmpt *legendComponent, legendType string) Value {
+	cc := m.b().ctx
+
 	if legendType != "symbol" {
 		return undef
 	}
@@ -523,7 +529,7 @@ func legendSymbolsEncode(symbolsSpec Value, fod Value, m *unitModel, channel str
 	}
 	if channel != chOpacity {
 		var condition string
-		if isFieldDef(fod) {
+		if isFieldDef(cc, fod) {
 			condition = selectedCondition(m, cmpt, fod)
 		}
 		if condition != "" {
@@ -568,13 +574,15 @@ func legendGradientEncode(gradientSpec Value, m *unitModel, legendType string, c
 }
 
 func legendLabelsEncode(specified Value, fod Value, m *unitModel, channel string, cmpt *legendComponent) Value {
+	cc := m.b().ctx
+
 	legend := coalesceObj(m.legend(channel))
 	if !legend.IsObj() {
 		legend = mkv()
 	}
 	config := m.config
 	var condition string
-	if isFieldDef(fod) {
+	if isFieldDef(cc, fod) {
 		condition = selectedCondition(m, cmpt, fod)
 	}
 	opacity := undef
@@ -584,12 +592,12 @@ func legendLabelsEncode(specified Value, fod Value, m *unitModel, channel string
 	format, formatType := legend.Get("format"), legend.Get("formatType")
 	text := undef
 	if isCustomFormatType(formatType) {
-		text = formatCustomType(fod, format, formatType, "", false, config, "datum.value")
+		text = formatCustomType(cc, fod, format, formatType, "", false, config, "datum.value")
 	} else if format.IsUndefined() && formatType.IsUndefined() && config.Get("customFormatTypes").IsTruthy() {
 		if channelDefType(fod) == "quantitative" && config.Get("numberFormatType").IsTruthy() {
-			text = formatCustomType(fod, config.Get("numberFormat"), config.Get("numberFormatType"), "", false, config, "datum.value")
-		} else if channelDefType(fod) == "temporal" && config.Get("timeFormatType").IsTruthy() && isFieldDef(fod) && fod.Get("timeUnit").IsUndefined() {
-			text = formatCustomType(fod, config.Get("timeFormat"), config.Get("timeFormatType"), "", false, config, "datum.value")
+			text = formatCustomType(cc, fod, config.Get("numberFormat"), config.Get("numberFormatType"), "", false, config, "datum.value")
+		} else if channelDefType(fod) == "temporal" && config.Get("timeFormatType").IsTruthy() && isFieldDef(cc, fod) && fod.Get("timeUnit").IsUndefined() {
+			text = formatCustomType(cc, fod, config.Get("timeFormat"), config.Get("timeFormatType"), "", false, config, "datum.value")
 		}
 	}
 	o := jsval.NewObject(3)
@@ -769,7 +777,9 @@ type legendEntry struct {
 }
 
 func assembleLegends(m Model) []Value {
-	if v5 {
+	cc := m.b().ctx
+
+	if cc.v5 {
 		return assembleLegends58(m)
 	}
 	index := m.b().comp.legends

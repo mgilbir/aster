@@ -23,24 +23,24 @@ type stackProperties struct {
 var stackableMarks = strSet([]string{"arc", "bar", "area", "rule", "point", "circle", "square", "line", "text", "tick"})
 var stackByDefaultMarks = strSet([]string{"bar", "area", "arc"})
 
-func isUnbinnedQuantitative(cd Value) bool {
-	return isFieldDef(cd) && channelDefType(cd) == "quantitative" && !cd.Get("bin").IsTruthy()
+func isUnbinnedQuantitative(cc *compileCtx, cd Value) bool {
+	return isFieldDef(cc, cd) && channelDefType(cd) == "quantitative" && !cd.Get("bin").IsTruthy()
 }
 
 // potentialStackedChannel finds which of x/y (or theta/radius) is the stacked measure.
-func potentialStackedChannel(encoding Value, x string, markDef Value) string {
+func potentialStackedChannel(cc *compileCtx, encoding Value, x string, markDef Value) string {
 	y := chRadius
 	if x == chX {
 		y = chY
 	}
 	mark, orient := markDef.Get("type").AsString(), markDef.Get("orient").AsString()
 	isCartesianBarOrArea := x == chX && (mark == "bar" || mark == "area")
-	if v5 {
+	if cc.v5 {
 		isCartesianBarOrArea = x == chX && mark == "bar"
 	}
 	xDef, yDef := encoding.Get(x), encoding.Get(y)
-	if isFieldDef(xDef) && isFieldDef(yDef) {
-		if isUnbinnedQuantitative(xDef) && isUnbinnedQuantitative(yDef) {
+	if isFieldDef(cc, xDef) && isFieldDef(cc, yDef) {
+		if isUnbinnedQuantitative(cc, xDef) && isUnbinnedQuantitative(cc, yDef) {
 			if xDef.Get("stack").IsTruthy() {
 				return x
 			} else if yDef.Get("stack").IsTruthy() {
@@ -60,18 +60,18 @@ func potentialStackedChannel(encoding Value, x string, markDef Value) string {
 					return x
 				}
 			}
-		} else if isUnbinnedQuantitative(xDef) {
+		} else if isUnbinnedQuantitative(cc, xDef) {
 			return x
-		} else if isUnbinnedQuantitative(yDef) {
+		} else if isUnbinnedQuantitative(cc, yDef) {
 			return y
 		}
-	} else if isUnbinnedQuantitative(xDef) {
-		if !v5 && isCartesianBarOrArea && orient == "vertical" {
+	} else if isUnbinnedQuantitative(cc, xDef) {
+		if !cc.v5 && isCartesianBarOrArea && orient == "vertical" {
 			return ""
 		}
 		return x
-	} else if isUnbinnedQuantitative(yDef) {
-		if !v5 && isCartesianBarOrArea && orient == "horizontal" {
+	} else if isUnbinnedQuantitative(cc, yDef) {
+		if !cc.v5 && isCartesianBarOrArea && orient == "horizontal" {
 			return ""
 		}
 		return y
@@ -94,7 +94,7 @@ func getDimensionChannel(channel string) string {
 }
 
 // stackOf computes the stack properties of a unit spec, or nil when it does not stack.
-func stackOf(m Value, encoding Value) *stackProperties {
+func stackOf(cc *compileCtx, m Value, encoding Value) *stackProperties {
 	markDef := m
 	if !isMarkDef(m) {
 		markDef = mkv("type", m)
@@ -103,17 +103,17 @@ func stackOf(m Value, encoding Value) *stackProperties {
 	if !stackableMarks[mark] {
 		return nil
 	}
-	fieldChannel := potentialStackedChannel(encoding, chX, markDef)
+	fieldChannel := potentialStackedChannel(cc, encoding, chX, markDef)
 	if fieldChannel == "" {
-		fieldChannel = potentialStackedChannel(encoding, chTheta, markDef)
+		fieldChannel = potentialStackedChannel(cc, encoding, chTheta, markDef)
 	}
 	if fieldChannel == "" {
 		return nil
 	}
 	stackedFieldDef := encoding.Get(fieldChannel)
 	stackedField := ""
-	if isFieldDef(stackedFieldDef) {
-		stackedField = vgField(stackedFieldDef, fieldRefOption{})
+	if isFieldDef(cc, stackedFieldDef) {
+		stackedField = vgField(cc, stackedFieldDef, fieldRefOption{})
 	}
 	dimensionChannel := getDimensionChannel(fieldChannel)
 	var groupbyChannels []string
@@ -121,8 +121,8 @@ func stackOf(m Value, encoding Value) *stackProperties {
 	if encoding.Get(dimensionChannel).IsTruthy() {
 		dimensionDef := encoding.Get(dimensionChannel)
 		dimensionField := ""
-		if isFieldDef(dimensionDef) {
-			dimensionField = vgField(dimensionDef, fieldRefOption{})
+		if isFieldDef(cc, dimensionDef) {
+			dimensionField = vgField(cc, dimensionDef, fieldRefOption{})
 		}
 		if dimensionField != "" && dimensionField != stackedField {
 			groupbyChannels = append(groupbyChannels, dimensionChannel)
@@ -135,8 +135,8 @@ func stackOf(m Value, encoding Value) *stackProperties {
 	}
 	dimensionOffsetDef := encoding.Get(dimensionOffsetChannel)
 	dimensionOffsetField := ""
-	if isFieldDef(dimensionOffsetDef) {
-		dimensionOffsetField = vgField(dimensionOffsetDef, fieldRefOption{})
+	if isFieldDef(cc, dimensionOffsetDef) {
+		dimensionOffsetField = vgField(cc, dimensionOffsetDef, fieldRefOption{})
 	}
 	if dimensionOffsetField != "" && dimensionOffsetField != stackedField {
 		groupbyChannels = append(groupbyChannels, dimensionOffsetChannel)
@@ -144,13 +144,13 @@ func stackOf(m Value, encoding Value) *stackProperties {
 	}
 	var stackByList []stackBy
 	for _, channel := range nonPositionChannels {
-		if channel != chTooltip && channelHasField(encoding, channel) {
+		if channel != chTooltip && channelHasField(cc, encoding, channel) {
 			for _, cDef := range arrayOf(encoding.Get(channel)) {
-				fd := getFieldDef(cDef)
+				fd := getFieldDef(cc, cDef)
 				if fd.Get("aggregate").IsTruthy() {
 					continue
 				}
-				f := vgField(fd, fieldRefOption{})
+				f := vgField(cc, fd, fieldRefOption{})
 				if f == "" || !groupbyFields.has(f) {
 					stackByList = append(stackByList, stackBy{channel, fd})
 				}
@@ -173,13 +173,13 @@ func stackOf(m Value, encoding Value) *stackProperties {
 	if !haveOffset || (offset != "zero" && offset != "center" && offset != "normalize") {
 		return nil
 	}
-	if encodingIsAggregate(encoding) && len(stackByList) == 0 {
+	if encodingIsAggregate(cc, encoding) && len(stackByList) == 0 {
 		return nil
 	}
-	if st := stackedFieldDef.Get("scale").Get("type"); v5 && st.IsTruthy() && !(st.IsStr() && st.StrValue() == "linear") {
+	if st := stackedFieldDef.Get("scale").Get("type"); cc.v5 && st.IsTruthy() && !(st.IsStr() && st.StrValue() == "linear") {
 		return nil // 5.8 refuses to stack a non-linear scale
 	}
-	if sec := getSecondaryRangeChannel(fieldChannel); sec != "" && isFieldOrDatumDef(encoding.Get(sec)) {
+	if sec := getSecondaryRangeChannel(fieldChannel); sec != "" && isFieldOrDatumDef(cc, encoding.Get(sec)) {
 		return nil
 	}
 	impute := isPathMarkName(mark)
@@ -194,12 +194,12 @@ func stackOf(m Value, encoding Value) *stackProperties {
 
 func isPathMarkName(m string) bool { return m == "line" || m == "area" || m == "trail" }
 
-func isRectBasedMark(m string) bool {
+func isRectBasedMark(cc *compileCtx, m string) bool {
 	switch m {
 	case "rect", "bar", "image", "arc":
 		return true
 	case "tick":
-		return !v5
+		return !cc.v5
 	}
 	return false
 }

@@ -55,10 +55,12 @@ func strItems(v Value) []string {
 }
 
 func (n *xformNode) defaultName(def Value) string {
+	cc := n.cc
+
 	if a := def.Get("as"); !a.IsNullish() {
 		return a.AsString()
 	}
-	return vgField(def, fieldRefOption{})
+	return vgField(cc, def, fieldRefOption{})
 }
 
 func (n *xformNode) dependentFields() *sset {
@@ -200,6 +202,8 @@ func (n *xformNode) addDimensions(fields []string) {
 }
 
 func (n *xformNode) assemble() []Value {
+	cc := n.cc
+
 	t := n.tv()
 	switch n.kind {
 	case "window":
@@ -239,7 +243,7 @@ func (n *xformNode) assemble() []Value {
 	case "density":
 		o := mk("type", "kde", "field", t.Get("density"))
 		spread(o, jsval.Obj(omit(t, "density")))
-		if !v5 {
+		if !cc.v5 {
 			o.Set("resolve", t.Get("resolve"))
 		}
 		return []Value{jsval.Obj(o)}
@@ -264,6 +268,8 @@ func (n *xformNode) assemble() []Value {
 }
 
 func (n *xformNode) assembleWindow() Value {
+	cc := n.cc
+
 	t := n.tv()
 	var fields, ops, as, params []Value
 	for _, w := range t.Get("window").Items() {
@@ -284,7 +290,7 @@ func (n *xformNode) assembleWindow() Value {
 	if frame.IsArr() && frame.Index(0).IsNull() && frame.Index(1).IsNull() {
 		all := true
 		for _, o := range ops {
-			if !isAggregateOp(o) {
+			if !isAggregateOp(cc, o) {
 				all = false
 			}
 		}
@@ -381,9 +387,11 @@ func (n *xformNode) assembleImpute() []Value {
 }
 
 func makeImputeFromEncoding(parent dfNode, m *unitModel) dfNode {
+	cc := m.b().ctx
+
 	encoding := m.encoding
 	xDef, yDef := encoding.Get("x"), encoding.Get("y")
-	if isFieldDef(xDef) && isFieldDef(yDef) {
+	if isFieldDef(cc, xDef) && isFieldDef(cc, yDef) {
 		var imputed, keyDef Value
 		switch {
 		case xDef.Get("impute").IsTruthy():
@@ -395,7 +403,7 @@ func makeImputeFromEncoding(parent dfNode, m *unitModel) dfNode {
 		}
 		imp := imputed.Get("impute")
 		method, value, frame, keyvals := imp.Get("method"), imp.Get("value"), imp.Get("frame"), imp.Get("keyvals")
-		groupbyFields := pathGroupingFields(m.mark(), encoding)
+		groupbyFields := pathGroupingFields(cc, m.mark(), encoding)
 		o := mk("impute", imputed.Get("field"), "key", keyDef.Get("field"))
 		if method.IsTruthy() {
 			o.Set("method", method)
@@ -419,12 +427,12 @@ func makeImputeFromEncoding(parent dfNode, m *unitModel) dfNode {
 
 // ---- transform constructors that normalize their input ----
 
-func newDensityNode(parent dfNode, t Value) dfNode {
+func newDensityNode(cc *compileCtx, parent dfNode, t Value) dfNode {
 	t = deepClone(t)
 	as := t.Get("as")
 	o := cloneObj(t.ObjValue())
 	o.Set("as", arr(coalesce(jsIndex(as, 0), jsval.Str("value")), coalesce(jsIndex(as, 1), jsval.Str("density"))))
-	if v5 {
+	if cc.v5 {
 		// 5.8 has no `resolve`; grouped densities default to 200 steps.
 		if t.Get("groupby").IsTruthy() && t.Get("minsteps").IsNullish() && t.Get("maxsteps").IsNullish() && t.Get("steps").IsNullish() {
 			o.Set("steps", jsval.Int(200))
@@ -472,6 +480,8 @@ func newRegressionNode(parent dfNode, t Value, kind string, field string) dfNode
 }
 
 func makeLookupNode(parent dfNode, m Model, t Value, counter int) dfNode {
+	cc := m.b().ctx
+
 	b := m.b()
 	sources := b.comp.data
 	from := t.Get("from")
@@ -481,7 +491,7 @@ func makeLookupNode(parent dfNode, m Model, t Value, counter int) dfNode {
 	case hasProperty(from, "data"):
 		fromSource := findSource(from.Get("data"), sources.sources.items)
 		if fromSource == nil {
-			fromSource = newSourceNode(from.Get("data"))
+			fromSource = newSourceNode(cc, from.Get("data"))
 			sources.sources.items = append(sources.sources.items, fromSource)
 		}
 		name := b.getName("lookup_" + jsval.JSNumberString(float64(counter)))
@@ -500,6 +510,8 @@ func makeLookupNode(parent dfNode, m Model, t Value, counter int) dfNode {
 		if fromOutput == nil {
 			throw("Cannot define and lookup the %q selection in the same view. Try moving the lookup into a second, layered view?", selName)
 		}
+	default:
+		throw("Invalid lookup `from` %s: expected an object with a `data` or a `param` property.", stringify(from))
 	}
 	secondary = fromOutput.getSource()
 	n := newXform(parent, "lookup", t)
@@ -543,18 +555,20 @@ func (n *stackNode) clone() dfNode {
 func (n *stackNode) addDimensions(fields []string) { n.st.facetby = append(n.st.facetby, fields...) }
 
 func (n *stackNode) getGroupbyFields() []string {
+	cc := n.cc
+
 	st := n.st
 	if len(st.dimensionFieldDefs) > 0 {
 		var out []string
 		for _, d := range st.dimensionFieldDefs {
 			if d.Get("bin").IsTruthy() {
 				if st.impute {
-					out = append(out, vgField(d, fieldRefOption{binSuffix: "mid"}))
+					out = append(out, vgField(cc, d, fieldRefOption{binSuffix: "mid"}))
 				} else {
-					out = append(out, vgField(d, fieldRefOption{}), vgField(d, fieldRefOption{binSuffix: "end"}))
+					out = append(out, vgField(cc, d, fieldRefOption{}), vgField(cc, d, fieldRefOption{binSuffix: "end"}))
 				}
 			} else {
-				out = append(out, vgField(d, fieldRefOption{}))
+				out = append(out, vgField(cc, d, fieldRefOption{}))
 			}
 		}
 		return out
@@ -633,31 +647,33 @@ func makeStackFromTransform(parent dfNode, t Value) *stackNode {
 }
 
 func makeStackFromEncoding(parent dfNode, m *unitModel) dfNode {
+	cc := m.b().ctx
+
 	sp := m.stack
 	if sp == nil {
 		return nil
 	}
 	var dims []Value
 	for _, gc := range sp.groupbyChannels {
-		if d := getFieldDef(m.encoding.Get(gc)); d.IsTruthy() {
+		if d := getFieldDef(cc, m.encoding.Get(gc)); d.IsTruthy() {
 			dims = append(dims, d)
 		}
 	}
 	var stackby []string
 	for _, by := range sp.stackBy {
-		if f := vgField(by.fieldDef, fieldRefOption{}); f != "" {
+		if f := vgField(cc, by.fieldDef, fieldRefOption{}); f != "" {
 			stackby = append(stackby, f)
 		}
 	}
 	orderDef := m.encoding.Get("order")
 	var sort Value
-	if orderDef.IsArr() || isFieldDef(orderDef) {
-		f, o := sortParams(orderDef, fieldRefOption{})
+	if orderDef.IsArr() || isFieldDef(cc, orderDef) {
+		f, o := sortParams(cc, orderDef, fieldRefOption{})
 		sort = mkv("field", jsval.Arr(f), "order", jsval.Arr(o))
 	} else {
 		var sortOrder Value
 		switch {
-		case isOrderOnlyDef(orderDef):
+		case isOrderOnlyDef(cc, orderDef):
 			sortOrder = orderDef.Get("sort")
 		case sp.fieldChannel == chY:
 			sortOrder = jsval.Str("descending")
@@ -667,7 +683,7 @@ func makeStackFromEncoding(parent dfNode, m *unitModel) dfNode {
 		var fields, orders []Value
 		seen := map[string]bool{}
 		for _, f := range stackby {
-			if v5 || !seen[f] {
+			if cc.v5 || !seen[f] {
 				seen[f] = true
 				fields = append(fields, jsval.Str(f))
 				orders = append(orders, sortOrder)
@@ -687,6 +703,8 @@ func makeStackFromEncoding(parent dfNode, m *unitModel) dfNode {
 }
 
 func (n *stackNode) assemble() []Value {
+	cc := n.cc
+
 	var out []Value
 	st := n.st
 	if st.impute {
@@ -696,20 +714,20 @@ func (n *stackNode) assemble() []Value {
 				bandPosition = bp.NumValue()
 			}
 			if d.Get("bin").IsTruthy() {
-				binStart := vgField(d, fieldRefOption{expr: "datum"})
-				binEnd := vgField(d, fieldRefOption{expr: "datum", binSuffix: "end"})
+				binStart := vgField(cc, d, fieldRefOption{expr: "datum"})
+				binEnd := vgField(cc, d, fieldRefOption{expr: "datum", binSuffix: "end"})
 				bpS := jsval.JSNumberString(bandPosition)
 				expr := isValidFiniteNumberExpr(binStart) + " ? " + bpS + "*" + binStart + "+" + jsval.JSNumberString(1-bandPosition) + "*" + binEnd + " : " + binStart
-				if v5 {
+				if cc.v5 {
 					expr = bpS + "*" + binStart + "+" + jsval.JSNumberString(1-bandPosition) + "*" + binEnd
 				}
 				out = append(out, mkv("type", "formula",
 					"expr", expr,
-					"as", vgField(d, fieldRefOption{binSuffix: "mid", forAs: true})))
+					"as", vgField(cc, d, fieldRefOption{binSuffix: "mid", forAs: true})))
 			}
 			gb := append(append([]string{}, st.stackby...), st.facetby...)
 			out = append(out, mkv("type", "impute", "field", st.stackField, "groupby", strsVal(gb),
-				"key", vgField(d, fieldRefOption{binSuffix: "mid"}), "method", "value", "value", 0))
+				"key", vgField(cc, d, fieldRefOption{binSuffix: "mid"}), "method", "value", "value", 0))
 		}
 	}
 	gb := append(n.getGroupbyFields(), st.facetby...)
@@ -766,11 +784,13 @@ func (n *geoJSONNode) assemble() []Value {
 }
 
 func geoPair(m *unitModel, coords [2]string) Value {
+	cc := m.b().ctx
+
 	pair := make([]Value, 2)
 	for i, ch := range coords {
-		def := getFieldOrDatumDef(m.encoding.Get(ch))
+		def := getFieldOrDatumDef(cc, m.encoding.Get(ch))
 		switch {
-		case isFieldDef(def):
+		case isFieldDef(cc, def):
 			pair[i] = def.Get("field")
 		case isDatumDef(def):
 			pair[i] = mkv("expr", def.Get("datum").AsString())
@@ -871,20 +891,22 @@ type facetNode struct {
 }
 
 func newFacetNode(parent dfNode, m *facetModel, name, data string) *facetNode {
+	cc := m.b().ctx
+
 	n := &facetNode{model: m, name: name, data: data, channels: map[string]*facetChannelInfo{}}
 	initNode(n, parent)
 	for _, channel := range facetChannels {
 		fd := m.facet.Lookup(channel)
 		if fd.IsTruthy() {
 			bin, sort := fd.Get("bin"), fd.Get("sort")
-			info := &facetChannelInfo{name: m.getName(channel + "_domain"), fields: []string{vgField(fd, fieldRefOption{})}}
+			info := &facetChannelInfo{name: m.getName(channel + "_domain"), fields: []string{vgField(cc, fd, fieldRefOption{})}}
 			if isBinning(bin) {
-				info.fields = append(info.fields, vgField(fd, fieldRefOption{binSuffix: "end"}))
+				info.fields = append(info.fields, vgField(cc, fd, fieldRefOption{binSuffix: "end"}))
 			}
-			if isSortField(sort) {
+			if isSortField(cc, sort) {
 				info.sortField = sort
 			} else if sort.IsArr() {
-				info.sortIndexField = sortArrayIndexField(fd, channel, fieldRefOption{})
+				info.sortIndexField = sortArrayIndexField(cc, fd, channel, fieldRefOption{})
 			}
 			n.channels[channel] = info
 		}
@@ -963,6 +985,8 @@ func (n *facetNode) getChildIndependentFieldsWithStep() map[string]string {
 }
 
 func (n *facetNode) assembleRowColumnHeaderData(channel, crossedDataName string, indep map[string]string) Value {
+	cc := n.cc
+
 	childChannel := map[string]string{"row": "y", "column": "x"}[channel]
 	var fields, ops, as []Value
 	if childChannel != "" && indep != nil && indep[childChannel] != "" {
@@ -980,7 +1004,7 @@ func (n *facetNode) assembleRowColumnHeaderData(channel, crossedDataName string,
 		op := coalesce(info.sortField.Get("op"), jsval.Str(defaultSortOp))
 		fields = append(fields, info.sortField.Get("field"))
 		ops = append(ops, op)
-		as = append(as, jsval.Str(vgField(info.sortField, fieldRefOption{forAs: true})))
+		as = append(as, jsval.Str(vgField(cc, info.sortField, fieldRefOption{forAs: true})))
 	} else if info.sortIndexField != "" {
 		fields = append(fields, jsval.Str(info.sortIndexField))
 		ops = append(ops, jsval.Str("max"))

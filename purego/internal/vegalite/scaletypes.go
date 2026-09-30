@@ -56,8 +56,8 @@ func hasDiscreteDomain(t string) bool {
 	return false
 }
 
-var defaultScaleConfig = func() *Object {
-	if v5 {
+func defaultScaleConfig(cc *compileCtx) *Object {
+	if cc.v5 {
 		return mk(
 			"pointPadding", 0.5,
 			"barBandPaddingInner", 0.1,
@@ -168,8 +168,8 @@ func scaleTypeSupportDataType(specified, fieldDefType string) bool {
 	return true
 }
 
-func channelSupportScaleType(channel, scaleType string, hasNestedOffsetScale bool) bool {
-	if !isScaleChannel(channel) {
+func channelSupportScaleType(cc *compileCtx, channel, scaleType string, hasNestedOffsetScale bool) bool {
+	if !isScaleChannel(cc, channel) {
 		return false
 	}
 	switch channel {

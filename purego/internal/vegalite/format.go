@@ -23,49 +23,49 @@ type formatSignalOpts struct {
 	config          Value
 }
 
-func formatSignalRef(o formatSignalOpts) Value {
+func formatSignalRef(cc *compileCtx, o formatSignalOpts) Value {
 	fod, format, formatType, expr, config := o.fieldOrDatumDef, o.format, o.formatType, o.expr, o.config
 	if isCustomFormatType(formatType) {
-		return formatCustomType(fod, format, formatType, expr, o.normalizeStack, config, "")
+		return formatCustomType(cc, fod, format, formatType, expr, o.normalizeStack, config, "")
 	}
-	field := fieldToFormat(fod, expr, o.normalizeStack)
+	field := fieldToFormat(cc, fod, expr, o.normalizeStack)
 	typ := channelDefType(fod)
 	if format.IsUndefined() && formatType.IsUndefined() && config.Get("customFormatTypes").IsTruthy() {
 		if typ == "quantitative" {
 			if o.normalizeStack && config.Get("normalizedNumberFormatType").IsTruthy() {
-				return formatCustomType(fod, config.Get("normalizedNumberFormat"), config.Get("normalizedNumberFormatType"), expr, false, config, "")
+				return formatCustomType(cc, fod, config.Get("normalizedNumberFormat"), config.Get("normalizedNumberFormatType"), expr, false, config, "")
 			}
 			if config.Get("numberFormatType").IsTruthy() {
-				return formatCustomType(fod, config.Get("numberFormat"), config.Get("numberFormatType"), expr, false, config, "")
+				return formatCustomType(cc, fod, config.Get("numberFormat"), config.Get("numberFormatType"), expr, false, config, "")
 			}
 		}
-		if typ == "temporal" && config.Get("timeFormatType").IsTruthy() && isFieldDef(fod) && fod.Get("timeUnit").IsUndefined() {
-			return formatCustomType(fod, config.Get("timeFormat"), config.Get("timeFormatType"), expr, false, config, "")
+		if typ == "temporal" && config.Get("timeFormatType").IsTruthy() && isFieldDef(cc, fod) && fod.Get("timeUnit").IsUndefined() {
+			return formatCustomType(cc, fod, config.Get("timeFormat"), config.Get("timeFormatType"), expr, false, config, "")
 		}
 	}
-	if isFieldOrDatumDefForTimeFormat(fod) {
+	if isFieldOrDatumDefForTimeFormat(cc, fod) {
 		unit, utc := "", false
-		if isFieldDef(fod) {
-			tu := normalizeTimeUnit(fod.Get("timeUnit"))
+		if isFieldDef(cc, fod) {
+			tu := normalizeTimeUnit(cc, fod.Get("timeUnit"))
 			if tu.Get("unit").IsTruthy() {
 				unit = tu.Get("unit").AsString()
 			}
 			utc = tu.Get("utc").IsTruthy()
 		}
 		isUTCScale := utc || (isScaleFieldDef(fod) && fod.Get("scale").Get("type").AsString() == "utc")
-		if v5 {
+		if cc.v5 {
 			// 5.8 ignores utc time units here.
 			isUTCScale = isScaleFieldDef(fod) && fod.Get("scale").Get("type").AsString() == "utc"
 		}
-		s := timeFormatExpression(field, unit, format, config.Get("timeFormatType"), config.Get("timeFormat"), isUTCScale)
+		s := timeFormatExpression(cc, field, unit, format, config.Get("timeFormatType"), config.Get("timeFormat"), isUTCScale)
 		if s != "" {
 			return sig(s)
 		}
 		return undef
 	}
 	format = numberFormat(typ, format, config, o.normalizeStack)
-	if isFieldDef(fod) && isBinning(fod.Get("bin")) {
-		endField := vgField(fod, fieldRefOption{expr: expr, binSuffix: "end"})
+	if isFieldDef(cc, fod) && isBinning(fod.Get("bin")) {
+		endField := vgField(cc, fod, fieldRefOption{expr: expr, binSuffix: "end"})
 		return sig(binFormatExpression(field, endField, format, formatType, config))
 	} else if format.IsTruthy() || channelDefType(fod) == "quantitative" {
 		return sig(formatExpr(field, format))
@@ -73,22 +73,22 @@ func formatSignalRef(o formatSignalOpts) Value {
 	return sig("isValid(" + field + ") ? " + field + ` : ""+` + field)
 }
 
-func fieldToFormat(fod Value, expr string, normalizeStack bool) string {
-	if isFieldDef(fod) {
+func fieldToFormat(cc *compileCtx, fod Value, expr string, normalizeStack bool) string {
+	if isFieldDef(cc, fod) {
 		if normalizeStack {
-			return vgField(fod, fieldRefOption{expr: expr, suffix: "end"}) + "-" + vgField(fod, fieldRefOption{expr: expr, suffix: "start"})
+			return vgField(cc, fod, fieldRefOption{expr: expr, suffix: "end"}) + "-" + vgField(cc, fod, fieldRefOption{expr: expr, suffix: "start"})
 		}
-		return vgField(fod, fieldRefOption{expr: expr})
+		return vgField(cc, fod, fieldRefOption{expr: expr})
 	}
 	return datumDefToExpr(fod)
 }
 
-func formatCustomType(fod, format, formatType Value, expr string, normalizeStack bool, config Value, field string) Value {
+func formatCustomType(cc *compileCtx, fod, format, formatType Value, expr string, normalizeStack bool, config Value, field string) Value {
 	if field == "" {
-		field = fieldToFormat(fod, expr, normalizeStack)
+		field = fieldToFormat(cc, fod, expr, normalizeStack)
 	}
-	if field != "datum.value" && isFieldDef(fod) && isBinning(fod.Get("bin")) {
-		endField := vgField(fod, fieldRefOption{expr: expr, binSuffix: "end"})
+	if field != "datum.value" && isFieldDef(cc, fod) && isBinning(fod.Get("bin")) {
+		endField := vgField(cc, fod, fieldRefOption{expr: expr, binSuffix: "end"})
 		return sig(binFormatExpression(field, endField, format, formatType, config))
 	}
 	return sig(customFormatExpr(formatType.AsString(), field, format))
@@ -96,7 +96,7 @@ func formatCustomType(fod, format, formatType Value, expr string, normalizeStack
 
 // guideFormat returns the format of an axis/legend; undefined when a custom
 // format type takes over.
-func guideFormat(fod Value, typ string, format, formatType Value, config Value, omitTimeFormatConfig bool) Value {
+func guideFormat(cc *compileCtx, fod Value, typ string, format, formatType Value, config Value, omitTimeFormatConfig bool) Value {
 	if formatType.IsStr() && isCustomFormatType(formatType) {
 		return undef
 	} else if format.IsUndefined() && formatType.IsUndefined() && config.Get("customFormatTypes").IsTruthy() {
@@ -112,10 +112,10 @@ func guideFormat(fod Value, typ string, format, formatType Value, config Value, 
 	if isPositionFieldOrDatumDef(fod) && fod.Get("stack").IsStr() && fod.Get("stack").StrValue() == "normalize" && config.Get("normalizedNumberFormat").IsTruthy() {
 		return numberFormat("quantitative", undef, config, true)
 	}
-	if isFieldOrDatumDefForTimeFormat(fod) {
+	if isFieldOrDatumDefForTimeFormat(cc, fod) {
 		tu := ""
-		if isFieldDef(fod) {
-			if u := normalizeTimeUnit(fod.Get("timeUnit")).Get("unit"); u.IsTruthy() {
+		if isFieldDef(cc, fod) {
+			if u := normalizeTimeUnit(cc, fod.Get("timeUnit")).Get("unit"); u.IsTruthy() {
 				tu = u.AsString()
 			}
 		}
@@ -127,12 +127,12 @@ func guideFormat(fod Value, typ string, format, formatType Value, config Value, 
 	return numberFormat(typ, format, config, false)
 }
 
-func guideFormatType(formatType Value, fod Value, scaleType string) Value {
+func guideFormatType(cc *compileCtx, formatType Value, fod Value, scaleType string) Value {
 	if formatType.IsTruthy() && (isSignalRef(formatType) || (formatType.IsStr() && (formatType.StrValue() == "number" || formatType.StrValue() == "time"))) {
 		return formatType
 	}
-	if isFieldOrDatumDefForTimeFormat(fod) && scaleType != "time" && scaleType != "utc" {
-		if isFieldDef(fod) && normalizeTimeUnit(fod.Get("timeUnit")).Get("utc").IsTruthy() {
+	if isFieldOrDatumDefForTimeFormat(cc, fod) && scaleType != "time" && scaleType != "utc" {
+		if isFieldDef(cc, fod) && normalizeTimeUnit(cc, fod.Get("timeUnit")).Get("utc").IsTruthy() {
 			return jsval.Str("utc")
 		}
 		return jsval.Str("time")
@@ -194,10 +194,10 @@ func binFormatExpression(startField, endField string, format, formatType Value, 
 	return fieldValidPredicate(startField, false) + ` ? "null" : ` + start + ` + "` + binRangeDelimiter + `" + ` + end
 }
 
-func timeFormatExpression(field, timeUnit string, format, formatType, rawTimeFormat Value, isUTCScale bool) string {
+func timeFormatExpression(cc *compileCtx, field, timeUnit string, format, formatType, rawTimeFormat Value, isUTCScale bool) string {
 	if timeUnit == "" || format.IsTruthy() {
 		if timeUnit == "" && formatType.IsTruthy() {
-			if v5 {
+			if cc.v5 {
 				return formatType.AsString() + "(" + field + ", '" + format.AsString() + "')"
 			}
 			return formatType.AsString() + "(" + field + ", " + stringifyJS(format) + ")"
@@ -209,7 +209,7 @@ func timeFormatExpression(field, timeUnit string, format, formatType, rawTimeFor
 		if isUTCScale {
 			fn = "utc"
 		}
-		if v5 {
+		if cc.v5 {
 			return fn + "Format(" + field + ", '" + format.AsString() + "')"
 		}
 		return fn + "Format(" + field + ", " + stringifyJS(format) + ")"

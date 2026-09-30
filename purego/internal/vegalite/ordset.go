@@ -162,6 +162,15 @@ func (o *omap[V]) len() int {
 	return len(o.keys)
 }
 
+// keysView returns the keys without copying; the caller must not modify the
+// omap while iterating or keep the slice.
+func (o *omap[V]) keysView() []string {
+	if o == nil {
+		return nil
+	}
+	return o.keys
+}
+
 func (o *omap[V]) keyList() []string {
 	if o == nil {
 		return nil

@@ -116,6 +116,8 @@ func getBinSignalName(m Model, field string, bin Value) string {
 // def. Upstream tells them apart by `'as' in t`, so a field def that carries an
 // `as` property is treated as a transform.
 func createBinComponent(t Value, bin Value, m Model, _ bool) (string, *binComponent) {
+	cc := m.b().ctx
+
 	var as []string
 	if t.IsObj() && t.ObjValue().Has("as") {
 		a := t.Get("as")
@@ -125,7 +127,7 @@ func createBinComponent(t Value, bin Value, m Model, _ bool) (string, *binCompon
 			as = []string{a.Index(0).AsString(), a.Index(1).AsString()}
 		}
 	} else {
-		as = []string{vgField(t, fieldRefOption{forAs: true}), vgField(t, fieldRefOption{binSuffix: "end", forAs: true})}
+		as = []string{vgField(cc, t, fieldRefOption{forAs: true}), vgField(cc, t, fieldRefOption{binSuffix: "end", forAs: true})}
 	}
 	nb := normalizeBin(bin, "")
 	var normalized *Object
@@ -148,7 +150,9 @@ func createBinComponent(t Value, bin Value, m Model, _ bool) (string, *binCompon
 }
 
 func rangeFormula(m fieldDefModel, fd Value, channel string, config Value) (formulaAs, formula string) {
-	if binRequiresRange(fd, channel) {
+	cc := m.b().ctx
+
+	if binRequiresRange(cc, fd, channel) {
 		var guide Value = mkv()
 		if u, ok := m.(*unitModel); ok {
 			if a := u.axis(channel); a.IsTruthy() {
@@ -157,9 +161,9 @@ func rangeFormula(m fieldDefModel, fd Value, channel string, config Value) (form
 				guide = l
 			}
 		}
-		startField := vgField(fd, fieldRefOption{expr: "datum"})
-		endField := vgField(fd, fieldRefOption{expr: "datum", binSuffix: "end"})
-		return vgField(fd, fieldRefOption{binSuffix: "range", forAs: true}), binFormatExpression(startField, endField, guide.Get("format"), guide.Get("formatType"), config)
+		startField := vgField(cc, fd, fieldRefOption{expr: "datum"})
+		endField := vgField(cc, fd, fieldRefOption{expr: "datum", binSuffix: "end"})
+		return vgField(cc, fd, fieldRefOption{binSuffix: "range", forAs: true}), binFormatExpression(startField, endField, guide.Get("format"), guide.Get("formatType"), config)
 	}
 	return "", ""
 }
@@ -233,6 +237,8 @@ func (n *binNode) merge(other *binNode, rename func(oldName, newName string)) {
 }
 
 func (n *binNode) assemble() []Value {
+	cc := n.cc
+
 	var out []Value
 	for _, key := range n.bins.keys {
 		bin := n.bins.m[key]
@@ -264,7 +270,7 @@ func (n *binNode) assemble() []Value {
 		out = append(out, jsval.Obj(bt))
 		for _, as := range remainingAs {
 			for i := 0; i < 2; i++ {
-				out = append(out, mkv("type", "formula", "expr", vgField(mkv("field", binAs[i]), fieldRefOption{expr: "datum"}), "as", as[i]))
+				out = append(out, mkv("type", "formula", "expr", vgField(cc, mkv("field", binAs[i]), fieldRefOption{expr: "datum"}), "as", as[i]))
 			}
 		}
 		if bin.formula != "" {
@@ -330,27 +336,29 @@ const (
 )
 
 func makeTimeUnitFromEncoding(parent dfNode, m fieldDefModel) dfNode {
+	cc := m.b().ctx
+
 	formula := reduceFieldDef(m, func(tc *omap[*Object], fd Value, channel string) *omap[*Object] {
 		field, timeUnit := fd.Get("field"), fd.Get("timeUnit")
-		if timeUnit.IsTruthy() && v5 {
-			component := mk("as", vgField(fd, fieldRefOption{forAs: true}), "field", field, "timeUnit", timeUnit)
+		if timeUnit.IsTruthy() && cc.v5 {
+			component := mk("as", vgField(cc, fd, fieldRefOption{forAs: true}), "field", field, "timeUnit", timeUnit)
 			tc.set(hashOf(jsval.Obj(component)), component)
 		} else if timeUnit.IsTruthy() {
 			var component *Object
 			u, isUnit := m.(*unitModel)
-			if isBinnedTimeUnit(timeUnit) {
+			if isBinnedTimeUnit(cc, timeUnit) {
 				if isUnit {
-					bp := getBandPosition(fd, undef, u.markDef, u.config)
-					if isRectBasedMark(u.mark()) || (bp.IsTruthy() && bp.NumValue() != 0) {
-						component = mk("timeUnit", normalizeTimeUnit(timeUnit), "field", field)
+					bp := getBandPosition(cc, fd, undef, u.markDef, u.config)
+					if isRectBasedMark(cc, u.mark()) || (bp.IsTruthy() && bp.NumValue() != 0) {
+						component = mk("timeUnit", normalizeTimeUnit(cc, timeUnit), "field", field)
 					}
 				}
 			} else {
-				component = mk("as", vgField(fd, fieldRefOption{forAs: true}), "field", field, "timeUnit", timeUnit)
+				component = mk("as", vgField(cc, fd, fieldRefOption{forAs: true}), "field", field, "timeUnit", timeUnit)
 			}
 			if isUnit {
-				bp := getBandPosition(fd, undef, u.markDef, u.config)
-				if isRectBasedMark(u.mark()) && isXorY(channel) && !(bp.IsNum() && bp.NumValue() == 0.5) {
+				bp := getBandPosition(cc, fd, undef, u.markDef, u.config)
+				if isRectBasedMark(cc, u.mark()) && isXorY(channel) && !(bp.IsNum() && bp.NumValue() == 0.5) {
 					if component != nil {
 						component.Set("rectBandPosition", bp)
 					}
@@ -368,11 +376,11 @@ func makeTimeUnitFromEncoding(parent dfNode, m fieldDefModel) dfNode {
 	return newTimeUnitNode(parent, formula)
 }
 
-func makeTimeUnitFromTransform(parent dfNode, t Value) *timeUnitNode {
+func makeTimeUnitFromTransform(cc *compileCtx, parent dfNode, t Value) *timeUnitNode {
 	timeUnit := t.Get("timeUnit")
 	other := omit(t, "timeUnit")
 	component := cloneObj(other)
-	component.Set("timeUnit", normalizeTimeUnit(timeUnit))
+	component.Set("timeUnit", normalizeTimeUnit(cc, timeUnit))
 	tu := newOmap[*Object]()
 	tu.set(hashOf(jsval.Obj(component)), component)
 	return newTimeUnitNode(parent, tu)
@@ -446,11 +454,13 @@ func offsettedRectFormulas(startField, endField string, rectBandPosition Value, 
 }
 
 func (n *timeUnitNode) assemble() []Value {
+	cc := n.cc
+
 	var out []Value
 	for _, k := range n.timeUnits.keys {
 		f := n.timeUnits.m[k]
 		rect := f.Lookup("rectBandPosition")
-		nt := normalizeTimeUnit(f.Lookup("timeUnit"))
+		nt := normalizeTimeUnit(cc, f.Lookup("timeUnit"))
 		if isTimeUnitTransformComponent(f) {
 			if f.Lookup("field").IsUndefined() {
 				throw("Cannot read properties of undefined (reading 'length')") // splitAccessPath(undefined)
@@ -535,6 +545,8 @@ func ensureMeasureField(m *omap[*omap[*sset]], field string) *omap[*sset] {
 }
 
 func addDimension(dims *sset, channel string, fd Value, m Model) {
+	cc := m.b().ctx
+
 	u := asUnit(m)
 	var channelDef2 Value
 	if u != nil {
@@ -543,22 +555,22 @@ func addDimension(dims *sset, channel string, fd Value, m Model) {
 		}
 	}
 	switch {
-	case isTypedFieldDef(fd) && u != nil && hasBandEnd(fd, channelDef2, u.markDef, u.config):
-		dims.add(vgField(fd, fieldRefOption{}))
-		dims.add(vgField(fd, fieldRefOption{suffix: "end"}))
-		bp := getBandPosition(fd, undef, u.markDef, u.config)
-		if !v5 && isRectBasedMark(u.mark()) && !(bp.IsNum() && bp.NumValue() == 0.5) && isXorY(channel) {
-			dims.add(vgField(fd, fieldRefOption{suffix: offsettedRectStartSuffix}))
-			dims.add(vgField(fd, fieldRefOption{suffix: offsettedRectEndSuffix}))
+	case isTypedFieldDef(fd) && u != nil && hasBandEnd(cc, fd, channelDef2, u.markDef, u.config):
+		dims.add(vgField(cc, fd, fieldRefOption{}))
+		dims.add(vgField(cc, fd, fieldRefOption{suffix: "end"}))
+		bp := getBandPosition(cc, fd, undef, u.markDef, u.config)
+		if !cc.v5 && isRectBasedMark(cc, u.mark()) && !(bp.IsNum() && bp.NumValue() == 0.5) && isXorY(channel) {
+			dims.add(vgField(cc, fd, fieldRefOption{suffix: offsettedRectStartSuffix}))
+			dims.add(vgField(cc, fd, fieldRefOption{suffix: offsettedRectEndSuffix}))
 		}
-		if fd.Get("bin").IsTruthy() && binRequiresRange(fd, channel) {
-			dims.add(vgField(fd, fieldRefOption{binSuffix: "range"}))
+		if fd.Get("bin").IsTruthy() && binRequiresRange(cc, fd, channel) {
+			dims.add(vgField(cc, fd, fieldRefOption{binSuffix: "range"}))
 		}
 	case isGeoPositionChannel(channel):
 		posChannel := getPositionChannelFromLatLong(channel)
 		dims.add(m.b().getName(posChannel))
 	default:
-		dims.add(vgField(fd, fieldRefOption{}))
+		dims.add(vgField(cc, fd, fieldRefOption{}))
 	}
 	if isScaleFieldDef(fd) && isFieldRange(fd.Get("scale").Get("range")) {
 		dims.add(fd.Get("scale").Get("range").Get("field").AsString())
@@ -589,6 +601,8 @@ func mergeMeasures(parent, child *omap[*omap[*sset]]) {
 }
 
 func makeAggregateFromEncoding(parent dfNode, m *unitModel) *aggregateNode {
+	cc := m.b().ctx
+
 	isAgg := false
 	m.forEachFieldDef(func(fd Value, _ string) {
 		if fd.Get("aggregate").IsTruthy() {
@@ -605,7 +619,7 @@ func makeAggregateFromEncoding(parent dfNode, m *unitModel) *aggregateNode {
 		if aggregate.IsTruthy() {
 			if aggregate.IsStr() && aggregate.StrValue() == "count" {
 				ops := ensureMeasureField(meas, "*")
-				ops.set("count", newSset(vgField(fd, fieldRefOption{forAs: true})))
+				ops.set("count", newSset(vgField(cc, fd, fieldRefOption{forAs: true})))
 			} else {
 				if isArgminDef(aggregate) || isArgmaxDef(aggregate) {
 					op := "argmax"
@@ -614,16 +628,16 @@ func makeAggregateFromEncoding(parent dfNode, m *unitModel) *aggregateNode {
 					}
 					argField := aggregate.Get(op).AsString()
 					ops := ensureMeasureField(meas, argField)
-					ops.set(op, newSset(vgField(mkv("op", op, "field", argField), fieldRefOption{forAs: true})))
+					ops.set(op, newSset(vgField(cc, mkv("op", op, "field", argField), fieldRefOption{forAs: true})))
 				} else {
 					ops := ensureMeasureField(meas, field.AsString())
-					ops.set(aggregate.AsString(), newSset(vgField(fd, fieldRefOption{forAs: true})))
+					ops.set(aggregate.AsString(), newSset(vgField(cc, fd, fieldRefOption{forAs: true})))
 				}
-				if isScaleChannel(channel) {
+				if isScaleChannel(cc, channel) {
 					if d := m.scaleDomain(channel); d.IsStr() && d.StrValue() == "unaggregated" {
 						ops := ensureMeasureField(meas, field.AsString())
-						ops.set("min", newSset(vgField(mkv("field", field, "aggregate", "min"), fieldRefOption{forAs: true})))
-						ops.set("max", newSset(vgField(mkv("field", field, "aggregate", "max"), fieldRefOption{forAs: true})))
+						ops.set("min", newSset(vgField(cc, mkv("field", field, "aggregate", "min"), fieldRefOption{forAs: true})))
+						ops.set("max", newSset(vgField(cc, mkv("field", field, "aggregate", "max"), fieldRefOption{forAs: true})))
 					}
 				}
 			}
@@ -637,7 +651,7 @@ func makeAggregateFromEncoding(parent dfNode, m *unitModel) *aggregateNode {
 	return newAggregateNode(parent, dims, meas)
 }
 
-func makeAggregateFromTransform(parent dfNode, t Value) *aggregateNode {
+func makeAggregateFromTransform(cc *compileCtx, parent dfNode, t Value) *aggregateNode {
 	dims := newSset()
 	meas := newOmap[*omap[*sset]]()
 	for _, s := range t.Get("aggregate").Items() {
@@ -645,12 +659,12 @@ func makeAggregateFromTransform(parent dfNode, t Value) *aggregateNode {
 		if op.IsTruthy() {
 			name := as.AsString()
 			if !as.IsTruthy() {
-				name = vgField(s, fieldRefOption{forAs: true})
+				name = vgField(cc, s, fieldRefOption{forAs: true})
 			}
 			if op.StrValue() == "count" {
 				ops := ensureMeasureField(meas, "*")
 				ops.set("count", newSset(name))
-			} else if v5 {
+			} else if cc.v5 {
 				ensureMeasureField(meas, field.AsString()).set(op.AsString(), newSset(name))
 			} else {
 				measureSet(meas, field.AsString(), op.AsString()).add(name)

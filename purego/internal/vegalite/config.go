@@ -31,9 +31,9 @@ var primitiveMarks = []string{
 	"circle", "square", "geoshape",
 }
 
-func defaultConfig() *Object {
+func defaultConfig(cc *compileCtx) *Object {
 	rectConfig := func() *Object {
-		if v5 {
+		if cc.v5 {
 			return mk("binSpacing", 0, "continuousBandSize", 5, "timeUnitBandPosition", 0.5)
 		}
 		return mk("binSpacing", 0, "continuousBandSize", 5, "minBandSize", 0.25, "timeUnitBandPosition", 0.5)
@@ -44,7 +44,7 @@ func defaultConfig() *Object {
 	tick.Set("thickness", jsval.Int(1))
 	view := mk("continuousWidth", 300, "continuousHeight", 300, "step", defaultStep)
 	markCfg := mk("color", "#4c78a8", "invalid", "break-paths-show-path-domains", "timeUnitBandSize", 1)
-	if v5 {
+	if cc.v5 {
 		// Vega-Lite 5.8: 200x200 views, mark-level `invalid: filter`, and a tick
 		// config without the rect band options.
 		view = mk("continuousWidth", 200, "continuousHeight", 200, "step", defaultStep)
@@ -82,14 +82,14 @@ func defaultConfig() *Object {
 		"boxplot", mk("size", 14, "extent", 1.5, "box", mk(), "median", mk("color", "white"), "outliers", mk(), "rule", mk(), "ticks", jsval.Null),
 		"errorbar", mk("center", "mean", "rule", true, "ticks", false),
 		"errorband", mk("band", mk("opacity", 0.3), "borders", false),
-		"scale", defaultScaleConfig(),
+		"scale", defaultScaleConfig(cc),
 		"projection", mk(),
 		"legend", legend,
 		"header", mk("titlePadding", 10, "labelPadding", 10),
 		"headerColumn", mk(),
 		"headerRow", mk(),
 		"headerFacet", mk(),
-		"selection", defaultSelectionConfig(),
+		"selection", defaultSelectionConfig(cc),
 		"style", mk(),
 		"title", mk(),
 		"facet", mk("spacing", defaultSpacing),
@@ -100,8 +100,8 @@ func defaultConfig() *Object {
 
 const selectionID = "_vgsid_"
 
-func defaultSelectionConfig() *Object {
-	if v5 {
+func defaultSelectionConfig(cc *compileCtx) *Object {
+	if cc.v5 {
 		return mk(
 			"point", mk(
 				"on", "click",
@@ -344,13 +344,13 @@ var configPropsWithExpr = func() []string {
 
 // initConfig merges the specified config over the defaults and converts
 // ExprRefs to SignalRefs.
-func initConfig(specified Value) Value {
+func initConfig(cc *compileCtx, specified Value) Value {
 	if specified.IsNullish() {
 		specified = jsval.Obj(jsval.NewObject(0))
 	}
 	color, font, fontSize, selection := specified.Get("color"), specified.Get("font"), specified.Get("fontSize"), specified.Get("selection")
 	rest := omit(specified, "color", "font", "fontSize", "selection")
-	parts := []Value{jsval.Obj(jsval.NewObject(0)), deepClone(jsval.Obj(defaultConfig()))}
+	parts := []Value{jsval.Obj(jsval.NewObject(0)), deepClone(jsval.Obj(defaultConfig(cc)))}
 	if font.IsTruthy() {
 		parts = append(parts, jsval.Obj(fontConfig(font)))
 	}
@@ -390,7 +390,7 @@ func initConfig(specified Value) Value {
 	if v := merged.Lookup("legend"); v.IsTruthy() {
 		out.Set("legend", replaceExprRef(v, 0))
 	}
-	if sc := merged.Lookup("scale"); sc.IsTruthy() && v5 {
+	if sc := merged.Lookup("scale"); sc.IsTruthy() && cc.v5 {
 		out.Set("scale", replaceExprRef(sc, 0))
 	} else if sc.IsTruthy() {
 		invalid := sc.Get("invalid")
@@ -435,21 +435,21 @@ var vlOnlyLegendConfig = []string{
 
 var vlOnlyRectConfig = []string{"binSpacing", "continuousBandSize", "discreteBandSize", "minBandSize"}
 
-func vlOnlyMarkSpecificConfig(markType string) []string {
+func vlOnlyMarkSpecificConfig(cc *compileCtx, markType string) []string {
 	switch markType {
 	case "view":
 		return []string{"continuousWidth", "continuousHeight", "discreteWidth", "discreteHeight", "step"}
 	case "area":
 		return []string{"line", "point"}
 	case "bar", "rect":
-		if v5 {
+		if cc.v5 {
 			return []string{"binSpacing", "continuousBandSize", "discreteBandSize"}
 		}
 		return vlOnlyRectConfig
 	case "line":
 		return []string{"point"}
 	case "tick":
-		if v5 {
+		if cc.v5 {
 			return []string{"bandSize", "thickness"}
 		}
 		return append([]string{"bandSize", "thickness"}, vlOnlyRectConfig...)
@@ -459,7 +459,7 @@ func vlOnlyMarkSpecificConfig(markType string) []string {
 
 // stripAndRedirectConfig removes Vega-Lite-only config and moves mark configs
 // into Vega style configs; it returns undefined when nothing is left.
-func stripAndRedirectConfig(cfg Value) Value {
+func stripAndRedirectConfig(cc *compileCtx, cfg Value) Value {
 	c := deepClone(cfg).ObjValue()
 	for _, p := range vlOnlyConfigProperties {
 		c.Delete(p)
@@ -498,7 +498,7 @@ func stripAndRedirectConfig(cfg Value) Value {
 			for _, p := range vlOnlyMarkConfigProperties {
 				mo.Delete(p)
 			}
-			for _, p := range vlOnlyMarkSpecificConfig(markType) {
+			for _, p := range vlOnlyMarkSpecificConfig(cc, markType) {
 				mo.Delete(p)
 			}
 		}

@@ -108,8 +108,8 @@ type modelBase struct {
 
 func (m *modelBase) b() *modelBase { return m }
 
-func newModelBase(self Model, spec Value, typ string, parent Model, parentGivenName string, config Value, resolve *resolveIndex, view Value) *modelBase {
-	m := &modelBase{self: self, typ: typ, parent: parent, config: config}
+func newModelBase(cc *compileCtx, self Model, spec Value, typ string, parent Model, parentGivenName string, config Value, resolve *resolveIndex, view Value) *modelBase {
+	m := &modelBase{ctx: cc, self: self, typ: typ, parent: parent, config: config}
 	m.view = replaceExprRef(view, 0)
 	if view.IsUndefined() {
 		m.view = undef
@@ -128,14 +128,12 @@ func newModelBase(self Model, spec Value, typ string, parent Model, parentGivenN
 	if parent != nil {
 		pb := parent.b()
 		m.scaleNames, m.projNames, m.signalNames = pb.scaleNames, pb.projNames, pb.signalNames
-		m.ctx = pb.ctx
 	} else {
 		m.scaleNames, m.projNames, m.signalNames = newNameMap(), newNameMap(), newNameMap()
-		m.ctx = &compileCtx{}
 	}
 	m.data = spec.Get("data")
 	m.description = spec.Get("description")
-	m.transforms = normalizeTransformList(spec.Get("transform"))
+	m.transforms = normalizeTransformList(cc, spec.Get("transform"))
 	if typ == "layer" || typ == "unit" {
 		m.layout = jsval.NewObject(0)
 	} else {
@@ -170,11 +168,11 @@ func newModelBase(self Model, spec Value, typ string, parent Model, parentGivenN
 	return m
 }
 
-func normalizeTransformList(tx Value) []Value {
+func normalizeTransformList(cc *compileCtx, tx Value) []Value {
 	var out []Value
 	for _, t := range tx.Items() {
 		if hasProperty(t, "filter") {
-			out = append(out, mkv("filter", normalizeLogicalComposition(t.Get("filter"), normalizePredicate, 0)))
+			out = append(out, mkv("filter", normalizeLogicalComposition(t.Get("filter"), func(f Value) Value { return normalizePredicate(cc, f) }, 0)))
 		} else {
 			out = append(out, t)
 		}
@@ -226,6 +224,8 @@ func (m *modelBase) width() Value  { return m.getSizeSignalRef("width") }
 func (m *modelBase) height() Value { return m.getSizeSignalRef("height") }
 
 func (m *modelBase) getSizeSignalRef(layoutSizeType string) Value {
+	cc := m.b().ctx
+
 	if m.parent != nil && isFacetModel(m.parent) {
 		sizeType := getSizeTypeFromLayoutSizeType(layoutSizeType)
 		channel := getPositionScaleChannel(sizeType)
@@ -237,7 +237,7 @@ func (m *modelBase) getSizeSignalRef(layoutSizeType string) Value {
 				domain := assembleDomain(m.self, channel)
 				field := getFieldFromDomain(domain)
 				if field != "" {
-					fieldRef := vgField(mkv("aggregate", "distinct", "field", field), fieldRefOption{expr: "datum"})
+					fieldRef := vgField(cc, mkv("aggregate", "distinct", "field", field), fieldRefOption{expr: "datum"})
 					return sig(sizeExpr(scaleName, sc, fieldRef))
 				}
 				return jsval.Null
@@ -257,6 +257,15 @@ func getSizeTypeFromLayoutSizeType(t string) string {
 		return "height"
 	}
 	return t
+}
+
+// scaleTypeOf is the type of the channel's scale, "" when the channel has none
+// (for example when the specification sets `scale: null`).
+func (m *modelBase) scaleTypeOf(channel string) string {
+	if sc := m.getScaleComponent(channel); sc != nil {
+		return sc.get("type").AsString()
+	}
+	return ""
 }
 
 func (m *modelBase) getScaleComponent(channel string) *scaleComponent {
@@ -294,11 +303,13 @@ func (m *modelBase) trySelectionComponent(variableName string) *selectionCompone
 
 // scaleName returns the (possibly renamed) name of the channel's scale; "" when there is none.
 func (m *modelBase) scaleName(channel string, parse bool) string {
+	cc := m.b().ctx
+
 	if parse {
 		return m.getName(channel)
 	}
 	has := false
-	if isChannel(channel) && isScaleChannel(channel) && m.comp.scales != nil {
+	if isChannel(cc, channel) && isScaleChannel(cc, channel) && m.comp.scales != nil {
 		if sc, ok := m.comp.scales.get(channel); ok && sc != nil {
 			has = true
 		}
@@ -336,6 +347,7 @@ func (m *modelBase) hasAxisOrientSignalRef() bool {
 // parse runs upstream's Model.parse in its fixed order.
 func parseModel(m Model) {
 	b := m.b()
+	b.ctx.check()
 	parseScales(m, false)
 	m.parseLayoutSize() // depends on scale
 	b.renameTopLevelLayoutSizeSignal()
@@ -416,7 +428,10 @@ func (m *modelBase) assembleHeaderMarks() []Value {
 	return marks
 }
 
-func (m *modelBase) assembleAxes() []Value { return assembleAxes(m.comp.axes, m.config) }
+func (m *modelBase) assembleAxes() []Value {
+	cc := m.b().ctx
+	return assembleAxes(cc, m.comp.axes, m.config)
+}
 
 func (m *modelBase) assembleLegends() []Value { return assembleLegends(m.self) }
 
@@ -461,6 +476,7 @@ func (m *modelBase) assembleTitle() Value {
 // axes, legends) in upstream's order.
 func assembleGroup(m Model, signals []Value) *Object {
 	b := m.b()
+	b.ctx.check()
 	group := jsval.NewObject(6)
 	signals = append(append([]Value{}, signals...), m.assembleSignals()...)
 	if len(signals) > 0 {

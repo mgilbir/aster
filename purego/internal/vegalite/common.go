@@ -136,10 +136,10 @@ func getMarkPropOrConfigSimple(channel string, mark, config Value) Value {
 }
 
 // sortParams builds the field/order arrays of a Vega compare.
-func sortParams(orderDef Value, opt fieldRefOption) (fields, orders []Value) {
+func sortParams(cc *compileCtx, orderDef Value, opt fieldRefOption) (fields, orders []Value) {
 	defs := arrayOf(orderDef)
 	for _, d := range defs {
-		fields = append(fields, jsval.Str(vgField(d, opt)))
+		fields = append(fields, jsval.Str(vgField(cc, d, opt)))
 		orders = append(orders, coalesce(d.Get("sort"), jsval.Str("ascending")))
 	}
 	return

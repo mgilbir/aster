@@ -256,13 +256,15 @@ func (n *calculateNode) assemble() Value {
 	return mkv("type", "formula", "expr", n.transform.Get("calculate"), "as", n.transform.Get("as"))
 }
 
-func sortArrayIndexField(fd Value, channel string, opt fieldRefOption) string {
+func sortArrayIndexField(cc *compileCtx, fd Value, channel string, opt fieldRefOption) string {
 	opt.prefix = channel
 	opt.suffix = "sort_index"
-	return vgField(fd, opt)
+	return vgField(cc, fd, opt)
 }
 
 func parseAllCalculateForSortIndex(parent dfNode, m fieldDefModel) dfNode {
+	cc := m.b().ctx
+
 	m.forEachFieldDef(func(fd Value, channel string) {
 		if !isScaleFieldDef(fd) {
 			return
@@ -272,11 +274,11 @@ func parseAllCalculateForSortIndex(parent dfNode, m fieldDefModel) dfNode {
 			var sb strings.Builder
 			for i, sv := range sort.Items() {
 				pred := mkv("field", fd.Get("field"), "timeUnit", fd.Get("timeUnit"), "equal", sv)
-				sb.WriteString(fieldFilterExpression(pred, true))
+				sb.WriteString(fieldFilterExpression(cc, pred, true))
 				sb.WriteString(" ? " + jsval.JSNumberString(float64(i)) + " : ")
 			}
 			sb.WriteString(jsval.JSNumberString(float64(sort.Len())))
-			parent = newCalculateNode(parent, mkv("calculate", sb.String(), "as", sortArrayIndexField(fd, channel, fieldRefOption{forAs: true})))
+			parent = newCalculateNode(parent, mkv("calculate", sb.String(), "as", sortArrayIndexField(cc, fd, channel, fieldRefOption{forAs: true})))
 		}
 	})
 	return parent
@@ -295,7 +297,7 @@ type filterNode struct {
 func newFilterNode(parent dfNode, m Model, filter Value) *filterNode {
 	n := &filterNode{model: m, filter: filter}
 	initNode(n, parent)
-	n.expr = expression(m, filter, n)
+	n.expr = expression(m.b().ctx, m, filter, n)
 	n.dep = getDependentFields(n.expr)
 	return n
 }
@@ -306,7 +308,7 @@ func (n *filterNode) hash() string           { return "Filter " + n.expr }
 func (n *filterNode) assemble() Value        { return mkv("type", "filter", "expr", n.expr) }
 
 // expression renders a filter (a predicate composition) as a Vega expression.
-func expression(m Model, filterOp Value, node dfNode) string {
+func expression(cc *compileCtx, m Model, filterOp Value, node dfNode) string {
 	return logicalExpr(filterOp, func(pred Value) string {
 		switch {
 		case pred.IsStr():
@@ -314,7 +316,7 @@ func expression(m Model, filterOp Value, node dfNode) string {
 		case isSelectionPredicate(pred):
 			return parseSelectionPredicate(m, pred, node, "datum")
 		}
-		return fieldFilterExpression(pred, true)
+		return fieldFilterExpression(cc, pred, true)
 	}, 0)
 }
 
@@ -346,11 +348,13 @@ func (n *filterInvalidNode) hash() string {
 }
 
 func makeFilterInvalid(parent dfNode, m *unitModel, marks, scales string) dfNode {
+	cc := m.b().ctx
+
 	if marks == "include-invalid-values" && scales == "include-invalid-values" {
 		return nil
 	}
 	filter := reduceFieldDef(fieldDefModel(m), func(agg *omap[Value], fd Value, channel string) *omap[Value] {
-		if isScaleChannel(channel) {
+		if isScaleChannel(cc, channel) {
 			if sc := m.getScaleComponent(channel); sc != nil {
 				mode := getScaleInvalidDataMode(m.markDef, m.config, channel, sc.get("type").AsString(), isCountingAggregateOp(fd.Get("aggregate")))
 				if mode != "show" && mode != "always-valid" {
@@ -369,11 +373,13 @@ func makeFilterInvalid(parent dfNode, m *unitModel, marks, scales string) dfNode
 // makeFilterInvalid58 is Vega-Lite 5.8's FilterInvalidNode.make: fields of
 // continuous scales are filtered when the mark's `invalid` is "filter".
 func makeFilterInvalid58(parent dfNode, m *unitModel) dfNode {
+	cc := m.b().ctx
+
 	if invalid := getMarkPropOrConfigSimple("invalid", m.markDef, m.config); !(invalid.IsStr() && invalid.StrValue() == "filter") {
 		return nil
 	}
 	filter := reduceFieldDef(fieldDefModel(m), func(agg *omap[Value], fd Value, channel string) *omap[Value] {
-		if isScaleChannel(channel) {
+		if isScaleChannel(cc, channel) {
 			if sc := m.getScaleComponent(channel); sc != nil {
 				agg2 := fd.Get("aggregate")
 				if hasContinuousDomain(sc.get("type").AsString()) && !(agg2.IsStr() && agg2.StrValue() == "count") && !isPathMarkName(m.mark()) {
@@ -394,15 +400,17 @@ func isValidFiniteNumberExpr(ref string) string {
 }
 
 func (n *filterInvalidNode) assemble() Value {
+	cc := n.cc
+
 	var filters []string
 	for _, field := range n.filter.keys {
 		fd := n.filter.m[field]
-		ref := vgField(fd, fieldRefOption{expr: "datum"})
+		ref := vgField(cc, fd, fieldRefOption{expr: "datum"})
 		switch channelDefType(fd) {
 		case "temporal":
 			filters = append(filters, "(isDate("+ref+") || (isValid("+ref+") && isFinite(+"+ref+")))")
 		case "quantitative":
-			if v5 {
+			if cc.v5 {
 				filters = append(filters, "isValid("+ref+")", "isFinite(+"+ref+")")
 			} else {
 				filters = append(filters, isValidFiniteNumberExpr(ref))

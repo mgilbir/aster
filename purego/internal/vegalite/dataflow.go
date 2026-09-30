@@ -1,8 +1,8 @@
 package vegalite
 
 import (
+	"fmt"
 	"strings"
-	"sync/atomic"
 
 	"github.com/mgilbir/aster/purego/internal/jsval"
 )
@@ -39,6 +39,8 @@ type dfNode interface {
 }
 
 type dfBase struct {
+	// cc is the compilation the node belongs to; setParent copies it from the parent.
+	cc   *compileCtx
 	self dfNode
 	kids []dfNode
 	par  dfNode
@@ -52,6 +54,9 @@ func (b *dfBase) setParent(p dfNode) {
 	}
 	b.par = p
 	if p != nil {
+		if b.cc == nil {
+			b.cc = p.base().cc
+		}
 		p.base().addChild(b.self, -1)
 	}
 }
@@ -151,8 +156,6 @@ type outputNode struct {
 	hashKey   string
 }
 
-var outputSeq atomic.Int64
-
 func newOutputNode(parent dfNode, source string, typ dataSourceType, refCounts map[string]int) *outputNode {
 	o := &outputNode{typ: typ, refCounts: refCounts, source: source, name: source}
 	if refCounts != nil {
@@ -173,7 +176,12 @@ func (o *outputNode) dependentFields() *sset { return newSset() }
 func (o *outputNode) producedFields() *sset  { return newSset() }
 func (o *outputNode) hash() string {
 	if o.hashKey == "" {
-		o.hashKey = "Output " + jsval.JSNumberString(float64(42+outputSeq.Add(1)))
+		if o.cc != nil {
+			o.cc.outputSeq++
+			o.hashKey = "Output " + jsval.JSNumberString(float64(42+o.cc.outputSeq))
+		} else {
+			o.hashKey = fmt.Sprintf("Output %p", o)
+		}
 	}
 	return o.hashKey
 }
@@ -208,11 +216,12 @@ func isNamedData(d Value) bool {
 	return hasProperty(d, "name") && !isUrlData(d) && !isInlineData(d) && !isGenerator(d)
 }
 
-func newSourceNode(data Value) *sourceNode {
+func newSourceNode(cc *compileCtx, data Value) *sourceNode {
 	if data.IsNullish() {
 		data = mkv("name", "source")
 	}
 	s := &sourceNode{}
+	s.cc = cc
 	var format *Object
 	if !isGenerator(data) {
 		if f := data.Get("format"); f.IsTruthy() {

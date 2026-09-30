@@ -107,7 +107,9 @@ func normalizeUnaggregatedDomain(domain Value, fd Value, scaleType string, scale
 }
 
 func parseDomainForChannel(u *unitModel, channel string) withExplicit {
-	scaleType := u.getScaleComponent(channel).get("type").AsString()
+	cc := u.b().ctx
+
+	scaleType := u.scaleTypeOf(channel)
 	encoding := u.encoding
 	domain := normalizeUnaggregatedDomain(u.scaleDomain(channel), u.typedFieldDef(channel), scaleType, u.config.Get("scale"))
 	if !jsval.SameRef(domain, u.scaleDomain(channel)) {
@@ -115,14 +117,14 @@ func parseDomainForChannel(u *unitModel, channel string) withExplicit {
 		o.Set("domain", domain)
 		u.specifiedScales.Set(channel, jsval.Obj(o))
 	}
-	if channel == chX && getFieldOrDatumDef(encoding.Get("x2")).IsTruthy() {
-		if getFieldOrDatumDef(encoding.Get("x")).IsTruthy() {
+	if channel == chX && getFieldOrDatumDef(cc, encoding.Get("x2")).IsTruthy() {
+		if getFieldOrDatumDef(cc, encoding.Get("x")).IsTruthy() {
 			a := parseSingleChannelDomain(scaleType, domain, u, "x")
 			return mergeValuesWithExplicit(&a, parseSingleChannelDomain(scaleType, domain, u, "x2"), "domain", "scale", domainsTieBreaker)
 		}
 		return parseSingleChannelDomain(scaleType, domain, u, "x2")
-	} else if channel == chY && getFieldOrDatumDef(encoding.Get("y2")).IsTruthy() {
-		if getFieldOrDatumDef(encoding.Get("y")).IsTruthy() {
+	} else if channel == chY && getFieldOrDatumDef(cc, encoding.Get("y2")).IsTruthy() {
+		if getFieldOrDatumDef(cc, encoding.Get("y")).IsTruthy() {
 			a := parseSingleChannelDomain(scaleType, domain, u, "y")
 			return mergeValuesWithExplicit(&a, parseSingleChannelDomain(scaleType, domain, u, "y2"), "domain", "scale", domainsTieBreaker)
 		}
@@ -131,39 +133,41 @@ func parseDomainForChannel(u *unitModel, channel string) withExplicit {
 	return parseSingleChannelDomain(scaleType, domain, u, channel)
 }
 
-func mapDomainToDataSignal(domain Value, typ string, timeUnit Value) Value {
+func mapDomainToDataSignal(cc *compileCtx, domain Value, typ string, timeUnit Value) Value {
 	return mapVals(domain, func(v Value) Value {
-		data, _ := valueExpr(v, timeUnit, typ, false, false)
+		data, _ := valueExpr(cc, v, timeUnit, typ, false, false)
 		return mkv("signal", "{data: "+data+"}")
 	})
 }
 
-func convertDomainIfItIsDateTime(domain Value, typ string, timeUnit Value) []Value {
-	unit := normalizeTimeUnit(timeUnit).Get("unit")
+func convertDomainIfItIsDateTime(cc *compileCtx, domain Value, typ string, timeUnit Value) []Value {
+	unit := normalizeTimeUnit(cc, timeUnit).Get("unit")
 	if typ == "temporal" || unit.IsTruthy() {
-		return mapDomainToDataSignal(domain, typ, unit).Items()
+		return mapDomainToDataSignal(cc, domain, typ, unit).Items()
 	}
 	return []Value{domain}
 }
 
 func parseSingleChannelDomain(scaleType string, domain Value, u *unitModel, channel string) withExplicit {
+	cc := u.b().ctx
+
 	encoding, markDef, mark, config, stack := u.encoding, u.markDef, u.mark(), u.config, u.stack
-	fod := getFieldOrDatumDef(encoding.Get(channel))
+	fod := getFieldOrDatumDef(cc, encoding.Get(channel))
 	typ := channelDefType(fod)
 	timeUnit := fod.Get("timeUnit")
 	dsType := dsMain
-	if !v5 {
+	if !cc.v5 {
 		dsType = getScaleDataSourceForHandlingInvalidValues(getMarkConfig("invalid", markDef, config, ""), isPathMarkName(mark))
 	}
 	switch {
 	case isDomainUnionWith(domain):
 		def := parseSingleChannelDomain(scaleType, undef, u, channel)
-		union := convertDomainIfItIsDateTime(domain.Get("unionWith"), typ, timeUnit)
+		union := convertDomainIfItIsDateTime(cc, domain.Get("unionWith"), typ, timeUnit)
 		return makeExplicit(jsval.Arr(append(append([]Value{}, union...), def.value.Items()...)))
 	case isSignalRef(domain):
 		return makeExplicit(arr(domain))
 	case domain.IsTruthy() && !(domain.IsStr() && domain.StrValue() == "unaggregated") && !isParameterDomain(domain):
-		return makeExplicit(jsval.Arr(convertDomainIfItIsDateTime(domain, typ, timeUnit)))
+		return makeExplicit(jsval.Arr(convertDomainIfItIsDateTime(cc, domain, typ, timeUnit)))
 	}
 	if stack != nil && channel == stack.fieldChannel {
 		if stack.offset == "normalize" {
@@ -176,19 +180,19 @@ func parseSingleChannelDomain(scaleType string, domain Value, u *unitModel, chan
 		))
 	}
 	var sort Value
-	if isScaleChannel(channel) && isFieldDef(fod) {
+	if isScaleChannel(cc, channel) && isFieldDef(cc, fod) {
 		sort = domainSort(u, channel, scaleType)
 	}
 	if isDatumDef(fod) {
-		return makeImplicit(jsval.Arr(convertDomainIfItIsDateTime(arr(fod.Get("datum")), typ, timeUnit)))
+		return makeImplicit(jsval.Arr(convertDomainIfItIsDateTime(cc, arr(fod.Get("datum")), typ, timeUnit)))
 	}
 	fd := fod
 	switch {
 	case domain.IsStr() && domain.StrValue() == "unaggregated":
 		field := fod.Get("field")
 		return makeImplicit(arr(
-			mkv("data", u.requestDataName(dsType), "field", vgField(mkv("field", field, "aggregate", "min"), fieldRefOption{})),
-			mkv("data", u.requestDataName(dsType), "field", vgField(mkv("field", field, "aggregate", "max"), fieldRefOption{})),
+			mkv("data", u.requestDataName(dsType), "field", vgField(cc, mkv("field", field, "aggregate", "min"), fieldRefOption{})),
+			mkv("data", u.requestDataName(dsType), "field", vgField(cc, mkv("field", field, "aggregate", "max"), fieldRefOption{})),
 		))
 	case isBinning(fd.Get("bin")):
 		if hasDiscreteDomain(scaleType) {
@@ -202,7 +206,7 @@ func parseSingleChannelDomain(scaleType string, domain Value, u *unitModel, chan
 				data = u.requestDataName(dsRaw)
 			}
 			opt := fieldRefOption{}
-			if binRequiresRange(fd, channel) {
+			if binRequiresRange(cc, fd, channel) {
 				opt.binSuffix = "range"
 			}
 			var sortV Value
@@ -224,10 +228,10 @@ func parseSingleChannelDomain(scaleType string, domain Value, u *unitModel, chan
 		return makeImplicit(arr(mkv("data", u.requestDataName(dsType), "field", u.vgField(channel, fieldRefOption{}))))
 	case fd.Get("timeUnit").IsTruthy() && (scaleType == "time" || scaleType == "utc"):
 		fd2 := encoding.Get(getSecondaryRangeChannel(channel))
-		if hasBandEnd(fd, fd2, markDef, config) {
+		if hasBandEnd(cc, fd, fd2, markDef, config) {
 			data := u.requestDataName(dsType)
-			bp := getBandPosition(fd, fd2, markDef, config)
-			isRectWithOffset := !v5 && isRectBasedMark(mark) && !(bp.IsNum() && bp.NumValue() == 0.5) && isXorY(channel)
+			bp := getBandPosition(cc, fd, fd2, markDef, config)
+			isRectWithOffset := !cc.v5 && isRectBasedMark(cc, mark) && !(bp.IsNum() && bp.NumValue() == 0.5) && isXorY(channel)
 			startOpt := fieldRefOption{}
 			endSuffix := "end"
 			if isRectWithOffset {
@@ -297,13 +301,15 @@ func coalesceTruthy(a, b Value) Value {
 
 // domainSort returns the sort of a discrete scale's domain: a bool, a sort object, or undefined.
 func domainSort(u *unitModel, channel, scaleType string) Value {
+	cc := u.b().ctx
+
 	if !hasDiscreteDomain(scaleType) {
 		return undef
 	}
 	fd := u.fieldDef(channel)
 	sort := fd.Get("sort")
 	if isSortArray(sort) {
-		return mkv("op", "min", "field", sortArrayIndexField(fd, channel, fieldRefOption{}), "order", "ascending")
+		return mkv("op", "min", "field", sortArrayIndexField(cc, fd, channel, fieldRefOption{}), "order", "ascending")
 	}
 	stack := u.stack
 	var stackDimensions *sset
@@ -314,7 +320,7 @@ func domainSort(u *unitModel, channel, scaleType string) Value {
 		}
 	}
 	switch {
-	case isSortField(sort):
+	case isSortField(cc, sort):
 		isStacked := stack != nil && !stackDimensions.has(sort.Get("field").AsString())
 		return normalizeSortField(sort, isStacked)
 	case isSortByEncoding(sort):
@@ -323,8 +329,8 @@ func domainSort(u *unitModel, channel, scaleType string) Value {
 		aggregate, field := fieldDefToSortBy.Get("aggregate"), fieldDefToSortBy.Get("field")
 		isStacked := stack != nil && !stackDimensions.has(field.AsString())
 		if isArgminDef(aggregate) || isArgmaxDef(aggregate) {
-			return normalizeSortField(mkv("field", vgField(fieldDefToSortBy, fieldRefOption{}), "order", order), isStacked)
-		} else if isAggregateOp(aggregate) || !aggregate.IsTruthy() {
+			return normalizeSortField(mkv("field", vgField(cc, fieldDefToSortBy, fieldRefOption{}), "order", order), isStacked)
+		} else if isAggregateOp(cc, aggregate) || !aggregate.IsTruthy() {
 			return normalizeSortField(mkv("op", aggregate, "field", field, "order", order), isStacked)
 		}
 	case sort.IsStr() && sort.StrValue() == "descending":

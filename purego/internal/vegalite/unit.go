@@ -17,18 +17,21 @@ type unitModel struct {
 	selection           []Value
 }
 
-func newUnitModel(spec Value, parent Model, parentGivenName string, parentGivenSize *Object, config Value) *unitModel {
+func newUnitModel(cc *compileCtx, spec Value, parent Model, parentGivenName string, parentGivenSize *Object, config Value) *unitModel {
 	u := &unitModel{}
 	var view Value
 	if isFrameMixins(spec) {
 		view = spec.Get("view")
 	}
-	u.modelBase = newModelBase(u, spec, "unit", parent, parentGivenName, config, nil, view)
+	u.modelBase = newModelBase(cc, u, spec, "unit", parent, parentGivenName, config, nil, view)
 	var markDef *Object
 	if isMarkDef(spec.Get("mark")) {
 		markDef = cloneObj(spec.Get("mark").ObjValue())
 	} else {
 		markDef = mk("type", spec.Get("mark"))
+	}
+	if t := markDef.Lookup("type"); !t.IsStr() || markCompilers[t.StrValue()].encodeEntry == nil {
+		throw("Invalid mark %s: expected one of the mark types (arc, area, bar, image, line, point, rect, rule, text, tick, trail, circle, square, geoshape, or a composite mark) or a mark definition with such a type", stringify(spec.Get("mark")))
 	}
 	mark := markDef.Lookup("type").AsString()
 	if markDef.Lookup("filled").IsUndefined() {
@@ -36,16 +39,16 @@ func newUnitModel(spec Value, parent Model, parentGivenName string, parentGivenS
 		markDef.Set("filled", defaultFilled(jsval.Obj(markDef), config, graticule))
 	}
 	filled := markDef.Lookup("filled").IsTruthy()
-	u.encoding = initEncoding(coalesceObj(spec.Get("encoding")), mark, filled, config)
-	u.markDef = initMarkdef(jsval.Obj(markDef), u.encoding, config)
+	u.encoding = initEncoding(cc, coalesceObj(spec.Get("encoding")), mark, filled, config)
+	u.markDef = initMarkdef(cc, jsval.Obj(markDef), u.encoding, config)
 	var size *Object
 	if isFrameMixins(spec) {
 		size = cloneObj(parentGivenSize)
 		// 6.x keeps a falsy size (0); 5.8 ignores it.
-		if v := spec.Get("width"); (v5 && v.IsTruthy()) || (!v5 && !v.IsUndefined()) {
+		if v := spec.Get("width"); (cc.v5 && v.IsTruthy()) || (!cc.v5 && !v.IsUndefined()) {
 			size.Set("width", v)
 		}
-		if v := spec.Get("height"); (v5 && v.IsTruthy()) || (!v5 && !v.IsUndefined()) {
+		if v := spec.Get("height"); (cc.v5 && v.IsTruthy()) || (!cc.v5 && !v.IsUndefined()) {
 			size.Set("height", v)
 		}
 	} else {
@@ -54,8 +57,8 @@ func newUnitModel(spec Value, parent Model, parentGivenName string, parentGivenS
 			size = jsval.NewObject(0)
 		}
 	}
-	u.size = initLayoutSize(u.encoding, size)
-	u.stack = stackOf(u.markDef, u.encoding)
+	u.size = initLayoutSize(cc, u.encoding, size)
+	u.stack = stackOf(cc, u.markDef, u.encoding)
 	u.specifiedScales = u.initScales(u.encoding)
 	u.specifiedAxes = u.initAxes(u.encoding)
 	u.specifiedLegends = u.initLegends(u.encoding)
@@ -65,7 +68,7 @@ func newUnitModel(spec Value, parent Model, parentGivenName string, parentGivenS
 			u.selection = append(u.selection, p)
 		}
 	}
-	if !v5 {
+	if !cc.v5 {
 		u.alignStackOrderWithColorDomain()
 	}
 	return u
@@ -82,11 +85,13 @@ func (u *unitModel) children() []Model { return nil }
 func (u *unitModel) mark() string      { return u.markDef.Get("type").AsString() }
 
 func (u *unitModel) hasProjection() bool {
+	cc := u.b().ctx
+
 	if u.mark() == "geoshape" {
 		return true
 	}
 	for _, ch := range geoPositionChannels {
-		if isFieldOrDatumDef(u.encoding.Get(ch)) {
+		if isFieldOrDatumDef(cc, u.encoding.Get(ch)) {
 			return true
 		}
 	}
@@ -104,9 +109,11 @@ func (u *unitModel) axis(channel string) Value   { return u.specifiedAxes.Lookup
 func (u *unitModel) legend(channel string) Value { return u.specifiedLegends.Lookup(channel) }
 
 func (u *unitModel) initScales(encoding Value) *Object {
+	cc := u.b().ctx
+
 	scales := jsval.NewObject(4)
 	for _, channel := range scaleChannels {
-		fod := getFieldOrDatumDef(encoding.Get(channel))
+		fod := getFieldOrDatumDef(cc, encoding.Get(channel))
 		if fod.IsTruthy() {
 			sc := fod.Get("scale")
 			if !sc.IsTruthy() {
@@ -132,12 +139,14 @@ func (u *unitModel) initScale(scale Value) Value {
 }
 
 func (u *unitModel) initAxes(encoding Value) *Object {
+	cc := u.b().ctx
+
 	axes := jsval.NewObject(2)
 	for _, channel := range positionScaleChannels {
 		cd := encoding.Get(channel)
-		if isFieldOrDatumDef(cd) || (channel == chX && isFieldOrDatumDef(encoding.Get("x2"))) || (channel == chY && isFieldOrDatumDef(encoding.Get("y2"))) {
+		if isFieldOrDatumDef(cc, cd) || (channel == chX && isFieldOrDatumDef(cc, encoding.Get("x2"))) || (channel == chY && isFieldOrDatumDef(cc, encoding.Get("y2"))) {
 			var axisSpec Value
-			if isFieldOrDatumDef(cd) {
+			if isFieldOrDatumDef(cc, cd) {
 				axisSpec = cd.Get("axis")
 			}
 			if axisSpec.IsTruthy() {
@@ -164,9 +173,11 @@ func (u *unitModel) initAxis(axis Value) Value {
 }
 
 func (u *unitModel) initLegends(encoding Value) *Object {
+	cc := u.b().ctx
+
 	legends := jsval.NewObject(4)
 	for _, channel := range nonPositionScaleChannels {
-		fod := getFieldOrDatumDef(encoding.Get(channel))
+		fod := getFieldOrDatumDef(cc, encoding.Get(channel))
 		if fod.IsTruthy() && supportLegend(channel) {
 			lg := fod.Get("legend")
 			if lg.IsTruthy() {
@@ -182,6 +193,8 @@ func (u *unitModel) initLegends(encoding Value) *Object {
 // alignStackOrderWithColorDomain makes stacked bars follow an explicit
 // nominal color domain by adding a sort-index calculate and an order channel.
 func (u *unitModel) alignStackOrderWithColorDomain() {
+	cc := u.b().ctx
+
 	enc := u.encoding
 	color, fill, order, xOffset, yOffset := enc.Get("color"), enc.Get("fill"), enc.Get("order"), enc.Get("xOffset"), enc.Get("yOffset")
 	colorField := fill
@@ -189,7 +202,7 @@ func (u *unitModel) alignStackOrderWithColorDomain() {
 		colorField = color
 	}
 	var colorEncoding Value
-	if isFieldDef(colorField) {
+	if isFieldDef(cc, colorField) {
 		colorEncoding = colorField
 	}
 	field := colorEncoding.Get("field")
@@ -201,7 +214,7 @@ func (u *unitModel) alignStackOrderWithColorDomain() {
 		offset = yOffset
 	}
 	var offsetEncoding Value
-	if isFieldDef(offset) {
+	if isFieldDef(cc, offset) {
 		offsetEncoding = offset
 	}
 	orderFieldName := "_" + field.AsString() + "_sort_index"
@@ -250,10 +263,12 @@ func (u *unitModel) assembleLayout() Value { return jsval.Null }
 func (u *unitModel) assembleLayoutSignals() []Value { return assembleLayoutSignals(u) }
 
 func (u *unitModel) correctDataNames(mark Value) Value {
+	cc := u.b().ctx
+
 	from := mark.Get("from")
 	if from.Get("data").IsTruthy() {
 		d := u.lookupDataSource(from.Get("data").AsString())
-		if !v5 && u.encoding.ObjValue().Has("time") {
+		if !cc.v5 && u.encoding.ObjValue().Has("time") {
 			d += curr
 		}
 		from.ObjValue().Set("data", jsval.Str(d))
@@ -289,9 +304,15 @@ func (u *unitModel) assembleGroupStyle() Value {
 func (u *unitModel) assembleTitle() Value     { return u.modelBase.assembleTitle() }
 func (u *unitModel) assembleLegends() []Value { return u.modelBase.assembleLegends() }
 
-func (u *unitModel) channelHasField(channel string) bool { return channelHasField(u.encoding, channel) }
+func (u *unitModel) channelHasField(channel string) bool {
+	cc := u.b().ctx
+	return channelHasField(cc, u.encoding, channel)
+}
 
-func (u *unitModel) fieldDef(channel string) Value { return getFieldDef(u.encoding.Get(channel)) }
+func (u *unitModel) fieldDef(channel string) Value {
+	cc := u.b().ctx
+	return getFieldDef(cc, u.encoding.Get(channel))
+}
 
 func (u *unitModel) typedFieldDef(channel string) Value {
 	fd := u.fieldDef(channel)
@@ -302,17 +323,21 @@ func (u *unitModel) typedFieldDef(channel string) Value {
 }
 
 func (u *unitModel) vgField(channel string, opt fieldRefOption) string {
+	cc := u.b().ctx
+
 	fd := u.fieldDef(channel)
 	if !fd.IsTruthy() {
 		return ""
 	}
-	return vgField(fd, opt)
+	return vgField(cc, fd, opt)
 }
 
 // forEachFieldDef calls f for each field def (or conditional field def) in the encoding.
 func (u *unitModel) forEachFieldDef(f func(fd Value, channel string)) {
+	cc := u.b().ctx
+
 	encodingEach(u.encoding, func(cd Value, c string) {
-		if fd := getFieldDef(cd); fd.IsTruthy() {
+		if fd := getFieldDef(cc, cd); fd.IsTruthy() {
 			f(fd, c)
 		}
 	})
@@ -329,11 +354,11 @@ func defaultFilled(markDef Value, config Value, graticule bool) Value {
 	return firstDefined(filledConfig, jsval.Bool(mark != "point" && mark != "line" && mark != "rule"))
 }
 
-func initMarkdef(original Value, encoding Value, config Value) Value {
+func initMarkdef(cc *compileCtx, original Value, encoding Value, config Value) Value {
 	mdv := replaceExprRef(original, 0)
 	md := mdv.ObjValue()
 	specifiedOrient := getMarkPropOrConfigSimple("orient", mdv, config)
-	orient := markOrient(md.Lookup("type").AsString(), encoding, specifiedOrient)
+	orient := markOrient(cc, md.Lookup("type").AsString(), encoding, specifiedOrient)
 	md.Set("orient", strOrUndef(orient))
 	if md.Lookup("type").AsString() == "bar" && orient != "" {
 		if cre := getMarkPropOrConfigSimple("cornerRadiusEnd", mdv, config); !cre.IsUndefined() {
@@ -355,8 +380,8 @@ func initMarkdef(original Value, encoding Value, config Value) Value {
 	}
 	so := getMarkPropOrConfigSimple("opacity", mdv, config)
 	sfo := getMarkPropOrConfigSimple("fillOpacity", mdv, config)
-	if so.IsUndefined() && (v5 || sfo.IsUndefined()) {
-		md.Set("opacity", markOpacity(md.Lookup("type").AsString(), encoding))
+	if so.IsUndefined() && (cc.v5 || sfo.IsUndefined()) {
+		md.Set("opacity", markOpacity(cc, md.Lookup("type").AsString(), encoding))
 	}
 	if getMarkPropOrConfigSimple("cursor", mdv, config).IsUndefined() {
 		md.Set("cursor", markCursor(mdv, encoding, config))
@@ -373,19 +398,19 @@ func markCursor(markDef, encoding, config Value) Value {
 
 const defaultReducedOpacity = 0.7
 
-func markOpacity(mark string, encoding Value) Value {
-	if (mark == "point" || mark == "tick" || mark == "circle" || mark == "square") && !encodingIsAggregate(encoding) {
+func markOpacity(cc *compileCtx, mark string, encoding Value) Value {
+	if (mark == "point" || mark == "tick" || mark == "circle" || mark == "square") && !encodingIsAggregate(cc, encoding) {
 		return jsval.Num(defaultReducedOpacity)
 	}
 	return undef
 }
 
-func markOrient(mark string, encoding Value, specifiedOrient Value) string {
+func markOrient(cc *compileCtx, mark string, encoding Value, specifiedOrient Value) string {
 	switch mark {
 	case "point", "circle", "square", "rect", "image":
 		return ""
 	case "text":
-		if v5 {
+		if cc.v5 {
 			return ""
 		}
 	}
@@ -409,10 +434,10 @@ func markOrient(mark string, encoding Value, specifiedOrient Value) string {
 		return "vertical"
 	}
 	if stage == 0 {
-		if isFieldDef(x) && (isBinned(x.Get("bin")) || (isFieldDef(y) && y.Get("aggregate").IsTruthy() && !x.Get("aggregate").IsTruthy())) {
+		if isFieldDef(cc, x) && (isBinned(x.Get("bin")) || (isFieldDef(cc, y) && y.Get("aggregate").IsTruthy() && !x.Get("aggregate").IsTruthy())) {
 			return "vertical"
 		}
-		if isFieldDef(y) && (isBinned(y.Get("bin")) || (isFieldDef(x) && x.Get("aggregate").IsTruthy() && !y.Get("aggregate").IsTruthy())) {
+		if isFieldDef(cc, y) && (isBinned(y.Get("bin")) || (isFieldDef(cc, x) && x.Get("aggregate").IsTruthy() && !y.Get("aggregate").IsTruthy())) {
 			return "horizontal"
 		}
 		if y2.IsTruthy() || x2.IsTruthy() {
@@ -420,16 +445,16 @@ func markOrient(mark string, encoding Value, specifiedOrient Value) string {
 				return so
 			}
 			if !x2.IsTruthy() {
-				if (isFieldDef(x) && channelDefType(x) == "quantitative" && !isBinning(x.Get("bin"))) || isNumericDataDef(x) {
-					if isFieldDef(y) && isBinned(y.Get("bin")) {
+				if (isFieldDef(cc, x) && channelDefType(x) == "quantitative" && !isBinning(x.Get("bin"))) || isNumericDataDef(x) {
+					if isFieldDef(cc, y) && isBinned(y.Get("bin")) {
 						return "horizontal"
 					}
 				}
 				return "vertical"
 			}
 			if !y2.IsTruthy() {
-				if (isFieldDef(y) && channelDefType(y) == "quantitative" && !isBinning(y.Get("bin"))) || isNumericDataDef(y) {
-					if isFieldDef(x) && isBinned(x.Get("bin")) {
+				if (isFieldDef(cc, y) && channelDefType(y) == "quantitative" && !isBinning(y.Get("bin"))) || isNumericDataDef(y) {
+					if isFieldDef(cc, x) && isBinned(x.Get("bin")) {
 						return "vertical"
 					}
 				}
@@ -439,7 +464,7 @@ func markOrient(mark string, encoding Value, specifiedOrient Value) string {
 		stage = 1
 	}
 	if stage == 1 {
-		if x2.IsTruthy() && !(isFieldDef(x) && isBinned(x.Get("bin"))) && y2.IsTruthy() && !(isFieldDef(y) && isBinned(y.Get("bin"))) {
+		if x2.IsTruthy() && !(isFieldDef(cc, x) && isBinned(x.Get("bin"))) && y2.IsTruthy() && !(isFieldDef(cc, y) && isBinned(y.Get("bin"))) {
 			return ""
 		}
 		stage = 2
@@ -447,12 +472,12 @@ func markOrient(mark string, encoding Value, specifiedOrient Value) string {
 	if stage == 2 {
 		switch {
 		case y2.IsTruthy():
-			if isFieldDef(y) && isBinned(y.Get("bin")) {
+			if isFieldDef(cc, y) && isBinned(y.Get("bin")) {
 				return "horizontal"
 			}
 			return "vertical"
 		case x2.IsTruthy():
-			if isFieldDef(x) && isBinned(x.Get("bin")) {
+			if isFieldDef(cc, x) && isBinned(x.Get("bin")) {
 				return "vertical"
 			}
 			return "horizontal"

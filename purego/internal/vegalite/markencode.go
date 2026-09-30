@@ -42,8 +42,8 @@ type wrapConditionOpts struct {
 	mainRefFn       func(cd Value) Value
 }
 
-func wrapCondition(o wrapConditionOpts) Value {
-	if v5 {
+func wrapCondition(cc *compileCtx, o wrapConditionOpts) Value {
+	if cc.v5 {
 		return wrapCondition58(o)
 	}
 	var valueRefs []Value
@@ -56,7 +56,7 @@ func wrapCondition(o wrapConditionOpts) Value {
 				spreadV(r, cvr)
 				valueRefs = append(valueRefs, jsval.Obj(r))
 			} else {
-				test := expression(o.model, c.Get("test"), nil)
+				test := expression(o.model.b().ctx, o.model, c.Get("test"), nil)
 				r := mk("test", test)
 				spreadV(r, cvr)
 				valueRefs = append(valueRefs, jsval.Obj(r))
@@ -83,6 +83,8 @@ func wrapCondition(o wrapConditionOpts) Value {
 type encodeIgnore map[string]string
 
 func baseEncodeEntry(m *unitModel, ignore encodeIgnore) Value {
+	cc := m.b().ctx
+
 	var fill, stroke Value
 	if ignore["color"] == "include" {
 		c := colorEncode(m, undef)
@@ -90,7 +92,7 @@ func baseEncodeEntry(m *unitModel, ignore encodeIgnore) Value {
 	}
 	o := jsval.NewObject(16)
 	spreadV(o, markDefProperties(m.markDef, ignore))
-	if v5 {
+	if cc.v5 {
 		spreadV(o, wrapAllFieldsInvalid58(m, "fill", fill))
 		spreadV(o, wrapAllFieldsInvalid58(m, "stroke", stroke))
 	} else {
@@ -209,12 +211,14 @@ type nonPositionOpts struct {
 }
 
 func nonPosition(channel string, m *unitModel, opt nonPositionOpts) Value {
+	cc := m.b().ctx
+
 	markDef, encoding, config := m.markDef, m.encoding, m.config
 	channelDef := encoding.Get(channel)
 	defaultRef, defaultValue := opt.defaultRef, opt.defaultValue
 	if defaultRef.IsUndefined() {
 		if defaultValue.IsNullish() {
-			defaultValue = getMarkPropOrConfig(channel, markDef, config, opt.vgChannel, v5 || !isConditionalDef(channelDef))
+			defaultValue = getMarkPropOrConfig(channel, markDef, config, opt.vgChannel, cc.v5 || !isConditionalDef(channelDef))
 		}
 		if !defaultValue.IsUndefined() {
 			defaultRef = signalOrValueRef(defaultValue)
@@ -223,11 +227,11 @@ func nonPosition(channel string, m *unitModel, opt nonPositionOpts) Value {
 	scaleName := m.scaleName(channel, false)
 	scale := m.getScaleComponent(channel)
 	invalidRef := undef
-	if !v5 {
-		invalidRef = getConditionalValueRefForIncludingInvalidValue(channel, channelDef, scale, scaleName, markDef, config)
+	if !cc.v5 {
+		invalidRef = getConditionalValueRefForIncludingInvalidValue(cc, channel, channelDef, scale, scaleName, markDef, config)
 	}
 	mainRefFn := func(cd Value) Value {
-		return midPoint(midPointParams{
+		return midPoint(cc, midPointParams{
 			channel: channel, channelDef: cd, markDef: markDef, config: config,
 			scaleName: scaleName, scale: scale, stack: nil, defaultRef: defaultRef,
 		})
@@ -236,26 +240,28 @@ func nonPosition(channel string, m *unitModel, opt nonPositionOpts) Value {
 	if vg == "" {
 		vg = channel
 	}
-	return wrapCondition(wrapConditionOpts{model: m, channelDef: channelDef, vgChannel: vg, invalidValueRef: invalidRef, mainRefFn: mainRefFn})
+	return wrapCondition(cc, wrapConditionOpts{model: m, channelDef: channelDef, vgChannel: vg, invalidValueRef: invalidRef, mainRefFn: mainRefFn})
 }
 
 // ---- text ----
 
 func textEncode(m *unitModel, channel string) Value {
-	return wrapCondition(wrapConditionOpts{
+	cc := m.b().ctx
+
+	return wrapCondition(cc, wrapConditionOpts{
 		model: m, channelDef: m.encoding.Get(channel), vgChannel: channel,
-		mainRefFn: func(cd Value) Value { return textRef(cd, m.config, "datum") },
+		mainRefFn: func(cd Value) Value { return textRef(cc, cd, m.config, "datum") },
 	})
 }
 
-func textRef(channelDef Value, config Value, expr string) Value {
+func textRef(cc *compileCtx, channelDef Value, config Value, expr string) Value {
 	if channelDef.IsTruthy() {
 		if isValueDef(channelDef) {
 			return signalOrValueRef(channelDef.Get("value"))
 		}
-		if isFieldOrDatumDef(channelDef) {
+		if isFieldOrDatumDef(cc, channelDef) {
 			format, formatType := getFormatMixins(channelDef)
-			return formatSignalRef(formatSignalOpts{fieldOrDatumDef: channelDef, format: format, formatType: formatType, expr: expr, config: config})
+			return formatSignalRef(cc, formatSignalOpts{fieldOrDatumDef: channelDef, format: format, formatType: formatType, expr: expr, config: config})
 		}
 	}
 	return undef
@@ -264,9 +270,11 @@ func textRef(channelDef Value, config Value, expr string) Value {
 // ---- zindex / aria ----
 
 func zindexEncode(m *unitModel) Value {
+	cc := m.b().ctx
+
 	order := m.encoding.Get("order")
 	if !isPathMarkName(m.mark()) && isValueDef(order) {
-		return wrapCondition(wrapConditionOpts{
+		return wrapCondition(cc, wrapConditionOpts{
 			model: m, channelDef: order, vgChannel: "zindex",
 			mainRefFn: func(cd Value) Value { return signalOrValueRef(cd.Get("value")) },
 		})
@@ -303,11 +311,13 @@ func ariaRoleDescription(m *unitModel) Value {
 }
 
 func descriptionEncode(m *unitModel) Value {
+	cc := m.b().ctx
+
 	channelDef := m.encoding.Get("description")
 	if channelDef.IsTruthy() {
-		return wrapCondition(wrapConditionOpts{
+		return wrapCondition(cc, wrapConditionOpts{
 			model: m, channelDef: channelDef, vgChannel: "description",
-			mainRefFn: func(cd Value) Value { return textRef(cd, m.config, "datum") },
+			mainRefFn: func(cd Value) Value { return textRef(cc, cd, m.config, "datum") },
 		})
 	}
 	dv := getMarkPropOrConfigSimple("description", m.markDef, m.config)
@@ -317,7 +327,7 @@ func descriptionEncode(m *unitModel) Value {
 	if m.config.Get("aria").IsBool() && !m.config.Get("aria").BoolValue() {
 		return mkv()
 	}
-	data := tooltipData(m.encoding, m.stack, m.config, false)
+	data := tooltipData(cc, m.encoding, m.stack, m.config, false)
 	if data.len() == 0 {
 		return undef
 	}
@@ -325,9 +335,9 @@ func descriptionEncode(m *unitModel) Value {
 	idx := 0
 	for _, key := range data.keys {
 		value := data.m[key]
-		if v5 && value == "" {
+		if cc.v5 && value == "" {
 			value = "undefined" // 5.8 interpolates a missing expression as is
-		} else if !v5 {
+		} else if !cc.v5 {
 			// Vega-Lite 6 hides internal (underscore-prefixed) signals from the
 			// description and flattens line breaks; 5.8 prints everything.
 			if strings.HasPrefix(key, "_") {
@@ -348,10 +358,12 @@ func descriptionEncode(m *unitModel) Value {
 // ---- tooltip ----
 
 func tooltipEncode(m *unitModel, reactiveGeom bool) Value {
+	cc := m.b().ctx
+
 	encoding, markDef, config, stack := m.encoding, m.markDef, m.config, m.stack
 	channelDef := encoding.Get("tooltip")
 	if channelDef.IsArr() {
-		r := tooltipRefForEncoding(mkv("tooltip", channelDef), stack, config, reactiveGeom)
+		r := tooltipRefForEncoding(cc, mkv("tooltip", channelDef), stack, config, reactiveGeom)
 		return mkv("tooltip", r)
 	}
 	datum := "datum"
@@ -359,7 +371,7 @@ func tooltipEncode(m *unitModel, reactiveGeom bool) Value {
 		datum = "datum.datum"
 	}
 	mainRefFn := func(cd Value) Value {
-		if r := tooltipTextRef(cd, config, datum); r.IsTruthy() {
+		if r := tooltipTextRef(cc, cd, config, datum); r.IsTruthy() {
 			return r
 		}
 		if cd.IsNull() {
@@ -376,13 +388,13 @@ func tooltipEncode(m *unitModel, reactiveGeom bool) Value {
 			if isSignalRef(markTooltip) {
 				return markTooltip
 			} else if markTooltip.Get("content").IsStr() && markTooltip.Get("content").StrValue() == "encoding" {
-				return tooltipRefForEncoding(encoding, stack, config, reactiveGeom)
+				return tooltipRefForEncoding(cc, encoding, stack, config, reactiveGeom)
 			}
 			return mkv("signal", datum)
 		}
 		return undef
 	}
-	return wrapCondition(wrapConditionOpts{model: m, channelDef: channelDef, vgChannel: "tooltip", mainRefFn: mainRefFn})
+	return wrapCondition(cc, wrapConditionOpts{model: m, channelDef: channelDef, vgChannel: "tooltip", mainRefFn: mainRefFn})
 }
 
 type tooltipEntry struct {
@@ -393,9 +405,9 @@ type tooltipEntry struct {
 }
 
 // tooltipData maps each tooltip key to its value expression.
-func tooltipData(encoding Value, stack *stackProperties, config Value, reactiveGeom bool) *omap[string] {
+func tooltipData(cc *compileCtx, encoding Value, stack *stackProperties, config Value, reactiveGeom bool) *omap[string] {
 	formatConfig := merged(config, config.Get("tooltipFormat"))
-	if v5 {
+	if cc.v5 {
 		formatConfig = config.ObjValue()
 	}
 	toSkip := map[string]bool{}
@@ -416,14 +428,14 @@ func tooltipData(encoding Value, stack *stackProperties, config Value, reactiveG
 		if t := fd.Get("title"); t.IsTruthy() {
 			titleV = t
 		} else {
-			titleV = defaultTitle(fd, jsval.Obj(formatConfig))
+			titleV = defaultTitle(cc, fd, jsval.Obj(formatConfig))
 		}
 		var titleParts []string
 		for _, x := range arrayOf(titleV) {
 			titleParts = append(titleParts, x.AsString())
 		}
 		key := strings.Join(titleParts, ", ")
-		if !v5 {
+		if !cc.v5 {
 			key = strings.ReplaceAll(key, `"`, `\"`)
 		}
 		value := ""
@@ -433,10 +445,10 @@ func tooltipData(encoding Value, stack *stackProperties, config Value, reactiveG
 			if channel == chX {
 				channel2 = chX2
 			}
-			fd2 := getFieldDef(encoding.Get(channel2))
+			fd2 := getFieldDef(cc, encoding.Get(channel2))
 			if isBinned(fd.Get("bin")) && fd2.IsTruthy() {
-				startField := vgField(fd, fieldRefOption{expr: expr})
-				endField := vgField(fd2, fieldRefOption{expr: expr})
+				startField := vgField(cc, fd, fieldRefOption{expr: expr})
+				endField := vgField(cc, fd2, fieldRefOption{expr: expr})
 				format, formatType := getFormatMixins(fd)
 				value = binFormatExpression(startField, endField, format, formatType, jsval.Obj(formatConfig))
 				hasValue = true
@@ -445,18 +457,18 @@ func tooltipData(encoding Value, stack *stackProperties, config Value, reactiveG
 		}
 		if (isXorY(channel) || channel == chTheta || channel == chRadius) && stack != nil && stack.fieldChannel == channel && stack.offset == "normalize" {
 			format, formatType := getFormatMixins(fd)
-			value = signalOrEmpty(formatSignalRef(formatSignalOpts{fieldOrDatumDef: fd, format: format, formatType: formatType, expr: expr, config: jsval.Obj(formatConfig), normalizeStack: true}))
+			value = signalOrEmpty(formatSignalRef(cc, formatSignalOpts{fieldOrDatumDef: fd, format: format, formatType: formatType, expr: expr, config: jsval.Obj(formatConfig), normalizeStack: true}))
 			hasValue = true
 		}
 		if !hasValue {
-			value = signalOrEmpty(tooltipTextRef(fd, jsval.Obj(formatConfig), expr))
+			value = signalOrEmpty(tooltipTextRef(cc, fd, jsval.Obj(formatConfig), expr))
 		}
 		tuples = append(tuples, tooltipEntry{channel, key, value, true})
 	}
 	encodingEach(encoding, func(cd Value, channel string) {
-		if isFieldDef(cd) {
+		if isFieldDef(cc, cd) {
 			add(cd, channel)
-		} else if hasConditionalFieldDef(cd) {
+		} else if hasConditionalFieldDef(cc, cd) {
 			add(cd.Get("condition"), channel)
 		}
 	})
@@ -470,8 +482,8 @@ func tooltipData(encoding Value, stack *stackProperties, config Value, reactiveG
 	return out
 }
 
-func tooltipRefForEncoding(encoding Value, stack *stackProperties, config Value, reactiveGeom bool) Value {
-	data := tooltipData(encoding, stack, config, reactiveGeom)
+func tooltipRefForEncoding(cc *compileCtx, encoding Value, stack *stackProperties, config Value, reactiveGeom bool) Value {
+	data := tooltipData(cc, encoding, stack, config, reactiveGeom)
 	var kv []string
 	for _, k := range data.keys {
 		kv = append(kv, `"`+k+`": `+jsName(data.m[k]))
@@ -484,22 +496,22 @@ func tooltipRefForEncoding(encoding Value, stack *stackProperties, config Value,
 
 // tooltipTextRef is textRef, which Vega-Lite 6 extends with line breaks for
 // discrete fields (5.8 has none).
-func tooltipTextRef(channelDef Value, config Value, expr string) Value {
-	if v5 {
-		return textRef(channelDef, config, expr)
+func tooltipTextRef(cc *compileCtx, channelDef Value, config Value, expr string) Value {
+	if cc.v5 {
+		return textRef(cc, channelDef, config, expr)
 	}
-	return addLineBreaksToTooltip(channelDef, config, expr)
+	return addLineBreaksToTooltip(cc, channelDef, config, expr)
 }
 
-func addLineBreaksToTooltip(channelDef Value, config Value, expr string) Value {
-	if isFieldDef(channelDef) && isDiscreteType(channelDefType(channelDef)) && !channelDef.Get("timeUnit").IsTruthy() {
+func addLineBreaksToTooltip(cc *compileCtx, channelDef Value, config Value, expr string) Value {
+	if isFieldDef(cc, channelDef) && isDiscreteType(channelDefType(channelDef)) && !channelDef.Get("timeUnit").IsTruthy() {
 		format, formatType := getFormatMixins(channelDef)
 		if !format.IsTruthy() && !formatType.IsTruthy() {
 			fieldString := expr + `["` + channelDef.Get("field").AsString() + `"]`
 			return mkv("signal", "isValid("+fieldString+") ? isArray("+fieldString+") ? join("+fieldString+", '\\n') : "+fieldString+` : ""+`+fieldString)
 		}
 	}
-	return textRef(channelDef, config, expr)
+	return textRef(cc, channelDef, config, expr)
 }
 
 // signalOrEmpty is ref.signal where an undefined signal is "" (a real signal
