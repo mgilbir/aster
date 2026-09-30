@@ -218,42 +218,56 @@ func (r *Runtime) installPolyfills() error {
 		// provides them) would queue callbacks that our synchronous render
 		// loop never services, leaving render promises pending forever.
 		//
-		// Callbacks run as microtasks rather than synchronously: patterns
-		// like vega-scenegraph's ready(), which polls a counter via
-		// setTimeout while the counter is decremented in a promise .then,
-		// need timer callbacks to interleave with promise reactions.
-		// Endless timer chains are bounded by the Go-side eval watchdog.
+		// Timers are macrotasks, as in a browser: the Go side (quickjs
+		// pumpJobs) calls __aster_run_timer only when the microtask queue is
+		// empty, runs one callback, and drains microtasks again. Patterns like
+		// vega-scenegraph's ready(), which polls a counter via setTimeout
+		// while a promise chain decrements it and records a result, depend
+		// on every pending reaction running before the next poll.
 		//
-		// The delay argument is ignored: callbacks fire in insertion order as
-		// microtasks, not ordered by delay. Vega's static render path does not
-		// depend on real timer ordering. A throwing callback is swallowed (as
-		// in a browser, where one timer's exception does not abort the others)
-		// so a single failing timer cannot wedge a render.
+		// Time is virtual: a timer is due at the queue's current time plus its
+		// delay, callbacks run in due order (insertion order for ties), and
+		// the clock jumps to each one as it runs — nothing actually waits. A
+		// throwing callback is swallowed (as in a browser, where one timer's
+		// exception does not abort the others) so a single failing timer
+		// cannot wedge a render. Endless timer chains are bounded by the
+		// Go-side eval watchdog.
 		//
 		// setInterval is aliased to setTimeout and therefore fires exactly
 		// once. A static render has no ongoing time in which to repeat;
 		// anything that genuinely needs a repeating timer would hang the
 		// synchronous render loop instead.
 		{
-			const _timers = new Map();
+			const _timers = [];
 			let _nextId = 1;
+			let _now = 0;
 			globalThis.setTimeout = function(fn, delay) {
 				const id = _nextId++;
-				_timers.set(id, true);
-				Promise.resolve().then(() => {
-					if (!_timers.delete(id)) return; // cleared meanwhile
-					try { fn(); } catch(e) {}
-				});
+				const d = Number(delay);
+				_timers.push({ id: id, fn: fn, due: _now + (d > 0 ? d : 0) });
 				return id;
 			};
 			globalThis.clearTimeout = function(id) {
-				_timers.delete(id);
+				const i = _timers.findIndex(function(t) { return t.id === id; });
+				if (i >= 0) _timers.splice(i, 1);
 			};
 			globalThis.setInterval = function(fn, delay) {
 				return globalThis.setTimeout(fn, delay);
 			};
 			globalThis.clearInterval = function(id) {
 				globalThis.clearTimeout(id);
+			};
+			globalThis.__aster_run_timer = function() {
+				if (_timers.length === 0) return false;
+				let next = 0;
+				for (let i = 1; i < _timers.length; i++) {
+					const t = _timers[i], n = _timers[next];
+					if (t.due < n.due || (t.due === n.due && t.id < n.id)) next = i;
+				}
+				const t = _timers.splice(next, 1)[0];
+				if (t.due > _now) _now = t.due;
+				try { t.fn(); } catch (e) {}
+				return true;
 			};
 		}
 
@@ -271,6 +285,37 @@ func (r *Runtime) installPolyfills() error {
 		// performance.now — some modules may reference this.
 		if (typeof globalThis.performance === 'undefined') {
 			globalThis.performance = { now: function() { return Date.now(); } };
+		}
+
+		// A measuring canvas. vega-scenegraph creates a 1x1 canvas context at
+		// import time (vega-canvas calls document.createElement('canvas')) and,
+		// when it gets one, measures text the way a browser does: it sets the
+		// item's CSS font (vega.font(item)) on the context and calls
+		// measureText on textValue(item, text) — the trimmed text truncated
+		// to item.limit. Providing just that makes Vega's own canvas path run,
+		// truncation included, with widths from Go. Any other canvas (e.g.
+		// vega-label's bitmaps) still gets no context, as without a DOM.
+		if (typeof globalThis.document === 'undefined') {
+			globalThis.document = {
+				createElement: function(tag) {
+					if (String(tag).toLowerCase() !== 'canvas' || typeof __aster_measure_text !== 'function') {
+						return null;
+					}
+					return {
+						width: 0,
+						height: 0,
+						getContext: function(type) {
+							if (type !== '2d' || this.width !== 1 || this.height !== 1) return null;
+							return {
+								font: '10px sans-serif',
+								measureText: function(text) {
+									return { width: __aster_measure_text(String(text), this.font) };
+								},
+							};
+						},
+					};
+				},
+			};
 		}
 	`
 

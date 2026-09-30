@@ -42,33 +42,9 @@ function createLoader() {
   return loader;
 }
 
-// Override text measurement if Go provides it.
-if (typeof __aster_measure_text === "function") {
-  // vega.textMetrics is the module-level object used by the scenegraph.
-  if (vega.textMetrics) {
-    const origWidth = vega.textMetrics.width;
-    vega.textMetrics.width = function (item, text) {
-      if (text == null || text === "") return 0;
-      const str = String(text);
-      // Build a CSS font string from the item properties.
-      const fontSize = item.fontSize || 11;
-      const fontFamily = item.font || "sans-serif";
-      const fontStyle = item.fontStyle || "normal";
-      const fontWeight = item.fontWeight || "normal";
-      const cssFont =
-        fontStyle + " " + fontWeight + " " + fontSize + "px " + fontFamily;
-      try {
-        return __aster_measure_text(str, cssFont);
-      } catch (e) {
-        // Fall back to Vega's default estimation if Go measurement fails.
-        if (typeof origWidth === "function") {
-          return origWidth(item, text);
-        }
-        return str.length * fontSize * 0.6;
-      }
-    };
-  }
-}
+// Text measurement: the runtime's polyfills give Vega a measuring canvas
+// context backed by __aster_measure_text, so Vega measures text through its
+// own canvas path (see installPolyfills in internal/runtime).
 
 /**
  * Compile a Vega-Lite spec to a Vega spec.
@@ -100,6 +76,10 @@ export async function vegaToSvg(specJSON, theme) {
   // Reset clip-path/gradient ID counters so each render produces
   // deterministic IDs regardless of how many renders preceded it.
   resetSVGDefIds();
+  // Seed Vega's random source per render so sample, jitter and bootstrap
+  // confidence intervals are reproducible. 123456789 is the seed Vega-Lite's
+  // own example renders use (vg2svg --seed 123456789).
+  vega.setRandom(vega.randomLCG(123456789));
 
   const spec = JSON.parse(specJSON);
   const loader = createLoader();

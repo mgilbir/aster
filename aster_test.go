@@ -146,146 +146,40 @@ func TestNoTextMeasurement(t *testing.T) {
 	}
 }
 
-// knownFailures lists specs that fail due to known runtime limitations
-// (e.g. polyfill gaps, unsupported features). These are skipped rather than
-// marked as errors so the test suite stays green while we work on fixes.
+// knownFailures lists Vega-Lite examples whose output differs from the
+// expected SVGs (rendered by upstream Vega 6.4.0 / Vega-Lite 6.4.3 in node,
+// see testdata/vega-lite/gen_expected.mjs) for a known reason. They are
+// skipped rather than marked as errors so the suite stays green.
 var knownFailures = map[string]string{
-	// Timezone: expected SVGs were generated in PDT (UTC-7), not UTC.
-	// These fail because aria-label timestamps differ by 7 hours.
-	"time_parse_local":                    "expected SVGs generated in PDT timezone",
-	"time_parse_utc_format":               "expected SVGs generated in PDT timezone",
-	"time_output_utc_scale":               "expected SVGs generated in PDT timezone",
-	"time_output_utc_timeunit":            "expected SVGs generated in PDT timezone",
-	"layer_line_errorband_pre_aggregated": "expected SVGs generated in PDT timezone",
-	"line_timestamp_domain":               "expected SVGs generated in PDT timezone",
+	// Emoji: the expected SVGs measure emoji with node-canvas's system color
+	// emoji font; the bundled monochrome Noto Emoji has different advances.
+	"isotype_bar_chart_emoji": "emoji advances differ from node-canvas's color emoji font",
+	"layer_bar_fruit":         "emoji advances differ from node-canvas's color emoji font",
 
-	// The bundled monochrome Noto Emoji fixes isotype_grid and layer_bar_fruit.
-	// isotype_bar_chart_emoji still differs: the reference SVGs were generated
-	// with Noto Color Emoji, whose emoji advances come from color-bitmap
-	// strikes and differ from the monochrome font's; matching would require
-	// embedding the 11MB CBDT font (which resvg can't rasterize anyway).
-	"isotype_bar_chart_emoji": "advance differs from reference Noto Color Emoji (monochrome bundled)",
+	// QuickJS differs from V8.
+	"histogram_nonlinear":          "QuickJS formats Infinity as \"Infinity\", V8's Intl as \"∞\"",
+	"geo_point":                    "QuickJS trigonometry differs from V8 in the last bit (-1e-13 vs 0)",
+	"trail_color":                  "QuickJS trigonometry differs from V8 in the last bit (trail arc joins)",
+	"bar_grouped_thin":             "QuickJS sort orders an inconsistent mixed-type comparator differently from V8's TimSort",
+	"bar_grouped_thin_minBandSize": "QuickJS sort orders an inconsistent mixed-type comparator differently from V8's TimSort",
 
-	// QuickJS formats Infinity as "Infinity" string, not "∞" symbol.
-	"histogram_nonlinear": "QuickJS Infinity formatting differs from Node.js",
+	// go-text's advances are rounded to 1/64 px; node-canvas's are not. A few
+	// label or legend widths land on the other side of a pixel boundary.
+	"bar_grouped_repeated":                   "text width rounding (1px)",
+	"config_numberFormatType_test":           "text width rounding (1px)",
+	"line_color_binned":                      "text width rounding (1px)",
+	"point_binned_color":                     "text width rounding (1px)",
+	"point_binned_opacity":                   "text width rounding (1px)",
+	"point_binned_size":                      "text width rounding (1px)",
+	"stacked_bar_count":                      "text width rounding (1px)",
+	"stacked_bar_count_corner_radius_config": "text width rounding (1px)",
+	"stacked_bar_count_corner_radius_mark":   "text width rounding (1px)",
+	"stacked_bar_count_corner_radius_mark_x": "text width rounding (1px)",
+	"stacked_bar_count_corner_radius_stroke": "text width rounding (1px)",
+	"stacked_bar_size":                       "text width rounding (1px)",
 
 	// Runtime errors in specific specs.
 	"facet_independent_scale_layer_broken": "known broken spec: TypeError in Vega compile",
-
-	// Random/sample transforms produce non-deterministic output.
-	"sample_scatterplot":              "non-deterministic sample transform",
-	"point_offset_random":             "non-deterministic random jitter",
-	"point_ordinal_bin_offset_random": "non-deterministic random jitter",
-
-	// Href and image rendering differences.
-	"point_href":    "href URL encoding differs",
-	"scatter_image": "sub-pixel image mark rendering difference",
-
-	// Temporal/timezone-dependent SVG differences.
-	// Expected SVGs generated in non-UTC timezone; axis labels and tick
-	// positions shift when rendered in UTC.
-	"area_gradient":                                         "temporal axis SVG differs in UTC",
-	"area_overlay":                                          "temporal axis SVG differs in UTC",
-	"area_overlay_with_y2":                                  "temporal axis SVG differs in UTC",
-	"area_temperature_range":                                "temporal axis SVG differs in UTC",
-	"area_vertical":                                         "temporal axis SVG differs in UTC",
-	"bar_1d_temporal":                                       "temporal axis SVG differs in UTC",
-	"bar_binnedyearmonth":                                   "temporal axis SVG differs in UTC",
-	"bar_grouped_repeated":                                  "temporal axis SVG differs in UTC",
-	"bar_grouped_stacked":                                   "temporal axis SVG differs in UTC",
-	"bar_grouped_thin":                                      "temporal axis SVG differs in UTC",
-	"bar_grouped_thin_minBandSize":                          "temporal axis SVG differs in UTC",
-	"bar_grouped_timeunit_yearweek":                         "temporal axis SVG differs in UTC",
-	"bar_group_timeunit":                                    "temporal axis SVG differs in UTC",
-	"bar_month":                                             "temporal axis SVG differs in UTC",
-	"bar_month_band":                                        "temporal axis SVG differs in UTC",
-	"bar_month_band_config":                                 "temporal axis SVG differs in UTC",
-	"bar_month_temporal":                                    "temporal axis SVG differs in UTC",
-	"bar_month_temporal_band_center":                        "temporal axis SVG differs in UTC",
-	"bar_month_temporal_band_center_config":                 "temporal axis SVG differs in UTC",
-	"bar_month_temporal_initial":                            "temporal axis SVG differs in UTC",
-	"bar_size_explicit_bad":                                 "temporal axis SVG differs in UTC",
-	"bar_yearmonth":                                         "temporal axis SVG differs in UTC",
-	"bar_yearmonth_center_band":                             "temporal axis SVG differs in UTC",
-	"bar_yearmonth_custom_format":                           "temporal axis SVG differs in UTC",
-	"bar_yearmonthdate_minBandSize":                         "temporal axis SVG differs in UTC",
-	"circle_natural_disasters":                              "temporal axis SVG differs in UTC",
-	"concat_weather":                                        "temporal axis SVG differs in UTC",
-	"config_numberFormatType_test":                          "temporal axis SVG differs in UTC",
-	"config_numberFormatType_tooltip":                       "temporal axis SVG differs in UTC",
-	"dynamic_color_legend":                                  "temporal axis SVG differs in UTC",
-	"errorband_2d_horizontal_color_encoding":                "temporal axis SVG differs in UTC",
-	"errorband_2d_vertical_borders":                         "temporal axis SVG differs in UTC",
-	"errorband_tooltip":                                     "temporal axis SVG differs in UTC",
-	"errorbar_2d_vertical_ticks":                            "temporal axis SVG differs in UTC",
-	"geo_point":                                             "temporal axis SVG differs in UTC",
-	"hconcat_weather":                                       "temporal axis SVG differs in UTC",
-	"interactive_airport_crossfilter":                       "temporal axis SVG differs in UTC",
-	"interactive_index_chart":                               "temporal axis SVG differs in UTC",
-	"interactive_layered_crossfilter":                       "temporal axis SVG differs in UTC",
-	"interactive_layered_crossfilter_discrete":              "temporal axis SVG differs in UTC",
-	"interactive_multi_line_label":                          "temporal axis SVG differs in UTC",
-	"interactive_multi_line_pivot_tooltip":                  "temporal axis SVG differs in UTC",
-	"interactive_multi_line_tooltip":                        "temporal axis SVG differs in UTC",
-	"interactive_overview_detail":                           "temporal axis SVG differs in UTC",
-	"interactive_point_init":                                "temporal axis SVG differs in UTC",
-	"interactive_query_widgets":                             "temporal axis SVG differs in UTC",
-	"interactive_seattle_weather":                           "temporal axis SVG differs in UTC",
-	"joinaggregate_mean_difference":                         "temporal axis SVG differs in UTC",
-	"joinaggregate_mean_difference_by_year":                 "temporal axis SVG differs in UTC",
-	"layer_bar_month":                                       "temporal axis SVG differs in UTC",
-	"layer_candlestick":                                     "temporal axis SVG differs in UTC",
-	"layer_dual_axis":                                       "temporal axis SVG differs in UTC",
-	"layer_histogram":                                       "temporal axis SVG differs in UTC",
-	"layer_line_co2_concentration":                          "temporal axis SVG differs in UTC",
-	"layer_line_errorband_2d_horizontal_borders_strokedash": "temporal axis SVG differs in UTC",
-	"layer_line_errorband_ci":                               "temporal axis SVG differs in UTC",
-	"layer_line_rolling_mean_point_raw":                     "temporal axis SVG differs in UTC",
-	"layer_point_errorbar_2d_horizontal_ci":                 "temporal axis SVG differs in UTC",
-	"layer_point_errorbar_ci":                               "temporal axis SVG differs in UTC",
-	"layer_precipitation_mean":                              "temporal axis SVG differs in UTC",
-	"layer_timeunit_rect":                                   "temporal axis SVG differs in UTC",
-	"line":                                                  "temporal axis SVG differs in UTC",
-	"line_calculate":                                        "temporal axis SVG differs in UTC",
-	"line_color_binned":                                     "temporal axis SVG differs in UTC",
-	"line_concat_facet":                                     "temporal axis SVG differs in UTC",
-	"line_max_year":                                         "temporal axis SVG differs in UTC",
-	"line_mean_month":                                       "temporal axis SVG differs in UTC",
-	"line_mean_year":                                        "temporal axis SVG differs in UTC",
-	"line_monotone":                                         "temporal axis SVG differs in UTC",
-	"line_month":                                            "temporal axis SVG differs in UTC",
-	"line_month_center_band":                                "temporal axis SVG differs in UTC",
-	"line_month_center_band_offset":                         "temporal axis SVG differs in UTC",
-	"line_shape_overlay":                                    "temporal axis SVG differs in UTC",
-	"line_step":                                             "temporal axis SVG differs in UTC",
-	"line_timeunit_transform":                               "temporal axis SVG differs in UTC",
-	"nested_concat_align":                                   "temporal axis SVG differs in UTC",
-	"point_binned_color":                                    "sub-pixel numeric rounding difference",
-	"point_binned_opacity":                                  "sub-pixel numeric rounding difference",
-	"point_binned_size":                                     "sub-pixel numeric rounding difference",
-	"point_dot_timeunit_color":                              "temporal axis SVG differs in UTC",
-	"rect_heatmap_weather":                                  "temporal axis SVG differs in UTC",
-	"rect_heatmap_weather_temporal_center_band":             "temporal axis SVG differs in UTC",
-	"rect_heatmap_weather_temporal_center_band_config":      "temporal axis SVG differs in UTC",
-	"repeat_child_layer":                                    "temporal axis SVG differs in UTC",
-	"repeat_line_weather":                                   "temporal axis SVG differs in UTC",
-	"selection_layer_bar_month":                             "temporal axis SVG differs in UTC",
-	"selection_project_binned_interval":                     "sub-pixel numeric rounding difference",
-	"stacked_area_ordinal":                                  "temporal axis SVG differs in UTC",
-	"stacked_bar_count":                                     "temporal axis SVG differs in UTC",
-	"stacked_bar_count_corner_radius_config":                "temporal axis SVG differs in UTC",
-	"stacked_bar_count_corner_radius_mark":                  "temporal axis SVG differs in UTC",
-	"stacked_bar_count_corner_radius_mark_x":                "temporal axis SVG differs in UTC",
-	"stacked_bar_count_corner_radius_stroke":                "temporal axis SVG differs in UTC",
-	"stacked_bar_size":                                      "temporal axis SVG differs in UTC",
-	"stacked_bar_weather":                                   "temporal axis SVG differs in UTC",
-	"trail_color":                                           "temporal axis SVG differs in UTC",
-	"trellis_area_seattle":                                  "temporal axis SVG differs in UTC",
-	"trellis_barley":                                        "temporal axis SVG differs in UTC",
-	"trellis_barley_independent":                            "temporal axis SVG differs in UTC",
-	"trellis_barley_layer_median":                           "temporal axis SVG differs in UTC",
-	"vconcat_weather":                                       "temporal axis SVG differs in UTC",
-	"window_cumulative_running_average":                     "temporal axis SVG differs in UTC",
 }
 
 // slowSpecs lists specs that take >2s to render (mostly geo/TopoJSON).
@@ -462,15 +356,17 @@ func TestVLConvertSpecs(t *testing.T) {
 	}
 }
 
-// TestVegaLiteExamples runs the official vega-lite v6.4.0 compiled examples.
+// TestVegaLiteExamples runs the official vega-lite v6.4.3 example specs
+// (https://github.com/vega/vega-lite, BSD-3-Clause) against expected SVGs
+// rendered by upstream Vega 6.4.0 / Vega-Lite 6.4.3 in node — the versions
+// vendored here — with testdata/vega-lite/gen_expected.mjs, in UTC.
 // Absolute-URL specs are served via a local httptest server.
-// Expected SVGs are from https://github.com/vega/vega-lite (BSD-3-Clause).
 //
-// Font: DejaVu Sans (explicitly loaded, matching Ubuntu CI's default sans-serif
-// used to generate the expected SVGs via node-canvas/Cairo).
+// Font: DejaVu Sans (explicitly loaded, matching the face gen_expected.mjs
+// measures with through node-canvas).
 func TestVegaLiteExamples(t *testing.T) {
-	specDir := filepath.Join("testdata", "vega-lite", "v6.4.0", "specs")
-	expectedDir := filepath.Join("testdata", "vega-lite", "v6.4.0", "expected")
+	specDir := filepath.Join("testdata", "vega-lite", "v6.4.3", "specs")
+	expectedDir := filepath.Join("testdata", "vega-lite", "v6.4.3", "expected")
 
 	specs, err := filepath.Glob(filepath.Join(specDir, "*.vl.json"))
 	if err != nil {
@@ -531,5 +427,33 @@ func TestVegaLiteExamples(t *testing.T) {
 				t.Errorf("SVG output differs from vega-lite expected (%d vs %d bytes)", len(svg), len(expected))
 			}
 		})
+	}
+}
+
+// Vega resolves an href asynchronously and re-renders once the loader has
+// sanitized it; timers must run as macrotasks for that re-render to see the
+// sanitized link. A loader that rejects the URL renders no link.
+func TestHrefLinks(t *testing.T) {
+	spec := []byte(`{"data":{"values":[{"a":1,"u":"https://example.com/x"}]},"mark":"point","encoding":{"x":{"field":"a","type":"quantitative"},"href":{"field":"u"}}}`)
+	for _, tc := range []struct {
+		name   string
+		loader aster.Loader
+		links  int
+	}{
+		{"allowed", aster.NewHTTPLoader(nil), 1},
+		{"denied", aster.DenyLoader{}, 0},
+	} {
+		c, err := aster.New(aster.WithLoader(tc.loader))
+		if err != nil {
+			t.Fatal(err)
+		}
+		svg, err := c.VegaLiteToSVG(spec)
+		_ = c.Close()
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if got := strings.Count(svg, `<a xlink:href="https://example.com/x"`); got != tc.links {
+			t.Errorf("%s: %d links, want %d", tc.name, got, tc.links)
+		}
 	}
 }

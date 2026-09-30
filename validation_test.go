@@ -16,7 +16,7 @@ func TestUnknownVegaLiteVersionErrors(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// The error should point the user at what is available.
-	if !strings.Contains(err.Error(), "6.4.0") {
+	if !strings.Contains(err.Error(), "6.4.3") {
 		t.Fatalf("error should list available versions, got: %v", err)
 	}
 }
@@ -33,8 +33,11 @@ func TestAvailableVersions(t *testing.T) {
 	if _, ok := keys["vl6_4"]; !ok {
 		t.Fatalf("expected vl6_4 in available versions, got %+v", vs)
 	}
-	if keys["vl6_4"].VegaLiteVersion != "6.4.0" {
-		t.Errorf("vl6_4 VegaLiteVersion = %q, want 6.4.0", keys["vl6_4"].VegaLiteVersion)
+	if keys["vl6_4"].VegaLiteVersion != "6.4.3" {
+		t.Errorf("vl6_4 VegaLiteVersion = %q, want 6.4.3", keys["vl6_4"].VegaLiteVersion)
+	}
+	if keys["vl6_4"].VegaVersion != "6.4.0" {
+		t.Errorf("vl6_4 VegaVersion = %q, want 6.4.0", keys["vl6_4"].VegaVersion)
 	}
 }
 

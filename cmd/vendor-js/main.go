@@ -28,15 +28,19 @@ import (
 const jsdelivrBase = "https://cdn.jsdelivr.net"
 
 // versionSet defines a Vega-Lite version to vendor.
-// The Vega version is auto-resolved from jsDelivr's transitive dependencies.
+// The Vega version is auto-resolved from jsDelivr's transitive dependencies
+// unless vegaVersion pins it.
 type versionSet struct {
 	key             string // directory name, e.g. "vl5_8"
 	vegaLiteVersion string // e.g. "5.8.0"
+	vegaVersion     string // optional pin, e.g. "6.4.0"
 }
 
 var versionSets = []versionSet{
 	{key: "vl5_8", vegaLiteVersion: "5.8.0"},
-	{key: "vl6_4", vegaLiteVersion: "6.4.0"},
+	// Pinned so the vendored runtime matches the Vega the pure-Go engine
+	// (github.com/mgilbir/aster/purego) follows.
+	{key: "vl6_4", vegaLiteVersion: "6.4.3", vegaVersion: "6.4.0"},
 }
 
 // VersionIndex is written to internal/js/modules/versions.json.
@@ -121,6 +125,17 @@ func main() {
 		Default:  "vl6_4",
 		Versions: make(map[string]VersionDef),
 	}
+	// Vendoring a single set (-version) must keep the other sets listed.
+	if prev, err := os.ReadFile(filepath.Join(outDir, "versions.json")); err == nil {
+		var old VersionIndex
+		if err := json.Unmarshal(prev, &old); err == nil {
+			for k, v := range old.Versions {
+				if _, err := os.Stat(filepath.Join(outDir, k)); err == nil {
+					index.Versions[k] = v
+				}
+			}
+		}
+	}
 
 	for _, vs := range sets {
 		vegaVer, err := vendorVersion(vs)
@@ -158,9 +173,13 @@ func vendorVersion(vs versionSet) (string, error) {
 		name    string
 		version string
 	}
-	queue := []queueItem{
-		{"vega-lite", vs.vegaLiteVersion},
+	var queue []queueItem
+	if vs.vegaVersion != "" {
+		// Queued first so that the pin wins over any version a dependency
+		// requests (the first version seen of a module is kept).
+		queue = append(queue, queueItem{"vega", vs.vegaVersion})
 	}
+	queue = append(queue, queueItem{"vega-lite", vs.vegaLiteVersion})
 
 	log.Printf("[%s] downloading Vega-Lite %s from jsDelivr...", vs.key, vs.vegaLiteVersion)
 
@@ -185,9 +204,16 @@ func vendorVersion(vs versionSet) (string, error) {
 			return "", fmt.Errorf("fetching %s@%s: %w", item.name, item.version, err)
 		}
 
+		// A dependency is requested by range (e.g. "%5E3.1.1", i.e. ^3.1.1);
+		// record the version jsDelivr actually served, so the manifest pins
+		// exact versions and other tools can install the same set.
+		resolved := item.version
+		if v := servedVersion(src, item.name); v != "" {
+			resolved = v
+		}
 		mod := &module{
 			name:    item.name,
-			version: item.version,
+			version: resolved,
 		}
 
 		// Track vega version as it's resolved.
@@ -300,6 +326,21 @@ func vendorVersion(vs versionSet) (string, error) {
 // httpClient bounds each vendoring download so a stalled CDN connection
 // cannot hang the build indefinitely.
 var httpClient = &http.Client{Timeout: 60 * time.Second}
+
+// servedVersion extracts the exact version from the header jsDelivr puts on a
+// bundle ("Original file: /npm/d3-geo@3.1.1/src/index.js"), or "".
+func servedVersion(src, name string) string {
+	marker := "Original file: /npm/" + name + "@"
+	i := strings.Index(src, marker)
+	if i < 0 {
+		return ""
+	}
+	rest := src[i+len(marker):]
+	if j := strings.IndexByte(rest, '/'); j > 0 {
+		return rest[:j]
+	}
+	return ""
+}
 
 func fetchESM(name, version string) (string, error) {
 	url := fmt.Sprintf("%s/npm/%s@%s/+esm", jsdelivrBase, name, version)

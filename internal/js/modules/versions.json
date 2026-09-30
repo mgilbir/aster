@@ -6,8 +6,8 @@
       "vegaLiteVersion": "5.8.0"
     },
     "vl6_4": {
-      "vegaVersion": "6.2.0",
-      "vegaLiteVersion": "6.4.0"
+      "vegaVersion": "6.4.0",
+      "vegaLiteVersion": "6.4.3"
     }
   }
 }
