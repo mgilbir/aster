@@ -36,6 +36,7 @@ import (
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/raster"
 	"github.com/mgilbir/aster/internal/scene"
+	"github.com/mgilbir/aster/internal/transforms/wordcloud"
 )
 
 // Loader fetches external data. It is satisfied by aster's Loader.
@@ -113,6 +114,10 @@ type Options struct {
 	// Shaper draws text when the label transform paints the marks it avoids;
 	// nil selects the rasterizer's default fonts.
 	Shaper raster.Shaper
+	// WordcloudText measures and draws words for the wordcloud transform,
+	// which upstream does with a canvas; nil makes the transform fail as it
+	// does when no canvas is available.
+	WordcloudText wordcloud.TextRenderer
 	// Location is the time zone of local-time scales and functions; nil is UTC.
 	Location *time.Location
 	// Config is a theme configuration merged under the specification's own
@@ -167,6 +172,7 @@ type runView struct {
 	rand    *expr.Random
 	bounder *scene.Bounder
 	shaper  raster.Shaper // text for the label transform's painter
+	wcText  wordcloud.TextRenderer
 
 	root *rtContext
 
@@ -260,6 +266,7 @@ func newView(ctx context.Context, opts Options, locale jsval.Value) *runView {
 		loc: opts.Location, sg: scene.New(),
 		bounder: scene.NewBounder(opts.TextMeasurer),
 		shaper:  opts.Shaper,
+		wcText:  opts.WordcloudText,
 	}
 	if v.loc == nil {
 		v.loc = time.UTC

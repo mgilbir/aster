@@ -3,7 +3,8 @@
 // search.
 //
 // Upstream measures and draws text with a canvas and consumes Math.random.
-// Both are injected here (TextRenderer and Params.Random), so a layout is
+// Both are injected here (TextRenderer and Params.Random; CanvasRenderer is the
+// one that matches node-canvas), so a layout is
 // reproducible for a given renderer and random sequence.
 package wordcloud
 

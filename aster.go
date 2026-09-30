@@ -34,6 +34,7 @@ import (
 	"github.com/mgilbir/aster/internal/svgpdf"
 	"github.com/mgilbir/aster/internal/text"
 	"github.com/mgilbir/aster/internal/transforms"
+	"github.com/mgilbir/aster/internal/transforms/wordcloud"
 	"github.com/mgilbir/aster/internal/vega"
 	"github.com/mgilbir/aster/internal/vegalite"
 )
@@ -282,6 +283,7 @@ func (c *Converter) renderSVG(ctx context.Context, spec jsval.Value) (out string
 	}
 	if m != nil {
 		opts.TextMeasurer = m
+		opts.WordcloudText = wordcloud.NewCanvasRenderer(m)
 	}
 	// The label transform paints the marks it avoids, text included; the
 	// shaper is only built if it does.
