@@ -185,11 +185,18 @@ async function render(vg) {
 process.on('unhandledRejection', (err) => console.error('oracle: unhandled rejection:', err && err.message));
 
 const write = (obj) => process.stdout.write(JSON.stringify(obj) + '\n');
+// The text stack is part of the version: node-canvas measures with the Pango
+// and Cairo it was built against, and a probe width catches any difference
+// in how the registered fonts resolve.
+const probe = canvas.createCanvas(1, 1).getContext('2d');
+probe.font = '11px sans-serif';
+const probeWidth = probe.measureText('Hello World 123').width;
 write({
   ready: true,
   version:
     `vega ${vega.version} / vega-lite ${vl.version} / node ${process.version} / canvas ${require('canvas/package.json').version}` +
-    (resvg ? ` / resvg-napi ${require('resvg-napi/package.json').version}` : ''),
+    (resvg ? ` / resvg-napi ${require('resvg-napi/package.json').version}` : '') +
+    ` / pango ${canvas.pangoVersion} / cairo ${canvas.cairoVersion} / probe ${probeWidth}`,
 });
 
 const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
