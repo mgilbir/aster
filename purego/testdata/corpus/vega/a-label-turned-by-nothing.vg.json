@@ -1,0 +1,136 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "**A label turned by something that is not an angle contributes nothing to what it is measured in.** `boundText` opens its rotation with `if (item.angle && !mode) { bounds.rotate(item.angle * DegToRad, x, y) }` \u2014 the guard is JavaScript **truthiness on the raw value**, and the multiplication happens after it. A `labelAngle` of `\"sideways\"` is a non-empty string and therefore passes, so the label's box is turned by `NaN`; `Bounds.union` is four bare comparisons and every one of them is false against a NaN, so the box never replaces the edge already there. The axis ends up the size of everything it *could* place, which is 11.5 units shorter than one whose labels were measured. This engine discarded the NaN and left the labels at zero degrees, measured in full.\n\nThe guard and the coercion together are why reading this as \"use it when it is a number\" gets three values wrong at once. An angle of `\"\"` is **falsey** and is not rotated; an angle of `\"0\"` is **truthy** and is rotated by zero, which is the same box; an angle of `\"sideways\"` is truthy and rotated by NaN, which is no box at all. Coercing first and testing `!= 0` reproduces all three \u2014 `Number(\"\")` is 0 and `Number(\"0\")` is 0 \u2014 provided the NaN is **kept**, which is the whole change.\n\n**Two sites, because the rule has two callers.** `turned` is an axis's `labelAngle`, read through `AxisBuilder`; `spun` is a text mark's own `angle` channel, read through `MarkEncoder`. They resolved the value with different functions and only one of them needed fixing to make an axis right, which is exactly how a rule like this survives half-mended. `upright` and `slanted` are the controls: no angle and a real one, and `slanted` matters because a 45-degree label *is* rotated and must still be measured, so a change that dropped every rotated label from the bounds would pass with only `turned` present.\n\n**`spun` hangs off the right edge on purpose, and the first version of this fixture did not.** A text mark sitting *inside* the plotting area cannot tell a NaN rotation from no rotation at all: both leave the surface the size the specification asked for, and a zero angle is not recorded on this engine's node, so the channel comparison is one-sided and skipped. The mutant that discards a mark's angle survived that version. Placed at `x: 195` the unrotated label runs past the plotting area and **grows the surface to 351**, where upstream's NaN-turned one contributes nothing and leaves it at 200 \u2014 probed at both, along with `\"\"` and `\"0\"`, which are respectively falsey and truthy-but-zero and both measured in full. Upstream's item bounds for the NaN case are the *cleared* sentinel rather than NaN, because `Bounds.rotate` clears before adding and every comparison against a NaN corner is false.\n\n**`dx` is on the spun mark on purpose.** Upstream's `bound` never turns `dx`/`dy`: it sets the box with them unrotated and turns the whole box about the anchor afterwards. This engine rotates the nudge instead, which is exact for a finite angle and would poison the **anchor** for a NaN one \u2014 upstream leaves `item.x` as it was encoded and loses only the bounds. A mark with no `dx` cannot tell the two apart.\n\nThe angle itself is compared through the harness's coerced channels, beside `strokeWidth` and `strokeMiterLimit`: upstream's item carries the word and this engine's node carries the number the word coerces to, and what the two must agree about is where the label ends up.",
+  "width": 200,
+  "height": 100,
+  "padding": 5,
+  "signals": [
+    {
+      "name": "turn",
+      "value": "sideways"
+    }
+  ],
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {
+          "k": "alpha"
+        },
+        {
+          "k": "beta"
+        },
+        {
+          "k": "gamma"
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "turned",
+      "type": "band",
+      "domain": {
+        "data": "t",
+        "field": "k"
+      },
+      "range": "width",
+      "padding": 0.1
+    },
+    {
+      "name": "slanted",
+      "type": "band",
+      "domain": {
+        "data": "t",
+        "field": "k"
+      },
+      "range": "width",
+      "padding": 0.1
+    }
+  ],
+  "axes": [
+    {
+      "orient": "bottom",
+      "scale": "turned",
+      "labelAngle": {
+        "signal": "turn"
+      }
+    },
+    {
+      "orient": "top",
+      "scale": "slanted",
+      "labelAngle": 45
+    }
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "encode": {
+        "update": {
+          "x": {
+            "value": 0
+          },
+          "y": {
+            "value": 20
+          },
+          "width": {
+            "value": 40
+          },
+          "height": {
+            "value": 20
+          },
+          "fill": {
+            "value": "#4c78a8"
+          }
+        }
+      }
+    },
+    {
+      "type": "text",
+      "encode": {
+        "update": {
+          "x": {
+            "value": 195
+          },
+          "y": {
+            "value": 15
+          },
+          "text": {
+            "value": "a long spun label"
+          },
+          "angle": {
+            "signal": "turn"
+          },
+          "dx": {
+            "value": 7
+          },
+          "dy": {
+            "value": 3
+          },
+          "fill": {
+            "value": "#333333"
+          }
+        }
+      }
+    },
+    {
+      "type": "text",
+      "encode": {
+        "update": {
+          "x": {
+            "value": 120
+          },
+          "y": {
+            "value": 30
+          },
+          "text": {
+            "value": "upright"
+          },
+          "fill": {
+            "value": "#333333"
+          }
+        }
+      }
+    }
+  ]
+}

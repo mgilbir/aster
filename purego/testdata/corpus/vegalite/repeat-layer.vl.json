@@ -1,0 +1,23 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "description": "Two measures drawn over one another, each line a copy of the same template.",
+  "data": {
+    "values": [
+      {"step": 1, "amount": 28, "score": 30},
+      {"step": 2, "amount": 55, "score": 21},
+      {"step": 3, "amount": 43, "score": 48},
+      {"step": 4, "amount": 91, "score": 12}
+    ]
+  },
+  "width": 180,
+  "height": 120,
+  "repeat": {"layer": ["amount", "score"]},
+  "spec": {
+    "mark": "line",
+    "encoding": {
+      "x": {"field": "step", "type": "quantitative"},
+      "y": {"field": {"repeat": "layer"}, "type": "quantitative", "title": "value"},
+      "color": {"datum": {"repeat": "layer"}, "type": "nominal"}
+    }
+  }
+}

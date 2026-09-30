@@ -1,0 +1,11 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A stacked area over a bucketed column, whose gaps are filled at the bucket's midpoint.",
+  "data": {"url": "data/cars.json"},
+  "mark": "area",
+  "encoding": {
+    "x": {"bin": {"maxbins": 10}, "field": "Acceleration"},
+    "y": {"aggregate": "count"},
+    "color": {"field": "Origin", "type": "nominal"}
+  }
+}

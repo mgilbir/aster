@@ -1,0 +1,12 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A facet whose header names its own type sizes, which a Vega title calls something else.",
+  "data": {"url": "data/cars.json"},
+  "mark": "bar",
+  "width": {"step": 17},
+  "encoding": {
+    "column": {"field": "Origin", "header": {"titleFontSize": 20, "labelFontSize": 15}},
+    "x": {"field": "Cylinders", "type": "ordinal"},
+    "y": {"aggregate": "count"}
+  }
+}

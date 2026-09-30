@@ -1,0 +1,41 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "`String(x)` for a number, which is not how a coordinate is written down. JavaScript writes the shortest decimal that reads back as the same double, and switches to the exponent form at two thresholds: **below 10^-6** and **at or above 10^21**. Between them it never does, so `1e20` is a hundred thousand million million million written out and `1e21` is `1e+21`, one step later. This engine wrote every number through its *coordinate* formatter — six decimal places, and never the exponent form, which are the right rules for an SVG attribute and a golden diff and the wrong ones for text a reader sees. So `1e-7` read `0`, having rounded away, and `1e21` read `1000000000000000000000`. The rows below are the two thresholds and the values either side of each, written three ways that all go through the same coercion: a **text mark** whose content is the column, an **ordinal legend** that enumerates it, and a **band axis** whose domain entries are its labels.",
+  "width": 260,
+  "height": 120,
+  "padding": 5,
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {"v": 1e-7, "n": 1},
+        {"v": 1e-6, "n": 2},
+        {"v": 1e20, "n": 3},
+        {"v": 1e21, "n": 4},
+        {"v": 0.1, "n": 5},
+        {"v": 5e-324, "n": 6}
+      ]
+    }
+  ],
+  "scales": [
+    {"name": "b", "type": "band", "domain": {"data": "t", "field": "v"}, "range": "width"},
+    {"name": "colour", "type": "ordinal", "domain": {"data": "t", "field": "v"}, "range": "category"}
+  ],
+  "axes": [{"orient": "bottom", "scale": "b", "labelOverlap": false}],
+  "legends": [{"fill": "colour"}],
+  "marks": [
+    {
+      "type": "text",
+      "from": {"data": "t"},
+      "encode": {
+        "enter": {
+          "x": {"value": 2},
+          "y": {"signal": "14 * datum.n - 7"},
+          "text": {"field": "v"},
+          "fontSize": {"value": 9},
+          "baseline": {"value": "top"}
+        }
+      }
+    }
+  ]
+}

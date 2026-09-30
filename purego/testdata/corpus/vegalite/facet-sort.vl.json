@@ -1,0 +1,21 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "description": "A trellis whose columns run backwards, and whose rows are ordered by a total.",
+  "data": {
+    "values": [
+      {"category": "Alpha", "amount": 28, "era": "before", "band": "low"},
+      {"category": "Beta", "amount": 55, "era": "during", "band": "high"},
+      {"category": "Alpha", "amount": 13, "era": "after", "band": "high"},
+      {"category": "Beta", "amount": 71, "era": "before", "band": "low"}
+    ]
+  },
+  "width": 80,
+  "height": 70,
+  "mark": "bar",
+  "encoding": {
+    "x": {"field": "category", "type": "nominal"},
+    "y": {"field": "amount", "type": "quantitative"},
+    "column": {"field": "era", "type": "nominal", "sort": "descending"},
+    "row": {"field": "band", "type": "nominal"}
+  }
+}

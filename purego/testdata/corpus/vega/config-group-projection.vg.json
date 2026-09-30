@@ -1,0 +1,125 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "Two config blocks a theme sets and this engine used to report. `group` paints the chart's own **frame** rather than its group marks \u2014 the name suggests otherwise and upstream's own comment says \"top-level group marks\", but probing it both ways shows the root item carrying the fill while an inner group mark does not. `projection` merges under each projection the way config.title merges under the title, so a theme naming mercator once means no projection has to name it again. The frame is filled and not stroked on purpose: upstream's two answers for the surface size disagree once it is, its frame bounds growing by the half-unit each side that its own renderer does not grow for.",
+  "width": 200,
+  "height": 110,
+  "config": {
+    "background": "#fafafa",
+    "padding": 6,
+    "group": {
+      "fill": "#eef2f7"
+    },
+    "projection": {
+      "type": "mercator",
+      "precision": 0.5
+    }
+  },
+  "data": [
+    {
+      "name": "land",
+      "values": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {},
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [
+                    -6,
+                    41
+                  ],
+                  [
+                    10,
+                    41
+                  ],
+                  [
+                    10,
+                    52
+                  ],
+                  [
+                    -6,
+                    52
+                  ],
+                  [
+                    -6,
+                    41
+                  ]
+                ]
+              ]
+            }
+          }
+        ]
+      },
+      "format": {
+        "type": "json",
+        "property": "features"
+      }
+    }
+  ],
+  "projections": [
+    {
+      "name": "p",
+      "fit": {
+        "signal": "data('land')"
+      },
+      "extent": [
+        [
+          10,
+          10
+        ],
+        [
+          190,
+          100
+        ]
+      ]
+    }
+  ],
+  "marks": [
+    {
+      "type": "group",
+      "encode": {
+        "enter": {
+          "x": {
+            "value": 4
+          },
+          "y": {
+            "value": 4
+          },
+          "width": {
+            "value": 90
+          },
+          "height": {
+            "value": 100
+          }
+        }
+      },
+      "marks": [
+        {
+          "type": "shape",
+          "from": {
+            "data": "land"
+          },
+          "transform": [
+            {
+              "type": "geoshape",
+              "projection": "p"
+            }
+          ],
+          "encode": {
+            "enter": {
+              "fill": {
+                "value": "#4c78a8"
+              },
+              "opacity": {
+                "value": 0.6
+              }
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

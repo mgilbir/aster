@@ -1,0 +1,15 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "Bars rounded at the end they grow to, filling half their band and nudged off it.",
+  "data": {"url": "data/cars.json"},
+  "mark": {
+    "type": "bar",
+    "yOffset": 5,
+    "cornerRadiusEnd": 2,
+    "height": {"band": 0.5}
+  },
+  "encoding": {
+    "y": {"field": "Origin", "type": "nominal"},
+    "x": {"aggregate": "count"}
+  }
+}

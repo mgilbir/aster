@@ -1,0 +1,206 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "The geojson transform gathers a table of coordinates into one FeatureCollection and publishes it for a projection's fit to read. Every row becomes a point of a single MultiPoint feature, so the fit sees the whole cloud as one geometry; a column already holding a feature combines with it, features first and the MultiPoint appended after them. Rows whose coordinates are missing or unparseable are left out of the point list rather than contributing a NaN.",
+  "width": 240,
+  "height": 140,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "cities",
+      "values": [
+        {
+          "name": "Lisbon",
+          "lon": -9.14,
+          "lat": 38.72
+        },
+        {
+          "name": "Oslo",
+          "lon": 10.75,
+          "lat": 59.91
+        },
+        {
+          "name": "Athens",
+          "lon": 23.73,
+          "lat": 37.98
+        },
+        {
+          "name": "Dublin",
+          "lon": -6.26,
+          "lat": 53.35
+        },
+        {
+          "name": "Warsaw",
+          "lon": 21.01,
+          "lat": 52.23
+        },
+        {
+          "name": "nowhere",
+          "lon": null,
+          "lat": 40.0
+        },
+        {
+          "name": "unparseable",
+          "lon": "west",
+          "lat": 45.0
+        }
+      ],
+      "transform": [
+        {
+          "type": "geojson",
+          "fields": [
+            "lon",
+            "lat"
+          ],
+          "signal": "cloud"
+        },
+        {
+          "type": "geopoint",
+          "projection": "toCloud",
+          "fields": [
+            "lon",
+            "lat"
+          ]
+        },
+        {
+          "type": "geopoint",
+          "projection": "toFrame",
+          "fields": [
+            "lon",
+            "lat"
+          ],
+          "as": [
+            "fx",
+            "fy"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "boxed",
+      "values": [
+        {
+          "shape": {
+            "type": "Feature",
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [
+                    -10,
+                    35
+                  ],
+                  [
+                    30,
+                    35
+                  ],
+                  [
+                    30,
+                    60
+                  ],
+                  [
+                    -10,
+                    60
+                  ],
+                  [
+                    -10,
+                    35
+                  ]
+                ]
+              ]
+            }
+          }
+        }
+      ],
+      "transform": [
+        {
+          "type": "geojson",
+          "geojson": "shape",
+          "signal": "frame"
+        }
+      ]
+    }
+  ],
+  "projections": [
+    {
+      "name": "toCloud",
+      "type": "mercator",
+      "fit": {
+        "signal": "cloud"
+      },
+      "extent": [
+        [
+          6,
+          6
+        ],
+        [
+          110,
+          134
+        ]
+      ]
+    },
+    {
+      "name": "toFrame",
+      "type": "mercator",
+      "fit": {
+        "signal": "frame"
+      },
+      "extent": [
+        [
+          126,
+          6
+        ],
+        [
+          234,
+          134
+        ]
+      ]
+    }
+  ],
+  "marks": [
+    {
+      "type": "symbol",
+      "from": {
+        "data": "cities"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "field": "x"
+          },
+          "y": {
+            "field": "y"
+          },
+          "size": {
+            "value": 50
+          },
+          "fill": {
+            "value": "#4c78a8"
+          }
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "from": {
+        "data": "cities"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "field": "fx"
+          },
+          "y": {
+            "field": "fy"
+          },
+          "size": {
+            "value": 50
+          },
+          "fill": {
+            "value": "#e45756"
+          }
+        }
+      }
+    }
+  ]
+}

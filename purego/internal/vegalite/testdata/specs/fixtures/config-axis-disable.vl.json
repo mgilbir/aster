@@ -1,0 +1,18 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A chart made of shapes rather than of measurements: the theme turns every axis off at once, and its own padding beats the configured one.",
+  "padding": 50,
+  "config": {"view": {"stroke": "transparent"}, "axis": {"disable": true, "grid": false}},
+  "data": {
+    "values": [
+      {"x": 0.25, "y": 0.433},
+      {"x": 0.75, "y": 0.433},
+      {"x": 0.5, "y": 0.0}
+    ]
+  },
+  "mark": {"type": "line", "color": "#76d9e4"},
+  "encoding": {
+    "x": {"field": "x", "type": "quantitative"},
+    "y": {"field": "y", "type": "quantitative"}
+  }
+}

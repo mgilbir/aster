@@ -1,0 +1,55 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "Text marks at every alignment and baseline, plus rotation and dx/dy offsets. Text anchoring has only ever been checked in one combination.",
+  "width": 260,
+  "height": 160,
+  "padding": 5,
+  "data": [
+    {
+      "name": "cells",
+      "values": [
+        {"x": 40, "y": 20, "align": "left", "baseline": "top", "angle": 0, "dx": 0, "dy": 0, "t": "Lt"},
+        {"x": 130, "y": 20, "align": "center", "baseline": "middle", "angle": 0, "dx": 0, "dy": 0, "t": "Cm"},
+        {"x": 220, "y": 20, "align": "right", "baseline": "bottom", "angle": 0, "dx": 0, "dy": 0, "t": "Rb"},
+        {"x": 40, "y": 70, "align": "left", "baseline": "alphabetic", "angle": 0, "dx": 6, "dy": -4, "t": "La"},
+        {"x": 130, "y": 70, "align": "center", "baseline": "top", "angle": 45, "dx": 0, "dy": 0, "t": "Rot"},
+        {"x": 220, "y": 70, "align": "right", "baseline": "middle", "angle": -30, "dx": -3, "dy": 5, "t": "Neg"},
+        {"x": 40, "y": 125, "align": "center", "baseline": "bottom", "angle": 90, "dx": 0, "dy": 0, "t": "Up"},
+        {"x": 130, "y": 125, "align": "left", "baseline": "middle", "angle": 0, "dx": 12, "dy": 0, "t": "Dx"},
+        {"x": 220, "y": 125, "align": "center", "baseline": "alphabetic", "angle": 0, "dx": 0, "dy": 10, "t": "Dy"}
+      ]
+    }
+  ],
+  "marks": [
+    {
+      "type": "symbol",
+      "from": {"data": "cells"},
+      "encode": {
+        "enter": {
+          "x": {"field": "x"},
+          "y": {"field": "y"},
+          "size": {"value": 20},
+          "fill": {"value": "#bbbbbb"}
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": {"data": "cells"},
+      "encode": {
+        "enter": {
+          "x": {"field": "x"},
+          "y": {"field": "y"},
+          "text": {"field": "t"},
+          "align": {"field": "align"},
+          "baseline": {"field": "baseline"},
+          "angle": {"field": "angle"},
+          "dx": {"field": "dx"},
+          "dy": {"field": "dy"},
+          "fontSize": {"value": 12},
+          "fill": {"value": "#333333"}
+        }
+      }
+    }
+  ]
+}

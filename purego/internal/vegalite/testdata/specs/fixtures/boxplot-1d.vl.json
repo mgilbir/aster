@@ -1,0 +1,7 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A boxplot of one column, which has no category to span and sits in the middle instead.",
+  "data": {"url": "data/cars.json"},
+  "mark": "boxplot",
+  "encoding": {"x": {"field": "Horsepower", "type": "quantitative"}}
+}

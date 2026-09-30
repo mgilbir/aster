@@ -1,0 +1,33 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "description": "A bucketed instant under an area, which has no band to sit in and so no far edge.",
+  "data": {
+    "values": [
+      {
+        "when": "2019-03-01",
+        "amount": 28
+      },
+      {
+        "when": "2020-05-01",
+        "amount": 55
+      },
+      {
+        "when": "2021-07-01",
+        "amount": 43
+      }
+    ]
+  },
+  "width": 160,
+  "height": 90,
+  "mark": "area",
+  "encoding": {
+    "y": {
+      "timeUnit": "year",
+      "field": "when"
+    },
+    "x": {
+      "aggregate": "sum",
+      "field": "amount"
+    }
+  }
+}

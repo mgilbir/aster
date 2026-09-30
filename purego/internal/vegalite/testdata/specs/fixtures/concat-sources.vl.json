@@ -1,0 +1,38 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "description": "Two plots side by side, each over its own table, with one shared colour key.",
+  "hconcat": [
+    {
+      "data": {
+        "values": [
+          {"category": "Alpha", "amount": 28},
+          {"category": "Beta", "amount": 55}
+        ]
+      },
+      "width": 110,
+      "height": 90,
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "category", "type": "nominal"},
+        "y": {"field": "amount", "type": "quantitative"},
+        "color": {"field": "category", "type": "nominal"}
+      }
+    },
+    {
+      "data": {
+        "values": [
+          {"category": "Beta", "score": 7},
+          {"category": "Gamma", "score": 5}
+        ]
+      },
+      "width": 110,
+      "height": 90,
+      "mark": "point",
+      "encoding": {
+        "x": {"field": "score", "type": "quantitative"},
+        "y": {"field": "score", "type": "quantitative"},
+        "color": {"field": "category", "type": "nominal"}
+      }
+    }
+  ]
+}

@@ -1,0 +1,89 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A title's encode block, which upstream splits three ways: 'group' paints the panel the heading sits in — the only way to put a band of colour behind a chart's name, since a title has no fillColor — while 'title' and 'subtitle' each style their own text and beat the matching property. The chart with no named part uses the deprecated form, where the whole block applies to the text, which is where a dx written in an encode comes from.",
+  "width": 260,
+  "height": 90,
+  "padding": 5,
+  "background": "white",
+  "signals": [{"name": "chosen", "value": "#b2182b"}],
+  "title": {
+    "text": "Encoded heading",
+    "subtitle": "with its own subtitle",
+    "anchor": "start",
+    "fontSize": 12,
+    "color": "#000000",
+    "encode": {
+      "group": {
+        "update": {
+          "fill": {"value": "#f7f7f7"},
+          "stroke": {"value": "#999999"},
+          "cornerRadius": {"value": 3}
+        }
+      },
+      "title": {
+        "enter": {"font": {"value": "serif"}},
+        "update": {
+          "fill": {"signal": "chosen"},
+          "fontSize": {"value": 19},
+          "fontStyle": {"value": "italic"},
+          "dx": {"value": 4},
+          "limit": {"value": 150}
+        }
+      },
+      "subtitle": {
+        "update": {
+          "fill": {"value": "#2166ac"},
+          "fontSize": {"value": 10},
+          "fontWeight": {"value": "bold"},
+          "fillOpacity": {"value": 0.7}
+        }
+      }
+    }
+  },
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {"c": "a", "v": 3},
+        {"c": "b", "v": 6}
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {"data": "t", "field": "c"},
+      "range": "width"
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {"data": "t", "field": "v"},
+      "range": "height"
+    }
+  ],
+  "axes": [{"scale": "x", "orient": "bottom"}],
+  "marks": [
+    {
+      "type": "group",
+      "encode": {"enter": {"x": {"value": 0}, "y": {"value": 0}}},
+      "title": {"text": "inner", "encode": {"update": {"dy": {"value": 5}}}},
+      "marks": [
+        {
+          "type": "rect",
+          "from": {"data": "t"},
+          "encode": {
+            "enter": {
+              "x": {"scale": "x", "field": "c"},
+              "width": {"scale": "x", "band": 0.8},
+              "y": {"scale": "y", "field": "v"},
+              "y2": {"scale": "y", "value": 0},
+              "fill": {"value": "#4c78a8"}
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "Two copies of one map, each colouring the same outlines by a different column. The copies are separate plots rather than a grid's cells, which is what makes it the counterpart of the trellis fixture: each copy joins the outlines on for itself, so the join must stay one per copy, and the projection must still be merged to the chart so both maps are drawn at one scale. Figures inline, as in the trellis fixture, so this stays about the composition rather than about loading.",
+  "repeat": {"row": ["rate", "count"]},
+  "resolve": {"scale": {"color": "independent"}},
+  "spec": {
+    "width": 300,
+    "height": 180,
+    "data": {
+      "values": [
+        {"id": 1, "rate": 0.04, "count": 12},
+        {"id": 4, "rate": 0.09, "count": 30},
+        {"id": 6, "rate": 0.11, "count": 21},
+        {"id": 12, "rate": 0.1, "count": 8}
+      ]
+    },
+    "transform": [
+      {"lookup": "id", "from": {"data": {"url": "data/us-10m.json", "format": {"type": "topojson", "feature": "states"}}, "key": "id"}, "as": "geo"}
+    ],
+    "projection": {"type": "albersUsa"},
+    "mark": "geoshape",
+    "encoding": {
+      "shape": {"field": "geo", "type": "geojson"},
+      "color": {"field": {"repeat": "row"}, "type": "quantitative"}
+    }
+  }
+}

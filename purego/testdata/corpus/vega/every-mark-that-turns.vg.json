@@ -1,0 +1,89 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "**Four marks read an `angle`, and the rule that a word turns them by NaN is the same rule for all four.** `a-label-turned-by-nothing` closed it for text, through `boundText`'s `if (item.angle && …) bounds.rotate(item.angle * DegToRad, x, y)`. The other three reach it by a different road and arrive at the same place: a symbol and an arc are built by `markItemPath`, whose `bound` is `shape(context(bounds, item.angle), item)`, and a path mark's is `path(context(bounds, item.angle), item)`. That shared `boundContext` opens `if (deg) { rot = deg * DegToRad; ma = md = Math.cos(rot); mb = Math.sin(rot); mc = -mb; }` — **truthiness on the raw value again**, and a non-empty string passes it. `cos(NaN)` is NaN, so the whole matrix is NaN, every point the shape adds is NaN, and `Bounds.add` is comparisons that are all false against one. The item's bounds are therefore left **cleared** — upstream's empty sentinel, not NaN — and the mark contributes nothing to the surface.\n\nProbed, all three: at `x: 95` in a 100-wide view, an unrotated symbol reaches 117.4, a path 157 and an arc 119.9; with `angle: \"sideways\"` every one of them reports cleared bounds and the surface stays 100. An angle of `45` turns and is measured in full, and an angle of `\"\"` is **falsey**, so it is not turned and *is* measured — the same three-way split text has, from a different function.\n\n**`image` is deliberately absent.** It was probed and it has no rotation at all: 135 by 60 with an angle and without one. Four marks turn, not five, and asserting otherwise here would be asserting something upstream does not do.\n\n**The three unreadable marks are the only things in this chart that could widen it, and that is load-bearing.** Each sits at `x: 95` and would push the surface out if it were measured — the symbol to 117, the arc to 120, the path to 157 — so reverting any one site on its own moves the surface and is caught. The controls are held **inside** the plotting area for exactly that reason: a control that reached past 120 would mask the symbol and the arc mutants behind the path's larger reach, and the fixture would report a pass for two sites it had stopped testing. `a-label-turned-by-nothing` had to be moved once for the same mistake.",
+  "width": 100,
+  "height": 60,
+  "padding": 5,
+  "signals": [
+    {"name": "turn", "value": "sideways"},
+    {"name": "blank", "value": ""}
+  ],
+  "marks": [
+    {
+      "type": "symbol",
+      "encode": {
+        "update": {
+          "x": {"value": 95},
+          "y": {"value": 30},
+          "size": {"value": 2000},
+          "angle": {"signal": "turn"},
+          "fill": {"value": "#4c78a8"}
+        }
+      }
+    },
+    {
+      "type": "path",
+      "encode": {
+        "update": {
+          "x": {"value": 95},
+          "y": {"value": 8},
+          "path": {"value": "M0,0L60,0L60,15Z"},
+          "angle": {"signal": "turn"},
+          "fill": {"value": "#f58518"}
+        }
+      }
+    },
+    {
+      "type": "arc",
+      "encode": {
+        "update": {
+          "x": {"value": 95},
+          "y": {"value": 52},
+          "outerRadius": {"value": 25},
+          "startAngle": {"value": 0},
+          "endAngle": {"value": 1.5},
+          "angle": {"signal": "turn"},
+          "fill": {"value": "#54a24b"}
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "encode": {
+        "update": {
+          "x": {"value": 20},
+          "y": {"value": 20},
+          "size": {"value": 200},
+          "angle": {"value": 45},
+          "fill": {"value": "#e45756"}
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "encode": {
+        "update": {
+          "x": {"value": 45},
+          "y": {"value": 20},
+          "size": {"value": 200},
+          "angle": {"signal": "blank"},
+          "fill": {"value": "#b279a2"}
+        }
+      }
+    },
+    {
+      "type": "arc",
+      "encode": {
+        "update": {
+          "x": {"value": 30},
+          "y": {"value": 45},
+          "outerRadius": {"value": 10},
+          "startAngle": {"value": 0},
+          "endAngle": {"value": 1.5},
+          "angle": {"value": 45},
+          "fill": {"value": "#9d755d"}
+        }
+      }
+    }
+  ]
+}

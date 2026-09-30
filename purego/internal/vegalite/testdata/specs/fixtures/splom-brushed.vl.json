@@ -1,0 +1,26 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A scatter-plot matrix panned and zoomed as a whole: the diagonal plots a column against itself, which is one projection and still two directions to drag in.",
+  "data": {"url": "data/cars.json"},
+  "repeat": {
+    "row": ["Horsepower", "Acceleration"],
+    "column": ["Acceleration", "Horsepower"]
+  },
+  "spec": {
+    "width": 120,
+    "height": 120,
+    "params": [
+      {"name": "brush", "select": {"type": "interval", "resolve": "union"}},
+      {"name": "grid", "select": {"type": "interval", "resolve": "global"}, "bind": "scales"}
+    ],
+    "mark": "point",
+    "encoding": {
+      "x": {"field": {"repeat": "column"}, "type": "quantitative"},
+      "y": {"field": {"repeat": "row"}, "type": "quantitative"},
+      "color": {
+        "condition": {"param": "brush", "field": "Origin", "type": "nominal"},
+        "value": "grey"
+      }
+    }
+  }
+}

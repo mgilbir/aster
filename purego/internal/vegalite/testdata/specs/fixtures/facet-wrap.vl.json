@@ -1,0 +1,25 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "description": "One field's values wrapped two to a row, each cell captioning itself.",
+  "data": {
+    "values": [
+      {"category": "Alpha", "amount": 28, "era": "before"},
+      {"category": "Beta", "amount": 55, "era": "before"},
+      {"category": "Alpha", "amount": 43, "era": "during"},
+      {"category": "Beta", "amount": 91, "era": "during"},
+      {"category": "Alpha", "amount": 12, "era": "after"},
+      {"category": "Beta", "amount": 67, "era": "after"}
+    ]
+  },
+  "columns": 2,
+  "facet": {"field": "era", "type": "nominal"},
+  "spec": {
+    "width": 90,
+    "height": 70,
+    "mark": "bar",
+    "encoding": {
+      "x": {"field": "category", "type": "nominal"},
+      "y": {"field": "amount", "type": "quantitative"}
+    }
+  }
+}

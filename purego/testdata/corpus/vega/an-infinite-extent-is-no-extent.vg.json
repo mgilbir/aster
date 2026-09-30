@@ -1,0 +1,72 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "An extent that is not finite is **no extent at all**. Upstream's `Extent.js` ends `if (!Number.isFinite(min) || !Number.isFinite(max)) { warn; min = max = undefined; }`, and the infinity is never filtered on the way in — `Number.isFinite` is asked of the *result*, so one infinite value takes the whole extent with it. The domain is then `[undefined, undefined]`, the scale answers `NaN` for everything and its axis draws no ticks and no labels. Four columns say which part of that rule is doing the work: `word` holds the text `Infinity`, which `Number` reads as a number; `calc` reaches an infinity by dividing by zero, so the rule is not about strings; `words` holds no number anywhere, where the extent stays at its `[+Infinity, -Infinity]` start and is discarded for the same reason; and `ok` is ordinary, so the fixture says what this costs and what it does not. The first axis is the observable one: with a finite domain it draws labels, and with no extent it draws nothing. The `extent` **transform** publishes the same rule into a signal, and it is written out here too — the two used to be separate transcriptions and only one of them was right.",
+  "width": 320,
+  "height": 130,
+  "padding": 5,
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {"word": "Infinity", "zero": 0, "words": "alpha", "ok": 1, "n": 1},
+        {"word": 2, "zero": 4, "words": "beta", "ok": 2, "n": 2},
+        {"word": 3, "zero": 5, "words": "gamma", "ok": 3, "n": 3},
+        {"word": 4, "zero": 8, "words": "delta", "ok": 4, "n": 4}
+      ],
+      "transform": [
+        {"type": "formula", "expr": "1 / datum.zero", "as": "calc"},
+        {"type": "extent", "field": "word", "signal": "wordExtent"},
+        {"type": "extent", "field": "ok", "signal": "okExtent"}
+      ]
+    }
+  ],
+  "scales": [
+    {"name": "word", "type": "linear", "domain": {"data": "t", "field": "word"}, "range": [110, 10]},
+    {"name": "calc", "type": "linear", "domain": {"data": "t", "field": "calc"}, "range": [110, 10]},
+    {"name": "words", "type": "linear", "domain": {"data": "t", "field": "words"}, "range": [110, 10]},
+    {"name": "ok", "type": "linear", "domain": {"data": "t", "field": "ok"}, "range": [110, 10]}
+  ],
+  "axes": [
+    {"orient": "left", "scale": "word", "tickCount": 4},
+    {"orient": "right", "scale": "ok", "tickCount": 4}
+  ],
+  "marks": [
+    {
+      "type": "text",
+      "from": {"data": "t"},
+      "encode": {
+        "enter": {
+          "x": {"value": 44},
+          "y": {"signal": "16 * datum.n - 12"},
+          "text": {"signal": "'word ' + scale('word', datum.ok) + ' calc ' + scale('calc', datum.ok) + ' words ' + scale('words', datum.ok) + ' ok ' + scale('ok', datum.ok)"},
+          "fontSize": {"value": 9},
+          "baseline": {"value": "top"}
+        }
+      }
+    },
+    {
+      "type": "text",
+      "encode": {
+        "enter": {
+          "x": {"value": 44},
+          "y": {"value": 72},
+          "text": {"signal": "'extent of word: [' + wordExtent + '] extent of ok: [' + okExtent + ']'"},
+          "fontSize": {"value": 9},
+          "baseline": {"value": "top"}
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "from": {"data": "t"},
+      "encode": {
+        "enter": {
+          "x": {"signal": "36 + 4 * datum.n"},
+          "y": {"scale": "word", "field": "ok"},
+          "size": {"value": 40},
+          "fill": {"value": "#4c78a8"}
+        }
+      }
+    }
+  ]
+}

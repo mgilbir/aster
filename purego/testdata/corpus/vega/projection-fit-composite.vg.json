@@ -1,0 +1,86 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A composite projection fitted to a geojson signal published by the same dataset that reads it back through geopoint — what Vega-Lite emits for any United States lon/lat chart. The fit has to reach albersUsa, and the geojson transform has to publish before the projection is built and after it the geopoint runs.",
+  "width": 200,
+  "height": 200,
+  "padding": 5,
+  "data": [
+    {
+      "name": "source_0",
+      "values": [
+        {
+          "lon": -100,
+          "lat": 40
+        },
+        {
+          "lon": -80,
+          "lat": 30
+        },
+        {
+          "lon": -120,
+          "lat": 50
+        }
+      ]
+    },
+    {
+      "name": "data_0",
+      "source": "source_0",
+      "transform": [
+        {
+          "type": "geojson",
+          "fields": [
+            "lon",
+            "lat"
+          ],
+          "signal": "geojson_0"
+        },
+        {
+          "type": "geopoint",
+          "projection": "projection",
+          "fields": [
+            "lon",
+            "lat"
+          ],
+          "as": [
+            "x",
+            "y"
+          ]
+        }
+      ]
+    }
+  ],
+  "projections": [
+    {
+      "name": "projection",
+      "type": "albersUsa",
+      "fit": {
+        "signal": "geojson_0"
+      },
+      "size": [
+        200,
+        200
+      ]
+    }
+  ],
+  "marks": [
+    {
+      "type": "symbol",
+      "from": {
+        "data": "data_0"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "field": "x"
+          },
+          "y": {
+            "field": "y"
+          },
+          "size": {
+            "value": 80
+          }
+        }
+      }
+    }
+  ]
+}

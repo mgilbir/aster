@@ -1,0 +1,133 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "Two projections asked for something that cannot be drawn, which upstream answers by drawing it anyway. A `scale` of zero collapses the whole world onto the point it translates to, and a mercator clipped to one turn of a world of width zero keeps a rectangle of width zero to clip against — so the outline it writes is a run of the same point with `NaN` where the arithmetic gave up. A stereographic told to clip at zero degrees stops clipping to a cap and cuts the antimeridian instead, which puts its own antipode, where the formula runs to infinity, back inside the map. Neither is a chart anybody wants; both are charts upstream produces, and a NaN in an outline is a coordinate to be stepped over rather than a reason to throw the outline away. The bound context upstream measures with compares each axis on its own and a NaN loses every comparison, so the x of a point whose y is NaN still counts.",
+  "width": 260,
+  "height": 130,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "world",
+      "values": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {},
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [160, -20],
+                  [-160, -20],
+                  [-160, 10],
+                  [160, 10],
+                  [160, -20]
+                ]
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {},
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [-30, 70],
+                  [30, 70],
+                  [30, 88],
+                  [-30, 88],
+                  [-30, 70]
+                ]
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {},
+            "geometry": {
+              "type": "LineString",
+              "coordinates": [
+                [-120, -40],
+                [0, 0],
+                [120, 40]
+              ]
+            }
+          }
+        ]
+      },
+      "format": {
+        "type": "json",
+        "property": "features"
+      }
+    }
+  ],
+  "projections": [
+    {
+      "name": "collapsed",
+      "type": "mercator",
+      "scale": 0,
+      "translate": [65, 65]
+    },
+    {
+      "name": "uncapped",
+      "type": "stereographic",
+      "scale": 30,
+      "translate": [195, 65],
+      "clipAngle": 0
+    }
+  ],
+  "marks": [
+    {
+      "type": "shape",
+      "from": {
+        "data": "world"
+      },
+      "transform": [
+        {
+          "type": "geoshape",
+          "projection": "collapsed"
+        }
+      ],
+      "encode": {
+        "enter": {
+          "fill": {
+            "value": "#cfd8dc"
+          },
+          "stroke": {
+            "value": "#37474f"
+          },
+          "strokeWidth": {
+            "value": 2
+          }
+        }
+      }
+    },
+    {
+      "type": "shape",
+      "from": {
+        "data": "world"
+      },
+      "transform": [
+        {
+          "type": "geoshape",
+          "projection": "uncapped"
+        }
+      ],
+      "encode": {
+        "enter": {
+          "fill": {
+            "value": null
+          },
+          "stroke": {
+            "value": "#7a4fb5"
+          },
+          "strokeWidth": {
+            "value": 0.7
+          }
+        }
+      }
+    }
+  ]
+}

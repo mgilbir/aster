@@ -1,0 +1,14 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "Small multiples stacked vertically, so the shared x axis has no facet behind it.",
+  "data": {"values": [
+    {"g": "A", "x": "p", "y": 3}, {"g": "A", "x": "q", "y": 5},
+    {"g": "B", "x": "p", "y": 7}, {"g": "B", "x": "q", "y": 2}
+  ]},
+  "mark": "bar",
+  "encoding": {
+    "row": {"field": "g", "type": "nominal"},
+    "x": {"field": "x", "type": "nominal"},
+    "y": {"field": "y", "type": "quantitative"}
+  }
+}

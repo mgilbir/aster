@@ -1,0 +1,161 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "The options of the two smoothing transforms, which one fixture each had only ever used the defaults of. The kernel density estimate is asked for a fixed bandwidth over a stated extent with a chosen number of steps, once as a density and once cumulatively, and grouped so the two series resolve their extents independently; counts turn the density back into an estimate of rows rather than an area of one. The loess fit beside them is given its own bandwidth and grouped by the same series, which is the option that decides whether a fit follows the data or flattens it.",
+  "width": 260,
+  "height": 150,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "points",
+      "values": [
+        { "s": "a", "x": 1, "y": 4 },
+        { "s": "a", "x": 2, "y": 6 },
+        { "s": "a", "x": 3, "y": 5 },
+        { "s": "a", "x": 4, "y": 9 },
+        { "s": "a", "x": 5, "y": 8 },
+        { "s": "a", "x": 6, "y": 13 },
+        { "s": "a", "x": 7, "y": 11 },
+        { "s": "b", "x": 1, "y": 12 },
+        { "s": "b", "x": 2, "y": 9 },
+        { "s": "b", "x": 3, "y": 10 },
+        { "s": "b", "x": 4, "y": 6 },
+        { "s": "b", "x": 5, "y": 7 },
+        { "s": "b", "x": 6, "y": 3 },
+        { "s": "b", "x": 7, "y": 4 }
+      ]
+    },
+    {
+      "name": "density",
+      "source": "points",
+      "transform": [
+        {
+          "type": "kde",
+          "field": "x",
+          "groupby": ["s"],
+          "bandwidth": 0.8,
+          "extent": [0, 8],
+          "steps": 25,
+          "resolve": "independent",
+          "as": ["at", "d"]
+        }
+      ]
+    },
+    {
+      "name": "cumulative",
+      "source": "points",
+      "transform": [
+        {
+          "type": "kde",
+          "field": "x",
+          "bandwidth": 0.8,
+          "extent": [0, 8],
+          "steps": 25,
+          "cumulative": true,
+          "counts": true,
+          "as": ["at", "total"]
+        }
+      ]
+    },
+    {
+      "name": "fitted",
+      "source": "points",
+      "transform": [
+        {
+          "type": "loess",
+          "x": "x",
+          "y": "y",
+          "groupby": ["s"],
+          "bandwidth": 0.6,
+          "as": ["fx", "fy"]
+        }
+      ]
+    }
+  ],
+  "scales": [
+    { "name": "x", "type": "linear", "domain": [0, 8], "range": "width" },
+    { "name": "y", "type": "linear", "domain": [0, 14], "range": [90, 0] },
+    {
+      "name": "d",
+      "type": "linear",
+      "domain": { "data": "density", "field": "d" },
+      "range": [150, 100]
+    },
+    {
+      "name": "c",
+      "type": "linear",
+      "domain": { "data": "cumulative", "field": "total" },
+      "range": [150, 100]
+    },
+    { "name": "colour", "type": "ordinal", "domain": ["a", "b"], "range": ["#4c78a8", "#e45756"] }
+  ],
+  "axes": [
+    { "orient": "bottom", "scale": "x", "offset": 56, "tickCount": 4 },
+    { "orient": "left", "scale": "y", "tickCount": 4 }
+  ],
+  "marks": [
+    {
+      "type": "symbol",
+      "from": { "data": "points" },
+      "encode": {
+        "enter": {
+          "x": { "scale": "x", "field": "x" },
+          "y": { "scale": "y", "field": "y" },
+          "size": { "value": 30 },
+          "fill": { "scale": "colour", "field": "s" },
+          "fillOpacity": { "value": 0.5 }
+        }
+      }
+    },
+    {
+      "type": "group",
+      "from": { "facet": { "name": "series", "data": "fitted", "groupby": "s" } },
+      "marks": [
+        {
+          "type": "line",
+          "from": { "data": "series" },
+          "encode": {
+            "enter": {
+              "x": { "scale": "x", "field": "fx" },
+              "y": { "scale": "y", "field": "fy" },
+              "stroke": { "scale": "colour", "field": "s" },
+              "strokeWidth": { "value": 2 }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "group",
+      "from": { "facet": { "name": "curve", "data": "density", "groupby": "s" } },
+      "marks": [
+        {
+          "type": "area",
+          "from": { "data": "curve" },
+          "encode": {
+            "enter": {
+              "x": { "scale": "x", "field": "at" },
+              "y": { "scale": "d", "field": "d" },
+              "y2": { "value": 150 },
+              "fill": { "scale": "colour", "field": "s" },
+              "fillOpacity": { "value": 0.3 }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "line",
+      "from": { "data": "cumulative" },
+      "encode": {
+        "enter": {
+          "x": { "scale": "x", "field": "at" },
+          "y": { "scale": "c", "field": "total" },
+          "stroke": { "value": "#333333" },
+          "strokeWidth": { "value": 1 },
+          "strokeDash": { "value": [3, 2] }
+        }
+      }
+    }
+  ]
+}

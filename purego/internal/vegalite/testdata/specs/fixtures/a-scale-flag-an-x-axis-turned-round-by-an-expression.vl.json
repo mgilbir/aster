@@ -1,0 +1,45 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "The same `config.scale.xReverse` again, written as an expression rather than as a flag, because the branch that inverts it has to invert an expression as an expression: `if (hasContinuousDomain(scaleType) && sort === 'descending') { if (isSignalRef(scaleConfig.xReverse)) { return {signal: `!${scaleConfig.xReverse.signal}`}; } else { return !scaleConfig.xReverse; } }`. A separate chart from the one that states the flag, since a document has one theme and this one names a parameter as its reading direction — which is the point of writing it this way, a control the reader can flip rather than a decision the author made. It arrives here already spelled Vega's way: `initConfig` runs `replaceExprRef` over `config.scale` as it reads it, so `{\"expr\": \"rtl\"}` is `{\"signal\": \"rtl\"}` long before a scale asks for it, and the negation is a string operation on the signal it carries. The first chart takes the parameter as it stands and its `x` reverses with it. The second sorts its `x` descending, so the sort has already turned that range round and the theme's answer is negated — `!rtl`, not `rtl`, which is a different chart the moment the parameter is false. The third is a band over categories, where the expression reaches a scale with no continuous domain at all and passes through unnegated, since the negation is about undoing a sort and a band's sort is done in its domain. The `y` scales are the rows that must not change: the chain is keyed on the channel named `x`, so nothing about a vertical axis depends on how the document is read.",
+  "data": {
+    "values": [
+      {"c": "alpha", "v": 28, "w": 3},
+      {"c": "beta", "v": 55, "w": 7},
+      {"c": "gamma", "v": 43, "w": 5},
+      {"c": "delta", "v": 91, "w": 9}
+    ]
+  },
+  "params": [{"name": "rtl", "value": true}],
+  "hconcat": [
+    {
+      "width": 140,
+      "height": 110,
+      "mark": "point",
+      "encoding": {
+        "x": {"field": "w", "type": "quantitative"},
+        "y": {"field": "v", "type": "quantitative"}
+      }
+    },
+    {
+      "width": 140,
+      "height": 110,
+      "mark": "point",
+      "encoding": {
+        "x": {"field": "w", "type": "quantitative", "sort": "descending"},
+        "y": {"field": "v", "type": "quantitative"}
+      }
+    },
+    {
+      "width": 140,
+      "height": 110,
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "c", "type": "nominal"},
+        "y": {"field": "v", "type": "quantitative"}
+      }
+    }
+  ],
+  "config": {
+    "scale": {"xReverse": {"expr": "rtl"}}
+  }
+}

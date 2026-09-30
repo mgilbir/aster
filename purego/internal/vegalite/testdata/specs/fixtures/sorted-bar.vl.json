@@ -1,0 +1,10 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "Bands ordered by the aggregate they are drawn from, descending.",
+  "data": {"url": "data/barley.json"},
+  "mark": "bar",
+  "encoding": {
+    "y": {"field": "site", "type": "nominal", "sort": {"op": "sum", "field": "yield", "order": "descending"}},
+    "x": {"aggregate": "sum", "field": "yield", "type": "quantitative"}
+  }
+}

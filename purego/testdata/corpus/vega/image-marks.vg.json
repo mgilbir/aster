@@ -1,0 +1,64 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "Image marks at explicit sizes, showing that align and baseline move the whole image rather than text inside a box: x is the left edge, the centre or the right edge depending on align.",
+  "width": 240,
+  "height": 120,
+  "padding": 5,
+  "data": [
+    {
+      "name": "table",
+      "values": [
+        {"u": "a.png", "x": 20, "y": 20, "a": "left", "b": "top"},
+        {"u": "b.png", "x": 120, "y": 20, "a": "center", "b": "top"},
+        {"u": "c.png", "x": 220, "y": 20, "a": "right", "b": "top"},
+        {"u": "d.png", "x": 20, "y": 100, "a": "left", "b": "bottom"},
+        {"u": "e.png", "x": 120, "y": 100, "a": "center", "b": "middle"},
+        {"u": "f.png", "x": 220, "y": 100, "a": "right", "b": "bottom"}
+      ]
+    }
+  ],
+  "marks": [
+    {
+      "type": "image",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "url": {"field": "u"},
+          "x": {"field": "x"},
+          "y": {"field": "y"},
+          "width": {"value": 40},
+          "height": {"value": 30},
+          "align": {"field": "a"},
+          "baseline": {"field": "b"}
+        }
+      }
+    },
+    {
+      "type": "image",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "url": {"value": "stretched.png"},
+          "x": {"value": 90},
+          "y": {"value": 55},
+          "width": {"value": 60},
+          "height": {"value": 12},
+          "aspect": {"value": false},
+          "smooth": {"value": false}
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"field": "x"},
+          "y": {"field": "y"},
+          "size": {"value": 20},
+          "fill": {"value": "#e45756"}
+        }
+      }
+    }
+  ]
+}

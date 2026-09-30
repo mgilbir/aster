@@ -1,0 +1,11 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A trellis whose row header states an empty title: the captions stay, the heading goes.",
+  "data": {"url": "data/barley.json"},
+  "mark": "point",
+  "encoding": {
+    "row": {"field": "site", "header": {"title": ""}},
+    "x": {"aggregate": "sum", "field": "yield", "type": "quantitative"},
+    "y": {"field": "variety", "type": "ordinal"}
+  }
+}

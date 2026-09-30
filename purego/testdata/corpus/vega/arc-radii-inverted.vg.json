@@ -1,0 +1,48 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "Arcs whose radii are the wrong way round, which d3 does not refuse: it swaps them, so an arc written inside-out draws exactly the ring an arc written the right way round would. The five here are the cases that separate swapping from rejecting — a normal ring, the same ring written inverted, an arc given only an inner radius (its outer radius defaults to zero, so swapping turns it into a solid wedge of that size), a negative outer radius, which collapses to a point at the centre, and a slice of no angle at all. Each still produces an item; the third is the one a specification is most likely to write by accident, and drawing nothing for it is the difference between a donut and an empty canvas. They are also turned by an `angle`, which every mark drawn through `markItemPath` takes and an arc is one of them — the wedge is rotated about its own centre, which for a shape d3 draws about the origin is the same as upstream's rotated bound context.",
+  "width": 460,
+  "height": 140,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "arcs",
+      "values": [
+        { "cx": 60, "inner": 20, "outer": 55, "note": "ring" },
+        { "cx": 170, "inner": 55, "outer": 20, "note": "inverted" },
+        { "cx": 280, "inner": 40, "note": "inner only" },
+        { "cx": 370, "inner": 0, "outer": -40, "note": "negative outer" },
+        { "cx": 430, "inner": 15, "outer": 45, "note": "no angle" }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "colour",
+      "type": "ordinal",
+      "domain": { "data": "arcs", "field": "note" },
+      "range": ["#4c78a8", "#f58518", "#54a24b", "#e45756", "#72b7b2"]
+    }
+  ],
+  "marks": [
+    {
+      "type": "arc",
+      "from": { "data": "arcs" },
+      "encode": {
+        "enter": {
+          "x": { "field": "cx" },
+          "y": { "value": 70 },
+          "startAngle": { "value": 0 },
+          "endAngle": { "signal": "datum.note === 'no angle' ? 0 : 2.1" },
+          "innerRadius": { "field": "inner" },
+          "outerRadius": { "field": "outer" },
+          "fill": { "scale": "colour", "field": "note" },
+          "stroke": { "value": "#333333" },
+          "strokeWidth": { "value": 1 },
+          "angle": { "value": 24 }
+        }
+      }
+    }
+  ]
+}

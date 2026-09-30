@@ -1,0 +1,12 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A trellis broken down by a year the facet channel has to bucket, its cells captioned as dates.",
+  "data": {"url": "data/stocks.csv"},
+  "mark": "line",
+  "encoding": {
+    "x": {"timeUnit": "quarter", "field": "date", "type": "ordinal"},
+    "y": {"field": "price", "type": "quantitative", "aggregate": "mean"},
+    "color": {"field": "symbol", "type": "nominal"},
+    "column": {"field": "date", "timeUnit": "year"}
+  }
+}

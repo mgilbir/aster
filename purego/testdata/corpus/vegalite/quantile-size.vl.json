@@ -1,0 +1,16 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A size scale that maps a continuum onto buckets, needing one size per bucket.",
+  "data": {"url": "data/cars.json"},
+  "mark": "circle",
+  "encoding": {
+    "y": {"field": "Origin", "type": "nominal"},
+    "x": {"field": "Cylinders", "type": "ordinal"},
+    "size": {
+      "field": "Horsepower",
+      "type": "quantitative",
+      "scale": {"type": "quantile"},
+      "legend": null
+    }
+  }
+}

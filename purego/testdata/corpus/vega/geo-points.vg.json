@@ -1,0 +1,131 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "Cities placed by the geopoint transform, under three projections at once. Covers the transform's default output fields, an explicit 'as' pair, a projection that turns the globe, and a point on the far side of an orthographic one — which projects rather than vanishing, because a projection clips shapes and not points.",
+  "width": 600,
+  "height": 400,
+  "padding": 5,
+  "autosize": "none",
+
+  "projections": [
+    {
+      "name": "flat",
+      "type": "equirectangular",
+      "scale": 90,
+      "translate": [300, 200]
+    },
+    {
+      "name": "turned",
+      "type": "mercator",
+      "scale": 70,
+      "rotate": [-20, 0, 0],
+      "center": [0, 15],
+      "translate": [300, 200]
+    },
+    {
+      "name": "globe",
+      "type": "orthographic",
+      "scale": 120,
+      "rotate": [-10, -20, 0],
+      "translate": [300, 200]
+    }
+  ],
+
+  "data": [
+    {
+      "name": "cities",
+      "values": [
+        {"name": "London", "lon": -0.13, "lat": 51.51},
+        {"name": "Cape Town", "lon": 18.42, "lat": -33.93},
+        {"name": "Tokyo", "lon": 139.69, "lat": 35.69},
+        {"name": "Lima", "lon": -77.04, "lat": -12.05},
+        {"name": "Reykjavik", "lon": -21.94, "lat": 64.13},
+        {"name": "Auckland", "lon": 174.76, "lat": -36.85}
+      ],
+      "transform": [
+        {"type": "geopoint", "projection": "flat", "fields": ["lon", "lat"]},
+        {
+          "type": "geopoint",
+          "projection": "turned",
+          "fields": ["lon", "lat"],
+          "as": ["tx", "ty"]
+        },
+        {
+          "type": "geopoint",
+          "projection": "globe",
+          "fields": ["lon", "lat"],
+          "as": ["gx", "gy"]
+        }
+      ]
+    }
+  ],
+
+  "marks": [
+    {
+      "type": "symbol",
+      "from": {"data": "cities"},
+      "encode": {
+        "enter": {
+          "x": {"field": "x"},
+          "y": {"field": "y"},
+          "size": {"value": 60},
+          "fill": {"value": "#4c78a8"}
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": {"data": "cities"},
+      "encode": {
+        "enter": {
+          "x": {"field": "x"},
+          "y": {"field": "y"},
+          "dy": {"value": -8},
+          "align": {"value": "center"},
+          "baseline": {"value": "bottom"},
+          "fontSize": {"value": 9},
+          "text": {"field": "name"},
+          "fill": {"value": "#333"}
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "from": {"data": "cities"},
+      "encode": {
+        "enter": {
+          "x": {"field": "tx"},
+          "y": {"field": "ty"},
+          "size": {"value": 40},
+          "shape": {"value": "square"},
+          "fill": {"value": "#f58518"}
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "from": {"data": "cities"},
+      "encode": {
+        "enter": {
+          "x": {"field": "gx"},
+          "y": {"field": "gy"},
+          "size": {"value": 40},
+          "shape": {"value": "triangle-up"},
+          "fill": {"value": "#54a24b"}
+        }
+      }
+    },
+    {
+      "type": "rule",
+      "from": {"data": "cities"},
+      "encode": {
+        "enter": {
+          "x": {"field": "x"},
+          "y": {"field": "y"},
+          "x2": {"field": "gx"},
+          "y2": {"field": "gy"},
+          "stroke": {"value": "#ddd"}
+        }
+      }
+    }
+  ]
+}

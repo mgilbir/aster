@@ -1,0 +1,89 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "Signals driving scales and encodings, a formula transform, a filter, and conditional production rules. The expression engine is heavily unit-tested but has barely been exercised end to end.",
+  "width": 260,
+  "height": 130,
+  "padding": 5,
+  "signals": [
+    {"name": "threshold", "value": 20},
+    {"name": "barPadding", "update": "0.15 + 0.05"},
+    {"name": "highlight", "update": "'#e45756'"},
+    {"name": "labelSize", "update": "round(width / 30)"}
+  ],
+  "data": [
+    {
+      "name": "raw",
+      "values": [
+        {"k": "a", "n": 12, "skip": false},
+        {"k": "b", "n": 28, "skip": false},
+        {"k": "c", "n": 5, "skip": true},
+        {"k": "d", "n": 33, "skip": false},
+        {"k": "e", "n": 19, "skip": false}
+      ]
+    },
+    {
+      "name": "table",
+      "source": "raw",
+      "transform": [
+        {"type": "filter", "expr": "!datum.skip"},
+        {"type": "formula", "as": "scaled", "expr": "datum.n * 2 + 1"},
+        {"type": "formula", "as": "tag", "expr": "upper(datum.k) + ':' + datum.n"},
+        {"type": "extent", "field": "scaled", "signal": "scaledExtent"}
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {"data": "table", "field": "k"},
+      "range": "width",
+      "padding": {"signal": "barPadding"}
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {"signal": "scaledExtent"},
+      "range": "height",
+      "nice": true,
+      "zero": true
+    }
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "x"},
+    {"orient": "left", "scale": "y", "tickCount": {"signal": "3"}}
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "k"},
+          "width": {"scale": "x", "band": 1},
+          "y": {"scale": "y", "field": "scaled"},
+          "y2": {"scale": "y", "value": 0},
+          "fill": [
+            {"test": "datum.n > threshold", "signal": "highlight"},
+            {"value": "#9ecae9"}
+          ]
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "k", "band": 0.5},
+          "y": {"scale": "y", "field": "scaled", "offset": -4},
+          "text": {"field": "tag"},
+          "align": {"value": "center"},
+          "baseline": {"value": "bottom"},
+          "fontSize": {"signal": "labelSize"},
+          "fill": {"value": "#444444"}
+        }
+      }
+    }
+  ]
+}

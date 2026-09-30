@@ -1,0 +1,15 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A checkbox that turns an encoding on and off, which is a condition on a parameter that is not a selection — its truth, not a set of picked rows.",
+  "data": {"url": "data/cars.json"},
+  "params": [{"name": "colourByOrigin", "value": true, "bind": {"input": "checkbox"}}],
+  "mark": "point",
+  "encoding": {
+    "x": {"field": "Horsepower", "type": "quantitative"},
+    "y": {"field": "Miles_per_Gallon", "type": "quantitative"},
+    "color": {
+      "condition": {"param": "colourByOrigin", "field": "Origin", "type": "nominal"},
+      "value": "steelblue"
+    }
+  }
+}

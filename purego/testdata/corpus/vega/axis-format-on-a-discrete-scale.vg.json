@@ -1,0 +1,68 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A discrete scale with a format specifier uses it, and plainly. `tickFormat` in vega-scale picks the formatter by asking whether the scale has a `tickFormat` of its own — only a continuous one does — so a band or point scale falls past the span-resolved branch to `else if (specifier) format = locale.format(specifier)`. Only an axis that states no specifier keeps its domain's own values, by the `defaultFormatter` above both arms. The first axis is a band of the numbers 1, 2 and 3 asked for `.0%`, which reads 100%, 200%, 300%; the second is a point scale of the same numbers asked for `$,.2f`; the third is a band of **words** asked for `.0%`, and every tick on it reads NaN% — d3's formatter coerces what it is given, and that is upstream's answer. Printing the words back instead looks like the axis was never asked. The fourth states no format at all and keeps its categories, which is the case that must not move. The fifth asks for `s` and reads 1.00000, 2.00000, 3.00000: a specifier naming no precision takes d3's default six significant digits here, because `locale.format` is handed the specifier as written. A **continuous** axis would not — `formatSpan` resolves the missing precision against the span being labelled, which is the other arm entirely — and that is the difference this row exists to hold, the two arms agreeing on every specifier that names its own precision.",
+  "width": 220,
+  "height": 120,
+  "padding": 5,
+  "data": [
+    {
+      "name": "table",
+      "values": [
+        {"n": 1, "c": "alpha", "v": 42},
+        {"n": 2, "c": "bravo", "v": 88},
+        {"n": 3, "c": "charlie", "v": 17}
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "banded",
+      "type": "band",
+      "domain": {"data": "table", "field": "n"},
+      "range": "width",
+      "padding": 0.2
+    },
+    {
+      "name": "pointed",
+      "type": "point",
+      "domain": {"data": "table", "field": "n"},
+      "range": "width",
+      "padding": 0.5
+    },
+    {
+      "name": "worded",
+      "type": "band",
+      "domain": {"data": "table", "field": "c"},
+      "range": "height"
+    },
+    {
+      "name": "plain",
+      "type": "band",
+      "domain": {"data": "table", "field": "c"},
+      "range": "height"
+    }
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "banded", "format": ".0%"},
+    {"orient": "top", "scale": "pointed", "format": "$,.2f"},
+    {"orient": "left", "scale": "worded", "format": ".0%"},
+    {"orient": "right", "scale": "plain"},
+    {"orient": "bottom", "scale": "banded", "format": "s"}
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "banded", "field": "n"},
+          "width": {"scale": "banded", "band": 1},
+          "y": {"scale": "worded", "field": "c"},
+          "height": {"scale": "worded", "band": 1},
+          "fill": {"value": "#4c78a8"},
+          "fillOpacity": {"value": 0.4}
+        }
+      }
+    }
+  ]
+}

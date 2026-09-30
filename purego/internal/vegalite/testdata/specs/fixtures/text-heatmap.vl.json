@@ -1,0 +1,13 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "data": {"values": [
+    {"x": "a", "y": "p", "v": 1}, {"x": "b", "y": "p", "v": 4},
+    {"x": "a", "y": "q", "v": 7}, {"x": "b", "y": "q", "v": 2}
+  ]},
+  "mark": "rect",
+  "encoding": {
+    "x": {"field": "x", "type": "ordinal"},
+    "y": {"field": "y", "type": "ordinal"},
+    "color": {"field": "v", "type": "quantitative"}
+  }
+}

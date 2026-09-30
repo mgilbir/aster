@@ -1,0 +1,379 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A trellis with headers, footers and titles. headerBand and footerBand place a label along the cell it names rather than at the cell's origin; titleBand does the same along the whole grid; titleAnchor 'end' puts a title past the footers; and offset pushes each kind further out.",
+  "width": 300,
+  "height": 200,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {
+          "r": "p",
+          "c": "a",
+          "v": 1
+        },
+        {
+          "r": "p",
+          "c": "b",
+          "v": 4
+        },
+        {
+          "r": "p",
+          "c": "c",
+          "v": 7
+        },
+        {
+          "r": "q",
+          "c": "a",
+          "v": 3
+        },
+        {
+          "r": "q",
+          "c": "b",
+          "v": 6
+        },
+        {
+          "r": "q",
+          "c": "c",
+          "v": 2
+        }
+      ]
+    }
+  ],
+  "layout": {
+    "columns": 3,
+    "padding": {
+      "row": 14,
+      "column": 14
+    },
+    "bounds": "full",
+    "headerBand": 0.5,
+    "footerBand": 0.5,
+    "titleBand": {
+      "row": 0.5,
+      "column": 0.5
+    },
+    "titleAnchor": {
+      "row": "end",
+      "column": "start"
+    },
+    "offset": {
+      "rowHeader": 6,
+      "columnHeader": 6,
+      "rowFooter": 8,
+      "columnFooter": 8,
+      "rowTitle": 14,
+      "columnTitle": 14
+    }
+  },
+  "scales": [
+    {
+      "name": "colour",
+      "type": "ordinal",
+      "domain": {
+        "data": "t",
+        "field": "c"
+      },
+      "range": "category"
+    }
+  ],
+  "marks": [
+    {
+      "type": "group",
+      "role": "column-header",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "update": {
+          "width": {
+            "value": 60
+          },
+          "height": {
+            "value": 12
+          }
+        }
+      },
+      "marks": [
+        {
+          "type": "text",
+          "encode": {
+            "enter": {
+              "x": {
+                "value": 0
+              },
+              "y": {
+                "value": 9
+              },
+              "text": {
+                "value": "col"
+              },
+              "fontSize": {
+                "value": 9
+              },
+              "align": {
+                "value": "center"
+              },
+              "fill": {
+                "value": "#333333"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "group",
+      "role": "row-header",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "update": {
+          "width": {
+            "value": 20
+          },
+          "height": {
+            "value": 40
+          }
+        }
+      },
+      "marks": [
+        {
+          "type": "text",
+          "encode": {
+            "enter": {
+              "x": {
+                "value": 0
+              },
+              "y": {
+                "value": 0
+              },
+              "text": {
+                "value": "row"
+              },
+              "fontSize": {
+                "value": 9
+              },
+              "align": {
+                "value": "right"
+              },
+              "baseline": {
+                "value": "middle"
+              },
+              "fill": {
+                "value": "#333333"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "group",
+      "role": "row-footer",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "update": {
+          "width": {
+            "value": 20
+          },
+          "height": {
+            "value": 40
+          }
+        }
+      },
+      "marks": [
+        {
+          "type": "text",
+          "encode": {
+            "enter": {
+              "x": {
+                "value": 0
+              },
+              "y": {
+                "value": 0
+              },
+              "text": {
+                "value": "end"
+              },
+              "fontSize": {
+                "value": 9
+              },
+              "baseline": {
+                "value": "middle"
+              },
+              "fill": {
+                "value": "#777777"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "group",
+      "role": "column-footer",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "update": {
+          "width": {
+            "value": 60
+          },
+          "height": {
+            "value": 12
+          }
+        }
+      },
+      "marks": [
+        {
+          "type": "text",
+          "encode": {
+            "enter": {
+              "x": {
+                "value": 0
+              },
+              "y": {
+                "value": 9
+              },
+              "text": {
+                "value": "foot"
+              },
+              "fontSize": {
+                "value": 9
+              },
+              "align": {
+                "value": "center"
+              },
+              "fill": {
+                "value": "#777777"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "group",
+      "role": "row-title",
+      "marks": [
+        {
+          "type": "text",
+          "encode": {
+            "enter": {
+              "x": {
+                "value": 0
+              },
+              "y": {
+                "value": 0
+              },
+              "text": {
+                "value": "rows"
+              },
+              "fontSize": {
+                "value": 10
+              },
+              "angle": {
+                "value": -90
+              },
+              "align": {
+                "value": "center"
+              },
+              "fill": {
+                "value": "#000000"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "group",
+      "role": "column-title",
+      "marks": [
+        {
+          "type": "text",
+          "encode": {
+            "enter": {
+              "x": {
+                "value": 0
+              },
+              "y": {
+                "value": 0
+              },
+              "text": {
+                "value": "columns"
+              },
+              "fontSize": {
+                "value": 10
+              },
+              "align": {
+                "value": "center"
+              },
+              "fill": {
+                "value": "#000000"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "group",
+      "from": {
+        "facet": {
+          "data": "t",
+          "name": "cell",
+          "groupby": [
+            "r",
+            "c"
+          ]
+        }
+      },
+      "encode": {
+        "update": {
+          "width": {
+            "value": 60
+          },
+          "height": {
+            "value": 40
+          }
+        }
+      },
+      "marks": [
+        {
+          "type": "rect",
+          "from": {
+            "data": "cell"
+          },
+          "encode": {
+            "enter": {
+              "x": {
+                "value": 0
+              },
+              "width": {
+                "signal": "8 * datum.v"
+              },
+              "y": {
+                "value": 4
+              },
+              "height": {
+                "value": 30
+              },
+              "fill": {
+                "scale": "colour",
+                "field": "c"
+              }
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

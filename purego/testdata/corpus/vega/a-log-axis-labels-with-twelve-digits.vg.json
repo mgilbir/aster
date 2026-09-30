@@ -1,0 +1,77 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A log axis is the one scale family `tickFormat` sends down its own branch \u2014 `else if (isLogarithmic(type)) { const varfmt = locale.formatFloat(specifier); \u2026 }` \u2014 and `formatFloat` fills in `precision = 12` when the specifier names none. So a log tick is written with `,` at **twelve significant digits**, which is where the exponent form begins: `10,000,000,000` is written out and `1e+12` is not. This engine used a fixed decimal count instead, which says how many places follow the point and not how many digits are worth showing, so every power past a million came out in full. That is not only a different label but a different **width**: the axis is as wide as its longest label, and the chart is as wide as its axis. The domain here spans `1` to `1e15` so the ticks cross the threshold in both directions, and a second axis over a narrow domain is beside it to say that ordinary labels are untouched. The third axis is the one that says **twelve** rather than merely *some* threshold: its domain spans 10^10 to 10^12, so `100,000,000,000` is a tick \u2014 exactly twelve significant digits, the last width written out in full. At eleven it would be `1e+11`, and a fixture whose ticks skip that power cannot tell the two apart; the first draft of this one skipped it and a mutant of the precision survived.",
+  "width": 200,
+  "height": 220,
+  "padding": 5,
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {
+          "v": 1
+        },
+        {
+          "v": 1000000000000000
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "wide",
+      "type": "log",
+      "domain": {
+        "data": "t",
+        "field": "v"
+      },
+      "range": [
+        220,
+        0
+      ]
+    },
+    {
+      "name": "narrow",
+      "type": "log",
+      "domain": [
+        1,
+        1000
+      ],
+      "range": [
+        220,
+        0
+      ]
+    },
+    {
+      "name": "atTheEdge",
+      "type": "log",
+      "domain": [
+        10000000000,
+        1000000000000
+      ],
+      "range": [
+        220,
+        0
+      ]
+    }
+  ],
+  "axes": [
+    {
+      "orient": "left",
+      "scale": "wide",
+      "tickCount": 10
+    },
+    {
+      "orient": "right",
+      "scale": "narrow",
+      "tickCount": 10
+    },
+    {
+      "orient": "right",
+      "scale": "atTheEdge",
+      "offset": 60,
+      "tickCount": 3
+    }
+  ],
+  "marks": []
+}

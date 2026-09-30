@@ -1,0 +1,112 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A hierarchy built from a flat table rather than read from one. The nest transform groups the rows by two keys and generates the intermediate nodes those keys stand for, which is the only way a table with no parent column can feed a treemap; the treemap then sizes every leaf by its own value and every branch by the sum of its leaves. The branch rectangles are drawn under the leaves so the grouping is visible, and the generated nodes carry a key rather than a name — which is what distinguishes them from the rows that were there to begin with.",
+  "width": 240,
+  "height": 160,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "flat",
+      "values": [
+        { "region": "north", "team": "alpha", "name": "ada", "v": 8 },
+        { "region": "north", "team": "alpha", "name": "bo", "v": 5 },
+        { "region": "north", "team": "beta", "name": "cyd", "v": 12 },
+        { "region": "south", "team": "gamma", "name": "dee", "v": 7 },
+        { "region": "south", "team": "gamma", "name": "eli", "v": 3 },
+        { "region": "south", "team": "delta", "name": "fay", "v": 15 },
+        { "region": "south", "team": "delta", "name": "gus", "v": 4 }
+      ],
+      "transform": [
+        { "type": "nest", "keys": ["region", "team"], "generate": true },
+        {
+          "type": "treemap",
+          "field": "v",
+          "sort": { "field": "value", "order": "descending" },
+          "round": true,
+          "method": "squarify",
+          "padding": 1,
+          "size": [{ "signal": "width" }, { "signal": "height" }]
+        }
+      ]
+    },
+    {
+      "name": "branches",
+      "source": "flat",
+      "transform": [{ "type": "filter", "expr": "datum.children" }]
+    },
+    {
+      "name": "leaves",
+      "source": "flat",
+      "transform": [{ "type": "filter", "expr": "!datum.children" }]
+    }
+  ],
+  "scales": [
+    {
+      "name": "colour",
+      "type": "ordinal",
+      "domain": ["north", "south"],
+      "range": ["#c6dbef", "#fdd0a2"]
+    }
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": { "data": "branches" },
+      "encode": {
+        "enter": {
+          "x": { "field": "x0" },
+          "x2": { "field": "x1" },
+          "y": { "field": "y0" },
+          "y2": { "field": "y1" },
+          "fill": { "value": "#f7f7f7" },
+          "stroke": { "value": "#999999" }
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": { "data": "leaves" },
+      "encode": {
+        "enter": {
+          "x": { "field": "x0" },
+          "x2": { "field": "x1" },
+          "y": { "field": "y0" },
+          "y2": { "field": "y1" },
+          "fill": { "scale": "colour", "field": "region" },
+          "stroke": { "value": "#ffffff" }
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": { "data": "leaves" },
+      "encode": {
+        "enter": {
+          "x": { "signal": "(datum.x0 + datum.x1) / 2" },
+          "y": { "signal": "(datum.y0 + datum.y1) / 2" },
+          "text": { "field": "name" },
+          "align": { "value": "center" },
+          "baseline": { "value": "middle" },
+          "fontSize": { "value": 9 },
+          "fill": { "value": "#333333" }
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": { "data": "branches" },
+      "encode": {
+        "enter": {
+          "x": { "signal": "datum.x0 + 2" },
+          "y": { "signal": "datum.y0 + 2" },
+          "text": { "field": "key" },
+          "baseline": { "value": "top" },
+          "fontSize": { "value": 8 },
+          "fontWeight": { "value": "bold" },
+          "fill": { "value": "#666666" }
+        }
+      }
+    }
+  ]
+}

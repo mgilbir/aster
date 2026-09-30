@@ -1,0 +1,21 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "The same rule for a grouped chart, where the order lands on the offset channel rather than on a column of its own.",
+  "data": {
+    "values": [
+      {"category": "a", "group": "x", "value": 0.1},
+      {"category": "a", "group": "y", "value": 0.6},
+      {"category": "a", "group": "z", "value": 0.9},
+      {"category": "b", "group": "x", "value": 0.7},
+      {"category": "b", "group": "y", "value": 0.2},
+      {"category": "b", "group": "z", "value": 1.1}
+    ]
+  },
+  "mark": "bar",
+  "encoding": {
+    "x": {"field": "category"},
+    "y": {"field": "value", "type": "quantitative"},
+    "xOffset": {"field": "group"},
+    "fill": {"field": "group", "scale": {"domain": ["y", "x", "z"]}}
+  }
+}

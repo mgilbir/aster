@@ -1,0 +1,20 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "Bars with a rounded end, which Vega-Lite draws by wrapping each stack in a group positioned by `y`/`y2` and marked `clip: true` — so the radius rounds the stack rather than every segment in it. That wrapper is why this fixture exists: a group is rect-like and takes its extent from `y2` as readily as from `height`, and reading only `height` made the group zero-high. Because it clips, it clipped away the very bars it was there to round: the chart drew its axes, its gridlines and its labels, and no data, with no diagnostic. A colour ramp is on it too, so the bars are distinguishable from one another and from the background in whatever draws them.",
+  "width": 200,
+  "height": 120,
+  "data": {
+    "values": [
+      {"month": "Jan", "rain": 62},
+      {"month": "Feb", "rain": 48},
+      {"month": "Mar", "rain": 31},
+      {"month": "Apr", "rain": 18}
+    ]
+  },
+  "mark": {"type": "bar", "cornerRadiusEnd": 3},
+  "encoding": {
+    "x": {"field": "month", "type": "nominal", "sort": null, "axis": {"labelAngle": 0}},
+    "y": {"field": "rain", "type": "quantitative", "title": "rainfall (mm)"},
+    "color": {"field": "rain", "type": "quantitative", "legend": null}
+  }
+}

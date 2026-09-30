@@ -1,0 +1,35 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "Colours bound to a set of pickers, over a domain the chart lists once.",
+  "data": {"url": "data/cars.json"},
+  "params": [
+    {"name": "color_usa", "value": "#4682b4", "bind": {"input": "color"}},
+    {"name": "color_europe", "value": "#e7ba52", "bind": {"input": "color"}},
+    {"name": "color_japan", "value": "#a7a7a7", "bind": {"input": "color"}}
+  ],
+  "layer": [
+    {
+      "mark": "point",
+      "encoding": {
+        "x": {"field": "Horsepower", "type": "quantitative"},
+        "y": {"field": "Miles_per_Gallon", "type": "quantitative"},
+        "color": {
+          "field": "Origin",
+          "type": "nominal",
+          "scale": {
+            "domain": ["USA", "Europe", "Japan"],
+            "range": [{"expr": "color_usa"}, {"expr": "color_europe"}, {"expr": "color_japan"}]
+          }
+        }
+      }
+    },
+    {
+      "mark": {"type": "point", "filled": true, "opacity": 0.3},
+      "encoding": {
+        "x": {"field": "Acceleration", "type": "quantitative"},
+        "y": {"field": "Miles_per_Gallon", "type": "quantitative"},
+        "color": {"field": "Origin", "type": "nominal"}
+      }
+    }
+  ]
+}

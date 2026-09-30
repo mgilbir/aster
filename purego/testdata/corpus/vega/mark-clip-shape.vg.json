@@ -1,0 +1,107 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "a mark's clip is a shape, not a boolean: one mark is clipped to a path and one to a globe's outline, and both shapes reach outside the plotting rectangle. Under the default autosize the surface is sized by what survives the clip, so reading either clip as \"the rectangle\" makes a visibly smaller picture.",
+  "width": 200,
+  "height": 120,
+  "padding": 5,
+  "signals": [
+    {
+      "name": "outline",
+      "value": "M-60,30L240,30L240,140Z"
+    }
+  ],
+  "projections": [
+    {
+      "name": "globe",
+      "type": "orthographic",
+      "scale": 120,
+      "translate": [
+        100,
+        60
+      ]
+    }
+  ],
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {
+          "x": -40,
+          "y": 60
+        },
+        {
+          "x": 60,
+          "y": 40
+        },
+        {
+          "x": 150,
+          "y": 90
+        },
+        {
+          "x": 260,
+          "y": 60
+        }
+      ]
+    }
+  ],
+  "marks": [
+    {
+      "type": "symbol",
+      "clip": {
+        "path": {
+          "signal": "outline"
+        }
+      },
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "field": "x"
+          },
+          "y": {
+            "field": "y"
+          },
+          "size": {
+            "value": 300
+          },
+          "fill": {
+            "value": "steelblue"
+          }
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "clip": {
+        "sphere": "globe"
+      },
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "field": "x"
+          },
+          "width": {
+            "value": 6
+          },
+          "y": {
+            "value": 10
+          },
+          "height": {
+            "value": 100
+          },
+          "fill": {
+            "value": "#e45756"
+          },
+          "fillOpacity": {
+            "value": 0.5
+          }
+        }
+      }
+    }
+  ]
+}

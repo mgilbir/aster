@@ -1,0 +1,21 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "Two band charts side by side, each counting its own categories.",
+  "data": {"url": "data/cars.json"},
+  "hconcat": [
+    {
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "Origin", "type": "nominal"},
+        "y": {"aggregate": "count"}
+      }
+    },
+    {
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "Cylinders", "type": "ordinal"},
+        "y": {"aggregate": "count"}
+      }
+    }
+  ]
+}

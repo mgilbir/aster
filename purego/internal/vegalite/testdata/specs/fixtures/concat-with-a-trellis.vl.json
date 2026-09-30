@@ -1,0 +1,26 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A trellis beside a plain plot: the grid belongs to the plot that holds it, and lays its cells out inside that plot's group.",
+  "data": {"url": "data/cars.json"},
+  "vconcat": [
+    {
+      "title": "By origin",
+      "mark": "line",
+      "encoding": {
+        "y": {"field": "Horsepower", "aggregate": "mean", "axis": {"title": null}},
+        "x": {"field": "Cylinders", "type": "ordinal"},
+        "row": {"field": "Origin", "header": {"title": null}}
+      },
+      "height": 30
+    },
+    {
+      "mark": "line",
+      "encoding": {
+        "x": {"field": "Cylinders", "type": "ordinal"},
+        "y": {"field": "Horsepower", "aggregate": "mean", "axis": {"title": null}}
+      },
+      "height": 50
+    }
+  ],
+  "config": {"facet": {"spacing": 5}}
+}

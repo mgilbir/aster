@@ -1,0 +1,129 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A stroke of negative width draws nothing and still **measures**. Upstream's `boundStroke` opens `if (item.stroke && item.opacity !== 0 && item.strokeOpacity !== 0)` \u2014 a colour and two opacities, and no test on the width \u2014 so a negative one flows into the allowance and *shrinks* the bounds. The allowance is `e = max(sw/2, miterLimit * sw / 2)`, and that `max` is why the same width behaves so differently either side of zero: for a positive width the miter term wins and the bounds grow by four times it, while for a negative width the **larger** of two negatives is the plain half-width, so they shrink by one times it. A symbol of size 80 measures 8.94 tall unstroked, 28.94 with a stroke of 5, and 3.94 with a stroke of -5. This engine asked `Stroke.isVisible`, which is `width > 0`, and so left a negative stroke out of the measurement entirely \u2014 the right question for whether a stroke draws, the wrong one for whether it measures. The zero row is here because it is the case the two questions agree on, and the sizes are written out through a text mark because a shrunk bound is only visible in the surface it produces. The lower row is a **path** mark rather than a symbol, because the two are measured by different code with the same guard: a symbol expands its own outline, a path expands the traced one, and both refused a negative allowance. A fixture with only symbols left the path's half unpinned \u2014 a mutant putting its guard back survived \u2014 which is how the second half came to be here.",
+  "width": 260,
+  "height": 110,
+  "padding": 5,
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {
+          "w": -5,
+          "n": 1
+        },
+        {
+          "w": 0,
+          "n": 2
+        },
+        {
+          "w": 5,
+          "n": 3
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "point",
+      "domain": {
+        "data": "t",
+        "field": "n"
+      },
+      "range": [
+        40,
+        220
+      ],
+      "padding": 0.5
+    }
+  ],
+  "marks": [
+    {
+      "type": "symbol",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "update": {
+          "x": {
+            "scale": "x",
+            "field": "n"
+          },
+          "y": {
+            "value": 60
+          },
+          "size": {
+            "value": 80
+          },
+          "shape": {
+            "value": "triangle"
+          },
+          "fill": {
+            "value": "#4c78a8"
+          },
+          "stroke": {
+            "value": "#333"
+          },
+          "strokeWidth": {
+            "field": "w"
+          }
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "update": {
+          "x": {
+            "value": 2
+          },
+          "y": {
+            "signal": "14 * datum.n - 12"
+          },
+          "text": {
+            "signal": "'strokeWidth ' + datum.w"
+          },
+          "fontSize": {
+            "value": 9
+          },
+          "baseline": {
+            "value": "top"
+          }
+        }
+      }
+    },
+    {
+      "type": "path",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "update": {
+          "x": {
+            "scale": "x",
+            "field": "n"
+          },
+          "y": {
+            "value": 92
+          },
+          "path": {
+            "value": "M-9,-6L9,-6L0,6Z"
+          },
+          "fill": {
+            "value": "#f58518"
+          },
+          "stroke": {
+            "value": "#333"
+          },
+          "strokeWidth": {
+            "field": "w"
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A trellis of pies, each scaled against its own cell and none of them bordered.",
+  "data": {"url": "data/cars.json"},
+  "mark": {"type": "arc", "outerRadius": 40},
+  "encoding": {
+    "theta": {"field": "Horsepower", "aggregate": "sum", "stack": true},
+    "color": {"field": "Cylinders", "type": "nominal"},
+    "column": {"field": "Origin", "type": "nominal"}
+  }
+}

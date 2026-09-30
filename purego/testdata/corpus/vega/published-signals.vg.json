@@ -1,0 +1,57 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A signal reading a signal a transform published, sizing a scale that positions the marks.",
+  "width": 200,
+  "height": 100,
+  "padding": 5,
+
+  "signals": [
+    {"name": "span", "update": "vals[1] - vals[0]"},
+    {"name": "step", "update": "span / 4"}
+  ],
+
+  "data": [
+    {
+      "name": "t",
+      "values": [{"v": 3}, {"v": 7}, {"v": 11}],
+      "transform": [
+        {"type": "extent", "field": "v", "signal": "vals"}
+      ]
+    }
+  ],
+
+  "scales": [
+    {
+      "name": "x",
+      "type": "linear",
+      "domain": {"signal": "vals"},
+      "range": [0, {"signal": "span * 20"}]
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": [0, 20],
+      "range": "height"
+    }
+  ],
+
+  "axes": [
+    {"orient": "bottom", "scale": "x", "tickCount": 4}
+  ],
+
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "t"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "v"},
+          "width": {"signal": "step"},
+          "y": {"scale": "y", "field": "v"},
+          "y2": {"scale": "y", "value": 0},
+          "fill": {"value": "steelblue"}
+        }
+      }
+    }
+  ]
+}

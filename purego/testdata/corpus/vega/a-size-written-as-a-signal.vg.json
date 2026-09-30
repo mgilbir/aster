@@ -1,0 +1,65 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A chart's **size may be written as a signal reference**, and that reference is an *expression*, not a seed. Upstream's `collectSignals` in `view.js` passes five top-level properties — `background`, `autosize`, `padding`, `width` and `height` — through `signalObject`, which is `value && value.signal ? {name, update: value.signal} : {name, value}`. So `\"width\": {\"signal\": \"w * 2 + 10\"}` does not set the width to a number; it makes the built-in `width` signal *derived*, and every scale ranged on `\"width\"`, every axis along it and every mark that reads the signal follows. Both forms are written here so the fixture says which half of the rule is doing the work. `height` is the plain form: the reference names `h` and nothing else declares a `height` signal, so the built-in is the derived one. `width` is the **merged** form: the specification also declares a signal named `width`, and upstream's `extend(pre[s.name], s)` copies that declaration *onto* the built-in — so its `value` of 333 lands as an initial value and the built-in's `update` survives it and wins. The width is therefore `w * 2 + 10`, and 333 is never seen. The reference is also resolved by dependency rather than by position: `w` is declared after the property that reads it. The axis exists because a scale with `\"range\": \"width\"` is the usual way a chart notices its own size, and the rect spans it so the drawing is wrong by the whole plotting area if the reference is dropped rather than wrong by a label.",
+  "width": {"signal": "w * 2 + 10"},
+  "height": {"signal": "h"},
+  "padding": 5,
+  "signals": [
+    {"name": "width", "value": 333},
+    {"name": "w", "value": 95},
+    {"name": "h", "value": 70}
+  ],
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {"u": 0.1, "n": 1},
+        {"u": 0.5, "n": 2},
+        {"u": 0.9, "n": 3}
+      ]
+    }
+  ],
+  "scales": [
+    {"name": "x", "type": "linear", "domain": [0, 1], "range": "width"},
+    {"name": "y", "type": "linear", "domain": [0, 4], "range": "height"}
+  ],
+  "axes": [{"orient": "bottom", "scale": "x", "tickCount": 3}],
+  "marks": [
+    {
+      "type": "rect",
+      "encode": {
+        "update": {
+          "x": {"value": 0},
+          "y": {"value": 0},
+          "width": {"signal": "width"},
+          "height": {"value": 6},
+          "fill": {"value": "#c6dbef"}
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "from": {"data": "t"},
+      "encode": {
+        "update": {
+          "x": {"scale": "x", "field": "u"},
+          "y": {"scale": "y", "field": "n"},
+          "size": {"value": 40},
+          "fill": {"value": "#4c78a8"}
+        }
+      }
+    },
+    {
+      "type": "text",
+      "encode": {
+        "update": {
+          "x": {"value": 4},
+          "y": {"value": 14},
+          "text": {"signal": "'width ' + width + ' height ' + height"},
+          "fontSize": {"value": 9},
+          "baseline": {"value": "top"}
+        }
+      }
+    }
+  ]
+}

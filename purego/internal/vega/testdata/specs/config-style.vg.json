@@ -1,0 +1,98 @@
+{
+ "width": 160,
+ "height": 80,
+ "padding": 5,
+ "config": {
+  "mark": {
+   "opacity": 0.8
+  },
+  "rect": {
+   "fill": "#e45756",
+   "cornerRadius": 4
+  },
+  "style": {
+   "big": {
+    "fontSize": 18,
+    "fontWeight": "bold",
+    "fill": "#333"
+   }
+  },
+  "axis": {
+   "labelFontSize": 14,
+   "domainColor": "#aaa"
+  }
+ },
+ "data": [
+  {
+   "name": "t",
+   "values": [
+    {
+     "a": 1
+    },
+    {
+     "a": 2
+    }
+   ]
+  }
+ ],
+ "scales": [
+  {
+   "name": "x",
+   "type": "linear",
+   "domain": [
+    0,
+    3
+   ],
+   "range": "width"
+  }
+ ],
+ "axes": [
+  {
+   "orient": "bottom",
+   "scale": "x",
+   "title": "T"
+  }
+ ],
+ "marks": [
+  {
+   "type": "rect",
+   "from": {
+    "data": "t"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "scale": "x",
+      "field": "a"
+     },
+     "width": {
+      "value": 20
+     },
+     "y": {
+      "value": 5
+     },
+     "height": {
+      "value": 30
+     }
+    }
+   }
+  },
+  {
+   "type": "text",
+   "style": "big",
+   "encode": {
+    "update": {
+     "x": {
+      "value": 5
+     },
+     "y": {
+      "value": 60
+     },
+     "text": {
+      "value": "Styled"
+     }
+    }
+   }
+  }
+ ]
+}

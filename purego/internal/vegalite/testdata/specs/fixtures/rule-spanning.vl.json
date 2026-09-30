@@ -1,0 +1,21 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A rule spanning from one category to the next, which is a horizontal rule because its second position is on x — the axis a mark measures along is the one its two ends are given on.",
+  "data": {
+    "values": [
+      {"label": "Jan", "sum": 20, "lead": "Feb"},
+      {"label": "Feb", "sum": 45, "lead": "Mar"},
+      {"label": "Mar", "sum": 30, "lead": "Apr"}
+    ]
+  },
+  "layer": [
+    {
+      "mark": {"type": "rule", "color": "#404040", "opacity": 1, "strokeWidth": 2, "xOffset": -22.5, "x2Offset": 22.5},
+      "encoding": {
+        "x2": {"field": "lead"},
+        "y": {"field": "sum", "type": "quantitative"}
+      }
+    }
+  ],
+  "encoding": {"x": {"field": "label", "type": "ordinal", "sort": null}}
+}

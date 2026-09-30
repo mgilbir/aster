@@ -1,0 +1,60 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A size stated as **zero** on a mark definition is not a zero-width mark; it is a mark with no usable size. Upstream tests the size it resolved for *truth* rather than for presence — `if (encoding.size || markDef.size)` decides whether to build a size at all, and `else if (bandSize)` in `defaultSizeRef` decides whether to write the one `getBandSize` returned — so a falsy number fails both and the mark falls past the bandwidth its band would have given it, past `continuousBandSize` on a quantitative axis, onto the tail a mark with no size of any kind takes: `getViewConfigDiscreteStep(config.view, sizeChannel) - 2`, which is 18. This compiler read the size for presence and drew the invisible mark the number literally asks for. The first row is that bar and the second is the same rule on a tick's height. The third states `size: 0` beside a `width` of 20 and comes out twenty wide, because once the `size` is falsy `getBandSize` does run and it reads the **Vega** name first — the same pair written `size: 10, width: 20` is ten. The fourth is the case that must *not* change: an `encoding` of `{\"value\": 0}` is tested as `encoding.size`, a channel definition, and an object is true whatever number it carries, so that bar really is invisible. The fifth states no size at all and takes the same tail by the same rule one level up: a `continuousBandSize` configured as zero is what `getBandSize` returns, and `defaultSizeRef` declines to write it, so a bar on a quantitative axis that a theme has narrowed to nothing is eighteen wide rather than invisible. The first four rows are still centred in their bands either way, since `defaultBandAlign` asks whether the band size is *relative* and zero is a number.",
+  "data": {
+    "values": [
+      {"c": "alpha", "v": 28},
+      {"c": "beta", "v": 55},
+      {"c": "gamma", "v": 43}
+    ]
+  },
+  "vconcat": [
+    {
+      "width": 200,
+      "height": 60,
+      "mark": {"type": "bar", "size": 0},
+      "encoding": {
+        "x": {"field": "c", "type": "nominal"},
+        "y": {"field": "v", "type": "quantitative"}
+      }
+    },
+    {
+      "width": 200,
+      "height": 60,
+      "mark": {"type": "tick", "size": 0},
+      "encoding": {
+        "x": {"field": "v", "type": "quantitative"},
+        "y": {"field": "c", "type": "nominal"}
+      }
+    },
+    {
+      "width": 200,
+      "height": 60,
+      "mark": {"type": "bar", "size": 0, "width": 20},
+      "encoding": {
+        "x": {"field": "c", "type": "nominal"},
+        "y": {"field": "v", "type": "quantitative"}
+      }
+    },
+    {
+      "width": 200,
+      "height": 60,
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "c", "type": "nominal"},
+        "y": {"field": "v", "type": "quantitative"},
+        "size": {"value": 0}
+      }
+    },
+    {
+      "width": 200,
+      "height": 60,
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "v", "type": "quantitative"},
+        "y": {"field": "v", "type": "quantitative"}
+      }
+    }
+  ],
+  "config": {"bar": {"continuousBandSize": 0}}
+}

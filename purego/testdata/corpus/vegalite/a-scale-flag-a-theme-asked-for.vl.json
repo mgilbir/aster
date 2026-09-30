@@ -1,0 +1,59 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A scale property that no rule settles is read straight from the theme. `parseUnitScaleProperty` walks `NON_TYPE_DOMAIN_RANGE_VEGA_SCALE_PROPERTIES` and, for each one the specification did not state, asks `const value = util.hasProperty(scaleRules, property) ? scaleRules[property]({...}) : config.scale[property];` — so the eight properties `scaleRules` claims work themselves out, and every other one is whatever the theme named. That `else` arm was missing here, which is why `config.scale.clamp` and `config.scale.round`, the two flags `ScaleConfig` declares and no rule claims, did nothing at all: a theme could not clamp its continuous scales, and could not ask a whole document for pixel-aligned positions. Neither has a default, so the omission stayed invisible until somebody wrote one. Which scales each flag reaches is decided by the ordinary gate, `scaleTypeSupportProperty`, applied to a themed value exactly as to a stated one: `case 'round': return isContinuousToContinuous(scaleType) || scaleType === 'band' || scaleType === 'point';` against `case 'clamp': return isContinuousToContinuous(scaleType);`. The theme here says `clamp`, `round`, `base` and `align` at once, and the four spread over the scales below by type rather than by channel. The first chart is a bar: its `x` is a band, so it takes the theme's `round` and its `align` and neither the `clamp` — a band has no ends to exceed — nor the `base`, while its `y` is linear and takes `round` and `clamp` and not the other two. The second is a point chart whose `y` is a log scale carrying a stated `clamp: false`: the stated value settles the property and the theme is never consulted for it, so that one scale reads `false` inside a document that asked for `true`, and the same scale takes the theme's `base` of 2 because nothing in the specification spoke about it. The third names its `x` a point scale, which takes `round` and `align` like a band, gives its `size` a quantitative column so a magnitude scale can show that `round` and `clamp` are not confined to positions, and colours by a nominal column — that ordinal colour scale is the row that must not change, since `round` and `clamp` and `base` and `align` are all wrong for it and it comes out of a themed document with none of them. The fourth colours by a number instead, so the colour scale is linear and does take both flags, which is the case the documentation's \"only available for x, y, and size scales\" would have you doubt and the code does not.",
+  "data": {
+    "values": [
+      {"c": "alpha", "v": 28, "w": 3},
+      {"c": "beta", "v": 55, "w": 7},
+      {"c": "gamma", "v": 43, "w": 5},
+      {"c": "delta", "v": 91, "w": 9}
+    ]
+  },
+  "hconcat": [
+    {
+      "width": 140,
+      "height": 110,
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "c", "type": "nominal"},
+        "y": {"field": "v", "type": "quantitative"}
+      }
+    },
+    {
+      "width": 140,
+      "height": 110,
+      "mark": "point",
+      "encoding": {
+        "x": {"field": "w", "type": "quantitative"},
+        "y": {
+          "field": "v",
+          "type": "quantitative",
+          "scale": {"type": "log", "clamp": false}
+        }
+      }
+    },
+    {
+      "width": 140,
+      "height": 110,
+      "mark": "point",
+      "encoding": {
+        "x": {"field": "c", "type": "nominal", "scale": {"type": "point"}},
+        "color": {"field": "c", "type": "nominal"},
+        "size": {"field": "v", "type": "quantitative"}
+      }
+    },
+    {
+      "width": 140,
+      "height": 110,
+      "mark": "point",
+      "encoding": {
+        "x": {"field": "w", "type": "quantitative"},
+        "y": {"field": "v", "type": "quantitative"},
+        "color": {"field": "v", "type": "quantitative"}
+      }
+    }
+  ],
+  "config": {
+    "scale": {"clamp": true, "round": true, "base": 2, "align": 0.2}
+  }
+}

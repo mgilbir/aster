@@ -1,0 +1,17 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A value no scale can place, drawn rather than dropped, at the scale's own output for one.",
+  "data": {
+    "values": [
+      {"a": 1, "b": 4},
+      {"a": 2, "b": null},
+      {"a": 3, "b": 6},
+      {"a": 4, "b": 5}
+    ]
+  },
+  "mark": {"type": "point", "invalid": null},
+  "encoding": {
+    "x": {"field": "a", "type": "quantitative"},
+    "y": {"field": "b", "type": "quantitative"}
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A heatmap whose rects sit over their buckets on both axes, each bucket interpolated beside its own.",
+  "data": {"url": "data/cars.json"},
+  "mark": "rect",
+  "encoding": {
+    "x": {"field": "Year", "timeUnit": "year", "type": "temporal", "bandPosition": 0},
+    "y": {"field": "Year", "timeUnit": "month", "type": "temporal", "bandPosition": 0},
+    "color": {"field": "Horsepower", "aggregate": "max", "type": "quantitative"}
+  }
+}

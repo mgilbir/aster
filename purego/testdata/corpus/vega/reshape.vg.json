@@ -1,0 +1,66 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A grouped bar chart built by folding wide records into long ones, then projecting, sorting and numbering them. fold, project, collect and identifier have never had a fixture.",
+  "width": 260,
+  "height": 120,
+  "padding": 5,
+  "data": [
+    {
+      "name": "wide",
+      "values": [
+        {"month": "Jan", "product": 30, "services": 18, "noise": "drop me"},
+        {"month": "Feb", "product": 22, "services": 27, "noise": "drop me"},
+        {"month": "Mar", "product": 41, "services": 12, "noise": "drop me"}
+      ]
+    },
+    {
+      "name": "long",
+      "source": "wide",
+      "transform": [
+        {"type": "fold", "fields": ["product", "services"], "as": ["stream", "amount"]},
+        {"type": "project", "fields": ["month", "stream", "amount"]},
+        {"type": "collect", "sort": {"field": ["stream", "month"], "order": ["ascending", "descending"]}},
+        {"type": "identifier", "as": "seq"}
+      ]
+    }
+  ],
+  "scales": [
+    {"name": "x", "type": "band", "domain": {"data": "long", "field": "month"}, "range": "width", "padding": 0.2},
+    {"name": "inner", "type": "band", "domain": {"data": "long", "field": "stream"}, "range": [0, 74], "padding": 0.1},
+    {"name": "y", "type": "linear", "domain": {"data": "long", "field": "amount"}, "range": "height", "nice": true, "zero": true},
+    {"name": "colour", "type": "ordinal", "domain": {"data": "long", "field": "stream"}, "range": {"scheme": "tableau10"}}
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "x"},
+    {"orient": "left", "scale": "y", "tickCount": 4}
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "long"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "month", "offset": 0},
+          "width": {"scale": "inner", "band": 1},
+          "y": {"scale": "y", "field": "amount"},
+          "y2": {"scale": "y", "value": 0},
+          "fill": {"scale": "colour", "field": "stream"}
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": {"data": "long"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "month", "band": 0.5},
+          "y": {"value": 10},
+          "text": {"field": "seq"},
+          "align": {"value": "center"},
+          "fontSize": {"value": 9},
+          "fill": {"value": "#888888"}
+        }
+      }
+    }
+  ]
+}

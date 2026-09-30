@@ -1,0 +1,15 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A rule at a computed mean drawn over the bars it summarises, sharing one x scale.",
+  "data": {"values": [
+    {"c": "a", "v": 3}, {"c": "b", "v": 5}, {"c": "d", "v": 2}, {"c": "e", "v": 6}
+  ]},
+  "layer": [
+    {"mark": "bar", "encoding": {"y": {"field": "v", "type": "quantitative"}}},
+    {
+      "mark": {"type": "rule", "color": "firebrick", "size": 2},
+      "encoding": {"y": {"aggregate": "mean", "field": "v", "type": "quantitative"}}
+    }
+  ],
+  "encoding": {"x": {"field": "c", "type": "nominal"}}
+}

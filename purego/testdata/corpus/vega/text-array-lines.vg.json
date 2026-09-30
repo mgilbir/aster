@@ -1,0 +1,73 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A text mark whose value is an array is one line per element, and a single-element array is a plain label. `lineBreak` is ignored when the value is an array, which is upstream's own condition.",
+  "width": 260,
+  "height": 150,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "labels",
+      "values": [
+        {"x": 20, "y": 25, "align": "left", "baseline": "top"},
+        {"x": 130, "y": 25, "align": "center", "baseline": "middle"},
+        {"x": 240, "y": 25, "align": "right", "baseline": "bottom"}
+      ]
+    }
+  ],
+  "marks": [
+    {
+      "type": "text",
+      "from": {"data": "labels"},
+      "encode": {
+        "enter": {
+          "x": {"field": "x"},
+          "y": {"field": "y"},
+          "align": {"field": "align"},
+          "baseline": {"field": "baseline"},
+          "text": {"value": ["first line", "second line", "third"]},
+          "fontSize": {"value": 11},
+          "fill": {"value": "black"}
+        }
+      }
+    },
+    {
+      "type": "text",
+      "encode": {
+        "enter": {
+          "x": {"value": 20},
+          "y": {"value": 95},
+          "text": {"value": ["only one element"]},
+          "fontSize": {"value": 13},
+          "fill": {"value": "firebrick"}
+        }
+      }
+    },
+    {
+      "type": "text",
+      "encode": {
+        "enter": {
+          "x": {"value": 20},
+          "y": {"value": 120},
+          "text": {"value": ["kept", "apart"]},
+          "lineBreak": {"value": "/"},
+          "fontSize": {"value": 11},
+          "fill": {"value": "steelblue"}
+        }
+      }
+    },
+    {
+      "type": "text",
+      "encode": {
+        "enter": {
+          "x": {"value": 150},
+          "y": {"value": 120},
+          "text": {"value": "split/on/slashes"},
+          "lineBreak": {"value": "/"},
+          "fontSize": {"value": 11},
+          "fill": {"value": "seagreen"}
+        }
+      }
+    }
+  ]
+}

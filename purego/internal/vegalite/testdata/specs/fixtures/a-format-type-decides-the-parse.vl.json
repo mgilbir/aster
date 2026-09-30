@@ -1,0 +1,40 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A guide's `formatType` settles the whole channel, and two rules turn on what it says. `getFormatMixins` reads the **guide's** pair for anything that is not a plain string definition — `const guide = getGuide(fieldDef) ?? {}; const {format, formatType} = guide;` — so an `axis` block decides it for the field and not only for the labels. First: `addLineBreaksToTooltip` uses the array-aware form only for a discrete field with no time unit and `!getFormatMixins(channelDef).format && !getFormatMixins(channelDef).formatType`, so a category whose axis names a format type is spoken **plainly** where one with none is joined as a list — the first two panels are that pair, and the difference is a whole `isArray` branch in the description. Second: `isFieldOrDatumDefForTimeFormat` is `formatType === 'time' || (!formatType && isTemporalFieldDef(...))`, and it decides whether a column is parsed into dates **at all** — so the third panel's temporal field, whose axis says `number`, is never parsed: upstream emits the source rows untouched, derives no dataset for the parse it does not do, and leaves a time scale standing over the raw strings. The fourth is the same field with no format type at all, parsed as usual, so the pair says which of the two the rule chose rather than only that something happened. These were pinned by `GuideFormatTypeTest` alone because upstream's rendering of them was eight pixels taller than this engine's for a reason nobody had explained; the reason was a label over a value that is not an instant, and with that fixed these are comparable as drawings as well as specifications.",
+  "data": {
+    "values": [
+      {"c": "alpha", "t": "2024-01-07", "v": 1},
+      {"c": "beta", "t": "2024-03-19", "v": 2}
+    ]
+  },
+  "hconcat": [
+    {
+      "width": 60, "height": 50, "mark": "bar",
+      "encoding": {
+        "x": {"field": "c", "type": "nominal"},
+        "y": {"field": "v", "type": "quantitative"}
+      }
+    },
+    {
+      "width": 60, "height": 50, "mark": "bar",
+      "encoding": {
+        "x": {"field": "c", "type": "nominal", "axis": {"formatType": "number"}},
+        "y": {"field": "v", "type": "quantitative"}
+      }
+    },
+    {
+      "width": 60, "height": 50, "mark": "line",
+      "encoding": {
+        "x": {"field": "t", "type": "temporal", "axis": {"formatType": "number"}},
+        "y": {"field": "v", "type": "quantitative"}
+      }
+    },
+    {
+      "width": 60, "height": 50, "mark": "line",
+      "encoding": {
+        "x": {"field": "t", "type": "temporal"},
+        "y": {"field": "v", "type": "quantitative"}
+      }
+    }
+  ]
+}

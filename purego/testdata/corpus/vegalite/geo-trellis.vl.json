@@ -1,0 +1,26 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A grid of maps: the outlines are joined on as whole records, gathered into a collection of their own, and the grid has one projection so every cell is drawn at the same scale. The figures are inline so the fixture stays about the grid rather than about loading; keying a number against its own text is pinned on its own, by the runtime's format-parse fixture.",
+  "width": 300,
+  "height": 180,
+  "data": {
+    "values": [
+      {"id": 1, "rate": 0.04, "band": "low"},
+      {"id": 4, "rate": 0.09, "band": "high"},
+      {"id": 5, "rate": 0.06, "band": "low"},
+      {"id": 6, "rate": 0.11, "band": "high"},
+      {"id": 8, "rate": 0.03, "band": "low"},
+      {"id": 12, "rate": 0.1, "band": "high"}
+    ]
+  },
+  "transform": [
+    {"lookup": "id", "from": {"data": {"url": "data/us-10m.json", "format": {"type": "topojson", "feature": "states"}}, "key": "id"}, "as": "geo"}
+  ],
+  "projection": {"type": "albersUsa"},
+  "mark": "geoshape",
+  "encoding": {
+    "shape": {"field": "geo", "type": "geojson"},
+    "color": {"field": "rate", "type": "quantitative"},
+    "row": {"field": "band"}
+  }
+}

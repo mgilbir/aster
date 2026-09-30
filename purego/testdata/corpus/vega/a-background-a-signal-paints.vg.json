@@ -1,0 +1,40 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "**A background written as a signal reference is that signal's expression, and a background named by a signal is that signal's value.** `collectSignals` puts five top-level properties through `signalObject` \u2014 `background`, `autosize`, `padding`, `width` and `height` \u2014 so `\"background\": {\"signal\": \"bg\"}` does not set a colour: it makes the **built-in `background` signal** derived, and the surface follows whatever that comes to. The property is only a seed. The same merge that governs `width` governs this one, which is why a specification declaring no `background` property and a signal *named* `background` paints that signal's colour \u2014 `world-map` does exactly that, binding it to a colour picker so a reader can change the page under the map, and this engine read only the property and painted nothing for the whole life of that fixture. It went unseen because the reference recorded no background at all until this change; 71 of these fixtures declare one and none of them was ever compared. Here the reference is written as an expression so the value cannot be confused with a literal: `bg` holds `'#ee'` and the reference appends `'f'`.",
+  "width": 120,
+  "height": 50,
+  "padding": 5,
+  "background": {
+    "signal": "bg + 'f'"
+  },
+  "signals": [
+    {
+      "name": "bg",
+      "value": "#ee"
+    }
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "encode": {
+        "update": {
+          "x": {
+            "value": 0
+          },
+          "y": {
+            "value": 0
+          },
+          "width": {
+            "value": 40
+          },
+          "height": {
+            "value": 20
+          },
+          "fill": {
+            "value": "#4c78a8"
+          }
+        }
+      }
+    }
+  ]
+}

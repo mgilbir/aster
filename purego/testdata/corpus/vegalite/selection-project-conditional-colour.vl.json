@@ -1,0 +1,15 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A click projected onto a colour written entirely as a test: it still remembers the column.",
+  "data": {"url": "data/cars.json"},
+  "params": [{"name": "click", "select": {"type": "point", "encodings": ["color"]}}],
+  "mark": "bar",
+  "encoding": {
+    "x": {"aggregate": "count"},
+    "y": {"field": "Origin", "type": "nominal"},
+    "color": {
+      "condition": {"param": "click", "field": "Origin", "type": "nominal"},
+      "value": "lightgray"
+    }
+  }
+}

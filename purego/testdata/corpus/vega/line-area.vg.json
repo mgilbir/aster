@@ -1,0 +1,109 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "Line, area, symbol and text marks over a shared pair of linear scales. The third differential fixture: covers the mark encoders that draw as connected series, per-datum symbols, and text with alignment and offsets. A second area is declared horizontal, which moves its back boundary along x rather than y — `areahShape` reads `x0 = x + width` and leaves the height alone.",
+  "width": 320,
+  "height": 180,
+  "padding": 5,
+  "data": [
+    {
+      "name": "series",
+      "values": [
+        {"t": 0, "v": 12, "label": "a"},
+        {"t": 1, "v": 43, "label": "b"},
+        {"t": 2, "v": 31, "label": "c"},
+        {"t": 3, "v": 68, "label": "d"},
+        {"t": 4, "v": 55, "label": "e"},
+        {"t": 5, "v": 91, "label": "f"}
+      ]
+    }
+  ],
+  "scales": [
+    {"name": "x", "type": "linear", "domain": {"data": "series", "field": "t"}, "range": "width"},
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {"data": "series", "field": "v"},
+      "nice": true,
+      "range": "height"
+    }
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "x", "tickCount": 5},
+    {"orient": "left", "scale": "y"}
+  ],
+  "marks": [
+    {
+      "type": "area",
+      "name": "band",
+      "from": {"data": "series"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "t"},
+          "y": {"scale": "y", "field": "v"},
+          "y2": {"scale": "y", "value": 0},
+          "fill": {"value": "lightsteelblue"},
+          "fillOpacity": {"value": 0.6}
+        }
+      }
+    },
+    {
+      "type": "line",
+      "name": "trend",
+      "from": {"data": "series"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "t"},
+          "y": {"scale": "y", "field": "v"},
+          "stroke": {"value": "steelblue"},
+          "strokeWidth": {"value": 3}
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "name": "points",
+      "from": {"data": "series"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "t"},
+          "y": {"scale": "y", "field": "v"},
+          "size": {"value": 90},
+          "shape": {"value": "diamond"},
+          "fill": {"value": "firebrick"}
+        }
+      }
+    },
+    {
+      "type": "text",
+      "name": "labels",
+      "from": {"data": "series"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "t"},
+          "y": {"scale": "y", "field": "v"},
+          "text": {"field": "label"},
+          "align": {"value": "center"},
+          "baseline": {"value": "bottom"},
+          "dy": {"value": -8},
+          "fontSize": {"value": 12},
+          "fill": {"value": "#333"}
+        }
+      }
+    },
+    {
+      "type": "area",
+      "name": "bandHorizontal",
+      "from": {"data": "series"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "t"},
+          "y": {"scale": "y", "field": "v"},
+          "y2": {"scale": "y", "value": 0},
+          "orient": {"value": "horizontal"},
+          "fill": {"value": "#e45756"},
+          "fillOpacity": {"value": 0.4}
+        }
+      }
+    }
+  ]
+}

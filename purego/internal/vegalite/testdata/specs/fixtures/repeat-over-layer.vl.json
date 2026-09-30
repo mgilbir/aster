@@ -1,0 +1,15 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A repetition whose copies are *layered* rather than laid side by side — `{\"repeat\": {\"layer\": […]}}`. The other look-alike of a composition inside a layer, and allowed where that is not: the repeat is above the layer here, not inside it.",
+  "data": {
+    "values": [
+      {"x": 1, "y": 2},
+      {"x": 3, "y": 4}
+    ]
+  },
+  "repeat": {"layer": ["x", "y"]},
+  "spec": {
+    "mark": "point",
+    "encoding": {"y": {"field": {"repeat": "layer"}, "type": "quantitative"}}
+  }
+}

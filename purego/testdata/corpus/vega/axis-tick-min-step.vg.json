@@ -1,0 +1,110 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "tickMinStep puts a floor on the gap between ticks, which upstream applies by reducing the tick count until the step d3 would choose reaches it. Four axes over the same domain ask for the same twelve ticks with four different minimum steps.",
+  "width": 300,
+  "height": 240,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {
+          "v": 0
+        },
+        {
+          "v": 97
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": [
+        0,
+        97
+      ],
+      "range": "height"
+    },
+    {
+      "name": "y2",
+      "type": "linear",
+      "domain": [
+        0,
+        97
+      ],
+      "range": "height"
+    },
+    {
+      "name": "x",
+      "type": "linear",
+      "domain": [
+        0,
+        97
+      ],
+      "range": "width"
+    },
+    {
+      "name": "xlog",
+      "type": "log",
+      "domain": [
+        1,
+        1000
+      ],
+      "range": "width"
+    }
+  ],
+  "axes": [
+    {
+      "orient": "left",
+      "scale": "y",
+      "tickCount": 12,
+      "title": "twelve, no floor"
+    },
+    {
+      "orient": "right",
+      "scale": "y2",
+      "tickCount": 12,
+      "tickMinStep": 20,
+      "title": "twelve, floor 20"
+    },
+    {
+      "orient": "bottom",
+      "scale": "x",
+      "tickCount": 12,
+      "tickMinStep": 200,
+      "title": "a floor wider than the domain"
+    },
+    {
+      "orient": "top",
+      "scale": "xlog",
+      "tickCount": 12,
+      "tickMinStep": 100,
+      "title": "a log scale, capped but not walked down"
+    }
+  ],
+  "marks": [
+    {
+      "type": "rule",
+      "encode": {
+        "enter": {
+          "x": {
+            "value": 0
+          },
+          "x2": {
+            "signal": "width"
+          },
+          "y": {
+            "scale": "y",
+            "value": 50
+          },
+          "stroke": {
+            "value": "#cccccc"
+          }
+        }
+      }
+    }
+  ]
+}

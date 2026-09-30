@@ -1,0 +1,112 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "a left-hand legend beside a left axis with a rotated title: the legend is anchored at the floor of how far that axis reaches, so the title's box has to be measured to the last bit \u2014 upstream measures it at the axis's origin and translates it out.",
+  "width": 200,
+  "height": 120,
+  "padding": 5,
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {
+          "c": "alpha",
+          "v": 28,
+          "g": "north"
+        },
+        {
+          "c": "beta",
+          "v": 55,
+          "g": "south"
+        },
+        {
+          "c": "gamma",
+          "v": 91,
+          "g": "north"
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {
+        "data": "t",
+        "field": "c"
+      },
+      "range": "width",
+      "padding": 0.1
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {
+        "data": "t",
+        "field": "v"
+      },
+      "range": "height",
+      "nice": true
+    },
+    {
+      "name": "colour",
+      "type": "ordinal",
+      "domain": {
+        "data": "t",
+        "field": "g"
+      },
+      "range": "category"
+    }
+  ],
+  "axes": [
+    {
+      "orient": "bottom",
+      "scale": "x",
+      "title": "category"
+    },
+    {
+      "orient": "left",
+      "scale": "y",
+      "title": "amount",
+      "tickCount": 4
+    }
+  ],
+  "legends": [
+    {
+      "fill": "colour",
+      "title": "region",
+      "orient": "left"
+    }
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "x",
+            "field": "c"
+          },
+          "width": {
+            "scale": "x",
+            "band": 1
+          },
+          "y": {
+            "scale": "y",
+            "field": "v"
+          },
+          "y2": {
+            "scale": "y",
+            "value": 0
+          },
+          "fill": {
+            "scale": "colour",
+            "field": "g"
+          }
+        }
+      }
+    }
+  ]
+}

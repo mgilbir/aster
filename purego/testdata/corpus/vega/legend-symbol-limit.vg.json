@@ -1,0 +1,169 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "symbolLimit is not a plain truncation: upstream keeps limit - 1 swatches and spends the last row saying how many entries it left out, with the swatch beside that row drawn from the next value. Beside them, a legend whose symbolType is an SVG **path** rather than one of the twelve names, which is how a specification asks for a swatch upstream does not ship \u2014 the same rule a mark's shape channel follows. A limit below one is the case that reads as a number rather than as a count: a zero is falsy and limits nothing, a negative one and a fractional one each keep no swatches at all, and the summary row that is left anchors at the legend's own edge because the anchor was measured before that row existed.",
+  "width": 200,
+  "height": 140,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {
+          "c": "alpha",
+          "v": 1
+        },
+        {
+          "c": "beta",
+          "v": 2
+        },
+        {
+          "c": "gamma",
+          "v": 3
+        },
+        {
+          "c": "delta",
+          "v": 4
+        },
+        {
+          "c": "epsilon",
+          "v": 5
+        },
+        {
+          "c": "zeta",
+          "v": 6
+        },
+        {
+          "c": "eta",
+          "v": 7
+        },
+        {
+          "c": "theta",
+          "v": 8
+        },
+        {
+          "c": "iota",
+          "v": 9
+        },
+        {
+          "c": "kappa",
+          "v": 10
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {
+        "data": "t",
+        "field": "c"
+      },
+      "range": "width"
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {
+        "data": "t",
+        "field": "v"
+      },
+      "range": "height"
+    },
+    {
+      "name": "colour",
+      "type": "ordinal",
+      "domain": {
+        "data": "t",
+        "field": "c"
+      },
+      "range": "category"
+    },
+    {
+      "name": "area",
+      "type": "linear",
+      "domain": {
+        "data": "t",
+        "field": "v"
+      },
+      "range": [
+        20,
+        400
+      ]
+    }
+  ],
+  "legends": [
+    {
+      "fill": "colour",
+      "title": "capped at four",
+      "symbolLimit": 4,
+      "orient": "right"
+    },
+    {
+      "size": "area",
+      "title": "uncapped",
+      "orient": "bottom-right"
+    },
+    {
+      "fill": "colour",
+      "title": "custom",
+      "orient": "top-right",
+      "symbolLimit": 3,
+      "symbolType": "M-0.5,0L0.5,0M0,-0.5L0,0.5M0.2,-0.3L0.5,0L0.2,0.3",
+      "symbolStrokeColor": "#333333",
+      "symbolStrokeWidth": 1.2,
+      "symbolSize": 300
+    },
+    {
+      "fill": "colour",
+      "title": "none kept",
+      "orient": "left",
+      "symbolLimit": -4
+    },
+    {
+      "fill": "colour",
+      "title": "half a row",
+      "orient": "top-left",
+      "symbolLimit": 0.5
+    },
+    {
+      "fill": "colour",
+      "title": "unlimited",
+      "orient": "bottom-left",
+      "symbolLimit": 0
+    }
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "x",
+            "field": "c"
+          },
+          "width": {
+            "scale": "x",
+            "band": 0.9
+          },
+          "y": {
+            "scale": "y",
+            "field": "v"
+          },
+          "y2": {
+            "scale": "y",
+            "value": 0
+          },
+          "fill": {
+            "scale": "colour",
+            "field": "c"
+          }
+        }
+      }
+    }
+  ]
+}

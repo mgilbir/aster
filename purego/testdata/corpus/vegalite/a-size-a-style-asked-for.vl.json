@@ -1,0 +1,36 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "The two ends of `getMarkConfig`'s chain that `a-size-a-theme-asked-for` cannot reach, because a size found early stops the walk. The first row is the **style block**, which upstream puts ahead of everything else — `getFirstDefined(vgChannel ? cfg : undefined, cfg, config[mark.type][vgChannel], …)`, with `cfg` the style config — so `config.style.bar.size` of 13 wins over `config.bar.width` of 5 even though the latter is written under Vega's own name for the property. A mark's styles are its type followed by whatever its `style` names. The second row is the far end: `minBandSize` configured as **zero**, which is a floor of nothing and therefore no floor at all, upstream's test being `minBandSize ? max(…) : bandWidth`. It has to be a `rect` rather than a bar because a size found anywhere earlier in the chain would settle the width before the band is ever measured, and the bar above has one.",
+  "data": {
+    "values": [
+      {"c": "alpha", "v": 28},
+      {"c": "beta", "v": 55},
+      {"c": "gamma", "v": 43}
+    ]
+  },
+  "config": {
+    "style": {"bar": {"size": 13}},
+    "bar": {"width": 5},
+    "rect": {"minBandSize": 0}
+  },
+  "vconcat": [
+    {
+      "width": 200,
+      "height": 60,
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "c", "type": "nominal"},
+        "y": {"field": "v", "type": "quantitative"}
+      }
+    },
+    {
+      "width": 200,
+      "height": 60,
+      "mark": "rect",
+      "encoding": {
+        "x": {"field": "c", "type": "nominal"},
+        "y": {"field": "v", "type": "quantitative"}
+      }
+    }
+  ]
+}

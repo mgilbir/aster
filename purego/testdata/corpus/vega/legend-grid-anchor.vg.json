@@ -1,0 +1,152 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "two legends on the left, one wider than the other, and fractional offsets on both sides: upstream's grid layout rounds each anchor once and measures a far-edge anchor against the whole grid, so the left pair shares the wider one's left edge and a half-unit offset lands on a whole coordinate.",
+  "width": 200,
+  "height": 120,
+  "padding": 5,
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {
+          "c": "alpha",
+          "v": 28,
+          "g": "a much longer region name",
+          "n": 3
+        },
+        {
+          "c": "beta",
+          "v": 55,
+          "g": "south",
+          "n": 9
+        },
+        {
+          "c": "gamma",
+          "v": 91,
+          "g": "east",
+          "n": 6
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {
+        "data": "t",
+        "field": "c"
+      },
+      "range": "width",
+      "padding": 0.1
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {
+        "data": "t",
+        "field": "v"
+      },
+      "range": "height",
+      "nice": true
+    },
+    {
+      "name": "colour",
+      "type": "ordinal",
+      "domain": {
+        "data": "t",
+        "field": "g"
+      },
+      "range": "category"
+    },
+    {
+      "name": "size",
+      "type": "linear",
+      "domain": {
+        "data": "t",
+        "field": "n"
+      },
+      "range": [
+        20,
+        200
+      ]
+    },
+    {
+      "name": "shade",
+      "type": "linear",
+      "domain": {
+        "data": "t",
+        "field": "v"
+      },
+      "range": {
+        "scheme": "blues"
+      }
+    }
+  ],
+  "axes": [
+    {
+      "orient": "bottom",
+      "scale": "x",
+      "title": "category"
+    },
+    {
+      "orient": "left",
+      "scale": "y",
+      "title": "amount",
+      "tickCount": 4
+    }
+  ],
+  "legends": [
+    {
+      "fill": "colour",
+      "title": "region",
+      "orient": "left",
+      "offset": 12.5
+    },
+    {
+      "size": "size",
+      "title": "n",
+      "orient": "left",
+      "offset": 12.5
+    },
+    {
+      "fill": "shade",
+      "title": "amount",
+      "type": "gradient",
+      "orient": "right",
+      "offset": 8.5
+    }
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "x",
+            "field": "c"
+          },
+          "width": {
+            "scale": "x",
+            "band": 1
+          },
+          "y": {
+            "scale": "y",
+            "field": "v"
+          },
+          "y2": {
+            "scale": "y",
+            "value": 0
+          },
+          "fill": {
+            "scale": "colour",
+            "field": "g"
+          }
+        }
+      }
+    }
+  ]
+}

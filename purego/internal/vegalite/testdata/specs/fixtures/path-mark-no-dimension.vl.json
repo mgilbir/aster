@@ -1,0 +1,12 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A line with only one position channel, and that channel not the one its orientation makes its dimension. `getSort` asks whether the dimension channel is a *field* before ordering the points by it: there is an order to draw them in only where the dimension is a column. This compiler ordered by the channel name regardless, so Vega was handed `sort: {\"field\": \"y\"}` for items with no `y` — every item comparing equal, a sort that does nothing at some cost. Found by probing a layer of such a mark, and it has nothing to do with layers.",
+  "data": {
+    "values": [
+      {"x": 1, "y": 2},
+      {"x": 3, "y": 4}
+    ]
+  },
+  "mark": "line",
+  "encoding": {"x": {"field": "y", "type": "quantitative"}}
+}

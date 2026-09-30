@@ -1,0 +1,15 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "Rules spanning a range, the shape a min-max plot is drawn as.",
+  "data": {"values": [
+    {"c": "A", "lo": 2, "hi": 9},
+    {"c": "B", "lo": 4, "hi": 7},
+    {"c": "C", "lo": 1, "hi": 5}
+  ]},
+  "mark": "rule",
+  "encoding": {
+    "x": {"field": "c", "type": "nominal"},
+    "y": {"field": "lo", "type": "quantitative"},
+    "y2": {"field": "hi"}
+  }
+}

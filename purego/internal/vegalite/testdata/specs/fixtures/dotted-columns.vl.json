@@ -1,0 +1,16 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "Columns whose names have dots in them, which are names and not paths.",
+  "data": {
+    "values": [
+      {"source.reco": 2, "source.yes": 1},
+      {"source.reco": 3, "source.yes": 4},
+      {"source.reco": 1, "source.yes": 3}
+    ]
+  },
+  "mark": "point",
+  "encoding": {
+    "x": {"field": "source\\.reco", "type": "quantitative"},
+    "y": {"field": "source\\.yes", "type": "quantitative"}
+  }
+}

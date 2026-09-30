@@ -1,0 +1,14 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A binned colour scale, whose legend labels the buckets rather than the values.",
+  "data": {"values": [
+    {"a": 1, "b": 2, "v": 1}, {"a": 2, "b": 5, "v": 4}, {"a": 3, "b": 1, "v": 7},
+    {"a": 4, "b": 6, "v": 9}, {"a": 5, "b": 3, "v": 3}
+  ]},
+  "mark": "point",
+  "encoding": {
+    "x": {"field": "a", "type": "quantitative"},
+    "y": {"field": "b", "type": "quantitative"},
+    "color": {"field": "v", "type": "quantitative", "bin": {"maxbins": 3}}
+  }
+}

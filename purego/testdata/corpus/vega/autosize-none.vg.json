@@ -1,0 +1,54 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "autosize 'none' with padding: the surface is the declared plotting area plus its padding and does not grow, so the axis labels hanging off the left are clipped rather than made room for.",
+  "width": 160,
+  "height": 90,
+  "padding": 12,
+  "autosize": {"type": "none"},
+  "data": [
+    {
+      "name": "table",
+      "values": [
+        {"c": "alpha", "v": 1200000},
+        {"c": "beta", "v": 780000},
+        {"c": "gamma", "v": 1650000}
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {"data": "table", "field": "c"},
+      "range": "width",
+      "padding": 0.2
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {"data": "table", "field": "v"},
+      "range": "height",
+      "zero": true,
+      "nice": true
+    }
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "x"},
+    {"orient": "left", "scale": "y", "tickCount": 3}
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "c"},
+          "width": {"scale": "x", "band": 1},
+          "y": {"scale": "y", "field": "v"},
+          "y2": {"scale": "y", "value": 0},
+          "fill": {"value": "#4c78a8"}
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A rect-like mark stating its own `align` or `baseline` over a band it would otherwise start at. Upstream chooses the Vega channel first — `left` is `x`, `center` is `xc`, `right` is `x2`, and the same three down the other axis — and only then asks whether that channel is a centre: `const center = vgChannel === 'xc' || vgChannel === 'yc'`. A centred one is placed at the band's middle, `band: 0.5`, where a mark left to fill its band is placed at the leading edge with no band at all. This engine read the *default* alignment instead of the resulting channel, so a bar that asked to be centred was written under `xc` — the channel that means the middle — with its position still at the edge. The three rows here state `center`, the default, and `right`, so the channel and the band are both drawn.",
+  "width": 220,
+  "height": 150,
+  "data": {
+    "values": [
+      {"c": "alpha", "v": 28},
+      {"c": "beta", "v": 55},
+      {"c": "gamma", "v": 43}
+    ]
+  },
+  "vconcat": [
+    {
+      "width": 200,
+      "height": 40,
+      "mark": {"type": "bar", "align": "center", "width": 12},
+      "encoding": {
+        "x": {"field": "c", "type": "nominal"},
+        "y": {"field": "v", "type": "quantitative"}
+      }
+    },
+    {
+      "width": 200,
+      "height": 40,
+      "mark": {"type": "bar", "align": "right", "width": 12},
+      "encoding": {
+        "x": {"field": "c", "type": "nominal"},
+        "y": {"field": "v", "type": "quantitative"}
+      }
+    },
+    {
+      "width": 200,
+      "height": 40,
+      "mark": {"type": "tick", "baseline": "middle"},
+      "encoding": {
+        "x": {"field": "v", "type": "quantitative"},
+        "y": {"field": "c", "type": "nominal"}
+      }
+    }
+  ]
+}

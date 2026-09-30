@@ -1,0 +1,109 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "The seven built-in symbol shapes and three curve families no fixture had drawn. The shapes are the ones a chart reaches for when circles and squares are taken: cross, the four triangles that are not up or down, the arrow and the wedge that point, and the stroke that is a line rather than an area. The curves are the open and closed forms that the earlier fixtures skipped — an open basis and catmull-rom drop the segments that need points outside the series, and a closed catmull-rom joins the ends, so all three draw a different outline through the same points.",
+  "width": 260,
+  "height": 170,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "shapes",
+      "values": [
+        { "s": "cross", "i": 0 },
+        { "s": "triangle", "i": 1 },
+        { "s": "triangle-right", "i": 2 },
+        { "s": "triangle-left", "i": 3 },
+        { "s": "arrow", "i": 4 },
+        { "s": "wedge", "i": 5 },
+        { "s": "stroke", "i": 6 }
+      ]
+    },
+    {
+      "name": "series",
+      "values": [
+        { "x": 0, "y": 30 },
+        { "x": 1, "y": 5 },
+        { "x": 2, "y": 45 },
+        { "x": 3, "y": 20 },
+        { "x": 4, "y": 38 },
+        { "x": 5, "y": 8 }
+      ]
+    }
+  ],
+  "scales": [
+    { "name": "col", "type": "linear", "domain": [0, 6], "range": [20, 240] },
+    { "name": "x", "type": "linear", "domain": [0, 5], "range": [20, 240] },
+    { "name": "y", "type": "linear", "domain": [0, 50], "range": [160, 70] }
+  ],
+  "marks": [
+    {
+      "type": "symbol",
+      "from": { "data": "shapes" },
+      "encode": {
+        "enter": {
+          "x": { "scale": "col", "field": "i" },
+          "y": { "value": 25 },
+          "size": { "value": 300 },
+          "shape": { "field": "s" },
+          "fill": { "value": "#c6dbef" },
+          "stroke": { "value": "#08519c" },
+          "strokeWidth": { "value": 1.5 }
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": { "data": "shapes" },
+      "encode": {
+        "enter": {
+          "x": { "scale": "col", "field": "i" },
+          "y": { "value": 48 },
+          "text": { "field": "s" },
+          "align": { "value": "center" },
+          "fontSize": { "value": 7 },
+          "fill": { "value": "#333333" }
+        }
+      }
+    },
+    {
+      "type": "line",
+      "from": { "data": "series" },
+      "encode": {
+        "enter": {
+          "x": { "scale": "x", "field": "x" },
+          "y": { "scale": "y", "field": "y" },
+          "interpolate": { "value": "basis-open" },
+          "stroke": { "value": "#4c78a8" },
+          "strokeWidth": { "value": 2 }
+        }
+      }
+    },
+    {
+      "type": "line",
+      "from": { "data": "series" },
+      "encode": {
+        "enter": {
+          "x": { "scale": "x", "field": "x" },
+          "y": { "scale": "y", "field": "y", "offset": -12 },
+          "interpolate": { "value": "catmull-rom-open" },
+          "stroke": { "value": "#f58518" },
+          "strokeWidth": { "value": 2 }
+        }
+      }
+    },
+    {
+      "type": "line",
+      "from": { "data": "series" },
+      "encode": {
+        "enter": {
+          "x": { "scale": "x", "field": "x" },
+          "y": { "scale": "y", "field": "y", "offset": 12 },
+          "interpolate": { "value": "catmull-rom-closed" },
+          "stroke": { "value": "#54a24b" },
+          "strokeWidth": { "value": 2 },
+          "fill": { "value": "transparent" }
+        }
+      }
+    }
+  ]
+}

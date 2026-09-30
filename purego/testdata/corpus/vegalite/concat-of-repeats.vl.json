@@ -1,0 +1,34 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "Two repetitions stacked: a concatenation's plot may itself be a repetition, which is a concatenation of its copies.",
+  "data": {"url": "data/movies.json"},
+  "vconcat": [
+    {
+      "title": "Ratings",
+      "repeat": {"column": ["Rotten Tomatoes Rating", "IMDB Rating"]},
+      "spec": {
+        "width": 150,
+        "height": 50,
+        "mark": "bar",
+        "encoding": {
+          "x": {"field": {"repeat": "column"}, "bin": {"maxbins": 20}},
+          "y": {"aggregate": "count"}
+        }
+      }
+    },
+    {
+      "title": "Gross",
+      "repeat": {"column": ["US Gross", "Worldwide Gross"]},
+      "spec": {
+        "width": 150,
+        "height": 50,
+        "mark": "bar",
+        "encoding": {
+          "x": {"field": {"repeat": "column"}, "bin": {"maxbins": 20}},
+          "y": {"aggregate": "count"}
+        }
+      }
+    }
+  ],
+  "config": {"countTitle": "Count", "axisX": {"titleLimit": 150}, "axisY": {"minExtent": 40}}
+}

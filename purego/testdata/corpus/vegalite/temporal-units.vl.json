@@ -1,0 +1,14 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A UTC time unit on one axis and a local one on the other, over the same instants.",
+  "data": {"values": [
+    {"d": "2012-03-01T05:00:00Z", "v": 3}, {"d": "2012-03-15T18:00:00Z", "v": 5},
+    {"d": "2012-04-02T09:00:00Z", "v": 2}, {"d": "2012-04-20T23:00:00Z", "v": 6}
+  ]},
+  "mark": "point",
+  "encoding": {
+    "x": {"field": "d", "type": "temporal", "timeUnit": "utcmonth"},
+    "y": {"field": "d", "type": "temporal", "timeUnit": "hours"},
+    "size": {"field": "v", "type": "quantitative"}
+  }
+}

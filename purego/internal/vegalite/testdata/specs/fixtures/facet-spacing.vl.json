@@ -1,0 +1,15 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A grid whose cells are set a gap of their own, captioned at a stated angle.",
+  "data": {"url": "data/cars.json"},
+  "width": 60,
+  "height": {"step": 8},
+  "spacing": 5,
+  "mark": "bar",
+  "encoding": {
+    "y": {"field": "Cylinders", "type": "ordinal", "axis": null},
+    "x": {"aggregate": "count"},
+    "row": {"field": "Origin", "title": "Where from", "header": {"labelAngle": 0}},
+    "column": {"field": "Cylinders", "type": "ordinal"}
+  }
+}

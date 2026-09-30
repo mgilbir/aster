@@ -1,0 +1,22 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "Four aggregates over one column, including the two that only compare.",
+  "data": {"values": [
+    {"g": "a", "v": 3}, {"g": "a", "v": 9}, {"g": "a", "v": 1},
+    {"g": "b", "v": 5}, {"g": "b", "v": 2}, {"g": "b", "v": 8}
+  ]},
+  "layer": [
+    {"mark": {"type": "rule", "size": 3}, "encoding": {
+      "y": {"aggregate": "min", "field": "v", "type": "quantitative"},
+      "y2": {"aggregate": "max", "field": "v"}
+    }},
+    {"mark": {"type": "point", "filled": true, "size": 60}, "encoding": {
+      "y": {"aggregate": "median", "field": "v", "type": "quantitative"}
+    }},
+    {"mark": {"type": "text", "dx": 12}, "encoding": {
+      "y": {"aggregate": "mean", "field": "v", "type": "quantitative"},
+      "text": {"aggregate": "count", "type": "quantitative"}
+    }}
+  ],
+  "encoding": {"x": {"field": "g", "type": "nominal"}}
+}

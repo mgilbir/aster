@@ -1,0 +1,45 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A bandwidth has to come from a band scale. `defaultSizeRef` is handed the *offset's* scale where there is one — `defaultSizeRef(vgSizeChannel, offsetScaleName || scaleName, offsetScale || scale, …)` — and only reaches for a bandwidth once it has asked what that scale is: `if (scaleType === 'band') { …bandwidth… }`, with everything else dropping out of the chain onto the tail a mark with no usable band size takes, a step less two. This compiler read \"there is an offset channel\" as \"there is a band to measure\", which is true of the offset scales a chart usually has and false the moment one is continuous. `bandwidth()` of a linear scale is **0** in Vega, so the first row's bars — offset along a *number* rather than a category — were drawn with no width at all. The second row is the same chart offset by a category, where the offset scale really is a band and the bandwidth is right; the two together say that the rule is the scale's kind and not the offset channel's presence. The third row has no offset at all and takes its own band, which is the case that must keep working.",
+  "data": {
+    "values": [
+      {"c": "alpha", "k": "one", "n": 1, "v": 28},
+      {"c": "alpha", "k": "two", "n": 2, "v": 43},
+      {"c": "beta", "k": "one", "n": 1, "v": 55},
+      {"c": "beta", "k": "two", "n": 2, "v": 12},
+      {"c": "gamma", "k": "one", "n": 1, "v": 91},
+      {"c": "gamma", "k": "two", "n": 2, "v": 37}
+    ]
+  },
+  "vconcat": [
+    {
+      "width": 220,
+      "height": 80,
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "c", "type": "nominal"},
+        "xOffset": {"field": "n", "type": "quantitative"},
+        "y": {"field": "v", "type": "quantitative"}
+      }
+    },
+    {
+      "width": 220,
+      "height": 80,
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "c", "type": "nominal"},
+        "xOffset": {"field": "k", "type": "nominal"},
+        "y": {"field": "v", "type": "quantitative"}
+      }
+    },
+    {
+      "width": 220,
+      "height": 80,
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "c", "type": "nominal"},
+        "y": {"field": "v", "type": "quantitative", "aggregate": "sum"}
+      }
+    }
+  ]
+}

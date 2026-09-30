@@ -1,0 +1,22 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "An axis whose labels are rewritten by an expression, which is the labels' text and not a property.",
+  "data": {
+    "url": "data/stocks.csv"
+  },
+  "mark": "bar",
+  "encoding": {
+    "x": {
+      "timeUnit": "month",
+      "field": "date",
+      "axis": {
+        "labelAlign": "left",
+        "labelExpr": "datum.label[0]"
+      }
+    },
+    "y": {
+      "aggregate": "mean",
+      "field": "price"
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "Weekdays put in a stated order, which is an order and not an inference.",
+  "data": {"url": "data/stocks.csv"},
+  "mark": "circle",
+  "encoding": {
+    "y": {
+      "field": "date",
+      "type": "ordinal",
+      "timeUnit": "day",
+      "sort": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+    },
+    "x": {"field": "date", "type": "ordinal", "timeUnit": "month"},
+    "size": {"aggregate": "count"}
+  }
+}

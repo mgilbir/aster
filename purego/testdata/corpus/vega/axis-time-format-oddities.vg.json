@@ -1,0 +1,94 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A percent consumes what follows it, and a percent with nothing after it consumes itself. d3 reads the character after the percent \u2014 and a pad modifier before it \u2014 looks it up, and pushes whatever the table gave back: the character itself where there is no entry, and the empty string where the pattern ended first, `charAt` past the end being the empty string. The bottom axis asks for `%~`, which is no directive at all, and reads `~` with the percent gone; the top asks for `%-~` and reads the same, the modifier swallowed with it; the second bottom axis asks for `%b%` and reads the month alone, its dangling percent dropped; and the left asks for `%-`, a modifier with nothing to pad, which consumes all of itself so every label on it is empty \u2014 which is why the modifier is looked for *up to* the last character rather than one short of it. A malformed specifier is not an error anywhere in this: it is read the way d3 reads it, which is the only answer a chart can be compared against. Two axes share the bottom on purpose, that being the shape which first looked like a guide-ordering defect and turned out to be the harvester flattening the whitespace it read.",
+  "width": 220,
+  "height": 90,
+  "padding": 5,
+  "data": [
+    {
+      "name": "table",
+      "values": [
+        {
+          "t": 1704067200000,
+          "v": 42
+        },
+        {
+          "t": 1709251200000,
+          "v": 88
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "when",
+      "type": "utc",
+      "domain": {
+        "data": "table",
+        "field": "t"
+      },
+      "range": "width"
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {
+        "data": "table",
+        "field": "v"
+      },
+      "range": "height"
+    }
+  ],
+  "axes": [
+    {
+      "orient": "bottom",
+      "scale": "when",
+      "format": "%~",
+      "tickCount": 2
+    },
+    {
+      "orient": "top",
+      "scale": "when",
+      "format": "%-~",
+      "tickCount": 2
+    },
+    {
+      "orient": "bottom",
+      "scale": "when",
+      "format": "%b%",
+      "tickCount": 2
+    },
+    {
+      "orient": "left",
+      "scale": "when",
+      "format": "%-",
+      "tickCount": 2
+    }
+  ],
+  "marks": [
+    {
+      "type": "symbol",
+      "from": {
+        "data": "table"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "when",
+            "field": "t"
+          },
+          "y": {
+            "scale": "y",
+            "field": "v"
+          },
+          "size": {
+            "value": 90
+          },
+          "fill": {
+            "value": "#4c78a8"
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A normalized stack is a proportion, so its axis is a percentage — `config.normalizedNumberFormat`, which defaults to `.0%`. `guideFormat` asks the **channel definition's own** `stack` for that, not the stack the view resolved: `if (isPositionFieldOrDatumDef(fieldOrDatumDef) && fieldOrDatumDef.stack === 'normalize' && config.normalizedNumberFormat) { return numberFormat({type: 'quantitative', config, normalizeStack: true}); }`. So the format is written wherever the word appears, on the channel it appears on, whatever the chart makes of it — and note the `type: 'quantitative'` passed rather than read, which means the field's own measure never enters into it. The first row is the ordinary case, where the word is on the stacked channel and both readings agree. The second is where they part: `stack: \"normalize\"` on the *discrete* axis is not a stack Vega-Lite can build — the emitted transform still says `offset: \"zero\"` — and upstream formats that band axis `.0%` regardless, so its 1, 2 and 3 are labelled as whole percentages. Read as the resolved stack, this compiler wrote nothing there at all. The third row is the ordering: the rule sits **above** the bucketed-instant branch rather than beside it, being a `return`, so a temporal axis carrying a normalized stack shows percentages and no dates at all — its bucketed months are labelled by a number specifier and the month specifier is never written. Read below the time branch instead, the months would win.",
+  "data": {
+    "values": [
+      {"c": "alpha", "k": "one", "n": 1, "v": 28, "t": "2024-01-07"},
+      {"c": "alpha", "k": "two", "n": 2, "v": 43, "t": "2024-03-19"},
+      {"c": "beta", "k": "one", "n": 1, "v": 55, "t": "2024-06-02"},
+      {"c": "beta", "k": "two", "n": 2, "v": 12, "t": "2024-09-11"},
+      {"c": "gamma", "k": "one", "n": 3, "v": 91, "t": "2024-01-07"},
+      {"c": "gamma", "k": "two", "n": 3, "v": 37, "t": "2024-03-19"}
+    ]
+  },
+  "vconcat": [
+    {
+      "width": 220,
+      "height": 80,
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "c", "type": "nominal"},
+        "y": {"field": "v", "type": "quantitative", "stack": "normalize"},
+        "color": {"field": "k", "type": "nominal"}
+      }
+    },
+    {
+      "width": 220,
+      "height": 80,
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "v", "type": "quantitative"},
+        "y": {"field": "n", "type": "ordinal", "stack": "normalize"}
+      }
+    },
+    {
+      "width": 220,
+      "height": 80,
+      "mark": "line",
+      "encoding": {
+        "x": {"field": "t", "timeUnit": "month", "type": "temporal", "stack": "normalize"},
+        "y": {"field": "v", "type": "quantitative"}
+      }
+    }
+  ]
+}

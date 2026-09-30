@@ -1,0 +1,13 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A trellis whose cells carry the only axis: its gridlines draw across a size named rather than scaled, so the cell aliases that name to its own.",
+  "data": {"url": "data/cars.json"},
+  "facet": {"row": {"field": "Origin", "type": "nominal"}},
+  "spec": {
+    "height": 20,
+    "mark": "bar",
+    "encoding": {
+      "x": {"aggregate": "sum", "field": "Horsepower", "type": "quantitative"}
+    }
+  }
+}

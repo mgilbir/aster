@@ -1,0 +1,87 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "What a screen reader is told about a mark rather than about one of its items. A description on the mark names the whole series and is heard once, on the container upstream draws every item inside; aria false takes a decorative mark out of the tree altogether. The item channels are here too: a description on the bars, and an ariaRole and ariaRoleDescription that override what the container would have said about each one.",
+  "width": 220,
+  "height": 120,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        { "c": "alpha", "v": 6 },
+        { "c": "beta", "v": 9 },
+        { "c": "gamma", "v": 4 }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": { "data": "t", "field": "c" },
+      "range": "width",
+      "padding": 0.2
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": { "data": "t", "field": "v" },
+      "range": "height",
+      "nice": true,
+      "zero": true
+    }
+  ],
+  "axes": [
+    { "orient": "bottom", "scale": "x" },
+    { "orient": "left", "scale": "y", "tickCount": 4 }
+  ],
+  "marks": [
+    {
+      "type": "rule",
+      "aria": false,
+      "encode": {
+        "enter": {
+          "x": { "value": 0 },
+          "x2": { "signal": "width" },
+          "y": { "scale": "y", "value": 7 },
+          "stroke": { "value": "#dddddd" },
+          "strokeDash": { "value": [3, 3] }
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "name": "bars",
+      "description": "Revenue by product line",
+      "from": { "data": "t" },
+      "encode": {
+        "enter": {
+          "x": { "scale": "x", "field": "c" },
+          "width": { "scale": "x", "band": 1 },
+          "y": { "scale": "y", "field": "v" },
+          "y2": { "scale": "y", "value": 0 },
+          "fill": { "value": "#4c78a8" },
+          "description": { "signal": "datum.c + ' at ' + datum.v" },
+          "ariaRole": { "value": "graphics-symbol" },
+          "ariaRoleDescription": { "value": "bar" }
+        }
+      }
+    },
+    {
+      "type": "text",
+      "description": "Value labels",
+      "from": { "data": "t" },
+      "encode": {
+        "enter": {
+          "x": { "scale": "x", "field": "c", "band": 0.5 },
+          "y": { "scale": "y", "field": "v", "offset": -4 },
+          "text": { "field": "v" },
+          "align": { "value": "center" },
+          "fontSize": { "value": 10 },
+          "fill": { "value": "#333333" }
+        }
+      }
+    }
+  ]
+}

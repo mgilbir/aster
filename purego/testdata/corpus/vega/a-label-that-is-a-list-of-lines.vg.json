@@ -1,0 +1,52 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A cell holding a **list** is a label of several lines, not a comma-joined string. `vega-scenegraph`'s `lineArray` is `isArray(_) ? _.length > 1 ? _ : _[0] : _`, so a domain value of `[1, 2]` draws two lines and is twelve pixels taller than its neighbours, a one-element list collapses to its element, and an empty one is the empty string. Nested data reaches a scale domain the moment anything groups or folds, and this engine wrote `String([1,2])` — `1,2` on one line — everywhere a **guide** drew a label, while a text mark over the same value already drew two. The band axis at the bottom and the legend on the right are the two that were wrong: the axis's labels are rotated, so the extra line shows up as *width* rather than height, and every legend entry below a two-line one sits twelve pixels lower. The text mark on the left is the transcription that was already right, so the fixture compares the three against each other as well as against upstream.",
+  "width": 220,
+  "height": 90,
+  "padding": 5,
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {"v": [1, 2], "n": 1},
+        {"v": [3], "n": 2},
+        {"v": "plain", "n": 3},
+        {"v": ["a", "b", "c"], "n": 4}
+      ]
+    }
+  ],
+  "scales": [
+    {"name": "x", "type": "band", "domain": {"data": "t", "field": "v"}, "range": "width", "padding": 0.1},
+    {"name": "colour", "type": "ordinal", "domain": {"data": "t", "field": "v"}, "range": "category"}
+  ],
+  "axes": [{"orient": "bottom", "scale": "x", "labelAngle": -40, "labelAlign": "right", "labelOverlap": false}],
+  "legends": [{"fill": "colour"}],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "t"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "v"},
+          "width": {"scale": "x", "band": 1},
+          "y": {"value": 46},
+          "y2": {"value": 90},
+          "fill": {"scale": "colour", "field": "v"}
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": {"data": "t"},
+      "encode": {
+        "enter": {
+          "x": {"signal": "34 * datum.n - 30"},
+          "y": {"value": 0},
+          "text": {"field": "v"},
+          "fontSize": {"value": 9},
+          "baseline": {"value": "top"}
+        }
+      }
+    }
+  ]
+}

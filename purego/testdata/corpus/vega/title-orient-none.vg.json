@@ -1,0 +1,45 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "a title oriented nowhere: upstream's layout leaves the group at the coordinates it already has, so the heading sits at the plotting area's own origin and its anchor still decides its alignment — a centred one therefore reaches back past the left edge and the drawing grows to hold it. The subtitle's own switch has no default either, so it is drawn on top of the heading rather than under it.",
+  "width": 200,
+  "height": 120,
+  "padding": 5,
+  "title": {
+    "text": "Revenue by segment",
+    "subtitle": "2026 to date",
+    "orient": "none"
+  },
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {"c": "alpha", "v": 28},
+        {"c": "beta", "v": 55},
+        {"c": "gamma", "v": 43}
+      ]
+    }
+  ],
+  "scales": [
+    {"name": "x", "type": "band", "domain": {"data": "t", "field": "c"}, "range": "width", "padding": 0.1},
+    {"name": "y", "type": "linear", "domain": {"data": "t", "field": "v"}, "range": "height", "nice": true}
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "x", "title": "category"},
+    {"orient": "left", "scale": "y", "title": "amount", "tickCount": 4}
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "t"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "c"},
+          "width": {"scale": "x", "band": 1},
+          "y": {"scale": "y", "field": "v"},
+          "y2": {"scale": "y", "value": 0},
+          "fill": {"value": "steelblue"}
+        }
+      }
+    }
+  ]
+}

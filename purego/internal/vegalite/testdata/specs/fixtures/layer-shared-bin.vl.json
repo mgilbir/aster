@@ -1,0 +1,21 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "Two layers bucketing one column the same way, which is one bucketing: the second layer's bin signals are folded into the first's and everything reads the survivor's names.",
+  "data": {"url": "data/movies.json"},
+  "layer": [
+    {
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "IMDB Rating", "type": "quantitative", "bin": {"maxbins": 10}},
+        "y": {"aggregate": "mean", "field": "US Gross", "type": "quantitative"}
+      }
+    },
+    {
+      "mark": "point",
+      "encoding": {
+        "x": {"field": "IMDB Rating", "type": "quantitative", "bin": {"maxbins": 10}},
+        "y": {"aggregate": "mean", "field": "Worldwide Gross", "type": "quantitative"}
+      }
+    }
+  ]
+}

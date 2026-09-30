@@ -1,0 +1,25 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "description": "A scatter-plot matrix: two measures crossed against two, each cell its own scales.",
+  "data": {
+    "values": [
+      {"amount": 28, "score": 3, "weight": 12},
+      {"amount": 55, "score": 7, "weight": 4},
+      {"amount": 43, "score": 5, "weight": 19},
+      {"amount": 91, "score": 2, "weight": 8}
+    ]
+  },
+  "repeat": {
+    "row": ["amount", "weight"],
+    "column": ["score", "weight"]
+  },
+  "spec": {
+    "width": 100,
+    "height": 100,
+    "mark": "point",
+    "encoding": {
+      "x": {"field": {"repeat": "column"}, "type": "quantitative"},
+      "y": {"field": {"repeat": "row"}, "type": "quantitative"}
+    }
+  }
+}

@@ -1,0 +1,109 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "The seven aggregate operations no fixture had ever asked for, read out as text so the numbers themselves are compared rather than a bar's height. The table is built to make each one say something different: a null and a missing field separate valid from missing, a repeated value separates distinct from count, and the sample and population forms of variance differ by the factor the sample form divides by. The argmax beside them returns a whole row rather than a number, which is what its label reads a second column out of.",
+  "width": 260,
+  "height": 150,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        { "g": "left", "c": "ada", "v": 4 },
+        { "g": "left", "c": "bo", "v": 9 },
+        { "g": "left", "c": "cyd", "v": 4 },
+        { "g": "left", "c": "dee", "v": null },
+        { "g": "left", "c": "eli" },
+        { "g": "right", "c": "fay", "v": 11 },
+        { "g": "right", "c": "gus", "v": 2 },
+        { "g": "right", "c": "hal", "v": 7 },
+        { "g": "right", "c": "ivy", "v": 7 }
+      ]
+    },
+    {
+      "name": "summary",
+      "source": "t",
+      "transform": [
+        {
+          "type": "aggregate",
+          "groupby": ["g"],
+          "fields": ["v", "v", "v", "v", "v", "v", "v", "v"],
+          "ops": [
+            "argmax",
+            "distinct",
+            "missing",
+            "valid",
+            "variance",
+            "variancep",
+            "stdevp",
+            "count"
+          ],
+          "as": ["top", "kinds", "gaps", "good", "spread", "spreadp", "sdp", "rows"]
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "y",
+      "type": "band",
+      "domain": { "data": "summary", "field": "g" },
+      "range": [0, 60],
+      "padding": 0.3
+    },
+    {
+      "name": "x",
+      "type": "linear",
+      "domain": { "data": "summary", "field": "spread" },
+      "range": [0, 240],
+      "zero": true,
+      "nice": true
+    }
+  ],
+  "axes": [{ "orient": "bottom", "scale": "x", "offset": 66, "tickCount": 4, "title": "variance" }],
+  "marks": [
+    {
+      "type": "rect",
+      "from": { "data": "summary" },
+      "encode": {
+        "enter": {
+          "x": { "value": 0 },
+          "x2": { "scale": "x", "field": "spread" },
+          "y": { "scale": "y", "field": "g" },
+          "height": { "scale": "y", "band": 1 },
+          "fill": { "value": "#4c78a8" }
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": { "data": "summary" },
+      "encode": {
+        "enter": {
+          "x": { "value": 0 },
+          "y": { "signal": "110 + (datum.g === 'left' ? 0 : 30)" },
+          "text": {
+            "signal": "datum.g + ': ' + datum.kinds + ' kinds, ' + datum.gaps + ' gaps, ' + datum.good + ' good of ' + datum.rows"
+          },
+          "fontSize": { "value": 10 },
+          "fill": { "value": "#333333" }
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": { "data": "summary" },
+      "encode": {
+        "enter": {
+          "x": { "value": 0 },
+          "y": { "signal": "124 + (datum.g === 'left' ? 0 : 30)" },
+          "text": {
+            "signal": "'var ' + format(datum.spread, '.4f') + ' / pop ' + format(datum.spreadp, '.4f') + ' / sd ' + format(datum.sdp, '.4f') + ' / top ' + datum.top.c"
+          },
+          "fontSize": { "value": 10 },
+          "fill": { "value": "#666666" }
+        }
+      }
+    }
+  ]
+}

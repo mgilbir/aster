@@ -1,0 +1,25 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "The same nesting by column, which is a different rule from the same nesting by row. Rows stack however many there are; columns have to be counted, and a grid inside a cell has to be counted *per cell* — so the outer partition aggregates a `distinct_size` and the cell reads it back as the number of columns it is wide. The inner layout then states no column count of its own: the chart's own count would be every cell's columns at once. Upstream's note points at vega/vega#952.",
+  "data": {
+    "values": [
+      {"region": "north", "size": "big", "x": 1, "y": 4},
+      {"region": "north", "size": "small", "x": 2, "y": 3},
+      {"region": "south", "size": "big", "x": 3, "y": 2},
+      {"region": "south", "size": "small", "x": 4, "y": 1}
+    ]
+  },
+  "facet": {"column": {"field": "region"}},
+  "spec": {
+    "facet": {"column": {"field": "size"}},
+    "spec": {
+      "width": 120,
+      "height": 80,
+      "mark": "point",
+      "encoding": {
+        "x": {"field": "x", "type": "quantitative"},
+        "y": {"field": "y", "type": "quantitative"}
+      }
+    }
+  }
+}

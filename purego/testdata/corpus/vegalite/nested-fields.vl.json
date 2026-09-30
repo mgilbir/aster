@@ -1,0 +1,17 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "Fields named through a path, flattened into columns of their own.",
+  "data": {
+    "values": [
+      {"day": "Mon", "record": {"low": 3, "high": 14}, "place": {"name": "Utrecht"}},
+      {"day": "Tue", "record": {"low": 5, "high": 17}, "place": {"name": "Delft"}},
+      {"day": "Wed", "record": {"low": 2, "high": 11}, "place": {"name": "Utrecht"}}
+    ]
+  },
+  "mark": "bar",
+  "encoding": {
+    "x": {"field": "day", "type": "ordinal"},
+    "y": {"field": "record.high", "type": "quantitative"},
+    "color": {"field": "place.name", "type": "nominal"}
+  }
+}

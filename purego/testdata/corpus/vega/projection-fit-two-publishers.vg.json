@@ -1,0 +1,132 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "One projection fitted to feature collections published by TWO datasets, each of which reads the projection back through geopoint. This is what Vega-Lite emits for a layered map — points over the routes between them — framed so the projection covers both.",
+  "width": 200,
+  "height": 200,
+  "padding": 5,
+  "data": [
+    {
+      "name": "airports",
+      "values": [
+        {
+          "lon": -100,
+          "lat": 40
+        },
+        {
+          "lon": -80,
+          "lat": 30
+        }
+      ],
+      "transform": [
+        {
+          "type": "geojson",
+          "fields": [
+            "lon",
+            "lat"
+          ],
+          "signal": "geo_a"
+        },
+        {
+          "type": "geopoint",
+          "projection": "p",
+          "fields": [
+            "lon",
+            "lat"
+          ],
+          "as": [
+            "x",
+            "y"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "routes",
+      "values": [
+        {
+          "lon": -120,
+          "lat": 50
+        },
+        {
+          "lon": -70,
+          "lat": 25
+        }
+      ],
+      "transform": [
+        {
+          "type": "geojson",
+          "fields": [
+            "lon",
+            "lat"
+          ],
+          "signal": "geo_b"
+        },
+        {
+          "type": "geopoint",
+          "projection": "p",
+          "fields": [
+            "lon",
+            "lat"
+          ],
+          "as": [
+            "x",
+            "y"
+          ]
+        }
+      ]
+    }
+  ],
+  "projections": [
+    {
+      "name": "p",
+      "type": "mercator",
+      "fit": {
+        "signal": "[geo_a, geo_b]"
+      },
+      "size": [
+        200,
+        200
+      ]
+    }
+  ],
+  "marks": [
+    {
+      "type": "symbol",
+      "from": {
+        "data": "airports"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "field": "x"
+          },
+          "y": {
+            "field": "y"
+          },
+          "size": {
+            "value": 80
+          }
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "from": {
+        "data": "routes"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "field": "x"
+          },
+          "y": {
+            "field": "y"
+          },
+          "size": {
+            "value": 40
+          }
+        }
+      }
+    }
+  ]
+}

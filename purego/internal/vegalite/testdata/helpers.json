@@ -1,0 +1,456 @@
+{
+ "selectors": [
+  {
+   "input": "click",
+   "source": "scope",
+   "output": [
+    {
+     "source": "scope",
+     "type": "click"
+    }
+   ]
+  },
+  {
+   "input": "pointerover",
+   "source": "view",
+   "output": [
+    {
+     "source": "view",
+     "type": "pointerover"
+    }
+   ]
+  },
+  {
+   "input": "dblclick",
+   "source": "view",
+   "output": [
+    {
+     "source": "view",
+     "type": "dblclick"
+    }
+   ]
+  },
+  {
+   "input": "wheel!",
+   "source": "scope",
+   "output": [
+    {
+     "source": "scope",
+     "type": "wheel",
+     "consume": true
+    }
+   ]
+  },
+  {
+   "input": "[pointerdown, window:pointerup] > window:pointermove!",
+   "source": "scope",
+   "output": [
+    {
+     "source": "window",
+     "type": "pointermove",
+     "consume": true,
+     "between": [
+      {
+       "source": "scope",
+       "type": "pointerdown"
+      },
+      {
+       "source": "window",
+       "type": "pointerup"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "[mousedown, window:mouseup] > window:mousemove!",
+   "source": "scope",
+   "output": [
+    {
+     "source": "window",
+     "type": "mousemove",
+     "consume": true,
+     "between": [
+      {
+       "source": "scope",
+       "type": "mousedown"
+      },
+      {
+       "source": "window",
+       "type": "mouseup"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "mouseover[event.shiftKey]",
+   "source": "view",
+   "output": [
+    {
+     "source": "view",
+     "type": "mouseover",
+     "filter": [
+      "event.shiftKey"
+     ]
+    }
+   ]
+  },
+  {
+   "input": "click[event.altKey][!event.shiftKey]",
+   "source": "scope",
+   "output": [
+    {
+     "source": "scope",
+     "type": "click",
+     "filter": [
+      "event.altKey",
+      "!event.shiftKey"
+     ]
+    }
+   ]
+  },
+  {
+   "input": "@brush:click",
+   "source": "scope",
+   "output": [
+    {
+     "source": "scope",
+     "type": "click",
+     "markname": "brush"
+    }
+   ]
+  },
+  {
+   "input": "rect:pointerdown",
+   "source": "scope",
+   "output": [
+    {
+     "source": "scope",
+     "type": "pointerdown",
+     "marktype": "rect"
+    }
+   ]
+  },
+  {
+   "input": "window:keydown",
+   "source": "scope",
+   "output": [
+    {
+     "source": "window",
+     "type": "keydown"
+    }
+   ]
+  },
+  {
+   "input": "click{100}",
+   "source": "scope",
+   "output": [
+    {
+     "source": "scope",
+     "type": "click",
+     "throttle": 100
+    }
+   ]
+  },
+  {
+   "input": "pointermove{50, 200}",
+   "source": "view",
+   "output": [
+    {
+     "source": "view",
+     "type": "pointermove",
+     "throttle": 50,
+     "debounce": 200
+    }
+   ]
+  },
+  {
+   "input": "timer{1}",
+   "source": "view",
+   "output": [
+    {
+     "source": "view",
+     "type": "timer",
+     "throttle": 1
+    }
+   ]
+  },
+  {
+   "input": "click, dblclick",
+   "source": "view",
+   "output": [
+    {
+     "source": "view",
+     "type": "click"
+    },
+    {
+     "source": "view",
+     "type": "dblclick"
+    }
+   ]
+  },
+  {
+   "input": "[click, dblclick] > pointermove",
+   "source": "view",
+   "output": [
+    {
+     "source": "view",
+     "type": "pointermove",
+     "between": [
+      {
+       "source": "view",
+       "type": "click"
+      },
+      {
+       "source": "view",
+       "type": "dblclick"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "input": "@name:click[event.item], symbol:mouseover",
+   "source": "scope",
+   "output": [
+    {
+     "source": "scope",
+     "type": "click",
+     "markname": "name",
+     "filter": [
+      "event.item"
+     ]
+    },
+    {
+     "source": "scope",
+     "type": "mouseover",
+     "marktype": "symbol"
+    }
+   ]
+  },
+  {
+   "input": "*:pointermove",
+   "source": "scope",
+   "output": [
+    {
+     "source": "scope",
+     "type": "pointermove",
+     "marktype": "*"
+    }
+   ]
+  },
+  {
+   "input": "[pointerdown, pointerup] > [click, dblclick] > pointermove",
+   "source": "view",
+   "output": [
+    {
+     "between": [
+      {
+       "source": "view",
+       "type": "pointerdown"
+      },
+      {
+       "source": "view",
+       "type": "pointerup"
+      }
+     ],
+     "stream": {
+      "source": "view",
+      "type": "pointermove",
+      "between": [
+       {
+        "source": "view",
+        "type": "click"
+       },
+       {
+        "source": "view",
+        "type": "dblclick"
+       }
+      ]
+     }
+    }
+   ]
+  }
+ ],
+ "expressions": [
+  {
+   "input": "datum.a",
+   "deps": [
+    "a"
+   ]
+  },
+  {
+   "input": "datum['a b']",
+   "deps": [
+    "a b"
+   ]
+  },
+  {
+   "input": "datum.a.b",
+   "deps": [
+    "a.b",
+    "a"
+   ]
+  },
+  {
+   "input": "datum.a['b']",
+   "deps": [
+    "a.b",
+    "a"
+   ]
+  },
+  {
+   "input": "datum.a + datum.b * 2",
+   "deps": [
+    "a",
+    "b"
+   ]
+  },
+  {
+   "input": "datum.x > 1 ? datum.y : datum.z",
+   "deps": [
+    "x",
+    "y",
+    "z"
+   ]
+  },
+  {
+   "input": "isValid(datum.a) && indexof([1,2], datum.b) !== -1",
+   "deps": [
+    "a",
+    "b"
+   ]
+  },
+  {
+   "input": "toDate(datum[\"x\"]) < now()",
+   "deps": [
+    "x"
+   ]
+  },
+  {
+   "input": "datum[0]",
+   "deps": [
+    "0"
+   ]
+  },
+  {
+   "input": "datum[foo]",
+   "deps": [
+    "foo"
+   ]
+  },
+  {
+   "input": "if(datum.type === \"a\", -2, 0) + if(datum.x, 1, 2)",
+   "deps": [
+    "type",
+    "x"
+   ]
+  },
+  {
+   "input": "length(data(\"brush_store\")) && vlSelectionTest(\"brush_store\", datum)",
+   "deps": []
+  },
+  {
+   "input": "{'a': datum.b, c: [datum.d]}",
+   "deps": [
+    "b",
+    "d"
+   ]
+  },
+  {
+   "input": "foo(datum.a).b",
+   "deps": [
+    "a"
+   ]
+  },
+  {
+   "input": "datum",
+   "deps": []
+  },
+  {
+   "input": "1 + 2",
+   "deps": []
+  },
+  {
+   "input": "\"a\" + datum.a.b.c",
+   "deps": [
+    "a.b.c",
+    "a.b",
+    "a"
+   ]
+  },
+  {
+   "input": "datum.a.b[c].d",
+   "deps": [
+    "a.b.c.d",
+    "a.b.c",
+    "a.b",
+    "a"
+   ]
+  },
+  {
+   "input": "!datum.a || (datum.b && datum.c)",
+   "deps": [
+    "a",
+    "b",
+    "c"
+   ]
+  },
+  {
+   "input": "datetime(year(datum['date']), 0, 1)",
+   "deps": [
+    "date"
+   ]
+  },
+  {
+   "input": "datum.a >= 0x10 && datum.b <= 1e3",
+   "deps": [
+    "a",
+    "b"
+   ]
+  }
+ ],
+ "escapes": [
+  {
+   "input": "",
+   "output": ""
+  },
+  {
+   "input": "a b",
+   "output": "a%20b"
+  },
+  {
+   "input": " of Mean",
+   "output": "%20of%20Mean"
+  },
+  {
+   "input": "x\"y",
+   "output": "x%22y"
+  },
+  {
+   "input": "héllo",
+   "output": "h%E9llo"
+  },
+  {
+   "input": "日本語",
+   "output": "%u65E5%u672C%u8A9E"
+  },
+  {
+   "input": "a+b-c*d/e@f_g.h",
+   "output": "a+b-c*d/e@f_g.h"
+  },
+  {
+   "input": "tab\there",
+   "output": "tab%09here"
+  },
+  {
+   "input": "100%",
+   "output": "100%25"
+  },
+  {
+   "input": "emoji 😀",
+   "output": "emoji%20%uD83D%uDE00"
+  }
+ ]
+}

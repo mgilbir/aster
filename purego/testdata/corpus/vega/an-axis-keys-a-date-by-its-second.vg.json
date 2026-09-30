@@ -1,0 +1,19 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "An axis's ticks are a keyed data join — `key: Value` on the grid, the tick and the label alike — and the key is `String(datum.value)`. A time scale's tick values are **dates**, and `Date.prototype.toString` writes down to the second: `Thu Jan 01 1970 01:00:00 GMT+0100 (Central European Standard Time)`, with no milliseconds in it. So every tick inside one second keys alike and the join keeps one. The first axis is a domain **three milliseconds wide**: `timeTicks` answers four dates, one distinct string stands between them, and upstream draws a single grid line, a single tick and a single label. The second is the same scale ticked a second apart, where the four keys differ and all four survive — so the fixture says the collapse is the *key* and not a count. The third is a **linear** scale over the same numbers, whose values are numbers and whose keys are therefore four; a rule about dates should not touch it.",
+  "width": 220,
+  "height": 90,
+  "padding": 5,
+  "data": [{"name": "t", "values": [{"v": 1}, {"v": 2}, {"v": 3}, {"v": 4}]}],
+  "scales": [
+    {"name": "ms", "type": "time", "domain": {"data": "t", "field": "v"}, "range": [0, 80]},
+    {"name": "sec", "type": "time", "domain": [0, 4000], "range": [0, 80]},
+    {"name": "lin", "type": "linear", "domain": {"data": "t", "field": "v"}, "range": [0, 80]}
+  ],
+  "axes": [
+    {"orient": "left", "scale": "ms", "tickCount": 4, "grid": true, "labelOverlap": false},
+    {"orient": "left", "scale": "sec", "tickCount": 4, "offset": 60, "labelOverlap": false},
+    {"orient": "left", "scale": "lin", "tickCount": 4, "offset": 130, "labelOverlap": false}
+  ],
+  "marks": []
+}

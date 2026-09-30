@@ -1,0 +1,211 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A discrete scale's domain holds the **values**, not their text, and three rules follow that a domain of strings cannot express. It is built by *grouping* the dataset, and a group's key is `'' + value`, so `1001` and `\"1001\"` are one entry \u2014 but the entry kept is the **first raw value**, the number, not the word. The scale's own index is d3's `InternMap`, keyed by value rather than by text, so looking the word up again **misses**: `scale('1001')` is `undefined` where `scale(1001)` is a band. And a value's text is not the value once it stops being a word \u2014 `+null` is `0` and `+'null'` is `NaN`, `+true` is `1` and `+'true'` is `NaN` \u2014 which a time-formatted axis prints, the null band reading `01 AM` for epoch zero rather than `0NaN`. Six rows here collapse to three entries by that grouping, and the three that lose are drawn all the same: their bands are looked up by a text that is no longer in the index, so upstream gives them no position at all. The `formatType` on the axis is what makes the retention visible as text rather than only as arithmetic. The text marks ask the scale itself, so the lookup is compared as characters rather than as an absent property: a hit prints a number and a miss prints what JavaScript prints for nothing. The second scale is the other way a domain arrives, and it follows a **different** rule: a domain written out in the specification never meets a grouping, so nothing coerces it to text on the way in and d3 dedups it through the `InternMap` its index is built on \u2014 by value. The same five entries that collapse to three when they come from a column stay five when they are written down. Deduping this one by text as well passed every gate in the corpus, because the data-driven path had already done that dedup and the two rules agreed everywhere anything looked; a mutant of that line surviving is what said so. It is read through the scale rather than through an axis, and deliberately: an axis joins its label items by the value's **text**, so two bands both reading `1001` collapse into one label at the later band and the axis shows three where the domain has five. That is a rule of its own and it is recorded as its own task; asking the scale for each of the five values in turn keeps this fixture about the domain. Its written-out domain says each rule once more, where a dedup that did nothing would otherwise pass: `1001` appears **twice** and must collapse to one entry, and a `0` stands beside a `-0` which must join it \u2014 a `Map` keys by SameValueZero, so the two zeroes are one key where a `Double`'s own `equals` holds them apart. Both were mutants that survived the first draft of this fixture, which had five entries and no duplicate among them.",
+  "width": 240,
+  "height": 120,
+  "padding": 5,
+  "data": [
+    {
+      "name": "raw",
+      "values": [
+        {
+          "k": 1001,
+          "v": 4,
+          "label": "number"
+        },
+        {
+          "k": "1001",
+          "v": 5,
+          "label": "its word"
+        },
+        {
+          "k": null,
+          "v": 6,
+          "label": "nothing"
+        },
+        {
+          "k": "null",
+          "v": 7,
+          "label": "the word for it"
+        },
+        {
+          "k": true,
+          "v": 8,
+          "label": "a flag"
+        },
+        {
+          "k": "true",
+          "v": 9,
+          "label": "the word for that"
+        }
+      ]
+    },
+    {
+      "name": "probes",
+      "values": [
+        {
+          "p": 1001,
+          "n": 0
+        },
+        {
+          "p": "1001",
+          "n": 1
+        },
+        {
+          "p": null,
+          "n": 2
+        },
+        {
+          "p": "null",
+          "n": 3
+        },
+        {
+          "p": true,
+          "n": 4
+        },
+        {
+          "p": 0,
+          "n": 5
+        },
+        {
+          "p": -0.0,
+          "n": 6
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {
+        "data": "raw",
+        "field": "k"
+      },
+      "range": "width",
+      "padding": 0.1
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {
+        "data": "raw",
+        "field": "v"
+      },
+      "nice": true,
+      "range": "height"
+    },
+    {
+      "name": "written",
+      "type": "band",
+      "domain": [
+        1001,
+        "1001",
+        1001,
+        null,
+        "null",
+        true,
+        0,
+        -0.0
+      ],
+      "range": "width",
+      "padding": 0.1
+    }
+  ],
+  "axes": [
+    {
+      "scale": "x",
+      "orient": "bottom",
+      "formatType": "time"
+    },
+    {
+      "scale": "x",
+      "orient": "top"
+    },
+    {
+      "scale": "y",
+      "orient": "left"
+    }
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {
+        "data": "raw"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "x",
+            "field": "k"
+          },
+          "width": {
+            "scale": "x",
+            "band": 1
+          },
+          "y": {
+            "scale": "y",
+            "field": "v"
+          },
+          "y2": {
+            "scale": "y",
+            "value": 0
+          },
+          "fill": {
+            "value": "steelblue"
+          }
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": {
+        "data": "raw"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "value": 4
+          },
+          "y": {
+            "signal": "12 * datum.v - 30"
+          },
+          "text": {
+            "signal": "datum.label + ' -> ' + scale('x', datum.k)"
+          },
+          "fontSize": {
+            "value": 9
+          },
+          "baseline": {
+            "value": "top"
+          }
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": {
+        "data": "probes"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "value": 120
+          },
+          "y": {
+            "signal": "12 * datum.n + 6"
+          },
+          "text": {
+            "signal": "'written(' + datum.p + ') = ' + scale('written', datum.p)"
+          },
+          "fontSize": {
+            "value": 9
+          },
+          "baseline": {
+            "value": "top"
+          }
+        }
+      }
+    }
+  ]
+}

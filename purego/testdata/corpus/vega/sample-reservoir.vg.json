@@ -1,0 +1,297 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "The sample transform, over a seeded stream so both engines keep the same rows. The reservoir fills with the first `size` rows in order and after that each row is offered one slot, replacing whatever was there \u2014 so the output is the reservoir's order, not the input's, and a row from the far end of the data can sit between two early ones. A size the data already fits inside passes every row through untouched, which the second chart shows.",
+  "width": 220,
+  "height": 90,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {
+          "i": 0,
+          "v": 1
+        },
+        {
+          "i": 1,
+          "v": 15
+        },
+        {
+          "i": 2,
+          "v": 6
+        },
+        {
+          "i": 3,
+          "v": 20
+        },
+        {
+          "i": 4,
+          "v": 11
+        },
+        {
+          "i": 5,
+          "v": 2
+        },
+        {
+          "i": 6,
+          "v": 16
+        },
+        {
+          "i": 7,
+          "v": 7
+        },
+        {
+          "i": 8,
+          "v": 21
+        },
+        {
+          "i": 9,
+          "v": 12
+        },
+        {
+          "i": 10,
+          "v": 3
+        },
+        {
+          "i": 11,
+          "v": 17
+        },
+        {
+          "i": 12,
+          "v": 8
+        },
+        {
+          "i": 13,
+          "v": 22
+        },
+        {
+          "i": 14,
+          "v": 13
+        },
+        {
+          "i": 15,
+          "v": 4
+        },
+        {
+          "i": 16,
+          "v": 18
+        },
+        {
+          "i": 17,
+          "v": 9
+        },
+        {
+          "i": 18,
+          "v": 23
+        },
+        {
+          "i": 19,
+          "v": 14
+        },
+        {
+          "i": 20,
+          "v": 5
+        },
+        {
+          "i": 21,
+          "v": 19
+        },
+        {
+          "i": 22,
+          "v": 10
+        },
+        {
+          "i": 23,
+          "v": 1
+        },
+        {
+          "i": 24,
+          "v": 15
+        },
+        {
+          "i": 25,
+          "v": 6
+        },
+        {
+          "i": 26,
+          "v": 20
+        },
+        {
+          "i": 27,
+          "v": 11
+        },
+        {
+          "i": 28,
+          "v": 2
+        },
+        {
+          "i": 29,
+          "v": 16
+        },
+        {
+          "i": 30,
+          "v": 7
+        },
+        {
+          "i": 31,
+          "v": 21
+        },
+        {
+          "i": 32,
+          "v": 12
+        },
+        {
+          "i": 33,
+          "v": 3
+        },
+        {
+          "i": 34,
+          "v": 17
+        },
+        {
+          "i": 35,
+          "v": 8
+        },
+        {
+          "i": 36,
+          "v": 22
+        },
+        {
+          "i": 37,
+          "v": 13
+        },
+        {
+          "i": 38,
+          "v": 4
+        },
+        {
+          "i": 39,
+          "v": 18
+        }
+      ]
+    },
+    {
+      "name": "kept",
+      "source": "t",
+      "transform": [
+        {
+          "type": "sample",
+          "size": 8
+        }
+      ]
+    },
+    {
+      "name": "all",
+      "source": "t",
+      "transform": [
+        {
+          "type": "sample",
+          "size": 60
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {
+        "data": "kept",
+        "field": "i"
+      },
+      "range": [
+        0,
+        100
+      ]
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {
+        "data": "t",
+        "field": "v"
+      },
+      "range": "height"
+    },
+    {
+      "name": "x2",
+      "type": "band",
+      "domain": {
+        "data": "all",
+        "field": "i"
+      },
+      "range": [
+        120,
+        220
+      ]
+    }
+  ],
+  "axes": [
+    {
+      "scale": "x",
+      "orient": "bottom",
+      "labelFontSize": 7
+    }
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {
+        "data": "kept"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "x",
+            "field": "i"
+          },
+          "width": {
+            "scale": "x",
+            "band": 0.85
+          },
+          "y": {
+            "scale": "y",
+            "field": "v"
+          },
+          "y2": {
+            "scale": "y",
+            "value": 0
+          },
+          "fill": {
+            "value": "#4c78a8"
+          }
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {
+        "data": "all"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "x2",
+            "field": "i"
+          },
+          "width": {
+            "scale": "x2",
+            "band": 0.85
+          },
+          "y": {
+            "scale": "y",
+            "field": "v"
+          },
+          "y2": {
+            "scale": "y",
+            "value": 0
+          },
+          "fill": {
+            "value": "#e45756"
+          }
+        }
+      }
+    }
+  ]
+}

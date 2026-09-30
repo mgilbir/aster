@@ -1,0 +1,72 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A pie's arithmetic is two different readings of the same column, and both are JavaScript's. The **total** is d3's `sum`, which coerces and then keeps only what is truthy — `if (value = +value) sum += value` — so a null, an empty cell, a zero and a word all contribute nothing to it. The **slice** is `a += v * k` with the *raw* value, so `null * k` is `0` and an empty cell is `0`, each leaving a slice of no width and the next one where it was; a **word** is `NaN`, and since the angle accumulates, every slice after it is NaN too. This engine read the column with a parser that answers NaN for a null, so a null did not merely draw nothing — it poisoned the running angle and the rest of the pie vanished with it. The three rows that are not numbers are here in one chart because their answers differ from one another: two of them are zero and the third is the end of the drawing.",
+  "width": 260,
+  "height": 120,
+  "padding": 5,
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {"v": 1, "n": 0},
+        {"v": null, "n": 1},
+        {"v": "", "n": 2},
+        {"v": 0, "n": 3},
+        {"v": 3, "n": 4},
+        {"v": 4, "n": 5}
+      ],
+      "transform": [{"type": "pie", "field": "v"}]
+    },
+    {
+      "name": "poisoned",
+      "values": [
+        {"v": 1, "n": 0},
+        {"v": "abc", "n": 1},
+        {"v": 3, "n": 2}
+      ],
+      "transform": [{"type": "pie", "field": "v"}]
+    }
+  ],
+  "marks": [
+    {
+      "type": "arc",
+      "from": {"data": "t"},
+      "encode": {
+        "enter": {
+          "x": {"value": 60},
+          "y": {"value": 60},
+          "startAngle": {"field": "startAngle"},
+          "endAngle": {"field": "endAngle"},
+          "outerRadius": {"value": 50},
+          "fill": {"value": "steelblue"}
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": {"data": "t"},
+      "encode": {
+        "enter": {
+          "x": {"value": 120},
+          "y": {"signal": "16 * datum.n + 4"},
+          "text": {"signal": "datum.startAngle + ' to ' + datum.endAngle"},
+          "fontSize": {"value": 8},
+          "baseline": {"value": "top"}
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": {"data": "poisoned"},
+      "encode": {
+        "enter": {
+          "x": {"value": 120},
+          "y": {"signal": "16 * datum.n + 104"},
+          "text": {"signal": "'poisoned ' + datum.startAngle + ' to ' + datum.endAngle"},
+          "fontSize": {"value": 8},
+          "baseline": {"value": "top"}
+        }
+      }
+    }
+  ]
+}

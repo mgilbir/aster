@@ -1,0 +1,30 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "Scales written out by hand, and two guides switched off.",
+  "data": {"values": [
+    {"c": "a", "v": 1, "g": "x"}, {"c": "b", "v": 4, "g": "y"},
+    {"c": "d", "v": 7, "g": "x"}, {"c": "e", "v": 2, "g": "y"}
+  ]},
+  "mark": "point",
+  "encoding": {
+    "x": {
+      "field": "c",
+      "type": "nominal",
+      "scale": {"domain": ["e", "d", "b", "a"], "paddingOuter": 0.5},
+      "axis": {"title": null, "labelAngle": 0}
+    },
+    "y": {
+      "field": "v",
+      "type": "quantitative",
+      "scale": {"domain": [0, 10], "nice": false},
+      "axis": null
+    },
+    "color": {
+      "field": "g",
+      "type": "nominal",
+      "scale": {"range": ["#4c78a8", "#f58518"]},
+      "legend": null
+    },
+    "size": {"field": "v", "type": "quantitative", "scale": {"range": [20, 200]}}
+  }
+}

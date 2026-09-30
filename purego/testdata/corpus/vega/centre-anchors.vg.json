@@ -1,0 +1,125 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v5.json",
+  "width": 300,
+  "height": 200,
+  "padding": 5,
+
+  "data": [
+    {
+      "name": "points",
+      "values": [
+        {"x": 40, "y": 30, "w": 30, "h": 20},
+        {"x": 110, "y": 70, "w": 50, "h": 12},
+        {"x": 200, "y": 110, "w": 20, "h": 40}
+      ]
+    }
+  ],
+
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "points"},
+      "encode": {
+        "enter": {
+          "xc": {"field": "x"},
+          "yc": {"field": "y"},
+          "width": {"field": "w"},
+          "height": {"field": "h"},
+          "fill": {"value": "#4c78a8"},
+          "fillOpacity": {"value": 0.6}
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {"data": "points"},
+      "encode": {
+        "enter": {
+          "x2": {"field": "x"},
+          "width": {"field": "w"},
+          "y": {"value": 160},
+          "height": {"value": 8},
+          "fill": {"value": "#f58518"}
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {"data": "points"},
+      "encode": {
+        "enter": {
+          "x": {"field": "x"},
+          "x2": {"value": 60},
+          "y": {"value": 175},
+          "y2": {"value": 170},
+          "fill": {"value": "#54a24b"}
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "from": {"data": "points"},
+      "encode": {
+        "enter": {
+          "xc": {"field": "x"},
+          "yc": {"field": "y"},
+          "size": {"value": 80},
+          "fill": {"value": "#e45756"}
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": {"data": "points"},
+      "encode": {
+        "enter": {
+          "xc": {"field": "x"},
+          "yc": {"value": 190},
+          "text": {"field": "x"},
+          "align": {"value": "center"},
+          "fill": {"value": "#333"}
+        }
+      }
+    },
+    {
+      "type": "line",
+      "from": {"data": "points"},
+      "encode": {
+        "enter": {
+          "xc": {"field": "x"},
+          "y": {"field": "y"},
+          "stroke": {"value": "#9d755d"},
+          "strokeWidth": {"value": 2}
+        }
+      }
+    },
+    {
+      "type": "group",
+      "from": {"data": "points"},
+      "encode": {
+        "enter": {
+          "xc": {"field": "x"},
+          "yc": {"value": 145},
+          "width": {"field": "w"},
+          "height": {"value": 10},
+          "fill": {"value": "#eeeeee"},
+          "stroke": {"value": "#bab0ac"}
+        }
+      },
+      "marks": [
+        {
+          "type": "rect",
+          "encode": {
+            "enter": {
+              "x": {"value": 0},
+              "width": {"value": 4},
+              "y": {"value": 0},
+              "height": {"value": 10},
+              "fill": {"value": "#b279a2"}
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

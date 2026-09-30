@@ -1,0 +1,147 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A projection's `angle` is d3's — a rotation of the plane after the projection, which every d3-geo projection has a setter for — and upstream never reaches it. The transform that maintains a projection forwards the nineteen names `vega-projection` exports as `projectionProperties`, and `angle` is not one of them, so a specification that asks for one is drawing the same map as a specification that does not. Both projections here are the same mercator and one of them asks for 30 degrees; the two outlines land exactly on top of each other, which is the whole of what upstream does with it. The thick grey is the plain one and the thin orange is the one that asked.",
+  "width": 220,
+  "height": 130,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "world",
+      "values": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {},
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [-100, 20],
+                  [-60, 20],
+                  [-60, 50],
+                  [-100, 50],
+                  [-100, 20]
+                ]
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {},
+            "geometry": {
+              "type": "LineString",
+              "coordinates": [
+                [-120, -40],
+                [0, 0],
+                [120, 40]
+              ]
+            }
+          }
+        ]
+      },
+      "format": {
+        "type": "json",
+        "property": "features"
+      }
+    },
+    {
+      "name": "pins",
+      "values": [
+        {"lon": -75, "lat": 40},
+        {"lon": 0, "lat": 0},
+        {"lon": 60, "lat": -25}
+      ],
+      "transform": [
+        {
+          "type": "geopoint",
+          "projection": "turned",
+          "fields": ["lon", "lat"],
+          "as": ["px", "py"]
+        }
+      ]
+    }
+  ],
+  "projections": [
+    {
+      "name": "plain",
+      "type": "mercator",
+      "scale": 28,
+      "translate": [110, 65]
+    },
+    {
+      "name": "turned",
+      "type": "mercator",
+      "scale": 28,
+      "translate": [110, 65],
+      "angle": 30
+    }
+  ],
+  "marks": [
+    {
+      "type": "shape",
+      "from": {
+        "data": "world"
+      },
+      "transform": [
+        {
+          "type": "geoshape",
+          "projection": "plain"
+        }
+      ],
+      "encode": {
+        "enter": {
+          "fill": {
+            "value": null
+          },
+          "stroke": {
+            "value": "#b8c4cc"
+          },
+          "strokeWidth": {
+            "value": 3
+          }
+        }
+      }
+    },
+    {
+      "type": "shape",
+      "from": {
+        "data": "world"
+      },
+      "transform": [
+        {
+          "type": "geoshape",
+          "projection": "turned"
+        }
+      ],
+      "encode": {
+        "enter": {
+          "fill": {
+            "value": null
+          },
+          "stroke": {
+            "value": "#d36f2a"
+          },
+          "strokeWidth": {
+            "value": 0.7
+          }
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "from": {
+        "data": "pins"
+      },
+      "encode": {
+        "enter": {
+          "x": {"field": "px"},
+          "y": {"field": "py"},
+          "size": {"value": 40},
+          "fill": {"value": "#7a4fb5"}
+        }
+      }
+    }
+  ]
+}

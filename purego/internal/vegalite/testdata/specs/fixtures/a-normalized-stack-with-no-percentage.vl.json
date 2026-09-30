@@ -1,0 +1,21 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "The same rule as `a-normalized-stack-is-a-percentage`, from the other side. `guideFormat`'s test is `fieldOrDatumDef.stack === 'normalize' && config.normalizedNumberFormat`, and the second half of it is a **truthiness** test rather than a presence one — so a theme that sets `normalizedNumberFormat` to the empty string is asking for no percentage rather than for an empty one, and the axis falls through to whatever it would otherwise have shown. Upstream writes no `format` on it at all. Read as \"is it set\", the empty string is set, and the axis would be handed a specifier that formats every label as nothing.",
+  "config": {"normalizedNumberFormat": ""},
+  "data": {
+    "values": [
+      {"c": "alpha", "k": "one", "v": 28},
+      {"c": "alpha", "k": "two", "v": 43},
+      {"c": "beta", "k": "one", "v": 55},
+      {"c": "beta", "k": "two", "v": 12}
+    ]
+  },
+  "width": 220,
+  "height": 90,
+  "mark": "bar",
+  "encoding": {
+    "x": {"field": "c", "type": "nominal"},
+    "y": {"field": "v", "type": "quantitative", "stack": "normalize"},
+    "color": {"field": "k", "type": "nominal"}
+  }
+}

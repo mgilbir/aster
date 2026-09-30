@@ -1,0 +1,90 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A column that **arrived** bucketed keeps its far edge in a second column rather than in an `_end` of its own, and a mark placed at a *point* is placed between the two: `else if (isBinned(bin)) { if (isFieldDef(channel2Def)) return interpolatedSignalRef({fieldOrDatumDef: channelDef, fieldOrDatumDef2: channel2Def, …}) }`. The rect path already read the pair — that is what makes a histogram's bars span their buckets — but the point path did not, and an area or a line over data that came pre-bucketed was drawn along the buckets' near edges instead of through their middles, half a bucket to the left of where upstream draws it. The first two rows are that area and that line. The last two must not move: a `bandPosition` of 0 asks for the near edge by name and gets the plain column back rather than a signal that computes it, and a bucketed column with no second channel has no far edge to interpolate towards — upstream warns that `x2` is required and leaves the mark where it was. The area **stacks**, which is what an area over a bucketed column does by default, and that is the second half of this fixture: stacking a path mark imputes over the bucket as a key, and a key has to be one column, so upstream writes the bucket's midpoint into a column first. For a bucket that arrived one, both of its edges resolve to the same name and the formula that comes out is the no-op `0.5*lo + 0.5*lo` written back over `lo` — emitted all the same, because the impute below is keyed on the column it names. This compiler skipped the formula, having read the rule as applying to its own bins only, and keyed the impute on a `_mid` nobody had written. The fifth row is the other kind of bucket, and it is why `mid` is named rather than guessed at: a bucketed **instant** did have a transform write it a second column, `month_t_end`, so a bin suffix of `end` still reaches it — but `range` and `mid` are columns only a real bin produces, and upstream excludes exactly those two by name. Stacked and imputed over its months, that area's `defined` reads `month_t` and its impute is keyed on `month_t`.",
+  "vconcat": [
+    {
+      "width": 200,
+      "height": 70,
+      "data": {
+        "values": [
+          {"lo": 0, "hi": 10, "v": 28},
+          {"lo": 10, "hi": 20, "v": 55},
+          {"lo": 20, "hi": 30, "v": 43}
+        ]
+      },
+      "mark": "area",
+      "encoding": {
+        "y": {"field": "lo", "bin": "binned", "type": "quantitative"},
+        "y2": {"field": "hi"},
+        "x": {"field": "v", "type": "quantitative"}
+      }
+    },
+    {
+      "width": 200,
+      "height": 70,
+      "data": {
+        "values": [
+          {"lo": 0, "hi": 10, "v": 28},
+          {"lo": 10, "hi": 20, "v": 55},
+          {"lo": 20, "hi": 30, "v": 43}
+        ]
+      },
+      "mark": {"type": "line", "point": true},
+      "encoding": {
+        "x": {"field": "lo", "bin": "binned", "type": "quantitative"},
+        "x2": {"field": "hi"},
+        "y": {"field": "v", "type": "quantitative"}
+      }
+    },
+    {
+      "width": 200,
+      "height": 70,
+      "data": {
+        "values": [
+          {"lo": 0, "hi": 10, "v": 28},
+          {"lo": 10, "hi": 20, "v": 55},
+          {"lo": 20, "hi": 30, "v": 43}
+        ]
+      },
+      "mark": "point",
+      "encoding": {
+        "x": {"field": "lo", "bin": "binned", "type": "quantitative", "bandPosition": 0},
+        "x2": {"field": "hi"},
+        "y": {"field": "v", "type": "quantitative"}
+      }
+    },
+    {
+      "width": 200,
+      "height": 70,
+      "data": {
+        "values": [
+          {"lo": 0, "hi": 10, "v": 28},
+          {"lo": 10, "hi": 20, "v": 55},
+          {"lo": 20, "hi": 30, "v": 43}
+        ]
+      },
+      "mark": "point",
+      "encoding": {
+        "x": {"field": "lo", "bin": "binned", "type": "quantitative"},
+        "y": {"field": "v", "type": "quantitative"}
+      }
+    },
+    {
+      "width": 200,
+      "height": 70,
+      "data": {
+        "values": [
+          {"t": "2024-01-07", "v": 28, "c": "alpha"},
+          {"t": "2024-03-19", "v": 55, "c": "beta"},
+          {"t": "2024-06-02", "v": 43, "c": "alpha"}
+        ]
+      },
+      "mark": "area",
+      "encoding": {
+        "x": {"field": "t", "timeUnit": "month", "type": "temporal"},
+        "y": {"field": "v", "type": "quantitative"},
+        "color": {"field": "c", "type": "nominal"}
+      }
+    }
+  ]
+}

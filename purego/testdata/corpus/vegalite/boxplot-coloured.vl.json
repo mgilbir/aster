@@ -1,0 +1,11 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A box plot coloured by the column it is already categorised by, which groups by it twice.",
+  "data": {"url": "data/cars.json"},
+  "mark": "boxplot",
+  "encoding": {
+    "x": {"field": "Origin", "type": "nominal"},
+    "color": {"field": "Origin", "type": "nominal", "legend": null},
+    "y": {"field": "Horsepower", "type": "quantitative", "scale": {"zero": false}}
+  }
+}

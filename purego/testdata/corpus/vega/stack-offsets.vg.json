@@ -1,0 +1,78 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A normalized stacked area: every column stacked to 1, the series faceted out of the stacked rows and sorted into a fixed order.",
+  "width": 240,
+  "height": 140,
+  "padding": 5,
+  "data": [
+    {
+      "name": "raw",
+      "values": [
+        {"t": 1, "c": "gamma", "v": 5},
+        {"t": 1, "c": "alpha", "v": 15},
+        {"t": 1, "c": "beta", "v": 4},
+        {"t": 2, "c": "alpha", "v": 12},
+        {"t": 2, "c": "beta", "v": 9},
+        {"t": 2, "c": "gamma", "v": 3},
+        {"t": 3, "c": "beta", "v": 11},
+        {"t": 3, "c": "gamma", "v": 8},
+        {"t": 3, "c": "alpha", "v": 7},
+        {"t": 4, "c": "alpha", "v": 3},
+        {"t": 4, "c": "gamma", "v": 14},
+        {"t": 4, "c": "beta", "v": 6}
+      ],
+      "transform": [
+        {
+          "type": "stack",
+          "groupby": ["t"],
+          "field": "v",
+          "sort": {"field": "c"},
+          "offset": "normalize"
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "linear",
+      "domain": {"data": "raw", "field": "t"},
+      "range": "width",
+      "zero": false,
+      "nice": false
+    },
+    {"name": "y", "type": "linear", "domain": [0, 1], "range": "height"},
+    {
+      "name": "colour",
+      "type": "ordinal",
+      "domain": {"data": "raw", "field": "c", "sort": true},
+      "range": {"scheme": "tableau10"}
+    }
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "x", "tickCount": 4},
+    {"orient": "left", "scale": "y", "tickCount": 5}
+  ],
+  "legends": [{"fill": "colour", "title": "Series"}],
+  "marks": [
+    {
+      "type": "group",
+      "from": {"facet": {"name": "series", "data": "raw", "groupby": "c"}},
+      "marks": [
+        {
+          "type": "area",
+          "from": {"data": "series"},
+          "encode": {
+            "enter": {
+              "x": {"scale": "x", "field": "t"},
+              "y": {"scale": "y", "field": "y0"},
+              "y2": {"scale": "y", "field": "y1"},
+              "fill": {"scale": "colour", "field": "c"},
+              "fillOpacity": {"value": 0.85}
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

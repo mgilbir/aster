@@ -1,0 +1,13 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A month written as a number, which the reader counts from one and Vega from zero.",
+  "data": {"url": "data/stocks.csv"},
+  "transform": [
+    {"filter": {"field": "date", "timeUnit": "yearmonth", "range": [{"year": 2005, "month": 1}, {"year": 2005, "month": 3}]}}
+  ],
+  "mark": "bar",
+  "encoding": {
+    "x": {"timeUnit": "yearmonth", "field": "date"},
+    "y": {"aggregate": "mean", "field": "price"}
+  }
+}

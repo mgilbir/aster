@@ -1,0 +1,123 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "format.parse, which was read and then ignored. The stated column becomes a number; 'auto' works the type out per column; and the untyped table still joins a numeric key, because an index is keyed by the string a value coerces to.",
+  "width": 300,
+  "height": 120,
+  "padding": 5,
+  "data": [
+    {
+      "name": "stated",
+      "url": "data/typed.tsv",
+      "format": {
+        "type": "tsv",
+        "parse": {
+          "id": "number",
+          "when": "date"
+        }
+      }
+    },
+    {
+      "name": "auto",
+      "url": "data/typed.tsv",
+      "format": {
+        "type": "tsv",
+        "parse": "auto"
+      }
+    },
+    {
+      "name": "untyped",
+      "url": "data/typed.tsv",
+      "format": {
+        "type": "tsv"
+      }
+    },
+    {
+      "name": "keys",
+      "values": [
+        {
+          "id": 1001,
+          "county": "Autauga"
+        }
+      ]
+    },
+    {
+      "name": "joined",
+      "source": "untyped",
+      "transform": [
+        {
+          "type": "lookup",
+          "from": "keys",
+          "key": "id",
+          "fields": [
+            "id"
+          ],
+          "values": [
+            "county"
+          ],
+          "as": [
+            "county"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "report",
+      "values": [
+        {}
+      ],
+      "transform": [
+        {
+          "type": "formula",
+          "as": "statedId",
+          "expr": "isNumber(data('stated')[0].id)"
+        },
+        {
+          "type": "formula",
+          "as": "statedWhen",
+          "expr": "isDate(data('stated')[0].when)"
+        },
+        {
+          "type": "formula",
+          "as": "autoRate",
+          "expr": "isNumber(data('auto')[0].rate)"
+        },
+        {
+          "type": "formula",
+          "as": "autoFlag",
+          "expr": "isBoolean(data('auto')[0].flag)"
+        },
+        {
+          "type": "formula",
+          "as": "untypedId",
+          "expr": "isString(data('untyped')[0].id)"
+        },
+        {
+          "type": "formula",
+          "as": "matched",
+          "expr": "'' + data('joined')[0].county"
+        }
+      ]
+    }
+  ],
+  "marks": [
+    {
+      "type": "text",
+      "from": {
+        "data": "report"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "value": 0
+          },
+          "y": {
+            "value": 20
+          },
+          "text": {
+            "signal": "'stated ' + datum.statedId + ',' + datum.statedWhen + ' auto ' + datum.autoRate + ',' + datum.autoFlag + ' untyped ' + datum.untypedId + ' joined ' + datum.matched"
+          }
+        }
+      }
+    }
+  ]
+}

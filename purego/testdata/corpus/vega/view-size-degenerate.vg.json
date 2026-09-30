@@ -1,0 +1,53 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A plotting area is never negative. `viewSizeLayout` measures the root group as `Math.max(0, group.width || 0)` and writes the answer back into the `width` signal, so a specification asking for a width of -4 gets a plotting area of zero and every scale ranging over `\"width\"` gets `[0, 0]` with it: the band scale here has a bandwidth of zero, the bars are lines, and the axis along the bottom is a point. The height is negative as well, so the same holds down the other axis. Nothing about this is a chart anybody wants; it is what upstream draws for one, and the clamp lives where every measurement downstream reads it rather than in each of them.",
+  "width": -4,
+  "height": -12,
+  "padding": 6,
+  "background": "white",
+  "data": [
+    {
+      "name": "table",
+      "values": [
+        {"c": "alpha", "v": 28},
+        {"c": "beta", "v": 55},
+        {"c": "gamma", "v": 43}
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {"data": "table", "field": "c"},
+      "range": "width",
+      "padding": 0.1
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {"data": "table", "field": "v"},
+      "range": "height",
+      "nice": true
+    }
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "x", "title": "category"},
+    {"orient": "left", "scale": "y", "tickCount": 2}
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "c"},
+          "width": {"scale": "x", "band": 1},
+          "y": {"scale": "y", "field": "v"},
+          "y2": {"scale": "y", "value": 0},
+          "fill": {"value": "#4c78a8"}
+        }
+      }
+    }
+  ]
+}

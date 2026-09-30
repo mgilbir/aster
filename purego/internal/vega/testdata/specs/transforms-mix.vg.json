@@ -1,0 +1,233 @@
+{
+ "width": 200,
+ "height": 80,
+ "padding": 5,
+ "data": [
+  {
+   "name": "raw",
+   "values": [
+    {
+     "k": "a",
+     "v": 3
+    },
+    {
+     "k": "b",
+     "v": 8
+    },
+    {
+     "k": "a",
+     "v": 5
+    },
+    {
+     "k": "c",
+     "v": 1
+    },
+    {
+     "k": "b",
+     "v": 2
+    }
+   ]
+  },
+  {
+   "name": "agg",
+   "source": "raw",
+   "transform": [
+    {
+     "type": "aggregate",
+     "groupby": [
+      "k"
+     ],
+     "ops": [
+      "sum",
+      "count",
+      "max"
+     ],
+     "fields": [
+      "v",
+      null,
+      "v"
+     ],
+     "as": [
+      "total",
+      "n",
+      "top"
+     ]
+    },
+    {
+     "type": "window",
+     "sort": {
+      "field": "total",
+      "order": "descending"
+     },
+     "ops": [
+      "rank",
+      "cume_dist"
+     ],
+     "as": [
+      "rank",
+      "cdf"
+     ]
+    },
+    {
+     "type": "formula",
+     "expr": "datum.total / 5",
+     "as": "scaled"
+    },
+    {
+     "type": "filter",
+     "expr": "datum.n >= 1"
+    },
+    {
+     "type": "collect",
+     "sort": {
+      "field": "total",
+      "order": "descending"
+     }
+    }
+   ]
+  },
+  {
+   "name": "lookupd",
+   "source": "raw",
+   "transform": [
+    {
+     "type": "lookup",
+     "from": "agg",
+     "key": "k",
+     "fields": [
+      "k"
+     ],
+     "values": [
+      "total"
+     ],
+     "as": [
+      "grand"
+     ]
+    },
+    {
+     "type": "project",
+     "fields": [
+      "k",
+      "grand"
+     ],
+     "as": [
+      "key",
+      "g"
+     ]
+    }
+   ]
+  }
+ ],
+ "scales": [
+  {
+   "name": "x",
+   "type": "band",
+   "domain": {
+    "data": "agg",
+    "field": "k",
+    "sort": {
+     "op": "max",
+     "field": "total",
+     "order": "descending"
+    }
+   },
+   "range": "width",
+   "padding": 0.1
+  },
+  {
+   "name": "y",
+   "type": "linear",
+   "domain": {
+    "data": "agg",
+    "field": "total"
+   },
+   "range": "height",
+   "nice": true
+  }
+ ],
+ "axes": [
+  {
+   "orient": "bottom",
+   "scale": "x"
+  }
+ ],
+ "marks": [
+  {
+   "type": "rect",
+   "from": {
+    "data": "agg"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "scale": "x",
+      "field": "k"
+     },
+     "width": {
+      "scale": "x",
+      "band": 1
+     },
+     "y": {
+      "scale": "y",
+      "field": "total"
+     },
+     "y2": {
+      "scale": "y",
+      "value": 0
+     }
+    }
+   }
+  },
+  {
+   "type": "text",
+   "from": {
+    "data": "agg"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "scale": "x",
+      "field": "k",
+      "band": 0.5
+     },
+     "y": {
+      "scale": "y",
+      "field": "total",
+      "offset": -3
+     },
+     "align": {
+      "value": "center"
+     },
+     "text": {
+      "signal": "datum.rank + ':' + format(datum.cdf, '.2f') + ':' + datum.scaled"
+     },
+     "fontSize": {
+      "value": 8
+     }
+    }
+   }
+  },
+  {
+   "type": "text",
+   "from": {
+    "data": "lookupd"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "value": 0
+     },
+     "y": {
+      "signal": "-5"
+     },
+     "text": {
+      "signal": "datum.key + datum.g"
+     },
+     "fontSize": {
+      "value": 6
+     }
+    }
+   }
+  }
+ ]
+}

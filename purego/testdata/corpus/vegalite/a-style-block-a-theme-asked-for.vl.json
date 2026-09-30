@@ -1,0 +1,46 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A `config.style` block reaches Vega whole. `stripAndRedirectConfig` deletes the Vega-Lite-only mark properties from `config.mark` — `if (config.mark) { for (const prop of VL_ONLY_MARK_CONFIG_PROPERTIES) delete config.mark[prop]; }` — and from each `config[markType]` inside `for (const markType of MARK_STYLES)`, and from nowhere else; a named style is never walked, and the redirection that follows only merges a mark-type block *into* it, `{...propConfig, ...config.style[toProp ?? prop]}`. Filtered as though it were a mark config, a style block arrived at the renderer without every word on that list, so a theme that said how a named style treats an unplaceable value, or what colour it draws in, was answered with nothing. The first row names a style that carries a colour and an `invalid` rule, which have to survive in `config.style` for Vega to apply them; the second declares a style no mark names, carrying the rest of the list, because a theme may define styles a given chart never asks for and they still belong in the block that goes out. The third row must not change: `config.mark` and `config.bar` lose exactly these properties on the way out, `config.bar` becoming the `bar` style as it goes, so the block a bar is drawn from keeps only the words Vega knows. Both marks are drawn from data with nothing unplaceable in it, so the `invalid` rule is pinned as configuration rather than as a redrawn scene.",
+  "data": {
+    "values": [
+      {"a": 1, "b": 2, "c": "alpha"},
+      {"a": 2, "b": 5, "c": "beta"},
+      {"a": 3, "b": 3, "c": "gamma"}
+    ]
+  },
+  "config": {
+    "style": {
+      "named": {"color": "#4c78a8", "invalid": "break-paths-show-domains"},
+      "unnamed": {
+        "filled": false,
+        "order": null,
+        "radius2": 3,
+        "theta2": 0.5,
+        "timeUnitBandSize": 0.5,
+        "timeUnitBandPosition": 0.25
+      }
+    },
+    "mark": {"color": "#e45756", "opacity": 0.8},
+    "bar": {"binSpacing": 3, "cornerRadius": 2}
+  },
+  "vconcat": [
+    {
+      "width": 180,
+      "height": 120,
+      "mark": {"type": "line", "style": "named"},
+      "encoding": {
+        "x": {"field": "a", "type": "quantitative"},
+        "y": {"field": "b", "type": "quantitative"}
+      }
+    },
+    {
+      "width": 180,
+      "height": 120,
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "c", "type": "nominal"},
+        "y": {"field": "b", "type": "quantitative"}
+      }
+    }
+  ]
+}

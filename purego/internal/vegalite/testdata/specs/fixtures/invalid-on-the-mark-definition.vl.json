@@ -1,0 +1,35 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "The same two invalid modes as `invalid-break-paths-domains`, written on the **mark definition** rather than in `config.mark` — and the domains are measured over different rows because of it. `assembleDomain` asks `getMarkConfig('invalid', markDef, config)`, and `getMarkConfig` reads only the configuration chain where `getMarkPropOrConfig` would read the mark definition first, so an `invalid` written here never reaches the choice of which output a domain is measured over. The point on the left hides its gaps and measures its domains over the rows it kept; the line on the right breaks at its gaps and measures over the rows it drew. Neither needs a second dataset, where the same two modes in a configuration need one apiece.",
+  "data": {
+    "values": [
+      {"a": -10, "b": null},
+      {"a": -5, "b": -25},
+      {"a": -1, "b": -20},
+      {"a": 0, "b": null},
+      {"a": 1, "b": 30},
+      {"a": 5, "b": 40},
+      {"a": 10, "b": null}
+    ]
+  },
+  "hconcat": [
+    {
+      "width": 100,
+      "height": 100,
+      "mark": {"type": "point", "invalid": "break-paths-show-domains"},
+      "encoding": {
+        "x": {"field": "a", "type": "quantitative"},
+        "y": {"field": "b", "type": "quantitative"}
+      }
+    },
+    {
+      "width": 100,
+      "height": 100,
+      "mark": {"type": "line", "invalid": "break-paths-filter-domains"},
+      "encoding": {
+        "x": {"field": "a", "type": "quantitative"},
+        "y": {"field": "b", "type": "quantitative"}
+      }
+    }
+  ]
+}

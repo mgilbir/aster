@@ -1,0 +1,12 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A logarithmic measure, which takes neither a zero nor a nice domain.",
+  "data": {"values": [
+    {"x": 1, "y": 1}, {"x": 2, "y": 10}, {"x": 3, "y": 100}, {"x": 4, "y": 1000}
+  ]},
+  "mark": "point",
+  "encoding": {
+    "x": {"field": "x", "type": "quantitative"},
+    "y": {"field": "y", "type": "quantitative", "scale": {"type": "log"}}
+  }
+}

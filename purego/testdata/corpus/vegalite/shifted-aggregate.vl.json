@@ -1,0 +1,10 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "An aggregate over shifted buckets, whose interpolated edges have to survive the grouping.",
+  "data": {"url": "data/stocks.csv"},
+  "mark": "bar",
+  "encoding": {
+    "x": {"timeUnit": "month", "field": "date", "type": "temporal", "bandPosition": 0},
+    "y": {"aggregate": "mean", "field": "price"}
+  }
+}

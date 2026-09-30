@@ -1,0 +1,121 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "domainRaw uses the interval it is given exactly, short-circuiting zero, the three domain overrides and nice. It is what makes an interactive zoom work: a brush publishes what it wants and nothing rounds it outwards.",
+  "width": 240,
+  "height": 200,
+  "padding": 5,
+  "background": "white",
+  "signals": [
+    {
+      "name": "zoom",
+      "value": [
+        17,
+        43
+      ]
+    }
+  ],
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {
+          "a": 20,
+          "b": 30
+        },
+        {
+          "a": 25,
+          "b": 41
+        },
+        {
+          "a": 33,
+          "b": 22
+        },
+        {
+          "a": 40,
+          "b": 37
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "linear",
+      "range": "width",
+      "domain": {
+        "data": "t",
+        "field": "a"
+      },
+      "domainRaw": {
+        "signal": "zoom"
+      },
+      "zero": true,
+      "nice": true,
+      "domainMin": -100,
+      "domainMax": 100
+    },
+    {
+      "name": "xplain",
+      "type": "linear",
+      "range": "width",
+      "domain": {
+        "data": "t",
+        "field": "a"
+      },
+      "zero": true,
+      "nice": true
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "range": "height",
+      "domain": {
+        "data": "t",
+        "field": "b"
+      },
+      "nice": true
+    }
+  ],
+  "axes": [
+    {
+      "orient": "bottom",
+      "scale": "x",
+      "title": "raw [17, 43]"
+    },
+    {
+      "orient": "top",
+      "scale": "xplain",
+      "title": "the same data, zeroed and niced"
+    },
+    {
+      "orient": "left",
+      "scale": "y"
+    }
+  ],
+  "marks": [
+    {
+      "type": "symbol",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "x",
+            "field": "a"
+          },
+          "y": {
+            "scale": "y",
+            "field": "b"
+          },
+          "size": {
+            "value": 80
+          },
+          "fill": {
+            "value": "#4c78a8"
+          }
+        }
+      }
+    }
+  ]
+}

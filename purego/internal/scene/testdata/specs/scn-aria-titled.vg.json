@@ -1,0 +1,103 @@
+{
+ "$schema": "https://vega.github.io/schema/vega/v6.json",
+ "width": 200,
+ "height": 150,
+ "padding": 5,
+ "marks": [
+  {
+   "type": "rect",
+   "from": {
+    "data": "t"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "scale": "x",
+      "field": "a"
+     },
+     "width": {
+      "scale": "x",
+      "band": 1,
+      "offset": -1
+     },
+     "y": {
+      "scale": "y",
+      "field": "b"
+     },
+     "y2": {
+      "scale": "y",
+      "value": 0
+     },
+     "fill": {
+      "value": "#69c"
+     }
+    }
+   }
+  }
+ ],
+ "data": [
+  {
+   "name": "t",
+   "values": [
+    {
+     "a": "A",
+     "b": 3
+    },
+    {
+     "a": "B",
+     "b": 7
+    },
+    {
+     "a": "C",
+     "b": 5
+    }
+   ]
+  }
+ ],
+ "scales": [
+  {
+   "name": "x",
+   "type": "band",
+   "domain": {
+    "data": "t",
+    "field": "a"
+   },
+   "range": "width",
+   "padding": 0.1
+  },
+  {
+   "name": "y",
+   "type": "linear",
+   "domain": {
+    "data": "t",
+    "field": "b"
+   },
+   "range": "height",
+   "nice": true
+  }
+ ],
+ "axes": [
+  {
+   "orient": "bottom",
+   "scale": "x",
+   "title": "Letters",
+   "description": "custom axis desc"
+  },
+  {
+   "orient": "left",
+   "scale": "y",
+   "title": [
+    "Two",
+    "line title"
+   ]
+  }
+ ],
+ "title": {
+  "text": [
+   "A title",
+   "in two lines"
+  ],
+  "subtitle": "and a subtitle",
+  "description": "title desc"
+ }
+}

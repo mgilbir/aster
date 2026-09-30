@@ -1,0 +1,120 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A group whose own signals and scales shadow the outer scope's. Each cell declares a signal named 'bar' and a scale named 's' that already exist outside it, so every reference inside the group has to resolve to the group's own and every reference outside it to the outer one — and the innermost group shadows the shadow. The height signal is read from the outer scope by a cell that does not redeclare it, which is what distinguishes shadowing from a fresh scope.",
+  "width": 260,
+  "height": 140,
+  "padding": 5,
+  "background": "white",
+  "signals": [
+    { "name": "bar", "value": 12 },
+    { "name": "tint", "value": "#4c78a8" },
+    { "name": "rowHeight", "value": 34 }
+  ],
+  "scales": [
+    { "name": "s", "type": "linear", "domain": [0, 10], "range": [0, 60] },
+    { "name": "outer", "type": "linear", "domain": [0, 10], "range": [0, 120] }
+  ],
+  "data": [
+    {
+      "name": "rows",
+      "values": [{ "i": 0, "v": 4 }, { "i": 1, "v": 7 }, { "i": 2, "v": 10 }]
+    }
+  ],
+  "marks": [
+    {
+      "type": "group",
+      "from": { "data": "rows" },
+      "encode": {
+        "enter": {
+          "x": { "value": 0 },
+          "y": { "signal": "datum.i * rowHeight" },
+          "width": { "signal": "width" },
+          "height": { "signal": "rowHeight" }
+        }
+      },
+      "signals": [
+        { "name": "bar", "update": "8 + parent.i * 4" },
+        { "name": "tint", "value": "#f58518" }
+      ],
+      "scales": [{ "name": "s", "type": "linear", "domain": [0, 10], "range": [0, 200] }],
+      "marks": [
+        {
+          "type": "rect",
+          "encode": {
+            "enter": {
+              "x": { "value": 0 },
+              "width": { "scale": "s", "signal": "parent.v" },
+              "y": { "value": 2 },
+              "height": { "signal": "bar" },
+              "fill": { "signal": "tint" }
+            }
+          }
+        },
+        {
+          "type": "group",
+          "encode": {
+            "enter": {
+              "x": { "value": 0 },
+              "y": { "value": 16 },
+              "width": { "signal": "width" },
+              "height": { "value": 14 }
+            }
+          },
+          "signals": [{ "name": "bar", "value": 6 }],
+          "marks": [
+            {
+              "type": "rect",
+              "encode": {
+                "enter": {
+                  "x": { "value": 0 },
+                  "width": { "scale": "s", "signal": "parent.v / 2" },
+                  "y": { "value": 0 },
+                  "height": { "signal": "bar" },
+                  "fill": { "value": "#54a24b" }
+                }
+              }
+            },
+            {
+              "type": "text",
+              "encode": {
+                "enter": {
+                  "x": { "signal": "width", "offset": -2 },
+                  "y": { "value": 8 },
+                  "align": { "value": "right" },
+                  "baseline": { "value": "middle" },
+                  "fontSize": { "value": 9 },
+                  "fill": { "value": "#333333" },
+                  "text": { "signal": "'inner bar ' + bar" }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "rule",
+      "encode": {
+        "enter": {
+          "x": { "value": 0 },
+          "x2": { "scale": "outer", "value": 10 },
+          "y": { "signal": "3 * rowHeight + 6" },
+          "stroke": { "signal": "tint" },
+          "strokeWidth": { "signal": "bar / 4" }
+        }
+      }
+    },
+    {
+      "type": "text",
+      "encode": {
+        "enter": {
+          "x": { "value": 0 },
+          "y": { "signal": "3 * rowHeight + 20" },
+          "fontSize": { "value": 10 },
+          "fill": { "value": "#333333" },
+          "text": { "signal": "'outer bar ' + bar + ', s(10) = ' + scale('s', 10)" }
+        }
+      }
+    }
+  ]
+}

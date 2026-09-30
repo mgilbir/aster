@@ -1,0 +1,67 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "The flatten transform expanding two parallel array fields into rows, then aggregated. flatten has an implementation and no fixture.",
+  "width": 240,
+  "height": 120,
+  "padding": 5,
+  "data": [
+    {
+      "name": "nested",
+      "values": [
+        {"team": "red", "weeks": [1, 2, 3], "scores": [4, 9, 6]},
+        {"team": "blue", "weeks": [1, 2, 3], "scores": [7, 3, 11]}
+      ]
+    },
+    {
+      "name": "flat",
+      "source": "nested",
+      "transform": [
+        {"type": "flatten", "fields": ["weeks", "scores"], "as": ["week", "score"]},
+        {"type": "formula", "as": "label", "expr": "datum.team + 'w' + datum.week"}
+      ]
+    },
+    {
+      "name": "totals",
+      "source": "flat",
+      "transform": [
+        {"type": "aggregate", "groupby": ["week"], "ops": ["sum"], "fields": ["score"], "as": ["total"]}
+      ]
+    }
+  ],
+  "scales": [
+    {"name": "x", "type": "band", "domain": {"data": "totals", "field": "week"}, "range": "width", "padding": 0.2},
+    {"name": "y", "type": "linear", "domain": {"data": "totals", "field": "total"}, "range": "height", "nice": true, "zero": true},
+    {"name": "teams", "type": "ordinal", "domain": {"data": "flat", "field": "team"}, "range": {"scheme": "set2"}}
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "x"},
+    {"orient": "left", "scale": "y", "tickCount": 4}
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "totals"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "week"},
+          "width": {"scale": "x", "band": 1},
+          "y": {"scale": "y", "field": "total"},
+          "y2": {"scale": "y", "value": 0},
+          "fill": {"value": "#dddddd"}
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "from": {"data": "flat"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "week", "band": 0.5},
+          "y": {"scale": "y", "field": "score"},
+          "size": {"value": 70},
+          "fill": {"scale": "teams", "field": "team"}
+        }
+      }
+    }
+  ]
+}

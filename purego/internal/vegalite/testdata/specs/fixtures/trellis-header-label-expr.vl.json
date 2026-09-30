@@ -1,0 +1,29 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A trellis captioning its own rows, spaced a row apart, over cells with no border.",
+  "data": {"url": "data/barley.json"},
+  "transform": [{"calculate": "datum.yield * 2", "as": "order"}],
+  "spacing": {"row": 1},
+  "facet": {
+    "row": {
+      "field": "site",
+      "type": "nominal",
+      "sort": {"field": "order"},
+      "header": {
+        "labelAngle": 0,
+        "labelAlign": "left",
+        "labelExpr": "datum.value === 'Waseca' ? 'WASECA' : datum.label"
+      }
+    }
+  },
+  "spec": {
+    "width": 300,
+    "height": 25,
+    "view": {"stroke": null},
+    "mark": "area",
+    "encoding": {
+      "x": {"field": "variety", "type": "nominal"},
+      "y": {"aggregate": "sum", "field": "yield", "type": "quantitative"}
+    }
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A key per layer over one shared size scale: two keys, each saying what its layer counts.",
+  "data": {"url": "data/cars.json"},
+  "layer": [
+    {
+      "mark": "circle",
+      "encoding": {
+        "x": {"bin": true, "field": "Acceleration", "type": "quantitative"},
+        "y": {"bin": true, "field": "Horsepower", "type": "quantitative"},
+        "size": {"aggregate": "count", "type": "quantitative", "title": "All Cars Count"}
+      }
+    },
+    {
+      "transform": [{"filter": "datum.Origin === 'Japan'"}],
+      "mark": "circle",
+      "encoding": {
+        "x": {"bin": true, "field": "Acceleration", "type": "quantitative"},
+        "y": {"bin": true, "field": "Horsepower", "type": "quantitative"},
+        "size": {"aggregate": "count", "type": "quantitative", "title": "Cars from Japan Count"},
+        "color": {"value": "firebrick"}
+      }
+    }
+  ],
+  "resolve": {"legend": {"size": "independent"}}
+}

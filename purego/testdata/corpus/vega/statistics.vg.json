@@ -1,0 +1,115 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A scatter with its least-squares line, and the same values summarised as a quantile plot beside it.",
+  "width": 240,
+  "height": 130,
+  "padding": 5,
+  "data": [
+    {
+      "name": "points",
+      "values": [
+        {"u": 1, "v": 2.1},
+        {"u": 2, "v": 4.3},
+        {"u": 3, "v": 5.6},
+        {"u": 4, "v": 8.4},
+        {"u": 5, "v": 9.7},
+        {"u": 6, "v": 12.2},
+        {"u": 7, "v": 13.4}
+      ]
+    },
+    {
+      "name": "fit",
+      "source": "points",
+      "transform": [{"type": "regression", "x": "u", "y": "v", "method": "linear"}]
+    },
+    {
+      "name": "quartiles",
+      "source": "points",
+      "transform": [
+        {"type": "quantile", "field": "v", "probs": [0.25, 0.5, 0.75], "as": ["p", "q"]}
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "linear",
+      "domain": {"data": "points", "field": "u"},
+      "range": [0, 130],
+      "zero": false,
+      "nice": true
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {"data": "points", "field": "v"},
+      "range": [130, 0],
+      "zero": true,
+      "nice": true
+    },
+    {
+      "name": "qy",
+      "type": "linear",
+      "domain": {"data": "quartiles", "field": "q"},
+      "range": [130, 0],
+      "zero": true
+    }
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "x", "tickCount": 4},
+    {"orient": "left", "scale": "y", "tickCount": 4}
+  ],
+  "marks": [
+    {
+      "type": "line",
+      "from": {"data": "fit"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "u"},
+          "y": {"scale": "y", "field": "v"},
+          "stroke": {"value": "#e45756"},
+          "strokeWidth": {"value": 2}
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "from": {"data": "points"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "u"},
+          "y": {"scale": "y", "field": "v"},
+          "size": {"value": 60},
+          "fill": {"value": "#4c78a8"}
+        }
+      }
+    },
+    {
+      "type": "rule",
+      "from": {"data": "quartiles"},
+      "encode": {
+        "enter": {
+          "x": {"value": 170},
+          "x2": {"value": 230},
+          "y": {"scale": "qy", "field": "q"},
+          "stroke": {"value": "#54a24b"},
+          "strokeWidth": {"value": 2}
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": {"data": "quartiles"},
+      "encode": {
+        "enter": {
+          "x": {"value": 232},
+          "y": {"scale": "qy", "field": "q"},
+          "text": {"field": "p"},
+          "baseline": {"value": "middle"},
+          "fontSize": {"value": 9},
+          "fill": {"value": "#333333"}
+        }
+      }
+    }
+  ]
+}

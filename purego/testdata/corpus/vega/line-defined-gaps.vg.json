@@ -1,0 +1,104 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A line and an area broken by `defined: false`, which is the one channel that makes a series draw as two subpaths rather than one. The differential model erased the difference — a moveTo and a lineTo both became a bare point — so a regression joining across the gap produced the identical record and passed. Nothing else in the corpus has an interior moveTo. Three more marks define *nothing*, which is the other end of the same channel: upstream keeps the item and writes an element with no `d` at all, where dropping the mark loses its container, its description and the colour it carries into a legend.",
+  "width": 200,
+  "height": 120,
+  "padding": 0,
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {"x": 0, "y": 10, "ok": true},
+        {"x": 50, "y": 40, "ok": true},
+        {"x": 100, "y": 20, "ok": false},
+        {"x": 150, "y": 60, "ok": true},
+        {"x": 200, "y": 30, "ok": true}
+      ]
+    }
+  ],
+  "scales": [
+    {"name": "x", "type": "linear", "domain": [0, 200], "range": "width"},
+    {"name": "y", "type": "linear", "domain": [0, 100], "range": [110, 10]}
+  ],
+  "marks": [
+    {
+      "type": "area",
+      "from": {"data": "t"},
+      "encode": {
+        "update": {
+          "x": {"scale": "x", "field": "x"},
+          "y": {"scale": "y", "field": "y"},
+          "y2": {"scale": "y", "value": 0},
+          "defined": {"field": "ok"},
+          "fill": {"value": "#c6dbef"}
+        }
+      }
+    },
+    {
+      "type": "line",
+      "from": {"data": "t"},
+      "encode": {
+        "update": {
+          "x": {"scale": "x", "field": "x"},
+          "y": {"scale": "y", "field": "y"},
+          "defined": {"field": "ok"},
+          "stroke": {"value": "#4c78a8"},
+          "strokeWidth": {"value": 2}
+        }
+      }
+    },
+    {
+      "type": "line",
+      "from": {"data": "t"},
+      "encode": {
+        "update": {
+          "x": {"scale": "x", "field": "x"},
+          "y": {"scale": "y", "field": "y"},
+          "stroke": {"value": "#bbb"},
+          "strokeDash": {"value": [3, 3]}
+        }
+      }
+    },
+    {
+      "type": "line",
+      "name": "noneDefined",
+      "from": {"data": "t"},
+      "encode": {
+        "update": {
+          "x": {"scale": "x", "field": "x"},
+          "y": {"scale": "y", "field": "y"},
+          "defined": {"value": false},
+          "stroke": {"value": "#e45756"}
+        }
+      }
+    },
+    {
+      "type": "area",
+      "name": "noneDefinedArea",
+      "from": {"data": "t"},
+      "encode": {
+        "update": {
+          "x": {"scale": "x", "field": "x"},
+          "y": {"scale": "y", "field": "y"},
+          "y2": {"scale": "y", "value": 0},
+          "defined": {"value": false},
+          "fill": {"value": "#f58518"}
+        }
+      }
+    },
+    {
+      "type": "trail",
+      "name": "noneDefinedTrail",
+      "from": {"data": "t"},
+      "encode": {
+        "update": {
+          "x": {"scale": "x", "field": "x"},
+          "y": {"scale": "y", "field": "y"},
+          "size": {"value": 6},
+          "defined": {"value": false},
+          "fill": {"value": "#54a24b"}
+        }
+      }
+    }
+  ]
+}

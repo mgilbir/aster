@@ -1,0 +1,38 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A grid whose cells are grids standing beside a plain plot: the levels belong to the plot that wrote them, so they are peeled where that plot's specification is normalised and lifted per plot. Everything the nest publishes runs through the plot's own name — `concat_0_cell` holding `concat_0_child_cell`, and the cell the marks are drawn in is `concat_0_child_child_width` wide. It also pins the split being per plot: only this plot's cells compute their own rows, and the plain plot beside it derives its chain as it always did.",
+  "data": {
+    "values": [
+      {"region": "north", "size": "big", "x": 1, "y": 4},
+      {"region": "north", "size": "small", "x": 2, "y": 3},
+      {"region": "south", "size": "big", "x": 3, "y": 2},
+      {"region": "south", "size": "small", "x": 4, "y": 1}
+    ]
+  },
+  "hconcat": [
+    {
+      "facet": {"column": {"field": "region"}},
+      "spec": {
+        "facet": {"row": {"field": "size"}},
+        "spec": {
+          "width": 120,
+          "height": 80,
+          "mark": "point",
+          "encoding": {
+            "x": {"field": "x", "type": "quantitative"},
+            "y": {"field": "y", "type": "quantitative"}
+          }
+        }
+      }
+    },
+    {
+      "width": 120,
+      "height": 80,
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "region", "type": "nominal"},
+        "y": {"field": "x", "type": "quantitative", "aggregate": "sum"}
+      }
+    }
+  ]
+}

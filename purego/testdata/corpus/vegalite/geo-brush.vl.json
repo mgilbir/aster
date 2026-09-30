@@ -1,0 +1,31 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A brush dragged over a map, which is a different kind of selection from a brush dragged over two scales. There is no scaled channel to invert a pixel through, so the brush remembers the rows its rectangle covers rather than the extent it inverts to: the store sorts by identity, the tuple comes from intersecting the rectangle with the drawn marks, and the condition tests identity. It opens already drawn, which is what pins the one-shot tick — the scenegraph is empty on the first pulse, so without it the initial brush would intersect nothing. Both channels are brushed here; the one-channel case, where the missing coordinate is borrowed from the middle of the plot, is pinned by the second fixture beside this one.",
+  "width": 300,
+  "height": 200,
+  "projection": {"type": "albersUsa"},
+  "data": {
+    "values": [
+      {"place": "a", "lon": -122.4, "lat": 37.8},
+      {"place": "b", "lon": -87.6, "lat": 41.9},
+      {"place": "c", "lon": -74.0, "lat": 40.7},
+      {"place": "d", "lon": -95.4, "lat": 29.8}
+    ]
+  },
+  "params": [
+    {
+      "name": "brush",
+      "select": "interval",
+      "value": {"latitude": [30, 42], "longitude": [-100, -70]}
+    }
+  ],
+  "mark": "circle",
+  "encoding": {
+    "longitude": {"field": "lon", "type": "quantitative"},
+    "latitude": {"field": "lat", "type": "quantitative"},
+    "color": {
+      "condition": {"param": "brush", "empty": false, "value": "goldenrod"},
+      "value": "steelblue"
+    }
+  }
+}

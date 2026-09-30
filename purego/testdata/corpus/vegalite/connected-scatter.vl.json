@@ -1,0 +1,11 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A line drawn in the order a column names, not left to right.",
+  "data": {"url": "data/driving.json"},
+  "mark": {"type": "line", "point": true},
+  "encoding": {
+    "x": {"field": "miles", "type": "quantitative", "scale": {"zero": false}},
+    "y": {"field": "gas", "type": "quantitative", "scale": {"zero": false}},
+    "order": {"field": "year"}
+  }
+}

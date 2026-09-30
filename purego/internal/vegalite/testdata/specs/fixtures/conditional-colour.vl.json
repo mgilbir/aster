@@ -1,0 +1,25 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A colour that is only a condition, which falls through to the mark's own.",
+  "data": {
+    "url": "data/movies.json"
+  },
+  "mark": "bar",
+  "encoding": {
+    "x": {
+      "field": "Major Genre",
+      "type": "nominal"
+    },
+    "y": {
+      "aggregate": "mean",
+      "field": "Rotten Tomatoes Rating",
+      "type": "quantitative"
+    },
+    "color": {
+      "condition": {
+        "test": "datum['mean_Rotten Tomatoes Rating'] === null",
+        "value": "#aaa"
+      }
+    }
+  }
+}

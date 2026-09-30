@@ -1,0 +1,59 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "Two rules about where a stack's rounding is read from. The first is that `cornerRadiusEnd` **overwrites** the corner it resolves into rather than defaulting it. `initMarkdef` writes `for (const newProp of newProps) { markDef[newProp] = cornerRadiusEnd }`, an assignment onto the mark definition, so a bar that states both `cornerRadiusEnd` and one of the two corners that word covers comes out with the end radius on that corner and the stated one gone. This compiler applied `cornerRadiusEnd` first and then wrote the mark's own properties over the top, so the stated corner won and a bar asking for a rounded end and a square top-left was drawn with the square — the opposite of upstream, and silently, since both are plausible numbers. The first two panels state `\"cornerRadiusEnd\": 6` beside a `cornerRadiusTopLeft` of 2 and a `cornerRadiusBottomLeft` of 3: upstream's top-left is a **six**, because `cornerRadiusEnd` claims it on a vertical bar, and the bottom-left stays a three, because it is not one of the corners `BAR_CORNER_RADIUS_END_INDEX` names for that orientation and nothing touches it. The first panel is stacked and reads those corners off the group; the second is the row that must **not** gain the groups, writing `\"stack\": null` so that `model.stack` is absent, and it shows the same precedence on a plain rect where there is no group to move anything to. The second rule is which tables a group's rounding and outline are looked up in. `getGroupsForStackedBarWithCornerRadius` asks `getMarkConfig(key, model.markDef, model.config)` for every corner and every stroke property, and `getMarkConfig` consults the **style blocks first** — `getMarkStyleConfig(channel, mark, config.style)` — before either configuration block. This compiler read a single flattened table of `config.mark` and `config.bar` instead, which has no style blocks in it, so a style that rounded and outlined a bar was invisible exactly where it mattered: the group was built with neither the radius nor the stroke, and the segments kept a radius they were supposed to have surrendered. The third panel wears a `boxed` style carrying a `cornerRadius`, a `stroke` and a `strokeWidth`, and stacks on a `detail` rather than a `color` so that it draws no legend: a style block's stroke is *also* meant to reach a legend's symbols, which is a separate rule in a separate file and not what this fixture is about. Upstream moves all three onto the outer group, adds `strokeForeground` and `strokeOffset` because a stroke is present at all — `if (groupUpdate.stroke) { groupUpdate.strokeForeground = {value: true}; groupUpdate.strokeOffset = {value: 0} }` — and then writes `{\"value\": 0}` for the radius back onto the segments, the comment upstream being that they are already moved to the group and Vega would otherwise apply the style underneath a second time.",
+  "data": {
+    "values": [
+      {"c": "Jan", "g": "north", "v": 28},
+      {"c": "Jan", "g": "south", "v": 41},
+      {"c": "Feb", "g": "north", "v": 35},
+      {"c": "Feb", "g": "south", "v": 19},
+      {"c": "Mar", "g": "north", "v": 22},
+      {"c": "Mar", "g": "south", "v": 33}
+    ]
+  },
+  "config": {
+    "style": {"boxed": {"cornerRadius": 9, "stroke": "#333333", "strokeWidth": 1.5}}
+  },
+  "hconcat": [
+    {
+      "width": 110,
+      "height": 130,
+      "mark": {
+        "type": "bar",
+        "cornerRadiusEnd": 6,
+        "cornerRadiusTopLeft": 2,
+        "cornerRadiusBottomLeft": 3
+      },
+      "encoding": {
+        "x": {"field": "c", "type": "nominal", "sort": null, "axis": {"labelAngle": 0}},
+        "y": {"field": "v", "type": "quantitative"},
+        "color": {"field": "g", "type": "nominal"}
+      }
+    },
+    {
+      "width": 110,
+      "height": 130,
+      "mark": {
+        "type": "bar",
+        "cornerRadiusEnd": 6,
+        "cornerRadiusTopLeft": 2,
+        "cornerRadiusBottomLeft": 3
+      },
+      "encoding": {
+        "x": {"field": "c", "type": "nominal", "sort": null, "axis": {"labelAngle": 0}},
+        "y": {"field": "v", "type": "quantitative", "stack": null},
+        "color": {"field": "g", "type": "nominal"}
+      }
+    },
+    {
+      "width": 110,
+      "height": 130,
+      "mark": {"type": "bar", "style": "boxed"},
+      "encoding": {
+        "x": {"field": "c", "type": "nominal", "sort": null, "axis": {"labelAngle": 0}},
+        "y": {"field": "v", "type": "quantitative"},
+        "detail": {"field": "g", "type": "nominal"}
+      }
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "description": "A facet written above the view rather than in its encoding, over both directions.",
+  "data": {
+    "values": [
+      {"category": "Alpha", "amount": 28, "band": "low", "era": "before"},
+      {"category": "Beta", "amount": 55, "band": "high", "era": "before"},
+      {"category": "Alpha", "amount": 43, "band": "low", "era": "after"},
+      {"category": "Beta", "amount": 91, "band": "high", "era": "after"}
+    ]
+  },
+  "facet": {
+    "row": {"field": "band", "type": "nominal"},
+    "column": {"field": "era", "type": "nominal"}
+  },
+  "spec": {
+    "width": 90,
+    "height": 70,
+    "mark": "bar",
+    "encoding": {
+      "x": {"field": "category", "type": "nominal"},
+      "y": {"field": "amount", "type": "quantitative"}
+    }
+  }
+}

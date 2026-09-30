@@ -1,0 +1,64 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A horizontal area beside a line with a gap in it. Area orientation and a broken series have never been compared.",
+  "width": 240,
+  "height": 140,
+  "padding": 5,
+  "data": [
+    {
+      "name": "band",
+      "values": [
+        {"t": 0, "lo": 6, "hi": 22},
+        {"t": 1, "lo": 10, "hi": 30},
+        {"t": 2, "lo": 4, "hi": 18},
+        {"t": 3, "lo": 12, "hi": 34},
+        {"t": 4, "lo": 8, "hi": 25}
+      ]
+    },
+    {
+      "name": "series",
+      "values": [
+        {"t": 0, "v": 14},
+        {"t": 1, "v": 21},
+        {"t": 2, "v": null},
+        {"t": 3, "v": 26},
+        {"t": 4, "v": 17}
+      ]
+    }
+  ],
+  "scales": [
+    {"name": "x", "type": "linear", "domain": [0, 4], "range": "width"},
+    {"name": "y", "type": "linear", "domain": [0, 36], "range": "height"}
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "x", "tickCount": 5},
+    {"orient": "left", "scale": "y", "tickCount": 4}
+  ],
+  "marks": [
+    {
+      "type": "area",
+      "from": {"data": "band"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "t"},
+          "y": {"scale": "y", "field": "lo"},
+          "y2": {"scale": "y", "field": "hi"},
+          "fill": {"value": "#c6dbef"},
+          "fillOpacity": {"value": 0.8}
+        }
+      }
+    },
+    {
+      "type": "line",
+      "from": {"data": "series"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "t"},
+          "y": {"scale": "y", "field": "v"},
+          "stroke": {"value": "#e45756"},
+          "strokeWidth": {"value": 2}
+        }
+      }
+    }
+  ]
+}

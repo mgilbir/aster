@@ -1,0 +1,21 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A chart drawn in somebody else's theme.",
+  "config": {
+    "background": "#f8f5ec",
+    "axis": {"labelColor": "#5f5a4e", "gridColor": "#e2dcc8", "domainColor": "#b8b0a0"},
+    "bar": {"fill": "#c85a3f"},
+    "legend": {"labelColor": "#5f5a4e"},
+    "title": {"color": "#3c3a33"}
+  },
+  "title": "Themed",
+  "data": {"values": [
+    {"a": "A", "b": 28}, {"a": "B", "b": 55}, {"a": "C", "b": 43}
+  ]},
+  "mark": "bar",
+  "encoding": {
+    "x": {"field": "a", "type": "nominal"},
+    "y": {"field": "b", "type": "quantitative"},
+    "color": {"field": "a", "type": "nominal"}
+  }
+}

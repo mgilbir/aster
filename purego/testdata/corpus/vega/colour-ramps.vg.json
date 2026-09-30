@@ -1,0 +1,113 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "Four continuous colour schemes — a perceptual ramp, a single-hue one, a diverging one and a cyclic one — sampled across the same domain, each with a gradient legend.",
+  "width": 240,
+  "height": 130,
+  "padding": 5,
+  "data": [
+    {
+      "name": "table",
+      "values": [
+        {"x": 0, "v": 0},
+        {"x": 1, "v": 14},
+        {"x": 2, "v": 29},
+        {"x": 3, "v": 43},
+        {"x": 4, "v": 57},
+        {"x": 5, "v": 71},
+        {"x": 6, "v": 86},
+        {"x": 7, "v": 100}
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {"data": "table", "field": "x"},
+      "range": "width",
+      "padding": 0.1
+    },
+    {
+      "name": "viridis",
+      "type": "linear",
+      "domain": [0, 100],
+      "range": {"scheme": "viridis"}
+    },
+    {
+      "name": "blues",
+      "type": "linear",
+      "domain": [0, 100],
+      "range": {"scheme": "blues"}
+    },
+    {
+      "name": "redblue",
+      "type": "linear",
+      "domain": [0, 100],
+      "range": {"scheme": "redblue"}
+    },
+    {
+      "name": "turbo",
+      "type": "linear",
+      "domain": [0, 100],
+      "range": {"scheme": "turbo"}
+    }
+  ],
+  "axes": [{"orient": "bottom", "scale": "x"}],
+  "legends": [
+    {"fill": "viridis", "type": "gradient", "title": "viridis", "orient": "right"}
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "x"},
+          "width": {"scale": "x", "band": 1},
+          "y": {"value": 0},
+          "height": {"value": 28},
+          "fill": {"scale": "viridis", "field": "v"}
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "x"},
+          "width": {"scale": "x", "band": 1},
+          "y": {"value": 32},
+          "height": {"value": 28},
+          "fill": {"scale": "blues", "field": "v"}
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "x"},
+          "width": {"scale": "x", "band": 1},
+          "y": {"value": 64},
+          "height": {"value": 28},
+          "fill": {"scale": "redblue", "field": "v"}
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "x"},
+          "width": {"scale": "x", "band": 1},
+          "y": {"value": 96},
+          "height": {"value": 28},
+          "fill": {"scale": "turbo", "field": "v"}
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,119 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A legend's own background: a rounded, filled, outlined panel behind the entries. The outline's width and dash come from config.legend and not from the legend, because a legend's own strokeWidth names a scale rather than styling anything.",
+  "width": 220,
+  "height": 160,
+  "padding": 5,
+  "background": "white",
+  "config": {
+    "legend": {
+      "strokeWidth": 2,
+      "strokeDash": [
+        4,
+        2
+      ]
+    }
+  },
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {
+          "c": "alpha",
+          "v": 3
+        },
+        {
+          "c": "beta",
+          "v": 7
+        },
+        {
+          "c": "gamma",
+          "v": 5
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {
+        "data": "t",
+        "field": "c"
+      },
+      "range": "width"
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {
+        "data": "t",
+        "field": "v"
+      },
+      "range": "height",
+      "nice": true
+    },
+    {
+      "name": "colour",
+      "type": "ordinal",
+      "domain": {
+        "data": "t",
+        "field": "c"
+      },
+      "range": "category"
+    }
+  ],
+  "legends": [
+    {
+      "fill": "colour",
+      "title": "series",
+      "orient": "right",
+      "fillColor": "#f5f5f5",
+      "strokeColor": "#666666",
+      "cornerRadius": 8,
+      "padding": 8
+    },
+    {
+      "fill": "colour",
+      "title": "again",
+      "orient": "bottom-left",
+      "fillColor": "#fff7ec",
+      "strokeColor": "#cc4c02",
+      "cornerRadius": 0,
+      "padding": 6,
+      "direction": "horizontal"
+    }
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "x",
+            "field": "c"
+          },
+          "width": {
+            "scale": "x",
+            "band": 0.9
+          },
+          "y": {
+            "scale": "y",
+            "field": "v"
+          },
+          "y2": {
+            "scale": "y",
+            "value": 0
+          },
+          "fill": {
+            "scale": "colour",
+            "field": "c"
+          }
+        }
+      }
+    }
+  ]
+}

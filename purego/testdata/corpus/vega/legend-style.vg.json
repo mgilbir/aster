@@ -1,0 +1,97 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A restyled legend beside dashed and round-capped marks: the same colour, width, dash and opacity family the axis has, plus the stroke channels on the marks themselves.",
+  "width": 200,
+  "height": 130,
+  "padding": 5,
+  "data": [
+    {
+      "name": "table",
+      "values": [
+        {"c": "alpha", "t": 1, "v": 28},
+        {"c": "alpha", "t": 2, "v": 55},
+        {"c": "alpha", "t": 3, "v": 43},
+        {"c": "beta", "t": 1, "v": 61},
+        {"c": "beta", "t": 2, "v": 22},
+        {"c": "beta", "t": 3, "v": 74}
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "linear",
+      "domain": {"data": "table", "field": "t"},
+      "domainMin": 1,
+      "range": "width"
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {"data": "table", "field": "v"},
+      "range": "height",
+      "nice": true
+    },
+    {
+      "name": "colour",
+      "type": "ordinal",
+      "domain": {"data": "table", "field": "c", "sort": true},
+      "range": {"scheme": "tableau10"}
+    }
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "x", "tickCount": 3},
+    {"orient": "left", "scale": "y", "tickCount": 4}
+  ],
+  "legends": [
+    {
+      "fill": "colour",
+      "title": "Series",
+      "labelColor": "#333366",
+      "labelFontStyle": "italic",
+      "labelOpacity": 0.8,
+      "titleColor": "#663333",
+      "titleFontWeight": "normal",
+      "symbolStrokeColor": "#222222",
+      "symbolStrokeWidth": 2,
+      "symbolDash": [2, 2],
+      "symbolOpacity": 0.6
+    }
+  ],
+  "marks": [
+    {
+      "type": "group",
+      "from": {"facet": {"name": "series", "data": "table", "groupby": "c"}},
+      "marks": [
+        {
+          "type": "line",
+          "from": {"data": "series"},
+          "encode": {
+            "enter": {
+              "x": {"scale": "x", "field": "t"},
+              "y": {"scale": "y", "field": "v"},
+              "stroke": {"scale": "colour", "field": "c"},
+              "strokeWidth": {"value": 3},
+              "strokeDash": {"value": [6, 3]},
+              "strokeCap": {"value": "round"},
+              "strokeJoin": {"value": "round"}
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "rule",
+      "encode": {
+        "enter": {
+          "x": {"value": 0},
+          "x2": {"signal": "width"},
+          "y": {"scale": "y", "value": 50},
+          "stroke": {"value": "#999999"},
+          "strokeWidth": {"value": 2},
+          "strokeDash": {"value": [4, 4]}
+        }
+      }
+    }
+  ]
+}

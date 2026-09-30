@@ -1,0 +1,54 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A mark's size is read from the **whole** chain, not from the mark definition alone. `getBandSize` asks `getMarkPropOrConfig(useVlSizeChannel ? 'size' : sizeChannel, mark, config, {vgChannel: sizeChannel})`, and that walks the definition under Vega's name for the property, then Vega-Lite's, then the style blocks, then `config[marktype]` under each name in turn, then `config.mark`. Read as the definition plus `config[marktype][width]` alone — which is what this compiler did — a theme that says `config.bar.size` is ignored and the bar keeps the bandwidth it would have had with no theme at all. The first row states that size in a theme and nothing on the mark. The second states a `discreteBandSize`, which `getBandSize` takes *before* it measures the band: `config[mark.type]?.discreteBandSize || {band: 1}`, so the configured number wins and only its absence falls through to the whole band — and because the number is not a *fraction* of the band, the mark is centred in it rather than filling it from the leading edge, which is `isRelativeBandSize(bandSize)` in `defaultBandAlign`. The third sets `minBandSize` to zero, which is a floor of nothing and therefore no floor: upstream's test is `minBandSize ? max(…) : bandWidth`, so the bandwidth is written alone. The fourth is a tick, whose size is its height rather than its width, to say that the chain is asked under the channel the mark actually uses.",
+  "data": {
+    "values": [
+      {"c": "alpha", "v": 28},
+      {"c": "beta", "v": 55},
+      {"c": "gamma", "v": 43}
+    ]
+  },
+  "config": {
+    "bar": {"size": 11},
+    "rect": {"discreteBandSize": 9},
+    "tick": {"size": 7}
+  },
+  "vconcat": [
+    {
+      "width": 200,
+      "height": 60,
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "c", "type": "nominal"},
+        "y": {"field": "v", "type": "quantitative"}
+      }
+    },
+    {
+      "width": 200,
+      "height": 60,
+      "mark": "rect",
+      "encoding": {
+        "x": {"field": "c", "type": "nominal"},
+        "y": {"field": "v", "type": "quantitative"}
+      }
+    },
+    {
+      "width": 200,
+      "height": 60,
+      "mark": {"type": "bar", "minBandSize": 0},
+      "encoding": {
+        "x": {"field": "c", "type": "nominal"},
+        "y": {"field": "v", "type": "quantitative"}
+      }
+    },
+    {
+      "width": 200,
+      "height": 60,
+      "mark": "tick",
+      "encoding": {
+        "x": {"field": "v", "type": "quantitative"},
+        "y": {"field": "c", "type": "nominal"}
+      }
+    }
+  ]
+}

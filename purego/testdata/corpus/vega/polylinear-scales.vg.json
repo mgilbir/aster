@@ -1,0 +1,80 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "Scales whose domain has more than two stops, on the transformed families as well as the linear one — and a range with a stop the domain does not use, which upstream truncates rather than refuses.",
+  "width": 320,
+  "height": 180,
+  "padding": 5,
+
+  "data": [
+    {
+      "name": "points",
+      "values": [
+        {"v": 1}, {"v": 2}, {"v": 3}, {"v": 5}, {"v": 10}, {"v": 30}, {"v": 100}
+      ],
+      "transform": [
+        {"type": "formula", "as": "lin", "expr": "scale('threeStop', datum.v)"},
+        {"type": "formula", "as": "pw", "expr": "scale('power', datum.v)"},
+        {"type": "formula", "as": "lg", "expr": "scale('logs', datum.v)"},
+        {"type": "formula", "as": "sl", "expr": "scale('symlogs', datum.v)"},
+        {"type": "formula", "as": "spare", "expr": "scale('spareStop', datum.v)"}
+      ]
+    }
+  ],
+
+  "scales": [
+    {
+      "name": "threeStop",
+      "type": "linear",
+      "domain": [1, 10, 100],
+      "range": [0, 20, 100]
+    },
+    {
+      "name": "power",
+      "type": "pow",
+      "exponent": 0.5,
+      "domain": [1, 10, 100],
+      "range": [0, 20, 100]
+    },
+    {
+      "name": "logs",
+      "type": "log",
+      "domain": [1, 10, 100],
+      "range": [0, 20, 100]
+    },
+    {
+      "name": "symlogs",
+      "type": "symlog",
+      "domain": [1, 10, 100],
+      "range": [0, 20, 100]
+    },
+    {
+      "name": "spareStop",
+      "type": "linear",
+      "domain": [1, 100],
+      "range": [0, 50, 999]
+    },
+    {
+      "name": "yscale",
+      "type": "band",
+      "domain": {"data": "points", "field": "v"},
+      "range": "height"
+    }
+  ],
+
+  "marks": [
+    {
+      "type": "text",
+      "from": {"data": "points"},
+      "encode": {
+        "enter": {
+          "x": {"value": 0},
+          "y": {"scale": "yscale", "field": "v", "band": 0.5},
+          "baseline": {"value": "middle"},
+          "text": {
+            "signal": "datum.v + ': ' + format(datum.lin, '.4f') + ' ' + format(datum.pw, '.4f') + ' ' + format(datum.lg, '.4f') + ' ' + format(datum.sl, '.4f') + ' ' + format(datum.spare, '.4f')"
+          }
+        }
+      }
+    }
+  ]
+}

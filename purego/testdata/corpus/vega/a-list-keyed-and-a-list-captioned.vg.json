@@ -1,0 +1,53 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "One column of lists, read two ways, and upstream disagrees with itself on purpose. A data-driven discrete domain **groups** by `'' + value`, which is `Array.prototype.join`: a null element contributes **nothing**, so `[\"a\", null, \"c\"]` keys as `a,,c` and — the part that is visible without reading a key — `[null]` and `[]` both key as the empty string and are **one** category. Five rows, four bands. A **caption** reads the same axis as `a,null,c, null, 1,null, only`, with the word, because a caption is built from the **labels** and a label has been through the formatter by then: `String` applied to each element, under which a null is four letters. This engine had `VegaValue.asString` joining an array with each element's own text, which is the caption's rule in the key's place — so the domain gained a fifth band upstream does not draw. Fixing that one function broke the caption in the same run, which is how it was established that the two sides are both real; the caption now formats per element in `GuideCaption` and the key does not. The legend is here because its entries come from the same domain and so inherit the same grouping, and the text mark writes the raw cell so the three readings sit side by side.",
+  "width": 280,
+  "height": 150,
+  "padding": 5,
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {"v": ["a", null, "c"], "n": 1},
+        {"v": [null], "n": 2},
+        {"v": [1, null], "n": 3},
+        {"v": [], "n": 4},
+        {"v": ["only"], "n": 5}
+      ]
+    }
+  ],
+  "scales": [
+    {"name": "x", "type": "band", "domain": {"data": "t", "field": "v"}, "range": "width", "padding": 0.1},
+    {"name": "colour", "type": "ordinal", "domain": {"data": "t", "field": "v"}, "range": "category"}
+  ],
+  "axes": [{"orient": "bottom", "scale": "x", "labelOverlap": false}],
+  "legends": [{"fill": "colour"}],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "t"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "v"},
+          "width": {"scale": "x", "band": 1},
+          "y": {"value": 62},
+          "y2": {"value": 96},
+          "fill": {"scale": "colour", "field": "v"}
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": {"data": "t"},
+      "encode": {
+        "enter": {
+          "x": {"value": 2},
+          "y": {"signal": "11 * datum.n - 10"},
+          "text": {"signal": "datum.n + ': [' + datum.v + ']'"},
+          "fontSize": {"value": 8},
+          "baseline": {"value": "top"}
+        }
+      }
+    }
+  ]
+}

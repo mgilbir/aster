@@ -1,0 +1,121 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "**A range with fewer than two values is not a reason to refuse a scale.** d3 pairs a continuous scale's domain against its range over `min(domain.length, range.length)` entries, so a range of one \u2014 or of none \u2014 leaves nothing to interpolate and `scale(x)` answers `undefined`. It does not throw and it does not stop the scale existing: probed, `[]` and `[5]` both build and both answer `undefined` for every input. A third value is not a refusal either \u2014 `[0, 50, 100]` over a domain of `[0, 100]` pairs the first two, so `scale(50)` is 25 rather than 50, which is what says the pairing is **by position** and not by ends. `long` is the same rule from the other side \u2014 a domain of three against a range of two \u2014 and it is the only shape that distinguishes `min(domain, range)` from the domain's own length: it pairs `(0, 0)` and `(50, 100)`, so `scale(25)` is 50. It is read at **two** values on purpose. At 25 both readings agree \u2014 each interpolates the first pair \u2014 and only a value past the second stop tells them apart: at 75 the rule gives 150, extrapolating off the end of a two-stop scale, where counting the stops off the domain would walk into a third range entry that is not there. A mutant survived the first version of this fixture for exactly that reason, and then survived the second, which had `long` but read it only at 25. This engine answered `Scale 'y' needs a numeric two-value range` and built nothing, and refusing a scale takes the axis and every encoding that names it with it: a chart upstream draws became no chart and three errors, the same failure `a-scale-with-no-range-keeps-its-default` records one range-shape over. What is compared here is that the scales **exist**, with the ranges upstream gives them. **No axis is drawn over a short range here, deliberately.** Upstream's ticks over one sit at `NaN`, and a `NaN` position is bounded by a rule this engine has not transcribed \u2014 `boundRule` opens `x1 = item.x || 0, y1 = item.y || 0`, where a `NaN` is *falsey* and bounds at zero, while `x2` and `y2` keep theirs and lose the four bare comparisons that `Bounds.union` is made of. That is a different bounds model from this one's `min`/`max`, it is worth a change of its own, and STATUS records the five pixels it is currently worth on this shape.",
+  "width": 200,
+  "height": 120,
+  "padding": 5,
+  "signals": [
+    {
+      "name": "rng",
+      "value": []
+    }
+  ],
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {
+          "k": "a",
+          "v": 10
+        },
+        {
+          "k": "b",
+          "v": 100
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "none",
+      "type": "linear",
+      "domain": [
+        0,
+        100
+      ],
+      "range": {
+        "signal": "rng"
+      }
+    },
+    {
+      "name": "one",
+      "type": "linear",
+      "domain": [
+        0,
+        100
+      ],
+      "range": [
+        5
+      ]
+    },
+    {
+      "name": "three",
+      "type": "linear",
+      "domain": [
+        0,
+        100
+      ],
+      "range": [
+        0,
+        50,
+        100
+      ]
+    },
+    {
+      "name": "two",
+      "type": "linear",
+      "domain": [
+        0,
+        100
+      ],
+      "range": [
+        0,
+        100
+      ]
+    },
+    {
+      "name": "long",
+      "type": "linear",
+      "domain": [
+        0,
+        50,
+        100
+      ],
+      "range": [
+        0,
+        100
+      ]
+    }
+  ],
+  "axes": [
+    {
+      "orient": "bottom",
+      "scale": "two",
+      "tickCount": 3
+    }
+  ],
+  "marks": [
+    {
+      "type": "text",
+      "encode": {
+        "update": {
+          "x": {
+            "value": 20
+          },
+          "y": {
+            "value": 20
+          },
+          "text": {
+            "signal": "'three(50) ' + scale('three', 50) + ' two(50) ' + scale('two', 50) + ' long(25) ' + scale('long', 25) + ' long(75) ' + scale('long', 75)"
+          },
+          "fontSize": {
+            "value": 9
+          },
+          "baseline": {
+            "value": "top"
+          }
+        }
+      }
+    }
+  ]
+}

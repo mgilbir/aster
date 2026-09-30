@@ -1,0 +1,192 @@
+{
+ "$schema": "https://vega.github.io/schema/vega/v6.json",
+ "width": 300,
+ "height": 200,
+ "padding": 5,
+ "marks": [
+  {
+   "type": "text",
+   "encode": {
+    "update": {
+     "x": {
+      "value": 20
+     },
+     "y": {
+      "value": 30
+     },
+     "text": {
+      "value": [
+       "first line",
+       "second, longer line",
+       "third"
+      ]
+     },
+     "fontSize": {
+      "value": 12
+     },
+     "lineHeight": {
+      "value": 18
+     },
+     "fill": {
+      "value": "black"
+     }
+    }
+   }
+  },
+  {
+   "type": "text",
+   "encode": {
+    "update": {
+     "x": {
+      "value": 180
+     },
+     "y": {
+      "value": 30
+     },
+     "text": {
+      "value": "a\nb\nc d e"
+     },
+     "lineBreak": {
+      "value": "\n"
+     },
+     "fontSize": {
+      "value": 11
+     },
+     "align": {
+      "value": "center"
+     },
+     "baseline": {
+      "value": "middle"
+     },
+     "fill": {
+      "value": "#c00"
+     }
+    }
+   }
+  },
+  {
+   "type": "text",
+   "encode": {
+    "update": {
+     "x": {
+      "value": 20
+     },
+     "y": {
+      "value": 120
+     },
+     "text": {
+      "value": "one|two|three"
+     },
+     "lineBreak": {
+      "value": "|"
+     },
+     "angle": {
+      "value": 20
+     },
+     "baseline": {
+      "value": "top"
+     },
+     "fill": {
+      "value": "#060"
+     },
+     "fontSize": {
+      "value": 14
+     }
+    }
+   }
+  },
+  {
+   "type": "text",
+   "encode": {
+    "update": {
+     "x": {
+      "value": 180
+     },
+     "y": {
+      "value": 150
+     },
+     "text": {
+      "value": [
+       "x",
+       "y"
+      ]
+     },
+     "align": {
+      "value": "right"
+     },
+     "baseline": {
+      "value": "bottom"
+     },
+     "lineHeight": {
+      "value": 30
+     },
+     "fill": {
+      "value": "#008"
+     }
+    }
+   }
+  },
+  {
+   "type": "text",
+   "encode": {
+    "update": {
+     "x": {
+      "value": 100
+     },
+     "y": {
+      "value": 180
+     },
+     "text": {
+      "value": [
+       "only one"
+      ]
+     },
+     "fill": {
+      "value": "#808"
+     }
+    }
+   }
+  },
+  {
+   "type": "text",
+   "encode": {
+    "update": {
+     "x": {
+      "value": 200
+     },
+     "y": {
+      "value": 180
+     },
+     "text": {
+      "value": ""
+     },
+     "fill": {
+      "value": "#808"
+     }
+    }
+   }
+  },
+  {
+   "type": "text",
+   "encode": {
+    "update": {
+     "x": {
+      "value": 220
+     },
+     "y": {
+      "value": 180
+     },
+     "text": {
+      "value": [
+       "",
+       "second only"
+      ]
+     },
+     "fill": {
+      "value": "#808"
+     }
+    }
+   }
+  }
+ ]
+}

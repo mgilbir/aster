@@ -1,0 +1,10 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "An aggregate that answers with a whole row, and a field naming which of its columns to read.",
+  "data": {"url": "data/movies.json"},
+  "mark": "bar",
+  "encoding": {
+    "x": {"aggregate": {"argmax": "US Gross"}, "field": "Production Budget", "type": "quantitative"},
+    "y": {"field": "Major Genre", "type": "nominal"}
+  }
+}

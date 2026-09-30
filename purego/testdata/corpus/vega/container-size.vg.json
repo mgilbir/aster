@@ -1,0 +1,41 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "containerSize() with no container, written the way a responsive specification writes it: measure, and fall back. The rect is 180 wide only because the measurement is absent, so this pins upstream's headless answer as geometry rather than as a claim.",
+  "width": 260,
+  "height": 60,
+  "padding": 5,
+  "signals": [
+    {"name": "measured", "update": "containerSize()[0]"},
+    {"name": "barWidth", "update": "measured || 180"}
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "encode": {
+        "enter": {
+          "x": {"value": 0},
+          "y": {"value": 0},
+          "width": {"signal": "barWidth"},
+          "height": {"value": 20},
+          "fill": {"value": "#4c78a8"}
+        }
+      }
+    },
+    {
+      "type": "text",
+      "encode": {
+        "enter": {
+          "x": {"value": 0},
+          "y": {"value": 36},
+          "align": {"value": "left"},
+          "baseline": {"value": "top"},
+          "fontSize": {"value": 10},
+          "fill": {"value": "#333333"},
+          "text": {
+            "signal": "'containerSize gives ' + length(containerSize()) + ' values, first is ' + (isValid(measured) ? 'a number' : 'absent')"
+          }
+        }
+      }
+    }
+  ]
+}

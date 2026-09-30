@@ -1,0 +1,51 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "**A title a signal does not supply is no title, not the word for one.** A guide's `title` may be computed, and upstream carries whatever the signal holds straight onto the title item — `null` stays `null` there, and a null text measures as nothing and paints as nothing. This engine read it with the same function it uses to *say* a value, and `String(null)` is the four-letter word `null`, so a chart whose title comes from a control that has not answered yet drew the word `null` across the top of a legend and along an axis. The three titles here are three different builders — an axis's, a legend's, and the chart's own — and each resolved its text separately, so one of them being right said nothing about the others. A **subtitle** is the fourth caller of the same resolution and is deliberately not here: a subtitle carries a second rule of its own — `titleLayout` unions its bounds into the heading only `if (subtitle && subtitle.text)` — and mixing the two would make one fixture answer two questions. It has its own, beside this one. The `blank` axis is the control: an **empty** title is not the same written form as an absent one and must stay empty rather than being folded in, exactly as an empty format specifier is not an absent one. The reference records no `text` key at all for these, because a null is dropped on the way out — which is why this went unseen: the mark comparison walked only the reference's own channels, so a word this side invented was looked at by nothing. `text` is one-sided-checked now, the way paint and the stroke caps already were, and it found two more fixtures the moment it was turned on.",
+  "width": 140,
+  "height": 70,
+  "padding": 5,
+  "signals": [
+    {"name": "gone", "value": null},
+    {"name": "blank", "value": ""}
+  ],
+  "title": {"text": {"signal": "gone"}},
+  "data": [
+    {
+      "name": "d",
+      "values": [
+        {"k": "a", "v": 1},
+        {"k": "b", "v": 2}
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {"data": "d", "field": "k"},
+      "range": "width",
+      "padding": 0.2
+    },
+    {"name": "c", "type": "ordinal", "domain": {"data": "d", "field": "k"}, "range": "category"}
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "x", "title": {"signal": "gone"}},
+    {"orient": "top", "scale": "x", "title": {"signal": "blank"}}
+  ],
+  "legends": [{"fill": "c", "title": {"signal": "gone"}}],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "d"},
+      "encode": {
+        "update": {
+          "x": {"scale": "x", "field": "k"},
+          "width": {"scale": "x", "band": 1},
+          "y": {"value": 0},
+          "y2": {"value": 40},
+          "fill": {"scale": "c", "field": "k"}
+        }
+      }
+    }
+  ]
+}

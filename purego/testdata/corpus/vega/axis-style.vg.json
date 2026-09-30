@@ -1,0 +1,84 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "Every part of an axis restyled: colours, widths, dashes and opacities on the ticks, grid and domain line, and a coloured italic label beside a plain title.",
+  "width": 220,
+  "height": 130,
+  "padding": 5,
+  "data": [
+    {
+      "name": "table",
+      "values": [
+        {"c": "a", "v": 28},
+        {"c": "b", "v": 55},
+        {"c": "c", "v": 43},
+        {"c": "d", "v": 91},
+        {"c": "e", "v": 12}
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {"data": "table", "field": "c"},
+      "range": "width",
+      "padding": 0.15
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {"data": "table", "field": "v"},
+      "range": "height",
+      "nice": true
+    }
+  ],
+  "axes": [
+    {
+      "orient": "bottom",
+      "scale": "x",
+      "title": "Category",
+      "tickColor": "#003399",
+      "tickWidth": 3,
+      "tickDash": [2, 2],
+      "tickOpacity": 0.5,
+      "domainColor": "#990099",
+      "domainWidth": 4,
+      "domainDash": [6, 3],
+      "domainOpacity": 0.6,
+      "labelColor": "#cc3333",
+      "labelFontStyle": "italic",
+      "labelOpacity": 0.7,
+      "titleColor": "#333333",
+      "titleFontWeight": "normal"
+    },
+    {
+      "orient": "left",
+      "scale": "y",
+      "title": "Value",
+      "grid": true,
+      "tickCount": 4,
+      "gridColor": "#00aa00",
+      "gridWidth": 2,
+      "gridDash": [4, 2],
+      "gridOpacity": 0.3,
+      "tickWidth": 9,
+      "labelFontStyle": "italic",
+      "domainColor": "#888888"
+    }
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "c"},
+          "width": {"scale": "x", "band": 1},
+          "y": {"scale": "y", "field": "v"},
+          "y2": {"scale": "y", "value": 0},
+          "fill": {"value": "#9ecae9"}
+        }
+      }
+    }
+  ]
+}

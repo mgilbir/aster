@@ -1,0 +1,70 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "Five of `config.legend`'s words are Vega-Lite's alone and are spent before anything is emitted: `VL_ONLY_LEGEND_CONFIG = ['gradientHorizontalMaxLength', 'gradientHorizontalMinLength', 'gradientVerticalMaxLength', 'gradientVerticalMinLength', 'unselectedOpacity']`, which `stripAndRedirectConfig` deletes from the block on the way out — `if (config.legend) { for (const prop of VL_ONLY_LEGEND_CONFIG) delete config.legend[prop]; }`. Passed straight through, they reached the renderer as five words Vega has never heard of in the block it applies to every legend, and the thing they were meant to decide was decided by a constant instead. What they decide is a colour ramp's length: `defaultGradientLength` destructures the four bounds out of the legend configuration and returns `gradientLengthSignal(model, 'height', gradientVerticalMinLength, gradientVerticalMaxLength)` for a vertical ramp, the same against `'width'` for a horizontal one oriented top or bottom, and the bare `gradientHorizontalMinLength` for a horizontal ramp anywhere else, `gradientLengthSignal` writing `clamp(size, min, max)`. The first row is a ramp down the side of the plot, so its length is the height clamped between the vertical bounds this theme asked for rather than between upstream's default sixty-four and two hundred. The second is a ramp along the top, clamped between the horizontal bounds against the width. The third is a horizontal ramp beside the plot, which has no width to follow and is simply as short as a horizontal ramp is allowed to be, proving the minimum is read on its own and not only as half of a clamp. The fourth is a discrete scale whose legend a selection picks through, drawn at `unselectedOpacity` where it is not picked, and it also shows that a symbol legend takes no length at all from the four bounds. The last row must not change: `labelFontSize` is a word Vega does know, so it survives in `config.legend` and keeps the block from disappearing, which is what distinguishes deleting five named keys from dropping the block whole.",
+  "data": {
+    "values": [
+      {"a": 1, "b": 2, "v": 3, "k": "alpha"},
+      {"a": 4, "b": 5, "v": 60, "k": "beta"},
+      {"a": 7, "b": 1, "v": 25, "k": "gamma"}
+    ]
+  },
+  "config": {
+    "legend": {
+      "gradientVerticalMinLength": 24,
+      "gradientVerticalMaxLength": 96,
+      "gradientHorizontalMinLength": 36,
+      "gradientHorizontalMaxLength": 72,
+      "unselectedOpacity": 0.15,
+      "labelFontSize": 9
+    }
+  },
+  "vconcat": [
+    {
+      "width": 180,
+      "height": 150,
+      "mark": "point",
+      "encoding": {
+        "x": {"field": "a", "type": "quantitative"},
+        "y": {"field": "b", "type": "quantitative"},
+        "color": {"field": "v", "type": "quantitative"}
+      }
+    },
+    {
+      "width": 180,
+      "height": 150,
+      "mark": "point",
+      "encoding": {
+        "x": {"field": "a", "type": "quantitative"},
+        "y": {"field": "b", "type": "quantitative"},
+        "color": {"field": "v", "type": "quantitative", "legend": {"orient": "top"}}
+      }
+    },
+    {
+      "width": 180,
+      "height": 150,
+      "mark": "point",
+      "encoding": {
+        "x": {"field": "a", "type": "quantitative"},
+        "y": {"field": "b", "type": "quantitative"},
+        "color": {
+          "field": "v",
+          "type": "quantitative",
+          "legend": {"orient": "right", "direction": "horizontal"}
+        }
+      }
+    },
+    {
+      "width": 180,
+      "height": 150,
+      "params": [
+        {"name": "picked", "select": {"type": "point", "fields": ["k"]}, "bind": "legend"}
+      ],
+      "mark": "point",
+      "encoding": {
+        "x": {"field": "a", "type": "quantitative"},
+        "y": {"field": "b", "type": "quantitative"},
+        "color": {"field": "k", "type": "nominal"}
+      }
+    }
+  ]
+}

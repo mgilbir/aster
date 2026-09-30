@@ -1,0 +1,13 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A styled tick pinned to a constant, beside a label sharing the same position.",
+  "data": {"url": "data/cars.json"},
+  "encoding": {
+    "x": {"field": "Origin", "type": "nominal"},
+    "y": {"value": 0}
+  },
+  "layer": [
+    {"mark": {"type": "text", "style": "label"}, "encoding": {"text": {"aggregate": "max", "field": "Horsepower"}}},
+    {"mark": {"type": "tick", "style": "tick", "size": 8, "color": "#ccc"}}
+  ]
+}

@@ -1,0 +1,1482 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "The twelve projections no chart in the corpus had drawn, each given the same graticule and the same four cities so the differences between them are the only thing on screen. The three conics take their parallels from the specification, the azimuthals and the gnomonic clip to a cap around their centre, the orthographic shows only the hemisphere facing the reader, and the transverse Mercator is the ordinary one turned on its side. Nothing here is decorative: a projection is a pair of trigonometric formulas and a clip, and a wrong sign in either draws a plausible-looking map of somewhere else. Each `geopath` names its `field`: a mark-level transform visits **scene items** rather than rows, and `geopath` with no field falls back to the identity accessor — which hands a scene item, with its bounds and its mark and its datum, to a path generator that wants geometry. Upstream answers that with an empty `d` attribute, so every one of these twelve graticules was a mark with no outline in it and this fixture compared nothing but the cities. The graticule stops at 60 degrees north and south because `conicConformal` is infinite at one pole: taken to the default extent it draws a line half a million pixels long, and a canvas a million pixels wide is measured in units where the last digit of a double is worth more than the comparison's tolerance. What is being compared here is twelve projections of the same graticule, not what any of them does at a point where its formula has no value. Each panel clips, which is what a trellis of maps does: without it a projection that reaches past its own 90 by 62 box paints over its neighbours, and the chart sizes itself to whichever of the twelve reaches furthest.",
+  "width": 280,
+  "height": 260,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "grid",
+      "transform": [
+        {
+          "type": "graticule",
+          "step": [
+            30,
+            30
+          ],
+          "extent": [
+            [
+              -180,
+              -60
+            ],
+            [
+              180,
+              60
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "name": "cities",
+      "values": [
+        {
+          "name": "quito",
+          "lon": -78.5,
+          "lat": -0.2
+        },
+        {
+          "name": "oslo",
+          "lon": 10.7,
+          "lat": 59.9
+        },
+        {
+          "name": "perth",
+          "lon": 115.9,
+          "lat": -32.0
+        },
+        {
+          "name": "nome",
+          "lon": -165.4,
+          "lat": 64.5
+        }
+      ],
+      "transform": [
+        {
+          "type": "geopoint",
+          "projection": "conicConformal",
+          "fields": [
+            "lon",
+            "lat"
+          ],
+          "as": [
+            "conicConformalX",
+            "conicConformalY"
+          ]
+        },
+        {
+          "type": "geopoint",
+          "projection": "conicEqualArea",
+          "fields": [
+            "lon",
+            "lat"
+          ],
+          "as": [
+            "conicEqualAreaX",
+            "conicEqualAreaY"
+          ]
+        },
+        {
+          "type": "geopoint",
+          "projection": "conicEquidistant",
+          "fields": [
+            "lon",
+            "lat"
+          ],
+          "as": [
+            "conicEquidistantX",
+            "conicEquidistantY"
+          ]
+        },
+        {
+          "type": "geopoint",
+          "projection": "azimuthalEqualArea",
+          "fields": [
+            "lon",
+            "lat"
+          ],
+          "as": [
+            "azimuthalEqualAreaX",
+            "azimuthalEqualAreaY"
+          ]
+        },
+        {
+          "type": "geopoint",
+          "projection": "azimuthalEquidistant",
+          "fields": [
+            "lon",
+            "lat"
+          ],
+          "as": [
+            "azimuthalEquidistantX",
+            "azimuthalEquidistantY"
+          ]
+        },
+        {
+          "type": "geopoint",
+          "projection": "gnomonic",
+          "fields": [
+            "lon",
+            "lat"
+          ],
+          "as": [
+            "gnomonicX",
+            "gnomonicY"
+          ]
+        },
+        {
+          "type": "geopoint",
+          "projection": "orthographic",
+          "fields": [
+            "lon",
+            "lat"
+          ],
+          "as": [
+            "orthographicX",
+            "orthographicY"
+          ]
+        },
+        {
+          "type": "geopoint",
+          "projection": "stereographic",
+          "fields": [
+            "lon",
+            "lat"
+          ],
+          "as": [
+            "stereographicX",
+            "stereographicY"
+          ]
+        },
+        {
+          "type": "geopoint",
+          "projection": "transverseMercator",
+          "fields": [
+            "lon",
+            "lat"
+          ],
+          "as": [
+            "transverseMercatorX",
+            "transverseMercatorY"
+          ]
+        },
+        {
+          "type": "geopoint",
+          "projection": "naturalEarth1",
+          "fields": [
+            "lon",
+            "lat"
+          ],
+          "as": [
+            "naturalEarth1X",
+            "naturalEarth1Y"
+          ]
+        },
+        {
+          "type": "geopoint",
+          "projection": "equalEarth",
+          "fields": [
+            "lon",
+            "lat"
+          ],
+          "as": [
+            "equalEarthX",
+            "equalEarthY"
+          ]
+        },
+        {
+          "type": "geopoint",
+          "projection": "mollweide",
+          "fields": [
+            "lon",
+            "lat"
+          ],
+          "as": [
+            "mollweideX",
+            "mollweideY"
+          ]
+        }
+      ]
+    }
+  ],
+  "projections": [
+    {
+      "name": "conicConformal",
+      "type": "conicConformal",
+      "scale": 22,
+      "translate": [
+        42,
+        30
+      ],
+      "parallels": [
+        20,
+        60
+      ]
+    },
+    {
+      "name": "conicEqualArea",
+      "type": "conicEqualArea",
+      "scale": 22,
+      "translate": [
+        42,
+        30
+      ],
+      "parallels": [
+        -20,
+        40
+      ]
+    },
+    {
+      "name": "conicEquidistant",
+      "type": "conicEquidistant",
+      "scale": 22,
+      "translate": [
+        42,
+        30
+      ],
+      "parallels": [
+        10,
+        50
+      ]
+    },
+    {
+      "name": "azimuthalEqualArea",
+      "type": "azimuthalEqualArea",
+      "scale": 22,
+      "translate": [
+        42,
+        30
+      ],
+      "rotate": [
+        0,
+        -20,
+        0
+      ]
+    },
+    {
+      "name": "azimuthalEquidistant",
+      "type": "azimuthalEquidistant",
+      "scale": 18,
+      "translate": [
+        42,
+        30
+      ]
+    },
+    {
+      "name": "gnomonic",
+      "type": "gnomonic",
+      "scale": 22,
+      "translate": [
+        42,
+        30
+      ]
+    },
+    {
+      "name": "orthographic",
+      "type": "orthographic",
+      "scale": 38,
+      "translate": [
+        42,
+        30
+      ],
+      "rotate": [
+        -10,
+        -20,
+        0
+      ]
+    },
+    {
+      "name": "stereographic",
+      "type": "stereographic",
+      "scale": 22,
+      "translate": [
+        42,
+        30
+      ]
+    },
+    {
+      "name": "transverseMercator",
+      "type": "transverseMercator",
+      "scale": 20,
+      "translate": [
+        42,
+        30
+      ],
+      "rotate": [
+        -10,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "naturalEarth1",
+      "type": "naturalEarth1",
+      "scale": 22,
+      "translate": [
+        42,
+        30
+      ]
+    },
+    {
+      "name": "equalEarth",
+      "type": "equalEarth",
+      "scale": 22,
+      "translate": [
+        42,
+        30
+      ]
+    },
+    {
+      "name": "mollweide",
+      "type": "mollweide",
+      "scale": 22,
+      "translate": [
+        42,
+        30
+      ]
+    }
+  ],
+  "marks": [
+    {
+      "type": "group",
+      "clip": true,
+      "encode": {
+        "enter": {
+          "x": {
+            "value": 0
+          },
+          "y": {
+            "value": 0
+          },
+          "width": {
+            "value": 90
+          },
+          "height": {
+            "value": 62
+          },
+          "stroke": {
+            "value": "#dddddd"
+          }
+        }
+      },
+      "marks": [
+        {
+          "type": "path",
+          "from": {
+            "data": "grid"
+          },
+          "encode": {
+            "enter": {
+              "stroke": {
+                "value": "#bbbbbb"
+              },
+              "strokeWidth": {
+                "value": 0.3
+              },
+              "fill": {
+                "value": "transparent"
+              }
+            }
+          },
+          "transform": [
+            {
+              "type": "geopath",
+              "projection": "conicConformal",
+              "field": "datum"
+            }
+          ]
+        },
+        {
+          "type": "symbol",
+          "from": {
+            "data": "cities"
+          },
+          "encode": {
+            "enter": {
+              "size": {
+                "value": 14
+              },
+              "fill": {
+                "value": "#e45756"
+              },
+              "x": {
+                "field": "conicConformalX"
+              },
+              "y": {
+                "field": "conicConformalY"
+              }
+            }
+          }
+        },
+        {
+          "type": "text",
+          "encode": {
+            "enter": {
+              "x": {
+                "value": 2
+              },
+              "y": {
+                "value": 8
+              },
+              "text": {
+                "value": "conicConformal"
+              },
+              "fontSize": {
+                "value": 7
+              },
+              "fill": {
+                "value": "#333333"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "group",
+      "clip": true,
+      "encode": {
+        "enter": {
+          "x": {
+            "value": 92
+          },
+          "y": {
+            "value": 0
+          },
+          "width": {
+            "value": 90
+          },
+          "height": {
+            "value": 62
+          },
+          "stroke": {
+            "value": "#dddddd"
+          }
+        }
+      },
+      "marks": [
+        {
+          "type": "path",
+          "from": {
+            "data": "grid"
+          },
+          "encode": {
+            "enter": {
+              "stroke": {
+                "value": "#bbbbbb"
+              },
+              "strokeWidth": {
+                "value": 0.3
+              },
+              "fill": {
+                "value": "transparent"
+              }
+            }
+          },
+          "transform": [
+            {
+              "type": "geopath",
+              "projection": "conicEqualArea",
+              "field": "datum"
+            }
+          ]
+        },
+        {
+          "type": "symbol",
+          "from": {
+            "data": "cities"
+          },
+          "encode": {
+            "enter": {
+              "size": {
+                "value": 14
+              },
+              "fill": {
+                "value": "#e45756"
+              },
+              "x": {
+                "field": "conicEqualAreaX"
+              },
+              "y": {
+                "field": "conicEqualAreaY"
+              }
+            }
+          }
+        },
+        {
+          "type": "text",
+          "encode": {
+            "enter": {
+              "x": {
+                "value": 2
+              },
+              "y": {
+                "value": 8
+              },
+              "text": {
+                "value": "conicEqualArea"
+              },
+              "fontSize": {
+                "value": 7
+              },
+              "fill": {
+                "value": "#333333"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "group",
+      "clip": true,
+      "encode": {
+        "enter": {
+          "x": {
+            "value": 184
+          },
+          "y": {
+            "value": 0
+          },
+          "width": {
+            "value": 90
+          },
+          "height": {
+            "value": 62
+          },
+          "stroke": {
+            "value": "#dddddd"
+          }
+        }
+      },
+      "marks": [
+        {
+          "type": "path",
+          "from": {
+            "data": "grid"
+          },
+          "encode": {
+            "enter": {
+              "stroke": {
+                "value": "#bbbbbb"
+              },
+              "strokeWidth": {
+                "value": 0.3
+              },
+              "fill": {
+                "value": "transparent"
+              }
+            }
+          },
+          "transform": [
+            {
+              "type": "geopath",
+              "projection": "conicEquidistant",
+              "field": "datum"
+            }
+          ]
+        },
+        {
+          "type": "symbol",
+          "from": {
+            "data": "cities"
+          },
+          "encode": {
+            "enter": {
+              "size": {
+                "value": 14
+              },
+              "fill": {
+                "value": "#e45756"
+              },
+              "x": {
+                "field": "conicEquidistantX"
+              },
+              "y": {
+                "field": "conicEquidistantY"
+              }
+            }
+          }
+        },
+        {
+          "type": "text",
+          "encode": {
+            "enter": {
+              "x": {
+                "value": 2
+              },
+              "y": {
+                "value": 8
+              },
+              "text": {
+                "value": "conicEquidistant"
+              },
+              "fontSize": {
+                "value": 7
+              },
+              "fill": {
+                "value": "#333333"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "group",
+      "clip": true,
+      "encode": {
+        "enter": {
+          "x": {
+            "value": 0
+          },
+          "y": {
+            "value": 64
+          },
+          "width": {
+            "value": 90
+          },
+          "height": {
+            "value": 62
+          },
+          "stroke": {
+            "value": "#dddddd"
+          }
+        }
+      },
+      "marks": [
+        {
+          "type": "path",
+          "from": {
+            "data": "grid"
+          },
+          "encode": {
+            "enter": {
+              "stroke": {
+                "value": "#bbbbbb"
+              },
+              "strokeWidth": {
+                "value": 0.3
+              },
+              "fill": {
+                "value": "transparent"
+              }
+            }
+          },
+          "transform": [
+            {
+              "type": "geopath",
+              "projection": "azimuthalEqualArea",
+              "field": "datum"
+            }
+          ]
+        },
+        {
+          "type": "symbol",
+          "from": {
+            "data": "cities"
+          },
+          "encode": {
+            "enter": {
+              "size": {
+                "value": 14
+              },
+              "fill": {
+                "value": "#e45756"
+              },
+              "x": {
+                "field": "azimuthalEqualAreaX"
+              },
+              "y": {
+                "field": "azimuthalEqualAreaY"
+              }
+            }
+          }
+        },
+        {
+          "type": "text",
+          "encode": {
+            "enter": {
+              "x": {
+                "value": 2
+              },
+              "y": {
+                "value": 8
+              },
+              "text": {
+                "value": "azimuthalEqualArea"
+              },
+              "fontSize": {
+                "value": 7
+              },
+              "fill": {
+                "value": "#333333"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "group",
+      "clip": true,
+      "encode": {
+        "enter": {
+          "x": {
+            "value": 92
+          },
+          "y": {
+            "value": 64
+          },
+          "width": {
+            "value": 90
+          },
+          "height": {
+            "value": 62
+          },
+          "stroke": {
+            "value": "#dddddd"
+          }
+        }
+      },
+      "marks": [
+        {
+          "type": "path",
+          "from": {
+            "data": "grid"
+          },
+          "encode": {
+            "enter": {
+              "stroke": {
+                "value": "#bbbbbb"
+              },
+              "strokeWidth": {
+                "value": 0.3
+              },
+              "fill": {
+                "value": "transparent"
+              }
+            }
+          },
+          "transform": [
+            {
+              "type": "geopath",
+              "projection": "azimuthalEquidistant",
+              "field": "datum"
+            }
+          ]
+        },
+        {
+          "type": "symbol",
+          "from": {
+            "data": "cities"
+          },
+          "encode": {
+            "enter": {
+              "size": {
+                "value": 14
+              },
+              "fill": {
+                "value": "#e45756"
+              },
+              "x": {
+                "field": "azimuthalEquidistantX"
+              },
+              "y": {
+                "field": "azimuthalEquidistantY"
+              }
+            }
+          }
+        },
+        {
+          "type": "text",
+          "encode": {
+            "enter": {
+              "x": {
+                "value": 2
+              },
+              "y": {
+                "value": 8
+              },
+              "text": {
+                "value": "azimuthalEquidistant"
+              },
+              "fontSize": {
+                "value": 7
+              },
+              "fill": {
+                "value": "#333333"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "group",
+      "clip": true,
+      "encode": {
+        "enter": {
+          "x": {
+            "value": 184
+          },
+          "y": {
+            "value": 64
+          },
+          "width": {
+            "value": 90
+          },
+          "height": {
+            "value": 62
+          },
+          "stroke": {
+            "value": "#dddddd"
+          }
+        }
+      },
+      "marks": [
+        {
+          "type": "path",
+          "from": {
+            "data": "grid"
+          },
+          "encode": {
+            "enter": {
+              "stroke": {
+                "value": "#bbbbbb"
+              },
+              "strokeWidth": {
+                "value": 0.3
+              },
+              "fill": {
+                "value": "transparent"
+              }
+            }
+          },
+          "transform": [
+            {
+              "type": "geopath",
+              "projection": "gnomonic",
+              "field": "datum"
+            }
+          ]
+        },
+        {
+          "type": "symbol",
+          "from": {
+            "data": "cities"
+          },
+          "encode": {
+            "enter": {
+              "size": {
+                "value": 14
+              },
+              "fill": {
+                "value": "#e45756"
+              },
+              "x": {
+                "field": "gnomonicX"
+              },
+              "y": {
+                "field": "gnomonicY"
+              }
+            }
+          }
+        },
+        {
+          "type": "text",
+          "encode": {
+            "enter": {
+              "x": {
+                "value": 2
+              },
+              "y": {
+                "value": 8
+              },
+              "text": {
+                "value": "gnomonic"
+              },
+              "fontSize": {
+                "value": 7
+              },
+              "fill": {
+                "value": "#333333"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "group",
+      "clip": true,
+      "encode": {
+        "enter": {
+          "x": {
+            "value": 0
+          },
+          "y": {
+            "value": 128
+          },
+          "width": {
+            "value": 90
+          },
+          "height": {
+            "value": 62
+          },
+          "stroke": {
+            "value": "#dddddd"
+          }
+        }
+      },
+      "marks": [
+        {
+          "type": "path",
+          "from": {
+            "data": "grid"
+          },
+          "encode": {
+            "enter": {
+              "stroke": {
+                "value": "#bbbbbb"
+              },
+              "strokeWidth": {
+                "value": 0.3
+              },
+              "fill": {
+                "value": "transparent"
+              }
+            }
+          },
+          "transform": [
+            {
+              "type": "geopath",
+              "projection": "orthographic",
+              "field": "datum"
+            }
+          ]
+        },
+        {
+          "type": "symbol",
+          "from": {
+            "data": "cities"
+          },
+          "encode": {
+            "enter": {
+              "size": {
+                "value": 14
+              },
+              "fill": {
+                "value": "#e45756"
+              },
+              "x": {
+                "field": "orthographicX"
+              },
+              "y": {
+                "field": "orthographicY"
+              }
+            }
+          }
+        },
+        {
+          "type": "text",
+          "encode": {
+            "enter": {
+              "x": {
+                "value": 2
+              },
+              "y": {
+                "value": 8
+              },
+              "text": {
+                "value": "orthographic"
+              },
+              "fontSize": {
+                "value": 7
+              },
+              "fill": {
+                "value": "#333333"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "group",
+      "clip": true,
+      "encode": {
+        "enter": {
+          "x": {
+            "value": 92
+          },
+          "y": {
+            "value": 128
+          },
+          "width": {
+            "value": 90
+          },
+          "height": {
+            "value": 62
+          },
+          "stroke": {
+            "value": "#dddddd"
+          }
+        }
+      },
+      "marks": [
+        {
+          "type": "path",
+          "from": {
+            "data": "grid"
+          },
+          "encode": {
+            "enter": {
+              "stroke": {
+                "value": "#bbbbbb"
+              },
+              "strokeWidth": {
+                "value": 0.3
+              },
+              "fill": {
+                "value": "transparent"
+              }
+            }
+          },
+          "transform": [
+            {
+              "type": "geopath",
+              "projection": "stereographic",
+              "field": "datum"
+            }
+          ]
+        },
+        {
+          "type": "symbol",
+          "from": {
+            "data": "cities"
+          },
+          "encode": {
+            "enter": {
+              "size": {
+                "value": 14
+              },
+              "fill": {
+                "value": "#e45756"
+              },
+              "x": {
+                "field": "stereographicX"
+              },
+              "y": {
+                "field": "stereographicY"
+              }
+            }
+          }
+        },
+        {
+          "type": "text",
+          "encode": {
+            "enter": {
+              "x": {
+                "value": 2
+              },
+              "y": {
+                "value": 8
+              },
+              "text": {
+                "value": "stereographic"
+              },
+              "fontSize": {
+                "value": 7
+              },
+              "fill": {
+                "value": "#333333"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "group",
+      "clip": true,
+      "encode": {
+        "enter": {
+          "x": {
+            "value": 184
+          },
+          "y": {
+            "value": 128
+          },
+          "width": {
+            "value": 90
+          },
+          "height": {
+            "value": 62
+          },
+          "stroke": {
+            "value": "#dddddd"
+          }
+        }
+      },
+      "marks": [
+        {
+          "type": "path",
+          "from": {
+            "data": "grid"
+          },
+          "encode": {
+            "enter": {
+              "stroke": {
+                "value": "#bbbbbb"
+              },
+              "strokeWidth": {
+                "value": 0.3
+              },
+              "fill": {
+                "value": "transparent"
+              }
+            }
+          },
+          "transform": [
+            {
+              "type": "geopath",
+              "projection": "transverseMercator",
+              "field": "datum"
+            }
+          ]
+        },
+        {
+          "type": "symbol",
+          "from": {
+            "data": "cities"
+          },
+          "encode": {
+            "enter": {
+              "size": {
+                "value": 14
+              },
+              "fill": {
+                "value": "#e45756"
+              },
+              "x": {
+                "field": "transverseMercatorX"
+              },
+              "y": {
+                "field": "transverseMercatorY"
+              }
+            }
+          }
+        },
+        {
+          "type": "text",
+          "encode": {
+            "enter": {
+              "x": {
+                "value": 2
+              },
+              "y": {
+                "value": 8
+              },
+              "text": {
+                "value": "transverseMercator"
+              },
+              "fontSize": {
+                "value": 7
+              },
+              "fill": {
+                "value": "#333333"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "group",
+      "clip": true,
+      "encode": {
+        "enter": {
+          "x": {
+            "value": 0
+          },
+          "y": {
+            "value": 192
+          },
+          "width": {
+            "value": 90
+          },
+          "height": {
+            "value": 62
+          },
+          "stroke": {
+            "value": "#dddddd"
+          }
+        }
+      },
+      "marks": [
+        {
+          "type": "path",
+          "from": {
+            "data": "grid"
+          },
+          "encode": {
+            "enter": {
+              "stroke": {
+                "value": "#bbbbbb"
+              },
+              "strokeWidth": {
+                "value": 0.3
+              },
+              "fill": {
+                "value": "transparent"
+              }
+            }
+          },
+          "transform": [
+            {
+              "type": "geopath",
+              "projection": "naturalEarth1",
+              "field": "datum"
+            }
+          ]
+        },
+        {
+          "type": "symbol",
+          "from": {
+            "data": "cities"
+          },
+          "encode": {
+            "enter": {
+              "size": {
+                "value": 14
+              },
+              "fill": {
+                "value": "#e45756"
+              },
+              "x": {
+                "field": "naturalEarth1X"
+              },
+              "y": {
+                "field": "naturalEarth1Y"
+              }
+            }
+          }
+        },
+        {
+          "type": "text",
+          "encode": {
+            "enter": {
+              "x": {
+                "value": 2
+              },
+              "y": {
+                "value": 8
+              },
+              "text": {
+                "value": "naturalEarth1"
+              },
+              "fontSize": {
+                "value": 7
+              },
+              "fill": {
+                "value": "#333333"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "group",
+      "clip": true,
+      "encode": {
+        "enter": {
+          "x": {
+            "value": 92
+          },
+          "y": {
+            "value": 192
+          },
+          "width": {
+            "value": 90
+          },
+          "height": {
+            "value": 62
+          },
+          "stroke": {
+            "value": "#dddddd"
+          }
+        }
+      },
+      "marks": [
+        {
+          "type": "path",
+          "from": {
+            "data": "grid"
+          },
+          "encode": {
+            "enter": {
+              "stroke": {
+                "value": "#bbbbbb"
+              },
+              "strokeWidth": {
+                "value": 0.3
+              },
+              "fill": {
+                "value": "transparent"
+              }
+            }
+          },
+          "transform": [
+            {
+              "type": "geopath",
+              "projection": "equalEarth",
+              "field": "datum"
+            }
+          ]
+        },
+        {
+          "type": "symbol",
+          "from": {
+            "data": "cities"
+          },
+          "encode": {
+            "enter": {
+              "size": {
+                "value": 14
+              },
+              "fill": {
+                "value": "#e45756"
+              },
+              "x": {
+                "field": "equalEarthX"
+              },
+              "y": {
+                "field": "equalEarthY"
+              }
+            }
+          }
+        },
+        {
+          "type": "text",
+          "encode": {
+            "enter": {
+              "x": {
+                "value": 2
+              },
+              "y": {
+                "value": 8
+              },
+              "text": {
+                "value": "equalEarth"
+              },
+              "fontSize": {
+                "value": 7
+              },
+              "fill": {
+                "value": "#333333"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "group",
+      "clip": true,
+      "encode": {
+        "enter": {
+          "x": {
+            "value": 184
+          },
+          "y": {
+            "value": 192
+          },
+          "width": {
+            "value": 90
+          },
+          "height": {
+            "value": 62
+          },
+          "stroke": {
+            "value": "#dddddd"
+          }
+        }
+      },
+      "marks": [
+        {
+          "type": "path",
+          "from": {
+            "data": "grid"
+          },
+          "encode": {
+            "enter": {
+              "stroke": {
+                "value": "#bbbbbb"
+              },
+              "strokeWidth": {
+                "value": 0.3
+              },
+              "fill": {
+                "value": "transparent"
+              }
+            }
+          },
+          "transform": [
+            {
+              "type": "geopath",
+              "projection": "mollweide",
+              "field": "datum"
+            }
+          ]
+        },
+        {
+          "type": "symbol",
+          "from": {
+            "data": "cities"
+          },
+          "encode": {
+            "enter": {
+              "size": {
+                "value": 14
+              },
+              "fill": {
+                "value": "#e45756"
+              },
+              "x": {
+                "field": "mollweideX"
+              },
+              "y": {
+                "field": "mollweideY"
+              }
+            }
+          }
+        },
+        {
+          "type": "text",
+          "encode": {
+            "enter": {
+              "x": {
+                "value": 2
+              },
+              "y": {
+                "value": 8
+              },
+              "text": {
+                "value": "mollweide"
+              },
+              "fontSize": {
+                "value": 7
+              },
+              "fill": {
+                "value": "#333333"
+              }
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

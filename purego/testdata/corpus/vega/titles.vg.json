@@ -1,0 +1,61 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A chart title with a subtitle, plus titles on both axes, so the title's placement against the whole drawing rather than the plotting area is exercised.",
+  "width": 220,
+  "height": 120,
+  "padding": 5,
+  "title": {"text": "Revenue by segment", "subtitle": "2026 to date"},
+  "data": [
+    {
+      "name": "table",
+      "values": [
+        {"segment": "alpha", "amount": 28},
+        {"segment": "beta", "amount": 55},
+        {"segment": "gamma", "amount": 43}
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {"data": "table", "field": "segment"},
+      "range": "width",
+      "padding": 0.2
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {"data": "table", "field": "amount"},
+      "range": "height",
+      "nice": true,
+      "zero": true
+    },
+    {
+      "name": "segmentColour",
+      "type": "ordinal",
+      "domain": {"data": "table", "field": "segment"},
+      "range": {"scheme": "tableau10"}
+    }
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "x", "title": "Segment"},
+    {"orient": "left", "scale": "y", "title": "Amount", "tickCount": 3}
+  ],
+  "legends": [{"fill": "segmentColour", "title": "Segment"}],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "segment"},
+          "width": {"scale": "x", "band": 1},
+          "y": {"scale": "y", "field": "amount"},
+          "y2": {"scale": "y", "value": 0},
+          "fill": {"scale": "segmentColour", "field": "segment"}
+        }
+      }
+    }
+  ]
+}

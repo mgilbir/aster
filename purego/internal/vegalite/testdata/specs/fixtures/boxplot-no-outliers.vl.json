@@ -1,0 +1,10 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A boxplot with its scatter of far-out rows turned off, which is one layer fewer.",
+  "data": {"url": "data/cars.json"},
+  "mark": {"type": "boxplot", "outliers": false},
+  "encoding": {
+    "y": {"field": "Origin", "type": "ordinal"},
+    "x": {"field": "Horsepower", "type": "quantitative"}
+  }
+}

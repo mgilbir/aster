@@ -1,0 +1,45 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "The side an axis is drawn on is settled before anything else about it, and it is settled from three places rather than one: `const orient = axis?.orient || config[channel === 'x' ? 'axisX' : 'axisY']?.orient || config.axis?.orient || defaultOrient(channel);` in `parseAxis`. This compiler read only the first of them, so a theme that moves every axis — `config.axis.orient`, which is how a document puts its vertical scales on the right of every chart at once — was read and dropped, and every axis stayed where Vega-Lite's own default put it. The side matters twice over. It is written onto the axis, `orient` being one of `propsToAlwaysIncludeConfig` because Vega has no `config.axis.orient` of its own to apply; and it is what every label on the axis is turned to face, `defaultLabelAlign` and `defaultLabelBaseline` both comparing the angle against the axis's main orientation and flipping the answer where the axis has been moved off it. The first chart shows both: its horizontal axis takes the theme's `top` and its category names, which are turned a quarter turn, are anchored by their left ends rather than their right, because a label hanging above a plot reads the other way round from the same label underneath it. Its vertical axis takes `right` from `config.axisY` and not `top` from `config.axis`, the more specific block being asked first. The second chart must not change: each of its axes states its own `orient`, and a stated side short-circuits the chain before the theme is consulted at all — `axis?.orient` is the first arm — so the axes stay at the bottom and the left and the category names stay anchored by their right ends, beside a theme that asked for neither. The third chart is the same short-circuit read the other way. Its horizontal axis writes `\"orient\": null`, which is what a generated specification says where it has no opinion, and the chain is `||` rather than `??`: a falsy statement is stepped past exactly as a missing one is, so that axis takes the theme's `top` and is anchored like the first chart's rather than kept at the bottom by the fact that it wrote something down.",
+  "data": {
+    "values": [
+      {"c": "alpha", "v": 28},
+      {"c": "beta", "v": 55},
+      {"c": "gamma", "v": 43},
+      {"c": "delta", "v": 91}
+    ]
+  },
+  "config": {
+    "axis": {"orient": "top"},
+    "axisY": {"orient": "right"}
+  },
+  "vconcat": [
+    {
+      "width": 200,
+      "height": 120,
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "c", "type": "nominal"},
+        "y": {"field": "v", "type": "quantitative"}
+      }
+    },
+    {
+      "width": 200,
+      "height": 120,
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "c", "type": "nominal", "axis": {"orient": "bottom"}},
+        "y": {"field": "v", "type": "quantitative", "axis": {"orient": "left"}}
+      }
+    },
+    {
+      "width": 200,
+      "height": 120,
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "c", "type": "nominal", "axis": {"orient": null}},
+        "y": {"field": "v", "type": "quantitative"}
+      }
+    }
+  ]
+}

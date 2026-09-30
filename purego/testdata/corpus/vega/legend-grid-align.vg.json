@@ -1,0 +1,61 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "gridAlign on a legend's entry grid. config.legend defaults it to 'each', and the grid's row centring is conditional on being aligned at all — so 'none' both packs the columns against their own contents and stops a short entry being centred against a tall one, over entries of deliberately unequal size.",
+  "width": 120,
+  "height": 100,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {"c": "a", "v": 10},
+        {"c": "bb", "v": 200},
+        {"c": "ccc", "v": 900},
+        {"c": "dddd", "v": 2500},
+        {"c": "eeeee", "v": 60},
+        {"c": "ffffff", "v": 1400}
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {"data": "t", "field": "c"},
+      "range": "width"
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {"data": "t", "field": "v"},
+      "range": "height"
+    },
+    {
+      "name": "sz",
+      "type": "linear",
+      "domain": {"data": "t", "field": "v"},
+      "range": [20, 900]
+    }
+  ],
+  "legends": [
+    {"size": "sz", "title": "each", "orient": "right", "columns": 2, "gridAlign": "each"},
+    {"size": "sz", "title": "all", "orient": "bottom", "columns": 3, "gridAlign": "all"},
+    {"size": "sz", "title": "none", "orient": "top-left", "columns": 2, "gridAlign": "none"}
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "t"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "c"},
+          "width": {"scale": "x", "band": 0.9},
+          "y": {"scale": "y", "field": "v"},
+          "y2": {"scale": "y", "value": 0},
+          "fill": {"value": "#4c78a8"}
+        }
+      }
+    }
+  ]
+}

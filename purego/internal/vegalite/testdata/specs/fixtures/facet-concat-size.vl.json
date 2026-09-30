@@ -1,0 +1,33 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A trellis beside a plain plot of the same declared size, which is the case that shows a grid has no size of its own. `parseConcatLayoutSize` reads each plot's own layout size to decide whether the row can share one; a grid's answer is one *cell's*, and two plots agreeing about a cell are not two plots agreeing about themselves. Offered the cell's size the two merged whenever they happened to match, and the shared name was then written into the plain plot's marks and scales — so this fixture is about the plot that is not faceted.",
+  "data": {
+    "values": [
+      {"region": "north", "x": 1, "y": 4},
+      {"region": "south", "x": 2, "y": 3}
+    ]
+  },
+  "hconcat": [
+    {
+      "facet": {"column": {"field": "region"}},
+      "spec": {
+        "width": 120,
+        "height": 80,
+        "mark": "point",
+        "encoding": {
+          "x": {"field": "x", "type": "quantitative"},
+          "y": {"field": "y", "type": "quantitative"}
+        }
+      }
+    },
+    {
+      "width": 120,
+      "height": 80,
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "region", "type": "nominal"},
+        "y": {"field": "x", "type": "quantitative", "aggregate": "sum"}
+      }
+    }
+  ]
+}

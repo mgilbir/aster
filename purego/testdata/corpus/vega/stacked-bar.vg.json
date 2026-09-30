@@ -1,0 +1,79 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "Stacked bar chart. The second differential fixture: exercises the stack and aggregate transforms, signals, and a conditional encoding on top of band and linear scales.",
+  "width": 300,
+  "height": 200,
+  "padding": 5,
+  "signals": [
+    {"name": "barPadding", "value": 0.1},
+    {"name": "highlightAbove", "update": "20"}
+  ],
+  "data": [
+    {
+      "name": "raw",
+      "values": [
+        {"quarter": "Q1", "team": "north", "sales": 12},
+        {"quarter": "Q1", "team": "south", "sales": 7},
+        {"quarter": "Q2", "team": "north", "sales": 18},
+        {"quarter": "Q2", "team": "south", "sales": 4},
+        {"quarter": "Q3", "team": "north", "sales": 9},
+        {"quarter": "Q3", "team": "south", "sales": 15},
+        {"quarter": "Q4", "team": "north", "sales": 21},
+        {"quarter": "Q4", "team": "south", "sales": 11}
+      ]
+    },
+    {
+      "name": "stacked",
+      "source": "raw",
+      "transform": [
+        {"type": "stack", "groupby": ["quarter"], "field": "sales"}
+      ]
+    },
+    {
+      "name": "totals",
+      "source": "raw",
+      "transform": [
+        {"type": "aggregate", "groupby": ["quarter"], "fields": ["sales"], "ops": ["sum"]}
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "xscale",
+      "type": "band",
+      "domain": {"data": "raw", "field": "quarter"},
+      "range": "width",
+      "padding": {"signal": "barPadding"}
+    },
+    {
+      "name": "yscale",
+      "type": "linear",
+      "domain": {"data": "totals", "field": "sum_sales"},
+      "nice": true,
+      "range": "height"
+    }
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "xscale"},
+    {"orient": "left", "scale": "yscale", "grid": true}
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "name": "bars",
+      "from": {"data": "stacked"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "xscale", "field": "quarter"},
+          "width": {"scale": "xscale", "band": 1},
+          "y": {"scale": "yscale", "field": "y0"},
+          "y2": {"scale": "yscale", "field": "y1"},
+          "fill": [
+            {"test": "datum.sales > highlightAbove", "value": "firebrick"},
+            {"value": "steelblue"}
+          ]
+        }
+      }
+    }
+  ]
+}

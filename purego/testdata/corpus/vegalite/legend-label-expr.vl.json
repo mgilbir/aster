@@ -1,0 +1,19 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A colour legend whose categories are too long to draw, shortened by labelExpr. Without it the legend is laid out at the full width of its longest entry and the chart overflows whatever holds it, which a host cannot compensate for: the untruncated labels are what the layout is computed from.",
+  "data": {"values": [
+    {"c": "Ambulatory care sensitive conditions", "v": 3},
+    {"c": "Chronic obstructive pulmonary disease", "v": 5},
+    {"c": "Acute myocardial infarction, initial", "v": 4}
+  ]},
+  "mark": "bar",
+  "encoding": {
+    "x": {"field": "v", "type": "quantitative"},
+    "y": {"field": "c", "type": "nominal", "axis": null},
+    "color": {
+      "field": "c",
+      "type": "nominal",
+      "legend": {"labelExpr": "slice(datum.value, 0, 26)", "title": "Condition"}
+    }
+  }
+}

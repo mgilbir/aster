@@ -1,0 +1,235 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A guide's styling read from signals. Half of this always worked and half was dropped without a word: labelFontSize is read through the number-or-signal path while labelColor took only a literal, so a chart colouring its axis from a control drew black labels and looked finished. Every field of an axis's and a legend's styling now takes either spelling. The same reaches a guide's encode block: a channel there is rewritten into the property it is another spelling of, and a signal survives that rewrite wherever the property can carry one.",
+  "width": 200,
+  "height": 110,
+  "padding": 5,
+  "background": "white",
+  "signals": [
+    {
+      "name": "ink",
+      "value": "#7b3294"
+    },
+    {
+      "name": "accent",
+      "value": "#008837"
+    },
+    {
+      "name": "weight",
+      "value": 700
+    },
+    {
+      "name": "thin",
+      "value": 2
+    },
+    {
+      "name": "pattern",
+      "value": [
+        4,
+        2
+      ]
+    }
+  ],
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {
+          "c": "alpha",
+          "v": 3
+        },
+        {
+          "c": "beta",
+          "v": 8
+        },
+        {
+          "c": "gamma",
+          "v": 5
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {
+        "data": "t",
+        "field": "c"
+      },
+      "range": "width",
+      "padding": 0.2
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {
+        "data": "t",
+        "field": "v"
+      },
+      "range": "height",
+      "nice": true
+    },
+    {
+      "name": "colour",
+      "type": "ordinal",
+      "domain": {
+        "data": "t",
+        "field": "c"
+      },
+      "range": "category"
+    }
+  ],
+  "axes": [
+    {
+      "scale": "x",
+      "orient": "bottom",
+      "labelColor": {
+        "signal": "ink"
+      },
+      "labelFont": {
+        "signal": "'serif'"
+      },
+      "labelFontStyle": {
+        "signal": "'italic'"
+      },
+      "labelFontWeight": {
+        "signal": "weight"
+      },
+      "labelFontSize": {
+        "signal": "11"
+      },
+      "tickColor": {
+        "signal": "accent"
+      },
+      "tickWidth": {
+        "signal": "thin"
+      },
+      "tickCap": {
+        "signal": "'round'"
+      },
+      "domainColor": {
+        "signal": "ink"
+      },
+      "domainWidth": {
+        "signal": "thin"
+      },
+      "title": "series",
+      "titleColor": {
+        "signal": "accent"
+      },
+      "titleFontWeight": {
+        "signal": "'normal'"
+      }
+    },
+    {
+      "scale": "y",
+      "orient": "left",
+      "grid": true,
+      "gridColor": {
+        "signal": "ink"
+      },
+      "gridDash": {
+        "signal": "pattern"
+      },
+      "gridDashOffset": {
+        "signal": "1"
+      },
+      "gridOpacity": {
+        "signal": "0.6"
+      },
+      "labelOpacity": {
+        "signal": "0.8"
+      },
+      "labelColor": {
+        "signal": "accent"
+      },
+      "encode": {
+        "grid": {
+          "update": {
+            "strokeWidth": {
+              "signal": "thin"
+            }
+          }
+        },
+        "labels": {
+          "update": {
+            "fontSize": {
+              "signal": "8 + thin"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "legends": [
+    {
+      "fill": "colour",
+      "title": "key",
+      "orient": "top-right",
+      "labelColor": {
+        "signal": "ink"
+      },
+      "labelFontSize": {
+        "signal": "9"
+      },
+      "titleColor": {
+        "signal": "accent"
+      },
+      "symbolStrokeColor": {
+        "signal": "ink"
+      },
+      "symbolStrokeWidth": {
+        "signal": "thin"
+      },
+      "encode": {
+        "symbols": {
+          "update": {
+            "size": {
+              "signal": "60"
+            }
+          }
+        },
+        "title": {
+          "update": {
+            "fontSize": {
+              "signal": "12"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "x",
+            "field": "c"
+          },
+          "width": {
+            "scale": "x",
+            "band": 1
+          },
+          "y": {
+            "scale": "y",
+            "field": "v"
+          },
+          "y2": {
+            "scale": "y",
+            "value": 0
+          },
+          "fill": {
+            "scale": "colour",
+            "field": "c"
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "An axis its shared guide names, over two layers that each name their own field.",
+  "data": {"url": "data/cars.json"},
+  "encoding": {
+    "x": {"field": "Horsepower", "type": "quantitative", "title": "Power"},
+    "y": {"type": "quantitative", "axis": {"title": "Economy and acceleration"}}
+  },
+  "layer": [
+    {
+      "mark": {"type": "point", "opacity": 0.3},
+      "encoding": {"y": {"field": "Miles_per_Gallon", "title": "Miles per gallon"}}
+    },
+    {
+      "mark": {"type": "point", "color": "red"},
+      "encoding": {"y": {"field": "Acceleration", "title": "Acceleration"}}
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "Histograms of three columns, one of them computed, each brushing the others: a bucketing of a computed column cannot climb above the step that computes it, and a click on a bucket remembers the bucket.",
+  "data": {"url": "data/cars.json"},
+  "transform": [{"calculate": "year(datum.Year)", "as": "built"}],
+  "repeat": {"column": ["Horsepower", "Acceleration", "built"]},
+  "spec": {
+    "layer": [
+      {
+        "params": [{"name": "brush", "select": {"type": "point", "encodings": ["x"]}}],
+        "transform": [{"filter": {"param": "brush"}}],
+        "mark": "bar",
+        "encoding": {
+          "x": {"field": {"repeat": "column"}, "bin": {"maxbins": 20}},
+          "y": {"aggregate": "count", "axis": null}
+        }
+      }
+    ]
+  }
+}

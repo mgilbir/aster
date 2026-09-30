@@ -1,0 +1,103 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A heatmap built by crossing a list with itself, and a word-count bar chart from countpattern beside it.",
+  "width": 240,
+  "height": 120,
+  "padding": 5,
+  "data": [
+    {
+      "name": "keys",
+      "values": [
+        {"k": "alpha", "n": 1},
+        {"k": "beta", "n": 2},
+        {"k": "gamma", "n": 3},
+        {"k": "delta", "n": 4}
+      ]
+    },
+    {
+      "name": "matrix",
+      "source": "keys",
+      "transform": [
+        {"type": "cross", "as": ["row", "col"]},
+        {"type": "formula", "expr": "datum.row.n * datum.col.n", "as": "weight"},
+        {"type": "formula", "expr": "datum.row.k", "as": "rowKey"},
+        {"type": "formula", "expr": "datum.col.k", "as": "colKey"}
+      ]
+    },
+    {
+      "name": "words",
+      "values": [
+        {"t": "the quick brown fox jumps over the lazy dog"},
+        {"t": "the dog barks and the fox runs"}
+      ],
+      "transform": [
+        {"type": "countpattern", "field": "t", "stopwords": "the|and|over"},
+        {"type": "collect", "sort": {"field": "count", "order": "descending"}}
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {"data": "matrix", "field": "colKey"},
+      "range": [0, 110],
+      "padding": 0.05
+    },
+    {
+      "name": "y",
+      "type": "band",
+      "domain": {"data": "matrix", "field": "rowKey"},
+      "range": [0, 110],
+      "padding": 0.05
+    },
+    {
+      "name": "heat",
+      "type": "linear",
+      "domain": {"data": "matrix", "field": "weight"},
+      "range": {"scheme": "blues"}
+    },
+    {
+      "name": "wy",
+      "type": "band",
+      "domain": {"data": "words", "field": "text"},
+      "range": [0, 110],
+      "padding": 0.2
+    },
+    {
+      "name": "wx",
+      "type": "linear",
+      "domain": {"data": "words", "field": "count"},
+      "range": [150, 240]
+    }
+  ],
+  "axes": [{"orient": "bottom", "scale": "x", "labelAngle": -45, "labelAlign": "right"}],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "matrix"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "colKey"},
+          "width": {"scale": "x", "band": 1},
+          "y": {"scale": "y", "field": "rowKey"},
+          "height": {"scale": "y", "band": 1},
+          "fill": {"scale": "heat", "field": "weight"}
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {"data": "words"},
+      "encode": {
+        "enter": {
+          "y": {"scale": "wy", "field": "text"},
+          "height": {"scale": "wy", "band": 1},
+          "x": {"value": 150},
+          "x2": {"scale": "wx", "field": "count"},
+          "fill": {"value": "#f58518"}
+        }
+      }
+    }
+  ]
+}

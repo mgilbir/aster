@@ -1,0 +1,173 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "The guide styling that was parsed and dropped: round and square line caps on ticks, gridlines and the domain, dash patterns started part-way along, an axis title truncated at a limit, and a legend whose labels and title carry their own alignment while its swatches and gradient carry their own offset, outline and opacity.",
+  "width": 240,
+  "height": 150,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {
+          "c": "alpha",
+          "v": 3
+        },
+        {
+          "c": "beta",
+          "v": 7
+        },
+        {
+          "c": "gamma",
+          "v": 5
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {
+        "data": "t",
+        "field": "c"
+      },
+      "range": "width",
+      "padding": 0.2
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": [
+        0,
+        10
+      ],
+      "range": "height"
+    },
+    {
+      "name": "colour",
+      "type": "ordinal",
+      "domain": {
+        "data": "t",
+        "field": "c"
+      },
+      "range": "category"
+    },
+    {
+      "name": "ramp",
+      "type": "linear",
+      "domain": [
+        0,
+        10
+      ],
+      "range": {
+        "scheme": "viridis"
+      }
+    }
+  ],
+  "axes": [
+    {
+      "orient": "bottom",
+      "scale": "x",
+      "title": "a category axis title far too long to fit the width it was given",
+      "titleLimit": 120,
+      "tickSize": 8,
+      "tickWidth": 4,
+      "tickCap": "round",
+      "tickColor": "#4c78a8",
+      "domainWidth": 4,
+      "domainCap": "square",
+      "domainColor": "#333333",
+      "labelPadding": 4
+    },
+    {
+      "orient": "left",
+      "scale": "y",
+      "grid": true,
+      "tickWidth": 3,
+      "tickCap": "square",
+      "tickDash": [
+        6,
+        4
+      ],
+      "tickDashOffset": 3,
+      "gridWidth": 2,
+      "gridCap": "round",
+      "gridDash": [
+        1,
+        6
+      ],
+      "gridDashOffset": 3,
+      "gridColor": "#bbbbbb",
+      "domainDash": [
+        4,
+        4
+      ],
+      "domainDashOffset": 2
+    }
+  ],
+  "legends": [
+    {
+      "fill": "colour",
+      "title": "series",
+      "orient": "right",
+      "symbolOffset": 12,
+      "symbolDash": [
+        3,
+        3
+      ],
+      "symbolDashOffset": 2,
+      "symbolStrokeColor": "#333333",
+      "symbolStrokeWidth": 1.5,
+      "labelAlign": "left",
+      "labelBaseline": "top",
+      "titleAlign": "left",
+      "titleBaseline": "top",
+      "titleLineHeight": 18
+    },
+    {
+      "fill": "ramp",
+      "type": "gradient",
+      "title": "value",
+      "orient": "bottom-right",
+      "gradientStrokeColor": "#a63603",
+      "gradientStrokeWidth": 2,
+      "gradientOpacity": 0.6,
+      "gradientLength": 100,
+      "gradientThickness": 10,
+      "direction": "horizontal"
+    }
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "x",
+            "field": "c"
+          },
+          "width": {
+            "scale": "x",
+            "band": 1
+          },
+          "y": {
+            "scale": "y",
+            "field": "v"
+          },
+          "y2": {
+            "scale": "y",
+            "value": 0
+          },
+          "fill": {
+            "scale": "colour",
+            "field": "c"
+          }
+        }
+      }
+    }
+  ]
+}

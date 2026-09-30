@@ -1,0 +1,121 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "The same tree as a circle pack and as a tidy node-link diagram, with the links drawn from each node back to its parent.",
+  "width": 260,
+  "height": 130,
+  "padding": 5,
+  "data": [
+    {
+      "name": "tree",
+      "values": [
+        {"id": "all", "parent": null, "size": 0},
+        {"id": "eu", "parent": "all", "size": 0},
+        {"id": "as", "parent": "all", "size": 0},
+        {"id": "fr", "parent": "eu", "size": 12},
+        {"id": "de", "parent": "eu", "size": 18},
+        {"id": "es", "parent": "eu", "size": 7},
+        {"id": "jp", "parent": "as", "size": 21},
+        {"id": "kr", "parent": "as", "size": 9}
+      ]
+    },
+    {
+      "name": "packed",
+      "source": "tree",
+      "transform": [
+        {"type": "stratify", "key": "id", "parentKey": "parent"},
+        {"type": "pack", "field": "size", "size": [126, 126], "padding": 2}
+      ]
+    },
+    {
+      "name": "tidy",
+      "source": "tree",
+      "transform": [
+        {"type": "stratify", "key": "id", "parentKey": "parent"},
+        {"type": "tree", "method": "tidy", "size": [110, 100]},
+        {"type": "formula", "expr": "datum.x + 145", "as": "tx"},
+        {"type": "formula", "expr": "datum.y + 10", "as": "ty"}
+      ]
+    },
+    {
+      "name": "links",
+      "source": "tidy",
+      "transform": [
+        {"type": "filter", "expr": "datum.parent != null"},
+        {
+          "type": "lookup",
+          "from": "tidy",
+          "key": "id",
+          "fields": ["parent"],
+          "values": ["tx", "ty"],
+          "as": ["px", "py"]
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "depth",
+      "type": "ordinal",
+      "domain": [0, 1, 2],
+      "range": ["#c6dbef", "#6baed6", "#2171b5"]
+    }
+  ],
+  "marks": [
+    {
+      "type": "symbol",
+      "from": {"data": "packed"},
+      "encode": {
+        "enter": {
+          "x": {"field": "x"},
+          "y": {"field": "y"},
+          "size": {"signal": "PI * datum.r * datum.r"},
+          "fill": {"scale": "depth", "field": "depth"},
+          "stroke": {"value": "#ffffff"},
+          "strokeWidth": {"value": 1}
+        }
+      }
+    },
+    {
+      "type": "rule",
+      "from": {"data": "links"},
+      "encode": {
+        "enter": {
+          "x": {"field": "px"},
+          "y": {"field": "py"},
+          "x2": {"field": "tx"},
+          "y2": {"field": "ty"},
+          "stroke": {"value": "#999999"},
+          "strokeWidth": {"value": 1}
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "from": {"data": "tidy"},
+      "encode": {
+        "enter": {
+          "x": {"field": "tx"},
+          "y": {"field": "ty"},
+          "size": {"value": 70},
+          "fill": {"scale": "depth", "field": "depth"},
+          "stroke": {"value": "#2171b5"},
+          "strokeWidth": {"value": 1}
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": {"data": "tidy"},
+      "encode": {
+        "enter": {
+          "x": {"field": "tx"},
+          "y": {"signal": "datum.ty - 8"},
+          "text": {"field": "id"},
+          "align": {"value": "center"},
+          "fontSize": {"value": 9},
+          "fill": {"value": "#333333"}
+        }
+      }
+    }
+  ]
+}

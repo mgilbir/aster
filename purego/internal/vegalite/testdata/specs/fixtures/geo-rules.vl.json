@@ -1,0 +1,42 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "Lines between two places, joined from a table the chart also draws from: the join reads the table bare and the projection writes both ends of each line.",
+  "width": 400,
+  "height": 250,
+  "projection": {"type": "albersUsa"},
+  "layer": [
+    {
+      "data": {"url": "data/airports.csv"},
+      "mark": "circle",
+      "encoding": {
+        "longitude": {"field": "longitude", "type": "quantitative"},
+        "latitude": {"field": "latitude", "type": "quantitative"},
+        "size": {"value": 5},
+        "color": {"value": "gray"}
+      }
+    },
+    {
+      "data": {"url": "data/flights-airport.csv"},
+      "transform": [
+        {"filter": {"field": "origin", "equal": "SEA"}},
+        {
+          "lookup": "origin",
+          "from": {"data": {"url": "data/airports.csv"}, "key": "iata", "fields": ["latitude", "longitude"]},
+          "as": ["origin_latitude", "origin_longitude"]
+        },
+        {
+          "lookup": "destination",
+          "from": {"data": {"url": "data/airports.csv"}, "key": "iata", "fields": ["latitude", "longitude"]},
+          "as": ["dest_latitude", "dest_longitude"]
+        }
+      ],
+      "mark": "rule",
+      "encoding": {
+        "longitude": {"field": "origin_longitude"},
+        "latitude": {"field": "origin_latitude"},
+        "longitude2": {"field": "dest_longitude"},
+        "latitude2": {"field": "dest_latitude"}
+      }
+    }
+  ]
+}

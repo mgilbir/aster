@@ -1,0 +1,160 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "**A stroke width that is present is coerced, and only an absent one takes the default.** `boundStroke` opens `const sw = item.strokeWidth != null ? +item.strokeWidth : 1`, and the two halves of that read differently. `!= null` is the *only* route to the default, so a width that is present but is not a number does **not** fall back to 1 \u2014 it goes through `+`, JavaScript's coercion, and whatever that produces is what the mark is measured with. `+true` is 1, `+\"3\"` is 3, `+\"\"` is **0**, and `+\"wide\"` is **NaN**. A width of 0 expands a mark by nothing and a width of NaN expands it by NaN, which then loses the comparisons `Bounds.union` is made of, so an unmeasurable symbol contributes nothing to the surface at all. This engine read the channel instead of coercing it \u2014 `asDouble`, then a `NaN` check that sent every non-number to the default \u2014 so all four of those measured as though the specification had said 1. `true` agreed by accident, which is why only the other three show. The symbols are spread along the row so each one's box is its own: `ten` and `three` are the controls that must still measure, `absent` and `explicitNull` are the two that must still take the default \u2014 and they are two cases, not one: `+null` is **0**, so a width written as `{\"value\": null}` reaches the default only through the `!= null` test and not through the coercion. A mutant that dropped that test survived a fixture holding `absent` alone, because an absent channel never reaches the coercion at all, and `blank`, `word` and `bool` are the coercions.",
+  "width": 400,
+  "height": 60,
+  "padding": 0,
+  "marks": [
+    {
+      "type": "symbol",
+      "encode": {
+        "update": {
+          "x": {
+            "value": 20
+          },
+          "y": {
+            "value": 30
+          },
+          "size": {
+            "value": 200
+          },
+          "stroke": {
+            "value": "#333"
+          },
+          "strokeWidth": {
+            "value": 10
+          }
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "encode": {
+        "update": {
+          "x": {
+            "value": 90
+          },
+          "y": {
+            "value": 30
+          },
+          "size": {
+            "value": 200
+          },
+          "stroke": {
+            "value": "#333"
+          },
+          "strokeWidth": {
+            "value": "3"
+          }
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "encode": {
+        "update": {
+          "x": {
+            "value": 140
+          },
+          "y": {
+            "value": 30
+          },
+          "size": {
+            "value": 200
+          },
+          "stroke": {
+            "value": "#333"
+          },
+          "strokeWidth": {
+            "value": true
+          }
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "encode": {
+        "update": {
+          "x": {
+            "value": 190
+          },
+          "y": {
+            "value": 30
+          },
+          "size": {
+            "value": 200
+          },
+          "stroke": {
+            "value": "#333"
+          },
+          "strokeWidth": {
+            "value": ""
+          }
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "encode": {
+        "update": {
+          "x": {
+            "value": 240
+          },
+          "y": {
+            "value": 30
+          },
+          "size": {
+            "value": 200
+          },
+          "stroke": {
+            "value": "#333"
+          },
+          "strokeWidth": {
+            "value": "wide"
+          }
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "encode": {
+        "update": {
+          "x": {
+            "value": 290
+          },
+          "y": {
+            "value": 30
+          },
+          "size": {
+            "value": 200
+          },
+          "stroke": {
+            "value": "#333"
+          }
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "encode": {
+        "update": {
+          "x": {
+            "value": 340
+          },
+          "y": {
+            "value": 30
+          },
+          "size": {
+            "value": 200
+          },
+          "stroke": {
+            "value": "#333"
+          },
+          "strokeWidth": {
+            "value": null
+          }
+        }
+      }
+    }
+  ]
+}

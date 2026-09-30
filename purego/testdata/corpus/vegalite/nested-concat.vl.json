@@ -1,0 +1,65 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "description": "A column holding a row of plots and a strip below it, each level laid out on its own.",
+  "data": {
+    "values": [
+      {
+        "a": "A",
+        "b": 28,
+        "c": 3
+      },
+      {
+        "a": "B",
+        "b": 55,
+        "c": 7
+      }
+    ]
+  },
+  "vconcat": [
+    {
+      "hconcat": [
+        {
+          "width": 80,
+          "height": 60,
+          "mark": "bar",
+          "encoding": {
+            "x": {
+              "field": "a",
+              "type": "nominal"
+            },
+            "y": {
+              "field": "b",
+              "type": "quantitative"
+            }
+          }
+        },
+        {
+          "width": 80,
+          "height": 60,
+          "mark": "point",
+          "encoding": {
+            "x": {
+              "field": "c",
+              "type": "quantitative"
+            },
+            "y": {
+              "field": "b",
+              "type": "quantitative"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "width": 180,
+      "height": 50,
+      "mark": "tick",
+      "encoding": {
+        "x": {
+          "field": "b",
+          "type": "quantitative"
+        }
+      }
+    }
+  ]
+}

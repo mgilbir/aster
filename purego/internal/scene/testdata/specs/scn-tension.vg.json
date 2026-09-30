@@ -1,0 +1,755 @@
+{
+ "$schema": "https://vega.github.io/schema/vega/v6.json",
+ "width": 260,
+ "height": 270,
+ "padding": 5,
+ "marks": [
+  {
+   "type": "line",
+   "from": {
+    "data": "p8"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 0"
+     },
+     "interpolate": {
+      "value": "bundle"
+     },
+     "tension": {
+      "value": 0
+     },
+     "stroke": {
+      "value": "#a33"
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p8"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 6"
+     },
+     "interpolate": {
+      "value": "bundle"
+     },
+     "tension": {
+      "value": 0.25
+     },
+     "stroke": {
+      "value": "#a33"
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p8"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 12"
+     },
+     "interpolate": {
+      "value": "bundle"
+     },
+     "tension": {
+      "value": 0.5
+     },
+     "stroke": {
+      "value": "#a33"
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p8"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 18"
+     },
+     "interpolate": {
+      "value": "bundle"
+     },
+     "tension": {
+      "value": 1
+     },
+     "stroke": {
+      "value": "#a33"
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p8"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 30"
+     },
+     "interpolate": {
+      "value": "cardinal"
+     },
+     "tension": {
+      "value": 0
+     },
+     "stroke": {
+      "value": "#a33"
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p8"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 36"
+     },
+     "interpolate": {
+      "value": "cardinal"
+     },
+     "tension": {
+      "value": 0.25
+     },
+     "stroke": {
+      "value": "#a33"
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p8"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 42"
+     },
+     "interpolate": {
+      "value": "cardinal"
+     },
+     "tension": {
+      "value": 0.5
+     },
+     "stroke": {
+      "value": "#a33"
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p8"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 48"
+     },
+     "interpolate": {
+      "value": "cardinal"
+     },
+     "tension": {
+      "value": 1
+     },
+     "stroke": {
+      "value": "#a33"
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p8"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 60"
+     },
+     "interpolate": {
+      "value": "cardinal-open"
+     },
+     "tension": {
+      "value": 0
+     },
+     "stroke": {
+      "value": "#a33"
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p8"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 66"
+     },
+     "interpolate": {
+      "value": "cardinal-open"
+     },
+     "tension": {
+      "value": 0.25
+     },
+     "stroke": {
+      "value": "#a33"
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p8"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 72"
+     },
+     "interpolate": {
+      "value": "cardinal-open"
+     },
+     "tension": {
+      "value": 0.5
+     },
+     "stroke": {
+      "value": "#a33"
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p8"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 78"
+     },
+     "interpolate": {
+      "value": "cardinal-open"
+     },
+     "tension": {
+      "value": 1
+     },
+     "stroke": {
+      "value": "#a33"
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p8"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 90"
+     },
+     "interpolate": {
+      "value": "cardinal-closed"
+     },
+     "tension": {
+      "value": 0
+     },
+     "stroke": {
+      "value": "#a33"
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p8"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 96"
+     },
+     "interpolate": {
+      "value": "cardinal-closed"
+     },
+     "tension": {
+      "value": 0.25
+     },
+     "stroke": {
+      "value": "#a33"
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p8"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 102"
+     },
+     "interpolate": {
+      "value": "cardinal-closed"
+     },
+     "tension": {
+      "value": 0.5
+     },
+     "stroke": {
+      "value": "#a33"
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p8"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 108"
+     },
+     "interpolate": {
+      "value": "cardinal-closed"
+     },
+     "tension": {
+      "value": 1
+     },
+     "stroke": {
+      "value": "#a33"
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p8"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 120"
+     },
+     "interpolate": {
+      "value": "catmull-rom"
+     },
+     "tension": {
+      "value": 0
+     },
+     "stroke": {
+      "value": "#a33"
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p8"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 126"
+     },
+     "interpolate": {
+      "value": "catmull-rom"
+     },
+     "tension": {
+      "value": 0.25
+     },
+     "stroke": {
+      "value": "#a33"
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p8"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 132"
+     },
+     "interpolate": {
+      "value": "catmull-rom"
+     },
+     "tension": {
+      "value": 0.5
+     },
+     "stroke": {
+      "value": "#a33"
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p8"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 138"
+     },
+     "interpolate": {
+      "value": "catmull-rom"
+     },
+     "tension": {
+      "value": 1
+     },
+     "stroke": {
+      "value": "#a33"
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p8"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 150"
+     },
+     "interpolate": {
+      "value": "catmull-rom-open"
+     },
+     "tension": {
+      "value": 0
+     },
+     "stroke": {
+      "value": "#a33"
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p8"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 156"
+     },
+     "interpolate": {
+      "value": "catmull-rom-open"
+     },
+     "tension": {
+      "value": 0.25
+     },
+     "stroke": {
+      "value": "#a33"
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p8"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 162"
+     },
+     "interpolate": {
+      "value": "catmull-rom-open"
+     },
+     "tension": {
+      "value": 0.5
+     },
+     "stroke": {
+      "value": "#a33"
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p8"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 168"
+     },
+     "interpolate": {
+      "value": "catmull-rom-open"
+     },
+     "tension": {
+      "value": 1
+     },
+     "stroke": {
+      "value": "#a33"
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p8"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 180"
+     },
+     "interpolate": {
+      "value": "catmull-rom-closed"
+     },
+     "tension": {
+      "value": 0
+     },
+     "stroke": {
+      "value": "#a33"
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p8"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 186"
+     },
+     "interpolate": {
+      "value": "catmull-rom-closed"
+     },
+     "tension": {
+      "value": 0.25
+     },
+     "stroke": {
+      "value": "#a33"
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p8"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 192"
+     },
+     "interpolate": {
+      "value": "catmull-rom-closed"
+     },
+     "tension": {
+      "value": 0.5
+     },
+     "stroke": {
+      "value": "#a33"
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p8"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 198"
+     },
+     "interpolate": {
+      "value": "catmull-rom-closed"
+     },
+     "tension": {
+      "value": 1
+     },
+     "stroke": {
+      "value": "#a33"
+     }
+    }
+   }
+  }
+ ],
+ "data": [
+  {
+   "name": "p8",
+   "values": [
+    {
+     "x": 0.0,
+     "y": 52.73243567064205,
+     "g": true
+    },
+    {
+     "x": 34.285714285714285,
+     "y": 33.056357646418796,
+     "g": true
+    },
+    {
+     "x": 68.57142857142857,
+     "y": 19.157724909163388,
+     "g": true
+    },
+    {
+     "x": 102.85714285714286,
+     "y": 20.6530833792441,
+     "g": false
+    },
+    {
+     "x": 137.14285714285714,
+     "y": 56.84169659622883,
+     "g": true
+    },
+    {
+     "x": 171.42857142857142,
+     "y": 63.96217781558725,
+     "g": true
+    },
+    {
+     "x": 205.71428571428572,
+     "y": 20.83802176870179,
+     "g": true
+    },
+    {
+     "x": 240.0,
+     "y": 12.136185294900272,
+     "g": true
+    }
+   ]
+  }
+ ]
+}

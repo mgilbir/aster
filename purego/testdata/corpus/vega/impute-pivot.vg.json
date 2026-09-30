@@ -1,0 +1,115 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "Two reshaping transforms that had no fixture between them. The long table is missing a reading for one series in one quarter, which is exactly the hole a stacked chart cannot draw around: impute fills it with a zero so the band above it still stacks from the right place. The same table is pivoted into one row per quarter with a column named after each series, and the rules underneath measure the gap between two of those columns — a column name the specification never writes down, since it comes from the data.",
+  "width": 240,
+  "height": 150,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "readings",
+      "values": [
+        { "q": "Q1", "s": "north", "v": 12 },
+        { "q": "Q1", "s": "south", "v": 7 },
+        { "q": "Q2", "s": "north", "v": 15 },
+        { "q": "Q2", "s": "south", "v": 9 },
+        { "q": "Q3", "s": "north", "v": 11 },
+        { "q": "Q4", "s": "north", "v": 18 },
+        { "q": "Q4", "s": "south", "v": 6 }
+      ]
+    },
+    {
+      "name": "stacked",
+      "source": "readings",
+      "transform": [
+        {
+          "type": "impute",
+          "field": "v",
+          "key": "q",
+          "keyvals": ["Q1", "Q2", "Q3", "Q4"],
+          "groupby": ["s"],
+          "method": "value",
+          "value": 0
+        },
+        { "type": "stack", "groupby": ["q"], "field": "v", "sort": { "field": "s" } }
+      ]
+    },
+    {
+      "name": "wide",
+      "source": "readings",
+      "transform": [{ "type": "pivot", "groupby": ["q"], "field": "s", "value": "v" }]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": ["Q1", "Q2", "Q3", "Q4"],
+      "range": "width",
+      "padding": 0.2
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": { "data": "stacked", "field": "y1" },
+      "range": [100, 0],
+      "nice": true,
+      "zero": true
+    },
+    {
+      "name": "colour",
+      "type": "ordinal",
+      "domain": ["north", "south"],
+      "range": ["#4c78a8", "#f58518"]
+    }
+  ],
+  "axes": [
+    { "orient": "bottom", "scale": "x", "offset": 46 },
+    { "orient": "left", "scale": "y", "tickCount": 4 }
+  ],
+  "legends": [{ "fill": "colour", "title": "series", "orient": "top-right" }],
+  "marks": [
+    {
+      "type": "rect",
+      "from": { "data": "stacked" },
+      "encode": {
+        "enter": {
+          "x": { "scale": "x", "field": "q" },
+          "width": { "scale": "x", "band": 1 },
+          "y": { "scale": "y", "field": "y0" },
+          "y2": { "scale": "y", "field": "y1" },
+          "fill": { "scale": "colour", "field": "s" },
+          "stroke": { "value": "#ffffff" },
+          "strokeWidth": { "value": 0.5 }
+        }
+      }
+    },
+    {
+      "type": "rule",
+      "from": { "data": "wide" },
+      "encode": {
+        "enter": {
+          "x": { "scale": "x", "field": "q", "band": 0.5 },
+          "y": { "value": 120 },
+          "y2": { "signal": "120 + (datum.north - (datum.south || 0)) * 1.5" },
+          "stroke": { "value": "#333333" },
+          "strokeWidth": { "value": 2 }
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": { "data": "wide" },
+      "encode": {
+        "enter": {
+          "x": { "scale": "x", "field": "q", "band": 0.5 },
+          "y": { "value": 145 },
+          "text": { "signal": "datum.north + '/' + (datum.south == null ? '-' : datum.south)" },
+          "align": { "value": "center" },
+          "fontSize": { "value": 9 },
+          "fill": { "value": "#333333" }
+        }
+      }
+    }
+  ]
+}

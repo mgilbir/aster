@@ -1,0 +1,67 @@
+{
+ "$schema": "https://vega.github.io/schema/vega/v6.json",
+ "width": 250,
+ "height": 100,
+ "padding": 5,
+ "marks": [
+  {
+   "type": "rect",
+   "encode": {
+    "update": {
+     "x": {
+      "value": 10
+     },
+     "y": {
+      "value": 10
+     },
+     "width": {
+      "value": 200
+     },
+     "height": {
+      "value": 20
+     },
+     "fill": {
+      "gradient": "scale",
+      "scale": "c",
+      "start": [
+       0,
+       0
+      ],
+      "stop": [
+       1,
+       0
+      ]
+     }
+    }
+   }
+  }
+ ],
+ "scales": [
+  {
+   "name": "c",
+   "type": "sequential",
+   "domain": [
+    0,
+    10
+   ],
+   "range": {
+    "scheme": "viridis"
+   }
+  }
+ ],
+ "legends": [
+  {
+   "fill": "c",
+   "type": "gradient",
+   "title": "Value",
+   "gradientLength": 150,
+   "orient": "right"
+  },
+  {
+   "fill": "c",
+   "type": "symbol",
+   "orient": "bottom",
+   "direction": "horizontal"
+  }
+ ]
+}

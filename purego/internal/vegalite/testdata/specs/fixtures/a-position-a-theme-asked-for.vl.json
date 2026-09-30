@@ -1,0 +1,43 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A mark's default position is read from the **whole** chain. `pointPositionDefaultRef` asks `getMarkPropOrConfig(channel, markDef, config, {vgChannel})`, which walks the definition under Vega's name for the channel and then Vega-Lite's, and then the configuration the same way — the style blocks, `config[marktype]` under each name, `config.mark`. Read as the definition alone, a theme that places every arc at a radius or every label at an angle placed nothing at all: the mark fell through to the default it would have taken untouched, an arc to `min(width,height)/2` and a text to no angle. The first row is an arc whose radius a theme sets; the second is a text whose angle and radius a theme sets, so the labels stand off the centre at a fixed turn rather than following their slices. A theme's value is still outranked by the mark's own, which the third row states to keep that order drawn rather than assumed.",
+  "data": {
+    "values": [
+      {"c": "alpha", "v": 30},
+      {"c": "beta", "v": 20},
+      {"c": "gamma", "v": 50}
+    ]
+  },
+  "config": {
+    "arc": {"radius": 55},
+    "text": {"theta": 1.2, "radius": 70}
+  },
+  "vconcat": [
+    {
+      "width": 160,
+      "height": 160,
+      "mark": "arc",
+      "encoding": {
+        "theta": {"field": "v", "type": "quantitative", "stack": true},
+        "color": {"field": "c", "type": "nominal", "legend": null}
+      }
+    },
+    {
+      "width": 160,
+      "height": 160,
+      "mark": "text",
+      "encoding": {
+        "text": {"field": "c", "type": "nominal"}
+      }
+    },
+    {
+      "width": 160,
+      "height": 160,
+      "mark": {"type": "arc", "radius": 40},
+      "encoding": {
+        "theta": {"field": "v", "type": "quantitative", "stack": true},
+        "color": {"field": "c", "type": "nominal", "legend": null}
+      }
+    }
+  ]
+}

@@ -1,0 +1,79 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A domain pinned by domainMin and domainMax beside one written out in full, which still gets zero because zero follows the scale type.",
+  "width": 220,
+  "height": 140,
+  "padding": 5,
+  "data": [
+    {
+      "name": "table",
+      "values": [
+        {"c": "a", "v": 42, "w": 18},
+        {"c": "b", "v": 95, "w": 33},
+        {"c": "c", "v": 12, "w": 27},
+        {"c": "d", "v": 61, "w": 45}
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {"data": "table", "field": "c"},
+      "range": "width",
+      "padding": 0.2
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {"data": "table", "field": "v"},
+      "domainMin": 20,
+      "domainMax": 80,
+      "range": "height"
+    },
+    {
+      "name": "written",
+      "type": "linear",
+      "domain": [10, 60],
+      "range": "height"
+    },
+    {
+      "name": "symmetric",
+      "type": "symlog",
+      "domain": {"data": "table", "field": "w"},
+      "range": [0, 40]
+    }
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "x"},
+    {"orient": "left", "scale": "y", "tickCount": 4, "title": "Pinned"},
+    {"orient": "right", "scale": "written", "tickCount": 4, "title": "Written out"}
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "c"},
+          "width": {"scale": "x", "band": 1},
+          "y": {"scale": "y", "field": "v"},
+          "y2": {"scale": "y", "value": 20},
+          "fill": {"value": "#9ecae9"}
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "c", "band": 0.5},
+          "y": {"scale": "written", "field": "v"},
+          "size": {"scale": "symmetric", "field": "w"},
+          "fill": {"value": "#e45756"}
+        }
+      }
+    }
+  ]
+}

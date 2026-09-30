@@ -1,0 +1,50 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "**An absent format specifier and an empty one are different answers.** `formatSpan` opens with a loose null check and nothing else — `specifier = formatSpecifier(specifier == null ? ',f' : specifier)` — so a specifier of `null` or `undefined` means **comma-grouped fixed**, and its precision is then computed from the tick step: a linear axis over `[0, 1]` at three ticks reads `0.0`, `0.5`, `1.0`. An **empty string** is a specifier in its own right, `formatSpecifier('')` has no type at all, and the same axis reads `0`, `0.5`, `1`. Only `== null` reaches `',f'`, and `''` is not `== null`. Four axes say which spelling lands where: `none` writes no `format` property, `nullSignal` writes one whose signal holds `null`, `blankSignal` writes one whose signal holds the empty string, and `blank` writes the empty string outright. The first two must agree and the last two must agree, and the two pairs must differ — a fixture that only carried the null case would pass with the rule half-transcribed. The **gradient** legend carries the rule a second time, because a guide resolves its format in two further places and those were separate readings of the same property. The **symbol** legend is there for the opposite reason: it is over an *ordinal* scale, which has no `tickFormat`, so `tickFormat` falls past the `formatSpan` branch to `else if (specifier)` — falsy — and out to `defaultFormatter`. Its labels are therefore `0`, `0.5`, `1` whatever the signal holds, and it is the control that says the rule does not leak into the branch it does not belong to. The failure this pins is not exotic: a chart whose format comes from a granularity control reads the word `null` as a specifier the moment the control has not been answered, which is not a format, and every label silently loses a decimal place.",
+  "width": 220,
+  "height": 120,
+  "padding": 5,
+  "signals": [
+    {"name": "missing", "value": null},
+    {"name": "blank", "value": ""}
+  ],
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {"k": "a", "v": 0},
+        {"k": "b", "v": 0.5},
+        {"k": "c", "v": 1}
+      ]
+    }
+  ],
+  "scales": [
+    {"name": "y", "type": "linear", "domain": [0, 1], "range": "height"},
+    {"name": "c", "type": "linear", "domain": [0, 1], "range": {"scheme": "blues"}},
+    {"name": "s", "type": "ordinal", "domain": {"data": "t", "field": "v"}, "range": "category"}
+  ],
+  "axes": [
+    {"orient": "left", "scale": "y", "tickCount": 3},
+    {"orient": "left", "scale": "y", "tickCount": 3, "offset": 40, "format": {"signal": "missing"}},
+    {"orient": "right", "scale": "y", "tickCount": 3, "format": {"signal": "blank"}},
+    {"orient": "right", "scale": "y", "tickCount": 3, "offset": 40, "format": ""}
+  ],
+  "legends": [
+    {"type": "gradient", "fill": "c", "format": {"signal": "missing"}, "tickCount": 3},
+    {"type": "symbol", "fill": "s", "format": {"signal": "missing"}}
+  ],
+  "marks": [
+    {
+      "type": "symbol",
+      "from": {"data": "t"},
+      "encode": {
+        "update": {
+          "x": {"value": 20},
+          "y": {"scale": "y", "field": "v"},
+          "size": {"value": 40},
+          "fill": {"value": "#4c78a8"}
+        }
+      }
+    }
+  ]
+}

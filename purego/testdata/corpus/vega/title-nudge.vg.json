@@ -1,0 +1,46 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "a title's dx and dy, which nudge the heading after the anchor has placed it — and nudge the subtitle with it, since upstream hands both the same pair. The surface is measured against what moved, so the whole drawing follows.",
+  "width": 200,
+  "height": 120,
+  "padding": 5,
+  "title": {
+    "text": "Revenue by segment",
+    "subtitle": "2026 to date",
+    "dx": 9,
+    "dy": 7
+  },
+  "data": [
+    {
+      "name": "table",
+      "values": [
+        {"segment": "alpha", "amount": 28},
+        {"segment": "beta", "amount": 55},
+        {"segment": "gamma", "amount": 43}
+      ]
+    }
+  ],
+  "scales": [
+    {"name": "x", "type": "band", "domain": {"data": "table", "field": "segment"}, "range": "width", "padding": 0.2},
+    {"name": "y", "type": "linear", "domain": {"data": "table", "field": "amount"}, "range": "height", "nice": true}
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "x", "title": "Segment"},
+    {"orient": "left", "scale": "y", "title": "Amount", "tickCount": 4}
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "segment"},
+          "width": {"scale": "x", "band": 1},
+          "y": {"scale": "y", "field": "amount"},
+          "y2": {"scale": "y", "value": 0},
+          "fill": {"value": "steelblue"}
+        }
+      }
+    }
+  ]
+}

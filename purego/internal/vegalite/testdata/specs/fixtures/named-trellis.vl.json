@@ -1,0 +1,12 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "name": "named_trellis",
+  "description": "A named chart's facet datasets are named under it too, as its scales and marks are.",
+  "data": {"url": "data/barley.json"},
+  "mark": "point",
+  "encoding": {
+    "facet": {"field": "site", "type": "nominal", "columns": 2},
+    "x": {"aggregate": "sum", "field": "yield", "type": "quantitative"},
+    "y": {"field": "variety", "type": "nominal"}
+  }
+}

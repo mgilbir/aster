@@ -1,0 +1,102 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "**How wide a band is comes from dividing by its space, and upstream guards that division twice where this engine guarded it once.** Vega's band scale is its own rather than d3's, and it reaches the step through two lines: `bandSpace` is `count ? (space > 0 ? space : 1) : 0` over `space = count - paddingInner + paddingOuter * 2`, and `rescale` then divides by `space || 1`. This engine wrote the pair as `maxOf(1.0, space)`, which is neither guard and disagrees with both.\n\n**A padding nothing can read is NaN.** The scale transform walks its parameters and calls a setter per key — `scale[key](_[key])` — and the setter is `Math.max(0, Math.min(1, _))`, which clamps a number and answers NaN for a word. There is no validation and nothing is discarded. `space > 0` is then *false*, so the step divides by **one** and becomes the whole range, while the bandwidth and every position go NaN: upstream draws a chart with nothing placeable in it. A NaN-propagating `max` loses it and loses the step too, but this engine never got that far — `NumberValues.resolve` dropped the NaN and fell back on the default, so a perfectly ordinary chart was drawn where upstream draws none. That is the loudest possible disagreement about a value a binding can deliver by accident, and a binding is exactly the door: `\"padding\": {\"signal\": \"gap\"}` is what a control writes through.\n\n**A space between zero and one is divided by, not rounded up.** This half needs no NaN at all and is the reason the fixture has a second scale. `bandSpace` replaces the space only when it is *not above zero*; a single band carrying half its width in inner padding has a space of `0.5`, and upstream divides a 200-wide range by it to reach a step of 400 and a band that fills the range. `maxOf(1.0, 0.5)` rounds the divisor up to one and draws that band at **half width**, centred. Probed at `paddingInner` of 0.5 — step 400, bandwidth 200 — and of 0.8, where the space is 0.2 and the step is 1000. A fixture carrying only the unreadable padding would pass with this half still wrong, which is why `narrow` is here.\n\n`ordinary` is the control and the only scale that places anything: four bands at a padding of 0.1, where the two formulas agree. `point` is the fourth shape, because a point scale is a band with `paddingInner` pinned at 1 and therefore reaches the same division — a space of `n - 1`, which is **zero** for a single point and takes the guard that `maxOf` happened to cover.",
+  "width": 200,
+  "height": 120,
+  "padding": 5,
+  "signals": [
+    {"name": "gap", "value": "wide"}
+  ],
+  "data": [
+    {
+      "name": "four",
+      "values": [{"k": "a"}, {"k": "b"}, {"k": "c"}, {"k": "d"}]
+    },
+    {
+      "name": "one",
+      "values": [{"k": "a"}]
+    }
+  ],
+  "scales": [
+    {
+      "name": "unreadable",
+      "type": "band",
+      "domain": {"data": "four", "field": "k"},
+      "range": "width",
+      "padding": {"signal": "gap"}
+    },
+    {
+      "name": "narrow",
+      "type": "band",
+      "domain": {"data": "one", "field": "k"},
+      "range": "width",
+      "paddingInner": 0.5
+    },
+    {
+      "name": "ordinary",
+      "type": "band",
+      "domain": {"data": "four", "field": "k"},
+      "range": "width",
+      "padding": 0.1
+    },
+    {
+      "name": "point",
+      "type": "point",
+      "domain": {"data": "one", "field": "k"},
+      "range": "width"
+    }
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "four"},
+      "encode": {
+        "update": {
+          "x": {"scale": "unreadable", "field": "k"},
+          "width": {"scale": "unreadable", "band": 1},
+          "y": {"value": 0},
+          "y2": {"value": 20},
+          "fill": {"value": "#4c78a8"}
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {"data": "one"},
+      "encode": {
+        "update": {
+          "x": {"scale": "narrow", "field": "k"},
+          "width": {"scale": "narrow", "band": 1},
+          "y": {"value": 30},
+          "y2": {"value": 50},
+          "fill": {"value": "#f58518"}
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {"data": "four"},
+      "encode": {
+        "update": {
+          "x": {"scale": "ordinary", "field": "k"},
+          "width": {"scale": "ordinary", "band": 1},
+          "y": {"value": 60},
+          "y2": {"value": 80},
+          "fill": {"value": "#54a24b"}
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "from": {"data": "one"},
+      "encode": {
+        "update": {
+          "x": {"scale": "point", "field": "k"},
+          "y": {"value": 95},
+          "size": {"value": 100},
+          "fill": {"value": "#e45756"}
+        }
+      }
+    }
+  ]
+}

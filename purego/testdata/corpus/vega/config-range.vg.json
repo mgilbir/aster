@@ -1,0 +1,165 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "config.range is what a named range stands for. A theme that redefines category, ramp and symbol changes every scale that asked for one by name \u2014 and a theme's category may be a scheme where the built-in default is a literal list.",
+  "width": 240,
+  "height": 120,
+  "padding": 5,
+  "background": "white",
+  "config": {
+    "range": {
+      "category": {
+        "scheme": "dark2"
+      },
+      "ramp": {
+        "scheme": "reds"
+      },
+      "symbol": [
+        "square",
+        "diamond",
+        "cross"
+      ]
+    }
+  },
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {
+          "c": "a",
+          "v": 3
+        },
+        {
+          "c": "b",
+          "v": 7
+        },
+        {
+          "c": "c",
+          "v": 5
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {
+        "data": "t",
+        "field": "c"
+      },
+      "range": "width",
+      "padding": 0.3
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": [
+        0,
+        8
+      ],
+      "range": "height"
+    },
+    {
+      "name": "colour",
+      "type": "ordinal",
+      "domain": {
+        "data": "t",
+        "field": "c"
+      },
+      "range": "category"
+    },
+    {
+      "name": "shape",
+      "type": "ordinal",
+      "domain": {
+        "data": "t",
+        "field": "c"
+      },
+      "range": "symbol"
+    },
+    {
+      "name": "heat",
+      "type": "linear",
+      "domain": [
+        0,
+        8
+      ],
+      "range": "ramp"
+    }
+  ],
+  "legends": [
+    {
+      "fill": "colour",
+      "title": "category",
+      "orient": "right"
+    },
+    {
+      "shape": "shape",
+      "title": "symbol",
+      "orient": "bottom-right"
+    }
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "x",
+            "field": "c"
+          },
+          "width": {
+            "scale": "x",
+            "band": 1
+          },
+          "y": {
+            "scale": "y",
+            "field": "v"
+          },
+          "y2": {
+            "scale": "y",
+            "value": 0
+          },
+          "fill": {
+            "scale": "heat",
+            "field": "v"
+          }
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "x",
+            "field": "c",
+            "band": 0.5
+          },
+          "y": {
+            "scale": "y",
+            "field": "v",
+            "offset": -10
+          },
+          "size": {
+            "value": 90
+          },
+          "shape": {
+            "scale": "shape",
+            "field": "c"
+          },
+          "fill": {
+            "scale": "colour",
+            "field": "c"
+          }
+        }
+      }
+    }
+  ]
+}

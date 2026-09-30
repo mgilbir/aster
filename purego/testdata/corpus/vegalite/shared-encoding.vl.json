@@ -1,0 +1,23 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "description": "A layer whose shared encoding states the type and whose members name only the field.",
+  "data": {
+    "values": [
+      {"from": -0.25, "to": -2.9, "label": "PoleStar"},
+      {"from": 0.25, "to": 2.9, "label": "Voyager"}
+    ]
+  },
+  "width": 200,
+  "height": 90,
+  "encoding": {
+    "x": {"type": "quantitative", "scale": {"zero": false}},
+    "y": {"field": "label", "type": "nominal", "title": null}
+  },
+  "layer": [
+    {"mark": "rule", "encoding": {"x": {"field": "from"}, "x2": {"field": "to"}}},
+    {
+      "mark": {"type": "point", "filled": true, "size": 60},
+      "encoding": {"x": {"field": "to"}}
+    }
+  ]
+}

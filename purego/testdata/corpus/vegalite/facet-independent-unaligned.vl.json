@@ -1,0 +1,13 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A trellis whose cells each scale x for themselves, and so cannot be aligned along it: their plotting areas are different widths.",
+  "data": {"url": "data/barley.json"},
+  "mark": "bar",
+  "width": 200,
+  "encoding": {
+    "row": {"field": "site", "type": "nominal"},
+    "x": {"aggregate": "sum", "field": "yield", "type": "quantitative"},
+    "y": {"field": "variety", "type": "nominal"}
+  },
+  "resolve": {"scale": {"x": "independent"}}
+}

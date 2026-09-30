@@ -1,0 +1,81 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A continuous colour scale does **not** clamp unless it is asked to. d3's continuous scale is `clamp ? Math.max(0, Math.min(1, x * k10)) : x * k10` with `clamp` false until someone sets it, and a colour range does not change that — so a value below the domain takes a position below zero and the ramp is *extrapolated* through it. The extrapolation is d3's `piecewise`, whose clamp is on the **segment index** and not on `t`: `i = Math.max(0, Math.min(n - 1, Math.floor(t *= n)))`, then `I[i](t - i)`. A third of a domain below the start of a sixteen-stop scheme, that evaluates the first segment at -5, and the channels saturate on the way out — upstream's blues ramp answers white, which is no colour in the scheme at all, and the same ramp above its domain answers black. This engine clamped by default and, told not to, answered **no colour whatsoever**; both halves were wrong in the same direction, which is why it looked consistent. The rows are: `ramp`, the default; `pinned`, the same scale with `clamp: true`, which is what this engine used to give everything; `pair`, a range written out as two colours, which follows the identical rule and only *looks* clamped because extrapolating past pure black or pure white saturates back to itself; and `lab`, the same rule through a non-RGB interpolator, where extrapolating leaves the space's own gamut and the conversion back is what pins the channels. The two right-hand columns are outside the domain and are the whole point; the three on the left are inside it and say what this costs, which is nothing.",
+  "width": 260,
+  "height": 120,
+  "padding": 5,
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {"v": 1, "n": 1},
+        {"v": 2.5, "n": 2},
+        {"v": 4, "n": 3},
+        {"v": 0, "n": 4},
+        {"v": 100, "n": 5}
+      ]
+    }
+  ],
+  "scales": [
+    {"name": "ramp", "type": "linear", "domain": [1, 4], "range": {"scheme": "blues"}},
+    {"name": "pinned", "type": "linear", "domain": [1, 4], "range": {"scheme": "blues"}, "clamp": true},
+    {"name": "pair", "type": "linear", "domain": [1, 4], "range": ["#000000", "#ffffff"]},
+    {"name": "lab", "type": "linear", "domain": [1, 4], "range": ["#1f77b4", "#ff7f0e"], "interpolate": "lab"},
+    {"name": "at", "type": "point", "domain": [1, 2.5, 4, 0, 100], "range": [20, 240], "padding": 0.5}
+  ],
+  "axes": [{"orient": "bottom", "scale": "at"}],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "t"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "at", "field": "v", "offset": -18},
+          "width": {"value": 36},
+          "y": {"value": 0},
+          "height": {"value": 20},
+          "fill": {"scale": "ramp", "field": "v"}
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {"data": "t"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "at", "field": "v", "offset": -18},
+          "width": {"value": 36},
+          "y": {"value": 22},
+          "height": {"value": 20},
+          "fill": {"scale": "pinned", "field": "v"}
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {"data": "t"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "at", "field": "v", "offset": -18},
+          "width": {"value": 36},
+          "y": {"value": 44},
+          "height": {"value": 20},
+          "fill": {"scale": "pair", "field": "v"}
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {"data": "t"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "at", "field": "v", "offset": -18},
+          "width": {"value": 36},
+          "y": {"value": 66},
+          "height": {"value": 20},
+          "fill": {"scale": "lab", "field": "v"}
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,134 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A timeunit transform feeding a time scale across the same spring daylight-saving change the local-time fixture crosses. Hourly readings from the evening before to the morning after are bucketed by local hours, so one bucket boundary falls in the hour that does not exist and the day is 23 hours long; the same readings are bucketed by utchours beside them, where every boundary is an hour apart. The bars are drawn on a time scale built from the transform's own unit start, which is the combination neither fixture had on its own.",
+  "width": 260,
+  "height": 150,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "readings",
+      "values": [
+        { "t": "2026-03-28T22:00:00", "v": 4 },
+        { "t": "2026-03-28T23:00:00", "v": 6 },
+        { "t": "2026-03-29T00:00:00", "v": 9 },
+        { "t": "2026-03-29T00:30:00", "v": 11 },
+        { "t": "2026-03-29T01:00:00", "v": 14 },
+        { "t": "2026-03-29T01:30:00", "v": 12 },
+        { "t": "2026-03-29T03:00:00", "v": 7 },
+        { "t": "2026-03-29T03:30:00", "v": 5 },
+        { "t": "2026-03-29T04:00:00", "v": 8 }
+      ],
+      "format": { "parse": { "t": "date" } },
+      "transform": [
+        { "type": "timeunit", "field": "t", "units": ["date", "hours"], "as": ["h0", "h1"] }
+      ]
+    },
+    {
+      "name": "utcBuckets",
+      "source": "readings",
+      "transform": [
+        {
+          "type": "timeunit",
+          "field": "t",
+          "units": ["date", "hours"],
+          "timezone": "utc",
+          "as": ["u0", "u1"]
+        },
+        {
+          "type": "aggregate",
+          "groupby": ["u0"],
+          "fields": ["v"],
+          "ops": ["sum"],
+          "as": ["total"]
+        }
+      ]
+    },
+    {
+      "name": "localBuckets",
+      "source": "readings",
+      "transform": [
+        {
+          "type": "aggregate",
+          "groupby": ["h0"],
+          "fields": ["v"],
+          "ops": ["sum"],
+          "as": ["total"]
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "time",
+      "domain": { "data": "localBuckets", "field": "h0" },
+      "range": "width",
+      "nice": { "interval": "hours", "step": 2 }
+    },
+    {
+      "name": "xu",
+      "type": "utc",
+      "domain": { "data": "utcBuckets", "field": "u0" },
+      "range": "width"
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": { "data": "localBuckets", "field": "total" },
+      "range": [90, 0],
+      "zero": true,
+      "nice": true
+    }
+  ],
+  "axes": [
+    {
+      "orient": "bottom",
+      "scale": "x",
+      "offset": 4,
+      "format": "%H:%M",
+      "tickCount": { "interval": "hours", "step": 2 },
+      "title": "local hours",
+      "labelAngle": -45,
+      "labelAlign": "right"
+    },
+    {
+      "orient": "bottom",
+      "scale": "xu",
+      "offset": 52,
+      "format": "%H:%M",
+      "tickCount": { "interval": "hours", "step": 2 },
+      "title": "utc hours",
+      "labelAngle": -45,
+      "labelAlign": "right"
+    },
+    { "orient": "left", "scale": "y", "tickCount": 3 }
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": { "data": "localBuckets" },
+      "encode": {
+        "enter": {
+          "x": { "scale": "x", "field": "h0" },
+          "x2": { "scale": "x", "field": "h0", "offset": 6 },
+          "y": { "scale": "y", "field": "total" },
+          "y2": { "scale": "y", "value": 0 },
+          "fill": { "value": "#4c78a8" }
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "from": { "data": "utcBuckets" },
+      "encode": {
+        "enter": {
+          "x": { "scale": "xu", "field": "u0" },
+          "y": { "scale": "y", "field": "total" },
+          "size": { "value": 40 },
+          "fill": { "value": "#e45756" }
+        }
+      }
+    }
+  ]
+}

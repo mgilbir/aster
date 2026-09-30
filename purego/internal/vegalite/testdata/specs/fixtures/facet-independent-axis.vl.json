@@ -1,0 +1,14 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A trellis whose axes are each their own: they are drawn inside every cell rather than once in a band, so the facet needs no domain dataset for a band to read.",
+  "data": {"url": "data/barley.json"},
+  "mark": "point",
+  "height": {"step": 12},
+  "encoding": {
+    "facet": {"field": "site", "type": "ordinal", "columns": 2, "sort": {"op": "median", "field": "yield"}},
+    "x": {"aggregate": "median", "field": "yield", "type": "quantitative", "scale": {"zero": false}},
+    "y": {"field": "variety", "type": "ordinal", "sort": "-x"},
+    "color": {"field": "year", "type": "nominal"}
+  },
+  "resolve": {"axis": {"x": "independent", "y": "independent"}}
+}

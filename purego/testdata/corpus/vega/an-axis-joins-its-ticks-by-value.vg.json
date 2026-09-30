@@ -1,0 +1,15 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "An axis draws one tick per **distinct tick value as text**, not one per domain entry. Its three value-driven marks are data joins with a key — `{type: RuleMark, role: AxisGridRole, key: Value, from: dataRef}`, and the same `key: Value` on the ticks and the labels — so two entries whose `datum.value` keys the same string collapse into one item, and the **later** one wins, a keyed join overwriting as it goes. The key is an object property, so it is the value's text: `1001` and `\"1001\"` key alike, as do a null and the word for one. A domain of five here draws three grid lines, three ticks and three labels, at the second of each pair and at the singleton. The legend beside it must **not** collapse, and the reason is structural rather than a different rule: a legend builds a group per entry and each group holds one symbol and one label, so the same key is unique inside each. Five swatches against three ticks over the same five values is the whole of this fixture. `labelOverlap` is off because two labels reading `1001` would otherwise be dropped by a rule that is not this one.",
+  "width": 240,
+  "height": 60,
+  "padding": 5,
+  "data": [{"name": "t", "values": [{"v": 1}]}],
+  "scales": [
+    {"name": "x", "type": "band", "domain": [1001, "1001", null, "null", true], "range": "width"},
+    {"name": "c", "type": "ordinal", "domain": [1001, "1001", null, "null", true], "range": {"scheme": "category10"}}
+  ],
+  "axes": [{"scale": "x", "orient": "bottom", "grid": true, "labelOverlap": false}],
+  "legends": [{"fill": "c"}],
+  "marks": []
+}

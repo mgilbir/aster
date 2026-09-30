@@ -1,0 +1,11 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A box plot whose tooltip asks for a mean, which is a measure of the summary rather than a column to group it by — and a plain tooltip beside it, which belongs to the outliers alone.",
+  "data": {"url": "data/cars.json"},
+  "mark": "boxplot",
+  "encoding": {
+    "y": {"field": "Origin", "type": "nominal"},
+    "x": {"field": "Miles_per_Gallon", "type": "quantitative", "title": "Miles per Gallon", "scale": {"zero": false}},
+    "tooltip": {"field": "Miles_per_Gallon", "aggregate": "mean"}
+  }
+}

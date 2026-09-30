@@ -1,0 +1,57 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A stated `orient` is an **argument** to the rule that decides orientation, not a way past it. Upstream's own comment on the call says so — \"set orient, which can be overridden by rules as sometimes the specified orient is invalid\" — and only two of the blocks in `orient()` ask for the stated value, the ranged bar's, where the direction is genuinely ambiguous, and the line's. Everything else answers from the encoding and then *logs* that it overrode what the chart asked for. The blocks are a `switch` whose cases all fall through, so which of them a mark reaches is the whole of the rule. The first row is a **trail**, which matches no case at all and is therefore vertical by the `return 'vertical'` under the entire switch: it asks to be horizontal and is not one, where a `line` in the same position would be. The second is a bar over a column that arrived bucketed, which the very first block settles as vertical before the stated value is ever read. The third is an area ranged along x asking to be vertical, which it cannot be: the block that allows a ranged mark to choose is the *bar's*, and an area never reaches it — it is answered one block further down, where the second position decides alone. A ranged **bar** in the same shape does get the direction it asks for. Read as one flattened pass, with the stated value taken first, all three rows simply got what they asked for.",
+  "vconcat": [
+    {
+      "width": 200,
+      "height": 70,
+      "data": {
+        "values": [
+          {"t": "2024-01-07", "v": 28},
+          {"t": "2024-03-19", "v": 55},
+          {"t": "2024-06-02", "v": 43},
+          {"t": "2024-09-11", "v": 91}
+        ]
+      },
+      "mark": {"type": "trail", "orient": "horizontal"},
+      "encoding": {
+        "x": {"field": "t", "type": "temporal"},
+        "y": {"field": "v", "type": "quantitative"}
+      }
+    },
+    {
+      "width": 200,
+      "height": 70,
+      "data": {
+        "values": [
+          {"lo": 0, "hi": 10, "v": 28},
+          {"lo": 10, "hi": 20, "v": 55},
+          {"lo": 20, "hi": 30, "v": 43}
+        ]
+      },
+      "mark": {"type": "bar", "orient": "horizontal"},
+      "encoding": {
+        "x": {"field": "lo", "bin": "binned", "type": "quantitative"},
+        "x2": {"field": "hi"},
+        "y": {"field": "v", "type": "quantitative"}
+      }
+    },
+    {
+      "width": 200,
+      "height": 70,
+      "data": {
+        "values": [
+          {"c": "alpha", "lo": 5, "hi": 28},
+          {"c": "beta", "lo": 12, "hi": 55},
+          {"c": "gamma", "lo": 9, "hi": 43}
+        ]
+      },
+      "mark": {"type": "area", "orient": "vertical"},
+      "encoding": {
+        "x": {"field": "lo", "type": "quantitative"},
+        "x2": {"field": "hi"},
+        "y": {"field": "c", "type": "nominal"}
+      }
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "One field as both a size and a colour, under the title only one of them named.",
+  "data": {"url": "data/cars.json"},
+  "mark": "circle",
+  "encoding": {
+    "y": {"field": "Origin", "type": "nominal"},
+    "x": {"field": "Cylinders", "type": "ordinal"},
+    "size": {"field": "Cylinders", "type": "ordinal"},
+    "color": {"field": "Cylinders", "type": "ordinal", "legend": {"title": "Cylinder count"}}
+  }
+}

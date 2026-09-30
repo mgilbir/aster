@@ -1,0 +1,26 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "description": "A gridline picked out at zero by a condition, and an extent published as a parameter.",
+  "data": {
+    "values": [
+      {"a": "A", "b": 28},
+      {"a": "B", "b": -19},
+      {"a": "C", "b": 43},
+      {"a": "D", "b": -31}
+    ]
+  },
+  "transform": [{"extent": "b", "param": "b_extent"}],
+  "width": 180,
+  "height": 110,
+  "mark": "bar",
+  "encoding": {
+    "x": {"field": "a", "type": "nominal"},
+    "y": {
+      "field": "b",
+      "type": "quantitative",
+      "axis": {
+        "gridColor": {"condition": {"test": "datum.value === 0", "value": "black"}, "value": "#ddd"}
+      }
+    }
+  }
+}

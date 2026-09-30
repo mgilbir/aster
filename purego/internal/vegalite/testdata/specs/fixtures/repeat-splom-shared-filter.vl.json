@@ -1,0 +1,16 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A matrix of scatter plots: the cell for (a, b) drops the same rows as the cell for (b, a).",
+  "repeat": {
+    "row": ["Horsepower", "Acceleration"],
+    "column": ["Acceleration", "Horsepower"]
+  },
+  "spec": {
+    "data": {"url": "data/cars.json"},
+    "mark": "point",
+    "encoding": {
+      "x": {"field": {"repeat": "column"}, "type": "quantitative"},
+      "y": {"field": {"repeat": "row"}, "type": "quantitative"}
+    }
+  }
+}

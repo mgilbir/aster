@@ -1,0 +1,119 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "Bin settings read back as a signal, an unnice'd extent that does not divide evenly, and an anchored grid.",
+  "width": 300,
+  "height": 120,
+  "padding": 5,
+
+  "signals": [
+    {"name": "binCount", "update": "(bins.stop - bins.start) / bins.step"},
+    {"name": "barStep", "update": "width / binCount"}
+  ],
+
+  "data": [
+    {
+      "name": "raw",
+      "values": [
+        {"v": 1}, {"v": 24}, {"v": 23.5}, {"v": 12}, {"v": 7}, {"v": 7.5},
+        {"v": 18}, {"v": 3}, {"v": 16.25}, {"v": 21}
+      ],
+      "transform": [
+        {
+          "type": "bin",
+          "field": "v",
+          "extent": [1, 24],
+          "maxbins": 20,
+          "nice": false,
+          "signal": "bins"
+        }
+      ]
+    },
+    {
+      "name": "counts",
+      "source": "raw",
+      "transform": [
+        {"type": "aggregate", "groupby": ["bin0", "bin1"]}
+      ]
+    },
+    {
+      "name": "anchored",
+      "values": [{"v": 0.2}, {"v": 5}, {"v": 9.9}, {"v": 4.5}],
+      "transform": [
+        {
+          "type": "bin",
+          "field": "v",
+          "extent": [0, 10],
+          "step": 1,
+          "anchor": 0.3,
+          "as": ["lo", "hi"]
+        }
+      ]
+    },
+    {
+      "name": "anchored-drawn",
+      "source": "anchored",
+      "transform": [{"type": "filter", "expr": "isFinite(datum.lo)"}]
+    }
+  ],
+
+  "scales": [
+    {
+      "name": "x",
+      "type": "linear",
+      "domain": {"signal": "[bins.start, bins.stop]"},
+      "range": "width"
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {"data": "counts", "field": "count"},
+      "range": "height",
+      "nice": true
+    }
+  ],
+
+  "axes": [
+    {"orient": "bottom", "scale": "x", "tickCount": 6},
+    {"orient": "left", "scale": "y", "tickCount": 3}
+  ],
+
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "counts"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "bin0", "offset": 1},
+          "x2": {"scale": "x", "field": "bin1"},
+          "y": {"scale": "y", "field": "count"},
+          "y2": {"scale": "y", "value": 0},
+          "fill": {"value": "steelblue"}
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {"data": "anchored-drawn"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "lo"},
+          "x2": {"scale": "x", "field": "hi"},
+          "y": {"value": 0},
+          "height": {"value": 6},
+          "fill": {"value": "#aaa"}
+        }
+      }
+    },
+    {
+      "type": "text",
+      "encode": {
+        "enter": {
+          "x": {"value": 4},
+          "y": {"value": 14},
+          "text": {"signal": "'bins: ' + bins.start + '..' + bins.stop + ' by ' + bins.step + ', step ' + format(barStep, '.2f') + ', off-grid ' + data('anchored')[0].lo"},
+          "fontSize": {"value": 10}
+        }
+      }
+    }
+  ]
+}

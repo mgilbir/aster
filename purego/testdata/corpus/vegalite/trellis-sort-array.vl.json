@@ -1,0 +1,15 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A trellis whose rows run in a stated order, which is computed onto the rows first.",
+  "data": {"url": "data/barley.json"},
+  "mark": "bar",
+  "encoding": {
+    "row": {
+      "field": "site",
+      "type": "nominal",
+      "sort": ["Waseca", "Crookston", "Morris"]
+    },
+    "x": {"aggregate": "sum", "field": "yield", "type": "quantitative"},
+    "y": {"field": "variety", "type": "nominal"}
+  }
+}

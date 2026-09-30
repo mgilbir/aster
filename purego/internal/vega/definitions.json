@@ -1,0 +1,2512 @@
+{
+ "aggregate": {
+  "type": "Aggregate",
+  "metadata": {
+   "generates": true,
+   "changes": true
+  },
+  "params": [
+   {
+    "name": "groupby",
+    "type": "field",
+    "array": true
+   },
+   {
+    "name": "ops",
+    "type": "enum",
+    "array": true,
+    "values": [
+     "values",
+     "count",
+     "missing",
+     "valid",
+     "sum",
+     "product",
+     "mean",
+     "average",
+     "variance",
+     "variancep",
+     "stdev",
+     "stdevp",
+     "stderr",
+     "distinct",
+     "ci0",
+     "ci1",
+     "median",
+     "q1",
+     "q3",
+     "min",
+     "max",
+     "argmin",
+     "argmax",
+     "exponential",
+     "exponentialb"
+    ]
+   },
+   {
+    "name": "aggregate_params",
+    "type": "number",
+    "null": true,
+    "array": true
+   },
+   {
+    "name": "fields",
+    "type": "field",
+    "null": true,
+    "array": true
+   },
+   {
+    "name": "as",
+    "type": "string",
+    "null": true,
+    "array": true
+   },
+   {
+    "name": "drop",
+    "type": "boolean",
+    "default": true
+   },
+   {
+    "name": "cross",
+    "type": "boolean",
+    "default": false
+   },
+   {
+    "name": "key",
+    "type": "field"
+   }
+  ]
+ },
+ "bin": {
+  "type": "Bin",
+  "metadata": {
+   "modifies": true
+  },
+  "params": [
+   {
+    "name": "field",
+    "type": "field",
+    "required": true
+   },
+   {
+    "name": "interval",
+    "type": "boolean",
+    "default": true
+   },
+   {
+    "name": "anchor",
+    "type": "number"
+   },
+   {
+    "name": "maxbins",
+    "type": "number",
+    "default": 20
+   },
+   {
+    "name": "base",
+    "type": "number",
+    "default": 10
+   },
+   {
+    "name": "divide",
+    "type": "number",
+    "array": true,
+    "default": [
+     5,
+     2
+    ]
+   },
+   {
+    "name": "extent",
+    "type": "number",
+    "array": true,
+    "length": 2,
+    "required": true
+   },
+   {
+    "name": "span",
+    "type": "number"
+   },
+   {
+    "name": "step",
+    "type": "number"
+   },
+   {
+    "name": "steps",
+    "type": "number",
+    "array": true
+   },
+   {
+    "name": "minstep",
+    "type": "number",
+    "default": 0
+   },
+   {
+    "name": "nice",
+    "type": "boolean",
+    "default": true
+   },
+   {
+    "name": "name",
+    "type": "string"
+   },
+   {
+    "name": "as",
+    "type": "string",
+    "array": true,
+    "length": 2,
+    "default": [
+     "bin0",
+     "bin1"
+    ]
+   }
+  ]
+ },
+ "collect": {
+  "type": "Collect",
+  "metadata": {
+   "source": true
+  },
+  "params": [
+   {
+    "name": "sort",
+    "type": "compare"
+   }
+  ]
+ },
+ "contour": {
+  "type": "Contour",
+  "metadata": {
+   "generates": true
+  },
+  "params": [
+   {
+    "name": "size",
+    "type": "number",
+    "array": true,
+    "length": 2,
+    "required": true
+   },
+   {
+    "name": "values",
+    "type": "number",
+    "array": true
+   },
+   {
+    "name": "x",
+    "type": "field"
+   },
+   {
+    "name": "y",
+    "type": "field"
+   },
+   {
+    "name": "weight",
+    "type": "field"
+   },
+   {
+    "name": "cellSize",
+    "type": "number"
+   },
+   {
+    "name": "bandwidth",
+    "type": "number"
+   },
+   {
+    "name": "count",
+    "type": "number"
+   },
+   {
+    "name": "nice",
+    "type": "boolean",
+    "default": false
+   },
+   {
+    "name": "thresholds",
+    "type": "number",
+    "array": true
+   },
+   {
+    "name": "smooth",
+    "type": "boolean",
+    "default": true
+   }
+  ]
+ },
+ "countpattern": {
+  "type": "CountPattern",
+  "metadata": {
+   "generates": true,
+   "changes": true
+  },
+  "params": [
+   {
+    "name": "field",
+    "type": "field",
+    "required": true
+   },
+   {
+    "name": "case",
+    "type": "enum",
+    "values": [
+     "upper",
+     "lower",
+     "mixed"
+    ],
+    "default": "mixed"
+   },
+   {
+    "name": "pattern",
+    "type": "string",
+    "default": "[\\w\"]+"
+   },
+   {
+    "name": "stopwords",
+    "type": "string",
+    "default": ""
+   },
+   {
+    "name": "as",
+    "type": "string",
+    "array": true,
+    "length": 2,
+    "default": [
+     "text",
+     "count"
+    ]
+   }
+  ]
+ },
+ "cross": {
+  "type": "Cross",
+  "metadata": {
+   "generates": true
+  },
+  "params": [
+   {
+    "name": "filter",
+    "type": "expr"
+   },
+   {
+    "name": "as",
+    "type": "string",
+    "array": true,
+    "length": 2,
+    "default": [
+     "a",
+     "b"
+    ]
+   }
+  ]
+ },
+ "crossfilter": {
+  "type": "CrossFilter",
+  "metadata": {},
+  "params": [
+   {
+    "name": "fields",
+    "type": "field",
+    "array": true,
+    "required": true
+   },
+   {
+    "name": "query",
+    "type": "array",
+    "array": true,
+    "required": true,
+    "content": {
+     "type": "number",
+     "array": true,
+     "length": 2
+    }
+   }
+  ]
+ },
+ "density": {
+  "type": "Density",
+  "metadata": {
+   "generates": true
+  },
+  "params": [
+   {
+    "name": "extent",
+    "type": "number",
+    "array": true,
+    "length": 2
+   },
+   {
+    "name": "steps",
+    "type": "number"
+   },
+   {
+    "name": "minsteps",
+    "type": "number",
+    "default": 25
+   },
+   {
+    "name": "maxsteps",
+    "type": "number",
+    "default": 200
+   },
+   {
+    "name": "method",
+    "type": "string",
+    "default": "pdf",
+    "values": [
+     "pdf",
+     "cdf"
+    ]
+   },
+   {
+    "name": "distribution",
+    "type": "param",
+    "params": [
+     {
+      "key": {
+       "function": "normal"
+      },
+      "params": [
+       {
+        "name": "mean",
+        "type": "number",
+        "default": 0
+       },
+       {
+        "name": "stdev",
+        "type": "number",
+        "default": 1
+       }
+      ]
+     },
+     {
+      "key": {
+       "function": "lognormal"
+      },
+      "params": [
+       {
+        "name": "mean",
+        "type": "number",
+        "default": 0
+       },
+       {
+        "name": "stdev",
+        "type": "number",
+        "default": 1
+       }
+      ]
+     },
+     {
+      "key": {
+       "function": "uniform"
+      },
+      "params": [
+       {
+        "name": "min",
+        "type": "number",
+        "default": 0
+       },
+       {
+        "name": "max",
+        "type": "number",
+        "default": 1
+       }
+      ]
+     },
+     {
+      "key": {
+       "function": "kde"
+      },
+      "params": [
+       {
+        "name": "field",
+        "type": "field",
+        "required": true
+       },
+       {
+        "name": "from",
+        "type": "data"
+       },
+       {
+        "name": "bandwidth",
+        "type": "number",
+        "default": 0
+       }
+      ]
+     },
+     {
+      "key": {
+       "function": "mixture"
+      },
+      "params": [
+       {
+        "name": "distributions",
+        "type": "param",
+        "array": true,
+        "params": [
+         {
+          "key": {
+           "function": "normal"
+          },
+          "params": [
+           {
+            "name": "mean",
+            "type": "number",
+            "default": 0
+           },
+           {
+            "name": "stdev",
+            "type": "number",
+            "default": 1
+           }
+          ]
+         },
+         {
+          "key": {
+           "function": "lognormal"
+          },
+          "params": [
+           {
+            "name": "mean",
+            "type": "number",
+            "default": 0
+           },
+           {
+            "name": "stdev",
+            "type": "number",
+            "default": 1
+           }
+          ]
+         },
+         {
+          "key": {
+           "function": "uniform"
+          },
+          "params": [
+           {
+            "name": "min",
+            "type": "number",
+            "default": 0
+           },
+           {
+            "name": "max",
+            "type": "number",
+            "default": 1
+           }
+          ]
+         },
+         {
+          "key": {
+           "function": "kde"
+          },
+          "params": [
+           {
+            "name": "field",
+            "type": "field",
+            "required": true
+           },
+           {
+            "name": "from",
+            "type": "data"
+           },
+           {
+            "name": "bandwidth",
+            "type": "number",
+            "default": 0
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "name": "weights",
+        "type": "number",
+        "array": true
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "name": "as",
+    "type": "string",
+    "array": true,
+    "default": [
+     "value",
+     "density"
+    ]
+   }
+  ]
+ },
+ "dotbin": {
+  "type": "DotBin",
+  "metadata": {
+   "modifies": true
+  },
+  "params": [
+   {
+    "name": "field",
+    "type": "field",
+    "required": true
+   },
+   {
+    "name": "groupby",
+    "type": "field",
+    "array": true
+   },
+   {
+    "name": "step",
+    "type": "number"
+   },
+   {
+    "name": "smooth",
+    "type": "boolean",
+    "default": false
+   },
+   {
+    "name": "as",
+    "type": "string",
+    "default": "bin"
+   }
+  ]
+ },
+ "extent": {
+  "type": "Extent",
+  "metadata": {},
+  "params": [
+   {
+    "name": "field",
+    "type": "field",
+    "required": true
+   }
+  ]
+ },
+ "filter": {
+  "type": "Filter",
+  "metadata": {
+   "changes": true
+  },
+  "params": [
+   {
+    "name": "expr",
+    "type": "expr",
+    "required": true
+   }
+  ]
+ },
+ "flatten": {
+  "type": "Flatten",
+  "metadata": {
+   "generates": true
+  },
+  "params": [
+   {
+    "name": "fields",
+    "type": "field",
+    "array": true,
+    "required": true
+   },
+   {
+    "name": "index",
+    "type": "string"
+   },
+   {
+    "name": "as",
+    "type": "string",
+    "array": true
+   }
+  ]
+ },
+ "fold": {
+  "type": "Fold",
+  "metadata": {
+   "generates": true
+  },
+  "params": [
+   {
+    "name": "fields",
+    "type": "field",
+    "array": true,
+    "required": true
+   },
+   {
+    "name": "as",
+    "type": "string",
+    "array": true,
+    "length": 2,
+    "default": [
+     "key",
+     "value"
+    ]
+   }
+  ]
+ },
+ "force": {
+  "type": "Force",
+  "metadata": {
+   "modifies": true
+  },
+  "params": [
+   {
+    "name": "static",
+    "type": "boolean",
+    "default": false
+   },
+   {
+    "name": "restart",
+    "type": "boolean",
+    "default": false
+   },
+   {
+    "name": "iterations",
+    "type": "number",
+    "default": 300
+   },
+   {
+    "name": "alpha",
+    "type": "number",
+    "default": 1
+   },
+   {
+    "name": "alphaMin",
+    "type": "number",
+    "default": 0.001
+   },
+   {
+    "name": "alphaTarget",
+    "type": "number",
+    "default": 0
+   },
+   {
+    "name": "velocityDecay",
+    "type": "number",
+    "default": 0.4
+   },
+   {
+    "name": "forces",
+    "type": "param",
+    "array": true,
+    "params": [
+     {
+      "key": {
+       "force": "center"
+      },
+      "params": [
+       {
+        "name": "x",
+        "type": "number",
+        "default": 0
+       },
+       {
+        "name": "y",
+        "type": "number",
+        "default": 0
+       }
+      ]
+     },
+     {
+      "key": {
+       "force": "collide"
+      },
+      "params": [
+       {
+        "name": "radius",
+        "type": "number",
+        "expr": true
+       },
+       {
+        "name": "strength",
+        "type": "number",
+        "default": 0.7
+       },
+       {
+        "name": "iterations",
+        "type": "number",
+        "default": 1
+       }
+      ]
+     },
+     {
+      "key": {
+       "force": "nbody"
+      },
+      "params": [
+       {
+        "name": "strength",
+        "type": "number",
+        "default": -30,
+        "expr": true
+       },
+       {
+        "name": "theta",
+        "type": "number",
+        "default": 0.9
+       },
+       {
+        "name": "distanceMin",
+        "type": "number",
+        "default": 1
+       },
+       {
+        "name": "distanceMax",
+        "type": "number"
+       }
+      ]
+     },
+     {
+      "key": {
+       "force": "link"
+      },
+      "params": [
+       {
+        "name": "links",
+        "type": "data"
+       },
+       {
+        "name": "id",
+        "type": "field"
+       },
+       {
+        "name": "distance",
+        "type": "number",
+        "default": 30,
+        "expr": true
+       },
+       {
+        "name": "strength",
+        "type": "number",
+        "expr": true
+       },
+       {
+        "name": "iterations",
+        "type": "number",
+        "default": 1
+       }
+      ]
+     },
+     {
+      "key": {
+       "force": "x"
+      },
+      "params": [
+       {
+        "name": "strength",
+        "type": "number",
+        "default": 0.1
+       },
+       {
+        "name": "x",
+        "type": "field"
+       }
+      ]
+     },
+     {
+      "key": {
+       "force": "y"
+      },
+      "params": [
+       {
+        "name": "strength",
+        "type": "number",
+        "default": 0.1
+       },
+       {
+        "name": "y",
+        "type": "field"
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "name": "as",
+    "type": "string",
+    "array": true,
+    "modify": false,
+    "default": [
+     "x",
+     "y",
+     "vx",
+     "vy"
+    ]
+   }
+  ]
+ },
+ "formula": {
+  "type": "Formula",
+  "metadata": {
+   "modifies": true
+  },
+  "params": [
+   {
+    "name": "expr",
+    "type": "expr",
+    "required": true
+   },
+   {
+    "name": "as",
+    "type": "string",
+    "required": true
+   },
+   {
+    "name": "initonly",
+    "type": "boolean"
+   }
+  ]
+ },
+ "geojson": {
+  "type": "GeoJSON",
+  "metadata": {},
+  "params": [
+   {
+    "name": "fields",
+    "type": "field",
+    "array": true,
+    "length": 2
+   },
+   {
+    "name": "geojson",
+    "type": "field"
+   }
+  ]
+ },
+ "geopath": {
+  "type": "GeoPath",
+  "metadata": {
+   "modifies": true
+  },
+  "params": [
+   {
+    "name": "projection",
+    "type": "projection"
+   },
+   {
+    "name": "field",
+    "type": "field"
+   },
+   {
+    "name": "pointRadius",
+    "type": "number",
+    "expr": true
+   },
+   {
+    "name": "as",
+    "type": "string",
+    "default": "path"
+   }
+  ]
+ },
+ "geopoint": {
+  "type": "GeoPoint",
+  "metadata": {
+   "modifies": true
+  },
+  "params": [
+   {
+    "name": "projection",
+    "type": "projection",
+    "required": true
+   },
+   {
+    "name": "fields",
+    "type": "field",
+    "array": true,
+    "required": true,
+    "length": 2
+   },
+   {
+    "name": "as",
+    "type": "string",
+    "array": true,
+    "length": 2,
+    "default": [
+     "x",
+     "y"
+    ]
+   }
+  ]
+ },
+ "geoshape": {
+  "type": "GeoShape",
+  "metadata": {
+   "modifies": true,
+   "nomod": true
+  },
+  "params": [
+   {
+    "name": "projection",
+    "type": "projection"
+   },
+   {
+    "name": "field",
+    "type": "field",
+    "default": "datum"
+   },
+   {
+    "name": "pointRadius",
+    "type": "number",
+    "expr": true
+   },
+   {
+    "name": "as",
+    "type": "string",
+    "default": "shape"
+   }
+  ]
+ },
+ "graticule": {
+  "type": "Graticule",
+  "metadata": {
+   "changes": true,
+   "generates": true
+  },
+  "params": [
+   {
+    "name": "extent",
+    "type": "array",
+    "array": true,
+    "length": 2,
+    "content": {
+     "type": "number",
+     "array": true,
+     "length": 2
+    }
+   },
+   {
+    "name": "extentMajor",
+    "type": "array",
+    "array": true,
+    "length": 2,
+    "content": {
+     "type": "number",
+     "array": true,
+     "length": 2
+    }
+   },
+   {
+    "name": "extentMinor",
+    "type": "array",
+    "array": true,
+    "length": 2,
+    "content": {
+     "type": "number",
+     "array": true,
+     "length": 2
+    }
+   },
+   {
+    "name": "step",
+    "type": "number",
+    "array": true,
+    "length": 2
+   },
+   {
+    "name": "stepMajor",
+    "type": "number",
+    "array": true,
+    "length": 2,
+    "default": [
+     90,
+     360
+    ]
+   },
+   {
+    "name": "stepMinor",
+    "type": "number",
+    "array": true,
+    "length": 2,
+    "default": [
+     10,
+     10
+    ]
+   },
+   {
+    "name": "precision",
+    "type": "number",
+    "default": 2.5
+   }
+  ]
+ },
+ "heatmap": {
+  "type": "heatmap",
+  "metadata": {
+   "modifies": true
+  },
+  "params": [
+   {
+    "name": "field",
+    "type": "field"
+   },
+   {
+    "name": "color",
+    "type": "string",
+    "expr": true
+   },
+   {
+    "name": "opacity",
+    "type": "number",
+    "expr": true
+   },
+   {
+    "name": "resolve",
+    "type": "enum",
+    "values": [
+     "shared",
+     "independent"
+    ],
+    "default": "independent"
+   },
+   {
+    "name": "as",
+    "type": "string",
+    "default": "image"
+   }
+  ]
+ },
+ "identifier": {
+  "type": "Identifier",
+  "metadata": {
+   "modifies": true
+  },
+  "params": [
+   {
+    "name": "as",
+    "type": "string",
+    "required": true
+   }
+  ]
+ },
+ "impute": {
+  "type": "Impute",
+  "metadata": {
+   "changes": true
+  },
+  "params": [
+   {
+    "name": "field",
+    "type": "field",
+    "required": true
+   },
+   {
+    "name": "key",
+    "type": "field",
+    "required": true
+   },
+   {
+    "name": "keyvals",
+    "array": true
+   },
+   {
+    "name": "groupby",
+    "type": "field",
+    "array": true
+   },
+   {
+    "name": "method",
+    "type": "enum",
+    "default": "value",
+    "values": [
+     "value",
+     "mean",
+     "median",
+     "max",
+     "min"
+    ]
+   },
+   {
+    "name": "value",
+    "default": 0
+   }
+  ]
+ },
+ "isocontour": {
+  "type": "Isocontour",
+  "metadata": {
+   "generates": true
+  },
+  "params": [
+   {
+    "name": "field",
+    "type": "field"
+   },
+   {
+    "name": "thresholds",
+    "type": "number",
+    "array": true
+   },
+   {
+    "name": "levels",
+    "type": "number"
+   },
+   {
+    "name": "nice",
+    "type": "boolean",
+    "default": false
+   },
+   {
+    "name": "resolve",
+    "type": "enum",
+    "values": [
+     "shared",
+     "independent"
+    ],
+    "default": "independent"
+   },
+   {
+    "name": "zero",
+    "type": "boolean",
+    "default": true
+   },
+   {
+    "name": "smooth",
+    "type": "boolean",
+    "default": true
+   },
+   {
+    "name": "scale",
+    "type": "number",
+    "expr": true
+   },
+   {
+    "name": "translate",
+    "type": "number",
+    "array": true,
+    "expr": true
+   },
+   {
+    "name": "as",
+    "type": "string",
+    "null": true,
+    "default": "contour"
+   }
+  ]
+ },
+ "joinaggregate": {
+  "type": "JoinAggregate",
+  "metadata": {
+   "modifies": true
+  },
+  "params": [
+   {
+    "name": "groupby",
+    "type": "field",
+    "array": true
+   },
+   {
+    "name": "fields",
+    "type": "field",
+    "null": true,
+    "array": true
+   },
+   {
+    "name": "ops",
+    "type": "enum",
+    "array": true,
+    "values": [
+     "values",
+     "count",
+     "missing",
+     "valid",
+     "sum",
+     "product",
+     "mean",
+     "average",
+     "variance",
+     "variancep",
+     "stdev",
+     "stdevp",
+     "stderr",
+     "distinct",
+     "ci0",
+     "ci1",
+     "median",
+     "q1",
+     "q3",
+     "min",
+     "max",
+     "argmin",
+     "argmax",
+     "exponential",
+     "exponentialb"
+    ]
+   },
+   {
+    "name": "as",
+    "type": "string",
+    "null": true,
+    "array": true
+   },
+   {
+    "name": "key",
+    "type": "field"
+   }
+  ]
+ },
+ "kde": {
+  "type": "KDE",
+  "metadata": {
+   "generates": true
+  },
+  "params": [
+   {
+    "name": "groupby",
+    "type": "field",
+    "array": true
+   },
+   {
+    "name": "field",
+    "type": "field",
+    "required": true
+   },
+   {
+    "name": "cumulative",
+    "type": "boolean",
+    "default": false
+   },
+   {
+    "name": "counts",
+    "type": "boolean",
+    "default": false
+   },
+   {
+    "name": "bandwidth",
+    "type": "number",
+    "default": 0
+   },
+   {
+    "name": "extent",
+    "type": "number",
+    "array": true,
+    "length": 2
+   },
+   {
+    "name": "resolve",
+    "type": "enum",
+    "values": [
+     "shared",
+     "independent"
+    ],
+    "default": "independent"
+   },
+   {
+    "name": "steps",
+    "type": "number"
+   },
+   {
+    "name": "minsteps",
+    "type": "number",
+    "default": 25
+   },
+   {
+    "name": "maxsteps",
+    "type": "number",
+    "default": 200
+   },
+   {
+    "name": "as",
+    "type": "string",
+    "array": true,
+    "default": [
+     "value",
+     "density"
+    ]
+   }
+  ]
+ },
+ "kde2d": {
+  "type": "KDE2D",
+  "metadata": {
+   "generates": true
+  },
+  "params": [
+   {
+    "name": "size",
+    "type": "number",
+    "array": true,
+    "length": 2,
+    "required": true
+   },
+   {
+    "name": "x",
+    "type": "field",
+    "required": true
+   },
+   {
+    "name": "y",
+    "type": "field",
+    "required": true
+   },
+   {
+    "name": "weight",
+    "type": "field"
+   },
+   {
+    "name": "groupby",
+    "type": "field",
+    "array": true
+   },
+   {
+    "name": "cellSize",
+    "type": "number"
+   },
+   {
+    "name": "bandwidth",
+    "type": "number",
+    "array": true,
+    "length": 2
+   },
+   {
+    "name": "counts",
+    "type": "boolean",
+    "default": false
+   },
+   {
+    "name": "as",
+    "type": "string",
+    "default": "grid"
+   }
+  ]
+ },
+ "label": {
+  "type": "Label",
+  "metadata": {
+   "modifies": true
+  },
+  "params": [
+   {
+    "name": "size",
+    "type": "number",
+    "array": true,
+    "length": 2,
+    "required": true
+   },
+   {
+    "name": "sort",
+    "type": "compare"
+   },
+   {
+    "name": "anchor",
+    "type": "string",
+    "array": true,
+    "default": [
+     "top-left",
+     "left",
+     "bottom-left",
+     "top",
+     "bottom",
+     "top-right",
+     "right",
+     "bottom-right"
+    ]
+   },
+   {
+    "name": "offset",
+    "type": "number",
+    "array": true,
+    "default": [
+     1
+    ]
+   },
+   {
+    "name": "padding",
+    "type": "number",
+    "default": 0,
+    "null": true
+   },
+   {
+    "name": "lineAnchor",
+    "type": "string",
+    "values": [
+     "start",
+     "end"
+    ],
+    "default": "end"
+   },
+   {
+    "name": "markIndex",
+    "type": "number",
+    "default": 0
+   },
+   {
+    "name": "avoidBaseMark",
+    "type": "boolean",
+    "default": true
+   },
+   {
+    "name": "avoidMarks",
+    "type": "data",
+    "array": true
+   },
+   {
+    "name": "method",
+    "type": "string",
+    "default": "naive"
+   },
+   {
+    "name": "as",
+    "type": "string",
+    "array": true,
+    "length": 5,
+    "default": [
+     "x",
+     "y",
+     "opacity",
+     "align",
+     "baseline"
+    ]
+   }
+  ]
+ },
+ "linkpath": {
+  "type": "LinkPath",
+  "metadata": {
+   "modifies": true
+  },
+  "params": [
+   {
+    "name": "sourceX",
+    "type": "field",
+    "default": "source.x"
+   },
+   {
+    "name": "sourceY",
+    "type": "field",
+    "default": "source.y"
+   },
+   {
+    "name": "targetX",
+    "type": "field",
+    "default": "target.x"
+   },
+   {
+    "name": "targetY",
+    "type": "field",
+    "default": "target.y"
+   },
+   {
+    "name": "orient",
+    "type": "enum",
+    "default": "vertical",
+    "values": [
+     "horizontal",
+     "vertical",
+     "radial"
+    ]
+   },
+   {
+    "name": "shape",
+    "type": "enum",
+    "default": "line",
+    "values": [
+     "line",
+     "arc",
+     "curve",
+     "diagonal",
+     "orthogonal"
+    ]
+   },
+   {
+    "name": "require",
+    "type": "signal"
+   },
+   {
+    "name": "as",
+    "type": "string",
+    "default": "path"
+   }
+  ]
+ },
+ "loess": {
+  "type": "Loess",
+  "metadata": {
+   "generates": true
+  },
+  "params": [
+   {
+    "name": "x",
+    "type": "field",
+    "required": true
+   },
+   {
+    "name": "y",
+    "type": "field",
+    "required": true
+   },
+   {
+    "name": "groupby",
+    "type": "field",
+    "array": true
+   },
+   {
+    "name": "bandwidth",
+    "type": "number",
+    "default": 0.3
+   },
+   {
+    "name": "as",
+    "type": "string",
+    "array": true
+   }
+  ]
+ },
+ "lookup": {
+  "type": "Lookup",
+  "metadata": {
+   "modifies": true
+  },
+  "params": [
+   {
+    "name": "index",
+    "type": "index",
+    "params": [
+     {
+      "name": "from",
+      "type": "data",
+      "required": true
+     },
+     {
+      "name": "key",
+      "type": "field",
+      "required": true
+     }
+    ]
+   },
+   {
+    "name": "values",
+    "type": "field",
+    "array": true
+   },
+   {
+    "name": "fields",
+    "type": "field",
+    "array": true,
+    "required": true
+   },
+   {
+    "name": "as",
+    "type": "string",
+    "array": true
+   },
+   {
+    "name": "default",
+    "default": null
+   }
+  ]
+ },
+ "nest": {
+  "type": "Nest",
+  "metadata": {
+   "treesource": true,
+   "changes": true
+  },
+  "params": [
+   {
+    "name": "keys",
+    "type": "field",
+    "array": true
+   },
+   {
+    "name": "generate",
+    "type": "boolean"
+   }
+  ]
+ },
+ "pack": {
+  "type": "Pack",
+  "metadata": {
+   "tree": true,
+   "modifies": true
+  },
+  "params": [
+   {
+    "name": "field",
+    "type": "field"
+   },
+   {
+    "name": "sort",
+    "type": "compare"
+   },
+   {
+    "name": "padding",
+    "type": "number",
+    "default": 0
+   },
+   {
+    "name": "radius",
+    "type": "field",
+    "default": null
+   },
+   {
+    "name": "size",
+    "type": "number",
+    "array": true,
+    "length": 2
+   },
+   {
+    "name": "as",
+    "type": "string",
+    "array": true,
+    "length": 5,
+    "default": [
+     "x",
+     "y",
+     "r",
+     "depth",
+     "children"
+    ]
+   }
+  ]
+ },
+ "partition": {
+  "type": "Partition",
+  "metadata": {
+   "tree": true,
+   "modifies": true
+  },
+  "params": [
+   {
+    "name": "field",
+    "type": "field"
+   },
+   {
+    "name": "sort",
+    "type": "compare"
+   },
+   {
+    "name": "padding",
+    "type": "number",
+    "default": 0
+   },
+   {
+    "name": "round",
+    "type": "boolean",
+    "default": false
+   },
+   {
+    "name": "size",
+    "type": "number",
+    "array": true,
+    "length": 2
+   },
+   {
+    "name": "as",
+    "type": "string",
+    "array": true,
+    "length": 6,
+    "default": [
+     "x0",
+     "y0",
+     "x1",
+     "y1",
+     "depth",
+     "children"
+    ]
+   }
+  ]
+ },
+ "pie": {
+  "type": "Pie",
+  "metadata": {
+   "modifies": true
+  },
+  "params": [
+   {
+    "name": "field",
+    "type": "field"
+   },
+   {
+    "name": "startAngle",
+    "type": "number",
+    "default": 0
+   },
+   {
+    "name": "endAngle",
+    "type": "number",
+    "default": 6.283185307179586
+   },
+   {
+    "name": "sort",
+    "type": "boolean",
+    "default": false
+   },
+   {
+    "name": "as",
+    "type": "string",
+    "array": true,
+    "length": 2,
+    "default": [
+     "startAngle",
+     "endAngle"
+    ]
+   }
+  ]
+ },
+ "pivot": {
+  "type": "Pivot",
+  "metadata": {
+   "generates": true,
+   "changes": true
+  },
+  "params": [
+   {
+    "name": "groupby",
+    "type": "field",
+    "array": true
+   },
+   {
+    "name": "field",
+    "type": "field",
+    "required": true
+   },
+   {
+    "name": "value",
+    "type": "field",
+    "required": true
+   },
+   {
+    "name": "op",
+    "type": "enum",
+    "values": [
+     "values",
+     "count",
+     "missing",
+     "valid",
+     "sum",
+     "product",
+     "mean",
+     "average",
+     "variance",
+     "variancep",
+     "stdev",
+     "stdevp",
+     "stderr",
+     "distinct",
+     "ci0",
+     "ci1",
+     "median",
+     "q1",
+     "q3",
+     "min",
+     "max",
+     "argmin",
+     "argmax",
+     "exponential",
+     "exponentialb"
+    ],
+    "default": "sum"
+   },
+   {
+    "name": "limit",
+    "type": "number",
+    "default": 0
+   },
+   {
+    "name": "key",
+    "type": "field"
+   }
+  ]
+ },
+ "project": {
+  "type": "Project",
+  "metadata": {
+   "generates": true,
+   "changes": true
+  },
+  "params": [
+   {
+    "name": "fields",
+    "type": "field",
+    "array": true
+   },
+   {
+    "name": "as",
+    "type": "string",
+    "null": true,
+    "array": true
+   }
+  ]
+ },
+ "quantile": {
+  "type": "Quantile",
+  "metadata": {
+   "generates": true,
+   "changes": true
+  },
+  "params": [
+   {
+    "name": "groupby",
+    "type": "field",
+    "array": true
+   },
+   {
+    "name": "field",
+    "type": "field",
+    "required": true
+   },
+   {
+    "name": "probs",
+    "type": "number",
+    "array": true
+   },
+   {
+    "name": "step",
+    "type": "number",
+    "default": 0.01
+   },
+   {
+    "name": "as",
+    "type": "string",
+    "array": true,
+    "default": [
+     "prob",
+     "value"
+    ]
+   }
+  ]
+ },
+ "regression": {
+  "type": "Regression",
+  "metadata": {
+   "generates": true
+  },
+  "params": [
+   {
+    "name": "x",
+    "type": "field",
+    "required": true
+   },
+   {
+    "name": "y",
+    "type": "field",
+    "required": true
+   },
+   {
+    "name": "groupby",
+    "type": "field",
+    "array": true
+   },
+   {
+    "name": "method",
+    "type": "string",
+    "default": "linear",
+    "values": [
+     "constant",
+     "linear",
+     "log",
+     "exp",
+     "pow",
+     "quad",
+     "poly"
+    ]
+   },
+   {
+    "name": "order",
+    "type": "number",
+    "default": 3
+   },
+   {
+    "name": "extent",
+    "type": "number",
+    "array": true,
+    "length": 2
+   },
+   {
+    "name": "params",
+    "type": "boolean",
+    "default": false
+   },
+   {
+    "name": "as",
+    "type": "string",
+    "array": true
+   }
+  ]
+ },
+ "resolvefilter": {
+  "type": "ResolveFilter",
+  "metadata": {},
+  "params": [
+   {
+    "name": "ignore",
+    "type": "number",
+    "required": true,
+    "description": "A bit mask indicating which filters to ignore."
+   },
+   {
+    "name": "filter",
+    "type": "object",
+    "required": true,
+    "description": "Per-tuple filter bitmaps from a CrossFilter transform."
+   }
+  ]
+ },
+ "sample": {
+  "type": "Sample",
+  "metadata": {},
+  "params": [
+   {
+    "name": "size",
+    "type": "number",
+    "default": 1000
+   }
+  ]
+ },
+ "sequence": {
+  "type": "Sequence",
+  "metadata": {
+   "generates": true,
+   "changes": true
+  },
+  "params": [
+   {
+    "name": "start",
+    "type": "number",
+    "required": true
+   },
+   {
+    "name": "stop",
+    "type": "number",
+    "required": true
+   },
+   {
+    "name": "step",
+    "type": "number",
+    "default": 1
+   },
+   {
+    "name": "as",
+    "type": "string",
+    "default": "data"
+   }
+  ]
+ },
+ "stack": {
+  "type": "Stack",
+  "metadata": {
+   "modifies": true
+  },
+  "params": [
+   {
+    "name": "field",
+    "type": "field"
+   },
+   {
+    "name": "groupby",
+    "type": "field",
+    "array": true
+   },
+   {
+    "name": "sort",
+    "type": "compare"
+   },
+   {
+    "name": "offset",
+    "type": "enum",
+    "default": "zero",
+    "values": [
+     "zero",
+     "center",
+     "normalize"
+    ]
+   },
+   {
+    "name": "as",
+    "type": "string",
+    "array": true,
+    "length": 2,
+    "default": [
+     "y0",
+     "y1"
+    ]
+   }
+  ]
+ },
+ "stratify": {
+  "type": "Stratify",
+  "metadata": {
+   "treesource": true
+  },
+  "params": [
+   {
+    "name": "key",
+    "type": "field",
+    "required": true
+   },
+   {
+    "name": "parentKey",
+    "type": "field",
+    "required": true
+   }
+  ]
+ },
+ "timeunit": {
+  "type": "TimeUnit",
+  "metadata": {
+   "modifies": true
+  },
+  "params": [
+   {
+    "name": "field",
+    "type": "field",
+    "required": true
+   },
+   {
+    "name": "interval",
+    "type": "boolean",
+    "default": true
+   },
+   {
+    "name": "units",
+    "type": "enum",
+    "values": [
+     "year",
+     "quarter",
+     "month",
+     "week",
+     "date",
+     "day",
+     "dayofyear",
+     "hours",
+     "minutes",
+     "seconds",
+     "milliseconds"
+    ],
+    "array": true
+   },
+   {
+    "name": "step",
+    "type": "number",
+    "default": 1
+   },
+   {
+    "name": "maxbins",
+    "type": "number",
+    "default": 40
+   },
+   {
+    "name": "extent",
+    "type": "date",
+    "array": true
+   },
+   {
+    "name": "inferUnits",
+    "type": "boolean",
+    "default": false
+   },
+   {
+    "name": "timezone",
+    "type": "enum",
+    "default": "local",
+    "values": [
+     "local",
+     "utc"
+    ]
+   },
+   {
+    "name": "as",
+    "type": "string",
+    "array": true,
+    "length": 2,
+    "default": [
+     "unit0",
+     "unit1"
+    ]
+   }
+  ]
+ },
+ "tree": {
+  "type": "Tree",
+  "metadata": {
+   "tree": true,
+   "modifies": true
+  },
+  "params": [
+   {
+    "name": "field",
+    "type": "field"
+   },
+   {
+    "name": "sort",
+    "type": "compare"
+   },
+   {
+    "name": "method",
+    "type": "enum",
+    "default": "tidy",
+    "values": [
+     "tidy",
+     "cluster"
+    ]
+   },
+   {
+    "name": "size",
+    "type": "number",
+    "array": true,
+    "length": 2
+   },
+   {
+    "name": "nodeSize",
+    "type": "number",
+    "array": true,
+    "length": 2
+   },
+   {
+    "name": "separation",
+    "type": "boolean",
+    "default": true
+   },
+   {
+    "name": "as",
+    "type": "string",
+    "array": true,
+    "length": 4,
+    "default": [
+     "x",
+     "y",
+     "depth",
+     "children"
+    ]
+   }
+  ]
+ },
+ "treelinks": {
+  "type": "TreeLinks",
+  "metadata": {
+   "tree": true,
+   "generates": true,
+   "changes": true
+  },
+  "params": []
+ },
+ "treemap": {
+  "type": "Treemap",
+  "metadata": {
+   "tree": true,
+   "modifies": true
+  },
+  "params": [
+   {
+    "name": "field",
+    "type": "field"
+   },
+   {
+    "name": "sort",
+    "type": "compare"
+   },
+   {
+    "name": "method",
+    "type": "enum",
+    "default": "squarify",
+    "values": [
+     "squarify",
+     "resquarify",
+     "binary",
+     "dice",
+     "slice",
+     "slicedice"
+    ]
+   },
+   {
+    "name": "padding",
+    "type": "number",
+    "default": 0
+   },
+   {
+    "name": "paddingInner",
+    "type": "number",
+    "default": 0
+   },
+   {
+    "name": "paddingOuter",
+    "type": "number",
+    "default": 0
+   },
+   {
+    "name": "paddingTop",
+    "type": "number",
+    "default": 0
+   },
+   {
+    "name": "paddingRight",
+    "type": "number",
+    "default": 0
+   },
+   {
+    "name": "paddingBottom",
+    "type": "number",
+    "default": 0
+   },
+   {
+    "name": "paddingLeft",
+    "type": "number",
+    "default": 0
+   },
+   {
+    "name": "ratio",
+    "type": "number",
+    "default": 1.618033988749895
+   },
+   {
+    "name": "round",
+    "type": "boolean",
+    "default": false
+   },
+   {
+    "name": "size",
+    "type": "number",
+    "array": true,
+    "length": 2
+   },
+   {
+    "name": "as",
+    "type": "string",
+    "array": true,
+    "length": 6,
+    "default": [
+     "x0",
+     "y0",
+     "x1",
+     "y1",
+     "depth",
+     "children"
+    ]
+   }
+  ]
+ },
+ "voronoi": {
+  "type": "Voronoi",
+  "metadata": {
+   "modifies": true
+  },
+  "params": [
+   {
+    "name": "x",
+    "type": "field",
+    "required": true
+   },
+   {
+    "name": "y",
+    "type": "field",
+    "required": true
+   },
+   {
+    "name": "size",
+    "type": "number",
+    "array": true,
+    "length": 2
+   },
+   {
+    "name": "extent",
+    "type": "array",
+    "array": true,
+    "length": 2,
+    "default": [
+     [
+      -100000,
+      -100000
+     ],
+     [
+      100000,
+      100000
+     ]
+    ],
+    "content": {
+     "type": "number",
+     "array": true,
+     "length": 2
+    }
+   },
+   {
+    "name": "as",
+    "type": "string",
+    "default": "path"
+   }
+  ]
+ },
+ "window": {
+  "type": "Window",
+  "metadata": {
+   "modifies": true
+  },
+  "params": [
+   {
+    "name": "sort",
+    "type": "compare"
+   },
+   {
+    "name": "groupby",
+    "type": "field",
+    "array": true
+   },
+   {
+    "name": "ops",
+    "type": "enum",
+    "array": true,
+    "values": [
+     "row_number",
+     "rank",
+     "dense_rank",
+     "percent_rank",
+     "cume_dist",
+     "ntile",
+     "lag",
+     "lead",
+     "first_value",
+     "last_value",
+     "nth_value",
+     "prev_value",
+     "next_value",
+     "values",
+     "count",
+     "missing",
+     "valid",
+     "sum",
+     "product",
+     "mean",
+     "average",
+     "variance",
+     "variancep",
+     "stdev",
+     "stdevp",
+     "stderr",
+     "distinct",
+     "ci0",
+     "ci1",
+     "median",
+     "q1",
+     "q3",
+     "min",
+     "max",
+     "argmin",
+     "argmax",
+     "exponential",
+     "exponentialb"
+    ]
+   },
+   {
+    "name": "params",
+    "type": "number",
+    "null": true,
+    "array": true
+   },
+   {
+    "name": "aggregate_params",
+    "type": "number",
+    "null": true,
+    "array": true
+   },
+   {
+    "name": "fields",
+    "type": "field",
+    "null": true,
+    "array": true
+   },
+   {
+    "name": "as",
+    "type": "string",
+    "null": true,
+    "array": true
+   },
+   {
+    "name": "frame",
+    "type": "number",
+    "null": true,
+    "array": true,
+    "length": 2,
+    "default": [
+     null,
+     0
+    ]
+   },
+   {
+    "name": "ignorePeers",
+    "type": "boolean",
+    "default": false
+   }
+  ]
+ },
+ "wordcloud": {
+  "type": "Wordcloud",
+  "metadata": {
+   "modifies": true
+  },
+  "params": [
+   {
+    "name": "size",
+    "type": "number",
+    "array": true,
+    "length": 2
+   },
+   {
+    "name": "font",
+    "type": "string",
+    "expr": true,
+    "default": "sans-serif"
+   },
+   {
+    "name": "fontStyle",
+    "type": "string",
+    "expr": true,
+    "default": "normal"
+   },
+   {
+    "name": "fontWeight",
+    "type": "string",
+    "expr": true,
+    "default": "normal"
+   },
+   {
+    "name": "fontSize",
+    "type": "number",
+    "expr": true,
+    "default": 14
+   },
+   {
+    "name": "fontSizeRange",
+    "type": "number",
+    "array": "nullable",
+    "default": [
+     10,
+     50
+    ]
+   },
+   {
+    "name": "rotate",
+    "type": "number",
+    "expr": true,
+    "default": 0
+   },
+   {
+    "name": "text",
+    "type": "field"
+   },
+   {
+    "name": "spiral",
+    "type": "string",
+    "values": [
+     "archimedean",
+     "rectangular"
+    ]
+   },
+   {
+    "name": "padding",
+    "type": "number",
+    "expr": true
+   },
+   {
+    "name": "as",
+    "type": "string",
+    "array": true,
+    "length": 7,
+    "default": [
+     "x",
+     "y",
+     "font",
+     "fontSize",
+     "fontStyle",
+     "fontWeight",
+     "angle"
+    ]
+   }
+  ]
+ }
+}

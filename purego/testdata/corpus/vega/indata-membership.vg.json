@@ -1,0 +1,83 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "indata() testing each bar's key against a second dataset. The selection holds a number and a boolean as well as strings, because upstream indexes by the value coerced to a string: the bars keyed \"3\" and \"true\" match rows holding 3 and true. \"d\" appears twice, so the printed result shows that indata returns a count rather than a boolean.",
+  "width": 300,
+  "height": 120,
+  "padding": 5,
+  "data": [
+    {
+      "name": "selected",
+      "values": [
+        {"id": "b"},
+        {"id": "d"},
+        {"id": "d"},
+        {"id": 3},
+        {"id": true}
+      ]
+    },
+    {
+      "name": "table",
+      "values": [
+        {"k": "a", "n": 12},
+        {"k": "b", "n": 28},
+        {"k": "c", "n": 5},
+        {"k": "d", "n": 33},
+        {"k": "3", "n": 19},
+        {"k": "true", "n": 24}
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {"data": "table", "field": "k"},
+      "range": "width",
+      "padding": 0.1
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {"data": "table", "field": "n"},
+      "range": "height",
+      "nice": true,
+      "zero": true
+    }
+  ],
+  "axes": [{"orient": "bottom", "scale": "x"}],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "k"},
+          "width": {"scale": "x", "band": 1},
+          "y": {"scale": "y", "field": "n"},
+          "y2": {"scale": "y", "value": 0},
+          "fill": [
+            {"test": "indata('selected', 'id', datum.k)", "value": "#4c78a8"},
+            {"value": "#dddddd"}
+          ]
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "k", "band": 0.5},
+          "y": {"scale": "y", "field": "n", "offset": -4},
+          "align": {"value": "center"},
+          "baseline": {"value": "bottom"},
+          "fontSize": {"value": 9},
+          "text": {
+            "signal": "'n=' + (indata('selected', 'id', datum.k) || 0)"
+          },
+          "fill": {"value": "#333333"}
+        }
+      }
+    }
+  ]
+}

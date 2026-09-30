@@ -1,0 +1,34 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A stack groups by the dimensions it was given and then by the facet's own fields, `groupby: [...this.getGroupbyFields(), ...facetby]` — **concatenated, not merged**. A chart that facets by the column it also plots along therefore names that column twice, and upstream writes it twice. Grouping by `c` and then by `c` again is the same partition either way, so this is a difference in what is emitted rather than in what is drawn — which is exactly the kind the specification comparison exists to catch and the picture cannot. The same rule was already written for the imputation's own groupby a few lines further down and applied to only one of the two. The second row is the ordinary case, faceting by a different column from the one on `x`, where the two lists have nothing in common and concatenating and merging agree.",
+  "data": {
+    "values": [
+      {"c": "alpha", "k": "one", "v": 28},
+      {"c": "beta", "k": "one", "v": 55},
+      {"c": "alpha", "k": "two", "v": 43},
+      {"c": "beta", "k": "two", "v": 12}
+    ]
+  },
+  "vconcat": [
+    {
+      "mark": "bar",
+      "width": 90,
+      "height": 70,
+      "encoding": {
+        "x": {"field": "c", "type": "nominal"},
+        "y": {"field": "v", "type": "quantitative"},
+        "column": {"field": "c", "type": "nominal"}
+      }
+    },
+    {
+      "mark": "bar",
+      "width": 90,
+      "height": 70,
+      "encoding": {
+        "x": {"field": "c", "type": "nominal"},
+        "y": {"field": "v", "type": "quantitative"},
+        "column": {"field": "k", "type": "nominal"}
+      }
+    }
+  ]
+}

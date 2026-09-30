@@ -1,0 +1,150 @@
+{
+ "$schema": "https://vega.github.io/schema/vega/v6.json",
+ "width": 300,
+ "height": 200,
+ "padding": 5,
+ "marks": [
+  {
+   "type": "text",
+   "encode": {
+    "update": {
+     "x": {
+      "value": 10
+     },
+     "y": {
+      "value": 30
+     },
+     "text": {
+      "value": "a < b && c > d \"quoted\" 'single'"
+     },
+     "font": {
+      "value": "\"Helvetica Neue\", Arial"
+     },
+     "fill": {
+      "value": "#111"
+     }
+    }
+   }
+  },
+  {
+   "type": "text",
+   "encode": {
+    "update": {
+     "x": {
+      "value": 10
+     },
+     "y": {
+      "value": 60
+     },
+     "text": {
+      "value": [
+       "tab\there",
+       "line\r\nbreak"
+      ]
+     },
+     "fill": {
+      "value": "#111"
+     },
+     "description": {
+      "value": "desc with \"quotes\", <tags> & \n newline\t tab"
+     }
+    }
+   }
+  },
+  {
+   "type": "text",
+   "name": "a b\"c",
+   "encode": {
+    "update": {
+     "x": {
+      "value": 10
+     },
+     "y": {
+      "value": 100
+     },
+     "text": {
+      "value": "named"
+     },
+     "fill": {
+      "value": "#111"
+     },
+     "aria": {
+      "value": false
+     }
+    }
+   }
+  },
+  {
+   "type": "text",
+   "encode": {
+    "update": {
+     "x": {
+      "value": 10
+     },
+     "y": {
+      "value": 130
+     },
+     "text": {
+      "value": 12.5
+     },
+     "fill": {
+      "value": "#111"
+     },
+     "fontWeight": {
+      "value": 700
+     },
+     "fontSize": {
+      "value": 10.5
+     }
+    }
+   }
+  },
+  {
+   "type": "text",
+   "encode": {
+    "update": {
+     "x": {
+      "value": 10
+     },
+     "y": {
+      "value": 160
+     },
+     "text": {
+      "value": "  \u00a0nbsp trim\ufeff "
+     },
+     "fill": {
+      "value": "#111"
+     }
+    }
+   }
+  },
+  {
+   "type": "text",
+   "encode": {
+    "update": {
+     "x": {
+      "value": 10
+     },
+     "y": {
+      "value": 180
+     },
+     "text": {
+      "value": "no fill"
+     },
+     "stroke": {
+      "value": "blue"
+     },
+     "strokeWidth": {
+      "value": 0.4
+     },
+     "opacity": {
+      "value": 0.7
+     },
+     "blend": {
+      "value": "screen"
+     }
+    }
+   }
+  }
+ ]
+}

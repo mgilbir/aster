@@ -1,0 +1,87 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "format.header names the columns of a delimited file that carries none. Upstream prepends them as a header row and lets the ordinary parser take over, which is what makes them behave like real column names \u2014 the delimiter is the file's own, and a name that needs quoting is quoted, so a name containing the delimiter still parses back as one field.",
+  "width": 200,
+  "height": 100,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "t",
+      "url": "data/headerless.csv",
+      "format": {
+        "type": "csv",
+        "header": [
+          "c",
+          "v"
+        ],
+        "parse": {
+          "v": "number"
+        }
+      }
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {
+        "data": "t",
+        "field": "c"
+      },
+      "range": "width",
+      "padding": 0.2
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {
+        "data": "t",
+        "field": "v"
+      },
+      "range": "height",
+      "nice": true
+    }
+  ],
+  "axes": [
+    {
+      "scale": "x",
+      "orient": "bottom"
+    },
+    {
+      "scale": "y",
+      "orient": "left"
+    }
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "x",
+            "field": "c"
+          },
+          "width": {
+            "scale": "x",
+            "band": 1
+          },
+          "y": {
+            "scale": "y",
+            "field": "v"
+          },
+          "y2": {
+            "scale": "y",
+            "value": 0
+          },
+          "fill": {
+            "value": "#4c78a8"
+          }
+        }
+      }
+    }
+  ]
+}

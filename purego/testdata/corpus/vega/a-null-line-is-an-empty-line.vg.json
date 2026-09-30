@@ -1,0 +1,52 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "`textValue` is `const text = line == null ? '' : (line + '').trim()`, so a **null line is an empty line** and not the four letters that spell it. This engine wrote `null` there. It also handed a list of *one* back to the ordinary single-string path instead of keeping it as a line list, which reaches the same wrong answer a second way — `[null]` came out as the word — and left an empty list with no text at all where upstream draws one empty line, `lineArray` collapsing `[]` to `undefined` and `textValue` writing that as the empty string. The last column is the one that says the rule is about **nulls in a list** and not about arrays: a one-element list of an ordinary value reads exactly as that value. No scale reads this column on purpose: a discrete domain over a column of lists keys and captions it by two further rules that disagree with each other, and those are recorded in STATUS.md as the next change rather than smuggled in here.",
+  "width": 240,
+  "height": 90,
+  "padding": 5,
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {"v": ["a", null, "c"], "k": "one", "n": 1},
+        {"v": [null], "k": "two", "n": 2},
+        {"v": [1, null], "k": "three", "n": 3},
+        {"v": [], "k": "four", "n": 4},
+        {"v": ["only"], "k": "five", "n": 5}
+      ]
+    }
+  ],
+  "scales": [
+    {"name": "x", "type": "band", "domain": {"data": "t", "field": "k"}, "range": "width", "padding": 0.1}
+  ],
+  "axes": [{"orient": "bottom", "scale": "x"}],
+  "marks": [
+    {
+      "type": "text",
+      "from": {"data": "t"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "k", "band": 0.5},
+          "y": {"value": 0},
+          "text": {"field": "v"},
+          "fontSize": {"value": 9},
+          "align": {"value": "center"},
+          "baseline": {"value": "top"}
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {"data": "t"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "k"},
+          "width": {"scale": "x", "band": 1},
+          "y": {"value": 46},
+          "y2": {"value": 62},
+          "fill": {"value": "#4c78a8"}
+        }
+      }
+    }
+  ]
+}

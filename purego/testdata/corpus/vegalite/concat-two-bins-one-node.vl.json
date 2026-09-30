@@ -1,0 +1,21 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "Two plots bucketing two different columns: both bucketings are cut once, above the fork.",
+  "data": {"url": "data/movies.json"},
+  "hconcat": [
+    {
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "IMDB Rating", "bin": true},
+        "y": {"aggregate": "count"}
+      }
+    },
+    {
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "Rotten Tomatoes Rating", "bin": true},
+        "y": {"aggregate": "count"}
+      }
+    }
+  ]
+}

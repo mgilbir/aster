@@ -1,0 +1,168 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A band domain whose sort direction comes from a signal rather than from the text of the specification: one scale told to sort descending by an aggregate of a column, another to sort ascending by a count, each direction named by a signal. A direction written that way is what a control changes when a reader reverses a chart, and reading it as though it were a word left every such domain ascending without saying so. The two domains deliberately differ in more than the signal, because upstream shares one sort operator between two that differ only in that and the second silently takes the first's order.",
+  "width": 240,
+  "height": 150,
+  "padding": 5,
+  "background": "white",
+  "signals": [
+    {
+      "name": "down",
+      "value": "descending"
+    },
+    {
+      "name": "up",
+      "value": "ascending"
+    }
+  ],
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {
+          "c": "north",
+          "v": 42,
+          "n": 1
+        },
+        {
+          "c": "south",
+          "v": 27,
+          "n": 3
+        },
+        {
+          "c": "east",
+          "v": 58,
+          "n": 2
+        },
+        {
+          "c": "west",
+          "v": 35,
+          "n": 1
+        },
+        {
+          "c": "central",
+          "v": 19,
+          "n": 4
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "byValueDown",
+      "type": "band",
+      "domain": {
+        "data": "t",
+        "field": "c",
+        "sort": {
+          "op": "min",
+          "field": "v",
+          "order": {
+            "signal": "down"
+          }
+        }
+      },
+      "range": "width"
+    },
+    {
+      "name": "byCountUp",
+      "type": "band",
+      "domain": {
+        "data": "t",
+        "field": "c",
+        "sort": {
+          "op": "count",
+          "order": {
+            "signal": "up"
+          }
+        }
+      },
+      "range": "width"
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": [
+        0,
+        60
+      ],
+      "range": [
+        40,
+        0
+      ]
+    }
+  ],
+  "axes": [
+    {
+      "orient": "top",
+      "scale": "byValueDown",
+      "labelFontSize": 8
+    },
+    {
+      "orient": "bottom",
+      "scale": "byCountUp",
+      "offset": 58,
+      "labelFontSize": 8
+    }
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "byValueDown",
+            "field": "c"
+          },
+          "width": {
+            "scale": "byValueDown",
+            "band": 0.8
+          },
+          "y": {
+            "scale": "y",
+            "field": "v"
+          },
+          "y2": {
+            "scale": "y",
+            "value": 0
+          },
+          "fill": {
+            "value": "#4c78a8"
+          }
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "byCountUp",
+            "field": "c"
+          },
+          "width": {
+            "scale": "byCountUp",
+            "band": 0.8
+          },
+          "y": {
+            "scale": "y",
+            "field": "v",
+            "offset": 62
+          },
+          "y2": {
+            "value": 102
+          },
+          "fill": {
+            "value": "#f58518"
+          }
+        }
+      }
+    }
+  ]
+}

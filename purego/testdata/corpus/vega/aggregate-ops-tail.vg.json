@@ -1,0 +1,214 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "The three aggregate operations that were missing: product, and the two exponentially weighted means. The exponential pair is the only one whose answer depends on the order of the rows, and the only one that reads aggregate_params.",
+  "width": 260,
+  "height": 140,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {
+          "g": "a",
+          "x": 2
+        },
+        {
+          "g": "a",
+          "x": 3
+        },
+        {
+          "g": "a",
+          "x": 5
+        },
+        {
+          "g": "b",
+          "x": 4
+        },
+        {
+          "g": "b",
+          "x": 6
+        },
+        {
+          "g": "c",
+          "x": 1
+        },
+        {
+          "g": "c",
+          "x": 1
+        },
+        {
+          "g": "c",
+          "x": 8
+        }
+      ]
+    },
+    {
+      "name": "summary",
+      "source": "t",
+      "transform": [
+        {
+          "type": "aggregate",
+          "groupby": [
+            "g"
+          ],
+          "fields": [
+            "x",
+            "x",
+            "x",
+            "x"
+          ],
+          "ops": [
+            "sum",
+            "product",
+            "exponential",
+            "exponentialb"
+          ],
+          "aggregate_params": [
+            null,
+            null,
+            0.5,
+            0.5
+          ],
+          "as": [
+            "sum",
+            "prod",
+            "exp",
+            "expb"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "long",
+      "source": "summary",
+      "transform": [
+        {
+          "type": "fold",
+          "fields": [
+            "sum",
+            "prod",
+            "exp",
+            "expb"
+          ]
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {
+        "data": "long",
+        "field": "g"
+      },
+      "range": "width",
+      "padding": 0.2
+    },
+    {
+      "name": "inner",
+      "type": "band",
+      "domain": [
+        "sum",
+        "prod",
+        "exp",
+        "expb"
+      ],
+      "range": {
+        "step": 14
+      }
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {
+        "data": "long",
+        "field": "value"
+      },
+      "range": "height",
+      "nice": true
+    },
+    {
+      "name": "colour",
+      "type": "ordinal",
+      "domain": [
+        "sum",
+        "prod",
+        "exp",
+        "expb"
+      ],
+      "range": "category"
+    }
+  ],
+  "axes": [
+    {
+      "orient": "bottom",
+      "scale": "x"
+    },
+    {
+      "orient": "left",
+      "scale": "y",
+      "tickCount": 5
+    }
+  ],
+  "legends": [
+    {
+      "fill": "colour",
+      "title": "operation",
+      "orient": "right"
+    }
+  ],
+  "marks": [
+    {
+      "type": "group",
+      "from": {
+        "facet": {
+          "data": "long",
+          "name": "cell",
+          "groupby": "g"
+        }
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "x",
+            "field": "g"
+          }
+        }
+      },
+      "marks": [
+        {
+          "type": "rect",
+          "from": {
+            "data": "cell"
+          },
+          "encode": {
+            "enter": {
+              "x": {
+                "scale": "inner",
+                "field": "key"
+              },
+              "width": {
+                "scale": "inner",
+                "band": 1
+              },
+              "y": {
+                "scale": "y",
+                "field": "value"
+              },
+              "y2": {
+                "scale": "y",
+                "value": 0
+              },
+              "fill": {
+                "scale": "colour",
+                "field": "key"
+              }
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

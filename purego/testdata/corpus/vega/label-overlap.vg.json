@@ -1,0 +1,75 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "Labels too crowded to all be drawn: a parity axis, a greedy one, and a horizontal gradient legend that thins its own without being asked.",
+  "width": 200,
+  "height": 120,
+  "padding": 5,
+  "data": [
+    {
+      "name": "table",
+      "values": [
+        {"c": "category-one", "v": 31},
+        {"c": "category-two", "v": 74},
+        {"c": "category-three", "v": 22},
+        {"c": "category-four", "v": 58},
+        {"c": "category-five", "v": 45},
+        {"c": "category-six", "v": 66},
+        {"c": "category-seven", "v": 12},
+        {"c": "category-eight", "v": 83}
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {"data": "table", "field": "c"},
+      "range": "width",
+      "padding": 0.1
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {"data": "table", "field": "v"},
+      "range": "height",
+      "nice": true
+    },
+    {
+      "name": "ramp",
+      "type": "linear",
+      "domain": {"data": "table", "field": "v"},
+      "range": ["#eeeeee", "#333333"]
+    }
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "x", "labelOverlap": "parity"},
+    {"orient": "top", "scale": "x", "labelOverlap": "greedy"},
+    {"orient": "left", "scale": "y", "tickCount": 20, "labelOverlap": "parity"}
+  ],
+  "legends": [
+    {
+      "fill": "ramp",
+      "type": "gradient",
+      "direction": "horizontal",
+      "gradientLength": 60,
+      "tickCount": 8,
+      "orient": "bottom",
+      "title": "Value"
+    }
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "c"},
+          "width": {"scale": "x", "band": 1},
+          "y": {"scale": "y", "field": "v"},
+          "y2": {"scale": "y", "value": 0},
+          "fill": {"scale": "ramp", "field": "v"}
+        }
+      }
+    }
+  ]
+}

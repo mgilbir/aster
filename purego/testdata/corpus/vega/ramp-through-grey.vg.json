@@ -1,0 +1,108 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "Colour ramps with an endpoint that carries no hue. A grey has undefined hue in HCL and HSL, and d3's interpolators hold the other endpoint's hue rather than swinging through the wheel — so red to grey desaturates. The transparent ramp is the same rule on the alpha channel.",
+  "width": 300,
+  "height": 150,
+  "padding": 5,
+
+  "data": [
+    {
+      "name": "steps",
+      "values": [
+        {"t": 0}, {"t": 0.25}, {"t": 0.5}, {"t": 0.75}, {"t": 1}
+      ]
+    }
+  ],
+
+  "scales": [
+    {
+      "name": "hcl",
+      "type": "linear",
+      "domain": [0, 1],
+      "range": ["red", "#ccc"],
+      "interpolate": "hcl"
+    },
+    {
+      "name": "hsl",
+      "type": "linear",
+      "domain": [0, 1],
+      "range": ["red", "#ccc"],
+      "interpolate": "hsl"
+    },
+    {
+      "name": "lab",
+      "type": "linear",
+      "domain": [0, 1],
+      "range": ["red", "black"],
+      "interpolate": "lab"
+    },
+    {
+      "name": "fade",
+      "type": "linear",
+      "domain": [0, 1],
+      "range": ["red", "transparent"]
+    },
+    {
+      "name": "xscale",
+      "type": "band",
+      "domain": {"data": "steps", "field": "t"},
+      "range": "width",
+      "padding": 0.05
+    }
+  ],
+
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "steps"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "xscale", "field": "t"},
+          "width": {"scale": "xscale", "band": 1},
+          "y": {"value": 0},
+          "height": {"value": 30},
+          "fill": {"scale": "hcl", "field": "t"}
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {"data": "steps"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "xscale", "field": "t"},
+          "width": {"scale": "xscale", "band": 1},
+          "y": {"value": 35},
+          "height": {"value": 30},
+          "fill": {"scale": "hsl", "field": "t"}
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {"data": "steps"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "xscale", "field": "t"},
+          "width": {"scale": "xscale", "band": 1},
+          "y": {"value": 70},
+          "height": {"value": 30},
+          "fill": {"scale": "lab", "field": "t"}
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {"data": "steps"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "xscale", "field": "t"},
+          "width": {"scale": "xscale", "band": 1},
+          "y": {"value": 105},
+          "height": {"value": 30},
+          "fill": {"scale": "fade", "field": "t"}
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A wrapped facet whose cells are ordered by an aggregate, so the chain stays below the facet and a copy of it is hung beside for the scales.",
+  "data": {"url": "data/barley.json"},
+  "mark": "point",
+  "height": {"step": 12},
+  "encoding": {
+    "facet": {
+      "field": "site",
+      "type": "ordinal",
+      "columns": 2,
+      "sort": {"op": "median", "field": "yield"}
+    },
+    "x": {"aggregate": "median", "field": "yield", "type": "quantitative", "scale": {"zero": false}},
+    "y": {"field": "variety", "type": "ordinal", "sort": "-x"},
+    "color": {"field": "year", "type": "nominal"}
+  }
+}

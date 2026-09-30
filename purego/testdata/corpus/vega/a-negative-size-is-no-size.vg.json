@@ -1,0 +1,51 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A plotting area is **never negative and never NaN**, whatever arrived at it. Upstream's `layoutGroup` opens `width = Math.max(0, group.width || 0)` and `viewSizeLayout` repeats it, and the second one hands the result to `resizeView`, which writes it **back into the signal** — `view.signal(Width, width, Skip)` followed by `view.run('enter')`. So the rule is not merely that the layout uses zero: the `width` signal itself reads zero on the rerun, and everything downstream of it reads zero too. The two halves of `Math.max(0, group.width || 0)` are separate tests and this fixture carries one each. `width` resolves to **-120**, which the clamp takes; `height` resolves to **NaN** from `0 / 0`, which only the `|| 0` takes, because `Math.max(0, NaN)` is `NaN` and a size nothing can be laid out against would travel into every scale ranged on it. The observable is threefold. The band scale ranged on `\"width\"` and the linear scale ranged on `\"height\"` are both `[0, 0]`, so the rects have no width and sit on one line. The `half` and `tall` signals read the size *after* the write-back, which is why `half` is 0 rather than -60 and `tall` is 1 rather than NaN — a dependent signal is the only way to see that the write-back happened at all rather than the layout quietly using a different number. And the text mark prints both sizes, so a reading that clamps the layout and leaves the signal alone differs in the drawing rather than only in the geometry. A size declared as an ordinary negative property was already clamped; this is reachable only through a signal, which is how it went unnoticed.",
+  "padding": 5,
+  "signals": [
+    {"name": "width", "update": "-120"},
+    {"name": "height", "update": "0 / 0"},
+    {"name": "half", "update": "width / 2"},
+    {"name": "tall", "update": "height + 1"}
+  ],
+  "data": [{"name": "t", "values": [{"k": "a"}, {"k": "b"}, {"k": "c"}]}],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {"data": "t", "field": "k"},
+      "range": "width",
+      "padding": 0.1
+    },
+    {"name": "y", "type": "linear", "domain": [0, 3], "range": "height"}
+  ],
+  "axes": [{"orient": "bottom", "scale": "x"}],
+  "marks": [
+    {
+      "type": "text",
+      "encode": {
+        "update": {
+          "x": {"value": 2},
+          "y": {"value": 30},
+          "text": {
+            "signal": "'w ' + width + ' h ' + height + ' half ' + half + ' tall ' + tall"
+          },
+          "fontSize": {"value": 9}
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {"data": "t"},
+      "encode": {
+        "update": {
+          "x": {"scale": "x", "field": "k"},
+          "width": {"scale": "x", "band": 1},
+          "y": {"value": 0},
+          "y2": {"value": 12},
+          "fill": {"value": "#4c78a8"}
+        }
+      }
+    }
+  ]
+}

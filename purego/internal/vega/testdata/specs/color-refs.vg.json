@@ -1,0 +1,136 @@
+{
+ "width": 200,
+ "height": 60,
+ "padding": 5,
+ "data": [
+  {
+   "name": "t",
+   "values": [
+    {
+     "h": 10,
+     "v": 1
+    },
+    {
+     "h": 120,
+     "v": 2
+    },
+    {
+     "h": 250,
+     "v": 3
+    }
+   ]
+  }
+ ],
+ "scales": [
+  {
+   "name": "x",
+   "type": "linear",
+   "domain": [
+    0,
+    4
+   ],
+   "range": "width"
+  }
+ ],
+ "marks": [
+  {
+   "type": "rect",
+   "from": {
+    "data": "t"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "scale": "x",
+      "field": "v"
+     },
+     "width": {
+      "value": 30
+     },
+     "y": {
+      "value": 0
+     },
+     "height": {
+      "value": 20
+     },
+     "fill": {
+      "color": {
+       "h": {
+        "field": "h"
+       },
+       "s": {
+        "value": 0.7
+       },
+       "l": {
+        "value": 0.5
+       }
+      }
+     },
+     "stroke": {
+      "color": {
+       "r": {
+        "field": "h"
+       },
+       "g": {
+        "value": 100
+       },
+       "b": {
+        "value": 50
+       }
+      }
+     }
+    }
+   }
+  },
+  {
+   "type": "rect",
+   "from": {
+    "data": "t"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "scale": "x",
+      "field": "v"
+     },
+     "width": {
+      "value": 30
+     },
+     "y": {
+      "value": 30
+     },
+     "height": {
+      "value": 20
+     },
+     "fill": {
+      "color": {
+       "l": {
+        "value": 60
+       },
+       "a": {
+        "field": "h",
+        "mult": 0.1
+       },
+       "b": {
+        "value": -20
+       }
+      }
+     },
+     "stroke": {
+      "color": {
+       "h": {
+        "field": "h"
+       },
+       "c": {
+        "value": 40
+       },
+       "l": {
+        "value": 60
+       }
+      }
+     }
+    }
+   }
+  }
+ ]
+}

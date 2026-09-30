@@ -1,0 +1,11 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "The same box plot with a tooltip that names a column outright: it explains a far-out row rather than a box, so it lands on the outliers and the summary keeps its five numbers.",
+  "data": {"url": "data/cars.json"},
+  "mark": "boxplot",
+  "encoding": {
+    "y": {"field": "Origin", "type": "nominal"},
+    "x": {"field": "Miles_per_Gallon", "type": "quantitative", "title": "Miles per Gallon", "scale": {"zero": false}},
+    "tooltip": {"field": "Miles_per_Gallon", "type": "quantitative"}
+  }
+}

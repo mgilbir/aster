@@ -1,0 +1,24 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A wrapped facet is a third channel beside `row` and `column`, and every rule that faces a heading runs over it too: `assembleLayoutTitleBand` loops `for (const channel of FACET_CHANNELS)`, which is all three, and `getHeaderChannel` answers `column` for a wrapped one because its cells are captioned above them. So a wrapped grid whose header anchors its heading at the end is anchored in the *column* band — `LAYOUT_TITLE_BAND.column.end` is 1 — and the heading itself is aligned `right`. That alignment is the anchor's and not the turn's, which is what this chart is arranged to show: `defaultHeaderGuideAlign` switches on the anchor first and returns from the `case` arm without ever reaching `defaultLabelAlign`, and two hundred degrees on a column band would have answered `left` had it been reached, `(0 < angle && angle < 180) === (orient === 'bottom')` being false against false. The turn still reaches the baseline, which the anchor has nothing to say about: two hundred degrees is caught by neither of the two middle bands, so `(angle <= 45 || 315 <= angle) === (orient === 'top')` reads false against true and the heading is baselined `top`. This compiler wrote the heading's `angle` and its `anchor` — those are `assembleHeaderProperties` carrying `titleAngle` and `titleAnchor` across under their Vega names — and neither the baseline nor the alignment nor the band the two of them imply, so a wrapped trellis anchored its heading by naming the anchor to Vega and then laid it out from the middle of the grid anyway. The captions on the cells must not change. A wrapped facet captions the **cell** rather than a band, `assembleLabelTitle` being the same function wherever its result is drawn, and the header states no `labelAngle` or `labelAnchor` here — so the names stay flat and unanchored while the heading above them is neither, which is what says the two are read from two different pairs of words.",
+  "data": {
+    "values": [
+      {"c": "alpha", "v": 28, "k": "one"},
+      {"c": "beta", "v": 55, "k": "two"},
+      {"c": "gamma", "v": 43, "k": "three"},
+      {"c": "delta", "v": 91, "k": "four"}
+    ]
+  },
+  "config": {"header": {"titleAngle": 200}},
+  "columns": 2,
+  "facet": {"field": "k", "type": "ordinal", "header": {"titleAnchor": "end"}},
+  "spec": {
+    "width": 120,
+    "height": 80,
+    "mark": "bar",
+    "encoding": {
+      "x": {"field": "c", "type": "nominal"},
+      "y": {"field": "v", "type": "quantitative"}
+    }
+  }
+}

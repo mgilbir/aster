@@ -1,0 +1,22 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "Lines coloured by series only where the reader hovers: still one line per series.",
+  "data": {"url": "data/stocks.csv"},
+  "params": [
+    {
+      "name": "hover",
+      "value": [{"symbol": "AAPL"}],
+      "select": {"type": "point", "fields": ["symbol"], "on": "pointerover"}
+    }
+  ],
+  "mark": "line",
+  "encoding": {
+    "x": {"field": "date", "type": "temporal"},
+    "y": {"field": "price", "type": "quantitative"},
+    "color": {
+      "condition": {"param": "hover", "field": "symbol", "type": "nominal", "legend": null},
+      "value": "grey"
+    },
+    "opacity": {"condition": {"param": "hover", "value": 1}, "value": 0.2}
+  }
+}

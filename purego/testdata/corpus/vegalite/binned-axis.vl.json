@@ -1,0 +1,13 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A pre-binned column drawn as spans, beside a bin the compiler chooses itself.",
+  "data": {"values": [
+    {"lo": 0, "hi": 10, "n": 4}, {"lo": 10, "hi": 20, "n": 7}, {"lo": 20, "hi": 30, "n": 2}
+  ]},
+  "mark": "bar",
+  "encoding": {
+    "x": {"field": "lo", "bin": "binned", "type": "quantitative"},
+    "x2": {"field": "hi"},
+    "y": {"field": "n", "type": "quantitative"}
+  }
+}

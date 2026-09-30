@@ -1,0 +1,107 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "The ten window operations no fixture had asked for, read out as text so the numbers themselves are compared. The column is built with ties, which is the only way the ranking family separates: rank leaves a gap after a tie where dense_rank does not, percent_rank and cume_dist divide by different totals, and ntile puts the ties wherever the sort left them. The value family beside them reads across the frame rather than down it — first_value and last_value answer from the frame's ends, nth_value from a position inside it, and prev_value and next_value from the neighbours that have one.",
+  "width": 260,
+  "height": 170,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        { "c": "a", "v": 4 },
+        { "c": "b", "v": 9 },
+        { "c": "c", "v": 4 },
+        { "c": "d", "v": 7 },
+        { "c": "e", "v": 9 },
+        { "c": "f", "v": 2 }
+      ]
+    },
+    {
+      "name": "ranked",
+      "source": "t",
+      "transform": [
+        {
+          "type": "window",
+          "sort": { "field": "v", "order": "ascending" },
+          "ops": ["rank", "dense_rank", "percent_rank", "cume_dist", "ntile"],
+          "params": [null, null, null, null, 3],
+          "as": ["rank", "dense", "pct", "cume", "third"]
+        },
+        {
+          "type": "window",
+          "sort": { "field": "v", "order": "ascending" },
+          "frame": [null, null],
+          "ops": ["first_value", "last_value", "nth_value", "prev_value", "next_value"],
+          "fields": ["c", "c", "c", "c", "c"],
+          "params": [null, null, 2, null, null],
+          "as": ["firstC", "lastC", "secondC", "prevC", "nextC"]
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "y",
+      "type": "band",
+      "domain": { "data": "ranked", "field": "c" },
+      "range": [0, 150],
+      "padding": 0.25
+    },
+    {
+      "name": "x",
+      "type": "linear",
+      "domain": { "data": "ranked", "field": "cume" },
+      "range": [70, 250],
+      "zero": true
+    }
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": { "data": "ranked" },
+      "encode": {
+        "enter": {
+          "x": { "value": 70 },
+          "x2": { "scale": "x", "field": "cume" },
+          "y": { "scale": "y", "field": "c" },
+          "height": { "scale": "y", "band": 1 },
+          "fill": { "signal": "datum.third === 1 ? '#9ecae1' : datum.third === 2 ? '#4c78a8' : '#08519c'" }
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": { "data": "ranked" },
+      "encode": {
+        "enter": {
+          "x": { "value": 66 },
+          "y": { "scale": "y", "field": "c", "band": 0.5 },
+          "align": { "value": "right" },
+          "baseline": { "value": "middle" },
+          "fontSize": { "value": 9 },
+          "fill": { "value": "#333333" },
+          "text": {
+            "signal": "datum.c + ' ' + datum.v + ' r' + datum.rank + '/d' + datum.dense"
+          }
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": { "data": "ranked" },
+      "encode": {
+        "enter": {
+          "x": { "scale": "x", "field": "cume", "offset": 4 },
+          "y": { "scale": "y", "field": "c", "band": 0.5 },
+          "baseline": { "value": "middle" },
+          "fontSize": { "value": 8 },
+          "fill": { "value": "#666666" },
+          "text": {
+            "signal": "format(datum.pct, '.2f') + ' ' + format(datum.cume, '.2f') + ' ' + datum.firstC + datum.secondC + datum.lastC + ' ' + (datum.prevC == null ? '-' : datum.prevC) + (datum.nextC == null ? '-' : datum.nextC)"
+          }
+        }
+      }
+    }
+  ]
+}

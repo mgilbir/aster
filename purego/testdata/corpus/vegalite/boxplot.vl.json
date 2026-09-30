@@ -1,0 +1,59 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "data": {
+    "values": [
+      {
+        "g": "a",
+        "v": 1
+      },
+      {
+        "g": "a",
+        "v": 3
+      },
+      {
+        "g": "a",
+        "v": 4
+      },
+      {
+        "g": "a",
+        "v": 5
+      },
+      {
+        "g": "a",
+        "v": 20
+      },
+      {
+        "g": "b",
+        "v": 2
+      },
+      {
+        "g": "b",
+        "v": 6
+      },
+      {
+        "g": "b",
+        "v": 7
+      },
+      {
+        "g": "b",
+        "v": 9
+      },
+      {
+        "g": "b",
+        "v": 10
+      }
+    ]
+  },
+  "mark": "boxplot",
+  "encoding": {
+    "x": {
+      "field": "g",
+      "type": "nominal"
+    },
+    "y": {
+      "field": "v",
+      "type": "quantitative"
+    }
+  },
+  "description": "A box plot: quartiles, a median, whiskers to the last point inside, and one outlier."
+}

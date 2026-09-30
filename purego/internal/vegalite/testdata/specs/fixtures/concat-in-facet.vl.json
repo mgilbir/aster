@@ -1,0 +1,30 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A grid whose cell holds plots, which is the inverse of every other grid here and needed compiling the other way about. There is no encoding for the facet channel to be lifted out of, so the concatenation is built as the chart — under the name the grid gives its cell, which is what makes its plots `child_concat_0` and `child_concat_1` — and the grid is made straight from the level and wraps the whole of it. The cell then carries what a concatenation carries: its layout, the chain each plot computes per cell, and each plot's own scales, which measure the rows that cell was handed and can only be built where those rows are visible.",
+  "data": {
+    "values": [
+      {"a": "p", "x": 1, "y": 2},
+      {"a": "q", "x": 3, "y": 4}
+    ]
+  },
+  "facet": {"column": {"field": "a"}},
+  "spec": {
+    "hconcat": [
+      {
+        "width": 60,
+        "height": 40,
+        "mark": "point",
+        "encoding": {
+          "x": {"field": "x", "type": "quantitative"},
+          "y": {"field": "y", "type": "quantitative"}
+        }
+      },
+      {
+        "width": 60,
+        "height": 40,
+        "mark": "bar",
+        "encoding": {"x": {"field": "y", "type": "quantitative"}}
+      }
+    ]
+  }
+}

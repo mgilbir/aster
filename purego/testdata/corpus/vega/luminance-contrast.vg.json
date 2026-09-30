@@ -1,0 +1,78 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "luminance() driving both a printed number and the colour of the text printing it. The swatches are chosen so that a wrong gamma expansion shows up: #0a0a0a and #0b0b0b sit either side of the knee, hsl(0,0%,4%) sits between WCAG's knee and sRGB's, and the two hsl colours have fractional 8-bit channels that a rounding implementation would lose.",
+  "width": 420,
+  "height": 90,
+  "padding": 5,
+  "data": [
+    {
+      "name": "swatches",
+      "values": [
+        {"c": "#000000"},
+        {"c": "#0a0a0a"},
+        {"c": "#0b0b0b"},
+        {"c": "hsl(0, 0%, 4%)"},
+        {"c": "steelblue"},
+        {"c": "hsl(210, 50%, 40%)"},
+        {"c": "#f58518"},
+        {"c": "#ffffff"}
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {"data": "swatches", "field": "c"},
+      "range": "width",
+      "padding": 0.04
+    }
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "swatches"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "c"},
+          "width": {"scale": "x", "band": 1},
+          "y": {"value": 0},
+          "y2": {"value": 60},
+          "fill": {"field": "c"}
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": {"data": "swatches"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "c", "band": 0.5},
+          "y": {"value": 30},
+          "align": {"value": "center"},
+          "baseline": {"value": "middle"},
+          "fontSize": {"value": 9},
+          "text": {"signal": "format(luminance(datum.c), '.6f')"},
+          "fill": {"signal": "luminance(datum.c) > 0.4 ? '#000000' : '#ffffff'"}
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": {"data": "swatches"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "c", "band": 0.5},
+          "y": {"value": 72},
+          "align": {"value": "center"},
+          "baseline": {"value": "middle"},
+          "fontSize": {"value": 9},
+          "text": {
+            "signal": "luminance(datum.c) > luminance('#767676') ? 'light' : 'dark'"
+          },
+          "fill": {"value": "#333333"}
+        }
+      }
+    }
+  ]
+}

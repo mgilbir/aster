@@ -1,0 +1,12 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A coloured boxplot, whose whiskers stay black because they mark an extent.",
+  "data": {"url": "data/cars.json"},
+  "mark": "boxplot",
+  "encoding": {
+    "y": {"field": "Origin", "type": "nominal"},
+    "x": {"field": "Horsepower", "type": "quantitative", "scale": {"zero": false}},
+    "color": {"value": "teal"},
+    "size": {"value": 10}
+  }
+}

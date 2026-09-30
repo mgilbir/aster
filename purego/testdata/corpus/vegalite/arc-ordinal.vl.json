@@ -1,0 +1,16 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "An arc over categories, which spans an angle rather than sitting at one.",
+  "data": {
+    "values": [
+      {"dir": "N", "strength": 4}, {"dir": "E", "strength": 6},
+      {"dir": "S", "strength": 3}, {"dir": "W", "strength": 7}
+    ]
+  },
+  "mark": "arc",
+  "encoding": {
+    "theta": {"field": "dir", "type": "ordinal"},
+    "radius": {"field": "strength", "type": "quantitative"},
+    "color": {"field": "dir", "type": "nominal"}
+  }
+}

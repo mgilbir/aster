@@ -1,0 +1,23 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "Log axes at three densities. d3's log tickFormat labels a tick only when its mantissa is within k = base*count/ticks, so a wide axis shows the powers of ten alone while a narrow one labels every tick — and the default specifier is 's', not a plain number.",
+  "width": 320,
+  "height": 200,
+  "padding": 5,
+
+  "scales": [
+    {"name": "wide", "type": "log", "domain": [1, 10000], "range": "height"},
+    {"name": "narrow", "type": "log", "domain": [1, 10], "range": "height"},
+    {"name": "middling", "type": "log", "domain": [1, 100], "range": "height"},
+    {"name": "twos", "type": "log", "base": 2, "domain": [1, 256], "range": "height"}
+  ],
+
+  "axes": [
+    {"orient": "left", "scale": "wide"},
+    {"orient": "right", "scale": "narrow"},
+    {"orient": "right", "scale": "middling", "offset": 70},
+    {"orient": "bottom", "scale": "twos"}
+  ],
+
+  "marks": []
+}

@@ -1,0 +1,25 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "Labels formatted as currency and as a percentage, over a normalized stack.",
+  "data": {"values": [
+    {"c": "a", "s": "x", "v": 3}, {"c": "a", "s": "y", "v": 1},
+    {"c": "b", "s": "x", "v": 2}, {"c": "b", "s": "y", "v": 6}
+  ]},
+  "layer": [
+    {
+      "mark": "bar",
+      "encoding": {
+        "y": {"field": "v", "type": "quantitative", "stack": "normalize", "axis": {"format": ".0%"}},
+        "color": {"field": "s", "type": "nominal"}
+      }
+    },
+    {
+      "mark": {"type": "text", "dy": -4},
+      "encoding": {
+        "y": {"field": "v", "type": "quantitative", "stack": "normalize"},
+        "text": {"field": "v", "type": "quantitative", "format": "$.2f"}
+      }
+    }
+  ],
+  "encoding": {"x": {"field": "c", "type": "nominal"}}
+}

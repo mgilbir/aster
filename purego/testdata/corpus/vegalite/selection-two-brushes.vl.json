@@ -1,0 +1,37 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "Two brushes over one plot, each with its own event selector and its own paint — which is what makes the compiler parse a selector rather than pass it through.",
+  "data": {"url": "data/cars.json"},
+  "params": [
+    {
+      "name": "alex",
+      "select": {
+        "type": "interval",
+        "on": "[pointerdown[!event.shiftKey], pointerup] > pointermove",
+        "translate": "[pointerdown[!event.shiftKey], pointerup] > pointermove"
+      }
+    },
+    {
+      "name": "morgan",
+      "select": {
+        "type": "interval",
+        "on": "[pointerdown[event.shiftKey], pointerup] > pointermove",
+        "translate": "[pointerdown[event.shiftKey], pointerup] > pointermove",
+        "mark": {"fill": "#fdbb84", "fillOpacity": 0.5, "stroke": "#e34a33"}
+      }
+    }
+  ],
+  "mark": "circle",
+  "encoding": {
+    "x": {"field": "Horsepower", "type": "quantitative"},
+    "y": {"field": "Miles_per_Gallon", "type": "quantitative"},
+    "color": {
+      "condition": {
+        "test": {"and": [{"param": "alex"}, {"param": "morgan"}]},
+        "field": "Cylinders",
+        "type": "ordinal"
+      },
+      "value": "grey"
+    }
+  }
+}

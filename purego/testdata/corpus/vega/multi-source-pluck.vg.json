@@ -1,0 +1,83 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A dataset concatenating two sources, and a signal plucking one column out of it.",
+  "width": 240,
+  "height": 100,
+  "padding": 5,
+
+  "signals": [
+    {"name": "names", "update": "pluck(data('both'), 'k')"},
+    {"name": "widest", "update": "length(pluck(data('both'), 'v'))"}
+  ],
+
+  "data": [
+    {"name": "left", "values": [{"k": "a1", "v": 3}, {"k": "a2", "v": 5}]},
+    {"name": "right", "values": [{"k": "b1", "v": 7}]},
+    {
+      "name": "both",
+      "source": ["left", "right"],
+      "transform": [
+        {"type": "formula", "as": "label", "expr": "datum.k + ':' + datum.v"}
+      ]
+    }
+  ],
+
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {"data": "both", "field": "k"},
+      "range": "width",
+      "padding": 0.2
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {"data": "both", "field": "v"},
+      "range": "height",
+      "nice": true
+    }
+  ],
+
+  "axes": [{"orient": "bottom", "scale": "x"}],
+
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "both"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "k"},
+          "width": {"scale": "x", "band": 1},
+          "y": {"scale": "y", "field": "v"},
+          "y2": {"scale": "y", "value": 0},
+          "fill": {"value": "steelblue"}
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": {"data": "both"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "k", "band": 0.5},
+          "y": {"scale": "y", "field": "v", "offset": -4},
+          "text": {"field": "label"},
+          "align": {"value": "center"},
+          "fontSize": {"value": 9}
+        }
+      }
+    },
+    {
+      "type": "text",
+      "encode": {
+        "enter": {
+          "x": {"value": 2},
+          "y": {"value": 10},
+          "text": {"signal": "'plucked ' + widest + ': ' + join(names, ', ')"},
+          "fontSize": {"value": 10}
+        }
+      }
+    }
+  ]
+}

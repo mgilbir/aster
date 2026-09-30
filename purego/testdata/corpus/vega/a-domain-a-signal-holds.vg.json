@@ -1,0 +1,139 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A scale domain a **signal** holds is the list it was given, in the order it was given \u2014 exactly as a written-out one is. This engine sent it down the *extent* path instead, which answers `min()..max()`, so a descending domain came back ascending and everything derived from it was backwards. `down` is `[100, 0]`: a linear scale's `zero` reads the domain's **ends** rather than its extremes, pulling a positive first entry to zero and leaving a last entry that is already zero alone, so upstream's domain is `[0, 0]` and every bar is flat. Sorted first it becomes `[0, 100]` and the chart draws as though nothing odd had been asked for. `up` is the same shape the right way round, so the fixture says what the rule costs a chart that asked for nothing strange, which is nothing. An **empty** domain is a separate rule and is not here: upstream builds that scale too, placing nothing and answering `NaN`, where this engine reports an error and builds no scale at all \u2014 recorded in STATUS.md as the next change rather than half-fixed alongside this one.",
+  "width": 220,
+  "height": 120,
+  "padding": 5,
+  "signals": [
+    {
+      "name": "down",
+      "value": [
+        100,
+        0
+      ]
+    },
+    {
+      "name": "up",
+      "value": [
+        0,
+        100
+      ]
+    }
+  ],
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {
+          "k": "a",
+          "v": 28
+        },
+        {
+          "k": "b",
+          "v": 91
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {
+        "data": "t",
+        "field": "k"
+      },
+      "range": "width",
+      "padding": 0.2
+    },
+    {
+      "name": "yDown",
+      "type": "linear",
+      "domain": {
+        "signal": "down"
+      },
+      "range": [
+        110,
+        10
+      ]
+    },
+    {
+      "name": "yUp",
+      "type": "linear",
+      "domain": {
+        "signal": "up"
+      },
+      "range": [
+        110,
+        10
+      ]
+    }
+  ],
+  "axes": [
+    {
+      "orient": "left",
+      "scale": "yDown",
+      "tickCount": 3
+    },
+    {
+      "orient": "right",
+      "scale": "yUp",
+      "tickCount": 3
+    }
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "update": {
+          "x": {
+            "scale": "x",
+            "field": "k"
+          },
+          "width": {
+            "value": 14
+          },
+          "y": {
+            "scale": "yDown",
+            "field": "v"
+          },
+          "y2": {
+            "scale": "yDown",
+            "value": 0
+          },
+          "fill": {
+            "value": "#4c78a8"
+          }
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "update": {
+          "x": {
+            "value": 60
+          },
+          "y": {
+            "signal": "40 + 14 * datum.v / 28"
+          },
+          "text": {
+            "signal": "'down ' + scale('yDown', datum.v) + '  up ' + scale('yUp', datum.v)"
+          },
+          "fontSize": {
+            "value": 9
+          },
+          "baseline": {
+            "value": "top"
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,58 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A layer reading its own table runs none of the chart's transforms: it is not below them.",
+  "data": {
+    "url": "data/driving.json"
+  },
+  "transform": [
+    {
+      "calculate": "+datum.year + 5",
+      "as": "year_end"
+    }
+  ],
+  "layer": [
+    {
+      "mark": "bar",
+      "encoding": {
+        "x": {
+          "field": "year",
+          "bin": "binned",
+          "type": "quantitative"
+        },
+        "x2": {
+          "field": "year_end"
+        },
+        "y": {
+          "field": "miles",
+          "type": "quantitative"
+        }
+      }
+    },
+    {
+      "data": {
+        "values": [
+          {
+            "year": 1960
+          },
+          {
+            "year": 1980
+          },
+          {
+            "year": 2000
+          }
+        ]
+      },
+      "mark": "rule",
+      "encoding": {
+        "x": {
+          "field": "year",
+          "type": "quantitative"
+        },
+        "y": {
+          "field": "year",
+          "type": "quantitative"
+        }
+      }
+    }
+  ]
+}

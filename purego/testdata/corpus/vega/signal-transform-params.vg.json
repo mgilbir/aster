@@ -1,0 +1,85 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v5.json",
+  "width": 300,
+  "height": 160,
+  "padding": 5,
+
+  "signals": [
+    {
+      "name": "op",
+      "value": "average",
+      "bind": {"input": "select", "options": ["average", "median", "sum"]}
+    },
+    {"name": "k", "value": 3, "bind": {"input": "range", "min": 1, "max": 5}},
+    {"name": "field", "value": "amount"}
+  ],
+
+  "data": [
+    {
+      "name": "sales",
+      "values": [
+        {"team": "alpha", "amount": 10},
+        {"team": "alpha", "amount": 30},
+        {"team": "beta", "amount": 25},
+        {"team": "beta", "amount": 5},
+        {"team": "gamma", "amount": 40},
+        {"team": "delta", "amount": 15},
+        {"team": "epsilon", "amount": 22}
+      ],
+      "transform": [
+        {
+          "type": "aggregate",
+          "groupby": ["team"],
+          "fields": [{"signal": "field"}],
+          "ops": [{"signal": "op"}],
+          "as": ["value"]
+        },
+        {
+          "type": "window",
+          "sort": {"field": "value", "order": "descending"},
+          "ops": ["row_number"],
+          "as": ["rank"]
+        },
+        {"type": "filter", "expr": "datum.rank <= k"}
+      ]
+    }
+  ],
+
+  "scales": [
+    {
+      "name": "y",
+      "type": "band",
+      "domain": {"data": "sales", "field": "team", "sort": {"field": "rank"}},
+      "range": "height",
+      "padding": 0.2
+    },
+    {
+      "name": "x",
+      "type": "linear",
+      "domain": {"data": "sales", "field": "value"},
+      "range": "width",
+      "nice": true
+    }
+  ],
+
+  "axes": [
+    {"orient": "left", "scale": "y"},
+    {"orient": "bottom", "scale": "x"}
+  ],
+
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "sales"},
+      "encode": {
+        "enter": {
+          "y": {"scale": "y", "field": "team"},
+          "height": {"scale": "y", "band": 1},
+          "x": {"scale": "x", "value": 0},
+          "x2": {"scale": "x", "field": "value"},
+          "fill": {"value": "#4c78a8"}
+        }
+      }
+    }
+  ]
+}

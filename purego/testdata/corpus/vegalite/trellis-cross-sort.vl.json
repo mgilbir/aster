@@ -1,0 +1,12 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A grid crossed both ways, each direction ordered by an aggregate of its own.",
+  "data": {"url": "data/barley.json"},
+  "mark": "point",
+  "encoding": {
+    "row": {"field": "site", "type": "nominal", "sort": {"op": "median", "field": "yield"}},
+    "column": {"field": "year", "type": "ordinal", "sort": {"op": "mean", "field": "yield"}},
+    "x": {"aggregate": "sum", "field": "yield", "type": "quantitative"},
+    "y": {"field": "variety", "type": "nominal"}
+  }
+}

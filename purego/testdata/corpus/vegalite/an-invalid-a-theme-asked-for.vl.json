@@ -1,0 +1,94 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "What a mark does with a value it cannot place is read from the **whole** configuration chain. `assembleDomain` and the mark's own `defined` both ask `getMarkConfig('invalid', markDef, config)`, and that is `getFirstDefined(styleConfig, styleConfig, config[mark.type].invalid, config.mark.invalid)` \u2014 so a theme saying `config.line.invalid` speaks for every line and one saying `config.point.invalid` for every point, each outranking `config.mark`. Read as `config.mark.invalid` and nothing else, as this compiler read it, a per-mark-type `invalid` was dropped: the chart kept the default for its kind, which is `filter` for a point and `break-paths-show-domains` for a line, and the data pipeline then built the wrong number of datasets for it \u2014 the sweep saw three where two were emitted, and a filter where none belonged. The first row is a line told to `filter` by its own block, which drops the gap rather than breaking at it. The second is a point told `break-paths-show-domains`; it has no path to break, so what the word buys it is a domain measured over the rows it kept rather than over all of them. The third states `invalid` on the mark itself over a theme that says otherwise, to keep that order drawn rather than assumed. The **style** blocks are the one arm of the chain not drawn here: they are resolved by the same code, but a style block written in a configuration is currently stripped from the emitted Vega where upstream passes it through, so a fixture using one would fail on that instead of on this.",
+  "data": {
+    "values": [
+      {
+        "a": -10,
+        "b": null
+      },
+      {
+        "a": -5,
+        "b": -25
+      },
+      {
+        "a": -1,
+        "b": -20
+      },
+      {
+        "a": 0,
+        "b": null
+      },
+      {
+        "a": 1,
+        "b": 30
+      },
+      {
+        "a": 5,
+        "b": 40
+      },
+      {
+        "a": 10,
+        "b": null
+      }
+    ]
+  },
+  "config": {
+    "line": {
+      "invalid": "filter"
+    },
+    "point": {
+      "invalid": "break-paths-show-domains"
+    }
+  },
+  "vconcat": [
+    {
+      "width": 110,
+      "height": 100,
+      "mark": "line",
+      "encoding": {
+        "x": {
+          "field": "a",
+          "type": "quantitative"
+        },
+        "y": {
+          "field": "b",
+          "type": "quantitative"
+        }
+      }
+    },
+    {
+      "width": 110,
+      "height": 100,
+      "mark": "point",
+      "encoding": {
+        "x": {
+          "field": "a",
+          "type": "quantitative"
+        },
+        "y": {
+          "field": "b",
+          "type": "quantitative"
+        }
+      }
+    },
+    {
+      "width": 110,
+      "height": 100,
+      "mark": {
+        "type": "line",
+        "invalid": "break-paths-show-domains"
+      },
+      "encoding": {
+        "x": {
+          "field": "a",
+          "type": "quantitative"
+        },
+        "y": {
+          "field": "b",
+          "type": "quantitative"
+        }
+      }
+    }
+  ]
+}

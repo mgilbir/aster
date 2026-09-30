@@ -1,0 +1,244 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "One tree drawn as four node-link diagrams, each joining the same edges with a different link shape: diagonal, orthogonal and curved across the top, and a radial fan below.",
+  "width": 600,
+  "height": 440,
+  "padding": 5,
+  "signals": [{"name": "linkShape", "value": "diagonal"}],
+  "data": [
+    {
+      "name": "nodes",
+      "values": [
+        {"id": "all", "parent": null},
+        {"id": "eu", "parent": "all"},
+        {"id": "as", "parent": "all"},
+        {"id": "am", "parent": "all"},
+        {"id": "fr", "parent": "eu"},
+        {"id": "de", "parent": "eu"},
+        {"id": "jp", "parent": "as"},
+        {"id": "kr", "parent": "as"},
+        {"id": "us", "parent": "am"}
+      ]
+    },
+    {
+      "name": "tidy",
+      "source": "nodes",
+      "transform": [
+        {"type": "stratify", "key": "id", "parentKey": "parent"},
+        {
+          "type": "tree",
+          "method": "tidy",
+          "size": [170, 150],
+          "as": ["y", "x", "depth", "children"]
+        }
+      ]
+    },
+    {
+      "name": "links",
+      "source": "tidy",
+      "transform": [
+        {"type": "treelinks"},
+        {"type": "linkpath", "orient": "horizontal", "shape": {"signal": "linkShape"}}
+      ]
+    },
+    {
+      "name": "radial",
+      "source": "nodes",
+      "transform": [
+        {"type": "stratify", "key": "id", "parentKey": "parent"},
+        {
+          "type": "tree",
+          "method": "cluster",
+          "size": [1, 100],
+          "as": ["alpha", "radius", "depth", "children"]
+        },
+        {"type": "formula", "expr": "(300 * datum.alpha + 270) % 360", "as": "angle"},
+        {"type": "formula", "expr": "PI * datum.angle / 180", "as": "radians"},
+        {"type": "formula", "expr": "datum.radius * cos(datum.radians)", "as": "x"},
+        {"type": "formula", "expr": "datum.radius * sin(datum.radians)", "as": "y"}
+      ]
+    },
+    {
+      "name": "radialLinks",
+      "source": "radial",
+      "transform": [
+        {"type": "treelinks"},
+        {
+          "type": "linkpath",
+          "orient": "radial",
+          "shape": "line",
+          "sourceX": "source.radians",
+          "sourceY": "source.radius",
+          "targetX": "target.radians",
+          "targetY": "target.radius"
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "depth",
+      "type": "ordinal",
+      "domain": [0, 1, 2],
+      "range": ["#c6dbef", "#6baed6", "#2171b5"]
+    }
+  ],
+  "marks": [
+    {
+      "type": "path",
+      "from": {"data": "links"},
+      "encode": {
+        "update": {
+          "path": {"field": "path"},
+          "stroke": {"value": "#bbbbbb"},
+          "strokeWidth": {"value": 1}
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "from": {"data": "tidy"},
+      "encode": {
+        "enter": {
+          "x": {"field": "x"},
+          "y": {"field": "y"},
+          "size": {"value": 60},
+          "fill": {"scale": "depth", "field": "depth"},
+          "stroke": {"value": "#ffffff"},
+          "strokeWidth": {"value": 1}
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": {"data": "tidy"},
+      "encode": {
+        "enter": {
+          "x": {"signal": "datum.x + 6"},
+          "y": {"field": "y"},
+          "text": {"field": "id"},
+          "align": {"value": "left"},
+          "baseline": {"value": "middle"},
+          "fontSize": {"value": 9},
+          "fill": {"value": "#333333"}
+        }
+      }
+    },
+    {
+      "type": "group",
+      "name": "orthogonalPanel",
+      "encode": {"enter": {"x": {"value": 215}, "y": {"value": 0}}},
+      "data": [
+        {
+          "name": "orthogonalLinks",
+          "source": "tidy",
+          "transform": [
+            {"type": "treelinks"},
+            {"type": "linkpath", "orient": "horizontal", "shape": "orthogonal"}
+          ]
+        }
+      ],
+      "marks": [
+        {
+          "type": "path",
+          "from": {"data": "orthogonalLinks"},
+          "encode": {
+            "update": {
+              "path": {"field": "path"},
+              "stroke": {"value": "#bbbbbb"},
+              "strokeWidth": {"value": 1}
+            }
+          }
+        },
+        {
+          "type": "symbol",
+          "from": {"data": "tidy"},
+          "encode": {
+            "enter": {
+              "x": {"field": "x"},
+              "y": {"field": "y"},
+              "size": {"value": 60},
+              "fill": {"scale": "depth", "field": "depth"},
+              "stroke": {"value": "#ffffff"},
+              "strokeWidth": {"value": 1}
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "group",
+      "name": "curvePanel",
+      "encode": {"enter": {"x": {"value": 430}, "y": {"value": 0}}},
+      "data": [
+        {
+          "name": "curveLinks",
+          "source": "tidy",
+          "transform": [
+            {"type": "treelinks"},
+            {"type": "linkpath", "orient": "horizontal", "shape": "curve"}
+          ]
+        }
+      ],
+      "marks": [
+        {
+          "type": "path",
+          "from": {"data": "curveLinks"},
+          "encode": {
+            "update": {
+              "path": {"field": "path"},
+              "stroke": {"value": "#bbbbbb"},
+              "strokeWidth": {"value": 1}
+            }
+          }
+        },
+        {
+          "type": "symbol",
+          "from": {"data": "tidy"},
+          "encode": {
+            "enter": {
+              "x": {"field": "x"},
+              "y": {"field": "y"},
+              "size": {"value": 60},
+              "fill": {"scale": "depth", "field": "depth"},
+              "stroke": {"value": "#ffffff"},
+              "strokeWidth": {"value": 1}
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "group",
+      "name": "radialPanel",
+      "encode": {"enter": {"x": {"value": 300}, "y": {"value": 320}}},
+      "marks": [
+        {
+          "type": "path",
+          "from": {"data": "radialLinks"},
+          "encode": {
+            "update": {
+              "path": {"field": "path"},
+              "stroke": {"value": "#bbbbbb"},
+              "strokeWidth": {"value": 1}
+            }
+          }
+        },
+        {
+          "type": "symbol",
+          "from": {"data": "radial"},
+          "encode": {
+            "enter": {
+              "x": {"field": "x"},
+              "y": {"field": "y"},
+              "size": {"value": 60},
+              "fill": {"scale": "depth", "field": "depth"},
+              "stroke": {"value": "#ffffff"},
+              "strokeWidth": {"value": 1}
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

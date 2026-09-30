@@ -1,0 +1,96 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A chart filtered by a regular expression, which is how a specification searches text: the query comes from a signal, regexp turns it into a pattern with the case-insensitive flag, and test asks each row whether its label matches. The second series keeps the rows the pattern rejects, so the two together account for every row and a pattern that matched nothing would be visible as one empty band. The labels underneath are built with replace over a pattern rather than a literal, which only replaces every occurrence when the g flag says to.",
+  "width": 260,
+  "height": 170,
+  "padding": 5,
+  "background": "white",
+  "signals": [
+    { "name": "query", "value": "er" },
+    { "name": "strip", "value": "-" }
+  ],
+  "data": [
+    {
+      "name": "jobs",
+      "values": [
+        { "job": "Farmer", "n": 42, "code": "a-b-c" },
+        { "job": "Teacher", "n": 31, "code": "d-e-f" },
+        { "job": "Physician", "n": 24, "code": "g-h-i" },
+        { "job": "Carpenter", "n": 18, "code": "j-k-l" },
+        { "job": "Clerk", "n": 12, "code": "m-n-o" },
+        { "job": "Lawyer", "n": 9, "code": "p-q-r" }
+      ]
+    },
+    {
+      "name": "matched",
+      "source": "jobs",
+      "transform": [
+        { "type": "filter", "expr": "test(regexp(query, 'i'), datum.job)" },
+        { "type": "formula", "expr": "replace(datum.code, regexp(strip, 'g'), '')", "as": "tight" },
+        { "type": "formula", "expr": "replace(datum.code, regexp(strip), '+')", "as": "once" }
+      ]
+    },
+    {
+      "name": "rejected",
+      "source": "jobs",
+      "transform": [{ "type": "filter", "expr": "!test(regexp(query, 'i'), datum.job)" }]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": { "data": "jobs", "field": "job" },
+      "range": "width",
+      "padding": 0.2
+    },
+    { "name": "y", "type": "linear", "domain": [0, 45], "range": [90, 0] }
+  ],
+  "axes": [
+    { "orient": "bottom", "scale": "x", "offset": 4, "labelAngle": -30, "labelAlign": "right" },
+    { "orient": "left", "scale": "y", "tickCount": 4 }
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": { "data": "matched" },
+      "encode": {
+        "enter": {
+          "x": { "scale": "x", "field": "job" },
+          "width": { "scale": "x", "band": 1 },
+          "y": { "scale": "y", "field": "n" },
+          "y2": { "scale": "y", "value": 0 },
+          "fill": { "value": "#4c78a8" }
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": { "data": "rejected" },
+      "encode": {
+        "enter": {
+          "x": { "scale": "x", "field": "job" },
+          "width": { "scale": "x", "band": 1 },
+          "y": { "scale": "y", "field": "n" },
+          "y2": { "scale": "y", "value": 0 },
+          "fill": { "value": "#dddddd" }
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": { "data": "matched" },
+      "encode": {
+        "enter": {
+          "x": { "value": 0 },
+          "y": { "signal": "112 + datum.n" },
+          "text": {
+            "signal": "datum.job + ': ' + datum.tight + ' / ' + datum.once + ' / ' + (isRegExp(regexp(query)) ? 'pattern' : 'not')"
+          },
+          "fontSize": { "value": 9 },
+          "fill": { "value": "#333333" }
+        }
+      }
+    }
+  ]
+}

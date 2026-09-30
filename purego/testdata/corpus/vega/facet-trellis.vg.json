@@ -1,0 +1,102 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "Small multiples: one row per region, each with its own scales and axes. Exercises faceting, nested scopes, the parent signal, and a group-level height signal.",
+  "width": 260,
+  "height": 200,
+  "padding": 5,
+  "signals": [
+    {"name": "cellHeight", "update": "48"}
+  ],
+  "data": [
+    {
+      "name": "table",
+      "values": [
+        {"region": "North", "quarter": "Q1", "sales": 32},
+        {"region": "North", "quarter": "Q2", "sales": 47},
+        {"region": "North", "quarter": "Q3", "sales": 41},
+        {"region": "South", "quarter": "Q1", "sales": 12},
+        {"region": "South", "quarter": "Q2", "sales": 19},
+        {"region": "South", "quarter": "Q3", "sales": 8},
+        {"region": "West", "quarter": "Q1", "sales": 65},
+        {"region": "West", "quarter": "Q2", "sales": 58},
+        {"region": "West", "quarter": "Q3", "sales": 73}
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "row",
+      "type": "band",
+      "domain": {"data": "table", "field": "region"},
+      "range": "height",
+      "padding": 0.2
+    }
+  ],
+  "marks": [
+    {
+      "type": "group",
+      "name": "cell",
+      "from": {"facet": {"name": "facetRows", "data": "table", "groupby": "region"}},
+      "signals": [
+        {"name": "height", "update": "cellHeight"}
+      ],
+      "encode": {
+        "enter": {
+          "y": {"scale": "row", "field": "region"},
+          "width": {"signal": "width"},
+          "height": {"signal": "cellHeight"},
+          "fill": {"value": "#f7f7f7"},
+          "stroke": {"value": "#bbbbbb"}
+        }
+      },
+      "scales": [
+        {
+          "name": "xs",
+          "type": "band",
+          "domain": {"data": "facetRows", "field": "quarter"},
+          "range": "width",
+          "padding": 0.2
+        },
+        {
+          "name": "ys",
+          "type": "linear",
+          "domain": {"data": "facetRows", "field": "sales"},
+          "range": "height",
+          "nice": true,
+          "zero": true
+        }
+      ],
+      "axes": [
+        {"orient": "left", "scale": "ys", "tickCount": 2},
+        {"orient": "bottom", "scale": "xs"}
+      ],
+      "marks": [
+        {
+          "type": "rect",
+          "from": {"data": "facetRows"},
+          "encode": {
+            "enter": {
+              "x": {"scale": "xs", "field": "quarter"},
+              "width": {"scale": "xs", "band": 1},
+              "y": {"scale": "ys", "field": "sales"},
+              "y2": {"scale": "ys", "value": 0},
+              "fill": {"value": "#4c78a8"}
+            }
+          }
+        },
+        {
+          "type": "text",
+          "encode": {
+            "enter": {
+              "x": {"value": 4},
+              "y": {"value": 10},
+              "text": {"signal": "parent.region + ' (' + parent.count + ')'"},
+              "fontSize": {"value": 9},
+              "fill": {"value": "#333333"}
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,113 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "Two scale properties that only some channels understand, and what happens where they are not understood. A **scheme** is a colour channel's word: `case 'interpolate': case 'scheme': case 'domainMid': if (!isColorChannel(channel)) { return log.message.cannotUseScalePropertyWithNonColor(propName); }`, and `parseRangeForChannel` then falls through to the range the channel would have taken anyway. So the first row's `x`, asked for `category10`, is still `[0, width]` \u2014 written through, as this compiler wrote it, Vega is handed a horizontal axis whose range is a palette and the bars are placed at colours. And **`rangeMin`/`rangeMax`** replace the ends of a range only where there are two ends to replace: `(rangeMin !== undefined || rangeMax !== undefined) && scaleTypeSupportProperty(scaleType, 'rangeMin') && isArray(d) && d.length === 2`. A colour scale's default range is the word `ramp`, a scheme's name rather than a pair, so the second row's colour keeps its ramp and the two properties do nothing; filling the missing end with a zero turned it into a range between two numbers, which paints nothing. The third row is the case that must not move: the same `rangeMin` on a **size**, whose default range is a genuine pair, where it does exactly what it says. The fourth is the other half of the length test, and the reason it is a length test rather than a null check: a `strokeDash` scale's default range is an array of *five* dash patterns, so there is no single end to replace and upstream leaves all five alone.",
+  "data": {
+    "values": [
+      {
+        "c": "alpha",
+        "v": 28,
+        "w": 3
+      },
+      {
+        "c": "beta",
+        "v": 55,
+        "w": 7
+      },
+      {
+        "c": "gamma",
+        "v": 43,
+        "w": 5
+      }
+    ]
+  },
+  "vconcat": [
+    {
+      "width": 200,
+      "height": 70,
+      "mark": "bar",
+      "encoding": {
+        "x": {
+          "field": "c",
+          "type": "nominal",
+          "scale": {
+            "scheme": "category10"
+          }
+        },
+        "y": {
+          "field": "v",
+          "type": "quantitative"
+        }
+      }
+    },
+    {
+      "width": 200,
+      "height": 70,
+      "mark": "bar",
+      "encoding": {
+        "x": {
+          "field": "c",
+          "type": "nominal"
+        },
+        "y": {
+          "field": "v",
+          "type": "quantitative"
+        },
+        "color": {
+          "field": "w",
+          "type": "quantitative",
+          "scale": {
+            "rangeMin": -4,
+            "rangeMax": 9
+          }
+        }
+      }
+    },
+    {
+      "width": 200,
+      "height": 70,
+      "mark": "point",
+      "encoding": {
+        "x": {
+          "field": "w",
+          "type": "quantitative"
+        },
+        "y": {
+          "field": "v",
+          "type": "quantitative"
+        },
+        "size": {
+          "field": "v",
+          "type": "quantitative",
+          "scale": {
+            "rangeMin": 40
+          }
+        }
+      }
+    },
+    {
+      "width": 200,
+      "height": 70,
+      "mark": {
+        "type": "line",
+        "point": true
+      },
+      "encoding": {
+        "x": {
+          "field": "w",
+          "type": "quantitative"
+        },
+        "y": {
+          "field": "v",
+          "type": "quantitative"
+        },
+        "strokeDash": {
+          "field": "c",
+          "type": "nominal",
+          "scale": {
+            "rangeMin": 3
+          }
+        }
+      }
+    }
+  ]
+}

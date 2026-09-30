@@ -1,0 +1,119 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v5.json",
+  "width": 300,
+  "height": 150,
+  "padding": 5,
+
+  "signals": [
+    {
+      "name": "palette",
+      "value": "Viridis",
+      "bind": {"input": "select", "options": ["Viridis", "Magma"]}
+    }
+  ],
+
+  "data": [
+    {
+      "name": "cells",
+      "values": [
+        {"x": 0, "v": 0},
+        {"x": 1, "v": 25},
+        {"x": 2, "v": 50},
+        {"x": 3, "v": 75},
+        {"x": 4, "v": 100}
+      ]
+    }
+  ],
+
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {"data": "cells", "field": "x"},
+      "range": "width"
+    },
+    {
+      "name": "byName",
+      "type": "linear",
+      "range": {"scheme": "Blues"},
+      "domain": {"data": "cells", "field": "v"}
+    },
+    {
+      "name": "bySignal",
+      "type": "linear",
+      "range": {"scheme": {"signal": "palette"}},
+      "domain": {"data": "cells", "field": "v"}
+    },
+    {
+      "name": "byStops",
+      "type": "linear",
+      "range": {
+        "scheme": ["#67000d", "#fb6a4a", "#ffffff", "#6baed6", "#08306b"]
+      },
+      "domain": {"data": "cells", "field": "v"}
+    },
+    {
+      "name": "counted",
+      "type": "ordinal",
+      "range": {"scheme": "Category20", "count": 3},
+      "domain": {"data": "cells", "field": "x"}
+    }
+  ],
+
+  "axes": [{"orient": "bottom", "scale": "x"}],
+
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "cells"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "x"},
+          "width": {"scale": "x", "band": 1},
+          "y": {"value": 0},
+          "height": {"value": 30},
+          "fill": {"scale": "byName", "field": "v"}
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {"data": "cells"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "x"},
+          "width": {"scale": "x", "band": 1},
+          "y": {"value": 35},
+          "height": {"value": 30},
+          "fill": {"scale": "bySignal", "field": "v"}
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {"data": "cells"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "x"},
+          "width": {"scale": "x", "band": 1},
+          "y": {"value": 70},
+          "height": {"value": 30},
+          "fill": {"scale": "byStops", "field": "v"}
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {"data": "cells"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "x"},
+          "width": {"scale": "x", "band": 1},
+          "y": {"value": 105},
+          "height": {"value": 30},
+          "fill": {"scale": "counted", "field": "x"}
+        }
+      }
+    }
+  ]
+}

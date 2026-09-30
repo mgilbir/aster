@@ -1,0 +1,66 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A stack's groups are keyed by JSON, so the values JSON cannot write share one group. `Stack` partitions with `k = JSON.stringify(groupby.map(get))` and nothing else — not the `fastmap` that `aggregate` and `window` group through — and `JSON.stringify` writes `null` for every non-finite number, so a NaN, an infinity and an actual null all key to `[null]` and stack together. The same rule keeps `1001` and `\"1001\"` apart, which a string key conflates, and folds `-0` into `0`, which a double's own equality does not. Written as arithmetic — `0/0` and `1/0` — because `NaN` and `Infinity` are not names Vega's expression language knows: `Unrecognized signal name: \"Infinity\"`. Five kinds of group value here: two plain words that must stay their own groups, then a NaN, an infinity and a null that must become one group summing 3+4+5, and a zero beside a negative zero that must become one summing 6+7. The bars are drawn from `y0` and `y1` so the grouping is visible as geometry rather than only as a column, and the labels read the group total so a merge that happened in the wrong place is legible.",
+  "width": 260,
+  "height": 160,
+  "padding": 5,
+  "data": [
+    {
+      "name": "raw",
+      "values": [
+        {"r": "p", "v": 1},
+        {"r": "q", "v": 2},
+        {"r": "nan", "v": 3},
+        {"r": "inf", "v": 4},
+        {"r": "null", "v": 5},
+        {"r": "zero", "v": 6},
+        {"r": "negzero", "v": 7}
+      ],
+      "transform": [
+        {
+          "type": "formula",
+          "as": "g",
+          "expr": "datum.r === 'nan' ? 0/0 : datum.r === 'inf' ? 1/0 : datum.r === 'null' ? null : datum.r === 'zero' ? 0 : datum.r === 'negzero' ? -0 : datum.r"
+        },
+        {"type": "stack", "groupby": ["g"], "field": "v"}
+      ]
+    }
+  ],
+  "scales": [
+    {"name": "x", "type": "band", "domain": {"data": "raw", "field": "r"}, "range": "width", "padding": 0.1},
+    {"name": "y", "type": "linear", "domain": {"data": "raw", "field": "y1"}, "nice": true, "range": "height"}
+  ],
+  "axes": [
+    {"scale": "x", "orient": "bottom"},
+    {"scale": "y", "orient": "left"}
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "raw"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "r"},
+          "width": {"scale": "x", "band": 1},
+          "y": {"scale": "y", "field": "y0"},
+          "y2": {"scale": "y", "field": "y1"},
+          "fill": {"value": "steelblue"}
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": {"data": "raw"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "r", "band": 0.5},
+          "y": {"scale": "y", "field": "y1", "offset": -3},
+          "align": {"value": "center"},
+          "baseline": {"value": "bottom"},
+          "text": {"signal": "datum.y0 + '-' + datum.y1"},
+          "fontSize": {"value": 9}
+        }
+      }
+    }
+  ]
+}

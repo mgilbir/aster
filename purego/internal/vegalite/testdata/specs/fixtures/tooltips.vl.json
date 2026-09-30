@@ -1,0 +1,21 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "Three ways of asking for a tooltip: a list, a single field, and everything.",
+  "data": {"values": [
+    {"c": "a", "v": 3, "n": 10}, {"c": "b", "v": 7, "n": 4}, {"c": "d", "v": 5, "n": 8}
+  ]},
+  "layer": [
+    {"mark": "bar", "encoding": {
+      "y": {"field": "v", "type": "quantitative"},
+      "tooltip": [
+        {"field": "c", "type": "nominal"},
+        {"field": "n", "type": "quantitative", "format": ".1f"}
+      ]
+    }},
+    {"mark": {"type": "point", "filled": true, "size": 40}, "encoding": {
+      "y": {"field": "n", "type": "quantitative"},
+      "tooltip": {"field": "n", "type": "quantitative"}
+    }}
+  ],
+  "encoding": {"x": {"field": "c", "type": "nominal"}}
+}

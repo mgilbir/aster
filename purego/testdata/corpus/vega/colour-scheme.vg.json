@@ -1,0 +1,66 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "Bars coloured by an ordinal category10 scheme, plus a sequential colour scale over an explicit two-colour range. The fifth differential fixture: covers scheme palettes and colour interpolation.",
+  "width": 280,
+  "height": 140,
+  "padding": 5,
+  "data": [
+    {
+      "name": "table",
+      "values": [
+        {"k": "alpha", "v": 28, "heat": 0},
+        {"k": "beta", "v": 55, "heat": 25},
+        {"k": "gamma", "v": 43, "heat": 50},
+        {"k": "delta", "v": 91, "heat": 75},
+        {"k": "epsilon", "v": 81, "heat": 100}
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {"data": "table", "field": "k"},
+      "range": "width",
+      "padding": 0.1
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {"data": "table", "field": "v"},
+      "nice": true,
+      "range": "height"
+    },
+    {
+      "name": "category",
+      "type": "ordinal",
+      "domain": {"data": "table", "field": "k"},
+      "range": {"scheme": "category10"}
+    },
+    {
+      "name": "heat",
+      "type": "linear",
+      "domain": [0, 100],
+      "range": ["#ffffcc", "#800026"]
+    }
+  ],
+  "axes": [{"orient": "bottom", "scale": "x"}, {"orient": "left", "scale": "y"}],
+  "marks": [
+    {
+      "type": "rect",
+      "name": "bars",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "k"},
+          "width": {"scale": "x", "band": 1},
+          "y": {"scale": "y", "field": "v"},
+          "y2": {"scale": "y", "value": 0},
+          "fill": {"scale": "category", "field": "k"},
+          "stroke": {"scale": "heat", "field": "heat"},
+          "strokeWidth": {"value": 2}
+        }
+      }
+    }
+  ]
+}

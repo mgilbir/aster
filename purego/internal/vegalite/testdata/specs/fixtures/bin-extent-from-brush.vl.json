@@ -1,0 +1,26 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "An overview above a detail whose buckets are as wide as the brush makes them.",
+  "data": {"url": "data/cars.json"},
+  "vconcat": [
+    {
+      "width": 300,
+      "height": 60,
+      "params": [{"name": "brush", "select": {"type": "interval", "encodings": ["x"]}}],
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "Horsepower", "bin": {"maxbins": 30}},
+        "y": {"aggregate": "count"}
+      }
+    },
+    {
+      "width": 300,
+      "height": 100,
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "Horsepower", "bin": {"maxbins": 30, "extent": {"param": "brush"}}},
+        "y": {"aggregate": "count"}
+      }
+    }
+  ]
+}

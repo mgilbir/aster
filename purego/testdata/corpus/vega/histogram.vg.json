@@ -1,0 +1,56 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A histogram: the bin transform feeding an aggregate count, drawn against a gridded axis. Exercises bin boundaries, which are their own algorithm, and a grid.",
+  "width": 240,
+  "height": 120,
+  "padding": 5,
+  "data": [
+    {
+      "name": "points",
+      "values": [
+        {"v": 1}, {"v": 3}, {"v": 3.5}, {"v": 4}, {"v": 4.2}, {"v": 5},
+        {"v": 5.5}, {"v": 6}, {"v": 6.1}, {"v": 7}, {"v": 8}, {"v": 9},
+        {"v": 9.5}, {"v": 11}, {"v": 12}, {"v": 12.5}, {"v": 18}
+      ],
+      "transform": [
+        {"type": "bin", "field": "v", "extent": [0, 20], "maxbins": 8},
+        {
+          "type": "aggregate",
+          "groupby": ["bin0", "bin1"],
+          "ops": ["count"],
+          "as": ["tally"]
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {"name": "x", "type": "linear", "domain": [0, 20], "range": "width", "zero": true},
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {"data": "points", "field": "tally"},
+      "range": "height",
+      "nice": true,
+      "zero": true
+    }
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "x", "tickCount": 5, "title": "Value"},
+    {"orient": "left", "scale": "y", "grid": true, "tickCount": 4, "title": "Count"}
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "points"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "bin0"},
+          "x2": {"scale": "x", "field": "bin1", "offset": -1},
+          "y": {"scale": "y", "field": "tally"},
+          "y2": {"scale": "y", "value": 0},
+          "fill": {"value": "#4c78a8"}
+        }
+      }
+    }
+  ]
+}

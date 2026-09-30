@@ -1,0 +1,113 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "Where an axis sits and how its ticks land: a bottom axis slid along its own direction by position, one drawn with no half-pixel translation at all, a band axis whose ticks are on the band edges rather than their centres, and one that leaves its ticks where the scale put them.",
+  "width": 240,
+  "height": 200,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {
+          "c": "alpha",
+          "v": 3
+        },
+        {
+          "c": "beta",
+          "v": 7
+        },
+        {
+          "c": "gamma",
+          "v": 5
+        },
+        {
+          "c": "delta",
+          "v": 2
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {
+        "data": "t",
+        "field": "c"
+      },
+      "range": "width",
+      "padding": 0.1
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": [
+        0,
+        10
+      ],
+      "range": "height"
+    }
+  ],
+  "axes": [
+    {
+      "orient": "bottom",
+      "scale": "x",
+      "tickBand": "extent",
+      "tickSize": 8,
+      "title": "ticks on the band edges"
+    },
+    {
+      "orient": "top",
+      "scale": "x",
+      "tickBand": "center",
+      "position": 20,
+      "title": "centred, and slid 20 along"
+    },
+    {
+      "orient": "left",
+      "scale": "y",
+      "translate": 0,
+      "tickCount": 5,
+      "title": "no half-pixel nudge"
+    },
+    {
+      "orient": "right",
+      "scale": "y",
+      "tickRound": false,
+      "tickCount": 7,
+      "title": "unrounded ticks"
+    }
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "x",
+            "field": "c"
+          },
+          "width": {
+            "scale": "x",
+            "band": 1
+          },
+          "y": {
+            "scale": "y",
+            "field": "v"
+          },
+          "y2": {
+            "scale": "y",
+            "value": 0
+          },
+          "fill": {
+            "value": "#4c78a8"
+          }
+        }
+      }
+    }
+  ]
+}

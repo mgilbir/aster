@@ -1,0 +1,70 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A title's style does not decorate the heading, it replaces the layer the heading's look comes from: upstream builds the title text with style 'group-title' and lets a specification's style take that slot, so the 13-point bold goes away and what the named block does not say falls through to the renderer's own 11 point rather than the title's. config.title still beats the style, and a property on the title still beats both.",
+  "width": 180,
+  "height": 80,
+  "padding": 5,
+  "background": "white",
+  "config": {
+    "style": {
+      "banner": {
+        "fill": "#7b3294",
+        "font": "serif",
+        "fontStyle": "italic"
+      },
+      "loud": {
+        "fill": "#008837",
+        "fontSize": 22,
+        "fontWeight": 800
+      }
+    },
+    "title": {
+      "subtitleColor": "#666666"
+    }
+  },
+  "title": {
+    "text": "Styled heading",
+    "subtitle": "and its subtitle",
+    "style": ["banner", "loud"],
+    "anchor": "start"
+  },
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {"c": "a", "v": 3},
+        {"c": "b", "v": 6}
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {"data": "t", "field": "c"},
+      "range": "width"
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {"data": "t", "field": "v"},
+      "range": "height"
+    }
+  ],
+  "axes": [{"scale": "x", "orient": "bottom"}],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "t"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "c"},
+          "width": {"scale": "x", "band": 0.8},
+          "y": {"scale": "y", "field": "v"},
+          "y2": {"scale": "y", "value": 0},
+          "fill": {"value": "#4c78a8"}
+        }
+      }
+    }
+  ]
+}

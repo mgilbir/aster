@@ -1,0 +1,5648 @@
+[
+ {
+  "name": "bare-points",
+  "size": [
+   200,
+   120
+  ],
+  "anchor": null,
+  "offset": null,
+  "padding": 0,
+  "paddingNull": false,
+  "lineAnchor": null,
+  "markIndex": 0,
+  "avoidBaseMark": null,
+  "method": null,
+  "sorted": false,
+  "inputs": [
+   {
+    "text": "lbl0",
+    "fontSize": 10,
+    "x": 30,
+    "y": 40,
+    "sortv": 0,
+    "base": null
+   },
+   {
+    "text": "lbl1",
+    "fontSize": 10,
+    "x": 35,
+    "y": 42,
+    "sortv": 1,
+    "base": null
+   },
+   {
+    "text": "lbl2",
+    "fontSize": 10,
+    "x": 120,
+    "y": 90,
+    "sortv": 2,
+    "base": null
+   },
+   {
+    "text": "lbl3",
+    "fontSize": 10,
+    "x": 60,
+    "y": 20,
+    "sortv": 3,
+    "base": null
+   },
+   {
+    "text": "lbl4",
+    "fontSize": 10,
+    "x": 5,
+    "y": 5,
+    "sortv": 4,
+    "base": null
+   },
+   {
+    "text": "lbl5",
+    "fontSize": 10,
+    "x": 190,
+    "y": 110,
+    "sortv": 5,
+    "base": null
+   },
+   {
+    "text": "lbl6",
+    "fontSize": 10,
+    "x": 100,
+    "y": 60,
+    "sortv": 6,
+    "base": null
+   }
+  ],
+  "baseShapes": [
+   null,
+   null,
+   null,
+   null,
+   null,
+   null,
+   null
+  ],
+  "avoidShapes": [],
+  "output": [
+   {
+    "x": 29.292893218813454,
+    "y": 39.292893218813454,
+    "opacity": 1,
+    "align": "right",
+    "baseline": "bottom"
+   },
+   {
+    "x": 34.292893218813454,
+    "y": 42.707106781186546,
+    "opacity": 1,
+    "align": "right",
+    "baseline": "top"
+   },
+   {
+    "x": 119.29289321881345,
+    "y": 89.29289321881345,
+    "opacity": 1,
+    "align": "right",
+    "baseline": "bottom"
+   },
+   {
+    "x": 59.292893218813454,
+    "y": 19.292893218813454,
+    "opacity": 1,
+    "align": "right",
+    "baseline": "bottom"
+   },
+   {
+    "x": 6,
+    "y": 5,
+    "opacity": 1,
+    "align": "left",
+    "baseline": "middle"
+   },
+   {
+    "x": 189.29289321881345,
+    "y": 109.29289321881345,
+    "opacity": 1,
+    "align": "right",
+    "baseline": "bottom"
+   },
+   {
+    "x": 99.29289321881345,
+    "y": 59.292893218813454,
+    "opacity": 1,
+    "align": "right",
+    "baseline": "bottom"
+   }
+  ]
+ },
+ {
+  "name": "rects-default",
+  "size": [
+   200,
+   120
+  ],
+  "anchor": null,
+  "offset": null,
+  "padding": 0,
+  "paddingNull": false,
+  "lineAnchor": null,
+  "markIndex": 0,
+  "avoidBaseMark": null,
+  "method": null,
+  "sorted": false,
+  "inputs": [
+   {
+    "text": "bar0",
+    "fontSize": 11,
+    "x": 10,
+    "y": 10,
+    "sortv": 0,
+    "base": {
+     "marktype": "rect",
+     "x": 10,
+     "y": 10,
+     "bounds": {
+      "x1": 10,
+      "y1": 10,
+      "x2": 50,
+      "y2": 40
+     }
+    }
+   },
+   {
+    "text": "bar1",
+    "fontSize": 11,
+    "x": 30,
+    "y": 25,
+    "sortv": -1,
+    "base": {
+     "marktype": "rect",
+     "x": 30,
+     "y": 25,
+     "bounds": {
+      "x1": 30,
+      "y1": 25,
+      "x2": 70,
+      "y2": 55
+     }
+    }
+   },
+   {
+    "text": "bar2",
+    "fontSize": 11,
+    "x": 120,
+    "y": 60,
+    "sortv": -2,
+    "base": {
+     "marktype": "rect",
+     "x": 120,
+     "y": 60,
+     "bounds": {
+      "x1": 120,
+      "y1": 60,
+      "x2": 170,
+      "y2": 100
+     }
+    }
+   },
+   {
+    "text": "bar3",
+    "fontSize": 11,
+    "x": 0,
+    "y": 0,
+    "sortv": -3,
+    "base": {
+     "marktype": "rect",
+     "x": 0,
+     "y": 0,
+     "bounds": {
+      "x1": 0,
+      "y1": 0,
+      "x2": 20,
+      "y2": 20
+     }
+    }
+   },
+   {
+    "text": "bar4",
+    "fontSize": 11,
+    "x": 170,
+    "y": 90,
+    "sortv": -4,
+    "base": {
+     "marktype": "rect",
+     "x": 170,
+     "y": 90,
+     "bounds": {
+      "x1": 170,
+      "y1": 90,
+      "x2": 210,
+      "y2": 130
+     }
+    }
+   },
+   {
+    "text": "bar5",
+    "fontSize": 11,
+    "x": 300,
+    "y": 50,
+    "sortv": -5,
+    "base": {
+     "marktype": "rect",
+     "x": 300,
+     "y": 50,
+     "bounds": {
+      "x1": 300,
+      "y1": 50,
+      "x2": 310,
+      "y2": 60
+     }
+    }
+   }
+  ],
+  "baseShapes": [
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          10,
+          10
+         ],
+         [
+          50,
+          10
+         ],
+         [
+          50,
+          40
+         ],
+         [
+          10,
+          40
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          10,
+          10
+         ],
+         [
+          50,
+          10
+         ],
+         [
+          50,
+          40
+         ],
+         [
+          10,
+          40
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          30,
+          25
+         ],
+         [
+          70,
+          25
+         ],
+         [
+          70,
+          55
+         ],
+         [
+          30,
+          55
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          30,
+          25
+         ],
+         [
+          70,
+          25
+         ],
+         [
+          70,
+          55
+         ],
+         [
+          30,
+          55
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          120,
+          60
+         ],
+         [
+          170,
+          60
+         ],
+         [
+          170,
+          100
+         ],
+         [
+          120,
+          100
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          120,
+          60
+         ],
+         [
+          170,
+          60
+         ],
+         [
+          170,
+          100
+         ],
+         [
+          120,
+          100
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          0,
+          0
+         ],
+         [
+          20,
+          0
+         ],
+         [
+          20,
+          20
+         ],
+         [
+          0,
+          20
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          0,
+          0
+         ],
+         [
+          20,
+          0
+         ],
+         [
+          20,
+          20
+         ],
+         [
+          0,
+          20
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          170,
+          90
+         ],
+         [
+          210,
+          90
+         ],
+         [
+          210,
+          130
+         ],
+         [
+          170,
+          130
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          170,
+          90
+         ],
+         [
+          210,
+          90
+         ],
+         [
+          210,
+          130
+         ],
+         [
+          170,
+          130
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          300,
+          50
+         ],
+         [
+          310,
+          50
+         ],
+         [
+          310,
+          60
+         ],
+         [
+          300,
+          60
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          300,
+          50
+         ],
+         [
+          310,
+          50
+         ],
+         [
+          310,
+          60
+         ],
+         [
+          300,
+          60
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ]
+   }
+  ],
+  "avoidShapes": [],
+  "output": [
+   {
+    "x": null,
+    "y": null,
+    "opacity": 0,
+    "align": null,
+    "baseline": null
+   },
+   {
+    "x": 29.292893218813454,
+    "y": 55.707106781186546,
+    "opacity": 1,
+    "align": "right",
+    "baseline": "top"
+   },
+   {
+    "x": 119.29289321881345,
+    "y": 59.292893218813454,
+    "opacity": 1,
+    "align": "right",
+    "baseline": "bottom"
+   },
+   {
+    "x": null,
+    "y": null,
+    "opacity": 0,
+    "align": null,
+    "baseline": null
+   },
+   {
+    "x": 169,
+    "y": 110,
+    "opacity": 1,
+    "align": "right",
+    "baseline": "middle"
+   },
+   {
+    "x": null,
+    "y": null,
+    "opacity": 0,
+    "align": null,
+    "baseline": null
+   }
+  ]
+ },
+ {
+  "name": "rects-inside",
+  "size": [
+   200,
+   120
+  ],
+  "anchor": [
+   "middle"
+  ],
+  "offset": [
+   -1
+  ],
+  "padding": 0,
+  "paddingNull": false,
+  "lineAnchor": null,
+  "markIndex": 0,
+  "avoidBaseMark": null,
+  "method": null,
+  "sorted": false,
+  "inputs": [
+   {
+    "text": "bar0",
+    "fontSize": 11,
+    "x": 10,
+    "y": 10,
+    "sortv": 0,
+    "base": {
+     "marktype": "rect",
+     "x": 10,
+     "y": 10,
+     "bounds": {
+      "x1": 10,
+      "y1": 10,
+      "x2": 50,
+      "y2": 40
+     }
+    }
+   },
+   {
+    "text": "bar1",
+    "fontSize": 11,
+    "x": 30,
+    "y": 25,
+    "sortv": -1,
+    "base": {
+     "marktype": "rect",
+     "x": 30,
+     "y": 25,
+     "bounds": {
+      "x1": 30,
+      "y1": 25,
+      "x2": 70,
+      "y2": 55
+     }
+    }
+   },
+   {
+    "text": "bar2",
+    "fontSize": 11,
+    "x": 120,
+    "y": 60,
+    "sortv": -2,
+    "base": {
+     "marktype": "rect",
+     "x": 120,
+     "y": 60,
+     "bounds": {
+      "x1": 120,
+      "y1": 60,
+      "x2": 170,
+      "y2": 100
+     }
+    }
+   },
+   {
+    "text": "bar3",
+    "fontSize": 11,
+    "x": 0,
+    "y": 0,
+    "sortv": -3,
+    "base": {
+     "marktype": "rect",
+     "x": 0,
+     "y": 0,
+     "bounds": {
+      "x1": 0,
+      "y1": 0,
+      "x2": 20,
+      "y2": 20
+     }
+    }
+   },
+   {
+    "text": "bar4",
+    "fontSize": 11,
+    "x": 170,
+    "y": 90,
+    "sortv": -4,
+    "base": {
+     "marktype": "rect",
+     "x": 170,
+     "y": 90,
+     "bounds": {
+      "x1": 170,
+      "y1": 90,
+      "x2": 210,
+      "y2": 130
+     }
+    }
+   },
+   {
+    "text": "bar5",
+    "fontSize": 11,
+    "x": 300,
+    "y": 50,
+    "sortv": -5,
+    "base": {
+     "marktype": "rect",
+     "x": 300,
+     "y": 50,
+     "bounds": {
+      "x1": 300,
+      "y1": 50,
+      "x2": 310,
+      "y2": 60
+     }
+    }
+   }
+  ],
+  "baseShapes": [
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          10,
+          10
+         ],
+         [
+          50,
+          10
+         ],
+         [
+          50,
+          40
+         ],
+         [
+          10,
+          40
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          10,
+          10
+         ],
+         [
+          50,
+          10
+         ],
+         [
+          50,
+          40
+         ],
+         [
+          10,
+          40
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          30,
+          25
+         ],
+         [
+          70,
+          25
+         ],
+         [
+          70,
+          55
+         ],
+         [
+          30,
+          55
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          30,
+          25
+         ],
+         [
+          70,
+          25
+         ],
+         [
+          70,
+          55
+         ],
+         [
+          30,
+          55
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          120,
+          60
+         ],
+         [
+          170,
+          60
+         ],
+         [
+          170,
+          100
+         ],
+         [
+          120,
+          100
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          120,
+          60
+         ],
+         [
+          170,
+          60
+         ],
+         [
+          170,
+          100
+         ],
+         [
+          120,
+          100
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          0,
+          0
+         ],
+         [
+          20,
+          0
+         ],
+         [
+          20,
+          20
+         ],
+         [
+          0,
+          20
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          0,
+          0
+         ],
+         [
+          20,
+          0
+         ],
+         [
+          20,
+          20
+         ],
+         [
+          0,
+          20
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          170,
+          90
+         ],
+         [
+          210,
+          90
+         ],
+         [
+          210,
+          130
+         ],
+         [
+          170,
+          130
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          170,
+          90
+         ],
+         [
+          210,
+          90
+         ],
+         [
+          210,
+          130
+         ],
+         [
+          170,
+          130
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          300,
+          50
+         ],
+         [
+          310,
+          50
+         ],
+         [
+          310,
+          60
+         ],
+         [
+          300,
+          60
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          300,
+          50
+         ],
+         [
+          310,
+          50
+         ],
+         [
+          310,
+          60
+         ],
+         [
+          300,
+          60
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ]
+   }
+  ],
+  "avoidShapes": [],
+  "output": [
+   {
+    "x": null,
+    "y": null,
+    "opacity": 0,
+    "align": null,
+    "baseline": null
+   },
+   {
+    "x": null,
+    "y": null,
+    "opacity": 0,
+    "align": null,
+    "baseline": null
+   },
+   {
+    "x": 145,
+    "y": 80,
+    "opacity": 1,
+    "align": "center",
+    "baseline": "middle"
+   },
+   {
+    "x": null,
+    "y": null,
+    "opacity": 0,
+    "align": null,
+    "baseline": null
+   },
+   {
+    "x": null,
+    "y": null,
+    "opacity": 0,
+    "align": null,
+    "baseline": null
+   },
+   {
+    "x": null,
+    "y": null,
+    "opacity": 0,
+    "align": null,
+    "baseline": null
+   }
+  ]
+ },
+ {
+  "name": "rects-avoid-base-false",
+  "size": [
+   200,
+   120
+  ],
+  "anchor": [
+   "top",
+   "bottom",
+   "right"
+  ],
+  "offset": [
+   2,
+   4
+  ],
+  "padding": 0,
+  "paddingNull": false,
+  "lineAnchor": null,
+  "markIndex": 0,
+  "avoidBaseMark": false,
+  "method": null,
+  "sorted": false,
+  "inputs": [
+   {
+    "text": "bar0",
+    "fontSize": 11,
+    "x": 10,
+    "y": 10,
+    "sortv": 0,
+    "base": {
+     "marktype": "rect",
+     "x": 10,
+     "y": 10,
+     "bounds": {
+      "x1": 10,
+      "y1": 10,
+      "x2": 50,
+      "y2": 40
+     }
+    }
+   },
+   {
+    "text": "bar1",
+    "fontSize": 11,
+    "x": 30,
+    "y": 25,
+    "sortv": -1,
+    "base": {
+     "marktype": "rect",
+     "x": 30,
+     "y": 25,
+     "bounds": {
+      "x1": 30,
+      "y1": 25,
+      "x2": 70,
+      "y2": 55
+     }
+    }
+   },
+   {
+    "text": "bar2",
+    "fontSize": 11,
+    "x": 120,
+    "y": 60,
+    "sortv": -2,
+    "base": {
+     "marktype": "rect",
+     "x": 120,
+     "y": 60,
+     "bounds": {
+      "x1": 120,
+      "y1": 60,
+      "x2": 170,
+      "y2": 100
+     }
+    }
+   },
+   {
+    "text": "bar3",
+    "fontSize": 11,
+    "x": 0,
+    "y": 0,
+    "sortv": -3,
+    "base": {
+     "marktype": "rect",
+     "x": 0,
+     "y": 0,
+     "bounds": {
+      "x1": 0,
+      "y1": 0,
+      "x2": 20,
+      "y2": 20
+     }
+    }
+   },
+   {
+    "text": "bar4",
+    "fontSize": 11,
+    "x": 170,
+    "y": 90,
+    "sortv": -4,
+    "base": {
+     "marktype": "rect",
+     "x": 170,
+     "y": 90,
+     "bounds": {
+      "x1": 170,
+      "y1": 90,
+      "x2": 210,
+      "y2": 130
+     }
+    }
+   },
+   {
+    "text": "bar5",
+    "fontSize": 11,
+    "x": 300,
+    "y": 50,
+    "sortv": -5,
+    "base": {
+     "marktype": "rect",
+     "x": 300,
+     "y": 50,
+     "bounds": {
+      "x1": 300,
+      "y1": 50,
+      "x2": 310,
+      "y2": 60
+     }
+    }
+   }
+  ],
+  "baseShapes": [
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          10,
+          10
+         ],
+         [
+          50,
+          10
+         ],
+         [
+          50,
+          40
+         ],
+         [
+          10,
+          40
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          10,
+          10
+         ],
+         [
+          50,
+          10
+         ],
+         [
+          50,
+          40
+         ],
+         [
+          10,
+          40
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          30,
+          25
+         ],
+         [
+          70,
+          25
+         ],
+         [
+          70,
+          55
+         ],
+         [
+          30,
+          55
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          30,
+          25
+         ],
+         [
+          70,
+          25
+         ],
+         [
+          70,
+          55
+         ],
+         [
+          30,
+          55
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          120,
+          60
+         ],
+         [
+          170,
+          60
+         ],
+         [
+          170,
+          100
+         ],
+         [
+          120,
+          100
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          120,
+          60
+         ],
+         [
+          170,
+          60
+         ],
+         [
+          170,
+          100
+         ],
+         [
+          120,
+          100
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          0,
+          0
+         ],
+         [
+          20,
+          0
+         ],
+         [
+          20,
+          20
+         ],
+         [
+          0,
+          20
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          0,
+          0
+         ],
+         [
+          20,
+          0
+         ],
+         [
+          20,
+          20
+         ],
+         [
+          0,
+          20
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          170,
+          90
+         ],
+         [
+          210,
+          90
+         ],
+         [
+          210,
+          130
+         ],
+         [
+          170,
+          130
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          170,
+          90
+         ],
+         [
+          210,
+          90
+         ],
+         [
+          210,
+          130
+         ],
+         [
+          170,
+          130
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          300,
+          50
+         ],
+         [
+          310,
+          50
+         ],
+         [
+          310,
+          60
+         ],
+         [
+          300,
+          60
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          300,
+          50
+         ],
+         [
+          310,
+          50
+         ],
+         [
+          310,
+          60
+         ],
+         [
+          300,
+          60
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ]
+   }
+  ],
+  "avoidShapes": [],
+  "output": [
+   {
+    "x": 30,
+    "y": 44,
+    "opacity": 1,
+    "align": "center",
+    "baseline": "top"
+   },
+   {
+    "x": 50,
+    "y": 23,
+    "opacity": 1,
+    "align": "center",
+    "baseline": "bottom"
+   },
+   {
+    "x": 145,
+    "y": 58,
+    "opacity": 1,
+    "align": "center",
+    "baseline": "bottom"
+   },
+   {
+    "x": null,
+    "y": null,
+    "opacity": 0,
+    "align": null,
+    "baseline": null
+   },
+   {
+    "x": null,
+    "y": null,
+    "opacity": 0,
+    "align": null,
+    "baseline": null
+   },
+   {
+    "x": null,
+    "y": null,
+    "opacity": 0,
+    "align": null,
+    "baseline": null
+   }
+  ]
+ },
+ {
+  "name": "rects-sorted-padding",
+  "size": [
+   200,
+   120
+  ],
+  "anchor": null,
+  "offset": [
+   3
+  ],
+  "padding": 20,
+  "paddingNull": false,
+  "lineAnchor": null,
+  "markIndex": 0,
+  "avoidBaseMark": null,
+  "method": null,
+  "sorted": true,
+  "inputs": [
+   {
+    "text": "bar0",
+    "fontSize": 11,
+    "x": 10,
+    "y": 10,
+    "sortv": 0,
+    "base": {
+     "marktype": "rect",
+     "x": 10,
+     "y": 10,
+     "bounds": {
+      "x1": 10,
+      "y1": 10,
+      "x2": 50,
+      "y2": 40
+     }
+    }
+   },
+   {
+    "text": "bar1",
+    "fontSize": 11,
+    "x": 30,
+    "y": 25,
+    "sortv": -1,
+    "base": {
+     "marktype": "rect",
+     "x": 30,
+     "y": 25,
+     "bounds": {
+      "x1": 30,
+      "y1": 25,
+      "x2": 70,
+      "y2": 55
+     }
+    }
+   },
+   {
+    "text": "bar2",
+    "fontSize": 11,
+    "x": 120,
+    "y": 60,
+    "sortv": -2,
+    "base": {
+     "marktype": "rect",
+     "x": 120,
+     "y": 60,
+     "bounds": {
+      "x1": 120,
+      "y1": 60,
+      "x2": 170,
+      "y2": 100
+     }
+    }
+   },
+   {
+    "text": "bar3",
+    "fontSize": 11,
+    "x": 0,
+    "y": 0,
+    "sortv": -3,
+    "base": {
+     "marktype": "rect",
+     "x": 0,
+     "y": 0,
+     "bounds": {
+      "x1": 0,
+      "y1": 0,
+      "x2": 20,
+      "y2": 20
+     }
+    }
+   },
+   {
+    "text": "bar4",
+    "fontSize": 11,
+    "x": 170,
+    "y": 90,
+    "sortv": -4,
+    "base": {
+     "marktype": "rect",
+     "x": 170,
+     "y": 90,
+     "bounds": {
+      "x1": 170,
+      "y1": 90,
+      "x2": 210,
+      "y2": 130
+     }
+    }
+   },
+   {
+    "text": "bar5",
+    "fontSize": 11,
+    "x": 300,
+    "y": 50,
+    "sortv": -5,
+    "base": {
+     "marktype": "rect",
+     "x": 300,
+     "y": 50,
+     "bounds": {
+      "x1": 300,
+      "y1": 50,
+      "x2": 310,
+      "y2": 60
+     }
+    }
+   }
+  ],
+  "baseShapes": [
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          10,
+          10
+         ],
+         [
+          50,
+          10
+         ],
+         [
+          50,
+          40
+         ],
+         [
+          10,
+          40
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          10,
+          10
+         ],
+         [
+          50,
+          10
+         ],
+         [
+          50,
+          40
+         ],
+         [
+          10,
+          40
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          30,
+          25
+         ],
+         [
+          70,
+          25
+         ],
+         [
+          70,
+          55
+         ],
+         [
+          30,
+          55
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          30,
+          25
+         ],
+         [
+          70,
+          25
+         ],
+         [
+          70,
+          55
+         ],
+         [
+          30,
+          55
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          120,
+          60
+         ],
+         [
+          170,
+          60
+         ],
+         [
+          170,
+          100
+         ],
+         [
+          120,
+          100
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          120,
+          60
+         ],
+         [
+          170,
+          60
+         ],
+         [
+          170,
+          100
+         ],
+         [
+          120,
+          100
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          0,
+          0
+         ],
+         [
+          20,
+          0
+         ],
+         [
+          20,
+          20
+         ],
+         [
+          0,
+          20
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          0,
+          0
+         ],
+         [
+          20,
+          0
+         ],
+         [
+          20,
+          20
+         ],
+         [
+          0,
+          20
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          170,
+          90
+         ],
+         [
+          210,
+          90
+         ],
+         [
+          210,
+          130
+         ],
+         [
+          170,
+          130
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          170,
+          90
+         ],
+         [
+          210,
+          90
+         ],
+         [
+          210,
+          130
+         ],
+         [
+          170,
+          130
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          300,
+          50
+         ],
+         [
+          310,
+          50
+         ],
+         [
+          310,
+          60
+         ],
+         [
+          300,
+          60
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          300,
+          50
+         ],
+         [
+          310,
+          50
+         ],
+         [
+          310,
+          60
+         ],
+         [
+          300,
+          60
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ]
+   }
+  ],
+  "avoidShapes": [],
+  "output": [
+   {
+    "x": 7.878679656440357,
+    "y": 42.121320343559645,
+    "opacity": 1,
+    "align": "right",
+    "baseline": "top"
+   },
+   {
+    "x": 27.878679656440358,
+    "y": 57.121320343559645,
+    "opacity": 1,
+    "align": "right",
+    "baseline": "top"
+   },
+   {
+    "x": 117.87867965644035,
+    "y": 57.878679656440355,
+    "opacity": 1,
+    "align": "right",
+    "baseline": "bottom"
+   },
+   {
+    "x": 10,
+    "y": -3,
+    "opacity": 1,
+    "align": "center",
+    "baseline": "bottom"
+   },
+   {
+    "x": 167,
+    "y": 110,
+    "opacity": 1,
+    "align": "right",
+    "baseline": "middle"
+   },
+   {
+    "x": null,
+    "y": null,
+    "opacity": 0,
+    "align": null,
+    "baseline": null
+   }
+  ]
+ },
+ {
+  "name": "rects-null-padding",
+  "size": [
+   200,
+   120
+  ],
+  "anchor": null,
+  "offset": null,
+  "padding": null,
+  "paddingNull": true,
+  "lineAnchor": null,
+  "markIndex": 0,
+  "avoidBaseMark": null,
+  "method": null,
+  "sorted": false,
+  "inputs": [
+   {
+    "text": "bar0",
+    "fontSize": 11,
+    "x": 10,
+    "y": 10,
+    "sortv": 0,
+    "base": {
+     "marktype": "rect",
+     "x": 10,
+     "y": 10,
+     "bounds": {
+      "x1": 10,
+      "y1": 10,
+      "x2": 50,
+      "y2": 40
+     }
+    }
+   },
+   {
+    "text": "bar1",
+    "fontSize": 11,
+    "x": 30,
+    "y": 25,
+    "sortv": -1,
+    "base": {
+     "marktype": "rect",
+     "x": 30,
+     "y": 25,
+     "bounds": {
+      "x1": 30,
+      "y1": 25,
+      "x2": 70,
+      "y2": 55
+     }
+    }
+   },
+   {
+    "text": "bar2",
+    "fontSize": 11,
+    "x": 120,
+    "y": 60,
+    "sortv": -2,
+    "base": {
+     "marktype": "rect",
+     "x": 120,
+     "y": 60,
+     "bounds": {
+      "x1": 120,
+      "y1": 60,
+      "x2": 170,
+      "y2": 100
+     }
+    }
+   },
+   {
+    "text": "bar3",
+    "fontSize": 11,
+    "x": 0,
+    "y": 0,
+    "sortv": -3,
+    "base": {
+     "marktype": "rect",
+     "x": 0,
+     "y": 0,
+     "bounds": {
+      "x1": 0,
+      "y1": 0,
+      "x2": 20,
+      "y2": 20
+     }
+    }
+   },
+   {
+    "text": "bar4",
+    "fontSize": 11,
+    "x": 170,
+    "y": 90,
+    "sortv": -4,
+    "base": {
+     "marktype": "rect",
+     "x": 170,
+     "y": 90,
+     "bounds": {
+      "x1": 170,
+      "y1": 90,
+      "x2": 210,
+      "y2": 130
+     }
+    }
+   },
+   {
+    "text": "bar5",
+    "fontSize": 11,
+    "x": 300,
+    "y": 50,
+    "sortv": -5,
+    "base": {
+     "marktype": "rect",
+     "x": 300,
+     "y": 50,
+     "bounds": {
+      "x1": 300,
+      "y1": 50,
+      "x2": 310,
+      "y2": 60
+     }
+    }
+   }
+  ],
+  "baseShapes": [
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          10,
+          10
+         ],
+         [
+          50,
+          10
+         ],
+         [
+          50,
+          40
+         ],
+         [
+          10,
+          40
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          10,
+          10
+         ],
+         [
+          50,
+          10
+         ],
+         [
+          50,
+          40
+         ],
+         [
+          10,
+          40
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          30,
+          25
+         ],
+         [
+          70,
+          25
+         ],
+         [
+          70,
+          55
+         ],
+         [
+          30,
+          55
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          30,
+          25
+         ],
+         [
+          70,
+          25
+         ],
+         [
+          70,
+          55
+         ],
+         [
+          30,
+          55
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          120,
+          60
+         ],
+         [
+          170,
+          60
+         ],
+         [
+          170,
+          100
+         ],
+         [
+          120,
+          100
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          120,
+          60
+         ],
+         [
+          170,
+          60
+         ],
+         [
+          170,
+          100
+         ],
+         [
+          120,
+          100
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          0,
+          0
+         ],
+         [
+          20,
+          0
+         ],
+         [
+          20,
+          20
+         ],
+         [
+          0,
+          20
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          0,
+          0
+         ],
+         [
+          20,
+          0
+         ],
+         [
+          20,
+          20
+         ],
+         [
+          0,
+          20
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          170,
+          90
+         ],
+         [
+          210,
+          90
+         ],
+         [
+          210,
+          130
+         ],
+         [
+          170,
+          130
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          170,
+          90
+         ],
+         [
+          210,
+          90
+         ],
+         [
+          210,
+          130
+         ],
+         [
+          170,
+          130
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          300,
+          50
+         ],
+         [
+          310,
+          50
+         ],
+         [
+          310,
+          60
+         ],
+         [
+          300,
+          60
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          300,
+          50
+         ],
+         [
+          310,
+          50
+         ],
+         [
+          310,
+          60
+         ],
+         [
+          300,
+          60
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ]
+   }
+  ],
+  "avoidShapes": [],
+  "output": [
+   {
+    "x": 9.292893218813452,
+    "y": 40.707106781186546,
+    "opacity": 1,
+    "align": "right",
+    "baseline": "top"
+   },
+   {
+    "x": 29.292893218813454,
+    "y": 55.707106781186546,
+    "opacity": 1,
+    "align": "right",
+    "baseline": "top"
+   },
+   {
+    "x": 119.29289321881345,
+    "y": 59.292893218813454,
+    "opacity": 1,
+    "align": "right",
+    "baseline": "bottom"
+   },
+   {
+    "x": -0.7071067811865479,
+    "y": -0.7071067811865479,
+    "opacity": 1,
+    "align": "right",
+    "baseline": "bottom"
+   },
+   {
+    "x": 169,
+    "y": 110,
+    "opacity": 1,
+    "align": "right",
+    "baseline": "middle"
+   },
+   {
+    "x": null,
+    "y": null,
+    "opacity": 0,
+    "align": null,
+    "baseline": null
+   }
+  ]
+ },
+ {
+  "name": "symbols-avoid",
+  "size": [
+   200,
+   120
+  ],
+  "anchor": null,
+  "offset": null,
+  "padding": 0,
+  "paddingNull": false,
+  "lineAnchor": null,
+  "markIndex": 0,
+  "avoidBaseMark": null,
+  "method": null,
+  "sorted": false,
+  "inputs": [
+   {
+    "text": "sym0",
+    "fontSize": 12,
+    "x": 50,
+    "y": 55,
+    "sortv": 0,
+    "base": {
+     "marktype": "rect",
+     "x": 47,
+     "y": 52,
+     "bounds": {
+      "x1": 47,
+      "y1": 52,
+      "x2": 53,
+      "y2": 58
+     }
+    }
+   },
+   {
+    "text": "sym1",
+    "fontSize": 12,
+    "x": 100,
+    "y": 20,
+    "sortv": 1,
+    "base": {
+     "marktype": "rect",
+     "x": 97,
+     "y": 17,
+     "bounds": {
+      "x1": 97,
+      "y1": 17,
+      "x2": 103,
+      "y2": 23
+     }
+    }
+   },
+   {
+    "text": "sym2",
+    "fontSize": 12,
+    "x": 150,
+    "y": 80,
+    "sortv": 2,
+    "base": {
+     "marktype": "rect",
+     "x": 147,
+     "y": 77,
+     "bounds": {
+      "x1": 147,
+      "y1": 77,
+      "x2": 153,
+      "y2": 83
+     }
+    }
+   },
+   {
+    "text": "sym3",
+    "fontSize": 12,
+    "x": 45,
+    "y": 100,
+    "sortv": 3,
+    "base": {
+     "marktype": "rect",
+     "x": 42,
+     "y": 97,
+     "bounds": {
+      "x1": 42,
+      "y1": 97,
+      "x2": 48,
+      "y2": 103
+     }
+    }
+   }
+  ],
+  "baseShapes": [
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          47,
+          52
+         ],
+         [
+          53,
+          52
+         ],
+         [
+          53,
+          58
+         ],
+         [
+          47,
+          58
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          47,
+          52
+         ],
+         [
+          53,
+          52
+         ],
+         [
+          53,
+          58
+         ],
+         [
+          47,
+          58
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          97,
+          17
+         ],
+         [
+          103,
+          17
+         ],
+         [
+          103,
+          23
+         ],
+         [
+          97,
+          23
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          97,
+          17
+         ],
+         [
+          103,
+          17
+         ],
+         [
+          103,
+          23
+         ],
+         [
+          97,
+          23
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          147,
+          77
+         ],
+         [
+          153,
+          77
+         ],
+         [
+          153,
+          83
+         ],
+         [
+          147,
+          83
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          147,
+          77
+         ],
+         [
+          153,
+          77
+         ],
+         [
+          153,
+          83
+         ],
+         [
+          147,
+          83
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          42,
+          97
+         ],
+         [
+          48,
+          97
+         ],
+         [
+          48,
+          103
+         ],
+         [
+          42,
+          103
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          42,
+          97
+         ],
+         [
+          48,
+          97
+         ],
+         [
+          48,
+          103
+         ],
+         [
+          42,
+          103
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ]
+   }
+  ],
+  "avoidShapes": [
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          40,
+          40
+         ],
+         [
+          120,
+          40
+         ],
+         [
+          120,
+          70
+         ],
+         [
+          40,
+          70
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          40,
+          40
+         ],
+         [
+          120,
+          40
+         ],
+         [
+          120,
+          70
+         ],
+         [
+          40,
+          70
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ]
+   }
+  ],
+  "output": [
+   {
+    "x": null,
+    "y": null,
+    "opacity": 0,
+    "align": null,
+    "baseline": null
+   },
+   {
+    "x": 96.29289321881345,
+    "y": 16.292893218813454,
+    "opacity": 1,
+    "align": "right",
+    "baseline": "bottom"
+   },
+   {
+    "x": 146,
+    "y": 80,
+    "opacity": 1,
+    "align": "right",
+    "baseline": "middle"
+   },
+   {
+    "x": 41.292893218813454,
+    "y": 96.29289321881345,
+    "opacity": 1,
+    "align": "right",
+    "baseline": "bottom"
+   }
+  ]
+ },
+ {
+  "name": "group-line-start",
+  "size": [
+   200,
+   120
+  ],
+  "anchor": null,
+  "offset": null,
+  "padding": 0,
+  "paddingNull": false,
+  "lineAnchor": "start",
+  "markIndex": 0,
+  "avoidBaseMark": null,
+  "method": null,
+  "sorted": false,
+  "inputs": [
+   {
+    "text": "series0",
+    "fontSize": 11,
+    "x": 0,
+    "y": 0,
+    "sortv": 0,
+    "base": {
+     "marktype": "group",
+     "x": null,
+     "y": null,
+     "bounds": {
+      "x1": 0,
+      "y1": 0,
+      "x2": 100,
+      "y2": 100
+     },
+     "marks": [
+      {
+       "marktype": "line",
+       "points": [
+        {
+         "x": 10,
+         "y": 20,
+         "x2": null,
+         "y2": null
+        },
+        {
+         "x": 90,
+         "y": 50,
+         "x2": null,
+         "y2": null
+        },
+        {
+         "x": 180,
+         "y": 30,
+         "x2": null,
+         "y2": null
+        }
+       ]
+      }
+     ]
+    }
+   },
+   {
+    "text": "series1",
+    "fontSize": 11,
+    "x": 0,
+    "y": 0,
+    "sortv": 1,
+    "base": {
+     "marktype": "group",
+     "x": null,
+     "y": null,
+     "bounds": {
+      "x1": 0,
+      "y1": 0,
+      "x2": 100,
+      "y2": 100
+     },
+     "marks": [
+      {
+       "marktype": "line",
+       "points": [
+        {
+         "x": 10,
+         "y": 90,
+         "x2": null,
+         "y2": null
+        },
+        {
+         "x": 90,
+         "y": 80,
+         "x2": null,
+         "y2": null
+        },
+        {
+         "x": 190,
+         "y": 100,
+         "x2": null,
+         "y2": null
+        }
+       ]
+      }
+     ]
+    }
+   }
+  ],
+  "baseShapes": [
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          10,
+          20
+         ],
+         [
+          90,
+          50
+         ],
+         [
+          180,
+          30
+         ]
+        ],
+        "closed": false
+       }
+      ]
+     },
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          10,
+          20
+         ],
+         [
+          90,
+          50
+         ],
+         [
+          180,
+          30
+         ]
+        ],
+        "closed": false
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          10,
+          20
+         ],
+         [
+          90,
+          50
+         ],
+         [
+          180,
+          30
+         ]
+        ],
+        "closed": false
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          10,
+          90
+         ],
+         [
+          90,
+          80
+         ],
+         [
+          190,
+          100
+         ]
+        ],
+        "closed": false
+       }
+      ]
+     },
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          10,
+          90
+         ],
+         [
+          90,
+          80
+         ],
+         [
+          190,
+          100
+         ]
+        ],
+        "closed": false
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          10,
+          90
+         ],
+         [
+          90,
+          80
+         ],
+         [
+          190,
+          100
+         ]
+        ],
+        "closed": false
+       }
+      ]
+     }
+    ]
+   }
+  ],
+  "avoidShapes": [],
+  "output": [
+   {
+    "x": 10.70710678118655,
+    "y": 19.292893218813454,
+    "opacity": 1,
+    "align": "left",
+    "baseline": "bottom"
+   },
+   {
+    "x": null,
+    "y": null,
+    "opacity": 0,
+    "align": null,
+    "baseline": null
+   }
+  ]
+ },
+ {
+  "name": "group-line-end",
+  "size": [
+   200,
+   120
+  ],
+  "anchor": null,
+  "offset": null,
+  "padding": 0,
+  "paddingNull": false,
+  "lineAnchor": "end",
+  "markIndex": 0,
+  "avoidBaseMark": null,
+  "method": null,
+  "sorted": false,
+  "inputs": [
+   {
+    "text": "series0",
+    "fontSize": 11,
+    "x": 0,
+    "y": 0,
+    "sortv": 0,
+    "base": {
+     "marktype": "group",
+     "x": null,
+     "y": null,
+     "bounds": {
+      "x1": 0,
+      "y1": 0,
+      "x2": 100,
+      "y2": 100
+     },
+     "marks": [
+      {
+       "marktype": "line",
+       "points": [
+        {
+         "x": 10,
+         "y": 20,
+         "x2": null,
+         "y2": null
+        },
+        {
+         "x": 90,
+         "y": 50,
+         "x2": null,
+         "y2": null
+        },
+        {
+         "x": 180,
+         "y": 30,
+         "x2": null,
+         "y2": null
+        }
+       ]
+      }
+     ]
+    }
+   },
+   {
+    "text": "series1",
+    "fontSize": 11,
+    "x": 0,
+    "y": 0,
+    "sortv": 1,
+    "base": {
+     "marktype": "group",
+     "x": null,
+     "y": null,
+     "bounds": {
+      "x1": 0,
+      "y1": 0,
+      "x2": 100,
+      "y2": 100
+     },
+     "marks": [
+      {
+       "marktype": "line",
+       "points": [
+        {
+         "x": 10,
+         "y": 90,
+         "x2": null,
+         "y2": null
+        },
+        {
+         "x": 90,
+         "y": 80,
+         "x2": null,
+         "y2": null
+        },
+        {
+         "x": 190,
+         "y": 100,
+         "x2": null,
+         "y2": null
+        }
+       ]
+      }
+     ]
+    }
+   }
+  ],
+  "baseShapes": [
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          10,
+          20
+         ],
+         [
+          90,
+          50
+         ],
+         [
+          180,
+          30
+         ]
+        ],
+        "closed": false
+       }
+      ]
+     },
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          10,
+          20
+         ],
+         [
+          90,
+          50
+         ],
+         [
+          180,
+          30
+         ]
+        ],
+        "closed": false
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          10,
+          20
+         ],
+         [
+          90,
+          50
+         ],
+         [
+          180,
+          30
+         ]
+        ],
+        "closed": false
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          10,
+          90
+         ],
+         [
+          90,
+          80
+         ],
+         [
+          190,
+          100
+         ]
+        ],
+        "closed": false
+       }
+      ]
+     },
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          10,
+          90
+         ],
+         [
+          90,
+          80
+         ],
+         [
+          190,
+          100
+         ]
+        ],
+        "closed": false
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          10,
+          90
+         ],
+         [
+          90,
+          80
+         ],
+         [
+          190,
+          100
+         ]
+        ],
+        "closed": false
+       }
+      ]
+     }
+    ]
+   }
+  ],
+  "avoidShapes": [],
+  "output": [
+   {
+    "x": null,
+    "y": null,
+    "opacity": 0,
+    "align": null,
+    "baseline": null
+   },
+   {
+    "x": 189.29289321881345,
+    "y": 100.70710678118655,
+    "opacity": 1,
+    "align": "right",
+    "baseline": "top"
+   }
+  ]
+ },
+ {
+  "name": "group-area-naive-avoid",
+  "size": [
+   180,
+   120
+  ],
+  "anchor": null,
+  "offset": null,
+  "padding": 0,
+  "paddingNull": false,
+  "lineAnchor": null,
+  "markIndex": 0,
+  "avoidBaseMark": true,
+  "method": "naive",
+  "sorted": false,
+  "inputs": [
+   {
+    "text": "area0",
+    "fontSize": 11,
+    "x": 0,
+    "y": 0,
+    "sortv": 0,
+    "base": {
+     "marktype": "group",
+     "x": null,
+     "y": null,
+     "bounds": {
+      "x1": 0,
+      "y1": 0,
+      "x2": 100,
+      "y2": 100
+     },
+     "marks": [
+      {
+       "marktype": "area",
+       "points": [
+        {
+         "x": 10,
+         "y": 20,
+         "x2": null,
+         "y2": 60
+        },
+        {
+         "x": 60,
+         "y": 30,
+         "x2": null,
+         "y2": 70
+        },
+        {
+         "x": 110,
+         "y": 40,
+         "x2": null,
+         "y2": 100
+        },
+        {
+         "x": 160,
+         "y": 20,
+         "x2": null,
+         "y2": 60
+        }
+       ]
+      }
+     ]
+    }
+   },
+   {
+    "text": "area1",
+    "fontSize": 11,
+    "x": 0,
+    "y": 0,
+    "sortv": 1,
+    "base": {
+     "marktype": "group",
+     "x": null,
+     "y": null,
+     "bounds": {
+      "x1": 0,
+      "y1": 0,
+      "x2": 100,
+      "y2": 100
+     },
+     "marks": [
+      {
+       "marktype": "area",
+       "points": [
+        {
+         "x": 10,
+         "y": 60,
+         "x2": null,
+         "y2": 80
+        },
+        {
+         "x": 60,
+         "y": 70,
+         "x2": null,
+         "y2": 95
+        },
+        {
+         "x": 110,
+         "y": 100,
+         "x2": null,
+         "y2": 115
+        },
+        {
+         "x": 160,
+         "y": 60,
+         "x2": null,
+         "y2": 80
+        }
+       ]
+      }
+     ]
+    }
+   }
+  ],
+  "baseShapes": [
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          10,
+          20
+         ],
+         [
+          60,
+          30
+         ],
+         [
+          110,
+          40
+         ],
+         [
+          160,
+          20
+         ],
+         [
+          160,
+          20
+         ],
+         [
+          110,
+          40
+         ],
+         [
+          60,
+          30
+         ],
+         [
+          10,
+          20
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          10,
+          20
+         ],
+         [
+          60,
+          30
+         ],
+         [
+          110,
+          40
+         ],
+         [
+          160,
+          20
+         ],
+         [
+          160,
+          20
+         ],
+         [
+          110,
+          40
+         ],
+         [
+          60,
+          30
+         ],
+         [
+          10,
+          20
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          10,
+          60
+         ],
+         [
+          60,
+          70
+         ],
+         [
+          110,
+          100
+         ],
+         [
+          160,
+          60
+         ],
+         [
+          160,
+          60
+         ],
+         [
+          110,
+          100
+         ],
+         [
+          60,
+          70
+         ],
+         [
+          10,
+          60
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          10,
+          60
+         ],
+         [
+          60,
+          70
+         ],
+         [
+          110,
+          100
+         ],
+         [
+          160,
+          60
+         ],
+         [
+          160,
+          60
+         ],
+         [
+          110,
+          100
+         ],
+         [
+          60,
+          70
+         ],
+         [
+          10,
+          60
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ]
+   }
+  ],
+  "avoidShapes": [],
+  "output": [
+   {
+    "x": 110,
+    "y": 70,
+    "opacity": 1,
+    "align": "center",
+    "baseline": "middle"
+   },
+   {
+    "x": 60,
+    "y": 82.5,
+    "opacity": 1,
+    "align": "center",
+    "baseline": "middle"
+   }
+  ]
+ },
+ {
+  "name": "group-area-naive-overlap",
+  "size": [
+   180,
+   120
+  ],
+  "anchor": null,
+  "offset": null,
+  "padding": 0,
+  "paddingNull": false,
+  "lineAnchor": null,
+  "markIndex": 0,
+  "avoidBaseMark": false,
+  "method": "naive",
+  "sorted": false,
+  "inputs": [
+   {
+    "text": "area0",
+    "fontSize": 11,
+    "x": 0,
+    "y": 0,
+    "sortv": 0,
+    "base": {
+     "marktype": "group",
+     "x": null,
+     "y": null,
+     "bounds": {
+      "x1": 0,
+      "y1": 0,
+      "x2": 100,
+      "y2": 100
+     },
+     "marks": [
+      {
+       "marktype": "area",
+       "points": [
+        {
+         "x": 10,
+         "y": 20,
+         "x2": null,
+         "y2": 60
+        },
+        {
+         "x": 60,
+         "y": 30,
+         "x2": null,
+         "y2": 70
+        },
+        {
+         "x": 110,
+         "y": 40,
+         "x2": null,
+         "y2": 100
+        },
+        {
+         "x": 160,
+         "y": 20,
+         "x2": null,
+         "y2": 60
+        }
+       ]
+      }
+     ]
+    }
+   },
+   {
+    "text": "area1",
+    "fontSize": 11,
+    "x": 0,
+    "y": 0,
+    "sortv": 1,
+    "base": {
+     "marktype": "group",
+     "x": null,
+     "y": null,
+     "bounds": {
+      "x1": 0,
+      "y1": 0,
+      "x2": 100,
+      "y2": 100
+     },
+     "marks": [
+      {
+       "marktype": "area",
+       "points": [
+        {
+         "x": 10,
+         "y": 60,
+         "x2": null,
+         "y2": 80
+        },
+        {
+         "x": 60,
+         "y": 70,
+         "x2": null,
+         "y2": 95
+        },
+        {
+         "x": 110,
+         "y": 100,
+         "x2": null,
+         "y2": 115
+        },
+        {
+         "x": 160,
+         "y": 60,
+         "x2": null,
+         "y2": 80
+        }
+       ]
+      }
+     ]
+    }
+   }
+  ],
+  "baseShapes": [
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          10,
+          20
+         ],
+         [
+          60,
+          30
+         ],
+         [
+          110,
+          40
+         ],
+         [
+          160,
+          20
+         ],
+         [
+          160,
+          20
+         ],
+         [
+          110,
+          40
+         ],
+         [
+          60,
+          30
+         ],
+         [
+          10,
+          20
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          10,
+          20
+         ],
+         [
+          60,
+          30
+         ],
+         [
+          110,
+          40
+         ],
+         [
+          160,
+          20
+         ],
+         [
+          160,
+          20
+         ],
+         [
+          110,
+          40
+         ],
+         [
+          60,
+          30
+         ],
+         [
+          10,
+          20
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          10,
+          60
+         ],
+         [
+          60,
+          70
+         ],
+         [
+          110,
+          100
+         ],
+         [
+          160,
+          60
+         ],
+         [
+          160,
+          60
+         ],
+         [
+          110,
+          100
+         ],
+         [
+          60,
+          70
+         ],
+         [
+          10,
+          60
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          10,
+          60
+         ],
+         [
+          60,
+          70
+         ],
+         [
+          110,
+          100
+         ],
+         [
+          160,
+          60
+         ],
+         [
+          160,
+          60
+         ],
+         [
+          110,
+          100
+         ],
+         [
+          60,
+          70
+         ],
+         [
+          10,
+          60
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ]
+   }
+  ],
+  "avoidShapes": [],
+  "output": [
+   {
+    "x": 110,
+    "y": 70,
+    "opacity": 1,
+    "align": "center",
+    "baseline": "middle"
+   },
+   {
+    "x": 60,
+    "y": 82.5,
+    "opacity": 1,
+    "align": "center",
+    "baseline": "middle"
+   }
+  ]
+ },
+ {
+  "name": "group-area-reduced-search-avoid",
+  "size": [
+   180,
+   120
+  ],
+  "anchor": null,
+  "offset": null,
+  "padding": 0,
+  "paddingNull": false,
+  "lineAnchor": null,
+  "markIndex": 0,
+  "avoidBaseMark": true,
+  "method": "reduced-search",
+  "sorted": false,
+  "inputs": [
+   {
+    "text": "area0",
+    "fontSize": 11,
+    "x": 0,
+    "y": 0,
+    "sortv": 0,
+    "base": {
+     "marktype": "group",
+     "x": null,
+     "y": null,
+     "bounds": {
+      "x1": 0,
+      "y1": 0,
+      "x2": 100,
+      "y2": 100
+     },
+     "marks": [
+      {
+       "marktype": "area",
+       "points": [
+        {
+         "x": 10,
+         "y": 20,
+         "x2": null,
+         "y2": 60
+        },
+        {
+         "x": 60,
+         "y": 30,
+         "x2": null,
+         "y2": 70
+        },
+        {
+         "x": 110,
+         "y": 40,
+         "x2": null,
+         "y2": 100
+        },
+        {
+         "x": 160,
+         "y": 20,
+         "x2": null,
+         "y2": 60
+        }
+       ]
+      }
+     ]
+    }
+   },
+   {
+    "text": "area1",
+    "fontSize": 11,
+    "x": 0,
+    "y": 0,
+    "sortv": 1,
+    "base": {
+     "marktype": "group",
+     "x": null,
+     "y": null,
+     "bounds": {
+      "x1": 0,
+      "y1": 0,
+      "x2": 100,
+      "y2": 100
+     },
+     "marks": [
+      {
+       "marktype": "area",
+       "points": [
+        {
+         "x": 10,
+         "y": 60,
+         "x2": null,
+         "y2": 80
+        },
+        {
+         "x": 60,
+         "y": 70,
+         "x2": null,
+         "y2": 95
+        },
+        {
+         "x": 110,
+         "y": 100,
+         "x2": null,
+         "y2": 115
+        },
+        {
+         "x": 160,
+         "y": 60,
+         "x2": null,
+         "y2": 80
+        }
+       ]
+      }
+     ]
+    }
+   }
+  ],
+  "baseShapes": [
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          10,
+          20
+         ],
+         [
+          60,
+          30
+         ],
+         [
+          110,
+          40
+         ],
+         [
+          160,
+          20
+         ],
+         [
+          160,
+          20
+         ],
+         [
+          110,
+          40
+         ],
+         [
+          60,
+          30
+         ],
+         [
+          10,
+          20
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          10,
+          20
+         ],
+         [
+          60,
+          30
+         ],
+         [
+          110,
+          40
+         ],
+         [
+          160,
+          20
+         ],
+         [
+          160,
+          20
+         ],
+         [
+          110,
+          40
+         ],
+         [
+          60,
+          30
+         ],
+         [
+          10,
+          20
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          10,
+          60
+         ],
+         [
+          60,
+          70
+         ],
+         [
+          110,
+          100
+         ],
+         [
+          160,
+          60
+         ],
+         [
+          160,
+          60
+         ],
+         [
+          110,
+          100
+         ],
+         [
+          60,
+          70
+         ],
+         [
+          10,
+          60
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          10,
+          60
+         ],
+         [
+          60,
+          70
+         ],
+         [
+          110,
+          100
+         ],
+         [
+          160,
+          60
+         ],
+         [
+          160,
+          60
+         ],
+         [
+          110,
+          100
+         ],
+         [
+          60,
+          70
+         ],
+         [
+          10,
+          60
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ]
+   }
+  ],
+  "avoidShapes": [],
+  "output": [
+   {
+    "x": 110,
+    "y": 54,
+    "opacity": 1,
+    "align": "center",
+    "baseline": "middle"
+   },
+   {
+    "x": 110,
+    "y": 110,
+    "opacity": 1,
+    "align": "center",
+    "baseline": "middle"
+   }
+  ]
+ },
+ {
+  "name": "group-area-reduced-search-overlap",
+  "size": [
+   180,
+   120
+  ],
+  "anchor": null,
+  "offset": null,
+  "padding": 0,
+  "paddingNull": false,
+  "lineAnchor": null,
+  "markIndex": 0,
+  "avoidBaseMark": false,
+  "method": "reduced-search",
+  "sorted": false,
+  "inputs": [
+   {
+    "text": "area0",
+    "fontSize": 11,
+    "x": 0,
+    "y": 0,
+    "sortv": 0,
+    "base": {
+     "marktype": "group",
+     "x": null,
+     "y": null,
+     "bounds": {
+      "x1": 0,
+      "y1": 0,
+      "x2": 100,
+      "y2": 100
+     },
+     "marks": [
+      {
+       "marktype": "area",
+       "points": [
+        {
+         "x": 10,
+         "y": 20,
+         "x2": null,
+         "y2": 60
+        },
+        {
+         "x": 60,
+         "y": 30,
+         "x2": null,
+         "y2": 70
+        },
+        {
+         "x": 110,
+         "y": 40,
+         "x2": null,
+         "y2": 100
+        },
+        {
+         "x": 160,
+         "y": 20,
+         "x2": null,
+         "y2": 60
+        }
+       ]
+      }
+     ]
+    }
+   },
+   {
+    "text": "area1",
+    "fontSize": 11,
+    "x": 0,
+    "y": 0,
+    "sortv": 1,
+    "base": {
+     "marktype": "group",
+     "x": null,
+     "y": null,
+     "bounds": {
+      "x1": 0,
+      "y1": 0,
+      "x2": 100,
+      "y2": 100
+     },
+     "marks": [
+      {
+       "marktype": "area",
+       "points": [
+        {
+         "x": 10,
+         "y": 60,
+         "x2": null,
+         "y2": 80
+        },
+        {
+         "x": 60,
+         "y": 70,
+         "x2": null,
+         "y2": 95
+        },
+        {
+         "x": 110,
+         "y": 100,
+         "x2": null,
+         "y2": 115
+        },
+        {
+         "x": 160,
+         "y": 60,
+         "x2": null,
+         "y2": 80
+        }
+       ]
+      }
+     ]
+    }
+   }
+  ],
+  "baseShapes": [
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          10,
+          20
+         ],
+         [
+          60,
+          30
+         ],
+         [
+          110,
+          40
+         ],
+         [
+          160,
+          20
+         ],
+         [
+          160,
+          20
+         ],
+         [
+          110,
+          40
+         ],
+         [
+          60,
+          30
+         ],
+         [
+          10,
+          20
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          10,
+          20
+         ],
+         [
+          60,
+          30
+         ],
+         [
+          110,
+          40
+         ],
+         [
+          160,
+          20
+         ],
+         [
+          160,
+          20
+         ],
+         [
+          110,
+          40
+         ],
+         [
+          60,
+          30
+         ],
+         [
+          10,
+          20
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          10,
+          60
+         ],
+         [
+          60,
+          70
+         ],
+         [
+          110,
+          100
+         ],
+         [
+          160,
+          60
+         ],
+         [
+          160,
+          60
+         ],
+         [
+          110,
+          100
+         ],
+         [
+          60,
+          70
+         ],
+         [
+          10,
+          60
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          10,
+          60
+         ],
+         [
+          60,
+          70
+         ],
+         [
+          110,
+          100
+         ],
+         [
+          160,
+          60
+         ],
+         [
+          160,
+          60
+         ],
+         [
+          110,
+          100
+         ],
+         [
+          60,
+          70
+         ],
+         [
+          10,
+          60
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ]
+   }
+  ],
+  "avoidShapes": [],
+  "output": [
+   {
+    "x": 110,
+    "y": 54,
+    "opacity": 1,
+    "align": "center",
+    "baseline": "middle"
+   },
+   {
+    "x": 110,
+    "y": 110,
+    "opacity": 1,
+    "align": "center",
+    "baseline": "middle"
+   }
+  ]
+ },
+ {
+  "name": "group-area-floodfill-avoid",
+  "size": [
+   180,
+   120
+  ],
+  "anchor": null,
+  "offset": null,
+  "padding": 0,
+  "paddingNull": false,
+  "lineAnchor": null,
+  "markIndex": 0,
+  "avoidBaseMark": true,
+  "method": "floodfill",
+  "sorted": false,
+  "inputs": [
+   {
+    "text": "area0",
+    "fontSize": 11,
+    "x": 0,
+    "y": 0,
+    "sortv": 0,
+    "base": {
+     "marktype": "group",
+     "x": null,
+     "y": null,
+     "bounds": {
+      "x1": 0,
+      "y1": 0,
+      "x2": 100,
+      "y2": 100
+     },
+     "marks": [
+      {
+       "marktype": "area",
+       "points": [
+        {
+         "x": 10,
+         "y": 20,
+         "x2": null,
+         "y2": 60
+        },
+        {
+         "x": 60,
+         "y": 30,
+         "x2": null,
+         "y2": 70
+        },
+        {
+         "x": 110,
+         "y": 40,
+         "x2": null,
+         "y2": 100
+        },
+        {
+         "x": 160,
+         "y": 20,
+         "x2": null,
+         "y2": 60
+        }
+       ]
+      }
+     ]
+    }
+   },
+   {
+    "text": "area1",
+    "fontSize": 11,
+    "x": 0,
+    "y": 0,
+    "sortv": 1,
+    "base": {
+     "marktype": "group",
+     "x": null,
+     "y": null,
+     "bounds": {
+      "x1": 0,
+      "y1": 0,
+      "x2": 100,
+      "y2": 100
+     },
+     "marks": [
+      {
+       "marktype": "area",
+       "points": [
+        {
+         "x": 10,
+         "y": 60,
+         "x2": null,
+         "y2": 80
+        },
+        {
+         "x": 60,
+         "y": 70,
+         "x2": null,
+         "y2": 95
+        },
+        {
+         "x": 110,
+         "y": 100,
+         "x2": null,
+         "y2": 115
+        },
+        {
+         "x": 160,
+         "y": 60,
+         "x2": null,
+         "y2": 80
+        }
+       ]
+      }
+     ]
+    }
+   }
+  ],
+  "baseShapes": [
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          10,
+          20
+         ],
+         [
+          60,
+          30
+         ],
+         [
+          110,
+          40
+         ],
+         [
+          160,
+          20
+         ],
+         [
+          160,
+          20
+         ],
+         [
+          110,
+          40
+         ],
+         [
+          60,
+          30
+         ],
+         [
+          10,
+          20
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          10,
+          20
+         ],
+         [
+          60,
+          30
+         ],
+         [
+          110,
+          40
+         ],
+         [
+          160,
+          20
+         ],
+         [
+          160,
+          20
+         ],
+         [
+          110,
+          40
+         ],
+         [
+          60,
+          30
+         ],
+         [
+          10,
+          20
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          10,
+          60
+         ],
+         [
+          60,
+          70
+         ],
+         [
+          110,
+          100
+         ],
+         [
+          160,
+          60
+         ],
+         [
+          160,
+          60
+         ],
+         [
+          110,
+          100
+         ],
+         [
+          60,
+          70
+         ],
+         [
+          10,
+          60
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          10,
+          60
+         ],
+         [
+          60,
+          70
+         ],
+         [
+          110,
+          100
+         ],
+         [
+          160,
+          60
+         ],
+         [
+          160,
+          60
+         ],
+         [
+          110,
+          100
+         ],
+         [
+          60,
+          70
+         ],
+         [
+          10,
+          60
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ]
+   }
+  ],
+  "avoidShapes": [],
+  "output": [
+   {
+    "x": 45,
+    "y": 105,
+    "opacity": 1,
+    "align": "center",
+    "baseline": "middle"
+   },
+   {
+    "x": 104,
+    "y": 55,
+    "opacity": 1,
+    "align": "center",
+    "baseline": "middle"
+   }
+  ]
+ },
+ {
+  "name": "group-area-floodfill-overlap",
+  "size": [
+   180,
+   120
+  ],
+  "anchor": null,
+  "offset": null,
+  "padding": 0,
+  "paddingNull": false,
+  "lineAnchor": null,
+  "markIndex": 0,
+  "avoidBaseMark": false,
+  "method": "floodfill",
+  "sorted": false,
+  "inputs": [
+   {
+    "text": "area0",
+    "fontSize": 11,
+    "x": 0,
+    "y": 0,
+    "sortv": 0,
+    "base": {
+     "marktype": "group",
+     "x": null,
+     "y": null,
+     "bounds": {
+      "x1": 0,
+      "y1": 0,
+      "x2": 100,
+      "y2": 100
+     },
+     "marks": [
+      {
+       "marktype": "area",
+       "points": [
+        {
+         "x": 10,
+         "y": 20,
+         "x2": null,
+         "y2": 60
+        },
+        {
+         "x": 60,
+         "y": 30,
+         "x2": null,
+         "y2": 70
+        },
+        {
+         "x": 110,
+         "y": 40,
+         "x2": null,
+         "y2": 100
+        },
+        {
+         "x": 160,
+         "y": 20,
+         "x2": null,
+         "y2": 60
+        }
+       ]
+      }
+     ]
+    }
+   },
+   {
+    "text": "area1",
+    "fontSize": 11,
+    "x": 0,
+    "y": 0,
+    "sortv": 1,
+    "base": {
+     "marktype": "group",
+     "x": null,
+     "y": null,
+     "bounds": {
+      "x1": 0,
+      "y1": 0,
+      "x2": 100,
+      "y2": 100
+     },
+     "marks": [
+      {
+       "marktype": "area",
+       "points": [
+        {
+         "x": 10,
+         "y": 60,
+         "x2": null,
+         "y2": 80
+        },
+        {
+         "x": 60,
+         "y": 70,
+         "x2": null,
+         "y2": 95
+        },
+        {
+         "x": 110,
+         "y": 100,
+         "x2": null,
+         "y2": 115
+        },
+        {
+         "x": 160,
+         "y": 60,
+         "x2": null,
+         "y2": 80
+        }
+       ]
+      }
+     ]
+    }
+   }
+  ],
+  "baseShapes": [
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          10,
+          20
+         ],
+         [
+          60,
+          30
+         ],
+         [
+          110,
+          40
+         ],
+         [
+          160,
+          20
+         ],
+         [
+          160,
+          20
+         ],
+         [
+          110,
+          40
+         ],
+         [
+          60,
+          30
+         ],
+         [
+          10,
+          20
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          10,
+          20
+         ],
+         [
+          60,
+          30
+         ],
+         [
+          110,
+          40
+         ],
+         [
+          160,
+          20
+         ],
+         [
+          160,
+          20
+         ],
+         [
+          110,
+          40
+         ],
+         [
+          60,
+          30
+         ],
+         [
+          10,
+          20
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "normal": [
+     {
+      "fill": true,
+      "subs": [
+       {
+        "pts": [
+         [
+          10,
+          60
+         ],
+         [
+          60,
+          70
+         ],
+         [
+          110,
+          100
+         ],
+         [
+          160,
+          60
+         ],
+         [
+          160,
+          60
+         ],
+         [
+          110,
+          100
+         ],
+         [
+          60,
+          70
+         ],
+         [
+          10,
+          60
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ],
+    "outline": [
+     {
+      "stroke": true,
+      "lw": 1,
+      "subs": [
+       {
+        "pts": [
+         [
+          10,
+          60
+         ],
+         [
+          60,
+          70
+         ],
+         [
+          110,
+          100
+         ],
+         [
+          160,
+          60
+         ],
+         [
+          160,
+          60
+         ],
+         [
+          110,
+          100
+         ],
+         [
+          60,
+          70
+         ],
+         [
+          10,
+          60
+         ]
+        ],
+        "closed": true
+       }
+      ]
+     }
+    ]
+   }
+  ],
+  "avoidShapes": [],
+  "output": [
+   {
+    "x": 45,
+    "y": 105,
+    "opacity": 1,
+    "align": "center",
+    "baseline": "middle"
+   },
+   {
+    "x": 107,
+    "y": 54,
+    "opacity": 1,
+    "align": "center",
+    "baseline": "middle"
+   }
+  ]
+ }
+]

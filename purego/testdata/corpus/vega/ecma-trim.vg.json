@@ -1,0 +1,89 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "trim() follows ECMA's whitespace set rather than the platform's. The two differ at both ends: a byte-order mark is trimmed and an information separator is not, so the reported length says which set was used.",
+  "width": 260,
+  "height": 120,
+  "padding": 5,
+  "data": [
+    {
+      "name": "rows",
+      "values": [
+        {
+          "name": "bom",
+          "raw": "\ufeffvalue\ufeff"
+        },
+        {
+          "name": "nbsp",
+          "raw": "\u00a0value\u00a0"
+        },
+        {
+          "name": "nel",
+          "raw": "\u0085value\u0085"
+        },
+        {
+          "name": "unit separator",
+          "raw": "\u001fvalue\u001f"
+        },
+        {
+          "name": "zero width space",
+          "raw": "\u200bvalue\u200b"
+        },
+        {
+          "name": "ideographic space",
+          "raw": "\u3000value\u3000"
+        }
+      ],
+      "transform": [
+        {
+          "type": "formula",
+          "as": "len",
+          "expr": "length(trim(datum.raw))"
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "y",
+      "type": "band",
+      "domain": {
+        "data": "rows",
+        "field": "name"
+      },
+      "range": "height",
+      "padding": 0.1
+    }
+  ],
+  "axes": [
+    {
+      "orient": "left",
+      "scale": "y"
+    }
+  ],
+  "marks": [
+    {
+      "type": "text",
+      "from": {
+        "data": "rows"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "value": 0
+          },
+          "y": {
+            "scale": "y",
+            "field": "name",
+            "band": 0.5
+          },
+          "baseline": {
+            "value": "middle"
+          },
+          "text": {
+            "signal": "datum.name + ': ' + datum.len"
+          }
+        }
+      }
+    }
+  ]
+}

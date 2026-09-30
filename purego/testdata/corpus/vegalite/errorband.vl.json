@@ -1,0 +1,59 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A band a standard deviation either side of the mean, with its edges drawn.",
+  "data": {
+    "values": [
+      {
+        "t": 1,
+        "v": 3
+      },
+      {
+        "t": 1,
+        "v": 5
+      },
+      {
+        "t": 1,
+        "v": 4
+      },
+      {
+        "t": 2,
+        "v": 6
+      },
+      {
+        "t": 2,
+        "v": 2
+      },
+      {
+        "t": 2,
+        "v": 7
+      },
+      {
+        "t": 3,
+        "v": 5
+      },
+      {
+        "t": 3,
+        "v": 9
+      },
+      {
+        "t": 3,
+        "v": 6
+      }
+    ]
+  },
+  "mark": {
+    "type": "errorband",
+    "extent": "stdev",
+    "borders": true
+  },
+  "encoding": {
+    "x": {
+      "field": "t",
+      "type": "quantitative"
+    },
+    "y": {
+      "field": "v",
+      "type": "quantitative"
+    }
+  }
+}

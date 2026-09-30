@@ -1,0 +1,186 @@
+// Package vegalite compiles Vega-Lite specifications to Vega specifications,
+// following the Vega-Lite 6.4 compiler stage by stage: config merging,
+// normalization, model construction, component parsing, dataflow optimization
+// and assembly. The output is a jsval value whose property order matches
+// upstream's JSON.stringify output, so it can be compared byte for byte.
+package vegalite
+
+import (
+	"fmt"
+	"time"
+
+	"github.com/mgilbir/aster/purego/internal/jsval"
+)
+
+// Options configure a compilation.
+type Options struct {
+	// Config is a Vega-Lite config object merged under the specification's own
+	// `config` (aster's WithTheme passes a theme here). The zero Value means none.
+	Config jsval.Value
+	// Location is the time zone in which datetime objects without `utc` are
+	// read, JavaScript's local time. Nil means UTC; the host's time zone is
+	// never consulted, so output does not depend on the machine.
+	Location *time.Location
+}
+
+// Compile turns a Vega-Lite specification into a Vega specification. The input
+// is not modified. Errors are returned for invalid specifications; Compile does
+// not panic.
+func Compile(spec jsval.Value, opts Options) (out jsval.Value, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			out = jsval.Undefined
+			switch e := r.(type) {
+			case compileError:
+				err = e
+			case exprSyntaxError:
+				err = compileError{"Invalid expression: " + e.msg}
+			default:
+				err = fmt.Errorf("vegalite: internal error: %v", r)
+			}
+		}
+	}()
+	if !spec.IsObj() {
+		return jsval.Undefined, compileError{"Invalid spec: a Vega-Lite specification must be an object"}
+	}
+	input := deepClone(spec)
+	return compileSpec(input, opts), nil
+}
+
+// CompileJSON compiles a specification (and optional config) given as JSON text
+// and returns the Vega specification as JSON text.
+func CompileJSON(specJSON []byte, configJSON string) ([]byte, error) {
+	spec, err := jsval.ParseJSON(specJSON)
+	if err != nil {
+		return nil, err
+	}
+	var opts Options
+	if configJSON != "" {
+		cfg, err := jsval.ParseJSONString(configJSON)
+		if err != nil {
+			return nil, fmt.Errorf("vegalite: invalid config: %w", err)
+		}
+		opts.Config = cfg
+	}
+	out, err := Compile(spec, opts)
+	if err != nil {
+		return nil, err
+	}
+	return jsval.AppendJSON(nil, out), nil
+}
+
+func compileSpec(inputSpec jsval.Value, opts Options) jsval.Value {
+	config := initConfig(jsval.Obj(mergeConfig(opts.Config, inputSpec.Get("config"))))
+	spec := normalize(inputSpec, config)
+	model := buildModel(spec, nil, "", jsval.NewObject(0), config, 0)
+	defer model.b().ctx.release()
+	model.b().ctx.loc = opts.Location
+	parseModel(model)
+	optimizeDataflow(model.b().comp.data, model)
+	top := getTopLevelProperties(inputSpec, spec.Get("autosize"), config, model)
+	out := assembleTopLevelModel(model, top, inputSpec.Get("datasets"), inputSpec.Get("usermeta"))
+	resolveLazy(out)
+	return out
+}
+
+func getTopLevelProperties(inputSpec jsval.Value, autosize jsval.Value, config jsval.Value, model Model) *Object {
+	b := model.b()
+	width, height := b.comp.layoutSize.get("width"), b.comp.layoutSize.get("height")
+	var as *Object
+	switch {
+	case autosize.IsUndefined():
+		as = mk("type", "pad")
+		if b.hasAxisOrientSignalRef() {
+			as.Set("resize", jsval.True)
+		}
+	case autosize.IsStr():
+		as = mk("type", autosize)
+	default:
+		as = cloneObj(autosize.ObjValue())
+	}
+	if width.IsTruthy() && height.IsTruthy() && as.Lookup("type").IsStr() && isFitType(as.Lookup("type").StrValue()) {
+		wStep := width.IsStr() && width.StrValue() == "step"
+		hStep := height.IsStr() && height.StrValue() == "step"
+		switch {
+		case wStep && hStep:
+			as.Set("type", jsval.Str("pad"))
+		case wStep || hStep:
+			sizeType := "height"
+			if wStep {
+				sizeType = "width"
+			}
+			inverse := "width"
+			if sizeType == "width" {
+				inverse = "height"
+			}
+			as.Set("type", jsval.Str(getFitType(inverse)))
+		}
+	}
+	out := jsval.NewObject(6)
+	if as.Len() == 1 && as.Lookup("type").IsTruthy() {
+		if as.Lookup("type").AsString() != "pad" {
+			out.Set("autosize", as.Lookup("type"))
+		}
+	} else {
+		out.Set("autosize", jsval.Obj(as))
+	}
+	spread(out, jsval.Obj(extractTopLevelProperties(config, false)))
+	spread(out, jsval.Obj(extractTopLevelProperties(inputSpec, true)))
+	return out
+}
+
+func assembleTopLevelModel(model Model, top *Object, datasets, usermeta jsval.Value) jsval.Value {
+	b := model.b()
+	vgConfig := undef
+	if b.config.IsTruthy() {
+		vgConfig = stripAndRedirectConfig(b.config)
+	}
+	rootData := assembleRootData(b.comp.data, datasets)
+	data := model.assembleSelectionData(rootData)
+	projections := b.assembleProjections()
+	title := model.assembleTitle()
+	style := model.assembleGroupStyle()
+	encodeEntry := b.assembleGroupEncodeEntry(true)
+	layoutSignals := model.assembleLayoutSignals()
+	// width and height signals with a value move to top-level properties.
+	var kept []jsval.Value
+	for _, s := range layoutSignals {
+		n := s.Get("name")
+		if n.IsStr() && (n.StrValue() == "width" || n.StrValue() == "height") && !s.Get("value").IsUndefined() {
+			top.Set(n.StrValue(), jsval.Num(jsval.ToNumber(s.Get("value"))))
+			continue
+		}
+		kept = append(kept, s)
+	}
+	params := top.Lookup("params")
+	other := omit(jsval.Obj(top), "params")
+	o := mk("$schema", "https://vega.github.io/schema/vega/v6.json")
+	if b.description.IsTruthy() {
+		o.Set("description", b.description)
+	}
+	spread(o, jsval.Obj(other))
+	if title.IsTruthy() {
+		o.Set("title", title)
+	}
+	if style.IsTruthy() {
+		o.Set("style", style)
+	}
+	if encodeEntry.IsTruthy() {
+		o.Set("encode", mkv("update", encodeEntry))
+	}
+	o.Set("data", jsval.Arr(data))
+	if len(projections) > 0 {
+		o.Set("projections", jsval.Arr(projections))
+	}
+	signals := append([]jsval.Value{}, kept...)
+	signals = append(signals, model.assembleSelectionTopLevelSignals(nil)...)
+	signals = append(signals, assembleParameterSignals(params)...)
+	spread(o, jsval.Obj(assembleGroup(model, signals)))
+	if vgConfig.IsTruthy() {
+		o.Set("config", vgConfig)
+	}
+	if usermeta.IsTruthy() {
+		o.Set("usermeta", usermeta)
+	}
+	return jsval.Obj(o)
+}

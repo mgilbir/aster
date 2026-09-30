@@ -1,0 +1,64 @@
+{
+ "width": 120,
+ "height": 60,
+ "padding": 5,
+ "signals": [
+  {
+   "name": "a",
+   "value": 4
+  },
+  {
+   "name": "b",
+   "update": "a * 2"
+  },
+  {
+   "name": "c",
+   "update": "b + width / 10"
+  },
+  {
+   "name": "counter",
+   "value": 0,
+   "on": [
+    {
+     "events": {
+      "signal": "a"
+     },
+     "update": "counter + 1"
+    }
+   ]
+  },
+  {
+   "name": "rangeStop",
+   "update": "[0, c]"
+  }
+ ],
+ "scales": [
+  {
+   "name": "x",
+   "type": "linear",
+   "domain": {
+    "signal": "rangeStop"
+   },
+   "range": "width"
+  }
+ ],
+ "marks": [
+  {
+   "type": "text",
+   "encode": {
+    "update": {
+     "x": {
+      "scale": "x",
+      "signal": "c"
+     },
+     "y": {
+      "value": 20
+     },
+     "text": {
+      "signal": "'a=' + a + ' b=' + b + ' c=' + c + ' n=' + counter"
+     }
+    }
+   }
+  }
+ ]
+}

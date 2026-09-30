@@ -1,0 +1,126 @@
+{
+ "$schema": "https://vega.github.io/schema/vega/v6.json",
+ "width": 150,
+ "height": 180,
+ "padding": 5,
+ "marks": [
+  {
+   "type": "rect",
+   "name": "back",
+   "zindex": {
+    "value": 0
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "value": 10
+     },
+     "y": {
+      "value": 10
+     },
+     "width": {
+      "value": 60
+     },
+     "height": {
+      "value": 60
+     },
+     "fill": {
+      "value": "#c33"
+     },
+     "zindex": {
+      "value": 2
+     }
+    }
+   }
+  },
+  {
+   "type": "rect",
+   "name": "front",
+   "interactive": false,
+   "encode": {
+    "update": {
+     "x": {
+      "value": 40
+     },
+     "y": {
+      "value": 40
+     },
+     "width": {
+      "value": 60
+     },
+     "height": {
+      "value": 60
+     },
+     "fill": {
+      "value": "#33c"
+     }
+    }
+   }
+  },
+  {
+   "type": "rect",
+   "from": {
+    "data": "t"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "value": 120
+     },
+     "width": {
+      "value": 20
+     },
+     "height": {
+      "value": 40
+     },
+     "fill": {
+      "field": "c"
+     },
+     "zindex": {
+      "field": "z"
+     }
+    }
+   }
+  }
+ ],
+ "data": [
+  {
+   "name": "t",
+   "values": [
+    {
+     "x": 10,
+     "c": "#a00",
+     "z": 3
+    },
+    {
+     "x": 20,
+     "c": "#0a0",
+     "z": 1
+    },
+    {
+     "x": 30,
+     "c": "#00a",
+     "z": 0
+    },
+    {
+     "x": 40,
+     "c": "#aa0",
+     "z": 2
+    },
+    {
+     "x": 50,
+     "c": "#0aa",
+     "z": -1
+    },
+    {
+     "x": 60,
+     "c": "#a0a",
+     "z": 1
+    }
+   ]
+  }
+ ]
+}

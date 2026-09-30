@@ -1,0 +1,12 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A band that states its inner padding, and a discretizing size scale that does not start at zero.",
+  "data": {"url": "data/cars.json"},
+  "mark": {"type": "bar", "stroke": "black"},
+  "encoding": {
+    "y": {"field": "Origin", "type": "nominal", "scale": {"paddingInner": 0.25}},
+    "x": {"aggregate": "count"},
+    "size": {"field": "Acceleration", "type": "quantitative", "scale": {"type": "quantize"}}
+  },
+  "config": {"bar": {"strokeWidth": 2}}
+}

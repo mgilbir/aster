@@ -1,0 +1,28 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "Categories ordered by another channel's aggregate, written as the shorthand for it.",
+  "data": {
+    "url": "data/cars.json"
+  },
+  "transform": [
+    {
+      "filter": "datum.Cylinders > 3"
+    }
+  ],
+  "height": {
+    "step": 17
+  },
+  "mark": "bar",
+  "encoding": {
+    "y": {
+      "field": "Origin",
+      "type": "ordinal",
+      "sort": "-x"
+    },
+    "x": {
+      "aggregate": "sum",
+      "field": "Horsepower",
+      "title": "power"
+    }
+  }
+}

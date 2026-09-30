@@ -1,0 +1,376 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "The projection properties that size and shape a map rather than place it: fit to an extent, fit to a size, the standard parallels of a conic, an orthographic clip angle, and the radius a Point geometry draws as.",
+  "width": 420,
+  "height": 360,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "land",
+      "values": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "name": "west"
+            },
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [
+                    -120,
+                    30
+                  ],
+                  [
+                    -100,
+                    30
+                  ],
+                  [
+                    -100,
+                    48
+                  ],
+                  [
+                    -118,
+                    46
+                  ],
+                  [
+                    -120,
+                    30
+                  ]
+                ]
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "name": "east"
+            },
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [
+                    -95,
+                    28
+                  ],
+                  [
+                    -72,
+                    32
+                  ],
+                  [
+                    -70,
+                    45
+                  ],
+                  [
+                    -90,
+                    44
+                  ],
+                  [
+                    -95,
+                    28
+                  ]
+                ]
+              ]
+            }
+          }
+        ]
+      },
+      "format": {
+        "type": "json",
+        "property": "features"
+      }
+    },
+    {
+      "name": "cities",
+      "values": [
+        {
+          "lon": -118,
+          "lat": 34
+        },
+        {
+          "lon": -87,
+          "lat": 41
+        },
+        {
+          "lon": -74,
+          "lat": 40
+        }
+      ],
+      "transform": [
+        {
+          "type": "formula",
+          "as": "geo",
+          "expr": "{type: 'Point', coordinates: [datum.lon, datum.lat]}"
+        }
+      ]
+    }
+  ],
+  "projections": [
+    {
+      "name": "fitted",
+      "type": "albers",
+      "fit": {
+        "signal": "data('land')"
+      },
+      "extent": [
+        [
+          10,
+          10
+        ],
+        [
+          200,
+          120
+        ]
+      ]
+    },
+    {
+      "name": "sized",
+      "type": "mercator",
+      "fit": {
+        "signal": "data('land')"
+      },
+      "size": [
+        180,
+        110
+      ]
+    },
+    {
+      "name": "wide",
+      "type": "conicEqualArea",
+      "parallels": [
+        10,
+        60
+      ],
+      "rotate": [
+        96,
+        0
+      ],
+      "fit": {
+        "signal": "data('land')"
+      },
+      "extent": [
+        [
+          10,
+          150
+        ],
+        [
+          200,
+          260
+        ]
+      ]
+    },
+    {
+      "name": "narrow",
+      "type": "conicEqualArea",
+      "parallels": [
+        40,
+        45
+      ],
+      "rotate": [
+        96,
+        0
+      ],
+      "fit": {
+        "signal": "data('land')"
+      },
+      "extent": [
+        [
+          220,
+          150
+        ],
+        [
+          410,
+          260
+        ]
+      ]
+    },
+    {
+      "name": "globe",
+      "type": "orthographic",
+      "clipAngle": 60,
+      "scale": 50,
+      "rotate": [
+        96,
+        -38,
+        0
+      ],
+      "translate": [
+        105,
+        290
+      ]
+    }
+  ],
+  "marks": [
+    {
+      "description": "Fitted into a rectangle 190 by 110 at (10,10). The projection has no scale or translate of its own; both are computed from where the geometry landed.",
+      "type": "shape",
+      "from": {
+        "data": "land"
+      },
+      "encode": {
+        "enter": {
+          "fill": {
+            "value": "#bcbddc"
+          },
+          "stroke": {
+            "value": "#54278f"
+          },
+          "strokeWidth": {
+            "value": 1
+          }
+        }
+      },
+      "transform": [
+        {
+          "type": "geoshape",
+          "projection": "fitted"
+        }
+      ]
+    },
+    {
+      "description": "The same geometry fitted to a size, which is that rectangle anchored at the origin \u2014 so this one is drawn in a group that moves it.",
+      "type": "group",
+      "encode": {
+        "enter": {
+          "x": {
+            "value": 220
+          },
+          "y": {
+            "value": 10
+          }
+        }
+      },
+      "marks": [
+        {
+          "type": "shape",
+          "from": {
+            "data": "land"
+          },
+          "encode": {
+            "enter": {
+              "fill": {
+                "value": "#a1d99b"
+              },
+              "stroke": {
+                "value": "#006d2c"
+              },
+              "strokeWidth": {
+                "value": 1
+              }
+            }
+          },
+          "transform": [
+            {
+              "type": "geoshape",
+              "projection": "sized"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "description": "A conic equal-area projection standing on parallels 10 and 60, fitted to the same box as the one beside it.",
+      "type": "shape",
+      "from": {
+        "data": "land"
+      },
+      "encode": {
+        "enter": {
+          "fill": {
+            "value": "#fdd0a2"
+          },
+          "stroke": {
+            "value": "#a63603"
+          },
+          "strokeWidth": {
+            "value": 1
+          }
+        }
+      },
+      "transform": [
+        {
+          "type": "geoshape",
+          "projection": "wide"
+        }
+      ]
+    },
+    {
+      "description": "The same projection on parallels 40 and 45, fitted to the same size. The parallels rebuild the formula rather than tuning it, so the two shapes differ.",
+      "type": "shape",
+      "from": {
+        "data": "land"
+      },
+      "encode": {
+        "enter": {
+          "fill": {
+            "value": "#fdae6b"
+          },
+          "stroke": {
+            "value": "#a63603"
+          },
+          "strokeWidth": {
+            "value": 1
+          }
+        }
+      },
+      "transform": [
+        {
+          "type": "geoshape",
+          "projection": "narrow"
+        }
+      ]
+    },
+    {
+      "description": "An orthographic globe clipped at 60 degrees from its centre, so the far side is cut away rather than folded back.",
+      "type": "shape",
+      "from": {
+        "data": "land"
+      },
+      "encode": {
+        "enter": {
+          "fill": {
+            "value": "#c6dbef"
+          },
+          "stroke": {
+            "value": "#08519c"
+          },
+          "strokeWidth": {
+            "value": 1
+          }
+        }
+      },
+      "transform": [
+        {
+          "type": "geoshape",
+          "projection": "globe"
+        }
+      ]
+    },
+    {
+      "description": "Three cities as Point geometry, drawn at the radius the projection asked for rather than at d3's 4.5.",
+      "type": "shape",
+      "from": {
+        "data": "cities"
+      },
+      "encode": {
+        "enter": {
+          "fill": {
+            "value": "#e6550d"
+          }
+        }
+      },
+      "transform": [
+        {
+          "type": "geoshape",
+          "projection": "fitted",
+          "field": "datum.geo",
+          "pointRadius": 6
+        }
+      ]
+    }
+  ]
+}

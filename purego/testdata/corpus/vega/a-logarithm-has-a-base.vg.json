@@ -1,0 +1,76 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A logarithm's base is **chosen**, not divided for. d3 writes `logp(base)` as `base === Math.E ? Math.log : base === 10 && Math.log10 || base === 2 && Math.log2 || (base = Math.log(base), x => Math.log(x) / base)` \u2014 three bases get the host's own function and everything else gets the division. The difference is not cosmetic: `Math.log10(1e6)` is exactly `6` where `ln(1e6) / ln(10)` is `5.999999999999999`, so an axis from one to a million asks for ticks over `[0, 5.999\u2026]` rather than `[0, 6]` and the **last power falls outside the range**. The first axis is that: 1 to 10^6, where upstream labels the million and this engine stopped at ten thousand. The second is base **2** over 1 to 1024, the other base with a host function and the same rounding to lose. The third is base **3**, which has no such function and takes the division upstream too \u2014 so the fixture says which bases are special and that the others are unchanged. The base-**2** axis is a control rather than a second proof, and the distinction is worth stating: `Math.log2` and `ln(x) / ln(2)` disagree in the last bit for tens of thousands of integers, and for **no power of two** \u2014 which is what a log axis ticks at. So a mutant that divides for base 2 survives this fixture and every other one that could be written; the arm is the faithful port and its effect is not observable through ticks. Base 10 is the half that is, and it is pinned above.",
+  "width": 120,
+  "height": 200,
+  "padding": 5,
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {
+          "v": 1
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "ten",
+      "type": "log",
+      "domain": [
+        1,
+        1000000
+      ],
+      "range": [
+        200,
+        0
+      ]
+    },
+    {
+      "name": "two",
+      "type": "log",
+      "base": 2,
+      "domain": [
+        1,
+        1024
+      ],
+      "range": [
+        200,
+        0
+      ]
+    },
+    {
+      "name": "three",
+      "type": "log",
+      "base": 3,
+      "domain": [
+        1,
+        19683
+      ],
+      "range": [
+        200,
+        0
+      ]
+    }
+  ],
+  "axes": [
+    {
+      "orient": "left",
+      "scale": "ten",
+      "tickCount": 4
+    },
+    {
+      "orient": "right",
+      "scale": "two",
+      "tickCount": 4
+    },
+    {
+      "orient": "right",
+      "scale": "three",
+      "tickCount": 4,
+      "offset": 60
+    }
+  ],
+  "marks": []
+}

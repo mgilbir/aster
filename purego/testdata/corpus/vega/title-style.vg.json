@@ -1,0 +1,102 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A title styled every way Vega allows: its own colour, face, line height and limit, an explicit align, angle and baseline overriding what the anchor and orient imply, and a subtitle with a face, weight, colour and line height of its own.",
+  "width": 260,
+  "height": 120,
+  "padding": 5,
+  "background": "white",
+  "title": {
+    "text": [
+      "A heading long enough",
+      "to need two lines"
+    ],
+    "subtitle": [
+      "and a subtitle",
+      "that also wraps"
+    ],
+    "orient": "top",
+    "anchor": "start",
+    "color": "#1b4965",
+    "font": "serif",
+    "fontSize": 15,
+    "fontWeight": 600,
+    "lineHeight": 20,
+    "limit": 200,
+    "align": "right",
+    "baseline": "middle",
+    "angle": 4,
+    "subtitleColor": "#7a7a7a",
+    "subtitleFont": "monospace",
+    "subtitleFontSize": 10,
+    "subtitleFontWeight": "bold",
+    "subtitleLineHeight": 15,
+    "subtitlePadding": 6
+  },
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {
+          "c": "a",
+          "v": 4
+        },
+        {
+          "c": "b",
+          "v": 9
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {
+        "data": "t",
+        "field": "c"
+      },
+      "range": "width"
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {
+        "data": "t",
+        "field": "v"
+      },
+      "range": "height",
+      "nice": true
+    }
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "x",
+            "field": "c"
+          },
+          "width": {
+            "scale": "x",
+            "band": 0.8
+          },
+          "y": {
+            "scale": "y",
+            "field": "v"
+          },
+          "y2": {
+            "scale": "y",
+            "value": 0
+          },
+          "fill": {
+            "value": "#4c78a8"
+          }
+        }
+      }
+    }
+  ]
+}

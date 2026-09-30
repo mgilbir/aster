@@ -1,0 +1,23 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "description": "A year bucket compared against bare years, and a month named rather than numbered.",
+  "data": {
+    "values": [
+      {"date": "2005-04-02", "price": 12},
+      {"date": "2006-05-02", "price": 48},
+      {"date": "2007-06-02", "price": 33},
+      {"date": "2008-07-02", "price": 91}
+    ]
+  },
+  "transform": [
+    {"filter": {"field": "date", "timeUnit": "year", "range": [2006, 2007]}},
+    {"filter": {"field": "date", "timeUnit": "month", "oneOf": ["may", "jun"]}}
+  ],
+  "width": 180,
+  "height": 110,
+  "mark": "line",
+  "encoding": {
+    "x": {"field": "date", "type": "temporal"},
+    "y": {"field": "price", "type": "quantitative"}
+  }
+}

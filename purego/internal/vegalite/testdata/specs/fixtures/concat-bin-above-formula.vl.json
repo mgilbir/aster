@@ -1,0 +1,22 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "Two histograms, one of a computed column: the bucketings that can climb above the formula do.",
+  "data": {"url": "data/cars.json"},
+  "transform": [{"calculate": "datum.Horsepower / datum.Weight_in_lbs", "as": "power"}],
+  "hconcat": [
+    {
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "Acceleration", "bin": {"maxbins": 20}},
+        "y": {"aggregate": "count"}
+      }
+    },
+    {
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "power", "bin": {"maxbins": 20}},
+        "y": {"aggregate": "count"}
+      }
+    }
+  ]
+}

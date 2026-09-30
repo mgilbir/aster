@@ -1,0 +1,11 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A trellis wrapped at two columns, written on the facet channel rather than beside it — which is where the wrapping is stated in this form.",
+  "data": {"url": "data/movies.json"},
+  "mark": "point",
+  "encoding": {
+    "facet": {"field": "MPAA Rating", "type": "ordinal", "columns": 2},
+    "x": {"field": "Worldwide Gross", "type": "quantitative"},
+    "y": {"field": "US DVD Sales", "type": "quantitative"}
+  }
+}

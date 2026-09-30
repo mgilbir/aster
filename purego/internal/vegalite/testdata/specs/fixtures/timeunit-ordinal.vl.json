@@ -1,0 +1,11 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A bucketed instant on a discrete scale, labelled as a date rather than a number.",
+  "data": {"url": "data/stocks.csv"},
+  "mark": "bar",
+  "encoding": {
+    "x": {"field": "date", "type": "ordinal", "timeUnit": "month"},
+    "y": {"aggregate": "mean", "field": "price", "type": "quantitative"},
+    "color": {"field": "date", "type": "ordinal", "timeUnit": "quarter"}
+  }
+}

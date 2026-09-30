@@ -1,0 +1,109 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "domainImplicit lets an ordinal value nobody declared join the domain instead of being unknown. The declared domain here is two values and the data has four, so the last two take the range entries after them \u2014 and the fourth wraps. The stroke uses the same scale without it, and simply has no colour for those two.",
+  "width": 240,
+  "height": 100,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {
+          "c": "alpha"
+        },
+        {
+          "c": "beta"
+        },
+        {
+          "c": "gamma"
+        },
+        {
+          "c": "delta"
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {
+        "data": "t",
+        "field": "c"
+      },
+      "range": "width",
+      "padding": 0.2
+    },
+    {
+      "name": "grows",
+      "type": "ordinal",
+      "domain": [
+        "alpha",
+        "beta"
+      ],
+      "range": [
+        "#4c78a8",
+        "#f58518",
+        "#54a24b"
+      ],
+      "domainImplicit": true
+    },
+    {
+      "name": "declared",
+      "type": "ordinal",
+      "domain": [
+        "alpha",
+        "beta"
+      ],
+      "range": [
+        "#333333",
+        "#999999",
+        "#cccccc"
+      ]
+    }
+  ],
+  "axes": [
+    {
+      "orient": "bottom",
+      "scale": "x"
+    }
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "x",
+            "field": "c"
+          },
+          "width": {
+            "scale": "x",
+            "band": 1
+          },
+          "y": {
+            "value": 0
+          },
+          "height": {
+            "value": 60
+          },
+          "fill": {
+            "scale": "grows",
+            "field": "c"
+          },
+          "stroke": {
+            "scale": "declared",
+            "field": "c"
+          },
+          "strokeWidth": {
+            "value": 3
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A title given as an **array** is one line per element, exactly as an axis title and a legend title are. An axis's and a legend's already followed that rule — the axis builder carries a comment saying `resolveLines`, not `resolveText`, because stringifying an array joins it with a comma on one line — and the chart's own title and subtitle were the two places that did not. `['two', 'lines']` is a heading 28 pixels tall against a single line's 13, so getting it wrong leaves the whole drawing fifteen pixels short and the heading reading `two,lines`. The signals here hold the arrays, which is how a trellis header or a control-driven heading arrives; the axis and legend titles beside them are the two that were already right, so the fixture compares all four against each other as well as against upstream.",
+  "width": 200,
+  "height": 110,
+  "padding": 5,
+  "signals": [
+    {"name": "heading", "value": ["two", "lines"]},
+    {"name": "under", "value": ["a", "subtitle", "of three"]},
+    {"name": "axisTitle", "value": ["axis", "title"]},
+    {"name": "legendTitle", "value": ["legend", "title"]}
+  ],
+  "title": {"text": {"signal": "heading"}, "subtitle": {"signal": "under"}},
+  "data": [{"name": "t", "values": [{"k": "a", "v": 28}, {"k": "b", "v": 91}]}],
+  "scales": [
+    {"name": "x", "type": "band", "domain": {"data": "t", "field": "k"}, "range": "width", "padding": 0.2},
+    {"name": "y", "type": "linear", "domain": [0, 100], "range": [100, 10]},
+    {"name": "colour", "type": "ordinal", "domain": {"data": "t", "field": "k"}, "range": "category"}
+  ],
+  "axes": [{"orient": "left", "scale": "y", "tickCount": 3, "title": {"signal": "axisTitle"}}],
+  "legends": [{"fill": "colour", "title": {"signal": "legendTitle"}}],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "t"},
+      "encode": {
+        "update": {
+          "x": {"scale": "x", "field": "k"},
+          "width": {"scale": "x", "band": 1},
+          "y": {"scale": "y", "field": "v"},
+          "y2": {"scale": "y", "value": 0},
+          "fill": {"scale": "colour", "field": "k"}
+        }
+      }
+    }
+  ]
+}

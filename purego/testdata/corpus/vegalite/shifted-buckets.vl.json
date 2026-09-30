@@ -1,0 +1,32 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "width": 300,
+  "description": "A rect marking the gaps in a series, drawn over the missing point rather than after it.",
+  "data": {
+    "values": [
+      {"a": "Jan 1, 2000", "b": 28},
+      {"a": "Jan 2, 2000", "b": 55},
+      {"a": "Jan 3, 2000", "b": null},
+      {"a": "Jan 4, 2000", "b": 55},
+      {"a": "Jan 5, 2000", "b": 43},
+      {"a": "Jan 6, 2000", "b": null},
+      {"a": "Jan 7, 2000", "b": 55}
+    ]
+  },
+  "layer": [
+    {
+      "mark": "line",
+      "encoding": {
+        "x": {"timeUnit": "yearmonthdate", "field": "a", "type": "temporal"},
+        "y": {"field": "b", "type": "quantitative"}
+      }
+    },
+    {
+      "transform": [{"filter": "datum.b === null"}],
+      "mark": {"type": "bar", "color": "red", "opacity": 0.2},
+      "encoding": {
+        "x": {"timeUnit": "yearmonthdate", "field": "a", "type": "temporal", "bandPosition": 0}
+      }
+    }
+  ]
+}

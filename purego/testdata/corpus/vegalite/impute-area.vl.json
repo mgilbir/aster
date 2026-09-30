@@ -1,0 +1,14 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A series with a hole in it, filled by an explicit impute rather than by the stack.",
+  "data": {"values": [
+    {"t": 1, "s": "a", "v": 3}, {"t": 2, "s": "a", "v": 5}, {"t": 3, "s": "a", "v": 4},
+    {"t": 1, "s": "b", "v": 2}, {"t": 3, "s": "b", "v": 6}
+  ]},
+  "mark": "line",
+  "encoding": {
+    "x": {"field": "t", "type": "quantitative"},
+    "y": {"field": "v", "type": "quantitative", "impute": {"value": 0}},
+    "color": {"field": "s", "type": "nominal"}
+  }
+}

@@ -1,0 +1,77 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "The three closed curve families over one ring of points — linear-closed, basis-closed and cardinal-closed — so a polygon can be told from a polyline that happens to end near where it began.",
+  "width": 200,
+  "height": 200,
+  "padding": 5,
+  "data": [
+    {
+      "name": "ring",
+      "values": [
+        {"x": 0, "y": 30},
+        {"x": 1, "y": 5},
+        {"x": 2, "y": 45},
+        {"x": 3, "y": 25},
+        {"x": 4, "y": 60}
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "angle",
+      "type": "point",
+      "domain": {"data": "ring", "field": "x"},
+      "range": [0, 5.026548245743669]
+    },
+    {
+      "name": "r",
+      "type": "linear",
+      "domain": [0, 70],
+      "range": [0, 90]
+    }
+  ],
+  "marks": [
+    {
+      "type": "line",
+      "name": "linear-ring",
+      "from": {"data": "ring"},
+      "encode": {
+        "enter": {
+          "x": {"signal": "100 + scale('r', datum.y) * cos(scale('angle', datum.x))"},
+          "y": {"signal": "100 + scale('r', datum.y) * sin(scale('angle', datum.x))"},
+          "interpolate": {"value": "linear-closed"},
+          "stroke": {"value": "#4c78a8"},
+          "strokeWidth": {"value": 2}
+        }
+      }
+    },
+    {
+      "type": "line",
+      "name": "basis-ring",
+      "from": {"data": "ring"},
+      "encode": {
+        "enter": {
+          "x": {"signal": "100 + scale('r', datum.y) * cos(scale('angle', datum.x))"},
+          "y": {"signal": "100 + scale('r', datum.y) * sin(scale('angle', datum.x))"},
+          "interpolate": {"value": "basis-closed"},
+          "stroke": {"value": "#f58518"},
+          "strokeWidth": {"value": 1}
+        }
+      }
+    },
+    {
+      "type": "line",
+      "name": "cardinal-ring",
+      "from": {"data": "ring"},
+      "encode": {
+        "enter": {
+          "x": {"signal": "100 + scale('r', datum.y) * cos(scale('angle', datum.x))"},
+          "y": {"signal": "100 + scale('r', datum.y) * sin(scale('angle', datum.x))"},
+          "interpolate": {"value": "cardinal-closed"},
+          "stroke": {"value": "#54a24b"},
+          "strokeWidth": {"value": 1}
+        }
+      }
+    }
+  ]
+}

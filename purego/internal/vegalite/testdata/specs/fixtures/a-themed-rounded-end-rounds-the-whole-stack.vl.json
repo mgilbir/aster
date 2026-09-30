@@ -1,0 +1,58 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A rounded end that came from a **theme** still rounds the stack rather than each of its segments. `parseMarkGroups` decides whether a bar is drawn inside a group of its own by asking `const hasCornerRadius = VG_CORNERRADIUS_CHANNELS.some((prop) => getMarkPropOrConfig(prop, model.markDef, model.config))`, and then `if (model.stack && !model.fieldDef('size') && hasCornerRadius) return getGroupsForStackedBarWithCornerRadius(model)`. The subtlety is which mark definition is being asked: `initMarkdef` has already run, and it is what turns `cornerRadiusEnd` — a word the five Vega channels above do not include — into `markDef.cornerRadiusTopLeft` and `markDef.cornerRadiusTopRight` by way of `for (const newProp of newProps) { markDef[newProp] = cornerRadiusEnd }`. This compiler asked the mark as it had been *written* instead of as it had been rewritten, so it saw a radius only when the chart put one on the mark itself. A theme that rounds every bar in a report — `config.bar.cornerRadiusEnd`, the whole point of which is that no chart has to mention it — opened no group at all, and every segment of every stack was rounded separately, joins and all, where upstream rounds the stack once at its two ends. The theme here sets `config.bar.cornerRadiusEnd` and no mark mentions a radius. The first panel is a vertical stack, which upstream wraps in an outer group carrying the radius, the clip and the stack's pixel extent, an inner group that undoes the outer one's translation, and the segments themselves stripped of the position across the stack. The second is the same stack lying on its side, which takes the other branch of the same function and moves `y`, `height` and the radii up instead of `x` and `width`. The third and fourth are the rows that must **not** change, and they are why the guard is three conditions rather than one: the third writes `\"stack\": null`, so `model.stack` is absent and a plain rounded rect is correct — the radius belongs to the single bar because the single bar is the whole of it; the fourth carries a `size` encoding, which `!model.fieldDef('size')` excludes outright, because a segment narrower than its group would no longer fill the rounded outline and upstream declines to guess. Both keep the theme's rounded top and neither may gain the groups.",
+  "data": {
+    "values": [
+      {"c": "Jan", "g": "north", "v": 28},
+      {"c": "Jan", "g": "south", "v": 41},
+      {"c": "Feb", "g": "north", "v": 35},
+      {"c": "Feb", "g": "south", "v": 19},
+      {"c": "Mar", "g": "north", "v": 22},
+      {"c": "Mar", "g": "south", "v": 33}
+    ]
+  },
+  "config": {"bar": {"cornerRadiusEnd": 8}},
+  "hconcat": [
+    {
+      "width": 110,
+      "height": 130,
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "c", "type": "nominal", "sort": null, "axis": {"labelAngle": 0}},
+        "y": {"field": "v", "type": "quantitative"},
+        "color": {"field": "g", "type": "nominal"}
+      }
+    },
+    {
+      "width": 130,
+      "height": 110,
+      "mark": "bar",
+      "encoding": {
+        "y": {"field": "c", "type": "nominal", "sort": null},
+        "x": {"field": "v", "type": "quantitative"},
+        "color": {"field": "g", "type": "nominal"}
+      }
+    },
+    {
+      "width": 110,
+      "height": 130,
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "c", "type": "nominal", "sort": null, "axis": {"labelAngle": 0}},
+        "y": {"field": "v", "type": "quantitative", "stack": null},
+        "color": {"field": "g", "type": "nominal"}
+      }
+    },
+    {
+      "width": 110,
+      "height": 130,
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "c", "type": "nominal", "sort": null, "axis": {"labelAngle": 0}},
+        "y": {"field": "v", "type": "quantitative"},
+        "size": {"field": "v", "type": "quantitative"},
+        "color": {"field": "g", "type": "nominal"}
+      }
+    }
+  ]
+}

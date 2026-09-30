@@ -1,0 +1,17 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A window running total over a filtered, calculated field.",
+  "data": {"url": "data/barley.json"},
+  "transform": [
+    {"filter": {"field": "site", "oneOf": ["Morris", "Waseca", "Crookston"]}},
+    {"calculate": "datum.yield * 2", "as": "doubled"},
+    {"joinaggregate": [{"op": "mean", "field": "yield", "as": "site_mean"}], "groupby": ["site"]},
+    {"window": [{"op": "row_number", "as": "rank"}], "sort": [{"field": "yield", "order": "descending"}]}
+  ],
+  "mark": "point",
+  "encoding": {
+    "x": {"field": "rank", "type": "quantitative"},
+    "y": {"field": "doubled", "type": "quantitative"},
+    "color": {"field": "site", "type": "nominal"}
+  }
+}

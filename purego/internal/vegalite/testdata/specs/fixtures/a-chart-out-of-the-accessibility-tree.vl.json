@@ -1,0 +1,21 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "`config.aria: false` is a statement about the whole drawing — \"a boolean flag indicating if ARIA default attributes should be included for marks and guides\" — and a guide has to carry it on itself, because a renderer reading the specification a guide at a time has nothing else to tell it that the chart it belongs to is not being described. `assembleAxis` writes it as the last word of the main axis: `{scale, orient, grid: false, ...title, ...axis, ...(config.aria === false ? {aria: false} : {}), zindex}`. This compiler wrote nothing, so a document that takes its charts out of the accessibility tree left every axis in it announcing itself to a screen reader as an axis. Three things about where that spread sits. It is **after** `...axis`, so it overrules what the axis itself said: the horizontal axis here asks for `aria: true` and comes out `false`, which is right, since an axis cannot opt back into a tree the chart is not in. It is on the **main** axis only — the gridlines are `aria: false` whatever the theme says, `assembleAxis` writing that one unconditionally in its grid arm, because a grid is a repetition of the axis beside it and reading it out twice tells a listener nothing. And it is the axis's own rule rather than a shared one: the legend's twin in `assembleLegend` is guarded by `legend.aria == undefined`, so a legend that asks for `aria: true` keeps it where an axis does not. The colour key here must not change — it states nothing, so it takes the `false` it would have taken before this rule existed, and its presence says the two guides were not made to share a reading.",
+  "data": {
+    "values": [
+      {"c": "alpha", "v": 28},
+      {"c": "beta", "v": 55},
+      {"c": "gamma", "v": 43},
+      {"c": "delta", "v": 91}
+    ]
+  },
+  "config": {"aria": false},
+  "width": 200,
+  "height": 120,
+  "mark": "bar",
+  "encoding": {
+    "x": {"field": "c", "type": "nominal", "axis": {"aria": true}},
+    "y": {"field": "v", "type": "quantitative"},
+    "color": {"field": "c", "type": "nominal"}
+  }
+}

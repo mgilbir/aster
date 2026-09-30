@@ -1,0 +1,86 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "geoArea, geoBounds and geoCentroid with no projection, which upstream measures on the globe rather than on the page. Both windings of the same box are here because a spherical polygon has no outside: wound one way the ring is a square degree, wound the other it is everything else on Earth.",
+  "width": 300,
+  "height": 160,
+  "padding": 5,
+
+  "data": [
+    {
+      "name": "shapes",
+      "values": [
+        {
+          "name": "box, wound clockwise",
+          "shape": {
+            "type": "Polygon",
+            "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]
+          }
+        },
+        {
+          "name": "box, wound the other way",
+          "shape": {
+            "type": "Polygon",
+            "coordinates": [[[0, 0], [0, 1], [1, 1], [1, 0], [0, 0]]]
+          }
+        },
+        {
+          "name": "wide",
+          "shape": {
+            "type": "Polygon",
+            "coordinates": [[[-60, -20], [60, -20], [60, 40], [-60, 40], [-60, -20]]]
+          }
+        },
+        {
+          "name": "across the antimeridian",
+          "shape": {"type": "MultiPoint", "coordinates": [[179, 10], [-179, 20]]}
+        },
+        {
+          "name": "a line",
+          "shape": {"type": "LineString", "coordinates": [[-45, 0], [45, 0]]}
+        },
+        {
+          "name": "two points",
+          "shape": {"type": "MultiPoint", "coordinates": [[-10, -10], [10, 10]]}
+        }
+      ],
+      "transform": [
+        {"type": "formula", "as": "area", "expr": "geoArea(null, datum.shape)"},
+        {"type": "formula", "as": "centre", "expr": "geoCentroid(null, datum.shape)"},
+        {"type": "formula", "as": "box", "expr": "geoBounds(null, datum.shape)"},
+        {"type": "formula", "as": "lon", "expr": "datum.centre[0]"},
+        {"type": "formula", "as": "lat", "expr": "datum.centre[1]"},
+        {"type": "formula", "as": "west", "expr": "datum.box[0][0]"},
+        {"type": "formula", "as": "north", "expr": "datum.box[1][1]"}
+      ]
+    }
+  ],
+
+  "scales": [
+    {
+      "name": "yscale",
+      "type": "band",
+      "domain": {"data": "shapes", "field": "name"},
+      "range": "height",
+      "padding": 0.2
+    }
+  ],
+
+  "axes": [{"orient": "left", "scale": "yscale"}],
+
+  "marks": [
+    {
+      "type": "text",
+      "from": {"data": "shapes"},
+      "encode": {
+        "enter": {
+          "x": {"value": 0},
+          "y": {"scale": "yscale", "field": "name", "band": 0.5},
+          "baseline": {"value": "middle"},
+          "text": {
+            "signal": "format(datum.area, '.6f') + ' sr, at ' + format(datum.lon, '.3f') + ',' + format(datum.lat, '.3f') + ', w' + format(datum.west, '.1f') + ' n' + format(datum.north, '.1f')"
+          }
+        }
+      }
+    }
+  ]
+}

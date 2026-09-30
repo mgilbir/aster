@@ -1,0 +1,31 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "description": "Two measures over one plot, each with a scale and an axis of its own.",
+  "data": {
+    "values": [
+      {"month": "Jan", "revenue": 280, "rate": 3.1},
+      {"month": "Feb", "revenue": 550, "rate": 2.4},
+      {"month": "Mar", "revenue": 430, "rate": 4.8},
+      {"month": "Apr", "revenue": 910, "rate": 1.2}
+    ]
+  },
+  "width": 200,
+  "height": 140,
+  "resolve": {"scale": {"y": "independent"}},
+  "layer": [
+    {
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "month", "type": "nominal"},
+        "y": {"field": "revenue", "type": "quantitative"}
+      }
+    },
+    {
+      "mark": {"type": "line", "color": "firebrick", "point": true},
+      "encoding": {
+        "x": {"field": "month", "type": "nominal"},
+        "y": {"field": "rate", "type": "quantitative"}
+      }
+    }
+  ]
+}

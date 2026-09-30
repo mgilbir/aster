@@ -1,0 +1,114 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "labelOffset slides an axis label along the axis rather than away from it, which is what labelPadding does. A band axis keeps its centring and slides; a linear one just slides.",
+  "width": 240,
+  "height": 120,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {
+          "c": "alpha",
+          "v": 3
+        },
+        {
+          "c": "beta",
+          "v": 7
+        },
+        {
+          "c": "gamma",
+          "v": 5
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {
+        "data": "t",
+        "field": "c"
+      },
+      "range": "width",
+      "padding": 0.2
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": [
+        0,
+        10
+      ],
+      "range": "height"
+    }
+  ],
+  "axes": [
+    {
+      "orient": "bottom",
+      "scale": "x",
+      "labelOffset": 14,
+      "labelPadding": 2,
+      "title": "band labels slid 14 along"
+    },
+    {
+      "orient": "top",
+      "scale": "x",
+      "labelOffset": -14,
+      "labelPadding": 2
+    },
+    {
+      "orient": "left",
+      "scale": "y",
+      "labelOffset": 8,
+      "tickCount": 5,
+      "title": "linear labels slid 8 down"
+    },
+    {
+      "orient": "right",
+      "scale": "y",
+      "tickCount": 5,
+      "aria": false
+    },
+    {
+      "orient": "right",
+      "scale": "y",
+      "tickCount": 5,
+      "offset": 26,
+      "description": "the same values again"
+    }
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "x",
+            "field": "c"
+          },
+          "width": {
+            "scale": "x",
+            "band": 1
+          },
+          "y": {
+            "scale": "y",
+            "field": "v"
+          },
+          "y2": {
+            "scale": "y",
+            "value": 0
+          },
+          "fill": {
+            "value": "#4c78a8"
+          }
+        }
+      }
+    }
+  ]
+}

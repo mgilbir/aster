@@ -1,0 +1,112 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "**A scale's shape parameter is coerced, not validated, and each of the three shows it somewhere different.** Upstream's scale transform walks its parameters and calls a setter per key — `scale[key](_[key])` — and d3's setters for these three are `base = +_`, `exponent = +_` and `constant = +_`. A word becomes NaN and stays on the scale. This engine read all three with the reader that *discards* a NaN and fell back on the default, so a chart upstream cannot draw was drawn as though nothing were wrong.\n\nWhat makes the three worth having together is that **no two of them are visible in the same place**, so a fixture carrying only one would leave the other two untested:\n\n- **`pow.exponent`** poisons the *mapping*: `scale(4)` is NaN, the mark is unplaceable, and the axis ticks are untouched. Probed at `exponent: \"wide\"` over `[1, 100]`.\n- **`symlog.constant`** does the same to the mapping and likewise leaves the ticks alone.\n- **`log.base`** does *not* touch the mapping at all — `scale(4)` is 36.12 with a base of 10, of 2, or of NaN, because d3's log scale normalises `log(x)` and the base only ever reaches the **ticks**. With a NaN base upstream generates **no ticks whatsoever**, where base 10 gives nineteen and base 2 gives seven. The axis is the only place this one is visible, which is why there is an axis over every scale here.\n\n**The colour-ramp versions of these three are deliberately not here, and the resolver keeps its old reader for them.** Probed: a *colour*-ranged `pow` or `symlog` with a NaN parameter makes upstream **throw** from inside d3-interpolate — `TypeError: I[i] is not a function`, in `piecewise` — and every mark comes out with a null fill. There is no upstream answer to be faithful to when upstream raises, so inventing a NaN there would match nothing. A `log` ramp does not throw, and its colours are identical with a NaN base or a real one, so nothing turns on it either. Three sites changed, three sites left, and the reason is written where they are.\n\nThe controls are the same three scales with real parameters — `base: 2`, `exponent: 2`, `constant: 2` — because these coercions sit on the path every log, pow and symlog chart takes, and a change that broke ordinary ones has to fail here rather than somewhere else.",
+  "width": 120,
+  "height": 160,
+  "padding": 5,
+  "signals": [
+    {"name": "word", "value": "wide"}
+  ],
+  "data": [
+    {"name": "t", "values": [{"v": 4}]}
+  ],
+  "scales": [
+    {
+      "name": "logBad",
+      "type": "log",
+      "domain": [1, 100],
+      "range": [0, 120],
+      "base": {"signal": "word"}
+    },
+    {"name": "logGood", "type": "log", "domain": [1, 100], "range": [0, 120], "base": 2},
+    {
+      "name": "powBad",
+      "type": "pow",
+      "domain": [1, 100],
+      "range": [0, 120],
+      "exponent": {"signal": "word"}
+    },
+    {"name": "powGood", "type": "pow", "domain": [1, 100], "range": [0, 120], "exponent": 2},
+    {
+      "name": "symBad",
+      "type": "symlog",
+      "domain": [1, 100],
+      "range": [0, 120],
+      "constant": {"signal": "word"}
+    },
+    {"name": "symGood", "type": "symlog", "domain": [1, 100], "range": [0, 120], "constant": 2}
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "logBad", "tickCount": 5, "offset": 0},
+    {"orient": "bottom", "scale": "logGood", "tickCount": 5, "offset": 30},
+    {"orient": "bottom", "scale": "powGood", "tickCount": 5, "offset": 60},
+    {"orient": "bottom", "scale": "symGood", "tickCount": 5, "offset": 90}
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "t"},
+      "encode": {
+        "update": {
+          "x": {"scale": "powBad", "field": "v"},
+          "width": {"value": 8},
+          "y": {"value": 0},
+          "y2": {"value": 12},
+          "fill": {"value": "#4c78a8"}
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {"data": "t"},
+      "encode": {
+        "update": {
+          "x": {"scale": "symBad", "field": "v"},
+          "width": {"value": 8},
+          "y": {"value": 16},
+          "y2": {"value": 28},
+          "fill": {"value": "#f58518"}
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {"data": "t"},
+      "encode": {
+        "update": {
+          "x": {"scale": "logBad", "field": "v"},
+          "width": {"value": 8},
+          "y": {"value": 32},
+          "y2": {"value": 44},
+          "fill": {"value": "#54a24b"}
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {"data": "t"},
+      "encode": {
+        "update": {
+          "x": {"scale": "powGood", "field": "v"},
+          "width": {"value": 8},
+          "y": {"value": 48},
+          "y2": {"value": 60},
+          "fill": {"value": "#e45756"}
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {"data": "t"},
+      "encode": {
+        "update": {
+          "x": {"scale": "symGood", "field": "v"},
+          "width": {"value": 8},
+          "y": {"value": 64},
+          "y2": {"value": 76},
+          "fill": {"value": "#b279a2"}
+        }
+      }
+    }
+  ]
+}

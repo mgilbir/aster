@@ -1,0 +1,10 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A tick pinned to a constant position along one axis and banded along the other.",
+  "data": {"url": "data/cars.json"},
+  "mark": {"type": "tick", "size": 8, "color": "#ccc"},
+  "encoding": {
+    "x": {"field": "Origin", "type": "nominal"},
+    "y": {"value": 30}
+  }
+}

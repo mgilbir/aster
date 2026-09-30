@@ -1,0 +1,157 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A domain of fewer than two values is still a scale. d3 builds one, places nothing through it and answers `NaN`: `domain([])` scales anything to `NaN`, and so does `domain([5])` \u2014 whose domain a linear scale's `zero` first pulls to `[0]`. Upstream therefore has a scale for a chart to name, and every `scale()` naming it answers `NaN`. This engine reported `needs at least two domain values` and built **no scale**, so the expressions below then reported an undefined scale as well and the chart lost its text to a diagnostic about something it had not got wrong \u2014 one refusal becoming four. `none` is the empty domain and `one` the single-valued one; `two` is an ordinary domain beside them, so the fixture says what the rule costs a chart that asked for nothing strange. The axes are drawn over all three because a scale that places nothing still has ticks to generate, and d3's answer for a domain of `[]` is no ticks at all while `[0]` gets exactly one. The single-valued domain has a **scale** here but no axis: upstream draws its tick and label at `y = NaN`, with finite `x`, and measures the surface 145 tall where this engine measures 140 \u2014 five pixels in the axis's own extent rather than in anything drawn, which is unexplained and is recorded in STATUS.md rather than guessed at. Everything else about that scale is compared here. The red rect is placed *through* the single-valued scale, so its `y` is `NaN`: upstream draws it and measures nothing from it, because `Bounds.union` is four bare comparisons and a comparison against `NaN` is false. NaN-propagating `min`/`max` functions differ, so one item at an impossible position made the whole surface `NaN` \u2014 which is the rule this mark is here to pin.",
+  "width": 240,
+  "height": 130,
+  "padding": 5,
+  "signals": [
+    {
+      "name": "none",
+      "value": []
+    },
+    {
+      "name": "one",
+      "value": [
+        5
+      ]
+    }
+  ],
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {
+          "k": "a",
+          "v": 28
+        },
+        {
+          "k": "b",
+          "v": 91
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "yNone",
+      "type": "linear",
+      "domain": {
+        "signal": "none"
+      },
+      "range": [
+        110,
+        10
+      ]
+    },
+    {
+      "name": "yOne",
+      "type": "linear",
+      "domain": {
+        "signal": "one"
+      },
+      "range": [
+        110,
+        10
+      ]
+    },
+    {
+      "name": "yTwo",
+      "type": "linear",
+      "domain": [
+        0,
+        100
+      ],
+      "range": [
+        110,
+        10
+      ]
+    }
+  ],
+  "axes": [
+    {
+      "orient": "left",
+      "scale": "yNone",
+      "tickCount": 3
+    }
+  ],
+  "marks": [
+    {
+      "type": "text",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "update": {
+          "x": {
+            "value": 40
+          },
+          "y": {
+            "signal": "20 + 16 * datum.v / 28"
+          },
+          "text": {
+            "signal": "'none ' + scale('yNone', datum.v) + '  one ' + scale('yOne', datum.v) + '  two ' + scale('yTwo', datum.v)"
+          },
+          "fontSize": {
+            "value": 9
+          },
+          "baseline": {
+            "value": "top"
+          }
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "update": {
+          "x": {
+            "value": 40
+          },
+          "width": {
+            "value": 12
+          },
+          "y": {
+            "scale": "yTwo",
+            "field": "v"
+          },
+          "y2": {
+            "scale": "yTwo",
+            "value": 0
+          },
+          "fill": {
+            "value": "#4c78a8"
+          }
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "update": {
+          "x": {
+            "value": 120
+          },
+          "width": {
+            "value": 20
+          },
+          "y": {
+            "scale": "yOne",
+            "field": "v"
+          },
+          "y2": {
+            "value": 100
+          },
+          "fill": {
+            "value": "#e45756"
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,246 @@
+{
+ "$schema": "https://vega.github.io/schema/vega/v6.json",
+ "width": 300,
+ "height": 190,
+ "padding": 5,
+ "marks": [
+  {
+   "type": "rect",
+   "from": {
+    "data": "t"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "field": "y"
+     },
+     "width": {
+      "value": 40
+     },
+     "height": {
+      "field": "h"
+     },
+     "cornerRadius": {
+      "field": "r"
+     },
+     "fill": {
+      "value": "#eb5"
+     },
+     "stroke": {
+      "value": "#530"
+     },
+     "strokeWidth": {
+      "field": "sw"
+     },
+     "strokeDash": {
+      "signal": "datum.i % 2 ? [4,2] : []"
+     },
+     "strokeCap": {
+      "value": "round"
+     },
+     "fillOpacity": {
+      "value": 0.8
+     }
+    }
+   }
+  },
+  {
+   "type": "rect",
+   "encode": {
+    "update": {
+     "x": {
+      "value": 10
+     },
+     "y": {
+      "value": 140
+     },
+     "width": {
+      "value": 100
+     },
+     "height": {
+      "value": 40
+     },
+     "cornerRadiusTopLeft": {
+      "value": 12
+     },
+     "cornerRadiusBottomRight": {
+      "value": 20
+     },
+     "cornerRadiusBottomLeft": {
+      "value": 3
+     },
+     "fill": {
+      "value": "#9c6"
+     },
+     "stroke": {
+      "value": "#000"
+     }
+    }
+   }
+  },
+  {
+   "type": "rect",
+   "encode": {
+    "update": {
+     "x": {
+      "value": 130
+     },
+     "y": {
+      "value": 140
+     },
+     "width": {
+      "value": -40
+     },
+     "height": {
+      "value": 40
+     },
+     "cornerRadius": {
+      "value": 6
+     },
+     "fill": {
+      "value": "#c69"
+     }
+    }
+   }
+  },
+  {
+   "type": "rect",
+   "encode": {
+    "update": {
+     "x": {
+      "value": 180
+     },
+     "y": {
+      "value": 140
+     },
+     "x2": {
+      "value": 240
+     },
+     "y2": {
+      "value": 180
+     },
+     "fill": {
+      "value": "#69c"
+     },
+     "strokeMiterLimit": {
+      "value": 10
+     },
+     "strokeJoin": {
+      "value": "miter"
+     },
+     "stroke": {
+      "value": "#111"
+     },
+     "strokeWidth": {
+      "value": 8
+     }
+    }
+   }
+  },
+  {
+   "type": "rect",
+   "encode": {
+    "update": {
+     "x": {
+      "value": 250
+     },
+     "y": {
+      "value": 140
+     },
+     "width": {
+      "value": 0
+     },
+     "height": {
+      "value": 30
+     },
+     "stroke": {
+      "value": "red"
+     }
+    }
+   }
+  },
+  {
+   "type": "rect",
+   "encode": {
+    "update": {
+     "x": {
+      "value": 270
+     },
+     "y": {
+      "value": 140
+     },
+     "width": {
+      "value": 20
+     },
+     "height": {
+      "value": 20
+     },
+     "cornerRadius": {
+      "value": 500
+     },
+     "fill": {
+      "value": "black"
+     }
+    }
+   }
+  }
+ ],
+ "data": [
+  {
+   "name": "t",
+   "values": [
+    {
+     "i": 0,
+     "x": 10,
+     "y": 10,
+     "h": 30,
+     "r": 0,
+     "sw": 0.5
+    },
+    {
+     "i": 1,
+     "x": 58,
+     "y": 10,
+     "h": 42,
+     "r": 4,
+     "sw": 1.2
+    },
+    {
+     "i": 2,
+     "x": 106,
+     "y": 10,
+     "h": 54,
+     "r": 8,
+     "sw": 1.9
+    },
+    {
+     "i": 3,
+     "x": 154,
+     "y": 10,
+     "h": 66,
+     "r": 12,
+     "sw": 2.5999999999999996
+    },
+    {
+     "i": 4,
+     "x": 202,
+     "y": 10,
+     "h": 78,
+     "r": 16,
+     "sw": 3.3
+    },
+    {
+     "i": 5,
+     "x": 250,
+     "y": 10,
+     "h": 90,
+     "r": 20,
+     "sw": 4.0
+    }
+   ]
+  }
+ ]
+}
