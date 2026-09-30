@@ -62,7 +62,15 @@ func (r *renderer) textItem(m *scene.Mark, it *scene.Item) {
 // image size), size and aspect ratio handling.
 func (r *renderer) imageItem(m *scene.Mark, it *scene.Item) {
 	w := &r.w
-	info := r.image(it.URL)
+	var info ImageInfo
+	if b, ok := it.Bitmap(); ok {
+		// A canvas is written as it is, not through the URL sanitizer: the
+		// data URL is made here, not taken from the specification.
+		bw, bh := b.Size()
+		info = ImageInfo{Src: b.DataURL(), Width: float64(bw), Height: float64(bh)}
+	} else {
+		info = r.image(it.URL)
+	}
 	x, y, iw, ih := scene.ImageGeometry(it, info.Width, info.Height)
 	w.attr("xlink:href", info.Src)
 	w.attrName("transform")

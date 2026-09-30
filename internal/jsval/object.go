@@ -22,7 +22,17 @@ type Object struct {
 	// str, when set, is the object's toString (d3 colour objects print as
 	// "rgb(…)"); plain objects print as "[object Object]".
 	str func(*Object) string
+	// host is an opaque payload of the embedding program, for the objects
+	// that stand for a host object (a canvas) rather than plain data. Two
+	// objects with a payload are equal only when they are the same object.
+	host any
 }
+
+// SetHost attaches an opaque host payload to the object.
+func (o *Object) SetHost(h any) { o.host = h }
+
+// Host returns the payload attached with SetHost, or nil.
+func (o *Object) Host() any { return o.host }
 
 // SetStringer sets the function String(v) uses for this object.
 func (o *Object) SetStringer(f func(*Object) string) { o.str = f }
@@ -297,6 +307,7 @@ func (o *Object) Clone() *Object {
 	}
 	if o != nil {
 		c.str = o.str
+		c.host = o.host
 		c.vals = append(c.vals, o.vals...)
 	}
 	if len(c.keys) > indexThreshold {

@@ -17,7 +17,7 @@ import (
 
 // TestCompareFiles compares the engine with the node oracle on the specs in
 // ASTER_COMPARE and prints the first difference in full (the whole engine
-// error with ASTER_FULL set).
+// error with ASTER_FULL set). ASTER_COMPARE_DUMP=dir writes both SVGs there.
 func TestCompareFiles(t *testing.T) {
 	list := os.Getenv("ASTER_COMPARE")
 	if list == "" {
@@ -41,6 +41,11 @@ func TestCompareFiles(t *testing.T) {
 		want, err := o.SVG(lite, spec)
 		if err != nil {
 			t.Fatalf("oracle: %v", err)
+		}
+		if dir := os.Getenv("ASTER_COMPARE_DUMP"); dir != "" {
+			base := filepath.Join(dir, strings.TrimSuffix(filepath.Base(f), filepath.Ext(f)))
+			_ = os.WriteFile(base+".got.svg", []byte(got), 0o644)
+			_ = os.WriteFile(base+".want.svg", []byte(want.SVG), 0o644)
 		}
 		msg := func(err error) string {
 			if os.Getenv("ASTER_FULL") != "" {

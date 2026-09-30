@@ -158,12 +158,6 @@ func (c *rtContext) parseOperator(e *entry) {
 	} else {
 		mk, ok := transformFactories[e.typ]
 		if !ok {
-			switch e.typ {
-			case "label", "wordcloud", "heatmap":
-				// These draw to a canvas, which a headless upstream render
-				// does not have either.
-				fail("the %s transform needs a canvas and is not supported", e.typ)
-			}
 			fail("unrecognized transform type: %s", e.typ)
 		}
 		n = c.g.add(e.typ, nil)

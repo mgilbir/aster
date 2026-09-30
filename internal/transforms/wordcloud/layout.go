@@ -2,6 +2,7 @@ package wordcloud
 
 import (
 	"context"
+	"errors"
 	"math"
 	"sort"
 
@@ -18,6 +19,7 @@ const (
 	MaxWords       = 50000
 	maxArea        = 1 << 28 // pixels of the placement board
 	maxSpiralSteps = 1 << 24
+	maxSpriteWork  = 1 << 28 // sprite pixels cut out of the sheets in one layout
 )
 
 // Spiral names the search path a word follows away from its start position.
@@ -58,6 +60,7 @@ type layout struct {
 	sprite   []int32 // shared scratch, as upstream's per-call `sprite` array
 	board    []int32
 	sw       int
+	work     int // sprite pixels cut so far
 }
 
 // toInt32 is JavaScript's ToInt32 (the effect of `~~x` and `x | 0`).
@@ -93,7 +96,9 @@ func (l *layout) run(words []*word) ([]*word, error) {
 		d := words[i]
 		d.x = toInt32(l.size[0]*(l.random()+.5)) >> 1
 		d.y = toInt32(l.size[1]*(l.random()+.5)) >> 1
-		l.makeSprite(words, i)
+		if err := l.makeSprite(words, i); err != nil {
+			return nil, err
+		}
 		if d.hasText {
 			ok, err := l.place(d, bounds)
 			if err != nil {
@@ -270,15 +275,20 @@ func collideRects(a *word, b *[2][2]int) bool {
 // then cuts each word's bitmap out of it. Upstream re-walks the words before
 // di as well, but those are already placed (or rejected) and never read again,
 // so they are skipped here.
-func (l *layout) makeSprite(words []*word, di int) {
+func (l *layout) makeSprite(words []*word, di int) error {
 	if words[di].hasSprite {
-		return
+		return nil
 	}
 	l.mask.clear()
 	x, y, maxh := 0, 0, 0
 	n := len(words)
 	start := di
 	for ; di < n; di++ {
+		// Drawing a word is the expensive part of a layout: honour the
+		// deadline between words, not only between placements.
+		if err := l.ctx.Err(); err != nil {
+			return err
+		}
 		d := words[di]
 		f := Font{Style: d.styleS, Weight: d.wtS, Family: d.family, Px: toInt32(float64(d.size+1) / 1)}
 		w := l.renderer.Measure(f, d.text+"m")
@@ -330,6 +340,11 @@ func (l *layout) makeSprite(words []*word, di int) {
 		w := d.width
 		w32 := w >> 5
 		h := d.y1 - d.y0
+		// A word wider than the sheet still gets a sprite upstream; the cut
+		// costs its area, so the total is bounded.
+		if l.work += w * h; l.work > maxSpriteWork || w < 0 || h < 0 {
+			return errors.New("wordcloud: words are too large to lay out")
+		}
 		need := h * w32
 		if need > len(l.sprite) {
 			l.sprite = append(l.sprite, make([]int32, need-len(l.sprite))...)
@@ -364,6 +379,7 @@ func (l *layout) makeSprite(words []*word, di int) {
 		d.sprite = append([]int32(nil), l.sprite[:cnt]...)
 		d.hasSprite = true
 	}
+	return nil
 }
 
 // sortWords orders by descending size; the sort is stable as in modern engines.

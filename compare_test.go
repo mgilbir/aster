@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -62,6 +63,13 @@ var corpusSets = []corpusSet{
 // oracle answer depends on the platform node runs on (its text shaping, or
 // V8's last-bit trigonometry on x86-64); the reason says which gives which.
 const expectFile = "testdata/oracle-expect.txt"
+
+var timerEvent = regexp.MustCompile(`"type"\s*:\s*"timer"`)
+
+// timeDependent reports whether a spec's rendering depends on when it runs.
+func timeDependent(spec []byte) bool {
+	return bytes.Contains(spec, []byte("now()")) || timerEvent.Match(spec)
+}
 
 // svgTolerance absorbs the two text engines (node-canvas and forme) placing
 // glyph advances differently in the last digits.
@@ -161,8 +169,9 @@ func compareOne(t *testing.T, o *oracle.Oracle, c *aster.Converter, set corpusSe
 	}
 	var problems []string
 	switch {
-	case gerr == nil && want.Err == "" && bytes.Contains(spec, []byte("now()")):
-		// It draws the current time: no recorded answer can match.
+	case gerr == nil && want.Err == "" && timeDependent(spec):
+		// It draws the current time, or advances on timer events that fire
+		// in node while the render awaits: no recorded answer can match.
 		r.svg = "time-dependent"
 	case gerr != nil && want.Err != "":
 		r.svg, r.detail = "both-error", "engine: "+firstLine(gerr.Error())+" | node: "+firstLine(want.Err)

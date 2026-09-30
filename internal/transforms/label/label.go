@@ -56,6 +56,9 @@ type Label struct {
 	Base     *Base   // nil when there is no base mark
 	// Tuple is the data tuple Apply writes results to; unused by Layout.
 	Tuple jsval.Value
+	// Ref is an opaque handle for the caller, handed back in Placement.Label
+	// and to Options.Sort and Options.TextWidth.
+	Ref any
 }
 
 // Mask is a width x height coverage grid painted by a Rasterizer. A set

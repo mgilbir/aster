@@ -24,10 +24,14 @@ type Budget struct {
 	MaxRows      int
 	MaxLoadBytes int64
 	MaxPoints    int64
+	// MaxCanvasBytes bounds the pixel memory of the bitmaps transforms paint
+	// (the heatmap's canvases), in total across the render.
+	MaxCanvasBytes int64
 
 	rows   int64
 	loaded int64
 	points int64
+	canvas int64
 }
 
 type key struct{}
@@ -133,6 +137,23 @@ func (b *Budget) Points(n int64) error {
 	if b.MaxPoints > 0 && b.points > b.MaxPoints {
 		return over("path points", b.points, b.MaxPoints)
 	}
+	return nil
+}
+
+// Canvas records n bytes of bitmap about to be allocated and fails past
+// MaxCanvasBytes. It is cumulative: a bitmap repainted by a later run of the
+// dataflow is charged again, which only makes the bound conservative.
+func (b *Budget) Canvas(n int64) error {
+	if b == nil {
+		return nil
+	}
+	if n < 0 {
+		n = 0
+	}
+	if b.MaxCanvasBytes > 0 && (n > b.MaxCanvasBytes || b.canvas+n > b.MaxCanvasBytes) {
+		return over("canvas bytes", b.canvas+min(n, math.MaxInt64-b.canvas), b.MaxCanvasBytes)
+	}
+	b.canvas += n
 	return nil
 }
 

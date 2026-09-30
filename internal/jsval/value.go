@@ -445,6 +445,9 @@ func Equal(a, b Value) bool {
 		if x == y {
 			return true
 		}
+		if x.host != nil || y.host != nil {
+			return false
+		}
 		if x.Len() != y.Len() {
 			return false
 		}

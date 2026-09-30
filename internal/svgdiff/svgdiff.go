@@ -158,11 +158,11 @@ func (c *comparer) node(g, w *node, path string) {
 		wv, wok := w.attrs[k]
 		switch {
 		case !gok:
-			c.report(here, "missing attribute %s=%q", k, wv)
+			c.report(here, "missing attribute %s=%q", k, elide(wv))
 		case !wok:
-			c.report(here, "unexpected attribute %s=%q", k, gv)
+			c.report(here, "unexpected attribute %s=%q", k, elide(gv))
 		case !c.valuesEqual(gv, wv):
-			c.report(here, "attribute %s=%q, want %q", k, gv, wv)
+			c.report(here, "attribute %s=%q, want %q", k, elide(gv), elide(wv))
 		}
 	}
 	if !c.valuesEqual(strings.TrimSpace(g.text), strings.TrimSpace(w.text)) {
@@ -177,11 +177,25 @@ func (c *comparer) node(g, w *node, path string) {
 	}
 }
 
+// elide shortens a long attribute value (an embedded image) for a report.
+func elide(s string) string {
+	if len(s) <= 160 {
+		return s
+	}
+	return s[:120] + "..." + s[len(s)-20:]
+}
+
+const pngDataPrefix = "data:image/png;base64,"
+
 // valuesEqual compares two attribute values token by token, numbers within
-// tolerance and everything else exactly.
+// tolerance and everything else exactly. Two embedded PNG images compare by
+// their pixels (see samePNG).
 func (c *comparer) valuesEqual(a, b string) bool {
 	if a == b {
 		return true
+	}
+	if strings.HasPrefix(a, pngDataPrefix) && strings.HasPrefix(b, pngDataPrefix) {
+		return samePNG(a[len(pngDataPrefix):], b[len(pngDataPrefix):])
 	}
 	ta, tb := tokenize(a), tokenize(b)
 	if len(ta) != len(tb) {

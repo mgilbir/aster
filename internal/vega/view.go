@@ -34,7 +34,9 @@ import (
 	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/geo"
 	"github.com/mgilbir/aster/internal/jsval"
+	"github.com/mgilbir/aster/internal/raster"
 	"github.com/mgilbir/aster/internal/scene"
+	"github.com/mgilbir/aster/internal/transforms/wordcloud"
 )
 
 // Loader fetches external data. It is satisfied by aster's Loader.
@@ -63,6 +65,9 @@ type Limits struct {
 	MaxLoadBytes int64
 	// MaxPoints is the number of path points geographic marks may generate.
 	MaxPoints int64
+	// MaxCanvasBytes is the total pixel memory of the bitmaps transforms
+	// paint (the heatmap's images).
+	MaxCanvasBytes int64
 	// MaxStringBytes is the total size of the large strings (over 4 KiB)
 	// expressions may build.
 	MaxStringBytes int64
@@ -90,6 +95,9 @@ func (l Limits) withDefaults() Limits {
 	if l.MaxPoints == 0 {
 		l.MaxPoints = 2_000_000
 	}
+	if l.MaxCanvasBytes == 0 {
+		l.MaxCanvasBytes = 512 << 20
+	}
 	if l.MaxStringBytes == 0 {
 		l.MaxStringBytes = 128 << 20
 	}
@@ -103,6 +111,13 @@ type Options struct {
 	// TextMeasurer measures text for layout and bounds; nil selects Vega's
 	// estimate (0.8 * length * fontSize).
 	TextMeasurer scene.TextMeasurer
+	// Shaper draws text when the label transform paints the marks it avoids;
+	// nil selects the rasterizer's default fonts.
+	Shaper raster.Shaper
+	// WordcloudText measures and draws words for the wordcloud transform,
+	// which upstream does with a canvas; nil makes the transform fail as it
+	// does when no canvas is available.
+	WordcloudText wordcloud.TextRenderer
 	// Location is the time zone of local-time scales and functions; nil is UTC.
 	Location *time.Location
 	// Config is a theme configuration merged under the specification's own
@@ -156,6 +171,8 @@ type runView struct {
 	now     func() float64
 	rand    *expr.Random
 	bounder *scene.Bounder
+	shaper  raster.Shaper // text for the label transform's painter
+	wcText  wordcloud.TextRenderer
 
 	root *rtContext
 
@@ -241,13 +258,15 @@ func newView(ctx context.Context, opts Options, locale jsval.Value) *runView {
 	limits := opts.Limits.withDefaults()
 	// The render's budget travels in the context, so transforms and geo code
 	// charge it (before allocating) without any plumbing.
-	bud := &budget.Budget{MaxRows: limits.MaxRows, MaxLoadBytes: limits.MaxLoadBytes, MaxPoints: limits.MaxPoints}
+	bud := &budget.Budget{MaxRows: limits.MaxRows, MaxLoadBytes: limits.MaxLoadBytes, MaxPoints: limits.MaxPoints, MaxCanvasBytes: limits.MaxCanvasBytes}
 	ctx = budget.With(ctx, bud)
 	v := &runView{
 		bud: bud, strs: expr.NewStringBudget(limits.MaxStringBytes),
 		ctx: ctx, loader: opts.Loader, limits: limits,
 		loc: opts.Location, sg: scene.New(),
 		bounder: scene.NewBounder(opts.TextMeasurer),
+		shaper:  opts.Shaper,
+		wcText:  opts.WordcloudText,
 	}
 	if v.loc == nil {
 		v.loc = time.UTC
@@ -452,7 +471,7 @@ func (v *runView) resizeView(viewWidth, viewHeight, width, height float64, origi
 		if rerun {
 			v.reruns++
 			if v.reruns > v.limits.MaxReruns {
-				fail("view layout did not converge after %d re-evaluations", v.limits.MaxReruns)
+				failLimit("view layout did not converge after %d re-evaluations", v.limits.MaxReruns)
 			}
 			if err := g.run("enter"); err != nil {
 				failErr(err)
@@ -496,7 +515,7 @@ func (v *runView) result(scope *Scope) *Result {
 func (v *runView) countItems(n int) {
 	v.items += n
 	if v.limits.MaxItems > 0 && v.items > v.limits.MaxItems {
-		fail("scenegraph exceeds the limit of %d items", v.limits.MaxItems)
+		failLimit("scenegraph exceeds %d items", v.limits.MaxItems)
 	}
 }
 
