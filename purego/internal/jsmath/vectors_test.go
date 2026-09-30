@@ -15,8 +15,10 @@ import (
 
 // The vectors below pin the functions to V8's results. Arguments come from a
 // fixed pseudo-random generator in this file; V8's answers are recorded by
-// testdata/eval_v8.mjs and stored as gzipped little-endian float64 results in
-// testdata/v8_<name>.bin.gz (one per argument tuple, in generation order).
+// testdata/eval_v8.mjs. testdata/v8_<name>.bin.gz stores both as gzipped
+// little-endian float64s: the argument tuples, then one result per tuple. The
+// arguments are stored because the generator's float arithmetic (and Go's
+// math.Exp/Log2) is not bit-identical across architectures.
 //
 //	go test ./purego/internal/jsmath -run TestV8Vectors -update    (re-record; needs node)
 //	go test ./purego/internal/jsmath -run TestV8Live -live=200000  (fresh arguments, needs node)
@@ -298,12 +300,12 @@ func TestV8Vectors(t *testing.T) {
 			continue
 		}
 		t.Run(v.name, func(t *testing.T) {
-			args := genArgs(v, 0, recordedCount)
 			if *update {
+				args := genArgs(v, 0, recordedCount)
 				res := runNode(t, v, args)
 				var buf bytes.Buffer
 				zw, _ := gzip.NewWriterLevel(&buf, gzip.BestCompression)
-				zw.Write(floatsToBytes(res))
+				zw.Write(floatsToBytes(append(args, res...)))
 				zw.Close()
 				if err := os.WriteFile(vectorPath(v.name), buf.Bytes(), 0o644); err != nil {
 					t.Fatal(err)
@@ -322,10 +324,11 @@ func TestV8Vectors(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := bytesToFloats(raw)
-			if len(want) != recordedCount {
-				t.Fatalf("recorded %d results, want %d", len(want), recordedCount)
+			rec := bytesToFloats(raw)
+			if len(rec) != recordedCount*(v.arity+1) {
+				t.Fatalf("recorded %d values, want %d", len(rec), recordedCount*(v.arity+1))
 			}
+			args, want := rec[:recordedCount*v.arity], rec[recordedCount*v.arity:]
 			compare(t, v, args, want)
 		})
 	}

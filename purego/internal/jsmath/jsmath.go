@@ -25,8 +25,8 @@
 // Math.hypot is different: V8 computes it in generated code with separate
 // multiply and add, which Hypot mirrors.
 //
-// Testing: vectors_test.go replays recorded V8 results (testdata/v8_*.bin.gz;
-// arguments are regenerated from a fixed seed) and, with -live=N, compares fresh
+// Testing: vectors_test.go replays recorded V8 arguments and results
+// (testdata/v8_*.bin.gz) and, with -live=N, compares fresh
 // arguments against a running node. testdata/eval_v8.mjs is the evaluator.
 package jsmath
 
