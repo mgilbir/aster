@@ -4,6 +4,7 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 	_ "time/tzdata" // the golden zones must resolve on machines without zoneinfo
@@ -37,9 +38,19 @@ var goldenZones = []struct{ file, name string }{
 	{"Australia_Lord_Howe", "Australia/Lord_Howe"},
 }
 
+// mustLoc loads a zone from testdata/zoneinfo (tzdata 2026c, the main build
+// node's ICU follows) when pinned there, else from the host. Hosts disagree on
+// historical offsets: Debian and Go's zoneinfo.zip keep backzone data (e.g.
+// Amsterdam's +0:19:32 LMT before 1937), macOS links Amsterdam to Brussels.
 func mustLoc(t testing.TB, name string) *time.Location {
 	t.Helper()
-	loc, err := time.LoadLocation(name)
+	var loc *time.Location
+	data, err := os.ReadFile(filepath.Join("testdata", "zoneinfo", filepath.FromSlash(name)))
+	if err == nil {
+		loc, err = time.LoadLocationFromTZData(name, data)
+	} else {
+		loc, err = time.LoadLocation(name)
+	}
 	if err != nil {
 		t.Fatal(err)
 	}

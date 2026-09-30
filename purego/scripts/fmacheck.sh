@@ -11,11 +11,13 @@
 # Excluded: internal/jsmath (fuses deliberately, mirroring V8's compiled
 # fdlibm) and internal/raster (targets resvg, not V8 bit parity).
 #
-# A site is identified as "file<TAB>enclosing function<TAB>source text", so
-# the allowlist survives line shifts. Usage:
+# A site is listed as "file<TAB>enclosing function<TAB>source text" but matched
+# on file and source text only: the allowlist survives line shifts, and the
+# function (which depends on what the Go version inlines) is for readers. Usage:
 #   scripts/fmacheck.sh            check against fmacheck.allow (exit 1 on new sites)
 #   scripts/fmacheck.sh -list      print all current sites (allowlist format)
 set -eu
+export LC_ALL=C   # sort/comm order must not depend on the host locale
 
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../.." && pwd)   # module root
@@ -69,8 +71,13 @@ grep -v -e '^[[:space:]]*#' -e '^[[:space:]]*$' "$allow" 2>/dev/null |
 	awk -F'\t' '{print $1 "\t" $2 "\t" $3}' | sort -u >"$tmp/allowed.txt" || true
 [ -f "$tmp/allowed.txt" ] || : >"$tmp/allowed.txt"
 
-comm -23 "$tmp/sites.txt" "$tmp/allowed.txt" >"$tmp/new.txt"
-comm -13 "$tmp/sites.txt" "$tmp/allowed.txt" >"$tmp/stale.txt"
+# Match on (file, text); keep the full lines for the report.
+awk -F'\t' '{print $1 "\t" $3}' "$tmp/sites.txt" | sort -u >"$tmp/sitekeys.txt"
+awk -F'\t' '{print $1 "\t" $3}' "$tmp/allowed.txt" | sort -u >"$tmp/allowkeys.txt"
+comm -23 "$tmp/sitekeys.txt" "$tmp/allowkeys.txt" >"$tmp/newkeys.txt"
+comm -13 "$tmp/sitekeys.txt" "$tmp/allowkeys.txt" >"$tmp/stalekeys.txt"
+awk -F'\t' 'NR == FNR { k[$0]; next } ($1 "\t" $3) in k' "$tmp/newkeys.txt" "$tmp/sites.txt" >"$tmp/new.txt"
+awk -F'\t' 'NR == FNR { k[$0]; next } ($1 "\t" $3) in k' "$tmp/stalekeys.txt" "$tmp/allowed.txt" >"$tmp/stale.txt"
 
 if [ -s "$tmp/stale.txt" ]; then
 	echo "fmacheck: stale allowlist entries (no longer fused; remove them):" >&2
@@ -81,4 +88,4 @@ if [ -s "$tmp/new.txt" ]; then
 	awk -F'\t' '{printf "  %s [%s]\n      %s\n", $1, $2, $3}' "$tmp/new.txt" >&2
 	exit 1
 fi
-echo "fmacheck: ok ($(wc -l <"$tmp/sites.txt" | tr -d ' ') allowlisted sites)"
+echo "fmacheck: ok ($(wc -l <"$tmp/sitekeys.txt" | tr -d ' ') allowlisted sites)"

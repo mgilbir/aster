@@ -415,6 +415,9 @@ func (iv Interval) Range(ctx context.Context, start, stop, step float64) ([]floa
 	if !(cur < stop) || !(step > 0) { // also handles Invalid Date
 		return nil, nil
 	}
+	if iv.certainlyTooLong(stop-cur, step) {
+		return nil, ErrRangeTooLarge
+	}
 	var out []float64
 	for {
 		prev := cur
@@ -432,6 +435,42 @@ func (iv Interval) Range(ctx context.Context, start, stop, step float64) ([]floa
 			return out, nil
 		}
 	}
+}
+
+// certainlyTooLong reports whether a span of ms milliseconds holds more than
+// MaxRangeLen boundaries step units apart, so Range can fail before stepping
+// through millions of dates. No calendar unit is longer than twice its nominal
+// length, so the test never rejects a range that fits. Filtered intervals keep
+// only some boundaries and are left to the loop.
+func (iv Interval) certainlyTooLong(ms, step float64) bool {
+	if iv.filter > 0 {
+		return false
+	}
+	var unit float64
+	switch iv.kind {
+	case kMillisecond:
+		unit = 1
+	case kSecond:
+		unit = 1e3
+	case kMinute:
+		unit = 6e4
+	case kHour:
+		unit = 36e5
+	case kDay, kUnixDay:
+		unit = 864e5
+	case kWeek:
+		unit = 6048e5
+	case kMonth:
+		unit = 2592e6 // 30 days
+	case kYear:
+		unit = 31536e6 // 365 days
+	default:
+		return false
+	}
+	if iv.k > 0 {
+		unit *= float64(iv.k)
+	}
+	return ms/(2*unit*step) > MaxRangeLen+1
 }
 
 // Count is interval.count(start, end): the number of boundaries after start

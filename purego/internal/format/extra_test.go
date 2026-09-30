@@ -78,6 +78,15 @@ func TestRangeBounds(t *testing.T) {
 	if _, err := ms.Range(ctx, 0, 1e6, 1); !errors.Is(err, context.Canceled) {
 		t.Errorf("canceled range: %v", err)
 	}
+	// Certainly too long: rejected before stepping (so before the canceled
+	// context is consulted), not after millions of local-zone dates.
+	day := Local(mustLoc(t, "Europe/Amsterdam")).Day()
+	if _, err := day.Range(ctx, 1e12, 2.16e19, 1); !errors.Is(err, ErrRangeTooLarge) {
+		t.Errorf("huge day range: %v", err)
+	}
+	if got, err := ms.Range(context.Background(), 0, MaxRangeLen, 1); err != nil || len(got) != MaxRangeLen {
+		t.Errorf("range of exactly MaxRangeLen: %d dates, %v", len(got), err)
+	}
 	if r, err := ms.Range(context.Background(), 5, 1, 1); err != nil || len(r) != 0 {
 		t.Errorf("empty range: %v %v", r, err)
 	}
