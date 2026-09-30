@@ -10,7 +10,7 @@ Aster embeds the full Vega/Vega-Lite runtime inside [QuickJS](https://bellard.or
 - Vega to SVG, PNG, or vector PDF
 - Arbitrary SVG to PNG or vector PDF conversion
 - PDF output is fully vector with subset-embedded fonts (selectable text) — ideal for LaTeX `\includegraphics`
-- Accurate text shaping (forme, with the advance rounding of HarfBuzz) with embedded Liberation Sans and monochrome Noto Emoji
+- Accurate text shaping with [forme](https://github.com/mgilbir/forme), measured the way browsers measure (unrounded advances), with embedded Liberation fonts and monochrome Noto Emoji
 - Configurable scale factor for high-DPI PNG output
 - Multiple Vega-Lite versions (5.8, 6.4)
 - Custom fonts, themes, data loaders, memory limits, and timeouts
@@ -155,6 +155,7 @@ Options passed to `aster.New()`:
 | `WithTimeout(d)` | 30s | Max duration per render |
 | `WithMemoryLimit(bytes)` | 0 (unlimited) | QuickJS heap limit |
 | `WithTextMeasurement(bool)` | `true` | forme text shaping for accurate layout |
+| `WithHarfBuzzTextMetrics()` | disabled | Measure with HarfBuzz's rounding (whole-pixel size, 1/64 px advances) instead of exact advances, for output byte-stable with earlier versions |
 | `WithFont(family, ttf)` | — | Register a custom TTF font (used by both measurement and PNG) |
 | `WithDefaultFontFamily(name)` | `"Liberation Sans"` | Family that generic `sans-serif` resolves to (both pipelines) |
 | `WithDefaultSerifFamily(name)` | `"Liberation Serif"` | Family that generic `serif` resolves to (both pipelines) |
@@ -239,7 +240,7 @@ aster.New(aster.WithLoader(aster.NewFallbackLoader(
 
 When rendering specs from untrusted sources, set `BlockPrivateNetworks: true` to additionally reject hosts that resolve to loopback, link-local, or private addresses (including cloud metadata endpoints like `169.254.169.254`), and pair it with `AllowedDomains` — name resolution happens at policy-check time, so the flag alone does not defend against DNS rebinding.
 
-`FileLoader` rejects absolute paths, path traversal (`..`), and URIs with schemes. It uses Go's `os.Root` for OS-level path containment, which also blocks symlink escapes.
+`FileLoader` rejects absolute paths, path traversal (`..`), and URIs with schemes. It uses Go's `os.Root` for OS-level path containment, which also blocks symlink escapes, refuses anything that is not a regular file, and caps file size at 64 MiB by default (`MaxBytes` raises or disables the cap).
 
 `FallbackLoader` naturally routes by URI shape — `FileLoader` accepts relative paths while `HTTPLoader` accepts absolute URLs — so combining them covers specs that reference both local and remote data.
 
@@ -272,6 +273,10 @@ Custom fonts are used for both text measurement (SVG layout) and PNG rendering.
 
 **Reuse:** A single `Converter` can render many specs sequentially. Amortizing startup across renders is the recommended pattern.
 
+## Pure-Go engine (experimental)
+
+[`purego`](purego/) is a second engine with the same API — `purego.New`, the same options, loaders and conversion methods — written entirely in Go: no QuickJS, no resvg, no WebAssembly. It follows the same Vega 6.4.0 / Vega-Lite 6.4.3 (and compiles Vega-Lite 5.8.0), matches this package's SVG on the comparison corpus, and renders 30–60× faster. See [purego/README.md](purego/README.md) for its status and differences.
+
 ## Developer notes
 
 ### Architecture
@@ -289,11 +294,14 @@ Both WASM runtimes ([QuickJS-NG](https://github.com/quickjs-ng/quickjs) built as
 The JS environment provides polyfills for APIs that Vega expects but QuickJS lacks:
 
 - `structuredClone` — recursive deep clone preserving `undefined`, `Date`/`RegExp`/`Map`/`Set`/typed arrays/`DataView`, and reference cycles
-- `setTimeout` / `clearTimeout` — microtask-scheduled, no real delays (d3-timer, vega-scenegraph)
+- `setTimeout` / `clearTimeout` — macrotasks on a virtual clock: the Go side runs one timer only when the microtask queue is empty, as a browser event loop does, and nothing actually waits (d3-timer, vega-scenegraph's resource loading)
 - `setInterval` / `clearInterval` — aliased to `setTimeout`, so an interval fires exactly once (a static render has no ongoing time in which to repeat)
-- `requestAnimationFrame` — microtask-scheduled (vega-view)
+- `requestAnimationFrame` — scheduled like `setTimeout` (vega-view)
+- `document.createElement('canvas')` — a 1x1 measuring context whose `measureText` calls the Go text measurer, so Vega measures (and truncates to `limit`) text through its own canvas path, as in a browser
 - `performance.now` — wall clock via `Date.now()` (not monotonic; only relative timing is used)
 - `Date` methods — redirected to UTC equivalents (QuickJS WASM has no timezone config)
+
+Each render also seeds Vega's random source (`randomLCG(123456789)`, the seed Vega-Lite's own example renders use), so `sample`, jitter and bootstrap confidence intervals are reproducible.
 
 ### Building from source
 
