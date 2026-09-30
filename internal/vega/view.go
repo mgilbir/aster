@@ -452,7 +452,7 @@ func (v *runView) resizeView(viewWidth, viewHeight, width, height float64, origi
 		if rerun {
 			v.reruns++
 			if v.reruns > v.limits.MaxReruns {
-				fail("view layout did not converge after %d re-evaluations", v.limits.MaxReruns)
+				failLimit("view layout did not converge after %d re-evaluations", v.limits.MaxReruns)
 			}
 			if err := g.run("enter"); err != nil {
 				failErr(err)
@@ -496,7 +496,7 @@ func (v *runView) result(scope *Scope) *Result {
 func (v *runView) countItems(n int) {
 	v.items += n
 	if v.limits.MaxItems > 0 && v.items > v.limits.MaxItems {
-		fail("scenegraph exceeds the limit of %d items", v.limits.MaxItems)
+		failLimit("scenegraph exceeds %d items", v.limits.MaxItems)
 	}
 }
 

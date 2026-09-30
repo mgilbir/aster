@@ -44,7 +44,7 @@ func (v *runView) seedCollect(c *rtContext, n *opNode, e *entry) {
 
 func (v *runView) checkRows(n int) {
 	if err := v.bud.AddRows(n); err != nil {
-		fail("data exceeds the limit of %d rows", v.limits.MaxRows)
+		failLimit("data exceeds %d rows", v.limits.MaxRows)
 	}
 }
 

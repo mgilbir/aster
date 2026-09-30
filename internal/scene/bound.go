@@ -119,6 +119,9 @@ func (bd *Bounder) boundTree(m *Mark, depth int) error {
 	if m.Type == MarkGroup {
 		for _, g := range m.Items {
 			for _, child := range g.Items {
+				if child == nil { // a mark whose operator never ran
+					continue
+				}
 				if err := bd.boundTree(child, depth+1); err != nil {
 					return err
 				}
@@ -252,7 +255,9 @@ func (bd *Bounder) pathBounds(b *Bounds, it *Item) error {
 func (bd *Bounder) groupBounds(b *Bounds, g *Item) error {
 	if !g.Clip.IsTrue() && g.ClipPath == nil {
 		for _, m := range g.Items {
-			b.Union(&m.Bounds)
+			if m != nil {
+				b.Union(&m.Bounds)
+			}
 		}
 	}
 	if (g.Clip.IsTrue() || g.ClipPath != nil || g.Width.Truthy() || g.Height.Truthy()) && !g.NoBound {

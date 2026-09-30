@@ -194,14 +194,26 @@ func tagOf(t scene.MarkType) string {
 }
 
 // orderedMarks is scene.Mark.Ordered for the child marks of a group: marks
-// without a z-index first, then the others sorted by z-index.
+// without a z-index first, then the others sorted by z-index. A nil entry is
+// a mark whose operator never ran (an error upstream logs and renders past);
+// like the holes of upstream's sparse items array, it is skipped.
 func orderedMarks(ms []*scene.Mark) []*scene.Mark {
-	anyZ := false
+	anyZ, holes := false, false
 	for _, m := range ms {
-		if m.Zindex != 0 {
+		if m == nil {
+			holes = true
+		} else if m.Zindex != 0 {
 			anyZ = true
-			break
 		}
+	}
+	if holes {
+		kept := make([]*scene.Mark, 0, len(ms))
+		for _, m := range ms {
+			if m != nil {
+				kept = append(kept, m)
+			}
+		}
+		ms = kept
 	}
 	if !anyZ {
 		return ms

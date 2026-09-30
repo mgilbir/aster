@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/geo"
 	"sort"
 
@@ -451,6 +452,25 @@ func fail(format string, args ...any) { panic(&opError{fmt.Errorf(format, args..
 
 func failErr(err error) { panic(&opError{err}) }
 
+// failLimit raises an error for an exceeded engine limit. Unlike the errors a
+// specification causes, it ends the render (see fatal).
+func failLimit(format string, args ...any) {
+	panic(&opError{fmt.Errorf("%w: "+format, append([]any{budget.ErrLimit}, args...)...)})
+}
+
+// fatal reports whether an error raised during evaluation ends the render.
+// Upstream's dataflow catches what an operator throws, logs it and carries
+// on (Dataflow.evaluate's catch clause, and asyncCallback for post-run
+// callbacks), so an error a specification causes (an expression exception,
+// an unknown projection) leaves a partial render, as in upstream. The limits
+// that bound the engine's work, cancellation and the engine's own bugs do not
+// have an upstream counterpart and stay fatal.
+func fatal(err error, internal bool) bool {
+	var le *geo.LimitError
+	return internal || errors.Is(err, budget.ErrLimit) || errors.As(err, &le) ||
+		errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
+
 // Graph is the dataflow graph and its scheduler (vega-dataflow Dataflow).
 type flowGraph struct {
 	ctx      context.Context
@@ -520,7 +540,7 @@ func (g *flowGraph) rerank(op *opNode) {
 			queue = append(queue, t)
 		}
 		if guard++; guard > 1<<22 {
-			fail("dataflow graph too large to rank")
+			failLimit("dataflow graph too large to rank")
 		}
 	}
 }
@@ -627,6 +647,7 @@ func (g *flowGraph) evaluate(encode string) (err error) {
 	g.touched = g.touched[:0]
 	clear(g.touchSet)
 
+	internal := false
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -637,9 +658,9 @@ func (g *flowGraph) evaluate(encode string) (err error) {
 				case *geo.LimitError:
 					err = e.Err
 				case error:
-					err = fmt.Errorf("%w\n%s", e, shortStack())
+					err, internal = fmt.Errorf("%w\n%s", e, shortStack()), true
 				default:
-					err = fmt.Errorf("vega: internal error: %v\n%s", r, shortStack())
+					err, internal = fmt.Errorf("vega: internal error: %v\n%s", r, shortStack()), true
 				}
 			}
 		}()
@@ -656,7 +677,7 @@ func (g *flowGraph) evaluate(encode string) (err error) {
 				}
 			}
 			if g.maxVisits > 0 && g.visits > g.maxVisits {
-				fail("dataflow evaluation limit exceeded")
+				failLimit("dataflow evaluation limit")
 			}
 			next := op.run(g.getPulse(op, encode))
 			if next != stopPulse {
@@ -677,7 +698,11 @@ func (g *flowGraph) evaluate(encode string) (err error) {
 	g.cur = nil
 	if err != nil {
 		g.postrun = nil
-		return err
+		if fatal(err, internal) {
+			return err
+		}
+		g.warn(err.Error())
+		return nil
 	}
 	if len(g.postrun) > 0 {
 		pr := g.postrun
@@ -692,13 +717,22 @@ func (g *flowGraph) evaluate(encode string) (err error) {
 	return nil
 }
 
+// safely runs a post-run callback; like upstream's asyncCallback it logs the
+// errors a specification causes and returns only fatal ones.
 func (g *flowGraph) safely(fn func(*flowGraph)) (err error) {
+	internal := false
 	defer func() {
 		if r := recover(); r != nil {
 			if e, ok := r.(*opError); ok {
 				err = e.err
+			} else if le, ok := r.(*geo.LimitError); ok {
+				err = le.Err
 			} else {
-				err = fmt.Errorf("vega: internal error: %v", r)
+				err, internal = fmt.Errorf("vega: internal error: %v", r), true
+			}
+			if !fatal(err, internal) {
+				g.warn(err.Error())
+				err = nil
 			}
 		}
 	}()

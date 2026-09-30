@@ -90,6 +90,31 @@ for (const [file, family, k] of faces) {
 canvas.registerFont(path.join(repo, 'internal/fonts/notoemoji/NotoEmoji.ttf'), { family: 'Noto Emoji' });
 const known = new Set(faces.map(([, family]) => family.toLowerCase()));
 
+// node-canvas's Image forgets a remote URL: its src getter returns '' before,
+// and even after, the fetch (node-canvas#118), so upstream in node writes
+// href="" for every remote image, and it fetches over the network. A browser
+// keeps the URL. The oracle does too, and never fetches: a remote image fails
+// to load, offline, as in the engine's tests.
+{
+  const src = Object.getOwnPropertyDescriptor(canvas.Image.prototype, 'src');
+  const remote = new WeakMap();
+  Object.defineProperty(canvas.Image.prototype, 'src', {
+    configurable: true,
+    set(v) {
+      if (typeof v === 'string' && /^\s*https?:\/\//.test(v)) {
+        remote.set(this, v);
+        setTimeout(() => this.onerror && this.onerror(new Error('oracle: offline')));
+        return;
+      }
+      remote.delete(this);
+      src.set.call(this, v);
+    },
+    get() {
+      return remote.has(this) ? remote.get(this) : src.get.call(this);
+    },
+  });
+}
+
 // mapFonts rewrites the family list of a CSS font shorthand
 // ("italic bold 11px \"Helvetica Neue\", sans-serif") to one registered family.
 function mapFonts(font) {
@@ -140,7 +165,9 @@ const localize = (uri) => {
 const base = vega.loader({ mode: 'file' });
 const loader = {
   ...base,
-  sanitize: (uri, options) => base.sanitize(localize(uri), options),
+  // Only loading maps a CDN URL onto the local copy: an href keeps the URL,
+  // as the engine's loader keeps it.
+  sanitize: (uri, options) => base.sanitize(uri, options),
   load: async (uri, options) => {
     const u = localize(uri);
     if (!u.includes('://') && !path.isAbsolute(u)) {

@@ -170,7 +170,7 @@ func (v *runView) applyChanges(input *opNode, pc *pendingChange) {
 	// A trigger that keeps firing would nest evaluations without end.
 	v.reruns++
 	if v.reruns > v.limits.MaxReruns {
-		fail("data triggers did not settle after %d re-evaluations", v.limits.MaxReruns)
+		failLimit("data triggers did not settle after %d re-evaluations", v.limits.MaxReruns)
 	}
 	if err := v.g.run(""); err != nil {
 		failErr(err)
