@@ -38,3 +38,4 @@ wazero-fork.sum
 
 # Claude Code machine-local settings
 .claude/settings.local.json
+enginebench-out/
