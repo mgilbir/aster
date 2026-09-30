@@ -188,7 +188,9 @@ func (r *renderer) applyMask(ms *maskSpec, st *state) {
 	if ms.nested != nil {
 		r.applyMask(ms.nested, st)
 	}
-	multiplyByMask(content, layer, ms.alpha)
+	if d := content.dirty.intersect(content.bounds()); !d.empty() && r.chargeOps(d.w()*d.h()) {
+		multiplyByMask(content, layer, ms.alpha)
+	}
 	layer.clearDirty()
 	r.pool = append(r.pool, layer)
 }
@@ -300,12 +302,15 @@ func (r *renderer) renderEffects(n *node, st *state, opacity float64, blend blen
 	if !r.chargePixels(ib.w() * ib.h() * nPrims) {
 		return
 	}
+	sub := r.allocCanvas(ib.w(), ib.h())
+	if sub == nil {
+		return
+	}
 	parent := r.cv
 	saved := struct {
 		cw, ch int
 		pool   []*canvas
 	}{r.cw, r.ch, r.pool}
-	sub := newCanvas(ib.w(), ib.h())
 	r.cv, r.cw, r.ch, r.pool = sub, sub.w, sub.h, nil
 	r.depth++
 	s2 := *st
@@ -320,6 +325,10 @@ func (r *renderer) renderEffects(n *node, st *state, opacity float64, blend blen
 		}
 	}
 	r.depth--
+	r.releasePool(r.pool)
 	r.cv, r.cw, r.ch, r.pool = parent, saved.cw, saved.ch, saved.pool
-	compositeLayerAt(parent, sub, ib.x0, ib.y0, opacity, st.clip, blend)
+	if r.err == nil && r.chargeOps(ib.w()*ib.h()) {
+		compositeLayerAt(parent, sub, ib.x0, ib.y0, opacity, st.clip, blend)
+	}
+	r.releaseCanvas(sub)
 }

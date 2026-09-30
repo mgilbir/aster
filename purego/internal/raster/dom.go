@@ -329,6 +329,14 @@ type Limits struct {
 	MaxCSSWork      int // selector-matching steps while applying style sheets
 	MaxFilterPixels int // pixels of one filter region
 	MaxEffectPixels int // pixels processed by filters and pattern tiles in one render
+	// MaxPixelOps bounds the total pixel work of one render: pixels covered by
+	// fills and strokes, composited layer and mask areas and filter/pattern
+	// pixels, summed over the whole document. It bounds the product of element
+	// count and canvas size that MaxRenderNodes and MaxPixels leave open.
+	MaxPixelOps int
+	// MaxCanvasBytes bounds the pixel memory alive at once: the canvas plus
+	// every offscreen layer (opacity group, mask, filter) in flight.
+	MaxCanvasBytes int
 }
 
 const (
@@ -347,6 +355,8 @@ const (
 	defaultMaxCSSWork  = 100_000_000
 	defaultMaxFilterPx = 32 << 20
 	defaultMaxEffectPx = 1 << 31
+	defaultMaxPixelOps = 1 << 29
+	defaultMaxCanvasB  = 1 << 30
 )
 
 func (l Limits) withDefaults() Limits {
@@ -394,6 +404,12 @@ func (l Limits) withDefaults() Limits {
 	}
 	if l.MaxEffectPixels <= 0 {
 		l.MaxEffectPixels = defaultMaxEffectPx
+	}
+	if l.MaxPixelOps <= 0 {
+		l.MaxPixelOps = defaultMaxPixelOps
+	}
+	if l.MaxCanvasBytes <= 0 {
+		l.MaxCanvasBytes = defaultMaxCanvasB
 	}
 	return l
 }

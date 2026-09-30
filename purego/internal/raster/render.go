@@ -1,6 +1,7 @@
 package raster
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -46,6 +47,11 @@ type renderer struct {
 	active       map[*node]bool // paint servers, masks, filters, markers being expanded
 	inText       bool           // drawing glyphs (text-rendering selects anti-aliasing)
 	effectPx     int            // pixels charged to filters and pattern tiles so far
+
+	ctx         context.Context // nil = never cancelled
+	pixelOps    int             // pixel work charged so far (see Limits.MaxPixelOps)
+	canvasBytes int             // pixel memory of live canvases (see Limits.MaxCanvasBytes)
+	ticks       int
 }
 
 var errLimit = errors.New("raster: resource limit exceeded")
@@ -58,7 +64,86 @@ func (r *renderer) chargePixels(n int) bool {
 		r.fail(fmt.Errorf("raster: filter and pattern work exceeds %d pixels: %w", r.lim.MaxEffectPixels, errLimit))
 		return false
 	}
+	return r.chargeOps(n)
+}
+
+// chargeOps accounts for n pixels of work against Limits.MaxPixelOps and
+// polls the context. It reports whether rendering may continue.
+func (r *renderer) chargeOps(n int) bool {
+	if r.err != nil {
+		return false
+	}
+	r.pixelOps += n
+	if r.pixelOps > r.lim.MaxPixelOps || r.pixelOps < 0 {
+		r.fail(fmt.Errorf("raster: render work exceeds %d pixel operations (output %dx%d; raise Limits.MaxPixelOps to allow it): %w",
+			r.lim.MaxPixelOps, r.cw, r.ch, errLimit))
+		return false
+	}
+	return r.poll(n >= 1<<14)
+}
+
+// poll checks the context, every call when force is set and otherwise every
+// few calls.
+func (r *renderer) poll(force bool) bool {
+	if r.ctx == nil {
+		return r.err == nil
+	}
+	if r.ticks++; force || r.ticks&15 == 0 {
+		if err := r.ctx.Err(); err != nil {
+			r.fail(err)
+		}
+	}
 	return r.err == nil
+}
+
+// allocCanvas allocates a canvas, failing the render when the live canvas
+// memory would exceed Limits.MaxCanvasBytes.
+func (r *renderer) allocCanvas(w, h int) *canvas {
+	if r.err != nil {
+		return nil
+	}
+	n := w * h * 4
+	if n < 0 || n > r.lim.MaxCanvasBytes-r.canvasBytes {
+		r.fail(fmt.Errorf("raster: offscreen layers need more than %d MiB of pixel memory at once (raise Limits.MaxCanvasBytes or reduce nested opacity/filter/mask groups): %w",
+			r.lim.MaxCanvasBytes>>20, errLimit))
+		return nil
+	}
+	r.canvasBytes += n
+	return newCanvas(w, h)
+}
+
+// releaseCanvas returns c's memory to the budget (c must not be used again).
+func (r *renderer) releaseCanvas(c *canvas) {
+	if c != nil {
+		r.canvasBytes -= len(c.pix)
+	}
+}
+
+// releasePool releases every pooled layer (a pool being discarded).
+func (r *renderer) releasePool(pool []*canvas) {
+	for _, c := range pool {
+		r.releaseCanvas(c)
+	}
+}
+
+// fillRast runs the rasterizer's fill, charging the pixels it processes and
+// stopping early when the budget runs out or the context is done.
+func (r *renderer) fillRast(evenOdd bool, sink spanSink) {
+	if r.err != nil {
+		return
+	}
+	rem := r.lim.MaxPixelOps - r.pixelOps
+	r.rast.work, r.rast.workCap = 0, rem+1
+	r.rast.fill(evenOdd, sink)
+	w := r.rast.work
+	r.rast.workCap = 0
+	if r.rast.stopped && r.ctx != nil {
+		if err := r.ctx.Err(); err != nil {
+			r.fail(err)
+			return
+		}
+	}
+	r.chargeOps(w + 16) // a small constant so empty shapes are not free
 }
 
 func (r *renderer) fail(err error) {
@@ -74,8 +159,9 @@ func (r *renderer) newLayer() *canvas {
 		if c.w == r.cw && c.h == r.ch {
 			return c
 		}
+		r.releaseCanvas(c)
 	}
-	return newCanvas(r.cw, r.ch)
+	return r.allocCanvas(r.cw, r.ch)
 }
 
 func (r *renderer) pushLayer() *canvas {
@@ -83,9 +169,13 @@ func (r *renderer) pushLayer() *canvas {
 		r.fail(fmt.Errorf("raster: more than %d nested opacity/blend layers", r.lim.MaxLayerDepth))
 		return nil
 	}
+	layer := r.newLayer()
+	if layer == nil {
+		return nil
+	}
 	r.depth++
 	prev := r.cv
-	r.cv = r.newLayer()
+	r.cv = layer
 	return prev
 }
 
@@ -93,7 +183,9 @@ func (r *renderer) popLayer(prev *canvas, opacity float64, mode blendMode) {
 	layer := r.cv
 	r.cv = prev
 	r.depth--
-	compositeLayer(prev, layer, layer.dirty, opacity, nil, mode)
+	if d := layer.dirty.intersect(layer.bounds()); !d.empty() && r.chargeOps(d.w()*d.h()) {
+		compositeLayer(prev, layer, layer.dirty, opacity, nil, mode)
+	}
 	layer.clearDirty()
 	r.pool = append(r.pool, layer)
 }
@@ -108,6 +200,9 @@ func (r *renderer) renderChildren(n *node, st *state) {
 }
 
 func (r *renderer) budget() bool {
+	if !r.poll(false) {
+		return false
+	}
 	r.visited++
 	if r.visited > r.lim.MaxRenderNodes {
 		r.fail(fmt.Errorf("raster: more than %d elements rendered (possible <use> expansion attack): %w", r.lim.MaxRenderNodes, errLimit))
@@ -504,13 +599,16 @@ func (r *renderer) pathsMask(ps []*path, ms []matrix, evenOdd []bool, region ire
 	if region.empty() {
 		return &mask{r: irect{}}
 	}
+	if !r.chargeOps(region.w()*region.h()/8 + 1) { // allocating and clearing the coverage map
+		return &mask{r: irect{}}
+	}
 	mk := &mask{r: region, a: make([]uint8, region.w()*region.h())}
 	var f flat
 	for i, p := range ps {
 		f.flatten(p, ms[i], 0.1)
 		r.rast.begin(region)
 		r.rast.addPolys(&f)
-		r.rast.fill(evenOdd[i], maskSink{mk})
+		r.fillRast(evenOdd[i], maskSink{mk})
 	}
 	return mk
 }
@@ -928,7 +1026,7 @@ func (r *renderer) fillPolys(f *flat, evenOdd bool, ps paintSrc, st *state) {
 	r.bl.cv = r.cv
 	r.bl.paint = ps
 	r.bl.mask = st.clip
-	r.rast.fill(evenOdd, &r.bl)
+	r.fillRast(evenOdd, &r.bl)
 	if crisp {
 		r.rast.setAA(true)
 	}

@@ -3,6 +3,7 @@ package fontsubset
 import (
 	"bytes"
 	"compress/zlib"
+	"strings"
 	"testing"
 
 	"github.com/mgilbir/aster/internal/fonts/liberation"
@@ -203,6 +204,33 @@ func TestParseRejectsMalformed(t *testing.T) {
 	} {
 		if _, err := Parse(data); err == nil {
 			t.Errorf("%s: Parse succeeded", name)
+		}
+	}
+}
+
+func TestSanitizePSName(t *testing.T) {
+	cases := map[string]string{
+		"Liberation-Sans":    "Liberation-Sans",
+		"A)>>/Evil<</B(x /Z": "AEvilBxZ",
+		"a b\x00c\xffd#e%f":  "abcdef",
+		"":                   "",
+	}
+	for in, want := range cases {
+		if got := sanitizePSName([]byte(in)); got != want {
+			t.Errorf("sanitizePSName(%q) = %q, want %q", in, got, want)
+		}
+	}
+	long := sanitizePSName([]byte(strings.Repeat("a", 200)))
+	if len(long) != 63 {
+		t.Errorf("long name len %d, want 63", len(long))
+	}
+}
+
+func TestParseAndSubsetNeverPanic(t *testing.T) {
+	// Truncated / garbage inputs must yield errors, not panics.
+	for _, in := range [][]byte{nil, {0}, []byte("\x00\x01\x00\x00garbage"), bytes.Repeat([]byte{0xff}, 512)} {
+		if f, err := Parse(in); err == nil && f != nil {
+			_, _ = f.Subset(map[uint16]bool{1: true})
 		}
 	}
 }

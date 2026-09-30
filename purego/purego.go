@@ -183,16 +183,40 @@ func (c *Converter) Close() error {
 	return nil
 }
 
+// opContext bounds one public call — every stage of it together — by the
+// converter's timeout.
+func (c *Converter) opContext() (context.Context, context.CancelFunc) {
+	if c.cfg.timeout > 0 {
+		return context.WithTimeout(context.Background(), c.cfg.timeout)
+	}
+	return context.WithCancel(context.Background())
+}
+
+// stageErr wraps a stage's error, naming the timeout when the call's context
+// expired, so a caller can tell a slow chart from a broken one.
+func (c *Converter) stageErr(ctx context.Context, stage string, err error) error {
+	if ctx.Err() == context.DeadlineExceeded {
+		return fmt.Errorf("purego: %s timed out after %v: %w", stage, c.cfg.timeout, err)
+	}
+	return fmt.Errorf("purego: %s: %w", stage, err)
+}
+
+// recoverInto turns a panic into an error. Every layer returns errors for bad
+// input, so a panic is a bug — but it must not take the host process down.
+func recoverInto(err *error) {
+	if r := recover(); r != nil {
+		*err = fmt.Errorf("purego: internal error: %v", r)
+	}
+}
+
 // VegaToSVG renders a Vega spec (JSON) to an SVG string.
 func (c *Converter) VegaToSVG(spec []byte) (string, error) {
 	if c.closed {
 		return "", errConverterClosed
 	}
-	v, err := jsval.ParseJSON(spec)
-	if err != nil {
-		return "", fmt.Errorf("purego: parsing Vega spec: %w", err)
-	}
-	return c.renderSVG(v)
+	ctx, cancel := c.opContext()
+	defer cancel()
+	return c.vegaSVG(ctx, spec)
 }
 
 // VegaLiteToSVG renders a Vega-Lite spec (JSON) to an SVG string.
@@ -200,32 +224,33 @@ func (c *Converter) VegaLiteToSVG(spec []byte) (string, error) {
 	if c.closed {
 		return "", errConverterClosed
 	}
+	ctx, cancel := c.opContext()
+	defer cancel()
+	return c.vegaLiteSVG(ctx, spec)
+}
+
+func (c *Converter) vegaSVG(ctx context.Context, spec []byte) (string, error) {
+	v, err := jsval.ParseJSON(spec)
+	if err != nil {
+		return "", fmt.Errorf("purego: parsing Vega spec: %w", err)
+	}
+	return c.renderSVG(ctx, v)
+}
+
+func (c *Converter) vegaLiteSVG(ctx context.Context, spec []byte) (string, error) {
 	vg, err := c.compileVegaLite(spec)
 	if err != nil {
 		return "", err
 	}
-	return c.renderSVG(vg)
+	return c.renderSVG(ctx, vg)
 }
 
-// renderSVG runs a Vega spec and serializes the resulting scenegraph. The
-// whole operation is bounded by the converter's timeout.
-func (c *Converter) renderSVG(spec jsval.Value) (out string, err error) {
-	defer func() {
-		// Every layer returns errors for bad input; a panic here is a bug,
-		// but it must not take the host process down.
-		if r := recover(); r != nil {
-			out, err = "", fmt.Errorf("purego: internal error: %v", r)
-		}
-	}()
+// renderSVG runs a Vega spec and serializes the resulting scenegraph.
+func (c *Converter) renderSVG(ctx context.Context, spec jsval.Value) (out string, err error) {
+	defer recoverInto(&err)
 	m, err := c.measurerInit()
 	if err != nil {
 		return "", err
-	}
-	ctx := context.Background()
-	if c.cfg.timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, c.cfg.timeout)
-		defer cancel()
 	}
 	opts := vega.Options{
 		Loader:   c.cfg.loader,
@@ -242,10 +267,7 @@ func (c *Converter) renderSVG(spec jsval.Value) (out string, err error) {
 	}
 	res, err := vega.Render(ctx, spec, opts)
 	if err != nil {
-		if ctx.Err() != nil {
-			return "", fmt.Errorf("purego: render timed out after %v: %w", c.cfg.timeout, err)
-		}
-		return "", fmt.Errorf("purego: rendering Vega: %w", err)
+		return "", c.stageErr(ctx, "rendering Vega", err)
 	}
 	so := svg.Options{
 		Width:  res.Width,
@@ -267,7 +289,23 @@ func (c *Converter) renderSVG(spec jsval.Value) (out string, err error) {
 		}
 		return []svg.HrefAttr{{Name: "xlink:href", Value: href}}, true
 	}
-	return svg.Render(ctx, res.Scenegraph, so)
+	out, err = svg.Render(ctx, res.Scenegraph, so)
+	if err != nil {
+		return "", c.stageErr(ctx, "writing SVG", err)
+	}
+	return out, nil
+}
+
+// rasterLimits turns WithMemoryLimit into the rasterizer's canvas budget:
+// the bytes of canvas, layers and masks alive at once, and the output size.
+func (c *Converter) rasterLimits() raster.Limits {
+	var l raster.Limits
+	if n := c.cfg.memoryLimit; n > 0 {
+		b := min(max(n, 4<<20), 1<<30)
+		l.MaxCanvasBytes = int(b)
+		l.MaxPixels = int(b / 8)
+	}
+	return l
 }
 
 // randomSeed seeds Vega's random() and every transform that samples.
@@ -362,20 +400,30 @@ func (c *Converter) compileVegaLite(spec []byte) (jsval.Value, error) {
 
 // VegaToPNG renders a Vega spec (JSON) to a PNG image.
 func (c *Converter) VegaToPNG(spec []byte, opts ...PNGOption) ([]byte, error) {
-	svg, err := c.VegaToSVG(spec)
+	if c.closed {
+		return nil, errConverterClosed
+	}
+	ctx, cancel := c.opContext()
+	defer cancel()
+	svg, err := c.vegaSVG(ctx, spec)
 	if err != nil {
 		return nil, err
 	}
-	return c.SVGToPNG(svg, opts...)
+	return c.svgToPNG(ctx, svg, opts)
 }
 
 // VegaLiteToPNG renders a Vega-Lite spec (JSON) to a PNG image.
 func (c *Converter) VegaLiteToPNG(spec []byte, opts ...PNGOption) ([]byte, error) {
-	svg, err := c.VegaLiteToSVG(spec)
+	if c.closed {
+		return nil, errConverterClosed
+	}
+	ctx, cancel := c.opContext()
+	defer cancel()
+	svg, err := c.vegaLiteSVG(ctx, spec)
 	if err != nil {
 		return nil, err
 	}
-	return c.SVGToPNG(svg, opts...)
+	return c.svgToPNG(ctx, svg, opts)
 }
 
 // SVGToPNG rasterizes an SVG string to a PNG image.
@@ -383,6 +431,13 @@ func (c *Converter) SVGToPNG(svg string, opts ...PNGOption) ([]byte, error) {
 	if c.closed {
 		return nil, errConverterClosed
 	}
+	ctx, cancel := c.opContext()
+	defer cancel()
+	return c.svgToPNG(ctx, svg, opts)
+}
+
+func (c *Converter) svgToPNG(ctx context.Context, svg string, opts []PNGOption) (out []byte, err error) {
+	defer recoverInto(&err)
 	cfg := defaultPNGConfig()
 	for _, opt := range opts {
 		opt(cfg)
@@ -390,7 +445,7 @@ func (c *Converter) SVGToPNG(svg string, opts ...PNGOption) ([]byte, error) {
 	if !(cfg.scale > 0) || math.IsInf(cfg.scale, 1) {
 		return nil, fmt.Errorf("purego: invalid PNG scale %v (must be a positive, finite number)", cfg.scale)
 	}
-	out, err := c.rasterize(svg, cfg.scale)
+	out, err = c.rasterize(ctx, svg, cfg.scale)
 	if err != nil {
 		return nil, err
 	}
@@ -403,7 +458,7 @@ func (c *Converter) SVGToPNG(svg string, opts ...PNGOption) ([]byte, error) {
 	return out, nil
 }
 
-func (c *Converter) rasterize(svg string, scale float64) ([]byte, error) {
+func (c *Converter) rasterize(ctx context.Context, svg string, scale float64) ([]byte, error) {
 	c.shaperOnce.Do(func() {
 		// Glyphs are drawn at their exact advances (as resvg draws them),
 		// with the same fonts and family mapping as layout.
@@ -415,9 +470,9 @@ func (c *Converter) rasterize(svg string, scale float64) ([]byte, error) {
 	if c.shaperErr != nil {
 		return nil, c.shaperErr
 	}
-	out, err := raster.RenderPNG([]byte(svg), raster.Options{Scale: scale, Shaper: c.shaper})
+	out, err := raster.RenderPNG([]byte(svg), raster.Options{Scale: scale, Shaper: c.shaper, Context: ctx, Limits: c.rasterLimits()})
 	if err != nil {
-		return nil, fmt.Errorf("purego: rendering PNG: %w", err)
+		return nil, c.stageErr(ctx, "rendering PNG", err)
 	}
 	return out, nil
 }
@@ -481,6 +536,17 @@ func (c *Converter) SVGToPDFUsage(svg string, opts ...PDFOption) ([]byte, []Font
 	if c.closed {
 		return nil, nil, errConverterClosed
 	}
+	ctx, cancel := c.opContext()
+	defer cancel()
+	return c.svgToPDF(ctx, svg, opts)
+}
+
+func (c *Converter) svgToPDF(ctx context.Context, svg string, opts []PDFOption) (pdf []byte, uses []FontUsage, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			pdf, uses, err = nil, nil, fmt.Errorf("purego: internal error: %v", r)
+		}
+	}()
 	cfg := &pdfConfig{text: PDFTextEmbed}
 	for _, opt := range opts {
 		opt(cfg)
@@ -500,31 +566,41 @@ func (c *Converter) SVGToPDFUsage(svg string, opts ...PDFOption) ([]byte, []Font
 	if err != nil {
 		return nil, nil, err
 	}
-	out, uses, err := svgpdf.ConvertWithUsage(svg, m, svgpdf.Options{Text: mode})
+	pdf, uses, err = svgpdf.ConvertWithUsage(svg, m, svgpdf.Options{Text: mode, Context: ctx})
 	if err != nil {
-		return nil, nil, fmt.Errorf("purego: rendering PDF: %w", err)
+		return nil, nil, c.stageErr(ctx, "rendering PDF", err)
 	}
-	return out, uses, nil
+	return pdf, uses, nil
 }
 
 // VegaToPDFUsage renders a Vega spec to a vector PDF and reports its per-face
 // glyph usage; see SVGToPDFUsage.
 func (c *Converter) VegaToPDFUsage(spec []byte, opts ...PDFOption) ([]byte, []FontUsage, error) {
-	svg, err := c.VegaToSVG(spec)
+	if c.closed {
+		return nil, nil, errConverterClosed
+	}
+	ctx, cancel := c.opContext()
+	defer cancel()
+	svg, err := c.vegaSVG(ctx, spec)
 	if err != nil {
 		return nil, nil, err
 	}
-	return c.SVGToPDFUsage(svg, opts...)
+	return c.svgToPDF(ctx, svg, opts)
 }
 
 // VegaLiteToPDFUsage renders a Vega-Lite spec to a vector PDF and reports its
 // per-face glyph usage; see SVGToPDFUsage.
 func (c *Converter) VegaLiteToPDFUsage(spec []byte, opts ...PDFOption) ([]byte, []FontUsage, error) {
-	svg, err := c.VegaLiteToSVG(spec)
+	if c.closed {
+		return nil, nil, errConverterClosed
+	}
+	ctx, cancel := c.opContext()
+	defer cancel()
+	svg, err := c.vegaLiteSVG(ctx, spec)
 	if err != nil {
 		return nil, nil, err
 	}
-	return c.SVGToPDFUsage(svg, opts...)
+	return c.svgToPDF(ctx, svg, opts)
 }
 
 // pdfMeasurerInit returns the measurer PDF text is shaped with: the layout

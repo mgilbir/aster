@@ -1,6 +1,7 @@
 package svgpdf
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -126,6 +127,22 @@ type renderer struct {
 	// lifetime of one render: axis labels repeat digits, so the same glyph
 	// is drawn many times.
 	glyphs map[glyphKey][]text.Segment
+
+	ctx       context.Context
+	lim       Limits
+	visited   int // elements rendered (a <clipPath> is re-applied per reference)
+	segsTotal int // path segments parsed so far
+	textTotal int // text bytes shaped so far
+}
+
+// parsePath parses path data, charging its segments to the render budget.
+func (r *renderer) parsePath(d string) ([]PathSeg, error) {
+	segs, err := parsePathDataMax(d, r.lim.MaxPathSegments-r.segsTotal)
+	if err != nil {
+		return nil, err
+	}
+	r.segsTotal += len(segs)
+	return segs, nil
 }
 
 // render translates the parsed SVG root into a content stream plus page
@@ -152,7 +169,7 @@ func render(root *element, shaper TextShaper, opts Options) (content []byte, gsL
 		return nil, nil, nil, 0, 0, err
 	}
 
-	r := &renderer{w: newContentWriter(), clips: clips, shaper: shaper}
+	r := &renderer{w: newContentWriter(), clips: clips, shaper: shaper, ctx: opts.Context, lim: opts.Limits.withDefaults()}
 	if opts.Text != TextOutlines && shaper != nil {
 		r.fonts = newFontCatalog(opts.Text, shaper)
 	}
@@ -203,6 +220,11 @@ func (r *renderer) children(e *element, st gstate) error {
 }
 
 func (r *renderer) element(e *element, st gstate) error {
+	if r.visited++; r.visited&63 == 0 {
+		if err := ctxErr(r.ctx); err != nil {
+			return err
+		}
+	}
 	if e.name == "defs" || e.name == "clipPath" {
 		return nil // definitions are referenced, not drawn
 	}
@@ -391,6 +413,10 @@ func (r *renderer) applyClip(ref string) error {
 	if !ok {
 		return fmt.Errorf("svgpdf: clip-path references unknown id %q", id)
 	}
+	// Every reference re-emits the clip geometry; charge it to the path budget.
+	if r.segsTotal += len(clip.children); r.segsTotal > r.lim.MaxPathSegments {
+		return limitErr("clip paths emitted more than %d segments", r.lim.MaxPathSegments)
+	}
 	for _, c := range clip.children {
 		if _, hasT := c.attr("transform"); hasT {
 			return fmt.Errorf("svgpdf: transform on <clipPath> children is not supported")
@@ -403,7 +429,7 @@ func (r *renderer) applyClip(ref string) error {
 			}
 			r.w.rect(x, y, w, h)
 		case "path":
-			segs, err := parsePathData(c.attrs["d"])
+			segs, err := r.parsePath(c.attrs["d"])
 			if err != nil {
 				return err
 			}
@@ -490,7 +516,7 @@ func (r *renderer) drawPath(e *element, st gstate) error {
 	if strings.TrimSpace(d) == "" {
 		return nil // Vega emits empty d for placeholder foreground paths
 	}
-	segs, err := parsePathData(d)
+	segs, err := r.parsePath(d)
 	if err != nil {
 		return err
 	}

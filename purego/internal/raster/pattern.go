@@ -33,11 +33,16 @@ func (r *renderer) subRender(w, h int, fn func()) *canvas {
 	}
 	parent := r.cv
 	cw, ch, pool := r.cw, r.ch, r.pool
-	sub := newCanvas(w, h)
+	sub := r.allocCanvas(w, h)
+	if sub == nil {
+		return nil
+	}
 	r.cv, r.cw, r.ch, r.pool = sub, w, h, nil
 	r.depth++
 	fn()
 	r.depth--
+	r.releasePool(r.pool)
+	r.releaseCanvas(sub) // the tile outlives the render budget; patternBytes caps the cache
 	r.cv, r.cw, r.ch, r.pool = parent, cw, ch, pool
 	return sub
 }

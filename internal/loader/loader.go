@@ -254,13 +254,19 @@ func isPrivateIP(ip net.IP) bool {
 // FileLoader serves files from a base directory on disk.
 // It accepts relative paths and rejects absolute URLs and path traversal.
 // On supported platforms, it uses os.Root for OS-level path containment.
+//
+// MaxBytes caps the size of one file. Zero means the default cap (64 MiB, the
+// same as HTTPLoader); a negative value disables the cap. A larger file fails
+// with an error before it is read. Only regular files are served (a FIFO or
+// device inside the directory is rejected without being opened).
 type FileLoader struct {
-	BaseDir string
-	once    sync.Once
-	mu      sync.Mutex // guards root against a concurrent Close
-	root    *os.Root
-	err     error
-	closed  bool
+	BaseDir  string
+	MaxBytes int64 // per-file size cap; 0 = 64 MiB default, negative = unlimited
+	once     sync.Once
+	mu       sync.Mutex // guards root against a concurrent Close
+	root     *os.Root
+	err      error
+	closed   bool
 }
 
 // NewFileLoader creates a FileLoader with eager initialization.
@@ -306,7 +312,10 @@ func (l *FileLoader) Sanitize(_ context.Context, uri string) (string, error) {
 	return cleaned, nil
 }
 
-func (l *FileLoader) Load(_ context.Context, uri string) ([]byte, error) {
+func (l *FileLoader) Load(ctx context.Context, uri string) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	l.initRoot()
 	if l.err != nil {
 		return nil, l.err
@@ -320,9 +329,43 @@ func (l *FileLoader) Load(_ context.Context, uri string) ([]byte, error) {
 		return nil, fmt.Errorf("aster: FileLoader for %q is closed", l.BaseDir)
 	}
 
-	data, err := root.ReadFile(uri)
+	max := l.MaxBytes
+	if max == 0 {
+		max = defaultMaxResponseBytes
+	}
+
+	// Stat before opening: opening a FIFO would block until a writer shows up.
+	if fi, err := root.Stat(uri); err != nil {
+		return nil, fmt.Errorf("aster: FileLoader failed to read %q: %w", uri, err)
+	} else if !fi.Mode().IsRegular() {
+		return nil, fmt.Errorf("aster: FileLoader %q is not a regular file", uri)
+	}
+	f, err := root.Open(uri)
 	if err != nil {
 		return nil, fmt.Errorf("aster: FileLoader failed to read %q: %w", uri, err)
+	}
+	defer func() { _ = f.Close() }()
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("aster: FileLoader failed to read %q: %w", uri, err)
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, fmt.Errorf("aster: FileLoader %q is not a regular file", uri)
+	}
+	if max > 0 && fi.Size() > max {
+		return nil, fmt.Errorf("aster: file %q is %d bytes, exceeds %d bytes (raise FileLoader.MaxBytes to allow larger files)", uri, fi.Size(), max)
+	}
+	var r io.Reader = f
+	if max > 0 {
+		// The file may grow after the stat; read one byte past the cap.
+		r = io.LimitReader(f, max+1)
+	}
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return nil, fmt.Errorf("aster: FileLoader failed to read %q: %w", uri, err)
+	}
+	if max > 0 && int64(len(data)) > max {
+		return nil, fmt.Errorf("aster: file %q exceeds %d bytes (raise FileLoader.MaxBytes to allow larger files)", uri, max)
 	}
 	return data, nil
 }

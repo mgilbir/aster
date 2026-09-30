@@ -41,6 +41,13 @@ func (r *renderer) drawText(e *element, st gstate) error {
 		return nil
 	}
 
+	if r.textTotal += len(str); r.textTotal > r.lim.MaxTextBytes {
+		return limitErr("text content exceeds %d bytes", r.lim.MaxTextBytes)
+	}
+	if err := ctxErr(r.ctx); err != nil {
+		return err
+	}
+
 	runs, advance := r.shaper.ShapeText(str, cssFontString(st))
 	if len(runs) == 0 {
 		return nil

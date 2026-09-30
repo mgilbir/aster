@@ -1,6 +1,7 @@
 package raster
 
 import (
+	"context"
 	"math"
 	"slices"
 )
@@ -51,6 +52,11 @@ type rasterizer struct {
 	aa         bool
 	haveEdges  bool
 	minX, maxX float64
+
+	ctx     context.Context // polled every few rows; nil = never cancelled
+	work    int             // pixels processed by fill since the caller last reset it
+	workCap int             // fill stops once work exceeds this (0 = no cap)
+	stopped bool            // the last fill was cut short (cancelled or over the cap)
 }
 
 func newRasterizer() *rasterizer {
@@ -148,6 +154,7 @@ func (r *rasterizer) addPolys(f *flat) {
 
 // fill scan-converts the accumulated edges and sends coverage to sink.
 func (r *rasterizer) fill(evenOdd bool, sink spanSink) {
+	r.stopped = false
 	if len(r.edges) == 0 || r.minK >= r.maxK {
 		return
 	}
@@ -201,6 +208,12 @@ func (r *rasterizer) fill(evenOdd bool, sink spanSink) {
 	xoff := float64(cx0)
 
 	for row := rowStart; row <= rowEnd; row++ {
+		if row&31 == 0 {
+			if r.ctx != nil && r.ctx.Err() != nil {
+				r.stopped = true
+				break
+			}
+		}
 		minPx, maxPx := int32(math.MaxInt32), int32(-1)
 		for s := int32(0); s < ssN; s++ {
 			k := row<<r.ssShift + s
@@ -308,6 +321,18 @@ func (r *rasterizer) fill(evenOdd bool, sink spanSink) {
 		}
 		run := int32(0)
 		n := int(maxPx-minPx) + 1
+		r.work += n
+		if r.workCap > 0 && r.work > r.workCap {
+			// Over the pixel budget: drop this row's accumulators and stop.
+			for i := 0; i < n; i++ {
+				acc[minPx+int32(i)] = 0
+				diff[minPx+int32(i)] = 0
+			}
+			acc[maxPx+1] = 0
+			diff[maxPx+1] = 0
+			r.stopped = true
+			break
+		}
 		total := int32(ssN * subN)
 		for i := 0; i < n; i++ {
 			px := minPx + int32(i)

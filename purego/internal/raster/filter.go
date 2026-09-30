@@ -30,6 +30,7 @@ type filterRun struct {
 	live    int // bytes held by results
 	limit   int
 	failed  bool
+	stop    func() bool // reports a cancelled render; nil = never
 }
 
 const maxFilterLiveBytes = 1 << 30
@@ -77,7 +78,7 @@ func (r *renderer) applyFilter(sp *filterSpec, ts matrix, cv *canvas) bool {
 	if !(rc.w() > 0 && rc.h() > 0) {
 		return false
 	}
-	run := &filterRun{w: cv.w, h: cv.h, src: cv.pix, ts: ts, limit: maxFilterLiveBytes}
+	run := &filterRun{w: cv.w, h: cv.h, src: cv.pix, ts: ts, limit: maxFilterLiveBytes, stop: func() bool { return !r.poll(true) }}
 	run.region = toIntRect(rc)
 	last := len(sp.prims) - 1
 	// Last use of each result name, to free buffers early.
@@ -97,6 +98,9 @@ func (r *renderer) applyFilter(sp *filterSpec, ts matrix, cv *canvas) bool {
 	}
 	for i := range sp.prims {
 		p := &sp.prims[i]
+		if !r.poll(true) {
+			return false
+		}
 		sub := toIntRect(transformRect32(p.rect, ts))
 		if !(p.rect.w() > 0 && p.rect.h() > 0) {
 			return false
@@ -335,9 +339,9 @@ func (run *filterRun) apply(p *fprim) (fimage, bool) {
 		in = toSpace(in, p.linear)
 		pix := append([]uint8(nil), in.pix...)
 		if box {
-			boxBlur(sx, sy, pix, w, h)
+			boxBlur(sx, sy, pix, w, h, run.stop)
 		} else {
-			iirBlur(sx, sy, pix, w, h)
+			iirBlur(sx, sy, pix, w, h, run.stop)
 		}
 		return fimage{pix: pix, region: run.region, linear: p.linear}, true
 	case tagFeDropShadow:
@@ -474,9 +478,9 @@ func (run *filterRun) dropShadow(p *fprim) (fimage, bool) {
 	shadow := append([]uint8(nil), inp.pix...)
 	if sx, sy, box, ok := run.stdDev(p.stdX, p.stdY); ok {
 		if box {
-			boxBlur(sx, sy, shadow, w, h)
+			boxBlur(sx, sy, shadow, w, h, run.stop)
 		} else {
-			iirBlur(sx, sy, shadow, w, h)
+			iirBlur(sx, sy, shadow, w, h, run.stop)
 		}
 	}
 	// Flood the blurred alpha with the shadow colour.
@@ -675,11 +679,14 @@ func createBoxGauss(sigma float32) [boxSteps]int {
 	return sizes
 }
 
-func boxBlur(sigmaX, sigmaY float64, pix []uint8, w, h int) {
+func boxBlur(sigmaX, sigmaY float64, pix []uint8, w, h int, stop func() bool) {
 	bh := createBoxGauss(float32(sigmaX))
 	bv := createBoxGauss(float32(sigmaY))
 	tmp := make([]uint8, len(pix))
 	for i := 0; i < boxSteps; i++ {
+		if stop != nil && stop() {
+			return
+		}
 		rh := (bh[i] - 1) / 2
 		rv := (bv[i] - 1) / 2
 		// vertical: pix -> tmp, then horizontal: tmp -> pix
@@ -725,9 +732,12 @@ func boxPass(dst, src []uint8, w, h, radius, step, lineStep, n, lines int) {
 	}
 }
 
-func iirBlur(sigmaX, sigmaY float64, pix []uint8, w, h int) {
+func iirBlur(sigmaX, sigmaY float64, pix []uint8, w, h int, stop func() bool) {
 	buf := make([]float64, w*h)
 	for ch := 0; ch < 4; ch++ {
+		if stop != nil && stop() {
+			return
+		}
 		for i := 0; i < w*h; i++ {
 			buf[i] = float64(pix[i*4+ch]) / 255.0
 		}

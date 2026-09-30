@@ -3,6 +3,7 @@ package svgpdf
 import (
 	"bytes"
 	"compress/zlib"
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"sort"
@@ -43,6 +44,12 @@ const (
 // Options configures Convert.
 type Options struct {
 	Text TextMode
+	// Context, when non-nil, is polled while parsing and rendering; the
+	// conversion stops with the context's error once it is done.
+	Context context.Context
+	// Limits bounds the work an untrusted SVG may cause; zero fields select
+	// the defaults (see Limits).
+	Limits Limits
 }
 
 // pdfFont accumulates the state of one font resource while rendering.

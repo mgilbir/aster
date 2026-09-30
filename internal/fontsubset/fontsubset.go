@@ -15,6 +15,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // Font is a parsed TrueType font ready for metric queries and subsetting.
@@ -88,7 +89,12 @@ func readSfnt(data []byte) (*sfntDir, error) {
 }
 
 // Parse reads the tables needed for subsetting and PDF metrics.
-func Parse(ttf []byte) (*Font, error) {
+func Parse(ttf []byte) (font *Font, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			font, err = nil, fmt.Errorf("fontsubset: malformed font: %v", p)
+		}
+	}()
 	ld, err := readSfnt(ttf)
 	if err != nil {
 		return nil, fmt.Errorf("fontsubset: parsing font: %w", err)
@@ -307,7 +313,12 @@ func (f *Font) closure(gids map[uint16]bool) (map[uint16]bool, error) {
 // hmtx is truncated to the highest kept glyph (text layout uses the PDF /W
 // array, not hmtx), and cmap is replaced by a minimal valid stub (glyphs are
 // addressed by ID via Identity CID mapping, never through character codes).
-func (f *Font) Subset(gids map[uint16]bool) ([]byte, error) {
+func (f *Font) Subset(gids map[uint16]bool) (out []byte, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			out, err = nil, fmt.Errorf("fontsubset: malformed font: %v", p)
+		}
+	}()
 	if !f.CanSubset() {
 		return nil, fmt.Errorf("fontsubset: font has no TrueType outlines (CFF fonts are not supported)")
 	}
@@ -618,7 +629,29 @@ func postScriptName(name []byte) string {
 		for i := 1; i < len(raw); i += 2 {
 			b = append(b, raw[i])
 		}
-		return string(b)
+		return sanitizePSName(b)
 	}
-	return string(raw)
+	return sanitizePSName(raw)
+}
+
+// maxPSNameLen is the PostScript name length limit.
+const maxPSNameLen = 63
+
+// sanitizePSName keeps only characters that are safe in a PDF name without
+// escaping: printable ASCII (! to ~) minus the PDF/PostScript delimiters
+// []{}()<>/% and the escape character #, limited to 63 characters. The font
+// file is untrusted and the name is written into PDFs (here and by hosts that
+// assemble their own), so it must never carry PDF syntax.
+func sanitizePSName(raw []byte) string {
+	out := make([]byte, 0, len(raw))
+	for _, c := range raw {
+		if c < '!' || c > '~' || strings.IndexByte("[](){}<>/%#", c) >= 0 {
+			continue
+		}
+		out = append(out, c)
+		if len(out) == maxPSNameLen {
+			break
+		}
+	}
+	return string(out)
 }

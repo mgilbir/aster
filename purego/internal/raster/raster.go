@@ -44,6 +44,7 @@ package raster
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"image"
@@ -70,6 +71,10 @@ type Options struct {
 	Background color.Color
 	// Limits bounds resource use; zero fields take safe defaults.
 	Limits Limits
+	// Context, when non-nil, is polled while rendering (per element, per
+	// block of scanlines, between filter primitives and when compositing
+	// layers); Render returns the context's error once it is done.
+	Context context.Context
 }
 
 // Render rasterizes svg and returns a non-premultiplied image.
@@ -80,6 +85,11 @@ func Render(svg []byte, opts Options) (img *image.NRGBA, err error) {
 		}
 	}()
 	lim := opts.Limits.withDefaults()
+	if opts.Context != nil {
+		if err := opts.Context.Err(); err != nil {
+			return nil, err
+		}
+	}
 	scale := opts.Scale
 	if scale == 0 {
 		scale = 1
@@ -159,9 +169,17 @@ func Render(svg []byte, opts Options) (img *image.NRGBA, err error) {
 	r := &renderer{
 		doc: doc, lim: lim, shaper: shaper,
 		rast: newRasterizer(), cw: cw, ch: ch, active: map[*node]bool{},
+		ctx: opts.Context,
+	}
+	r.rast.ctx = opts.Context
+	if opts.Limits.MaxPixelOps <= 0 {
+		// Default work budget: 512 Mpx, or 16 canvases for big outputs.
+		r.lim.MaxPixelOps = max(defaultMaxPixelOps, 16*cw*ch)
 	}
 	r.rootState = rootState
-	r.cv = newCanvas(cw, ch)
+	if r.cv = r.allocCanvas(cw, ch); r.cv == nil {
+		return nil, r.err
+	}
 	if opts.Background != nil {
 		nc := color.NRGBAModel.Convert(opts.Background).(color.NRGBA)
 		a := uint32(nc.A)
