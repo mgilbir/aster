@@ -332,4 +332,4 @@ Thanks also to the [Vega](https://vega.github.io/vega/) and [Vega-Lite](https://
 
 ## License
 
-MIT
+[BSD 3-Clause](LICENSE). Third-party notices for the projects the engine derives from are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
