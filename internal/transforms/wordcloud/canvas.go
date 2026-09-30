@@ -97,7 +97,7 @@ func (r *CanvasRenderer) Draw(m *Mask, f Font, txt string, tx, ty, angle, stroke
 		for _, g := range run.Glyphs {
 			gx, gy := pen+g.XOffset, -g.YOffset
 			pen += g.Advance
-			dx, dy := tx+c*gx-s*gy, ty+s*gx+c*gy
+			dx, dy := tx+float64(c*gx)-float64(s*gy), ty+float64(s*gx)+float64(c*gy)
 			if dx+reach < 0 || dx-reach > sheetW || dy+reach < 0 || dy-reach > sheetH {
 				continue
 			}

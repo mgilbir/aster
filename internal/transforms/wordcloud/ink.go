@@ -68,7 +68,7 @@ func (r *inkRaster) reset() {
 func (r *inkRaster) addGlyph(segs []text.Segment, gx, gy, tx, ty, c, s float64) {
 	dev := func(p text.Point) pt {
 		lx, ly := gx+p.X, gy+p.Y
-		return pt{fx(tx + c*lx - s*ly), fx(ty + s*lx + c*ly)}
+		return pt{fx(tx + float64(c*lx) - float64(s*ly)), fx(ty + float64(s*lx) + float64(c*ly))}
 	}
 	var cur pt
 	for _, sg := range segs {
@@ -84,8 +84,8 @@ func (r *inkRaster) addGlyph(segs []text.Segment, gx, gy, tx, ty, c, s float64) 
 			// Cairo's outline decomposition raises a quadratic to the
 			// cubic with the same shape.
 			q1, q2 := dev(sg.P[0]), dev(sg.P[1])
-			c1 := pt{fx(cur.x + 2.0/3*(q1.x-cur.x)), fx(cur.y + 2.0/3*(q1.y-cur.y))}
-			c2 := pt{fx(q2.x + 2.0/3*(q1.x-q2.x)), fx(q2.y + 2.0/3*(q1.y-q2.y))}
+			c1 := pt{fx(cur.x + float64(2.0/3*(q1.x-cur.x))), fx(cur.y + float64(2.0/3*(q1.y-cur.y)))}
+			c2 := pt{fx(q2.x + float64(2.0/3*(q1.x-q2.x))), fx(q2.y + float64(2.0/3*(q1.y-q2.y)))}
 			r.cubic(cur, c1, c2, q2)
 			cur = q2
 		case text.CubicTo:
@@ -127,13 +127,13 @@ func (r *inkRaster) cubicAt(p0, p1, p2, p3 pt, depth int) {
 // segDist2 is the squared distance from p to the segment a-b.
 func segDist2(p, a, b pt) float64 {
 	dx, dy := b.x-a.x, b.y-a.y
-	l2 := dx*dx + dy*dy
+	l2 := float64(dx*dx) + float64(dy*dy)
 	t := 0.0
 	if l2 > 0 {
-		t = math.Max(0, math.Min(1, ((p.x-a.x)*dx+(p.y-a.y)*dy)/l2))
+		t = math.Max(0, math.Min(1, (float64((p.x-a.x)*dx)+float64((p.y-a.y)*dy))/l2))
 	}
-	ex, ey := a.x+t*dx-p.x, a.y+t*dy-p.y
-	return ex*ex + ey*ey
+	ex, ey := a.x+float64(t*dx)-p.x, a.y+float64(t*dy)-p.y
+	return float64(ex*ex) + float64(ey*ey)
 }
 
 // fill scan-converts the contours as they wind, nonzero.
@@ -190,12 +190,12 @@ func (r *inkRaster) stroke(m *Mask, width float64) {
 		for i := range pts {
 			a, b := pts[i], pts[(i+1)%n]
 			d := dirs[i]
-			nx, ny := -d.y*hw, d.x*hw
+			nx, ny := float64(-d.y*hw), float64(d.x*hw)
 			r.addOriented([]pt{{a.x + nx, a.y + ny}, {b.x + nx, b.y + ny}, {b.x - nx, b.y - ny}, {a.x - nx, a.y - ny}})
 			// The join at b, between this segment and the next.
 			d1 := dirs[(i+1)%n]
-			cross := d.x*d1.y - d.y*d1.x
-			dot := d.x*d1.x + d.y*d1.y
+			cross := float64(d.x*d1.y) - float64(d.y*d1.x)
+			dot := float64(d.x*d1.x) + float64(d.y*d1.y)
 			if cross == 0 && dot > 0 {
 				continue
 			}
@@ -203,12 +203,12 @@ func (r *inkRaster) stroke(m *Mask, width float64) {
 			if cross > 0 {
 				side = -1
 			}
-			ax, ay := side*nx, side*ny
-			bx, by := side*(-d1.y*hw), side*(d1.x*hw)
+			ax, ay := float64(side*nx), float64(side*ny)
+			bx, by := float64(side*float64(-d1.y*hw)), float64(side*float64(d1.x*hw))
 			// miter length / width = 1 / cos(turn / 2).
 			if dot > -1 && 1/math.Sqrt((1+dot)/2) <= miterMax {
 				k := 1 / (1 + dot)
-				r.addOriented([]pt{b, {b.x + ax, b.y + ay}, {b.x + (ax+bx)*k, b.y + (ay+by)*k}, {b.x + bx, b.y + by}})
+				r.addOriented([]pt{b, {b.x + ax, b.y + ay}, {b.x + float64((ax+bx)*k), b.y + float64((ay+by)*k)}, {b.x + bx, b.y + by}})
 			} else {
 				r.addOriented([]pt{b, {b.x + ax, b.y + ay}, {b.x + bx, b.y + by}})
 			}
@@ -222,7 +222,7 @@ func (r *inkRaster) addOriented(p []pt) {
 	area := 0.0
 	for i := range p {
 		j := (i + 1) % len(p)
-		area += p[i].x*p[j].y - p[j].x*p[i].y
+		area += float64(p[i].x*p[j].y) - float64(p[j].x*p[i].y)
 	}
 	if area < 0 {
 		slices.Reverse(p)
@@ -284,7 +284,7 @@ func (r *inkRaster) scan(m *Mask) {
 					continue
 				}
 				live = append(live, i)
-				r.cross = append(r.cross, crossing{e.x0 + (ys-e.y0)*e.dxdy, e.dir})
+				r.cross = append(r.cross, crossing{e.x0 + float64((ys-e.y0)*e.dxdy), e.dir})
 			}
 			r.active = live
 			slices.SortFunc(r.cross, func(a, b crossing) int {
@@ -323,14 +323,14 @@ func addSpan(row []float32, x0 int, xa, xb float64, w float32) {
 	}
 	ia, ib := int(xa), int(xb)
 	if ia == ib {
-		row[ia-x0] += float32(xb-xa) * w
+		row[ia-x0] += float32(float32(xb-xa) * w)
 		return
 	}
-	row[ia-x0] += float32(float64(ia+1)-xa) * w
+	row[ia-x0] += float32(float32(float64(ia+1)-xa) * w)
 	for i := ia + 1; i < ib; i++ {
 		row[i-x0] += w
 	}
 	if ib-x0 < len(row) {
-		row[ib-x0] += float32(xb-float64(ib)) * w
+		row[ib-x0] += float32(float32(xb-float64(ib)) * w)
 	}
 }

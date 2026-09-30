@@ -284,6 +284,11 @@ func (l *layout) makeSprite(words []*word, di int) error {
 	n := len(words)
 	start := di
 	for ; di < n; di++ {
+		// Drawing a word is the expensive part of a layout: honour the
+		// deadline between words, not only between placements.
+		if err := l.ctx.Err(); err != nil {
+			return err
+		}
 		d := words[di]
 		f := Font{Style: d.styleS, Weight: d.wtS, Family: d.family, Px: toInt32(float64(d.size+1) / 1)}
 		w := l.renderer.Measure(f, d.text+"m")
