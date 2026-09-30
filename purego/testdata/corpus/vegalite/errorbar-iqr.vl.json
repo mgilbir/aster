@@ -1,0 +1,13 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "Interquartile ranges with capped ends, drawn sideways from a categorical axis.",
+  "data": {"values": [
+    {"g": "a", "v": 3}, {"g": "a", "v": 9}, {"g": "a", "v": 5}, {"g": "a", "v": 1},
+    {"g": "b", "v": 6}, {"g": "b", "v": 2}, {"g": "b", "v": 8}, {"g": "b", "v": 4}
+  ]},
+  "mark": {"type": "errorbar", "extent": "iqr", "ticks": true, "thickness": 2},
+  "encoding": {
+    "y": {"field": "g", "type": "nominal"},
+    "x": {"field": "v", "type": "quantitative"}
+  }
+}

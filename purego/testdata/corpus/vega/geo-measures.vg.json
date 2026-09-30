@@ -1,0 +1,219 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "geoBounds and geoScale asked about a fitted projection. Both need the projection, and a projection is made of signals \u2014 so a signal's update has to be able to see the projections that have settled by the time it runs. geoBounds takes a GeoJSON object rather than an array, which is why the features are wrapped.",
+  "width": 300,
+  "height": 200,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "land",
+      "values": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "n": "west"
+            },
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [
+                    -120,
+                    30
+                  ],
+                  [
+                    -100,
+                    30
+                  ],
+                  [
+                    -100,
+                    48
+                  ],
+                  [
+                    -118,
+                    46
+                  ],
+                  [
+                    -120,
+                    30
+                  ]
+                ]
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "n": "east"
+            },
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [
+                    -95,
+                    28
+                  ],
+                  [
+                    -72,
+                    32
+                  ],
+                  [
+                    -70,
+                    45
+                  ],
+                  [
+                    -90,
+                    44
+                  ],
+                  [
+                    -95,
+                    28
+                  ]
+                ]
+              ]
+            }
+          }
+        ]
+      },
+      "format": {
+        "type": "json",
+        "property": "features"
+      }
+    }
+  ],
+  "signals": [
+    {
+      "name": "box",
+      "update": "geoBounds('p', {type: 'FeatureCollection', features: data('land')})"
+    },
+    {
+      "name": "k",
+      "update": "geoScale('p')"
+    }
+  ],
+  "projections": [
+    {
+      "name": "p",
+      "type": "albers",
+      "fit": {
+        "signal": "data('land')"
+      },
+      "extent": [
+        [
+          10,
+          40
+        ],
+        [
+          290,
+          160
+        ]
+      ]
+    }
+  ],
+  "marks": [
+    {
+      "description": "The features themselves.",
+      "type": "shape",
+      "from": {
+        "data": "land"
+      },
+      "encode": {
+        "enter": {
+          "fill": {
+            "value": "#c7e9c0"
+          },
+          "stroke": {
+            "value": "#31a354"
+          }
+        }
+      },
+      "transform": [
+        {
+          "type": "geoshape",
+          "projection": "p"
+        }
+      ]
+    },
+    {
+      "description": "The box geoBounds reported, drawn over them.",
+      "type": "rect",
+      "encode": {
+        "enter": {
+          "x": {
+            "signal": "box[0][0]"
+          },
+          "y": {
+            "signal": "box[0][1]"
+          },
+          "x2": {
+            "signal": "box[1][0]"
+          },
+          "y2": {
+            "signal": "box[1][1]"
+          },
+          "stroke": {
+            "value": "#e6550d"
+          },
+          "strokeWidth": {
+            "value": 1
+          },
+          "strokeDash": {
+            "value": [
+              3,
+              3
+            ]
+          }
+        }
+      }
+    },
+    {
+      "description": "A circle whose radius is a fixed number of projected units, which only geoScale can give.",
+      "type": "symbol",
+      "encode": {
+        "enter": {
+          "x": {
+            "value": 150
+          },
+          "y": {
+            "value": 25
+          },
+          "size": {
+            "signal": "PI * pow(k * 0.05, 2)"
+          },
+          "fill": {
+            "value": "#9ecae1"
+          },
+          "stroke": {
+            "value": "#3182bd"
+          }
+        }
+      }
+    },
+    {
+      "type": "text",
+      "encode": {
+        "enter": {
+          "x": {
+            "value": 10
+          },
+          "y": {
+            "value": 16
+          },
+          "text": {
+            "signal": "'scale ' + format(k, '.1f')"
+          },
+          "fontSize": {
+            "value": 10
+          },
+          "fill": {
+            "value": "#333333"
+          }
+        }
+      }
+    }
+  ]
+}

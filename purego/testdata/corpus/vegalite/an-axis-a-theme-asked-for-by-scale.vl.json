@@ -1,0 +1,37 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A theme may speak about an axis in a block named after the **kind of scale** under it — `config.axisBand`, `config.axisQuantitative` and their per-direction twins — and `getAxisConfigs` keeps those apart from the blocks Vega itself knows: `vlOnlyConfigTypes` against `vgConfigTypes = ['axis', axisOrient, axisChannel]`. Two consequences meet on the horizontal axis of the first chart. `getAxisConfig` asks `vlOnlyAxisConfig` before `vgAxisConfig`, so the `bottom` this theme writes in `config.axisBand` is the side the axis is drawn on, beating the `top` in `config.axisX`; but `parseAxis` resolves the orient it computes *from* — the one every label is turned to face — out of `axis.orient`, `config.axisX` and `config.axis` alone, and a block named after a scale is not among them. So the axis is at the bottom and its category names are anchored by their left ends, which is how a label on a *top* axis is anchored: upstream's own two-tier reading, reproduced rather than repaired, and the only case where the side written on an axis and the side its labels were turned for are different. The second chart states the other half of the same theme: its horizontal scale is continuous, so `config.axisBand` does not apply to it and it takes `top` from `config.axisX`, while its vertical scale is a band and takes `bottom` from `config.axisBand`. Both charts also show the one axis property a theme is never asked about. `isAxisProperty(property) && property !== 'values'` excludes it by name, because the ticks an axis shows are values of its own column and a theme cannot know them — a list written once in `config.axisQuantitative` would be forced onto every measured axis in the document, whatever each of them is measuring. This compiler wrote it out from every Vega-Lite-only block, so both measured axes here showed ticks at 20 and 60 and nowhere else; upstream shows neither, and leaves the tick count it computed from the plot's height standing beside it.",
+  "data": {
+    "values": [
+      {"c": "alpha", "v": 28},
+      {"c": "beta", "v": 55},
+      {"c": "gamma", "v": 43},
+      {"c": "delta", "v": 91}
+    ]
+  },
+  "config": {
+    "axisX": {"orient": "top"},
+    "axisBand": {"orient": "bottom"},
+    "axisQuantitative": {"values": [20, 60]}
+  },
+  "vconcat": [
+    {
+      "width": 200,
+      "height": 120,
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "c", "type": "nominal"},
+        "y": {"field": "v", "type": "quantitative"}
+      }
+    },
+    {
+      "width": 200,
+      "height": 120,
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "v", "type": "quantitative"},
+        "y": {"field": "c", "type": "nominal"}
+      }
+    }
+  ]
+}

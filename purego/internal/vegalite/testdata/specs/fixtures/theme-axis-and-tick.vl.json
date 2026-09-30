@@ -1,0 +1,17 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A theme speaking about one direction of axis and about a mark's style: the labels stand upright, the caption comes off, and the ticks are turned on their side.",
+  "data": {"url": "data/cars.json"},
+  "encoding": {
+    "x": {"field": "Origin", "type": "nominal"},
+    "y": {"value": 20}
+  },
+  "layer": [
+    {"mark": {"type": "text", "style": "label"}, "encoding": {"text": {"aggregate": "max", "field": "Horsepower"}}},
+    {"mark": {"type": "tick", "style": "tick", "size": 8, "color": "#ccc"}}
+  ],
+  "config": {
+    "axisX": {"domain": false, "labelAngle": 0, "tickColor": "#ccc", "title": null},
+    "style": {"label": {"baseline": "middle", "align": "right", "dx": -5}, "tick": {"orient": "horizontal"}}
+  }
+}

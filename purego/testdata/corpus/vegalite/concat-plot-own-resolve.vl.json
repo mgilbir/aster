@@ -1,0 +1,39 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A `resolve` written on one plot of a concatenation governs the layers inside that plot.",
+  "data": {"url": "data/cars.json"},
+  "vconcat": [
+    {
+      "layer": [
+        {
+          "mark": "circle",
+          "encoding": {
+            "x": {"bin": {"maxbins": 10}, "field": "Horsepower"},
+            "y": {"bin": {"maxbins": 10}, "field": "Miles_per_Gallon"},
+            "size": {"aggregate": "count", "title": "All Cars Count"},
+            "opacity": {"value": 0.4}
+          }
+        },
+        {
+          "transform": [{"filter": "datum.Origin === 'Japan'"}],
+          "mark": "circle",
+          "encoding": {
+            "x": {"bin": {"maxbins": 10}, "field": "Horsepower"},
+            "y": {"bin": {"maxbins": 10}, "field": "Miles_per_Gallon"},
+            "size": {"aggregate": "count", "title": "Cars from Japan Count"}
+          }
+        }
+      ],
+      "resolve": {"legend": {"size": "independent"}}
+    },
+    {
+      "width": 330,
+      "height": 120,
+      "mark": "bar",
+      "encoding": {
+        "x": {"aggregate": "count"},
+        "y": {"field": "Origin", "type": "nominal"}
+      }
+    }
+  ]
+}

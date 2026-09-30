@@ -1,0 +1,60 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "Turned axis labels: 45 degrees hung the way plain Vega hangs them, and the same angle corrected by an explicit align and baseline the way Vega-Lite emits it.",
+  "width": 200,
+  "height": 110,
+  "padding": 5,
+  "data": [
+    {
+      "name": "table",
+      "values": [
+        {"c": "alpha-long-name", "v": 31},
+        {"c": "bravo-long-name", "v": 74},
+        {"c": "charlie-long", "v": 22},
+        {"c": "delta-longer", "v": 58}
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {"data": "table", "field": "c"},
+      "range": "width",
+      "padding": 0.15
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {"data": "table", "field": "v"},
+      "range": "height",
+      "nice": true
+    }
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "x", "labelAngle": 45},
+    {
+      "orient": "top",
+      "scale": "x",
+      "labelAngle": -45,
+      "labelAlign": "left",
+      "labelBaseline": "middle"
+    },
+    {"orient": "left", "scale": "y", "tickCount": 4, "labelAngle": -90}
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "c"},
+          "width": {"scale": "x", "band": 1},
+          "y": {"scale": "y", "field": "v"},
+          "y2": {"scale": "y", "value": 0},
+          "fill": {"value": "#9ecae9"}
+        }
+      }
+    }
+  ]
+}

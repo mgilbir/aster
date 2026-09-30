@@ -1,0 +1,765 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "Every colour space Vega can interpolate a ramp in, over the same two ends, plus the rgb gamma \u2014 the only interpolator d3 gives one. Both ends are exact whichever is chosen; the path between them is the only thing a reader sees, and the gamma bends that path without moving either end.",
+  "width": 340,
+  "height": 220,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "steps",
+      "values": [
+        {
+          "t": 0.0
+        },
+        {
+          "t": 0.0625
+        },
+        {
+          "t": 0.125
+        },
+        {
+          "t": 0.1875
+        },
+        {
+          "t": 0.25
+        },
+        {
+          "t": 0.3125
+        },
+        {
+          "t": 0.375
+        },
+        {
+          "t": 0.4375
+        },
+        {
+          "t": 0.5
+        },
+        {
+          "t": 0.5625
+        },
+        {
+          "t": 0.625
+        },
+        {
+          "t": 0.6875
+        },
+        {
+          "t": 0.75
+        },
+        {
+          "t": 0.8125
+        },
+        {
+          "t": 0.875
+        },
+        {
+          "t": 0.9375
+        },
+        {
+          "t": 1.0
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "linear",
+      "domain": [
+        0,
+        1
+      ],
+      "range": "width"
+    },
+    {
+      "name": "rgb",
+      "type": "linear",
+      "domain": [
+        0,
+        1
+      ],
+      "range": [
+        "#440154",
+        "#fde725"
+      ],
+      "interpolate": "rgb"
+    },
+    {
+      "name": "lab",
+      "type": "linear",
+      "domain": [
+        0,
+        1
+      ],
+      "range": [
+        "#440154",
+        "#fde725"
+      ],
+      "interpolate": "lab"
+    },
+    {
+      "name": "hcl",
+      "type": "linear",
+      "domain": [
+        0,
+        1
+      ],
+      "range": [
+        "#440154",
+        "#fde725"
+      ],
+      "interpolate": "hcl"
+    },
+    {
+      "name": "hcl-long",
+      "type": "linear",
+      "domain": [
+        0,
+        1
+      ],
+      "range": [
+        "#440154",
+        "#fde725"
+      ],
+      "interpolate": "hcl-long"
+    },
+    {
+      "name": "hsl",
+      "type": "linear",
+      "domain": [
+        0,
+        1
+      ],
+      "range": [
+        "#440154",
+        "#fde725"
+      ],
+      "interpolate": "hsl"
+    },
+    {
+      "name": "hsl-long",
+      "type": "linear",
+      "domain": [
+        0,
+        1
+      ],
+      "range": [
+        "#440154",
+        "#fde725"
+      ],
+      "interpolate": "hsl-long"
+    },
+    {
+      "name": "cubehelix",
+      "type": "linear",
+      "domain": [
+        0,
+        1
+      ],
+      "range": [
+        "#440154",
+        "#fde725"
+      ],
+      "interpolate": "cubehelix"
+    },
+    {
+      "name": "cubehelix-long",
+      "type": "linear",
+      "domain": [
+        0,
+        1
+      ],
+      "range": [
+        "#440154",
+        "#fde725"
+      ],
+      "interpolate": "cubehelix-long"
+    },
+    {
+      "name": "gamma22",
+      "type": "linear",
+      "domain": [
+        0,
+        1
+      ],
+      "range": [
+        "#440154",
+        "#fde725"
+      ],
+      "interpolate": {
+        "type": "rgb",
+        "gamma": 2.2
+      }
+    },
+    {
+      "name": "gamma05",
+      "type": "linear",
+      "domain": [
+        0,
+        1
+      ],
+      "range": [
+        "#440154",
+        "#fde725"
+      ],
+      "interpolate": {
+        "type": "rgb",
+        "gamma": 0.5
+      }
+    }
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {
+        "data": "steps"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "x",
+            "field": "t"
+          },
+          "width": {
+            "value": 20
+          },
+          "y": {
+            "value": 0
+          },
+          "height": {
+            "value": 18
+          },
+          "fill": {
+            "scale": "rgb",
+            "field": "t"
+          }
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {
+        "data": "steps"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "x",
+            "field": "t"
+          },
+          "width": {
+            "value": 20
+          },
+          "y": {
+            "value": 22
+          },
+          "height": {
+            "value": 18
+          },
+          "fill": {
+            "scale": "lab",
+            "field": "t"
+          }
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {
+        "data": "steps"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "x",
+            "field": "t"
+          },
+          "width": {
+            "value": 20
+          },
+          "y": {
+            "value": 44
+          },
+          "height": {
+            "value": 18
+          },
+          "fill": {
+            "scale": "hcl",
+            "field": "t"
+          }
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {
+        "data": "steps"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "x",
+            "field": "t"
+          },
+          "width": {
+            "value": 20
+          },
+          "y": {
+            "value": 66
+          },
+          "height": {
+            "value": 18
+          },
+          "fill": {
+            "scale": "hcl-long",
+            "field": "t"
+          }
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {
+        "data": "steps"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "x",
+            "field": "t"
+          },
+          "width": {
+            "value": 20
+          },
+          "y": {
+            "value": 88
+          },
+          "height": {
+            "value": 18
+          },
+          "fill": {
+            "scale": "hsl",
+            "field": "t"
+          }
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {
+        "data": "steps"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "x",
+            "field": "t"
+          },
+          "width": {
+            "value": 20
+          },
+          "y": {
+            "value": 110
+          },
+          "height": {
+            "value": 18
+          },
+          "fill": {
+            "scale": "hsl-long",
+            "field": "t"
+          }
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {
+        "data": "steps"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "x",
+            "field": "t"
+          },
+          "width": {
+            "value": 20
+          },
+          "y": {
+            "value": 132
+          },
+          "height": {
+            "value": 18
+          },
+          "fill": {
+            "scale": "cubehelix",
+            "field": "t"
+          }
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {
+        "data": "steps"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "x",
+            "field": "t"
+          },
+          "width": {
+            "value": 20
+          },
+          "y": {
+            "value": 154
+          },
+          "height": {
+            "value": 18
+          },
+          "fill": {
+            "scale": "cubehelix-long",
+            "field": "t"
+          }
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {
+        "data": "steps"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "x",
+            "field": "t"
+          },
+          "width": {
+            "value": 20
+          },
+          "y": {
+            "value": 176
+          },
+          "height": {
+            "value": 18
+          },
+          "fill": {
+            "scale": "gamma22",
+            "field": "t"
+          }
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {
+        "data": "steps"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "x",
+            "field": "t"
+          },
+          "width": {
+            "value": 20
+          },
+          "y": {
+            "value": 198
+          },
+          "height": {
+            "value": 18
+          },
+          "fill": {
+            "scale": "gamma05",
+            "field": "t"
+          }
+        }
+      }
+    },
+    {
+      "type": "text",
+      "encode": {
+        "enter": {
+          "x": {
+            "signal": "width"
+          },
+          "y": {
+            "value": 9
+          },
+          "text": {
+            "value": "rgb"
+          },
+          "align": {
+            "value": "right"
+          },
+          "baseline": {
+            "value": "middle"
+          },
+          "fontSize": {
+            "value": 9
+          },
+          "fill": {
+            "value": "#333333"
+          }
+        }
+      }
+    },
+    {
+      "type": "text",
+      "encode": {
+        "enter": {
+          "x": {
+            "signal": "width"
+          },
+          "y": {
+            "value": 31
+          },
+          "text": {
+            "value": "lab"
+          },
+          "align": {
+            "value": "right"
+          },
+          "baseline": {
+            "value": "middle"
+          },
+          "fontSize": {
+            "value": 9
+          },
+          "fill": {
+            "value": "#333333"
+          }
+        }
+      }
+    },
+    {
+      "type": "text",
+      "encode": {
+        "enter": {
+          "x": {
+            "signal": "width"
+          },
+          "y": {
+            "value": 53
+          },
+          "text": {
+            "value": "hcl"
+          },
+          "align": {
+            "value": "right"
+          },
+          "baseline": {
+            "value": "middle"
+          },
+          "fontSize": {
+            "value": 9
+          },
+          "fill": {
+            "value": "#333333"
+          }
+        }
+      }
+    },
+    {
+      "type": "text",
+      "encode": {
+        "enter": {
+          "x": {
+            "signal": "width"
+          },
+          "y": {
+            "value": 75
+          },
+          "text": {
+            "value": "hcl-long"
+          },
+          "align": {
+            "value": "right"
+          },
+          "baseline": {
+            "value": "middle"
+          },
+          "fontSize": {
+            "value": 9
+          },
+          "fill": {
+            "value": "#333333"
+          }
+        }
+      }
+    },
+    {
+      "type": "text",
+      "encode": {
+        "enter": {
+          "x": {
+            "signal": "width"
+          },
+          "y": {
+            "value": 97
+          },
+          "text": {
+            "value": "hsl"
+          },
+          "align": {
+            "value": "right"
+          },
+          "baseline": {
+            "value": "middle"
+          },
+          "fontSize": {
+            "value": 9
+          },
+          "fill": {
+            "value": "#333333"
+          }
+        }
+      }
+    },
+    {
+      "type": "text",
+      "encode": {
+        "enter": {
+          "x": {
+            "signal": "width"
+          },
+          "y": {
+            "value": 119
+          },
+          "text": {
+            "value": "hsl-long"
+          },
+          "align": {
+            "value": "right"
+          },
+          "baseline": {
+            "value": "middle"
+          },
+          "fontSize": {
+            "value": 9
+          },
+          "fill": {
+            "value": "#333333"
+          }
+        }
+      }
+    },
+    {
+      "type": "text",
+      "encode": {
+        "enter": {
+          "x": {
+            "signal": "width"
+          },
+          "y": {
+            "value": 141
+          },
+          "text": {
+            "value": "cubehelix"
+          },
+          "align": {
+            "value": "right"
+          },
+          "baseline": {
+            "value": "middle"
+          },
+          "fontSize": {
+            "value": 9
+          },
+          "fill": {
+            "value": "#333333"
+          }
+        }
+      }
+    },
+    {
+      "type": "text",
+      "encode": {
+        "enter": {
+          "x": {
+            "signal": "width"
+          },
+          "y": {
+            "value": 163
+          },
+          "text": {
+            "value": "cubehelix-long"
+          },
+          "align": {
+            "value": "right"
+          },
+          "baseline": {
+            "value": "middle"
+          },
+          "fontSize": {
+            "value": 9
+          },
+          "fill": {
+            "value": "#333333"
+          }
+        }
+      }
+    },
+    {
+      "type": "text",
+      "encode": {
+        "enter": {
+          "x": {
+            "signal": "width"
+          },
+          "y": {
+            "value": 185
+          },
+          "text": {
+            "value": "rgb gamma 2.2"
+          },
+          "align": {
+            "value": "right"
+          },
+          "baseline": {
+            "value": "middle"
+          },
+          "fontSize": {
+            "value": 9
+          },
+          "fill": {
+            "value": "#333333"
+          }
+        }
+      }
+    },
+    {
+      "type": "text",
+      "encode": {
+        "enter": {
+          "x": {
+            "signal": "width"
+          },
+          "y": {
+            "value": 207
+          },
+          "text": {
+            "value": "rgb gamma 0.5"
+          },
+          "align": {
+            "value": "right"
+          },
+          "baseline": {
+            "value": "middle"
+          },
+          "fontSize": {
+            "value": 9
+          },
+          "fill": {
+            "value": "#333333"
+          }
+        }
+      }
+    }
+  ]
+}

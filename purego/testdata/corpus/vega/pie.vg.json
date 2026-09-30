@@ -1,0 +1,45 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A donut chart: the pie transform turning values into angles, and arc marks drawing the ring.",
+  "width": 200,
+  "height": 200,
+  "padding": 5,
+  "data": [
+    {
+      "name": "table",
+      "values": [
+        {"k": "alpha", "v": 40},
+        {"k": "beta", "v": 25},
+        {"k": "gamma", "v": 35},
+        {"k": "delta", "v": 12}
+      ],
+      "transform": [{"type": "pie", "field": "v"}]
+    }
+  ],
+  "scales": [
+    {
+      "name": "colour",
+      "type": "ordinal",
+      "domain": {"data": "table", "field": "k"},
+      "range": {"scheme": "tableau10"}
+    }
+  ],
+  "legends": [{"fill": "colour", "title": "Slice"}],
+  "marks": [
+    {
+      "type": "arc",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"value": 100},
+          "y": {"value": 100},
+          "startAngle": {"field": "startAngle"},
+          "endAngle": {"field": "endAngle"},
+          "innerRadius": {"value": 35},
+          "outerRadius": {"value": 90},
+          "fill": {"scale": "colour", "field": "k"}
+        }
+      }
+    }
+  ]
+}

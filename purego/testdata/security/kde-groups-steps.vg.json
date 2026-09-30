@@ -1,0 +1,1 @@
+{"data":[{"name":"d","transform":[{"type":"sequence","start":0,"stop":2000},{"type":"formula","as":"g","expr":"datum.data%1000"}]},{"name":"k","source":"d","transform":[{"type":"kde","field":"data","groupby":["g"],"steps":1000000,"extent":[0,1]}]}]}

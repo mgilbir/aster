@@ -1,0 +1,24 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A label on each segment: the bar's colour and the text's detail key the same stack.",
+  "data": {"url": "data/barley.json"},
+  "height": {"step": 17},
+  "encoding": {"y": {"field": "variety"}},
+  "layer": [
+    {
+      "mark": "bar",
+      "encoding": {
+        "x": {"aggregate": "sum", "field": "yield", "stack": "normalize"},
+        "color": {"field": "site", "scale": {"range": ["#675193", "#ca8861"]}}
+      }
+    },
+    {
+      "mark": {"type": "text", "opacity": 0.9, "color": "white"},
+      "encoding": {
+        "x": {"aggregate": "sum", "field": "yield", "stack": "normalize", "bandPosition": 0.5},
+        "text": {"aggregate": "sum", "field": "yield"},
+        "detail": {"field": "site"}
+      }
+    }
+  ]
+}

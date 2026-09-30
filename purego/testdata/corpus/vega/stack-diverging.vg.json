@@ -1,0 +1,81 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A stack containing negatives, which run away from zero rather than continuing the pile, over a domain taken from both stack bounds at once.",
+  "width": 240,
+  "height": 150,
+  "padding": 5,
+  "data": [
+    {
+      "name": "raw",
+      "values": [
+        {"q": "Q1", "s": "gain", "v": 8},
+        {"q": "Q1", "s": "loss", "v": -3},
+        {"q": "Q1", "s": "other", "v": 4},
+        {"q": "Q2", "s": "gain", "v": 5},
+        {"q": "Q2", "s": "loss", "v": -7},
+        {"q": "Q2", "s": "other", "v": -2},
+        {"q": "Q3", "s": "gain", "v": 11},
+        {"q": "Q3", "s": "loss", "v": -4},
+        {"q": "Q3", "s": "other", "v": 3},
+        {"q": "Q4", "s": "gain", "v": -6},
+        {"q": "Q4", "s": "loss", "v": -5},
+        {"q": "Q4", "s": "other", "v": 9}
+      ],
+      "transform": [{"type": "stack", "groupby": ["q"], "field": "v"}]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {"data": "raw", "field": "q"},
+      "range": "width",
+      "padding": 0.2
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {"data": "raw", "fields": ["y0", "y1"]},
+      "range": "height",
+      "nice": true
+    },
+    {
+      "name": "colour",
+      "type": "ordinal",
+      "domain": {"data": "raw", "field": "s", "sort": true},
+      "range": {"scheme": "tableau10"}
+    }
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "x"},
+    {"orient": "left", "scale": "y", "tickCount": 5, "grid": true}
+  ],
+  "legends": [{"fill": "colour", "title": "Series", "orient": "right"}],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "raw"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "q"},
+          "width": {"scale": "x", "band": 1},
+          "y": {"scale": "y", "field": "y0"},
+          "y2": {"scale": "y", "field": "y1"},
+          "fill": {"scale": "colour", "field": "s"}
+        }
+      }
+    },
+    {
+      "type": "rule",
+      "encode": {
+        "enter": {
+          "x": {"value": 0},
+          "x2": {"signal": "width"},
+          "y": {"scale": "y", "value": 0},
+          "stroke": {"value": "#333"},
+          "strokeWidth": {"value": 1}
+        }
+      }
+    }
+  ]
+}

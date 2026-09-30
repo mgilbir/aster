@@ -1,0 +1,18 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "The third arm of the cursor rule, which needs a chart of its own because a configuration is chart-level and this one contradicts `a-link-a-theme-gave-every-mark`. The guard upstream writes is `const specifiedCursor = getMarkPropOrConfig('cursor', markDef, config); if (specifiedCursor === undefined) { markDef.cursor = cursor(…); }` — the **whole chain**, not the mark alone. So a theme that settles the cursor suppresses the pointer for every mark under it, even where the same theme is what gave them their link. Read as the mark's own property only, a theme's cursor was ignored and every bar came out with a pointer the chart had explicitly overridden; and with no guard at all, the pointer would win over anything anyone wrote anywhere.",
+  "config": {"mark": {"href": "https://example.invalid/", "cursor": "crosshair"}},
+  "data": {
+    "values": [
+      {"c": "alpha", "v": 28},
+      {"c": "beta", "v": 55}
+    ]
+  },
+  "width": 180,
+  "height": 60,
+  "mark": "bar",
+  "encoding": {
+    "x": {"field": "c", "type": "nominal"},
+    "y": {"field": "v", "type": "quantitative"}
+  }
+}

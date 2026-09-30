@@ -1,0 +1,15 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A trellis whose cells each scale x for themselves and are measured in steps, so each is as wide as its own categories need — a count taken per cell rather than a size the grid shares.",
+  "data": {"url": "data/barley.json"},
+  "facet": {"column": {"field": "site"}},
+  "spec": {
+    "width": {"step": 17},
+    "mark": "bar",
+    "encoding": {
+      "y": {"aggregate": "sum", "field": "yield"},
+      "x": {"field": "variety", "type": "ordinal"}
+    }
+  },
+  "resolve": {"scale": {"x": "independent"}}
+}

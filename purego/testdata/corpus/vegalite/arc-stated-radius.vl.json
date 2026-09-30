@@ -1,0 +1,21 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "An arc that names its own reach, which is then not derived from the plotting area.",
+  "data": {
+    "values": [
+      {"category": "Sky", "value": 75},
+      {"category": "Shady side of a pyramid", "value": 10},
+      {"category": "Sunny side of a pyramid", "value": 15}
+    ]
+  },
+  "mark": {"type": "arc", "outerRadius": 80},
+  "encoding": {
+    "theta": {
+      "field": "value",
+      "type": "quantitative",
+      "scale": {"range": [2.35619449, 8.639379797]},
+      "stack": true
+    },
+    "color": {"field": "category", "type": "nominal"}
+  }
+}

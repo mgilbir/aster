@@ -1,0 +1,279 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "The guide encode channels that are another spelling of a property: a tick's cap and dash offset, a label's line height, an axis title's alignment, angle, limit and position, and \u2014 on a legend \u2014 the ramp's own outline and the group the legend sits in, which is where its background and placement live. Upstream builds each mark's channel from either spelling, so writing one has to do exactly what writing the other does. A ramp label's own alignment is not among them: upstream derives it from where along the bar the label sits and reads no property for it, so only an encode block can change it and this engine reports that channel rather than folding it. A swatch's own fill is not among them either, for the mirror-image reason: upstream sets it from symbolFillColor and then overwrites it from the legend's colour scale, so the property shows only where there is no scale while the encode channel beats both.",
+  "width": 200,
+  "height": 120,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {
+          "c": "a",
+          "v": 1
+        },
+        {
+          "c": "b",
+          "v": 9
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "linear",
+      "domain": {
+        "data": "t",
+        "field": "v"
+      },
+      "range": "width"
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {
+        "data": "t",
+        "field": "v"
+      },
+      "range": "height"
+    },
+    {
+      "name": "ramp",
+      "type": "linear",
+      "domain": {
+        "data": "t",
+        "field": "v"
+      },
+      "range": {
+        "scheme": "viridis"
+      }
+    },
+    {
+      "name": "swatch",
+      "type": "ordinal",
+      "domain": {
+        "data": "t",
+        "field": "c"
+      },
+      "range": "category"
+    }
+  ],
+  "axes": [
+    {
+      "scale": "x",
+      "orient": "bottom",
+      "grid": true,
+      "title": "an axis title",
+      "encode": {
+        "ticks": {
+          "update": {
+            "strokeCap": {
+              "value": "square"
+            },
+            "strokeDash": {
+              "value": [
+                3,
+                2
+              ]
+            },
+            "strokeDashOffset": {
+              "value": 1
+            },
+            "strokeWidth": {
+              "value": 2
+            }
+          }
+        },
+        "grid": {
+          "update": {
+            "strokeCap": {
+              "value": "round"
+            },
+            "strokeDash": {
+              "value": [
+                1,
+                3
+              ]
+            },
+            "strokeDashOffset": {
+              "value": 2
+            }
+          }
+        },
+        "domain": {
+          "update": {
+            "strokeCap": {
+              "value": "square"
+            },
+            "strokeWidth": {
+              "value": 2
+            }
+          }
+        },
+        "labels": {
+          "update": {
+            "lineHeight": {
+              "value": 15
+            },
+            "fontSize": {
+              "value": 9
+            }
+          }
+        },
+        "title": {
+          "update": {
+            "align": {
+              "value": "left"
+            },
+            "baseline": {
+              "value": "bottom"
+            },
+            "angle": {
+              "value": 8
+            },
+            "limit": {
+              "value": 90
+            },
+            "fillOpacity": {
+              "value": 0.8
+            }
+          }
+        }
+      }
+    }
+  ],
+  "legends": [
+    {
+      "fill": "ramp",
+      "type": "gradient",
+      "title": "ramp",
+      "encode": {
+        "gradient": {
+          "update": {
+            "stroke": {
+              "value": "#333333"
+            },
+            "strokeWidth": {
+              "value": 2
+            },
+            "opacity": {
+              "value": 0.85
+            }
+          }
+        },
+        "labels": {
+          "update": {
+            "fontSize": {
+              "value": 8
+            }
+          }
+        },
+        "title": {
+          "update": {
+            "baseline": {
+              "value": "bottom"
+            },
+            "limit": {
+              "value": 60
+            }
+          }
+        },
+        "legend": {
+          "update": {
+            "fill": {
+              "value": "#f0f0f0"
+            },
+            "stroke": {
+              "value": "#777777"
+            },
+            "cornerRadius": {
+              "value": 4
+            },
+            "padding": {
+              "value": 7
+            }
+          }
+        }
+      }
+    },
+    {
+      "fill": "swatch",
+      "title": "swatches",
+      "orient": "top-left",
+      "encode": {
+        "labels": {
+          "update": {
+            "align": {
+              "value": "right"
+            },
+            "baseline": {
+              "value": "bottom"
+            }
+          }
+        },
+        "symbols": {
+          "update": {
+            "shape": {
+              "value": "square"
+            },
+            "size": {
+              "value": 120
+            },
+            "strokeDash": {
+              "value": [
+                3,
+                2
+              ]
+            },
+            "strokeDashOffset": {
+              "value": 1
+            },
+            "strokeWidth": {
+              "value": 2
+            }
+          }
+        },
+        "title": {
+          "update": {
+            "align": {
+              "value": "right"
+            },
+            "fontSize": {
+              "value": 11
+            }
+          }
+        }
+      },
+      "symbolStrokeColor": "#333333"
+    }
+  ],
+  "marks": [
+    {
+      "type": "symbol",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "x",
+            "field": "v"
+          },
+          "y": {
+            "scale": "y",
+            "field": "v"
+          },
+          "fill": {
+            "scale": "ramp",
+            "field": "v"
+          },
+          "size": {
+            "value": 90
+          }
+        }
+      }
+    }
+  ]
+}

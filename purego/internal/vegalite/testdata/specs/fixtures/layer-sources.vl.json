@@ -1,0 +1,25 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "description": "Two layers reading two different tables, and a third joined in beside them.",
+  "layer": [
+    {
+      "data": {
+        "values": [
+          {"category": "Alpha", "amount": 28},
+          {"category": "Beta", "amount": 55},
+          {"category": "Gamma", "amount": 43}
+        ]
+      },
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "category", "type": "nominal"},
+        "y": {"field": "amount", "type": "quantitative"}
+      }
+    },
+    {
+      "data": {"values": [{"threshold": 40}]},
+      "mark": {"type": "rule", "strokeDash": [4, 4]},
+      "encoding": {"y": {"field": "threshold", "type": "quantitative"}}
+    }
+  ]
+}

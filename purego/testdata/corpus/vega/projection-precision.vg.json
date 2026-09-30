@@ -1,0 +1,192 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A projection's `precision` is the threshold of its adaptive resampler: a straight line on the globe is a curve on the map, and the resampler keeps bisecting a segment while the midpoint of the great circle is further than this from the straight line between its ends. Zero turns it off, which is what a chart asks for when it wants the vertices it gave and nothing interpolated. Each row here is the same geometry twice, once at the default and once at zero, through a projection that clips to a cap: the gnomonic's is 60 degrees and the orthographic's is the hemisphere facing the reader, so every line here leaves the map and the clip has to put a point on the edge where it goes. That point is the one worth drawing this for. The clip emits it with a marker on it, so that a ring closing on itself can be told from one whose two ends merely landed together — and a marker is a thing to be dropped rather than carried once the clipping is over, because the stage after it projects.",
+  "width": 260,
+  "height": 130,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "lines",
+      "values": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {},
+            "geometry": {
+              "type": "LineString",
+              "coordinates": [
+                [-120, -40],
+                [0, 0],
+                [120, 40]
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {},
+            "geometry": {
+              "type": "LineString",
+              "coordinates": [
+                [-150, 30],
+                [-30, 55],
+                [90, 20]
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {},
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [-70, -25],
+                  [70, -25],
+                  [70, 25],
+                  [-70, 25],
+                  [-70, -25]
+                ]
+              ]
+            }
+          }
+        ]
+      },
+      "format": {
+        "type": "json",
+        "property": "features"
+      }
+    }
+  ],
+  "projections": [
+    {
+      "name": "gnomonic",
+      "type": "gnomonic",
+      "scale": 30,
+      "translate": [65, 65]
+    },
+    {
+      "name": "gnomonicCrisp",
+      "type": "gnomonic",
+      "scale": 30,
+      "translate": [65, 65],
+      "precision": 0
+    },
+    {
+      "name": "orthographic",
+      "type": "orthographic",
+      "scale": 55,
+      "translate": [195, 65]
+    },
+    {
+      "name": "orthographicCrisp",
+      "type": "orthographic",
+      "scale": 55,
+      "translate": [195, 65],
+      "precision": 0
+    }
+  ],
+  "marks": [
+    {
+      "type": "shape",
+      "from": {
+        "data": "lines"
+      },
+      "transform": [
+        {
+          "type": "geoshape",
+          "projection": "gnomonic"
+        }
+      ],
+      "encode": {
+        "enter": {
+          "fill": {
+            "value": null
+          },
+          "stroke": {
+            "value": "#b8c4cc"
+          },
+          "strokeWidth": {
+            "value": 3
+          }
+        }
+      }
+    },
+    {
+      "type": "shape",
+      "from": {
+        "data": "lines"
+      },
+      "transform": [
+        {
+          "type": "geoshape",
+          "projection": "gnomonicCrisp"
+        }
+      ],
+      "encode": {
+        "enter": {
+          "fill": {
+            "value": null
+          },
+          "stroke": {
+            "value": "#d36f2a"
+          },
+          "strokeWidth": {
+            "value": 0.7
+          }
+        }
+      }
+    },
+    {
+      "type": "shape",
+      "from": {
+        "data": "lines"
+      },
+      "transform": [
+        {
+          "type": "geoshape",
+          "projection": "orthographic"
+        }
+      ],
+      "encode": {
+        "enter": {
+          "fill": {
+            "value": null
+          },
+          "stroke": {
+            "value": "#b8c4cc"
+          },
+          "strokeWidth": {
+            "value": 3
+          }
+        }
+      }
+    },
+    {
+      "type": "shape",
+      "from": {
+        "data": "lines"
+      },
+      "transform": [
+        {
+          "type": "geoshape",
+          "projection": "orthographicCrisp"
+        }
+      ],
+      "encode": {
+        "enter": {
+          "fill": {
+            "value": null
+          },
+          "stroke": {
+            "value": "#7a4fb5"
+          },
+          "strokeWidth": {
+            "value": 0.7
+          }
+        }
+      }
+    }
+  ]
+}

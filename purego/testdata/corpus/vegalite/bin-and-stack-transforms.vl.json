@@ -1,0 +1,24 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A bucketing and an accumulation written as transforms rather than on the channels.",
+  "data": {"url": "data/movies.json"},
+  "transform": [
+    {"bin": true, "field": "IMDB Rating", "as": "binned rating"},
+    {"aggregate": [{"op": "count", "as": "count"}], "groupby": ["binned rating", "binned rating_end", "Major Genre"]},
+    {
+      "stack": "count",
+      "groupby": ["binned rating"],
+      "as": ["low", "high"],
+      "offset": "normalize",
+      "sort": [{"field": "Major Genre", "order": "descending"}]
+    }
+  ],
+  "mark": "rect",
+  "encoding": {
+    "x": {"field": "binned rating", "bin": {"binned": true}, "title": "IMDB Rating (binned)"},
+    "x2": {"field": "binned rating_end"},
+    "y": {"field": "low", "type": "quantitative"},
+    "y2": {"field": "high"},
+    "color": {"field": "Major Genre", "type": "nominal"}
+  }
+}

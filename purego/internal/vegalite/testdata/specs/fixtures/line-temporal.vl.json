@@ -1,0 +1,13 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "width": 400, "height": 200,
+  "data": {"values": [
+    {"d": "2020-01-01", "v": 12}, {"d": "2020-02-01", "v": 31},
+    {"d": "2020-03-01", "v": 25}, {"d": "2020-04-01", "v": 44}
+  ]},
+  "mark": "line",
+  "encoding": {
+    "x": {"field": "d", "type": "temporal"},
+    "y": {"field": "v", "type": "quantitative"}
+  }
+}

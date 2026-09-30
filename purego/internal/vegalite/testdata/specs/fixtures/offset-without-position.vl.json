@@ -1,0 +1,17 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "An offset with no position beside it, which has no band to sit inside and takes the plot.",
+  "data": {
+    "values": [
+      {"group": "x", "value": 0.1},
+      {"group": "y", "value": 0.6},
+      {"group": "z", "value": 0.9}
+    ]
+  },
+  "mark": "bar",
+  "encoding": {
+    "xOffset": {"field": "group"},
+    "y": {"field": "value", "type": "quantitative"},
+    "color": {"field": "group"}
+  }
+}

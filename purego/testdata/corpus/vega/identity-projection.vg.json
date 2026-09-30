@@ -1,0 +1,361 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "The identity projection: no globe at all. Coordinates are already on the page and only the scale, the translation and a reflection touch them, which is what a chart whose geometry is a floor plan rather than a map wants. Its defaults are its own \u2014 scale 1 and translate [0, 0], where every spherical projection starts at 150 and the middle of a 960 by 500 page \u2014 and clipExtent, fitExtent and reflectY all work on it as they do on the rest. What does **not** work on it is everything a sphere has and this does not: the last two rows draw the same wide geometry twice, once plainly and once through a projection that also asks for a clipAngle, a centre, a rotation and a resampling precision, and the two land exactly on top of each other. Upstream applies a projection property only where the projection has a setter of that name, and d3-geo's identity projection has five; it also has no resampler at all, which is why the straight edges here stay straight rather than bulging along a great circle that is not there.",
+  "width": 240,
+  "height": 120,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "shape",
+      "values": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {},
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [
+                    0,
+                    0
+                  ],
+                  [
+                    40,
+                    0
+                  ],
+                  [
+                    40,
+                    20
+                  ],
+                  [
+                    20,
+                    30
+                  ],
+                  [
+                    0,
+                    20
+                  ],
+                  [
+                    0,
+                    0
+                  ]
+                ]
+              ]
+            }
+          }
+        ]
+      },
+      "format": {
+        "type": "json",
+        "property": "features"
+      }
+    },
+    {
+      "name": "spans",
+      "values": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {},
+            "geometry": {
+              "type": "Polygon",
+              "coordinates": [
+                [
+                  [-100, 20],
+                  [-60, 20],
+                  [-60, 50],
+                  [-100, 50],
+                  [-100, 20]
+                ]
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {},
+            "geometry": {
+              "type": "LineString",
+              "coordinates": [
+                [-120, -40],
+                [0, 0],
+                [120, 40]
+              ]
+            }
+          }
+        ]
+      },
+      "format": {
+        "type": "json",
+        "property": "features"
+      }
+    },
+    {
+      "name": "pts",
+      "values": [
+        {
+          "x": 5,
+          "y": 5
+        },
+        {
+          "x": 30,
+          "y": 15
+        },
+        {
+          "x": 20,
+          "y": 25
+        }
+      ]
+    }
+  ],
+  "projections": [
+    {
+      "name": "plain",
+      "type": "identity",
+      "scale": 2,
+      "translate": [
+        4,
+        4
+      ]
+    },
+    {
+      "name": "flipped",
+      "type": "identity",
+      "scale": 2,
+      "translate": [
+        130,
+        64
+      ],
+      "reflectY": true
+    },
+    {
+      "name": "fitted",
+      "type": "identity",
+      "fit": {
+        "signal": "data('shape')"
+      },
+      "extent": [
+        [
+          100,
+          6
+        ],
+        [
+          124,
+          114
+        ]
+      ]
+    },
+    {
+      "name": "wide",
+      "type": "identity",
+      "scale": 0.5,
+      "translate": [
+        130,
+        60
+      ]
+    },
+    {
+      "name": "wideDeaf",
+      "type": "identity",
+      "scale": 0.5,
+      "translate": [
+        130,
+        60
+      ],
+      "clipAngle": 8,
+      "center": [
+        -40,
+        25
+      ],
+      "rotate": [
+        60,
+        -20
+      ],
+      "precision": 0.1
+    }
+  ],
+  "signals": [
+    {
+      "name": "howBig",
+      "update": "geoScale('plain') + ',' + geoScale('fitted')"
+    }
+  ],
+  "marks": [
+    {
+      "type": "shape",
+      "from": {
+        "data": "spans"
+      },
+      "transform": [
+        {
+          "type": "geoshape",
+          "projection": "wide"
+        }
+      ],
+      "encode": {
+        "enter": {
+          "fill": {
+            "value": "#f2f2f2"
+          },
+          "stroke": {
+            "value": "#999999"
+          },
+          "strokeWidth": {
+            "value": 3
+          }
+        }
+      }
+    },
+    {
+      "type": "shape",
+      "from": {
+        "data": "spans"
+      },
+      "transform": [
+        {
+          "type": "geoshape",
+          "projection": "wideDeaf"
+        }
+      ],
+      "encode": {
+        "enter": {
+          "fill": {
+            "value": null
+          },
+          "stroke": {
+            "value": "#7a4fb5"
+          },
+          "strokeWidth": {
+            "value": 0.7
+          }
+        }
+      }
+    },
+    {
+      "type": "shape",
+      "from": {
+        "data": "shape"
+      },
+      "transform": [
+        {
+          "type": "geoshape",
+          "projection": "plain"
+        }
+      ],
+      "encode": {
+        "enter": {
+          "fill": {
+            "value": "#dbe9f6"
+          },
+          "stroke": {
+            "value": "#4c78a8"
+          }
+        }
+      }
+    },
+    {
+      "type": "shape",
+      "from": {
+        "data": "shape"
+      },
+      "transform": [
+        {
+          "type": "geoshape",
+          "projection": "flipped"
+        }
+      ],
+      "encode": {
+        "enter": {
+          "fill": {
+            "value": "#fde0dd"
+          },
+          "stroke": {
+            "value": "#e45756"
+          }
+        }
+      }
+    },
+    {
+      "type": "shape",
+      "from": {
+        "data": "shape"
+      },
+      "transform": [
+        {
+          "type": "geoshape",
+          "projection": "fitted"
+        }
+      ],
+      "encode": {
+        "enter": {
+          "fill": {
+            "value": "#e6f0d9"
+          },
+          "stroke": {
+            "value": "#4a7c1f"
+          }
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "from": {
+        "data": "pts"
+      },
+      "transform": [
+        {
+          "type": "geopoint",
+          "projection": "plain",
+          "fields": [
+            "x",
+            "y"
+          ],
+          "as": [
+            "px",
+            "py"
+          ]
+        }
+      ],
+      "encode": {
+        "enter": {
+          "x": {
+            "field": "px"
+          },
+          "y": {
+            "field": "py"
+          },
+          "size": {
+            "value": 40
+          },
+          "fill": {
+            "value": "#333"
+          }
+        }
+      }
+    },
+    {
+      "type": "text",
+      "encode": {
+        "enter": {
+          "x": {
+            "value": 4
+          },
+          "y": {
+            "value": 116
+          },
+          "fontSize": {
+            "value": 9
+          }
+        },
+        "update": {
+          "text": {
+            "signal": "howBig"
+          }
+        }
+      }
+    }
+  ]
+}

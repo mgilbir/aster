@@ -1,0 +1,38 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "`cornerRadiusEnd` is a bar's word and nothing else's. `initMarkDef` guards the whole rule with `if (markDef.type === 'bar' && markDef.orient)`, so an area, a point, a tick or a rule that asks for one is compiled as though it had not: upstream emits no corner property at all for them, where this compiler wrote the two corners onto every mark type there is. The three layers here ask for it on an area, a point and a tick, and the bar in the fourth layer is the one that gets it — a **ranged** bar at that, whose far end is a `y2` rather than a baseline, which rounds all four corners rather than two. A bar with two ends of its own has no far one to single out, so upstream writes the plain `cornerRadius` in place of the pair.",
+  "width": 220,
+  "height": 130,
+  "data": {
+    "values": [
+      {"c": "Jan", "v": 62, "lo": 20, "hi": 62},
+      {"c": "Feb", "v": 48, "lo": 12, "hi": 48},
+      {"c": "Mar", "v": 31, "lo": 8, "hi": 31},
+      {"c": "Apr", "v": 18, "lo": 4, "hi": 18}
+    ]
+  },
+  "encoding": {
+    "x": {"field": "c", "type": "nominal", "sort": null, "axis": {"labelAngle": 0}}
+  },
+  "layer": [
+    {
+      "mark": {"type": "area", "cornerRadiusEnd": 6, "opacity": 0.3},
+      "encoding": {"y": {"field": "v", "type": "quantitative"}}
+    },
+    {
+      "mark": {"type": "bar", "cornerRadiusEnd": 5},
+      "encoding": {
+        "y": {"field": "lo", "type": "quantitative"},
+        "y2": {"field": "hi"}
+      }
+    },
+    {
+      "mark": {"type": "point", "cornerRadiusEnd": 4, "filled": true},
+      "encoding": {"y": {"field": "v", "type": "quantitative"}}
+    },
+    {
+      "mark": {"type": "tick", "cornerRadiusEnd": 3},
+      "encoding": {"y": {"field": "lo", "type": "quantitative"}}
+    }
+  ]
+}

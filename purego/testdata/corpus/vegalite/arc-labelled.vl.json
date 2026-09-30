@@ -1,0 +1,22 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A pie whose slices are labelled in their middles, the labels sitting outside the arc.",
+  "data": {
+    "values": [
+      {"category": "a", "value": 4},
+      {"category": "b", "value": 6},
+      {"category": "c", "value": 10}
+    ]
+  },
+  "encoding": {
+    "theta": {"field": "value", "type": "quantitative", "stack": true},
+    "color": {"field": "category", "type": "nominal", "legend": null}
+  },
+  "layer": [
+    {"mark": {"type": "arc", "outerRadius": 80}},
+    {
+      "mark": {"type": "text", "radius": 90, "radiusOffset": 5},
+      "encoding": {"text": {"field": "category", "type": "nominal"}}
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "What survives `stripAndRedirectConfig` is decided by a list upstream wrote out by hand, `VL_ONLY_CONFIG_PROPERTIES`, and by a sweep at the end of it that asks about every property rather than about a named few — `for (const prop in config) { if (isObject(config[prop]) && isEmpty(config[prop])) delete config[prop]; }`. Read as the rule it looks like, \"whatever only Vega-Lite understands is struck out\", the list gives the wrong answer in both directions, and this compiler derived it and got sixteen keys wrong. The first five rows are keys that are Vega-Lite's own and are handed to Vega all the same, which has no use for them: `fieldTitle` names the formatter a guide's default title is written by, `switch (config.fieldTitle) { case 'plain': return fieldDef.field; }` in `channeldef.ts`, and it is not on the list; neither is `timeFormatType`; neither are `headerRow`, `headerColumn` and `headerFacet`, though the `header` block beside them is struck out. Dropped here, a theme arrived at the renderer without them. The two axis rows go the other way. This compiler resolves `axisXBand` and `axisBand` through the same chain and writes both onto the x axis, where the label padding and the label size below can be read; but `axisXBand` is on upstream's list and `axisBand` is not, so only `axisBand` may also appear in the emitted configuration, and `axisXBand` passed through was a word Vega has never heard of. Then a block the specification wrote empty, `axis`, and one emptied on the way out, `legend`, whose `unselectedOpacity` is the last thing in it; both are gone by the closing sweep, where this compiler swept only the blocks it knew by name and emitted the rest as empty objects nobody had asked for. Then an empty parameter list, which is an array rather than a block and goes the same way, since `isObject` is Vega's and answers for a list too. The last rows must not change: `range` and the named style carrying a fill are non-empty and belong in the output, and a named style written *empty* belongs there too — the sweep is over the configuration's own properties and does not go a level down into `config.style`, so `{\"style\": {\"blank\": {}}}` is emitted exactly as written. Every field here is plain, with no aggregate, bucket or time unit, so the three field-title formatters agree; what is pinned is that the key reaches the output, not what it would mean to a guide title.",
+  "width": 200,
+  "height": 140,
+  "data": {
+    "values": [
+      {"c": "alpha", "v": 4},
+      {"c": "beta", "v": 7},
+      {"c": "gamma", "v": 2}
+    ]
+  },
+  "mark": "bar",
+  "encoding": {
+    "x": {"field": "c", "type": "nominal"},
+    "y": {"field": "v", "type": "quantitative"},
+    "color": {"field": "c", "type": "nominal"}
+  },
+  "config": {
+    "fieldTitle": "plain",
+    "timeFormatType": "isoWeek",
+    "headerRow": {"labelFont": "Verdana"},
+    "headerColumn": {"labelFont": "Georgia"},
+    "headerFacet": {"labelFont": "Courier"},
+    "axisXBand": {"labelPadding": 9},
+    "axisBand": {"labelFontSize": 13},
+    "axis": {},
+    "legend": {"unselectedOpacity": 0.25},
+    "params": [],
+    "range": {"category": ["#4c78a8", "#f58518", "#54a24b"]},
+    "style": {"blank": {}, "spoken": {"fill": "#b279a2"}}
+  }
+}

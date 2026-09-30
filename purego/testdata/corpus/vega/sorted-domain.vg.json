@@ -1,0 +1,81 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "Discrete domains ordered by `sort`: the bands by a sum they never carry as a field, the colours by their own numeric value.",
+  "width": 240,
+  "height": 160,
+  "padding": 5,
+  "data": [
+    {
+      "name": "table",
+      "values": [
+        {"team": "delta", "tier": 100, "points": 3},
+        {"team": "alpha", "tier": 9, "points": 10},
+        {"team": "charlie", "tier": 20, "points": 7},
+        {"team": "alpha", "tier": 9, "points": 1},
+        {"team": "bravo", "tier": 3, "points": 7},
+        {"team": "charlie", "tier": 20, "points": 2},
+        {"team": "delta", "tier": 100, "points": 3}
+      ]
+    },
+    {
+      "name": "totals",
+      "source": "table",
+      "transform": [
+        {
+          "type": "aggregate",
+          "groupby": ["team", "tier"],
+          "fields": ["points"],
+          "ops": ["sum"],
+          "as": ["total"]
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "y",
+      "type": "band",
+      "domain": {
+        "data": "table",
+        "field": "team",
+        "sort": {"op": "sum", "field": "points", "order": "descending"}
+      },
+      "range": "height",
+      "padding": 0.2
+    },
+    {
+      "name": "x",
+      "type": "linear",
+      "domain": {"data": "totals", "field": "total"},
+      "range": "width",
+      "nice": true,
+      "zero": true
+    },
+    {
+      "name": "tier",
+      "type": "ordinal",
+      "domain": {"data": "table", "field": "tier", "sort": true},
+      "range": {"scheme": "tableau10"}
+    }
+  ],
+  "axes": [
+    {"orient": "left", "scale": "y"},
+    {"orient": "bottom", "scale": "x", "tickCount": 4}
+  ],
+  "legends": [{"fill": "tier", "title": "Tier"}],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "totals"},
+      "encode": {
+        "enter": {
+          "y": {"scale": "y", "field": "team"},
+          "height": {"scale": "y", "band": 1},
+          "x": {"scale": "x", "value": 0},
+          "x2": {"scale": "x", "field": "total"},
+          "fill": {"scale": "tier", "field": "tier"}
+        }
+      }
+    }
+  ]
+}

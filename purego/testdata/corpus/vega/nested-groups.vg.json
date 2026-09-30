@@ -1,0 +1,95 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A group mark driven by plain data rather than a facet, with a second group nested inside it and clipping switched on. Nesting has only been tested through faceting.",
+  "width": 260,
+  "height": 130,
+  "padding": 5,
+  "data": [
+    {
+      "name": "panels",
+      "values": [
+        {"label": "left", "left": 0, "tint": "#eef3fa"},
+        {"label": "right", "left": 135, "tint": "#faf0ee"}
+      ]
+    },
+    {
+      "name": "series",
+      "values": [
+        {"i": 0, "v": 18}, {"i": 1, "v": 42}, {"i": 2, "v": 30}, {"i": 3, "v": 55}
+      ]
+    }
+  ],
+  "scales": [
+    {"name": "x", "type": "linear", "domain": [0, 3], "range": [0, 110]},
+    {"name": "y", "type": "linear", "domain": [0, 60], "range": [90, 0]}
+  ],
+  "marks": [
+    {
+      "type": "group",
+      "name": "panel",
+      "from": {"data": "panels"},
+      "encode": {
+        "enter": {
+          "x": {"field": "left"},
+          "y": {"value": 20},
+          "width": {"value": 125},
+          "height": {"value": 100},
+          "fill": {"field": "tint"},
+          "stroke": {"value": "#cccccc"}
+        }
+      },
+      "marks": [
+        {
+          "type": "text",
+          "encode": {
+            "enter": {
+              "x": {"value": 6},
+              "y": {"value": 12},
+              "text": {"signal": "parent.label"},
+              "fontSize": {"value": 11},
+              "fill": {"value": "#666666"}
+            }
+          }
+        },
+        {
+          "type": "group",
+          "clip": true,
+          "encode": {
+            "enter": {
+              "x": {"value": 8},
+              "y": {"value": 6},
+              "width": {"value": 110},
+              "height": {"value": 90}
+            }
+          },
+          "marks": [
+            {
+              "type": "line",
+              "from": {"data": "series"},
+              "encode": {
+                "enter": {
+                  "x": {"scale": "x", "field": "i"},
+                  "y": {"scale": "y", "field": "v"},
+                  "stroke": {"value": "#4c78a8"},
+                  "strokeWidth": {"value": 2}
+                }
+              }
+            },
+            {
+              "type": "symbol",
+              "from": {"data": "series"},
+              "encode": {
+                "enter": {
+                  "x": {"scale": "x", "field": "i"},
+                  "y": {"scale": "y", "field": "v"},
+                  "size": {"value": 45},
+                  "fill": {"value": "#4c78a8"}
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

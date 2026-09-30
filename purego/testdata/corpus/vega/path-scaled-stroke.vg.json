@@ -1,0 +1,96 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A stroked `path` mark under `scaleX`/`scaleY`. The stroke allowance is measured in the space the pen draws in, so scaling the outline must not scale the margin around it — no fixture in the corpus both scaled and stroked a path, and the bounds came out twice too wide.",
+  "width": 260,
+  "height": 240,
+  "padding": 5,
+  "autosize": "pad",
+
+  "data": [
+    {
+      "name": "shapes",
+      "values": [
+        {"n": "square", "p": "M1.25,1.25L6.75,1.25L6.75,6.75L1.25,6.75Z", "sx": 8,  "sy": 8, "w": 2, "col": "#4c78a8"},
+        {"n": "wide",   "p": "M0,0L8,0L8,4L0,4Z",                        "sx": 12, "sy": 3, "w": 3, "col": "#f58518"},
+        {"n": "spike",  "p": "M0,6L3,0L6,6Z",                            "sx": 6,  "sy": 6, "w": 4, "col": "#54a24b"},
+        {"n": "line",   "p": "M0,0L6,6",                                 "sx": 7,  "sy": 4, "w": 3, "col": "#e45756"},
+        {"n": "plain",  "p": "M0,0L6,0L6,6L0,6Z",                        "sx": 1,  "sy": 1, "w": 2, "col": "#9d755d"}
+      ]
+    }
+  ],
+
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {"data": "shapes", "field": "n"},
+      "range": "width",
+      "padding": 0.1
+    }
+  ],
+
+  "axes": [{"scale": "x", "orient": "bottom", "labelAngle": -40, "labelAlign": "right"}],
+
+  "marks": [
+    {
+      "description": "The default miter join, which carries the largest allowance: miterLimit/2 stroke widths past a vertex. `plain` is unscaled, so it holds the case that must not move.",
+      "type": "path",
+      "from": {"data": "shapes"},
+      "encode": {
+        "enter": {
+          "path": {"field": "p"},
+          "fill": {"value": null},
+          "stroke": {"field": "col"},
+          "strokeWidth": {"field": "w"}
+        },
+        "update": {
+          "x": {"scale": "x", "field": "n"},
+          "y": {"value": 20},
+          "scaleX": {"field": "sx"},
+          "scaleY": {"field": "sy"}
+        }
+      }
+    },
+    {
+      "description": "A square cap reaches sqrt(2)/2 of the width past the end of a diagonal, and a round join takes no miter allowance at all — two different allowances under the same scaling.",
+      "type": "path",
+      "from": {"data": "shapes"},
+      "encode": {
+        "enter": {
+          "path": {"field": "p"},
+          "fill": {"value": null},
+          "stroke": {"value": "#72b7b2"},
+          "strokeWidth": {"value": 4},
+          "strokeCap": {"value": "square"},
+          "strokeJoin": {"value": "round"}
+        },
+        "update": {
+          "x": {"scale": "x", "field": "n"},
+          "y": {"value": 110},
+          "scaleX": {"field": "sx"},
+          "scaleY": {"field": "sy"}
+        }
+      }
+    },
+    {
+      "description": "A miter limit below the default changes the allowance rather than merely scaling it, so it separates 'divided by the scale' from 'divided by anything that happens to be 4'.",
+      "type": "path",
+      "from": {"data": "shapes"},
+      "encode": {
+        "enter": {
+          "path": {"field": "p"},
+          "fill": {"value": null},
+          "stroke": {"value": "#333333"},
+          "strokeWidth": {"value": 2},
+          "strokeMiterLimit": {"value": 1}
+        },
+        "update": {
+          "x": {"scale": "x", "field": "n"},
+          "y": {"value": 190},
+          "scaleX": {"field": "sx"},
+          "scaleY": {"field": "sy"}
+        }
+      }
+    }
+  ]
+}

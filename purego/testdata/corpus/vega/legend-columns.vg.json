@@ -1,0 +1,55 @@
+{
+  "width": 200,
+  "height": 100,
+  "padding": 5,
+  "autosize": "pad",
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {
+          "c": "aa"
+        },
+        {
+          "c": "bb"
+        },
+        {
+          "c": "cc"
+        },
+        {
+          "c": "dd"
+        },
+        {
+          "c": "ee"
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "s",
+      "type": "ordinal",
+      "domain": {
+        "data": "t",
+        "field": "c"
+      },
+      "range": {
+        "scheme": "category10"
+      }
+    }
+  ],
+  "legends": [
+    {
+      "fill": "s",
+      "columns": 2
+    },
+    {
+      "fill": "s",
+      "columns": 0,
+      "orient": "bottom",
+      "title": "no columns"
+    }
+  ],
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A legend wrapped into two columns. Entries fill down each column before moving across, which is how a reader scans a list. A second legend asks for zero columns, which upstream reads as one column per entry rather than as one column: the number is falsy, and every entry then takes a column of its own."
+}

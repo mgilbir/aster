@@ -1,0 +1,17 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "Columns folded into rows, then counted.",
+  "data": {"values": [
+    {"country": "A", "gold": 3, "silver": 5},
+    {"country": "B", "gold": 7, "silver": 2}
+  ]},
+  "transform": [
+    {"fold": ["gold", "silver"], "as": ["metal", "count"]}
+  ],
+  "mark": "bar",
+  "encoding": {
+    "x": {"field": "country", "type": "nominal"},
+    "y": {"field": "count", "type": "quantitative"},
+    "color": {"field": "metal", "type": "nominal"}
+  }
+}

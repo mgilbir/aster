@@ -1,0 +1,14 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A domain ordered by a written-out list, and one ordered by another channel.",
+  "data": {"values": [
+    {"c": "a", "v": 5, "k": 3}, {"c": "b", "v": 2, "k": 1},
+    {"c": "d", "v": 7, "k": 4}, {"c": "e", "v": 1, "k": 2}
+  ]},
+  "mark": "bar",
+  "encoding": {
+    "x": {"field": "c", "type": "nominal", "sort": ["d", "a", "e", "b"]},
+    "y": {"field": "v", "type": "quantitative"},
+    "color": {"field": "c", "type": "nominal", "sort": {"field": "k", "order": "descending"}}
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A theme narrowing every bucket's bar at once, written as a bare fraction.",
+  "data": {"url": "data/stocks.csv"},
+  "mark": "bar",
+  "encoding": {
+    "x": {"timeUnit": "month", "field": "date"},
+    "y": {"aggregate": "mean", "field": "price"}
+  },
+  "config": {"mark": {"timeUnitBandSize": 0.7}}
+}

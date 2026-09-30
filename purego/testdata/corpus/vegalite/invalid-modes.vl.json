@@ -1,0 +1,21 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "What a path does with a value it cannot place: break it, or drop the row.",
+  "data": {
+    "values": [
+      {"a": 1, "b": 4, "c": "x"},
+      {"a": 2, "b": null, "c": "x"},
+      {"a": 3, "b": 6, "c": "y"}
+    ]
+  },
+  "layer": [
+    {"mark": {"type": "line"}},
+    {"mark": {"type": "line", "invalid": "filter"}},
+    {"mark": {"type": "point"}}
+  ],
+  "encoding": {
+    "x": {"field": "a", "type": "quantitative"},
+    "y": {"field": "b", "type": "quantitative"},
+    "color": {"field": "c", "type": "nominal"}
+  }
+}

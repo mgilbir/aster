@@ -1,0 +1,111 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A scatter under three trends: a quadratic fit sampled where it bends, a loess smoothing, and the straight line for comparison.",
+  "width": 240,
+  "height": 140,
+  "padding": 5,
+  "data": [
+    {
+      "name": "points",
+      "values": [
+        {"u": 1, "v": 2},
+        {"u": 2, "v": 5},
+        {"u": 3, "v": 11},
+        {"u": 4, "v": 21},
+        {"u": 5, "v": 34},
+        {"u": 6, "v": 52},
+        {"u": 7, "v": 71},
+        {"u": 8, "v": 99}
+      ]
+    },
+    {
+      "name": "quad",
+      "source": "points",
+      "transform": [{"type": "regression", "x": "u", "y": "v", "method": "quad"}]
+    },
+    {
+      "name": "smooth",
+      "source": "points",
+      "transform": [{"type": "loess", "x": "u", "y": "v", "bandwidth": 0.6}]
+    },
+    {
+      "name": "straight",
+      "source": "points",
+      "transform": [{"type": "regression", "x": "u", "y": "v"}]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "linear",
+      "domain": {"data": "points", "field": "u"},
+      "range": "width",
+      "zero": false,
+      "nice": true
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {"data": "points", "field": "v"},
+      "range": "height",
+      "zero": true,
+      "nice": true
+    }
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "x", "tickCount": 4},
+    {"orient": "left", "scale": "y", "tickCount": 4}
+  ],
+  "marks": [
+    {
+      "type": "line",
+      "from": {"data": "straight"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "u"},
+          "y": {"scale": "y", "field": "v"},
+          "stroke": {"value": "#999999"},
+          "strokeWidth": {"value": 1},
+          "strokeDash": {"value": [4, 3]}
+        }
+      }
+    },
+    {
+      "type": "line",
+      "from": {"data": "quad"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "u"},
+          "y": {"scale": "y", "field": "v"},
+          "stroke": {"value": "#e45756"},
+          "strokeWidth": {"value": 2}
+        }
+      }
+    },
+    {
+      "type": "line",
+      "from": {"data": "smooth"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "u"},
+          "y": {"scale": "y", "field": "v"},
+          "stroke": {"value": "#54a24b"},
+          "strokeWidth": {"value": 2},
+          "interpolate": {"value": "monotone"}
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "from": {"data": "points"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "u"},
+          "y": {"scale": "y", "field": "v"},
+          "size": {"value": 55},
+          "fill": {"value": "#4c78a8"}
+        }
+      }
+    }
+  ]
+}

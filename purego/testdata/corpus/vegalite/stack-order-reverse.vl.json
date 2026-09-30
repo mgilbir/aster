@@ -1,0 +1,41 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "description": "A stack ordered by a column of its own, one ordered only by direction, and an axis running backwards.",
+  "data": {
+    "values": [
+      {"site": "Alpha", "variety": "one", "yield": 28, "rank": 3, "power": 120},
+      {"site": "Alpha", "variety": "two", "yield": 55, "rank": 1, "power": 90},
+      {"site": "Beta", "variety": "one", "yield": 43, "rank": 2, "power": 150},
+      {"site": "Beta", "variety": "two", "yield": 12, "rank": 4, "power": 60}
+    ]
+  },
+  "vconcat": [
+    {
+      "width": 150,
+      "height": 90,
+      "mark": "bar",
+      "encoding": {
+        "y": {"field": "site", "type": "nominal"},
+        "x": {"aggregate": "sum", "field": "yield"},
+        "color": {"field": "variety", "type": "nominal"},
+        "order": {"aggregate": "sum", "field": "rank", "type": "quantitative"}
+      }
+    },
+    {
+      "width": 150,
+      "height": 90,
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "site", "type": "nominal"},
+        "y": {"aggregate": "sum", "field": "yield"},
+        "color": {"field": "variety", "type": "nominal"},
+        "order": {"sort": "ascending"}
+      }
+    },
+    {
+      "width": 150,
+      "mark": "tick",
+      "encoding": {"x": {"field": "power", "type": "quantitative", "sort": "descending"}}
+    }
+  ]
+}

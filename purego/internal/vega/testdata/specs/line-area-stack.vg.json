@@ -1,0 +1,160 @@
+{
+ "width": 200,
+ "height": 100,
+ "padding": 5,
+ "data": [
+  {
+   "name": "t",
+   "values": [
+    {
+     "x": 0,
+     "y": 3,
+     "c": "a"
+    },
+    {
+     "x": 1,
+     "y": 5,
+     "c": "a"
+    },
+    {
+     "x": 2,
+     "y": 2,
+     "c": "a"
+    },
+    {
+     "x": 0,
+     "y": 1,
+     "c": "b"
+    },
+    {
+     "x": 1,
+     "y": 2,
+     "c": "b"
+    },
+    {
+     "x": 2,
+     "y": 4,
+     "c": "b"
+    }
+   ],
+   "transform": [
+    {
+     "type": "stack",
+     "groupby": [
+      "x"
+     ],
+     "sort": {
+      "field": "c"
+     },
+     "field": "y"
+    }
+   ]
+  }
+ ],
+ "scales": [
+  {
+   "name": "x",
+   "type": "linear",
+   "domain": {
+    "data": "t",
+    "field": "x"
+   },
+   "range": "width"
+  },
+  {
+   "name": "y",
+   "type": "linear",
+   "domain": {
+    "data": "t",
+    "field": "y1"
+   },
+   "range": "height",
+   "nice": true
+  },
+  {
+   "name": "c",
+   "type": "ordinal",
+   "domain": {
+    "data": "t",
+    "field": "c"
+   },
+   "range": {
+    "scheme": "set2"
+   }
+  }
+ ],
+ "marks": [
+  {
+   "type": "group",
+   "from": {
+    "facet": {
+     "name": "s",
+     "data": "t",
+     "groupby": "c"
+    }
+   },
+   "marks": [
+    {
+     "type": "area",
+     "from": {
+      "data": "s"
+     },
+     "encode": {
+      "enter": {
+       "fill": {
+        "scale": "c",
+        "field": "c"
+       },
+       "interpolate": {
+        "value": "monotone"
+       }
+      },
+      "update": {
+       "x": {
+        "scale": "x",
+        "field": "x"
+       },
+       "y": {
+        "scale": "y",
+        "field": "y0"
+       },
+       "y2": {
+        "scale": "y",
+        "field": "y1"
+       }
+      }
+     }
+    },
+    {
+     "type": "line",
+     "from": {
+      "data": "s"
+     },
+     "encode": {
+      "enter": {
+       "stroke": {
+        "value": "#333"
+       },
+       "strokeWidth": {
+        "value": 1.5
+       }
+      },
+      "update": {
+       "x": {
+        "scale": "x",
+        "field": "x"
+       },
+       "y": {
+        "scale": "y",
+        "field": "y1"
+       },
+       "defined": {
+        "signal": "datum.x != 1 || datum.c != 'b'"
+       }
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "Whole numbers on the axes, eight decimal places in the tooltip.",
+  "data": {"url": "data/cars.json"},
+  "config": {
+    "tooltipFormat": {"numberFormat": ".8f"},
+    "numberFormat": "d",
+    "customFormatTypes": true
+  },
+  "mark": {"type": "line", "tooltip": true},
+  "encoding": {
+    "x": {"field": "Year", "type": "temporal"},
+    "y": {"field": "Miles_per_Gallon", "type": "quantitative", "aggregate": "average"}
+  }
+}

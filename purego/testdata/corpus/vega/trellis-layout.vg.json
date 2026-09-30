@@ -1,0 +1,91 @@
+{
+  "width": 300,
+  "height": 200,
+  "padding": 5,
+  "autosize": "pad",
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {
+          "c": "a",
+          "v": 3
+        },
+        {
+          "c": "b",
+          "v": 5
+        },
+        {
+          "c": "c",
+          "v": 2
+        },
+        {
+          "c": "d",
+          "v": 7
+        },
+        {
+          "c": "e",
+          "v": 4
+        }
+      ]
+    }
+  ],
+  "layout": {
+    "columns": 3,
+    "padding": {
+      "row": 12,
+      "column": 20
+    }
+  },
+  "marks": [
+    {
+      "type": "group",
+      "from": {
+        "facet": {
+          "name": "cell",
+          "data": "t",
+          "groupby": "c"
+        }
+      },
+      "encode": {
+        "enter": {
+          "width": {
+            "value": 60
+          },
+          "height": {
+            "value": 40
+          },
+          "fill": {
+            "value": "#eee"
+          }
+        }
+      },
+      "marks": [
+        {
+          "type": "rect",
+          "from": {
+            "data": "cell"
+          },
+          "encode": {
+            "enter": {
+              "x": {
+                "value": 2
+              },
+              "y": {
+                "value": 2
+              },
+              "width": {
+                "value": 10
+              },
+              "height": {
+                "field": "v"
+              }
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "Small multiples placed by a layout grid rather than by hand: five cells wrapped into three columns, with row and column padding."
+}

@@ -1,0 +1,11 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A line bucketed two years at a time, which is a unit with a step of its own.",
+  "data": {"url": "data/stocks.csv"},
+  "transform": [{"filter": "datum.symbol==='GOOG'"}],
+  "mark": "line",
+  "encoding": {
+    "x": {"field": "date", "timeUnit": {"unit": "year", "step": 2}, "type": "temporal"},
+    "y": {"aggregate": "average", "field": "price", "type": "quantitative"}
+  }
+}

@@ -1,0 +1,154 @@
+{
+ "$schema": "https://vega.github.io/schema/vega/v6.json",
+ "width": 300,
+ "height": 200,
+ "padding": 5,
+ "marks": [
+  {
+   "type": "group",
+   "encode": {
+    "update": {
+     "x": {
+      "value": 10
+     },
+     "y": {
+      "value": 10
+     },
+     "width": {
+      "value": 280
+     },
+     "height": {
+      "value": 180
+     },
+     "fill": {
+      "value": "#f4f4f4"
+     },
+     "stroke": {
+      "value": "#888"
+     }
+    }
+   },
+   "marks": [
+    {
+     "type": "group",
+     "encode": {
+      "update": {
+       "x": {
+        "value": 10
+       },
+       "y": {
+        "value": 10
+       },
+       "width": {
+        "value": 120
+       },
+       "height": {
+        "value": 70
+       },
+       "fill": {
+        "value": "#fff"
+       },
+       "stroke": {
+        "value": "#bbb"
+       }
+      }
+     },
+     "marks": [
+      {
+       "type": "group",
+       "encode": {
+        "update": {
+         "x": {
+          "value": 10
+         },
+         "y": {
+          "value": 10
+         },
+         "width": {
+          "value": 60
+         },
+         "height": {
+          "value": 40
+         },
+         "fill": {
+          "value": "#ffd"
+         }
+        }
+       },
+       "marks": [
+        {
+         "type": "rect",
+         "encode": {
+          "update": {
+           "x": {
+            "value": 5
+           },
+           "y": {
+            "value": 5
+           },
+           "width": {
+            "value": 20
+           },
+           "height": {
+            "value": 10
+           },
+           "fill": {
+            "value": "#c33"
+           }
+          }
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "type": "group",
+     "encode": {
+      "update": {
+       "x": {
+        "value": 140
+       },
+       "y": {
+        "value": 10
+       },
+       "width": {
+        "value": 120
+       },
+       "height": {
+        "value": 70
+       },
+       "fill": {
+        "value": "#fff"
+       },
+       "clip": {
+        "value": true
+       }
+      }
+     },
+     "marks": [
+      {
+       "type": "text",
+       "encode": {
+        "update": {
+         "text": {
+          "value": "clipped label that runs far to the right"
+         },
+         "x": {
+          "value": 5
+         },
+         "y": {
+          "value": 30
+         },
+         "fill": {
+          "value": "#333"
+         }
+        }
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

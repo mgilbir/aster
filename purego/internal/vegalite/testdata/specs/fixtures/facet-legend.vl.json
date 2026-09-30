@@ -1,0 +1,15 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A trellis with a legend, which is placed against the whole grid rather than a cell.",
+  "data": {"values": [
+    {"g": "A", "x": "p", "y": 3, "s": "one"}, {"g": "A", "x": "q", "y": 5, "s": "two"},
+    {"g": "B", "x": "p", "y": 7, "s": "one"}, {"g": "B", "x": "q", "y": 2, "s": "two"}
+  ]},
+  "mark": "bar",
+  "encoding": {
+    "column": {"field": "g", "type": "nominal"},
+    "x": {"field": "x", "type": "nominal"},
+    "y": {"field": "y", "type": "quantitative"},
+    "color": {"field": "s", "type": "nominal"}
+  }
+}

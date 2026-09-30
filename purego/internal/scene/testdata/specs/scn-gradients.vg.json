@@ -1,0 +1,365 @@
+{
+ "$schema": "https://vega.github.io/schema/vega/v6.json",
+ "width": 300,
+ "height": 200,
+ "padding": 5,
+ "marks": [
+  {
+   "type": "rect",
+   "encode": {
+    "update": {
+     "x": {
+      "value": 10
+     },
+     "y": {
+      "value": 10
+     },
+     "width": {
+      "value": 80
+     },
+     "height": {
+      "value": 60
+     },
+     "fill": {
+      "value": {
+       "gradient": "linear",
+       "stops": [
+        {
+         "offset": 0,
+         "color": "red"
+        },
+        {
+         "offset": 1,
+         "color": "blue"
+        }
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "type": "rect",
+   "encode": {
+    "update": {
+     "x": {
+      "value": 110
+     },
+     "y": {
+      "value": 10
+     },
+     "width": {
+      "value": 80
+     },
+     "height": {
+      "value": 60
+     },
+     "fill": {
+      "value": {
+       "gradient": "linear",
+       "x1": 0,
+       "y1": 0,
+       "x2": 0,
+       "y2": 1,
+       "stops": [
+        {
+         "offset": 0,
+         "color": "#fff"
+        },
+        {
+         "offset": 0.5,
+         "color": "#0a0"
+        },
+        {
+         "offset": 1,
+         "color": "#000"
+        }
+       ]
+      }
+     },
+     "stroke": {
+      "value": {
+       "gradient": "linear",
+       "x1": 0,
+       "y1": 0,
+       "x2": 1,
+       "y2": 1,
+       "stops": [
+        {
+         "offset": 0,
+         "color": "orange"
+        },
+        {
+         "offset": 1,
+         "color": "purple"
+        }
+       ]
+      }
+     },
+     "strokeWidth": {
+      "value": 5
+     }
+    }
+   }
+  },
+  {
+   "type": "symbol",
+   "encode": {
+    "update": {
+     "x": {
+      "value": 250
+     },
+     "y": {
+      "value": 40
+     },
+     "size": {
+      "value": 3000
+     },
+     "fill": {
+      "value": {
+       "gradient": "radial",
+       "stops": [
+        {
+         "offset": 0,
+         "color": "yellow"
+        },
+        {
+         "offset": 1,
+         "color": "red"
+        }
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "type": "symbol",
+   "encode": {
+    "update": {
+     "x": {
+      "value": 50
+     },
+     "y": {
+      "value": 120
+     },
+     "size": {
+      "value": 3000
+     },
+     "fill": {
+      "value": {
+       "gradient": "radial",
+       "stops": [
+        {
+         "offset": 0,
+         "color": "#fff"
+        },
+        {
+         "offset": 1,
+         "color": "#036"
+        }
+       ],
+       "x1": 0.3,
+       "y1": 0.3,
+       "r1": 0.05,
+       "x2": 0.5,
+       "y2": 0.5,
+       "r2": 0.6
+      }
+     },
+     "stroke": {
+      "value": {
+       "gradient": "radial",
+       "stops": [
+        {
+         "offset": 0,
+         "color": "red"
+        },
+        {
+         "offset": 1,
+         "color": "green"
+        }
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "type": "rect",
+   "from": {
+    "data": "t"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "value": 100
+     },
+     "width": {
+      "value": 25
+     },
+     "height": {
+      "value": 60
+     },
+     "fill": {
+      "value": {
+       "gradient": "linear",
+       "stops": [
+        {
+         "offset": 0,
+         "color": "#f00"
+        },
+        {
+         "offset": 1,
+         "color": "black"
+        }
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "type": "text",
+   "encode": {
+    "update": {
+     "x": {
+      "value": 120
+     },
+     "y": {
+      "value": 150
+     },
+     "text": {
+      "value": "gradient text"
+     },
+     "fontSize": {
+      "value": 20
+     },
+     "fill": {
+      "value": {
+       "gradient": "linear",
+       "stops": [
+        {
+         "offset": 0,
+         "color": "red"
+        },
+        {
+         "offset": 1,
+         "color": "blue"
+        }
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "t"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.x / 3 + 170"
+     },
+     "stroke": {
+      "value": {
+       "gradient": "linear",
+       "stops": [
+        {
+         "offset": 0,
+         "color": "red"
+        },
+        {
+         "offset": 1,
+         "color": "blue"
+        }
+       ]
+      }
+     },
+     "strokeWidth": {
+      "value": 3
+     }
+    }
+   }
+  },
+  {
+   "type": "group",
+   "encode": {
+    "update": {
+     "x": {
+      "value": 200
+     },
+     "y": {
+      "value": 110
+     },
+     "width": {
+      "value": 80
+     },
+     "height": {
+      "value": 60
+     },
+     "fill": {
+      "value": {
+       "gradient": "linear",
+       "stops": [
+        {
+         "offset": 0,
+         "color": "#eee"
+        },
+        {
+         "offset": 1,
+         "color": "#999"
+        }
+       ]
+      }
+     },
+     "stroke": {
+      "value": {
+       "gradient": "linear",
+       "stops": [
+        {
+         "offset": 0,
+         "color": "#000"
+        },
+        {
+         "offset": 1,
+         "color": "#f00"
+        }
+       ]
+      }
+     },
+     "strokeForeground": {
+      "value": true
+     }
+    }
+   }
+  }
+ ],
+ "data": [
+  {
+   "name": "t",
+   "values": [
+    {
+     "x": 110,
+     "c": "#f00"
+    },
+    {
+     "x": 140,
+     "c": "#0f0"
+    },
+    {
+     "x": 170,
+     "c": "#00f"
+    }
+   ]
+  }
+ ]
+}

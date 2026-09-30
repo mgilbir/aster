@@ -1,0 +1,202 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A mark filled with a gradient, written two ways. A specification can spell the object out \u2014 {gradient, x1, y1, x2, y2, stops} in fractions of the mark's own box \u2014 or ask a colour scale for it with gradient(), which fills in the scale's ticks as stops with each offset being the value's fraction of the domain. Both arrive at the encoder as the same object, so it does not need to know which it got.",
+  "width": 240,
+  "height": 130,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {
+          "c": "a",
+          "v": 2
+        },
+        {
+          "c": "b",
+          "v": 7
+        },
+        {
+          "c": "c",
+          "v": 5
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {
+        "data": "t",
+        "field": "c"
+      },
+      "range": "width",
+      "padding": 0.15
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {
+        "data": "t",
+        "field": "v"
+      },
+      "range": "height"
+    },
+    {
+      "name": "ramp",
+      "type": "linear",
+      "domain": [
+        0,
+        10
+      ],
+      "range": {
+        "scheme": "blues"
+      }
+    },
+    {
+      "name": "warm",
+      "type": "sequential",
+      "domain": [
+        0,
+        10
+      ],
+      "range": {
+        "scheme": "inferno"
+      }
+    }
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "x",
+            "field": "c"
+          },
+          "width": {
+            "scale": "x",
+            "band": 1
+          },
+          "y": {
+            "scale": "y",
+            "field": "v"
+          },
+          "y2": {
+            "scale": "y",
+            "value": 0
+          },
+          "fill": {
+            "signal": "gradient('ramp', [0, 1], [0, 0])"
+          },
+          "stroke": {
+            "value": "#333"
+          },
+          "strokeWidth": {
+            "value": 0.5
+          }
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "encode": {
+        "enter": {
+          "x": {
+            "value": 10
+          },
+          "y": {
+            "value": 8
+          },
+          "width": {
+            "value": 100
+          },
+          "height": {
+            "value": 14
+          },
+          "fill": {
+            "value": {
+              "gradient": "linear",
+              "x1": 0,
+              "y1": 0,
+              "x2": 1,
+              "y2": 0,
+              "stops": [
+                {
+                  "offset": 0,
+                  "color": "#eeeeee"
+                },
+                {
+                  "offset": 0.4,
+                  "color": "#9ecae1"
+                },
+                {
+                  "offset": 1,
+                  "color": "#08306b"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "encode": {
+        "enter": {
+          "x": {
+            "value": 130
+          },
+          "y": {
+            "value": 8
+          },
+          "width": {
+            "value": 100
+          },
+          "height": {
+            "value": 14
+          },
+          "fill": {
+            "signal": "gradient('warm', [0, 0], [1, 0], 4)"
+          }
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "encode": {
+        "enter": {
+          "x": {
+            "value": 60
+          },
+          "y": {
+            "value": 110
+          },
+          "size": {
+            "value": 900
+          },
+          "fill": {
+            "value": {
+              "gradient": "radial",
+              "stops": [
+                {
+                  "offset": 0,
+                  "color": "#ffffcc"
+                },
+                {
+                  "offset": 1,
+                  "color": "#bd0026"
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  ]
+}

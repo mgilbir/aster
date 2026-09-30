@@ -1,0 +1,117 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "Four axes on one chart, each configured differently: a top axis, an offset one, a grid drawn above the marks by zindex, and one stripped of its domain line and ticks, plus the two baselines that are measured against the line height rather than the font size: `line-top` on a label and `line-bottom` on a title, which an axis measures itself by.",
+  "width": 240,
+  "height": 130,
+  "padding": 5,
+  "data": [
+    {
+      "name": "table",
+      "values": [
+        {
+          "k": "a",
+          "v": 14
+        },
+        {
+          "k": "b",
+          "v": 33
+        },
+        {
+          "k": "c",
+          "v": 21
+        },
+        {
+          "k": "d",
+          "v": 27
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {
+        "data": "table",
+        "field": "k"
+      },
+      "range": "width",
+      "padding": 0.3
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {
+        "data": "table",
+        "field": "v"
+      },
+      "range": "height",
+      "nice": true,
+      "zero": true
+    }
+  ],
+  "axes": [
+    {
+      "orient": "top",
+      "scale": "x",
+      "tickSize": 3,
+      "labelPadding": 4,
+      "labelBaseline": "line-top"
+    },
+    {
+      "orient": "bottom",
+      "scale": "x",
+      "offset": 8,
+      "domain": false,
+      "ticks": false
+    },
+    {
+      "orient": "left",
+      "scale": "y",
+      "tickCount": 3,
+      "labelFontSize": 9,
+      "title": "amount",
+      "titleBaseline": "line-bottom"
+    },
+    {
+      "orient": "right",
+      "scale": "y",
+      "grid": true,
+      "ticks": false,
+      "labels": false,
+      "domain": false,
+      "zindex": 1
+    }
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {
+        "data": "table"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "x",
+            "field": "k"
+          },
+          "width": {
+            "scale": "x",
+            "band": 1
+          },
+          "y": {
+            "scale": "y",
+            "field": "v"
+          },
+          "y2": {
+            "scale": "y",
+            "value": 0
+          },
+          "fill": {
+            "value": "#72b7b2"
+          }
+        }
+      }
+    }
+  ]
+}

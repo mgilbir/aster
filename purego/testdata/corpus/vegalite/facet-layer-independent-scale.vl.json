@@ -1,0 +1,26 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A trellis of layers measuring its x per cell: the layers are one model to the facet, so they share the cell's scale and its axis, and the scale reads the cell's own tables.",
+  "data": {"url": "data/cars.json"},
+  "facet": {"column": {"field": "Origin", "type": "nominal"}},
+  "spec": {
+    "width": {"step": 17},
+    "layer": [
+      {
+        "mark": "line",
+        "encoding": {
+          "y": {"aggregate": "sum", "field": "Horsepower", "title": "power"},
+          "x": {"field": "Cylinders", "type": "ordinal"}
+        }
+      },
+      {
+        "mark": "point",
+        "encoding": {
+          "y": {"aggregate": "sum", "field": "Horsepower", "title": "power"},
+          "x": {"field": "Cylinders"}
+        }
+      }
+    ]
+  },
+  "resolve": {"scale": {"x": "independent"}}
+}

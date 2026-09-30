@@ -1,0 +1,47 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "Symbols over a logarithmic x scale and a sqrt y scale. The fourth differential fixture: the log axis exercises the tick algorithm's powers-and-multiples path, which is where a port most easily diverges. Two more log axes carry a **degenerate** base, which is a number a specification may write and upstream draws: the base reaches the ticks, the labels and `nice` and never the geometry, d3 transforming by the natural log whatever base was asked for. A base of 0 takes d3's integer branch, generates nothing there because `k < base` never runs, and falls back to linear ticks across the domain; a base of 0.5 takes the other branch and legitimately yields none. Both place their marks exactly where a base-10 scale would. A fourth log scale has a domain that touches zero, which really is unusable — every `scale(x)` on one answers null upstream — and upstream still draws the axis that names it, line and title and no ticks at all. Refusing to build the scale took the axis with it and called a chart upstream draws a defect in this engine.",
+  "width": 300,
+  "height": 150,
+  "padding": 5,
+  "data": [
+    {
+      "name": "points",
+      "values": [
+        {"n": 1, "m": 4},
+        {"n": 7, "m": 16},
+        {"n": 30, "m": 36},
+        {"n": 150, "m": 64},
+        {"n": 900, "m": 100}
+      ]
+    }
+  ],
+  "scales": [
+    {"name": "x", "type": "log", "domain": [1, 1000], "range": "width"},
+    {"name": "zeroBase", "type": "log", "base": 0, "domain": [3, 900], "range": "width"},
+    {"name": "halfBase", "type": "log", "base": 0.5, "domain": [3, 900], "range": "width"},
+    {"name": "touchesZero", "type": "log", "domain": [0, 900], "range": "width"},
+    {"name": "y", "type": "sqrt", "domain": [0, 100], "range": "height"}
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "x"},
+    {"orient": "bottom", "scale": "zeroBase", "offset": 34, "title": "Base 0"},
+    {"orient": "bottom", "scale": "halfBase", "offset": 72, "title": "Base 0.5"},
+    {"orient": "bottom", "scale": "touchesZero", "offset": 110, "title": "Domain touches zero"},
+    {"orient": "left", "scale": "y", "tickCount": 5}
+  ],
+  "marks": [
+    {
+      "type": "symbol",
+      "name": "dots",
+      "from": {"data": "points"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "n"},
+          "y": {"scale": "y", "field": "m"},
+          "size": {"value": 70}
+        }
+      }
+    }
+  ]
+}

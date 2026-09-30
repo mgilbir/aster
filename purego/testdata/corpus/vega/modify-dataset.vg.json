@@ -1,0 +1,145 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "modify() writes a dataset from an expression, which is what an interactive selection is built on: remove matches an object field by field rather than by identity, insert adds rows, and toggle adds what is not there. A dataset with nothing in it and nothing to add answers 0 and is left alone. What this fixture does not exercise is a toggle that *removes* a row, because upstream's changeset is applied after the run and then applied again, so a signal-driven toggle of an existing row ends with two copies of it rather than none; the once-only behaviour is what an event handler gets and what TransformReferenceTest pins.",
+  "width": 220,
+  "height": 100,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "picked",
+      "values": [
+        {
+          "c": "alpha"
+        },
+        {
+          "c": "beta"
+        }
+      ]
+    },
+    {
+      "name": "grown",
+      "values": [
+        {
+          "c": "alpha"
+        }
+      ]
+    },
+    {
+      "name": "empty",
+      "values": []
+    },
+    {
+      "name": "t",
+      "values": [
+        {
+          "c": "alpha",
+          "v": 4
+        },
+        {
+          "c": "beta",
+          "v": 7
+        },
+        {
+          "c": "gamma",
+          "v": 3
+        }
+      ]
+    }
+  ],
+  "signals": [
+    {
+      "name": "changed",
+      "update": "modify('picked', {c: 'gamma'}, {c: 'alpha'})"
+    },
+    {
+      "name": "added",
+      "update": "modify('grown', null, null, {c: 'delta'})"
+    },
+    {
+      "name": "nothing",
+      "update": "modify('empty', null, null)"
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {
+        "data": "t",
+        "field": "c"
+      },
+      "range": "width",
+      "padding": 0.2
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {
+        "data": "t",
+        "field": "v"
+      },
+      "range": "height"
+    }
+  ],
+  "axes": [
+    {
+      "scale": "x",
+      "orient": "bottom"
+    }
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "x",
+            "field": "c"
+          },
+          "width": {
+            "scale": "x",
+            "band": 1
+          },
+          "y": {
+            "scale": "y",
+            "field": "v"
+          },
+          "y2": {
+            "scale": "y",
+            "value": 0
+          }
+        },
+        "update": {
+          "fill": {
+            "signal": "indata('picked', 'c', datum.c) ? '#4c78a8' : (indata('grown', 'c', datum.c) ? '#e45756' : '#cccccc')"
+          }
+        }
+      }
+    },
+    {
+      "type": "text",
+      "encode": {
+        "enter": {
+          "x": {
+            "value": 4
+          },
+          "y": {
+            "value": 10
+          },
+          "fontSize": {
+            "value": 10
+          }
+        },
+        "update": {
+          "text": {
+            "signal": "changed + ',' + added + ',' + nothing + ' | ' + length(data('picked')) + ',' + length(data('grown'))"
+          }
+        }
+      }
+    }
+  ]
+}

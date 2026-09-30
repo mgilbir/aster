@@ -1,0 +1,15 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A brush in a repeated plot: every copy can be dragged in, and all of them write one store.",
+  "repeat": {"column": ["Horsepower", "Acceleration"]},
+  "spec": {
+    "data": {"url": "data/cars.json"},
+    "params": [{"name": "brush", "select": {"type": "interval", "resolve": "union"}}],
+    "mark": "point",
+    "encoding": {
+      "x": {"field": {"repeat": "column"}, "type": "quantitative"},
+      "y": {"field": "Miles_per_Gallon", "type": "quantitative"},
+      "opacity": {"condition": {"param": "brush", "value": 1}, "value": 0.2}
+    }
+  }
+}

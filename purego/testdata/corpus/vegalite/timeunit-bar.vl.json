@@ -1,0 +1,10 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "Rows bucketed into calendar months and counted.",
+  "data": {"url": "data/stocks.csv"},
+  "mark": "bar",
+  "encoding": {
+    "x": {"field": "date", "type": "temporal", "timeUnit": "month"},
+    "y": {"aggregate": "mean", "field": "price", "type": "quantitative"}
+  }
+}

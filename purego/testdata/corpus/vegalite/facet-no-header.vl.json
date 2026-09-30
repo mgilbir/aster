@@ -1,0 +1,12 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A facet with no header at all, which is not the same as a header with nothing in it.",
+  "data": {"url": "data/cars.json"},
+  "width": {"step": 17},
+  "mark": "bar",
+  "encoding": {
+    "row": {"field": "Origin", "header": null},
+    "y": {"aggregate": "count"},
+    "x": {"field": "Cylinders", "type": "ordinal"}
+  }
+}

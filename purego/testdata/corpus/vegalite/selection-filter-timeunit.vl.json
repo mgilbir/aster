@@ -1,0 +1,65 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A rule filtered by a brush over bucketed months: the bucketing follows the test.",
+  "data": {
+    "url": "data/stocks.csv"
+  },
+  "layer": [
+    {
+      "params": [
+        {
+          "name": "brush",
+          "select": {
+            "type": "interval",
+            "encodings": [
+              "x"
+            ]
+          }
+        }
+      ],
+      "mark": "bar",
+      "encoding": {
+        "x": {
+          "timeUnit": "month",
+          "field": "date",
+          "type": "ordinal"
+        },
+        "y": {
+          "aggregate": "mean",
+          "field": "price",
+          "type": "quantitative"
+        },
+        "opacity": {
+          "condition": {
+            "param": "brush",
+            "value": 1
+          },
+          "value": 0.7
+        }
+      }
+    },
+    {
+      "transform": [
+        {
+          "filter": {
+            "param": "brush"
+          }
+        }
+      ],
+      "mark": "rule",
+      "encoding": {
+        "y": {
+          "aggregate": "mean",
+          "field": "price",
+          "type": "quantitative"
+        },
+        "color": {
+          "value": "firebrick"
+        },
+        "size": {
+          "value": 3
+        }
+      }
+    }
+  ]
+}

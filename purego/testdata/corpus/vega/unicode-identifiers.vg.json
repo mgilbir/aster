@@ -1,0 +1,48 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "Field names reached through `datum.name` in an expression. ECMA's identifier grammar is UnicodeIDStart/UnicodeIDContinue, which admits letter numbers, combining marks, connectors and the two zero-width joiners \u2014 a wider set than a letter-or-digit test.",
+  "width": 260,
+  "height": 110,
+  "padding": 5,
+  "data": [
+    {
+      "name": "rows",
+      "values": [
+        {
+          "cafe\u0301": 7,
+          "\u2167x": 7,
+          "a\u200cb": 7,
+          "a_1": 7
+        }
+      ],
+      "transform": [
+        {
+          "type": "formula",
+          "as": "sum",
+          "expr": "datum.cafe\u0301 + datum.\u2167x + datum.a\u200cb + datum.a_1"
+        }
+      ]
+    }
+  ],
+  "marks": [
+    {
+      "type": "text",
+      "from": {
+        "data": "rows"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "value": 0
+          },
+          "y": {
+            "value": 20
+          },
+          "text": {
+            "signal": "'sum ' + datum.sum"
+          }
+        }
+      }
+    }
+  ]
+}

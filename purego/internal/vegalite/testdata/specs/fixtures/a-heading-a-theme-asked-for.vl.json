@@ -1,0 +1,22 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "The heading over a trellis faces the way its captions do, and by the same two rules: `assembleTitleGroup` spreads `...defaultHeaderGuideBaseline(titleAngle, headerChannel)` and `...defaultHeaderGuideAlign(headerChannel, titleAngle, titleAnchor)` into the title it builds, exactly as `assembleLabelTitle` spreads them off `labelAngle` and `labelAnchor` into each cell's caption. This compiler called neither for a heading — only for a caption — so a trellis that anchored its heading to one end of the grid drew it centred, and one that turned it on its side drew it turned and still anchored as though it were flat. Both properties are read through `getHeaderProperty`, which asks the header's own block, then `config.headerRow`/`config.headerColumn`, then `config.header`, so the anchor written once in the theme here reaches both of this chart's headings and the turn written on the column's own header reaches one. The rules are asked through the **band** the heading is in rather than the channel it captions: a column heading runs across the top of the grid and is faced as an `x` axis's labels are, a row heading down the side as a `y` axis's, and both ask `defaultLabelBaseline` for `alwaysIncludeMiddle`, which an axis does not — a heading turned a quarter turn has its own length running across the band, so it is centred on the band rather than pushed to one edge of it, which is why the column heading is baselined `middle`. The row heading is turned by nothing at all and is still aligned, `right`, because `defaultHeaderGuideAlign` switches on the anchor before it reaches the angle and the two `case` arms answer outright: a heading pushed to one end of the grid is pushed there whether or not anything turned it, and reading the anchor only inside a test for an angle would leave every unturned, anchored heading centred. The baseline is the angle's alone — `defaultLabelBaseline` answers nothing without one — so that row heading has none. The anchor is also the whole of `layout.titleBand`: `LAYOUT_TITLE_BAND = {column: {start: 0, end: 1}, row: {start: 1, end: 0}}`, the two bands being numbered from opposite corners, so one anchor written once puts the column heading against band 1 and the row heading against band 0 — and this compiler wrote no `titleBand` at all. The captions on the cells must not change. They are the header's `label…` properties and neither the theme nor either header states one of them, so they stay flat, unanchored and unbaselined beside headings that are none of those things: the words that face a heading are not an instruction to the names underneath it.",
+  "data": {
+    "values": [
+      {"c": "alpha", "v": 28, "k": "one", "g": "north"},
+      {"c": "beta", "v": 55, "k": "one", "g": "south"},
+      {"c": "gamma", "v": 43, "k": "two", "g": "north"},
+      {"c": "delta", "v": 91, "k": "two", "g": "south"}
+    ]
+  },
+  "config": {"header": {"titleAnchor": "end"}},
+  "width": 120,
+  "height": 80,
+  "mark": "bar",
+  "encoding": {
+    "x": {"field": "c", "type": "nominal"},
+    "y": {"field": "v", "type": "quantitative"},
+    "column": {"field": "k", "type": "ordinal", "header": {"titleAngle": 90}},
+    "row": {"field": "g", "type": "ordinal"}
+  }
+}

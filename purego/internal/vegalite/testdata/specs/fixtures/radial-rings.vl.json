@@ -1,0 +1,11 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A radial chart whose rings start away from the centre, said as one end of the range.",
+  "data": {"values": [12, 23, 47, 6, 52, 19]},
+  "mark": {"type": "arc", "innerRadius": 20, "stroke": "#fff"},
+  "encoding": {
+    "theta": {"field": "data", "type": "quantitative", "stack": true},
+    "radius": {"field": "data", "scale": {"type": "sqrt", "zero": true, "rangeMin": 20}},
+    "color": {"field": "data", "type": "nominal", "legend": null}
+  }
+}

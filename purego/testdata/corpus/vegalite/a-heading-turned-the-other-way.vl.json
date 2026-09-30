@@ -1,0 +1,22 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A heading is turned through `const titleAngle = normalizeAngle(ta);` in `assembleTitleGroup`, and a caption is not — `assembleLabelTitle` hands `labelAngle` to the same two rules exactly as it was written. The asymmetry is upstream's and it is visible, because both rules are written as a chain of comparisons against a number between zero and three hundred and sixty: a heading turned to minus one hundred degrees is a heading turned to two hundred and sixty, and two hundred and sixty is caught by `225 < angle && angle < 315` and by the arm that reads `45 <= angle && angle <= 135`, where minus one hundred falls through the first and is caught instead by `angle <= 45`. So this chart's column heading is baselined `middle` and its row heading `bottom`; handing the number over as it was written would baseline them `bottom` and `middle`, which is the same pair of words on the wrong pair of headings. The anchors show the other half of `defaultHeaderGuideAlign`. The column heading is anchored at the start, which aligns it `left` whatever the turn, and puts it against band 0 of the column band — `LAYOUT_TITLE_BAND.column.start`. The row heading must not change: it anchors itself `middle`, which is the default the function declares in its own signature — `anchor: TitleAnchor = 'middle'` — and so falls past both `case` arms to the angle, taking `left` from the turn instead of from the anchor; and `middle` has no entry in either row of `LAYOUT_TITLE_BAND`, so `getLayoutTitleBand` answers nothing and the layout is left with a `titleBand` naming the column alone rather than both bands.",
+  "data": {
+    "values": [
+      {"c": "alpha", "v": 28, "k": "one", "g": "north"},
+      {"c": "beta", "v": 55, "k": "one", "g": "south"},
+      {"c": "gamma", "v": 43, "k": "two", "g": "north"},
+      {"c": "delta", "v": 91, "k": "two", "g": "south"}
+    ]
+  },
+  "config": {"header": {"titleAngle": -100}},
+  "width": 120,
+  "height": 80,
+  "mark": "bar",
+  "encoding": {
+    "x": {"field": "c", "type": "nominal"},
+    "y": {"field": "v", "type": "quantitative"},
+    "column": {"field": "k", "type": "ordinal", "header": {"titleAnchor": "start"}},
+    "row": {"field": "g", "type": "ordinal", "header": {"titleAnchor": "middle"}}
+  }
+}

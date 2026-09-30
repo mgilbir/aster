@@ -1,0 +1,508 @@
+{
+ "$schema": "https://vega.github.io/schema/vega/v6.json",
+ "width": 260,
+ "height": 250,
+ "padding": 5,
+ "marks": [
+  {
+   "type": "line",
+   "from": {
+    "data": "p8"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 0"
+     },
+     "defined": {
+      "field": "g"
+     },
+     "interpolate": {
+      "value": "linear"
+     },
+     "stroke": {
+      "value": "#2a2"
+     }
+    }
+   }
+  },
+  {
+   "type": "area",
+   "from": {
+    "data": "p8"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 0"
+     },
+     "y2": {
+      "signal": "datum.y + 0 + 8"
+     },
+     "defined": {
+      "field": "g"
+     },
+     "interpolate": {
+      "value": "linear"
+     },
+     "fill": {
+      "value": "#2a2"
+     },
+     "fillOpacity": {
+      "value": 0.4
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p8"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 25"
+     },
+     "defined": {
+      "field": "g"
+     },
+     "interpolate": {
+      "value": "basis"
+     },
+     "stroke": {
+      "value": "#2a2"
+     }
+    }
+   }
+  },
+  {
+   "type": "area",
+   "from": {
+    "data": "p8"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 25"
+     },
+     "y2": {
+      "signal": "datum.y + 25 + 8"
+     },
+     "defined": {
+      "field": "g"
+     },
+     "interpolate": {
+      "value": "basis"
+     },
+     "fill": {
+      "value": "#2a2"
+     },
+     "fillOpacity": {
+      "value": 0.4
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p8"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 50"
+     },
+     "defined": {
+      "field": "g"
+     },
+     "interpolate": {
+      "value": "cardinal"
+     },
+     "stroke": {
+      "value": "#2a2"
+     }
+    }
+   }
+  },
+  {
+   "type": "area",
+   "from": {
+    "data": "p8"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 50"
+     },
+     "y2": {
+      "signal": "datum.y + 50 + 8"
+     },
+     "defined": {
+      "field": "g"
+     },
+     "interpolate": {
+      "value": "cardinal"
+     },
+     "fill": {
+      "value": "#2a2"
+     },
+     "fillOpacity": {
+      "value": 0.4
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p8"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 75"
+     },
+     "defined": {
+      "field": "g"
+     },
+     "interpolate": {
+      "value": "monotone"
+     },
+     "stroke": {
+      "value": "#2a2"
+     }
+    }
+   }
+  },
+  {
+   "type": "area",
+   "from": {
+    "data": "p8"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 75"
+     },
+     "y2": {
+      "signal": "datum.y + 75 + 8"
+     },
+     "defined": {
+      "field": "g"
+     },
+     "interpolate": {
+      "value": "monotone"
+     },
+     "fill": {
+      "value": "#2a2"
+     },
+     "fillOpacity": {
+      "value": 0.4
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p8"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 100"
+     },
+     "defined": {
+      "field": "g"
+     },
+     "interpolate": {
+      "value": "natural"
+     },
+     "stroke": {
+      "value": "#2a2"
+     }
+    }
+   }
+  },
+  {
+   "type": "area",
+   "from": {
+    "data": "p8"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 100"
+     },
+     "y2": {
+      "signal": "datum.y + 100 + 8"
+     },
+     "defined": {
+      "field": "g"
+     },
+     "interpolate": {
+      "value": "natural"
+     },
+     "fill": {
+      "value": "#2a2"
+     },
+     "fillOpacity": {
+      "value": 0.4
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p8"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 125"
+     },
+     "defined": {
+      "field": "g"
+     },
+     "interpolate": {
+      "value": "step"
+     },
+     "stroke": {
+      "value": "#2a2"
+     }
+    }
+   }
+  },
+  {
+   "type": "area",
+   "from": {
+    "data": "p8"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 125"
+     },
+     "y2": {
+      "signal": "datum.y + 125 + 8"
+     },
+     "defined": {
+      "field": "g"
+     },
+     "interpolate": {
+      "value": "step"
+     },
+     "fill": {
+      "value": "#2a2"
+     },
+     "fillOpacity": {
+      "value": 0.4
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p8"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 150"
+     },
+     "defined": {
+      "field": "g"
+     },
+     "interpolate": {
+      "value": "catmull-rom"
+     },
+     "stroke": {
+      "value": "#2a2"
+     }
+    }
+   }
+  },
+  {
+   "type": "area",
+   "from": {
+    "data": "p8"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 150"
+     },
+     "y2": {
+      "signal": "datum.y + 150 + 8"
+     },
+     "defined": {
+      "field": "g"
+     },
+     "interpolate": {
+      "value": "catmull-rom"
+     },
+     "fill": {
+      "value": "#2a2"
+     },
+     "fillOpacity": {
+      "value": 0.4
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p8"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 175"
+     },
+     "defined": {
+      "field": "g"
+     },
+     "interpolate": {
+      "value": "basis-open"
+     },
+     "stroke": {
+      "value": "#2a2"
+     }
+    }
+   }
+  },
+  {
+   "type": "area",
+   "from": {
+    "data": "p8"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 175"
+     },
+     "y2": {
+      "signal": "datum.y + 175 + 8"
+     },
+     "defined": {
+      "field": "g"
+     },
+     "interpolate": {
+      "value": "basis-open"
+     },
+     "fill": {
+      "value": "#2a2"
+     },
+     "fillOpacity": {
+      "value": 0.4
+     }
+    }
+   }
+  }
+ ],
+ "data": [
+  {
+   "name": "p8",
+   "values": [
+    {
+     "x": 0.0,
+     "y": 46.105442180942276,
+     "g": true
+    },
+    {
+     "x": 34.285714285714285,
+     "y": 59.73243567064205,
+     "g": true
+    },
+    {
+     "x": 68.57142857142857,
+     "y": 40.056357646418796,
+     "g": true
+    },
+    {
+     "x": 102.85714285714286,
+     "y": 5.157724909163388,
+     "g": false
+    },
+    {
+     "x": 137.14285714285714,
+     "y": 27.6530833792441,
+     "g": true
+    },
+    {
+     "x": 171.42857142857142,
+     "y": 63.84169659622883,
+     "g": true
+    },
+    {
+     "x": 205.71428571428572,
+     "y": 49.96217781558725,
+     "g": true
+    },
+    {
+     "x": 240.0,
+     "y": 27.83802176870183,
+     "g": true
+    },
+    {
+     "x": 250,
+     "y": 40,
+     "g": true
+    }
+   ]
+  }
+ ]
+}

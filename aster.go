@@ -26,13 +26,13 @@ import (
 
 	"github.com/mgilbir/aster/internal/resvg"
 	"github.com/mgilbir/aster/internal/runtime"
-	"github.com/mgilbir/aster/internal/textmeasure"
+	"github.com/mgilbir/aster/internal/text"
 )
 
 // Converter renders Vega/Vega-Lite specs to SVG, PNG and PDF.
 type Converter struct {
 	rt       *runtime.Runtime
-	measurer *textmeasure.Measurer
+	measurer *text.Measurer
 	fonts    fontPlan // shared by text measurement and PNG rasterization
 	loader   Loader   // stashed for Close()
 	closed   bool     // set by Close; every entry point checks it
@@ -45,7 +45,7 @@ type Converter struct {
 	// measurer is reused; when text measurement was disabled via
 	// WithTextMeasurement(false), one is created lazily for PDF use only.
 	pdfMeasurerOnce sync.Once
-	pdfMeasurer     *textmeasure.Measurer
+	pdfMeasurer     *text.Measurer
 	pdfMeasurerErr  error
 }
 
@@ -70,11 +70,11 @@ func New(opts ...Option) (*Converter, error) {
 	// PNG rasterization can't disagree about fonts or generic-family mappings.
 	plan := newFontPlan(cfg)
 
-	var measurer *textmeasure.Measurer
+	var measurer *text.Measurer
 	var tm runtime.TextMeasurer
 	if cfg.textMeasure {
 		var err error
-		measurer, err = textmeasure.New(plan.measurerOptions()...)
+		measurer, err = text.New(plan.measurerOptions()...)
 		if err != nil {
 			return nil, fmt.Errorf("aster: initializing text measurer: %w", err)
 		}
@@ -327,12 +327,12 @@ func (c *Converter) SVGToPDF(svg string, opts ...PDFOption) ([]byte, error) {
 // enabled (the default) and otherwise builds one on first use from the same
 // fontPlan, so PDF glyph outlines come from the font the SVG was laid out
 // against.
-func (c *Converter) pdfMeasurerInit() (*textmeasure.Measurer, error) {
+func (c *Converter) pdfMeasurerInit() (*text.Measurer, error) {
 	if c.measurer != nil {
 		return c.measurer, nil
 	}
 	c.pdfMeasurerOnce.Do(func() {
-		c.pdfMeasurer, c.pdfMeasurerErr = textmeasure.New(c.fonts.measurerOptions()...)
+		c.pdfMeasurer, c.pdfMeasurerErr = text.New(c.fonts.measurerOptions()...)
 		if c.pdfMeasurerErr != nil {
 			c.pdfMeasurerErr = fmt.Errorf("aster: initializing PDF text shaper: %w", c.pdfMeasurerErr)
 		}

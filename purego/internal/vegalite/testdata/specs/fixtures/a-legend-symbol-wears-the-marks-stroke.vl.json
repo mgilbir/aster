@@ -1,0 +1,68 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A legend's swatches are painted the way the marks they stand for are painted, and the whole configuration chain decides that. `symbols` in `legend/encode.ts` opens with `applyMarkConfig({}, model, FILL_STROKE_CONFIG)`, which asks `getMarkConfig` for each of the nine stroke and fill properties \u2014 and `getMarkConfig` reads a **style block first**, then `config[marktype]`, then `config.mark`. This compiler asked the flattened table of the last two, which has no styles in it at all, so a chart whose marks name a style that outlines them left its swatches unoutlined; and where the style was the only thing painting them, the legend came out with no `encode` block whatsoever rather than with the wrong one. The first row is that case: a bar outlined by `config.style.bar`, whose size legend must carry the same outline. The second is the case that must not move \u2014 the legend explaining the **colour** itself, where the mark's own fill is taken off the swatch because a swatch cannot show a scale it is itself the key to. Note what it still keeps: the outline is not the colour, so the stroke stays while the fill goes. A row naming a style of its own is drawn in `a-legend-symbol-wears-a-styles-stroke` rather than here, because two size legends over the same field are hoisted into one and the second row's style would never reach a legend at all.",
+  "data": {
+    "values": [
+      {
+        "c": "alpha",
+        "v": 28
+      },
+      {
+        "c": "beta",
+        "v": 55
+      },
+      {
+        "c": "gamma",
+        "v": 43
+      }
+    ]
+  },
+  "config": {
+    "style": {
+      "bar": {
+        "stroke": "black",
+        "strokeWidth": 3
+      }
+    }
+  },
+  "vconcat": [
+    {
+      "width": 200,
+      "height": 70,
+      "mark": "bar",
+      "encoding": {
+        "x": {
+          "field": "c",
+          "type": "nominal"
+        },
+        "y": {
+          "field": "v",
+          "type": "quantitative"
+        },
+        "size": {
+          "field": "v",
+          "type": "quantitative"
+        }
+      }
+    },
+    {
+      "width": 200,
+      "height": 70,
+      "mark": "bar",
+      "encoding": {
+        "x": {
+          "field": "c",
+          "type": "nominal"
+        },
+        "y": {
+          "field": "v",
+          "type": "quantitative"
+        },
+        "color": {
+          "field": "c",
+          "type": "nominal"
+        }
+      }
+    }
+  ]
+}

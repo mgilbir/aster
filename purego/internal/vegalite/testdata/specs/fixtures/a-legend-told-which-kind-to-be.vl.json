@@ -1,0 +1,153 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A channel may tell its legend which kind to be, and a legend that names its swatches' opacity has said all there is to say. `getLegendType` is `getFirstDefined(legend.type, defaultType(params))`, so a stated kind wins outright, and every rule keyed off the kind follows it: which properties survive the prefix filter, whether a `gradientLength` is written, which encode block is built. The first row is a continuous colour \u2014 a ramp by default \u2014 told to be **symbols**, and it writes its `type` because it had to be asked for. The second and third are the halves that must not move: a colour told to be the ramp it already was, and a size told to be the swatches it already was, where upstream writes no `type` at all \u2014 `if (isColorChannel(channel) && isContinuousToContinuous(scaleType)) { if (legendType === 'gradient') return undefined; } else if (legendType === 'symbol') return undefined;` \u2014 because writing it would be writing Vega's own default back at it. The fourth names a `symbolOpacity`, which upstream lets reach the swatch through Vega's own legend handling and therefore stops deriving one from the mark: `const opacity = symbolOpacity === undefined ? (getMaxValue(encoding.opacity) ?? markDef.opacity) : undefined`. Derived anyway, the mark's opacity was written over the legend's, and a chart asking for swatches at a tenth got them at the marks' seven tenths; the test is for presence rather than truth, which the fifth row draws: a legend asking for **zero** has still said what it wants, and the derived value is suppressed all the same \u2014 read for truth, a zero would fall through and the swatches would come back at the marks' opacity, which is the opposite of what was asked. **The scales are resolved independently, and that is not decoration**: a concatenation shares its scales by default, so every `color` in it is one scale and every `size` is one, and the legends follow. An earlier draft of this fixture gave each row a field of its own and *still* collapsed four cases into two legends \u2014 a distinct field is not enough, the resolution has to say so. The remaining half of the rule \u2014 a *size* told to be a ramp \u2014 is not drawn here: the specification for it is correct, and this runtime does not render a gradient legend for a scale that carries no colours, which is a gap of its own and not this one.",
+  "data": {
+    "values": [
+      {
+        "c": "alpha",
+        "v": 28,
+        "w": 3,
+        "p": 1,
+        "q": 4,
+        "r": 7,
+        "s": 10
+      },
+      {
+        "c": "beta",
+        "v": 55,
+        "w": 7,
+        "p": 2,
+        "q": 5,
+        "r": 8,
+        "s": 11
+      },
+      {
+        "c": "gamma",
+        "v": 43,
+        "w": 5,
+        "p": 3,
+        "q": 6,
+        "r": 9,
+        "s": 12
+      }
+    ]
+  },
+  "vconcat": [
+    {
+      "width": 160,
+      "height": 60,
+      "mark": "bar",
+      "encoding": {
+        "x": {
+          "field": "w",
+          "type": "quantitative"
+        },
+        "y": {
+          "field": "v",
+          "type": "quantitative"
+        },
+        "color": {
+          "field": "p",
+          "type": "quantitative",
+          "legend": {
+            "type": "symbol"
+          }
+        }
+      }
+    },
+    {
+      "width": 160,
+      "height": 60,
+      "mark": "bar",
+      "encoding": {
+        "x": {
+          "field": "w",
+          "type": "quantitative"
+        },
+        "y": {
+          "field": "v",
+          "type": "quantitative"
+        },
+        "color": {
+          "field": "q",
+          "type": "quantitative",
+          "legend": {
+            "type": "gradient"
+          }
+        }
+      }
+    },
+    {
+      "width": 160,
+      "height": 60,
+      "mark": "point",
+      "encoding": {
+        "x": {
+          "field": "w",
+          "type": "quantitative"
+        },
+        "y": {
+          "field": "v",
+          "type": "quantitative"
+        },
+        "size": {
+          "field": "r",
+          "type": "quantitative",
+          "legend": {
+            "type": "symbol"
+          }
+        }
+      }
+    },
+    {
+      "width": 160,
+      "height": 60,
+      "mark": "point",
+      "encoding": {
+        "x": {
+          "field": "w",
+          "type": "quantitative"
+        },
+        "y": {
+          "field": "v",
+          "type": "quantitative"
+        },
+        "size": {
+          "field": "v",
+          "type": "quantitative",
+          "legend": {
+            "symbolOpacity": 0.1
+          }
+        }
+      }
+    },
+    {
+      "width": 160,
+      "height": 60,
+      "mark": "point",
+      "encoding": {
+        "x": {
+          "field": "w",
+          "type": "quantitative"
+        },
+        "y": {
+          "field": "v",
+          "type": "quantitative"
+        },
+        "size": {
+          "field": "s",
+          "type": "quantitative",
+          "legend": {
+            "symbolOpacity": 0
+          }
+        }
+      }
+    }
+  ],
+  "resolve": {
+    "scale": {
+      "color": "independent",
+      "size": "independent"
+    }
+  }
+}

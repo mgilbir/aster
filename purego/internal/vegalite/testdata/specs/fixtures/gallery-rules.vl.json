@@ -1,0 +1,79 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "description": "A column that arrived binned with a step, and a fold naming neither of its outputs.",
+  "data": {
+    "values": [
+      {
+        "low": 0,
+        "high": 2,
+        "count": 12,
+        "target": 9,
+        "reading": 4
+      },
+      {
+        "low": 2,
+        "high": 4,
+        "count": 27,
+        "target": 9,
+        "reading": 7
+      },
+      {
+        "low": 4,
+        "high": 6,
+        "count": 19,
+        "target": 9,
+        "reading": 2
+      }
+    ]
+  },
+  "vconcat": [
+    {
+      "width": 180,
+      "mark": "bar",
+      "encoding": {
+        "x": {
+          "field": "low",
+          "bin": {
+            "binned": true,
+            "step": 2
+          },
+          "type": "quantitative"
+        },
+        "x2": {
+          "field": "high"
+        },
+        "y": {
+          "field": "count",
+          "type": "quantitative"
+        }
+      }
+    },
+    {
+      "width": 180,
+      "height": 100,
+      "transform": [
+        {
+          "fold": [
+            "target",
+            "reading"
+          ]
+        }
+      ],
+      "mark": "line",
+      "encoding": {
+        "x": {
+          "field": "low",
+          "type": "quantitative"
+        },
+        "y": {
+          "field": "value",
+          "type": "quantitative"
+        },
+        "color": {
+          "field": "key",
+          "type": "nominal"
+        }
+      }
+    }
+  ]
+}

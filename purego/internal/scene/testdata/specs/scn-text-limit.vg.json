@@ -1,0 +1,112 @@
+{
+ "$schema": "https://vega.github.io/schema/vega/v6.json",
+ "width": 300,
+ "height": 230,
+ "padding": 5,
+ "marks": [
+  {
+   "type": "text",
+   "from": {
+    "data": "t"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "value": 10
+     },
+     "y": {
+      "signal": "datum.y"
+     },
+     "text": {
+      "field": "s"
+     },
+     "limit": {
+      "field": "l"
+     },
+     "ellipsis": {
+      "field": "e"
+     },
+     "dir": {
+      "field": "d"
+     },
+     "fontSize": {
+      "value": 12
+     },
+     "fill": {
+      "value": "#000"
+     }
+    }
+   }
+  }
+ ],
+ "data": [
+  {
+   "name": "t",
+   "values": [
+    {
+     "y": 20,
+     "s": "The quick brown fox jumps over the lazy dog",
+     "l": 100,
+     "e": null,
+     "d": "ltr"
+    },
+    {
+     "y": 45,
+     "s": "The quick brown fox jumps over the lazy dog",
+     "l": 100,
+     "e": "...",
+     "d": "ltr"
+    },
+    {
+     "y": 70,
+     "s": "The quick brown fox jumps over the lazy dog",
+     "l": 100,
+     "e": "\u2026",
+     "d": "rtl"
+    },
+    {
+     "y": 95,
+     "s": "  padded  text  ",
+     "l": 50,
+     "e": "~",
+     "d": "ltr"
+    },
+    {
+     "y": 120,
+     "s": "short",
+     "l": 500,
+     "e": null,
+     "d": "ltr"
+    },
+    {
+     "y": 145,
+     "s": "emoji \ud83d\ude00\ud83d\ude00\ud83d\ude00 and \u00e9\u00e8 accents \u4e2d\u6587 here",
+     "l": 90,
+     "e": null,
+     "d": "ltr"
+    },
+    {
+     "y": 170,
+     "s": "emoji \ud83d\ude00\ud83d\ude00\ud83d\ude00 and \u00e9\u00e8 accents \u4e2d\u6587 here",
+     "l": 90,
+     "e": "\ud83d\ude01",
+     "d": "rtl"
+    },
+    {
+     "y": 195,
+     "s": "zero limit",
+     "l": 0,
+     "e": null,
+     "d": "ltr"
+    },
+    {
+     "y": 220,
+     "s": "tiny limit",
+     "l": 3,
+     "e": null,
+     "d": "ltr"
+    }
+   ]
+  }
+ ]
+}

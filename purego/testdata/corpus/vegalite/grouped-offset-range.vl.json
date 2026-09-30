@@ -1,0 +1,21 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "description": "Grouped bars whose plot is a fixed width, so the inner band fills whatever the outer one got.",
+  "data": {
+    "values": [
+      {"era": "before", "band": "low", "amount": 28},
+      {"era": "before", "band": "high", "amount": 55},
+      {"era": "after", "band": "low", "amount": 43},
+      {"era": "after", "band": "high", "amount": 12}
+    ]
+  },
+  "width": 220,
+  "height": 110,
+  "mark": "bar",
+  "encoding": {
+    "x": {"field": "era", "type": "nominal"},
+    "xOffset": {"field": "band", "type": "nominal"},
+    "y": {"field": "amount", "type": "quantitative"},
+    "color": {"field": "band", "type": "nominal"}
+  }
+}

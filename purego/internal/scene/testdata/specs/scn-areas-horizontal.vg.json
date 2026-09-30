@@ -1,0 +1,332 @@
+{
+ "$schema": "https://vega.github.io/schema/vega/v6.json",
+ "width": 540,
+ "height": 190,
+ "padding": 5,
+ "marks": [
+  {
+   "type": "area",
+   "from": {
+    "data": "h"
+   },
+   "encode": {
+    "update": {
+     "orient": {
+      "value": "horizontal"
+     },
+     "y": {
+      "field": "y"
+     },
+     "x": {
+      "signal": "datum.x + 0"
+     },
+     "width": {
+      "field": "w"
+     },
+     "interpolate": {
+      "value": "linear"
+     },
+     "fill": {
+      "value": "#c80"
+     },
+     "fillOpacity": {
+      "value": 0.6
+     },
+     "stroke": {
+      "value": "#420"
+     }
+    }
+   }
+  },
+  {
+   "type": "area",
+   "from": {
+    "data": "h"
+   },
+   "encode": {
+    "update": {
+     "orient": {
+      "value": "horizontal"
+     },
+     "y": {
+      "field": "y"
+     },
+     "x": {
+      "signal": "datum.x + 65"
+     },
+     "width": {
+      "field": "w"
+     },
+     "interpolate": {
+      "value": "basis"
+     },
+     "fill": {
+      "value": "#c80"
+     },
+     "fillOpacity": {
+      "value": 0.6
+     },
+     "stroke": {
+      "value": "#420"
+     }
+    }
+   }
+  },
+  {
+   "type": "area",
+   "from": {
+    "data": "h"
+   },
+   "encode": {
+    "update": {
+     "orient": {
+      "value": "horizontal"
+     },
+     "y": {
+      "field": "y"
+     },
+     "x": {
+      "signal": "datum.x + 130"
+     },
+     "width": {
+      "field": "w"
+     },
+     "interpolate": {
+      "value": "cardinal"
+     },
+     "fill": {
+      "value": "#c80"
+     },
+     "fillOpacity": {
+      "value": 0.6
+     },
+     "stroke": {
+      "value": "#420"
+     }
+    }
+   }
+  },
+  {
+   "type": "area",
+   "from": {
+    "data": "h"
+   },
+   "encode": {
+    "update": {
+     "orient": {
+      "value": "horizontal"
+     },
+     "y": {
+      "field": "y"
+     },
+     "x": {
+      "signal": "datum.x + 195"
+     },
+     "width": {
+      "field": "w"
+     },
+     "interpolate": {
+      "value": "monotone"
+     },
+     "fill": {
+      "value": "#c80"
+     },
+     "fillOpacity": {
+      "value": 0.6
+     },
+     "stroke": {
+      "value": "#420"
+     }
+    }
+   }
+  },
+  {
+   "type": "area",
+   "from": {
+    "data": "h"
+   },
+   "encode": {
+    "update": {
+     "orient": {
+      "value": "horizontal"
+     },
+     "y": {
+      "field": "y"
+     },
+     "x": {
+      "signal": "datum.x + 260"
+     },
+     "width": {
+      "field": "w"
+     },
+     "interpolate": {
+      "value": "natural"
+     },
+     "fill": {
+      "value": "#c80"
+     },
+     "fillOpacity": {
+      "value": 0.6
+     },
+     "stroke": {
+      "value": "#420"
+     }
+    }
+   }
+  },
+  {
+   "type": "area",
+   "from": {
+    "data": "h"
+   },
+   "encode": {
+    "update": {
+     "orient": {
+      "value": "horizontal"
+     },
+     "y": {
+      "field": "y"
+     },
+     "x": {
+      "signal": "datum.x + 325"
+     },
+     "width": {
+      "field": "w"
+     },
+     "interpolate": {
+      "value": "step"
+     },
+     "fill": {
+      "value": "#c80"
+     },
+     "fillOpacity": {
+      "value": 0.6
+     },
+     "stroke": {
+      "value": "#420"
+     }
+    }
+   }
+  },
+  {
+   "type": "area",
+   "from": {
+    "data": "h"
+   },
+   "encode": {
+    "update": {
+     "orient": {
+      "value": "horizontal"
+     },
+     "y": {
+      "field": "y"
+     },
+     "x": {
+      "signal": "datum.x + 390"
+     },
+     "width": {
+      "field": "w"
+     },
+     "interpolate": {
+      "value": "catmull-rom"
+     },
+     "fill": {
+      "value": "#c80"
+     },
+     "fillOpacity": {
+      "value": 0.6
+     },
+     "stroke": {
+      "value": "#420"
+     }
+    }
+   }
+  },
+  {
+   "type": "area",
+   "from": {
+    "data": "h"
+   },
+   "encode": {
+    "update": {
+     "orient": {
+      "value": "horizontal"
+     },
+     "y": {
+      "field": "y"
+     },
+     "x": {
+      "signal": "datum.x + 455"
+     },
+     "width": {
+      "field": "w"
+     },
+     "interpolate": {
+      "value": "step-before"
+     },
+     "fill": {
+      "value": "#c80"
+     },
+     "fillOpacity": {
+      "value": 0.6
+     },
+     "stroke": {
+      "value": "#420"
+     }
+    }
+   }
+  }
+ ],
+ "data": [
+  {
+   "name": "h",
+   "values": [
+    {
+     "y": 10,
+     "x": 60.0,
+     "w": 30
+    },
+    {
+     "y": 28,
+     "x": 91.33307638509933,
+     "w": 40
+    },
+    {
+     "y": 46,
+     "x": 98.9539052351278,
+     "w": 50
+    },
+    {
+     "y": 64,
+     "x": 77.0951952093532,
+     "w": 30
+    },
+    {
+     "y": 82,
+     "x": 42.2991822682059,
+     "w": 40
+    },
+    {
+     "y": 100,
+     "x": 20.89879529339612,
+     "w": 50
+    },
+    {
+     "y": 118,
+     "x": 29.089420497760514,
+     "w": 30
+    },
+    {
+     "y": 136,
+     "x": 60.672556019373985,
+     "w": 40
+    },
+    {
+     "y": 154,
+     "x": 91.74671455396613,
+     "w": 50
+    }
+   ]
+  }
+ ]
+}

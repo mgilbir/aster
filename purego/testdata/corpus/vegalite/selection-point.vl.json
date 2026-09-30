@@ -1,0 +1,12 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A chart whose colour says which rows the reader has picked, which is a selection compiled into a store, its signals and a test.",
+  "data": {"url": "data/cars.json"},
+  "params": [{"name": "pts", "select": "point"}],
+  "mark": "rect",
+  "encoding": {
+    "y": {"field": "Origin"},
+    "x": {"field": "Cylinders"},
+    "color": {"condition": {"param": "pts", "aggregate": "count"}, "value": "grey"}
+  }
+}

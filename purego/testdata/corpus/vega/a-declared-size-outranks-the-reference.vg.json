@@ -1,0 +1,40 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "The other half of the merge in `collectSignals`: when a specification writes its size **both ways**, the declaration wins key by key. Upstream builds the built-in `{name: 'width', update: 'w'}` from `\"width\": {\"signal\": \"w\"}` and then runs `extend(pre[s.name], s)` over the specification's own entry, which copies that entry *onto* the built-in — so a declaration carrying `update` **overwrites** the reference, and one carrying only `value` leaves the reference's `update` standing and contributes an initial value the first pulse throws away. `a-size-written-as-a-signal` pins the second case; this pins the first. `width` is the overwritten one — the reference says `w`, which is 300, and the declaration says 120, so the chart is 120 across and never 300. `height` is written only as a reference, with nothing to merge, so the two sit side by side in one drawing and the fixture says which rule each dimension is under. The scale ranged on `\"width\"` and the axis along it follow, because the point of the rule is that a derived size is a size like any other.",
+  "width": {"signal": "w"},
+  "height": {"signal": "h"},
+  "padding": 5,
+  "signals": [
+    {"name": "w", "value": 300},
+    {"name": "h", "value": 60},
+    {"name": "width", "update": "120"}
+  ],
+  "scales": [{"name": "x", "type": "linear", "domain": [0, 10], "range": "width"}],
+  "axes": [{"orient": "bottom", "scale": "x", "tickCount": 2}],
+  "marks": [
+    {
+      "type": "rect",
+      "encode": {
+        "update": {
+          "x": {"scale": "x", "value": 0},
+          "x2": {"scale": "x", "value": 10},
+          "y": {"value": 0},
+          "height": {"value": 8},
+          "fill": {"value": "#c6dbef"}
+        }
+      }
+    },
+    {
+      "type": "text",
+      "encode": {
+        "update": {
+          "x": {"value": 2},
+          "y": {"value": 16},
+          "text": {"signal": "'w ' + w + ' width ' + width + ' height ' + height"},
+          "fontSize": {"value": 9},
+          "baseline": {"value": "top"}
+        }
+      }
+    }
+  ]
+}

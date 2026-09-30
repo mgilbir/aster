@@ -1,0 +1,276 @@
+{
+ "$schema": "https://vega.github.io/schema/vega/v6.json",
+ "width": 280,
+ "height": 140,
+ "padding": 5,
+ "marks": [
+  {
+   "type": "rect",
+   "encode": {
+    "update": {
+     "x": {
+      "value": 10
+     },
+     "y": {
+      "value": 10
+     },
+     "width": {
+      "value": 40
+     },
+     "height": {
+      "value": 40
+     },
+     "fill": {
+      "value": "transparent"
+     },
+     "stroke": {
+      "value": "transparent"
+     }
+    }
+   }
+  },
+  {
+   "type": "rect",
+   "encode": {
+    "update": {
+     "x": {
+      "value": 60
+     },
+     "y": {
+      "value": 10
+     },
+     "width": {
+      "value": 40
+     },
+     "height": {
+      "value": 40
+     },
+     "fill": {
+      "value": null
+     },
+     "stroke": {
+      "value": null
+     }
+    }
+   }
+  },
+  {
+   "type": "rect",
+   "encode": {
+    "update": {
+     "x": {
+      "value": 110
+     },
+     "y": {
+      "value": 10
+     },
+     "width": {
+      "value": 40
+     },
+     "height": {
+      "value": 40
+     },
+     "fill": {
+      "value": "rgba(10,20,30,0.5)"
+     },
+     "stroke": {
+      "value": "hsl(120, 50%, 50%)"
+     },
+     "strokeWidth": {
+      "value": 0
+     }
+    }
+   }
+  },
+  {
+   "type": "rect",
+   "encode": {
+    "update": {
+     "x": {
+      "value": 160
+     },
+     "y": {
+      "value": 10
+     },
+     "width": {
+      "value": 40
+     },
+     "height": {
+      "value": 40
+     },
+     "fill": {
+      "value": "#f00"
+     },
+     "opacity": {
+      "value": 0
+     },
+     "stroke": {
+      "value": "#000"
+     }
+    }
+   }
+  },
+  {
+   "type": "rect",
+   "encode": {
+    "update": {
+     "x": {
+      "value": 210
+     },
+     "y": {
+      "value": 10
+     },
+     "width": {
+      "value": 40
+     },
+     "height": {
+      "value": 40
+     },
+     "fill": {
+      "value": "#0f0"
+     },
+     "strokeOpacity": {
+      "value": 0
+     },
+     "stroke": {
+      "value": "#000"
+     },
+     "strokeWidth": {
+      "value": 9
+     }
+    }
+   }
+  },
+  {
+   "type": "symbol",
+   "encode": {
+    "update": {
+     "x": {
+      "value": 30
+     },
+     "y": {
+      "value": 90
+     },
+     "size": {
+      "value": 1500
+     },
+     "fill": {
+      "value": "#369"
+     },
+     "stroke": {
+      "value": "#f90"
+     },
+     "strokeWidth": {
+      "value": 12
+     },
+     "strokeCap": {
+      "value": "square"
+     },
+     "strokeJoin": {
+      "value": "miter"
+     }
+    }
+   }
+  },
+  {
+   "type": "symbol",
+   "encode": {
+    "update": {
+     "x": {
+      "value": 90
+     },
+     "y": {
+      "value": 90
+     },
+     "shape": {
+      "value": "cross"
+     },
+     "size": {
+      "value": 1500
+     },
+     "fill": {
+      "value": "#369"
+     },
+     "stroke": {
+      "value": "#f90"
+     },
+     "strokeWidth": {
+      "value": 12
+     },
+     "strokeMiterLimit": {
+      "value": 1
+     }
+    }
+   }
+  },
+  {
+   "type": "symbol",
+   "encode": {
+    "update": {
+     "x": {
+      "value": 150
+     },
+     "y": {
+      "value": 90
+     },
+     "shape": {
+      "value": "triangle-up"
+     },
+     "size": {
+      "value": 1500
+     },
+     "stroke": {
+      "value": "#f90"
+     },
+     "strokeWidth": {
+      "value": 12
+     },
+     "strokeCap": {
+      "value": "round"
+     },
+     "strokeJoin": {
+      "value": "round"
+     }
+    }
+   }
+  },
+  {
+   "type": "symbol",
+   "encode": {
+    "update": {
+     "x": {
+      "value": 210
+     },
+     "y": {
+      "value": 90
+     },
+     "size": {
+      "value": -100
+     },
+     "fill": {
+      "value": "#000"
+     }
+    }
+   }
+  },
+  {
+   "type": "symbol",
+   "encode": {
+    "update": {
+     "x": {
+      "value": 250
+     },
+     "y": {
+      "value": 90
+     },
+     "size": {
+      "value": 0
+     },
+     "fill": {
+      "value": "#000"
+     }
+    }
+   }
+  }
+ ]
+}

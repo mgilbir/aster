@@ -1,0 +1,236 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "The last encode channels in Vega's vocabulary: a scaled and dash-offset stroke, a mitred join, text broken on a separator of its own with its own line height and right-to-left truncation, a stretched and unsmoothed image, and a group whose outline is drawn over its children.",
+  "width": 440,
+  "height": 260,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "paths",
+      "values": [
+        {"label": "usr/local/share/doc", "y": 30},
+        {"label": "var/log/system/daily", "y": 70}
+      ]
+    },
+    {
+      "name": "spikes",
+      "values": [
+        {"x": 0, "y": 0},
+        {"x": 30, "y": 60},
+        {"x": 60, "y": 0},
+        {"x": 90, "y": 60},
+        {"x": 120, "y": 0}
+      ]
+    }
+  ],
+  "marks": [
+    {
+      "description": "The same dash pattern twice, the second started a half-period along, so its gaps fall where the first draws.",
+      "type": "rule",
+      "encode": {
+        "enter": {
+          "x": {"value": 10},
+          "x2": {"value": 200},
+          "y": {"value": 12},
+          "stroke": {"value": "#4c78a8"},
+          "strokeWidth": {"value": 3},
+          "strokeDash": {"value": [8, 8]}
+        }
+      }
+    },
+    {
+      "type": "rule",
+      "encode": {
+        "enter": {
+          "x": {"value": 10},
+          "x2": {"value": 200},
+          "y": {"value": 22},
+          "stroke": {"value": "#e45756"},
+          "strokeWidth": {"value": 3},
+          "strokeDash": {"value": [8, 8]},
+          "strokeDashOffset": {"value": 8}
+        }
+      }
+    },
+    {
+      "description": "A zig-zag stroked with sharp joins. The miter limit decides whether each spike keeps its point or is cut square, and 1 cuts every one of them.",
+      "type": "line",
+      "from": {"data": "spikes"},
+      "encode": {
+        "enter": {
+          "x": {"field": "x", "offset": 10},
+          "y": {"field": "y", "offset": 40},
+          "stroke": {"value": "#54a24b"},
+          "strokeWidth": {"value": 10},
+          "strokeJoin": {"value": "miter"},
+          "strokeMiterLimit": {"value": 1},
+          "interpolate": {"value": "linear"}
+        }
+      }
+    },
+    {
+      "description": "A path mark scaled unevenly about its own anchor, and a second at its natural size behind it. Only a path mark takes these: on a symbol upstream ignores them, and so does this engine.",
+      "type": "path",
+      "encode": {
+        "enter": {
+          "x": {"value": 250},
+          "y": {"value": 40},
+          "path": {"value": "M-10,-10L10,-10L10,10L-10,10Z"},
+          "fill": {"value": "#bab0ac"}
+        }
+      }
+    },
+    {
+      "type": "path",
+      "encode": {
+        "enter": {
+          "x": {"value": 250},
+          "y": {"value": 40},
+          "path": {"value": "M-10,-10L10,-10L10,10L-10,10Z"},
+          "scaleX": {"value": 2},
+          "scaleY": {"value": 0.5},
+          "fill": {"value": "#f58518"}
+        }
+      }
+    },
+    {
+      "description": "The same numbers on a symbol, which neither engine applies.",
+      "type": "symbol",
+      "encode": {
+        "enter": {
+          "x": {"value": 330},
+          "y": {"value": 40},
+          "size": {"value": 400},
+          "shape": {"value": "square"},
+          "scaleX": {"value": 2},
+          "scaleY": {"value": 0.5},
+          "fill": {"value": "#f58518"}
+        }
+      }
+    },
+    {
+      "description": "One string per row broken into lines on a slash, with a line height wider than the font would choose.",
+      "type": "text",
+      "from": {"data": "paths"},
+      "encode": {
+        "enter": {
+          "x": {"value": 10},
+          "y": {"field": "y", "offset": 120},
+          "text": {"field": "label"},
+          "lineBreak": {"value": "/"},
+          "lineHeight": {"value": 16},
+          "fontSize": {"value": 10},
+          "fill": {"value": "#333333"},
+          "baseline": {"value": "top"}
+        }
+      }
+    },
+    {
+      "description": "A right-to-left run truncated: the ellipsis goes in front and the tail is what survives, because the end of an RTL string is where its meaning starts.",
+      "type": "text",
+      "encode": {
+        "enter": {
+          "x": {"value": 150},
+          "y": {"value": 130},
+          "text": {"value": "one two three four five"},
+          "dir": {"value": "rtl"},
+          "limit": {"value": 60},
+          "fontSize": {"value": 11},
+          "fill": {"value": "#333333"},
+          "baseline": {"value": "top"}
+        }
+      }
+    },
+    {
+      "description": "The same run left-to-right, for the contrast.",
+      "type": "text",
+      "encode": {
+        "enter": {
+          "x": {"value": 150},
+          "y": {"value": 148},
+          "text": {"value": "one two three four five"},
+          "limit": {"value": 60},
+          "fontSize": {"value": 11},
+          "fill": {"value": "#333333"},
+          "baseline": {"value": "top"}
+        }
+      }
+    },
+    {
+      "description": "An image stretched to a box it does not fit, with smoothing off.",
+      "type": "image",
+      "encode": {
+        "enter": {
+          "url": {"value": "tail.png"},
+          "x": {"value": 300},
+          "y": {"value": 120},
+          "width": {"value": 100},
+          "height": {"value": 40},
+          "aspect": {"value": false},
+          "smooth": {"value": false}
+        }
+      }
+    },
+    {
+      "description": "A group whose outline is drawn after its children, and nudged by an explicit stroke offset. The bar runs to the border, so which is on top is visible.",
+      "type": "group",
+      "encode": {
+        "enter": {
+          "x": {"value": 10},
+          "y": {"value": 190},
+          "width": {"value": 180},
+          "height": {"value": 60},
+          "fill": {"value": "#f7f7f7"},
+          "stroke": {"value": "#333333"},
+          "strokeWidth": {"value": 6},
+          "strokeForeground": {"value": true},
+          "strokeOffset": {"value": 0}
+        }
+      },
+      "marks": [
+        {
+          "type": "rect",
+          "encode": {
+            "enter": {
+              "x": {"value": 0},
+              "y": {"value": 20},
+              "width": {"value": 180},
+              "height": {"value": 20},
+              "fill": {"value": "#4c78a8"}
+            }
+          }
+        }
+      ]
+    },
+    {
+      "description": "The same group with the outline under its children, which is the default.",
+      "type": "group",
+      "encode": {
+        "enter": {
+          "x": {"value": 220},
+          "y": {"value": 190},
+          "width": {"value": 180},
+          "height": {"value": 60},
+          "fill": {"value": "#f7f7f7"},
+          "stroke": {"value": "#333333"},
+          "strokeWidth": {"value": 6}
+        }
+      },
+      "marks": [
+        {
+          "type": "rect",
+          "encode": {
+            "enter": {
+              "x": {"value": 0},
+              "y": {"value": 20},
+              "width": {"value": 180},
+              "height": {"value": 20},
+              "fill": {"value": "#4c78a8"}
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

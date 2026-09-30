@@ -1,0 +1,92 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A trail: a line whose thickness follows the data, drawn as a filled run of capsules rather than a stroke, beside a plain line through the same points. One trail asks for `size: 0`, which upstream reads as **one** — `ts = item => item.size || 1`, the same falsy default a path's `scaleX` takes — so it is drawn a unit wide rather than as a hairline. A symbol beside it asks for a negative size, which upstream neither draws nor measures: its radius is `Math.sqrt(size) / 2`, and every coordinate computed from a NaN fails every comparison the bounding box makes.",
+  "width": 240,
+  "height": 130,
+  "padding": 5,
+  "data": [
+    {
+      "name": "table",
+      "values": [
+        {"t": 0, "v": 24, "w": 2},
+        {"t": 1, "v": 58, "w": 9},
+        {"t": 2, "v": 41, "w": 4},
+        {"t": 3, "v": 77, "w": 14},
+        {"t": 4, "v": 52, "w": 6},
+        {"t": 5, "v": 88, "w": 20}
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "linear",
+      "domain": {"data": "table", "field": "t"},
+      "range": "width",
+      "zero": false
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": [0, 100],
+      "range": "height"
+    }
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "x", "tickCount": 6},
+    {"orient": "left", "scale": "y", "tickCount": 4}
+  ],
+  "marks": [
+    {
+      "type": "trail",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "t"},
+          "y": {"scale": "y", "field": "v"},
+          "size": {"field": "w"},
+          "fill": {"value": "#4c78a8"},
+          "fillOpacity": {"value": 0.7}
+        }
+      }
+    },
+    {
+      "type": "line",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "t"},
+          "y": {"scale": "y", "field": "v"},
+          "stroke": {"value": "#333333"},
+          "strokeWidth": {"value": 1}
+        }
+      }
+    },
+    {
+      "type": "trail",
+      "name": "zeroWidth",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "t"},
+          "y": {"scale": "y", "field": "v", "offset": 30},
+          "size": {"value": 0},
+          "fill": {"value": "#e45756"}
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "name": "negativeSize",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "t"},
+          "y": {"scale": "y", "field": "v", "offset": -20},
+          "size": {"value": -4},
+          "fill": {"value": "#54a24b"}
+        }
+      }
+    }
+  ]
+}

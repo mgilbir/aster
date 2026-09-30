@@ -1,0 +1,21 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A trellis two deep and two across, so the grid has headers on both sides.",
+  "data": {"values": [
+    {"r": "north", "c": "2023", "x": "p", "y": 3},
+    {"r": "north", "c": "2023", "x": "q", "y": 5},
+    {"r": "north", "c": "2024", "x": "p", "y": 7},
+    {"r": "north", "c": "2024", "x": "q", "y": 2},
+    {"r": "south", "c": "2023", "x": "p", "y": 6},
+    {"r": "south", "c": "2023", "x": "q", "y": 1},
+    {"r": "south", "c": "2024", "x": "p", "y": 4},
+    {"r": "south", "c": "2024", "x": "q", "y": 8}
+  ]},
+  "mark": "bar",
+  "encoding": {
+    "row": {"field": "r", "type": "nominal"},
+    "column": {"field": "c", "type": "nominal"},
+    "x": {"field": "x", "type": "nominal"},
+    "y": {"field": "y", "type": "quantitative"}
+  }
+}

@@ -1,0 +1,135 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "autosize fit where the size is a signal rather than a property: the view fits against the signal's value, which is how a chart sized by its host is written.",
+  "padding": 5,
+  "autosize": {
+    "type": "fit"
+  },
+  "signals": [
+    {
+      "name": "width",
+      "value": 300
+    },
+    {
+      "name": "height",
+      "update": "150"
+    },
+    {
+      "name": "mid",
+      "update": "width / 2"
+    }
+  ],
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {
+          "c": "alpha",
+          "v": 12000
+        },
+        {
+          "c": "beta",
+          "v": 45000
+        },
+        {
+          "c": "gamma",
+          "v": 28000
+        },
+        {
+          "c": "delta",
+          "v": 61000
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {
+        "data": "t",
+        "field": "c"
+      },
+      "range": "width",
+      "padding": 0.1
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {
+        "data": "t",
+        "field": "v"
+      },
+      "range": "height",
+      "nice": true
+    }
+  ],
+  "axes": [
+    {
+      "orient": "left",
+      "scale": "y",
+      "title": "amount",
+      "tickCount": 4
+    },
+    {
+      "orient": "bottom",
+      "scale": "x",
+      "title": "category",
+      "labelAngle": -30,
+      "labelAlign": "right"
+    }
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "x",
+            "field": "c"
+          },
+          "width": {
+            "scale": "x",
+            "band": 1
+          },
+          "y": {
+            "scale": "y",
+            "field": "v"
+          },
+          "y2": {
+            "scale": "y",
+            "value": 0
+          },
+          "fill": {
+            "value": "steelblue"
+          }
+        }
+      }
+    },
+    {
+      "type": "rule",
+      "encode": {
+        "enter": {
+          "x": {
+            "signal": "mid"
+          },
+          "x2": {
+            "signal": "mid"
+          },
+          "y": {
+            "value": 0
+          },
+          "y2": {
+            "signal": "height"
+          },
+          "stroke": {
+            "value": "firebrick"
+          }
+        }
+      }
+    }
+  ]
+}

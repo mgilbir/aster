@@ -1,0 +1,62 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "labelFlush hangs the first and last labels inside the plot by changing their alignment, and labelFlushOffset then nudges them along the axis — outwards, which is the direction upstream signs it. A zero threshold still flushes a label that lands exactly on an end, and an explicit labelAlign means the label is not being flushed at all, so its offset does nothing.",
+  "width": 200,
+  "height": 140,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {"x": 0, "v": 1},
+        {"x": 50, "v": 8},
+        {"x": 100, "v": 4}
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "linear",
+      "domain": {"data": "t", "field": "x"},
+      "range": "width"
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {"data": "t", "field": "v"},
+      "range": "height"
+    }
+  ],
+  "axes": [
+    {"scale": "x", "orient": "bottom", "labelFlush": true, "labelFlushOffset": 6},
+    {"scale": "x", "orient": "top", "labelFlush": 0, "labelFlushOffset": -4},
+    {
+      "scale": "y",
+      "orient": "left",
+      "labelFlush": 20,
+      "labelFlushOffset": 5
+    },
+    {
+      "scale": "y",
+      "orient": "right",
+      "labelFlush": true,
+      "labelFlushOffset": 8,
+      "labelBaseline": "middle"
+    }
+  ],
+  "marks": [
+    {
+      "type": "line",
+      "from": {"data": "t"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "x"},
+          "y": {"scale": "y", "field": "v"},
+          "stroke": {"value": "#4c78a8"}
+        }
+      }
+    }
+  ]
+}

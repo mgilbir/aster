@@ -1,0 +1,95 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "labelBound culls nothing, which is upstream's behaviour rather than a gap: its bound test runs before the label bounds exist, and a cleared Bounds is trivially enclosed. The first label here overflows a 140-unit axis by more than sixty, and all three axes keep it \u2014 under true, under false, and under an explicit tolerance.",
+  "width": 140,
+  "height": 120,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {
+          "c": "a very long first label indeed"
+        },
+        {
+          "c": "b"
+        },
+        {
+          "c": "c"
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {
+        "data": "t",
+        "field": "c"
+      },
+      "range": "width"
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": [
+        0,
+        10
+      ],
+      "range": "height"
+    }
+  ],
+  "axes": [
+    {
+      "orient": "bottom",
+      "scale": "x",
+      "labelBound": true,
+      "labelFontSize": 9
+    },
+    {
+      "orient": "top",
+      "scale": "x",
+      "labelBound": false,
+      "labelFontSize": 9
+    },
+    {
+      "orient": "left",
+      "scale": "y",
+      "tickCount": 4,
+      "labelBound": 40
+    }
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "x",
+            "field": "c"
+          },
+          "width": {
+            "scale": "x",
+            "band": 0.9
+          },
+          "y": {
+            "scale": "y",
+            "value": 0
+          },
+          "y2": {
+            "scale": "y",
+            "value": 6
+          },
+          "fill": {
+            "value": "#4c78a8"
+          }
+        }
+      }
+    }
+  ]
+}

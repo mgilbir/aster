@@ -1,0 +1,79 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A legend can be keyed to a strokeDash or a strokeWidth scale, which on a legend are channels naming scales and not the outline drawn round the legend. Each swatch is then drawn under its own dash pattern or at its own width, and a width scale changes how tall the rows are because upstream measures them from the scale rather than from symbolStrokeWidth.",
+  "width": 200,
+  "height": 120,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {"c": "alpha", "x": 0, "v": 1},
+        {"c": "alpha", "x": 1, "v": 4},
+        {"c": "beta", "x": 0, "v": 3},
+        {"c": "beta", "x": 1, "v": 2},
+        {"c": "gamma", "x": 0, "v": 2},
+        {"c": "gamma", "x": 1, "v": 5}
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "linear",
+      "domain": {"data": "t", "field": "x"},
+      "range": "width"
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {"data": "t", "field": "v"},
+      "range": "height"
+    },
+    {
+      "name": "dash",
+      "type": "ordinal",
+      "domain": {"data": "t", "field": "c"},
+      "range": [[1, 0], [6, 3], [2, 2, 8, 2]]
+    },
+    {
+      "name": "thick",
+      "type": "ordinal",
+      "domain": {"data": "t", "field": "c"},
+      "range": [1, 4, 9]
+    }
+  ],
+  "legends": [
+    {"strokeDash": "dash", "title": "style", "orient": "right"},
+    {"strokeWidth": "thick", "title": "weight", "orient": "top-left"},
+    {
+      "strokeDash": "dash",
+      "strokeWidth": "thick",
+      "title": "both",
+      "orient": "bottom",
+      "direction": "horizontal"
+    }
+  ],
+  "marks": [
+    {
+      "type": "group",
+      "from": {"facet": {"data": "t", "name": "series", "groupby": "c"}},
+      "marks": [
+        {
+          "type": "line",
+          "from": {"data": "series"},
+          "encode": {
+            "enter": {
+              "x": {"scale": "x", "field": "x"},
+              "y": {"scale": "y", "field": "v"},
+              "stroke": {"value": "#333333"},
+              "strokeDash": {"scale": "dash", "field": "c"},
+              "strokeWidth": {"scale": "thick", "field": "c"}
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

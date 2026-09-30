@@ -1,0 +1,43 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A counting aggregate answers with a number, whatever the column it counted was. `count`, `distinct`, `valid` and `missing` reduce a group to a tally, so a `type` the chart stated is about the wrong thing — it describes the column going in where what comes out is a count — and upstream overrides it and says so: `if (type !== 'quantitative') { if (isCountingAggregateOp(aggregate)) { log.warn(…); fieldDef.type = 'quantitative'; } }`. Left as stated, the channel keeps a band or an ordinal scale where upstream builds a linear one, and everything hung off that scale follows it: the first row's counts run along a linear axis rather than sitting in a band apiece, and the second row's colours run along a continuous ramp rather than being handed out one per category. That row draws **no legend**, and not because one would be wrong: the legend a linear colour scale earns is a gradient, and a gradient here is rendered with a single colour stop where upstream samples twenty-one. The Vega this compiler emits for it is byte-for-byte upstream's — the specification gate compares exactly that — so the defect is in the runtime that draws the specification, not in the rule this fixture is about, and it is left for a fixture of its own at the Vega level where it belongs. A narrow domain alone does not cause it, nor an aggregated one, nor a gradient inside a concatenation; each was tried on its own and drew correctly. The third row is the distinction that makes this a rule rather than a coincidence — a `mean` is *not* a counting aggregate, so the nominal type it was given stands, band scale and all. Only those four operations, and only over a type the chart actually stated: where none is stated the inference already answers quantitative for any aggregate at all, which is why the two agreed everywhere until a chart said otherwise.",
+  "data": {
+    "values": [
+      {"c": "alpha", "k": "one", "v": 28},
+      {"c": "beta", "k": "two", "v": 55},
+      {"c": "alpha", "k": "one", "v": 43},
+      {"c": "gamma", "k": "two", "v": 91},
+      {"c": "beta", "k": "three", "v": 12}
+    ]
+  },
+  "vconcat": [
+    {
+      "width": 200,
+      "height": 80,
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "c", "type": "nominal"},
+        "y": {"field": "k", "type": "nominal", "aggregate": "count"}
+      }
+    },
+    {
+      "width": 200,
+      "height": 80,
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "c", "type": "nominal"},
+        "y": {"field": "v", "type": "quantitative"},
+        "color": {"field": "k", "type": "nominal", "aggregate": "distinct", "legend": null}
+      }
+    },
+    {
+      "width": 200,
+      "height": 80,
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "c", "type": "nominal"},
+        "y": {"field": "v", "type": "nominal", "aggregate": "mean"}
+      }
+    }
+  ]
+}

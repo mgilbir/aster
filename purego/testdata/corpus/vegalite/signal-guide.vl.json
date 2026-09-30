@@ -1,0 +1,15 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A guide property computed by a parameter, which Vega reads as a signal.",
+  "data": {"url": "data/cars.json"},
+  "params": [{"name": "xLabelAngle", "value": 45, "bind": {"input": "range", "min": -90, "max": 90}}],
+  "mark": "point",
+  "encoding": {
+    "x": {
+      "field": "Origin",
+      "type": "nominal",
+      "axis": {"labelAngle": {"expr": "xLabelAngle"}}
+    },
+    "y": {"aggregate": "count"}
+  }
+}

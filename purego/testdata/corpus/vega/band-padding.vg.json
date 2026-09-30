@@ -1,0 +1,75 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "Band and point scales with every spacing knob turned: separate inner and outer padding, a non-central alignment, rounding, and a reversed range.",
+  "width": 240,
+  "height": 130,
+  "padding": 5,
+  "data": [
+    {
+      "name": "table",
+      "values": [
+        {"k": "one", "v": 8}, {"k": "two", "v": 19}, {"k": "three", "v": 13}
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {"data": "table", "field": "k"},
+      "range": "width",
+      "paddingInner": 0.45,
+      "paddingOuter": 0.05,
+      "align": 0.2,
+      "round": true
+    },
+    {
+      "name": "dots",
+      "type": "point",
+      "domain": {"data": "table", "field": "k"},
+      "range": [0, 240],
+      "padding": 0.9,
+      "align": 0.75,
+      "round": true
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {"data": "table", "field": "v"},
+      "range": "height",
+      "zero": true,
+      "reverse": true
+    }
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "x"},
+    {"orient": "left", "scale": "y", "tickCount": 4}
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "k"},
+          "width": {"scale": "x", "band": 1},
+          "y": {"scale": "y", "field": "v"},
+          "y2": {"scale": "y", "value": 0},
+          "fill": {"value": "#b279a2"}
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "dots", "field": "k"},
+          "y": {"value": 8},
+          "size": {"value": 60},
+          "fill": {"value": "#54a24b"}
+        }
+      }
+    }
+  ]
+}

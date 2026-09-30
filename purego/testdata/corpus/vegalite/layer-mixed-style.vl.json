@@ -1,0 +1,26 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A caption with no position beside a plot that has one, over a bar whose width settles the shared scale's padding.",
+  "data": {"url": "data/stocks.csv"},
+  "transform": [{"filter": "datum.symbol==='GOOG'"}],
+  "layer": [
+    {
+      "mark": "rule",
+      "encoding": {
+        "x": {"field": "date", "type": "temporal"},
+        "y": {"field": "price", "type": "quantitative"}
+      }
+    },
+    {
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "date", "type": "temporal"},
+        "y": {"field": "price", "type": "quantitative"}
+      }
+    },
+    {
+      "mark": {"type": "text", "align": "right", "x": "width", "y": -5},
+      "encoding": {"text": {"value": "closing price"}}
+    }
+  ]
+}

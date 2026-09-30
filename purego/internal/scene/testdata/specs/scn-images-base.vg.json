@@ -1,0 +1,129 @@
+{
+ "$schema": "https://vega.github.io/schema/vega/v6.json",
+ "width": 300,
+ "height": 150,
+ "padding": 5,
+ "marks": [
+  {
+   "type": "image",
+   "from": {
+    "data": "t"
+   },
+   "encode": {
+    "update": {
+     "url": {
+      "field": "u"
+     },
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "field": "y"
+     },
+     "width": {
+      "field": "w"
+     },
+     "height": {
+      "field": "h"
+     },
+     "align": {
+      "field": "al"
+     },
+     "baseline": {
+      "field": "bl"
+     },
+     "aspect": {
+      "field": "as"
+     },
+     "smooth": {
+      "field": "sm"
+     },
+     "opacity": {
+      "value": 0.9
+     },
+     "blend": {
+      "value": "multiply"
+     }
+    }
+   }
+  }
+ ],
+ "data": [
+  {
+   "name": "t",
+   "values": [
+    {
+     "u": "img/a.png",
+     "x": 40,
+     "y": 30,
+     "w": 40,
+     "h": 30,
+     "al": "left",
+     "bl": "top",
+     "as": true,
+     "sm": true
+    },
+    {
+     "u": "https://example.org/b.png?x=1&y=2",
+     "x": 140,
+     "y": 30,
+     "w": 40,
+     "h": null,
+     "al": "center",
+     "bl": "middle",
+     "as": false,
+     "sm": false
+    },
+    {
+     "u": "data:image/png;base64,iVBORw0KGgo=",
+     "x": 240,
+     "y": 30,
+     "w": null,
+     "h": 20,
+     "al": "right",
+     "bl": "bottom",
+     "as": true,
+     "sm": null
+    },
+    {
+     "u": "javascript:alert(1)",
+     "x": 40,
+     "y": 100,
+     "w": 30,
+     "h": 30,
+     "al": "left",
+     "bl": "top",
+     "as": true,
+     "sm": true
+    },
+    {
+     "u": "//cdn.example.org/c.png",
+     "x": 140,
+     "y": 100,
+     "w": 30,
+     "h": 30,
+     "al": "left",
+     "bl": "top",
+     "as": true,
+     "sm": true
+    },
+    {
+     "u": "",
+     "x": 240,
+     "y": 100,
+     "w": 30,
+     "h": 30,
+     "al": "left",
+     "bl": "top",
+     "as": true,
+     "sm": true
+    }
+   ]
+  }
+ ],
+ "usermeta": {
+  "loaderOptions": {
+   "baseURL": "https://base.example/dir/"
+  }
+ }
+}

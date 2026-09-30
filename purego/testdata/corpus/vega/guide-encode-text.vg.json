@@ -1,0 +1,131 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "The guide encode channels that have no property behind them, resolved against the item rather than folded. A label's ellipsis is the mark a truncated one ends with and its lineBreak is what a long one is split on, so a path can be shown as a stack; a title's own encode may replace the words outright and nudge them with dx and dy. None of the five has a guide property, which is why upstream reads them off the encode block and so does this.",
+  "width": 220,
+  "height": 120,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {
+          "c": "one/two/three",
+          "v": 4
+        },
+        {
+          "c": "alpha/beta",
+          "v": 7
+        },
+        {
+          "c": "a-very-long-category-name",
+          "v": 3
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {
+        "data": "t",
+        "field": "c"
+      },
+      "range": "width",
+      "padding": 0.2
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {
+        "data": "t",
+        "field": "v"
+      },
+      "range": "height"
+    }
+  ],
+  "axes": [
+    {
+      "scale": "x",
+      "orient": "bottom",
+      "labelLimit": 60,
+      "labelFontSize": 8,
+      "title": "written down",
+      "encode": {
+        "labels": {
+          "update": {
+            "ellipsis": {
+              "value": "~"
+            }
+          }
+        },
+        "title": {
+          "update": {
+            "text": {
+              "value": "from the encode block"
+            },
+            "dx": {
+              "value": 6
+            },
+            "dy": {
+              "value": 4
+            },
+            "limit": {
+              "value": 90
+            },
+            "ellipsis": {
+              "value": "\u00bb"
+            }
+          }
+        }
+      }
+    },
+    {
+      "scale": "y",
+      "orient": "left",
+      "labelFontSize": 8,
+      "title": "stacked/title",
+      "encode": {
+        "title": {
+          "update": {
+            "lineBreak": {
+              "value": "/"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "x",
+            "field": "c"
+          },
+          "width": {
+            "scale": "x",
+            "band": 1
+          },
+          "y": {
+            "scale": "y",
+            "field": "v"
+          },
+          "y2": {
+            "scale": "y",
+            "value": 0
+          },
+          "fill": {
+            "value": "#4c78a8"
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A dated axis bounded at one end by a written-out date and at the other by an instant.",
+  "data": {"url": "data/stocks.csv"},
+  "transform": [{"filter": "datum.symbol==='GOOG'"}],
+  "mark": "line",
+  "encoding": {
+    "x": {
+      "field": "date",
+      "type": "temporal",
+      "scale": {"domainMin": {"year": 2005}, "domainMax": {"year": 2008, "month": "jan"}}
+    },
+    "y": {"field": "price", "type": "quantitative"}
+  }
+}

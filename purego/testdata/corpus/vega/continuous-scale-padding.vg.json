@@ -1,0 +1,67 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "`scale.padding` on **continuous** scales — a line over a padded time scale, with a padded linear scale on the other axis. Every other padding fixture in the corpus pads a band or a point scale, where the padding divides a step; on a continuous scale it widens the domain instead, by inverting the pixel padding through the scale, so the first and last points sit inside the plotting area rather than on its edges.",
+  "width": 240,
+  "height": 140,
+  "padding": 5,
+  "data": [
+    {
+      "name": "table",
+      "values": [
+        {"t": "2026-05-20T10:00:00", "v": 18},
+        {"t": "2026-05-27T10:00:00", "v": 14},
+        {"t": "2026-06-03T10:00:00", "v": 11},
+        {"t": "2026-06-10T10:00:00", "v": 8},
+        {"t": "2026-06-17T10:00:00", "v": 5}
+      ],
+      "format": {"parse": {"t": "date"}}
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "time",
+      "domain": {"data": "table", "field": "t"},
+      "range": "width",
+      "padding": 10
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {"data": "table", "field": "v"},
+      "range": "height",
+      "padding": 12,
+      "zero": false
+    }
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "x", "tickCount": 3, "format": "%d-%m"},
+    {"orient": "left", "scale": "y", "tickCount": 4}
+  ],
+  "marks": [
+    {
+      "type": "line",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "t"},
+          "y": {"scale": "y", "field": "v"},
+          "stroke": {"value": "#4c78a8"},
+          "strokeWidth": {"value": 2}
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "t"},
+          "y": {"scale": "y", "field": "v"},
+          "size": {"value": 60},
+          "fill": {"value": "#4c78a8"}
+        }
+      }
+    }
+  ]
+}

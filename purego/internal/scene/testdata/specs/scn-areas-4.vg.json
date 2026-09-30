@@ -1,0 +1,483 @@
+{
+ "$schema": "https://vega.github.io/schema/vega/v6.json",
+ "width": 260,
+ "height": 278,
+ "padding": 5,
+ "marks": [
+  {
+   "type": "area",
+   "from": {
+    "data": "p4"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 0"
+     },
+     "y2": {
+      "signal": "datum.y + 0 + 9"
+     },
+     "interpolate": {
+      "value": "linear"
+     },
+     "fill": {
+      "value": "#8ab"
+     },
+     "stroke": {
+      "value": "#123"
+     }
+    }
+   }
+  },
+  {
+   "type": "area",
+   "from": {
+    "data": "p4"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 12"
+     },
+     "y2": {
+      "signal": "datum.y + 12 + 9"
+     },
+     "interpolate": {
+      "value": "linear-closed"
+     },
+     "fill": {
+      "value": "#8ab"
+     },
+     "stroke": {
+      "value": "#123"
+     }
+    }
+   }
+  },
+  {
+   "type": "area",
+   "from": {
+    "data": "p4"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 24"
+     },
+     "y2": {
+      "signal": "datum.y + 24 + 9"
+     },
+     "interpolate": {
+      "value": "basis"
+     },
+     "fill": {
+      "value": "#8ab"
+     },
+     "stroke": {
+      "value": "#123"
+     }
+    }
+   }
+  },
+  {
+   "type": "area",
+   "from": {
+    "data": "p4"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 36"
+     },
+     "y2": {
+      "signal": "datum.y + 36 + 9"
+     },
+     "interpolate": {
+      "value": "basis-open"
+     },
+     "fill": {
+      "value": "#8ab"
+     },
+     "stroke": {
+      "value": "#123"
+     }
+    }
+   }
+  },
+  {
+   "type": "area",
+   "from": {
+    "data": "p4"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 48"
+     },
+     "y2": {
+      "signal": "datum.y + 48 + 9"
+     },
+     "interpolate": {
+      "value": "basis-closed"
+     },
+     "fill": {
+      "value": "#8ab"
+     },
+     "stroke": {
+      "value": "#123"
+     }
+    }
+   }
+  },
+  {
+   "type": "area",
+   "from": {
+    "data": "p4"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 72"
+     },
+     "y2": {
+      "signal": "datum.y + 72 + 9"
+     },
+     "interpolate": {
+      "value": "cardinal"
+     },
+     "fill": {
+      "value": "#8ab"
+     },
+     "stroke": {
+      "value": "#123"
+     }
+    }
+   }
+  },
+  {
+   "type": "area",
+   "from": {
+    "data": "p4"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 84"
+     },
+     "y2": {
+      "signal": "datum.y + 84 + 9"
+     },
+     "interpolate": {
+      "value": "cardinal-open"
+     },
+     "fill": {
+      "value": "#8ab"
+     },
+     "stroke": {
+      "value": "#123"
+     }
+    }
+   }
+  },
+  {
+   "type": "area",
+   "from": {
+    "data": "p4"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 96"
+     },
+     "y2": {
+      "signal": "datum.y + 96 + 9"
+     },
+     "interpolate": {
+      "value": "cardinal-closed"
+     },
+     "fill": {
+      "value": "#8ab"
+     },
+     "stroke": {
+      "value": "#123"
+     }
+    }
+   }
+  },
+  {
+   "type": "area",
+   "from": {
+    "data": "p4"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 108"
+     },
+     "y2": {
+      "signal": "datum.y + 108 + 9"
+     },
+     "interpolate": {
+      "value": "catmull-rom"
+     },
+     "fill": {
+      "value": "#8ab"
+     },
+     "stroke": {
+      "value": "#123"
+     }
+    }
+   }
+  },
+  {
+   "type": "area",
+   "from": {
+    "data": "p4"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 120"
+     },
+     "y2": {
+      "signal": "datum.y + 120 + 9"
+     },
+     "interpolate": {
+      "value": "catmull-rom-open"
+     },
+     "fill": {
+      "value": "#8ab"
+     },
+     "stroke": {
+      "value": "#123"
+     }
+    }
+   }
+  },
+  {
+   "type": "area",
+   "from": {
+    "data": "p4"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 132"
+     },
+     "y2": {
+      "signal": "datum.y + 132 + 9"
+     },
+     "interpolate": {
+      "value": "catmull-rom-closed"
+     },
+     "fill": {
+      "value": "#8ab"
+     },
+     "stroke": {
+      "value": "#123"
+     }
+    }
+   }
+  },
+  {
+   "type": "area",
+   "from": {
+    "data": "p4"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 144"
+     },
+     "y2": {
+      "signal": "datum.y + 144 + 9"
+     },
+     "interpolate": {
+      "value": "monotone"
+     },
+     "fill": {
+      "value": "#8ab"
+     },
+     "stroke": {
+      "value": "#123"
+     }
+    }
+   }
+  },
+  {
+   "type": "area",
+   "from": {
+    "data": "p4"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 156"
+     },
+     "y2": {
+      "signal": "datum.y + 156 + 9"
+     },
+     "interpolate": {
+      "value": "natural"
+     },
+     "fill": {
+      "value": "#8ab"
+     },
+     "stroke": {
+      "value": "#123"
+     }
+    }
+   }
+  },
+  {
+   "type": "area",
+   "from": {
+    "data": "p4"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 168"
+     },
+     "y2": {
+      "signal": "datum.y + 168 + 9"
+     },
+     "interpolate": {
+      "value": "step"
+     },
+     "fill": {
+      "value": "#8ab"
+     },
+     "stroke": {
+      "value": "#123"
+     }
+    }
+   }
+  },
+  {
+   "type": "area",
+   "from": {
+    "data": "p4"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 180"
+     },
+     "y2": {
+      "signal": "datum.y + 180 + 9"
+     },
+     "interpolate": {
+      "value": "step-before"
+     },
+     "fill": {
+      "value": "#8ab"
+     },
+     "stroke": {
+      "value": "#123"
+     }
+    }
+   }
+  },
+  {
+   "type": "area",
+   "from": {
+    "data": "p4"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 192"
+     },
+     "y2": {
+      "signal": "datum.y + 192 + 9"
+     },
+     "interpolate": {
+      "value": "step-after"
+     },
+     "fill": {
+      "value": "#8ab"
+     },
+     "stroke": {
+      "value": "#123"
+     }
+    }
+   }
+  }
+ ],
+ "data": [
+  {
+   "name": "p4",
+   "values": [
+    {
+     "x": 0.0,
+     "y": 52.280184001535886,
+     "g": true
+    },
+    {
+     "x": 80.0,
+     "y": 53.88657951377877,
+     "g": true
+    },
+    {
+     "x": 160.0,
+     "y": 30.754096477287664,
+     "g": true
+    },
+    {
+     "x": 240.0,
+     "y": 6.026893133421538,
+     "g": false
+    }
+   ]
+  }
+ ]
+}

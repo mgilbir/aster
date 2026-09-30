@@ -1,0 +1,36 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "The same brush over a map, dragged along latitude only, and it is not the two-channel case with a channel removed. The rectangle spans the plot across, so the brush is a band over the map rather than a line; and the two stated latitudes have no longitude to be projected with, so they borrow the place the middle of the plot inverts back to — which is the whole reason `projection_center` exists. The aggregate below it is the second rule this fixture carries: an aggregate's rows are not the rows that went in, so a selection remembering rows by identity writes the identity again beneath it, and a circle without one could not be picked at all.",
+  "width": 300,
+  "height": 200,
+  "projection": {"type": "albersUsa"},
+  "data": {
+    "values": [
+      {"port": "a", "lon": -122.4, "lat": 37.8},
+      {"port": "a", "lon": -122.4, "lat": 37.8},
+      {"port": "b", "lon": -87.6, "lat": 41.9},
+      {"port": "c", "lon": -74.0, "lat": 40.7},
+      {"port": "d", "lon": -95.4, "lat": 29.8}
+    ]
+  },
+  "transform": [
+    {"aggregate": [{"op": "count", "as": "flights"}], "groupby": ["port", "lon", "lat"]}
+  ],
+  "params": [
+    {
+      "name": "brush",
+      "select": {"type": "interval", "encodings": ["latitude"]},
+      "value": {"latitude": [35, 42]}
+    }
+  ],
+  "mark": "circle",
+  "encoding": {
+    "longitude": {"field": "lon", "type": "quantitative"},
+    "latitude": {"field": "lat", "type": "quantitative"},
+    "size": {"field": "flights", "type": "quantitative"},
+    "color": {
+      "condition": {"param": "brush", "empty": false, "value": "goldenrod"},
+      "value": "steelblue"
+    }
+  }
+}

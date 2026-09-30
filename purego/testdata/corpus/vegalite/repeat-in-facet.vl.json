@@ -1,0 +1,23 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "The same shape reached by repetition rather than by concatenation, which is worth its own fixture only because of *when* the rewrite happens: a repeat at the top of a chart is normalised before anything looks at it, and a repeat that is a grid's cell cannot be, because until the grids are peeled off it is not the thing being compiled. So it is normalised after the peel, where it stands.",
+  "data": {
+    "values": [
+      {"a": "p", "x": 1, "y": 2},
+      {"a": "q", "x": 3, "y": 4}
+    ]
+  },
+  "facet": {"column": {"field": "a"}},
+  "spec": {
+    "repeat": {"column": ["x", "y"]},
+    "spec": {
+      "width": 60,
+      "height": 40,
+      "mark": "point",
+      "encoding": {
+        "x": {"field": {"repeat": "column"}, "type": "quantitative"},
+        "y": {"field": "y", "type": "quantitative"}
+      }
+    }
+  }
+}

@@ -1,0 +1,96 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A symlog axis spanning both signs, a pow axis with an exponent other than one, and a reversed point scale, and a quantize scale whose range is the keyword `height`, an ordinal scale and an identity scale — six scale types with no fixture of their own. An axis over the last two drew nothing at all: `generatedTicks` had no branch for either, and `rangeEnds` none either, so the spine ran the whole height of the plot and the title was centred on that. An ordinal axis is ticked with its domain values at their range positions, and an identity axis is ticked like a linear one — d3 makes it `linearish` — with each tick at the value itself. A range keyword is a range like any other once it is resolved: `height` reads as `[height, 0]`, and two values are a perfectly good pair of buckets. This engine refused the whole scale instead, for wanting an explicit range array or a scheme, and a refused scale takes its axis with it.",
+  "width": 240,
+  "height": 150,
+  "padding": 5,
+  "data": [
+    {
+      "name": "table",
+      "values": [
+        {"c": "a", "v": -900, "p": 4, "q": 1},
+        {"c": "b", "v": -12, "p": 36, "q": 2},
+        {"c": "c", "v": 0, "p": 81, "q": 3},
+        {"c": "d", "v": 45, "p": 144, "q": 4},
+        {"c": "e", "v": 1400, "p": 400, "q": 5}
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "sym",
+      "type": "symlog",
+      "domain": {"data": "table", "field": "v"},
+      "range": "width",
+      "constant": 10
+    },
+    {
+      "name": "power",
+      "type": "pow",
+      "exponent": 0.5,
+      "domain": {"data": "table", "field": "p"},
+      "range": "height",
+      "nice": true
+    },
+    {
+      "name": "steps",
+      "type": "point",
+      "domain": {"data": "table", "field": "c"},
+      "range": "height",
+      "padding": 0.5,
+      "reverse": true
+    },
+    {
+      "name": "buckets",
+      "type": "quantize",
+      "domain": {"data": "table", "field": "p"},
+      "range": "height"
+    },
+    {
+      "name": "named",
+      "type": "ordinal",
+      "domain": {"data": "table", "field": "c"},
+      "range": [12, 44, 76, 108, 132]
+    },
+    {
+      "name": "asis",
+      "type": "identity",
+      "domain": {"data": "table", "field": "q"}
+    }
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "sym", "tickCount": 5, "title": "Symlog, both signs"},
+    {"orient": "left", "scale": "power", "tickCount": 4, "title": "Pow 0.5"},
+    {"orient": "right", "scale": "steps"},
+    {"orient": "left", "scale": "buckets", "offset": 58, "tickCount": 4, "title": "Quantize, keyword range"},
+    {"orient": "right", "scale": "named", "offset": 46, "title": "Ordinal"},
+    {"orient": "right", "scale": "asis", "offset": 104, "tickCount": 3, "title": "Identity"}
+  ],
+  "marks": [
+    {
+      "type": "symbol",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "sym", "field": "v"},
+          "y": {"scale": "power", "field": "p"},
+          "size": {"value": 90},
+          "shape": {"value": "diamond"},
+          "fill": {"value": "#4c78a8"}
+        }
+      }
+    },
+    {
+      "type": "rule",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "sym", "value": 0},
+          "x2": {"scale": "sym", "field": "v"},
+          "y": {"scale": "steps", "field": "c"},
+          "stroke": {"value": "#999999"}
+        }
+      }
+    }
+  ]
+}

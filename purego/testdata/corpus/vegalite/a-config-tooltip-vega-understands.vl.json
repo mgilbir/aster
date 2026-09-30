@@ -1,0 +1,18 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "The other side of the tooltip rule in `a-config-block-that-keeps-only-vegas`, which cannot be drawn beside it because a configuration is chart-level. A tooltip written as a bare `true` is **Vega's own switch** — `isObject` is false for it, so upstream's guard does not fire and the flag travels through into the emitted configuration untouched. Only the object form, which names which fields to show, is spent while compiling. Dropping both would leave a chart that asked every mark for a tooltip without one.",
+  "config": {"mark": {"tooltip": true}},
+  "data": {
+    "values": [
+      {"c": "alpha", "v": 28},
+      {"c": "beta", "v": 55}
+    ]
+  },
+  "width": 200,
+  "height": 70,
+  "mark": "bar",
+  "encoding": {
+    "x": {"field": "c", "type": "nominal"},
+    "y": {"field": "v", "type": "quantitative"}
+  }
+}

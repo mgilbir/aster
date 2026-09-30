@@ -1,0 +1,66 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "Rows bucketed into calendar months by the timeunit transform, then counted. Each bar spans its bucket rather than sitting at a point, which is what unit0 and unit1 are for.",
+  "width": 280,
+  "height": 120,
+  "padding": 5,
+  "data": [
+    {
+      "name": "events",
+      "values": [
+        {"at": "2026-01-15T09:20:00Z"},
+        {"at": "2026-01-28T22:05:00Z"},
+        {"at": "2026-02-03T11:00:00Z"},
+        {"at": "2026-03-02T00:00:00Z"},
+        {"at": "2026-03-19T13:45:00Z"},
+        {"at": "2026-03-30T07:10:00Z"},
+        {"at": "2026-04-08T16:00:00Z"}
+      ],
+      "format": {"parse": {"at": "date"}},
+      "transform": [
+        {"type": "timeunit", "field": "at", "units": ["year", "month"], "timezone": "utc"},
+        {
+          "type": "aggregate",
+          "groupby": ["unit0", "unit1"],
+          "ops": ["count"],
+          "as": ["tally"]
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "utc",
+      "domain": [1767225600000, 1777939200000],
+      "range": "width"
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {"data": "events", "field": "tally"},
+      "range": "height",
+      "nice": true,
+      "zero": true
+    }
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "x", "tickCount": 4},
+    {"orient": "left", "scale": "y", "tickCount": 3, "title": "Events"}
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "events"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "unit0"},
+          "x2": {"scale": "x", "field": "unit1", "offset": -1},
+          "y": {"scale": "y", "field": "tally"},
+          "y2": {"scale": "y", "value": 0},
+          "fill": {"value": "#54a24b"}
+        }
+      }
+    }
+  ]
+}

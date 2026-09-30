@@ -1,0 +1,34 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "description": "Three parameters: a plain value, one bound to an input, and one derived from another.",
+  "data": {
+    "values": [
+      {"category": "Alpha", "amount": 28},
+      {"category": "Beta", "amount": 55},
+      {"category": "Gamma", "amount": 43},
+      {"category": "Delta", "amount": 12}
+    ]
+  },
+  "width": 160,
+  "height": 110,
+  "params": [
+    {"name": "cutoff", "value": 20},
+    {"name": "tint", "value": "#4c78a8", "bind": {"input": "color"}},
+    {"name": "marker", "expr": "cutoff * 2"}
+  ],
+  "transform": [{"filter": "datum.amount > cutoff"}],
+  "layer": [
+    {
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "category", "type": "nominal"},
+        "y": {"field": "amount", "type": "quantitative"},
+        "color": {"value": {"expr": "tint"}}
+      }
+    },
+    {
+      "mark": {"type": "rule", "strokeDash": [4, 4]},
+      "encoding": {"y": {"datum": {"expr": "marker"}, "type": "quantitative"}}
+    }
+  ]
+}

@@ -1,0 +1,103 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A running total and a three-point moving average from one window transform, over two series partitioned by name.",
+  "width": 240,
+  "height": 140,
+  "padding": 5,
+  "data": [
+    {
+      "name": "raw",
+      "values": [
+        {"c": "north", "t": 1, "v": 12},
+        {"c": "north", "t": 2, "v": 31},
+        {"c": "north", "t": 3, "v": 7},
+        {"c": "north", "t": 4, "v": 24},
+        {"c": "north", "t": 5, "v": 18},
+        {"c": "south", "t": 1, "v": 22},
+        {"c": "south", "t": 2, "v": 9},
+        {"c": "south", "t": 3, "v": 27},
+        {"c": "south", "t": 4, "v": 14},
+        {"c": "south", "t": 5, "v": 33}
+      ],
+      "transform": [
+        {
+          "type": "window",
+          "groupby": ["c"],
+          "sort": {"field": "t"},
+          "ops": ["sum", "mean", "row_number"],
+          "fields": ["v", "v", null],
+          "as": ["total", "moving", "n"]
+        },
+        {
+          "type": "window",
+          "groupby": ["c"],
+          "sort": {"field": "t"},
+          "ops": ["mean"],
+          "fields": ["v"],
+          "as": ["window3"],
+          "frame": [-1, 1]
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "point",
+      "domain": {"data": "raw", "field": "t"},
+      "range": "width",
+      "padding": 0.5
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {"data": "raw", "field": "total"},
+      "range": "height",
+      "nice": true
+    },
+    {
+      "name": "colour",
+      "type": "ordinal",
+      "domain": {"data": "raw", "field": "c", "sort": true},
+      "range": {"scheme": "tableau10"}
+    }
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "x", "title": "Step"},
+    {"orient": "left", "scale": "y", "tickCount": 4, "title": "Running total"}
+  ],
+  "legends": [{"fill": "colour", "title": "Series"}],
+  "marks": [
+    {
+      "type": "group",
+      "from": {"facet": {"name": "series", "data": "raw", "groupby": "c"}},
+      "marks": [
+        {
+          "type": "line",
+          "from": {"data": "series"},
+          "encode": {
+            "enter": {
+              "x": {"scale": "x", "field": "t"},
+              "y": {"scale": "y", "field": "total"},
+              "stroke": {"scale": "colour", "field": "c"},
+              "strokeWidth": {"value": 2}
+            }
+          }
+        },
+        {
+          "type": "symbol",
+          "from": {"data": "series"},
+          "encode": {
+            "enter": {
+              "x": {"scale": "x", "field": "t"},
+              "y": {"scale": "y", "field": "window3"},
+              "size": {"value": 40},
+              "fill": {"scale": "colour", "field": "c"},
+              "fillOpacity": {"value": 0.6}
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

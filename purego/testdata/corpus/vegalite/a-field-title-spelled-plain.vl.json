@@ -1,0 +1,109 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A guide's default caption comes from one of **three** formatters, and `config.fieldTitle` picks which: `switch (config.fieldTitle) { case 'plain': return fieldDef.field; case 'functional': return functionalTitleFormatter(fieldDef); default: return verbalTitleFormatter(fieldDef, config); }`. Only the verbal one was implemented here, so a theme asking for either of the others was answered with prose it had not asked for \u2014 `Mean of v` where the chart wanted `v`. The key itself reaches the emitted configuration either way, Vega having no use for it and upstream passing it through regardless, which is why a sweep over what is emitted could not see this at all. `plain` is the bare column name whatever was done to it: a mean, a bucketed month, a bin and an argmax all read `v` or `t` here, where the verbal formatter would announce each derivation. The last panel is the one that gives nothing: a **count** has no field, so `plain` returns undefined and the axis carries no title at all \u2014 not the configured count title, which only the verbal formatter reaches.",
+  "config": {
+    "fieldTitle": "plain"
+  },
+  "data": {
+    "values": [
+      {
+        "v": 28,
+        "t": "2024-01-07",
+        "c": "alpha"
+      },
+      {
+        "v": 55,
+        "t": "2024-03-19",
+        "c": "beta"
+      },
+      {
+        "v": 43,
+        "t": "2024-06-02",
+        "c": "gamma"
+      }
+    ]
+  },
+  "hconcat": [
+    {
+      "width": 90,
+      "height": 70,
+      "mark": "point",
+      "encoding": {
+        "x": {
+          "field": "v",
+          "type": "quantitative",
+          "aggregate": "mean"
+        },
+        "y": {
+          "field": "v",
+          "type": "quantitative"
+        }
+      }
+    },
+    {
+      "width": 90,
+      "height": 70,
+      "mark": "point",
+      "encoding": {
+        "x": {
+          "field": "t",
+          "type": "temporal",
+          "timeUnit": "month"
+        },
+        "y": {
+          "field": "v",
+          "type": "quantitative"
+        }
+      }
+    },
+    {
+      "width": 90,
+      "height": 70,
+      "mark": "point",
+      "encoding": {
+        "x": {
+          "field": "v",
+          "type": "quantitative",
+          "bin": true
+        },
+        "y": {
+          "field": "v",
+          "type": "quantitative"
+        }
+      }
+    },
+    {
+      "width": 90,
+      "height": 70,
+      "mark": "point",
+      "encoding": {
+        "x": {
+          "field": "v",
+          "type": "quantitative",
+          "aggregate": {
+            "argmax": "c"
+          }
+        },
+        "y": {
+          "field": "v",
+          "type": "quantitative"
+        }
+      }
+    },
+    {
+      "width": 90,
+      "height": 70,
+      "mark": "point",
+      "encoding": {
+        "x": {
+          "aggregate": "count",
+          "type": "quantitative"
+        },
+        "y": {
+          "field": "v",
+          "type": "quantitative"
+        }
+      }
+    }
+  ]
+}

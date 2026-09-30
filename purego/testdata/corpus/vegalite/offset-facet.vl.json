@@ -1,0 +1,18 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "Grouped bars inside a trellis, so an offset band nests inside a faceted cell.",
+  "data": {"values": [
+    {"c": "one", "g": "x", "k": "p", "v": 3}, {"c": "one", "g": "x", "k": "q", "v": 5},
+    {"c": "one", "g": "y", "k": "p", "v": 2}, {"c": "one", "g": "y", "k": "q", "v": 6},
+    {"c": "two", "g": "x", "k": "p", "v": 7}, {"c": "two", "g": "x", "k": "q", "v": 1},
+    {"c": "two", "g": "y", "k": "p", "v": 4}, {"c": "two", "g": "y", "k": "q", "v": 8}
+  ]},
+  "mark": "bar",
+  "encoding": {
+    "column": {"field": "c", "type": "nominal"},
+    "x": {"field": "g", "type": "nominal"},
+    "xOffset": {"field": "k", "type": "nominal"},
+    "y": {"field": "v", "type": "quantitative"},
+    "color": {"field": "k", "type": "nominal"}
+  }
+}

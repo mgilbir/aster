@@ -1,0 +1,85 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A mark property is read from the **whole** chain wherever upstream asks `getMarkPropOrConfig` for it, and three places here asked only the mark definition. `aria()` opens `const enableAria = getMarkPropOrConfig('aria', markDef, config)` and writes the bare `true` into the encode block when it is truthy; `getMarkGroup` asks the same question and writes `aria: false` onto the mark itself; `initMarkDef` asks it for `cornerRadiusEnd` before resolving that into two of Vega's four corners; and `getMarkConfig`, the tail of all of them, walks the style blocks under Vega-Lite's name for a property, then `config[marktype]` under Vega's name and then under Vega-Lite's, and only then `config.mark` — where this compiler had looked up `config[marktype]` under Vega's name and stopped, so the aliased pairs never resolved. A theme that rounded every bar, named every bar to a screen reader, sized every label or thickened every line was therefore ignored, and the chart drew what it would have drawn with no theme at all. The first row is a bar the theme rounds and names; the second states its own radius and its own name, and must come out with those rather than the theme's, which is what keeps the precedence drawn rather than assumed. The third is a point the theme takes out of the accessibility tree, so the mark carries `aria: false` and its encode block says nothing about a role or a description. The fourth is a text mark whose size the theme sets as a font size, the fifth the same text mark stating its own; the sixth is a line whose `size` the theme sets, which on a path is its stroke width rather than an area. The seventh binds the radius to a parameter instead: `markDef[newProp] = cornerRadiusEnd` hands the value to `markDefProperties`, which writes it out with `signalOrValueRef`, so an expression is a signal here as it is everywhere else and a bar tied to a slider was otherwise drawn with an object for a corner.",
+  "data": {
+    "values": [
+      {"c": "alpha", "v": 30},
+      {"c": "beta", "v": 20},
+      {"c": "gamma", "v": 50}
+    ]
+  },
+  "params": [{"name": "cr", "value": 4}],
+  "config": {
+    "bar": {"aria": true, "ariaRoleDescription": "column", "cornerRadiusEnd": 6},
+    "point": {"aria": false},
+    "text": {"fontSize": 20},
+    "line": {"size": 7}
+  },
+  "vconcat": [
+    {
+      "width": 160,
+      "height": 100,
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "c", "type": "nominal"},
+        "y": {"field": "v", "type": "quantitative", "stack": null}
+      }
+    },
+    {
+      "width": 160,
+      "height": 100,
+      "mark": {"type": "bar", "cornerRadiusEnd": 2, "ariaRoleDescription": "total"},
+      "encoding": {
+        "x": {"field": "c", "type": "nominal"},
+        "y": {"field": "v", "type": "quantitative", "stack": null}
+      }
+    },
+    {
+      "width": 160,
+      "height": 100,
+      "mark": "point",
+      "encoding": {
+        "x": {"field": "c", "type": "nominal"},
+        "y": {"field": "v", "type": "quantitative"}
+      }
+    },
+    {
+      "width": 160,
+      "height": 100,
+      "mark": "text",
+      "encoding": {
+        "x": {"field": "c", "type": "nominal"},
+        "y": {"field": "v", "type": "quantitative"},
+        "text": {"field": "c", "type": "nominal"}
+      }
+    },
+    {
+      "width": 160,
+      "height": 100,
+      "mark": {"type": "text", "fontSize": 9},
+      "encoding": {
+        "x": {"field": "c", "type": "nominal"},
+        "y": {"field": "v", "type": "quantitative"},
+        "text": {"field": "c", "type": "nominal"}
+      }
+    },
+    {
+      "width": 160,
+      "height": 100,
+      "mark": "line",
+      "encoding": {
+        "x": {"field": "c", "type": "nominal"},
+        "y": {"field": "v", "type": "quantitative"}
+      }
+    },
+    {
+      "width": 160,
+      "height": 100,
+      "mark": {"type": "bar", "cornerRadiusEnd": {"expr": "cr"}},
+      "encoding": {
+        "x": {"field": "c", "type": "nominal"},
+        "y": {"field": "v", "type": "quantitative", "stack": null}
+      }
+    }
+  ]
+}

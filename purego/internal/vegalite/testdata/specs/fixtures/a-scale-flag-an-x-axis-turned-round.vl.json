@@ -1,0 +1,70 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "`config.scale.xReverse` turns every `x` scale in a document round at once, which is how a chart is drawn for a right-to-left reader, and it heads the chain that settles `reverse`: `if (channel === 'x' && scaleConfig.xReverse !== undefined) { if (hasContinuousDomain(scaleType) && sort === 'descending') { if (isSignalRef(scaleConfig.xReverse)) { return {signal: `!${scaleConfig.xReverse.signal}`}; } else { return !scaleConfig.xReverse; } } return scaleConfig.xReverse; } if (hasContinuousDomain(scaleType) && sort === 'descending') { return true; } return undefined;`. Only the second half of that was here — the half that reverses a continuous range because Vega cannot sort a continuous domain and a `sort: \"descending\"` has to be honoured some other way — so the theme's entry was never read and a document asking for right-to-left came out left-to-right, every chart of it. The entry has no default, which is why nothing noticed. The first chart is a bar over categories: its `x` is a band, and a band turns round with the rest because `scaleTypeSupportProperty` answers `true` for `reverse` whatever the scale type is, so this is not a rule about continuous scales even though the second half of it is. Its `xOffset` scale is the row that must not change: the chain asks for the channel named `x` exactly, and an offset scale is a different channel, so the bars within each group keep their own order while the groups themselves are laid out backwards. The second chart sorts its `y` descending and leaves its `x` alone, which shows the two halves apart — the `y` takes its `reverse` from the sort, as it always did, and the `x` takes its `reverse` from the theme. The third is the interesting one: its `x` is continuous and sorted descending, and the sort has already turned that range round once, so the theme's `true` comes out as `reverse: false` rather than as `true`. Inverting rather than overriding is what keeps a descending axis descending in a document read the other way. The fourth sorts descending in the same way but states `reverse: true` on the scale itself, and a stated value settles a property before any rule is consulted, so it stays `true` where the rule would have said `false`. The fifth bins its `x`, and shows how far the flag reaches past the scale: `getBinSpacing` multiplies the half-spacing that pulls each bucket's edge inward by `(reverse ? -1 : 1)`, so the offsets on the rect change sign along with the range.",
+  "data": {
+    "values": [
+      {"c": "alpha", "g": "one", "v": 28, "w": 3},
+      {"c": "beta", "g": "two", "v": 55, "w": 7},
+      {"c": "gamma", "g": "one", "v": 43, "w": 5},
+      {"c": "delta", "g": "two", "v": 91, "w": 9}
+    ]
+  },
+  "hconcat": [
+    {
+      "width": 140,
+      "height": 110,
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "c", "type": "nominal"},
+        "xOffset": {"field": "g", "type": "nominal"},
+        "y": {"field": "v", "type": "quantitative"},
+        "color": {"field": "g", "type": "nominal"}
+      }
+    },
+    {
+      "width": 140,
+      "height": 110,
+      "mark": "point",
+      "encoding": {
+        "x": {"field": "w", "type": "quantitative"},
+        "y": {"field": "v", "type": "quantitative", "sort": "descending"}
+      }
+    },
+    {
+      "width": 140,
+      "height": 110,
+      "mark": "point",
+      "encoding": {
+        "x": {"field": "w", "type": "quantitative", "sort": "descending"},
+        "y": {"field": "v", "type": "quantitative"}
+      }
+    },
+    {
+      "width": 140,
+      "height": 110,
+      "mark": "point",
+      "encoding": {
+        "x": {
+          "field": "w",
+          "type": "quantitative",
+          "sort": "descending",
+          "scale": {"reverse": true}
+        },
+        "y": {"field": "v", "type": "quantitative"}
+      }
+    },
+    {
+      "width": 140,
+      "height": 110,
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "w", "type": "quantitative", "bin": true},
+        "y": {"aggregate": "count"}
+      }
+    }
+  ],
+  "config": {
+    "scale": {"xReverse": true},
+    "bar": {"binSpacing": 2}
+  }
+}

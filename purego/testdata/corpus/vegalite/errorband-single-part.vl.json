@@ -1,0 +1,21 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "An error band with its borders off, which is still a layer of one rather than the view itself.",
+  "data": {
+    "url": "data/cars.json"
+  },
+  "mark": {
+    "type": "errorband",
+    "extent": "stdev"
+  },
+  "encoding": {
+    "y": {
+      "field": "Miles_per_Gallon",
+      "type": "quantitative"
+    },
+    "x": {
+      "field": "Cylinders",
+      "type": "ordinal"
+    }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "One layer levels its labels and the other turns them: level wins, and stays unaligned.",
+  "data": {"url": "data/barley.json"},
+  "layer": [
+    {
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "variety", "type": "ordinal", "axis": {"labelAngle": 0}},
+        "y": {"aggregate": "sum", "field": "yield", "type": "quantitative"}
+      }
+    },
+    {
+      "mark": "point",
+      "encoding": {
+        "x": {"field": "variety", "type": "ordinal"},
+        "y": {"aggregate": "sum", "field": "yield", "type": "quantitative"}
+      }
+    }
+  ]
+}

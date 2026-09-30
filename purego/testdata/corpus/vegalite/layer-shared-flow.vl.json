@@ -1,0 +1,17 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "Two layers bucketing one instant and stacking it, which is one question asked twice.",
+  "data": {"url": "data/stocks.csv"},
+  "transform": [{"filter": "datum.symbol==='GOOG'"}],
+  "encoding": {
+    "x": {"timeUnit": "binnedyearmonth", "field": "date", "type": "temporal", "bandPosition": 0.5},
+    "y": {"field": "price", "type": "quantitative"}
+  },
+  "layer": [
+    {"mark": "bar"},
+    {
+      "mark": {"type": "text", "baseline": "bottom"},
+      "encoding": {"text": {"field": "price", "type": "quantitative"}}
+    }
+  ]
+}

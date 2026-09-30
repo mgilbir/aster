@@ -1,0 +1,38 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "description": "A population pyramid stating no channel types at all, the way Vega-Lite's own example does.",
+  "data": {
+    "values": [
+      {"age": 0, "sex": 1, "people": 1200},
+      {"age": 0, "sex": 2, "people": 1150},
+      {"age": 5, "sex": 1, "people": 980},
+      {"age": 5, "sex": 2, "people": 940},
+      {"age": 10, "sex": 1, "people": 700},
+      {"age": 10, "sex": 2, "people": 760},
+      {"age": 15, "sex": 1, "people": 430},
+      {"age": 15, "sex": 2, "people": 480}
+    ]
+  },
+  "transform": [
+    {"calculate": "datum.sex == 2 ? 'Female' : 'Male'", "as": "gender"},
+    {"calculate": "datum.sex == 2 ? -datum.people : datum.people", "as": "signed_people"}
+  ],
+  "width": 200,
+  "height": 140,
+  "mark": "bar",
+  "encoding": {
+    "y": {"field": "age", "axis": null, "sort": "descending"},
+    "x": {
+      "aggregate": "sum",
+      "field": "signed_people",
+      "title": "population",
+      "axis": {"format": "s"}
+    },
+    "color": {
+      "field": "gender",
+      "scale": {"range": ["#675193", "#ca8861"]},
+      "legend": {"orient": "top", "title": null}
+    }
+  },
+  "config": {"view": {"stroke": null}, "axis": {"grid": false}}
+}

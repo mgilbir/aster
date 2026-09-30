@@ -1,0 +1,17 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A parse the specification stated over rows it wrote out, which is a formula and not the loader's work.",
+  "data": {
+    "values": [
+      {"when": "01 Jan 2020", "v": 28},
+      {"when": "01 Feb 2020", "v": 55},
+      {"when": "01 Mar 2020", "v": 43}
+    ],
+    "format": {"parse": {"when": "utc:'%d %b %Y'"}}
+  },
+  "mark": "line",
+  "encoding": {
+    "x": {"field": "when", "type": "temporal"},
+    "y": {"field": "v", "type": "quantitative"}
+  }
+}

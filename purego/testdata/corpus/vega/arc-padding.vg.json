@@ -1,0 +1,66 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A donut with padded, rounded slices beside a pie of the same data: the gap is measured at a pad radius and the corners are rounded by tangent circles, so neither is a fixed subtraction.",
+  "width": 320,
+  "height": 160,
+  "padding": 5,
+  "data": [
+    {
+      "name": "table",
+      "values": [
+        {"k": "alpha", "v": 40},
+        {"k": "beta", "v": 25},
+        {"k": "gamma", "v": 35},
+        {"k": "delta", "v": 12},
+        {"k": "epsilon", "v": 8}
+      ],
+      "transform": [{"type": "pie", "field": "v"}]
+    }
+  ],
+  "scales": [
+    {
+      "name": "colour",
+      "type": "ordinal",
+      "domain": {"data": "table", "field": "k"},
+      "range": {"scheme": "tableau10"}
+    }
+  ],
+  "marks": [
+    {
+      "type": "arc",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"value": 80},
+          "y": {"value": 80},
+          "startAngle": {"field": "startAngle"},
+          "endAngle": {"field": "endAngle"},
+          "innerRadius": {"value": 30},
+          "outerRadius": {"value": 72},
+          "padAngle": {"value": 0.06},
+          "cornerRadius": {"value": 6},
+          "fill": {"scale": "colour", "field": "k"}
+        }
+      }
+    },
+    {
+      "type": "arc",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"value": 240},
+          "y": {"value": 80},
+          "startAngle": {"field": "startAngle"},
+          "endAngle": {"field": "endAngle"},
+          "innerRadius": {"value": 0},
+          "outerRadius": {"value": 72},
+          "padAngle": {"value": 0.03},
+          "cornerRadius": {"value": 10},
+          "fill": {"scale": "colour", "field": "k"},
+          "stroke": {"value": "#ffffff"},
+          "strokeWidth": {"value": 1}
+        }
+      }
+    }
+  ]
+}

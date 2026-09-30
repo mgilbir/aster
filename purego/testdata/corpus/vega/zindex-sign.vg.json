@@ -1,0 +1,163 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "a negative zindex and a fractional one, on an axis and on a mark. Upstream partitions on whether a zindex was given at all and only then sorts, so -2 raises rather than sinks; and 0.5 raises too, which is why the pair of bottom axes here comes out in the opposite order to the one they are declared in.",
+  "width": 200,
+  "height": 120,
+  "padding": 5,
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {
+          "c": "alpha",
+          "v": 28
+        },
+        {
+          "c": "beta",
+          "v": 55
+        },
+        {
+          "c": "gamma",
+          "v": 43
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {
+        "data": "t",
+        "field": "c"
+      },
+      "range": "width",
+      "padding": 0.1
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {
+        "data": "t",
+        "field": "v"
+      },
+      "range": "height",
+      "nice": true
+    }
+  ],
+  "axes": [
+    {
+      "orient": "bottom",
+      "scale": "x",
+      "title": "declared first, raised by a half",
+      "zindex": 0.5,
+      "offset": 30
+    },
+    {
+      "orient": "bottom",
+      "scale": "x",
+      "title": "category",
+      "zindex": -2
+    },
+    {
+      "orient": "left",
+      "scale": "y",
+      "title": "amount",
+      "tickCount": 4
+    },
+    {
+      "orient": "left",
+      "scale": "y",
+      "grid": true,
+      "ticks": false,
+      "labels": false,
+      "domain": false,
+      "zindex": 0.5
+    }
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "x",
+            "field": "c"
+          },
+          "width": {
+            "scale": "x",
+            "band": 1
+          },
+          "y": {
+            "scale": "y",
+            "field": "v"
+          },
+          "y2": {
+            "scale": "y",
+            "value": 0
+          },
+          "fill": {
+            "value": "steelblue"
+          }
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "zindex": -1,
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "x",
+            "field": "c"
+          },
+          "width": {
+            "scale": "x",
+            "band": 1
+          },
+          "y": {
+            "scale": "y",
+            "field": "v"
+          },
+          "height": {
+            "value": 4
+          },
+          "fill": {
+            "value": "#e45756"
+          }
+        }
+      }
+    },
+    {
+      "type": "rule",
+      "zindex": 0.25,
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "x",
+            "field": "c"
+          },
+          "x2": {
+            "signal": "width"
+          },
+          "y": {
+            "scale": "y",
+            "field": "v"
+          },
+          "stroke": {
+            "value": "#333333"
+          }
+        }
+      }
+    }
+  ]
+}

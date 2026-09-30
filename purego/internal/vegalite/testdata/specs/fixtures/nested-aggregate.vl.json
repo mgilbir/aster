@@ -1,0 +1,22 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A column named through a path, aggregated — where the name is referenced and so escaped.",
+  "data": {
+    "values": [
+      {"properties": {"yield": 12, "site": "a"}},
+      {"properties": {"yield": 23, "site": "a"}},
+      {"properties": {"yield": 47, "site": "b"}}
+    ]
+  },
+  "transform": [
+    {
+      "joinaggregate": [{"op": "mean", "field": "properties.yield", "as": "average"}],
+      "groupby": ["properties.site"]
+    }
+  ],
+  "mark": "bar",
+  "encoding": {
+    "x": {"field": "properties.site", "type": "nominal"},
+    "y": {"field": "average", "type": "quantitative"}
+  }
+}

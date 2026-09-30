@@ -1,0 +1,76 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "`min` and `max` are `if (v < m.min || m.min === undefined) m.min = v` over the **raw** values, which is JavaScript's relational operator and not a numeric comparison. ECMA-262 applies `ToPrimitive` with the *number* hint to both sides before asking whether it has two strings, so a cell holding a list primitivizes to its join and `[3] > [1,2]` is `\"3\" > \"1,2\"` — true. This engine read both sides as numbers, got `NaN`, answered nothing, and so kept the first row as the maximum forever: over `[[1,2], [3], 4, 5]` it reported `1,2` where upstream reports `5`. The `nested` column is that case. `mixed` is the same rule with words and numbers, where no number ever displaces a word because `3 > \"b\"` is false in both directions — which is why upstream's maximum there is `b` and not `3`. `plain` is an ordinary column, so the fixture says what the rule costs and what it does not. `argmin` and `argmax` are written out beside them because they reach the answer by a different route and genuinely disagree: over `nested` the maximum is `5` while the arg-maximum is the row holding `[3]`.",
+  "width": 300,
+  "height": 70,
+  "padding": 5,
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {"nested": [1, 2], "mixed": "b", "plain": 3, "n": 1},
+        {"nested": [3], "mixed": "a", "plain": 1, "n": 2},
+        {"nested": 4, "mixed": 3, "plain": 4, "n": 3},
+        {"nested": 5, "mixed": 10, "plain": 2, "n": 4}
+      ]
+    },
+    {
+      "name": "summary",
+      "source": "t",
+      "transform": [
+        {
+          "type": "aggregate",
+          "fields": ["nested", "nested", "mixed", "mixed", "plain", "plain", "nested", "nested"],
+          "ops": ["min", "max", "min", "max", "min", "max", "argmin", "argmax"],
+          "as": ["nlo", "nhi", "mlo", "mhi", "plo", "phi", "nargmin", "nargmax"]
+        }
+      ]
+    },
+    {
+      "name": "ordered",
+      "source": "t",
+      "transform": [{"type": "collect", "sort": {"field": "nested"}}]
+    }
+  ],
+  "marks": [
+    {
+      "type": "text",
+      "from": {"data": "summary"},
+      "encode": {
+        "enter": {
+          "x": {"value": 2},
+          "y": {"value": 2},
+          "text": {"signal": "'nested ' + datum.nlo + ' .. ' + datum.nhi + '   mixed ' + datum.mlo + ' .. ' + datum.mhi + '   plain ' + datum.plo + ' .. ' + datum.phi"},
+          "fontSize": {"value": 9},
+          "baseline": {"value": "top"}
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": {"data": "summary"},
+      "encode": {
+        "enter": {
+          "x": {"value": 2},
+          "y": {"value": 18},
+          "text": {"signal": "'argmin row ' + datum.nargmin.n + '   argmax row ' + datum.nargmax.n"},
+          "fontSize": {"value": 9},
+          "baseline": {"value": "top"}
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": {"data": "ordered"},
+      "encode": {
+        "enter": {
+          "x": {"signal": "2 + 70 * (datum.n - 1)"},
+          "y": {"value": 40},
+          "text": {"signal": "'' + datum.nested"},
+          "fontSize": {"value": 9},
+          "baseline": {"value": "top"}
+        }
+      }
+    }
+  ]
+}

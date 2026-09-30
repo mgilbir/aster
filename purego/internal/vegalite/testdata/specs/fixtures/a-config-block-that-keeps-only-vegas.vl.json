@@ -1,0 +1,21 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "Two blocks that must hand Vega only the words Vega knows. `config.view` is one of the **mark** blocks, not a shape of its own: `MARK_STYLES = new Set(['view', ...PRIMITIVE_MARKS])`, and the loop over it deletes the generic `VL_ONLY_MARK_CONFIG_PROPERTIES` from every member *and then* whatever that member has in the mark-specific table, where `view`'s entry is its five sizes. This compiler dropped the sizes and kept the rest, so `config.view.invalid` — a word Vega has never heard — was renamed into the `cell` style and shipped. And `config.mark.tooltip` written as an **object** is spent while compiling rather than passed on: `if (config.mark.tooltip && isObject(config.mark.tooltip)) delete config.mark.tooltip`, because `{\"content\": \"data\"}` says which fields to show, which is a question only Vega-Lite can answer. A bare `true` is Vega's own switch and travels through, which is the case that must not move — as are `view`'s `fill` and `stroke`, which are Vega's words for a plotting area's paint and reach the `cell` style intact.",
+  "config": {
+    "view": {"invalid": "filter", "step": 30, "continuousWidth": 120, "fill": "#eeeeee", "stroke": "#999999"},
+    "mark": {"tooltip": {"content": "data"}, "color": "#4c78a8", "opacity": 0.8}
+  },
+  "data": {
+    "values": [
+      {"c": "alpha", "v": 28},
+      {"c": "beta", "v": 55}
+    ]
+  },
+  "width": 200,
+  "height": 70,
+  "mark": "bar",
+  "encoding": {
+    "x": {"field": "c", "type": "nominal"},
+    "y": {"field": "v", "type": "quantitative"}
+  }
+}

@@ -1,0 +1,139 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "href makes an item a link, which upstream's renderer turns into an <a xlink:href> around whatever it drew. It works on marks and on every part of a guide, and it is resolved against the item's own datum \u2014 so each bar links to its own row and each axis label to the category it names.",
+  "width": 200,
+  "height": 100,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {
+          "c": "alpha",
+          "v": 4,
+          "u": "https://example.com/alpha"
+        },
+        {
+          "c": "beta",
+          "v": 7,
+          "u": "https://example.com/beta"
+        },
+        {
+          "c": "gamma",
+          "v": 3,
+          "u": "https://example.com/gamma"
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {
+        "data": "t",
+        "field": "c"
+      },
+      "range": "width",
+      "padding": 0.2
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {
+        "data": "t",
+        "field": "v"
+      },
+      "range": "height"
+    },
+    {
+      "name": "colour",
+      "type": "ordinal",
+      "domain": {
+        "data": "t",
+        "field": "c"
+      },
+      "range": "category"
+    }
+  ],
+  "axes": [
+    {
+      "scale": "x",
+      "orient": "bottom",
+      "encode": {
+        "labels": {
+          "update": {
+            "href": {
+              "signal": "'https://example.com/' + datum.label"
+            },
+            "cursor": {
+              "value": "pointer"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "legends": [
+    {
+      "fill": "colour",
+      "title": "series",
+      "orient": "right",
+      "encode": {
+        "symbols": {
+          "update": {
+            "href": {
+              "signal": "'https://example.com/s/' + datum.label"
+            }
+          }
+        },
+        "title": {
+          "update": {
+            "href": {
+              "value": "https://example.com/about"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "x",
+            "field": "c"
+          },
+          "width": {
+            "scale": "x",
+            "band": 1
+          },
+          "y": {
+            "scale": "y",
+            "field": "v"
+          },
+          "y2": {
+            "scale": "y",
+            "value": 0
+          },
+          "fill": {
+            "scale": "colour",
+            "field": "c"
+          },
+          "href": {
+            "field": "u"
+          },
+          "cursor": {
+            "value": "pointer"
+          }
+        }
+      }
+    }
+  ]
+}

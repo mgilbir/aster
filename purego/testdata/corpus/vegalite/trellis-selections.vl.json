@@ -1,0 +1,36 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A trellis brushed, panned and picked through a widget: the machinery belongs in the cell, the controls and the pushed scales at the top.",
+  "data": {"url": "data/cars.json"},
+  "mark": "circle",
+  "params": [
+    {
+      "name": "brush",
+      "select": {
+        "type": "interval",
+        "encodings": ["x"],
+        "resolve": "intersect",
+        "on": "[pointerdown[event.shiftKey], pointerup] > pointermove",
+        "translate": "[pointerdown[event.shiftKey], pointerup] > pointermove"
+      }
+    },
+    {
+      "name": "grid",
+      "select": {"type": "interval", "resolve": "global", "translate": "[pointerdown[!event.shiftKey], pointerup] > pointermove"},
+      "bind": "scales"
+    },
+    {
+      "name": "pick",
+      "select": {"type": "point", "fields": ["Cylinders"], "resolve": "global", "on": "pointerover", "nearest": true},
+      "bind": {"input": "number"}
+    }
+  ],
+  "encoding": {
+    "column": {"field": "Origin"},
+    "x": {"field": "Horsepower", "type": "quantitative", "scale": {"zero": false}},
+    "y": {"field": "Miles_per_Gallon", "type": "quantitative", "scale": {"zero": false}},
+    "size": {"value": 100, "condition": {"param": "brush", "value": 250}},
+    "color": {"value": "steelblue", "condition": {"param": "pick", "value": "red"}},
+    "opacity": {"value": 1}
+  }
+}

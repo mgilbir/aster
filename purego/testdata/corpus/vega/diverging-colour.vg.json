@@ -1,0 +1,71 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A continuous colour scale with a three-point domain, which Vega turns into a diverging scale: the middle value takes the ramp's midpoint colour whether or not it sits midway between the ends. The two-point scale beside it is the sequential case for comparison.",
+  "width": 260,
+  "height": 160,
+  "padding": 5,
+
+  "data": [
+    {
+      "name": "values",
+      "values": [
+        {"v": -10}, {"v": -5}, {"v": 0}, {"v": 5}, {"v": 10}, {"v": 20}
+      ]
+    }
+  ],
+
+  "scales": [
+    {
+      "name": "diverging",
+      "type": "linear",
+      "domain": [-10, 0, 20],
+      "range": {"scheme": "blueorange"}
+    },
+    {
+      "name": "sequential",
+      "type": "linear",
+      "domain": [-10, 20],
+      "range": {"scheme": "blueorange"}
+    },
+    {
+      "name": "yscale",
+      "type": "band",
+      "domain": {"data": "values", "field": "v"},
+      "range": "height",
+      "padding": 0.1
+    }
+  ],
+
+  "axes": [{"orient": "left", "scale": "yscale"}],
+
+  "legends": [{"fill": "diverging", "type": "gradient", "title": "diverging"}],
+
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "values"},
+      "encode": {
+        "enter": {
+          "x": {"value": 0},
+          "width": {"value": 60},
+          "y": {"scale": "yscale", "field": "v"},
+          "height": {"scale": "yscale", "band": 1},
+          "fill": {"scale": "diverging", "field": "v"}
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {"data": "values"},
+      "encode": {
+        "enter": {
+          "x": {"value": 70},
+          "width": {"value": 60},
+          "y": {"scale": "yscale", "field": "v"},
+          "height": {"scale": "yscale", "band": 1},
+          "fill": {"scale": "sequential", "field": "v"}
+        }
+      }
+    }
+  ]
+}

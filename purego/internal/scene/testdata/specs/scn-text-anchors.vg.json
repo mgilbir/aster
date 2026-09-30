@@ -1,0 +1,197 @@
+{
+ "$schema": "https://vega.github.io/schema/vega/v6.json",
+ "width": 300,
+ "height": 210,
+ "padding": 5,
+ "marks": [
+  {
+   "type": "symbol",
+   "from": {
+    "data": "t"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "field": "y"
+     },
+     "size": {
+      "value": 10
+     },
+     "fill": {
+      "value": "red"
+     }
+    }
+   }
+  },
+  {
+   "type": "text",
+   "from": {
+    "data": "t"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "field": "y"
+     },
+     "text": {
+      "field": "t"
+     },
+     "align": {
+      "field": "a"
+     },
+     "baseline": {
+      "field": "b"
+     },
+     "fontSize": {
+      "value": 13
+     },
+     "fill": {
+      "value": "#000"
+     },
+     "font": {
+      "value": "Georgia, serif"
+     }
+    }
+   }
+  }
+ ],
+ "data": [
+  {
+   "name": "t",
+   "values": [
+    {
+     "x": 60,
+     "y": 25,
+     "a": "left",
+     "b": "alphabetic",
+     "t": "l/alphabetic"
+    },
+    {
+     "x": 160,
+     "y": 25,
+     "a": "center",
+     "b": "alphabetic",
+     "t": "c/alphabetic"
+    },
+    {
+     "x": 260,
+     "y": 25,
+     "a": "right",
+     "b": "alphabetic",
+     "t": "r/alphabetic"
+    },
+    {
+     "x": 60,
+     "y": 57,
+     "a": "left",
+     "b": "top",
+     "t": "l/top"
+    },
+    {
+     "x": 160,
+     "y": 57,
+     "a": "center",
+     "b": "top",
+     "t": "c/top"
+    },
+    {
+     "x": 260,
+     "y": 57,
+     "a": "right",
+     "b": "top",
+     "t": "r/top"
+    },
+    {
+     "x": 60,
+     "y": 89,
+     "a": "left",
+     "b": "middle",
+     "t": "l/middle"
+    },
+    {
+     "x": 160,
+     "y": 89,
+     "a": "center",
+     "b": "middle",
+     "t": "c/middle"
+    },
+    {
+     "x": 260,
+     "y": 89,
+     "a": "right",
+     "b": "middle",
+     "t": "r/middle"
+    },
+    {
+     "x": 60,
+     "y": 121,
+     "a": "left",
+     "b": "bottom",
+     "t": "l/bottom"
+    },
+    {
+     "x": 160,
+     "y": 121,
+     "a": "center",
+     "b": "bottom",
+     "t": "c/bottom"
+    },
+    {
+     "x": 260,
+     "y": 121,
+     "a": "right",
+     "b": "bottom",
+     "t": "r/bottom"
+    },
+    {
+     "x": 60,
+     "y": 153,
+     "a": "left",
+     "b": "line-top",
+     "t": "l/line-top"
+    },
+    {
+     "x": 160,
+     "y": 153,
+     "a": "center",
+     "b": "line-top",
+     "t": "c/line-top"
+    },
+    {
+     "x": 260,
+     "y": 153,
+     "a": "right",
+     "b": "line-top",
+     "t": "r/line-top"
+    },
+    {
+     "x": 60,
+     "y": 185,
+     "a": "left",
+     "b": "line-bottom",
+     "t": "l/line-bottom"
+    },
+    {
+     "x": 160,
+     "y": 185,
+     "a": "center",
+     "b": "line-bottom",
+     "t": "c/line-bottom"
+    },
+    {
+     "x": 260,
+     "y": 185,
+     "a": "right",
+     "b": "line-bottom",
+     "t": "r/line-bottom"
+    }
+   ]
+  }
+ ]
+}

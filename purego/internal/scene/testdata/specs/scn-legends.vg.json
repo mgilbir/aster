@@ -1,0 +1,140 @@
+{
+ "$schema": "https://vega.github.io/schema/vega/v6.json",
+ "width": 200,
+ "height": 150,
+ "padding": 5,
+ "marks": [
+  {
+   "type": "symbol",
+   "from": {
+    "data": "t"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "scale": "x",
+      "field": "b"
+     },
+     "y": {
+      "scale": "y",
+      "field": "c"
+     },
+     "fill": {
+      "scale": "col",
+      "field": "a"
+     },
+     "size": {
+      "scale": "sz",
+      "field": "b"
+     }
+    }
+   }
+  }
+ ],
+ "data": [
+  {
+   "name": "t",
+   "values": [
+    {
+     "a": "A",
+     "b": 3,
+     "c": 4
+    },
+    {
+     "a": "B",
+     "b": 7,
+     "c": 2
+    },
+    {
+     "a": "C",
+     "b": 5,
+     "c": 9
+    }
+   ]
+  }
+ ],
+ "scales": [
+  {
+   "name": "x",
+   "type": "linear",
+   "domain": [
+    0,
+    10
+   ],
+   "range": "width"
+  },
+  {
+   "name": "y",
+   "type": "linear",
+   "domain": [
+    0,
+    10
+   ],
+   "range": "height"
+  },
+  {
+   "name": "col",
+   "type": "ordinal",
+   "domain": {
+    "data": "t",
+    "field": "a"
+   },
+   "range": "category"
+  },
+  {
+   "name": "sz",
+   "type": "linear",
+   "domain": [
+    0,
+    10
+   ],
+   "range": [
+    20,
+    400
+   ]
+  }
+ ],
+ "axes": [
+  {
+   "orient": "bottom",
+   "scale": "x",
+   "grid": true
+  },
+  {
+   "orient": "left",
+   "scale": "y",
+   "grid": true,
+   "gridDash": [
+    2,
+    2
+   ],
+   "domain": false
+  }
+ ],
+ "legends": [
+  {
+   "fill": "col",
+   "title": "Kind",
+   "orient": "right",
+   "symbolType": "diamond",
+   "encode": {
+    "symbols": {
+     "update": {
+      "strokeWidth": {
+       "value": 2
+      },
+      "stroke": {
+       "value": "#000"
+      }
+     }
+    }
+   }
+  },
+  {
+   "size": "sz",
+   "title": "Size",
+   "orient": "right",
+   "symbolFillColor": "#ccc"
+  }
+ ]
+}

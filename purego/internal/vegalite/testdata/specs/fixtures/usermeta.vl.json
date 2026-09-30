@@ -1,0 +1,22 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "`usermeta` carried through onto the compiled Vega, which is the one top-level property whose purpose is to survive compilation — a host writes what it needs into it and reads it back off the output. `name` is dropped on the way, which is upstream's behaviour and is pinned here beside it.",
+  "name": "score-total",
+  "usermeta": {
+    "source": "measurement-results",
+    "revision": 3,
+    "locale": "nl-NL"
+  },
+  "data": {
+    "values": [
+      {"t": "2026-05-20", "v": 18},
+      {"t": "2026-05-27", "v": 14},
+      {"t": "2026-06-03", "v": 11}
+    ]
+  },
+  "mark": "line",
+  "encoding": {
+    "x": {"field": "t", "type": "temporal"},
+    "y": {"field": "v", "type": "quantitative"}
+  }
+}

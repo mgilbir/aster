@@ -1,0 +1,122 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "The five time units no fixture had bucketed by. Quarter and dayofyear are the two that are not a field of a date at all — a quarter is three months rounded down and a dayofyear ignores the month entirely, so a reading in February and one in March land in the same quarter bucket and in different dayofyear ones. Minutes, seconds and milliseconds are the other end of the scale, where the bucket is shorter than the gap between readings and every row keeps its own. Each row is labelled with the instant its bucket starts, so the boundaries themselves are compared rather than a bar's height.",
+  "width": 260,
+  "height": 170,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "readings",
+      "values": [
+        { "t": "2026-01-15T10:20:30.400Z", "v": 3 },
+        { "t": "2026-02-09T10:20:30.900Z", "v": 5 },
+        { "t": "2026-03-28T10:20:31.100Z", "v": 8 },
+        { "t": "2026-05-02T10:21:45.250Z", "v": 2 },
+        { "t": "2026-08-19T11:05:09.750Z", "v": 6 },
+        { "t": "2026-11-30T23:59:59.999Z", "v": 9 }
+      ],
+      "format": { "parse": { "t": "date" } }
+    },
+    {
+      "name": "quarters",
+      "source": "readings",
+      "transform": [
+        { "type": "timeunit", "field": "t", "units": ["year", "quarter"], "timezone": "utc", "as": ["q0", "q1"] },
+        { "type": "aggregate", "groupby": ["q0"], "fields": ["v"], "ops": ["sum"], "as": ["total"] }
+      ]
+    },
+    {
+      "name": "days",
+      "source": "readings",
+      "transform": [
+        { "type": "timeunit", "field": "t", "units": ["dayofyear"], "timezone": "utc", "as": ["d0", "d1"] }
+      ]
+    },
+    {
+      "name": "fine",
+      "source": "readings",
+      "transform": [
+        {
+          "type": "timeunit",
+          "field": "t",
+          "units": ["hours", "minutes", "seconds", "milliseconds"],
+          "timezone": "utc",
+          "as": ["f0", "f1"]
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "utc",
+      "domain": { "data": "quarters", "field": "q0" },
+      "range": [30, 240],
+      "nice": { "interval": "quarter" }
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": { "data": "quarters", "field": "total" },
+      "range": [80, 20],
+      "zero": true
+    }
+  ],
+  "axes": [
+    {
+      "orient": "bottom",
+      "scale": "x",
+      "offset": 6,
+      "format": "%b %d",
+      "tickCount": { "interval": "quarter" },
+      "labelAngle": -35,
+      "labelAlign": "right"
+    }
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": { "data": "quarters" },
+      "encode": {
+        "enter": {
+          "x": { "scale": "x", "field": "q0" },
+          "width": { "value": 14 },
+          "y": { "scale": "y", "field": "total" },
+          "y2": { "scale": "y", "value": 0 },
+          "fill": { "value": "#4c78a8" }
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": { "data": "days" },
+      "encode": {
+        "enter": {
+          "x": { "value": 4 },
+          "y": { "signal": "112 + datum.v * 6" },
+          "text": {
+            "signal": "utcFormat(datum.t, '%b %d') + ' -> day ' + utcFormat(datum.d0, '%b %d') + ', to ' + utcFormat(datum.d1, '%b %d')"
+          },
+          "fontSize": { "value": 8 },
+          "fill": { "value": "#333333" }
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": { "data": "fine" },
+      "encode": {
+        "enter": {
+          "x": { "value": 4 },
+          "y": { "signal": "126 + datum.v * 6" },
+          "text": {
+            "signal": "utcFormat(datum.f0, '%H:%M:%S.%L') + ' to ' + utcFormat(datum.f1, '%H:%M:%S.%L')"
+          },
+          "fontSize": { "value": 8 },
+          "fill": { "value": "#666666" }
+        }
+      }
+    }
+  ]
+}

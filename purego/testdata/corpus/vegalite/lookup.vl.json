@@ -1,0 +1,54 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "data": {
+    "values": [
+      {
+        "k": "a",
+        "v": 3
+      },
+      {
+        "k": "b",
+        "v": 7
+      },
+      {
+        "k": "d",
+        "v": 5
+      }
+    ]
+  },
+  "transform": [
+    {
+      "lookup": "k",
+      "from": {
+        "data": {
+          "values": [
+            {
+              "id": "a",
+              "name": "Alpha"
+            },
+            {
+              "id": "b",
+              "name": "Beta"
+            }
+          ]
+        },
+        "key": "id",
+        "fields": [
+          "name"
+        ]
+      }
+    }
+  ],
+  "mark": "bar",
+  "encoding": {
+    "x": {
+      "field": "name",
+      "type": "nominal"
+    },
+    "y": {
+      "field": "v",
+      "type": "quantitative"
+    }
+  },
+  "description": "Rows joined to a second table before they are drawn, and one row with no match."
+}

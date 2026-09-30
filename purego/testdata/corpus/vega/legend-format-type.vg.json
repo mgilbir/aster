@@ -1,0 +1,164 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A gradient legend over instants. Its scale is a colour ramp and knows nothing about time, so formatType is the only thing that makes its labels read as dates; and tickMinStep thins them the way it thins an axis's. The fourth is chosen by a **signal** rather than written down, on both the legend and an axis: a chart that lets a control switch a column between a count and a date has to switch the grammar the format string is read in as well as the string.",
+  "width": 320,
+  "height": 130,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {
+          "d": "2024-01-15T00:00:00Z",
+          "v": 3
+        },
+        {
+          "d": "2024-04-15T00:00:00Z",
+          "v": 7
+        },
+        {
+          "d": "2024-07-15T00:00:00Z",
+          "v": 5
+        },
+        {
+          "d": "2024-10-15T00:00:00Z",
+          "v": 9
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "linear",
+      "domain": [
+        0,
+        10
+      ],
+      "range": "width"
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": [
+        0,
+        10
+      ],
+      "range": "height"
+    },
+    {
+      "name": "when",
+      "type": "linear",
+      "domain": [
+        1705276800000,
+        1729036800000
+      ],
+      "range": {
+        "scheme": "viridis"
+      }
+    },
+    {
+      "name": "clock",
+      "type": "utc",
+      "domain": [
+        1705276800000,
+        1729036800000
+      ],
+      "range": "width"
+    }
+  ],
+  "legends": [
+    {
+      "fill": "when",
+      "type": "gradient",
+      "title": "as dates",
+      "formatType": "utc",
+      "format": "%b %Y",
+      "orient": "right",
+      "gradientLength": 100
+    },
+    {
+      "fill": "when",
+      "type": "gradient",
+      "title": "multi-format",
+      "formatType": "utc",
+      "orient": "bottom-right",
+      "gradientLength": 300,
+      "direction": "horizontal"
+    },
+    {
+      "fill": "when",
+      "type": "gradient",
+      "title": "thinned",
+      "formatType": "utc",
+      "format": "%b",
+      "orient": "left",
+      "gradientLength": 300,
+      "tickMinStep": 7776000000
+    },
+    {
+      "fill": "when",
+      "type": "gradient",
+      "title": "by signal",
+      "formatType": {
+        "signal": "grammar"
+      },
+      "format": {
+        "signal": "spec"
+      },
+      "orient": "top-right",
+      "gradientLength": 120,
+      "direction": "horizontal"
+    }
+  ],
+  "marks": [
+    {
+      "type": "symbol",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "x",
+            "field": "v"
+          },
+          "y": {
+            "scale": "y",
+            "field": "v"
+          },
+          "size": {
+            "value": 80
+          },
+          "fill": {
+            "value": "#4c78a8"
+          }
+        }
+      }
+    }
+  ],
+  "signals": [
+    {
+      "name": "grammar",
+      "value": "utc"
+    },
+    {
+      "name": "spec",
+      "value": "%d %b"
+    }
+  ],
+  "axes": [
+    {
+      "scale": "clock",
+      "orient": "top",
+      "formatType": {
+        "signal": "grammar"
+      },
+      "format": {
+        "signal": "spec"
+      },
+      "tickCount": 3
+    }
+  ]
+}

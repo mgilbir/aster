@@ -1,0 +1,56 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A lollipop chart: a point scale, rules from the baseline, symbols of several shapes, and a right-hand axis. Point scales and rule marks have never been compared before.",
+  "width": 240,
+  "height": 140,
+  "padding": 5,
+  "data": [
+    {
+      "name": "table",
+      "values": [
+        {"name": "one", "value": 12, "kind": "square"},
+        {"name": "two", "value": 31, "kind": "diamond"},
+        {"name": "three", "value": 24, "kind": "triangle-up"},
+        {"name": "four", "value": 40, "kind": "cross"}
+      ]
+    }
+  ],
+  "scales": [
+    {"name": "x", "type": "point", "domain": {"data": "table", "field": "name"}, "range": "width", "padding": 0.5},
+    {"name": "y", "type": "linear", "domain": {"data": "table", "field": "value"}, "range": "height", "nice": true, "zero": true}
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "x"},
+    {"orient": "right", "scale": "y", "tickCount": 4}
+  ],
+  "marks": [
+    {
+      "type": "rule",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "name"},
+          "y": {"scale": "y", "value": 0},
+          "y2": {"scale": "y", "field": "value"},
+          "stroke": {"value": "#9ecae9"},
+          "strokeWidth": {"value": 2}
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "name"},
+          "y": {"scale": "y", "field": "value"},
+          "shape": {"field": "kind"},
+          "size": {"value": 140},
+          "fill": {"value": "#e45756"},
+          "stroke": {"value": "#7d2b2a"},
+          "strokeWidth": {"value": 1}
+        }
+      }
+    }
+  ]
+}

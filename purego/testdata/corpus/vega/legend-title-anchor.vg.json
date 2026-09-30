@@ -1,0 +1,146 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "titleAnchor slides a legend's title along the entries it labels, and titleOrient chooses which side it sits on \u2014 all four of them. A title above or below them anchors along their width and takes its alignment from the anchor; one beside them anchors down their height and takes its baseline instead, staying left-aligned. A 'bottom' or 'right' title is placed *past* the entries rather than before them, which is the same measurement read the other way round, and a two-line one is anchored by its last line.",
+  "width": 220,
+  "height": 200,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {
+          "c": "alpha",
+          "v": 3
+        },
+        {
+          "c": "beta",
+          "v": 7
+        },
+        {
+          "c": "gamma-wide",
+          "v": 5
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {
+        "data": "t",
+        "field": "c"
+      },
+      "range": "width"
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {
+        "data": "t",
+        "field": "v"
+      },
+      "range": "height"
+    },
+    {
+      "name": "colour",
+      "type": "ordinal",
+      "domain": {
+        "data": "t",
+        "field": "c"
+      },
+      "range": "category"
+    }
+  ],
+  "legends": [
+    {
+      "fill": "colour",
+      "title": "start",
+      "orient": "right",
+      "titleAnchor": "start"
+    },
+    {
+      "fill": "colour",
+      "title": "middle",
+      "orient": "left",
+      "titleAnchor": "middle"
+    },
+    {
+      "fill": "colour",
+      "title": "end",
+      "orient": "top",
+      "titleAnchor": "end"
+    },
+    {
+      "fill": "colour",
+      "title": "down-end",
+      "orient": "bottom",
+      "titleOrient": "left",
+      "titleAnchor": "end"
+    },
+    {
+      "fill": "colour",
+      "title": "down-start",
+      "orient": "top-left",
+      "titleOrient": "left",
+      "titleAnchor": "start"
+    },
+    {
+      "fill": "colour",
+      "title": [
+        "two",
+        "lines"
+      ],
+      "orient": "bottom-right",
+      "titleOrient": "left",
+      "titleAnchor": "end"
+    },
+    {
+      "fill": "colour",
+      "title": "under",
+      "orient": "bottom-left",
+      "titleOrient": "bottom",
+      "titleAnchor": "middle"
+    },
+    {
+      "fill": "colour",
+      "title": "after",
+      "orient": "top-right",
+      "titleOrient": "right",
+      "titleAnchor": "end"
+    }
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "x",
+            "field": "c"
+          },
+          "width": {
+            "scale": "x",
+            "band": 0.9
+          },
+          "y": {
+            "scale": "y",
+            "field": "v"
+          },
+          "y2": {
+            "scale": "y",
+            "value": 0
+          },
+          "fill": {
+            "scale": "colour",
+            "field": "c"
+          }
+        }
+      }
+    }
+  ]
+}

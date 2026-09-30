@@ -1,0 +1,22 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "The other half of `a-legend-symbol-wears-the-marks-stroke`: a style the mark **names**, and a value written as an expression. A mark's styles are its own type followed by whatever its `style` names — `getStyles` is `[].concat(mark.type, mark.style ?? [])` — and `getStyleConfig` walks them in that order with the last one that speaks winning. So `config.style.outlined` reaches a bar that asks for it, and the swatch is outlined the way the bar is. The width is an **expression**, which `applyMarkConfig` passes through `signalOrValueRef`, so what lands on the swatch is a signal rather than a value wrapped around an object — written as a value, Vega is handed `{\"value\": {\"expr\": …}}` and draws an outline of nothing. This is a chart of its own rather than a second row beside the other fixture because two size legends over the same field are hoisted into a single legend, and the second of them would then never be drawn.",
+  "data": {
+    "values": [
+      {"c": "alpha", "v": 28},
+      {"c": "beta", "v": 55},
+      {"c": "gamma", "v": 43}
+    ]
+  },
+  "config": {
+    "style": {"outlined": {"stroke": "#8b1a1a", "strokeWidth": {"expr": "2 + 3"}}}
+  },
+  "width": 200,
+  "height": 70,
+  "mark": {"type": "bar", "style": "outlined"},
+  "encoding": {
+    "x": {"field": "c", "type": "nominal"},
+    "y": {"field": "v", "type": "quantitative"},
+    "size": {"field": "v", "type": "quantitative"}
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A symbol legend beside the chart and a gradient legend below it, so both legend forms and both placement axes are covered at once.",
+  "width": 220,
+  "height": 140,
+  "padding": 5,
+  "data": [
+    {
+      "name": "table",
+      "values": [
+        {"segment": "alpha", "amount": 28, "score": 4},
+        {"segment": "beta", "amount": 55, "score": 19},
+        {"segment": "gamma", "amount": 43, "score": 12}
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {"data": "table", "field": "segment"},
+      "range": "width",
+      "padding": 0.2
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {"data": "table", "field": "amount"},
+      "range": "height",
+      "nice": true,
+      "zero": true
+    },
+    {
+      "name": "segmentColour",
+      "type": "ordinal",
+      "domain": {"data": "table", "field": "segment"},
+      "range": {"scheme": "category10"}
+    },
+    {
+      "name": "scoreColour",
+      "type": "linear",
+      "domain": {"data": "table", "field": "score"},
+      "range": ["#eeeeff", "#003366"],
+      "zero": true
+    }
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "x"},
+    {"orient": "left", "scale": "y", "tickCount": 3}
+  ],
+  "legends": [
+    {"fill": "segmentColour", "title": "Segment"},
+    {"fill": "scoreColour", "title": "Score", "orient": "bottom", "gradientLength": 120}
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "segment"},
+          "width": {"scale": "x", "band": 1},
+          "y": {"scale": "y", "field": "amount"},
+          "y2": {"scale": "y", "value": 0},
+          "fill": {"scale": "segmentColour", "field": "segment"}
+        }
+      }
+    }
+  ]
+}

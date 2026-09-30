@@ -1,0 +1,35 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "Two tables handed in by name, which is how a chart takes data it did not carry.",
+  "width": 300,
+  "height": 150,
+  "encoding": {
+    "x": {"field": "row", "type": "quantitative", "title": "run"},
+    "y": {"field": "fps", "type": "quantitative"},
+    "color": {"field": "system", "type": "nominal"}
+  },
+  "layer": [
+    {
+      "data": {"name": "falcon"},
+      "transform": [
+        {"window": [{"op": "row_number", "as": "row"}]},
+        {"calculate": "1000/datum.data", "as": "fps"},
+        {"calculate": "'Falcon'", "as": "system"}
+      ],
+      "mark": "line"
+    },
+    {
+      "data": {"name": "square"},
+      "transform": [
+        {"window": [{"op": "row_number", "as": "row"}]},
+        {"calculate": "1000/datum.data", "as": "fps"},
+        {"calculate": "'Square'", "as": "system"}
+      ],
+      "mark": "line"
+    }
+  ],
+  "datasets": {
+    "falcon": [16.8, 19.7, 16.0, 19.5, 16.4],
+    "square": [24.2, 17.9, 15.8, 58.4, 151]
+  }
+}

@@ -1,0 +1,74 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A time series over eight months: a UTC scale ticking on calendar boundaries, and a local-time scale over a single day ticking on hours. Dates come in as ISO strings and are read by format.parse.",
+  "width": 300,
+  "height": 120,
+  "padding": 5,
+  "data": [
+    {
+      "name": "months",
+      "values": [
+        {"when": "2026-01-15T00:00:00Z", "v": 3},
+        {"when": "2026-03-02T00:00:00Z", "v": 11},
+        {"when": "2026-04-20T00:00:00Z", "v": 7},
+        {"when": "2026-06-11T00:00:00Z", "v": 14},
+        {"when": "2026-08-05T00:00:00Z", "v": 5}
+      ],
+      "format": {"parse": {"when": "date"}}
+    },
+    {
+      "name": "hours",
+      "values": [
+        {"at": "2026-05-01T00:00:00Z", "load": 2},
+        {"at": "2026-05-01T06:00:00Z", "load": 9},
+        {"at": "2026-05-01T12:00:00Z", "load": 6},
+        {"at": "2026-05-01T18:00:00Z", "load": 12},
+        {"at": "2026-05-02T00:00:00Z", "load": 4}
+      ],
+      "format": {"parse": {"at": "date"}}
+    }
+  ],
+  "scales": [
+    {"name": "x", "type": "utc", "domain": {"data": "months", "field": "when"}, "range": "width"},
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {"data": "months", "field": "v"},
+      "range": [110, 60],
+      "nice": true,
+      "zero": true
+    },
+    {"name": "hx", "type": "utc", "domain": {"data": "hours", "field": "at"}, "range": "width", "nice": true},
+    {"name": "hy", "type": "linear", "domain": {"data": "hours", "field": "load"}, "range": [45, 0], "zero": true}
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "x", "offset": 6},
+    {"orient": "top", "scale": "hx", "tickCount": 4}
+  ],
+  "marks": [
+    {
+      "type": "line",
+      "from": {"data": "months"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "when"},
+          "y": {"scale": "y", "field": "v"},
+          "stroke": {"value": "#4c78a8"},
+          "strokeWidth": {"value": 2}
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "from": {"data": "hours"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "hx", "field": "at"},
+          "y": {"scale": "hy", "field": "load"},
+          "size": {"value": 50},
+          "fill": {"value": "#e45756"}
+        }
+      }
+    }
+  ]
+}

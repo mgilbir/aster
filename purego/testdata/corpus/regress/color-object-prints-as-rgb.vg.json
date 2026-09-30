@@ -1,0 +1,5 @@
+{"width":100,"height":50,"data":[{"name":"t","values":[{"c":"#c09e73","d":0.2}]}],
+"marks":[{"type":"rect","from":{"data":"t"},"encode":{"update":{"x":{"value":5},"y":{"value":5},"width":{"value":40},"height":{"value":40},
+"fill":{"signal":"hsl(hsl(datum.c).h, hsl(datum.c).s + datum.d - .5, hsl(datum.c).l)"},
+"stroke":{"signal":"rgb(datum.c)"},"strokeWidth":{"value":3}}}},
+{"type":"text","from":{"data":"t"},"encode":{"update":{"x":{"value":50},"y":{"value":25},"text":{"signal":"'' + lab(datum.c) + ' ' + hcl('red')"}}}}]}

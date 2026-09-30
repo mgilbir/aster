@@ -1,0 +1,20 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A colour chosen by a predicate on the row, which needs no selection to resolve.",
+  "data": {"values": [
+    {"c": "a", "v": 1}, {"c": "b", "v": 4}, {"c": "d", "v": 7}, {"c": "e", "v": 2}
+  ]},
+  "mark": "bar",
+  "encoding": {
+    "x": {"field": "c", "type": "nominal"},
+    "y": {"field": "v", "type": "quantitative"},
+    "color": {
+      "condition": {"test": "datum.v > 3", "value": "#c44"},
+      "value": "#ccc"
+    },
+    "opacity": {
+      "condition": {"test": {"field": "c", "oneOf": ["a", "e"]}, "value": 0.4},
+      "value": 1
+    }
+  }
+}

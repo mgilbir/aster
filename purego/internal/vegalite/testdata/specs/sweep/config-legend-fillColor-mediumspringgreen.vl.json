@@ -1,0 +1,53 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "width": 200,
+  "height": 120,
+  "data": {
+    "values": [
+      {
+        "c": "alpha",
+        "v": 28,
+        "w": 3,
+        "t": "2024-01-07"
+      },
+      {
+        "c": "beta",
+        "v": 55,
+        "w": 7,
+        "t": "2024-03-19"
+      },
+      {
+        "c": "gamma",
+        "v": 43,
+        "w": 5,
+        "t": "2024-06-02"
+      },
+      {
+        "c": "delta",
+        "v": 91,
+        "w": 9,
+        "t": "2024-09-11"
+      }
+    ]
+  },
+  "mark": "bar",
+  "encoding": {
+    "x": {
+      "field": "c",
+      "type": "nominal"
+    },
+    "y": {
+      "field": "v",
+      "type": "quantitative"
+    },
+    "color": {
+      "field": "c",
+      "type": "nominal"
+    }
+  },
+  "config": {
+    "legend": {
+      "fillColor": "mediumspringgreen"
+    }
+  }
+}

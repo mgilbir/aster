@@ -1,0 +1,12 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "One field encoded twice, and a named scheme, which is a range and not a property beside one.",
+  "data": {"url": "data/cars.json"},
+  "mark": "point",
+  "encoding": {
+    "x": {"field": "Horsepower", "type": "quantitative"},
+    "y": {"field": "Acceleration", "type": "quantitative"},
+    "color": {"field": "Cylinders", "type": "ordinal", "scale": {"scheme": "category20"}},
+    "size": {"field": "Cylinders", "type": "ordinal"}
+  }
+}

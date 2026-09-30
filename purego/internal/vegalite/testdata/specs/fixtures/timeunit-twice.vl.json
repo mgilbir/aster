@@ -1,0 +1,15 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A column bucketed the same way by two channels, which is one bucketing: the transform is emitted once however many channels ask for it.",
+  "data": {"url": "data/stocks.csv"},
+  "transform": [{"filter": "datum.symbol==='GOOG'"}],
+  "mark": "line",
+  "encoding": {
+    "x": {"timeUnit": "yearmonthdate", "field": "date"},
+    "y": {"field": "price", "type": "quantitative"},
+    "tooltip": [
+      {"timeUnit": "yearmonthdate", "field": "date"},
+      {"field": "price", "type": "quantitative"}
+    ]
+  }
+}

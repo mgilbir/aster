@@ -1,0 +1,36 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "Two trellises side by side, faceted on the **same column**, which is what makes them share one table. Each grid's distinct values are written into a dataset of their own, and each stands beside the table it reads rather than at the end of the chart's data — a plot's own data is assembled when that plot is. Two plots reading one table therefore insert at the same index, and the second was landing in front of the first: `concat_1_column_domain` came out before `concat_0_column_domain`, so the two grids' values were back to front. Upstream assembles in order and appends, which is what this now does — skipping past the values already standing there rather than inserting among them. The two grids differ only in how they caption their cells, which keeps the fixture about the order of the datasets rather than about their contents; the third panel facets on a *different* column, so it gets a table of its own and its values are interleaved with it, which is the shape that was already right and must stay so.",
+  "data": {
+    "values": [
+      {"k": "one", "g": "x", "v": 28},
+      {"k": "two", "g": "y", "v": 55}
+    ]
+  },
+  "hconcat": [
+    {
+      "width": 70, "height": 50, "mark": "bar",
+      "encoding": {
+        "x": {"field": "g", "type": "nominal"},
+        "y": {"field": "v", "type": "quantitative"},
+        "column": {"field": "k", "type": "nominal"}
+      }
+    },
+    {
+      "width": 70, "height": 50, "mark": "bar",
+      "encoding": {
+        "x": {"field": "g", "type": "nominal"},
+        "y": {"field": "v", "type": "quantitative"},
+        "column": {"field": "k", "type": "nominal", "header": {"labelExpr": "'<' + datum.label + '>'"}}
+      }
+    },
+    {
+      "width": 70, "height": 50, "mark": "bar",
+      "encoding": {
+        "x": {"field": "k", "type": "nominal"},
+        "y": {"field": "v", "type": "quantitative"},
+        "column": {"field": "g", "type": "nominal"}
+      }
+    }
+  ]
+}

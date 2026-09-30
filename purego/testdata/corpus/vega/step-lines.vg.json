@@ -1,0 +1,92 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "The three staircase interpolations over the same points — the vertical half way, at the first point, and at the second — with a step-after area beneath them.",
+  "width": 240,
+  "height": 150,
+  "padding": 5,
+  "data": [
+    {
+      "name": "table",
+      "values": [
+        {"x": 0, "y": 12},
+        {"x": 1, "y": 44},
+        {"x": 2, "y": 21},
+        {"x": 3, "y": 58},
+        {"x": 4, "y": 33}
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "linear",
+      "domain": {"data": "table", "field": "x"},
+      "range": "width",
+      "zero": false
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": [0, 70],
+      "range": "height"
+    }
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "x", "tickCount": 5},
+    {"orient": "left", "scale": "y", "tickCount": 4}
+  ],
+  "marks": [
+    {
+      "type": "area",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "x"},
+          "y": {"scale": "y", "field": "y"},
+          "y2": {"scale": "y", "value": 0},
+          "interpolate": {"value": "step-after"},
+          "fill": {"value": "#c6dbef"}
+        }
+      }
+    },
+    {
+      "type": "line",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "x"},
+          "y": {"scale": "y", "field": "y"},
+          "interpolate": {"value": "step"},
+          "stroke": {"value": "#4c78a8"},
+          "strokeWidth": {"value": 2}
+        }
+      }
+    },
+    {
+      "type": "line",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "x"},
+          "y": {"scale": "y", "field": "y"},
+          "interpolate": {"value": "step-before"},
+          "stroke": {"value": "#f58518"},
+          "strokeWidth": {"value": 1}
+        }
+      }
+    },
+    {
+      "type": "line",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "x"},
+          "y": {"scale": "y", "field": "y"},
+          "interpolate": {"value": "step-after"},
+          "stroke": {"value": "#54a24b"},
+          "strokeWidth": {"value": 1}
+        }
+      }
+    }
+  ]
+}

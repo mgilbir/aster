@@ -1,0 +1,207 @@
+{
+ "$schema": "https://vega.github.io/schema/vega/v6.json",
+ "width": 300,
+ "height": 180,
+ "padding": 5,
+ "marks": [
+  {
+   "type": "rect",
+   "from": {
+    "data": "t"
+   },
+   "description": "mark-level desc",
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "value": 10
+     },
+     "width": {
+      "value": 30
+     },
+     "height": {
+      "value": 30
+     },
+     "fill": {
+      "value": "#69c"
+     },
+     "href": {
+      "field": "h"
+     },
+     "description": {
+      "signal": "'item ' + datum.i"
+     },
+     "ariaRole": {
+      "value": "figure"
+     },
+     "ariaRoleDescription": {
+      "value": "a box"
+     },
+     "cursor": {
+      "value": "pointer"
+     },
+     "tooltip": {
+      "signal": "datum"
+     }
+    }
+   }
+  },
+  {
+   "type": "symbol",
+   "from": {
+    "data": "t"
+   },
+   "aria": false,
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "value": 60
+     },
+     "size": {
+      "value": 300
+     },
+     "fill": {
+      "value": "#c66"
+     },
+     "description": {
+      "value": "hidden"
+     }
+    }
+   }
+  },
+  {
+   "type": "symbol",
+   "from": {
+    "data": "t"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "value": 90
+     },
+     "size": {
+      "value": 300
+     },
+     "fill": {
+      "value": "#6c6"
+     },
+     "aria": {
+      "signal": "datum.i % 2 == 0"
+     },
+     "description": {
+      "value": "maybe hidden"
+     }
+    }
+   }
+  },
+  {
+   "type": "text",
+   "from": {
+    "data": "t"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "value": 130
+     },
+     "text": {
+      "field": "h"
+     },
+     "href": {
+      "field": "h"
+     },
+     "fontSize": {
+      "value": 8
+     },
+     "fill": {
+      "value": "#00c"
+     }
+    }
+   }
+  },
+  {
+   "type": "group",
+   "encode": {
+    "update": {
+     "x": {
+      "value": 10
+     },
+     "y": {
+      "value": 140
+     },
+     "width": {
+      "value": 60
+     },
+     "height": {
+      "value": 30
+     },
+     "fill": {
+      "value": "#ffe"
+     },
+     "href": {
+      "value": "https://example.org/g"
+     },
+     "description": {
+      "value": "a group"
+     }
+    }
+   }
+  }
+ ],
+ "data": [
+  {
+   "name": "t",
+   "values": [
+    {
+     "i": 0,
+     "x": 20,
+     "h": "https://example.org/a?q=1&r=<2>"
+    },
+    {
+     "i": 1,
+     "x": 65,
+     "h": "/relative/path"
+    },
+    {
+     "i": 2,
+     "x": 110,
+     "h": "mailto:x@example.org"
+    },
+    {
+     "i": 3,
+     "x": 155,
+     "h": "javascript:alert(1)"
+    },
+    {
+     "i": 4,
+     "x": 200,
+     "h": "#frag"
+    },
+    {
+     "i": 5,
+     "x": 245,
+     "h": "ftp://h/f"
+    }
+   ]
+  }
+ ],
+ "usermeta": {
+  "loaderOptions": {
+   "baseURL": "https://base.example/dir",
+   "target": "_blank",
+   "rel": "noopener noreferrer",
+   "defaultProtocol": "https"
+  }
+ }
+}

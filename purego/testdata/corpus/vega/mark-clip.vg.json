@@ -1,0 +1,83 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A mark-level `clip` on marks that are not groups. The series runs above the y domain and past both ends of the x domain, so the clipped line and symbols are cut at the plotting area's edge while the unclipped text mark beside them is not — which is also the difference between the two bounds upstream reports.",
+  "width": 200,
+  "height": 120,
+  "padding": 5,
+  "data": [
+    {
+      "name": "table",
+      "values": [
+        {"x": -1, "y": 20},
+        {"x": 0, "y": 90},
+        {"x": 1, "y": 40},
+        {"x": 2, "y": 130},
+        {"x": 3, "y": 55},
+        {"x": 4, "y": 25},
+        {"x": 5, "y": 70}
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "linear",
+      "domain": [0, 4],
+      "range": "width",
+      "zero": false
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": [0, 100],
+      "range": "height"
+    }
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "x", "tickCount": 4},
+    {"orient": "left", "scale": "y", "tickCount": 4}
+  ],
+  "marks": [
+    {
+      "type": "line",
+      "clip": true,
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "x"},
+          "y": {"scale": "y", "field": "y"},
+          "stroke": {"value": "#4c78a8"},
+          "strokeWidth": {"value": 2}
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "clip": true,
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "x"},
+          "y": {"scale": "y", "field": "y"},
+          "size": {"value": 80},
+          "fill": {"value": "#f58518"}
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "x"},
+          "y": {"scale": "y", "field": "y"},
+          "dy": {"value": -8},
+          "text": {"field": "y"},
+          "align": {"value": "center"},
+          "fontSize": {"value": 9},
+          "fill": {"value": "#333"}
+        }
+      }
+    }
+  ]
+}

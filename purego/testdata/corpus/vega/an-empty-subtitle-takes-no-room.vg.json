@@ -1,0 +1,23 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "**A heading reserves its own row whatever it says; its subtitle's row only when the subtitle says something.** The asymmetry is one line of `titleLayout` — `if (subtitle && subtitle.text) { … tempBounds.clear().union(subtitle.bounds) } else { tempBounds.clear() }`, followed unconditionally by `tempBounds.union(title.bounds)` — so the title's bounds always enter the heading's and the subtitle's enter only when its text is **truthy**. Probed: no title at all is 80 tall, a title of `\"\"` is 97, a title of `\"Hi\"` is 97 as well, `\"Hi\"` with an empty subtitle is still 97, and only `\"Hi\"` with a real subtitle reaches 111. The title row is reserved on **declaration** and the subtitle row on **content**; reading either rule off the other gets one of them wrong. This engine reserved the subtitle's row on declaration too — 112 where upstream draws 97, fifteen pixels of surface no chart asked for. It is not a corner: a templated heading writes `\"subtitle\": {\"signal\": \"…\"}` and leaves the parameter empty until somebody fills it in, which is the state every such chart starts in. A **signal** is what this fixture uses rather than a literal `\"\"`, and the difference is not cosmetic: whether the subtitle *item* exists is decided by the property alone, and a `{\"signal\": …}` is an object and therefore truthy — so a computed subtitle has an item however it resolves, where a literal empty one is never built. The item existing and the item taking room are two different questions, and only the second was wrong. The mark list here shows the first: `title-subtitle` is present, with no text. The same shape written inside a **group** proves nothing, because a group's size comes from its own encode and the heading's bounds never reach the surface — a fixture built that way passed while the defect was still there.",
+  "width": 140,
+  "height": 70,
+  "padding": 5,
+  "signals": [{"name": "gone", "value": null}],
+  "title": {"text": "Hi", "subtitle": {"signal": "gone"}},
+  "marks": [
+    {
+      "type": "rect",
+      "encode": {
+        "update": {
+          "x": {"value": 0},
+          "y": {"value": 0},
+          "width": {"value": 40},
+          "height": {"value": 20},
+          "fill": {"value": "#333"}
+        }
+      }
+    }
+  ]
+}

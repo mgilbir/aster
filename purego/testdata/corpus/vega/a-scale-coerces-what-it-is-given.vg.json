@@ -1,0 +1,200 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "What a continuous scale does with a value that is not a number, which is one line of d3 and two rules: `return x == null || isNaN(x = +x) ? unknown : \u2026`. **Nothing is caught before the coercion** \u2014 a null and an undefined answer `unknown`, which is `undefined` unless the scale was given one \u2014 and **everything else goes through `+`**, which is `Number(x)` and not a parse: the empty string is `0`, an empty array is `0`, a flag is `1`, and only a word that is not a number reaches `NaN` and so `unknown` as well. The rows below are those five cases and a plain number to hold the axis. The empty cell is the one that matters in practice, a column read from a CSV being full of them: upstream places it at zero and this engine dropped it, because its coercion read a string with `toDoubleOrNull` \u2014 a *parse*, which rejects the empty string where `Number` accepts it. The symbols are drawn at the value's own position and labelled with what the scale answered, so a row that is placed and a row that is not are told apart by the text rather than by an absence. An **ordinal** scale is asked the same questions last: it has no coercion at all \u2014 its index is keyed by the value \u2014 so every one of these is a miss, and a miss answers `unknown` exactly as the others do. It is here because it is the one scale family whose answer for a value it cannot place is reached without any arithmetic, which makes it the clearest statement of what `unknown` is. The last scale has an **empty range**, which is legal and answers `unknown` for everything \u2014 even for a value its domain does hold, there being nothing to answer with: `range[index % 0]` is `range[NaN]`. It is asked about a value in its domain rather than outside it, so the branch it pins is the empty range and not the miss. A **log** scale is asked the same questions, and it is the one that says which side the guard is on: `x == null || isNaN(x = +x)` tests the **input**, and the arithmetic then runs whatever it comes to. So a log scale asked for `-5` answers `NaN` \u2014 a perfectly good number with no logarithm \u2014 where the same scale asked for a *word* answers nothing at all. Reading the answer instead of the input conflates the two, and the empty cell is what separates them: it coerces to `0`, passes the guard, and its logarithm is `NaN` too. The negative row is here for that one distinction.",
+  "width": 220,
+  "height": 120,
+  "padding": 5,
+  "data": [
+    {
+      "name": "raw",
+      "values": [
+        {
+          "v": 20,
+          "what": "a number",
+          "n": 0
+        },
+        {
+          "v": null,
+          "what": "nothing",
+          "n": 1
+        },
+        {
+          "v": "",
+          "what": "an empty cell",
+          "n": 2
+        },
+        {
+          "v": [],
+          "what": "an empty list",
+          "n": 3
+        },
+        {
+          "v": true,
+          "what": "a flag",
+          "n": 4
+        },
+        {
+          "v": "abc",
+          "what": "a word",
+          "n": 5
+        },
+        {
+          "v": -5,
+          "what": "a negative",
+          "n": 6
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": [
+        0,
+        20
+      ],
+      "range": "height"
+    },
+    {
+      "name": "b",
+      "type": "band",
+      "domain": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "range": "width"
+    },
+    {
+      "name": "q",
+      "type": "quantize",
+      "domain": [
+        0,
+        20
+      ],
+      "range": [
+        "lo",
+        "mid",
+        "hi"
+      ]
+    },
+    {
+      "name": "th",
+      "type": "threshold",
+      "domain": [
+        10
+      ],
+      "range": [
+        "under",
+        "over"
+      ]
+    },
+    {
+      "name": "qt",
+      "type": "quantile",
+      "domain": {
+        "data": "raw",
+        "field": "v"
+      },
+      "range": [
+        "p0",
+        "p1",
+        "p2"
+      ]
+    },
+    {
+      "name": "o",
+      "type": "ordinal",
+      "domain": [
+        "a",
+        "b"
+      ],
+      "range": [
+        "red",
+        "blue"
+      ]
+    },
+    {
+      "name": "e",
+      "type": "ordinal",
+      "domain": [
+        "a"
+      ],
+      "range": []
+    },
+    {
+      "name": "lg",
+      "type": "log",
+      "domain": [
+        1,
+        100
+      ],
+      "range": [
+        0,
+        100
+      ]
+    }
+  ],
+  "axes": [
+    {
+      "scale": "y",
+      "orient": "left"
+    }
+  ],
+  "marks": [
+    {
+      "type": "symbol",
+      "from": {
+        "data": "raw"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "b",
+            "field": "n",
+            "band": 0.5
+          },
+          "y": {
+            "scale": "y",
+            "field": "v"
+          },
+          "size": {
+            "value": 60
+          },
+          "fill": {
+            "value": "steelblue"
+          }
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": {
+        "data": "raw"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "value": 0
+          },
+          "y": {
+            "signal": "14 * datum.n + 7"
+          },
+          "text": {
+            "signal": "datum.what + ' -> ' + scale('y', datum.v) + ' | q ' + scale('q', datum.v) + ' | th ' + scale('th', datum.v) + ' | qt ' + scale('qt', datum.v) + ' | o ' + scale('o', datum.v) + ' | e ' + scale('e', 'a') + ' | lg ' + scale('lg', datum.v)"
+          },
+          "fontSize": {
+            "value": 8
+          },
+          "baseline": {
+            "value": "top"
+          }
+        }
+      }
+    }
+  ]
+}

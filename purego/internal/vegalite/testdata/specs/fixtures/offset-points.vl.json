@@ -1,0 +1,12 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "Points offset within a band, where the offset places them rather than giving each a lane.",
+  "data": {"url": "data/cars.json"},
+  "mark": "point",
+  "encoding": {
+    "x": {"field": "Origin", "type": "nominal", "scale": {"padding": 0.2}},
+    "xOffset": {"field": "Cylinders", "type": "ordinal"},
+    "y": {"aggregate": "mean", "field": "Horsepower"},
+    "color": {"field": "Cylinders", "type": "ordinal"}
+  }
+}

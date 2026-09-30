@@ -1,0 +1,47 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "clipHeight on three legends: one smaller than the labels, one zero and one negative. The entry group gains a rectangle of its own and stops being noBound, the symbol inside it is clipped while the label is not, and the symbol therefore contributes nothing to the row's measurement — so a clipped row is as tall as its label and starts at the entry's own origin.",
+  "width": 200,
+  "height": 120,
+  "padding": 5,
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {"c": "alpha", "v": 28, "g": "north"},
+        {"c": "beta", "v": 55, "g": "south"},
+        {"c": "gamma", "v": 43, "g": "east"}
+      ]
+    }
+  ],
+  "scales": [
+    {"name": "x", "type": "band", "domain": {"data": "t", "field": "c"}, "range": "width", "padding": 0.1},
+    {"name": "y", "type": "linear", "domain": {"data": "t", "field": "v"}, "range": "height", "nice": true},
+    {"name": "colour", "type": "ordinal", "domain": {"data": "t", "field": "g"}, "range": "category"},
+    {"name": "area", "type": "linear", "domain": {"data": "t", "field": "v"}, "range": [40, 900]}
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "x", "title": "category"},
+    {"orient": "left", "scale": "y", "title": "amount", "tickCount": 4}
+  ],
+  "legends": [
+    {"size": "area", "title": "clipped small", "orient": "right", "clipHeight": 8},
+    {"fill": "colour", "title": "clip of none", "orient": "left", "clipHeight": 0},
+    {"fill": "colour", "title": "clip below zero", "orient": "top", "clipHeight": -4}
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "t"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "c"},
+          "width": {"scale": "x", "band": 1},
+          "y": {"scale": "y", "field": "v"},
+          "y2": {"scale": "y", "value": 0},
+          "fill": {"scale": "colour", "field": "g"}
+        }
+      }
+    }
+  ]
+}

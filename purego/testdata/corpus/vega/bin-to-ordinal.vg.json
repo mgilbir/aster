@@ -1,0 +1,103 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "The bin transform feeding a bin-ordinal colour scale: the bins the transform chose are the same numbers the scale cuts on, so the histogram's colours and its bars cannot disagree.",
+  "width": 240,
+  "height": 120,
+  "padding": 5,
+  "data": [
+    {
+      "name": "table",
+      "values": [
+        {"v": 3},
+        {"v": 7},
+        {"v": 8},
+        {"v": 12},
+        {"v": 14},
+        {"v": 15},
+        {"v": 16},
+        {"v": 19},
+        {"v": 22},
+        {"v": 23},
+        {"v": 24},
+        {"v": 28},
+        {"v": 31},
+        {"v": 33},
+        {"v": 38},
+        {"v": 41},
+        {"v": 44},
+        {"v": 47}
+      ]
+    },
+    {
+      "name": "binned",
+      "source": "table",
+      "transform": [
+        {"type": "bin", "field": "v", "extent": [0, 50], "maxbins": 5},
+        {
+          "type": "aggregate",
+          "groupby": ["bin0", "bin1"],
+          "ops": ["count"],
+          "as": ["n"]
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "linear",
+      "domain": [0, 50],
+      "range": "width"
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {"data": "binned", "field": "n"},
+      "range": [100, 0],
+      "zero": true,
+      "nice": true
+    },
+    {
+      "name": "shade",
+      "type": "bin-ordinal",
+      "domain": [0, 10, 20, 30, 40, 50],
+      "range": ["#eff3ff", "#c6dbef", "#9ecae1", "#6baed6", "#2171b5"]
+    }
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "x", "tickCount": 5, "offset": 4},
+    {"orient": "left", "scale": "y", "tickCount": 4}
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "binned"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "bin0"},
+          "x2": {"scale": "x", "field": "bin1"},
+          "y": {"scale": "y", "field": "n"},
+          "y2": {"scale": "y", "value": 0},
+          "fill": {"scale": "shade", "field": "bin0"},
+          "stroke": {"value": "#ffffff"},
+          "strokeWidth": {"value": 1}
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": {"data": "binned"},
+      "encode": {
+        "enter": {
+          "x": {"signal": "(scale('x', datum.bin0) + scale('x', datum.bin1)) / 2"},
+          "y": {"signal": "scale('y', datum.n) - 4"},
+          "text": {"field": "n"},
+          "align": {"value": "center"},
+          "baseline": {"value": "bottom"},
+          "fontSize": {"value": 9},
+          "fill": {"value": "#333333"}
+        }
+      }
+    }
+  ]
+}

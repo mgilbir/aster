@@ -1,0 +1,1 @@
+{"data": [{"name": "d", "transform": [{"type": "sequence", "start": 0, "stop": 200000}, {"type": "formula", "as": "y", "expr": "datum.data"}, {"type": "regression", "x": "data", "y": "y", "method": "poly", "order": 100}]}]}

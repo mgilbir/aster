@@ -1,0 +1,36 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A text mark placed in polar coordinates by a radius its **mark definition** states rather than its encoding. `pointPositionDefaultRef` asks `getMarkPropOrConfig(channel, markDef, config, {vgChannel})`, and that reads Vega's name for the channel before Vega-Lite's — so a radius is the mark's `outerRadius` where it states one and its `radius` otherwise, the former winning when both are written. `outerRadius` is the documented alias for `radius`, and reading only the Vega-Lite name left the label unplaced: upstream writes a `radius` beside the `outerRadius` it passes through to Vega, and this engine wrote only the pass-through. The three layers state the two names apart and together, so which one wins is drawn as well as declared.",
+  "width": 160,
+  "height": 160,
+  "data": {
+    "values": [
+      {"c": "alpha", "v": 30},
+      {"c": "beta", "v": 20},
+      {"c": "gamma", "v": 50}
+    ]
+  },
+  "layer": [
+    {
+      "mark": {"type": "arc", "outerRadius": 60},
+      "encoding": {
+        "theta": {"field": "v", "type": "quantitative", "stack": true},
+        "color": {"field": "c", "type": "nominal", "legend": null}
+      }
+    },
+    {
+      "mark": {"type": "text", "radius": 72},
+      "encoding": {
+        "theta": {"field": "v", "type": "quantitative", "stack": true},
+        "text": {"field": "c", "type": "nominal"}
+      }
+    },
+    {
+      "mark": {"type": "text", "outerRadius": 40, "radius": 5, "fontSize": 8},
+      "encoding": {
+        "theta": {"field": "v", "type": "quantitative", "stack": true},
+        "text": {"field": "v", "type": "quantitative"}
+      }
+    }
+  ]
+}

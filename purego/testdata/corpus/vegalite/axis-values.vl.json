@@ -1,0 +1,17 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "An axis told which ticks to show, and a text mark turned to fit between them.",
+  "data": {"values": [
+    {"a": 1, "b": 12}, {"a": 4, "b": 30}, {"a": 7, "b": 21}, {"a": 9, "b": 44}
+  ]},
+  "layer": [
+    {"mark": {"type": "point", "size": 80}},
+    {"mark": {"type": "text", "angle": 300, "dy": -8, "align": "left", "limit": 30},
+     "encoding": {"text": {"field": "b", "type": "quantitative"}}}
+  ],
+  "encoding": {
+    "x": {"field": "a", "type": "quantitative",
+          "axis": {"values": [0, 5, 10], "labelAngle": 45, "tickCount": 3}},
+    "y": {"field": "b", "type": "quantitative", "axis": {"values": [10, 20, 30, 40]}}
+  }
+}

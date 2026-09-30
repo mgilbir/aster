@@ -1,0 +1,30 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A line and its halo repeated over three columns, where each copy is a layer of two marks — so the copy is named and its members are numbered under it.",
+  "data": {
+    "values": [
+      {"t": 1, "AAPL": 10, "GOOG": 20, "MSFT": 15},
+      {"t": 2, "AAPL": 14, "GOOG": 18, "MSFT": 17},
+      {"t": 3, "AAPL": 12, "GOOG": 22, "MSFT": 13}
+    ]
+  },
+  "repeat": {"layer": ["AAPL", "GOOG", "MSFT"]},
+  "spec": {
+    "layer": [
+      {
+        "mark": {"type": "line", "stroke": "white", "strokeWidth": 4},
+        "encoding": {
+          "x": {"field": "t", "type": "quantitative"},
+          "y": {"field": {"repeat": "layer"}, "type": "quantitative", "title": "price"}
+        }
+      },
+      {
+        "mark": {"type": "line", "stroke": "steelblue"},
+        "encoding": {
+          "x": {"field": "t", "type": "quantitative"},
+          "y": {"field": {"repeat": "layer"}, "type": "quantitative", "title": "price"}
+        }
+      }
+    ]
+  }
+}

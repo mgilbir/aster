@@ -1,0 +1,212 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "The same skewed column through all four discretizing scales, so the difference between equal widths and equal counts is visible as a row of squares. The last row is the threshold scale again with `zero: true`, which folds zero into the **cut points** rather than into a continuous extent: `[10, 50]` becomes `[0, 50]`, and every value under 10 changes bucket with it. Upstream applies `zero` by scale option and not by scale type, so a quantile and a bin-ordinal scale take it the same way, and a domain whose low end is already negative is left alone. The last two rows are the same quantize scale with and without `nice`, which upstream applies by **capability** rather than by type: of the four discretizing scales only quantize has a `nice`, inherited from the linear scale d3 builds it on, so `[8, 95]` becomes `[0, 100]` there and stays `[8, 95]` on the other three. Four of the five values change bucket with it, and the axis over each says so. A threshold scale asking for `nice: true` is the negative of that: its cut points of `[8, 57]` are the cut points it keeps, because it has no `nice` for upstream to call.",
+  "width": 250,
+  "height": 130,
+  "padding": 5,
+  "data": [
+    {
+      "name": "table",
+      "values": [
+        {"v": 1},
+        {"v": 2},
+        {"v": 2},
+        {"v": 3},
+        {"v": 4},
+        {"v": 5},
+        {"v": 7},
+        {"v": 9},
+        {"v": 12},
+        {"v": 18},
+        {"v": 27},
+        {"v": 44},
+        {"v": 70},
+        {"v": 100}
+      ]
+    },
+    {
+      "name": "spread",
+      "values": [{"v": 8}, {"v": 26}, {"v": 51}, {"v": 74}, {"v": 95}]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "linear",
+      "domain": [0, 100],
+      "range": [0, 240]
+    },
+    {
+      "name": "byWidth",
+      "type": "quantize",
+      "domain": [0, 100],
+      "range": ["#eff3ff", "#bdd7e7", "#6baed6", "#2171b5"]
+    },
+    {
+      "name": "byCount",
+      "type": "quantile",
+      "domain": {"data": "table", "field": "v"},
+      "range": ["#feedde", "#fdbe85", "#fd8d3c", "#d94701"]
+    },
+    {
+      "name": "byLimit",
+      "type": "threshold",
+      "domain": [10, 50],
+      "range": ["#edf8e9", "#74c476", "#006d2c"]
+    },
+    {
+      "name": "byLimitFromZero",
+      "type": "threshold",
+      "domain": [10, 50],
+      "zero": true,
+      "range": ["#fee5d9", "#fb6a4a", "#a50f15"]
+    },
+    {
+      "name": "byEdge",
+      "type": "bin-ordinal",
+      "domain": [0, 25, 50, 75, 100],
+      "range": ["#f2f0f7", "#cbc9e2", "#9e9ac8", "#6a51a3"]
+    },
+    {
+      "name": "byLimitNiced",
+      "type": "threshold",
+      "domain": [8, 57],
+      "nice": true,
+      "range": ["#edf8e9", "#74c476", "#006d2c"]
+    },
+    {
+      "name": "byWidthRaw",
+      "type": "quantize",
+      "domain": [8, 95],
+      "range": [0, 80, 160, 240]
+    },
+    {
+      "name": "byWidthNiced",
+      "type": "quantize",
+      "domain": [8, 95],
+      "nice": true,
+      "range": [0, 80, 160, 240]
+    }
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "x", "tickCount": 5, "offset": 8},
+    {"orient": "bottom", "scale": "byWidthRaw", "offset": 50, "title": "Quantize"},
+    {"orient": "bottom", "scale": "byWidthNiced", "offset": 95, "title": "Quantize, niced"}
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "v"},
+          "width": {"value": 9},
+          "y": {"value": 0},
+          "height": {"value": 22},
+          "fill": {"scale": "byWidth", "field": "v"},
+          "stroke": {"value": "#666666"},
+          "strokeWidth": {"value": 0.5}
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "v"},
+          "width": {"value": 9},
+          "y": {"value": 25},
+          "height": {"value": 22},
+          "fill": {"scale": "byCount", "field": "v"},
+          "stroke": {"value": "#666666"},
+          "strokeWidth": {"value": 0.5}
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "v"},
+          "width": {"value": 9},
+          "y": {"value": 50},
+          "height": {"value": 22},
+          "fill": {"scale": "byLimit", "field": "v"},
+          "stroke": {"value": "#666666"},
+          "strokeWidth": {"value": 0.5}
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "v"},
+          "width": {"value": 9},
+          "y": {"value": 132},
+          "height": {"value": 18},
+          "fill": {"scale": "byLimitFromZero", "field": "v"},
+          "stroke": {"value": "#666666"},
+          "strokeWidth": {"value": 0.5}
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "v"},
+          "width": {"value": 9},
+          "y": {"value": 75},
+          "height": {"value": 22},
+          "fill": {"scale": "byEdge", "field": "v"},
+          "stroke": {"value": "#666666"},
+          "strokeWidth": {"value": 0.5}
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "v"},
+          "width": {"value": 9},
+          "y": {"value": 100},
+          "height": {"value": 22},
+          "fill": {"scale": "byLimitNiced", "field": "v"},
+          "stroke": {"value": "#666666"},
+          "strokeWidth": {"value": 0.5}
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "from": {"data": "spread"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "byWidthRaw", "field": "v"},
+          "y": {"value": 170},
+          "size": {"value": 40},
+          "fill": {"value": "#4c78a8"}
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "from": {"data": "spread"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "byWidthNiced", "field": "v"},
+          "y": {"value": 215},
+          "size": {"value": 40},
+          "fill": {"value": "#e45756"}
+        }
+      }
+    }
+  ]
+}

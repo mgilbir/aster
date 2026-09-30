@@ -1,0 +1,9 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A box plot along one axis with its whisker ticks drawn: they are as thick as a tick is.",
+  "data": {"url": "data/cars.json"},
+  "mark": {"type": "boxplot", "extent": 1.5, "median": {"color": "red"}, "ticks": true},
+  "encoding": {
+    "x": {"field": "Horsepower", "type": "quantitative", "scale": {"zero": false}}
+  }
+}

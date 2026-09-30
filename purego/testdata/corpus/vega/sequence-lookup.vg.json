@@ -1,0 +1,99 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A curve drawn from a sequence with no data behind it, over bars whose labels and colours are joined in from a second dataset by lookup.",
+  "width": 240,
+  "height": 140,
+  "padding": 5,
+  "data": [
+    {
+      "name": "names",
+      "values": [
+        {"id": "n", "label": "North", "tone": "#4c78a8"},
+        {"id": "s", "label": "South", "tone": "#f58518"},
+        {"id": "e", "label": "East", "tone": "#54a24b"},
+        {"id": "w", "label": "West", "tone": "#e45756"}
+      ]
+    },
+    {
+      "name": "bars",
+      "values": [
+        {"k": "s", "v": 62},
+        {"k": "n", "v": 41},
+        {"k": "w", "v": 78},
+        {"k": "x", "v": 25}
+      ],
+      "transform": [
+        {
+          "type": "lookup",
+          "from": "names",
+          "key": "id",
+          "fields": ["k"],
+          "values": ["label", "tone"],
+          "as": ["name", "colour"],
+          "default": "#bbbbbb"
+        }
+      ]
+    },
+    {
+      "name": "curve",
+      "transform": [
+        {"type": "sequence", "start": 0, "stop": 100, "step": 4, "as": "t"},
+        {"type": "formula", "expr": "50 + 40 * sin(datum.t / 12)", "as": "y"}
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {"data": "bars", "field": "name"},
+      "range": "width",
+      "padding": 0.25
+    },
+    {
+      "name": "t",
+      "type": "linear",
+      "domain": {"data": "curve", "field": "t"},
+      "range": "width",
+      "zero": false
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": [0, 100],
+      "range": "height"
+    }
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "x"},
+    {"orient": "left", "scale": "y", "tickCount": 4}
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "bars"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "name"},
+          "width": {"scale": "x", "band": 1},
+          "y": {"scale": "y", "field": "v"},
+          "y2": {"scale": "y", "value": 0},
+          "fill": {"field": "colour"},
+          "fillOpacity": {"value": 0.7}
+        }
+      }
+    },
+    {
+      "type": "line",
+      "from": {"data": "curve"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "t", "field": "t"},
+          "y": {"scale": "y", "field": "y"},
+          "stroke": {"value": "#333333"},
+          "strokeWidth": {"value": 2}
+        }
+      }
+    }
+  ]
+}

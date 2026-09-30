@@ -1,0 +1,12 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A scatter the reader pans and zooms, which is an interval selection bound to the scales: no brush is drawn, and the domains themselves are what the drag moves.",
+  "data": {"url": "data/cars.json"},
+  "params": [{"name": "grid", "select": "interval", "bind": "scales"}],
+  "mark": "circle",
+  "encoding": {
+    "x": {"field": "Horsepower", "type": "quantitative", "scale": {"domain": [75, 150]}},
+    "y": {"field": "Miles_per_Gallon", "type": "quantitative", "scale": {"domain": [20, 40]}},
+    "size": {"field": "Cylinders", "type": "quantitative"}
+  }
+}

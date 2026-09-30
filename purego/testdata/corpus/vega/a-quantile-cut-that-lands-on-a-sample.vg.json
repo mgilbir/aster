@@ -1,0 +1,62 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "d3's `quantileSorted` ends `return value0 + (value1 - value0) * (i - i0)`, and it evaluates that product even when `i` lands exactly on a sample and the weight is zero. Returning `values[i0]` there is the obvious saving, exact for every finite column, and wrong for one holding an infinity: `(Infinity - 2) * 0` is **NaN**, not zero. Four samples and a three-colour range is the shape that reaches it — the cuts sit at `i = 1` and `i = 2` exactly — so the `wild` scale has thresholds `[1, NaN]` upstream and had `[1, 2]` here. A NaN cut point is not a missing one: it is a boundary every comparison fails, which sends a bisection left rather than right, and two of the four marks changed colour. The short circuit also hid a second slip, visible only in the same place: d3 reads `values[i0 + 1]` for the upper sample and this read `values[ceil(i)]`, which names the *same* sample again whenever the position is whole. `tame` is the identical shape with the infinity taken out, so the fixture says what the rule costs an ordinary chart, which is nothing; `between` has a four-colour range, where every cut falls between two samples and the interpolation itself is what is compared.",
+  "width": 270,
+  "height": 80,
+  "padding": 5,
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {"v": "Infinity", "w": 4, "n": 1},
+        {"v": "-Infinity", "w": -8, "n": 2},
+        {"v": 1, "w": 1, "n": 3},
+        {"v": 2, "w": 2, "n": 4}
+      ]
+    }
+  ],
+  "scales": [
+    {"name": "wild", "type": "quantile", "domain": {"data": "t", "field": "v"}, "range": ["#eee", "#999", "#333"]},
+    {"name": "tame", "type": "quantile", "domain": {"data": "t", "field": "w"}, "range": ["#eee", "#999", "#333"]},
+    {"name": "between", "type": "quantile", "domain": {"data": "t", "field": "w"}, "range": ["#eee", "#bbb", "#777", "#333"]}
+  ],
+  "marks": [
+    {
+      "type": "text",
+      "from": {"data": "t"},
+      "encode": {
+        "enter": {
+          "x": {"value": 2},
+          "y": {"signal": "14 * datum.n - 12"},
+          "text": {"signal": "datum.v + ' -> ' + scale('wild', datum.w) + '  ' + scale('tame', datum.w) + '  ' + scale('between', datum.w)"},
+          "fontSize": {"value": 9},
+          "baseline": {"value": "top"}
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "from": {"data": "t"},
+      "encode": {
+        "enter": {
+          "x": {"signal": "212 + 14 * datum.n"},
+          "y": {"value": 14},
+          "size": {"value": 70},
+          "fill": {"scale": "wild", "field": "w"}
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "from": {"data": "t"},
+      "encode": {
+        "enter": {
+          "x": {"signal": "212 + 14 * datum.n"},
+          "y": {"value": 40},
+          "size": {"value": 70},
+          "fill": {"scale": "between", "field": "w"}
+        }
+      }
+    }
+  ]
+}

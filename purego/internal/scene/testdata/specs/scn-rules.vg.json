@@ -1,0 +1,160 @@
+{
+ "$schema": "https://vega.github.io/schema/vega/v6.json",
+ "width": 300,
+ "height": 200,
+ "padding": 5,
+ "marks": [
+  {
+   "type": "rule",
+   "from": {
+    "data": "t"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "value": 10
+     },
+     "y2": {
+      "field": "y2"
+     },
+     "stroke": {
+      "value": "#333"
+     },
+     "strokeWidth": {
+      "field": "sw"
+     },
+     "strokeDash": {
+      "value": [
+       5,
+       5
+      ]
+     },
+     "strokeCap": {
+      "value": "square"
+     }
+    }
+   }
+  },
+  {
+   "type": "rule",
+   "encode": {
+    "update": {
+     "x": {
+      "value": 10
+     },
+     "x2": {
+      "value": 290
+     },
+     "y": {
+      "value": 150
+     },
+     "stroke": {
+      "value": "#c00"
+     }
+    }
+   }
+  },
+  {
+   "type": "rule",
+   "encode": {
+    "update": {
+     "x": {
+      "value": 10
+     },
+     "y": {
+      "value": 170
+     },
+     "stroke": {
+      "value": "#00c"
+     },
+     "strokeWidth": {
+      "value": 3
+     }
+    }
+   }
+  },
+  {
+   "type": "rule",
+   "encode": {
+    "update": {
+     "x": {
+      "value": 50
+     },
+     "y": {
+      "value": 170
+     },
+     "x2": {
+      "value": 90
+     },
+     "y2": {
+      "value": 190
+     },
+     "stroke": {
+      "value": "#0c0"
+     },
+     "opacity": {
+      "value": 0
+     },
+     "strokeWidth": {
+      "value": 3
+     }
+    }
+   }
+  }
+ ],
+ "data": [
+  {
+   "name": "t",
+   "values": [
+    {
+     "x": 20,
+     "y2": 40,
+     "sw": 0.5
+    },
+    {
+     "x": 50,
+     "y2": 50,
+     "sw": 1.0
+    },
+    {
+     "x": 80,
+     "y2": 60,
+     "sw": 1.5
+    },
+    {
+     "x": 110,
+     "y2": 70,
+     "sw": 2.0
+    },
+    {
+     "x": 140,
+     "y2": 80,
+     "sw": 2.5
+    },
+    {
+     "x": 170,
+     "y2": 90,
+     "sw": 3.0
+    },
+    {
+     "x": 200,
+     "y2": 100,
+     "sw": 3.5
+    },
+    {
+     "x": 230,
+     "y2": 110,
+     "sw": 4.0
+    },
+    {
+     "x": 260,
+     "y2": 120,
+     "sw": 4.5
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,99 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A column of words told to read as dates, which upstream labels rather than refuses. `formatType: \"time\"` decides the *grammar* before the scale gets a say, and it reaches further than the labels: `isFieldOrDatumDefForTimeFormat` is `formatType === 'time' || (!formatType && isTemporalFieldDef(...))`, so the column is **parsed** as well \u2014 Vega-Lite writes `toDate(datum[\"a\"])` over it, `toDate` is `Date.parse` for anything that is not already a number or a date, and `Date.parse('one')` is `NaN` rather than nothing. Every row therefore carries the same NaN, the band collapses to a single entry, and the label is d3's arithmetic on an Invalid Date: every getter answers NaN, every NaN goes through the same padding, and the multi-format falls all the way through to `%Y` because `second(date) < date` is false rather than true. `0NaN` \u2014 three characters padded to four. The first row is that, unformatted; the second names a format, so the same NaN is written through `%b %d, %Y` and comes out ` NaN, 0NaN`, a name field contributing nothing where a number field says NaN. The third must not move: real dates, the same format, read the way they read anywhere. Three things here were wrong and each is one character wide, which is the point \u2014 the labels are turned on their side, so a label's *width* is the chart's height and the corpus differed by eight pixels nobody could account for. The fourth panel is what makes the *parse* visible rather than only its labels: a text mark over the same column, as a plain category. A nominal text channel writes `isValid(datum[\"a\"]) ? datum[\"a\"] : \"\" + datum[\"a\"]`, and `isValid` is false of a NaN exactly as it is of a null \u2014 so the second arm runs either way and prints the two apart, `NaN` against `null`. Without it every mutant of `toDate` survives, because a label coerces both to the same Invalid Date and the chart is otherwise the same size. The **empty string** is the one input `toDate` refuses outright \u2014 `_ == null || _ === '' ? null : parser(_)`, two guards and only these two \u2014 and it is pinned by `ToDateTest` rather than here, because a row carrying one puts a *null* into a stack and upstream keys a stack's groups by `JSON.stringify`, under which a NaN and a null are the same group. That is a separate divergence with a separate cause and it is recorded as its own task; a fixture carrying it would fail for a reason that has nothing to do with dates.",
+  "data": {
+    "values": [
+      {
+        "a": "one",
+        "b": "two",
+        "t": "2024-01-07",
+        "v": 1
+      },
+      {
+        "a": "three",
+        "b": "four",
+        "t": "2024-03-19",
+        "v": 2
+      }
+    ]
+  },
+  "hconcat": [
+    {
+      "width": 60,
+      "height": 60,
+      "mark": "bar",
+      "encoding": {
+        "x": {
+          "field": "a",
+          "type": "nominal",
+          "axis": {
+            "formatType": "time"
+          }
+        },
+        "y": {
+          "field": "v",
+          "type": "quantitative"
+        }
+      }
+    },
+    {
+      "width": 60,
+      "height": 60,
+      "mark": "bar",
+      "encoding": {
+        "x": {
+          "field": "b",
+          "type": "nominal",
+          "axis": {
+            "formatType": "time",
+            "format": "%b %d, %Y"
+          }
+        },
+        "y": {
+          "field": "v",
+          "type": "quantitative"
+        }
+      }
+    },
+    {
+      "width": 60,
+      "height": 60,
+      "mark": "bar",
+      "encoding": {
+        "x": {
+          "field": "t",
+          "type": "temporal",
+          "axis": {
+            "format": "%b %d, %Y"
+          }
+        },
+        "y": {
+          "field": "v",
+          "type": "quantitative"
+        }
+      }
+    },
+    {
+      "width": 60,
+      "height": 60,
+      "mark": "text",
+      "encoding": {
+        "x": {
+          "field": "a",
+          "type": "nominal",
+          "axis": {
+            "formatType": "time"
+          }
+        },
+        "y": {
+          "field": "v",
+          "type": "quantitative"
+        },
+        "text": {
+          "field": "a",
+          "type": "nominal"
+        }
+      }
+    }
+  ]
+}

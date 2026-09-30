@@ -1,0 +1,99 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "An identity scale maps the value itself, which is how a specification hands final coordinates to a channel that expects a scale. Its domain and range are both [0, 1] and neither is consulted \u2014 the pair exists so domain() answers something. A value that is not a number maps to nothing rather than to NaN, which upstream draws as a missing mark and this engine additionally reports; that row is left out here so the fixture compiles clean, and ScalesTest covers it.",
+  "width": 200,
+  "height": 100,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {
+          "px": 20,
+          "py": 20,
+          "c": "a"
+        },
+        {
+          "px": 90,
+          "py": 60,
+          "c": "b"
+        },
+        {
+          "px": 160,
+          "py": 35,
+          "c": "c"
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "pos",
+      "type": "identity"
+    },
+    {
+      "name": "colour",
+      "type": "ordinal",
+      "domain": {
+        "data": "t",
+        "field": "c"
+      },
+      "range": "category"
+    }
+  ],
+  "signals": [
+    {
+      "name": "span",
+      "update": "domain('pos')[0] + ',' + domain('pos')[1]"
+    }
+  ],
+  "marks": [
+    {
+      "type": "symbol",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "pos",
+            "field": "px"
+          },
+          "y": {
+            "scale": "pos",
+            "field": "py"
+          },
+          "size": {
+            "value": 200
+          },
+          "fill": {
+            "scale": "colour",
+            "field": "c"
+          }
+        }
+      }
+    },
+    {
+      "type": "text",
+      "encode": {
+        "enter": {
+          "x": {
+            "value": 4
+          },
+          "y": {
+            "value": 95
+          },
+          "fontSize": {
+            "value": 9
+          }
+        },
+        "update": {
+          "text": {
+            "signal": "span"
+          }
+        }
+      }
+    }
+  ]
+}

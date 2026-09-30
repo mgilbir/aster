@@ -1,0 +1,16 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A colour scale whose range is read from a column rather than written out, which is a lookup: one row per category, taken in the order the domain lists them.",
+  "data": {
+    "values": [
+      {"y": "X", "l": "A", "c": "red"},
+      {"y": "Y", "l": "B", "c": "blue"},
+      {"y": "Z", "l": "C", "c": "green"}
+    ]
+  },
+  "mark": "circle",
+  "encoding": {
+    "y": {"type": "nominal", "field": "y"},
+    "color": {"type": "nominal", "field": "l", "scale": {"range": {"field": "c"}}}
+  }
+}

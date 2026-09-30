@@ -1,0 +1,25 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A domain widened by values beside the ones the data gives, and a rect spanning a bucketed instant.",
+  "data": {"url": "data/cars.json"},
+  "layer": [
+    {
+      "mark": "rect",
+      "encoding": {
+        "x": {"timeUnit": "month", "field": "Year", "type": "temporal"},
+        "y": {"aggregate": "count"}
+      }
+    },
+    {
+      "mark": "point",
+      "encoding": {
+        "x": {"timeUnit": "month", "field": "Year", "type": "temporal"},
+        "y": {"aggregate": "count"},
+        "size": {
+          "aggregate": "count",
+          "scale": {"domain": {"unionWith": [5, 600]}}
+        }
+      }
+    }
+  ]
+}

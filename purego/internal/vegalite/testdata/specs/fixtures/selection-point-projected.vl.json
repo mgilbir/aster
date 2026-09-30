@@ -1,0 +1,17 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A click that picks by a channel rather than by the row's identity, beside a brush — so the pick has to know which channel it projected onto, and that a click on the brush is not a pick.",
+  "data": {"url": "data/stocks.csv"},
+  "transform": [{"filter": "datum.symbol !== 'IBM'"}],
+  "params": [
+    {"name": "index", "select": {"type": "point", "encodings": ["x"], "on": "pointerover", "nearest": true}},
+    {"name": "brush", "select": {"type": "interval", "encodings": ["x"]}}
+  ],
+  "mark": "point",
+  "encoding": {
+    "x": {"field": "date", "type": "temporal"},
+    "y": {"field": "price", "type": "quantitative"},
+    "color": {"field": "symbol", "type": "nominal"},
+    "opacity": {"condition": {"param": "index", "value": 1, "empty": false}, "value": 0.3}
+  }
+}

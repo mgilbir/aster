@@ -1,0 +1,42 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "**A mark upstream cannot place is bounded at zero, and the corner it cannot place is lost from the union rather than spreading through it.** Two lines do it, and this engine had neither. `rule.js` opens its bound with `x1 = item.x || 0, y1 = item.y || 0` — a `NaN` is *falsey* in JavaScript, so the first corner of an unplaceable mark bounds at the origin — while the second corner is taken with `item.x2 != null ? item.x2 : x1`, and a `NaN` is not `null`, so it keeps its `NaN`. Then `Bounds.union` is four bare comparisons — `if (b.x1 < this.x1) this.x1 = b.x1` and three more — every one of which is **false** against a `NaN`, so the unplaceable corner never replaces the edge already there. The surface that comes out is the size of everything the chart *could* place. This engine used `min` and `max` at both sites, and NaN-propagating ones do not: one `NaN` anywhere turned the whole surface into `NaN`. A scale with an empty range is the shortest way to a chart full of them — `scale(x)` has nothing to interpolate, so every tick and every label of the axis over it is unplaceable — and the axis still draws, still generates its ticks from the **domain**, and still lays out its labels, which is why upstream's surface here is the same 241 by 152 it would be with a working range. The `two` axis is the control: it places everything, and the bottom of the drawing is measured against it.",
+  "width": 200,
+  "height": 120,
+  "padding": 5,
+  "signals": [{"name": "rng", "value": []}],
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {"k": "a", "v": 10},
+        {"k": "b", "v": 100}
+      ]
+    }
+  ],
+  "scales": [
+    {"name": "none", "type": "linear", "domain": [0, 100], "range": {"signal": "rng"}},
+    {"name": "one", "type": "linear", "domain": [0, 100], "range": [5]},
+    {"name": "two", "type": "linear", "domain": [0, 100], "range": [0, 100]}
+  ],
+  "axes": [
+    {"orient": "left", "scale": "none", "tickCount": 3},
+    {"orient": "right", "scale": "one", "tickCount": 3},
+    {"orient": "bottom", "scale": "two", "tickCount": 3}
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "t"},
+      "encode": {
+        "update": {
+          "x": {"value": 0},
+          "width": {"value": 10},
+          "y": {"scale": "none", "field": "v"},
+          "y2": {"scale": "none", "value": 0},
+          "fill": {"value": "#4c78a8"}
+        }
+      }
+    }
+  ]
+}

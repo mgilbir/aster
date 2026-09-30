@@ -1,0 +1,204 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A legend for each of the discretizing scales, which upstream draws as a stacked colour bar rather than as swatches: one band per bucket, sized by the share of the domain the bucket covers, with the labels sitting at the boundaries between them. The first band carries no label because nothing bounds it from below. The quantile legend beside the quantize one has uneven bands, which is the whole point of a quantile scale, and the threshold legend below them is the case where the specification states the boundaries itself. The fourth legend asks for the same quantize scale as symbols, where each swatch is labelled by the interval it stands for rather than by a bound that would not say which side of it the colour is on.",
+  "width": 200,
+  "height": 120,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {
+          "x": 5,
+          "v": 2
+        },
+        {
+          "x": 20,
+          "v": 9
+        },
+        {
+          "x": 35,
+          "v": 14
+        },
+        {
+          "x": 50,
+          "v": 23
+        },
+        {
+          "x": 65,
+          "v": 41
+        },
+        {
+          "x": 80,
+          "v": 62
+        },
+        {
+          "x": 95,
+          "v": 88
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "linear",
+      "domain": [
+        0,
+        100
+      ],
+      "range": "width"
+    },
+    {
+      "name": "quantized",
+      "type": "quantize",
+      "domain": [
+        0,
+        100
+      ],
+      "range": [
+        "#eff3ff",
+        "#bdd7e7",
+        "#6baed6",
+        "#2171b5"
+      ]
+    },
+    {
+      "name": "quantiled",
+      "type": "quantile",
+      "domain": {
+        "data": "t",
+        "field": "v"
+      },
+      "range": [
+        "#edf8e9",
+        "#a1d99b",
+        "#31a354"
+      ]
+    },
+    {
+      "name": "thresholded",
+      "type": "threshold",
+      "domain": [
+        20,
+        60
+      ],
+      "range": [
+        "#fee6ce",
+        "#fdae6b",
+        "#e6550d"
+      ]
+    }
+  ],
+  "axes": [
+    {
+      "orient": "bottom",
+      "scale": "x",
+      "tickCount": 5
+    }
+  ],
+  "legends": [
+    {
+      "fill": "quantized",
+      "title": "quantize"
+    },
+    {
+      "fill": "quantiled",
+      "title": "quantile"
+    },
+    {
+      "fill": "thresholded",
+      "title": "threshold",
+      "direction": "horizontal"
+    },
+    {
+      "fill": "quantized",
+      "type": "symbol",
+      "title": "as symbols"
+    }
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "x",
+            "field": "x"
+          },
+          "width": {
+            "value": 10
+          },
+          "y": {
+            "value": 10
+          },
+          "height": {
+            "value": 20
+          },
+          "fill": {
+            "scale": "quantized",
+            "field": "v"
+          }
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "x",
+            "field": "x"
+          },
+          "width": {
+            "value": 10
+          },
+          "y": {
+            "value": 40
+          },
+          "height": {
+            "value": 20
+          },
+          "fill": {
+            "scale": "quantiled",
+            "field": "v"
+          }
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "x",
+            "field": "x"
+          },
+          "width": {
+            "value": 10
+          },
+          "y": {
+            "value": 70
+          },
+          "height": {
+            "value": 20
+          },
+          "fill": {
+            "scale": "thresholded",
+            "field": "v"
+          }
+        }
+      }
+    }
+  ]
+}

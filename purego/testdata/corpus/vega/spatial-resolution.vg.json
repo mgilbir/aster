@@ -1,0 +1,156 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "Upstream's `adjustSpatial`, which is four statements in order rather than a set of alternatives: `o.height = o.y2 - o.y` when a far edge is written beside a near one, `o.y = o.y2 - (o.height||0)` when it is written without one, and `o.y = o.yc - (o.height||0)/2` last of all. Because they are statements, a far edge *replaces* an encoded extent and a centre halves the replacement — so a mark centred on a band written as `y` and `y2` is placed against a height the specification never wrote down. The marks here write each combination on its own: a band centred by `yc`, a far edge with an extent and no near edge — on a rect, and on a symbol and a text, which resolve their position by a different route in this engine and had to be shown separately — the same pair on x, an encoded extent overwritten by a far edge beside it, and a **negative** width, which upstream keeps on the item and draws to the left of the anchor — only the bounding box is ordered.",
+  "width": 420,
+  "height": 220,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {"c": 0, "lo": 40, "hi": 120},
+        {"c": 1, "lo": 70, "hi": 160},
+        {"c": 2, "lo": 20, "hi": 90}
+      ]
+    }
+  ],
+  "scales": [
+    {"name": "x", "type": "point", "domain": {"data": "t", "field": "c"}, "range": [40, 380], "padding": 0.5}
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "name": "bandCentred",
+      "from": {"data": "t"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "c"},
+          "width": {"value": 18},
+          "y": {"field": "lo"},
+          "y2": {"field": "hi"},
+          "yc": {"value": 110},
+          "fill": {"value": "#4c78a8"},
+          "fillOpacity": {"value": 0.7}
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "name": "centredOnABand",
+      "from": {"data": "t"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "c"},
+          "y": {"field": "lo"},
+          "y2": {"field": "hi"},
+          "yc": {"value": 110},
+          "size": {"value": 120},
+          "fill": {"value": "#f58518"}
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "name": "farEdgeWithAnExtent",
+      "from": {"data": "t"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "c", "offset": 26},
+          "width": {"value": 14},
+          "y2": {"field": "hi"},
+          "height": {"value": 26},
+          "fill": {"value": "#54a24b"}
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "name": "farEdgeWithAnExtentOnX",
+      "from": {"data": "t"},
+      "encode": {
+        "enter": {
+          "x2": {"scale": "x", "field": "c", "offset": -34},
+          "width": {"value": 30},
+          "y": {"field": "lo", "offset": 62},
+          "height": {"value": 9},
+          "fill": {"value": "#e45756"}
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "name": "symbolFarEdgeWithAnExtent",
+      "from": {"data": "t"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "c", "offset": 13},
+          "y2": {"field": "hi"},
+          "height": {"value": 34},
+          "size": {"value": 90},
+          "shape": {"value": "square"},
+          "fill": {"value": "#9d755d"}
+        }
+      }
+    },
+    {
+      "type": "text",
+      "name": "textFarEdgeWithAnExtentOnX",
+      "from": {"data": "t"},
+      "encode": {
+        "enter": {
+          "x2": {"scale": "x", "field": "c", "offset": 8},
+          "width": {"value": 22},
+          "y": {"field": "lo", "offset": -12},
+          "text": {"field": "c"},
+          "fontSize": {"value": 11},
+          "fill": {"value": "#333333"}
+        }
+      }
+    },
+    {
+      "type": "area",
+      "name": "bandCentredArea",
+      "from": {"data": "t"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "c"},
+          "y": {"field": "lo"},
+          "y2": {"field": "hi"},
+          "yc": {"value": 190},
+          "fill": {"value": "#b279a2"},
+          "fillOpacity": {"value": 0.5}
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "name": "aNegativeWidth",
+      "from": {"data": "t"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "c", "offset": 46},
+          "width": {"value": -12},
+          "y": {"field": "lo", "offset": 96},
+          "height": {"value": 11},
+          "fill": {"value": "#bab0ac"}
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "name": "anExtentOverwritten",
+      "from": {"data": "t"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "c", "offset": -30},
+          "width": {"value": 8},
+          "y": {"field": "lo"},
+          "y2": {"field": "hi"},
+          "height": {"value": 7},
+          "fill": {"value": "#72b7b2"}
+        }
+      }
+    }
+  ]
+}

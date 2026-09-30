@@ -1,0 +1,107 @@
+{
+ "width": 100,
+ "height": 60,
+ "padding": 5,
+ "marks": [
+  {
+   "type": "rect",
+   "zindex": 2,
+   "encode": {
+    "update": {
+     "x": {
+      "value": 10
+     },
+     "y": {
+      "value": 10
+     },
+     "width": {
+      "value": 60
+     },
+     "height": {
+      "value": 30
+     },
+     "fill": {
+      "value": "#e45756"
+     },
+     "tooltip": {
+      "value": "hi"
+     },
+     "cursor": {
+      "value": "pointer"
+     },
+     "href": {
+      "value": "https://example.com"
+     }
+    }
+   }
+  },
+  {
+   "type": "rect",
+   "zindex": 1,
+   "interactive": false,
+   "encode": {
+    "update": {
+     "x": {
+      "value": 30
+     },
+     "y": {
+      "value": 20
+     },
+     "width": {
+      "value": 60
+     },
+     "height": {
+      "value": 30
+     },
+     "fill": {
+      "value": "#4c78a8"
+     }
+    }
+   }
+  },
+  {
+   "type": "group",
+   "clip": true,
+   "encode": {
+    "update": {
+     "x": {
+      "value": 0
+     },
+     "y": {
+      "value": 0
+     },
+     "width": {
+      "value": 40
+     },
+     "height": {
+      "value": 30
+     },
+     "stroke": {
+      "value": "#888"
+     }
+    }
+   },
+   "marks": [
+    {
+     "type": "symbol",
+     "encode": {
+      "update": {
+       "x": {
+        "value": 40
+       },
+       "y": {
+        "value": 30
+       },
+       "size": {
+        "value": 2000
+       },
+       "fill": {
+        "value": "orange"
+       }
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

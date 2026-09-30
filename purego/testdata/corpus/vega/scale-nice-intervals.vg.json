@@ -1,0 +1,143 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A scale's nice in every form: a flag, a count, and a time interval. All three round the domain outward and they round to different things \u2014 nice: true over 17 January to 9 May gives the Sundays either side, nice: 'month' gives 1 January to 1 June, and {interval: 'month', step: 3} rounds out to a quarter. A count changes the step the rounding uses, so nice: 20 stops short of where nice: true lands.",
+  "width": 220,
+  "height": 150,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {
+          "when": 1579237200000,
+          "v": 0.7
+        },
+        {
+          "when": 1583067600000,
+          "v": 5.2
+        },
+        {
+          "when": 1588999860000,
+          "v": 9.3
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "byMonth",
+      "type": "utc",
+      "domain": {
+        "data": "t",
+        "field": "when"
+      },
+      "range": "width",
+      "nice": "month"
+    },
+    {
+      "name": "byQuarter",
+      "type": "utc",
+      "domain": {
+        "data": "t",
+        "field": "when"
+      },
+      "range": "width",
+      "nice": {
+        "interval": "month",
+        "step": 3
+      }
+    },
+    {
+      "name": "byWeek",
+      "type": "utc",
+      "domain": {
+        "data": "t",
+        "field": "when"
+      },
+      "range": "width",
+      "nice": "week"
+    },
+    {
+      "name": "count20",
+      "type": "linear",
+      "domain": {
+        "data": "t",
+        "field": "v"
+      },
+      "range": "height",
+      "nice": 20
+    }
+  ],
+  "axes": [
+    {
+      "scale": "byMonth",
+      "orient": "bottom",
+      "format": "%b %d",
+      "labelFontSize": 8,
+      "tickCount": 4
+    },
+    {
+      "scale": "byQuarter",
+      "orient": "top",
+      "format": "%b %d",
+      "labelFontSize": 8,
+      "tickCount": 3
+    },
+    {
+      "scale": "count20",
+      "orient": "left",
+      "labelFontSize": 8
+    }
+  ],
+  "marks": [
+    {
+      "type": "symbol",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "byMonth",
+            "field": "when"
+          },
+          "y": {
+            "scale": "count20",
+            "field": "v"
+          },
+          "size": {
+            "value": 60
+          },
+          "fill": {
+            "value": "#4c78a8"
+          }
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "byWeek",
+            "field": "when"
+          },
+          "y": {
+            "scale": "count20",
+            "field": "v"
+          },
+          "size": {
+            "value": 60
+          },
+          "fill": {
+            "value": "#e45756"
+          }
+        }
+      }
+    }
+  ]
+}

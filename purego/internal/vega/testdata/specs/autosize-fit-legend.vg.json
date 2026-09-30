@@ -1,0 +1,115 @@
+{
+ "width": 300,
+ "height": 120,
+ "padding": 8,
+ "autosize": {
+  "type": "fit",
+  "contains": "padding"
+ },
+ "background": "#fafafa",
+ "data": [
+  {
+   "name": "t",
+   "values": [
+    {
+     "c": "a",
+     "v": 1
+    },
+    {
+     "c": "b",
+     "v": 3
+    },
+    {
+     "c": "c",
+     "v": 2
+    }
+   ]
+  }
+ ],
+ "scales": [
+  {
+   "name": "x",
+   "type": "band",
+   "domain": {
+    "data": "t",
+    "field": "c"
+   },
+   "range": "width",
+   "padding": 0.1
+  },
+  {
+   "name": "y",
+   "type": "linear",
+   "domain": {
+    "data": "t",
+    "field": "v"
+   },
+   "range": "height",
+   "nice": true
+  },
+  {
+   "name": "col",
+   "type": "ordinal",
+   "domain": {
+    "data": "t",
+    "field": "c"
+   },
+   "range": "category"
+  }
+ ],
+ "axes": [
+  {
+   "orient": "bottom",
+   "scale": "x",
+   "title": "Category"
+  },
+  {
+   "orient": "left",
+   "scale": "y",
+   "grid": true
+  }
+ ],
+ "legends": [
+  {
+   "fill": "col",
+   "title": "Colour"
+  }
+ ],
+ "title": {
+  "text": "A titled chart",
+  "subtitle": "with a subtitle",
+  "anchor": "start"
+ },
+ "marks": [
+  {
+   "type": "rect",
+   "from": {
+    "data": "t"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "scale": "x",
+      "field": "c"
+     },
+     "width": {
+      "scale": "x",
+      "band": 1
+     },
+     "y": {
+      "scale": "y",
+      "field": "v"
+     },
+     "y2": {
+      "scale": "y",
+      "value": 0
+     },
+     "fill": {
+      "scale": "col",
+      "field": "c"
+     }
+    }
+   }
+  }
+ ]
+}

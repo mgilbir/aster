@@ -1,0 +1,64 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "d3's symlog transform is `Math.sign(x) * Math.log1p(Math.abs(x / c))`, and every part of that line is load-bearing. `log1p` and `ln(1 + t)` are the same function and not the same arithmetic — adding one to a small number throws away the low bits before the logarithm sees them — so a domain near zero places a value one or two units in the last place away from upstream. The first scale is that case: its domain is `[0.1, 0.30000000000000004]`, where this engine put 0.2 at `…4051715` and upstream puts it at `…4051665`. `Math.abs(x / c)` rather than `abs(x) / c` is the second: they agree for a positive constant and part company for a negative one, which the third scale uses. `Math.sign` being zero at zero is the third, which is why a symlog of `-0` is `-0`. Written out through a text mark rather than left to the marks' positions, because the difference is in the last digits and a coordinate is rounded long before it reaches the page. The engine had this rule transcribed three times, in the positional scale, in the colour-ramp transform and in the expression `pan`/`zoom` functions, and only the last of the three was right.",
+  "width": 300,
+  "height": 110,
+  "padding": 5,
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {"v": 0.1, "w": -8, "n": 1},
+        {"v": 0.2, "w": 0, "n": 2},
+        {"v": 0.30000000000000004, "w": 3, "n": 3},
+        {"v": 0.3, "w": 40, "n": 4}
+      ]
+    }
+  ],
+  "scales": [
+    {"name": "tiny", "type": "symlog", "domain": {"data": "t", "field": "v"}, "range": [0, 100]},
+    {"name": "signed", "type": "symlog", "domain": {"data": "t", "field": "w"}, "range": [0, 100]},
+    {"name": "negC", "type": "symlog", "constant": -2, "domain": [-8, 40], "range": [0, 100]},
+    {"name": "bigC", "type": "symlog", "constant": 7.5, "domain": [-8, 40], "range": [0, 100]}
+  ],
+  "marks": [
+    {
+      "type": "text",
+      "from": {"data": "t"},
+      "encode": {
+        "enter": {
+          "x": {"value": 2},
+          "y": {"signal": "14 * datum.n - 12"},
+          "text": {"signal": "'tiny ' + scale('tiny', datum.v) + '  signed ' + scale('signed', datum.w)"},
+          "fontSize": {"value": 9},
+          "baseline": {"value": "top"}
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": {"data": "t"},
+      "encode": {
+        "enter": {
+          "x": {"value": 2},
+          "y": {"signal": "14 * datum.n + 46"},
+          "text": {"signal": "'negC ' + scale('negC', datum.w) + '  bigC ' + scale('bigC', datum.w) + '  back ' + invert('bigC', 40)"},
+          "fontSize": {"value": 9},
+          "baseline": {"value": "top"}
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "from": {"data": "t"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "bigC", "field": "w"},
+          "y": {"value": 104},
+          "size": {"value": 30},
+          "fill": {"value": "#4c78a8"}
+        }
+      }
+    }
+  ]
+}

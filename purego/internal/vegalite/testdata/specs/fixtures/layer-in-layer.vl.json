@@ -1,0 +1,18 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A layer inside a layer, which is the composition a layer *may* hold and the one thing next to it that is not refused. It earns a fixture because it is the look-alike of a composition inside a layer: those four are rejected by Vega-Lite's own grammar, and this is what distinguishes 'refused because it cannot be described' from 'refused because it is not built yet'. The second mark has only one position channel, which is the second rule here — see `path-mark-no-dimension.vl.json`.",
+  "data": {
+    "values": [
+      {"x": 1, "y": 2},
+      {"x": 3, "y": 4}
+    ]
+  },
+  "layer": [
+    {
+      "layer": [
+        {"mark": "point", "encoding": {"x": {"field": "x", "type": "quantitative"}}},
+        {"mark": "line", "encoding": {"x": {"field": "y", "type": "quantitative"}}}
+      ]
+    }
+  ]
+}

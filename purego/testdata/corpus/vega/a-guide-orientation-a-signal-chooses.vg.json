@@ -1,0 +1,106 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "**A guide's orientation may be computed, and reading it as text refuses it.** Every guide property accepts a `{\"signal\": \u2026}`, and the enum-valued ones were the last to notice: an object is not a word, so reading one as text produced `[object Object]`, the parse of it failed, and what happened next depended on the property. A legend's orientation fell back to its default corner with a diagnostic. An **axis's** took the whole axis with it \u2014 `return null` \u2014 so a chart lost the side of itself it reserves room along, and the surface came out 210 wide where upstream draws 241. That is not a style: an orientation decides which edge of the plotting area a guide is measured against, so a chart that moves its axis from left to right is a different layout and not a different colour, and a dashboard offering \"labels on the left or the right\" writes exactly this. Three properties are here because three were found: the axis's `orient`, the legend's `orient`, and the legend's `direction`, which decides whether entries run down or across \u2014 probed, a legend whose direction is a signal reading `horizontal` makes a 206-wide surface where the default vertical makes 172. Each is written as an **expression** rather than a bare name so the answer cannot be confused with a literal that happened to parse.",
+  "width": 150,
+  "height": 80,
+  "padding": 5,
+  "signals": [
+    {
+      "name": "side",
+      "value": "ri"
+    },
+    {
+      "name": "corner",
+      "value": "bottom-"
+    },
+    {
+      "name": "across",
+      "value": "horiz"
+    }
+  ],
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {
+          "k": "a",
+          "v": 30
+        },
+        {
+          "k": "b",
+          "v": 80
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": [
+        0,
+        100
+      ],
+      "range": "height"
+    },
+    {
+      "name": "c",
+      "type": "ordinal",
+      "domain": {
+        "data": "t",
+        "field": "k"
+      },
+      "range": "category"
+    }
+  ],
+  "axes": [
+    {
+      "orient": {
+        "signal": "side + 'ght'"
+      },
+      "scale": "y",
+      "tickCount": 3
+    }
+  ],
+  "legends": [
+    {
+      "fill": "c",
+      "orient": {
+        "signal": "corner + 'left'"
+      },
+      "direction": {
+        "signal": "across + 'ontal'"
+      }
+    }
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "update": {
+          "x": {
+            "value": 0
+          },
+          "width": {
+            "value": 20
+          },
+          "y": {
+            "scale": "y",
+            "field": "v"
+          },
+          "y2": {
+            "scale": "y",
+            "value": 0
+          },
+          "fill": {
+            "scale": "c",
+            "field": "k"
+          }
+        }
+      }
+    }
+  ]
+}

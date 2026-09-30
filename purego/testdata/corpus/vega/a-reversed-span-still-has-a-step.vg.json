@@ -1,0 +1,44 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "**An axis that counts downwards labels its ticks like any other.** A domain may run backwards — `configureDomain` replaces an end rather than clamping it, and upstream does not correct the result, so a `domainMax` below the minimum is a domain from 0 to −50 and the axis counts down it. The decimals such a label keeps come from the tick step, and upstream reads that step with d3's `tickStep`. This engine computed it as `stepFrom(tickIncrement(start, stop, count))`, which **is not the same function**: `tickIncrement` divides by the span and takes `log10` of it, so a negative span gives NaN, while `tickStep` reverses the pair *first* and answers a negative step. `tickIncrement(10, −50, 5)` is NaN; `tickStep(10, −50, 5)` is −10. The NaN fell through to \"leave the specifier alone\", `,f` kept d3's default of six decimals, and the axis read `−20.000000` where upstream reads `−20`.\n\nThe substitution was at **eight** call sites, every one of them standing in for d3's `tickStep`, and `Ticks.step` — written for exactly this and carrying a comment saying so — was wired into none of them. `Ticks.spanStep` is the one place the rule lives now.\n\n**Two reversed scales, because the fix has two halves and one of them hides behind the other.** `down` is the coarse case: a step of −20, where d3's `precisionFixed` answers 0 and a label reads `−20`. Reaching the step at all is enough to fix it, because `precisionForStep` already answered 0 for a negative number — by the wrong route, but with the right answer. `fine` is the case that tells the routes apart: a step of −0.02 needs **two** decimals, and only taking the step's *magnitude* gets them, which is what every one of d3's three precision functions does when it opens with `Math.abs(step)`. A fixture with only `down` in it passes with half the fix in place.\n\n`up` is the control, and it is the same span the other way round, so a change that broke ordinary axes would show here rather than in some other fixture. The labels are what is compared; the tick **positions** are the same either way, which is why this went unseen for as long as it did.",
+  "width": 200,
+  "height": 120,
+  "padding": 5,
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {"v": 19},
+        {"v": 91}
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "down",
+      "type": "linear",
+      "domain": {"data": "t", "field": "v"},
+      "domainMax": -50,
+      "range": "height"
+    },
+    {
+      "name": "fine",
+      "type": "linear",
+      "domain": [0, 1],
+      "domainMax": -0.05,
+      "range": "height"
+    },
+    {
+      "name": "up",
+      "type": "linear",
+      "domain": [-50, 0],
+      "range": "width"
+    }
+  ],
+  "axes": [
+    {"orient": "left", "scale": "down", "tickCount": 3},
+    {"orient": "right", "scale": "fine", "tickCount": 3},
+    {"orient": "bottom", "scale": "up", "tickCount": 3}
+  ],
+  "marks": []
+}

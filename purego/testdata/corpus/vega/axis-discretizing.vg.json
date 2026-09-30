@@ -1,0 +1,113 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "An axis drawn on each of the four discretizing scales, which no chart in the corpus had asked for. Their ranges are positions rather than colours, so the ticks land somewhere: a quantize scale ticks like the linear scale it wraps, a threshold scale ticks at its own cut points, a quantile scale at every sample in its domain, and a bin-ordinal scale at the bin boundaries its transform produced — filtered to the ones that fall inside the range, which is what makes it the only one of the four whose ticks are not simply its domain. Several ticks share a position because the output is a short list of steps; that is what the scales are.",
+  "width": 240,
+  "height": 130,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        { "v": 0 },
+        { "v": 7 },
+        { "v": 12 },
+        { "v": 23 },
+        { "v": 31 },
+        { "v": 44 },
+        { "v": 58 },
+        { "v": 79 },
+        { "v": 96 }
+      ]
+    },
+    {
+      "name": "binned",
+      "source": "t",
+      "transform": [{ "type": "bin", "field": "v", "extent": [0, 100], "step": 25 }]
+    }
+  ],
+  "scales": [
+    {
+      "name": "quantized",
+      "type": "quantize",
+      "domain": [0, 100],
+      "range": [0, 60, 120, 180, 240]
+    },
+    {
+      "name": "thresholded",
+      "type": "threshold",
+      "domain": [25, 50, 75],
+      "range": [10, 90, 170, 240]
+    },
+    {
+      "name": "quantiled",
+      "type": "quantile",
+      "domain": { "data": "t", "field": "v" },
+      "range": [0, 120, 240]
+    },
+    {
+      "name": "binOrdinal",
+      "type": "bin-ordinal",
+      "domain": { "data": "binned", "field": "bin0" },
+      "range": [20, 100, 160, 220]
+    }
+  ],
+  "axes": [
+    { "orient": "top", "scale": "quantized", "title": "quantize", "titlePadding": 2 },
+    {
+      "orient": "top",
+      "scale": "thresholded",
+      "offset": 40,
+      "title": "threshold",
+      "titlePadding": 2
+    },
+    { "orient": "bottom", "scale": "quantiled", "title": "quantile", "titlePadding": 2 },
+    {
+      "orient": "bottom",
+      "scale": "binOrdinal",
+      "offset": 42,
+      "title": "bin-ordinal",
+      "titlePadding": 2
+    }
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": { "data": "t" },
+      "encode": {
+        "enter": {
+          "x": { "scale": "quantized", "field": "v" },
+          "width": { "value": 6 },
+          "y": { "value": 8 },
+          "height": { "value": 22 },
+          "fill": { "value": "#4c78a8" }
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": { "data": "t" },
+      "encode": {
+        "enter": {
+          "x": { "scale": "thresholded", "field": "v" },
+          "width": { "value": 6 },
+          "y": { "value": 48 },
+          "height": { "value": 22 },
+          "fill": { "value": "#f58518" }
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "from": { "data": "binned" },
+      "encode": {
+        "enter": {
+          "x": { "scale": "binOrdinal", "field": "bin0" },
+          "y": { "value": 88 },
+          "size": { "value": 60 },
+          "fill": { "value": "#54a24b" }
+        }
+      }
+    }
+  ]
+}

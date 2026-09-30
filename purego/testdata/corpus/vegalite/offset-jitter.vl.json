@@ -1,0 +1,13 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "Points jittered within their category, where the offset is continuous rather than a set of lanes — so the stated step sizes the band and the offset fills it.",
+  "data": {"url": "data/cars.json"},
+  "transform": [{"calculate": "random()", "as": "random"}],
+  "height": {"step": 50},
+  "mark": "point",
+  "encoding": {
+    "x": {"field": "Horsepower", "type": "quantitative"},
+    "y": {"field": "Cylinders", "type": "ordinal"},
+    "yOffset": {"field": "random", "type": "quantitative"}
+  }
+}

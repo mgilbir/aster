@@ -1,0 +1,2 @@
+{"width":50,"height":50,"data":[{"name":"a","values":[{"c":"x","v":1},{"c":"y","v":2}],"transform":[{"type":"stack","groupby":["c",""],"field":"v"}]}],
+"marks":[{"type":"text","from":{"data":"a"},"encode":{"update":{"text":{"signal":"datum.y1"}}}}]}

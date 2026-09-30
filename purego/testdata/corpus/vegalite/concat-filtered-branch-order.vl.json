@@ -1,0 +1,25 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A plot filtered by a brush beside the plot the brush is dragged in.",
+  "data": {"url": "data/cars.json"},
+  "hconcat": [
+    {
+      "mark": "bar",
+      "transform": [{"filter": {"param": "brush"}}],
+      "encoding": {
+        "y": {"field": "Origin", "type": "nominal", "sort": "-x"},
+        "x": {"aggregate": "count", "scale": {"domain": [0, 300]}}
+      }
+    },
+    {
+      "height": 200,
+      "width": 50,
+      "params": [{"name": "brush", "select": {"type": "interval", "encodings": ["y"]}}],
+      "mark": "bar",
+      "encoding": {
+        "y": {"field": "Origin", "type": "nominal", "sort": "-x", "axis": null},
+        "x": {"aggregate": "count", "axis": null}
+      }
+    }
+  ]
+}

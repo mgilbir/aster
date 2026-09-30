@@ -1,0 +1,150 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A time scale's domain is a list of **dates**, not of numbers, and a date has a range. ECMA-262's `TimeClip` calls anything past \u00b18.64e15 milliseconds \u2014 about \u00b1271,821 years \u2014 an *Invalid Date*, whose time value is `NaN`; `new Date(1e21)` is one. So a column reaching `1e21` gives upstream a domain of `[0, NaN]` and an axis with **no labels at all**, and the line it draws has a point it cannot place. This engine carried the number through instead: it saturated on the way to a `Long`, asked for the year 292,278,994, and `LocalDate` will not build one \u2014 so the compile ended in a fatal `DateTimeException` and drew nothing, where upstream draws the chart. The rule was already written down here as `JsDate.clip`, in the module a scale can see; only the expression functions were using it. The second scale is the same column read as a **linear** scale, which has no such bound and places every value including the enormous one, so the fixture says the clipping belongs to the date and not to the number. Three more scales say where the bound **is**, which a value of `1e21` cannot: one whose domain ends exactly at `8640000000000000` and is a date, one ending a single millisecond later and is not, and one whose domain is a column carrying an **infinity** \u2014 written by a formula, JSON having no way to spell one. A clip that is a day too wide passes the first two otherwise, and a clip that tests only the magnitude passes the third.",
+  "width": 200,
+  "height": 100,
+  "padding": 5,
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {
+          "v": 1e-07,
+          "n": 1
+        },
+        {
+          "v": 1000000,
+          "n": 2
+        },
+        {
+          "v": 1e+20,
+          "n": 3
+        },
+        {
+          "v": 1e+21,
+          "n": 4
+        }
+      ],
+      "transform": [
+        {
+          "type": "formula",
+          "expr": "datum.n === 4 ? 1/0 : datum.v",
+          "as": "inf"
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "y",
+      "type": "time",
+      "domain": {
+        "data": "t",
+        "field": "v"
+      },
+      "range": "height"
+    },
+    {
+      "name": "lin",
+      "type": "linear",
+      "domain": {
+        "data": "t",
+        "field": "v"
+      },
+      "range": [
+        0,
+        60
+      ]
+    },
+    {
+      "name": "atBound",
+      "type": "time",
+      "domain": [
+        0,
+        8640000000000000
+      ],
+      "range": [
+        0,
+        60
+      ]
+    },
+    {
+      "name": "pastBound",
+      "type": "time",
+      "domain": [
+        0,
+        8640000000000001
+      ],
+      "range": [
+        0,
+        60
+      ]
+    },
+    {
+      "name": "infinite",
+      "type": "time",
+      "domain": {
+        "data": "t",
+        "field": "inf"
+      },
+      "range": [
+        0,
+        60
+      ]
+    }
+  ],
+  "axes": [
+    {
+      "orient": "left",
+      "scale": "y",
+      "tickCount": 4
+    }
+  ],
+  "marks": [
+    {
+      "type": "symbol",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "signal": "40 * datum.n"
+          },
+          "y": {
+            "scale": "y",
+            "field": "v"
+          },
+          "size": {
+            "value": 40
+          }
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "value": 0
+          },
+          "y": {
+            "signal": "14 * datum.n - 7"
+          },
+          "text": {
+            "signal": "'time ' + scale('y', datum.v) + ' | linear ' + scale('lin', datum.v) + ' | at ' + scale('atBound', datum.v) + ' | past ' + scale('pastBound', datum.v) + ' | inf ' + scale('infinite', datum.v)"
+          },
+          "fontSize": {
+            "value": 8
+          },
+          "baseline": {
+            "value": "top"
+          }
+        }
+      }
+    }
+  ]
+}

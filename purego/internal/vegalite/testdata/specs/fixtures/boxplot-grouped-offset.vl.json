@@ -1,0 +1,12 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "Box plots side by side within each category, where the offset has already put each box in a lane — so the box is not centred in the band a second time.",
+  "data": {"url": "data/cars.json"},
+  "mark": {"type": "boxplot"},
+  "encoding": {
+    "x": {"field": "Cylinders", "type": "nominal"},
+    "color": {"field": "Origin", "type": "nominal"},
+    "xOffset": {"field": "Origin", "type": "nominal"},
+    "y": {"field": "Acceleration", "type": "quantitative"}
+  }
+}

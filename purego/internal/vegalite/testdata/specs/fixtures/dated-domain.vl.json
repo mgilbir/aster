@@ -1,0 +1,14 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A domain written as dates, which Vega takes as expressions rather than objects.",
+  "data": {"url": "data/stocks.csv"},
+  "mark": "bar",
+  "encoding": {
+    "x": {
+      "timeUnit": "hours",
+      "field": "date",
+      "scale": {"domain": [{"hours": 0}, {"hours": 24}]}
+    },
+    "y": {"field": "price", "type": "quantitative"}
+  }
+}

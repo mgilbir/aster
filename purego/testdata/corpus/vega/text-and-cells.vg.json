@@ -1,0 +1,128 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "Three more transforms whose one fixture each used only their defaults. The word count is given a pattern of its own so hyphenated words stay whole, a case rule so capitals do not count separately, and a stopword list so the small words drop out; the identifier that follows numbers what is left, which is what a mark keys on when the text itself is not unique. The Voronoi cells on the right are given an extent larger than the points they surround, so the outermost cells are cut by the extent rather than by the hull, and their outlines are written under names the specification chose.",
+  "width": 280,
+  "height": 140,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "lines",
+      "values": [
+        { "text": "The quick brown fox jumps over the lazy dog" },
+        { "text": "A quick brown dog outpaces a quick fox" },
+        { "text": "The well-known dog and the WELL-KNOWN fox" }
+      ]
+    },
+    {
+      "name": "words",
+      "source": "lines",
+      "transform": [
+        {
+          "type": "countpattern",
+          "field": "text",
+          "pattern": "[\\w-]{3,}",
+          "case": "lower",
+          "stopwords": "(the|and|over|a)",
+          "as": ["word", "n"]
+        },
+        { "type": "collect", "sort": { "field": ["n", "word"], "order": ["descending", "ascending"] } },
+        { "type": "identifier", "as": "rank" }
+      ]
+    },
+    {
+      "name": "points",
+      "values": [
+        { "px": 20, "py": 20 },
+        { "px": 60, "py": 40 },
+        { "px": 35, "py": 75 },
+        { "px": 85, "py": 90 },
+        { "px": 100, "py": 30 },
+        { "px": 55, "py": 110 }
+      ],
+      "transform": [
+        {
+          "type": "voronoi",
+          "x": "px",
+          "y": "py",
+          "extent": [
+            [-10, -10],
+            [130, 130]
+          ],
+          "as": "cell"
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "count",
+      "type": "linear",
+      "domain": { "data": "words", "field": "n" },
+      "range": [0, 120],
+      "zero": true
+    },
+    {
+      "name": "row",
+      "type": "band",
+      "domain": { "data": "words", "field": "word" },
+      "range": [0, 130],
+      "padding": 0.2
+    }
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": { "data": "words" },
+      "encode": {
+        "enter": {
+          "x": { "value": 46 },
+          "x2": { "scale": "count", "field": "n", "offset": 46 },
+          "y": { "scale": "row", "field": "word" },
+          "height": { "scale": "row", "band": 1 },
+          "fill": { "signal": "datum.rank % 2 ? '#4c78a8' : '#9ecae1'" }
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": { "data": "words" },
+      "encode": {
+        "enter": {
+          "x": { "value": 44 },
+          "y": { "scale": "row", "field": "word", "band": 0.5 },
+          "text": { "field": "word" },
+          "align": { "value": "right" },
+          "baseline": { "value": "middle" },
+          "fontSize": { "value": 9 },
+          "fill": { "value": "#333333" }
+        }
+      }
+    },
+    {
+      "type": "path",
+      "from": { "data": "points" },
+      "encode": {
+        "enter": {
+          "x": { "value": 150 },
+          "path": { "field": "cell" },
+          "fill": { "value": "#f7f7f7" },
+          "stroke": { "value": "#999999" },
+          "strokeWidth": { "value": 0.5 }
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "from": { "data": "points" },
+      "encode": {
+        "enter": {
+          "x": { "field": "px", "offset": 150 },
+          "y": { "field": "py" },
+          "size": { "value": 40 },
+          "fill": { "value": "#e45756" }
+        }
+      }
+    }
+  ]
+}

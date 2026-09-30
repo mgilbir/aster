@@ -1,0 +1,140 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "The options of the three hierarchy layouts that a single fixture each had left unexercised. The pack layout is given a radius field so its leaves are sized by a column rather than by their value, plus its own padding; the partition layout rounds its rectangles, pads them and writes its output under names of the specification's choosing; and the tree layout is asked for the cluster method with separation switched off, which puts every leaf on the same depth and spaces siblings evenly. All three sort their children, which is the option that turned out to be read from the wrong object.",
+  "width": 280,
+  "height": 180,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "flat",
+      "values": [
+        { "id": "root", "label": "all" },
+        { "id": "a", "parent": "root", "label": "alpha", "v": 6, "r": 18 },
+        { "id": "b", "parent": "root", "label": "beta", "v": 14, "r": 10 },
+        { "id": "c", "parent": "root", "label": "gamma", "v": 9, "r": 22 },
+        { "id": "a1", "parent": "a", "label": "a1", "v": 4, "r": 8 },
+        { "id": "a2", "parent": "a", "label": "a2", "v": 2, "r": 14 },
+        { "id": "b1", "parent": "b", "label": "b1", "v": 11, "r": 6 },
+        { "id": "b2", "parent": "b", "label": "b2", "v": 3, "r": 12 }
+      ]
+    },
+    {
+      "name": "packed",
+      "source": "flat",
+      "transform": [
+        { "type": "stratify", "key": "id", "parentKey": "parent" },
+        {
+          "type": "pack",
+          "field": "v",
+          "radius": "r",
+          "padding": 3,
+          "sort": { "field": "value", "order": "descending" },
+          "size": [90, 90]
+        }
+      ]
+    },
+    {
+      "name": "parted",
+      "source": "flat",
+      "transform": [
+        { "type": "stratify", "key": "id", "parentKey": "parent" },
+        {
+          "type": "partition",
+          "field": "v",
+          "sort": { "field": "value" },
+          "padding": 2,
+          "round": true,
+          "size": [90, 80],
+          "as": ["left", "top", "right", "bottom", "level", "kids"]
+        }
+      ]
+    },
+    {
+      "name": "treed",
+      "source": "flat",
+      "transform": [
+        { "type": "stratify", "key": "id", "parentKey": "parent" },
+        {
+          "type": "tree",
+          "method": "cluster",
+          "separation": false,
+          "sort": { "field": "value", "order": "descending" },
+          "size": [80, 70],
+          "as": ["across", "down", "level", "kids"]
+        }
+      ]
+    }
+  ],
+  "marks": [
+    {
+      "type": "symbol",
+      "from": { "data": "packed" },
+      "encode": {
+        "enter": {
+          "x": { "field": "x" },
+          "y": { "field": "y" },
+          "size": { "signal": "4 * datum.r * datum.r" },
+          "shape": { "value": "circle" },
+          "fill": { "value": "#c6dbef" },
+          "stroke": { "value": "#3182bd" },
+          "strokeWidth": { "value": 0.5 }
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": { "data": "parted" },
+      "encode": {
+        "enter": {
+          "x": { "signal": "110 + datum.left" },
+          "x2": { "signal": "110 + datum.right" },
+          "y": { "field": "top" },
+          "y2": { "field": "bottom" },
+          "fill": { "signal": "datum.kids ? '#fdd0a2' : '#e6550d'" },
+          "stroke": { "value": "#ffffff" }
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": { "data": "parted" },
+      "encode": {
+        "enter": {
+          "x": { "signal": "112 + datum.left" },
+          "y": { "signal": "datum.top + 2" },
+          "text": { "field": "label" },
+          "baseline": { "value": "top" },
+          "fontSize": { "value": 8 },
+          "fill": { "value": "#333333" }
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "from": { "data": "treed" },
+      "encode": {
+        "enter": {
+          "x": { "signal": "200 + datum.across" },
+          "y": { "signal": "100 + datum.down" },
+          "size": { "value": 50 },
+          "fill": { "signal": "datum.level === 0 ? '#31a354' : '#a1d99b'" }
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": { "data": "treed" },
+      "encode": {
+        "enter": {
+          "x": { "signal": "204 + datum.across" },
+          "y": { "signal": "100 + datum.down" },
+          "text": { "field": "label" },
+          "baseline": { "value": "middle" },
+          "fontSize": { "value": 8 },
+          "fill": { "value": "#333333" }
+        }
+      }
+    }
+  ]
+}

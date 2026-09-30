@@ -1,0 +1,18 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "The other half of `a-link-a-theme-gave-every-mark`, which cannot be a row beside it because a configuration is chart-level: a chart with no link anywhere — no `href` channel, none on the mark, none in the theme — draws no `cursor` at all. `cursor` returns `markDef.cursor`, which is nothing, and the property is never written. A rule that reached for the pointer on the strength of the theme alone would put one on every chart that has a `config.mark` block of any kind, which is most of them.",
+  "config": {"mark": {"opacity": 0.9}},
+  "data": {
+    "values": [
+      {"c": "alpha", "v": 28},
+      {"c": "beta", "v": 55}
+    ]
+  },
+  "width": 180,
+  "height": 60,
+  "mark": "bar",
+  "encoding": {
+    "x": {"field": "c", "type": "nominal"},
+    "y": {"field": "v", "type": "quantitative"}
+  }
+}

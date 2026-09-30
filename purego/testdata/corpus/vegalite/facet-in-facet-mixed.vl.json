@@ -1,0 +1,25 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "Rows of grids inside columns of them, and it is not the two same-channel cases combined. A heading is folded upward only where the level above facets on the **same channel**: a column grid has no column heading below it to absorb and no row heading above to be absorbed into, so this chart captions its columns at the top and its rows inside each cell — two headings where the same nesting by one channel writes one. It is the case that shows the fold is per channel rather than per level.",
+  "data": {
+    "values": [
+      {"region": "north", "size": "big", "x": 1, "y": 4},
+      {"region": "north", "size": "small", "x": 2, "y": 3},
+      {"region": "south", "size": "big", "x": 3, "y": 2},
+      {"region": "south", "size": "small", "x": 4, "y": 1}
+    ]
+  },
+  "facet": {"column": {"field": "region"}},
+  "spec": {
+    "facet": {"row": {"field": "size"}},
+    "spec": {
+      "width": 120,
+      "height": 80,
+      "mark": "point",
+      "encoding": {
+        "x": {"field": "x", "type": "quantitative"},
+        "y": {"field": "y", "type": "quantitative"}
+      }
+    }
+  }
+}

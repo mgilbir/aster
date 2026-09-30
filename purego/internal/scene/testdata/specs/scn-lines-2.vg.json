@@ -1,0 +1,450 @@
+{
+ "$schema": "https://vega.github.io/schema/vega/v6.json",
+ "width": 260,
+ "height": 278,
+ "padding": 5,
+ "marks": [
+  {
+   "type": "line",
+   "from": {
+    "data": "p2"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 0"
+     },
+     "interpolate": {
+      "value": "linear"
+     },
+     "stroke": {
+      "value": "#333"
+     },
+     "strokeWidth": {
+      "value": 1
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p2"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 12"
+     },
+     "interpolate": {
+      "value": "linear-closed"
+     },
+     "stroke": {
+      "value": "#333"
+     },
+     "strokeWidth": {
+      "value": 1
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p2"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 24"
+     },
+     "interpolate": {
+      "value": "basis"
+     },
+     "stroke": {
+      "value": "#333"
+     },
+     "strokeWidth": {
+      "value": 1
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p2"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 36"
+     },
+     "interpolate": {
+      "value": "basis-open"
+     },
+     "stroke": {
+      "value": "#333"
+     },
+     "strokeWidth": {
+      "value": 1
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p2"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 48"
+     },
+     "interpolate": {
+      "value": "basis-closed"
+     },
+     "stroke": {
+      "value": "#333"
+     },
+     "strokeWidth": {
+      "value": 1
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p2"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 60"
+     },
+     "interpolate": {
+      "value": "bundle"
+     },
+     "stroke": {
+      "value": "#333"
+     },
+     "strokeWidth": {
+      "value": 1
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p2"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 72"
+     },
+     "interpolate": {
+      "value": "cardinal"
+     },
+     "stroke": {
+      "value": "#333"
+     },
+     "strokeWidth": {
+      "value": 1
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p2"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 84"
+     },
+     "interpolate": {
+      "value": "cardinal-open"
+     },
+     "stroke": {
+      "value": "#333"
+     },
+     "strokeWidth": {
+      "value": 1
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p2"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 96"
+     },
+     "interpolate": {
+      "value": "cardinal-closed"
+     },
+     "stroke": {
+      "value": "#333"
+     },
+     "strokeWidth": {
+      "value": 1
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p2"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 108"
+     },
+     "interpolate": {
+      "value": "catmull-rom"
+     },
+     "stroke": {
+      "value": "#333"
+     },
+     "strokeWidth": {
+      "value": 1
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p2"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 120"
+     },
+     "interpolate": {
+      "value": "catmull-rom-open"
+     },
+     "stroke": {
+      "value": "#333"
+     },
+     "strokeWidth": {
+      "value": 1
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p2"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 132"
+     },
+     "interpolate": {
+      "value": "catmull-rom-closed"
+     },
+     "stroke": {
+      "value": "#333"
+     },
+     "strokeWidth": {
+      "value": 1
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p2"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 144"
+     },
+     "interpolate": {
+      "value": "monotone"
+     },
+     "stroke": {
+      "value": "#333"
+     },
+     "strokeWidth": {
+      "value": 1
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p2"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 156"
+     },
+     "interpolate": {
+      "value": "natural"
+     },
+     "stroke": {
+      "value": "#333"
+     },
+     "strokeWidth": {
+      "value": 1
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p2"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 168"
+     },
+     "interpolate": {
+      "value": "step"
+     },
+     "stroke": {
+      "value": "#333"
+     },
+     "strokeWidth": {
+      "value": 1
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p2"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 180"
+     },
+     "interpolate": {
+      "value": "step-before"
+     },
+     "stroke": {
+      "value": "#333"
+     },
+     "strokeWidth": {
+      "value": 1
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p2"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 192"
+     },
+     "interpolate": {
+      "value": "step-after"
+     },
+     "stroke": {
+      "value": "#333"
+     },
+     "strokeWidth": {
+      "value": 1
+     }
+    }
+   }
+  }
+ ],
+ "data": [
+  {
+   "name": "p2",
+   "values": [
+    {
+     "x": 0.0,
+     "y": 37.38800516653349,
+     "g": true
+    },
+    {
+     "x": 240.0,
+     "y": 61.98934007603763,
+     "g": true
+    }
+   ]
+  }
+ ]
+}

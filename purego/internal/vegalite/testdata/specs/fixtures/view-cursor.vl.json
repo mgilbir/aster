@@ -1,0 +1,16 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A plotting area that says what the pointer looks like over it, which is part of the view block like its paint.",
+  "data": {"url": "data/stocks.csv"},
+  "transform": [{"filter": "datum.symbol==='GOOG'"}],
+  "mark": "line",
+  "width": 400,
+  "encoding": {
+    "x": {"field": "date", "type": "temporal"},
+    "y": {"field": "price", "type": "quantitative"}
+  },
+  "params": [
+    {"name": "brush", "select": {"type": "interval", "encodings": ["x"], "mark": {"cursor": "pointer"}}}
+  ],
+  "view": {"cursor": "text"}
+}

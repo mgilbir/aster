@@ -1,0 +1,1 @@
+{"data": [{"name": "d", "transform": [{"type": "sequence", "start": 0, "stop": 200000}, {"type": "window", "ops": ["median"], "fields": ["data"], "frame": [-1000000, 1000000]}]}]}

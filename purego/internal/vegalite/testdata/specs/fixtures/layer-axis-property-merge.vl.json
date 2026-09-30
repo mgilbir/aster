@@ -1,0 +1,22 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A band over a line, sharing one x: what either layer settles about the axis, the axis keeps.",
+  "data": {"url": "data/cars.json"},
+  "encoding": {"x": {"field": "Year", "timeUnit": "year"}},
+  "layer": [
+    {
+      "mark": {"type": "errorband", "extent": "stderr"},
+      "encoding": {
+        "y": {
+          "field": "Miles_per_Gallon",
+          "type": "quantitative",
+          "title": "Mean of Miles per Gallon"
+        }
+      }
+    },
+    {
+      "mark": "line",
+      "encoding": {"y": {"aggregate": "mean", "field": "Miles_per_Gallon"}}
+    }
+  ]
+}

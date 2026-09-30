@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mgilbir/aster/internal/textmeasure"
+	"github.com/mgilbir/aster/internal/text"
 	pdf0 "github.com/mgilbir/pdf0"
 )
 
@@ -37,7 +37,7 @@ func firstMoveToX(t *testing.T, content string) float64 {
 // shaped advance: middle sits half an advance left of start, end a full
 // advance left.
 func TestTextAnchor(t *testing.T) {
-	m, err := textmeasure.New()
+	m, err := text.New()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func within(a, b, tol float64) bool {
 // contains no /Font resources and no text-showing operators, only filled
 // path geometry.
 func TestTextProducesOutlinesNotFonts(t *testing.T) {
-	m, err := textmeasure.New()
+	m, err := text.New()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestTextProducesOutlinesNotFonts(t *testing.T) {
 // TestTextWhitespaceOnly renders nothing but must not error.
 func TestTextWhitespaceOnly(t *testing.T) {
 	svg := `<svg width="10" height="10"><text transform="translate(5,5)" font-size="10px"> </text></svg>`
-	m, err := textmeasure.New()
+	m, err := text.New()
 	if err != nil {
 		t.Fatal(err)
 	}

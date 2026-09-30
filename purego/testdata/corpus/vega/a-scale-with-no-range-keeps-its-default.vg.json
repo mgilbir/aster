@@ -1,0 +1,66 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "**A scale with no range is not a broken scale.** Upstream's `configureRange` only ever calls `scale.range(…)` when there is a range to set, so a scale that declares none keeps d3's own default — and that default is `[0, 1]` for every continuous, discretizing and banded type. Probed across nine: `linear`, `log`, `sqrt`, `time`, `quantize`, `threshold`, `band` and `point` all range `[0, 1]`, and only `ordinal` differs, ranging `[]`. Two ways to arrive there and both are written out here. `plain` simply declares no `range`. `scheme` declares one and it evaporates, because the scheme branch is reached through a bare `else if (_.scheme)` — a **truthiness** test, so a scheme of `null`, `\"\"`, `0` or `false` is not a failed lookup and not a fallback to some default palette: the branch is never entered and the scale is left exactly as `plain` is. That is the common case rather than the exotic one, since `{\"scheme\": {\"signal\": \"theme\"}}` whose signal has not been answered yet is precisely a scale with no range. `named` is the control: a scheme that does resolve still resolves. **Only the signal form gets this far.** A *literal* falsey scheme never reaches `configureRange`: `parseScaleRange` matches it against no branch at all and upstream refuses the whole specification with `Unsupported range type: {\"scheme\":null}` — probed, and the reason this fixture writes the rule with signals rather than with literals. `{\"signal\": …}` survives parsing because it is an *object* and every object is truthy, and it is weighed a second time once it has a value. The three `pos` scales carry the same rule onto an axis, where a `[0, 1]` range is visible as an axis 1 unit wide rather than as no axis at all — refusing the range used to take the whole scale with it, and then every encoding that named it, so a chart upstream draws became no chart and a fistful of errors. The rects read `plain` and `scheme` for their **fill**, which upstream answers with a *number* rather than a colour; what the scene item then carries is a separate question from this one and is not what this fixture is about.",
+  "width": 260,
+  "height": 120,
+  "padding": 5,
+  "signals": [
+    {"name": "missing", "value": null},
+    {"name": "blank", "value": ""}
+  ],
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {"k": "a", "v": 0},
+        {"k": "b", "v": 50},
+        {"k": "c", "v": 100}
+      ]
+    }
+  ],
+  "scales": [
+    {"name": "plain", "type": "linear", "domain": [0, 100]},
+    {"name": "scheme", "type": "linear", "domain": [0, 100], "range": {"scheme": {"signal": "missing"}}},
+    {"name": "blankScheme", "type": "linear", "domain": [0, 100], "range": {"scheme": {"signal": "blank"}}},
+    {"name": "named", "type": "linear", "domain": [0, 100], "range": {"scheme": "blues"}},
+    {"name": "posPlain", "type": "linear", "domain": [0, 100]},
+    {"name": "posBand", "type": "band", "domain": {"data": "t", "field": "k"}},
+    {"name": "posPoint", "type": "point", "domain": {"data": "t", "field": "k"}},
+    {"name": "x", "type": "band", "domain": {"data": "t", "field": "k"}, "range": "width", "padding": 0.2}
+  ],
+  "axes": [
+    {"orient": "top", "scale": "posPlain", "tickCount": 2},
+    {"orient": "bottom", "scale": "posBand"},
+    {"orient": "bottom", "scale": "posPoint", "offset": 20}
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "t"},
+      "encode": {
+        "update": {
+          "x": {"scale": "x", "field": "k"},
+          "width": {"scale": "x", "band": 1},
+          "y": {"value": 20},
+          "height": {"value": 24},
+          "fill": {"scale": "named", "field": "v"},
+          "stroke": {"value": "#333"}
+        }
+      }
+    },
+    {
+      "type": "text",
+      "encode": {
+        "update": {
+          "x": {"value": 2},
+          "y": {"value": 54},
+          "text": {
+            "signal": "'plain ' + scale('plain', 50) + ' scheme ' + scale('scheme', 50) + ' blank ' + scale('blankScheme', 50) + ' band ' + scale('posBand', 'b') + ' point ' + scale('posPoint', 'b')"
+          },
+          "fontSize": {"value": 9},
+          "baseline": {"value": "top"}
+        }
+      }
+    }
+  ]
+}

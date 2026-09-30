@@ -1,0 +1,14 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "Two series told apart by their dash pattern rather than by colour.",
+  "data": {"values": [
+    {"t": 1, "s": "a", "v": 3}, {"t": 2, "s": "a", "v": 5}, {"t": 3, "s": "a", "v": 4},
+    {"t": 1, "s": "b", "v": 6}, {"t": 2, "s": "b", "v": 2}, {"t": 3, "s": "b", "v": 7}
+  ]},
+  "mark": "line",
+  "encoding": {
+    "x": {"field": "t", "type": "quantitative"},
+    "y": {"field": "v", "type": "quantitative"},
+    "strokeDash": {"field": "s", "type": "nominal"}
+  }
+}

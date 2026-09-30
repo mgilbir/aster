@@ -1,0 +1,54 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "An offset scale is padded by its own two entries in `config.scale`, and by a constant that is not an entry at all. Upstream sends the offset channels down a second arm of each rule: `} else if (isXorYOffset(channel)) { if (scaleType === ScaleType.BAND) return scaleConfig.offsetBandPaddingInner; }` for the inner padding, and `} else if (isXorYOffset(channel)) { if (scaleType === ScaleType.POINT) { return 0.5; } else if (scaleType === ScaleType.BAND) return scaleConfig.offsetBandPaddingOuter; }` for the outer. This compiler had neither arm. `offsetBandPaddingInner` and `offsetBandPaddingOuter` were never read, and because they have no default the omission was silent until a theme wrote one; and the point case read `pointPadding`, which agreed only by the accident that its default is the same 0.5 the comment calls for — the half-step that puts an offset point on the centre of the band a bar would have filled. The first row is a grouped bar, where the inner scale takes the theme's 0.3 and 0.15 while the outer band keeps the wider nested-offset padding that separates the groups. The second row offsets points down the other axis — a second channel rather than the same one, because a concatenation shares an offset scale across its views and the two would otherwise be merged into one — and its outer padding must stay 0.5 even though the theme has narrowed every point scale to 0.2, since that number is a constant and not the configured one. The third row is a point scale with no offset at all, where `pointPadding` does apply and must read 0.2, so the two are told apart rather than assumed alike.",
+  "data": {
+    "values": [
+      {"c": "alpha", "g": "one", "v": 30},
+      {"c": "alpha", "g": "two", "v": 18},
+      {"c": "beta", "g": "one", "v": 20},
+      {"c": "beta", "g": "two", "v": 44},
+      {"c": "gamma", "g": "one", "v": 50},
+      {"c": "gamma", "g": "two", "v": 12}
+    ]
+  },
+  "config": {
+    "scale": {
+      "offsetBandPaddingInner": 0.3,
+      "offsetBandPaddingOuter": 0.15,
+      "pointPadding": 0.2
+    }
+  },
+  "vconcat": [
+    {
+      "width": 160,
+      "height": 90,
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "c", "type": "nominal"},
+        "xOffset": {"field": "g", "type": "nominal"},
+        "y": {"field": "v", "type": "quantitative"},
+        "color": {"field": "g", "type": "nominal", "legend": null}
+      }
+    },
+    {
+      "width": 160,
+      "height": 90,
+      "mark": "point",
+      "encoding": {
+        "y": {"field": "c", "type": "nominal"},
+        "yOffset": {"field": "g", "type": "nominal", "scale": {"type": "point"}},
+        "x": {"field": "v", "type": "quantitative"},
+        "color": {"field": "g", "type": "nominal", "legend": null}
+      }
+    },
+    {
+      "width": 160,
+      "height": 90,
+      "mark": "point",
+      "encoding": {
+        "x": {"field": "c", "type": "nominal"},
+        "y": {"field": "v", "type": "quantitative"}
+      }
+    }
+  ]
+}

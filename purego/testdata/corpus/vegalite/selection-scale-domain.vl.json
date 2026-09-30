@@ -1,0 +1,31 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "An overview whose brush is the detail plot's x domain, and a mark drawn with a conditional colour so its second legend is painted in the arm a swatch can show.",
+  "data": {"url": "data/cars.json"},
+  "vconcat": [
+    {
+      "width": 400,
+      "height": 60,
+      "params": [{"name": "brush", "select": {"type": "interval", "encodings": ["x"]}}],
+      "mark": "point",
+      "encoding": {
+        "x": {"field": "Horsepower", "type": "quantitative"},
+        "y": {"field": "Miles_per_Gallon", "type": "quantitative"}
+      }
+    },
+    {
+      "width": 400,
+      "mark": "point",
+      "encoding": {
+        "x": {"field": "Horsepower", "type": "quantitative", "scale": {"domain": {"param": "brush"}}},
+        "y": {"field": "Miles_per_Gallon", "type": "quantitative"},
+        "color": {
+          "condition": {"param": "brush", "field": "Cylinders", "type": "ordinal"},
+          "value": "grey"
+        },
+        "shape": {"field": "Origin", "type": "nominal"},
+        "order": {"condition": {"param": "brush", "value": 1}, "value": 0}
+      }
+    }
+  ]
+}

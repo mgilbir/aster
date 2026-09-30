@@ -1,0 +1,101 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A column of dates written in a format nothing can guess, read with the format the specification states. Upstream's parse types include date and utc followed by a d3 time pattern, and the pattern may be quoted; without them a column like 03/04/2026 is either read as the wrong month or left as text, and a whole axis is drawn from strings. The two series here are the same six instants written day-first and in a quoted pattern with a time in it, parsed as local and as UTC respectively, so the pair also shows which one the zone applies to.",
+  "width": 260,
+  "height": 120,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "dayFirst",
+      "values": [
+        { "when": "03/04/2026", "v": 4 },
+        { "when": "17/04/2026", "v": 9 },
+        { "when": "02/05/2026", "v": 6 },
+        { "when": "21/05/2026", "v": 12 },
+        { "when": "09/06/2026", "v": 8 },
+        { "when": "28/06/2026", "v": 15 }
+      ],
+      "format": { "parse": { "when": "utc:%d/%m/%Y" } }
+    },
+    {
+      "name": "stamped",
+      "values": [
+        { "at": "2026-04-03 08:30", "v": 2 },
+        { "at": "2026-04-17 12:45", "v": 7 },
+        { "at": "2026-05-02 19:05", "v": 4 },
+        { "at": "2026-05-21 06:20", "v": 10 },
+        { "at": "2026-06-09 23:55", "v": 5 },
+        { "at": "2026-06-28 15:10", "v": 13 }
+      ],
+      "format": { "parse": { "at": "utc:'%Y-%m-%d %H:%M'" } }
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "utc",
+      "domain": { "data": "dayFirst", "field": "when" },
+      "range": "width"
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": { "data": "dayFirst", "field": "v" },
+      "range": [80, 0],
+      "zero": true,
+      "nice": true
+    }
+  ],
+  "axes": [
+    {
+      "orient": "bottom",
+      "scale": "x",
+      "offset": 6,
+      "format": "%d %b",
+      "tickCount": { "interval": "month" },
+      "labelAngle": -30,
+      "labelAlign": "right"
+    },
+    { "orient": "left", "scale": "y", "tickCount": 4 }
+  ],
+  "marks": [
+    {
+      "type": "line",
+      "from": { "data": "dayFirst" },
+      "encode": {
+        "enter": {
+          "x": { "scale": "x", "field": "when" },
+          "y": { "scale": "y", "field": "v" },
+          "stroke": { "value": "#4c78a8" },
+          "strokeWidth": { "value": 2 }
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "from": { "data": "stamped" },
+      "encode": {
+        "enter": {
+          "x": { "scale": "x", "field": "at" },
+          "y": { "scale": "y", "field": "v" },
+          "size": { "value": 45 },
+          "fill": { "value": "#e45756" }
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": { "data": "stamped" },
+      "encode": {
+        "enter": {
+          "x": { "value": 0 },
+          "y": { "signal": "96 + datum.v" },
+          "text": { "signal": "utcFormat(datum.at, '%b %d %H:%M')" },
+          "fontSize": { "value": 8 },
+          "fill": { "value": "#666666" }
+        }
+      }
+    }
+  ]
+}

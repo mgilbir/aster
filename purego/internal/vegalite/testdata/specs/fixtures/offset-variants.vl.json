@@ -1,0 +1,14 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "An offset over a bucketed instant, which divides one bucket rather than one band.",
+  "width": 400,
+  "height": 250,
+  "data": {"url": "data/cars.json"},
+  "mark": "bar",
+  "encoding": {
+    "x": {"timeUnit": "year", "field": "Year", "type": "temporal"},
+    "xOffset": {"field": "Origin"},
+    "color": {"field": "Origin"},
+    "y": {"aggregate": "count", "title": "Number of Cars"}
+  }
+}

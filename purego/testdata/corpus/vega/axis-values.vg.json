@@ -1,0 +1,72 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "Explicit tick values: written out of order and partly outside the domain on one axis, thinned by a tickCount on another, and filtering a band domain on the third.",
+  "width": 220,
+  "height": 150,
+  "padding": 5,
+  "data": [
+    {
+      "name": "table",
+      "values": [
+        {"c": "alpha", "v": 42},
+        {"c": "bravo", "v": 88},
+        {"c": "charlie", "v": 17},
+        {"c": "delta", "v": 63},
+        {"c": "echo", "v": 51}
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {"data": "table", "field": "c"},
+      "range": "width",
+      "padding": 0.2
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": [0, 100],
+      "range": "height"
+    },
+    {
+      "name": "thinned",
+      "type": "linear",
+      "domain": [0, 100],
+      "range": "height"
+    }
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "x", "values": ["delta", "alpha", "charlie"]},
+    {
+      "orient": "left",
+      "scale": "y",
+      "values": [77, -20, 0, 33, 140, 100],
+      "grid": true,
+      "title": "Out of order"
+    },
+    {
+      "orient": "right",
+      "scale": "thinned",
+      "values": [0, 25, 50, 75, 100],
+      "tickCount": 4,
+      "title": "Thinned"
+    }
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "c"},
+          "width": {"scale": "x", "band": 1},
+          "y": {"scale": "y", "field": "v"},
+          "y2": {"scale": "y", "value": 0},
+          "fill": {"value": "#9ecae9"}
+        }
+      }
+    }
+  ]
+}

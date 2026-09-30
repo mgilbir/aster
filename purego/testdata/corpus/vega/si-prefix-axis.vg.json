@@ -1,0 +1,74 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "Axes and a legend whose formats resolve against their span: 's' takes one SI prefix for the whole axis, and the precision types take theirs from the tick step.",
+  "width": 320,
+  "height": 200,
+  "padding": 5,
+
+  "data": [
+    {
+      "name": "table",
+      "values": [
+        {"category": "a", "amount": 120000, "share": 0.0123},
+        {"category": "b", "amount": 940000, "share": 0.0456},
+        {"category": "c", "amount": 1650000, "share": 0.0071},
+        {"category": "d", "amount": 2000000, "share": 0.0338}
+      ]
+    }
+  ],
+
+  "scales": [
+    {
+      "name": "xscale",
+      "type": "band",
+      "domain": {"data": "table", "field": "category"},
+      "range": "width",
+      "padding": 0.2
+    },
+    {
+      "name": "yscale",
+      "domain": {"data": "table", "field": "amount"},
+      "nice": true,
+      "range": "height"
+    },
+    {
+      "name": "share",
+      "domain": {"data": "table", "field": "share"},
+      "range": "height"
+    },
+    {
+      "name": "colour",
+      "type": "linear",
+      "domain": {"data": "table", "field": "amount"},
+      "range": {"scheme": "blues"}
+    }
+  ],
+
+  "axes": [
+    {"orient": "bottom", "scale": "xscale"},
+    {"orient": "left", "scale": "yscale", "format": "s", "tickCount": 5},
+    {"orient": "right", "scale": "yscale", "format": "$,s", "tickCount": 5},
+    {"orient": "right", "scale": "share", "format": "r", "tickCount": 5, "offset": 60},
+    {"orient": "top", "scale": "yscale", "format": "e", "tickCount": 4}
+  ],
+
+  "legends": [
+    {"fill": "colour", "type": "gradient", "format": "s", "title": "amount"}
+  ],
+
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "xscale", "field": "category"},
+          "width": {"scale": "xscale", "band": 1},
+          "y": {"scale": "yscale", "field": "amount"},
+          "y2": {"scale": "yscale", "value": 0},
+          "fill": {"scale": "colour", "field": "amount"}
+        }
+      }
+    }
+  ]
+}

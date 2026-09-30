@@ -1,0 +1,46 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "Each bar as a share of the total, which is what joinaggregate is for: an aggregate written back onto every row rather than collapsing them.",
+  "width": 240,
+  "height": 120,
+  "padding": 5,
+  "data": [
+    {
+      "name": "table",
+      "values": [
+        {"k": "a", "n": 12}, {"k": "b", "n": 28}, {"k": "c", "n": 33}, {"k": "d", "n": 7}
+      ],
+      "transform": [
+        {"type": "joinaggregate", "ops": ["sum", "max"], "fields": ["n", "n"], "as": ["total", "peak"]},
+        {"type": "formula", "as": "share", "expr": "datum.n / datum.total"},
+        {"type": "formula", "as": "isPeak", "expr": "datum.n === datum.peak"}
+      ]
+    }
+  ],
+  "scales": [
+    {"name": "x", "type": "band", "domain": {"data": "table", "field": "k"}, "range": "width", "padding": 0.25},
+    {"name": "y", "type": "linear", "domain": [0, 0.5], "range": "height"}
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "x"},
+    {"orient": "left", "scale": "y", "tickCount": 5}
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "k"},
+          "width": {"scale": "x", "band": 1},
+          "y": {"scale": "y", "field": "share"},
+          "y2": {"scale": "y", "value": 0},
+          "fill": [
+            {"test": "datum.isPeak", "value": "#e45756"},
+            {"value": "#9ecae9"}
+          ]
+        }
+      }
+    }
+  ]
+}

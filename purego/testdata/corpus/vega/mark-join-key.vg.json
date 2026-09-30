@@ -1,0 +1,87 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A mark's key names the field that identifies an item, so two rows sharing a key are one item and not two. The later row wins the item's datum while the item keeps the place its key first appeared, which is why the third row's value is drawn in the first row's position. The rect mark repeats 'a' twice and the symbol mark repeats a date, so the key is tested as text and as a number; the line mark alongside them has no key and draws every row.",
+  "width": 220,
+  "height": 120,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        { "c": "a", "v": 2, "t": 1 },
+        { "c": "b", "v": 7, "t": 2 },
+        { "c": "a", "v": 5, "t": 1 },
+        { "c": "c", "v": 4, "t": 3 }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": { "data": "t", "field": "c" },
+      "range": "width",
+      "padding": 0.15
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": { "data": "t", "field": "v" },
+      "range": "height",
+      "nice": true,
+      "zero": true
+    },
+    {
+      "name": "colour",
+      "type": "ordinal",
+      "domain": { "data": "t", "field": "c" },
+      "range": ["#4c78a8", "#f58518", "#54a24b"]
+    }
+  ],
+  "axes": [
+    { "orient": "bottom", "scale": "x" },
+    { "orient": "left", "scale": "y", "tickCount": 4 }
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": { "data": "t" },
+      "key": "c",
+      "encode": {
+        "enter": {
+          "x": { "scale": "x", "field": "c" },
+          "width": { "scale": "x", "band": 1 },
+          "y": { "scale": "y", "field": "v" },
+          "y2": { "scale": "y", "value": 0 },
+          "fill": { "scale": "colour", "field": "c" }
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "from": { "data": "t" },
+      "key": "t",
+      "encode": {
+        "enter": {
+          "x": { "scale": "x", "field": "c", "offset": 12 },
+          "y": { "scale": "y", "field": "v" },
+          "size": { "value": 60 },
+          "fill": { "value": "#333333" }
+        }
+      }
+    },
+    {
+      "type": "line",
+      "from": { "data": "t" },
+      "encode": {
+        "enter": {
+          "x": { "scale": "x", "field": "c", "offset": 6 },
+          "y": { "scale": "y", "field": "v" },
+          "stroke": { "value": "#999999" },
+          "strokeWidth": { "value": 1 }
+        }
+      }
+    }
+  ]
+}

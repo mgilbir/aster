@@ -1,0 +1,83 @@
+{
+ "width": 260,
+ "height": 80,
+ "padding": 5,
+ "data": [
+  {
+   "name": "t",
+   "values": [
+    {
+     "d": "2020-01-15",
+     "v": 3
+    },
+    {
+     "d": "2020-03-01",
+     "v": 6
+    },
+    {
+     "d": "2020-06-20",
+     "v": 4
+    }
+   ],
+   "format": {
+    "parse": {
+     "d": "date"
+    }
+   }
+  }
+ ],
+ "scales": [
+  {
+   "name": "x",
+   "type": "time",
+   "domain": {
+    "data": "t",
+    "field": "d"
+   },
+   "range": "width",
+   "nice": "month"
+  },
+  {
+   "name": "y",
+   "type": "linear",
+   "domain": {
+    "data": "t",
+    "field": "v"
+   },
+   "range": "height",
+   "zero": true
+  }
+ ],
+ "axes": [
+  {
+   "orient": "bottom",
+   "scale": "x",
+   "format": "%b %Y",
+   "labelOverlap": true
+  },
+  {
+   "orient": "left",
+   "scale": "y"
+  }
+ ],
+ "marks": [
+  {
+   "type": "symbol",
+   "from": {
+    "data": "t"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "scale": "x",
+      "field": "d"
+     },
+     "y": {
+      "scale": "y",
+      "field": "v"
+     }
+    }
+   }
+  }
+ ]
+}

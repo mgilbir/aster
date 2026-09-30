@@ -1,0 +1,13 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A donut: the same arc with an inner radius, so the ring is hollow.",
+  "data": {"values": [
+    {"category": "A", "value": 4}, {"category": "B", "value": 6},
+    {"category": "C", "value": 10}
+  ]},
+  "mark": {"type": "arc", "innerRadius": 50},
+  "encoding": {
+    "theta": {"field": "value", "type": "quantitative"},
+    "color": {"field": "category", "type": "nominal"}
+  }
+}

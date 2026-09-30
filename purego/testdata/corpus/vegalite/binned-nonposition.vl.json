@@ -1,0 +1,13 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A bucketed column read through the size and opacity scales, beside an opacity written only as a test.",
+  "data": {"url": "data/cars.json"},
+  "mark": "point",
+  "encoding": {
+    "x": {"field": "Horsepower", "type": "quantitative"},
+    "y": {"field": "Miles_per_Gallon", "type": "quantitative"},
+    "size": {"bin": {"maxbins": 6}, "field": "Acceleration", "type": "quantitative"},
+    "opacity": {"condition": [{"test": "datum.Horsepower > 100", "value": 0.25}]}
+  },
+  "config": {"point": {"opacity": 0.5}}
+}

@@ -1,0 +1,137 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A theme reaching the marks: config.mark under the built-ins, config.rect over them, a named style over that, and a rect that encodes only a stroke and so gets no fill at all. Four more marks are here for channels a theme reaches and a per-channel reader does not: the symbol takes its `shape` from `config.symbol`, the text its `fontWeight` and `angle` from `config.text`, the line its `interpolate` from `config.line`. The path takes nothing from any theme and is here for what Vega's own configuration says a path is: `path: {stroke: defaultColor}` — a **stroked** outline, where this engine had filled it.",
+  "width": 220,
+  "height": 120,
+  "padding": 5,
+  "config": {
+    "mark": {"strokeWidth": 3, "fillOpacity": 0.75, "stroke": "#334455"},
+    "rect": {"cornerRadius": 4},
+    "symbol": {"size": 160, "fill": "#cc6677", "shape": "triangle"},
+    "rule": {"strokeDash": [4, 2], "stroke": "#888888"},
+    "text": {"fontWeight": "bold", "fontSize": 13, "angle": 8},
+    "line": {"interpolate": "step", "strokeWidth": 2},
+    "style": {
+      "highlight": {"fill": "#ddaa33", "cornerRadius": 8}
+    }
+  },
+  "data": [
+    {
+      "name": "table",
+      "values": [
+        {"c": "alpha", "v": 42},
+        {"c": "bravo", "v": 88},
+        {"c": "charlie", "v": 61}
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {"data": "table", "field": "c"},
+      "range": "width",
+      "padding": 0.25
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {"data": "table", "field": "v"},
+      "range": "height",
+      "nice": true
+    }
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "x"},
+    {"orient": "left", "scale": "y", "tickCount": 4}
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "c"},
+          "width": {"scale": "x", "band": 1},
+          "y": {"scale": "y", "field": "v"},
+          "y2": {"scale": "y", "value": 0}
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "style": "highlight",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "c"},
+          "width": {"scale": "x", "band": 0.4},
+          "y": {"scale": "y", "field": "v"},
+          "height": {"value": 6}
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "c"},
+          "width": {"scale": "x", "band": 1},
+          "y": {"value": 0},
+          "height": {"value": 14},
+          "stroke": {"value": "#224466"}
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "c", "band": 0.5},
+          "y": {"scale": "y", "field": "v"}
+        }
+      }
+    },
+    {
+      "type": "rule",
+      "encode": {
+        "enter": {
+          "x": {"value": 0},
+          "x2": {"signal": "width"},
+          "y": {"scale": "y", "value": 50}
+        }
+      }
+    },
+    {
+      "type": "text",
+      "encode": {
+        "enter": {
+          "x": {"value": 6},
+          "y": {"value": 14},
+          "text": {"value": "themed"}
+        }
+      }
+    },
+    {
+      "type": "line",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "c", "band": 0.5},
+          "y": {"scale": "y", "field": "v"},
+          "stroke": {"value": "#4a7c1f"}
+        }
+      }
+    },
+    {
+      "type": "path",
+      "encode": {
+        "enter": {
+          "path": {"value": "M2,100L40,80L78,104L116,86"}
+        }
+      }
+    }
+  ]
+}

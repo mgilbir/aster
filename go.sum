@@ -1,13 +1,11 @@
-github.com/go-text/typesetting v0.3.3 h1:ihGNJU9KzdK2QRDy1Bm7FT5RFQoYb+3n3EIhI/4eaQc=
-github.com/go-text/typesetting v0.3.3/go.mod h1:vIRUT25mLQaSh4C8H/lIsKppQz/Gdb8Pu/tNwpi52ts=
-github.com/go-text/typesetting-utils v0.0.0-20250618110550-c820a94c77b8 h1:4KCscI9qYWMGTuz6BpJtbUSRzcBrUSSE0ENMJbNSrFs=
-github.com/go-text/typesetting-utils v0.0.0-20250618110550-c820a94c77b8/go.mod h1:3/62I4La/HBRX9TcTpBj4eipLiwzf+vhI+7whTc9V7o=
 github.com/mgilbir/andsifr v0.0.0-20260706220517-1793eb745c6f h1:1zvMjWXOWwVoCET7oavSdOIVnCJV4d5hDdtoJUrWDUg=
 github.com/mgilbir/andsifr v0.0.0-20260706220517-1793eb745c6f/go.mod h1:Uh3/Oswp1l5MwPdGoLvNMnUbxq1mYDyrE0Vszec79W4=
 github.com/mgilbir/formalis v0.3.1 h1:NyYe/EcRYJ2jUjgaZG98lNXgJ7H+jgy6mq7HXOnQxl8=
 github.com/mgilbir/formalis v0.3.1/go.mod h1:M82rAk4SewJbe1B3bhgQKw0w7ojFOHus7Nm1roqZYEk=
-github.com/mgilbir/forme v0.4.1 h1:KVS2Weh1wgDgP6hPRT6I3Vhen3vBvY70Q2k80/aPv/w=
-github.com/mgilbir/forme v0.4.1/go.mod h1:VWH98Gvv6a4tUBmhvB0efHmpPEAHrO49EJpu4UGwfw0=
+github.com/mgilbir/forme v0.4.3 h1:2jhGEtD/2NWeCkf0zVLysyDepi4a9A4BPuhJUPGImMM=
+github.com/mgilbir/forme v0.4.3/go.mod h1:VWH98Gvv6a4tUBmhvB0efHmpPEAHrO49EJpu4UGwfw0=
+github.com/mgilbir/goecma262 v0.2.0 h1:Ycgd4Gt6mjxAtNd5H1+K5kRm3bcq4uMM+vqZz2Fh3X4=
+github.com/mgilbir/goecma262 v0.2.0/go.mod h1:wQvOAFchLrhVSiF4JsSzH+yE6eLpc8gOBrvpuahNucI=
 github.com/mgilbir/golittlecms v0.0.0-20260727161601-f6af7cfe1556 h1:2ZUsOgMhxpHCYC8jyzeEnJZFLYGbXhqjAJWJBvY8q4U=
 github.com/mgilbir/golittlecms v0.0.0-20260727161601-f6af7cfe1556/go.mod h1:8SmvcTVpsTeqGaLqnhlCphGYaBeoeedJQB6AsKNNQxo=
 github.com/mgilbir/gopenjpeg v0.1.1 h1:zf0iHWEkex7TsOtQKPy6t19qNJzf7ykxK7r5Sgl/V2A=

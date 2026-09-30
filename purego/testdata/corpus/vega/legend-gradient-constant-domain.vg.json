@@ -1,0 +1,165 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A colour scale over a column that turns out constant. Its domain has no span, and a gradient legend for it is drawn as the **whole ramp** rather than as the one colour that value maps to: `if (!(max - min)) { scale = \u2026 .domain([min=0, max=1]) }`, upstream's own fix for its issue 1479, which throws the domain away and samples end to end. Two things go with that replacement \u2014 the stop offsets are the sampled values themselves, `fraction` being left as `identity` rather than `scaleFraction`, and the scale it builds is a plain linear one, so a transformed colour scale loses its transform where there is no span for a power to bend. The single label sits beside the ramp's **middle**, which is what d3's `normalize` says for coinciding ends: `constant(0.5)`. Left unexpanded the ramp collapsed to one stop, because the ticks between two ends that coincide are one value, and the label drifted to the start. The second legend is the same scale with a span, unchanged and here to say that only the degenerate case moves. The third is degenerate again but takes a **slice** of its scheme, `extent: [0.2, 0.55]`: the replacement carries that slice, because upstream copies the scale's resolved `range()` and a scheme's extent is already resolved into it. Expanded over the whole scheme instead, the ramp would be right in shape and wrong in every colour.",
+  "width": 120,
+  "height": 80,
+  "padding": 5,
+  "data": [
+    {
+      "name": "flat",
+      "values": [
+        {
+          "d": 7
+        },
+        {
+          "d": 7
+        },
+        {
+          "d": 7
+        }
+      ]
+    },
+    {
+      "name": "spread",
+      "values": [
+        {
+          "d": 1
+        },
+        {
+          "d": 4
+        },
+        {
+          "d": 9
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "constant",
+      "type": "linear",
+      "domain": {
+        "data": "flat",
+        "field": "d"
+      },
+      "range": "ramp",
+      "interpolate": "hcl",
+      "zero": false
+    },
+    {
+      "name": "varied",
+      "type": "linear",
+      "domain": {
+        "data": "spread",
+        "field": "d"
+      },
+      "range": "ramp",
+      "interpolate": "hcl",
+      "zero": false
+    },
+    {
+      "name": "sliced",
+      "type": "linear",
+      "domain": {
+        "data": "flat",
+        "field": "d"
+      },
+      "range": {
+        "scheme": "viridis",
+        "extent": [
+          0.2,
+          0.55
+        ]
+      },
+      "zero": false
+    }
+  ],
+  "legends": [
+    {
+      "fill": "constant",
+      "gradientLength": 64,
+      "title": "Constant"
+    },
+    {
+      "fill": "varied",
+      "gradientLength": 64,
+      "title": "Varied"
+    },
+    {
+      "fill": "sliced",
+      "gradientLength": 64,
+      "title": "Sliced"
+    }
+  ],
+  "marks": [
+    {
+      "type": "symbol",
+      "from": {
+        "data": "flat"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "value": 20
+          },
+          "y": {
+            "value": 20
+          },
+          "size": {
+            "value": 200
+          },
+          "fill": {
+            "scale": "constant",
+            "field": "d"
+          }
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "from": {
+        "data": "spread"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "value": 50
+          },
+          "y": {
+            "value": 20
+          },
+          "size": {
+            "value": 200
+          },
+          "fill": {
+            "scale": "varied",
+            "field": "d"
+          }
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "from": {
+        "data": "flat"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "value": 80
+          },
+          "y": {
+            "value": 20
+          },
+          "size": {
+            "value": 200
+          },
+          "fill": {
+            "scale": "sliced",
+            "field": "d"
+          }
+        }
+      }
+    }
+  ]
+}

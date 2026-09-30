@@ -1,0 +1,51 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A quantile scale whose column holds no number is **still a scale**. Its samples are filtered with `d != null && !isNaN(d = +d)`, so a column of date *strings* leaves nothing: upstream reports `domain: []` and `quantiles: [null, null]`, and the scale answers the **first** range entry for any number it is asked about — a null threshold makes d3's `ascending` return `NaN`, and a bisect whose comparison is NaN settles at the low end rather than walking right. It answers `unknown` for a value that fails the input guard, as every scale does. This engine reported an error and built no scale at all, so a mark naming it in a colour channel referred to something that was not there. The second scale is the same shape with one number among the words, which has a domain of one and cuts nowhere; the third is an ordinary column, so the fixture says what an empty domain costs and what it does not.",
+  "width": 240,
+  "height": 100,
+  "padding": 5,
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {"v": "2024-01-07", "w": "2024-01-07", "u": 1, "n": 1},
+        {"v": "2024-03-19", "w": 5, "u": 2, "n": 2},
+        {"v": "2024-06-02", "w": "2024-06-02", "u": 3, "n": 3},
+        {"v": "2024-11-30", "w": "2024-11-30", "u": 4, "n": 4}
+      ]
+    }
+  ],
+  "scales": [
+    {"name": "none", "type": "quantile", "domain": {"data": "t", "field": "v"}, "range": ["#eee", "#999", "#333"]},
+    {"name": "one", "type": "quantile", "domain": {"data": "t", "field": "w"}, "range": ["#eee", "#999", "#333"]},
+    {"name": "all", "type": "quantile", "domain": {"data": "t", "field": "u"}, "range": ["#eee", "#999", "#333"]}
+  ],
+  "marks": [
+    {
+      "type": "text",
+      "from": {"data": "t"},
+      "encode": {
+        "enter": {
+          "x": {"value": 2},
+          "y": {"signal": "18 * datum.n - 12"},
+          "text": {"signal": "'none ' + scale('none', datum.u) + ' | one ' + scale('one', datum.u) + ' | all ' + scale('all', datum.u)"},
+          "fontSize": {"value": 9},
+          "baseline": {"value": "top"}
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {"data": "t"},
+      "encode": {
+        "enter": {
+          "x": {"signal": "40 * datum.n + 120"},
+          "width": {"value": 30},
+          "y": {"value": 70},
+          "y2": {"value": 95},
+          "fill": {"scale": "none", "field": "u"}
+        }
+      }
+    }
+  ]
+}

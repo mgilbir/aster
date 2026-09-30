@@ -1,0 +1,12 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A colour ramp laid along the bottom: it is as long as the plot is wide.",
+  "data": {"url": "data/cars.json"},
+  "mark": "point",
+  "encoding": {
+    "x": {"field": "Horsepower", "type": "quantitative"},
+    "y": {"field": "Miles_per_Gallon", "type": "quantitative"},
+    "color": {"field": "Acceleration", "type": "quantitative"}
+  },
+  "config": {"legend": {"orient": "bottom", "direction": "horizontal"}}
+}

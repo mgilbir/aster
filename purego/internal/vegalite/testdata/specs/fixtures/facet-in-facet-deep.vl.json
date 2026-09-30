@@ -1,0 +1,23 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "Three levels of grid, which is here to say that nothing about the nesting is two-deep special-casing: the levels are peeled into a list and lifted in turn, so the cell the marks are drawn in is `child_child_child_width` and the partitions chain `facet` to `child_facet` to `child_child_facet`. The heading fold runs the same way — the two column levels caption together as `a / c` while the row level between them captions its own rows, per channel and not per level.",
+  "data": {
+    "values": [{"a": "p", "b": "q", "c": "r", "x": 1, "y": 2}]
+  },
+  "facet": {"column": {"field": "a"}},
+  "spec": {
+    "facet": {"row": {"field": "b"}},
+    "spec": {
+      "facet": {"column": {"field": "c"}},
+      "spec": {
+        "width": 60,
+        "height": 40,
+        "mark": "point",
+        "encoding": {
+          "x": {"field": "x", "type": "quantitative"},
+          "y": {"field": "y", "type": "quantitative"}
+        }
+      }
+    }
+  }
+}

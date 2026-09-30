@@ -1,0 +1,509 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "The encode channels that change an outline rather than a colour: per-corner radii, the spline families and their tension, polar text placement, blend modes, text truncation and a group that clips. The blend modes are on four mark types rather than one, since the comparison recorded them for a rect and not for a rule, a text, a line or a group.",
+  "width": 460,
+  "height": 300,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "bars",
+      "values": [
+        {
+          "c": "a",
+          "v": 44,
+          "r": 12
+        },
+        {
+          "c": "b",
+          "v": 72,
+          "r": 6
+        },
+        {
+          "c": "c",
+          "v": 30,
+          "r": 40
+        }
+      ]
+    },
+    {
+      "name": "series",
+      "values": [
+        {
+          "t": 0,
+          "y": 20
+        },
+        {
+          "t": 1,
+          "y": 78
+        },
+        {
+          "t": 2,
+          "y": 34
+        },
+        {
+          "t": 3,
+          "y": 90
+        },
+        {
+          "t": 4,
+          "y": 46
+        },
+        {
+          "t": 5,
+          "y": 62
+        }
+      ]
+    },
+    {
+      "name": "spokes",
+      "values": [
+        {
+          "a": 0,
+          "label": "north"
+        },
+        {
+          "a": 1.5707963267948966,
+          "label": "east"
+        },
+        {
+          "a": 3.141592653589793,
+          "label": "south"
+        },
+        {
+          "a": 4.71238898038469,
+          "label": "west"
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {
+        "data": "bars",
+        "field": "c"
+      },
+      "range": [
+        0,
+        200
+      ],
+      "padding": 0.2
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": [
+        0,
+        100
+      ],
+      "range": [
+        130,
+        0
+      ]
+    },
+    {
+      "name": "lx",
+      "type": "linear",
+      "domain": [
+        0,
+        5
+      ],
+      "range": [
+        0,
+        200
+      ]
+    },
+    {
+      "name": "ly",
+      "type": "linear",
+      "domain": [
+        0,
+        100
+      ],
+      "range": [
+        130,
+        0
+      ]
+    }
+  ],
+  "marks": [
+    {
+      "description": "Each bar rounds its own corners, and 'c' asks for 40 on a bar the scale never makes that tall, so the clamp is visible.",
+      "type": "rect",
+      "from": {
+        "data": "bars"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "x",
+            "field": "c"
+          },
+          "width": {
+            "scale": "x",
+            "band": 1
+          },
+          "y": {
+            "scale": "y",
+            "field": "v"
+          },
+          "y2": {
+            "scale": "y",
+            "value": 0
+          },
+          "fill": {
+            "value": "#4c78a8"
+          },
+          "cornerRadiusTopLeft": {
+            "field": "r"
+          },
+          "cornerRadiusTopRight": {
+            "field": "r"
+          },
+          "cornerRadiusBottomLeft": {
+            "value": 0
+          },
+          "cornerRadiusBottomRight": {
+            "value": 0
+          }
+        }
+      }
+    },
+    {
+      "description": "One radius on all four corners, and a multiply blend so it darkens the bar under it rather than hiding it.",
+      "type": "rect",
+      "encode": {
+        "enter": {
+          "x": {
+            "value": 20
+          },
+          "y": {
+            "value": 40
+          },
+          "width": {
+            "value": 120
+          },
+          "height": {
+            "value": 60
+          },
+          "fill": {
+            "value": "#f58518"
+          },
+          "fillOpacity": {
+            "value": 0.7
+          },
+          "cornerRadius": {
+            "value": 14
+          },
+          "blend": {
+            "value": "multiply"
+          }
+        }
+      }
+    },
+    {
+      "description": "A Catmull-Rom spline at its own default alpha, which is not a cardinal spline at tension 0.",
+      "type": "line",
+      "from": {
+        "data": "series"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "lx",
+            "field": "t"
+          },
+          "y": {
+            "scale": "ly",
+            "field": "y"
+          },
+          "stroke": {
+            "value": "#54a24b"
+          },
+          "strokeWidth": {
+            "value": 2
+          },
+          "interpolate": {
+            "value": "catmull-rom"
+          },
+          "blend": {
+            "value": "multiply"
+          }
+        }
+      }
+    },
+    {
+      "description": "A cardinal spline slackened by an explicit tension, drawn over the same points.",
+      "type": "line",
+      "from": {
+        "data": "series"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "lx",
+            "field": "t"
+          },
+          "y": {
+            "scale": "ly",
+            "field": "y"
+          },
+          "stroke": {
+            "value": "#e45756"
+          },
+          "strokeWidth": {
+            "value": 2
+          },
+          "interpolate": {
+            "value": "cardinal"
+          },
+          "tension": {
+            "value": 0.7
+          }
+        }
+      }
+    },
+    {
+      "description": "A bundle, which pulls the series most of the way onto the chord across it. Its 'tension' is a blend, not a stiffness.",
+      "type": "line",
+      "from": {
+        "data": "series"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "lx",
+            "field": "t"
+          },
+          "y": {
+            "scale": "ly",
+            "field": "y"
+          },
+          "stroke": {
+            "value": "#b279a2"
+          },
+          "strokeWidth": {
+            "value": 2
+          },
+          "interpolate": {
+            "value": "bundle"
+          },
+          "tension": {
+            "value": 0.4
+          }
+        }
+      }
+    },
+    {
+      "description": "An open cardinal spline: its first and last points are not on the curve at all.",
+      "type": "line",
+      "from": {
+        "data": "series"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "lx",
+            "field": "t"
+          },
+          "y": {
+            "scale": "ly",
+            "field": "y"
+          },
+          "stroke": {
+            "value": "#9d755d"
+          },
+          "strokeWidth": {
+            "value": 1.5
+          },
+          "strokeDash": {
+            "value": [
+              4,
+              2
+            ]
+          },
+          "interpolate": {
+            "value": "cardinal-open"
+          }
+        }
+      }
+    },
+    {
+      "description": "An area under a Catmull-Rom spline, whose return leg has to take the same curve.",
+      "type": "area",
+      "from": {
+        "data": "series"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "scale": "lx",
+            "field": "t"
+          },
+          "y": {
+            "scale": "ly",
+            "field": "y"
+          },
+          "y2": {
+            "scale": "ly",
+            "value": 0
+          },
+          "fill": {
+            "value": "#72b7b2"
+          },
+          "fillOpacity": {
+            "value": 0.35
+          },
+          "interpolate": {
+            "value": "catmull-rom"
+          },
+          "tension": {
+            "value": 0.9
+          },
+          "blend": {
+            "value": "screen"
+          }
+        }
+      }
+    },
+    {
+      "description": "Labels placed by radius and angle around a centre rather than by x and y, and truncated to a width they do not fit.",
+      "type": "text",
+      "from": {
+        "data": "spokes"
+      },
+      "encode": {
+        "enter": {
+          "x": {
+            "value": 340
+          },
+          "y": {
+            "value": 200
+          },
+          "radius": {
+            "value": 60
+          },
+          "theta": {
+            "field": "a"
+          },
+          "text": {
+            "signal": "datum.label + ' by a long way'"
+          },
+          "limit": {
+            "value": 46
+          },
+          "ellipsis": {
+            "value": "~"
+          },
+          "align": {
+            "value": "center"
+          },
+          "baseline": {
+            "value": "middle"
+          },
+          "fill": {
+            "value": "#333333"
+          },
+          "fontSize": {
+            "value": 11
+          },
+          "blend": {
+            "value": "multiply"
+          }
+        }
+      }
+    },
+    {
+      "description": "A group that clips from its encode block rather than from the mark's own property, with a rounded background. The rule reaches well past the group's width.",
+      "type": "group",
+      "encode": {
+        "enter": {
+          "x": {
+            "value": 240
+          },
+          "y": {
+            "value": 20
+          },
+          "width": {
+            "value": 120
+          },
+          "height": {
+            "value": 70
+          },
+          "clip": {
+            "value": true
+          },
+          "fill": {
+            "value": "#f2f2f2"
+          },
+          "stroke": {
+            "value": "#bbbbbb"
+          },
+          "cornerRadiusTopLeft": {
+            "value": 18
+          },
+          "cornerRadiusBottomRight": {
+            "value": 18
+          },
+          "blend": {
+            "value": "multiply"
+          }
+        }
+      },
+      "marks": [
+        {
+          "type": "rule",
+          "encode": {
+            "enter": {
+              "x": {
+                "value": 10
+              },
+              "y": {
+                "value": 35
+              },
+              "x2": {
+                "value": 300
+              },
+              "stroke": {
+                "value": "#4c78a8"
+              },
+              "strokeWidth": {
+                "value": 3
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "rule",
+      "encode": {
+        "enter": {
+          "x": {
+            "value": 10
+          },
+          "x2": {
+            "value": 120
+          },
+          "y": {
+            "value": 20
+          },
+          "y2": {
+            "value": 90
+          },
+          "stroke": {
+            "value": "#e45756"
+          },
+          "strokeWidth": {
+            "value": 3
+          },
+          "blend": {
+            "value": "difference"
+          }
+        }
+      }
+    }
+  ]
+}

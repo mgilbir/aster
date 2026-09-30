@@ -1,0 +1,231 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "**A fill that is not a colour is still a fill.** Upstream does no parsing: whatever the encode produced lands on the scene item and goes to the renderer as it stands, so `fill: 0.28` is written into the SVG as `fill=\"0.28\"`. This engine parsed the value, found no colour, and recorded that the mark had **no fill at all** \u2014 which is a different thing from having one that paints nothing, and upstream keeps them apart. The way in is ordinary rather than exotic: a `{\"scheme\": {\"signal\": \"\u2026\"}}` whose signal has not been answered leaves the scale with d3's default `[0, 1]` range \u2014 see `a-scale-with-no-range-keeps-its-default` \u2014 so every mark keyed to it is filled with a **number**, and a palette picker starts there.\n\n**Nothing visible turns on it, and that is worth stating rather than leaving to be rediscovered.** An unparseable presentation attribute is treated as *not specified*, so `fill` takes its inherited value \u2014 and vega's root group is `<g fill=\"none\" stroke-miterlimit=\"4\" \u2026>`, so the mark paints nothing. This engine writes `fill=\"none\"` and paints nothing too. Reasoning from SVG's *initial* value instead of its *inherited* one says black, and that reading was tried and is wrong; the group attribute is what settles it. What differed was only the record: upstream's item says a fill was asked for, and this one said none was.\n\nFour shapes and each is load-bearing. `number` and `word` are the unparseable ones. `missing` is `{\"value\": null}`, which must keep recording no fill, because that is what null means and it is how a specification turns a fill off \u2014 folding it in with the unparseable ones would lose the distinction this change is about. `colour` must still parse. The **stroke** on the last rect is the other half: it was already kept, and for a second reason that does not apply to a fill \u2014 `boundStroke` asks whether an item *has* a stroke rather than what colour it is, so dropping an unreadable one left the mark a stroke-width narrower than upstream's.\n\n**An empty value is present too, and for a stroke it is also falsey.** `blankFill` is `{\"value\": \"\"}`: upstream puts it on the item and writes `fill=\"\"`, so it is a fill that was asked for and paints nothing, exactly as an unparseable one is. An empty **stroke** is the case this fixture cannot carry. `boundStroke` opens `if (item.stroke && \u2026)` and `\"\"` is falsey there, so upstream records the stroke on the item and does *not* measure it \u2014 two rects, one `stroke: \"\"` and one `stroke: \"not a colour\"`, bound 30 wide and 32. This engine can express the measuring half and not the recording half: a transparent stroke widens, because `Stroke` carries no note of the falsiness its source had, and giving it one is a field on a public class for a difference nothing can see. So the stroke stays dropped, the bounds stay right, and `an empty stroke does not widen a mark` pins it as a unit test instead. STATUS records what upstream's item holds that this one does not.",
+  "width": 200,
+  "height": 60,
+  "padding": 5,
+  "signals": [
+    {
+      "name": "scheme",
+      "value": null
+    }
+  ],
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {
+          "k": "a",
+          "v": 10
+        },
+        {
+          "k": "b",
+          "v": 60
+        },
+        {
+          "k": "c",
+          "v": 100
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {
+        "data": "t",
+        "field": "k"
+      },
+      "range": "width",
+      "padding": 0.2
+    },
+    {
+      "name": "c",
+      "type": "linear",
+      "domain": [
+        0,
+        100
+      ],
+      "range": {
+        "scheme": {
+          "signal": "scheme"
+        }
+      }
+    }
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {
+        "data": "t"
+      },
+      "encode": {
+        "update": {
+          "x": {
+            "scale": "x",
+            "field": "k"
+          },
+          "width": {
+            "scale": "x",
+            "band": 1
+          },
+          "y": {
+            "value": 0
+          },
+          "y2": {
+            "value": 20
+          },
+          "fill": {
+            "scale": "c",
+            "field": "v"
+          }
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "encode": {
+        "update": {
+          "x": {
+            "value": 0
+          },
+          "y": {
+            "value": 24
+          },
+          "width": {
+            "value": 30
+          },
+          "height": {
+            "value": 14
+          },
+          "fill": {
+            "value": "not a colour"
+          }
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "encode": {
+        "update": {
+          "x": {
+            "value": 40
+          },
+          "y": {
+            "value": 24
+          },
+          "width": {
+            "value": 30
+          },
+          "height": {
+            "value": 14
+          },
+          "fill": {
+            "value": null
+          }
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "encode": {
+        "update": {
+          "x": {
+            "value": 80
+          },
+          "y": {
+            "value": 24
+          },
+          "width": {
+            "value": 30
+          },
+          "height": {
+            "value": 14
+          },
+          "fill": {
+            "value": "#4c78a8"
+          }
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "encode": {
+        "update": {
+          "x": {
+            "value": 120
+          },
+          "y": {
+            "value": 24
+          },
+          "width": {
+            "value": 30
+          },
+          "height": {
+            "value": 14
+          },
+          "fill": {
+            "value": "#eee"
+          },
+          "stroke": {
+            "value": "not a colour"
+          },
+          "strokeWidth": {
+            "value": 2
+          }
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "encode": {
+        "update": {
+          "x": {
+            "value": 0
+          },
+          "y": {
+            "value": 42
+          },
+          "width": {
+            "value": 30
+          },
+          "height": {
+            "value": 14
+          },
+          "fill": {
+            "value": ""
+          }
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "encode": {
+        "update": {
+          "x": {
+            "value": 80
+          },
+          "y": {
+            "value": 42
+          },
+          "width": {
+            "value": 30
+          },
+          "height": {
+            "value": 14
+          },
+          "fill": {
+            "value": "#eee"
+          },
+          "stroke": {
+            "value": "not a colour"
+          },
+          "strokeWidth": {
+            "value": 2
+          }
+        }
+      }
+    }
+  ]
+}

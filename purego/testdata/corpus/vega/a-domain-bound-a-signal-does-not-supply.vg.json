@@ -1,0 +1,64 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "**A bound a signal does not supply is no bound; a bound it supplies unreadably is a bound of NaN.** Both halves are one line of `configureDomain` in `vega-encode/src/Scale.js` — `if (_.domainMax != null) domain[n] = _.domainMax` — which gates on `null` and then writes the value **as it stands**, leaving d3's own `domain` setter to coerce it with `+`. This engine read the override with the same function it reads every other guide number with, and that one asks `is it a number?`, which is a different question and gets the two ends wrong in **opposite** directions. `Number(null)` is `0` — JavaScript's coercion, faithfully implemented — so a `domainMax` bound to a control nobody has touched yet pulled the top of the domain down to zero and took the scale, its ticks, its labels and every mark keyed through it with it. That is not a corner: a templated chart writes `\"domainMax\": {\"signal\": \"cap\"}` and leaves `cap` unset until a user moves something, which is the state every such chart *starts* in. And a word was discarded, so the axis stayed fully ticked over the data's own end where upstream draws **no ticks at all** — `scaleLinear().domain([0, \"high\"])` is `[0, NaN]`, and d3's `ticks` opens `if (!(i2 >= i1)) return []`, where every comparison against a NaN is false.\n\nThe three scales are three different answers and each is load-bearing. `open` is the null: its domain must stay at the data's own 91, and it is the half that says the override was **skipped** rather than applied as something harmless. `unreadable` is the word: no ticks and no labels, which is the honest thing for an axis over a bound nobody can read to say, and it is the half a `takeIf { !it.isNaN() }` silently turned back into a full axis. `given` is the control — a number still overrides, and it is read at **0** on purpose, because zero is the one number a null was being confused with, and a fixture whose control was `120` would pass with the defect still there.\n\nThe axes are read for their tick and label **counts**, not only their positions: the null half moves labels and the unreadable half removes them, and only the second is visible in a count. A mark is drawn through `open` alone, deliberately — an unplaceable rect would bring in the bounds-at-the-origin rule that `a-mark-nobody-can-place` already carries, and mixing the two would make one fixture answer two questions.",
+  "width": 200,
+  "height": 100,
+  "padding": 5,
+  "signals": [
+    {"name": "gone", "value": null},
+    {"name": "word", "value": "high"},
+    {"name": "cap", "value": 0}
+  ],
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {"k": "a", "v": 19},
+        {"k": "b", "v": 91}
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "open",
+      "type": "linear",
+      "domain": {"data": "t", "field": "v"},
+      "domainMax": {"signal": "gone"},
+      "range": "height"
+    },
+    {
+      "name": "unreadable",
+      "type": "linear",
+      "domain": {"data": "t", "field": "v"},
+      "domainMax": {"signal": "word"},
+      "range": "height"
+    },
+    {
+      "name": "given",
+      "type": "linear",
+      "domain": {"data": "t", "field": "v"},
+      "domainMax": {"signal": "cap"},
+      "range": "height"
+    }
+  ],
+  "axes": [
+    {"orient": "left", "scale": "open", "tickCount": 3},
+    {"orient": "right", "scale": "unreadable", "tickCount": 3},
+    {"orient": "top", "scale": "given", "tickCount": 3}
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "t"},
+      "encode": {
+        "update": {
+          "x": {"value": 0},
+          "width": {"value": 12},
+          "y": {"scale": "open", "field": "v"},
+          "y2": {"scale": "open", "value": 0},
+          "fill": {"value": "#4c78a8"}
+        }
+      }
+    }
+  ]
+}

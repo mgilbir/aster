@@ -1,0 +1,20 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A step that belongs to the outer band rather than to one mark inside it.",
+  "data": {
+    "values": [
+      {"category": "A", "group": "x", "value": 0.1},
+      {"category": "A", "group": "y", "value": 0.6},
+      {"category": "B", "group": "x", "value": 0.7},
+      {"category": "B", "group": "y", "value": 0.2}
+    ]
+  },
+  "width": {"step": 50, "for": "position"},
+  "mark": "bar",
+  "encoding": {
+    "x": {"field": "category", "scale": {"padding": 0.2}},
+    "y": {"field": "value", "type": "quantitative"},
+    "xOffset": {"field": "group", "scale": {"paddingInner": 0.2}},
+    "color": {"field": "group"}
+  }
+}

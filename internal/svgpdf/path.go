@@ -36,7 +36,12 @@ type Point struct {
 // absolute segments. Supported commands: M/m L/l H/h V/v C/c S/s Q/q T/t
 // A/a Z/z. Unknown commands are an error.
 func parsePathData(d string) ([]PathSeg, error) {
-	p := &pathParser{data: d}
+	return parsePathDataMax(d, defaultMaxSegments)
+}
+
+// parsePathDataMax is parsePathData with a cap on the number of segments.
+func parsePathDataMax(d string, maxSegs int) ([]PathSeg, error) {
+	p := &pathParser{data: d, max: maxSegs}
 	return p.parse()
 }
 
@@ -45,6 +50,7 @@ type pathParser struct {
 	pos  int
 
 	segs []PathSeg
+	max  int // segment cap
 
 	cur      Point // current point
 	start    Point // start of current subpath (for Z)
@@ -65,6 +71,9 @@ func (p *pathParser) parse() ([]PathSeg, error) {
 		p.pos++
 		if err := p.runCommand(cmd); err != nil {
 			return nil, err
+		}
+		if p.max > 0 && len(p.segs) > p.max {
+			return nil, limitErr("path has more than %d segments", p.max)
 		}
 	}
 }
@@ -116,6 +125,9 @@ func (p *pathParser) runCommand(cmd byte) error {
 			return err
 		}
 		first = false
+		if p.max > 0 && len(p.segs) > p.max {
+			return limitErr("path has more than %d segments", p.max)
+		}
 	}
 }
 

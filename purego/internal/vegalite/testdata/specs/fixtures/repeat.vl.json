@@ -1,0 +1,22 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "description": "One bar chart drawn once per measure, laid out two to a row.",
+  "data": {
+    "values": [
+      {"category": "Alpha", "amount": 28, "score": 3, "weight": 12},
+      {"category": "Beta", "amount": 55, "score": 7, "weight": 4},
+      {"category": "Gamma", "amount": 43, "score": 5, "weight": 19}
+    ]
+  },
+  "columns": 2,
+  "repeat": ["amount", "score", "weight"],
+  "spec": {
+    "width": 120,
+    "height": 90,
+    "mark": "bar",
+    "encoding": {
+      "x": {"field": "category", "type": "nominal"},
+      "y": {"field": {"repeat": "repeat"}, "type": "quantitative"}
+    }
+  }
+}

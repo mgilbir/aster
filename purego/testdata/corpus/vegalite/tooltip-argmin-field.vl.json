@@ -1,0 +1,22 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A tooltip naming the column an argmin kept, which it reads by its own name.",
+  "data": {
+    "values": [
+      {"Fighter Name": "liukang", "Place Rank": 1, "Fighting Style": "tiger"},
+      {"Fighter Name": "liukang", "Place Rank": 10, "Fighting Style": "crane"},
+      {"Fighter Name": "raiden", "Place Rank": 8, "Fighting Style": "tiger"},
+      {"Fighter Name": "raiden", "Place Rank": 2, "Fighting Style": "shaolin"}
+    ]
+  },
+  "mark": "bar",
+  "encoding": {
+    "tooltip": [
+      {"field": "Fighter Name"},
+      {"aggregate": "min", "field": "Place Rank"},
+      {"aggregate": {"argmin": "Place Rank"}, "field": "Fighting Style"}
+    ],
+    "x": {"aggregate": "min", "field": "Place Rank"},
+    "y": {"field": "Fighter Name"}
+  }
+}

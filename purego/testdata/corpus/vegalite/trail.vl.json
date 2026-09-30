@@ -1,0 +1,33 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A trail, whose width varies along one path rather than splitting it.",
+  "data": {
+    "url": "data/stocks.csv"
+  },
+  "transform": [
+    {
+      "filter": "datum.symbol !== 'GOOG'"
+    }
+  ],
+  "mark": "trail",
+  "encoding": {
+    "x": {
+      "field": "date",
+      "type": "temporal"
+    },
+    "y": {
+      "field": "price",
+      "type": "quantitative"
+    },
+    "size": {
+      "field": "price",
+      "type": "quantitative",
+      "legend": null
+    },
+    "color": {
+      "field": "symbol",
+      "type": "nominal",
+      "legend": null
+    }
+  }
+}

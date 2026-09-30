@@ -1,0 +1,109 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "The same rule as `a-field-title-spelled-plain`, on the third formatter. `functionalTitleFormatter` spells the derivation as a call rather than as prose: `const fn = aggregate || timeUnitParams?.unit || (timeUnitParams?.maxbins && 'timeunit') || (isBinning(bin) && 'bin'); return fn ? `${fn.toUpperCase()}(${field})` : field;`. So a mean is `MEAN(v)`, a bucketed month `MONTH(t)`, a bin `BIN(v)`, and a column with nothing done to it keeps its own name. The two extremes come first and keep their words, spelled as the call: `v for argmax(c)`, where the verbal formatter writes `v for max c`. The last panel is upstream's own oddity, reproduced rather than tidied: a **count** has no field and nothing guards it, so the title is literally `COUNT(undefined)` \u2014 a caption nobody would choose, and the one a chart asking for `functional` is given.",
+  "config": {
+    "fieldTitle": "functional"
+  },
+  "data": {
+    "values": [
+      {
+        "v": 28,
+        "t": "2024-01-07",
+        "c": "alpha"
+      },
+      {
+        "v": 55,
+        "t": "2024-03-19",
+        "c": "beta"
+      },
+      {
+        "v": 43,
+        "t": "2024-06-02",
+        "c": "gamma"
+      }
+    ]
+  },
+  "hconcat": [
+    {
+      "width": 90,
+      "height": 70,
+      "mark": "point",
+      "encoding": {
+        "x": {
+          "field": "v",
+          "type": "quantitative",
+          "aggregate": "mean"
+        },
+        "y": {
+          "field": "v",
+          "type": "quantitative"
+        }
+      }
+    },
+    {
+      "width": 90,
+      "height": 70,
+      "mark": "point",
+      "encoding": {
+        "x": {
+          "field": "t",
+          "type": "temporal",
+          "timeUnit": "month"
+        },
+        "y": {
+          "field": "v",
+          "type": "quantitative"
+        }
+      }
+    },
+    {
+      "width": 90,
+      "height": 70,
+      "mark": "point",
+      "encoding": {
+        "x": {
+          "field": "v",
+          "type": "quantitative",
+          "bin": true
+        },
+        "y": {
+          "field": "v",
+          "type": "quantitative"
+        }
+      }
+    },
+    {
+      "width": 90,
+      "height": 70,
+      "mark": "point",
+      "encoding": {
+        "x": {
+          "field": "v",
+          "type": "quantitative",
+          "aggregate": {
+            "argmax": "c"
+          }
+        },
+        "y": {
+          "field": "v",
+          "type": "quantitative"
+        }
+      }
+    },
+    {
+      "width": 90,
+      "height": 70,
+      "mark": "point",
+      "encoding": {
+        "x": {
+          "aggregate": "count",
+          "type": "quantitative"
+        },
+        "y": {
+          "field": "v",
+          "type": "quantitative"
+        }
+      }
+    }
+  ]
+}

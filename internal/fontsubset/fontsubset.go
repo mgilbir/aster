@@ -15,8 +15,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"sort"
-
-	"github.com/go-text/typesetting/font/opentype"
+	"strings"
 )
 
 // Font is a parsed TrueType font ready for metric queries and subsetting.
@@ -48,29 +47,69 @@ type Metrics struct {
 	FixedPitch  bool
 }
 
-func tag(s string) opentype.Tag { return opentype.MustNewTag(s) }
+// sfntDir is the table directory of a font file. Tables are slices of the file
+// data, not copies.
+type sfntDir struct {
+	tables map[string][]byte
+}
+
+// maxTables bounds the table directory a hostile file can declare.
+const maxTables = 4096
+
+// readSfnt reads the table directory of an sfnt-wrapped font (TrueType,
+// OpenType/CFF or Apple 'true'). WOFF and collections are not sfnt files of
+// their own and are rejected; callers pass the unwrapped font program.
+func readSfnt(data []byte) (*sfntDir, error) {
+	if len(data) < 12 {
+		return nil, fmt.Errorf("file too short (%d bytes)", len(data))
+	}
+	switch binary.BigEndian.Uint32(data) {
+	case 0x00010000, 0x4F54544F, 0x74727565, 0x74797031: // 1.0, OTTO, true, typ1
+	default:
+		return nil, fmt.Errorf("not an sfnt font (signature %#08x)", binary.BigEndian.Uint32(data))
+	}
+	n := int(binary.BigEndian.Uint16(data[4:]))
+	if n == 0 || n > maxTables || 12+n*16 > len(data) {
+		return nil, fmt.Errorf("bad table count %d", n)
+	}
+	s := &sfntDir{tables: make(map[string][]byte, n)}
+	for i := 0; i < n; i++ {
+		rec := data[12+i*16:]
+		off := uint64(binary.BigEndian.Uint32(rec[8:]))
+		length := uint64(binary.BigEndian.Uint32(rec[12:]))
+		if off+length > uint64(len(data)) {
+			return nil, fmt.Errorf("table %q [%d,%d) outside the %d byte file", rec[:4], off, off+length, len(data))
+		}
+		t := string(rec[:4])
+		if _, dup := s.tables[t]; !dup {
+			s.tables[t] = data[off : off+length : off+length]
+		}
+	}
+	return s, nil
+}
 
 // Parse reads the tables needed for subsetting and PDF metrics.
-func Parse(ttf []byte) (*Font, error) {
-	ld, err := opentype.NewLoader(bytes.NewReader(ttf))
+func Parse(ttf []byte) (font *Font, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			font, err = nil, fmt.Errorf("fontsubset: malformed font: %v", p)
+		}
+	}()
+	ld, err := readSfnt(ttf)
 	if err != nil {
 		return nil, fmt.Errorf("fontsubset: parsing font: %w", err)
 	}
 	f := &Font{}
 
 	must := func(name string) ([]byte, error) {
-		data, err := ld.RawTable(tag(name))
-		if err != nil {
-			return nil, fmt.Errorf("fontsubset: missing required table %s: %w", name, err)
+		data, ok := ld.tables[name]
+		if !ok {
+			return nil, fmt.Errorf("fontsubset: missing required table %s", name)
 		}
 		return data, nil
 	}
 	optional := func(name string) []byte {
-		data, err := ld.RawTable(tag(name))
-		if err != nil {
-			return nil
-		}
-		return data
+		return ld.tables[name]
 	}
 
 	if f.head, err = must("head"); err != nil {
@@ -274,7 +313,12 @@ func (f *Font) closure(gids map[uint16]bool) (map[uint16]bool, error) {
 // hmtx is truncated to the highest kept glyph (text layout uses the PDF /W
 // array, not hmtx), and cmap is replaced by a minimal valid stub (glyphs are
 // addressed by ID via Identity CID mapping, never through character codes).
-func (f *Font) Subset(gids map[uint16]bool) ([]byte, error) {
+func (f *Font) Subset(gids map[uint16]bool) (out []byte, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			out, err = nil, fmt.Errorf("fontsubset: malformed font: %v", p)
+		}
+	}()
 	if !f.CanSubset() {
 		return nil, fmt.Errorf("fontsubset: font has no TrueType outlines (CFF fonts are not supported)")
 	}
@@ -504,7 +548,7 @@ func assembleSfnt(tables []struct {
 		if len(t.tag) != 4 {
 			return nil, fmt.Errorf("fontsubset: bad table tag %q", t.tag)
 		}
-		w32(uint32(opentype.NewTag(t.tag[0], t.tag[1], t.tag[2], t.tag[3])))
+		w32(binary.BigEndian.Uint32([]byte(t.tag)))
 		w32(tableChecksum(t.data))
 		w32(uint32(offset))
 		w32(uint32(len(t.data)))
@@ -585,7 +629,29 @@ func postScriptName(name []byte) string {
 		for i := 1; i < len(raw); i += 2 {
 			b = append(b, raw[i])
 		}
-		return string(b)
+		return sanitizePSName(b)
 	}
-	return string(raw)
+	return sanitizePSName(raw)
+}
+
+// maxPSNameLen is the PostScript name length limit.
+const maxPSNameLen = 63
+
+// sanitizePSName keeps only characters that are safe in a PDF name without
+// escaping: printable ASCII (! to ~) minus the PDF/PostScript delimiters
+// []{}()<>/% and the escape character #, limited to 63 characters. The font
+// file is untrusted and the name is written into PDFs (here and by hosts that
+// assemble their own), so it must never carry PDF syntax.
+func sanitizePSName(raw []byte) string {
+	out := make([]byte, 0, len(raw))
+	for _, c := range raw {
+		if c < '!' || c > '~' || strings.IndexByte("[](){}<>/%#", c) >= 0 {
+			continue
+		}
+		out = append(out, c)
+		if len(out) == maxPSNameLen {
+			break
+		}
+	}
+	return string(out)
 }

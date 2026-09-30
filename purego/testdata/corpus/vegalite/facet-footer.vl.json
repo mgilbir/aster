@@ -1,0 +1,12 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A facet whose captions hang off the bottom of the grid rather than the top.",
+  "data": {"url": "data/cars.json"},
+  "mark": "bar",
+  "encoding": {
+    "column": {"field": "Origin", "header": {"orient": "bottom"}},
+    "y": {"aggregate": "count"},
+    "x": {"field": "Cylinders", "type": "ordinal", "axis": null},
+    "color": {"field": "Cylinders"}
+  }
+}

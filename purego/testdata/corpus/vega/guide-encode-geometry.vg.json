@@ -1,0 +1,77 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "An axis whose own encode blocks move the lines it drew. A tick is lifted off the axis and stretched, a gridline is pulled in from both ends, and the domain line starts short of its scale — none of which any axis property can say, and all of which upstream applies last so that they win over the geometry the guide computed for itself. The right-hand axis reaches through a tick the way a published example does, drawing one long marker at a chosen value while every other tick keeps its length: the channel is read against the tick's own datum, so a rule over datum.value decides which one moves.",
+  "width": 220,
+  "height": 130,
+  "padding": 5,
+  "background": "white",
+  "signals": [{ "name": "marked", "value": 40 }],
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        { "c": "a", "v": 12 },
+        { "c": "b", "v": 34 },
+        { "c": "c", "v": 21 },
+        { "c": "d", "v": 47 }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": { "data": "t", "field": "c" },
+      "range": "width",
+      "padding": 0.2
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": [0, 60],
+      "range": "height",
+      "nice": false
+    }
+  ],
+  "axes": [
+    {
+      "orient": "bottom",
+      "scale": "x",
+      "grid": true,
+      "gridColor": "#dddddd",
+      "encode": {
+        "ticks": { "update": { "y": { "value": -4 }, "y2": { "value": 9 } } },
+        "grid": { "update": { "y": { "value": -10 }, "y2": { "signal": "-height + 12" } } },
+        "domain": { "update": { "x": { "value": 12 }, "x2": { "signal": "width - 12" } } }
+      }
+    },
+    {
+      "orient": "right",
+      "scale": "y",
+      "tickCount": 6,
+      "encode": {
+        "ticks": {
+          "update": {
+            "x2": { "signal": "datum.value === marked ? 24 : 5" },
+            "strokeWidth": { "signal": "datum.value === marked ? 2 : 1" }
+          }
+        }
+      }
+    }
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": { "data": "t" },
+      "encode": {
+        "enter": {
+          "x": { "scale": "x", "field": "c" },
+          "width": { "scale": "x", "band": 1 },
+          "y": { "scale": "y", "field": "v" },
+          "y2": { "scale": "y", "value": 0 },
+          "fill": { "value": "#4c78a8" }
+        }
+      }
+    }
+  ]
+}

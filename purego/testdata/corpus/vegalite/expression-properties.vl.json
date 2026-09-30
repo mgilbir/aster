@@ -1,0 +1,12 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A mark property and a label angle computed by parameters, and a turn written negatively.",
+  "data": {"url": "data/cars.json"},
+  "params": [{"name": "cornerRadius", "value": 4, "bind": {"input": "range", "min": 0, "max": 20}}],
+  "mark": {"type": "rect", "cornerRadius": {"expr": "cornerRadius"}},
+  "encoding": {
+    "x": {"field": "Origin", "type": "nominal", "axis": {"labelAngle": -45}},
+    "y": {"field": "Cylinders", "type": "ordinal"},
+    "color": {"aggregate": "count"}
+  }
+}

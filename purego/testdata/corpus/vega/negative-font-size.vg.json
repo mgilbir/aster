@@ -1,0 +1,48 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "negative font sizes on an axis label, an axis title, a legend title, a chart title and its subtitle. The width estimate is a negative number, so every box is built the wrong way round and upstream's Bounds.set swaps it back — the text reaches backwards from its anchor and the guides still measure themselves by it.",
+  "width": 200,
+  "height": 120,
+  "padding": 5,
+  "title": {
+    "text": "Revenue by segment",
+    "subtitle": "2026 to date",
+    "fontSize": -4,
+    "subtitleFontSize": -6
+  },
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {"c": "alpha", "v": 28, "g": "north"},
+        {"c": "beta", "v": 55, "g": "south"},
+        {"c": "gamma", "v": 43, "g": "east"}
+      ]
+    }
+  ],
+  "scales": [
+    {"name": "x", "type": "band", "domain": {"data": "t", "field": "c"}, "range": "width", "padding": 0.1},
+    {"name": "y", "type": "linear", "domain": {"data": "t", "field": "v"}, "range": "height", "nice": true},
+    {"name": "colour", "type": "ordinal", "domain": {"data": "t", "field": "g"}, "range": "category"}
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "x", "title": "category", "labelFontSize": -4},
+    {"orient": "left", "scale": "y", "title": "amount", "tickCount": 4, "titleFontSize": -9}
+  ],
+  "legends": [{"fill": "colour", "title": "region", "titleFontSize": -7}],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "t"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "c"},
+          "width": {"scale": "x", "band": 1},
+          "y": {"scale": "y", "field": "v"},
+          "y2": {"scale": "y", "value": 0},
+          "fill": {"scale": "colour", "field": "g"}
+        }
+      }
+    }
+  ]
+}

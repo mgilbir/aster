@@ -1,0 +1,28 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "An overview a reader brushes and a detail that follows it, which puts the brush's machinery inside the plot that declares it and records that plot's name in every picked tuple.",
+  "data": {"url": "data/cars.json"},
+  "vconcat": [
+    {
+      "width": 300,
+      "height": 60,
+      "params": [
+        {"name": "brush", "select": {"type": "interval", "encodings": ["x"]}, "value": {"x": [100, 200]}}
+      ],
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "Horsepower", "type": "quantitative", "bin": {"maxbins": 20}},
+        "y": {"aggregate": "count"}
+      }
+    },
+    {
+      "width": 300,
+      "transform": [{"filter": {"param": "brush"}}],
+      "mark": "point",
+      "encoding": {
+        "x": {"field": "Horsepower", "type": "quantitative"},
+        "y": {"field": "Miles_per_Gallon", "type": "quantitative"}
+      }
+    }
+  ]
+}

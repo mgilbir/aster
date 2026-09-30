@@ -1,0 +1,60 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "Labels longer than the limit nobody set: the axis truncates at 180 and the legend at 160 by default, and an explicit limit shortens one axis further.",
+  "width": 200,
+  "height": 110,
+  "padding": 5,
+  "data": [
+    {
+      "name": "table",
+      "values": [
+        {"c": "a-really-quite-long-category-name-here", "v": 41},
+        {"c": "another-long-one-that-runs-on-and-on", "v": 68},
+        {"c": "short", "v": 23}
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "y",
+      "type": "band",
+      "domain": {"data": "table", "field": "c"},
+      "range": "height",
+      "padding": 0.3
+    },
+    {
+      "name": "x",
+      "type": "linear",
+      "domain": {"data": "table", "field": "v"},
+      "range": "width",
+      "nice": true
+    },
+    {
+      "name": "colour",
+      "type": "ordinal",
+      "domain": {"data": "table", "field": "c"},
+      "range": {"scheme": "tableau10"}
+    }
+  ],
+  "axes": [
+    {"orient": "left", "scale": "y"},
+    {"orient": "right", "scale": "y", "labelLimit": 60},
+    {"orient": "bottom", "scale": "x", "tickCount": 4}
+  ],
+  "legends": [{"fill": "colour", "title": "Series"}],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "y": {"scale": "y", "field": "c"},
+          "height": {"scale": "y", "band": 1},
+          "x": {"scale": "x", "value": 0},
+          "x2": {"scale": "x", "field": "v"},
+          "fill": {"scale": "colour", "field": "c"}
+        }
+      }
+    }
+  ]
+}

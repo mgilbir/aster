@@ -1,0 +1,57 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "Minimal bar chart.",
+  "width": 344,
+  "height": 196,
+  "padding": 5,
+  "data": [
+    {
+      "name": "table",
+      "values": [
+        {"category": "Jan", "amount": 28},
+        {"category": "Feb", "amount": 55},
+        {"category": "Mar", "amount": 43},
+        {"category": "Apr", "amount": 91},
+        {"category": "May", "amount": 81},
+        {"category": "Jun", "amount": 53},
+        {"category": "Jul", "amount": 19},
+        {"category": "Aug", "amount": 87}
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "xscale",
+      "type": "band",
+      "domain": {"data": "table", "field": "category"},
+      "range": "width",
+      "padding": 0.05
+    },
+    {
+      "name": "yscale",
+      "type": "linear",
+      "domain": {"data": "table", "field": "amount"},
+      "nice": true,
+      "range": "height"
+    }
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "xscale"},
+    {"orient": "left", "scale": "yscale"}
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "xscale", "field": "category"},
+          "width": {"scale": "xscale", "band": 1},
+          "y": {"scale": "yscale", "field": "amount"},
+          "y2": {"scale": "yscale", "value": 0},
+          "fill": {"value": "steelblue"}
+        }
+      }
+    }
+  ]
+}

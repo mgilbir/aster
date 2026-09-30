@@ -1,0 +1,11 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A stack of bars whose far end is rounded, which rounds the stack and not its segments.",
+  "data": {"url": "data/cars.json"},
+  "mark": {"type": "bar", "cornerRadiusEnd": 6},
+  "encoding": {
+    "x": {"field": "Cylinders", "type": "ordinal"},
+    "y": {"aggregate": "count"},
+    "color": {"field": "Origin", "type": "nominal"}
+  }
+}

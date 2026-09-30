@@ -1,0 +1,396 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "layout center puts a cell narrower than its column in the middle of it rather than at its start. Six cells of six different widths in a three-column grid: every cell but the widest of each column is nudged by half its column's slack. Three more grids, each for a rule that only shows when it is asked for and refused. The second asks to be centred and states no `align`: upstream's centring step reads the flag its alignment branch sets \u2014 `if (alignCol && get(opt.center, Column) && nrows > 1)` \u2014 and the branch an unstated `align` takes begins by clearing it, so nothing moves. The third states `columns: 0`, which is `ncols = opt.columns || groups.length` and puts all six in one row rather than one column. The fourth is `bounds: \"flush\"` over cells that declare no size: `bboxFlush` is `(0, 0, item.width || 0, item.height || 0)` with no fallback, so each measures as nothing and the grid collapses to its own padding.",
+  "width": 420,
+  "height": 340,
+  "padding": 5,
+  "background": "white",
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {
+          "c": "a",
+          "w": 20
+        },
+        {
+          "c": "b",
+          "w": 60
+        },
+        {
+          "c": "c",
+          "w": 100
+        },
+        {
+          "c": "d",
+          "w": 34
+        },
+        {
+          "c": "e",
+          "w": 74
+        },
+        {
+          "c": "f",
+          "w": 114
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "colour",
+      "type": "ordinal",
+      "domain": {
+        "data": "t",
+        "field": "c"
+      },
+      "range": "category"
+    }
+  ],
+  "marks": [
+    {
+      "type": "group",
+      "layout": {
+        "columns": 3,
+        "padding": {
+          "row": 12,
+          "column": 12
+        },
+        "align": "each",
+        "center": true,
+        "bounds": "full"
+      },
+      "marks": [
+        {
+          "type": "group",
+          "from": {
+            "facet": {
+              "data": "t",
+              "name": "cell",
+              "groupby": "c"
+            }
+          },
+          "encode": {
+            "enter": {
+              "height": {
+                "value": 40
+              }
+            }
+          },
+          "marks": [
+            {
+              "type": "rect",
+              "from": {
+                "data": "cell"
+              },
+              "encode": {
+                "enter": {
+                  "x": {
+                    "value": 0
+                  },
+                  "width": {
+                    "field": "w"
+                  },
+                  "y": {
+                    "value": 0
+                  },
+                  "height": {
+                    "value": 30
+                  },
+                  "fill": {
+                    "scale": "colour",
+                    "field": "c"
+                  }
+                }
+              }
+            },
+            {
+              "type": "text",
+              "from": {
+                "data": "cell"
+              },
+              "encode": {
+                "enter": {
+                  "x": {
+                    "value": 2
+                  },
+                  "y": {
+                    "value": 20
+                  },
+                  "text": {
+                    "field": "c"
+                  },
+                  "fontSize": {
+                    "value": 9
+                  },
+                  "fill": {
+                    "value": "#ffffff"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "group",
+      "encode": {
+        "enter": {
+          "y": {
+            "value": 130
+          }
+        }
+      },
+      "layout": {
+        "columns": 3,
+        "padding": 12,
+        "center": true,
+        "bounds": "full"
+      },
+      "marks": [
+        {
+          "type": "group",
+          "from": {
+            "facet": {
+              "data": "t",
+              "name": "cell",
+              "groupby": "c"
+            }
+          },
+          "encode": {
+            "enter": {
+              "height": {
+                "value": 40
+              }
+            }
+          },
+          "marks": [
+            {
+              "type": "rect",
+              "from": {
+                "data": "cell"
+              },
+              "encode": {
+                "enter": {
+                  "x": {
+                    "value": 0
+                  },
+                  "width": {
+                    "field": "w"
+                  },
+                  "y": {
+                    "value": 0
+                  },
+                  "height": {
+                    "value": 30
+                  },
+                  "fill": {
+                    "scale": "colour",
+                    "field": "c"
+                  }
+                }
+              }
+            },
+            {
+              "type": "text",
+              "from": {
+                "data": "cell"
+              },
+              "encode": {
+                "enter": {
+                  "x": {
+                    "value": 2
+                  },
+                  "y": {
+                    "value": 20
+                  },
+                  "text": {
+                    "field": "c"
+                  },
+                  "fontSize": {
+                    "value": 9
+                  },
+                  "fill": {
+                    "value": "#ffffff"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "group",
+      "encode": {
+        "enter": {
+          "y": {
+            "value": 220
+          }
+        }
+      },
+      "layout": {
+        "columns": 0,
+        "padding": 6,
+        "bounds": "full"
+      },
+      "marks": [
+        {
+          "type": "group",
+          "from": {
+            "facet": {
+              "data": "t",
+              "name": "cell",
+              "groupby": "c"
+            }
+          },
+          "encode": {
+            "enter": {
+              "height": {
+                "value": 40
+              }
+            }
+          },
+          "marks": [
+            {
+              "type": "rect",
+              "from": {
+                "data": "cell"
+              },
+              "encode": {
+                "enter": {
+                  "x": {
+                    "value": 0
+                  },
+                  "width": {
+                    "field": "w"
+                  },
+                  "y": {
+                    "value": 0
+                  },
+                  "height": {
+                    "value": 30
+                  },
+                  "fill": {
+                    "scale": "colour",
+                    "field": "c"
+                  }
+                }
+              }
+            },
+            {
+              "type": "text",
+              "from": {
+                "data": "cell"
+              },
+              "encode": {
+                "enter": {
+                  "x": {
+                    "value": 2
+                  },
+                  "y": {
+                    "value": 20
+                  },
+                  "text": {
+                    "field": "c"
+                  },
+                  "fontSize": {
+                    "value": 9
+                  },
+                  "fill": {
+                    "value": "#ffffff"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "group",
+      "encode": {
+        "enter": {
+          "y": {
+            "value": 290
+          }
+        }
+      },
+      "layout": {
+        "columns": 3,
+        "padding": 8,
+        "align": "each",
+        "bounds": "flush"
+      },
+      "marks": [
+        {
+          "type": "group",
+          "from": {
+            "facet": {
+              "data": "t",
+              "name": "cell",
+              "groupby": "c"
+            }
+          },
+          "encode": {
+            "enter": {}
+          },
+          "marks": [
+            {
+              "type": "rect",
+              "from": {
+                "data": "cell"
+              },
+              "encode": {
+                "enter": {
+                  "x": {
+                    "value": 0
+                  },
+                  "width": {
+                    "field": "w"
+                  },
+                  "y": {
+                    "value": 0
+                  },
+                  "height": {
+                    "value": 30
+                  },
+                  "fill": {
+                    "scale": "colour",
+                    "field": "c"
+                  }
+                }
+              }
+            },
+            {
+              "type": "text",
+              "from": {
+                "data": "cell"
+              },
+              "encode": {
+                "enter": {
+                  "x": {
+                    "value": 2
+                  },
+                  "y": {
+                    "value": 20
+                  },
+                  "text": {
+                    "field": "c"
+                  },
+                  "fontSize": {
+                    "value": 9
+                  },
+                  "fill": {
+                    "value": "#ffffff"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

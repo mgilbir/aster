@@ -1,0 +1,42 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A gradient legend over a colour scale whose column holds no number at all. The extent is discarded, so the domain is `[NaN, NaN]`, and two separate rules decide what the legend draws. Upstream's degenerate test is `if (!(max - min))` — **falsiness, not a comparison with zero** — so a span of NaN is degenerate exactly as a span of zero is, the domain is thrown away and the whole ramp is sampled end to end. Written as `hi - lo == 0.0` this asked the one question JavaScript was not asking, and the swatch came out with no gradient at all. Then the labels: automatic generation produces nothing over a NaN domain, so upstream falls back to the domain's two ends, and `NaN !== NaN` is true so it takes that branch and makes **two** entries — which the label mark's `key: Value` join then collapses to **one**, because both key as the text `NaN`. Every value-driven guide mark upstream builds carries that key; a symbol legend is the one place it never fires, since each entry is a group of its own, and reading that as 'a legend does not join' is what left this one joining nothing. The second legend is an ordinary column, so the fixture says what both rules cost a chart that has numbers in it.",
+  "width": 240,
+  "height": 130,
+  "padding": 5,
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {"words": "alpha", "n": 1, "ok": 3},
+        {"words": "beta", "n": 2, "ok": 8},
+        {"words": "gamma", "n": 3, "ok": 14},
+        {"words": "delta", "n": 4, "ok": 20}
+      ]
+    }
+  ],
+  "scales": [
+    {"name": "x", "type": "band", "domain": {"data": "t", "field": "words"}, "range": "width", "padding": 0.1},
+    {"name": "none", "type": "linear", "domain": {"data": "t", "field": "words"}, "range": {"scheme": "blues"}},
+    {"name": "some", "type": "linear", "domain": {"data": "t", "field": "ok"}, "range": {"scheme": "viridis"}}
+  ],
+  "legends": [
+    {"fill": "none", "type": "gradient", "title": "no number"},
+    {"fill": "some", "type": "gradient", "title": "numbers"}
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "t"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "words"},
+          "width": {"scale": "x", "band": 1},
+          "y": {"value": 0},
+          "y2": {"value": 60},
+          "fill": {"scale": "some", "field": "ok"}
+        }
+      }
+    }
+  ]
+}

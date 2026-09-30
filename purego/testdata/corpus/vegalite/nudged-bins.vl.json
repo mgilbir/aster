@@ -1,0 +1,10 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A bucketed bar nudged off its bucket at each end, which composes with the spacing.",
+  "data": {"url": "data/stocks.csv"},
+  "mark": {"type": "bar", "xOffset": -2, "x2Offset": 2},
+  "encoding": {
+    "x": {"timeUnit": "month", "field": "date"},
+    "y": {"aggregate": "mean", "field": "price"}
+  }
+}

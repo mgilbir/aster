@@ -1,0 +1,21 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "An error bar under a point: the aggregate a transform states merges with the one an encoding asks for.",
+  "data": {"url": "data/barley.json"},
+  "layer": [
+    {
+      "mark": "errorbar",
+      "encoding": {
+        "x": {"field": "yield", "type": "quantitative", "scale": {"zero": false}},
+        "y": {"field": "variety", "type": "ordinal"}
+      }
+    },
+    {
+      "mark": {"type": "point", "filled": true, "color": "black"},
+      "encoding": {
+        "x": {"field": "yield", "type": "quantitative", "aggregate": "mean"},
+        "y": {"field": "variety", "type": "ordinal"}
+      }
+    }
+  ]
+}

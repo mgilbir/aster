@@ -1,0 +1,108 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A box plot: one aggregate producing five quantiles per group, drawn as whiskers, a box and a median rule.",
+  "width": 260,
+  "height": 140,
+  "padding": 5,
+  "data": [
+    {
+      "name": "raw",
+      "values": [
+        {"g": "north", "v": 12},
+        {"g": "north", "v": 19},
+        {"g": "north", "v": 23},
+        {"g": "north", "v": 28},
+        {"g": "north", "v": 31},
+        {"g": "north", "v": 44},
+        {"g": "south", "v": 7},
+        {"g": "south", "v": 9},
+        {"g": "south", "v": 14},
+        {"g": "south", "v": 15},
+        {"g": "south", "v": 26},
+        {"g": "east", "v": 18},
+        {"g": "east", "v": 21},
+        {"g": "east", "v": 22},
+        {"g": "east", "v": 33},
+        {"g": "east", "v": 37},
+        {"g": "east", "v": 39},
+        {"g": "east", "v": 48}
+      ]
+    },
+    {
+      "name": "stats",
+      "source": "raw",
+      "transform": [
+        {
+          "type": "aggregate",
+          "groupby": ["g"],
+          "fields": ["v", "v", "v", "v", "v"],
+          "ops": ["min", "q1", "median", "q3", "max"],
+          "as": ["lo", "lowerQuartile", "mid", "upperQuartile", "hi"]
+        }
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "y",
+      "type": "band",
+      "domain": {"data": "raw", "field": "g"},
+      "range": "height",
+      "padding": 0.4
+    },
+    {
+      "name": "x",
+      "type": "linear",
+      "domain": {"data": "raw", "field": "v"},
+      "range": "width",
+      "zero": false,
+      "nice": true
+    }
+  ],
+  "axes": [
+    {"orient": "left", "scale": "y"},
+    {"orient": "bottom", "scale": "x", "tickCount": 5, "grid": true}
+  ],
+  "marks": [
+    {
+      "type": "rule",
+      "from": {"data": "stats"},
+      "encode": {
+        "enter": {
+          "y": {"scale": "y", "field": "g", "band": 0.5},
+          "x": {"scale": "x", "field": "lo"},
+          "x2": {"scale": "x", "field": "hi"},
+          "stroke": {"value": "#4c78a8"}
+        }
+      }
+    },
+    {
+      "type": "rect",
+      "from": {"data": "stats"},
+      "encode": {
+        "enter": {
+          "y": {"scale": "y", "field": "g"},
+          "height": {"scale": "y", "band": 1},
+          "x": {"scale": "x", "field": "lowerQuartile"},
+          "x2": {"scale": "x", "field": "upperQuartile"},
+          "fill": {"value": "#9ecae9"},
+          "stroke": {"value": "#4c78a8"}
+        }
+      }
+    },
+    {
+      "type": "rule",
+      "from": {"data": "stats"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "mid"},
+          "x2": {"scale": "x", "field": "mid"},
+          "y": {"scale": "y", "field": "g"},
+          "y2": {"scale": "y", "field": "g", "band": 1},
+          "stroke": {"value": "#1f3b57"},
+          "strokeWidth": {"value": 2}
+        }
+      }
+    }
+  ]
+}

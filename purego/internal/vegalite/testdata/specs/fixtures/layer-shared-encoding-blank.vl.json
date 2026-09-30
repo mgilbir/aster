@@ -1,0 +1,79 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A shared encoding a layer never fills in, and captions taken off for the whole chart.",
+  "data": {
+    "url": "data/driving.json"
+  },
+  "transform": [
+    {
+      "calculate": "+datum.year + 5",
+      "as": "year_end"
+    }
+  ],
+  "encoding": {
+    "y": {
+      "type": "quantitative",
+      "axis": {
+        "zindex": 1
+      }
+    },
+    "x": {
+      "type": "quantitative",
+      "axis": {
+        "tickCount": 5,
+        "format": "d"
+      }
+    }
+  },
+  "config": {
+    "axis": {
+      "title": null,
+      "gridColor": "white",
+      "domain": false
+    }
+  },
+  "layer": [
+    {
+      "mark": {
+        "type": "bar",
+        "fill": "#aaa"
+      },
+      "encoding": {
+        "x": {
+          "field": "year",
+          "bin": "binned"
+        },
+        "x2": {
+          "field": "year_end"
+        },
+        "y": {
+          "field": "miles"
+        }
+      }
+    },
+    {
+      "data": {
+        "values": [
+          {
+            "year": 1960
+          },
+          {
+            "year": 1980
+          },
+          {
+            "year": 2000
+          }
+        ]
+      },
+      "mark": {
+        "type": "rule",
+        "stroke": "#000"
+      },
+      "encoding": {
+        "x": {
+          "field": "year"
+        }
+      }
+    }
+  ]
+}

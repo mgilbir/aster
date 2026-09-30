@@ -1,0 +1,117 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A kernel density estimate over a dot plot of the same values, with a theoretical normal drawn behind both. The dots are placed by dotbin and piled up by stack.",
+  "width": 240,
+  "height": 140,
+  "padding": 5,
+  "data": [
+    {
+      "name": "table",
+      "values": [
+        {"v": 2},
+        {"v": 3},
+        {"v": 3},
+        {"v": 3.5},
+        {"v": 4},
+        {"v": 5},
+        {"v": 5},
+        {"v": 5},
+        {"v": 6},
+        {"v": 7},
+        {"v": 9},
+        {"v": 12}
+      ]
+    },
+    {
+      "name": "estimate",
+      "source": "table",
+      "transform": [{"type": "kde", "field": "v", "extent": [0, 14], "steps": 40}]
+    },
+    {
+      "name": "theory",
+      "source": "table",
+      "transform": [
+        {
+          "type": "density",
+          "extent": [0, 14],
+          "steps": 40,
+          "distribution": {"function": "normal", "mean": 5.375, "stdev": 2.8}
+        }
+      ]
+    },
+    {
+      "name": "dots",
+      "source": "table",
+      "transform": [
+        {"type": "dotbin", "field": "v", "step": 1, "as": "pos"},
+        {"type": "stack", "groupby": ["pos"], "as": ["lo", "hi"]}
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "linear",
+      "domain": [0, 14],
+      "range": "width"
+    },
+    {
+      "name": "dot",
+      "type": "linear",
+      "domain": [0, 5],
+      "range": [136, 96]
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {"data": "estimate", "field": "density"},
+      "range": [90, 0],
+      "zero": true,
+      "nice": true
+    }
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "x", "tickCount": 7},
+    {"orient": "left", "scale": "y", "tickCount": 3, "format": ".2f"}
+  ],
+  "marks": [
+    {
+      "type": "area",
+      "from": {"data": "estimate"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "value"},
+          "y": {"scale": "y", "field": "density"},
+          "y2": {"scale": "y", "value": 0},
+          "fill": {"value": "#4c78a8"},
+          "fillOpacity": {"value": 0.35}
+        }
+      }
+    },
+    {
+      "type": "line",
+      "from": {"data": "theory"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "value"},
+          "y": {"scale": "y", "field": "density"},
+          "stroke": {"value": "#e45756"},
+          "strokeWidth": {"value": 1.5},
+          "strokeDash": {"value": [5, 3]}
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "from": {"data": "dots"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "pos"},
+          "y": {"scale": "dot", "field": "lo"},
+          "size": {"value": 45},
+          "fill": {"value": "#54a24b"}
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A stack whose colours are listed in a stated order, which orders the segments too — a domain otherwise orders only the legend.",
+  "data": {"url": "data/cars.json"},
+  "mark": "bar",
+  "encoding": {
+    "x": {"field": "Cylinders", "type": "ordinal"},
+    "y": {"aggregate": "count", "type": "quantitative"},
+    "color": {
+      "field": "Origin",
+      "type": "nominal",
+      "scale": {"domain": ["Japan", "Europe", "USA"], "range": ["#e7ba52", "#c7c7c7", "#1f77b4"]}
+    }
+  }
+}

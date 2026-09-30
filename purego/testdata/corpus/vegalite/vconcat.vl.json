@@ -1,0 +1,32 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "description": "A column of plots of unequal height, the lower one measuring only one axis.",
+  "data": {
+    "values": [
+      {"category": "Alpha", "amount": 28, "score": 3},
+      {"category": "Beta", "amount": 55, "score": 7},
+      {"category": "Gamma", "amount": 43, "score": 5},
+      {"category": "Delta", "amount": 91, "score": 2}
+    ]
+  },
+  "spacing": 30,
+  "vconcat": [
+    {
+      "width": 200,
+      "height": 110,
+      "mark": "line",
+      "encoding": {
+        "x": {"field": "score", "type": "quantitative"},
+        "y": {"field": "amount", "type": "quantitative"}
+      }
+    },
+    {
+      "width": 200,
+      "height": 60,
+      "mark": "tick",
+      "encoding": {
+        "x": {"field": "amount", "type": "quantitative"}
+      }
+    }
+  ]
+}

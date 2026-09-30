@@ -1,0 +1,71 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A position scale's padding is read from `config.scale`, and two of its entries were not read at all. Upstream resolves the three paddings in order, the whole `padding` first: `if (isContinuousToContinuous(scaleType)) { if (scaleConfig.continuousPadding !== undefined) return scaleConfig.continuousPadding; ... return barConfig.continuousBandSize; } if (scaleType === ScaleType.POINT) return scaleConfig.pointPadding;`, and then the outer half of a band, `if (scaleType === ScaleType.BAND) return getFirstDefined(bandPaddingOuter, paddingInner / 2)`. This compiler began each of those chains one link late: it went straight to `config.bar.continuousBandSize` without asking `continuousPadding`, and it always halved the inner padding without asking `bandPaddingOuter`, so a theme that padded its scales was answered with the built-in number instead. The first row is a band scale whose ends the theme widens, where the outer padding is the theme's 0.4 and not half of the bar's 0.1; its `y` shows that `continuousPadding` reaches a continuous scale on either axis. The second row is the same band with a stated `padding`, which settles both ends at once and outranks the theme, so it must stay a lone `padding` with no inner or outer beside it. The third row is a point scale, which `continuousPadding` never reaches because a point scale is not continuous-to-continuous, so it keeps `pointPadding` and must not change. The fourth row is a plain line, to show the theme's padding is not a bar's affair but every continuous position scale's. The fifth row is a bar against a continuous dimension, where the theme's `continuousPadding` outranks `config.bar.continuousBandSize` because upstream returns it before ever looking at the bar block. The sixth row states `paddingOuter` on the scale itself, which outranks the theme in turn.",
+  "data": {
+    "values": [
+      {"c": "alpha", "v": 30, "n": 1},
+      {"c": "beta", "v": 20, "n": 2},
+      {"c": "gamma", "v": 50, "n": 3}
+    ]
+  },
+  "config": {
+    "scale": {"bandPaddingOuter": 0.4, "continuousPadding": 7},
+    "bar": {"continuousBandSize": 12}
+  },
+  "vconcat": [
+    {
+      "width": 140,
+      "height": 90,
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "c", "type": "nominal"},
+        "y": {"field": "v", "type": "quantitative"}
+      }
+    },
+    {
+      "width": 140,
+      "height": 90,
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "c", "type": "nominal", "scale": {"padding": 0.9}},
+        "y": {"field": "v", "type": "quantitative"}
+      }
+    },
+    {
+      "width": 140,
+      "height": 90,
+      "mark": "point",
+      "encoding": {
+        "x": {"field": "c", "type": "nominal"},
+        "y": {"field": "v", "type": "quantitative"}
+      }
+    },
+    {
+      "width": 140,
+      "height": 90,
+      "mark": "line",
+      "encoding": {
+        "x": {"field": "n", "type": "quantitative"},
+        "y": {"field": "v", "type": "quantitative"}
+      }
+    },
+    {
+      "width": 140,
+      "height": 90,
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "n", "type": "quantitative"},
+        "y": {"field": "v", "type": "quantitative"}
+      }
+    },
+    {
+      "width": 140,
+      "height": 90,
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "c", "type": "nominal", "scale": {"paddingOuter": 0.05}},
+        "y": {"field": "v", "type": "quantitative"}
+      }
+    }
+  ]
+}

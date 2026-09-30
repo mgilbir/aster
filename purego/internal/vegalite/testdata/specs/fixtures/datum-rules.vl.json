@@ -1,0 +1,16 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A threshold drawn at a constant, dashed, over the bars it judges.",
+  "data": {"values": [
+    {"c": "a", "v": 3}, {"c": "b", "v": 7}, {"c": "d", "v": 5}, {"c": "e", "v": 9}
+  ]},
+  "layer": [
+    {"mark": "bar", "encoding": {
+      "x": {"field": "c", "type": "nominal"},
+      "y": {"field": "v", "type": "quantitative"}
+    }},
+    {"mark": {"type": "rule", "strokeDash": [6, 4], "color": "firebrick"}, "encoding": {
+      "y": {"datum": 6, "type": "quantitative"}
+    }}
+  ]
+}

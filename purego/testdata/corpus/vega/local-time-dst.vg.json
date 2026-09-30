@@ -1,0 +1,73 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A local time scale across the spring daylight-saving change, beside a UTC scale over the same instants. The two axes are deliberately not parallel: local midnight stays midnight through a night that is only 23 hours long.",
+  "width": 240,
+  "height": 130,
+  "padding": 5,
+  "data": [
+    {
+      "name": "table",
+      "values": [
+        {"t": "2026-03-27T00:00:00", "v": 12},
+        {"t": "2026-03-28T00:00:00", "v": 19},
+        {"t": "2026-03-29T00:00:00", "v": 8},
+        {"t": "2026-03-30T00:00:00", "v": 25},
+        {"t": "2026-03-31T00:00:00", "v": 15}
+      ],
+      "format": {"parse": {"t": "date"}}
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "time",
+      "domain": {"data": "table", "field": "t"},
+      "range": "width"
+    },
+    {
+      "name": "xu",
+      "type": "utc",
+      "domain": {"data": "table", "field": "t"},
+      "range": "width"
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {"data": "table", "field": "v"},
+      "range": [90, 0],
+      "zero": true,
+      "nice": true
+    }
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "x", "tickCount": 5, "offset": 4, "title": "local"},
+    {"orient": "bottom", "scale": "xu", "tickCount": 5, "offset": 44, "title": "utc"},
+    {"orient": "left", "scale": "y", "tickCount": 3}
+  ],
+  "marks": [
+    {
+      "type": "line",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "t"},
+          "y": {"scale": "y", "field": "v"},
+          "stroke": {"value": "#4c78a8"},
+          "strokeWidth": {"value": 2}
+        }
+      }
+    },
+    {
+      "type": "symbol",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "t"},
+          "y": {"scale": "y", "field": "v"},
+          "size": {"value": 50},
+          "fill": {"value": "#4c78a8"}
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,84 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "Where the minus sign applies and where it does not: a linear axis and a gradient legend sign their negatives with U+2212, while a band axis, an ordinal legend and a text mark keep the hyphen JavaScript gives them.",
+  "width": 220,
+  "height": 130,
+  "padding": 5,
+  "data": [
+    {
+      "name": "table",
+      "values": [
+        {"tier": -1200, "v": -35, "label": "cold"},
+        {"tier": -5, "v": 18, "label": "mild"},
+        {"tier": 12, "v": -8, "label": "warm"},
+        {"tier": 340, "v": 44, "label": "hot"}
+      ]
+    }
+  ],
+  "scales": [
+    {
+      "name": "x",
+      "type": "band",
+      "domain": {"data": "table", "field": "tier"},
+      "range": "width",
+      "padding": 0.3
+    },
+    {
+      "name": "y",
+      "type": "linear",
+      "domain": {"data": "table", "field": "v"},
+      "range": "height",
+      "nice": true
+    },
+    {
+      "name": "swatch",
+      "type": "ordinal",
+      "domain": {"data": "table", "field": "tier"},
+      "range": {"scheme": "tableau10"}
+    },
+    {
+      "name": "ramp",
+      "type": "linear",
+      "domain": {"data": "table", "field": "v"},
+      "range": ["#eeeeee", "#333333"]
+    }
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "x", "title": "Band: hyphens"},
+    {"orient": "left", "scale": "y", "tickCount": 5, "title": "Linear: minus signs"}
+  ],
+  "legends": [
+    {"fill": "swatch", "title": "Ordinal", "orient": "right"},
+    {"fill": "ramp", "type": "gradient", "title": "Ramp", "orient": "bottom", "tickCount": 4}
+  ],
+  "marks": [
+    {
+      "type": "rect",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "tier"},
+          "width": {"scale": "x", "band": 1},
+          "y": {"scale": "y", "field": "v"},
+          "y2": {"scale": "y", "value": 0},
+          "fill": {"scale": "ramp", "field": "v"}
+        }
+      }
+    },
+    {
+      "type": "text",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "tier", "band": 0.5},
+          "y": {"scale": "y", "field": "v"},
+          "dy": {"value": -4},
+          "text": {"field": "v"},
+          "align": {"value": "center"},
+          "baseline": {"value": "bottom"},
+          "fill": {"value": "#333333"}
+        }
+      }
+    }
+  ]
+}

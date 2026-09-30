@@ -1,0 +1,47 @@
+{
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A bubble chart with a size legend and a horizontal symbol legend below it. A legend mapping no colour draws grey outlines, which no fixture has checked.",
+  "width": 220,
+  "height": 130,
+  "padding": 5,
+  "data": [
+    {
+      "name": "table",
+      "values": [
+        {"x": 1, "y": 22, "w": 4, "g": "north"},
+        {"x": 2, "y": 41, "w": 18, "g": "south"},
+        {"x": 3, "y": 15, "w": 9, "g": "north"},
+        {"x": 4, "y": 36, "w": 27, "g": "south"}
+      ]
+    }
+  ],
+  "scales": [
+    {"name": "x", "type": "linear", "domain": [0, 5], "range": "width"},
+    {"name": "y", "type": "linear", "domain": {"data": "table", "field": "y"}, "range": "height", "nice": true, "zero": true},
+    {"name": "area", "type": "linear", "domain": {"data": "table", "field": "w"}, "range": [30, 400], "zero": true},
+    {"name": "grp", "type": "ordinal", "domain": {"data": "table", "field": "g"}, "range": {"scheme": "dark2"}}
+  ],
+  "axes": [
+    {"orient": "bottom", "scale": "x", "tickCount": 5},
+    {"orient": "left", "scale": "y", "tickCount": 3}
+  ],
+  "legends": [
+    {"size": "area", "title": "Weight", "tickCount": 3},
+    {"fill": "grp", "title": "Group", "orient": "bottom", "direction": "horizontal"}
+  ],
+  "marks": [
+    {
+      "type": "symbol",
+      "from": {"data": "table"},
+      "encode": {
+        "enter": {
+          "x": {"scale": "x", "field": "x"},
+          "y": {"scale": "y", "field": "y"},
+          "size": {"scale": "area", "field": "w"},
+          "fill": {"scale": "grp", "field": "g"},
+          "fillOpacity": {"value": 0.75}
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,55 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A legend keeps only the words its own kind understands, and the test is the property name's **prefix**: `if ((legendType === 'gradient' && property.startsWith('symbol')) || (legendType === 'symbol' && property.startsWith('gradient'))) { continue; }`. A ramp has no symbols to colour and a row of swatches has no ramp, so the settings of the other kind are dropped where they are *read* rather than ignored where they are drawn. Written through, as this compiler wrote them, Vega is handed a legend carrying instructions for the kind it is not. The first row is a gradient legend — a quantitative colour — given both a `symbolFillColor` it must lose and a `gradientStrokeColor` it must keep. The second is a symbol legend — a size — given the same pair the other way about. Each row therefore has a must-not-change half built into it: the rule is a prefix test, not a list, so a property that merely *contains* the other kind's name is untouched, which is why `titleColor` and `labelColor` survive on both.",
+  "data": {
+    "values": [
+      {"c": "alpha", "v": 28, "w": 3},
+      {"c": "beta", "v": 55, "w": 7},
+      {"c": "gamma", "v": 43, "w": 5}
+    ]
+  },
+  "vconcat": [
+    {
+      "width": 200,
+      "height": 80,
+      "mark": "bar",
+      "encoding": {
+        "x": {"field": "c", "type": "nominal"},
+        "y": {"field": "v", "type": "quantitative"},
+        "color": {
+          "field": "w",
+          "type": "quantitative",
+          "legend": {
+            "symbolFillColor": "aliceblue",
+            "symbolStrokeColor": "red",
+            "gradientStrokeColor": "blue",
+            "gradientThickness": 14,
+            "titleColor": "green",
+            "labelColor": "purple"
+          }
+        }
+      }
+    },
+    {
+      "width": 200,
+      "height": 80,
+      "mark": "point",
+      "encoding": {
+        "x": {"field": "w", "type": "quantitative"},
+        "y": {"field": "v", "type": "quantitative"},
+        "size": {
+          "field": "v",
+          "type": "quantitative",
+          "legend": {
+            "symbolFillColor": "aliceblue",
+            "symbolStrokeColor": "red",
+            "gradientStrokeColor": "blue",
+            "gradientThickness": 14,
+            "titleColor": "green",
+            "labelColor": "purple"
+          }
+        }
+      }
+    }
+  ]
+}

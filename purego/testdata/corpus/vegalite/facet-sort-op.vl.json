@@ -1,0 +1,26 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "description": "A trellis whose columns are ordered by a total none of its rows carries.",
+  "data": {
+    "values": [
+      {"category": "Alpha", "amount": 28, "era": "before"},
+      {"category": "Beta", "amount": 55, "era": "before"},
+      {"category": "Alpha", "amount": 13, "era": "during"},
+      {"category": "Beta", "amount": 91, "era": "during"},
+      {"category": "Alpha", "amount": 12, "era": "after"},
+      {"category": "Beta", "amount": 9, "era": "after"}
+    ]
+  },
+  "width": 80,
+  "height": 70,
+  "mark": "bar",
+  "encoding": {
+    "x": {"field": "category", "type": "nominal"},
+    "y": {"field": "amount", "type": "quantitative"},
+    "column": {
+      "field": "era",
+      "type": "nominal",
+      "sort": {"field": "amount", "op": "sum", "order": "descending"}
+    }
+  }
+}

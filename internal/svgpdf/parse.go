@@ -1,6 +1,7 @@
 package svgpdf
 
 import (
+	"context"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -47,12 +48,21 @@ const maxNestingDepth = 512
 
 // parseSVG parses an SVG document into an element tree, rejecting elements
 // outside the supported subset.
-func parseSVG(svg string) (*element, error) {
+func parseSVG(ctx context.Context, svg string, lim Limits) (*element, error) {
+	if len(svg) > lim.MaxInputBytes {
+		return nil, limitErr("SVG input is %d bytes, limit is %d", len(svg), lim.MaxInputBytes)
+	}
 	dec := xml.NewDecoder(strings.NewReader(svg))
 	var root *element
 	var stack []*element
+	elements, tokens := 0, 0
 
 	for {
+		if tokens++; tokens&1023 == 0 {
+			if err := ctxErr(ctx); err != nil {
+				return nil, err
+			}
+		}
 		tok, err := dec.Token()
 		if err != nil {
 			if errors.Is(err, io.EOF) {
@@ -65,6 +75,9 @@ func parseSVG(svg string) (*element, error) {
 			name := t.Name.Local
 			if !supportedElements[name] {
 				return nil, fmt.Errorf("svgpdf: unsupported SVG element <%s>", name)
+			}
+			if elements++; elements > lim.MaxElements {
+				return nil, limitErr("more than %d elements", lim.MaxElements)
 			}
 			el := &element{name: name, attrs: make(map[string]string, len(t.Attr))}
 			for _, a := range t.Attr {

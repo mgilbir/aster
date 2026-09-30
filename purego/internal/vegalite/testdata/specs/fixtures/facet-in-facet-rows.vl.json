@@ -1,0 +1,25 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A grid whose every cell is itself a grid: two levels of cell group, not one crossed grid. Both levels facet by row, which is what pins the heading rule — `parseFacetHeader` folds the inner level's caption into the outer one's and nulls the inner, so the rows are captioned once, at the top, as `region / size`. It also pins the band: a header naming another grid cannot be as tall as what it names, there being no one cell to match, so it takes `headerBand` and is centred on it instead.",
+  "data": {
+    "values": [
+      {"region": "north", "size": "big", "x": 1, "y": 4},
+      {"region": "north", "size": "small", "x": 2, "y": 3},
+      {"region": "south", "size": "big", "x": 3, "y": 2},
+      {"region": "south", "size": "small", "x": 4, "y": 1}
+    ]
+  },
+  "facet": {"row": {"field": "region"}},
+  "spec": {
+    "facet": {"row": {"field": "size"}},
+    "spec": {
+      "width": 120,
+      "height": 80,
+      "mark": "point",
+      "encoding": {
+        "x": {"field": "x", "type": "quantitative"},
+        "y": {"field": "y", "type": "quantitative"}
+      }
+    }
+  }
+}

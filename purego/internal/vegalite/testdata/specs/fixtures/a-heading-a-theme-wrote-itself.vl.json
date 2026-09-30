@@ -1,0 +1,20 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A trellis heading a **theme** writes. `assembleLabelTitle` asks `getHeaderProperties(['format', 'formatType', 'labelAngle', 'labelAnchor', 'labelOrient', 'labelExpr'], facetFieldDef.header, config, channel)` — all six through the same chain, the channel's own header block and then the theme — and then substitutes `datum.label` with what it would otherwise have written and `datum.value` with the column itself. This compiler read `labelExpr` from the header block alone, so a `config.header.labelExpr` was dropped and a theme that captions every cell of every trellis the same way captioned none of them. The **column** headings here come from the theme; the **row** headings state their own, which must win over it. Both facets live in one chart rather than two beside each other, and deliberately: a concatenation emits its facet domain datasets in an order this compiler and upstream disagree about, which is a difference of its own and would fail this fixture for a reason that has nothing to do with headings.",
+  "config": {"header": {"labelExpr": "datum.label + ' ▸'"}},
+  "data": {
+    "values": [
+      {"k": "one", "j": "up", "g": "x", "v": 28},
+      {"k": "two", "j": "down", "g": "y", "v": 55}
+    ]
+  },
+  "width": 70,
+  "height": 50,
+  "mark": "bar",
+  "encoding": {
+    "x": {"field": "g", "type": "nominal"},
+    "y": {"field": "v", "type": "quantitative"},
+    "column": {"field": "k", "type": "nominal"},
+    "row": {"field": "j", "type": "nominal", "header": {"labelExpr": "'<' + datum.label + '>'"}}
+  }
+}

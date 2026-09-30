@@ -1,5 +1,7 @@
 package svgpdf
 
+import "fmt"
+
 // FontUsage reports, for one shaped face used in a converted document, the
 // source font bytes and the glyph IDs actually referenced.
 //
@@ -31,8 +33,18 @@ type FontUsage struct {
 // ConvertWithUsage is Convert plus the per-face glyph usage of the produced
 // document (see FontUsage). Usage is most useful with Options{Text: TextNamed};
 // with TextEmbed the fonts are already embedded and usage is informational.
-func ConvertWithUsage(svg string, shaper TextShaper, opts Options) ([]byte, []FontUsage, error) {
-	root, err := parseSVG(svg)
+//
+// The conversion is bounded by opts.Limits and cancelled by opts.Context, and
+// it never panics: an internal failure is returned as an error.
+func ConvertWithUsage(svg string, shaper TextShaper, opts Options) (pdf []byte, uses []FontUsage, err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			pdf, uses, err = nil, nil, fmt.Errorf("svgpdf: internal error: %v", p)
+		}
+	}()
+	lim := opts.Limits.withDefaults()
+	opts.Limits = lim
+	root, err := parseSVG(opts.Context, svg, lim)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -40,7 +52,10 @@ func ConvertWithUsage(svg string, shaper TextShaper, opts Options) ([]byte, []Fo
 	if err != nil {
 		return nil, nil, err
 	}
-	pdf, err := buildPDF(content, gsList, fonts, width, height)
+	if err := ctxErr(opts.Context); err != nil {
+		return nil, nil, err
+	}
+	pdf, err = buildPDF(content, gsList, fonts, width, height)
 	if err != nil {
 		return nil, nil, err
 	}

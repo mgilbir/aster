@@ -1,0 +1,110 @@
+{
+ "width": 200,
+ "height": 100,
+ "padding": 5,
+ "signals": [
+  {
+   "name": "pad",
+   "value": 3
+  }
+ ],
+ "data": [
+  {
+   "name": "t",
+   "values": [
+    {
+     "k": "a",
+     "v": 3.7
+    },
+    {
+     "k": "b",
+     "v": 8.2
+    },
+    {
+     "k": "c",
+     "v": 5
+    }
+   ]
+  }
+ ],
+ "scales": [
+  {
+   "name": "x",
+   "type": "band",
+   "domain": {
+    "data": "t",
+    "field": "k"
+   },
+   "range": "width",
+   "padding": 0.2
+  },
+  {
+   "name": "y",
+   "type": "linear",
+   "domain": {
+    "data": "t",
+    "field": "v"
+   },
+   "range": "height",
+   "nice": true
+  }
+ ],
+ "marks": [
+  {
+   "type": "rect",
+   "from": {
+    "data": "t"
+   },
+   "encode": {
+    "enter": {
+     "fill": {
+      "value": "#4c78a8"
+     }
+    },
+    "update": {
+     "x": {
+      "scale": "x",
+      "field": "k",
+      "offset": {
+       "signal": "pad"
+      }
+     },
+     "width": {
+      "scale": "x",
+      "band": 0.5,
+      "offset": -1
+     },
+     "y": {
+      "scale": "y",
+      "field": "v",
+      "round": true
+     },
+     "y2": {
+      "scale": "y",
+      "value": 0,
+      "offset": {
+       "field": "v",
+       "mult": 0.5
+      }
+     },
+     "opacity": [
+      {
+       "test": "datum.v > 6",
+       "value": 1
+      },
+      {
+       "test": "datum.v > 4",
+       "value": 0.7
+      },
+      {
+       "value": 0.3
+      }
+     ],
+     "cornerRadius": {
+      "signal": "pad * 2"
+     }
+    }
+   }
+  }
+ ]
+}

@@ -1,0 +1,155 @@
+{
+ "$schema": "https://vega.github.io/schema/vega/v6.json",
+ "width": 260,
+ "height": 180,
+ "padding": 5,
+ "marks": [
+  {
+   "type": "line",
+   "from": {
+    "data": "p8"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "field": "y"
+     },
+     "stroke": {
+      "value": "#333"
+     },
+     "strokeWidth": {
+      "value": 4
+     },
+     "strokeCap": {
+      "value": "round"
+     },
+     "strokeJoin": {
+      "value": "round"
+     },
+     "strokeDash": {
+      "value": [
+       6,
+       3,
+       1,
+       3
+      ]
+     },
+     "strokeDashOffset": {
+      "value": 2
+     },
+     "opacity": {
+      "value": 0.8
+     }
+    }
+   }
+  },
+  {
+   "type": "line",
+   "from": {
+    "data": "p8"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 60"
+     },
+     "stroke": {
+      "value": "#900"
+     },
+     "strokeWidth": {
+      "value": 6
+     },
+     "strokeCap": {
+      "value": "square"
+     },
+     "strokeJoin": {
+      "value": "miter"
+     },
+     "strokeMiterLimit": {
+      "value": 2
+     },
+     "strokeOpacity": {
+      "value": 0.5
+     }
+    }
+   }
+  },
+  {
+   "type": "area",
+   "from": {
+    "data": "p8"
+   },
+   "encode": {
+    "update": {
+     "x": {
+      "field": "x"
+     },
+     "y": {
+      "signal": "datum.y + 120"
+     },
+     "y2": {
+      "signal": "datum.y + 150"
+     },
+     "fill": {
+      "value": "#69c"
+     },
+     "blend": {
+      "value": "multiply"
+     },
+     "stroke": {
+      "value": "#000"
+     },
+     "strokeWidth": {
+      "value": 3
+     },
+     "strokeJoin": {
+      "value": "bevel"
+     }
+    }
+   }
+  }
+ ],
+ "data": [
+  {
+   "name": "p8",
+   "values": [
+    {
+     "x": 0.0,
+     "y": 39.735458557716264,
+     "g": true
+    },
+    {
+     "x": 48.0,
+     "y": 61.791620261311714,
+     "g": true
+    },
+    {
+     "x": 96.0,
+     "y": 47.52800020149668,
+     "g": true
+    },
+    {
+     "x": 144.0,
+     "y": 7.09585158126362,
+     "g": false
+    },
+    {
+     "x": 192.0,
+     "y": 21.218334053191974,
+     "g": true
+    },
+    {
+     "x": 240.0,
+     "y": 58.460994109705005,
+     "g": true
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A stream graph: bars stacked about their own centre rather than from zero.",
+  "data": {"values": [
+    {"t": 1, "s": "a", "v": 3}, {"t": 1, "s": "b", "v": 5},
+    {"t": 2, "s": "a", "v": 6}, {"t": 2, "s": "b", "v": 2},
+    {"t": 3, "s": "a", "v": 1}, {"t": 3, "s": "b", "v": 7}
+  ]},
+  "mark": "area",
+  "encoding": {
+    "x": {"field": "t", "type": "quantitative"},
+    "y": {"field": "v", "type": "quantitative", "stack": "center"},
+    "color": {"field": "s", "type": "nominal"}
+  }
+}

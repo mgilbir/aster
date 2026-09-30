@@ -1,0 +1,132 @@
+{
+  "width": 300,
+  "height": 150,
+  "padding": 5,
+  "autosize": "pad",
+  "data": [
+    {
+      "name": "t",
+      "values": [
+        {
+          "r": "one",
+          "c": "x",
+          "v": 3
+        },
+        {
+          "r": "one",
+          "c": "y",
+          "v": 5
+        },
+        {
+          "r": "two",
+          "c": "x",
+          "v": 2
+        },
+        {
+          "r": "two",
+          "c": "y",
+          "v": 7
+        }
+      ]
+    },
+    {
+      "name": "rows",
+      "source": "t",
+      "transform": [
+        {
+          "type": "aggregate",
+          "groupby": [
+            "r"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "cols",
+      "source": "t",
+      "transform": [
+        {
+          "type": "aggregate",
+          "groupby": [
+            "c"
+          ]
+        }
+      ]
+    }
+  ],
+  "layout": {
+    "columns": 2,
+    "padding": 10
+  },
+  "marks": [
+    {
+      "type": "group",
+      "role": "column-header",
+      "from": {
+        "data": "cols"
+      },
+      "encode": {
+        "enter": {
+          "height": {
+            "value": 14
+          }
+        }
+      },
+      "title": {
+        "text": {
+          "signal": "parent.c"
+        },
+        "frame": "group"
+      }
+    },
+    {
+      "type": "group",
+      "role": "row-header",
+      "from": {
+        "data": "rows"
+      },
+      "encode": {
+        "enter": {
+          "width": {
+            "value": 30
+          }
+        }
+      },
+      "title": {
+        "text": {
+          "signal": "parent.r"
+        },
+        "orient": "left",
+        "frame": "group"
+      }
+    },
+    {
+      "type": "group",
+      "from": {
+        "facet": {
+          "name": "cell",
+          "data": "t",
+          "groupby": [
+            "r",
+            "c"
+          ]
+        }
+      },
+      "encode": {
+        "enter": {
+          "width": {
+            "value": 80
+          },
+          "height": {
+            "value": 50
+          },
+          "fill": {
+            "value": "#eee"
+          }
+        }
+      }
+    }
+  ],
+  "$schema": "https://vega.github.io/schema/vega/v6.json",
+  "description": "A trellis with row and column headers: the grid places the cells, and the labels are arranged around it rather than among it."
+}

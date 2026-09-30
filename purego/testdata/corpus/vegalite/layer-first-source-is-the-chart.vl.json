@@ -1,0 +1,30 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A first layer bringing its own rows: the chart's own table is still the first source.",
+  "width": 400,
+  "data": {"url": "data/driving.json"},
+  "layer": [
+    {
+      "data": {"values": [{"start": 1970, "end": 1980}, {"start": 1990, "end": 2000}]},
+      "mark": {"type": "rect", "opacity": 0.3},
+      "encoding": {
+        "x": {"field": "start", "type": "quantitative"},
+        "x2": {"field": "end"}
+      }
+    },
+    {
+      "mark": "line",
+      "encoding": {
+        "x": {"field": "year", "type": "quantitative"},
+        "y": {"field": "miles", "type": "quantitative"}
+      }
+    },
+    {
+      "mark": "point",
+      "encoding": {
+        "x": {"field": "year", "type": "quantitative"},
+        "y": {"field": "miles", "type": "quantitative"}
+      }
+    }
+  ]
+}

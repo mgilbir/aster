@@ -1,0 +1,23 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "Points drawn without the gaps, over domains measured with them.",
+  "data": {
+    "values": [
+      {"a": -10, "b": null},
+      {"a": -5, "b": -25},
+      {"a": -1, "b": -20},
+      {"a": 0, "b": null},
+      {"a": 1, "b": 30},
+      {"a": 5, "b": 40},
+      {"a": 10, "b": null}
+    ]
+  },
+  "config": {"mark": {"invalid": "break-paths-show-domains"}},
+  "width": 100,
+  "height": 100,
+  "mark": "point",
+  "encoding": {
+    "x": {"field": "a", "type": "quantitative"},
+    "y": {"field": "b", "type": "quantitative"}
+  }
+}

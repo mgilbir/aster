@@ -1,0 +1,14 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A binned histogram split by a row, so the bin and the facet share one flow.",
+  "data": {"values": [
+    {"g": "A", "v": 1}, {"g": "A", "v": 2}, {"g": "A", "v": 8}, {"g": "A", "v": 9},
+    {"g": "B", "v": 3}, {"g": "B", "v": 4}, {"g": "B", "v": 4}, {"g": "B", "v": 10}
+  ]},
+  "mark": "bar",
+  "encoding": {
+    "row": {"field": "g", "type": "nominal"},
+    "x": {"field": "v", "type": "quantitative", "bin": {"maxbins": 5}},
+    "y": {"aggregate": "count", "type": "quantitative"}
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "One line per series, split by a detail channel that maps to no scale.",
+  "width": 300, "height": 150,
+  "data": {"url": "data/stocks.csv"},
+  "mark": "line",
+  "encoding": {
+    "x": {"field": "date", "type": "temporal"},
+    "y": {"field": "price", "type": "quantitative"},
+    "detail": {"field": "symbol", "type": "nominal"}
+  }
+}

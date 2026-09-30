@@ -1,0 +1,27 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+  "description": "A mark that links somewhere shows the pointer, there being nothing else about it that looks clickable — and **three places can say it links**. `cursor(markDef, encoding, config)` asks `encoding.href || markDef.href || getMarkPropOrConfig('href', markDef, config)`, so a theme that gives every bar the same link makes every bar clickable, exactly as an `href` channel or an `href` on the mark would. This compiler read only the channel, so a themed link drew no pointer and the reader had nothing to tell them the mark could be followed. Both guards run through the chain too: `const specifiedCursor = getMarkPropOrConfig('cursor', markDef, config); if (specifiedCursor === undefined) { … }`, so a `cursor` the theme settles suppresses the pointer exactly as one on the mark does. The first row takes its link from `config.mark`; the second states its own `cursor` and must keep it, the theme's link notwithstanding; the third has no link at all and must have no cursor.",
+  "config": {"mark": {"href": "https://example.invalid/"}},
+  "data": {
+    "values": [
+      {"c": "alpha", "v": 28},
+      {"c": "beta", "v": 55}
+    ]
+  },
+  "vconcat": [
+    {
+      "width": 180, "height": 60, "mark": "bar",
+      "encoding": {
+        "x": {"field": "c", "type": "nominal"},
+        "y": {"field": "v", "type": "quantitative"}
+      }
+    },
+    {
+      "width": 180, "height": 60, "mark": {"type": "bar", "cursor": "crosshair"},
+      "encoding": {
+        "x": {"field": "c", "type": "nominal"},
+        "y": {"field": "v", "type": "quantitative"}
+      }
+    }
+  ]
+}

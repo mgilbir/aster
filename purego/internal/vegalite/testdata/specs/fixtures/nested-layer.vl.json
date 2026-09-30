@@ -1,0 +1,35 @@
+{
+  "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+  "description": "A layer inside a layer: a target line and its caption drawn as one annotation.",
+  "data": {
+    "values": [
+      {"category": "Alpha", "amount": 28},
+      {"category": "Beta", "amount": 55},
+      {"category": "Gamma", "amount": 43}
+    ]
+  },
+  "width": 170,
+  "height": 110,
+  "encoding": {"x": {"field": "category", "type": "nominal"}},
+  "layer": [
+    {
+      "mark": "bar",
+      "encoding": {"y": {"field": "amount", "type": "quantitative"}}
+    },
+    {
+      "layer": [
+        {
+          "mark": {"type": "rule", "color": "firebrick", "strokeDash": [4, 4]},
+          "encoding": {"y": {"datum": 40, "type": "quantitative"}}
+        },
+        {
+          "mark": {"type": "text", "dy": -6, "align": "left", "color": "firebrick"},
+          "encoding": {
+            "y": {"datum": 40, "type": "quantitative"},
+            "text": {"value": "target"}
+          }
+        }
+      ]
+    }
+  ]
+}
