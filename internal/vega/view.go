@@ -64,6 +64,9 @@ type Limits struct {
 	MaxLoadBytes int64
 	// MaxPoints is the number of path points geographic marks may generate.
 	MaxPoints int64
+	// MaxCanvasBytes is the total pixel memory of the bitmaps transforms
+	// paint (the heatmap's images).
+	MaxCanvasBytes int64
 	// MaxStringBytes is the total size of the large strings (over 4 KiB)
 	// expressions may build.
 	MaxStringBytes int64
@@ -90,6 +93,9 @@ func (l Limits) withDefaults() Limits {
 	}
 	if l.MaxPoints == 0 {
 		l.MaxPoints = 2_000_000
+	}
+	if l.MaxCanvasBytes == 0 {
+		l.MaxCanvasBytes = 512 << 20
 	}
 	if l.MaxStringBytes == 0 {
 		l.MaxStringBytes = 128 << 20
@@ -246,7 +252,7 @@ func newView(ctx context.Context, opts Options, locale jsval.Value) *runView {
 	limits := opts.Limits.withDefaults()
 	// The render's budget travels in the context, so transforms and geo code
 	// charge it (before allocating) without any plumbing.
-	bud := &budget.Budget{MaxRows: limits.MaxRows, MaxLoadBytes: limits.MaxLoadBytes, MaxPoints: limits.MaxPoints}
+	bud := &budget.Budget{MaxRows: limits.MaxRows, MaxLoadBytes: limits.MaxLoadBytes, MaxPoints: limits.MaxPoints, MaxCanvasBytes: limits.MaxCanvasBytes}
 	ctx = budget.With(ctx, bud)
 	v := &runView{
 		bud: bud, strs: expr.NewStringBudget(limits.MaxStringBytes),

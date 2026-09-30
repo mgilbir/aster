@@ -4,6 +4,7 @@ import (
 	"context"
 	"math"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -12,6 +13,7 @@ import (
 type Image struct {
 	Width, Height int
 	Pix           []uint8
+	url           string // DataURL, once computed
 }
 
 // Pixel is the per-cell input to heatmap color and opacity functions: the
@@ -109,17 +111,26 @@ func (p *HeatmapParams) pixelOpacity(datum jsval.Value, px Pixel) (float64, erro
 
 func (p *HeatmapParams) render(ctx context.Context, g Grid, hasValues bool, datum jsval.Value, max float64) (*Image, error) {
 	n := g.Width
-	x1, y1 := int(g.X1), int(g.Y1)
-	x2, y2 := int(g.X2), int(g.Y2)
-	if x2 == 0 {
-		x2 = n
+	// The region comes from the data: bound it in floating point before any
+	// integer conversion or allocation.
+	fx2, fy2 := g.X2, g.Y2
+	if fx2 == 0 {
+		fx2 = float64(n)
 	}
-	if y2 == 0 {
-		y2 = g.Height
+	if fy2 == 0 {
+		fy2 = float64(g.Height)
 	}
-	w, h := x2-x1, y2-y1
-	if w < 0 || h < 0 || int64(w)*int64(h) > MaxGridCells {
+	fw, fh := math.Trunc(fx2)-math.Trunc(g.X1), math.Trunc(fy2)-math.Trunc(g.Y1)
+	const far = 1 << 40
+	if math.Abs(g.X1) > far || math.Abs(g.Y1) > far || math.Abs(fx2) > far || math.Abs(fy2) > far ||
+		math.IsNaN(fw) || math.IsNaN(fh) || fw < 0 || fh < 0 || fw*fh > MaxGridCells {
 		return nil, errTooLarge
+	}
+	x1, y1 := int(g.X1), int(g.Y1)
+	x2, y2 := int(fx2), int(fy2)
+	w, h := x2-x1, y2-y1
+	if err := budget.From(ctx).Canvas(4 * int64(w) * int64(h)); err != nil {
+		return nil, err
 	}
 	img := &Image{Width: w, Height: h, Pix: make([]uint8, 4*w*h)}
 	k := 0

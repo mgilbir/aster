@@ -1,9 +1,5 @@
 # Specs whose comparison with the node oracle is not "ok" (see compare_test.go).
 # set/name<TAB>status<TAB>reason
-vg-fixtures/contour-plot	engine-error	gap: the heatmap transform (canvas-backed upstream) is not implemented
-vg-fixtures/density-heatmaps	engine-error	gap: the heatmap transform (canvas-backed upstream) is not implemented
-vg-gallery/contour-plot	engine-error	gap: the heatmap transform (canvas-backed upstream) is not implemented
-vg-gallery/density-heatmaps	engine-error	gap: the heatmap transform (canvas-backed upstream) is not implemented
 vg-gallery/warming-stripes	differ|ok	platform: match on Linux; on macOS node-canvas shapes this text slightly differently (probe widths 87.388 vs 87.398 px)
 vg-gallery/word-cloud	engine-error	gap: the engine rejects this wordcloud transform as needing a canvas; upstream lays it out with node-canvas
 vl-examples/isotype_bar_chart_emoji	differ|ok	platform: match on Linux; on macOS node-canvas shapes this text slightly differently (probe widths 87.388 vs 87.398 px)

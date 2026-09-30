@@ -271,27 +271,31 @@ func (bd *Bounder) groupBounds(b *Bounds, g *Item) error {
 // ImageSize returns the natural size of an image item's picture, or 0, 0 when
 // unknown; the SVG renderer and bounds share it through Item.Image.
 func imageWidth(it *Item) float64 {
-	switch {
-	case it.Width.Set():
+	if it.Width.Set() {
 		return it.Width.Val()
-	case it.imgW == 0 || it.imgW != it.imgW:
+	}
+	nw, nh := it.naturalSize()
+	switch {
+	case nw == 0 || nw != nw:
 		return 0
 	case !it.Aspect.IsFalse() && it.Height.Truthy():
-		return it.Height.Val() * it.imgW / it.imgH
+		return it.Height.Val() * nw / nh
 	}
-	return it.imgW
+	return nw
 }
 
 func imageHeight(it *Item) float64 {
-	switch {
-	case it.Height.Set():
+	if it.Height.Set() {
 		return it.Height.Val()
-	case it.imgH == 0 || it.imgH != it.imgH:
+	}
+	nw, nh := it.naturalSize()
+	switch {
+	case nh == 0 || nh != nh:
 		return 0
 	case !it.Aspect.IsFalse() && it.Width.Truthy():
-		return it.Width.Val() * it.imgH / it.imgW
+		return it.Width.Val() * nh / nw
 	}
-	return it.imgH
+	return nh
 }
 
 func imageXOffset(align string, w float64) float64 {
@@ -331,6 +335,41 @@ func (bd *Bounder) imageBounds(b *Bounds, it *Item) {
 	x := it.X.Zero() - imageXOffset(it.Align, w)
 	y := it.Y.Zero() - imageYOffset(it.Baseline, h)
 	b.Set(x, y, x+w, y+h)
+}
+
+// Bitmap is a picture an image item carries in its `image` property instead of
+// a URL: the canvas a transform (heatmap) painted. Upstream's image mark draws
+// such a canvas directly and, when it writes SVG, inlines it with toDataURL().
+type Bitmap interface {
+	// Size is the width and height of the canvas in pixels.
+	Size() (w, h int)
+	// DataURL is the canvas as a data URL.
+	DataURL() string
+}
+
+// Bitmap returns the canvas in the item's `image` property. An item with a
+// URL ignores it: the mark loads the URL when it differs from the image's own
+// (which a canvas does not have).
+func (it *Item) Bitmap() (Bitmap, bool) {
+	if it.URL != "" || it.Extra == nil {
+		return nil, false
+	}
+	o := it.Extra.Lookup("image").ObjValue()
+	if o == nil {
+		return nil, false
+	}
+	b, ok := o.Host().(Bitmap)
+	return b, ok
+}
+
+// naturalSize is the size of the item's picture: its canvas, else the loaded
+// image's.
+func (it *Item) naturalSize() (w, h float64) {
+	if b, ok := it.Bitmap(); ok {
+		bw, bh := b.Size()
+		return float64(bw), float64(bh)
+	}
+	return it.imgW, it.imgH
 }
 
 // SetImageSize records the loaded picture's natural size, used for image
