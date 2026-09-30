@@ -261,10 +261,10 @@ func analyzeData(data jsval.Value, scope *Scope, ops []*entry) []*entry {
 	var output []*entry
 	var source *entry
 	var upstream []P
-	modify, generate := false, false
+	modify, generate, fromSource := false, false, false
 
 	switch {
-	case !data.Get("values").IsUndefined():
+	case data.Get("values").IsTruthy(): // JS truthiness: null, 0 and "" mean absent
 		if isSignalObj(data.Get("values")) || hasSignal(data.Get("format")) {
 			output = append(output, loadEntry(scope, data))
 			source = collectEntry(nil, nil)
@@ -273,7 +273,7 @@ func analyzeData(data jsval.Value, scope *Scope, ops []*entry) []*entry {
 			source = collectEntry(&ingestSpec{values: data.Get("values"), format: data.Get("format")}, nil)
 			output = append(output, source)
 		}
-	case !data.Get("url").IsUndefined():
+	case data.Get("url").IsTruthy():
 		if hasSignal(data.Get("url")) || hasSignal(data.Get("format")) {
 			output = append(output, loadEntry(scope, data))
 			source = collectEntry(nil, nil)
@@ -282,16 +282,16 @@ func analyzeData(data jsval.Value, scope *Scope, ops []*entry) []*entry {
 			source = collectEntry(&ingestSpec{url: data.Get("url"), request: true, format: data.Get("format")}, nil)
 			output = append(output, source)
 		}
-	case !data.Get("source").IsUndefined():
+	case data.Get("source").IsTruthy():
 		for _, d := range arrayOf(data.Get("source")) {
 			upstream = append(upstream, scope.getData(d.AsString()).output)
 		}
 		source = nil
+		fromSource = true            // even `source: []` is a (empty) source: the array is truthy
 		output = append(output, nil) // populated below
-		// `source` truthiness: upstream is non-empty
 	}
 
-	haveSource := source != nil || len(upstream) > 0
+	haveSource := source != nil || fromSource
 	for _, t := range ops {
 		m := t.meta
 		if !haveSource && !m.source {
@@ -315,19 +315,19 @@ func analyzeData(data jsval.Value, scope *Scope, ops []*entry) []*entry {
 		}
 	}
 
-	if len(upstream) > 0 {
+	if fromSource {
 		n := len(upstream) - 1
 		relay := mk("relay")
 		if modify {
 			relay.param("derive", jsval.True)
 		}
-		if n > 0 {
+		if n != 0 { // upstream `n ? upstream : upstream[0]`; -1 is truthy
 			relay.param("pulse", upstream)
 		} else {
 			relay.param("pulse", upstream[0])
 		}
 		output[0] = relay
-		if modify || n > 0 {
+		if modify || n != 0 {
 			rest := append([]*entry{output[0], collectEntry(nil, nil)}, output[1:]...)
 			output = rest
 		}
@@ -341,13 +341,13 @@ func analyzeData(data jsval.Value, scope *Scope, ops []*entry) []*entry {
 
 func loadEntry(scope *Scope, data jsval.Value) *entry {
 	e := mk("load")
-	if u := data.Get("url"); !u.IsUndefined() {
+	if u := data.Get("url"); u.IsTruthy() {
 		e.param("url", scope.property(u))
 	}
 	if a := data.Get("async"); a.IsTruthy() {
 		e.param("async", scope.property(a))
 	}
-	if v := data.Get("values"); !v.IsUndefined() {
+	if v := data.Get("values"); v.IsTruthy() {
 		e.param("values", scope.property(v))
 	}
 	e.param("format", scope.objectProperty(data.Get("format")))

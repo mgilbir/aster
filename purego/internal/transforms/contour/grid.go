@@ -98,6 +98,13 @@ func GridFromValue(v jsval.Value) (Grid, error) {
 		return 0
 	}
 	g.Scale, g.X1, g.Y1, g.X2, g.Y2 = num("scale"), num("x1"), num("y1"), num("x2"), num("y2")
+	if sc := v.Get("scale"); sc.IsArr() {
+		g.Scale = 0
+		g.ScaleXY = []float64{math.NaN(), math.NaN()}
+		for i := 0; i < 2 && i < sc.Len(); i++ {
+			g.ScaleXY[i] = jsval.ToNumber(sc.Index(i))
+		}
+	}
 	if t := v.Get("translate"); t.IsArr() {
 		g.Translate = []float64{jsval.ToNumber(t.Index(0)), jsval.ToNumber(t.Index(1))}
 	}

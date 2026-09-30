@@ -409,12 +409,17 @@ type tupleIndex struct {
 func facTupleIndex(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *opParams) any) {
 	return (*tupleIndex)(nil), trFunc(func(n *opNode, p *opParams, pulse *flowPulse) *flowPulse {
 		f, _ := p.Get("field").(transforms.Field)
-		lookup, err := transforms.NewLookupIndex(n.g.ctx, pulse.tuples, f)
+		tuples := pulse.tuples
+		if pulse.items != nil {
+			// A named mark's data are its items ("reactive geometry").
+			tuples = n.g.view.itemTuples(pulse.items)
+		}
+		lookup, err := transforms.NewLookupIndex(n.g.ctx, tuples, f)
 		if err != nil {
 			failErr(err)
 		}
-		idx := &tupleIndex{lookup: lookup, m: make(map[string]jsval.Value, len(pulse.tuples))}
-		for _, t := range pulse.tuples {
+		idx := &tupleIndex{lookup: lookup, m: make(map[string]jsval.Value, len(tuples))}
+		for _, t := range tuples {
 			idx.m[f.Apply(t).AsString()] = t
 		}
 		n.value = idx

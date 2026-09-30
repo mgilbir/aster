@@ -1,0 +1,2 @@
+{"width":50,"height":50,"data":[{"name":"a","values":[{"x":1}]},{"name":"b","source":[],"transform":[{"type":"formula","as":"y","expr":"1"}]},{"name":"c","source":null,"values":null,"url":"","transform":[{"type":"formula","as":"y","expr":"1"}]},{"name":"d","source":["a"],"values":0}],
+"marks":[{"type":"text","from":{"data":"b"},"encode":{"update":{"text":{"value":"b"}}}},{"type":"text","from":{"data":"c"},"encode":{"update":{"text":{"value":"c"}}}},{"type":"text","from":{"data":"d"},"encode":{"update":{"text":{"value":"d"}}}}]}

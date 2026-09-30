@@ -21,6 +21,9 @@ type OverlapParams struct {
 	// Order, if non-empty, is the field path (e.g. "datum.index") items are
 	// ordered by (ascending) before removal.
 	Order string
+	// Sort, if set, orders the items instead (the `sort` comparator
+	// parameter the parser attaches for an overlap `order`).
+	Sort func(a, b *scene.Item) int
 	// Bound, when set, hides items whose bounds leave the range of the scale
 	// along the orientation of an axis (top/bottom bound x, others y), give
 	// or take Tolerance pixels (0 means 1, as upstream's `tolerance || 1`).
@@ -160,8 +163,11 @@ func Overlap(mark *scene.Mark, p OverlapParams) {
 	if len(source) == 0 {
 		return
 	}
-	if p.Order != "" {
-		cmp := compareField(p.Order)
+	if p.Order != "" || p.Sort != nil {
+		cmp := p.Sort
+		if cmp == nil {
+			cmp = compareField(p.Order)
+		}
 		sorted := make([]*scene.Item, len(source))
 		copy(sorted, source)
 		jssort.Sort(sorted, cmp)

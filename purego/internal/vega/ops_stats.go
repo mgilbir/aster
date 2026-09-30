@@ -216,7 +216,7 @@ func forceOf(p *opParams) force.Force {
 			c.Strength = p.num("strength", 1)
 		}
 		if p.has("iterations") {
-			c.Iterations = int(p.num("iterations", 1))
+			c.Iterations = clampInt(p.num("iterations", 1))
 		}
 		return c
 	case "nbody":
@@ -244,7 +244,7 @@ func forceOf(p *opParams) force.Force {
 			l.Strength = &s
 		}
 		if p.has("iterations") {
-			l.Iterations = int(p.num("iterations", 1))
+			l.Iterations = clampInt(p.num("iterations", 1))
 		}
 		return l
 	case "x":

@@ -89,6 +89,12 @@ func facOverlap(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode
 		if o := p.Value("order"); o.IsStr() {
 			op.Order = o.StrValue()
 		}
+		if cmp := p.comparator("sort"); cmp != nil {
+			// The parser passes the overlap `order` as a comparator over the
+			// items (vega's `compare({field: "datum.index"})`).
+			v := n.g.view
+			op.Sort = func(a, b *scene.Item) int { return cmp(v.itemTuple(a), v.itemTuple(b)) }
+		}
 		if sc, ok := p.Get("boundScale").(scale.Scale); ok && sc != nil {
 			rng := sc.Range()
 			if len(rng) > 0 {

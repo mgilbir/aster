@@ -205,6 +205,8 @@ func (p *IsocontourParams) transformPaths(geoms []Geometry, g Grid, datum jsval.
 		s = p.ScaleFn(datum)
 	} else if len(p.Scale) > 0 && !(len(p.Scale) == 1 && p.Scale[0] == 0) {
 		s = p.Scale
+	} else if g.ScaleXY != nil {
+		s = g.ScaleXY
 	} else if g.Scale != 0 {
 		s = []float64{g.Scale}
 	}

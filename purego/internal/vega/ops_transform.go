@@ -3,6 +3,7 @@ package vega
 import (
 	"context"
 	"math"
+	"slices"
 
 	"github.com/mgilbir/aster/purego/internal/format"
 	"github.com/mgilbir/aster/purego/internal/jsval"
@@ -188,6 +189,34 @@ func (p *opParams) pair2(name string) *[2]float64 {
 // -- generic wrappers -----------------------------------------------------------
 
 // txFn computes a transform's output from the complete input.
+// requireFields fails the way upstream does when a transform applies a field
+// accessor that is null: an empty field name resolves to null at run time
+// (`if (!_.$field) return null`), and calling it is a TypeError. Only the
+// accessors every tuple goes through are checked: required field parameters
+// and group-by lists.
+func requireFields(def *transformDef, p *opParams) {
+	if def == nil {
+		return
+	}
+	for _, pd := range def.params {
+		if pd.typ != "field" {
+			continue
+		}
+		switch {
+		case pd.array && pd.name == "groupby":
+			for _, f := range p.fields(pd.name) {
+				if f.IsNil() {
+					fail("TypeError: f is not a function (empty field name in %s)", pd.name)
+				}
+			}
+		case !pd.array && pd.required:
+			if _, ok := p.vals[pd.name]; ok && p.field(pd.name).IsNil() {
+				fail("TypeError: %s is not a function (empty field name)", pd.name)
+			}
+		}
+	}
+}
+
 type txFn func(n *opNode, p *opParams, in []jsval.Value) ([]jsval.Value, error)
 
 // tupleTransform wraps a one-shot tuple function as an operator.
@@ -198,6 +227,7 @@ func tupleTransform(f txFn) factory { return statefulTransform(func() txFn { ret
 func statefulTransform(newFn func() txFn) factory {
 	return func(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *opParams) any) {
 		f := newFn()
+		def := definitions()[e.typ]
 		return nil, trFunc(func(n *opNode, p *opParams, pulse *flowPulse) *flowPulse {
 			if pulse.items != nil {
 				return markTransform(n, p, pulse, f)
@@ -205,6 +235,9 @@ func statefulTransform(newFn func() txFn) factory {
 			in := pulse.tuples
 			if len(pulse.multi) > 0 {
 				in = concatTuples(pulse.multi)
+			}
+			if len(in) > 0 {
+				requireFields(def, p)
 			}
 			out, err := f(n, p, in)
 			if err != nil {
@@ -273,19 +306,25 @@ func init() {
 			if len(pulse.multi) > 0 {
 				in = concatTuples(pulse.multi) // several source data sets
 			}
+			// A null group-by accessor (an empty field name) must not crash
+			// the grouping; it reads as undefined.
+			for i, f := range ap.GroupBy {
+				if f.IsNil() {
+					ap.GroupBy[i] = transforms.NamedField("", nil, func(jsval.Value) jsval.Value { return jsval.Undefined })
+				}
+			}
 			out, err := transforms.Aggregate(n.g.ctx, in, ap)
 			if err != nil {
 				failErr(err)
 			}
-			if kf, ok := p.Get("key").(transforms.KeyFunc); ok {
-				cells := &aggCells{byKey: make(map[string]jsval.Value, len(out))}
-				for i, k := range firstKeys(in, kf) {
-					if i < len(out) {
-						cells.byKey[k] = out[i]
-					}
-				}
-				n.value = cells
+			// A group mark faceted over this data set finds each group's
+			// tuple here; the cells are keyed like the aggregate's own
+			// groups (an explicit key, else the group-by values).
+			kf, ok := p.Get("key").(transforms.KeyFunc)
+			if !ok {
+				kf = transforms.KeyOf(ap.GroupBy...)
 			}
+			n.value = &aggCells{in: in, out: out, key: kf}
 			return changedPulse(pulse, out)
 		}), nil
 	}
@@ -311,7 +350,7 @@ func init() {
 		return transforms.Identifier(ctxOf(n), in, p.str("as"), &n.g.view.idCounter)
 	})
 	tf["sample"] = tupleTransform(func(n *opNode, p *opParams, in []jsval.Value) ([]jsval.Value, error) {
-		size := int(p.num("size", 1000))
+		size := clampInt(math.Ceil(p.num("size", 1000))) // `res.length < num` admits ceil(num) tuples
 		return transforms.Sample(ctxOf(n), in, size, n.g.view.randSource())
 	})
 	tf["sequence"] = tupleTransform(func(n *opNode, p *opParams, in []jsval.Value) ([]jsval.Value, error) {
@@ -319,9 +358,16 @@ func init() {
 		if as == "" {
 			as = "data"
 		}
-		return transforms.Sequence(ctxOf(n), transforms.SequenceParams{
+		seq, err := transforms.Sequence(ctxOf(n), transforms.SequenceParams{
 			Start: p.num("start", 0), Stop: p.num("stop", 0), Step: p.num("step", 1), As: as,
 		})
+		if err != nil || len(in) == 0 {
+			return seq, err
+		}
+		// Upstream adds the sequence to the tuples already flowing through
+		// (`pulse.add.concat(this.value)`), so after other transforms it
+		// extends the data set rather than replacing it.
+		return append(slices.Clip(in), seq...), nil
 	})
 	tf["stack"] = tupleTransform(func(n *opNode, p *opParams, in []jsval.Value) ([]jsval.Value, error) {
 		return transforms.Stack(ctxOf(n), in, transforms.StackParams{
@@ -365,7 +411,7 @@ func init() {
 	tf["pivot"] = tupleTransform(func(n *opNode, p *opParams, in []jsval.Value) ([]jsval.Value, error) {
 		pp := transforms.PivotParams{
 			GroupBy: p.fields("groupby"), Field: p.field("field"), Value: p.field("value"),
-			Op: p.str("op"), Limit: int(p.num("limit", 0)), Rand: n.g.view.randSource(),
+			Op: p.str("op"), Limit: clampInt(p.num("limit", 0)), Rand: n.g.view.randSource(),
 		}
 		if kf := p.field("key"); !kf.IsNil() {
 			pp.Key = kf
@@ -387,7 +433,7 @@ func init() {
 	tf["regression"] = tupleTransform(func(n *opNode, p *opParams, in []jsval.Value) ([]jsval.Value, error) {
 		rp := transforms.RegressionParams{
 			X: p.field("x"), Y: p.field("y"), GroupBy: p.fields("groupby"),
-			Method: p.str("method"), Order: int(p.num("order", 3)),
+			Method: p.str("method"), Order: clampInt(p.num("order", 3)),
 			Extent: p.nums("extent"), Params: p.bool("params"), As: p.strs("as"),
 		}
 		return transforms.Regression(ctxOf(n), in, rp)
@@ -642,4 +688,18 @@ func markTransform(n *opNode, p *opParams, pulse *flowPulse, f txFn) *flowPulse 
 		}
 	}
 	return nil
+}
+
+// clampInt converts a number to an int without relying on the platform's
+// out-of-range conversion: NaN is 0, and magnitudes saturate at 2^31-1.
+func clampInt(f float64) int {
+	switch {
+	case math.IsNaN(f):
+		return 0
+	case f >= math.MaxInt32:
+		return math.MaxInt32
+	case f <= math.MinInt32:
+		return math.MinInt32
+	}
+	return int(f)
 }

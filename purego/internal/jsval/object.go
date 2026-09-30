@@ -19,7 +19,13 @@ type Object struct {
 	keys  []string
 	vals  []Value
 	index map[string]int
+	// str, when set, is the object's toString (d3 colour objects print as
+	// "rgb(…)"); plain objects print as "[object Object]".
+	str func(*Object) string
 }
+
+// SetStringer sets the function String(v) uses for this object.
+func (o *Object) SetStringer(f func(*Object) string) { o.str = f }
 
 // NewObject makes an empty object with room for n keys.
 func NewObject(n int) *Object {
@@ -161,6 +167,7 @@ func (o *Object) Clone() *Object {
 		vals: make([]Value, 0, o.Len()+1),
 	}
 	if o != nil {
+		c.str = o.str
 		c.vals = append(c.vals, o.vals...)
 	}
 	if len(c.keys) > indexThreshold {

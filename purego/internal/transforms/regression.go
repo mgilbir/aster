@@ -53,9 +53,8 @@ func Regression(ctx context.Context, data []jsval.Value, p RegressionParams) ([]
 	if !regressionMethods[method] {
 		return nil, fmt.Errorf("Invalid regression method: %s", method)
 	}
-	if method == "poly" && (p.Order < 0 || p.Order > MaxPolyOrder) {
-		return nil, fmt.Errorf("regression: poly order %d out of range [0,%d]", p.Order, MaxPolyOrder)
-	}
+	// An order beyond the limit is only an error for a group that has enough
+	// points to fit it (FitRegression checks); smaller groups are skipped.
 	dof := regressionDOF(method, p.Order)
 	domain := p.Extent
 	if domain != nil && method == "log" && len(domain) > 0 && domain[0] <= 0 {

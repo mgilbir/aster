@@ -121,9 +121,6 @@ func (e *Env) TickCount(s scale.Scale, count jsval.Value, minStep jsval.Value) (
 	typ := typeOf(s)
 	if count.IsNum() {
 		n := count.NumValue()
-		if math.Abs(n) > maxTicks {
-			return tc, fmt.Errorf("tick count %v exceeds the limit of %d", n, maxTicks)
-		}
 		if bins, ok := binsOf(s); ok {
 			n = jsMax(n, float64(len(bins)))
 		}
@@ -145,6 +142,11 @@ func (e *Env) TickCount(s scale.Scale, count jsval.Value, minStep jsval.Value) (
 					n--
 				}
 			}
+		}
+		// The bound applies after the minimum-step clamp, which can reduce an
+		// absurd count to a handful of ticks.
+		if math.Abs(n) > maxTicks {
+			return tc, fmt.Errorf("tick count %v exceeds the limit of %d", n, maxTicks)
 		}
 		return scale.Count(n), nil
 	}

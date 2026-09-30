@@ -25,6 +25,9 @@ type Grid struct {
 	Width, Height  int
 	X1, Y1, X2, Y2 float64
 	Translate      []float64
+	// ScaleXY is a data grid's scale given as an array, [sx, sy] (missing or
+	// non-numeric entries are NaN, which the transform reads as 1).
+	ScaleXY []float64
 }
 
 // DensityParams configures 2-D kernel density estimation.

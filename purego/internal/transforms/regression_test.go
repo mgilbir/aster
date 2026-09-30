@@ -68,8 +68,17 @@ func TestRegressionBadInput(t *testing.T) {
 	if _, err := Regression(ctx, nil, RegressionParams{X: x, Y: y, Method: "nope"}); err == nil {
 		t.Error("expected error for unknown method")
 	}
-	if _, err := Regression(ctx, nil, RegressionParams{X: x, Y: y, Method: "poly", Order: 1 << 30}); err == nil {
-		t.Error("expected error for huge order")
+	// An order beyond the limit is an error only for a group with enough
+	// points to fit it; smaller groups are skipped, as upstream skips them.
+	if out, err := Regression(ctx, nil, RegressionParams{X: x, Y: y, Method: "poly", Order: 1 << 30}); err != nil || len(out) != 0 {
+		t.Errorf("huge order without data: %v, %d rows", err, len(out))
+	}
+	var many []jsval.Value
+	for i := 0; i < MaxPolyOrder+2; i++ {
+		many = append(many, obj("x", jsval.Num(float64(i)), "y", jsval.Num(float64(i*i))))
+	}
+	if _, err := Regression(ctx, many, RegressionParams{X: x, Y: y, Method: "poly", Order: MaxPolyOrder + 1}); err == nil {
+		t.Error("expected error for an order beyond the limit with enough points")
 	}
 	// Singular system must not panic.
 	same := []jsval.Value{obj("x", jsval.Num(1), "y", jsval.Num(1)), obj("x", jsval.Num(1), "y", jsval.Num(2)),

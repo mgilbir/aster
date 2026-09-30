@@ -294,6 +294,9 @@ func (v Value) AsString() string {
 		}
 		return b.String()
 	case KindObj:
+		if o := v.ObjValue(); o != nil && o.str != nil {
+			return o.str(o)
+		}
 		return "[object Object]"
 	case KindPattern:
 		return v.PatternOf().String()

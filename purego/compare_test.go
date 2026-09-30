@@ -22,7 +22,7 @@ import (
 )
 
 var (
-	compareSets    = flag.String("compare.sets", "vg-fixtures,vl-fixtures,vl-examples,vl-convert", "comma-separated corpus sets to compare")
+	compareSets    = flag.String("compare.sets", "vg-fixtures,vl-fixtures,vl-examples,vl-convert,vg-gallery,regress-vg,regress-vl", "comma-separated corpus sets to compare")
 	compareFilter  = flag.String("compare.run", "", "only compare specs whose name contains this substring")
 	compareReport  = flag.String("compare.report", "", "write a per-spec markdown report to this path")
 	compareVerbose = flag.Bool("compare.v", false, "log every spec's outcome")
@@ -37,6 +37,9 @@ type corpusSet struct {
 
 var corpusSets = []corpusSet{
 	{"vg-fixtures", "testdata/corpus/vega/*.vg.json", false},
+	{"vg-gallery", "testdata/corpus/vg-gallery/*.vg.json", false},
+	{"regress-vg", "testdata/corpus/regress/*.vg.json", false},
+	{"regress-vl", "testdata/corpus/regress/*.vl.json", true},
 	{"vl-fixtures", "testdata/corpus/vegalite/*.vl.json", true},
 	{"vl-examples", "../testdata/vega-lite/v6.4.3/specs/*.vl.json", true},
 	{"vl-convert", "../testdata/vl-convert/*.vl.json", true},
@@ -45,6 +48,12 @@ var corpusSets = []corpusSet{
 // oracleDir caches the reference engine's output; it is git-ignored and
 // rebuilt on demand, keyed by a hash of the spec.
 const oracleDir = "testdata/oracle-cache"
+
+// oracleEngineVersion is part of every cache key. Bump it whenever the
+// reference engine's output changes for the same spec (a re-vendored Vega, a
+// change to its runtime or text measurement), so stale renderings are never
+// compared.
+const oracleEngineVersion = "vega-6.4.0/vl-6.4.3/exact-text-1"
 
 type outcome int
 
@@ -68,6 +77,11 @@ var referenceDiverges = map[string]string{
 	"trail":                        "QuickJS trigonometry differs from V8 in the last bit",
 	"bar_grouped_thin":             "QuickJS sorts an inconsistent mixed-type comparator differently from V8's TimSort",
 	"bar_grouped_thin_minBandSize": "QuickJS sorts an inconsistent mixed-type comparator differently from V8's TimSort",
+	// Found by the differential fuzzer (testdata/corpus/regress); each confirmed
+	// against upstream in node (testdata/nodesvg.mjs).
+	"string-domain-iterates-chars":          "QuickJS's Date.prototype.toString names the zone \"(UTC)\" where V8 says \"(Coordinated Universal Time)\", so a domain made of the characters of that string has different letters",
+	"filter-timeunit-on-numeric-csv-column": "QuickJS's Date.parse accepts strings such as \"0.0\" (the year 2000) that V8 reads as an invalid date",
+	"trail-mark-many-arcs":                  "QuickJS trigonometry differs from V8 in the last bit",
 	// These draw the current time (now()), so no cached reference can match.
 	"clock": "draws the current time",
 	"watch": "draws the current time",
@@ -173,7 +187,7 @@ func compareOne(t *testing.T, pg *purego.Converter, refConv func() (*aster.Conve
 	case d.Equal:
 		res.outcome = outEqual
 	default:
-		res.outcome, res.detail = outDiffer, fmt.Sprintf("%d diffs; first: %s", d.DiffCount, d.Diff)
+		res.outcome, res.detail = outDiffer, fmt.Sprintf("%d diffs; first: %s", d.DiffCount, firstLine(d.Diff))
 		if why, ok := referenceDiverges[name]; ok {
 			res.outcome, res.detail = outRefDiverges, why
 		}
@@ -200,7 +214,7 @@ func compareVega(pg *purego.Converter, spec, want []byte) string {
 // oracle returns the reference engine's SVG (and, for Vega-Lite, its compiled
 // Vega) for spec, from the cache when the spec is unchanged.
 func oracle(refConv func() (*aster.Converter, error), set corpusSet, name string, spec []byte) (svg, vega []byte, err error) {
-	sum := sha256.Sum256(spec)
+	sum := sha256.Sum256(append([]byte(oracleEngineVersion+"\x00"), spec...))
 	key := hex.EncodeToString(sum[:8])
 	dir := filepath.Join(oracleDir, set.name)
 	base := filepath.Join(dir, name+"."+key)

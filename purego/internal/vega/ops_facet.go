@@ -31,7 +31,26 @@ func (c *rtContext) makeSubflow(spec *flowSpec) subflowMaker {
 
 // aggCells is the value of an aggregate operator whose output faceted group
 // marks read: the output tuple of each group by key.
-type aggCells struct{ byKey map[string]jsval.Value }
+type aggCells struct {
+	byKey map[string]jsval.Value
+	// Cells are indexed on first use: most aggregates never parent a facet.
+	in, out []jsval.Value
+	key     transforms.KeyFunc
+}
+
+// get returns the output tuple of the group with the given key.
+func (a *aggCells) get(k string) jsval.Value {
+	if a.byKey == nil {
+		a.byKey = make(map[string]jsval.Value, len(a.out))
+		for i, k := range firstKeys(a.in, a.key) {
+			if i < len(a.out) {
+				a.byKey[k] = a.out[i]
+			}
+		}
+		a.in = nil
+	}
+	return a.byKey[k]
+}
 
 // cell is one facet subflow: a source operator that hands the cell's tuples to
 // the instantiated operators.
@@ -95,7 +114,7 @@ func facFacet(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 		for _, g := range groups {
 			var parent jsval.Value
 			if cells != nil {
-				parent = cells.byKey[g.Key]
+				parent = cells.get(g.Key)
 			}
 			cl := st.subflow(n, g.Key, flow, g.Key, parent, pulse)
 			cl.tuples = g.Tuples

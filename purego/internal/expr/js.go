@@ -61,6 +61,13 @@ func colorValue(c color.Color) jsval.Value {
 		o.Set(n, jsval.Num(ch[i]))
 	}
 	o.Set("opacity", jsval.Num(ch[3]))
+	// Every d3 colour prints as its rgb() form.
+	o.SetStringer(func(o *jsval.Object) string {
+		if c, ok := asColor(jsval.Obj(o)); ok {
+			return c.RGB().FormatRgb()
+		}
+		return "[object Object]"
+	})
 	return jsval.Obj(o)
 }
 

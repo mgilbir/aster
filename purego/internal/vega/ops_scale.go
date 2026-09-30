@@ -58,6 +58,32 @@ func valueList(x any) ([]jsval.Value, bool) {
 	return nil, false
 }
 
+// domainList reads a domain parameter. Scales iterate the value they are given
+// (`for (const v of domain)`, `Array.from(domain)`), so a string is a domain of
+// its characters (code points); a non-iterable value is an error for the
+// ordinal family and an empty domain for the rest.
+func domainList(x any, typ string) ([]jsval.Value, bool) {
+	if l, ok := valueList(x); ok {
+		return l, true
+	}
+	v, ok := x.(jsval.Value)
+	if !ok || !v.IsTruthy() {
+		return nil, false
+	}
+	if v.IsStr() {
+		var out []jsval.Value
+		for _, r := range v.StrValue() {
+			out = append(out, jsval.Str(string(r)))
+		}
+		return out, true
+	}
+	switch typ {
+	case scale.TypeOrdinal, scale.TypeBand, scale.TypePoint, scale.TypeQuantile:
+		fail("TypeError: %s is not iterable", v.String())
+	}
+	return nil, false
+}
+
 func scaleKey(p *opParams) string {
 	t := p.Value("type").AsString()
 	if t == scale.TypeSequential {
@@ -66,7 +92,7 @@ func scaleKey(p *opParams) string {
 	d := ""
 	if isContinuousColor(p) {
 		n := 0
-		if dom, ok := valueList(p.Get("domain")); ok {
+		if dom, ok := domainList(p.Get("domain"), p.Value("type").AsString()); ok {
 			n = len(dom)
 			if !p.Value("domainMid").IsNullish() {
 				n++
@@ -147,7 +173,7 @@ func configureDomain(s scale.Scale, p *opParams, g *flowGraph) int {
 		s.SetDomain(raw)
 		return len(raw)
 	}
-	domain, ok := valueList(p.Get("domain"))
+	domain, ok := domainList(p.Get("domain"), typ)
 	if !ok {
 		return 0
 	}
