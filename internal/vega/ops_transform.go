@@ -609,6 +609,9 @@ func windowParams(p *opParams) transforms.WindowParams {
 	wp := transforms.WindowParams{
 		Sort: p.comparator("sort"), GroupBy: p.fields("groupby"), IgnorePeers: p.bool("ignorePeers"),
 	}
+	if cs := p.compareSpec("sort"); cs != nil && len(cs.fields) > 0 {
+		wp.SortField = cs.fields[0]
+	}
 	for i, op := range ops {
 		s := transforms.WindowOpSpec{Op: op, Param: math.NaN()}
 		if i < len(fields) {

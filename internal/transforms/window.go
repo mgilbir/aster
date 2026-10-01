@@ -37,6 +37,9 @@ type WindowOpSpec struct {
 type WindowParams struct {
 	// Sort orders tuples within a partition; nil keeps input order.
 	Sort Comparator
+	// SortField is the first field Sort compares, for the error of applying
+	// it to undefined (see adjustPeers).
+	SortField string
 	// GroupBy partitions the tuples.
 	GroupBy []Field
 	Ops     []WindowOpSpec
@@ -55,6 +58,10 @@ type windowFrame struct {
 	i0, i1, p0, p1, index int
 	data                  []jsval.Value
 	compare               Comparator // never nil: without Sort it always says "different"
+	// sortField is the field the comparator reads; err is set by adjustPeers
+	// when upstream's comparator would be handed undefined.
+	sortField string
+	err       error
 }
 
 type windowOp interface {
@@ -281,7 +288,7 @@ func Window(ctx context.Context, data []jsval.Value, p WindowParams) ([]jsval.Va
 			SortTuples(rows, p.Sort)
 		}
 		n := len(rows)
-		w := windowFrame{data: rows, compare: compare}
+		w := windowFrame{data: rows, compare: compare, sortField: p.SortField}
 		var c *cell
 		if ms != nil {
 			c = ms.newCell()
@@ -304,7 +311,9 @@ func Window(ctx context.Context, data []jsval.Value, p WindowParams) ([]jsval.Va
 			}
 			w.i0, w.i1, w.index = min(max(start, 0), n), min(max(end, 0), n), i
 			if rangeFrame {
-				adjustPeers(&w)
+				if adjustPeers(&w); w.err != nil {
+					return nil, w.err
+				}
 			}
 			t := rows[i].ObjValue()
 			if c != nil {
@@ -342,14 +351,34 @@ func Window(ctx context.Context, data []jsval.Value, p WindowParams) ([]jsval.Va
 
 // adjustPeers widens the frame to whole peer groups (rows equal under the sort
 // comparator), as upstream's range frames do.
+//
+// Upstream indexes d[r0] and d[r1] without a bounds check: a window that
+// starts past the last row (r0 == len) or ends before the first (r1 == -1)
+// hands undefined to the comparator, which reads a field of it and throws.
 func adjustPeers(w *windowFrame) {
 	r0, r1, d, n := w.i0, w.i1-1, w.data, len(w.data)-1
-	if r0 > 0 && r0 < len(d) && w.compare(d[r0], d[r0-1]) == 0 {
+	if r0 > 0 && r0 >= len(d) {
+		w.err = readsUndefined(w.sortField)
+		return
+	}
+	if r0 > 0 && w.compare(d[r0], d[r0-1]) == 0 {
 		w.i0 = peerBound(d, d[r0], w.compare, false)
 	}
-	if r1 < n && r1 >= 0 && w.compare(d[r1], d[r1+1]) == 0 {
+	if r1 < n && r1 < 0 {
+		w.err = readsUndefined(w.sortField)
+		return
+	}
+	if r1 < n && w.compare(d[r1], d[r1+1]) == 0 {
 		w.i1 = peerBound(d, d[r1], w.compare, true)
 	}
+}
+
+// readsUndefined is the TypeError of a comparator reading field of undefined.
+func readsUndefined(field string) error {
+	if segs := jsval.ParseFieldPath(field); len(segs) > 0 {
+		field = segs[0]
+	}
+	return fmt.Errorf("Cannot read properties of undefined (reading '%s')", field)
 }
 
 // peerBound is d3's bisector.left (right=false) or bisector.right over the
