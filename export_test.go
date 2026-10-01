@@ -16,6 +16,21 @@ func WithClockForTest(now func() time.Time) Option {
 	return func(c *config) { c.now = now }
 }
 
+// WithPangoTextForTest measures text the way the oracle's node-canvas does:
+// every glyph advance a whole number of 1/1024 px, rounded to nearest as
+// HarfBuzz 3 and later do (Pango 1.57 on macOS), or floored as HarfBuzz 2 does
+// (the Pango 1.48 node-canvas bundles on Linux) when floor is set. The widths
+// then agree with the oracle's to the last bit, not only to a tolerance, so a
+// layout that rounds a width up cannot land on the other side of an integer.
+func WithPangoTextForTest(floor bool) Option {
+	return func(c *config) {
+		c.pangoText = 1
+		if floor {
+			c.pangoText = 2
+		}
+	}
+}
+
 // VegaToSVGAfterSignalWritesForTest renders a Vega spec, writes each signal
 // (name, JSON value) as View.signal does, re-running after each, and returns
 // the chart after the last write.

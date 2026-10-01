@@ -70,7 +70,7 @@ func TestFuzzDifferential(t *testing.T) {
 	var results []fuzzResult
 	var wg sync.WaitGroup
 	// One converter for every worker: a Converter is safe for concurrent use.
-	c := oracleConverter(t, aster.WithTimeout(10*time.Second))
+	c := oracleConverter(t, o, aster.WithTimeout(10*time.Second))
 	for w := 0; w < workers; w++ {
 		wg.Add(1)
 		go func() {

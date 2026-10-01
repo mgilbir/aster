@@ -57,6 +57,7 @@ type Option func(*config)
 type config struct {
 	systemFonts     bool
 	exact           bool
+	pango           pangoMode
 	fonts           []customFont
 	fallbackFamily  string
 	serifFamily     string
@@ -104,6 +105,32 @@ func WithDefaultMonospaceFamily(family string) Option {
 // CSS size.
 func WithExactAdvances() Option { return func(c *config) { c.exact = true } }
 
+// pangoMode is how advances are scaled in exact mode.
+type pangoMode uint8
+
+const (
+	pangoNone  pangoMode = iota // unrounded
+	pangoRound                  // HarfBuzz 3 and later: rounded half up to 1/1024 px
+	pangoFloor                  // HarfBuzz 2: floored to 1/1024 px
+)
+
+// WithPangoAdvances is WithExactAdvances with every glyph advance and GPOS
+// adjustment scaled the way Pango does when node-canvas measures text: HarfBuzz
+// scales at size*1024, so each comes out a whole number of 1/1024 px. The
+// rounding is the HarfBuzz version's: flooring before HarfBuzz 3 (the Pango
+// 1.48 that node-canvas bundles on Linux), rounding to nearest after it
+// (Pango 1.57 on macOS). Without it advances are unrounded, which is
+// within 1/2048 px per glyph of either.
+func WithPangoAdvances(floor bool) Option {
+	return func(c *config) {
+		c.exact = true
+		c.pango = pangoRound
+		if floor {
+			c.pango = pangoFloor
+		}
+	}
+}
+
 // Glyph is one positioned glyph of a Run. Distances are in pixels at the
 // run's metric (see Run.ShapedSize).
 type Glyph struct {
@@ -133,6 +160,7 @@ type Run struct {
 type Measurer struct {
 	mu    sync.RWMutex // guards the caches; the width cache is read under RLock
 	exact bool
+	pango pangoMode
 
 	entries []*entry // registration order
 	byFam   map[string][]*entry
@@ -160,6 +188,7 @@ func New(opts ...Option) (*Measurer, error) {
 	}
 	m := &Measurer{
 		exact:           cfg.exact,
+		pango:           cfg.pango,
 		byFam:           make(map[string][]*entry),
 		cssCache:        make(map[string]CSSFont),
 		listCache:       make(map[listKey]*faceList),
@@ -379,7 +408,12 @@ func (m *Measurer) run(runs *[]Run, text string, a, b int, f *Face, size, shaped
 	for i := range glyphs {
 		g := &glyphs[i]
 		var adv, xo, yo float64
-		if m.exact {
+		if m.exact && m.pango != pangoNone {
+			trunc := m.pango == pangoFloor
+			adv = pangoAdvance(g, scale, upem, trunc)
+			xo = emScale(g.XOffset*upem/1000, scale, upem, trunc) / pangoUnit
+			yo = emScale(g.YOffset*upem/1000, scale, upem, trunc) / pangoUnit
+		} else if m.exact {
 			adv = g.XAdvance * scale / 1000
 			xo, yo = g.XOffset*scale/1000, g.YOffset*scale/1000
 		} else {
@@ -456,4 +490,36 @@ func refAdvance(g *shape.Glyph, s64, upem float64) float64 {
 	base := math.Round((g.XAdvance - g.XAdjust) * upem / 1000)
 	kern := math.Round(g.XAdjust * upem / 1000)
 	return (math.Round(base*s64/upem) + math.Trunc(kern*s64/upem)) / 64
+}
+
+// pangoUnit is Pango's unit: node-canvas shapes with HarfBuzz at a scale of
+// size * 1024, so every glyph advance and every GPOS adjustment comes out a
+// whole number of 1/1024 px.
+const pangoUnit = 1024
+
+// emScale scales v font units to 1/1024 px at size px, as hb_font_t does. The
+// scale is size*1024 truncated to an integer. HarfBuzz 3 and later multiply
+// by size*1024/upem as a 16.16 fixed-point number and round half up; before
+// that the product was divided by upem and floored.
+func emScale(v, size, upem float64, trunc bool) float64 {
+	scale := int64(size * pangoUnit)
+	if trunc {
+		n, d := int64(v)*scale, int64(upem)
+		q := n / d
+		if n%d != 0 && n < 0 {
+			q-- // floor, not toward zero: negative adjustments come out one unit longer
+		}
+		return float64(q)
+	}
+	mult := (scale << 16) / int64(upem)
+	return float64((int64(v)*mult + 0x8000) >> 16)
+}
+
+// pangoAdvance is a glyph's advance in pixels as Pango measures it: HarfBuzz
+// scales the glyph's own advance and its GPOS adjustment (kerning)
+// separately, each to 1/1024 px, and the two are added.
+func pangoAdvance(g *shape.Glyph, size, upem float64, trunc bool) float64 {
+	base := math.Round((g.XAdvance - g.XAdjust) * upem / 1000)
+	kern := math.Round(g.XAdjust * upem / 1000)
+	return (emScale(base, size, upem, trunc) + emScale(kern, size, upem, trunc)) / pangoUnit
 }

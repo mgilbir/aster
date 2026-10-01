@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -74,10 +75,33 @@ var pinnedNow = time.UnixMilli(1767225600000) // 2026-01-01T00:00:00Z
 // glyph advances differently in the last digits.
 var svgTolerance = svgdiff.Options{Abs: 0.5, Rel: 1e-6}
 
+// pangoVersion reads "pango 1.57.1" from the oracle's version line.
+var pangoVersion = regexp.MustCompile(`pango (\d+)\.(\d+)`)
+
+// pangoText is the engine's text model for the oracle's node-canvas: node-canvas
+// measures with the Pango it was built against, which scales every glyph
+// advance to 1/1024 px with the HarfBuzz it bundles. Pango 1.48 (the Linux
+// build) floors, Pango 1.57 (the macOS build) rounds to nearest; the engine
+// reproduces the oracle's widths bit for bit under either, so a layout that
+// takes the ceiling of a width cannot land on the other side of an integer.
+// Without an oracle the engine measures unrounded advances.
+func pangoText(o *oracle.Oracle) []aster.Option {
+	if o == nil {
+		return nil
+	}
+	m := pangoVersion.FindStringSubmatch(o.Version())
+	if m == nil {
+		return nil
+	}
+	minor, _ := strconv.Atoi(m[2])
+	return []aster.Option{aster.WithPangoTextForTest(m[1] == "1" && minor < 50)}
+}
+
 // oracleConverter is the engine configured as the oracle measures text:
 // DejaVu Sans Mono for monospace and DejaVu Sans for every other family
-// (the embedded Noto Emoji covers emoji on both sides).
-func oracleConverter(t testing.TB, extra ...aster.Option) *aster.Converter {
+// (the embedded Noto Emoji covers emoji on both sides), with the advances
+// the oracle's Pango produces (see pangoText; o may be nil).
+func oracleConverter(t testing.TB, o *oracle.Oracle, extra ...aster.Option) *aster.Converter {
 	t.Helper()
 	opts := []aster.Option{
 		aster.WithFont("DejaVu Sans", dejavu.SansRegular), aster.WithFont("DejaVu Sans", dejavu.SansBold),
@@ -92,6 +116,7 @@ func oracleConverter(t testing.TB, extra ...aster.Option) *aster.Converter {
 	if *compareHarfBuzz {
 		opts = append(opts, aster.WithHarfBuzzTextMetrics())
 	}
+	opts = append(opts, pangoText(o)...)
 	c, err := aster.New(append(opts, extra...)...)
 	if err != nil {
 		t.Fatal(err)
@@ -116,7 +141,7 @@ func TestCompareWithNode(t *testing.T) {
 		t.Skip("slow: renders the whole corpus")
 	}
 	o := oracle.For(t, oracle.VL6)
-	c := oracleConverter(t)
+	c := oracleConverter(t, o)
 	t.Logf("oracle: %s", o.Version())
 
 	wanted := map[string]bool{}

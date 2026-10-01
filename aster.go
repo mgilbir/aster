@@ -328,8 +328,12 @@ func (c *Converter) renderSVG(ctx context.Context, spec jsval.Value) (out string
 		// seed Vega-Lite's own example renders use (vg2svg --seed).
 		Random: transforms.LCG(randomSeed),
 	}
+	// One canvas context measures for the layout and the SVG writer, as
+	// vega-scenegraph's single context does.
+	var canvas *text.CanvasContext
 	if m != nil {
-		opts.TextMeasurer = m
+		canvas = text.NewCanvasContext(m)
+		opts.TextMeasurer = canvas
 		opts.WordcloudText = wordcloud.NewCanvasRenderer(m)
 	}
 	if st := stagesFrom(ctx); st != nil {
@@ -355,8 +359,8 @@ func (c *Converter) renderSVG(ctx context.Context, spec jsval.Value) (out string
 	if res.HasBackground {
 		so.Background = res.Background
 	}
-	if m != nil {
-		so.Measurer = m
+	if canvas != nil {
+		so.Measurer = canvas
 	}
 	// Vega sanitizes every href through the view's loader; the Loader decides
 	// which links a chart may carry, and a rejected URL renders no link.
@@ -444,6 +448,9 @@ func (c *Converter) newMeasurer() (*text.Measurer, error) {
 	opts := c.fontOptions()
 	if !c.cfg.harfBuzzText {
 		opts = append(opts, text.WithExactAdvances())
+		if c.cfg.pangoText != 0 {
+			opts = append(opts, text.WithPangoAdvances(c.cfg.pangoText == 2))
+		}
 	}
 	return text.New(opts...)
 }

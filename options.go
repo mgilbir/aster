@@ -27,6 +27,7 @@ type config struct {
 	defaultMonospaceFamily string
 	timezone               string
 	harfBuzzText           bool
+	pangoText              int              // 0: unrounded advances; 1 and 2: Pango's (see WithPangoTextForTest)
 	now                    func() time.Time // the clock for now(); nil is the system clock (tests pin it)
 }
 

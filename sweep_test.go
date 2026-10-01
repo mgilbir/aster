@@ -115,10 +115,11 @@ func runSweep(t *testing.T, sw sweep) {
 		o *oracle.Oracle
 		c *aster.Converter
 	}
-	sides := map[string]side{"": {o, oracleConverter(t)}}
+	sides := map[string]side{"": {o, oracleConverter(t, o)}}
 	for _, sc := range out.Cases {
 		if _, ok := sides[sc.Zone]; !ok {
-			sides[sc.Zone] = side{oracle.ForZone(t, oracle.VL6, sc.Zone), oracleConverter(t, aster.WithTimezone(sc.Zone))}
+			zo := oracle.ForZone(t, oracle.VL6, sc.Zone)
+			sides[sc.Zone] = side{zo, oracleConverter(t, zo, aster.WithTimezone(sc.Zone))}
 		}
 	}
 	var cases []sweepCase
