@@ -291,6 +291,15 @@ func parseScaleInterpolate(interpolate jsval.Value, params *paramList) {
 // -- range ---------------------------------------------------------------------
 
 func parseScaleRange(spec jsval.Value, scope *Scope, params *paramList) P {
+	return parseScaleRangeAlias(spec, scope, params, 0)
+}
+
+// maxRangeAliases bounds a chain of config.range names that name each other
+// (config.range.a = "b", config.range.b = "a" never terminates; upstream
+// overflows its stack). Real configurations alias one level.
+const maxRangeAliases = 32
+
+func parseScaleRangeAlias(spec jsval.Value, scope *Scope, params *paramList, depth int) P {
 	config := scope.config.Get("range")
 	rng := spec.Get("range")
 	typ := scaleTypeOf(spec)
@@ -301,7 +310,10 @@ func parseScaleRange(spec jsval.Value, scope *Scope, params *paramList) P {
 	case rng.IsStr():
 		name := rng.StrValue()
 		if config.IsObj() && config.ObjValue().Has(name) {
-			return parseScaleRange(extended(spec, obj("range", config.Get(name))), scope, params)
+			if depth >= maxRangeAliases {
+				perr("Scale range aliases nest too deeply: %s", quote(rng))
+			}
+			return parseScaleRangeAlias(extended(spec, obj("range", config.Get(name))), scope, params, depth+1)
 		}
 		switch name {
 		case "width":

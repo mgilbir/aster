@@ -371,6 +371,15 @@ legend/guide layout, `collide`/`nbody`/link forces (poll per node batch, cap
 - **Recursion**: `jsval.ParseJSON` rejects depth > 256; expression parser depth 512 (tested with 40,000-deep
   `+`, `!`, `(`, `abs(`, `[`, `{a:`, `?:`, `.a`, `[0]`, `=`: all clean errors); `svgpdf` depth 512;
   `raster` depth 256; hierarchy depth/size (`ErrTooLarge`) on 200k-deep chains; group nesting is bounded by JSON depth.
+  Every recursive cycle of the engine (113) is listed in `scripts/recursion.allow` with the limit that bounds it
+  (`go run ./internal/cmd/recursionaudit`, run by `TestRecursionsAreBounded` and CI); `TestDeepInput` drives each
+  nesting shape at depths 120 to 100,000 in a child process with a 64 MB stack cap. The audit found and fixed:
+  a `<use>` cycle inside a `clipPath` (infinite recursion), `config.range` names that alias each other (infinite
+  recursion), event-selector brackets, left-associative Vega-Lite expression chains, one frame per data transform in
+  the Vega-Lite dataflow optimizer (overflowed at 1M transforms), binary treemap tiling and the Delaunay quicksort
+  (one frame per child or point in the worst case), aggregate `cross` over many group-by fields, and values nested at
+  run time (`jsval.MaxValueDepth`). The audit sees only direct calls, so recursion through an interface or a function
+  value is reviewed by hand (the Vega-Lite normalizer's `mapTop` is bounded by `normParams.deeper`).
 - **Regular expressions** go through goecma262 `*Err` methods with budgets: `(a+)+$`, `(a*)*b`, `(x+x+)+y` on 60 to 100,000
   character inputs, and `countpattern` over 200k rows, return promptly.
 - **Other limits that work**: `sequence` (10M, expression `sequence()` 1M), `bin` maxbins and step search, tick counts

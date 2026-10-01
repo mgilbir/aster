@@ -69,6 +69,11 @@ func Compare(got, want []byte, opts Options) (Result, error) {
 	return Result{Equal: c.count == 0, Diff: c.first, Elements: c.elements, DiffCount: c.count}, nil
 }
 
+// maxDepth bounds element nesting in a compared document: the comparison
+// recurses once per level, and the path it reports grows with the depth.
+// Vega's SVG nests under 20 levels.
+const maxDepth = 512
+
 func parse(doc []byte) (*node, error) {
 	dec := xml.NewDecoder(bytes.NewReader(doc))
 	dec.Strict = true
@@ -91,6 +96,9 @@ func parse(doc []byte) (*node, error) {
 			top := stack[len(stack)-1]
 			top.children = append(top.children, n)
 			stack = append(stack, n)
+			if len(stack) > maxDepth+1 { // the document node is stack[0]
+				return nil, fmt.Errorf("elements nest more than %d levels", maxDepth)
+			}
 		case xml.EndElement:
 			stack = stack[:len(stack)-1]
 		case xml.CharData:

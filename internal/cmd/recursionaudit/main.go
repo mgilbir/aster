@@ -18,6 +18,11 @@
 //
 //	go run ./internal/cmd/recursionaudit          # check against scripts/recursion.allow
 //	go run ./internal/cmd/recursionaudit -list    # print every cycle (allowlist format)
+//	go run ./internal/cmd/recursionaudit -list -cut f,g   # ... with functions f and g removed
+//
+// -cut answers "does every cycle in this component go through a function that
+// checks the limit?": cut the checking functions and list what is left; an
+// empty list means each recursion passes one.
 package main
 
 import (
@@ -55,6 +60,7 @@ type listedPackage struct {
 func main() {
 	list := flag.Bool("list", false, "print every cycle in allowlist format")
 	allow := flag.String("allow", "scripts/recursion.allow", "the allowlist")
+	cut := flag.String("cut", "", "comma-separated functions to remove from the call graph before looking for cycles (with -list)")
 	flag.Parse()
 
 	pkgs, err := goList()
@@ -93,6 +99,15 @@ func main() {
 		}
 		for _, f := range files {
 			g.addFile(fset, f, info)
+		}
+	}
+	for _, name := range strings.Split(*cut, ",") {
+		if name == "" {
+			continue
+		}
+		delete(g.edges, name)
+		for _, to := range g.edges {
+			delete(to, name)
 		}
 	}
 	cycles := g.cycles()

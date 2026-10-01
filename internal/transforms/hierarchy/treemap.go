@@ -74,44 +74,60 @@ func tileBinary(parent *Node, x0, y0, x1, y1 float64) {
 		sum += nd.Value
 		sums[i+1] = sum
 	}
+	// part lays out nodes[i:j] in the box. The two halves are independent, so
+	// it recurses into the half with fewer nodes and loops on the other: the
+	// recursion is at most log2(n) deep however skewed the values are (all
+	// zero, say, which splits off one node at a time and would otherwise
+	// recurse once per child).
 	var part func(i, j int, value, x0, y0, x1, y1 float64)
 	part = func(i, j int, value, x0, y0, x1, y1 float64) {
-		if i >= j-1 {
-			nd := nodes[i]
-			nd.X0, nd.Y0, nd.X1, nd.Y1 = x0, y0, x1, y1
-			return
-		}
-		valueOffset := sums[i]
-		valueTarget := value/2 + valueOffset
-		k := i + 1
-		hi := j - 1
-		for k < hi {
-			mid := (k + hi) >> 1
-			if sums[mid] < valueTarget {
-				k = mid + 1
+		for {
+			if i >= j-1 {
+				nd := nodes[i]
+				nd.X0, nd.Y0, nd.X1, nd.Y1 = x0, y0, x1, y1
+				return
+			}
+			valueOffset := sums[i]
+			valueTarget := value/2 + valueOffset
+			k := i + 1
+			hi := j - 1
+			for k < hi {
+				mid := (k + hi) >> 1
+				if sums[mid] < valueTarget {
+					k = mid + 1
+				} else {
+					hi = mid
+				}
+			}
+			if valueTarget-sums[k-1] < sums[k]-valueTarget && i+1 < k {
+				k--
+			}
+			valueLeft := sums[k] - valueOffset
+			valueRight := value - valueLeft
+			// The two sub-boxes: left is nodes[i:k], right is nodes[k:j].
+			var lx0, ly0, lx1, ly1, rx0, ry0, rx1, ry1 float64
+			if x1-x0 > y1-y0 {
+				xk := x1
+				if truthy(value) {
+					xk = (float64(x0*valueRight) + float64(x1*valueLeft)) / value
+				}
+				lx0, ly0, lx1, ly1 = x0, y0, xk, y1
+				rx0, ry0, rx1, ry1 = xk, y0, x1, y1
 			} else {
-				hi = mid
+				yk := y1
+				if truthy(value) {
+					yk = (float64(y0*valueRight) + float64(y1*valueLeft)) / value
+				}
+				lx0, ly0, lx1, ly1 = x0, y0, x1, yk
+				rx0, ry0, rx1, ry1 = x0, yk, x1, y1
 			}
-		}
-		if valueTarget-sums[k-1] < sums[k]-valueTarget && i+1 < k {
-			k--
-		}
-		valueLeft := sums[k] - valueOffset
-		valueRight := value - valueLeft
-		if x1-x0 > y1-y0 {
-			xk := x1
-			if truthy(value) {
-				xk = (float64(x0*valueRight) + float64(x1*valueLeft)) / value
+			if k-i <= j-k {
+				part(i, k, valueLeft, lx0, ly0, lx1, ly1)
+				i, value, x0, y0, x1, y1 = k, valueRight, rx0, ry0, rx1, ry1
+			} else {
+				part(k, j, valueRight, rx0, ry0, rx1, ry1)
+				j, value, x0, y0, x1, y1 = k, valueLeft, lx0, ly0, lx1, ly1
 			}
-			part(i, k, valueLeft, x0, y0, xk, y1)
-			part(k, j, valueRight, xk, y0, x1, y1)
-		} else {
-			yk := y1
-			if truthy(value) {
-				yk = (float64(y0*valueRight) + float64(y1*valueLeft)) / value
-			}
-			part(i, k, valueLeft, x0, y0, x1, yk)
-			part(k, j, valueRight, x0, yk, x1, y1)
 		}
 	}
 	part(0, n, parent.Value, x0, y0, x1, y1)

@@ -135,6 +135,9 @@ func Aggregate(ctx context.Context, data []jsval.Value, p AggregateParams) (res 
 func crossCells(ctx context.Context, dims []Field, dnames []string, cells map[string]*aggCell,
 	order []*aggCell, newCell func(string, jsval.Value) *aggCell) error {
 	n := len(dims)
+	if n > MaxGroupDims {
+		return limitErr("aggregate cross group-by fields", n, MaxGroupDims)
+	}
 	type domain struct {
 		keys []string
 		vals map[string]jsval.Value

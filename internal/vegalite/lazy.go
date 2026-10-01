@@ -33,6 +33,8 @@ type compileCtx struct {
 	lazySeq, outputSeq int64
 	// sigIdx speeds up signal lookups by name (see signalIndex).
 	sigIdx signalIndex
+	// transforms counts the data transforms parsed so far (see maxTransforms).
+	transforms int
 }
 
 // check panics with the context's error once the caller's context is done.

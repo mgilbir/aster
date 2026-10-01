@@ -127,3 +127,8 @@ func nameAt(names []string, i int) string {
 // d3 recurses without limit (a cyclic locale overflows the stack); beyond
 // this depth the directive expands to nothing.
 const maxLocaleNesting = 8
+
+// maxLocaleExpansions bounds how many %c, %x and %X one specifier expands in
+// all. The nesting bound alone leaves b^8 work for a locale whose dateTime
+// holds b copies of %c, which a specification can supply (config.locale).
+const maxLocaleExpansions = 1 << 12

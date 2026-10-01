@@ -125,6 +125,11 @@ func mergeDeepInto(dest *Object, src Value) {
 func parseTransformArray(head dfNode, m Model, ap *ancestorParse) dfNode {
 	cc := m.b().ctx
 
+	if cc != nil {
+		if cc.transforms += len(m.b().transforms); cc.transforms > maxTransforms {
+			throw("too many data transforms (limit %d)", maxTransforms)
+		}
+	}
 	lookupCounter := 0
 	for _, t := range m.b().transforms {
 		cc.check()

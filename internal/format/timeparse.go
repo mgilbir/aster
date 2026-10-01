@@ -26,13 +26,13 @@ type TimeParser struct {
 // Parse is d3.timeParse(specifier) in the given zone (UTC for utcParse).
 func (l *TimeLocale) Parse(specifier string, z Zone) *TimeParser {
 	p := &TimeParser{loc: l, zone: z, spec: specifier}
-	p.ops, p.bad = l.compileParse(nil, specifier, 0)
+	p.ops, p.bad = l.compileParse(nil, specifier, 0, new(int))
 	return p
 }
 
 const parseDirectives = "aAbBcdefgGHIjLmMpqQsSuUVwWxXyYZ%"
 
-func (l *TimeLocale) compileParse(ops []parseOp, spec string, depth int) ([]parseOp, bool) {
+func (l *TimeLocale) compileParse(ops []parseOp, spec string, depth int, work *int) ([]parseOp, bool) {
 	for i := 0; i < len(spec); {
 		c := spec[i]
 		i++
@@ -57,7 +57,7 @@ func (l *TimeLocale) compileParse(ops []parseOp, spec string, depth int) ([]pars
 		}
 		switch c {
 		case 'c', 'x', 'X':
-			if depth >= maxLocaleNesting {
+			if *work++; depth >= maxLocaleNesting || *work > maxLocaleExpansions {
 				return ops, true
 			}
 			sub := l.def.DateTime
@@ -67,7 +67,7 @@ func (l *TimeLocale) compileParse(ops []parseOp, spec string, depth int) ([]pars
 				sub = l.def.Time
 			}
 			var bad bool
-			if ops, bad = l.compileParse(ops, sub, depth+1); bad {
+			if ops, bad = l.compileParse(ops, sub, depth+1, work); bad {
 				return ops, true
 			}
 		default:

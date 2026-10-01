@@ -13,6 +13,10 @@ import (
 const (
 	// MaxGroupCells bounds the cells aggregate's cross product may create.
 	MaxGroupCells = 4_000_000
+	// MaxGroupDims bounds the group-by fields of an aggregate with cross: its
+	// cell enumeration recurses once per field, and fields with a single value
+	// add no cells, so MaxGroupCells does not bound them.
+	MaxGroupDims = 256
 	// MaxSequence bounds the length of a sequence transform.
 	MaxSequence = 10_000_000
 	// MaxBins bounds the number of bins (and bin steps) a bin transform

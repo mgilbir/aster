@@ -30,6 +30,9 @@ type layerModel struct {
 }
 
 func newLayerModel(cc *compileCtx, spec Value, parent Model, parentGivenName string, parentGivenSize *Object, config Value, depth int) *layerModel {
+	if depth > maxDepth { // layers nest without going through buildModel
+		panic(compileError{errDepth.Error()})
+	}
 	l := &layerModel{}
 	var resolve *resolveIndex
 	if r := spec.Get("resolve"); r.IsObj() {

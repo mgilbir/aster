@@ -651,8 +651,13 @@ func (r *renderer) buildClip(cn *node, st *state, depth int, bb *rect) *mask {
 	var ms []matrix
 	var eo []bool
 	var single *node
-	var collect func(parent *node, pm matrix, ps0 *state, top bool)
-	collect = func(parent *node, pm matrix, ps0 *state, top bool) {
+	var collect func(parent *node, pm matrix, ps0 *state, top bool, hops int)
+	collect = func(parent *node, pm matrix, ps0 *state, top bool, hops int) {
+		// A <use> in a clipPath may reference another <use>, even itself
+		// through a cycle: bound the chain by the element nesting limit.
+		if hops > r.lim.MaxDepth {
+			return
+		}
 		for _, k := range parent.kids {
 			if isDisplayNone(k) {
 				continue
@@ -678,7 +683,7 @@ func (r *renderer) buildClip(cn *node, st *state, depth int, bb *rect) *mask {
 						x := kst.length(k.str(aX), 0, 0)
 						y := kst.length(k.str(aY), 1, 0)
 						fake := &node{kids: []*node{t}}
-						collect(fake, m.mul(translate(x, y)), &kst, false)
+						collect(fake, m.mul(translate(x, y)), &kst, false, hops+1)
 					}
 				}
 			case tagPath, tagRect, tagCircle, tagEllipse, tagLine, tagPolyline, tagPolygon:
@@ -700,7 +705,7 @@ func (r *renderer) buildClip(cn *node, st *state, depth int, bb *rect) *mask {
 			}
 		}
 	}
-	collect(cn, base, &cs, true)
+	collect(cn, base, &cs, true, 0)
 	var result *mask
 	if len(ps) == 0 {
 		result = &mask{r: irect{}}
