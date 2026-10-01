@@ -9,11 +9,27 @@ import "strings"
 //
 // Where upstream throws on a malformed path (an unterminated bracket or
 // quote), this returns the unterminated remainder as one literal segment, so
-// the lookup misses instead of the chart failing.
+// the lookup misses instead of the chart failing. SplitFieldPath reports what
+// upstream throws.
 func ParseFieldPath(path string) []string {
+	segments, _ := SplitFieldPath(path)
+	return segments
+}
+
+// PathError is the exception vega-util's splitAccessPath throws for a path it
+// cannot split.
+type PathError struct{ Msg string }
+
+func (e *PathError) Error() string { return e.Msg }
+
+// SplitFieldPath is ParseFieldPath with the error upstream throws: a closing
+// bracket with none open, or a bracket or quote left open. The segments are
+// the lenient ones whatever the error.
+func SplitFieldPath(path string) ([]string, error) {
 	if path == "" {
-		return nil
+		return nil, nil
 	}
+	var err error
 	var (
 		segments []string
 		carried  strings.Builder // text carried over a backslash escape
@@ -77,13 +93,24 @@ func ParseFieldPath(path string) []string {
 				start = i + 1
 				bracket = 0
 				openAt = -1
+			default:
+				if err == nil {
+					err = &PathError{"Access path missing open bracket: " + path}
+				}
 			}
 		}
 		i++
 	}
 	if bracket != 0 || quote != 0 {
+		if err == nil {
+			if bracket != 0 {
+				err = &PathError{"Access path missing closing bracket: " + path}
+			} else {
+				err = &PathError{"Access path missing closing quote: " + path}
+			}
+		}
 		segments = segments[:openSegments]
-		return append(segments, path[openAt:])
+		return append(segments, path[openAt:]), err
 	}
 	if i > start {
 		end := i
@@ -92,5 +119,5 @@ func ParseFieldPath(path string) []string {
 		}
 		push(end)
 	}
-	return segments
+	return segments, err
 }
