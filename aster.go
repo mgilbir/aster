@@ -274,6 +274,7 @@ func (c *Converter) renderSVG(ctx context.Context, spec jsval.Value) (out string
 	opts := vega.Options{
 		Loader:   c.cfg.loader,
 		Location: c.location,
+		Now:      c.cfg.now,
 		Config:   c.theme,
 		Limits:   c.limits(),
 		// Seeded per render so sample, jitter and

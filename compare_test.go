@@ -2,14 +2,12 @@ package aster_test
 
 import (
 	"bufio"
-	"bytes"
 	"flag"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -64,12 +62,10 @@ var corpusSets = []corpusSet{
 // V8's last-bit trigonometry on x86-64); the reason says which gives which.
 const expectFile = "testdata/oracle-expect.txt"
 
-var timerEvent = regexp.MustCompile(`"type"\s*:\s*"timer"`)
-
-// timeDependent reports whether a spec's rendering depends on when it runs.
-func timeDependent(spec []byte) bool {
-	return bytes.Contains(spec, []byte("now()")) || timerEvent.Match(spec)
-}
+// pinnedNow is the instant the oracle pins Date.now and new Date() to
+// (testdata/oracle-node/oracle.mjs), so a chart that draws the current time
+// compares like any other.
+var pinnedNow = time.UnixMilli(1767225600000) // 2026-01-01T00:00:00Z
 
 // svgTolerance absorbs the two text engines (node-canvas and forme) placing
 // glyph advances differently in the last digits.
@@ -88,6 +84,7 @@ func oracleConverter(t testing.TB, extra ...aster.Option) *aster.Converter {
 		aster.WithDefaultFontFamily("DejaVu Sans"), aster.WithDefaultMonospaceFamily("DejaVu Sans Mono"),
 		aster.WithDefaultSerifFamily("DejaVu Sans"),
 		aster.WithLoader(corpusLoader(t)), aster.WithTimeout(2 * time.Minute),
+		aster.WithClockForTest(func() time.Time { return pinnedNow }),
 	}
 	if *compareHarfBuzz {
 		opts = append(opts, aster.WithHarfBuzzTextMetrics())
@@ -104,7 +101,7 @@ type specResult struct {
 	id     string // set/name
 	status string
 	detail string
-	svg    string // identical, equal, differ, engine-error, node-error, both-error, time-dependent
+	svg    string // identical, equal, differ, engine-error, node-error, both-error
 }
 
 // TestCompareWithNode renders and compiles the corpus with the engine and
@@ -169,10 +166,6 @@ func compareOne(t *testing.T, o *oracle.Oracle, c *aster.Converter, set corpusSe
 	}
 	var problems []string
 	switch {
-	case gerr == nil && want.Err == "" && timeDependent(spec):
-		// It draws the current time, or advances on timer events that fire
-		// in node while the render awaits: no recorded answer can match.
-		r.svg = "time-dependent"
 	case gerr != nil && want.Err != "":
 		r.svg, r.detail = "both-error", "engine: "+firstLine(gerr.Error())+" | node: "+firstLine(want.Err)
 	case gerr != nil:
@@ -214,7 +207,7 @@ func compareOne(t *testing.T, o *oracle.Oracle, c *aster.Converter, set corpusSe
 }
 
 func scoreboard(t *testing.T, results []specResult) {
-	cols := []string{"identical", "equal", "differ", "engine-error", "node-error", "both-error", "time-dependent"}
+	cols := []string{"identical", "equal", "differ", "engine-error", "node-error", "both-error"}
 	type tally struct {
 		n, vegaDiffer int
 		by            map[string]int

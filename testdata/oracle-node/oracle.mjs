@@ -34,6 +34,23 @@ import { fileURLToPath } from 'node:url';
 // node version pinned there applies).
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
+// The clock is pinned, before anything reads it: now() compiles to Date.now
+// and datetime() with no arguments to new Date(), so a chart that draws the
+// current time renders the same instant on every run. The engine's tests pin
+// the same instant (WithClockForTest in export_test.go).
+const PINNED_NOW = Date.UTC(2026, 0, 1);
+{
+  const RealDate = Date;
+  globalThis.Date = class extends RealDate {
+    constructor(...args) {
+      super(...(args.length === 0 ? [PINNED_NOW] : args));
+    }
+    static now() {
+      return PINNED_NOW;
+    }
+  };
+}
+
 if (process.env.TZ !== 'UTC') {
   console.error('run with TZ=UTC');
   process.exit(2);
@@ -207,6 +224,11 @@ function rasterize(svg, scale) {
   const doc = new resvg.Resvg(svg, { fontFamily: 'Liberation Sans' }, rasterFonts);
   return doc.renderPng({ scale: scale || 1 }).toString('base64');
 }
+
+// A static render is the chart's first frame: timer event streams never fire,
+// as in the engine (there is no event loop). In node they would fire while a
+// render awaits, by wall-clock time.
+vega.View.prototype.timer = function () {};
 
 const quiet = vega.logger(vega.None);
 const compile = (spec) => vl.compile(spec, { logger: quiet }).spec;

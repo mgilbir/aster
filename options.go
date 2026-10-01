@@ -27,6 +27,7 @@ type config struct {
 	defaultMonospaceFamily string
 	timezone               string
 	harfBuzzText           bool
+	now                    func() time.Time // the clock for now(); nil is the system clock (tests pin it)
 }
 
 func defaultConfig() *config {
