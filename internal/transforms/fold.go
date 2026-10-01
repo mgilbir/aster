@@ -66,5 +66,5 @@ func reserveFoldWeight(ctx context.Context, data []jsval.Value, copies int) erro
 		in += max(c-b.RowBytes, 0)
 		out += budget.Mul(int64(copies), max(c+2*jsval.RowField-b.RowBytes, 0))
 	}
-	return b.ReserveWeight(0, out-in)
+	return b.ReserveWeight(budget.Mul(int64(len(data)), int64(copies-1)), out-in)
 }
