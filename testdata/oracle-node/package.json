@@ -63,6 +63,7 @@
     "vega-expression": "6.2.2"
   },
   "devDependencies": {
+    "acorn": "8.18.0",
     "canvas": "3.2.3",
     "resvg-napi": "0.3.1"
   },
