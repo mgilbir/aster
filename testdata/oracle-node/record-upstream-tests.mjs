@@ -660,7 +660,8 @@ function recordTransforms(moduleNamespace, packageName, calls) {
       // operator. A vector without it would record that `extent` changed nothing, which is true of
       // the tuples and useless as a check.
       // `bin` leaves a function: it cannot be recorded, but the bounds it carries are all it is made of.
-      const {start, stop, step} = typeof this.value === 'function' ? this.value : {};
+      // Only bin's: a scale is a function too, and a band scale's `step` is a method.
+      const {start, stop, step} = name === 'bin' && typeof this.value === 'function' ? this.value : {};
       const value =
         this.value === undefined ? undefined
           : typeof this.value === 'function' ? (step === undefined ? undefined : encode({start, stop, step}))
