@@ -504,6 +504,10 @@ func parseLegend(spec jsval.Value, scope *Scope) {
 		"formatType", scope.property(en.FormatType),
 		"formatSpecifier", scope.property(en.Format),
 	)
+	// The entries operator exists before the expressions of its tick count and
+	// symbol size do, and so ranks below them until the parameters are
+	// connected: which operators have run when one throws depends on it.
+	entries := scope.add(newEntry("legendentries", nil, params))
 	if en.CountExpr != "" {
 		if c := params.get("count"); c == nil || !pTruthy(c) {
 			params.set("count", scope.signalRef(en.CountExpr))
@@ -513,7 +517,6 @@ func parseLegend(spec jsval.Value, scope *Scope) {
 		fn := scope.parseExpression(en.SizeExpr)
 		params.set("size", pExpr{fn: fn})
 	}
-	entries := scope.add(newEntry("legendentries", nil, params))
 	parseMark(plan.Mark(scope.handle(data), scope.handle(entries)), scope)
 }
 

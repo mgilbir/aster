@@ -1,0 +1,8 @@
+{"width":120,"height":80,"padding":5,
+"data":[{"name":"t","values":[{"x":1,"y":2},{"x":2,"y":4}]}],
+"scales":[{"name":"x","type":"linear","domain":[0,3],"range":"width"},
+{"name":"y","type":"linear","domain":[0,5],"range":"height"},
+{"name":"c","type":"linear","domain":[0,5],"range":{"scheme":"viridis"}}],
+"axes":[{"scale":"x","orient":"bottom"},{"scale":"y","orient":"left"}],
+"legends":[{"fill":"c","title":"c","format":"bad\tformat"}],
+"marks":[{"type":"symbol","from":{"data":"t"},"encode":{"update":{"x":{"scale":"x","field":"x"},"y":{"scale":"y","field":"y"},"fill":{"scale":"c","field":"y"}}}}]}
