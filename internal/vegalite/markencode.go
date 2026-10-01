@@ -474,8 +474,10 @@ func tooltipData(cc *compileCtx, encoding Value, stack *stackProperties, config 
 	})
 	out := newOmap[string]()
 	for _, t := range tuples {
-		// `!out[key]`: an earlier entry whose value was undefined does not block this one.
-		if !toSkip[t.channel] && (!out.has(t.key) || out.m[t.key] == "") {
+		// `!out[key]`: an earlier entry whose value was undefined does not block
+		// this one, and a key every object inherits (toString, constructor, ...)
+		// reads as an entry already there.
+		if !toSkip[t.channel] && (!out.has(t.key) || out.m[t.key] == "") && !inheritedObjectKey(t.key) {
 			out.set(t.key, t.value)
 		}
 	}

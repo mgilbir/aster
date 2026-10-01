@@ -54,12 +54,22 @@ func vgAlignedPositionChannel(channel string, markDef, config Value, defaultAlig
 				alignExcl = "center"
 			}
 		}
-		return map[string]string{"left": "x", "center": "xc", "right": "x2"}[alignExcl]
+		return channelOrUndefined(map[string]string{"left": "x", "center": "xc", "right": "x2"}, alignExcl)
 	}
 	if alignExcl == "" {
 		alignExcl = defaultAlign
 	}
-	return map[string]string{"top": "y", "middle": "yc", "bottom": "y2"}[alignExcl]
+	return channelOrUndefined(map[string]string{"top": "y", "middle": "yc", "bottom": "y2"}, alignExcl)
+}
+
+// channelOrUndefined is the table lookup upstream indexes with an alignment
+// that may be none of the keys: the result is undefined, which a computed
+// property name then spells "undefined".
+func channelOrUndefined(table map[string]string, align string) string {
+	if ch, ok := table[align]; ok {
+		return ch
+	}
+	return "undefined"
 }
 
 type pointPositionOpts struct {

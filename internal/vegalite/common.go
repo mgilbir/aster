@@ -201,3 +201,14 @@ func mergeTitleComponent(v1, v2 withExplicit) withExplicit {
 	}
 	return withExplicit{v1.explicit, jsval.Arr(mergeTitleFieldDefs(a.Items(), b.Items()))}
 }
+
+// inheritedObjectKey reports a key that reads as present on any plain object
+// through its prototype: `out[key]` of an empty `{}` is truthy for them.
+func inheritedObjectKey(key string) bool {
+	switch key {
+	case "constructor", "hasOwnProperty", "isPrototypeOf", "propertyIsEnumerable", "toString", "valueOf",
+		"toLocaleString", "__defineGetter__", "__defineSetter__", "__lookupGetter__", "__lookupSetter__", "__proto__":
+		return true
+	}
+	return false
+}
