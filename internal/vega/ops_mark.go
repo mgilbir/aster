@@ -480,6 +480,16 @@ func reflowItems(p *flowPulse) []*scene.Item {
 func facSortItems(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *opParams) any) {
 	return nil, trFunc(func(n *opNode, p *opParams, pulse *flowPulse) *flowPulse {
 		cmp := p.comparator("sort")
+		if cmp == nil {
+			// A comparator over no fields is null (vega-util's compare).
+			// SortItems then sorts with stableCompare(null), null, which
+			// Array.prototype.sort rejects; when nothing asks for a sort it
+			// still reads null.fields.
+			if p.Modified("sort") || len(pulse.add) > 0 {
+				fail("The comparison function must be either a function or undefined: null")
+			}
+			fail("Cannot read properties of null (reading 'fields')")
+		}
 		mod := p.Modified("sort") || len(pulse.add) > 0 || len(pulse.mod) > 0 || len(pulse.rem) > 0
 		if mod && cmp != nil {
 			// The comparator's fields are paths into the item (datum.x, x, ...).
