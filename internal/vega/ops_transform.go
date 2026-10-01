@@ -445,6 +445,9 @@ func init() {
 			Method: p.str("method"), Order: clampInt(p.num("order", 3)),
 			Extent: p.nums("extent"), Params: p.bool("params"), As: p.strs("as"),
 		}
+		if ev := p.Value("extent"); ev.IsTruthy() && !ev.IsArr() {
+			rp.ExtentNotArray = true
+		}
 		return transforms.Regression(ctxOf(n), in, rp)
 	})
 	tf["lookup"] = tupleTransform(func(n *opNode, p *opParams, in []jsval.Value) ([]jsval.Value, error) {

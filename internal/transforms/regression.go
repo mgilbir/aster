@@ -2,6 +2,7 @@ package transforms
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 
@@ -21,6 +22,10 @@ type RegressionParams struct {
 	Order int
 	// Extent is the x domain of the drawn curve; nil computes it per group.
 	Extent []float64
+	// ExtentNotArray is set when the extent was given as something other than
+	// an array (a signal answering a string, say): upstream draws a linear or
+	// constant fit with dom.forEach, which only an array has.
+	ExtentNotArray bool
 	// Params outputs one coefficient tuple per group instead of curve points.
 	Params bool
 	// As names the output x and y fields; nil or short means the accessor names.
@@ -103,6 +108,9 @@ func Regression(ctx context.Context, data []jsval.Value, p RegressionParams) ([]
 			continue
 		}
 		var dom []jsval.Value
+		if p.ExtentNotArray && (method == "linear" || method == "constant") {
+			return nil, errors.New("TypeError: dom.forEach is not a function")
+		}
 		if domain != nil {
 			for _, d := range domain {
 				dom = append(dom, jsval.Num(d))
