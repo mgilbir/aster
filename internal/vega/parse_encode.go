@@ -3,6 +3,7 @@ package vega
 import (
 	"github.com/mgilbir/aster/internal/jsmath"
 	"math"
+	"strings"
 
 	"github.com/mgilbir/aster/internal/expr"
 	"github.com/mgilbir/aster/internal/jsval"
@@ -145,7 +146,22 @@ func (c *encCompiler) rule(rules jsval.Value) valueFn {
 		val  valueFn
 	}
 	var bs []branch
-	for _, r := range rules.Items() {
+	items := rules.Items()
+	if len(items) == 0 {
+		// The generated source is empty, which does not parse.
+		perr("Expression parse error: ")
+	}
+	for i, r := range items {
+		if !r.Get("test").IsTruthy() && i < len(items)-1 {
+			// Upstream concatenates the source of every rule, with no stop at
+			// the unconditional one: what follows it is appended to its value
+			// ("a""b" is not an expression).
+			if fn, ok := c.concatenatedRules(items); ok {
+				return fn
+			}
+		}
+	}
+	for _, r := range items {
 		val := c.entry(r)
 		if t := r.Get("test"); t.IsTruthy() {
 			f := c.scope.parseExpression(t.AsString())
@@ -164,6 +180,53 @@ func (c *encCompiler) rule(rules jsval.Value) valueFn {
 		}
 		return jsval.Null
 	}
+}
+
+// concatenatedRules builds rule.js's source for rules that follow an
+// unconditional one and evaluates it as an expression. Only rules made of a
+// constant, a signal or a field path can be rendered as source here; for any
+// other it reports false and the caller keeps the rules up to the first
+// unconditional one.
+func (c *encCompiler) concatenatedRules(items []jsval.Value) (valueFn, bool) {
+	var code strings.Builder
+	for _, r := range items {
+		var src string
+		switch {
+		case !r.IsObj() || !r.Get("gradient").IsNullish() || !r.Get("scale").IsNullish() || !r.Get("exponent").IsNullish() ||
+			!r.Get("mult").IsNullish() || !r.Get("offset").IsNullish() || r.Get("round").IsTruthy() || r.Get("color").IsTruthy():
+			return nil, false
+		case r.Get("signal").IsTruthy():
+			src = "(" + r.Get("signal").AsString() + ")"
+		case !r.Get("field").IsNullish():
+			f := r.Get("field")
+			if !f.IsStr() {
+				return nil, false
+			}
+			src = "datum"
+			for _, seg := range jsval.ParseFieldPath(f.StrValue()) {
+				src += "[" + stringValue(jsval.Str(seg)) + "]"
+			}
+		case !r.Get("value").IsUndefined():
+			v := r.Get("value")
+			if v.IsObj() || v.IsArr() {
+				return nil, false
+			}
+			src = stringValue(v)
+		default:
+			src = "null"
+		}
+		if t := r.Get("test"); t.IsTruthy() {
+			src = "(" + t.AsString() + ")?" + src + ":"
+		}
+		code.WriteString(src)
+	}
+	text := code.String()
+	if strings.HasSuffix(text, ":") {
+		text += "null"
+	}
+	f := c.scope.parseExpression(text)
+	c.depExpr(f)
+	return func(ev *encEval) jsval.Value { return f.evalEnc(ev) }, true
 }
 
 // evalEnc evaluates an expression with the encoder's datum and item.
