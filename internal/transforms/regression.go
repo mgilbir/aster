@@ -18,8 +18,9 @@ type RegressionParams struct {
 	// Method is constant, linear, log, exp, pow, quad or poly; empty means linear.
 	Method string
 	// Order is the polynomial order for poly. Use DefaultRegressionOrder when
-	// the specification gave none.
-	Order int
+	// the specification gave none. Upstream takes any number: only an integer
+	// of at least -1 gets a fit (see fitPoly).
+	Order float64
 	// Extent is the x domain of the drawn curve; nil computes it per group.
 	Extent []float64
 	// ExtentNotArray is set when the extent was given as something other than
@@ -36,7 +37,7 @@ type RegressionParams struct {
 const DefaultRegressionOrder = 3
 
 // regressionDOF is the number of fitted parameters a group must exceed.
-func regressionDOF(method string, order int) int {
+func regressionDOF(method string, order float64) float64 {
 	switch method {
 	case "poly":
 		return order
@@ -82,7 +83,7 @@ func Regression(ctx context.Context, data []jsval.Value, p RegressionParams) ([]
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if len(g.Tuples) <= dof {
+		if float64(len(g.Tuples)) <= dof {
 			continue
 		}
 		// A fitted curve is at most 200 points (two for a line).
