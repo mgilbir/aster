@@ -467,7 +467,7 @@ var memCases = []memCase{
 		return memVL(fmt.Sprintf(`{"data":{"sequence":{"start":0,"stop":%d,"as":"x"}},"transform":[{"calculate":"pad('' + datum.x, 200, 'z', 'left')","as":"s"}],"mark":"text","encoding":{"y":{"field":"x","type":"quantitative"},"text":{"field":"s","type":"nominal"}}}`, items))
 	}},
 	{name: "vl-geoshape", kind: "vl", gen: func(_, _ int, l uint64, s float64) memSpec {
-		n := max(int(s*float64(l)/32), 4)
+		n := max(int(s*float64(l/specBytesDivisor)/18), 4) // 18 bytes a coordinate pair
 		var sb strings.Builder
 		sb.WriteString(`{"width":300,"height":300,"data":{"values":[{"type":"Feature","geometry":{"type":"Polygon","coordinates":[[`)
 		for i := range n {

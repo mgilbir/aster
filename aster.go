@@ -302,6 +302,9 @@ func (c *Converter) VegaLiteToSVG(spec []byte) (string, error) {
 }
 
 func (c *Converter) vegaSVG(ctx context.Context, spec []byte) (string, error) {
+	if err := c.checkSpecSize(spec); err != nil {
+		return "", err
+	}
 	v, err := timed(ctx, "json", func() (jsval.Value, error) { return jsval.ParseJSON(spec) })
 	if err != nil {
 		return "", fmt.Errorf("aster: parsing Vega spec: %w", err)
@@ -432,6 +435,27 @@ func (c *Converter) maxSVGBytes() int {
 	return 128 << 20
 }
 
+// specBytesDivisor sets the specification a memory limit admits: a sixteenth of
+// the limit in bytes. The rows and items budgets charge what a specification
+// makes the engine build, and none of them sees the text itself, which is all
+// there is to an inline geometry; once parsed and compiled it holds about
+// nineteen times its size, so a sixteenth of the limit stays within twice it.
+const specBytesDivisor = 16
+
+// checkSpecSize refuses a specification too large for WithMemoryLimit. Every
+// entry point that takes a specification passes through it, whatever the form
+// the caller held it in: they all end up as the JSON bytes parsed here.
+func (c *Converter) checkSpecSize(spec []byte) error {
+	n := c.cfg.memoryLimit
+	if n == 0 {
+		return nil
+	}
+	if limit := max(n/specBytesDivisor, 1<<20); uint64(len(spec)) > limit {
+		return fmt.Errorf("aster: %w: the specification is too large for the memory limit (%d bytes, at most %d)", ErrLimit, len(spec), limit)
+	}
+	return nil
+}
+
 // randomSeed seeds Vega's random() and every transform that samples.
 const randomSeed = 123456789
 
@@ -525,6 +549,9 @@ func (c *Converter) VegaLiteToVega(spec []byte) ([]byte, error) {
 // compileVegaLite parses a Vega-Lite spec and compiles it to Vega with the
 // converter's theme and time zone.
 func (c *Converter) compileVegaLite(ctx context.Context, spec []byte) (jsval.Value, error) {
+	if err := c.checkSpecSize(spec); err != nil {
+		return jsval.Undefined, err
+	}
 	v, err := timed(ctx, "json", func() (jsval.Value, error) { return jsval.ParseJSON(spec) })
 	if err != nil {
 		return jsval.Undefined, fmt.Errorf("aster: parsing Vega-Lite spec: %w", err)
