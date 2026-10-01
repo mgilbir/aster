@@ -48,11 +48,18 @@ type node struct {
 	children []*node
 }
 
-// Compare compares got against want.
+// Compare compares got against want, the document of the reference
+// implementation. The characters XML 1.0 forbids (C0 controls other than tab,
+// LF and CR, U+FFFE, U+FFFF) are dropped from want before it is parsed: Vega
+// writes them verbatim into a document no XML parser accepts, where the engine
+// drops them (see internal/svg), so want is read as the well-formed document
+// it was meant to be. got is not touched: a forbidden character the engine
+// wrote is a parse error.
 func Compare(got, want []byte, opts Options) (Result, error) {
 	if bytes.Equal(got, want) {
 		return Result{Identical: true, Equal: true}, nil
 	}
+	want = dropForbidden(want)
 	g, err := parse(got)
 	if err != nil {
 		return Result{}, fmt.Errorf("svgdiff: parsing got: %w", err)
@@ -73,6 +80,23 @@ func Compare(got, want []byte, opts Options) (Result, error) {
 // recurses once per level, and the path it reports grows with the depth.
 // Vega's SVG nests under 20 levels.
 const maxDepth = 512
+
+// dropForbidden removes the characters XML 1.0 forbids from doc, copying only
+// when there is one.
+func dropForbidden(doc []byte) []byte {
+	forbidden := func(r rune) bool {
+		return r < 0x20 && r != '\t' && r != '\n' && r != '\r' || r == 0xFFFE || r == 0xFFFF
+	}
+	if bytes.IndexFunc(doc, forbidden) < 0 {
+		return doc
+	}
+	return bytes.Map(func(r rune) rune {
+		if forbidden(r) {
+			return -1
+		}
+		return r
+	}, doc)
+}
 
 func parse(doc []byte) (*node, error) {
 	dec := xml.NewDecoder(bytes.NewReader(doc))
