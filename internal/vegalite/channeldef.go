@@ -142,8 +142,14 @@ func vgField(cc *compileCtx, fd Value, opt fieldRefOption) string {
 	// value: it reads as "" in the checks, as that word in a template string,
 	// and a path function given it throws.
 	missing := ""
-	if f := fd.Get("field"); !f.IsNullish() {
+	// pristine is true while `field` is still the value the spec gave. A
+	// number or a boolean there has no length, which splitAccessPath loops
+	// over, so the path functions read it as the empty path.
+	pristine := false
+	rawField := fd.Get("field")
+	if f := rawField; !f.IsNullish() {
 		field = f.AsString()
+		pristine = !f.IsStr() && !f.IsArr()
 	} else if f.IsNull() {
 		missing = "null"
 	} else {
@@ -155,11 +161,11 @@ func vgField(cc *compileCtx, fd Value, opt fieldRefOption) string {
 		}
 		return field
 	}
-	hasField := field != ""
+	hasField := rawField.IsTruthy()
 	suffix := opt.suffix
 	argAccessor := ""
 	if isCountDef(fd) {
-		field, missing = internalField("count"), ""
+		field, missing, pristine = internalField("count"), "", false
 	} else {
 		fn := ""
 		if !opt.nofn {
@@ -174,11 +180,11 @@ func vgField(cc *compileCtx, fd Value, opt fieldRefOption) string {
 				case aggregate.IsTruthy():
 					if isArgmaxDef(aggregate) {
 						argAccessor = `["` + jsField() + `"]`
-						field, missing = "argmax_"+aggregate.Get("argmax").AsString(), ""
+						field, missing, pristine = "argmax_"+aggregate.Get("argmax").AsString(), "", false
 						hasField = true
 					} else if isArgminDef(aggregate) {
 						argAccessor = `["` + jsField() + `"]`
-						field, missing = "argmin_"+aggregate.Get("argmin").AsString(), ""
+						field, missing, pristine = "argmin_"+aggregate.Get("argmin").AsString(), "", false
 						hasField = true
 					} else {
 						fn = aggregate.AsString()
@@ -194,24 +200,27 @@ func vgField(cc *compileCtx, fd Value, opt fieldRefOption) string {
 			}
 		}
 		if fn != "" {
-			if hasField && field != "" {
+			if hasField {
 				field = fn + "_" + field
 			} else {
 				field = fn
 			}
-			missing = ""
+			missing, pristine = "", false
 		}
 	}
 	if suffix != "" {
-		field, missing = jsField()+"_"+suffix, ""
+		field, missing, pristine = jsField()+"_"+suffix, "", false
 	}
 	if opt.prefix != "" {
-		field, missing = opt.prefix+"_"+jsField(), ""
+		field, missing, pristine = opt.prefix+"_"+jsField(), "", false
 	}
 	if missing != "" {
 		// replacePathInField, removePathFromField and flatAccessWithDatum all
 		// start with splitAccessPath(field).
 		throw("Cannot read properties of %s (reading 'length')", missing)
+	}
+	if pristine {
+		field = ""
 	}
 	switch {
 	case opt.forAs:
