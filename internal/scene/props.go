@@ -110,11 +110,11 @@ func (it *Item) setProp(l *jsonLoader, k string, val jsval.Value) (bool, error) 
 	case "scaleY":
 		it.ScaleY = numOf(val)
 	case "interpolate":
-		it.Interpolate = strOf(val)
+		it.Interpolate = strOfTruthy(val)
 	case "tension":
 		it.Tension = numOf(val)
 	case "orient":
-		it.Orient = strOf(val)
+		it.Orient = strOfTruthy(val)
 	case "defined":
 		it.Defined = triOf(val)
 	case "text":
