@@ -19,6 +19,10 @@ type TimeUnitParams struct {
 	// and step are chosen by timeBin from Extent (or the data's own extent) and
 	// MaxBins.
 	Units []string
+	// UnitsGiven is set when the units parameter is present, even as an empty
+	// array: `_.units ? ... : timeBin(...)` takes an empty list as given, and
+	// timeUnits then rejects it.
+	UnitsGiven bool
 	// Step is the multiple of the last unit to floor to; 0 means 1. It only
 	// applies together with Units.
 	Step    float64
@@ -70,7 +74,7 @@ func TimeUnit(ctx context.Context, data []jsval.Value, p TimeUnitParams) ([]jsva
 			return data, info, err
 		}
 		units, step = bin.Units, bin.Step
-	case len(p.Units) > 0:
+	case p.UnitsGiven || len(p.Units) > 0:
 		units, step = p.Units, p.Step
 		if step == 0 || math.IsNaN(step) {
 			step = 1

@@ -490,7 +490,7 @@ func init() {
 		}
 		tp := transforms.TimeUnitParams{
 			Field: p.field("field"), NoInterval: !p.Value("interval").IsTruthy() && p.has("interval"),
-			Units: p.strs("units"), Step: p.num("step", 1), MaxBins: p.num("maxbins", 40),
+			Units: p.strs("units"), UnitsGiven: p.list("units") != nil, Step: p.num("step", 1), MaxBins: p.num("maxbins", 40),
 			Extent: p.pair2("extent"), InferUnits: p.bool("inferUnits"), Zone: zone,
 			As: pairAs(p.strs("as")),
 		}
