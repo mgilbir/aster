@@ -1,0 +1,5 @@
+# Cases whose comparison with the node oracle is not "ok" (see expect_test.go).
+# id<TAB>status<TAB>reason
+number-axis-format--ja-JP	differ	gap: CJK text (here the locale's yen sign), glyphs missing from both sides' fonts, is measured differently from node-canvas (the same cause as values/aggregated--beyond-ascii)
+time-axis-default--zh-CN	differ	gap: CJK text (here the locale's month names), glyphs missing from both sides' fonts, is measured differently from node-canvas (the same cause as values/aggregated--beyond-ascii)
+time-axis-default--zh-TW	differ	gap: CJK text (here the locale's month names), glyphs missing from both sides' fonts, is measured differently from node-canvas (the same cause as values/aggregated--beyond-ascii)
