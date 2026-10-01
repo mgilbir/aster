@@ -1,21 +1,11 @@
 package vega
 
 import (
-	"context"
 	"strings"
 	"testing"
 
 	"github.com/mgilbir/aster/internal/scene"
 )
-
-func renderSpec(t *testing.T, spec string) *Result {
-	t.Helper()
-	res, err := Render(context.Background(), mustJSON(t, spec), Options{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return res
-}
 
 func hasWarning(res *Result, sub string) bool {
 	for _, w := range res.Warnings {
