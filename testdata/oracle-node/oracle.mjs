@@ -174,10 +174,17 @@ if (vega.textMetrics.width !== vega.textMetrics.measureWidth) {
 // "data/ffox.png", as in upstream's build), then testdata/data; the CDN URLs
 // some specs use are served from the same local copy.
 const roots = [path.join(repo, 'testdata/vega-datasets'), path.join(repo, 'testdata/data')];
-const cdn = /^https?:\/\/(?:cdn\.jsdelivr\.net\/npm\/vega-datasets@[^/]+|raw\.githubusercontent\.com\/vega\/vega-datasets\/[^/]+|vega\.github\.io\/vega-datasets)\/(data\/.+)$/;
+// The URLs that serve copies of vega-datasets, shared with the engine's test
+// loader (compare_test.go) so both map exactly the same ones.
+const datasetURLs = JSON.parse(fs.readFileSync(path.join(repo, 'testdata/oracle-node/dataset-urls.json'), 'utf8')).patterns.map(
+  (p) => new RegExp(p),
+);
 const localize = (uri) => {
-  const m = cdn.exec(uri);
-  return m ? m[1] : uri;
+  for (const re of datasetURLs) {
+    const m = re.exec(uri);
+    if (m) return m[1];
+  }
+  return uri;
 };
 const base = vega.loader({ mode: 'file' });
 const loader = {

@@ -1,14 +1,17 @@
 package aster_test
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -278,19 +281,37 @@ func corpusLoader(t testing.TB) aster.Loader {
 	)
 }
 
-// redirectTransport rewrites vega-datasets CDN/GitHub URLs to a local server.
+// datasetURLs are the URL patterns that serve copies of vega-datasets,
+// shared with the oracle (testdata/oracle-node/dataset-urls.json), so both
+// sides map exactly the same URLs to the local copy and refuse the rest.
+var datasetURLs = sync.OnceValue(func() []*regexp.Regexp {
+	b, err := os.ReadFile("testdata/oracle-node/dataset-urls.json")
+	if err != nil {
+		panic(err)
+	}
+	var f struct{ Patterns []string }
+	if err := json.Unmarshal(b, &f); err != nil {
+		panic(err)
+	}
+	res := make([]*regexp.Regexp, len(f.Patterns))
+	for i, p := range f.Patterns {
+		res[i] = regexp.MustCompile(p)
+	}
+	return res
+})
+
+// redirectTransport serves the URLs datasetURLs maps from a local server.
 type redirectTransport struct {
 	target string
 	next   http.RoundTripper
 }
 
 func (rt redirectTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	path := req.URL.Path
 	rewritten := ""
-	switch req.URL.Hostname() {
-	case "cdn.jsdelivr.net", "raw.githubusercontent.com", "vega.github.io":
-		if i := strings.Index(path, "/data/"); i >= 0 {
-			rewritten = path[i:]
+	for _, re := range datasetURLs() {
+		if m := re.FindStringSubmatch(req.URL.String()); m != nil {
+			rewritten = "/" + m[1]
+			break
 		}
 	}
 	if rewritten == "" {
