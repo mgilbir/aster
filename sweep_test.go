@@ -40,6 +40,7 @@ const (
 	compareSVG     sweepMode = iota // render the case, compare the SVG
 	compareVega                     // compile a Vega-Lite case, compare the Vega
 	compareSignals                  // render, write signals, render again; compare the second SVG
+	compareLite                     // a Vega-Lite case: compare the SVG and, as a second status, the compiled Vega
 )
 
 type sweep struct {
@@ -146,6 +147,22 @@ func runSweepCase(t *testing.T, o *oracle.Oracle, c *aster.Converter, mode sweep
 	switch mode {
 	case compareVega:
 		return compareCompiled(t, o, c, sc)
+	case compareLite:
+		r = runSweepCase(t, o, c, compareSVG, sc)
+		if r.status == "oracle-failure" {
+			return r
+		}
+		// As compareOne does: the compiled Vega counts only when upstream
+		// compiled the case and the engine did too.
+		if v := compareCompiled(t, o, c, sc); v.status == "vega-differ" {
+			if r.status == "ok" {
+				r.status, r.detail = "vega-differ", ""
+			} else {
+				r.status += "+vega-differ"
+			}
+			r.detail += vegaDetailMarker + v.detail
+		}
+		return r
 	case compareSignals:
 		want, err = o.Signals(sc.Spec, sc.Writes)
 		ws := make([][2]string, len(sc.Writes))
@@ -222,6 +239,10 @@ func compareCompiled(t *testing.T, o *oracle.Oracle, c *aster.Converter, sc swee
 	return r
 }
 
+// vegaDetailMarker separates the SVG difference from the compiled-Vega
+// difference in the detail of a case that has both.
+const vegaDetailMarker = " | vega: "
+
 // firstJSONDiff names the first place two JSON values differ, in key order of
 // want then got.
 func firstJSONDiff(got, want jsval.Value, path string) string {
@@ -297,7 +318,17 @@ func sweepScoreboard(t *testing.T, sw sweep, cases []sweepCase, results []specRe
 			}
 			continue
 		}
-		causes[r.status+": "+causeShape(r.detail)]++
+		if svg, vg, both := strings.Cut(r.detail, vegaDetailMarker); both || strings.HasSuffix(r.status, "vega-differ") {
+			if both && svg != "" {
+				causes[strings.TrimSuffix(r.status, "+vega-differ")+": "+causeShape(svg)]++
+			}
+			if !both {
+				vg = svg
+			}
+			causes["vega-differ: "+causeShape(vg)]++
+		} else {
+			causes[r.status+": "+causeShape(r.detail)]++
+		}
 		if *sweepV {
 			t.Logf("%s: %s: %s", r.id, r.status, r.detail)
 		}

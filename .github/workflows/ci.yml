@@ -90,9 +90,16 @@ jobs:
           (cd testdata/oracle-node-vl5 && npm ci)
       - uses: actions/cache@v6
         with:
+          path: testdata/corpora-cache
+          key: corpora-${{ hashFiles('testdata/corpora/*.sha256', 'scripts/fetch-corpora.sh') }}
+      - name: fetch the external corpora
+        # Verified against the checked-in manifests; a cache hit is verified too.
+        run: scripts/fetch-corpora.sh
+      - uses: actions/cache@v6
+        with:
           path: testdata/oracle-cache
-          key: oracle-${{ hashFiles('testdata/oracle-node/oracle.mjs', 'testdata/oracle-node*/package-lock.json') }}-${{ github.sha }}
-          restore-keys: oracle-${{ hashFiles('testdata/oracle-node/oracle.mjs', 'testdata/oracle-node*/package-lock.json') }}-
+          key: oracle-${{ hashFiles('testdata/oracle-node/oracle.mjs', 'testdata/oracle-node/sweeps/*.mjs', 'testdata/corpora/*.sha256', 'testdata/oracle-node*/package-lock.json') }}-${{ github.sha }}
+          restore-keys: oracle-${{ hashFiles('testdata/oracle-node/oracle.mjs', 'testdata/oracle-node/sweeps/*.mjs', 'testdata/corpora/*.sha256', 'testdata/oracle-node*/package-lock.json') }}-
       - name: full test suite
         env:
           ASTER_ORACLE: require

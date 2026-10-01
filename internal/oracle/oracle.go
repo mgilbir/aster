@@ -174,11 +174,16 @@ func (o *Oracle) Signals(spec []byte, writes []SignalWrite) (Result, error) {
 
 // Generate runs the generator testdata/oracle-node/sweeps/<name>.mjs and
 // returns its output (Result.Data). The generator's source is part of the
-// cache key, so editing it regenerates.
+// cache key, so editing it regenerates; so is the corpus manifest
+// testdata/corpora/<name>.sha256, when there is one, for a generator that
+// reads a fetched corpus.
 func (o *Oracle) Generate(name string) (Result, error) {
 	src, err := os.ReadFile(filepath.Join(o.root, sweepDir, name+".mjs"))
 	if err != nil {
 		return Result{}, err
+	}
+	if m, err := os.ReadFile(filepath.Join(o.root, "testdata/corpora", name+".sha256")); err == nil {
+		src = append(src, m...)
 	}
 	sum := sha256.Sum256(src)
 	return o.ask(map[string]any{"op": "generate", "sweep": name, "rev": hex.EncodeToString(sum[:])})

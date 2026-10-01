@@ -306,6 +306,7 @@ On the 1,347 specs of the corpus (260 Vega fixtures, 332 Vega-Lite fixtures, Veg
 (cd testdata/oracle-node-vl5 && npm ci)
 go test ./...                               # tests that need the oracle skip without it
 ASTER_ORACLE=require go test ./...          # as in CI: fail instead of skipping
+scripts/fetch-corpora.sh                    # external corpora (TestCorpusWild, TestCorpusDeneb)
 go test -run TestCompareWithNode -v . -args -compare.report=/tmp/report.md
 scripts/fmacheck.sh                         # fused multiply-add audit
 ASTER_FUZZ=3000 go test -run TestFuzzDifferential -v -timeout 3h .

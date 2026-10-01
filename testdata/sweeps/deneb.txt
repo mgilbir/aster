@@ -1,0 +1,8 @@
+# Cases whose comparison with the node oracle is not "ok" (see expect_test.go).
+# id<TAB>status<TAB>reason
+flow__network	differ	TODO: 24 diffs; first: /#document[0]/svg.marks[1]/g[0]/g.mark-group.role-frame.root[0]/g[1]/g[0]/g.mark-symbol.role-mark.symbol-nodes[0]/path: attribute transform="translate(0,0)", want "translate(7.0710678118654755,0)"
+magnitude__proportional-symbol	differ	TODO: 19 diffs; first: /#document[0]/svg.marks[1]/g[0]/g.mark-group.role-frame.root[0]/g[1]/g[0]/g.mark-symbol.role-mark.symbol-bubbles[0]/path: attribute transform="translate(288.4910768035133,153.23624778308005)", want "translate(285.79462621333255,192.0515577407004)"
+part-to-whole__parliament-diagram	differ	TODO: 4 diffs; first: /#document[0]/svg.marks[1]/g[0]/g.mark-group.role-frame.root[0]/g[1]/g[0]/g.mark-symbol.role-mark.symbol-seat[156]/path: attribute transform="translate(177.49999999999997,168.98345383163257)", want "translate(177.49999999999997,137.5)"
+part-to-whole__voronoi	differ	TODO: 2 diffs; first: /#document[0]/svg.marks[1]/g[0]/g.mark-group.role-frame.root[0]/g[1]/g[0]/g.mark-path.role-mark.path-voronoi-area[8]/path: unexpected attribute d="M400,0L400,400L0,400L0,0Z"
+spatial__choropleth	differ	TODO: 1 diffs; first: /#document[0]/svg.marks[0]/g[0]/g.mark-group.role-frame.root[0]/g[1]/g[0]/g.mark-group.role-title[0]/g: attribute transform="translate(-0.9999999999998863,-70)", want "translate(0,-70.99999999999999)"
+spatial__equalised-cartogram	differ	TODO: 1 diffs; first: /#document[0]/svg.marks[0]/g[0]/g.mark-group.role-frame.root[0]/g[1]/g[1]/g.mark-group.role-title[0]/g: attribute transform="translate(-2.000000000000057,-71.90944103034167)", want "translate(0,-72)"
