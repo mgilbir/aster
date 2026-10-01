@@ -2,6 +2,7 @@ package vega
 
 import (
 	"context"
+	"errors"
 	"math"
 	"slices"
 
@@ -188,6 +189,10 @@ func (p *opParams) pair2(name string) *[2]float64 {
 
 // -- generic wrappers -----------------------------------------------------------
 
+// errStopPulse is what a transform function returns to end its pass with
+// StopPropagation: the operator ran but its targets are not re-evaluated.
+var errStopPulse = errors.New("vega: stop propagation")
+
 // txFn computes a transform's output from the complete input.
 // requireFields fails the way upstream does when a transform applies a field
 // accessor that is null: an empty field name resolves to null at run time
@@ -240,10 +245,21 @@ func statefulTransform(newFn func() txFn) factory {
 				requireFields(def, p)
 			}
 			out, err := f(n, p, in)
+			if err == errStopPulse {
+				return stopPulse
+			}
 			if err != nil {
 				failErr(err)
 			}
 			n.g.view.checkRows(len(out) - len(in))
+			// The tuples a transform creates are ingested in output order
+			// (vega-dataflow's ingest), which is the order a sort breaks
+			// ties in.
+			for _, t := range out {
+				if o := t.ObjValue(); o != nil {
+					o.EnsureTupleID()
+				}
+			}
 			res := changedPulse(pulse, out)
 			if len(out) > 0 && len(in) > 0 && &out[0] == &in[0] {
 				res.tree = pulse.tree // annotated in place: still the same data set
@@ -671,21 +687,35 @@ func markTransform(n *opNode, p *opParams, pulse *flowPulse, f txFn) *flowPulse 
 		}
 		before[i] = snap
 	}
-	if _, err := f(n, p, views); err != nil {
-		failErr(err)
-	}
-	for i, t := range views {
-		o := t.ObjValue()
-		for j := 0; j < o.Len(); j++ {
-			k, val := o.KeyAt(j), o.ValueAt(j)
-			if k == "datum" || k == "bounds" {
-				continue
+	// The transform works on the items themselves upstream, so what it wrote
+	// before it failed stays on them (the force simulation has placed the
+	// nodes before a link it cannot resolve throws).
+	copyBack := func() {
+		for i, t := range views {
+			o := t.ObjValue()
+			for j := 0; j < o.Len(); j++ {
+				k, val := o.KeyAt(j), o.ValueAt(j)
+				if k == "datum" || k == "bounds" {
+					continue
+				}
+				if old, ok := before[i][k]; ok && jsval.SameRef(old, val) && old.Kind() == val.Kind() {
+					continue
+				}
+				setItemProp(items[i], k, val)
 			}
-			if old, ok := before[i][k]; ok && jsval.SameRef(old, val) && old.Kind() == val.Kind() {
-				continue
-			}
-			setItemProp(items[i], k, val)
 		}
+	}
+	stop := false
+	func() {
+		defer copyBack()
+		if _, err := f(n, p, views); err == errStopPulse {
+			stop = true
+		} else if err != nil {
+			failErr(err)
+		}
+	}()
+	if stop {
+		return stopPulse
 	}
 	return nil
 }

@@ -54,11 +54,17 @@ func barePulse(in *flowPulse) *flowPulse {
 func ingestTuple(v jsval.Value) jsval.Value {
 	switch v.Kind() {
 	case jsval.KindObj:
-		return jsval.Obj(v.ObjValue().Clone())
+		src := v.ObjValue()
+		o := src.Clone()
+		o.SetTupleID(src.TupleID()) // ingest keeps the id a tuple already has
+		o.EnsureTupleID()
+		return jsval.Obj(o)
 	case jsval.KindArr, jsval.KindTimestamp:
 		return v
 	}
-	return jsval.Obj(jsval.ObjectOf("data", v))
+	o := jsval.ObjectOf("data", v)
+	o.EnsureTupleID()
+	return jsval.Obj(o)
 }
 
 // -- value operators -----------------------------------------------------------
@@ -288,7 +294,7 @@ func facCollect(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode
 			}
 		}
 		if cmp != nil && mod {
-			transforms.SortTuples(list, cmp)
+			transforms.SortTuples(list, transforms.StableComparator(cmp))
 		}
 		n.value = list
 		n.modified = mod
@@ -387,7 +393,7 @@ func facValues(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode,
 			f, _ := p.Get("field").(transforms.Field)
 			if cmp := p.comparator("sort"); cmp != nil {
 				src = append([]jsval.Value(nil), src...)
-				transforms.SortTuples(src, cmp)
+				transforms.SortTuples(src, transforms.StableComparator(cmp))
 			}
 			out := make([]jsval.Value, len(src))
 			for i, t := range src {

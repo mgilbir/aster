@@ -3,7 +3,6 @@ package transforms
 import (
 	"context"
 	"math"
-	"sort"
 
 	"github.com/mgilbir/aster/internal/jsval"
 )
@@ -128,7 +127,15 @@ func DotBinTuples(ctx context.Context, data []jsval.Value, p DotBinParams) (DotB
 			keys[o] = f
 			return f
 		}
-		sort.SliceStable(tuples, func(i, j int) bool { return num(tuples[i])-num(tuples[j]) < 0 })
+		SortTuples(tuples, StableComparator(func(a, b jsval.Value) int {
+			switch d := num(a) - num(b); {
+			case d < 0:
+				return -1
+			case d > 0:
+				return 1
+			}
+			return 0
+		}))
 		vals := make([]float64, len(tuples))
 		for i, t := range tuples {
 			vals[i] = num(t)

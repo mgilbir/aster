@@ -278,7 +278,7 @@ func Window(ctx context.Context, data []jsval.Value, p WindowParams) ([]jsval.Va
 		}
 		rows := slices.Clone(g.Tuples)
 		if p.Sort != nil {
-			SortTuples(rows, p.Sort)
+			SortTuples(rows, StableComparator(p.Sort))
 		}
 		n := len(rows)
 		w := windowFrame{data: rows, compare: compare}

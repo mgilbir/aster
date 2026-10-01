@@ -17,7 +17,7 @@ func Collect(ctx context.Context, data []jsval.Value, cmp Comparator) ([]jsval.V
 	}
 	out := slices.Clone(data)
 	if cmp != nil {
-		SortTuples(out, cmp)
+		SortTuples(out, StableComparator(cmp))
 	}
 	return out, ctx.Err()
 }

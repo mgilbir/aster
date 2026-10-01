@@ -203,6 +203,40 @@ func CompareBy(fields []Field, orders []string) Comparator {
 	}
 }
 
+// StableComparator is vega-dataflow's stableCompare: cmp, with ties broken by
+// tuple id, which is the order the tuples were ingested in. A nil comparator
+// stays nil.
+func StableComparator(cmp Comparator) Comparator {
+	if cmp == nil {
+		return nil
+	}
+	return func(a, b jsval.Value) int {
+		if c := cmp(a, b); c != 0 {
+			return c
+		}
+		return TupleIDOrder(a, b)
+	}
+}
+
+// TupleIDOrder orders two tuples by tuple id (a value that is not a tuple has
+// id 0).
+func TupleIDOrder(a, b jsval.Value) int {
+	var ia, ib uint32
+	if o := a.ObjValue(); o != nil {
+		ia = o.TupleID()
+	}
+	if o := b.ObjValue(); o != nil {
+		ib = o.TupleID()
+	}
+	switch {
+	case ia < ib:
+		return -1
+	case ia > ib:
+		return 1
+	}
+	return 0
+}
+
 // SortTuples sorts data in place exactly as V8's Array.prototype.sort does
 // (see package jssort): stable, and producing upstream's order even when the
 // comparator is inconsistent, as vega-util's compare is across mixed types.
