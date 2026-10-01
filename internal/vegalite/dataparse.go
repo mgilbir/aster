@@ -292,7 +292,15 @@ func getImplicitFromEncoding(m Model) *Object {
 			} else {
 				mainChannel := getMainRangeChannel(channel)
 				mainFieldDef := fm.fieldDefOf(mainChannel)
-				o := cloneObj(fd.ObjValue())
+				// `mainFieldDef.type` of a secondary channel (x2) whose main
+				// channel (x) is not encoded.
+				switch {
+				case mainFieldDef.IsUndefined():
+					throw("Cannot read properties of undefined (reading 'type')")
+				case mainFieldDef.IsNull():
+					throw("Cannot read properties of null (reading 'type')")
+				}
+				o :=cloneObj(fd.ObjValue())
 				o.Set("type", mainFieldDef.Get("type"))
 				add(jsval.Obj(o))
 			}

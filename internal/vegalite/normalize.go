@@ -877,6 +877,15 @@ func getPointOverlay(markDef, markConfig, encoding Value) (Value, bool) {
 	case !point.IsUndefined():
 		return undef, false
 	}
+	if !markConfig.Get("point").IsTruthy() {
+		// `markConfig.point || encoding.shape` reads encoding.shape.
+		switch {
+		case encoding.IsUndefined():
+			throw("Cannot read properties of undefined (reading 'shape')")
+		case encoding.IsNull():
+			throw("Cannot read properties of null (reading 'shape')")
+		}
+	}
 	if markConfig.Get("point").IsTruthy() || encoding.Get("shape").IsTruthy() {
 		if isObject(markConfig.Get("point")) {
 			return markConfig.Get("point"), true

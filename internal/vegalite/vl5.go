@@ -528,6 +528,22 @@ func cmAlias(cc *compileCtx, field string) string {
 	return removePathFromField(field)
 }
 
+// cmFieldName reads the continuous axis field a composite mark builds its
+// derived names from. 6.x runs it through removePathFromField, whose
+// splitAccessPath throws on a missing field (a boxplot of an aggregate that
+// names none, like count).
+func cmFieldName(cc *compileCtx, v Value) string {
+	if !cc.v5 {
+		switch {
+		case v.IsUndefined():
+			throw("Cannot read properties of undefined (reading 'length')")
+		case v.IsNull():
+			throw("Cannot read properties of null (reading 'length')")
+		}
+	}
+	return v.AsString()
+}
+
 // legendSelectionUpdate is the expression reading the clicked legend entry.
 func legendSelectionUpdate(cc *compileCtx) string {
 	if cc.v5 {

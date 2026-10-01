@@ -176,7 +176,16 @@ func (n *xformNode) addDimensions(fields []string) {
 	var base []Value
 	switch n.kind {
 	case "window", "joinaggregate":
-		base = t.Get("groupby").Items()
+		// `this.transform.groupby.concat(fields)`: without a groupby that is
+		// a TypeError (pivot alone guards with `?? []`).
+		switch g := t.Get("groupby"); {
+		case g.IsUndefined():
+			throw("Cannot read properties of undefined (reading 'concat')")
+		case g.IsNull():
+			throw("Cannot read properties of null (reading 'concat')")
+		default:
+			base = g.Items()
+		}
 	case "pivot":
 		base = arrayOf(t.Get("groupby"))
 	default:
