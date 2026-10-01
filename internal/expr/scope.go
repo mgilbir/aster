@@ -2,11 +2,13 @@ package expr
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"math/rand/v2"
 	"time"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/jsval"
 )
@@ -26,6 +28,25 @@ func throw(name, format string, args ...any) {
 }
 
 func typeError(format string, args ...any) { throw("TypeError", format, args...) }
+
+// limitPanic carries an engine resource limit out of an evaluation. Unlike an
+// Error it is no exception upstream would throw (upstream has no such limits):
+// Eval returns it as an error wrapping budget.ErrLimit, which ends the render.
+type limitPanic struct{ err error }
+
+// exceeded ends the evaluation with a resource-limit error.
+func exceeded(format string, args ...any) {
+	panic(&limitPanic{fmt.Errorf("%w: "+format, append([]any{budget.ErrLimit}, args...)...)})
+}
+
+// failFormat raises a formatting error: a resource limit as such, anything
+// else as the Error upstream's formatter throws.
+func failFormat(err error) {
+	if errors.Is(err, budget.ErrLimit) {
+		panic(&limitPanic{err})
+	}
+	throw("Error", "%v", err)
+}
 
 // Random is the source behind random(), sampleNormal and friends. Vega
 // exposes vega-statistics' setRandom for reproducible output; here the source
@@ -213,7 +234,7 @@ func (s *Scope) chargeBytes(n int) {
 		return
 	}
 	if int64(n) > s.Strings.left {
-		throw("RangeError", "Invalid string length: the expression string budget of this render is used up")
+		exceeded("the expression string budget of this render is used up")
 	}
 	s.Strings.left -= int64(n)
 }

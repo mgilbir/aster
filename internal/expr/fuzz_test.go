@@ -1,10 +1,12 @@
 package expr
 
 import (
+	"errors"
 	"math/rand/v2"
 	"testing"
 	"time"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -30,7 +32,7 @@ func compileEvalNoPanic(t testing.TB, src string) {
 	go func() {
 		defer close(done)
 		if _, err := p.Eval(s); err != nil {
-			if _, ok := err.(*Error); !ok && s.Context == nil {
+			if _, ok := err.(*Error); !ok && !errors.Is(err, budget.ErrLimit) && s.Context == nil {
 				t.Errorf("%q: non-JS error %T %v", src, err, err)
 			}
 		}

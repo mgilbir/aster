@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -23,7 +24,7 @@ const maxNestKeys = 256
 // them to the output dataset as vega's Nest does.
 func Nest(tuples []jsval.Value, keys []Accessor, generate bool) (*Tree, []jsval.Value, error) {
 	if len(keys) > maxNestKeys {
-		return nil, nil, fmt.Errorf("nest: too many keys (%d)", len(keys))
+		return nil, nil, fmt.Errorf("%w: nest: too many keys (%d)", budget.ErrLimit, len(keys))
 	}
 	if len(tuples) > MaxNodes {
 		return nil, nil, ErrTooLarge

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/scale"
 )
@@ -157,7 +158,7 @@ func (e *Env) LegendEntries(in LegendEntriesInput) ([]jsval.Value, error) {
 	}
 	values := set.Values
 	if len(values) > maxTicks {
-		return nil, fmt.Errorf("legend of %d entries exceeds the limit of %d", len(values), maxTicks)
+		return nil, fmt.Errorf("%w: legend of %d entries exceeds the limit of %d", budget.ErrLimit, len(values), maxTicks)
 	}
 
 	switch typ {

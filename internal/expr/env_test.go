@@ -2,6 +2,7 @@ package expr
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/jsval"
 )
@@ -252,8 +254,8 @@ func TestErrorsNotPanics(t *testing.T) {
 		s := NewScope(nil)
 		if _, err := p.Eval(s); err == nil {
 			t.Errorf("%s: expected an evaluation error", src)
-		} else if _, ok := err.(*Error); !ok {
-			t.Errorf("%s: error %T %v is not an *Error", src, err, err)
+		} else if _, ok := err.(*Error); !ok && !errors.Is(err, budget.ErrLimit) {
+			t.Errorf("%s: error %T %v is neither an *Error nor a limit", src, err, err)
 		}
 		if len(s.stack) != 0 {
 			t.Errorf("%s: argument stack not restored (%d)", src, len(s.stack))

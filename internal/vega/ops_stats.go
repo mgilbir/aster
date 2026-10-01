@@ -5,6 +5,7 @@ import (
 	"math"
 	"slices"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsmath"
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/transforms"
@@ -43,7 +44,7 @@ func init() {
 				iters = 300
 			}
 			if iters > force.MaxIterations {
-				return in, fmt.Errorf("force: iterations %v exceeds limit %d", iters, force.MaxIterations)
+				return in, fmt.Errorf("%w: force: iterations %v exceeds limit %d", budget.ErrLimit, iters, force.MaxIterations)
 			}
 			var fs []force.Force
 			for _, x := range p.list("forces") {

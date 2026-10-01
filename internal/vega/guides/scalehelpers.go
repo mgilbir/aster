@@ -6,6 +6,7 @@ import (
 	"math"
 	"sort"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsmath"
 
 	"github.com/mgilbir/aster/internal/format"
@@ -146,7 +147,7 @@ func (e *Env) TickCount(s scale.Scale, count jsval.Value, minStep jsval.Value) (
 		// The bound applies after the minimum-step clamp, which can reduce an
 		// absurd count to a handful of ticks.
 		if math.Abs(n) > maxTicks {
-			return tc, fmt.Errorf("tick count %v exceeds the limit of %d", n, maxTicks)
+			return tc, fmt.Errorf("%w: tick count %v exceeds the limit of %d", budget.ErrLimit, n, maxTicks)
 		}
 		return scale.Count(n), nil
 	}
@@ -254,7 +255,7 @@ func TickValues(s scale.Scale, count scale.TickCount) ([]jsval.Value, error) {
 	if t, ok := s.(scale.Ticker); ok {
 		ticks := t.Ticks(count)
 		if len(ticks) > maxTicks {
-			return nil, fmt.Errorf("scale produced %d ticks, more than the limit of %d", len(ticks), maxTicks)
+			return nil, fmt.Errorf("%w: scale produced %d ticks, more than the limit of %d", budget.ErrLimit, len(ticks), maxTicks)
 		}
 		out := make([]jsval.Value, len(ticks))
 		temporal := scale.IsTemporal(typeOf(s))
@@ -269,7 +270,7 @@ func TickValues(s scale.Scale, count scale.TickCount) ([]jsval.Value, error) {
 	}
 	d := s.Domain()
 	if len(d) > maxTicks {
-		return nil, fmt.Errorf("scale domain of %d values exceeds the tick limit of %d", len(d), maxTicks)
+		return nil, fmt.Errorf("%w: scale domain of %d values exceeds the tick limit of %d", budget.ErrLimit, len(d), maxTicks)
 	}
 	return d, nil
 }

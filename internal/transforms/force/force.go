@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsmath"
 
 	"github.com/mgilbir/aster/internal/jsval"
@@ -153,7 +154,7 @@ func Run(ctx context.Context, nodes []jsval.Value, p Params) error {
 		iters = 300
 	}
 	if iters > MaxIterations {
-		return fmt.Errorf("force: iterations %d exceeds limit %d", iters, MaxIterations)
+		return fmt.Errorf("%w: force: iterations %d exceeds limit %d", budget.ErrLimit, iters, MaxIterations)
 	}
 	m, err := NewSimulation(ctx, nodes, p)
 	if err != nil {

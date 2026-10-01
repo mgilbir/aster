@@ -6,6 +6,7 @@ import (
 	"math"
 	"strings"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/geo"
 	"github.com/mgilbir/aster/internal/jsval"
@@ -348,7 +349,7 @@ func parseDSVLimit(ctx context.Context, text string, delim byte, maxRows int) ([
 			continue
 		}
 		if len(rows) >= maxRows || (len(rows) > 0 && len(rows)*len(columns) > 16*maxRows && maxRows < math.MaxInt/16) {
-			return nil, nil, fmt.Errorf("data exceeds the limit of %d rows", maxRows)
+			return nil, nil, fmt.Errorf("%w: data exceeds the limit of %d rows", budget.ErrLimit, maxRows)
 		}
 		if len(rows)&1023 == 0 {
 			if err := ctx.Err(); err != nil {

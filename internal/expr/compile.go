@@ -166,8 +166,9 @@ func (p *Program) Source() string { return p.src }
 
 // Eval evaluates the expression in s. JavaScript exceptions (a property read
 // of null, an invalid regular expression, an unknown-scale error from the
-// runtime) are returned as errors, as is context cancellation; Eval does not
-// panic.
+// runtime) are returned as *Error, an exceeded resource limit as an error
+// wrapping budget.ErrLimit, and context cancellation as its error; Eval does
+// not panic.
 func (p *Program) Eval(s *Scope) (v jsval.Value, err error) {
 	base := len(s.stack)
 	defer func() {
@@ -177,6 +178,8 @@ func (p *Program) Eval(s *Scope) (v jsval.Value, err error) {
 			switch e := r.(type) {
 			case *Error:
 				err = e
+			case *limitPanic:
+				err = e.err
 			case *cancelled:
 				err = e.err
 			default:

@@ -389,7 +389,7 @@ func init() {
 			throw("RangeError", "Invalid array length")
 		}
 		if n32 > MaxSequenceLength {
-			throw("RangeError", "sequence length exceeds %d", MaxSequenceLength)
+			exceeded("sequence length exceeds %d", MaxSequenceLength)
 		}
 		n := int(n32)
 		s.chargeItems(n)
