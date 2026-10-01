@@ -224,6 +224,12 @@ func (c *Converter) stageErr(ctx context.Context, stage string, err error) error
 // input, so a panic is a bug — but it must not take the host process down.
 func recoverInto(err *error) {
 	if r := recover(); r != nil {
+		// A budget that stops work deep inside a stage (the geographic path
+		// walk) panics with its error: it is a limit, not a bug.
+		if e, ok := r.(error); ok && errors.Is(e, ErrLimit) {
+			*err = fmt.Errorf("aster: %w", e)
+			return
+		}
 		*err = fmt.Errorf("aster: internal error: %v", r)
 	}
 }
