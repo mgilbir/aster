@@ -63,13 +63,18 @@ func vgAlignedPositionChannel(channel string, markDef, config Value, defaultAlig
 }
 
 // channelOrUndefined is the table lookup upstream indexes with an alignment
-// that may be none of the keys: the result is undefined, which a computed
-// property name then spells "undefined".
+// that may be none of the keys: the result is undefined, "" here (a position
+// given no channel takes its own); jsKey spells it as a property name.
 func channelOrUndefined(table map[string]string, align string) string {
-	if ch, ok := table[align]; ok {
-		return ch
+	return table[align]
+}
+
+// jsKey is a computed property name: undefined becomes "undefined".
+func jsKey(name string) string {
+	if name == "" {
+		return "undefined"
 	}
-	return "undefined"
+	return name
 }
 
 type pointPositionOpts struct {
@@ -470,7 +475,7 @@ func positionAndSize(fd Value, channel string, m *unitModel) Value {
 		offset: po.offset, defaultRefFn: pointPositionDefaultRef(m, "mid", channel, scaleName, scale), bandPosition: bandPosition,
 	})
 	if vgSizeChannel != "" {
-		o := mk(vgChannel, posRef)
+		o := mk(jsKey(vgChannel), posRef)
 		spreadV(o, sizeMixins)
 		return jsval.Obj(o)
 	}
@@ -492,7 +497,7 @@ func positionAndSize(fd Value, channel string, m *unitModel) Value {
 		p.Set("offset", sizeOffset)
 		second = jsval.Obj(p)
 	}
-	return mkv(vgChannel, posRef, vgChannel2, second)
+	return mkv(jsKey(vgChannel), posRef, vgChannel2, second)
 }
 
 func getBinSpacing(channel string, spacing float64, reverse, axisTranslate, offset, minBandSize Value, bandSizeExpr string) Value {

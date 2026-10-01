@@ -3,7 +3,6 @@
 vl_0008	differ	TODO: 119 diffs; first: /#document[0]/svg.marks[1]/g[0]/g.mark-group.role-frame.root[0]/g[1]/g[6]/g.mark-path.role-mark.layer_2_voronoi[8]/path: unexpected attribute d="M9.781578402691984,0L9.7811712733879,272L8.624666539978893,272L8.62542879779861,0Z"
 vl_0009	differ	TODO: 123 diffs; first: /#document[0]/svg.marks[1]/g[0]/g.mark-group.role-frame.root[0]/g[1]/g[6]/g.mark-path.role-mark.layer_1_voronoi[9]/path: unexpected attribute d="M9.781100410932538,260L9.78164949402077,0L10.937583390727186,0L10.937813628679823,260Z"
 vl_0030	node-error	TODO: Cannot read properties of undefined (reading 'marktype')
-vl_0113	differ	TODO: 27 diffs; first: /#document[0]/svg.marks: attribute height="545", want "510"
 vl_0117	differ	TODO: 1 diffs; first: /#document[0]/svg.marks[1]/g[0]/g.mark-group.role-frame.root[0]/g[1]/g[5]/g.mark-group.role-legend[0]/g[0]/path.background: attribute d="M0,0h67v229h-67Z", want "M0,0h68v229h-68Z"
 vl_0286	differ	TODO: 3 diffs; first: /#document[0]/svg.marks: attribute viewBox="0 0 431 371", want "0 0 432 371"
 vl_0300	differ	TODO: 3 diffs; first: /#document[0]/svg.marks: attribute viewBox="0 0 315 324", want "0 0 366 324"

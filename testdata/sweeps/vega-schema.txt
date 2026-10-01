@@ -8,10 +8,4 @@ axis-tickCount-month	node-error	TODO: Cannot read properties of undefined (readi
 axis-tickCount-second	node-error	TODO: Cannot read properties of undefined (reading 'marktype')
 axis-tickCount-week	node-error	TODO: Cannot read properties of undefined (reading 'marktype')
 axis-tickCount-year	node-error	TODO: Cannot read properties of undefined (reading 'marktype')
-config-legend-columns--4	differ	TODO: 12 diffs; first: /#document[0]/svg.marks: attribute height="198", want "130"
-config-legend-columns-0.5	differ	TODO: 12 diffs; first: /#document[0]/svg.marks: attribute height="198", want "130"
 config-range-ordinal-scheme_greys_count_3	differ	TODO: 4 diffs; first: /#document[0]/svg.marks[1]/g[0]/g.mark-group.role-frame.root[0]/g[1]/g[1]/g.mark-rect.role-mark[0]/path: attribute fill="rgb(196, 196, 196)", want "rgb(187, 187, 187)"
-layout-columns--4	differ	TODO: 6 diffs; first: /#document[0]/svg.marks: attribute height="192", want "180"
-layout-columns-0.5	differ	TODO: 6 diffs; first: /#document[0]/svg.marks: attribute height="192", want "180"
-legend-columns--4	differ	TODO: 12 diffs; first: /#document[0]/svg.marks: attribute height="198", want "130"
-legend-columns-0.5	differ	TODO: 12 diffs; first: /#document[0]/svg.marks: attribute height="198", want "130"
