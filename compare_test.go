@@ -22,8 +22,10 @@ import (
 	"github.com/mgilbir/aster/internal/svgdiff"
 )
 
+const compareSetsDefault = "vg-fixtures,vl-fixtures,vl-examples,vl-convert,vg-gallery,regress-vg,regress-vl"
+
 var (
-	compareSets     = flag.String("compare.sets", "vg-fixtures,vl-fixtures,vl-examples,vl-convert,vg-gallery,regress-vg,regress-vl", "comma-separated corpus sets to compare with the node oracle")
+	compareSets     = flag.String("compare.sets", compareSetsDefault, "comma-separated corpus sets to compare with the node oracle")
 	compareFilter   = flag.String("compare.run", "", "only compare specs whose name contains this substring")
 	compareReport   = flag.String("compare.report", "", "write a per-spec markdown report to this path")
 	compareVerbose  = flag.Bool("compare.v", false, "log every spec's outcome")
@@ -149,6 +151,12 @@ func TestCompareWithNode(t *testing.T) {
 		}
 	}
 	scoreboard(t, results)
+	// A floor, so a corpus directory that moved or emptied fails instead of
+	// comparing less.
+	const corpusFloor = 1347
+	if *compareSets == compareSetsDefault && *compareFilter == "" && len(results) < corpusFloor {
+		t.Errorf("compared %d specs, fewer than the corpus floor of %d", len(results), corpusFloor)
+	}
 	checkExpectations(t, expectFile, *compareUpdate, results)
 }
 

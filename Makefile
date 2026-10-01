@@ -1,4 +1,4 @@
-.PHONY: vendor-datasets build test test-all lint fmacheck clean bench
+.PHONY: vendor-datasets build test test-all check lint fmacheck clean bench
 
 vendor-datasets:
 	go run ./cmd/vendor-datasets
@@ -13,6 +13,10 @@ test:
 # (cd testdata/oracle-node && npm ci) && (cd testdata/oracle-node-vl5 && npm ci)
 test-all:
 	go test ./...
+
+# Every gate, with the oracle required, and a ledger of what ran.
+check:
+	scripts/check.sh
 
 lint:
 	golangci-lint run ./...
