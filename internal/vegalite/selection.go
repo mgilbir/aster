@@ -303,6 +303,7 @@ func materializeSelections(m *unitModel, main *outputNode) {
 		return
 	}
 	for _, name := range m.comp.selection.keyList() {
+		m.b().ctx.check()
 		sel := m.comp.selection.m[name]
 		lookupName := m.getName("lookup_" + name)
 		fn := newFilterNode(main, m, mkv("param", name))
