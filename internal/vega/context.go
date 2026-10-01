@@ -242,6 +242,9 @@ func (c *rtContext) parseParameter(p P, b *paramBuilder) any {
 		if v == nil {
 			return nil
 		}
+		if v == undefinedRef {
+			fail("Operator not defined: undefined")
+		}
 		n := c.get(v)
 		if n == nil {
 			fail("operator not defined (%s)", v.typ)
@@ -269,6 +272,9 @@ func (c *rtContext) parseParameter(p P, b *paramBuilder) any {
 		return c.keyFn(v)
 	case pExpr:
 		for _, d := range v.fn.deps {
+			if d.e == undefinedRef {
+				fail("Operator not defined: undefined")
+			}
 			n := c.get(d.e)
 			if n == nil {
 				continue
@@ -404,6 +410,10 @@ type exprFn struct {
 	usesItem bool
 }
 
+// undefinedRef stands for an operator reference whose id is undefined (see
+// parseExpression); the runtime cannot resolve it.
+var undefinedRef = &entry{typ: "undefined"}
+
 type depRef struct {
 	name string
 	e    *entry
@@ -493,9 +503,12 @@ func (s *Scope) parseExpression(code string) *exprFn {
 		if expr.IsObjectPrototypeName(name) && s.findSignal(name) == nil {
 			// scope.getSignal(name) finds the inherited property of the plain
 			// signals object, truthy, so no "Unrecognized signal name"; the
-			// reference built from it has no operator id, and the runtime
-			// fails to resolve it.
-			perr("Operator not defined: undefined")
+			// reference built from it has no operator id. The parse goes on,
+			// and the runtime fails to resolve the reference when it builds
+			// the operator (at once for the view, when a subflow is
+			// instantiated for a group, where the dataflow logs it).
+			add("$"+name, undefinedRef)
+			continue
 		}
 		e := s.getSignal(name)
 		add("$"+name, e)
