@@ -288,8 +288,10 @@ func (o *Oracle) start() (*proc, error) {
 	// applies the version pinned in its package.json; CI installs the same.
 	cmd := exec.Command("node", filepath.Join(o.root, script))
 	cmd.Dir = filepath.Join(o.root, o.set)
-	cmd.Env = append(os.Environ(), "TZ="+o.zone, "NODE_PATH="+filepath.Join(o.root, o.set, "node_modules"))
+	cmd.Env = append(os.Environ(), "TZ="+o.zone, "NODE_PATH="+filepath.Join(o.root, o.set, "node_modules"),
+		"ASTER_ORACLE_PARENT="+strconv.Itoa(os.Getpid()))
 	cmd.Stderr = os.Stderr
+	ownGroup(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
@@ -340,7 +342,7 @@ func (p *proc) stop() {
 		return
 	}
 	p.stdin.Close()
-	p.cmd.Process.Kill()
+	killGroup(p.cmd)
 	p.cmd.Wait()
 	p.cmd = nil
 }

@@ -28,6 +28,21 @@ import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
+import { Worker } from 'node:worker_threads';
+
+// node must not outlive the Go process that drives it. An input can keep the
+// main thread busy for good (upstream looping on it), so it cannot watch for
+// that itself: a worker thread polls the parent the Go side names and kills
+// the process once that parent is gone.
+if (process.env.ASTER_ORACLE_PARENT) {
+  new Worker(
+    `const parent = ${Number(process.env.ASTER_ORACLE_PARENT)};
+     setInterval(() => {
+       try { process.kill(parent, 0); } catch (e) { if (e.code === 'ESRCH') process.kill(process.pid, 'SIGKILL'); }
+     }, 1000);`,
+    { eval: true },
+  ).unref();
+}
 
 // Paths are resolved from the repository root, whatever the working
 // directory (oracle_test.go runs node in the module set's directory so the
@@ -345,3 +360,5 @@ for await (const line of rl) {
   }
   write(res);
 }
+// stdin closed: the Go side is done with this process.
+process.exit(0);
