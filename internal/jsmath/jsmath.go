@@ -10,8 +10,10 @@
 // arguments. Path strings and tick labels print shortest-round-trip numbers, so
 // a one-ulp difference changes the output text, and byte-compatible SVG needs the
 // same bits. The code follows V8's source, including its departures from
-// fdlibm: pow divides by the whole denominator in its final step, exp special-
-// cases exp(1), and log10 is built on log.
+// fdlibm: exp special-cases exp(1), and log10 is built on log.
+//
+// Math.pow is the exception: V8 passes it to the C library, so Pow ports glibc's
+// pow (pow.go) and follows gcc's fused multiply-adds, not clang's.
 //
 // V8's fdlibm is compiled by clang, which contracts a*b+c into a fused
 // multiply-add on arm64 (and does not on x86-64), within one C++ expression only.
@@ -28,6 +30,7 @@
 // Testing: vectors_test.go replays recorded V8 arguments and results
 // (testdata/v8_*.bin.gz) and, with -live=N, compares fresh
 // arguments against a running node. testdata/eval_v8.mjs is the evaluator.
+// The pow vectors come from node on Linux (JSMATH_NODE_DOCKER, see runNode).
 package jsmath
 
 import "math"

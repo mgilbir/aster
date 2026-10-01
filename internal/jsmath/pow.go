@@ -2,296 +2,293 @@ package jsmath
 
 import "math"
 
-// fdlibm e_pow.c constants.
-const (
-	l1     = 5.99999999999994648725e-01
-	l2     = 4.28571428578550184252e-01
-	l3     = 3.33333329818377432918e-01
-	l4     = 2.72728123808534006489e-01
-	l5     = 2.30660745775561754067e-01
-	l6     = 2.06975017800338417784e-01
-	p1     = 1.66666666666666019037e-01
-	p2     = -2.77777777770155933842e-03
-	p3     = 6.61375632143793436117e-05
-	p4     = -1.65339022054652515390e-06
-	p5     = 4.13813679705723846039e-08
-	lg2    = 6.93147180559945286227e-01
-	lg2H   = 6.93147182464599609375e-01
-	lg2L   = -1.90465429995776804525e-09
-	ovt    = 8.0085662595372944372e-17
-	cp     = 9.61796693925975554329e-01
-	cpH    = 9.61796700954437255859e-01
-	cpL    = -7.02846165095275826516e-09
-	ivln2  = 1.44269504088896338700e+00
-	ivln2H = 1.44269502162933349609e+00
-	ivln2L = 1.92596299112661746887e-08
-	two53  = 9007199254740992.0
-	huge   = 1.0e300
-)
-
-var (
-	bp  = [2]float64{1.0, 1.5}
-	dpH = [2]float64{0.0, 5.84962487220764160156e-01}
-	dpL = [2]float64{0.0, 1.35003920212974897128e-08}
-)
-
-// Pow is Math.pow and the ** operator, following V8's port of fdlibm's
-// __ieee754_pow.
+// Math.pow and the ** operator are not fdlibm in current V8. Since V8 11 the
+// default (--use-std-math-pow, src/numbers/ieee754.cc math::pow) is the C
+// library's pow after the ECMAScript special cases; node 24 (V8 13.6) calls
+// glibc's on Linux. That is the ARM optimized-routines pow (glibc
+// sysdeps/ieee754/dbl-64/e_pow.c, with e_pow_log_data.c and e_exp_data.c in
+// powdata.go): log(x) as a double-double from a 128-entry table and a degree-7
+// polynomial, multiplied by y, then exp of that. It is within 0.52 ULP, not
+// correctly rounded, so it is ported rather than approximated.
 //
-// It is bit-exact with V8. Two details differ from a textbook fdlibm port and
-// matter for that: the last step divides z*t1 by the whole (t1-2)-(w+z*w), not
-// by t1-2 with w+z*w subtracted afterwards, and the overflow/underflow results
-// of a huge exponent carry the sign of a negative base with an odd exponent.
+// The FMA placement mirrors gcc, which builds glibc, not the clang convention of
+// the other files: gcc contracts across statements, and on x86-64 glibc selects
+// its FMA build of the file (e_pow-fma.c, -mfma -mavx2) wherever the CPU has
+// FMA, which node on x86-64 and on arm64 Linux therefore agree on bit for bit.
+// A product that is used more than once, or by anything but an add, stays
+// unfused (ar2, r2, ehi, and scale*tmp in the subnormal path of specialcase).
+// macOS's libm is a different routine and is not reproduced: node there differs
+// from this in about 0.2% of random arguments.
+
+// Constants of the pow polynomial and the log and exp tables, scaled as glibc's
+// e_pow_log_data.c and e_exp_data.c scale them.
+const (
+	powLn2hi = 0x1.62e42fefa3800p-1
+	powLn2lo = 0x1.ef35793c76730p-45
+	powA0    = -0x1p-1
+	powA1    = 0x1.555555555556p-2 * -2
+	powA2    = -0x1.0000000000006p-2 * -2
+	powA3    = 0x1.999999959554ep-3 * 4
+	powA4    = -0x1.555555529a47ap-3 * 4
+	powA5    = 0x1.2495b9b4845e9p-3 * -8
+	powA6    = -0x1.0002b8b263fc3p-3 * -8
+
+	expInvLn2N   = 0x1.71547652b82fep0 * 128
+	expNegLn2hiN = -0x1.62e42fefa0000p-8
+	expNegLn2loN = -0x1.cf79abc9e3b3ap-47
+	expShift     = 0x1.8p52
+	expC2        = 0x1.ffffffffffdbdp-2
+	expC3        = 0x1.555555555543cp-3
+	expC4        = 0x1.55555cf172b91p-5
+	expC5        = 0x1.1111167a4d017p-7
+
+	powOff   = 0x3fe6955500000000
+	signBias = 0x800 << 7 // makes exp_inline return a negative result
+)
+
+// Pow is Math.pow and the ** operator: V8's math::pow, which handles the
+// ECMAScript special cases and leaves the rest to the C library's pow.
 func Pow(x, y float64) float64 {
 	// ECMAScript differs from C here: any NaN exponent gives NaN, and ±1 raised
 	// to an infinite power is NaN rather than 1.
 	if y != y || (math.IsInf(y, 0) && (x == 1 || x == -1)) {
 		return math.NaN()
 	}
-	hx, lx := hi(x), lo(x)
-	hy, ly := hi(y), lo(y)
-	ix, iy := hx&0x7fffffff, hy&0x7fffffff
+	// V8's optimizing compilers do these two without calling pow; the runtime
+	// does the same so every tier agrees.
+	if y == 2 {
+		return x * x
+	}
+	if y == 0.5 {
+		if math.IsInf(x, 0) {
+			return math.Inf(1)
+		}
+		return math.Sqrt(x + 0) // the +0 turns -0 into +0
+	}
+	return libmPow(x, y)
+}
 
-	// y == 0: x**0 = 1
-	if uint32(iy)|ly == 0 {
+// top12 is the sign and exponent bits of x.
+func top12(x float64) uint32 { return uint32(math.Float64bits(x) >> 52) }
+
+// checkint reports whether the finite non-zero value with bits iy is not an
+// integer (0), an odd integer (1) or an even one (2).
+func checkint(iy uint64) int {
+	e := int(iy >> 52 & 0x7ff)
+	if e < 0x3ff {
+		return 0
+	}
+	if e > 0x3ff+52 {
+		return 2
+	}
+	if iy&(1<<(0x3ff+52-e)-1) != 0 {
+		return 0
+	}
+	if iy&(1<<(0x3ff+52-e)) != 0 {
 		return 1
 	}
-	// x|y == NaN return NaN unless x == 1 then return 1
-	if ix > 0x7ff00000 || (ix == 0x7ff00000 && lx != 0) ||
-		iy > 0x7ff00000 || (iy == 0x7ff00000 && ly != 0) {
-		if (uint32(ix)-0x3ff00000)|lx == 0 {
-			return 1
-		}
-		return math.NaN()
-	}
+	return 2
+}
 
-	// yisint: 0 y is not an integer, 1 y is an odd int, 2 y is an even int
-	yisint := int32(0)
-	if hx < 0 {
-		if iy >= 0x43400000 {
-			yisint = 2
-		} else if iy >= 0x3ff00000 {
-			k := (iy >> 20) - 0x3ff
-			if k > 20 {
-				j := ly >> uint(52-k)
-				if j<<uint(52-k) == ly {
-					yisint = 2 - int32(j&1)
+// zeroInfNaN reports whether the bits are those of 0, an infinity or a NaN.
+func zeroInfNaN(i uint64) bool {
+	return 2*i-1 >= 2*math.Float64bits(math.Inf(1))-1
+}
+
+// powXflow is the result of an overflow (or, with under, an underflow), negative
+// when negative is set.
+func powXflow(negative, under bool) float64 {
+	r := math.Inf(1)
+	if under {
+		r = 0
+	}
+	if negative {
+		r = -r
+	}
+	return r
+}
+
+// libmPow is glibc's __pow for finite or infinite x and a y that is not NaN.
+func libmPow(x, y float64) float64 {
+	var sb uint32
+	ix, iy := math.Float64bits(x), math.Float64bits(y)
+	topx, topy := top12(x), top12(y)
+	const one = 0x3ff0000000000000 // bits of 1.0
+	if topx-0x001 >= 0x7ff-0x001 || (topy&0x7ff)-0x3be >= 0x43e-0x3be {
+		// x < 0x1p-126 or inf or nan, or |y| < 0x1p-65 or |y| >= 0x1p63 or nan.
+		if zeroInfNaN(iy) {
+			if 2*iy == 0 {
+				return 1
+			}
+			if ix == one {
+				return 1
+			}
+			if 2*ix > 2*math.Float64bits(math.Inf(1)) {
+				return math.NaN()
+			}
+			if (2*ix < 2*one) == (iy>>63 == 0) {
+				return 0 // |x|<1 && y==inf or |x|>1 && y==-inf
+			}
+			return y * y
+		}
+		if zeroInfNaN(ix) {
+			x2 := x * x
+			if ix>>63 != 0 && checkint(iy) == 1 {
+				x2 = -x2
+			}
+			if iy>>63 != 0 {
+				return 1 / x2
+			}
+			return x2
+		}
+		// x and y are finite and non-zero here.
+		if ix>>63 != 0 {
+			yint := checkint(iy)
+			if yint == 0 {
+				return math.NaN()
+			}
+			if yint == 1 {
+				sb = signBias
+			}
+			ix &= 0x7fffffffffffffff
+			topx &= 0x7ff
+		}
+		if (topy&0x7ff)-0x3be >= 0x43e-0x3be {
+			if ix == one {
+				return 1
+			}
+			if topy&0x7ff < 0x3be {
+				// |y| < 2^-65, x^y ~= 1 + y*log(x).
+				if ix > one {
+					return 1 + y
 				}
-			} else if ly == 0 {
-				j := iy >> uint(20-k)
-				if j<<uint(20-k) == iy {
-					yisint = 2 - (j & 1)
-				}
+				return 1 - y
 			}
+			return powXflow(false, (ix > one) != (topy < 0x800))
+		}
+		if topx == 0 {
+			// Normalize a subnormal x so that its exponent becomes negative.
+			ix = math.Float64bits(x*0x1p52) & 0x7fffffffffffffff
+			ix -= 52 << 52
 		}
 	}
 
-	// special value of y
-	if ly == 0 {
-		if iy == 0x7ff00000 { // y is +-inf
-			switch {
-			case (uint32(ix)-0x3ff00000)|lx == 0:
-				return 1 // +-1**+-inf = 1
-			case ix >= 0x3ff00000: // (|x|>1)**+-inf = inf,0
-				if hy >= 0 {
-					return y
-				}
-				return 0
-			default: // (|x|<1)**-,+inf = inf,0
-				if hy < 0 {
-					return -y
-				}
-				return 0
+	hi, lo := powLog(ix)
+	ehi := mul(y, hi)
+	elo := fma(y, lo, fma(y, hi, -ehi))
+	return powExp(ehi, elo, sb)
+}
+
+// powLog returns y+tail = log(x), where y is the rounded result and tail has
+// about 15 further bits. ix is the bits of x, normalized in the subnormal range
+// by using the sign bit for the exponent.
+func powLog(ix uint64) (y, tail float64) {
+	// x = 2^k z with z in [OFF, 2*OFF), split into 128 subintervals; the ith holds
+	// z and c is near its centre.
+	tmp := ix - powOff
+	i := tmp >> (52 - 7) % 128
+	k := int64(tmp) >> 52
+	z := math.Float64frombits(ix - tmp&(0xfff<<52))
+	kd := float64(k)
+
+	// log(x) = k*Ln2 + log(c) + log1p(z/c-1). 1/c is j/128 or j/256 for an
+	// integer j, so r = z/c - 1 is exact.
+	e := &powLogTab[i]
+	r := fma(z, e.invc, -1)
+
+	// k*Ln2 + log(c) + r.
+	t1 := fma(kd, powLn2hi, e.logc)
+	t2 := t1 + r
+	lo1 := fma(kd, powLn2lo, e.logctail)
+	lo2 := t1 - t2 + r
+
+	// k*Ln2 + log(c) + r + A[0]*r*r.
+	ar := mul(powA0, r)
+	ar2 := mul(r, ar)
+	ar3 := mul(r, ar2)
+	hi := t2 + ar2
+	lo3 := fma(ar, r, -ar2)
+	lo4 := t2 - hi + ar2
+
+	// p = log1p(r) - r - A[0]*r*r.
+	p := fma(ar2, fma(ar2, fma(r, powA6, powA5), fma(r, powA4, powA3)), fma(r, powA2, powA1))
+	lo := fma(ar3, p, lo1+lo2+lo3+lo4)
+	y = hi + lo
+	return y, hi - y + lo
+}
+
+// powExp returns sign*exp(x+xtail), where |xtail| < 2^-8/128 and |xtail| <= |x|;
+// sb is signBias or 0 and sets the sign to - or +.
+func powExp(x, xtail float64, sb uint32) float64 {
+	abstop := top12(x) & 0x7ff
+	if abstop-0x3c9 >= 0x408-0x3c9 { // |x| < 2^-54 or |x| >= 512
+		if abstop-0x3c9 >= 0x80000000 {
+			// Tiny x, including 0: avoid a spurious underflow.
+			if sb != 0 {
+				return -(1 + x)
 			}
+			return 1 + x
 		}
-		if iy == 0x3ff00000 { // y is +-1
-			if hy < 0 {
-				return 1 / x
-			}
-			return x
+		if abstop >= 0x409 { // |x| >= 1024
+			return powXflow(sb != 0, math.Float64bits(x)>>63 != 0)
 		}
-		if hy == 0x40000000 { // y is 2
-			return x * x
-		}
-		if hy == 0x3fe00000 { // y is 0.5
-			if hx >= 0 {
-				return math.Sqrt(x)
-			}
-		}
+		abstop = 0 // large x is special-cased below
 	}
 
-	ax := math.Abs(x)
-	// special value of x
-	if lx == 0 {
-		if ix == 0x7ff00000 || ix == 0 || ix == 0x3ff00000 {
-			z := ax // x is +-0, +-inf, +-1
-			if hy < 0 {
-				z = 1 / z // z = (1/|x|)
-			}
-			if hx < 0 {
-				if (ix-0x3ff00000)|yisint == 0 {
-					z = math.NaN() // (-1)**non-int is NaN
-				} else if yisint == 1 {
-					z = -z // (x<0)**odd = -(|x|**odd)
-				}
-			}
-			return z
-		}
+	// exp(x) = 2^(k/128) * exp(r), with exp(r) in [2^(-1/256), 2^(1/256)] and
+	// x = ln2/128*k + r, with k an integer and r in [-ln2/256, ln2/256].
+	kd := fma(x, expInvLn2N, expShift)
+	ki := math.Float64bits(kd)
+	kd -= expShift
+	r := fma(kd, expNegLn2loN, fma(kd, expNegLn2hiN, x))
+	// The code assumes 2^-200 < |xtail| < 2^-8/128.
+	r += xtail
+	// 2^(k/128) ~= scale * (1 + tail).
+	idx := 2 * (ki % 128)
+	top := (ki + uint64(sb)) << (52 - 7)
+	tail := math.Float64frombits(powExpTab[idx])
+	sbits := powExpTab[idx+1] + top // a valid scale only when -1023*128 < k < 1024*128
+	// exp(x) = 2^(k/128) * exp(r) ~= scale + scale * (tail + exp(r) - 1).
+	r2 := mul(r, r)
+	tmp := fma(mul(r2, r2), fma(r, expC5, expC4), fma(r2, fma(r, expC3, expC2), tail+r))
+	if abstop == 0 {
+		return powSpecial(tmp, sbits, ki)
 	}
+	scale := math.Float64frombits(sbits)
+	return fma(scale, tmp, scale)
+}
 
-	// (x<0)**(non-int) is NaN
-	if ((uint32(hx)>>31)-1)|uint32(yisint) == 0 {
-		return math.NaN()
+// powSpecial handles the results of powExp that may overflow or underflow when
+// computed as scale*(1+tmp) without an intermediate rounding. sbits are the bits
+// of scale, whose computed exponent may have overflown into the sign bit; the
+// sign of int32(ki) says which way: positive k may overflow, negative underflow.
+func powSpecial(tmp float64, sbits, ki uint64) float64 {
+	if ki&0x80000000 == 0 {
+		// k > 0, the exponent of scale might have overflowed by <= 460.
+		sbits -= 1009 << 52
+		scale := math.Float64frombits(sbits)
+		return 0x1p1009 * fma(scale, tmp, scale)
 	}
-
-	sgn := 1.0 // sign of result: -1 for (-ve)**(odd int)
-	if ((uint32(hx)>>31)-1)|uint32(yisint-1) == 0 {
-		sgn = -1
-	}
-
-	var t1, t2 float64
-	// |y| is huge
-	if iy > 0x41e00000 { // if |y| > 2**31
-		if iy > 0x43f00000 { // if |y| > 2**64, must o/uflow
-			if ix <= 0x3fefffff {
-				if hy < 0 {
-					return math.Inf(1)
-				}
-				return 0
-			}
-			if ix >= 0x3ff00000 {
-				if hy > 0 {
-					return math.Inf(1)
-				}
-				return 0
-			}
+	// k < 0, with care in the subnormal range. sbits is the signed scale.
+	sbits += 1022 << 52
+	scale := math.Float64frombits(sbits)
+	// scale*tmp is used twice below, so it is rounded once and stays unfused.
+	st := mul(scale, tmp)
+	y := scale + st
+	if math.Abs(y) < 1 {
+		// Round y to the right precision before scaling it into the subnormal
+		// range, to avoid the double rounding that can cause 0.5+E/2 ulp error.
+		one := 1.0
+		if y < 0 {
+			one = -1
 		}
-		// over/underflow if x is not close to one
-		if ix < 0x3fefffff {
-			if hy < 0 {
-				return sgn * math.Inf(1)
-			}
-			return sgn * 0
-		}
-		if ix > 0x3ff00000 {
-			if hy > 0 {
-				return sgn * math.Inf(1)
-			}
-			return sgn * 0
-		}
-		// now |1-x| is tiny <= 2**-20, suffice to compute
-		// log(x) by x-x^2/2+x^3/3-x^4/4
-		t := ax - 1 // t has 20 trailing zeros
-		w := mul(t, t) * fma(-t, fma(-t, 0.25, 0.3333333333333333333333), 0.5)
-		u := mul(ivln2H, t) // ivln2_h has 21 sig. bits
-		v := fma(t, ivln2L, -mul(w, ivln2))
-		t1 = withLow(u+v, 0)
-		t2 = v - (t1 - u)
-	} else {
-		n := int32(0)
-		// take care of subnormal number
-		if ix < 0x00100000 {
-			ax *= two53
-			n -= 53
-			ix = hi(ax)
-		}
-		n += (ix >> 20) - 0x3ff
-		j := ix & 0x000fffff
-		// determine interval
-		ix = j | 0x3ff00000 // normalize ix
-		var k int
-		switch {
-		case j <= 0x3988E: // |x| < sqrt(3/2)
-			k = 0
-		case j < 0xBB67A: // |x| < sqrt(3)
-			k = 1
-		default:
-			k = 0
-			n++
-			ix -= 0x00100000
-		}
-		ax = withHigh(ax, ix)
-
-		// compute s = s_h+s_l = (x-1)/(x+1) or (x-1.5)/(x+1.5)
-		u := ax - bp[k] // bp[0]=1.0, bp[1]=1.5
-		v := 1 / (ax + bp[k])
-		s := mul(u, v)
-		sH := withLow(s, 0)
-		// t_h = ax + bp[k] High
-		tH := fromWords(((ix>>1)|0x20000000)+0x00080000+int32(k<<18), 0)
-		tL := ax - (tH - bp[k])
-		sL := mul(v, fma(-sH, tL, fma(-sH, tH, u)))
-		// compute log(ax)
-		s2 := mul(s, s)
-		r := mul(mul(s2, s2), fma(s2, fma(s2, fma(s2, fma(s2, fma(s2, l6, l5), l4), l3), l2), l1))
-		r = fma(sL, sH+s, r)
-		s2 = mul(sH, sH)
-		tH = withLow(3.0+s2+r, 0)
-		tL = r - ((tH - 3.0) - s2)
-		// u+v = s*(1+...)
-		u = mul(sH, tH)
-		v = fma(sL, tH, mul(tL, s))
-		// 2/(3log2)*(s+...)
-		pH := withLow(u+v, 0)
-		pL := v - (pH - u)
-		zH := mul(cpH, pH) // cp_h+cp_l = 2/(3*log2)
-		zL := fma(cpL, pH, mul(pL, cp)) + dpL[k]
-		// log2(ax) = (s+..)*2/(3*log2) = n + dp_h + z_h + z_l
-		t := float64(n)
-		t1 = withLow(((zH+zL)+dpH[k])+t, 0)
-		t2 = zL - (((t1 - t) - dpH[k]) - zH)
-	}
-
-	// split up y into y1+y2 and compute (y1+y2)*(t1+t2)
-	y1 := withLow(y, 0)
-	pL := fma(y-y1, t1, mul(y, t2))
-	pH := mul(y1, t1)
-	z := pL + pH
-	j, i := hi(z), lo(z)
-	if j >= 0x40900000 { // z >= 1024
-		if uint32(j-0x40900000)|i != 0 { // if z > 1024
-			return sgn * math.Inf(1) // overflow
-		}
-		if pL+ovt > z-pH {
-			return sgn * math.Inf(1) // overflow
-		}
-	} else if uint32(j)&0x7fffffff >= 0x4090cc00 { // z <= -1075
-		if (uint32(j)-0xc090cc00)|i != 0 { // z < -1075
-			return sgn * 0 // underflow
-		}
-		if pL <= z-pH {
-			return sgn * 0 // underflow
+		lo := scale - y + st
+		hi := one + y
+		lo = one - hi + y + lo
+		y = (hi + lo) - one
+		if y == 0 {
+			y = math.Float64frombits(sbits & 0x8000000000000000) // fix the sign of 0
 		}
 	}
-	// compute 2**(p_h+p_l)
-	ii := j & 0x7fffffff
-	k := (ii >> 20) - 0x3ff
-	n := int32(0)
-	if ii > 0x3fe00000 { // if |z| > 0.5, set n = [z+0.5]
-		n = j + (0x00100000 >> uint(k+1))
-		k = ((n & 0x7fffffff) >> 20) - 0x3ff // new k for n
-		t := withHigh(0, n&^(0x000fffff>>uint(k)))
-		n = ((n & 0x000fffff) | 0x00100000) >> uint(20-k)
-		if j < 0 {
-			n = -n
-		}
-		pH -= t
-	}
-	t := withLow(pL+pH, 0)
-	u := mul(t, lg2H)
-	v := fma(pL-(t-pH), lg2, mul(t, lg2L))
-	z = u + v
-	w := v - (z - u)
-	t = mul(z, z)
-	t1 = fma(-t, fma(t, fma(t, fma(t, fma(t, p5, p4), p3), p2), p1), z)
-	r := mul(z, t1) / ((t1 - 2) - fma(z, w, w)) // V8 divides by the whole denominator, unlike fdlibm's e_pow.c
-	z = 1 - (r - z)
-	j = hi(z)
-	j += n << 20
-	if (j >> 20) <= 0 {
-		z = math.Ldexp(z, int(n)) // subnormal output
-	} else {
-		z = withHigh(z, j)
-	}
-	return sgn * z
+	return 0x1p-1022 * y
 }

@@ -1,5 +1,8 @@
 // Records V8's results for the functions in jsmath, over pseudo-random inputs.
 // Usage: node testdata/gen_math.mjs > testdata/math.json
+//
+// The pow rows must come from node on Linux: V8 leaves Math.pow to the C
+// library's pow, and macOS's differs from glibc's (see pow.go).
 let s = 12345;
 const rnd = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
 const out = { sin: [], cos: [], atan: [], atan2: [], asin: [], acos: [], pow: [], hypot: [] };

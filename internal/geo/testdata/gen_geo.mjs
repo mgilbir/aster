@@ -6,6 +6,10 @@
 //
 // It writes points.json.gz, paths.json.gz, fit.json.gz, measures.json, graticule.json.gz,
 // topo.json.gz, digits.json, angle.json and geoms.json.gz next to this file (gen_pipeline.mjs and gen_contour.mjs record the vega-geo transforms).
+//
+// Record on macOS/arm64, which jsmath follows, except for the conicConformal entries of
+// points, fit and random: they use Math.pow, which V8 leaves to the C library, and jsmath.Pow
+// is glibc's, so those entries are taken from a run in a Linux container (node 24.21.0).
 import { createRequire } from 'node:module';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
