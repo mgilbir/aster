@@ -33,6 +33,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"sync"
 	"unicode"
 	"unicode/utf8"
@@ -240,6 +241,11 @@ func (m *Measurer) MeasureText(text, cssFont string) float64 {
 	if len(text) == 0 {
 		return 0
 	}
+	if strings.ContainsAny(text, "\n\r  ") {
+		// The reference lays text out with Pango, which breaks it into lines at
+		// these separators ("\r\n" is one break) and reports the widest line.
+		return m.measureLines(text, cssFont)
+	}
 	key := widthKey{text, cssFont}
 	// Most measurements repeat (axis labels, legend entries): concurrent
 	// renders on one Measurer hit the cache under a shared lock.
@@ -266,6 +272,31 @@ func (m *Measurer) MeasureText(text, cssFont string) float64 {
 	m.widthCache[key] = w
 	m.mu.Unlock()
 	return w
+}
+
+// measureLines is the width of the widest line of text split at line
+// separators.
+func (m *Measurer) measureLines(text, cssFont string) float64 {
+	var widest float64
+	for {
+		i := strings.IndexAny(text, "\n\r  ")
+		line := text
+		if i >= 0 {
+			line = text[:i]
+		}
+		if w := m.MeasureText(line, cssFont); w > widest {
+			widest = w
+		}
+		if i < 0 {
+			break
+		}
+		if strings.HasPrefix(text[i:], "\r\n") {
+			i++
+		}
+		_, size := utf8.DecodeRuneInString(text[i:])
+		text = text[i+size:]
+	}
+	return widest
 }
 
 // ShapeText shapes text with the font the CSS string selects and returns the
