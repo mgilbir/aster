@@ -3,6 +3,8 @@ package aster_test
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +20,10 @@ func TestErrLimit(t *testing.T) {
 		return `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">` +
 			strings.Repeat("<g>", depth) + `<rect width="5" height="5"/>` + strings.Repeat("</g>", depth) + `</svg>`
 	}
+	big := t.TempDir()
+	if err := os.WriteFile(filepath.Join(big, "big.json"), []byte(`[{"a":1},{"a":2},{"a":3}]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	cases := []struct {
 		name string
 		opts []aster.Option
@@ -25,6 +31,10 @@ func TestErrLimit(t *testing.T) {
 	}{
 		{"data rows", []aster.Option{aster.WithMemoryLimit(1 << 20)}, func(c *aster.Converter) error {
 			_, err := c.VegaToSVG([]byte(`{"data":[{"name":"t","transform":[{"type":"sequence","start":0,"stop":1e6}]}]}`))
+			return err
+		}},
+		{"loaded file size", []aster.Option{aster.WithLoader(&aster.FileLoader{BaseDir: big, MaxBytes: 8})}, func(c *aster.Converter) error {
+			_, err := c.VegaToSVG([]byte(`{"data":[{"name":"t","url":"big.json"}]}`))
 			return err
 		}},
 		{"tick count", nil, func(c *aster.Converter) error {
