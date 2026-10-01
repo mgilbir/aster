@@ -2,6 +2,7 @@ package vega
 
 import (
 	"context"
+	"errors"
 	"math"
 	"slices"
 
@@ -188,6 +189,10 @@ func (p *opParams) pair2(name string) *[2]float64 {
 
 // -- generic wrappers -----------------------------------------------------------
 
+// errStopPulse is what a transform function returns to end its pass with
+// StopPropagation: the operator ran but its targets are not re-evaluated.
+var errStopPulse = errors.New("vega: stop propagation")
+
 // txFn computes a transform's output from the complete input.
 // requireFields fails the way upstream does when a transform applies a field
 // accessor that is null: an empty field name resolves to null at run time
@@ -240,10 +245,21 @@ func statefulTransform(newFn func() txFn) factory {
 				requireFields(def, p)
 			}
 			out, err := f(n, p, in)
+			if err == errStopPulse {
+				return stopPulse
+			}
 			if err != nil {
 				failErr(err)
 			}
 			n.g.view.checkRows(len(out) - len(in))
+			// The tuples a transform creates are ingested in output order
+			// (vega-dataflow's ingest), which is the order a sort breaks
+			// ties in.
+			for _, t := range out {
+				if o := t.ObjValue(); o != nil {
+					o.EnsureTupleID()
+				}
+			}
 			res := changedPulse(pulse, out)
 			if len(out) > 0 && len(in) > 0 && &out[0] == &in[0] {
 				res.tree = pulse.tree // annotated in place: still the same data set
@@ -322,7 +338,7 @@ func init() {
 			// groups (an explicit key, else the group-by values).
 			kf, ok := p.Get("key").(transforms.KeyFunc)
 			if !ok {
-				kf = transforms.KeyOf(ap.GroupBy...)
+				kf = transforms.KeyOf(n.g.view.zone, ap.GroupBy...)
 			}
 			n.value = &aggCells{in: in, out: out, key: kf}
 			return changedPulse(pulse, out)
@@ -358,9 +374,18 @@ func init() {
 		if as == "" {
 			as = "data"
 		}
-		seq, err := transforms.Sequence(ctxOf(n), transforms.SequenceParams{
-			Start: p.num("start", 0), Stop: p.num("stop", 0), Step: p.num("step", 1), As: as,
-		})
+		var seq []jsval.Value
+		var err error
+		// `range(start, stop, _.step || 1)`: only a falsy step is 1. A truthy
+		// one that reads as 0 or NaN ([], "0", "x") is d3.range's step of
+		// zero, whose count Infinity | 0 is no values at all.
+		if sv := p.Value("step"); sv.IsTruthy() && !(jsval.ToNumber(sv) != 0 && !math.IsNaN(jsval.ToNumber(sv))) {
+			seq = nil
+		} else {
+			seq, err = transforms.Sequence(ctxOf(n), transforms.SequenceParams{
+				Start: p.num("start", 0), Stop: p.num("stop", 0), Step: p.num("step", 1), As: as,
+			})
+		}
 		if err != nil || len(in) == 0 {
 			return seq, err
 		}
@@ -433,8 +458,11 @@ func init() {
 	tf["regression"] = tupleTransform(func(n *opNode, p *opParams, in []jsval.Value) ([]jsval.Value, error) {
 		rp := transforms.RegressionParams{
 			X: p.field("x"), Y: p.field("y"), GroupBy: p.fields("groupby"),
-			Method: p.str("method"), Order: clampInt(p.num("order", 3)),
+			Method: p.str("method"), Order: p.num("order", 3),
 			Extent: p.nums("extent"), Params: p.bool("params"), As: p.strs("as"),
+		}
+		if ev := p.Value("extent"); ev.IsTruthy() && !ev.IsArr() {
+			rp.ExtentNotArray = true
 		}
 		return transforms.Regression(ctxOf(n), in, rp)
 	})
@@ -478,7 +506,7 @@ func init() {
 		}
 		tp := transforms.TimeUnitParams{
 			Field: p.field("field"), NoInterval: !p.Value("interval").IsTruthy() && p.has("interval"),
-			Units: p.strs("units"), Step: p.num("step", 1), MaxBins: p.num("maxbins", 40),
+			Units: p.strs("units"), UnitsGiven: p.list("units") != nil, Step: p.num("step", 1), MaxBins: p.num("maxbins", 40),
 			Extent: p.pair2("extent"), InferUnits: p.bool("inferUnits"), Zone: zone,
 			As: pairAs(p.strs("as")),
 		}
@@ -597,6 +625,9 @@ func windowParams(p *opParams) transforms.WindowParams {
 	wp := transforms.WindowParams{
 		Sort: p.comparator("sort"), GroupBy: p.fields("groupby"), IgnorePeers: p.bool("ignorePeers"),
 	}
+	if cs := p.compareSpec("sort"); cs != nil && len(cs.fields) > 0 {
+		wp.SortField = cs.fields[0]
+	}
 	for i, op := range ops {
 		s := transforms.WindowOpSpec{Op: op, Param: math.NaN()}
 		if i < len(fields) {
@@ -671,21 +702,35 @@ func markTransform(n *opNode, p *opParams, pulse *flowPulse, f txFn) *flowPulse 
 		}
 		before[i] = snap
 	}
-	if _, err := f(n, p, views); err != nil {
-		failErr(err)
-	}
-	for i, t := range views {
-		o := t.ObjValue()
-		for j := 0; j < o.Len(); j++ {
-			k, val := o.KeyAt(j), o.ValueAt(j)
-			if k == "datum" || k == "bounds" {
-				continue
+	// The transform works on the items themselves upstream, so what it wrote
+	// before it failed stays on them (the force simulation has placed the
+	// nodes before a link it cannot resolve throws).
+	copyBack := func() {
+		for i, t := range views {
+			o := t.ObjValue()
+			for j := 0; j < o.Len(); j++ {
+				k, val := o.KeyAt(j), o.ValueAt(j)
+				if k == "datum" || k == "bounds" {
+					continue
+				}
+				if old, ok := before[i][k]; ok && jsval.SameRef(old, val) && old.Kind() == val.Kind() {
+					continue
+				}
+				setItemProp(items[i], k, val)
 			}
-			if old, ok := before[i][k]; ok && jsval.SameRef(old, val) && old.Kind() == val.Kind() {
-				continue
-			}
-			setItemProp(items[i], k, val)
 		}
+	}
+	stop := false
+	func() {
+		defer copyBack()
+		if _, err := f(n, p, views); err == errStopPulse {
+			stop = true
+		} else if err != nil {
+			failErr(err)
+		}
+	}()
+	if stop {
+		return stopPulse
 	}
 	return nil
 }

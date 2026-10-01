@@ -41,7 +41,7 @@ func TestRegressionGolden(t *testing.T) {
 					Params: spec.Get("params").IsTruthy(), As: as,
 				}
 				if o := spec.Get("order"); o.IsNum() {
-					p.Order = int(o.NumValue())
+					p.Order = o.NumValue()
 				}
 				if e := spec.Get("extent"); e.IsArr() {
 					for _, v := range e.Items() {
@@ -121,6 +121,39 @@ func BenchmarkLoess10k(b *testing.B) {
 		if _, err := Loess(context.Background(), d, p); err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+// Upstream takes any number for a polynomial order. Its fit allocates
+// Array(order + 1) for the expanded coefficients, which throws for anything
+// but an integer length: a fractional, NaN or too-negative order is a
+// RangeError, and an order of -1 is a fit of nothing, with NaN coefficients.
+func TestRegressionPolyUnusualOrders(t *testing.T) {
+	ctx := context.Background()
+	var rows []jsval.Value
+	for i := 1; i <= 6; i++ {
+		rows = append(rows, obj("x", jsval.Num(float64(i)), "y", jsval.Num(float64(i*i%7))))
+	}
+	p := RegressionParams{X: FieldOf("x"), Y: FieldOf("y"), Method: "poly"}
+	for _, order := range []float64{0.1, 2.5, -1.5, -2, math.NaN(), math.Inf(-1)} {
+		p.Order = order
+		if _, err := Regression(ctx, rows, p); err == nil || err.Error() != "RangeError: Invalid array length" {
+			t.Errorf("order %v: %v", order, err)
+		}
+	}
+	p.Order, p.Params = -1, true
+	out, err := Regression(ctx, rows, p)
+	if err != nil || len(out) != 1 {
+		t.Fatalf("order -1: %v, %d rows", err, len(out))
+	}
+	coef := out[0].Get("coef")
+	if coef.Len() != 1 || !math.IsNaN(coef.Index(0).NumValue()) || !math.IsNaN(out[0].Get("rSquared").NumValue()) {
+		t.Errorf("order -1: coef %v, rSquared %v", coef, out[0].Get("rSquared"))
+	}
+	// A group the order does not exceed is skipped, not an error.
+	p.Params, p.Order = false, 2.5
+	if out, err := Regression(ctx, rows[:2], p); err != nil || len(out) != 0 {
+		t.Errorf("two points, order 2.5: %v, %d rows", err, len(out))
 	}
 }
 

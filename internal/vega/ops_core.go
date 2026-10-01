@@ -3,6 +3,7 @@ package vega
 import (
 	"math"
 
+	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/scene"
 	"github.com/mgilbir/aster/internal/transforms"
@@ -54,11 +55,17 @@ func barePulse(in *flowPulse) *flowPulse {
 func ingestTuple(v jsval.Value) jsval.Value {
 	switch v.Kind() {
 	case jsval.KindObj:
-		return jsval.Obj(v.ObjValue().Clone())
+		src := v.ObjValue()
+		o := src.Clone()
+		o.SetTupleID(src.TupleID()) // ingest keeps the id a tuple already has
+		o.EnsureTupleID()
+		return jsval.Obj(o)
 	case jsval.KindArr, jsval.KindTimestamp:
 		return v
 	}
-	return jsval.Obj(jsval.ObjectOf("data", v))
+	o := jsval.ObjectOf("data", v)
+	o.EnsureTupleID()
+	return jsval.Obj(o)
 }
 
 // -- value operators -----------------------------------------------------------
@@ -117,22 +124,33 @@ func facKey(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *o
 				}
 			}
 		}
-		return makeKeyFn(fields, p.Value("flat").IsTruthy())
+		return makeKeyFn(c.view.zone, fields, p.Value("flat").IsTruthy())
 	}
 }
 
 // makeKeyFn is vega-util's key(fields, flat): the string forms of the field
-// values joined with '|'. With flat, the names are literal property names.
-func makeKeyFn(fields []string, flat bool) transforms.KeyFunc {
+// values joined with '|' (a date as in the view's zone z). With flat, the names
+// are literal property names.
+func makeKeyFn(z format.Zone, fields []string, flat bool) transforms.KeyFunc {
 	fs := make([]transforms.Field, len(fields))
 	for i, f := range fields {
 		if flat {
 			fs[i] = flatField(f)
 		} else {
+			segs, err := jsval.SplitFieldPath(f)
+			if err != nil {
+				fail("%s", err.Error())
+			}
+			if len(segs) == 0 {
+				// The runtime compiles the accessor of a path with no step to
+				// `return _[];`, which does not parse. Unlike a field
+				// parameter, a key has no guard for the empty name.
+				fail("Unexpected token ']'")
+			}
 			fs[i] = transforms.FieldOf(f)
 		}
 	}
-	return transforms.KeyOf(fs...)
+	return transforms.KeyOf(z, fs...)
 }
 
 // flatField reads a property by literal name (backslash escapes removed).
@@ -155,7 +173,7 @@ func (c *rtContext) keyFn(k pKey) transforms.KeyFunc {
 			fields = append(fields, v.AsString())
 		}
 	}
-	return makeKeyFn(fields, k.flat)
+	return makeKeyFn(c.view.zone, fields, k.flat)
 }
 
 // compareSpec is a resolved comparator: the function over tuples, and the field
@@ -281,10 +299,14 @@ func facCollect(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode
 			if len(pulse.multi) > 0 {
 				src = concatTuples(pulse.multi)
 			}
-			list = append(make([]jsval.Value, 0, len(src)), src...)
+			if cmp == nil {
+				list = collectIncremental(list, src)
+			} else {
+				list = append(make([]jsval.Value, 0, len(src)), src...)
+			}
 		}
 		if cmp != nil && mod {
-			transforms.SortTuples(list, cmp)
+			transforms.SortTuples(list, transforms.StableComparator(cmp))
 		}
 		n.value = list
 		n.modified = mod
@@ -295,6 +317,57 @@ func facCollect(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode
 		n.tree = tree
 		return &flowPulse{stamp: pulse.stamp, encode: pulse.encode, changed: mod, tuples: list, tree: tree}
 	}), nil
+}
+
+// collectIncremental is what Collect does with the tuples that pass through it
+// when it does not sort: tuples already collected and still present keep their
+// place, those that left are dropped, and those that arrived are appended in
+// the order they came (SortedList.data without a comparator: the surviving
+// data, then the added tuples). A tuple is the same one when it is the same
+// object, which is what upstream's tuple id stands for; a filter that lets a
+// tuple through again after it was withheld thus appends it rather than
+// putting it back where it was.
+//
+// The engine's operators hand over whole data sets rather than add, remove
+// and modify lists, so which tuples left and which arrived is read off the
+// difference. That needs distinct objects: anything else (a repeated or a
+// non-object tuple) is taken as a new set in the order it came.
+func collectIncremental(list, src []jsval.Value) []jsval.Value {
+	if len(list) == 0 {
+		return append(make([]jsval.Value, 0, len(src)), src...)
+	}
+	incoming := make(map[*jsval.Object]struct{}, len(src))
+	for _, t := range src {
+		if !t.IsObj() {
+			return append(make([]jsval.Value, 0, len(src)), src...)
+		}
+		o := t.ObjValue()
+		if _, dup := incoming[o]; dup {
+			return append(make([]jsval.Value, 0, len(src)), src...)
+		}
+		incoming[o] = struct{}{}
+	}
+	out := make([]jsval.Value, 0, len(src))
+	kept := make(map[*jsval.Object]struct{}, len(list))
+	for _, t := range list {
+		if !t.IsObj() {
+			return append(make([]jsval.Value, 0, len(src)), src...)
+		}
+		o := t.ObjValue()
+		if _, dup := kept[o]; dup {
+			return append(make([]jsval.Value, 0, len(src)), src...)
+		}
+		if _, ok := incoming[o]; ok {
+			out = append(out, t)
+			kept[o] = struct{}{}
+		}
+	}
+	for _, t := range src {
+		if _, ok := kept[t.ObjValue()]; !ok {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 func concatTuples(lists [][]jsval.Value) []jsval.Value {
@@ -332,7 +405,7 @@ func facValues(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode,
 			f, _ := p.Get("field").(transforms.Field)
 			if cmp := p.comparator("sort"); cmp != nil {
 				src = append([]jsval.Value(nil), src...)
-				transforms.SortTuples(src, cmp)
+				transforms.SortTuples(src, transforms.StableComparator(cmp))
 			}
 			out := make([]jsval.Value, len(src))
 			for i, t := range src {

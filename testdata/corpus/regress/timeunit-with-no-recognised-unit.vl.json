@@ -1,0 +1,1 @@
+{"data":{"values":[{"a":"Jan 1, 2000","b":28},{"a":"Jan 2, 2000","b":55}]},"mark":"line","encoding":{"x":{"timeUnit":"0x10","field":"a","type":"temporal"},"y":{"field":"b","type":"quantitative"}}}

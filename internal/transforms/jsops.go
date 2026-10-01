@@ -1,6 +1,7 @@
 package transforms
 
 import (
+	"fmt"
 	"github.com/mgilbir/aster/internal/jssort"
 	"math"
 	"sort"
@@ -203,6 +204,40 @@ func CompareBy(fields []Field, orders []string) Comparator {
 	}
 }
 
+// StableComparator is vega-dataflow's stableCompare: cmp, with ties broken by
+// tuple id, which is the order the tuples were ingested in. A nil comparator
+// stays nil.
+func StableComparator(cmp Comparator) Comparator {
+	if cmp == nil {
+		return nil
+	}
+	return func(a, b jsval.Value) int {
+		if c := cmp(a, b); c != 0 {
+			return c
+		}
+		return TupleIDOrder(a, b)
+	}
+}
+
+// TupleIDOrder orders two tuples by tuple id (a value that is not a tuple has
+// id 0).
+func TupleIDOrder(a, b jsval.Value) int {
+	var ia, ib uint32
+	if o := a.ObjValue(); o != nil {
+		ia = o.TupleID()
+	}
+	if o := b.ObjValue(); o != nil {
+		ib = o.TupleID()
+	}
+	switch {
+	case ia < ib:
+		return -1
+	case ia > ib:
+		return 1
+	}
+	return 0
+}
+
 // SortTuples sorts data in place exactly as V8's Array.prototype.sort does
 // (see package jssort): stable, and producing upstream's order even when the
 // comparator is inconsistent, as vega-util's compare is across mixed types.
@@ -293,6 +328,39 @@ func Extent(n int, f func(i int) jsval.Value) (lo, hi jsval.Value, ok bool) {
 		}
 	}
 	return lo, hi, true
+}
+
+// ExtentOf is vega-util's extent(tuples, field). Its search for a first valid
+// value is `for (v = f(a[i]); i < n && invalid(v); v = f(a[++i]))`: when every
+// value is invalid it applies the accessor once more, to a[n], which is
+// undefined, and an accessor that reads a property of its argument (every
+// field and expression accessor does) throws a TypeError. The null field has
+// no accessor and reads undefined.
+func ExtentOf(tuples []jsval.Value, f Field) (lo, hi jsval.Value, ok bool, err error) {
+	lo, hi, ok = Extent(len(tuples), func(i int) jsval.Value { return f.Apply(tuples[i]) })
+	if ok && lo.IsUndefined() {
+		return lo, hi, ok, ReadsUndefined(f)
+	}
+	return lo, hi, ok, nil
+}
+
+// ReadsUndefined is the error of applying the accessor f to undefined, which
+// upstream's code does when it reads one element past the end of an array (or
+// the first of an empty one): every field and expression accessor reads a
+// property of its argument and throws. The null field has no accessor and
+// yields nil.
+func ReadsUndefined(f Field) error {
+	if f.IsNil() {
+		return nil
+	}
+	prop := f.Name
+	if len(f.Fields) > 0 {
+		prop = f.Fields[0]
+	}
+	if segs := jsval.ParseFieldPath(prop); len(segs) > 0 {
+		prop = segs[0]
+	}
+	return fmt.Errorf("Cannot read properties of undefined (reading '%s')", prop)
 }
 
 // NumExtent is Extent for numeric fields: the min and max of the finite-order

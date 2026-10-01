@@ -1,0 +1,4 @@
+# Cases whose comparison with the node oracle is not "ok" (see expect_test.go).
+# id<TAB>status<TAB>reason
+aggregated--beyond-ascii	differ	gap, not modelled: CJK glyphs are in neither side's fonts, so this measures a missing glyph, which is not a Vega rule: node-canvas draws Pango's hex box on Linux (pangocairo get_glyph_extents_missing, FreeType-hinted) and falls back to a system CJK font on macOS; the engine measures .notdef
+ordinal-colour--beyond-ascii	ok|differ	platform, gap, not modelled: CJK glyphs are in neither side's fonts, so this measures a missing glyph, which is not a Vega rule: node-canvas draws Pango's hex box on Linux (pangocairo get_glyph_extents_missing, FreeType-hinted) and falls back to a system CJK font on macOS; the engine measures .notdef. On macOS the fallback font's widths leave the layout as the engine lays it out; on Linux the wider hex boxes change the legend's width and so the view's

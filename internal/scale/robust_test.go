@@ -82,6 +82,9 @@ func TestNoPanics(t *testing.T) {
 			func() {
 				defer func() {
 					if e := recover(); e != nil {
+						if _, ok := e.(*Thrown); ok {
+							return // a JavaScript exception, as upstream throws
+						}
 						t.Fatalf("%s: panic: %v\n%s", typ, e, debug.Stack())
 					}
 				}()

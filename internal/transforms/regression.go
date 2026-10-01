@@ -2,9 +2,11 @@ package transforms
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 
+	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/jsmath"
 
 	"github.com/mgilbir/aster/internal/jsval"
@@ -17,10 +19,15 @@ type RegressionParams struct {
 	// Method is constant, linear, log, exp, pow, quad or poly; empty means linear.
 	Method string
 	// Order is the polynomial order for poly. Use DefaultRegressionOrder when
-	// the specification gave none.
-	Order int
+	// the specification gave none. Upstream takes any number: only an integer
+	// of at least -1 gets a fit (see fitPoly).
+	Order float64
 	// Extent is the x domain of the drawn curve; nil computes it per group.
 	Extent []float64
+	// ExtentNotArray is set when the extent was given as something other than
+	// an array (a signal answering a string, say): upstream draws a linear or
+	// constant fit with dom.forEach, which only an array has.
+	ExtentNotArray bool
 	// Params outputs one coefficient tuple per group instead of curve points.
 	Params bool
 	// As names the output x and y fields; nil or short means the accessor names.
@@ -31,7 +38,7 @@ type RegressionParams struct {
 const DefaultRegressionOrder = 3
 
 // regressionDOF is the number of fitted parameters a group must exceed.
-func regressionDOF(method string, order int) int {
+func regressionDOF(method string, order float64) float64 {
 	switch method {
 	case "poly":
 		return order
@@ -71,13 +78,13 @@ func Regression(ctx context.Context, data []jsval.Value, p RegressionParams) ([]
 	if len(p.As) > 1 {
 		as1 = p.As[1]
 	}
-	groups := regressionGroups(data, p.GroupBy)
+	groups := regressionGroups(zoneOf(ctx), data, p.GroupBy)
 	var out []jsval.Value
 	for _, g := range groups {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if len(g.Tuples) <= dof {
+		if float64(len(g.Tuples)) <= dof {
 			continue
 		}
 		// A fitted curve is at most 200 points (two for a line).
@@ -103,12 +110,18 @@ func Regression(ctx context.Context, data []jsval.Value, p RegressionParams) ([]
 			continue
 		}
 		var dom []jsval.Value
+		if p.ExtentNotArray && (method == "linear" || method == "constant") {
+			return nil, errors.New("TypeError: dom.forEach is not a function")
+		}
 		if domain != nil {
 			for _, d := range domain {
 				dom = append(dom, jsval.Num(d))
 			}
 		} else {
-			lo, hi, _ := Extent(len(g.Tuples), func(i int) jsval.Value { return p.X.Get(g.Tuples[i]) })
+			lo, hi, _, err := ExtentOf(g.Tuples, p.X)
+			if err != nil {
+				return nil, err
+			}
 			dom = []jsval.Value{lo, hi}
 		}
 		add := func(x jsval.Value, y float64) {
@@ -152,14 +165,14 @@ func Regression(ctx context.Context, data []jsval.Value, p RegressionParams) ([]
 // regressionGroups is upstream's partition: no group-by (nil) is one group of
 // everything; an explicitly empty list is one empty-dims group when there is
 // data and none otherwise.
-func regressionGroups(data []jsval.Value, groupby []Field) []Group {
+func regressionGroups(z format.Zone, data []jsval.Value, groupby []Field) []Group {
 	if groupby != nil && len(groupby) == 0 {
 		if len(data) == 0 {
 			return nil
 		}
 		return []Group{{Dims: []jsval.Value{}, Tuples: data}}
 	}
-	return Partition(data, groupby)
+	return Partition(z, data, groupby)
 }
 
 const regressionMinRadians = 0.5 * math.Pi / 180

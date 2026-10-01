@@ -14,8 +14,10 @@ package aster
 // heap over 1 GiB for a 250 byte specification" is a finding on any machine.
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -175,4 +177,31 @@ func TestSVGToPNGIgnoresEntities(t *testing.T) {
 		}
 	}
 	runRes2()
+}
+
+// The Vega-Lite compiler polls the deadline as it walks a spec's views and
+// selections: a spec with a hundred thousand layers or selection parameters
+// took 18 s and 12 s against a 2 s timeout before (and minutes in full).
+func TestTimeoutCoversLargeVegaLiteSpecs(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow: builds and compiles specs with 100,000 views and parameters")
+	}
+	items := func(n int, item func(i int) string) string {
+		parts := make([]string, n)
+		for i := range parts {
+			parts[i] = item(i)
+		}
+		return strings.Join(parts, ",")
+	}
+	for name, spec := range map[string]string{
+		"layers": `{"data":{"values":[{"a":1}]},"layer":[` + items(100000, func(int) string { return `{"mark":"point"}` }) + `]}`,
+		"params": `{"data":{"values":[{"a":1}]},"mark":"point","params":[` + items(100000, func(i int) string { return fmt.Sprintf(`{"name":"p%d","select":"point"}`, i) }) + `]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			res, killed := runSec(t, secJob{Kind: "vl2vega", Input: spec, Timeout: "1s"}, 60*time.Second)
+			if killed || res.Seconds > 3 {
+				t.Errorf("compiling took %.1fs with a 1s timeout (killed %v): %s", res.Seconds, killed, res.Err)
+			}
+		})
+	}
 }

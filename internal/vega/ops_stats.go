@@ -1,6 +1,12 @@
 package vega
 
 import (
+	"fmt"
+	"math"
+	"slices"
+
+	"github.com/mgilbir/aster/internal/budget"
+	"github.com/mgilbir/aster/internal/jsmath"
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/transforms"
 	"github.com/mgilbir/aster/internal/transforms/contour"
@@ -23,22 +29,104 @@ func init() {
 		return transforms.Density(ctxOf(n), in, dp)
 	})
 
-	tf["force"] = tupleTransform(func(n *opNode, p *opParams, in []jsval.Value) ([]jsval.Value, error) {
-		fp := force.DefaultParams()
-		fp.Static = p.bool("static")
-		if v := p.num("iterations", 300); v != 0 {
-			fp.Iterations = int(v)
-		}
-		fp.Alpha = p.num("alpha", 1)
-		fp.AlphaMin = p.num("alphaMin", 0.001)
-		fp.AlphaTarget = p.num("alphaTarget", 0)
-		fp.VelocityDecay = p.num("velocityDecay", 0.4)
-		for _, x := range p.list("forces") {
-			if sub, _ := x.(*opParams); sub != nil {
-				fp.Forces = append(fp.Forces, forceOf(sub))
+	// The simulation is the operator's value (vega-force's Force.transform):
+	// the first pass builds it and, unless static, ticks once; a later pass
+	// reconfigures it and only a static one ticks again, since the ticks of a
+	// running simulation come from a wall-clock timer that a static render
+	// never reaches.
+	tf["force"] = statefulTransform(func() txFn {
+		var sim *force.Simulation
+		var last []jsval.Value
+		return func(n *opNode, p *opParams, in []jsval.Value) ([]jsval.Value, error) {
+			static := p.bool("static")
+			iters := p.num("iterations", 300)
+			if iters == 0 || math.IsNaN(iters) {
+				iters = 300
 			}
+			if iters > force.MaxIterations {
+				return in, fmt.Errorf("%w: force: iterations %v exceeds limit %d", budget.ErrLimit, iters, force.MaxIterations)
+			}
+			var fs []force.Force
+			for _, x := range p.list("forces") {
+				if sub, _ := x.(*opParams); sub != nil {
+					fs = append(fs, forceOf(sub))
+				}
+			}
+			// pulse.changed(ADD_REM): the nodes are not the ones simulated.
+			change := len(in) != len(last)
+			for i := 0; !change && i < len(in); i++ {
+				change = in[i].ObjValue() != last[i].ObjValue()
+			}
+			last = slices.Clone(in)
+			paramsMod := p.Modified("alpha", "alphaMin", "alphaTarget", "velocityDecay", "forces")
+			ctx := n.g.ctx
+			if sim == nil {
+				fp := force.DefaultParams()
+				fp.Forces = fs
+				var err error
+				if sim, err = force.NewSimulation(ctx, in, fp); err != nil {
+					return in, err
+				}
+				if !static {
+					change = true
+					sim.Tick()
+				}
+			} else {
+				sim.SetContext(ctx)
+				sim.Pull()
+				if change {
+					if err := sim.SetNodes(in); err != nil {
+						return in, err
+					}
+				}
+				if paramsMod {
+					if p.Modified("alpha") {
+						sim.SetAlpha(p.num("alpha", 1))
+					}
+					if p.Modified("alphaMin") {
+						sim.SetAlphaMin(p.num("alphaMin", 0.001))
+					}
+					if p.Modified("alphaTarget") {
+						sim.SetAlphaTarget(p.num("alphaTarget", 0))
+					}
+					if p.Modified("velocityDecay") {
+						sim.SetVelocityDecay(p.num("velocityDecay", 0.4))
+					}
+					if p.Modified("forces") {
+						for i, f := range fs {
+							if err := sim.SetForce(i, f); err != nil {
+								return in, err
+							}
+						}
+						sim.Trim(len(fs))
+					}
+				}
+			}
+			if paramsMod || change || p.Modified("static", "iterations") {
+				alpha := p.num("alpha", 1)
+				if alpha == 0 || math.IsNaN(alpha) {
+					alpha = 1
+				}
+				sim.SetAlpha(math.Max(sim.Alpha(), alpha))
+				sim.SetAlphaDecay(1 - jsmath.Pow(sim.AlphaMin(), 1/iters))
+				if static {
+					for i := int(iters); i > 0; i-- {
+						if err := ctx.Err(); err != nil {
+							return in, err
+						}
+						sim.Tick()
+						if err := sim.Err(); err != nil {
+							return in, err
+						}
+					}
+				} else if !change {
+					sim.WriteBack()
+					return in, errStopPulse // defer to the simulation's own ticks
+				}
+			}
+			sim.WriteBack()
+			return in, sim.Err()
 		}
-		return in, force.Run(n.g.ctx, in, fp)
 	})
 
 	tf["voronoi"] = tupleTransform(func(n *opNode, p *opParams, in []jsval.Value) ([]jsval.Value, error) {
@@ -134,7 +222,7 @@ func init() {
 	})
 
 	tf["linkpath"] = tupleTransform(func(n *opNode, p *opParams, in []jsval.Value) ([]jsval.Value, error) {
-		return in, linkPath(p, in)
+		return in, linkPath(p, in, n.g.view.jsString)
 	})
 }
 

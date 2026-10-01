@@ -288,17 +288,24 @@ func (m *modelBase) getScaleType(channel string) string {
 	return ""
 }
 
-// trySelectionComponent is getSelectionComponent for callers that catch the throw.
-func (m *modelBase) trySelectionComponent(variableName string) *selectionComponent {
+// trySelectionComponent is getSelectionComponent for callers that catch the
+// throw. Upstream keeps a model's selections in a plain object, so a name every
+// object inherits (toString, __proto__, ...) that the model does not define
+// finds Object.prototype's value rather than nothing: it is no selection
+// (junk is true, and sel nil), and does not throw.
+func (m *modelBase) trySelectionComponent(variableName string) (sel *selectionComponent, junk bool) {
 	if m.comp.selection != nil {
 		if sel, ok := m.comp.selection.get(variableName); ok && sel != nil {
-			return sel
+			return sel, false
 		}
+	}
+	if inheritedObjectKey(variableName) {
+		return nil, true
 	}
 	if m.parent != nil {
 		return m.parent.b().trySelectionComponent(variableName)
 	}
-	return nil
+	return nil, false
 }
 
 // scaleName returns the (possibly renamed) name of the channel's scale; "" when there is none.

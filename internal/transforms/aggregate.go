@@ -68,10 +68,11 @@ func Aggregate(ctx context.Context, data []jsval.Value, p AggregateParams) (res 
 	}
 	// The default key is built in a reusable buffer so that finding an
 	// existing cell does not allocate; a custom Key field is used as is.
-	keyApp := keyAppender(dims)
+	zone := zoneOf(ctx)
+	keyApp := keyAppender(dims, zone)
 	if !p.Key.IsNil() {
 		g := p.Key.Get
-		keyApp = func(dst []byte, t jsval.Value) []byte { return appendKeyValue(dst, g(t)) }
+		keyApp = func(dst []byte, t jsval.Value) []byte { return appendKeyValue(dst, g(t), zone) }
 	}
 	var keyBuf []byte
 
@@ -135,6 +136,9 @@ func Aggregate(ctx context.Context, data []jsval.Value, p AggregateParams) (res 
 func crossCells(ctx context.Context, dims []Field, dnames []string, cells map[string]*aggCell,
 	order []*aggCell, newCell func(string, jsval.Value) *aggCell) error {
 	n := len(dims)
+	if n > MaxGroupDims {
+		return limitErr("aggregate cross group-by fields", n, MaxGroupDims)
+	}
 	type domain struct {
 		keys []string
 		vals map[string]jsval.Value
@@ -147,7 +151,7 @@ func crossCells(ctx context.Context, dims []Field, dnames []string, cells map[st
 	for _, ac := range order {
 		for i := 0; i < n; i++ {
 			v := ac.tuple.Lookup(dnames[i])
-			k := v.AsString()
+			k := keyString(v, zoneOf(ctx))
 			if _, ok := doms[i].vals[k]; !ok {
 				doms[i].keys = append(doms[i].keys, k)
 			}

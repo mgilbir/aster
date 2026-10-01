@@ -461,7 +461,7 @@ func (g *measureGroup) write(s *measureSet, id int, m *mstate, data []jsval.Valu
 		case opDistinct:
 			seen := make(map[string]struct{}, 16)
 			for i := len(data) - 1; i >= 0; i-- {
-				seen[get(data[i]).AsString()] = struct{}{}
+				seen[keyString(get(data[i]), zoneOf(s.ctx))] = struct{}{}
 			}
 			v = jsval.Int(len(seen))
 		case opCI0, opCI1:

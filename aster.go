@@ -30,6 +30,7 @@ import (
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/pngopt"
 	"github.com/mgilbir/aster/internal/raster"
+	"github.com/mgilbir/aster/internal/scene"
 	"github.com/mgilbir/aster/internal/svg"
 	"github.com/mgilbir/aster/internal/svgpdf"
 	"github.com/mgilbir/aster/internal/text"
@@ -224,6 +225,49 @@ func recoverInto(err *error) {
 	}
 }
 
+// stagesKey carries a stage timer in a call's context; only the tests set it
+// (export_test.go), to time each stage of a render.
+type stagesKey struct{}
+
+func stagesFrom(ctx context.Context) func(string, time.Duration) {
+	f, _ := ctx.Value(stagesKey{}).(func(string, time.Duration))
+	return f
+}
+
+// timed runs f and reports its duration as stage, when a timer is set.
+func timed[T any](ctx context.Context, stage string, f func() (T, error)) (T, error) {
+	st := stagesFrom(ctx)
+	if st == nil {
+		return f()
+	}
+	t0 := time.Now()
+	v, err := f()
+	st(stage, time.Since(t0))
+	return v, err
+}
+
+// timedMeasurer reports the time spent measuring text as the "text" stage.
+type timedMeasurer struct {
+	m  scene.TextMeasurer
+	st func(string, time.Duration)
+}
+
+func (t timedMeasurer) MeasureText(text, font string) float64 {
+	t0 := time.Now()
+	w := t.m.MeasureText(text, font)
+	t.st("text", time.Since(t0))
+	return w
+}
+
+// signalWritesKey carries signal writes in a call's context; only the tests
+// set it (export_test.go), to compare a chart after View.signal writes.
+type signalWritesKey struct{}
+
+func signalWritesFrom(ctx context.Context) []vega.SignalWrite {
+	w, _ := ctx.Value(signalWritesKey{}).([]vega.SignalWrite)
+	return w
+}
+
 // VegaToSVG renders a Vega spec (JSON) to an SVG string.
 func (c *Converter) VegaToSVG(spec []byte) (string, error) {
 	release, ok := c.enter()
@@ -249,7 +293,7 @@ func (c *Converter) VegaLiteToSVG(spec []byte) (string, error) {
 }
 
 func (c *Converter) vegaSVG(ctx context.Context, spec []byte) (string, error) {
-	v, err := jsval.ParseJSON(spec)
+	v, err := timed(ctx, "json", func() (jsval.Value, error) { return jsval.ParseJSON(spec) })
 	if err != nil {
 		return "", fmt.Errorf("aster: parsing Vega spec: %w", err)
 	}
@@ -274,16 +318,29 @@ func (c *Converter) renderSVG(ctx context.Context, spec jsval.Value) (out string
 	opts := vega.Options{
 		Loader:   c.cfg.loader,
 		Location: c.location,
-		Config:   c.theme,
-		Limits:   c.limits(),
+		Now:      c.cfg.now,
+		// Set only by the tests' signal sweep (export_test.go).
+		SignalWrites: signalWritesFrom(ctx),
+		Config:       c.theme,
+		Limits:       c.limits(),
 		// Seeded per render so sample, jitter and
 		// bootstrap confidence intervals are reproducible. 123456789 is the
 		// seed Vega-Lite's own example renders use (vg2svg --seed).
 		Random: transforms.LCG(randomSeed),
 	}
+	// One canvas context measures for the layout and the SVG writer, as
+	// vega-scenegraph's single context does.
+	var canvas *text.CanvasContext
 	if m != nil {
-		opts.TextMeasurer = m
+		canvas = text.NewCanvasContext(m)
+		opts.TextMeasurer = canvas
 		opts.WordcloudText = wordcloud.NewCanvasRenderer(m)
+	}
+	if st := stagesFrom(ctx); st != nil {
+		opts.Stages = st
+		if m != nil {
+			opts.TextMeasurer = timedMeasurer{m, st}
+		}
 	}
 	// The label transform paints the marks it avoids, text included; the
 	// shaper is only built if it does.
@@ -302,8 +359,8 @@ func (c *Converter) renderSVG(ctx context.Context, spec jsval.Value) (out string
 	if res.HasBackground {
 		so.Background = res.Background
 	}
-	if m != nil {
-		so.Measurer = m
+	if canvas != nil {
+		so.Measurer = canvas
 	}
 	// Vega sanitizes every href through the view's loader; the Loader decides
 	// which links a chart may carry, and a rejected URL renders no link.
@@ -338,7 +395,7 @@ func (c *Converter) renderSVG(ctx context.Context, spec jsval.Value) (out string
 		}
 		return svg.ImageInfo{}
 	}
-	out, err = svg.Render(ctx, res.Scenegraph, so)
+	out, err = timed(ctx, "svg", func() (string, error) { return svg.Render(ctx, res.Scenegraph, so) })
 	if err != nil {
 		return "", c.stageErr(ctx, "writing SVG", err)
 	}
@@ -391,6 +448,9 @@ func (c *Converter) newMeasurer() (*text.Measurer, error) {
 	opts := c.fontOptions()
 	if !c.cfg.harfBuzzText {
 		opts = append(opts, text.WithExactAdvances())
+		if c.cfg.pangoText != 0 {
+			opts = append(opts, text.WithPangoAdvances(c.cfg.pangoText == 2))
+		}
 	}
 	return text.New(opts...)
 }
@@ -452,11 +512,13 @@ func (c *Converter) VegaLiteToVega(spec []byte) ([]byte, error) {
 // compileVegaLite parses a Vega-Lite spec and compiles it to Vega with the
 // converter's theme and time zone.
 func (c *Converter) compileVegaLite(ctx context.Context, spec []byte) (jsval.Value, error) {
-	v, err := jsval.ParseJSON(spec)
+	v, err := timed(ctx, "json", func() (jsval.Value, error) { return jsval.ParseJSON(spec) })
 	if err != nil {
 		return jsval.Undefined, fmt.Errorf("aster: parsing Vega-Lite spec: %w", err)
 	}
-	vg, err := vegalite.Compile(v, vegalite.Options{Config: c.theme, Location: c.location, Version: c.vl, Context: ctx})
+	vg, err := timed(ctx, "compile", func() (jsval.Value, error) {
+		return vegalite.Compile(v, vegalite.Options{Config: c.theme, Location: c.location, Version: c.vl, Context: ctx})
+	})
 	if err != nil {
 		return jsval.Undefined, c.stageErr(ctx, "compiling Vega-Lite", err)
 	}
@@ -557,7 +619,9 @@ func (c *Converter) rasterize(ctx context.Context, svg string, scale float64) ([
 	if _, err := c.shaperInit(); err != nil {
 		return nil, err
 	}
-	out, err := raster.RenderPNG([]byte(svg), raster.Options{Scale: scale, Shaper: c.shaper, Context: ctx, Limits: c.rasterLimits()})
+	out, err := timed(ctx, "png", func() ([]byte, error) {
+		return raster.RenderPNG([]byte(svg), raster.Options{Scale: scale, Shaper: c.shaper, Context: ctx, Limits: c.rasterLimits()})
+	})
 	if err != nil {
 		return nil, c.stageErr(ctx, "rendering PNG", err)
 	}
@@ -682,7 +746,11 @@ func (c *Converter) svgToPDF(ctx context.Context, svg string, opts []PDFOption) 
 	if err != nil {
 		return nil, nil, err
 	}
+	t0 := time.Now()
 	pdf, uses, err = svgpdf.ConvertWithUsage(svg, m, svgpdf.Options{Text: mode, Context: ctx})
+	if st := stagesFrom(ctx); st != nil {
+		st("pdf", time.Since(t0))
+	}
 	if err != nil {
 		return nil, nil, c.stageErr(ctx, "rendering PDF", err)
 	}

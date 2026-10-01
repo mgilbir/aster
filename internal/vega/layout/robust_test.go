@@ -62,9 +62,12 @@ func TestLayoutMalformedScenes(t *testing.T) {
 		if sp.IsObj() {
 			p.Grid = ParseGridSpec(sp)
 		}
-		_ = ViewLayout(root, view, p)
+		_, _ = ViewLayout(root, view, p)
 	}
-	if ViewLayout(nil, view, Params{}) != nil || ViewLayout(root, nil, Params{}) != nil {
+	if s, _ := ViewLayout(nil, view, Params{}); s != nil {
+		t.Fatal("nil inputs should produce no adjustment")
+	}
+	if s, _ := ViewLayout(root, nil, Params{}); s != nil {
 		t.Fatal("nil inputs should produce no adjustment")
 	}
 
@@ -92,5 +95,29 @@ func TestParseOverlap(t *testing.T) {
 	}
 	if ParseOverlap(spec, func(string) ([2]float64, bool) { return [2]float64{}, false }).Bound != nil {
 		t.Fatal("bound on unknown scale kept")
+	}
+}
+
+// A `columns` that is not a valid array length (negative, fractional, or
+// beyond 2^32 - 1) makes upstream's gridLayout throw a RangeError at
+// `xExtent = Array(ncols)`; the layout of every group after it is abandoned
+// together with the size adjustments gathered so far.
+func TestInvalidColumnsThrow(t *testing.T) {
+	cell := &scene.Item{Width: scene.N(10), Height: scene.N(10)}
+	root := mark("frame", scene.MarkGroup, group(mark("scope", scene.MarkGroup, cell)))
+	auto := Autosize{Type: AutosizePad}
+	for _, c := range []jsval.Value{jsval.Num(0.5), jsval.Int(-4), jsval.Num(1e12), jsval.Num(4294967296)} {
+		p := Params{Autosize: &auto, Grid: ParseGridSpec(jsval.Obj(jsval.ObjectOf("columns", c)))}
+		sizes, err := ViewLayout(root, &View{AutosizeActive: true}, p)
+		if err != ErrInvalidArrayLength || sizes != nil {
+			t.Errorf("columns %v: sizes %v, err %v; want the RangeError", c, sizes, err)
+		}
+	}
+	// 0 means one column per group, a whole number is a column count
+	for _, c := range []jsval.Value{jsval.Int(0), jsval.Int(1), jsval.Num(4294967295)} {
+		p := Params{Autosize: &auto, Grid: ParseGridSpec(jsval.Obj(jsval.ObjectOf("columns", c)))}
+		if _, err := ViewLayout(root, &View{AutosizeActive: true}, p); err != nil {
+			t.Errorf("columns %v: unexpected error %v", c, err)
+		}
 	}
 }

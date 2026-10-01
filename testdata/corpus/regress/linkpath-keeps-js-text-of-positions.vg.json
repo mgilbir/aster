@@ -1,0 +1,14 @@
+{"width":400,"height":200,"data":[{"name":"edges","values":[
+{"source":{"x":0,"y":"2e3"},"target":{"x":5}},
+{"source":{"x":"7","y":null},"target":{"x":true,"y":[1,2]}},
+{"source":{"x":1,"y":2},"target":{"x":3,"y":4}}],
+"transform":[
+{"type":"linkpath","shape":"line","as":"p0"},
+{"type":"linkpath","shape":"arc","as":"p1"},
+{"type":"linkpath","shape":"curve","as":"p2"},
+{"type":"linkpath","shape":"diagonal","orient":"horizontal","as":"p3"},
+{"type":"linkpath","shape":"diagonal","orient":"vertical","as":"p4"},
+{"type":"linkpath","shape":"orthogonal","orient":"horizontal","as":"p5"},
+{"type":"linkpath","shape":"curve","orient":"radial","as":"p6"}]}],
+"marks":[
+{"type":"text","from":{"data":"edges"},"encode":{"update":{"y":{"signal":"datum.source.x * 20 + 10"},"text":{"signal":"datum.p0 + ' | ' + datum.p1 + ' | ' + datum.p2 + ' | ' + datum.p3 + ' | ' + datum.p4 + ' | ' + datum.p5 + ' | ' + datum.p6"},"fontSize":{"value":6}}}}]}

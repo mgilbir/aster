@@ -24,6 +24,13 @@ var errDepth = errors.New("vegalite: specification is nested too deeply")
 // real chart.
 const maxDepth = 64
 
+// maxTransforms bounds the data transforms of one specification. Each becomes
+// a node in the dataflow tree, in a chain with the transforms before it, and
+// the optimizer and the assembler walk that tree recursively: the transform
+// count is the recursion depth. Real charts have a few dozen; 10000 keeps the
+// walk to a stack of a few MB.
+const maxTransforms = 10000
+
 // maxRepeatChildren bounds the views a repeat may expand into (the product of
 // its row, column and repeat lists); real charts use a few dozen.
 const maxRepeatChildren = 10000

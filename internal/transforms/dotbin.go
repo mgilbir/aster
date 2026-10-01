@@ -3,7 +3,6 @@ package transforms
 import (
 	"context"
 	"math"
-	"sort"
 
 	"github.com/mgilbir/aster/internal/jsval"
 )
@@ -102,7 +101,10 @@ func DotBinTuples(ctx context.Context, data []jsval.Value, p DotBinParams) (DotB
 	get := p.Field.Get
 	step := p.Step
 	if step == 0 || math.IsNaN(step) {
-		lo, hi, ok := Extent(len(data), func(i int) jsval.Value { return get(data[i]) })
+		lo, hi, ok, err := ExtentOf(data, p.Field)
+		if err != nil {
+			return DotBinResult{}, err
+		}
 		step = 0
 		if ok {
 			// span(): (last - first) || 0
@@ -113,9 +115,15 @@ func DotBinTuples(ctx context.Context, data []jsval.Value, p DotBinParams) (DotB
 		step /= 30
 	}
 	res := DotBinResult{Start: math.Inf(1), Stop: math.Inf(-1), Step: step}
-	for _, g := range Partition(data, p.GroupBy) {
+	for _, g := range Partition(zoneOf(ctx), data, p.GroupBy) {
 		if err := ctx.Err(); err != nil {
 			return res, err
+		}
+		if len(g.Tuples) == 0 {
+			// dotbin() starts with f(array[0]).
+			if err := ReadsUndefined(p.Field); err != nil {
+				return res, err
+			}
 		}
 		tuples := append([]jsval.Value(nil), g.Tuples...)
 		keys := make(map[*jsval.Object]float64, len(tuples))
@@ -128,7 +136,15 @@ func DotBinTuples(ctx context.Context, data []jsval.Value, p DotBinParams) (DotB
 			keys[o] = f
 			return f
 		}
-		sort.SliceStable(tuples, func(i, j int) bool { return num(tuples[i])-num(tuples[j]) < 0 })
+		SortTuples(tuples, StableComparator(func(a, b jsval.Value) int {
+			switch d := num(a) - num(b); {
+			case d < 0:
+				return -1
+			case d > 0:
+				return 1
+			}
+			return 0
+		}))
 		vals := make([]float64, len(tuples))
 		for i, t := range tuples {
 			vals[i] = num(t)

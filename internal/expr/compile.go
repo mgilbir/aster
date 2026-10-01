@@ -166,8 +166,9 @@ func (p *Program) Source() string { return p.src }
 
 // Eval evaluates the expression in s. JavaScript exceptions (a property read
 // of null, an invalid regular expression, an unknown-scale error from the
-// runtime) are returned as errors, as is context cancellation; Eval does not
-// panic.
+// runtime) are returned as *Error, an exceeded resource limit as an error
+// wrapping budget.ErrLimit, and context cancellation as its error; Eval does
+// not panic.
 func (p *Program) Eval(s *Scope) (v jsval.Value, err error) {
 	base := len(s.stack)
 	defer func() {
@@ -177,6 +178,8 @@ func (p *Program) Eval(s *Scope) (v jsval.Value, err error) {
 			switch e := r.(type) {
 			case *Error:
 				err = e
+			case *limitPanic:
+				err = e.err
 			case *cancelled:
 				err = e.err
 			default:
@@ -335,11 +338,32 @@ func (c *compiler) identifier(n *Node) (node, error) {
 	}
 	switch id {
 	case "datum":
-		return func(s *Scope) jsval.Value { return s.Datum }, nil
+		return func(s *Scope) jsval.Value {
+			if s.NoDatum {
+				throw("ReferenceError", "datum is not defined")
+			}
+			return s.Datum
+		}, nil
 	case "event":
-		return func(s *Scope) jsval.Value { return s.Event }, nil
+		return func(s *Scope) jsval.Value {
+			if s.NoEvent {
+				throw("ReferenceError", "event is not defined")
+			}
+			return s.Event
+		}, nil
 	case "item":
-		return func(s *Scope) jsval.Value { return s.Item }, nil
+		return func(s *Scope) jsval.Value {
+			if s.NoItem {
+				throw("ReferenceError", "item is not defined")
+			}
+			return s.Item
+		}, nil
+	}
+	if id == "__proto__" {
+		// The codegen records a global with `globals[id] = 1`, which on a plain
+		// object sets the prototype instead (and ignores a number): no signal
+		// is referenced, and the read of it gives undefined.
+		return func(*Scope) jsval.Value { return jsval.Undefined }, nil
 	}
 	c.addSignal(id)
 	return func(s *Scope) jsval.Value {
@@ -376,6 +400,12 @@ var disallowedProperties = map[string]bool{
 	"__lookupGetter__": true, "__lookupSetter__": true, "isPrototypeOf": true, "propertyIsEnumerable": true,
 	"toString": true, "valueOf": true, "__proto__": true, "toLocaleString": true,
 }
+
+// IsObjectPrototypeName reports whether name is a property every JavaScript
+// object inherits (constructor, toString, __proto__, ...). Upstream keeps its
+// signals, scales and data in plain objects, so a lookup by such a name finds
+// the inherited property instead of nothing.
+func IsObjectPrototypeName(name string) bool { return disallowedProperties[name] }
 
 func (c *compiler) object(n *Node) (node, error) {
 	type prop struct {
@@ -663,6 +693,9 @@ func (c *compiler) member(n *Node) (node, error) {
 			}
 			var hint slotHint
 			return func(s *Scope) jsval.Value {
+				if s.NoDatum {
+					throw("ReferenceError", "datum is not defined")
+				}
 				d := s.Datum
 				if d.IsObj() {
 					return hint.get(d.ObjValue(), key)
@@ -741,7 +774,7 @@ func arrayIndex(key string) (int, bool) {
 func (s *Scope) getProp(obj jsval.Value, key string) jsval.Value {
 	switch obj.Kind() {
 	case jsval.KindObj:
-		return obj.Get(key)
+		return obj.ObjValue().Prop(key)
 	case jsval.KindArr:
 		if key == "length" {
 			return jsval.Int(obj.Len())
@@ -834,12 +867,14 @@ func (h *slotHint) get(o *jsval.Object, key string) jsval.Value {
 		return o.ValueAt(i)
 	}
 	v, ok := o.Get(key)
-	if ok {
-		for i, k := range o.Keys() {
-			if k == key {
-				h.slot.Store(int32(i))
-				break
-			}
+	if !ok {
+		v, _ = jsval.Inherited(key)
+		return v
+	}
+	for i, k := range o.Keys() {
+		if k == key {
+			h.slot.Store(int32(i))
+			break
 		}
 	}
 	return v

@@ -1,0 +1,1 @@
+{"data":{"values":[{"a":1,"b":2}]},"mark":"rule","encoding":{"y":{"field":"a","type":"quantitative"},"x2":{"field":"b"}}}

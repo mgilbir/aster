@@ -244,6 +244,10 @@ func InterpolateHue(a, b jsval.Value) func(float64) jsval.Value {
 // Unlike upstream, each call returns a fresh array instead of a shared,
 // mutated one.
 func InterpolateArray(a, b jsval.Value) func(float64) jsval.Value {
+	return interpolateArray(a, b, 0)
+}
+
+func interpolateArray(a, b jsval.Value, depth int) func(float64) jsval.Value {
 	bi := b.Items()
 	nb := len(bi)
 	na := 0
@@ -252,7 +256,7 @@ func InterpolateArray(a, b jsval.Value) func(float64) jsval.Value {
 	}
 	x := make([]func(float64) jsval.Value, na)
 	for i := 0; i < na; i++ {
-		x[i] = InterpolateValue(a.Index(i), bi[i])
+		x[i] = interpolateValue(a.Index(i), bi[i], depth+1)
 	}
 	return func(t float64) jsval.Value {
 		c := make([]jsval.Value, nb)
@@ -268,6 +272,10 @@ func InterpolateArray(a, b jsval.Value) func(float64) jsval.Value {
 // value and come first in the result, followed by the interpolated keys (the
 // order d3 builds its result object in).
 func InterpolateObject(a, b jsval.Value) func(float64) jsval.Value {
+	return interpolateObject(a, b, 0)
+}
+
+func interpolateObject(a, b jsval.Value, depth int) func(float64) jsval.Value {
 	ao, bo := a.ObjValue(), b.ObjValue()
 	type entry struct {
 		key string
@@ -279,7 +287,7 @@ func InterpolateObject(a, b jsval.Value) func(float64) jsval.Value {
 		for i := 0; i < bo.Len(); i++ {
 			k := bo.KeyAt(i)
 			if ao != nil && ao.Has(k) {
-				interp = append(interp, entry{k, InterpolateValue(ao.Lookup(k), bo.ValueAt(i))})
+				interp = append(interp, entry{k, interpolateValue(ao.Lookup(k), bo.ValueAt(i), depth+1)})
 			} else {
 				consts.Set(k, bo.ValueAt(i))
 			}
@@ -297,6 +305,17 @@ func InterpolateObject(a, b jsval.Value) func(float64) jsval.Value {
 // InterpolateValue is d3.interpolate: it picks an interpolator from the type of
 // the end value b.
 func InterpolateValue(a, b jsval.Value) func(float64) jsval.Value {
+	return interpolateValue(a, b, 0)
+}
+
+// interpolateValue is InterpolateValue for values nested depth levels deep. A
+// range can come from a signal whose value was built at run time, nested as
+// deep as the specification is long, so past jsval.MaxValueDepth the end
+// value is returned as it is.
+func interpolateValue(a, b jsval.Value, depth int) func(float64) jsval.Value {
+	if depth > jsval.MaxValueDepth {
+		return func(float64) jsval.Value { return b }
+	}
 	switch b.Kind() {
 	case jsval.KindNull, jsval.KindUndefined, jsval.KindBool:
 		return func(float64) jsval.Value { return b }
@@ -310,9 +329,9 @@ func InterpolateValue(a, b jsval.Value) func(float64) jsval.Value {
 	case jsval.KindTimestamp:
 		return InterpolateDate(a, b)
 	case jsval.KindArr:
-		return InterpolateArray(a, b)
+		return interpolateArray(a, b, depth)
 	}
-	return InterpolateObject(a, b)
+	return interpolateObject(a, b, depth)
 }
 
 // numberAt finds the leftmost match of d3-interpolate's number regexp
@@ -543,6 +562,10 @@ func Discrete(values []jsval.Value) func(t float64) jsval.Value {
 	}
 }
 
+// Thrown is the panic value of a JavaScript exception thrown inside a scale
+// function, whose Apply methods cannot return an error (see jsval.Thrown).
+type Thrown = jsval.Thrown
+
 // Piecewise is d3.piecewise: interpolates through the values with one
 // interpolator per consecutive pair. A nil interpolate means InterpolateValue.
 func Piecewise(interpolate Interpolator, values []jsval.Value) func(t float64) jsval.Value {
@@ -558,18 +581,13 @@ func Piecewise(interpolate Interpolator, values []jsval.Value) func(t float64) j
 		segs[i] = interpolate(values[i], values[i+1])
 	}
 	return func(t float64) jsval.Value {
-		if n == 0 {
-			// d3 would call I[0], which is undefined: a TypeError. The nearest
-			// harmless answer is the single value, or undefined.
-			if len(values) == 1 {
-				return values[0]
-			}
-			return jsval.Undefined
-		}
+		// `I[Math.max(0, Math.min(n - 1, Math.floor(t *= n)))](t - i)`: a NaN
+		// position indexes I[NaN], and a piecewise through fewer than two
+		// values has no I[0]; either way the call is on undefined.
 		t = float64(t * float64(n)) // rounded here so t-i below cannot fuse into an FMA
 		f := math.Floor(t)
-		if f != f {
-			return segs[0](math.NaN())
+		if n == 0 || f != f {
+			panic(&Thrown{Name: "TypeError", Msg: "I[i] is not a function"})
 		}
 		i := int(math.Max(0, math.Min(float64(n-1), f)))
 		return segs[i](t - float64(i))
@@ -591,13 +609,21 @@ func QuantizeSamples(interpolator func(float64) jsval.Value, n int) []jsval.Valu
 
 const maxSamples = 1 << 20
 
-// Zoom is d3.interpolateZoom (with rho = sqrt(2) when rho is 0 or omitted by
-// the caller passing math.Sqrt2): it interpolates between two views
+// Zoom is d3.interpolateZoom.rho(rho): it interpolates between two views
 // [cx, cy, width] and also reports the suggested duration in milliseconds.
 func Zoom(rho float64) func(p0, p1 [3]float64) (interp func(t float64) [3]float64, duration float64) {
 	rho = math.Max(1e-3, rho)
 	rho2 := rho * rho
-	rho4 := rho2 * rho2
+	return zoomRho(rho, rho2, rho2*rho2)
+}
+
+// DefaultZoom is d3.interpolateZoom itself. It is not Zoom(math.Sqrt2): upstream builds it with the
+// exact squares 2 and 4, where rho(Math.SQRT2) squares the rounded root (2.0000000000000004).
+func DefaultZoom() func(p0, p1 [3]float64) (interp func(t float64) [3]float64, duration float64) {
+	return zoomRho(math.Sqrt2, 2, 4)
+}
+
+func zoomRho(rho, rho2, rho4 float64) func(p0, p1 [3]float64) (interp func(t float64) [3]float64, duration float64) {
 	const epsilon2 = 1e-12
 	cosh := func(x float64) float64 { x = jsmath.Exp(x); return (x + 1/x) / 2 }
 	sinh := func(x float64) float64 { x = jsmath.Exp(x); return (x - 1/x) / 2 }

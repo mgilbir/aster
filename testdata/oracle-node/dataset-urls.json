@@ -1,0 +1,13 @@
+{
+  "comment": "URLs that serve copies of vega-datasets' data/ directory. The oracle (oracle.mjs) and the engine's test loader (compare_test.go) both read this file, so they map exactly the same URLs to the local copy in testdata/vega-datasets; any other URL fails to load on both sides (offline). Each pattern's first group is the path under testdata/vega-datasets. The syntax is the subset JavaScript and Go (RE2) share.",
+  "patterns": [
+    "^https?://cdn\\.jsdelivr\\.net/npm/vega-datasets(?:@[^/]+)?/(data/[^?#]+)",
+    "^https?://cdn\\.jsdelivr\\.net/gh/vega/vega-datasets(?:@[^/]+)?/(data/[^?#]+)",
+    "^https?://raw\\.githubusercontent\\.com/vega/vega-datasets/[^/]+/(data/[^?#]+)",
+    "^https?://vega\\.github\\.io/vega-datasets/(data/[^?#]+)",
+    "^https?://vega\\.github\\.io/vega-lite/(data/[^?#]+)",
+    "^https?://vega\\.github\\.io/vega/(data/[^?#]+)",
+    "^https?://raw\\.githubusercontent\\.com/vega/vega/[^/]+/docs/(data/[^?#]+)",
+    "^https?://raw\\.githubusercontent\\.com/vega/vega-lite/[^/]+/(?:site/)?(data/[^?#]+)"
+  ]
+}

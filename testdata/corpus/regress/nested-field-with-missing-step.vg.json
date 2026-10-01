@@ -1,0 +1,1 @@
+{"width":50,"height":50,"data":[{"name":"t","values":[{"a":{"b":1}},{"c":2}],"transform":[{"type":"aggregate","groupby":["a.b"]}]}],"marks":[{"type":"rect","from":{"data":"t"},"encode":{"update":{"width":{"value":10},"height":{"value":10}}}}]}

@@ -17,7 +17,7 @@ func init() {
 	fn("format", func(s *Scope, args []jsval.Value) jsval.Value {
 		out, err := s.locale().FormatValue(arg(args, 0), arg(args, 1))
 		if err != nil {
-			throw("Error", "%v", err)
+			failFormat(err)
 		}
 		return jsval.Str(out)
 	})
@@ -27,7 +27,7 @@ func init() {
 			if v.IsTimestamp() || v.IsNum() || v.IsNull() {
 				out, err := s.locale().TimeFormatValue(v, arg(args, 1), utc)
 				if err != nil {
-					throw("Error", "%v", err)
+					failFormat(err)
 				}
 				return jsval.Str(out)
 			}
@@ -35,7 +35,7 @@ func init() {
 			// through Number()).
 			out, err := s.locale().TimeFormatValue(jsval.Num(s.num(v)), arg(args, 1), utc)
 			if err != nil {
-				throw("Error", "%v", err)
+				failFormat(err)
 			}
 			return jsval.Str(out)
 		}

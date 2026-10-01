@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -81,7 +82,7 @@ func Transform(ctx context.Context, data []jsval.Value, p Params) error {
 		return fmt.Errorf("wordcloud: unsupported size %v x %v", size[0], size[1])
 	}
 	if len(data) > MaxWords {
-		return fmt.Errorf("wordcloud: %d words exceeds the limit of %d", len(data), MaxWords)
+		return fmt.Errorf("%w: wordcloud: %d words exceeds the limit of %d", budget.ErrLimit, len(data), MaxWords)
 	}
 	as := p.As
 	if len(as) != 7 {

@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"math"
+	"unicode/utf16"
 
 	"github.com/mgilbir/aster/internal/jsmath"
+	"github.com/mgilbir/aster/internal/jsval"
 )
 
 // MaxDepth bounds group nesting in every recursive walk (bounds, rendering).
@@ -187,23 +189,25 @@ func (bd *Bounder) itemBounds(t MarkType, b *Bounds, it *Item) error {
 			if it.Mark != nil && it.Mark.Shape != nil {
 				fn = it.Mark.Shape
 			}
-			if fn != nil {
-				_ = fn(&bd.ctx, it)
+			if fn == nil {
+				return ErrNoShapeGenerator
 			}
+			_ = fn(&bd.ctx, it)
 		}
 		if err != nil {
 			return err
 		}
-		BoundStroke(b, it, true).Translate(it.X.Zero(), it.Y.Zero())
+		BoundStroke(b, it, true).Translate(it.OrZero("x"), it.OrZero("y"))
 	case MarkRect:
-		x, y := it.X.Zero(), it.Y.Zero()
-		// (x + width) || 0: NaN sums collapse to 0.
-		x2 := nanZero(x + it.Width.Val())
-		y2 := nanZero(y + it.Height.Val())
+		x, y := it.OrZero("x"), it.OrZero("y")
+		// (x + width) || 0: NaN sums collapse to 0, but a sum with a word is
+		// a string, which no comparison treats as a number: it stays NaN.
+		x2 := it.sumOrZero(x, it.Width.Val(), "x", "width")
+		y2 := it.sumOrZero(y, it.Height.Val(), "y", "height")
 		b.Set(x, y, x2, y2)
 		BoundStroke(b, it, false)
 	case MarkRule:
-		x1, y1 := it.X.Zero(), it.Y.Zero()
+		x1, y1 := it.OrZero("x"), it.OrZero("y")
 		x2, y2 := x1, y1
 		if it.X2.Set() {
 			x2 = it.X2.Val()
@@ -223,6 +227,20 @@ func (bd *Bounder) itemBounds(t MarkType, b *Bounds, it *Item) error {
 		return bd.groupBounds(b, it)
 	}
 	return nil
+}
+
+// sumOrZero is `(a + b) || 0` where a is item[propA] || 0 and b is item[propB]:
+// a NaN sum is 0 unless a word took part, since a word concatenates into a
+// string that is truthy.
+func (it *Item) sumOrZero(a, b float64, propA, propB string) float64 {
+	s := a + b
+	if s == s {
+		return s
+	}
+	if it.isWord(propA) || it.isWord(propB) {
+		return s
+	}
+	return 0
 }
 
 func nanZero(v float64) float64 {
@@ -245,7 +263,7 @@ func (bd *Bounder) pathBounds(b *Bounds, it *Item) error {
 	// offset, exactly as upstream does for path bounds.
 	bd.ctx.reset(b, it.AngleTruthy(), it.Angle.Val())
 	sx, sy := scaleOf(it.ScaleX), scaleOf(it.ScaleY)
-	if err := RenderPath(&bd.ctx, cmds, it.X.Zero(), it.Y.Zero(), sx, sy); err != nil {
+	if err := RenderPath(&bd.ctx, cmds, it.OrZero("x"), it.OrZero("y"), sx, sy); err != nil {
 		return err
 	}
 	BoundStroke(b, it, true)
@@ -264,7 +282,7 @@ func (bd *Bounder) groupBounds(b *Bounds, g *Item) error {
 		b.Add(0, 0).Add(g.Width.Zero(), g.Height.Zero())
 	}
 	BoundStroke(b, g, false)
-	b.Translate(g.X.Zero(), g.Y.Zero())
+	b.Translate(g.OrZero("x"), g.OrZero("y"))
 	return nil
 }
 
@@ -388,7 +406,7 @@ func scaleOf(n Num) float64 {
 // radius is given (polar placement from the origin, theta measured clockwise
 // from 12 o'clock).
 func AnchorPoint(it *Item) (x, y float64) {
-	x, y = it.X.Zero(), it.Y.Zero()
+	x, y = it.OrZero("x"), it.OrZero("y")
 	if r := it.Radius.Zero(); r != 0 {
 		t := it.Theta.Zero() - halfPi
 		x += float64(r * jsmath.Cos(t))
@@ -423,10 +441,80 @@ func (bd *Bounder) textBounds(b *Bounds, it *Item, mode int) {
 		dx -= w
 	}
 
+	if it.hasRawPos() {
+		bd.textBoundsRaw(b, it, mode, dx, dy, w, h)
+		return
+	}
 	dx += x
 	dy += y
 	b.Set(dx, dy, dx+w, dy+h)
 	if it.AngleTruthy() && mode == 0 {
 		b.Rotate(it.Angle.Val()*degToRad, x, y)
 	}
+}
+
+// hasRawPos reports a text position that was given as something other than a
+// number (a word, a numeric string).
+func (it *Item) hasRawPos() bool {
+	_, rx := it.Raw["x"]
+	_, ry := it.Raw["y"]
+	return rx || ry
+}
+
+// textBoundsRaw is textBounds for an anchor that is not a number. Upstream
+// adds the offsets to the anchor itself, `bounds.set(dx += x, dy += y, dx + w,
+// dy + h)`, so a string anchor turns each of those into a concatenation
+// ("-11" + "0" is "-110") that Bounds.set then orders as text when both ends
+// are strings. The result is exact when the text is rotated, which reads the
+// corners as numbers; an unrotated box keeps the strings upstream, and is
+// read here as the numbers they convert to.
+func (bd *Bounder) textBoundsRaw(b *Bounds, it *Item, mode int, dx, dy, w, h float64) {
+	ax, ay := it.PosValue("x"), it.PosValue("y")
+	if r := it.Radius.Zero(); r != 0 {
+		t := it.Theta.Zero() - halfPi
+		ax = jsPlus(ax, jsval.Num(float64(r*jsmath.Cos(t))))
+		ay = jsPlus(ay, jsval.Num(float64(r*jsmath.Sin(t))))
+	}
+	x1, y1 := jsPlus(jsval.Num(dx), ax), jsPlus(jsval.Num(dy), ay)
+	x2, y2 := jsPlus(x1, jsval.Num(w)), jsPlus(y1, jsval.Num(h))
+	if jsLess(x2, x1) {
+		x1, x2 = x2, x1
+	}
+	if jsLess(y2, y1) {
+		y1, y2 = y2, y1
+	}
+	b.X1, b.Y1, b.X2, b.Y2 = jsval.ToNumber(x1), jsval.ToNumber(y1), jsval.ToNumber(x2), jsval.ToNumber(y2)
+	if it.AngleTruthy() && mode == 0 {
+		b.Rotate(it.Angle.Val()*degToRad, jsval.ToNumber(ax), jsval.ToNumber(ay))
+	}
+}
+
+// jsPlus is the + operator on the values a numeric property can hold: a
+// string, array or object makes it a concatenation, anything else a sum.
+func jsPlus(a, b jsval.Value) jsval.Value {
+	concat := func(v jsval.Value) bool { return v.IsStr() || v.IsArr() || v.IsObj() }
+	if concat(a) || concat(b) {
+		return jsval.Str(a.AsString() + b.AsString())
+	}
+	return jsval.Num(jsval.ToNumber(a) + jsval.ToNumber(b))
+}
+
+// jsLess is a < b for the results of jsPlus: two strings compare as text (by
+// UTF-16 code unit), anything else as numbers, false for NaN.
+func jsLess(a, b jsval.Value) bool {
+	if a.IsStr() && b.IsStr() {
+		return utf16Less(a.StrValue(), b.StrValue())
+	}
+	return jsval.ToNumber(a) < jsval.ToNumber(b)
+}
+
+// utf16Less orders two strings by UTF-16 code unit.
+func utf16Less(a, b string) bool {
+	ua, ub := utf16.Encode([]rune(a)), utf16.Encode([]rune(b))
+	for i := 0; i < len(ua) && i < len(ub); i++ {
+		if ua[i] != ub[i] {
+			return ua[i] < ub[i]
+		}
+	}
+	return len(ua) < len(ub)
 }

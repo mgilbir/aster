@@ -24,7 +24,7 @@ func TestCompareFiles(t *testing.T) {
 		t.Skip("set ASTER_COMPARE")
 	}
 	o := oracle.For(t, oracle.VL6)
-	c := oracleConverter(t)
+	c := oracleConverter(t, o)
 	for _, f := range strings.Split(list, ",") {
 		spec, err := os.ReadFile(f)
 		if err != nil {

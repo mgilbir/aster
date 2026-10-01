@@ -235,7 +235,11 @@ func parseSelectionPredicate(m Model, pred Value, dfnode dfNode, datum string) s
 	store := stringValue(jsval.Str(vname + storeSuffix))
 	var sel *selectionComponent
 	if m != nil {
-		sel = m.b().trySelectionComponent(vname)
+		var junk bool
+		if sel, junk = m.b().trySelectionComponent(vname); junk {
+			// Object.prototype's value has no `project`.
+			throw("Cannot read properties of undefined (reading 'timeUnit')")
+		}
 	}
 	if sel == nil {
 		return "!!" + vname
@@ -273,7 +277,21 @@ func parseSelectionExtent(m Model, name string, extent Value) string {
 	vname := varName(name)
 	encoding := extent.Get("encoding")
 	field := extent.Get("field")
-	sel := m.b().trySelectionComponent(vname)
+	sel, junk := m.b().trySelectionComponent(vname)
+	if junk {
+		if !field.IsTruthy() {
+			throw("Cannot read properties of undefined (reading 'items')")
+		}
+		// the function's name, or none for Object.prototype itself
+		fname := "undefined"
+		if vname != "__proto__" {
+			fname = vname
+			if vname == "constructor" {
+				fname = "Object"
+			}
+		}
+		return fname + "[" + stringValue(jsval.Str(replacePathInField(field.AsString()))) + "]"
+	}
 	if sel == nil {
 		return vname
 	}
@@ -303,6 +321,7 @@ func materializeSelections(m *unitModel, main *outputNode) {
 		return
 	}
 	for _, name := range m.comp.selection.keyList() {
+		m.b().ctx.check()
 		sel := m.comp.selection.m[name]
 		lookupName := m.getName("lookup_" + name)
 		fn := newFilterNode(main, m, mkv("param", name))
@@ -386,7 +405,14 @@ func findSignalIndex(cc *compileCtx, signals []Value, name string) int {
 }
 
 // pushOn appends an event handler to a signal's `on` array.
+//
+// Upstream pushes onto `signal.on` of a signal found by name; when no such
+// signal exists (a pan or zoom whose projected channel has no signal, as for
+// the geographic latitude channel) that is a TypeError, an error here too.
 func pushOn(sg *Object, handler Value) {
+	if sg == nil {
+		throw("Cannot read properties of undefined (reading 'on')")
+	}
 	on := sg.Lookup("on")
 	items := append(append([]Value{}, on.Items()...), handler)
 	sg.Set("on", jsval.Arr(items))
@@ -1411,11 +1437,15 @@ var scalesCompiler = selectionCompiler{
 	signals: func(m *unitModel, sel *selectionComponent, signals []Value) []Value {
 		if m.parent != nil && !isTopLevelLayer(m) {
 			for _, proj := range sel.scalesBound {
-				if signal := findSignal(sel.cc, signals, proj.dataSignal); signal != nil {
-					signal.Set("push", jsval.Str("outer"))
-					signal.Delete("value")
-					signal.Delete("update")
+				signal := findSignal(sel.cc, signals, proj.dataSignal)
+				if signal == nil {
+					// `signals.find(...)` is undefined: upstream's assignment
+					// to its `push` property is a TypeError.
+					throw("Cannot set properties of undefined (setting 'push')")
 				}
+				signal.Set("push", jsval.Str("outer"))
+				signal.Delete("value")
+				signal.Delete("update")
 			}
 		}
 		return signals

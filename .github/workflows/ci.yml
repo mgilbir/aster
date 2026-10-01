@@ -68,6 +68,8 @@ jobs:
         with:
           go-version-file: go.mod
       - run: scripts/fmacheck.sh
+      - name: recursion audit
+        run: go run ./internal/cmd/recursionaudit
 
   oracle:
     # The full suite with the node oracle required: upstream Vega / Vega-Lite
@@ -90,9 +92,27 @@ jobs:
           (cd testdata/oracle-node-vl5 && npm ci)
       - uses: actions/cache@v6
         with:
+          # upstream's own test suites, recorded against the installed packages: the shallow clones
+          # of the git tags (their tests are not on npm) and the vectors, which the replays
+          # (TestUpstream*) need. The script skips recording when the vectors match its fingerprint.
+          path: |
+            testdata/upstream-clones
+            testdata/upstream-vectors-cache
+          key: upstream-vectors-${{ hashFiles('testdata/oracle-node/package-lock.json', 'testdata/oracle-node/record-upstream-tests.mjs', 'testdata/oracle-node/record-upstream-hooks.mjs', 'scripts/record-upstream-vectors.sh') }}
+      - name: record upstream's test vectors
+        run: scripts/record-upstream-vectors.sh
+      - uses: actions/cache@v6
+        with:
+          path: testdata/corpora-cache
+          key: corpora-${{ hashFiles('testdata/corpora/*.sha256', 'scripts/fetch-corpora.sh') }}
+      - name: fetch the external corpora
+        # Verified against the checked-in manifests; a cache hit is verified too.
+        run: scripts/fetch-corpora.sh
+      - uses: actions/cache@v6
+        with:
           path: testdata/oracle-cache
-          key: oracle-${{ hashFiles('testdata/oracle-node/oracle.mjs', 'testdata/oracle-node*/package-lock.json') }}-${{ github.sha }}
-          restore-keys: oracle-${{ hashFiles('testdata/oracle-node/oracle.mjs', 'testdata/oracle-node*/package-lock.json') }}-
+          key: oracle-${{ hashFiles('testdata/oracle-node/oracle.mjs', 'testdata/oracle-node/sweeps/*.mjs', 'testdata/corpora/*.sha256', 'testdata/oracle-node*/package-lock.json') }}-${{ github.sha }}
+          restore-keys: oracle-${{ hashFiles('testdata/oracle-node/oracle.mjs', 'testdata/oracle-node/sweeps/*.mjs', 'testdata/corpora/*.sha256', 'testdata/oracle-node*/package-lock.json') }}-
       - name: full test suite
         env:
           ASTER_ORACLE: require

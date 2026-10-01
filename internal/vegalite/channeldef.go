@@ -138,14 +138,34 @@ type fieldRefOption struct {
 // (or an aggregate/window op def).
 func vgField(cc *compileCtx, fd Value, opt fieldRefOption) string {
 	field := ""
-	if f := fd.Get("field"); !f.IsNullish() {
+	// missing is "undefined" or "null" while `field` is that JavaScript
+	// value: it reads as "" in the checks, as that word in a template string,
+	// and a path function given it throws.
+	missing := ""
+	// pristine is true while `field` is still the value the spec gave. A
+	// number or a boolean there has no length, which splitAccessPath loops
+	// over, so the path functions read it as the empty path.
+	pristine := false
+	rawField := fd.Get("field")
+	if f := rawField; !f.IsNullish() {
 		field = f.AsString()
+		pristine = !f.IsStr() && !f.IsArr()
+	} else if f.IsNull() {
+		missing = "null"
+	} else {
+		missing = "undefined"
 	}
-	hasField := field != ""
+	jsField := func() string {
+		if missing != "" {
+			return missing
+		}
+		return field
+	}
+	hasField := rawField.IsTruthy()
 	suffix := opt.suffix
 	argAccessor := ""
 	if isCountDef(fd) {
-		field = internalField("count")
+		field, missing, pristine = internalField("count"), "", false
 	} else {
 		fn := ""
 		if !opt.nofn {
@@ -159,12 +179,12 @@ func vgField(cc *compileCtx, fd Value, opt fieldRefOption) string {
 					suffix = opt.binSuffix + opt.suffix
 				case aggregate.IsTruthy():
 					if isArgmaxDef(aggregate) {
-						argAccessor = `["` + field + `"]`
-						field = "argmax_" + aggregate.Get("argmax").AsString()
+						argAccessor = `["` + jsField() + `"]`
+						field, missing, pristine = "argmax_"+aggregate.Get("argmax").AsString(), "", false
 						hasField = true
 					} else if isArgminDef(aggregate) {
-						argAccessor = `["` + field + `"]`
-						field = "argmin_" + aggregate.Get("argmin").AsString()
+						argAccessor = `["` + jsField() + `"]`
+						field, missing, pristine = "argmin_"+aggregate.Get("argmin").AsString(), "", false
 						hasField = true
 					} else {
 						fn = aggregate.AsString()
@@ -180,18 +200,27 @@ func vgField(cc *compileCtx, fd Value, opt fieldRefOption) string {
 			}
 		}
 		if fn != "" {
-			if hasField && field != "" {
+			if hasField {
 				field = fn + "_" + field
 			} else {
 				field = fn
 			}
+			missing, pristine = "", false
 		}
 	}
 	if suffix != "" {
-		field = field + "_" + suffix
+		field, missing, pristine = jsField()+"_"+suffix, "", false
 	}
 	if opt.prefix != "" {
-		field = opt.prefix + "_" + field
+		field, missing, pristine = opt.prefix+"_"+jsField(), "", false
+	}
+	if missing != "" {
+		// replacePathInField, removePathFromField and flatAccessWithDatum all
+		// start with splitAccessPath(field).
+		throw("Cannot read properties of %s (reading 'length')", missing)
+	}
+	if pristine {
+		field = ""
 	}
 	switch {
 	case opt.forAs:

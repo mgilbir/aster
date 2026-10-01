@@ -3,6 +3,7 @@ package vega
 import (
 	"github.com/mgilbir/aster/internal/jsmath"
 	"math"
+	"strings"
 
 	"github.com/mgilbir/aster/internal/expr"
 	"github.com/mgilbir/aster/internal/jsval"
@@ -101,6 +102,10 @@ func parseEncode(encode jsval.Value, typ, role string, style jsval.Value, scope 
 
 func (c *encCompiler) parseBlock(block jsval.Value, typ string) *encodeSet {
 	set := &encodeSet{marktype: typ}
+	if block.IsNullish() {
+		// the loop over its names does nothing, but listing the outputs does not
+		perr("Cannot convert undefined or null to object")
+	}
 	o := block.ObjValue()
 	if o == nil {
 		return set
@@ -145,7 +150,22 @@ func (c *encCompiler) rule(rules jsval.Value) valueFn {
 		val  valueFn
 	}
 	var bs []branch
-	for _, r := range rules.Items() {
+	items := rules.Items()
+	if len(items) == 0 {
+		// The generated source is empty, which does not parse.
+		perr("Expression parse error: ")
+	}
+	for i, r := range items {
+		if !r.Get("test").IsTruthy() && i < len(items)-1 {
+			// Upstream concatenates the source of every rule, with no stop at
+			// the unconditional one: what follows it is appended to its value
+			// ("a""b" is not an expression).
+			if fn, ok := c.concatenatedRules(items); ok {
+				return fn
+			}
+		}
+	}
+	for _, r := range items {
 		val := c.entry(r)
 		if t := r.Get("test"); t.IsTruthy() {
 			f := c.scope.parseExpression(t.AsString())
@@ -166,13 +186,60 @@ func (c *encCompiler) rule(rules jsval.Value) valueFn {
 	}
 }
 
+// concatenatedRules builds rule.js's source for rules that follow an
+// unconditional one and evaluates it as an expression. Only rules made of a
+// constant, a signal or a field path can be rendered as source here; for any
+// other it reports false and the caller keeps the rules up to the first
+// unconditional one.
+func (c *encCompiler) concatenatedRules(items []jsval.Value) (valueFn, bool) {
+	var code strings.Builder
+	for _, r := range items {
+		var src string
+		switch {
+		case !r.IsObj() || !r.Get("gradient").IsNullish() || !r.Get("scale").IsNullish() || !r.Get("exponent").IsNullish() ||
+			!r.Get("mult").IsNullish() || !r.Get("offset").IsNullish() || r.Get("round").IsTruthy() || r.Get("color").IsTruthy():
+			return nil, false
+		case r.Get("signal").IsTruthy():
+			src = "(" + r.Get("signal").AsString() + ")"
+		case !r.Get("field").IsNullish():
+			f := r.Get("field")
+			if !f.IsStr() {
+				return nil, false
+			}
+			src = "datum"
+			for _, seg := range jsval.ParseFieldPath(f.StrValue()) {
+				src += "[" + stringValue(jsval.Str(seg)) + "]"
+			}
+		case !r.Get("value").IsUndefined():
+			v := r.Get("value")
+			if v.IsObj() || v.IsArr() {
+				return nil, false
+			}
+			src = stringValue(v)
+		default:
+			src = "null"
+		}
+		if t := r.Get("test"); t.IsTruthy() {
+			src = "(" + t.AsString() + ")?" + src + ":"
+		}
+		code.WriteString(src)
+	}
+	text := code.String()
+	if strings.HasSuffix(text, ":") {
+		text += "null"
+	}
+	f := c.scope.parseExpression(text)
+	c.depExpr(f)
+	return func(ev *encEval) jsval.Value { return f.evalEnc(ev) }, true
+}
+
 // evalEnc evaluates an expression with the encoder's datum and item.
 func (f *exprFn) evalEnc(ev *encEval) jsval.Value {
 	item := jsval.Undefined
 	if f.usesItem {
 		item = ev.ctx.view.itemAsValue(ev.item)
 	}
-	return f.eval(ev.ctx, ev.datum, item, jsval.Undefined)
+	return f.eval(ev.ctx, ev.datum, item, jsval.Undefined, varDatum|varItem)
 }
 
 func constFn(v jsval.Value) valueFn { return func(*encEval) jsval.Value { return v } }
@@ -213,7 +280,7 @@ func (c *encCompiler) entry(enc jsval.Value) valueFn {
 		value = c.field(enc.Get("field"))
 		haveValue = true
 	case !enc.Get("value").IsUndefined():
-		value = constFn(enc.Get("value"))
+		value = c.literal(enc.Get("value"))
 		haveValue = true
 	}
 
@@ -260,6 +327,30 @@ func (c *encCompiler) entry(enc jsval.Value) valueFn {
 }
 
 // property is a numeric property that may itself be a value reference.
+// quirkyLiteral reports whether upstream's expression parser reads the string
+// literal s as an identifier. It tests `legalKeywords[lookahead.value]` on a
+// plain object for every token, so the literal "if" and every name an object
+// inherits ("constructor", "toString", ...) parse as identifiers, whatever
+// their quotes.
+func quirkyLiteral(s string) bool { return s == "if" || expr.IsObjectPrototypeName(s) }
+
+// literal is the value a reference holds as a constant. Upstream emits it as
+// source text and parses that: a quirky string becomes a signal reference.
+func (c *encCompiler) literal(v jsval.Value) valueFn {
+	if v.IsStr() && quirkyLiteral(v.StrValue()) {
+		return c.identifierFn(v.StrValue())
+	}
+	return constFn(v)
+}
+
+// identifierFn evaluates the identifier name as the expression compiler does,
+// failing the parse where upstream's would (no such signal).
+func (c *encCompiler) identifierFn(name string) valueFn {
+	f := c.scope.parseExpression(name)
+	c.depExpr(f)
+	return func(ev *encEval) jsval.Value { return f.evalEnc(ev) }
+}
+
 func (c *encCompiler) property(p jsval.Value) valueFn {
 	if p.IsObj() {
 		return c.entry(p)
@@ -271,6 +362,9 @@ func (c *encCompiler) property(p jsval.Value) valueFn {
 // or a field reference.
 func (c *encCompiler) scaleRefFn(s jsval.Value) valueFn {
 	switch {
+	case s.IsStr() && quirkyLiteral(s.StrValue()):
+		c.scaleDeps(jsval.Undefined, false)
+		return c.identifierFn(s.StrValue())
 	case s.IsStr():
 		c.scaleDeps(s, true)
 		return constFn(s)
@@ -289,13 +383,13 @@ func (c *encCompiler) scaleTerm(enc jsval.Value, value valueFn, haveValue bool) 
 	if r := enc.Get("range"); !r.IsNullish() {
 		f := jsval.ToNumber(r)
 		return term{a: func(ev *encEval) jsval.Value {
-			rng := ev.ctx.scaleRange(scale(ev))
+			rng := ev.ctx.encScaleRange(scale(ev))
 			return lerp(rng, f)
 		}}
 	}
 	var cur term
 	if haveValue {
-		cur = term{a: func(ev *encEval) jsval.Value { return ev.ctx.applyScale(scale(ev), value(ev)) }}
+		cur = term{a: func(ev *encEval) jsval.Value { return ev.ctx.encScale(scale(ev), value(ev)) }}
 	}
 	if band := enc.Get("band"); !band.IsNullish() {
 		bw := func(ev *encEval) jsval.Value { return jsval.Num(ev.ctx.scaleBandwidth(scale(ev))) }
@@ -315,7 +409,7 @@ func (c *encCompiler) scaleTerm(enc jsval.Value, value valueFn, haveValue bool) 
 			sum := cur.fn()
 			cur = term{a: func(ev *encEval) jsval.Value {
 				if ex := ev.datum.Get("extra"); ex.IsTruthy() {
-					return ev.ctx.applyScale(scale(ev), ex.Get("value"))
+					return ev.ctx.encScale(scale(ev), ex.Get("value"))
 				}
 				return sum(ev)
 			}}
@@ -453,8 +547,13 @@ func (c *encCompiler) fieldObj(ref jsval.Value) valueFn {
 	case ref.Get("datum").IsTruthy():
 		// A constant path is the common case: compile it once.
 		if d := ref.Get("datum"); d.IsStr() {
-			get := transforms.FieldOf(d.StrValue()).Get
-			return func(ev *encEval) jsval.Value { return get(ev.datum) }
+			if _, err := jsval.SplitFieldPath(d.StrValue()); err != nil {
+				perr("%s", err.Error())
+			}
+			if !hasQuirkySegment(d.StrValue()) {
+				get := transforms.FieldOf(d.StrValue()).Get
+				return func(ev *encEval) jsval.Value { return get(ev.datum) }
+			}
 		}
 		path := c.fieldPath(ref.Get("datum"))
 		return func(ev *encEval) jsval.Value { return walkPath(ev.datum, path(ev)) }
@@ -468,10 +567,32 @@ func (c *encCompiler) fieldObj(ref jsval.Value) valueFn {
 // evaluated and used as a single key.
 func (c *encCompiler) fieldPath(key jsval.Value) func(ev *encEval) []jsval.Value {
 	if key.IsStr() {
-		segs := jsval.ParseFieldPath(key.StrValue())
+		segs, err := jsval.SplitFieldPath(key.StrValue())
+		if err != nil {
+			perr("%s", err.Error())
+		}
 		vals := make([]jsval.Value, len(segs))
+		fns := make([]valueFn, len(segs))
+		quirky := false
 		for i, s := range segs {
 			vals[i] = jsval.Str(s)
+			if quirkyLiteral(s) {
+				// A quoted segment of the generated datum access is parsed
+				// as an identifier too.
+				fns[i], quirky = c.identifierFn(s), true
+			}
+		}
+		if quirky {
+			return func(ev *encEval) []jsval.Value {
+				out := make([]jsval.Value, len(vals))
+				for i, v := range vals {
+					out[i] = v
+					if fns[i] != nil {
+						out[i] = fns[i](ev)
+					}
+				}
+				return out
+			}
 		}
 		return func(*encEval) []jsval.Value { return vals }
 	}
@@ -694,4 +815,13 @@ func applyEncodeDefaults(encode jsval.Value, typ, role string, style jsval.Value
 		out.Set("update", jsval.Obj(update))
 	}
 	return jsval.Obj(out)
+}
+
+func hasQuirkySegment(path string) bool {
+	for _, seg := range jsval.ParseFieldPath(path) {
+		if quirkyLiteral(seg) {
+			return true
+		}
+	}
+	return false
 }

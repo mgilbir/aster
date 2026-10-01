@@ -1,0 +1,2 @@
+# Cases whose comparison with the node oracle is not "ok" (see expect_test.go).
+# id<TAB>status<TAB>reason

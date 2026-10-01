@@ -5,6 +5,7 @@ import (
 	"math"
 	"strings"
 
+	"github.com/mgilbir/aster/internal/expr"
 	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/geo"
 	"github.com/mgilbir/aster/internal/jsval"
@@ -461,11 +462,27 @@ func binsFromObject(s scale.Scale, b jsval.Value) []float64 {
 	return d3Range(start, stop+step/2, step)
 }
 
-// d3Range is d3.range(start, stop, step).
+// maxBinValues bounds the bin boundaries a scale may generate; real charts
+// use a few dozen.
+const maxBinValues = 1_000_000
+
+// d3Range is d3.range(start, stop, step). Its length is
+// `Math.max(0, Math.ceil((stop - start) / step)) | 0`: wrapped to 32 bits, so
+// a count that wraps negative is `new Array(n)`'s RangeError, while a count
+// that wraps to a small positive one yields that many values.
 func d3Range(start, stop, step float64) []float64 {
-	n := math.Ceil((stop - start) / step)
-	if !(n > 0) || n > 1e6 {
-		return []float64{}
+	n := math.Max(0, math.Ceil((stop-start)/step))
+	if math.IsNaN(n) || math.IsInf(n, 0) {
+		n = 0 // NaN | 0 and Infinity | 0
+	}
+	if n > 2147483647 {
+		n = float64(int32(uint32(int64(math.Mod(n, 4294967296)))))
+	}
+	if n < 0 {
+		fail("Invalid array length")
+	}
+	if n > maxBinValues {
+		failLimit("scale bins exceed %d values", maxBinValues)
 	}
 	out := make([]float64, int(n))
 	for i := range out {
@@ -613,6 +630,7 @@ func configureScheme(typ string, p *opParams, count int) rangeSpec {
 	var interp scale.UnitInterpolator
 	var colors []jsval.Value
 	var discrete bool
+	var countFrac bool // the scheme count is not an integer
 
 	gamma, hasGamma := 0.0, false
 	if gv := p.Value("interpolateGamma"); !gv.IsNullish() {
@@ -647,12 +665,21 @@ func configureScheme(typ string, p *opParams, count int) rangeSpec {
 		count++
 	case scale.TypeBinOrdinal:
 		count--
+	case scale.TypeOrdinal:
+		// (+_.schemeCount || count || DEFAULT_COUNT): the count of an
+		// interpolating scheme's samples; a discrete scheme is used whole.
+		if c := jsval.ToNumber(p.Value("schemeCount")); c != 0 && !math.IsNaN(c) {
+			count = int(c)
+		} else if count == 0 {
+			count = 5
+		}
 	case scale.TypeQuantile, scale.TypeQuantize:
 		c := jsval.ToNumber(p.Value("schemeCount"))
 		if c == 0 || math.IsNaN(c) {
 			c = 5
 		}
 		count = int(c)
+		countFrac = c != math.Trunc(c)
 	}
 
 	adjust := func(f scale.UnitInterpolator, withReverse bool) scale.UnitInterpolator {
@@ -674,13 +701,21 @@ func configureScheme(typ string, p *opParams, count int) rangeSpec {
 		return rangeSpec{interp: adjust(interp, true)}
 	}
 	if !discrete && interp != nil {
+		// quantizeInterpolator builds new Array(count): a negative count (a
+		// bin-ordinal scale over an empty domain) or a fractional one (a
+		// fractional schemeCount) is a RangeError, which ends the scale
+		// operator's evaluation.
+		if count < 0 || countFrac {
+			fail("Invalid array length")
+		}
 		return rangeSpec{values: scale.QuantizeInterpolator(adjust(interp, false), count)}
 	}
 	if typ == scale.TypeOrdinal {
 		return rangeSpec{values: colors}
 	}
+	// scheme.slice(0, count): a negative end counts from the end.
 	if count < 0 {
-		count = 0
+		count = max(len(colors)+count, 0)
 	}
 	if count > len(colors) {
 		count = len(colors)
@@ -740,6 +775,15 @@ func (c *rtContext) scaleOf(ref jsval.Value) scale.Scale {
 }
 
 func (c *rtContext) applyScale(ref, v jsval.Value) jsval.Value {
+	defer func() {
+		// an exception of the scale is an exception of the expression
+		if r := recover(); r != nil {
+			if e, ok := r.(*scale.Thrown); ok {
+				panic(&expr.Error{Name: e.Name, Msg: e.Msg})
+			}
+			panic(r)
+		}
+	}()
 	s := c.scaleOf(ref)
 	if s == nil {
 		if p, ok := c.projectionOf(ref); ok {
@@ -758,6 +802,37 @@ func projectPoint(p geo.Projection, v jsval.Value) jsval.Value {
 		return jsval.Undefined
 	}
 	return jsval.ArrOf(jsval.Num(x), jsval.Num(y))
+}
+
+// hasScaleRef reports whether ref names a scale or a projection the context
+// can see. The encoders' scale parameters exist only for scales known when the
+// specification was parsed, and the generated code calls them unguarded.
+func (c *rtContext) hasScaleRef(ref jsval.Value) bool {
+	if !ref.IsStr() {
+		return false
+	}
+	if c.scaleNode(ref.StrValue()) != nil {
+		return true
+	}
+	_, ok := c.projectionOf(ref)
+	return ok
+}
+
+// encScale is the encoders' _scale(name, value), `_["%name"](value)`: with no
+// such scale that is a call of undefined.
+func (c *rtContext) encScale(ref, v jsval.Value) jsval.Value {
+	if !c.hasScaleRef(ref) {
+		fail("_.%%%s is not a function", ref.AsString())
+	}
+	return c.applyScale(ref, v)
+}
+
+// encScaleRange is the encoders' _range(name), `_["%name"].range()`.
+func (c *rtContext) encScaleRange(ref jsval.Value) jsval.Value {
+	if !c.hasScaleRef(ref) {
+		fail("Cannot read properties of undefined (reading 'range')")
+	}
+	return c.scaleRange(ref)
 }
 
 func (c *rtContext) scaleRange(ref jsval.Value) jsval.Value {

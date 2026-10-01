@@ -28,14 +28,48 @@ import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
+import { Worker } from 'node:worker_threads';
+
+// node must not outlive the Go process that drives it. An input can keep the
+// main thread busy for good (upstream looping on it), so it cannot watch for
+// that itself: a worker thread polls the parent the Go side names and kills
+// the process once that parent is gone.
+if (process.env.ASTER_ORACLE_PARENT) {
+  new Worker(
+    `const parent = ${Number(process.env.ASTER_ORACLE_PARENT)};
+     setInterval(() => {
+       try { process.kill(parent, 0); } catch (e) { if (e.code === 'ESRCH') process.kill(process.pid, 'SIGKILL'); }
+     }, 1000);`,
+    { eval: true },
+  ).unref();
+}
 
 // Paths are resolved from the repository root, whatever the working
 // directory (oracle_test.go runs node in the module set's directory so the
 // node version pinned there applies).
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
-if (process.env.TZ !== 'UTC') {
-  console.error('run with TZ=UTC');
+// The clock is pinned, before anything reads it: now() compiles to Date.now
+// and datetime() with no arguments to new Date(), so a chart that draws the
+// current time renders the same instant on every run. The engine's tests pin
+// the same instant (WithClockForTest in export_test.go).
+const PINNED_NOW = Date.UTC(2026, 0, 1);
+{
+  const RealDate = Date;
+  globalThis.Date = class extends RealDate {
+    constructor(...args) {
+      super(...(args.length === 0 ? [PINNED_NOW] : args));
+    }
+    static now() {
+      return PINNED_NOW;
+    }
+  };
+}
+
+// TZ selects the zone local time is in: UTC for the corpus, other zones for
+// the time-zone sweep. It is part of the version, hence of the cache key.
+if (!process.env.TZ) {
+  console.error('set TZ (UTC, or an IANA zone)');
   process.exit(2);
 }
 const require = createRequire(path.join(path.resolve(process.env.NODE_PATH), 'x.js'));
@@ -157,10 +191,17 @@ if (vega.textMetrics.width !== vega.textMetrics.measureWidth) {
 // "data/ffox.png", as in upstream's build), then testdata/data; the CDN URLs
 // some specs use are served from the same local copy.
 const roots = [path.join(repo, 'testdata/vega-datasets'), path.join(repo, 'testdata/data')];
-const cdn = /^https?:\/\/(?:cdn\.jsdelivr\.net\/npm\/vega-datasets@[^/]+|raw\.githubusercontent\.com\/vega\/vega-datasets\/[^/]+|vega\.github\.io\/vega-datasets)\/(data\/.+)$/;
+// The URLs that serve copies of vega-datasets, shared with the engine's test
+// loader (compare_test.go) so both map exactly the same ones.
+const datasetURLs = JSON.parse(fs.readFileSync(path.join(repo, 'testdata/oracle-node/dataset-urls.json'), 'utf8')).patterns.map(
+  (p) => new RegExp(p),
+);
 const localize = (uri) => {
-  const m = cdn.exec(uri);
-  return m ? m[1] : uri;
+  for (const re of datasetURLs) {
+    const m = re.exec(uri);
+    if (m) return m[1];
+  }
+  return uri;
 };
 const base = vega.loader({ mode: 'file' });
 const loader = {
@@ -176,7 +217,10 @@ const loader = {
         if (p.startsWith(r + path.sep) && fs.existsSync(p)) return fs.readFileSync(p, 'utf8');
       }
     }
-    return base.load(u, options);
+    // Offline, like the engine's test loader: a URL the local copy does not
+    // serve fails to load rather than reaching the network.
+    if (/^data:/.test(u)) return base.load(u, options);
+    throw new Error('oracle: offline, not a local dataset: ' + uri);
   },
 };
 process.chdir(roots[0]);
@@ -208,15 +252,49 @@ function rasterize(svg, scale) {
   return doc.renderPng({ scale: scale || 1 }).toString('base64');
 }
 
+// A static render is the chart's first frame: timer event streams never fire,
+// as in the engine (there is no event loop). In node they would fire while a
+// render awaits, by wall-clock time.
+vega.View.prototype.timer = function () {};
+
 const quiet = vega.logger(vega.None);
 const compile = (spec) => vl.compile(spec, { logger: quiet }).spec;
 
-async function render(vg) {
+function newView(vg) {
   // Each render starts its clip-path/gradient ids at zero and reseeds the
   // random generator, as the engine does per render.
   if (scenegraph.resetSVGDefIds) scenegraph.resetSVGDefIds();
   vega.setRandom(vega.randomLCG(123456789));
-  const view = new vega.View(vega.parse(vg), { loader, renderer: 'none', logger: quiet });
+  return new vega.View(vega.parse(vg), { loader, renderer: 'none', logger: quiet });
+}
+
+// renderAfter renders, writes each signal (View.signal, then runAsync, as a
+// binding or a host does) and renders again; the second SVG is the answer.
+async function renderAfter(vg, writes) {
+  const view = newView(vg);
+  try {
+    await view.toSVG();
+    for (const { name, value } of writes) {
+      view.signal(name, value);
+      await view.runAsync();
+    }
+    return await view.toSVG();
+  } finally {
+    view.finalize();
+  }
+}
+
+// Sweep generators live in sweeps/<name>.mjs and export generate(ctx), which
+// returns { cases, skips }; ctx carries the modules, since a generator cannot
+// import them by name (NODE_PATH does not apply to ES modules).
+async function generate(name) {
+  if (!/^[a-z0-9-]+$/.test(name)) throw new Error('bad sweep name: ' + name);
+  const mod = await import(path.join(repo, 'testdata/oracle-node/sweeps', name + '.mjs'));
+  return mod.generate({ vega, vl, require, repo });
+}
+
+async function render(vg) {
+  const view = newView(vg);
   try {
     return await view.toSVG();
   } finally {
@@ -240,7 +318,8 @@ write({
   version:
     `vega ${vega.version} / vega-lite ${vl.version} / node ${process.version} / canvas ${require('canvas/package.json').version}` +
     (resvg ? ` / resvg-napi ${require('resvg-napi/package.json').version}` : '') +
-    ` / pango ${canvas.pangoVersion} / cairo ${canvas.cairoVersion} / probe ${probeWidth}`,
+    ` / pango ${canvas.pangoVersion} / cairo ${canvas.cairoVersion} / probe ${probeWidth}` +
+    (process.env.TZ === 'UTC' ? '' : ` / TZ ${process.env.TZ}`),
 });
 
 const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
@@ -255,6 +334,16 @@ for await (const line of rl) {
   }
   const res = { id: req.id };
   try {
+    if (req.op === 'generate') {
+      res.data = await generate(req.sweep);
+      write(res);
+      continue;
+    }
+    if (req.op === 'signals') {
+      res.svg = await renderAfter(JSON.parse(req.spec), req.writes || []);
+      write(res);
+      continue;
+    }
     if (req.op === 'png') {
       res.png = rasterize(req.svg, req.scale);
       write(res);
@@ -271,3 +360,5 @@ for await (const line of rl) {
   }
   write(res);
 }
+// stdin closed: the Go side is done with this process.
+process.exit(0);

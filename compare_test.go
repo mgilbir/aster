@@ -1,8 +1,7 @@
 package aster_test
 
 import (
-	"bufio"
-	"bytes"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"net/http"
@@ -10,9 +9,10 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -23,8 +23,10 @@ import (
 	"github.com/mgilbir/aster/internal/svgdiff"
 )
 
+const compareSetsDefault = "vg-fixtures,vl-fixtures,vl-examples,vl-convert,vg-gallery,regress-vg,regress-vl"
+
 var (
-	compareSets     = flag.String("compare.sets", "vg-fixtures,vl-fixtures,vl-examples,vl-convert,vg-gallery,regress-vg,regress-vl", "comma-separated corpus sets to compare with the node oracle")
+	compareSets     = flag.String("compare.sets", compareSetsDefault, "comma-separated corpus sets to compare with the node oracle")
 	compareFilter   = flag.String("compare.run", "", "only compare specs whose name contains this substring")
 	compareReport   = flag.String("compare.report", "", "write a per-spec markdown report to this path")
 	compareVerbose  = flag.Bool("compare.v", false, "log every spec's outcome")
@@ -64,21 +66,42 @@ var corpusSets = []corpusSet{
 // V8's last-bit trigonometry on x86-64); the reason says which gives which.
 const expectFile = "testdata/oracle-expect.txt"
 
-var timerEvent = regexp.MustCompile(`"type"\s*:\s*"timer"`)
-
-// timeDependent reports whether a spec's rendering depends on when it runs.
-func timeDependent(spec []byte) bool {
-	return bytes.Contains(spec, []byte("now()")) || timerEvent.Match(spec)
-}
+// pinnedNow is the instant the oracle pins Date.now and new Date() to
+// (testdata/oracle-node/oracle.mjs), so a chart that draws the current time
+// compares like any other.
+var pinnedNow = time.UnixMilli(1767225600000) // 2026-01-01T00:00:00Z
 
 // svgTolerance absorbs the two text engines (node-canvas and forme) placing
 // glyph advances differently in the last digits.
 var svgTolerance = svgdiff.Options{Abs: 0.5, Rel: 1e-6}
 
+// pangoVersion reads "pango 1.57.1" from the oracle's version line.
+var pangoVersion = regexp.MustCompile(`pango (\d+)\.(\d+)`)
+
+// pangoText is the engine's text model for the oracle's node-canvas: node-canvas
+// measures with the Pango it was built against, which scales every glyph
+// advance to 1/1024 px with the HarfBuzz it bundles. Pango 1.48 (the Linux
+// build) floors, Pango 1.57 (the macOS build) rounds to nearest; the engine
+// reproduces the oracle's widths bit for bit under either, so a layout that
+// takes the ceiling of a width cannot land on the other side of an integer.
+// Without an oracle the engine measures unrounded advances.
+func pangoText(o *oracle.Oracle) []aster.Option {
+	if o == nil {
+		return nil
+	}
+	m := pangoVersion.FindStringSubmatch(o.Version())
+	if m == nil {
+		return nil
+	}
+	minor, _ := strconv.Atoi(m[2])
+	return []aster.Option{aster.WithPangoTextForTest(m[1] == "1" && minor < 50)}
+}
+
 // oracleConverter is the engine configured as the oracle measures text:
 // DejaVu Sans Mono for monospace and DejaVu Sans for every other family
-// (the embedded Noto Emoji covers emoji on both sides).
-func oracleConverter(t testing.TB, extra ...aster.Option) *aster.Converter {
+// (the embedded Noto Emoji covers emoji on both sides), with the advances
+// the oracle's Pango produces (see pangoText; o may be nil).
+func oracleConverter(t testing.TB, o *oracle.Oracle, extra ...aster.Option) *aster.Converter {
 	t.Helper()
 	opts := []aster.Option{
 		aster.WithFont("DejaVu Sans", dejavu.SansRegular), aster.WithFont("DejaVu Sans", dejavu.SansBold),
@@ -88,10 +111,12 @@ func oracleConverter(t testing.TB, extra ...aster.Option) *aster.Converter {
 		aster.WithDefaultFontFamily("DejaVu Sans"), aster.WithDefaultMonospaceFamily("DejaVu Sans Mono"),
 		aster.WithDefaultSerifFamily("DejaVu Sans"),
 		aster.WithLoader(corpusLoader(t)), aster.WithTimeout(2 * time.Minute),
+		aster.WithClockForTest(func() time.Time { return pinnedNow }),
 	}
 	if *compareHarfBuzz {
 		opts = append(opts, aster.WithHarfBuzzTextMetrics())
 	}
+	opts = append(opts, pangoText(o)...)
 	c, err := aster.New(append(opts, extra...)...)
 	if err != nil {
 		t.Fatal(err)
@@ -104,7 +129,7 @@ type specResult struct {
 	id     string // set/name
 	status string
 	detail string
-	svg    string // identical, equal, differ, engine-error, node-error, both-error, time-dependent
+	svg    string // identical, equal, differ, engine-error, node-error, both-error
 }
 
 // TestCompareWithNode renders and compiles the corpus with the engine and
@@ -116,7 +141,7 @@ func TestCompareWithNode(t *testing.T) {
 		t.Skip("slow: renders the whole corpus")
 	}
 	o := oracle.For(t, oracle.VL6)
-	c := oracleConverter(t)
+	c := oracleConverter(t, o)
 	t.Logf("oracle: %s", o.Version())
 
 	wanted := map[string]bool{}
@@ -151,7 +176,13 @@ func TestCompareWithNode(t *testing.T) {
 		}
 	}
 	scoreboard(t, results)
-	checkExpectations(t, results)
+	// A floor, so a corpus directory that moved or emptied fails instead of
+	// comparing less.
+	const corpusFloor = 1418
+	if *compareSets == compareSetsDefault && *compareFilter == "" && len(results) < corpusFloor {
+		t.Errorf("compared %d specs, fewer than the corpus floor of %d", len(results), corpusFloor)
+	}
+	checkExpectations(t, expectFile, *compareUpdate, results)
 }
 
 func compareOne(t *testing.T, o *oracle.Oracle, c *aster.Converter, set corpusSet, spec []byte) specResult {
@@ -169,10 +200,6 @@ func compareOne(t *testing.T, o *oracle.Oracle, c *aster.Converter, set corpusSe
 	}
 	var problems []string
 	switch {
-	case gerr == nil && want.Err == "" && timeDependent(spec):
-		// It draws the current time, or advances on timer events that fire
-		// in node while the render awaits: no recorded answer can match.
-		r.svg = "time-dependent"
 	case gerr != nil && want.Err != "":
 		r.svg, r.detail = "both-error", "engine: "+firstLine(gerr.Error())+" | node: "+firstLine(want.Err)
 	case gerr != nil:
@@ -214,7 +241,7 @@ func compareOne(t *testing.T, o *oracle.Oracle, c *aster.Converter, set corpusSe
 }
 
 func scoreboard(t *testing.T, results []specResult) {
-	cols := []string{"identical", "equal", "differ", "engine-error", "node-error", "both-error", "time-dependent"}
+	cols := []string{"identical", "equal", "differ", "engine-error", "node-error", "both-error"}
 	type tally struct {
 		n, vegaDiffer int
 		by            map[string]int
@@ -262,86 +289,6 @@ func scoreboard(t *testing.T, results []specResult) {
 	}
 }
 
-type expectation struct{ status, reason string }
-
-func readExpectations(t *testing.T) map[string]expectation {
-	m := map[string]expectation{}
-	f, err := os.Open(expectFile)
-	if os.IsNotExist(err) {
-		return m
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer f.Close()
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		line := sc.Text()
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		parts := strings.SplitN(line, "\t", 3)
-		if len(parts) < 2 {
-			t.Fatalf("%s: malformed line %q", expectFile, line)
-		}
-		e := expectation{status: parts[1]}
-		if len(parts) == 3 {
-			e.reason = parts[2]
-		}
-		m[parts[0]] = e
-	}
-	return m
-}
-
-func checkExpectations(t *testing.T, results []specResult) {
-	expect := readExpectations(t)
-	if *compareUpdate {
-		for _, r := range results {
-			if r.status == "ok" && !strings.Contains(expect[r.id].status, "|") {
-				delete(expect, r.id)
-				continue
-			}
-			e := expect[r.id]
-			if strings.Contains(e.status, "|") && slices.Contains(strings.Split(e.status, "|"), r.status) {
-				continue // platform-dependent, and this platform is one of them
-			}
-			if e.reason == "" || e.status != r.status {
-				e.reason = "TODO: " + r.detail
-			}
-			e.status = r.status
-			expect[r.id] = e
-		}
-		ids := make([]string, 0, len(expect))
-		for id := range expect {
-			ids = append(ids, id)
-		}
-		sort.Strings(ids)
-		var b strings.Builder
-		b.WriteString("# Specs whose comparison with the node oracle is not \"ok\" (see compare_test.go).\n# set/name<TAB>status<TAB>reason\n")
-		for _, id := range ids {
-			fmt.Fprintf(&b, "%s\t%s\t%s\n", id, expect[id].status, expect[id].reason)
-		}
-		if err := os.WriteFile(expectFile, []byte(b.String()), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		t.Logf("wrote %s (%d entries)", expectFile, len(ids))
-		return
-	}
-	for _, r := range results {
-		want := "ok"
-		if e, ok := expect[r.id]; ok {
-			want = e.status
-		}
-		switch {
-		case slices.Contains(strings.Split(want, "|"), r.status):
-		case r.status == "ok":
-			t.Errorf("%s now matches node (was %s): remove it from %s", r.id, want, expectFile)
-		default:
-			t.Errorf("%s: %s, want %s: %s", r.id, r.status, want, r.detail)
-		}
-	}
-}
-
 func firstLine(s string) string {
 	if i := strings.IndexByte(s, '\n'); i >= 0 {
 		s = s[:i]
@@ -367,19 +314,37 @@ func corpusLoader(t testing.TB) aster.Loader {
 	)
 }
 
-// redirectTransport rewrites vega-datasets CDN/GitHub URLs to a local server.
+// datasetURLs are the URL patterns that serve copies of vega-datasets,
+// shared with the oracle (testdata/oracle-node/dataset-urls.json), so both
+// sides map exactly the same URLs to the local copy and refuse the rest.
+var datasetURLs = sync.OnceValue(func() []*regexp.Regexp {
+	b, err := os.ReadFile("testdata/oracle-node/dataset-urls.json")
+	if err != nil {
+		panic(err)
+	}
+	var f struct{ Patterns []string }
+	if err := json.Unmarshal(b, &f); err != nil {
+		panic(err)
+	}
+	res := make([]*regexp.Regexp, len(f.Patterns))
+	for i, p := range f.Patterns {
+		res[i] = regexp.MustCompile(p)
+	}
+	return res
+})
+
+// redirectTransport serves the URLs datasetURLs maps from a local server.
 type redirectTransport struct {
 	target string
 	next   http.RoundTripper
 }
 
 func (rt redirectTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	path := req.URL.Path
 	rewritten := ""
-	switch req.URL.Hostname() {
-	case "cdn.jsdelivr.net", "raw.githubusercontent.com", "vega.github.io":
-		if i := strings.Index(path, "/data/"); i >= 0 {
-			rewritten = path[i:]
+	for _, re := range datasetURLs() {
+		if m := re.FindStringSubmatch(req.URL.String()); m != nil {
+			rewritten = "/" + m[1]
+			break
 		}
 	}
 	if rewritten == "" {

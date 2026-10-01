@@ -22,6 +22,7 @@ type exprNode struct {
 	object   *exprNode
 	property *exprNode
 	kids     []*exprNode // generic children in visit order
+	depth    int         // levels of the tree below and including this node
 }
 
 type exprParser struct {
@@ -34,6 +35,29 @@ type exprParser struct {
 }
 
 const maxExprDepth = 200
+
+// maxExprNodeDepth bounds the depth of the syntax tree. maxExprDepth bounds
+// the parser's own recursion, but a left-associative chain (a+b+c+..., a.b.c,
+// f()()()) is built in a loop and nests one level per operator in the tree,
+// which exprNode.visit and exprNames then walk recursively. It matches
+// expr.MaxDepth, which Vega's parser enforces on the same text later.
+const maxExprNodeDepth = 512
+
+// mk finishes a node that has children: it records its depth and fails when
+// the tree is too deep.
+func (p *exprParser) mk(n *exprNode) *exprNode {
+	d := 0
+	for _, c := range n.children() {
+		if c != nil && c.depth > d {
+			d = c.depth
+		}
+	}
+	n.depth = d + 1
+	if n.depth > maxExprNodeDepth {
+		p.fail("expression too deeply nested")
+	}
+	return n
+}
 
 type exprSyntaxError struct{ msg string }
 
@@ -280,7 +304,7 @@ func (p *exprParser) parseConditional() *exprNode {
 		cons := p.parseConditional()
 		p.expect(":")
 		alt := p.parseConditional()
-		return &exprNode{kind: "Conditional", kids: []*exprNode{test, cons, alt}}
+		return p.mk(&exprNode{kind: "Conditional", kids: []*exprNode{test, cons, alt}})
 	}
 	return test
 }
@@ -302,7 +326,7 @@ func (p *exprParser) parseBinary(minPrec int) *exprNode {
 		}
 		p.next(true)
 		right := p.parseBinary(prec)
-		left = &exprNode{kind: "Binary", kids: []*exprNode{left, right}}
+		left = p.mk(&exprNode{kind: "Binary", kids: []*exprNode{left, right}})
 	}
 	return left
 }
@@ -316,7 +340,7 @@ func (p *exprParser) parseUnary() *exprNode {
 	if p.kind == "punct" && (p.tok == "+" || p.tok == "-" || p.tok == "!" || p.tok == "~") {
 		p.next(true)
 		arg := p.parseUnary()
-		return &exprNode{kind: "Unary", kids: []*exprNode{arg}}
+		return p.mk(&exprNode{kind: "Unary", kids: []*exprNode{arg}})
 	}
 	return p.parsePostfix()
 }
@@ -332,7 +356,7 @@ func (p *exprParser) parsePostfix() *exprNode {
 			}
 			prop := &exprNode{kind: "Identifier", name: p.val}
 			p.next(false)
-			expr = &exprNode{kind: "Member", object: expr, property: prop}
+			expr = p.mk(&exprNode{kind: "Member", object: expr, property: prop})
 		case p.isP("["):
 			p.next(true)
 			prop := p.parseConditional()
@@ -341,7 +365,7 @@ func (p *exprParser) parsePostfix() *exprNode {
 			} else {
 				p.fail("Unexpected token " + p.tok)
 			}
-			expr = &exprNode{kind: "Member", object: expr, property: prop}
+			expr = p.mk(&exprNode{kind: "Member", object: expr, property: prop})
 		case p.isP("("):
 			p.next(true)
 			kids := []*exprNode{expr}
@@ -359,7 +383,7 @@ func (p *exprParser) parsePostfix() *exprNode {
 				p.fail("Unexpected token " + p.tok)
 			}
 			p.next(false)
-			expr = &exprNode{kind: "Call", kids: kids}
+			expr = p.mk(&exprNode{kind: "Call", kids: kids})
 		default:
 			return expr
 		}
@@ -416,7 +440,7 @@ func (p *exprParser) parsePrimary() *exprNode {
 				p.fail("Unexpected token " + p.tok)
 			}
 			p.next(false)
-			return n
+			return p.mk(n)
 		case "{":
 			p.next(true)
 			n := &exprNode{kind: "Object"}
@@ -433,7 +457,7 @@ func (p *exprParser) parsePrimary() *exprNode {
 				p.next(false)
 				p.expect(":")
 				val := p.parseConditional()
-				n.kids = append(n.kids, &exprNode{kind: "Property", kids: []*exprNode{key, val}})
+				n.kids = append(n.kids, p.mk(&exprNode{kind: "Property", kids: []*exprNode{key, val}}))
 				if p.isP(",") {
 					p.next(true)
 					continue
@@ -444,7 +468,7 @@ func (p *exprParser) parsePrimary() *exprNode {
 				p.fail("Unexpected token " + p.tok)
 			}
 			p.next(false)
-			return n
+			return p.mk(n)
 		}
 	case "eof":
 		p.fail("Unexpected end of input")

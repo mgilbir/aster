@@ -1,0 +1,1 @@
+{"width":50,"height":50,"signals":[{"name":"w","value":20,"update":"datum"}],"marks":[{"type":"rect","encode":{"enter":{"width":{"signal":"w"},"height":{"value":10}}}}]}

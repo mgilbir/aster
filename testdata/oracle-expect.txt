@@ -1,7 +1,7 @@
 # Specs whose comparison with the node oracle is not "ok" (see compare_test.go).
 # set/name<TAB>status<TAB>reason
-vg-gallery/warming-stripes	differ|ok	platform: match on Linux; on macOS node-canvas shapes this text slightly differently (probe widths 87.388 vs 87.398 px)
+vg-gallery/warming-stripes	differ|ok	platform: emoji (here the 🔗 in the source line): on Linux node-canvas (Pango 1.48) measures them with Noto Emoji's advance, as the engine does, and they match; on macOS (Pango 1.57) every emoji presentation sequence measures exactly one em, which moves the layout
 vg-gallery/word-cloud	ok|differ	platform: d3-cloud places words by the pixels node-canvas rasterizes; the engine reproduces node-canvas on macOS (Pango 1.57 / Cairo 1.18) word for word, while Linux's node-canvas build (Pango 1.48 / Cairo 1.16) rasterizes glyphs differently, which moves the layout
-vl-examples/isotype_bar_chart_emoji	differ|ok	platform: match on Linux; on macOS node-canvas shapes this text slightly differently (probe widths 87.388 vs 87.398 px)
-vl-examples/layer_bar_fruit	differ|ok	platform: match on Linux; on macOS node-canvas shapes this text slightly differently (probe widths 87.388 vs 87.398 px)
+vl-examples/isotype_bar_chart_emoji	differ|ok	platform: emoji (here the isotype symbols): on Linux node-canvas (Pango 1.48) measures them with Noto Emoji's advance, as the engine does, and they match; on macOS (Pango 1.57) every emoji presentation sequence measures exactly one em, which moves the layout
+vl-examples/layer_bar_fruit	differ|ok	platform: emoji (here the fruit labels): on Linux node-canvas (Pango 1.48) measures them with Noto Emoji's advance, as the engine does, and they match; on macOS (Pango 1.57) every emoji presentation sequence measures exactly one em, which moves the layout
 vl-examples/trail_color	ok|differ	platform: V8 on x86-64 computes trigonometry differently in the last bit from V8 on arm64, which the engine follows (jsmath); the trail geometry flips on it, so it differs where node runs on x86-64

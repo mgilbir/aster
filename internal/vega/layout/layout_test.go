@@ -172,7 +172,10 @@ func TestViewLayoutAgainstUpstream(t *testing.T) {
 					Padding:        Padding{Left: jnum(pad.Get("left")), Right: jnum(pad.Get("right")), Top: jnum(pad.Get("top")), Bottom: jnum(pad.Get("bottom"))},
 					AutosizeActive: jnum(vw.Get("autosize")) >= 1,
 				}
-				sizes := ViewLayout(mark, view, p)
+				sizes, lerr := ViewLayout(mark, view, p)
+				if lerr != nil {
+					t.Fatal(lerr)
+				}
 
 				want := rec.Get("sizes")
 				if len(sizes) != want.Len() {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -13,23 +14,26 @@ func errUnknownOp(op string) error { return fmt.Errorf("unknown aggregate op %q"
 // LookupIndex maps string-coerced key values to tuples of a secondary
 // dataset (vega-transforms' TupleIndex). When several tuples share a key the
 // last one wins.
-type LookupIndex struct{ m map[string]jsval.Value }
+type LookupIndex struct {
+	m    map[string]jsval.Value
+	zone format.Zone
+}
 
 // NewLookupIndex indexes from by key.
 func NewLookupIndex(ctx context.Context, from []jsval.Value, key Field) (*LookupIndex, error) {
-	ix := &LookupIndex{m: make(map[string]jsval.Value, len(from))}
+	ix := &LookupIndex{m: make(map[string]jsval.Value, len(from)), zone: zoneOf(ctx)}
 	for i, t := range from {
 		if err := poll(ctx, i); err != nil {
 			return nil, err
 		}
-		ix.m[key.Apply(t).AsString()] = t
+		ix.m[keyString(key.Apply(t), ix.zone)] = t
 	}
 	return ix, nil
 }
 
 // Get returns the tuple stored under the string form of k.
 func (ix *LookupIndex) Get(k jsval.Value) (jsval.Value, bool) {
-	v, ok := ix.m[k.AsString()]
+	v, ok := ix.m[keyString(k, ix.zone)]
 	return v, ok
 }
 

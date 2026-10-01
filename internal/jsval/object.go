@@ -2,6 +2,7 @@ package jsval
 
 import (
 	"fmt"
+	"sync/atomic"
 
 	ecma262 "github.com/mgilbir/goecma262"
 )
@@ -26,7 +27,28 @@ type Object struct {
 	// that stand for a host object (a canvas) rather than plain data. Two
 	// objects with a payload are equal only when they are the same object.
 	host any
+	// tid is the tuple id (vega-dataflow's tupleid): 0 until the object is
+	// ingested as a data tuple.
+	tid uint32
 }
+
+// tupleCounter is vega-dataflow's TUPLE_ID: ids grow in ingestion order.
+var tupleCounter atomic.Uint32
+
+// TupleID is the object's tuple id, 0 when it is not a tuple.
+func (o *Object) TupleID() uint32 { return o.tid }
+
+// EnsureTupleID gives the object the next tuple id unless it has one, as
+// vega-dataflow's ingest does, and reports the id.
+func (o *Object) EnsureTupleID() uint32 {
+	if o.tid == 0 {
+		o.tid = tupleCounter.Add(1)
+	}
+	return o.tid
+}
+
+// SetTupleID sets the tuple id.
+func (o *Object) SetTupleID(id uint32) { o.tid = id }
 
 // SetHost attaches an opaque host payload to the object.
 func (o *Object) SetHost(h any) { o.host = h }
@@ -308,6 +330,7 @@ func (o *Object) Clone() *Object {
 	if o != nil {
 		c.str = o.str
 		c.host = o.host
+		c.tid = o.tid
 		c.vals = append(c.vals, o.vals...)
 	}
 	if len(c.keys) > indexThreshold {

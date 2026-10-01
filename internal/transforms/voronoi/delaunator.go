@@ -452,61 +452,66 @@ func circumcenter(ax, ay, bx, by, cx, cy float64) (float64, float64) {
 // insertion-sort cutoff match upstream because the order of equidistant
 // points changes the triangulation.
 func quicksort(ids []int32, dists []float64, left, right int) {
-	if right-left <= 20 {
-		for i := left + 1; i <= right; i++ {
-			temp := ids[i]
-			tempDist := dists[temp]
-			j := i - 1
-			for j >= left && dists[ids[j]] > tempDist {
-				ids[j+1] = ids[j]
-				j--
-			}
-			ids[j+1] = temp
-		}
-		return
-	}
-	median := (left + right) >> 1
-	i := left + 1
-	j := right
-	ids[median], ids[i] = ids[i], ids[median]
-	if dists[ids[left]] > dists[ids[right]] {
-		ids[left], ids[right] = ids[right], ids[left]
-	}
-	if dists[ids[i]] > dists[ids[right]] {
-		ids[i], ids[right] = ids[right], ids[i]
-	}
-	if dists[ids[left]] > dists[ids[i]] {
-		ids[left], ids[i] = ids[i], ids[left]
-	}
-
-	temp := ids[i]
-	tempDist := dists[temp]
 	for {
-		for {
-			i++
-			if i > right || !(dists[ids[i]] < tempDist) {
-				break
+		if right-left <= 20 {
+			for i := left + 1; i <= right; i++ {
+				temp := ids[i]
+				tempDist := dists[temp]
+				j := i - 1
+				for j >= left && dists[ids[j]] > tempDist {
+					ids[j+1] = ids[j]
+					j--
+				}
+				ids[j+1] = temp
 			}
+			return
 		}
-		for {
-			j--
-			if j < left || !(dists[ids[j]] > tempDist) {
-				break
-			}
+		median := (left + right) >> 1
+		i := left + 1
+		j := right
+		ids[median], ids[i] = ids[i], ids[median]
+		if dists[ids[left]] > dists[ids[right]] {
+			ids[left], ids[right] = ids[right], ids[left]
 		}
-		if j < i {
-			break
+		if dists[ids[i]] > dists[ids[right]] {
+			ids[i], ids[right] = ids[right], ids[i]
 		}
-		ids[i], ids[j] = ids[j], ids[i]
-	}
-	ids[left+1] = ids[j]
-	ids[j] = temp
+		if dists[ids[left]] > dists[ids[i]] {
+			ids[left], ids[i] = ids[i], ids[left]
+		}
 
-	if right-i+1 >= j-left {
-		quicksort(ids, dists, i, right)
-		quicksort(ids, dists, left, j-1)
-	} else {
-		quicksort(ids, dists, left, j-1)
-		quicksort(ids, dists, i, right)
+		temp := ids[i]
+		tempDist := dists[temp]
+		for {
+			for {
+				i++
+				if i > right || !(dists[ids[i]] < tempDist) {
+					break
+				}
+			}
+			for {
+				j--
+				if j < left || !(dists[ids[j]] > tempDist) {
+					break
+				}
+			}
+			if j < i {
+				break
+			}
+			ids[i], ids[j] = ids[j], ids[i]
+		}
+		ids[left+1] = ids[j]
+		ids[j] = temp
+
+		// The two partitions are independent: recurse into the smaller and loop on
+		// the larger, so the recursion is at most log2(n) deep even for an input
+		// that defeats the median-of-three pivot.
+		if right-i+1 >= j-left {
+			quicksort(ids, dists, left, j-1)
+			left = i
+		} else {
+			quicksort(ids, dists, i, right)
+			right = j - 1
+		}
 	}
 }

@@ -111,6 +111,12 @@ func init() {
 	fn("utcweek", func(s *Scope, args []jsval.Value) jsval.Value {
 		return jsval.Num(format.UTC.WeekOfYear(s.dateOf(arg(args, 0))))
 	})
+	fn("isoweek", func(s *Scope, args []jsval.Value) jsval.Value {
+		return jsval.Num(s.zone().ISOWeekOfYear(s.dateOf(arg(args, 0))))
+	})
+	fn("utcisoweek", func(s *Scope, args []jsval.Value) jsval.Value {
+		return jsval.Num(format.UTC.ISOWeekOfYear(s.dateOf(arg(args, 0))))
+	})
 	fn("dayofyear", func(s *Scope, args []jsval.Value) jsval.Value {
 		return jsval.Num(s.zone().DayOfYear(s.dateOf(arg(args, 0))))
 	})

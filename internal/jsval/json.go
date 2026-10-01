@@ -14,6 +14,17 @@ import (
 // recursion in every consumer that walks the result.
 const MaxJSONDepth = 256
 
+// MaxValueDepth bounds how deeply the functions that walk a Value recursively
+// (Equal, AsString, AppendJSON) descend. A parsed document is already limited
+// to MaxJSONDepth, but a value built at run time (a formula wrapping its own
+// field in an array, once per transform) can nest as deep as the
+// specification is long. V8 throws a RangeError at about 10000 frames; here a
+// walk that reaches the bound stops (Equal reports false, AsString and
+// AppendJSON write nothing for the too-deep value) instead of recursing until
+// the goroutine stack overflows, which Go cannot recover from. Each frame is
+// under 200 bytes, so the bound costs a few hundred KB of stack.
+const MaxValueDepth = 1024
+
 // ErrJSONDepth is returned (wrapped) when a document nests past MaxJSONDepth.
 var ErrJSONDepth = errors.New("json: document nests too deeply")
 
@@ -483,12 +494,12 @@ func (p *parser) array(depth int) (Value, error) {
 // numbers are null; a Timestamp is written as its epoch number and a Pattern
 // as {} (it has no enumerable properties).
 func AppendJSON(dst []byte, v Value) []byte {
-	return appendJSON(dst, v, "", "")
+	return appendJSON(dst, v, "", "", 0)
 }
 
 // AppendJSONIndent is JSON.stringify(v, null, indent).
 func AppendJSONIndent(dst []byte, v Value, indent string) []byte {
-	return appendJSON(dst, v, indent, "\n")
+	return appendJSON(dst, v, indent, "\n", 0)
 }
 
 // MarshalJSON writes compact JSON.stringify output.
@@ -499,7 +510,10 @@ func (v Value) MarshalJSON() ([]byte, error) {
 	return AppendJSON(nil, v), nil
 }
 
-func appendJSON(dst []byte, v Value, indent, prefix string) []byte {
+func appendJSON(dst []byte, v Value, indent, prefix string, depth int) []byte {
+	if depth > MaxValueDepth {
+		return append(dst, "null"...)
+	}
 	switch v.k {
 	case KindUndefined, KindNull:
 		return append(dst, "null"...)
@@ -531,7 +545,7 @@ func appendJSON(dst []byte, v Value, indent, prefix string) []byte {
 			if indent != "" {
 				dst = append(dst, inner...)
 			}
-			dst = appendJSON(dst, it, indent, inner)
+			dst = appendJSON(dst, it, indent, inner, depth+1)
 		}
 		if indent != "" {
 			dst = append(dst, prefix...)
@@ -559,7 +573,7 @@ func appendJSON(dst []byte, v Value, indent, prefix string) []byte {
 			if indent != "" {
 				dst = append(dst, ' ')
 			}
-			dst = appendJSON(dst, val, indent, inner)
+			dst = appendJSON(dst, val, indent, inner, depth+1)
 		}
 		if n > 0 && indent != "" {
 			dst = append(dst, prefix...)

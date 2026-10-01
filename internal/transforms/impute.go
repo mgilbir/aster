@@ -95,10 +95,11 @@ func Impute(ctx context.Context, data []jsval.Value, p ImputeParams) ([]jsval.Va
 		values  []jsval.Value
 		present int // number of key positions with a tuple
 	}
+	zone := zoneOf(ctx)
 	domain := append([]jsval.Value(nil), p.KeyVals...)
 	kMap := make(map[string]int, len(domain))
 	for i, k := range domain {
-		kMap[k.AsString()] = i + 1
+		kMap[keyString(k, zone)] = i + 1
 	}
 	var groups []*group
 	cells := 0
@@ -109,7 +110,7 @@ func Impute(ctx context.Context, data []jsval.Value, p ImputeParams) ([]jsval.Va
 			return nil, err
 		}
 		k := p.Key.Apply(t)
-		ks := k.AsString()
+		ks := keyString(k, zone)
 		j := kMap[ks]
 		if j == 0 {
 			domain = append(domain, k)
@@ -122,7 +123,7 @@ func Impute(ctx context.Context, data []jsval.Value, p ImputeParams) ([]jsval.Va
 				sb.WriteByte(',')
 			}
 			if v := f.Get(t); !v.IsNullish() {
-				sb.WriteString(v.AsString())
+				sb.WriteString(keyString(v, zone))
 			}
 		}
 		g := gMap[sb.String()]

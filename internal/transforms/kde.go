@@ -44,7 +44,10 @@ func KDE(ctx context.Context, source []jsval.Value, p KDEParams) ([]jsval.Value,
 	get := p.Field.Get
 	if p.Resolve == "shared" {
 		if domain == nil {
-			lo, hi, ok := Extent(len(source), func(i int) jsval.Value { return get(source[i]) })
+			lo, hi, ok, err := ExtentOf(source, p.Field)
+			if err != nil {
+				return nil, err
+			}
 			d := [2]float64{math.NaN(), math.NaN()}
 			if ok && !lo.IsUndefined() {
 				d = [2]float64{jsval.ToNumber(lo), jsval.ToNumber(hi)}
@@ -61,7 +64,7 @@ func KDE(ctx context.Context, source []jsval.Value, p KDEParams) ([]jsval.Value,
 		names[i] = g.Name
 	}
 	var out []jsval.Value
-	for _, g := range Partition(source, p.GroupBy) {
+	for _, g := range Partition(zoneOf(ctx), source, p.GroupBy) {
 		vals := make([]jsval.Value, len(g.Tuples))
 		for i, t := range g.Tuples {
 			vals[i] = get(t)

@@ -60,16 +60,7 @@ func (it *Item) setProp(l *jsonLoader, k string, val jsval.Value) (bool, error) 
 	case "strokeMiterLimit":
 		it.StrokeMiterLimit = numOf(val)
 	case "strokeDash":
-		switch {
-		case val.IsArr():
-			d := make([]float64, 0, val.Len())
-			for _, e := range val.Items() {
-				d = append(d, jsval.ToNumber(e))
-			}
-			it.StrokeDash = d
-		case val.IsStr():
-			it.StrokeDashStr = val.StrValue()
-		}
+		it.StrokeDash = val
 	case "strokeDashOffset":
 		it.StrokeDashOffset = numOf(val)
 	case "strokeForeground":
@@ -111,7 +102,12 @@ func (it *Item) setProp(l *jsonLoader, k string, val jsval.Value) (bool, error) 
 	case "size":
 		it.Size = numOf(val)
 	case "path":
-		if !val.IsNullish() {
+		// item.path = value: a nullish path clears an earlier one (the
+		// voronoi transform sets a degenerate cell's path to null on a later
+		// run), and the SVG writer then emits no d attribute.
+		if val.IsNullish() {
+			it.Path = Path{}
+		} else {
 			it.Path = P(strOf(val))
 		}
 	case "scaleX":
@@ -119,17 +115,23 @@ func (it *Item) setProp(l *jsonLoader, k string, val jsval.Value) (bool, error) 
 	case "scaleY":
 		it.ScaleY = numOf(val)
 	case "interpolate":
-		it.Interpolate = strOf(val)
+		it.Interpolate = strOfTruthy(val)
 	case "tension":
 		it.Tension = numOf(val)
 	case "orient":
-		it.Orient = strOf(val)
+		it.Orient = strOfTruthy(val)
 	case "defined":
 		it.Defined = triOf(val)
 	case "text":
 		it.Text = val
 	case "font":
 		it.Font = strOf(val)
+		// An array (Vega-Lite writes [] for a null title font) is truthy: the
+		// attribute is its text, with no sans-serif default.
+		delete(it.Raw, "font")
+		if val.IsArr() || val.IsObj() {
+			it.setRaw("font", val)
+		}
 	case "fontSize":
 		it.FontSize = numOf(val)
 	case "fontWeight":
@@ -167,7 +169,13 @@ func (it *Item) setProp(l *jsonLoader, k string, val jsval.Value) (bool, error) 
 	case "cursor":
 		it.Cursor = strOf(val)
 	case "href":
-		it.Href = strOf(val)
+		// The renderer sanitizes the href with vega-loader, whose first step
+		// is uri.replace(...): only a string can be a link, any other value
+		// (a number, a date) rejects and renders none.
+		it.Href = ""
+		if val.IsStr() {
+			it.Href = val.StrValue()
+		}
 	case "tooltip":
 		it.Tooltip = val
 	case "description":
@@ -212,6 +220,10 @@ func (it *Item) setProp(l *jsonLoader, k string, val jsval.Value) (bool, error) 
 // or unset properties. Group items answer "items" with their child marks'
 // count only through Items; Get does not expose structure.
 func (it *Item) Get(key string) jsval.Value {
+	// A numeric property given a word reads back as that word.
+	if v, ok := it.Raw[key]; ok {
+		return v
+	}
 	num := func(n Num) jsval.Value {
 		if !n.Set() {
 			return jsval.Undefined
@@ -277,17 +289,7 @@ func (it *Item) Get(key string) jsval.Value {
 	case "strokeMiterLimit":
 		return num(it.StrokeMiterLimit)
 	case "strokeDash":
-		if it.StrokeDashStr != "" {
-			return jsval.Str(it.StrokeDashStr)
-		}
-		if it.StrokeDash == nil {
-			return jsval.Undefined
-		}
-		vs := make([]jsval.Value, len(it.StrokeDash))
-		for i, d := range it.StrokeDash {
-			vs[i] = jsval.Num(d)
-		}
-		return jsval.Arr(vs)
+		return it.StrokeDash
 	case "strokeDashOffset":
 		return num(it.StrokeDashOffset)
 	case "strokeForeground":
@@ -439,11 +441,44 @@ func gradientValue(g *Gradient) jsval.Value {
 var rawNumeric = map[string]bool{
 	"angle": true, "strokeWidth": true, "strokeOpacity": true, "fillOpacity": true,
 	"opacity": true, "strokeDashOffset": true, "strokeMiterLimit": true,
+	"x": true, "y": true, "width": true, "height": true, "cornerRadius": true, "cornerRadiusTopLeft": true,
+	"cornerRadiusTopRight": true, "cornerRadiusBottomRight": true, "cornerRadiusBottomLeft": true,
+}
+
+// truthyProp is the truthiness of a numeric property as it was given: a word
+// is truthy where the number it converts to (NaN) is not.
+func (it *Item) truthyProp(prop string, n Num) bool {
+	if v, ok := it.Raw[prop]; ok {
+		return v.IsTruthy()
+	}
+	return n.Truthy()
+}
+
+// orZeroProp is `value(item[prop], fallback) || 0` followed by the unary plus
+// a path generator applies: given prop wins over the fallback unless unset.
+func (it *Item) orZeroProp(prop string, n Num, fallbackProp string, fallback Num) float64 {
+	if !n.Set() {
+		prop, n = fallbackProp, fallback
+	}
+	if v, ok := it.Raw[prop]; ok {
+		if !v.IsTruthy() {
+			return 0
+		}
+		return jsval.ToNumber(v)
+	}
+	return n.Zero()
 }
 
 func (it *Item) setRaw(k string, val jsval.Value) {
 	switch val.Kind() {
-	case jsval.KindStr, jsval.KindBool, jsval.KindArr, jsval.KindObj:
+	case jsval.KindObj:
+		if val.Get("$num").IsStr() {
+			// a non-finite number as a recording carries it (see numOf)
+			delete(it.Raw, k)
+			return
+		}
+		fallthrough
+	case jsval.KindStr, jsval.KindBool, jsval.KindArr:
 		if it.Raw == nil {
 			it.Raw = make(map[string]jsval.Value, 1)
 		}
@@ -460,6 +495,54 @@ func (it *Item) RawValue(prop string) (jsval.Value, bool) {
 	return v, ok
 }
 
+// OrZero is upstream's `item[prop] || 0` for a size property (width, height):
+// a word the property was given is truthy and reads as the number it
+// converts to, NaN for most, where a numeric NaN reads as 0.
+func (it *Item) OrZero(prop string) float64 {
+	if v, ok := it.Raw[prop]; ok {
+		if !v.IsTruthy() {
+			return 0
+		}
+		return jsval.ToNumber(v)
+	}
+	switch prop {
+	case "x":
+		return it.X.Zero()
+	case "y":
+		return it.Y.Zero()
+	case "width":
+		return it.Width.Zero()
+	case "height":
+		return it.Height.Zero()
+	}
+	return 0
+}
+
+// PosValue is `item[prop] || 0` (prop is "x" or "y") as a JavaScript value: the
+// word the property was given, else the number.
+func (it *Item) PosValue(prop string) jsval.Value {
+	if v, ok := it.Raw[prop]; ok {
+		if !v.IsTruthy() {
+			return jsval.Num(0)
+		}
+		return v
+	}
+	return jsval.Num(it.OrZero(prop))
+}
+
+// AppendPos appends `item[prop] || 0` (prop is "x" or "y") the way a template
+// string prints it into a transform: a word the property was given is written
+// as it is, where a number goes through AppendNumber.
+func (it *Item) AppendPos(dst []byte, prop string) []byte {
+	if v, ok := it.Raw[prop]; ok {
+		if !v.IsTruthy() {
+			return append(dst, '0')
+		}
+		return append(dst, v.AsString()...)
+	}
+	return AppendNumber(dst, it.OrZero(prop))
+}
+
 // AngleTruthy is upstream's `if (item.angle)`: the truthiness of the value as
 // given, so a word turns a mark (by NaN) where a zero does not.
 func (it *Item) AngleTruthy() bool {
@@ -467,4 +550,15 @@ func (it *Item) AngleTruthy() bool {
 		return v.IsTruthy()
 	}
 	return it.Angle.Truthy()
+}
+
+// isWord reports a numeric property given a word (a truthy non-numeric
+// string, object or array).
+func (it *Item) isWord(prop string) bool {
+	v, ok := it.Raw[prop]
+	if !ok || !v.IsTruthy() {
+		return false
+	}
+	f := jsval.ToNumber(v)
+	return f != f
 }

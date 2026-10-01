@@ -318,15 +318,15 @@ func spanSpecifier(v jsval.Value) (string, error) {
 }
 
 // numberSpecifier reads a number format specifier: undefined and null mean the
-// default ("" here); anything but a string is not a legal d3 specifier.
+// default ("" here). d3's formatSpecifier matches the specifier with a regular
+// expression's exec, which converts it to a string first, so a number such as
+// 42 is the specifier "42" (a width); whether that text is a legal specifier
+// is up to the parser.
 func numberSpecifier(v jsval.Value) (string, error) {
-	switch {
-	case v.IsNullish():
+	if v.IsNullish() {
 		return "", nil
-	case v.IsStr():
-		return v.StrValue(), nil
 	}
-	return "", errors.New("invalid format: " + v.AsString())
+	return v.AsString(), nil
 }
 
 func timeFormatOf(loc *format.Locale, specifier jsval.Value, utc bool) (Format, error) {

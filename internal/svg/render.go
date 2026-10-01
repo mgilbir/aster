@@ -51,6 +51,12 @@ var ErrTooLarge = errors.New("svg: output exceeds the size limit")
 
 var errNilScene = errors.New("svg: nil scenegraph")
 
+// errMarkHole is what upstream's SVG renderer throws on a group whose child
+// marks have a hole: a dataflow error stops the run before every mark exists,
+// and a mark created at a later index than a missing one leaves undefined
+// entries in the group's items array, which the renderer then reads.
+var errMarkHole = errors.New("TypeError: Cannot read properties of undefined (reading 'marktype')")
+
 // Render produces the SVG document for sg. It checks ctx periodically and
 // returns its error when cancelled.
 func Render(ctx context.Context, sg *scene.Scenegraph, opt Options) (string, error) {
@@ -194,26 +200,15 @@ func tagOf(t scene.MarkType) string {
 }
 
 // orderedMarks is scene.Mark.Ordered for the child marks of a group: marks
-// without a z-index first, then the others sorted by z-index. A nil entry is
-// a mark whose operator never ran (an error upstream logs and renders past);
-// like the holes of upstream's sparse items array, it is skipped.
+// without a z-index first, then the others sorted by z-index. The marks are
+// all present (see errMarkHole).
 func orderedMarks(ms []*scene.Mark) []*scene.Mark {
-	anyZ, holes := false, false
+	anyZ := false
 	for _, m := range ms {
-		if m == nil {
-			holes = true
-		} else if m.Zindex != 0 {
+		if m.Zindex != 0 {
 			anyZ = true
+			break
 		}
-	}
-	if holes {
-		kept := make([]*scene.Mark, 0, len(ms))
-		for _, m := range ms {
-			if m != nil {
-				kept = append(kept, m)
-			}
-		}
-		ms = kept
 	}
 	if !anyZ {
 		return ms
@@ -319,14 +314,14 @@ func (r *renderer) item(m *scene.Mark, it *scene.Item, tag string, depth int) er
 		r.imageItem(m, it)
 	case scene.MarkRule:
 		w.attrName("transform")
-		w.buf = appendTranslate(w.buf, it.X.Zero(), it.Y.Zero())
+		w.buf = appendTranslateItem(w.buf, it)
 		w.buf = append(w.buf, '"')
 		x2, y2 := 0.0, 0.0
 		if it.X2.Set() {
-			x2 = it.X2.Val() - it.X.Zero()
+			x2 = it.X2.Val() - it.OrZero("x")
 		}
 		if it.Y2.Set() {
-			y2 = it.Y2.Val() - it.Y.Zero()
+			y2 = it.Y2.Val() - it.OrZero("y")
 		}
 		w.attrNum("x2", x2)
 		w.attrNum("y2", y2)
@@ -340,7 +335,7 @@ func (r *renderer) item(m *scene.Mark, it *scene.Item, tag string, depth int) er
 			w.attrRaw("vector-effect", "non-scaling-stroke")
 		}
 		w.attrName("transform")
-		w.buf = appendTranslate(w.buf, it.X.Zero(), it.Y.Zero())
+		w.buf = appendTranslateItem(w.buf, it)
 		if it.AngleTruthy() {
 			w.buf = append(w.buf, " rotate("...)
 			w.buf = appendAngle(w.buf, it)
@@ -360,7 +355,7 @@ func (r *renderer) item(m *scene.Mark, it *scene.Item, tag string, depth int) er
 		r.style(m, it, "path", it.Fill, it.Stroke)
 	case scene.MarkArc, scene.MarkSymbol, scene.MarkShape:
 		w.attrName("transform")
-		w.buf = appendTranslate(w.buf, it.X.Zero(), it.Y.Zero())
+		w.buf = appendTranslateItem(w.buf, it)
 		if it.AngleTruthy() {
 			w.buf = append(w.buf, " rotate("...)
 			w.buf = appendAngle(w.buf, it)
@@ -402,6 +397,15 @@ func scaleOne(n scene.Num) float64 {
 	return 1
 }
 
+// appendTranslateItem is `translate(${item.x || 0},${item.y || 0})`.
+func appendTranslateItem(dst []byte, it *scene.Item) []byte {
+	dst = append(dst, "translate("...)
+	dst = it.AppendPos(dst, "x")
+	dst = append(dst, ',')
+	dst = it.AppendPos(dst, "y")
+	return append(dst, ')')
+}
+
 func appendTranslate(dst []byte, x, y float64) []byte {
 	dst = append(dst, "translate("...)
 	dst = scene.AppendNumber(dst, x)
@@ -436,7 +440,7 @@ func abs(f float64) float64 {
 func (r *renderer) group(m *scene.Mark, it *scene.Item, depth int) error {
 	w := &r.w
 	w.attrName("transform")
-	w.buf = appendTranslate(w.buf, it.X.Zero(), it.Y.Zero())
+	w.buf = appendTranslateItem(w.buf, it)
 	w.buf = append(w.buf, '"')
 
 	fore := it.StrokeForeground.IsTrue()
@@ -466,6 +470,11 @@ func (r *renderer) group(m *scene.Mark, it *scene.Item, depth int) error {
 			return err
 		}
 		w.attr("clip-path", ref)
+	}
+	for _, m := range it.Items {
+		if m == nil {
+			return errMarkHole
+		}
 	}
 	for _, child := range orderedMarks(it.Items) {
 		if err := r.mark(child, depth+1); err != nil {

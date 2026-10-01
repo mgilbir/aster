@@ -194,6 +194,7 @@ func init() {
 	})
 	geoFn("geoShape", func(g GeoProvider, a []jsval.Value) jsval.Value { return g.GeoShape(arg(a, 0), arg(a, 1), arg(a, 2)) })
 	geoFn("geoScale", func(g GeoProvider, a []jsval.Value) jsval.Value { return g.GeoScale(arg(a, 0), arg(a, 1)) })
+	geoFn("geoTranslate", func(g GeoProvider, a []jsval.Value) jsval.Value { return g.GeoTranslate(arg(a, 0), arg(a, 1)) })
 	fn("pathShape", func(s *Scope, args []jsval.Value) jsval.Value {
 		if s.geo == nil {
 			return jsval.Undefined

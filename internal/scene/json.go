@@ -152,6 +152,15 @@ func strOf(v jsval.Value) string {
 	return v.AsString()
 }
 
+// strOfTruthy is strOf for properties that upstream reads as `value || default`
+// (interpolate, orient): every falsy value (0, NaN, false, null) is unset.
+func strOfTruthy(v jsval.Value) string {
+	if !v.IsTruthy() {
+		return ""
+	}
+	return strOf(v)
+}
+
 func numOf(v jsval.Value) Num {
 	if v.IsNullish() {
 		return Num{}

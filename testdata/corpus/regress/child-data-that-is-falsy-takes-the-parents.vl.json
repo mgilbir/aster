@@ -1,0 +1,6 @@
+{"$schema":"https://vega.github.io/schema/vega-lite/v6.json",
+"data":{"values":[{"a":"x","b":1},{"a":"y","b":3},{"a":"x","b":2}]},
+"hconcat":[
+{"data":0,"mark":"bar","encoding":{"x":{"field":"a","type":"nominal"},"y":{"aggregate":"sum","field":"b","type":"quantitative"}}},
+{"data":null,"mark":"point","encoding":{"x":{"field":"a","type":"nominal"},"y":{"field":"b","type":"quantitative"}}},
+{"data":"","mark":"tick","encoding":{"x":{"field":"b","type":"quantitative"}}}]}

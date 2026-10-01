@@ -183,6 +183,9 @@ type Item struct {
 	Datum jsval.Value
 	// Bounds is the item's bounding box (filled by Bounder.BoundMark).
 	Bounds Bounds
+	// Seq is the item's tuple id: the order the items of a view were created
+	// in, which breaks the ties of a mark sort.
+	Seq uint64
 
 	// Layout.
 	X, Y, X2, Y2  Num
@@ -199,11 +202,11 @@ type Item struct {
 	StrokeCap        string
 	StrokeJoin       string
 	StrokeMiterLimit Num
-	// StrokeDash is the dash array. A non-nil empty slice is a present empty
-	// array (emits stroke-dasharray=""); StrokeDashStr, when non-empty, is
-	// used verbatim instead (dash written as a string in the spec).
-	StrokeDash       []float64
-	StrokeDashStr    string
+	// StrokeDash is the dash pattern as the encoder wrote it: upstream keeps
+	// any value and its SVG renderer writes String(value) (an array joins with
+	// commas), so a number, a string or an empty array is written as given.
+	// A nullish value (the zero Value is undefined) means no pattern.
+	StrokeDash       jsval.Value
 	StrokeDashOffset Num
 	StrokeForeground Tri
 	StrokeOffset     Num

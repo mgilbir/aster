@@ -28,12 +28,21 @@ func (v *runView) setGuideCaptions() {
 			m.NoGuideCaption = true
 			continue
 		}
+		var caption string
+		ok := true
 		switch m.Role {
 		case "axis":
-			m.GuideCaption = v.axisCaption(ctx, m.Items[0])
+			caption, ok = v.axisCaption(ctx, m.Items[0])
 		case "legend":
-			m.GuideCaption = v.legendCaption(ctx, m.Items[0])
+			caption, ok = v.legendCaption(ctx, m.Items[0])
 		}
+		if !ok {
+			// ariaGuide catches what the caption throws and answers null:
+			// the mark gets no aria attributes at all.
+			m.NoGuideCaption = true
+			continue
+		}
+		m.GuideCaption = caption
 	}
 }
 
@@ -77,16 +86,18 @@ func (v *runView) captionOptions(item *scene.Item) scale.CaptionOptions {
 	return o
 }
 
-func (v *runView) axisCaption(c *rtContext, item *scene.Item) string {
+// axisCaption is axisCaption of util/aria.js; ok is false where upstream's
+// throws (no such scale, a domain it cannot caption).
+func (v *runView) axisCaption(c *rtContext, item *scene.Item) (caption string, ok bool) {
 	datum := item.Datum
 	name := datum.Get("scale").AsString()
 	n := c.scaleNode(name)
 	if n == nil {
-		return ""
+		return "", false
 	}
 	s, _ := n.value.(scale.Scale)
 	if s == nil {
-		return ""
+		return "", false
 	}
 	title := ""
 	hasTitle := false
@@ -104,29 +115,31 @@ func (v *runView) axisCaption(c *rtContext, item *scene.Item) string {
 	}
 	dc, err := scale.DomainCaption(v.locale, s, v.captionOptions(item))
 	if err != nil {
-		return ""
+		return "", false
 	}
 	out := xy + "-axis"
 	if hasTitle {
 		out += " titled '" + title + "'"
 	}
-	return out + " for a " + typ + " scale with " + dc
+	return out + " for a " + typ + " scale with " + dc, true
 }
 
-func (v *runView) legendCaption(c *rtContext, item *scene.Item) string {
+// legendCaption is legendCaption of util/aria.js; ok is false where upstream's
+// throws.
+func (v *runView) legendCaption(c *rtContext, item *scene.Item) (caption string, ok bool) {
 	datum := item.Datum
 	scales := datum.Get("scales").ObjValue()
 	if scales == nil || scales.Len() == 0 {
-		return ""
+		return "", false
 	}
 	props := append([]string(nil), scales.Keys()...)
 	n := c.scaleNode(scales.ValueAt(0).AsString())
 	if n == nil {
-		return ""
+		return "", false
 	}
 	s, _ := n.value.(scale.Scale)
 	if s == nil {
-		return ""
+		return "", false
 	}
 	title := ""
 	if datum.Get("title").IsTruthy() {
@@ -138,13 +151,13 @@ func (v *runView) legendCaption(c *rtContext, item *scene.Item) string {
 	}
 	dc, err := scale.DomainCaption(v.locale, s, v.captionOptions(item))
 	if err != nil {
-		return ""
+		return "", false
 	}
 	out := typ
 	if title != "" {
 		out += " titled '" + title + "'"
 	}
-	return out + " for " + channelCaption(props) + " with " + dc
+	return out + " for " + channelCaption(props) + " with " + dc, true
 }
 
 func channelCaption(props []string) string {

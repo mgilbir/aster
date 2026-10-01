@@ -1,0 +1,1 @@
+{"width":50,"height":50,"data":[{"name":"t","values":[{"group":"a"},{"group":"b"}],"transform":[{"type":"regression","x":"age","y":"group","method":"log","as":["age","group"]}]}]}

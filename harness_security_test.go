@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"testing"
@@ -31,6 +32,10 @@ type secJob struct {
 	FontB64   []byte   `json:"font"`
 	Scale     float64  `json:"scale"`
 	Extra     []string `json:"extra"`
+	// MaxStackMB caps the child's goroutine stacks (debug.SetMaxStack), so
+	// an unbounded recursion fails at a modest depth instead of growing to
+	// Go's 1 GB default; a stack overflow is fatal and cannot be recovered.
+	MaxStackMB int `json:"maxStackMB"`
 }
 
 type secResult struct {
@@ -76,6 +81,9 @@ func init() {
 }
 
 func runSecChild(job secJob) int {
+	if job.MaxStackMB > 0 {
+		debug.SetMaxStack(job.MaxStackMB << 20)
+	}
 	var peak uint64
 	stop := make(chan struct{})
 	go func() {

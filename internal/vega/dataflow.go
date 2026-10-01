@@ -1,14 +1,15 @@
 package vega
 
 import (
-	"container/heap"
 	"context"
 	"errors"
 	"fmt"
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/geo"
+	"github.com/mgilbir/aster/internal/scale"
 	"sort"
 
+	"github.com/mgilbir/aster/internal/expr"
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/scene"
 	"github.com/mgilbir/aster/internal/transforms/hierarchy"
@@ -416,25 +417,66 @@ func (n *opNode) detach() {
 	n.source = nil
 }
 
-// nodeHeap is the evaluation priority queue: lowest rank first, creation
-// order between equal ranks.
+// nodeHeap is the evaluation priority queue: lowest rank first. It is
+// vega-dataflow's Heap, step for step, because among operators of equal rank
+// the order they come out in is whatever that sift order gives, and when an
+// operator throws, the ones not yet run are the ones that never will.
 type nodeHeap []*opNode
 
 func (h nodeHeap) Len() int { return len(h) }
-func (h nodeHeap) Less(i, j int) bool {
-	if h[i].qrank != h[j].qrank {
-		return h[i].qrank < h[j].qrank
-	}
-	return h[i].id < h[j].id
+
+// less is cmp(a, b) < 0 for the comparator a.qrank - b.qrank.
+func (nodeHeap) less(a, b *opNode) bool { return a.qrank < b.qrank }
+
+func (h *nodeHeap) push(x *opNode) {
+	*h = append(*h, x)
+	h.siftdown(0, len(*h)-1)
 }
-func (h nodeHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
-func (h *nodeHeap) Push(x any)   { *h = append(*h, x.(*opNode)) }
-func (h *nodeHeap) Pop() any {
-	old := *h
-	n := len(old)
-	x := old[n-1]
-	*h = old[:n-1]
-	return x
+
+func (h *nodeHeap) pop() *opNode {
+	nodes := *h
+	last := nodes[len(nodes)-1]
+	nodes = nodes[:len(nodes)-1]
+	*h = nodes
+	if len(nodes) == 0 {
+		return last
+	}
+	item := nodes[0]
+	nodes[0] = last
+	h.siftup(0)
+	return item
+}
+
+func (h nodeHeap) siftdown(start, idx int) {
+	item := h[idx]
+	for idx > start {
+		pidx := (idx - 1) >> 1
+		parent := h[pidx]
+		if h.less(item, parent) {
+			h[idx] = parent
+			idx = pidx
+			continue
+		}
+		break
+	}
+	h[idx] = item
+}
+
+func (h nodeHeap) siftup(idx int) {
+	start, end := idx, len(h)
+	item := h[idx]
+	cidx := idx<<1 + 1
+	for cidx < end {
+		ridx := cidx + 1
+		if ridx < end && !h.less(h[cidx], h[ridx]) {
+			cidx = ridx
+		}
+		h[idx] = h[cidx]
+		idx = cidx
+		cidx = idx<<1 + 1
+	}
+	h[idx] = item
+	h.siftdown(start, idx)
 }
 
 type postrun struct {
@@ -574,7 +616,7 @@ func (g *flowGraph) enqueue(n *opNode, force bool) {
 	}
 	if q || force {
 		n.qrank = n.rank
-		heap.Push(&g.heap, n)
+		g.heap.push(n)
 	}
 }
 
@@ -657,6 +699,8 @@ func (g *flowGraph) evaluate(encode string) (err error) {
 					err = e.err
 				case *geo.LimitError:
 					err = e.Err
+				case *scale.Thrown, *expr.Error:
+					err = e.(error) // an exception a scale, an accessor or an expression threw
 				case error:
 					err, internal = fmt.Errorf("%w\n%s", e, shortStack()), true
 				default:
@@ -665,7 +709,7 @@ func (g *flowGraph) evaluate(encode string) (err error) {
 			}
 		}()
 		for g.heap.Len() > 0 {
-			op := heap.Pop(&g.heap).(*opNode)
+			op := g.heap.pop()
 			if op.rank != op.qrank {
 				g.enqueue(op, true)
 				continue
@@ -727,6 +771,10 @@ func (g *flowGraph) safely(fn func(*flowGraph)) (err error) {
 				err = e.err
 			} else if le, ok := r.(*geo.LimitError); ok {
 				err = le.Err
+			} else if th, ok := r.(*scale.Thrown); ok {
+				err = th
+			} else if ee, ok := r.(*expr.Error); ok {
+				err = ee
 			} else {
 				err, internal = fmt.Errorf("vega: internal error: %v", r), true
 			}

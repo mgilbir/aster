@@ -2,6 +2,7 @@ package transforms
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"slices"
@@ -35,13 +36,13 @@ var regressionMethods = map[string]bool{
 // FitRegression fits the named method (constant, linear, log, exp, pow, quad,
 // poly) to the tuples. Points whose x or y is null or not a number are ignored.
 // order only applies to poly.
-func FitRegression(method string, data []jsval.Value, x, y Accessor, order int) (RegressionModel, error) {
+func FitRegression(method string, data []jsval.Value, x, y Accessor, order float64) (RegressionModel, error) {
 	return FitRegressionCtx(context.Background(), method, data, x, y, order)
 }
 
 // FitRegressionCtx is FitRegression that stops with the context's error when
 // ctx is cancelled (a high-order polynomial fit costs order^2 passes).
-func FitRegressionCtx(ctx context.Context, method string, data []jsval.Value, x, y Accessor, order int) (RegressionModel, error) {
+func FitRegressionCtx(ctx context.Context, method string, data []jsval.Value, x, y Accessor, order float64) (RegressionModel, error) {
 	switch method {
 	case "constant":
 		return FitConstant(data, x, y), nil
@@ -56,9 +57,6 @@ func FitRegressionCtx(ctx context.Context, method string, data []jsval.Value, x,
 	case "quad":
 		return FitQuad(data, x, y), nil
 	case "poly":
-		if order < 0 || order > MaxPolyOrder {
-			return RegressionModel{}, fmt.Errorf("regression: poly order %d out of range [0,%d]", order, MaxPolyOrder)
-		}
 		return fitPoly(ctx, data, x, y, order)
 	}
 	return RegressionModel{}, fmt.Errorf("Invalid regression method: %s", method)
@@ -294,12 +292,12 @@ func FitQuad(data []jsval.Value, x, y Accessor) RegressionModel {
 // FitPoly fits a polynomial of the given order by solving the normal
 // equations with Gaussian elimination on mean-centred data. Orders 0, 1 and 2
 // use the constant, linear and quad fits. Coef is ascending in power.
-func FitPoly(data []jsval.Value, x, y Accessor, order int) RegressionModel {
+func FitPoly(data []jsval.Value, x, y Accessor, order float64) RegressionModel {
 	m, _ := fitPoly(context.Background(), data, x, y, order)
 	return m
 }
 
-func fitPoly(ctx context.Context, data []jsval.Value, x, y Accessor, order int) (RegressionModel, error) {
+func fitPoly(ctx context.Context, data []jsval.Value, x, y Accessor, order float64) (RegressionModel, error) {
 	switch order {
 	case 0:
 		return FitConstant(data, x, y), nil
@@ -308,9 +306,21 @@ func fitPoly(ctx context.Context, data []jsval.Value, x, y Accessor, order int) 
 	case 2:
 		return FitQuad(data, x, y), nil
 	}
+	// Upstream takes any number for the order, k = order + 1 coefficients; once
+	// the normal equations are solved it allocates Array(k) for the expanded
+	// polynomial, which throws unless k is an integer that is a valid array
+	// length. A fractional, NaN or negative-below-minus-one order therefore ends
+	// in that RangeError (the system it would have solved first has no effect),
+	// and an order of -1 fits nothing: its coefficients are NaN.
+	if k := order + 1; k != math.Trunc(k) || k < 0 || k > math.MaxUint32 {
+		return RegressionModel{}, errors.New("RangeError: Invalid array length")
+	}
+	if order > MaxPolyOrder {
+		return RegressionModel{}, fmt.Errorf("regression: poly order %g out of range [-1,%d]", order, MaxPolyOrder)
+	}
 	ps := regressionPoints(data, x, y, false)
 	n := len(ps.x)
-	k := order + 1
+	k := int(order) + 1
 	matrix := make([][]float64, 0, k+1)
 	lhs := make([]float64, 0, k)
 	for i := 0; i < k; i++ {
@@ -341,7 +351,14 @@ func fitPoly(ctx context.Context, data []jsval.Value, x, y Accessor, order int) 
 	ux, uy := ps.ux, ps.uy
 	predict := func(x float64) float64 {
 		x -= ux
-		y := uy + coef[0] + float64(coef[1]*x) + float64(float64(coef[2]*x)*x)
+		// coef[i] past the end of an order -1 fit is undefined, and NaN with it.
+		at := func(i int) float64 {
+			if i < len(coef) {
+				return coef[i]
+			}
+			return math.NaN()
+		}
+		y := uy + at(0) + float64(at(1)*x) + float64(float64(at(2)*x)*x)
 		for i := 3; i < k; i++ {
 			y += float64(coef[i] * jsmath.Pow(x, float64(i)))
 		}
@@ -356,6 +373,9 @@ func fitPoly(ctx context.Context, data []jsval.Value, x, y Accessor, order int) 
 
 // regressionUncenter expands the polynomial back out of mean-centred space.
 func regressionUncenter(k int, a []float64, x, y float64) []float64 {
+	if k == 0 {
+		return []float64{math.NaN()} // z[0] += y on the empty array
+	}
 	z := make([]float64, k)
 	for i := k - 1; i >= 0; i-- {
 		v := a[i]

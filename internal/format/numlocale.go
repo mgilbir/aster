@@ -3,6 +3,7 @@ package format
 import (
 	"errors"
 	"fmt"
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsmath"
 	"math"
 	"math/big"
@@ -219,7 +220,7 @@ func (l *NumberLocale) newFormat(s Specifier, extraPrefix, extraSuffix string) (
 	case math.IsNaN(w):
 		f.width = 0
 	case w > MaxWidth:
-		return nil, fmt.Errorf("format width %v exceeds %d", w, MaxWidth)
+		return nil, fmt.Errorf("%w: format width %v exceeds %d", budget.ErrLimit, w, MaxWidth)
 	default:
 		f.width = int(w)
 	}

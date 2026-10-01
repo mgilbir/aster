@@ -1,0 +1,1 @@
+{"width":50,"height":50,"data":[{"name":"t","values":[{"v":"a"},{"v":"b"}]}],"scales":[{"name":"c","type":"pow","domain":{"data":"t","field":"v"},"range":["#eee","#999","#333"]}],"marks":[{"type":"rect","from":{"data":"t"},"encode":{"update":{"width":{"value":10},"height":{"value":10},"fill":{"scale":"c","value":1}}}}]}

@@ -45,6 +45,7 @@ type renderer struct {
 	rootState    state
 	docStates    map[*node]*state
 	active       map[*node]bool // paint servers, masks, filters, markers being expanded
+	useLoops     map[*node]bool // clip-path <use> elements whose chain of uses loops (see useLoops)
 	inText       bool           // drawing glyphs (text-rendering selects anti-aliasing)
 	effectPx     int            // pixels charged to filters and pattern tiles so far
 
@@ -615,6 +616,45 @@ func (r *renderer) pathsMask(ps []*path, ms []matrix, evenOdd []bool, region ire
 
 const maxClipDepth = 8
 
+// useLoop reports whether the chain of <use> elements starting at u, each
+// referencing the next, comes back on itself: such a chain draws nothing.
+// Each use references one element, so the chains form a functional graph and
+// a walk stops at the first use already decided; deciding every use of a
+// document is linear in their number however the chains share their tails.
+func (r *renderer) useLoop(u *node) bool {
+	if r.useLoops == nil {
+		r.useLoops = map[*node]bool{}
+	}
+	var chain []*node
+	onChain := map[*node]bool{}
+	loops := false
+	for n := u; ; {
+		if v, done := r.useLoops[n]; done {
+			loops = v
+			break
+		}
+		if onChain[n] {
+			loops = true
+			break
+		}
+		chain = append(chain, n)
+		onChain[n] = true
+		href := n.str(aHref)
+		if !strings.HasPrefix(href, "#") {
+			break
+		}
+		t := r.doc.ids[href[1:]]
+		if t == nil || t.tag != tagUse {
+			break
+		}
+		n = t
+	}
+	for _, n := range chain {
+		r.useLoops[n] = loops
+	}
+	return loops
+}
+
 // buildClip resolves a clipPath element for an element whose state is st.
 // Returns nil when the clip is unusable (the element is then not drawn).
 func (r *renderer) buildClip(cn *node, st *state, depth int, bb *rect) *mask {
@@ -651,10 +691,15 @@ func (r *renderer) buildClip(cn *node, st *state, depth int, bb *rect) *mask {
 	var ms []matrix
 	var eo []bool
 	var single *node
-	var collect func(parent *node, pm matrix, ps0 *state, top bool)
-	collect = func(parent *node, pm matrix, ps0 *state, top bool) {
+	var collect func(parent *node, pm matrix, ps0 *state, top bool, hops int)
+	collect = func(parent *node, pm matrix, ps0 *state, top bool, hops int) {
+		// A <use> in a clipPath may reference another <use>, even itself
+		// through a cycle: bound the chain by the element nesting limit.
+		if hops > r.lim.MaxDepth {
+			return
+		}
 		for _, k := range parent.kids {
-			if isDisplayNone(k) {
+			if isDisplayNone(k) || !r.budget() {
 				continue
 			}
 			var kst state
@@ -674,11 +719,11 @@ func (r *renderer) buildClip(cn *node, st *state, depth int, bb *rect) *mask {
 			case tagUse:
 				href := k.str(aHref)
 				if strings.HasPrefix(href, "#") {
-					if t := r.doc.ids[href[1:]]; t != nil && t != k {
+					if t := r.doc.ids[href[1:]]; t != nil && t != k && !r.useLoop(k) {
 						x := kst.length(k.str(aX), 0, 0)
 						y := kst.length(k.str(aY), 1, 0)
 						fake := &node{kids: []*node{t}}
-						collect(fake, m.mul(translate(x, y)), &kst, false)
+						collect(fake, m.mul(translate(x, y)), &kst, false, hops+1)
 					}
 				}
 			case tagPath, tagRect, tagCircle, tagEllipse, tagLine, tagPolyline, tagPolygon:
@@ -700,7 +745,7 @@ func (r *renderer) buildClip(cn *node, st *state, depth int, bb *rect) *mask {
 			}
 		}
 	}
-	collect(cn, base, &cs, true)
+	collect(cn, base, &cs, true, 0)
 	var result *mask
 	if len(ps) == 0 {
 		result = &mask{r: irect{}}

@@ -326,9 +326,17 @@ func (v Value) AsDouble() float64 {
 	case KindStr:
 		return parseLooseDouble(strings.TrimSpace(v.s))
 	case KindArr:
-		items := v.Items()
-		if len(items) == 1 {
-			return items[0].AsDouble()
+		// A chain of one-element arrays is followed in a loop, not by
+		// recursion, whatever its depth.
+		for {
+			items := v.Items()
+			if len(items) != 1 {
+				return math.NaN()
+			}
+			v = items[0]
+			if v.k != KindArr {
+				return v.AsDouble()
+			}
 		}
 	}
 	return math.NaN()
@@ -362,7 +370,12 @@ func (v Value) AsBoolean() bool {
 // except that a Timestamp is written as its epoch number (callers that need
 // Date.prototype.toString format it themselves). Array elements that are
 // nullish are written as "" (Array.prototype.join).
-func (v Value) AsString() string {
+func (v Value) AsString() string { return v.asString(0) }
+
+func (v Value) asString(depth int) string {
+	if depth > MaxValueDepth {
+		return ""
+	}
 	switch v.k {
 	case KindStr:
 		return v.s
@@ -384,7 +397,7 @@ func (v Value) AsString() string {
 				b.WriteByte(',')
 			}
 			if !it.IsNullish() {
-				b.WriteString(it.AsString())
+				b.WriteString(it.asString(depth + 1))
 			}
 		}
 		return b.String()
@@ -416,8 +429,10 @@ func (v Value) String() string {
 }
 
 // Equal is deep structural equality (not JavaScript ===). NaN equals NaN.
-func Equal(a, b Value) bool {
-	if a.k != b.k {
+func Equal(a, b Value) bool { return equal(a, b, 0) }
+
+func equal(a, b Value, depth int) bool {
+	if a.k != b.k || depth > MaxValueDepth {
 		return false
 	}
 	switch a.k {
@@ -435,7 +450,7 @@ func Equal(a, b Value) bool {
 			return false
 		}
 		for i := range x {
-			if !Equal(x[i], y[i]) {
+			if !equal(x[i], y[i], depth+1) {
 				return false
 			}
 		}
@@ -453,7 +468,7 @@ func Equal(a, b Value) bool {
 		}
 		for i := 0; i < x.Len(); i++ {
 			bv, ok := y.Get(x.KeyAt(i))
-			if !ok || !Equal(x.ValueAt(i), bv) {
+			if !ok || !equal(x.ValueAt(i), bv, depth+1) {
 				return false
 			}
 		}

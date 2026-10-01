@@ -253,6 +253,31 @@ func TestLineAreaErrors(t *testing.T) {
 	}
 }
 
+// `item.interpolate || 'linear'` and `entry[orient || 'vertical']`: falsy
+// values of any type (NaN, 0, false, null) mean unset, not an unknown curve.
+func TestFalsyInterpolateAndOrientAreUnset(t *testing.T) {
+	for _, v := range []jsval.Value{jsval.Num(math.NaN()), jsval.Num(0), jsval.Bool(false), jsval.Null, jsval.Str("")} {
+		it := &Item{}
+		for _, k := range []string{"interpolate", "orient"} {
+			if _, err := it.Set(k, v); err != nil {
+				t.Fatal(err)
+			}
+		}
+		var sp StringPath
+		if err := Line(&sp, []*Item{it, it}); err != nil {
+			t.Errorf("%v: %v", v, err)
+		}
+	}
+	it := &Item{}
+	if _, err := it.Set("interpolate", jsval.Num(1)); err != nil {
+		t.Fatal(err)
+	}
+	var sp StringPath
+	if err := Line(&sp, []*Item{it}); err != ErrUnknownInterpolate {
+		t.Errorf("truthy non-string interpolate: %v", err)
+	}
+}
+
 func TestOrdered(t *testing.T) {
 	m := &Mark{}
 	for _, z := range []float64{0, 3, 1, 0, -2, 1} {
@@ -420,7 +445,9 @@ func TestItemSetGet(t *testing.T) {
 	if g := it.Fill.Gradient(); g == nil || !g.Radial || len(g.Stops) != 1 {
 		t.Errorf("gradient: %+v", it.Fill)
 	}
-	if v := it.Get("x"); v.NumValue() != 12.5 {
+	// A string given for a numeric property reads back as the string, as a
+	// JavaScript property would, while the number it converts to drives layout.
+	if v := it.Get("x"); !v.IsStr() || v.StrValue() != "12.5" {
 		t.Errorf("Get x = %v", v)
 	}
 	if !it.Get("y").IsUndefined() || !it.Get("stroke").IsNull() || it.Get("madeUp").NumValue() != 1 {
@@ -431,5 +458,47 @@ func TestItemSetGet(t *testing.T) {
 	}
 	if fill := it.Get("fill"); fill.Get("gradient").AsString() != "radial" {
 		t.Errorf("Get fill = %v", fill)
+	}
+}
+
+// A word given where a number goes is truthy, and converts to NaN: upstream
+// draws a rectangle with a corner radius of "round" as a path of NaN corners
+// and reads a width of "wide" as NaN where a numeric NaN would read as 0.
+func TestWordsWhereNumbersGo(t *testing.T) {
+	var it Item
+	for k, v := range map[string]jsval.Value{
+		"width": jsval.Num(40), "height": jsval.Num(20), "cornerRadius": jsval.Str("round"),
+	} {
+		if _, err := it.Set(k, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !it.HasCornerRadius() {
+		t.Error(`cornerRadius "round" is truthy`)
+	}
+	var p StringPath
+	Rectangle(&p, &it)
+	if got := p.String(); !strings.HasPrefix(got, "MNaN,0LNaN,0C") {
+		t.Errorf("path %s, want one of NaN corners", got)
+	}
+
+	var plain Item
+	plain.Set("cornerRadius", jsval.Num(math.NaN()))
+	if plain.HasCornerRadius() {
+		t.Error("a numeric NaN radius is falsy")
+	}
+
+	var w Item
+	w.Set("width", jsval.Str("wide"))
+	if got := w.OrZero("width"); !math.IsNaN(got) {
+		t.Errorf(`width "wide" reads %v, want NaN`, got)
+	}
+	w.Set("width", jsval.Num(math.NaN()))
+	if got := w.OrZero("width"); got != 0 {
+		t.Errorf("width NaN reads %v, want 0", got)
+	}
+	w.Set("width", jsval.Str(""))
+	if got := w.OrZero("width"); got != 0 {
+		t.Errorf(`width "" reads %v, want 0`, got)
 	}
 }

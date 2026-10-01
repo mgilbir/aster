@@ -11,7 +11,15 @@ import (
 
 var defaultEventMarks = strSet([]string{"*", "arc", "area", "group", "image", "line", "path", "rect", "rule", "shape", "symbol", "text", "trail"})
 
-type eventParser struct{ defaultSource string }
+type eventParser struct {
+	defaultSource string
+	depth         int // nesting of between selectors being parsed
+}
+
+// maxEventNesting bounds how deeply between selectors ("[[a, b] > c, d] > e")
+// nest: parseBetween recurses once per level, and the selector is a string of
+// any length. Real selectors nest once.
+const maxEventNesting = 64
 
 func parseSelector(selector, source string) []Value {
 	if source == "" {
@@ -66,6 +74,11 @@ func (p *eventParser) parseOne(s string) Value {
 }
 
 func (p *eventParser) parseBetween(s string) Value {
+	p.depth++
+	defer func() { p.depth-- }()
+	if p.depth > maxEventNesting {
+		throw("Event selector nested too deeply: %s", s[:min(len(s), 40)])
+	}
 	n := len(s)
 	i := evFind(s, 1, ']', "[", "]")
 	if i == n {

@@ -43,3 +43,11 @@ testdata/oracle-node/node_modules/
 testdata/oracle-node-vl5/node_modules/
 testdata/oracle-cache/
 testdata/oracle-cache-quickjs/
+
+# External corpora fetched by scripts/fetch-corpora.sh
+testdata/corpora-cache/
+
+# Upstream test vectors: recorded by scripts/record-upstream-vectors.sh (derived, regenerable)
+testdata/upstream-vectors-cache/
+testdata/upstream-clones/
+testdata/oracle-node/.recorder-scratch/

@@ -300,16 +300,24 @@ func runGolden(t *testing.T, file string) {
 		for _, q := range c.Queries {
 			want := q[2]
 			var got jsval.Value
-			var ran bool
+			var ran, threw bool
 			func() {
 				defer func() {
 					if r := recover(); r != nil {
+						// an exception is the answer when upstream threw too
+						if _, ok := r.(*Thrown); ok && isThrow(want) {
+							threw = true
+							return
+						}
 						t.Errorf("%s: panic in %v: %v", c.Name, q[:2], r)
 						fail++
 					}
 				}()
 				got, ran = runQuery(t, s, q[:2])
 			}()
+			if threw {
+				continue
+			}
 			if isThrow(want) || !ran {
 				continue
 			}

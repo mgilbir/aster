@@ -299,19 +299,49 @@ The engine is organized along Vega's own module boundaries, under `internal/`:
 
 Upstream is the oracle. `testdata/oracle-node` pins Vega 6.4.0 / Vega-Lite 6.4.3 (and resvg), and `testdata/oracle-node-vl5` Vega-Lite 5.8.0, running in node; `internal/oracle` drives them and caches their answers under `testdata/oracle-cache`, which is recreated on demand and never committed. The engine's SVG, compiled Vega and PNG are compared with what upstream produces for the same spec.
 
-On the 1,347 specs of the corpus (260 Vega fixtures, 332 Vega-Lite fixtures, Vega's 92 example specs, the 627 Vega-Lite examples, 23 vl-convert specs and 13 fuzz-found regressions), 1,331 render identically to upstream or within half a pixel (text is shaped by forme on one side and node-canvas on the other) and 13 draw the current time or advance on timer events; the remaining few are those whose oracle answer depends on the platform node runs on, listed with the reason in `testdata/oracle-expect.txt`; the compiled Vega is identical to upstream's for every Vega-Lite spec.
+On the 1,418 specs of the corpus (260 Vega fixtures, 332 Vega-Lite fixtures, Vega's 92 example specs, the 627 Vega-Lite examples, 23 vl-convert specs and 84 fuzz-found regressions), 1,415 render identically to upstream or within half a pixel, or fail where upstream fails (text is shaped by forme on one side and node-canvas on the other; the clock is pinned on both sides, and timer events do not fire in a static render); the remaining few are those whose oracle answer depends on the platform node runs on, listed with the reason in `testdata/oracle-expect.txt`; the compiled Vega is identical to upstream's for every Vega-Lite spec.
+
+Beyond the corpus, the same comparison runs over generated and collected inputs. Each has a floor on its case count, so it cannot silently shrink, and an expectation file under `testdata/sweeps` that lists, with a reason, every case that is not `ok`; a case that regresses fails, and so does an entry that no longer applies.
+
+| Sweep | Cases | What it probes |
+|---|---:|---|
+| `TestSweepVegaSchema` | 7,549 | one chart per (property, value) Vega's schema declares |
+| `TestSweepVegaLiteSchema` | 27,513 | the same over Vega-Lite's schema, comparing the compiled Vega |
+| `TestSweepValues` | 500 | untidy data (NaN, ±Infinity, -0, null, empty strings, words where numbers go, non-ASCII text) through stacks, scales, aggregates and axes |
+| `TestSweepSignals` | 166 | signal writes after the first render, re-run as `View.signal` + `runAsync` would |
+| `TestSweepTimezones` | 801 | local time in nine zones around 2024's daylight-saving transitions, node running with that `TZ` |
+| `TestSweepLocales` | 372 | every d3 number and time locale, through axes, legends, formats and parses |
+| `TestCorpusWild` | 1,981 | Vega-Lite specs collected from the wild (chart-llm, pinned) |
+| `TestCorpusDeneb` | 62 | Deneb's templates and examples (pinned) |
+
+All of them agree with upstream except a handful of CJK and emoji cases, where neither side has the glyphs and what node measures depends on the platform's font fallback.
+
+Other parts of the harness:
+
+- **Upstream's own test suites.** `scripts/record-upstream-vectors.sh` runs the test files of 29 Vega and d3 packages, at the installed versions, and records every call they make with upstream's answer; 24 `TestUpstream*` tests replay 26,054 of those calls against the engine and require exact equality. The few known divergences are listed with their cause in `testdata/upstream-vectors/known-divergences.txt`, some only for the architecture node recorded them on.
+- **Differential fuzzing.** `ASTER_FUZZ=<n> go test -run TestFuzzDifferential .` mutates corpus specs and renders each mutant on both sides, checking the engine for panics and a time budget; each disagreement is triaged into a fix with a regression spec under `testdata/corpus/regress`, or into a stated reason (a deliberate limit, a loader policy).
+- **The comparator is tested too.** `internal/svgdiff` is mutation-tested: 336 kinds of change over 718 documents must each be reported, and the equivalences it tolerates are listed.
+- **Untrusted input.** `TestDeepInput` drives 69 deeply nested shapes (JSON, expressions, specs, SVG for PNG) to depths up to 100,000 in child processes with a capped stack, each within a time limit; `go run ./internal/cmd/recursionaudit` finds every recursion in the call graph and checks each against `scripts/recursion.allow`, which says how it is bounded. Resource limits (elements, render work, pixels, time) have their own tests.
+- **Floating point.** `scripts/fmacheck.sh` rejects fused multiply-adds the Go compiler could introduce on arm64 where V8 does not have them.
+- **Performance.** `BenchmarkScenes` times representative charts; `ASTER_PERF=1 go test -run TestPerfReport .` breaks a render down by stage (parse, compile, dataflow, text, SVG, PNG, PDF).
+
+`scripts/check.sh` (or `make check`) runs the gates CI runs.
 
 ```bash
 (cd testdata/oracle-node && npm ci)        # node version pinned in package.json (volta)
 (cd testdata/oracle-node-vl5 && npm ci)
 go test ./...                               # tests that need the oracle skip without it
 ASTER_ORACLE=require go test ./...          # as in CI: fail instead of skipping
+scripts/fetch-corpora.sh                    # external corpora (TestCorpusWild, TestCorpusDeneb)
+scripts/record-upstream-vectors.sh          # upstream's own test suites, for the TestUpstream* replays
 go test -run TestCompareWithNode -v . -args -compare.report=/tmp/report.md
 scripts/fmacheck.sh                         # fused multiply-add audit
 ASTER_FUZZ=3000 go test -run TestFuzzDifferential -v -timeout 3h .
 ```
 
 `go test -short ./...` needs no node: the unit tests replay vectors recorded from upstream (by the generators under each package's `testdata/`).
+
+Upstream's own test suites are replayed too. `scripts/record-upstream-vectors.sh` runs the test files of Vega's and d3's packages (from the git tag of the installed version) against the installed packages and records every call they make with upstream's answer, in `testdata/upstream-vectors-cache` (git-ignored, derived). The `TestUpstream*` tests in `internal/` replay those calls against the engine and compare exactly; they skip without the vectors, and fail with `ASTER_ORACLE=require`. Where the engine and upstream differ, the difference is listed, with its reason, in `testdata/upstream-vectors/known-divergences.txt`, and asserted both ways: an unlisted difference fails, and so does a listed one that has gone away.
 
 ### Building from source
 

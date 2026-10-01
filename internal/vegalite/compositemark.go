@@ -272,7 +272,7 @@ func normalizeBoxPlot(cc *compileCtx, spec Value, config Value) Value {
 	isMinMax := boxPlotType.IsStr() && boxPlotType.StrValue() == "min-max"
 	isTukey := boxPlotType.IsStr() && boxPlotType.StrValue() == "tukey"
 	bp := boxParams(cc, spec, extent, config)
-	contField := bp.continuousAxisChannelDef.Get("field").AsString()
+	contField := cmFieldName(cc, bp.continuousAxisChannelDef.Get("field"))
 	aliasedFieldName := cmAlias(cc, contField)
 	color, size := bp.encodingWithoutContinuousAxis.Get("color"), bp.encodingWithoutContinuousAxis.Get("size")
 	encodingWithoutSizeColorAndContinuousAxis := omit(bp.encodingWithoutContinuousAxis, "color", "size")
@@ -439,7 +439,7 @@ type boxParamsResult struct {
 func boxParams(cc *compileCtx, spec Value, extent Value, config Value) boxParamsResult {
 	orient := compositeMarkOrient(cc, spec, "boxplot")
 	cai := compositeMarkContinuousAxis(spec, orient, "boxplot")
-	contField := cai.def.Get("field").AsString()
+	contField := cmFieldName(cc, cai.def.Get("field"))
 	aliased := cmAlias(cc, contField)
 	boxPlotType := extent
 	if extent.IsNum() {

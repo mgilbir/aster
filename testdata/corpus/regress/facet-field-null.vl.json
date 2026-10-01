@@ -1,0 +1,1 @@
+{"data":{"values":[{"a":"A","b":1},{"a":"B","b":2}]},"mark":"point","encoding":{"row":{"field":null,"type":"quantitative"},"x":{"field":"b","type":"quantitative"}}}

@@ -1,0 +1,2 @@
+{"width":100,"height":50,"marks":[{"type":"text","encode":{"update":{"x":{"value":0},"y":{"value":20},"text":{"value":"__proto__"}}}},
+{"type":"text","encode":{"update":{"x":{"value":0},"y":{"value":40},"text":{"signal":"'' + ('__proto__')"}}}}]}

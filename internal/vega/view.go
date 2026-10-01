@@ -35,7 +35,9 @@ import (
 	"github.com/mgilbir/aster/internal/geo"
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/raster"
+	"github.com/mgilbir/aster/internal/scale"
 	"github.com/mgilbir/aster/internal/scene"
+	"github.com/mgilbir/aster/internal/transforms"
 	"github.com/mgilbir/aster/internal/transforms/wordcloud"
 )
 
@@ -125,12 +127,26 @@ type Options struct {
 	Config jsval.Value
 	// Locale holds optional number and time locale definitions.
 	Locale *format.Locale
+	// Stages, when set, is told how long each stage of the render took:
+	// "parse" (the specification into a dataflow), "dataflow" (the first run:
+	// data, transforms, encoding, layout) and "writes" (the SignalWrites).
+	Stages func(stage string, d time.Duration)
+	// SignalWrites are applied in order after the first run, each followed by
+	// another run, as a host or a binding writes through View.signal; the
+	// result is the chart after the last.
+	SignalWrites []SignalWrite
 	// Now supplies the clock for now(); nil uses the system clock.
 	Now func() time.Time
 	// Random seeds random(); nil uses a nondeterministic source.
 	Random func() float64
 	// Limits bound the work of the render.
 	Limits Limits
+}
+
+// SignalWrite is one View.signal(name, value) call.
+type SignalWrite struct {
+	Name  string
+	Value jsval.Value
 }
 
 // Result is a rendered view: the scenegraph and what the SVG renderer needs
@@ -201,6 +217,7 @@ type runView struct {
 	marks          []*scene.Mark
 	markCtx        map[*scene.Mark]*rtContext
 	idCounter      float64
+	itemSeq        uint64
 }
 
 // Render parses spec and evaluates it to a laid-out scenegraph.
@@ -215,6 +232,8 @@ func Render(ctx context.Context, spec jsval.Value, opts Options) (res *Result, e
 				err = e
 			case *opError:
 				err = e.err
+			case *scale.Thrown:
+				err = e
 			case *geo.LimitError:
 				err = e.Err
 			case error:
@@ -229,6 +248,15 @@ func Render(ctx context.Context, spec jsval.Value, opts Options) (res *Result, e
 		return nil, errors.New("Input Vega specification must be an object.")
 	}
 
+	stage := func(string) {}
+	if opts.Stages != nil {
+		t0 := time.Now()
+		stage = func(name string) {
+			now := time.Now()
+			opts.Stages(name, now.Sub(t0))
+			t0 = now
+		}
+	}
 	config := mergeConfig(defaultConfig(), opts.Config, spec.Get("config"))
 	scope := newScope(config, &parseOptions{})
 	parseView(spec, scope)
@@ -236,8 +264,25 @@ func Render(ctx context.Context, spec jsval.Value, opts Options) (res *Result, e
 
 	v := newView(ctx, opts, scope.locale)
 	v.build(flow)
+	stage("parse")
 	if err := v.run(); err != nil {
 		return nil, err
+	}
+	stage("dataflow")
+	for _, w := range opts.SignalWrites {
+		// View.signal(name, value): a top-level signal, set through the
+		// dataflow's update and propagated by the next run.
+		n := v.root.signals[w.Name]
+		if n == nil {
+			return nil, fmt.Errorf("Unrecognized signal name: %q", w.Name)
+		}
+		v.g.update(n, w.Value, false, false)
+		if err := v.run(); err != nil {
+			return nil, err
+		}
+	}
+	if len(opts.SignalWrites) > 0 {
+		stage("writes")
 	}
 	v.setGuideCaptions()
 	return v.result(scope), nil
@@ -272,6 +317,9 @@ func newView(ctx context.Context, opts Options, locale jsval.Value) *runView {
 		v.loc = time.UTC
 	}
 	v.zone = format.Local(v.loc)
+	// Transforms that key on text write a date in the view's zone.
+	ctx = transforms.WithZone(ctx, v.zone)
+	v.ctx = ctx
 	switch {
 	case opts.Locale != nil:
 		v.locale = opts.Locale
@@ -549,7 +597,7 @@ func (v *runView) addSignalListener(c *rtContext, src, tgt *opNode, u *updateSpe
 			}
 		case u.update != nil:
 			ev := jsval.Obj(jsval.NewObject(0))
-			val = u.update.eval(c, jsval.Undefined, jsval.Undefined, ev)
+			val = u.update.eval(c, jsval.Undefined, jsval.Undefined, ev, varDatum|varEvent)
 		case u.hasVal:
 			val = u.value
 		}

@@ -1,6 +1,7 @@
 package svg
 
 import (
+	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/scene"
 )
 
@@ -26,7 +27,10 @@ func (r *renderer) textItem(m *scene.Mark, it *scene.Item) {
 
 	w.attrRaw("text-anchor", textAnchor(it.Align))
 	w.attrName("transform")
-	if it.AngleTruthy() {
+	if xv, yv := it.PosValue("x"), it.PosValue("y"); (xv.IsStr() || yv.IsStr()) && it.Radius.Zero() == 0 {
+		// A position given a word: the template strings concatenate.
+		w.buf = appendWordTransform(w.buf, it, xv, yv, dx, dy)
+	} else if it.AngleTruthy() {
 		w.buf = appendTranslate(w.buf, x, y)
 		w.buf = append(w.buf, " rotate("...)
 		w.buf = appendAngle(w.buf, it)
@@ -56,6 +60,43 @@ func (r *renderer) textItem(m *scene.Mark, it *scene.Item) {
 		w.text(r.metrics.TextValue(it, l))
 		w.end()
 	}
+}
+
+// appendWordTransform is the text transform of attr() in vega-scenegraph's
+// marks/text.js when x or y is a string, where `x + dx` joins the strings
+// instead of adding.
+func appendWordTransform(dst []byte, it *scene.Item, xv, yv jsval.Value, dx, dy float64) []byte {
+	join := func(a jsval.Value, b float64) string {
+		if a.IsStr() {
+			return a.StrValue() + string(scene.AppendNumber(nil, b))
+		}
+		return string(scene.AppendNumber(nil, jsval.ToNumber(a)+b))
+	}
+	text := func(v jsval.Value) string {
+		if v.IsStr() {
+			return v.StrValue()
+		}
+		return string(scene.AppendNumber(nil, jsval.ToNumber(v)))
+	}
+	if it.AngleTruthy() {
+		dst = append(dst, "translate("...)
+		dst = append(dst, text(xv)...)
+		dst = append(dst, ',')
+		dst = append(dst, text(yv)...)
+		dst = append(dst, ") rotate("...)
+		dst = appendAngle(dst, it)
+		dst = append(dst, ')')
+		if dx != 0 || dy != 0 {
+			dst = append(dst, ' ')
+			dst = appendTranslate(dst, dx, dy)
+		}
+		return dst
+	}
+	dst = append(dst, "translate("...)
+	dst = append(dst, join(xv, dx)...)
+	dst = append(dst, ',')
+	dst = append(dst, join(yv, dy)...)
+	return append(dst, ')')
 }
 
 // imageItem writes an <image>: source, placement (alignment offsets from the

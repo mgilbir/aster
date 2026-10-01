@@ -25,10 +25,16 @@ type tupleMod struct {
 // propsMatch is vega's removePredicate: every property of props equals that of
 // the tuple.
 func propsMatch(props jsval.Value) func(jsval.Value) bool {
-	return func(t jsval.Value) bool { return equalObjects(props, t) }
+	return func(t jsval.Value) bool { return equalObjects(props, t, 0) }
 }
 
-func looseEqual(a, b jsval.Value) bool {
+// looseEqualDepth is looseEqual for values nested depth levels deep. A value
+// built at run time can nest deeper than any parsed document, so the descent
+// stops (reporting unequal) at jsval.MaxValueDepth.
+func looseEqualDepth(a, b jsval.Value, depth int) bool {
+	if depth > jsval.MaxValueDepth {
+		return false
+	}
 	if a.Kind() == b.Kind() {
 		switch a.Kind() {
 		case jsval.KindArr:
@@ -36,26 +42,26 @@ func looseEqual(a, b jsval.Value) bool {
 				return false
 			}
 			for i, x := range a.Items() {
-				if !looseEqual(x, b.Index(i)) {
+				if !looseEqualDepth(x, b.Index(i), depth+1) {
 					return false
 				}
 			}
 			return true
 		case jsval.KindObj:
-			return equalObjects(a, b)
+			return equalObjects(a, b, depth)
 		}
 		return jsval.Equal(a, b)
 	}
 	return false
 }
 
-func equalObjects(a, b jsval.Value) bool {
+func equalObjects(a, b jsval.Value, depth int) bool {
 	o := a.ObjValue()
 	if o == nil {
 		return false
 	}
 	for i := 0; i < o.Len(); i++ {
-		if !looseEqual(o.ValueAt(i), b.Get(o.KeyAt(i))) {
+		if !looseEqualDepth(o.ValueAt(i), b.Get(o.KeyAt(i)), depth+1) {
 			return false
 		}
 	}

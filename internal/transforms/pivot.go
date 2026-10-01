@@ -39,6 +39,7 @@ func Pivot(ctx context.Context, data []jsval.Value, p PivotParams) ([]jsval.Valu
 	if !IsAggregateOp(op) {
 		return nil, errUnknownOp(op)
 	}
+	zone := zoneOf(ctx)
 	seen := map[string]bool{}
 	var keys []jsval.Value
 	for i, t := range data {
@@ -46,7 +47,7 @@ func Pivot(ctx context.Context, data []jsval.Value, p PivotParams) ([]jsval.Valu
 			return nil, err
 		}
 		k := p.Field.Apply(t)
-		if s := k.AsString(); !seen[s] {
+		if s := keyString(k, zone); !seen[s] {
 			seen[s] = true
 			keys = append(keys, k)
 		}
@@ -77,7 +78,7 @@ func Pivot(ctx context.Context, data []jsval.Value, p PivotParams) ([]jsval.Valu
 	measures := make([]Measure, len(keys))
 	for i, k := range keys {
 		k := k
-		name := k.AsString()
+		name := keyString(k, zone)
 		var get Accessor
 		mop := op
 		if op == "count" {

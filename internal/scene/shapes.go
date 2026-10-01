@@ -15,6 +15,10 @@ import (
 // fails with a TypeError when it tries to use the missing curve.
 var ErrUnknownInterpolate = errors.New("scene: unknown interpolate type")
 
+// ErrNoShapeGenerator reports a shape mark item with no generator (neither
+// the mark's nor the item's); upstream calls `.context` on undefined.
+var ErrNoShapeGenerator = errors.New("Cannot read properties of undefined (reading 'context')")
+
 // ErrCurveNoArea reports an area drawn with the bundle interpolation, which d3
 // implements only for lines; upstream fails with a TypeError.
 var ErrCurveNoArea = errors.New("scene: bundle interpolation cannot draw areas")
@@ -22,9 +26,11 @@ var ErrCurveNoArea = errors.New("scene: bundle interpolation cannot draw areas")
 // HasCornerRadius reports whether any corner radius is set and non-zero
 // (`item.cornerRadius || item.cornerRadiusTopLeft || ...`).
 func (it *Item) HasCornerRadius() bool {
-	return it.CornerRadius.Truthy() || it.CornerRadiusTopLeft.Truthy() ||
-		it.CornerRadiusTopRight.Truthy() || it.CornerRadiusBottomRight.Truthy() ||
-		it.CornerRadiusBottomLeft.Truthy()
+	return it.truthyProp("cornerRadius", it.CornerRadius) ||
+		it.truthyProp("cornerRadiusTopLeft", it.CornerRadiusTopLeft) ||
+		it.truthyProp("cornerRadiusTopRight", it.CornerRadiusTopRight) ||
+		it.truthyProp("cornerRadiusBottomRight", it.CornerRadiusBottomRight) ||
+		it.truthyProp("cornerRadiusBottomLeft", it.CornerRadiusBottomLeft)
 }
 
 func lineCurve(first *Item) (curveSpec, error) {
@@ -64,7 +70,7 @@ func Line(ctx PathContext, items []*Item) error {
 			}
 		}
 		if defined0 {
-			out.point(items[i].X.Zero(), items[i].Y.Zero())
+			out.point(items[i].OrZero("x"), items[i].OrZero("y"))
 		}
 	}
 	return ctxErr(ctx)
@@ -112,7 +118,7 @@ func Area(ctx PathContext, items []*Item) error {
 		}
 		if defined0 {
 			it := items[i]
-			x, y := it.X.Zero(), it.Y.Zero()
+			x, y := it.OrZero("x"), it.OrZero("y")
 			if horizontal {
 				// area().y(y).x1(x).x0(xw): baseline at x+width, same y.
 				bx[i], by[i] = x+it.Width.Zero(), y
@@ -173,7 +179,7 @@ func Trail(ctx PathContext, items []*Item) error {
 			if size == 0 {
 				size = 1
 			}
-			point(it.X.Zero(), it.Y.Zero(), size)
+			point(it.OrZero("x"), it.OrZero("y"), size)
 		}
 	}
 	return ctxErr(ctx)
@@ -181,7 +187,7 @@ func Trail(ctx PathContext, items []*Item) error {
 
 // Rectangle draws the item's box at its own position, with per-corner radii.
 func Rectangle(ctx PathContext, item *Item) {
-	rectangle(ctx, item, item.X.Zero(), item.Y.Zero())
+	rectangle(ctx, item, item.OrZero("x"), item.OrZero("y"))
 }
 
 // RectangleAt draws the item's box (width, height, radii) with its top-left
@@ -197,23 +203,18 @@ const rectC = 0.448084975506
 func clamp(v, lo, hi float64) float64 { return math.Max(lo, math.Min(v, hi)) }
 
 func rectangle(ctx PathContext, it *Item, x1, y1 float64) {
-	w, h := it.Width.Zero(), it.Height.Zero()
+	w, h := it.OrZero("width"), it.OrZero("height")
 	s := math.Min(w, h) / 2
 	// value(item.cornerRadiusX, item.cornerRadius) || 0, then clamped.
-	corner := func(specific Num) float64 {
-		v := specific.Or(math.NaN())
-		if !specific.Set() {
-			v = it.CornerRadius.Or(math.NaN())
-		}
-		if v != v {
-			v = 0
-		}
-		return clamp(v, 0, s)
+	// A word given as a radius is truthy and converts to NaN, which the clamp
+	// keeps: the path is drawn with NaN corners, as upstream draws it.
+	corner := func(prop string, specific Num) float64 {
+		return clamp(it.orZeroProp(prop, specific, "cornerRadius", it.CornerRadius), 0, s)
 	}
-	tl := corner(it.CornerRadiusTopLeft)
-	tr := corner(it.CornerRadiusTopRight)
-	bl := corner(it.CornerRadiusBottomLeft)
-	br := corner(it.CornerRadiusBottomRight)
+	tl := corner("cornerRadiusTopLeft", it.CornerRadiusTopLeft)
+	tr := corner("cornerRadiusTopRight", it.CornerRadiusTopRight)
+	bl := corner("cornerRadiusBottomLeft", it.CornerRadiusBottomLeft)
+	br := corner("cornerRadiusBottomRight", it.CornerRadiusBottomRight)
 
 	if tl <= 0 && tr <= 0 && bl <= 0 && br <= 0 {
 		ctx.Rect(x1, y1, w, h)
@@ -620,7 +621,7 @@ func ItemPathData(sp *StringPath, mark MarkType, it *Item) (d []byte, ok bool, e
 			fn = it.Mark.Shape
 		}
 		if fn == nil {
-			return nil, false, nil
+			return nil, false, ErrNoShapeGenerator
 		}
 		// `path.context(null)(item)`: the generator formats its own string.
 		s := fn(nil, it)

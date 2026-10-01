@@ -6,6 +6,7 @@ import (
 	"math"
 	"strings"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/geo"
 	"github.com/mgilbir/aster/internal/jsval"
@@ -28,18 +29,26 @@ func (v *runView) seedCollect(c *rtContext, n *opNode, e *entry) {
 		}
 	case e.ingest != nil && e.ingest.request:
 		data = v.request(e.ingest.url, e.ingest.format)
-		for i := range data {
-			data[i] = ingestTuple(data[i])
-		}
+		ingestRows(data)
 	case e.ingest != nil:
 		data = v.parseValues(e.ingest.values, e.ingest.format)
-		for i := range data {
-			data[i] = ingestTuple(data[i])
-		}
+		ingestRows(data)
 	}
 	v.checkRows(len(data))
 	n.value = data
 	v.g.pulseInput(n, &flowPulse{tuples: data, changed: true})
+}
+
+// ingestRows ingests rows that arrive through a change set. ChangeSet.pulse
+// reads the tuple id of every added row before ingesting it, which throws for
+// a null row (a primitive row is fine and is wrapped).
+func ingestRows(data []jsval.Value) {
+	for i := range data {
+		if data[i].IsNull() {
+			fail("Cannot read properties of null (reading 'Symbol(vega_id)')")
+		}
+		data[i] = ingestTuple(data[i])
+	}
 }
 
 func (v *runView) checkRows(n int) {
@@ -48,19 +57,21 @@ func (v *runView) checkRows(n int) {
 	}
 }
 
-// parseValues is Dataflow.parse: read inline values with a format.
+// parseValues is Dataflow.parse: read inline values with a format. Unlike a
+// url's body, which Dataflow.request catches, a failure here is thrown: out of
+// the runtime when the data set is made, or out of the Load transform.
 func (v *runView) parseValues(values, fmtSpec jsval.Value) []jsval.Value {
 	data, err := v.read(values, nil, fmtSpec)
 	if err != nil {
-		// upstream: ingestion failures are warnings and yield no rows.
-		v.g.warn("Data ingestion failed: " + err.Error())
-		return nil
+		fail("%s", err.Error())
 	}
 	return data
 }
 
-// request is Dataflow.request: load a url, then parse it. Failures are
-// warnings, and the data set is empty.
+// request is Dataflow.request: load a url, then parse it. A failed load is a
+// warning and the data set is empty. A body that does not parse is a warning
+// too, but the data stays what was loaded: the data set is that text, as one
+// tuple.
 func (v *runView) request(url, fmtSpec jsval.Value) []jsval.Value {
 	if !url.IsStr() {
 		v.g.warn("Loading failed: no url")
@@ -90,7 +101,9 @@ func (v *runView) request(url, fmtSpec jsval.Value) []jsval.Value {
 	data, err := v.read(jsval.Undefined, body, fmtSpec)
 	if err != nil {
 		v.g.warn("Data ingestion failed " + uri + ": " + err.Error())
-		return nil
+		// The data stays what was loaded, and the data set is that one value:
+		// the text, which a tuple wraps as {data: text}.
+		return []jsval.Value{jsval.Str(string(body))}
 	}
 	return data
 }
@@ -336,7 +349,7 @@ func parseDSVLimit(ctx context.Context, text string, delim byte, maxRows int) ([
 			continue
 		}
 		if len(rows) >= maxRows || (len(rows) > 0 && len(rows)*len(columns) > 16*maxRows && maxRows < math.MaxInt/16) {
-			return nil, nil, fmt.Errorf("data exceeds the limit of %d rows", maxRows)
+			return nil, nil, fmt.Errorf("%w: data exceeds the limit of %d rows", budget.ErrLimit, maxRows)
 		}
 		if len(rows)&1023 == 0 {
 			if err := ctx.Err(); err != nil {

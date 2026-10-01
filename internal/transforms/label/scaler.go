@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"math"
+
+	"github.com/mgilbir/aster/internal/budget"
 )
 
 // scaler maps layout coordinates to bitmap cells. Large layouts are
@@ -19,8 +21,12 @@ func newScaler(width, height, padding float64) (*scaler, error) {
 	ratio := math.Max(1, math.Sqrt(width*height/1e6))
 	w := toInt32((width + 2*padding + ratio) / ratio)
 	h := toInt32((height + 2*padding + ratio) / ratio)
-	if w < 0 || h < 0 || w*h > maxBitmapBits {
-		return nil, fmt.Errorf("label: layout bitmap %dx%d is invalid or too large (check size and padding)", w, h)
+	if w < 0 || h < 0 {
+		// new Uint32Array of a negative length
+		return nil, fmt.Errorf("RangeError: Invalid typed array length: %d", (w*h+31)>>5)
+	}
+	if w*h > maxBitmapBits {
+		return nil, fmt.Errorf("%w: label: layout bitmap %dx%d is too large (check size and padding)", budget.ErrLimit, w, h)
 	}
 	return &scaler{width: width, height: height, padding: padding, ratio: ratio, w: w, h: h}, nil
 }
@@ -55,7 +61,7 @@ func toInt32(f float64) int {
 func markBitmaps(ctx context.Context, sc *scaler, r Rasterizer, baseMark []any, avoidMarks [][]any, labelInside, isGroupArea bool) ([2]*bitmap, error) {
 	width, height := int(sc.width), int(sc.height)
 	if width*height > maxMaskPixels {
-		return [2]*bitmap{}, fmt.Errorf("label: layout %dx%d is too large to rasterize", width, height)
+		return [2]*bitmap{}, fmt.Errorf("%w: label: layout %dx%d is too large to rasterize", budget.ErrLimit, width, height)
 	}
 	border := labelInside || isGroupArea
 	newMask := func() *Mask { return &Mask{Width: width, Height: height, Pix: make([]bool, width*height)} }

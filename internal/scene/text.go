@@ -44,6 +44,9 @@ func LineHeight(it *Item) float64 {
 // quotes inside the family are swapped for single quotes (for embedding in a
 // quoted attribute).
 func FontFamily(it *Item, quote bool) string {
+	if v, ok := it.Raw["font"]; ok && !quote && v.IsTruthy() {
+		return v.AsString() // `font || 'sans-serif'` keeps a truthy array
+	}
 	f := it.Font
 	if f == "" {
 		return "sans-serif"

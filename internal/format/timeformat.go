@@ -27,13 +27,13 @@ type TimeFormat struct {
 // Format is d3.timeFormat(specifier) in the given zone (UTC for utcFormat).
 func (l *TimeLocale) Format(specifier string, z Zone) *TimeFormat {
 	f := &TimeFormat{loc: l, zone: z, spec: specifier}
-	f.ops = l.compileFormat(nil, specifier, 0)
+	f.ops = l.compileFormat(nil, specifier, 0, new(int))
 	return f
 }
 
 // compileFormat translates a specifier into ops, expanding %c, %x and %X
 // in place (they ignore padding modifiers).
-func (l *TimeLocale) compileFormat(ops []fmtOp, spec string, depth int) []fmtOp {
+func (l *TimeLocale) compileFormat(ops []fmtOp, spec string, depth int, work *int) []fmtOp {
 	lit := 0 // start of pending literal
 	flush := func(end int) {
 		if end > lit {
@@ -82,14 +82,14 @@ func (l *TimeLocale) compileFormat(ops []fmtOp, spec string, depth int) []fmtOp 
 		}
 		switch c {
 		case 'c', 'x', 'X':
-			if depth < maxLocaleNesting {
+			if *work++; depth < maxLocaleNesting && *work <= maxLocaleExpansions {
 				sub := l.def.DateTime
 				if c == 'x' {
 					sub = l.def.Date
 				} else if c == 'X' {
 					sub = l.def.Time
 				}
-				ops = l.compileFormat(ops, sub, depth+1)
+				ops = l.compileFormat(ops, sub, depth+1, work)
 			}
 		case 'a', 'A', 'b', 'B', 'd', 'e', 'f', 'g', 'G', 'H', 'I', 'j', 'L', 'm', 'M', 'p', 'q', 'Q', 's', 'S',
 			'u', 'U', 'V', 'w', 'W', 'y', 'Y', 'Z':

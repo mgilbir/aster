@@ -1,0 +1,1 @@
+{"data":{"values":[{"a":"A","b":1},{"a":"B","b":2}]},"mark":"boxplot","encoding":{"x":{"field":"a","type":"nominal"},"y":{"aggregate":"count"}}}

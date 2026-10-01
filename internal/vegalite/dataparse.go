@@ -27,11 +27,16 @@ func findSource(data Value, sources []dfNode) *sourceNode {
 		if !ok {
 			continue
 		}
-		otherData := jsval.Obj(os.data)
 		if data.Get("name").IsTruthy() && os.hasName() && data.Get("name").AsString() != os.name {
 			continue
 		}
 		formatMesh := data.Get("format").Get("mesh")
+		if os.data == nil {
+			// A data object that is none of inline, url, sphere or named
+			// (`{}`) leaves the source without data.
+			throw("Cannot read properties of undefined (reading 'format')")
+		}
+		otherData := jsval.Obj(os.data)
 		otherFeature := otherData.Get("format").Get("feature")
 		if formatMesh.IsTruthy() && otherFeature.IsTruthy() {
 			continue
@@ -77,7 +82,9 @@ func parseRoot(m Model, sources *sourceList) dfNode {
 	cc := m.b().ctx
 
 	b := m.b()
-	if !b.data.IsUndefined() || b.parent == nil {
+	// `model.data || !model.parent`: a data of null, 0 or "" on a child is no
+	// data of its own, and is not the null that gives the root an empty source.
+	if b.data.IsTruthy() || b.parent == nil {
 		if b.data.IsNull() {
 			s := newSourceNode(cc, mkv("values", jsval.Arr(nil)))
 			sources.items = append(sources.items, s)
@@ -125,6 +132,11 @@ func mergeDeepInto(dest *Object, src Value) {
 func parseTransformArray(head dfNode, m Model, ap *ancestorParse) dfNode {
 	cc := m.b().ctx
 
+	if cc != nil {
+		if cc.transforms += len(m.b().transforms); cc.transforms > maxTransforms {
+			throw("too many data transforms (limit %d)", maxTransforms)
+		}
+	}
 	lookupCounter := 0
 	for _, t := range m.b().transforms {
 		cc.check()
@@ -292,6 +304,14 @@ func getImplicitFromEncoding(m Model) *Object {
 			} else {
 				mainChannel := getMainRangeChannel(channel)
 				mainFieldDef := fm.fieldDefOf(mainChannel)
+				// `mainFieldDef.type` of a secondary channel (x2) whose main
+				// channel (x) is not encoded.
+				switch {
+				case mainFieldDef.IsUndefined():
+					throw("Cannot read properties of undefined (reading 'type')")
+				case mainFieldDef.IsNull():
+					throw("Cannot read properties of null (reading 'type')")
+				}
 				o := cloneObj(fd.ObjValue())
 				o.Set("type", mainFieldDef.Get("type"))
 				add(jsval.Obj(o))

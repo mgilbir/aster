@@ -176,7 +176,16 @@ func (n *xformNode) addDimensions(fields []string) {
 	var base []Value
 	switch n.kind {
 	case "window", "joinaggregate":
-		base = t.Get("groupby").Items()
+		// `this.transform.groupby.concat(fields)`: without a groupby that is
+		// a TypeError (pivot alone guards with `?? []`).
+		switch g := t.Get("groupby"); {
+		case g.IsUndefined():
+			throw("Cannot read properties of undefined (reading 'concat')")
+		case g.IsNull():
+			throw("Cannot read properties of null (reading 'concat')")
+		default:
+			base = g.Items()
+		}
 	case "pivot":
 		base = arrayOf(t.Get("groupby"))
 	default:
@@ -502,11 +511,13 @@ func makeLookupNode(parent dfNode, m Model, t Value, counter int) dfNode {
 		o := mk("as", selName)
 		spread(o, t)
 		t = jsval.Obj(o)
-		sel := b.trySelectionComponent(varName(selName))
-		if sel == nil {
+		sel, junk := b.trySelectionComponent(varName(selName))
+		if sel == nil && !junk {
 			throw("Lookups can only be performed on selection parameters. %q is a variable parameter.", selName)
 		}
-		fromOutput = sel.materialized
+		if sel != nil {
+			fromOutput = sel.materialized
+		}
 		if fromOutput == nil {
 			throw("Cannot define and lookup the %q selection in the same view. Try moving the lookup into a second, layered view?", selName)
 		}

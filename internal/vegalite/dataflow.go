@@ -44,6 +44,34 @@ type dfBase struct {
 	self dfNode
 	kids []dfNode
 	par  dfNode
+	// kidSet indexes kids once there are many, so membership is not a scan
+	// (a spec with a hundred thousand layers adds that many children to one
+	// node). Only this file's methods change kids, and they keep it in step.
+	kidSet map[dfNode]struct{}
+}
+
+// manyKids is the child count from which kidSet is kept.
+const manyKids = 32
+
+func (b *dfBase) hasChild(c dfNode) bool {
+	if b.kidSet != nil {
+		_, ok := b.kidSet[c]
+		return ok
+	}
+	return b.indexOf(c) >= 0
+}
+
+// noteAdded keeps kidSet in step after c joined kids.
+func (b *dfBase) noteAdded(c dfNode) {
+	switch {
+	case b.kidSet != nil:
+		b.kidSet[c] = struct{}{}
+	case len(b.kids) > manyKids:
+		b.kidSet = make(map[dfNode]struct{}, 2*len(b.kids))
+		for _, k := range b.kids {
+			b.kidSet[k] = struct{}{}
+		}
+	}
 }
 
 func (b *dfBase) base() *dfBase { return b }
@@ -73,9 +101,10 @@ func (b *dfBase) indexOf(c dfNode) int {
 }
 
 func (b *dfBase) addChild(c dfNode, loc int) {
-	if b.indexOf(c) >= 0 {
+	if b.hasChild(c) {
 		return
 	}
+	defer b.noteAdded(c)
 	if loc >= 0 {
 		if loc > len(b.kids) {
 			loc = len(b.kids)
@@ -91,11 +120,20 @@ func (b *dfBase) addChild(c dfNode, loc int) {
 // removeChild mirrors Array.prototype.splice(indexOf(x), 1), including its
 // quirk that a missing child (index -1) removes the last one.
 func (b *dfBase) removeChild(c dfNode) int {
-	loc := b.indexOf(c)
+	loc := -1
+	if b.hasChild(c) {
+		loc = b.indexOf(c)
+	}
 	switch {
 	case loc >= 0:
 		b.kids = append(b.kids[:loc], b.kids[loc+1:]...)
+		if b.kidSet != nil {
+			delete(b.kidSet, c)
+		}
 	case len(b.kids) > 0:
+		if b.kidSet != nil {
+			delete(b.kidSet, b.kids[len(b.kids)-1])
+		}
 		b.kids = b.kids[:len(b.kids)-1]
 	}
 	return loc
@@ -128,7 +166,7 @@ func (b *dfBase) swapWithParent() {
 	for _, child := range append([]dfNode(nil), b.kids...) {
 		child.base().setParent(parent)
 	}
-	b.kids = nil
+	b.kids, b.kidSet = nil, nil
 	parent.base().removeChild(b.self)
 	loc := parent.base().par.base().removeChild(parent)
 	b.par = newParent
@@ -252,10 +290,10 @@ func newSourceNode(cc *compileCtx, data Value) *sourceNode {
 		s.name = n.AsString()
 	}
 	if format != nil && format.Len() > 0 {
+		if s.data == nil {
+			throw("Cannot set properties of undefined (setting 'format')")
+		}
 		s.data.Set("format", jsval.Obj(format))
-	}
-	if s.data == nil {
-		s.data = jsval.NewObject(0)
 	}
 	s.base().self = s
 	return s

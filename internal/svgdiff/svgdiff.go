@@ -48,11 +48,18 @@ type node struct {
 	children []*node
 }
 
-// Compare compares got against want.
+// Compare compares got against want, the document of the reference
+// implementation. The characters XML 1.0 forbids (C0 controls other than tab,
+// LF and CR, U+FFFE, U+FFFF) are dropped from want before it is parsed: Vega
+// writes them verbatim into a document no XML parser accepts, where the engine
+// drops them (see internal/svg), so want is read as the well-formed document
+// it was meant to be. got is not touched: a forbidden character the engine
+// wrote is a parse error.
 func Compare(got, want []byte, opts Options) (Result, error) {
 	if bytes.Equal(got, want) {
 		return Result{Identical: true, Equal: true}, nil
 	}
+	want = dropForbidden(want)
 	g, err := parse(got)
 	if err != nil {
 		return Result{}, fmt.Errorf("svgdiff: parsing got: %w", err)
@@ -67,6 +74,28 @@ func Compare(got, want []byte, opts Options) (Result, error) {
 	}
 	c.node(g, w, "")
 	return Result{Equal: c.count == 0, Diff: c.first, Elements: c.elements, DiffCount: c.count}, nil
+}
+
+// maxDepth bounds element nesting in a compared document: the comparison
+// recurses once per level, and the path it reports grows with the depth.
+// Vega's SVG nests under 20 levels.
+const maxDepth = 512
+
+// dropForbidden removes the characters XML 1.0 forbids from doc, copying only
+// when there is one.
+func dropForbidden(doc []byte) []byte {
+	forbidden := func(r rune) bool {
+		return r < 0x20 && r != '\t' && r != '\n' && r != '\r' || r == 0xFFFE || r == 0xFFFF
+	}
+	if bytes.IndexFunc(doc, forbidden) < 0 {
+		return doc
+	}
+	return bytes.Map(func(r rune) rune {
+		if forbidden(r) {
+			return -1
+		}
+		return r
+	}, doc)
 }
 
 func parse(doc []byte) (*node, error) {
@@ -91,6 +120,9 @@ func parse(doc []byte) (*node, error) {
 			top := stack[len(stack)-1]
 			top.children = append(top.children, n)
 			stack = append(stack, n)
+			if len(stack) > maxDepth+1 { // the document node is stack[0]
+				return nil, fmt.Errorf("elements nest more than %d levels", maxDepth)
+			}
 		case xml.EndElement:
 			stack = stack[:len(stack)-1]
 		case xml.CharData:
@@ -230,33 +262,41 @@ type token struct {
 	text string
 }
 
-// tokenize splits s into numbers and the text between them. Separators
-// (spaces and commas) are dropped so "1,2" and "1 2" compare equal.
+// tokenize splits s into numbers and the text between them. A run of only
+// separators (spaces and commas) is dropped, so "1,2" and "1 2" compare
+// equal, as they do in path data and lists. Other text keeps its commas;
+// its whitespace is trimmed and each run of it collapses to one space, as
+// SVG collapses whitespace when it renders text.
 func tokenize(s string) []token {
 	var out []token
 	i := 0
 	for i < len(s) {
-		ch := s[i]
-		if ch == ' ' || ch == ',' || ch == '\n' || ch == '\t' {
-			i++
-			continue
-		}
 		if j := scanNumber(s, i); j > i {
-			f, err := strconv.ParseFloat(s[i:j], 64)
-			if err == nil {
+			if f, err := strconv.ParseFloat(s[i:j], 64); err == nil {
 				out = append(out, token{num: true, val: f})
 				i = j
 				continue
 			}
 		}
 		j := i + 1
-		for j < len(s) && scanNumber(s, j) == j && s[j] != ' ' && s[j] != ',' {
+		for j < len(s) && scanNumber(s, j) == j {
 			j++
 		}
-		out = append(out, token{text: s[i:j]})
+		if text := collapse(s[i:j]); text != "" {
+			out = append(out, token{text: text})
+		}
 		i = j
 	}
 	return out
+}
+
+// collapse trims whitespace and collapses each inner run of it to one
+// space; a run of nothing but separators is empty.
+func collapse(s string) string {
+	if strings.Trim(s, " ,\n\t\r") == "" {
+		return ""
+	}
+	return strings.Join(strings.Fields(s), " ")
 }
 
 // scanNumber returns the end of a number starting at i, or i if none.

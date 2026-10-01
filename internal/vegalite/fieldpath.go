@@ -8,7 +8,15 @@ import (
 
 // Field-path helpers from vega-lite/src/util.ts.
 
-func splitAccessPath(p string) []string { return jsval.ParseFieldPath(p) }
+// splitAccessPath is vega-util's, which throws on a path with a bracket or
+// quote left open.
+func splitAccessPath(p string) []string {
+	segs, err := jsval.SplitFieldPath(p)
+	if err != nil {
+		throw("%s", err.Error())
+	}
+	return segs
+}
 
 // accessPathWithDatum turns "a.b" into "datum["a"] && datum["a"]["b"]".
 func accessPathWithDatum(path, datum string) string {

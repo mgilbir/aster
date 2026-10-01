@@ -310,3 +310,17 @@ func TestTickCountFor(t *testing.T) {
 		t.Errorf("interval count = %+v %v", tc, err)
 	}
 }
+
+// d3's formatSpecifier matches its argument with a regular expression's exec,
+// which converts it to a string: the number 42 is the specifier "42".
+func TestNumberSpecifierConvertsToString(t *testing.T) {
+	for _, c := range []struct {
+		in   jsval.Value
+		want string
+	}{{jsval.Num(42), "42"}, {jsval.Str(".2f"), ".2f"}, {jsval.Null, ""}} {
+		got, err := numberSpecifier(c.in)
+		if err != nil || got != c.want {
+			t.Errorf("numberSpecifier(%v) = %q, %v; want %q", c.in, got, err, c.want)
+		}
+	}
+}

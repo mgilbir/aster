@@ -3,6 +3,7 @@ package expr
 import (
 	"math"
 
+	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/scale/color"
 )
@@ -81,12 +82,21 @@ func isObjectLike(v jsval.Value) bool {
 }
 
 // str is String(v).
-func (s *Scope) str(v jsval.Value) string {
+func (s *Scope) str(v jsval.Value) string { return s.strDepth(v, 0) }
+
+// strDepth is str for an array nested depth levels deep. A value built at run
+// time can nest as deep as the specification is long, so the descent is
+// bounded by jsval.MaxValueDepth and throws the RangeError V8 throws when it
+// runs out of stack.
+func (s *Scope) strDepth(v jsval.Value, depth int) string {
+	if depth > jsval.MaxValueDepth {
+		throw("RangeError", "Maximum call stack size exceeded")
+	}
 	switch v.Kind() {
 	case jsval.KindStr:
 		return v.StrValue()
 	case jsval.KindTimestamp:
-		return dateToString(v.NumValue(), s.zone())
+		return format.DateToString(v.NumValue(), s.zone())
 	case jsval.KindArr:
 		items := v.Items()
 		switch len(items) {
@@ -96,7 +106,7 @@ func (s *Scope) str(v jsval.Value) string {
 			if items[0].IsNullish() {
 				return ""
 			}
-			return s.str(items[0])
+			return s.strDepth(items[0], depth+1)
 		}
 		var b []byte
 		for i, it := range items {
@@ -104,7 +114,7 @@ func (s *Scope) str(v jsval.Value) string {
 				b = append(b, ',')
 			}
 			if !it.IsNullish() {
-				part := s.str(it)
+				part := s.strDepth(it, depth+1)
 				s.checkLen(len(b) + len(part))
 				b = append(b, part...)
 			}
@@ -115,7 +125,6 @@ func (s *Scope) str(v jsval.Value) string {
 		if c, ok := asColor(v); ok {
 			return c.String()
 		}
-		return "[object Object]"
 	}
 	return v.AsString()
 }

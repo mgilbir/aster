@@ -807,6 +807,11 @@ func (p *parser) parsePrimary() *Node {
 	switch {
 	case t.kind == tIdent || t.kind == tKeyword && t.val == "if":
 		return identNode(p.lex().val)
+	case t.kind == tString && (t.val == "if" || disallowedProperties[t.val]):
+		// upstream tests `legalKeywords[lookahead.value]` on a plain object
+		// for every token: a string literal whose value is "if" or the name
+		// of an Object.prototype property is read as an identifier.
+		return identNode(p.lex().val)
 	case t.kind == tString || t.kind == tNum:
 		if t.octal {
 			p.fail("Octal literals are not allowed in strict mode.")

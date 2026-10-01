@@ -1,0 +1,1 @@
+{"width":50,"height":50,"data":[{"name":"t","values":[{"h":4},{"h":"x"}]}],"marks":[{"type":"rect","from":{"data":"t"},"encode":{"update":{"width":{"value":10},"height":{"value":10},"x":{"signal":"datum.h == 4 ? 0 : 20"},"href":{"field":"h"}}}}]}

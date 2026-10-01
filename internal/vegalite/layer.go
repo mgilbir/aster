@@ -30,6 +30,9 @@ type layerModel struct {
 }
 
 func newLayerModel(cc *compileCtx, spec Value, parent Model, parentGivenName string, parentGivenSize *Object, config Value, depth int) *layerModel {
+	if depth > maxDepth { // layers nest without going through buildModel
+		panic(compileError{errDepth.Error()})
+	}
 	l := &layerModel{}
 	var resolve *resolveIndex
 	if r := spec.Get("resolve"); r.IsObj() {
@@ -44,6 +47,7 @@ func newLayerModel(cc *compileCtx, spec Value, parent Model, parentGivenName str
 		layoutSize.Set("height", v)
 	}
 	for i, layer := range spec.Get("layer").Items() {
+		cc.check()
 		name := l.getName("layer_" + jsval.JSNumberString(float64(i)))
 		switch {
 		case isLayerSpec(layer):
@@ -83,6 +87,7 @@ func (l *layerModel) children() []Model { return l.kids }
 func (l *layerModel) parseData() {
 	l.comp.data = parseDataFor(l)
 	for _, c := range l.kids {
+		l.b().ctx.check()
 		c.parseData()
 	}
 }
@@ -92,6 +97,7 @@ func (l *layerModel) parseLayoutSize() { parseLayerLayoutSize(l) }
 func (l *layerModel) parseSelections() {
 	l.comp.selection = newOmap[*selectionComponent]()
 	for _, c := range l.kids {
+		l.b().ctx.check()
 		c.parseSelections()
 		cs := c.b().comp.selection
 		for _, k := range cs.keyList() {
@@ -103,6 +109,7 @@ func (l *layerModel) parseSelections() {
 
 func (l *layerModel) parseMarkGroup() {
 	for _, c := range l.kids {
+		l.b().ctx.check()
 		c.parseMarkGroup()
 	}
 }
@@ -111,6 +118,7 @@ func (l *layerModel) parseAxesAndHeaders() { parseLayerAxes(l) }
 
 func (l *layerModel) assembleSelectionTopLevelSignals(signals []Value) []Value {
 	for _, c := range l.kids {
+		l.b().ctx.check()
 		signals = c.assembleSelectionTopLevelSignals(signals)
 	}
 	return signals
@@ -119,6 +127,7 @@ func (l *layerModel) assembleSelectionTopLevelSignals(signals []Value) []Value {
 func (l *layerModel) assembleSignals() []Value {
 	signals := assembleAxisSignals(l)
 	for _, c := range l.kids {
+		l.b().ctx.check()
 		signals = append(signals, c.assembleSignals()...)
 	}
 	return signals
@@ -127,6 +136,7 @@ func (l *layerModel) assembleSignals() []Value {
 func (l *layerModel) assembleLayoutSignals() []Value {
 	signals := assembleLayoutSignals(l)
 	for _, c := range l.kids {
+		l.b().ctx.check()
 		signals = append(signals, c.assembleLayoutSignals()...)
 	}
 	return signals
@@ -134,6 +144,7 @@ func (l *layerModel) assembleLayoutSignals() []Value {
 
 func (l *layerModel) assembleSelectionData(data []Value) []Value {
 	for _, c := range l.kids {
+		l.b().ctx.check()
 		data = c.assembleSelectionData(data)
 	}
 	return data
@@ -143,6 +154,7 @@ func (l *layerModel) assembleGroupStyle() Value {
 	seen := map[string]bool{}
 	var styles []string
 	for _, c := range l.kids {
+		l.b().ctx.check()
 		for _, s := range arrayOf(c.assembleGroupStyle()) {
 			if !seen[s.AsString()] {
 				seen[s.AsString()] = true
@@ -164,6 +176,7 @@ func (l *layerModel) assembleTitle() Value {
 		return t
 	}
 	for _, c := range l.kids {
+		l.b().ctx.check()
 		if t := c.assembleTitle(); t.IsTruthy() {
 			return t
 		}
@@ -176,6 +189,7 @@ func (l *layerModel) assembleLayout() Value { return jsval.Null }
 func (l *layerModel) assembleMarks() []Value {
 	var marks []Value
 	for _, c := range l.kids {
+		l.b().ctx.check()
 		marks = append(marks, c.assembleMarks()...)
 	}
 	return assembleLayerSelectionMarks(l, marks)
@@ -184,6 +198,7 @@ func (l *layerModel) assembleMarks() []Value {
 func (l *layerModel) assembleLegends() []Value {
 	legends := assembleLegends(l)
 	for _, c := range l.kids {
+		l.b().ctx.check()
 		legends = append(legends, c.assembleLegends()...)
 	}
 	return legends
@@ -213,6 +228,7 @@ func newConcatModel(cc *compileCtx, spec Value, parent Model, parentGivenName st
 		childSpecs = spec.Get("concat")
 	}
 	for i, child := range childSpecs.Items() {
+		cc.check()
 		c.kids = append(c.kids, buildModel(cc, child, c, c.getName("concat_"+jsval.JSNumberString(float64(i))), nil, config, depth+1))
 	}
 	return c
@@ -223,6 +239,7 @@ func (c *concatModel) children() []Model { return c.kids }
 func (c *concatModel) parseData() {
 	c.comp.data = parseDataFor(c)
 	for _, k := range c.kids {
+		c.b().ctx.check()
 		k.parseData()
 	}
 }
@@ -230,6 +247,7 @@ func (c *concatModel) parseData() {
 func (c *concatModel) parseSelections() {
 	c.comp.selection = newOmap[*selectionComponent]()
 	for _, k := range c.kids {
+		c.b().ctx.check()
 		k.parseSelections()
 		cs := k.b().comp.selection
 		for _, key := range cs.keyList() {
@@ -241,12 +259,14 @@ func (c *concatModel) parseSelections() {
 
 func (c *concatModel) parseMarkGroup() {
 	for _, k := range c.kids {
+		c.b().ctx.check()
 		k.parseMarkGroup()
 	}
 }
 
 func (c *concatModel) parseAxesAndHeaders() {
 	for _, k := range c.kids {
+		c.b().ctx.check()
 		k.parseAxesAndHeaders()
 	}
 }
@@ -255,6 +275,7 @@ func (c *concatModel) parseLayoutSize() { parseConcatLayoutSize(c) }
 
 func (c *concatModel) assembleSelectionTopLevelSignals(signals []Value) []Value {
 	for _, k := range c.kids {
+		c.b().ctx.check()
 		signals = k.assembleSelectionTopLevelSignals(signals)
 	}
 	return signals
@@ -262,6 +283,7 @@ func (c *concatModel) assembleSelectionTopLevelSignals(signals []Value) []Value 
 
 func (c *concatModel) assembleSignals() []Value {
 	for _, k := range c.kids {
+		c.b().ctx.check()
 		k.assembleSignals()
 	}
 	return nil
@@ -270,6 +292,7 @@ func (c *concatModel) assembleSignals() []Value {
 func (c *concatModel) assembleLayoutSignals() []Value {
 	signals := assembleLayoutSignals(c)
 	for _, k := range c.kids {
+		c.b().ctx.check()
 		signals = append(signals, k.assembleLayoutSignals()...)
 	}
 	return signals
@@ -277,6 +300,7 @@ func (c *concatModel) assembleLayoutSignals() []Value {
 
 func (c *concatModel) assembleSelectionData(data []Value) []Value {
 	for _, k := range c.kids {
+		c.b().ctx.check()
 		data = k.assembleSelectionData(data)
 	}
 	return data
@@ -285,6 +309,7 @@ func (c *concatModel) assembleSelectionData(data []Value) []Value {
 func (c *concatModel) assembleMarks() []Value {
 	var out []Value
 	for _, k := range c.kids {
+		c.b().ctx.check()
 		title := k.assembleTitle()
 		style := k.assembleGroupStyle()
 		encodeEntry := k.b().assembleGroupEncodeEntry(false)

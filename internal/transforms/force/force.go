@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsmath"
 
 	"github.com/mgilbir/aster/internal/jsval"
@@ -153,9 +154,49 @@ func Run(ctx context.Context, nodes []jsval.Value, p Params) error {
 		iters = 300
 	}
 	if iters > MaxIterations {
-		return fmt.Errorf("force: iterations %d exceeds limit %d", iters, MaxIterations)
+		return fmt.Errorf("%w: force: iterations %d exceeds limit %d", budget.ErrLimit, iters, MaxIterations)
 	}
-	// d3-force defaults, overridden only by parameters Vega sees as modified.
+	m, err := NewSimulation(ctx, nodes, p)
+	if err != nil {
+		return err
+	}
+	if !p.Static {
+		m.Tick()
+		m.WriteBack()
+		return firstErr(m.s.err, ctx.Err())
+	}
+	// Vega raises alpha to at least _.alpha (or 1) and spreads the decay so the
+	// simulation cools to alphaMin in exactly `iterations` ticks.
+	alpha := p.Alpha
+	if alpha == 0 || math.IsNaN(alpha) {
+		alpha = 1
+	}
+	m.SetAlpha(math.Max(m.Alpha(), alpha))
+	m.SetAlphaDecay(1 - jsmath.Pow(m.AlphaMin(), 1/float64(iters)))
+	for ; iters > 0; iters-- {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		m.Tick()
+		if m.s.err != nil {
+			return m.s.err
+		}
+	}
+	m.WriteBack()
+	return nil
+}
+
+// Simulation is a d3 force simulation that lives across passes of the
+// transform: vega-force keeps it as the operator's value and, on later passes,
+// reconfigures it (new nodes, rebuilt forces, a restarted alpha) instead of
+// starting over. The methods are the d3 calls vega-force makes.
+type Simulation struct{ s *sim }
+
+// NewSimulation is d3.forceSimulation(nodes) set up with p's parameters and
+// forces, as vega-force's simulation() does on the first pass. Nothing has
+// ticked yet. d3 initializes each force as it is added, so a link it cannot
+// resolve fails here, after the nodes have been placed.
+func NewSimulation(ctx context.Context, nodes []jsval.Value, p Params) (*Simulation, error) {
 	s := &sim{
 		alpha:         1,
 		alphaMin:      0.001,
@@ -177,42 +218,103 @@ func Run(ctx context.Context, nodes []jsval.Value, p Params) error {
 		s.velocityDecay = 1 - p.VelocityDecay
 	}
 	if err := s.setNodes(nodes); err != nil {
+		return nil, err
+	}
+	m := &Simulation{s}
+	for i, f := range p.Forces {
+		if err := m.SetForce(i, f); err != nil {
+			return m, err
+		}
+	}
+	return m, nil
+}
+
+// SetContext sets the context the simulation polls for cancellation.
+func (m *Simulation) SetContext(ctx context.Context) { m.s.ctx = ctx }
+
+// Tick is simulation.tick() (without the event).
+func (m *Simulation) Tick() { m.s.tick() }
+
+// Err is the context error a tick saw.
+func (m *Simulation) Err() error { return m.s.err }
+
+// WriteBack copies the simulation's positions onto the nodes.
+func (m *Simulation) WriteBack() { m.s.writeBack() }
+
+// The d3 simulation accessors vega-force uses.
+func (m *Simulation) Alpha() float64             { return m.s.alpha }
+func (m *Simulation) SetAlpha(a float64)         { m.s.alpha = a }
+func (m *Simulation) AlphaMin() float64          { return m.s.alphaMin }
+func (m *Simulation) SetAlphaMin(a float64)      { m.s.alphaMin = a }
+func (m *Simulation) SetAlphaTarget(a float64)   { m.s.alphaTarget = a }
+func (m *Simulation) SetAlphaDecay(a float64)    { m.s.alphaDecay = a }
+func (m *Simulation) SetVelocityDecay(v float64) { m.s.velocityDecay = 1 - v }
+
+// SetNodes is simulation.nodes(nodes): the nodes are initialized again (a node
+// without a position gets its place on the phyllotaxis spiral) and every force
+// is initialized with them.
+func (m *Simulation) SetNodes(nodes []jsval.Value) error {
+	if err := m.s.setNodes(nodes); err != nil {
 		return err
 	}
-	for _, f := range p.Forces {
-		if f == nil {
-			return errors.New("force: nil force")
-		}
-		impl := f.build()
-		if err := impl.initialize(s); err != nil {
+	for _, f := range m.s.forces {
+		if err := f.initialize(m.s); err != nil {
 			return err
 		}
-		s.forces = append(s.forces, impl)
 	}
-	if !p.Static {
-		s.tick()
-		s.writeBack()
-		return firstErr(s.err, ctx.Err())
-	}
-	// Vega raises alpha to at least _.alpha (or 1) and spreads the decay so the
-	// simulation cools to alphaMin in exactly `iterations` ticks.
-	alpha := p.Alpha
-	if alpha == 0 || math.IsNaN(alpha) {
-		alpha = 1
-	}
-	s.alpha = math.Max(s.alpha, alpha)
-	s.alphaDecay = 1 - jsmath.Pow(s.alphaMin, 1/float64(iters))
-	for ; iters > 0; iters-- {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		s.tick()
-		if s.err != nil {
-			return s.err
-		}
-	}
-	s.writeBack()
 	return nil
+}
+
+// SetForce is simulation.force(name, f) for the force at index i: it replaces
+// the force there (or adds it after the last) and initializes it.
+func (m *Simulation) SetForce(i int, f Force) error {
+	if f == nil {
+		return errors.New("force: nil force")
+	}
+	impl := f.build()
+	if i < len(m.s.forces) {
+		m.s.forces[i] = impl
+	} else {
+		m.s.forces = append(m.s.forces, impl)
+	}
+	return impl.initialize(m.s)
+}
+
+// Reinitialize hands the force at index i back to the simulation, which
+// initializes it again so it reads its parameters anew.
+func (m *Simulation) Reinitialize(i int) error {
+	if i >= len(m.s.forces) {
+		return nil
+	}
+	return m.s.forces[i].initialize(m.s)
+}
+
+// Trim removes the forces from index n on.
+func (m *Simulation) Trim(n int) {
+	if n < len(m.s.forces) {
+		m.s.forces = m.s.forces[:n]
+	}
+}
+
+// Pull reads the nodes' positions and velocities back from the objects: d3
+// reads and writes node.x and the rest on the node objects themselves, so
+// anything that changed them between passes is seen by the next tick.
+func (m *Simulation) Pull() {
+	for i, o := range m.s.objs {
+		nd := &m.s.nodes[i]
+		if v := o.Lookup("x"); !v.IsNullish() {
+			nd.x = jsval.ToNumber(v)
+		}
+		if v := o.Lookup("y"); !v.IsNullish() {
+			nd.y = jsval.ToNumber(v)
+		}
+		if v := o.Lookup("vx"); !v.IsNullish() {
+			nd.vx = jsval.ToNumber(v)
+		}
+		if v := o.Lookup("vy"); !v.IsNullish() {
+			nd.vy = jsval.ToNumber(v)
+		}
+	}
 }
 
 func firstErr(a, b error) error {
