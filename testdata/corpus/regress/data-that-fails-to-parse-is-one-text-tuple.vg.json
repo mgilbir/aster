@@ -1,0 +1,11 @@
+{"width":200,"height":60,"padding":5,
+"data":[
+{"name":"bad","url":"data/typed.tsv","format":{"type":"json"}},
+{"name":"worse","url":"data/typed.tsv","format":{"type":"csv","parse":{"id":"nosuchtype"}}},
+{"name":"count","values":[{}],"transform":[
+{"type":"formula","as":"n","expr":"length(data('bad'))"},
+{"type":"formula","as":"m","expr":"length(data('worse'))"},
+{"type":"formula","as":"head","expr":"substring(data('bad')[0].data, 0, 8)"},
+{"type":"formula","as":"id","expr":"'' + data('bad')[0].id"}]}],
+"marks":[{"type":"text","from":{"data":"count"},"encode":{"update":{"x":{"value":0},"y":{"value":20},
+"text":{"signal":"datum.n + ' ' + datum.m + ' ' + datum.head + ' ' + datum.id"}}}}]}
