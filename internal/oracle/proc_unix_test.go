@@ -19,8 +19,13 @@ func TestKillLeavesNoProcessBehind(t *testing.T) {
 		t.Fatal(err)
 	}
 	pgid := p.cmd.Process.Pid
-	defer p.stop()
+	defer p.stdin.Close()
 	killGroup(p.cmd)
+	// Reap the leader, as Linux counts a zombie as a member of its group, with
+	// wait4 rather than cmd.Wait, which would close stdin.
+	var ws syscall.WaitStatus
+	syscall.Wait4(pgid, &ws, 0, nil)
+	p.cmd = nil
 	deadline := time.Now().Add(5 * time.Second)
 	for syscall.Kill(-pgid, 0) == nil {
 		if time.Now().After(deadline) {
