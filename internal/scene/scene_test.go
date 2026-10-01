@@ -253,6 +253,31 @@ func TestLineAreaErrors(t *testing.T) {
 	}
 }
 
+// `item.interpolate || 'linear'` and `entry[orient || 'vertical']`: falsy
+// values of any type (NaN, 0, false, null) mean unset, not an unknown curve.
+func TestFalsyInterpolateAndOrientAreUnset(t *testing.T) {
+	for _, v := range []jsval.Value{jsval.Num(math.NaN()), jsval.Num(0), jsval.Bool(false), jsval.Null, jsval.Str("")} {
+		it := &Item{}
+		for _, k := range []string{"interpolate", "orient"} {
+			if _, err := it.Set(k, v); err != nil {
+				t.Fatal(err)
+			}
+		}
+		var sp StringPath
+		if err := Line(&sp, []*Item{it, it}); err != nil {
+			t.Errorf("%v: %v", v, err)
+		}
+	}
+	it := &Item{}
+	if _, err := it.Set("interpolate", jsval.Num(1)); err != nil {
+		t.Fatal(err)
+	}
+	var sp StringPath
+	if err := Line(&sp, []*Item{it}); err != ErrUnknownInterpolate {
+		t.Errorf("truthy non-string interpolate: %v", err)
+	}
+}
+
 func TestOrdered(t *testing.T) {
 	m := &Mark{}
 	for _, z := range []float64{0, 3, 1, 0, -2, 1} {
@@ -420,7 +445,9 @@ func TestItemSetGet(t *testing.T) {
 	if g := it.Fill.Gradient(); g == nil || !g.Radial || len(g.Stops) != 1 {
 		t.Errorf("gradient: %+v", it.Fill)
 	}
-	if v := it.Get("x"); v.NumValue() != 12.5 {
+	// A string given for a numeric property reads back as the string, as a
+	// JavaScript property would, while the number it converts to drives layout.
+	if v := it.Get("x"); !v.IsStr() || v.StrValue() != "12.5" {
 		t.Errorf("Get x = %v", v)
 	}
 	if !it.Get("y").IsUndefined() || !it.Get("stroke").IsNull() || it.Get("madeUp").NumValue() != 1 {

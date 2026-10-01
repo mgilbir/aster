@@ -183,6 +183,9 @@ type Item struct {
 	Datum jsval.Value
 	// Bounds is the item's bounding box (filled by Bounder.BoundMark).
 	Bounds Bounds
+	// Seq is the item's tuple id: the order the items of a view were created
+	// in, which breaks the ties of a mark sort.
+	Seq uint64
 
 	// Layout.
 	X, Y, X2, Y2  Num

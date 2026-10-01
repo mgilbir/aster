@@ -374,9 +374,18 @@ func init() {
 		if as == "" {
 			as = "data"
 		}
-		seq, err := transforms.Sequence(ctxOf(n), transforms.SequenceParams{
-			Start: p.num("start", 0), Stop: p.num("stop", 0), Step: p.num("step", 1), As: as,
-		})
+		var seq []jsval.Value
+		var err error
+		// `range(start, stop, _.step || 1)`: only a falsy step is 1. A truthy
+		// one that reads as 0 or NaN ([], "0", "x") is d3.range's step of
+		// zero, whose count Infinity | 0 is no values at all.
+		if sv := p.Value("step"); sv.IsTruthy() && !(jsval.ToNumber(sv) != 0 && !math.IsNaN(jsval.ToNumber(sv))) {
+			seq = nil
+		} else {
+			seq, err = transforms.Sequence(ctxOf(n), transforms.SequenceParams{
+				Start: p.num("start", 0), Stop: p.num("stop", 0), Step: p.num("step", 1), As: as,
+			})
+		}
 		if err != nil || len(in) == 0 {
 			return seq, err
 		}
@@ -452,6 +461,9 @@ func init() {
 			Method: p.str("method"), Order: clampInt(p.num("order", 3)),
 			Extent: p.nums("extent"), Params: p.bool("params"), As: p.strs("as"),
 		}
+		if ev := p.Value("extent"); ev.IsTruthy() && !ev.IsArr() {
+			rp.ExtentNotArray = true
+		}
 		return transforms.Regression(ctxOf(n), in, rp)
 	})
 	tf["lookup"] = tupleTransform(func(n *opNode, p *opParams, in []jsval.Value) ([]jsval.Value, error) {
@@ -494,7 +506,7 @@ func init() {
 		}
 		tp := transforms.TimeUnitParams{
 			Field: p.field("field"), NoInterval: !p.Value("interval").IsTruthy() && p.has("interval"),
-			Units: p.strs("units"), Step: p.num("step", 1), MaxBins: p.num("maxbins", 40),
+			Units: p.strs("units"), UnitsGiven: p.list("units") != nil, Step: p.num("step", 1), MaxBins: p.num("maxbins", 40),
 			Extent: p.pair2("extent"), InferUnits: p.bool("inferUnits"), Zone: zone,
 			As: pairAs(p.strs("as")),
 		}
@@ -612,6 +624,9 @@ func windowParams(p *opParams) transforms.WindowParams {
 	aggp := p.nums("aggregate_params")
 	wp := transforms.WindowParams{
 		Sort: p.comparator("sort"), GroupBy: p.fields("groupby"), IgnorePeers: p.bool("ignorePeers"),
+	}
+	if cs := p.compareSpec("sort"); cs != nil && len(cs.fields) > 0 {
+		wp.SortField = cs.fields[0]
 	}
 	for i, op := range ops {
 		s := transforms.WindowOpSpec{Op: op, Param: math.NaN()}

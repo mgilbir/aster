@@ -1,0 +1,1 @@
+{"width":50,"height":50,"data":[{"name":"t","values":[1,"b",true,[2]],"transform":[{"type":"formula","as":"d","expr":"datum.data"}]}],"marks":[{"type":"text","from":{"data":"t"},"encode":{"update":{"text":{"field":"d"},"y":{"signal":"20*datum.data"}}}}]}

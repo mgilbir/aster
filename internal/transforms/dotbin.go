@@ -101,7 +101,10 @@ func DotBinTuples(ctx context.Context, data []jsval.Value, p DotBinParams) (DotB
 	get := p.Field.Get
 	step := p.Step
 	if step == 0 || math.IsNaN(step) {
-		lo, hi, ok := Extent(len(data), func(i int) jsval.Value { return get(data[i]) })
+		lo, hi, ok, err := ExtentOf(data, p.Field)
+		if err != nil {
+			return DotBinResult{}, err
+		}
 		step = 0
 		if ok {
 			// span(): (last - first) || 0
@@ -115,6 +118,12 @@ func DotBinTuples(ctx context.Context, data []jsval.Value, p DotBinParams) (DotB
 	for _, g := range Partition(data, p.GroupBy) {
 		if err := ctx.Err(); err != nil {
 			return res, err
+		}
+		if len(g.Tuples) == 0 {
+			// dotbin() starts with f(array[0]).
+			if err := ReadsUndefined(p.Field); err != nil {
+				return res, err
+			}
 		}
 		tuples := append([]jsval.Value(nil), g.Tuples...)
 		keys := make(map[*jsval.Object]float64, len(tuples))

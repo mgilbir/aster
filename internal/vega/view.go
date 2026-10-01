@@ -35,6 +35,7 @@ import (
 	"github.com/mgilbir/aster/internal/geo"
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/raster"
+	"github.com/mgilbir/aster/internal/scale"
 	"github.com/mgilbir/aster/internal/scene"
 	"github.com/mgilbir/aster/internal/transforms/wordcloud"
 )
@@ -215,6 +216,7 @@ type runView struct {
 	marks          []*scene.Mark
 	markCtx        map[*scene.Mark]*rtContext
 	idCounter      float64
+	itemSeq        uint64
 }
 
 // Render parses spec and evaluates it to a laid-out scenegraph.
@@ -229,6 +231,8 @@ func Render(ctx context.Context, spec jsval.Value, opts Options) (res *Result, e
 				err = e
 			case *opError:
 				err = e.err
+			case *scale.Thrown:
+				err = e
 			case *geo.LimitError:
 				err = e.Err
 			case error:
@@ -589,7 +593,7 @@ func (v *runView) addSignalListener(c *rtContext, src, tgt *opNode, u *updateSpe
 			}
 		case u.update != nil:
 			ev := jsval.Obj(jsval.NewObject(0))
-			val = u.update.eval(c, jsval.Undefined, jsval.Undefined, ev)
+			val = u.update.eval(c, jsval.Undefined, jsval.Undefined, ev, varDatum|varEvent)
 		case u.hasVal:
 			val = u.value
 		}

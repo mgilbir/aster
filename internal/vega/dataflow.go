@@ -7,11 +7,11 @@ import (
 	"fmt"
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/geo"
+	"github.com/mgilbir/aster/internal/scale"
 	"sort"
 
 	"github.com/mgilbir/aster/internal/expr"
 	"github.com/mgilbir/aster/internal/jsval"
-	"github.com/mgilbir/aster/internal/scale"
 	"github.com/mgilbir/aster/internal/scene"
 	"github.com/mgilbir/aster/internal/transforms/hierarchy"
 )
@@ -659,8 +659,8 @@ func (g *flowGraph) evaluate(encode string) (err error) {
 					err = e.err
 				case *geo.LimitError:
 					err = e.Err
-				case *scale.Error, *expr.Error:
-					err = e.(error) // an exception a scale or an expression threw
+				case *scale.Thrown, *expr.Error:
+					err = e.(error) // an exception a scale, an accessor or an expression threw
 				case error:
 					err, internal = fmt.Errorf("%w\n%s", e, shortStack()), true
 				default:
@@ -731,8 +731,8 @@ func (g *flowGraph) safely(fn func(*flowGraph)) (err error) {
 				err = e.err
 			} else if le, ok := r.(*geo.LimitError); ok {
 				err = le.Err
-			} else if se, ok := r.(*scale.Error); ok {
-				err = se
+			} else if th, ok := r.(*scale.Thrown); ok {
+				err = th
 			} else if ee, ok := r.(*expr.Error); ok {
 				err = ee
 			} else {

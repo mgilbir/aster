@@ -5,17 +5,6 @@ import (
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
-// Error is a JavaScript exception a scale raises while it is applied, such as
-// the TypeError d3's piecewise interpolator throws for a NaN position. It is
-// the payload of a panic: the dataflow turns it into the error that ends the
-// evaluation, as an uncaught exception does upstream.
-type Error struct {
-	Name string // "TypeError", "RangeError", ...
-	Msg  string
-}
-
-func (e *Error) Error() string { return e.Name + ": " + e.Msg }
-
 // Scale is implemented by every scale. It is the common surface of a d3 scale
 // object as vega-scale uses it: apply, domain, range, copy and the `type` tag
 // that vega-scale attaches. Capabilities that only some scales have are

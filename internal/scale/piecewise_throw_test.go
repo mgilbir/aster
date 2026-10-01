@@ -12,10 +12,10 @@ import (
 // all), finds nothing to call and throws "I[i] is not a function", which
 // upstream surfaces as an operator error rather than a color.
 func TestPiecewiseThrowsWhereD3Does(t *testing.T) {
-	throws := func(f func() jsval.Value) (th *Error) {
+	throws := func(f func() jsval.Value) (th *Thrown) {
 		defer func() {
 			if r := recover(); r != nil {
-				th, _ = r.(*Error)
+				th, _ = r.(*Thrown)
 				if th == nil {
 					panic(r)
 				}
@@ -38,5 +38,8 @@ func TestPiecewiseThrowsWhereD3Does(t *testing.T) {
 		if th := throws(func() jsval.Value { return one(x) }); th == nil {
 			t.Errorf("single value at %v did not throw", x)
 		}
+	}
+	if th := throws(func() jsval.Value { return Piecewise(nil, nil)(0.5) }); th == nil {
+		t.Error("no values did not throw")
 	}
 }

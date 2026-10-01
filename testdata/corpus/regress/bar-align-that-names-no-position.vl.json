@@ -1,0 +1,1 @@
+{"data":{"values":[{"c":"alpha","v":28},{"c":"beta","v":55}]},"width":100,"height":50,"mark":{"type":"bar","align":" ","width":12},"encoding":{"x":{"field":"c","type":"nominal"},"y":{"field":"v","type":"quantitative"}}}

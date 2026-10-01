@@ -33,6 +33,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"sync"
 	"unicode"
 	"unicode/utf8"
@@ -266,8 +267,21 @@ func (m *Measurer) add(e *entry) {
 
 // MeasureText returns the width in pixels of text set in the CSS font.
 func (m *Measurer) MeasureText(text, cssFont string) float64 {
+	// node-canvas hands the string to Pango as a C string: it ends at the first
+	// NUL character.
+	if i := strings.IndexByte(text, 0); i >= 0 {
+		text = text[:i]
+	}
 	if len(text) == 0 {
 		return 0
+	}
+	if strings.ContainsAny(text, "\n\r\u2028\u2029") {
+		// The reference lays text out with Pango, which breaks it into lines at
+		// these separators ("\r\n" is one break) and reports the widest line.
+		return m.measureLines(text, cssFont)
+	}
+	if strings.IndexByte(text, '\t') >= 0 {
+		return m.measureTabs(text, cssFont)
 	}
 	key := widthKey{text, cssFont}
 	// Most measurements repeat (axis labels, legend entries): concurrent
@@ -295,6 +309,52 @@ func (m *Measurer) MeasureText(text, cssFont string) float64 {
 	m.widthCache[key] = w
 	m.mu.Unlock()
 	return w
+}
+
+// measureLines is the width of the widest line of text split at line
+// separators.
+func (m *Measurer) measureLines(text, cssFont string) float64 {
+	var widest float64
+	for {
+		i := strings.IndexAny(text, "\n\r\u2028\u2029")
+		line := text
+		if i >= 0 {
+			line = text[:i]
+		}
+		if w := m.MeasureText(line, cssFont); w > widest {
+			widest = w
+		}
+		if i < 0 {
+			break
+		}
+		if strings.HasPrefix(text[i:], "\r\n") {
+			i++
+		}
+		_, size := utf8.DecodeRuneInString(text[i:])
+		text = text[i+size:]
+	}
+	return widest
+}
+
+// measureTabs is the width of one line containing tabs, set as Pango sets
+// them: tab stops lie at every eight spaces from the start of the line, and a
+// tab advances to the first stop at least one space beyond the text so far
+// (a stop closer than that is skipped).
+func (m *Measurer) measureTabs(line, cssFont string) float64 {
+	space := m.MeasureText(" ", cssFont)
+	stop := 8 * space
+	var x float64
+	for {
+		i := strings.IndexByte(line, '\t')
+		if i < 0 {
+			return x + m.MeasureText(line, cssFont)
+		}
+		x += m.MeasureText(line[:i], cssFont)
+		if stop > 0 {
+			x = stop * (math.Floor((x+space)/stop) + 1)
+		}
+		line = line[i+1:]
+	}
 }
 
 // ShapeText shapes text with the font the CSS string selects and returns the

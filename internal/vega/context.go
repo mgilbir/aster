@@ -152,7 +152,7 @@ func (c *rtContext) parseOperator(e *entry) {
 		if e.update != nil {
 			fn := e.update
 			n.update = func(n *opNode, p *opParams) any {
-				return fn.eval(c, jsval.Undefined, jsval.Undefined, jsval.Undefined)
+				return fn.eval(c, jsval.Undefined, jsval.Undefined, jsval.Undefined, 0)
 			}
 		}
 	} else {
@@ -242,6 +242,9 @@ func (c *rtContext) parseParameter(p P, b *paramBuilder) any {
 		if v == nil {
 			return nil
 		}
+		if v == undefinedRef {
+			fail("Operator not defined: undefined")
+		}
 		n := c.get(v)
 		if n == nil {
 			fail("operator not defined (%s)", v.typ)
@@ -257,6 +260,11 @@ func (c *rtContext) parseParameter(p P, b *paramBuilder) any {
 		if v.path == "" {
 			return transforms.Field{}
 		}
+		if len(jsval.ParseFieldPath(v.path)) == 0 {
+			// The runtime builds the accessor as Function("_", "return _[]")
+			// for a path with no segment.
+			fail("Unexpected token ']'")
+		}
 		return fieldAccessor(v.path, v.name)
 	case pCompare:
 		return c.compareFn(v)
@@ -264,6 +272,9 @@ func (c *rtContext) parseParameter(p P, b *paramBuilder) any {
 		return c.keyFn(v)
 	case pExpr:
 		for _, d := range v.fn.deps {
+			if d.e == undefinedRef {
+				fail("Operator not defined: undefined")
+			}
 			n := c.get(d.e)
 			if n == nil {
 				continue
@@ -287,7 +298,7 @@ type tupleIDMarker struct{}
 
 // fieldAccessor is vega-util's field(path, name).
 func fieldAccessor(path, name string) transforms.Field {
-	f := transforms.FieldOf(path)
+	f := transforms.FieldOfStrict(path)
 	if name != "" {
 		f.Name = name
 	}
@@ -399,15 +410,30 @@ type exprFn struct {
 	usesItem bool
 }
 
+// undefinedRef stands for an operator reference whose id is undefined (see
+// parseExpression); the runtime cannot resolve it.
+var undefinedRef = &entry{typ: "undefined"}
+
 type depRef struct {
 	name string
 	e    *entry
 }
 
+// exprVars are the free variables a context defines for an expression: the
+// parameters of the function upstream compiles it into.
+type exprVars uint8
+
+const (
+	varDatum exprVars = 1 << iota
+	varItem
+	varEvent
+)
+
 // eval evaluates the expression in context c.
-func (f *exprFn) eval(c *rtContext, datum, item, event jsval.Value) jsval.Value {
+func (f *exprFn) eval(c *rtContext, datum, item, event jsval.Value, vars exprVars) jsval.Value {
 	s := c.scope()
 	s.Datum, s.Item, s.Event = datum, item, event
+	s.NoDatum, s.NoItem, s.NoEvent = vars&varDatum == 0, vars&varItem == 0, vars&varEvent == 0
 	v, err := f.prog.Eval(s)
 	if err != nil {
 		failErr(fmt.Errorf("%w (in expression %s)", err, f.src))
@@ -423,7 +449,7 @@ type boundExpr struct {
 }
 
 func (b *boundExpr) call(datum jsval.Value) jsval.Value {
-	return b.fn.eval(b.ctx, datum, jsval.Undefined, jsval.Undefined)
+	return b.fn.eval(b.ctx, datum, jsval.Undefined, jsval.Undefined, varDatum)
 }
 
 // accessor adapts the expression to a transforms accessor.
@@ -485,6 +511,16 @@ func (s *Scope) parseExpression(code string) *exprFn {
 		}
 	}
 	for _, name := range d.Signals {
+		if expr.IsObjectPrototypeName(name) && s.findSignal(name) == nil {
+			// scope.getSignal(name) finds the inherited property of the plain
+			// signals object, truthy, so no "Unrecognized signal name"; the
+			// reference built from it has no operator id. The parse goes on,
+			// and the runtime fails to resolve the reference when it builds
+			// the operator (at once for the view, when a subflow is
+			// instantiated for a group, where the dataflow logs it).
+			add("$"+name, undefinedRef)
+			continue
+		}
 		e := s.getSignal(name)
 		add("$"+name, e)
 	}

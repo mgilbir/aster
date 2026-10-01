@@ -562,6 +562,10 @@ func Discrete(values []jsval.Value) func(t float64) jsval.Value {
 	}
 }
 
+// Thrown is the panic value of a JavaScript exception thrown inside a scale
+// function, whose Apply methods cannot return an error (see jsval.Thrown).
+type Thrown = jsval.Thrown
+
 // Piecewise is d3.piecewise: interpolates through the values with one
 // interpolator per consecutive pair. A nil interpolate means InterpolateValue.
 func Piecewise(interpolate Interpolator, values []jsval.Value) func(t float64) jsval.Value {
@@ -583,7 +587,7 @@ func Piecewise(interpolate Interpolator, values []jsval.Value) func(t float64) j
 		t = float64(t * float64(n)) // rounded here so t-i below cannot fuse into an FMA
 		f := math.Floor(t)
 		if n == 0 || f != f {
-			panic(&Error{Name: "TypeError", Msg: "I[i] is not a function"})
+			panic(&Thrown{Name: "TypeError", Msg: "I[i] is not a function"})
 		}
 		i := int(math.Max(0, math.Min(float64(n-1), f)))
 		return segs[i](t - float64(i))

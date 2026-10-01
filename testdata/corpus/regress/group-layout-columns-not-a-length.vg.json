@@ -1,0 +1,1 @@
+{"width":120,"height":60,"layout":{"columns":1.5},"marks":[{"type":"group","encode":{"enter":{"width":{"value":50},"height":{"value":50},"fill":{"value":"#eee"}}}},{"type":"group","encode":{"enter":{"width":{"value":50},"height":{"value":50},"fill":{"value":"#ccc"}}}}]}

@@ -1,0 +1,1 @@
+{"data":{"values":[{"a":"A","y":1},{"a":"B","y":2}]},"facet":{"column":{"field":"a"}},"spec":{"mark":"point","encoding":{"y":{"field":"y","type":"quantitative"}},"transform":[{"joinaggregate":[{"op":"mean","field":"y","as":"m"}]}]}}

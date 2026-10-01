@@ -166,17 +166,32 @@ func parameterValue(def *paramDef, value jsval.Value, scope *Scope) P {
 		if a := value.Get("as"); a.IsStr() {
 			name = a.StrValue()
 		}
-		return pField{path: value.Get("field").AsString(), name: name}
+		return pField{path: fieldPathText(value.Get("field")), name: name}
 	case typ == "expr":
 		return pExpr{fn: scope.parseExpression(value.AsString())}
 	case typ == "data":
 		return scope.getData(value.AsString()).values
 	case isField:
-		return pField{path: value.AsString()}
+		return pField{path: fieldPathText(value)}
 	case typ == "compare":
 		return scope.compareRef(value)
 	}
 	return value
+}
+
+// fieldPathText is the access path vega-util's field(value) splits. A falsy
+// value gives no accessor at all (the runtime resolves it to null); a string
+// is the path; an array reads as its joined text. Any other value (a number,
+// boolean or object) has no length, so splitting it finds no segments, the
+// path "." here: an empty path, which the runtime cannot turn into a getter.
+func fieldPathText(v jsval.Value) string {
+	switch {
+	case !v.IsTruthy():
+		return ""
+	case v.IsStr(), v.IsArr():
+		return v.AsString()
+	}
+	return "."
 }
 
 func parseIndexParameter(spec jsval.Value, scope *Scope) P {

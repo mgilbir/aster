@@ -315,7 +315,7 @@ func positionAndSize58(fd Value, channel string, m *unitModel) Value {
 		offset: po.offset, defaultRefFn: pointPositionDefaultRef(m, "mid", channel, scaleName, scale), bandPosition: bandPosition,
 	})
 	if vgSizeChannel != "" {
-		o := mk(vgChannel, posRef)
+		o := mk(jsKey(vgChannel), posRef)
 		spreadV(o, sizeMixins)
 		return jsval.Obj(o)
 	}
@@ -337,7 +337,7 @@ func positionAndSize58(fd Value, channel string, m *unitModel) Value {
 		p.Set("offset", sizeOffset)
 		second = jsval.Obj(p)
 	}
-	return mkv(vgChannel, posRef, vgChannel2, second)
+	return mkv(jsKey(vgChannel), posRef, vgChannel2, second)
 }
 
 func getBinSpacing58(channel string, spacing float64, reverse, axisTranslate, offset Value) Value {
@@ -526,6 +526,22 @@ func cmAlias(cc *compileCtx, field string) string {
 		return field
 	}
 	return removePathFromField(field)
+}
+
+// cmFieldName reads the continuous axis field a composite mark builds its
+// derived names from. 6.x runs it through removePathFromField, whose
+// splitAccessPath throws on a missing field (a boxplot of an aggregate that
+// names none, like count).
+func cmFieldName(cc *compileCtx, v Value) string {
+	if !cc.v5 {
+		switch {
+		case v.IsUndefined():
+			throw("Cannot read properties of undefined (reading 'length')")
+		case v.IsNull():
+			throw("Cannot read properties of null (reading 'length')")
+		}
+	}
+	return v.AsString()
 }
 
 // legendSelectionUpdate is the expression reading the clicked legend entry.

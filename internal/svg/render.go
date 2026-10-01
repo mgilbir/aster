@@ -314,14 +314,14 @@ func (r *renderer) item(m *scene.Mark, it *scene.Item, tag string, depth int) er
 		r.imageItem(m, it)
 	case scene.MarkRule:
 		w.attrName("transform")
-		w.buf = appendTranslate(w.buf, it.X.Zero(), it.Y.Zero())
+		w.buf = appendTranslateItem(w.buf, it)
 		w.buf = append(w.buf, '"')
 		x2, y2 := 0.0, 0.0
 		if it.X2.Set() {
-			x2 = it.X2.Val() - it.X.Zero()
+			x2 = it.X2.Val() - it.OrZero("x")
 		}
 		if it.Y2.Set() {
-			y2 = it.Y2.Val() - it.Y.Zero()
+			y2 = it.Y2.Val() - it.OrZero("y")
 		}
 		w.attrNum("x2", x2)
 		w.attrNum("y2", y2)
@@ -335,7 +335,7 @@ func (r *renderer) item(m *scene.Mark, it *scene.Item, tag string, depth int) er
 			w.attrRaw("vector-effect", "non-scaling-stroke")
 		}
 		w.attrName("transform")
-		w.buf = appendTranslate(w.buf, it.X.Zero(), it.Y.Zero())
+		w.buf = appendTranslateItem(w.buf, it)
 		if it.AngleTruthy() {
 			w.buf = append(w.buf, " rotate("...)
 			w.buf = appendAngle(w.buf, it)
@@ -355,7 +355,7 @@ func (r *renderer) item(m *scene.Mark, it *scene.Item, tag string, depth int) er
 		r.style(m, it, "path", it.Fill, it.Stroke)
 	case scene.MarkArc, scene.MarkSymbol, scene.MarkShape:
 		w.attrName("transform")
-		w.buf = appendTranslate(w.buf, it.X.Zero(), it.Y.Zero())
+		w.buf = appendTranslateItem(w.buf, it)
 		if it.AngleTruthy() {
 			w.buf = append(w.buf, " rotate("...)
 			w.buf = appendAngle(w.buf, it)
@@ -397,6 +397,15 @@ func scaleOne(n scene.Num) float64 {
 	return 1
 }
 
+// appendTranslateItem is `translate(${item.x || 0},${item.y || 0})`.
+func appendTranslateItem(dst []byte, it *scene.Item) []byte {
+	dst = append(dst, "translate("...)
+	dst = it.AppendPos(dst, "x")
+	dst = append(dst, ',')
+	dst = it.AppendPos(dst, "y")
+	return append(dst, ')')
+}
+
 func appendTranslate(dst []byte, x, y float64) []byte {
 	dst = append(dst, "translate("...)
 	dst = scene.AppendNumber(dst, x)
@@ -431,7 +440,7 @@ func abs(f float64) float64 {
 func (r *renderer) group(m *scene.Mark, it *scene.Item, depth int) error {
 	w := &r.w
 	w.attrName("transform")
-	w.buf = appendTranslate(w.buf, it.X.Zero(), it.Y.Zero())
+	w.buf = appendTranslateItem(w.buf, it)
 	w.buf = append(w.buf, '"')
 
 	fore := it.StrokeForeground.IsTrue()

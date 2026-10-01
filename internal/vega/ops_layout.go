@@ -44,13 +44,13 @@ func facViewLayout(c *rtContext, n *opNode, e *entry) (any, transform, func(*opN
 			Warn:           n.g.warn,
 		}
 		sizes, err := layout.ViewLayout(mark, lv, lp)
-		if err != nil {
-			// upstream's layout throws; the dataflow stops evaluating and
-			// the view keeps whatever the operators before it produced
-			failErr(err)
-		}
 		for _, s := range sizes {
 			v.resizeView(s.ViewWidth, s.ViewHeight, s.Width, s.Height, s.Origin, s.Resize)
+		}
+		if err != nil {
+			// upstream's layout throws; the dataflow stops evaluating and
+			// the view keeps whatever was done before the exception
+			failErr(err)
 		}
 		// Layout may resize child items, so group bounds are recomputed
 		// (legend entries excepted, which upstream exempts to avoid

@@ -335,11 +335,26 @@ func (c *compiler) identifier(n *Node) (node, error) {
 	}
 	switch id {
 	case "datum":
-		return func(s *Scope) jsval.Value { return s.Datum }, nil
+		return func(s *Scope) jsval.Value {
+			if s.NoDatum {
+				throw("ReferenceError", "datum is not defined")
+			}
+			return s.Datum
+		}, nil
 	case "event":
-		return func(s *Scope) jsval.Value { return s.Event }, nil
+		return func(s *Scope) jsval.Value {
+			if s.NoEvent {
+				throw("ReferenceError", "event is not defined")
+			}
+			return s.Event
+		}, nil
 	case "item":
-		return func(s *Scope) jsval.Value { return s.Item }, nil
+		return func(s *Scope) jsval.Value {
+			if s.NoItem {
+				throw("ReferenceError", "item is not defined")
+			}
+			return s.Item
+		}, nil
 	}
 	c.addSignal(id)
 	return func(s *Scope) jsval.Value {
@@ -376,6 +391,12 @@ var disallowedProperties = map[string]bool{
 	"__lookupGetter__": true, "__lookupSetter__": true, "isPrototypeOf": true, "propertyIsEnumerable": true,
 	"toString": true, "valueOf": true, "__proto__": true, "toLocaleString": true,
 }
+
+// IsObjectPrototypeName reports whether name is a property every JavaScript
+// object inherits (constructor, toString, __proto__, ...). Upstream keeps its
+// signals, scales and data in plain objects, so a lookup by such a name finds
+// the inherited property instead of nothing.
+func IsObjectPrototypeName(name string) bool { return disallowedProperties[name] }
 
 func (c *compiler) object(n *Node) (node, error) {
 	type prop struct {
@@ -663,6 +684,9 @@ func (c *compiler) member(n *Node) (node, error) {
 			}
 			var hint slotHint
 			return func(s *Scope) jsval.Value {
+				if s.NoDatum {
+					throw("ReferenceError", "datum is not defined")
+				}
 				d := s.Datum
 				if d.IsObj() {
 					return hint.get(d.ObjValue(), key)

@@ -138,14 +138,28 @@ type fieldRefOption struct {
 // (or an aggregate/window op def).
 func vgField(cc *compileCtx, fd Value, opt fieldRefOption) string {
 	field := ""
+	// missing is "undefined" or "null" while `field` is that JavaScript
+	// value: it reads as "" in the checks, as that word in a template string,
+	// and a path function given it throws.
+	missing := ""
 	if f := fd.Get("field"); !f.IsNullish() {
 		field = f.AsString()
+	} else if f.IsNull() {
+		missing = "null"
+	} else {
+		missing = "undefined"
+	}
+	jsField := func() string {
+		if missing != "" {
+			return missing
+		}
+		return field
 	}
 	hasField := field != ""
 	suffix := opt.suffix
 	argAccessor := ""
 	if isCountDef(fd) {
-		field = internalField("count")
+		field, missing = internalField("count"), ""
 	} else {
 		fn := ""
 		if !opt.nofn {
@@ -159,12 +173,12 @@ func vgField(cc *compileCtx, fd Value, opt fieldRefOption) string {
 					suffix = opt.binSuffix + opt.suffix
 				case aggregate.IsTruthy():
 					if isArgmaxDef(aggregate) {
-						argAccessor = `["` + field + `"]`
-						field = "argmax_" + aggregate.Get("argmax").AsString()
+						argAccessor = `["` + jsField() + `"]`
+						field, missing = "argmax_"+aggregate.Get("argmax").AsString(), ""
 						hasField = true
 					} else if isArgminDef(aggregate) {
-						argAccessor = `["` + field + `"]`
-						field = "argmin_" + aggregate.Get("argmin").AsString()
+						argAccessor = `["` + jsField() + `"]`
+						field, missing = "argmin_"+aggregate.Get("argmin").AsString(), ""
 						hasField = true
 					} else {
 						fn = aggregate.AsString()
@@ -185,13 +199,19 @@ func vgField(cc *compileCtx, fd Value, opt fieldRefOption) string {
 			} else {
 				field = fn
 			}
+			missing = ""
 		}
 	}
 	if suffix != "" {
-		field = field + "_" + suffix
+		field, missing = jsField()+"_"+suffix, ""
 	}
 	if opt.prefix != "" {
-		field = opt.prefix + "_" + field
+		field, missing = opt.prefix+"_"+jsField(), ""
+	}
+	if missing != "" {
+		// replacePathInField, removePathFromField and flatAccessWithDatum all
+		// start with splitAccessPath(field).
+		throw("Cannot read properties of %s (reading 'length')", missing)
 	}
 	switch {
 	case opt.forAs:

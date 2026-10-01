@@ -96,11 +96,18 @@ func (d *diffStat) String() string {
 //     matching the requested weight and style, and Noto Emoji is regular, so
 //     for bold or italic text it draws emoji as .notdef of the sans face. This
 //     package falls back to Noto Emoji whatever the weight.
+//   - pango-layout: text with line separators or tabs. The reference measured
+//     them as ordinary glyphs; node-canvas, the oracle for the layouts the
+//     charts are compared on, lays text out with Pango (lines at the
+//     separators, tab stops every eight spaces), and so does MeasureText.
 func explained(m *Measurer, text, css string) string {
 	for _, r := range text {
 		if r >= 0x0590 && r <= 0x05FF {
 			return "hebrew"
 		}
+	}
+	if strings.ContainsAny(text, "\n\r\u2028\u2029\t") {
+		return "pango-layout"
 	}
 	c := ParseCSSFont(css)
 	if c.Weight != 400 || c.Italic {
@@ -187,7 +194,7 @@ func TestCompareTextmeasure(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var compat, exact, unexplained, hebrew, emoji diffStat
+	var compat, exact, unexplained, hebrew, emoji, layout diffStat
 	var bad []string
 	for fi, css := range corpusFonts {
 		for si, s := range corpusStrings {
@@ -204,6 +211,8 @@ func TestCompareTextmeasure(t *testing.T) {
 				hebrew.add(s, css, got, want)
 			case "emoji-aspect":
 				emoji.add(s, css, got, want)
+			case "pango-layout":
+				layout.add(s, css, got, want)
 			default:
 				unexplained.add(s, css, got, want)
 				bad = append(bad, fmt.Sprintf("%q @ %q: got %.6f want %.6f", s, css, got, want))
@@ -225,9 +234,9 @@ func TestCompareTextmeasure(t *testing.T) {
 	if len(bad) > 0 {
 		t.Errorf("%d unexplained differences", len(bad))
 	}
-	if unexplained.exact != unexplained.n || unexplained.n != 3846 || hebrew.n != 30 || emoji.n != 60 {
-		t.Errorf("comparable/unexplained/hebrew/emoji = %d/%d/%d/%d exact %d, want 3846/3846/30/60",
-			unexplained.n, unexplained.n-len(bad), hebrew.n, emoji.n, unexplained.exact)
+	if unexplained.exact != unexplained.n || unexplained.n+layout.n != 3846 || hebrew.n != 30 || emoji.n != 60 || layout.n == 0 {
+		t.Errorf("comparable/layout/unexplained/hebrew/emoji = %d/%d/%d/%d/%d exact %d, want 3846 in all with only the layout class apart",
+			unexplained.n, layout.n, unexplained.n-len(bad), hebrew.n, emoji.n, unexplained.exact)
 	}
 }
 

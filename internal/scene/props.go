@@ -115,17 +115,23 @@ func (it *Item) setProp(l *jsonLoader, k string, val jsval.Value) (bool, error) 
 	case "scaleY":
 		it.ScaleY = numOf(val)
 	case "interpolate":
-		it.Interpolate = strOf(val)
+		it.Interpolate = strOfTruthy(val)
 	case "tension":
 		it.Tension = numOf(val)
 	case "orient":
-		it.Orient = strOf(val)
+		it.Orient = strOfTruthy(val)
 	case "defined":
 		it.Defined = triOf(val)
 	case "text":
 		it.Text = val
 	case "font":
 		it.Font = strOf(val)
+		// An array (Vega-Lite writes [] for a null title font) is truthy: the
+		// attribute is its text, with no sans-serif default.
+		delete(it.Raw, "font")
+		if val.IsArr() || val.IsObj() {
+			it.setRaw("font", val)
+		}
 	case "fontSize":
 		it.FontSize = numOf(val)
 	case "fontWeight":
@@ -163,7 +169,13 @@ func (it *Item) setProp(l *jsonLoader, k string, val jsval.Value) (bool, error) 
 	case "cursor":
 		it.Cursor = strOf(val)
 	case "href":
-		it.Href = strOf(val)
+		// The renderer sanitizes the href with vega-loader, whose first step
+		// is uri.replace(...): only a string can be a link, any other value
+		// (a number, a date) rejects and renders none.
+		it.Href = ""
+		if val.IsStr() {
+			it.Href = val.StrValue()
+		}
 	case "tooltip":
 		it.Tooltip = val
 	case "description":
@@ -208,6 +220,10 @@ func (it *Item) setProp(l *jsonLoader, k string, val jsval.Value) (bool, error) 
 // or unset properties. Group items answer "items" with their child marks'
 // count only through Items; Get does not expose structure.
 func (it *Item) Get(key string) jsval.Value {
+	// A numeric property given a word reads back as that word.
+	if v, ok := it.Raw[key]; ok {
+		return v
+	}
 	num := func(n Num) jsval.Value {
 		if !n.Set() {
 			return jsval.Undefined
@@ -425,7 +441,7 @@ func gradientValue(g *Gradient) jsval.Value {
 var rawNumeric = map[string]bool{
 	"angle": true, "strokeWidth": true, "strokeOpacity": true, "fillOpacity": true,
 	"opacity": true, "strokeDashOffset": true, "strokeMiterLimit": true,
-	"width": true, "height": true, "cornerRadius": true, "cornerRadiusTopLeft": true,
+	"x": true, "y": true, "width": true, "height": true, "cornerRadius": true, "cornerRadiusTopLeft": true,
 	"cornerRadiusTopRight": true, "cornerRadiusBottomRight": true, "cornerRadiusBottomLeft": true,
 }
 
@@ -490,12 +506,41 @@ func (it *Item) OrZero(prop string) float64 {
 		return jsval.ToNumber(v)
 	}
 	switch prop {
+	case "x":
+		return it.X.Zero()
+	case "y":
+		return it.Y.Zero()
 	case "width":
 		return it.Width.Zero()
 	case "height":
 		return it.Height.Zero()
 	}
 	return 0
+}
+
+// PosValue is `item[prop] || 0` (prop is "x" or "y") as a JavaScript value: the
+// word the property was given, else the number.
+func (it *Item) PosValue(prop string) jsval.Value {
+	if v, ok := it.Raw[prop]; ok {
+		if !v.IsTruthy() {
+			return jsval.Num(0)
+		}
+		return v
+	}
+	return jsval.Num(it.OrZero(prop))
+}
+
+// AppendPos appends `item[prop] || 0` (prop is "x" or "y") the way a template
+// string prints it into a transform: a word the property was given is written
+// as it is, where a number goes through AppendNumber.
+func (it *Item) AppendPos(dst []byte, prop string) []byte {
+	if v, ok := it.Raw[prop]; ok {
+		if !v.IsTruthy() {
+			return append(dst, '0')
+		}
+		return append(dst, v.AsString()...)
+	}
+	return AppendNumber(dst, it.OrZero(prop))
 }
 
 // AngleTruthy is upstream's `if (item.angle)`: the truthiness of the value as
@@ -505,4 +550,15 @@ func (it *Item) AngleTruthy() bool {
 		return v.IsTruthy()
 	}
 	return it.Angle.Truthy()
+}
+
+// isWord reports a numeric property given a word (a truthy non-numeric
+// string, object or array).
+func (it *Item) isWord(prop string) bool {
+	v, ok := it.Raw[prop]
+	if !ok || !v.IsTruthy() {
+		return false
+	}
+	f := jsval.ToNumber(v)
+	return f != f
 }

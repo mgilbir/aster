@@ -1,0 +1,1 @@
+{"data":{"values":[{"d":"a","p":28,"k":"u"},{"d":"b","p":55,"k":"v"}]},"width":100,"height":50,"mark":"point","encoding":{"x":{"field":"d","type":"nominal"},"y":{"field":"p","type":"quantitative"},"color":{"field":"k","type":"nominal","title":"toString","legend":null}}}

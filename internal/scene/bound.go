@@ -187,23 +187,25 @@ func (bd *Bounder) itemBounds(t MarkType, b *Bounds, it *Item) error {
 			if it.Mark != nil && it.Mark.Shape != nil {
 				fn = it.Mark.Shape
 			}
-			if fn != nil {
-				_ = fn(&bd.ctx, it)
+			if fn == nil {
+				return ErrNoShapeGenerator
 			}
+			_ = fn(&bd.ctx, it)
 		}
 		if err != nil {
 			return err
 		}
-		BoundStroke(b, it, true).Translate(it.X.Zero(), it.Y.Zero())
+		BoundStroke(b, it, true).Translate(it.OrZero("x"), it.OrZero("y"))
 	case MarkRect:
-		x, y := it.X.Zero(), it.Y.Zero()
-		// (x + width) || 0: NaN sums collapse to 0.
-		x2 := nanZero(x + it.Width.Val())
-		y2 := nanZero(y + it.Height.Val())
+		x, y := it.OrZero("x"), it.OrZero("y")
+		// (x + width) || 0: NaN sums collapse to 0, but a sum with a word is
+		// a string, which no comparison treats as a number: it stays NaN.
+		x2 := it.sumOrZero(x, it.Width.Val(), "x", "width")
+		y2 := it.sumOrZero(y, it.Height.Val(), "y", "height")
 		b.Set(x, y, x2, y2)
 		BoundStroke(b, it, false)
 	case MarkRule:
-		x1, y1 := it.X.Zero(), it.Y.Zero()
+		x1, y1 := it.OrZero("x"), it.OrZero("y")
 		x2, y2 := x1, y1
 		if it.X2.Set() {
 			x2 = it.X2.Val()
@@ -223,6 +225,20 @@ func (bd *Bounder) itemBounds(t MarkType, b *Bounds, it *Item) error {
 		return bd.groupBounds(b, it)
 	}
 	return nil
+}
+
+// sumOrZero is `(a + b) || 0` where a is item[propA] || 0 and b is item[propB]:
+// a NaN sum is 0 unless a word took part, since a word concatenates into a
+// string that is truthy.
+func (it *Item) sumOrZero(a, b float64, propA, propB string) float64 {
+	s := a + b
+	if s == s {
+		return s
+	}
+	if it.isWord(propA) || it.isWord(propB) {
+		return s
+	}
+	return 0
 }
 
 func nanZero(v float64) float64 {
@@ -245,7 +261,7 @@ func (bd *Bounder) pathBounds(b *Bounds, it *Item) error {
 	// offset, exactly as upstream does for path bounds.
 	bd.ctx.reset(b, it.AngleTruthy(), it.Angle.Val())
 	sx, sy := scaleOf(it.ScaleX), scaleOf(it.ScaleY)
-	if err := RenderPath(&bd.ctx, cmds, it.X.Zero(), it.Y.Zero(), sx, sy); err != nil {
+	if err := RenderPath(&bd.ctx, cmds, it.OrZero("x"), it.OrZero("y"), sx, sy); err != nil {
 		return err
 	}
 	BoundStroke(b, it, true)
@@ -264,7 +280,7 @@ func (bd *Bounder) groupBounds(b *Bounds, g *Item) error {
 		b.Add(0, 0).Add(g.Width.Zero(), g.Height.Zero())
 	}
 	BoundStroke(b, g, false)
-	b.Translate(g.X.Zero(), g.Y.Zero())
+	b.Translate(g.OrZero("x"), g.OrZero("y"))
 	return nil
 }
 
@@ -388,7 +404,7 @@ func scaleOf(n Num) float64 {
 // radius is given (polar placement from the origin, theta measured clockwise
 // from 12 o'clock).
 func AnchorPoint(it *Item) (x, y float64) {
-	x, y = it.X.Zero(), it.Y.Zero()
+	x, y = it.OrZero("x"), it.OrZero("y")
 	if r := it.Radius.Zero(); r != 0 {
 		t := it.Theta.Zero() - halfPi
 		x += float64(r * jsmath.Cos(t))

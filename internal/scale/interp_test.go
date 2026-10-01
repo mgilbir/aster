@@ -263,7 +263,7 @@ func TestSchemesGolden(t *testing.T) {
 func TestPiecewiseThrows(t *testing.T) {
 	throws := func(f func(float64) jsval.Value, x float64) (thrown bool) {
 		defer func() {
-			if e, ok := recover().(*Error); ok && e.Name == "TypeError" {
+			if e, ok := recover().(*Thrown); ok && e.Name == "TypeError" {
 				thrown = true
 			}
 		}()

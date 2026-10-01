@@ -88,6 +88,8 @@ func TestFieldOfNames(t *testing.T) {
 	if v := FieldOf("a.b").Apply(o); v.NumValue() != 4 {
 		t.Error("nested field read")
 	}
+	// The library accessor never panics; FieldOfStrict is the one that throws
+	// like a JavaScript member chain (TestFieldAccessorThrowsOnMissingSteps).
 	if !FieldOf("a.b.c").Apply(o).IsUndefined() || !FieldOf("x.y").Apply(o).IsUndefined() {
 		t.Error("missing steps must read undefined, not panic")
 	}

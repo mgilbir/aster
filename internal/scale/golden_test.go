@@ -305,7 +305,7 @@ func runGolden(t *testing.T, file string) {
 				defer func() {
 					if r := recover(); r != nil {
 						// an exception is the answer when upstream threw too
-						if _, ok := r.(*Error); ok && isThrow(want) {
+						if _, ok := r.(*Thrown); ok && isThrow(want) {
 							threw = true
 							return
 						}

@@ -28,18 +28,26 @@ func (v *runView) seedCollect(c *rtContext, n *opNode, e *entry) {
 		}
 	case e.ingest != nil && e.ingest.request:
 		data = v.request(e.ingest.url, e.ingest.format)
-		for i := range data {
-			data[i] = ingestTuple(data[i])
-		}
+		ingestRows(data)
 	case e.ingest != nil:
 		data = v.parseValues(e.ingest.values, e.ingest.format)
-		for i := range data {
-			data[i] = ingestTuple(data[i])
-		}
+		ingestRows(data)
 	}
 	v.checkRows(len(data))
 	n.value = data
 	v.g.pulseInput(n, &flowPulse{tuples: data, changed: true})
+}
+
+// ingestRows ingests rows that arrive through a change set. ChangeSet.pulse
+// reads the tuple id of every added row before ingesting it, which throws for
+// a null row (a primitive row is fine and is wrapped).
+func ingestRows(data []jsval.Value) {
+	for i := range data {
+		if data[i].IsNull() {
+			fail("Cannot read properties of null (reading 'Symbol(vega_id)')")
+		}
+		data[i] = ingestTuple(data[i])
+	}
 }
 
 func (v *runView) checkRows(n int) {

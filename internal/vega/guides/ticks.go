@@ -185,8 +185,14 @@ func (e *Env) symbolEntries(in LegendEntriesInput, s scale.Scale, format LabelFo
 	var offset float64
 	if size != nil {
 		// if the first value maps to size zero, remove it from the list (vega#717)
-		if !in.Values.IsTruthy() && len(items) > 0 {
-			if r := s.Apply(items[0]); r.IsNum() && r.NumValue() == 0 {
+		// items[0] of no items is undefined, and the scale is applied to it all
+		// the same (an implicit ordinal domain grows by it).
+		if !in.Values.IsTruthy() {
+			first := jsval.Undefined
+			if len(items) > 0 {
+				first = items[0]
+			}
+			if r := s.Apply(first); r.IsNum() && r.NumValue() == 0 && len(items) > 0 {
 				items = items[1:]
 				max = jsval.Undefined
 			}

@@ -85,8 +85,9 @@ type Size struct {
 // mark it applies the grid layout (if requested), positions the axes, legends
 // and title, and computes the size adjustment. The sizes are returned in item
 // order, only for groups that request one. An error (ErrInvalidArrayLength)
-// is upstream's exception: it abandons the layout of every remaining group and
-// the size adjustments gathered so far.
+// is upstream's exception: it abandons the layout of the remaining groups,
+// while the groups laid out before it keep their size adjustments (upstream
+// resizes the view as it lays out each group); those are returned with it.
 func ViewLayout(mark *scene.Mark, view *View, p Params) ([]Size, error) {
 	var sizes []Size
 	if mark == nil || view == nil {
@@ -98,7 +99,7 @@ func ViewLayout(mark *scene.Mark, view *View, p Params) ([]Size, error) {
 		}
 		if p.Grid != nil {
 			if err := trellisLayout(group, p.Grid, view.Warn); err != nil {
-				return nil, err
+				return sizes, err
 			}
 		}
 		if s, ok := layoutGroup(view, group, p); ok {

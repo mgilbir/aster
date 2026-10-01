@@ -66,6 +66,12 @@ type Scope struct {
 	// Datum, Event and Item are the `datum`, `event` and `item` variables.
 	// Unset ones read as undefined.
 	Datum, Event, Item jsval.Value
+	// NoDatum, NoEvent and NoItem mark the variables the compiled function has
+	// no parameter for, which JavaScript reports as ReferenceErrors when the
+	// expression reads them: operator updates take none of the three, handlers
+	// only event and datum, parameter expressions datum, encoders item and
+	// datum.
+	NoDatum, NoEvent, NoItem bool
 
 	// Locale supplies number and time formatting (format, timeFormat, ...) and
 	// the local time zone of the date functions (date, year, hours, datetime,
