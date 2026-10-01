@@ -546,3 +546,14 @@ func (it *Item) AngleTruthy() bool {
 	}
 	return it.Angle.Truthy()
 }
+
+// isWord reports a numeric property given a word (a truthy non-numeric
+// string, object or array).
+func (it *Item) isWord(prop string) bool {
+	v, ok := it.Raw[prop]
+	if !ok || !v.IsTruthy() {
+		return false
+	}
+	f := jsval.ToNumber(v)
+	return f != f
+}
