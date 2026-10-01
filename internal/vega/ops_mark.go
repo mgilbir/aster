@@ -496,9 +496,22 @@ func facSortItems(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNo
 			// The comparator's fields are paths into the item (datum.x, x, ...).
 			v := n.g.view
 			views := make(map[*scene.Item]jsval.Value, len(pulse.items))
+			var temp []*scene.Item
 			for _, it := range pulse.items {
+				if v.itemTupleCache[it] == nil {
+					temp = append(temp, it)
+				}
 				views[it] = v.itemTuple(it)
 			}
+			// The views only serve the comparator: the ones this sort made
+			// are dropped, or every sorted item would keep a copy of its
+			// properties for the rest of the render.
+			defer func() {
+				for _, it := range temp {
+					delete(v.viewItem, v.itemTupleCache[it])
+					delete(v.itemTupleCache, it)
+				}
+			}()
 			// stableCompare: ties go by tuple id, the order the items were created.
 			jssort.Sort(pulse.items, func(a, b *scene.Item) int {
 				if c := cmp(views[a], views[b]); c != 0 {
