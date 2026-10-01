@@ -1,6 +1,7 @@
 package transforms
 
 import (
+	"fmt"
 	"github.com/mgilbir/aster/internal/jssort"
 	"math"
 	"sort"
@@ -293,6 +294,27 @@ func Extent(n int, f func(i int) jsval.Value) (lo, hi jsval.Value, ok bool) {
 		}
 	}
 	return lo, hi, true
+}
+
+// ExtentOf is vega-util's extent(tuples, field). Its search for a first valid
+// value is `for (v = f(a[i]); i < n && invalid(v); v = f(a[++i]))`: when every
+// value is invalid it applies the accessor once more, to a[n], which is
+// undefined, and an accessor that reads a property of its argument (every
+// field and expression accessor does) throws a TypeError. The null field has
+// no accessor and reads undefined.
+func ExtentOf(tuples []jsval.Value, f Field) (lo, hi jsval.Value, ok bool, err error) {
+	lo, hi, ok = Extent(len(tuples), func(i int) jsval.Value { return f.Apply(tuples[i]) })
+	if ok && lo.IsUndefined() && !f.IsNil() {
+		prop := f.Name
+		if len(f.Fields) > 0 {
+			prop = f.Fields[0]
+		}
+		if segs := jsval.ParseFieldPath(prop); len(segs) > 0 {
+			prop = segs[0]
+		}
+		return lo, hi, ok, fmt.Errorf("Cannot read properties of undefined (reading '%s')", prop)
+	}
+	return lo, hi, ok, nil
 }
 
 // NumExtent is Extent for numeric fields: the min and max of the finite-order

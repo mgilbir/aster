@@ -244,7 +244,7 @@ vega.View.prototype.timer = function () {};
 
 const quiet = vega.logger(vega.None);
 const logs = [];
-const cap = { level() { return this; }, error(...a) { logs.push('ERROR ' + a.map(x => (x && x.message) || String(x)).join(' ')); return this; }, warn(...a) { logs.push('WARN ' + a.join(' ')); return this; }, info() { return this; }, debug() { return this; } };
+const cap = { level() { return this; }, error(...a) { logs.push('ERROR ' + a.map(x => (x && x.stack ? x.stack.split('\n').slice(0,4).join(' @ ') : String(x))).join(' ')); return this; }, warn(...a) { logs.push('WARN ' + a.join(' ')); return this; }, info() { return this; }, debug() { return this; } };
 
 const compile = (spec) => vl.compile(spec, { logger: quiet }).spec;
 

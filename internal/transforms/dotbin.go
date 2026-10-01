@@ -102,7 +102,10 @@ func DotBinTuples(ctx context.Context, data []jsval.Value, p DotBinParams) (DotB
 	get := p.Field.Get
 	step := p.Step
 	if step == 0 || math.IsNaN(step) {
-		lo, hi, ok := Extent(len(data), func(i int) jsval.Value { return get(data[i]) })
+		lo, hi, ok, err := ExtentOf(data, p.Field)
+		if err != nil {
+			return DotBinResult{}, err
+		}
 		step = 0
 		if ok {
 			// span(): (last - first) || 0

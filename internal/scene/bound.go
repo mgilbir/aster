@@ -187,9 +187,10 @@ func (bd *Bounder) itemBounds(t MarkType, b *Bounds, it *Item) error {
 			if it.Mark != nil && it.Mark.Shape != nil {
 				fn = it.Mark.Shape
 			}
-			if fn != nil {
-				_ = fn(&bd.ctx, it)
+			if fn == nil {
+				return ErrNoShapeGenerator
 			}
+			_ = fn(&bd.ctx, it)
 		}
 		if err != nil {
 			return err

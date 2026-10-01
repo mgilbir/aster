@@ -461,11 +461,27 @@ func binsFromObject(s scale.Scale, b jsval.Value) []float64 {
 	return d3Range(start, stop+step/2, step)
 }
 
-// d3Range is d3.range(start, stop, step).
+// maxBinValues bounds the bin boundaries a scale may generate; real charts
+// use a few dozen.
+const maxBinValues = 1_000_000
+
+// d3Range is d3.range(start, stop, step). Its length is
+// `Math.max(0, Math.ceil((stop - start) / step)) | 0`: wrapped to 32 bits, so
+// a count that wraps negative is `new Array(n)`'s RangeError, while a count
+// that wraps to a small positive one yields that many values.
 func d3Range(start, stop, step float64) []float64 {
-	n := math.Ceil((stop - start) / step)
-	if !(n > 0) || n > 1e6 {
-		return []float64{}
+	n := math.Max(0, math.Ceil((stop-start)/step))
+	if math.IsNaN(n) || math.IsInf(n, 0) {
+		n = 0 // NaN | 0 and Infinity | 0
+	}
+	if n > 2147483647 {
+		n = float64(int32(uint32(int64(math.Mod(n, 4294967296)))))
+	}
+	if n < 0 {
+		fail("Invalid array length")
+	}
+	if n > maxBinValues {
+		failLimit("scale bins exceed %d values", maxBinValues)
 	}
 	out := make([]float64, int(n))
 	for i := range out {

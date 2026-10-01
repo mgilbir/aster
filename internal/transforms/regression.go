@@ -108,7 +108,10 @@ func Regression(ctx context.Context, data []jsval.Value, p RegressionParams) ([]
 				dom = append(dom, jsval.Num(d))
 			}
 		} else {
-			lo, hi, _ := Extent(len(g.Tuples), func(i int) jsval.Value { return p.X.Get(g.Tuples[i]) })
+			lo, hi, _, err := ExtentOf(g.Tuples, p.X)
+			if err != nil {
+				return nil, err
+			}
 			dom = []jsval.Value{lo, hi}
 		}
 		add := func(x jsval.Value, y float64) {

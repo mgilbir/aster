@@ -79,10 +79,16 @@ func TimeUnit(ctx context.Context, data []jsval.Value, p TimeUnitParams) ([]jsva
 		lo, hi := math.NaN(), math.NaN()
 		if p.Extent != nil {
 			lo, hi = p.Extent[0], p.Extent[1]
-		} else if a, b, ok := Extent(len(data), func(i int) jsval.Value { return p.Field.Apply(data[i]) }); ok {
-			lo, hi = jsval.ToNumber(a), jsval.ToNumber(b)
-			if a.IsUndefined() {
-				lo, hi = math.NaN(), math.NaN()
+		} else {
+			a, b, ok, err := ExtentOf(data, p.Field)
+			if err != nil {
+				return data, info, err
+			}
+			if ok {
+				lo, hi = jsval.ToNumber(a), jsval.ToNumber(b)
+				if a.IsUndefined() {
+					lo, hi = math.NaN(), math.NaN()
+				}
 			}
 		}
 		bin := format.Bin(lo, hi, p.MaxBins)

@@ -15,6 +15,10 @@ import (
 // fails with a TypeError when it tries to use the missing curve.
 var ErrUnknownInterpolate = errors.New("scene: unknown interpolate type")
 
+// ErrNoShapeGenerator reports a shape mark item with no generator (neither
+// the mark's nor the item's); upstream calls `.context` on undefined.
+var ErrNoShapeGenerator = errors.New("Cannot read properties of undefined (reading 'context')")
+
 // ErrCurveNoArea reports an area drawn with the bundle interpolation, which d3
 // implements only for lines; upstream fails with a TypeError.
 var ErrCurveNoArea = errors.New("scene: bundle interpolation cannot draw areas")
@@ -617,7 +621,7 @@ func ItemPathData(sp *StringPath, mark MarkType, it *Item) (d []byte, ok bool, e
 			fn = it.Mark.Shape
 		}
 		if fn == nil {
-			return nil, false, nil
+			return nil, false, ErrNoShapeGenerator
 		}
 		// `path.context(null)(item)`: the generator formats its own string.
 		s := fn(nil, it)
