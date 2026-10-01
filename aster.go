@@ -433,11 +433,14 @@ const randomSeed = 123456789
 // no separate heap to cap, so the byte budget is converted into the number of
 // rows and scene items a render may create, at a conservative per-object cost.
 func (c *Converter) limits() vega.Limits {
-	const bytesPerRow, bytesPerItem = 256, 512
+	const bytesPerRow, bytesPerItem, bytesPerCell = 256, 512, 16384
 	var l vega.Limits
 	if n := c.cfg.memoryLimit; n > 0 {
 		l.MaxRows = int(max(n/bytesPerRow, 1000))
 		l.MaxItems = int(max(n/bytesPerItem, 1000))
+		// A facet cell instantiates its own operators; the default (20,000)
+		// is the most that is left alone.
+		l.MaxSubflows = int(min(max(n/bytesPerCell, 1000), 20_000))
 		l.MaxLoadBytes = int64(max(n/2, 1<<20))
 		l.MaxStringBytes = int64(max(n/4, 1<<20))
 		l.MaxCanvasBytes = int64(max(n/2, 1<<20))
