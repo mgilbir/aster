@@ -253,15 +253,28 @@ func (g *graph) addFile(fset *token.FileSet, f *ast.File, info *types.Info) {
 			continue
 		}
 		top := funcName(obj)
+		if fd.Recv == nil && fd.Name.Name == "init" {
+			// A package may have several init functions; tell them apart.
+			top += "@" + filepath.Base(fset.Position(fd.Pos()).Filename)
+		}
 		g.edge(top, top)
 		delete(g.edges[top], top) // a node, no self edge yet
 		litVars := map[types.Object]string{}
 		// Name each literal; record those assigned to a variable.
 		var stack []string
 		var visit func(n ast.Node) bool
+		// A literal is named by its enclosing function and its position among
+		// that function's literals in source order: stable when unrelated
+		// lines move, and distinct for two literals on one line.
+		ordinal := map[*ast.FuncLit]int{}
+		ast.Inspect(fd.Body, func(n ast.Node) bool {
+			if lit, ok := n.(*ast.FuncLit); ok {
+				ordinal[lit] = len(ordinal) + 1
+			}
+			return true
+		})
 		litName := func(lit *ast.FuncLit) string {
-			p := fset.Position(lit.Pos())
-			return fmt.Sprintf("%s$lit@%s:%d", top, filepath.Base(p.Filename), p.Line)
+			return fmt.Sprintf("%s$lit%d", top, ordinal[lit])
 		}
 		ast.Inspect(fd.Body, func(n ast.Node) bool {
 			switch s := n.(type) {
