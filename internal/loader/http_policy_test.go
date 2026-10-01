@@ -200,3 +200,37 @@ func (r blockingReader) Read([]byte) (int, error) {
 	<-r.ctx.Done()
 	return 0, r.ctx.Err()
 }
+
+// Errors say what failed, not what the other side sent or what credentials a
+// URL carried.
+func TestHTTPLoaderErrorsDoNotLeak(t *testing.T) {
+	l := &HTTPLoader{BaseURL: "https://base-user:base-secret@cdn.example.com/", Client: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path == "/redirect" {
+			return respond(r, http.StatusFound, "", "Location", "http://redir-user:redir-secret@example.com/"), nil
+		}
+		return respond(r, 500, "SECRET-BODY from the server"), nil
+	})}}
+	ctx := context.Background()
+	var errs []error
+	_, err := l.Load(ctx, "http://example.com/fail")
+	errs = append(errs, err)
+	_, err = l.Load(ctx, "http://example.com/redirect")
+	errs = append(errs, err)
+	_, err = l.Load(ctx, "http://uri-user:uri-secret@example.com/x")
+	errs = append(errs, err)
+	_, err = l.Sanitize(ctx, "http://uri-user:uri-secret@example.com/x")
+	errs = append(errs, err)
+	_, err = l.Sanitize(ctx, "relative.json")
+	errs = append(errs, err)
+	for i, err := range errs {
+		if err == nil {
+			t.Errorf("%d: no error", i)
+			continue
+		}
+		for _, secret := range []string{"SECRET-BODY", "uri-secret", "redir-secret", "base-secret"} {
+			if strings.Contains(err.Error(), secret) {
+				t.Errorf("%d: error leaks %q: %v", i, secret, err)
+			}
+		}
+	}
+}

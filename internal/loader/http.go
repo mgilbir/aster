@@ -2,6 +2,7 @@ package loader
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -159,6 +160,12 @@ func (l *HTTPLoader) Load(ctx context.Context, uri string) ([]byte, error) {
 
 	resp, err := client.Do(req)
 	if err != nil {
+		// The *url.Error repeats the URL, with the credentials of a redirect
+		// target the server sent; uri says which load failed.
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			err = ue.Err
+		}
 		return nil, fmt.Errorf("aster: failed to load %q: %w", uri, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
