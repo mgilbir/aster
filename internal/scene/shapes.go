@@ -22,9 +22,11 @@ var ErrCurveNoArea = errors.New("scene: bundle interpolation cannot draw areas")
 // HasCornerRadius reports whether any corner radius is set and non-zero
 // (`item.cornerRadius || item.cornerRadiusTopLeft || ...`).
 func (it *Item) HasCornerRadius() bool {
-	return it.CornerRadius.Truthy() || it.CornerRadiusTopLeft.Truthy() ||
-		it.CornerRadiusTopRight.Truthy() || it.CornerRadiusBottomRight.Truthy() ||
-		it.CornerRadiusBottomLeft.Truthy()
+	return it.truthyProp("cornerRadius", it.CornerRadius) ||
+		it.truthyProp("cornerRadiusTopLeft", it.CornerRadiusTopLeft) ||
+		it.truthyProp("cornerRadiusTopRight", it.CornerRadiusTopRight) ||
+		it.truthyProp("cornerRadiusBottomRight", it.CornerRadiusBottomRight) ||
+		it.truthyProp("cornerRadiusBottomLeft", it.CornerRadiusBottomLeft)
 }
 
 func lineCurve(first *Item) (curveSpec, error) {
@@ -197,23 +199,18 @@ const rectC = 0.448084975506
 func clamp(v, lo, hi float64) float64 { return math.Max(lo, math.Min(v, hi)) }
 
 func rectangle(ctx PathContext, it *Item, x1, y1 float64) {
-	w, h := it.Width.Zero(), it.Height.Zero()
+	w, h := it.OrZero("width"), it.OrZero("height")
 	s := math.Min(w, h) / 2
 	// value(item.cornerRadiusX, item.cornerRadius) || 0, then clamped.
-	corner := func(specific Num) float64 {
-		v := specific.Or(math.NaN())
-		if !specific.Set() {
-			v = it.CornerRadius.Or(math.NaN())
-		}
-		if v != v {
-			v = 0
-		}
-		return clamp(v, 0, s)
+	// A word given as a radius is truthy and converts to NaN, which the clamp
+	// keeps: the path is drawn with NaN corners, as upstream draws it.
+	corner := func(prop string, specific Num) float64 {
+		return clamp(it.orZeroProp(prop, specific, "cornerRadius", it.CornerRadius), 0, s)
 	}
-	tl := corner(it.CornerRadiusTopLeft)
-	tr := corner(it.CornerRadiusTopRight)
-	bl := corner(it.CornerRadiusBottomLeft)
-	br := corner(it.CornerRadiusBottomRight)
+	tl := corner("cornerRadiusTopLeft", it.CornerRadiusTopLeft)
+	tr := corner("cornerRadiusTopRight", it.CornerRadiusTopRight)
+	bl := corner("cornerRadiusBottomLeft", it.CornerRadiusBottomLeft)
+	br := corner("cornerRadiusBottomRight", it.CornerRadiusBottomRight)
 
 	if tl <= 0 && tr <= 0 && bl <= 0 && br <= 0 {
 		ctx.Rect(x1, y1, w, h)

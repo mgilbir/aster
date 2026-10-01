@@ -420,11 +420,44 @@ func gradientValue(g *Gradient) jsval.Value {
 var rawNumeric = map[string]bool{
 	"angle": true, "strokeWidth": true, "strokeOpacity": true, "fillOpacity": true,
 	"opacity": true, "strokeDashOffset": true, "strokeMiterLimit": true,
+	"width": true, "height": true, "cornerRadius": true, "cornerRadiusTopLeft": true,
+	"cornerRadiusTopRight": true, "cornerRadiusBottomRight": true, "cornerRadiusBottomLeft": true,
+}
+
+// truthyProp is the truthiness of a numeric property as it was given: a word
+// is truthy where the number it converts to (NaN) is not.
+func (it *Item) truthyProp(prop string, n Num) bool {
+	if v, ok := it.Raw[prop]; ok {
+		return v.IsTruthy()
+	}
+	return n.Truthy()
+}
+
+// orZeroProp is `value(item[prop], fallback) || 0` followed by the unary plus
+// a path generator applies: given prop wins over the fallback unless unset.
+func (it *Item) orZeroProp(prop string, n Num, fallbackProp string, fallback Num) float64 {
+	if !n.Set() {
+		prop, n = fallbackProp, fallback
+	}
+	if v, ok := it.Raw[prop]; ok {
+		if !v.IsTruthy() {
+			return 0
+		}
+		return jsval.ToNumber(v)
+	}
+	return n.Zero()
 }
 
 func (it *Item) setRaw(k string, val jsval.Value) {
 	switch val.Kind() {
-	case jsval.KindStr, jsval.KindBool, jsval.KindArr, jsval.KindObj:
+	case jsval.KindObj:
+		if val.Get("$num").IsStr() {
+			// a non-finite number as a recording carries it (see numOf)
+			delete(it.Raw, k)
+			return
+		}
+		fallthrough
+	case jsval.KindStr, jsval.KindBool, jsval.KindArr:
 		if it.Raw == nil {
 			it.Raw = make(map[string]jsval.Value, 1)
 		}
@@ -439,6 +472,25 @@ func (it *Item) setRaw(k string, val jsval.Value) {
 func (it *Item) RawValue(prop string) (jsval.Value, bool) {
 	v, ok := it.Raw[prop]
 	return v, ok
+}
+
+// OrZero is upstream's `item[prop] || 0` for a size property (width, height):
+// a word the property was given is truthy and reads as the number it
+// converts to, NaN for most, where a numeric NaN reads as 0.
+func (it *Item) OrZero(prop string) float64 {
+	if v, ok := it.Raw[prop]; ok {
+		if !v.IsTruthy() {
+			return 0
+		}
+		return jsval.ToNumber(v)
+	}
+	switch prop {
+	case "width":
+		return it.Width.Zero()
+	case "height":
+		return it.Height.Zero()
+	}
+	return 0
 }
 
 // AngleTruthy is upstream's `if (item.angle)`: the truthiness of the value as

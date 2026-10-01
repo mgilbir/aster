@@ -507,6 +507,15 @@ func facBound(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 				failErr(err)
 			}
 		}
+		// A group's bounds are recomputed on every run (and any mark's when its
+		// parameters were modified); for axes, legends and titles the pulse
+		// is reflowed to carry the layout change to the enclosing layout.
+		if (mark.Type == scene.MarkGroup || p.Modified()) && !mark.Type.Nested() {
+			switch mark.Role {
+			case "axis", "legend", "title":
+				return reflowPulse(pulse)
+			}
+		}
 		return nil
 	}), nil
 }

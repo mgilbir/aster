@@ -281,7 +281,11 @@ func facCollect(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode
 			if len(pulse.multi) > 0 {
 				src = concatTuples(pulse.multi)
 			}
-			list = append(make([]jsval.Value, 0, len(src)), src...)
+			if cmp == nil {
+				list = collectIncremental(list, src)
+			} else {
+				list = append(make([]jsval.Value, 0, len(src)), src...)
+			}
 		}
 		if cmp != nil && mod {
 			transforms.SortTuples(list, cmp)
@@ -295,6 +299,57 @@ func facCollect(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode
 		n.tree = tree
 		return &flowPulse{stamp: pulse.stamp, encode: pulse.encode, changed: mod, tuples: list, tree: tree}
 	}), nil
+}
+
+// collectIncremental is what Collect does with the tuples that pass through it
+// when it does not sort: tuples already collected and still present keep their
+// place, those that left are dropped, and those that arrived are appended in
+// the order they came (SortedList.data without a comparator: the surviving
+// data, then the added tuples). A tuple is the same one when it is the same
+// object, which is what upstream's tuple id stands for; a filter that lets a
+// tuple through again after it was withheld thus appends it rather than
+// putting it back where it was.
+//
+// The engine's operators hand over whole data sets rather than add, remove
+// and modify lists, so which tuples left and which arrived is read off the
+// difference. That needs distinct objects: anything else (a repeated or a
+// non-object tuple) is taken as a new set in the order it came.
+func collectIncremental(list, src []jsval.Value) []jsval.Value {
+	if len(list) == 0 {
+		return append(make([]jsval.Value, 0, len(src)), src...)
+	}
+	incoming := make(map[*jsval.Object]struct{}, len(src))
+	for _, t := range src {
+		if !t.IsObj() {
+			return append(make([]jsval.Value, 0, len(src)), src...)
+		}
+		o := t.ObjValue()
+		if _, dup := incoming[o]; dup {
+			return append(make([]jsval.Value, 0, len(src)), src...)
+		}
+		incoming[o] = struct{}{}
+	}
+	out := make([]jsval.Value, 0, len(src))
+	kept := make(map[*jsval.Object]struct{}, len(list))
+	for _, t := range list {
+		if !t.IsObj() {
+			return append(make([]jsval.Value, 0, len(src)), src...)
+		}
+		o := t.ObjValue()
+		if _, dup := kept[o]; dup {
+			return append(make([]jsval.Value, 0, len(src)), src...)
+		}
+		if _, ok := incoming[o]; ok {
+			out = append(out, t)
+			kept[o] = struct{}{}
+		}
+	}
+	for _, t := range src {
+		if _, ok := kept[t.ObjValue()]; !ok {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 func concatTuples(lists [][]jsval.Value) []jsval.Value {

@@ -105,8 +105,8 @@ func ViewLayout(mark *scene.Mark, view *View, p Params) []Size {
 }
 
 func layoutGroup(view *View, group *scene.Item, p Params) (Size, bool) {
-	width := jsMax(0, orZero(group.Width.Val()))
-	height := jsMax(0, orZero(group.Height.Val()))
+	width := jsMax(0, group.OrZero("width"))
+	height := jsMax(0, group.OrZero("height"))
 	viewBounds := newBoundsSet(0, 0, width, height)
 	xBounds, yBounds := viewBounds, viewBounds
 	var legends []*scene.Item
@@ -197,7 +197,7 @@ func layoutGroup(view *View, group *scene.Item, p Params) (Size, bool) {
 
 	// override aggregated view bounds if content is clipped
 	if group.Clip.IsTrue() || group.ClipPath != nil {
-		viewBounds.Set(0, 0, orZero(group.Width.Val()), orZero(group.Height.Val()))
+		viewBounds.Set(0, 0, group.OrZero("width"), group.OrZero("height"))
 	}
 
 	// perform size adjustment
@@ -215,9 +215,9 @@ func viewSizeLayout(view *View, group *scene.Item, vb *scene.Bounds, auto Autosi
 		return Size{}, false
 	}
 	viewWidth, viewHeight := view.Width, view.Height
-	width := jsMax(0, orZero(group.Width.Val()))
+	width := jsMax(0, group.OrZero("width"))
 	left := jsMax(0, math.Ceil(-vb.X1))
-	height := jsMax(0, orZero(group.Height.Val()))
+	height := jsMax(0, group.OrZero("height"))
 	top := jsMax(0, math.Ceil(-vb.Y1))
 	right := jsMax(0, math.Ceil(vb.X2-width))
 	bottom := jsMax(0, math.Ceil(vb.Y2-height))
