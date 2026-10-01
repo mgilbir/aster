@@ -507,6 +507,18 @@ func (it *Item) OrZero(prop string) float64 {
 	return 0
 }
 
+// PosValue is `item[prop] || 0` (prop is "x" or "y") as a JavaScript value: the
+// word the property was given, else the number.
+func (it *Item) PosValue(prop string) jsval.Value {
+	if v, ok := it.Raw[prop]; ok {
+		if !v.IsTruthy() {
+			return jsval.Num(0)
+		}
+		return v
+	}
+	return jsval.Num(it.OrZero(prop))
+}
+
 // AppendPos appends `item[prop] || 0` (prop is "x" or "y") the way a template
 // string prints it into a transform: a word the property was given is written
 // as it is, where a number goes through AppendNumber.
