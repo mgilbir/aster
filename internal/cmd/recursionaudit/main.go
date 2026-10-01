@@ -46,8 +46,9 @@ import (
 
 const module = "github.com/mgilbir/aster"
 
-// skipped are packages that do not process untrusted input.
-var skipped = []string{module + "/internal/cmd/", module + "/internal/oracle", module + "/cmd/"}
+// skipped are packages that do not process untrusted input (commands, and the
+// test support that drives node and reads the vectors it records).
+var skipped = []string{module + "/internal/cmd/", module + "/internal/oracle", module + "/internal/upstream", module + "/cmd/"}
 
 type listedPackage struct {
 	ImportPath string
