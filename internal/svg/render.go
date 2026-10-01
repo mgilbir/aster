@@ -51,6 +51,12 @@ var ErrTooLarge = errors.New("svg: output exceeds the size limit")
 
 var errNilScene = errors.New("svg: nil scenegraph")
 
+// errMarkHole is what upstream's SVG renderer throws on a group whose child
+// marks have a hole: a dataflow error stops the run before every mark exists,
+// and a mark created at a later index than a missing one leaves undefined
+// entries in the group's items array, which the renderer then reads.
+var errMarkHole = errors.New("TypeError: Cannot read properties of undefined (reading 'marktype')")
+
 // Render produces the SVG document for sg. It checks ctx periodically and
 // returns its error when cancelled.
 func Render(ctx context.Context, sg *scene.Scenegraph, opt Options) (string, error) {
@@ -194,26 +200,15 @@ func tagOf(t scene.MarkType) string {
 }
 
 // orderedMarks is scene.Mark.Ordered for the child marks of a group: marks
-// without a z-index first, then the others sorted by z-index. A nil entry is
-// a mark whose operator never ran (an error upstream logs and renders past);
-// like the holes of upstream's sparse items array, it is skipped.
+// without a z-index first, then the others sorted by z-index. The marks are
+// all present (see errMarkHole).
 func orderedMarks(ms []*scene.Mark) []*scene.Mark {
-	anyZ, holes := false, false
+	anyZ := false
 	for _, m := range ms {
-		if m == nil {
-			holes = true
-		} else if m.Zindex != 0 {
+		if m.Zindex != 0 {
 			anyZ = true
+			break
 		}
-	}
-	if holes {
-		kept := make([]*scene.Mark, 0, len(ms))
-		for _, m := range ms {
-			if m != nil {
-				kept = append(kept, m)
-			}
-		}
-		ms = kept
 	}
 	if !anyZ {
 		return ms
@@ -466,6 +461,11 @@ func (r *renderer) group(m *scene.Mark, it *scene.Item, depth int) error {
 			return err
 		}
 		w.attr("clip-path", ref)
+	}
+	for _, m := range it.Items {
+		if m == nil {
+			return errMarkHole
+		}
 	}
 	for _, child := range orderedMarks(it.Items) {
 		if err := r.mark(child, depth+1); err != nil {

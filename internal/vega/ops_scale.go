@@ -614,6 +614,7 @@ func configureScheme(typ string, p *opParams, count int) rangeSpec {
 	var interp scale.UnitInterpolator
 	var colors []jsval.Value
 	var discrete bool
+	var countFrac bool // the scheme count is not an integer
 
 	gamma, hasGamma := 0.0, false
 	if gv := p.Value("interpolateGamma"); !gv.IsNullish() {
@@ -662,6 +663,7 @@ func configureScheme(typ string, p *opParams, count int) rangeSpec {
 			c = 5
 		}
 		count = int(c)
+		countFrac = c != math.Trunc(c)
 	}
 
 	adjust := func(f scale.UnitInterpolator, withReverse bool) scale.UnitInterpolator {
@@ -683,13 +685,21 @@ func configureScheme(typ string, p *opParams, count int) rangeSpec {
 		return rangeSpec{interp: adjust(interp, true)}
 	}
 	if !discrete && interp != nil {
+		// quantizeInterpolator builds new Array(count): a negative count (a
+		// bin-ordinal scale over an empty domain) or a fractional one (a
+		// fractional schemeCount) is a RangeError, which ends the scale
+		// operator's evaluation.
+		if count < 0 || countFrac {
+			fail("Invalid array length")
+		}
 		return rangeSpec{values: scale.QuantizeInterpolator(adjust(interp, false), count)}
 	}
 	if typ == scale.TypeOrdinal {
 		return rangeSpec{values: colors}
 	}
+	// scheme.slice(0, count): a negative end counts from the end.
 	if count < 0 {
-		count = 0
+		count = max(len(colors)+count, 0)
 	}
 	if count > len(colors) {
 		count = len(colors)
