@@ -605,13 +605,21 @@ func QuantizeSamples(interpolator func(float64) jsval.Value, n int) []jsval.Valu
 
 const maxSamples = 1 << 20
 
-// Zoom is d3.interpolateZoom (with rho = sqrt(2) when rho is 0 or omitted by
-// the caller passing math.Sqrt2): it interpolates between two views
+// Zoom is d3.interpolateZoom.rho(rho): it interpolates between two views
 // [cx, cy, width] and also reports the suggested duration in milliseconds.
 func Zoom(rho float64) func(p0, p1 [3]float64) (interp func(t float64) [3]float64, duration float64) {
 	rho = math.Max(1e-3, rho)
 	rho2 := rho * rho
-	rho4 := rho2 * rho2
+	return zoomRho(rho, rho2, rho2*rho2)
+}
+
+// DefaultZoom is d3.interpolateZoom itself. It is not Zoom(math.Sqrt2): upstream builds it with the
+// exact squares 2 and 4, where rho(Math.SQRT2) squares the rounded root (2.0000000000000004).
+func DefaultZoom() func(p0, p1 [3]float64) (interp func(t float64) [3]float64, duration float64) {
+	return zoomRho(math.Sqrt2, 2, 4)
+}
+
+func zoomRho(rho, rho2, rho4 float64) func(p0, p1 [3]float64) (interp func(t float64) [3]float64, duration float64) {
 	const epsilon2 = 1e-12
 	cosh := func(x float64) float64 { x = jsmath.Exp(x); return (x + 1/x) / 2 }
 	sinh := func(x float64) float64 { x = jsmath.Exp(x); return (x - 1/x) / 2 }

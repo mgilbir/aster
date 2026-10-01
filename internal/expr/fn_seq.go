@@ -293,6 +293,35 @@ func init() {
 		// lo + f * (hi - lo): the string/date coercions of `+` apply to lo.
 		return s.add(lo, jsval.Num(float64(f*(s.num(hi)-s.num(lo)))))
 	})
+	// interpolateLinear(values, frac): piecewise-linear interpolation across an array of control points
+	// (vega-functions interpolate.js).
+	fn("interpolateLinear", func(s *Scope, args []jsval.Value) jsval.Value {
+		values := arg(args, 0)
+		if !values.IsArr() || values.Len() == 0 {
+			return jsval.Undefined
+		}
+		items := values.Items()
+		n := len(items)
+		lo := items[0]
+		f := s.num(arg(args, 1))
+		if n == 1 || !(f > 0) {
+			return lo
+		}
+		if f >= 1 {
+			return items[n-1]
+		}
+		pos := float64(f * float64(n-1))
+		i := int(math.Floor(pos))
+		t := pos - float64(i)
+		if t == 0 {
+			return items[i]
+		}
+		next := jsval.Undefined
+		if i+1 < n {
+			next = items[i+1]
+		}
+		return s.add(items[i], jsval.Num(float64(t*(s.num(next)-s.num(items[i])))))
+	})
 	fn("inrange", func(s *Scope, args []jsval.Value) jsval.Value {
 		left, right := arg(args, 2), arg(args, 3)
 		return jsval.Bool(s.inRange(arg(args, 0), arg(args, 1),

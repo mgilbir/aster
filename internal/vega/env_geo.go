@@ -72,6 +72,16 @@ func (c *rtContext) GeoScale(projection, group jsval.Value) jsval.Value {
 	return jsval.Num(p.Scale())
 }
 
+// GeoTranslate is geoTranslate(projection): the projection's translation [x, y].
+func (c *rtContext) GeoTranslate(projection, group jsval.Value) jsval.Value {
+	p, ok := c.projectionOf(projection)
+	if !ok {
+		return jsval.Undefined
+	}
+	x, y := p.Translate()
+	return jsval.ArrOf(jsval.Num(x), jsval.Num(y))
+}
+
 // GeoShape returns a shape handle: a function of a path context that draws the
 // GeoJSON through the projection.
 func (c *rtContext) GeoShape(projection, geojson, group jsval.Value) jsval.Value {

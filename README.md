@@ -307,12 +307,15 @@ On the 1,347 specs of the corpus (260 Vega fixtures, 332 Vega-Lite fixtures, Veg
 go test ./...                               # tests that need the oracle skip without it
 ASTER_ORACLE=require go test ./...          # as in CI: fail instead of skipping
 scripts/fetch-corpora.sh                    # external corpora (TestCorpusWild, TestCorpusDeneb)
+scripts/record-upstream-vectors.sh          # upstream's own test suites, for the TestUpstream* replays
 go test -run TestCompareWithNode -v . -args -compare.report=/tmp/report.md
 scripts/fmacheck.sh                         # fused multiply-add audit
 ASTER_FUZZ=3000 go test -run TestFuzzDifferential -v -timeout 3h .
 ```
 
 `go test -short ./...` needs no node: the unit tests replay vectors recorded from upstream (by the generators under each package's `testdata/`).
+
+Upstream's own test suites are replayed too. `scripts/record-upstream-vectors.sh` runs the test files of Vega's and d3's packages (from the git tag of the installed version) against the installed packages and records every call they make with upstream's answer, in `testdata/upstream-vectors-cache` (git-ignored, derived). The `TestUpstream*` tests in `internal/` replay those calls against the engine and compare exactly; they skip without the vectors, and fail with `ASTER_ORACLE=require`. Where the engine and upstream differ, the difference is listed, with its reason, in `testdata/upstream-vectors/known-divergences.txt`, and asserted both ways: an unlisted difference fails, and so does a listed one that has gone away.
 
 ### Building from source
 

@@ -88,6 +88,10 @@ func (e *fakeEnv) GeoScale(p, grp jsval.Value) jsval.Value {
 	e.rec("geoScale %v", p)
 	return jsval.Num(4)
 }
+func (e *fakeEnv) GeoTranslate(p, grp jsval.Value) jsval.Value {
+	e.rec("geoTranslate %v", p)
+	return jsval.ArrOf(jsval.Num(5), jsval.Num(6))
+}
 func (e *fakeEnv) GeoShape(p, g, grp jsval.Value) jsval.Value {
 	e.rec("geoShape %v", p)
 	return jsval.Str("shape")

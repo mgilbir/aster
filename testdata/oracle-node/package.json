@@ -63,7 +63,10 @@
     "vega-expression": "6.2.2"
   },
   "devDependencies": {
+    "acorn": "8.18.0",
     "canvas": "3.2.3",
+    "csv-spectrum": "1.0.0",
+    "d3-polygon": "3.0.1",
     "resvg-napi": "0.3.1"
   },
   "volta": {
