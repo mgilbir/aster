@@ -1,14 +1,12 @@
 package aster_test
 
 import (
-	"bufio"
 	"flag"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -148,7 +146,7 @@ func TestCompareWithNode(t *testing.T) {
 		}
 	}
 	scoreboard(t, results)
-	checkExpectations(t, results)
+	checkExpectations(t, expectFile, *compareUpdate, results)
 }
 
 func compareOne(t *testing.T, o *oracle.Oracle, c *aster.Converter, set corpusSet, spec []byte) specResult {
@@ -251,86 +249,6 @@ func scoreboard(t *testing.T, results []specResult) {
 		}
 		if err := os.WriteFile(*compareReport, []byte(md.String()), 0o644); err != nil {
 			t.Error(err)
-		}
-	}
-}
-
-type expectation struct{ status, reason string }
-
-func readExpectations(t *testing.T) map[string]expectation {
-	m := map[string]expectation{}
-	f, err := os.Open(expectFile)
-	if os.IsNotExist(err) {
-		return m
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer f.Close()
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		line := sc.Text()
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		parts := strings.SplitN(line, "\t", 3)
-		if len(parts) < 2 {
-			t.Fatalf("%s: malformed line %q", expectFile, line)
-		}
-		e := expectation{status: parts[1]}
-		if len(parts) == 3 {
-			e.reason = parts[2]
-		}
-		m[parts[0]] = e
-	}
-	return m
-}
-
-func checkExpectations(t *testing.T, results []specResult) {
-	expect := readExpectations(t)
-	if *compareUpdate {
-		for _, r := range results {
-			if r.status == "ok" && !strings.Contains(expect[r.id].status, "|") {
-				delete(expect, r.id)
-				continue
-			}
-			e := expect[r.id]
-			if strings.Contains(e.status, "|") && slices.Contains(strings.Split(e.status, "|"), r.status) {
-				continue // platform-dependent, and this platform is one of them
-			}
-			if e.reason == "" || e.status != r.status {
-				e.reason = "TODO: " + r.detail
-			}
-			e.status = r.status
-			expect[r.id] = e
-		}
-		ids := make([]string, 0, len(expect))
-		for id := range expect {
-			ids = append(ids, id)
-		}
-		sort.Strings(ids)
-		var b strings.Builder
-		b.WriteString("# Specs whose comparison with the node oracle is not \"ok\" (see compare_test.go).\n# set/name<TAB>status<TAB>reason\n")
-		for _, id := range ids {
-			fmt.Fprintf(&b, "%s\t%s\t%s\n", id, expect[id].status, expect[id].reason)
-		}
-		if err := os.WriteFile(expectFile, []byte(b.String()), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		t.Logf("wrote %s (%d entries)", expectFile, len(ids))
-		return
-	}
-	for _, r := range results {
-		want := "ok"
-		if e, ok := expect[r.id]; ok {
-			want = e.status
-		}
-		switch {
-		case slices.Contains(strings.Split(want, "|"), r.status):
-		case r.status == "ok":
-			t.Errorf("%s now matches node (was %s): remove it from %s", r.id, want, expectFile)
-		default:
-			t.Errorf("%s: %s, want %s: %s", r.id, r.status, want, r.detail)
 		}
 	}
 }

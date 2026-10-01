@@ -125,12 +125,22 @@ type Options struct {
 	Config jsval.Value
 	// Locale holds optional number and time locale definitions.
 	Locale *format.Locale
+	// SignalWrites are applied in order after the first run, each followed by
+	// another run, as a host or a binding writes through View.signal; the
+	// result is the chart after the last.
+	SignalWrites []SignalWrite
 	// Now supplies the clock for now(); nil uses the system clock.
 	Now func() time.Time
 	// Random seeds random(); nil uses a nondeterministic source.
 	Random func() float64
 	// Limits bound the work of the render.
 	Limits Limits
+}
+
+// SignalWrite is one View.signal(name, value) call.
+type SignalWrite struct {
+	Name  string
+	Value jsval.Value
 }
 
 // Result is a rendered view: the scenegraph and what the SVG renderer needs
@@ -238,6 +248,18 @@ func Render(ctx context.Context, spec jsval.Value, opts Options) (res *Result, e
 	v.build(flow)
 	if err := v.run(); err != nil {
 		return nil, err
+	}
+	for _, w := range opts.SignalWrites {
+		// View.signal(name, value): a top-level signal, set through the
+		// dataflow's update and propagated by the next run.
+		n := v.root.signals[w.Name]
+		if n == nil {
+			return nil, fmt.Errorf("Unrecognized signal name: %q", w.Name)
+		}
+		v.g.update(n, w.Value, false, false)
+		if err := v.run(); err != nil {
+			return nil, err
+		}
 	}
 	v.setGuideCaptions()
 	return v.result(scope), nil

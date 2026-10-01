@@ -25,6 +25,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -39,9 +41,10 @@ const (
 )
 
 const (
-	script  = "testdata/oracle-node/oracle.mjs"
-	cache   = "testdata/oracle-cache"
-	timeout = 2 * time.Minute
+	script   = "testdata/oracle-node/oracle.mjs"
+	sweepDir = "testdata/oracle-node/sweeps"
+	cache    = "testdata/oracle-cache"
+	timeout  = 2 * time.Minute
 )
 
 // Result is one answer. Err is upstream's error for an input it rejects.
@@ -49,18 +52,25 @@ type Result struct {
 	SVG  string          `json:"svg,omitempty"`
 	Vega json.RawMessage `json:"vega,omitempty"`
 	PNG  []byte          `json:"png,omitempty"`
+	// Data is a generator's output (Generate).
+	Data json.RawMessage `json:"data,omitempty"`
 	Err  string          `json:"err,omitempty"`
 }
 
-// Oracle is one node process serving a module set. It is safe for concurrent
-// use; requests are answered one at a time.
+// Oracle serves a module set from a small pool of node processes, so callers
+// on several goroutines are answered in parallel. It is safe for concurrent
+// use.
 type Oracle struct {
 	root        string // repository root
 	set         string
 	fingerprint string // part of every cache key
 	version     string
+	free        chan *proc // idle processes; nil entries are slots not yet started
+}
 
-	mu     sync.Mutex
+// proc is one node process answering one request at a time.
+type proc struct {
+	o      *Oracle
 	cmd    *exec.Cmd
 	stdin  io.WriteCloser
 	lines  chan []byte // stdout, one response per line; closed when node exits
@@ -103,21 +113,34 @@ func For(t testing.TB, set string) *Oracle {
 		}
 		h.Write(b)
 	}
-	o := &Oracle{root: root, set: set}
-	if err := o.start(); err != nil {
+	o := &Oracle{root: root, set: set, free: make(chan *proc, poolSize())}
+	first, err := o.start()
+	if err != nil {
 		return unavailable("%v", err)
+	}
+	o.free <- first
+	for i := 1; i < cap(o.free); i++ {
+		o.free <- nil
 	}
 	h.Write([]byte(o.version))
 	o.fingerprint = hex.EncodeToString(h.Sum(nil))
 	actual, loaded := oracles.LoadOrStore(set, o)
 	if loaded {
-		o.stop()
+		first.stop()
 	}
 	return actual.(*Oracle)
 }
 
-// Version describes the oracle's modules and node, e.g.
-// "vega 6.4.0 / vega-lite 6.4.3 / node v24.21.0 / canvas 3.2.3".
+// poolSize is the number of node processes per module set: ASTER_ORACLE_PROCS,
+// else half the CPUs, between 1 and 8.
+func poolSize() int {
+	if n, err := strconv.Atoi(os.Getenv("ASTER_ORACLE_PROCS")); err == nil && n > 0 {
+		return n
+	}
+	return min(max(runtime.NumCPU()/2, 1), 8)
+}
+
+// Version describes the oracle's modules, node and text stack.
 func (o *Oracle) Version() string { return o.version }
 
 // SVG is upstream's rendering of spec and, for Vega-Lite, its compiled Vega.
@@ -136,6 +159,31 @@ func (o *Oracle) PNG(svg []byte, scale float64) (Result, error) {
 	return o.ask(map[string]any{"op": "png", "svg": string(svg), "scale": scale})
 }
 
+// SignalWrite is one View.signal(name, value) call.
+type SignalWrite struct {
+	Name  string          `json:"name"`
+	Value json.RawMessage `json:"value"`
+}
+
+// Signals is upstream's rendering of a Vega spec after the writes: it renders
+// once, sets each signal in order (View.signal, then runAsync), and renders
+// again; the second SVG is the answer.
+func (o *Oracle) Signals(spec []byte, writes []SignalWrite) (Result, error) {
+	return o.ask(map[string]any{"op": "signals", "spec": string(spec), "writes": writes})
+}
+
+// Generate runs the generator testdata/oracle-node/sweeps/<name>.mjs and
+// returns its output (Result.Data). The generator's source is part of the
+// cache key, so editing it regenerates.
+func (o *Oracle) Generate(name string) (Result, error) {
+	src, err := os.ReadFile(filepath.Join(o.root, sweepDir, name+".mjs"))
+	if err != nil {
+		return Result{}, err
+	}
+	sum := sha256.Sum256(src)
+	return o.ask(map[string]any{"op": "generate", "sweep": name, "rev": hex.EncodeToString(sum[:])})
+}
+
 // ask answers from the cache or from node. The error reports an oracle
 // failure (node died or misbehaved), not an input upstream rejects.
 func (o *Oracle) ask(req map[string]any) (Result, error) {
@@ -151,41 +199,62 @@ func (o *Oracle) ask(req map[string]any) (Result, error) {
 		return res, nil
 	}
 
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	if o.cmd == nil {
-		if err := o.start(); err != nil {
+	p := <-o.free
+	defer func() { o.free <- p }()
+	if p == nil || p.cmd == nil {
+		if p, err = o.start(); err != nil {
+			p = nil
 			return res, err
 		}
 	}
-	o.nextID++
-	req["id"] = o.nextID
+	res, err = p.ask(req)
+	if err != nil {
+		return res, err
+	}
+	if b, err := json.Marshal(res); err == nil {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err == nil {
+			// Written whole and renamed, so a concurrent reader never sees a
+			// partial answer.
+			tmp := fmt.Sprintf("%s.%d.tmp", path, os.Getpid())
+			if os.WriteFile(tmp, b, 0o644) == nil {
+				_ = os.Rename(tmp, path)
+			}
+		}
+	}
+	return res, nil
+}
+
+func (p *proc) ask(req map[string]any) (Result, error) {
+	var res Result
+	p.nextID++
+	req["id"] = p.nextID
 	line, err := json.Marshal(req)
 	if err != nil {
 		return res, err
 	}
-	if _, err := o.stdin.Write(append(line, '\n')); err != nil {
-		o.stop()
+	if _, err := p.stdin.Write(append(line, '\n')); err != nil {
+		p.stop()
 		return res, fmt.Errorf("oracle: %w", err)
 	}
 	select {
-	case out, ok := <-o.lines:
+	case out, ok := <-p.lines:
 		if !ok {
-			o.stop()
+			p.stop()
 			return res, errors.New("oracle: node exited")
 		}
 		var got struct {
-			ID  int             `json:"id"`
-			SVG string          `json:"svg"`
-			Veg json.RawMessage `json:"vega"`
-			PNG string          `json:"png"`
-			Err string          `json:"err"`
+			ID   int             `json:"id"`
+			SVG  string          `json:"svg"`
+			Veg  json.RawMessage `json:"vega"`
+			PNG  string          `json:"png"`
+			Data json.RawMessage `json:"data"`
+			Err  string          `json:"err"`
 		}
-		if err := json.Unmarshal(out, &got); err != nil || got.ID != o.nextID {
-			o.stop()
+		if err := json.Unmarshal(out, &got); err != nil || got.ID != p.nextID {
+			p.stop()
 			return res, fmt.Errorf("oracle: bad response %.200q", out)
 		}
-		res = Result{SVG: got.SVG, Vega: got.Veg, Err: got.Err}
+		res = Result{SVG: got.SVG, Vega: got.Veg, Data: got.Data, Err: got.Err}
 		if got.PNG != "" {
 			if res.PNG, err = base64.StdEncoding.DecodeString(got.PNG); err != nil {
 				return res, fmt.Errorf("oracle: bad PNG: %w", err)
@@ -194,18 +263,13 @@ func (o *Oracle) ask(req map[string]any) (Result, error) {
 	case <-time.After(timeout):
 		// An input upstream cannot finish is an answer too; restart node
 		// for the next request.
-		o.stop()
+		p.stop()
 		res.Err = fmt.Sprintf("oracle: no answer within %v", timeout)
-	}
-	if b, err := json.Marshal(res); err == nil {
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err == nil {
-			_ = os.WriteFile(path, b, 0o644)
-		}
 	}
 	return res, nil
 }
 
-func (o *Oracle) start() error {
+func (o *Oracle) start() (*proc, error) {
 	// Run in the module set's directory, so a node version manager (volta)
 	// applies the version pinned in its package.json; CI installs the same.
 	cmd := exec.Command("node", filepath.Join(o.root, script))
@@ -214,25 +278,25 @@ func (o *Oracle) start() error {
 	cmd.Stderr = os.Stderr
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err := cmd.Start(); err != nil {
-		return err
+		return nil, err
 	}
 	lines := make(chan []byte, 1)
 	go func() {
 		defer close(lines)
 		sc := bufio.NewScanner(stdout)
-		sc.Buffer(make([]byte, 1<<20), 1<<30)
+		sc.Buffer(make([]byte, 1<<20), 1<<31)
 		for sc.Scan() {
 			lines <- append([]byte(nil), sc.Bytes()...)
 		}
 	}()
-	o.cmd, o.stdin, o.lines = cmd, stdin, lines
+	p := &proc{o: o, cmd: cmd, stdin: stdin, lines: lines}
 	select {
 	case line, ok := <-lines:
 		var ready struct {
@@ -240,25 +304,31 @@ func (o *Oracle) start() error {
 			Version string `json:"version"`
 		}
 		if !ok || json.Unmarshal(line, &ready) != nil || !ready.Ready {
-			o.stop()
-			return errors.New("oracle did not start")
+			p.stop()
+			return nil, errors.New("oracle did not start")
 		}
-		o.version = ready.Version
-		return nil
+		if o.version != "" && ready.Version != o.version {
+			p.stop()
+			return nil, fmt.Errorf("oracle: a new process reports %q, the first reported %q", ready.Version, o.version)
+		}
+		if o.version == "" { // the first process, started before the pool is shared
+			o.version = ready.Version
+		}
+		return p, nil
 	case <-time.After(time.Minute):
-		o.stop()
-		return errors.New("oracle start timed out")
+		p.stop()
+		return nil, errors.New("oracle start timed out")
 	}
 }
 
-func (o *Oracle) stop() {
-	if o.cmd == nil {
+func (p *proc) stop() {
+	if p.cmd == nil {
 		return
 	}
-	o.stdin.Close()
-	o.cmd.Process.Kill()
-	o.cmd.Wait()
-	o.cmd = nil
+	p.stdin.Close()
+	p.cmd.Process.Kill()
+	p.cmd.Wait()
+	p.cmd = nil
 }
 
 // repoRoot finds the module root from the working directory (a test runs in

@@ -224,6 +224,15 @@ func recoverInto(err *error) {
 	}
 }
 
+// signalWritesKey carries signal writes in a call's context; only the tests
+// set it (export_test.go), to compare a chart after View.signal writes.
+type signalWritesKey struct{}
+
+func signalWritesFrom(ctx context.Context) []vega.SignalWrite {
+	w, _ := ctx.Value(signalWritesKey{}).([]vega.SignalWrite)
+	return w
+}
+
 // VegaToSVG renders a Vega spec (JSON) to an SVG string.
 func (c *Converter) VegaToSVG(spec []byte) (string, error) {
 	release, ok := c.enter()
@@ -275,8 +284,10 @@ func (c *Converter) renderSVG(ctx context.Context, spec jsval.Value) (out string
 		Loader:   c.cfg.loader,
 		Location: c.location,
 		Now:      c.cfg.now,
-		Config:   c.theme,
-		Limits:   c.limits(),
+		// Set only by the tests' signal sweep (export_test.go).
+		SignalWrites: signalWritesFrom(ctx),
+		Config:       c.theme,
+		Limits:       c.limits(),
 		// Seeded per render so sample, jitter and
 		// bootstrap confidence intervals are reproducible. 123456789 is the
 		// seed Vega-Lite's own example renders use (vg2svg --seed).

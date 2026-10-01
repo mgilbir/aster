@@ -233,12 +233,41 @@ vega.View.prototype.timer = function () {};
 const quiet = vega.logger(vega.None);
 const compile = (spec) => vl.compile(spec, { logger: quiet }).spec;
 
-async function render(vg) {
+function newView(vg) {
   // Each render starts its clip-path/gradient ids at zero and reseeds the
   // random generator, as the engine does per render.
   if (scenegraph.resetSVGDefIds) scenegraph.resetSVGDefIds();
   vega.setRandom(vega.randomLCG(123456789));
-  const view = new vega.View(vega.parse(vg), { loader, renderer: 'none', logger: quiet });
+  return new vega.View(vega.parse(vg), { loader, renderer: 'none', logger: quiet });
+}
+
+// renderAfter renders, writes each signal (View.signal, then runAsync, as a
+// binding or a host does) and renders again; the second SVG is the answer.
+async function renderAfter(vg, writes) {
+  const view = newView(vg);
+  try {
+    await view.toSVG();
+    for (const { name, value } of writes) {
+      view.signal(name, value);
+      await view.runAsync();
+    }
+    return await view.toSVG();
+  } finally {
+    view.finalize();
+  }
+}
+
+// Sweep generators live in sweeps/<name>.mjs and export generate(ctx), which
+// returns { cases, skips }; ctx carries the modules, since a generator cannot
+// import them by name (NODE_PATH does not apply to ES modules).
+async function generate(name) {
+  if (!/^[a-z0-9-]+$/.test(name)) throw new Error('bad sweep name: ' + name);
+  const mod = await import(path.join(repo, 'testdata/oracle-node/sweeps', name + '.mjs'));
+  return mod.generate({ vega, vl, require, repo });
+}
+
+async function render(vg) {
+  const view = newView(vg);
   try {
     return await view.toSVG();
   } finally {
@@ -277,6 +306,16 @@ for await (const line of rl) {
   }
   const res = { id: req.id };
   try {
+    if (req.op === 'generate') {
+      res.data = await generate(req.sweep);
+      write(res);
+      continue;
+    }
+    if (req.op === 'signals') {
+      res.svg = await renderAfter(JSON.parse(req.spec), req.writes || []);
+      write(res);
+      continue;
+    }
     if (req.op === 'png') {
       res.png = rasterize(req.svg, req.scale);
       write(res);
