@@ -2,6 +2,7 @@ package vega
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -91,6 +92,11 @@ func (v *runView) request(url, fmtSpec jsval.Value) []jsval.Value {
 	if err != nil {
 		if cerr := v.ctx.Err(); cerr != nil {
 			failErr(cerr)
+		}
+		// A body over the loader's size cap is a resource limit, which ends
+		// the render like the budget below, not a failed load.
+		if errors.Is(err, budget.ErrLimit) {
+			failErr(err)
 		}
 		v.g.warn("Loading failed " + uri + ": " + err.Error())
 		return nil

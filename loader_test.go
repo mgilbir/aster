@@ -178,8 +178,9 @@ func TestHTTPLoaderIntegration(t *testing.T) {
 	defer ts.Close()
 
 	l := &aster.HTTPLoader{
-		Client:         ts.Client(),
-		AllowedDomains: []string{"127.0.0.1"},
+		AllowPrivateNetworks: true,
+		Client:               ts.Client(),
+		AllowedDomains:       []string{"127.0.0.1"},
 	}
 
 	ctx := context.Background()
@@ -208,8 +209,9 @@ func TestHTTPLoaderRedirectToDisallowedHostBlocked(t *testing.T) {
 	defer redirector.Close()
 
 	l := &aster.HTTPLoader{
-		Client:         redirector.Client(),
-		AllowedDomains: []string{urlHost(t, redirector.URL)},
+		AllowPrivateNetworks: true,
+		Client:               redirector.Client(),
+		AllowedDomains:       []string{urlHost(t, redirector.URL)},
 	}
 
 	_, err := l.Load(context.Background(), redirector.URL+"/start.json")
@@ -234,7 +236,8 @@ func TestHTTPLoaderRedirectToAllowedHostFollowed(t *testing.T) {
 	defer redirector.Close()
 
 	l := &aster.HTTPLoader{
-		AllowedDomains: []string{urlHost(t, redirector.URL), urlHost(t, final.URL)},
+		AllowPrivateNetworks: true,
+		AllowedDomains:       []string{urlHost(t, redirector.URL), urlHost(t, final.URL)},
 	}
 
 	data, err := l.Load(context.Background(), redirector.URL+"/start.json")
@@ -246,9 +249,9 @@ func TestHTTPLoaderRedirectToAllowedHostFollowed(t *testing.T) {
 	}
 }
 
-// BlockPrivateNetworks rejects loopback targets at policy-check time.
-func TestHTTPLoaderBlockPrivateNetworks(t *testing.T) {
-	l := &aster.HTTPLoader{BlockPrivateNetworks: true}
+// Private networks are denied unless AllowPrivateNetworks is set.
+func TestHTTPLoaderDeniesPrivateNetworksByDefault(t *testing.T) {
+	l := &aster.HTTPLoader{}
 	ctx := context.Background()
 	for _, uri := range []string{
 		"http://127.0.0.1/data.json",
@@ -558,7 +561,7 @@ func TestHTTPLoaderResponseCapEnforced(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	l := &aster.HTTPLoader{Client: ts.Client(), MaxResponseBytes: 1024}
+	l := &aster.HTTPLoader{Client: ts.Client(), AllowPrivateNetworks: true, MaxResponseBytes: 1024}
 	_, err := l.Load(context.Background(), ts.URL+"/big.json")
 	if err == nil {
 		t.Fatal("expected error for response exceeding MaxResponseBytes")
@@ -604,7 +607,7 @@ func TestHTTPLoaderCallerCheckRedirectStillApplies(t *testing.T) {
 			return errors.New("caller-policy: no redirects")
 		},
 	}
-	l := &aster.HTTPLoader{Client: client}
+	l := &aster.HTTPLoader{Client: client, AllowPrivateNetworks: true}
 
 	_, err := l.Load(context.Background(), redirector.URL+"/start.json")
 	if err == nil {

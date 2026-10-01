@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -64,5 +66,41 @@ func TestRunPDFInvalidTextMode(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "invalid -text") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// -allow-http reaches the public internet only; a loopback data service needs
+// -allow-private-networks as well.
+func TestRunSVGPrivateNetworks(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`[{"a":"HELLOWORLD"}]`))
+	}))
+	defer ts.Close()
+	dir := t.TempDir()
+	spec := filepath.Join(dir, "spec.vl.json")
+	if err := os.WriteFile(spec, []byte(`{"$schema":"https://vega.github.io/schema/vega-lite/v5.json","data":{"url":"`+ts.URL+`/d.json"},"mark":"text","encoding":{"text":{"field":"a"}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{"allow-http", []string{"-allow-http"}, false},
+		{"allow-domain", []string{"-allow-domain", "127.0.0.1"}, false},
+		{"allow-http and private", []string{"-allow-http", "-allow-private-networks"}, true},
+		{"allow-domain and private", []string{"-allow-domain", "127.0.0.1", "-allow-private-networks"}, true},
+	} {
+		out := filepath.Join(dir, "out.svg")
+		if err := runSVG(append([]string{"-i", spec, "-o", out}, tc.args...)); err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		svg, err := os.ReadFile(out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := bytes.Contains(svg, []byte("HELLOWORLD")); got != tc.want {
+			t.Errorf("%s: data loaded = %v, want %v", tc.name, got, tc.want)
+		}
 	}
 }

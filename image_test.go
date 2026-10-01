@@ -3,9 +3,13 @@ package aster_test
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/binary"
+	"errors"
+	"hash/crc32"
 	"image"
 	"image/color"
 	"image/png"
+	"strings"
 	"testing"
 
 	"github.com/mgilbir/aster"
@@ -97,5 +101,48 @@ func TestMalformedImageRendersBlank(t *testing.T) {
 func TestUnsupportedImageFormatIgnored(t *testing.T) {
 	if _, err := renderImage(t, "data:image/tiff;base64,SUkqAAgAAAA="); err != nil {
 		return // graceful rejection is fine
+	}
+}
+
+// A data: image is bounded before it is decoded: by its size, base64 or not,
+// and by the dimensions in its header.
+func TestDataURIImageLimits(t *testing.T) {
+	ihdr := func(w, h uint32) string {
+		chunk := make([]byte, 0, 17)
+		chunk = append(chunk, "IHDR"...)
+		chunk = binary.BigEndian.AppendUint32(chunk, w)
+		chunk = binary.BigEndian.AppendUint32(chunk, h)
+		chunk = append(chunk, 8, 6, 0, 0, 0) // 8-bit RGBA
+		b := []byte("\x89PNG\r\n\x1a\n")
+		b = binary.BigEndian.AppendUint32(b, 13)
+		b = append(b, chunk...)
+		b = binary.BigEndian.AppendUint32(b, crc32.ChecksumIEEE(chunk))
+		return "data:image/png;base64," + base64.StdEncoding.EncodeToString(b)
+	}
+	for name, href := range map[string]string{
+		"base64 payload":  "data:image/png;base64," + strings.Repeat("A", 48<<20),
+		"escaped payload": "data:image/png," + strings.Repeat("a", 33<<20),
+		"pixel count":     ihdr(60000, 60000),
+		"dimension":       ihdr(70000, 1),
+	} {
+		if _, err := renderImage(t, href); !errors.Is(err, aster.ErrLimit) {
+			t.Errorf("%s: err = %v, want a limit", name, err)
+		}
+	}
+	for name, href := range map[string]string{
+		"no comma":          "data:image/png;base64",
+		"empty":             "data:",
+		"bad base64":        "data:image/png;base64,@@@@",
+		"truncated base64":  "data:image/png;base64,iVBORw0KGgo",
+		"bad percent":       "data:image/png,%zz",
+		"not an image":      "data:text/html,<script>alert(1)</script>",
+		"remote":            "http://127.0.0.1:1/x.png",
+		"file":              "file:///etc/passwd",
+		"relative":          "../../etc/passwd",
+		"empty after comma": "data:image/png;base64,",
+	} {
+		if _, err := renderImage(t, href); err != nil && errors.Is(err, aster.ErrLimit) {
+			t.Errorf("%s: err = %v", name, err)
+		}
 	}
 }

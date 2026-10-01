@@ -108,7 +108,7 @@ aster svg -i chart.vl.json -allow-domain cdn.jsdelivr.net
 
 The CLI auto-detects Vega vs Vega-Lite from the `$schema` field. If absent, Vega-Lite is assumed.
 
-Shared flags: `-i`/`-o` (input/output, stdin/stdout when omitted), `-version`, `-timeout`, `-allow-http`, and `-allow-domain` (repeatable; implies `-allow-http`). `png` also accepts `-scale` and `-recode`; these don't apply to `pdf` since it's vector output. `pdf` accepts `-text embed|named|outlines` to pick the [PDF text mode](#options) (default `embed`).
+Shared flags: `-i`/`-o` (input/output, stdin/stdout when omitted), `-version`, `-timeout`, `-allow-http`, `-allow-domain` (repeatable; implies `-allow-http`), and `-allow-private-networks` (let HTTP loading reach loopback, link-local and private addresses, which are denied by default). `png` also accepts `-scale` and `-recode`; these don't apply to `pdf` since it's vector output. `pdf` accepts `-text embed|named|outlines` to pick the [PDF text mode](#options) (default `embed`).
 
 ## API
 
@@ -211,7 +211,7 @@ aster.New()
 // Allow HTTP/HTTPS requests.
 aster.New(aster.WithLoader(aster.NewHTTPLoader(nil)))
 
-// Allow HTTP with a custom client (timeouts, proxies, etc).
+// Allow HTTP with a custom client (transport, TLS, redirect policy, etc).
 aster.New(aster.WithLoader(aster.NewHTTPLoader(customClient)))
 
 // HTTP with domain whitelisting — only these hosts are permitted.
@@ -251,11 +251,14 @@ aster.New(aster.WithLoader(aster.NewFallbackLoader(
 | `StaticLoader` | Returns a fixed JSON value for any URI (test stub) |
 | `FallbackLoader` | Tries child loaders in order until one succeeds |
 
-`HTTPLoader` rejects non-HTTP schemes (`ftp:`, `javascript:`, `data:`, `file:`), URIs with userinfo (`user:pass@host`), and domains not in the allowlist. Domain matching is case-insensitive. The same policy is re-checked on every HTTP redirect hop, so an allowed host cannot redirect a request to a disallowed one; a `CheckRedirect` on your own `http.Client` still applies on top. Response bodies are capped at 64 MiB by default (`MaxResponseBytes` raises or disables the cap).
+`HTTPLoader` rejects non-HTTP schemes (`ftp:`, `javascript:`, `data:`, `file:`), URIs with userinfo (`user:pass@host`), and domains not in the allowlist. Domain matching is case-insensitive, ignores one trailing dot, and takes ASCII names only (write an internationalized name in its punycode form). The same policy is re-checked on every HTTP redirect hop (at most 10), so an allowed host cannot redirect a request to a disallowed one; a `CheckRedirect` on your own `http.Client` still applies on top. Response bodies are capped at 64 MiB after decompression (`MaxResponseBytes` raises or disables the cap), and one request, redirects and body included, takes at most 60 seconds (`Timeout`); a body over the cap, or over what is left of the render's load budget (`WithMemoryLimit`), ends the render with `ErrLimit`. So does a file over `FileLoader`'s `MaxBytes`, also behind a `FallbackLoader`.
 
-When rendering specs from untrusted sources, set `BlockPrivateNetworks: true` to additionally reject hosts that resolve to loopback, link-local, or private addresses (including cloud metadata endpoints like `169.254.169.254`), and pair it with `AllowedDomains` — name resolution happens at policy-check time, so the flag alone does not defend against DNS rebinding.
+**Private networks are denied by default.** A specification names its URLs, so a hostile one could otherwise make the server fetch from its own network: `localhost`, loopback, link-local (cloud metadata at `169.254.169.254`), RFC 1918 and unique-local, carrier-grade NAT, multicast and unspecified addresses, in every spelling (`2130706433`, `0x7f.1`, `::ffff:127.0.0.1`, NAT64 and 6to4 forms). The check is made on the address a connection is actually made to, so a name that resolves to one, DNS rebinding and redirects do not get around it. Set `AllowPrivateNetworks: true` (CLI: `-allow-private-networks`) to reach a data service on your own network. This replaces `BlockPrivateNetworks`, which is now ignored. The check lives in the connections of the default client and of a `Client` whose `Transport` is an `*http.Transport`; a `Transport` with a deprecated `Dial`, or any other `http.RoundTripper`, chooses where it connects itself, and for those only address literals and `localhost` names are refused, so combine them with `AllowedDomains`.
 
-`FileLoader` rejects absolute paths, path traversal (`..`), and URIs with schemes. It uses Go's `os.Root` for OS-level path containment, which also blocks symlink escapes, refuses anything that is not a regular file, and caps file size at 64 MiB by default (`MaxBytes` raises or disables the cap).
+**Proxies are honoured.** The default client (a nil `Client`, or `http.DefaultClient`) follows `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` as `http.DefaultTransport` does, and a `Transport` of your own keeps its `Proxy`. The connection to the proxy is allowed whatever its address, since whoever runs the process chose it. The proxy resolves the target's name itself, though, so a request it carries gets only the checks on the URL (address literals, `localhost` names, `AllowedDomains`), not the check on the address finally reached: when a proxy is set, deny internal destinations at the proxy, or use `AllowedDomains`. A request the proxy settings send directly (`NO_PROXY`) keeps the full check.
+
+
+`FileLoader` rejects absolute paths, path traversal (`..`), control characters and URIs with a scheme (`file:`, `http:`); the URI is a file path, so nothing is percent-decoded and a name with a colon, such as `22:48`, is an ordinary file name. It uses Go's `os.Root` for OS-level path containment, which also blocks symlink escapes, refuses anything that is not a regular file, and caps file size at 64 MiB by default (`MaxBytes` raises or disables the cap).
 
 `FallbackLoader` naturally routes by URI shape — `FileLoader` accepts relative paths while `HTTPLoader` accepts absolute URLs — so combining them covers specs that reference both local and remote data.
 

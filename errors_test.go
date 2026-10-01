@@ -3,6 +3,10 @@ package aster_test
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +22,15 @@ func TestErrLimit(t *testing.T) {
 		return `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">` +
 			strings.Repeat("<g>", depth) + `<rect width="5" height="5"/>` + strings.Repeat("</g>", depth) + `</svg>`
 	}
+	big := t.TempDir()
+	if err := os.WriteFile(filepath.Join(big, "big.json"), []byte(`[{"a":1},{"a":2},{"a":3}]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`[{"a":1},{"a":2},{"a":3}]`))
+	}))
+	defer srv.Close()
+	loadSpec := func(url string) []byte { return []byte(`{"data":[{"name":"t","url":"` + url + `"}]}`) }
 	cases := []struct {
 		name string
 		opts []aster.Option
@@ -25,6 +38,19 @@ func TestErrLimit(t *testing.T) {
 	}{
 		{"data rows", []aster.Option{aster.WithMemoryLimit(1 << 20)}, func(c *aster.Converter) error {
 			_, err := c.VegaToSVG([]byte(`{"data":[{"name":"t","transform":[{"type":"sequence","start":0,"stop":1e6}]}]}`))
+			return err
+		}},
+		{"loaded file size", []aster.Option{aster.WithLoader(&aster.FileLoader{BaseDir: big, MaxBytes: 8})}, func(c *aster.Converter) error {
+			_, err := c.VegaToSVG([]byte(`{"data":[{"name":"t","url":"big.json"}]}`))
+			return err
+		}},
+		{"loaded file size behind a fallback", []aster.Option{aster.WithLoader(aster.NewFallbackLoader(
+			&aster.FileLoader{BaseDir: big, MaxBytes: 8}, aster.NewHTTPLoader(nil)))}, func(c *aster.Converter) error {
+			_, err := c.VegaToSVG(loadSpec("big.json"))
+			return err
+		}},
+		{"loaded HTTP size", []aster.Option{aster.WithLoader(&aster.HTTPLoader{AllowPrivateNetworks: true, MaxResponseBytes: 8})}, func(c *aster.Converter) error {
+			_, err := c.VegaToSVG(loadSpec(srv.URL + "/big.json"))
 			return err
 		}},
 		{"tick count", nil, func(c *aster.Converter) error {

@@ -81,14 +81,16 @@ type commonOpts struct {
 	fs           *flag.FlagSet
 	allowHTTP    bool
 	allowDomains stringList
+	allowPrivate bool
 	version      string
 	timeout      time.Duration
 }
 
 func registerCommonOpts(fs *flag.FlagSet) *commonOpts {
 	co := &commonOpts{fs: fs}
-	fs.BoolVar(&co.allowHTTP, "allow-http", false, "allow HTTP(S) data loading from any host")
+	fs.BoolVar(&co.allowHTTP, "allow-http", false, "allow HTTP(S) data loading from any public host")
 	fs.Var(&co.allowDomains, "allow-domain", "restrict HTTP loading to this host (repeatable); implies -allow-http")
+	fs.BoolVar(&co.allowPrivate, "allow-private-networks", false, "let HTTP loading reach loopback, link-local and private addresses (denied by default)")
 	fs.StringVar(&co.version, "version", "", "Vega-Lite version, e.g. 5.8 or 6.4 (default: build default)")
 	fs.DurationVar(&co.timeout, "timeout", 0, "max duration per render, e.g. 30s; 0 disables the timeout (default: 30s)")
 	return co
@@ -116,9 +118,9 @@ func (co *commonOpts) options() ([]aster.Option, error) {
 	}
 	switch {
 	case len(co.allowDomains) > 0:
-		opts = append(opts, aster.WithLoader(&aster.HTTPLoader{AllowedDomains: co.allowDomains}))
+		opts = append(opts, aster.WithLoader(&aster.HTTPLoader{AllowedDomains: co.allowDomains, AllowPrivateNetworks: co.allowPrivate}))
 	case co.allowHTTP:
-		opts = append(opts, aster.WithLoader(aster.NewHTTPLoader(nil)))
+		opts = append(opts, aster.WithLoader(&aster.HTTPLoader{AllowPrivateNetworks: co.allowPrivate}))
 	}
 	return opts, nil
 }

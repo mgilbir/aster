@@ -19,7 +19,8 @@ type Loader = loader.Loader
 type (
 	// DenyLoader denies all resource loading. This is the default.
 	DenyLoader = loader.DenyLoader
-	// HTTPLoader allows loading resources over HTTP and HTTPS.
+	// HTTPLoader allows loading resources over HTTP and HTTPS, to public addresses
+	// unless AllowPrivateNetworks is set.
 	HTTPLoader = loader.HTTPLoader
 	// FileLoader serves files from a base directory on disk. It accepts
 	// relative paths and rejects absolute URLs and path traversal.
@@ -33,7 +34,7 @@ type (
 )
 
 // NewHTTPLoader creates a loader that allows HTTP(S) requests.
-// If client is nil, http.DefaultClient is used.
+// If client is nil, the default client described on HTTPLoader is used.
 func NewHTTPLoader(client *http.Client) *HTTPLoader { return loader.NewHTTPLoader(client) }
 
 // NewFileLoader creates a FileLoader with eager initialization.

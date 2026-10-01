@@ -9,11 +9,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
-	"net/http"
-	"net/url"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -46,211 +45,6 @@ func (DenyLoader) Load(_ context.Context, uri string) ([]byte, error) {
 
 func (DenyLoader) Sanitize(_ context.Context, uri string) (string, error) {
 	return "", fmt.Errorf("aster: resource loading denied for %q (no loader configured)", uri)
-}
-
-// HTTPLoader allows loading resources over HTTP and HTTPS.
-//
-// AllowedDomains restricts which hostnames may be accessed. If empty, all
-// domains are permitted. BaseURL enables resolution of relative URIs; if
-// empty, only absolute HTTP(S) URLs are accepted.
-//
-// The same scheme/userinfo/AllowedDomains policy is enforced on every HTTP
-// redirect hop, so an allowed host cannot redirect the request to a
-// disallowed one.
-//
-// BlockPrivateNetworks, when set, additionally rejects any request whose host
-// resolves to a loopback, link-local, private, or unspecified address
-// (including cloud metadata endpoints such as 169.254.169.254). It is off by
-// default so that local development and test servers keep working; enable it
-// when rendering specs from untrusted sources. Note that name resolution here
-// happens at policy-check time, so it does not by itself defend against DNS
-// rebinding — pair it with AllowedDomains for untrusted input.
-//
-// MaxResponseBytes caps how much of a response body is read. Zero means the
-// default cap (64 MiB); a negative value disables the cap entirely. Responses
-// larger than the cap fail with an error instead of being truncated, so a
-// hostile or misbehaving server cannot stream unbounded data into memory.
-type HTTPLoader struct {
-	Client               *http.Client
-	AllowedDomains       []string // if non-empty, only these hostnames are permitted
-	BaseURL              string   // if set, relative URIs are resolved against this URL
-	BlockPrivateNetworks bool     // if set, reject loopback/link-local/private hosts
-	MaxResponseBytes     int64    // response body cap; 0 = 64 MiB default, negative = unlimited
-}
-
-// defaultMaxResponseBytes bounds response bodies when MaxResponseBytes is 0.
-const defaultMaxResponseBytes = 64 << 20
-
-// NewHTTPLoader creates a loader that allows HTTP(S) requests.
-// If client is nil, http.DefaultClient is used.
-func NewHTTPLoader(client *http.Client) *HTTPLoader {
-	if client == nil {
-		client = http.DefaultClient
-	}
-	return &HTTPLoader{Client: client}
-}
-
-func (l *HTTPLoader) Load(ctx context.Context, uri string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, uri, nil)
-	if err != nil {
-		return nil, fmt.Errorf("aster: failed to create request for %q: %w", uri, err)
-	}
-
-	// Re-validate the initial URL independently of Sanitize so Load is safe
-	// even when called directly.
-	if err := l.checkURL(ctx, req.URL); err != nil {
-		return nil, err
-	}
-
-	base := l.Client
-	if base == nil {
-		base = http.DefaultClient
-	}
-	// Shallow-copy the client so the policy-enforcing CheckRedirect below does
-	// not mutate a caller-supplied client. Every redirect target is run
-	// through the same scheme/domain/network policy as the initial URL, then
-	// through the caller's own CheckRedirect (if any), so a stricter
-	// caller-supplied redirect policy still applies.
-	client := *base
-	callerCheck := base.CheckRedirect
-	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-		if len(via) >= 10 {
-			return errors.New("aster: stopped after 10 redirects")
-		}
-		if err := l.checkURL(req.Context(), req.URL); err != nil {
-			return err
-		}
-		if callerCheck != nil {
-			return callerCheck(req, via)
-		}
-		return nil
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("aster: failed to load %q: %w", uri, err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("aster: HTTP %d loading %q", resp.StatusCode, uri)
-	}
-
-	max := l.MaxResponseBytes
-	if max == 0 {
-		max = defaultMaxResponseBytes
-	}
-	if max < 0 {
-		data, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return nil, fmt.Errorf("aster: failed to read response from %q: %w", uri, err)
-		}
-		return data, nil
-	}
-
-	// Read one byte past the cap to distinguish "exactly at the cap" from
-	// "exceeds it".
-	data, err := io.ReadAll(io.LimitReader(resp.Body, max+1))
-	if err != nil {
-		return nil, fmt.Errorf("aster: failed to read response from %q: %w", uri, err)
-	}
-	if int64(len(data)) > max {
-		return nil, fmt.Errorf("aster: response from %q exceeds %d bytes (raise HTTPLoader.MaxResponseBytes to allow larger payloads): %w", uri, max, budget.ErrLimit)
-	}
-	return data, nil
-}
-
-func (l *HTTPLoader) Sanitize(ctx context.Context, uri string) (string, error) {
-	parsed, err := url.Parse(uri)
-	if err != nil {
-		return "", fmt.Errorf("aster: invalid URI %q: %w", uri, err)
-	}
-
-	// Resolve relative URIs against BaseURL if configured.
-	if parsed.Scheme == "" {
-		if l.BaseURL == "" {
-			return "", fmt.Errorf("aster: relative URI %q not allowed (no BaseURL configured)", uri)
-		}
-		base, err := url.Parse(l.BaseURL)
-		if err != nil {
-			return "", fmt.Errorf("aster: invalid BaseURL %q: %w", l.BaseURL, err)
-		}
-		parsed = base.ResolveReference(parsed)
-	}
-
-	if err := l.checkURL(ctx, parsed); err != nil {
-		return "", err
-	}
-
-	return parsed.String(), nil
-}
-
-// checkURL enforces the HTTPLoader access policy on a fully-resolved URL:
-// no userinfo, http/https only, host in AllowedDomains (when set), and — when
-// BlockPrivateNetworks is set — a host that does not resolve to a
-// loopback/link-local/private/unspecified address. It is applied to the
-// initial request URL and to every redirect target.
-func (l *HTTPLoader) checkURL(ctx context.Context, u *url.URL) error {
-	if u.User != nil {
-		return fmt.Errorf("aster: URI %q contains userinfo (not allowed)", u.Redacted())
-	}
-
-	scheme := strings.ToLower(u.Scheme)
-	if scheme != "http" && scheme != "https" {
-		return fmt.Errorf("aster: unsupported scheme %q in URI %q (only http/https allowed)", scheme, u.String())
-	}
-
-	hostname := u.Hostname()
-	if len(l.AllowedDomains) > 0 {
-		allowed := false
-		for _, d := range l.AllowedDomains {
-			if strings.EqualFold(hostname, d) {
-				allowed = true
-				break
-			}
-		}
-		if !allowed {
-			return fmt.Errorf("aster: domain %q not in allowed list for URI %q", hostname, u.String())
-		}
-	}
-
-	if l.BlockPrivateNetworks {
-		private, err := hostResolvesPrivate(ctx, hostname)
-		if err != nil {
-			return fmt.Errorf("aster: resolving host %q: %w", hostname, err)
-		}
-		if private {
-			return fmt.Errorf("aster: host %q resolves to a private/loopback address (blocked)", hostname)
-		}
-	}
-
-	return nil
-}
-
-// hostResolvesPrivate reports whether host (an IP literal or a name) maps to
-// any address in a loopback, link-local, private, or unspecified range.
-func hostResolvesPrivate(ctx context.Context, host string) (bool, error) {
-	if ip := net.ParseIP(host); ip != nil {
-		return isPrivateIP(ip), nil
-	}
-	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
-	if err != nil {
-		return false, err
-	}
-	for _, a := range addrs {
-		if isPrivateIP(a.IP) {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
-func isPrivateIP(ip net.IP) bool {
-	return ip.IsLoopback() ||
-		ip.IsLinkLocalUnicast() ||
-		ip.IsLinkLocalMulticast() ||
-		ip.IsPrivate() ||
-		ip.IsUnspecified()
 }
 
 // FileLoader serves files from a base directory on disk.
@@ -288,30 +82,59 @@ func (l *FileLoader) initRoot() {
 		}
 		l.root, l.err = os.OpenRoot(l.BaseDir)
 		if l.err != nil {
-			l.err = fmt.Errorf("aster: FileLoader cannot open root %q: %w", l.BaseDir, l.err)
+			// Not the path: this error reaches whoever supplied the URI.
+			var pe *fs.PathError
+			if errors.As(l.err, &pe) {
+				l.err = pe.Err
+			}
+			l.err = fmt.Errorf("aster: FileLoader cannot open its base directory: %w", l.err)
 		}
 	})
 }
 
+// Sanitize accepts a relative path inside the base directory. The URI is a
+// file path, not a URL: a name with a colon in its first segment (22:48) is a
+// file name, as it is to the reference implementation, and only an actual
+// scheme (file:, http:, mailto:) is refused. Nothing is decoded, so %2e%2e is
+// a file name too.
 func (l *FileLoader) Sanitize(_ context.Context, uri string) (string, error) {
-	parsed, err := url.Parse(uri)
-	if err != nil {
-		return "", fmt.Errorf("aster: invalid URI %q: %w", uri, err)
+	if hasScheme(uri) {
+		return "", fmt.Errorf("aster: FileLoader only accepts relative paths, got a scheme in %q", uri)
 	}
-
-	if parsed.Scheme != "" {
-		return "", fmt.Errorf("aster: FileLoader only accepts relative paths, got scheme %q in %q", parsed.Scheme, uri)
+	for i := 0; i < len(uri); i++ {
+		if uri[i] < 0x20 || uri[i] == 0x7f {
+			return "", fmt.Errorf("aster: invalid URI %q: control character", uri)
+		}
 	}
 
 	cleaned := filepath.Clean(uri)
-	if filepath.IsAbs(cleaned) {
+	if filepath.IsAbs(cleaned) || filepath.VolumeName(cleaned) != "" || os.IsPathSeparator(cleaned[0]) {
 		return "", fmt.Errorf("aster: FileLoader rejects absolute path %q", uri)
 	}
-	if strings.HasPrefix(cleaned, "..") {
+	if runtime.GOOS == "windows" && strings.Contains(cleaned, ":") {
+		return "", fmt.Errorf("aster: FileLoader rejects %q: a colon names a drive or a stream", uri)
+	}
+	if cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("aster: FileLoader rejects path traversal in %q", uri)
 	}
 
 	return cleaned, nil
+}
+
+// hasScheme reports whether s starts with a URI scheme: a letter, then
+// letters, digits, '+', '-' or '.', then a colon.
+func hasScheme(s string) bool {
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z':
+		case i > 0 && (c >= '0' && c <= '9' || c == '+' || c == '-' || c == '.'):
+		case i > 0 && c == ':':
+			return true
+		default:
+			return false
+		}
+	}
+	return false
 }
 
 func (l *FileLoader) Load(ctx context.Context, uri string) ([]byte, error) {
@@ -328,13 +151,10 @@ func (l *FileLoader) Load(ctx context.Context, uri string) ([]byte, error) {
 	if closed || root == nil {
 		// A converter closes its loader on Close; a loader shared with a
 		// second converter must fail cleanly rather than dereference nil.
-		return nil, fmt.Errorf("aster: FileLoader for %q is closed", l.BaseDir)
+		return nil, errors.New("aster: FileLoader is closed")
 	}
 
-	max := l.MaxBytes
-	if max == 0 {
-		max = defaultMaxResponseBytes
-	}
+	max := loadCap(ctx, l.MaxBytes)
 
 	// Stat before opening: opening a FIFO would block until a writer shows up.
 	if fi, err := root.Stat(uri); err != nil {
@@ -354,11 +174,11 @@ func (l *FileLoader) Load(ctx context.Context, uri string) ([]byte, error) {
 	if !fi.Mode().IsRegular() {
 		return nil, fmt.Errorf("aster: FileLoader %q is not a regular file", uri)
 	}
-	if max > 0 && fi.Size() > max {
-		return nil, fmt.Errorf("aster: file %q is %d bytes, exceeds %d bytes (raise FileLoader.MaxBytes to allow larger files): %w", uri, fi.Size(), max, budget.ErrLimit)
+	if max >= 0 && fi.Size() > max {
+		return nil, fmt.Errorf("aster: file %q is %d bytes, exceeds %d bytes (raise FileLoader.MaxBytes or the memory limit to allow larger files): %w", uri, fi.Size(), max, budget.ErrLimit)
 	}
 	var r io.Reader = f
-	if max > 0 {
+	if max >= 0 {
 		// The file may grow after the stat; read one byte past the cap.
 		r = io.LimitReader(f, max+1)
 	}
@@ -366,8 +186,8 @@ func (l *FileLoader) Load(ctx context.Context, uri string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("aster: FileLoader failed to read %q: %w", uri, err)
 	}
-	if max > 0 && int64(len(data)) > max {
-		return nil, fmt.Errorf("aster: file %q exceeds %d bytes (raise FileLoader.MaxBytes to allow larger files): %w", uri, max, budget.ErrLimit)
+	if max >= 0 && int64(len(data)) > max {
+		return nil, fmt.Errorf("aster: file %q exceeds %d bytes (raise FileLoader.MaxBytes or the memory limit to allow larger files): %w", uri, max, budget.ErrLimit)
 	}
 	return data, nil
 }
@@ -447,6 +267,11 @@ func (l *FallbackLoader) Load(ctx context.Context, uri string) ([]byte, error) {
 		}
 		data, err := child.Load(ctx, sanitized)
 		if err != nil {
+			// A limit is not a miss: no other child may answer in its place,
+			// nor may its own error hide the limit.
+			if errors.Is(err, budget.ErrLimit) || ctx.Err() != nil {
+				return nil, err
+			}
 			lastErr = err
 			continue
 		}
