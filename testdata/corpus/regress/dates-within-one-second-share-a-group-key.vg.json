@@ -1,0 +1,17 @@
+{"width":300,"height":120,"padding":5,
+"data":[
+{"name":"t","values":[{"t":100,"v":1},{"t":200,"v":2},{"t":1500,"v":3},{"t":1900,"v":4}],"transform":[
+{"type":"formula","as":"d","expr":"datetime(1970, 0, 1, 0, 0, 0, datum.t)"}]},
+{"name":"grouped","source":"t","transform":[
+{"type":"aggregate","groupby":["d"],"ops":["count","sum","distinct"],"fields":[null,"v","d"],"as":["n","s","dd"]}]},
+{"name":"joined","source":"t","transform":[
+{"type":"joinaggregate","groupby":["d"],"ops":["sum"],"fields":["v"],"as":["tot"]}]},
+{"name":"windowed","source":"t","transform":[
+{"type":"window","groupby":["d"],"ops":["row_number"],"as":["rn"]}]},
+{"name":"pivoted","source":"t","transform":[
+{"type":"pivot","field":"d","value":"v"}]}],
+"marks":[
+{"type":"text","from":{"data":"grouped"},"encode":{"update":{"x":{"value":0},"y":{"signal":"20 + datum.s * 3"},"text":{"signal":"'group ' + datum.n + ' ' + datum.s + ' ' + datum.dd"}}}},
+{"type":"text","from":{"data":"joined"},"encode":{"update":{"x":{"value":120},"y":{"signal":"20 + datum.v * 12"},"text":{"signal":"'join ' + datum.v + ':' + datum.tot"}}}},
+{"type":"text","from":{"data":"windowed"},"encode":{"update":{"x":{"value":200},"y":{"signal":"20 + datum.v * 12"},"text":{"signal":"'row ' + datum.v + ':' + datum.rn"}}}},
+{"type":"text","from":{"data":"pivoted"},"encode":{"update":{"x":{"value":0},"y":{"value":100},"text":{"signal":"datum['Thu Jan 01 1970 00:00:00 GMT+0000 (Coordinated Universal Time)'] + ' / ' + datum['Thu Jan 01 1970 00:00:01 GMT+0000 (Coordinated Universal Time)']"},"fontSize":{"value":8}}}}]}

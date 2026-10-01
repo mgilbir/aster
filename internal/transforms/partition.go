@@ -3,6 +3,7 @@ package transforms
 import (
 	"strings"
 
+	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -17,10 +18,11 @@ type Group struct {
 // Partition splits data by the group-by fields, groups in order of first
 // appearance, as vega-transforms' partition() does. Groups are identified by
 // the comma-joined string form of the dimension values (null and undefined
-// join as empty, like Array.prototype.toString), so 1 and "1" are one group.
+// join as empty, like Array.prototype.toString, and a date in the zone z), so
+// 1 and "1" are one group.
 // With no group-by fields everything is one group with nil Dims, even when data
 // is empty.
-func Partition(data []jsval.Value, groupby []Field) []Group {
+func Partition(z format.Zone, data []jsval.Value, groupby []Field) []Group {
 	if len(groupby) == 0 {
 		return []Group{{Tuples: data}}
 	}
@@ -34,7 +36,7 @@ func Partition(data []jsval.Value, groupby []Field) []Group {
 				sb.WriteByte(',')
 			}
 			if v := f.Get(t); !v.IsNullish() {
-				sb.WriteString(v.AsString())
+				sb.WriteString(keyString(v, z))
 			}
 		}
 		k := sb.String()

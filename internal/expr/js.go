@@ -3,6 +3,7 @@ package expr
 import (
 	"math"
 
+	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/scale/color"
 )
@@ -95,7 +96,7 @@ func (s *Scope) strDepth(v jsval.Value, depth int) string {
 	case jsval.KindStr:
 		return v.StrValue()
 	case jsval.KindTimestamp:
-		return dateToString(v.NumValue(), s.zone())
+		return format.DateToString(v.NumValue(), s.zone())
 	case jsval.KindArr:
 		items := v.Items()
 		switch len(items) {

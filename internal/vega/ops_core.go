@@ -3,6 +3,7 @@ package vega
 import (
 	"math"
 
+	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/scene"
 	"github.com/mgilbir/aster/internal/transforms"
@@ -123,13 +124,14 @@ func facKey(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *o
 				}
 			}
 		}
-		return makeKeyFn(fields, p.Value("flat").IsTruthy())
+		return makeKeyFn(c.view.zone, fields, p.Value("flat").IsTruthy())
 	}
 }
 
 // makeKeyFn is vega-util's key(fields, flat): the string forms of the field
-// values joined with '|'. With flat, the names are literal property names.
-func makeKeyFn(fields []string, flat bool) transforms.KeyFunc {
+// values joined with '|' (a date as in the view's zone z). With flat, the names
+// are literal property names.
+func makeKeyFn(z format.Zone, fields []string, flat bool) transforms.KeyFunc {
 	fs := make([]transforms.Field, len(fields))
 	for i, f := range fields {
 		if flat {
@@ -138,7 +140,7 @@ func makeKeyFn(fields []string, flat bool) transforms.KeyFunc {
 			fs[i] = transforms.FieldOf(f)
 		}
 	}
-	return transforms.KeyOf(fs...)
+	return transforms.KeyOf(z, fs...)
 }
 
 // flatField reads a property by literal name (backslash escapes removed).
@@ -161,7 +163,7 @@ func (c *rtContext) keyFn(k pKey) transforms.KeyFunc {
 			fields = append(fields, v.AsString())
 		}
 	}
-	return makeKeyFn(fields, k.flat)
+	return makeKeyFn(c.view.zone, fields, k.flat)
 }
 
 // compareSpec is a resolved comparator: the function over tuples, and the field

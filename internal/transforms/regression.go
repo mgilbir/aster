@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/jsmath"
 
 	"github.com/mgilbir/aster/internal/jsval"
@@ -77,7 +78,7 @@ func Regression(ctx context.Context, data []jsval.Value, p RegressionParams) ([]
 	if len(p.As) > 1 {
 		as1 = p.As[1]
 	}
-	groups := regressionGroups(data, p.GroupBy)
+	groups := regressionGroups(zoneOf(ctx), data, p.GroupBy)
 	var out []jsval.Value
 	for _, g := range groups {
 		if err := ctx.Err(); err != nil {
@@ -164,14 +165,14 @@ func Regression(ctx context.Context, data []jsval.Value, p RegressionParams) ([]
 // regressionGroups is upstream's partition: no group-by (nil) is one group of
 // everything; an explicitly empty list is one empty-dims group when there is
 // data and none otherwise.
-func regressionGroups(data []jsval.Value, groupby []Field) []Group {
+func regressionGroups(z format.Zone, data []jsval.Value, groupby []Field) []Group {
 	if groupby != nil && len(groupby) == 0 {
 		if len(data) == 0 {
 			return nil
 		}
 		return []Group{{Dims: []jsval.Value{}, Tuples: data}}
 	}
-	return Partition(data, groupby)
+	return Partition(z, data, groupby)
 }
 
 const regressionMinRadians = 0.5 * math.Pi / 180

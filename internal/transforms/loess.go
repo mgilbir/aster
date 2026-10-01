@@ -36,7 +36,7 @@ func Loess(ctx context.Context, data []jsval.Value, p LoessParams) ([]jsval.Valu
 		as1 = p.As[1]
 	}
 	var out []jsval.Value
-	for _, g := range regressionGroups(data, p.GroupBy) {
+	for _, g := range regressionGroups(zoneOf(ctx), data, p.GroupBy) {
 		pts, err := LoessFit(ctx, g.Tuples, p.X.Get, p.Y.Get, bw)
 		if err != nil {
 			return nil, err

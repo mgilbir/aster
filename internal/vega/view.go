@@ -37,6 +37,7 @@ import (
 	"github.com/mgilbir/aster/internal/raster"
 	"github.com/mgilbir/aster/internal/scale"
 	"github.com/mgilbir/aster/internal/scene"
+	"github.com/mgilbir/aster/internal/transforms"
 	"github.com/mgilbir/aster/internal/transforms/wordcloud"
 )
 
@@ -316,6 +317,9 @@ func newView(ctx context.Context, opts Options, locale jsval.Value) *runView {
 		v.loc = time.UTC
 	}
 	v.zone = format.Local(v.loc)
+	// Transforms that key on text write a date in the view's zone.
+	ctx = transforms.WithZone(ctx, v.zone)
+	v.ctx = ctx
 	switch {
 	case opts.Locale != nil:
 		v.locale = opts.Locale

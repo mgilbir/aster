@@ -115,7 +115,7 @@ func DotBinTuples(ctx context.Context, data []jsval.Value, p DotBinParams) (DotB
 		step /= 30
 	}
 	res := DotBinResult{Start: math.Inf(1), Stop: math.Inf(-1), Step: step}
-	for _, g := range Partition(data, p.GroupBy) {
+	for _, g := range Partition(zoneOf(ctx), data, p.GroupBy) {
 		if err := ctx.Err(); err != nil {
 			return res, err
 		}

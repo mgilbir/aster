@@ -3,6 +3,7 @@ package transforms
 import (
 	"testing"
 
+	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -106,10 +107,10 @@ func TestMeasureName(t *testing.T) {
 
 func TestKeyOf(t *testing.T) {
 	row := jsval.Obj(jsval.ObjectOf("a", jsval.Num(1), "b", jsval.Null, "c", jsval.Str("z")))
-	if k := KeyOfPaths("a", "b", "c", "d")(row); k != "1|null|z|undefined" {
+	if k := KeyOfPaths(format.Zone{}, "a", "b", "c", "d")(row); k != "1|null|z|undefined" {
 		t.Errorf("key = %q", k)
 	}
-	if KeyOfPaths()(row) != "" {
+	if KeyOfPaths(format.Zone{})(row) != "" {
 		t.Error("empty key")
 	}
 }

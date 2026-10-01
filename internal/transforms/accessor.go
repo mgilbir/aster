@@ -1,6 +1,7 @@
 package transforms
 
 import (
+	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -180,41 +181,52 @@ func MeasureName(op, field, as string) string {
 type KeyFunc func(jsval.Value) string
 
 // appendKeyValue appends String(v) to dst without allocating for the common
-// string and number cases.
-func appendKeyValue(dst []byte, v jsval.Value) []byte {
+// string and number cases. A date is written as Date.prototype.toString does in
+// the zone z, so dates within one second share a key.
+func appendKeyValue(dst []byte, v jsval.Value, z format.Zone) []byte {
 	switch v.Kind() {
 	case jsval.KindStr:
 		return append(dst, v.StrValue()...)
 	case jsval.KindNum:
 		return jsval.AppendJSNumber(dst, v.NumValue())
+	case jsval.KindTimestamp:
+		return append(dst, format.DateToString(v.NumValue(), z)...)
 	}
 	return append(dst, v.AsString()...)
 }
 
+// keyString is String(v) with a date in the zone z.
+func keyString(v jsval.Value, z format.Zone) string {
+	if v.IsTimestamp() {
+		return format.DateToString(v.NumValue(), z)
+	}
+	return v.AsString()
+}
+
 // keyAppender is KeyOf in append form: it writes the key of t onto dst, so a
 // caller can look the key up in a map (m[string(b)]) without allocating.
-func keyAppender(fields []Field) func(dst []byte, t jsval.Value) []byte {
+func keyAppender(fields []Field, z format.Zone) func(dst []byte, t jsval.Value) []byte {
 	switch len(fields) {
 	case 0:
 		return func(dst []byte, _ jsval.Value) []byte { return dst }
 	case 1:
 		g := fields[0].Get
-		return func(dst []byte, t jsval.Value) []byte { return appendKeyValue(dst, g(t)) }
+		return func(dst []byte, t jsval.Value) []byte { return appendKeyValue(dst, g(t), z) }
 	}
 	return func(dst []byte, t jsval.Value) []byte {
 		for i, f := range fields {
 			if i > 0 {
 				dst = append(dst, '|')
 			}
-			dst = appendKeyValue(dst, f.Get(t))
+			dst = appendKeyValue(dst, f.Get(t), z)
 		}
 		return dst
 	}
 }
 
-// KeyOf is vega-util's key(fields): the values' string forms joined with '|'.
-// No fields give the constant key "".
-func KeyOf(fields ...Field) KeyFunc {
+// KeyOf is vega-util's key(fields): the values' string forms joined with '|',
+// a date in the zone z. No fields give the constant key "".
+func KeyOf(z format.Zone, fields ...Field) KeyFunc {
 	if len(fields) == 0 {
 		return func(jsval.Value) string { return "" }
 	}
@@ -225,11 +237,11 @@ func KeyOf(fields ...Field) KeyFunc {
 				return v.StrValue()
 			} else {
 				var buf [32]byte
-				return string(appendKeyValue(buf[:0], v))
+				return string(appendKeyValue(buf[:0], v, z))
 			}
 		}
 	}
-	app := keyAppender(fields)
+	app := keyAppender(fields, z)
 	return func(t jsval.Value) string {
 		var buf [64]byte
 		return string(app(buf[:0], t))
@@ -237,4 +249,4 @@ func KeyOf(fields ...Field) KeyFunc {
 }
 
 // KeyOfPaths is KeyOf over field paths, the form the `key` helper takes.
-func KeyOfPaths(paths ...string) KeyFunc { return KeyOf(FieldsOf(paths...)...) }
+func KeyOfPaths(z format.Zone, paths ...string) KeyFunc { return KeyOf(z, FieldsOf(paths...)...) }
