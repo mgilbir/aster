@@ -158,7 +158,13 @@ func (it *Item) setProp(l *jsonLoader, k string, val jsval.Value) (bool, error) 
 	case "cursor":
 		it.Cursor = strOf(val)
 	case "href":
-		it.Href = strOf(val)
+		// The renderer sanitizes the href with vega-loader, whose first step
+		// is uri.replace(...): only a string can be a link, any other value
+		// (a number, a date) rejects and renders none.
+		it.Href = ""
+		if val.IsStr() {
+			it.Href = val.StrValue()
+		}
 	case "tooltip":
 		it.Tooltip = val
 	case "description":
