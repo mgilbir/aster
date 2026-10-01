@@ -1,0 +1,1 @@
+{"description":"x","repeat":{"row":["Horsepower"],"column":["Acceleration"]},"spec":{"data":{"url":"data/cars.json"},"mark":"point","encoding":{"x":{"field":{"repeat":"toString"},"type":"quantitative"},"y":{"field":{"repeat":"__proto__"},"type":"quantitative"},"color":{"field":{"repeat":"hasOwnProperty"},"type":"nominal"},"size":{"field":{"repeat":"row"},"type":"quantitative"}}}}

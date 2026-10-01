@@ -1100,14 +1100,39 @@ func replaceRepeaterInEncoding(cc *compileCtx, encoding, repeater Value) Value {
 func replaceRepeatInProp(prop string, o, repeater Value) (Value, bool) {
 	val := o.Get(prop)
 	if isRepeatRef(val) {
-		if key := val.Get("repeat").AsString(); repeater.IsObj() && repeater.ObjValue().Has(key) {
+		key := val.Get("repeat").AsString()
+		if repeater.IsObj() && repeater.ObjValue().Has(key) {
 			c := cloneObj(o.ObjValue())
 			c.Set(prop, repeater.Get(key))
+			return jsval.Obj(c), true
+		}
+		if repr, ok := inheritedPropertyText(key); ok && prop == "field" && repeater.IsObj() {
+			// `field.repeat in repeater` is true for what every object
+			// inherits, and the field becomes that function or object, which
+			// the field name machinery reads as its text.
+			c := cloneObj(o.ObjValue())
+			c.Set(prop, jsval.Str(repr))
 			return jsval.Obj(c), true
 		}
 		return undef, false
 	}
 	return o, true
+}
+
+// inheritedPropertyText is the string form of the property of Object.prototype
+// called key: a native function prints as `function name() { [native code] }`
+// (constructor is Object), __proto__ is the prototype object itself.
+func inheritedPropertyText(key string) (string, bool) {
+	switch key {
+	case "constructor":
+		return "function Object() { [native code] }", true
+	case "hasOwnProperty", "isPrototypeOf", "propertyIsEnumerable", "toString", "valueOf", "toLocaleString",
+		"__defineGetter__", "__defineSetter__", "__lookupGetter__", "__lookupSetter__":
+		return "function " + key + "() { [native code] }", true
+	case "__proto__":
+		return "[object Object]", true
+	}
+	return "", false
 }
 
 func replaceRepeaterInFieldDef(cc *compileCtx, fd, repeater Value) Value {
