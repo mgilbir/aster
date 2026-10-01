@@ -37,3 +37,35 @@ func (c *Converter) VegaToSVGAfterSignalWritesForTest(spec []byte, writes [][2]s
 	}
 	return c.vegaSVG(context.WithValue(ctx, signalWritesKey{}, ws), spec)
 }
+
+// StagesForTest renders spec to SVG, then that SVG to PNG and to PDF, and
+// returns the time each stage took: json, compile (Vega-Lite), parse,
+// dataflow, text (measuring, inside dataflow), svg, png and pdf.
+func (c *Converter) StagesForTest(spec []byte, lite bool) (map[string]time.Duration, error) {
+	release, ok := c.enter()
+	if !ok {
+		return nil, errConverterClosed
+	}
+	defer release()
+	ctx, cancel := c.opContext()
+	defer cancel()
+	stages := map[string]time.Duration{}
+	ctx = context.WithValue(ctx, stagesKey{}, func(s string, d time.Duration) { stages[s] += d })
+	var svg string
+	var err error
+	if lite {
+		svg, err = c.vegaLiteSVG(ctx, spec)
+	} else {
+		svg, err = c.vegaSVG(ctx, spec)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if _, err := c.svgToPNG(ctx, svg, nil); err != nil {
+		return nil, err
+	}
+	if _, _, err := c.svgToPDF(ctx, svg, nil); err != nil {
+		return nil, err
+	}
+	return stages, nil
+}

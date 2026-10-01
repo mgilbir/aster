@@ -125,6 +125,10 @@ type Options struct {
 	Config jsval.Value
 	// Locale holds optional number and time locale definitions.
 	Locale *format.Locale
+	// Stages, when set, is told how long each stage of the render took:
+	// "parse" (the specification into a dataflow), "dataflow" (the first run:
+	// data, transforms, encoding, layout) and "writes" (the SignalWrites).
+	Stages func(stage string, d time.Duration)
 	// SignalWrites are applied in order after the first run, each followed by
 	// another run, as a host or a binding writes through View.signal; the
 	// result is the chart after the last.
@@ -239,6 +243,15 @@ func Render(ctx context.Context, spec jsval.Value, opts Options) (res *Result, e
 		return nil, errors.New("Input Vega specification must be an object.")
 	}
 
+	stage := func(string) {}
+	if opts.Stages != nil {
+		t0 := time.Now()
+		stage = func(name string) {
+			now := time.Now()
+			opts.Stages(name, now.Sub(t0))
+			t0 = now
+		}
+	}
 	config := mergeConfig(defaultConfig(), opts.Config, spec.Get("config"))
 	scope := newScope(config, &parseOptions{})
 	parseView(spec, scope)
@@ -246,9 +259,11 @@ func Render(ctx context.Context, spec jsval.Value, opts Options) (res *Result, e
 
 	v := newView(ctx, opts, scope.locale)
 	v.build(flow)
+	stage("parse")
 	if err := v.run(); err != nil {
 		return nil, err
 	}
+	stage("dataflow")
 	for _, w := range opts.SignalWrites {
 		// View.signal(name, value): a top-level signal, set through the
 		// dataflow's update and propagated by the next run.
@@ -260,6 +275,9 @@ func Render(ctx context.Context, spec jsval.Value, opts Options) (res *Result, e
 		if err := v.run(); err != nil {
 			return nil, err
 		}
+	}
+	if len(opts.SignalWrites) > 0 {
+		stage("writes")
 	}
 	v.setGuideCaptions()
 	return v.result(scope), nil
