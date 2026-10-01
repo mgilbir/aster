@@ -300,7 +300,7 @@ func getImplicitFromEncoding(m Model) *Object {
 				case mainFieldDef.IsNull():
 					throw("Cannot read properties of null (reading 'type')")
 				}
-				o :=cloneObj(fd.ObjValue())
+				o := cloneObj(fd.ObjValue())
 				o.Set("type", mainFieldDef.Get("type"))
 				add(jsval.Obj(o))
 			}
