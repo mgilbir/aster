@@ -102,7 +102,7 @@ func parseSVG(ctx context.Context, svg string, lim Limits) (*element, error) {
 			}
 			stack = append(stack, el)
 			if len(stack) > maxNestingDepth {
-				return nil, fmt.Errorf("svgpdf: SVG nesting exceeds %d levels", maxNestingDepth)
+				return nil, fmt.Errorf("%w: SVG nesting exceeds %d levels", ErrLimit, maxNestingDepth)
 			}
 		case xml.EndElement:
 			if len(stack) == 0 {

@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"unicode/utf16"
 	"unicode/utf8"
+
+	"github.com/mgilbir/aster/internal/budget"
 )
 
 // MaxJSONDepth bounds how deeply a parsed document may nest. Real charts nest
@@ -26,7 +28,7 @@ const MaxJSONDepth = 256
 const MaxValueDepth = 1024
 
 // ErrJSONDepth is returned (wrapped) when a document nests past MaxJSONDepth.
-var ErrJSONDepth = errors.New("json: document nests too deeply")
+var ErrJSONDepth = fmt.Errorf("json: document nests too deeply: %w", budget.ErrLimit)
 
 // SyntaxError reports malformed JSON and where it was found.
 type SyntaxError struct {

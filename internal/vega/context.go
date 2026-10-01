@@ -1,8 +1,10 @@
 package vega
 
 import (
+	"errors"
 	"fmt"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/expr"
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/scene"
@@ -50,7 +52,7 @@ const maxContextDepth = 64
 
 func (c *rtContext) fork() *rtContext {
 	if c.depth+1 > maxContextDepth {
-		fail("group nesting too deep")
+		failLimit("group nesting too deep")
 	}
 	sub := newContext(c.view)
 	sub.parent = c
@@ -471,6 +473,9 @@ func (b *boundExpr) accessor() transforms.Field {
 func (s *Scope) parseExpression(code string) *exprFn {
 	prog, err := expr.CompileCached(code)
 	if err != nil {
+		if errors.Is(err, budget.ErrLimit) {
+			perrLimit("Expression parse error: %v (in %.80q)", err, code)
+		}
 		perr("Expression parse error: %s", code)
 	}
 	d := prog.Deps()

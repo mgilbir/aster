@@ -1,8 +1,9 @@
 package vegalite
 
 import (
-	"errors"
 	"fmt"
+
+	"github.com/mgilbir/aster/internal/budget"
 )
 
 // compileError is the value thrown (as a panic) where upstream throws an
@@ -16,9 +17,21 @@ func throw(format string, args ...any) {
 	panic(compileError{fmt.Sprintf(format, args...)})
 }
 
-// errDepth is returned when a specification nests composition operators
-// (layer, concat, facet, repeat) deeper than maxDepth.
-var errDepth = errors.New("vegalite: specification is nested too deeply")
+// limitError is the value thrown where a specification exceeds one of the
+// compiler's own limits, which upstream does not have. Compile returns it as
+// an error wrapping budget.ErrLimit.
+type limitError struct{ msg string }
+
+func (e limitError) Error() string { return e.msg }
+func (e limitError) Unwrap() error { return budget.ErrLimit }
+
+func exceeded(format string, args ...any) {
+	panic(limitError{fmt.Sprintf(format, args...)})
+}
+
+// depthMsg reports a specification that nests composition operators (layer,
+// concat, facet, repeat) deeper than maxDepth.
+const depthMsg = "vegalite: specification is nested too deeply"
 
 // maxDepth bounds the nesting of composite specifications, far beyond any
 // real chart.

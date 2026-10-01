@@ -188,7 +188,7 @@ func isLogicalNot(op Value) bool { return hasProperty(op, "not") }
 
 func forEachLeaf(op Value, fn func(Value), depth int) {
 	if depth > maxDepth*4 {
-		throw("logical composition nested too deeply")
+		exceeded("logical composition nested too deeply")
 	}
 	switch {
 	case isLogicalNot(op):
@@ -208,7 +208,7 @@ func forEachLeaf(op Value, fn func(Value), depth int) {
 
 func normalizeLogicalComposition(op Value, normalizer func(Value) Value, depth int) Value {
 	if depth > maxDepth*4 {
-		throw("logical composition nested too deeply")
+		exceeded("logical composition nested too deeply")
 	}
 	switch {
 	case isLogicalNot(op):
@@ -224,7 +224,7 @@ func normalizeLogicalComposition(op Value, normalizer func(Value) Value, depth i
 // logicalExpr renders a logical composition through cb for each leaf.
 func logicalExpr(op Value, cb func(Value) string, depth int) string {
 	if depth > maxDepth*4 {
-		throw("logical composition nested too deeply")
+		exceeded("logical composition nested too deeply")
 	}
 	switch {
 	case isLogicalNot(op):

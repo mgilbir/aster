@@ -455,7 +455,7 @@ func (a *arena) takeAttrs(buf []attr) []attr {
 // names, and only character data inside text elements is retained.
 func parseDocument(src string, lim Limits) (*document, error) {
 	if len(src) > lim.MaxInputBytes {
-		return nil, fmt.Errorf("raster: SVG input is %d bytes, limit is %d", len(src), lim.MaxInputBytes)
+		return nil, fmt.Errorf("%w: SVG input is %d bytes, limit is %d", errLimit, len(src), lim.MaxInputBytes)
 	}
 	doc := &document{ids: map[string]*node{}}
 	var ar arena
@@ -701,7 +701,7 @@ func parseDocument(src string, lim Limits) (*document, error) {
 			}
 			doc.count++
 			if doc.count > lim.MaxElements {
-				return nil, fmt.Errorf("raster: SVG has more than %d elements", lim.MaxElements)
+				return nil, fmt.Errorf("%w: SVG has more than %d elements", errLimit, lim.MaxElements)
 			}
 			nd := ar.newNode()
 			nd.tag = tag
@@ -733,7 +733,7 @@ func parseDocument(src string, lim Limits) (*document, error) {
 			}
 			if !selfClose {
 				if len(stack)+1 > lim.MaxDepth {
-					return nil, fmt.Errorf("raster: SVG nesting exceeds %d levels", lim.MaxDepth)
+					return nil, fmt.Errorf("%w: SVG nesting exceeds %d levels", errLimit, lim.MaxDepth)
 				}
 				stack = append(stack, nd)
 				if tag == tagText {

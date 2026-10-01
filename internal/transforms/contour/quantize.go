@@ -1,13 +1,14 @@
 package contour
 
 import (
-	"errors"
+	"fmt"
 	"math"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsmath"
 )
 
-var errTooManyThresholds = errors.New("contour: too many contour levels")
+var errTooManyThresholds = fmt.Errorf("contour: too many contour levels: %w", budget.ErrLimit)
 
 // Quantize returns vega-geo's threshold generator for k levels: it spans the
 // data extent (starting at min(extent, 0) when zero is set) and yields

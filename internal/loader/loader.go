@@ -16,6 +16,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/mgilbir/aster/internal/budget"
 )
 
 // Loader controls how external resources (data files, remote URLs) are fetched.
@@ -153,7 +155,7 @@ func (l *HTTPLoader) Load(ctx context.Context, uri string) ([]byte, error) {
 		return nil, fmt.Errorf("aster: failed to read response from %q: %w", uri, err)
 	}
 	if int64(len(data)) > max {
-		return nil, fmt.Errorf("aster: response from %q exceeds %d bytes (raise HTTPLoader.MaxResponseBytes to allow larger payloads)", uri, max)
+		return nil, fmt.Errorf("aster: response from %q exceeds %d bytes (raise HTTPLoader.MaxResponseBytes to allow larger payloads): %w", uri, max, budget.ErrLimit)
 	}
 	return data, nil
 }
@@ -353,7 +355,7 @@ func (l *FileLoader) Load(ctx context.Context, uri string) ([]byte, error) {
 		return nil, fmt.Errorf("aster: FileLoader %q is not a regular file", uri)
 	}
 	if max > 0 && fi.Size() > max {
-		return nil, fmt.Errorf("aster: file %q is %d bytes, exceeds %d bytes (raise FileLoader.MaxBytes to allow larger files)", uri, fi.Size(), max)
+		return nil, fmt.Errorf("aster: file %q is %d bytes, exceeds %d bytes (raise FileLoader.MaxBytes to allow larger files): %w", uri, fi.Size(), max, budget.ErrLimit)
 	}
 	var r io.Reader = f
 	if max > 0 {
@@ -365,7 +367,7 @@ func (l *FileLoader) Load(ctx context.Context, uri string) ([]byte, error) {
 		return nil, fmt.Errorf("aster: FileLoader failed to read %q: %w", uri, err)
 	}
 	if max > 0 && int64(len(data)) > max {
-		return nil, fmt.Errorf("aster: file %q exceeds %d bytes (raise FileLoader.MaxBytes to allow larger files)", uri, max)
+		return nil, fmt.Errorf("aster: file %q exceeds %d bytes (raise FileLoader.MaxBytes to allow larger files): %w", uri, max, budget.ErrLimit)
 	}
 	return data, nil
 }

@@ -167,6 +167,18 @@ Options passed to `aster.New()`:
 
 `WithMemoryLimit` is not a heap cap: it scales the render's budgets (rows at 256 bytes each, scene items at 512, loaded bytes, the SVG at a quarter of the limit) and the rasterizer's canvas memory, and each budget is charged before the allocation it pays for. Without it the defaults apply: 1M rows, 500k scene items, 64 MiB of loaded data, 128 MiB of SVG. `WithTimeout` bounds one call across all of its stages.
 
+A specification that exceeds any resource limit (these budgets, and the fixed bounds on nesting depth, expression size, tick and legend counts, and PNG and PDF output) fails with an error wrapping `aster.ErrLimit`; a call that runs out of time fails with one wrapping `context.DeadlineExceeded`:
+
+```go
+svg, err := c.VegaLiteToSVG(spec)
+switch {
+case errors.Is(err, aster.ErrLimit):
+	// the specification asks for more than this converter allows
+case errors.Is(err, context.DeadlineExceeded):
+	// the render took longer than WithTimeout
+}
+```
+
 **PNG options** passed per render:
 
 | Option | Default | Description |

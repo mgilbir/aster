@@ -229,7 +229,7 @@ func parseView(spec jsval.Value, scope *Scope) {
 // axes, marks, legends, title.
 func parseScopeSpec(spec jsval.Value, scope *Scope, preprocessed []jsval.Value) {
 	if scope.depth > maxContextDepth {
-		perr("group nesting too deep")
+		perrLimit("group nesting too deep")
 	}
 	signals := arrayOf(spec.Get("signals"))
 	scales := arrayOf(spec.Get("scales"))

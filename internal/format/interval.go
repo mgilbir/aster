@@ -2,8 +2,10 @@ package format
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"math"
+
+	"github.com/mgilbir/aster/internal/budget"
 )
 
 // MaxRangeLen bounds the number of dates Interval.Range and Ticks return; a
@@ -11,7 +13,7 @@ import (
 const MaxRangeLen = 1 << 22
 
 // ErrRangeTooLarge is returned when a range would exceed MaxRangeLen dates.
-var ErrRangeTooLarge = errors.New("format: interval range too large")
+var ErrRangeTooLarge = fmt.Errorf("format: interval range too large: %w", budget.ErrLimit)
 
 type unitKind uint8
 

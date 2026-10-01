@@ -7,7 +7,7 @@ import (
 func buildModel(cc *compileCtx, spec Value, parent Model, parentGivenName string, unitSize *Object, config Value, depth int) Model {
 	cc.check()
 	if depth > maxDepth {
-		panic(compileError{errDepth.Error()})
+		exceeded(depthMsg)
 	}
 	switch {
 	case isFacetSpec(spec):
@@ -31,7 +31,7 @@ type layerModel struct {
 
 func newLayerModel(cc *compileCtx, spec Value, parent Model, parentGivenName string, parentGivenSize *Object, config Value, depth int) *layerModel {
 	if depth > maxDepth { // layers nest without going through buildModel
-		panic(compileError{errDepth.Error()})
+		exceeded(depthMsg)
 	}
 	l := &layerModel{}
 	var resolve *resolveIndex

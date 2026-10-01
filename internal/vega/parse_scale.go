@@ -311,7 +311,7 @@ func parseScaleRangeAlias(spec jsval.Value, scope *Scope, params *paramList, dep
 		name := rng.StrValue()
 		if config.IsObj() && config.ObjValue().Has(name) {
 			if depth >= maxRangeAliases {
-				perr("Scale range aliases nest too deeply: %s", quote(rng))
+				perrLimit("Scale range aliases nest too deeply: %s", quote(rng))
 			}
 			return parseScaleRangeAlias(extended(spec, obj("range", config.Get(name))), scope, params, depth+1)
 		}

@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -586,12 +587,29 @@ func (s *Scope) findField(name string) P {
 }
 
 // parseError is an error in the specification.
-type parseError struct{ msg string }
+// parseError is a specification upstream's parser rejects; limit marks one
+// that exceeds an engine limit instead, which wraps budget.ErrLimit.
+type parseError struct {
+	msg   string
+	limit bool
+}
 
 func (e *parseError) Error() string { return e.msg }
 
+func (e *parseError) Unwrap() error {
+	if e.limit {
+		return budget.ErrLimit
+	}
+	return nil
+}
+
 func perr(format string, args ...any) {
 	panic(&parseError{msg: fmt.Sprintf(format, args...)})
+}
+
+// perrLimit is perr for an exceeded engine limit.
+func perrLimit(format string, args ...any) {
+	panic(&parseError{msg: fmt.Sprintf(format, args...), limit: true})
 }
 
 func quote(v jsval.Value) string { return string(jsval.AppendJSON(nil, v)) }

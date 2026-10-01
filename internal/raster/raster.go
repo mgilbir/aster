@@ -101,7 +101,7 @@ func Render(svg []byte, opts Options) (img *image.NRGBA, err error) {
 		return nil, errors.New("raster: empty SVG input")
 	}
 	if len(svg) > lim.MaxInputBytes {
-		return nil, fmt.Errorf("raster: SVG input is %d bytes, limit is %d", len(svg), lim.MaxInputBytes)
+		return nil, fmt.Errorf("%w: SVG input is %d bytes, limit is %d", errLimit, len(svg), lim.MaxInputBytes)
 	}
 	doc, err := parseDocument(string(svg), lim)
 	if err != nil {
@@ -149,8 +149,8 @@ func Render(svg []byte, opts Options) (img *image.NRGBA, err error) {
 		return nil, errors.New("raster: SVG has zero dimensions")
 	}
 	if pw > float64(lim.MaxDimension) || ph > float64(lim.MaxDimension) || pw*ph > float64(lim.MaxPixels) {
-		return nil, fmt.Errorf("raster: output %.0fx%.0f px (width*height*scale^2) exceeds the limit of %d pixels / %d per side",
-			pw, ph, lim.MaxPixels, lim.MaxDimension)
+		return nil, fmt.Errorf("%w: output %.0fx%.0f px (width*height*scale^2) exceeds the limit of %d pixels / %d per side",
+			errLimit, pw, ph, lim.MaxPixels, lim.MaxDimension)
 	}
 	cw, ch := int(pw), int(ph)
 

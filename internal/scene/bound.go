@@ -3,9 +3,11 @@ package scene
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"unicode/utf16"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsmath"
 	"github.com/mgilbir/aster/internal/jsval"
 )
@@ -18,7 +20,7 @@ const MaxDepth = 256
 var errNoMark = errors.New("scene: item has no mark")
 
 // ErrTooDeep reports a scenegraph nested deeper than MaxDepth.
-var ErrTooDeep = errors.New("scene: group nesting too deep")
+var ErrTooDeep = fmt.Errorf("scene: group nesting too deep: %w", budget.ErrLimit)
 
 // Bounder computes bounding boxes. It owns scratch state and is therefore not
 // safe for concurrent use; make one per goroutine.
