@@ -213,7 +213,7 @@ func (c *encCompiler) entry(enc jsval.Value) valueFn {
 		value = c.field(enc.Get("field"))
 		haveValue = true
 	case !enc.Get("value").IsUndefined():
-		value = constFn(enc.Get("value"))
+		value = c.literal(enc.Get("value"))
 		haveValue = true
 	}
 
@@ -260,6 +260,30 @@ func (c *encCompiler) entry(enc jsval.Value) valueFn {
 }
 
 // property is a numeric property that may itself be a value reference.
+// quirkyLiteral reports whether upstream's expression parser reads the string
+// literal s as an identifier. It tests `legalKeywords[lookahead.value]` on a
+// plain object for every token, so the literal "if" and every name an object
+// inherits ("constructor", "toString", ...) parse as identifiers, whatever
+// their quotes.
+func quirkyLiteral(s string) bool { return s == "if" || expr.IsObjectPrototypeName(s) }
+
+// literal is the value a reference holds as a constant. Upstream emits it as
+// source text and parses that: a quirky string becomes a signal reference.
+func (c *encCompiler) literal(v jsval.Value) valueFn {
+	if v.IsStr() && quirkyLiteral(v.StrValue()) {
+		return c.identifierFn(v.StrValue())
+	}
+	return constFn(v)
+}
+
+// identifierFn evaluates the identifier name as the expression compiler does,
+// failing the parse where upstream's would (no such signal).
+func (c *encCompiler) identifierFn(name string) valueFn {
+	f := c.scope.parseExpression(name)
+	c.depExpr(f)
+	return func(ev *encEval) jsval.Value { return f.evalEnc(ev) }
+}
+
 func (c *encCompiler) property(p jsval.Value) valueFn {
 	if p.IsObj() {
 		return c.entry(p)
@@ -271,6 +295,9 @@ func (c *encCompiler) property(p jsval.Value) valueFn {
 // or a field reference.
 func (c *encCompiler) scaleRefFn(s jsval.Value) valueFn {
 	switch {
+	case s.IsStr() && quirkyLiteral(s.StrValue()):
+		c.scaleDeps(jsval.Undefined, false)
+		return c.identifierFn(s.StrValue())
 	case s.IsStr():
 		c.scaleDeps(s, true)
 		return constFn(s)
@@ -452,7 +479,7 @@ func (c *encCompiler) fieldObj(ref jsval.Value) valueFn {
 		}
 	case ref.Get("datum").IsTruthy():
 		// A constant path is the common case: compile it once.
-		if d := ref.Get("datum"); d.IsStr() {
+		if d := ref.Get("datum"); d.IsStr() && !hasQuirkySegment(d.StrValue()) {
 			get := transforms.FieldOf(d.StrValue()).Get
 			return func(ev *encEval) jsval.Value { return get(ev.datum) }
 		}
@@ -470,8 +497,27 @@ func (c *encCompiler) fieldPath(key jsval.Value) func(ev *encEval) []jsval.Value
 	if key.IsStr() {
 		segs := jsval.ParseFieldPath(key.StrValue())
 		vals := make([]jsval.Value, len(segs))
+		fns := make([]valueFn, len(segs))
+		quirky := false
 		for i, s := range segs {
 			vals[i] = jsval.Str(s)
+			if quirkyLiteral(s) {
+				// A quoted segment of the generated datum access is parsed
+				// as an identifier too.
+				fns[i], quirky = c.identifierFn(s), true
+			}
+		}
+		if quirky {
+			return func(ev *encEval) []jsval.Value {
+				out := make([]jsval.Value, len(vals))
+				for i, v := range vals {
+					out[i] = v
+					if fns[i] != nil {
+						out[i] = fns[i](ev)
+					}
+				}
+				return out
+			}
 		}
 		return func(*encEval) []jsval.Value { return vals }
 	}
@@ -694,4 +740,13 @@ func applyEncodeDefaults(encode jsval.Value, typ, role string, style jsval.Value
 		out.Set("update", jsval.Obj(update))
 	}
 	return jsval.Obj(out)
+}
+
+func hasQuirkySegment(path string) bool {
+	for _, seg := range jsval.ParseFieldPath(path) {
+		if quirkyLiteral(seg) {
+			return true
+		}
+	}
+	return false
 }

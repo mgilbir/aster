@@ -485,6 +485,13 @@ func (s *Scope) parseExpression(code string) *exprFn {
 		}
 	}
 	for _, name := range d.Signals {
+		if expr.IsObjectPrototypeName(name) && s.findSignal(name) == nil {
+			// scope.getSignal(name) finds the inherited property of the plain
+			// signals object, truthy, so no "Unrecognized signal name"; the
+			// reference built from it has no operator id, and the runtime
+			// fails to resolve it.
+			perr("Operator not defined: undefined")
+		}
 		e := s.getSignal(name)
 		add("$"+name, e)
 	}

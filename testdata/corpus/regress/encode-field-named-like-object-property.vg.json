@@ -1,0 +1,1 @@
+{"width":50,"height":50,"data":[{"name":"t","values":[{"valueOf":1}]}],"marks":[{"type":"rect","from":{"data":"t"},"encode":{"update":{"width":{"field":"valueOf"},"height":{"value":10}}}}]}

@@ -377,6 +377,12 @@ var disallowedProperties = map[string]bool{
 	"toString": true, "valueOf": true, "__proto__": true, "toLocaleString": true,
 }
 
+// IsObjectPrototypeName reports whether name is a property every JavaScript
+// object inherits (constructor, toString, __proto__, ...). Upstream keeps its
+// signals, scales and data in plain objects, so a lookup by such a name finds
+// the inherited property instead of nothing.
+func IsObjectPrototypeName(name string) bool { return disallowedProperties[name] }
+
 func (c *compiler) object(n *Node) (node, error) {
 	type prop struct {
 		key  string
