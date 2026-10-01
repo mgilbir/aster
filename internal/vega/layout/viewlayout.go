@@ -86,22 +86,32 @@ type Size struct {
 // and title, and computes the size adjustment. The sizes are returned in item
 // order, only for groups that request one.
 func ViewLayout(mark *scene.Mark, view *View, p Params) []Size {
+	sizes, _ := ViewLayoutChecked(mark, view, p)
+	return sizes
+}
+
+// ViewLayoutChecked is ViewLayout reporting the error upstream's throws, which
+// ends the whole layout: the sizes of the groups laid out before it are
+// returned with it.
+func ViewLayoutChecked(mark *scene.Mark, view *View, p Params) ([]Size, error) {
 	var sizes []Size
 	if mark == nil || view == nil {
-		return nil
+		return nil, nil
 	}
 	for _, group := range mark.Items {
 		if group == nil {
 			continue
 		}
 		if p.Grid != nil {
-			trellisLayout(group, p.Grid, view.Warn)
+			if err := trellisLayout(group, p.Grid, view.Warn); err != nil {
+				return sizes, err
+			}
 		}
 		if s, ok := layoutGroup(view, group, p); ok {
 			sizes = append(sizes, s)
 		}
 	}
-	return sizes
+	return sizes, nil
 }
 
 func layoutGroup(view *View, group *scene.Item, p Params) (Size, bool) {
