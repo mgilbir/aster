@@ -139,13 +139,15 @@ func (p *parser) errf(format string, args ...any) error {
 	return &SyntaxError{Offset: p.i, Msg: fmt.Sprintf(format, args...)}
 }
 
-// charge takes n bytes from the memory limit.
-func (p *parser) charge(n int64) error {
+// charge takes n bytes from the memory limit and reports whether they were
+// there; it is small enough to inline, as the parser calls it for every value.
+func (p *parser) charge(n int64) bool {
 	p.left -= n
-	if p.left < 0 {
-		return fmt.Errorf("%w (more than %d bytes)", ErrJSONSize, p.max)
-	}
-	return nil
+	return p.left >= 0
+}
+
+func (p *parser) tooLarge() error {
+	return fmt.Errorf("%w (more than %d bytes)", ErrJSONSize, p.max)
 }
 
 func (p *parser) ws() {
@@ -179,8 +181,8 @@ func (p *parser) value(depth int) (Value, error) {
 		if err != nil {
 			return Undefined, err
 		}
-		if err := p.charge(int64(len(s))); err != nil {
-			return Undefined, err
+		if !p.charge(int64(len(s))) {
+			return Undefined, p.tooLarge()
 		}
 		return Str(s), nil
 	case 't':
@@ -416,7 +418,10 @@ func (p *parser) object(depth int) (Value, error) {
 	p.ws()
 	if p.i < len(p.s) && p.s[p.i] == '}' {
 		p.i++
-		return Obj(NewObject(0)), p.charge(costObject)
+		if !p.charge(costObject) {
+			return Undefined, p.tooLarge()
+		}
+		return Obj(NewObject(0)), nil
 	}
 	base := len(p.kstk)
 	for {
@@ -438,8 +443,8 @@ func (p *parser) object(depth int) (Value, error) {
 		if err != nil {
 			return Undefined, err
 		}
-		if err := p.charge(costMember + int64(len(k))); err != nil {
-			return Undefined, err
+		if !p.charge(costMember + int64(len(k))) {
+			return Undefined, p.tooLarge()
 		}
 		p.kstk = append(p.kstk, k)
 		p.vstk = append(p.vstk, v)
@@ -453,8 +458,8 @@ func (p *parser) object(depth int) (Value, error) {
 		case '}':
 			p.i++
 			n := len(p.kstk) - base
-			if err := p.charge(costObject); err != nil {
-				return Undefined, err
+			if !p.charge(costObject) {
+				return Undefined, p.tooLarge()
 			}
 			o := p.newObject(n)
 			vbase := len(p.vstk) - n
@@ -518,8 +523,8 @@ func (p *parser) array(depth int) (Value, error) {
 		if err != nil {
 			return Undefined, err
 		}
-		if err := p.charge(costElem); err != nil {
-			return Undefined, err
+		if !p.charge(costElem) {
+			return Undefined, p.tooLarge()
 		}
 		p.vstk = append(p.vstk, v)
 		p.ws()
@@ -531,8 +536,8 @@ func (p *parser) array(depth int) (Value, error) {
 			p.i++
 		case ']':
 			p.i++
-			if err := p.charge(costArray); err != nil {
-				return Undefined, err
+			if !p.charge(costArray) {
+				return Undefined, p.tooLarge()
 			}
 			arr, items := p.makeArr(len(p.vstk) - base)
 			copy(items, p.vstk[base:])
