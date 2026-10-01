@@ -68,6 +68,8 @@ jobs:
         with:
           go-version-file: go.mod
       - run: scripts/fmacheck.sh
+      - name: recursion audit
+        run: go run ./internal/cmd/recursionaudit
 
   oracle:
     # The full suite with the node oracle required: upstream Vega / Vega-Lite

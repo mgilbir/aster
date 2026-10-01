@@ -1,0 +1,5 @@
+# Every recursive cycle in the engine, with how its depth is bounded (see
+# internal/cmd/recursionaudit and TestDeepInput). A stack overflow is fatal in
+# Go: an entry must name the limit, not a recovery.
+#
+# cycle<TAB># how it is bounded
