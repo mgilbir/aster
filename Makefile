@@ -1,4 +1,4 @@
-.PHONY: vendor-datasets build test test-all check lint fmacheck clean bench
+.PHONY: vendor-datasets build test test-all check lint fmacheck fuzz clean bench
 
 vendor-datasets:
 	go run ./cmd/vendor-datasets
@@ -23,6 +23,11 @@ lint:
 
 fmacheck:
 	scripts/fmacheck.sh
+
+# Every coverage-guided fuzz target in turn (scripts/fuzz-targets.txt), for the
+# minutes listed there, or FUZZTIME each: make fuzz FUZZTIME=30s
+fuzz:
+	scripts/fuzz.sh
 
 bench:
 	go test -run '^$$' -bench . -benchmem .

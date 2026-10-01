@@ -1,0 +1,84 @@
+name: Fuzz
+
+# Coverage-guided fuzzing (go test -fuzz) of the parsers, nightly. The targets
+# and the minutes each one gets are listed in scripts/fuzz-targets.txt; the
+# matrix is built from that file, so a new target is added there only. Each
+# target keeps the inputs the fuzzer found interesting between runs in the
+# actions cache, so a night starts where the last one stopped.
+
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+    inputs:
+      fuzztime:
+        description: "-fuzztime for every target (e.g. 30s); empty runs the minutes listed in scripts/fuzz-targets.txt"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fuzz
+  cancel-in-progress: false
+
+jobs:
+  targets:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: matrix
+        run: |
+          matrix=$(scripts/fuzz.sh -list | jq -R -s -c '{include: (split("\n") | map(select(length > 0) | split("\t")
+            | {pkg: .[0], target: .[1], minutes: .[2], key: ((.[0] | ltrimstr("./") | gsub("/"; "-")) + "-" + .[1])}))}')
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  fuzz:
+    needs: targets
+    name: ${{ matrix.pkg }} ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.targets.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          # the build cache is the fuzz corpus's neighbour in GOCACHE; the corpus is cached on its own below
+          cache: false
+      - id: dir
+        run: echo "fuzz=$(go env GOCACHE)/fuzz" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache/restore@v6
+        with:
+          path: ${{ steps.dir.outputs.fuzz }}
+          # cache keys are immutable: each run saves under a new key and the next one restores the latest
+          key: fuzz-${{ matrix.key }}-${{ github.run_id }}
+          restore-keys: fuzz-${{ matrix.key }}-
+      - name: go test -fuzz
+        env:
+          PKG: ${{ matrix.pkg }}
+          TARGET: ${{ matrix.target }}
+          FUZZTIME: ${{ inputs.fuzztime || format('{0}m', matrix.minutes) }}
+        run: go test -run='^$' -fuzz="^$TARGET\$" -fuzztime="$FUZZTIME" "$PKG"
+      - uses: actions/cache/save@v6
+        # a failing run still found inputs worth keeping
+        if: always()
+        with:
+          path: ${{ steps.dir.outputs.fuzz }}
+          key: fuzz-${{ matrix.key }}-${{ github.run_id }}
+      - name: collect the crashers
+        if: failure()
+        run: |
+          mkdir "$RUNNER_TEMP/crashers"
+          git ls-files --others --exclude-standard -z -- '*/testdata/fuzz/*' | xargs -0 -r cp --parents -t "$RUNNER_TEMP/crashers"
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: crashers-${{ matrix.key }}
+          path: ${{ runner.temp }}/crashers
+          if-no-files-found: ignore
