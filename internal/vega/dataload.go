@@ -102,7 +102,7 @@ func (v *runView) request(url, fmtSpec jsval.Value) []jsval.Value {
 		return nil
 	}
 	if err := v.bud.Load(int64(len(body))); err != nil {
-		fail("%v", err)
+		failErr(err)
 	}
 	data, err := v.read(jsval.Undefined, body, fmtSpec)
 	if err != nil {
@@ -155,7 +155,7 @@ func (v *runView) read(value jsval.Value, raw []byte, schema jsval.Value) ([]jsv
 			if cerr := v.ctx.Err(); cerr != nil {
 				failErr(cerr)
 			}
-			fail("%v", err)
+			failErr(err)
 		}
 	case "topojson":
 		var doc jsval.Value
