@@ -84,24 +84,28 @@ type Size struct {
 // ViewLayout is vega-view-transforms' ViewLayout: for every group item of
 // mark it applies the grid layout (if requested), positions the axes, legends
 // and title, and computes the size adjustment. The sizes are returned in item
-// order, only for groups that request one.
-func ViewLayout(mark *scene.Mark, view *View, p Params) []Size {
+// order, only for groups that request one. An error (ErrInvalidArrayLength)
+// is upstream's exception: it abandons the layout of every remaining group and
+// the size adjustments gathered so far.
+func ViewLayout(mark *scene.Mark, view *View, p Params) ([]Size, error) {
 	var sizes []Size
 	if mark == nil || view == nil {
-		return nil
+		return nil, nil
 	}
 	for _, group := range mark.Items {
 		if group == nil {
 			continue
 		}
 		if p.Grid != nil {
-			trellisLayout(group, p.Grid, view.Warn)
+			if err := trellisLayout(group, p.Grid, view.Warn); err != nil {
+				return nil, err
+			}
 		}
 		if s, ok := layoutGroup(view, group, p); ok {
 			sizes = append(sizes, s)
 		}
 	}
-	return sizes
+	return sizes, nil
 }
 
 func layoutGroup(view *View, group *scene.Item, p Params) (Size, bool) {

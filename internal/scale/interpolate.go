@@ -558,18 +558,13 @@ func Piecewise(interpolate Interpolator, values []jsval.Value) func(t float64) j
 		segs[i] = interpolate(values[i], values[i+1])
 	}
 	return func(t float64) jsval.Value {
-		if n == 0 {
-			// d3 would call I[0], which is undefined: a TypeError. The nearest
-			// harmless answer is the single value, or undefined.
-			if len(values) == 1 {
-				return values[0]
-			}
-			return jsval.Undefined
-		}
+		// `I[Math.max(0, Math.min(n - 1, Math.floor(t *= n)))](t - i)`: a NaN
+		// position indexes I[NaN], and a piecewise through fewer than two
+		// values has no I[0]; either way the call is on undefined.
 		t = float64(t * float64(n)) // rounded here so t-i below cannot fuse into an FMA
 		f := math.Floor(t)
-		if f != f {
-			return segs[0](math.NaN())
+		if n == 0 || f != f {
+			panic(&Error{Name: "TypeError", Msg: "I[i] is not a function"})
 		}
 		i := int(math.Max(0, math.Min(float64(n-1), f)))
 		return segs[i](t - float64(i))

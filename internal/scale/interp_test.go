@@ -256,3 +256,31 @@ func TestSchemesGolden(t *testing.T) {
 	}
 	t.Logf("%d schemes", len(g.Schemes))
 }
+
+// d3's piecewise interpolator calls I[Math.max(0, Math.min(n - 1,
+// Math.floor(t * n)))]: a NaN position, or fewer than two values, leaves
+// nothing to call, and the TypeError is an exception of the scale.
+func TestPiecewiseThrows(t *testing.T) {
+	throws := func(f func(float64) jsval.Value, x float64) (thrown bool) {
+		defer func() {
+			if e, ok := recover().(*Error); ok && e.Name == "TypeError" {
+				thrown = true
+			}
+		}()
+		f(x)
+		return false
+	}
+	two := Piecewise(nil, []jsval.Value{jsval.Num(0), jsval.Num(10)})
+	if throws(two, 0.5) || throws(two, -3) || throws(two, 7) {
+		t.Error("finite positions must not throw, whatever their range")
+	}
+	if !throws(two, math.NaN()) {
+		t.Error("a NaN position must throw")
+	}
+	if !throws(Piecewise(nil, []jsval.Value{jsval.Num(1)}), 0.5) || !throws(Piecewise(nil, nil), 0.5) {
+		t.Error("a piecewise through fewer than two values must throw")
+	}
+	if throws(two, math.Inf(1)) || throws(two, math.Inf(-1)) {
+		t.Error("an infinite position indexes the last or first segment and extrapolates")
+	}
+}

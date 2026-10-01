@@ -1,11 +1,23 @@
 package layout
 
 import (
+	"errors"
 	"math"
 
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/scene"
 )
+
+// maxArrayLength is the largest length `Array(n)` accepts (2^32 - 1); any
+// other n makes the constructor throw a RangeError.
+const maxArrayLength = 1<<32 - 1
+
+// ErrInvalidArrayLength is the RangeError upstream's gridLayout raises at
+// `xExtent = Array(ncols)` when the `columns` of a layout is not a valid array
+// length (negative, fractional or beyond 2^32 - 1). The error aborts the
+// whole dataflow evaluation, so the layout, and every operator after it,
+// never runs.
+var ErrInvalidArrayLength = errors.New("RangeError: Invalid array length")
 
 // maxGridColumns bounds the columns of a grid; a specification can otherwise
 // ask for an arbitrarily wide table.
@@ -35,7 +47,8 @@ type gridOptions struct {
 type GridSpec struct {
 	gridOptions
 	// invalid records a columns value a JavaScript array could not be sized
-	// with (negative or fractional); upstream fails with a RangeError there.
+	// with (negative, fractional or too long); upstream's gridLayout fails with
+	// a RangeError there (ErrInvalidArrayLength).
 	invalid bool
 
 	rowHeader, columnHeader, rowFooter, columnFooter, rowTitle, columnTitle float64
@@ -101,7 +114,7 @@ func ParseGridSpec(opt jsval.Value) *GridSpec {
 	if c := opt.Get("columns"); c.IsTruthy() {
 		f := jsval.ToNumber(c)
 		switch {
-		case f != math.Floor(f) || f < 0 || math.IsNaN(f):
+		case f != math.Floor(f) || f < 0 || f > maxArrayLength || math.IsNaN(f):
 			g.invalid = true
 		case f > maxGridColumns:
 			g.columns = maxGridColumns

@@ -5,6 +5,7 @@ import (
 	"math"
 	"strings"
 
+	"github.com/mgilbir/aster/internal/expr"
 	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/geo"
 	"github.com/mgilbir/aster/internal/jsval"
@@ -647,6 +648,14 @@ func configureScheme(typ string, p *opParams, count int) rangeSpec {
 		count++
 	case scale.TypeBinOrdinal:
 		count--
+	case scale.TypeOrdinal:
+		// (+_.schemeCount || count || DEFAULT_COUNT): the count of an
+		// interpolating scheme's samples; a discrete scheme is used whole.
+		if c := jsval.ToNumber(p.Value("schemeCount")); c != 0 && !math.IsNaN(c) {
+			count = int(c)
+		} else if count == 0 {
+			count = 5
+		}
 	case scale.TypeQuantile, scale.TypeQuantize:
 		c := jsval.ToNumber(p.Value("schemeCount"))
 		if c == 0 || math.IsNaN(c) {
@@ -740,6 +749,15 @@ func (c *rtContext) scaleOf(ref jsval.Value) scale.Scale {
 }
 
 func (c *rtContext) applyScale(ref, v jsval.Value) jsval.Value {
+	defer func() {
+		// an exception of the scale is an exception of the expression
+		if r := recover(); r != nil {
+			if e, ok := r.(*scale.Error); ok {
+				panic(&expr.Error{Name: e.Name, Msg: e.Msg})
+			}
+			panic(r)
+		}
+	}()
 	s := c.scaleOf(ref)
 	if s == nil {
 		if p, ok := c.projectionOf(ref); ok {

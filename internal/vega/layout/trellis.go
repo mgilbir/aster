@@ -82,9 +82,9 @@ func boundFull(it *scene.Item, field byte) float64 {
 // trellisLayout lays out the cells of a group as a table, then positions the
 // row/column headers, footers and titles around it. warn (may be nil)
 // receives upstream's view warnings.
-func trellisLayout(group *scene.Item, opt *GridSpec, warn func(string)) {
+func trellisLayout(group *scene.Item, opt *GridSpec, warn func(string)) error {
 	if opt.invalid {
-		return
+		return ErrInvalidArrayLength
 	}
 	views := gridLayoutGroups(group)
 	groups := views.marks
@@ -139,6 +139,7 @@ func trellisLayout(group *scene.Item, opt *GridSpec, warn func(string)) {
 		}
 		layoutTitle(views.colTitle, offset, true, &bounds, opt.titleBandColumn)
 	}
+	return nil
 }
 
 // aggregation functions for grid margin determination
