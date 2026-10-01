@@ -235,7 +235,11 @@ func parseSelectionPredicate(m Model, pred Value, dfnode dfNode, datum string) s
 	store := stringValue(jsval.Str(vname + storeSuffix))
 	var sel *selectionComponent
 	if m != nil {
-		sel = m.b().trySelectionComponent(vname)
+		var junk bool
+		if sel, junk = m.b().trySelectionComponent(vname); junk {
+			// Object.prototype's value has no `project`.
+			throw("Cannot read properties of undefined (reading 'timeUnit')")
+		}
 	}
 	if sel == nil {
 		return "!!" + vname
@@ -273,7 +277,21 @@ func parseSelectionExtent(m Model, name string, extent Value) string {
 	vname := varName(name)
 	encoding := extent.Get("encoding")
 	field := extent.Get("field")
-	sel := m.b().trySelectionComponent(vname)
+	sel, junk := m.b().trySelectionComponent(vname)
+	if junk {
+		if !field.IsTruthy() {
+			throw("Cannot read properties of undefined (reading 'items')")
+		}
+		// the function's name, or none for Object.prototype itself
+		fname := "undefined"
+		if vname != "__proto__" {
+			fname = vname
+			if vname == "constructor" {
+				fname = "Object"
+			}
+		}
+		return fname + "[" + stringValue(jsval.Str(replacePathInField(field.AsString()))) + "]"
+	}
 	if sel == nil {
 		return vname
 	}
