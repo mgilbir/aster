@@ -36,7 +36,7 @@ func decodeDataURI(href string, lim Limits) (*rasterImage, error) {
 	var data []byte
 	if strings.HasSuffix(strings.ToLower(meta), ";base64") {
 		if base64.StdEncoding.DecodedLen(len(payload)) > lim.MaxImageBytes+4 {
-			return nil, fmt.Errorf("image data exceeds %d bytes", lim.MaxImageBytes)
+			return nil, fmt.Errorf("%w: image data exceeds %d bytes", errLimit, lim.MaxImageBytes)
 		}
 		// Strip whitespace that XML pretty-printing may have inserted.
 		clean := strings.Map(func(r rune) rune {
@@ -56,7 +56,7 @@ func decodeDataURI(href string, lim Limits) (*rasterImage, error) {
 		}
 	} else {
 		if len(payload) > lim.MaxImageBytes {
-			return nil, fmt.Errorf("image data exceeds %d bytes", lim.MaxImageBytes)
+			return nil, fmt.Errorf("%w: image data exceeds %d bytes", errLimit, lim.MaxImageBytes)
 		}
 		s, err := url.PathUnescape(payload)
 		if err != nil {
@@ -65,7 +65,7 @@ func decodeDataURI(href string, lim Limits) (*rasterImage, error) {
 		data = []byte(s)
 	}
 	if len(data) > lim.MaxImageBytes {
-		return nil, fmt.Errorf("image data exceeds %d bytes", lim.MaxImageBytes)
+		return nil, fmt.Errorf("%w: image data exceeds %d bytes", errLimit, lim.MaxImageBytes)
 	}
 	cfg, format, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil {
@@ -76,7 +76,7 @@ func decodeDataURI(href string, lim Limits) (*rasterImage, error) {
 	}
 	if cfg.Width <= 0 || cfg.Height <= 0 || cfg.Width > 65535 || cfg.Height > 65535 ||
 		cfg.Width*cfg.Height > lim.MaxImagePixels {
-		return nil, fmt.Errorf("image dimensions %dx%d exceed the limit", cfg.Width, cfg.Height)
+		return nil, fmt.Errorf("%w: image dimensions %dx%d exceed the limit", errLimit, cfg.Width, cfg.Height)
 	}
 	var img image.Image
 	if format == "png" {
@@ -155,7 +155,8 @@ func (s *imageShader) shadeRow(y, x0 int, dst []uint8) {
 }
 
 // imageFor decodes (once) the data: image an <image> element refers to.
-// Unsupported or unreachable images yield nil, as they are skipped by resvg.
+// Unsupported or unreachable images yield nil, as they are skipped by resvg;
+// an image over the limits fails the render.
 func (r *renderer) imageFor(n *node) (*rasterImage, error) {
 	href := n.str(aHref)
 	if href == "" {
@@ -167,6 +168,9 @@ func (r *renderer) imageFor(n *node) (*rasterImage, error) {
 	img, err := decodeDataURI(href, r.lim)
 	if err != nil {
 		img = nil
+		if errors.Is(err, errLimit) {
+			r.fail(err)
+		}
 	}
 	if r.imgs == nil {
 		r.imgs = map[*node]*rasterImage{}

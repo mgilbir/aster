@@ -212,6 +212,9 @@ func (c *Converter) opContext() (context.Context, context.CancelFunc) {
 // expired, so a caller can tell a slow chart from a broken one.
 func (c *Converter) stageErr(ctx context.Context, stage string, err error) error {
 	if ctx.Err() == context.DeadlineExceeded {
+		if !errors.Is(err, context.DeadlineExceeded) {
+			err = fmt.Errorf("%w: %w", context.DeadlineExceeded, err)
+		}
 		return fmt.Errorf("aster: %s timed out after %v: %w", stage, c.cfg.timeout, err)
 	}
 	return fmt.Errorf("aster: %s: %w", stage, err)

@@ -134,7 +134,7 @@ func parseTransformArray(head dfNode, m Model, ap *ancestorParse) dfNode {
 
 	if cc != nil {
 		if cc.transforms += len(m.b().transforms); cc.transforms > maxTransforms {
-			throw("too many data transforms (limit %d)", maxTransforms)
+			exceeded("too many data transforms (limit %d)", maxTransforms)
 		}
 	}
 	lookupCounter := 0

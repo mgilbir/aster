@@ -2,10 +2,11 @@ package raster
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"strings"
+
+	"github.com/mgilbir/aster/internal/budget"
 )
 
 type gradKey struct {
@@ -55,7 +56,7 @@ type renderer struct {
 	ticks       int
 }
 
-var errLimit = errors.New("raster: resource limit exceeded")
+var errLimit = fmt.Errorf("raster: %w", budget.ErrLimit)
 
 // chargePixels accounts for n pixels of filter or pattern-tile work and fails
 // the render when the budget is spent.
@@ -167,7 +168,7 @@ func (r *renderer) newLayer() *canvas {
 
 func (r *renderer) pushLayer() *canvas {
 	if r.depth >= r.lim.MaxLayerDepth {
-		r.fail(fmt.Errorf("raster: more than %d nested opacity/blend layers", r.lim.MaxLayerDepth))
+		r.fail(fmt.Errorf("%w: more than %d nested opacity/blend layers", errLimit, r.lim.MaxLayerDepth))
 		return nil
 	}
 	layer := r.newLayer()

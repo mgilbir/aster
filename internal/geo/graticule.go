@@ -1,9 +1,10 @@
 package geo
 
 import (
-	"errors"
+	"fmt"
 	"math"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -13,7 +14,7 @@ const maxGraticulePoints = 1 << 22
 
 // ErrGraticuleTooLarge is returned when graticule parameters would generate an
 // unreasonable number of points.
-var ErrGraticuleTooLarge = errors.New("geo: graticule parameters generate too many points")
+var ErrGraticuleTooLarge = fmt.Errorf("geo: graticule parameters generate too many points: %w", budget.ErrLimit)
 
 // Graticule is d3.geoGraticule: a generator of meridians and parallels.
 type Graticule struct {

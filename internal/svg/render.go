@@ -6,8 +6,10 @@ package svg
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/scene"
 )
 
@@ -47,7 +49,7 @@ type Options struct {
 }
 
 // ErrTooLarge is returned when the output exceeds Options.MaxBytes.
-var ErrTooLarge = errors.New("svg: output exceeds the size limit")
+var ErrTooLarge = fmt.Errorf("svg: output exceeds the size limit: %w", budget.ErrLimit)
 
 var errNilScene = errors.New("svg: nil scenegraph")
 

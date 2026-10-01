@@ -3,9 +3,11 @@ package contour
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"sort"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsmath"
 
 	"github.com/mgilbir/aster/internal/jsval"
@@ -74,7 +76,7 @@ func Density(ctx context.Context, data []jsval.Value, p DensityParams, counts bo
 		}
 		kf := math.Floor(jsmath.Log(p.CellSize) / math.Ln2)
 		if kf > 30 {
-			return Grid{}, errors.New("contour: cell size too large")
+			return Grid{}, fmt.Errorf("contour: cell size too large: %w", budget.ErrLimit)
 		}
 		k = int(kf)
 	}

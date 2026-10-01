@@ -2,10 +2,11 @@ package wordcloud
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"math"
 	"sort"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsmath"
 
 	"github.com/mgilbir/aster/internal/jsval"
@@ -343,7 +344,7 @@ func (l *layout) makeSprite(words []*word, di int) error {
 		// A word wider than the sheet still gets a sprite upstream; the cut
 		// costs its area, so the total is bounded.
 		if l.work += w * h; l.work > maxSpriteWork || w < 0 || h < 0 {
-			return errors.New("wordcloud: words are too large to lay out")
+			return fmt.Errorf("wordcloud: words are too large to lay out: %w", budget.ErrLimit)
 		}
 		need := h * w32
 		if need > len(l.sprite) {

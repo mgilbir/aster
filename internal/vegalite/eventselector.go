@@ -77,7 +77,7 @@ func (p *eventParser) parseBetween(s string) Value {
 	p.depth++
 	defer func() { p.depth-- }()
 	if p.depth > maxEventNesting {
-		throw("Event selector nested too deeply: %s", s[:min(len(s), 40)])
+		exceeded("Event selector nested too deeply: %s", s[:min(len(s), 40)])
 	}
 	n := len(s)
 	i := evFind(s, 1, ']', "[", "]")

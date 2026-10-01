@@ -56,8 +56,10 @@ func Compile(spec jsval.Value, opts Options) (out jsval.Value, err error) {
 				err = e.err
 			case compileError:
 				err = e
+			case limitError:
+				err = e
 			case exprSyntaxError:
-				err = compileError{"Invalid expression: " + e.msg}
+				err = e.err()
 			default:
 				if panicHook != nil {
 					panicHook(debug.Stack())

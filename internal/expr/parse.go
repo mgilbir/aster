@@ -8,6 +8,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -23,13 +24,23 @@ const (
 )
 
 // SyntaxError is a parse failure. Msg follows V8's wording, as upstream's
-// parser does; Pos is the byte offset where scanning stopped.
+// parser does; Pos is the byte offset where scanning stopped. Limit marks a
+// text that exceeds MaxLength or MaxDepth, which upstream would parse: it
+// wraps budget.ErrLimit.
 type SyntaxError struct {
-	Msg string
-	Pos int
+	Msg   string
+	Pos   int
+	Limit bool
 }
 
 func (e *SyntaxError) Error() string { return e.Msg }
+
+func (e *SyntaxError) Unwrap() error {
+	if e.Limit {
+		return budget.ErrLimit
+	}
+	return nil
+}
 
 type tokKind uint8
 
@@ -86,7 +97,7 @@ type parser struct {
 // reserved words other than `if` are rejected.
 func Parse(src string) (n *Node, err error) {
 	if len(src) > MaxLength {
-		return nil, &SyntaxError{Msg: "Expression too long"}
+		return nil, &SyntaxError{Msg: "Expression too long", Limit: true}
 	}
 	p := &parser{src: src}
 	defer func() {
@@ -104,6 +115,10 @@ func Parse(src string) (n *Node, err error) {
 		p.fail("Unexpect token after expression.")
 	}
 	return expr, nil
+}
+
+func (p *parser) failLimit(msg string) {
+	panic(&SyntaxError{Msg: msg, Pos: p.idx, Limit: true})
 }
 
 func (p *parser) fail(msg string) {
@@ -693,7 +708,7 @@ func (p *parser) node(n *Node, kids ...*Node) *Node {
 	}
 	n.depth = d + 1
 	if n.depth > MaxDepth {
-		p.fail("Expression is nested too deeply")
+		p.failLimit("Expression is nested too deeply")
 	}
 	return n
 }
@@ -884,7 +899,7 @@ func (p *parser) parsePostfix() *Node {
 func (p *parser) parseUnary() *Node {
 	p.depth++
 	if p.depth > MaxDepth {
-		p.fail("Expression is nested too deeply")
+		p.failLimit("Expression is nested too deeply")
 	}
 	defer func() { p.depth-- }()
 	if p.look.kind != tPunct && p.look.kind != tKeyword {
@@ -982,7 +997,7 @@ func (p *parser) parseBinary() *Node {
 func (p *parser) parseConditional() *Node {
 	p.depth++
 	if p.depth > MaxDepth {
-		p.fail("Expression is nested too deeply")
+		p.failLimit("Expression is nested too deeply")
 	}
 	defer func() { p.depth-- }()
 	expr := p.parseBinary()

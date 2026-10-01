@@ -7,6 +7,8 @@ import (
 	"sync/atomic"
 
 	"github.com/mgilbir/forme/shape"
+
+	"github.com/mgilbir/aster/internal/budget"
 )
 
 // maxFontBytes bounds the size of a font program accepted from a caller.
@@ -86,7 +88,7 @@ func (f *Face) HasRune(r rune) bool {
 // the parser is reported as an error like any other malformed font.
 func newFace(id, family string, weight int, italic bool, data []byte) (f *Face, err error) {
 	if len(data) > maxFontBytes {
-		return nil, fmt.Errorf("text: font %q is %d bytes, over the %d limit", family, len(data), maxFontBytes)
+		return nil, fmt.Errorf("text: font %q is %d bytes, over the %d limit: %w", family, len(data), maxFontBytes, budget.ErrLimit)
 	}
 	defer func() {
 		if r := recover(); r != nil {

@@ -2,8 +2,9 @@ package svgpdf
 
 import (
 	"context"
-	"errors"
 	"fmt"
+
+	"github.com/mgilbir/aster/internal/budget"
 )
 
 // Limits bounds the resources an SVG document may consume during conversion.
@@ -39,7 +40,7 @@ func (l Limits) withDefaults() Limits {
 }
 
 // ErrLimit is wrapped by every error caused by a resource limit.
-var ErrLimit = errors.New("svgpdf: resource limit exceeded")
+var ErrLimit = fmt.Errorf("svgpdf: %w", budget.ErrLimit)
 
 func limitErr(format string, args ...any) error {
 	return fmt.Errorf("svgpdf: "+format+": %w", append(args, ErrLimit)...)

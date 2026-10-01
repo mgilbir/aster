@@ -54,14 +54,26 @@ func (p *exprParser) mk(n *exprNode) *exprNode {
 	}
 	n.depth = d + 1
 	if n.depth > maxExprNodeDepth {
-		p.fail("expression too deeply nested")
+		p.failLimit("expression too deeply nested")
 	}
 	return n
 }
 
-type exprSyntaxError struct{ msg string }
+type exprSyntaxError struct {
+	msg   string
+	limit bool // the text exceeds the parser's limits
+}
 
-func (p *exprParser) fail(msg string) { panic(exprSyntaxError{msg}) }
+func (p *exprParser) fail(msg string)      { panic(exprSyntaxError{msg: msg}) }
+func (p *exprParser) failLimit(msg string) { panic(exprSyntaxError{msg: msg, limit: true}) }
+
+// err is the error Compile reports for the syntax error.
+func (e exprSyntaxError) err() error {
+	if e.limit {
+		return limitError{"Invalid expression: " + e.msg}
+	}
+	return compileError{"Invalid expression: " + e.msg}
+}
 
 func (p *exprParser) skipSpace() {
 	for p.pos < len(p.src) {
@@ -277,7 +289,7 @@ func parseExprAST(src string) (root *exprNode, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			if se, ok := r.(exprSyntaxError); ok {
-				root, err = nil, compileError{"Invalid expression: " + se.msg}
+				root, err = nil, se.err()
 				return
 			}
 			panic(r)
@@ -295,7 +307,7 @@ func parseExprAST(src string) (root *exprNode, err error) {
 func (p *exprParser) parseConditional() *exprNode {
 	p.depth++
 	if p.depth > maxExprDepth {
-		p.fail("expression too deeply nested")
+		p.failLimit("expression too deeply nested")
 	}
 	defer func() { p.depth-- }()
 	test := p.parseBinary(0)
@@ -334,7 +346,7 @@ func (p *exprParser) parseBinary(minPrec int) *exprNode {
 func (p *exprParser) parseUnary() *exprNode {
 	p.depth++
 	if p.depth > maxExprDepth {
-		p.fail("expression too deeply nested")
+		p.failLimit("expression too deeply nested")
 	}
 	defer func() { p.depth-- }()
 	if p.kind == "punct" && (p.tok == "+" || p.tok == "-" || p.tok == "!" || p.tok == "~") {

@@ -10,7 +10,8 @@ package hierarchy
 
 import (
 	"context"
-	"errors"
+	"fmt"
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jssort"
 
 	"github.com/mgilbir/aster/internal/jsval"
@@ -25,7 +26,7 @@ const (
 )
 
 // ErrTooLarge is returned when a hierarchy exceeds MaxDepth or MaxNodes.
-var ErrTooLarge = errors.New("hierarchy: tree too deep or too large")
+var ErrTooLarge = fmt.Errorf("hierarchy: tree too deep or too large: %w", budget.ErrLimit)
 
 // Node is a d3-hierarchy node. Layout results live in the geometry fields;
 // which of them a transform fills depends on the layout.

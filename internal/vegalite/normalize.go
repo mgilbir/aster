@@ -41,7 +41,7 @@ func (p *normParams) deeper() *normParams {
 	c := *p
 	c.depth++
 	if c.depth > maxDepth {
-		panic(compileError{errDepth.Error()})
+		exceeded(depthMsg)
 	}
 	return &c
 }
@@ -624,7 +624,7 @@ func (n *coreNormalizer) mapNonLayerRepeat(spec Value, p *normParams) Value {
 		repeatValues = single(repeater.Get("repeat"))
 	}
 	if len(repeatValues)*len(rows)*len(cols) > maxRepeatChildren {
-		throw("repeat would create %d views (limit %d)", len(repeatValues)*len(rows)*len(cols), maxRepeatChildren)
+		exceeded("repeat would create %d views (limit %d)", len(repeatValues)*len(rows)*len(cols), maxRepeatChildren)
 	}
 	var concat []Value
 	for _, repeatValue := range repeatValues {

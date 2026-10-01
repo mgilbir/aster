@@ -6,6 +6,7 @@ import (
 	"math"
 	"strings"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -234,7 +235,7 @@ func (d decoder) point(p jsval.Value) jsval.Value {
 // types become null.
 func (d decoder) geometry(o jsval.Value, depth int) (jsval.Value, error) {
 	if depth > maxTopoDepth {
-		return jsval.Undefined, fmt.Errorf("%w: geometry nesting too deep", errTopology)
+		return jsval.Undefined, fmt.Errorf("%w: geometry nesting too deep: %w", errTopology, budget.ErrLimit)
 	}
 	typ := o.Get("type")
 	name := ""
@@ -443,7 +444,7 @@ func extractArcs(t *topology, object jsval.Value, filter MeshFilter) ([]int, err
 	var geometry func(o jsval.Value, depth int)
 	geometry = func(o jsval.Value, depth int) {
 		if depth > maxTopoDepth {
-			err = fmt.Errorf("%w: geometry nesting too deep", errTopology)
+			err = fmt.Errorf("%w: geometry nesting too deep: %w", errTopology, budget.ErrLimit)
 			return
 		}
 		geom := o.ObjValue()
