@@ -154,10 +154,7 @@ func (l *FileLoader) Load(ctx context.Context, uri string) ([]byte, error) {
 		return nil, errors.New("aster: FileLoader is closed")
 	}
 
-	max := l.MaxBytes
-	if max == 0 {
-		max = defaultMaxResponseBytes
-	}
+	max := loadCap(ctx, l.MaxBytes)
 
 	// Stat before opening: opening a FIFO would block until a writer shows up.
 	if fi, err := root.Stat(uri); err != nil {
@@ -177,11 +174,11 @@ func (l *FileLoader) Load(ctx context.Context, uri string) ([]byte, error) {
 	if !fi.Mode().IsRegular() {
 		return nil, fmt.Errorf("aster: FileLoader %q is not a regular file", uri)
 	}
-	if max > 0 && fi.Size() > max {
-		return nil, fmt.Errorf("aster: file %q is %d bytes, exceeds %d bytes (raise FileLoader.MaxBytes to allow larger files): %w", uri, fi.Size(), max, budget.ErrLimit)
+	if max >= 0 && fi.Size() > max {
+		return nil, fmt.Errorf("aster: file %q is %d bytes, exceeds %d bytes (raise FileLoader.MaxBytes or the memory limit to allow larger files): %w", uri, fi.Size(), max, budget.ErrLimit)
 	}
 	var r io.Reader = f
-	if max > 0 {
+	if max >= 0 {
 		// The file may grow after the stat; read one byte past the cap.
 		r = io.LimitReader(f, max+1)
 	}
@@ -189,8 +186,8 @@ func (l *FileLoader) Load(ctx context.Context, uri string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("aster: FileLoader failed to read %q: %w", uri, err)
 	}
-	if max > 0 && int64(len(data)) > max {
-		return nil, fmt.Errorf("aster: file %q exceeds %d bytes (raise FileLoader.MaxBytes to allow larger files): %w", uri, max, budget.ErrLimit)
+	if max >= 0 && int64(len(data)) > max {
+		return nil, fmt.Errorf("aster: file %q exceeds %d bytes (raise FileLoader.MaxBytes or the memory limit to allow larger files): %w", uri, max, budget.ErrLimit)
 	}
 	return data, nil
 }
@@ -270,6 +267,11 @@ func (l *FallbackLoader) Load(ctx context.Context, uri string) ([]byte, error) {
 		}
 		data, err := child.Load(ctx, sanitized)
 		if err != nil {
+			// A limit is not a miss: no other child may answer in its place,
+			// nor may its own error hide the limit.
+			if errors.Is(err, budget.ErrLimit) || ctx.Err() != nil {
+				return nil, err
+			}
 			lastErr = err
 			continue
 		}

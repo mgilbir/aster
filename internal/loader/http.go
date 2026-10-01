@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/netip"
@@ -96,6 +97,20 @@ const (
 	maxRedirects       = 10
 )
 
+// loadCap is how many bytes one load may return: the configured cap (0 is the
+// default, negative none) lowered to what is left of the render's load budget,
+// so that a loader never reads more than the render may keep. Negative means
+// no cap.
+func loadCap(ctx context.Context, configured int64) int64 {
+	if configured == 0 {
+		configured = defaultMaxResponseBytes
+	}
+	if left := budget.From(ctx).LoadLeft(); left != math.MaxInt64 && (configured < 0 || left < configured) {
+		return left
+	}
+	return configured
+}
+
 // NewHTTPLoader creates a loader that allows HTTP(S) requests.
 // If client is nil, the client described on HTTPLoader is used.
 func NewHTTPLoader(client *http.Client) *HTTPLoader {
@@ -152,10 +167,7 @@ func (l *HTTPLoader) Load(ctx context.Context, uri string) ([]byte, error) {
 		return nil, fmt.Errorf("aster: HTTP %d loading %q", resp.StatusCode, uri)
 	}
 
-	max := l.MaxResponseBytes
-	if max == 0 {
-		max = defaultMaxResponseBytes
-	}
+	max := loadCap(ctx, l.MaxResponseBytes)
 	if max < 0 {
 		data, err := io.ReadAll(resp.Body)
 		if err != nil {
@@ -167,7 +179,7 @@ func (l *HTTPLoader) Load(ctx context.Context, uri string) ([]byte, error) {
 	// The declared size can be a lie, but when it is over the cap there is
 	// nothing to read.
 	if resp.ContentLength > max {
-		return nil, fmt.Errorf("aster: response from %q is %d bytes, exceeds %d bytes (raise HTTPLoader.MaxResponseBytes to allow larger payloads): %w", uri, resp.ContentLength, max, budget.ErrLimit)
+		return nil, fmt.Errorf("aster: response from %q is %d bytes, exceeds %d bytes (raise HTTPLoader.MaxResponseBytes or the memory limit to allow larger payloads): %w", uri, resp.ContentLength, max, budget.ErrLimit)
 	}
 	// Read one byte past the cap to distinguish "exactly at the cap" from
 	// "exceeds it".
@@ -176,7 +188,7 @@ func (l *HTTPLoader) Load(ctx context.Context, uri string) ([]byte, error) {
 		return nil, fmt.Errorf("aster: failed to read response from %q: %w", uri, err)
 	}
 	if int64(len(data)) > max {
-		return nil, fmt.Errorf("aster: response from %q exceeds %d bytes (raise HTTPLoader.MaxResponseBytes to allow larger payloads): %w", uri, max, budget.ErrLimit)
+		return nil, fmt.Errorf("aster: response from %q exceeds %d bytes (raise HTTPLoader.MaxResponseBytes or the memory limit to allow larger payloads): %w", uri, max, budget.ErrLimit)
 	}
 	return data, nil
 }
