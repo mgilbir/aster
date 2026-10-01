@@ -121,6 +121,12 @@ func (it *Item) setProp(l *jsonLoader, k string, val jsval.Value) (bool, error) 
 		it.Text = val
 	case "font":
 		it.Font = strOf(val)
+		// An array (Vega-Lite writes [] for a null title font) is truthy: the
+		// attribute is its text, with no sans-serif default.
+		delete(it.Raw, "font")
+		if val.IsArr() || val.IsObj() {
+			it.setRaw("font", val)
+		}
 	case "fontSize":
 		it.FontSize = numOf(val)
 	case "fontWeight":
