@@ -356,6 +356,12 @@ func (c *compiler) identifier(n *Node) (node, error) {
 			return s.Item
 		}, nil
 	}
+	if id == "__proto__" {
+		// The codegen records a global with `globals[id] = 1`, which on a plain
+		// object sets the prototype instead (and ignores a number): no signal
+		// is referenced, and the read of it gives undefined.
+		return func(*Scope) jsval.Value { return jsval.Undefined }, nil
+	}
 	c.addSignal(id)
 	return func(s *Scope) jsval.Value {
 		if s.env == nil {
