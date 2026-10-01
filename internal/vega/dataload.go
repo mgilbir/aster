@@ -35,7 +35,7 @@ func (v *runView) seedCollect(c *rtContext, n *opNode, e *entry) {
 		data = v.parseValues(e.ingest.values, e.ingest.format)
 		ingestRows(data)
 	}
-	v.checkRows(len(data))
+	v.checkRows(len(data), v.rowExcess(data))
 	n.value = data
 	v.g.pulseInput(n, &flowPulse{tuples: data, changed: true})
 }
@@ -52,8 +52,10 @@ func ingestRows(data []jsval.Value) {
 	}
 }
 
-func (v *runView) checkRows(n int) {
-	if err := v.bud.AddRows(n); err != nil {
+// checkRows records n more rows and the excess bytes by which they weigh more
+// than the budget counts them for (rowExcess), failing past the row budget.
+func (v *runView) checkRows(n int, excess int64) {
+	if err := v.bud.AddRows(n); err != nil || v.bud.AddRowExcess(excess) != nil {
 		failLimit("data exceeds %d rows", v.limits.MaxRows)
 	}
 }

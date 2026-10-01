@@ -451,6 +451,7 @@ func (c *Converter) limits() vega.Limits {
 		l.MaxStringBytes = int64(max(n/4, 1<<20))
 		l.MaxCanvasBytes = int64(max(n/2, 1<<20))
 		l.MaxParseBytes = int64(max(n/2, 1<<20))
+		l.RowBytes = bytesPerRow
 	}
 	return l
 }
