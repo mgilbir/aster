@@ -22,6 +22,11 @@
 // few units in the last place off. A line whose signature is `*ulp<=N` accepts, for that package, any
 // vector whose answer equals upstream's except for numbers within N ulps. It is asserted the same way:
 // the replay fails when no vector uses it, so it cannot outlive its cause.
+//
+// A package written <package>@<arch> holds the divergences of vectors recorded on that architecture
+// (node's process.arch) only: the engine's jsmath follows V8 as clang builds it for arm64, fusing
+// multiply-adds, and V8 on x64 does not fuse them, so a few transcendental results differ in the last
+// bit there. They are asserted the same way, where they apply.
 package upstream
 
 import (
@@ -30,6 +35,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"os"
 	"path/filepath"
@@ -74,6 +80,7 @@ type File struct {
 	Package  string `json:"package"`
 	Version  string `json:"version"`
 	TimeZone string `json:"timeZone"`
+	Arch     string `json:"arch"` // node's process.arch where the vectors were recorded
 	Calls    []Call `json:"calls"`
 }
 
@@ -214,8 +221,17 @@ func Start(t testing.TB, pkg string) *Replay {
 		t.Fatal(err)
 	}
 	rep := &Replay{
-		t: t, File: f, known: known[pkg], name: pkg,
+		t: t, File: f, known: map[string]string{}, name: pkg,
 		visited: map[string]bool{}, diverged: map[string]bool{}, skipped: map[string]int{},
+	}
+	maps.Copy(rep.known, known[pkg])
+	if f.Arch != "" {
+		for sig, why := range known[pkg+"@"+f.Arch] {
+			if _, both := rep.known[sig]; both {
+				t.Fatalf("%s: %s is listed for %s and for %s@%s", divergencesFile, sig, pkg, pkg, f.Arch)
+			}
+			rep.known[sig] = why
+		}
 	}
 	for sig := range rep.known {
 		if n, ok := strings.CutPrefix(sig, "*ulp<="); ok {

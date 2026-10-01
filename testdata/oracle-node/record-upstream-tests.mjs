@@ -976,6 +976,7 @@ for (const packageName of packages) {
     // Recorded, because a `local` interval's answer depends on it: d3-time's own suite runs in
     // America/Los_Angeles and Vega's in another zone, so a replay has to know which.
     timeZone: process.env.TZ,
+    arch: process.arch,
     files: files.length,
     skipped,
   };
