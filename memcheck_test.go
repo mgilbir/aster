@@ -27,8 +27,8 @@ package aster
 // process sees as in-use. The table reports live from the first and in-use from
 // the second.
 //
-// Each case is sized in units of the budget it targets (rows: limit/256, items:
-// limit/512, ...) and run at two scales: 0.9 of the budget, which the render
+// Each case is sized in units of the budget it targets (the rows and items
+// limits() derives from the limit, the loaded bytes, ...) and run at two scales: 0.9 of the budget, which the render
 // should complete or be refused by another budget, and 2, which should end in an
 // error wrapping ErrLimit. A (case, limit) holds if the render fails with
 // ErrLimit, or succeeds with a peak live heap of at most memcheckK times the
@@ -306,8 +306,8 @@ type memCase struct {
 	name    string
 	kind    string   // vega, vl
 	formats []string // default svg
-	// gen builds the specification. rows and items are the budgets (limit/256
-	// and limit/512) already scaled; l is the limit and s the scale.
+	// gen builds the specification. rows and items are the row and item
+	// budgets of the limit, already scaled; l is the limit and s the scale.
 	gen func(rows, items int, l uint64, s float64) memSpec
 }
 
@@ -531,8 +531,9 @@ func (r memRow) holds() bool {
 }
 
 func memRun(c memCase, format string, limit uint64, scale float64) memRow {
-	rows := int(scale * float64(limit) / 256)
-	items := int(scale * float64(limit) / 512)
+	lim := (&Converter{cfg: &config{memoryLimit: limit}}).limits()
+	rows := int(scale * float64(lim.MaxRows))
+	items := int(scale * float64(lim.MaxItems))
 	ms := c.gen(rows, items, limit, scale)
 	job := memJob{Format: format, Kind: c.kind, Spec: ms.spec, Limit: limit, LoadMB: ms.loadMB, LoadKind: ms.loadKind}
 	row := memRow{name: c.name, format: format, limit: limit, scale: scale}
