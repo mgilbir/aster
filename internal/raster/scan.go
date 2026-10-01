@@ -3,7 +3,6 @@ package raster
 import (
 	"context"
 	"math"
-	"slices"
 )
 
 // The scan converter samples each pixel row at ssN evenly spaced sub-scanlines
@@ -42,6 +41,7 @@ type rasterizer struct {
 	bucket     []int32
 	active     []int32
 	cross      []crossing
+	crossTmp   []crossing // radixSort's second buffer
 	acc, diff  []int32
 	cov        []uint8
 	covTable   []uint8
@@ -150,6 +150,42 @@ func (r *rasterizer) addPolys(f *flat) {
 		}
 		r.addLine(pts[len(pts)-1], pts[0])
 	}
+}
+
+// radixSort sorts crossings by x, which lies in [0, qmax], with an LSD radix
+// sort in 11-bit digits: a dense stroke crosses thousands of edges on every
+// sub-scanline, where a comparison sort dominated rendering. It returns the
+// sorted slice, which may be r.crossTmp's storage (the two swap).
+func (r *rasterizer) radixSort(cross []crossing, qmax int32) []crossing {
+	const bits = 11
+	const size = 1 << bits
+	if cap(r.crossTmp) < len(cross) {
+		r.crossTmp = make([]crossing, len(cross))
+	}
+	src, dst := cross, r.crossTmp[:len(cross)]
+	var count [size]int
+	for shift := uint(0); shift == 0 || qmax>>shift > 0; shift += bits {
+		count = [size]int{}
+		for _, c := range src {
+			count[(uint32(c.x)>>shift)&(size-1)]++
+		}
+		sum := 0
+		for i, n := range count {
+			count[i] = sum
+			sum += n
+		}
+		for _, c := range src {
+			d := (uint32(c.x) >> shift) & (size - 1)
+			dst[count[d]] = c
+			count[d]++
+		}
+		src, dst = dst, src
+	}
+	// Keep both buffers: whichever is not returned becomes crossTmp.
+	if &src[0] != &cross[0] {
+		r.crossTmp = cross[:0]
+	}
+	return src
 }
 
 // fill scan-converts the accumulated edges and sends coverage to sink.
@@ -264,7 +300,7 @@ func (r *rasterizer) fill(evenOdd bool, sink spanSink) {
 						cross[j+1] = c
 					}
 				} else {
-					slices.SortFunc(cross, func(a, b crossing) int { return int(a.x) - int(b.x) })
+					cross = r.radixSort(cross, qmax)
 				}
 			}
 			w := int32(0)
