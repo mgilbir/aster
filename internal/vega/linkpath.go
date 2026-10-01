@@ -9,9 +9,11 @@ import (
 )
 
 // linkPath is vega-encode's LinkPath: the SVG path of an edge from a source to
-// a target position, for each shape and orientation. Numbers are written the
-// way JavaScript concatenates them.
-func linkPath(p *opParams, in []jsval.Value) error {
+// a target position, for each shape and orientation. The positions are the
+// field values as they come: upstream concatenates them into the path text, so
+// a missing one prints as "undefined" and a string keeps its own spelling.
+// str is JavaScript's String(x).
+func linkPath(p *opParams, in []jsval.Value, str func(jsval.Value) string) error {
 	field := func(name, dflt string) transforms.Field {
 		if f := p.field(name); !f.IsNil() {
 			return f
@@ -32,64 +34,83 @@ func linkPath(p *opParams, in []jsval.Value) error {
 	if shape == "" {
 		shape = "line"
 	}
-	path := linkPaths[shape+"-"+orient]
-	if path == nil {
-		path = linkPaths[shape]
+	lp := linkPaths[shape+"-"+orient]
+	if lp == nil {
+		lp = linkPaths[shape]
 	}
-	if path == nil {
+	if lp == nil {
 		fail("LinkPath unsupported type: %s%s", shape, "-"+orient)
 	}
+	js := linkJS{str}
 	for _, t := range in {
 		o := t.ObjValue()
 		if o == nil {
 			continue
 		}
-		o.Set(as, jsval.Str(path(
-			jsval.ToNumber(sx.Apply(t)), jsval.ToNumber(sy.Apply(t)),
-			jsval.ToNumber(tx.Apply(t)), jsval.ToNumber(ty.Apply(t)),
-		)))
+		o.Set(as, jsval.Str(lp(js, sx.Apply(t), sy.Apply(t), tx.Apply(t), ty.Apply(t))))
 	}
 	return nil
 }
+
+// linkJS carries the JavaScript conversions the path builders need.
+type linkJS struct{ str func(jsval.Value) string }
 
 func n(f float64) string { return jsval.JSNumberString(f) }
 
 func cat(parts ...string) string { return strings.Join(parts, "") }
 
-func lineP(sx, sy, tx, ty float64) string {
-	return cat("M", n(sx), ",", n(sy), "L", n(tx), ",", n(ty))
+// plus is the + operator: a string, array, object or date makes it a
+// concatenation, anything else a sum.
+func (j linkJS) plus(a, b jsval.Value) jsval.Value {
+	concat := func(v jsval.Value) bool {
+		return v.IsStr() || v.IsArr() || v.IsObj() || v.IsTimestamp() || v.IsPattern()
+	}
+	if concat(a) || concat(b) {
+		return jsval.Str(j.str(a) + j.str(b))
+	}
+	return jsval.Num(jsval.ToNumber(a) + jsval.ToNumber(b))
+}
+
+func lineP(j linkJS, sx, sy, tx, ty jsval.Value) string {
+	return cat("M", j.str(sx), ",", j.str(sy), "L", j.str(tx), ",", j.str(ty))
 }
 
 // polar converts (angle, radius) pairs to Cartesian for the radial shapes.
-func polar(f func(sx, sy, tx, ty float64) string) func(sa, sr, ta, tr float64) string {
-	return func(sa, sr, ta, tr float64) string {
-		return f(sr*jsmath.Cos(sa), sr*jsmath.Sin(sa), tr*jsmath.Cos(ta), tr*jsmath.Sin(ta))
+func polar(f func(j linkJS, sx, sy, tx, ty jsval.Value) string) linkPathFn {
+	return func(j linkJS, sa, sr, ta, tr jsval.Value) string {
+		a, r, b, q := jsval.ToNumber(sa), jsval.ToNumber(sr), jsval.ToNumber(ta), jsval.ToNumber(tr)
+		return f(j, jsval.Num(r*jsmath.Cos(a)), jsval.Num(r*jsmath.Sin(a)), jsval.Num(q*jsmath.Cos(b)), jsval.Num(q*jsmath.Sin(b)))
 	}
 }
 
-func arcP(sx, sy, tx, ty float64) string {
-	dx, dy := tx-sx, ty-sy
+func arcP(j linkJS, sx, sy, tx, ty jsval.Value) string {
+	dx, dy := jsval.ToNumber(tx)-jsval.ToNumber(sx), jsval.ToNumber(ty)-jsval.ToNumber(sy)
 	rr := jsmath.Hypot(dx, dy) / 2
 	ra := float64(180*jsmath.Atan2(dy, dx)) / 3.141592653589793
-	return cat("M", n(sx), ",", n(sy), "A", n(rr), ",", n(rr), " ", n(ra), " 0 1 ", n(tx), ",", n(ty))
+	return cat("M", j.str(sx), ",", j.str(sy), "A", n(rr), ",", n(rr), " ", n(ra), " 0 1 ", j.str(tx), ",", j.str(ty))
 }
 
-func curveP(sx, sy, tx, ty float64) string {
-	dx, dy := tx-sx, ty-sy
-	ix := float64(0.2 * (dx + dy))
-	iy := float64(0.2 * (dy - dx))
-	return cat("M", n(sx), ",", n(sy), "C", n(sx+ix), ",", n(sy+iy), " ", n(tx+iy), ",", n(ty-ix), " ", n(tx), ",", n(ty))
+func curveP(j linkJS, sx, sy, tx, ty jsval.Value) string {
+	nsx, nsy, ntx, nty := jsval.ToNumber(sx), jsval.ToNumber(sy), jsval.ToNumber(tx), jsval.ToNumber(ty)
+	dx, dy := ntx-nsx, nty-nsy
+	ix := jsval.Num(float64(0.2 * (dx + dy)))
+	iy := jsval.Num(float64(0.2 * (dy - dx)))
+	return cat("M", j.str(sx), ",", j.str(sy),
+		"C", j.str(j.plus(sx, ix)), ",", j.str(j.plus(sy, iy)),
+		" ", j.str(j.plus(tx, iy)), ",", n(nty-ix.NumValue()),
+		" ", j.str(tx), ",", j.str(ty))
 }
 
-func orthoX(sx, sy, tx, ty float64) string {
-	return cat("M", n(sx), ",", n(sy), "V", n(ty), "H", n(tx))
+func orthoX(j linkJS, sx, sy, tx, ty jsval.Value) string {
+	return cat("M", j.str(sx), ",", j.str(sy), "V", j.str(ty), "H", j.str(tx))
 }
 
-func orthoY(sx, sy, tx, ty float64) string {
-	return cat("M", n(sx), ",", n(sy), "H", n(tx), "V", n(ty))
+func orthoY(j linkJS, sx, sy, tx, ty jsval.Value) string {
+	return cat("M", j.str(sx), ",", j.str(sy), "H", j.str(tx), "V", j.str(ty))
 }
 
-func orthoR(sa, sr, ta, tr float64) string {
+func orthoR(_ linkJS, a, r, b, q jsval.Value) string {
+	sa, sr, ta, tr := jsval.ToNumber(a), jsval.ToNumber(r), jsval.ToNumber(b), jsval.ToNumber(q)
 	sc, ss := jsmath.Cos(sa), jsmath.Sin(sa)
 	tc, ts := jsmath.Cos(ta), jsmath.Sin(ta)
 	var sf bool
@@ -112,24 +133,27 @@ func abs(f float64) float64 {
 	return f
 }
 
-func diagonalX(sx, sy, tx, ty float64) string {
-	m := (sx + tx) / 2
-	return cat("M", n(sx), ",", n(sy), "C", n(m), ",", n(sy), " ", n(m), ",", n(ty), " ", n(tx), ",", n(ty))
+func diagonalX(j linkJS, sx, sy, tx, ty jsval.Value) string {
+	m := n(jsval.ToNumber(j.plus(sx, tx)) / 2)
+	return cat("M", j.str(sx), ",", j.str(sy), "C", m, ",", j.str(sy), " ", m, ",", j.str(ty), " ", j.str(tx), ",", j.str(ty))
 }
 
-func diagonalY(sx, sy, tx, ty float64) string {
-	m := (sy + ty) / 2
-	return cat("M", n(sx), ",", n(sy), "C", n(sx), ",", n(m), " ", n(tx), ",", n(m), " ", n(tx), ",", n(ty))
+func diagonalY(j linkJS, sx, sy, tx, ty jsval.Value) string {
+	m := n(jsval.ToNumber(j.plus(sy, ty)) / 2)
+	return cat("M", j.str(sx), ",", j.str(sy), "C", j.str(sx), ",", m, " ", j.str(tx), ",", m, " ", j.str(tx), ",", j.str(ty))
 }
 
-func diagonalR(sa, sr, ta, tr float64) string {
+func diagonalR(_ linkJS, a, r, b, q jsval.Value) string {
+	sa, sr, ta, tr := jsval.ToNumber(a), jsval.ToNumber(r), jsval.ToNumber(b), jsval.ToNumber(q)
 	sc, ss := jsmath.Cos(sa), jsmath.Sin(sa)
 	tc, ts := jsmath.Cos(ta), jsmath.Sin(ta)
 	mr := (sr + tr) / 2
 	return cat("M", n(sr*sc), ",", n(sr*ss), "C", n(mr*sc), ",", n(mr*ss), " ", n(mr*tc), ",", n(mr*ts), " ", n(tr*tc), ",", n(tr*ts))
 }
 
-var linkPaths = map[string]func(a, b, c, d float64) string{
+type linkPathFn func(j linkJS, a, b, c, d jsval.Value) string
+
+var linkPaths = map[string]linkPathFn{
 	"line":                  lineP,
 	"line-radial":           polar(lineP),
 	"arc":                   arcP,
