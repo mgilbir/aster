@@ -6,11 +6,13 @@ package loader
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
-	"net/url"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -80,30 +82,59 @@ func (l *FileLoader) initRoot() {
 		}
 		l.root, l.err = os.OpenRoot(l.BaseDir)
 		if l.err != nil {
-			l.err = fmt.Errorf("aster: FileLoader cannot open root %q: %w", l.BaseDir, l.err)
+			// Not the path: this error reaches whoever supplied the URI.
+			var pe *fs.PathError
+			if errors.As(l.err, &pe) {
+				l.err = pe.Err
+			}
+			l.err = fmt.Errorf("aster: FileLoader cannot open its base directory: %w", l.err)
 		}
 	})
 }
 
+// Sanitize accepts a relative path inside the base directory. The URI is a
+// file path, not a URL: a name with a colon in its first segment (22:48) is a
+// file name, as it is to the reference implementation, and only an actual
+// scheme (file:, http:, mailto:) is refused. Nothing is decoded, so %2e%2e is
+// a file name too.
 func (l *FileLoader) Sanitize(_ context.Context, uri string) (string, error) {
-	parsed, err := url.Parse(uri)
-	if err != nil {
-		return "", fmt.Errorf("aster: invalid URI %q: %w", uri, err)
+	if hasScheme(uri) {
+		return "", fmt.Errorf("aster: FileLoader only accepts relative paths, got a scheme in %q", uri)
 	}
-
-	if parsed.Scheme != "" {
-		return "", fmt.Errorf("aster: FileLoader only accepts relative paths, got scheme %q in %q", parsed.Scheme, uri)
+	for i := 0; i < len(uri); i++ {
+		if uri[i] < 0x20 || uri[i] == 0x7f {
+			return "", fmt.Errorf("aster: invalid URI %q: control character", uri)
+		}
 	}
 
 	cleaned := filepath.Clean(uri)
-	if filepath.IsAbs(cleaned) {
+	if filepath.IsAbs(cleaned) || filepath.VolumeName(cleaned) != "" || os.IsPathSeparator(cleaned[0]) {
 		return "", fmt.Errorf("aster: FileLoader rejects absolute path %q", uri)
 	}
-	if strings.HasPrefix(cleaned, "..") {
+	if runtime.GOOS == "windows" && strings.Contains(cleaned, ":") {
+		return "", fmt.Errorf("aster: FileLoader rejects %q: a colon names a drive or a stream", uri)
+	}
+	if cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("aster: FileLoader rejects path traversal in %q", uri)
 	}
 
 	return cleaned, nil
+}
+
+// hasScheme reports whether s starts with a URI scheme: a letter, then
+// letters, digits, '+', '-' or '.', then a colon.
+func hasScheme(s string) bool {
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z':
+		case i > 0 && (c >= '0' && c <= '9' || c == '+' || c == '-' || c == '.'):
+		case i > 0 && c == ':':
+			return true
+		default:
+			return false
+		}
+	}
+	return false
 }
 
 func (l *FileLoader) Load(ctx context.Context, uri string) ([]byte, error) {
@@ -120,7 +151,7 @@ func (l *FileLoader) Load(ctx context.Context, uri string) ([]byte, error) {
 	if closed || root == nil {
 		// A converter closes its loader on Close; a loader shared with a
 		// second converter must fail cleanly rather than dereference nil.
-		return nil, fmt.Errorf("aster: FileLoader for %q is closed", l.BaseDir)
+		return nil, errors.New("aster: FileLoader is closed")
 	}
 
 	max := l.MaxBytes
