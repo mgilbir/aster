@@ -16,6 +16,7 @@ const (
 	UnitQuarter      = "quarter"
 	UnitMonth        = "month"
 	UnitWeek         = "week"
+	UnitISOWeek      = "isoweek"
 	UnitDate         = "date"
 	UnitDay          = "day"
 	UnitDayOfYear    = "dayofyear"
@@ -27,7 +28,7 @@ const (
 
 // TimeUnits is vega-time's TIME_UNITS, coarsest first.
 var TimeUnits = []string{
-	UnitYear, UnitQuarter, UnitMonth, UnitWeek, UnitDate, UnitDay, UnitDayOfYear,
+	UnitYear, UnitQuarter, UnitMonth, UnitWeek, UnitISOWeek, UnitDate, UnitDay, UnitDayOfYear,
 	UnitHours, UnitMinutes, UnitSeconds, UnitMilliseconds,
 }
 
@@ -49,7 +50,7 @@ func NormalizeUnits(units []string) ([]string, error) {
 		has[u] = true
 	}
 	n := 0
-	if has[UnitWeek] || has[UnitDay] {
+	if has[UnitWeek] || has[UnitISOWeek] || has[UnitDay] {
 		n++
 	}
 	if has[UnitQuarter] || has[UnitMonth] || has[UnitDate] {
@@ -58,7 +59,7 @@ func NormalizeUnits(units []string) ([]string, error) {
 	if has[UnitDayOfYear] {
 		n++
 	}
-	if n > 1 {
+	if n > 1 || (has[UnitWeek] && has[UnitISOWeek]) {
 		return nil, fmt.Errorf("Incompatible time units: %s", strings.Join(units, ","))
 	}
 	out := slices.Clone(units)
@@ -67,18 +68,20 @@ func NormalizeUnits(units []string) ([]string, error) {
 }
 
 var defaultUnitSpecifiers = map[string]string{
-	UnitYear:                   "%Y ",
-	UnitQuarter:                "Q%q ",
-	UnitMonth:                  "%b ",
-	UnitDate:                   "%d ",
-	UnitWeek:                   "W%U ",
-	UnitDay:                    "%a ",
-	UnitDayOfYear:              "%j ",
-	UnitHours:                  "%H:00",
-	UnitMinutes:                "00:%M",
-	UnitSeconds:                ":%S",
-	UnitMilliseconds:           ".%L",
-	UnitYear + "-" + UnitMonth: "%Y-%m ",
+	UnitYear:                     "%Y ",
+	UnitQuarter:                  "Q%q ",
+	UnitMonth:                    "%b ",
+	UnitDate:                     "%d ",
+	UnitWeek:                     "W%U ",
+	UnitISOWeek:                  "W%V ",
+	UnitYear + "-" + UnitISOWeek: "%G W%V ",
+	UnitDay:                      "%a ",
+	UnitDayOfYear:                "%j ",
+	UnitHours:                    "%H:00",
+	UnitMinutes:                  "00:%M",
+	UnitSeconds:                  ":%S",
+	UnitMilliseconds:             ".%L",
+	UnitYear + "-" + UnitMonth:   "%Y-%m ",
 	UnitYear + "-" + UnitMonth + "-" + UnitDate: "%Y-%m-%d ",
 	UnitHours + "-" + UnitMinutes:               "%H:%M",
 }
@@ -167,6 +170,8 @@ func IntervalFor(z Zone, unit string) (Interval, bool) {
 		return z.Month(), true
 	case UnitWeek:
 		return z.Week(0), true
+	case UnitISOWeek:
+		return z.Week(1), true
 	case UnitDate, UnitDay, UnitDayOfYear:
 		return z.Day(), true
 	case UnitHours:
@@ -240,6 +245,14 @@ func (z Zone) WeekOfYear(t float64) float64 {
 	return float64(weekNumber(z.dayInfo(z.Fields(t)), 0))
 }
 
+// ISOWeekOfYear is vega-time's isoweek / utcisoweek: the ISO 8601 week number.
+func (z Zone) ISOWeekOfYear(t float64) float64 {
+	if !Valid(t) {
+		return math.NaN()
+	}
+	return float64(isoWeek(z.dayInfo(z.Fields(t))))
+}
+
 // ---- floor ----
 
 type getKind uint8
@@ -257,7 +270,11 @@ const (
 	gWeek
 	gWeekDay // WEEK+DAY: day of year of the weekday within the week number
 	gDay
+	gISOWeek     // the ISO 8601 week number
+	gISOWeekYear // YEAR+ISOWEEK: the year the ISO week belongs to
+	gISOWeekDay  // ISOWEEK+DAY: day of year of the weekday within the ISO week number
 	gConst2012
+	gConst2015
 	gZero
 	gOne
 )
@@ -268,6 +285,7 @@ const (
 	invNone invKind = iota
 	invQuarter
 	invWeek
+	invISOWeek
 )
 
 type floorPart struct {
@@ -309,9 +327,15 @@ func NewFloor(z Zone, units []string, step float64) *Floorer {
 		return p
 	}
 	f := &Floorer{z: z}
+	// Without a year unit, the reference year is 2012 (a leap year that begins on a Sunday), or 2015
+	// for ISO weeks: it has 53, so every week number is a real week (vega-time's floor.js).
 	switch {
+	case u[UnitYear] && u[UnitISOWeek]:
+		f.y = part(UnitYear, 0, gISOWeekYear, invNone)
 	case u[UnitYear]:
 		f.y = part(UnitYear, 0, gYear, invNone)
+	case u[UnitISOWeek]:
+		f.y = floorPart{get: gConst2015}
 	default:
 		f.y = floorPart{get: gConst2012}
 	}
@@ -326,8 +350,12 @@ func NewFloor(z Zone, units []string, step float64) *Floorer {
 	switch {
 	case u[UnitWeek] && u[UnitDay]:
 		f.d = part(UnitDay, 1, gWeekDay, invNone)
+	case u[UnitISOWeek] && u[UnitDay]:
+		f.d = part(UnitDay, 1, gISOWeekDay, invNone)
 	case u[UnitWeek]:
 		f.d = part(UnitWeek, 1, gWeek, invWeek)
+	case u[UnitISOWeek]:
+		f.d = part(UnitISOWeek, 1, gISOWeek, invISOWeek)
 	case u[UnitDay]:
 		f.d = part(UnitDay, 1, gDay, invNone)
 	case u[UnitDate]:
@@ -382,8 +410,32 @@ func (st *floorState) get(k getKind, year float64) float64 {
 		return weekdayOfYear(float64(weekNumber(st.di, 0)), float64(f.Weekday), st.first(year))
 	case gDay:
 		return weekdayOfYear(1, float64(f.Weekday), st.first(year))
+	case gISOWeek:
+		return float64(isoWeek(st.di))
+	case gISOWeekYear:
+		return float64(isoYear(st.di))
+	case gISOWeekDay:
+		return isoWeekday(st.isoWeekOne(year), float64(isoWeek(st.di)), float64((f.Weekday+6)%7))
 	}
 	return math.NaN()
+}
+
+// isoWeekday is vega-time's isoWeekday(): the day of the year of a day (Monday 0 to Sunday 6) of an ISO
+// week, where weekOneDate is the day of January on which week 1 begins.
+func isoWeekday(weekOneDate, week, day float64) float64 {
+	return weekOneDate + float64((week-1)*7) + day
+}
+
+// isoWeekOne is localISOWeekOneDate / utcISOWeekOneDate: the day of January on which week 1 of the
+// week-numbering year y begins; zero or less refers to the preceding December. NaN when y is not a
+// number.
+func (st *floorState) isoWeekOne(y float64) float64 {
+	if math.IsNaN(y) || math.IsInf(y, 0) || math.Abs(y) > 1e7 {
+		return math.NaN()
+	}
+	jan1 := st.z.jan1Days(int(math.Trunc(y)))
+	monday := floorToWeekday(jan1+3, 1)
+	return float64(monday - jan1 + 1)
 }
 
 // weekdayOfYear is vega-time's weekday(): the day of the year, counting from
@@ -406,6 +458,8 @@ func (p floorPart) eval(st *floorState, year float64) float64 {
 	switch p.get {
 	case gConst2012:
 		return 2012
+	case gConst2015:
+		return 2015
 	case gZero:
 		return 0
 	case gOne:
@@ -424,6 +478,8 @@ func (p floorPart) eval(st *floorState, year float64) float64 {
 		v *= 3
 	case invWeek:
 		v = weekdayOfYear(v, 0, st.first(year))
+	case invISOWeek:
+		v = isoWeekday(st.isoWeekOne(year), v, 0)
 	}
 	return v
 }

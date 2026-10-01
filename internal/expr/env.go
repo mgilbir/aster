@@ -76,6 +76,7 @@ type GeoProvider interface {
 	GeoBounds(projection, geojson, group jsval.Value) jsval.Value
 	GeoCentroid(projection, geojson, group jsval.Value) jsval.Value
 	GeoScale(projection, group jsval.Value) jsval.Value
+	GeoTranslate(projection, group jsval.Value) jsval.Value
 	// GeoShape and PathShape return an opaque shape (a function of a path
 	// context upstream) for the symbol/shape encodings.
 	GeoShape(projection, geojson, group jsval.Value) jsval.Value
