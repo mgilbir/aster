@@ -564,13 +564,13 @@ func Piecewise(interpolate Interpolator, values []jsval.Value) func(t float64) j
 	return func(t float64) jsval.Value {
 		if n == 0 {
 			// I[0] is undefined with fewer than two values.
-			panic(&Thrown{"I[i] is not a function"})
+			panic(&Thrown{Msg: "I[i] is not a function"})
 		}
 		t = float64(t * float64(n)) // rounded here so t-i below cannot fuse into an FMA
 		f := math.Floor(t)
 		if f != f {
 			// I[NaN] is undefined too.
-			panic(&Thrown{"I[i] is not a function"})
+			panic(&Thrown{Msg: "I[i] is not a function"})
 		}
 		i := int(math.Max(0, math.Min(float64(n-1), f)))
 		return segs[i](t - float64(i))
