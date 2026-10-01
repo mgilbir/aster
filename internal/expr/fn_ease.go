@@ -151,7 +151,7 @@ func easeBackInOut(t float64) float64 {
 		return float64(t*t) * (float64((s+1)*t) - s) / 2
 	}
 	t -= 2
-	return (float64(t*t)*(float64((s+1)*t)+s) + 2) / 2
+	return (float64(float64(t*t)*(float64((s+1)*t)+s)) + 2) / 2
 }
 
 // elasticParams are the s and p of d3-ease's elastic custom(a, p) at the default amplitude and period.
