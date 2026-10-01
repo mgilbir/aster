@@ -58,7 +58,7 @@ const COLUMNS = [
     values: [1, 2, '2', 4],
   },
   { name: 'all-words', note: 'a column of numeric text, which a domain sorts as text or as numbers', values: ['10', '9', '100', '2'] },
-  { name: 'with-a-negative-zero', note: 'a negative zero, which JSON writes as 0', values: [0, -0, 1, 2] },
+  { name: 'with-a-negative-zero', note: 'a negative zero (carried as -0 in the spec text)', values: [0, -0, 1, 2] },
   { name: 'with-a-negative', note: 'a negative, for the minus sign a label writes', values: [-5, 2, -1200, 4] },
   {
     name: 'past-exact-integers',
@@ -573,6 +573,14 @@ function withColumn(chart, column) {
   return spec;
 }
 
+// specText serializes a spec as JSON, writing a negative zero as -0, which
+// JSON.stringify writes as 0. JSON.parse reads -0 back as negative zero, and
+// so does the engine.
+function specText(spec) {
+  const mark = '__negative_zero__';
+  return JSON.stringify(spec, (_, v) => (Object.is(v, -0) ? mark : v)).replaceAll(`"${mark}"`, '-0');
+}
+
 export function generate() {
   const cases = [];
   for (const chart of CHARTS()) {
@@ -581,7 +589,8 @@ export function generate() {
         name: `${chart.name}--${column.name}`,
         family: chart.name,
         property: column.name,
-        spec: withColumn(chart, column),
+        // As text, so a negative zero reaches both sides as -0.
+        specText: specText(withColumn(chart, column)),
       });
     }
   }

@@ -55,6 +55,9 @@ type sweepCase struct {
 	Property string          `json:"property,omitempty"`
 	Lite     bool            `json:"lite,omitempty"`
 	Spec     json.RawMessage `json:"spec"`
+	// SpecText, when set, is the spec as text, for a value JSON cannot carry
+	// through the generator's output (a negative zero); it replaces Spec.
+	SpecText string `json:"specText,omitempty"`
 	// Writes are the signal writes of a signal-sweep case.
 	Writes []oracle.SignalWrite `json:"writes,omitempty"`
 }
@@ -88,6 +91,11 @@ func runSweep(t *testing.T, sw sweep) {
 	}
 	if len(out.Cases) < sw.floor {
 		t.Fatalf("%s generated %d cases, fewer than its floor of %d", sw.name, len(out.Cases), sw.floor)
+	}
+	for i := range out.Cases {
+		if out.Cases[i].SpecText != "" {
+			out.Cases[i].Spec = json.RawMessage(out.Cases[i].SpecText)
+		}
 	}
 	seen := map[string]bool{}
 	for _, c := range out.Cases {
