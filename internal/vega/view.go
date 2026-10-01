@@ -70,9 +70,13 @@ type Limits struct {
 	// MaxCanvasBytes is the total pixel memory of the bitmaps transforms
 	// paint (the heatmap's images).
 	MaxCanvasBytes int64
-	// MaxStringBytes is the total size of the large strings (over 4 KiB)
+	// MaxStringBytes is the total size of the large strings (over 512 bytes)
 	// expressions may build.
 	MaxStringBytes int64
+	// MaxParseBytes bounds the memory one JSON document may take once parsed
+	// (data files, inline values given as text, topojson), estimated while it
+	// is built.
+	MaxParseBytes int64
 }
 
 func (l Limits) withDefaults() Limits {
@@ -102,6 +106,9 @@ func (l Limits) withDefaults() Limits {
 	}
 	if l.MaxStringBytes == 0 {
 		l.MaxStringBytes = 128 << 20
+	}
+	if l.MaxParseBytes == 0 {
+		l.MaxParseBytes = 1 << 30
 	}
 	return l
 }
