@@ -18,7 +18,7 @@ func TestMeasureTextWidestLine(t *testing.T) {
 	if wide <= narrow {
 		t.Fatalf("fixture widths %v %v", wide, narrow)
 	}
-	for _, sep := range []string{"\n", "\r", "\r\n", " ", " "} {
+	for _, sep := range []string{"\n", "\r", "\r\n", "\u2028", "\u2029"} {
 		if got := m.MeasureText("ab"+sep+"cdefgh", font); got != wide {
 			t.Errorf("ab%qcdefgh: %v, want %v", sep, got, wide)
 		}
@@ -65,6 +65,13 @@ func TestMeasureTextWidestLine(t *testing.T) {
 	x := m.MeasureText(near, font)
 	if got, want := m.MeasureText(near+"\t", font), stop*(math.Ceil(x/stop)+1); math.Abs(got-want) > 1e-9 {
 		t.Errorf("tab near a stop: %v, want %v", got, want)
+	}
+	// A NUL ends the string, as node-canvas's C string does.
+	if got := m.MeasureText("ab\x00cdefgh", font); got != m.MeasureText("ab", font) {
+		t.Errorf("text after a NUL was measured: %v", got)
+	}
+	if got := m.MeasureText("\x00ab", font); got != 0 {
+		t.Errorf("leading NUL: %v", got)
 	}
 	// U+0085 and the vertical tab are not line separators to Pango.
 	if got := m.MeasureText("ab\u0085cdefgh", font); got <= wide {

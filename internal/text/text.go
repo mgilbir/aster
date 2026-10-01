@@ -238,10 +238,15 @@ func (m *Measurer) add(e *entry) {
 
 // MeasureText returns the width in pixels of text set in the CSS font.
 func (m *Measurer) MeasureText(text, cssFont string) float64 {
+	// node-canvas hands the string to Pango as a C string: it ends at the first
+	// NUL character.
+	if i := strings.IndexByte(text, 0); i >= 0 {
+		text = text[:i]
+	}
 	if len(text) == 0 {
 		return 0
 	}
-	if strings.ContainsAny(text, "\n\r  ") {
+	if strings.ContainsAny(text, "\n\r\u2028\u2029") {
 		// The reference lays text out with Pango, which breaks it into lines at
 		// these separators ("\r\n" is one break) and reports the widest line.
 		return m.measureLines(text, cssFont)
@@ -282,7 +287,7 @@ func (m *Measurer) MeasureText(text, cssFont string) float64 {
 func (m *Measurer) measureLines(text, cssFont string) float64 {
 	var widest float64
 	for {
-		i := strings.IndexAny(text, "\n\r  ")
+		i := strings.IndexAny(text, "\n\r\u2028\u2029")
 		line := text
 		if i >= 0 {
 			line = text[:i]

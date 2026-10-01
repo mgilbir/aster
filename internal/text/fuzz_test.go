@@ -78,7 +78,7 @@ func FuzzMeasure(f *testing.F) {
 		runs, total := m.ShapeText(text, css)
 		// MeasureText lays text with line separators and tabs out as Pango
 		// does; ShapeText only shapes the glyphs.
-		if total != w && !strings.ContainsAny(text, "\n\r\u2028\u2029\t") {
+		if total != w && !strings.ContainsAny(text, "\n\r\u2028\u2029\t\x00") {
 			t.Fatalf("ShapeText total %v != MeasureText %v", total, w)
 		}
 		for _, r := range runs {
