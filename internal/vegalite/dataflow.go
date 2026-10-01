@@ -290,10 +290,10 @@ func newSourceNode(cc *compileCtx, data Value) *sourceNode {
 		s.name = n.AsString()
 	}
 	if format != nil && format.Len() > 0 {
+		if s.data == nil {
+			throw("Cannot set properties of undefined (setting 'format')")
+		}
 		s.data.Set("format", jsval.Obj(format))
-	}
-	if s.data == nil {
-		s.data = jsval.NewObject(0)
 	}
 	s.base().self = s
 	return s

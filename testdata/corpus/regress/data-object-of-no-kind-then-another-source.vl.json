@@ -1,0 +1,6 @@
+{"$schema":"https://vega.github.io/schema/vega-lite/v6.json",
+"width":100,"height":100,
+"projection":{"type":"orthographic"},
+"layer":[
+{"data":{},"mark":{"type":"geoshape","fill":"aliceblue"}},
+{"data":{"graticule":true},"mark":{"type":"geoshape","stroke":"black","fill":null}}]}

@@ -27,11 +27,16 @@ func findSource(data Value, sources []dfNode) *sourceNode {
 		if !ok {
 			continue
 		}
-		otherData := jsval.Obj(os.data)
 		if data.Get("name").IsTruthy() && os.hasName() && data.Get("name").AsString() != os.name {
 			continue
 		}
 		formatMesh := data.Get("format").Get("mesh")
+		if os.data == nil {
+			// A data object that is none of inline, url, sphere or named
+			// (`{}`) leaves the source without data.
+			throw("Cannot read properties of undefined (reading 'format')")
+		}
+		otherData := jsval.Obj(os.data)
 		otherFeature := otherData.Get("format").Get("feature")
 		if formatMesh.IsTruthy() && otherFeature.IsTruthy() {
 			continue
