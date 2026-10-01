@@ -230,33 +230,41 @@ type token struct {
 	text string
 }
 
-// tokenize splits s into numbers and the text between them. Separators
-// (spaces and commas) are dropped so "1,2" and "1 2" compare equal.
+// tokenize splits s into numbers and the text between them. A run of only
+// separators (spaces and commas) is dropped, so "1,2" and "1 2" compare
+// equal, as they do in path data and lists. Other text keeps its commas;
+// its whitespace is trimmed and each run of it collapses to one space, as
+// SVG collapses whitespace when it renders text.
 func tokenize(s string) []token {
 	var out []token
 	i := 0
 	for i < len(s) {
-		ch := s[i]
-		if ch == ' ' || ch == ',' || ch == '\n' || ch == '\t' {
-			i++
-			continue
-		}
 		if j := scanNumber(s, i); j > i {
-			f, err := strconv.ParseFloat(s[i:j], 64)
-			if err == nil {
+			if f, err := strconv.ParseFloat(s[i:j], 64); err == nil {
 				out = append(out, token{num: true, val: f})
 				i = j
 				continue
 			}
 		}
 		j := i + 1
-		for j < len(s) && scanNumber(s, j) == j && s[j] != ' ' && s[j] != ',' {
+		for j < len(s) && scanNumber(s, j) == j {
 			j++
 		}
-		out = append(out, token{text: s[i:j]})
+		if text := collapse(s[i:j]); text != "" {
+			out = append(out, token{text: text})
+		}
 		i = j
 	}
 	return out
+}
+
+// collapse trims whitespace and collapses each inner run of it to one
+// space; a run of nothing but separators is empty.
+func collapse(s string) string {
+	if strings.Trim(s, " ,\n\t\r") == "" {
+		return ""
+	}
+	return strings.Join(strings.Fields(s), " ")
 }
 
 // scanNumber returns the end of a number starting at i, or i if none.
