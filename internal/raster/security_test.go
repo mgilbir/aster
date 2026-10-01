@@ -233,3 +233,55 @@ func TestFontMetrics(t *testing.T) {
 		t.Error("garbage parsed as a font")
 	}
 }
+
+// A clipPath's <use> may reference another <use>. A chain that loops draws
+// nothing, wherever it is entered; a chain that ends at a shape clips to it.
+// Each chain is walked once however many uses share it, and the walk is
+// charged to MaxRenderNodes like any other <use> expansion.
+func TestClipUseChains(t *testing.T) {
+	alpha := func(svg string, x, y int) uint8 {
+		t.Helper()
+		img, err := Render([]byte(`<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">`+svg+`</svg>`), Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return img.Pix[(y*img.Stride)+x*4+3]
+	}
+	loop := `<defs><clipPath id="c"><use href="#u0"/><use id="u0" href="#u1"/><use id="u1" href="#u2"/><use id="u2" href="#u1"/></clipPath></defs><rect width="10" height="10" clip-path="url(#c)"/>`
+	if a := alpha(loop, 2, 2); a != 0 {
+		t.Errorf("a looping chain clipped to something: alpha %d", a)
+	}
+	chain := `<defs><rect id="r" width="4" height="4"/><clipPath id="c"><use href="#u0"/></clipPath><use id="u0" href="#u1"/><use id="u1" href="#r"/></defs><rect width="10" height="10" clip-path="url(#c)"/>`
+	if a := alpha(chain, 2, 2); a != 255 {
+		t.Errorf("inside the chained rect: alpha %d, want 255", a)
+	}
+	if a := alpha(chain, 6, 6); a != 0 {
+		t.Errorf("outside the chained rect: alpha %d, want 0", a)
+	}
+
+	const n = 100000
+	var b strings.Builder
+	b.WriteString(secHead + `<defs><clipPath id="c">`)
+	for i := range n {
+		fmt.Fprintf(&b, `<use id="u%d" href="#u%d"/>`, i, (i+1)%n)
+	}
+	b.WriteString(`</clipPath></defs><rect width="5" height="5" clip-path="url(#c)"/></svg>`)
+	if err := mustFinish(t, "loop of uses", b.String(), Limits{}, 2*time.Second); err != nil {
+		t.Errorf("a loop of uses: %v", err)
+	}
+
+	b.Reset()
+	b.WriteString(secHead + `<defs><rect id="r" width="4" height="4"/><clipPath id="c">`)
+	for i := range n {
+		next := fmt.Sprintf("u%d", i+1)
+		if i == n-1 {
+			next = "r"
+		}
+		fmt.Fprintf(&b, `<use id="u%d" href="#%s"/>`, i, next)
+	}
+	b.WriteString(`</clipPath></defs><rect width="5" height="5" clip-path="url(#c)"/></svg>`)
+	err := mustFinish(t, "chain of uses", b.String(), Limits{MaxRenderNodes: 1_000_000}, 5*time.Second)
+	if !errors.Is(err, errLimit) {
+		t.Errorf("a long chain of uses from each of %d uses: %v, want the render-node limit", n, err)
+	}
+}
