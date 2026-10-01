@@ -305,7 +305,7 @@ func (c *Converter) vegaSVG(ctx context.Context, spec []byte) (string, error) {
 	if err := c.checkSpecSize(spec); err != nil {
 		return "", err
 	}
-	v, err := timed(ctx, "json", func() (jsval.Value, error) { return jsval.ParseJSON(spec) })
+	v, err := timed(ctx, "json", func() (jsval.Value, error) { return jsval.ParseJSONLimit(spec, c.limits().MaxParseBytes) })
 	if err != nil {
 		return "", fmt.Errorf("aster: parsing Vega spec: %w", err)
 	}
@@ -475,6 +475,8 @@ func (c *Converter) limits() vega.Limits {
 		l.MaxLoadBytes = int64(max(n/2, 1<<20))
 		l.MaxStringBytes = int64(max(n/4, 1<<20))
 		l.MaxCanvasBytes = int64(max(n/2, 1<<20))
+		l.MaxParseBytes = int64(max(n/2, 1<<20))
+		l.RowBytes = bytesPerRow
 	}
 	return l
 }
@@ -552,7 +554,7 @@ func (c *Converter) compileVegaLite(ctx context.Context, spec []byte) (jsval.Val
 	if err := c.checkSpecSize(spec); err != nil {
 		return jsval.Undefined, err
 	}
-	v, err := timed(ctx, "json", func() (jsval.Value, error) { return jsval.ParseJSON(spec) })
+	v, err := timed(ctx, "json", func() (jsval.Value, error) { return jsval.ParseJSONLimit(spec, c.limits().MaxParseBytes) })
 	if err != nil {
 		return jsval.Undefined, fmt.Errorf("aster: parsing Vega-Lite spec: %w", err)
 	}
