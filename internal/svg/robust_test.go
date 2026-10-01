@@ -97,7 +97,7 @@ func TestRandomScenesNeverPanic(t *testing.T) {
 						it.Href = []string{"https://x", "javascript:x", "", "//h"}[r.Intn(4)]
 					}
 					if r.Intn(3) == 0 {
-						it.StrokeDash = []float64{1, math.NaN()}
+						it.StrokeDash = jsval.Arr([]jsval.Value{jsval.Num(1), jsval.Num(math.NaN())})
 					}
 					if typ == scene.MarkGroup {
 						build(it, depth+1)

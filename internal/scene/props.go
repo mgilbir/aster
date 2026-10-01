@@ -60,16 +60,7 @@ func (it *Item) setProp(l *jsonLoader, k string, val jsval.Value) (bool, error) 
 	case "strokeMiterLimit":
 		it.StrokeMiterLimit = numOf(val)
 	case "strokeDash":
-		switch {
-		case val.IsArr():
-			d := make([]float64, 0, val.Len())
-			for _, e := range val.Items() {
-				d = append(d, jsval.ToNumber(e))
-			}
-			it.StrokeDash = d
-		case val.IsStr():
-			it.StrokeDashStr = val.StrValue()
-		}
+		it.StrokeDash = val
 	case "strokeDashOffset":
 		it.StrokeDashOffset = numOf(val)
 	case "strokeForeground":
@@ -277,17 +268,7 @@ func (it *Item) Get(key string) jsval.Value {
 	case "strokeMiterLimit":
 		return num(it.StrokeMiterLimit)
 	case "strokeDash":
-		if it.StrokeDashStr != "" {
-			return jsval.Str(it.StrokeDashStr)
-		}
-		if it.StrokeDash == nil {
-			return jsval.Undefined
-		}
-		vs := make([]jsval.Value, len(it.StrokeDash))
-		for i, d := range it.StrokeDash {
-			vs[i] = jsval.Num(d)
-		}
-		return jsval.Arr(vs)
+		return it.StrokeDash
 	case "strokeDashOffset":
 		return num(it.StrokeDashOffset)
 	case "strokeForeground":

@@ -1,8 +1,6 @@
 # Cases whose comparison with the node oracle is not "ok" (see expect_test.go).
 # id<TAB>status<TAB>reason
 a-corner-radius--round	differ	TODO: 4 diffs; first: /#document[0]/svg.marks[0]/g[0]/g.mark-group.role-frame.root[0]/g[1]/g[0]/g.mark-rect.role-mark[0]/path: attribute d="M9.523809523809518,0h38.095238095238095v60h-38.095238095238095Z", want "MNaN,0LNaN,0CNaN,0,47.61904761904761,NaN,47.61904761904761,NaNL47.61904761904761,NaNC47.61904761904761,NaN,NaN…
-a-dash-pattern--6	differ	TODO: 1 diffs; first: /#document[0]/svg.marks[0]/g[0]/g.mark-group.role-frame.root[0]/g[1]/g[0]/g.mark-rule.role-mark[0]/line: attribute stroke-dasharray="4,2", want "6"
-a-dash-pattern--null	differ	TODO: 1 diffs; first: /#document[0]/svg.marks[0]/g[0]/g.mark-group.role-frame.root[0]/g[1]/g[0]/g.mark-rule.role-mark[0]/line: unexpected attribute stroke-dasharray="4,2"
 a-format-specifier--42	differ	TODO: 1 diffs; first: /#document[0]/svg.marks[0]/g[0]/g.mark-group.role-frame.root[0]/g[1]/g[0]/g.mark-group.role-axis: missing attribute aria-label="Y-axis for a linear scale with values from                                          0 to                                          1"
 a-legend-title--0	differ	TODO: 1 diffs; first: /#document[0]/svg.marks[0]/g[0]/g.mark-group.role-frame.root[0]/g[1]/g[0]/g.mark-group.role-legend[0]/g[0]/path.background: attribute d="M0,0h39v66h-39Z", want "M0,0h23v66h-23Z"
 a-legend-title--1e-21	differ	TODO: 1 diffs; first: /#document[0]/svg.marks[0]/g[0]/g.mark-group.role-frame.root[0]/g[1]/g[0]/g.mark-group.role-legend[0]/g[0]/path.background: attribute d="M0,0h39v66h-39Z", want "M0,0h40v66h-40Z"

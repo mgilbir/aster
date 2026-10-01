@@ -62,19 +62,9 @@ func (r *renderer) style(m *scene.Mark, it *scene.Item, tag string, fill, stroke
 	if it.StrokeJoin != "" {
 		w.attr("stroke-linejoin", it.StrokeJoin)
 	}
-	switch {
-	case it.StrokeDashStr != "":
-		w.attr("stroke-dasharray", it.StrokeDashStr)
-	case it.StrokeDash != nil:
-		// An array coerces to its comma-joined elements; empty gives "".
-		w.attrName("stroke-dasharray")
-		for i, d := range it.StrokeDash {
-			if i > 0 {
-				w.buf = append(w.buf, ',')
-			}
-			w.buf = scene.AppendNumber(w.buf, d)
-		}
-		w.buf = append(w.buf, '"')
+	if !it.StrokeDash.IsNullish() {
+		// String(value): an array joins with commas, an empty one gives "".
+		w.attr("stroke-dasharray", it.StrokeDash.AsString())
 	}
 	r.itemNumAttr(it, "strokeDashOffset", "stroke-dashoffset", it.StrokeDashOffset)
 	r.itemNumAttr(it, "strokeMiterLimit", "stroke-miterlimit", it.StrokeMiterLimit)
