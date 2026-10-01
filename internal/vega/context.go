@@ -152,7 +152,7 @@ func (c *rtContext) parseOperator(e *entry) {
 		if e.update != nil {
 			fn := e.update
 			n.update = func(n *opNode, p *opParams) any {
-				return fn.eval(c, jsval.Undefined, jsval.Undefined, jsval.Undefined)
+				return fn.eval(c, jsval.Undefined, jsval.Undefined, jsval.Undefined, 0)
 			}
 		}
 	} else {
@@ -419,10 +419,21 @@ type depRef struct {
 	e    *entry
 }
 
+// exprVars are the free variables a context defines for an expression: the
+// parameters of the function upstream compiles it into.
+type exprVars uint8
+
+const (
+	varDatum exprVars = 1 << iota
+	varItem
+	varEvent
+)
+
 // eval evaluates the expression in context c.
-func (f *exprFn) eval(c *rtContext, datum, item, event jsval.Value) jsval.Value {
+func (f *exprFn) eval(c *rtContext, datum, item, event jsval.Value, vars exprVars) jsval.Value {
 	s := c.scope()
 	s.Datum, s.Item, s.Event = datum, item, event
+	s.NoDatum, s.NoItem, s.NoEvent = vars&varDatum == 0, vars&varItem == 0, vars&varEvent == 0
 	v, err := f.prog.Eval(s)
 	if err != nil {
 		failErr(fmt.Errorf("%w (in expression %s)", err, f.src))
@@ -438,7 +449,7 @@ type boundExpr struct {
 }
 
 func (b *boundExpr) call(datum jsval.Value) jsval.Value {
-	return b.fn.eval(b.ctx, datum, jsval.Undefined, jsval.Undefined)
+	return b.fn.eval(b.ctx, datum, jsval.Undefined, jsval.Undefined, varDatum)
 }
 
 // accessor adapts the expression to a transforms accessor.

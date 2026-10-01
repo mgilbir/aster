@@ -335,11 +335,26 @@ func (c *compiler) identifier(n *Node) (node, error) {
 	}
 	switch id {
 	case "datum":
-		return func(s *Scope) jsval.Value { return s.Datum }, nil
+		return func(s *Scope) jsval.Value {
+			if s.NoDatum {
+				throw("ReferenceError", "datum is not defined")
+			}
+			return s.Datum
+		}, nil
 	case "event":
-		return func(s *Scope) jsval.Value { return s.Event }, nil
+		return func(s *Scope) jsval.Value {
+			if s.NoEvent {
+				throw("ReferenceError", "event is not defined")
+			}
+			return s.Event
+		}, nil
 	case "item":
-		return func(s *Scope) jsval.Value { return s.Item }, nil
+		return func(s *Scope) jsval.Value {
+			if s.NoItem {
+				throw("ReferenceError", "item is not defined")
+			}
+			return s.Item
+		}, nil
 	}
 	c.addSignal(id)
 	return func(s *Scope) jsval.Value {
@@ -669,6 +684,9 @@ func (c *compiler) member(n *Node) (node, error) {
 			}
 			var hint slotHint
 			return func(s *Scope) jsval.Value {
+				if s.NoDatum {
+					throw("ReferenceError", "datum is not defined")
+				}
 				d := s.Datum
 				if d.IsObj() {
 					return hint.get(d.ObjValue(), key)

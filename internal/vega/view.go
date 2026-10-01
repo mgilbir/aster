@@ -593,7 +593,7 @@ func (v *runView) addSignalListener(c *rtContext, src, tgt *opNode, u *updateSpe
 			}
 		case u.update != nil:
 			ev := jsval.Obj(jsval.NewObject(0))
-			val = u.update.eval(c, jsval.Undefined, jsval.Undefined, ev)
+			val = u.update.eval(c, jsval.Undefined, jsval.Undefined, ev, varDatum|varEvent)
 		case u.hasVal:
 			val = u.value
 		}

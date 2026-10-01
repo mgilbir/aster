@@ -235,7 +235,7 @@ func (f *exprFn) evalEnc(ev *encEval) jsval.Value {
 	if f.usesItem {
 		item = ev.ctx.view.itemAsValue(ev.item)
 	}
-	return f.eval(ev.ctx, ev.datum, item, jsval.Undefined)
+	return f.eval(ev.ctx, ev.datum, item, jsval.Undefined, varDatum|varItem)
 }
 
 func constFn(v jsval.Value) valueFn { return func(*encEval) jsval.Value { return v } }
