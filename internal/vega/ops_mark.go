@@ -361,11 +361,10 @@ func adjustSpatial(it *scene.Item, set *encodeSet) bool {
 
 // jsToNumOr0 is `(o.width||0)`.
 func jsToNumOr0(v jsval.Value) float64 {
-	f := jsval.ToNumber(v)
-	if f != f {
-		return 0
+	if !v.IsTruthy() {
+		return 0 // undefined, null, false, "", 0 and NaN
 	}
-	return f
+	return jsval.ToNumber(v) // a word or an object stays NaN: `{}/2` is NaN
 }
 
 // xc and yc are encoded channels that the item type does not model; they are

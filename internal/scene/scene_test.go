@@ -445,7 +445,9 @@ func TestItemSetGet(t *testing.T) {
 	if g := it.Fill.Gradient(); g == nil || !g.Radial || len(g.Stops) != 1 {
 		t.Errorf("gradient: %+v", it.Fill)
 	}
-	if v := it.Get("x"); v.NumValue() != 12.5 {
+	// A string given for a numeric property reads back as the string, as a
+	// JavaScript property would, while the number it converts to drives layout.
+	if v := it.Get("x"); !v.IsStr() || v.StrValue() != "12.5" {
 		t.Errorf("Get x = %v", v)
 	}
 	if !it.Get("y").IsUndefined() || !it.Get("stroke").IsNull() || it.Get("madeUp").NumValue() != 1 {

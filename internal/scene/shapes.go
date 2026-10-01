@@ -70,7 +70,7 @@ func Line(ctx PathContext, items []*Item) error {
 			}
 		}
 		if defined0 {
-			out.point(items[i].X.Zero(), items[i].Y.Zero())
+			out.point(items[i].OrZero("x"), items[i].OrZero("y"))
 		}
 	}
 	return ctxErr(ctx)
@@ -118,7 +118,7 @@ func Area(ctx PathContext, items []*Item) error {
 		}
 		if defined0 {
 			it := items[i]
-			x, y := it.X.Zero(), it.Y.Zero()
+			x, y := it.OrZero("x"), it.OrZero("y")
 			if horizontal {
 				// area().y(y).x1(x).x0(xw): baseline at x+width, same y.
 				bx[i], by[i] = x+it.Width.Zero(), y
@@ -179,7 +179,7 @@ func Trail(ctx PathContext, items []*Item) error {
 			if size == 0 {
 				size = 1
 			}
-			point(it.X.Zero(), it.Y.Zero(), size)
+			point(it.OrZero("x"), it.OrZero("y"), size)
 		}
 	}
 	return ctxErr(ctx)
@@ -187,7 +187,7 @@ func Trail(ctx PathContext, items []*Item) error {
 
 // Rectangle draws the item's box at its own position, with per-corner radii.
 func Rectangle(ctx PathContext, item *Item) {
-	rectangle(ctx, item, item.X.Zero(), item.Y.Zero())
+	rectangle(ctx, item, item.OrZero("x"), item.OrZero("y"))
 }
 
 // RectangleAt draws the item's box (width, height, radii) with its top-left

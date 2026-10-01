@@ -209,6 +209,10 @@ func (it *Item) setProp(l *jsonLoader, k string, val jsval.Value) (bool, error) 
 // or unset properties. Group items answer "items" with their child marks'
 // count only through Items; Get does not expose structure.
 func (it *Item) Get(key string) jsval.Value {
+	// A numeric property given a word reads back as that word.
+	if v, ok := it.Raw[key]; ok {
+		return v
+	}
 	num := func(n Num) jsval.Value {
 		if !n.Set() {
 			return jsval.Undefined
@@ -426,7 +430,7 @@ func gradientValue(g *Gradient) jsval.Value {
 var rawNumeric = map[string]bool{
 	"angle": true, "strokeWidth": true, "strokeOpacity": true, "fillOpacity": true,
 	"opacity": true, "strokeDashOffset": true, "strokeMiterLimit": true,
-	"width": true, "height": true, "cornerRadius": true, "cornerRadiusTopLeft": true,
+	"x": true, "y": true, "width": true, "height": true, "cornerRadius": true, "cornerRadiusTopLeft": true,
 	"cornerRadiusTopRight": true, "cornerRadiusBottomRight": true, "cornerRadiusBottomLeft": true,
 }
 
@@ -491,12 +495,29 @@ func (it *Item) OrZero(prop string) float64 {
 		return jsval.ToNumber(v)
 	}
 	switch prop {
+	case "x":
+		return it.X.Zero()
+	case "y":
+		return it.Y.Zero()
 	case "width":
 		return it.Width.Zero()
 	case "height":
 		return it.Height.Zero()
 	}
 	return 0
+}
+
+// AppendPos appends `item[prop] || 0` (prop is "x" or "y") the way a template
+// string prints it into a transform: a word the property was given is written
+// as it is, where a number goes through AppendNumber.
+func (it *Item) AppendPos(dst []byte, prop string) []byte {
+	if v, ok := it.Raw[prop]; ok {
+		if !v.IsTruthy() {
+			return append(dst, '0')
+		}
+		return append(dst, v.AsString()...)
+	}
+	return AppendNumber(dst, it.OrZero(prop))
 }
 
 // AngleTruthy is upstream's `if (item.angle)`: the truthiness of the value as
