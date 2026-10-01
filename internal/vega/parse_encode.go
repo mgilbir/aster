@@ -102,6 +102,10 @@ func parseEncode(encode jsval.Value, typ, role string, style jsval.Value, scope 
 
 func (c *encCompiler) parseBlock(block jsval.Value, typ string) *encodeSet {
 	set := &encodeSet{marktype: typ}
+	if block.IsNullish() {
+		// the loop over its names does nothing, but listing the outputs does not
+		perr("Cannot convert undefined or null to object")
+	}
 	o := block.ObjValue()
 	if o == nil {
 		return set
