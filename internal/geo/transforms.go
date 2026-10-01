@@ -204,8 +204,17 @@ type GeoPointParams struct {
 // longitude/latitude to x/y through the projection. Where the projection has no
 // location (albersUsa outside its regions) the outputs are undefined.
 func GeoPoint(ctx context.Context, tuples []jsval.Value, p GeoPointParams) error {
-	if p.Projection == nil || p.Lon == nil || p.Lat == nil {
-		return errors.New("geo: geopoint requires projection and fields")
+	// A missing projection or field is only an error for a tuple to geo-code:
+	// upstream calls them inside the per-tuple function, arguments first.
+	if len(tuples) > 0 {
+		switch {
+		case p.Lon == nil:
+			return errors.New("TypeError: lon is not a function")
+		case p.Lat == nil:
+			return errors.New("TypeError: lat is not a function")
+		case p.Projection == nil:
+			return errors.New("TypeError: proj is not a function")
+		}
 	}
 	xf, yf := p.As[0], p.As[1]
 	if xf == "" {

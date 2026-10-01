@@ -1,0 +1,6 @@
+{"width":60,"height":40,
+"projections":[{"name":"p","type":"mercator"}],
+"data":[{"name":"t","values":[],"transform":[{"type":"geopoint","projection":"p","fields":["lon",null],"as":["x","y"]}]}],
+"marks":[
+{"type":"symbol","from":{"data":"t"},"encode":{"update":{"x":{"field":"x"},"y":{"field":"y"}}}},
+{"type":"rect","encode":{"update":{"x":{"value":2},"y":{"value":2},"width":{"value":5},"height":{"value":5},"fill":{"value":"steelblue"}}}}]}
