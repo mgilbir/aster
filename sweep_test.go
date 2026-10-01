@@ -61,6 +61,9 @@ type sweepCase struct {
 	SpecText string `json:"specText,omitempty"`
 	// Writes are the signal writes of a signal-sweep case.
 	Writes []oracle.SignalWrite `json:"writes,omitempty"`
+	// Zone, when set, is the IANA time zone both sides render in: node runs
+	// with that TZ and the engine with WithTimezone.
+	Zone string `json:"zone,omitempty"`
 }
 
 // sweepSkip is a part of the declared surface the generator did not sweep,
@@ -107,7 +110,17 @@ func runSweep(t *testing.T, sw sweep) {
 	}
 	t.Logf("%s: %d cases, %d skipped properties; oracle: %s", sw.name, len(out.Cases), len(out.Skips), o.Version())
 
-	c := oracleConverter(t)
+	// One oracle and one converter per time zone the cases use.
+	type side struct {
+		o *oracle.Oracle
+		c *aster.Converter
+	}
+	sides := map[string]side{"": {o, oracleConverter(t)}}
+	for _, sc := range out.Cases {
+		if _, ok := sides[sc.Zone]; !ok {
+			sides[sc.Zone] = side{oracle.ForZone(t, oracle.VL6, sc.Zone), oracleConverter(t, aster.WithTimezone(sc.Zone))}
+		}
+	}
 	var cases []sweepCase
 	for _, sc := range out.Cases {
 		if *sweepRun == "" || strings.Contains(sc.Name, *sweepRun) {
@@ -122,7 +135,8 @@ func runSweep(t *testing.T, sw sweep) {
 		go func() {
 			defer wg.Done()
 			for i := range next {
-				results[i] = runSweepCase(t, o, c, sw.mode, cases[i])
+				s := sides[cases[i].Zone]
+				results[i] = runSweepCase(t, s.o, s.c, sw.mode, cases[i])
 			}
 		}()
 	}

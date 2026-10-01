@@ -51,8 +51,10 @@ const PINNED_NOW = Date.UTC(2026, 0, 1);
   };
 }
 
-if (process.env.TZ !== 'UTC') {
-  console.error('run with TZ=UTC');
+// TZ selects the zone local time is in: UTC for the corpus, other zones for
+// the time-zone sweep. It is part of the version, hence of the cache key.
+if (!process.env.TZ) {
+  console.error('set TZ (UTC, or an IANA zone)');
   process.exit(2);
 }
 const require = createRequire(path.join(path.resolve(process.env.NODE_PATH), 'x.js'));
@@ -301,7 +303,8 @@ write({
   version:
     `vega ${vega.version} / vega-lite ${vl.version} / node ${process.version} / canvas ${require('canvas/package.json').version}` +
     (resvg ? ` / resvg-napi ${require('resvg-napi/package.json').version}` : '') +
-    ` / pango ${canvas.pangoVersion} / cairo ${canvas.cairoVersion} / probe ${probeWidth}`,
+    ` / pango ${canvas.pangoVersion} / cairo ${canvas.cairoVersion} / probe ${probeWidth}` +
+    (process.env.TZ === 'UTC' ? '' : ` / TZ ${process.env.TZ}`),
 });
 
 const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });

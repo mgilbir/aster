@@ -63,6 +63,7 @@ type Result struct {
 type Oracle struct {
 	root        string // repository root
 	set         string
+	zone        string // TZ of the node processes
 	fingerprint string // part of every cache key
 	version     string
 	free        chan *proc // idle processes; nil entries are slots not yet started
@@ -79,11 +80,19 @@ type proc struct {
 
 var oracles sync.Map // set → *Oracle
 
-// For returns the oracle for a module set (VL6 or VL5), or skips the test
-// (fails with ASTER_ORACLE=require) when it is not installed.
+// For returns the oracle for a module set (VL6 or VL5), running in UTC, or
+// skips the test (fails with ASTER_ORACLE=require) when it is not installed.
 func For(t testing.TB, set string) *Oracle {
 	t.Helper()
-	if o, ok := oracles.Load(set); ok {
+	return ForZone(t, set, "UTC")
+}
+
+// ForZone is For with node running in the IANA time zone zone (TZ), for
+// comparing local-time behaviour.
+func ForZone(t testing.TB, set, zone string) *Oracle {
+	t.Helper()
+	key := set + "\x00" + zone
+	if o, ok := oracles.Load(key); ok {
 		return o.(*Oracle)
 	}
 	unavailable := func(format string, args ...any) *Oracle {
@@ -113,7 +122,7 @@ func For(t testing.TB, set string) *Oracle {
 		}
 		h.Write(b)
 	}
-	o := &Oracle{root: root, set: set, free: make(chan *proc, poolSize())}
+	o := &Oracle{root: root, set: set, zone: zone, free: make(chan *proc, poolSize())}
 	first, err := o.start()
 	if err != nil {
 		return unavailable("%v", err)
@@ -124,7 +133,7 @@ func For(t testing.TB, set string) *Oracle {
 	}
 	h.Write([]byte(o.version))
 	o.fingerprint = hex.EncodeToString(h.Sum(nil))
-	actual, loaded := oracles.LoadOrStore(set, o)
+	actual, loaded := oracles.LoadOrStore(key, o)
 	if loaded {
 		first.stop()
 	}
@@ -279,7 +288,7 @@ func (o *Oracle) start() (*proc, error) {
 	// applies the version pinned in its package.json; CI installs the same.
 	cmd := exec.Command("node", filepath.Join(o.root, script))
 	cmd.Dir = filepath.Join(o.root, o.set)
-	cmd.Env = append(os.Environ(), "TZ=UTC", "NODE_PATH="+filepath.Join(o.root, o.set, "node_modules"))
+	cmd.Env = append(os.Environ(), "TZ="+o.zone, "NODE_PATH="+filepath.Join(o.root, o.set, "node_modules"))
 	cmd.Stderr = os.Stderr
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
