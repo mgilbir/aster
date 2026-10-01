@@ -102,8 +102,14 @@ func (m *mut) expand(s string) jsval.Value {
 	for strings.Contains(s, "$F") {
 		s = strings.Replace(s, "$F", m.field(), 1)
 	}
+	// A negated placeholder ("-$N") must stay a JSON number whatever the
+	// number drawn: "--1" is not one.
 	for strings.Contains(s, "$N") {
-		s = strings.Replace(s, "$N", m.number(), 1)
+		n := m.number()
+		if i := strings.Index(s, "$N"); i > 0 && s[i-1] == '-' && strings.HasPrefix(n, "-") {
+			s, n = s[:i-1]+s[i:], n[1:]
+		}
+		s = strings.Replace(s, "$N", n, 1)
 	}
 	for strings.Contains(s, "$S") {
 		q := string(jsval.AppendJSON(nil, jsval.Str(m.pick(trickyStrings))))
