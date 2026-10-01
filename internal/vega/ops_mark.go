@@ -131,6 +131,8 @@ func facDataJoin(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNod
 				}
 				it := &slab[0]
 				it.Bounds = scene.NewBounds()
+				n.g.view.itemSeq++
+				it.Seq = n.g.view.itemSeq
 				slab = slab[1:]
 				x = &entries[0]
 				entries = entries[1:]
@@ -497,7 +499,19 @@ func facSortItems(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNo
 			for _, it := range pulse.items {
 				views[it] = v.itemTuple(it)
 			}
-			jssort.Sort(pulse.items, func(a, b *scene.Item) int { return cmp(views[a], views[b]) })
+			// stableCompare: ties go by tuple id, the order the items were created.
+			jssort.Sort(pulse.items, func(a, b *scene.Item) int {
+				if c := cmp(views[a], views[b]); c != 0 {
+					return c
+				}
+				switch {
+				case a.Seq < b.Seq:
+					return -1
+				case a.Seq > b.Seq:
+					return 1
+				}
+				return 0
+			})
 		}
 		n.modified = mod
 		return pulse

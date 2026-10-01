@@ -216,6 +216,7 @@ type runView struct {
 	marks          []*scene.Mark
 	markCtx        map[*scene.Mark]*rtContext
 	idCounter      float64
+	itemSeq        uint64
 }
 
 // Render parses spec and evaluates it to a laid-out scenegraph.
