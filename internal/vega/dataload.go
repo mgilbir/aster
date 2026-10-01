@@ -56,13 +56,13 @@ func (v *runView) checkRows(n int) {
 	}
 }
 
-// parseValues is Dataflow.parse: read inline values with a format.
+// parseValues is Dataflow.parse: read inline values with a format. Unlike a
+// url's body, which Dataflow.request catches, a failure here is thrown: out of
+// the runtime when the data set is made, or out of the Load transform.
 func (v *runView) parseValues(values, fmtSpec jsval.Value) []jsval.Value {
 	data, err := v.read(values, nil, fmtSpec)
 	if err != nil {
-		// upstream: ingestion failures are warnings and yield no rows.
-		v.g.warn("Data ingestion failed: " + err.Error())
-		return nil
+		fail("%s", err.Error())
 	}
 	return data
 }
