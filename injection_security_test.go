@@ -73,6 +73,24 @@ func TestInjectionRotateAngleString(t *testing.T) {
 	}
 }
 
+// A text position given a word is joined into transform="translate(x,y)" as a
+// string (internal/svg/textimg.go appendWordTransform), with or without an
+// angle; the attribute must be escaped as a whole.
+func TestInjectionTextPositionString(t *testing.T) {
+	for _, angle := range []string{"0", "30"} {
+		t.Run("angle="+angle, func(t *testing.T) {
+			spec := fmt.Sprintf(`{"width":50,"height":50,"marks":[{"type":"text","encode":{"update":{
+				"text":{"value":"hi"},"angle":{"value":%s},
+				"x":{"value":"1\" onmouseover=\"alert(1)"},"y":{"value":"2\" data-x=\"y"}}}}]}`, angle)
+			svg := renderVegaSVG(t, spec)
+			checkSVG(t, svg)
+			if !strings.Contains(svg, `translate(1&quot; onmouseover=&quot;alert(1)`) {
+				t.Errorf("the position is not in the transform: %s", svg)
+			}
+		})
+	}
+}
+
 // A gradient object's id is written unescaped into fill="url(#id)" and
 // stroke="url(#id)" (internal/svg/style.go paintAttr uses attrRaw).
 func TestInjectionGradientID(t *testing.T) {
