@@ -122,7 +122,7 @@ func propOrThrow(v jsval.Value, key string) jsval.Value {
 func prop(v jsval.Value, key string) jsval.Value {
 	switch v.Kind() {
 	case jsval.KindObj:
-		return v.ObjValue().Lookup(key)
+		return v.ObjValue().Prop(key)
 	case jsval.KindArr:
 		if key == "length" {
 			return jsval.Int(v.Len())

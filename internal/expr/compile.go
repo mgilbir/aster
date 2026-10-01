@@ -765,7 +765,7 @@ func arrayIndex(key string) (int, bool) {
 func (s *Scope) getProp(obj jsval.Value, key string) jsval.Value {
 	switch obj.Kind() {
 	case jsval.KindObj:
-		return obj.Get(key)
+		return obj.ObjValue().Prop(key)
 	case jsval.KindArr:
 		if key == "length" {
 			return jsval.Int(obj.Len())
@@ -858,12 +858,14 @@ func (h *slotHint) get(o *jsval.Object, key string) jsval.Value {
 		return o.ValueAt(i)
 	}
 	v, ok := o.Get(key)
-	if ok {
-		for i, k := range o.Keys() {
-			if k == key {
-				h.slot.Store(int32(i))
-				break
-			}
+	if !ok {
+		v, _ = jsval.Inherited(key)
+		return v
+	}
+	for i, k := range o.Keys() {
+		if k == key {
+			h.slot.Store(int32(i))
+			break
 		}
 	}
 	return v

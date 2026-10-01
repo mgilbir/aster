@@ -124,7 +124,6 @@ func (s *Scope) strDepth(v jsval.Value, depth int) string {
 		if c, ok := asColor(v); ok {
 			return c.String()
 		}
-		return "[object Object]"
 	}
 	return v.AsString()
 }

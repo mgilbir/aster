@@ -31,14 +31,14 @@ func (s *split) combine() *Object {
 }
 
 func (s *split) get(key string) Value {
-	return firstDefined(s.explicit.Lookup(key), s.implicit.Lookup(key))
+	return firstDefined(s.explicit.Prop(key), s.implicit.Prop(key))
 }
 
 func (s *split) getWithExplicit(key string) withExplicit {
-	if v := s.explicit.Lookup(key); !v.IsUndefined() {
+	if v := s.explicit.Prop(key); !v.IsUndefined() {
 		return withExplicit{true, v}
 	}
-	if v := s.implicit.Lookup(key); !v.IsUndefined() {
+	if v := s.implicit.Prop(key); !v.IsUndefined() {
 		return withExplicit{false, v}
 	}
 	return withExplicit{false, undef}
