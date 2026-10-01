@@ -206,7 +206,8 @@ func zoomValue(f func(float64) [3]float64) func(float64) jsval.Value {
 }
 
 // scaleTypes maps d3-scale's constructors to the registry's type names. d3 has no scaleSequentialQuantile
-// or scaleRadial in Vega's registry; those vectors are not replayed.
+// in Vega's registry; those vectors are not replayed. scaleRadial is not there either and is
+// built directly.
 var scaleTypes = map[string]string{
 	"scaleLinear":           TypeLinear,
 	"scaleLog":              TypeLog,
@@ -398,11 +399,14 @@ func TestUpstreamD3Scale(t *testing.T) {
 			continue
 		}
 		typ, ok := scaleTypes[base]
-		if !ok {
+		if !ok && base != "scaleRadial" {
 			r.Skip("scales the engine does not have (" + base + ")")
 			continue
 		}
-		s, _ := NewIn(typ, local)
+		var s Scale = NewRadial()
+		if ok {
+			s, _ = NewIn(typ, local)
+		}
 		if ts, isTime := s.(*Time); isTime && typ == TypeTime {
 			_ = ts
 		}
@@ -533,7 +537,7 @@ func TestUpstreamD3Scale(t *testing.T) {
 			r.Skip("unmapped method " + c.Method)
 		}
 	}
-	r.Done(800)
+	r.Done(836)
 }
 
 func argOf(args []any, i int) any {
