@@ -102,7 +102,12 @@ func (it *Item) setProp(l *jsonLoader, k string, val jsval.Value) (bool, error) 
 	case "size":
 		it.Size = numOf(val)
 	case "path":
-		if !val.IsNullish() {
+		// item.path = value: a nullish path clears an earlier one (the
+		// voronoi transform sets a degenerate cell's path to null on a later
+		// run), and the SVG writer then emits no d attribute.
+		if val.IsNullish() {
+			it.Path = Path{}
+		} else {
 			it.Path = P(strOf(val))
 		}
 	case "scaleX":

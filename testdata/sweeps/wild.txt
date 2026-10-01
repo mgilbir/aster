@@ -1,5 +1,3 @@
 # Cases whose comparison with the node oracle is not "ok" (see expect_test.go).
 # id<TAB>status<TAB>reason
-vl_0008	differ	TODO: 119 diffs; first: /#document[0]/svg.marks[1]/g[0]/g.mark-group.role-frame.root[0]/g[1]/g[6]/g.mark-path.role-mark.layer_2_voronoi[8]/path: unexpected attribute d="M9.781578402691984,0L9.7811712733879,272L8.624666539978893,272L8.62542879779861,0Z"
-vl_0009	differ	TODO: 123 diffs; first: /#document[0]/svg.marks[1]/g[0]/g.mark-group.role-frame.root[0]/g[1]/g[6]/g.mark-path.role-mark.layer_1_voronoi[9]/path: unexpected attribute d="M9.781100410932538,260L9.78164949402077,0L10.937583390727186,0L10.937813628679823,260Z"
 vl_1756	differ	TODO: 3 diffs; first: /#document[0]/svg.marks: attribute viewBox="0 0 152 148", want "0 0 151 148"

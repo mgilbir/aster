@@ -86,7 +86,14 @@ func init() {
 	})
 
 	tf["geoshape"] = func(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *opParams) any) {
+		built := false // upstream's this.value: the generator, once made
 		return nil, trFunc(func(n *opNode, p *opParams, pulse *flowPulse) *flowPulse {
+			// A new generator (the first run, or a changed parameter such as
+			// the projection refit to a resized view) reflows the source:
+			// every item counts as modified, so the mark is encoded and
+			// bounded again with the shapes it now draws.
+			reflow := !built || p.Modified()
+			built = true
 			proj, _ := p.Get("projection").(geo.Projection)
 			var field geo.Accessor
 			if f := p.field("field"); !f.IsNil() {
@@ -110,6 +117,9 @@ func init() {
 			if pulse.items != nil {
 				for _, it := range pulse.items {
 					it.Shape.Func = fn
+				}
+				if reflow {
+					return reflowPulse(pulse)
 				}
 				return nil
 			}
