@@ -63,6 +63,10 @@ type Limits struct {
 	// MaxSubflows is the number of facet cells (group marks over faceted data),
 	// each of which instantiates its own operators.
 	MaxSubflows int
+	// MaxOperators is the number of dataflow operators a specification may
+	// instantiate: its signals, data, marks, axes and legends, and the
+	// subflows of its facet cells.
+	MaxOperators int
 	// MaxLoadBytes is the total size of the data the Loader may return.
 	MaxLoadBytes int64
 	// MaxPoints is the number of path points geographic marks may generate.
@@ -90,6 +94,9 @@ func (l Limits) withDefaults() Limits {
 	}
 	if l.MaxSubflows == 0 {
 		l.MaxSubflows = 20_000
+	}
+	if l.MaxOperators == 0 {
+		l.MaxOperators = 500_000
 	}
 	if l.MaxLoadBytes == 0 {
 		l.MaxLoadBytes = 64 << 20
@@ -258,7 +265,7 @@ func Render(ctx context.Context, spec jsval.Value, opts Options) (res *Result, e
 		}
 	}
 	config := mergeConfig(defaultConfig(), opts.Config, spec.Get("config"))
-	scope := newScope(config, &parseOptions{})
+	scope := newScope(config, &parseOptions{maxOps: opts.Limits.withDefaults().MaxOperators})
 	parseView(spec, scope)
 	flow := scope.toRuntime()
 
@@ -346,6 +353,7 @@ func newView(ctx context.Context, opts Options, locale jsval.Value) *runView {
 	v.g = newGraph(ctx)
 	v.g.view = v
 	v.g.maxVisits = limits.MaxVisits
+	v.g.maxOps = limits.MaxOperators
 	return v
 }
 
