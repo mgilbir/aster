@@ -246,6 +246,9 @@ func (m *Measurer) MeasureText(text, cssFont string) float64 {
 		// these separators ("\r\n" is one break) and reports the widest line.
 		return m.measureLines(text, cssFont)
 	}
+	if strings.IndexByte(text, '\t') >= 0 {
+		return m.measureTabs(text, cssFont)
+	}
 	key := widthKey{text, cssFont}
 	// Most measurements repeat (axis labels, legend entries): concurrent
 	// renders on one Measurer hit the cache under a shared lock.
@@ -297,6 +300,27 @@ func (m *Measurer) measureLines(text, cssFont string) float64 {
 		text = text[i+size:]
 	}
 	return widest
+}
+
+// measureTabs is the width of one line containing tabs, set as Pango sets
+// them: tab stops lie at every eight spaces from the start of the line, and a
+// tab advances to the first stop at least one space beyond the text so far
+// (a stop closer than that is skipped).
+func (m *Measurer) measureTabs(line, cssFont string) float64 {
+	space := m.MeasureText(" ", cssFont)
+	stop := 8 * space
+	var x float64
+	for {
+		i := strings.IndexByte(line, '\t')
+		if i < 0 {
+			return x + m.MeasureText(line, cssFont)
+		}
+		x += m.MeasureText(line[:i], cssFont)
+		if stop > 0 {
+			x = stop * (math.Floor((x+space)/stop) + 1)
+		}
+		line = line[i+1:]
+	}
 }
 
 // ShapeText shapes text with the font the CSS string selects and returns the

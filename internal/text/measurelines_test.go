@@ -1,6 +1,10 @@
 package text
 
-import "testing"
+import (
+	"math"
+	"strings"
+	"testing"
+)
 
 // Pango lays text out in lines: the width of text with line separators is that
 // of its widest line, as node-canvas's measureText reports.
@@ -24,6 +28,43 @@ func TestMeasureTextWidestLine(t *testing.T) {
 	}
 	if got := m.MeasureText("\n", font); got != 0 {
 		t.Errorf("a lone newline: %v", got)
+	}
+	// Tab stops lie at every eight spaces; a tab skips a stop closer than one
+	// space.
+	space := m.MeasureText(" ", font)
+	stop := 8 * space
+	a := m.MeasureText("a", font)
+	for _, c := range []struct {
+		text string
+		want float64
+	}{
+		{"\t", stop},
+		{"a\t", stop},
+		{"\ta", stop + a},
+		{"a\t\t", 2 * stop},
+		{"aa\tb\tc", 2*stop + m.MeasureText("c", font)},
+	} {
+		if got := m.MeasureText(c.text, font); math.Abs(got-c.want) > 1e-9 {
+			t.Errorf("%q: %v, want %v", c.text, got, c.want)
+		}
+	}
+	// 7 a's reach a stop of the 4th multiple's neighbourhood: when the next
+	// stop is nearer than a space, the tab goes on to the following one.
+	var near string
+	for n := 1; n < 40 && near == ""; n++ {
+		for k := 0; k < 40 && near == ""; k++ {
+			text := strings.Repeat("a", n) + strings.Repeat("i", k)
+			if gap := stop*math.Ceil(m.MeasureText(text, font)/stop) - m.MeasureText(text, font); gap > space/8 && gap < space {
+				near = text
+			}
+		}
+	}
+	if near == "" {
+		t.Fatal("no near-stop fixture")
+	}
+	x := m.MeasureText(near, font)
+	if got, want := m.MeasureText(near+"\t", font), stop*(math.Ceil(x/stop)+1); math.Abs(got-want) > 1e-9 {
+		t.Errorf("tab near a stop: %v, want %v", got, want)
 	}
 	// U+0085 and the vertical tab are not line separators to Pango.
 	if got := m.MeasureText("ab\u0085cdefgh", font); got <= wide {

@@ -1,0 +1,1 @@
+{"width":100,"height":50,"scales":[{"name":"c","type":"ordinal","domain":["a\tb","aaaaaaaaaaaa\tb","\tx","ab\t\tc","aaaa\tb"],"range":["red","blue","green","black","gray"]}],"legends":[{"fill":"c","title":"T"}]}
