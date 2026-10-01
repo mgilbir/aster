@@ -120,6 +120,12 @@ func DotBinTuples(ctx context.Context, data []jsval.Value, p DotBinParams) (DotB
 		if err := ctx.Err(); err != nil {
 			return res, err
 		}
+		if len(g.Tuples) == 0 {
+			// dotbin() starts with f(array[0]).
+			if err := ReadsUndefined(p.Field); err != nil {
+				return res, err
+			}
+		}
 		tuples := append([]jsval.Value(nil), g.Tuples...)
 		keys := make(map[*jsval.Object]float64, len(tuples))
 		num := func(t jsval.Value) float64 {

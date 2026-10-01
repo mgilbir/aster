@@ -358,9 +358,18 @@ func init() {
 		if as == "" {
 			as = "data"
 		}
-		seq, err := transforms.Sequence(ctxOf(n), transforms.SequenceParams{
-			Start: p.num("start", 0), Stop: p.num("stop", 0), Step: p.num("step", 1), As: as,
-		})
+		var seq []jsval.Value
+		var err error
+		// `range(start, stop, _.step || 1)`: only a falsy step is 1. A truthy
+		// one that reads as 0 or NaN ([], "0", "x") is d3.range's step of
+		// zero, whose count Infinity | 0 is no values at all.
+		if sv := p.Value("step"); sv.IsTruthy() && !(jsval.ToNumber(sv) != 0 && !math.IsNaN(jsval.ToNumber(sv))) {
+			seq = nil
+		} else {
+			seq, err = transforms.Sequence(ctxOf(n), transforms.SequenceParams{
+				Start: p.num("start", 0), Stop: p.num("stop", 0), Step: p.num("step", 1), As: as,
+			})
+		}
 		if err != nil || len(in) == 0 {
 			return seq, err
 		}

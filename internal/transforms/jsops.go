@@ -304,17 +304,29 @@ func Extent(n int, f func(i int) jsval.Value) (lo, hi jsval.Value, ok bool) {
 // no accessor and reads undefined.
 func ExtentOf(tuples []jsval.Value, f Field) (lo, hi jsval.Value, ok bool, err error) {
 	lo, hi, ok = Extent(len(tuples), func(i int) jsval.Value { return f.Apply(tuples[i]) })
-	if ok && lo.IsUndefined() && !f.IsNil() {
-		prop := f.Name
-		if len(f.Fields) > 0 {
-			prop = f.Fields[0]
-		}
-		if segs := jsval.ParseFieldPath(prop); len(segs) > 0 {
-			prop = segs[0]
-		}
-		return lo, hi, ok, fmt.Errorf("Cannot read properties of undefined (reading '%s')", prop)
+	if ok && lo.IsUndefined() {
+		return lo, hi, ok, ReadsUndefined(f)
 	}
 	return lo, hi, ok, nil
+}
+
+// ReadsUndefined is the error of applying the accessor f to undefined, which
+// upstream's code does when it reads one element past the end of an array (or
+// the first of an empty one): every field and expression accessor reads a
+// property of its argument and throws. The null field has no accessor and
+// yields nil.
+func ReadsUndefined(f Field) error {
+	if f.IsNil() {
+		return nil
+	}
+	prop := f.Name
+	if len(f.Fields) > 0 {
+		prop = f.Fields[0]
+	}
+	if segs := jsval.ParseFieldPath(prop); len(segs) > 0 {
+		prop = segs[0]
+	}
+	return fmt.Errorf("Cannot read properties of undefined (reading '%s')", prop)
 }
 
 // NumExtent is Extent for numeric fields: the min and max of the finite-order
