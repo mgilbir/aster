@@ -312,18 +312,21 @@ func timeUnitFieldExpr(full, field string, end bool) string {
 	return dateTimeExprToExpr(jsval.Obj(dateExpr))
 }
 
-func getDateTimePartAndStep(unit string, step float64) (string, float64) {
+// getDateTimePartAndStep is upstream's: the date part a unit steps and by
+// how much. It answers undefined (ok false) for a unit it does not know,
+// which its callers destructure.
+func getDateTimePartAndStep(unit string, step float64) (part string, st float64, ok bool) {
 	switch unit {
 	case "year", "month", "date", "hours", "minutes", "seconds", "milliseconds":
-		return unit, step
+		return unit, step, true
 	case "day", "dayofyear":
-		return "date", step
+		return "date", step, true
 	case "quarter":
-		return "month", step * 3
+		return "month", step * 3, true
 	case "week":
-		return "date", step * 7
+		return "date", step * 7, true
 	}
-	return "", step
+	return "", step, false
 }
 
 // durationExpr is upstream's durationExpr with the identity wrapper unless
@@ -337,7 +340,10 @@ func durationExpr(cc *compileCtx, tu Value, wrap func(string) string) string {
 		if s := n.Get("step"); s.IsNum() {
 			step = s.NumValue()
 		}
-		part, st := getDateTimePartAndStep(smallest, step)
+		part, st, ok := getDateTimePartAndStep(smallest, step)
+		if !ok && !cc.v5 {
+			throw("Cannot destructure property 'step' of 'getDateTimePartAndStep(...)' as it is undefined.")
+		}
 		end := cloneObj(start)
 		if cc.v5 {
 			// 5.8 bumps the smallest part itself (a quarter is three months);
