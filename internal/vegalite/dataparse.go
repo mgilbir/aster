@@ -77,7 +77,9 @@ func parseRoot(m Model, sources *sourceList) dfNode {
 	cc := m.b().ctx
 
 	b := m.b()
-	if !b.data.IsUndefined() || b.parent == nil {
+	// `model.data || !model.parent`: a data of null, 0 or "" on a child is no
+	// data of its own, and is not the null that gives the root an empty source.
+	if b.data.IsTruthy() || b.parent == nil {
 		if b.data.IsNull() {
 			s := newSourceNode(cc, mkv("values", jsval.Arr(nil)))
 			sources.items = append(sources.items, s)
