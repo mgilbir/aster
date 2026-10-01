@@ -7,7 +7,10 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"reflect"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -88,28 +91,83 @@ func TestHTTPLoaderDialTimeAddressPolicy(t *testing.T) {
 	}
 }
 
-// The default client does not follow HTTP_PROXY: a proxy resolves names
-// itself, which would take the address policy out of the loader's hands.
-func TestHTTPLoaderIgnoresProxyEnvironment(t *testing.T) {
-	t.Setenv("HTTP_PROXY", "http://proxy.example.net:3128")
-	t.Setenv("HTTPS_PROXY", "http://proxy.example.net:3128")
-	req, _ := http.NewRequest("GET", "http://example.com/", nil)
-	for name, c := range map[string]*http.Client{"nil": nil, "default": http.DefaultClient, "empty": {}} {
-		l := &HTTPLoader{Client: c}
-		tr, ok := l.client().Transport.(*http.Transport)
-		if !ok {
-			t.Fatalf("%s: transport is %T", name, l.client().Transport)
-		}
-		if tr.Proxy != nil {
-			if u, _ := tr.Proxy(req); u != nil {
-				t.Errorf("%s: proxy %v used", name, u)
-			}
-		}
+// A proxy is honoured, from the environment for the default client and from a
+// caller's Transport, and the connection to it is allowed though it is on
+// loopback here; a request the proxy settings send directly keeps the address
+// check, and a request through the proxy still has its URL checked.
+func TestHTTPLoaderHonoursProxies(t *testing.T) {
+	if reflect.ValueOf(proxyFromEnvironment).Pointer() != reflect.ValueOf(http.ProxyFromEnvironment).Pointer() {
+		t.Fatal("the default client does not read the proxy environment")
 	}
-	// A transport the caller gave a proxy is theirs.
-	own := &http.Transport{Proxy: http.ProxyFromEnvironment}
-	if got := (&HTTPLoader{Client: &http.Client{Transport: own}}).client().Transport; got != own {
-		t.Error("a caller's proxied transport was replaced")
+	var hosts []string
+	var mu sync.Mutex
+	proxy, hits := countingServer(t, func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		hosts = append(hosts, r.Host)
+		mu.Unlock()
+		_, _ = w.Write([]byte("[1]"))
+	})
+	proxyURL, _ := url.Parse(proxy.URL)
+	_, port, _ := net.SplitHostPort(proxy.Listener.Addr().String())
+	// NO_PROXY=direct.example.net, as the environment would say it
+	choose := func(req *http.Request) (*url.URL, error) {
+		if req.URL.Hostname() == "direct.example.net" {
+			return nil, nil
+		}
+		return proxyURL, nil
+	}
+	saved := proxyFromEnvironment
+	proxyFromEnvironment = choose
+	t.Cleanup(func() { proxyFromEnvironment = saved })
+
+	toLoopback := func(ctx context.Context, network, _ string) (net.Conn, error) {
+		var d net.Dialer
+		return d.DialContext(ctx, network, proxy.Listener.Addr().String()) // every name "resolves" to loopback
+	}
+	for name, client := range map[string]*http.Client{
+		"environment":     nil,
+		"default client":  http.DefaultClient,
+		"caller's proxy":  {Transport: &http.Transport{Proxy: choose}},
+		"caller's dialer": {Transport: &http.Transport{Proxy: choose, DialContext: toLoopback}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			l := &HTTPLoader{Client: client}
+			mu.Lock()
+			hosts = nil
+			mu.Unlock()
+			got, err := l.Load(context.Background(), "http://data.example.net/x.json")
+			if err != nil || string(got) != "[1]" {
+				t.Fatalf("through the proxy: %q, %v", got, err)
+			}
+			mu.Lock()
+			if len(hosts) != 1 || hosts[0] != "data.example.net" {
+				t.Errorf("the proxy saw hosts %q", hosts)
+			}
+			mu.Unlock()
+
+			// sent directly, a name leading to loopback is refused
+			before := hits.Load()
+			if name == "caller's dialer" {
+				_, err = l.Load(context.Background(), "http://direct.example.net:"+port+"/x.json")
+			} else {
+				tr := l.transport(l.client().Transport).(*http.Transport)
+				var c net.Conn
+				if c, err = tr.DialContext(context.Background(), "tcp", "localhost:"+port); err == nil {
+					_ = c.Close()
+				}
+			}
+			if err == nil || !strings.Contains(err.Error(), "private") {
+				t.Errorf("direct to loopback: %v", err)
+			}
+
+			// through the proxy, an address literal is still refused
+			if _, err := l.Load(context.Background(), "http://127.0.0.1:"+port+"/x.json"); err == nil {
+				t.Error("an address literal went through the proxy")
+			}
+			if hits.Load() != before {
+				t.Errorf("the proxy saw %d refused requests", hits.Load()-before)
+			}
+		})
 	}
 }
 

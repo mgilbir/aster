@@ -41,17 +41,22 @@ import (
 // name, so DNS rebinding and redirects cannot get around it. It is enforced
 // on the connections of the default client and of any Client whose Transport
 // is an *http.Transport (a DialContext or DialTLSContext of its own is wrapped
-// with the check). A Transport with a Proxy or a deprecated Dial function, and
-// any other http.RoundTripper, decide for themselves where they connect, as
-// the caller wrote them to: for those only address literals and localhost
-// names are refused, and AllowedDomains is the tool to confine them.
+// with the check). A Transport with a deprecated Dial function, and any other
+// http.RoundTripper, decide for themselves where they connect, as the caller
+// wrote them to: for those only address literals and localhost names are
+// refused, and AllowedDomains is the tool to confine them.
 //
-// Client nil (and http.DefaultClient) selects a client of this package's own:
-// it ignores the HTTP_PROXY environment variables, because a proxy resolves
-// names itself and would take the address check out of the loader's hands,
-// and it bounds connecting, TLS and the wait for response headers. A Client
-// with its own Transport is used as given, proxy included; the policy above
-// still applies to every URL.
+// A proxy is honoured: the HTTP_PROXY, HTTPS_PROXY and NO_PROXY environment
+// variables for the default client (as http.DefaultTransport does), and the
+// Proxy of a caller's Transport. The connection to the proxy is allowed
+// whatever its address, since whoever runs the process chose it; but the proxy
+// resolves the target's name itself, so for a request it carries only the
+// checks on the URL apply (address literals, localhost names,
+// AllowedDomains), not the check on the address finally reached. A request the
+// proxy settings send directly (NO_PROXY) keeps the full check.
+//
+// Client nil (and http.DefaultClient) selects a client of this package's own,
+// which bounds connecting, TLS and the wait for response headers.
 //
 // MaxResponseBytes caps how much of a response body is read, after any
 // content decoding. Zero means the default cap (64 MiB); a negative value
@@ -80,6 +85,11 @@ type HTTPLoader struct {
 	mu     sync.Mutex // guards cached
 	cached derivedTransport
 }
+
+// proxyFromEnvironment selects the proxy of the default client. A variable so
+// that a test can stand in for the environment, which net/http reads once per
+// process.
+var proxyFromEnvironment = http.ProxyFromEnvironment
 
 // derivedTransport is the transport made from the last base transport seen,
 // kept so that connections are reused from one load to the next.
@@ -296,7 +306,7 @@ func (l *HTTPLoader) transport(base http.RoundTripper) http.RoundTripper {
 	switch {
 	case base == nil || base == http.DefaultTransport:
 		t = nil
-	case t == nil || t.Proxy != nil || t.Dial != nil || t.DialTLS != nil:
+	case t == nil || t.Dial != nil || t.DialTLS != nil:
 		return base // the caller's own egress
 	case l.AllowPrivateNetworks:
 		return base // nothing to check
@@ -318,35 +328,80 @@ func (l *HTTPLoader) transport(base http.RoundTripper) http.RoundTripper {
 			ResponseHeaderTimeout:  30 * time.Second,
 			ExpectContinueTimeout:  time.Second,
 			MaxResponseHeaderBytes: 64 << 10,
+			Proxy:                  proxyFromEnvironment,
 		}
 	} else {
 		rt = t.Clone()
 	}
+	px := &proxies{}
+	if rt.Proxy != nil {
+		rt.Proxy = px.record(rt.Proxy)
+	}
 	if t != nil && (t.DialContext != nil || t.DialTLSContext != nil) {
-		rt.DialContext = checkedDial(t.DialContext)
-		rt.DialTLSContext = checkedDial(t.DialTLSContext)
+		rt.DialContext = checkedDial(t.DialContext, px)
+		rt.DialTLSContext = checkedDial(t.DialTLSContext, px)
 	} else {
-		dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
+		direct := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
+		dialer := direct
 		if !l.AllowPrivateNetworks {
-			dialer.Control = denyPrivate
+			guarded := *direct
+			guarded.Control = denyPrivate
+			dialer = &guarded
 		}
-		rt.DialContext = dialer.DialContext
+		rt.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			if px.has(addr) {
+				return direct.DialContext(ctx, network, addr)
+			}
+			return dialer.DialContext(ctx, network, addr)
+		}
 		rt.ForceAttemptHTTP2 = true
 	}
 	l.cached = derivedTransport{base: t, allow: l.AllowPrivateNetworks, rt: rt, ok: true}
 	return rt
 }
 
+// proxies are the addresses of the proxies a transport's Proxy function has
+// chosen, as the transport dials them: the dial check lets those through.
+type proxies struct{ addrs sync.Map }
+
+// record wraps a Proxy function to remember the address of every proxy it
+// returns.
+func (p *proxies) record(proxy func(*http.Request) (*url.URL, error)) func(*http.Request) (*url.URL, error) {
+	return func(req *http.Request) (*url.URL, error) {
+		u, err := proxy(req)
+		if u != nil {
+			p.addrs.Store(proxyAddr(u), true)
+		}
+		return u, err
+	}
+}
+
+func (p *proxies) has(addr string) bool {
+	_, ok := p.addrs.Load(addr)
+	return ok
+}
+
+// proxyAddr is the host:port net/http dials for a proxy URL, the port
+// defaulting by scheme.
+func proxyAddr(u *url.URL) string {
+	port := u.Port()
+	if port == "" {
+		port = map[string]string{"http": "80", "https": "443", "socks5": "1080", "socks5h": "1080"}[u.Scheme]
+	}
+	return net.JoinHostPort(u.Hostname(), port)
+}
+
 // checkedDial wraps a caller's dial function: a connection it makes to a
-// private address is closed. A nil dial stays nil.
-func checkedDial(dial func(context.Context, string, string) (net.Conn, error)) func(context.Context, string, string) (net.Conn, error) {
+// private address is closed, unless it is to one of the transport's proxies.
+// A nil dial stays nil.
+func checkedDial(dial func(context.Context, string, string) (net.Conn, error), px *proxies) func(context.Context, string, string) (net.Conn, error) {
 	if dial == nil {
 		return nil
 	}
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
 		c, err := dial(ctx, network, addr)
-		if err != nil {
-			return nil, err
+		if err != nil || px.has(addr) {
+			return c, err
 		}
 		if tcp, ok := c.RemoteAddr().(*net.TCPAddr); ok && privateAddr(tcp.AddrPort().Addr()) {
 			_ = c.Close()
