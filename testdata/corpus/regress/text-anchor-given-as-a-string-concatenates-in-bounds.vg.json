@@ -1,0 +1,5 @@
+{"width":120,"height":60,"padding":5,
+"marks":[
+{"type":"text","encode":{"update":{"x":{"value":60},"y":{"signal":"'0'"},"angle":{"value":-90},"text":{"value":"rotated"},"baseline":{"value":"top"}}}},
+{"type":"text","encode":{"update":{"x":{"signal":"'10'"},"y":{"value":50},"dy":{"value":-4},"text":{"value":"plain"}}}},
+{"type":"text","encode":{"update":{"x":{"signal":"'3'"},"y":{"signal":"'20'"},"angle":{"value":30},"dx":{"value":-5},"text":{"value":"both"}}}}]}

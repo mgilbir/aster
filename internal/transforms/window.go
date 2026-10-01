@@ -279,7 +279,7 @@ func Window(ctx context.Context, data []jsval.Value, p WindowParams) ([]jsval.Va
 	}
 
 	tick := budget.NewTicker(ctx)
-	for _, g := range GroupByKey(data, KeyOf(p.GroupBy...)) {
+	for _, g := range GroupByKey(data, KeyOf(zoneOf(ctx), p.GroupBy...)) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}

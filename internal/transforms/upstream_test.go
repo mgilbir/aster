@@ -442,9 +442,9 @@ func replayRegression(r *upstream.Replay, c *upstream.Call) {
 		r.Skip("regressions with accessors the recording cannot identify")
 		return
 	}
-	order := 0
+	order := 0.0
 	if method == "Poly" {
-		order = int(upstream.Number(argAt(args, 3)))
+		order = upstream.Number(argAt(args, 3))
 	}
 	names := map[string]string{"Constant": "constant", "Linear": "linear", "Log": "log", "Exp": "exp", "Pow": "pow", "Quad": "quad", "Poly": "poly"}
 	model, err := FitRegression(names[method], valuesOfArg(argAt(args, 0)), x, y, order)

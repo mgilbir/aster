@@ -361,6 +361,10 @@ func normalizePredicateCompat(op Value, p *normParams) Value {
 		src = op.Get("filter")
 	}
 	return normalizeLogicalComposition(src, func(o Value) Value {
+		if o.IsNullish() {
+			// a condition with neither selection nor test
+			throw("Cannot read properties of %s (reading 'selection')", o.AsString())
+		}
 		if o.Get("selection").IsTruthy() {
 			return normSel(o.Get("selection"))
 		}

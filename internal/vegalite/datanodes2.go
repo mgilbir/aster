@@ -425,7 +425,10 @@ func timeOffsetExpr(timeUnit Value, field string, reverse bool) string {
 	if s := timeUnit.Get("step"); s.IsNum() {
 		step = s.NumValue()
 	}
-	part, st := getDateTimePartAndStep(smallest, step)
+	part, st, ok := getDateTimePartAndStep(smallest, step)
+	if !ok {
+		throw("Cannot destructure property 'part' of 'getDateTimePartAndStep(...)' as it is undefined.")
+	}
 	fn := "timeOffset"
 	if utc {
 		fn = "utcOffset"

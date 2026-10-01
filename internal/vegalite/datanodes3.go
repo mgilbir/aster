@@ -511,11 +511,13 @@ func makeLookupNode(parent dfNode, m Model, t Value, counter int) dfNode {
 		o := mk("as", selName)
 		spread(o, t)
 		t = jsval.Obj(o)
-		sel := b.trySelectionComponent(varName(selName))
-		if sel == nil {
+		sel, junk := b.trySelectionComponent(varName(selName))
+		if sel == nil && !junk {
 			throw("Lookups can only be performed on selection parameters. %q is a variable parameter.", selName)
 		}
-		fromOutput = sel.materialized
+		if sel != nil {
+			fromOutput = sel.materialized
+		}
 		if fromOutput == nil {
 			throw("Cannot define and lookup the %q selection in the same view. Try moving the lookup into a second, layered view?", selName)
 		}

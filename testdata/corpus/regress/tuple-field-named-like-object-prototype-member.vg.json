@@ -1,0 +1,14 @@
+{"width":300,"height":100,"padding":5,
+"data":[{"name":"t","values":[{"a":1,"b":"x"},{"a":2,"b":"y"}],"transform":[
+{"type":"formula","as":"f1","expr":"isObject(datum.toString)"},
+{"type":"formula","as":"f2","expr":"'' + datum.valueOf"},
+{"type":"formula","as":"f3","expr":"isValid(datum.constructor)"},
+{"type":"formula","as":"f4","expr":"+datum.hasOwnProperty"},
+{"type":"formula","as":"f5","expr":"datum.toString ? 'T' : 'F'"}]},
+{"name":"w","source":"t","transform":[{"type":"filter","expr":"isValid(datum.toString)"}]},
+{"name":"ts","source":"t","transform":[{"type":"timeunit","field":"toString","units":["month"],"as":["u0","u1"]},{"type":"formula","as":"k","expr":"isDate(datum.u0) + ' ' + isValid(datum.u0)"}]},
+{"name":"gr","source":"t","transform":[{"type":"aggregate","groupby":["constructor"],"ops":["count"],"as":["n"]}]}],
+"marks":[{"type":"text","from":{"data":"t"},"encode":{"update":{"x":{"value":0},"y":{"signal":"datum.a * 20"},"text":{"signal":"datum.f1 + ' | ' + datum.f2 + ' | ' + datum.f3 + ' | ' + datum.f4 + ' | ' + datum.f5"}}}},
+{"type":"text","from":{"data":"gr"},"encode":{"update":{"x":{"value":0},"y":{"value":70},"text":{"signal":"'gr ' + datum.n + ' ' + datum.constructor"}}}},
+{"type":"text","from":{"data":"ts"},"encode":{"update":{"x":{"value":0},"y":{"value":80},"text":{"signal":"'ts ' + datum.k"}}}},
+{"type":"text","from":{"data":"w"},"encode":{"update":{"x":{"value":0},"y":{"value":90},"text":{"signal":"'w' + datum.a"}}}}]}

@@ -1,0 +1,2 @@
+{"width":50,"height":50,"data":[{"name":"t","values":"a,b\n1,2","format":{"type":"csv","parse":{"a":"nosuch"}}}],
+"marks":[{"type":"rect","from":{"data":"t"},"encode":{"update":{"width":{"value":10},"height":{"value":10}}}}]}

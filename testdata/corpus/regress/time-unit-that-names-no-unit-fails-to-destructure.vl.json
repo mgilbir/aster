@@ -1,0 +1,4 @@
+{"$schema":"https://vega.github.io/schema/vega-lite/v6.json",
+"data":{"values":[{"d":"2020-01-01","v":1},{"d":"2020-02-01","v":2}]},
+"mark":"bar",
+"encoding":{"x":{"field":"d","type":"temporal","timeUnit":"undefined","bandPosition":0},"y":{"field":"v","aggregate":"mean"}}}

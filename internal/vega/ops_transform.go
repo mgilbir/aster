@@ -338,7 +338,7 @@ func init() {
 			// groups (an explicit key, else the group-by values).
 			kf, ok := p.Get("key").(transforms.KeyFunc)
 			if !ok {
-				kf = transforms.KeyOf(ap.GroupBy...)
+				kf = transforms.KeyOf(n.g.view.zone, ap.GroupBy...)
 			}
 			n.value = &aggCells{in: in, out: out, key: kf}
 			return changedPulse(pulse, out)
@@ -458,7 +458,7 @@ func init() {
 	tf["regression"] = tupleTransform(func(n *opNode, p *opParams, in []jsval.Value) ([]jsval.Value, error) {
 		rp := transforms.RegressionParams{
 			X: p.field("x"), Y: p.field("y"), GroupBy: p.fields("groupby"),
-			Method: p.str("method"), Order: clampInt(p.num("order", 3)),
+			Method: p.str("method"), Order: p.num("order", 3),
 			Extent: p.nums("extent"), Params: p.bool("params"), As: p.strs("as"),
 		}
 		if ev := p.Value("extent"); ev.IsTruthy() && !ev.IsArr() {

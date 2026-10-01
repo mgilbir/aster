@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"math"
+	"unicode/utf16"
 
 	"github.com/mgilbir/aster/internal/jsmath"
+	"github.com/mgilbir/aster/internal/jsval"
 )
 
 // MaxDepth bounds group nesting in every recursive walk (bounds, rendering).
@@ -439,10 +441,80 @@ func (bd *Bounder) textBounds(b *Bounds, it *Item, mode int) {
 		dx -= w
 	}
 
+	if it.hasRawPos() {
+		bd.textBoundsRaw(b, it, mode, dx, dy, w, h)
+		return
+	}
 	dx += x
 	dy += y
 	b.Set(dx, dy, dx+w, dy+h)
 	if it.AngleTruthy() && mode == 0 {
 		b.Rotate(it.Angle.Val()*degToRad, x, y)
 	}
+}
+
+// hasRawPos reports a text position that was given as something other than a
+// number (a word, a numeric string).
+func (it *Item) hasRawPos() bool {
+	_, rx := it.Raw["x"]
+	_, ry := it.Raw["y"]
+	return rx || ry
+}
+
+// textBoundsRaw is textBounds for an anchor that is not a number. Upstream
+// adds the offsets to the anchor itself, `bounds.set(dx += x, dy += y, dx + w,
+// dy + h)`, so a string anchor turns each of those into a concatenation
+// ("-11" + "0" is "-110") that Bounds.set then orders as text when both ends
+// are strings. The result is exact when the text is rotated, which reads the
+// corners as numbers; an unrotated box keeps the strings upstream, and is
+// read here as the numbers they convert to.
+func (bd *Bounder) textBoundsRaw(b *Bounds, it *Item, mode int, dx, dy, w, h float64) {
+	ax, ay := it.PosValue("x"), it.PosValue("y")
+	if r := it.Radius.Zero(); r != 0 {
+		t := it.Theta.Zero() - halfPi
+		ax = jsPlus(ax, jsval.Num(float64(r*jsmath.Cos(t))))
+		ay = jsPlus(ay, jsval.Num(float64(r*jsmath.Sin(t))))
+	}
+	x1, y1 := jsPlus(jsval.Num(dx), ax), jsPlus(jsval.Num(dy), ay)
+	x2, y2 := jsPlus(x1, jsval.Num(w)), jsPlus(y1, jsval.Num(h))
+	if jsLess(x2, x1) {
+		x1, x2 = x2, x1
+	}
+	if jsLess(y2, y1) {
+		y1, y2 = y2, y1
+	}
+	b.X1, b.Y1, b.X2, b.Y2 = jsval.ToNumber(x1), jsval.ToNumber(y1), jsval.ToNumber(x2), jsval.ToNumber(y2)
+	if it.AngleTruthy() && mode == 0 {
+		b.Rotate(it.Angle.Val()*degToRad, jsval.ToNumber(ax), jsval.ToNumber(ay))
+	}
+}
+
+// jsPlus is the + operator on the values a numeric property can hold: a
+// string, array or object makes it a concatenation, anything else a sum.
+func jsPlus(a, b jsval.Value) jsval.Value {
+	concat := func(v jsval.Value) bool { return v.IsStr() || v.IsArr() || v.IsObj() }
+	if concat(a) || concat(b) {
+		return jsval.Str(a.AsString() + b.AsString())
+	}
+	return jsval.Num(jsval.ToNumber(a) + jsval.ToNumber(b))
+}
+
+// jsLess is a < b for the results of jsPlus: two strings compare as text (by
+// UTF-16 code unit), anything else as numbers, false for NaN.
+func jsLess(a, b jsval.Value) bool {
+	if a.IsStr() && b.IsStr() {
+		return utf16Less(a.StrValue(), b.StrValue())
+	}
+	return jsval.ToNumber(a) < jsval.ToNumber(b)
+}
+
+// utf16Less orders two strings by UTF-16 code unit.
+func utf16Less(a, b string) bool {
+	ua, ub := utf16.Encode([]rune(a)), utf16.Encode([]rune(b))
+	for i := 0; i < len(ua) && i < len(ub); i++ {
+		if ua[i] != ub[i] {
+			return ua[i] < ub[i]
+		}
+	}
+	return len(ua) < len(ub)
 }

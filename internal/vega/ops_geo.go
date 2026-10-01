@@ -65,14 +65,21 @@ func init() {
 
 	tf["geopoint"] = tupleTransform(func(n *opNode, p *opParams, in []jsval.Value) ([]jsval.Value, error) {
 		proj, _ := p.Get("projection").(geo.Projection)
+		if !p.has("fields") {
+			fail("Cannot read properties of undefined (reading '0')")
+		}
+		// A field missing from the list (null, or past its end) is an accessor
+		// that is not a function, which only matters to a tuple.
 		fields := p.fields("fields")
-		if len(fields) < 2 {
-			fail("geopoint requires two fields")
+		var lon, lat geo.Accessor
+		if len(fields) > 0 {
+			lon = geoAccessor(fields[0])
+		}
+		if len(fields) > 1 {
+			lat = geoAccessor(fields[1])
 		}
 		as := pairAs(p.strs("as"))
-		err := geo.GeoPoint(ctxOf(n), in, geo.GeoPointParams{
-			Projection: proj, Lon: geoAccessor(fields[0]), Lat: geoAccessor(fields[1]), As: as,
-		})
+		err := geo.GeoPoint(ctxOf(n), in, geo.GeoPointParams{Projection: proj, Lon: lon, Lat: lat, As: as})
 		return in, err
 	})
 

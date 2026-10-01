@@ -260,7 +260,11 @@ func (c *rtContext) parseParameter(p P, b *paramBuilder) any {
 		if v.path == "" {
 			return transforms.Field{}
 		}
-		if len(jsval.ParseFieldPath(v.path)) == 0 {
+		segs, err := jsval.SplitFieldPath(v.path)
+		if err != nil {
+			fail("%s", err.Error())
+		}
+		if len(segs) == 0 {
 			// The runtime builds the accessor as Function("_", "return _[]")
 			// for a path with no segment.
 			fail("Unexpected token ']'")

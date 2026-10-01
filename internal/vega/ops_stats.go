@@ -221,7 +221,7 @@ func init() {
 	})
 
 	tf["linkpath"] = tupleTransform(func(n *opNode, p *opParams, in []jsval.Value) ([]jsval.Value, error) {
-		return in, linkPath(p, in)
+		return in, linkPath(p, in, n.g.view.jsString)
 	})
 }
 

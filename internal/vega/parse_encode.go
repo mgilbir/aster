@@ -102,6 +102,10 @@ func parseEncode(encode jsval.Value, typ, role string, style jsval.Value, scope 
 
 func (c *encCompiler) parseBlock(block jsval.Value, typ string) *encodeSet {
 	set := &encodeSet{marktype: typ}
+	if block.IsNullish() {
+		// the loop over its names does nothing, but listing the outputs does not
+		perr("Cannot convert undefined or null to object")
+	}
 	o := block.ObjValue()
 	if o == nil {
 		return set
@@ -542,9 +546,14 @@ func (c *encCompiler) fieldObj(ref jsval.Value) valueFn {
 		}
 	case ref.Get("datum").IsTruthy():
 		// A constant path is the common case: compile it once.
-		if d := ref.Get("datum"); d.IsStr() && !hasQuirkySegment(d.StrValue()) {
-			get := transforms.FieldOf(d.StrValue()).Get
-			return func(ev *encEval) jsval.Value { return get(ev.datum) }
+		if d := ref.Get("datum"); d.IsStr() {
+			if _, err := jsval.SplitFieldPath(d.StrValue()); err != nil {
+				perr("%s", err.Error())
+			}
+			if !hasQuirkySegment(d.StrValue()) {
+				get := transforms.FieldOf(d.StrValue()).Get
+				return func(ev *encEval) jsval.Value { return get(ev.datum) }
+			}
 		}
 		path := c.fieldPath(ref.Get("datum"))
 		return func(ev *encEval) jsval.Value { return walkPath(ev.datum, path(ev)) }
@@ -558,7 +567,10 @@ func (c *encCompiler) fieldObj(ref jsval.Value) valueFn {
 // evaluated and used as a single key.
 func (c *encCompiler) fieldPath(key jsval.Value) func(ev *encEval) []jsval.Value {
 	if key.IsStr() {
-		segs := jsval.ParseFieldPath(key.StrValue())
+		segs, err := jsval.SplitFieldPath(key.StrValue())
+		if err != nil {
+			perr("%s", err.Error())
+		}
 		vals := make([]jsval.Value, len(segs))
 		fns := make([]valueFn, len(segs))
 		quirky := false
