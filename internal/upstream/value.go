@@ -167,6 +167,11 @@ func (c *Call) ArgsContain(kinds ...string) bool {
 			return true
 		}
 	}
+	for _, s := range c.ViaChainSteps() {
+		if Contains(s.Args, kinds...) {
+			return true
+		}
+	}
 	return false
 }
 

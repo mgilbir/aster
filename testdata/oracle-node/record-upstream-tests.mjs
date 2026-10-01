@@ -80,6 +80,12 @@ const outputDir = resolve(here, '../upstream-vectors-cache');
  */
 const functionOrigins = new WeakMap();
 
+/** An origin may be a function: for something a test goes on configuring, it is read when used. */
+function originOf(value) {
+  const origin = functionOrigins.get(value);
+  return typeof origin === 'function' ? origin() : origin;
+}
+
 function originate(value, origin) {
   const followed = typeof value === 'function' || (value !== null && typeof value === 'object');
   if (followed && !functionOrigins.has(value)) functionOrigins.set(value, origin);
@@ -123,7 +129,7 @@ function encode(value, seen = new Set()) {
       // column-naming bug here.
       return {$: 'accessor', fields: value.fields, ...(value.fname ? {name: value.fname} : {})};
     }
-    const origin = functionOrigins.get(value);
+    const origin = originOf(value);
     return {$: 'function', name: value.name || '(anonymous)', ...(origin ? {origin} : {})};
   }
   if (typeof value === 'symbol') return {$: 'symbol'};
@@ -161,7 +167,7 @@ function encode(value, seen = new Set()) {
     if (proto && proto !== Object.prototype && value.constructor?.name) out.$class = value.constructor.name;
     for (const key of Object.keys(value)) out[key] = encode(value[key], seen);
     // An object a call made (`randomNormal(0, 1)` handed to `randomMixture`) says which call.
-    const origin = functionOrigins.get(value);
+    const origin = originOf(value);
     if (origin) out.$origin = origin;
     return out;
   } finally {
@@ -211,7 +217,12 @@ function recordExports(moduleNamespace, packageName, calls) {
         // builder, and belongs to the instance-and-sequence recording the transforms use.
         if (typeof result !== 'function' && !followable(result)) return result;
         const proxied = applied(result, packageName, name, args, calls);
-        originate(proxied, {from: name, args: encodedArgs});
+        // Configured since (`geoPath().projection(geoMercator().scale(100))`): read when it is handed on.
+        originate(proxied, () => ({
+          from: name,
+          args: encodedArgs,
+          ...(chainOf(result).length ? {chain: encodeChain(chainOf(result))} : {}),
+        }));
         return proxied;
       },
       construct(target, args, newTarget) {
@@ -297,7 +308,7 @@ async function runTestFile(file, packageName, calls, skipped, checkout) {
   // Named after the test file and nothing else. A timestamp here reached the *recorded* text —
   // Node names the importer in a resolution failure — so two runs disagreed on a file that had not
   // changed. One package per process means no collision.
-  const temporary = join(scratch, `${basename(file)}.mjs`);
+  const temporary = join(scratch, `${where.replace(/[\\/]/g, '__')}.mjs`);
   writeFileSync(temporary, rewritten);
   try {
     await import(pathToFileURL(temporary).href);
@@ -325,6 +336,9 @@ async function runTestFile(file, packageName, calls, skipped, checkout) {
  * - a bare import (`fs`, `d3-array`) is left alone, to resolve from `testdata/oracle-node/node_modules` —
  *   which is the same installed version every reference in this repository comes from.
  */
+/** The paths a test may import the package under test by (set once the checkout is known). */
+const packageEntries = new Set();
+
 function rewriteImports(source, file) {
   const ast = parse(source, {ecmaVersion: 'latest', sourceType: 'module'});
   const edits = [];
@@ -334,11 +348,12 @@ function rewriteImports(source, file) {
     // `../index.js` is Vega's shape; `../src/index.js` is d3's. Both mean "the package
     // under test", and both are pointed at the *installed* build, which is what every reference
     // and vector in this repository is generated from.
-    const isPackage =
-      from === '../index.js' || from === '../index' || from === '../src/index.js';
-    if (!isPackage && from !== 'tape' && from !== 'vitest' && !from.startsWith('./')) continue;
+    // A test in a subdirectory (d3-geo's `test/projection`) reaches it with more `../`: so the
+    // import is resolved and compared with the package's entry points.
+    const isPackage = from.startsWith('.') && packageEntries.has(resolve(dirname(file), from));
+    if (!isPackage && from !== 'tape' && from !== 'vitest' && !from.startsWith('.')) continue;
 
-    if (from.startsWith('./')) {
+    if (from.startsWith('.') && !isPackage) {
       // Rebuilt from the AST rather than patched in the text. The first version swapped `'${from}'`
       // for the resolved URL and quietly did nothing to d3, which writes its imports with double
       // quotes — 36 of 36 files then failed to resolve a helper that was right beside them.
@@ -478,8 +493,19 @@ function chainOf(target) {
 
 // The chain holds arguments already encoded: a test may change an array after handing it over
 // (`scale.domain(values); values.pop()`), and the scale took a copy.
+//
+// An argument that is something a call made (a projection handed to `geoPath().projection(...)`) is
+// encoded again when the chain is read: the test may go on configuring it, and the answer depends on
+// its state when asked.
 function encodeChain(chain) {
-  return chain.map(([m, a]) => [m, a]);
+  return chain.map(([m, a, raw]) => [
+    m,
+    a.map((encoded, i) => (raw && refreshable(encoded) ? encode(raw[i]) : encoded)),
+  ]);
+}
+
+function refreshable(encoded) {
+  return encoded !== null && typeof encoded === 'object' && (encoded.origin !== undefined || encoded.$origin !== undefined);
 }
 
 /**
@@ -498,13 +524,17 @@ function applied(value, packageName, name, constructedWith, calls, via = [], fix
   const encodedConstruction = constructedWith.map(a => encode(a));
   // The base of every record this wrapper writes: how the object was made and configured.
   const base = target => {
+    // The root's configuration, then (for something derived from it) the steps to it, then what
+    // was done to the derived object itself: `scale('band')()` is a scale a test then configures.
     const chain = fixedChain ?? encodeChain(chainOf(target));
+    const derived = fixedChain ? encodeChain(chainOf(target)) : [];
     return {
       package: packageName,
       fn: `${name}()`,
       constructedWith: encodedConstruction,
       ...(chain.length ? {chain} : {}),
       ...(via.length ? {via} : {}),
+      ...(derived.length ? {viaChain: derived} : {}),
     };
   };
   // What a call returned: followed if it is something a later call can ask about.
@@ -521,7 +551,15 @@ function applied(value, packageName, name, constructedWith, calls, via = [], fix
       return applied(result, packageName, name, constructedWith, calls, via);
     }
     const wrapped = applied(result, packageName, name, constructedWith, calls, next, encodeChain(chainOf(target)));
-    originate(wrapped, {from: `${name}()`, steps: next});
+    // What was done to it since matters when it is handed on (`tickCount(scale, 10)`): its own
+    // configuration, after the root's and the steps to it.
+    originate(wrapped, () => ({
+      from: `${name}()`,
+      constructedWith: encodedConstruction,
+      ...(encodeChain(chainOf(target)).length ? {chain: encodeChain(chainOf(target))} : {}),
+      steps: next,
+      ...(chainOf(result).length ? {viaChain: encodeChain(chainOf(result))} : {}),
+    }));
     return wrapped;
   };
   return new Proxy(value, {
@@ -560,7 +598,10 @@ function applied(value, packageName, name, constructedWith, calls, via = [], fix
     get(target, key, receiver) {
       const property = Reflect.get(target, key, receiver);
       if (typeof property !== 'function' || typeof key !== 'string') return property;
-      if (key === 'constructor' || key.startsWith('_') || key in Function.prototype) return property;
+      // `toString` of an object that has its own (d3-path's `Path`, a d3-color colour) is the answer a
+      // test asks for with `path + ''`, so it is recorded; on a function it is everyone's.
+      const ownToString = key === 'toString' && typeof target === 'object' && target.toString !== Object.prototype.toString;
+      if (key === 'constructor' || key.startsWith('_') || (key in Function.prototype && !ownToString)) return property;
       return function (...args) {
         const encodedArgs = args.map(a => encode(a));
         const record = base(target);
@@ -582,10 +623,13 @@ function applied(value, packageName, name, constructedWith, calls, via = [], fix
         // asked: remembered against the object itself, so a later question sees it whether or not
         // the test kept the returned value.
         if (result === target || result === receiver) {
-          chainOf(target).push([key, encodedArgs]);
+          chainOf(target).push([key, encodedArgs, args]);
           return receiver;
         }
         if (outer) pushCall(calls, {...record, method: key, args: encodedArgs, result: encode(result)});
+        // A method of an object that returns nothing changes the object (`path.moveTo(0, 0)`), so
+        // what follows is asked of the object as it then is.
+        if (result === undefined && typeof target === 'object') chainOf(target).push([key, encodedArgs, args]);
         return follow(result, target, [key, encodedArgs]);
       };
     },
@@ -818,7 +862,9 @@ function installedVersion(packageName) {
   }
 }
 
-const [, , checkout, ...packages] = process.argv;
+// Resolved now: the recorder changes directory to each package's own while it runs its tests.
+const [, , checkoutArgument, ...packages] = process.argv;
+const checkout = checkoutArgument && resolve(checkoutArgument);
 if (packages.length > 1) {
   console.error('record one package per process: tuple ids are a module-level counter');
   process.exit(2);
@@ -831,7 +877,22 @@ mkdirSync(outputDir, {recursive: true});
 
 // One copy of the package under test: a helper that imports the cloned entry point gets the
 // installed one (see record-upstream-hooks.mjs).
+/** The test files under a directory, in a stable order: d3-geo keeps some in subdirectories. */
+function testFiles(dir, prefix = '') {
+  const out = [];
+  for (const entry of readdirSync(join(dir, prefix), {withFileTypes: true})) {
+    const relative = join(prefix, entry.name);
+    if (entry.isDirectory()) out.push(...testFiles(dir, relative));
+    else if (entry.name.endsWith('-test.js') || entry.name.endsWith('-test.mjs')) out.push(relative);
+  }
+  return out.sort();
+}
+
 if (packages.length === 1) {
+  for (const entry of [join(checkout, 'src', 'index'), join(checkout, 'index'), join(checkout, 'packages', packages[0], 'index')]) {
+    packageEntries.add(entry);
+    packageEntries.add(`${entry}.js`);
+  }
   const installed = import.meta.resolve(packages[0]);
   register('./record-upstream-hooks.mjs', {
     parentURL: import.meta.url,
@@ -877,14 +938,18 @@ for (const packageName of packages) {
     console.error(`${packageName}: no test directory at ${testDir}`);
     continue;
   }
+  // A package's tests read their fixtures relative to the package (`./locale/en-US.json`,
+  // `./test/data/barley.json`), so they run from its directory.
+  process.chdir(dirname(testDir));
   const calls = [];
   const skipped = [];
-  const files = readdirSync(testDir)
-    .filter(f => f.endsWith('-test.js') || f.endsWith('-test.mjs'))
-    .sort();
+  const files = testFiles(testDir);
   for (const file of files) {
-    await runTestFile(join(testDir, file), packageName, calls, skipped, resolve(checkout));
+    await runTestFile(join(testDir, file), packageName, calls, skipped, checkout);
   }
+  // A test that reads a fixture through a callback (`csv-spectrum`) makes its calls after the file has
+  // been imported; give the event loop a moment to run them.
+  await new Promise(resolve => setTimeout(resolve, 200));
   // Identical calls are recorded once: a test that calls `bin` with the same parameters in three
   // assertions is one vector, and a duplicate proves nothing the first did not. "Identical" is the
   // whole record: the object a method was asked of, its configuration and the steps to the question

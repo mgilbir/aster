@@ -56,7 +56,55 @@ func TestUpstreamD3Format(t *testing.T) {
 			if c.Fn == "formatDefaultLocale" {
 				loc = l
 			}
-			r.Skip("locale objects (their methods are not recorded)")
+			r.Skip("constructions (a locale object is the answer)")
+		case "formatLocale()", "formatDefaultLocale()":
+			// formatLocale(definition).format(specifier)(value), and formatPrefix likewise
+			l, err := NumberLocaleFromValue(upstream.ToValue(c.ConstructedWith[0]))
+			if err != nil {
+				r.Check(c, nil, true)
+				continue
+			}
+			via := c.ViaSteps()
+			switch {
+			case len(via) == 0 && (c.Method == "format" || c.Method == "formatPrefix"):
+				spec, ok := c.Arg(0).(string)
+				if !ok {
+					r.Skip("non-string specifier")
+					continue
+				}
+				var err error
+				if c.Method == "format" {
+					_, err = l.Format(spec)
+				} else {
+					_, err = l.FormatPrefix(spec, upstream.Number(c.Arg(1)))
+				}
+				r.Check(c, fnResult(c, err == nil), err != nil)
+			case len(via) == 1 && c.Method == "" && len(c.Args) == 1 && len(via[0].Args) >= 1:
+				spec, ok := via[0].Args[0].(string)
+				if !ok {
+					r.Skip("non-string specifier")
+					continue
+				}
+				if via[0].Method == "format" {
+					nf, err := l.Format(spec)
+					if err != nil {
+						r.Check(c, nil, true)
+						continue
+					}
+					r.Check(c, nf.FormatValue(upstream.ToValue(c.Args[0])), false)
+				} else if via[0].Method == "formatPrefix" && len(via[0].Args) == 2 {
+					pf, err := l.FormatPrefix(spec, upstream.Number(via[0].Args[1]))
+					if err != nil {
+						r.Check(c, nil, true)
+						continue
+					}
+					r.Check(c, pf(upstream.Number(c.Args[0])), false)
+				} else {
+					r.Skip("unmapped locale step")
+				}
+			default:
+				r.Skip("locale methods of another shape")
+			}
 		case "format":
 			spec, ok := c.Arg(0).(string)
 			if !ok {
@@ -65,6 +113,31 @@ func TestUpstreamD3Format(t *testing.T) {
 			}
 			_, err := loc.Format(spec)
 			r.Check(c, fnResult(c, err == nil), err != nil)
+		case "formatSpecifier()":
+			// a FormatSpecifier a test went on changing, then asked for its string
+			spec, ok := argAtCall(c.ConstructedWith, 0).(string)
+			if !ok || c.Method != "toString" {
+				r.Skip("specifier questions of another shape")
+				continue
+			}
+			s, err := ParseSpecifier(spec)
+			if err != nil {
+				r.Check(c, nil, true)
+				continue
+			}
+			changed := true
+			for _, step := range c.ChainSteps() {
+				field, isSet := strings.CutPrefix(step.Method, "set:")
+				if !isSet || !setSpecifierField(&s, field, step.Args[0]) {
+					changed = false
+					break
+				}
+			}
+			if !changed {
+				r.Skip("specifier changes the adapter does not map")
+				continue
+			}
+			r.Check(c, s.String(), false)
 		case "format()", "formatPrefix()":
 			spec, ok := c.ConstructedWith[0].(string)
 			if !ok {
@@ -116,7 +189,8 @@ func TestUpstreamD3Format(t *testing.T) {
 				return upstream.Enc(x)
 			}
 			r.Check(c, map[string]any{
-				"fill": s.Fill, "align": string(s.Align), "sign": string(s.Sign), "symbol": s.Symbol,
+				"$class": "FormatSpecifier",
+				"fill":   s.Fill, "align": string(s.Align), "sign": string(s.Sign), "symbol": s.Symbol,
 				"zero": s.Zero, "width": opt(s.Width), "comma": s.Comma, "precision": opt(s.Precision),
 				"trim": s.Trim, "type": s.Type,
 			}, false)
@@ -138,7 +212,7 @@ func TestUpstreamD3Format(t *testing.T) {
 		}
 	}
 	_ = enUS
-	r.Done(700)
+	r.Done(900)
 }
 
 // intervalOf resolves an exported d3-time interval name (timeDay, utcMonday, unixDay, ...).
@@ -270,10 +344,22 @@ func TestUpstreamD3Time(t *testing.T) {
 			continue
 		}
 		name, method, hasMethod := strings.Cut(c.Fn, ".")
+		if strings.HasSuffix(c.Fn, ".every()") {
+			// timeDay.every(k) is an interval of its own, asked like any other
+			name, method, hasMethod = strings.TrimSuffix(c.Fn, ".every()"), c.Method, c.Method != ""
+		}
 		iv, ok := intervalOf(name, local)
 		if !ok {
 			r.Skip("custom intervals (timeInterval)")
 			continue
+		}
+		if strings.HasSuffix(c.Fn, ".every()") {
+			k := jsval.ToNumber(upstream.ToValue(c.ConstructedWith[0]))
+			iv, ok = iv.Every(k)
+			if !ok {
+				r.Check(c, nil, true)
+				continue
+			}
 		}
 		if !hasMethod {
 			// timeDay(date) is floor; with no argument, the pinned clock.
@@ -360,6 +446,63 @@ func TestUpstreamD3TimeFormat(t *testing.T) {
 			tm, ok := loc.Parse("%Y-%m-%dT%H:%M:%S.%LZ", UTC).Parse(s)
 			r.Check(c, parsedDate(tm, ok), false)
 			continue
+		case "timeFormatDefaultLocale", "timeFormatLocale":
+			l, err := TimeLocaleFromValue(upstream.ToValue(c.Arg(0)))
+			if err != nil {
+				r.Skip("locale definitions the engine rejects")
+				continue
+			}
+			if c.Fn == "timeFormatDefaultLocale" {
+				loc = l
+			}
+			r.Skip("constructions (a locale object is the answer)")
+			continue
+		case "timeFormatLocale()", "timeFormatDefaultLocale()":
+			// timeFormatLocale(definition).format(specifier)(date), and the utc and parse kin
+			l, err := TimeLocaleFromValue(upstream.ToValue(c.ConstructedWith[0]))
+			if err != nil {
+				r.Check(c, nil, true)
+				continue
+			}
+			via := c.ViaSteps()
+			zoneFor := func(m string) Zone {
+				if strings.HasPrefix(m, "utc") {
+					return UTC
+				}
+				return local
+			}
+			switch {
+			case len(via) == 0 && c.Method != "" && len(c.Args) == 1:
+				if _, ok := c.Args[0].(string); !ok {
+					r.Skip("non-string specifier")
+					continue
+				}
+				r.Check(c, fnResult(c, true), false)
+			case len(via) == 1 && c.Method == "" && len(c.Args) == 1 && len(via[0].Args) == 1:
+				spec, ok := via[0].Args[0].(string)
+				if !ok {
+					r.Skip("non-string specifier")
+					continue
+				}
+				z := zoneFor(via[0].Method)
+				switch via[0].Method {
+				case "format", "utcFormat":
+					r.Check(c, l.Format(spec, z).FormatValue(upstream.ToValue(c.Args[0])), false)
+				case "parse", "utcParse":
+					s, ok := c.Args[0].(string)
+					if !ok {
+						r.Skip("non-string input")
+						continue
+					}
+					tm, ok := l.Parse(spec, z).Parse(s)
+					r.Check(c, parsedDate(tm, ok), false)
+				default:
+					r.Skip("unmapped locale step")
+				}
+			default:
+				r.Skip("locale methods of another shape")
+			}
+			continue
 		case "timeFormat", "utcFormat", "utcParse", "timeParse":
 			spec, ok := c.Arg(0).(string)
 			if !ok {
@@ -402,7 +545,7 @@ func TestUpstreamD3TimeFormat(t *testing.T) {
 			r.Skip("unmapped " + c.Fn)
 		}
 	}
-	r.Done(400)
+	r.Done(550)
 }
 
 func parsedDate(t float64, ok bool) any {
@@ -410,4 +553,34 @@ func parsedDate(t float64, ok bool) any {
 		return nil
 	}
 	return upstream.EncDate(t)
+}
+
+// setSpecifierField is `specifier[field] = v` on d3's FormatSpecifier.
+func setSpecifierField(s *Specifier, field string, v any) bool {
+	val := upstream.ToValue(v)
+	switch field {
+	case "fill":
+		s.Fill = val.AsString()
+	case "align":
+		s.Align = val.AsString()[0]
+	case "sign":
+		s.Sign = val.AsString()[0]
+	case "symbol":
+		s.Symbol = val.AsString()
+	case "zero":
+		s.Zero = val.IsTruthy()
+	case "width":
+		s.Width = upstream.Number(v)
+	case "comma":
+		s.Comma = val.IsTruthy()
+	case "precision":
+		s.Precision = upstream.Number(v)
+	case "trim":
+		s.Trim = val.IsTruthy()
+	case "type":
+		s.Type = val.AsString()
+	default:
+		return false
+	}
+	return true
 }

@@ -53,6 +53,7 @@ type Call struct {
 	ConstructedWith []any               `json:"constructedWith"`
 	Chain           [][]json.RawMessage `json:"chain"`
 	Via             [][]json.RawMessage `json:"via"`
+	ViaChain        [][]json.RawMessage `json:"viaChain"`
 	Args            []any               `json:"args"`
 	Params          any                 `json:"params"`
 	Input           any                 `json:"input"`
@@ -100,6 +101,9 @@ func (c *Call) ChainSteps() []Step { return steps(c.Chain) }
 // of the function `scale.tickFormat(5)` returned; a step with no method is a plain call.
 func (c *Call) ViaSteps() []Step { return steps(c.Via) }
 
+// ViaChainSteps is the configuration made on the object the via steps led to, after they were taken.
+func (c *Call) ViaChainSteps() []Step { return steps(c.ViaChain) }
+
 // Chained returns the i-th configuration step of a builder chain: method and decoded arguments.
 func (c *Call) Chained(i int) (method string, args []any) {
 	s := steps(c.Chain[i : i+1])[0]
@@ -127,6 +131,9 @@ func (c *Call) Signature() string {
 	}
 	for _, v := range c.ViaSteps() {
 		fmt.Fprintf(&b, ">%s%s", v.Method, jsonText(v.Args))
+	}
+	for _, v := range c.ViaChainSteps() {
+		fmt.Fprintf(&b, "~%s%s", v.Method, jsonText(v.Args))
 	}
 	if c.Method != "" {
 		b.WriteString("::" + c.Method)
@@ -272,6 +279,13 @@ func repoRoot() (string, error) {
 // true when the Go function failed where upstream throws (the messages are not compared).
 func (r *Replay) Check(c *Call, got any, threw bool) {
 	r.t.Helper()
+	r.CheckAgainst(c, c.Result, got, threw)
+}
+
+// CheckAgainst is Check for a vector whose answer is not its result: the tuples an operator emitted
+// (c.Output), say. want is the recorded answer.
+func (r *Replay) CheckAgainst(c *Call, want, got any, threw bool) {
+	r.t.Helper()
 	sig := c.Signature()
 	r.visited[sig] = true
 	r.replayed++
@@ -282,9 +296,9 @@ func (r *Replay) Check(c *Call, got any, threw bool) {
 			diff = fmt.Sprintf("upstream throws %q, engine returned %s", *c.Threw, show(got))
 		}
 	case threw:
-		diff = fmt.Sprintf("upstream returns %s, engine fails", show(c.Result))
-	case !Equal(got, c.Result):
-		diff = fmt.Sprintf("upstream %s, engine %s", show(c.Result), show(got))
+		diff = fmt.Sprintf("upstream returns %s, engine fails", show(want))
+	case !Equal(got, want):
+		diff = fmt.Sprintf("upstream %s, engine %s", show(want), show(got))
 	}
 	if diff == "" {
 		return
@@ -293,7 +307,7 @@ func (r *Replay) Check(c *Call, got any, threw bool) {
 	if _, ok := r.known[sig]; ok {
 		return
 	}
-	if r.ulp > 0 && c.Threw == nil && !threw && WithinUlps(got, c.Result, r.ulp) {
+	if r.ulp > 0 && c.Threw == nil && !threw && WithinUlps(got, want, r.ulp) {
 		r.ulpUsed++
 		return
 	}

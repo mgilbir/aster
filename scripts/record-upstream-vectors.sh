@@ -11,6 +11,9 @@
 # The Go replays (TestUpstream* in internal/...) skip when they are absent, and fail instead with
 # ASTER_ORACLE=require, as in CI.
 #
+# The recording is skipped when the vectors in the output directory were made from the same lockfile,
+# recorder and script (a fingerprint is kept beside them); RECORD_FORCE=1 records again.
+#
 # Usage: scripts/record-upstream-vectors.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -19,6 +22,12 @@ ROOT="$PWD"
 NODE_DIR="$ROOT/testdata/oracle-node"
 OUT="$ROOT/testdata/upstream-vectors-cache"
 CLONES="$ROOT/testdata/upstream-clones"
+
+fingerprint="$(cat "$NODE_DIR/package-lock.json" "$NODE_DIR/record-upstream-tests.mjs" "$NODE_DIR/record-upstream-hooks.mjs" "$ROOT/scripts/record-upstream-vectors.sh" | shasum -a 256 | cut -d' ' -f1)"
+if [ -z "${RECORD_FORCE:-}" ] && [ -f "$OUT/.fingerprint" ] && [ "$(cat "$OUT/.fingerprint")" = "$fingerprint" ]; then
+  echo "==> upstream vectors are up to date ($OUT)"
+  exit 0
+fi
 
 if [ ! -d "$NODE_DIR/node_modules" ]; then
   (cd "$NODE_DIR" && npm ci --silent)
@@ -92,4 +101,5 @@ for file in "$OUT"/*.json; do
     echo "    removed $(basename "$file") (recorded nothing)"
   fi
 done
-echo "==> recorded: $(ls "$OUT" | wc -l | tr -d ' ') packages in $OUT"
+echo "$fingerprint" > "$OUT/.fingerprint"
+echo "==> recorded: $(ls "$OUT"/*.json | wc -l | tr -d ' ') packages in $OUT"

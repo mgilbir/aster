@@ -94,6 +94,10 @@ func TestUpstreamD3Interpolate(t *testing.T) {
 			r.Skip("colour instances as endpoints (the engine interpolates colour strings, as Vega passes them)")
 			continue
 		}
+		if strings.HasPrefix(fn, "interpolateArray") && c.ArgsContain("object") {
+			r.Skip("array-likes that are not arrays")
+			continue
+		}
 		if c.ArgsContain("typed") || (!strings.HasPrefix(fn, "piecewise") && c.ArgsContain("function")) {
 			r.Skip("typed arrays or functions as arguments (no such values in a specification)")
 			continue

@@ -90,6 +90,17 @@ jobs:
           (cd testdata/oracle-node-vl5 && npm ci)
       - uses: actions/cache@v6
         with:
+          # upstream's own test suites, recorded against the installed packages: the shallow clones
+          # of the git tags (their tests are not on npm) and the vectors, which the replays
+          # (TestUpstream*) need. The script skips recording when the vectors match its fingerprint.
+          path: |
+            testdata/upstream-clones
+            testdata/upstream-vectors-cache
+          key: upstream-vectors-${{ hashFiles('testdata/oracle-node/package-lock.json', 'testdata/oracle-node/record-upstream-tests.mjs', 'testdata/oracle-node/record-upstream-hooks.mjs', 'scripts/record-upstream-vectors.sh') }}
+      - name: record upstream's test vectors
+        run: scripts/record-upstream-vectors.sh
+      - uses: actions/cache@v6
+        with:
           path: testdata/corpora-cache
           key: corpora-${{ hashFiles('testdata/corpora/*.sha256', 'scripts/fetch-corpora.sh') }}
       - name: fetch the external corpora
