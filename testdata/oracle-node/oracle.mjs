@@ -193,7 +193,10 @@ const loader = {
         if (p.startsWith(r + path.sep) && fs.existsSync(p)) return fs.readFileSync(p, 'utf8');
       }
     }
-    return base.load(u, options);
+    // Offline, like the engine's test loader: a URL the local copy does not
+    // serve fails to load rather than reaching the network.
+    if (/^data:/.test(u)) return base.load(u, options);
+    throw new Error('oracle: offline, not a local dataset: ' + uri);
   },
 };
 process.chdir(roots[0]);
