@@ -1,0 +1,5 @@
+{"$schema":"https://vega.github.io/schema/vega-lite/v6.json",
+"data":{"values":[{"a":"x","b":1},{"a":"y","b":3}]},
+"mark":"bar",
+"encoding":{"x":{"field":"a","type":"nominal"},"y":{"field":"b","type":"quantitative"},
+"color":{"field":"a","type":"nominal","condition":[{"test":"datum.b == 1","value":"blue"},{"value":"green"}]}}}
