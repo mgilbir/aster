@@ -137,6 +137,12 @@ func makeKeyFn(z format.Zone, fields []string, flat bool) transforms.KeyFunc {
 		if flat {
 			fs[i] = flatField(f)
 		} else {
+			if len(jsval.ParseFieldPath(f)) == 0 {
+				// The runtime compiles the accessor of a path with no step to
+				// `return _[];`, which does not parse. Unlike a field
+				// parameter, a key has no guard for the empty name.
+				fail("Unexpected token ']'")
+			}
 			fs[i] = transforms.FieldOf(f)
 		}
 	}
