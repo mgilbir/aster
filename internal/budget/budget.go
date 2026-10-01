@@ -85,6 +85,16 @@ func (b *Budget) Reserve(n int64) error {
 	return nil
 }
 
+// ReserveWeight is Reserve for a transform that grows the weight of the rows
+// as well as their number: it checks that rows more rows and excess more bytes
+// of row excess (see AddRowExcess) fit, without recording them.
+func (b *Budget) ReserveWeight(rows, excess int64) error {
+	if b == nil || b.RowBytes <= 0 {
+		return b.Reserve(rows)
+	}
+	return b.Reserve(rows + excess/b.RowBytes)
+}
+
 // AddRows records n more rows (negative when rows were dropped) and fails when
 // the total exceeds MaxRows.
 func (b *Budget) AddRows(n int) error {
@@ -194,6 +204,11 @@ func Reserve(ctx context.Context, n int64) error { return From(ctx).Reserve(n) }
 // fits; the input rows are already counted.
 func ReserveOut(ctx context.Context, out, in int64) error {
 	return From(ctx).Reserve(out - in)
+}
+
+// ReserveWeight is Budget.ReserveWeight on the Budget in ctx.
+func ReserveWeight(ctx context.Context, rows, excess int64) error {
+	return From(ctx).ReserveWeight(rows, excess)
 }
 
 // Ticker polls a context once per accumulated unit of work, for loops whose
