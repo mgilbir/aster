@@ -10,6 +10,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -41,6 +43,10 @@ type vecFunc struct {
 	// liveOnly functions already have recorded vectors elsewhere (math.json.gz);
 	// they are only checked by -live.
 	liveOnly bool
+	// libm functions are not computed by V8 but by the C library: Math.pow is
+	// glibc's pow on Linux, which Pow ports; macOS's libm rounds differently.
+	// Their recorded vectors come from node on Linux.
+	libm bool
 }
 
 func (v *vecFunc) call(a []float64) float64 {
@@ -51,7 +57,7 @@ func (v *vecFunc) call(a []float64) float64 {
 }
 
 var vecFuncs = []*vecFunc{
-	{name: "pow", arity: 2, f2: Pow},
+	{name: "pow", arity: 2, f2: Pow, libm: true},
 	{name: "exp", arity: 1, f1: Exp, special: []float64{709.782712893384, 709.7827128933841, -745.1332191019411, -745.1332191019412, -708.3964185322641, 0.5 * math.Ln2, 1.5 * math.Ln2, 0x1p-28, 0x1p-54, -0x1p-54, 1, -1}},
 	{name: "expm1", arity: 1, f1: Expm1, special: []float64{709.782712893384, 56 * math.Ln2, -38.816242111356935, -37, 0.5 * math.Ln2, 1.5 * math.Ln2, 0x1p-54, 0x1p-55, 1, -1, 0.34657359027997264}},
 	{name: "log", arity: 1, f1: Log, special: []float64{1, 0x1p-1022, 0x1p-1074, math.MaxFloat64, math.Sqrt2, math.Sqrt2 / 2, 1 + 0x1p-20, 1 - 0x1p-20, 2, 0.5, math.E}},
@@ -168,7 +174,25 @@ func unaryArg(r *splitmix, v *vecFunc) float64 {
 
 // powArgs draws one (base, exponent) pair.
 func powArgs(r *splitmix) (float64, float64) {
-	switch c := r.intn(24); {
+	switch c := r.intn(32); {
+	case c == 24: // any base, integer exponents
+		return r.sign() * r.logUniform(-60, 60), float64(r.intn(2001) - 1000)
+	case c == 25: // quarter exponents
+		return r.logUniform(-40, 40), float64(r.intn(161)-80) / 4
+	case c == 26: // results in the subnormal range
+		x := r.logUniform(1, 40)
+		return x, -(1022 + r.unit()*52) / math.Log2(x)
+	case c == 27: // inputs on which fdlibm and the C library's pow differ
+		k := [][2]float64{{10, -5}, {10, -17}, {10, 23}, {0.527924914041446, 2.4}, {0.11504498964210919, 44.625}, {2, 983.8424675024525}, {73041.22436527038, 2.0 / 3}}[r.intn(7)]
+		return nearby(r, k[0]), nearby(r, k[1])
+	case c == 28: // huge and tiny bases
+		return r.sign() * r.logUniform(-1074+52, 1023), r.unit()*2 - 1
+	case c == 29: // subnormal bases, small integer exponents
+		return r.sign() * math.Ldexp(r.unit(), -1022), float64(r.intn(7) - 3)
+	case c == 30: // negative bases, integer exponents
+		return -r.logUniform(-300, 300), float64(r.intn(2001) - 1000)
+	case c == 31: // near 1
+		return 1 + (r.unit()*2-1)*math.Ldexp(1, -r.intn(40)), r.sign() * r.logUniform(0, 40)
 	case c == 0:
 		return math.Float64frombits(r.next()), math.Float64frombits(r.next())
 	case c == 1:
@@ -256,9 +280,28 @@ func bytesToFloats(b []byte) []float64 {
 	return f
 }
 
-// runNode evaluates the function in V8 over the given arguments.
+// runNode evaluates the function in V8 over the given arguments, in the node on
+// PATH or, with JSMATH_NODE_DOCKER set to the docker run options (if any) and
+// the image, in a Linux container (see libm).
 func runNode(t testing.TB, v *vecFunc, args []float64) []float64 {
-	cmd := exec.Command("node", "testdata/eval_v8.mjs", v.name)
+	var cmd *exec.Cmd
+	if d := os.Getenv("JSMATH_NODE_DOCKER"); d != "" {
+		dir, err := filepath.Abs("testdata")
+		if err != nil {
+			t.Fatal(err)
+		}
+		run := append([]string{"run", "--rm", "-i", "-v", dir + ":/t:ro"}, strings.Fields(d)...)
+		cmd = exec.Command("docker", append(run, "node", "/t/eval_v8.mjs", v.name)...)
+	} else {
+		script, err := filepath.Abs("testdata/eval_v8.mjs")
+		if err != nil {
+			t.Fatal(err)
+		}
+		cmd = exec.Command("node", script, v.name)
+		// Run in the oracle's directory so a node version manager (volta) applies
+		// the node pinned in its package.json, the V8 the vectors must come from.
+		cmd.Dir = filepath.Join("..", "..", "testdata", "oracle-node")
+	}
 	cmd.Stdin = bytes.NewReader(floatsToBytes(args))
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -267,6 +310,14 @@ func runNode(t testing.TB, v *vecFunc, args []float64) []float64 {
 		t.Fatalf("node: %v", err)
 	}
 	return bytesToFloats(out.Bytes())
+}
+
+// skipLibm skips a comparison with node for a function that V8 leaves to the C
+// library when node runs on macOS, whose libm is not the one ported.
+func skipLibm(t *testing.T, v *vecFunc) {
+	if v.libm && runtime.GOOS == "darwin" && os.Getenv("JSMATH_NODE_DOCKER") == "" {
+		t.Skip("node on macOS calls Apple's libm; set JSMATH_NODE_DOCKER=node:24.21.0-bookworm to compare with glibc's in a container")
+	}
 }
 
 func sameFloat(a, b float64) bool {
@@ -301,6 +352,7 @@ func TestV8Vectors(t *testing.T) {
 		}
 		t.Run(v.name, func(t *testing.T) {
 			if *update {
+				skipLibm(t, v)
 				args := genArgs(v, 0, recordedCount)
 				res := runNode(t, v, args)
 				var buf bytes.Buffer
@@ -346,6 +398,7 @@ func TestV8Live(t *testing.T) {
 			continue
 		}
 		t.Run(v.name, func(t *testing.T) {
+			skipLibm(t, v)
 			args := genArgs(v, *liveSeed, *liveN)
 			want := runNode(t, v, args)
 			if dir := os.Getenv("JSMATH_DUMP"); dir != "" {

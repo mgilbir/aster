@@ -83,6 +83,60 @@ func TestAgainstV8(t *testing.T) {
 	}
 }
 
+// TestPowCases pins Pow to the results of node 24.21.0 on Linux (glibc's pow),
+// among them arguments on which the fdlibm pow V8 once used and macOS's libm
+// round differently, and the ECMAScript special cases.
+func TestPowCases(t *testing.T) {
+	inf, nan, nz := math.Inf(1), math.NaN(), math.Copysign(0, -1)
+	for _, c := range []struct{ x, y, want float64 }{
+		{10, -5, 1e-5},
+		{0.527924914041446, 2.4, 0.21586050011389926},
+		{10, 23, 1.0000000000000001e+23},
+		{10, -17, 1e-17},
+		{2, 983.8424675024525, 1.4658641590558648e+296},
+		{0.11504498964210919, 44.625, 1.233733987039986e-42},
+		{0.1, 0.1, 0.7943282347242815},
+		{1.0000000000000002, 1e17, 4398196873.9457445},
+		{2, 0.5, math.Sqrt2},
+		{9, 0.5, 3},
+		{27, 1.0 / 3, 3},
+		{-8, 1.0 / 3, nan},
+		{-27, 1.0 / 3, nan},
+		{nan, 0, 1},
+		{nan, 1, nan},
+		{2, nan, nan},
+		{3, nz, 1},
+		{1, inf, nan},
+		{-1, -inf, nan},
+		{0, -1, inf},
+		{nz, -1, -inf},
+		{nz, -3, -inf},
+		{nz, 3, nz},
+		{nz, 2, 0},
+		{nz, 0.5, 0},
+		{-2, 3, -8},
+		{-2, -3, -0.125},
+		{inf, -2, 0},
+		{inf, 0.5, inf},
+		{-inf, 3, -inf},
+		{-inf, -3, nz},
+		{-inf, 0.5, inf},
+		{2, 1024, inf},
+		{2, -1074, 5e-324},
+		{2, -1075, 0},
+		{0.5, 1074, 5e-324},
+		{5e-324, 0.5, 2.2227587494850775e-162},
+		{5e-324, 1, 5e-324},
+		{1e-310, 1.5, 0},
+		{math.MaxFloat64, 1.0000000000000002, inf},
+		{-math.MaxFloat64, 3, -inf},
+	} {
+		if got := Pow(c.x, c.y); !sameFloat(got, c.want) {
+			t.Errorf("Pow(%v, %v) = %v (%#x), want %v (%#x)", c.x, c.y, got, math.Float64bits(got), c.want, math.Float64bits(c.want))
+		}
+	}
+}
+
 var sink float64
 
 func BenchmarkSinCos(b *testing.B) {
