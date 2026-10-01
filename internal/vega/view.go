@@ -35,6 +35,7 @@ import (
 	"github.com/mgilbir/aster/internal/geo"
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/raster"
+	"github.com/mgilbir/aster/internal/scale"
 	"github.com/mgilbir/aster/internal/scene"
 	"github.com/mgilbir/aster/internal/transforms/wordcloud"
 )
@@ -229,6 +230,8 @@ func Render(ctx context.Context, spec jsval.Value, opts Options) (res *Result, e
 				err = e
 			case *opError:
 				err = e.err
+			case *scale.Thrown:
+				err = e
 			case *geo.LimitError:
 				err = e.Err
 			case error:

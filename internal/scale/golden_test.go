@@ -304,6 +304,11 @@ func runGolden(t *testing.T, file string) {
 			func() {
 				defer func() {
 					if r := recover(); r != nil {
+						// A *Thrown is the engine throwing as upstream does,
+						// which is right exactly when upstream threw.
+						if _, ok := r.(*Thrown); ok && isThrow(want) {
+							return
+						}
 						t.Errorf("%s: panic in %v: %v", c.Name, q[:2], r)
 						fail++
 					}

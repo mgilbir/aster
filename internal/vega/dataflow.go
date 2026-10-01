@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/geo"
+	"github.com/mgilbir/aster/internal/scale"
 	"sort"
 
 	"github.com/mgilbir/aster/internal/jsval"
@@ -655,6 +656,8 @@ func (g *flowGraph) evaluate(encode string) (err error) {
 				switch e := r.(type) {
 				case *opError:
 					err = e.err
+				case *scale.Thrown:
+					err = e
 				case *geo.LimitError:
 					err = e.Err
 				case error:
@@ -725,6 +728,8 @@ func (g *flowGraph) safely(fn func(*flowGraph)) (err error) {
 		if r := recover(); r != nil {
 			if e, ok := r.(*opError); ok {
 				err = e.err
+			} else if th, ok := r.(*scale.Thrown); ok {
+				err = th
 			} else if le, ok := r.(*geo.LimitError); ok {
 				err = le.Err
 			} else {

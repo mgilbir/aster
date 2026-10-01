@@ -543,6 +543,14 @@ func Discrete(values []jsval.Value) func(t float64) jsval.Value {
 	}
 }
 
+// Thrown is the panic value of a JavaScript exception thrown inside a scale
+// function, whose Apply methods cannot return an error. The dataflow logs it
+// as an error the specification caused, as upstream's does when an operator
+// throws.
+type Thrown struct{ Msg string }
+
+func (e *Thrown) Error() string { return e.Msg }
+
 // Piecewise is d3.piecewise: interpolates through the values with one
 // interpolator per consecutive pair. A nil interpolate means InterpolateValue.
 func Piecewise(interpolate Interpolator, values []jsval.Value) func(t float64) jsval.Value {
@@ -559,17 +567,14 @@ func Piecewise(interpolate Interpolator, values []jsval.Value) func(t float64) j
 	}
 	return func(t float64) jsval.Value {
 		if n == 0 {
-			// d3 would call I[0], which is undefined: a TypeError. The nearest
-			// harmless answer is the single value, or undefined.
-			if len(values) == 1 {
-				return values[0]
-			}
-			return jsval.Undefined
+			// I[0] is undefined with fewer than two values.
+			panic(&Thrown{"I[i] is not a function"})
 		}
 		t = float64(t * float64(n)) // rounded here so t-i below cannot fuse into an FMA
 		f := math.Floor(t)
 		if f != f {
-			return segs[0](math.NaN())
+			// I[NaN] is undefined too.
+			panic(&Thrown{"I[i] is not a function"})
 		}
 		i := int(math.Max(0, math.Min(float64(n-1), f)))
 		return segs[i](t - float64(i))
