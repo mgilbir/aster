@@ -544,12 +544,8 @@ func Discrete(values []jsval.Value) func(t float64) jsval.Value {
 }
 
 // Thrown is the panic value of a JavaScript exception thrown inside a scale
-// function, whose Apply methods cannot return an error. The dataflow logs it
-// as an error the specification caused, as upstream's does when an operator
-// throws.
-type Thrown struct{ Msg string }
-
-func (e *Thrown) Error() string { return e.Msg }
+// function, whose Apply methods cannot return an error (see jsval.Thrown).
+type Thrown = jsval.Thrown
 
 // Piecewise is d3.piecewise: interpolates through the values with one
 // interpolator per consecutive pair. A nil interpolate means InterpolateValue.

@@ -43,6 +43,15 @@ func FieldOf(path string) Field {
 	return Field{Get: getter(segs), Name: name, Fields: []string{name}}
 }
 
+// FieldOfStrict is FieldOf with the accessor's JavaScript semantics for a
+// missing step (see strictGetter): the accessors the dataflow runtime builds
+// from specification fields, whose panics it recovers and logs.
+func FieldOfStrict(path string) Field {
+	f := FieldOf(path)
+	f.Get = strictGetter(jsval.ParseFieldPath(path))
+	return f
+}
+
 // FieldsOf maps FieldOf over paths.
 func FieldsOf(paths ...string) []Field {
 	out := make([]Field, len(paths))
@@ -60,7 +69,8 @@ func NamedField(name string, fields []string, get Accessor) Field {
 
 // getter is vega-util's getter: plain property reads along the path. Unlike a
 // JavaScript member chain it answers Undefined instead of throwing when an
-// intermediate step is null or undefined.
+// intermediate step is null or undefined, so the library never panics on
+// hostile tuples; FieldOfStrict is the faithful accessor.
 func getter(path []string) Accessor {
 	switch len(path) {
 	case 0:
@@ -75,6 +85,37 @@ func getter(path []string) Accessor {
 		}
 		return v
 	}
+}
+
+// strictGetter reads the path as a JavaScript member chain does: a property of
+// null or undefined (a missing step of a nested path, or a missing tuple) is a
+// TypeError, raised as a *jsval.Thrown panic.
+func strictGetter(path []string) Accessor {
+	switch len(path) {
+	case 0:
+		return func(v jsval.Value) jsval.Value { return v }
+	case 1:
+		p := path[0]
+		return func(v jsval.Value) jsval.Value { return propOrThrow(v, p) }
+	}
+	return func(v jsval.Value) jsval.Value {
+		for _, p := range path {
+			v = propOrThrow(v, p)
+		}
+		return v
+	}
+}
+
+// propOrThrow is `v[key]`, a TypeError for null and undefined.
+func propOrThrow(v jsval.Value, key string) jsval.Value {
+	if v.IsNullish() {
+		of := "undefined"
+		if v.IsNull() {
+			of = "null"
+		}
+		panic(&jsval.Thrown{Msg: "Cannot read properties of " + of + " (reading '" + key + "')"})
+	}
+	return prop(v, key)
 }
 
 // prop is JavaScript's v[key] for the values datum fields hold.

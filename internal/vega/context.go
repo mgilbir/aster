@@ -298,7 +298,7 @@ type tupleIDMarker struct{}
 
 // fieldAccessor is vega-util's field(path, name).
 func fieldAccessor(path, name string) transforms.Field {
-	f := transforms.FieldOf(path)
+	f := transforms.FieldOfStrict(path)
 	if name != "" {
 		f.Name = name
 	}
