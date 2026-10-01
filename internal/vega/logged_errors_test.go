@@ -26,6 +26,12 @@ func TestOperatorErrorsAreLogged(t *testing.T) {
 			"Cannot read properties of undefined (reading 'age')",
 		},
 		{
+			// The generated encoder calls `_["%nosuch"](value)`.
+			"encoder reference to an unknown scale",
+			`{"width":50,"height":50,"data":[{"name":"t","values":[{"a":1}]}],"marks":[{"type":"rect","from":{"data":"t"},"encode":{"update":{"fill":{"scale":"nosuch","field":"a"}}}}]}`,
+			"_.%nosuch is not a function",
+		},
+		{
 			"scale bins without a step",
 			`{"width":100,"height":50,"scales":[{"name":"x","type":"linear","domain":[0,10],"range":"width","bins":{"step":0}}]}`,
 			"Scale bins parameter missing step property.",

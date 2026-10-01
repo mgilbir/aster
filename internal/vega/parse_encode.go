@@ -379,13 +379,13 @@ func (c *encCompiler) scaleTerm(enc jsval.Value, value valueFn, haveValue bool) 
 	if r := enc.Get("range"); !r.IsNullish() {
 		f := jsval.ToNumber(r)
 		return term{a: func(ev *encEval) jsval.Value {
-			rng := ev.ctx.scaleRange(scale(ev))
+			rng := ev.ctx.encScaleRange(scale(ev))
 			return lerp(rng, f)
 		}}
 	}
 	var cur term
 	if haveValue {
-		cur = term{a: func(ev *encEval) jsval.Value { return ev.ctx.applyScale(scale(ev), value(ev)) }}
+		cur = term{a: func(ev *encEval) jsval.Value { return ev.ctx.encScale(scale(ev), value(ev)) }}
 	}
 	if band := enc.Get("band"); !band.IsNullish() {
 		bw := func(ev *encEval) jsval.Value { return jsval.Num(ev.ctx.scaleBandwidth(scale(ev))) }
@@ -405,7 +405,7 @@ func (c *encCompiler) scaleTerm(enc jsval.Value, value valueFn, haveValue bool) 
 			sum := cur.fn()
 			cur = term{a: func(ev *encEval) jsval.Value {
 				if ex := ev.datum.Get("extra"); ex.IsTruthy() {
-					return ev.ctx.applyScale(scale(ev), ex.Get("value"))
+					return ev.ctx.encScale(scale(ev), ex.Get("value"))
 				}
 				return sum(ev)
 			}}

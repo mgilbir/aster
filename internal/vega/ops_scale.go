@@ -776,6 +776,37 @@ func projectPoint(p geo.Projection, v jsval.Value) jsval.Value {
 	return jsval.ArrOf(jsval.Num(x), jsval.Num(y))
 }
 
+// hasScaleRef reports whether ref names a scale or a projection the context
+// can see. The encoders' scale parameters exist only for scales known when the
+// specification was parsed, and the generated code calls them unguarded.
+func (c *rtContext) hasScaleRef(ref jsval.Value) bool {
+	if !ref.IsStr() {
+		return false
+	}
+	if c.scaleNode(ref.StrValue()) != nil {
+		return true
+	}
+	_, ok := c.projectionOf(ref)
+	return ok
+}
+
+// encScale is the encoders' _scale(name, value), `_["%name"](value)`: with no
+// such scale that is a call of undefined.
+func (c *rtContext) encScale(ref, v jsval.Value) jsval.Value {
+	if !c.hasScaleRef(ref) {
+		fail("_.%%%s is not a function", ref.AsString())
+	}
+	return c.applyScale(ref, v)
+}
+
+// encScaleRange is the encoders' _range(name), `_["%name"].range()`.
+func (c *rtContext) encScaleRange(ref jsval.Value) jsval.Value {
+	if !c.hasScaleRef(ref) {
+		fail("Cannot read properties of undefined (reading 'range')")
+	}
+	return c.scaleRange(ref)
+}
+
 func (c *rtContext) scaleRange(ref jsval.Value) jsval.Value {
 	s := c.scaleOf(ref)
 	if s == nil {
