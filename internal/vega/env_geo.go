@@ -101,8 +101,26 @@ func (c *rtContext) GeoShape(projection, geojson, group jsval.Value) jsval.Value
 	})
 }
 
-// PathShape returns a shape handle for SVG path data.
+// PathShape returns a shape handle for SVG path data. Upstream parses the path
+// when the shape is first drawn, not when it is made, so a path that is not a
+// string (a number, null) is only an error then: path.match fails, and it is
+// the shape's bounds or its drawing that throws.
 func (c *rtContext) PathShape(path jsval.Value) jsval.Value {
+	if !path.IsStr() {
+		return c.view.newShape(func(ctx scene.PathContext, _ *scene.Item) string {
+			if ctx == nil {
+				return path.AsString()
+			}
+			if path.IsNullish() {
+				of := "undefined"
+				if path.IsNull() {
+					of = "null"
+				}
+				panic(&jsval.Thrown{Name: "TypeError", Msg: "Cannot read properties of " + of + " (reading 'match')"})
+			}
+			panic(&jsval.Thrown{Name: "TypeError", Msg: "path.match is not a function"})
+		})
+	}
 	fn, err := scene.PathFuncFromString(path.AsString())
 	if err != nil {
 		failErr(err)
