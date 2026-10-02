@@ -1,15 +1,15 @@
 package svgpdf
 
 import (
+	"bytes"
 	"fmt"
 	"strconv"
-	"strings"
 )
 
 // contentWriter builds a PDF content stream (plain-text graphics operators)
 // and tracks the ExtGState resources the stream references.
 type contentWriter struct {
-	buf strings.Builder
+	buf []byte
 
 	// ExtGState registry: opacity values are applied through /GSn gs.
 	// gsNames preserves first-use order so output is deterministic.
@@ -77,24 +77,37 @@ func newContentWriter() *contentWriter {
 // fmtNum formats a coordinate for a content stream: fixed notation (PDF has
 // no exponent syntax), at most 4 decimals, trailing zeros trimmed.
 func fmtNum(v float64) string {
-	s := strconv.FormatFloat(v, 'f', 4, 64)
-	if strings.Contains(s, ".") {
-		s = strings.TrimRight(s, "0")
-		s = strings.TrimSuffix(s, ".")
+	var a [32]byte
+	return string(appendNum(a[:0], v))
+}
+
+// appendNum appends fmtNum(v) to dst without allocating.
+func appendNum(dst []byte, v float64) []byte {
+	start := len(dst)
+	dst = strconv.AppendFloat(dst, v, 'f', 4, 64)
+	n := dst[start:]
+	if bytes.IndexByte(n, '.') >= 0 {
+		for len(n) > 0 && n[len(n)-1] == '0' {
+			n = n[:len(n)-1]
+		}
+		if len(n) > 0 && n[len(n)-1] == '.' {
+			n = n[:len(n)-1]
+		}
+		dst = dst[:start+len(n)]
 	}
-	if s == "-0" {
-		s = "0"
+	if string(dst[start:]) == "-0" {
+		dst = append(dst[:start], '0')
 	}
-	return s
+	return dst
 }
 
 func (w *contentWriter) op(operator string, args ...float64) {
 	for _, a := range args {
-		w.buf.WriteString(fmtNum(a))
-		w.buf.WriteByte(' ')
+		w.buf = appendNum(w.buf, a)
+		w.buf = append(w.buf, ' ')
 	}
-	w.buf.WriteString(operator)
-	w.buf.WriteByte('\n')
+	w.buf = append(w.buf, operator...)
+	w.buf = append(w.buf, '\n')
 }
 
 func (w *contentWriter) save() {
@@ -161,16 +174,16 @@ func (w *contentWriter) setDash(pattern []float64, phase float64) {
 	if equalDash(w.cur.dash, pattern) && w.cur.dashOffset == phase {
 		return
 	}
-	w.buf.WriteByte('[')
+	w.buf = append(w.buf, '[')
 	for i, d := range pattern {
 		if i > 0 {
-			w.buf.WriteByte(' ')
+			w.buf = append(w.buf, ' ')
 		}
-		w.buf.WriteString(fmtNum(d))
+		w.buf = appendNum(w.buf, d)
 	}
-	w.buf.WriteString("] ")
-	w.buf.WriteString(fmtNum(phase))
-	w.buf.WriteString(" d\n")
+	w.buf = append(w.buf, "] "...)
+	w.buf = appendNum(w.buf, phase)
+	w.buf = append(w.buf, " d\n"...)
 	w.cur.dash = append([]float64(nil), pattern...)
 	w.cur.dashOffset = phase
 }
@@ -210,9 +223,9 @@ func (w *contentWriter) opacity(fillAlpha, strokeAlpha float64) {
 		w.gsIndex[key] = name
 		w.gsNames = append(w.gsNames, gsEntry{name: name, alpha: key})
 	}
-	w.buf.WriteByte('/')
-	w.buf.WriteString(name)
-	w.buf.WriteString(" gs\n")
+	w.buf = append(w.buf, '/')
+	w.buf = append(w.buf, name...)
+	w.buf = append(w.buf, " gs\n"...)
 }
 
 // --- text object operators ---
@@ -221,11 +234,11 @@ func (w *contentWriter) beginText() { w.op("BT") }
 func (w *contentWriter) endText()   { w.op("ET") }
 
 func (w *contentWriter) setTextFont(res string, size float64) {
-	w.buf.WriteByte('/')
-	w.buf.WriteString(res)
-	w.buf.WriteByte(' ')
-	w.buf.WriteString(fmtNum(size))
-	w.buf.WriteString(" Tf\n")
+	w.buf = append(w.buf, '/')
+	w.buf = append(w.buf, res...)
+	w.buf = append(w.buf, ' ')
+	w.buf = appendNum(w.buf, size)
+	w.buf = append(w.buf, " Tf\n"...)
 }
 
 func (w *contentWriter) textMatrix(m Matrix) {
@@ -244,19 +257,20 @@ type tjItem struct {
 
 // showGlyphs emits one TJ array.
 func (w *contentWriter) showGlyphs(items []tjItem) {
-	w.buf.WriteByte('[')
+	const hex = "0123456789ABCDEF"
+	w.buf = append(w.buf, '[')
 	for _, it := range items {
 		if it.isAdj {
-			w.buf.WriteString(fmtNum(it.adj))
+			w.buf = appendNum(w.buf, it.adj)
 			continue
 		}
-		w.buf.WriteByte('<')
+		w.buf = append(w.buf, '<')
 		for _, g := range it.glyphs {
-			fmt.Fprintf(&w.buf, "%04X", g)
+			w.buf = append(w.buf, hex[g>>12], hex[g>>8&15], hex[g>>4&15], hex[g&15])
 		}
-		w.buf.WriteByte('>')
+		w.buf = append(w.buf, '>')
 	}
-	w.buf.WriteString("] TJ\n")
+	w.buf = append(w.buf, "] TJ\n"...)
 }
 
 func (w *contentWriter) moveTo(p Point) { w.op("m", p.X, p.Y) }
@@ -317,5 +331,5 @@ func (w *contentWriter) clip() {
 }
 
 func (w *contentWriter) bytes() []byte {
-	return []byte(w.buf.String())
+	return w.buf
 }
