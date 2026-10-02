@@ -41,7 +41,13 @@ func parsePathData(d string) ([]PathSeg, error) {
 
 // parsePathDataMax is parsePathData with a cap on the number of segments.
 func parsePathDataMax(d string, maxSegs int) ([]PathSeg, error) {
-	p := &pathParser{data: d, max: maxSegs}
+	return parsePathDataInto(nil, d, maxSegs)
+}
+
+// parsePathDataInto is parsePathDataMax appending to buf[:0], so a caller that
+// consumes the segments before the next path can reuse one buffer.
+func parsePathDataInto(buf []PathSeg, d string, maxSegs int) ([]PathSeg, error) {
+	p := pathParser{data: d, max: maxSegs, segs: buf[:0]}
 	return p.parse()
 }
 
@@ -303,23 +309,25 @@ func (p *pathParser) arcTo(rel bool) error {
 		return err
 	}
 
-	p.segs = append(p.segs, arcToCubics(p.cur, end, rx, ry, rot, largeArc, sweep)...)
+	p.segs = appendArc(p.segs, p.cur, end, rx, ry, rot, largeArc, sweep)
 	p.cur = end
 	p.lastCmd = 'a'
 	return nil
 }
 
-// arcToCubics converts an SVG elliptical arc to cubic Bézier segments using
+// appendArc converts an SVG elliptical arc to cubic Bézier segments using
 // the endpoint-to-center parameterization of SVG 1.1 appendix F.6, splitting
 // the sweep into arcs of at most 90° each.
-func arcToCubics(from, to Point, rx, ry, xRotDeg float64, largeArc, sweep bool) []PathSeg {
+//
+// appendArc appends those segments to dst.
+func appendArc(dst []PathSeg, from, to Point, rx, ry, xRotDeg float64, largeArc, sweep bool) []PathSeg {
 	if from == to {
-		return nil
+		return dst
 	}
 	rx, ry = math.Abs(rx), math.Abs(ry)
 	if rx == 0 || ry == 0 {
 		// Zero radii degrade to a straight line per the SVG spec.
-		return []PathSeg{{Op: OpLineTo, P3: to}}
+		return append(dst, PathSeg{Op: OpLineTo, P3: to})
 	}
 
 	phi := xRotDeg * math.Pi / 180
@@ -370,7 +378,7 @@ func arcToCubics(from, to Point, rx, ry, xRotDeg float64, largeArc, sweep bool) 
 	// standard tangent-length factor k = 4/3 tan(δ/4).
 	n := int(math.Ceil(math.Abs(dTheta) / (math.Pi / 2)))
 	if n == 0 {
-		return nil
+		return dst
 	}
 	delta := dTheta / float64(n)
 	k := 4.0 / 3.0 * math.Tan(delta/4)
@@ -388,7 +396,6 @@ func arcToCubics(from, to Point, rx, ry, xRotDeg float64, largeArc, sweep bool) 
 		return pt, deriv
 	}
 
-	segs := make([]PathSeg, 0, n)
 	t := theta1
 	p0, d0 := pointAt(t)
 	for i := 0; i < n; i++ {
@@ -398,7 +405,7 @@ func arcToCubics(from, to Point, rx, ry, xRotDeg float64, largeArc, sweep bool) 
 		if i == n-1 {
 			end = to // land exactly on the endpoint
 		}
-		segs = append(segs, PathSeg{
+		dst = append(dst, PathSeg{
 			Op: OpCubicTo,
 			P1: Point{p0.X + k*d0.X, p0.Y + k*d0.Y},
 			P2: Point{end.X - k*d1.X, end.Y - k*d1.Y},
@@ -407,7 +414,7 @@ func arcToCubics(from, to Point, rx, ry, xRotDeg float64, largeArc, sweep bool) 
 		t = t2
 		p0, d0 = p1, d1
 	}
-	return segs
+	return dst
 }
 
 // --- scanning helpers ---

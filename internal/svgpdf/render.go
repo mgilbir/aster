@@ -130,17 +130,19 @@ type renderer struct {
 
 	ctx       context.Context
 	lim       Limits
-	visited   int // elements rendered (a <clipPath> is re-applied per reference)
-	segsTotal int // path segments parsed so far
-	textTotal int // text bytes shaped so far
+	visited   int       // elements rendered (a <clipPath> is re-applied per reference)
+	segsTotal int       // path segments parsed so far
+	segBuf    []PathSeg // reused by parsePath
+	textTotal int       // text bytes shaped so far
 }
 
 // parsePath parses path data, charging its segments to the render budget.
 func (r *renderer) parsePath(d string) ([]PathSeg, error) {
-	segs, err := parsePathDataMax(d, r.lim.MaxPathSegments-r.segsTotal)
+	segs, err := parsePathDataInto(r.segBuf, d, r.lim.MaxPathSegments-r.segsTotal)
 	if err != nil {
 		return nil, err
 	}
+	r.segBuf = segs // the caller draws the segments before the next parse
 	r.segsTotal += len(segs)
 	return segs, nil
 }
