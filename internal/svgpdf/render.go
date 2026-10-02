@@ -107,7 +107,8 @@ var geometryAttrs = map[string]map[string]bool{
 // output (the caller then falls back to raster).
 func checkAttrs(e *element) error {
 	geo := geometryAttrs[e.name]
-	for name := range e.attrs {
+	for _, a := range e.attrs {
+		name := a.name
 		if isIgnorableAttr(name) || presentationAttrs[name] || geo[name] {
 			continue
 		}
@@ -154,11 +155,11 @@ func render(root *element, shaper TextShaper, opts Options) (content []byte, gsL
 	if err := checkAttrs(root); err != nil {
 		return nil, nil, nil, 0, 0, err
 	}
-	width, err = parseLength(root.attrs["width"])
+	width, err = parseLength(root.attrVal("width"))
 	if err != nil {
 		return nil, nil, nil, 0, 0, fmt.Errorf("svgpdf: <svg> width: %w", err)
 	}
-	height, err = parseLength(root.attrs["height"])
+	height, err = parseLength(root.attrVal("height"))
 	if err != nil {
 		return nil, nil, nil, 0, 0, fmt.Errorf("svgpdf: <svg> height: %w", err)
 	}
@@ -431,7 +432,7 @@ func (r *renderer) applyClip(ref string) error {
 			}
 			r.w.rect(x, y, w, h)
 		case "path":
-			segs, err := r.parsePath(c.attrs["d"])
+			segs, err := r.parsePath(c.attrVal("d"))
 			if err != nil {
 				return err
 			}
@@ -514,7 +515,7 @@ func (r *renderer) drawRect(e *element, st gstate) error {
 }
 
 func (r *renderer) drawPath(e *element, st gstate) error {
-	d := e.attrs["d"]
+	d := e.attrVal("d")
 	if strings.TrimSpace(d) == "" {
 		return nil // Vega emits empty d for placeholder foreground paths
 	}
