@@ -493,38 +493,12 @@ func facSortItems(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNo
 		}
 		mod := p.Modified("sort") || len(pulse.add) > 0 || len(pulse.mod) > 0 || len(pulse.rem) > 0
 		if mod && cmp != nil {
-			// The comparator's fields are paths into the item (datum.x, x, ...).
 			v := n.g.view
-			views := make(map[*scene.Item]jsval.Value, len(pulse.items))
-			var temp []*scene.Item
-			for _, it := range pulse.items {
-				if v.itemTupleCache[it] == nil {
-					temp = append(temp, it)
-				}
-				views[it] = v.itemTuple(it)
+			if cs := p.compareSpec("sort"); cs != nil && cs.roots != nil {
+				v.sortItemsByKeys(pulse.items, cs)
+			} else {
+				v.sortItemsByViews(pulse.items, cmp)
 			}
-			// The views only serve the comparator: the ones this sort made
-			// are dropped, or every sorted item would keep a copy of its
-			// properties for the rest of the render.
-			defer func() {
-				for _, it := range temp {
-					delete(v.viewItem, v.itemTupleCache[it])
-					delete(v.itemTupleCache, it)
-				}
-			}()
-			// stableCompare: ties go by tuple id, the order the items were created.
-			jssort.Sort(pulse.items, func(a, b *scene.Item) int {
-				if c := cmp(views[a], views[b]); c != 0 {
-					return c
-				}
-				switch {
-				case a.Seq < b.Seq:
-					return -1
-				case a.Seq > b.Seq:
-					return 1
-				}
-				return 0
-			})
 		}
 		n.modified = mod
 		return pulse
@@ -694,4 +668,102 @@ func (v *runView) derivedTuples(jm *joinMap, pulse *flowPulse) []jsval.Value {
 		}
 	}
 	return out
+}
+
+// sortItemsByViews sorts items with cmp over their tuple views. The views only
+// serve the comparator: the ones this sort made are dropped, or every sorted
+// item would keep a copy of its properties for the rest of the render.
+func (v *runView) sortItemsByViews(items []*scene.Item, cmp transforms.Comparator) {
+	views := make(map[*scene.Item]jsval.Value, len(items))
+	var temp []*scene.Item
+	for _, it := range items {
+		if v.itemTupleCache[it] == nil {
+			temp = append(temp, it)
+		}
+		views[it] = v.itemTuple(it)
+	}
+	defer func() {
+		for _, it := range temp {
+			delete(v.viewItem, v.itemTupleCache[it])
+			delete(v.itemTupleCache, it)
+		}
+	}()
+	// stableCompare: ties go by tuple id, the order the items were created.
+	jssort.Sort(items, func(a, b *scene.Item) int {
+		if c := cmp(views[a], views[b]); c != 0 {
+			return c
+		}
+		return cmpSeq(a, b)
+	})
+}
+
+func cmpSeq(a, b *scene.Item) int {
+	switch {
+	case a.Seq < b.Seq:
+		return -1
+	case a.Seq > b.Seq:
+		return 1
+	}
+	return 0
+}
+
+// sortRec is an item with the offset of its sort keys.
+type sortRec struct {
+	it  *scene.Item
+	off int
+}
+
+// sortItemsByKeys is sortItemsByViews for a comparator over plain field paths:
+// the keys are read once per item, from a view holding only the properties the
+// paths start with, and the sort compares the keys. The result is the same
+// order, without a tuple view (and its copy of every property) per item.
+func (v *runView) sortItemsByKeys(items []*scene.Item, cs *compareSpec) {
+	nf := len(cs.keys)
+	keys := make([]jsval.Value, len(items)*nf)
+	recs := make([]sortRec, len(items))
+	scratch := jsval.NewObject(nf + 1)
+	view := jsval.Obj(scratch)
+	for i, it := range items {
+		if v.itemTupleCache[it] != nil {
+			// A view that exists is refreshed, as a sort over views does.
+			v.itemTuple(it)
+		}
+		for _, root := range cs.roots {
+			switch root {
+			case "datum":
+				scratch.Set(root, it.Datum)
+			case "bounds":
+				b := it.Bounds
+				scratch.Set(root, obj("x1", jsval.Num(b.X1), "y1", jsval.Num(b.Y1), "x2", jsval.Num(b.X2), "y2", jsval.Num(b.Y2)))
+			default:
+				if val := it.Get(root); !val.IsUndefined() {
+					scratch.Set(root, val)
+				} else {
+					scratch.Delete(root)
+				}
+			}
+		}
+		recs[i] = sortRec{it, i * nf}
+		for j, k := range cs.keys {
+			keys[i*nf+j] = k.Get(view)
+		}
+	}
+	order := make([]int, nf)
+	for j, o := range cs.orders {
+		order[j] = 1
+		if o == transforms.Desc {
+			order[j] = -1
+		}
+	}
+	jssort.Sort(recs, func(a, b sortRec) int {
+		for j := 0; j < nf; j++ {
+			if c := transforms.Ascending(keys[a.off+j], keys[b.off+j]); c != 0 {
+				return c * order[j]
+			}
+		}
+		return cmpSeq(a.it, b.it)
+	})
+	for i, r := range recs {
+		items[i] = r.it
+	}
 }

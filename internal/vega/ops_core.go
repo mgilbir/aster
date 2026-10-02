@@ -183,6 +183,11 @@ type compareSpec struct {
 	cmp    transforms.Comparator
 	fields []string
 	orders []string
+	// keys are the accessors cmp is built from and roots the first segment of
+	// each one's path; roots is nil unless every field is a plain path with a
+	// segment, so a caller can read the keys off a partial view of a tuple.
+	keys  []transforms.Field
+	roots []string
 }
 
 // compareFrom builds a comparator from field specs (paths or accessors) and
@@ -191,6 +196,8 @@ func compareFrom(fields []any, orders []any) *compareSpec {
 	fs := make([]transforms.Field, 0, len(fields))
 	ord := make([]string, 0, len(fields))
 	names := make([]string, 0, len(fields))
+	roots := make([]string, 0, len(fields))
+	rootsOK := true
 	for i, f := range fields {
 		var fld transforms.Field
 		switch v := f.(type) {
@@ -199,10 +206,13 @@ func compareFrom(fields []any, orders []any) *compareSpec {
 				continue
 			}
 			fld = transforms.FieldOf(v.AsString())
+			rootsOK = appendRoot(&roots, v.AsString()) && rootsOK
 		case transforms.Field:
 			fld = v
+			rootsOK = false
 		case string:
 			fld = transforms.FieldOf(v)
+			rootsOK = appendRoot(&roots, v) && rootsOK
 		default:
 			continue
 		}
@@ -216,7 +226,23 @@ func compareFrom(fields []any, orders []any) *compareSpec {
 	if cmp == nil {
 		return nil
 	}
-	return &compareSpec{cmp: cmp, fields: names, orders: ord}
+	cs := &compareSpec{cmp: cmp, fields: names, orders: ord}
+	if rootsOK {
+		cs.keys, cs.roots = fs, roots
+	}
+	return cs
+}
+
+// appendRoot adds the first segment of a field path to roots and reports
+// whether the path has one.
+func appendRoot(roots *[]string, path string) bool {
+	segs := jsval.ParseFieldPath(path)
+	if len(segs) == 0 {
+		*roots = append(*roots, "")
+		return false
+	}
+	*roots = append(*roots, segs[0])
+	return true
 }
 
 func (c *rtContext) compareFn(cmp pCompare) *compareSpec {
