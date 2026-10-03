@@ -21,7 +21,7 @@ func (it *Item) Set(key string, val jsval.Value) (known bool, err error) {
 }
 
 func (it *Item) setProp(l *jsonLoader, k string, val jsval.Value) (bool, error) {
-	if rawNumeric[k] {
+	if rawNumeric(k) {
 		it.setRaw(k, val)
 	}
 	switch k {
@@ -438,11 +438,14 @@ func gradientValue(g *Gradient) jsval.Value {
 // rawNumeric lists the numeric properties whose non-numeric values upstream
 // can observe: through a truthiness guard (angle) or by writing them to the
 // SVG verbatim (the style attributes).
-var rawNumeric = map[string]bool{
-	"angle": true, "strokeWidth": true, "strokeOpacity": true, "fillOpacity": true,
-	"opacity": true, "strokeDashOffset": true, "strokeMiterLimit": true,
-	"x": true, "y": true, "width": true, "height": true, "cornerRadius": true, "cornerRadiusTopLeft": true,
-	"cornerRadiusTopRight": true, "cornerRadiusBottomRight": true, "cornerRadiusBottomLeft": true,
+func rawNumeric(k string) bool {
+	switch k {
+	case "angle", "strokeWidth", "strokeOpacity", "fillOpacity", "opacity", "strokeDashOffset",
+		"strokeMiterLimit", "x", "y", "width", "height", "cornerRadius", "cornerRadiusTopLeft",
+		"cornerRadiusTopRight", "cornerRadiusBottomRight", "cornerRadiusBottomLeft":
+		return true
+	}
+	return false
 }
 
 // truthyProp is the truthiness of a numeric property as it was given: a word
