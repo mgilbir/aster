@@ -3,6 +3,7 @@ package expr
 import (
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -567,6 +568,9 @@ func (c *compiler) conditional(n *Node) (node, error) {
 }
 
 func (c *compiler) binary(n *Node) (node, error) {
+	if n.Op == "+" && n.Left.Kind == KindBinary && n.Left.Op == "+" {
+		return c.concatChain(n)
+	}
 	l, err := c.compile(n.Left)
 	if err != nil {
 		return nil, err
@@ -878,4 +882,52 @@ func (h *slotHint) get(o *jsval.Object, key string) jsval.Value {
 		}
 	}
 	return v
+}
+
+// concatChain compiles a + b + c ...: the operands of a left-nested chain of
+// additions, evaluated in order, each added to the running result as the
+// nested closures would. Once the result is a string the rest of the chain is
+// concatenation, built in one allocation instead of one per operator; the
+// string budget is charged after each operand with the length the nested
+// concatenations would have made, so a limit trips at the same operand.
+func (c *compiler) concatChain(n *Node) (node, error) {
+	var operands []*Node
+	for ; n.Kind == KindBinary && n.Op == "+"; n = n.Left {
+		operands = append(operands, n.Right)
+	}
+	operands = append(operands, n)
+	slices.Reverse(operands)
+	fs := make([]node, len(operands))
+	for i, o := range operands {
+		f, err := c.compile(o)
+		if err != nil {
+			return nil, err
+		}
+		fs[i] = f
+	}
+	return func(s *Scope) jsval.Value {
+		acc := fs[0](s)
+		i := 1
+		for ; i < len(fs) && !acc.IsStr(); i++ {
+			acc = s.add(acc, fs[i](s))
+		}
+		if i == len(fs) {
+			return acc
+		}
+		var buf [8]string
+		parts := append(buf[:0], acc.StrValue())
+		total := len(parts[0])
+		for ; i < len(fs); i++ {
+			y := s.str(s.primitive(fs[i](s), false))
+			total += len(y)
+			s.checkLen(total)
+			parts = append(parts, y)
+		}
+		var b strings.Builder
+		b.Grow(total)
+		for _, p := range parts {
+			b.WriteString(p)
+		}
+		return jsval.Str(b.String())
+	}, nil
 }
