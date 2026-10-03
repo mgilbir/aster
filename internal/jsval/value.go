@@ -10,6 +10,7 @@ package jsval
 import (
 	"math"
 	"strings"
+	"unsafe"
 )
 
 // Kind discriminates the variants of a Value.
@@ -62,12 +63,41 @@ func (k Kind) String() string {
 // the reference, as JavaScript does. By convention values reachable from a
 // specification or a datum are treated as immutable once published; code that
 // needs to change one clones it first.
+//
+// A Value is two words. p is the string's bytes, the *arrayBox, *Object or
+// *Pattern, or for null, booleans, numbers and dates the address of the kind's
+// tag; x is then the string's length with the kind in its top byte, the kind
+// alone, or the number's bits. Undefined is both zero. Values are not
+// comparable: == would compare the bytes of a string by address; Key gives
+// the comparison of the values.
 type Value struct {
-	k Kind
-	n float64 // KindNum, KindTimestamp, KindBool (0/1)
-	s string  // KindStr
-	r any     // *arrayBox, *Object, *Pattern
+	_ [0]func() // not comparable
+	p unsafe.Pointer
+	x uint64
 }
+
+// tags are what p points at for the kinds that hold no reference: the kind
+// is the offset.
+var tags [KindPattern + 1]byte
+
+const (
+	kindShift = 56
+	lenMask   = 1<<kindShift - 1
+)
+
+func scalar(k Kind, bits uint64) Value { return Value{p: unsafe.Pointer(&tags[k]), x: bits} }
+
+func ref(k Kind, p unsafe.Pointer) Value { return Value{p: p, x: uint64(k) << kindShift} }
+
+// n is the float of a number, date or boolean.
+func (v Value) n() float64 { return math.Float64frombits(v.x) }
+
+// s is the string of a string.
+func (v Value) s() string { return unsafe.String((*byte)(v.p), int(v.x&lenMask)) }
+
+func (v Value) arr() *arrayBox { return (*arrayBox)(v.p) }
+func (v Value) obj() *Object   { return (*Object)(v.p) }
+func (v Value) pat() *Pattern  { return (*Pattern)(v.p) }
 
 type arrayBox struct{ items []Value }
 
@@ -126,7 +156,7 @@ func (s *ArrSlab) Next() (Value, []Value) {
 	b := &s.boxes[0]
 	b.items = s.vals[:s.dim:s.dim]
 	s.boxes, s.vals = s.boxes[1:], s.vals[s.dim:]
-	return Value{k: KindArr, r: b}, b.items
+	return ref(KindArr, unsafe.Pointer(b)), b.items
 }
 
 // MakeArr makes an array of n undefined elements and returns it with its
@@ -163,24 +193,26 @@ func MakeArr(n int) (Value, []Value) {
 	default:
 		b = &arrayBox{items: make([]Value, n)}
 	}
-	return Value{k: KindArr, r: b}, b.items
+	return ref(KindArr, unsafe.Pointer(b)), b.items
 }
 
 var (
 	Undefined = Value{}
-	Null      = Value{k: KindNull}
-	True      = Value{k: KindBool, n: 1}
-	False     = Value{k: KindBool}
+	Null      = scalar(KindNull, 0)
+	True      = scalar(KindBool, math.Float64bits(1))
+	False     = scalar(KindBool, 0)
 )
 
 // Num makes a number.
-func Num(f float64) Value { return Value{k: KindNum, n: f} }
+func Num(f float64) Value { return scalar(KindNum, math.Float64bits(f)) }
 
 // Int makes a number from an int.
-func Int(i int) Value { return Value{k: KindNum, n: float64(i)} }
+func Int(i int) Value { return Num(float64(i)) }
 
 // Str makes a string.
-func Str(s string) Value { return Value{k: KindStr, s: s} }
+func Str(s string) Value {
+	return Value{p: unsafe.Pointer(unsafe.StringData(s)), x: uint64(len(s)) | uint64(KindStr)<<kindShift}
+}
 
 // Bool makes a boolean.
 func Bool(b bool) Value {
@@ -191,10 +223,12 @@ func Bool(b bool) Value {
 }
 
 // Timestamp makes a date from epoch milliseconds (NaN is an Invalid Date).
-func Timestamp(epochMillis float64) Value { return Value{k: KindTimestamp, n: epochMillis} }
+func Timestamp(epochMillis float64) Value {
+	return scalar(KindTimestamp, math.Float64bits(epochMillis))
+}
 
 // Arr makes an array that takes ownership of items.
-func Arr(items []Value) Value { return Value{k: KindArr, r: &arrayBox{items: items}} }
+func Arr(items []Value) Value { return ref(KindArr, unsafe.Pointer(&arrayBox{items: items})) }
 
 // ArrOf makes an array from the given values.
 func ArrOf(items ...Value) Value { return Arr(items) }
@@ -204,101 +238,120 @@ func Obj(o *Object) Value {
 	if o == nil {
 		o = NewObject(0)
 	}
-	return Value{k: KindObj, r: o}
+	return ref(KindObj, unsafe.Pointer(o))
 }
 
 // PatternValue wraps a compiled pattern.
-func PatternValue(p *Pattern) Value { return Value{k: KindPattern, r: p} }
+func PatternValue(p *Pattern) Value { return ref(KindPattern, unsafe.Pointer(p)) }
 
 // Kind reports the variant.
-func (v Value) Kind() Kind { return v.k }
+func (v Value) Kind() Kind {
+	if d := uintptr(v.p) - uintptr(unsafe.Pointer(&tags)); d < uintptr(len(tags)) {
+		return Kind(d)
+	}
+	return Kind(v.x >> kindShift)
+}
 
-func (v Value) IsUndefined() bool { return v.k == KindUndefined }
-func (v Value) IsNull() bool      { return v.k == KindNull }
-func (v Value) IsBool() bool      { return v.k == KindBool }
-func (v Value) IsNum() bool       { return v.k == KindNum }
-func (v Value) IsStr() bool       { return v.k == KindStr }
-func (v Value) IsTimestamp() bool { return v.k == KindTimestamp }
-func (v Value) IsArr() bool       { return v.k == KindArr }
-func (v Value) IsObj() bool       { return v.k == KindObj }
-func (v Value) IsPattern() bool   { return v.k == KindPattern }
+// is reports whether v is of kind k, a kind that holds no reference.
+func (v Value) is(k Kind) bool { return v.p == unsafe.Pointer(&tags[k]) }
+
+func (v Value) IsUndefined() bool { return v.p == nil && v.x == 0 }
+func (v Value) IsNull() bool      { return v.is(KindNull) }
+func (v Value) IsBool() bool      { return v.is(KindBool) }
+func (v Value) IsNum() bool       { return v.is(KindNum) }
+func (v Value) IsStr() bool       { return v.Kind() == KindStr }
+func (v Value) IsTimestamp() bool { return v.is(KindTimestamp) }
+func (v Value) IsArr() bool       { return v.Kind() == KindArr }
+func (v Value) IsObj() bool       { return v.Kind() == KindObj }
+func (v Value) IsPattern() bool   { return v.Kind() == KindPattern }
 
 // IsNullish is JavaScript's `v == null`: true for Null and Undefined.
-func (v Value) IsNullish() bool { return v.k == KindNull || v.k == KindUndefined }
+func (v Value) IsNullish() bool { return v.IsNull() || v.IsUndefined() }
 
 // IsMissing is true for Null, Undefined and numeric NaN, Vega's notion of a
 // missing value.
 func (v Value) IsMissing() bool {
-	switch v.k {
+	switch v.Kind() {
 	case KindNull, KindUndefined:
 		return true
 	case KindNum:
-		return math.IsNaN(v.n)
+		return math.IsNaN(v.n())
 	}
 	return false
 }
 
 // NumValue returns the float of a KindNum or KindTimestamp value, and 0 for
 // anything else. Use AsNumber when the kind is not known.
-func (v Value) NumValue() float64 { return v.n }
+func (v Value) NumValue() float64 {
+	switch v.Kind() {
+	case KindNum, KindTimestamp, KindBool:
+		return v.n()
+	}
+	return 0
+}
 
 // BoolValue returns the boolean of a KindBool value (false otherwise).
-func (v Value) BoolValue() bool { return v.k == KindBool && v.n != 0 }
+func (v Value) BoolValue() bool { return v.Kind() == KindBool && v.n() != 0 }
 
 // StrValue returns the string of a KindStr value ("" otherwise).
-func (v Value) StrValue() string { return v.s }
+func (v Value) StrValue() string {
+	if v.Kind() != KindStr {
+		return ""
+	}
+	return v.s()
+}
 
 // Items returns the elements of an array (nil otherwise). The slice is shared;
 // do not modify it.
 func (v Value) Items() []Value {
-	if v.k != KindArr {
+	if v.Kind() != KindArr {
 		return nil
 	}
-	return v.r.(*arrayBox).items
+	return v.arr().items
 }
 
 // Len is the length of an array or the number of keys of an object.
 func (v Value) Len() int {
-	switch v.k {
+	switch v.Kind() {
 	case KindArr:
-		return len(v.r.(*arrayBox).items)
+		return len(v.arr().items)
 	case KindObj:
-		return v.r.(*Object).Len()
+		return v.obj().Len()
 	}
 	return 0
 }
 
 // ObjValue returns the object of a KindObj value (nil otherwise).
 func (v Value) ObjValue() *Object {
-	if v.k != KindObj {
+	if v.Kind() != KindObj {
 		return nil
 	}
-	return v.r.(*Object)
+	return v.obj()
 }
 
 // PatternOf returns the pattern of a KindPattern value (nil otherwise).
 func (v Value) PatternOf() *Pattern {
-	if v.k != KindPattern {
+	if v.Kind() != KindPattern {
 		return nil
 	}
-	return v.r.(*Pattern)
+	return v.pat()
 }
 
 // Get reads a property of an object, answering Undefined when v is not an
 // object or has no such key.
 func (v Value) Get(key string) Value {
-	if v.k != KindObj {
+	if v.Kind() != KindObj {
 		return Undefined
 	}
-	return v.r.(*Object).Lookup(key)
+	return v.obj().Lookup(key)
 }
 
 // Index reads an array element, answering Undefined out of range.
 func (v Value) Index(i int) Value {
-	if v.k != KindArr {
+	if v.Kind() != KindArr {
 		return Undefined
 	}
-	items := v.r.(*arrayBox).items
+	items := v.arr().items
 	if i < 0 || i >= len(items) {
 		return Undefined
 	}
@@ -308,8 +361,8 @@ func (v Value) Index(i int) Value {
 // NumberOrNull returns the number held by a Num or Timestamp, and ok=false for
 // anything else. A date is a number to arithmetic but not to isNumber.
 func (v Value) NumberOrNull() (float64, bool) {
-	if v.k == KindNum || v.k == KindTimestamp {
-		return v.n, true
+	if v.Kind() == KindNum || v.Kind() == KindTimestamp {
+		return v.n(), true
 	}
 	return 0, false
 }
@@ -318,13 +371,13 @@ func (v Value) NumberOrNull() (float64, bool) {
 // held no number. null, "" and [] read NaN (Number would say 0). Use
 // ToNumber for the coercion.
 func (v Value) AsDouble() float64 {
-	switch v.k {
+	switch v.Kind() {
 	case KindNum, KindTimestamp:
-		return v.n
+		return v.n()
 	case KindBool:
-		return v.n
+		return v.n()
 	case KindStr:
-		return parseLooseDouble(strings.TrimSpace(v.s))
+		return parseLooseDouble(strings.TrimSpace(v.s()))
 	case KindArr:
 		// A chain of one-element arrays is followed in a loop, not by
 		// recursion, whatever its depth.
@@ -334,7 +387,7 @@ func (v Value) AsDouble() float64 {
 				return math.NaN()
 			}
 			v = items[0]
-			if v.k != KindArr {
+			if v.Kind() != KindArr {
 				return v.AsDouble()
 			}
 		}
@@ -345,13 +398,13 @@ func (v Value) AsDouble() float64 {
 // IsTruthy is JavaScript truthiness. Every object (including a Date, even the
 // epoch or an Invalid Date, and a pattern) is truthy.
 func (v Value) IsTruthy() bool {
-	switch v.k {
+	switch v.Kind() {
 	case KindBool:
-		return v.n != 0
+		return v.n() != 0
 	case KindNum:
-		return v.n != 0 && !math.IsNaN(v.n)
+		return v.n() != 0 && !math.IsNaN(v.n())
 	case KindStr:
-		return v.s != ""
+		return v.s() != ""
 	case KindTimestamp, KindArr, KindObj, KindPattern:
 		return true
 	}
@@ -360,8 +413,8 @@ func (v Value) IsTruthy() bool {
 
 // AsBoolean is like IsTruthy except that a Timestamp reads as its number.
 func (v Value) AsBoolean() bool {
-	if v.k == KindTimestamp {
-		return v.n != 0 && !math.IsNaN(v.n)
+	if v.Kind() == KindTimestamp {
+		return v.n() != 0 && !math.IsNaN(v.n())
 	}
 	return v.IsTruthy()
 }
@@ -376,13 +429,13 @@ func (v Value) asString(depth int) string {
 	if depth > MaxValueDepth {
 		return ""
 	}
-	switch v.k {
+	switch v.Kind() {
 	case KindStr:
-		return v.s
+		return v.s()
 	case KindNum, KindTimestamp:
-		return JSNumberString(v.n)
+		return JSNumberString(v.n())
 	case KindBool:
-		if v.n != 0 {
+		if v.n() != 0 {
 			return "true"
 		}
 		return "false"
@@ -415,13 +468,13 @@ func (v Value) asString(depth int) string {
 // String implements fmt.Stringer for debugging; it writes compact JSON-like
 // text and is not a JavaScript conversion.
 func (v Value) String() string {
-	switch v.k {
+	switch v.Kind() {
 	case KindStr:
-		return quoteJSON(v.s)
+		return quoteJSON(v.s())
 	case KindUndefined:
 		return "undefined"
 	case KindTimestamp:
-		return "Date(" + JSNumberString(v.n) + ")"
+		return "Date(" + JSNumberString(v.n()) + ")"
 	case KindPattern:
 		return v.PatternOf().String()
 	}
@@ -432,18 +485,18 @@ func (v Value) String() string {
 func Equal(a, b Value) bool { return equal(a, b, 0) }
 
 func equal(a, b Value, depth int) bool {
-	if a.k != b.k || depth > MaxValueDepth {
+	if a.Kind() != b.Kind() || depth > MaxValueDepth {
 		return false
 	}
-	switch a.k {
+	switch a.Kind() {
 	case KindUndefined, KindNull:
 		return true
 	case KindBool:
-		return a.n == b.n
+		return a.n() == b.n()
 	case KindNum, KindTimestamp:
-		return a.n == b.n || (math.IsNaN(a.n) && math.IsNaN(b.n))
+		return a.n() == b.n() || (math.IsNaN(a.n()) && math.IsNaN(b.n()))
 	case KindStr:
-		return a.s == b.s
+		return a.s() == b.s()
 	case KindArr:
 		x, y := a.Items(), b.Items()
 		if len(x) != len(y) {
@@ -483,14 +536,14 @@ func equal(a, b Value, depth int) bool {
 // SameRef reports whether two arrays/objects/patterns are the same reference
 // (JavaScript === for objects). For primitives it is strict equality.
 func SameRef(a, b Value) bool {
-	if a.k != b.k {
+	if a.Kind() != b.Kind() {
 		return false
 	}
-	switch a.k {
+	switch a.Kind() {
 	case KindArr, KindObj, KindPattern:
-		return a.r == b.r
+		return a.p == b.p
 	case KindNum:
-		return a.n == b.n
+		return a.n() == b.n()
 	}
 	return Equal(a, b)
 }
@@ -502,7 +555,7 @@ func SameRef(a, b Value) bool {
 func (v Value) Field(path string) Value {
 	cur := v
 	for _, seg := range ParseFieldPath(path) {
-		switch cur.k {
+		switch cur.Kind() {
 		case KindObj:
 			next, ok := cur.ObjValue().Get(seg)
 			if !ok {
@@ -539,4 +592,28 @@ func parseIndex(s string) (int, bool) {
 		n = n*10 + int(c-'0')
 	}
 	return n, true
+}
+
+// Key is a comparable form of a Value, for map keys and ==: two values have
+// the same Key when they are the same primitive (NaN matching nothing, -0
+// matching 0, strings by content) or the same reference.
+type Key struct {
+	k Kind
+	n float64
+	s string
+	r unsafe.Pointer
+}
+
+// Key returns v's Key.
+func (v Value) Key() Key {
+	switch k := v.Kind(); k {
+	case KindBool, KindNum, KindTimestamp:
+		return Key{k: k, n: v.n()}
+	case KindStr:
+		return Key{k: k, s: v.s()}
+	case KindArr, KindObj, KindPattern:
+		return Key{k: k, r: v.p}
+	default:
+		return Key{k: k}
+	}
 }

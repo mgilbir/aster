@@ -100,13 +100,13 @@ func appendDecimal(dst []byte, digits string, n int) []byte {
 // ToNumber is JavaScript's Number(x) coercion: null is 0, undefined NaN,
 // "" and [] are 0, a one-element array converts its element's string.
 func ToNumber(v Value) float64 {
-	switch v.k {
+	switch v.Kind() {
 	case KindNum, KindTimestamp, KindBool:
-		return v.n
+		return v.n()
 	case KindNull:
 		return 0
 	case KindStr:
-		return StringToNumber(v.s)
+		return StringToNumber(v.s())
 	case KindArr:
 		items := v.Items()
 		switch len(items) {

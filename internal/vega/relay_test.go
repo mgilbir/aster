@@ -105,7 +105,7 @@ func TestRelayDeriveMatchesMap(t *testing.T) {
 			for i := range want {
 				w, g := want[i].ObjValue(), got[i].ObjValue()
 				if w == nil {
-					if got[i] != want[i] {
+					if got[i].Key() != want[i].Key() {
 						t.Fatalf("round %d pulse %d tuple %d: %v, want %v", round, pi, i, got[i], want[i])
 					}
 					continue

@@ -98,17 +98,17 @@ func (c *rtContext) Modify(name string, insert, remove, toggle, modify, values j
 		case remove.IsBool():
 			pc.removes = append(pc.removes, func(jsval.Value) bool { return true })
 		case remove.IsArr():
-			set := map[jsval.Value]struct{}{}
+			set := map[jsval.Key]struct{}{}
 			for _, t := range remove.Items() {
-				set[t] = struct{}{}
+				set[t.Key()] = struct{}{}
 			}
-			pc.removes = append(pc.removes, func(t jsval.Value) bool { _, ok := set[t]; return ok })
+			pc.removes = append(pc.removes, func(t jsval.Value) bool { _, ok := set[t.Key()]; return ok })
 		case remove.IsObj():
 			// an object is a tuple when it is one of the data set's tuples,
 			// otherwise a property filter
 			t := remove
 			pc.removes = append(pc.removes, func(x jsval.Value) bool {
-				if x == t {
+				if x.Key() == t.Key() {
 					return true
 				}
 				return propsMatch(remove)(x)
