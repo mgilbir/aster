@@ -52,11 +52,20 @@ func barePulse(in *flowPulse) *flowPulse {
 // ingestTuple is vega-dataflow's ingest: objects are tuples, anything else is
 // wrapped as {data: value}. Objects are copied so that transforms that write
 // fields into tuples never touch the specification they came from.
-func ingestTuple(v jsval.Value) jsval.Value {
+func ingestTuple(v jsval.Value) jsval.Value { return ingestTupleWith(nil, v) }
+
+// ingestTupleWith is ingestTuple drawing the copy from cl, for a loop that
+// ingests many rows; a nil cl copies each row on its own.
+func ingestTupleWith(cl *jsval.Cloner, v jsval.Value) jsval.Value {
 	switch v.Kind() {
 	case jsval.KindObj:
 		src := v.ObjValue()
-		o := src.Clone()
+		var o *jsval.Object
+		if cl != nil {
+			o = cl.Clone(src)
+		} else {
+			o = src.Clone()
+		}
 		o.SetTupleID(src.TupleID()) // ingest keeps the id a tuple already has
 		o.EnsureTupleID()
 		return jsval.Obj(o)
@@ -564,6 +573,7 @@ func facRelay(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 			lut = make(map[*jsval.Object]jsval.Value, len(src))
 		}
 		live := make(map[*jsval.Object]struct{}, len(src))
+		var cl jsval.Cloner
 		for i, t := range src {
 			o := t.ObjValue()
 			if o == nil {
@@ -573,7 +583,7 @@ func facRelay(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 			live[o] = struct{}{}
 			d, ok := lut[o]
 			if !ok {
-				d = jsval.Obj(o.Clone())
+				d = jsval.Obj(cl.Clone(o))
 				lut[o] = d
 			} else {
 				do := d.ObjValue()
@@ -601,8 +611,9 @@ func facLoad(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *
 		} else {
 			data = c.view.request(p.Value("url"), format)
 		}
+		var cl jsval.Cloner
 		for i := range data {
-			data[i] = ingestTuple(data[i])
+			data[i] = ingestTupleWith(&cl, data[i])
 		}
 		n.value = data
 		return changedPulse(pulse, data)

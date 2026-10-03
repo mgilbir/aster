@@ -25,8 +25,9 @@ func (v *runView) seedCollect(c *rtContext, n *opNode, e *entry) {
 	switch {
 	case e.literal != nil:
 		data = make([]jsval.Value, len(e.literal))
+		var cl jsval.Cloner
 		for i, t := range e.literal {
-			data[i] = ingestTuple(t)
+			data[i] = ingestTupleWith(&cl, t)
 		}
 	case e.ingest != nil && e.ingest.request:
 		data = v.request(e.ingest.url, e.ingest.format)
@@ -44,11 +45,12 @@ func (v *runView) seedCollect(c *rtContext, n *opNode, e *entry) {
 // reads the tuple id of every added row before ingesting it, which throws for
 // a null row (a primitive row is fine and is wrapped).
 func ingestRows(data []jsval.Value) {
+	var cl jsval.Cloner
 	for i := range data {
 		if data[i].IsNull() {
 			fail("Cannot read properties of null (reading 'Symbol(vega_id)')")
 		}
-		data[i] = ingestTuple(data[i])
+		data[i] = ingestTupleWith(&cl, data[i])
 	}
 }
 
