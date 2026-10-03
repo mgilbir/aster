@@ -20,6 +20,15 @@ type edge struct {
 	dir      int8
 }
 
+// activeEdge is an edge being crossed by the current sub-scanline, copied out
+// of r.edges so the per-sub-scanline loops read it sequentially.
+type activeEdge struct {
+	x0, dxdy float64
+	y0       float64 // start y in pixel units (the edge's y0 over sub-scanlines per pixel)
+	ke       int32
+	dir      int8
+}
+
 type crossing struct {
 	x   int32
 	dir int8
@@ -39,7 +48,7 @@ type rasterizer struct {
 	minK, maxK int32
 	sorted     []int32
 	bucket     []int32
-	active     []int32
+	active     []activeEdge
 	cross      []crossing
 	acc, diff  []int32
 	wdelta     []int32 // net winding change per sub-pixel column, for dense sub-scanlines
@@ -289,7 +298,7 @@ func (r *rasterizer) fill(evenOdd bool, sink spanSink) {
 			}
 			// Retire finished edges, admit new ones.
 			for i := 0; i < len(active); {
-				if r.edges[active[i]].ke <= k {
+				if active[i].ke <= k {
 					active[i] = active[len(active)-1]
 					active = active[:len(active)-1]
 				} else {
@@ -297,7 +306,8 @@ func (r *rasterizer) fill(evenOdd bool, sink spanSink) {
 				}
 			}
 			for next < len(sorted) && r.edges[sorted[next]].ks <= k {
-				active = append(active, sorted[next])
+				e := &r.edges[sorted[next]]
+				active = append(active, activeEdge{x0: e.x0, dxdy: e.dxdy, y0: e.y0 * invSS, ke: e.ke, dir: e.dir})
 				next++
 			}
 			if len(active) == 0 {
@@ -309,9 +319,9 @@ func (r *rasterizer) fill(evenOdd bool, sink spanSink) {
 				// crossing list (binning wins whatever the span).
 				wd := r.wdelta[:qmax+1]
 				lo, hi := qmax, qmin
-				for _, ei := range active {
-					e := &r.edges[ei]
-					x := e.x0 + (yc-e.y0*invSS)*e.dxdy
+				for i := range active {
+					e := &active[i]
+					x := e.x0 + (yc-e.y0)*e.dxdy
 					qf := math.Floor((x-xoff)*fx + 0.5)
 					var q int32
 					if qf <= float64(qmin) {
@@ -334,9 +344,9 @@ func (r *rasterizer) fill(evenOdd bool, sink spanSink) {
 			}
 			cross = cross[:0]
 			lo, hi := qmax, qmin
-			for _, ei := range active {
-				e := &r.edges[ei]
-				x := e.x0 + (yc-e.y0*invSS)*e.dxdy
+			for i := range active {
+				e := &active[i]
+				x := e.x0 + (yc-e.y0)*e.dxdy
 				qf := math.Floor((x-xoff)*fx + 0.5)
 				var q int32
 				if qf <= float64(qmin) {
