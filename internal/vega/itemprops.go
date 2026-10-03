@@ -31,6 +31,15 @@ func setItemProp(it *scene.Item, name string, v jsval.Value) bool {
 	return !jsval.Equal(old, it.Get(name))
 }
 
+// setItemPropWith is setItemProp for a property whose Setter is at hand.
+func setItemPropWith(it *scene.Item, name string, set scene.Setter, v jsval.Value) bool {
+	old := it.Get(name)
+	if err := set(it, v); err != nil {
+		failErr(err)
+	}
+	return !jsval.Equal(old, it.Get(name))
+}
+
 // assignItemProp is setItemProp for a caller that does not ask whether the
 // value changed.
 func assignItemProp(it *scene.Item, name string, v jsval.Value) {

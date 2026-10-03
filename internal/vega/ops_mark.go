@@ -300,8 +300,10 @@ func (b *boundSet) run(it *scene.Item, track bool) bool {
 			}
 		}
 		if !track {
-			assignItemProp(it, ch.name, val)
-		} else if setItemProp(it, ch.name, val) {
+			if err := ch.set(it, val); err != nil {
+				failErr(err)
+			}
+		} else if setItemPropWith(it, ch.name, ch.set, val) {
 			mod = true
 		}
 	}
@@ -310,6 +312,14 @@ func (b *boundSet) run(it *scene.Item, track bool) bool {
 	}
 	return mod
 }
+
+// The setters adjustSpatial writes through.
+var (
+	spatialSetterX      = scene.SetterFor("x")
+	spatialSetterY      = scene.SetterFor("y")
+	spatialSetterWidth  = scene.SetterFor("width")
+	spatialSetterHeight = scene.SetterFor("height")
+)
 
 // adjustSpatial derives x/width, y/height from the x2/xc/y2/yc channels (rule
 // marks keep their x2/y2). It runs after all channels are set, exactly like the
@@ -321,10 +331,12 @@ func adjustSpatial(it *scene.Item, set *encodeSet, track bool) bool {
 	}
 	swap := mt == "group" || mt == "image" || mt == "rect"
 	mod := false
-	setNum := func(name string, v float64) {
+	setNum := func(name string, setter scene.Setter, v float64) {
 		if !track {
-			assignItemProp(it, name, jsval.Num(v))
-		} else if setItemProp(it, name, jsval.Num(v)) {
+			if err := setter(it, jsval.Num(v)); err != nil {
+				failErr(err)
+			}
+		} else if setItemPropWith(it, name, setter, jsval.Num(v)) {
 			mod = true
 		}
 	}
@@ -336,15 +348,15 @@ func adjustSpatial(it *scene.Item, set *encodeSet, track bool) bool {
 				setItemProp(it, "x2", x)
 				mod = true
 			}
-			setNum("width", jsval.ToNumber(getItemProp(it, "x2"))-jsval.ToNumber(getItemProp(it, "x")))
+			setNum("width", spatialSetterWidth, jsval.ToNumber(getItemProp(it, "x2"))-jsval.ToNumber(getItemProp(it, "x")))
 		} else {
 			w := jsToNumOr0(getItemProp(it, "width"))
-			setNum("x", jsval.ToNumber(getItemProp(it, "x2"))-w)
+			setNum("x", spatialSetterX, jsval.ToNumber(getItemProp(it, "x2"))-w)
 		}
 	}
 	if set.xc {
 		w := jsToNumOr0(getItemProp(it, "width"))
-		setNum("x", xcOf(it)-w/2)
+		setNum("x", spatialSetterX, xcOf(it)-w/2)
 	}
 	if set.y2 {
 		if set.y {
@@ -354,15 +366,15 @@ func adjustSpatial(it *scene.Item, set *encodeSet, track bool) bool {
 				setItemProp(it, "y2", y)
 				mod = true
 			}
-			setNum("height", jsval.ToNumber(getItemProp(it, "y2"))-jsval.ToNumber(getItemProp(it, "y")))
+			setNum("height", spatialSetterHeight, jsval.ToNumber(getItemProp(it, "y2"))-jsval.ToNumber(getItemProp(it, "y")))
 		} else {
 			h := jsToNumOr0(getItemProp(it, "height"))
-			setNum("y", jsval.ToNumber(getItemProp(it, "y2"))-h)
+			setNum("y", spatialSetterY, jsval.ToNumber(getItemProp(it, "y2"))-h)
 		}
 	}
 	if set.yc {
 		h := jsToNumOr0(getItemProp(it, "height"))
-		setNum("y", ycOf(it)-h/2)
+		setNum("y", spatialSetterY, ycOf(it)-h/2)
 	}
 	return mod
 }
