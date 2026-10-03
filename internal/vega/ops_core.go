@@ -52,11 +52,20 @@ func barePulse(in *flowPulse) *flowPulse {
 // ingestTuple is vega-dataflow's ingest: objects are tuples, anything else is
 // wrapped as {data: value}. Objects are copied so that transforms that write
 // fields into tuples never touch the specification they came from.
-func ingestTuple(v jsval.Value) jsval.Value {
+func ingestTuple(v jsval.Value) jsval.Value { return ingestTupleWith(nil, v) }
+
+// ingestTupleWith is ingestTuple drawing the copy from cl, for a loop that
+// ingests many rows; a nil cl copies each row on its own.
+func ingestTupleWith(cl *jsval.Cloner, v jsval.Value) jsval.Value {
 	switch v.Kind() {
 	case jsval.KindObj:
 		src := v.ObjValue()
-		o := src.Clone()
+		var o *jsval.Object
+		if cl != nil {
+			o = cl.Clone(src)
+		} else {
+			o = src.Clone()
+		}
 		o.SetTupleID(src.TupleID()) // ingest keeps the id a tuple already has
 		o.EnsureTupleID()
 		return jsval.Obj(o)
@@ -183,6 +192,13 @@ type compareSpec struct {
 	cmp    transforms.Comparator
 	fields []string
 	orders []string
+	// keys are the accessors cmp is built from and roots the first segment of
+	// each one's path; roots is nil unless every field is a plain path with a
+	// segment, so a caller can read the keys off a partial view of a tuple.
+	keys  []transforms.Field
+	roots []string
+	// rest reads what follows the root of each path.
+	rest []transforms.Accessor
 }
 
 // compareFrom builds a comparator from field specs (paths or accessors) and
@@ -191,6 +207,9 @@ func compareFrom(fields []any, orders []any) *compareSpec {
 	fs := make([]transforms.Field, 0, len(fields))
 	ord := make([]string, 0, len(fields))
 	names := make([]string, 0, len(fields))
+	roots := make([]string, 0, len(fields))
+	rest := make([]transforms.Accessor, 0, len(fields))
+	rootsOK := true
 	for i, f := range fields {
 		var fld transforms.Field
 		switch v := f.(type) {
@@ -199,10 +218,13 @@ func compareFrom(fields []any, orders []any) *compareSpec {
 				continue
 			}
 			fld = transforms.FieldOf(v.AsString())
+			rootsOK = appendRoot(&roots, &rest, v.AsString()) && rootsOK
 		case transforms.Field:
 			fld = v
+			rootsOK = false
 		case string:
 			fld = transforms.FieldOf(v)
+			rootsOK = appendRoot(&roots, &rest, v) && rootsOK
 		default:
 			continue
 		}
@@ -216,7 +238,25 @@ func compareFrom(fields []any, orders []any) *compareSpec {
 	if cmp == nil {
 		return nil
 	}
-	return &compareSpec{cmp: cmp, fields: names, orders: ord}
+	cs := &compareSpec{cmp: cmp, fields: names, orders: ord}
+	if rootsOK {
+		cs.keys, cs.roots, cs.rest = fs, roots, rest
+	}
+	return cs
+}
+
+// appendRoot adds the first segment of a field path to roots, and an accessor
+// of the rest to rest; it reports whether the path has a first segment.
+func appendRoot(roots *[]string, rest *[]transforms.Accessor, path string) bool {
+	segs := jsval.ParseFieldPath(path)
+	if len(segs) == 0 {
+		*roots = append(*roots, "")
+		*rest = append(*rest, nil)
+		return false
+	}
+	*roots = append(*roots, segs[0])
+	*rest = append(*rest, transforms.PathAccessor(segs[1:]))
+	return true
 }
 
 func (c *rtContext) compareFn(cmp pCompare) *compareSpec {
@@ -333,7 +373,7 @@ func facCollect(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode
 // difference. That needs distinct objects: anything else (a repeated or a
 // non-object tuple) is taken as a new set in the order it came.
 func collectIncremental(list, src []jsval.Value) []jsval.Value {
-	if len(list) == 0 {
+	if len(list) == 0 || sameObjects(list, src) {
 		return append(make([]jsval.Value, 0, len(src)), src...)
 	}
 	incoming := make(map[*jsval.Object]struct{}, len(src))
@@ -368,6 +408,21 @@ func collectIncremental(list, src []jsval.Value) []jsval.Value {
 		}
 	}
 	return out
+}
+
+// sameObjects reports whether a and b are the same objects in the same order,
+// for which collectIncremental's answer is b, whatever the sets hold.
+func sameObjects(a, b []jsval.Value) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		o := a[i].ObjValue()
+		if o == nil || o != b[i].ObjValue() {
+			return false
+		}
+	}
+	return true
 }
 
 func concatTuples(lists [][]jsval.Value) []jsval.Value {
@@ -514,7 +569,11 @@ func facRelay(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 			return &flowPulse{stamp: pulse.stamp, encode: pulse.encode, changed: true, tuples: src, tree: pulse.tree}
 		}
 		out := make([]jsval.Value, len(src))
+		if len(lut) == 0 {
+			lut = make(map[*jsval.Object]jsval.Value, len(src))
+		}
 		live := make(map[*jsval.Object]struct{}, len(src))
+		var cl jsval.Cloner
 		for i, t := range src {
 			o := t.ObjValue()
 			if o == nil {
@@ -524,7 +583,7 @@ func facRelay(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 			live[o] = struct{}{}
 			d, ok := lut[o]
 			if !ok {
-				d = jsval.Obj(o.Clone())
+				d = jsval.Obj(cl.Clone(o))
 				lut[o] = d
 			} else {
 				do := d.ObjValue()
@@ -552,8 +611,9 @@ func facLoad(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *
 		} else {
 			data = c.view.request(p.Value("url"), format)
 		}
+		var cl jsval.Cloner
 		for i := range data {
-			data[i] = ingestTuple(data[i])
+			data[i] = ingestTupleWith(&cl, data[i])
 		}
 		n.value = data
 		return changedPulse(pulse, data)

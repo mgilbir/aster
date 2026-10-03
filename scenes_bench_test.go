@@ -167,3 +167,35 @@ func TestPerfReport(t *testing.T) {
 	}
 	t.Log(b.String())
 }
+
+// BenchmarkDataflow runs the dataflow and the SVG writer of each scene on a
+// specification compiled once: the benchmark to profile when the dataflow is
+// the stage of interest (the PNG and PDF of BenchmarkScenes dwarf it).
+func BenchmarkDataflow(b *testing.B) {
+	c, err := aster.New(aster.WithTimeout(5 * time.Minute))
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer c.Close()
+	for _, sc := range benchScenes() {
+		b.Run(sc.name, func(b *testing.B) {
+			run, err := c.RenderPreparedForTest(sc.spec, sc.lite)
+			if err != nil {
+				b.Fatal(err)
+			}
+			if err := run(); err != nil {
+				b.Fatal(err)
+			}
+			b.ReportAllocs()
+			cpu0 := processCPU()
+			b.ResetTimer()
+			for b.Loop() {
+				if err := run(); err != nil {
+					b.Fatal(err)
+				}
+			}
+			b.StopTimer()
+			b.ReportMetric(float64((processCPU()-cpu0).Nanoseconds())/float64(b.N), "cpu-ns/op")
+		})
+	}
+}

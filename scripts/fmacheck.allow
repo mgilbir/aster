@@ -80,8 +80,8 @@ internal/vega/layout/grid.go	vega/layout.gridLayout	ay -= bounds.Height() / 2	# 
 internal/vega/layout/grid.go	vega/layout.gridLayout	dx[i] += x / 2	# the fused product is x*0.5 (division by 2, a power of two): exact
 internal/vega/layout/grid.go	vega/layout.gridLayout	dy[i] += y / 2	# the fused product is x*0.5 (division by 2, a power of two): exact
 internal/vega/layout/props.go	vega/layout.legendTitleOffset	if x-r >= 0.5 {	# the fused product is x*0.5 (division by 2, a power of two): exact
-internal/vega/ops_mark.go	vega.adjustSpatial	setNum("x", xcOf(it)-w/2)	# the fused product is x*0.5 (division by 2, a power of two): exact
-internal/vega/ops_mark.go	vega.adjustSpatial	setNum("y", ycOf(it)-h/2)	# the fused product is x*0.5 (division by 2, a power of two): exact
+internal/vega/ops_mark.go	vega.adjustSpatial	setNum("x", spatialSetterX, xcOf(it)-w/2)	# the fused product is x*0.5 (division by 2, a power of two): exact
+internal/vega/ops_mark.go	vega.adjustSpatial	setNum("y", spatialSetterY, ycOf(it)-h/2)	# the fused product is x*0.5 (division by 2, a power of two): exact
 internal/vega/ops_scale.go	vega.binsFromObject	return d3Range(start, stop+step/2, step)	# the fused product is x*0.5 (division by 2, a power of two): exact
 internal/vega/ops_scale.go	vega.padDomain	return [2]float64{da + float64((d0-da)*k), da + float64((d1-da)*k)}	# the fused product is x*0.5 (division by 2, a power of two): exact
 internal/vega/ops_scale.go	vega.zoomLinear	return [2]float64{da + float64((d0-da)*k), da + float64((d1-da)*k)}	# the fused product is x*0.5 (division by 2, a power of two): exact

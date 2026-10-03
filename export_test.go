@@ -6,6 +6,9 @@ import (
 	"time"
 
 	"github.com/mgilbir/aster/internal/jsval"
+	"github.com/mgilbir/aster/internal/text"
+	"github.com/mgilbir/aster/internal/transforms"
+	"github.com/mgilbir/aster/internal/transforms/wordcloud"
 	"github.com/mgilbir/aster/internal/vega"
 )
 
@@ -83,4 +86,51 @@ func (c *Converter) StagesForTest(spec []byte, lite bool) (map[string]time.Durat
 		return nil, err
 	}
 	return stages, nil
+}
+
+// RenderPreparedForTest compiles spec once and returns a function that runs
+// the dataflow (vega.Render: the Vega spec to a scenegraph) with the options
+// a render passes, without the SVG, PNG and PDF writers, so a profile of the
+// function is a profile of the dataflow stage.
+func (c *Converter) RenderPreparedForTest(spec []byte, lite bool) (func() error, error) {
+	ctx := context.Background()
+	var vg jsval.Value
+	var err error
+	if lite {
+		vg, err = c.compileVegaLite(ctx, spec)
+	} else {
+		vg, err = jsval.ParseJSON(spec)
+	}
+	if err != nil {
+		return nil, err
+	}
+	m, err := c.measurerInit()
+	if err != nil {
+		return nil, err
+	}
+	return func() (err error) {
+		release, ok := c.enter()
+		if !ok {
+			return errConverterClosed
+		}
+		defer release()
+		ctx, cancel := c.opContext()
+		defer cancel()
+		defer recoverInto(&err)
+		opts := vega.Options{
+			Loader:   c.cfg.loader,
+			Location: c.location,
+			Now:      c.cfg.now,
+			Config:   c.theme,
+			Limits:   c.limits(),
+			Random:   transforms.LCG(randomSeed),
+			Shaper:   lazyShaper{c},
+		}
+		if m != nil {
+			opts.TextMeasurer = text.NewCanvasContext(m)
+			opts.WordcloudText = wordcloud.NewCanvasRenderer(m)
+		}
+		_, err = vega.Render(ctx, vg, opts)
+		return err
+	}, nil
 }

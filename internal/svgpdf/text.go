@@ -48,7 +48,7 @@ func (r *renderer) drawText(e *element, st gstate) error {
 		return err
 	}
 
-	runs, advance := r.shaper.ShapeText(str, cssFontString(st))
+	runs, advance := r.shaper.ShapeText(str, r.cssFont(st))
 	if len(runs) == 0 {
 		return nil
 	}
@@ -111,19 +111,22 @@ func (r *renderer) drawTextRunFont(f *pdfFont, run text.Run, penX float64, str s
 	r.w.setTextFont(f.res, size)
 	r.w.textMatrix(Matrix{A: 1, B: 0, C: 0, D: -1, E: penXStart, F: 0})
 
-	var items []tjItem
-	var cur []uint16
+	// The glyph IDs of the run go to one reused buffer; each TJ item is a
+	// window onto it, and showGlyphs consumes them before the next run.
+	items := r.tjBuf[:0]
+	r.gidBuf = r.gidBuf[:0]
+	curStart := 0
 	flush := func() {
-		if len(cur) > 0 {
-			items = append(items, tjItem{glyphs: cur})
-			cur = nil
+		if len(r.gidBuf) > curStart {
+			items = append(items, tjItem{glyphs: r.gidBuf[curStart:len(r.gidBuf):len(r.gidBuf)]})
+			curStart = len(r.gidBuf)
 		}
 	}
 	show := func() {
 		flush()
 		if len(items) > 0 {
 			r.w.showGlyphs(items)
-			items = nil
+			items = items[:0]
 		}
 	}
 
@@ -153,11 +156,12 @@ func (r *renderer) drawTextRunFont(f *pdfFont, run text.Run, penX float64, str s
 			penText -= num * size / 1000
 		}
 
-		cur = append(cur, gid)
+		r.gidBuf = append(r.gidBuf, gid)
 		penText += float64(f.parsed.Advance(gid)) / upem * size
 		penX += g.Advance
 	}
 	show()
+	r.tjBuf = items[:0]
 	if rise != 0 {
 		r.w.textRise(0)
 	}
@@ -276,6 +280,23 @@ func emitGlyphOutline(w *contentWriter, outline []text.Segment, ox, oy float64) 
 		}
 	}
 	return true
+}
+
+// cssFont is cssFontString with the last result remembered: a chart's labels
+// share a handful of fonts, and formatting the size dominates a short label.
+func (r *renderer) cssFont(st gstate) string {
+	key := fontKey{st.fontStyle, st.fontWeight, st.fontSize, st.fontFamily}
+	if r.cssFontKey != key || r.cssFontStr == "" {
+		r.cssFontKey, r.cssFontStr = key, cssFontString(st)
+	}
+	return r.cssFontStr
+}
+
+// fontKey is the part of the graphics state cssFontString reads.
+type fontKey struct {
+	style, weight string
+	size          float64
+	family        string
 }
 
 // cssFontString rebuilds the CSS font shorthand that the text package parses,

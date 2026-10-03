@@ -113,7 +113,7 @@ PDF writer and text stack, data races. Details at the end.
 
 ## 3. High: unbounded string concatenation
 
-**Status: Fixed. `Scope.checkLen` (per-string limit, `MaxStringLength`) runs before `+`, `join`, `pad`/repeat, `replace` (with a pre-check for regexp replacement), array stringification; strings over 4 KiB and arrays over 256 elements from `sequence()` are also charged to a render-wide `expr.StringBudget` (128 MiB default, `vega.Limits.MaxStringBytes`).**
+**Status: Fixed. `Scope.checkLen` (per-string limit, `MaxStringLength`) runs before `+`, `join`, `pad`/repeat, `replace` (with a pre-check for regexp replacement), array stringification; strings over 512 bytes and arrays over 256 elements from `sequence()` are also charged to a render-wide `expr.StringBudget` (128 MiB default, `vega.Limits.MaxStringBytes`).**
 
 - Reproducer: `TestResourceStringConcatenationBounded`;
   `testdata/security/string-doubling.vg.json`.

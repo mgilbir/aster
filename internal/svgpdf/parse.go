@@ -14,15 +14,27 @@ import (
 // caller can fall back to raster output.
 type element struct {
 	name     string
-	attrs    map[string]string
+	attrs    []attribute // in document order; a repeated name's last value wins
 	children []*element
 	text     string // character data, only meaningful for <text>
 }
 
+type attribute struct{ name, value string }
+
 // attr returns the attribute value and whether it was present.
 func (e *element) attr(name string) (string, bool) {
-	v, ok := e.attrs[name]
-	return v, ok
+	for i := len(e.attrs) - 1; i >= 0; i-- {
+		if e.attrs[i].name == name {
+			return e.attrs[i].value, true
+		}
+	}
+	return "", false
+}
+
+// attrVal returns the attribute value, or "" when it is absent.
+func (e *element) attrVal(name string) string {
+	v, _ := e.attr(name)
+	return v
 }
 
 // supportedElements is the element vocabulary of Vega's SVG renderer that the
@@ -52,6 +64,17 @@ func parseSVG(ctx context.Context, svg string, lim Limits) (*element, error) {
 	if len(svg) > lim.MaxInputBytes {
 		return nil, limitErr("SVG input is %d bytes, limit is %d", len(svg), lim.MaxInputBytes)
 	}
+	if root, ok, err := parseSVGFast(ctx, svg, lim); err != nil {
+		return nil, err
+	} else if ok {
+		return root, nil
+	}
+	return parseSVGXML(ctx, svg, lim)
+}
+
+// parseSVGXML is parseSVG on encoding/xml: the reference for what a document
+// parses to and the source of every parse error.
+func parseSVGXML(ctx context.Context, svg string, lim Limits) (*element, error) {
 	dec := xml.NewDecoder(strings.NewReader(svg))
 	var root *element
 	var stack []*element
@@ -79,14 +102,14 @@ func parseSVG(ctx context.Context, svg string, lim Limits) (*element, error) {
 			if elements++; elements > lim.MaxElements {
 				return nil, limitErr("more than %d elements", lim.MaxElements)
 			}
-			el := &element{name: name, attrs: make(map[string]string, len(t.Attr))}
+			el := &element{name: name, attrs: make([]attribute, 0, len(t.Attr))}
 			for _, a := range t.Attr {
 				// Namespace declarations arrive with Space "xmlns"; keep
 				// plain local names for everything else.
 				if a.Name.Space == "xmlns" || a.Name.Local == "xmlns" {
 					continue
 				}
-				el.attrs[a.Name.Local] = a.Value
+				el.attrs = append(el.attrs, attribute{a.Name.Local, a.Value})
 			}
 			if len(stack) == 0 {
 				if root != nil {

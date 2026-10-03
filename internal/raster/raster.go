@@ -49,9 +49,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
-	"image/png"
 	"math"
-	"sync"
 )
 
 // Options configures Render.
@@ -270,25 +268,12 @@ func (c *canvas) toNRGBA() *image.NRGBA {
 	return out
 }
 
-var pngPool = &pngBufferPool{}
-
-type pngBufferPool struct{ p sync.Pool }
-
-func (b *pngBufferPool) Get() *png.EncoderBuffer {
-	if v, ok := b.p.Get().(*png.EncoderBuffer); ok {
-		return v
-	}
-	return nil
-}
-func (b *pngBufferPool) Put(v *png.EncoderBuffer) { b.p.Put(v) }
-
 // EncodePNG encodes img as PNG. Fully opaque images are written as RGB
-// (smaller); others as RGBA.
+// (smaller); others as RGBA. The bytes are image/png's.
 func EncodePNG(img *image.NRGBA) ([]byte, error) {
-	enc := png.Encoder{CompressionLevel: png.DefaultCompression, BufferPool: pngPool}
 	var buf bytes.Buffer
 	buf.Grow(len(img.Pix) / 8)
-	if err := enc.Encode(&buf, img); err != nil {
+	if err := encodePNG(&buf, img); err != nil {
 		return nil, fmt.Errorf("raster: encoding PNG: %w", err)
 	}
 	return buf.Bytes(), nil

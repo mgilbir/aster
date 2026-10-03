@@ -224,6 +224,12 @@ func (c *Converter) stageErr(ctx context.Context, stage string, err error) error
 // input, so a panic is a bug — but it must not take the host process down.
 func recoverInto(err *error) {
 	if r := recover(); r != nil {
+		// A budget that stops work deep inside a stage (the geographic path
+		// walk) panics with its error: it is a limit, not a bug.
+		if e, ok := r.(error); ok && errors.Is(e, ErrLimit) {
+			*err = fmt.Errorf("aster: %w", e)
+			return
+		}
 		*err = fmt.Errorf("aster: internal error: %v", r)
 	}
 }
@@ -296,7 +302,10 @@ func (c *Converter) VegaLiteToSVG(spec []byte) (string, error) {
 }
 
 func (c *Converter) vegaSVG(ctx context.Context, spec []byte) (string, error) {
-	v, err := timed(ctx, "json", func() (jsval.Value, error) { return jsval.ParseJSON(spec) })
+	if err := c.checkSpecSize(spec); err != nil {
+		return "", err
+	}
+	v, err := timed(ctx, "json", func() (jsval.Value, error) { return jsval.ParseJSONLimit(spec, c.limits().MaxParseBytes) })
 	if err != nil {
 		return "", fmt.Errorf("aster: parsing Vega spec: %w", err)
 	}
@@ -426,6 +435,27 @@ func (c *Converter) maxSVGBytes() int {
 	return 128 << 20
 }
 
+// specBytesDivisor sets the specification a memory limit admits: a sixteenth of
+// the limit in bytes. The rows and items budgets charge what a specification
+// makes the engine build, and none of them sees the text itself, which is all
+// there is to an inline geometry; once parsed and compiled it holds about
+// nineteen times its size, so a sixteenth of the limit stays within twice it.
+const specBytesDivisor = 16
+
+// checkSpecSize refuses a specification too large for WithMemoryLimit. Every
+// entry point that takes a specification passes through it, whatever the form
+// the caller held it in: they all end up as the JSON bytes parsed here.
+func (c *Converter) checkSpecSize(spec []byte) error {
+	n := c.cfg.memoryLimit
+	if n == 0 {
+		return nil
+	}
+	if limit := max(n/specBytesDivisor, 1<<20); uint64(len(spec)) > limit {
+		return fmt.Errorf("aster: %w: the specification is too large for the memory limit (%d bytes, at most %d)", ErrLimit, len(spec), limit)
+	}
+	return nil
+}
+
 // randomSeed seeds Vega's random() and every transform that samples.
 const randomSeed = 123456789
 
@@ -433,14 +463,20 @@ const randomSeed = 123456789
 // no separate heap to cap, so the byte budget is converted into the number of
 // rows and scene items a render may create, at a conservative per-object cost.
 func (c *Converter) limits() vega.Limits {
-	const bytesPerRow, bytesPerItem = 256, 512
+	const bytesPerRow, bytesPerItem, bytesPerCell, bytesPerOp = 512, 1536, 16384, 1536
 	var l vega.Limits
 	if n := c.cfg.memoryLimit; n > 0 {
 		l.MaxRows = int(max(n/bytesPerRow, 1000))
 		l.MaxItems = int(max(n/bytesPerItem, 1000))
+		// A facet cell instantiates its own operators; the default (20,000)
+		// is the most that is left alone.
+		l.MaxSubflows = int(min(max(n/bytesPerCell, 1000), 20_000))
+		l.MaxOperators = int(min(max(n/bytesPerOp, 10_000), 500_000))
 		l.MaxLoadBytes = int64(max(n/2, 1<<20))
 		l.MaxStringBytes = int64(max(n/4, 1<<20))
 		l.MaxCanvasBytes = int64(max(n/2, 1<<20))
+		l.MaxParseBytes = int64(max(n/2, 1<<20))
+		l.RowBytes = bytesPerRow
 	}
 	return l
 }
@@ -515,7 +551,10 @@ func (c *Converter) VegaLiteToVega(spec []byte) ([]byte, error) {
 // compileVegaLite parses a Vega-Lite spec and compiles it to Vega with the
 // converter's theme and time zone.
 func (c *Converter) compileVegaLite(ctx context.Context, spec []byte) (jsval.Value, error) {
-	v, err := timed(ctx, "json", func() (jsval.Value, error) { return jsval.ParseJSON(spec) })
+	if err := c.checkSpecSize(spec); err != nil {
+		return jsval.Undefined, err
+	}
+	v, err := timed(ctx, "json", func() (jsval.Value, error) { return jsval.ParseJSONLimit(spec, c.limits().MaxParseBytes) })
 	if err != nil {
 		return jsval.Undefined, fmt.Errorf("aster: parsing Vega-Lite spec: %w", err)
 	}

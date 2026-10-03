@@ -374,6 +374,18 @@ func (l *Locale) FormatValue(v, spec jsval.Value) (string, error) {
 	return f.FormatValue(v), nil
 }
 
+// AppendFormatValue appends what FormatValue returns to dst.
+func (l *Locale) AppendFormatValue(dst []byte, v, spec jsval.Value) ([]byte, error) {
+	if v.Kind() == jsval.KindNull {
+		return append(dst, "null"...), nil
+	}
+	f, err := l.NumberFormat(spec.AsString())
+	if err != nil {
+		return dst, err
+	}
+	return f.AppendFormatValue(dst, v), nil
+}
+
 // TimeFormatValue is the `timeFormat(value, spec)` / `utcFormat(value, spec)`
 // expression functions: "null" for null, else the time format of the date
 // (a non-date is first converted with +value).

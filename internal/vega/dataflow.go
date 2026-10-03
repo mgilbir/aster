@@ -530,7 +530,10 @@ type flowGraph struct {
 	view      *runView
 	visits    int
 	maxVisits int
-	warnings  []string
+	// maxOps bounds the operators the graph holds, which every guide, mark and
+	// facet cell instantiates.
+	maxOps   int
+	warnings []string
 }
 
 func newGraph(ctx context.Context) *flowGraph {
@@ -542,6 +545,9 @@ var errReentrant = errors.New("vega: dataflow already running")
 // add creates an operator, assigns it the next rank and touches it.
 func (g *flowGraph) add(name string, value any) *opNode {
 	g.idCtr++
+	if g.maxOps > 0 && g.idCtr > g.maxOps {
+		failLimit("more than %d dataflow operators", g.maxOps)
+	}
 	n := &opNode{g: g, id: g.idCtr, name: name, value: value, stamp: -1, rank: -1, qrank: -1}
 	g.rankCtr++
 	n.rank = g.rankCtr
