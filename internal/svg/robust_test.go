@@ -72,32 +72,34 @@ func TestRandomScenesNeverPanic(t *testing.T) {
 					it.Width, it.Height = oddNum(r), oddNum(r)
 					it.Fill, it.Stroke = oddPaint(r), oddPaint(r)
 					it.StrokeWidth, it.Opacity, it.StrokeOpacity = oddNum(r), oddNum(r), oddNum(r)
-					it.StrokeMiterLimit, it.StrokeOffset = oddNum(r), oddNum(r)
-					it.CornerRadius, it.CornerRadiusTopLeft = oddNum(r), oddNum(r)
-					it.StartAngle, it.EndAngle, it.PadAngle, it.InnerRadius, it.OuterRadius = oddNum(r), oddNum(r), oddNum(r), oddNum(r), oddNum(r)
-					it.Angle, it.Size, it.Tension, it.Radius, it.Theta = oddNum(r), oddNum(r), oddNum(r), oddNum(r), oddNum(r)
-					it.FontSize, it.LineHeight, it.Limit, it.Dx, it.Dy = oddNum(r), oddNum(r), oddNum(r), oddNum(r), oddNum(r)
-					it.ScaleX, it.ScaleY = oddNum(r), oddNum(r)
-					it.Interpolate = interps[r.Intn(len(interps))]
-					it.Orient = []string{"", "horizontal", "vertical", "x"}[r.Intn(4)]
+					for _, k := range []string{"strokeMiterLimit", "strokeOffset", "cornerRadius", "cornerRadiusTopLeft",
+						"startAngle", "endAngle", "padAngle", "innerRadius", "outerRadius"} {
+						setNum(it, k, oddNum(r))
+					}
+					it.Angle, it.Size = oddNum(r), oddNum(r)
+					for _, k := range []string{"tension", "radius", "theta", "fontSize", "lineHeight", "limit", "dx", "dy", "scaleX", "scaleY"} {
+						setNum(it, k, oddNum(r))
+					}
+					setStr(it, "interpolate", interps[r.Intn(len(interps))])
+					setStr(it, "orient", []string{"", "horizontal", "vertical", "x"}[r.Intn(4)])
 					it.Shape.Name = shapes[r.Intn(len(shapes))]
-					it.Text = texts[r.Intn(len(texts))]
+					_, _ = it.Set("text", texts[r.Intn(len(texts))])
 					it.Align = []string{"", "left", "center", "right"}[r.Intn(4)]
 					it.Baseline = []string{"", "top", "middle", "bottom", "line-top", "line-bottom"}[r.Intn(6)]
-					it.Dir = []string{"", "rtl"}[r.Intn(2)]
-					it.LineBreak = []string{"", "\n"}[r.Intn(2)]
+					setStr(it, "dir", []string{"", "rtl"}[r.Intn(2)])
+					setStr(it, "lineBreak", []string{"", "\n"}[r.Intn(2)])
 					it.Defined = scene.Tri(r.Intn(3))
-					it.StrokeForeground = scene.Tri(r.Intn(3))
+					_, _ = it.Set("strokeForeground", []jsval.Value{jsval.Undefined, jsval.False, jsval.True}[r.Intn(3)])
 					it.Clip = scene.Tri(r.Intn(3))
 					it.Aria = scene.Tri(r.Intn(3))
 					if r.Intn(3) == 0 {
-						it.Path = scene.P([]string{"M0,0L10,10", "junk", "M0,0 a1,1 0 1,1 5,5 t1,1", "m1,1"}[r.Intn(4)])
+						it.SetPath(scene.P([]string{"M0,0L10,10", "junk", "M0,0 a1,1 0 1,1 5,5 t1,1", "m1,1"}[r.Intn(4)]))
 					}
 					if r.Intn(4) == 0 {
-						it.Href = []string{"https://x", "javascript:x", "", "//h"}[r.Intn(4)]
+						setStr(it, "href", []string{"https://x", "javascript:x", "", "//h"}[r.Intn(4)])
 					}
 					if r.Intn(3) == 0 {
-						it.StrokeDash = jsval.Arr([]jsval.Value{jsval.Num(1), jsval.Num(math.NaN())})
+						_, _ = it.Set("strokeDash", jsval.Arr([]jsval.Value{jsval.Num(1), jsval.Num(math.NaN())}))
 					}
 					if typ == scene.MarkGroup {
 						build(it, depth+1)
@@ -111,4 +113,22 @@ func TestRandomScenesNeverPanic(t *testing.T) {
 			continue
 		}
 	}
+}
+
+// setNum sets a numeric property of it to n, unset included.
+func setNum(it *scene.Item, k string, n scene.Num) {
+	v := jsval.Undefined
+	if n.Set() {
+		v = jsval.Num(n.Val())
+	}
+	_, _ = it.Set(k, v)
+}
+
+// setStr sets a string property of it to s, "" as unset.
+func setStr(it *scene.Item, k, s string) {
+	v := jsval.Undefined
+	if s != "" {
+		v = jsval.Str(s)
+	}
+	_, _ = it.Set(k, v)
 }

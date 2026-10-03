@@ -56,12 +56,12 @@ func SetterFor(name string) Setter {
 		}
 	case "interpolate":
 		return func(it *Item, val jsval.Value) error {
-			it.Interpolate = strOfTruthy(val)
+			it.lineW().Interpolate = strOfTruthy(val)
 			return nil
 		}
 	case "orient":
 		return func(it *Item, val jsval.Value) error {
-			it.Orient = strOfTruthy(val)
+			it.lineW().Orient = strOfTruthy(val)
 			return nil
 		}
 	}
@@ -84,64 +84,64 @@ var numFields = map[string]func(*Item) *Num{
 	"fillOpacity":             func(it *Item) *Num { return &it.FillOpacity },
 	"strokeOpacity":           func(it *Item) *Num { return &it.StrokeOpacity },
 	"strokeWidth":             func(it *Item) *Num { return &it.StrokeWidth },
-	"strokeMiterLimit":        func(it *Item) *Num { return &it.StrokeMiterLimit },
-	"strokeDashOffset":        func(it *Item) *Num { return &it.StrokeDashOffset },
-	"strokeOffset":            func(it *Item) *Num { return &it.StrokeOffset },
-	"cornerRadius":            func(it *Item) *Num { return &it.CornerRadius },
-	"cornerRadiusTopLeft":     func(it *Item) *Num { return &it.CornerRadiusTopLeft },
-	"cornerRadiusTopRight":    func(it *Item) *Num { return &it.CornerRadiusTopRight },
-	"cornerRadiusBottomLeft":  func(it *Item) *Num { return &it.CornerRadiusBottomLeft },
-	"cornerRadiusBottomRight": func(it *Item) *Num { return &it.CornerRadiusBottomRight },
-	"startAngle":              func(it *Item) *Num { return &it.StartAngle },
-	"endAngle":                func(it *Item) *Num { return &it.EndAngle },
-	"padAngle":                func(it *Item) *Num { return &it.PadAngle },
-	"innerRadius":             func(it *Item) *Num { return &it.InnerRadius },
-	"outerRadius":             func(it *Item) *Num { return &it.OuterRadius },
+	"strokeMiterLimit":        func(it *Item) *Num { return &it.strokeW().StrokeMiterLimit },
+	"strokeDashOffset":        func(it *Item) *Num { return &it.strokeW().StrokeDashOffset },
+	"strokeOffset":            func(it *Item) *Num { return &it.strokeW().StrokeOffset },
+	"cornerRadius":            func(it *Item) *Num { return &it.geomW().CornerRadius },
+	"cornerRadiusTopLeft":     func(it *Item) *Num { return &it.geomW().CornerRadiusTopLeft },
+	"cornerRadiusTopRight":    func(it *Item) *Num { return &it.geomW().CornerRadiusTopRight },
+	"cornerRadiusBottomLeft":  func(it *Item) *Num { return &it.geomW().CornerRadiusBottomLeft },
+	"cornerRadiusBottomRight": func(it *Item) *Num { return &it.geomW().CornerRadiusBottomRight },
+	"startAngle":              func(it *Item) *Num { return &it.geomW().StartAngle },
+	"endAngle":                func(it *Item) *Num { return &it.geomW().EndAngle },
+	"padAngle":                func(it *Item) *Num { return &it.geomW().PadAngle },
+	"innerRadius":             func(it *Item) *Num { return &it.geomW().InnerRadius },
+	"outerRadius":             func(it *Item) *Num { return &it.geomW().OuterRadius },
 	"size":                    func(it *Item) *Num { return &it.Size },
-	"scaleX":                  func(it *Item) *Num { return &it.ScaleX },
-	"scaleY":                  func(it *Item) *Num { return &it.ScaleY },
-	"tension":                 func(it *Item) *Num { return &it.Tension },
-	"fontSize":                func(it *Item) *Num { return &it.FontSize },
-	"dx":                      func(it *Item) *Num { return &it.Dx },
-	"dy":                      func(it *Item) *Num { return &it.Dy },
+	"scaleX":                  func(it *Item) *Num { return &it.pathW().ScaleX },
+	"scaleY":                  func(it *Item) *Num { return &it.pathW().ScaleY },
+	"tension":                 func(it *Item) *Num { return &it.lineW().Tension },
+	"fontSize":                func(it *Item) *Num { return &it.textW().FontSize },
+	"dx":                      func(it *Item) *Num { return &it.textW().Dx },
+	"dy":                      func(it *Item) *Num { return &it.textW().Dy },
 	"angle":                   func(it *Item) *Num { return &it.Angle },
-	"radius":                  func(it *Item) *Num { return &it.Radius },
-	"theta":                   func(it *Item) *Num { return &it.Theta },
-	"limit":                   func(it *Item) *Num { return &it.Limit },
-	"lineHeight":              func(it *Item) *Num { return &it.LineHeight },
+	"radius":                  func(it *Item) *Num { return &it.textW().Radius },
+	"theta":                   func(it *Item) *Num { return &it.textW().Theta },
+	"limit":                   func(it *Item) *Num { return &it.textW().Limit },
+	"lineHeight":              func(it *Item) *Num { return &it.textW().LineHeight },
 	"zindex":                  func(it *Item) *Num { return &it.Zindex },
 }
 
 var strFields = map[string]func(*Item) *string{
 	"align":               func(it *Item) *string { return &it.Align },
 	"baseline":            func(it *Item) *string { return &it.Baseline },
-	"strokeCap":           func(it *Item) *string { return &it.StrokeCap },
-	"strokeJoin":          func(it *Item) *string { return &it.StrokeJoin },
-	"blend":               func(it *Item) *string { return &it.Blend },
-	"fontWeight":          func(it *Item) *string { return &it.FontWeight },
-	"fontStyle":           func(it *Item) *string { return &it.FontStyle },
-	"fontVariant":         func(it *Item) *string { return &it.FontVariant },
-	"lineBreak":           func(it *Item) *string { return &it.LineBreak },
-	"ellipsis":            func(it *Item) *string { return &it.Ellipsis },
-	"dir":                 func(it *Item) *string { return &it.Dir },
-	"url":                 func(it *Item) *string { return &it.URL },
-	"cursor":              func(it *Item) *string { return &it.Cursor },
+	"strokeCap":           func(it *Item) *string { return &it.strokeW().StrokeCap },
+	"strokeJoin":          func(it *Item) *string { return &it.strokeW().StrokeJoin },
+	"blend":               func(it *Item) *string { return &it.strokeW().Blend },
+	"fontWeight":          func(it *Item) *string { return &it.textW().FontWeight },
+	"fontStyle":           func(it *Item) *string { return &it.textW().FontStyle },
+	"fontVariant":         func(it *Item) *string { return &it.textW().FontVariant },
+	"lineBreak":           func(it *Item) *string { return &it.textW().LineBreak },
+	"ellipsis":            func(it *Item) *string { return &it.textW().Ellipsis },
+	"dir":                 func(it *Item) *string { return &it.textW().Dir },
+	"url":                 func(it *Item) *string { return &it.imageW().URL },
+	"cursor":              func(it *Item) *string { return &it.linkW().Cursor },
 	"description":         func(it *Item) *string { return &it.Description },
 	"ariaRole":            func(it *Item) *string { return &it.AriaRole },
 	"ariaRoleDescription": func(it *Item) *string { return &it.AriaRoleDescription },
 }
 
 var triFields = map[string]func(*Item) *Tri{
-	"strokeForeground": func(it *Item) *Tri { return &it.StrokeForeground },
+	"strokeForeground": func(it *Item) *Tri { return &it.strokeW().StrokeForeground },
 	"defined":          func(it *Item) *Tri { return &it.Defined },
-	"aspect":           func(it *Item) *Tri { return &it.Aspect },
-	"smooth":           func(it *Item) *Tri { return &it.Smooth },
+	"aspect":           func(it *Item) *Tri { return &it.imageW().Aspect },
+	"smooth":           func(it *Item) *Tri { return &it.imageW().Smooth },
 	"aria":             func(it *Item) *Tri { return &it.Aria },
 }
 
 var valFields = map[string]func(*Item) *jsval.Value{
-	"strokeDash": func(it *Item) *jsval.Value { return &it.StrokeDash },
-	"text":       func(it *Item) *jsval.Value { return &it.Text },
-	"tooltip":    func(it *Item) *jsval.Value { return &it.Tooltip },
+	"strokeDash": func(it *Item) *jsval.Value { return &it.strokeW().StrokeDash },
+	"text":       func(it *Item) *jsval.Value { return &it.textW().Text },
+	"tooltip":    func(it *Item) *jsval.Value { return &it.linkW().Tooltip },
 	"datum":      func(it *Item) *jsval.Value { return &it.Datum },
 }

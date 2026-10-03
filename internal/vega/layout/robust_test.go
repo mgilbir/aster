@@ -34,9 +34,9 @@ func TestLayoutMalformedScenes(t *testing.T) {
 	datum := func(kv ...any) jsval.Value { return jsval.Obj(jsval.ObjectOf(kv...)) }
 	yes := jsval.True
 
-	axis := &scene.Item{Orient: "left", Datum: datum("grid", yes, "ticks", yes, "labels", yes, "domain", yes, "title", yes)}
-	legend := &scene.Item{Orient: "right", Datum: datum("title", yes, "type", jsval.Str("symbol"))}
-	title := &scene.Item{Orient: "top"}
+	axis := oriented("left", &scene.Item{Datum: datum("grid", yes, "ticks", yes, "labels", yes, "domain", yes, "title", yes)})
+	legend := oriented("right", &scene.Item{Datum: datum("title", yes, "type", jsval.Str("symbol"))})
+	title := oriented("top", &scene.Item{})
 	empty := mark("", scene.MarkRect)
 	g := group(
 		mark("axis", scene.MarkGroup, axis),
@@ -120,4 +120,10 @@ func TestInvalidColumnsThrow(t *testing.T) {
 			t.Errorf("columns %v: unexpected error %v", c, err)
 		}
 	}
+}
+
+// oriented sets the orient of it and returns it.
+func oriented(orient string, it *scene.Item) *scene.Item {
+	_, _ = it.Set("orient", jsval.Str(orient))
+	return it
 }

@@ -79,10 +79,10 @@ func TestNilAndEmpty(t *testing.T) {
 func TestEscaping(t *testing.T) {
 	sg := scene.New()
 	m := sg.AddMark(scene.MarkDef{Type: scene.MarkText, Name: `n"<&>`, Role: "r\t"}, nil, -1)
-	m.Items = append(m.Items, &scene.Item{
-		Mark: m, Text: jsval.Str("a&b<c>d\"e\tf\n"), Description: "x\"y<z>&\r\n\t",
-		Font: `"A B", 'c'`, Fill: scene.Color("#000"),
-	})
+	it := &scene.Item{Mark: m, Description: "x\"y<z>&\r\n\t", Fill: scene.Color("#000")}
+	_, _ = it.Set("text", jsval.Str("a&b<c>d\"e\tf\n"))
+	_, _ = it.Set("font", jsval.Str(`"A B", 'c'`))
+	m.Items = append(m.Items, it)
 	got, err := Render(context.Background(), sg, Options{Width: 1, Height: 1})
 	if err != nil {
 		t.Fatal(err)
@@ -180,11 +180,11 @@ func bigScene(n int) *scene.Scenegraph {
 				it.Size = scene.N(30)
 				it.Shape.Name = "diamond"
 			case scene.MarkText:
-				it.Text = jsval.Str("label " + strconv.Itoa(i))
-				it.FontSize = scene.N(10)
+				_, _ = it.Set("text", jsval.Str("label "+strconv.Itoa(i)))
+				_, _ = it.Set("fontSize", jsval.Num(10))
 				it.Align = "center"
 				it.Baseline = "middle"
-				it.Limit = scene.N(40)
+				_, _ = it.Set("limit", jsval.Num(40))
 			case scene.MarkLine:
 				it.Stroke = scene.Color("#c33")
 			}

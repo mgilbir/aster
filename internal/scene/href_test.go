@@ -11,14 +11,14 @@ import (
 func TestHrefMustBeAString(t *testing.T) {
 	for v, want := range map[string]string{"x": "x", "": ""} {
 		it := &Item{}
-		if _, err := it.Set("href", jsval.Str(v)); err != nil || it.Href != want {
-			t.Errorf("%q: %q %v", v, it.Href, err)
+		if _, err := it.Set("href", jsval.Str(v)); err != nil || it.Href() != want {
+			t.Errorf("%q: %q %v", v, it.Href(), err)
 		}
 	}
 	for _, v := range []jsval.Value{jsval.Num(4), jsval.Bool(true), jsval.Null, jsval.ArrOf(jsval.Str("a"))} {
-		it := &Item{Href: "stale"}
-		if _, err := it.Set("href", v); err != nil || it.Href != "" {
-			t.Errorf("%v: %q %v", v, it.Href, err)
+		it := &Item{link: &linkAttrs{Href: "stale"}}
+		if _, err := it.Set("href", v); err != nil || it.Href() != "" {
+			t.Errorf("%v: %q %v", v, it.Href(), err)
 		}
 	}
 }

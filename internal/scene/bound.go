@@ -48,12 +48,12 @@ func BoundStroke(b *Bounds, it *Item, miter bool) *Bounds {
 	if it.Stroke.Truthy() && it.Opacity.Val() != 0 && it.StrokeOpacity.Val() != 0 {
 		sw := it.StrokeWidth.Or(1)
 		k := 1.0
-		if it.StrokeCap == "square" {
+		if it.StrokeCap() == "square" {
 			k = math.Sqrt2
 		}
 		e := k * sw / 2
-		if miter && (it.StrokeJoin == "" || it.StrokeJoin == "miter") {
-			e = jsMax(e, it.StrokeMiterLimit.Or(4)*sw/2)
+		if miter && (it.StrokeJoin() == "" || it.StrokeJoin() == "miter") {
+			e = jsMax(e, it.StrokeMiterLimit().Or(4)*sw/2)
 		}
 		b.Expand(e)
 	}
@@ -253,7 +253,7 @@ func nanZero(v float64) float64 {
 }
 
 func (bd *Bounder) pathBounds(b *Bounds, it *Item) error {
-	if !it.Path.Set {
+	if !it.Path().Set {
 		b.Set(0, 0, 0, 0)
 		return nil
 	}
@@ -264,7 +264,7 @@ func (bd *Bounder) pathBounds(b *Bounds, it *Item) error {
 	// The rotation is applied by the context about the origin, after the item
 	// offset, exactly as upstream does for path bounds.
 	bd.ctx.reset(b, it.AngleTruthy(), it.Angle.Val())
-	sx, sy := scaleOf(it.ScaleX), scaleOf(it.ScaleY)
+	sx, sy := scaleOf(it.ScaleX()), scaleOf(it.ScaleY())
 	if err := RenderPath(&bd.ctx, cmds, it.OrZero("x"), it.OrZero("y"), sx, sy); err != nil {
 		return err
 	}
@@ -290,29 +290,27 @@ func (bd *Bounder) groupBounds(b *Bounds, g *Item) error {
 
 // ImageSize returns the natural size of an image item's picture, or 0, 0 when
 // unknown; the SVG renderer and bounds share it through Item.Image.
-func imageWidth(it *Item) float64 {
+func imageWidth(it *Item, nw, nh float64) float64 {
 	if it.Width.Set() {
 		return it.Width.Val()
 	}
-	nw, nh := it.naturalSize()
 	switch {
 	case nw == 0 || nw != nw:
 		return 0
-	case !it.Aspect.IsFalse() && it.Height.Truthy():
+	case !it.Aspect().IsFalse() && it.Height.Truthy():
 		return it.Height.Val() * nw / nh
 	}
 	return nw
 }
 
-func imageHeight(it *Item) float64 {
+func imageHeight(it *Item, nw, nh float64) float64 {
 	if it.Height.Set() {
 		return it.Height.Val()
 	}
-	nw, nh := it.naturalSize()
 	switch {
 	case nh == 0 || nh != nh:
 		return 0
-	case !it.Aspect.IsFalse() && it.Width.Truthy():
+	case !it.Aspect().IsFalse() && it.Width.Truthy():
 		return it.Width.Val() * nh / nw
 	}
 	return nh
@@ -341,17 +339,16 @@ func imageYOffset(baseline string, h float64) float64 {
 // ImageGeometry returns the drawn position and size of an image item, given the
 // picture's natural size (0, 0 when unknown).
 func ImageGeometry(it *Item, naturalW, naturalH float64) (x, y, w, h float64) {
-	saveW, saveH := it.imgW, it.imgH
-	it.imgW, it.imgH = naturalW, naturalH
-	w, h = imageWidth(it), imageHeight(it)
+	nw, nh := it.naturalSizeOr(naturalW, naturalH)
+	w, h = imageWidth(it, nw, nh), imageHeight(it, nw, nh)
 	x = it.X.Zero() - imageXOffset(it.Align, w)
 	y = it.Y.Zero() - imageYOffset(it.Baseline, h)
-	it.imgW, it.imgH = saveW, saveH
 	return
 }
 
 func (bd *Bounder) imageBounds(b *Bounds, it *Item) {
-	w, h := imageWidth(it), imageHeight(it)
+	nw, nh := it.naturalSize()
+	w, h := imageWidth(it, nw, nh), imageHeight(it, nw, nh)
 	x := it.X.Zero() - imageXOffset(it.Align, w)
 	y := it.Y.Zero() - imageYOffset(it.Baseline, h)
 	b.Set(x, y, x+w, y+h)
@@ -371,7 +368,7 @@ type Bitmap interface {
 // URL ignores it: the mark loads the URL when it differs from the image's own
 // (which a canvas does not have).
 func (it *Item) Bitmap() (Bitmap, bool) {
-	if it.URL != "" || it.Extra == nil {
+	if it.URL() != "" || it.Extra == nil {
 		return nil, false
 	}
 	o := it.Extra.Lookup("image").ObjValue()
@@ -385,16 +382,25 @@ func (it *Item) Bitmap() (Bitmap, bool) {
 // naturalSize is the size of the item's picture: its canvas, else the loaded
 // image's.
 func (it *Item) naturalSize() (w, h float64) {
+	img := it.imageR()
+	return it.naturalSizeOr(img.imgW, img.imgH)
+}
+
+// naturalSizeOr is the size of the item's canvas, else w, h.
+func (it *Item) naturalSizeOr(w, h float64) (float64, float64) {
 	if b, ok := it.Bitmap(); ok {
 		bw, bh := b.Size()
 		return float64(bw), float64(bh)
 	}
-	return it.imgW, it.imgH
+	return w, h
 }
 
 // SetImageSize records the loaded picture's natural size, used for image
 // bounds when width or height is not given.
-func (it *Item) SetImageSize(w, h float64) { it.imgW, it.imgH = w, h }
+func (it *Item) SetImageSize(w, h float64) {
+	img := it.imageW()
+	img.imgW, img.imgH = w, h
+}
 
 func scaleOf(n Num) float64 {
 	v := n.Zero()
@@ -409,8 +415,8 @@ func scaleOf(n Num) float64 {
 // from 12 o'clock).
 func AnchorPoint(it *Item) (x, y float64) {
 	x, y = it.OrZero("x"), it.OrZero("y")
-	if r := it.Radius.Zero(); r != 0 {
-		t := it.Theta.Zero() - halfPi
+	if r := it.Radius().Zero(); r != 0 {
+		t := it.Theta().Zero() - halfPi
 		x += float64(r * jsmath.Cos(t))
 		y += float64(r * jsmath.Sin(t))
 	}
@@ -422,8 +428,8 @@ func AnchorPoint(it *Item) (x, y float64) {
 func (bd *Bounder) textBounds(b *Bounds, it *Item, mode int) {
 	h := bd.Height(it)
 	x, y := AnchorPoint(it)
-	dx := it.Dx.Zero()
-	dy := it.Dy.Zero() + BaselineOffset(it) - jsRound(float64(0.8*h)) // use 4/5 offset
+	dx := it.Dx().Zero()
+	dy := it.Dy().Zero() + BaselineOffset(it) - jsRound(float64(0.8*h)) // use 4/5 offset
 	line, lines := TextLine(it)
 
 	var w float64
@@ -472,8 +478,8 @@ func (it *Item) hasRawPos() bool {
 // read here as the numbers they convert to.
 func (bd *Bounder) textBoundsRaw(b *Bounds, it *Item, mode int, dx, dy, w, h float64) {
 	ax, ay := it.PosValue("x"), it.PosValue("y")
-	if r := it.Radius.Zero(); r != 0 {
-		t := it.Theta.Zero() - halfPi
+	if r := it.Radius().Zero(); r != 0 {
+		t := it.Theta().Zero() - halfPi
 		ax = jsPlus(ax, jsval.Num(float64(r*jsmath.Cos(t))))
 		ay = jsPlus(ay, jsval.Num(float64(r*jsmath.Sin(t))))
 	}

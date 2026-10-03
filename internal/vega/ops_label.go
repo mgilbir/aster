@@ -73,10 +73,10 @@ func facLabel(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 		for i, t := range pulse.items {
 			l := &labels[i]
 			l.Ref = t
-			l.FontSize = t.FontSize.Val()
+			l.FontSize = t.FontSize().Val()
 			l.X, l.Y = t.X.Val(), t.Y.Val()
-			if !t.Text.IsNullish() {
-				l.Text = t.Text.AsString()
+			if !t.Text().IsNullish() {
+				l.Text = t.Text().AsString()
 			}
 			l.Base = labelBase(v, t, opts.MarkIndex)
 		}

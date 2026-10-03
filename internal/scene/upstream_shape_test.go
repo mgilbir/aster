@@ -109,7 +109,7 @@ func TestUpstreamD3ShapeLine(t *testing.T) {
 				finite = false
 				break
 			}
-			items = append(items, &Item{X: N(x), Y: N(y), Interpolate: interpolate, Orient: orient, Tension: param})
+			items = append(items, &Item{X: N(x), Y: N(y), line: &lineAttrs{Interpolate: interpolate, Orient: orient, Tension: param}})
 		}
 		if !finite {
 			r.Skip("points that are not finite (Vega reads NaN as 0, d3 draws it)")

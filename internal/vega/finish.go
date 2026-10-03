@@ -54,7 +54,7 @@ func extractTitle(item *scene.Item) string {
 	if last == nil || len(last.Items) == 0 || last.Items[0] == nil {
 		return ""
 	}
-	return joinText(last.Items[0].Text)
+	return joinText(last.Items[0].Text())
 }
 
 func joinText(t jsval.Value) string {
@@ -106,7 +106,7 @@ func (v *runView) axisCaption(c *rtContext, item *scene.Item) (caption string, o
 		hasTitle = title != ""
 	}
 	xy := "X"
-	if item.Orient == "left" || item.Orient == "right" {
+	if item.Orient() == "left" || item.Orient() == "right" {
 		xy = "Y"
 	}
 	typ := s.Type()

@@ -26,16 +26,16 @@ type Metrics struct {
 
 // FontSize is `item.fontSize != null ? (+item.fontSize || 0) : 11`.
 func FontSize(it *Item) float64 {
-	if it.FontSize.Set() {
-		return it.FontSize.Zero()
+	if it.FontSize().Set() {
+		return it.FontSize().Zero()
 	}
 	return 11
 }
 
 // LineHeight is `item.lineHeight != null ? item.lineHeight : fontSize + 2`.
 func LineHeight(it *Item) float64 {
-	if it.LineHeight.Set() {
-		return it.LineHeight.Val()
+	if it.LineHeight().Set() {
+		return it.LineHeight().Val()
 	}
 	return FontSize(it) + 2
 }
@@ -47,7 +47,7 @@ func FontFamily(it *Item, quote bool) string {
 	if v, ok := it.Raw["font"]; ok && !quote && v.IsTruthy() {
 		return v.AsString() // `font || 'sans-serif'` keeps a truthy array
 	}
-	f := it.Font
+	f := it.Font()
 	if f == "" {
 		return "sans-serif"
 	}
@@ -61,16 +61,16 @@ func FontFamily(it *Item, quote bool) string {
 // and weight, the size in px, then the family.
 func CSSFont(it *Item, quote bool) string {
 	var b strings.Builder
-	if it.FontStyle != "" {
-		b.WriteString(it.FontStyle)
+	if it.FontStyle() != "" {
+		b.WriteString(it.FontStyle())
 		b.WriteByte(' ')
 	}
-	if it.FontVariant != "" {
-		b.WriteString(it.FontVariant)
+	if it.FontVariant() != "" {
+		b.WriteString(it.FontVariant())
 		b.WriteByte(' ')
 	}
-	if it.FontWeight != "" {
-		b.WriteString(it.FontWeight)
+	if it.FontWeight() != "" {
+		b.WriteString(it.FontWeight())
 		b.WriteByte(' ')
 	}
 	var nb [32]byte
@@ -104,7 +104,7 @@ func BaselineOffset(it *Item) float64 {
 // lines holds one entry. Null entries become "" and other values are
 // stringified, as textValue does with `line + ”`.
 func TextLines(it *Item) (lines []string, multi bool) {
-	t := it.Text
+	t := it.Text()
 	switch {
 	case t.IsArr():
 		items := t.Items()
@@ -119,8 +119,8 @@ func TextLines(it *Item) (lines []string, multi bool) {
 			return []string{lineString(items[0])}, false
 		}
 		return []string{""}, false
-	case it.LineBreak != "" && t.IsTruthy():
-		parts := strings.Split(t.AsString(), it.LineBreak)
+	case it.LineBreak() != "" && t.IsTruthy():
+		parts := strings.Split(t.AsString(), it.LineBreak())
 		if len(parts) > 1 {
 			return parts, true
 		}
@@ -144,8 +144,8 @@ func lineString(v jsval.Value) string {
 // (lines is nil), or the lines otherwise (line is empty). It avoids the slice
 // TextLines allocates for the common single-line case.
 func TextLine(it *Item) (line string, lines []string) {
-	t := it.Text
-	if !t.IsArr() && (it.LineBreak == "" || !t.IsTruthy()) {
+	t := it.Text()
+	if !t.IsArr() && (it.LineBreak() == "" || !t.IsTruthy()) {
 		return lineString(t), nil
 	}
 	l, multi := TextLines(it)
@@ -168,7 +168,7 @@ func MultiLineOffset(it *Item) float64 {
 // with an ellipsis to fit `limit` when one is set.
 func (m Metrics) TextValue(it *Item, line string) string {
 	text := trimJS(line)
-	if it.Limit.Val() > 0 && len(text) > 0 {
+	if it.Limit().Val() > 0 && len(text) > 0 {
 		return m.truncate(it, text)
 	}
 	return text
@@ -230,7 +230,7 @@ func isASCII(s string) bool {
 // left text, prepending) the ellipsis. It binary-searches over UTF-16 code unit
 // prefixes, as upstream does over JavaScript string slices.
 func (m Metrics) truncate(it *Item, text string) string {
-	limit := it.Limit.Val()
+	limit := it.Limit().Val()
 	width := func(s string) float64 {
 		if m.Measurer == nil {
 			return estimateWidth(s, FontSize(it))
@@ -243,11 +243,11 @@ func (m Metrics) truncate(it *Item, text string) string {
 		return text
 	}
 
-	ellipsis := it.Ellipsis
+	ellipsis := it.Ellipsis()
 	if ellipsis == "" {
 		ellipsis = "…"
 	}
-	rtl := it.Dir == "rtl"
+	rtl := it.Dir() == "rtl"
 	limit -= width(ellipsis)
 
 	var slice func(lo, hi int) string

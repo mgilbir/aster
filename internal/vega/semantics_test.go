@@ -37,7 +37,7 @@ func TestCollectBreaksTiesByTupleID(t *testing.T) {
 	  "marks": [{"type": "text", "from": {"data": "d2"}, "encode": {"enter": {"text": {"field": "v"}}}}]}`)
 	var got []float64
 	for _, it := range marks(res)[0].Items {
-		got = append(got, it.Text.NumValue())
+		got = append(got, it.Text().NumValue())
 	}
 	if want := []float64{0, 1, 2, 3}; !equalFloats(got, want) {
 		t.Errorf("order after the tie-breaking sort = %v, want %v", got, want)

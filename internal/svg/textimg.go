@@ -21,13 +21,13 @@ func textAnchor(align string) string {
 // property), the font styling, and the text as one run or one <tspan> per line.
 func (r *renderer) textItem(m *scene.Mark, it *scene.Item) {
 	w := &r.w
-	dx := it.Dx.Zero()
-	dy := it.Dy.Zero() + scene.BaselineOffset(it)
+	dx := it.Dx().Zero()
+	dy := it.Dy().Zero() + scene.BaselineOffset(it)
 	x, y := scene.AnchorPoint(it)
 
 	w.attrRaw("text-anchor", textAnchor(it.Align))
 	w.attrName("transform")
-	if xv, yv := it.PosValue("x"), it.PosValue("y"); (xv.IsStr() || yv.IsStr()) && it.Radius.Zero() == 0 {
+	if xv, yv := it.PosValue("x"), it.PosValue("y"); (xv.IsStr() || yv.IsStr()) && it.Radius().Zero() == 0 {
 		// A position given a word: the template strings concatenate.
 		w.buf = appendWordTransform(w.buf, it, xv, yv, dx, dy)
 	} else if it.AngleTruthy() {
@@ -110,7 +110,7 @@ func (r *renderer) imageItem(m *scene.Mark, it *scene.Item) {
 		bw, bh := b.Size()
 		info = ImageInfo{Src: b.DataURL(), Width: float64(bw), Height: float64(bh)}
 	} else {
-		info = r.image(it.URL)
+		info = r.image(it.URL())
 	}
 	x, y, iw, ih := scene.ImageGeometry(it, info.Width, info.Height)
 	w.attr("xlink:href", info.Src)
@@ -119,7 +119,7 @@ func (r *renderer) imageItem(m *scene.Mark, it *scene.Item) {
 	w.buf = append(w.buf, '"')
 	w.attrNum("width", iw)
 	w.attrNum("height", ih)
-	if it.Aspect.IsFalse() {
+	if it.Aspect().IsFalse() {
 		w.attrRaw("preserveAspectRatio", "none")
 	} else {
 		w.attrRaw("preserveAspectRatio", "xMidYMid")
