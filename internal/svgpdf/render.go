@@ -134,7 +134,13 @@ type renderer struct {
 	visited   int       // elements rendered (a <clipPath> is re-applied per reference)
 	segsTotal int       // path segments parsed so far
 	segBuf    []PathSeg // reused by parsePath
-	textTotal int       // text bytes shaped so far
+
+	// Reused by drawTextRunFont, and the last font string cssFont built.
+	gidBuf     []uint16
+	tjBuf      []tjItem
+	cssFontKey fontKey
+	cssFontStr string
+	textTotal  int // text bytes shaped so far
 }
 
 // parsePath parses path data, charging its segments to the render budget.
