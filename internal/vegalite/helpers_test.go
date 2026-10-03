@@ -8,7 +8,7 @@ import (
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
-func loadHelperVectors(t *testing.T) jsval.Value {
+func loadHelperVectors(t testing.TB) jsval.Value {
 	t.Helper()
 	data, err := os.ReadFile("testdata/helpers.json")
 	if err != nil {

@@ -72,7 +72,7 @@ func pathFuncFromValue(v jsval.Value) (PathFunc, error) {
 			if len(a) == 0 {
 				continue
 			}
-			n := func(i int) float64 { return numOf(a[i]).Val() }
+			n := func(i int) float64 { return numOf(op.Index(i)).Val() } // an operand left out is undefined
 			switch a[0].AsString() {
 			case "M":
 				ctx.MoveTo(n(1), n(2))

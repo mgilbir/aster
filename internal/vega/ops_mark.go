@@ -33,6 +33,7 @@ func itemPulse(in *flowPulse, items, add, rem, mod []*scene.Item) *flowPulse {
 // joinEntry is the item bound to one key.
 type joinEntry struct {
 	item *scene.Item
+	key  *jsval.Object // the tuple, when the key is its identity
 	exit bool
 	seen int // run in which a tuple last mapped to this entry
 }
@@ -41,6 +42,9 @@ type joinEntry struct {
 // default, or the string a key accessor returns.
 type joinMap struct {
 	keyFn func(jsval.Value) string // nil: tuple identity
+	// objs indexes the entries keyed by a tuple, made when a lookup first
+	// needs it: a first run (usually the only one) tells new tuples apart
+	// without it.
 	objs  map[*jsval.Object]*joinEntry
 	vals  map[jsval.Value]*joinEntry
 	strs  map[string]*joinEntry
@@ -55,9 +59,22 @@ func (m *joinMap) find(t jsval.Value) *joinEntry {
 		return m.strs[m.keyFn(t)]
 	}
 	if o := t.ObjValue(); o != nil {
+		if m.objs == nil {
+			m.index()
+		}
 		return m.objs[o]
 	}
 	return m.vals[t]
+}
+
+// index builds objs from the entries.
+func (m *joinMap) index() {
+	m.objs = make(map[*jsval.Object]*joinEntry, len(m.order))
+	for _, e := range m.order {
+		if e.key != nil {
+			m.objs[e.key] = e
+		}
+	}
 }
 
 func (m *joinMap) put(t jsval.Value, e *joinEntry) {
@@ -65,7 +82,10 @@ func (m *joinMap) put(t jsval.Value, e *joinEntry) {
 	case m.keyFn != nil:
 		m.strs[m.keyFn(t)] = e
 	case t.ObjValue() != nil:
-		m.objs[t.ObjValue()] = e
+		e.key = t.ObjValue()
+		if m.objs != nil {
+			m.objs[e.key] = e
+		}
 	default:
 		m.vals[t] = e
 	}
@@ -84,7 +104,7 @@ func facDataJoin(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNod
 	return nil, trFunc(func(n *opNode, p *opParams, pulse *flowPulse) *flowPulse {
 		jm, _ := n.value.(*joinMap)
 		if jm == nil {
-			jm = &joinMap{objs: make(map[*jsval.Object]*joinEntry, len(pulse.tuples)), vals: map[jsval.Value]*joinEntry{}, strs: map[string]*joinEntry{}}
+			jm = &joinMap{vals: map[jsval.Value]*joinEntry{}, strs: map[string]*joinEntry{}}
 			switch k := p.Get("key").(type) {
 			case transforms.Field:
 				g, v := k.Get, n.g.view
@@ -105,6 +125,13 @@ func facDataJoin(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNod
 			// them into).
 			tuples = n.g.view.derivedTuples(jm, pulse)
 		}
+		// On a first run by tuple identity, a tuple whose id the run has not
+		// had is a new one, found without the index.
+		var ids tidSet
+		fresh := jm.keyFn == nil && len(jm.order) == 0 && jm.objs == nil && ids.init(tuples)
+		if jm.order == nil {
+			jm.order = make([]*joinEntry, 0, len(tuples))
+		}
 		jm.run++
 		var add, mod []*scene.Item
 		var slab []scene.Item
@@ -115,7 +142,10 @@ func facDataJoin(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNod
 					failErr(err)
 				}
 			}
-			x := jm.find(t)
+			var x *joinEntry
+			if o := t.ObjValue(); !fresh || o == nil || jm.objs != nil || !ids.add(o) {
+				x = jm.find(t)
+			}
 			if x != nil {
 				if x.exit {
 					add = append(add, x.item)

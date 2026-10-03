@@ -3,33 +3,54 @@ package raster
 import (
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/mgilbir/aster/internal/fuzzutil"
 )
 
 var fuzzLimits = Limits{MaxPixels: 1 << 18, MaxDimension: 2048, MaxElements: 5000, MaxRenderNodes: 20000, MaxInputBytes: 1 << 20}
 
-func FuzzRender(f *testing.F) {
+// addSVGSeeds seeds a target with the synthetic documents of the tests and
+// the SVG the engine produced for real charts (the vl-convert expectations and
+// the security corpus), so mutation starts from every element and attribute a
+// chart uses.
+func addSVGSeeds(f *testing.F) {
 	for _, s := range synths {
 		f.Add(s.svg)
 	}
 	for _, s := range featureSynths {
 		f.Add(s.svg)
 	}
-	f.Add(`<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><path d="M0 0L10 10" stroke="red"/></svg>`)
-	f.Fuzz(func(t *testing.T, svg string) {
+	for _, s := range fuzzutil.Files(f, "../../testdata/vl-convert/expected/v5_8/*.svg", "../../testdata/security/*.svg") {
+		f.Add(s)
+	}
+}
+
+// renderChecked renders svg within fuzzLimits, in bounded time. Render turns a
+// panic into an "internal error", which is a failure here, and a limit has to
+// be reported as one.
+func renderChecked(t *testing.T, svg string) {
+	fuzzutil.Within(t, 20*time.Second, "Render", func() {
 		img, err := Render([]byte(svg), Options{Limits: fuzzLimits})
-		if err == nil && img == nil {
-			t.Fatal("nil image without error")
+		switch {
+		case err == nil && img == nil:
+			t.Fatalf("%q: nil image without error", svg)
+		case err != nil && strings.Contains(err.Error(), "internal error"):
+			t.Fatalf("%q: %v", svg, err)
+		case err == nil && int64(img.Bounds().Dx())*int64(img.Bounds().Dy()) > int64(fuzzLimits.MaxPixels):
+			t.Fatalf("%q: %v image exceeds MaxPixels", svg, img.Bounds())
 		}
 	})
 }
 
+func FuzzRender(f *testing.F) {
+	addSVGSeeds(f)
+	f.Add(`<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><path d="M0 0L10 10" stroke="red"/></svg>`)
+	f.Fuzz(renderChecked)
+}
+
 func FuzzParseDocument(f *testing.F) {
-	for _, s := range synths {
-		f.Add(s.svg)
-	}
-	for _, s := range featureSynths {
-		f.Add(s.svg)
-	}
+	addSVGSeeds(f)
 	f.Add(`<!DOCTYPE svg [<!ENTITY a "b">]><svg><text>&a;&#x41;</text></svg>`)
 	f.Fuzz(func(t *testing.T, s string) {
 		_, _ = parseDocument(s, fuzzLimits.withDefaults())
@@ -103,10 +124,7 @@ func FuzzFeatureAttrs(f *testing.F) {
 			`<clipPath id="c" ` + a + `><circle r="20"/></clipPath></defs>` +
 			`<path d="M5 5L30 40L55 5" fill="url(#p)" stroke="black" marker-mid="url(#k)" marker-start="url(#k)" filter="url(#f)" mask="url(#m)" clip-path="url(#c)"/>` +
 			`<text x="5" y="50" ` + a + `>Hi<tspan ` + a + `>there</tspan></text></svg>`
-		img, err := Render([]byte(svg), Options{Limits: fuzzLimits})
-		if err == nil && img == nil {
-			t.Fatal("nil image without error")
-		}
+		renderChecked(t, svg)
 	})
 }
 

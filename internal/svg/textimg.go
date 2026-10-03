@@ -28,8 +28,9 @@ func (r *renderer) textItem(m *scene.Mark, it *scene.Item) {
 	w.attrRaw("text-anchor", textAnchor(it.Align))
 	w.attrName("transform")
 	if xv, yv := it.PosValue("x"), it.PosValue("y"); (xv.IsStr() || yv.IsStr()) && it.Radius().Zero() == 0 {
-		// A position given a word: the template strings concatenate.
-		w.buf = appendWordTransform(w.buf, it, xv, yv, dx, dy)
+		// A position given a word: the template strings concatenate, and the
+		// word is spec text, so the attribute is escaped as a whole.
+		w.buf = appendEscapedBytes(w.buf, appendWordTransform(nil, it, xv, yv, dx, dy))
 	} else if it.AngleTruthy() {
 		w.buf = appendTranslate(w.buf, x, y)
 		w.buf = append(w.buf, " rotate("...)
