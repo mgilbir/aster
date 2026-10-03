@@ -20,6 +20,15 @@ type edge struct {
 	dir      int8
 }
 
+// activeEdge is an edge being crossed by the current sub-scanline, copied out
+// of r.edges so the per-sub-scanline loops read it sequentially.
+type activeEdge struct {
+	x0, dxdy float64
+	y0       float64 // start y in pixel units (the edge's y0 over sub-scanlines per pixel)
+	ke       int32
+	dir      int8
+}
+
 type crossing struct {
 	x   int32
 	dir int8
@@ -39,10 +48,12 @@ type rasterizer struct {
 	minK, maxK int32
 	sorted     []int32
 	bucket     []int32
-	active     []int32
+	active     []activeEdge
 	cross      []crossing
-	crossTmp   []crossing // radixSort's second buffer
 	acc, diff  []int32
+	wdelta     []int32 // net winding change per sub-pixel column, for dense sub-scanlines
+	minPx      int32   // widest pixel range touched on the current row
+	maxPx      int32
 	cov        []uint8
 	covTable   []uint8
 	aaTable    []uint8
@@ -152,40 +163,66 @@ func (r *rasterizer) addPolys(f *flat) {
 	}
 }
 
-// radixSort sorts crossings by x, which lies in [0, qmax], with an LSD radix
-// sort in 11-bit digits: a dense stroke crosses thousands of edges on every
-// sub-scanline, where a comparison sort dominated rendering. It returns the
-// sorted slice, which may be r.crossTmp's storage (the two swap).
-func (r *rasterizer) radixSort(cross []crossing, qmax int32) []crossing {
-	const bits = 11
-	const size = 1 << bits
-	if cap(r.crossTmp) < len(cross) {
-		r.crossTmp = make([]crossing, len(cross))
+// A sub-scanline with more than binMin crossings is binned by column rather than
+// insertion-sorted once n*n exceeds sortSpread times the columns the crossings
+// span: sorting costs about n*n, binning the crossings plus the columns. A
+// variable, so a test can force either path.
+var (
+	binMin     int32 = 24
+	sortSpread int32 = 16
+)
+
+// span adds the covered sub-pixel interval [qa, qb) to the row accumulators.
+func (r *rasterizer) span(qa, qb, subN int32) {
+	if qb <= qa {
+		return
 	}
-	src, dst := cross, r.crossTmp[:len(cross)]
-	var count [size]int
-	for shift := uint(0); shift == 0 || qmax>>shift > 0; shift += bits {
-		count = [size]int{}
-		for _, c := range src {
-			count[(uint32(c.x)>>shift)&(size-1)]++
-		}
-		sum := 0
-		for i, n := range count {
-			count[i] = sum
-			sum += n
-		}
-		for _, c := range src {
-			d := (uint32(c.x) >> shift) & (size - 1)
-			dst[count[d]] = c
-			count[d]++
-		}
-		src, dst = dst, src
+	pa := qa >> r.subShift
+	pb := qb >> r.subShift
+	if pa < r.minPx {
+		r.minPx = pa
 	}
-	// Keep both buffers: whichever is not returned becomes crossTmp.
-	if &src[0] != &cross[0] {
-		r.crossTmp = cross[:0]
+	if pb > r.maxPx {
+		r.maxPx = pb
 	}
-	return src
+	if pa == pb {
+		r.acc[pa] += qb - qa
+	} else {
+		r.acc[pa] += subN - (qa & (subN - 1))
+		r.acc[pb] += qb & (subN - 1)
+		if pb > pa+1 {
+			r.diff[pa+1] += subN
+			r.diff[pb] -= subN
+		}
+	}
+}
+
+// sweep walks the winding changes wd[lo..hi] in column order, clearing them,
+// and adds the covered intervals to the row accumulators.
+func (r *rasterizer) sweep(wd []int32, lo, hi int32, evenOdd bool, subN int32) {
+	w := int32(0)
+	var start int32
+	for q := lo; q <= hi; q++ {
+		d := wd[q]
+		if d == 0 {
+			continue
+		}
+		wd[q] = 0
+		inBefore := w != 0
+		if evenOdd {
+			inBefore = w&1 != 0
+		}
+		w += d
+		inAfter := w != 0
+		if evenOdd {
+			inAfter = w&1 != 0
+		}
+		if !inBefore && inAfter {
+			start = q
+		} else if inBefore && !inAfter {
+			r.span(start, q, subN)
+		}
+	}
 }
 
 // fill scan-converts the accumulated edges and sends coverage to sink.
@@ -206,6 +243,9 @@ func (r *rasterizer) fill(evenOdd bool, sink spanSink) {
 	diff := r.diff[:W+2]
 	cov := r.cov[:W+2]
 	cx0 := int32(r.clip.x0)
+	if cap(r.wdelta) < (W<<r.subShift)+1 {
+		r.wdelta = make([]int32, (W<<r.subShift)+1)
+	}
 	qmin := int32(0)
 	qmax := int32(W) << r.subShift
 
@@ -250,7 +290,7 @@ func (r *rasterizer) fill(evenOdd bool, sink spanSink) {
 				break
 			}
 		}
-		minPx, maxPx := int32(math.MaxInt32), int32(-1)
+		r.minPx, r.maxPx = int32(math.MaxInt32), -1
 		for s := int32(0); s < ssN; s++ {
 			k := row<<r.ssShift + s
 			if k < r.minK || k >= r.maxK {
@@ -258,7 +298,7 @@ func (r *rasterizer) fill(evenOdd bool, sink spanSink) {
 			}
 			// Retire finished edges, admit new ones.
 			for i := 0; i < len(active); {
-				if r.edges[active[i]].ke <= k {
+				if active[i].ke <= k {
 					active[i] = active[len(active)-1]
 					active = active[:len(active)-1]
 				} else {
@@ -266,17 +306,47 @@ func (r *rasterizer) fill(evenOdd bool, sink spanSink) {
 				}
 			}
 			for next < len(sorted) && r.edges[sorted[next]].ks <= k {
-				active = append(active, sorted[next])
+				e := &r.edges[sorted[next]]
+				active = append(active, activeEdge{x0: e.x0, dxdy: e.dxdy, y0: e.y0 * invSS, ke: e.ke, dir: e.dir})
 				next++
 			}
 			if len(active) == 0 {
 				continue
 			}
 			yc := (float64(k) + 0.5) * invSS
+			if n := int64(len(active)); n > int64(binMin) && n*n > int64(sortSpread)*int64(qmax) {
+				// Very dense: bin straight from the edges, skipping the
+				// crossing list (binning wins whatever the span).
+				wd := r.wdelta[:qmax+1]
+				lo, hi := qmax, qmin
+				for i := range active {
+					e := &active[i]
+					x := e.x0 + (yc-e.y0)*e.dxdy
+					qf := math.Floor((x-xoff)*fx + 0.5)
+					var q int32
+					if qf <= float64(qmin) {
+						q = qmin
+					} else if qf >= float64(qmax) {
+						q = qmax
+					} else {
+						q = int32(qf)
+					}
+					wd[q] += int32(e.dir)
+					if q < lo {
+						lo = q
+					}
+					if q > hi {
+						hi = q
+					}
+				}
+				r.sweep(wd, lo, hi, evenOdd, subN)
+				continue
+			}
 			cross = cross[:0]
-			for _, ei := range active {
-				e := &r.edges[ei]
-				x := e.x0 + (yc-e.y0*invSS)*e.dxdy
+			lo, hi := qmax, qmin
+			for i := range active {
+				e := &active[i]
+				x := e.x0 + (yc-e.y0)*e.dxdy
 				qf := math.Floor((x-xoff)*fx + 0.5)
 				var q int32
 				if qf <= float64(qmin) {
@@ -287,21 +357,32 @@ func (r *rasterizer) fill(evenOdd bool, sink spanSink) {
 					q = int32(qf)
 				}
 				cross = append(cross, crossing{q, e.dir})
-			}
-			if len(cross) > 1 {
-				if len(cross) <= 24 {
-					for i := 1; i < len(cross); i++ {
-						c := cross[i]
-						j := i - 1
-						for j >= 0 && cross[j].x > c.x {
-							cross[j+1] = cross[j]
-							j--
-						}
-						cross[j+1] = c
-					}
-				} else {
-					cross = r.radixSort(cross, qmax)
+				if q < lo {
+					lo = q
 				}
+				if q > hi {
+					hi = q
+				}
+			}
+			if n := int32(len(cross)); n > binMin && int64(n)*int64(n) > int64(sortSpread)*int64(hi-lo) {
+				// Dense: add each crossing's winding change to its column and
+				// sweep the columns in order. Equal-x crossings only ever
+				// bound zero-width spans, so this paints what sorting does.
+				wd := r.wdelta[:qmax+1]
+				for _, c := range cross {
+					wd[c.x] += int32(c.dir)
+				}
+				r.sweep(wd, lo, hi, evenOdd, subN)
+				continue
+			}
+			for i := 1; i < len(cross); i++ {
+				c := cross[i]
+				j := i - 1
+				for j >= 0 && cross[j].x > c.x {
+					cross[j+1] = cross[j]
+					j--
+				}
+				cross[j+1] = c
 			}
 			w := int32(0)
 			var start int32
@@ -318,31 +399,11 @@ func (r *rasterizer) fill(evenOdd bool, sink spanSink) {
 				if !inBefore && inAfter {
 					start = c.x
 				} else if inBefore && !inAfter {
-					qa, qb := start, c.x
-					if qb <= qa {
-						continue
-					}
-					pa := qa >> r.subShift
-					pb := qb >> r.subShift
-					if pa < minPx {
-						minPx = pa
-					}
-					if pb > maxPx {
-						maxPx = pb
-					}
-					if pa == pb {
-						acc[pa] += qb - qa
-					} else {
-						acc[pa] += subN - (qa & (subN - 1))
-						acc[pb] += qb & (subN - 1)
-						if pb > pa+1 {
-							diff[pa+1] += subN
-							diff[pb] -= subN
-						}
-					}
+					r.span(start, c.x, subN)
 				}
 			}
 		}
+		minPx, maxPx := r.minPx, r.maxPx
 		if maxPx < 0 {
 			continue
 		}

@@ -84,7 +84,7 @@ func facDataJoin(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNod
 	return nil, trFunc(func(n *opNode, p *opParams, pulse *flowPulse) *flowPulse {
 		jm, _ := n.value.(*joinMap)
 		if jm == nil {
-			jm = &joinMap{objs: map[*jsval.Object]*joinEntry{}, vals: map[jsval.Value]*joinEntry{}, strs: map[string]*joinEntry{}}
+			jm = &joinMap{objs: make(map[*jsval.Object]*joinEntry, len(pulse.tuples)), vals: map[jsval.Value]*joinEntry{}, strs: map[string]*joinEntry{}}
 			switch k := p.Get("key").(type) {
 			case transforms.Field:
 				g, v := k.Get, n.g.view
@@ -280,8 +280,10 @@ type boundSet struct {
 	ev  encEval
 }
 
-// run encodes one item, reporting whether any property changed.
-func (b *boundSet) run(it *scene.Item) bool {
+// run encodes one item, reporting whether any property changed. A caller that
+// has no use for the answer (the item is new, or leaving) passes track false
+// and the properties are stored without being compared to their old values.
+func (b *boundSet) run(it *scene.Item, track bool) bool {
 	set := b.set
 	b.ev.ctx, b.ev.item, b.ev.datum = b.ctx, it, it.Datum
 	ev := &b.ev
@@ -297,28 +299,44 @@ func (b *boundSet) run(it *scene.Item) bool {
 				continue
 			}
 		}
-		if setItemProp(it, ch.name, val) {
+		if !track {
+			if err := ch.set(it, val); err != nil {
+				failErr(err)
+			}
+		} else if setItemPropWith(it, ch.name, ch.set, val) {
 			mod = true
 		}
 	}
-	if adjustSpatial(it, set) {
+	if adjustSpatial(it, set, track) {
 		mod = true
 	}
 	return mod
 }
 
+// The setters adjustSpatial writes through.
+var (
+	spatialSetterX      = scene.SetterFor("x")
+	spatialSetterY      = scene.SetterFor("y")
+	spatialSetterWidth  = scene.SetterFor("width")
+	spatialSetterHeight = scene.SetterFor("height")
+)
+
 // adjustSpatial derives x/width, y/height from the x2/xc/y2/yc channels (rule
 // marks keep their x2/y2). It runs after all channels are set, exactly like the
 // generated encoder code.
-func adjustSpatial(it *scene.Item, set *encodeSet) bool {
+func adjustSpatial(it *scene.Item, set *encodeSet, track bool) bool {
 	mt := set.marktype
 	if mt == "rule" {
 		return false
 	}
 	swap := mt == "group" || mt == "image" || mt == "rect"
 	mod := false
-	setNum := func(name string, v float64) {
-		if setItemProp(it, name, jsval.Num(v)) {
+	setNum := func(name string, setter scene.Setter, v float64) {
+		if !track {
+			if err := setter(it, jsval.Num(v)); err != nil {
+				failErr(err)
+			}
+		} else if setItemPropWith(it, name, setter, jsval.Num(v)) {
 			mod = true
 		}
 	}
@@ -330,15 +348,15 @@ func adjustSpatial(it *scene.Item, set *encodeSet) bool {
 				setItemProp(it, "x2", x)
 				mod = true
 			}
-			setNum("width", jsval.ToNumber(getItemProp(it, "x2"))-jsval.ToNumber(getItemProp(it, "x")))
+			setNum("width", spatialSetterWidth, jsval.ToNumber(getItemProp(it, "x2"))-jsval.ToNumber(getItemProp(it, "x")))
 		} else {
 			w := jsToNumOr0(getItemProp(it, "width"))
-			setNum("x", jsval.ToNumber(getItemProp(it, "x2"))-w)
+			setNum("x", spatialSetterX, jsval.ToNumber(getItemProp(it, "x2"))-w)
 		}
 	}
 	if set.xc {
 		w := jsToNumOr0(getItemProp(it, "width"))
-		setNum("x", xcOf(it)-w/2)
+		setNum("x", spatialSetterX, xcOf(it)-w/2)
 	}
 	if set.y2 {
 		if set.y {
@@ -348,15 +366,15 @@ func adjustSpatial(it *scene.Item, set *encodeSet) bool {
 				setItemProp(it, "y2", y)
 				mod = true
 			}
-			setNum("height", jsval.ToNumber(getItemProp(it, "y2"))-jsval.ToNumber(getItemProp(it, "y")))
+			setNum("height", spatialSetterHeight, jsval.ToNumber(getItemProp(it, "y2"))-jsval.ToNumber(getItemProp(it, "y")))
 		} else {
 			h := jsToNumOr0(getItemProp(it, "height"))
-			setNum("y", jsval.ToNumber(getItemProp(it, "y2"))-h)
+			setNum("y", spatialSetterY, jsval.ToNumber(getItemProp(it, "y2"))-h)
 		}
 	}
 	if set.yc {
 		h := jsToNumOr0(getItemProp(it, "height"))
-		setNum("y", ycOf(it)-h/2)
+		setNum("y", spatialSetterY, ycOf(it)-h/2)
 	}
 	return mod
 }
@@ -400,21 +418,21 @@ func facEncode(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode,
 		if len(pulse.add) > 0 {
 			for _, t := range pulse.add {
 				if enter != nil {
-					enter.run(t)
+					enter.run(t, false)
 				}
 				if update != nil {
-					update.run(t)
+					update.run(t, false)
 				}
 			}
 			if set != nil && set != update {
 				for _, t := range pulse.add {
-					set.run(t)
+					set.run(t, false)
 				}
 			}
 		}
 		if len(pulse.rem) > 0 && exit != nil {
 			for _, t := range pulse.rem {
-				exit.run(t)
+				exit.run(t, false)
 			}
 		}
 		if reenter || set != nil {
@@ -425,10 +443,10 @@ func facEncode(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode,
 			if reenter {
 				for _, t := range items {
 					mod := fmod
-					if enter != nil && enter.run(t) {
+					if enter != nil && enter.run(t, true) {
 						mod = true
 					}
-					if set != nil && set.run(t) {
+					if set != nil && set.run(t, true) {
 						mod = true
 					}
 					if mod {
@@ -437,7 +455,7 @@ func facEncode(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode,
 				}
 			} else {
 				for _, t := range items {
-					if set.run(t) || fmod {
+					if set.run(t, true) || fmod {
 						outMod = append(outMod, t)
 					}
 				}
@@ -493,25 +511,12 @@ func facSortItems(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNo
 		}
 		mod := p.Modified("sort") || len(pulse.add) > 0 || len(pulse.mod) > 0 || len(pulse.rem) > 0
 		if mod && cmp != nil {
-			// The comparator's fields are paths into the item (datum.x, x, ...).
 			v := n.g.view
-			views := make(map[*scene.Item]jsval.Value, len(pulse.items))
-			for _, it := range pulse.items {
-				views[it] = v.itemTuple(it)
+			if cs := p.compareSpec("sort"); cs != nil && cs.roots != nil {
+				v.sortItemsByKeys(pulse.items, cs)
+			} else {
+				v.sortItemsByViews(pulse.items, cmp)
 			}
-			// stableCompare: ties go by tuple id, the order the items were created.
-			jssort.Sort(pulse.items, func(a, b *scene.Item) int {
-				if c := cmp(views[a], views[b]); c != 0 {
-					return c
-				}
-				switch {
-				case a.Seq < b.Seq:
-					return -1
-				case a.Seq > b.Seq:
-					return 1
-				}
-				return 0
-			})
 		}
 		n.modified = mod
 		return pulse
@@ -681,4 +686,130 @@ func (v *runView) derivedTuples(jm *joinMap, pulse *flowPulse) []jsval.Value {
 		}
 	}
 	return out
+}
+
+// sortItemsByViews sorts items with cmp over their tuple views. The views only
+// serve the comparator: the ones this sort made are dropped, or every sorted
+// item would keep a copy of its properties for the rest of the render.
+func (v *runView) sortItemsByViews(items []*scene.Item, cmp transforms.Comparator) {
+	views := make(map[*scene.Item]jsval.Value, len(items))
+	var temp []*scene.Item
+	for _, it := range items {
+		if v.itemTupleCache[it] == nil {
+			temp = append(temp, it)
+		}
+		views[it] = v.itemTuple(it)
+	}
+	defer func() {
+		for _, it := range temp {
+			delete(v.viewItem, v.itemTupleCache[it])
+			delete(v.itemTupleCache, it)
+		}
+	}()
+	// stableCompare: ties go by tuple id, the order the items were created.
+	jssort.Sort(items, func(a, b *scene.Item) int {
+		if c := cmp(views[a], views[b]); c != 0 {
+			return c
+		}
+		return cmpSeq(a, b)
+	})
+}
+
+func cmpSeq(a, b *scene.Item) int {
+	switch {
+	case a.Seq < b.Seq:
+		return -1
+	case a.Seq > b.Seq:
+		return 1
+	}
+	return 0
+}
+
+// sortRec is an item with the offset of its sort keys.
+type sortRec struct {
+	it  *scene.Item
+	off int
+}
+
+// itemSortKeys reads the sort keys of an item into keys, without a view of the
+// item, and reports whether it could: every path must start at the datum, at
+// the bounds or at a property the item holds.
+func itemSortKeys(it *scene.Item, cs *compareSpec, keys []jsval.Value) bool {
+	for j, root := range cs.roots {
+		var rv jsval.Value
+		switch root {
+		case "datum":
+			rv = it.Datum
+		case "bounds":
+			b := it.Bounds
+			rv = obj("x1", jsval.Num(b.X1), "y1", jsval.Num(b.Y1), "x2", jsval.Num(b.X2), "y2", jsval.Num(b.Y2))
+		default:
+			if rv = it.Get(root); rv.IsUndefined() {
+				return false
+			}
+		}
+		keys[j] = cs.rest[j](rv)
+	}
+	return true
+}
+
+// sortItemsByKeys is sortItemsByViews for a comparator over plain field paths:
+// the keys are read once per item, from a view holding only the properties the
+// paths start with, and the sort compares the keys. The result is the same
+// order, without a tuple view (and its copy of every property) per item.
+func (v *runView) sortItemsByKeys(items []*scene.Item, cs *compareSpec) {
+	nf := len(cs.keys)
+	keys := make([]jsval.Value, len(items)*nf)
+	recs := make([]sortRec, len(items))
+	var scratch *jsval.Object // a partial view of an item, for the paths it cannot answer
+	for i, it := range items {
+		if v.itemTupleCache[it] != nil {
+			// A view that exists is refreshed, as a sort over views does.
+			v.itemTuple(it)
+		}
+		recs[i] = sortRec{it, i * nf}
+		if itemSortKeys(it, cs, keys[i*nf:(i+1)*nf]) {
+			continue
+		}
+		// A root the item does not hold may still be a property every object
+		// has (toString): the path is read off a view that holds the roots.
+		if scratch == nil {
+			scratch = jsval.NewObject(nf + 1)
+		}
+		for _, root := range cs.roots {
+			if root == "datum" || root == "bounds" {
+				continue
+			}
+			if val := it.Get(root); !val.IsUndefined() {
+				scratch.Set(root, val)
+			} else {
+				scratch.Delete(root)
+			}
+		}
+		scratch.Set("datum", it.Datum)
+		b := it.Bounds
+		scratch.Set("bounds", obj("x1", jsval.Num(b.X1), "y1", jsval.Num(b.Y1), "x2", jsval.Num(b.X2), "y2", jsval.Num(b.Y2)))
+		view := jsval.Obj(scratch)
+		for j, k := range cs.keys {
+			keys[i*nf+j] = k.Get(view)
+		}
+	}
+	order := make([]int, nf)
+	for j, o := range cs.orders {
+		order[j] = 1
+		if o == transforms.Desc {
+			order[j] = -1
+		}
+	}
+	jssort.Sort(recs, func(a, b sortRec) int {
+		for j := 0; j < nf; j++ {
+			if c := transforms.Ascending(keys[a.off+j], keys[b.off+j]); c != 0 {
+				return c * order[j]
+			}
+		}
+		return cmpSeq(a.it, b.it)
+	})
+	for i, r := range recs {
+		items[i] = r.it
+	}
 }

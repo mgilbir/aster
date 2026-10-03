@@ -1,15 +1,18 @@
 package svgpdf
 
 import (
+	"bytes"
 	"fmt"
+	"math"
+	"math/bits"
 	"strconv"
-	"strings"
 )
 
 // contentWriter builds a PDF content stream (plain-text graphics operators)
 // and tracks the ExtGState resources the stream references.
 type contentWriter struct {
-	buf strings.Builder
+	buf    []byte
+	chunks [][]byte // full chunks before buf; see spill
 
 	// ExtGState registry: opacity values are applied through /GSn gs.
 	// gsNames preserves first-use order so output is deterministic.
@@ -77,24 +80,104 @@ func newContentWriter() *contentWriter {
 // fmtNum formats a coordinate for a content stream: fixed notation (PDF has
 // no exponent syntax), at most 4 decimals, trailing zeros trimmed.
 func fmtNum(v float64) string {
-	s := strconv.FormatFloat(v, 'f', 4, 64)
-	if strings.Contains(s, ".") {
-		s = strings.TrimRight(s, "0")
-		s = strings.TrimSuffix(s, ".")
+	var a [32]byte
+	return string(appendNum(a[:0], v))
+}
+
+// appendNum appends fmtNum(v) to dst without allocating. Magnitudes below
+// 1e14 are rounded in integer arithmetic; strconv's 'f' format with a fixed
+// precision goes through its slowest, arbitrary-precision path.
+func appendNum(dst []byte, v float64) []byte {
+	q, neg, ok := scaleFixed4(v)
+	if !ok {
+		return appendNumSlow(dst, v)
 	}
-	if s == "-0" {
-		s = "0"
+	if q == 0 {
+		return append(dst, '0') // also what "-0.0000" becomes
 	}
-	return s
+	if neg {
+		dst = append(dst, '-')
+	}
+	dst = strconv.AppendUint(dst, q/10000, 10)
+	if f := q % 10000; f != 0 {
+		d := [5]byte{'.', byte('0' + f/1000), byte('0' + f/100%10), byte('0' + f/10%10), byte('0' + f%10)}
+		n := 5
+		for d[n-1] == '0' {
+			n--
+		}
+		dst = append(dst, d[:n]...)
+	}
+	return dst
+}
+
+// scaleFixed4 returns |v| * 10^4 rounded to the nearest integer, ties to
+// even, computed on the exact binary value of v, which is how strconv rounds
+// 'f' output. ok is false for NaN, infinities and magnitudes of 1e14 and up.
+func scaleFixed4(v float64) (q uint64, neg, ok bool) {
+	b := math.Float64bits(v)
+	neg = b>>63 != 0
+	exp := int(b >> 52 & 0x7ff)
+	if exp == 0x7ff || math.Abs(v) >= 1e14 {
+		return 0, false, false
+	}
+	m := b & (1<<52 - 1)
+	e := -1074
+	if exp != 0 {
+		m |= 1 << 52
+		e = exp - 1075
+	}
+	// |v| < 2^47, so e < 0 here (m < 2^53 has e <= 46-52).
+	hi, lo := bits.Mul64(m, 10000) // the exact product, below 2^67
+	s := uint(-e)
+	var up, tie bool
+	switch {
+	case s < 64:
+		q = hi<<(64-s) | lo>>s
+		r, half := lo&(1<<s-1), uint64(1)<<(s-1)
+		up, tie = r > half, r == half
+	case s == 64:
+		q = hi
+		up, tie = lo > 1<<63, lo == 1<<63
+	case s < 128:
+		q = hi >> (s - 64)
+		rh, half := hi&(1<<(s-64)-1), uint64(1)<<(s-65)
+		up, tie = rh > half || rh == half && lo > 0, rh == half && lo == 0
+	default:
+		// The product is below 2^67, under half of 2^s: rounds to zero.
+	}
+	if up || tie && q&1 == 1 {
+		q++
+	}
+	return q, neg, true
+}
+
+// appendNumSlow is appendNum on strconv alone: the definition of the format.
+func appendNumSlow(dst []byte, v float64) []byte {
+	start := len(dst)
+	dst = strconv.AppendFloat(dst, v, 'f', 4, 64)
+	n := dst[start:]
+	if bytes.IndexByte(n, '.') >= 0 {
+		for len(n) > 0 && n[len(n)-1] == '0' {
+			n = n[:len(n)-1]
+		}
+		if len(n) > 0 && n[len(n)-1] == '.' {
+			n = n[:len(n)-1]
+		}
+		dst = dst[:start+len(n)]
+	}
+	if string(dst[start:]) == "-0" {
+		dst = append(dst[:start], '0')
+	}
+	return dst
 }
 
 func (w *contentWriter) op(operator string, args ...float64) {
 	for _, a := range args {
-		w.buf.WriteString(fmtNum(a))
-		w.buf.WriteByte(' ')
+		w.buf = appendNum(w.buf, a)
+		w.buf = append(w.buf, ' ')
 	}
-	w.buf.WriteString(operator)
-	w.buf.WriteByte('\n')
+	w.buf = append(w.buf, operator...)
+	w.buf = append(w.buf, '\n')
 }
 
 func (w *contentWriter) save() {
@@ -161,16 +244,16 @@ func (w *contentWriter) setDash(pattern []float64, phase float64) {
 	if equalDash(w.cur.dash, pattern) && w.cur.dashOffset == phase {
 		return
 	}
-	w.buf.WriteByte('[')
+	w.buf = append(w.buf, '[')
 	for i, d := range pattern {
 		if i > 0 {
-			w.buf.WriteByte(' ')
+			w.buf = append(w.buf, ' ')
 		}
-		w.buf.WriteString(fmtNum(d))
+		w.buf = appendNum(w.buf, d)
 	}
-	w.buf.WriteString("] ")
-	w.buf.WriteString(fmtNum(phase))
-	w.buf.WriteString(" d\n")
+	w.buf = append(w.buf, "] "...)
+	w.buf = appendNum(w.buf, phase)
+	w.buf = append(w.buf, " d\n"...)
 	w.cur.dash = append([]float64(nil), pattern...)
 	w.cur.dashOffset = phase
 }
@@ -210,9 +293,9 @@ func (w *contentWriter) opacity(fillAlpha, strokeAlpha float64) {
 		w.gsIndex[key] = name
 		w.gsNames = append(w.gsNames, gsEntry{name: name, alpha: key})
 	}
-	w.buf.WriteByte('/')
-	w.buf.WriteString(name)
-	w.buf.WriteString(" gs\n")
+	w.buf = append(w.buf, '/')
+	w.buf = append(w.buf, name...)
+	w.buf = append(w.buf, " gs\n"...)
 }
 
 // --- text object operators ---
@@ -221,11 +304,11 @@ func (w *contentWriter) beginText() { w.op("BT") }
 func (w *contentWriter) endText()   { w.op("ET") }
 
 func (w *contentWriter) setTextFont(res string, size float64) {
-	w.buf.WriteByte('/')
-	w.buf.WriteString(res)
-	w.buf.WriteByte(' ')
-	w.buf.WriteString(fmtNum(size))
-	w.buf.WriteString(" Tf\n")
+	w.buf = append(w.buf, '/')
+	w.buf = append(w.buf, res...)
+	w.buf = append(w.buf, ' ')
+	w.buf = appendNum(w.buf, size)
+	w.buf = append(w.buf, " Tf\n"...)
 }
 
 func (w *contentWriter) textMatrix(m Matrix) {
@@ -244,19 +327,20 @@ type tjItem struct {
 
 // showGlyphs emits one TJ array.
 func (w *contentWriter) showGlyphs(items []tjItem) {
-	w.buf.WriteByte('[')
+	const hex = "0123456789ABCDEF"
+	w.buf = append(w.buf, '[')
 	for _, it := range items {
 		if it.isAdj {
-			w.buf.WriteString(fmtNum(it.adj))
+			w.buf = appendNum(w.buf, it.adj)
 			continue
 		}
-		w.buf.WriteByte('<')
+		w.buf = append(w.buf, '<')
 		for _, g := range it.glyphs {
-			fmt.Fprintf(&w.buf, "%04X", g)
+			w.buf = append(w.buf, hex[g>>12], hex[g>>8&15], hex[g>>4&15], hex[g&15])
 		}
-		w.buf.WriteByte('>')
+		w.buf = append(w.buf, '>')
 	}
-	w.buf.WriteString("] TJ\n")
+	w.buf = append(w.buf, "] TJ\n"...)
 }
 
 func (w *contentWriter) moveTo(p Point) { w.op("m", p.X, p.Y) }
@@ -273,6 +357,7 @@ func (w *contentWriter) cubicTo(c1, c2, end Point) {
 // pathSegs emits normalized path segments as PDF path construction operators.
 func (w *contentWriter) pathSegs(segs []PathSeg) {
 	for _, s := range segs {
+		w.spill()
 		switch s.Op {
 		case OpMoveTo:
 			w.moveTo(s.P3)
@@ -316,6 +401,25 @@ func (w *contentWriter) clip() {
 	w.op("n")
 }
 
-func (w *contentWriter) bytes() []byte {
-	return []byte(w.buf.String())
+// Chunk sizes of the content stream. A chart of 100k marks writes tens of
+// megabytes; growing one slice by append copies it about five times over, while
+// a list of chunks is written once and compressed in sequence.
+const (
+	contentSpill = 512 << 10 // spill once buf holds this much
+	contentChunk = contentSpill + contentSpill/8
+)
+
+// spill moves buf to the chunk list once it is large, so that the next
+// operators go to a fresh buffer instead of regrowing this one. Callers invoke
+// it between operators; a chunk boundary never changes the stream.
+func (w *contentWriter) spill() {
+	if len(w.buf) >= contentSpill {
+		w.chunks = append(w.chunks, w.buf)
+		w.buf = make([]byte, 0, contentChunk)
+	}
+}
+
+// stream returns the content stream as consecutive chunks.
+func (w *contentWriter) stream() [][]byte {
+	return append(w.chunks, w.buf)
 }

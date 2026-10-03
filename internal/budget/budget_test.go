@@ -70,6 +70,28 @@ func TestLoadAndPoints(t *testing.T) {
 	}
 }
 
+func TestRowExcessCountsInRows(t *testing.T) {
+	b := &Budget{MaxRows: 10, RowBytes: 100}
+	if err := b.AddRows(4); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.AddRowExcess(550); err != nil { // five rows' worth more
+		t.Fatalf("9 rows' worth fit: %v", err)
+	}
+	if b.RowsLeft() != 1 || !errors.Is(b.Reserve(2), ErrLimit) {
+		t.Fatalf("excess must take from what is left: %d", b.RowsLeft())
+	}
+	if !errors.Is(b.AddRowExcess(200), ErrLimit) {
+		t.Fatal("excess past the limit must fail")
+	}
+	if b.AddRowExcess(-10_000) != nil || b.RowsLeft() != 6 {
+		t.Fatal("dropped rows give their excess back, down to zero")
+	}
+	if err := (&Budget{MaxRows: 1}).AddRowExcess(1 << 40); err != nil {
+		t.Fatalf("without RowBytes only rows are counted: %v", err)
+	}
+}
+
 func TestTickerPollsContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	tk := NewTicker(ctx)

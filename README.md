@@ -339,7 +339,7 @@ Other parts of the harness:
 - **The comparator is tested too.** `internal/svgdiff` is mutation-tested: 336 kinds of change over 718 documents must each be reported, and the equivalences it tolerates are listed.
 - **Untrusted input.** `TestDeepInput` drives 69 deeply nested shapes (JSON, expressions, specs, SVG for PNG) to depths up to 100,000 in child processes with a capped stack, each within a time limit; `go run ./internal/cmd/recursionaudit` finds every recursion in the call graph and checks each against `scripts/recursion.allow`, which says how it is bounded. Resource limits (elements, render work, pixels, time) have their own tests.
 - **Floating point.** `scripts/fmacheck.sh` rejects fused multiply-adds the Go compiler could introduce on arm64 where V8 does not have them.
-- **Performance.** `BenchmarkScenes` times representative charts; `ASTER_PERF=1 go test -run TestPerfReport .` breaks a render down by stage (parse, compile, dataflow, text, SVG, PNG, PDF).
+- **Performance.** `BenchmarkScenes` times representative charts; `ASTER_PERF=1 go test -run TestPerfReport .` breaks a render down by stage (parse, compile, dataflow, text, SVG, PNG, PDF). CI gates pull requests on it: `scripts/benchgate.sh` (`make benchgate`) benchmarks the base and the head alternately on one machine and fails on a significant increase in allocations (over 2%), bytes (5%) or time (15%) in a fixed set of benchmarks; a PR label `perf-regression-ok` allows an intended trade-off.
 
 `scripts/check.sh` (or `make check`) runs the gates CI runs.
 

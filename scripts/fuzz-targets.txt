@@ -15,6 +15,7 @@
 ./internal/scene	FuzzFromJSON	10
 ./internal/svg	FuzzRender	10
 ./internal/svgpdf	FuzzConvert	10
+./internal/svgpdf	FuzzParseSVGFast	10
 ./internal/raster	FuzzRender	10
 ./internal/raster	FuzzParseDocument	10
 ./internal/raster	FuzzPathData	5

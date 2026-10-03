@@ -63,6 +63,10 @@ type Limits struct {
 	// MaxSubflows is the number of facet cells (group marks over faceted data),
 	// each of which instantiates its own operators.
 	MaxSubflows int
+	// MaxOperators is the number of dataflow operators a specification may
+	// instantiate: its signals, data, marks, axes and legends, and the
+	// subflows of its facet cells.
+	MaxOperators int
 	// MaxLoadBytes is the total size of the data the Loader may return.
 	MaxLoadBytes int64
 	// MaxPoints is the number of path points geographic marks may generate.
@@ -70,9 +74,17 @@ type Limits struct {
 	// MaxCanvasBytes is the total pixel memory of the bitmaps transforms
 	// paint (the heatmap's images).
 	MaxCanvasBytes int64
-	// MaxStringBytes is the total size of the large strings (over 4 KiB)
+	// MaxStringBytes is the total size of the large strings (over 512 bytes)
 	// expressions may build.
 	MaxStringBytes int64
+	// MaxParseBytes bounds the memory one JSON document may take once parsed
+	// (data files, inline values given as text, topojson), estimated while it
+	// is built.
+	MaxParseBytes int64
+	// RowBytes is the memory one counted row stands for. When set, rows that
+	// weigh more (many fields, long strings) are charged for the difference,
+	// so MaxRows * RowBytes bounds the data; 0 counts rows only.
+	RowBytes int64
 }
 
 func (l Limits) withDefaults() Limits {
@@ -91,6 +103,9 @@ func (l Limits) withDefaults() Limits {
 	if l.MaxSubflows == 0 {
 		l.MaxSubflows = 20_000
 	}
+	if l.MaxOperators == 0 {
+		l.MaxOperators = 500_000
+	}
 	if l.MaxLoadBytes == 0 {
 		l.MaxLoadBytes = 64 << 20
 	}
@@ -102,6 +117,9 @@ func (l Limits) withDefaults() Limits {
 	}
 	if l.MaxStringBytes == 0 {
 		l.MaxStringBytes = 128 << 20
+	}
+	if l.MaxParseBytes == 0 {
+		l.MaxParseBytes = 1 << 30
 	}
 	return l
 }
@@ -258,7 +276,7 @@ func Render(ctx context.Context, spec jsval.Value, opts Options) (res *Result, e
 		}
 	}
 	config := mergeConfig(defaultConfig(), opts.Config, spec.Get("config"))
-	scope := newScope(config, &parseOptions{})
+	scope := newScope(config, &parseOptions{maxOps: opts.Limits.withDefaults().MaxOperators})
 	parseView(spec, scope)
 	flow := scope.toRuntime()
 
@@ -303,7 +321,7 @@ func newView(ctx context.Context, opts Options, locale jsval.Value) *runView {
 	limits := opts.Limits.withDefaults()
 	// The render's budget travels in the context, so transforms and geo code
 	// charge it (before allocating) without any plumbing.
-	bud := &budget.Budget{MaxRows: limits.MaxRows, MaxLoadBytes: limits.MaxLoadBytes, MaxPoints: limits.MaxPoints, MaxCanvasBytes: limits.MaxCanvasBytes}
+	bud := &budget.Budget{MaxRows: limits.MaxRows, MaxLoadBytes: limits.MaxLoadBytes, MaxPoints: limits.MaxPoints, MaxCanvasBytes: limits.MaxCanvasBytes, RowBytes: limits.RowBytes}
 	ctx = budget.With(ctx, bud)
 	v := &runView{
 		bud: bud, strs: expr.NewStringBudget(limits.MaxStringBytes),
@@ -346,6 +364,7 @@ func newView(ctx context.Context, opts Options, locale jsval.Value) *runView {
 	v.g = newGraph(ctx)
 	v.g.view = v
 	v.g.maxVisits = limits.MaxVisits
+	v.g.maxOps = limits.MaxOperators
 	return v
 }
 

@@ -20,7 +20,7 @@ import (
 // The output is deterministic: fixed object numbering (fonts follow the
 // four skeleton objects in first-use order), insertion-ordered dictionaries,
 // no timestamps, no /Info and no /ID.
-func buildPDF(content []byte, gsList []gsEntry, fonts *fontCatalog, width, height float64) ([]byte, error) {
+func buildPDF(content [][]byte, gsList []gsEntry, fonts *fontCatalog, width, height float64) ([]byte, error) {
 	// Object 1: Catalog
 	catalog := &pdf0.Dictionary{}
 	catalog.Set("Type", pdf0.Name("Catalog"))
@@ -76,8 +76,10 @@ func buildPDF(content []byte, gsList []gsEntry, fonts *fontCatalog, width, heigh
 	// deterministic for a given input and compression level.
 	var compressed bytes.Buffer
 	zw := zlib.NewWriter(&compressed)
-	if _, err := zw.Write(content); err != nil {
-		return nil, fmt.Errorf("svgpdf: compressing content stream: %w", err)
+	for _, chunk := range content {
+		if _, err := zw.Write(chunk); err != nil {
+			return nil, fmt.Errorf("svgpdf: compressing content stream: %w", err)
+		}
 	}
 	if err := zw.Close(); err != nil {
 		return nil, fmt.Errorf("svgpdf: compressing content stream: %w", err)

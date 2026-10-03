@@ -416,6 +416,8 @@ type Scope struct {
 
 type parseOptions struct {
 	maxDepth int
+	// maxOps bounds the operators the parse produces, counted in ops.
+	maxOps, ops int
 }
 
 func newScope(config jsval.Value, opts *parseOptions) *Scope {
@@ -484,6 +486,11 @@ func (s *Scope) finish() {
 }
 
 func (s *Scope) add(e *entry) *entry {
+	if o := s.opts; o.maxOps > 0 {
+		if o.ops++; o.ops > o.maxOps {
+			failLimit("more than %d dataflow operators", o.maxOps)
+		}
+	}
 	s.operators = append(s.operators, e)
 	return e
 }
