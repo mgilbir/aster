@@ -93,20 +93,33 @@ echo "benchgate: head $(git log -1 --format='%h %s' "$head")"
 
 # Build both sides before running either; a package missing from the base (a
 # new one) or without the benchmark is left out, there is nothing to compare.
+# -trimpath keeps the checkout directories out of the binaries, so that a
+# package the change does not reach builds the same bytes on both sides; such
+# a package is left out too, as two runs of one program can only differ by
+# noise (a shared runner once showed one 23% apart, p < 0.001).
 entries=$work/entries
 : >"$entries"
 n=0
 benchmarks | while read -r pkg regex; do
 	n=$((n + 1))
 	for side in base head; do
-		(cd "$work/$side" && [ -d "$pkg" ] && go test -c -o "$work/$side.$n.test" "./$pkg" 2>/dev/null) || continue
+		(cd "$work/$side" && [ -d "$pkg" ] && go test -c -trimpath -o "$work/$side.$n.test" "./$pkg" 2>/dev/null) || continue
 	done
-	if [ -x "$work/base.$n.test" ] && [ -x "$work/head.$n.test" ]; then
-		printf '%s %s %s\n' "$n" "$pkg" "$regex" >>"$entries"
-	else
+	if ! [ -x "$work/base.$n.test" ] || ! [ -x "$work/head.$n.test" ]; then
 		echo "benchgate: skipping $pkg ($regex): no test binary on both sides"
+	elif cmp -s "$work/base.$n.test" "$work/head.$n.test"; then
+		echo "benchgate: skipping $pkg ($regex): unchanged by the change"
+	else
+		printf '%s %s %s\n' "$n" "$pkg" "$regex" >>"$entries"
 	fi
 done
+
+if ! [ -s "$entries" ]; then
+	verdict="benchgate: no regression (the change reaches none of the benchmarked packages)"
+	echo "$verdict"
+	[ -z "${GITHUB_STEP_SUMMARY:-}" ] || printf '### Benchmarks\n\n%s\n' "$verdict" >>"$GITHUB_STEP_SUMMARY"
+	exit 0
+fi
 
 run() { # run side n pkg regex
 	(cd "$work/$1/$3" && "$work/$1.$2.test" -test.run '^$' -test.bench "$4" -test.benchmem \
