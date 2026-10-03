@@ -151,7 +151,7 @@ func (r *renderer) parsePath(d string) ([]PathSeg, error) {
 // render translates the parsed SVG root into a content stream plus page
 // dimensions in points (1 SVG px = 1 pt), along with the font catalog of the
 // text drawn (nil in TextOutlines mode).
-func render(root *element, shaper TextShaper, opts Options) (content []byte, gsList []gsEntry, fonts *fontCatalog, width, height float64, err error) {
+func render(root *element, shaper TextShaper, opts Options) (content [][]byte, gsList []gsEntry, fonts *fontCatalog, width, height float64, err error) {
 	if err := checkAttrs(root); err != nil {
 		return nil, nil, nil, 0, 0, err
 	}
@@ -197,7 +197,7 @@ func render(root *element, shaper TextShaper, opts Options) (content []byte, gsL
 	if err := r.children(root, rootState()); err != nil {
 		return nil, nil, nil, 0, 0, err
 	}
-	return r.w.bytes(), r.w.gsNames, r.fonts, width, height, nil
+	return r.w.stream(), r.w.gsNames, r.fonts, width, height, nil
 }
 
 func viewBoxMatrix(vb string, width, height float64) (Matrix, error) {
@@ -223,6 +223,7 @@ func (r *renderer) children(e *element, st gstate) error {
 }
 
 func (r *renderer) element(e *element, st gstate) error {
+	defer r.w.spill()
 	if r.visited++; r.visited&63 == 0 {
 		if err := ctxErr(r.ctx); err != nil {
 			return err

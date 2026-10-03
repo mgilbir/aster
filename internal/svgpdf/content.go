@@ -11,7 +11,8 @@ import (
 // contentWriter builds a PDF content stream (plain-text graphics operators)
 // and tracks the ExtGState resources the stream references.
 type contentWriter struct {
-	buf []byte
+	buf    []byte
+	chunks [][]byte // full chunks before buf; see spill
 
 	// ExtGState registry: opacity values are applied through /GSn gs.
 	// gsNames preserves first-use order so output is deterministic.
@@ -356,6 +357,7 @@ func (w *contentWriter) cubicTo(c1, c2, end Point) {
 // pathSegs emits normalized path segments as PDF path construction operators.
 func (w *contentWriter) pathSegs(segs []PathSeg) {
 	for _, s := range segs {
+		w.spill()
 		switch s.Op {
 		case OpMoveTo:
 			w.moveTo(s.P3)
@@ -399,6 +401,25 @@ func (w *contentWriter) clip() {
 	w.op("n")
 }
 
-func (w *contentWriter) bytes() []byte {
-	return w.buf
+// Chunk sizes of the content stream. A chart of 100k marks writes tens of
+// megabytes; growing one slice by append copies it about five times over, while
+// a list of chunks is written once and compressed in sequence.
+const (
+	contentSpill = 512 << 10 // spill once buf holds this much
+	contentChunk = contentSpill + contentSpill/8
+)
+
+// spill moves buf to the chunk list once it is large, so that the next
+// operators go to a fresh buffer instead of regrowing this one. Callers invoke
+// it between operators; a chunk boundary never changes the stream.
+func (w *contentWriter) spill() {
+	if len(w.buf) >= contentSpill {
+		w.chunks = append(w.chunks, w.buf)
+		w.buf = make([]byte, 0, contentChunk)
+	}
+}
+
+// stream returns the content stream as consecutive chunks.
+func (w *contentWriter) stream() [][]byte {
+	return append(w.chunks, w.buf)
 }

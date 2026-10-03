@@ -47,6 +47,11 @@ func parsePathDataMax(d string, maxSegs int) ([]PathSeg, error) {
 // parsePathDataInto is parsePathDataMax appending to buf[:0], so a caller that
 // consumes the segments before the next path can reuse one buffer.
 func parsePathDataInto(buf []PathSeg, d string, maxSegs int) ([]PathSeg, error) {
+	// A long path has roughly one segment per 8 bytes of data; sizing the buffer
+	// for that spares a 100k-point line the repeated growth and copying.
+	if want := min(len(d)/8, max(maxSegs, 0)); want > cap(buf) && len(d) >= 4096 {
+		buf = make([]PathSeg, 0, want)
+	}
 	p := pathParser{data: d, max: maxSegs, segs: buf[:0]}
 	return p.parse()
 }
