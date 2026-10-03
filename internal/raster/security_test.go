@@ -18,6 +18,7 @@ const secHead = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200
 
 func mustFinish(t *testing.T, name, svg string, lim Limits, max time.Duration) error {
 	t.Helper()
+	max *= raceSlowdown
 	start := time.Now()
 	_, err := Render([]byte(svg), Options{Limits: lim})
 	if d := time.Since(start); d > max {
