@@ -2,8 +2,86 @@ package svgpdf
 
 import (
 	"math"
+	"math/rand"
+	"strings"
 	"testing"
 )
+
+// TestParseTransformFastMatchesRegexp checks that the scanner, where it
+// accepts, builds the very matrix (bit for bit) the regular expression does,
+// and that it declines what the regular expression is left to parse.
+func TestParseTransformFastMatchesRegexp(t *testing.T) {
+	check := func(s string) bool {
+		t.Helper()
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return false
+		}
+		want, wantErr := parseTransformRegexp(s)
+		got, ok := parseTransformFast(s)
+		if !ok {
+			return false
+		}
+		if wantErr != nil {
+			t.Fatalf("scanner accepted %q, which the regexp rejects: %v", s, wantErr)
+		}
+		for i, p := range [][2]float64{{got.A, want.A}, {got.B, want.B}, {got.C, want.C}, {got.D, want.D}, {got.E, want.E}, {got.F, want.F}} {
+			if math.Float64bits(p[0]) != math.Float64bits(p[1]) {
+				t.Fatalf("%q: element %d: scanner %+v, regexp %+v", s, i, got, want)
+			}
+		}
+		return true
+	}
+	for _, s := range []string{
+		"translate(124,22)", "translate(5)", "rotate(-90)", "rotate(90, 10, 10)", "scale(2)", "scale(2 3)",
+		"matrix(1,0,0,1,5.5,-3e2)", "skewX(30)", "skewY(-12.5)", "translate(1,2) rotate(30) scale(.5)",
+		"  translate (1 , 2)\n,rotate( 45 )  ", "translate(1e-3,+4)", "translate(0x1p-2)",
+	} {
+		if !check(s) {
+			t.Errorf("scanner declined %q", s)
+		}
+	}
+	for _, s := range []string{
+		"translate()", "translate(1,2,3)", "rotate(1,2)", "scale()", "matrix(1,2,3)", "skewX()", "foo(1)", "translate(1", "translate 1,2",
+		"x translate(1,2)", "translate(1,2) x", "translate(a)", "translate(1;2)", "(1)", "translate(1)(2)", "matrix(1,2,3,4,5,6,7)",
+		"translate(1,\f2)", "translate\v(1)", "scale(1) , , rotate(2)x",
+	} {
+		if check(s) {
+			t.Errorf("scanner accepted %q", s)
+		}
+	}
+	rng := rand.New(rand.NewSource(3))
+	funcs := []string{"translate", "rotate", "scale", "matrix", "skewX", "skewY"}
+	alphabet := "0123456789.-+e ,()\t\nxT"
+	for range 200000 {
+		var b strings.Builder
+		for range 1 + rng.Intn(3) {
+			b.WriteString(funcs[rng.Intn(len(funcs))])
+			b.WriteByte("( \t"[rng.Intn(3)])
+			for range rng.Intn(14) {
+				b.WriteByte(alphabet[rng.Intn(len(alphabet))])
+			}
+			b.WriteString(")  "[:1+rng.Intn(3)])
+		}
+		check(b.String())
+	}
+}
+
+func BenchmarkParseTransform(b *testing.B) {
+	for _, f := range []struct {
+		name string
+		fn   func(string) (Matrix, error)
+	}{{"regexp", parseTransformRegexp}, {"scan", parseTransform}} {
+		b.Run(f.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				if _, err := f.fn("translate(123.4567,89.0123)"); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
 
 func matricesEqual(a, b Matrix) bool {
 	return almostEqual(a.A, b.A) && almostEqual(a.B, b.B) &&

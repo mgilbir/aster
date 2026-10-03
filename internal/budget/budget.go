@@ -27,8 +27,14 @@ type Budget struct {
 	// MaxCanvasBytes bounds the pixel memory of the bitmaps transforms paint
 	// (the heatmap's canvases), in total across the render.
 	MaxCanvasBytes int64
+	// RowBytes is the memory one counted row stands for (0: rows are only
+	// counted). With it set, AddRowExcess charges the bytes by which rows
+	// outweigh that, so that MaxRows bounds their memory (MaxRows * RowBytes)
+	// and not just their number.
+	RowBytes int64
 
 	rows   int64
+	excess int64
 	loaded int64
 	points int64
 	canvas int64
@@ -73,10 +79,20 @@ func (b *Budget) Reserve(n int64) error {
 	if b == nil || b.MaxRows <= 0 || n <= 0 {
 		return nil
 	}
-	if n > int64(b.MaxRows) || b.rows+n > int64(b.MaxRows) {
-		return over("data rows", b.rows+min(n, math.MaxInt64-b.rows), int64(b.MaxRows))
+	if n > int64(b.MaxRows) || b.used()+n > int64(b.MaxRows) {
+		return over("data rows", b.used()+min(n, math.MaxInt64-b.used()), int64(b.MaxRows))
 	}
 	return nil
+}
+
+// ReserveWeight is Reserve for a transform that grows the weight of the rows
+// as well as their number: it checks that rows more rows and excess more bytes
+// of row excess (see AddRowExcess) fit, without recording them.
+func (b *Budget) ReserveWeight(rows, excess int64) error {
+	if b == nil || b.RowBytes <= 0 {
+		return b.Reserve(rows)
+	}
+	return b.Reserve(rows + excess/b.RowBytes)
 }
 
 // AddRows records n more rows (negative when rows were dropped) and fails when
@@ -86,10 +102,34 @@ func (b *Budget) AddRows(n int) error {
 		return nil
 	}
 	b.rows += int64(n)
-	if b.MaxRows > 0 && b.rows > int64(b.MaxRows) {
-		return over("data rows", b.rows, int64(b.MaxRows))
+	return b.checkRows()
+}
+
+// AddRowExcess records n more bytes (negative when rows were dropped or
+// shrank) by which the rows weigh more than the RowBytes each is counted for,
+// and fails when the rows and their excess exceed MaxRows.
+func (b *Budget) AddRowExcess(n int64) error {
+	if b == nil || b.RowBytes <= 0 {
+		return nil
+	}
+	b.excess = max(b.excess+n, 0)
+	return b.checkRows()
+}
+
+func (b *Budget) checkRows() error {
+	if b.MaxRows > 0 && b.used() > int64(b.MaxRows) {
+		return over("data rows", b.used(), int64(b.MaxRows))
 	}
 	return nil
+}
+
+// used is the rows recorded, the excess weight of the heavy ones counted in
+// rows.
+func (b *Budget) used() int64 {
+	if b.RowBytes <= 0 {
+		return b.rows
+	}
+	return b.rows + b.excess/b.RowBytes
 }
 
 // Rows is the number of rows recorded so far.
@@ -125,7 +165,7 @@ func (b *Budget) RowsLeft() int64 {
 	if b == nil || b.MaxRows <= 0 {
 		return math.MaxInt64
 	}
-	return max(int64(b.MaxRows)-b.rows, 0)
+	return max(int64(b.MaxRows)-b.used(), 0)
 }
 
 // Points records n path points and fails past MaxPoints.
@@ -164,6 +204,11 @@ func Reserve(ctx context.Context, n int64) error { return From(ctx).Reserve(n) }
 // fits; the input rows are already counted.
 func ReserveOut(ctx context.Context, out, in int64) error {
 	return From(ctx).Reserve(out - in)
+}
+
+// ReserveWeight is Budget.ReserveWeight on the Budget in ctx.
+func ReserveWeight(ctx context.Context, rows, excess int64) error {
+	return From(ctx).ReserveWeight(rows, excess)
 }
 
 // Ticker polls a context once per accumulated unit of work, for loops whose

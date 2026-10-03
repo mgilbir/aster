@@ -1,6 +1,10 @@
 package svgpdf
 
-import "testing"
+import (
+	"math"
+	"math/rand"
+	"testing"
+)
 
 func TestParseColor(t *testing.T) {
 	cases := []struct {
@@ -83,5 +87,57 @@ func TestFmtNum(t *testing.T) {
 		if got := fmtNum(c.in); got != c.want {
 			t.Errorf("fmtNum(%g): got %q, want %q", c.in, got, c.want)
 		}
+	}
+}
+
+// TestAppendNumMatchesStrconv checks the integer-arithmetic formatter against
+// strconv on edge cases, ties, and hundreds of thousands of random values of every
+// magnitude.
+func TestAppendNumMatchesStrconv(t *testing.T) {
+	check := func(v float64) {
+		t.Helper()
+		got := string(appendNum(nil, v))
+		want := string(appendNumSlow(nil, v))
+		if got != want {
+			t.Fatalf("appendNum(%v = %#x): got %q, want %q", v, math.Float64bits(v), got, want)
+		}
+	}
+	for _, v := range []float64{
+		0, math.Copysign(0, -1), 1, -1, 0.5, 0.00005, 0.00015, 0.00025, 0.03125, 0.09375, 0.00004999999999999999, 0.00005000000000000001,
+		1e-4, 1e-5, 5e-5, -5e-5, 9.99995, 9.99994999, 99999.99995, 1e13, 1e14 - 0.5, 1e14, 1e15, 1e300,
+		math.SmallestNonzeroFloat64, math.MaxFloat64, math.NaN(), math.Inf(1), math.Inf(-1),
+		0.1, 0.2, 0.3, 1.0 / 3, 2.0 / 3, 123456.78905, 599.99995, 4.00005, 0.30000000000000004,
+	} {
+		check(v)
+	}
+	// Exact ties: k/32 and k/64 have few binary places, so k*1e4/32 hits .5.
+	for k := -400; k <= 400; k++ {
+		for _, d := range []float64{32, 64, 128, 16384, 1 << 20} {
+			check(float64(k) / d)
+		}
+	}
+	rng := rand.New(rand.NewSource(7))
+	for range 300_000 {
+		check(math.Float64frombits(rng.Uint64()))
+		// Spread over magnitudes 1e-6 to 1e7, as scaled coordinates are.
+		check((rng.Float64() - 0.5) * math.Pow(10, float64(rng.Intn(14)-6)))
+		// Short decimals, as Vega's data coordinates are.
+		check(float64(rng.Intn(2_000_000)-1_000_000) / math.Pow(10, float64(rng.Intn(7))))
+	}
+}
+
+func BenchmarkAppendNum(b *testing.B) {
+	vals := []float64{12, 0.3333333, 200.5, 123.456789, 0.00001, -98.7654321, 599.9999}
+	for _, f := range []struct {
+		name string
+		fn   func([]byte, float64) []byte
+	}{{"strconv", appendNumSlow}, {"integer", appendNum}} {
+		b.Run(f.name, func(b *testing.B) {
+			b.ReportAllocs()
+			var buf [32]byte
+			for i := 0; i < b.N; i++ {
+				_ = f.fn(buf[:0], vals[i%len(vals)])
+			}
+		})
 	}
 }

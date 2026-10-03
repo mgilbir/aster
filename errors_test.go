@@ -31,6 +31,8 @@ func TestErrLimit(t *testing.T) {
 	}))
 	defer srv.Close()
 	loadSpec := func(url string) []byte { return []byte(`{"data":[{"name":"t","url":"` + url + `"}]}`) }
+	// A specification of 1 MiB and a little more: over a sixteenth of 16 MiB.
+	bigSpec := []byte(`{"padding":` + strings.Repeat(" ", 1<<20) + `1}`)
 	cases := []struct {
 		name string
 		opts []aster.Option
@@ -38,6 +40,22 @@ func TestErrLimit(t *testing.T) {
 	}{
 		{"data rows", []aster.Option{aster.WithMemoryLimit(1 << 20)}, func(c *aster.Converter) error {
 			_, err := c.VegaToSVG([]byte(`{"data":[{"name":"t","transform":[{"type":"sequence","start":0,"stop":1e6}]}]}`))
+			return err
+		}},
+		{"specification size, Vega", []aster.Option{aster.WithMemoryLimit(16 << 20)}, func(c *aster.Converter) error {
+			_, err := c.VegaToSVG(bigSpec)
+			return err
+		}},
+		{"specification size, Vega-Lite", []aster.Option{aster.WithMemoryLimit(16 << 20)}, func(c *aster.Converter) error {
+			_, err := c.VegaLiteToPNG(bigSpec)
+			return err
+		}},
+		{"specification size, Vega-Lite to Vega", []aster.Option{aster.WithMemoryLimit(16 << 20)}, func(c *aster.Converter) error {
+			_, err := c.VegaLiteToVega(bigSpec)
+			return err
+		}},
+		{"specification size, PDF", []aster.Option{aster.WithMemoryLimit(16 << 20)}, func(c *aster.Converter) error {
+			_, _, err := c.VegaToPDFUsage(bigSpec)
 			return err
 		}},
 		{"loaded file size", []aster.Option{aster.WithLoader(&aster.FileLoader{BaseDir: big, MaxBytes: 8})}, func(c *aster.Converter) error {

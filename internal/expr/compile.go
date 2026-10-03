@@ -3,6 +3,7 @@ package expr
 import (
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -567,6 +568,9 @@ func (c *compiler) conditional(n *Node) (node, error) {
 }
 
 func (c *compiler) binary(n *Node) (node, error) {
+	if n.Op == "+" && n.Left.Kind == KindBinary && n.Left.Op == "+" {
+		return c.concatChain(n)
+	}
 	l, err := c.compile(n.Left)
 	if err != nil {
 		return nil, err
@@ -878,4 +882,83 @@ func (h *slotHint) get(o *jsval.Object, key string) jsval.Value {
 		}
 	}
 	return v
+}
+
+// concatChain compiles a + b + c ...: the operands of a left-nested chain of
+// additions, evaluated in order, each added to the running result as the
+// nested closures would. Once the result is a string the rest of the chain is
+// concatenation, built in one allocation instead of one per operator; the
+// string budget is charged after each operand with the length the nested
+// concatenations would have made, so a limit trips at the same operand. An
+// operand that is a call of format(value, spec) is appended to the result
+// without making its own string first.
+func (c *compiler) concatChain(n *Node) (node, error) {
+	var operands []*Node
+	for ; n.Kind == KindBinary && n.Op == "+"; n = n.Left {
+		operands = append(operands, n.Right)
+	}
+	operands = append(operands, n)
+	slices.Reverse(operands)
+	type operand struct {
+		f      node // the operand's value
+		v0, v1 node // format(v0, v1): the arguments, with f its call
+	}
+	ops := make([]operand, len(operands))
+	for i, o := range operands {
+		if i > 0 && o.Kind == KindCall && o.Left.Kind == KindIdentifier && o.Left.Name == "format" && len(o.Elems) == 2 {
+			v0, err := c.compile(o.Elems[0])
+			if err != nil {
+				return nil, err
+			}
+			v1, err := c.compile(o.Elems[1])
+			if err != nil {
+				return nil, err
+			}
+			ops[i] = operand{v0: v0, v1: v1, f: func(s *Scope) jsval.Value {
+				x, spec := v0(s), v1(s)
+				out, err := s.locale().FormatValue(x, spec)
+				if err != nil {
+					failFormat(err)
+				}
+				return jsval.Str(out)
+			}}
+			continue
+		}
+		f, err := c.compile(o)
+		if err != nil {
+			return nil, err
+		}
+		ops[i].f = f
+	}
+	return func(s *Scope) jsval.Value {
+		acc := ops[0].f(s)
+		i := 1
+		for ; i < len(ops) && !acc.IsStr(); i++ {
+			acc = s.add(acc, ops[i].f(s))
+		}
+		if i == len(ops) {
+			return acc
+		}
+		first := acc.StrValue()
+		var scratch [96]byte
+		buf := append(scratch[:0], first...)
+		total := len(first)
+		for ; i < len(ops); i++ {
+			if op := &ops[i]; op.v0 != nil {
+				x, spec := op.v0(s), op.v1(s)
+				start := len(buf)
+				var err error
+				if buf, err = s.locale().AppendFormatValue(buf, x, spec); err != nil {
+					failFormat(err)
+				}
+				total += len(buf) - start
+			} else {
+				y := s.str(s.primitive(op.f(s), false))
+				total += len(y)
+				buf = append(buf, y...)
+			}
+			s.checkLen(total)
+		}
+		return jsval.Str(string(buf))
+	}, nil
 }

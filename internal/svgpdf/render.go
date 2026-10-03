@@ -107,7 +107,8 @@ var geometryAttrs = map[string]map[string]bool{
 // output (the caller then falls back to raster).
 func checkAttrs(e *element) error {
 	geo := geometryAttrs[e.name]
-	for name := range e.attrs {
+	for _, a := range e.attrs {
+		name := a.name
 		if isIgnorableAttr(name) || presentationAttrs[name] || geo[name] {
 			continue
 		}
@@ -130,17 +131,25 @@ type renderer struct {
 
 	ctx       context.Context
 	lim       Limits
-	visited   int // elements rendered (a <clipPath> is re-applied per reference)
-	segsTotal int // path segments parsed so far
-	textTotal int // text bytes shaped so far
+	visited   int       // elements rendered (a <clipPath> is re-applied per reference)
+	segsTotal int       // path segments parsed so far
+	segBuf    []PathSeg // reused by parsePath
+
+	// Reused by drawTextRunFont, and the last font string cssFont built.
+	gidBuf     []uint16
+	tjBuf      []tjItem
+	cssFontKey fontKey
+	cssFontStr string
+	textTotal  int // text bytes shaped so far
 }
 
 // parsePath parses path data, charging its segments to the render budget.
 func (r *renderer) parsePath(d string) ([]PathSeg, error) {
-	segs, err := parsePathDataMax(d, r.lim.MaxPathSegments-r.segsTotal)
+	segs, err := parsePathDataInto(r.segBuf, d, r.lim.MaxPathSegments-r.segsTotal)
 	if err != nil {
 		return nil, err
 	}
+	r.segBuf = segs // the caller draws the segments before the next parse
 	r.segsTotal += len(segs)
 	return segs, nil
 }
@@ -148,15 +157,15 @@ func (r *renderer) parsePath(d string) ([]PathSeg, error) {
 // render translates the parsed SVG root into a content stream plus page
 // dimensions in points (1 SVG px = 1 pt), along with the font catalog of the
 // text drawn (nil in TextOutlines mode).
-func render(root *element, shaper TextShaper, opts Options) (content []byte, gsList []gsEntry, fonts *fontCatalog, width, height float64, err error) {
+func render(root *element, shaper TextShaper, opts Options) (content [][]byte, gsList []gsEntry, fonts *fontCatalog, width, height float64, err error) {
 	if err := checkAttrs(root); err != nil {
 		return nil, nil, nil, 0, 0, err
 	}
-	width, err = parseLength(root.attrs["width"])
+	width, err = parseLength(root.attrVal("width"))
 	if err != nil {
 		return nil, nil, nil, 0, 0, fmt.Errorf("svgpdf: <svg> width: %w", err)
 	}
-	height, err = parseLength(root.attrs["height"])
+	height, err = parseLength(root.attrVal("height"))
 	if err != nil {
 		return nil, nil, nil, 0, 0, fmt.Errorf("svgpdf: <svg> height: %w", err)
 	}
@@ -194,7 +203,7 @@ func render(root *element, shaper TextShaper, opts Options) (content []byte, gsL
 	if err := r.children(root, rootState()); err != nil {
 		return nil, nil, nil, 0, 0, err
 	}
-	return r.w.bytes(), r.w.gsNames, r.fonts, width, height, nil
+	return r.w.stream(), r.w.gsNames, r.fonts, width, height, nil
 }
 
 func viewBoxMatrix(vb string, width, height float64) (Matrix, error) {
@@ -220,6 +229,7 @@ func (r *renderer) children(e *element, st gstate) error {
 }
 
 func (r *renderer) element(e *element, st gstate) error {
+	defer r.w.spill()
 	if r.visited++; r.visited&63 == 0 {
 		if err := ctxErr(r.ctx); err != nil {
 			return err
@@ -429,7 +439,7 @@ func (r *renderer) applyClip(ref string) error {
 			}
 			r.w.rect(x, y, w, h)
 		case "path":
-			segs, err := r.parsePath(c.attrs["d"])
+			segs, err := r.parsePath(c.attrVal("d"))
 			if err != nil {
 				return err
 			}
@@ -512,7 +522,7 @@ func (r *renderer) drawRect(e *element, st gstate) error {
 }
 
 func (r *renderer) drawPath(e *element, st gstate) error {
-	d := e.attrs["d"]
+	d := e.attrVal("d")
 	if strings.TrimSpace(d) == "" {
 		return nil // Vega emits empty d for placeholder foreground paths
 	}

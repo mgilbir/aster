@@ -34,6 +34,7 @@ type valueFn func(ev *encEval) jsval.Value
 type channel struct {
 	name string
 	fn   valueFn
+	set  scene.Setter // assigns the property of an item
 }
 
 // encodeSet is one encoding set (enter, update, exit, or a custom one).
@@ -123,7 +124,7 @@ func (c *encCompiler) parseBlock(block jsval.Value, typ string) *encodeSet {
 		} else {
 			fn = c.entry(enc)
 		}
-		set.channels = append(set.channels, channel{name: name, fn: fn})
+		set.channels = append(set.channels, channel{name: name, fn: fn, set: scene.SetterFor(name)})
 		switch name {
 		case "x":
 			set.x = true

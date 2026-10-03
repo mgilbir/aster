@@ -244,6 +244,7 @@ func statefulTransform(newFn func() txFn) factory {
 			if len(in) > 0 {
 				requireFields(def, p)
 			}
+			before := n.g.view.rowExcess(in)
 			out, err := f(n, p, in)
 			if err == errStopPulse {
 				return stopPulse
@@ -251,7 +252,7 @@ func statefulTransform(newFn func() txFn) factory {
 			if err != nil {
 				failErr(err)
 			}
-			n.g.view.checkRows(len(out) - len(in))
+			n.g.view.checkRows(len(out)-len(in), n.g.view.rowExcess(out)-before)
 			// The tuples a transform creates are ingested in output order
 			// (vega-dataflow's ingest), which is the order a sort breaks
 			// ties in.

@@ -22,6 +22,9 @@ type funcDef struct {
 	math1 func(float64) float64
 	math2 func(a, b float64) float64
 	fn    builtinFn
+	// pred1, for a function of one value that only tests it, is what fn does,
+	// called without the argument stack.
+	pred1 func(v jsval.Value) bool
 	// special compiles the call itself (if, clamp).
 	special func(c *compiler, n *Node) (node, error)
 	// check validates the call's arguments at compile time (after min).
@@ -40,6 +43,11 @@ func def(name string, d *funcDef) {
 }
 
 func fn(name string, f builtinFn) { def(name, &funcDef{fn: f}) }
+
+// pred defines a function that tests its first argument.
+func pred(name string, p func(v jsval.Value) bool) {
+	def(name, &funcDef{pred1: p, fn: func(s *Scope, args []jsval.Value) jsval.Value { return jsval.Bool(p(arg(args, 0))) }})
+}
 
 func fnMin(name string, min int, f builtinFn) { def(name, &funcDef{fn: f, min: min}) }
 
@@ -122,6 +130,10 @@ func (c *compiler) call(n *Node) (node, error) {
 			}
 			return jsval.Num(f(s.num(x), s.num(y)))
 		}, nil
+	}
+	if d.pred1 != nil && len(args) == 1 {
+		p, a0 := d.pred1, args[0]
+		return func(s *Scope) jsval.Value { return jsval.Bool(p(a0(s))) }, nil
 	}
 	f := d.fn
 	switch len(args) {

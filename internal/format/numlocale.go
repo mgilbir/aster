@@ -152,6 +152,10 @@ type NumberFormat struct {
 	prefix    string
 	suffix    string
 	maybeSufx bool
+	// simpleG: the format is a trimmed "g" with no prefix, suffix, sign,
+	// width, grouping or numerals, the shape of the default specifier, whose
+	// output appendSimpleG writes without the general machinery.
+	simpleG bool
 }
 
 // Format is d3.format(specifier) for the locale.
@@ -224,6 +228,8 @@ func (l *NumberLocale) newFormat(s Specifier, extraPrefix, extraSuffix string) (
 	default:
 		f.width = int(w)
 	}
+	f.simpleG = f.typ == 'g' && f.trim && f.prefix == "" && f.suffix == "" && f.sign == '-' &&
+		f.width == 0 && !f.comma && f.precision <= 14 && l.numerals == nil
 	return f, nil
 }
 
@@ -287,6 +293,14 @@ func (f *NumberFormat) FormatValue(v jsval.Value) string {
 	return f.Format(jsval.ToNumber(v))
 }
 
+// AppendFormatValue appends what FormatValue returns to dst.
+func (f *NumberFormat) AppendFormatValue(dst []byte, v jsval.Value) []byte {
+	if f.typ == 'c' {
+		return f.appendFormat(dst, 0, v.AsString())
+	}
+	return f.AppendFormat(dst, jsval.ToNumber(v))
+}
+
 // AppendFormat appends the formatted x to dst.
 func (f *NumberFormat) AppendFormat(dst []byte, x float64) []byte {
 	if f.typ == 'c' {
@@ -296,6 +310,11 @@ func (f *NumberFormat) AppendFormat(dst []byte, x float64) []byte {
 }
 
 func (f *NumberFormat) appendFormat(dst []byte, x float64, cText string) []byte {
+	if f.simpleG {
+		if out, ok := f.appendSimpleG(dst, x); ok {
+			return out
+		}
+	}
 	loc := f.loc
 	valuePrefix, valueSuffix := f.prefix, f.suffix
 	var body string
@@ -673,4 +692,45 @@ func PrecisionRound(step, max float64) float64 {
 	step = math.Abs(step)
 	max = math.Abs(max) - step
 	return math.Max(0, decimalExponent(max)-decimalExponent(step)) + 1
+}
+
+// appendSimpleG formats x as a trimmed "g" does when the result is positional
+// and exact: x finite and not zero, its shortest digits no more than the
+// precision, and its exponent from -6 up to the precision (toPrecision's
+// positional range). The shortest digits then are the digits toPrecision
+// rounds to, and the trimmed body is them placed around the decimal point. It
+// reports false for everything else, and the general path formats it.
+func (f *NumberFormat) appendSimpleG(dst []byte, x float64) ([]byte, bool) {
+	if x == 0 || math.IsNaN(x) || math.IsInf(x, 0) {
+		return dst, false
+	}
+	var tmp [40]byte
+	var dbuf [24]byte
+	digits, e := parseExp(dbuf[:0], strconv.AppendFloat(tmp[:0], math.Abs(x), 'e', -1, 64))
+	if len(digits) > f.precision || e < -6 || e >= f.precision {
+		return dst, false
+	}
+	loc := f.loc
+	if x < 0 {
+		dst = append(dst, loc.minus...)
+	}
+	switch {
+	case e < 0:
+		dst = append(dst, '0')
+		dst = append(dst, loc.decimal...)
+		for i := 0; i < -(e + 1); i++ {
+			dst = append(dst, '0')
+		}
+		dst = append(dst, digits...)
+	case len(digits) <= e+1:
+		dst = append(dst, digits...)
+		for i := len(digits); i < e+1; i++ {
+			dst = append(dst, '0')
+		}
+	default:
+		dst = append(dst, digits[:e+1]...)
+		dst = append(dst, loc.decimal...)
+		dst = append(dst, digits[e+1:]...)
+	}
+	return dst, true
 }

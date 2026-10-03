@@ -45,6 +45,8 @@ type stroker struct {
 	tmp     []point
 	rev     []point
 	dirs    []point
+	left    []point // side outlines, reused across subpaths (emitPoly copies them)
+	right   []point
 	dashed  flat
 }
 
@@ -116,15 +118,15 @@ func (s *stroker) strokeSub(pts []point, closed bool) {
 		closed = false // a two-point loop is a line traversed twice
 	}
 	// Left offset chain (forward), then the same on the reversed points.
-	var left []point
-	left = s.side(clean, closed, left)
+	left := s.side(clean, closed, s.left[:0])
+	s.left = left
 	rev := s.rev[:0]
 	for i := len(clean) - 1; i >= 0; i-- {
 		rev = append(rev, clean[i])
 	}
 	s.rev = rev
-	var right []point
-	right = s.side(rev, closed, right)
+	right := s.side(rev, closed, s.right[:0])
+	s.right = right
 	if closed {
 		s.emitPoly(left)
 		s.emitPoly(right)
@@ -138,6 +140,7 @@ func (s *stroker) strokeSub(pts []point, closed bool) {
 	poly = append(poly, right...)
 	d0 := unit(clean[0].x-clean[1].x, clean[0].y-clean[1].y)
 	poly = s.cap(poly, clean[0], d0)
+	s.left = poly
 	s.emitPoly(poly)
 }
 

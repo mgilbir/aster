@@ -113,13 +113,9 @@ func init() {
 	})
 	// isNaN and isFinite are Number.isNaN / Number.isFinite: no coercion, so
 	// a string or date is never NaN.
-	fn("isNaN", func(s *Scope, args []jsval.Value) jsval.Value {
-		v := arg(args, 0)
-		return jsval.Bool(v.IsNum() && math.IsNaN(v.NumValue()))
-	})
-	fn("isFinite", func(s *Scope, args []jsval.Value) jsval.Value {
-		v := arg(args, 0)
-		return jsval.Bool(v.IsNum() && !math.IsNaN(v.NumValue()) && !math.IsInf(v.NumValue(), 0))
+	pred("isNaN", func(v jsval.Value) bool { return v.IsNum() && math.IsNaN(v.NumValue()) })
+	pred("isFinite", func(v jsval.Value) bool {
+		return v.IsNum() && !math.IsNaN(v.NumValue()) && !math.IsInf(v.NumValue(), 0)
 	})
 	fn("random", func(s *Scope, args []jsval.Value) jsval.Value {
 		return jsval.Num(s.Rand.next())

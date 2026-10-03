@@ -247,7 +247,7 @@ func (r *renderer) renderText(n *node, st *state, opacity float64, blend blendMo
 
 // layoutText places glyphs in text-chunk order and applies text-anchor.
 func (r *renderer) layoutText(chars []tchar) []glyphPos {
-	var out []glyphPos
+	out := make([]glyphPos, 0, len(chars)) // one glyph per character is the common case
 	cx, cy := 0.0, 0.0
 	chunk := 0
 	chunkStart := 0 // index into out where the current chunk begins
@@ -308,6 +308,7 @@ func (r *renderer) layoutText(chars []tchar) []glyphPos {
 		}
 		shifted := (c.flags&(tfDX|tfDY) != 0 && (c.dx != 0 || c.dy != 0)) || c.rot != 0
 		var sb strings.Builder
+		sb.Grow(j - i)
 		for _, ch := range chars[i:j] {
 			sb.WriteRune(ch.r)
 		}
