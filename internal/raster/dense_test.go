@@ -22,7 +22,7 @@ func (s *recSink) blitRow(y, x0 int, cov []uint8) {
 // them does, under both fill rules.
 func TestDenseCrossingsMatchSorted(t *testing.T) {
 	rng := rand.New(rand.NewPCG(3, 4))
-	defer func(v int) { denseCrossings = v }(denseCrossings)
+	defer func(m, v int32) { binMin, sortSpread = m, v }(binMin, sortSpread)
 	for iter := 0; iter < 40; iter++ {
 		var f flat
 		for s := 0; s < 1+iter%4; s++ {
@@ -33,9 +33,13 @@ func TestDenseCrossingsMatchSorted(t *testing.T) {
 			f.subs = append(f.subs, polyline{start: start, end: len(f.pts)})
 		}
 		for _, eo := range []bool{false, true} {
-			var out [2]recSink
-			for i, dense := range []int{1 << 30, 0} {
-				denseCrossings = dense
+			// Spread 1<<30 only ever sorts, 0 always bins straight from the
+			// edges, and 2 and 8 bin from the crossing list when they span
+			// few columns.
+			spreads := []int32{1 << 30, 0, 2, 8}
+			out := make([]recSink, len(spreads))
+			for i, sp := range spreads {
+				binMin, sortSpread = 0, sp
 				r := newRasterizer()
 				r.begin(irect{0, 0, 100, 60})
 				r.addPolys(&f)
@@ -44,10 +48,12 @@ func TestDenseCrossingsMatchSorted(t *testing.T) {
 			if len(out[0].rows) == 0 {
 				t.Fatal("nothing painted")
 			}
-			if !slices.EqualFunc(out[0].rows, out[1].rows, func(a, b rowRec) bool {
-				return a.y == b.y && a.x0 == b.x0 && slices.Equal(a.cov, b.cov)
-			}) {
-				t.Fatalf("iter %d evenOdd %v: dense and sorted coverage differ", iter, eo)
+			for i := 1; i < len(out); i++ {
+				if !slices.EqualFunc(out[0].rows, out[i].rows, func(a, b rowRec) bool {
+					return a.y == b.y && a.x0 == b.x0 && slices.Equal(a.cov, b.cov)
+				}) {
+					t.Fatalf("iter %d evenOdd %v spread %d: binned and sorted coverage differ", iter, eo, spreads[i])
+				}
 			}
 		}
 	}
