@@ -134,3 +134,6 @@ func (c *Converter) RenderPreparedForTest(spec []byte, lite bool) (func() error,
 		return err
 	}, nil
 }
+
+// RaceSlowdownForTest is raceSlowdown, for the external tests' time limits.
+const RaceSlowdownForTest = raceSlowdown
