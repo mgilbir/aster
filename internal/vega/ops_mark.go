@@ -280,8 +280,10 @@ type boundSet struct {
 	ev  encEval
 }
 
-// run encodes one item, reporting whether any property changed.
-func (b *boundSet) run(it *scene.Item) bool {
+// run encodes one item, reporting whether any property changed. A caller that
+// has no use for the answer (the item is new, or leaving) passes track false
+// and the properties are stored without being compared to their old values.
+func (b *boundSet) run(it *scene.Item, track bool) bool {
 	set := b.set
 	b.ev.ctx, b.ev.item, b.ev.datum = b.ctx, it, it.Datum
 	ev := &b.ev
@@ -297,11 +299,13 @@ func (b *boundSet) run(it *scene.Item) bool {
 				continue
 			}
 		}
-		if setItemProp(it, ch.name, val) {
+		if !track {
+			assignItemProp(it, ch.name, val)
+		} else if setItemProp(it, ch.name, val) {
 			mod = true
 		}
 	}
-	if adjustSpatial(it, set) {
+	if adjustSpatial(it, set, track) {
 		mod = true
 	}
 	return mod
@@ -310,7 +314,7 @@ func (b *boundSet) run(it *scene.Item) bool {
 // adjustSpatial derives x/width, y/height from the x2/xc/y2/yc channels (rule
 // marks keep their x2/y2). It runs after all channels are set, exactly like the
 // generated encoder code.
-func adjustSpatial(it *scene.Item, set *encodeSet) bool {
+func adjustSpatial(it *scene.Item, set *encodeSet, track bool) bool {
 	mt := set.marktype
 	if mt == "rule" {
 		return false
@@ -318,7 +322,9 @@ func adjustSpatial(it *scene.Item, set *encodeSet) bool {
 	swap := mt == "group" || mt == "image" || mt == "rect"
 	mod := false
 	setNum := func(name string, v float64) {
-		if setItemProp(it, name, jsval.Num(v)) {
+		if !track {
+			assignItemProp(it, name, jsval.Num(v))
+		} else if setItemProp(it, name, jsval.Num(v)) {
 			mod = true
 		}
 	}
@@ -400,21 +406,21 @@ func facEncode(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode,
 		if len(pulse.add) > 0 {
 			for _, t := range pulse.add {
 				if enter != nil {
-					enter.run(t)
+					enter.run(t, false)
 				}
 				if update != nil {
-					update.run(t)
+					update.run(t, false)
 				}
 			}
 			if set != nil && set != update {
 				for _, t := range pulse.add {
-					set.run(t)
+					set.run(t, false)
 				}
 			}
 		}
 		if len(pulse.rem) > 0 && exit != nil {
 			for _, t := range pulse.rem {
-				exit.run(t)
+				exit.run(t, false)
 			}
 		}
 		if reenter || set != nil {
@@ -425,10 +431,10 @@ func facEncode(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode,
 			if reenter {
 				for _, t := range items {
 					mod := fmod
-					if enter != nil && enter.run(t) {
+					if enter != nil && enter.run(t, true) {
 						mod = true
 					}
-					if set != nil && set.run(t) {
+					if set != nil && set.run(t, true) {
 						mod = true
 					}
 					if mod {
@@ -437,7 +443,7 @@ func facEncode(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode,
 				}
 			} else {
 				for _, t := range items {
-					if set.run(t) || fmod {
+					if set.run(t, true) || fmod {
 						outMod = append(outMod, t)
 					}
 				}

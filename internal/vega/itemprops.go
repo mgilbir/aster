@@ -27,10 +27,16 @@ var itemPropNames = []string{
 // are kept in Extra by Item.Set, so later reads (`item.name`) still see them.
 func setItemProp(it *scene.Item, name string, v jsval.Value) bool {
 	old := it.Get(name)
+	assignItemProp(it, name, v)
+	return !jsval.Equal(old, it.Get(name))
+}
+
+// assignItemProp is setItemProp for a caller that does not ask whether the
+// value changed.
+func assignItemProp(it *scene.Item, name string, v jsval.Value) {
 	if _, err := it.Set(name, v); err != nil {
 		failErr(err)
 	}
-	return !jsval.Equal(old, it.Get(name))
 }
 
 // getItemProp reads a property of an item as expressions see it.
