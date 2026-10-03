@@ -64,6 +64,17 @@ func parseSVG(ctx context.Context, svg string, lim Limits) (*element, error) {
 	if len(svg) > lim.MaxInputBytes {
 		return nil, limitErr("SVG input is %d bytes, limit is %d", len(svg), lim.MaxInputBytes)
 	}
+	if root, ok, err := parseSVGFast(ctx, svg, lim); err != nil {
+		return nil, err
+	} else if ok {
+		return root, nil
+	}
+	return parseSVGXML(ctx, svg, lim)
+}
+
+// parseSVGXML is parseSVG on encoding/xml: the reference for what a document
+// parses to and the source of every parse error.
+func parseSVGXML(ctx context.Context, svg string, lim Limits) (*element, error) {
 	dec := xml.NewDecoder(strings.NewReader(svg))
 	var root *element
 	var stack []*element
