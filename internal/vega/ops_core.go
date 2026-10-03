@@ -188,6 +188,8 @@ type compareSpec struct {
 	// segment, so a caller can read the keys off a partial view of a tuple.
 	keys  []transforms.Field
 	roots []string
+	// rest reads what follows the root of each path.
+	rest []transforms.Accessor
 }
 
 // compareFrom builds a comparator from field specs (paths or accessors) and
@@ -197,6 +199,7 @@ func compareFrom(fields []any, orders []any) *compareSpec {
 	ord := make([]string, 0, len(fields))
 	names := make([]string, 0, len(fields))
 	roots := make([]string, 0, len(fields))
+	rest := make([]transforms.Accessor, 0, len(fields))
 	rootsOK := true
 	for i, f := range fields {
 		var fld transforms.Field
@@ -206,13 +209,13 @@ func compareFrom(fields []any, orders []any) *compareSpec {
 				continue
 			}
 			fld = transforms.FieldOf(v.AsString())
-			rootsOK = appendRoot(&roots, v.AsString()) && rootsOK
+			rootsOK = appendRoot(&roots, &rest, v.AsString()) && rootsOK
 		case transforms.Field:
 			fld = v
 			rootsOK = false
 		case string:
 			fld = transforms.FieldOf(v)
-			rootsOK = appendRoot(&roots, v) && rootsOK
+			rootsOK = appendRoot(&roots, &rest, v) && rootsOK
 		default:
 			continue
 		}
@@ -228,20 +231,22 @@ func compareFrom(fields []any, orders []any) *compareSpec {
 	}
 	cs := &compareSpec{cmp: cmp, fields: names, orders: ord}
 	if rootsOK {
-		cs.keys, cs.roots = fs, roots
+		cs.keys, cs.roots, cs.rest = fs, roots, rest
 	}
 	return cs
 }
 
-// appendRoot adds the first segment of a field path to roots and reports
-// whether the path has one.
-func appendRoot(roots *[]string, path string) bool {
+// appendRoot adds the first segment of a field path to roots, and an accessor
+// of the rest to rest; it reports whether the path has a first segment.
+func appendRoot(roots *[]string, rest *[]transforms.Accessor, path string) bool {
 	segs := jsval.ParseFieldPath(path)
 	if len(segs) == 0 {
 		*roots = append(*roots, "")
+		*rest = append(*rest, nil)
 		return false
 	}
 	*roots = append(*roots, segs[0])
+	*rest = append(*rest, transforms.PathAccessor(segs[1:]))
 	return true
 }
 

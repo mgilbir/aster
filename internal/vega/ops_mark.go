@@ -719,6 +719,28 @@ type sortRec struct {
 	off int
 }
 
+// itemSortKeys reads the sort keys of an item into keys, without a view of the
+// item, and reports whether it could: every path must start at the datum, at
+// the bounds or at a property the item holds.
+func itemSortKeys(it *scene.Item, cs *compareSpec, keys []jsval.Value) bool {
+	for j, root := range cs.roots {
+		var rv jsval.Value
+		switch root {
+		case "datum":
+			rv = it.Datum
+		case "bounds":
+			b := it.Bounds
+			rv = obj("x1", jsval.Num(b.X1), "y1", jsval.Num(b.Y1), "x2", jsval.Num(b.X2), "y2", jsval.Num(b.Y2))
+		default:
+			if rv = it.Get(root); rv.IsUndefined() {
+				return false
+			}
+		}
+		keys[j] = cs.rest[j](rv)
+	}
+	return true
+}
+
 // sortItemsByKeys is sortItemsByViews for a comparator over plain field paths:
 // the keys are read once per item, from a view holding only the properties the
 // paths start with, and the sort compares the keys. The result is the same
@@ -727,29 +749,35 @@ func (v *runView) sortItemsByKeys(items []*scene.Item, cs *compareSpec) {
 	nf := len(cs.keys)
 	keys := make([]jsval.Value, len(items)*nf)
 	recs := make([]sortRec, len(items))
-	scratch := jsval.NewObject(nf + 1)
-	view := jsval.Obj(scratch)
+	var scratch *jsval.Object // a partial view of an item, for the paths it cannot answer
 	for i, it := range items {
 		if v.itemTupleCache[it] != nil {
 			// A view that exists is refreshed, as a sort over views does.
 			v.itemTuple(it)
 		}
+		recs[i] = sortRec{it, i * nf}
+		if itemSortKeys(it, cs, keys[i*nf:(i+1)*nf]) {
+			continue
+		}
+		// A root the item does not hold may still be a property every object
+		// has (toString): the path is read off a view that holds the roots.
+		if scratch == nil {
+			scratch = jsval.NewObject(nf + 1)
+		}
 		for _, root := range cs.roots {
-			switch root {
-			case "datum":
-				scratch.Set(root, it.Datum)
-			case "bounds":
-				b := it.Bounds
-				scratch.Set(root, obj("x1", jsval.Num(b.X1), "y1", jsval.Num(b.Y1), "x2", jsval.Num(b.X2), "y2", jsval.Num(b.Y2)))
-			default:
-				if val := it.Get(root); !val.IsUndefined() {
-					scratch.Set(root, val)
-				} else {
-					scratch.Delete(root)
-				}
+			if root == "datum" || root == "bounds" {
+				continue
+			}
+			if val := it.Get(root); !val.IsUndefined() {
+				scratch.Set(root, val)
+			} else {
+				scratch.Delete(root)
 			}
 		}
-		recs[i] = sortRec{it, i * nf}
+		scratch.Set("datum", it.Datum)
+		b := it.Bounds
+		scratch.Set("bounds", obj("x1", jsval.Num(b.X1), "y1", jsval.Num(b.Y1), "x2", jsval.Num(b.X2), "y2", jsval.Num(b.Y2)))
+		view := jsval.Obj(scratch)
 		for j, k := range cs.keys {
 			keys[i*nf+j] = k.Get(view)
 		}

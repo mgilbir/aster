@@ -68,6 +68,10 @@ func NamedField(name string, fields []string, get Accessor) Field {
 	return Field{Get: get, Name: name, Fields: fields}
 }
 
+// PathAccessor reads the path from a tuple as a field accessor does; the
+// empty path is the tuple itself.
+func PathAccessor(path []string) Accessor { return getter(path) }
+
 // getter is vega-util's getter: plain property reads along the path. Unlike a
 // JavaScript member chain it answers Undefined instead of throwing when an
 // intermediate step is null or undefined, so the library never panics on
