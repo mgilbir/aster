@@ -2,108 +2,26 @@ package transforms
 
 import (
 	"fmt"
-	"github.com/mgilbir/aster/internal/jssort"
 	"math"
 	"sort"
 	"strconv"
-	"unicode/utf8"
+
+	"github.com/mgilbir/aster/internal/jssort"
 
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
-// primitive is ToPrimitive with hint "number" as the relational operators use
-// it: dates read as their epoch, arrays and objects as their string form.
-func primitive(v jsval.Value) jsval.Value {
-	switch v.Kind() {
-	case jsval.KindTimestamp:
-		return jsval.Num(v.NumValue())
-	case jsval.KindArr, jsval.KindObj, jsval.KindPattern:
-		return jsval.Str(v.AsString())
-	}
-	return v
-}
-
-// Relate is JavaScript's abstract relational comparison of a and b: it
-// returns -1, 0 or +1, and ok=false when either side coerces to NaN (every
-// operator then answers false). Two strings compare by UTF-16 code units;
-// anything else compares as numbers.
-func Relate(a, b jsval.Value) (c int, ok bool) {
-	// Fast path: the overwhelmingly common same-kind cases.
-	if a.Kind() == jsval.KindNum && b.Kind() == jsval.KindNum {
-		return cmpFloat(a.NumValue(), b.NumValue())
-	}
-	a, b = primitive(a), primitive(b)
-	if a.Kind() == jsval.KindStr && b.Kind() == jsval.KindStr {
-		return CompareUTF16(a.StrValue(), b.StrValue()), true
-	}
-	return cmpFloat(jsval.ToNumber(a), jsval.ToNumber(b))
-}
-
-func cmpFloat(x, y float64) (int, bool) {
-	switch {
-	case x < y:
-		return -1, true
-	case x > y:
-		return 1, true
-	case x == y:
-		return 0, true
-	}
-	return 0, false
-}
-
 // Less is `a < b`.
-func Less(a, b jsval.Value) bool { c, ok := Relate(a, b); return ok && c < 0 }
+func Less(a, b jsval.Value) bool { c, ok := jsval.Relate(a, b); return ok && c < 0 }
 
 // Greater is `a > b`.
-func Greater(a, b jsval.Value) bool { c, ok := Relate(a, b); return ok && c > 0 }
+func Greater(a, b jsval.Value) bool { c, ok := jsval.Relate(a, b); return ok && c > 0 }
 
 // GreaterEq is `a >= b`; it is false when either side is NaN.
-func GreaterEq(a, b jsval.Value) bool { c, ok := Relate(a, b); return ok && c >= 0 }
+func GreaterEq(a, b jsval.Value) bool { c, ok := jsval.Relate(a, b); return ok && c >= 0 }
 
 // LessEq is `a <= b`.
-func LessEq(a, b jsval.Value) bool { c, ok := Relate(a, b); return ok && c <= 0 }
-
-// CompareUTF16 orders strings by UTF-16 code unit, as JavaScript does. It
-// differs from byte order only when one string has a supplementary-plane
-// character where the other has a BMP character above U+D7FF.
-func CompareUTF16(a, b string) int {
-	n := min(len(a), len(b))
-	i := 0
-	for i < n && a[i] == b[i] {
-		i++
-	}
-	if i == n {
-		switch {
-		case len(a) < len(b):
-			return -1
-		case len(a) > len(b):
-			return 1
-		}
-		return 0
-	}
-	// Back up to the start of the rune that differs.
-	for i > 0 && !utf8.RuneStart(a[i]) {
-		i--
-	}
-	ra, _ := utf8.DecodeRuneInString(a[i:])
-	rb, _ := utf8.DecodeRuneInString(b[i:])
-	ua, ub := utf16Unit(ra), utf16Unit(rb)
-	switch {
-	case ua < ub:
-		return -1
-	case ua > ub:
-		return 1
-	}
-	return 0
-}
-
-// utf16Unit is the first UTF-16 code unit of r.
-func utf16Unit(r rune) rune {
-	if r >= 0x10000 {
-		return 0xD800 + ((r - 0x10000) >> 10)
-	}
-	return r
-}
+func LessEq(a, b jsval.Value) bool { c, ok := jsval.Relate(a, b); return ok && c <= 0 }
 
 // Ascending is vega-util's ascending comparator. null and undefined sort
 // before everything, NaN (and an Invalid Date) sort after them and before
@@ -127,10 +45,10 @@ func Ascending(u, v jsval.Value) int {
 		}
 		return 0
 	case u.Kind() == jsval.KindStr && v.Kind() == jsval.KindStr:
-		return CompareUTF16(u.StrValue(), v.StrValue())
+		return jsval.CompareUTF16(u.StrValue(), v.StrValue())
 	}
 	un, vn := u.IsNullish(), v.IsNullish()
-	if c, ok := Relate(u, v); ok {
+	if c, ok := jsval.Relate(u, v); ok {
 		if c < 0 && !vn {
 			return -1
 		}
