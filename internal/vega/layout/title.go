@@ -54,7 +54,7 @@ func titleLayout(mark *scene.Mark, width, height float64, viewBounds *scene.Boun
 	}
 
 	temp := scene.NewBounds()
-	if subtitle != nil && subtitle.Text.IsTruthy() {
+	if subtitle != nil && subtitle.Text().IsTruthy() {
 		// position the subtitle below/beside the title
 		var sx, sy float64
 		switch orient {

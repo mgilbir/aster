@@ -149,29 +149,29 @@ func TestParseAndRenderPath(t *testing.T) {
 }
 
 func TestTruncate(t *testing.T) {
-	it := &Item{FontSize: N(10), Limit: N(30)}
+	it := &Item{text: &textAttrs{FontSize: N(10), Limit: N(30)}}
 	m := Metrics{}
 	// estimateWidth = ~~(0.8*len*10): 8px per unit; limit 30, ellipsis costs 8.
 	if got := m.TextValue(it, "abcdefgh"); got != "ab…" {
 		t.Errorf("ltr: %q", got)
 	}
-	it.Dir = "rtl"
+	it.textW().Dir = "rtl"
 	if got := m.TextValue(it, "abcdefgh"); got != "…gh" {
 		t.Errorf("rtl: %q", got)
 	}
-	it.Dir = ""
-	it.Ellipsis = "."
+	it.textW().Dir = ""
+	it.textW().Ellipsis = "."
 	if got := m.TextValue(it, "  abcdefgh "); got != "ab." {
 		t.Errorf("custom ellipsis: %q", got)
 	}
-	it.Limit = N(0)
+	it.textW().Limit = N(0)
 	if got := m.TextValue(it, "  keep  "); got != "keep" {
 		t.Errorf("no limit still trims: %q", got)
 	}
 	// Non-BMP characters count as two UTF-16 units and are never split into
 	// invalid UTF-8.
-	it.Limit = N(40)
-	it.Ellipsis = ""
+	it.textW().Limit = N(40)
+	it.textW().Ellipsis = ""
 	// 8 UTF-16 units of width 8 each; the ellipsis leaves 32: three units fit,
 	// which splits the second emoji, as JavaScript's slice does.
 	got := m.TextValue(it, "\U0001F600\U0001F600\U0001F600\U0001F600")
@@ -184,7 +184,7 @@ func TestTruncate(t *testing.T) {
 }
 
 func TestCSSFont(t *testing.T) {
-	it := &Item{FontStyle: "italic", FontVariant: "small-caps", FontWeight: "bold", FontSize: N(10.5), Font: `"A B"`}
+	it := &Item{text: &textAttrs{FontStyle: "italic", FontVariant: "small-caps", FontWeight: "bold", FontSize: N(10.5), Font: `"A B"`}}
 	if got, want := CSSFont(it, false), `italic small-caps bold 10.5px "A B"`; got != want {
 		t.Errorf("%s", got)
 	}
@@ -199,7 +199,7 @@ func TestCSSFont(t *testing.T) {
 func TestBaselineOffset(t *testing.T) {
 	cases := map[string]float64{"top": 8, "middle": 3, "bottom": -2, "line-top": 9, "line-bottom": -3, "": 0, "alphabetic": 0}
 	for b, want := range cases {
-		it := &Item{Baseline: b, FontSize: N(10)}
+		it := &Item{Baseline: b, text: &textAttrs{FontSize: N(10)}}
 		if got := BaselineOffset(it); got != want {
 			t.Errorf("baseline %q = %v want %v", b, got, want)
 		}
@@ -239,12 +239,12 @@ func TestSymbolShapesAllDraw(t *testing.T) {
 }
 
 func TestLineAreaErrors(t *testing.T) {
-	items := []*Item{{Interpolate: "no-such", X: N(1)}, {X: N(2)}}
+	items := []*Item{{line: &lineAttrs{Interpolate: "no-such"}, X: N(1)}, {X: N(2)}}
 	var sp StringPath
 	if err := Line(&sp, items); err != ErrUnknownInterpolate {
 		t.Errorf("line: %v", err)
 	}
-	items[0].Interpolate = "bundle"
+	items[0].lineW().Interpolate = "bundle"
 	if err := Area(&sp, items); err != ErrCurveNoArea {
 		t.Errorf("bundle area: %v", err)
 	}
@@ -372,7 +372,7 @@ func BenchmarkBoundTree(b *testing.B) {
 func BenchmarkPaths(b *testing.B) {
 	items := make([]*Item, 1000)
 	for i := range items {
-		items[i] = &Item{X: N(float64(i) * 1.37), Y: N(float64(i%17) * 3.1), Interpolate: "monotone", Height: N(20), StartAngle: N(float64(i) * 0.01), EndAngle: N(float64(i)*0.01 + 1), OuterRadius: N(30), InnerRadius: N(10), PadAngle: N(0.02), CornerRadius: N(3), Size: N(100)}
+		items[i] = &Item{X: N(float64(i) * 1.37), Y: N(float64(i%17) * 3.1), line: &lineAttrs{Interpolate: "monotone"}, Height: N(20), geom: &geomAttrs{StartAngle: N(float64(i) * 0.01), EndAngle: N(float64(i)*0.01 + 1), OuterRadius: N(30), InnerRadius: N(10), PadAngle: N(0.02), CornerRadius: N(3)}, Size: N(100)}
 	}
 	var sp StringPath
 	b.Run("line-monotone", func(b *testing.B) {
@@ -385,7 +385,7 @@ func BenchmarkPaths(b *testing.B) {
 	})
 	b.Run("area-basis", func(b *testing.B) {
 		for _, it := range items {
-			it.Interpolate = "basis"
+			it.lineW().Interpolate = "basis"
 		}
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
@@ -439,7 +439,7 @@ func TestItemSetGet(t *testing.T) {
 	}
 	set("mark", jsval.Undefined)
 
-	if it.X.Val() != 12.5 || it.Y.Set() || !it.Stroke.IsNull() || !it.Aria.IsFalse() || it.FontWeight != "700" || !it.Clip.IsTrue() {
+	if it.X.Val() != 12.5 || it.Y.Set() || !it.Stroke.IsNull() || !it.Aria.IsFalse() || it.FontWeight() != "700" || !it.Clip.IsTrue() {
 		t.Errorf("unexpected item state: %+v", it)
 	}
 	if g := it.Fill.Gradient(); g == nil || !g.Radial || len(g.Stops) != 1 {

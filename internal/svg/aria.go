@@ -94,7 +94,7 @@ func (r *renderer) markAria(m *scene.Mark) {
 
 // titleCaption is `array(item.text).join(' ')`.
 func titleCaption(it *scene.Item) string {
-	t := it.Text
+	t := it.Text()
 	if t.IsNullish() {
 		return ""
 	}

@@ -294,8 +294,8 @@ func (r *renderer) mark(m *scene.Mark, depth int) error {
 func (r *renderer) item(m *scene.Mark, it *scene.Item, tag string, depth int) error {
 	w := &r.w
 	var link bool
-	if it.Href != "" {
-		if attrs, ok := r.opt.Href(it.Href); ok {
+	if it.Href() != "" {
+		if attrs, ok := r.opt.Href(it.Href()); ok {
 			link = true
 			w.start("a")
 			for _, a := range attrs {
@@ -332,7 +332,7 @@ func (r *renderer) item(m *scene.Mark, it *scene.Item, tag string, depth int) er
 		w.attrBytes("d", scene.RectPathData(&r.sp, it, false, 0, 0))
 		r.style(m, it, "path", it.Fill, it.Stroke)
 	case scene.MarkPath:
-		sx, sy := scaleOne(it.ScaleX), scaleOne(it.ScaleY)
+		sx, sy := scaleOne(it.ScaleX()), scaleOne(it.ScaleY())
 		if sx != 1 || sy != 1 {
 			w.attrRaw("vector-effect", "non-scaling-stroke")
 		}
@@ -343,7 +343,7 @@ func (r *renderer) item(m *scene.Mark, it *scene.Item, tag string, depth int) er
 			w.buf = appendAngle(w.buf, it)
 			w.buf = append(w.buf, ')')
 		}
-		if it.ScaleX.Truthy() || it.ScaleY.Truthy() {
+		if it.ScaleX().Truthy() || it.ScaleY().Truthy() {
 			w.buf = append(w.buf, " scale("...)
 			w.buf = scene.AppendNumber(w.buf, sx)
 			w.buf = append(w.buf, ',')
@@ -351,8 +351,8 @@ func (r *renderer) item(m *scene.Mark, it *scene.Item, tag string, depth int) er
 			w.buf = append(w.buf, ')')
 		}
 		w.buf = append(w.buf, '"')
-		if it.Path.Set {
-			w.attr("d", it.Path.D)
+		if it.Path().Set {
+			w.attr("d", it.Path().D)
 		}
 		r.style(m, it, "path", it.Fill, it.Stroke)
 	case scene.MarkArc, scene.MarkSymbol, scene.MarkShape:
@@ -423,8 +423,8 @@ func appendTranslate(dst []byte, x, y float64) []byte {
 func groupStrokeOffset(it *scene.Item, stroke scene.Paint) float64 {
 	sw := it.StrokeWidth.Or(1)
 	switch {
-	case it.StrokeOffset.Set():
-		return it.StrokeOffset.Val()
+	case it.StrokeOffset().Set():
+		return it.StrokeOffset().Val()
 	case stroke.Truthy() && sw > 0.5 && sw < 1.5:
 		return 0.5 - abs(sw-1)
 	}
@@ -445,7 +445,7 @@ func (r *renderer) group(m *scene.Mark, it *scene.Item, depth int) error {
 	w.buf = appendTranslateItem(w.buf, it)
 	w.buf = append(w.buf, '"')
 
-	fore := it.StrokeForeground.IsTrue()
+	fore := it.StrokeForeground().IsTrue()
 	fill, stroke := it.Fill, it.Stroke
 	// With a foreground stroke the background is drawn without it.
 	bgStroke := stroke

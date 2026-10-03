@@ -153,6 +153,8 @@ type Mark struct {
 	// Shape is the mark-wide geo shape generator (`mark.shape`), consulted
 	// before Item.Shape by shape marks.
 	Shape ShapeFunc
+	// attrs are the slabs the items' property groups come from.
+	attrs *attrSlabs
 
 	// GuideCaption is the aria-label text for axis and legend marks that have
 	// no explicit description; the runtime computes it from the guide's scale
@@ -177,6 +179,14 @@ func (m *Mark) AddItem() *Item {
 //
 // Field names follow Vega's item properties. Unset means "the encoding did not
 // produce this property".
+//
+// The properties every mark type uses are fields. The ones only some mark
+// types use (text, arc and corner geometry, path, line, image, the stroke
+// details, links) live in groups the item allocates when one of them is first
+// set, and are read through methods named after the property (FontSize,
+// StartAngle, ...), which return the unset value while the group is absent.
+// They are set with Set or a Setter. A copy of an Item shares its groups with
+// the original.
 type Item struct {
 	// Mark is the parent mark. Datum is the source tuple (not rendered).
 	Mark  *Mark
@@ -194,74 +204,21 @@ type Item struct {
 	Baseline      string
 
 	// Paint.
-	Fill, Stroke     Paint
-	Opacity          Num
-	FillOpacity      Num
-	StrokeOpacity    Num
-	StrokeWidth      Num
-	StrokeCap        string
-	StrokeJoin       string
-	StrokeMiterLimit Num
-	// StrokeDash is the dash pattern as the encoder wrote it: upstream keeps
-	// any value and its SVG renderer writes String(value) (an array joins with
-	// commas), so a number, a string or an empty array is written as given.
-	// A nullish value (the zero Value is undefined) means no pattern.
-	StrokeDash       jsval.Value
-	StrokeDashOffset Num
-	StrokeForeground Tri
-	StrokeOffset     Num
-	Blend            string
+	Fill, Stroke  Paint
+	Opacity       Num
+	FillOpacity   Num
+	StrokeOpacity Num
+	StrokeWidth   Num
 
-	// Rect and group corners.
-	CornerRadius            Num
-	CornerRadiusTopLeft     Num
-	CornerRadiusTopRight    Num
-	CornerRadiusBottomLeft  Num
-	CornerRadiusBottomRight Num
-
-	// Arc.
-	StartAngle, EndAngle Num
-	PadAngle             Num
-	InnerRadius          Num
-	OuterRadius          Num
-
-	// Symbol, shape, path.
+	// Symbol, shape and every mark that rotates.
 	Shape Shape
 	Size  Num
-	Path  Path
+	Angle Num
 
 	// Line and area.
-	Interpolate string
-	Tension     Num
-	Orient      string
-	Defined     Tri
+	Defined Tri
 
-	// Text.
-	Text        jsval.Value
-	Font        string
-	FontSize    Num
-	FontWeight  string
-	FontStyle   string
-	FontVariant string
-	Dx, Dy      Num
-	Angle       Num
-	Radius      Num
-	Theta       Num
-	Limit       Num
-	LineBreak   string
-	LineHeight  Num
-	Ellipsis    string
-	Dir         string
-
-	// Image.
-	URL    string
-	Aspect Tri
-	Smooth Tri
-
-	// Interaction and accessibility.
-	Cursor              string
-	Href                string
-	Tooltip             jsval.Value
+	// Accessibility.
 	Description         string
 	Aria                Tri
 	AriaRole            string
@@ -273,8 +230,6 @@ type Item struct {
 	Items    []*Mark
 	Clip     Tri
 	ClipPath PathFunc
-	// ScaleX and ScaleY scale path marks.
-	ScaleX, ScaleY Num
 	// NoBound excludes the group's own box from its bounds (`noBound`).
 	NoBound bool
 
@@ -289,8 +244,14 @@ type Item struct {
 	// nearly every item.
 	Raw map[string]jsval.Value
 
-	// imgW, imgH are the natural size of the loaded picture of an image item.
-	imgW, imgH float64
+	// The property groups, nil until a property of theirs is set (attrs.go).
+	text   *textAttrs
+	stroke *strokeAttrs
+	geom   *geomAttrs
+	path   *pathAttrs
+	line   *lineAttrs
+	image  *imageAttrs
+	link   *linkAttrs
 }
 
 // Shape is the geometry source of symbol and shape items: a symbol type name /
@@ -319,7 +280,10 @@ func P(d string) Path { return Path{D: d, Set: true} }
 // parsedPath returns the parsed commands of the item's path, caching them
 // until the path string changes.
 func (it *Item) parsedPath() ([]PathCmd, error) {
-	p := &it.Path
+	if it.path == nil {
+		return ParsePath("")
+	}
+	p := &it.path.Path
 	if p.parsedOK && p.parsedD == p.D {
 		return p.parsed, nil
 	}

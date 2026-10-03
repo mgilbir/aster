@@ -56,7 +56,7 @@ func TestSettersMatchSet(t *testing.T) {
 			if !reflect.DeepEqual(a.Extra, b.Extra) {
 				t.Fatalf("%s=%v: Extra differs", name, val)
 			}
-			if a.Shape.Name != b.Shape.Name || a.Path.D != b.Path.D || a.Path.Set != b.Path.Set || a.Clip != b.Clip || a.Fill != b.Fill || a.Stroke != b.Stroke {
+			if a.Shape.Name != b.Shape.Name || a.Path().D != b.Path().D || a.Path().Set != b.Path().Set || a.Clip != b.Clip || a.Fill != b.Fill || a.Stroke != b.Stroke {
 				t.Fatalf("%s=%v: structural fields differ", name, val)
 			}
 		}

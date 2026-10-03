@@ -26,19 +26,19 @@ var ErrCurveNoArea = errors.New("scene: bundle interpolation cannot draw areas")
 // HasCornerRadius reports whether any corner radius is set and non-zero
 // (`item.cornerRadius || item.cornerRadiusTopLeft || ...`).
 func (it *Item) HasCornerRadius() bool {
-	return it.truthyProp("cornerRadius", it.CornerRadius) ||
-		it.truthyProp("cornerRadiusTopLeft", it.CornerRadiusTopLeft) ||
-		it.truthyProp("cornerRadiusTopRight", it.CornerRadiusTopRight) ||
-		it.truthyProp("cornerRadiusBottomRight", it.CornerRadiusBottomRight) ||
-		it.truthyProp("cornerRadiusBottomLeft", it.CornerRadiusBottomLeft)
+	return it.truthyProp("cornerRadius", it.CornerRadius()) ||
+		it.truthyProp("cornerRadiusTopLeft", it.CornerRadiusTopLeft()) ||
+		it.truthyProp("cornerRadiusTopRight", it.CornerRadiusTopRight()) ||
+		it.truthyProp("cornerRadiusBottomRight", it.CornerRadiusBottomRight()) ||
+		it.truthyProp("cornerRadiusBottomLeft", it.CornerRadiusBottomLeft())
 }
 
 func lineCurve(first *Item) (curveSpec, error) {
-	interp := first.Interpolate
+	interp := first.Interpolate()
 	if interp == "" {
 		interp = "linear"
 	}
-	spec, ok := lookupCurve(interp, first.Orient, first.Tension)
+	spec, ok := lookupCurve(interp, first.Orient(), first.Tension())
 	if !ok {
 		return spec, ErrUnknownInterpolate
 	}
@@ -91,7 +91,7 @@ func Area(ctx PathContext, items []*Item) error {
 		// d3's bundle curve has no areaStart/areaEnd, so upstream throws.
 		return ErrCurveNoArea
 	}
-	horizontal := first.Orient == "horizontal"
+	horizontal := first.Orient() == "horizontal"
 	out := spec.new(ctx)
 	n := len(items)
 	bx := make([]float64, n)
@@ -209,12 +209,12 @@ func rectangle(ctx PathContext, it *Item, x1, y1 float64) {
 	// A word given as a radius is truthy and converts to NaN, which the clamp
 	// keeps: the path is drawn with NaN corners, as upstream draws it.
 	corner := func(prop string, specific Num) float64 {
-		return clamp(it.orZeroProp(prop, specific, "cornerRadius", it.CornerRadius), 0, s)
+		return clamp(it.orZeroProp(prop, specific, "cornerRadius", it.CornerRadius()), 0, s)
 	}
-	tl := corner("cornerRadiusTopLeft", it.CornerRadiusTopLeft)
-	tr := corner("cornerRadiusTopRight", it.CornerRadiusTopRight)
-	bl := corner("cornerRadiusBottomLeft", it.CornerRadiusBottomLeft)
-	br := corner("cornerRadiusBottomRight", it.CornerRadiusBottomRight)
+	tl := corner("cornerRadiusTopLeft", it.CornerRadiusTopLeft())
+	tr := corner("cornerRadiusTopRight", it.CornerRadiusTopRight())
+	bl := corner("cornerRadiusBottomLeft", it.CornerRadiusBottomLeft())
+	br := corner("cornerRadiusBottomRight", it.CornerRadiusBottomRight())
 
 	if tl <= 0 && tr <= 0 && bl <= 0 && br <= 0 {
 		ctx.Rect(x1, y1, w, h)
@@ -236,10 +236,10 @@ func rectangle(ctx PathContext, it *Item, x1, y1 float64) {
 // Arc draws a pie/donut sector as d3-shape's arc generator does, including
 // pad angle and corner rounding.
 func Arc(ctx PathContext, it *Item) error {
-	r0 := it.InnerRadius.Zero()
-	r1 := it.OuterRadius.Zero()
-	a0 := it.StartAngle.Zero() - halfPi
-	a1 := it.EndAngle.Zero() - halfPi
+	r0 := it.InnerRadius().Zero()
+	r1 := it.OuterRadius().Zero()
+	a0 := it.StartAngle().Zero() - halfPi
+	a1 := it.EndAngle().Zero() - halfPi
 	da := math.Abs(a1 - a0)
 	cw := a1 > a0
 
@@ -269,12 +269,12 @@ func arcSector(ctx PathContext, it *Item, r0, r1, a0, a1, da float64, cw bool) {
 	const eps = epsilon12
 	a01, a11, a00, a10 := a0, a1, a0, a1
 	da0, da1 := da, da
-	ap := it.PadAngle.Zero() / 2
+	ap := it.PadAngle().Zero() / 2
 	var rp float64
 	if ap > eps {
 		rp = math.Sqrt(float64(r0*r0) + float64(r1*r1))
 	}
-	rc := math.Min(math.Abs(r1-r0)/2, it.CornerRadius.Zero())
+	rc := math.Min(math.Abs(r1-r0)/2, it.CornerRadius().Zero())
 	rc0, rc1 := rc, rc
 
 	// Apply padding? Note that since r1 >= r0, da1 >= da0.

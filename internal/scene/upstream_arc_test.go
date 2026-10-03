@@ -62,9 +62,9 @@ func TestUpstreamD3ShapeArc(t *testing.T) {
 			dest     *Num
 			optional bool
 		}{
-			{"innerRadius", &it.InnerRadius, false}, {"outerRadius", &it.OuterRadius, false},
-			{"startAngle", &it.StartAngle, false}, {"endAngle", &it.EndAngle, false},
-			{"padAngle", &it.PadAngle, true}, {"cornerRadius", &it.CornerRadius, true},
+			{"innerRadius", &it.geomW().InnerRadius, false}, {"outerRadius", &it.geomW().OuterRadius, false},
+			{"startAngle", &it.geomW().StartAngle, false}, {"endAngle", &it.geomW().EndAngle, false},
+			{"padAngle", &it.geomW().PadAngle, true}, {"cornerRadius", &it.geomW().CornerRadius, true},
 		} {
 			raw, present := values[f.key]
 			if !present {

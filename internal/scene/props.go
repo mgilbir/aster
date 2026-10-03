@@ -54,41 +54,41 @@ func (it *Item) setProp(l *jsonLoader, k string, val jsval.Value) (bool, error) 
 	case "strokeWidth":
 		it.StrokeWidth = numOf(val)
 	case "strokeCap":
-		it.StrokeCap = strOf(val)
+		it.strokeW().StrokeCap = strOf(val)
 	case "strokeJoin":
-		it.StrokeJoin = strOf(val)
+		it.strokeW().StrokeJoin = strOf(val)
 	case "strokeMiterLimit":
-		it.StrokeMiterLimit = numOf(val)
+		it.strokeW().StrokeMiterLimit = numOf(val)
 	case "strokeDash":
-		it.StrokeDash = val
+		it.strokeW().StrokeDash = val
 	case "strokeDashOffset":
-		it.StrokeDashOffset = numOf(val)
+		it.strokeW().StrokeDashOffset = numOf(val)
 	case "strokeForeground":
-		it.StrokeForeground = triOf(val)
+		it.strokeW().StrokeForeground = triOf(val)
 	case "strokeOffset":
-		it.StrokeOffset = numOf(val)
+		it.strokeW().StrokeOffset = numOf(val)
 	case "blend":
-		it.Blend = strOf(val)
+		it.strokeW().Blend = strOf(val)
 	case "cornerRadius":
-		it.CornerRadius = numOf(val)
+		it.geomW().CornerRadius = numOf(val)
 	case "cornerRadiusTopLeft":
-		it.CornerRadiusTopLeft = numOf(val)
+		it.geomW().CornerRadiusTopLeft = numOf(val)
 	case "cornerRadiusTopRight":
-		it.CornerRadiusTopRight = numOf(val)
+		it.geomW().CornerRadiusTopRight = numOf(val)
 	case "cornerRadiusBottomLeft":
-		it.CornerRadiusBottomLeft = numOf(val)
+		it.geomW().CornerRadiusBottomLeft = numOf(val)
 	case "cornerRadiusBottomRight":
-		it.CornerRadiusBottomRight = numOf(val)
+		it.geomW().CornerRadiusBottomRight = numOf(val)
 	case "startAngle":
-		it.StartAngle = numOf(val)
+		it.geomW().StartAngle = numOf(val)
 	case "endAngle":
-		it.EndAngle = numOf(val)
+		it.geomW().EndAngle = numOf(val)
 	case "padAngle":
-		it.PadAngle = numOf(val)
+		it.geomW().PadAngle = numOf(val)
 	case "innerRadius":
-		it.InnerRadius = numOf(val)
+		it.geomW().InnerRadius = numOf(val)
 	case "outerRadius":
-		it.OuterRadius = numOf(val)
+		it.geomW().OuterRadius = numOf(val)
 	case "shape":
 		if val.IsObj() {
 			fn, err := pathFuncFromValue(val)
@@ -106,26 +106,26 @@ func (it *Item) setProp(l *jsonLoader, k string, val jsval.Value) (bool, error) 
 		// voronoi transform sets a degenerate cell's path to null on a later
 		// run), and the SVG writer then emits no d attribute.
 		if val.IsNullish() {
-			it.Path = Path{}
+			it.SetPath(Path{})
 		} else {
-			it.Path = P(strOf(val))
+			it.SetPath(P(strOf(val)))
 		}
 	case "scaleX":
-		it.ScaleX = numOf(val)
+		it.pathW().ScaleX = numOf(val)
 	case "scaleY":
-		it.ScaleY = numOf(val)
+		it.pathW().ScaleY = numOf(val)
 	case "interpolate":
-		it.Interpolate = strOfTruthy(val)
+		it.lineW().Interpolate = strOfTruthy(val)
 	case "tension":
-		it.Tension = numOf(val)
+		it.lineW().Tension = numOf(val)
 	case "orient":
-		it.Orient = strOfTruthy(val)
+		it.lineW().Orient = strOfTruthy(val)
 	case "defined":
 		it.Defined = triOf(val)
 	case "text":
-		it.Text = val
+		it.textW().Text = val
 	case "font":
-		it.Font = strOf(val)
+		it.textW().Font = strOf(val)
 		// An array (Vega-Lite writes [] for a null title font) is truthy: the
 		// attribute is its text, with no sans-serif default.
 		delete(it.Raw, "font")
@@ -133,51 +133,51 @@ func (it *Item) setProp(l *jsonLoader, k string, val jsval.Value) (bool, error) 
 			it.setRaw("font", val)
 		}
 	case "fontSize":
-		it.FontSize = numOf(val)
+		it.textW().FontSize = numOf(val)
 	case "fontWeight":
-		it.FontWeight = strOf(val)
+		it.textW().FontWeight = strOf(val)
 	case "fontStyle":
-		it.FontStyle = strOf(val)
+		it.textW().FontStyle = strOf(val)
 	case "fontVariant":
-		it.FontVariant = strOf(val)
+		it.textW().FontVariant = strOf(val)
 	case "dx":
-		it.Dx = numOf(val)
+		it.textW().Dx = numOf(val)
 	case "dy":
-		it.Dy = numOf(val)
+		it.textW().Dy = numOf(val)
 	case "angle":
 		it.Angle = numOf(val)
 	case "radius":
-		it.Radius = numOf(val)
+		it.textW().Radius = numOf(val)
 	case "theta":
-		it.Theta = numOf(val)
+		it.textW().Theta = numOf(val)
 	case "limit":
-		it.Limit = numOf(val)
+		it.textW().Limit = numOf(val)
 	case "lineBreak":
-		it.LineBreak = strOf(val)
+		it.textW().LineBreak = strOf(val)
 	case "lineHeight":
-		it.LineHeight = numOf(val)
+		it.textW().LineHeight = numOf(val)
 	case "ellipsis":
-		it.Ellipsis = strOf(val)
+		it.textW().Ellipsis = strOf(val)
 	case "dir":
-		it.Dir = strOf(val)
+		it.textW().Dir = strOf(val)
 	case "url":
-		it.URL = strOf(val)
+		it.imageW().URL = strOf(val)
 	case "aspect":
-		it.Aspect = triOf(val)
+		it.imageW().Aspect = triOf(val)
 	case "smooth":
-		it.Smooth = triOf(val)
+		it.imageW().Smooth = triOf(val)
 	case "cursor":
-		it.Cursor = strOf(val)
+		it.linkW().Cursor = strOf(val)
 	case "href":
 		// The renderer sanitizes the href with vega-loader, whose first step
 		// is uri.replace(...): only a string can be a link, any other value
 		// (a number, a date) rejects and renders none.
-		it.Href = ""
+		it.linkW().Href = ""
 		if val.IsStr() {
-			it.Href = val.StrValue()
+			it.linkW().Href = val.StrValue()
 		}
 	case "tooltip":
-		it.Tooltip = val
+		it.linkW().Tooltip = val
 	case "description":
 		it.Description = strOf(val)
 	case "aria":
@@ -283,106 +283,106 @@ func (it *Item) Get(key string) jsval.Value {
 	case "strokeWidth":
 		return num(it.StrokeWidth)
 	case "strokeCap":
-		return str(it.StrokeCap)
+		return str(it.StrokeCap())
 	case "strokeJoin":
-		return str(it.StrokeJoin)
+		return str(it.StrokeJoin())
 	case "strokeMiterLimit":
-		return num(it.StrokeMiterLimit)
+		return num(it.StrokeMiterLimit())
 	case "strokeDash":
-		return it.StrokeDash
+		return it.StrokeDash()
 	case "strokeDashOffset":
-		return num(it.StrokeDashOffset)
+		return num(it.StrokeDashOffset())
 	case "strokeForeground":
-		return tri(it.StrokeForeground)
+		return tri(it.StrokeForeground())
 	case "strokeOffset":
-		return num(it.StrokeOffset)
+		return num(it.StrokeOffset())
 	case "blend":
-		return str(it.Blend)
+		return str(it.Blend())
 	case "cornerRadius":
-		return num(it.CornerRadius)
+		return num(it.CornerRadius())
 	case "cornerRadiusTopLeft":
-		return num(it.CornerRadiusTopLeft)
+		return num(it.CornerRadiusTopLeft())
 	case "cornerRadiusTopRight":
-		return num(it.CornerRadiusTopRight)
+		return num(it.CornerRadiusTopRight())
 	case "cornerRadiusBottomLeft":
-		return num(it.CornerRadiusBottomLeft)
+		return num(it.CornerRadiusBottomLeft())
 	case "cornerRadiusBottomRight":
-		return num(it.CornerRadiusBottomRight)
+		return num(it.CornerRadiusBottomRight())
 	case "startAngle":
-		return num(it.StartAngle)
+		return num(it.StartAngle())
 	case "endAngle":
-		return num(it.EndAngle)
+		return num(it.EndAngle())
 	case "padAngle":
-		return num(it.PadAngle)
+		return num(it.PadAngle())
 	case "innerRadius":
-		return num(it.InnerRadius)
+		return num(it.InnerRadius())
 	case "outerRadius":
-		return num(it.OuterRadius)
+		return num(it.OuterRadius())
 	case "shape":
 		return str(it.Shape.Name)
 	case "size":
 		return num(it.Size)
 	case "path":
-		if !it.Path.Set {
+		if !it.Path().Set {
 			return jsval.Undefined
 		}
-		return jsval.Str(it.Path.D)
+		return jsval.Str(it.Path().D)
 	case "scaleX":
-		return num(it.ScaleX)
+		return num(it.ScaleX())
 	case "scaleY":
-		return num(it.ScaleY)
+		return num(it.ScaleY())
 	case "interpolate":
-		return str(it.Interpolate)
+		return str(it.Interpolate())
 	case "tension":
-		return num(it.Tension)
+		return num(it.Tension())
 	case "orient":
-		return str(it.Orient)
+		return str(it.Orient())
 	case "defined":
 		return tri(it.Defined)
 	case "text":
-		return it.Text
+		return it.Text()
 	case "font":
-		return str(it.Font)
+		return str(it.Font())
 	case "fontSize":
-		return num(it.FontSize)
+		return num(it.FontSize())
 	case "fontWeight":
-		return str(it.FontWeight)
+		return str(it.FontWeight())
 	case "fontStyle":
-		return str(it.FontStyle)
+		return str(it.FontStyle())
 	case "fontVariant":
-		return str(it.FontVariant)
+		return str(it.FontVariant())
 	case "dx":
-		return num(it.Dx)
+		return num(it.Dx())
 	case "dy":
-		return num(it.Dy)
+		return num(it.Dy())
 	case "angle":
 		return num(it.Angle)
 	case "radius":
-		return num(it.Radius)
+		return num(it.Radius())
 	case "theta":
-		return num(it.Theta)
+		return num(it.Theta())
 	case "limit":
-		return num(it.Limit)
+		return num(it.Limit())
 	case "lineBreak":
-		return str(it.LineBreak)
+		return str(it.LineBreak())
 	case "lineHeight":
-		return num(it.LineHeight)
+		return num(it.LineHeight())
 	case "ellipsis":
-		return str(it.Ellipsis)
+		return str(it.Ellipsis())
 	case "dir":
-		return str(it.Dir)
+		return str(it.Dir())
 	case "url":
-		return str(it.URL)
+		return str(it.URL())
 	case "aspect":
-		return tri(it.Aspect)
+		return tri(it.Aspect())
 	case "smooth":
-		return tri(it.Smooth)
+		return tri(it.Smooth())
 	case "cursor":
-		return str(it.Cursor)
+		return str(it.Cursor())
 	case "href":
-		return str(it.Href)
+		return str(it.Href())
 	case "tooltip":
-		return it.Tooltip
+		return it.Tooltip()
 	case "description":
 		return str(it.Description)
 	case "aria":

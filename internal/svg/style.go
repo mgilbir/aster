@@ -31,7 +31,7 @@ func (r *renderer) style(m *scene.Mark, it *scene.Item, tag string, fill, stroke
 	}
 
 	var smoothOff bool
-	if tag == "image" && it.Smooth.IsFalse() {
+	if tag == "image" && it.Smooth().IsFalse() {
 		smoothOff = true
 	}
 
@@ -40,14 +40,14 @@ func (r *renderer) style(m *scene.Mark, it *scene.Item, tag string, fill, stroke
 		w.attrName("font-size")
 		w.buf = scene.AppendNumber(w.buf, scene.FontSize(it))
 		w.buf = append(w.buf, "px\""...)
-		if it.FontStyle != "" {
-			w.attr("font-style", it.FontStyle)
+		if it.FontStyle() != "" {
+			w.attr("font-style", it.FontStyle())
 		}
-		if it.FontVariant != "" {
-			w.attr("font-variant", it.FontVariant)
+		if it.FontVariant() != "" {
+			w.attr("font-variant", it.FontVariant())
 		}
-		if it.FontWeight != "" {
-			w.attr("font-weight", it.FontWeight)
+		if it.FontWeight() != "" {
+			w.attr("font-weight", it.FontWeight())
 		}
 	}
 
@@ -56,21 +56,21 @@ func (r *renderer) style(m *scene.Mark, it *scene.Item, tag string, fill, stroke
 	r.paintAttr("stroke", stroke)
 	r.itemNumAttr(it, "strokeOpacity", "stroke-opacity", it.StrokeOpacity)
 	r.itemNumAttr(it, "strokeWidth", "stroke-width", it.StrokeWidth)
-	if it.StrokeCap != "" {
-		w.attr("stroke-linecap", it.StrokeCap)
+	if it.StrokeCap() != "" {
+		w.attr("stroke-linecap", it.StrokeCap())
 	}
-	if it.StrokeJoin != "" {
-		w.attr("stroke-linejoin", it.StrokeJoin)
+	if it.StrokeJoin() != "" {
+		w.attr("stroke-linejoin", it.StrokeJoin())
 	}
-	if !it.StrokeDash.IsNullish() {
+	if !it.StrokeDash().IsNullish() {
 		// String(value): an array joins with commas, an empty one gives "".
-		w.attr("stroke-dasharray", it.StrokeDash.AsString())
+		w.attr("stroke-dasharray", it.StrokeDash().AsString())
 	}
-	r.itemNumAttr(it, "strokeDashOffset", "stroke-dashoffset", it.StrokeDashOffset)
-	r.itemNumAttr(it, "strokeMiterLimit", "stroke-miterlimit", it.StrokeMiterLimit)
+	r.itemNumAttr(it, "strokeDashOffset", "stroke-dashoffset", it.StrokeDashOffset())
+	r.itemNumAttr(it, "strokeMiterLimit", "stroke-miterlimit", it.StrokeMiterLimit())
 	r.itemNumAttr(it, "opacity", "opacity", it.Opacity)
 
-	blend := it.Blend
+	blend := it.Blend()
 	if !blendModes[blend] {
 		blend = ""
 	}

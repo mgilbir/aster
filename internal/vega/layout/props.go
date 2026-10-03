@@ -74,8 +74,8 @@ func extraStr(it *scene.Item, name string) string {
 // orientOf is item.orient: the typed field, or an untyped property the
 // runtime may have stored instead.
 func orientOf(it *scene.Item) string {
-	if it.Orient != "" {
-		return it.Orient
+	if it.Orient() != "" {
+		return it.Orient()
 	}
 	return extraStr(it, "orient")
 }

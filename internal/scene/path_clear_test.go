@@ -14,14 +14,14 @@ func TestNullPathClearsPreviousPath(t *testing.T) {
 	if _, err := it.Set("path", jsval.Str("M0,0L1,1Z")); err != nil {
 		t.Fatal(err)
 	}
-	if !it.Path.Set || it.Path.D != "M0,0L1,1Z" {
-		t.Fatalf("path = %+v", it.Path)
+	if !it.Path().Set || it.Path().D != "M0,0L1,1Z" {
+		t.Fatalf("path = %+v", it.Path())
 	}
 	for _, v := range []jsval.Value{jsval.Null, jsval.Undefined} {
 		it.Set("path", jsval.Str("M0,0L1,1Z"))
 		it.Set("path", v)
-		if it.Path.Set {
-			t.Errorf("path survived %v: %+v", v, it.Path)
+		if it.Path().Set {
+			t.Errorf("path survived %v: %+v", v, it.Path())
 		}
 		if got := it.Get("path"); !got.IsNullish() {
 			t.Errorf("path reads back %v", got)
