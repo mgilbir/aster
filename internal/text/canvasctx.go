@@ -18,7 +18,18 @@ type CanvasContext struct {
 	mu    sync.Mutex
 	font  string
 	cache lruCache
+	// valid remembers which font strings ValidCanvasFont accepted: a chart
+	// measures thousands of texts in a few fonts, and parsing the font is
+	// dearer than finding the width.
+	valid map[string]bool
 }
+
+// maxValidFonts bounds the memory of valid; a specification can name any
+// number of fonts.
+const (
+	maxValidFonts   = 256
+	maxValidFontLen = 256
+)
 
 // canvasDefaultFont is a new canvas context's font.
 const canvasDefaultFont = "10px sans-serif"
@@ -36,7 +47,17 @@ func (c *CanvasContext) MeasureText(text, cssFont string) float64 {
 	if w, ok := c.cache.get(key); ok {
 		return w
 	}
-	if ValidCanvasFont(cssFont) {
+	ok, seen := c.valid[cssFont]
+	if !seen {
+		ok = ValidCanvasFont(cssFont)
+		if len(cssFont) <= maxValidFontLen {
+			if c.valid == nil || len(c.valid) >= maxValidFonts {
+				c.valid = make(map[string]bool)
+			}
+			c.valid[cssFont] = ok
+		}
+	}
+	if ok {
 		c.font = cssFont
 	}
 	w := c.m.MeasureText(text, c.font)
