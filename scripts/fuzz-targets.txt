@@ -1,0 +1,31 @@
+# The coverage-guided fuzz targets (go test -fuzz). One per line:
+#
+#   <package> TAB <target> TAB <minutes in the nightly run>
+#
+# scripts/fuzz.sh (make fuzz) runs every line in turn, and the matrix of
+# .github/workflows/fuzz.yml is built from this file, so a new target is
+# listed here and nowhere else. TestFuzzTargetsListed fails when a Fuzz
+# function is missing from it.
+./internal/jsval	FuzzParseJSON	10
+./internal/expr	FuzzParse	10
+./internal/expr	FuzzCompileEval	10
+./internal/vegalite	FuzzEventSelector	10
+./internal/geo	FuzzTopoJSON	10
+./internal/geo	FuzzPath	5
+./internal/scene	FuzzFromJSON	10
+./internal/svg	FuzzRender	10
+./internal/svgpdf	FuzzConvert	10
+./internal/svgpdf	FuzzParseSVGFast	10
+./internal/raster	FuzzRender	10
+./internal/raster	FuzzParseDocument	10
+./internal/raster	FuzzPathData	5
+./internal/raster	FuzzColorAndTransform	5
+./internal/raster	FuzzCSS	5
+./internal/raster	FuzzFeatureAttrs	5
+./internal/raster	FuzzFontMetrics	5
+./internal/format	FuzzParseDate	5
+./internal/format	FuzzNumberFormat	5
+./internal/format	FuzzTimeFormatParse	5
+./internal/scale/color	FuzzParse	5
+./internal/text	FuzzLoadFont	5
+./internal/text	FuzzMeasure	5

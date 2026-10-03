@@ -2,11 +2,17 @@ package expr
 
 import (
 	"errors"
+	"fmt"
 	"math/rand/v2"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/mgilbir/aster/internal/budget"
+	"github.com/mgilbir/aster/internal/fuzzutil"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -52,7 +58,108 @@ func FuzzCompileEval(f *testing.F) {
 	} {
 		f.Add(s)
 	}
+	for _, s := range corpusExpressions(f) {
+		f.Add(s)
+	}
 	f.Fuzz(func(t *testing.T, src string) { compileEvalNoPanic(t, src) })
+}
+
+// corpusExpressions are the distinct expressions (the `expr` and `signal`
+// strings) of the Vega specifications in testdata/corpus that are at most 200
+// bytes long: what real charts write, so the fuzzer starts from every syntax
+// they use.
+func corpusExpressions(tb testing.TB) []string {
+	files, err := filepath.Glob(filepath.Join("..", "..", "testdata", "corpus", "vega", "*.vg.json"))
+	if err != nil || len(files) == 0 {
+		tb.Fatalf("no corpus specifications found (%v)", err)
+	}
+	seen := map[string]bool{}
+	var walk func(v jsval.Value)
+	walk = func(v jsval.Value) {
+		switch v.Kind() {
+		case jsval.KindArr:
+			for _, it := range v.Items() {
+				walk(it)
+			}
+		case jsval.KindObj:
+			o := v.ObjValue()
+			for i := 0; i < o.Len(); i++ {
+				if k, e := o.KeyAt(i), o.ValueAt(i); (k == "expr" || k == "signal") && e.IsStr() && len(e.StrValue()) <= 200 {
+					seen[e.StrValue()] = true
+				}
+				walk(o.ValueAt(i))
+			}
+		}
+	}
+	for _, file := range files {
+		b, err := os.ReadFile(file)
+		if err != nil {
+			tb.Fatal(err)
+		}
+		if v, err := jsval.ParseJSON(b); err == nil {
+			walk(v)
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for s := range seen {
+		out = append(out, s)
+	}
+	slices.Sort(out)
+	return out
+}
+
+// shape is the syntax tree of n, one token per node, in Walk order.
+func shape(n *Node) string {
+	var b strings.Builder
+	n.Walk(func(n *Node) bool {
+		fmt.Fprintf(&b, "%d:%s:%s:%s:%t ", n.Kind, n.Op, n.Name, n.Raw, n.Computed)
+		return false
+	})
+	return b.String()
+}
+
+// FuzzParse holds the parser alone to its contract: it fails only with a
+// *SyntaxError (a resource limit wrapping budget.ErrLimit), it finishes, and
+// the tree it returns is the same when the source is padded with white space
+// (which upstream's tokenizer skips) and can be compiled without a panic.
+// There is no printer to round-trip through.
+func FuzzParse(f *testing.F) {
+	for _, s := range corpusExpressions(f) {
+		f.Add(s)
+	}
+	for _, s := range []string{
+		"a ? b : c ? d : e", "-a ** 2", "a in b", "this", "x++", "0x1F + 0b11 + 0o7 + 017 + 1e3 + .5", `/(?<n>a)\k<n>/giu.test(s)`,
+		`'\u{1F600}\x41\101\` + "\n'", "{a: 1, 'b': 2, 3: 4, if: 5}", "[,]", "a.if", "a[b][c](d)", "!~+-a", `a\u0062`, `\ud83d`, strings.Repeat("(", 600),
+	} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, src string) {
+		fuzzutil.Within(t, 10*time.Second, fmt.Sprintf("Parse(%q)", src), func() {
+			n, err := Parse(src)
+			padded, err2 := Parse(" \t" + src + "\n ")
+			if err != nil {
+				var se *SyntaxError
+				if !errors.As(err, &se) {
+					t.Errorf("%q: error %T %v is not a *SyntaxError", src, err, err)
+				} else if se.Limit != errors.Is(err, budget.ErrLimit) {
+					t.Errorf("%q: Limit is %v but errors.Is(ErrLimit) is not", src, se.Limit)
+				}
+				if err2 == nil {
+					t.Errorf("%q: fails, but succeeds padded with white space", src)
+				}
+				return
+			}
+			if n == nil {
+				t.Fatalf("%q: nil tree without an error", src)
+			}
+			if err2 != nil && !errors.Is(err2, budget.ErrLimit) {
+				t.Errorf("%q: parses, but fails padded with white space: %v", src, err2)
+			} else if err2 == nil && shape(padded) != shape(n) {
+				t.Errorf("%q: padded with white space it parses to a different tree:\n%s\n%s", src, shape(n), shape(padded))
+			}
+			_, _ = CompileNode(n)
+		})
+	})
 }
 
 // TestMutatedGolden runs byte-level mutations of every recorded expression

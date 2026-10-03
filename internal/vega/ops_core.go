@@ -558,8 +558,12 @@ func facTupleIndex(c *rtContext, n *opNode, e *entry) (any, transform, func(*opN
 
 // facRelay relays a data stream between pipelines; with `derive` it hands on
 // copies, so that transforms downstream do not write into the source tuples.
+// A source tuple that comes again in a later pulse gets its copy back, updated.
 func facRelay(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *opParams) any) {
-	lut := map[*jsval.Object]jsval.Value{}
+	// The copies the last pulse handed on, by source. A pulse looks its tuples
+	// up in a map built from them; the first pulse (usually the only one) has
+	// nothing to look up, and builds a map only if a tuple comes twice.
+	var last []relayCopy
 	return nil, trFunc(func(n *opNode, p *opParams, pulse *flowPulse) *flowPulse {
 		src := pulse.tuples
 		if len(pulse.multi) > 0 {
@@ -569,10 +573,15 @@ func facRelay(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 			return &flowPulse{stamp: pulse.stamp, encode: pulse.encode, changed: true, tuples: src, tree: pulse.tree}
 		}
 		out := make([]jsval.Value, len(src))
-		if len(lut) == 0 {
-			lut = make(map[*jsval.Object]jsval.Value, len(src))
+		copies := make([]relayCopy, 0, len(src))
+		var lut map[*jsval.Object]*jsval.Object
+		var ids tidSet
+		if len(last) > 0 || !ids.init(src) {
+			lut = make(map[*jsval.Object]*jsval.Object, max(len(src), len(last)))
+			for _, c := range last {
+				lut[c.src] = c.dst
+			}
 		}
-		live := make(map[*jsval.Object]struct{}, len(src))
 		var cl jsval.Cloner
 		for i, t := range src {
 			o := t.ObjValue()
@@ -580,26 +589,85 @@ func facRelay(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 				out[i] = t
 				continue
 			}
-			live[o] = struct{}{}
-			d, ok := lut[o]
-			if !ok {
-				d = jsval.Obj(cl.Clone(o))
-				lut[o] = d
-			} else {
-				do := d.ObjValue()
-				for j := 0; j < o.Len(); j++ {
-					do.Set(o.KeyAt(j), o.ValueAt(j))
+			if lut == nil && !ids.add(o) {
+				// Perhaps a tuple this pulse has had already.
+				lut = make(map[*jsval.Object]*jsval.Object, len(src))
+				for _, c := range copies {
+					lut[c.src] = c.dst
 				}
 			}
-			out[i] = d
-		}
-		for o := range lut {
-			if _, ok := live[o]; !ok {
-				delete(lut, o)
+			var d *jsval.Object
+			if lut != nil {
+				d = lut[o]
 			}
+			if d == nil {
+				d = cl.Clone(o)
+				if lut != nil {
+					lut[o] = d
+				}
+			} else {
+				for j := 0; j < o.Len(); j++ {
+					d.Set(o.KeyAt(j), o.ValueAt(j))
+				}
+			}
+			copies = append(copies, relayCopy{o, d})
+			out[i] = jsval.Obj(d)
 		}
+		last = copies
 		return &flowPulse{stamp: pulse.stamp, encode: pulse.encode, changed: true, tuples: out}
 	}), nil
+}
+
+// relayCopy is a source tuple and the copy a derived relay made of it.
+type relayCopy struct{ src, dst *jsval.Object }
+
+// tidSet is a set of tuples by tuple id: what an operator uses to know,
+// without a map, that a tuple of a pulse has not come before in that pulse.
+// Distinct tuples can share an id (a derived copy keeps its source's), so a
+// tuple add finds in the set has only perhaps come before. init fails when a
+// tuple has no id, or the ids spread over more than 64 per tuple.
+type tidSet struct {
+	lo   uint32
+	bits []uint64
+}
+
+func (s *tidSet) init(tuples []jsval.Value) bool {
+	lo, hi, n := uint32(math.MaxUint32), uint32(0), 0
+	for _, t := range tuples {
+		o := t.ObjValue()
+		if o == nil {
+			continue
+		}
+		id := o.TupleID()
+		if id == 0 {
+			return false
+		}
+		lo, hi, n = min(lo, id), max(hi, id), n+1
+	}
+	if n == 0 {
+		return true
+	}
+	span := uint64(hi-lo) + 1
+	if span > 64*uint64(n) {
+		return false
+	}
+	s.lo, s.bits = lo, make([]uint64, (span+63)/64)
+	return true
+}
+
+// add puts o in the set, and reports false when its id was there already (or
+// is out of the range init saw).
+func (s *tidSet) add(o *jsval.Object) bool {
+	i := uint64(o.TupleID() - s.lo)
+	if i >= 64*uint64(len(s.bits)) {
+		return false
+	}
+	w, b := i/64, uint64(1)<<(i%64)
+	if s.bits[w]&b != 0 {
+		return false
+	}
+	s.bits[w] |= b
+	return true
 }
 
 func facLoad(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *opParams) any) {
