@@ -132,7 +132,7 @@ func (m *mut) number() string {
 var trickyStrings = []string{
 	"", " ", "NaN", "Infinity", "-Infinity", "null", "undefined", "true", "0", "-0", "1e3", "0x10", " 12 ",
 	"日本語のテキスト", "😀👍🏽", "שלום עולם", "العربية", "é́", "a\u0000b", "<b>&amp;\"'</b>", "line1\nline2", "tab\there",
-	"2020-01-01", "2020-13-45", "1e999", "constructor", "__proto__", "toString", "‮", "a very long string that goes on and on and on and on and on and on and on and on and on and on and on and on",
+	"2020-01-01", "2020-13-45", "1e999", "constructor", "__proto__", "toString", "\u202e", "a very long string that goes on and on and on and on and on and on and on and on and on and on and on and on",
 }
 
 var hugeNumbers = []string{"1e308", "-1e308", "5e-324", "1e-320", "1e-300", "9007199254740993", "-9007199254740993", "1.7976931348623157e308", "4.9e-324", "0", "-0", "123456789012345678901234567890", "0.1", "1e21", "1e-7"}
@@ -234,10 +234,6 @@ var poolVLTransform = []string{
 	`{"quantile":"$F","probs":[0.25,0.5,0.75]}`, `{"quantile":"$F","step":0.1,"groupby":["$F"]}`, `{"joinaggregate":[{"op":"mean","field":"$F","as":"jm"}],"groupby":["$F"]}`, `{"joinaggregate":[{"op":"count","as":"jc"}]}`, `{"pivot":"$F","value":"$F","groupby":["$F"]}`, `{"pivot":"$F","value":"$F","op":"max"}`,
 	`{"lookup":"$F","from":{"data":{"values":[{"k":1,"v":"one"},{"k":2,"v":"two"}]},"key":"k","fields":["v"]}}`, `{"lookup":"$F","from":{"data":{"values":[{"k":1,"v":"one"}]},"key":"k"},"as":"lk","default":"none"}`,
 	`{"extent":"$F","param":"ex"}`, `{"filter":{"param":"pt"}}`,
-}
-
-var poolVLTransformParams = []string{
-	`"maxbins"`, `"step"`, `"extent"`, `"groupby"`, `"as"`, `"frame"`, `"sort"`, `"offset"`, `"ignorePeers"`, `"bandwidth"`, `"order"`,
 }
 
 // Vega-side pools.

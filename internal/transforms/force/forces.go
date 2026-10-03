@@ -7,13 +7,6 @@ import (
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
-func clampIter(n int) int {
-	if n > MaxForceIterations {
-		return MaxForceIterations
-	}
-	return n
-}
-
 // Center translates all nodes so their centroid sits at (X, Y).
 type Center struct{ X, Y float64 }
 

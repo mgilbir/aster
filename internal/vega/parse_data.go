@@ -322,10 +322,8 @@ func analyzeData(data jsval.Value, scope *Scope, ops []*entry) []*entry {
 			modify = true
 		}
 		if m.source {
-			source = t
 			haveSource = true
 		} else if m.changes {
-			source = nil
 			haveSource = false
 		}
 	}

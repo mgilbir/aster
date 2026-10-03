@@ -447,7 +447,7 @@ func (m *modelBase) assembleProjections() []Value { return assembleProjections(m
 func (m *modelBase) assembleTitle() Value {
 	title := jsval.NewObject(4)
 	var encoding Value
-	var noEnc Value = mkv()
+	noEnc := mkv()
 	if m.title.IsTruthy() {
 		encoding = m.title.Get("encoding")
 		noEnc = jsval.Obj(omit(m.title, "encoding"))

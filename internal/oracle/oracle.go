@@ -341,9 +341,9 @@ func (p *proc) stop() {
 	if p.cmd == nil {
 		return
 	}
-	p.stdin.Close()
+	_ = p.stdin.Close()
 	killGroup(p.cmd)
-	p.cmd.Wait()
+	_ = p.cmd.Wait() // killed: the error says so
 	p.cmd = nil
 }
 

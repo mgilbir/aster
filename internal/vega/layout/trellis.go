@@ -206,7 +206,6 @@ func layoutHeaders(headers, groups []*scene.Item, ncols, limit int, offset float
 		if g != nil {
 			var x, y float64
 			if isX {
-				x, y = 0, 0
 				if band == nil {
 					x = xOf(g)
 				} else {
@@ -230,7 +229,7 @@ func layoutHeaders(headers, groups []*scene.Item, ncols, limit int, offset float
 			h.Y = scene.N(y)
 
 			// update the current edge of the layout bounds
-			var mb *scene.Bounds = hb
+			mb := hb
 			if h.Mark != nil {
 				mb = &h.Mark.Bounds
 			}

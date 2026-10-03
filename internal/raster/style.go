@@ -191,12 +191,12 @@ func parsePaint(s string) (paint, bool) {
 		}
 		p := paint{kind: pURL, id: ref}
 		rest := strings.TrimSpace(s[end+1:])
-		switch {
-		case rest == "":
+		switch rest {
+		case "":
 			p.fbKind = pNone
-		case rest == "none":
+		case "none":
 			p.fbKind = pNone
-		case rest == "currentColor" || rest == "currentcolor":
+		case "currentColor", "currentcolor":
 			p.fbKind = pCurrent
 		default:
 			if c, ok := parseColor(rest); ok {

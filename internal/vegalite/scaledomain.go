@@ -440,7 +440,7 @@ func mergeDomains(domains []Value) Value {
 	var allData []Value
 	seenD := map[string]bool{}
 	for _, d := range domains {
-		var v Value = jsval.Null
+		v := jsval.Null
 		if isDataRefDomain(d) {
 			v = d.Get("data")
 		}

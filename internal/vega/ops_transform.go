@@ -18,19 +18,6 @@ import (
 
 // -- parameter readers ----------------------------------------------------------
 
-func (p *opParams) flatten(x any, out *[]any) {
-	switch v := x.(type) {
-	case []any:
-		for _, e := range v {
-			p.flatten(e, out)
-		}
-	case nil:
-		*out = append(*out, nil)
-	default:
-		*out = append(*out, v)
-	}
-}
-
 // list returns a list parameter's elements: a resolved array, the items of an
 // array value, or the single value.
 func (p *opParams) list(name string) []any {

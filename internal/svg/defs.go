@@ -16,12 +16,11 @@ type gradDef struct {
 }
 
 type clipDef struct {
-	id        string
-	path      string
-	width     scene.Num
-	height    scene.Num
-	hasSize   bool
-	pathValid bool
+	id      string
+	path    string
+	width   scene.Num
+	height  scene.Num
+	hasSize bool
 }
 
 const patternPrefix = "p_"

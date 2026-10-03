@@ -66,7 +66,7 @@ func TestNilAndEmpty(t *testing.T) {
 		t.Fatal("nil scenegraph should fail")
 	}
 	sg := scene.New()
-	got, err := Render(nil, sg, Options{Width: 10, Height: 20, Scale: 2, Origin: [2]float64{1.5, 2}, Background: "#fff"})
+	got, err := Render(context.Background(), sg, Options{Width: 10, Height: 20, Scale: 2, Origin: [2]float64{1.5, 2}, Background: "#fff"})
 	if err != nil {
 		t.Fatal(err)
 	}

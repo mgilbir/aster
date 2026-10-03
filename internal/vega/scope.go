@@ -61,8 +61,6 @@ func (l *paramList) get(name string) P { return l.m.at(name) }
 
 func (l *paramList) has(name string) bool { return l.m.has(name) }
 
-func (l *paramList) delete(name string) { l.m.delete(name) }
-
 // tmeta is a transform's definition metadata.
 type tmeta struct {
 	source, generates, changes, modifies, nomod bool
@@ -415,7 +413,6 @@ type Scope struct {
 }
 
 type parseOptions struct {
-	maxDepth int
 	// maxOps bounds the operators the parse produces, counted in ops.
 	maxOps, ops int
 }
@@ -446,8 +443,6 @@ func (s *Scope) fork() *Scope {
 		depth:    s.depth + 1,
 	}
 }
-
-func (s *Scope) isSubscope() bool { return s.subid > 0 }
 
 func (s *Scope) toRuntime() *flowSpec {
 	s.finish()

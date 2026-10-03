@@ -59,9 +59,7 @@ type rasterizer struct {
 	aaTable    []uint8
 	crispTable []uint8
 	fx0, fx1   float64
-	qx0, qx1   int32
 	aa         bool
-	haveEdges  bool
 	minX, maxX float64
 
 	ctx     context.Context // polled every few rows; nil = never cancelled

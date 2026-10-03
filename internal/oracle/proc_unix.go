@@ -21,6 +21,6 @@ func killGroup(cmd *exec.Cmd) {
 		return
 	}
 	if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil {
-		cmd.Process.Kill()
+		_ = cmd.Process.Kill()
 	}
 }

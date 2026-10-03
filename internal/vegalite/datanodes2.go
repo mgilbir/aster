@@ -153,7 +153,7 @@ func rangeFormula(m fieldDefModel, fd Value, channel string, config Value) (form
 	cc := m.b().ctx
 
 	if binRequiresRange(cc, fd, channel) {
-		var guide Value = mkv()
+		guide := mkv()
 		if u, ok := m.(*unitModel); ok {
 			if a := u.axis(channel); a.IsTruthy() {
 				guide = a

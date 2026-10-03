@@ -175,24 +175,6 @@ func bisectRight(a []float64, x float64, lo, hi int) int {
 	return lo
 }
 
-// bisectLeft is d3.bisectLeft.
-func bisectLeft(a []float64, x float64, lo, hi int) int {
-	if lo < hi {
-		if x != x {
-			return hi
-		}
-		for lo < hi {
-			mid := int(uint(lo+hi) >> 1)
-			if a[mid] < x {
-				lo = mid + 1
-			} else {
-				hi = mid
-			}
-		}
-	}
-	return lo
-}
-
 // quantileSorted is d3.quantileSorted (R-7 linear interpolation) on sorted
 // data. ok is false for empty data or a NaN p (upstream returns undefined).
 func quantileSorted(values []float64, p float64) (float64, bool) {

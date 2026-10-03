@@ -67,11 +67,10 @@ type FontData struct {
 // textShaper adapts internal/text (forme shaping, the engine's font
 // resolution and fallback) to Shaper.
 type textShaper struct {
-	m      *text.Measurer
-	known  map[string]bool // lower-case family names that exist
-	mu     sync.Mutex
-	faces  map[*text.Face]*textFace
-	family string
+	m     *text.Measurer
+	known map[string]bool // lower-case family names that exist
+	mu    sync.Mutex
+	faces map[*text.Face]*textFace
 }
 
 var builtinFamilies = []string{

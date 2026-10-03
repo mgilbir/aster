@@ -417,7 +417,7 @@ func positionAndSize(fd Value, channel string, m *unitModel) Value {
 		}
 	}
 	hasSizeFromMarkOrEncoding := sizeMixins.IsTruthy()
-	var sc *scaleComponent = scale
+	sc := scale
 	if sc == nil {
 		sc = offsetScale
 	}

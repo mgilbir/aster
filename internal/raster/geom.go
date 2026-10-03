@@ -56,10 +56,6 @@ func (m matrix) invert() (matrix, bool) {
 	}, true
 }
 
-// meanScale is the geometric-mean scale factor, used to pick flattening
-// tolerances in local space.
-func (m matrix) meanScale() float64 { return math.Sqrt(math.Abs(m.det())) }
-
 // maxScale bounds how much the transform can stretch a unit vector.
 func (m matrix) maxScale() float64 {
 	sx := math.Hypot(m.a, m.b)
@@ -79,14 +75,8 @@ func (m matrix) isFinite() bool {
 // rect is an axis-aligned rectangle.
 type rect struct{ x0, y0, x1, y1 float64 }
 
-func (r rect) empty() bool { return !(r.x1 > r.x0 && r.y1 > r.y0) }
-
 func (r rect) w() float64 { return r.x1 - r.x0 }
 func (r rect) h() float64 { return r.y1 - r.y0 }
-
-func (r rect) intersect(o rect) rect {
-	return rect{math.Max(r.x0, o.x0), math.Max(r.y0, o.y0), math.Min(r.x1, o.x1), math.Min(r.y1, o.y1)}
-}
 
 // irect is an integer pixel rectangle [x0,x1) x [y0,y1).
 type irect struct{ x0, y0, x1, y1 int }

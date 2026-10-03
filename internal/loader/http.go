@@ -306,7 +306,7 @@ func (l *HTTPLoader) transport(base http.RoundTripper) http.RoundTripper {
 	switch {
 	case base == nil || base == http.DefaultTransport:
 		t = nil
-	case t == nil || t.Dial != nil || t.DialTLS != nil:
+	case t == nil || t.Dial != nil || t.DialTLS != nil: //nolint:staticcheck // a caller who set the deprecated Dial chooses where it connects
 		return base // the caller's own egress
 	case l.AllowPrivateNetworks:
 		return base // nothing to check

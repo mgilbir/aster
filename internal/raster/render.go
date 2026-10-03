@@ -683,8 +683,7 @@ func (r *renderer) buildClip(cn *node, st *state, depth int, bb *rect) *mask {
 		}
 		base = base.mul(matrix{bb.w(), 0, 0, bb.h(), bb.x0, bb.y0})
 	}
-	var cs state
-	cs = *r.inheritedState(cn)
+	cs := *r.inheritedState(cn)
 	cs.ctm = st.ctm
 	cs.clip = st.clip
 	cs.vw, cs.vh = st.vw, st.vh
@@ -703,8 +702,7 @@ func (r *renderer) buildClip(cn *node, st *state, depth int, bb *rect) *mask {
 			if isDisplayNone(k) || !r.budget() {
 				continue
 			}
-			var kst state
-			kst = *ps0
+			kst := *ps0
 			kst.applyProps(k)
 			m := pm
 			if tf, ok := k.get(aTransform); ok {
@@ -837,10 +835,7 @@ func (r *renderer) buildShape(n *node, st *state, p *path) bool {
 	case tagPolyline, tagPolygon:
 		sc := numScanner{s: n.str(aPoints)}
 		cnt := 0
-		for {
-			if sc.atEnd() {
-				break
-			}
+		for !sc.atEnd() {
 			x, ok := sc.number()
 			if !ok {
 				break

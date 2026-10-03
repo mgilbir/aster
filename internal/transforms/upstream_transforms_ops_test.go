@@ -170,15 +170,6 @@ func (o *opCall) checkTuples(want any, res []jsval.Value, err error) {
 	o.CheckAgainst(o.c, want, tupleList(res), false)
 }
 
-// stateful skips a vector whose answer depends on the pulses the operator instance saw before it.
-func (o *opCall) stateful() bool {
-	if o.c.Sequence == 0 {
-		return false
-	}
-	o.Skip("pulses against the state of earlier ones (" + o.c.Op + ")")
-	return true
-}
-
 func (o *opCall) aggregate() {
 	groupby, okGroup := fieldsFrom(o.params["groupby"])
 	fields, okFields := nullableFieldsFrom(o.params["fields"])

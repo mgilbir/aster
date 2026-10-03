@@ -457,11 +457,11 @@ func mergeOutputsFn() func(root dfNode) bool {
 // ---- facet subtree ----
 
 func isAddDimensionsNode(n dfNode) bool {
-	switch n.(type) {
+	switch n := n.(type) {
 	case *aggregateNode, *stackNode:
 		return true
 	case *xformNode:
-		k := n.(*xformNode).kind
+		k := n.kind
 		return k == "window" || k == "joinaggregate"
 	}
 	return false

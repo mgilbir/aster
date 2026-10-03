@@ -70,15 +70,6 @@ func (p *path) bounds() (rect, bool) {
 	return b.r, b.ok
 }
 
-// transformed returns a copy of p under m.
-func (p *path) transformed(m matrix) *path {
-	q := &path{verbs: append([]uint8(nil), p.verbs...), pts: make([]point, len(p.pts))}
-	for i, pt := range p.pts {
-		q.pts[i] = m.apply(pt)
-	}
-	return q
-}
-
 // arcTo appends an SVG elliptical arc from the current point as cubic
 // Béziers (SVG 1.1 implementation notes, F.6).
 func (p *path) arcTo(rx, ry, xrot float64, large, sweep bool, x, y float64) {

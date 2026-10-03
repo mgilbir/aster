@@ -245,13 +245,6 @@ func (it *Item) sumOrZero(a, b float64, propA, propB string) float64 {
 	return 0
 }
 
-func nanZero(v float64) float64 {
-	if v != v {
-		return 0
-	}
-	return v
-}
-
 func (bd *Bounder) pathBounds(b *Bounds, it *Item) error {
 	if !it.Path().Set {
 		b.Set(0, 0, 0, 0)
