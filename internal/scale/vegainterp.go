@@ -179,6 +179,9 @@ func Get(s Scale, name string) (jsval.Value, bool) {
 			return jsval.Num(v), ok
 		}
 	case "round", "padding", "paddingInner", "paddingOuter", "align", "bandwidth", "step":
+		if r, ok := s.(*Radial); ok && name == "round" {
+			return jsval.Bool(r.Round()), true
+		}
 		b, ok := s.(*Band)
 		if !ok {
 			return jsval.Undefined, false

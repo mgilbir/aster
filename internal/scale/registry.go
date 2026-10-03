@@ -183,8 +183,12 @@ func Set(s Scale, name string, v jsval.Value) bool {
 			return true
 		}
 	case "round":
-		if b, ok := s.(Bander); ok {
-			b.SetRound(v.IsTruthy())
+		switch x := s.(type) {
+		case Bander:
+			x.SetRound(v.IsTruthy())
+			return true
+		case *Radial:
+			x.SetRound(v.IsTruthy())
 			return true
 		}
 	case "unknown":

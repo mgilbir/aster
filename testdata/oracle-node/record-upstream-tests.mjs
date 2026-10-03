@@ -659,7 +659,13 @@ function recordTransforms(moduleNamespace, packageName, calls) {
       // leaves `[min, max]` in `this.value`, and a chart reads it as a parameter of the next
       // operator. A vector without it would record that `extent` changed nothing, which is true of
       // the tuples and useless as a check.
-      const value = this.value === undefined || typeof this.value === 'function' ? undefined : encode(this.value);
+      // `bin` leaves a function: it cannot be recorded, but the bounds it carries are all it is made of.
+      // Only bin's: a scale is a function too, and a band scale's `step` is a method.
+      const {start, stop, step} = name === 'bin' && typeof this.value === 'function' ? this.value : {};
+      const value =
+        this.value === undefined ? undefined
+          : typeof this.value === 'function' ? (step === undefined ? undefined : encode({start, stop, step}))
+            : encode(this.value);
       pushCall(calls, {
         package: packageName,
         op: name,
