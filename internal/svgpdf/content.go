@@ -3,6 +3,8 @@ package svgpdf
 import (
 	"bytes"
 	"fmt"
+	"math"
+	"math/bits"
 	"strconv"
 )
 
@@ -81,8 +83,75 @@ func fmtNum(v float64) string {
 	return string(appendNum(a[:0], v))
 }
 
-// appendNum appends fmtNum(v) to dst without allocating.
+// appendNum appends fmtNum(v) to dst without allocating. Magnitudes below
+// 1e14 are rounded in integer arithmetic; strconv's 'f' format with a fixed
+// precision goes through its slowest, arbitrary-precision path.
 func appendNum(dst []byte, v float64) []byte {
+	q, neg, ok := scaleFixed4(v)
+	if !ok {
+		return appendNumSlow(dst, v)
+	}
+	if q == 0 {
+		return append(dst, '0') // also what "-0.0000" becomes
+	}
+	if neg {
+		dst = append(dst, '-')
+	}
+	dst = strconv.AppendUint(dst, q/10000, 10)
+	if f := q % 10000; f != 0 {
+		d := [5]byte{'.', byte('0' + f/1000), byte('0' + f/100%10), byte('0' + f/10%10), byte('0' + f%10)}
+		n := 5
+		for d[n-1] == '0' {
+			n--
+		}
+		dst = append(dst, d[:n]...)
+	}
+	return dst
+}
+
+// scaleFixed4 returns |v| * 10^4 rounded to the nearest integer, ties to
+// even, computed on the exact binary value of v, which is how strconv rounds
+// 'f' output. ok is false for NaN, infinities and magnitudes of 1e14 and up.
+func scaleFixed4(v float64) (q uint64, neg, ok bool) {
+	b := math.Float64bits(v)
+	neg = b>>63 != 0
+	exp := int(b >> 52 & 0x7ff)
+	if exp == 0x7ff || math.Abs(v) >= 1e14 {
+		return 0, false, false
+	}
+	m := b & (1<<52 - 1)
+	e := -1074
+	if exp != 0 {
+		m |= 1 << 52
+		e = exp - 1075
+	}
+	// |v| < 2^47, so e < 0 here (m < 2^53 has e <= 46-52).
+	hi, lo := bits.Mul64(m, 10000) // the exact product, below 2^67
+	s := uint(-e)
+	var up, tie bool
+	switch {
+	case s < 64:
+		q = hi<<(64-s) | lo>>s
+		r, half := lo&(1<<s-1), uint64(1)<<(s-1)
+		up, tie = r > half, r == half
+	case s == 64:
+		q = hi
+		up, tie = lo > 1<<63, lo == 1<<63
+	case s < 128:
+		q = hi >> (s - 64)
+		rh, half := hi&(1<<(s-64)-1), uint64(1)<<(s-65)
+		up, tie = rh > half || rh == half && lo > 0, rh == half && lo == 0
+	default:
+		// The product is below 2^67, under half of 2^s: rounds to zero.
+	}
+	if up || tie && q&1 == 1 {
+		q++
+	}
+	return q, neg, true
+}
+
+// appendNumSlow is appendNum on strconv alone: the definition of the format.
+func appendNumSlow(dst []byte, v float64) []byte {
 	start := len(dst)
 	dst = strconv.AppendFloat(dst, v, 'f', 4, 64)
 	n := dst[start:]
