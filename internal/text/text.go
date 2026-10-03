@@ -50,6 +50,14 @@ const (
 	maxSizePx     = 1 << 16 // larger CSS sizes are clamped
 	maxFamilies   = 32      // font-family entries considered per query
 	maxCacheItems = 1 << 14 // entries in each of the measurement caches
+
+	// maxWidthBytes bounds the width cache by what its entries hold: the key
+	// strings and widthEntryBytes of map overhead each. Labels are short, so
+	// the entry count usually ends the cache first; the bytes stop a few long
+	// texts (up to a specification's string limit each) from pinning memory
+	// that no render's budget accounts for, in a Measurer that outlives them.
+	maxWidthBytes   = 4 << 20
+	widthEntryBytes = 64
 )
 
 // Option configures a Measurer.
@@ -176,6 +184,7 @@ type Measurer struct {
 	cssCache   map[string]CSSFont
 	listCache  map[listKey]*faceList
 	widthCache map[widthKey]float64
+	widthBytes int // what widthCache holds, as maxWidthBytes counts it
 	nextID     int
 }
 
@@ -303,10 +312,15 @@ func (m *Measurer) MeasureText(text, cssFont string) float64 {
 	_, w = m.shapePlan(&p, false)
 
 	m.mu.Lock()
-	if len(m.widthCache) >= maxCacheItems {
-		clear(m.widthCache)
+	// A text too large to share the cache with anything is not kept.
+	if n := len(text) + len(cssFont) + widthEntryBytes; n <= maxWidthBytes {
+		if len(m.widthCache) >= maxCacheItems || m.widthBytes+n > maxWidthBytes {
+			clear(m.widthCache)
+			m.widthBytes = 0
+		}
+		m.widthCache[key] = w
+		m.widthBytes += n
 	}
-	m.widthCache[key] = w
 	m.mu.Unlock()
 	return w
 }

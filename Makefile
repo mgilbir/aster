@@ -1,4 +1,4 @@
-.PHONY: vendor-datasets build test test-all check lint fmacheck clean bench
+.PHONY: vendor-datasets build test test-all check lint fmacheck clean bench benchgate
 
 vendor-datasets:
 	go run ./cmd/vendor-datasets
@@ -26,6 +26,11 @@ fmacheck:
 
 bench:
 	go test -run '^$$' -bench . -benchmem .
+
+# The benchmarks CI gates pull requests on: HEAD against BASE (default
+# origin/main), minutes. See scripts/benchgate.sh.
+benchgate:
+	scripts/benchgate.sh $(BASE)
 
 # Remove compiled test binaries. The oracle cache (testdata/oracle-cache) is
 # recreated on demand; delete it by hand to force fresh answers.

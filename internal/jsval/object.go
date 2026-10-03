@@ -323,15 +323,15 @@ func (o *Object) All() func(yield func(string, Value) bool) {
 
 // Clone makes a shallow copy.
 func (o *Object) Clone() *Object {
-	c := &Object{
-		keys: append(make([]string, 0, o.Len()+1), o.Keys()...),
-		vals: make([]Value, 0, o.Len()+1),
-	}
+	// Room for one more key, which the transforms that add a field use; a
+	// small object is one allocation, as NewObject makes it.
+	c := NewObject(o.Len() + 1)
 	if o != nil {
+		c.keys = append(c.keys, o.keys...)
+		c.vals = append(c.vals, o.vals...)
 		c.str = o.str
 		c.host = o.host
 		c.tid = o.tid
-		c.vals = append(c.vals, o.vals...)
 	}
 	if len(c.keys) > indexThreshold {
 		c.reindex()

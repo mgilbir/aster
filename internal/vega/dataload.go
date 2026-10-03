@@ -25,8 +25,9 @@ func (v *runView) seedCollect(c *rtContext, n *opNode, e *entry) {
 	switch {
 	case e.literal != nil:
 		data = make([]jsval.Value, len(e.literal))
+		var cl jsval.Cloner
 		for i, t := range e.literal {
-			data[i] = ingestTuple(t)
+			data[i] = ingestTupleWith(&cl, t)
 		}
 	case e.ingest != nil && e.ingest.request:
 		data = v.request(e.ingest.url, e.ingest.format)
@@ -35,7 +36,7 @@ func (v *runView) seedCollect(c *rtContext, n *opNode, e *entry) {
 		data = v.parseValues(e.ingest.values, e.ingest.format)
 		ingestRows(data)
 	}
-	v.checkRows(len(data))
+	v.checkRows(len(data), v.rowExcess(data))
 	n.value = data
 	v.g.pulseInput(n, &flowPulse{tuples: data, changed: true})
 }
@@ -44,16 +45,19 @@ func (v *runView) seedCollect(c *rtContext, n *opNode, e *entry) {
 // reads the tuple id of every added row before ingesting it, which throws for
 // a null row (a primitive row is fine and is wrapped).
 func ingestRows(data []jsval.Value) {
+	var cl jsval.Cloner
 	for i := range data {
 		if data[i].IsNull() {
 			fail("Cannot read properties of null (reading 'Symbol(vega_id)')")
 		}
-		data[i] = ingestTuple(data[i])
+		data[i] = ingestTupleWith(&cl, data[i])
 	}
 }
 
-func (v *runView) checkRows(n int) {
-	if err := v.bud.AddRows(n); err != nil {
+// checkRows records n more rows and the excess bytes by which they weigh more
+// than the budget counts them for (rowExcess), failing past the row budget.
+func (v *runView) checkRows(n int, excess int64) {
+	if err := v.bud.AddRows(n); err != nil || v.bud.AddRowExcess(excess) != nil {
 		failLimit("data exceeds %d rows", v.limits.MaxRows)
 	}
 }
@@ -102,7 +106,7 @@ func (v *runView) request(url, fmtSpec jsval.Value) []jsval.Value {
 		return nil
 	}
 	if err := v.bud.Load(int64(len(body))); err != nil {
-		fail("%v", err)
+		failErr(err)
 	}
 	data, err := v.read(jsval.Undefined, body, fmtSpec)
 	if err != nil {
@@ -126,7 +130,7 @@ func (v *runView) read(value jsval.Value, raw []byte, schema jsval.Value) ([]jsv
 	var err error
 	switch typ {
 	case "json":
-		data, err = readJSON(value, raw, schema)
+		data, err = readJSON(value, raw, schema, v.limits.MaxParseBytes)
 	case "csv", "tsv", "dsv":
 		delim := ","
 		switch typ {
@@ -155,11 +159,11 @@ func (v *runView) read(value jsval.Value, raw []byte, schema jsval.Value) ([]jsv
 			if cerr := v.ctx.Err(); cerr != nil {
 				failErr(cerr)
 			}
-			fail("%v", err)
+			failErr(err)
 		}
 	case "topojson":
 		var doc jsval.Value
-		doc, err = jsonDocument(value, raw, schema)
+		doc, err = jsonDocument(value, raw, schema, v.limits.MaxParseBytes)
 		if err != nil {
 			break
 		}
@@ -171,6 +175,11 @@ func (v *runView) read(value jsval.Value, raw []byte, schema jsval.Value) ([]jsv
 		return nil, fmt.Errorf("Unknown data format type: %s", typ)
 	}
 	if err != nil {
+		// A document past a resource limit ends the render; it is not a
+		// body that failed to parse.
+		if errors.Is(err, budget.ErrLimit) {
+			failErr(err)
+		}
 		return nil, err
 	}
 	if p := schema.Get("parse"); !p.IsNullish() && p.IsTruthy() {
@@ -183,16 +192,16 @@ func (v *runView) read(value jsval.Value, raw []byte, schema jsval.Value) ([]jsv
 
 // jsonDocument decodes a JSON payload (or takes an already decoded value) and
 // selects the `property` path.
-func jsonDocument(value jsval.Value, raw []byte, schema jsval.Value) (jsval.Value, error) {
+func jsonDocument(value jsval.Value, raw []byte, schema jsval.Value, limit int64) (jsval.Value, error) {
 	var doc jsval.Value
 	if value.IsUndefined() {
-		d, err := jsval.ParseJSON(raw)
+		d, err := jsval.ParseJSONLimit(raw, limit)
 		if err != nil {
 			return jsval.Undefined, err
 		}
 		doc = d
 	} else if value.IsStr() {
-		d, err := jsval.ParseJSONString(value.StrValue())
+		d, err := jsval.ParseJSONLimit([]byte(value.StrValue()), limit)
 		if err != nil {
 			return jsval.Undefined, err
 		}
@@ -213,8 +222,8 @@ func walkFieldPath(v jsval.Value, path string) jsval.Value {
 	return v
 }
 
-func readJSON(value jsval.Value, raw []byte, schema jsval.Value) ([]jsval.Value, error) {
-	doc, err := jsonDocument(value, raw, schema)
+func readJSON(value jsval.Value, raw []byte, schema jsval.Value, limit int64) ([]jsval.Value, error) {
+	doc, err := jsonDocument(value, raw, schema, limit)
 	if err != nil {
 		return nil, err
 	}

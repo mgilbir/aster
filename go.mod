@@ -3,7 +3,7 @@ module github.com/mgilbir/aster
 go 1.26
 
 require (
-	github.com/mgilbir/forme v0.4.3
+	github.com/mgilbir/forme v0.4.4-0.20261002233817-daa6eec49205
 	github.com/mgilbir/goecma262 v0.2.0
 	github.com/mgilbir/pdf0 v0.4.0
 	golang.org/x/image v0.35.0

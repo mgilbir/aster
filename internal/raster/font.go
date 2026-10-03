@@ -139,6 +139,10 @@ func getDefaultShaper() (Shaper, error) {
 	return defaultShaper.s, defaultShaper.err
 }
 
+// familyUnquote strips quotes from a font-family name and turns commas into
+// spaces; a Replacer is safe for concurrent use and costly to build.
+var familyUnquote = strings.NewReplacer("'", "", "\"", "", ",", " ")
+
 func (s *textShaper) Shape(txt string, req FontRequest, size float64) []ShapedGlyph {
 	if size <= 0 || txt == "" {
 		return nil
@@ -146,7 +150,7 @@ func (s *textShaper) Shape(txt string, req FontRequest, size float64) []ShapedGl
 	fams := make([]string, 0, len(req.Families))
 	found := false
 	for _, f := range req.Families {
-		f = strings.NewReplacer("'", "", "\"", "", ",", " ").Replace(f)
+		f = familyUnquote.Replace(f)
 		if f = strings.TrimSpace(f); f == "" {
 			continue
 		}
@@ -170,7 +174,11 @@ func (s *textShaper) Shape(txt string, req FontRequest, size float64) []ShapedGl
 	}
 	css += strconv.Itoa(w) + " " + strconv.FormatFloat(size, 'f', -1, 64) + "px " + strings.Join(fams, ",")
 	runs, _ := s.m.ShapeText(txt, css)
-	var out []ShapedGlyph
+	n := 0
+	for _, r := range runs {
+		n += len(r.Glyphs)
+	}
+	out := make([]ShapedGlyph, 0, n)
 	for _, r := range runs {
 		face := s.face(r.Face)
 		k := 1.0

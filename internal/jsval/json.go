@@ -40,11 +40,37 @@ func (e *SyntaxError) Error() string {
 	return fmt.Sprintf("json: %s at offset %d", e.Msg, e.Offset)
 }
 
+// ErrJSONSize is returned (wrapped) when a document would take more memory
+// than the limit given to ParseJSONLimit.
+var ErrJSONSize = fmt.Errorf("json: document is too large to hold in memory: %w", budget.ErrLimit)
+
+// What a parsed value holds, as ParseJSONLimit counts it: a Value in an array
+// (48 bytes), a member of an object (a 16 byte key header and a Value), the
+// Object header and the slice header of an array. Strings count their bytes,
+// keys too (a key shared between rows is charged each time, which keeps the
+// count independent of what the table happens to hold).
+const (
+	costElem   = 48
+	costMember = 64
+	costObject = 80
+	costArray  = 24
+)
+
 // ParseJSON parses text with JSON.parse semantics: strict RFC 8259 grammar,
 // object keys kept in document order, a repeated key overwriting the value at
 // its first position. Invalid UTF-8 and lone surrogate escapes become U+FFFD.
-func ParseJSON(text []byte) (Value, error) {
-	p := parser{s: text}
+func ParseJSON(text []byte) (Value, error) { return ParseJSONLimit(text, 0) }
+
+// ParseJSONLimit is ParseJSON that stops with ErrJSONSize once the values built
+// would take more than max bytes of memory, estimated per element, member and
+// string as each is produced: a document of a few bytes per value costs tens of
+// times that on the heap, so the size of the text does not bound the parse.
+// max <= 0 is unlimited.
+func ParseJSONLimit(text []byte, max int64) (Value, error) {
+	p := parser{s: text, left: math.MaxInt64}
+	if max > 0 {
+		p.left, p.max = max, max
+	}
 	if len(text) >= slabMinDoc {
 		p.sl = new(slabs)
 	}
@@ -92,6 +118,10 @@ type parser struct {
 	s []byte
 	i int
 
+	// left is what the values built so far leave of the memory limit, which
+	// was max.
+	left, max int64
+
 	// Elements and members of the containers being parsed are collected on
 	// these stacks and copied into one exactly sized allocation when the
 	// container closes, instead of growing a slice per array.
@@ -107,6 +137,17 @@ type parser struct {
 
 func (p *parser) errf(format string, args ...any) error {
 	return &SyntaxError{Offset: p.i, Msg: fmt.Sprintf(format, args...)}
+}
+
+// charge takes n bytes from the memory limit and reports whether they were
+// there; it is small enough to inline, as the parser calls it for every value.
+func (p *parser) charge(n int64) bool {
+	p.left -= n
+	return p.left >= 0
+}
+
+func (p *parser) tooLarge() error {
+	return fmt.Errorf("%w (more than %d bytes)", ErrJSONSize, p.max)
 }
 
 func (p *parser) ws() {
@@ -139,6 +180,9 @@ func (p *parser) value(depth int) (Value, error) {
 		s, err := p.str()
 		if err != nil {
 			return Undefined, err
+		}
+		if !p.charge(int64(len(s))) {
+			return Undefined, p.tooLarge()
 		}
 		return Str(s), nil
 	case 't':
@@ -374,6 +418,9 @@ func (p *parser) object(depth int) (Value, error) {
 	p.ws()
 	if p.i < len(p.s) && p.s[p.i] == '}' {
 		p.i++
+		if !p.charge(costObject) {
+			return Undefined, p.tooLarge()
+		}
 		return Obj(NewObject(0)), nil
 	}
 	base := len(p.kstk)
@@ -396,6 +443,9 @@ func (p *parser) object(depth int) (Value, error) {
 		if err != nil {
 			return Undefined, err
 		}
+		if !p.charge(costMember + int64(len(k))) {
+			return Undefined, p.tooLarge()
+		}
 		p.kstk = append(p.kstk, k)
 		p.vstk = append(p.vstk, v)
 		p.ws()
@@ -408,6 +458,9 @@ func (p *parser) object(depth int) (Value, error) {
 		case '}':
 			p.i++
 			n := len(p.kstk) - base
+			if !p.charge(costObject) {
+				return Undefined, p.tooLarge()
+			}
 			o := p.newObject(n)
 			vbase := len(p.vstk) - n
 			for i := 0; i < n; i++ {
@@ -470,6 +523,9 @@ func (p *parser) array(depth int) (Value, error) {
 		if err != nil {
 			return Undefined, err
 		}
+		if !p.charge(costElem) {
+			return Undefined, p.tooLarge()
+		}
 		p.vstk = append(p.vstk, v)
 		p.ws()
 		if p.i >= len(p.s) {
@@ -480,6 +536,9 @@ func (p *parser) array(depth int) (Value, error) {
 			p.i++
 		case ']':
 			p.i++
+			if !p.charge(costArray) {
+				return Undefined, p.tooLarge()
+			}
 			arr, items := p.makeArr(len(p.vstk) - base)
 			copy(items, p.vstk[base:])
 			clear(p.vstk[base:])

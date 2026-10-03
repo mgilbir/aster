@@ -17,10 +17,7 @@ func init() {
 	fn("isRegExp", func(s *Scope, args []jsval.Value) jsval.Value { return jsval.Bool(arg(args, 0).IsPattern()) })
 	fn("isString", func(s *Scope, args []jsval.Value) jsval.Value { return jsval.Bool(arg(args, 0).IsStr()) })
 	// isValid is `_ != null && _ === _`: not null, undefined or NaN.
-	fn("isValid", func(s *Scope, args []jsval.Value) jsval.Value {
-		v := arg(args, 0)
-		return jsval.Bool(!v.IsNullish() && !(v.IsNum() && math.IsNaN(v.NumValue())))
-	})
+	pred("isValid", func(v jsval.Value) bool { return !v.IsNullish() && !(v.IsNum() && math.IsNaN(v.NumValue())) })
 	fn("isTuple", func(s *Scope, args []jsval.Value) jsval.Value {
 		if s.tuples == nil {
 			return jsval.False

@@ -72,7 +72,7 @@ func (s *facetState) subflow(n *opNode, k any, make subflowMaker, key string, pa
 		g := n.g
 		g.view.cells++
 		if g.view.cells > g.view.limits.MaxSubflows {
-			fail("more than %d facet cells", g.view.limits.MaxSubflows)
+			failLimit("more than %d facet cells", g.view.limits.MaxSubflows)
 		}
 		sf := g.add("subflow", nil)
 		sf.ctx = n.ctx

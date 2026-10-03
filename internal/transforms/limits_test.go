@@ -102,3 +102,23 @@ func TestLongLoopsStopOnCancel(t *testing.T) {
 		t.Errorf("bootstrap ignored the context: %v after %v", err, time.Since(start))
 	}
 }
+
+func TestFoldRefusesHeavyCopiesBeforeMakingThem(t *testing.T) {
+	// 200 rows of 20 fields folded four ways: 800 rows, which fit 1000 rows,
+	// but each copy weighs about 2 KiB against the 512 bytes it is counted for.
+	wide := rowsOf(200, func(i int) map[string]jsval.Value {
+		m := map[string]jsval.Value{}
+		for f := range 20 {
+			m[string(rune('a'+f))] = jsval.Int(i)
+		}
+		return m
+	})
+	fold := FoldParams{Fields: []Field{FieldOf("a"), FieldOf("b"), FieldOf("c"), FieldOf("d")}}
+	if _, err := Fold(budgetCtx(1000), wide, fold); err != nil {
+		t.Fatalf("rows only: %v", err)
+	}
+	ctx := budget.With(context.Background(), &budget.Budget{MaxRows: 1000, RowBytes: 512})
+	if _, err := Fold(ctx, wide, fold); !errors.Is(err, ErrLimit) {
+		t.Errorf("by weight: %v", err)
+	}
+}

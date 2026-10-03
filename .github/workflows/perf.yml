@@ -1,0 +1,40 @@
+name: Performance
+
+# A pull request must not make the benchmarks measurably slower or hungrier
+# than its base. scripts/benchgate.sh builds both sides, runs them alternately
+# on this one runner and compares them with benchstat; the thresholds are in
+# the script. For an intended trade-off, label the PR perf-regression-ok (the
+# job runs again when the label is added or removed).
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: perf-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  benchgate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: benchmark base and head
+        env:
+          BENCHGATE_ALLOW: ${{ contains(github.event.pull_request.labels.*.name, 'perf-regression-ok') }}
+          BENCHGATE_OUT: ${{ runner.temp }}/benchgate
+        run: scripts/benchgate.sh "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: benchgate
+          path: ${{ runner.temp }}/benchgate

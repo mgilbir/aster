@@ -200,7 +200,7 @@ type StringBudget struct {
 }
 
 // smallString is the size up to which a string is not charged.
-const smallString = 4096
+const smallString = 512
 
 // NewStringBudget makes a budget of n bytes; n <= 0 is unlimited.
 func NewStringBudget(n int64) *StringBudget {
