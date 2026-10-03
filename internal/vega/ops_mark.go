@@ -84,7 +84,7 @@ func facDataJoin(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNod
 	return nil, trFunc(func(n *opNode, p *opParams, pulse *flowPulse) *flowPulse {
 		jm, _ := n.value.(*joinMap)
 		if jm == nil {
-			jm = &joinMap{objs: map[*jsval.Object]*joinEntry{}, vals: map[jsval.Value]*joinEntry{}, strs: map[string]*joinEntry{}}
+			jm = &joinMap{objs: make(map[*jsval.Object]*joinEntry, len(pulse.tuples)), vals: map[jsval.Value]*joinEntry{}, strs: map[string]*joinEntry{}}
 			switch k := p.Get("key").(type) {
 			case transforms.Field:
 				g, v := k.Get, n.g.view

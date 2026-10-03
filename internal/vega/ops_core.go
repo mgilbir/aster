@@ -359,7 +359,7 @@ func facCollect(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode
 // difference. That needs distinct objects: anything else (a repeated or a
 // non-object tuple) is taken as a new set in the order it came.
 func collectIncremental(list, src []jsval.Value) []jsval.Value {
-	if len(list) == 0 {
+	if len(list) == 0 || sameObjects(list, src) {
 		return append(make([]jsval.Value, 0, len(src)), src...)
 	}
 	incoming := make(map[*jsval.Object]struct{}, len(src))
@@ -394,6 +394,21 @@ func collectIncremental(list, src []jsval.Value) []jsval.Value {
 		}
 	}
 	return out
+}
+
+// sameObjects reports whether a and b are the same objects in the same order,
+// for which collectIncremental's answer is b, whatever the sets hold.
+func sameObjects(a, b []jsval.Value) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		o := a[i].ObjValue()
+		if o == nil || o != b[i].ObjValue() {
+			return false
+		}
+	}
+	return true
 }
 
 func concatTuples(lists [][]jsval.Value) []jsval.Value {
@@ -540,6 +555,9 @@ func facRelay(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 			return &flowPulse{stamp: pulse.stamp, encode: pulse.encode, changed: true, tuples: src, tree: pulse.tree}
 		}
 		out := make([]jsval.Value, len(src))
+		if len(lut) == 0 {
+			lut = make(map[*jsval.Object]jsval.Value, len(src))
+		}
 		live := make(map[*jsval.Object]struct{}, len(src))
 		for i, t := range src {
 			o := t.ObjValue()
