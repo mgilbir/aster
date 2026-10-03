@@ -109,10 +109,10 @@ func TestSVGMutations(t *testing.T) {
 			var msg string
 			select {
 			case msg = <-done:
-			case <-time.After(60 * time.Second):
-				msg = "HANG > 60s"
+			case <-time.After(60 * time.Second * aster.RaceSlowdownForTest):
+				msg = fmt.Sprintf("HANG > %v", 60*time.Second*aster.RaceSlowdownForTest)
 			}
-			if msg == "" && time.Since(start) > 15*time.Second {
+			if msg == "" && time.Since(start) > 15*time.Second*aster.RaceSlowdownForTest {
 				msg = fmt.Sprintf("SLOW %v", time.Since(start))
 			}
 			if msg != "" {

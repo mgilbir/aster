@@ -156,10 +156,10 @@ func TestHostileFonts(t *testing.T) {
 		}()
 		select {
 		case msg = <-done:
-		case <-time.After(30 * time.Second):
-			msg = "HANG > 30s"
+		case <-time.After(30 * time.Second * raceSlowdown):
+			msg = fmt.Sprintf("HANG > %v", 30*time.Second*raceSlowdown)
 		}
-		if msg == "" && time.Since(start) > 10*time.Second {
+		if msg == "" && time.Since(start) > 10*time.Second*raceSlowdown {
 			msg = fmt.Sprintf("SLOW %v", time.Since(start))
 		}
 		if msg != "" {
