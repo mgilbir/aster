@@ -64,7 +64,7 @@ jobs:
           PKG: ${{ matrix.pkg }}
           TARGET: ${{ matrix.target }}
           FUZZTIME: ${{ inputs.fuzztime || format('{0}m', matrix.minutes) }}
-        run: go test -run='^$' -fuzz="^$TARGET\$" -fuzztime="$FUZZTIME" "$PKG"
+        run: scripts/fuzz.sh -one "$PKG" "$TARGET"
       - uses: actions/cache/save@v6
         # a failing run still found inputs worth keeping
         if: always()
