@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\"marktype\":\"shape\",\"items\":[{\"shape\":{\"ops\":[[\"M\",1],[\"C\",2,3],[\"A\"]]}}]}")
