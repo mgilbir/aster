@@ -754,7 +754,7 @@ func (s *Scope) hasProperty(o, k jsval.Value) bool {
 			return i < o.Len()
 		}
 	case jsval.KindPattern:
-		return patternProp(o.PatternOf(), key) != jsval.Undefined
+		return !patternProp(o.PatternOf(), key).IsUndefined()
 	}
 	return false
 }

@@ -151,7 +151,7 @@ func facPreFacet(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNod
 		st.active = st.active[:0]
 		seen := make(map[any]struct{}, len(pulse.tuples))
 		for _, t := range pulse.tuples {
-			cl := st.subflow(n, t, flow, "", t, pulse)
+			cl := st.subflow(n, t.Key(), flow, "", t, pulse)
 			if hasField && !field.IsNil() {
 				arr := field.Apply(t)
 				items := arr.Items()
@@ -164,7 +164,7 @@ func facPreFacet(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNod
 				cl.tuples = []jsval.Value{t}
 			}
 			st.activate(cl)
-			seen[t] = struct{}{}
+			seen[t.Key()] = struct{}{}
 		}
 		for _, k := range st.order {
 			if _, ok := seen[k]; ok {

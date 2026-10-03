@@ -46,7 +46,7 @@ type joinMap struct {
 	// needs it: a first run (usually the only one) tells new tuples apart
 	// without it.
 	objs  map[*jsval.Object]*joinEntry
-	vals  map[jsval.Value]*joinEntry
+	vals  map[jsval.Key]*joinEntry
 	strs  map[string]*joinEntry
 	order []*joinEntry
 	run   int
@@ -64,7 +64,7 @@ func (m *joinMap) find(t jsval.Value) *joinEntry {
 		}
 		return m.objs[o]
 	}
-	return m.vals[t]
+	return m.vals[t.Key()]
 }
 
 // index builds objs from the entries.
@@ -87,7 +87,7 @@ func (m *joinMap) put(t jsval.Value, e *joinEntry) {
 			m.objs[e.key] = e
 		}
 	default:
-		m.vals[t] = e
+		m.vals[t.Key()] = e
 	}
 	m.order = append(m.order, e)
 }
@@ -104,7 +104,7 @@ func facDataJoin(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNod
 	return nil, trFunc(func(n *opNode, p *opParams, pulse *flowPulse) *flowPulse {
 		jm, _ := n.value.(*joinMap)
 		if jm == nil {
-			jm = &joinMap{vals: map[jsval.Value]*joinEntry{}, strs: map[string]*joinEntry{}}
+			jm = &joinMap{vals: map[jsval.Key]*joinEntry{}, strs: map[string]*joinEntry{}}
 			switch k := p.Get("key").(type) {
 			case transforms.Field:
 				g, v := k.Get, n.g.view

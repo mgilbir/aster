@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"unicode/utf16"
 	"unicode/utf8"
+	"unsafe"
 
 	"github.com/mgilbir/aster/internal/budget"
 )
@@ -565,7 +566,7 @@ func AppendJSONIndent(dst []byte, v Value, indent string) []byte {
 
 // MarshalJSON writes compact JSON.stringify output.
 func (v Value) MarshalJSON() ([]byte, error) {
-	if v.k == KindUndefined {
+	if v.Kind() == KindUndefined {
 		return []byte("null"), nil
 	}
 	return AppendJSON(nil, v), nil
@@ -575,21 +576,21 @@ func appendJSON(dst []byte, v Value, indent, prefix string, depth int) []byte {
 	if depth > MaxValueDepth {
 		return append(dst, "null"...)
 	}
-	switch v.k {
+	switch v.Kind() {
 	case KindUndefined, KindNull:
 		return append(dst, "null"...)
 	case KindBool:
-		if v.n != 0 {
+		if v.n() != 0 {
 			return append(dst, "true"...)
 		}
 		return append(dst, "false"...)
 	case KindNum, KindTimestamp:
-		if math.IsNaN(v.n) || math.IsInf(v.n, 0) {
+		if math.IsNaN(v.n()) || math.IsInf(v.n(), 0) {
 			return append(dst, "null"...)
 		}
-		return AppendJSNumber(dst, v.n)
+		return AppendJSNumber(dst, v.n())
 	case KindStr:
-		return appendQuoted(dst, v.s)
+		return appendQuoted(dst, v.s())
 	case KindPattern:
 		return append(dst, "{}"...)
 	case KindArr:
@@ -619,7 +620,7 @@ func appendJSON(dst []byte, v Value, indent, prefix string, depth int) []byte {
 		n := 0
 		for i := 0; i < o.Len(); i++ {
 			val := o.ValueAt(i)
-			if val.k == KindUndefined {
+			if val.Kind() == KindUndefined {
 				continue
 			}
 			if n > 0 {
@@ -723,7 +724,7 @@ func (p *parser) makeArr(n int) (Value, []Value) {
 	default:
 		return MakeArr(n)
 	}
-	return Value{k: KindArr, r: b}, b.items
+	return ref(KindArr, unsafe.Pointer(b)), b.items
 }
 
 // newObject is NewObject drawing small objects from the parser's chunks.

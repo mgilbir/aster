@@ -19,7 +19,7 @@ func TestDataJoinFirstRunMatchesIndex(t *testing.T) {
 	for round := 0; round < 200; round++ {
 		_, tr, _ := facDataJoin(nil, nil, nil)
 		fast := &opNode{g: v.g}
-		indexed := &opNode{g: v.g, value: &joinMap{objs: map[*jsval.Object]*joinEntry{}, vals: map[jsval.Value]*joinEntry{}, strs: map[string]*joinEntry{}}}
+		indexed := &opNode{g: v.g, value: &joinMap{objs: map[*jsval.Object]*joinEntry{}, vals: map[jsval.Key]*joinEntry{}, strs: map[string]*joinEntry{}}}
 		items := map[*scene.Item]*scene.Item{} // indexed item -> fast item
 		for pi, src := range tuplePulses(r, 4) {
 			want := tr.transform(indexed, p, &flowPulse{tuples: src})
@@ -37,7 +37,7 @@ func TestDataJoinFirstRunMatchesIndex(t *testing.T) {
 						t.Fatalf("round %d pulse %d: %s item %d is another item", round, pi, l.name, i)
 					}
 					items[w] = g
-					if g.Datum != w.Datum {
+					if g.Datum.Key() != w.Datum.Key() {
 						t.Fatalf("round %d pulse %d: %s item %d has another datum", round, pi, l.name, i)
 					}
 				}
