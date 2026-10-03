@@ -67,11 +67,26 @@ type FontData struct {
 // textShaper adapts internal/text (forme shaping, the engine's font
 // resolution and fallback) to Shaper.
 type textShaper struct {
-	m      *text.Measurer
-	known  map[string]bool // lower-case family names that exist
-	mu     sync.Mutex
-	faces  map[*text.Face]*textFace
-	family string
+	m     *text.Measurer
+	known map[string]bool // lower-case family names that exist
+	faces *faceCache      // shared with the shaper's bound views
+}
+
+// faceCache maps the measurer's faces to the Face each is drawn through.
+type faceCache struct {
+	mu sync.Mutex
+	m  map[*text.Face]*textFace
+}
+
+// BoundShaper returns s shaping under b (see text.ShapingBudget) when s is
+// one of this package's shapers. Any other Shaper, and a nil b, leave s as it
+// is.
+func BoundShaper(s Shaper, b *text.ShapingBudget) Shaper {
+	ts, ok := s.(*textShaper)
+	if !ok || b == nil {
+		return s
+	}
+	return &textShaper{m: ts.m.Bounded(b), known: ts.known, faces: ts.faces}
 }
 
 var builtinFamilies = []string{
@@ -101,7 +116,7 @@ func NewShaper(fonts ...FontData) (Shaper, error) {
 	if err != nil {
 		return nil, fmt.Errorf("raster: creating text shaper: %w", err)
 	}
-	return &textShaper{m: m, known: known, faces: map[*text.Face]*textFace{}}, nil
+	return &textShaper{m: m, known: known, faces: &faceCache{m: map[*text.Face]*textFace{}}}, nil
 }
 
 // NewShaperWithOptions returns a Shaper over a text.Measurer built from opts,
@@ -125,7 +140,7 @@ func NewShaperWithOptions(opts ...text.Option) (Shaper, error) {
 // built with; build it with text.WithExactAdvances for resvg-identical
 // placement. Family resolution is entirely the measurer's.
 func NewShaperFromMeasurer(m *text.Measurer) Shaper {
-	return &textShaper{m: m, faces: map[*text.Face]*textFace{}}
+	return &textShaper{m: m, faces: &faceCache{m: map[*text.Face]*textFace{}}}
 }
 
 var defaultShaper struct {
@@ -193,13 +208,13 @@ func (s *textShaper) Shape(txt string, req FontRequest, size float64) []ShapedGl
 }
 
 func (s *textShaper) face(f *text.Face) *textFace {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if tf, ok := s.faces[f]; ok {
+	s.faces.mu.Lock()
+	defer s.faces.mu.Unlock()
+	if tf, ok := s.faces.m[f]; ok {
 		return tf
 	}
 	tf := &textFace{f: f}
-	s.faces[f] = tf
+	s.faces.m[f] = tf
 	return tf
 }
 

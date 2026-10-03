@@ -165,8 +165,18 @@ type Run struct {
 	Width float64
 }
 
-// Measurer computes text widths and shapes text.
+// Measurer computes text widths and shapes text. It is safe for concurrent
+// use. Bounded returns a view of it that shapes under a ShapingBudget; the
+// views share the fonts and caches.
 type Measurer struct {
+	*measurerState
+	// budget bounds the shaping done through this view; nil shapes without
+	// bounds.
+	budget *ShapingBudget
+}
+
+// measurerState is what every view of a Measurer shares.
+type measurerState struct {
 	mu    sync.RWMutex // guards the caches; the width cache is read under RLock
 	exact bool
 	pango pangoMode
@@ -196,7 +206,7 @@ func New(opts ...Option) (*Measurer, error) {
 	for _, o := range opts {
 		o(&cfg)
 	}
-	m := &Measurer{
+	m := &Measurer{measurerState: &measurerState{
 		exact:           cfg.exact,
 		pango:           cfg.pango,
 		byFam:           make(map[string][]*entry),
@@ -206,7 +216,7 @@ func New(opts ...Option) (*Measurer, error) {
 		fallbackFamily:  orDefault(cfg.fallbackFamily, "Liberation Sans"),
 		serifFamily:     orDefault(cfg.serifFamily, "Liberation Serif"),
 		monospaceFamily: orDefault(cfg.monospaceFamily, "Liberation Mono"),
-	}
+	}}
 
 	// Embedded fonts are registered first; Noto Emoji last among them so it
 	// is only reached for runes nothing else covers.
@@ -466,7 +476,7 @@ func (m *Measurer) shapePlan(p *planned, keep bool) ([]Run, float64) {
 
 // run shapes text[a:b] in face f and appends it to runs when keep is set.
 func (m *Measurer) run(runs *[]Run, text string, a, b int, f *Face, size, shaped, scale float64, keep bool) float64 {
-	glyphs, ok := f.shapeGlyphs(text[a:b])
+	glyphs, ok := f.shapeGlyphs(text[a:b], m.budget)
 	if !ok {
 		return 0
 	}

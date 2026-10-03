@@ -117,8 +117,12 @@ func newFace(id, family string, weight int, italic bool, data []byte) (f *Face, 
 
 // shapeGlyphs shapes s through a clone of the face, so that any number of
 // goroutines may shape through one Face at once, and records the glyphs
-// returned for Subset. It contains any panic a malformed font provokes.
-func (f *Face) shapeGlyphs(s string) (g []shape.Glyph, ok bool) {
+// returned for Subset. It contains any panic a malformed font provokes. With
+// a budget the run is shaped under it (see ShapingBudget).
+func (f *Face) shapeGlyphs(s string, b *ShapingBudget) (g []shape.Glyph, ok bool) {
+	if b != nil {
+		return f.shapeGlyphsBounded(s, b)
+	}
 	c := f.clones.Get().(*shape.Face)
 	defer func() {
 		if recover() != nil {

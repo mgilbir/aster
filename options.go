@@ -60,7 +60,8 @@ func WithTheme(theme string) Option {
 // WithMemoryLimit bounds the memory a single render may use, in bytes. Zero
 // means no limit. The pure-Go engine has no separate heap to cap, so the limit
 // is enforced as a budget on what a specification can make the engine hold:
-// loaded data, parsed rows and generated scene items. The specification is
+// loaded data, parsed rows, generated scene items and the glyphs of each run
+// of text shaped (a quarter of the limit, at least 1 MiB). The specification is
 // bounded too, to a sixteenth of the limit (at least 1 MiB): it costs about
 // nineteen times its size once parsed and compiled, and an inline geometry is
 // all specification and no rows. A larger one is refused with an error wrapping
@@ -71,7 +72,8 @@ func WithMemoryLimit(bytes uint64) Option {
 	}
 }
 
-// WithTimeout sets the maximum duration for a single render operation.
+// WithTimeout sets the maximum duration for a single render operation: every
+// stage of it together, text shaping included.
 func WithTimeout(d time.Duration) Option {
 	return func(c *config) {
 		c.timeout = d

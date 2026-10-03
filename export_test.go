@@ -124,7 +124,7 @@ func (c *Converter) RenderPreparedForTest(spec []byte, lite bool) (func() error,
 			Config:   c.theme,
 			Limits:   c.limits(),
 			Random:   transforms.LCG(randomSeed),
-			Shaper:   lazyShaper{c},
+			Shaper:   lazyShaper{c, nil},
 		}
 		if m != nil {
 			opts.TextMeasurer = text.NewCanvasContext(m)

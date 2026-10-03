@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/mgilbir/aster/internal/budget"
-	"github.com/mgilbir/aster/internal/geo"
 	"github.com/mgilbir/aster/internal/scale"
 	"sort"
 
@@ -508,7 +507,7 @@ func failLimit(format string, args ...any) {
 // that bound the engine's work, cancellation and the engine's own bugs do not
 // have an upstream counterpart and stay fatal.
 func fatal(err error, internal bool) bool {
-	var le *geo.LimitError
+	var le *budget.Stop
 	return internal || errors.Is(err, budget.ErrLimit) || errors.As(err, &le) ||
 		errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
@@ -703,7 +702,7 @@ func (g *flowGraph) evaluate(encode string) (err error) {
 				switch e := r.(type) {
 				case *opError:
 					err = e.err
-				case *geo.LimitError:
+				case *budget.Stop:
 					err = e.Err
 				case *scale.Thrown, *expr.Error:
 					err = e.(error) // an exception a scale, an accessor or an expression threw
@@ -775,7 +774,7 @@ func (g *flowGraph) safely(fn func(*flowGraph)) (err error) {
 		if r := recover(); r != nil {
 			if e, ok := r.(*opError); ok {
 				err = e.err
-			} else if le, ok := r.(*geo.LimitError); ok {
+			} else if le, ok := r.(*budget.Stop); ok {
 				err = le.Err
 			} else if th, ok := r.(*scale.Thrown); ok {
 				err = th

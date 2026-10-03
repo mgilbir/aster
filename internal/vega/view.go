@@ -32,7 +32,6 @@ import (
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/expr"
 	"github.com/mgilbir/aster/internal/format"
-	"github.com/mgilbir/aster/internal/geo"
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/raster"
 	"github.com/mgilbir/aster/internal/scale"
@@ -252,7 +251,7 @@ func Render(ctx context.Context, spec jsval.Value, opts Options) (res *Result, e
 				err = e.err
 			case *scale.Thrown:
 				err = e
-			case *geo.LimitError:
+			case *budget.Stop:
 				err = e.Err
 			case error:
 				err = fmt.Errorf("vega: %w\n%s", e, shortStack())
