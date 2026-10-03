@@ -293,6 +293,14 @@ func (f *NumberFormat) FormatValue(v jsval.Value) string {
 	return f.Format(jsval.ToNumber(v))
 }
 
+// AppendFormatValue appends what FormatValue returns to dst.
+func (f *NumberFormat) AppendFormatValue(dst []byte, v jsval.Value) []byte {
+	if f.typ == 'c' {
+		return f.appendFormat(dst, 0, v.AsString())
+	}
+	return f.AppendFormat(dst, jsval.ToNumber(v))
+}
+
 // AppendFormat appends the formatted x to dst.
 func (f *NumberFormat) AppendFormat(dst []byte, x float64) []byte {
 	if f.typ == 'c' {
