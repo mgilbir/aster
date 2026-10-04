@@ -111,7 +111,7 @@ func (r *renderer) imageItem(m *scene.Mark, it *scene.Item) {
 		bw, bh := b.Size()
 		info = ImageInfo{Src: b.DataURL(), Width: float64(bw), Height: float64(bh)}
 	} else {
-		info = r.image(it.URL())
+		info = r.image(it.URL(), !it.Width.Set() || !it.Height.Set())
 	}
 	x, y, iw, ih := scene.ImageGeometry(it, info.Width, info.Height)
 	w.attr("xlink:href", info.Src)
@@ -128,9 +128,9 @@ func (r *renderer) imageItem(m *scene.Mark, it *scene.Item) {
 	r.style(m, it, "image", it.Fill, it.Stroke)
 }
 
-func (r *renderer) image(url string) ImageInfo {
+func (r *renderer) image(url string, size bool) ImageInfo {
 	if r.opt.Image != nil {
-		return r.opt.Image(url)
+		return r.opt.Image(url, size)
 	}
 	// Without a canvas vega keeps the sanitized URL as the image source and
 	// knows nothing of the size; a rejected URL gives an empty source.

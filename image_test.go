@@ -309,3 +309,69 @@ func TestImagesInPDF(t *testing.T) {
 		t.Error("the default loader fetched an image")
 	}
 }
+
+// An image mark without a width or a height takes it from the image, as
+// upstream's SVG renderer does once the image has loaded, and is drawn at
+// that size. The SVG and the PNG of one call fetch it once.
+func TestImageNaturalSize(t *testing.T) {
+	srv, hits := imageServer(t)
+	c, err := aster.New(aster.WithLoader(&aster.HTTPLoader{AllowPrivateNetworks: true}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Close() }()
+	mark := func(enter string) []byte {
+		return []byte(`{"width":40,"height":40,"marks":[{"type":"image","encode":{"enter":{"url":{"value":"` + srv.URL + `/red.png"}` + enter + `}}}]}`)
+	}
+
+	svg, err := c.VegaToSVG(mark(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(svg, `width="16" height="16"`) {
+		t.Errorf("a sizeless image mark is not the image's 16x16:\n%s", svg)
+	}
+	// A width alone takes the height from the image's proportions.
+	svg, err = c.VegaToSVG(mark(`,"width":{"value":32}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(svg, `width="32" height="32"`) {
+		t.Errorf("a width alone did not set the height:\n%s", svg)
+	}
+
+	hits.Store(0)
+	out, err := c.VegaToPNG(mark(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	img, err := png.Decode(bytes.NewReader(out))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := countReddish(img); n < 200 {
+		t.Errorf("the sizeless image mark drew %d red pixels", n)
+	}
+	if hits.Load() != 1 {
+		t.Errorf("the image was fetched %d times for one call, want once", hits.Load())
+	}
+
+	// A mark with its size given needs no fetch for its SVG.
+	hits.Store(0)
+	if _, err := c.VegaToSVG(mark(`,"width":{"value":10},"height":{"value":10}`)); err != nil {
+		t.Fatal(err)
+	}
+	if hits.Load() != 0 {
+		t.Errorf("a sized image mark was fetched %d times for its SVG", hits.Load())
+	}
+
+	// The default loader fetches nothing, and the size stays unknown.
+	d, err := aster.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = d.Close() }()
+	if svg, err := d.VegaToSVG(mark("")); err != nil || !strings.Contains(svg, `width="0" height="0"`) {
+		t.Errorf("default loader: %v\n%s", err, svg)
+	}
+}

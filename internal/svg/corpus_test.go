@@ -57,7 +57,7 @@ func (e *corpusEntry) options() Options {
 	}
 	u := URLOptions{BaseURL: e.URLOptions.BaseURL, Target: e.URLOptions.Target, Rel: e.URLOptions.Rel, DefaultProtocol: e.URLOptions.DefaultProtocol}
 	o.Href = DefaultHref(u)
-	o.Image = func(url string) ImageInfo {
+	o.Image = func(url string, _ bool) ImageInfo {
 		if src, ok := SanitizeURL(url, u); ok && url != "" {
 			return ImageInfo{Src: src}
 		}

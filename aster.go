@@ -204,7 +204,7 @@ func (c *Converter) enter() (release func(), ok bool) {
 // opContext bounds one public call — every stage of it together — by the
 // converter's timeout, and by Close. The context carries the call's shaping
 // budget, so its text is shaped under the same timeout and within one
-// allowance of work.
+// allowance of work, and the images it has fetched (see callImages).
 func (c *Converter) opContext() (context.Context, context.CancelFunc) {
 	var ctx context.Context
 	var cancel context.CancelFunc
@@ -213,7 +213,8 @@ func (c *Converter) opContext() (context.Context, context.CancelFunc) {
 	} else {
 		ctx, cancel = context.WithCancel(c.base)
 	}
-	return text.WithShapingBudget(ctx, text.NewShapingBudget(ctx, c.shapingLimits())), cancel
+	ctx = text.WithShapingBudget(ctx, text.NewShapingBudget(ctx, c.shapingLimits()))
+	return context.WithValue(ctx, callImagesKey{}, c.newCallImages()), cancel
 }
 
 // stageErr wraps a stage's error, naming the timeout when the call's context
@@ -462,7 +463,11 @@ func (c *Converter) renderSVG(ctx context.Context, spec jsval.Value) (out string
 	// Image URLs go through the Loader like every other resource (upstream's
 	// ResourceLoader.loadImage sanitizes with context "image"); a rejected URL
 	// renders what a failed image load does: no source, no size.
-	so.Image = func(url string) svg.ImageInfo {
+	// An item missing a width or a height takes it from the image, as
+	// upstream's SVG renderer does once the image has loaded; the image is
+	// fetched for that through the call's cache, which PNG and PDF output
+	// then draw from.
+	so.Image = func(url string, size bool) svg.ImageInfo {
 		if url == "" {
 			return svg.ImageInfo{}
 		}
@@ -470,48 +475,21 @@ func (c *Converter) renderSVG(ctx context.Context, spec jsval.Value) (out string
 		if err != nil {
 			return svg.ImageInfo{}
 		}
-		if src, ok := svg.SanitizeURL(u, svg.URLOptions{}); ok {
-			return svg.ImageInfo{Src: src}
+		src, ok := svg.SanitizeURL(u, svg.URLOptions{})
+		if !ok {
+			return svg.ImageInfo{}
 		}
-		return svg.ImageInfo{}
+		info := svg.ImageInfo{Src: src}
+		if size {
+			info.Width, info.Height, _ = imagesFrom(ctx).size(ctx, u)
+		}
+		return info
 	}
 	out, err = timed(ctx, "svg", func() (string, error) { return svg.Render(ctx, res.Scenegraph, so) })
 	if err != nil {
 		return "", c.stageErr(ctx, "writing SVG", err)
 	}
 	return out, nil
-}
-
-// imageLoader fetches what the <image> elements of a PNG or a PDF refer to through the
-// Loader, as every resource of a call is: the href sanitized, then loaded,
-// under the call's context. An image is read up to the rasterizer's limit for
-// one image, and the images of one call together up to the data allowance (64
-// MiB, or half of WithMemoryLimit). A rejected or failed load leaves the image
-// undrawn, as a broken image is.
-func (c *Converter) imageLoader() func(context.Context, string) ([]byte, error) {
-	allowance := c.limits().MaxLoadBytes
-	if allowance <= 0 {
-		allowance = 64 << 20
-	}
-	var used atomic.Int64
-	return func(ctx context.Context, href string) ([]byte, error) {
-		u, err := c.cfg.loader.Sanitize(ctx, href)
-		if err != nil {
-			return nil, err
-		}
-		left := allowance - used.Load()
-		if left <= 0 {
-			return nil, fmt.Errorf("%w: images over %d bytes in total", ErrLimit, allowance)
-		}
-		b, err := c.cfg.loader.Load(budget.With(ctx, &budget.Budget{MaxLoadBytes: min(left, budget.From(ctx).LoadLeft())}), u)
-		if err != nil {
-			return nil, err
-		}
-		if used.Add(int64(len(b))) > allowance {
-			return nil, fmt.Errorf("%w: images over %d bytes in total", ErrLimit, allowance)
-		}
-		return b, nil
-	}
 }
 
 // rasterLimits turns WithMemoryLimit into the rasterizer's canvas budget:
@@ -787,7 +765,7 @@ func (c *Converter) rasterize(ctx context.Context, svg string, scale float64) ([
 	}
 	sh = raster.BoundShaper(sh, text.ShapingBudgetFrom(ctx))
 	out, err := timed(ctx, "png", func() ([]byte, error) {
-		return raster.RenderPNG([]byte(svg), raster.Options{Scale: scale, Shaper: sh, Context: ctx, Limits: c.rasterLimits(), Images: c.imageLoader()})
+		return raster.RenderPNG([]byte(svg), raster.Options{Scale: scale, Shaper: sh, Context: ctx, Limits: c.rasterLimits(), Images: imagesFrom(ctx).load})
 	})
 	if err != nil {
 		return nil, c.stageErr(ctx, "rendering PNG", err)
@@ -922,7 +900,7 @@ func (c *Converter) svgToPDF(ctx context.Context, svg string, opts []PDFOption) 
 	}
 	m = m.Bounded(text.ShapingBudgetFrom(ctx))
 	t0 := time.Now()
-	pdf, uses, err = svgpdf.ConvertWithUsage(svg, m, svgpdf.Options{Text: mode, Context: ctx, Images: c.imageLoader()})
+	pdf, uses, err = svgpdf.ConvertWithUsage(svg, m, svgpdf.Options{Text: mode, Context: ctx, Images: imagesFrom(ctx).load})
 	if st := stagesFrom(ctx); st != nil {
 		st("pdf", time.Since(t0))
 	}
