@@ -71,7 +71,7 @@ type benchCase struct {
 func benchCases(b *testing.B) []benchCase {
 	var cs []benchCase
 	for _, n := range benchSpecs {
-		cs = append(cs, benchCase{"vl/" + n, benchSpec(b, n), true})
+		cs = append(cs, benchCase{"vl/" + n, exampleSpec(b, n), true})
 	}
 	for _, n := range galleryBench {
 		spec, err := os.ReadFile("testdata/corpus/vg-gallery/" + n + ".vg.json")

@@ -114,7 +114,7 @@ Shared flags: `-i`/`-o` (input/output, stdin/stdout when omitted), `-version`, `
 
 ### Converter
 
-All rendering goes through a `Converter`, created with `aster.New()`. A converter is not safe for concurrent use — create one per goroutine if needed.
+All rendering goes through a `Converter`, created with `aster.New()`. A converter is safe for concurrent use, so one can serve a whole process (see [Performance](#performance)).
 
 ```go
 c, err := aster.New(
@@ -281,16 +281,17 @@ Custom fonts are used for both text measurement (SVG layout) and PNG rendering.
 
 ## Performance
 
-A render takes milliseconds: on an Apple M1 Pro the 627 Vega-Lite examples render to SVG in 2.4 ms each (geometric mean) and to PNG in 7.9 ms, 2.5× and 1.7× faster than upstream Vega running in node 24 on the same specs, and a `Converter` is ready for its first chart in under 10 ms. [internal/cmd/enginebench](internal/cmd/enginebench) runs the comparison; [RESULTS.md](internal/cmd/enginebench/RESULTS.md) has the full numbers, including the QuickJS/WASM engine earlier versions of this package used, which was 13–62× slower.
+A render takes milliseconds: on an Apple M1 Pro the 627 Vega-Lite examples render to SVG in 1.9 ms each (geometric mean) and to PNG in 7.2 ms, 3.5× and 2.1× faster than upstream Vega running in node 24 on the same specs, and a `Converter` is ready for its first chart in under 10 ms. [internal/cmd/enginebench](internal/cmd/enginebench) runs the comparison; [RESULTS.md](internal/cmd/enginebench/RESULTS.md) has the full numbers, including the QuickJS/WASM engine earlier versions of this package used, which was 13–62× slower.
 
-**Concurrency:** a `Converter` is safe for concurrent use by any number of goroutines, so one can serve a whole process. Each call renders on state of its own; what calls share (fonts and their shaping caches, locales, colour schemes, compiled expressions) is immutable or synchronized. A `Loader` passed to `WithLoader` is called from several goroutines at once and must be safe for that (the loaders in this package are). `Close` may be called at any time: it cancels the calls in flight, waits for them, closes the loader, and every later call returns an error. Throughput of a mixed workload (`BenchmarkParallel`, renders per second, 10 cores):
+**Concurrency:** a `Converter` is safe for concurrent use by any number of goroutines, so one can serve a whole process. Each call renders on state of its own; what calls share (fonts and their shaping caches, locales, colour schemes, compiled expressions) is immutable or synchronized. A `Loader` passed to `WithLoader` is called from several goroutines at once and must be safe for that (the loaders in this package are). `Close` may be called at any time: it cancels the calls in flight, waits for them, closes the loader, and every later call returns an error. Throughput of a mixed SVG workload (`BenchmarkParallel`, renders per second, median of five runs, 10 cores):
 
 | Goroutines | 1 | 4 | 10 |
 |---|---|---|---|
-| one shared `Converter` | ~760 | ~1,900 | ~2,300 |
-| one `Converter` each | ~750 | ~2,150 | ~3,000 |
+| one shared `Converter` | ~950 | ~2,500 | ~3,300 |
+| one `Converter` each | ~950 | ~2,700 | ~4,100 |
+| one shared `Converter`, `GOGC=400` | ~1,080 | ~3,700 | ~4,900 |
 
-Past about four goroutines the garbage collector appears to be the limit.
+The gap between a shared `Converter` and one per goroutine is the garbage collector's pacing, not contention: mutex and block profiles show calls never wait on each other, but ten converters hold a larger live heap, so at the default `GOGC=100` the collector runs about a third as often (458 cycles in 20,000 renders against 1,542). A process that renders in parallel gets the throughput back by letting the heap grow further between collections, with a higher `GOGC` (or `debug.SetGCPercent`), or `GOGC=off` with a `GOMEMLIMIT` sized for the machine; at `GOGC=400` one shared `Converter` matches one per goroutine.
 
 ## Developer notes
 

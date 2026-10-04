@@ -67,20 +67,6 @@ func interpolatorFromCall(from, args any) (Interpolator, bool) {
 	return nil, false
 }
 
-// unitOf resolves a recorded `t => value` function made by a d3-interpolate call.
-func unitOf(v any) (UnitInterpolator, bool) {
-	origin, ok := upstream.IsFunction(v)
-	if !ok || origin == nil {
-		return nil, false
-	}
-	from, _ := origin["from"].(string)
-	args, _ := origin["args"].([]any)
-	if f, ok := interpolators[from]; ok && len(args) == 2 {
-		return UnitInterpolator(f(upstream.ToValue(args[0]), upstream.ToValue(args[1]))), true
-	}
-	return nil, false
-}
-
 func TestUpstreamD3Interpolate(t *testing.T) {
 	r := upstream.Start(t, "d3-interpolate")
 	for i := range r.File.Calls {
@@ -260,7 +246,7 @@ func intervalOfFunction(v any, local format.Zone) (format.Interval, bool) {
 		return format.Interval{}, false
 	}
 	z := format.UTC
-	unit := name
+	var unit string
 	switch {
 	case strings.HasPrefix(name, "time"):
 		z, unit = local, name[len("time"):]

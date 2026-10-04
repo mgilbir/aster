@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/mgilbir/aster"
-	"github.com/mgilbir/aster/internal/fonts/dejavu"
 )
 
 // normalizeSVGNumbers rounds all floating-point numbers in an SVG string to
@@ -205,24 +204,6 @@ func datasetServer(t *testing.T) *aster.HTTPLoader {
 	}
 	return &aster.HTTPLoader{
 		Client: &http.Client{Transport: transport},
-	}
-}
-
-// dejaVuFontOptions returns aster options that configure DejaVu Sans as the
-// text measurement font. DejaVu Sans is the default sans-serif on Ubuntu,
-// matching the environment used to generate the vega-lite expected SVGs.
-func dejaVuFontOptions(t *testing.T) []aster.Option {
-	t.Helper()
-	return []aster.Option{
-		aster.WithFont("DejaVu Sans", dejavu.SansRegular),
-		aster.WithFont("DejaVu Sans", dejavu.SansBold),
-		aster.WithFont("DejaVu Sans", dejavu.SansOblique),
-		aster.WithFont("DejaVu Sans", dejavu.SansBoldOblique),
-		aster.WithFont("DejaVu Sans Mono", dejavu.MonoRegular),
-		aster.WithFont("DejaVu Sans Mono", dejavu.MonoBold),
-		aster.WithFont("DejaVu Sans Mono", dejavu.MonoOblique),
-		aster.WithFont("DejaVu Sans Mono", dejavu.MonoBoldOblique),
-		aster.WithDefaultFontFamily("DejaVu Sans"),
 	}
 }
 

@@ -283,7 +283,7 @@ func TickFormat(loc *format.Locale, s Scale, count TickCount, specifier jsval.Va
 		if count.HasN {
 			n = count.N
 		}
-		var d0, dn float64 = math.NaN(), math.NaN()
+		d0, dn := math.NaN(), math.NaN()
 		if len(d) > 0 {
 			d0, dn = jsval.ToNumber(d[0]), jsval.ToNumber(d[len(d)-1])
 		}

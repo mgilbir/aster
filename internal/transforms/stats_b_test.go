@@ -119,9 +119,7 @@ func bSpecDist(t *testing.T, s jsval.Value) Distribution {
 		return NewInteger(s.Get("min").NumValue(), s.Get("max").NumValue())
 	case "kde":
 		var vals []jsval.Value
-		for _, v := range s.Get("data").Items() {
-			vals = append(vals, v)
-		}
+		vals = append(vals, s.Get("data").Items()...)
 		return NewKernelDensity(vals, s.Get("bandwidth").NumValue())
 	case "mixture":
 		var ds []Distribution

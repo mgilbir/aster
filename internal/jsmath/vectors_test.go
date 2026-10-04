@@ -79,15 +79,6 @@ var vecFuncs = []*vecFunc{
 	{name: "tan", arity: 1, f1: Tan, special: []float64{math.Pi / 4, math.Pi / 2, math.Pi, 3 * math.Pi / 2, 0x1p-28, 0.6743316650390625, 1e5, 1e6, 1e7, 1e10, 1e300, math.MaxFloat64}},
 }
 
-func vecFuncByName(n string) *vecFunc {
-	for _, v := range vecFuncs {
-		if v.name == n {
-			return v
-		}
-	}
-	return nil
-}
-
 // splitmix64 is a small, fixed generator so the recorded vectors stay
 // reproducible across Go versions (math/rand's streams are not guaranteed).
 type splitmix struct{ s uint64 }
@@ -174,72 +165,72 @@ func unaryArg(r *splitmix, v *vecFunc) float64 {
 
 // powArgs draws one (base, exponent) pair.
 func powArgs(r *splitmix) (float64, float64) {
-	switch c := r.intn(32); {
-	case c == 24: // any base, integer exponents
+	switch c := r.intn(32); c {
+	case 24: // any base, integer exponents
 		return r.sign() * r.logUniform(-60, 60), float64(r.intn(2001) - 1000)
-	case c == 25: // quarter exponents
+	case 25: // quarter exponents
 		return r.logUniform(-40, 40), float64(r.intn(161)-80) / 4
-	case c == 26: // results in the subnormal range
+	case 26: // results in the subnormal range
 		x := r.logUniform(1, 40)
 		return x, -(1022 + r.unit()*52) / math.Log2(x)
-	case c == 27: // inputs on which fdlibm and the C library's pow differ
+	case 27: // inputs on which fdlibm and the C library's pow differ
 		k := [][2]float64{{10, -5}, {10, -17}, {10, 23}, {0.527924914041446, 2.4}, {0.11504498964210919, 44.625}, {2, 983.8424675024525}, {73041.22436527038, 2.0 / 3}}[r.intn(7)]
 		return nearby(r, k[0]), nearby(r, k[1])
-	case c == 28: // huge and tiny bases
+	case 28: // huge and tiny bases
 		return r.sign() * r.logUniform(-1074+52, 1023), r.unit()*2 - 1
-	case c == 29: // subnormal bases, small integer exponents
+	case 29: // subnormal bases, small integer exponents
 		return r.sign() * math.Ldexp(r.unit(), -1022), float64(r.intn(7) - 3)
-	case c == 30: // negative bases, integer exponents
+	case 30: // negative bases, integer exponents
 		return -r.logUniform(-300, 300), float64(r.intn(2001) - 1000)
-	case c == 31: // near 1
+	case 31: // near 1
 		return 1 + (r.unit()*2-1)*math.Ldexp(1, -r.intn(40)), r.sign() * r.logUniform(0, 40)
-	case c == 0:
+	case 0:
 		return math.Float64frombits(r.next()), math.Float64frombits(r.next())
-	case c == 1:
+	case 1:
 		return specials[r.intn(len(specials))], specials[r.intn(len(specials))]
-	case c == 2: // hard decimal cases: 10^k, k an integer
+	case 2: // hard decimal cases: 10^k, k an integer
 		return 10, float64(r.intn(80) - 40)
-	case c == 3: // 1.1**2.4 and friends
+	case 3: // 1.1**2.4 and friends
 		return 1 + float64(r.intn(100))/10, float64(r.intn(100)-20) / 10
-	case c == 4: // small integer powers of integers
+	case 4: // small integer powers of integers
 		return float64(r.intn(1001)), float64(r.intn(60))
-	case c == 5:
+	case 5:
 		return float64(r.intn(1001)) / float64(1+r.intn(100)), float64(r.intn(21) - 10)
-	case c == 6: // negative bases, integer exponents
+	case 6: // negative bases, integer exponents
 		return -r.logUniform(-20, 20), float64(r.intn(41) - 20)
-	case c == 7: // negative bases, fractional exponents
+	case 7: // negative bases, fractional exponents
 		return -r.logUniform(-20, 20), r.unit()*20 - 10
-	case c == 8: // near 1, huge exponent
+	case 8: // near 1, huge exponent
 		return 1 + (r.unit()*2-1)*math.Ldexp(1, -20-r.intn(30)), r.sign() * r.logUniform(20, 70)
-	case c == 9: // overflow and underflow boundaries
+	case 9: // overflow and underflow boundaries
 		x := r.logUniform(-1074+52, 1023)
 		y := r.sign() * (1000 + r.unit()*100) / math.Log2(x)
 		return x, y
-	case c == 10:
+	case 10:
 		return r.logUniform(-1074+52, 1023), r.sign() * r.logUniform(-3, 3)
-	case c == 11: // roots
+	case 11: // roots
 		return r.logUniform(-30, 30), []float64{0.5, 1.0 / 3, 0.25, 0.75, 1.5, 2.5, -0.5, 1.0 / 5, 2.0 / 3}[r.intn(9)]
-	case c == 12:
+	case 12:
 		return r.unit() * 1000, r.unit()*40 - 20
-	case c == 13:
+	case 13:
 		return r.unit() * 4, r.unit()*4 - 2
-	case c == 14:
+	case 14:
 		return r.logUniform(-1074+52, 1023) * r.sign(), float64(r.intn(9) - 4)
-	case c == 15: // subnormal bases
+	case 15: // subnormal bases
 		return math.Ldexp(r.unit(), -1022), r.unit()*4 - 2
-	case c == 16:
+	case 16:
 		return math.Pow(2, float64(r.intn(2000)-1000)), r.unit()*4 - 2
-	case c == 17:
+	case 17:
 		return r.logUniform(-10, 10), float64(r.intn(2001)-1000) / 8
-	case c == 18:
+	case 18:
 		return nearby(r, float64(r.intn(21)-10)), nearby(r, float64(r.intn(21)-10)/2)
-	case c == 19:
+	case 19:
 		return r.unit(), r.sign() * r.logUniform(0, 9)
-	case c == 20:
+	case 20:
 		return r.unit() * 2, float64(r.intn(400) - 200)
-	case c == 21:
+	case 21:
 		return 2, r.unit()*2100 - 1075
-	case c == 22:
+	case 22:
 		return math.Exp(r.unit()*20 - 10), r.unit()*100 - 50
 	default:
 		return r.unit()*20 - 10, float64(r.intn(21) - 10)

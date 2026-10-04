@@ -372,7 +372,8 @@ func init() {
 	// sequence is d3.range: arguments are (stop), (start, stop) or (start,
 	// stop, step).
 	fn("sequence", func(s *Scope, args []jsval.Value) jsval.Value {
-		start, stop, step := math.NaN(), math.NaN(), 1.0
+		var start, stop float64
+		step := 1.0
 		switch {
 		case len(args) < 2:
 			stop, start = s.num(arg(args, 0)), 0

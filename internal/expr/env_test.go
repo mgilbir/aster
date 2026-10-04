@@ -354,8 +354,8 @@ func TestSeededRandom(t *testing.T) {
 		}
 		return v.String()
 	}
-	if run(42) != run(42) || run(42) == run(43) {
-		t.Errorf("seeded generator is not deterministic: %s / %s / %s", run(42), run(42), run(43))
+	if a, b, c := run(42), run(42), run(43); a != b || a == c {
+		t.Errorf("seeded generator is not deterministic: %s / %s / %s", a, b, c)
 	}
 }
 

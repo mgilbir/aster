@@ -160,7 +160,6 @@ func collectSignals(spec, config jsval.Value) []jsval.Value {
 			merged := signals[i].ObjValue().Clone()
 			extendObj(merged, s)
 			signals[i] = jsval.Obj(merged)
-			s = signals[i]
 		} else {
 			signals = append(signals, s)
 		}

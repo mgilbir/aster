@@ -157,5 +157,3 @@ func newBoundsSet(x1, y1, x2, y2 float64) scene.Bounds {
 	b.Set(x1, y1, x2, y2)
 	return b
 }
-
-func cloneBounds(b *scene.Bounds) scene.Bounds { return *b }

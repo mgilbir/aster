@@ -202,23 +202,24 @@ func (v *diagram) clipFinite(i int32, points []float64) []float64 {
 		x0, y0, x1, y1 = x1, y1, points[j], points[j+1]
 		c0, c1 = c1, v.regionCode(x1, y1)
 		if c0 == 0 && c1 == 0 {
-			e0, e1 = e1, 0
+			e1 = 0
 			P = append(P, x1, y1)
 			continue
 		}
 		var s [4]float64
 		var ok bool
-		var sx0, sy0, sx1, sy1 float64
+		var sx1, sy1 float64
 		if c0 == 0 {
 			if s, ok = v.clipSegment(x0, y0, x1, y1, c0, c1); !ok {
 				continue
 			}
-			sx0, sy0, sx1, sy1 = s[0], s[1], s[2], s[3]
+			sx1, sy1 = s[2], s[3]
 		} else {
 			if s, ok = v.clipSegment(x1, y1, x0, y0, c1, c0); !ok {
 				continue
 			}
-			sx1, sy1, sx0, sy0 = s[0], s[1], s[2], s[3]
+			sx1, sy1 = s[0], s[1]
+			sx0, sy0 := s[2], s[3]
 			e0, e1 = e1, v.edgeCode(sx0, sy0)
 			if e0 != 0 && e1 != 0 {
 				P, _ = v.edge(i, e0, e1, P, len(P))

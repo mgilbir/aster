@@ -97,7 +97,7 @@ func TestUseBomb(t *testing.T) {
 }
 
 func itoa(i int) string {
-	return strings.TrimSpace(strings.Replace(string(rune('0'+i/10))+string(rune('0'+i%10)), "\x00", "", -1))
+	return strings.TrimSpace(strings.ReplaceAll(string(rune('0'+i/10))+string(rune('0'+i%10)), "\x00", ""))
 }
 
 func TestUseCycle(t *testing.T) {

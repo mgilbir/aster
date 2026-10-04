@@ -185,11 +185,6 @@ func Log(x float64) float64 {
 
 // ---- log1p
 
-const (
-	lp1 = lg1
-	lp2 = lg2k
-)
-
 // Log1p is Math.log1p.
 func Log1p(x float64) float64 {
 	hx := hi(x)

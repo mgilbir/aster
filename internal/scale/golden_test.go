@@ -127,10 +127,6 @@ func valuesMatch(a, b jsval.Value, st *cmpStats) bool {
 	return jsval.Equal(a, b)
 }
 
-func valuesMatchList(a, b []jsval.Value, st *cmpStats) bool {
-	return valuesMatch(jsval.Arr(a), jsval.Arr(b), st)
-}
-
 type goldenCase struct {
 	Name    string  `json:"name"`
 	Type    string  `json:"type"`

@@ -592,7 +592,7 @@ func configureRangeStep(typ string, p *opParams, count int) rangeSpec {
 		fail("Only band and point scales support rangeStep.")
 	}
 	padding := jsval.ToNumber(orZeroV(p.Value("padding")))
-	outer := padding
+	var outer float64
 	if v := p.Value("paddingOuter"); !v.IsNullish() {
 		outer = jsval.ToNumber(orZeroV(v))
 	} else {

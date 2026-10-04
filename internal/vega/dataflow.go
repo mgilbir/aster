@@ -55,38 +55,6 @@ type flowPulse struct {
 // stopPulse is StopPropagation: targets are not enqueued.
 var stopPulse = &flowPulse{stamp: -1}
 
-func (p *flowPulse) fork() *flowPulse {
-	q := *p
-	q.add, q.rem, q.mod = nil, nil, nil
-	return &q
-}
-
-// visitItems calls f for the items a visit of the given kinds would reach. A
-// reflow pulse treats the whole source as modified, as Pulse.visit(REFLOW)
-// does for the tuples that are not already added or modified.
-func (p *flowPulse) modOrReflow() []*scene.Item {
-	if !p.reflow {
-		return p.mod
-	}
-	if len(p.add)+len(p.mod) == len(p.items) {
-		return p.mod
-	}
-	if len(p.add) == 0 {
-		return p.items
-	}
-	added := make(map[*scene.Item]struct{}, len(p.add))
-	for _, it := range p.add {
-		added[it] = struct{}{}
-	}
-	out := make([]*scene.Item, 0, len(p.items))
-	for _, it := range p.items {
-		if _, ok := added[it]; !ok {
-			out = append(out, it)
-		}
-	}
-	return out
-}
-
 // Params holds an operator's marshalled parameter values together with which
 // of them changed since the previous marshalling (vega-dataflow Parameters).
 type opParams struct {
@@ -176,7 +144,7 @@ func sameValue(a, b any) bool {
 	case nil:
 		return b == nil
 	}
-	defer func() { recover() }() // uncomparable dynamic types compare as different
+	defer func() { _ = recover() }() // uncomparable dynamic types compare as different
 	return a == b
 }
 
@@ -402,18 +370,6 @@ func (n *opNode) evaluate(p *flowPulse) *flowPulse {
 		}
 	}
 	return nil
-}
-
-// detach unregisters n from the operators it listens to.
-func (n *opNode) detach() {
-	for _, a := range n.argops {
-		a.op.removeTarget(n)
-	}
-	for _, s := range n.source {
-		s.removeTarget(n)
-	}
-	n.pulse = nil
-	n.source = nil
 }
 
 // nodeHeap is the evaluation priority queue: lowest rank first. It is

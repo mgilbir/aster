@@ -56,14 +56,13 @@ const (
 )
 
 type token struct {
-	kind   tokKind
-	val    string  // identifier/keyword/punctuator text, string literal value
-	num    float64 // numeric literal value
-	octal  bool
-	start  int
-	end    int
-	prec   int
-	regexp bool
+	kind  tokKind
+	val   string  // identifier/keyword/punctuator text, string literal value
+	num   float64 // numeric literal value
+	octal bool
+	start int
+	end   int
+	prec  int
 }
 
 // keywords are the reserved words vega-expression's tokenizer recognises. Only

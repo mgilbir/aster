@@ -104,7 +104,7 @@ func main() {
 		fatal(err)
 	}
 	rep.Version = version()
-	defer e.Close()
+	defer func() { _ = e.Close() }()
 	rep.InitMS = ms(time.Since(t0))
 	t0 = time.Now()
 	if _, err := e.VegaLiteToSVG(bar); err != nil {
@@ -150,7 +150,9 @@ func main() {
 		fatal(err)
 	}
 	if *out == "" {
-		os.Stdout.Write(append(b, '\n'))
+		if _, err := os.Stdout.Write(append(b, '\n')); err != nil {
+			fatal(err)
+		}
 		return
 	}
 	if err := os.WriteFile(*out, append(b, '\n'), 0o644); err != nil {
