@@ -104,3 +104,28 @@ func TestRunSVGPrivateNetworks(t *testing.T) {
 		}
 	}
 }
+
+// -signal sets a signal before the render: a JSON value, or else a string.
+func TestRunSVGSignal(t *testing.T) {
+	dir := t.TempDir()
+	spec := filepath.Join(dir, "spec.json")
+	if err := os.WriteFile(spec, []byte(`{"width":100,"height":20,"signals":[{"name":"w","value":10},{"name":"label","value":"a"}],
+	  "marks":[{"type":"rect","encode":{"update":{"width":{"signal":"w"},"height":{"value":20}}}},
+	           {"type":"text","encode":{"update":{"text":{"signal":"label"}}}}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "out.svg")
+	if err := runSVG([]string{"-i", spec, "-o", out, "-signal", "w=50", "-signal", "label=hello world"}); err != nil {
+		t.Fatal(err)
+	}
+	svg, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(svg, []byte(`h50v20h-50Z`)) || !bytes.Contains(svg, []byte(`hello world`)) {
+		t.Errorf("the signals were not set:\n%s", svg)
+	}
+	if err := runSVG([]string{"-i", spec, "-o", out, "-signal", "nope=1"}); err == nil {
+		t.Error("an unknown signal: no error")
+	}
+}

@@ -125,11 +125,38 @@ func (co *commonOpts) options() ([]aster.Option, error) {
 	return opts, nil
 }
 
+// signalFlag collects the repeatable -signal name=value flag of the rendering
+// subcommands. A value that parses as JSON is that JSON value; any other is a
+// string.
+type signalFlag []aster.SignalOption
+
+func (s *signalFlag) String() string { return "" }
+
+func (s *signalFlag) Set(v string) error {
+	name, value, ok := strings.Cut(v, "=")
+	if !ok || name == "" {
+		return fmt.Errorf("want name=value, got %q", v)
+	}
+	if json.Valid([]byte(value)) {
+		*s = append(*s, aster.WithSignal(name, json.RawMessage(value)))
+	} else {
+		*s = append(*s, aster.WithSignal(name, value))
+	}
+	return nil
+}
+
+func registerSignals(fs *flag.FlagSet) *signalFlag {
+	s := &signalFlag{}
+	fs.Var(s, "signal", "set a top-level signal (a Vega-Lite parameter) before rendering, as name=value, value JSON or else a string (repeatable)")
+	return s
+}
+
 func runSVG(args []string) (err error) {
 	fs := flag.NewFlagSet("svg", flag.ExitOnError)
 	input := fs.String("i", "", "input spec file (- or omit for stdin)")
 	output := fs.String("o", "", "output SVG file (omit for stdout)")
 	co := registerCommonOpts(fs)
+	signals := registerSignals(fs)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -153,11 +180,15 @@ func runSVG(args []string) (err error) {
 		}
 	}()
 
+	var renderOpts []aster.RenderOption
+	for _, s := range *signals {
+		renderOpts = append(renderOpts, s)
+	}
 	var svg string
 	if isVegaLite(spec) {
-		svg, err = c.VegaLiteToSVG(spec)
+		svg, err = c.VegaLiteToSVG(spec, renderOpts...)
 	} else {
-		svg, err = c.VegaToSVG(spec)
+		svg, err = c.VegaToSVG(spec, renderOpts...)
 	}
 	if err != nil {
 		return err
@@ -173,6 +204,7 @@ func runPNG(args []string) (err error) {
 	scale := fs.Float64("scale", 1.0, "scale factor; 2 produces 2x dimensions")
 	recode := fs.Bool("recode", false, "losslessly re-encode the PNG into a smaller equivalent format")
 	co := registerCommonOpts(fs)
+	signals := registerSignals(fs)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -203,6 +235,9 @@ func runPNG(args []string) (err error) {
 	if *recode {
 		pngOpts = append(pngOpts, aster.WithRecodePNG())
 	}
+	for _, s := range *signals {
+		pngOpts = append(pngOpts, s)
+	}
 
 	var data []byte
 	if isVegaLite(spec) {
@@ -223,6 +258,7 @@ func runPDF(args []string) (err error) {
 	output := fs.String("o", "", "output PDF file (omit for stdout)")
 	textMode := fs.String("text", "embed", "PDF text mode: embed (subset fonts, selectable text), named (no font program; the assembling document must embed the same font), or outlines (glyphs as paths)")
 	co := registerCommonOpts(fs)
+	signals := registerSignals(fs)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -237,6 +273,9 @@ func runPDF(args []string) (err error) {
 		pdfOpts = append(pdfOpts, aster.WithPDFText(aster.PDFTextOutlines))
 	default:
 		return fmt.Errorf("invalid -text %q (must be embed, named, or outlines)", *textMode)
+	}
+	for _, s := range *signals {
+		pdfOpts = append(pdfOpts, s)
 	}
 
 	spec, err := readInput(*input)
