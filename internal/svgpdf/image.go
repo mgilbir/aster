@@ -18,8 +18,8 @@ import (
 // its size in pixels.
 type pdfImage struct {
 	// The resource names (Im0, Im1, ...) of the image smoothed and not:
-	// interpolation is a property of the XObject, and an image drawn both
-	// ways is two, sharing its streams.
+	// interpolation is a property of the image's stream, so an image drawn
+	// both ways is embedded twice, once each way.
 	smoothRes, sharpRes string
 	w, h                int
 	cat                 *imageCatalog
