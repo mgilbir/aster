@@ -50,7 +50,9 @@ merges any number of them (the first node file is the baseline).
 
 ## Results
 
-[RESULTS.md](RESULTS.md) (raw JSON in `results-2026-09-30/`) is the run that
-decided to replace the previous engine, Vega in QuickJS with resvg for PNG
-(both WebAssembly), with the pure-Go one: node 20 and 24, the QuickJS engine
-("aster" there) and the pure-Go engine ("purego" there, now the package).
+[RESULTS.md](RESULTS.md) has two runs. The latest (2026-10-03, raw JSON in
+`results-2026-10-03/`) times the pure-Go engine against node 24 after the
+performance work. The first (2026-09-30, raw JSON in `results-2026-09-30/`) is
+the run that decided to replace the previous engine, Vega in QuickJS with resvg
+for PNG (both WebAssembly), with the pure-Go one: node 20 and 24, the QuickJS
+engine ("aster" there) and the pure-Go engine ("purego" there, now the package).

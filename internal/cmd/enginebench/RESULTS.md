@@ -1,4 +1,122 @@
-# Engine comparison, 2026-09-30
+# Engine comparison
+
+## 2026-10-03: the pure-Go engine after the performance work
+
+Produced by `NODE="volta run --node 24 node" run.sh` on the same Apple M1 Pro as the run below, at 819a348 (after #48–#57, which cut the PDF stage, the PNG encoder and rasterizer, and the dataflow). Raw JSON in `results-2026-10-03/`. The machine had about one and a half cores of background load (a Docker VM, Spotlight, a browser), which falls on node and the engine alike; node 24 measured about 8% slower than on 2026-09-30, so compare the engine with its own earlier times (SVG geomean 2.40 → 1.92 ms, PNG 7.89 → 7.17 ms) as well as with node.
+
+### Engines
+
+| engine | version | environment | init | first VL→SVG | peak RSS | failed cases |
+|---|---|---|---:|---:|---:|---:|
+| node 24 | Vega 6.4.0 / Vega-Lite 6.4.3, node-canvas 3.2.3 | node v24.21.0 darwin/arm64, Apple M1 Pro | 390 ms | 65.2 ms | 1025 MB | 3 |
+| aster | Vega 6.4.0 / Vega-Lite 6.4.3, pure Go | go1.27.1 darwin/arm64, GOMAXPROCS=10 | 0.00 ms | 9.42 ms | 270 MB | 1 |
+
+Times are the median of repeated runs on a warm engine (budget 300 ms per case, at least 3 runs unless one run exceeds 2 s). Only cases every engine completed are compared.
+
+### vl-examples, Vega-Lite → Vega JSON (627 specs)
+
+| engine | geomean | median | p90 | max | total | speedup vs node 24 (geomean) | faster than node 24 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| node 24 | 0.52 ms | 0.42 ms | 1.22 ms | 9.52 ms | 425 ms | — | — |
+| aster | 0.30 ms | 0.25 ms | 0.65 ms | 3.11 ms | 238 ms | 1.72× | 627/627 |
+
+### vl-examples, spec → SVG (627 specs)
+
+| engine | geomean | median | p90 | max | total | speedup vs node 24 (geomean) | faster than node 24 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| node 24 | 6.62 ms | 6.21 ms | 20.9 ms | 420 ms | 7472 ms | — | — |
+| aster | 1.92 ms | 1.62 ms | 7.49 ms | 129 ms | 2816 ms | 3.45× | 614/627 |
+
+### vl-examples, spec → PNG (626 specs)
+
+| engine | geomean | median | p90 | max | total | speedup vs node 24 (geomean) | faster than node 24 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| node 24 | 14.8 ms | 13.2 ms | 42.1 ms | 398 ms | 14.7 s | — | — |
+| aster | 7.17 ms | 7.01 ms | 21.8 ms | 207 ms | 7602 ms | 2.06× | 616/626 |
+
+### vg-gallery, spec → SVG (92 specs)
+
+| engine | geomean | median | p90 | max | total | speedup vs node 24 (geomean) | faster than node 24 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| node 24 | 7.95 ms | 6.70 ms | 65.4 ms | 417 ms | 2726 ms | — | — |
+| aster | 2.07 ms | 1.34 ms | 26.8 ms | 395 ms | 1103 ms | 3.84× | 90/92 |
+
+### vg-gallery, spec → PNG (90 specs)
+
+| engine | geomean | median | p90 | max | total | speedup vs node 24 (geomean) | faster than node 24 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| node 24 | 30.2 ms | 32.1 ms | 123 ms | 849 ms | 5492 ms | — | — |
+| aster | 14.0 ms | 13.5 ms | 66.0 ms | 410 ms | 2607 ms | 2.16× | 87/90 |
+
+### Highlights (end-to-end SVG and PNG)
+
+| spec | stage | node 24 | aster |
+|---|---|---:|---:|
+| vl-examples/bar | svg | 5.77 ms | 0.61 ms |
+| vl-examples/bar | png | 11.9 ms | 2.89 ms |
+| vl-examples/trellis_bar | svg | 7.74 ms | 1.61 ms |
+| vl-examples/trellis_bar | png | 23.3 ms | 12.0 ms |
+| vl-examples/repeat_splom | svg | 224 ms | 18.1 ms |
+| vl-examples/repeat_splom | png | 365 ms | 80.7 ms |
+| vl-examples/geo_choropleth | svg | 193 ms | 73.3 ms |
+| vl-examples/geo_choropleth | png | 202 ms | 90.6 ms |
+| vg-gallery/scatter-plot | svg | 8.99 ms | 1.18 ms |
+| vg-gallery/scatter-plot | png | 55.2 ms | 8.40 ms |
+| vg-gallery/stacked-area-chart | svg | 4.12 ms | 0.28 ms |
+| vg-gallery/stacked-area-chart | png | 18.2 ms | 4.41 ms |
+| vg-gallery/treemap | svg | 2.11 ms | 0.53 ms |
+| vg-gallery/treemap | png | 53.3 ms | 22.2 ms |
+| vg-gallery/county-unemployment | svg | 203 ms | 67.2 ms |
+| vg-gallery/county-unemployment | png | 849 ms | 101 ms |
+| vg-gallery/force-directed-layout | svg | 47.0 ms | 18.1 ms |
+| vg-gallery/force-directed-layout | png | 65.5 ms | 30.1 ms |
+| vg-gallery/beeswarm-plot | svg | 14.5 ms | 6.62 ms |
+| vg-gallery/beeswarm-plot | png | 21.0 ms | 11.2 ms |
+| vg-gallery/contour-plot | svg | 12.9 ms | 6.18 ms |
+| vg-gallery/contour-plot | png | 45.5 ms | 43.3 ms |
+| vg-gallery/world-map | svg | 44.2 ms | 8.02 ms |
+| vg-gallery/world-map | png | 216 ms | 34.0 ms |
+
+### Slowest svg cases (by the slowest engine)
+
+| spec | node 24 | aster |
+|---|---:|---:|
+| vl-examples/geo_circle | 420 ms | 110 ms |
+| vg-gallery/platformer | 417 ms | 25.4 ms |
+| vg-gallery/word-cloud | 399 ms | 395 ms |
+| vl-examples/interactive_geo_facet_species | 281 ms | 118 ms |
+| vl-examples/geo_trellis | 263 ms | 129 ms |
+| vl-examples/repeat_splom | 224 ms | 18.1 ms |
+| vg-gallery/county-unemployment | 203 ms | 67.2 ms |
+| vl-examples/geo_choropleth | 193 ms | 73.3 ms |
+| vg-gallery/time-units | 175 ms | 28.1 ms |
+| vg-gallery/map-with-tooltip | 119 ms | 48.4 ms |
+
+### Slowest png cases (by the slowest engine)
+
+| spec | node 24 | aster |
+|---|---:|---:|
+| vg-gallery/county-unemployment | 849 ms | 101 ms |
+| vg-gallery/word-cloud | 341 ms | 410 ms |
+| vl-examples/geo_circle | 398 ms | 184 ms |
+| vl-examples/bar_count_minimap | 366 ms | 117 ms |
+| vl-examples/repeat_splom | 365 ms | 80.7 ms |
+| vl-examples/geo_trellis | 352 ms | 207 ms |
+| vl-examples/interactive_geo_facet_species | 330 ms | 162 ms |
+| vg-gallery/wind-vectors | 279 ms | 41.2 ms |
+| vg-gallery/world-map | 216 ms | 34.0 ms |
+| vg-gallery/tree-layout | 208 ms | 51.9 ms |
+
+### Failures
+
+- **node 24**: 3
+  - vl-examples/scatter_image png: Image given has not completed loading
+  - vg-gallery/platformer png: Image given has not completed loading
+  - vg-gallery/projections png: the surface type is not appropriate for the operation
+- **aster**: 1
+  - vg-gallery/projections png: aster: rendering PNG: raster: SVG has no valid size (width/height or viewBox required)
+
+## 2026-09-30: the run that retired the QuickJS engine
 
 Produced by `run.sh` (node 20 via the default node, then node 24 with `volta run --node 24 node internal/cmd/enginebench/bench.mjs`), on an Apple M1 Pro, before the QuickJS engine was retired. aster is the QuickJS + resvg engine; purego is the pure-Go engine that replaced it.
 
