@@ -804,9 +804,10 @@ func (c *Converter) VegaLiteToPDF(spec []byte, opts ...PDFOption) ([]byte, error
 // default the fonts a chart uses are subset and embedded, so the output is
 // self-contained and text is selectable.
 //
-// Only the SVG subset that Vega emits is supported. Unsupported constructs
-// (gradients, images, embedded CSS, ...) return a descriptive error rather
-// than a silently incomplete chart; callers can fall back to SVGToPNG.
+// Only the SVG subset that Vega emits is supported, images included (fetched
+// through the Loader, as PNG output fetches them). Unsupported constructs
+// (gradients, embedded CSS, ...) return a descriptive error rather than a
+// silently incomplete chart; callers can fall back to SVGToPNG.
 func (c *Converter) SVGToPDF(svg string, opts ...PDFOption) ([]byte, error) {
 	out, _, err := c.SVGToPDFUsage(svg, opts...)
 	return out, err
