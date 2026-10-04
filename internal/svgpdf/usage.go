@@ -1,6 +1,10 @@
 package svgpdf
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/mgilbir/aster/internal/budget"
+)
 
 // FontUsage reports, for one shaped face used in a converted document, the
 // source font bytes and the glyph IDs actually referenced.
@@ -39,6 +43,11 @@ type FontUsage struct {
 func ConvertWithUsage(svg string, shaper TextShaper, opts Options) (pdf []byte, uses []FontUsage, err error) {
 	defer func() {
 		if p := recover(); p != nil {
+			if stop, ok := p.(*budget.Stop); ok {
+				// The shaper's budget or the context stopped a text run.
+				pdf, uses, err = nil, nil, stop.Err
+				return
+			}
 			pdf, uses, err = nil, nil, fmt.Errorf("svgpdf: internal error: %v", p)
 		}
 	}()

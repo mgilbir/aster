@@ -50,6 +50,8 @@ import (
 	"image"
 	"image/color"
 	"math"
+
+	"github.com/mgilbir/aster/internal/budget"
 )
 
 // Options configures Render.
@@ -79,6 +81,11 @@ type Options struct {
 func Render(svg []byte, opts Options) (img *image.NRGBA, err error) {
 	defer func() {
 		if p := recover(); p != nil {
+			if stop, ok := p.(*budget.Stop); ok {
+				// The shaper's budget or the context stopped a text run.
+				img, err = nil, stop.Err
+				return
+			}
 			img, err = nil, fmt.Errorf("raster: internal error: %v", p)
 		}
 	}()

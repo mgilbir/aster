@@ -105,6 +105,20 @@ func TestErrLimit(t *testing.T) {
 			_, err := c.SVGToPDF(deepSVG(2000))
 			return err
 		}},
+		// A run's glyphs may hold a quarter of the memory limit (at least 1 MiB):
+		// far fewer glyphs than 100,000 characters set in one face make.
+		{"text run, layout", []aster.Option{aster.WithMemoryLimit(1 << 20)}, func(c *aster.Converter) error {
+			_, err := c.VegaToSVG([]byte(`{"marks":[{"type":"text","encode":{"enter":{"text":{"signal":"pad('', 100000, 'a')"}}}}]}`))
+			return err
+		}},
+		{"text run, PNG", []aster.Option{aster.WithMemoryLimit(1 << 20)}, func(c *aster.Converter) error {
+			_, err := c.SVGToPNG(longTextSVG(100000))
+			return err
+		}},
+		{"text run, PDF", []aster.Option{aster.WithMemoryLimit(1 << 20)}, func(c *aster.Converter) error {
+			_, err := c.SVGToPDF(longTextSVG(100000))
+			return err
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -130,4 +144,11 @@ func TestErrLimit(t *testing.T) {
 			t.Errorf("err = %.300v, want context.DeadlineExceeded and not a limit", err)
 		}
 	})
+}
+
+// longTextSVG is an SVG, written as Vega writes text, with one text element
+// of n characters.
+func longTextSVG(n int) string {
+	return `<svg xmlns="http://www.w3.org/2000/svg" width="100" height="20"><text transform="translate(0,15)" font-family="sans-serif" font-size="10px">` +
+		strings.Repeat("a", n) + `</text></svg>`
 }

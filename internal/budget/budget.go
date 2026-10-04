@@ -15,6 +15,16 @@ import (
 // ErrLimit is wrapped by every error reporting an exceeded budget.
 var ErrLimit = errors.New("limit exceeded")
 
+// Stop is the panic value that ends a render from code that cannot return an
+// error, such as a scenegraph callback walking a geographic path or a text
+// measurement shaping a run: a budget is spent or the render's context is
+// done. It wraps the cause. Callers that can return an error recover it, and
+// the renderer's own recover reports the rest.
+type Stop struct{ Err error }
+
+func (e *Stop) Error() string { return e.Err.Error() }
+func (e *Stop) Unwrap() error { return e.Err }
+
 // Budget is the mutable state of one render. It is not safe for concurrent
 // use: a render is single-threaded.
 type Budget struct {

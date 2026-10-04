@@ -26,6 +26,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/fontsubset"
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/pngopt"
@@ -200,12 +201,18 @@ func (c *Converter) enter() (release func(), ok bool) {
 }
 
 // opContext bounds one public call — every stage of it together — by the
-// converter's timeout, and by Close.
+// converter's timeout, and by Close. The context carries the call's shaping
+// budget, so its text is shaped under the same timeout and within one
+// allowance of work.
 func (c *Converter) opContext() (context.Context, context.CancelFunc) {
+	var ctx context.Context
+	var cancel context.CancelFunc
 	if c.cfg.timeout > 0 {
-		return context.WithTimeout(c.base, c.cfg.timeout)
+		ctx, cancel = context.WithTimeout(c.base, c.cfg.timeout)
+	} else {
+		ctx, cancel = context.WithCancel(c.base)
 	}
-	return context.WithCancel(c.base)
+	return text.WithShapingBudget(ctx, text.NewShapingBudget(ctx, c.shapingLimits())), cancel
 }
 
 // stageErr wraps a stage's error, naming the timeout when the call's context
@@ -225,7 +232,12 @@ func (c *Converter) stageErr(ctx context.Context, stage string, err error) error
 func recoverInto(err *error) {
 	if r := recover(); r != nil {
 		// A budget that stops work deep inside a stage (the geographic path
-		// walk) panics with its error: it is a limit, not a bug.
+		// walk, text shaping) panics with its error: it is a limit or the
+		// call's context, not a bug.
+		if s, ok := r.(*budget.Stop); ok {
+			*err = fmt.Errorf("aster: %w", s.Err)
+			return
+		}
 		if e, ok := r.(error); ok && errors.Is(e, ErrLimit) {
 			*err = fmt.Errorf("aster: %w", e)
 			return
@@ -327,6 +339,8 @@ func (c *Converter) renderSVG(ctx context.Context, spec jsval.Value) (out string
 	if err != nil {
 		return "", err
 	}
+	shaping := text.ShapingBudgetFrom(ctx)
+	m = m.Bounded(shaping)
 	opts := vega.Options{
 		Loader:   c.cfg.loader,
 		Location: c.location,
@@ -356,7 +370,7 @@ func (c *Converter) renderSVG(ctx context.Context, spec jsval.Value) (out string
 	}
 	// The label transform paints the marks it avoids, text included; the
 	// shaper is only built if it does.
-	opts.Shaper = lazyShaper{c}
+	opts.Shaper = lazyShaper{c, shaping}
 	res, err := vega.Render(ctx, spec, opts)
 	if err != nil {
 		return "", c.stageErr(ctx, "rendering Vega", err)
@@ -422,6 +436,17 @@ func (c *Converter) rasterLimits() raster.Limits {
 		b := min(max(n, 4<<20), 1<<30)
 		l.MaxCanvasBytes = int(b)
 		l.MaxPixels = int(b / 8)
+	}
+	return l
+}
+
+// shapingLimits bounds the text shaping of one call: forme's lookup work, and
+// with WithMemoryLimit the glyphs of one run to a quarter of the limit, as the
+// SVG is.
+func (c *Converter) shapingLimits() text.ShapingLimits {
+	var l text.ShapingLimits
+	if n := c.cfg.memoryLimit; n > 0 {
+		l.RunBytes = int64(min(max(n/4, 1<<20), 1<<40))
 	}
 	return l
 }
@@ -646,23 +671,29 @@ func (c *Converter) shaperInit() (raster.Shaper, error) {
 	return c.shaper, c.shaperErr
 }
 
-// lazyShaper defers building the PNG shaper until text is first drawn.
-type lazyShaper struct{ c *Converter }
+// lazyShaper defers building the PNG shaper until text is first drawn, and
+// shapes under the call's budget.
+type lazyShaper struct {
+	c *Converter
+	b *text.ShapingBudget
+}
 
 func (l lazyShaper) Shape(text string, req raster.FontRequest, size float64) []raster.ShapedGlyph {
 	sh, err := l.c.shaperInit()
 	if err != nil {
 		return nil
 	}
-	return sh.Shape(text, req, size)
+	return raster.BoundShaper(sh, l.b).Shape(text, req, size)
 }
 
 func (c *Converter) rasterize(ctx context.Context, svg string, scale float64) ([]byte, error) {
-	if _, err := c.shaperInit(); err != nil {
+	sh, err := c.shaperInit()
+	if err != nil {
 		return nil, err
 	}
+	sh = raster.BoundShaper(sh, text.ShapingBudgetFrom(ctx))
 	out, err := timed(ctx, "png", func() ([]byte, error) {
-		return raster.RenderPNG([]byte(svg), raster.Options{Scale: scale, Shaper: c.shaper, Context: ctx, Limits: c.rasterLimits()})
+		return raster.RenderPNG([]byte(svg), raster.Options{Scale: scale, Shaper: sh, Context: ctx, Limits: c.rasterLimits()})
 	})
 	if err != nil {
 		return nil, c.stageErr(ctx, "rendering PNG", err)
@@ -788,6 +819,7 @@ func (c *Converter) svgToPDF(ctx context.Context, svg string, opts []PDFOption) 
 	if err != nil {
 		return nil, nil, err
 	}
+	m = m.Bounded(text.ShapingBudgetFrom(ctx))
 	t0 := time.Now()
 	pdf, uses, err = svgpdf.ConvertWithUsage(svg, m, svgpdf.Options{Text: mode, Context: ctx})
 	if st := stagesFrom(ctx); st != nil {

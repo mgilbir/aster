@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -154,7 +155,7 @@ func GeoPath(ctx context.Context, tuples []jsval.Value, p GeoPathParams) (err er
 	path.Bind(ctx)
 	defer func() {
 		if r := recover(); r != nil {
-			le, ok := r.(*LimitError)
+			le, ok := r.(*budget.Stop)
 			if !ok {
 				panic(r)
 			}

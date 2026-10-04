@@ -42,7 +42,7 @@ func FuzzLoadFont(f *testing.F) {
 			return
 		}
 		face.HasRune('A')
-		if gs, ok := face.shapeGlyphs("Hello, Agé ́"); ok {
+		if gs, ok := face.shapeGlyphs("Hello, Agé ́", nil); ok {
 			for _, g := range gs {
 				if math.IsNaN(g.XAdvance) {
 					t.Fatal("NaN advance")

@@ -34,15 +34,6 @@ type Path struct {
 	walking bool
 }
 
-// LimitError is the panic value that stops a path walk whose point budget is
-// spent or whose context is done; it wraps the cause. The Path methods cannot
-// return errors (they are scenegraph callbacks), so callers that can (GeoPath)
-// recover it, and the renderer's own recover reports the rest.
-type LimitError struct{ Err error }
-
-func (e *LimitError) Error() string { return e.Err.Error() }
-func (e *LimitError) Unwrap() error { return e.Err }
-
 // Bind charges every point the path emits to the budget carried by ctx and
 // stops the walk when ctx is done. Projection resampling can multiply the
 // points of a segment by 2^16, so this is what bounds geographic output.
@@ -65,12 +56,12 @@ func (s *limitSink) Point(x, y float64) {
 	s.n++
 	if s.p.bud != nil {
 		if err := s.p.bud.Points(1); err != nil {
-			panic(&LimitError{err})
+			panic(&budget.Stop{Err: err})
 		}
 	}
 	if s.n&4095 == 0 {
 		if err := s.p.bctx.Err(); err != nil {
-			panic(&LimitError{err})
+			panic(&budget.Stop{Err: err})
 		}
 	}
 	s.Stream.Point(x, y)
