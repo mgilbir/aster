@@ -60,8 +60,8 @@ func WithTheme(theme string) Option {
 // WithMemoryLimit bounds the memory a single render may use, in bytes. Zero
 // means no limit. The pure-Go engine has no separate heap to cap, so the limit
 // is enforced as a budget on what a specification can make the engine hold:
-// loaded data, parsed rows, generated scene items and the glyphs of each long
-// run of text shaped (a quarter of the limit, at least 1 MiB). The specification is
+// loaded data, parsed rows, generated scene items and the glyphs of each run
+// of text shaped (a quarter of the limit, at least 1 MiB). The specification is
 // bounded too, to a sixteenth of the limit (at least 1 MiB): it costs about
 // nineteen times its size once parsed and compiled, and an inline geometry is
 // all specification and no rows. A larger one is refused with an error wrapping
@@ -170,13 +170,59 @@ func WithTimezone(tz string) Option {
 	}
 }
 
-// PNGOption configures a single PNG render operation.
-type PNGOption func(*pngConfig)
+// PNGOption configures a single PNG render operation: WithScale,
+// WithRecodePNG, WithQuantizePNG, and WithSignal for the Vega and Vega-Lite
+// methods.
+type PNGOption interface{ applyPNG(*pngConfig) }
+
+type pngOption func(*pngConfig)
+
+func (f pngOption) applyPNG(c *pngConfig) { f(c) }
+
+// RenderOption configures a single VegaToSVG or VegaLiteToSVG call. WithSignal
+// is the one there is.
+type RenderOption interface{ applyRender(*renderConfig) }
+
+// renderConfig is what configures the Vega render of a call, whatever its
+// output.
+type renderConfig struct {
+	signals []SignalOption
+}
+
+// SignalOption sets a top-level signal of the specification before the chart
+// is rendered; see WithSignal. It is a RenderOption, a PNGOption and a
+// PDFOption.
+type SignalOption struct {
+	name  string
+	value any
+}
+
+// WithSignal sets the top-level signal name to value, as Vega's
+// view.signal(name, value) does, and the chart is rendered as it then stands:
+// a Vega-Lite variable parameter (one a bound input sets) is a signal of the
+// same name. A selection's state is held in its store dataset as well, which
+// a signal write does not change. value is anything encoding/json encodes, which the signal then
+// holds as the JSON value (a json.RawMessage is used as it is); a time.Time
+// becomes its RFC 3339 string, so a date is better set as milliseconds since
+// the epoch. Several signals are set in the order given, each propagated
+// before the next is set.
+//
+// A name the specification does not define fails the render, as it does
+// upstream. The SVG-input methods (SVGToPNG, SVGToPDF) render no
+// specification and ignore it.
+func WithSignal(name string, value any) SignalOption {
+	return SignalOption{name: name, value: value}
+}
+
+func (o SignalOption) applyRender(c *renderConfig) { c.signals = append(c.signals, o) }
+func (o SignalOption) applyPNG(c *pngConfig)       { o.applyRender(&c.render) }
+func (o SignalOption) applyPDF(c *pdfConfig)       { o.applyRender(&c.render) }
 
 type pngConfig struct {
 	scale          float64
 	recode         bool
 	quantizeColors int
+	render         renderConfig
 }
 
 func defaultPNGConfig() *pngConfig {
@@ -186,9 +232,9 @@ func defaultPNGConfig() *pngConfig {
 // WithScale sets the scale factor for PNG rendering. A scale of 2.0 produces
 // an image with twice the dimensions. Default is 1.0.
 func WithScale(scale float64) PNGOption {
-	return func(c *pngConfig) {
+	return pngOption(func(c *pngConfig) {
 		c.scale = scale
-	}
+	})
 }
 
 // WithRecodePNG losslessly re-encodes the rendered PNG into its cheapest
@@ -200,9 +246,9 @@ func WithScale(scale float64) PNGOption {
 // extra decode/encode round trip (tens of milliseconds for chart-sized
 // images).
 func WithRecodePNG() PNGOption {
-	return func(c *pngConfig) {
+	return pngOption(func(c *pngConfig) {
 		c.recode = true
-	}
+	})
 }
 
 // WithQuantizePNG lossily quantizes the rendered PNG to at most maxColors
@@ -222,7 +268,7 @@ func WithRecodePNG() PNGOption {
 // cannot maintain the output within the quality guard or cannot keep the
 // encoded size in check, so enabling it is always safe.
 func WithQuantizePNG(maxColors int) PNGOption {
-	return func(c *pngConfig) {
+	return pngOption(func(c *pngConfig) {
 		c.quantizeColors = min(max(maxColors, 2), 256)
-	}
+	})
 }
