@@ -104,11 +104,14 @@ aster svg -i chart.vl.json -o chart.svg -allow-http
 
 # ...restricted to specific hosts
 aster svg -i chart.vl.json -allow-domain cdn.jsdelivr.net
+
+# Set signals (Vega-Lite parameters) before rendering: JSON values, or strings
+aster svg -i chart.vl.json -signal cutoff=10 -signal 'label=Q3 sales'
 ```
 
 The CLI auto-detects Vega vs Vega-Lite from the `$schema` field. If absent, Vega-Lite is assumed.
 
-Shared flags: `-i`/`-o` (input/output, stdin/stdout when omitted), `-version`, `-timeout`, `-allow-http`, `-allow-domain` (repeatable; implies `-allow-http`), and `-allow-private-networks` (let HTTP loading reach loopback, link-local and private addresses, which are denied by default). `png` also accepts `-scale` and `-recode`; these don't apply to `pdf` since it's vector output. `pdf` accepts `-text embed|named|outlines` to pick the [PDF text mode](#options) (default `embed`).
+Shared flags: `-i`/`-o` (input/output, stdin/stdout when omitted), `-version`, `-timeout`, `-allow-http`, `-allow-domain` (repeatable; implies `-allow-http`), and `-allow-private-networks` (let HTTP loading reach loopback, link-local and private addresses, which are denied by default). `png` also accepts `-scale` and `-recode`; these don't apply to `pdf` since it's vector output. `pdf` accepts `-text embed|named|outlines` to pick the [PDF text mode](#options) (default `embed`). `svg`, `png` and `pdf` accept `-signal name=value` (repeatable) to set a signal before rendering; a value that parses as JSON is that value, anything else a string.
 
 ## API
 
@@ -165,7 +168,7 @@ Options passed to `aster.New()`:
 | `WithTheme(json)` | — | Vega theme config applied to all renders |
 | `WithTimezone(tz)` | `"UTC"` | Timezone for local-time operations (time scales, `timeFormat`, parsing dates without a zone); any IANA zone Go knows, others make `New` return an error |
 
-`WithMemoryLimit` is not a heap cap: it scales the render's budgets (rows at 256 bytes each, scene items at 512, loaded bytes, the SVG at a quarter of the limit) and the rasterizer's canvas memory, and each budget is charged before the allocation it pays for. Without it the defaults apply: 1M rows, 500k scene items, 64 MiB of loaded data, 128 MiB of SVG. `WithTimeout` bounds one call across all of its stages, text shaping included: a run of text longer than 256 bytes stops partway when the call's time is up, and shorter ones are not started. Runs that long are also bounded on their own, by an allowance of lookup work per call about sixty times what the heaviest example chart needs, and with `WithMemoryLimit` by their glyphs (a quarter of the limit); a run past either is refused with an error wrapping `ErrLimit`, as is one in a font whose layout tables exceed what the shaper reads (a malformed or hostile font).
+`WithMemoryLimit` is not a heap cap: it scales the render's budgets (rows at 256 bytes each, scene items at 512, loaded bytes, the SVG at a quarter of the limit) and the rasterizer's canvas memory, and each budget is charged before the allocation it pays for. Without it the defaults apply: 1M rows, 500k scene items, 64 MiB of loaded data, 128 MiB of SVG. `WithTimeout` bounds one call across all of its stages, text shaping included: a run of text stops partway when the call's time is up. Shaping is also bounded on its own, by an allowance of lookup work per call about sixty times what the heaviest example chart needs, and with `WithMemoryLimit` by the glyphs of one run (a quarter of the limit); a run past either is refused with an error wrapping `ErrLimit`, as is one in a font whose layout tables exceed what the shaper reads (a malformed or hostile font).
 
 A specification that exceeds any resource limit (these budgets, and the fixed bounds on nesting depth, expression size, tick and legend counts, and PNG and PDF output) fails with an error wrapping `aster.ErrLimit`; a call that runs out of time fails with one wrapping `context.DeadlineExceeded`:
 
@@ -178,6 +181,15 @@ case errors.Is(err, context.DeadlineExceeded):
 	// the render took longer than WithTimeout
 }
 ```
+
+**Signals** — every render method that takes a specification also takes `WithSignal(name, value)`, which sets a top-level signal before the chart is drawn, as Vega's `view.signal(name, value)` does. A Vega-Lite parameter (a variable, or the value a bound input sets) is a signal of the same name, so a chart can be rendered as it looks after the input changes:
+
+```go
+svg, err := c.VegaLiteToSVG(spec, aster.WithSignal("cutoff", 10))
+png, err := c.VegaToPNG(spec, aster.WithScale(2), aster.WithSignal("year", 2000), aster.WithSignal("region", "EMEA"))
+```
+
+The value is anything `encoding/json` encodes, held as that JSON value. Signals are set in the order given, each propagated before the next. A name the specification does not define fails the render; the SVG-input methods ignore the option.
 
 **PNG options** passed per render:
 
@@ -367,7 +379,7 @@ Everything needed is committed, so a plain `go build ./...` works offline. `make
 ### Known limitations
 
 - **Emoji:** Monochrome [Noto Emoji](https://fonts.google.com/noto/specimen/Noto+Emoji) is bundled as a fallback, so emoji have text metrics and rasterize (in black-and-white) in PNG output. Color emoji are not supported.
-- **Interactive features:** Selection and signal interactivity are evaluated at initial state only; there is no event loop.
+- **Interactive features:** There is no event loop: a chart is rendered at its initial state, or at the state `WithSignal` sets (a parameter, a bound input's value); events themselves (pointer, timer, input) are not simulated.
 - **Images:** PNG and PDF output fetch the images they draw through the Loader, as data is fetched (so the default loader draws only embedded `data:` images), each distinct URL once. PNG, JPEG and GIF are drawn; a PDF embeds an RGB or grey JPEG as it is and the rest as compressed RGB with a soft mask for transparency. An image that cannot be fetched or decoded is left out, as a broken image is, and one over the size limits fails the render with `ErrLimit`. Images are not loaded while the SVG is written, so an image mark without a width and height has none in the SVG (upstream in node writes the loaded image's size) and is not drawn.
 
 ## Acknowledgments

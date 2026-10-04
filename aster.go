@@ -17,6 +17,7 @@ package aster
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -280,8 +281,8 @@ func (t timedMeasurer) MeasureText(text, font string) float64 {
 	return w
 }
 
-// signalWritesKey carries signal writes in a call's context; only the tests
-// set it (export_test.go), to compare a chart after View.signal writes.
+// signalWritesKey carries a call's signal writes (WithSignal) in its context,
+// to the render.
 type signalWritesKey struct{}
 
 func signalWritesFrom(ctx context.Context) []vega.SignalWrite {
@@ -289,8 +290,53 @@ func signalWritesFrom(ctx context.Context) []vega.SignalWrite {
 	return w
 }
 
+// withSignals returns ctx carrying the writes of the signals rc sets, their
+// values turned into the JSON values they encode to.
+func withSignals(ctx context.Context, rc renderConfig) (context.Context, error) {
+	if len(rc.signals) == 0 {
+		return ctx, nil
+	}
+	ws := make([]vega.SignalWrite, len(rc.signals))
+	for i, s := range rc.signals {
+		b, err := json.Marshal(s.value)
+		if err != nil {
+			return nil, fmt.Errorf("aster: signal %q: %w", s.name, err)
+		}
+		v, err := jsval.ParseJSON(b)
+		if err != nil {
+			return nil, fmt.Errorf("aster: signal %q: %w", s.name, err)
+		}
+		ws[i] = vega.SignalWrite{Name: s.name, Value: v}
+	}
+	return context.WithValue(ctx, signalWritesKey{}, ws), nil
+}
+
+func renderOptions(opts []RenderOption) renderConfig {
+	var rc renderConfig
+	for _, o := range opts {
+		o.applyRender(&rc)
+	}
+	return rc
+}
+
+func pngRenderOptions(opts []PNGOption) renderConfig {
+	cfg := defaultPNGConfig()
+	for _, o := range opts {
+		o.applyPNG(cfg)
+	}
+	return cfg.render
+}
+
+func pdfRenderOptions(opts []PDFOption) renderConfig {
+	var cfg pdfConfig
+	for _, o := range opts {
+		o.applyPDF(&cfg)
+	}
+	return cfg.render
+}
+
 // VegaToSVG renders a Vega spec (JSON) to an SVG string.
-func (c *Converter) VegaToSVG(spec []byte) (string, error) {
+func (c *Converter) VegaToSVG(spec []byte, opts ...RenderOption) (string, error) {
 	release, ok := c.enter()
 	if !ok {
 		return "", errConverterClosed
@@ -298,11 +344,15 @@ func (c *Converter) VegaToSVG(spec []byte) (string, error) {
 	defer release()
 	ctx, cancel := c.opContext()
 	defer cancel()
+	ctx, err := withSignals(ctx, renderOptions(opts))
+	if err != nil {
+		return "", err
+	}
 	return c.vegaSVG(ctx, spec)
 }
 
 // VegaLiteToSVG renders a Vega-Lite spec (JSON) to an SVG string.
-func (c *Converter) VegaLiteToSVG(spec []byte) (string, error) {
+func (c *Converter) VegaLiteToSVG(spec []byte, opts ...RenderOption) (string, error) {
 	release, ok := c.enter()
 	if !ok {
 		return "", errConverterClosed
@@ -310,6 +360,10 @@ func (c *Converter) VegaLiteToSVG(spec []byte) (string, error) {
 	defer release()
 	ctx, cancel := c.opContext()
 	defer cancel()
+	ctx, err := withSignals(ctx, renderOptions(opts))
+	if err != nil {
+		return "", err
+	}
 	return c.vegaLiteSVG(ctx, spec)
 }
 
@@ -633,6 +687,10 @@ func (c *Converter) VegaToPNG(spec []byte, opts ...PNGOption) ([]byte, error) {
 	defer release()
 	ctx, cancel := c.opContext()
 	defer cancel()
+	ctx, err := withSignals(ctx, pngRenderOptions(opts))
+	if err != nil {
+		return nil, err
+	}
 	svg, err := c.vegaSVG(ctx, spec)
 	if err != nil {
 		return nil, err
@@ -649,6 +707,10 @@ func (c *Converter) VegaLiteToPNG(spec []byte, opts ...PNGOption) ([]byte, error
 	defer release()
 	ctx, cancel := c.opContext()
 	defer cancel()
+	ctx, err := withSignals(ctx, pngRenderOptions(opts))
+	if err != nil {
+		return nil, err
+	}
 	svg, err := c.vegaLiteSVG(ctx, spec)
 	if err != nil {
 		return nil, err
@@ -672,7 +734,7 @@ func (c *Converter) svgToPNG(ctx context.Context, svg string, opts []PNGOption) 
 	defer recoverInto(&err)
 	cfg := defaultPNGConfig()
 	for _, opt := range opts {
-		opt(cfg)
+		opt.applyPNG(cfg)
 	}
 	if !(cfg.scale > 0) || math.IsInf(cfg.scale, 1) {
 		return nil, fmt.Errorf("aster: invalid PNG scale %v (must be a positive, finite number)", cfg.scale)
@@ -760,19 +822,25 @@ const (
 	PDFTextOutlines
 )
 
-// PDFOption configures a single PDF render operation.
-type PDFOption func(*pdfConfig)
+// PDFOption configures a single PDF render operation: WithPDFText, and
+// WithSignal for the Vega and Vega-Lite methods.
+type PDFOption interface{ applyPDF(*pdfConfig) }
+
+type pdfOption func(*pdfConfig)
+
+func (f pdfOption) applyPDF(c *pdfConfig) { f(c) }
 
 type pdfConfig struct {
-	text PDFTextMode
+	text   PDFTextMode
+	render renderConfig
 }
 
 // WithPDFText selects how text is represented in the PDF; see the
 // PDFTextMode constants. The default is PDFTextEmbed.
 func WithPDFText(mode PDFTextMode) PDFOption {
-	return func(c *pdfConfig) {
+	return pdfOption(func(c *pdfConfig) {
 		c.text = mode
-	}
+	})
 }
 
 // FontUsage reports the source bytes and referenced glyph IDs of one face in a
@@ -835,7 +903,7 @@ func (c *Converter) svgToPDF(ctx context.Context, svg string, opts []PDFOption) 
 	}()
 	cfg := &pdfConfig{text: PDFTextEmbed}
 	for _, opt := range opts {
-		opt(cfg)
+		opt.applyPDF(cfg)
 	}
 	var mode svgpdf.TextMode
 	switch cfg.text {
@@ -874,6 +942,10 @@ func (c *Converter) VegaToPDFUsage(spec []byte, opts ...PDFOption) ([]byte, []Fo
 	defer release()
 	ctx, cancel := c.opContext()
 	defer cancel()
+	ctx, err := withSignals(ctx, pdfRenderOptions(opts))
+	if err != nil {
+		return nil, nil, err
+	}
 	svg, err := c.vegaSVG(ctx, spec)
 	if err != nil {
 		return nil, nil, err
@@ -891,6 +963,10 @@ func (c *Converter) VegaLiteToPDFUsage(spec []byte, opts ...PDFOption) ([]byte, 
 	defer release()
 	ctx, cancel := c.opContext()
 	defer cancel()
+	ctx, err := withSignals(ctx, pdfRenderOptions(opts))
+	if err != nil {
+		return nil, nil, err
+	}
 	svg, err := c.vegaLiteSVG(ctx, spec)
 	if err != nil {
 		return nil, nil, err
