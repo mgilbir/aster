@@ -15,9 +15,10 @@ type Color struct {
 // Paint is a fill or stroke value: a color and its alpha, "none", or unset
 // (inherit).
 type Paint struct {
-	Color Color
-	Alpha float64 // the color's own, multiplied into the fill or stroke opacity
-	None  bool
+	Color    Color
+	Alpha    float64 // the color's own, multiplied into the fill or stroke opacity
+	None     bool
+	Gradient string // the id of the gradient a url(#id) paint refers to
 }
 
 // alpha is what the paint multiplies the opacity by: its colour's alpha, or 1
@@ -35,8 +36,12 @@ func parsePaint(s string) (Paint, error) {
 	if strings.EqualFold(s, "none") {
 		return Paint{None: true}, nil
 	}
-	if strings.HasPrefix(s, "url(") {
-		return Paint{}, fmt.Errorf("svgpdf: unsupported paint reference %q (gradients/patterns are not implemented)", s)
+	if strings.HasPrefix(s, "url(") && strings.HasSuffix(s, ")") {
+		ref := strings.Trim(strings.TrimSpace(s[4:len(s)-1]), `"'`)
+		if !strings.HasPrefix(ref, "#") || len(ref) == 1 {
+			return Paint{}, fmt.Errorf("svgpdf: unsupported paint reference %q", s)
+		}
+		return Paint{Gradient: ref[1:], Alpha: 1}, nil
 	}
 	c, alpha, err := parseColor(s)
 	if err != nil {

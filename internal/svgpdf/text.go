@@ -87,6 +87,9 @@ func (r *renderer) drawTextLine(str string, st gstate, x, y float64) (float64, e
 	if st.fill.None {
 		return x, nil
 	}
+	if st.fill.Gradient != "" {
+		return x, fmt.Errorf("svgpdf: a gradient fill on text is not supported")
+	}
 
 	if r.textTotal += len(str); r.textTotal > r.lim.MaxTextBytes {
 		return x, limitErr("text content exceeds %d bytes", r.lim.MaxTextBytes)

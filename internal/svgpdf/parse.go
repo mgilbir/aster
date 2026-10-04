@@ -40,15 +40,19 @@ func (e *element) attrVal(name string) string {
 // supportedElements is the element vocabulary of Vega's SVG renderer that the
 // translator understands. Encountering anything else is an error.
 var supportedElements = map[string]bool{
-	"svg":      true,
-	"g":        true,
-	"rect":     true,
-	"path":     true,
-	"line":     true,
-	"text":     true,
-	"tspan":    true,
-	"defs":     true,
-	"clipPath": true,
+	"svg":   true,
+	"g":     true,
+	"rect":  true,
+	"path":  true,
+	"line":  true,
+	"text":  true,
+	"tspan": true,
+
+	"linearGradient": true,
+	"radialGradient": true,
+	"stop":           true,
+	"defs":           true,
+	"clipPath":       true,
 }
 
 // maxNestingDepth bounds element nesting. SVGToPDF is public API accepting

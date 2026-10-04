@@ -45,6 +45,10 @@ type streamState struct {
 	dashOffset  float64
 	fillAlpha   float64
 	strokeAlpha float64
+
+	// ctm is the transform cm has set, from user space to the page: what a
+	// pattern, which is drawn in page space, is placed by.
+	ctm Matrix
 }
 
 // clone deep-copies the dash slice so a snapshot on the q/Q stack is not
@@ -60,7 +64,7 @@ func (s streamState) clone() streamState {
 // miter limit 10, solid line, fully opaque. cur starts here so the first leaf
 // reconciles against the real stream defaults.
 func defaultStreamState() streamState {
-	return streamState{miterLimit: 10, fillAlpha: 1, strokeAlpha: 1}
+	return streamState{miterLimit: 10, fillAlpha: 1, strokeAlpha: 1, ctm: Identity()}
 }
 
 // alphaPair is a (fill, stroke) constant-alpha combination.
@@ -200,6 +204,7 @@ func (w *contentWriter) restore() {
 }
 
 func (w *contentWriter) concat(m Matrix) {
+	w.cur.ctm = w.cur.ctm.Mul(m)
 	w.op("cm", m.A, m.B, m.C, m.D, m.E, m.F)
 }
 
@@ -396,6 +401,31 @@ func (w *contentWriter) paint(fill, stroke, evenOdd bool) {
 
 // clip marks the current path as the clipping region (nonzero winding) and
 // consumes it without painting.
+// clipRule clips to the current path under the fill rule (W or W*), and ends
+// it.
+func (w *contentWriter) clipRule(evenOdd bool) {
+	if evenOdd {
+		w.op("W*")
+	} else {
+		w.op("W")
+	}
+	w.op("n")
+}
+
+// strokePattern makes the pattern named res the stroke colour.
+func (w *contentWriter) strokePattern(res string) {
+	w.buf = append(w.buf, "/Pattern CS\n/"...)
+	w.buf = append(w.buf, res...)
+	w.buf = append(w.buf, " SCN\n"...)
+}
+
+// shade paints the shading named res over the clip (sh).
+func (w *contentWriter) shade(res string) {
+	w.buf = append(w.buf, '/')
+	w.buf = append(w.buf, res...)
+	w.buf = append(w.buf, " sh\n"...)
+}
+
 func (w *contentWriter) clip() {
 	w.op("W")
 	w.op("n")

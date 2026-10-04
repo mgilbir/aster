@@ -3,6 +3,7 @@ package svgpdf
 import (
 	"context"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -125,6 +126,10 @@ type renderer struct {
 	shaper TextShaper
 	fonts  *fontCatalog // nil in TextOutlines mode: all text drawn as paths
 
+	gradients map[string]*gradient // by id
+	shadings  []*gradient          // the gradients drawn, in first-use order
+	patterns  []patternUse         // the gradient strokes, in order
+
 	// glyphs memoizes scaled outlines per (Face, glyph, size) for the
 	// lifetime of one render: axis labels repeat digits, so the same glyph
 	// is drawn many times.
@@ -158,28 +163,33 @@ func (r *renderer) parsePath(d string) ([]PathSeg, error) {
 // render translates the parsed SVG root into a content stream plus page
 // dimensions in points (1 SVG px = 1 pt), along with the font catalog of the
 // text drawn (nil in TextOutlines mode).
-func render(root *element, shaper TextShaper, opts Options) (content [][]byte, gsList []gsEntry, fonts *fontCatalog, width, height float64, err error) {
+func render(root *element, shaper TextShaper, opts Options) (content [][]byte, gsList []gsEntry, fonts *fontCatalog, paints paintDefs, width, height float64, err error) {
 	if err := checkAttrs(root); err != nil {
-		return nil, nil, nil, 0, 0, err
+		return nil, nil, nil, paintDefs{}, 0, 0, err
 	}
 	width, err = parseLength(root.attrVal("width"))
 	if err != nil {
-		return nil, nil, nil, 0, 0, fmt.Errorf("svgpdf: <svg> width: %w", err)
+		return nil, nil, nil, paintDefs{}, 0, 0, fmt.Errorf("svgpdf: <svg> width: %w", err)
 	}
 	height, err = parseLength(root.attrVal("height"))
 	if err != nil {
-		return nil, nil, nil, 0, 0, fmt.Errorf("svgpdf: <svg> height: %w", err)
+		return nil, nil, nil, paintDefs{}, 0, 0, fmt.Errorf("svgpdf: <svg> height: %w", err)
 	}
 	if width <= 0 || height <= 0 {
-		return nil, nil, nil, 0, 0, fmt.Errorf("svgpdf: <svg> must declare positive width and height")
+		return nil, nil, nil, paintDefs{}, 0, 0, fmt.Errorf("svgpdf: <svg> must declare positive width and height")
 	}
 
 	clips, err := collectClipPaths(root)
 	if err != nil {
-		return nil, nil, nil, 0, 0, err
+		return nil, nil, nil, paintDefs{}, 0, 0, err
 	}
 
-	r := &renderer{w: newContentWriter(), clips: clips, shaper: shaper, ctx: opts.Context, lim: opts.Limits.withDefaults()}
+	gradients, err := collectGradients(root)
+	if err != nil {
+		return nil, nil, nil, paintDefs{}, 0, 0, err
+	}
+
+	r := &renderer{w: newContentWriter(), clips: clips, gradients: gradients, shaper: shaper, ctx: opts.Context, lim: opts.Limits.withDefaults()}
 	if opts.Text != TextOutlines && shaper != nil {
 		r.fonts = newFontCatalog(opts.Text, shaper)
 	}
@@ -194,7 +204,7 @@ func render(root *element, shaper TextShaper, opts Options) (content [][]byte, g
 	if vb, ok := root.attr("viewBox"); ok {
 		m, err := viewBoxMatrix(vb, width, height)
 		if err != nil {
-			return nil, nil, nil, 0, 0, err
+			return nil, nil, nil, paintDefs{}, 0, 0, err
 		}
 		if !m.IsIdentity() {
 			r.w.concat(m)
@@ -202,9 +212,9 @@ func render(root *element, shaper TextShaper, opts Options) (content [][]byte, g
 	}
 
 	if err := r.children(root, rootState()); err != nil {
-		return nil, nil, nil, 0, 0, err
+		return nil, nil, nil, paintDefs{}, 0, 0, err
 	}
-	return r.w.stream(), r.w.gsNames, r.fonts, width, height, nil
+	return r.w.stream(), r.w.gsNames, r.fonts, paintDefs{r.shadings, r.patterns}, width, height, nil
 }
 
 func viewBoxMatrix(vb string, width, height float64) (Matrix, error) {
@@ -236,7 +246,8 @@ func (r *renderer) element(e *element, st gstate) error {
 			return err
 		}
 	}
-	if e.name == "defs" || e.name == "clipPath" {
+	switch e.name {
+	case "defs", "clipPath", "linearGradient", "radialGradient":
 		return nil // definitions are referenced, not drawn
 	}
 	if err := checkAttrs(e); err != nil {
@@ -515,6 +526,9 @@ func (r *renderer) drawRect(e *element, st gstate) error {
 	if w <= 0 || h <= 0 {
 		return nil // zero-area rects render nothing per the SVG spec
 	}
+	if st.fill.Gradient != "" || st.stroke.Gradient != "" {
+		return r.paintShape(st, func() { r.w.rect(x, y, w, h) }, rect{x, y, x + w, y + h}, true)
+	}
 	fill, stroke := r.setPaintState(st)
 	if !fill && !stroke {
 		return nil
@@ -535,6 +549,10 @@ func (r *renderer) drawPath(e *element, st gstate) error {
 	}
 	if len(segs) == 0 {
 		return nil
+	}
+	if st.fill.Gradient != "" || st.stroke.Gradient != "" {
+		box, ok := segsBox(segs)
+		return r.paintShape(st, func() { r.w.pathSegs(segs) }, box, ok)
 	}
 	fill, stroke := r.setPaintState(st)
 	if !fill && !stroke {
@@ -572,6 +590,13 @@ func (r *renderer) drawLine(e *element, st gstate) error {
 	// Lines are stroke-only geometry.
 	if st.stroke.None {
 		return nil
+	}
+	if st.stroke.Gradient != "" {
+		st.fill = Paint{None: true}
+		return r.paintShape(st, func() {
+			r.w.moveTo(Point{x1, y1})
+			r.w.lineTo(Point{x2, y2})
+		}, rect{math.Min(x1, x2), math.Min(y1, y2), math.Max(x1, x2), math.Max(y1, y2)}, true)
 	}
 	_, stroke := r.setPaintState(st)
 	if !stroke {

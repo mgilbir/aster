@@ -130,7 +130,7 @@ func TestTextTspanLines(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	content, _, _, _, _, err := render(root, m, Options{Text: TextOutlines})
+	content, _, _, _, _, _, err := render(root, m, Options{Text: TextOutlines})
 	if err != nil {
 		t.Fatal(err)
 	}

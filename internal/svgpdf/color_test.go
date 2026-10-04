@@ -83,9 +83,14 @@ func TestParsePaint(t *testing.T) {
 	if err != nil || p.None {
 		t.Errorf("parsePaint(#4c78a8): got %+v, err %v", p, err)
 	}
-	// Gradient/pattern references must error, not degrade.
-	if _, err := parsePaint("url(#gradient_0)"); err == nil {
-		t.Error("parsePaint(url(#...)): expected error, got none")
+	// A reference within the document is a gradient's; any other errors.
+	if p, err := parsePaint("url(#gradient_0)"); err != nil || p.Gradient != "gradient_0" {
+		t.Errorf("parsePaint(url(#gradient_0)): got %+v, err %v", p, err)
+	}
+	for _, s := range []string{"url(other.svg#g)", "url(#)", "url()"} {
+		if _, err := parsePaint(s); err == nil {
+			t.Errorf("parsePaint(%s): expected error, got none", s)
+		}
 	}
 }
 
