@@ -25,32 +25,79 @@ type TextShaper interface {
 // Vega positions text via its transform attribute: the local origin (0, 0)
 // is the alphabetic-baseline anchor point (baseline offsets are baked into
 // the translate by Vega's SVG renderer), so glyphs are drawn along y = 0.
+//
+// Multi-line text is one <tspan> a line: the first at the origin, each next
+// with x="0" and a dy of the line height. A tspan's x and y set the position,
+// its dx and dy move it, and its text is anchored on its own (each x starts a
+// new chunk); a tspan without x continues where the text before it ended.
 func (r *renderer) drawText(e *element, st gstate) error {
-	str := e.text
-	if strings.TrimSpace(str) == "" {
-		return nil
+	if len(e.children) == 0 {
+		_, err := r.drawTextLine(e.text, st, 0, 0)
+		return err
 	}
-	if len(e.children) > 0 {
-		return fmt.Errorf("svgpdf: <text> with child elements (e.g. <tspan>) is not supported")
+	if strings.TrimSpace(e.text) != "" {
+		return fmt.Errorf("svgpdf: <text> mixing its own text with <tspan> is not supported")
+	}
+	var x, y float64
+	for _, c := range e.children {
+		if c.name != "tspan" || len(c.children) > 0 {
+			return fmt.Errorf("svgpdf: <text> may hold only <tspan> elements of text, got <%s>", c.name)
+		}
+		if err := checkAttrs(c); err != nil {
+			return err
+		}
+		cst, err := applyPresentation(c, st)
+		if err != nil {
+			return err
+		}
+		for _, a := range []struct {
+			name string
+			set  func(float64)
+		}{
+			{"x", func(v float64) { x = v }}, {"y", func(v float64) { y = v }},
+			{"dx", func(v float64) { x += v }}, {"dy", func(v float64) { y += v }},
+		} {
+			if v, ok := c.attr(a.name); ok {
+				f, err := parseLength(v)
+				if err != nil {
+					return fmt.Errorf("svgpdf: <tspan> %s: %w", a.name, err)
+				}
+				a.set(f)
+			}
+		}
+		end, err := r.drawTextLine(c.text, cst, x, y)
+		if err != nil {
+			return err
+		}
+		x = end
+	}
+	return nil
+}
+
+// drawTextLine draws one line of text with its anchor at (x, y), and returns
+// the x where the text after it begins.
+func (r *renderer) drawTextLine(str string, st gstate, x, y float64) (float64, error) {
+	if strings.TrimSpace(str) == "" {
+		return x, nil
 	}
 	if r.shaper == nil {
-		return fmt.Errorf("svgpdf: text rendering requires a shaper (text measurer)")
+		return x, fmt.Errorf("svgpdf: text rendering requires a shaper (text measurer)")
 	}
 	// Text is painted with the fill color only; Vega does not stroke text.
 	if st.fill.None {
-		return nil
+		return x, nil
 	}
 
 	if r.textTotal += len(str); r.textTotal > r.lim.MaxTextBytes {
-		return limitErr("text content exceeds %d bytes", r.lim.MaxTextBytes)
+		return x, limitErr("text content exceeds %d bytes", r.lim.MaxTextBytes)
 	}
 	if err := ctxErr(r.ctx); err != nil {
-		return err
+		return x, err
 	}
 
 	runs, advance := r.shaper.ShapeText(str, r.cssFont(st))
 	if len(runs) == 0 {
-		return nil
+		return x, nil
 	}
 
 	// text-anchor shifts the whole string relative to the origin using the
@@ -61,6 +108,12 @@ func (r *renderer) drawText(e *element, st gstate) error {
 		penX = -advance / 2
 	case "end":
 		penX = -advance
+	}
+	end := x + penX + advance
+	if x != 0 || y != 0 {
+		r.w.save()
+		r.w.concat(Matrix{A: 1, D: 1, E: x, F: y})
+		defer r.w.restore()
 	}
 
 	r.w.fillColor(st.fill.Color)
@@ -86,10 +139,10 @@ func (r *renderer) drawText(e *element, st gstate) error {
 			penX, err = r.drawTextRunOutline(run, penX)
 		}
 		if err != nil {
-			return err
+			return x, err
 		}
 	}
-	return nil
+	return end, nil
 }
 
 // drawTextRunFont emits one shaped run as a PDF text object: a TJ array of

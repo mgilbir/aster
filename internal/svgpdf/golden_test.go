@@ -191,7 +191,7 @@ func TestConvertUnsupportedConstructsError(t *testing.T) {
 		{"unknown attribute", `<svg width="10" height="10"><rect width="5" height="5" filter="blur(1)"/></svg>`},
 		{"unknown color keyword", `<svg width="10" height="10"><rect width="5" height="5" fill="notacolor"/></svg>`},
 		{"missing clip target", `<svg width="10" height="10"><g clip-path="url(#nope)"/></svg>`},
-		{"tspan", `<svg width="10" height="10"><text><tspan>x</tspan></text></svg>`},
+		{"nested tspan", `<svg width="10" height="10"><text><tspan><tspan>x</tspan></tspan></text></svg>`},
 		{"style attribute", `<svg width="10" height="10"><rect width="5" height="5" style="fill:red"/></svg>`},
 		{"no dimensions", `<svg><rect width="5" height="5"/></svg>`},
 	}

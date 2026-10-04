@@ -46,6 +46,7 @@ var supportedElements = map[string]bool{
 	"path":     true,
 	"line":     true,
 	"text":     true,
+	"tspan":    true,
 	"defs":     true,
 	"clipPath": true,
 }
@@ -133,7 +134,7 @@ func parseSVGXML(ctx context.Context, svg string, lim Limits) (*element, error) 
 			}
 			stack = stack[:len(stack)-1]
 		case xml.CharData:
-			if len(stack) > 0 && stack[len(stack)-1].name == "text" {
+			if len(stack) > 0 && (stack[len(stack)-1].name == "text" || stack[len(stack)-1].name == "tspan") {
 				stack[len(stack)-1].text += string(t)
 			}
 		case xml.Comment, xml.ProcInst, xml.Directive:

@@ -36,9 +36,9 @@ func TestParseColor(t *testing.T) {
 
 func TestParseColorErrors(t *testing.T) {
 	for _, s := range []string{
-		"#12345",           // bad hex length
-		"#gggggg",          // bad hex digits
-		"rgb(1,2)",         // missing component
+		"#12345",   // bad hex length
+		"#gggggg",  // bad hex digits
+		"rgb(1,2)", // missing component
 		"notacolor",
 		"",
 	} {

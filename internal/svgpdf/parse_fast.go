@@ -44,7 +44,7 @@ func parseSVGFast(ctx context.Context, svg string, lim Limits) (root *element, o
 				if strings.TrimLeft(data, " \t\n") != "" {
 					return nil, false, nil
 				}
-			} else if top := stack[len(stack)-1]; top.name == "text" {
+			} else if top := stack[len(stack)-1]; top.name == "text" || top.name == "tspan" {
 				if top.text == "" {
 					top.text = data
 				} else {

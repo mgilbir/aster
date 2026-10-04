@@ -38,7 +38,7 @@ type gstate struct {
 func rootState() gstate {
 	return gstate{
 		fill:          Paint{Color: Color{0, 0, 0}, Alpha: 1}, // SVG default fill is black
-		stroke:        Paint{None: true},            // SVG default stroke is none
+		stroke:        Paint{None: true},                      // SVG default stroke is none
 		strokeWidth:   1,
 		miterLimit:    4, // SVG default (PDF's is 10, so it is always written)
 		opacity:       1,
@@ -98,6 +98,7 @@ var geometryAttrs = map[string]map[string]bool{
 	"path":     {"d": true},
 	"line":     {"x1": true, "y1": true, "x2": true, "y2": true},
 	"text":     {},
+	"tspan":    {"x": true, "y": true, "dx": true, "dy": true},
 	"defs":     {},
 	"clipPath": {},
 }

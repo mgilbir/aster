@@ -2,6 +2,7 @@ package svgpdf
 
 import (
 	"bytes"
+	"context"
 	"strconv"
 	"strings"
 	"testing"
@@ -112,5 +113,44 @@ func TestTextWhitespaceOnly(t *testing.T) {
 	}
 	if _, err := Convert(svg, m, Options{}); err != nil {
 		t.Fatalf("Convert: %v", err)
+	}
+}
+
+// Multi-line text, one <tspan> a line as Vega writes it: each line is drawn,
+// the second moved down by its dy, and a middle-anchored line centred on its
+// own width.
+func TestTextTspanLines(t *testing.T) {
+	m, err := text.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	svg := `<svg width="100" height="60"><text text-anchor="middle" transform="translate(50,20)" font-family="sans-serif" font-size="10px">` +
+		`<tspan>Hop</tspan><tspan x="0" dy="14">Hopping</tspan></text></svg>`
+	root, err := parseSVG(context.Background(), svg, Limits{}.withDefaults())
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, _, _, _, _, err := render(root, m, Options{Text: TextOutlines})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(bytes.Join(content, nil))
+	if !strings.Contains(got, "1 0 0 1 0 14 cm") {
+		t.Errorf("the second line is not 14 down:\n%s", got)
+	}
+	pdf, err := Convert(svg, m, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := pdf0.Read(bytes.NewReader(pdf), int64(len(pdf)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	txt, err := doc.ExtractText()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(txt, "Hop") || !strings.Contains(txt, "Hopping") {
+		t.Errorf("text %q, want both lines", txt)
 	}
 }
