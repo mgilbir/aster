@@ -214,15 +214,19 @@ func fastName(s string) (name string, n int) {
 	return s[:n], n
 }
 
-// fastAttrName is fastName that also takes an "xmlns:" declaration prefix.
+// fastAttrName is fastName that also takes an "xmlns:" declaration prefix,
+// and the "xlink:" prefix of an image's href. As encoding/xml gives it, an
+// xlink attribute is named by its local part alone.
 func fastAttrName(s string) (name string, n int) {
 	name, n = fastName(s)
-	if name == "xmlns" && n < len(s) && s[n] == ':' {
+	if (name == "xmlns" || name == "xlink") && n < len(s) && s[n] == ':' {
 		rest, m := fastName(s[n+1:])
 		if m == 0 {
 			return "", 0
 		}
-		_ = rest
+		if name == "xlink" {
+			return rest, n + 1 + m
+		}
 		return s[:n+1+m], n + 1 + m
 	}
 	return name, n

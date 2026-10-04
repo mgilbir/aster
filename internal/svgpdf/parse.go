@@ -46,6 +46,7 @@ var supportedElements = map[string]bool{
 	"path":     true,
 	"line":     true,
 	"text":     true,
+	"image":    true,
 	"defs":     true,
 	"clipPath": true,
 }

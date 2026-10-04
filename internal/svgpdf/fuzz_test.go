@@ -34,6 +34,9 @@ func FuzzConvert(f *testing.F) {
 			`<defs><clipPath id="c"><rect width="30" height="15"/></clipPath></defs></svg>`,
 		`<svg width="1e9" height="-1"><rect width="nan" height="5"/><path d="M1e308,1e308L-1e308,0"/></svg>`,
 		`<?xml version="1.0"?><!DOCTYPE svg [<!ENTITY a "b">]><svg width="9" height="9"><text>&a;&#x41;</text></svg>`,
+		// A 1x1 PNG, a 1x1 GIF, and an image with no size of its own.
+		`<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="9" height="9"><image xlink:href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==" width="9" height="4" preserveAspectRatio="xMidYMid" opacity="0.5"/>` +
+			`<image xlink:href="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACwAAAAAAQABAAACAkQBADs=" transform="translate(1,1)" preserveAspectRatio="none" width="3"/><image xlink:href="http://x/y.png"/></svg>`,
 	} {
 		f.Add(s, uint8(0))
 	}

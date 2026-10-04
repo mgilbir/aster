@@ -38,6 +38,7 @@ type renderer struct {
 	err     error
 
 	imgs     map[*node]*rasterImage
+	fetched  map[string][]byte // image bytes by href, from Options.Images
 	outlines map[outlineKey]*path
 	grads    map[gradKey]*gradient
 

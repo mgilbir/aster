@@ -50,6 +50,12 @@ type Options struct {
 	// Limits bounds the work an untrusted SVG may cause; zero fields select
 	// the defaults (see Limits).
 	Limits Limits
+	// Images fetches the image an <image> element refers to by anything but
+	// a data: URI (which is decoded in place). It is called once per distinct
+	// href, before drawing, from several goroutines at once. nil leaves such
+	// images undrawn. An image that cannot be fetched is left out, as a broken
+	// image is; an error wrapping budget.ErrLimit fails the conversion.
+	Images func(ctx context.Context, href string) ([]byte, error)
 }
 
 // pdfFont accumulates the state of one font resource while rendering.
