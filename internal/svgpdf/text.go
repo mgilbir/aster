@@ -65,7 +65,7 @@ func (r *renderer) drawText(e *element, st gstate) error {
 
 	r.w.fillColor(st.fill.Color)
 	// Reconcile the alpha (text is fill-only, so fill and stroke alpha match).
-	fillAlpha := st.opacity * st.fillOpacity
+	fillAlpha := st.opacity * st.fillOpacity * st.fill.alpha()
 	r.w.setAlpha(fillAlpha, fillAlpha)
 
 	for k, run := range runs {

@@ -37,7 +37,7 @@ type gstate struct {
 
 func rootState() gstate {
 	return gstate{
-		fill:          Paint{Color: Color{0, 0, 0}}, // SVG default fill is black
+		fill:          Paint{Color: Color{0, 0, 0}, Alpha: 1}, // SVG default fill is black
 		stroke:        Paint{None: true},            // SVG default stroke is none
 		strokeWidth:   1,
 		miterLimit:    4, // SVG default (PDF's is 10, so it is always written)
@@ -300,12 +300,14 @@ func (r *renderer) element(e *element, st gstate) error {
 // inherited state.
 func applyPresentation(e *element, st gstate) (gstate, error) {
 	var err error
-	if v, ok := e.attr("fill"); ok {
+	// An empty fill or stroke is an invalid value, which SVG ignores: the
+	// inherited paint applies (Vega writes one for an empty colour).
+	if v, ok := e.attr("fill"); ok && strings.TrimSpace(v) != "" {
 		if st.fill, err = parsePaint(v); err != nil {
 			return st, err
 		}
 	}
-	if v, ok := e.attr("stroke"); ok {
+	if v, ok := e.attr("stroke"); ok && strings.TrimSpace(v) != "" {
 		if st.stroke, err = parsePaint(v); err != nil {
 			return st, err
 		}
@@ -473,8 +475,8 @@ func (r *renderer) setPaintState(st gstate) (fill, stroke bool) {
 		r.w.setLineJoin(st.lineJoin)
 		r.w.setDash(st.dashPattern, st.dashOffset)
 	}
-	fillAlpha := st.opacity * st.fillOpacity
-	strokeAlpha := st.opacity * st.strokeOpacity
+	fillAlpha := st.opacity * st.fillOpacity * st.fill.alpha()
+	strokeAlpha := st.opacity * st.strokeOpacity * st.stroke.alpha()
 	// setAlpha reconciles against the current alpha and resets to opaque when
 	// needed, so a translucent leaf cannot leak its alpha forward.
 	r.w.setAlpha(fillAlpha, strokeAlpha)

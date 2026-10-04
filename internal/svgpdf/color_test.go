@@ -16,14 +16,14 @@ func TestParseColor(t *testing.T) {
 		{"#4c78a8", Color{0x4c / 255.0, 0x78 / 255.0, 0xa8 / 255.0}},
 		{"#ddd", Color{0xdd / 255.0, 0xdd / 255.0, 0xdd / 255.0}},
 		{"rgb(255, 0, 128)", Color{1, 0, 128 / 255.0}},
-		{"rgb(100%, 0%, 50%)", Color{1, 0, 0.5}},
+		{"rgb(100%, 0%, 50%)", Color{1, 0, 128 / 255.0}}, // 8 bits a channel, as the PNG writer and browsers
 		{"white", Color{1, 1, 1}},
 		{"black", Color{0, 0, 0}},
 		{"steelblue", Color{70 / 255.0, 130 / 255.0, 180 / 255.0}},
 		{"White", Color{1, 1, 1}}, // keywords are case-insensitive
 	}
 	for _, c := range cases {
-		got, err := parseColor(c.in)
+		got, _, err := parseColor(c.in)
 		if err != nil {
 			t.Errorf("parseColor(%q): %v", c.in, err)
 			continue
@@ -39,12 +39,33 @@ func TestParseColorErrors(t *testing.T) {
 		"#12345",           // bad hex length
 		"#gggggg",          // bad hex digits
 		"rgb(1,2)",         // missing component
-		"rebeccapurple",    // outside the supported keyword subset
-		"hsl(120,50%,50%)", // unsupported color function
+		"notacolor",
 		"",
 	} {
-		if _, err := parseColor(s); err == nil {
+		if _, _, err := parseColor(s); err == nil {
 			t.Errorf("parseColor(%q): expected error, got none", s)
+		}
+	}
+}
+
+// Every CSS colour parses, and its alpha is kept for the opacity.
+func TestParseColorCSS(t *testing.T) {
+	for _, tc := range []struct {
+		in    string
+		want  Color
+		alpha float64
+	}{
+		{"teal", Color{0, 128 / 255.0, 128 / 255.0}, 1},
+		{"aliceblue", Color{240 / 255.0, 248 / 255.0, 1}, 1},
+		{"rebeccapurple", Color{102 / 255.0, 51 / 255.0, 153 / 255.0}, 1},
+		{"#c8edf1a2", Color{0xc8 / 255.0, 0xed / 255.0, 0xf1 / 255.0}, 0xa2 / 255.0},
+		{"#f008", Color{1, 0, 0}, 0x88 / 255.0},
+		{"rgba(255, 0, 0, 0.5)", Color{1, 0, 0}, 0.5},
+		{"hsl(120, 100%, 25%)", Color{0, 128 / 255.0, 0}, 1},
+	} {
+		got, alpha, err := parseColor(tc.in)
+		if err != nil || !almostEqual(got.R, tc.want.R) || !almostEqual(got.G, tc.want.G) || !almostEqual(got.B, tc.want.B) || math.Abs(alpha-tc.alpha) > 1e-6 {
+			t.Errorf("parseColor(%q) = %+v %g %v, want %+v %g", tc.in, got, alpha, err, tc.want, tc.alpha)
 		}
 	}
 }
