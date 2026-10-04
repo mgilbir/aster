@@ -11,12 +11,19 @@ import (
 	"github.com/mgilbir/forme/shape"
 )
 
-// ShapingBudget bounds the text shaping of one render. A run shaped through a
-// Measurer bound to it (see Measurer.Bounded) is shaped under its context, so
-// a timeout or a cancellation stops the run partway, and the lookup work forme
-// charges for it comes out of one allowance that every run of the render
-// shares. A run is also refused when its glyphs would hold more than the
-// memory allowed for one run.
+// ShapingBudget bounds the text shaping of one render. A run longer than
+// shortRunBytes shaped through a Measurer bound to it (see Measurer.Bounded)
+// is shaped under its context, so a timeout or a cancellation stops the run
+// partway, and the lookup work forme charges for it comes out of one
+// allowance that every such run of the render shares. It is also refused when
+// its glyphs would hold more than the memory allowed for one run.
+//
+// A shorter run is shaped as an unbounded Measurer shapes it, once the
+// context is checked. forme's bounded shaping clones the face for every run
+// and leaves its scratch buffers behind, which for the thousands of short
+// labels of a chart is a quarter more allocation; and a short run is cheap
+// whatever it is, since a specification can choose among the fonts but not
+// bring its own. A timeout still stops shaping between short runs.
 //
 // Measurement cannot return an error, so a refused run panics with a
 // *budget.Stop wrapping the context's error or one that wraps budget.ErrLimit,
@@ -43,9 +50,9 @@ type ShapingLimits struct {
 
 // DefaultShapingWork is the shaping work a call may charge when none is
 // configured. Across the Vega-Lite examples and the Vega gallery, the most
-// one specification charges, rendered to SVG and then to PNG, is about a
-// sixtieth of it (labeled-scatter-plot, whose label transform measures every
-// candidate position: 1.1e9 units).
+// one specification charges, rendered to SVG and then to PNG with every run
+// charged however short, is about a sixtieth of it (labeled-scatter-plot,
+// whose label transform measures every candidate position: 1.1e9 units).
 const DefaultShapingWork = 1 << 36
 
 // glyphBytes is what one glyph of a run holds: forme's glyph and the Glyph a
@@ -101,6 +108,9 @@ func (b *ShapingBudget) runGlyphs(n int) int {
 	}
 	return g
 }
+
+// shortRunBytes is the longest run shaped without forme's bounds.
+const shortRunBytes = 256
 
 // runSlack is what forme counts against a run's input beyond its text: the
 // face's own feature settings.

@@ -34,7 +34,8 @@ func TestBoundedShapesAsUnbounded(t *testing.T) {
 	}
 	b := NewShapingBudget(context.Background(), ShapingLimits{})
 	bm := m.Bounded(b)
-	for _, s := range []string{"Hello, world", "Agé ́ ffi", "مرحبا بالعالم", "日本語 😀"} {
+	long := strings.Repeat("Agé ́ ffi مرحبا ", 20) // over shortRunBytes: shaped under the budget
+	for _, s := range []string{"Hello, world", "Agé ́ ffi", "مرحبا بالعالم", "日本語 😀", long} {
 		runs, w := m.ShapeText(s, "12px sans-serif")
 		bruns, bw := bm.ShapeText(s, "12px sans-serif")
 		if w != bw || !reflect.DeepEqual(runs, bruns) {
@@ -51,9 +52,10 @@ func TestBoundedCacheHitIsFree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m.MeasureText("cached", "10px sans-serif")
+	cached := strings.Repeat("cached ", 50)
+	m.MeasureText(cached, "10px sans-serif")
 	b := NewShapingBudget(context.Background(), ShapingLimits{Work: 1})
-	if err := stopOf(t, func() { m.Bounded(b).MeasureText("cached", "10px sans-serif") }); err != nil {
+	if err := stopOf(t, func() { m.Bounded(b).MeasureText(cached, "10px sans-serif") }); err != nil {
 		t.Fatalf("a cached width must not shape: %v", err)
 	}
 }
@@ -64,12 +66,12 @@ func TestBoundedWorkSpent(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := NewShapingBudget(context.Background(), ShapingLimits{Work: 1})
-	err = stopOf(t, func() { m.Bounded(b).MeasureText("too much work", "10px sans-serif") })
+	err = stopOf(t, func() { m.Bounded(b).MeasureText(strings.Repeat("too much work ", 20), "10px sans-serif") })
 	if !errors.Is(err, budget.ErrLimit) {
 		t.Fatalf("got %v, want a limit error", err)
 	}
-	// Once spent, the next run is refused before forme is asked.
-	err = stopOf(t, func() { m.Bounded(b).MeasureText("more", "10px sans-serif") })
+	// Once spent, the next long run is refused before forme is asked.
+	err = stopOf(t, func() { m.Bounded(b).MeasureText(strings.Repeat("more ", 60), "10px sans-serif") })
 	if !errors.Is(err, budget.ErrLimit) {
 		t.Fatalf("got %v, want a limit error", err)
 	}
@@ -101,6 +103,28 @@ func TestBoundedRunMemory(t *testing.T) {
 	err = stopOf(t, func() { m.Bounded(b).MeasureText(strings.Repeat("a", 500), "10px sans-serif") })
 	if !errors.Is(err, budget.ErrLimit) {
 		t.Fatalf("got %v, want a limit error", err)
+	}
+}
+
+func TestShortRunsAreNotCharged(t *testing.T) {
+	m, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := NewShapingBudget(context.Background(), ShapingLimits{Work: 1})
+	short := strings.Repeat("a", shortRunBytes)
+	if err := stopOf(t, func() { m.Bounded(b).ShapeText(short, "10px sans-serif") }); err != nil {
+		t.Fatalf("a short run must not be charged: %v", err)
+	}
+	if b.Used() != 0 {
+		t.Fatalf("a short run charged %d", b.Used())
+	}
+	// A done context still stops a short run.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err = stopOf(t, func() { m.Bounded(NewShapingBudget(ctx, ShapingLimits{})).ShapeText("short", "10px sans-serif") })
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("got %v, want context.Canceled", err)
 	}
 }
 
