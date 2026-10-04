@@ -299,7 +299,7 @@ func TestQuantizeOptionClamps(t *testing.T) {
 	}
 	for _, tc := range cases {
 		cfg := defaultPNGConfig()
-		WithQuantizePNG(tc.in)(cfg)
+		WithQuantizePNG(tc.in).applyPNG(cfg)
 		if cfg.quantizeColors != tc.want {
 			t.Errorf("WithQuantizePNG(%d): quantizeColors = %d, want %d", tc.in, cfg.quantizeColors, tc.want)
 		}
