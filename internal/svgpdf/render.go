@@ -98,7 +98,7 @@ var geometryAttrs = map[string]map[string]bool{
 	"path":     {"d": true},
 	"line":     {"x1": true, "y1": true, "x2": true, "y2": true},
 	"text":     {},
-	"image":    {"x": true, "y": true, "width": true, "height": true, "href": true, "preserveAspectRatio": true},
+	"image":    {"x": true, "y": true, "width": true, "height": true, "href": true, "preserveAspectRatio": true, "style": true},
 	"defs":     {},
 	"clipPath": {},
 }

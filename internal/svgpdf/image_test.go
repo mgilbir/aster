@@ -199,3 +199,28 @@ func TestImageLimits(t *testing.T) {
 		t.Errorf("a broken image: %v", err)
 	}
 }
+
+// An image mark with smooth false is written with image-rendering: pixelated
+// and is embedded without interpolation; other images are interpolated, as
+// the PNG writer smooths them. Any other style is refused.
+func TestImageRendering(t *testing.T) {
+	src := dataURL("image/png", pngBytes(t, false))
+	pixelated := ` style="image-rendering: optimizeSpeed; image-rendering: pixelated;"`
+	pdf, err := Convert(imageSVG(imageEl(src, pixelated)), nil, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(pdf, []byte("/Interpolate")) {
+		t.Error("a pixelated image is interpolated")
+	}
+	pdf, err = Convert(imageSVG(imageEl(src, ""), imageEl(src, pixelated)), nil, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := bytes.Count(pdf, []byte("/Interpolate true")); n != 1 || len(pdfImages(t, pdf)) != 2 {
+		t.Errorf("an image drawn smooth and pixelated: %d interpolated of %d", n, len(pdfImages(t, pdf)))
+	}
+	if _, err := Convert(imageSVG(imageEl(src, ` style="opacity: 0.5"`)), nil, Options{}); err == nil {
+		t.Error("an image with another style converted")
+	}
+}
