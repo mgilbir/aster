@@ -21,7 +21,7 @@ func gradContent(t *testing.T, svg string) (string, []*gradient, error) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	content, _, _, paints, _, _, err := render(root, nil, Options{})
+	content, _, _, _, paints, _, _, err := render(root, nil, nil, Options{})
 	return string(bytes.Join(content, nil)), paints.shadings, err
 }
 

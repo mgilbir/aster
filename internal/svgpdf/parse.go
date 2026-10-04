@@ -47,6 +47,7 @@ var supportedElements = map[string]bool{
 	"line":  true,
 	"text":  true,
 	"tspan": true,
+	"image": true,
 
 	"linearGradient": true,
 	"radialGradient": true,

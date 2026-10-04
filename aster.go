@@ -428,6 +428,38 @@ func (c *Converter) renderSVG(ctx context.Context, spec jsval.Value) (out string
 	return out, nil
 }
 
+// imageLoader fetches what the <image> elements of a PNG or a PDF refer to through the
+// Loader, as every resource of a call is: the href sanitized, then loaded,
+// under the call's context. An image is read up to the rasterizer's limit for
+// one image, and the images of one call together up to the data allowance (64
+// MiB, or half of WithMemoryLimit). A rejected or failed load leaves the image
+// undrawn, as a broken image is.
+func (c *Converter) imageLoader() func(context.Context, string) ([]byte, error) {
+	allowance := c.limits().MaxLoadBytes
+	if allowance <= 0 {
+		allowance = 64 << 20
+	}
+	var used atomic.Int64
+	return func(ctx context.Context, href string) ([]byte, error) {
+		u, err := c.cfg.loader.Sanitize(ctx, href)
+		if err != nil {
+			return nil, err
+		}
+		left := allowance - used.Load()
+		if left <= 0 {
+			return nil, fmt.Errorf("%w: images over %d bytes in total", ErrLimit, allowance)
+		}
+		b, err := c.cfg.loader.Load(budget.With(ctx, &budget.Budget{MaxLoadBytes: min(left, budget.From(ctx).LoadLeft())}), u)
+		if err != nil {
+			return nil, err
+		}
+		if used.Add(int64(len(b))) > allowance {
+			return nil, fmt.Errorf("%w: images over %d bytes in total", ErrLimit, allowance)
+		}
+		return b, nil
+	}
+}
+
 // rasterLimits turns WithMemoryLimit into the rasterizer's canvas budget:
 // the bytes of canvas, layers and masks alive at once, and the output size.
 func (c *Converter) rasterLimits() raster.Limits {
@@ -693,7 +725,7 @@ func (c *Converter) rasterize(ctx context.Context, svg string, scale float64) ([
 	}
 	sh = raster.BoundShaper(sh, text.ShapingBudgetFrom(ctx))
 	out, err := timed(ctx, "png", func() ([]byte, error) {
-		return raster.RenderPNG([]byte(svg), raster.Options{Scale: scale, Shaper: sh, Context: ctx, Limits: c.rasterLimits()})
+		return raster.RenderPNG([]byte(svg), raster.Options{Scale: scale, Shaper: sh, Context: ctx, Limits: c.rasterLimits(), Images: c.imageLoader()})
 	})
 	if err != nil {
 		return nil, c.stageErr(ctx, "rendering PNG", err)
@@ -772,8 +804,9 @@ func (c *Converter) VegaLiteToPDF(spec []byte, opts ...PDFOption) ([]byte, error
 // default the fonts a chart uses are subset and embedded, so the output is
 // self-contained and text is selectable.
 //
-// Only the SVG subset that Vega emits is supported. Unsupported constructs
-// (images, embedded CSS, patterns, ...) return a descriptive error rather
+// Only the SVG subset that Vega emits is supported, images (fetched through
+// the Loader, as PNG output fetches them) and gradients included. Unsupported
+// constructs (embedded CSS, patterns, ...) return a descriptive error rather
 // than a silently incomplete chart; callers can fall back to SVGToPNG.
 func (c *Converter) SVGToPDF(svg string, opts ...PDFOption) ([]byte, error) {
 	out, _, err := c.SVGToPDFUsage(svg, opts...)
@@ -821,7 +854,7 @@ func (c *Converter) svgToPDF(ctx context.Context, svg string, opts []PDFOption) 
 	}
 	m = m.Bounded(text.ShapingBudgetFrom(ctx))
 	t0 := time.Now()
-	pdf, uses, err = svgpdf.ConvertWithUsage(svg, m, svgpdf.Options{Text: mode, Context: ctx})
+	pdf, uses, err = svgpdf.ConvertWithUsage(svg, m, svgpdf.Options{Text: mode, Context: ctx, Images: c.imageLoader()})
 	if st := stagesFrom(ctx); st != nil {
 		st("pdf", time.Since(t0))
 	}

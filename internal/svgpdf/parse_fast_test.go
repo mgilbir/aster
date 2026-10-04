@@ -76,6 +76,8 @@ func TestParseSVGFastMatchesXML(t *testing.T) {
 		`<svg><g d="M0 0
 L1 1"/></svg>`,
 		`<svg><text>a > b ]] c</text></svg>`,
+		`<svg xlink:href="a"/>`,
+		`<svg><image xlink:href="data:image/png;base64,AA" width="1"/></svg>`,
 	}
 	rejected := []string{
 		``, `<svg>`, `<svg></g>`, `<svg></svg><svg></svg>`, `<g/>`, `<rect/>`, `x<svg/>`,
@@ -83,7 +85,7 @@ L1 1"/></svg>`,
 		`<svg><text>a&#65;</text></svg>`, `<svg><text>a&nbsp;</text></svg>`, `<svg><text>a&amp</text></svg>`,
 		"<svg><text>a\r\nb</text></svg>", `<svg><text>]]></text></svg>`, `<svg a="]]>"/>`,
 		`<svg a=1/>`, `<svg a/>`, `<svg a="1"b="2"/>`, `<svg a="<"/>`, `<svg a="1/>`, `<svg><g></svg>`,
-		`<svg><g></g `, `<svg><g></gx></g></svg>`, `<svg:g/>`, `<svg><x:g/></svg>`, `<svg xlink:href="a"/>`,
+		`<svg><g></g `, `<svg><g></gx></g></svg>`, `<svg:g/>`, `<svg><x:g/></svg>`, `<svg x:href="a"/>`, `<svg xlink:="a"/>`,
 		`<svg><tref/></svg>`, "<svg a=\"\x01\"/>", "<svg a=\"\xff\"/>", "<svg><text>\xef\xbf\xbe</text></svg>",
 		`<svg xmlns:="x"/>`, `<svg><g/ ></svg>`, `<svg><g`, `<svg><`,
 	}

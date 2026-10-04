@@ -100,6 +100,7 @@ var geometryAttrs = map[string]map[string]bool{
 	"line":     {"x1": true, "y1": true, "x2": true, "y2": true},
 	"text":     {},
 	"tspan":    {"x": true, "y": true, "dx": true, "dy": true},
+	"image":    {"x": true, "y": true, "width": true, "height": true, "href": true, "preserveAspectRatio": true},
 	"defs":     {},
 	"clipPath": {},
 }
@@ -125,6 +126,7 @@ type renderer struct {
 	clips  map[string]*element
 	shaper TextShaper
 	fonts  *fontCatalog // nil in TextOutlines mode: all text drawn as paths
+	images *imageCatalog
 
 	gradients map[string]*gradient // by id
 	shadings  []*gradient          // the gradients drawn, in first-use order
@@ -163,33 +165,34 @@ func (r *renderer) parsePath(d string) ([]PathSeg, error) {
 // render translates the parsed SVG root into a content stream plus page
 // dimensions in points (1 SVG px = 1 pt), along with the font catalog of the
 // text drawn (nil in TextOutlines mode).
-func render(root *element, shaper TextShaper, opts Options) (content [][]byte, gsList []gsEntry, fonts *fontCatalog, paints paintDefs, width, height float64, err error) {
+func render(root *element, shaper TextShaper, fetched map[string][]byte, opts Options) (content [][]byte, gsList []gsEntry, fonts *fontCatalog, images *imageCatalog, paints paintDefs, width, height float64, err error) {
 	if err := checkAttrs(root); err != nil {
-		return nil, nil, nil, paintDefs{}, 0, 0, err
+		return nil, nil, nil, nil, paintDefs{}, 0, 0, err
 	}
 	width, err = parseLength(root.attrVal("width"))
 	if err != nil {
-		return nil, nil, nil, paintDefs{}, 0, 0, fmt.Errorf("svgpdf: <svg> width: %w", err)
+		return nil, nil, nil, nil, paintDefs{}, 0, 0, fmt.Errorf("svgpdf: <svg> width: %w", err)
 	}
 	height, err = parseLength(root.attrVal("height"))
 	if err != nil {
-		return nil, nil, nil, paintDefs{}, 0, 0, fmt.Errorf("svgpdf: <svg> height: %w", err)
+		return nil, nil, nil, nil, paintDefs{}, 0, 0, fmt.Errorf("svgpdf: <svg> height: %w", err)
 	}
 	if width <= 0 || height <= 0 {
-		return nil, nil, nil, paintDefs{}, 0, 0, fmt.Errorf("svgpdf: <svg> must declare positive width and height")
+		return nil, nil, nil, nil, paintDefs{}, 0, 0, fmt.Errorf("svgpdf: <svg> must declare positive width and height")
 	}
 
 	clips, err := collectClipPaths(root)
 	if err != nil {
-		return nil, nil, nil, paintDefs{}, 0, 0, err
+		return nil, nil, nil, nil, paintDefs{}, 0, 0, err
 	}
 
 	gradients, err := collectGradients(root)
 	if err != nil {
-		return nil, nil, nil, paintDefs{}, 0, 0, err
+		return nil, nil, nil, nil, paintDefs{}, 0, 0, err
 	}
 
 	r := &renderer{w: newContentWriter(), clips: clips, gradients: gradients, shaper: shaper, ctx: opts.Context, lim: opts.Limits.withDefaults()}
+	r.images = newImageCatalog(fetched, r.lim)
 	if opts.Text != TextOutlines && shaper != nil {
 		r.fonts = newFontCatalog(opts.Text, shaper)
 	}
@@ -204,7 +207,7 @@ func render(root *element, shaper TextShaper, opts Options) (content [][]byte, g
 	if vb, ok := root.attr("viewBox"); ok {
 		m, err := viewBoxMatrix(vb, width, height)
 		if err != nil {
-			return nil, nil, nil, paintDefs{}, 0, 0, err
+			return nil, nil, nil, nil, paintDefs{}, 0, 0, err
 		}
 		if !m.IsIdentity() {
 			r.w.concat(m)
@@ -212,9 +215,9 @@ func render(root *element, shaper TextShaper, opts Options) (content [][]byte, g
 	}
 
 	if err := r.children(root, rootState()); err != nil {
-		return nil, nil, nil, paintDefs{}, 0, 0, err
+		return nil, nil, nil, nil, paintDefs{}, 0, 0, err
 	}
-	return r.w.stream(), r.w.gsNames, r.fonts, paintDefs{r.shadings, r.patterns}, width, height, nil
+	return r.w.stream(), r.w.gsNames, r.fonts, r.images, paintDefs{r.shadings, r.patterns}, width, height, nil
 }
 
 func viewBoxMatrix(vb string, width, height float64) (Matrix, error) {
@@ -295,6 +298,8 @@ func (r *renderer) element(e *element, st gstate) error {
 		err = r.drawLine(e, st)
 	case "text":
 		err = r.drawText(e, st)
+	case "image":
+		err = r.drawImage(e, st)
 	default:
 		err = fmt.Errorf("svgpdf: unsupported element <%s>", e.name)
 	}

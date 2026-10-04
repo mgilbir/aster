@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/mgilbir/aster/internal/budget"
+	"github.com/mgilbir/aster/internal/imageref"
 )
 
 // Limits bounds the resources an SVG document may consume during conversion.
@@ -14,6 +15,8 @@ type Limits struct {
 	MaxElements     int // parsed elements
 	MaxPathSegments int // path segments, summed over all paths (after arc conversion)
 	MaxTextBytes    int // text content, summed over all <text> elements
+	MaxImageBytes   int // encoded size of one image
+	MaxImagePixels  int // pixels of one decoded image
 }
 
 const (
@@ -21,6 +24,8 @@ const (
 	defaultMaxElements   = 1_000_000
 	defaultMaxSegments   = 10_000_000
 	defaultMaxTextBytes  = 16 << 20
+	defaultMaxImgBytes   = 32 << 20
+	defaultMaxImgPixels  = 64 << 20
 )
 
 func (l Limits) withDefaults() Limits {
@@ -36,7 +41,18 @@ func (l Limits) withDefaults() Limits {
 	if l.MaxTextBytes <= 0 {
 		l.MaxTextBytes = defaultMaxTextBytes
 	}
+	if l.MaxImageBytes <= 0 {
+		l.MaxImageBytes = defaultMaxImgBytes
+	}
+	if l.MaxImagePixels <= 0 {
+		l.MaxImagePixels = defaultMaxImgPixels
+	}
 	return l
+}
+
+// imageLimits are the bounds of one image, as imageref takes them.
+func (l Limits) imageLimits() imageref.Limits {
+	return imageref.Limits{MaxBytes: l.MaxImageBytes, MaxPixels: l.MaxImagePixels, Err: ErrLimit}
 }
 
 // ErrLimit is wrapped by every error caused by a resource limit.

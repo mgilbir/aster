@@ -203,6 +203,13 @@ func (w *contentWriter) restore() {
 	}
 }
 
+// drawXObject paints the XObject named res (Do).
+func (w *contentWriter) drawXObject(res string) {
+	w.buf = append(w.buf, '/')
+	w.buf = append(w.buf, res...)
+	w.buf = append(w.buf, " Do\n"...)
+}
+
 func (w *contentWriter) concat(m Matrix) {
 	w.cur.ctm = w.cur.ctm.Mul(m)
 	w.op("cm", m.A, m.B, m.C, m.D, m.E, m.F)

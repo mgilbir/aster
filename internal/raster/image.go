@@ -1,17 +1,13 @@
 package raster
 
 import (
-	"bytes"
-	"encoding/base64"
 	"errors"
-	"fmt"
 	"image"
 	"image/draw"
-	"image/jpeg"
-	"image/png"
 	"math"
-	"net/url"
 	"strings"
+
+	"github.com/mgilbir/aster/internal/imageref"
 )
 
 // rasterImage is a decoded bitmap in premultiplied RGBA.
@@ -20,70 +16,15 @@ type rasterImage struct {
 	pix  []uint8
 }
 
-// decodeDataURI decodes a data: URI holding PNG or JPEG. Only data URIs are
-// accepted: the rasterizer never touches the network or filesystem.
-func decodeDataURI(href string, lim Limits) (*rasterImage, error) {
-	href = strings.TrimSpace(href)
-	if !strings.HasPrefix(href, "data:") {
-		return nil, errors.New("only data: image URIs are supported")
-	}
-	comma := strings.IndexByte(href, ',')
-	if comma < 0 {
-		return nil, errors.New("malformed data URI")
-	}
-	meta := href[5:comma]
-	payload := href[comma+1:]
-	var data []byte
-	if strings.HasSuffix(strings.ToLower(meta), ";base64") {
-		if base64.StdEncoding.DecodedLen(len(payload)) > lim.MaxImageBytes+4 {
-			return nil, fmt.Errorf("%w: image data exceeds %d bytes", errLimit, lim.MaxImageBytes)
-		}
-		// Strip whitespace that XML pretty-printing may have inserted.
-		clean := strings.Map(func(r rune) rune {
-			switch r {
-			case ' ', '\n', '\r', '\t':
-				return -1
-			}
-			return r
-		}, payload)
-		var err error
-		data, err = base64.StdEncoding.DecodeString(clean)
-		if err != nil {
-			data, err = base64.RawStdEncoding.DecodeString(strings.TrimRight(clean, "="))
-			if err != nil {
-				return nil, fmt.Errorf("invalid base64 image data: %w", err)
-			}
-		}
-	} else {
-		if len(payload) > lim.MaxImageBytes {
-			return nil, fmt.Errorf("%w: image data exceeds %d bytes", errLimit, lim.MaxImageBytes)
-		}
-		s, err := url.PathUnescape(payload)
-		if err != nil {
-			return nil, err
-		}
-		data = []byte(s)
-	}
-	if len(data) > lim.MaxImageBytes {
-		return nil, fmt.Errorf("%w: image data exceeds %d bytes", errLimit, lim.MaxImageBytes)
-	}
-	cfg, format, err := image.DecodeConfig(bytes.NewReader(data))
-	if err != nil {
-		return nil, fmt.Errorf("unsupported image: %w", err)
-	}
-	if format != "png" && format != "jpeg" {
-		return nil, fmt.Errorf("unsupported image format %q", format)
-	}
-	if cfg.Width <= 0 || cfg.Height <= 0 || cfg.Width > 65535 || cfg.Height > 65535 ||
-		cfg.Width*cfg.Height > lim.MaxImagePixels {
-		return nil, fmt.Errorf("%w: image dimensions %dx%d exceed the limit", errLimit, cfg.Width, cfg.Height)
-	}
-	var img image.Image
-	if format == "png" {
-		img, err = png.Decode(bytes.NewReader(data))
-	} else {
-		img, err = jpeg.Decode(bytes.NewReader(data))
-	}
+// imageLimits are the bounds of one image, as imageref takes them.
+func (lim Limits) imageLimits() imageref.Limits {
+	return imageref.Limits{MaxBytes: lim.MaxImageBytes, MaxPixels: lim.MaxImagePixels, Err: errLimit}
+}
+
+// decodeImage decodes a PNG, JPEG or GIF (its first frame) into premultiplied
+// RGBA.
+func decodeImage(data []byte, lim Limits) (*rasterImage, error) {
+	img, err := imageref.Decode(data, lim.imageLimits())
 	if err != nil {
 		return nil, err
 	}
@@ -154,7 +95,8 @@ func (s *imageShader) shadeRow(y, x0 int, dst []uint8) {
 	}
 }
 
-// imageFor decodes (once) the data: image an <image> element refers to.
+// imageFor decodes (once) the image an <image> element refers to: a data:
+// URI, or the bytes Options.Images fetched.
 // Unsupported or unreachable images yield nil, as they are skipped by resvg;
 // an image over the limits fails the render.
 func (r *renderer) imageFor(n *node) (*rasterImage, error) {
@@ -165,7 +107,16 @@ func (r *renderer) imageFor(n *node) (*rasterImage, error) {
 	if img, cached := r.imgs[n]; cached {
 		return img, nil
 	}
-	img, err := decodeDataURI(href, r.lim)
+	var img *rasterImage
+	data, err := r.fetched[strings.TrimSpace(href)], error(nil)
+	if data == nil {
+		// Only data: URIs are decoded here: the rasterizer never touches the
+		// network or the filesystem; other images are fetched by Options.Images.
+		data, err = imageref.DataURI(href, r.lim.imageLimits())
+	}
+	if err == nil {
+		img, err = decodeImage(data, r.lim)
+	}
 	if err != nil {
 		img = nil
 		if errors.Is(err, errLimit) {

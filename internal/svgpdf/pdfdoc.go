@@ -20,7 +20,7 @@ import (
 // The output is deterministic: fixed object numbering (fonts follow the
 // four skeleton objects in first-use order), insertion-ordered dictionaries,
 // no timestamps, no /Info and no /ID.
-func buildPDF(content [][]byte, gsList []gsEntry, fonts *fontCatalog, paints paintDefs, width, height float64) ([]byte, error) {
+func buildPDF(content [][]byte, gsList []gsEntry, fonts *fontCatalog, images *imageCatalog, paints paintDefs, width, height float64) ([]byte, error) {
 	// Object 1: Catalog
 	catalog := &pdf0.Dictionary{}
 	catalog.Set("Type", pdf0.Name("Catalog"))
@@ -91,6 +91,15 @@ func buildPDF(content [][]byte, gsList []gsEntry, fonts *fontCatalog, paints pai
 			}
 			resources.Set("Pattern", patRes)
 		}
+	}
+
+	// Image XObjects, numbered after the fonts, in first-use order.
+	if images != nil && len(images.list) > 0 {
+		imageObjects, xobjRes := buildImageObjects(images, next)
+		for n, obj := range imageObjects {
+			fontObjects[n] = obj
+		}
+		resources.Set("XObject", xobjRes)
 	}
 
 	// Object 3: Page
