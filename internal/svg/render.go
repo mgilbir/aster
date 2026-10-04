@@ -39,9 +39,11 @@ type Options struct {
 	// Href returns the attributes of the <a> element for a hyperlinked item;
 	// ok=false renders no link. Nil uses DefaultHref(URLOptions{}).
 	Href func(uri string) (attrs []HrefAttr, ok bool)
-	// Image resolves an image URL. Nil reproduces vega running without a
-	// canvas: the sanitized URL as source and an unknown (0x0) size.
-	Image func(url string) ImageInfo
+	// Image resolves an image URL: its source, and its natural size when size
+	// is set, which an item missing a width or a height takes it from. Nil
+	// reproduces vega running without a canvas: the sanitized URL as source
+	// and an unknown (0x0) size.
+	Image func(url string, size bool) ImageInfo
 	// MaxBytes bounds the size of the document; 0 means unbounded. Rendering
 	// fails as soon as the output passes it, instead of finishing a
 	// document nobody can use.

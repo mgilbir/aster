@@ -368,7 +368,7 @@ Everything needed is committed, so a plain `go build ./...` works offline. `make
 
 - **Emoji:** Monochrome [Noto Emoji](https://fonts.google.com/noto/specimen/Noto+Emoji) is bundled as a fallback, so emoji have text metrics and rasterize (in black-and-white) in PNG output. Color emoji are not supported.
 - **Interactive features:** Selection and signal interactivity are evaluated at initial state only; there is no event loop.
-- **Images:** PNG and PDF output fetch the images they draw through the Loader, as data is fetched (so the default loader draws only embedded `data:` images), each distinct URL once. PNG, JPEG and GIF are drawn; a PDF embeds an RGB or grey JPEG as it is and the rest as compressed RGB with a soft mask for transparency. An image that cannot be fetched or decoded is left out, as a broken image is, and one over the size limits fails the render with `ErrLimit`. Images are not loaded while the SVG is written, so an image mark without a width and height has none in the SVG (upstream in node writes the loaded image's size) and is not drawn.
+- **Images:** PNG and PDF output fetch the images they draw through the Loader, as data is fetched (so the default loader draws only embedded `data:` images), each distinct URL once. PNG, JPEG and GIF are drawn; a PDF embeds an RGB or grey JPEG as it is and the rest as compressed RGB with a soft mask for transparency. An image that cannot be fetched or decoded is left out, as a broken image is, and one over the size limits fails the render with `ErrLimit`. An image mark without a width or a height takes it from the image, as upstream does once the image has loaded; a call fetches each image once for its SVG, PNG and PDF.
 
 ## Acknowledgments
 
