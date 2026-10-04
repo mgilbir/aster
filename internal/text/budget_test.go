@@ -34,7 +34,7 @@ func TestBoundedShapesAsUnbounded(t *testing.T) {
 	}
 	b := NewShapingBudget(context.Background(), ShapingLimits{})
 	bm := m.Bounded(b)
-	long := strings.Repeat("Agé ́ ffi مرحبا ", 20) // over shortRunBytes: shaped under the budget
+	long := strings.Repeat("Agé ́ ffi مرحبا ", 20)
 	for _, s := range []string{"Hello, world", "Agé ́ ffi", "مرحبا بالعالم", "日本語 😀", long} {
 		runs, w := m.ShapeText(s, "12px sans-serif")
 		bruns, bw := bm.ShapeText(s, "12px sans-serif")
@@ -106,25 +106,15 @@ func TestBoundedRunMemory(t *testing.T) {
 	}
 }
 
-func TestShortRunsAreNotCharged(t *testing.T) {
+func TestShortRunsAreCharged(t *testing.T) {
 	m, err := New()
 	if err != nil {
 		t.Fatal(err)
 	}
-	b := NewShapingBudget(context.Background(), ShapingLimits{Work: 1})
-	short := strings.Repeat("a", shortRunBytes)
-	if err := stopOf(t, func() { m.Bounded(b).ShapeText(short, "10px sans-serif") }); err != nil {
-		t.Fatalf("a short run must not be charged: %v", err)
-	}
-	if b.Used() != 0 {
-		t.Fatalf("a short run charged %d", b.Used())
-	}
-	// A done context still stops a short run.
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	err = stopOf(t, func() { m.Bounded(NewShapingBudget(ctx, ShapingLimits{})).ShapeText("short", "10px sans-serif") })
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("got %v, want context.Canceled", err)
+	b := NewShapingBudget(context.Background(), ShapingLimits{})
+	m.Bounded(b).ShapeText("a label", "10px sans-serif")
+	if b.Used() <= 0 {
+		t.Fatal("a short run charged no work")
 	}
 }
 
