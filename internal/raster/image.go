@@ -18,6 +18,50 @@ import (
 type rasterImage struct {
 	w, h int
 	pix  []uint8
+	mips []*rasterImage // the image halved once, twice, ...; built as drawing needs them
+}
+
+// level is the image halved k times, or as many times as it can be (to 1x1),
+// and how many times that is. Halving averages 2x2 pixels in premultiplied
+// space, so the colour of a transparent pixel does not bleed.
+func (img *rasterImage) level(k int) (*rasterImage, int) {
+	for len(img.mips) < k {
+		prev := img
+		if n := len(img.mips); n > 0 {
+			prev = img.mips[n-1]
+		}
+		if prev.w == 1 && prev.h == 1 {
+			break
+		}
+		img.mips = append(img.mips, prev.halve())
+	}
+	k = min(k, len(img.mips))
+	if k == 0 {
+		return img, 0
+	}
+	return img.mips[k-1], k
+}
+
+// halve is the image at half its size, rounded up; at an odd edge the last
+// pixel stands for the one beyond it.
+func (img *rasterImage) halve() *rasterImage {
+	w, h := (img.w+1)/2, (img.h+1)/2
+	pix := make([]uint8, w*h*4)
+	for y := 0; y < h; y++ {
+		y0, y1 := 2*y, min(2*y+1, img.h-1)
+		for x := 0; x < w; x++ {
+			x0, x1 := 2*x, min(2*x+1, img.w-1)
+			p00 := img.pix[(y0*img.w+x0)*4:]
+			p10 := img.pix[(y0*img.w+x1)*4:]
+			p01 := img.pix[(y1*img.w+x0)*4:]
+			p11 := img.pix[(y1*img.w+x1)*4:]
+			d := pix[(y*w+x)*4:]
+			for c := 0; c < 4; c++ {
+				d[c] = uint8((uint32(p00[c]) + uint32(p10[c]) + uint32(p01[c]) + uint32(p11[c]) + 2) / 4)
+			}
+		}
+	}
+	return &rasterImage{w: w, h: h, pix: pix}
 }
 
 // decodeDataURI decodes a data: URI holding PNG or JPEG. Only data URIs are
@@ -93,11 +137,41 @@ func decodeDataURI(href string, lim Limits) (*rasterImage, error) {
 	return &rasterImage{w: b.Dx(), h: b.Dy(), pix: dst.Pix}, nil
 }
 
+// sampledLevel is what an image drawn through inv (device -> image pixels) is
+// sampled from, and whether by area: an image drawn at half its size or more
+// is the image itself, sampled bilinearly as it always was. One drawn smaller
+// would skip pixels so, as bilinear sampling reads four for each drawn one:
+//
+//   - unrotated, each drawn pixel is the average of the pixels its footprint
+//     covers, weighted by how much of each it covers, on the image or the copy
+//     halved as many times as leaves the footprint between two and four
+//     pixels a side (at most 25 read);
+//   - rotated or skewed, it is sampled bilinearly from the copy halved as
+//     many times as leaves the footprint between one and two pixels.
+//
+// Halved copies average 2x2 pixels in premultiplied space. The matrix returned
+// maps device pixels to the pixels of what is sampled.
+func sampledLevel(img *rasterImage, inv matrix) (*rasterImage, matrix, bool) {
+	f := max(math.Hypot(inv.a, inv.b), math.Hypot(inv.c, inv.d))
+	if !(f > 2) {
+		return img, inv, false
+	}
+	area := inv.b == 0 && inv.c == 0
+	k := int(math.Floor(math.Log2(f)))
+	if area {
+		k--
+	}
+	lvl, k := img.level(k)
+	s := float64(int(1) << k)
+	return lvl, matrix{inv.a / s, inv.b / s, inv.c / s, inv.d / s, inv.e / s, inv.f / s}, area
+}
+
 // imageShader samples an image through an inverse transform.
 type imageShader struct {
 	img     *rasterImage
 	inv     matrix // device -> image pixel space
 	nearest bool
+	area    bool // averaged over each pixel's footprint (see sampledLevel)
 	opacity uint32
 }
 
@@ -117,6 +191,44 @@ func (s *imageShader) fetch(x, y int) (r, g, b, a float64) {
 	return float64(p[0]), float64(p[1]), float64(p[2]), float64(p[3])
 }
 
+// average is the mean of the image over the box [u0,u1) x [v0,v1), in image
+// pixels, each pixel weighted by how much of it the box covers.
+func (s *imageShader) average(u0, v0, u1, v1 float64) (r, g, b, a float64) {
+	var wsum float64
+	for y := int(math.Floor(v0)); float64(y) < v1; y++ {
+		wy := math.Min(v1, float64(y+1)) - math.Max(v0, float64(y))
+		for x := int(math.Floor(u0)); float64(x) < u1; x++ {
+			w := wy * (math.Min(u1, float64(x+1)) - math.Max(u0, float64(x)))
+			pr, pg, pb, pa := s.fetch(x, y)
+			r, g, b, a = r+pr*w, g+pg*w, b+pb*w, a+pa*w
+			wsum += w
+		}
+	}
+	if wsum <= 0 {
+		return s.bilinear((u0+u1)/2, (v0+v1)/2)
+	}
+	return r / wsum, g / wsum, b / wsum, a / wsum
+}
+
+// bilinear samples the image at (u, v), in image pixels.
+func (s *imageShader) bilinear(u, v float64) (r, g, b, a float64) {
+	u -= 0.5
+	v -= 0.5
+	fx, fy := math.Floor(u), math.Floor(v)
+	tx, ty := u-fx, v-fy
+	ix, iy := int(fx), int(fy)
+	r00, g00, b00, a00 := s.fetch(ix, iy)
+	r10, g10, b10, a10 := s.fetch(ix+1, iy)
+	r01, g01, b01, a01 := s.fetch(ix, iy+1)
+	r11, g11, b11, a11 := s.fetch(ix+1, iy+1)
+	w00, w10, w01, w11 := (1-tx)*(1-ty), tx*(1-ty), (1-tx)*ty, tx*ty
+	r = r00*w00 + r10*w10 + r01*w01 + r11*w11
+	g = g00*w00 + g10*w10 + g01*w01 + g11*w11
+	b = b00*w00 + b10*w10 + b01*w01 + b11*w11
+	a = a00*w00 + a10*w10 + a01*w01 + a11*w11
+	return r, g, b, a
+}
+
 func (s *imageShader) shadeRow(y, x0 int, dst []uint8) {
 	n := len(dst) / 4
 	py := float64(y) + 0.5
@@ -125,23 +237,16 @@ func (s *imageShader) shadeRow(y, x0 int, dst []uint8) {
 		u := s.inv.a*px + s.inv.c*py + s.inv.e
 		v := s.inv.b*px + s.inv.d*py + s.inv.f
 		var r, g, b, a float64
-		if s.nearest {
+		switch {
+		case s.nearest:
 			r, g, b, a = s.fetch(int(math.Floor(u)), int(math.Floor(v)))
-		} else {
-			u -= 0.5
-			v -= 0.5
-			fx, fy := math.Floor(u), math.Floor(v)
-			tx, ty := u-fx, v-fy
-			ix, iy := int(fx), int(fy)
-			r00, g00, b00, a00 := s.fetch(ix, iy)
-			r10, g10, b10, a10 := s.fetch(ix+1, iy)
-			r01, g01, b01, a01 := s.fetch(ix, iy+1)
-			r11, g11, b11, a11 := s.fetch(ix+1, iy+1)
-			w00, w10, w01, w11 := (1-tx)*(1-ty), tx*(1-ty), (1-tx)*ty, tx*ty
-			r = r00*w00 + r10*w10 + r01*w01 + r11*w11
-			g = g00*w00 + g10*w10 + g01*w01 + g11*w11
-			b = b00*w00 + b10*w10 + b01*w01 + b11*w11
-			a = a00*w00 + a10*w10 + a01*w01 + a11*w11
+		case s.area:
+			// The pixel's footprint on the level: the device pixel's square,
+			// which an unrotated transform maps to a box.
+			hu, hv := math.Abs(s.inv.a)/2, math.Abs(s.inv.d)/2
+			r, g, b, a = s.average(u-hu, v-hv, u+hu, v+hv)
+		default:
+			r, g, b, a = s.bilinear(u, v)
 		}
 		if s.opacity != 255 {
 			k := float64(s.opacity) / 255
@@ -226,6 +331,9 @@ func (r *renderer) renderImage(n *node, st *state, opacity float64, blend blendM
 		inv:     inv,
 		nearest: st.pixelated,
 		opacity: uint32(math.Round(math.Max(0, math.Min(1, opacity)) * 255)),
+	}
+	if !shader.nearest {
+		shader.img, shader.inv, shader.area = sampledLevel(img, inv)
 	}
 	var prev *canvas
 	if blend != blendNormal {
