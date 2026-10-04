@@ -20,7 +20,7 @@ import (
 // The output is deterministic: fixed object numbering (fonts follow the
 // four skeleton objects in first-use order), insertion-ordered dictionaries,
 // no timestamps, no /Info and no /ID.
-func buildPDF(content [][]byte, gsList []gsEntry, fonts *fontCatalog, images *imageCatalog, width, height float64) ([]byte, error) {
+func buildPDF(content [][]byte, gsList []gsEntry, fonts *fontCatalog, images *imageCatalog, paints paintDefs, width, height float64) ([]byte, error) {
 	// Object 1: Catalog
 	catalog := &pdf0.Dictionary{}
 	catalog.Set("Type", pdf0.Name("Catalog"))
@@ -60,6 +60,36 @@ func buildPDF(content [][]byte, gsList []gsEntry, fonts *fontCatalog, images *im
 		}
 		if fontRes.Len() > 0 {
 			resources.Set("Font", fontRes)
+		}
+	}
+
+	// Shadings of the gradients drawn, numbered after the fonts, in
+	// first-use order, then the patterns of gradient strokes, which refer to
+	// them.
+	if len(paints.shadings) > 0 {
+		shRes := &pdf0.Dictionary{}
+		shNum := map[*gradient]int{}
+		for _, g := range paints.shadings {
+			fontObjects[next] = &pdf0.IndirectObject{Number: next, Value: g.shading()}
+			shRes.Set(pdf0.Name(g.res), pdf0.IndirectRef{Number: next})
+			shNum[g] = next
+			next++
+		}
+		resources.Set("Shading", shRes)
+		if len(paints.patterns) > 0 {
+			patRes := &pdf0.Dictionary{}
+			for _, p := range paints.patterns {
+				pat := &pdf0.Dictionary{}
+				pat.Set("Type", pdf0.Name("Pattern"))
+				pat.Set("PatternType", pdf0.Integer(2))
+				pat.Set("Shading", pdf0.IndirectRef{Number: shNum[p.g]})
+				m := p.matrix
+				pat.Set("Matrix", pdf0.Array{pdf0.Real(m.A), pdf0.Real(m.B), pdf0.Real(m.C), pdf0.Real(m.D), pdf0.Real(m.E), pdf0.Real(m.F)})
+				fontObjects[next] = &pdf0.IndirectObject{Number: next, Value: pat}
+				patRes.Set(pdf0.Name(p.res), pdf0.IndirectRef{Number: next})
+				next++
+			}
+			resources.Set("Pattern", patRes)
 		}
 	}
 

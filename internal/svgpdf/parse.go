@@ -40,15 +40,20 @@ func (e *element) attrVal(name string) string {
 // supportedElements is the element vocabulary of Vega's SVG renderer that the
 // translator understands. Encountering anything else is an error.
 var supportedElements = map[string]bool{
-	"svg":      true,
-	"g":        true,
-	"rect":     true,
-	"path":     true,
-	"line":     true,
-	"text":     true,
-	"image":    true,
-	"defs":     true,
-	"clipPath": true,
+	"svg":   true,
+	"g":     true,
+	"rect":  true,
+	"path":  true,
+	"line":  true,
+	"text":  true,
+	"tspan": true,
+	"image": true,
+
+	"linearGradient": true,
+	"radialGradient": true,
+	"stop":           true,
+	"defs":           true,
+	"clipPath":       true,
 }
 
 // maxNestingDepth bounds element nesting. SVGToPDF is public API accepting
@@ -134,7 +139,7 @@ func parseSVGXML(ctx context.Context, svg string, lim Limits) (*element, error) 
 			}
 			stack = stack[:len(stack)-1]
 		case xml.CharData:
-			if len(stack) > 0 && stack[len(stack)-1].name == "text" {
+			if len(stack) > 0 && (stack[len(stack)-1].name == "text" || stack[len(stack)-1].name == "tspan") {
 				stack[len(stack)-1].text += string(t)
 			}
 		case xml.Comment, xml.ProcInst, xml.Directive:

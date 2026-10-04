@@ -3,6 +3,7 @@ package svgpdf
 import (
 	"context"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -37,8 +38,8 @@ type gstate struct {
 
 func rootState() gstate {
 	return gstate{
-		fill:          Paint{Color: Color{0, 0, 0}}, // SVG default fill is black
-		stroke:        Paint{None: true},            // SVG default stroke is none
+		fill:          Paint{Color: Color{0, 0, 0}, Alpha: 1}, // SVG default fill is black
+		stroke:        Paint{None: true},                      // SVG default stroke is none
 		strokeWidth:   1,
 		miterLimit:    4, // SVG default (PDF's is 10, so it is always written)
 		opacity:       1,
@@ -98,6 +99,7 @@ var geometryAttrs = map[string]map[string]bool{
 	"path":     {"d": true},
 	"line":     {"x1": true, "y1": true, "x2": true, "y2": true},
 	"text":     {},
+	"tspan":    {"x": true, "y": true, "dx": true, "dy": true},
 	"image":    {"x": true, "y": true, "width": true, "height": true, "href": true, "preserveAspectRatio": true, "style": true},
 	"defs":     {},
 	"clipPath": {},
@@ -125,6 +127,10 @@ type renderer struct {
 	shaper TextShaper
 	fonts  *fontCatalog // nil in TextOutlines mode: all text drawn as paths
 	images *imageCatalog
+
+	gradients map[string]*gradient // by id
+	shadings  []*gradient          // the gradients drawn, in first-use order
+	patterns  []patternUse         // the gradient strokes, in order
 
 	// glyphs memoizes scaled outlines per (Face, glyph, size) for the
 	// lifetime of one render: axis labels repeat digits, so the same glyph
@@ -159,28 +165,33 @@ func (r *renderer) parsePath(d string) ([]PathSeg, error) {
 // render translates the parsed SVG root into a content stream plus page
 // dimensions in points (1 SVG px = 1 pt), along with the font catalog of the
 // text drawn (nil in TextOutlines mode).
-func render(root *element, shaper TextShaper, fetched map[string][]byte, opts Options) (content [][]byte, gsList []gsEntry, fonts *fontCatalog, images *imageCatalog, width, height float64, err error) {
+func render(root *element, shaper TextShaper, fetched map[string][]byte, opts Options) (content [][]byte, gsList []gsEntry, fonts *fontCatalog, images *imageCatalog, paints paintDefs, width, height float64, err error) {
 	if err := checkAttrs(root); err != nil {
-		return nil, nil, nil, nil, 0, 0, err
+		return nil, nil, nil, nil, paintDefs{}, 0, 0, err
 	}
 	width, err = parseLength(root.attrVal("width"))
 	if err != nil {
-		return nil, nil, nil, nil, 0, 0, fmt.Errorf("svgpdf: <svg> width: %w", err)
+		return nil, nil, nil, nil, paintDefs{}, 0, 0, fmt.Errorf("svgpdf: <svg> width: %w", err)
 	}
 	height, err = parseLength(root.attrVal("height"))
 	if err != nil {
-		return nil, nil, nil, nil, 0, 0, fmt.Errorf("svgpdf: <svg> height: %w", err)
+		return nil, nil, nil, nil, paintDefs{}, 0, 0, fmt.Errorf("svgpdf: <svg> height: %w", err)
 	}
 	if width <= 0 || height <= 0 {
-		return nil, nil, nil, nil, 0, 0, fmt.Errorf("svgpdf: <svg> must declare positive width and height")
+		return nil, nil, nil, nil, paintDefs{}, 0, 0, fmt.Errorf("svgpdf: <svg> must declare positive width and height")
 	}
 
 	clips, err := collectClipPaths(root)
 	if err != nil {
-		return nil, nil, nil, nil, 0, 0, err
+		return nil, nil, nil, nil, paintDefs{}, 0, 0, err
 	}
 
-	r := &renderer{w: newContentWriter(), clips: clips, shaper: shaper, ctx: opts.Context, lim: opts.Limits.withDefaults()}
+	gradients, err := collectGradients(root)
+	if err != nil {
+		return nil, nil, nil, nil, paintDefs{}, 0, 0, err
+	}
+
+	r := &renderer{w: newContentWriter(), clips: clips, gradients: gradients, shaper: shaper, ctx: opts.Context, lim: opts.Limits.withDefaults()}
 	r.images = newImageCatalog(fetched, r.lim)
 	if opts.Text != TextOutlines && shaper != nil {
 		r.fonts = newFontCatalog(opts.Text, shaper)
@@ -196,7 +207,7 @@ func render(root *element, shaper TextShaper, fetched map[string][]byte, opts Op
 	if vb, ok := root.attr("viewBox"); ok {
 		m, err := viewBoxMatrix(vb, width, height)
 		if err != nil {
-			return nil, nil, nil, nil, 0, 0, err
+			return nil, nil, nil, nil, paintDefs{}, 0, 0, err
 		}
 		if !m.IsIdentity() {
 			r.w.concat(m)
@@ -204,9 +215,9 @@ func render(root *element, shaper TextShaper, fetched map[string][]byte, opts Op
 	}
 
 	if err := r.children(root, rootState()); err != nil {
-		return nil, nil, nil, nil, 0, 0, err
+		return nil, nil, nil, nil, paintDefs{}, 0, 0, err
 	}
-	return r.w.stream(), r.w.gsNames, r.fonts, r.images, width, height, nil
+	return r.w.stream(), r.w.gsNames, r.fonts, r.images, paintDefs{r.shadings, r.patterns}, width, height, nil
 }
 
 func viewBoxMatrix(vb string, width, height float64) (Matrix, error) {
@@ -238,7 +249,8 @@ func (r *renderer) element(e *element, st gstate) error {
 			return err
 		}
 	}
-	if e.name == "defs" || e.name == "clipPath" {
+	switch e.name {
+	case "defs", "clipPath", "linearGradient", "radialGradient":
 		return nil // definitions are referenced, not drawn
 	}
 	if err := checkAttrs(e); err != nil {
@@ -305,12 +317,14 @@ func (r *renderer) element(e *element, st gstate) error {
 // inherited state.
 func applyPresentation(e *element, st gstate) (gstate, error) {
 	var err error
-	if v, ok := e.attr("fill"); ok {
+	// An empty fill or stroke is an invalid value, which SVG ignores: the
+	// inherited paint applies (Vega writes one for an empty colour).
+	if v, ok := e.attr("fill"); ok && strings.TrimSpace(v) != "" {
 		if st.fill, err = parsePaint(v); err != nil {
 			return st, err
 		}
 	}
-	if v, ok := e.attr("stroke"); ok {
+	if v, ok := e.attr("stroke"); ok && strings.TrimSpace(v) != "" {
 		if st.stroke, err = parsePaint(v); err != nil {
 			return st, err
 		}
@@ -478,8 +492,8 @@ func (r *renderer) setPaintState(st gstate) (fill, stroke bool) {
 		r.w.setLineJoin(st.lineJoin)
 		r.w.setDash(st.dashPattern, st.dashOffset)
 	}
-	fillAlpha := st.opacity * st.fillOpacity
-	strokeAlpha := st.opacity * st.strokeOpacity
+	fillAlpha := st.opacity * st.fillOpacity * st.fill.alpha()
+	strokeAlpha := st.opacity * st.strokeOpacity * st.stroke.alpha()
 	// setAlpha reconciles against the current alpha and resets to opaque when
 	// needed, so a translucent leaf cannot leak its alpha forward.
 	r.w.setAlpha(fillAlpha, strokeAlpha)
@@ -517,6 +531,9 @@ func (r *renderer) drawRect(e *element, st gstate) error {
 	if w <= 0 || h <= 0 {
 		return nil // zero-area rects render nothing per the SVG spec
 	}
+	if st.fill.Gradient != "" || st.stroke.Gradient != "" {
+		return r.paintShape(st, func() { r.w.rect(x, y, w, h) }, rect{x, y, x + w, y + h}, true)
+	}
 	fill, stroke := r.setPaintState(st)
 	if !fill && !stroke {
 		return nil
@@ -537,6 +554,10 @@ func (r *renderer) drawPath(e *element, st gstate) error {
 	}
 	if len(segs) == 0 {
 		return nil
+	}
+	if st.fill.Gradient != "" || st.stroke.Gradient != "" {
+		box, ok := segsBox(segs)
+		return r.paintShape(st, func() { r.w.pathSegs(segs) }, box, ok)
 	}
 	fill, stroke := r.setPaintState(st)
 	if !fill && !stroke {
@@ -574,6 +595,13 @@ func (r *renderer) drawLine(e *element, st gstate) error {
 	// Lines are stroke-only geometry.
 	if st.stroke.None {
 		return nil
+	}
+	if st.stroke.Gradient != "" {
+		st.fill = Paint{None: true}
+		return r.paintShape(st, func() {
+			r.w.moveTo(Point{x1, y1})
+			r.w.lineTo(Point{x2, y2})
+		}, rect{math.Min(x1, x2), math.Min(y1, y2), math.Max(x1, x2), math.Max(y1, y2)}, true)
 	}
 	_, stroke := r.setPaintState(st)
 	if !stroke {

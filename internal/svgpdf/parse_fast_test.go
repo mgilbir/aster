@@ -86,7 +86,7 @@ L1 1"/></svg>`,
 		"<svg><text>a\r\nb</text></svg>", `<svg><text>]]></text></svg>`, `<svg a="]]>"/>`,
 		`<svg a=1/>`, `<svg a/>`, `<svg a="1"b="2"/>`, `<svg a="<"/>`, `<svg a="1/>`, `<svg><g></svg>`,
 		`<svg><g></g `, `<svg><g></gx></g></svg>`, `<svg:g/>`, `<svg><x:g/></svg>`, `<svg x:href="a"/>`, `<svg xlink:="a"/>`,
-		`<svg><tspan/></svg>`, "<svg a=\"\x01\"/>", "<svg a=\"\xff\"/>", "<svg><text>\xef\xbf\xbe</text></svg>",
+		`<svg><tref/></svg>`, "<svg a=\"\x01\"/>", "<svg a=\"\xff\"/>", "<svg><text>\xef\xbf\xbe</text></svg>",
 		`<svg xmlns:="x"/>`, `<svg><g/ ></svg>`, `<svg><g`, `<svg><`,
 	}
 	for _, d := range accepted {

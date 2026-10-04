@@ -34,6 +34,12 @@ func FuzzConvert(f *testing.F) {
 			`<defs><clipPath id="c"><rect width="30" height="15"/></clipPath></defs></svg>`,
 		`<svg width="1e9" height="-1"><rect width="nan" height="5"/><path d="M1e308,1e308L-1e308,0"/></svg>`,
 		`<?xml version="1.0"?><!DOCTYPE svg [<!ENTITY a "b">]><svg width="9" height="9"><text>&a;&#x41;</text></svg>`,
+		// Gradients (bounding box and user space, a gradient stroke), multi-line
+		// text, and colours with alpha.
+		`<svg width="40" height="40"><defs><linearGradient id="g" x1="1" x2="1" y1="1" y2="0"><stop offset="0" stop-color="white"/><stop offset="50%" stop-color="rgba(0,100,0,1)"/><stop offset="1" stop-color="hsl(120,100%,25%)"/></linearGradient>` +
+			`<radialGradient id="r" fx="0.2" gradientUnits="userSpaceOnUse" cx="20" cy="20" r="10"><stop offset="0" stop-color="#f00"/><stop offset="1" stop-color="teal"/></radialGradient></defs>` +
+			`<rect width="20" height="20" fill="url(#g)" stroke="url(#r)"/><path d="M0,0C0,40 40,40 40,0Z" fill="url(#r)" fill-opacity="0.5"/><line x2="40" y2="40" stroke="url(#g)"/>` +
+			`<text transform="translate(5,30)" fill="#c8edf1a2" text-anchor="middle"><tspan>a</tspan><tspan x="0" dy="10">bb</tspan></text></svg>`,
 		// A 1x1 PNG, a 1x1 GIF, and an image with no size of its own.
 		`<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="9" height="9"><image xlink:href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==" width="9" height="4" preserveAspectRatio="xMidYMid" opacity="0.5"/>` +
 			`<image xlink:href="data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACwAAAAAAQABAAACAkQBADs=" transform="translate(1,1)" preserveAspectRatio="none" width="3"/><image xlink:href="http://x/y.png"/></svg>`,

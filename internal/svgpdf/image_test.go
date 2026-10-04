@@ -114,7 +114,7 @@ func renderContent(t *testing.T, svg string) (string, error) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	content, _, _, _, _, _, err := render(root, nil, nil, Options{})
+	content, _, _, _, _, _, _, err := render(root, nil, nil, Options{})
 	return string(bytes.Join(content, nil)), err
 }
 

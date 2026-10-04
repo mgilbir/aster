@@ -65,14 +65,14 @@ func ConvertWithUsage(svg string, shaper TextShaper, opts Options) (pdf []byte, 
 			return nil, nil, err
 		}
 	}
-	content, gsList, fonts, images, width, height, err := render(root, shaper, fetched, opts)
+	content, gsList, fonts, images, paints, width, height, err := render(root, shaper, fetched, opts)
 	if err != nil {
 		return nil, nil, err
 	}
 	if err := ctxErr(opts.Context); err != nil {
 		return nil, nil, err
 	}
-	pdf, err = buildPDF(content, gsList, fonts, images, width, height)
+	pdf, err = buildPDF(content, gsList, fonts, images, paints, width, height)
 	if err != nil {
 		return nil, nil, err
 	}
