@@ -94,7 +94,7 @@ func buildPDF(content [][]byte, gsList []gsEntry, fonts *fontCatalog, images *im
 	}
 
 	// Image XObjects, numbered after the fonts, in first-use order.
-	if images != nil && len(images.list) > 0 {
+	if images != nil && len(images.uses) > 0 {
 		imageObjects, xobjRes := buildImageObjects(images, next)
 		for n, obj := range imageObjects {
 			fontObjects[n] = obj

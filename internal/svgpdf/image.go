@@ -17,12 +17,16 @@ import (
 // pdfImage is one image XObject: its stream, the soft mask of its alpha, and
 // its size in pixels.
 type pdfImage struct {
-	res    string // resource name (Im0, Im1, ...)
-	w, h   int
-	data   []byte
-	filter string // DCTDecode (a JPEG as it is) or FlateDecode
-	space  string // DeviceRGB or DeviceGray
-	smask  []byte // Flate-compressed alpha; nil when the image is opaque
+	// The resource names (Im0, Im1, ...) of the image smoothed and not:
+	// interpolation is a property of the image's stream, so an image drawn
+	// both ways is embedded twice, once each way.
+	smoothRes, sharpRes string
+	w, h                int
+	cat                 *imageCatalog
+	data                []byte
+	filter              string // DCTDecode (a JPEG as it is) or FlateDecode
+	space               string // DeviceRGB or DeviceGray
+	smask               []byte // Flate-compressed alpha; nil when the image is opaque
 }
 
 // imageCatalog holds the images a document draws, each href once, in the
@@ -31,7 +35,14 @@ type imageCatalog struct {
 	lim     imageref.Limits
 	fetched map[string][]byte    // bytes by href, from Options.Images
 	byHref  map[string]*pdfImage // nil: the image cannot be drawn
-	list    []*pdfImage
+	uses    []imageUse           // the XObjects drawn, in first-use order
+}
+
+// imageUse is one XObject: an image, smoothed or not.
+type imageUse struct {
+	img    *pdfImage
+	smooth bool
+	res    string
 }
 
 func newImageCatalog(fetched map[string][]byte, lim Limits) *imageCatalog {
@@ -54,11 +65,47 @@ func (c *imageCatalog) get(href string) (*pdfImage, error) {
 		img = nil
 	}
 	if img != nil {
-		img.res = fmt.Sprintf("Im%d", len(c.list))
-		c.list = append(c.list, img)
+		img.cat = c
 	}
 	c.byHref[href] = img
 	return img, nil
+}
+
+// res is the resource name of the image, smoothed or not, naming it on first
+// use.
+func (img *pdfImage) res(smooth bool) string {
+	name := &img.sharpRes
+	if smooth {
+		name = &img.smoothRes
+	}
+	if *name == "" {
+		*name = fmt.Sprintf("Im%d", len(img.cat.uses))
+		img.cat.uses = append(img.cat.uses, imageUse{img, smooth, *name})
+	}
+	return *name
+}
+
+// imageSmoothing reads an image's style, which may set image-rendering alone,
+// as Vega writes it for an image mark with smooth false: pixelated (or
+// optimizeSpeed, crisp-edges) draws it without smoothing.
+func imageSmoothing(style string) (bool, error) {
+	smooth := true
+	for _, decl := range strings.Split(style, ";") {
+		if strings.TrimSpace(decl) == "" {
+			continue
+		}
+		prop, val, ok := strings.Cut(decl, ":")
+		if !ok || strings.TrimSpace(prop) != "image-rendering" {
+			return false, fmt.Errorf("svgpdf: unsupported style %q on <image>", style)
+		}
+		switch strings.TrimSpace(val) {
+		case "pixelated", "optimizeSpeed", "crisp-edges":
+			smooth = false
+		default:
+			smooth = true
+		}
+	}
+	return smooth, nil
 }
 
 func (c *imageCatalog) load(href string) (*pdfImage, error) {
@@ -134,6 +181,10 @@ func deflate(b []byte) ([]byte, error) {
 // from the image's own proportions, and a box missing both is the image's
 // size.
 func (r *renderer) drawImage(e *element, st gstate) error {
+	smooth, err := imageSmoothing(e.attrVal("style"))
+	if err != nil {
+		return err
+	}
 	img, err := r.images.get(e.attrVal("href"))
 	if err != nil || img == nil {
 		return err
@@ -193,7 +244,7 @@ func (r *renderer) drawImage(e *element, st gstate) error {
 	// The image fills the unit square, its first row at the top: in this
 	// y-down space, the square's top edge goes to oy.
 	r.w.concat(Matrix{A: dw, D: -dh, E: ox, F: oy + dh})
-	r.w.drawXObject(img.res)
+	r.w.drawXObject(img.res(smooth))
 	r.w.restore()
 	return nil
 }
@@ -221,12 +272,16 @@ func buildImageObjects(c *imageCatalog, next int) (map[int]*pdf0.IndirectObject,
 		s.Dict.Set("Length", pdf0.Integer(len(data)))
 		return s
 	}
-	for _, img := range c.list {
+	for _, u := range c.uses {
+		img := u.img
 		s := stream(img.data, img.w, img.h, img.space, img.filter)
+		if u.smooth {
+			s.Dict.Set("Interpolate", pdf0.Boolean(true))
+		}
 		if img.smask != nil {
 			s.Dict.Set("SMask", add(stream(img.smask, img.w, img.h, "DeviceGray", "FlateDecode")))
 		}
-		res.Set(pdf0.Name(img.res), add(s))
+		res.Set(pdf0.Name(u.res), add(s))
 	}
 	return objects, res
 }
