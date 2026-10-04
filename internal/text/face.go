@@ -118,28 +118,37 @@ func newFace(id, family string, weight int, italic bool, data []byte) (f *Face, 
 // shapeGlyphs shapes s through a clone of the face, so that any number of
 // goroutines may shape through one Face at once, and records the glyphs
 // returned for Subset. It contains any panic a malformed font provokes. With
-// a budget a long run is shaped under it, and a short one once the budget's
-// context is checked (see ShapingBudget).
+// a budget the run is shaped under it, and a run it refuses panics with a
+// *budget.Stop (see ShapingBudget).
 func (f *Face) shapeGlyphs(s string, b *ShapingBudget) (g []shape.Glyph, ok bool) {
-	if b != nil {
-		if len(s) > shortRunBytes {
-			return f.shapeGlyphsBounded(s, b)
-		}
-		if err := b.ctx.Err(); err != nil {
-			panic(&budget.Stop{Err: err})
-		}
+	g, ok, err := f.shapeOnClone(s, b)
+	if err != nil {
+		panic(&budget.Stop{Err: err})
 	}
+	if ok {
+		f.record(g)
+	}
+	return g, ok
+}
+
+// shapeOnClone shapes s on a clone from the pool, under b when it is not nil.
+// A clone that panicked mid-shaping is dropped; one whose run b refused is
+// reusable, forme having cleared its budget.
+func (f *Face) shapeOnClone(s string, b *ShapingBudget) (g []shape.Glyph, ok bool, err error) {
 	c := f.clones.Get().(*shape.Face)
 	defer func() {
 		if recover() != nil {
-			g, ok = nil, false
-			return // a clone that panicked mid-shaping is dropped
+			g, ok, err = nil, false, nil
+			return
 		}
 		f.clones.Put(c)
 	}()
-	g, _ = c.ShapeGlyphs(s)
-	f.record(g)
-	return g, true
+	if b == nil {
+		g, _ = c.ShapeGlyphs(s)
+		return g, true, nil
+	}
+	g, err = b.shape(c, s, f.Family)
+	return g, err == nil, err
 }
 
 // record merges the glyphs of g into the base face's record of used glyphs.
