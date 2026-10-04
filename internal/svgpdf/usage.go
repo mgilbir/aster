@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/mgilbir/aster/internal/budget"
+	"github.com/mgilbir/aster/internal/imageref"
 )
 
 // FontUsage reports, for one shaped face used in a converted document, the
@@ -57,14 +58,21 @@ func ConvertWithUsage(svg string, shaper TextShaper, opts Options) (pdf []byte, 
 	if err != nil {
 		return nil, nil, err
 	}
-	content, gsList, fonts, width, height, err := render(root, shaper, opts)
+	var fetched map[string][]byte
+	if opts.Images != nil {
+		fetched, err = imageref.Fetch(opts.Context, hrefsToFetch(root), opts.Images, lim.imageLimits())
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	content, gsList, fonts, images, width, height, err := render(root, shaper, fetched, opts)
 	if err != nil {
 		return nil, nil, err
 	}
 	if err := ctxErr(opts.Context); err != nil {
 		return nil, nil, err
 	}
-	pdf, err = buildPDF(content, gsList, fonts, width, height)
+	pdf, err = buildPDF(content, gsList, fonts, images, width, height)
 	if err != nil {
 		return nil, nil, err
 	}

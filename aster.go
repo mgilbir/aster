@@ -428,7 +428,7 @@ func (c *Converter) renderSVG(ctx context.Context, spec jsval.Value) (out string
 	return out, nil
 }
 
-// imageLoader fetches what the <image> elements of a PNG refer to through the
+// imageLoader fetches what the <image> elements of a PNG or a PDF refer to through the
 // Loader, as every resource of a call is: the href sanitized, then loaded,
 // under the call's context. An image is read up to the rasterizer's limit for
 // one image, and the images of one call together up to the data allowance (64
@@ -853,7 +853,7 @@ func (c *Converter) svgToPDF(ctx context.Context, svg string, opts []PDFOption) 
 	}
 	m = m.Bounded(text.ShapingBudgetFrom(ctx))
 	t0 := time.Now()
-	pdf, uses, err = svgpdf.ConvertWithUsage(svg, m, svgpdf.Options{Text: mode, Context: ctx})
+	pdf, uses, err = svgpdf.ConvertWithUsage(svg, m, svgpdf.Options{Text: mode, Context: ctx, Images: c.imageLoader()})
 	if st := stagesFrom(ctx); st != nil {
 		st("pdf", time.Since(t0))
 	}

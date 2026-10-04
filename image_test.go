@@ -266,3 +266,46 @@ func TestRemoteImageLimit(t *testing.T) {
 		t.Fatalf("err = %v, want a limit", err)
 	}
 }
+
+// PDF output embeds the images the PNG would draw, fetched the same way, and a
+// chart with an image mark converts.
+func TestImagesInPDF(t *testing.T) {
+	srv, hits := imageServer(t)
+	c, err := aster.New(aster.WithLoader(&aster.HTTPLoader{AllowPrivateNetworks: true}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Close() }()
+	svg := `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="40" height="40">` +
+		`<image xlink:href="` + srv.URL + `/red.png" width="40" height="40"/></svg>`
+	pdf, err := c.SVGToPDF(svg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(pdf, []byte("/Subtype /Image")) || hits.Load() != 1 {
+		t.Errorf("the image was not embedded (%d fetches)", hits.Load())
+	}
+
+	spec := `{"width":40,"height":20,"marks":[{"type":"image","encode":{"enter":{"url":{"value":"` + srv.URL + `/red.png"},"width":{"value":20},"height":{"value":20}}}}]}`
+	pdf, err = c.VegaToPDF([]byte(spec))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(pdf, []byte("/Subtype /Image")) {
+		t.Error("the image mark was not embedded")
+	}
+
+	// The default loader leaves the image out, and the chart still converts.
+	d, err := aster.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = d.Close() }()
+	pdf, err = d.SVGToPDF(svg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(pdf, []byte("/Subtype /Image")) {
+		t.Error("the default loader fetched an image")
+	}
+}

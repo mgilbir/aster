@@ -20,7 +20,7 @@ import (
 // The output is deterministic: fixed object numbering (fonts follow the
 // four skeleton objects in first-use order), insertion-ordered dictionaries,
 // no timestamps, no /Info and no /ID.
-func buildPDF(content [][]byte, gsList []gsEntry, fonts *fontCatalog, width, height float64) ([]byte, error) {
+func buildPDF(content [][]byte, gsList []gsEntry, fonts *fontCatalog, images *imageCatalog, width, height float64) ([]byte, error) {
 	// Object 1: Catalog
 	catalog := &pdf0.Dictionary{}
 	catalog.Set("Type", pdf0.Name("Catalog"))
@@ -50,16 +50,26 @@ func buildPDF(content [][]byte, gsList []gsEntry, fonts *fontCatalog, width, hei
 	// Font resources and their objects (Type0/CIDFontType2/descriptor/
 	// font program/ToUnicode), numbered after the fixed skeleton objects.
 	fontObjects := map[int]*pdf0.IndirectObject{}
+	next := 5
 	if fonts != nil && len(fonts.list) > 0 {
 		var fontRes *pdf0.Dictionary
 		var err error
-		fontObjects, fontRes, _, err = buildFontObjects(fonts, 5)
+		fontObjects, fontRes, next, err = buildFontObjects(fonts, next)
 		if err != nil {
 			return nil, err
 		}
 		if fontRes.Len() > 0 {
 			resources.Set("Font", fontRes)
 		}
+	}
+
+	// Image XObjects, numbered after the fonts, in first-use order.
+	if images != nil && len(images.list) > 0 {
+		imageObjects, xobjRes := buildImageObjects(images, next)
+		for n, obj := range imageObjects {
+			fontObjects[n] = obj
+		}
+		resources.Set("XObject", xobjRes)
 	}
 
 	// Object 3: Page
