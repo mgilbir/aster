@@ -284,7 +284,7 @@ func (q *Quantize) Copy() Scale {
 type Threshold struct {
 	meta
 	domain  []jsval.Value
-	dnum    []float64
+	dnum    []float64 // the thresholds as numbers, when all of them are
 	rng     []jsval.Value
 	n       int
 	unknown jsval.Value
@@ -305,6 +305,12 @@ func (t *Threshold) resize() { t.n = min(len(t.domain), len(t.rng)-1) }
 
 // Apply is scale(x).
 func (t *Threshold) Apply(x jsval.Value) jsval.Value {
+	if t.dnum == nil {
+		if c, ok := jsval.Relate(x, x); x.IsNullish() || !ok || c != 0 {
+			return t.unknown
+		}
+		return rangeAt(t.rng, bisectRightValues(t.domain, x, 0, max(t.n, 0)))
+	}
 	f, ok := selfComparable(x)
 	if !ok {
 		return t.unknown
@@ -324,8 +330,38 @@ func (t *Threshold) Domain() []jsval.Value { return cloneValues(t.domain) }
 // SetDomain is scale.domain(d).
 func (t *Threshold) SetDomain(d []jsval.Value) {
 	t.domain = cloneValues(d)
-	t.dnum = valuesToNums(d)
+	t.dnum = nil
+	if allNumeric(d) {
+		t.dnum = valuesToNums(d)
+	}
 	t.resize()
+}
+
+// allNumeric reports whether every value is a number or a date, which compare
+// with x the same way their numeric values do. A string threshold compares
+// with a string x as text, and a null one with nothing.
+func allNumeric(v []jsval.Value) bool {
+	for _, x := range v {
+		if k := x.Kind(); k != jsval.KindNum && k != jsval.KindTimestamp {
+			return false
+		}
+	}
+	return true
+}
+
+// bisectRightValues is d3.bisectRight over values in [lo, hi), comparing them
+// with x as d3.ascending does: by JavaScript's relational operators, with
+// null or undefined comparable to nothing.
+func bisectRightValues(a []jsval.Value, x jsval.Value, lo, hi int) int {
+	for lo < hi {
+		mid := int(uint(lo+hi) >> 1)
+		if c, ok := jsval.Relate(a[mid], x); ok && c <= 0 && !a[mid].IsNullish() {
+			lo = mid + 1
+		} else {
+			hi = mid
+		}
+	}
+	return lo
 }
 
 // Range returns a copy of the range.

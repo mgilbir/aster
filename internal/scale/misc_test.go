@@ -324,3 +324,32 @@ func TestNumberSpecifierConvertsToString(t *testing.T) {
 		}
 	}
 }
+
+// TestThresholdComparesAsJavaScript checks the thresholds compare with the
+// input as d3.ascending does: strings as text, dates as numbers, and a null
+// threshold with nothing.
+func TestThresholdComparesAsJavaScript(t *testing.T) {
+	s, n := jsval.Str, jsval.Num
+	cases := []struct {
+		domain []jsval.Value
+		x      jsval.Value
+		want   jsval.Value
+	}{
+		{[]jsval.Value{s("10"), s("2")}, s("12"), n(1)},
+		{[]jsval.Value{s("10"), s("2")}, s("3"), n(2)},
+		{[]jsval.Value{s("10"), s("2")}, n(3), n(2)},
+		{[]jsval.Value{s("b")}, s("abc"), n(0)},
+		{[]jsval.Value{s("b")}, s("c"), n(1)},
+		{[]jsval.Value{s("b")}, jsval.Null, jsval.Undefined},
+		{[]jsval.Value{jsval.Null, n(5)}, n(1), n(0)},
+		{[]jsval.Value{jsval.Timestamp(1000), jsval.Timestamp(2000)}, n(1500), n(1)},
+	}
+	for _, c := range cases {
+		th := NewThreshold()
+		th.SetDomain(c.domain)
+		th.SetRange([]jsval.Value{n(0), n(1), n(2)})
+		if got := th.Apply(c.x); !jsval.Equal(got, c.want) {
+			t.Errorf("domain %v: scale(%v) = %v, want %v", c.domain, c.x, got, c.want)
+		}
+	}
+}
