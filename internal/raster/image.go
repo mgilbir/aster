@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"image"
 	"image/draw"
+	"image/gif"
 	"image/jpeg"
 	"image/png"
 	"math"
@@ -20,8 +21,9 @@ type rasterImage struct {
 	pix  []uint8
 }
 
-// decodeDataURI decodes a data: URI holding PNG or JPEG. Only data URIs are
-// accepted: the rasterizer never touches the network or filesystem.
+// decodeDataURI decodes a data: URI holding PNG, JPEG or GIF. Only data URIs
+// are accepted: the rasterizer never touches the network or filesystem; other
+// images are fetched by Options.Images.
 func decodeDataURI(href string, lim Limits) (*rasterImage, error) {
 	href = strings.TrimSpace(href)
 	if !strings.HasPrefix(href, "data:") {
@@ -64,6 +66,11 @@ func decodeDataURI(href string, lim Limits) (*rasterImage, error) {
 		}
 		data = []byte(s)
 	}
+	return decodeImage(data, lim)
+}
+
+// decodeImage decodes a PNG, JPEG or GIF (its first frame).
+func decodeImage(data []byte, lim Limits) (*rasterImage, error) {
 	if len(data) > lim.MaxImageBytes {
 		return nil, fmt.Errorf("%w: image data exceeds %d bytes", errLimit, lim.MaxImageBytes)
 	}
@@ -71,7 +78,7 @@ func decodeDataURI(href string, lim Limits) (*rasterImage, error) {
 	if err != nil {
 		return nil, fmt.Errorf("unsupported image: %w", err)
 	}
-	if format != "png" && format != "jpeg" {
+	if format != "png" && format != "jpeg" && format != "gif" {
 		return nil, fmt.Errorf("unsupported image format %q", format)
 	}
 	if cfg.Width <= 0 || cfg.Height <= 0 || cfg.Width > 65535 || cfg.Height > 65535 ||
@@ -79,10 +86,13 @@ func decodeDataURI(href string, lim Limits) (*rasterImage, error) {
 		return nil, fmt.Errorf("%w: image dimensions %dx%d exceed the limit", errLimit, cfg.Width, cfg.Height)
 	}
 	var img image.Image
-	if format == "png" {
+	switch format {
+	case "png":
 		img, err = png.Decode(bytes.NewReader(data))
-	} else {
+	case "jpeg":
 		img, err = jpeg.Decode(bytes.NewReader(data))
+	default:
+		img, err = gif.Decode(bytes.NewReader(data))
 	}
 	if err != nil {
 		return nil, err
@@ -154,7 +164,8 @@ func (s *imageShader) shadeRow(y, x0 int, dst []uint8) {
 	}
 }
 
-// imageFor decodes (once) the data: image an <image> element refers to.
+// imageFor decodes (once) the image an <image> element refers to: a data:
+// URI, or the bytes Options.Images fetched.
 // Unsupported or unreachable images yield nil, as they are skipped by resvg;
 // an image over the limits fails the render.
 func (r *renderer) imageFor(n *node) (*rasterImage, error) {
@@ -165,7 +176,13 @@ func (r *renderer) imageFor(n *node) (*rasterImage, error) {
 	if img, cached := r.imgs[n]; cached {
 		return img, nil
 	}
-	img, err := decodeDataURI(href, r.lim)
+	var img *rasterImage
+	var err error
+	if data, ok := r.fetched[strings.TrimSpace(href)]; ok {
+		img, err = decodeImage(data, r.lim)
+	} else {
+		img, err = decodeDataURI(href, r.lim)
+	}
 	if err != nil {
 		img = nil
 		if errors.Is(err, errLimit) {

@@ -66,6 +66,13 @@ type Options struct {
 	// Shaper turns text into glyphs. nil selects the default shaper over the
 	// embedded fonts plus Fonts.
 	Shaper Shaper
+	// Images fetches the image an <image> element refers to by anything but
+	// a data: URI (which is decoded in place). It is called once per distinct
+	// href, before drawing, from several goroutines at once. nil leaves such
+	// images undrawn: the rasterizer touches neither the network nor the
+	// filesystem itself. An image that cannot be fetched is skipped, as a
+	// broken image is; an error wrapping budget.ErrLimit fails the render.
+	Images func(ctx context.Context, href string) ([]byte, error)
 	// Background, when non-nil, is painted under the drawing. The default is
 	// fully transparent.
 	Background color.Color
@@ -171,10 +178,14 @@ func Render(svg []byte, opts Options) (img *image.NRGBA, err error) {
 			return nil, err
 		}
 	}
+	fetched, err := fetchImages(opts.Context, doc, opts.Images, lim)
+	if err != nil {
+		return nil, err
+	}
 	r := &renderer{
 		doc: doc, lim: lim, shaper: shaper,
 		rast: newRasterizer(), cw: cw, ch: ch, active: map[*node]bool{},
-		ctx: opts.Context,
+		ctx: opts.Context, fetched: fetched,
 	}
 	r.rast.ctx = opts.Context
 	if opts.Limits.MaxPixelOps <= 0 {

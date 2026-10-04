@@ -202,7 +202,7 @@ PDF text modes:
 
 ### Loaders
 
-Loaders control how Vega fetches external data. The default denies all loading for security. Loaders that hold resources (like `FileLoader` and `FallbackLoader`) are automatically closed when `Converter.Close()` is called.
+Loaders control how Vega fetches external data, and the images PNG output draws. The default denies all loading for security. Loaders that hold resources (like `FileLoader` and `FallbackLoader`) are automatically closed when `Converter.Close()` is called.
 
 ```go
 // Deny all external data (default).
@@ -368,7 +368,7 @@ Everything needed is committed, so a plain `go build ./...` works offline. `make
 
 - **Emoji:** Monochrome [Noto Emoji](https://fonts.google.com/noto/specimen/Noto+Emoji) is bundled as a fallback, so emoji have text metrics and rasterize (in black-and-white) in PNG output. Color emoji are not supported.
 - **Interactive features:** Selection and signal interactivity are evaluated at initial state only; there is no event loop.
-- **Remote images in PNG:** Image marks referencing external URLs render in SVG output (the URL is embedded as an `href`), but the rasterizer does not fetch them, so they are blank in PNG output. Embedded `data:` URLs render fine.
+- **Images:** PNG output fetches the images it draws through the Loader, as data is fetched (so the default loader draws only embedded `data:` images), each distinct URL once. PNG, JPEG and GIF are drawn; an image that cannot be fetched or decoded is left out, as a broken image is, and one over the size limits fails the render with `ErrLimit`. Images are not loaded while the SVG is written, so an image mark without a width and height has none in the SVG (upstream in node writes the loaded image's size) and is not drawn. PDF output does not support image marks.
 
 ## Acknowledgments
 

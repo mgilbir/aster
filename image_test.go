@@ -9,7 +9,12 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/mgilbir/aster"
@@ -20,8 +25,8 @@ import (
 // gracefully (no panic) rather than rendering garbage. This guards the
 // rasterizer's image support and its bounds.
 
-// validPNGDataURL returns a data: URL for a small solid-red PNG.
-func validPNGDataURL(t *testing.T) string {
+// redPNG is a small solid-red PNG.
+func redPNG(t *testing.T) []byte {
 	t.Helper()
 	img := image.NewRGBA(image.Rect(0, 0, 16, 16))
 	for y := range 16 {
@@ -33,14 +38,20 @@ func validPNGDataURL(t *testing.T) string {
 	if err := png.Encode(&buf, img); err != nil {
 		t.Fatalf("encode test png: %v", err)
 	}
-	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(buf.Bytes())
+	return buf.Bytes()
+}
+
+// validPNGDataURL returns a data: URL for a small solid-red PNG.
+func validPNGDataURL(t *testing.T) string {
+	t.Helper()
+	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(redPNG(t))
 }
 
 // renderImage rasterizes a 40x40 SVG containing a single <image> with href, and
 // returns the decoded output plus any render error.
-func renderImage(t *testing.T, href string) (image.Image, error) {
+func renderImage(t *testing.T, href string, opts ...aster.Option) (image.Image, error) {
 	t.Helper()
-	c, err := aster.New()
+	c, err := aster.New(opts...)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -144,5 +155,114 @@ func TestDataURIImageLimits(t *testing.T) {
 		if _, err := renderImage(t, href); err != nil && errors.Is(err, aster.ErrLimit) {
 			t.Errorf("%s: err = %v", name, err)
 		}
+	}
+}
+
+// imageServer serves /red.png, and counts the requests for it.
+func imageServer(t *testing.T) (*httptest.Server, *atomic.Int32) {
+	t.Helper()
+	body := redPNG(t)
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/red.png" {
+			http.NotFound(w, r)
+			return
+		}
+		hits.Add(1)
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(body)
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &hits
+}
+
+// An image the Loader can fetch is drawn in PNG output, as it is in a browser.
+func TestRemoteImageRenders(t *testing.T) {
+	srv, hits := imageServer(t)
+	loader := aster.WithLoader(&aster.HTTPLoader{AllowPrivateNetworks: true})
+	img, err := renderImage(t, srv.URL+"/red.png", loader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := countReddish(img); n < 1500 {
+		t.Fatalf("the fetched PNG did not render (only %d red pixels)", n)
+	}
+
+	// Through Vega: the image mark's URL is sanitized into the SVG, then
+	// fetched for the PNG. Two marks with the same URL fetch it once.
+	c, err := aster.New(loader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Close() }()
+	hits.Store(0)
+	spec := `{"width":40,"height":20,"marks":[
+	  {"type":"image","encode":{"enter":{"url":{"value":"` + srv.URL + `/red.png"},"x":{"value":0},"width":{"value":20},"height":{"value":20}}}},
+	  {"type":"image","encode":{"enter":{"url":{"value":"` + srv.URL + `/red.png"},"x":{"value":20},"width":{"value":20},"height":{"value":20}}}}]}`
+	out, err := c.VegaToPNG([]byte(spec))
+	if err != nil {
+		t.Fatal(err)
+	}
+	vimg, err := png.Decode(bytes.NewReader(out))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := countReddish(vimg); n < 600 {
+		t.Fatalf("the image marks did not render (only %d red pixels)", n)
+	}
+	if hits.Load() != 1 {
+		t.Errorf("the image was fetched %d times, want once", hits.Load())
+	}
+}
+
+// A relative image path is read through a FileLoader.
+func TestRelativeImageRenders(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "red.png"), redPNG(t), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	img, err := renderImage(t, "red.png", aster.WithLoader(&aster.FileLoader{BaseDir: dir}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := countReddish(img); n < 1500 {
+		t.Fatalf("the file did not render (only %d red pixels)", n)
+	}
+}
+
+// What the Loader refuses or cannot fetch is drawn as a broken image: not at
+// all, and the render goes on.
+func TestRefusedImageRendersBlank(t *testing.T) {
+	srv, hits := imageServer(t)
+	for name, tc := range map[string]struct {
+		href string
+		opts []aster.Option
+	}{
+		"default loader":         {srv.URL + "/red.png", nil},
+		"private network denied": {srv.URL + "/red.png", []aster.Option{aster.WithLoader(aster.NewHTTPLoader(nil))}},
+		"not found":              {srv.URL + "/missing.png", []aster.Option{aster.WithLoader(&aster.HTTPLoader{AllowPrivateNetworks: true})}},
+		"outside the directory":  {"../red.png", []aster.Option{aster.WithLoader(&aster.FileLoader{BaseDir: t.TempDir()})}},
+	} {
+		img, err := renderImage(t, tc.href, tc.opts...)
+		if err != nil {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		if n := countReddish(img); n != 0 {
+			t.Errorf("%s: %d red pixels, want none", name, n)
+		}
+	}
+	if hits.Load() != 0 {
+		t.Errorf("a refused image was fetched %d times", hits.Load())
+	}
+}
+
+// An image over the loader's size limit fails the render as a limit, as an
+// oversized data: image does.
+func TestRemoteImageLimit(t *testing.T) {
+	srv, _ := imageServer(t)
+	_, err := renderImage(t, srv.URL+"/red.png", aster.WithLoader(&aster.HTTPLoader{AllowPrivateNetworks: true, MaxResponseBytes: 16}))
+	if !errors.Is(err, aster.ErrLimit) {
+		t.Fatalf("err = %v, want a limit", err)
 	}
 }
