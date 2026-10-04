@@ -107,9 +107,9 @@ type measureGroup struct {
 	field Field
 	outs  []measureOut // sorted by idx, stable
 
-	sum, product, mean, variance, exp, minmax bool
-	argmin, argmax, wantMin, wantMax          bool
-	expR                                      float64
+	sum, product, mean, variance, exp bool
+	argmin, argmax, wantMin, wantMax  bool
+	expR                              float64
 }
 
 // mstate is the running state of one measureGroup in one cell.
@@ -230,15 +230,6 @@ func (s *measureSet) newCell() *cell {
 		}
 	}
 	return c
-}
-
-func (s *measureSet) resetCell(c *cell) {
-	c.num = 0
-	c.data = nil
-	c.memo = storeMemo{}
-	for i, g := range s.groups {
-		c.aggs[i] = g.newState()
-	}
 }
 
 // add accumulates t into c. It does not touch c.data.

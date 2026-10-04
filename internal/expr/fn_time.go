@@ -132,7 +132,7 @@ func init() {
 			if utc {
 				z = format.UTC
 			}
-			step := math.NaN()
+			var step float64
 			stepV := arg(args, 2)
 			if stepV.IsNullish() {
 				step = 1

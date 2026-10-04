@@ -731,7 +731,7 @@ func normalizeErrorBand(cc *compileCtx, spec Value, config Value) Value {
 	r := errorBarParams(cc, spec, "errorband", config)
 	def := r.markDef
 	makePart := makeCompositeAggregatePartFactory(def, r.continuousAxis, r.continuousAxisChannelDef, jsval.Obj(r.encodingWithoutContinuousAxis), config.Get("errorband"))
-	is2D := spec.Get("encoding").Get("x").IsUndefined() == false && spec.Get("encoding").Get("y").IsUndefined() == false
+	is2D := !spec.Get("encoding").Get("x").IsUndefined() && !spec.Get("encoding").Get("y").IsUndefined()
 	bandMark := mk("type", "rect")
 	bordersMark := mk("type", "rule")
 	if is2D {

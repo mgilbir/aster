@@ -76,8 +76,6 @@ func TestCollectGolden(t *testing.T) {
 	}
 }
 
-func xOf(t jsval.Value) jsval.Value { return t.Get("x") }
-
 func TestFilterFormulaGolden(t *testing.T) {
 	preds := map[string]func(jsval.Value) bool{
 		"datum.x > 2": func(d jsval.Value) bool { x := d.Get("x"); return Greater(x, jsval.Num(2)) },

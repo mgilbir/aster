@@ -288,7 +288,6 @@ func (c *encCompiler) entry(enc jsval.Value) valueFn {
 	cur := term{a: value}
 	if !enc.Get("scale").IsNullish() {
 		cur = c.scaleTerm(enc, value, haveValue)
-		haveValue = true
 	}
 	if cur.a == nil && cur.b == nil {
 		cur = term{a: constFn(jsval.Null)}

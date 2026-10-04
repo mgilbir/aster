@@ -78,14 +78,13 @@ type marcher struct {
 	smooth bool
 
 	// Scratch reused across thresholds.
-	nodes      []node
-	frags      []fragment
-	byStart    map[int]int32
-	byEnd      map[int]int32
-	x, y       int
-	value      float64
-	rings      [][][2]float64
-	ringBuffer [][2]float64
+	nodes   []node
+	frags   []fragment
+	byStart map[int]int32
+	byEnd   map[int]int32
+	x, y    int
+	value   float64
+	rings   [][][2]float64
 }
 
 func (m *marcher) at(i int) float64 {

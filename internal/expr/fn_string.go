@@ -413,8 +413,8 @@ func init() {
 			return jsval.Arr(items)
 		default:
 			sp := s.str(sep)
-			switch {
-			case sp == "":
+			switch sp {
+			case "":
 				if isASCII(str) {
 					parts = make([]string, len(str))
 					for i := range str {

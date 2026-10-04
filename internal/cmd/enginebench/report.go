@@ -53,7 +53,14 @@ func writeReport(w io.Writer, files []string) error {
 		}
 	}
 
-	fmt.Fprintf(w, "## Engines\n\n| engine | version | environment | init | first VL→SVG | peak RSS | failed cases |\n|---|---|---|---:|---:|---:|---:|\n")
+	// pr writes to w until a write fails; writeReport returns that error.
+	var werr error
+	pr := func(format string, a ...any) {
+		if werr == nil {
+			_, werr = fmt.Fprintf(w, format, a...)
+		}
+	}
+	pr("## Engines\n\n| engine | version | environment | init | first VL→SVG | peak RSS | failed cases |\n|---|---|---|---:|---:|---:|---:|\n")
 	for _, r := range reps {
 		failed := 0
 		for _, x := range r.Results {
@@ -61,9 +68,9 @@ func writeReport(w io.Writer, files []string) error {
 				failed++
 			}
 		}
-		fmt.Fprintf(w, "| %s | %s | %s | %s | %s | %.0f MB | %d |\n", r.Engine, r.Version, r.Env, fmtMS(r.InitMS), fmtMS(r.FirstMS), r.RSSMB, failed)
+		pr("| %s | %s | %s | %s | %s | %.0f MB | %d |\n", r.Engine, r.Version, r.Env, fmtMS(r.InitMS), fmtMS(r.FirstMS), r.RSSMB, failed)
 	}
-	fmt.Fprintf(w, "\nTimes are the median of repeated runs on a warm engine (budget %.0f ms per case, at least 3 runs unless one run exceeds 2 s). Only cases every engine completed are compared.\n", reps[0].Budget)
+	pr("\nTimes are the median of repeated runs on a warm engine (budget %.0f ms per case, at least 3 runs unless one run exceeds 2 s). Only cases every engine completed are compared.\n", reps[0].Budget)
 
 	for _, suite := range []string{"vl-examples", "vg-gallery"} {
 		for _, stage := range stageNames {
@@ -71,8 +78,8 @@ func writeReport(w io.Writer, files []string) error {
 			if len(keys) == 0 {
 				continue
 			}
-			fmt.Fprintf(w, "\n## %s, %s (%d specs)\n\n", suite, stageTitle(stage), len(keys))
-			fmt.Fprintf(w, "| engine | geomean | median | p90 | max | total | speedup vs %s (geomean) | faster than %s |\n|---|---:|---:|---:|---:|---:|---:|---:|\n", reps[base].Engine, reps[base].Engine)
+			pr("\n## %s, %s (%d specs)\n\n", suite, stageTitle(stage), len(keys))
+			pr("| engine | geomean | median | p90 | max | total | speedup vs %s (geomean) | faster than %s |\n|---|---:|---:|---:|---:|---:|---:|---:|\n", reps[base].Engine, reps[base].Engine)
 			for i, r := range reps {
 				var t, ratio []float64
 				faster := 0
@@ -87,25 +94,25 @@ func writeReport(w io.Writer, files []string) error {
 				if i == base {
 					sp, fs = "—", "—"
 				}
-				fmt.Fprintf(w, "| %s | %s | %s | %s | %s | %s | %s | %s |\n", r.Engine,
+				pr("| %s | %s | %s | %s | %s | %s | %s | %s |\n", r.Engine,
 					fmtMS(geomean(t)), fmtMS(pct(t, 0.5)), fmtMS(pct(t, 0.9)), fmtMS(pct(t, 1)), fmtMS(sum(t)), sp, fs)
 			}
 		}
 	}
 
-	fmt.Fprintf(w, "\n## Highlights (end-to-end SVG and PNG)\n\n| spec | stage |")
+	pr("\n## Highlights (end-to-end SVG and PNG)\n\n| spec | stage |")
 	for _, r := range reps {
-		fmt.Fprintf(w, " %s |", r.Engine)
+		pr(" %s |", r.Engine)
 	}
-	fmt.Fprintf(w, "\n|---|---|%s\n", strings.Repeat("---:|", len(reps)))
+	pr("\n|---|---|%s\n", strings.Repeat("---:|", len(reps)))
 	for _, h := range highlights {
 		suite, name, _ := strings.Cut(h, "/")
 		for _, stage := range []string{"svg", "png"} {
-			fmt.Fprintf(w, "| %s | %s |", h, stage)
+			pr("| %s | %s |", h, stage)
 			for i := range reps {
-				fmt.Fprintf(w, " %s |", cell(res[i], key{suite, name, stage}))
+				pr(" %s |", cell(res[i], key{suite, name, stage}))
 			}
-			fmt.Fprintln(w)
+			pr("\n")
 		}
 	}
 
@@ -125,21 +132,21 @@ func writeReport(w io.Writer, files []string) error {
 			}
 		}
 		sort.Slice(rows, func(a, b int) bool { return rows[a].t > rows[b].t })
-		fmt.Fprintf(w, "\n## Slowest %s cases (by the slowest engine)\n\n| spec |", stage)
+		pr("\n## Slowest %s cases (by the slowest engine)\n\n| spec |", stage)
 		for _, r := range reps {
-			fmt.Fprintf(w, " %s |", r.Engine)
+			pr(" %s |", r.Engine)
 		}
-		fmt.Fprintf(w, "\n|---|%s\n", strings.Repeat("---:|", len(reps)))
+		pr("\n|---|%s\n", strings.Repeat("---:|", len(reps)))
 		for _, x := range rows[:min(10, len(rows))] {
-			fmt.Fprintf(w, "| %s/%s |", x.k.suite, x.k.name)
+			pr("| %s/%s |", x.k.suite, x.k.name)
 			for i := range reps {
-				fmt.Fprintf(w, " %s |", cell(res[i], x.k))
+				pr(" %s |", cell(res[i], x.k))
 			}
-			fmt.Fprintln(w)
+			pr("\n")
 		}
 	}
 
-	fmt.Fprintf(w, "\n## Failures\n\n")
+	pr("\n## Failures\n\n")
 	for _, r := range reps {
 		var errs []string
 		for _, x := range r.Results {
@@ -147,16 +154,16 @@ func writeReport(w io.Writer, files []string) error {
 				errs = append(errs, fmt.Sprintf("%s/%s %s: %s", x.Suite, x.Name, x.Stage, x.Err))
 			}
 		}
-		fmt.Fprintf(w, "- **%s**: %d", r.Engine, len(errs))
+		pr("- **%s**: %d", r.Engine, len(errs))
 		for _, e := range errs[:min(8, len(errs))] {
-			fmt.Fprintf(w, "\n  - %s", e)
+			pr("\n  - %s", e)
 		}
 		if len(errs) > 8 {
-			fmt.Fprintf(w, "\n  - … %d more", len(errs)-8)
+			pr("\n  - … %d more", len(errs)-8)
 		}
-		fmt.Fprintln(w)
+		pr("\n")
 	}
-	return nil
+	return werr
 }
 
 // common lists the (suite, stage) cases every report timed successfully.

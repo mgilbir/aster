@@ -283,11 +283,11 @@ func (t *tokenizer) str(quote byte) token {
 	begin := t.pos
 	for t.pos < len(t.in) {
 		c := t.peek()
-		switch {
-		case c == quote:
+		switch c {
+		case quote:
 			t.advance()
 			return token{typ: tokString, str: b.String()}
-		case c == '\\':
+		case '\\':
 			t.advance()
 			c = t.peek()
 			switch {

@@ -1,3 +1,27 @@
 version: "2"
 run:
   timeout: 5m
+linters:
+  settings:
+    staticcheck:
+      checks:
+        # staticcheck's defaults
+        - all
+        - -ST1000
+        - -ST1003
+        - -ST1016
+        - -ST1020
+        - -ST1021
+        - -ST1022
+        # Error messages follow upstream Vega's wording, capitals and full stops included.
+        - -ST1005
+        # Rewrites of taste (De Morgan, tagged switches, embedded field selectors) in code
+        # that often mirrors upstream JavaScript line by line.
+        - -QF1001
+        - -QF1003
+        - -QF1008
+  exclusions:
+    rules:
+      # A test that drops a Close or Set error fails on what it checks next.
+      - path: _test\.go
+        linters: [errcheck]

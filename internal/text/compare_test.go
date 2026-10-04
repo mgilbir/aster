@@ -27,7 +27,7 @@ var corpusStrings = []string{
 	"Weight_in_lbs", "Miles_per_Gallon", "Acceleration", "United States of America",
 	"Very long axis title that goes on and on, with commas; semicolons: colons!",
 	"– en dash — em dash … ellipsis “quotes” ‘single’",
-	" nbsp", "tab\there", "a​b", "soft­hyphen", "− minus 1×2 ± °C",
+	" nbsp", "tab\there", "a\u200bb", "soft\u00adhyphen", "− minus 1×2 ± °C",
 	"\U0001F600", "Smile \U0001F600 face", "❤️ heart", "\U0001F1EB\U0001F1F7", "☀ ★ ✓",
 	"日本語のテキスト", "中文标签", "한국어", "Mixed 中文 and Latin", "العربية", "עברית", "हिन्दी",
 	"~!@#$%^&*()_+{}|:\"<>?`-=[]\\;',./", "IIIIIIIIII", "WWWWWWWWWW", "iiiiiiiiii", "mmmmmmmmmm",

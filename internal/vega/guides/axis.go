@@ -396,7 +396,7 @@ func axisLabels(spec Value, l lookup, userEncode, dataRef, size Value, band tick
 		"exit", objv("opacity", zero(), "x", enter.Lookup("x"), "y", enter.Lookup("y")),
 	)
 
-	var dx, dy Value = jsval.Null, jsval.Null
+	dx, dy := jsval.Null, jsval.Null
 	if !labelAlign.IsTruthy() && flushOn {
 		dx = ifX(orient, offsetExpr, jsval.Undefined)
 	}
@@ -426,7 +426,7 @@ func axisLabels(spec Value, l lookup, userEncode, dataRef, size Value, band tick
 	// if overlap method or bound defined, request label overlap removal
 	var overlap Value
 	if overlapM.IsTruthy() || bound.IsTruthy() {
-		var b Value = jsval.Null
+		b := jsval.Null
 		if bound.IsTruthy() {
 			b = objv("scale", scale, "orient", orient, "tolerance", bound)
 		}

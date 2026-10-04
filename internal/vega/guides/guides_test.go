@@ -86,11 +86,6 @@ func typesOf(v Value) map[string]string {
 	return m
 }
 
-// guideConfig rebuilds the scope config from the recorded guide sections.
-func guideConfig(v Value) Value {
-	return v
-}
-
 func TestGuidesAgainstUpstream(t *testing.T) {
 	configs, cases := loadGolden(t)
 	counts := map[string]int{}

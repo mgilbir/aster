@@ -245,7 +245,7 @@ func parseSelectionPredicate(m Model, pred Value, dfnode dfNode, datum string) s
 		return "!!" + vname
 	}
 	if sel.project.timeUnit != nil {
-		var child dfNode = dfnode
+		child := dfnode
 		if child == nil {
 			child = m.b().comp.data.raw
 		}
@@ -1487,7 +1487,7 @@ var legendsCompiler = selectionCompiler{
 				evt.ObjValue().Set("filter", jsval.Arr(filters))
 			}
 		}
-		var evt Value = jsval.Str("click")
+		evt := jsval.Str("click")
 		if isLegendStreamBinding(sel.props.Lookup("bind")) {
 			evt = sel.props.Lookup("bind").Get("legend")
 		}

@@ -154,7 +154,6 @@ type standard struct {
 	sx, sy                float64 // reflect
 	theta                 float64 // clip angle in radians; hasTheta false means null
 	hasTheta              bool
-	thetaUndefined        bool
 	preclip               *clipper
 	x0, y0, x1, y1        float64 // post-clip extent
 	hasClip               bool

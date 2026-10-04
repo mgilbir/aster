@@ -490,13 +490,7 @@ func legendSymbolsEncode(symbolsSpec Value, fod Value, m *unitModel, channel str
 			if !src.IsTruthy() {
 				src = encoding.Get("color")
 			}
-			f := firstDefined(getFirstConditionValue(src), markDef.Get("fill"))
-			if f.IsUndefined() || f.IsNull() || (f.IsBool() && !f.BoolValue()) || (f.IsStr() && f.StrValue() == "") {
-				if filled {
-					f = coalesce(f, markDef.Get("color"))
-				}
-			}
-			f = getFirstNonNullish3(getFirstConditionValue(src), markDef.Get("fill"), func() Value {
+			f := getFirstNonNullish3(getFirstConditionValue(src), markDef.Get("fill"), func() Value {
 				if filled {
 					return markDef.Get("color")
 				}

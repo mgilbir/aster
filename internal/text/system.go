@@ -132,7 +132,7 @@ func readSysFont(path string) (sf sysFont, ok bool) {
 	if err != nil {
 		return sf, false
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var hdr [12]byte
 	if _, err := f.ReadAt(hdr[:], 0); err != nil {

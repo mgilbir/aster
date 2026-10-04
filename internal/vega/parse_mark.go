@@ -170,7 +170,7 @@ func parseMark(spec jsval.Value, scope *Scope) {
 
 	input := parseMarkData(spec.Get("from"), group, scope)
 
-	var key P = input.key
+	key := input.key
 	if key == nil && spec.Get("key").IsTruthy() {
 		key = pField{path: spec.Get("key").AsString()}
 	}

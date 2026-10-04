@@ -74,21 +74,6 @@ func (m *smallMap[V]) set(k string, v V) (int, bool) {
 	return i, true
 }
 
-// delete removes k, keeping the order of the rest.
-func (m *smallMap[V]) delete(k string) {
-	i := m.find(k)
-	if i < 0 {
-		return
-	}
-	m.ents = append(m.ents[:i], m.ents[i+1:]...)
-	if m.idx != nil {
-		delete(m.idx, k)
-		for j := i; j < len(m.ents); j++ {
-			m.idx[m.ents[j].key] = j
-		}
-	}
-}
-
 // grow makes room for n entries up front.
 func (m *smallMap[V]) grow(n int) {
 	if cap(m.ents) < n {

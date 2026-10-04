@@ -83,10 +83,9 @@ func structure(v jsval.Value, depth int, indent string, b *strings.Builder) {
 		return
 	}
 	fmt.Fprintf(b, "%s%s role=%s items=%d bounds=%s\n", indent, v.Get("marktype").AsString(), v.Get("role").AsString(), v.Get("items").Len(), v.Get("bounds").String())
-	for _, it := range v.Get("items").Items() {
-		for _, m := range it.Get("items").Items() {
+	if items := v.Get("items").Items(); len(items) > 0 {
+		for _, m := range items[0].Get("items").Items() {
 			structure(m, depth+1, indent+"  ", b)
 		}
-		break
 	}
 }

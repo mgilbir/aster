@@ -24,16 +24,6 @@ type pointMStream interface {
 	pointM(x, y, m float64)
 }
 
-// noopStream discards everything.
-type noopStream struct{}
-
-func (noopStream) Point(x, y float64) {}
-func (noopStream) LineStart()         {}
-func (noopStream) LineEnd()           {}
-func (noopStream) PolygonStart()      {}
-func (noopStream) PolygonEnd()        {}
-func (noopStream) Sphere()            {}
-
 // maxGeometryDepth bounds GeometryCollection nesting; deeper collections are
 // ignored rather than recursed into.
 const maxGeometryDepth = 256

@@ -426,7 +426,7 @@ func (d *dayComposer) write() (dayResult, bool) {
 		d.index++
 	}
 	c := d.comp
-	year, month, day := 0, kNone, kNone // the default year 0 becomes 2000
+	var year, month, day int
 	if d.named == kNone {
 		if d.iso || !isDay(c[0]) {
 			year, month, day = c[0], c[1], c[2] // YMD

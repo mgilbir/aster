@@ -61,23 +61,6 @@ func (c *rtContext) fork() *rtContext {
 	return sub
 }
 
-// detach disconnects every operator of a sub-context from the graph.
-func (c *rtContext) detach(sub *rtContext) {
-	for i, s := range c.subcontexts {
-		if s == sub {
-			c.subcontexts = append(c.subcontexts[:i], c.subcontexts[i+1:]...)
-			break
-		}
-	}
-	for _, n := range sub.nodes {
-		n.targets = nil
-	}
-	for _, n := range sub.nodes {
-		n.detach()
-	}
-	sub.nodes = nil
-}
-
 func (c *rtContext) get(e *entry) *opNode {
 	for x := c; x != nil; x = x.parent {
 		if n, ok := x.nodes[e]; ok {
