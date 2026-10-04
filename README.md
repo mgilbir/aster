@@ -104,11 +104,14 @@ aster svg -i chart.vl.json -o chart.svg -allow-http
 
 # ...restricted to specific hosts
 aster svg -i chart.vl.json -allow-domain cdn.jsdelivr.net
+
+# Set signals (Vega-Lite parameters) before rendering: JSON values, or strings
+aster svg -i chart.vl.json -signal cutoff=10 -signal 'label=Q3 sales'
 ```
 
 The CLI auto-detects Vega vs Vega-Lite from the `$schema` field. If absent, Vega-Lite is assumed.
 
-Shared flags: `-i`/`-o` (input/output, stdin/stdout when omitted), `-version`, `-timeout`, `-allow-http`, `-allow-domain` (repeatable; implies `-allow-http`), and `-allow-private-networks` (let HTTP loading reach loopback, link-local and private addresses, which are denied by default). `png` also accepts `-scale` and `-recode`; these don't apply to `pdf` since it's vector output. `pdf` accepts `-text embed|named|outlines` to pick the [PDF text mode](#options) (default `embed`).
+Shared flags: `-i`/`-o` (input/output, stdin/stdout when omitted), `-version`, `-timeout`, `-allow-http`, `-allow-domain` (repeatable; implies `-allow-http`), and `-allow-private-networks` (let HTTP loading reach loopback, link-local and private addresses, which are denied by default). `png` also accepts `-scale` and `-recode`; these don't apply to `pdf` since it's vector output. `pdf` accepts `-text embed|named|outlines` to pick the [PDF text mode](#options) (default `embed`). `svg`, `png` and `pdf` accept `-signal name=value` (repeatable) to set a signal before rendering; a value that parses as JSON is that value, anything else a string.
 
 ## API
 
@@ -178,6 +181,15 @@ case errors.Is(err, context.DeadlineExceeded):
 	// the render took longer than WithTimeout
 }
 ```
+
+**Signals** — every render method that takes a specification also takes `WithSignal(name, value)`, which sets a top-level signal before the chart is drawn, as Vega's `view.signal(name, value)` does. A Vega-Lite parameter (a variable, or the value a bound input sets) is a signal of the same name, so a chart can be rendered as it looks after the input changes:
+
+```go
+svg, err := c.VegaLiteToSVG(spec, aster.WithSignal("cutoff", 10))
+png, err := c.VegaToPNG(spec, aster.WithScale(2), aster.WithSignal("year", 2000), aster.WithSignal("region", "EMEA"))
+```
+
+The value is anything `encoding/json` encodes, held as that JSON value. Signals are set in the order given, each propagated before the next. A name the specification does not define fails the render; the SVG-input methods ignore the option.
 
 **PNG options** passed per render:
 
@@ -367,7 +379,7 @@ Everything needed is committed, so a plain `go build ./...` works offline. `make
 ### Known limitations
 
 - **Emoji:** Monochrome [Noto Emoji](https://fonts.google.com/noto/specimen/Noto+Emoji) is bundled as a fallback, so emoji have text metrics and rasterize (in black-and-white) in PNG output. Color emoji are not supported.
-- **Interactive features:** Selection and signal interactivity are evaluated at initial state only; there is no event loop.
+- **Interactive features:** There is no event loop: a chart is rendered at its initial state, or at the state `WithSignal` sets (a parameter, a bound input's value); events themselves (pointer, timer, input) are not simulated.
 - **Remote images in PNG:** Image marks referencing external URLs render in SVG output (the URL is embedded as an `href`), but the rasterizer does not fetch them, so they are blank in PNG output. Embedded `data:` URLs render fine.
 
 ## Acknowledgments

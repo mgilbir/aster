@@ -198,8 +198,8 @@ func fuzzOne(pg *aster.Converter, o *oracle.Oracle, pool []baseSpec, seed, n int
 	r := fuzzResult{n: n, id: fmt.Sprintf("s%d-%05d", seed, n), base: b.name, lite: b.lite, muts: log, spec: spec}
 
 	render := func(c interface {
-		VegaLiteToSVG([]byte) (string, error)
-		VegaToSVG([]byte) (string, error)
+		VegaLiteToSVG([]byte, ...aster.RenderOption) (string, error)
+		VegaToSVG([]byte, ...aster.RenderOption) (string, error)
 	}) (string, error) {
 		if b.lite {
 			return c.VegaLiteToSVG(spec)
