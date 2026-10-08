@@ -147,6 +147,8 @@ type renderer struct {
 	// once (see form).
 	forms     []*formDef
 	formIndex map[string]*formDef
+	// painted are the colour glyphs painted so far (see paintColourGlyph).
+	painted map[paintedKey]paintedGlyph
 
 	ctx       context.Context
 	lim       Limits

@@ -3,6 +3,7 @@ package svgpdf
 import (
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"image"
 	"image/color"
 	"image/draw"
@@ -108,41 +109,97 @@ func (r *renderer) drawTextRunColour(run text.Run, penX float64, str string, tex
 func (r *renderer) drawColourGlyph(face *text.Face, gid int, size, x, y float64, fg Color, alpha float64) error {
 	upem := float64(face.UnitsPerEm())
 	fgc := shape.Color{R: byteOf(fg.R), G: byteOf(fg.G), B: byteOf(fg.B), A: 255}
-	opts := shape.PaintOptions{Foreground: fgc}
-	var check colourCheck
-	if err := text.PaintGlyph(face, gid, opts, &check); err != nil {
-		return nil // a glyph that cannot be painted is not drawn, as an empty one
-	}
 	r.w.save()
 	defer r.w.restore()
 	// Font units, y up, at the glyph's origin.
 	r.w.concat(Matrix{A: size / upem, D: -size / upem, E: x, F: y})
-	if !check.vector() {
+	ctm := r.w.cur.ctm
+	key := paintedKey{face, gid, fgc, ctm.A, ctm.B, ctm.C, ctm.D}
+	g, ok := r.painted[key]
+	if !ok {
+		g = r.paintColourGlyph(face, gid, fgc, upem)
+		if r.painted == nil {
+			r.painted = map[paintedKey]paintedGlyph{}
+		}
+		r.painted[key] = g
+	}
+	switch {
+	case g.err != nil:
+		return g.err
+	case g.image:
 		return r.drawGlyphImage(face, gid, fgc, alpha, colourImagePPEM(size))
+	case len(g.content) == 0:
+		return nil
+	case alpha >= 1:
+		r.w.buf = append(r.w.buf, g.content...)
+		return nil
+	}
+	// The glyph is drawn translucent as one thing at the text's alpha, so
+	// that its layers are not seen through one another.
+	p := &pdfPainter{r: r, face: face, upem: upem, box: g.box, m: []Matrix{Identity()}}
+	p.setOrigin()
+	fm := p.pageForm(g.content, p.bbox())
+	r.w.setAlpha(alpha, alpha)
+	p.toForm()
+	r.w.drawXObject(fm)
+	return nil
+}
+
+// paintedKey is a colour glyph as it is painted: by its face, in a
+// foreground, under a transform's size and turn. Where it is on the page is
+// not part of it, as nothing of a glyph's painting depends on that.
+type paintedKey struct {
+	face       *text.Face
+	gid        int
+	fg         shape.Color
+	a, b, c, d float64
+}
+
+// paintedGlyph is how a colour glyph is drawn: as an image, or as its
+// content, the operators that paint it at the current transform, empty for
+// a glyph that paints nothing.
+type paintedGlyph struct {
+	image   bool
+	content []byte
+	box     shape.Rect
+	err     error
+}
+
+// paintColourGlyph paints a glyph once, at the current transform: whether
+// PDF can draw it, and if so what draws it. A glyph drawn again at the same
+// size and turn is drawn from it, as it paints the same.
+func (r *renderer) paintColourGlyph(face *text.Face, gid int, fg shape.Color, upem float64) paintedGlyph {
+	opts := shape.PaintOptions{Foreground: fg}
+	var check colourCheck
+	if err := text.PaintGlyph(face, gid, opts, &check); err != nil {
+		return paintedGlyph{} // a glyph that cannot be painted is not drawn, as an empty one
+	}
+	if !check.vector() {
+		return paintedGlyph{image: true}
 	}
 	box, _ := raster.ColourGlyphBounds(face, gid, opts)
 	p := &pdfPainter{r: r, face: face, upem: upem, box: box, m: []Matrix{Identity()}}
-	// The glyph is a group of its own: the backdrop of its composites, and,
-	// drawn translucent, one thing at the text's alpha, so that its layers
-	// are not seen through one another.
+	p.setOrigin()
+	// The glyph is a group of its own: the backdrop of its composites.
 	p.beginGroup()
 	err := text.PaintGlyph(face, gid, opts, p)
-	for len(p.groups) > 1 {
-		p.endGroup()
-	}
+	p.unwind()
 	content := p.endGroup()
-	if err != nil || p.err != nil || len(content) == 0 {
-		return errors.Join(err, p.err)
+	if err != nil || p.err != nil {
+		return paintedGlyph{err: errors.Join(err, p.err)}
 	}
-	if alpha >= 1 {
-		r.w.buf = append(r.w.buf, content...)
-		return nil
+	return paintedGlyph{content: content, box: box}
+}
+
+// setOrigin places the glyph's page space at the corner of its box on the
+// page (see pageForm).
+func (p *pdfPainter) setOrigin() {
+	ctm, b := p.r.w.cur.ctm, p.box
+	p.origin = [2]float64{math.Inf(1), math.Inf(1)}
+	for _, c := range [][2]float64{{b.XMin, b.YMin}, {b.XMax, b.YMin}, {b.XMin, b.YMax}, {b.XMax, b.YMax}} {
+		x, y := ctm.Apply(c[0], c[1])
+		p.origin = [2]float64{math.Min(p.origin[0], x), math.Min(p.origin[1], y)}
 	}
-	fm := p.pageForm(content, p.bbox())
-	r.w.setAlpha(alpha, alpha)
-	p.toPage()
-	r.w.drawXObject(fm)
-	return nil
 }
 
 // drawGlyphImage draws a glyph as an image the PNG writer paints, in font
@@ -256,6 +313,8 @@ type pdfPainter struct {
 	box    shape.Rect // the glyph's bounds, in its font units
 	m      []Matrix   // the current user space to the glyph's font units; innermost last
 	depth  int        // clips and transforms open
+	open   []bool     // which of them, innermost last, are transforms
+	origin [2]float64 // where the glyph's page space starts on the page (see pageForm)
 	groups []pdfGroup
 	err    error
 }
@@ -269,23 +328,64 @@ const big = 1 << 15
 
 func (p *pdfPainter) PushTransform(t shape.Transform) {
 	m := Matrix{A: t.XX, B: t.YX, C: t.XY, D: t.YY, E: t.X0, F: t.Y0}
-	p.r.w.save()
+	p.push(true)
 	p.r.w.concat(m)
 	p.m = append(p.m, p.top().Mul(m))
+}
+
+func (p *pdfPainter) PopTransform() { p.pop() }
+
+// push opens a q for a transform or a clip.
+func (p *pdfPainter) push(transform bool) {
+	p.r.w.save()
+	p.open = append(p.open, transform)
 	p.depth++
 }
 
-func (p *pdfPainter) PopTransform() {
+// pop closes the innermost transform or clip with its Q. One the current
+// group did not open is not closed: forme balances its pushes and pops, and
+// a stray Q would corrupt the page.
+func (p *pdfPainter) pop() {
+	start := 0
+	if n := len(p.groups); n > 0 {
+		start = p.groups[n-1].depth
+	}
+	if p.depth <= start {
+		return
+	}
 	p.r.w.restore()
-	if len(p.m) > 1 {
+	if p.open[len(p.open)-1] && len(p.m) > 1 {
 		p.m = p.m[:len(p.m)-1]
 	}
+	p.open = p.open[:len(p.open)-1]
 	p.depth--
 }
 
+// closeTo closes the transforms and clips opened since depth.
+func (p *pdfPainter) closeTo(depth int) {
+	for p.depth > depth {
+		p.r.w.restore()
+		if p.open[len(p.open)-1] && len(p.m) > 1 {
+			p.m = p.m[:len(p.m)-1]
+		}
+		p.open = p.open[:len(p.open)-1]
+		p.depth--
+	}
+}
+
+// unwind closes everything a painting left open, down to its own group: what
+// forme never does, but what would otherwise leave the page unbalanced.
+func (p *pdfPainter) unwind() {
+	for len(p.groups) > 1 {
+		p.PopGroup(shape.CompositeSrcOver)
+	}
+	if len(p.groups) == 1 {
+		p.closeTo(p.groups[0].depth)
+	}
+}
+
 func (p *pdfPainter) PushClipGlyph(gid int) {
-	p.depth++
-	p.r.w.save()
+	p.push(false)
 	outline, err := text.GlyphOutline(p.face, gid, p.upem)
 	if err != nil || len(outline) == 0 {
 		// Nothing is inside an empty outline.
@@ -304,16 +404,12 @@ func (p *pdfPainter) PushClipGlyph(gid int) {
 }
 
 func (p *pdfPainter) PushClipRect(rc shape.Rect) {
-	p.depth++
-	p.r.w.save()
+	p.push(false)
 	p.r.w.rect(rc.XMin, rc.YMin, rc.XMax-rc.XMin, rc.YMax-rc.YMin)
 	p.r.w.clip()
 }
 
-func (p *pdfPainter) PopClip() {
-	p.r.w.restore()
-	p.depth--
-}
+func (p *pdfPainter) PopClip() { p.pop() }
 
 func (p *pdfPainter) Solid(c shape.Color, _ bool) {
 	p.r.w.fillColor(colourOf(c))
@@ -366,11 +462,13 @@ func (p *pdfPainter) paint(g, a *gradient) {
 		return
 	}
 	mask := p.pageForm([]byte("/"+p.r.shadingOf(p.shared(a))+" sh\n"), p.bbox())
-	m := w.cur.ctm
+	// The mask is set in the glyph's page space, then the gradient painted
+	// back in the current one.
+	k := p.formMatrix()
 	w.save()
-	p.toPage()
+	p.toForm()
 	w.stateGS("lum:"+mask, gsEntry{mask: mask, maskLuminosity: true})
-	w.concat(m)
+	w.concat(k)
 	w.setAlpha(1, 1)
 	w.shade(p.r.shadingOf(p.shared(g)))
 	w.restore()
@@ -623,20 +721,24 @@ func (p *pdfPainter) Image(img shape.Image) {
 	if p.err != nil {
 		return
 	}
+	if len(img.Data) == 0 {
+		return
+	}
 	var key string
 	var make func() (*image.NRGBA, error)
 	switch img.Format {
 	case shape.ImagePNG:
+		// The font's own bytes, which forme hands out without copying.
 		key = fmt.Sprintf("glyphpng:%p:%d", &img.Data[0], len(img.Data))
 		make = func() (*image.NRGBA, error) { return decodeNRGBA(img.Data, p.r.lim) }
 	case shape.ImageMask:
+		// Made for the call, so known by what it holds.
 		c := img.Color
-		key = fmt.Sprintf("glyphmask:%p:%d:%dx%d:%d,%d,%d,%d", p.face, len(img.Data), img.Width, img.Height, c.R, c.G, c.B, c.A)
+		h := fnv.New64a()
+		h.Write(img.Data)
+		key = fmt.Sprintf("glyphmask:%x:%dx%d:%d,%d,%d,%d", h.Sum64(), img.Width, img.Height, c.R, c.G, c.B, c.A)
 		make = func() (*image.NRGBA, error) { return maskNRGBA(img), nil }
 	default:
-		return
-	}
-	if len(img.Data) == 0 {
 		return
 	}
 	pi, err := p.r.images.put(key, make)

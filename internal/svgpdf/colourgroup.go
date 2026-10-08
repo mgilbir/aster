@@ -117,6 +117,11 @@ func (p *pdfPainter) PushGroup() { p.beginGroup() }
 // colourCheck sends a glyph whose enclosing group has a clip or transform
 // open around the group to an image, as the backdrop is then not whole.
 func (p *pdfPainter) PopGroup(mode shape.CompositeMode) {
+	// The glyph's own group is closed by drawColourGlyph, not by a pop.
+	if len(p.groups) <= 1 {
+		return
+	}
+	p.closeTo(p.groups[len(p.groups)-1].depth)
 	src := p.endGroup()
 	w := p.r.w
 	wrap := func(b []byte) []byte {
@@ -125,6 +130,14 @@ func (p *pdfPainter) PopGroup(mode shape.CompositeMode) {
 		}
 		out := append([]byte("q\n"), b...)
 		return append(out, "Q\n"...)
+	}
+	// A Porter-Duff operator rewrites the backdrop, which must then be
+	// whole: with a clip or transform still open in it, its q would be lost.
+	// colourCheck draws such a glyph as an image; were it painted here
+	// anyway, it is drawn source-over rather than leave the page unbalanced.
+	parent := p.groups[len(p.groups)-1].depth
+	if porterDuff(mode) && p.depth != parent {
+		mode = shape.CompositeSrcOver
 	}
 	if mode == shape.CompositeSrcOver {
 		w.buf = append(w.buf, wrap(src)...)
@@ -137,7 +150,7 @@ func (p *pdfPainter) PopGroup(mode shape.CompositeMode) {
 		}
 		fs := p.pageForm(src, box)
 		w.save()
-		p.toPage()
+		p.toForm()
 		w.stateGS("bm:"+bm, gsEntry{bm: bm})
 		w.drawXObject(fs)
 		w.restore()
@@ -160,7 +173,7 @@ func (p *pdfPainter) PopGroup(mode shape.CompositeMode) {
 		saved := w.buf
 		w.buf = nil
 		w.save()
-		p.toPage()
+		p.toForm()
 		w.stateGS(fmt.Sprintf("mask:%s:%v", fm, invert), gsEntry{mask: fm, maskInvert: invert})
 		w.drawXObject(fb)
 		w.restore()
@@ -197,12 +210,16 @@ func (p *pdfPainter) PopGroup(mode shape.CompositeMode) {
 }
 
 // pageForm registers a form of content, drawn in the current user space
-// within box, as a form in page space: its content first sets the current
-// transform, and its BBox is box there. It is drawn after toPage. Quartz
-// draws nothing of a soft mask whose group's coordinates run past the page's
-// own, as a glyph's font units do; in page space they never do.
+// within box, as a form in the glyph's page space: page units, from the
+// corner of the glyph's box on the page. Its content first sets the current
+// transform there, and its BBox is box there. It is drawn after toForm.
+//
+// Quartz draws nothing of a soft mask whose group's coordinates run past the
+// page's own, as a glyph's font units, in the thousands, do; a glyph's page
+// space runs from zero to its size. And it is the same wherever the glyph
+// is, so that every copy of a glyph at one size shares its forms.
 func (p *pdfPainter) pageForm(content []byte, box [4]float64) string {
-	m := p.r.w.cur.ctm
+	m := p.formMatrix()
 	c := appendMatrix(nil, m)
 	c = append(c, " cm\n"...)
 	c = append(c, content...)
@@ -216,10 +233,19 @@ func (p *pdfPainter) pageForm(content []byte, box [4]float64) string {
 	return p.r.form(c, [4]float64{x0, y0, x1, y1})
 }
 
-// toPage undoes the current transform, for drawing a pageForm. The caller
-// saves and restores the graphics state around it.
-func (p *pdfPainter) toPage() {
-	if inv, ok := invert(p.r.w.cur.ctm); ok {
+// formMatrix maps the current user space into the glyph's page space.
+func (p *pdfPainter) formMatrix() Matrix {
+	m := p.r.w.cur.ctm
+	m.E -= p.origin[0]
+	m.F -= p.origin[1]
+	return m
+}
+
+// toForm moves from the current user space to the glyph's page space, for
+// drawing a pageForm. The caller saves and restores the graphics state
+// around it.
+func (p *pdfPainter) toForm() {
+	if inv, ok := invert(p.formMatrix()); ok {
 		p.r.w.concat(inv)
 	}
 }

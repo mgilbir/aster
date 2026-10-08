@@ -2,6 +2,7 @@ package svgpdf
 
 import (
 	"bytes"
+	"math"
 	"os"
 	"regexp"
 	"strconv"
@@ -264,4 +265,100 @@ func TestColourGlyphFormsInPageSpace(t *testing.T) {
 			}
 		}
 	}
+}
+
+// TestColourPainterUnbalanced paints what forme never does, as the fuzzer
+// found: the page must stay balanced and nothing may panic.
+func TestColourPainterUnbalanced(t *testing.T) {
+	newPainter := func() (*renderer, *pdfPainter) {
+		r := &renderer{w: newContentWriter(), images: newImageCatalog(nil, Limits{}.withDefaults()), lim: Limits{}.withDefaults()}
+		p := &pdfPainter{r: r, upem: 1000, box: shape.Rect{XMax: 1000, YMax: 1000}, m: []Matrix{Identity()}}
+		p.beginGroup()
+		return r, p
+	}
+	balanced := func(what, content string) {
+		if strings.Count(content, "q\n") != strings.Count(content, "Q\n") {
+			t.Errorf("%s: unbalanced\n%s", what, content)
+		}
+	}
+	// A Porter-Duff operator onto a backdrop with a clip open in it.
+	_, p := newPainter()
+	p.PushClipRect(shape.Rect{XMax: 10, YMax: 10})
+	p.PushGroup()
+	p.PopGroup(shape.CompositeClear)
+	p.unwind()
+	balanced("Clear onto an open clip", string(p.endGroup()))
+	// Pops with nothing to pop, and pushes never popped.
+	_, p = newPainter()
+	p.PopClip()
+	p.PopTransform()
+	p.PopGroup(shape.CompositeSrcIn)
+	p.PushGroup()
+	p.PushTransform(shape.Transform{XX: 1, YY: 1})
+	p.PushClipRect(shape.Rect{XMax: 1, YMax: 1})
+	p.unwind()
+	balanced("stray pops and unclosed pushes", string(p.endGroup()))
+	// An image with no data, and two masks of one size that differ.
+	r, p := newPainter()
+	p.Image(shape.Image{Format: shape.ImagePNG})
+	for _, b := range []byte{0x00, 0xff} {
+		p.Image(shape.Image{Format: shape.ImageMask, Data: []byte{b, b, b, b}, Width: 2, Height: 2, Box: shape.Rect{XMax: 1, YMax: 1}, Color: shape.Color{A: 255}})
+	}
+	p.unwind()
+	if n := imagesDrawn(string(p.endGroup())); n != 2 || len(r.images.uses) != 2 {
+		t.Errorf("two different masks drawn as %d images", n)
+	}
+}
+
+// TestColourMaskReturnsToGlyphSpace pins a luminosity mask's transforms: the
+// mask is set in the glyph's page space and the gradient painted back in the
+// glyph's own, so the two cm around the gs undo one another, wherever on the
+// page the glyph is.
+func TestColourMaskReturnsToGlyphSpace(t *testing.T) {
+	for _, at := range []string{"10,80", "17.3,41.9"} {
+		pdf, err := Convert(`<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><text transform="translate(`+at+
+			`)" font-family="ColourTest" font-size="60">`+"\U0001F52E"+`</text></svg>`, colourShaper(t), Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		doc, err := pdf0.Read(bytes.NewReader(pdf), int64(len(pdf)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		content := contentStreamOf(t, doc)
+		f := strings.Fields(content)
+		var ms []Matrix
+		for i, tok := range f {
+			if tok == "gs" && i >= 8 && f[i-2] == "cm" && strings.HasPrefix(f[i-1], "/GS") {
+				ms = append(ms, cmBefore(t, f, i-2))
+				if i+7 < len(f) && f[i+7] == "cm" {
+					ms = append(ms, cmBefore(t, f, i+7))
+				}
+			}
+		}
+		if len(ms) != 2 {
+			t.Fatalf("no mask set between two cm in\n%s", content)
+		}
+		p := ms[0].Mul(ms[1])
+		for _, v := range []float64{p.A - 1, p.B, p.C, p.D - 1, p.E, p.F} {
+			if math.Abs(v) > 1e-3 {
+				t.Errorf("the cm around the mask make %+v, not the identity", p)
+				break
+			}
+		}
+	}
+}
+
+// cmBefore reads the matrix of the cm at f[i].
+func cmBefore(t *testing.T, f []string, i int) Matrix {
+	t.Helper()
+	var v [6]float64
+	for k := range v {
+		x, err := strconv.ParseFloat(f[i-6+k], 64)
+		if err != nil {
+			t.Fatalf("cm operand %q", f[i-6+k])
+		}
+		v[k] = x
+	}
+	return Matrix{A: v[0], B: v[1], C: v[2], D: v[3], E: v[4], F: v[5]}
 }
