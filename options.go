@@ -111,6 +111,11 @@ func WithSystemFonts() Option {
 // WithFont registers a custom TTF font with the given family name. Custom
 // fonts take priority over system and embedded fonts. Multiple calls append
 // additional fonts; later fonts take higher priority.
+//
+// A colour font (COLR, sbix, CBDT) draws its glyphs in colour in PNG and PDF
+// output. Registered with any family name, it is also what draws the
+// characters a spec's fonts lack, such as emoji, before the bundled
+// monochrome Noto Emoji.
 func WithFont(family string, ttf []byte) Option {
 	return func(c *config) {
 		c.fonts = append(c.fonts, fontEntry{family: family, data: ttf})

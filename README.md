@@ -11,6 +11,7 @@ Aster is a Go implementation of the Vega runtime and the Vega-Lite compiler, fol
 - Arbitrary SVG to PNG or vector PDF conversion
 - PDF output is fully vector with subset-embedded fonts (selectable text) — ideal for LaTeX `\includegraphics`
 - Accurate text shaping with [forme](https://github.com/mgilbir/forme), measured the way browsers measure (unrounded advances), with embedded Liberation fonts and monochrome Noto Emoji
+- Colour emoji in PNG and PDF from a colour font you register (COLRv0, COLRv1, sbix, CBDT)
 - Configurable scale factor for high-DPI PNG output
 - Multiple Vega-Lite versions (5.8, 6.4)
 - Custom fonts, themes, data loaders, memory limits, timeouts, and any IANA timezone
@@ -160,7 +161,7 @@ Options passed to `aster.New()`:
 | `WithMemoryLimit(bytes)` | 0 (defaults) | Budget for what one render may hold (loaded data, rows, scene items, SVG size, raster canvas); see below |
 | `WithTextMeasurement(bool)` | `true` | forme text shaping for accurate layout |
 | `WithHarfBuzzTextMetrics()` | disabled | Measure with HarfBuzz's rounding (whole-pixel size, 1/64 px advances) instead of exact advances, for output byte-stable with earlier versions |
-| `WithFont(family, ttf)` | — | Register a custom TTF font (used by both measurement and PNG) |
+| `WithFont(family, ttf)` | — | Register a custom TTF font (used by both measurement and PNG); a colour font draws in colour |
 | `WithDefaultFontFamily(name)` | `"Liberation Sans"` | Family that generic `sans-serif` resolves to (both pipelines) |
 | `WithDefaultSerifFamily(name)` | `"Liberation Serif"` | Family that generic `serif` resolves to (both pipelines) |
 | `WithDefaultMonospaceFamily(name)` | `"Liberation Mono"` | Family that generic `monospace` resolves to (both pipelines) |
@@ -378,7 +379,7 @@ Everything needed is committed, so a plain `go build ./...` works offline. `make
 
 ### Known limitations
 
-- **Emoji:** Monochrome [Noto Emoji](https://fonts.google.com/noto/specimen/Noto+Emoji) is bundled as a fallback, so emoji have text metrics and rasterize (in black-and-white) in PNG output. Color emoji are not supported.
+- **Emoji:** Monochrome [Noto Emoji](https://fonts.google.com/noto/specimen/Noto+Emoji) is bundled as a fallback, so emoji always have text metrics and draw (in the text's colour). No colour font is bundled. A colour font registered with `WithFont` (such as [Noto Color Emoji](https://github.com/googlefonts/noto-emoji)) is tried before the bundled fonts for characters the requested families lack, and draws in colour: COLRv0 and COLRv1 (gradients, transforms and every composite mode), sbix and CBDT bitmaps (the strike for the size drawn), and EBDT masks. Measurement then uses that font's advances, as a browser using it would. In PDF a colour glyph is drawn as vectors where PDF can say what it paints, and otherwise as an image of it at 256 pixels per em (sweep gradients, repeated or translucent gradients, composite modes other than source-over); either way its text is kept, so it can be searched and copied. SVG output leaves emoji as text, for the viewer to draw. SVG-in-OpenType glyphs are drawn from their outlines. `WithSystemFonts` does not index TrueType collections (`.ttc`), so it does not find Apple Color Emoji, and uses a system font only when a spec names its family.
 - **Interactive features:** There is no event loop: a chart is rendered at its initial state, or at the state `WithSignal` sets (a parameter, a bound input's value); events themselves (pointer, timer, input) are not simulated.
 - **Images:** PNG and PDF output fetch the images they draw through the Loader, as data is fetched (so the default loader draws only embedded `data:` images), each distinct URL once. PNG, JPEG and GIF are drawn; a PDF embeds an RGB or grey JPEG as it is and the rest as compressed RGB with a soft mask for transparency. An image that cannot be fetched or decoded is left out, as a broken image is, and one over the size limits fails the render with `ErrLimit`. An image mark without a width or a height takes it from the image, as upstream does once the image has loaded; a call fetches each image once for its SVG, PNG and PDF.
 

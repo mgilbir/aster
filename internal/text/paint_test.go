@@ -131,3 +131,33 @@ func TestPaintGlyphErrors(t *testing.T) {
 		t.Error("nil face: no error")
 	}
 }
+
+func TestCustomFontFallsBackBeforeEmbedded(t *testing.T) {
+	data, err := os.ReadFile("../../testdata/colourfonts/ColourTest.ttf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		opts []Option
+		want string // the family drawing the emoji
+	}{
+		{nil, "Noto Emoji"},
+		// A font given with WithFont is tried before the embedded ones for
+		// what the families asked for do not cover; the Latin letters stay
+		// with Liberation Sans, the default family.
+		{[]Option{WithFont("Colour Test", data)}, "Colour Test"},
+	} {
+		m, err := New(c.opts...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		runs, _ := m.ShapeText("Hi \U0001F534", "20px sans-serif")
+		if len(runs) != 2 || runs[0].Face.Family != "Liberation Sans" || runs[1].Face.Family != c.want {
+			var got []string
+			for _, r := range runs {
+				got = append(got, r.Face.Family)
+			}
+			t.Errorf("runs from %v, want Liberation Sans then %s", got, c.want)
+		}
+	}
+}

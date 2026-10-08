@@ -181,9 +181,10 @@ type measurerState struct {
 	exact bool
 	pango pangoMode
 
-	entries []*entry // registration order
-	byFam   map[string][]*entry
-	first   *Face // the face runes nothing covers fall back to (.notdef)
+	entries  []*entry // registration order
+	fallback []*entry // entries in fallback order (see faces)
+	byFam    map[string][]*entry
+	first    *Face // the face runes nothing covers fall back to (.notdef)
 
 	fallbackFamily  string
 	serifFamily     string
@@ -260,7 +261,17 @@ func New(opts ...Option) (*Measurer, error) {
 		if err != nil {
 			return nil, err
 		}
-		m.add(&entry{face: face, family: f.family})
+		m.add(&entry{face: face, family: f.family, custom: true})
+	}
+	for i := len(m.entries) - 1; i >= 0; i-- {
+		if m.entries[i].custom {
+			m.fallback = append(m.fallback, m.entries[i])
+		}
+	}
+	for _, e := range m.entries {
+		if !e.custom {
+			m.fallback = append(m.fallback, e)
+		}
 	}
 	return m, nil
 }

@@ -11,9 +11,10 @@ type entry struct {
 	weight int
 	italic bool
 
-	face *Face
-	path string // system font file, when face is nil
-	dead bool   // loading path failed; never retry
+	face   *Face
+	path   string // system font file, when face is nil
+	dead   bool   // loading path failed; never retry
+	custom bool   // given with WithFont
 }
 
 // load returns the entry's face, reading a system font on first use.
@@ -32,7 +33,7 @@ func (e *entry) load(m *Measurer) *Face {
 
 // bestMatch picks, among candidates, the entries closest to the requested
 // weight and style by the CSS Fonts font-style-matching rules (style first,
-// then weight), keeping registration order.
+// then weight), keeping their order.
 func bestMatch(cands []*entry, weight int, italic bool) []*entry {
 	if len(cands) == 0 {
 		return nil
@@ -156,7 +157,10 @@ type faceList struct {
 // first redirected to their configured concrete families), the configured
 // default family, then metric-compatible aliases of everything requested,
 // then every registered face that fits the weight and style, and finally
-// every registered face at all.
+// every registered face at all. Of the registered faces, those given with
+// WithFont come first, the latest first, as they take priority over the
+// embedded ones: a colour emoji font given so draws the emoji the families
+// asked for do not have, rather than the embedded monochrome Noto Emoji.
 func (m *Measurer) faces(css CSSFont) *faceList {
 	key := listKey{strings.Join(css.Family, "\x00"), css.Weight, css.Italic}
 	if l, ok := m.listCache[key]; ok {
@@ -204,8 +208,8 @@ func (m *Measurer) faces(css CSSFont) *faceList {
 		}
 	}
 	// Any registered face fitting the weight and style, then any at all.
-	push(bestMatch(m.entries, css.Weight, css.Italic))
-	push(m.entries)
+	push(bestMatch(m.fallback, css.Weight, css.Italic))
+	push(m.fallback)
 
 	if len(m.listCache) >= maxCacheItems {
 		clear(m.listCache)
