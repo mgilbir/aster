@@ -1,8 +1,13 @@
 package raster
 
 import (
+	"bytes"
+	"compress/gzip"
+	"io"
 	"math"
 	"sort"
+	"strconv"
+	"strings"
 
 	"github.com/mgilbir/forme/shape"
 )
@@ -92,7 +97,7 @@ func (r *renderer) paintColour(f ColourFace, gid uint32, m matrix, sp *state, fg
 		return true // the render has failed
 	}
 	cs := *sp
-	p := &colourPainter{r: r, face: f, st: &cs}
+	p := &colourPainter{r: r, face: f, st: &cs, gid: gid, fg: fg}
 	p.m = []matrix{m}
 	p.clips = []*mask{sp.clip}
 	opts := shape.PaintOptions{Foreground: fg, PPEM: ppem}
@@ -117,7 +122,9 @@ type colourPainter struct {
 	r    *renderer
 	face Face
 	st   *state // the text's state, its clip the painting's current one
-	fl   flat   // the renderer's own is collecting the text's outlines
+	gid  uint32 // the glyph painted, which an SVG document names
+	fg   shape.Color
+	fl   flat // the renderer's own is collecting the text's outlines
 
 	m      []matrix // font units (y up) to device, innermost last
 	clips  []*mask  // the clip in effect, innermost last; nil is none
@@ -352,6 +359,9 @@ func (p *colourPainter) Image(img shape.Image) {
 		ri = p.r.colourImage(img.Data)
 	case shape.ImageMask:
 		ri = maskImage(img)
+	case shape.ImageSVG:
+		p.svgGlyph(img.Data)
+		return
 	}
 	if ri == nil || ri.w <= 0 || ri.h <= 0 {
 		return
@@ -572,4 +582,70 @@ func (g *colrGradient) shadeRow(y, x0 int, dst []uint8) {
 		dst[i*4+2] = uint8(v >> 16)
 		dst[i*4+3] = uint8(v >> 24)
 	}
+}
+
+// maxSVGGlyphDocs bounds the SVG glyph documents a render keeps parsed.
+const maxSVGGlyphDocs = 64
+
+// svgGlyph draws an SVG-in-OpenType glyph: the element of its document whose
+// id is "glyph" and its index, in font units with y running down from the
+// baseline, its context-fill and context-stroke the text's colour, as is its
+// currentColor. A document is parsed once per render, within the render's
+// limits. Text in the document draws its colour glyphs from their outlines.
+func (p *colourPainter) svgGlyph(data []byte) {
+	r := p.r
+	if len(data) == 0 {
+		return
+	}
+	doc := r.svgGlyphDoc(data)
+	if doc == nil {
+		return
+	}
+	n := doc.ids["glyph"+strconv.FormatUint(uint64(p.gid), 10)]
+	if n == nil {
+		return
+	}
+	st := initialState(0, 0)
+	st.vw, st.vh = 1000, 1000
+	st.ctm = p.top().mul(scaleM(1, -1))
+	st.clip = p.st.clip
+	fg := rgba{p.fg.R, p.fg.G, p.fg.B, float32(p.fg.A) / 255}
+	st.color = fg
+	st.fill = paint{kind: pColor, c: fg}
+	// The document is drawn as any is, through the renderer's own buffers;
+	// drawGlyphs is collecting the text's outlines in r.fl meanwhile.
+	saved, fl := r.doc, r.fl
+	r.doc, r.inSVGGlyph, r.fl = doc, true, flat{}
+	r.renderElement(n, &st)
+	r.doc, r.inSVGGlyph, r.fl = saved, false, fl
+}
+
+// svgGlyphDoc parses an SVG glyph document, gzipped or not, once per
+// render. One that does not parse is nil.
+func (r *renderer) svgGlyphDoc(data []byte) *document {
+	k := colourImageKey{&data[0], len(data)}
+	if doc, ok := r.svgGlyphs[k]; ok {
+		return doc
+	}
+	src := data
+	if len(src) >= 2 && src[0] == 0x1f && src[1] == 0x8b {
+		src = nil
+		if zr, err := gzip.NewReader(bytes.NewReader(data)); err == nil {
+			// No more than the limit on an SVG's size, and one byte more,
+			// which parseDocument then refuses.
+			src, _ = io.ReadAll(io.LimitReader(zr, int64(r.lim.MaxInputBytes)+1))
+		}
+	}
+	var doc *document
+	if len(src) > 0 {
+		// The context paints are the text's, which the glyph's state carries
+		// as its colour.
+		s := strings.NewReplacer("context-fill", "currentColor", "context-stroke", "currentColor").Replace(string(src))
+		doc, _ = parseDocument(s, r.lim)
+	}
+	if r.svgGlyphs == nil || len(r.svgGlyphs) >= maxSVGGlyphDocs {
+		r.svgGlyphs = map[colourImageKey]*document{}
+	}
+	r.svgGlyphs[k] = doc
+	return doc
 }

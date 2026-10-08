@@ -303,3 +303,60 @@ func TestColourGlyphImage(t *testing.T) {
 		t.Error("nil face: no error")
 	}
 }
+
+func TestSVGGlyphs(t *testing.T) {
+	data, err := os.ReadFile("../../testdata/colourfonts/SvgTest.ttf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	img, err := Render([]byte(`<svg xmlns="http://www.w3.org/2000/svg" width="400" height="100">
+<text x="0" y="90" font-family="SvgTest" font-size="100" fill="#0a8">&#x1F600;&#x1F308;&#x1F534;A</text></svg>`),
+		Options{Fonts: []FontData{{Family: "SvgTest", Data: data}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		what string
+		x, y int
+		want color.NRGBA
+	}{
+		// U+1F600: a gradient from the document's defs, red to blue, under
+		// a circle in context-fill, the text's colour.
+		{"gradient, left", 12, 20, color.NRGBA{226, 27, 29, 255}},
+		{"gradient, right", 88, 20, color.NRGBA{30, 51, 226, 255}},
+		{"context-fill", 50, 50, color.NRGBA{0, 170, 136, 255}},
+		// U+1F308 and U+1F534, one gzipped document: a square, and a
+		// triangle through a <use> of a shape in its defs, in the use's fill.
+		{"gzipped document's first glyph", 150, 50, color.NRGBA{26, 179, 51, 255}},
+		{"a <use>'s fill", 250, 70, color.NRGBA{230, 26, 26, 255}},
+		// 'A' has no document: its outline, in the fill.
+		{"outline", 350, 80, color.NRGBA{0, 170, 136, 255}},
+	} {
+		if got := img.At(c.x, c.y); !within(got, c.want, 6) {
+			t.Errorf("%s: %v, want %v", c.what, got, c.want)
+		}
+	}
+}
+
+func TestSVGGlyphImage(t *testing.T) {
+	data, err := os.ReadFile("../../testdata/colourfonts/SvgTest.ttf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := text.New(text.WithFont("SvgTest", data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runs, _ := m.ShapeText("\U0001F308", "20px SvgTest")
+	img, box, err := ColourGlyphImage(runs[0].Face, runs[0].Glyphs[0].GID, shape.Color{A: 255}, 100)
+	if err != nil || img == nil {
+		t.Fatalf("no image: %v", err)
+	}
+	// The square, 100 to 900 across and 0 to 800 up, found by drawing it.
+	if math.Abs(box.XMin-100) > 10 || math.Abs(box.XMax-900) > 10 || math.Abs(box.YMin) > 10 || math.Abs(box.YMax-800) > 10 {
+		t.Errorf("box %+v", box)
+	}
+	if img.Bounds().Min != (image.Point{}) {
+		t.Errorf("image bounds %v do not start at the origin", img.Bounds())
+	}
+}

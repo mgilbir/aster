@@ -25,6 +25,12 @@
 # em, each a square of its own colour, so that a test can tell which strike
 # was drawn; and 'A', an outline with no image.
 #
+# SvgTest.ttf, an OpenType SVG table: U+1F600 a document of its own, a
+# square in a gradient its defs hold under a circle in context-fill (the
+# text's colour); U+1F308 and U+1F534 one gzipped document drawing both,
+# the second through a <use> of a shape in its defs; and 'A', an outline
+# with no document.
+#
 # ColourPair.ttc is the two in one TrueType collection, for the system font
 # scanner, which indexes each face of a collection.
 #
@@ -208,6 +214,35 @@ def sbix(path):
     save(fb, path)
 
 
+SVG_SMILE = (
+    '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">'
+    '<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="0">'
+    '<stop offset="0" stop-color="#e61a1a"/><stop offset="1" stop-color="#1a33e6"/>'
+    '</linearGradient></defs>'
+    '<g id="glyph4"><rect x="100" y="-800" width="800" height="800" fill="url(#g)"/>'
+    '<circle cx="500" cy="-400" r="250" fill="context-fill"/></g></svg>')
+SVG_PAIR = (
+    '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">'
+    '<defs><path id="tri" d="M100 0L500 -800L900 0Z"/></defs>'
+    '<g id="glyph2"><rect x="100" y="-800" width="800" height="800" fill="#1ab333"/></g>'
+    '<g id="glyph3"><use xlink:href="#tri" fill="#e61a1a"/></g></svg>')
+
+
+def svg(path):
+    from fontTools.ttLib.tables import S_V_G_
+    order = [".notdef", "A", "u1F308", "u1F534", "u1F600"]
+    sq = poly((100, 0), (100, 800), (900, 800), (900, 0))
+    outlines = {".notdef": OUTLINES[".notdef"], "A": OUTLINES["A"],
+                "u1F308": sq, "u1F534": sq, "u1F600": sq}
+    fb = base("SvgTest", order, {ord("A"): "A", 0x1F308: "u1F308", 0x1F534: "u1F534",
+                                 0x1F600: "u1F600"}, outlines)
+    table = S_V_G_.table_S_V_G_()
+    table.docList = [S_V_G_.SVGDocument(SVG_PAIR, 2, 3, compressed=True),
+                     S_V_G_.SVGDocument(SVG_SMILE, 4, 4)]
+    fb.font["SVG "] = table
+    save(fb, path)
+
+
 def collection(path, *fonts):
     from fontTools.ttLib import TTFont
     from fontTools.ttLib.ttCollection import TTCollection
@@ -221,5 +256,6 @@ if __name__ == "__main__":
     out = sys.argv[1] if len(sys.argv) > 1 else here
     colr(os.path.join(out, "ColourTest.ttf"))
     sbix(os.path.join(out, "SbixTest.ttf"))
+    svg(os.path.join(out, "SvgTest.ttf"))
     collection(os.path.join(out, "ColourPair.ttc"),
                os.path.join(out, "ColourTest.ttf"), os.path.join(out, "SbixTest.ttf"))

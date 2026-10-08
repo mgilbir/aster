@@ -55,7 +55,7 @@ func FuzzColourPainter(f *testing.F) {
 
 // FuzzColourFont converts every glyph of a mutated colour font to PDF.
 func FuzzColourFont(f *testing.F) {
-	for _, name := range []string{"ColourTest.ttf", "SbixTest.ttf"} {
+	for _, name := range []string{"ColourTest.ttf", "SbixTest.ttf", "SvgTest.ttf"} {
 		data, err := os.ReadFile("../../testdata/colourfonts/" + name)
 		if err != nil {
 			f.Fatal(err)

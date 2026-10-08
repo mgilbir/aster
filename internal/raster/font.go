@@ -286,10 +286,9 @@ func (t *textFace) Outline(gid uint32, sink OutlineSink) bool {
 }
 
 // Colour reports whether glyph gid is painted rather than filled from its
-// outline. An SVG-in-OpenType glyph is not: it is drawn from its outline.
+// outline: a COLR, SVG, sbix, CBDT or EBDT glyph.
 func (t *textFace) Colour(gid uint32, ppem int) bool {
-	c := text.GlyphColour(t.f, int(gid), shape.PaintOptions{PPEM: ppem})
-	return c != shape.ColourNone && c != shape.ColourSVG
+	return text.GlyphColour(t.f, int(gid), shape.PaintOptions{PPEM: ppem}) != shape.ColourNone
 }
 
 func (t *textFace) Paint(gid uint32, opts shape.PaintOptions, p shape.Painter) error {

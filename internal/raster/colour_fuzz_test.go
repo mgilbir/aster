@@ -33,7 +33,7 @@ func FuzzColourPainter(f *testing.F) {
 
 // FuzzColourFont renders every glyph of a mutated colour font.
 func FuzzColourFont(f *testing.F) {
-	for _, name := range []string{"ColourTest.ttf", "SbixTest.ttf"} {
+	for _, name := range []string{"ColourTest.ttf", "SbixTest.ttf", "SvgTest.ttf"} {
 		data, err := os.ReadFile("../../testdata/colourfonts/" + name)
 		if err != nil {
 			f.Fatal(err)

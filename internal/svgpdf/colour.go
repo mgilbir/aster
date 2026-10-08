@@ -32,11 +32,11 @@ func colourImagePPEM(size float64) int {
 }
 
 // colourGlyph reports whether glyph gid of face is drawn in colour: a COLR,
-// sbix, CBDT or EBDT glyph. An SVG-table glyph is drawn from its outline. A
-// PDF has no device size, so a bitmap glyph is drawn from its largest strike.
+// SVG, sbix, CBDT or EBDT glyph. A PDF has no device size, so a bitmap glyph
+// is drawn from its largest strike, and an SVG glyph, which svgpdf cannot
+// draw itself, as the PNG writer's image of it.
 func colourGlyph(face *text.Face, gid int) bool {
-	c := text.GlyphColour(face, gid, shape.PaintOptions{})
-	return c != shape.ColourNone && c != shape.ColourSVG
+	return text.GlyphColour(face, gid, shape.PaintOptions{}) != shape.ColourNone
 }
 
 // hasColour reports whether a run has a colour glyph.

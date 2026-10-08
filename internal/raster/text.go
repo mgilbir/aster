@@ -556,7 +556,9 @@ func (r *renderer) drawGlyphs(gs []glyphPos, sp *state, opacity float64, layered
 				if g.g.Face == nil {
 					continue
 				}
-				if cf, ppem, ok := colourGlyph(g, ctm); ok && r.drawColourGlyph(cf, g, sp, ctm, ppem, fo) {
+				// Text inside an SVG glyph draws its colour glyphs from their
+				// outlines: an SVG glyph cannot draw itself.
+				if cf, ppem, ok := colourGlyph(g, ctm); ok && !r.inSVGGlyph && r.drawColourGlyph(cf, g, sp, ctm, ppem, fo) {
 					continue
 				}
 				p := r.glyphOutline(g.g.Face, g.g.ID)
@@ -579,7 +581,7 @@ func (r *renderer) drawGlyphs(gs []glyphPos, sp *state, opacity float64, layered
 				if g.g.Face == nil {
 					continue
 				}
-				if _, _, ok := colourGlyph(g, ctm); ok {
+				if _, _, ok := colourGlyph(g, ctm); ok && !r.inSVGGlyph {
 					continue // a colour glyph's outline is not what is drawn
 				}
 				p := r.glyphOutline(g.g.Face, g.g.ID)

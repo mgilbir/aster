@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"image/draw"
 	"math"
 
 	"github.com/mgilbir/forme/shape"
@@ -29,6 +30,13 @@ func ColourGlyphImage(f *text.Face, gid int, fg shape.Color, ppem int) (img *ima
 	b := &colourBounds{face: tf}
 	if err := tf.Paint(uint32(gid), shape.PaintOptions{Foreground: fg, PPEM: ppem}, b); err != nil {
 		return nil, box, err
+	}
+	svg := b.svg
+	if svg {
+		// An SVG glyph's document says nothing of where it draws until it is
+		// drawn: it is drawn over two ems about its em square, and cropped.
+		u := tf.UnitsPerEm()
+		b.r, b.ok = rect{-u / 2, -u / 2, 3 * u / 2, 3 * u / 2}, true
 	}
 	if !b.ok {
 		return nil, box, nil
@@ -59,7 +67,36 @@ func ColourGlyphImage(f *text.Face, gid int, fg shape.Color, ppem int) (img *ima
 	if r.err != nil {
 		return nil, box, r.err
 	}
-	return r.cv.toNRGBA(), shape.Rect{XMin: x0 / k, YMin: y0 / k, XMax: x1 / k, YMax: y1 / k}, nil
+	img = r.cv.toNRGBA()
+	if svg {
+		// Cropped to what it painted.
+		c := opaqueBounds(img)
+		if c.Empty() {
+			return nil, box, nil
+		}
+		// A copy of its own: a sub-image's rows are its parent's.
+		crop := image.NewNRGBA(image.Rect(0, 0, c.Dx(), c.Dy()))
+		draw.Draw(crop, crop.Bounds(), img, c.Min, draw.Src)
+		img = crop
+		x0, x1 = x0+float64(c.Min.X), x0+float64(c.Max.X)
+		y0, y1 = y1-float64(c.Max.Y), y1-float64(c.Min.Y)
+	}
+	return img, shape.Rect{XMin: x0 / k, YMin: y0 / k, XMax: x1 / k, YMax: y1 / k}, nil
+}
+
+// opaqueBounds is the box of the pixels of img that are not transparent.
+func opaqueBounds(img *image.NRGBA) image.Rectangle {
+	b := img.Bounds()
+	out := image.Rectangle{}
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		row := img.Pix[(y-b.Min.Y)*img.Stride:]
+		for x := b.Min.X; x < b.Max.X; x++ {
+			if row[(x-b.Min.X)*4+3] != 0 {
+				out = out.Union(image.Rect(x, y, x+1, y+1))
+			}
+		}
+	}
+	return out
 }
 
 // ColourGlyphBounds is the box a colour glyph of f paints within, in font
@@ -87,6 +124,7 @@ type colourBounds struct {
 	clips []rect   // in the glyph's font units, innermost last
 	r     rect
 	ok    bool
+	svg   bool // it painted an SVG document, which says nothing of its bounds
 }
 
 func (b *colourBounds) top() matrix {
@@ -153,6 +191,10 @@ func (b *colourBounds) RadialGradient(shape.RadialGradient) { b.paint() }
 func (b *colourBounds) SweepGradient(shape.SweepGradient)   { b.paint() }
 
 func (b *colourBounds) Image(img shape.Image) {
+	if img.Format == shape.ImageSVG {
+		b.svg = true
+		return
+	}
 	b.pushBox(rect{img.Box.XMin, img.Box.YMin, img.Box.XMax, img.Box.YMax}, true)
 	b.paint()
 	b.PopClip()

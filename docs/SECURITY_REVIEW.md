@@ -435,6 +435,7 @@ Scope: what a colour font given with `WithFont` (untrusted, by the threat model)
 - PNG (`internal/raster/colour.go`): each colour glyph is painted into layers that come from the rasterizer's pool, under `MaxLayerDepth` and `MaxCanvasBytes`. Groups nested past the depth are painted into the layer beneath rather than failing the render, so a font cannot fail a chart. Clip masks are bounded by the glyph's device box, and every fill is charged to `MaxPixelOps`.
 - PDF (`internal/svgpdf/colour.go`, `colourgroup.go`): a glyph is painted once per size and turn and reused (`paintedKey`), and its forms and shadings are deduplicated by content. So a glyph repeated 10,000 times costs one painting. A repeated gradient's function has at most 512 periods, and a sweep's mesh 720 triangles.
 - Bitmap glyphs decode through `imageref` with the image limits; decoded PNGs are cached per render (at most 256).
+- OpenType SVG glyph documents are font data, so as untrusted as an SVG given to `SVGToPNG`. They are gunzipped to at most `MaxInputBytes`, parsed by the rasterizer's own parser under its limits (and cached, at most 64 a render), and drawn under the same pixel, layer and depth budgets as the page. Text inside one draws its colour glyphs from their outlines, so a glyph cannot draw itself.
 
 Found and fixed:
 

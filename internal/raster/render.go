@@ -41,6 +41,8 @@ type renderer struct {
 	fetched    map[string][]byte // image bytes by href, from Options.Images
 	outlines   map[outlineKey]*path
 	colourImgs map[colourImageKey]*rasterImage // decoded bitmap glyphs
+	svgGlyphs  map[colourImageKey]*document    // parsed SVG glyph documents
+	inSVGGlyph bool                            // drawing one, whose text draws no other
 	grads      map[gradKey]*gradient
 
 	patterns     map[patternKey]*patternTile

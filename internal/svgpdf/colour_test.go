@@ -18,7 +18,7 @@ import (
 func colourShaper(t *testing.T) *text.Measurer {
 	t.Helper()
 	var opts []text.Option
-	for _, name := range []string{"ColourTest", "SbixTest"} {
+	for _, name := range []string{"ColourTest", "SbixTest", "SvgTest"} {
 		data, err := os.ReadFile("../../testdata/colourfonts/" + name + ".ttf")
 		if err != nil {
 			t.Fatal(err)
@@ -96,9 +96,13 @@ func TestColourGlyphsVector(t *testing.T) {
 }
 
 func TestColourGlyphsImage(t *testing.T) {
-	// A bitmap glyph is its image.
+	// A bitmap glyph is its image, and an SVG glyph the PNG writer's image
+	// of it, each glyph its own.
 	if _, images := colourPDF(t, "SbixTest", "\U0001F600", "", TextEmbed); images != 1 {
 		t.Errorf("sbix: %d images, want one", images)
+	}
+	if _, images := colourPDF(t, "SvgTest", "\U0001F600\U0001F308\U0001F534", "", TextEmbed); images != 3 {
+		t.Errorf("SVG: %d images, want three", images)
 	}
 	// What PDF cannot composite, Xor and Plus, sends a glyph to an image.
 	for _, m := range []shape.CompositeMode{shape.CompositeXor, shape.CompositePlus} {
