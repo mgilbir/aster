@@ -35,8 +35,12 @@ type Face struct {
 	// they return are merged into shape under usedMu, which is what Subset
 	// keeps.
 	shape *shape.Face
-	prog  []byte
+	src   []byte // the font file the face was loaded from
+	index int    // which face of src, a collection, it is; 0 for a single font
 	upem  int
+
+	progOnce sync.Once
+	prog     []byte
 
 	clones sync.Pool // of *shape.Face, clones of shape
 
@@ -51,8 +55,30 @@ type Face struct {
 
 // Program returns the font program (an sfnt, with any WOFF wrapper removed)
 // the face was loaded from, suitable for subsetting and embedding. The slice
-// is shared: callers must not modify it.
-func (f *Face) Program() []byte { return f.prog }
+// is shared: callers must not modify it. A face of a collection is copied out
+// into a font of its own on the first call, which for a large collection is a
+// large copy: Table reads a table without it, and Size says how large it is.
+func (f *Face) Program() []byte {
+	f.progOnce.Do(func() { f.prog = f.shape.Program() })
+	return f.prog
+}
+
+// Table returns one table of the face's font, tag "hhea" say, read where it
+// is in the file the face was loaded from, or nil. The slice is shared:
+// callers must not modify it.
+func (f *Face) Table(tag string) []byte {
+	if t := sfntTable(f.src, f.index, tag); t != nil {
+		return t
+	}
+	// A WOFF font's tables are only in its unwrapped program.
+	if len(f.src) >= 4 && (string(f.src[:4]) == "wOFF" || string(f.src[:4]) == "wOF2") {
+		return sfntTable(f.Program(), 0, tag)
+	}
+	return nil
+}
+
+// Size is the size in bytes of the face's font program, without making it.
+func (f *Face) Size() int { return sfntSize(f.src, f.index) }
 
 // UnitsPerEm returns the face's design units per em.
 func (f *Face) UnitsPerEm() int { return f.upem }
@@ -87,15 +113,21 @@ func (f *Face) HasRune(r rune) bool {
 // style from the font itself. It never panics: a font that trips a bug in
 // the parser is reported as an error like any other malformed font.
 func newFace(id, family string, weight int, italic bool, data []byte) (f *Face, err error) {
-	if len(data) > maxFontBytes {
-		return nil, fmt.Errorf("text: font %q is %d bytes, over the %d limit: %w", family, len(data), maxFontBytes, budget.ErrLimit)
+	return newFaceAt(id, family, weight, italic, data, 0, maxFontBytes)
+}
+
+// newFaceAt is newFace for face index of data, which may be a collection, and
+// a file of up to limit bytes.
+func newFaceAt(id, family string, weight int, italic bool, data []byte, index, limit int) (f *Face, err error) {
+	if len(data) > limit {
+		return nil, fmt.Errorf("text: font %q is %d bytes, over the %d limit: %w", family, len(data), limit, budget.ErrLimit)
 	}
 	defer func() {
 		if r := recover(); r != nil {
 			f, err = nil, fmt.Errorf("text: loading font %q: %v", family, r)
 		}
 	}()
-	sf, err := shape.Load(data)
+	sf, err := shape.LoadCollection(data, index)
 	if err != nil {
 		return nil, fmt.Errorf("text: loading font %q: %w", family, err)
 	}
@@ -108,7 +140,7 @@ func newFace(id, family string, weight int, italic bool, data []byte) (f *Face, 
 	}
 	f = &Face{
 		ID: id, Family: family, Weight: weight, Italic: italic,
-		shape: sf, prog: sf.Program(), upem: upem,
+		shape: sf, src: data, index: index, upem: upem,
 		seen: make([]atomic.Uint64, (sf.NumGlyphs()+63)/64),
 	}
 	f.clones.New = func() any { return sf.Clone() }

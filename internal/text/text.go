@@ -190,7 +190,7 @@ type measurerState struct {
 	serifFamily     string
 	monospaceFamily string
 	system          *systemIndex // nil unless WithSystemFonts
-	sysEntries      map[string]*entry
+	sysEntries      map[sysKey]*entry
 
 	cssCache   map[string]CSSFont
 	listCache  map[listKey]*faceList
@@ -411,7 +411,7 @@ func (m *Measurer) FontData(f *Face) []byte {
 	if f == nil {
 		return nil
 	}
-	return f.prog
+	return f.Program()
 }
 
 // piece is a stretch of text set in one face.

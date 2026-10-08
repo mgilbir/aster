@@ -23,6 +23,9 @@
 # em, each a square of its own colour, so that a test can tell which strike
 # was drawn; and 'A', an outline with no image.
 #
+# ColourPair.ttc is the two in one TrueType collection, for the system font
+# scanner, which indexes each face of a collection.
+#
 # fontTools takes COLR's angles in degrees, and forme hands them out in
 # radians. They are built with fontTools and their timestamps fixed, so that building
 # them again produces the same bytes.
@@ -195,8 +198,18 @@ def sbix(path):
     save(fb, path)
 
 
+def collection(path, *fonts):
+    from fontTools.ttLib import TTFont
+    from fontTools.ttLib.ttCollection import TTCollection
+    ttc = TTCollection()
+    ttc.fonts = [TTFont(f, recalcTimestamp=False) for f in fonts]
+    ttc.save(path)
+
+
 if __name__ == "__main__":
     here = os.path.dirname(os.path.abspath(__file__))
     out = sys.argv[1] if len(sys.argv) > 1 else here
     colr(os.path.join(out, "ColourTest.ttf"))
     sbix(os.path.join(out, "SbixTest.ttf"))
+    collection(os.path.join(out, "ColourPair.ttc"),
+               os.path.join(out, "ColourTest.ttf"), os.path.join(out, "SbixTest.ttf"))

@@ -21,6 +21,10 @@ import (
 // draw is drawn at as an image: four times a 64px label's.
 const colourImagePPEM = 256
 
+// maxInvisibleFontBytes bounds the colour fonts whose runs are also written
+// as invisible text in their own font.
+const maxInvisibleFontBytes = 64 << 20
+
 // colourGlyph reports whether glyph gid of face is drawn in colour: a COLR,
 // sbix, CBDT or EBDT glyph. An SVG-table glyph is drawn from its outline. A
 // PDF has no device size, so a bitmap glyph is drawn from its largest strike.
@@ -50,7 +54,9 @@ func (r *renderer) drawTextRunColour(run text.Run, penX float64, str string, tex
 	if actual {
 		r.w.beginActualText(str[textStart:textEnd])
 	}
-	if r.fonts != nil {
+	// A font too large to copy out and subset, such as Apple Color Emoji, at
+	// 190 MB, keeps its ActualText only.
+	if r.fonts != nil && run.Face.Size() <= maxInvisibleFontBytes {
 		if f := r.fonts.fontFor(run.Face); f != nil {
 			r.w.textRender(3) // neither filled nor stroked
 			_, err := r.drawTextRunFont(f, run, penX, str, textEnd)

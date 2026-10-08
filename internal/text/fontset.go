@@ -13,6 +13,7 @@ type entry struct {
 
 	face   *Face
 	path   string // system font file, when face is nil
+	index  int    // the face's index in path, a collection
 	dead   bool   // loading path failed; never retry
 	custom bool   // given with WithFont
 }

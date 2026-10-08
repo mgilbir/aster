@@ -229,7 +229,17 @@ type textFace struct {
 
 // Metrics parses the font's hhea, OS/2 and post tables once.
 func (t *textFace) Metrics() (FaceMetrics, bool) {
-	t.once.Do(func() { t.fm, t.fmOK = parseFaceMetrics(t.f.Program(), t.UnitsPerEm()) })
+	t.once.Do(func() {
+		// The tables are read where they are: a face of a large collection is
+		// not copied out into a program of its own.
+		tables := map[string][]byte{}
+		for _, tag := range []string{"hhea", "OS/2", "post"} {
+			if tb := t.f.Table(tag); tb != nil {
+				tables[tag] = tb
+			}
+		}
+		t.fm, t.fmOK = faceMetricsOf(tables, t.UnitsPerEm())
+	})
 	return t.fm, t.fmOK
 }
 

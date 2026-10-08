@@ -135,3 +135,47 @@ func pdfContent(t *testing.T, pdf []byte) []byte {
 	}
 	return all
 }
+
+// TestAppleColorEmoji draws emoji from the system's Apple Color Emoji, where
+// there is one, named by the spec: system fonts are no fallback.
+func TestAppleColorEmoji(t *testing.T) {
+	if _, err := os.Stat("/System/Library/Fonts/Apple Color Emoji.ttc"); err != nil {
+		t.Skip("no Apple Color Emoji")
+	}
+	c, err := aster.New(aster.WithSystemFonts())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	spec := []byte(`{"width": 200, "height": 100, "padding": 0, "background": "white",
+  "marks": [{"type": "text", "encode": {"enter": {"x": {"value": 0}, "y": {"value": 80},
+    "text": {"value": "😀🌈"}, "font": {"value": "Apple Color Emoji"}, "fontSize": {"value": 60}}}}]}`)
+	out, err := c.VegaToPNG(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	img, err := png.Decode(bytes.NewReader(out))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The grinning face is yellow.
+	yellow := 0
+	for y := 0; y < 100; y++ {
+		for x := 0; x < 70; x++ {
+			r, g, b, _ := img.At(x, y).RGBA()
+			if r>>8 > 200 && g>>8 > 150 && b>>8 < 100 {
+				yellow++
+			}
+		}
+	}
+	if yellow < 500 {
+		t.Errorf("%d yellow pixels where the grinning face is", yellow)
+	}
+	pdf, err := c.VegaToPDF(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(pdfContent(t, pdf), []byte("/ActualText <FEFFD83DDE00D83CDF08>")) {
+		t.Error("the PDF does not keep the emoji's text")
+	}
+}

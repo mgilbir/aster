@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -22,10 +21,17 @@ import (
 // tables. A file is only read in full, and handed to forme, when a query
 // names its family.
 //
-// Limits compared with a full font database: TrueType collections (.ttc) and
-// bare .woff files are not indexed, and there is no script-based fallback
-// across system fonts (a CJK string is only drawn from a system font when the
-// CSS font-family names one).
+// Each face of a TrueType or OpenType collection (.ttc, .otc) is indexed as
+// a font of its own. A file is mapped into memory read-only rather than read
+// (see mapSystemFont), so a large one such as Apple Color Emoji costs only the
+// pages its faces read.
+//
+// Limits compared with a full font database: bare .woff files are not
+// indexed, and there is no fallback to system fonts at all: a system font
+// draws text only when the CSS font-family names it. That is deliberate for
+// colour emoji fonts too: Apple Color Emoji's licence, for one, does not
+// allow drawing it into documents for distribution, so it is only used for a
+// spec that asks for it by name.
 const (
 	maxSystemFiles = 20000
 	maxSystemDepth = 6
@@ -37,6 +43,7 @@ type sysFont struct {
 	weight int
 	italic bool
 	path   string
+	index  int // the face's index in its collection; 0 for a single font
 }
 
 type systemIndex struct {
@@ -105,37 +112,62 @@ func scanFontDir(dir string, depth int, files *int, idx *systemIndex) {
 			continue
 		}
 		switch strings.ToLower(filepath.Ext(de.Name())) {
-		case ".ttf", ".otf":
+		case ".ttf", ".otf", ".ttc", ".otc":
 		default:
 			continue
 		}
-		if info, err := de.Info(); err != nil || !info.Mode().IsRegular() || info.Size() > maxFontBytes {
+		if info, err := de.Info(); err != nil || !info.Mode().IsRegular() || info.Size() > maxSystemFontBytes {
 			continue
 		}
 		*files++
-		if sf, ok := readSysFont(path); ok {
+		for _, sf := range readSysFonts(path) {
 			n := normFamily(sf.family)
 			idx.byFam[n] = append(idx.byFam[n], sf)
 		}
 	}
 }
 
-// readSysFont reads the family, weight and style of a font file from its
-// tables without loading the whole file.
-func readSysFont(path string) (sf sysFont, ok bool) {
+// readSysFonts reads the family, weight and style of each face of a font
+// file, a single font or a collection, from its tables without loading the
+// whole file.
+func readSysFonts(path string) (out []sysFont) {
 	defer func() {
 		if recover() != nil {
-			ok = false
+			out = nil
 		}
 	}()
 	f, err := os.Open(path)
 	if err != nil {
-		return sf, false
+		return nil
 	}
 	defer func() { _ = f.Close() }()
-
 	var hdr [12]byte
 	if _, err := f.ReadAt(hdr[:], 0); err != nil {
+		return nil
+	}
+	if string(hdr[:4]) != "ttcf" {
+		if sf, ok := readSysFace(f, path, 0, 0); ok {
+			out = append(out, sf)
+		}
+		return out
+	}
+	n := min(int(binary.BigEndian.Uint32(hdr[8:12])), maxCollectionFonts)
+	offs := make([]byte, 4*n)
+	if _, err := f.ReadAt(offs, 12); err != nil {
+		return nil
+	}
+	for i := range n {
+		if sf, ok := readSysFace(f, path, i, int64(binary.BigEndian.Uint32(offs[4*i:]))); ok {
+			out = append(out, sf)
+		}
+	}
+	return out
+}
+
+// readSysFace reads the face whose table directory is at base in f.
+func readSysFace(f *os.File, path string, index int, base int64) (sf sysFont, ok bool) {
+	var hdr [12]byte
+	if _, err := f.ReadAt(hdr[:], base); err != nil {
 		return sf, false
 	}
 	switch binary.BigEndian.Uint32(hdr[:4]) {
@@ -148,7 +180,7 @@ func readSysFont(path string) (sf sysFont, ok bool) {
 		return sf, false
 	}
 	dir := make([]byte, 16*n)
-	if _, err := f.ReadAt(dir, 12); err != nil {
+	if _, err := f.ReadAt(dir, base+12); err != nil {
 		return sf, false
 	}
 	table := func(tag string, max int) []byte {
@@ -179,7 +211,7 @@ func readSysFont(path string) (sf sysFont, ok bool) {
 	if family == "" {
 		return sf, false
 	}
-	sf = sysFont{family: family, weight: weightNormal, path: path}
+	sf = sysFont{family: family, weight: weightNormal, path: path, index: index}
 	if os2 := table("OS/2", 64); len(os2) >= 64 {
 		if w := int(binary.BigEndian.Uint16(os2[4:6])); w >= 1 && w <= 1000 {
 			sf.weight = w
@@ -240,32 +272,33 @@ func nameString(t []byte, id uint16) string {
 func (m *Measurer) systemEntries(sys []sysFont) []*entry {
 	out := make([]*entry, len(sys))
 	for i, sf := range sys {
-		e, ok := m.sysEntries[sf.path]
+		key := sysKey{sf.path, sf.index}
+		e, ok := m.sysEntries[key]
 		if !ok {
-			e = &entry{family: sf.family, norm: normFamily(sf.family), weight: sf.weight, italic: sf.italic, path: sf.path}
+			e = &entry{family: sf.family, norm: normFamily(sf.family), weight: sf.weight, italic: sf.italic, path: sf.path, index: sf.index}
 			if m.sysEntries == nil {
-				m.sysEntries = make(map[string]*entry)
+				m.sysEntries = make(map[sysKey]*entry)
 			}
-			m.sysEntries[sf.path] = e
+			m.sysEntries[key] = e
 		}
 		out[i] = e
 	}
 	return out
 }
 
-// loadSystemFace reads a system font file and loads it.
+// sysKey is a face of a system font file.
+type sysKey struct {
+	path  string
+	index int
+}
+
+// loadSystemFace maps a system font file and loads the entry's face of it.
 func loadSystemFace(m *Measurer, e *entry) (*Face, error) {
-	info, err := os.Stat(e.path)
-	if err != nil {
-		return nil, err
-	}
-	if !info.Mode().IsRegular() || info.Size() > maxFontBytes {
-		return nil, fs.ErrInvalid
-	}
-	data, err := os.ReadFile(e.path)
+	data, err := mapSystemFont(e.path)
 	if err != nil {
 		return nil, err
 	}
 	m.nextID++
-	return newFace(fmt.Sprintf("system-%d-%s", m.nextID, filepath.Base(e.path)), e.family, e.weight, e.italic, data)
+	id := fmt.Sprintf("system-%d-%s-%d", m.nextID, filepath.Base(e.path), e.index)
+	return newFaceAt(id, e.family, e.weight, e.italic, data, e.index, maxSystemFontBytes)
 }
