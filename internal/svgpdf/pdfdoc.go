@@ -38,9 +38,10 @@ func buildPDF(content [][]byte, gsList []gsEntry, fonts *fontCatalog, images *im
 	// Soft masks name the form XObjects they are drawn from, which are
 	// numbered last; they are filled in then.
 	type pendingMask struct {
-		gs     *pdf0.Dictionary
-		form   string
-		invert bool
+		gs         *pdf0.Dictionary
+		form       string
+		invert     bool
+		luminosity bool
 	}
 	var masks []pendingMask
 	if len(gsList) > 0 {
@@ -52,7 +53,7 @@ func buildPDF(content [][]byte, gsList []gsEntry, fonts *fontCatalog, images *im
 			case gs.bm != "":
 				d.Set("BM", pdf0.Name(gs.bm))
 			case gs.mask != "":
-				masks = append(masks, pendingMask{d, gs.mask, gs.maskInvert})
+				masks = append(masks, pendingMask{d, gs.mask, gs.maskInvert, gs.maskLuminosity})
 			default:
 				d.Set("ca", pdf0.Real(gs.alpha.fill))
 				d.Set("CA", pdf0.Real(gs.alpha.stroke))
@@ -147,7 +148,11 @@ func buildPDF(content [][]byte, gsList []gsEntry, fonts *fontCatalog, images *im
 		for _, m := range masks {
 			sm := &pdf0.Dictionary{}
 			sm.Set("Type", pdf0.Name("Mask"))
-			sm.Set("S", pdf0.Name("Alpha"))
+			if m.luminosity {
+				sm.Set("S", pdf0.Name("Luminosity"))
+			} else {
+				sm.Set("S", pdf0.Name("Alpha"))
+			}
 			sm.Set("G", pdf0.IndirectRef{Number: formNum[m.form]})
 			if m.invert {
 				fn := &pdf0.Dictionary{}

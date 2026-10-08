@@ -96,15 +96,65 @@ func TestColourGlyphsVector(t *testing.T) {
 }
 
 func TestColourGlyphsImage(t *testing.T) {
+	// A bitmap glyph is its image.
+	if _, images := colourPDF(t, "SbixTest", "\U0001F600", "", TextEmbed); images != 1 {
+		t.Errorf("sbix: %d images, want one", images)
+	}
+	// What PDF cannot composite, Xor and Plus, sends a glyph to an image.
+	for _, m := range []shape.CompositeMode{shape.CompositeXor, shape.CompositePlus} {
+		var c colourCheck
+		c.PushGroup()
+		c.PushGroup()
+		c.PopGroup(m)
+		c.PopGroup(shape.CompositeSrcOver)
+		if c.vector() {
+			t.Errorf("mode %d: drawn as vectors", m)
+		}
+	}
+	// So does a Porter-Duff operator onto a backdrop with a clip open
+	// around the source.
+	var c colourCheck
+	c.PushGroup()
+	c.PushClipRect(shape.Rect{XMax: 1})
+	c.PushGroup()
+	c.PopGroup(shape.CompositeSrcIn)
+	c.PopClip()
+	c.PopGroup(shape.CompositeSrcOver)
+	if c.vector() {
+		t.Error("SrcIn under an open clip: drawn as vectors")
+	}
 	for _, c := range []struct {
-		what, family, s, attrs string
+		size float64
+		want int
+	}{{10, 256}, {60, 480}, {500, 1024}} {
+		if got := colourImagePPEM(c.size); got != c.want {
+			t.Errorf("a %vpt glyph's image at %d pixels per em, want %d", c.size, got, c.want)
+		}
+	}
+}
+
+func TestColourGlyphsGradients(t *testing.T) {
+	for _, c := range []struct {
+		what, s string
+		want    []string // in the PDF
 	}{
-		{"sweep gradient", "ColourTest", "\U0001F300", ""},
-		{"repeated radial gradient", "ColourTest", "\U0001F31E", ""},
-		{"sbix", "SbixTest", "\U0001F600", ""},
+		{"sweep", "\U0001F300", []string{"/ShadingType 4", "/BitsPerFlag 8"}},
+		// A repeated radial gradient's function runs over the periods the
+		// glyph needs, stitching its colour line once a period.
+		{"repeated radial", "\U0001F31E", []string{"/ShadingType 3", "/Domain [", "/FunctionType 3"}},
+		// A translucent stop: the colour under a soft mask of the alpha,
+		// the same gradient in grey.
+		{"translucent, reflected", "\U0001F52E", []string{"/S /Luminosity", "/ColorSpace /DeviceGray"}},
+		{"translucent, radial", "\U0001F4A7", []string{"/S /Luminosity", "/ColorSpace /DeviceGray"}},
 	} {
-		if _, images := colourPDF(t, c.family, c.s, c.attrs, TextEmbed); images != 1 {
-			t.Errorf("%s: %d images, want one", c.what, images)
+		content, pdf := colourPDFBytes(t, "ColourTest", c.s, "", TextEmbed)
+		if n := imagesDrawn(content); n != 0 {
+			t.Errorf("%s: %d images, want none", c.what, n)
+		}
+		for _, want := range c.want {
+			if !bytes.Contains(pdf, []byte(want)) {
+				t.Errorf("%s: no %q", c.what, want)
+			}
 		}
 	}
 }
@@ -180,19 +230,19 @@ func TestColourGlyphsTextModes(t *testing.T) {
 }
 
 func TestColourGlyphsShareResources(t *testing.T) {
-	// A glyph drawn many times writes its shading and its image once.
+	// A glyph drawn many times writes its shadings once.
 	pdf, err := Convert(`<svg xmlns="http://www.w3.org/2000/svg" width="400" height="100">`+
 		`<text transform="translate(0,80)" font-family="ColourTest" font-size="20">`+strings.Repeat("\U0001F308\U0001F300", 10)+`</text></svg>`,
 		colourShaper(t), Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n := bytes.Count(pdf, []byte("/ShadingType")); n != 1 {
-		t.Errorf("%d shadings, want one", n)
+	// The linear gradient's shading and the sweep's mesh, once each.
+	if n := bytes.Count(pdf, []byte("/ShadingType")); n != 2 {
+		t.Errorf("%d shadings, want two", n)
 	}
-	// The sweep's image and its alpha, a soft mask.
-	if n := bytes.Count(pdf, []byte("/Subtype /Image")); n != 2 {
-		t.Errorf("%d images, want the sweep's and its soft mask", n)
+	if n := bytes.Count(pdf, []byte("/Subtype /Image")); n != 0 {
+		t.Errorf("%d images, want none", n)
 	}
 }
 

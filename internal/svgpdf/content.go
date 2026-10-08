@@ -82,6 +82,9 @@ type gsEntry struct {
 	bm         string
 	mask       string
 	maskInvert bool
+	// maskLuminosity makes the soft mask the group's luminosity rather than
+	// its alpha.
+	maskLuminosity bool
 }
 
 func newContentWriter() *contentWriter {

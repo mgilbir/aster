@@ -17,9 +17,18 @@ import (
 	"github.com/mgilbir/aster/internal/text"
 )
 
-// colourImagePPEM is the size, in pixels per em, a colour glyph PDF cannot
-// draw is drawn at as an image: four times a 64px label's.
-const colourImagePPEM = 256
+// A colour glyph PDF cannot draw is drawn as an image of eight pixels a
+// point of its size, as a 576 dpi print would, and within these.
+const (
+	minColourImagePPEM = 256
+	maxColourImagePPEM = 1024
+)
+
+// colourImagePPEM is the size, in pixels per em, a glyph of size points is
+// drawn at as an image.
+func colourImagePPEM(size float64) int {
+	return int(math.Max(minColourImagePPEM, math.Min(maxColourImagePPEM, math.Ceil(8*size))))
+}
 
 // maxInvisibleFontBytes bounds the colour fonts whose runs are also written
 // as invisible text in their own font.
@@ -109,7 +118,7 @@ func (r *renderer) drawColourGlyph(face *text.Face, gid int, size, x, y float64,
 	// Font units, y up, at the glyph's origin.
 	r.w.concat(Matrix{A: size / upem, D: -size / upem, E: x, F: y})
 	if !check.vector() {
-		return r.drawGlyphImage(face, gid, fgc, alpha)
+		return r.drawGlyphImage(face, gid, fgc, alpha, colourImagePPEM(size))
 	}
 	box, _ := raster.ColourGlyphBounds(face, gid, opts)
 	p := &pdfPainter{r: r, face: face, upem: upem, box: box, m: []Matrix{Identity()}}
@@ -138,11 +147,11 @@ func (r *renderer) drawColourGlyph(face *text.Face, gid int, size, x, y float64,
 
 // drawGlyphImage draws a glyph as an image the PNG writer paints, in font
 // units at the glyph's origin.
-func (r *renderer) drawGlyphImage(face *text.Face, gid int, fg shape.Color, alpha float64) error {
+func (r *renderer) drawGlyphImage(face *text.Face, gid int, fg shape.Color, alpha float64, ppem int) error {
 	var box shape.Rect
-	key := fmt.Sprintf("glyph:%p:%d:%d,%d,%d", face, gid, fg.R, fg.G, fg.B)
+	key := fmt.Sprintf("glyph:%p:%d:%d,%d,%d:%d", face, gid, fg.R, fg.G, fg.B, ppem)
 	img, err := r.images.put(key, func() (*image.NRGBA, error) {
-		px, b, err := raster.ColourGlyphImage(face, gid, fg, colourImagePPEM)
+		px, b, err := raster.ColourGlyphImage(face, gid, fg, ppem)
 		box = b
 		return px, err
 	})
@@ -173,8 +182,8 @@ func (r *renderer) drawImageIn(img *pdfImage, box shape.Rect, alpha float64) {
 func byteOf(v float64) uint8 { return uint8(math.Round(math.Max(0, math.Min(1, v)) * 255)) }
 
 // colourCheck is a painter that paints nothing and finds whether PDF can
-// draw a glyph's painting as it is: with no sweep gradient, gradients only
-// padded and opaque, no Xor or Plus, which PDF has no way to draw, and each
+// draw a glyph's painting as it is: with no Xor or Plus, which PDF has no way
+// to draw, no padded radial gradient starting at a negative radius, and each
 // Porter-Duff operator's backdrop whole, with no clip or transform opened
 // in its group before the group composited onto it.
 type colourCheck struct {
@@ -211,39 +220,24 @@ func (c *colourCheck) PopGroup(m shape.CompositeMode) {
 		c.need(!porterDuff(m) || c.depth == start)
 	}
 }
-func (c *colourCheck) Solid(shape.Color, bool) { c.need(true) }
-func (c *colourCheck) LinearGradient(g shape.LinearGradient) {
-	c.need(vectorLine(g.Line))
-}
+func (c *colourCheck) Solid(shape.Color, bool)             { c.need(true) }
+func (c *colourCheck) LinearGradient(shape.LinearGradient) { c.need(true) }
+func (c *colourCheck) SweepGradient(shape.SweepGradient)   { c.need(true) }
 func (c *colourCheck) RadialGradient(g shape.RadialGradient) {
-	// A start circle the colour line moves to a negative radius is not one
-	// PDF can draw.
+	// A padded gradient whose colour line moves its start circle to a
+	// negative radius is not one PDF can draw; a repeated one is drawn from
+	// where the radius is zero.
 	lo := 0.0
 	if s := sortedStops(g.Line); len(s) > 0 {
 		lo = s[0].Offset
 	}
-	c.need(vectorLine(g.Line) && g.R0+lo*(g.R1-g.R0) >= 0)
+	c.need(g.Line.Extend != shape.ExtendPad || g.R0+lo*(g.R1-g.R0) >= 0)
 }
-func (c *colourCheck) SweepGradient(shape.SweepGradient) { c.need(false) }
 func (c *colourCheck) Image(img shape.Image) {
 	c.need(img.Format == shape.ImagePNG || img.Format == shape.ImageMask)
 }
 
 func (c *colourCheck) need(ok bool) { c.notVector = c.notVector || !ok }
-
-// vectorLine reports whether a colour line is one a PDF shading draws: padded,
-// and opaque, a shading having no alpha.
-func vectorLine(l shape.ColorLine) bool {
-	if l.Extend != shape.ExtendPad {
-		return false
-	}
-	for _, s := range l.Stops {
-		if s.Color.A != 255 {
-			return false
-		}
-	}
-	return true
-}
 
 func sortedStops(l shape.ColorLine) []shape.ColorStop {
 	st := append([]shape.ColorStop(nil), l.Stops...)
@@ -336,34 +330,114 @@ func colourOf(c shape.Color) Color {
 	return Color{R: float64(c.R) / 255, G: float64(c.G) / 255, B: float64(c.B) / 255}
 }
 
-// shading registers a gradient's shading, its colour line sorted and moved
-// to run from 0 to 1, and paints it. at gives the geometry at the colour
-// line's offset t.
-func (p *pdfPainter) shading(radial bool, line shape.ColorLine, at func(lo, hi float64) []float64) {
+// colourLine is a gradient's colour line sorted and moved to run from 0 to
+// 1, as its colour and its alpha, and the offsets its 0 and 1 were. alpha is
+// nil when every stop is opaque. ok is false when there are no stops.
+func colourLine(line shape.ColorLine) (colour, alpha []gradStop, lo, hi float64, ok bool) {
 	st := sortedStops(line)
 	if len(st) == 0 {
-		return
+		return nil, nil, 0, 0, false
 	}
-	lo, hi := st[0].Offset, st[len(st)-1].Offset
+	lo, hi = st[0].Offset, st[len(st)-1].Offset
 	if hi == lo {
 		hi = lo + 1e-9
 	}
-	g := &gradient{radial: radial, coords: at(lo, hi)}
+	translucent := false
 	for _, s := range st {
-		g.stops = append(g.stops, gradStop{offset: (s.Offset - lo) / (hi - lo), color: colourOf(s.Color)})
+		t := (s.Offset - lo) / (hi - lo)
+		colour = append(colour, gradStop{offset: t, color: colourOf(s.Color)})
+		a := float64(s.Color.A) / 255
+		alpha = append(alpha, gradStop{offset: t, color: Color{R: a, G: a, B: a}})
+		translucent = translucent || s.Color.A != 255
 	}
-	// A glyph drawn again draws the same shading, which is written once.
-	key := fmt.Sprint(g.radial, g.coords, g.stops)
+	if !translucent {
+		alpha = nil
+	}
+	return colour, alpha, lo, hi, true
+}
+
+// paint paints a gradient, g in colour and, when its stops are translucent,
+// a, the same in grey, as a soft mask of its alpha.
+func (p *pdfPainter) paint(g, a *gradient) {
+	w := p.r.w
+	if a == nil {
+		w.setAlpha(1, 1)
+		w.shade(p.r.shadingOf(p.shared(g)))
+		return
+	}
+	mask := p.pageForm([]byte("/"+p.r.shadingOf(p.shared(a))+" sh\n"), p.bbox())
+	m := w.cur.ctm
+	w.save()
+	p.toPage()
+	w.stateGS("lum:"+mask, gsEntry{mask: mask, maskLuminosity: true})
+	w.concat(m)
+	w.setAlpha(1, 1)
+	w.shade(p.r.shadingOf(p.shared(g)))
+	w.restore()
+}
+
+// shared is g, or the gradient drawn before that is the same: a glyph drawn
+// again draws the same shading, which is written once.
+func (p *pdfPainter) shared(g *gradient) *gradient {
+	key := fmt.Sprint(g.radial, g.gray, g.coords, g.stops, g.domain, g.periods, len(g.mesh))
+	if g.mesh != nil {
+		key += fmt.Sprint(g.mesh)
+	}
 	if seen, ok := p.r.glyphShadings[key]; ok {
-		g = seen
-	} else {
-		if p.r.glyphShadings == nil {
-			p.r.glyphShadings = map[string]*gradient{}
-		}
-		p.r.glyphShadings[key] = g
+		return seen
 	}
-	p.r.w.setAlpha(1, 1)
-	p.r.w.shade(p.r.shadingOf(g))
+	if p.r.glyphShadings == nil {
+		p.r.glyphShadings = map[string]*gradient{}
+	}
+	p.r.glyphShadings[key] = g
+	return g
+}
+
+// gradients makes the colour and alpha gradients of a linear or radial
+// gradient: at gives the coords for a span of the colour line's parameter,
+// and span the span the glyph needs of a repeated one.
+func (p *pdfPainter) gradients(radial bool, line shape.ColorLine, at func(t0, t1 float64) []float64, span func() (float64, float64, bool)) {
+	colour, alpha, _, _, ok := colourLine(line)
+	if !ok {
+		return
+	}
+	g := &gradient{radial: radial, stops: colour}
+	switch line.Extend {
+	case shape.ExtendRepeat, shape.ExtendReflect:
+		t0, t1, ok := span()
+		if !ok {
+			return
+		}
+		if t1-t0 > maxColourPeriods {
+			t1 = t0 + maxColourPeriods
+		}
+		g.domain = [2]float64{t0, t1}
+		g.periods = periodsRepeat
+		if line.Extend == shape.ExtendReflect {
+			g.periods = periodsReflect
+		}
+		g.coords = at(t0, t1)
+	default:
+		g.coords = at(0, 1)
+	}
+	var a *gradient
+	if alpha != nil {
+		a = &gradient{radial: radial, gray: true, stops: alpha, coords: g.coords, domain: g.domain, periods: g.periods}
+	}
+	p.paint(g, a)
+}
+
+// corners samples the glyph's bounds in the current space: a grid over it,
+// which a repeated radial gradient's span is found from.
+func (p *pdfPainter) corners(n int) [][2]float64 {
+	b := p.bbox()
+	var pts [][2]float64
+	for i := 0; i <= n; i++ {
+		for j := 0; j <= n; j++ {
+			pts = append(pts, [2]float64{b[0] + (b[2]-b[0])*float64(i)/float64(n), b[1] + (b[3]-b[1])*float64(j)/float64(n)})
+		}
+	}
+	return pts
 }
 
 func (p *pdfPainter) LinearGradient(g shape.LinearGradient) {
@@ -375,24 +449,175 @@ func (p *pdfPainter) LinearGradient(g shape.LinearGradient) {
 		k := ((p1.X-p0.X)*nx + (p1.Y-p0.Y)*ny) / n2
 		p3x, p3y = p0.X+k*nx, p0.Y+k*ny
 	}
-	dx, dy := p3x-p0.X, p3y-p0.Y
-	if dx == 0 && dy == 0 {
+	_, _, lo, hi, ok := colourLine(g.Line)
+	if !ok {
 		return
 	}
-	p.shading(false, g.Line, func(lo, hi float64) []float64 {
-		return []float64{p0.X + lo*dx, p0.Y + lo*dy, p0.X + hi*dx, p0.Y + hi*dy}
+	// The normalised line: from a at 0 to b at 1.
+	dx, dy := p3x-p0.X, p3y-p0.Y
+	ax, ay := p0.X+lo*dx, p0.Y+lo*dy
+	ux, uy := (hi-lo)*dx, (hi-lo)*dy
+	l2 := ux*ux + uy*uy
+	if l2 == 0 {
+		return
+	}
+	p.gradients(false, g.Line, func(t0, t1 float64) []float64 {
+		return []float64{ax + t0*ux, ay + t0*uy, ax + t1*ux, ay + t1*uy}
+	}, func() (float64, float64, bool) {
+		t0, t1 := math.Inf(1), math.Inf(-1)
+		for _, c := range p.corners(1) {
+			t := ((c[0]-ax)*ux + (c[1]-ay)*uy) / l2
+			t0, t1 = math.Min(t0, t), math.Max(t1, t)
+		}
+		return math.Floor(t0), math.Ceil(t1), true
 	})
 }
 
 func (p *pdfPainter) RadialGradient(g shape.RadialGradient) {
+	_, _, lo, hi, ok := colourLine(g.Line)
+	if !ok {
+		return
+	}
 	cx, cy, cr := g.C1.X-g.C0.X, g.C1.Y-g.C0.Y, g.R1-g.R0
-	p.shading(true, g.Line, func(lo, hi float64) []float64 {
-		return []float64{g.C0.X + lo*cx, g.C0.Y + lo*cy, g.R0 + lo*cr, g.C0.X + hi*cx, g.C0.Y + hi*cy, g.R0 + hi*cr}
+	// The normalised circles: from (x0, y0, r0) at 0, moving by (dx, dy, dr)
+	// to 1.
+	x0, y0, r0 := g.C0.X+lo*cx, g.C0.Y+lo*cy, g.R0+lo*cr
+	dx, dy, dr := (hi-lo)*cx, (hi-lo)*cy, (hi-lo)*cr
+	p.gradients(true, g.Line, func(t0, t1 float64) []float64 {
+		return []float64{x0 + t0*dx, y0 + t0*dy, r0 + t0*dr, x0 + t1*dx, y0 + t1*dy, r0 + t1*dr}
+	}, func() (float64, float64, bool) {
+		// The parameters the glyph's points take, sampled, and a margin.
+		t0, t1 := math.Inf(1), math.Inf(-1)
+		for _, c := range p.corners(16) {
+			if t, ok := radialT(c[0]-x0, c[1]-y0, dx, dy, r0, dr); ok {
+				t0, t1 = math.Min(t0, t), math.Max(t1, t)
+			}
+		}
+		if t0 > t1 {
+			return 0, 0, false
+		}
+		t0, t1 = math.Floor(t0)-1, math.Ceil(t1)+1
+		// No circle of a negative radius.
+		if dr > 0 {
+			t0 = math.Max(t0, -r0/dr)
+		} else if dr < 0 {
+			t1 = math.Min(t1, -r0/dr)
+		}
+		return t0, t1, t1 > t0
 	})
 }
 
-// SweepGradient is never called: colourCheck sends such a glyph to an image.
-func (p *pdfPainter) SweepGradient(shape.SweepGradient) {}
+// radialT is the largest t whose circle, from radius r0 moving by
+// (dx, dy, dr), passes through (px, py) relative to its start, with a radius
+// of at least zero.
+func radialT(px, py, dx, dy, r0, dr float64) (float64, bool) {
+	a := dx*dx + dy*dy - dr*dr
+	b := px*dx + py*dy + r0*dr
+	c := px*px + py*py - r0*r0
+	if math.Abs(a) < 1e-9 {
+		if b == 0 {
+			return 0, false
+		}
+		t := c / (2 * b)
+		return t, r0+t*dr >= 0
+	}
+	disc := b*b - a*c
+	if disc < 0 {
+		return 0, false
+	}
+	sq := math.Sqrt(disc)
+	t1, t2 := (b+sq)/a, (b-sq)/a
+	if t1 < t2 {
+		t1, t2 = t2, t1
+	}
+	if r0+t1*dr >= 0 {
+		return t1, true
+	}
+	return t2, r0+t2*dr >= 0
+}
+
+// sweepWedges is how many triangles a sweep gradient's mesh has, a half
+// degree each.
+const sweepWedges = 720
+
+// SweepGradient paints a sweep as a mesh of thin triangles about its centre,
+// reaching past the glyph's bounds, each corner coloured from the colour line
+// at its angle.
+func (p *pdfPainter) SweepGradient(g shape.SweepGradient) {
+	colour, alpha, lo, hi, ok := colourLine(g.Line)
+	if !ok {
+		return
+	}
+	span := g.EndAngle - g.StartAngle
+	a0, da := g.StartAngle+lo*span, (hi-lo)*span
+	if da == 0 {
+		return
+	}
+	cx, cy := g.Center.X, g.Center.Y
+	r := 0.0
+	for _, c := range p.corners(1) {
+		r = math.Max(r, math.Hypot(c[0]-cx, c[1]-cy))
+	}
+	r = r*1.01 + 1
+	at := func(stops []gradStop, a float64) Color {
+		return colourAt(stops, spread(g.Line.Extend, (a-a0)/da))
+	}
+	mesh := func(stops []gradStop) []meshVertex {
+		var m []meshVertex
+		for i := range sweepWedges {
+			b0 := 2 * math.Pi * float64(i) / sweepWedges
+			b1 := 2 * math.Pi * float64(i+1) / sweepWedges
+			c0, c1 := at(stops, b0), at(stops, b1)
+			s0, k0 := math.Sincos(b0)
+			s1, k1 := math.Sincos(b1)
+			m = append(m, meshVertex{cx, cy, at(stops, (b0+b1)/2)},
+				meshVertex{cx + r*k0, cy + r*s0, c0}, meshVertex{cx + r*k1, cy + r*s1, c1})
+		}
+		return m
+	}
+	sg := &gradient{mesh: mesh(colour)}
+	var sa *gradient
+	if alpha != nil {
+		sa = &gradient{gray: true, mesh: mesh(alpha)}
+	}
+	p.paint(sg, sa)
+}
+
+// spread maps a gradient's parameter into 0..1 as its extend mode does.
+func spread(e shape.Extend, t float64) float64 {
+	switch e {
+	case shape.ExtendRepeat:
+		return t - math.Floor(t)
+	case shape.ExtendReflect:
+		t = math.Mod(t, 2)
+		if t < 0 {
+			t += 2
+		}
+		if t > 1 {
+			t = 2 - t
+		}
+		return t
+	}
+	return math.Max(0, math.Min(1, t))
+}
+
+// colourAt is the colour of a colour line, from 0 to 1, at t.
+func colourAt(stops []gradStop, t float64) Color {
+	if t <= stops[0].offset {
+		return stops[0].color
+	}
+	for i := 1; i < len(stops); i++ {
+		a, b := stops[i-1], stops[i]
+		if t <= b.offset {
+			f := 0.0
+			if b.offset > a.offset {
+				f = (t - a.offset) / (b.offset - a.offset)
+			}
+			return Color{R: a.color.R + (b.color.R-a.color.R)*f, G: a.color.G + (b.color.G-a.color.G)*f, B: a.color.B + (b.color.B-a.color.B)*f}
+		}
+	}
+	return stops[len(stops)-1].color
+}
 
 func (p *pdfPainter) Image(img shape.Image) {
 	if p.err != nil {
