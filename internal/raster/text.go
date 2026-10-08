@@ -550,6 +550,14 @@ func (r *renderer) drawGlyphs(gs []glyphPos, sp *state, opacity float64, layered
 			return
 		}
 		if ps, ok := r.resolvePaint(sp.fill, fo, sp, bboxFn); ok {
+			// A colour glyph's foreground takes a gradient or pattern fill
+			// as it is, its opacity left to the glyph's layer.
+			var fgPaint *paintSrc
+			if !ps.solid {
+				if fp, ok := r.resolvePaint(sp.fill, 1, sp, bboxFn); ok && !fp.solid {
+					fgPaint = &fp
+				}
+			}
 			r.fl.reset()
 			for i := range gs {
 				g := &gs[i]
@@ -558,7 +566,7 @@ func (r *renderer) drawGlyphs(gs []glyphPos, sp *state, opacity float64, layered
 				}
 				// Text inside an SVG glyph draws its colour glyphs from their
 				// outlines: an SVG glyph cannot draw itself.
-				if cf, ppem, ok := colourGlyph(g, ctm); ok && !r.inSVGGlyph && r.drawColourGlyph(cf, g, sp, ctm, ppem, fo) {
+				if cf, ppem, ok := colourGlyph(g, ctm); ok && !r.inSVGGlyph && r.drawColourGlyph(cf, g, sp, ctm, ppem, fo, fgPaint) {
 					continue
 				}
 				p := r.glyphOutline(g.g.Face, g.g.ID)

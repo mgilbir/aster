@@ -56,8 +56,9 @@ func colourGlyph(g *glyphPos, ctm matrix) (ColourFace, int, bool) {
 
 // glyphForeground is the colour a colour glyph's foreground paints take: the
 // text's fill when it is a colour, its opacity left to the layer the glyph is
-// painted into, and black for a fill a colour glyph cannot take (a gradient
-// or pattern).
+// painted into, and for a gradient or pattern fill, whose solid foreground
+// fills are painted with it (see drawColourGlyph), its fallback colour, or
+// black, for what must be one colour: a colour stop, a bitmap mask.
 func glyphForeground(sp *state) shape.Color {
 	c := black
 	switch sp.fill.kind {
@@ -80,15 +81,22 @@ func glyphForeground(sp *state) shape.Color {
 // then drawn at opacity: a glyph's composite modes reach no further than its
 // own paints. It reports false, having drawn nothing, when the face refuses
 // to paint the glyph, which is then filled from its outline instead.
-func (r *renderer) drawColourGlyph(f ColourFace, g *glyphPos, sp *state, ctm matrix, ppem int, opacity float64) bool {
+func (r *renderer) drawColourGlyph(f ColourFace, g *glyphPos, sp *state, ctm matrix, ppem int, opacity float64, fgPaint *paintSrc) bool {
 	// Font units, y up, to device space.
 	m := ctm.mul(g.matrix()).mul(scaleM(1, -1))
-	return r.paintColour(f, g.g.ID, m, sp, glyphForeground(sp), ppem, opacity)
+	return r.paintColourWith(f, g.g.ID, m, sp, glyphForeground(sp), fgPaint, ppem, opacity)
 }
 
 // paintColour paints glyph gid of f under m, from font units (y up) to
 // device space, as drawColourGlyph describes.
 func (r *renderer) paintColour(f ColourFace, gid uint32, m matrix, sp *state, fg shape.Color, ppem int, opacity float64) bool {
+	return r.paintColourWith(f, gid, m, sp, fg, nil, ppem, opacity)
+}
+
+// paintColourWith is paintColour with the foreground's solid fills painted
+// with fgPaint where it is not nil: the text's gradient or pattern, which the
+// rest of the foreground, a colour stop or a bitmap mask, takes fg for.
+func (r *renderer) paintColourWith(f ColourFace, gid uint32, m matrix, sp *state, fg shape.Color, fgPaint *paintSrc, ppem int, opacity float64) bool {
 	if r.depth >= r.lim.MaxLayerDepth {
 		return false
 	}
@@ -97,7 +105,7 @@ func (r *renderer) paintColour(f ColourFace, gid uint32, m matrix, sp *state, fg
 		return true // the render has failed
 	}
 	cs := *sp
-	p := &colourPainter{r: r, face: f, st: &cs, gid: gid, fg: fg}
+	p := &colourPainter{r: r, face: f, st: &cs, gid: gid, fg: fg, fgPaint: fgPaint}
 	p.m = []matrix{m}
 	p.clips = []*mask{sp.clip}
 	opts := shape.PaintOptions{Foreground: fg, PPEM: ppem}
@@ -124,7 +132,10 @@ type colourPainter struct {
 	st   *state // the text's state, its clip the painting's current one
 	gid  uint32 // the glyph painted, which an SVG document names
 	fg   shape.Color
-	fl   flat // the renderer's own is collecting the text's outlines
+	// fgPaint is what the foreground's solid fills are painted with when the
+	// text is filled with a gradient or pattern, and nil otherwise.
+	fgPaint *paintSrc
+	fl      flat // the renderer's own is collecting the text's outlines
 
 	m      []matrix // font units (y up) to device, innermost last
 	clips  []*mask  // the clip in effect, innermost last; nil is none
@@ -282,8 +293,30 @@ func (p *colourPainter) paintRegion(ps paintSrc) {
 	p.r.fillPolys(&p.fl, false, ps, p.st)
 }
 
-func (p *colourPainter) Solid(c shape.Color, _ bool) {
+func (p *colourPainter) Solid(c shape.Color, foreground bool) {
+	if foreground && p.fgPaint != nil {
+		// The text's own paint, at the alpha the font gives the foreground.
+		ps := *p.fgPaint
+		if a := uint32(c.A); a != 255 {
+			ps.sh = alphaShader{ps.sh, a}
+		}
+		p.paintRegion(ps)
+		return
+	}
 	p.paintRegion(solidPaint(shapeRGBA(c), 1))
+}
+
+// alphaShader is a shader at an alpha, 0 to 255.
+type alphaShader struct {
+	sh shader
+	a  uint32
+}
+
+func (s alphaShader) shadeRow(y, x0 int, dst []uint8) {
+	s.sh.shadeRow(y, x0, dst)
+	for i := range dst {
+		dst[i] = uint8(mul255(uint32(dst[i]), s.a))
+	}
 }
 
 func shapeRGBA(c shape.Color) rgba {

@@ -382,3 +382,21 @@ func TestRadialNegativeRadius(t *testing.T) {
 		t.Errorf("U+1F315 at its tip: %v, want %v", got, want)
 	}
 }
+
+// TestColourGlyphGradientFill fills text in a colour font with a gradient:
+// the glyph's foreground paint, U+1F600's rotated triangle at the font's
+// 0.8, takes the gradient, red at the text's left to blue at its right,
+// rather than one colour.
+func TestColourGlyphGradientFill(t *testing.T) {
+	img := renderColour(t, `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100">
+<defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="0"><stop offset="0" stop-color="#f00"/><stop offset="1" stop-color="#00f"/></linearGradient></defs>
+<text x="0" y="85" font-family="ColourTest" font-size="100" fill="url(#g)">&#x1F600;A</text></svg>`)
+	left := color.NRGBAModel.Convert(img.At(30, 30)).(color.NRGBA)
+	right := color.NRGBAModel.Convert(img.At(95, 45)).(color.NRGBA)
+	if !(left.R > 150 && left.B < 100) {
+		t.Errorf("the triangle at its left is %v, want the gradient's red over a little green", left)
+	}
+	if !(right.B > left.B+40 && right.R < left.R) {
+		t.Errorf("the triangle at its right is %v, want bluer than at its left, %v", right, left)
+	}
+}
