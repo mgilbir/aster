@@ -1,6 +1,7 @@
 package aster
 
 import (
+	"maps"
 	"strings"
 	"time"
 )
@@ -11,6 +12,7 @@ type Option func(*config)
 type fontEntry struct {
 	family string
 	data   []byte
+	axes   map[string]float64 // WithFontInstance's point in the design space
 }
 
 type config struct {
@@ -119,6 +121,22 @@ func WithSystemFonts() Option {
 func WithFont(family string, ttf []byte) Option {
 	return func(c *config) {
 		c.fonts = append(c.fonts, fontEntry{family: family, data: ttf})
+	}
+}
+
+// WithFontInstance registers a variable font with the given family name at
+// one point of its design space, as WithFont registers a font: axes are by
+// tag, {"wght": 650, "wdth": 75} say. The instance's outlines, metrics and
+// colour glyphs (COLR's variable paints) are drawn and measured; an axis not
+// named stays at its default, one outside its range is clamped to it, and
+// one the font does not have fails the first render, as a font that does not
+// load does. A variable font given
+// with WithFont is drawn at its default instance. Register the same font
+// more than once, under one family at different weights, to have CSS
+// font-weight choose among instances.
+func WithFontInstance(family string, ttf []byte, axes map[string]float64) Option {
+	return func(c *config) {
+		c.fonts = append(c.fonts, fontEntry{family: family, data: ttf, axes: maps.Clone(axes)})
 	}
 }
 

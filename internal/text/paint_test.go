@@ -161,3 +161,47 @@ func TestCustomFontFallsBackBeforeEmbedded(t *testing.T) {
 		}
 	}
 }
+
+func TestWithFontInstance(t *testing.T) {
+	data, err := os.ReadFile("../../testdata/colourfonts/VarTest.ttf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// U+1F7E0's alpha is 1 at the default weight, 400, and 0.25 at 900.
+	for _, c := range []struct {
+		opt  Option
+		want uint8
+	}{
+		{WithFont("V", data), 255},
+		{WithFontInstance("V", data, map[string]float64{"wght": 900}), 64},
+		{WithFontInstance("V", data, map[string]float64{"wght": 650}), 159},
+		{WithFontInstance("V", data, map[string]float64{"wght": 2000}), 64}, // clamped to 900
+	} {
+		m, err := New(c.opt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		runs, _ := m.ShapeText("\U0001F7E0", "20px V")
+		var rec recorder
+		if err := PaintGlyph(runs[0].Face, runs[0].Glyphs[0].GID, shape.PaintOptions{}, &rec); err != nil {
+			t.Fatal(err)
+		}
+		if want := fmt.Sprintf("Solid {230 26 26 %d} false", c.want); !strings.Contains(strings.Join(rec.calls, "|"), want) {
+			t.Errorf("painted %v, want %s", rec.calls, want)
+		}
+	}
+	if _, err := New(WithFontInstance("V", data, map[string]float64{"wdth": 75})); err == nil {
+		t.Error("an axis the font does not have: no error")
+	}
+	// Two instances under one family: CSS font-weight chooses between them.
+	m, err := New(WithFontInstance("V", data, map[string]float64{"wght": 400}), WithFontInstance("V", data, map[string]float64{"wght": 900}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for css, want := range map[string]int{"20px V": 400, "bold 20px V": 900, "900 20px V": 900} {
+		runs, _ := m.ShapeText("\U0001F7E0", css)
+		if got := runs[0].Face.Weight; got != want {
+			t.Errorf("%q: the face of weight %d, want %d", css, got, want)
+		}
+	}
+}

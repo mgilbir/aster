@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/mgilbir/aster"
@@ -190,5 +191,65 @@ func TestAppleColorEmoji(t *testing.T) {
 	}
 	if len(pdf) > 1<<20 {
 		t.Errorf("the PDF is %d bytes", len(pdf))
+	}
+}
+
+// TestVariableColourFont draws a variable COLR font at an instance: its
+// U+1F7E0 is red at full alpha at the default weight and at a quarter of it
+// at 900.
+func TestVariableColourFont(t *testing.T) {
+	data, err := os.ReadFile("testdata/colourfonts/VarTest.ttf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := []byte(`{"width": 100, "height": 100, "padding": 0, "background": "white",
+  "marks": [{"type": "text", "encode": {"enter": {"x": {"value": 0}, "y": {"value": 80},
+    "text": {"value": "🟠"}, "font": {"value": "V"}, "fontSize": {"value": 60}}}}]}`)
+	for _, c := range []struct {
+		opt  aster.Option
+		want color.NRGBA
+	}{
+		{aster.WithFont("V", data), color.NRGBA{230, 26, 26, 255}},
+		// A quarter of red over white.
+		{aster.WithFontInstance("V", data, map[string]float64{"wght": 900}), color.NRGBA{249, 198, 198, 255}},
+	} {
+		conv, err := aster.New(c.opt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out, err := conv.VegaToPNG(spec)
+		conv.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		img, err := png.Decode(bytes.NewReader(out))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := color.NRGBAModel.Convert(img.At(30, 50)).(color.NRGBA); !closeTo(got, c.want) {
+			t.Errorf("%v, want %v", got, c.want)
+		}
+	}
+	conv, err := aster.New(aster.WithFontInstance("V", data, map[string]float64{"wght": 900}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conv.Close()
+	pdf, err := conv.VegaToPDF(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(pdf, []byte("/ca 0.25")) { // 64/255
+		t.Error("the PDF does not draw the instance's alpha, 0.25")
+	}
+	// Fonts load on the first render, which fails for an axis the font does
+	// not have, as for a font that does not load.
+	bad, err := aster.New(aster.WithFontInstance("V", data, map[string]float64{"wdth": 75}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bad.Close()
+	if _, err := bad.VegaToPNG(spec); err == nil || !strings.Contains(err.Error(), "wdth") {
+		t.Errorf("an axis the font does not have: %v", err)
 	}
 }

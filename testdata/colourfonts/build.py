@@ -34,6 +34,10 @@
 # the second through a <use> of a shape in its defs; and 'A', an outline
 # with no document.
 #
+# VarTest.ttf, a variable COLR font, its weight axis from 100 to 900 about
+# 400: U+1F7E0 a square of palette colour 0 whose alpha is 1 at the default
+# and 0.25 at 900, varied (PaintVarSolid), and 'A', an outline.
+#
 # ColourPair.ttc is the two in one TrueType collection, for the system font
 # scanner, which indexes each face of a collection.
 #
@@ -254,6 +258,28 @@ def svg(path):
     save(fb, path)
 
 
+def variable(path):
+    from fontTools.varLib.builder import buildDeltaSetIndexMap
+    from fontTools.varLib.varStore import OnlineVarStoreBuilder
+    order = [".notdef", SQ, "A", "u1F7E0"]
+    outlines = {".notdef": OUTLINES[".notdef"], SQ: OUTLINES[SQ], "A": OUTLINES["A"],
+                "u1F7E0": OUTLINES[SQ]}
+    fb = base("VarTest", order, {ord("A"): "A", 0x1F7E0: "u1F7E0"}, outlines)
+    fb.setupFvar([("wght", 100, 400, 900, "Weight")], [])
+    colr = buildCOLR({"u1F7E0": fill(SQ, {"Format": F.PaintVarSolid, "PaletteIndex": 0,
+                                          "Alpha": 1.0, "VarIndexBase": 0})},
+                     glyphMap=fb.font.getReverseGlyphMap())
+    # The alpha's delta at the heaviest end, -0.75, in F2Dot14 units.
+    builder = OnlineVarStoreBuilder(["wght"])
+    builder.setSupports([{"wght": (0, 1.0, 1.0)}])
+    index = builder.storeDeltas([-12288])
+    colr.table.VarStore = builder.finish(optimize=False)
+    colr.table.VarIndexMap = buildDeltaSetIndexMap([index])
+    fb.font["COLR"] = colr
+    fb.font["CPAL"] = buildCPAL(PALETTES)
+    save(fb, path)
+
+
 def collection(path, *fonts):
     from fontTools.ttLib import TTFont
     from fontTools.ttLib.ttCollection import TTCollection
@@ -268,5 +294,6 @@ if __name__ == "__main__":
     colr(os.path.join(out, "ColourTest.ttf"))
     sbix(os.path.join(out, "SbixTest.ttf"))
     svg(os.path.join(out, "SvgTest.ttf"))
+    variable(os.path.join(out, "VarTest.ttf"))
     collection(os.path.join(out, "ColourPair.ttc"),
                os.path.join(out, "ColourTest.ttf"), os.path.join(out, "SbixTest.ttf"))

@@ -32,6 +32,7 @@ package text
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"strings"
 	"sync"
@@ -76,6 +77,7 @@ type config struct {
 type customFont struct {
 	family string
 	data   []byte
+	axes   map[string]float64 // where in its design space, for WithFontInstance
 }
 
 // WithSystemFonts enables fonts installed on the machine. See system.go for what is and is not supported: family
@@ -88,7 +90,19 @@ func WithSystemFonts() Option { return func(c *config) { c.systemFonts = true } 
 // are tried after earlier ones when the same family name has several faces
 // of equal fit.
 func WithFont(family string, ttf []byte) Option {
-	return func(c *config) { c.fonts = append(c.fonts, customFont{family, ttf}) }
+	return func(c *config) { c.fonts = append(c.fonts, customFont{family: family, data: ttf}) }
+}
+
+// WithFontInstance registers a variable font under family as WithFont does,
+// at one point of its design space: axes by tag, such as
+// {"wght": 650}. Its outlines, metrics and colour glyphs (COLR's variable
+// paints) are all the instance's; an axis not named stays at its default,
+// one outside its range is clamped to it, and one the font does not have is
+// an error from New.
+func WithFontInstance(family string, ttf []byte, axes map[string]float64) Option {
+	return func(c *config) {
+		c.fonts = append(c.fonts, customFont{family: family, data: ttf, axes: maps.Clone(axes)})
+	}
 }
 
 // WithDefaultFontFamily sets the family generic CSS families such as
@@ -257,7 +271,7 @@ func New(opts ...Option) (*Measurer, error) {
 		if f.family == "" {
 			return nil, errors.New("text: WithFont needs a family name")
 		}
-		face, err := newFace(fmt.Sprintf("custom-%d-%s", i, f.family), f.family, 0, false, f.data)
+		face, err := newFaceInstance(fmt.Sprintf("custom-%d-%s", i, f.family), f.family, f.data, f.axes)
 		if err != nil {
 			return nil, err
 		}

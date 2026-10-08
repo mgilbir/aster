@@ -591,7 +591,11 @@ func (c *Converter) fontOptions() []text.Option {
 		opts = append(opts, text.WithSystemFonts())
 	}
 	for _, f := range c.cfg.fonts {
-		opts = append(opts, text.WithFont(f.family, f.data))
+		if f.axes != nil {
+			opts = append(opts, text.WithFontInstance(f.family, f.data, f.axes))
+		} else {
+			opts = append(opts, text.WithFont(f.family, f.data))
+		}
 	}
 	if f := c.cfg.defaultFontFamily; f != "" {
 		opts = append(opts, text.WithDefaultFontFamily(f))

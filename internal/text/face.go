@@ -188,6 +188,41 @@ func newFace(id, family string, weight int, italic bool, data []byte) (f *Face, 
 	return newFaceAt(id, family, weight, italic, data, 0, false)
 }
 
+// newFaceInstance is newFace for a font given with WithFont, its weight and
+// style read from it, at the point axes names of its design space when it is
+// not nil. An instance is a font program of its own, written for the point,
+// which is what the face reads from and embeds.
+func newFaceInstance(id, family string, data []byte, axes map[string]float64) (f *Face, err error) {
+	if axes == nil {
+		return newFace(id, family, 0, false, data)
+	}
+	if len(data) > maxFontBytes {
+		return nil, fmt.Errorf("text: font %q is %d bytes, over the %d limit: %w", family, len(data), maxFontBytes, budget.ErrLimit)
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			f, err = nil, fmt.Errorf("text: loading font %q: %v", family, r)
+		}
+	}()
+	sf, err := shape.LoadInstance(data, axes)
+	if err != nil {
+		return nil, fmt.Errorf("text: loading font %q at %v: %w", family, axes, err)
+	}
+	f, err = faceOf(id, family, 0, false, sf, sf.Program(), 0, false)
+	if err != nil {
+		return nil, err
+	}
+	// The instance's weight and style are where it is on the axes that say
+	// them, as CSS font-weight and font-style choose among a family's faces.
+	if w, ok := axes["wght"]; ok && w >= 1 && w <= 1000 {
+		f.Weight = int(math.Round(w))
+	}
+	if i, ok := axes["ital"]; ok {
+		f.Italic = i >= 0.5
+	}
+	return f, nil
+}
+
 // newFaceAt is newFace for face index of data, which may be a collection,
 // and which is a system font file mapped into memory when mapped is set.
 func newFaceAt(id, family string, weight int, italic bool, data []byte, index int, mapped bool) (f *Face, err error) {
@@ -210,6 +245,12 @@ func newFaceAt(id, family string, weight int, italic bool, data []byte, index in
 	if err != nil {
 		return nil, fmt.Errorf("text: loading font %q: %w", family, err)
 	}
+	return faceOf(id, family, weight, italic, sf, data, index, mapped)
+}
+
+// faceOf is the Face of sf, loaded from face index of src. A weight of 0 or
+// less reads the weight and style from the font itself.
+func faceOf(id, family string, weight int, italic bool, sf *shape.Face, src []byte, index int, mapped bool) (*Face, error) {
 	upem := sf.UnitsPerEm()
 	if upem <= 0 {
 		return nil, fmt.Errorf("text: font %q has no units per em", family)
@@ -217,9 +258,9 @@ func newFaceAt(id, family string, weight int, italic bool, data []byte, index in
 	if weight <= 0 {
 		weight, italic = styleOfFace(sf)
 	}
-	f = &Face{
+	f := &Face{
 		ID: id, Family: family, Weight: weight, Italic: italic,
-		shape: sf, src: data, index: index, mapped: mapped, upem: upem,
+		shape: sf, src: src, index: index, mapped: mapped, upem: upem,
 		seen: make([]atomic.Uint64, (sf.NumGlyphs()+63)/64),
 	}
 	f.clones.New = func() any { return sf.Clone() }
