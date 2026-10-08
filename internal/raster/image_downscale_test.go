@@ -9,6 +9,7 @@ import (
 	"image/png"
 	"math"
 	"testing"
+	"time"
 )
 
 func pngDataURI(t *testing.T, img image.Image) string {
@@ -129,5 +130,34 @@ func TestHalve(t *testing.T) {
 	}
 	if l, k := img.level(5); k != 2 || l.w != 1 || l.h != 1 {
 		t.Errorf("level(5) = %dx%d at %d, want 1x1 at 2", l.w, l.h, k)
+	}
+}
+
+// TestImageShrunkToNothing samples an image through a transform that shrinks
+// it to far less than a pixel, as a colour glyph's image box can: averaging a
+// device pixel's footprint visited every image pixel under it, out to the
+// edge copies past the image, which took longer than the life of the process.
+func TestImageShrunkToNothing(t *testing.T) {
+	img := &rasterImage{w: 5, h: 7, pix: make([]uint8, 5*7*4)}
+	for i := range img.pix {
+		img.pix[i] = 0xff
+	}
+	for _, inv := range []matrix{
+		{1e25, 0, 0, 1e38, 0, 0},
+		{math.Inf(1), 0, 0, 1, 0, 0},
+		{1, 0, 0, math.NaN(), 0, 0},
+	} {
+		lvl, linv, area := sampledLevel(img, inv)
+		s := &imageShader{img: lvl, inv: linv, area: area, opacity: 255}
+		done := make(chan struct{})
+		go func() {
+			s.shadeRow(0, 0, make([]uint8, 4*64))
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("sampling through %v did not finish in 10s", inv)
+		}
 	}
 }
