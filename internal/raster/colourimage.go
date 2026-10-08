@@ -62,6 +62,22 @@ func ColourGlyphImage(f *text.Face, gid int, fg shape.Color, ppem int) (img *ima
 	return r.cv.toNRGBA(), shape.Rect{XMin: x0 / k, YMin: y0 / k, XMax: x1 / k, YMax: y1 / k}, nil
 }
 
+// ColourGlyphBounds is the box a colour glyph of f paints within, in font
+// units with y up, the origin on the baseline at its pen position: where its
+// paints reach, each bounded by the clips around it. ok is false for a glyph
+// that paints nothing, or cannot be painted.
+func ColourGlyphBounds(f *text.Face, gid int, opts shape.PaintOptions) (box shape.Rect, ok bool) {
+	if f == nil {
+		return box, false
+	}
+	tf := &textFace{f: f}
+	b := &colourBounds{face: tf}
+	if err := tf.Paint(uint32(gid), opts, b); err != nil || !b.ok {
+		return box, false
+	}
+	return shape.Rect{XMin: b.r.x0, YMin: b.r.y0, XMax: b.r.x1, YMax: b.r.y1}, true
+}
+
 // colourBounds is a painter that paints nothing and measures where a glyph's
 // painting reaches: each paint is bounded by the clips around it, the
 // glyphs' outlines and the boxes, as HarfBuzz's paint extents are.

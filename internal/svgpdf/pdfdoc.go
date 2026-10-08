@@ -35,13 +35,28 @@ func buildPDF(content [][]byte, gsList []gsEntry, fonts *fontCatalog, images *im
 	// Resources: ExtGState entries for the opacity values the content
 	// stream references, in first-use order (deterministic).
 	resources := &pdf0.Dictionary{}
+	// Soft masks name the form XObjects they are drawn from, which are
+	// numbered last; they are filled in then.
+	type pendingMask struct {
+		gs     *pdf0.Dictionary
+		form   string
+		invert bool
+	}
+	var masks []pendingMask
 	if len(gsList) > 0 {
 		extGState := &pdf0.Dictionary{}
 		for _, gs := range gsList {
 			d := &pdf0.Dictionary{}
 			d.Set("Type", pdf0.Name("ExtGState"))
-			d.Set("ca", pdf0.Real(gs.alpha.fill))
-			d.Set("CA", pdf0.Real(gs.alpha.stroke))
+			switch {
+			case gs.bm != "":
+				d.Set("BM", pdf0.Name(gs.bm))
+			case gs.mask != "":
+				masks = append(masks, pendingMask{d, gs.mask, gs.maskInvert})
+			default:
+				d.Set("ca", pdf0.Real(gs.alpha.fill))
+				d.Set("CA", pdf0.Real(gs.alpha.stroke))
+			}
 			extGState.Set(pdf0.Name(gs.name), d)
 		}
 		resources.Set("ExtGState", extGState)
@@ -94,12 +109,57 @@ func buildPDF(content [][]byte, gsList []gsEntry, fonts *fontCatalog, images *im
 	}
 
 	// Image XObjects, numbered after the fonts, in first-use order.
+	var xobjRes *pdf0.Dictionary
 	if images != nil && len(images.uses) > 0 {
-		imageObjects, xobjRes := buildImageObjects(images, next)
+		var imageObjects map[int]*pdf0.IndirectObject
+		imageObjects, xobjRes = buildImageObjects(images, next)
 		for n, obj := range imageObjects {
 			fontObjects[n] = obj
+			next = max(next, n+1)
 		}
 		resources.Set("XObject", xobjRes)
+	}
+
+	// Form XObjects, the transparency groups of colour glyphs, numbered
+	// last. They draw with the page's resources, which are then an object
+	// of their own that the page and each form refer to.
+	pageResources := pdf0.Object(resources)
+	if len(paints.forms) > 0 {
+		if xobjRes == nil {
+			xobjRes = &pdf0.Dictionary{}
+			resources.Set("XObject", xobjRes)
+		}
+		resNum := next
+		next++
+		fontObjects[resNum] = &pdf0.IndirectObject{Number: resNum, Value: resources}
+		pageResources = pdf0.IndirectRef{Number: resNum}
+		formNum := map[string]int{}
+		for _, f := range paints.forms {
+			s, err := f.stream(pdf0.IndirectRef{Number: resNum})
+			if err != nil {
+				return nil, err
+			}
+			fontObjects[next] = &pdf0.IndirectObject{Number: next, Value: s}
+			xobjRes.Set(pdf0.Name(f.res), pdf0.IndirectRef{Number: next})
+			formNum[f.res] = next
+			next++
+		}
+		for _, m := range masks {
+			sm := &pdf0.Dictionary{}
+			sm.Set("Type", pdf0.Name("Mask"))
+			sm.Set("S", pdf0.Name("Alpha"))
+			sm.Set("G", pdf0.IndirectRef{Number: formNum[m.form]})
+			if m.invert {
+				fn := &pdf0.Dictionary{}
+				fn.Set("FunctionType", pdf0.Integer(2))
+				fn.Set("Domain", pdf0.Array{pdf0.Integer(0), pdf0.Integer(1)})
+				fn.Set("C0", pdf0.Array{pdf0.Integer(1)})
+				fn.Set("C1", pdf0.Array{pdf0.Integer(0)})
+				fn.Set("N", pdf0.Integer(1))
+				sm.Set("TR", fn)
+			}
+			m.gs.Set("SMask", sm)
+		}
 	}
 
 	// Object 3: Page
@@ -109,7 +169,7 @@ func buildPDF(content [][]byte, gsList []gsEntry, fonts *fontCatalog, images *im
 	page.Set("MediaBox", pdf0.Array{
 		pdf0.Integer(0), pdf0.Integer(0), pdf0.Real(width), pdf0.Real(height),
 	})
-	page.Set("Resources", resources)
+	page.Set("Resources", pageResources)
 	page.Set("Contents", pdf0.IndirectRef{Number: 4})
 
 	// Object 4: content stream, Flate-compressed. zlib output is

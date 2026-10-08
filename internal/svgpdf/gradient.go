@@ -258,6 +258,7 @@ func (g *gradient) shading() *pdf0.Dictionary {
 type paintDefs struct {
 	shadings []*gradient
 	patterns []patternUse
+	forms    []*formDef
 }
 
 // patternUse is a gradient stroke: the shading pattern of a gradient placed

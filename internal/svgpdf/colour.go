@@ -108,16 +108,32 @@ func (r *renderer) drawColourGlyph(face *text.Face, gid int, size, x, y float64,
 	defer r.w.restore()
 	// Font units, y up, at the glyph's origin.
 	r.w.concat(Matrix{A: size / upem, D: -size / upem, E: x, F: y})
-	// A translucent glyph of several paints is drawn whole, as an image, so
-	// that its layers are not seen through one another.
-	if check.vector && (alpha >= 1 || check.paints <= 1) {
-		p := &pdfPainter{r: r, face: face, alpha: alpha, upem: upem}
-		if err := text.PaintGlyph(face, gid, opts, p); err != nil {
-			return err
-		}
-		return p.err
+	if !check.vector() {
+		return r.drawGlyphImage(face, gid, fgc, alpha)
 	}
-	return r.drawGlyphImage(face, gid, fgc, alpha)
+	box, _ := raster.ColourGlyphBounds(face, gid, opts)
+	p := &pdfPainter{r: r, face: face, upem: upem, box: box, m: []Matrix{Identity()}}
+	// The glyph is a group of its own: the backdrop of its composites, and,
+	// drawn translucent, one thing at the text's alpha, so that its layers
+	// are not seen through one another.
+	p.beginGroup()
+	err := text.PaintGlyph(face, gid, opts, p)
+	for len(p.groups) > 1 {
+		p.endGroup()
+	}
+	content := p.endGroup()
+	if err != nil || p.err != nil || len(content) == 0 {
+		return errors.Join(err, p.err)
+	}
+	if alpha >= 1 {
+		r.w.buf = append(r.w.buf, content...)
+		return nil
+	}
+	fm := p.pageForm(content, p.bbox())
+	r.w.setAlpha(alpha, alpha)
+	p.toPage()
+	r.w.drawXObject(fm)
+	return nil
 }
 
 // drawGlyphImage draws a glyph as an image the PNG writer paints, in font
@@ -158,22 +174,42 @@ func byteOf(v float64) uint8 { return uint8(math.Round(math.Max(0, math.Min(1, v
 
 // colourCheck is a painter that paints nothing and finds whether PDF can
 // draw a glyph's painting as it is: with no sweep gradient, gradients only
-// padded and opaque, and groups only drawn source-over, which painting
-// straight onto the page is. It counts the paints.
+// padded and opaque, no Xor or Plus, which PDF has no way to draw, and each
+// Porter-Duff operator's backdrop whole, with no clip or transform opened
+// in its group before the group composited onto it.
 type colourCheck struct {
 	notVector bool
-	vector    bool
-	paints    int
+	depth     int   // clips and transforms open
+	groups    []int // depth at each open group's start, the glyph's first
 }
 
-func (c *colourCheck) PushTransform(shape.Transform) {}
-func (c *colourCheck) PopTransform()                 {}
-func (c *colourCheck) PushClipGlyph(int)             {}
-func (c *colourCheck) PushClipRect(shape.Rect)       {}
-func (c *colourCheck) PopClip()                      {}
-func (c *colourCheck) PushGroup()                    {}
+func (c *colourCheck) vector() bool { return !c.notVector }
+
+func (c *colourCheck) PushTransform(shape.Transform) { c.depth++ }
+func (c *colourCheck) PopTransform()                 { c.depth-- }
+func (c *colourCheck) PushClipGlyph(int)             { c.depth++ }
+func (c *colourCheck) PushClipRect(shape.Rect)       { c.depth++ }
+func (c *colourCheck) PopClip()                      { c.depth-- }
+func (c *colourCheck) PushGroup()                    { c.groups = append(c.groups, c.depth) }
 func (c *colourCheck) PopGroup(m shape.CompositeMode) {
-	c.need(m == shape.CompositeSrcOver)
+	n := len(c.groups)
+	if n == 0 {
+		c.need(false)
+		return
+	}
+	c.groups = c.groups[:n-1]
+	switch m {
+	case shape.CompositeXor, shape.CompositePlus:
+		c.need(false)
+	default:
+		// The enclosing group's start: the glyph's, at depth 0, for the
+		// outermost.
+		start := 0
+		if n > 1 {
+			start = c.groups[n-2]
+		}
+		c.need(!porterDuff(m) || c.depth == start)
+	}
 }
 func (c *colourCheck) Solid(shape.Color, bool) { c.need(true) }
 func (c *colourCheck) LinearGradient(g shape.LinearGradient) {
@@ -193,11 +229,7 @@ func (c *colourCheck) Image(img shape.Image) {
 	c.need(img.Format == shape.ImagePNG || img.Format == shape.ImageMask)
 }
 
-func (c *colourCheck) need(ok bool) {
-	c.paints++
-	c.notVector = c.notVector || !ok
-	c.vector = !c.notVector
-}
+func (c *colourCheck) need(ok bool) { c.notVector = c.notVector || !ok }
 
 // vectorLine reports whether a colour line is one a PDF shading draws: padded,
 // and opaque, a shading having no alpha.
@@ -221,28 +253,44 @@ func sortedStops(l shape.ColorLine) []shape.ColorStop {
 
 // pdfPainter writes a glyph's painting as PDF: a transform or clip is a q, Q
 // pair around what it applies to, a fill paints the clip, a gradient is a
-// shading and an image an image XObject. Groups are only ever source-over
-// (see colourCheck), and painted straight onto the page.
+// shading, an image an image XObject, and a group is composited as PopGroup
+// says.
 type pdfPainter struct {
-	r     *renderer
-	face  *text.Face
-	alpha float64
-	upem  float64
-	err   error
+	r      *renderer
+	face   *text.Face
+	upem   float64
+	box    shape.Rect // the glyph's bounds, in its font units
+	m      []Matrix   // the current user space to the glyph's font units; innermost last
+	depth  int        // clips and transforms open
+	groups []pdfGroup
+	err    error
 }
+
+// top maps the current user space into the glyph's font units.
+func (p *pdfPainter) top() Matrix { return p.m[len(p.m)-1] }
 
 // big is past any glyph's painting, in font units: a fill covers it and the
 // clips around it bound it.
 const big = 1 << 15
 
 func (p *pdfPainter) PushTransform(t shape.Transform) {
+	m := Matrix{A: t.XX, B: t.YX, C: t.XY, D: t.YY, E: t.X0, F: t.Y0}
 	p.r.w.save()
-	p.r.w.concat(Matrix{A: t.XX, B: t.YX, C: t.XY, D: t.YY, E: t.X0, F: t.Y0})
+	p.r.w.concat(m)
+	p.m = append(p.m, p.top().Mul(m))
+	p.depth++
 }
 
-func (p *pdfPainter) PopTransform() { p.r.w.restore() }
+func (p *pdfPainter) PopTransform() {
+	p.r.w.restore()
+	if len(p.m) > 1 {
+		p.m = p.m[:len(p.m)-1]
+	}
+	p.depth--
+}
 
 func (p *pdfPainter) PushClipGlyph(gid int) {
+	p.depth++
 	p.r.w.save()
 	outline, err := text.GlyphOutline(p.face, gid, p.upem)
 	if err != nil || len(outline) == 0 {
@@ -262,20 +310,25 @@ func (p *pdfPainter) PushClipGlyph(gid int) {
 }
 
 func (p *pdfPainter) PushClipRect(rc shape.Rect) {
+	p.depth++
 	p.r.w.save()
 	p.r.w.rect(rc.XMin, rc.YMin, rc.XMax-rc.XMin, rc.YMax-rc.YMin)
 	p.r.w.clip()
 }
 
-func (p *pdfPainter) PopClip()                     { p.r.w.restore() }
-func (p *pdfPainter) PushGroup()                   {}
-func (p *pdfPainter) PopGroup(shape.CompositeMode) {}
+func (p *pdfPainter) PopClip() {
+	p.r.w.restore()
+	p.depth--
+}
 
 func (p *pdfPainter) Solid(c shape.Color, _ bool) {
 	p.r.w.fillColor(colourOf(c))
-	a := p.alpha * float64(c.A) / 255
+	a := float64(c.A) / 255
 	p.r.w.setAlpha(a, a)
-	p.r.w.rect(-big, -big, 2*big, 2*big)
+	// The glyph's bounds, which the clips around a fill are within: a fill
+	// of the plane trips readers inside a soft mask's group.
+	b := p.bbox()
+	p.r.w.rect(b[0], b[1], b[2]-b[0], b[3]-b[1])
 	p.r.w.paint(true, false, false)
 }
 
@@ -309,7 +362,7 @@ func (p *pdfPainter) shading(radial bool, line shape.ColorLine, at func(lo, hi f
 		}
 		p.r.glyphShadings[key] = g
 	}
-	p.r.w.setAlpha(p.alpha, p.alpha)
+	p.r.w.setAlpha(1, 1)
 	p.r.w.shade(p.r.shadingOf(g))
 }
 
@@ -367,7 +420,7 @@ func (p *pdfPainter) Image(img shape.Image) {
 		return
 	}
 	if pi != nil {
-		p.r.drawImageIn(pi, img.Box, p.alpha)
+		p.r.drawImageIn(pi, img.Box, 1)
 	}
 }
 

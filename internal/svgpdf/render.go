@@ -143,6 +143,10 @@ type renderer struct {
 	glyphBoxes map[string]shape.Rect
 	// glyphShadings are the colour glyphs' gradients, each written once.
 	glyphShadings map[string]*gradient
+	// forms are the form XObjects drawn, in first-use order, each content
+	// once (see form).
+	forms     []*formDef
+	formIndex map[string]*formDef
 
 	ctx       context.Context
 	lim       Limits
@@ -224,7 +228,7 @@ func render(root *element, shaper TextShaper, fetched map[string][]byte, opts Op
 	if err := r.children(root, rootState()); err != nil {
 		return nil, nil, nil, nil, paintDefs{}, 0, 0, err
 	}
-	return r.w.stream(), r.w.gsNames, r.fonts, r.images, paintDefs{r.shadings, r.patterns}, width, height, nil
+	return r.w.stream(), r.w.gsNames, r.fonts, r.images, paintDefs{r.shadings, r.patterns, r.forms}, width, height, nil
 }
 
 func viewBoxMatrix(vb string, width, height float64) (Matrix, error) {

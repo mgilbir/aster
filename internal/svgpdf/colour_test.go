@@ -3,9 +3,12 @@ package svgpdf
 import (
 	"bytes"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/mgilbir/forme/shape"
 	pdf0 "github.com/mgilbir/pdf0"
 
 	"github.com/mgilbir/aster/internal/text"
@@ -36,11 +39,15 @@ func colourPDF(t *testing.T, family, s, attrs string, mode TextMode) (string, in
 }
 
 // imagesDrawn counts the different image XObjects a content stream draws.
-func imagesDrawn(content string) int {
+func imagesDrawn(content string) int { return xobjectsDrawn(content, "/Im") }
+
+// xobjectsDrawn counts the different XObjects named with prefix a content
+// stream draws.
+func xobjectsDrawn(content, prefix string) int {
 	seen := map[string]bool{}
 	f := strings.Fields(content)
 	for i := 1; i < len(f); i++ {
-		if f[i] == "Do" {
+		if f[i] == "Do" && strings.HasPrefix(f[i-1], prefix) {
 			seen[f[i-1]] = true
 		}
 	}
@@ -94,22 +101,64 @@ func TestColourGlyphsImage(t *testing.T) {
 	}{
 		{"sweep gradient", "ColourTest", "\U0001F300", ""},
 		{"repeated radial gradient", "ColourTest", "\U0001F31E", ""},
-		{"SrcIn", "ColourTest", "\U0001F3A8", ""},
-		{"Multiply", "ColourTest", "\U0001F4A0", ""},
 		{"sbix", "SbixTest", "\U0001F600", ""},
 	} {
-		content, images := colourPDF(t, c.family, c.s, c.attrs, TextEmbed)
-		if images != 1 {
+		if _, images := colourPDF(t, c.family, c.s, c.attrs, TextEmbed); images != 1 {
 			t.Errorf("%s: %d images, want one", c.what, images)
 		}
-		if !strings.Contains(content, " Do\n") {
-			t.Errorf("%s: no image drawn", c.what)
+	}
+}
+
+func TestColourGlyphsComposite(t *testing.T) {
+	for _, c := range []struct {
+		what, s, attrs string
+		forms          int      // drawn with Do; a soft mask's is not
+		want           []string // in the PDF
+	}{
+		// The source, a form, blended onto the backdrop drawn as it is.
+		{"Multiply", "\U0001F4A0", "", 1, []string{"/BM /Multiply"}},
+		{"Luminosity", "\U0001F4A1", "", 1, []string{"/BM /Luminosity"}},
+		// The source masked by the backdrop's alpha.
+		{"SrcIn", "\U0001F3A8", "", 1, []string{"/SMask", "/S /Alpha", "/Group"}},
+		// A translucent glyph is one form, drawn at the text's alpha, so that
+		// its square is not seen through its triangle.
+		{"translucent layers", "\U0001F534", ` fill-opacity="0.5"`, 1, []string{"/ca 0.5"}},
+	} {
+		content, pdf := colourPDFBytes(t, "ColourTest", c.s, c.attrs, TextEmbed)
+		if n := imagesDrawn(content); n != 0 {
+			t.Errorf("%s: %d images, want none", c.what, n)
+		}
+		if n := xobjectsDrawn(content, "/Fm"); n != c.forms {
+			t.Errorf("%s: %d forms drawn, want %d", c.what, n, c.forms)
+		}
+		for _, want := range c.want {
+			if !bytes.Contains(pdf, []byte(want)) {
+				t.Errorf("%s: no %q", c.what, want)
+			}
 		}
 	}
-	// The two layers of a translucent COLRv0 glyph are drawn as one image,
-	// not as two paths seen through one another.
-	if _, images := colourPDF(t, "ColourTest", "\U0001F534", ` fill-opacity="0.5"`, TextEmbed); images != 1 {
-		t.Errorf("translucent layers: %d images, want one", images)
+}
+
+// TestColourGlyphsInvertedMask composites with SrcOut: the source masked by
+// the inverse of the backdrop's alpha.
+func TestColourGlyphsInvertedMask(t *testing.T) {
+	r := &renderer{w: newContentWriter()}
+	p := &pdfPainter{r: r, upem: 1000, box: shape.Rect{XMax: 1000, YMax: 1000}, m: []Matrix{Identity()}}
+	p.beginGroup()
+	p.PushClipRect(shape.Rect{XMax: 500, YMax: 500})
+	p.Solid(shape.Color{R: 255, A: 255}, false)
+	p.PopClip()
+	p.PushGroup()
+	p.PushClipRect(shape.Rect{XMax: 1000, YMax: 1000})
+	p.Solid(shape.Color{B: 255, A: 255}, false)
+	p.PopClip()
+	p.PopGroup(shape.CompositeSrcOut)
+	content := string(p.endGroup())
+	if len(r.forms) != 2 || !strings.Contains(content, "/Fm0 Do") {
+		t.Fatalf("forms %d, content\n%s", len(r.forms), content)
+	}
+	if gs := r.w.gsNames; len(gs) != 1 || gs[0].mask != "Fm1" || !gs[0].maskInvert {
+		t.Errorf("ExtGStates %+v, want Fm1's alpha inverted", gs)
 	}
 }
 
@@ -144,5 +193,25 @@ func TestColourGlyphsShareResources(t *testing.T) {
 	// The sweep's image and its alpha, a soft mask.
 	if n := bytes.Count(pdf, []byte("/Subtype /Image")); n != 2 {
 		t.Errorf("%d images, want the sweep's and its soft mask", n)
+	}
+}
+
+// TestColourGlyphFormsInPageSpace pins the forms of colour glyphs to page
+// space: Quartz draws nothing of a soft mask whose group's coordinates run
+// past the page's own, as a glyph's font units, in the thousands, do.
+func TestColourGlyphFormsInPageSpace(t *testing.T) {
+	_, pdf := colourPDFBytes(t, "ColourTest", "\U0001F3A8\U0001F4A0", ` fill-opacity="0.5"`, TextEmbed)
+	boxes := regexp.MustCompile(`/BBox \[([-0-9. ]+)\]`).FindAllSubmatch(pdf, -1)
+	if len(boxes) == 0 {
+		t.Fatal("no forms")
+	}
+	for _, b := range boxes {
+		for _, f := range strings.Fields(string(b[1])) {
+			// The page is 200 by 100.
+			if v, err := strconv.ParseFloat(f, 64); err != nil || v < -1 || v > 201 {
+				t.Errorf("form BBox [%s] is not in page space", b[1])
+				break
+			}
+		}
 	}
 }
