@@ -6,6 +6,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/mgilbir/forme/shape"
+
 	"github.com/mgilbir/aster/internal/text"
 )
 
@@ -271,6 +273,17 @@ func (t *textFace) Outline(gid uint32, sink OutlineSink) bool {
 		}
 	}
 	return true
+}
+
+// Colour reports whether glyph gid is painted rather than filled from its
+// outline. An SVG-in-OpenType glyph is not: it is drawn from its outline.
+func (t *textFace) Colour(gid uint32, ppem int) bool {
+	c := text.GlyphColour(t.f, int(gid), shape.PaintOptions{PPEM: ppem})
+	return c != shape.ColourNone && c != shape.ColourSVG
+}
+
+func (t *textFace) Paint(gid uint32, opts shape.PaintOptions, p shape.Painter) error {
+	return text.PaintGlyph(t.f, int(gid), opts, p)
 }
 
 var emptyPath = &path{}

@@ -551,8 +551,12 @@ func (r *renderer) drawGlyphs(gs []glyphPos, sp *state, opacity float64, layered
 		}
 		if ps, ok := r.resolvePaint(sp.fill, fo, sp, bboxFn); ok {
 			r.fl.reset()
-			for _, g := range gs {
+			for i := range gs {
+				g := &gs[i]
 				if g.g.Face == nil {
+					continue
+				}
+				if cf, ppem, ok := colourGlyph(g, ctm); ok && r.drawColourGlyph(cf, g, sp, ctm, ppem, fo) {
 					continue
 				}
 				p := r.glyphOutline(g.g.Face, g.g.ID)
@@ -570,9 +574,13 @@ func (r *renderer) drawGlyphs(gs []glyphPos, sp *state, opacity float64, layered
 		}
 		if ps, ok := r.resolvePaint(sp.stroke, so, sp, bboxFn); ok {
 			var gp path
-			for _, g := range gs {
+			for i := range gs {
+				g := &gs[i]
 				if g.g.Face == nil {
 					continue
+				}
+				if _, _, ok := colourGlyph(g, ctm); ok {
+					continue // a colour glyph's outline is not what is drawn
 				}
 				p := r.glyphOutline(g.g.Face, g.g.ID)
 				if p == nil {

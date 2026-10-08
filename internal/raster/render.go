@@ -37,10 +37,11 @@ type renderer struct {
 	nest    int
 	err     error
 
-	imgs     map[*node]*rasterImage
-	fetched  map[string][]byte // image bytes by href, from Options.Images
-	outlines map[outlineKey]*path
-	grads    map[gradKey]*gradient
+	imgs       map[*node]*rasterImage
+	fetched    map[string][]byte // image bytes by href, from Options.Images
+	outlines   map[outlineKey]*path
+	colourImgs map[colourImageKey]*rasterImage // decoded bitmap glyphs
+	grads      map[gradKey]*gradient
 
 	patterns     map[patternKey]*patternTile
 	patternBytes int
