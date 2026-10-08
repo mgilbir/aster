@@ -23,7 +23,8 @@
 # em, each a square of its own colour, so that a test can tell which strike
 # was drawn; and 'A', an outline with no image.
 #
-# They are built with fontTools and their timestamps fixed, so that building
+# fontTools takes COLR's angles in degrees, and forme hands them out in
+# radians. They are built with fontTools and their timestamps fixed, so that building
 # them again produces the same bytes.
 import os
 import struct
@@ -90,10 +91,10 @@ COLOR = {
     "u1F300": fill(SQ, {
         "Format": F.PaintSweepGradient,
         "ColorLine": line("reflect", stop(0.0, 0), stop(0.5, 2), stop(1.0, 1)),
-        "centerX": 500, "centerY": 400, "startAngle": 0.0, "endAngle": 0.5}),
+        "centerX": 500, "centerY": 400, "startAngle": 0.0, "endAngle": 90.0}),
     "u1F600": {"Format": F.PaintColrLayers, "Layers": [
         fill(SQ, solid(2)),
-        {"Format": F.PaintRotateAroundCenter, "angle": 0.25, "centerX": 500, "centerY": 400,
+        {"Format": F.PaintRotateAroundCenter, "angle": 45.0, "centerX": 500, "centerY": 400,
          "Paint": fill(TRI, solid(FOREGROUND, 0.8))}]},
     "u1F3A8": {"Format": F.PaintComposite, "CompositeMode": "SRC_IN",
                "SourcePaint": fill(TRI, solid(0)),
@@ -121,7 +122,10 @@ def base(family, order, cmap, outlines):
     fb.setupGlyphOrder(order)
     fb.setupCharacterMap(cmap)
     fb.setupGlyf(outlines)
-    fb.setupHorizontalMetrics({name: (ADVANCE, 0) for name in order})
+    # Each left side bearing is its outline's xMin, as renderers that move an
+    # outline to the bearing hmtx states expect.
+    glyf = fb.font["glyf"]
+    fb.setupHorizontalMetrics({name: (ADVANCE, getattr(glyf[name], "xMin", 0)) for name in order})
     fb.setupHorizontalHeader(ascent=ASCENT, descent=DESCENT)
     fb.setupOS2(sTypoAscender=ASCENT, sTypoDescender=DESCENT, usWinAscent=ASCENT,
                 usWinDescent=-DESCENT)
