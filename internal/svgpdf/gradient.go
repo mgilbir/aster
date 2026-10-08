@@ -33,6 +33,9 @@ type gradient struct {
 	// not at all, repeated, or reflected every other period.
 	domain  [2]float64
 	periods colourPeriods
+	// noExtend leaves a colour glyph's shading unextended past its start or
+	// end: a radial one whose circles' radius reaches zero there.
+	noExtend [2]bool
 	// mesh, when set, makes the shading a free-form triangle mesh, a sweep
 	// gradient's, and the rest of the geometry unused.
 	mesh []meshVertex
@@ -296,7 +299,7 @@ func (g *gradient) shading() pdf0.Object {
 		sh.Set("Domain", pdf0.Array{pdf0.Real(g.domain[0]), pdf0.Real(g.domain[1])})
 	}
 	sh.Set("Function", fn)
-	sh.Set("Extend", pdf0.Array{pdf0.Boolean(true), pdf0.Boolean(true)})
+	sh.Set("Extend", pdf0.Array{pdf0.Boolean(!g.noExtend[0]), pdf0.Boolean(!g.noExtend[1])})
 	return sh
 }
 

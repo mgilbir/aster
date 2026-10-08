@@ -115,18 +115,6 @@ func TestColourGlyphsImage(t *testing.T) {
 			t.Errorf("mode %d: drawn as vectors", m)
 		}
 	}
-	// So does a Porter-Duff operator onto a backdrop with a clip open
-	// around the source.
-	var c colourCheck
-	c.PushGroup()
-	c.PushClipRect(shape.Rect{XMax: 1})
-	c.PushGroup()
-	c.PopGroup(shape.CompositeSrcIn)
-	c.PopClip()
-	c.PopGroup(shape.CompositeSrcOver)
-	if c.vector() {
-		t.Error("SrcIn under an open clip: drawn as vectors")
-	}
 	for _, c := range []struct {
 		size float64
 		want int
@@ -395,4 +383,69 @@ func cmBefore(t *testing.T, f []string, i int) Matrix {
 		v[k] = x
 	}
 	return Matrix{A: v[0], B: v[1], C: v[2], D: v[3], E: v[4], F: v[5]}
+}
+
+func TestColourRadialFromZero(t *testing.T) {
+	// A padded radial gradient whose colour line starts at a negative radius
+	// is a shading from the circle of radius zero, unextended past it.
+	for _, s := range []string{"\U0001F315", "\U0001F311"} {
+		content, pdf := colourPDFBytes(t, "ColourTest", s, "", TextEmbed)
+		if n := imagesDrawn(content); n != 0 {
+			t.Errorf("%U: %d images", []rune(s)[0], n)
+		}
+		if !bytes.Contains(pdf, []byte("/Extend [false true]")) && !bytes.Contains(pdf, []byte("/Extend [true false]")) {
+			t.Errorf("%U: no shading left unextended at the cone's tip", []rune(s)[0])
+		}
+	}
+}
+
+// TestColourCompositeOpenClip composites SrcIn onto a backdrop with a clip
+// left open around the source, which forme does not paint but a painting
+// may: inside the clip the operator's result, outside it the backdrop, each
+// under a soft mask of the clip's region, the outside's inverted and its
+// BBox the page, as Quartz needs.
+func TestColourCompositeOpenClip(t *testing.T) {
+	r := &renderer{w: newContentWriter(), images: newImageCatalog(nil, Limits{}.withDefaults()), lim: Limits{}.withDefaults(), pageW: 100, pageH: 100}
+	r.w.concat(Matrix{A: 1, D: -1, F: 100})
+	r.w.save()
+	r.w.concat(Matrix{A: 0.1, D: -0.1, F: 90})
+	p := &pdfPainter{r: r, upem: 1000, box: shape.Rect{XMax: 1000, YMax: 800}, m: []Matrix{Identity()}}
+	p.setOrigin()
+	p.beginGroup()
+	p.PushGroup()
+	p.PushClipRect(shape.Rect{XMax: 1000, YMax: 800})
+	p.Solid(shape.Color{B: 255, A: 255}, false)
+	p.PopClip()
+	p.PushClipRect(shape.Rect{XMin: 500, XMax: 1000, YMax: 800})
+	p.PushGroup()
+	p.PushClipRect(shape.Rect{XMax: 1000, YMin: 300, YMax: 500})
+	p.Solid(shape.Color{G: 200, A: 255}, false)
+	p.PopClip()
+	p.PopGroup(shape.CompositeSrcIn)
+	p.PopClip()
+	p.PopGroup(shape.CompositeSrcOver)
+	p.unwind()
+	content := string(p.endGroup())
+	if strings.Count(content, "q\n") != strings.Count(content, "Q\n") {
+		t.Fatalf("unbalanced:\n%s", content)
+	}
+	var inverted, plain int
+	var invertedForm string
+	for _, gs := range r.w.gsNames {
+		switch {
+		case gs.mask != "" && gs.maskInvert:
+			inverted++
+			invertedForm = gs.mask
+		case gs.mask != "":
+			plain++
+		}
+	}
+	if inverted != 1 || plain < 2 {
+		t.Fatalf("masks: %d inverted, %d not; want the region's both ways and the operator's", inverted, plain)
+	}
+	for _, f := range r.forms {
+		if f.res == invertedForm && f.bbox != [4]float64{0, 0, 100, 100} {
+			t.Errorf("the inverted mask's BBox %v is not the page", f.bbox)
+		}
+	}
 }

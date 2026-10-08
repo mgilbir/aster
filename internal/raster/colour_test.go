@@ -360,3 +360,25 @@ func TestSVGGlyphImage(t *testing.T) {
 		t.Errorf("image bounds %v do not start at the origin", img.Bounds())
 	}
 }
+
+// TestRadialNegativeRadius draws radial gradients whose colour lines reach
+// circles of negative radius, which the COLR spec paints only where
+// r(ω) ≥ 0, in the colour the colour line has at ω. HarfBuzz (through
+// cairo) paints them otherwise, from the circles it normalizes to.
+func TestRadialNegativeRadius(t *testing.T) {
+	img := renderColour(t, `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100">
+<text x="0" y="90" font-family="ColourTest" font-size="100">&#x1F315;&#x1F311;</text></svg>`)
+	// U+1F311: r(ω) = 300 - 250ω is painted for ω ≤ 1.2, all before the
+	// first stop at 1.25: red everywhere it paints.
+	for _, p := range []image.Point{{115, 50}, {150, 50}, {185, 20}} {
+		if got := img.At(p.X, p.Y); !near(got, color.NRGBA{230, 26, 26, 255}) {
+			t.Errorf("U+1F311 at %v: %v, want the first stop's red", p, got)
+		}
+	}
+	// U+1F315: the cone's tip is at ω = -0.2, centre (430, 400), where the
+	// colour line is 40% of the way from red (-0.5) to green (0.25).
+	want := color.NRGBA{148, 87, 36, 255} // 230 + 0.4*(26-230), 26 + 0.4*(178-26), 26 + 0.4*(51-26)
+	if got := img.At(43, 50); !within(got, want, 12) {
+		t.Errorf("U+1F315 at its tip: %v, want %v", got, want)
+	}
+}

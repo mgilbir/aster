@@ -5,6 +5,7 @@ import (
 	"compress/zlib"
 	"fmt"
 	"math"
+	"strings"
 
 	"github.com/mgilbir/forme/shape"
 	pdf0 "github.com/mgilbir/pdf0"
@@ -131,13 +132,11 @@ func (p *pdfPainter) PopGroup(mode shape.CompositeMode) {
 		out := append([]byte("q\n"), b...)
 		return append(out, "Q\n"...)
 	}
-	// A Porter-Duff operator rewrites the backdrop, which must then be
-	// whole: with a clip or transform still open in it, its q would be lost.
-	// colourCheck draws such a glyph as an image; were it painted here
-	// anyway, it is drawn source-over rather than leave the page unbalanced.
-	parent := p.groups[len(p.groups)-1].depth
-	if porterDuff(mode) && p.depth != parent {
-		mode = shape.CompositeSrcOver
+	// A Porter-Duff operator rewrites the backdrop: one with a clip or
+	// transform still open in it is composited by compositeOpen.
+	if k := p.depth - p.groups[len(p.groups)-1].depth; porterDuff(mode) && k > 0 && len(p.r.w.stack) >= k {
+		p.compositeOpen(mode, src, k)
+		return
 	}
 	if mode == shape.CompositeSrcOver {
 		w.buf = append(w.buf, wrap(src)...)
@@ -169,12 +168,17 @@ func (p *pdfPainter) PopGroup(mode shape.CompositeMode) {
 			}
 			return nil
 		}
-		fb, fm := p.pageForm(b, box), p.pageForm(mask, box)
+		fb := p.pageForm(b, box)
 		saved := w.buf
 		w.buf = nil
 		w.save()
-		p.toForm()
-		w.stateGS(fmt.Sprintf("mask:%s:%v", fm, invert), gsEntry{mask: fm, maskInvert: invert})
+		if invert {
+			p.setInvertedMask(p.invertedMaskForm(mask, p.formMatrix()))
+		} else {
+			fm := p.pageForm(mask, box)
+			p.toForm()
+			w.stateGS(fmt.Sprintf("mask:%s:false", fm), gsEntry{mask: fm})
+		}
 		w.drawXObject(fb)
 		w.restore()
 		out := w.buf
@@ -219,18 +223,50 @@ func (p *pdfPainter) PopGroup(mode shape.CompositeMode) {
 // space runs from zero to its size. And it is the same wherever the glyph
 // is, so that every copy of a glyph at one size shares its forms.
 func (p *pdfPainter) pageForm(content []byte, box [4]float64) string {
-	m := p.formMatrix()
+	return p.formAt(content, p.formMatrix(), box)
+}
+
+// formAt is pageForm for content drawn in a user space m maps into the
+// glyph's page space, within box there.
+func (p *pdfPainter) formAt(content []byte, m Matrix, box [4]float64) string {
+	return p.formIn(content, m, mapBox(m, box))
+}
+
+// formIn is a form of content drawn in a user space m maps into the glyph's
+// page space, its BBox bbox in the glyph's page space.
+func (p *pdfPainter) formIn(content []byte, m Matrix, bbox [4]float64) string {
 	c := appendMatrix(nil, m)
 	c = append(c, " cm\n"...)
 	c = append(c, content...)
-	x0, y0 := math.Inf(1), math.Inf(1)
-	x1, y1 := math.Inf(-1), math.Inf(-1)
-	for _, pt := range [][2]float64{{box[0], box[1]}, {box[2], box[1]}, {box[0], box[3]}, {box[2], box[3]}} {
-		x, y := m.Apply(pt[0], pt[1])
-		x0, y0 = math.Min(x0, x), math.Min(y0, y)
-		x1, y1 = math.Max(x1, x), math.Max(y1, y)
+	return p.r.form(c, bbox)
+}
+
+// invertedMaskForm is a form for a soft mask inverted by its transfer
+// function, of content drawn in a user space m maps into the glyph's page
+// space: in the page's own space, its BBox the page. It is set by
+// setInvertedMask. Quartz applies an inverted mask only when it is set with
+// the default transform in effect and its BBox covers the page, and hides
+// what it masks otherwise; PDFium draws it either way.
+func (p *pdfPainter) invertedMaskForm(content []byte, m Matrix) string {
+	m.E += p.origin[0]
+	m.F += p.origin[1]
+	page := [4]float64{0, 0, p.r.pageW, p.r.pageH}
+	if !(page[2] > 0 && page[3] > 0) {
+		page = [4]float64{-big, -big, big, big}
 	}
-	return p.r.form(c, [4]float64{x0, y0, x1, y1})
+	return p.formIn(content, m, page)
+}
+
+// setInvertedMask sets the inverted soft mask of form fm, and leaves the
+// transform at the glyph's page space, where its forms are drawn. The caller
+// saves and restores the graphics state around it.
+func (p *pdfPainter) setInvertedMask(fm string) {
+	w := p.r.w
+	if inv, ok := invert(w.cur.ctm); ok {
+		w.concat(inv)
+	}
+	w.stateGS(fmt.Sprintf("mask:%s:true", fm), gsEntry{mask: fm, maskInvert: true})
+	w.concat(Matrix{A: 1, D: 1, E: p.origin[0], F: p.origin[1]})
 }
 
 // formMatrix maps the current user space into the glyph's page space.
@@ -287,4 +323,128 @@ func invert(m Matrix) (Matrix, bool) {
 		A: m.D / d, B: -m.B / d, C: -m.C / d, D: m.A / d,
 		E: (m.C*m.F - m.D*m.E) / d, F: (m.B*m.E - m.A*m.F) / d,
 	}, true
+}
+
+// compositeOpen composites the source onto a backdrop with k clips or
+// transforms opened in it since its group began, which a Porter-Duff
+// operator rewrites: inside the clips, the operator's result; outside them,
+// the backdrop as it was, as a clip bounds an operator. The backdrop, closed,
+// the source, the result and the clips' region (the opened clips replayed
+// over the glyph's box) are forms; the backdrop is drawn masked by the
+// inverse of the region and the result masked by it, from the state the
+// backdrop's group began in, and the clips are opened again for the pops
+// that close them.
+func (p *pdfPainter) compositeOpen(mode shape.CompositeMode, src []byte, k int) {
+	w := p.r.w
+	base := w.stack[len(w.stack)-k]
+	kb := base.ctm
+	kb.E -= p.origin[0]
+	kb.F -= p.origin[1]
+	kc := p.formMatrix()
+	var prefix []byte
+	for _, b := range p.openBytes[len(p.openBytes)-k:] {
+		prefix = append(prefix, b...)
+	}
+	closing := []byte(strings.Repeat("Q\n", k))
+	// The glyph's box in the current space, the glyph's page space, and the
+	// backdrop's group's space.
+	bc := p.bbox()
+	bp := mapBox(kc, bc)
+	bb := bp
+	if inv, ok := invert(kb); ok {
+		bb = mapBox(inv, bp)
+	}
+	fd := p.formAt(append(append([]byte(nil), w.buf...), closing...), kb, bb)
+	fs := p.formAt(src, kc, bc)
+	region := append([]byte(nil), prefix...)
+	region = fmt.Appendf(region, "0 g\n")
+	region = appendRect(region, bc)
+	region = append(region, "f\n"...)
+	region = append(region, closing...)
+	fc := p.formAt(region, kb, bb)
+	fci := p.invertedMaskForm(region, kb)
+
+	// The operator's result, in the glyph's page space.
+	cur, stack := w.cur, w.stack
+	w.buf, w.stack = nil, nil
+	w.cur = defaultStreamState()
+	draw := func(f string) {
+		w.save()
+		w.drawXObject(f)
+		w.restore()
+	}
+	masked := func(f, mask string, invert bool) {
+		w.save()
+		w.stateGS(fmt.Sprintf("mask:%s:%v", mask, invert), gsEntry{mask: mask, maskInvert: invert})
+		w.drawXObject(f)
+		w.restore()
+	}
+	switch mode {
+	case shape.CompositeSrc:
+		draw(fs)
+	case shape.CompositeDest:
+		draw(fd)
+	case shape.CompositeDestOver:
+		draw(fs)
+		draw(fd)
+	case shape.CompositeSrcIn:
+		masked(fs, fd, false)
+	case shape.CompositeDestIn:
+		masked(fd, fs, false)
+	case shape.CompositeSrcOut:
+		masked(fs, fd, true)
+	case shape.CompositeDestOut:
+		masked(fd, fs, true)
+	case shape.CompositeSrcAtop:
+		draw(fd)
+		masked(fs, fd, false)
+	case shape.CompositeDestAtop:
+		draw(fs)
+		masked(fd, fs, false)
+	}
+	result := w.buf
+
+	// The backdrop outside the clips, the result inside them, from the
+	// backdrop's group's state, and the clips opened again.
+	w.buf, w.stack, w.cur = nil, nil, base
+	toPage := func() {
+		if inv, ok := invert(kb); ok {
+			w.concat(inv)
+		}
+	}
+	w.save()
+	p.setInvertedMask(fci)
+	w.drawXObject(fd)
+	w.restore()
+	if len(result) > 0 {
+		fr := p.formAt(result, Identity(), bp)
+		w.save()
+		toPage()
+		w.stateGS(fmt.Sprintf("mask:%s:false", fc), gsEntry{mask: fc})
+		w.drawXObject(fr)
+		w.restore()
+	}
+	w.buf = append(w.buf, prefix...)
+	w.cur, w.stack = cur, stack
+}
+
+// mapBox is the box around box under m.
+func mapBox(m Matrix, box [4]float64) [4]float64 {
+	x0, y0 := math.Inf(1), math.Inf(1)
+	x1, y1 := math.Inf(-1), math.Inf(-1)
+	for _, pt := range [][2]float64{{box[0], box[1]}, {box[2], box[1]}, {box[0], box[3]}, {box[2], box[3]}} {
+		x, y := m.Apply(pt[0], pt[1])
+		x0, y0 = math.Min(x0, x), math.Min(y0, y)
+		x1, y1 = math.Max(x1, x), math.Max(y1, y)
+	}
+	return [4]float64{x0, y0, x1, y1}
+}
+
+// appendRect appends a re of box.
+func appendRect(b []byte, box [4]float64) []byte {
+	for _, v := range []float64{box[0], box[1], box[2] - box[0], box[3] - box[1]} {
+		b = appendNum(b, v)
+		b = append(b, ' ')
+	}
+	return append(b, "re\n"...)
 }

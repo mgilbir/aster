@@ -147,6 +147,9 @@ type renderer struct {
 	// once (see form).
 	forms     []*formDef
 	formIndex map[string]*formDef
+	// pageW and pageH are the page's size, which an inverted soft mask's
+	// BBox covers (see invertedMaskForm).
+	pageW, pageH float64
 	// painted are the colour glyphs painted so far (see paintColourGlyph).
 	painted map[paintedKey]paintedGlyph
 
@@ -215,6 +218,7 @@ func render(root *element, shaper TextShaper, fetched map[string][]byte, opts Op
 	// unchanged below this point. Glyph outlines are pre-flipped in
 	// drawText, so text is not mirrored by this.
 	r.w.concat(Matrix{A: 1, B: 0, C: 0, D: -1, E: 0, F: height})
+	r.pageW, r.pageH = width, height
 
 	// viewBox, when present, maps user units onto the width×height viewport.
 	if vb, ok := root.attr("viewBox"); ok {

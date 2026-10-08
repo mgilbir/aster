@@ -19,6 +19,9 @@
 #   U+1F4A1  composite HSL_LUMINOSITY
 #   U+1F52E  linear gradient, reflect, a stop at 30% alpha
 #   U+1F4A7  radial gradient, pad, a stop at 50% alpha
+#   U+1F315  radial gradient, pad, its stops moving the start circle to a
+#            negative radius, the circles growing
+#   U+1F311  the same, the circles shrinking
 #   U+0041   'A', an outline with no colour
 #
 # SbixTest.ttf, sbix: U+1F600 as a PNG in two strikes, 20 and 100 pixels per
@@ -125,6 +128,14 @@ COLOR = {
         "Format": F.PaintRadialGradient,
         "ColorLine": line("pad", stop(0.0, 2), stop(1.0, 0, 0.5)),
         "x0": 500, "y0": 400, "r0": 0, "x1": 500, "y1": 400, "r1": 400}),
+    "u1F315": fill(SQ, {
+        "Format": F.PaintRadialGradient,
+        "ColorLine": line("pad", stop(-0.5, 0), stop(0.25, 2), stop(1.0, 1)),
+        "x0": 450, "y0": 400, "r0": 50, "x1": 550, "y1": 400, "r1": 300}),
+    "u1F311": fill(SQ, {
+        "Format": F.PaintRadialGradient,
+        "ColorLine": line("pad", stop(1.25, 0), stop(1.75, 1)),
+        "x0": 300, "y0": 400, "r0": 300, "x1": 400, "y1": 400, "r1": 50}),
     "u1F4A1": {"Format": F.PaintComposite, "CompositeMode": "HSL_LUMINOSITY",
                "SourcePaint": fill(TRI, solid(2)),
                "BackdropPaint": fill(SQ, solid(0))},

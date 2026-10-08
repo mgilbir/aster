@@ -238,9 +238,7 @@ func byteOf(v float64) uint8 { return uint8(math.Round(math.Max(0, math.Min(1, v
 
 // colourCheck is a painter that paints nothing and finds whether PDF can
 // draw a glyph's painting as it is: with no Xor or Plus, which PDF has no way
-// to draw, no padded radial gradient starting at a negative radius, and each
-// Porter-Duff operator's backdrop whole, with no clip or transform opened
-// in its group before the group composited onto it.
+// to draw.
 type colourCheck struct {
 	notVector bool
 	depth     int   // clips and transforms open
@@ -266,28 +264,13 @@ func (c *colourCheck) PopGroup(m shape.CompositeMode) {
 	case shape.CompositeXor, shape.CompositePlus:
 		c.need(false)
 	default:
-		// The enclosing group's start: the glyph's, at depth 0, for the
-		// outermost.
-		start := 0
-		if n > 1 {
-			start = c.groups[n-2]
-		}
-		c.need(!porterDuff(m) || c.depth == start)
+		c.need(true)
 	}
 }
 func (c *colourCheck) Solid(shape.Color, bool)             { c.need(true) }
 func (c *colourCheck) LinearGradient(shape.LinearGradient) { c.need(true) }
 func (c *colourCheck) SweepGradient(shape.SweepGradient)   { c.need(true) }
-func (c *colourCheck) RadialGradient(g shape.RadialGradient) {
-	// A padded gradient whose colour line moves its start circle to a
-	// negative radius is not one PDF can draw; a repeated one is drawn from
-	// where the radius is zero.
-	lo := 0.0
-	if s := sortedStops(g.Line); len(s) > 0 {
-		lo = s[0].Offset
-	}
-	c.need(g.Line.Extend != shape.ExtendPad || g.R0+lo*(g.R1-g.R0) >= 0)
-}
+func (c *colourCheck) RadialGradient(shape.RadialGradient) { c.need(true) }
 func (c *colourCheck) Image(img shape.Image) {
 	c.need(img.Format == shape.ImagePNG || img.Format == shape.ImageMask)
 }
@@ -305,16 +288,19 @@ func sortedStops(l shape.ColorLine) []shape.ColorStop {
 // shading, an image an image XObject, and a group is composited as PopGroup
 // says.
 type pdfPainter struct {
-	r      *renderer
-	face   *text.Face
-	upem   float64
-	box    shape.Rect // the glyph's bounds, in its font units
-	m      []Matrix   // the current user space to the glyph's font units; innermost last
-	depth  int        // clips and transforms open
-	open   []bool     // which of them, innermost last, are transforms
-	origin [2]float64 // where the glyph's page space starts on the page (see pageForm)
-	groups []pdfGroup
-	err    error
+	r     *renderer
+	face  *text.Face
+	upem  float64
+	box   shape.Rect // the glyph's bounds, in its font units
+	m     []Matrix   // the current user space to the glyph's font units; innermost last
+	depth int        // clips and transforms open
+	open  []bool     // which of them, innermost last, are transforms
+	// openBytes is what opened each, its q and its cm or clip, innermost
+	// last: what compositeOpen opens again.
+	openBytes [][]byte
+	origin    [2]float64 // where the glyph's page space starts on the page (see pageForm)
+	groups    []pdfGroup
+	err       error
 }
 
 // top maps the current user space into the glyph's font units.
@@ -326,9 +312,16 @@ const big = 1 << 15
 
 func (p *pdfPainter) PushTransform(t shape.Transform) {
 	m := Matrix{A: t.XX, B: t.YX, C: t.XY, D: t.YY, E: t.X0, F: t.Y0}
+	start := len(p.r.w.buf)
 	p.push(true)
 	p.r.w.concat(m)
 	p.m = append(p.m, p.top().Mul(m))
+	p.opened(start)
+}
+
+// opened records what the innermost push wrote, from start.
+func (p *pdfPainter) opened(start int) {
+	p.openBytes = append(p.openBytes, append([]byte(nil), p.r.w.buf[start:]...))
 }
 
 func (p *pdfPainter) PopTransform() { p.pop() }
@@ -356,6 +349,7 @@ func (p *pdfPainter) pop() {
 		p.m = p.m[:len(p.m)-1]
 	}
 	p.open = p.open[:len(p.open)-1]
+	p.openBytes = p.openBytes[:len(p.openBytes)-1]
 	p.depth--
 }
 
@@ -367,6 +361,7 @@ func (p *pdfPainter) closeTo(depth int) {
 			p.m = p.m[:len(p.m)-1]
 		}
 		p.open = p.open[:len(p.open)-1]
+		p.openBytes = p.openBytes[:len(p.openBytes)-1]
 		p.depth--
 	}
 }
@@ -383,6 +378,8 @@ func (p *pdfPainter) unwind() {
 }
 
 func (p *pdfPainter) PushClipGlyph(gid int) {
+	start := len(p.r.w.buf)
+	defer p.opened(start)
 	p.push(false)
 	outline, err := text.GlyphOutline(p.face, gid, p.upem)
 	if err != nil || len(outline) == 0 {
@@ -402,6 +399,8 @@ func (p *pdfPainter) PushClipGlyph(gid int) {
 }
 
 func (p *pdfPainter) PushClipRect(rc shape.Rect) {
+	start := len(p.r.w.buf)
+	defer p.opened(start)
 	p.push(false)
 	p.r.w.rect(rc.XMin, rc.YMin, rc.XMax-rc.XMin, rc.YMax-rc.YMin)
 	p.r.w.clip()
@@ -579,6 +578,10 @@ func (p *pdfPainter) RadialGradient(g shape.RadialGradient) {
 	// to 1.
 	x0, y0, r0 := g.C0.X+lo*cx, g.C0.Y+lo*cy, g.R0+lo*cr
 	dx, dy, dr := (hi-lo)*cx, (hi-lo)*cy, (hi-lo)*cr
+	if g.Line.Extend == shape.ExtendPad && r0 < 0 {
+		p.radialFromZero(g.Line, x0, y0, r0, dx, dy, dr)
+		return
+	}
 	p.gradients(true, g.Line, func(t0, t1 float64) []float64 {
 		return []float64{x0 + t0*dx, y0 + t0*dy, r0 + t0*dr, x0 + t1*dx, y0 + t1*dy, r0 + t1*dr}
 	}, func() (float64, float64, bool) {
@@ -601,6 +604,43 @@ func (p *pdfPainter) RadialGradient(g shape.RadialGradient) {
 		}
 		return t0, t1, t1 > t0
 	})
+}
+
+// radialFromZero paints a padded radial gradient whose colour line starts
+// at a circle of negative radius, which a PDF shading cannot: from the
+// circle of radius zero on, where its circles are, unextended back past it.
+// The colour of a parameter before the line's start is its first stop, as
+// the colour function's domain clips it.
+func (p *pdfPainter) radialFromZero(line shape.ColorLine, x0, y0, r0, dx, dy, dr float64) {
+	colour, alpha, _, _, ok := colourLine(line)
+	if !ok || dr == 0 {
+		return // no circle has a radius of zero or more
+	}
+	tz := -r0 / dr
+	var t0, t1 float64
+	var no [2]bool
+	if dr > 0 {
+		// The circles grow from zero at tz: to 1 and on, extended after.
+		t0, t1 = tz, math.Max(1, tz+1)
+		no = [2]bool{true, false}
+	} else {
+		// They shrink to zero at tz, before the line starts: from as far
+		// back as the glyph needs, extended before, to tz.
+		t1, t0 = tz, tz-1
+		for _, c := range p.corners(16) {
+			if t, ok := radialT(c[0]-x0, c[1]-y0, dx, dy, r0, dr); ok {
+				t0 = math.Min(t0, t-1)
+			}
+		}
+		no = [2]bool{false, true}
+	}
+	coords := []float64{x0 + t0*dx, y0 + t0*dy, math.Max(0, r0+t0*dr), x0 + t1*dx, y0 + t1*dy, math.Max(0, r0+t1*dr)}
+	g := &gradient{radial: true, stops: colour, coords: coords, domain: [2]float64{t0, t1}, noExtend: no}
+	var a *gradient
+	if alpha != nil {
+		a = &gradient{radial: true, gray: true, stops: alpha, coords: coords, domain: g.domain, noExtend: no}
+	}
+	p.paint(g, a)
 }
 
 // radialT is the largest t whose circle, from radius r0 moving by
