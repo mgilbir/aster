@@ -41,7 +41,7 @@ func renderColour(t *testing.T, svg string) *image.NRGBA {
 // cairo):
 //
 //	hb-view --font-size=60 --margin=10 --foreground=00AA88 --background=EEEEEE \
-//	  -O png -o hb-view.png ColourTest.ttf -u 1F534,1F7E2,1F308,1F31E,1F300,1F600,1F3A8,1F4A0,1F4A1,41
+//	  -O png -o hb-view.png ColourTest.ttf -u 1F534,1F7E2,1F308,1F31E,1F300,1F600,1F3A8,1F4A0,1F4A1,41,1F52E,1F4A7
 //
 // The sweep gradient is left out: cairo draws the wedge of a reflected sweep
 // below its start angle wrongly. TestSweepGradient checks it instead.
@@ -55,12 +55,13 @@ func TestColourGlyphsMatchHarfBuzz(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := renderColour(t, `<svg xmlns="http://www.w3.org/2000/svg" width="620" height="80"><rect width="620" height="80" fill="#eee"/>
-<text x="10" y="58" font-family="ColourTest" font-size="60" fill="#0a8">&#x1F534;&#x1F7E2;&#x1F308;&#x1F31E;&#x1F300;&#x1F600;&#x1F3A8;&#x1F4A0;&#x1F4A1;A</text></svg>`)
+	got := renderColour(t, `<svg xmlns="http://www.w3.org/2000/svg" width="740" height="80"><rect width="740" height="80" fill="#eee"/>
+<text x="10" y="58" font-family="ColourTest" font-size="60" fill="#0a8">&#x1F534;&#x1F7E2;&#x1F308;&#x1F31E;&#x1F300;&#x1F600;&#x1F3A8;&#x1F4A0;&#x1F4A1;A&#x1F52E;&#x1F4A7;</text></svg>`)
 	if got.Bounds() != ref.Bounds() {
 		t.Fatalf("size %v, HarfBuzz's %v", got.Bounds(), ref.Bounds())
 	}
-	names := []string{"COLRv0 layers", "solid", "linear", "radial", "sweep", "foreground, rotated", "SrcIn", "Multiply", "HSL luminosity", "outline"}
+	names := []string{"COLRv0 layers", "solid", "linear", "radial", "sweep", "foreground, rotated", "SrcIn", "Multiply", "HSL luminosity", "outline",
+		"translucent stop, reflected", "translucent stop, radial"}
 	for i, name := range names {
 		if name == "sweep" {
 			continue

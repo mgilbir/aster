@@ -17,6 +17,8 @@
 #   U+1F3A8  composite SRC_IN: a solid triangle kept only inside a square
 #   U+1F4A0  composite MULTIPLY: a solid triangle multiplied onto a gradient
 #   U+1F4A1  composite HSL_LUMINOSITY
+#   U+1F52E  linear gradient, reflect, a stop at 30% alpha
+#   U+1F4A7  radial gradient, pad, a stop at 50% alpha
 #   U+0041   'A', an outline with no colour
 #
 # SbixTest.ttf, sbix: U+1F600 as a PNG in two strikes, 20 and 100 pixels per
@@ -109,6 +111,14 @@ COLOR = {
                    "Format": F.PaintLinearGradient,
                    "ColorLine": line("pad", stop(0.0, 0), stop(1.0, 2)),
                    "x0": 100, "y0": 0, "x1": 900, "y1": 0, "x2": 100, "y2": 800})},
+    "u1F52E": fill(SQ, {
+        "Format": F.PaintLinearGradient,
+        "ColorLine": line("reflect", stop(0.0, 0), stop(1.0, 1, 0.3)),
+        "x0": 300, "y0": 0, "x1": 500, "y1": 0, "x2": 300, "y2": 800}),
+    "u1F4A7": fill(SQ, {
+        "Format": F.PaintRadialGradient,
+        "ColorLine": line("pad", stop(0.0, 2), stop(1.0, 0, 0.5)),
+        "x0": 500, "y0": 400, "r0": 0, "x1": 500, "y1": 400, "r1": 400}),
     "u1F4A1": {"Format": F.PaintComposite, "CompositeMode": "HSL_LUMINOSITY",
                "SourcePaint": fill(TRI, solid(2)),
                "BackdropPaint": fill(SQ, solid(0))},

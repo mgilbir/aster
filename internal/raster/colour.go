@@ -423,7 +423,8 @@ const (
 
 // colrGradient is a COLR gradient shader. Its colour line is normalised to
 // run from 0 to 1 and its geometry moved to match, as HarfBuzz does, so that
-// stops out of order or past either end are drawn as the font states them.
+// stops out of order or past either end are drawn as the font states them,
+// and its colours interpolated unpremultiplied, as HarfBuzz's are.
 type colrGradient struct {
 	kind   colrKind
 	inv    matrix // device to font units
@@ -460,9 +461,10 @@ func (g *colrGradient) stops(line shape.ColorLine) (lo, hi float64, ok bool) {
 		}
 		hi = lo + 1e-9
 	}
-	premul := func(c shape.Color) [4]float64 {
-		a := float64(c.A) / 255
-		return [4]float64{float64(c.R) * a, float64(c.G) * a, float64(c.B) * a, a * 255}
+	// Colours are interpolated unpremultiplied, as HarfBuzz (through cairo)
+	// and PDF's shadings do, and premultiplied after.
+	unpremul := func(c shape.Color) [4]float64 {
+		return [4]float64{float64(c.R), float64(c.G), float64(c.B), float64(c.A)}
 	}
 	j := 0
 	for i := range lutSize {
@@ -473,12 +475,12 @@ func (g *colrGradient) stops(line shape.ColorLine) (lo, hi float64, ok bool) {
 		var c [4]float64
 		switch {
 		case t <= st[0].Offset:
-			c = premul(st[0].Color)
+			c = unpremul(st[0].Color)
 		case j >= len(st)-1:
-			c = premul(st[len(st)-1].Color)
+			c = unpremul(st[len(st)-1].Color)
 		default:
 			a, b := st[j], st[j+1]
-			ca, cb := premul(a.Color), premul(b.Color)
+			ca, cb := unpremul(a.Color), unpremul(b.Color)
 			f := 0.0
 			if b.Offset > a.Offset {
 				f = (t - a.Offset) / (b.Offset - a.Offset)
@@ -487,7 +489,8 @@ func (g *colrGradient) stops(line shape.ColorLine) (lo, hi float64, ok bool) {
 				c[k] = ca[k] + (cb[k]-ca[k])*f
 			}
 		}
-		g.lut[i] = uint32(clampByte(c[0])) | uint32(clampByte(c[1]))<<8 | uint32(clampByte(c[2]))<<16 | uint32(clampByte(c[3]))<<24
+		al := c[3] / 255
+		g.lut[i] = uint32(clampByte(c[0]*al)) | uint32(clampByte(c[1]*al))<<8 | uint32(clampByte(c[2]*al))<<16 | uint32(clampByte(c[3]))<<24
 	}
 	return lo, hi, true
 }
