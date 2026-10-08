@@ -27,6 +27,15 @@ func sfntDir(b []byte, index int) (off int, ok bool) {
 	return int(binary.BigEndian.Uint32(b[12+4*index:])), true
 }
 
+// collectionSize is the number of faces in a font file: those of a
+// collection, or 1.
+func collectionSize(b []byte) int {
+	if len(b) < 12 || string(b[:4]) != "ttcf" {
+		return 1
+	}
+	return min(int(binary.BigEndian.Uint32(b[8:12])), maxCollectionFonts)
+}
+
 // sfntTable returns table tag of face index of font file b, as a slice of b,
 // or nil.
 func sfntTable(b []byte, index int, tag string) []byte {

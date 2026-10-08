@@ -162,6 +162,7 @@ Options passed to `aster.New()`:
 | `WithTextMeasurement(bool)` | `true` | forme text shaping for accurate layout |
 | `WithHarfBuzzTextMetrics()` | disabled | Measure with HarfBuzz's rounding (whole-pixel size, 1/64 px advances) instead of exact advances, for output byte-stable with earlier versions |
 | `WithFont(family, ttf)` | — | Register a custom TTF font (used by both measurement and PNG); a colour font draws in colour |
+| `WithFontFace(family, ttc, index)` | — | Register one face of a font collection (`WithFont` registers every face of one, which font-weight and font-style choose among) |
 | `WithFontInstance(family, ttf, axes)` | — | Register a variable font at a point of its design space (`{"wght": 650}`): its outlines, metrics and variable colour glyphs; register several under one family to have font-weight choose |
 | `WithDefaultFontFamily(name)` | `"Liberation Sans"` | Family that generic `sans-serif` resolves to (both pipelines) |
 | `WithDefaultSerifFamily(name)` | `"Liberation Serif"` | Family that generic `serif` resolves to (both pipelines) |

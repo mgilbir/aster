@@ -78,6 +78,7 @@ type customFont struct {
 	family string
 	data   []byte
 	axes   map[string]float64 // where in its design space, for WithFontInstance
+	index  int                // which face of a collection; every face when negative
 }
 
 // WithSystemFonts enables fonts installed on the machine. See system.go for what is and is not supported: family
@@ -89,8 +90,20 @@ func WithSystemFonts() Option { return func(c *config) { c.systemFonts = true } 
 // name. Its weight and style are read from the font. Fonts registered later
 // are tried after earlier ones when the same family name has several faces
 // of equal fit.
+//
+// A font collection (.ttc, .otc) registers every face of it under family,
+// each with its own weight and style, which CSS font-weight and font-style
+// then choose among; WithFontFace registers one.
 func WithFont(family string, ttf []byte) Option {
-	return func(c *config) { c.fonts = append(c.fonts, customFont{family: family, data: ttf}) }
+	return func(c *config) { c.fonts = append(c.fonts, customFont{family: family, data: ttf, index: -1}) }
+}
+
+// WithFontFace registers face index (from 0) of a font collection under
+// family, as WithFont registers a font; index 0 of a single font is the font.
+func WithFontFace(family string, ttc []byte, index int) Option {
+	return func(c *config) {
+		c.fonts = append(c.fonts, customFont{family: family, data: ttc, index: max(0, index)})
+	}
 }
 
 // WithFontInstance registers a variable font under family as WithFont does,
@@ -98,10 +111,16 @@ func WithFont(family string, ttf []byte) Option {
 // {"wght": 650}. Its outlines, metrics and colour glyphs (COLR's variable
 // paints) are all the instance's; an axis not named stays at its default,
 // one outside its range is clamped to it, and one the font does not have is
-// an error from New.
+// an error from New. Of a collection, the first face is the one drawn;
+// WithFontFaceInstance names another.
 func WithFontInstance(family string, ttf []byte, axes map[string]float64) Option {
+	return WithFontFaceInstance(family, ttf, 0, axes)
+}
+
+// WithFontFaceInstance is WithFontInstance for face index of a collection.
+func WithFontFaceInstance(family string, ttc []byte, index int, axes map[string]float64) Option {
 	return func(c *config) {
-		c.fonts = append(c.fonts, customFont{family: family, data: ttf, axes: maps.Clone(axes)})
+		c.fonts = append(c.fonts, customFont{family: family, data: ttc, index: max(0, index), axes: maps.Clone(axes)})
 	}
 }
 
@@ -271,11 +290,24 @@ func New(opts ...Option) (*Measurer, error) {
 		if f.family == "" {
 			return nil, errors.New("text: WithFont needs a family name")
 		}
-		face, err := newFaceInstance(fmt.Sprintf("custom-%d-%s", i, f.family), f.family, f.data, f.axes)
-		if err != nil {
-			return nil, err
+		// A collection is every face of it, or the one asked for.
+		indexes := []int{f.index}
+		if f.index < 0 {
+			indexes = []int{0}
+			if n := collectionSize(f.data); n > 1 && f.axes == nil {
+				indexes = make([]int, n)
+				for k := range indexes {
+					indexes[k] = k
+				}
+			}
 		}
-		m.add(&entry{face: face, family: f.family, custom: true})
+		for _, index := range indexes {
+			face, err := newFaceInstance(fmt.Sprintf("custom-%d-%d-%s", i, index, f.family), f.family, f.data, index, f.axes)
+			if err != nil {
+				return nil, err
+			}
+			m.add(&entry{face: face, family: f.family, custom: true})
+		}
 	}
 	for i := len(m.entries) - 1; i >= 0; i-- {
 		if m.entries[i].custom {

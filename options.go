@@ -13,6 +13,7 @@ type fontEntry struct {
 	family string
 	data   []byte
 	axes   map[string]float64 // WithFontInstance's point in the design space
+	face   int                // WithFontFace's face of a collection; -1 for every face
 }
 
 type config struct {
@@ -112,7 +113,9 @@ func WithSystemFonts() Option {
 
 // WithFont registers a custom TTF font with the given family name. Custom
 // fonts take priority over system and embedded fonts. Multiple calls append
-// additional fonts; later fonts take higher priority.
+// additional fonts; later fonts take higher priority. A font collection
+// (.ttc, .otc) registers every face of it, each with its own weight and
+// style; WithFontFace registers one.
 //
 // A colour font (COLR, sbix, CBDT) draws its glyphs in colour in PNG and PDF
 // output. Registered with any family name, it is also what draws the
@@ -120,7 +123,18 @@ func WithSystemFonts() Option {
 // monochrome Noto Emoji.
 func WithFont(family string, ttf []byte) Option {
 	return func(c *config) {
-		c.fonts = append(c.fonts, fontEntry{family: family, data: ttf})
+		c.fonts = append(c.fonts, fontEntry{family: family, data: ttf, face: -1})
+	}
+}
+
+// WithFontFace registers one face of a font collection (.ttc, .otc), by
+// its index from 0, under family, as WithFont registers a font. WithFont
+// registers every face of a collection, which CSS font-weight and
+// font-style choose among; this is for a collection whose faces are not
+// one family's weights and styles.
+func WithFontFace(family string, ttc []byte, index int) Option {
+	return func(c *config) {
+		c.fonts = append(c.fonts, fontEntry{family: family, data: ttc, face: max(0, index)})
 	}
 }
 
@@ -133,7 +147,8 @@ func WithFont(family string, ttf []byte) Option {
 // load does. A variable font given
 // with WithFont is drawn at its default instance. Register the same font
 // more than once, under one family at different weights, to have CSS
-// font-weight choose among instances.
+// font-weight choose among instances. Of a collection, its first face is
+// the one registered.
 func WithFontInstance(family string, ttf []byte, axes map[string]float64) Option {
 	return func(c *config) {
 		c.fonts = append(c.fonts, fontEntry{family: family, data: ttf, axes: maps.Clone(axes)})

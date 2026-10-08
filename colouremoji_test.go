@@ -253,3 +253,31 @@ func TestVariableColourFont(t *testing.T) {
 		t.Errorf("an axis the font does not have: %v", err)
 	}
 }
+
+// TestFontCollection draws from the second face of a collection, which
+// WithFontFace names.
+func TestFontCollection(t *testing.T) {
+	data, err := os.ReadFile("testdata/colourfonts/ColourPair.ttc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	conv, err := aster.New(aster.WithFontFace("Pair", data, 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conv.Close()
+	out, err := conv.VegaToPNG([]byte(`{"width": 100, "height": 100, "padding": 0, "background": "white",
+  "marks": [{"type": "text", "encode": {"enter": {"x": {"value": 0}, "y": {"value": 80},
+    "text": {"value": "😀"}, "font": {"value": "Pair"}, "fontSize": {"value": 60}}}}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	img, err := png.Decode(bytes.NewReader(out))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// SbixTest's U+1F600 at 60 pixels per em: its 100 ppem strike, purple.
+	if got := color.NRGBAModel.Convert(img.At(30, 50)).(color.NRGBA); !closeTo(got, color.NRGBA{120, 40, 200, 255}) {
+		t.Errorf("%v, want the bitmap's purple", got)
+	}
+}

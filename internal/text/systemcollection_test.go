@@ -211,3 +211,37 @@ func TestOutlineProgram(t *testing.T) {
 		t.Errorf("font checksum %#x", got)
 	}
 }
+
+func TestWithFontCollection(t *testing.T) {
+	data, err := os.ReadFile(colourPair)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// WithFont registers both faces, ColourTest's and SbixTest's.
+	m, err := New(WithFont("Pair", data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(m.byFam[normFamily("Pair")]); n != 2 {
+		t.Fatalf("%d faces registered, want both", n)
+	}
+	// WithFontFace registers the one asked for: SbixTest's, whose U+1F600
+	// is a bitmap where ColourTest's is COLR.
+	for index, want := range map[int]shape.GlyphColour{0: shape.ColourPaint, 1: shape.ColourBitmap} {
+		m, err := New(WithFontFace("Pair", data, index))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n := len(m.byFam[normFamily("Pair")]); n != 1 {
+			t.Errorf("face %d: %d faces registered", index, n)
+		}
+		runs, _ := m.ShapeText("\U0001F600", "20px Pair")
+		if c := GlyphColour(runs[0].Face, runs[0].Glyphs[0].GID, shape.PaintOptions{PPEM: 20}); c != want {
+			t.Errorf("face %d: U+1F600 is %d, want %d", index, c, want)
+		}
+		// Embedded from its own outline tables, not the whole collection.
+		if p := m.FontData(runs[0].Face); p == nil || sfntTable(p, 0, "sbix") != nil || sfntTable(p, 0, "COLR") != nil {
+			t.Errorf("face %d: its embedding program is not its outlines", index)
+		}
+	}
+}

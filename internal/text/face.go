@@ -188,13 +188,13 @@ func newFace(id, family string, weight int, italic bool, data []byte) (f *Face, 
 	return newFaceAt(id, family, weight, italic, data, 0, false)
 }
 
-// newFaceInstance is newFace for a font given with WithFont, its weight and
-// style read from it, at the point axes names of its design space when it is
-// not nil. An instance is a font program of its own, written for the point,
+// newFaceInstance is newFace for face index of a font given with WithFont,
+// its weight and style read from it, at the point axes names of its design
+// space when it is not nil. An instance is a font program of its own, written for the point,
 // which is what the face reads from and embeds.
-func newFaceInstance(id, family string, data []byte, axes map[string]float64) (f *Face, err error) {
+func newFaceInstance(id, family string, data []byte, index int, axes map[string]float64) (f *Face, err error) {
 	if axes == nil {
-		return newFace(id, family, 0, false, data)
+		return newFaceAt(id, family, 0, false, data, index, false)
 	}
 	if len(data) > maxFontBytes {
 		return nil, fmt.Errorf("text: font %q is %d bytes, over the %d limit: %w", family, len(data), maxFontBytes, budget.ErrLimit)
@@ -204,7 +204,7 @@ func newFaceInstance(id, family string, data []byte, axes map[string]float64) (f
 			f, err = nil, fmt.Errorf("text: loading font %q: %v", family, r)
 		}
 	}()
-	sf, err := shape.LoadInstance(data, axes)
+	sf, err := shape.LoadCollectionInstance(data, index, axes)
 	if err != nil {
 		return nil, fmt.Errorf("text: loading font %q at %v: %w", family, axes, err)
 	}
