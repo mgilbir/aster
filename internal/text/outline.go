@@ -107,6 +107,7 @@ func (f *Face) outlineUnits(gid int) (segs []Segment, err error) {
 			segs, err = nil, fmt.Errorf("%w: %v", ErrNoOutline, r)
 		}
 	}()
+	defer f.guard()()
 	if gid < 0 || gid >= f.shape.NumGlyphs() {
 		return nil, ErrGlyphRange
 	}

@@ -111,3 +111,78 @@ func TestAppleColorEmoji(t *testing.T) {
 		t.Error("Apple Color Emoji used as a fallback")
 	}
 }
+
+// TestTruncatedSystemFont truncates a mapped font file while its faces are
+// in use: reading past the new end faults, which is a recovered panic, and
+// so an error or nothing drawn, rather than the end of the process.
+func TestTruncatedSystemFont(t *testing.T) {
+	data, err := os.ReadFile(colourPair)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := t.TempDir() + "/Pair.ttc"
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mapped, err := mapSystemFont(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := newFaceAt("t", "SbixTest", 400, false, mapped, 1, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Truncate(path, 16); err != nil {
+		t.Fatal(err)
+	}
+	gid := 2
+	_ = f.HasRune(0x1F600)
+	_, _ = f.shapeGlyphs("\U0001F600A", nil)
+	_, _ = GlyphOutline(f, gid, 20)
+	_ = GlyphColour(f, gid, shape.PaintOptions{PPEM: 20})
+	_ = PaintGlyph(f, gid, shape.PaintOptions{PPEM: 20}, &recorder{})
+	_ = f.Table("hhea")
+	_ = f.Size()
+	_ = f.Name()
+	_, _ = f.Subset()
+	_ = f.Program()
+}
+
+// TestTruncatedAppleColorEmoji truncates a copy of Apple Color Emoji, where
+// there is one, while a face of it is drawing: its bitmaps are megabytes past
+// the new end, on pages that are gone, and reading them faults.
+func TestTruncatedAppleColorEmoji(t *testing.T) {
+	const apple = "/System/Library/Fonts/Apple Color Emoji.ttc"
+	if testing.Short() {
+		t.Skip("copies 190 MB")
+	}
+	data, err := os.ReadFile(apple)
+	if err != nil {
+		t.Skip("no Apple Color Emoji")
+	}
+	path := t.TempDir() + "/Apple.ttc"
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mapped, err := mapSystemFont(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := newFaceAt("t", "Apple Color Emoji", 400, false, mapped, 0, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, ok := f.shapeGlyphs("\U0001F600", nil)
+	if !ok || len(g) != 1 {
+		t.Fatal("not shaped")
+	}
+	if err := os.Truncate(path, 1<<16); err != nil {
+		t.Fatal(err)
+	}
+	if err := PaintGlyph(f, g[0].GID, shape.PaintOptions{PPEM: 160}, &recorder{}); err == nil {
+		t.Error("painting from pages that are gone: no error")
+	}
+	_, _ = f.shapeGlyphs("\U0001F308", nil)
+	_ = f.Table("OS/2")
+	_ = GlyphColour(f, g[0].GID, shape.PaintOptions{PPEM: 160})
+}

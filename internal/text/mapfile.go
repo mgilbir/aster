@@ -3,6 +3,7 @@ package text
 import (
 	"io/fs"
 	"os"
+	"runtime/debug"
 	"sync"
 )
 
@@ -48,4 +49,20 @@ func mapSystemFont(path string) ([]byte, error) {
 	}
 	mapped.m[path] = b
 	return b, nil
+}
+
+// guard makes a fault reading the face's file a panic, which the caller
+// recovers as it recovers a malformed font, rather than the end of the
+// process: a mapped file that is truncated while it is in use faults where
+// it was read. It is deferred, after the recover, as
+//
+//	defer f.guard()()
+//
+// and does nothing for a face whose font is in memory.
+func (f *Face) guard() func() {
+	if f == nil || !f.mapped {
+		return func() {}
+	}
+	old := debug.SetPanicOnFault(true)
+	return func() { debug.SetPanicOnFault(old) }
 }

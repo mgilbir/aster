@@ -300,5 +300,5 @@ func loadSystemFace(m *Measurer, e *entry) (*Face, error) {
 	}
 	m.nextID++
 	id := fmt.Sprintf("system-%d-%s-%d", m.nextID, filepath.Base(e.path), e.index)
-	return newFaceAt(id, e.family, e.weight, e.italic, data, e.index, maxSystemFontBytes)
+	return newFaceAt(id, e.family, e.weight, e.italic, data, e.index, true)
 }

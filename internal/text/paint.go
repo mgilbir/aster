@@ -21,6 +21,7 @@ func GlyphColour(f *Face, gid int, opts shape.PaintOptions) (c shape.GlyphColour
 			c = shape.ColourNone
 		}
 	}()
+	defer f.guard()()
 	return f.shape.GlyphColourFor(gid, opts)
 }
 
@@ -43,5 +44,6 @@ func PaintGlyph(f *Face, gid int, opts shape.PaintOptions, p shape.Painter) (err
 			err = fmt.Errorf("text: painting glyph %d of %q: %v", gid, f.Family, r)
 		}
 	}()
+	defer f.guard()()
 	return f.shape.PaintGlyph(gid, opts, p)
 }
