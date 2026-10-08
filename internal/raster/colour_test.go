@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/mgilbir/forme/shape"
+
+	"github.com/mgilbir/aster/internal/text"
 )
 
 func colourFonts(t *testing.T) []FontData {
@@ -262,5 +264,41 @@ func TestComposite(t *testing.T) {
 				break
 			}
 		}
+	}
+}
+
+func TestColourGlyphImage(t *testing.T) {
+	data, err := os.ReadFile("../../testdata/colourfonts/ColourTest.ttf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := text.New(text.WithFont("ColourTest", data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runs, _ := m.ShapeText("\U0001F534\U0001F600", "20px ColourTest")
+	fg := shape.Color{G: 170, B: 136, A: 255}
+	// COLRv0: the square, 100 to 900 across and 0 to 800 up, is the box, at
+	// 100 pixels per em 80 pixels a side; its top left corner is red.
+	img, box, err := ColourGlyphImage(runs[0].Face, runs[0].Glyphs[0].GID, fg, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if box != (shape.Rect{XMin: 100, YMin: 0, XMax: 900, YMax: 800}) || img.Bounds().Dx() != 80 || img.Bounds().Dy() != 80 {
+		t.Errorf("box %v, image %v", box, img.Bounds())
+	}
+	if got := img.At(2, 2); !near(got, color.NRGBA{230, 26, 26, 255}) {
+		t.Errorf("top left %v, want red", got)
+	}
+	// The rotated triangle reaches past the square, and the box with it.
+	_, box, err = ColourGlyphImage(runs[0].Face, runs[0].Glyphs[1].GID, fg, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if box.XMin >= 100 || box.XMax <= 900 || box.YMin >= 0 || box.YMax <= 800 {
+		t.Errorf("rotated glyph's box %v does not reach past the square", box)
+	}
+	if _, _, err := ColourGlyphImage(nil, 1, fg, 100); err == nil {
+		t.Error("nil face: no error")
 	}
 }

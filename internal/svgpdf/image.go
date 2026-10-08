@@ -71,6 +71,28 @@ func (c *imageCatalog) get(href string) (*pdfImage, error) {
 	return img, nil
 }
 
+// put returns the image drawn from the pixels make returns, under key, made
+// once: what is drawn that is not an <image>, such as a colour glyph. It is
+// nil when make returns no image.
+func (c *imageCatalog) put(key string, make func() (*image.NRGBA, error)) (*pdfImage, error) {
+	if img, ok := c.byHref[key]; ok {
+		return img, nil
+	}
+	px, err := make()
+	if err != nil {
+		return nil, err
+	}
+	var img *pdfImage
+	if px != nil && px.Rect.Dx() > 0 && px.Rect.Dy() > 0 {
+		if img, err = encodeNRGBA(px); err != nil {
+			return nil, err
+		}
+		img.cat = c
+	}
+	c.byHref[key] = img
+	return img, nil
+}
+
 // res is the resource name of the image, smoothed or not, naming it on first
 // use.
 func (img *pdfImage) res(smooth bool) string {
@@ -140,6 +162,13 @@ func (c *imageCatalog) load(href string) (*pdfImage, error) {
 	b := src.Bounds()
 	nrgba := image.NewNRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
 	draw.Draw(nrgba, nrgba.Bounds(), src, b.Min, draw.Src)
+	return encodeNRGBA(nrgba)
+}
+
+// encodeNRGBA is an image XObject of decoded pixels: their colour, and their
+// alpha as a soft mask when they are not all opaque.
+func encodeNRGBA(nrgba *image.NRGBA) (*pdfImage, error) {
+	b := nrgba.Bounds()
 	n := b.Dx() * b.Dy()
 	rgb := make([]byte, 0, 3*n)
 	alpha := make([]byte, 0, n)
@@ -150,6 +179,7 @@ func (c *imageCatalog) load(href string) (*pdfImage, error) {
 		opaque = opaque && nrgba.Pix[i+3] == 0xff
 	}
 	img := &pdfImage{w: b.Dx(), h: b.Dy(), filter: "FlateDecode", space: "DeviceRGB"}
+	var err error
 	if img.data, err = deflate(rgb); err != nil {
 		return nil, err
 	}

@@ -125,18 +125,29 @@ func (r *renderer) drawTextLine(str string, st gstate, x, y float64) (float64, e
 	r.w.setAlpha(fillAlpha, fillAlpha)
 
 	for k, run := range runs {
+		// The source text a run's last cluster covers ends where the next
+		// run's text begins (or at the end of the string).
+		end := len(str)
+		if k+1 < len(runs) && len(runs[k+1].Glyphs) > 0 {
+			end = runs[k+1].Glyphs[0].Cluster
+		}
+		if hasColour(run) {
+			start := -1
+			if len(run.Glyphs) > 0 {
+				start = run.Glyphs[0].Cluster
+			}
+			var err error
+			if penX, err = r.drawTextRunColour(run, penX, str, start, end, st); err != nil {
+				return x, err
+			}
+			continue
+		}
 		var f *pdfFont
 		if r.fonts != nil {
 			f = r.fonts.fontFor(run.Face)
 		}
 		var err error
 		if f != nil {
-			// The source text a run's last cluster covers ends where the
-			// next run's text begins (or at the end of the string).
-			end := len(str)
-			if k+1 < len(runs) && len(runs[k+1].Glyphs) > 0 {
-				end = runs[k+1].Glyphs[0].Cluster
-			}
 			penX, err = r.drawTextRunFont(f, run, penX, str, end)
 		} else {
 			penX, err = r.drawTextRunOutline(run, penX)

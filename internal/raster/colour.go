@@ -76,6 +76,14 @@ func glyphForeground(sp *state) shape.Color {
 // own paints. It reports false, having drawn nothing, when the face refuses
 // to paint the glyph, which is then filled from its outline instead.
 func (r *renderer) drawColourGlyph(f ColourFace, g *glyphPos, sp *state, ctm matrix, ppem int, opacity float64) bool {
+	// Font units, y up, to device space.
+	m := ctm.mul(g.matrix()).mul(scaleM(1, -1))
+	return r.paintColour(f, g.g.ID, m, sp, glyphForeground(sp), ppem, opacity)
+}
+
+// paintColour paints glyph gid of f under m, from font units (y up) to
+// device space, as drawColourGlyph describes.
+func (r *renderer) paintColour(f ColourFace, gid uint32, m matrix, sp *state, fg shape.Color, ppem int, opacity float64) bool {
 	if r.depth >= r.lim.MaxLayerDepth {
 		return false
 	}
@@ -85,11 +93,10 @@ func (r *renderer) drawColourGlyph(f ColourFace, g *glyphPos, sp *state, ctm mat
 	}
 	cs := *sp
 	p := &colourPainter{r: r, face: f, st: &cs}
-	// Font units, y up, to device space.
-	p.m = []matrix{ctm.mul(g.matrix()).mul(scaleM(1, -1))}
+	p.m = []matrix{m}
 	p.clips = []*mask{sp.clip}
-	opts := shape.PaintOptions{Foreground: glyphForeground(sp), PPEM: ppem}
-	err := f.Paint(g.g.ID, opts, p)
+	opts := shape.PaintOptions{Foreground: fg, PPEM: ppem}
+	err := f.Paint(gid, opts, p)
 	// Groups a refused or failed painting left open are dropped.
 	for len(p.groups) > 0 {
 		p.discardGroup()

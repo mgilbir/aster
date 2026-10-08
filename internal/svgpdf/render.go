@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/mgilbir/forme/shape"
+
 	"github.com/mgilbir/aster/internal/text"
 )
 
@@ -136,6 +138,11 @@ type renderer struct {
 	// lifetime of one render: axis labels repeat digits, so the same glyph
 	// is drawn many times.
 	glyphs map[glyphKey][]text.Segment
+	// glyphBoxes are where the colour glyphs drawn as images go, in font
+	// units, by their image's key.
+	glyphBoxes map[string]shape.Rect
+	// glyphShadings are the colour glyphs' gradients, each written once.
+	glyphShadings map[string]*gradient
 
 	ctx       context.Context
 	lim       Limits
