@@ -54,8 +54,8 @@ internal/expr ^(BenchmarkFilter10k|BenchmarkCompileAndEval10k|BenchmarkCompile|B
 internal/scale ApplyFloat|ApplyValue|BandApply|OrdinalApply|LinearColorApply|LinearTicks|LogTicks
 internal/text MeasureCached|MeasureUncached$|MeasureLong
 internal/svg ^BenchmarkRender10k$
-internal/raster ^BenchmarkGolden
-internal/svgpdf ^BenchmarkConvert$
+internal/raster ^BenchmarkGolden|^BenchmarkColourGlyphs$
+internal/svgpdf ^BenchmarkConvert$|^BenchmarkConvertColour$
 internal/vegalite CompileBar|CompileTrellis|CompileSplom
 internal/vega Scatter1k|Scatter20k|Facet200x10
 internal/transforms ^Benchmark(AggregateSumMean100k|Bin100k|Stack100k)$
