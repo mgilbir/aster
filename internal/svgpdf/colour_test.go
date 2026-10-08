@@ -83,8 +83,7 @@ func TestColourGlyphsVector(t *testing.T) {
 		" sh\n",              // the linear gradient
 		"\nW\nn\n",           // a glyph's clip
 		"0 0.6667 0.5333 rg", // the foreground, the fill
-		"/Span <</ActualText <FEFFD83DDD34D83DDFE2D83CDF08D83DDE00>>> BDC", "EMC",
-		"3 Tr", // the run as invisible text
+		"3 Tr",               // the run as invisible text
 	} {
 		if !strings.Contains(content, want) {
 			t.Errorf("content stream has no %q", want)
@@ -221,12 +220,43 @@ func TestColourGlyphsTextModes(t *testing.T) {
 			t.Errorf("TextOutlines content has %q", unwanted)
 		}
 	}
-	// Named writes the text, invisible, under ActualText, as Embed does.
+	// Named writes the text, invisible, as Embed does.
 	content, _ = colourPDF(t, "ColourTest", "\U0001F534A", "", TextNamed)
-	for _, want := range []string{"/Span <</ActualText <FEFFD83DDD340041>>> BDC", "3 Tr", " Tf\n"} {
+	for _, want := range []string{"3 Tr", " Tf\n"} {
 		if !strings.Contains(content, want) {
 			t.Errorf("TextNamed content has no %q", want)
 		}
+	}
+	// With invisible text, no ActualText: PDFium drops the text inside it.
+	if strings.Contains(content, "ActualText") {
+		t.Error("ActualText around invisible text")
+	}
+}
+
+// noFontData is a shaper whose faces have no program to embed.
+type noFontData struct{ *text.Measurer }
+
+func (noFontData) FontData(*text.Face) []byte { return nil }
+
+func TestColourGlyphsActualText(t *testing.T) {
+	// A run whose font cannot be embedded keeps its text as ActualText.
+	pdf, err := Convert(`<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><text transform="translate(10,80)" font-family="ColourTest" font-size="60">`+
+		"\U0001F534A</text></svg>", noFontData{colourShaper(t)}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc, err := pdf0.Read(bytes.NewReader(pdf), int64(len(pdf)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := contentStreamOf(t, doc)
+	for _, want := range []string{"/Span <</ActualText <FEFFD83DDD340041>>> BDC", "EMC"} {
+		if !strings.Contains(content, want) {
+			t.Errorf("content has no %q", want)
+		}
+	}
+	if strings.Contains(content, " Tr\n") {
+		t.Error("invisible text without a font")
 	}
 }
 

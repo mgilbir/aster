@@ -31,10 +31,6 @@ func colourImagePPEM(size float64) int {
 	return int(math.Max(minColourImagePPEM, math.Min(maxColourImagePPEM, math.Ceil(8*size))))
 }
 
-// maxInvisibleFontBytes bounds the colour fonts whose runs are also written
-// as invisible text in their own font.
-const maxInvisibleFontBytes = 64 << 20
-
 // colourGlyph reports whether glyph gid of face is drawn in colour: a COLR,
 // sbix, CBDT or EBDT glyph. An SVG-table glyph is drawn from its outline. A
 // PDF has no device size, so a bitmap glyph is drawn from its largest strike.
@@ -57,23 +53,25 @@ func hasColour(run text.Run) bool {
 // rest as outlines. In the modes that write text, the run is also written as
 // invisible text in its own font, as a scanned page's OCR text is, so that it
 // is found, selected and copied as text; its subset keeps the outlines and
-// none of the colour tables. The whole is marked with the run's source text
-// as ActualText, for the readers that take it over what is drawn.
+// none of the colour tables, and is cut from the face's outline tables alone
+// (text.Measurer.FontData), even of a 192 MB collection. A run whose font
+// cannot be embedded is marked with its source text as ActualText instead,
+// which only some readers take: PDFium drops the text inside such a span.
 func (r *renderer) drawTextRunColour(run text.Run, penX float64, str string, textStart, textEnd int, st gstate) (float64, error) {
-	actual := r.fonts != nil && textStart >= 0 && textStart < textEnd && textEnd <= len(str)
+	var f *pdfFont
+	if r.fonts != nil {
+		f = r.fonts.fontFor(run.Face)
+	}
+	actual := r.fonts != nil && f == nil && textStart >= 0 && textStart < textEnd && textEnd <= len(str)
 	if actual {
 		r.w.beginActualText(str[textStart:textEnd])
 	}
-	// A font too large to copy out and subset, such as Apple Color Emoji, at
-	// 190 MB, keeps its ActualText only.
-	if r.fonts != nil && run.Face.Size() <= maxInvisibleFontBytes {
-		if f := r.fonts.fontFor(run.Face); f != nil {
-			r.w.textRender(3) // neither filled nor stroked
-			_, err := r.drawTextRunFont(f, run, penX, str, textEnd)
-			r.w.textRender(0)
-			if err != nil {
-				return penX, err
-			}
+	if f != nil {
+		r.w.textRender(3) // neither filled nor stroked
+		_, err := r.drawTextRunFont(f, run, penX, str, textEnd)
+		r.w.textRender(0)
+		if err != nil {
+			return penX, err
 		}
 	}
 	fg := st.fill.Color

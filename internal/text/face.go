@@ -45,6 +45,9 @@ type Face struct {
 	progOnce sync.Once
 	prog     []byte
 
+	outlineOnce sync.Once
+	outline     []byte
+
 	clones sync.Pool // of *shape.Face, clones of shape
 
 	// seen is a bitset of the glyphs already recorded in shape; it is
@@ -77,6 +80,25 @@ func (f *Face) Program() []byte {
 		}
 	})
 	return f.prog
+}
+
+// OutlineProgram returns the face's font with only the tables an embedder of
+// its outlines needs, such as a PDF writer's subset: no colour or bitmap
+// tables. It is a font of its own even for a face of a collection, and is
+// made from the file where it is, without making Program. The slice is
+// shared: callers must not modify it. It is nil for a face it cannot be made
+// of (WOFF, read through Program instead).
+func (f *Face) OutlineProgram() []byte {
+	f.outlineOnce.Do(func() {
+		defer func() {
+			if recover() != nil {
+				f.outline = nil
+			}
+		}()
+		defer f.guard()()
+		f.outline = outlineProgram(f.src, f.index)
+	})
+	return f.outline
 }
 
 // Table returns one table of the face's font, tag "hhea" say, read where it

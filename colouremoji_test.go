@@ -109,8 +109,9 @@ func TestColourEmojiPDF(t *testing.T) {
 		t.Fatal(err)
 	}
 	content := pdfContent(t, out)
-	// The emoji is painted and marked with its text; U+1F534 is D83D DD34.
-	for _, want := range []string{"/Span <</ActualText <FEFFD83DDD34", "3 Tr", "0.902 0.102 0.102 rg"} {
+	// The emoji is painted, and written as invisible text whose font maps it
+	// back to U+1F534, D83D DD34.
+	for _, want := range []string{"<D83DDD34>", "3 Tr", "0.902 0.102 0.102 rg"} {
 		if !bytes.Contains(content, []byte(want)) {
 			t.Errorf("PDF content has no %q", want)
 		}
@@ -175,7 +176,19 @@ func TestAppleColorEmoji(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Contains(pdfContent(t, pdf), []byte("/ActualText <FEFFD83DDE00D83CDF08>")) {
-		t.Error("the PDF does not keep the emoji's text")
+	// The text is invisible text in a subset of the font, cut from its
+	// outline tables, not its 190 MB of bitmaps, which maps the glyphs back
+	// to U+1F600 and U+1F308.
+	content := pdfContent(t, pdf)
+	for _, want := range []string{"3 Tr", "<D83DDE00>", "<D83CDF08>"} {
+		if !bytes.Contains(content, []byte(want)) {
+			t.Errorf("the PDF has no %q", want)
+		}
+	}
+	if !bytes.Contains(pdf, []byte("/FontFile2")) {
+		t.Error("no font embedded")
+	}
+	if len(pdf) > 1<<20 {
+		t.Errorf("the PDF is %d bytes", len(pdf))
 	}
 }

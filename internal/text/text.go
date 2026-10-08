@@ -406,10 +406,18 @@ func (m *Measurer) ShapeText(text, cssFont string) ([]Run, float64) {
 	return m.shapePlan(&p, true)
 }
 
-// FontData returns the font program of a face for embedding, or nil.
+// FontData returns the font program of a face for embedding, or nil: its
+// program, or for a face of a collection, or one larger than a font given in
+// memory may be, its OutlineProgram, which a collection's face would
+// otherwise be copied out whole for (Apple Color Emoji: 192 MB of bitmaps).
 func (m *Measurer) FontData(f *Face) []byte {
 	if f == nil {
 		return nil
+	}
+	if f.index != 0 || len(f.src) >= 4 && string(f.src[:4]) == "ttcf" || f.Size() > maxFontBytes {
+		if p := f.OutlineProgram(); p != nil {
+			return p
+		}
 	}
 	return f.Program()
 }

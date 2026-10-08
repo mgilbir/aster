@@ -186,3 +186,28 @@ func TestTruncatedAppleColorEmoji(t *testing.T) {
 	_ = f.Table("OS/2")
 	_ = GlyphColour(f, g[0].GID, shape.PaintOptions{PPEM: 160})
 }
+
+func TestOutlineProgram(t *testing.T) {
+	m := pairMeasurer(t)
+	runs, _ := m.ShapeText("\U0001F600", "20px SbixTest")
+	f := runs[0].Face
+	p := m.FontData(f)
+	if p == nil || &p[0] != &f.OutlineProgram()[0] {
+		t.Fatal("a collection face's FontData is not its OutlineProgram")
+	}
+	if sfntTable(p, 0, "sbix") != nil || sfntTable(p, 0, "glyf") == nil || sfntTable(p, 0, "hmtx") == nil {
+		t.Error("the outline program keeps the bitmaps or loses the outlines")
+	}
+	// A font of its own: forme loads it, with the face's glyphs and metrics.
+	sf, err := shape.Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sf.NumGlyphs() != f.shape.NumGlyphs() || sf.UnitsPerEm() != f.UnitsPerEm() {
+		t.Errorf("%d glyphs at %d units per em, the face's %d at %d", sf.NumGlyphs(), sf.UnitsPerEm(), f.shape.NumGlyphs(), f.UnitsPerEm())
+	}
+	// Its checksums hold: the whole font sums to 0xB1B0AFBA.
+	if got := sfntChecksum(p); got != 0xB1B0AFBA {
+		t.Errorf("font checksum %#x", got)
+	}
+}
