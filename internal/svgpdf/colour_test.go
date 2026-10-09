@@ -449,3 +449,32 @@ func TestColourCompositeOpenClip(t *testing.T) {
 		}
 	}
 }
+
+// TestGradientKey: two colour glyph gradients share a shading only when
+// everything it is written from is the same.
+func TestGradientKey(t *testing.T) {
+	base := func() *gradient {
+		return &gradient{radial: true, coords: []float64{0, 0, 1, 0, 0, 2}, stops: []gradStop{{0, Color{R: 1}}, {1, Color{B: 1}}},
+			domain: [2]float64{0, 1}, mesh: []meshVertex{{1, 2, Color{G: 1}}}}
+	}
+	same := base()
+	if base().key() != same.key() {
+		t.Fatal("equal gradients, different keys")
+	}
+	for name, change := range map[string]func(g *gradient){
+		"radial":   func(g *gradient) { g.radial = false },
+		"gray":     func(g *gradient) { g.gray = true },
+		"noExtend": func(g *gradient) { g.noExtend[0] = true },
+		"periods":  func(g *gradient) { g.periods = periodsReflect },
+		"domain":   func(g *gradient) { g.domain[1] = 2 },
+		"coords":   func(g *gradient) { g.coords[2] = 1.5 },
+		"stops":    func(g *gradient) { g.stops[1].color.G = 0.5 },
+		"mesh":     func(g *gradient) { g.mesh[0].x = 3 },
+	} {
+		g := base()
+		change(g)
+		if g.key() == same.key() {
+			t.Errorf("gradients differing in %s share a key", name)
+		}
+	}
+}

@@ -474,10 +474,7 @@ func (p *pdfPainter) paint(g, a *gradient) {
 // shared is g, or the gradient drawn before that is the same: a glyph drawn
 // again draws the same shading, which is written once.
 func (p *pdfPainter) shared(g *gradient) *gradient {
-	key := fmt.Sprint(g.radial, g.gray, g.coords, g.stops, g.domain, g.periods, len(g.mesh))
-	if g.mesh != nil {
-		key += fmt.Sprint(g.mesh)
-	}
+	key := g.key()
 	if seen, ok := p.r.glyphShadings[key]; ok {
 		return seen
 	}

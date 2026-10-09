@@ -1,8 +1,7 @@
 package svgpdf
 
 import (
-	"bytes"
-	"compress/zlib"
+	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
 	"math"
@@ -560,15 +559,13 @@ func (g *gradient) meshShading() pdf0.Object {
 			data = append(data, uint8(math.Round(math.Max(0, math.Min(1, c))*255)))
 		}
 	}
-	var b bytes.Buffer
-	zw := zlib.NewWriter(&b)
-	_, _ = zw.Write(data)
-	_ = zw.Close()
+	// Compressing into memory cannot fail.
+	z, _ := compress(data)
 	decode := pdf0.Array{pdf0.Real(x0), pdf0.Real(x1), pdf0.Real(y0), pdf0.Real(y1)}
 	for range comps {
 		decode = append(decode, pdf0.Integer(0), pdf0.Integer(1))
 	}
-	sh := &pdf0.Stream{Data: b.Bytes()}
+	sh := &pdf0.Stream{Data: z}
 	sh.Dict.Set("ShadingType", pdf0.Integer(4))
 	sh.Dict.Set("ColorSpace", g.space())
 	sh.Dict.Set("BitsPerCoordinate", pdf0.Integer(32))
@@ -576,6 +573,53 @@ func (g *gradient) meshShading() pdf0.Object {
 	sh.Dict.Set("BitsPerFlag", pdf0.Integer(8))
 	sh.Dict.Set("Decode", decode)
 	sh.Dict.Set("Filter", pdf0.Name("FlateDecode"))
-	sh.Dict.Set("Length", pdf0.Integer(b.Len()))
+	sh.Dict.Set("Length", pdf0.Integer(len(z)))
 	return sh
+}
+
+// key is a colour glyph gradient's identity: a digest of everything its
+// shading is written from, so that two that would write the same shading
+// share it. A sweep's mesh is thousands of vertices, which formatting as
+// text cost more than drawing.
+func (g *gradient) key() string {
+	h := sha256.New()
+	var b []byte
+	f := func(v float64) { b = binary.LittleEndian.AppendUint64(b, math.Float64bits(v)) }
+	flag := func(v bool) {
+		if v {
+			b = append(b, 1)
+		} else {
+			b = append(b, 0)
+		}
+	}
+	flag(g.radial)
+	flag(g.gray)
+	flag(g.noExtend[0])
+	flag(g.noExtend[1])
+	b = append(b, byte(g.periods))
+	f(g.domain[0])
+	f(g.domain[1])
+	b = binary.LittleEndian.AppendUint64(b, uint64(len(g.coords)))
+	for _, v := range g.coords {
+		f(v)
+	}
+	b = binary.LittleEndian.AppendUint64(b, uint64(len(g.stops)))
+	for _, s := range g.stops {
+		f(s.offset)
+		f(s.color.R)
+		f(s.color.G)
+		f(s.color.B)
+	}
+	b = binary.LittleEndian.AppendUint64(b, uint64(len(g.mesh)))
+	h.Write(b)
+	for _, v := range g.mesh {
+		b = b[:0]
+		f(v.x)
+		f(v.y)
+		f(v.c.R)
+		f(v.c.G)
+		f(v.c.B)
+		h.Write(b)
+	}
+	return string(h.Sum(nil))
 }
