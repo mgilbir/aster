@@ -133,13 +133,37 @@ func (s *imageShader) fetch(x, y int) (r, g, b, a float64) {
 }
 
 // average is the mean of the image over the box [u0,u1) x [v0,v1), in image
-// pixels, each pixel weighted by how much of it the box covers.
+// pixels, each pixel weighted by how much of it the box covers. Past the
+// image's edges is its edge pixels, as fetch reads it, so only the image's own
+// pixels are visited, the edge ones weighted for what lies beyond them: a box
+// many times the image's size, from a transform that shrinks it to nothing,
+// costs no more than the image.
 func (s *imageShader) average(u0, v0, u1, v1 float64) (r, g, b, a float64) {
+	if !(u1 > u0) || !(v1 > v0) {
+		return s.bilinear((u0+u1)/2, (v0+v1)/2)
+	}
+	// span is how much of [lo,hi) pixel i of n covers, the first and last
+	// reaching out to everything before and after them.
+	span := func(lo, hi float64, i, n int) float64 {
+		a, b := float64(i), float64(i+1)
+		if i == 0 {
+			a = math.Inf(-1)
+		}
+		if i == n-1 {
+			b = math.Inf(1)
+		}
+		return math.Max(0, math.Min(hi, b)-math.Max(lo, a))
+	}
+	// The pixel index of v, within the n pixels, clamped as a float first:
+	// converting an infinity to an int is not defined.
+	index := func(v float64, n int) int { return int(math.Max(0, math.Min(float64(n-1), v))) }
+	y0, y1 := index(math.Floor(v0), s.img.h), index(math.Ceil(v1)-1, s.img.h)
+	x0, x1 := index(math.Floor(u0), s.img.w), index(math.Ceil(u1)-1, s.img.w)
 	var wsum float64
-	for y := int(math.Floor(v0)); float64(y) < v1; y++ {
-		wy := math.Min(v1, float64(y+1)) - math.Max(v0, float64(y))
-		for x := int(math.Floor(u0)); float64(x) < u1; x++ {
-			w := wy * (math.Min(u1, float64(x+1)) - math.Max(u0, float64(x)))
+	for y := y0; y <= y1; y++ {
+		wy := span(v0, v1, y, s.img.h)
+		for x := x0; x <= x1; x++ {
+			w := wy * span(u0, u1, x, s.img.w)
 			pr, pg, pb, pa := s.fetch(x, y)
 			r, g, b, a = r+pr*w, g+pg*w, b+pb*w, a+pa*w
 			wsum += w

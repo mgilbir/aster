@@ -1,6 +1,8 @@
 package svgpdf
 
 import (
+	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
 	"math"
 	"strconv"
@@ -21,7 +23,39 @@ type gradient struct {
 	coords []float64 // linear: x1 y1 x2 y2; radial: fx fy fr cx cy r
 	stops  []gradStop
 	res    string // the shading's resource name, once drawn
+
+	// The rest serve colour glyphs only. gray makes the shading one of
+	// DeviceGray, from each stop's colour's R: a soft mask's alpha.
+	gray bool
+	// domain is the span of the gradient's parameter its coords run over
+	// (zero: 0 to 1), and periods how its colour line repeats across it:
+	// not at all, repeated, or reflected every other period.
+	domain  [2]float64
+	periods colourPeriods
+	// noExtend leaves a colour glyph's shading unextended past its start or
+	// end: a radial one whose circles' radius reaches zero there.
+	noExtend [2]bool
+	// mesh, when set, makes the shading a free-form triangle mesh, a sweep
+	// gradient's, and the rest of the geometry unused.
+	mesh []meshVertex
 }
+
+type colourPeriods uint8
+
+const (
+	periodsNone colourPeriods = iota
+	periodsRepeat
+	periodsReflect
+)
+
+// meshVertex is a corner of a triangle of a mesh shading.
+type meshVertex struct {
+	x, y float64
+	c    Color
+}
+
+// maxColourPeriods bounds the periods of a repeated gradient's function.
+const maxColourPeriods = 512
 
 type gradStop struct {
 	offset float64
@@ -183,10 +217,14 @@ func hasAll(e *element, names []string) bool {
 	return true
 }
 
-// shading is the PDF shading dictionary of g. Its colour function runs over
-// the gradient's 0..1 and is the colour of the first stop before it and of the
-// last after it, as SVG's pad.
-func (g *gradient) shading() *pdf0.Dictionary {
+// shading is the PDF shading of g: a dictionary, or a stream for a mesh. Its
+// colour function runs over the gradient's 0..1 and is the colour of the
+// first stop before it and of the last after it, as SVG's pad; repeated, it
+// runs over the domain, a copy of it, or its mirror, each period.
+func (g *gradient) shading() pdf0.Object {
+	if g.mesh != nil {
+		return g.meshShading()
+	}
 	type point struct {
 		t float64
 		c Color
@@ -201,7 +239,12 @@ func (g *gradient) shading() *pdf0.Dictionary {
 	if last := g.stops[len(g.stops)-1]; last.offset < 1 {
 		pts = append(pts, point{1, last.color})
 	}
-	rgb := func(c Color) pdf0.Array { return pdf0.Array{pdf0.Real(c.R), pdf0.Real(c.G), pdf0.Real(c.B)} }
+	rgb := func(c Color) pdf0.Array {
+		if g.gray {
+			return pdf0.Array{pdf0.Real(c.R)}
+		}
+		return pdf0.Array{pdf0.Real(c.R), pdf0.Real(c.G), pdf0.Real(c.B)}
+	}
 	interp := func(a, b Color) *pdf0.Dictionary {
 		f := &pdf0.Dictionary{}
 		f.Set("FunctionType", pdf0.Integer(2))
@@ -236,6 +279,9 @@ func (g *gradient) shading() *pdf0.Dictionary {
 		st.Set("Encode", encode)
 		fn = st
 	}
+	if g.periods != periodsNone {
+		fn = g.repeat(fn)
+	}
 	sh := &pdf0.Dictionary{}
 	coords := make(pdf0.Array, len(g.coords))
 	for i, v := range g.coords {
@@ -246,10 +292,13 @@ func (g *gradient) shading() *pdf0.Dictionary {
 	} else {
 		sh.Set("ShadingType", pdf0.Integer(2))
 	}
-	sh.Set("ColorSpace", pdf0.Name("DeviceRGB"))
+	sh.Set("ColorSpace", g.space())
 	sh.Set("Coords", coords)
+	if g.domain != ([2]float64{}) {
+		sh.Set("Domain", pdf0.Array{pdf0.Real(g.domain[0]), pdf0.Real(g.domain[1])})
+	}
 	sh.Set("Function", fn)
-	sh.Set("Extend", pdf0.Array{pdf0.Boolean(true), pdf0.Boolean(true)})
+	sh.Set("Extend", pdf0.Array{pdf0.Boolean(!g.noExtend[0]), pdf0.Boolean(!g.noExtend[1])})
 	return sh
 }
 
@@ -258,6 +307,7 @@ func (g *gradient) shading() *pdf0.Dictionary {
 type paintDefs struct {
 	shadings []*gradient
 	patterns []patternUse
+	forms    []*formDef
 }
 
 // patternUse is a gradient stroke: the shading pattern of a gradient placed
@@ -442,4 +492,134 @@ func cubicExtrema(p0, p1, p2, p3 float64) []float64 {
 	keep((-b + sq) / (2 * a))
 	keep((-b - sq) / (2 * a))
 	return ts
+}
+
+func (g *gradient) space() pdf0.Name {
+	if g.gray {
+		return "DeviceGray"
+	}
+	return "DeviceRGB"
+}
+
+// repeat is fn, a function over 0..1, once each period of the domain: a
+// stitching function whose bounds are the whole numbers in the domain, each
+// period encoded onto fn's 0..1, or onto 1..0 for every other one reflected.
+func (g *gradient) repeat(fn pdf0.Object) pdf0.Object {
+	d0, d1 := g.domain[0], g.domain[1]
+	if !(d1 > d0) {
+		return fn
+	}
+	var fns, bounds, encode pdf0.Array
+	for k := math.Floor(d0); k < d1 && len(fns) < maxColourPeriods; k++ {
+		lo, hi := math.Max(d0, k), math.Min(d1, k+1)
+		if len(fns) > 0 {
+			bounds = append(bounds, pdf0.Real(lo))
+		}
+		e0, e1 := lo-k, hi-k
+		if g.periods == periodsReflect && int64(k)%2 != 0 {
+			e0, e1 = 1-e0, 1-e1
+		}
+		fns = append(fns, fn)
+		encode = append(encode, pdf0.Real(e0), pdf0.Real(e1))
+	}
+	st := &pdf0.Dictionary{}
+	st.Set("FunctionType", pdf0.Integer(3))
+	st.Set("Domain", pdf0.Array{pdf0.Real(d0), pdf0.Real(d1)})
+	st.Set("Functions", fns)
+	st.Set("Bounds", bounds)
+	st.Set("Encode", encode)
+	return st
+}
+
+// meshShading is a free-form triangle mesh shading (type 4) of g.mesh, each
+// three vertices a triangle, its coordinates in 32 bits over their range.
+func (g *gradient) meshShading() pdf0.Object {
+	x0, y0 := math.Inf(1), math.Inf(1)
+	x1, y1 := math.Inf(-1), math.Inf(-1)
+	for _, v := range g.mesh {
+		x0, y0 = math.Min(x0, v.x), math.Min(y0, v.y)
+		x1, y1 = math.Max(x1, v.x), math.Max(y1, v.y)
+	}
+	if !(x1 > x0) || !(y1 > y0) {
+		x1, y1 = x0+1, y0+1
+	}
+	comps := 3
+	if g.gray {
+		comps = 1
+	}
+	q := func(v, lo, hi float64) uint32 {
+		return uint32(math.Round(math.Max(0, math.Min(1, (v-lo)/(hi-lo))) * math.MaxUint32))
+	}
+	data := make([]byte, 0, len(g.mesh)*(9+comps))
+	for _, v := range g.mesh {
+		data = append(data, 0) // a new triangle's vertex
+		data = binary.BigEndian.AppendUint32(data, q(v.x, x0, x1))
+		data = binary.BigEndian.AppendUint32(data, q(v.y, y0, y1))
+		for _, c := range []float64{v.c.R, v.c.G, v.c.B}[:comps] {
+			data = append(data, uint8(math.Round(math.Max(0, math.Min(1, c))*255)))
+		}
+	}
+	// Compressing into memory cannot fail.
+	z, _ := compress(data)
+	decode := pdf0.Array{pdf0.Real(x0), pdf0.Real(x1), pdf0.Real(y0), pdf0.Real(y1)}
+	for range comps {
+		decode = append(decode, pdf0.Integer(0), pdf0.Integer(1))
+	}
+	sh := &pdf0.Stream{Data: z}
+	sh.Dict.Set("ShadingType", pdf0.Integer(4))
+	sh.Dict.Set("ColorSpace", g.space())
+	sh.Dict.Set("BitsPerCoordinate", pdf0.Integer(32))
+	sh.Dict.Set("BitsPerComponent", pdf0.Integer(8))
+	sh.Dict.Set("BitsPerFlag", pdf0.Integer(8))
+	sh.Dict.Set("Decode", decode)
+	sh.Dict.Set("Filter", pdf0.Name("FlateDecode"))
+	sh.Dict.Set("Length", pdf0.Integer(len(z)))
+	return sh
+}
+
+// key is a colour glyph gradient's identity: a digest of everything its
+// shading is written from, so that two that would write the same shading
+// share it. A sweep's mesh is thousands of vertices, which formatting as
+// text cost more than drawing.
+func (g *gradient) key() string {
+	h := sha256.New()
+	var b []byte
+	f := func(v float64) { b = binary.LittleEndian.AppendUint64(b, math.Float64bits(v)) }
+	flag := func(v bool) {
+		if v {
+			b = append(b, 1)
+		} else {
+			b = append(b, 0)
+		}
+	}
+	flag(g.radial)
+	flag(g.gray)
+	flag(g.noExtend[0])
+	flag(g.noExtend[1])
+	b = append(b, byte(g.periods))
+	f(g.domain[0])
+	f(g.domain[1])
+	b = binary.LittleEndian.AppendUint64(b, uint64(len(g.coords)))
+	for _, v := range g.coords {
+		f(v)
+	}
+	b = binary.LittleEndian.AppendUint64(b, uint64(len(g.stops)))
+	for _, s := range g.stops {
+		f(s.offset)
+		f(s.color.R)
+		f(s.color.G)
+		f(s.color.B)
+	}
+	b = binary.LittleEndian.AppendUint64(b, uint64(len(g.mesh)))
+	h.Write(b)
+	for _, v := range g.mesh {
+		b = b[:0]
+		f(v.x)
+		f(v.y)
+		f(v.c.R)
+		f(v.c.G)
+		f(v.c.B)
+		h.Write(b)
+	}
+	return string(h.Sum(nil))
 }

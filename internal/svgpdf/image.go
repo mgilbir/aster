@@ -1,8 +1,6 @@
 package svgpdf
 
 import (
-	"bytes"
-	"compress/zlib"
 	"errors"
 	"fmt"
 	"image"
@@ -68,6 +66,28 @@ func (c *imageCatalog) get(href string) (*pdfImage, error) {
 		img.cat = c
 	}
 	c.byHref[href] = img
+	return img, nil
+}
+
+// put returns the image drawn from the pixels make returns, under key, made
+// once: what is drawn that is not an <image>, such as a colour glyph. It is
+// nil when make returns no image.
+func (c *imageCatalog) put(key string, make func() (*image.NRGBA, error)) (*pdfImage, error) {
+	if img, ok := c.byHref[key]; ok {
+		return img, nil
+	}
+	px, err := make()
+	if err != nil {
+		return nil, err
+	}
+	var img *pdfImage
+	if px != nil && px.Rect.Dx() > 0 && px.Rect.Dy() > 0 {
+		if img, err = encodeNRGBA(px); err != nil {
+			return nil, err
+		}
+		img.cat = c
+	}
+	c.byHref[key] = img
 	return img, nil
 }
 
@@ -140,6 +160,13 @@ func (c *imageCatalog) load(href string) (*pdfImage, error) {
 	b := src.Bounds()
 	nrgba := image.NewNRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
 	draw.Draw(nrgba, nrgba.Bounds(), src, b.Min, draw.Src)
+	return encodeNRGBA(nrgba)
+}
+
+// encodeNRGBA is an image XObject of decoded pixels: their colour, and their
+// alpha as a soft mask when they are not all opaque.
+func encodeNRGBA(nrgba *image.NRGBA) (*pdfImage, error) {
+	b := nrgba.Bounds()
 	n := b.Dx() * b.Dy()
 	rgb := make([]byte, 0, 3*n)
 	alpha := make([]byte, 0, n)
@@ -150,6 +177,7 @@ func (c *imageCatalog) load(href string) (*pdfImage, error) {
 		opaque = opaque && nrgba.Pix[i+3] == 0xff
 	}
 	img := &pdfImage{w: b.Dx(), h: b.Dy(), filter: "FlateDecode", space: "DeviceRGB"}
+	var err error
 	if img.data, err = deflate(rgb); err != nil {
 		return nil, err
 	}
@@ -164,15 +192,11 @@ func (c *imageCatalog) load(href string) (*pdfImage, error) {
 // deflate is zlib at the default level, which is deterministic for a given
 // input.
 func deflate(b []byte) ([]byte, error) {
-	var out bytes.Buffer
-	zw := zlib.NewWriter(&out)
-	if _, err := zw.Write(b); err != nil {
+	out, err := compress(b)
+	if err != nil {
 		return nil, fmt.Errorf("svgpdf: compressing image: %w", err)
 	}
-	if err := zw.Close(); err != nil {
-		return nil, fmt.Errorf("svgpdf: compressing image: %w", err)
-	}
-	return out.Bytes(), nil
+	return out, nil
 }
 
 // drawImage draws an <image> into its box (x, y, width, height), placed as

@@ -11,6 +11,7 @@ Aster is a Go implementation of the Vega runtime and the Vega-Lite compiler, fol
 - Arbitrary SVG to PNG or vector PDF conversion
 - PDF output is fully vector with subset-embedded fonts (selectable text) — ideal for LaTeX `\includegraphics`
 - Accurate text shaping with [forme](https://github.com/mgilbir/forme), measured the way browsers measure (unrounded advances), with embedded Liberation fonts and monochrome Noto Emoji
+- Colour emoji in PNG and PDF from a colour font you register (COLRv0, COLRv1, sbix, CBDT)
 - Configurable scale factor for high-DPI PNG output
 - Multiple Vega-Lite versions (5.8, 6.4)
 - Custom fonts, themes, data loaders, memory limits, timeouts, and any IANA timezone
@@ -160,11 +161,14 @@ Options passed to `aster.New()`:
 | `WithMemoryLimit(bytes)` | 0 (defaults) | Budget for what one render may hold (loaded data, rows, scene items, SVG size, raster canvas); see below |
 | `WithTextMeasurement(bool)` | `true` | forme text shaping for accurate layout |
 | `WithHarfBuzzTextMetrics()` | disabled | Measure with HarfBuzz's rounding (whole-pixel size, 1/64 px advances) instead of exact advances, for output byte-stable with earlier versions |
-| `WithFont(family, ttf)` | — | Register a custom TTF font (used by both measurement and PNG) |
+| `WithFont(family, ttf)` | — | Register a custom TTF font (used by both measurement and PNG); a colour font draws in colour |
+| `WithFontFace(family, ttc, index)` | — | Register one face of a font collection (`WithFont` registers every face of one, which font-weight and font-style choose among) |
+| `WithFontPalette(family, index)` | first palette | Draw a colour font's glyphs with another of its CPAL palettes (a dark-mode one, say), for every font of the family |
+| `WithFontInstance(family, ttf, axes)` | — | Register a variable font at a point of its design space (`{"wght": 650}`): its outlines, metrics and variable colour glyphs; register several under one family to have font-weight choose |
 | `WithDefaultFontFamily(name)` | `"Liberation Sans"` | Family that generic `sans-serif` resolves to (both pipelines) |
 | `WithDefaultSerifFamily(name)` | `"Liberation Serif"` | Family that generic `serif` resolves to (both pipelines) |
 | `WithDefaultMonospaceFamily(name)` | `"Liberation Mono"` | Family that generic `monospace` resolves to (both pipelines) |
-| `WithSystemFonts()` | disabled | Also use system-installed fonts (both pipelines) |
+| `WithSystemFonts()` | disabled | Also use system-installed fonts, when a spec names them (both pipelines) |
 | `WithTheme(json)` | — | Vega theme config applied to all renders |
 | `WithTimezone(tz)` | `"UTC"` | Timezone for local-time operations (time scales, `timeFormat`, parsing dates without a zone); any IANA zone Go knows, others make `New` return an error |
 
@@ -370,6 +374,13 @@ ASTER_FUZZ=3000 go test -run TestFuzzDifferential -v -timeout 3h .
 
 `go test -short ./...` needs no node: the unit tests replay vectors recorded from upstream (by the generators under each package's `testdata/`).
 
+Colour glyphs are checked against HarfBuzz's drawing of the same fonts (`hb-view`, images in `testdata/colourfonts`, among them a subset of Noto Color Emoji), and aster's PDFs are read back with PDFium, Chrome's PDF engine, and compared with its PNGs (`TestPDFium*`). Those need a Python with pypdfium2, pinned in `scripts/pdfium/requirements.txt`, and skip without one:
+
+```sh
+python3 -m venv .pdfium && .pdfium/bin/pip install --require-hashes -r scripts/pdfium/requirements.txt
+ASTER_PDFIUM=.pdfium/bin/python go test ./internal/svgpdf -run TestPDFium
+```
+
 Upstream's own test suites are replayed too. `scripts/record-upstream-vectors.sh` runs the test files of Vega's and d3's packages (from the git tag of the installed version) against the installed packages and records every call they make with upstream's answer, in `testdata/upstream-vectors-cache` (git-ignored, derived). The `TestUpstream*` tests in `internal/` replay those calls against the engine and compare exactly; they skip without the vectors, and fail with `ASTER_ORACLE=require`. Where the engine and upstream differ, the difference is listed, with its reason, in `testdata/upstream-vectors/known-divergences.txt`, and asserted both ways: an unlisted difference fails, and so does a listed one that has gone away.
 
 ### Building from source
@@ -378,7 +389,7 @@ Everything needed is committed, so a plain `go build ./...` works offline. `make
 
 ### Known limitations
 
-- **Emoji:** Monochrome [Noto Emoji](https://fonts.google.com/noto/specimen/Noto+Emoji) is bundled as a fallback, so emoji have text metrics and rasterize (in black-and-white) in PNG output. Color emoji are not supported.
+- **Emoji:** Monochrome [Noto Emoji](https://fonts.google.com/noto/specimen/Noto+Emoji) is bundled as a fallback, so emoji always have text metrics and draw (in the text's colour). No colour font is bundled. A colour font registered with `WithFont` (such as [Noto Color Emoji](https://github.com/googlefonts/noto-emoji)) is tried before the bundled fonts for characters the requested families lack, and draws in colour: COLRv0 and COLRv1 (gradients, transforms and every composite mode), sbix and CBDT bitmaps (the strike for the size drawn), and EBDT masks. Measurement then uses that font's advances, as a browser using it would. A variable colour font is drawn at its default instance, or at the one `WithFontInstance` names. In PDF a colour glyph is drawn as vectors where PDF can say what it paints (its composites as transparency groups: blend modes as PDF's own, Porter-Duff operators with soft masks), its gradients as shadings (a sweep as a mesh, a repeated one with its colour line once a period, translucent stops under a soft mask), and otherwise, for the Xor and Plus operators, as an image of it at 8 pixels a point of its size, 256 to 1024 per em; either way its text is kept, so it can be searched and copied. SVG output leaves emoji as text, for the viewer to draw. OpenType SVG glyphs are drawn too: in PNG by the rasterizer's own SVG renderer, their `context-fill` the text's colour, and in PDF as that drawing's image. `WithSystemFonts` indexes each face of a font collection (`.ttc`, `.otc`) and maps system font files into memory rather than reading them, so Apple Color Emoji (190 MB) costs only what is drawn from it. A system font is used only when a spec names its family (for example `"font": "Apple Color Emoji"`), never as a fallback: check a system font's licence before distributing what it draws. In PDF, emoji are also written as invisible text in a subset of the font cut from its outline tables alone, so Apple Color Emoji adds about 100 KB to a PDF, not its 190 MB of bitmaps, and its emoji can be searched and copied.
 - **Interactive features:** There is no event loop: a chart is rendered at its initial state, or at the state `WithSignal` sets (a parameter, a bound input's value); events themselves (pointer, timer, input) are not simulated.
 - **Images:** PNG and PDF output fetch the images they draw through the Loader, as data is fetched (so the default loader draws only embedded `data:` images), each distinct URL once. PNG, JPEG and GIF are drawn; a PDF embeds an RGB or grey JPEG as it is and the rest as compressed RGB with a soft mask for transparency. An image that cannot be fetched or decoded is left out, as a broken image is, and one over the size limits fails the render with `ErrLimit`. An image mark without a width or a height takes it from the image, as upstream does once the image has loaded; a call fetches each image once for its SVG, PNG and PDF.
 

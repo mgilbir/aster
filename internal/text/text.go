@@ -32,6 +32,7 @@ package text
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"math"
 	"strings"
 	"sync"
@@ -68,6 +69,7 @@ type config struct {
 	exact           bool
 	pango           pangoMode
 	fonts           []customFont
+	palettes        map[string]int // by normalised family, WithFontPalette
 	fallbackFamily  string
 	serifFamily     string
 	monospaceFamily string
@@ -76,6 +78,8 @@ type config struct {
 type customFont struct {
 	family string
 	data   []byte
+	axes   map[string]float64 // where in its design space, for WithFontInstance
+	index  int                // which face of a collection; every face when negative
 }
 
 // WithSystemFonts enables fonts installed on the machine. See system.go for what is and is not supported: family
@@ -87,8 +91,52 @@ func WithSystemFonts() Option { return func(c *config) { c.systemFonts = true } 
 // name. Its weight and style are read from the font. Fonts registered later
 // are tried after earlier ones when the same family name has several faces
 // of equal fit.
+//
+// A font collection (.ttc, .otc) registers every face of it under family,
+// each with its own weight and style, which CSS font-weight and font-style
+// then choose among; WithFontFace registers one.
 func WithFont(family string, ttf []byte) Option {
-	return func(c *config) { c.fonts = append(c.fonts, customFont{family, ttf}) }
+	return func(c *config) { c.fonts = append(c.fonts, customFont{family: family, data: ttf, index: -1}) }
+}
+
+// WithFontFace registers face index (from 0) of a font collection under
+// family, as WithFont registers a font; index 0 of a single font is the font.
+func WithFontFace(family string, ttc []byte, index int) Option {
+	return func(c *config) {
+		c.fonts = append(c.fonts, customFont{family: family, data: ttc, index: max(0, index)})
+	}
+}
+
+// WithFontPalette draws the colour glyphs of family's faces (COLR's, which
+// CPAL colours) with palette index, from 0, of their font's palettes, rather
+// than its first: a font's dark-mode palette, say. It applies to every face
+// of the family, given with WithFont, found with WithSystemFonts, or
+// embedded; a palette a font does not have is its first, as forme takes it.
+func WithFontPalette(family string, index int) Option {
+	return func(c *config) {
+		if c.palettes == nil {
+			c.palettes = map[string]int{}
+		}
+		c.palettes[normFamily(family)] = max(0, index)
+	}
+}
+
+// WithFontInstance registers a variable font under family as WithFont does,
+// at one point of its design space: axes by tag, such as
+// {"wght": 650}. Its outlines, metrics and colour glyphs (COLR's variable
+// paints) are all the instance's; an axis not named stays at its default,
+// one outside its range is clamped to it, and one the font does not have is
+// an error from New. Of a collection, the first face is the one drawn;
+// WithFontFaceInstance names another.
+func WithFontInstance(family string, ttf []byte, axes map[string]float64) Option {
+	return WithFontFaceInstance(family, ttf, 0, axes)
+}
+
+// WithFontFaceInstance is WithFontInstance for face index of a collection.
+func WithFontFaceInstance(family string, ttc []byte, index int, axes map[string]float64) Option {
+	return func(c *config) {
+		c.fonts = append(c.fonts, customFont{family: family, data: ttc, index: max(0, index), axes: maps.Clone(axes)})
+	}
 }
 
 // WithDefaultFontFamily sets the family generic CSS families such as
@@ -181,15 +229,17 @@ type measurerState struct {
 	exact bool
 	pango pangoMode
 
-	entries []*entry // registration order
-	byFam   map[string][]*entry
-	first   *Face // the face runes nothing covers fall back to (.notdef)
+	entries  []*entry // registration order
+	fallback []*entry // entries in fallback order (see faces)
+	byFam    map[string][]*entry
+	first    *Face // the face runes nothing covers fall back to (.notdef)
 
 	fallbackFamily  string
 	serifFamily     string
 	monospaceFamily string
 	system          *systemIndex // nil unless WithSystemFonts
-	sysEntries      map[string]*entry
+	sysEntries      map[sysKey]*entry
+	palettes        map[string]int // WithFontPalette's, by normalised family
 
 	cssCache   map[string]CSSFont
 	listCache  map[listKey]*faceList
@@ -216,6 +266,7 @@ func New(opts ...Option) (*Measurer, error) {
 		fallbackFamily:  orDefault(cfg.fallbackFamily, "Liberation Sans"),
 		serifFamily:     orDefault(cfg.serifFamily, "Liberation Serif"),
 		monospaceFamily: orDefault(cfg.monospaceFamily, "Liberation Mono"),
+		palettes:        cfg.palettes,
 	}}
 
 	// Embedded fonts are registered first; Noto Emoji last among them so it
@@ -241,7 +292,7 @@ func New(opts ...Option) (*Measurer, error) {
 		{liberation.SerifBoldItalic, "liberation-serif-bolditalic", "Liberation Serif", 700, true},
 		{notoemoji.Regular, "noto-emoji", notoemoji.Family, 400, false},
 	} {
-		f, err := newFace(e.id, e.family, e.weight, e.italic, e.data)
+		f, err := embeddedFace(e.id, e.family, e.weight, e.italic, e.data)
 		if err != nil {
 			return nil, fmt.Errorf("text: embedded font %s: %w", e.id, err)
 		}
@@ -256,13 +307,43 @@ func New(opts ...Option) (*Measurer, error) {
 		if f.family == "" {
 			return nil, errors.New("text: WithFont needs a family name")
 		}
-		face, err := newFace(fmt.Sprintf("custom-%d-%s", i, f.family), f.family, 0, false, f.data)
-		if err != nil {
-			return nil, err
+		// A collection is every face of it, or the one asked for.
+		indexes := []int{f.index}
+		if f.index < 0 {
+			indexes = []int{0}
+			if n := collectionSize(f.data); n > 1 && f.axes == nil {
+				indexes = make([]int, n)
+				for k := range indexes {
+					indexes[k] = k
+				}
+			}
 		}
-		m.add(&entry{face: face, family: f.family})
+		for _, index := range indexes {
+			face, err := newFaceInstance(fmt.Sprintf("custom-%d-%d-%s", i, index, f.family), f.family, f.data, index, f.axes)
+			if err != nil {
+				return nil, err
+			}
+			m.add(&entry{face: face, family: f.family, custom: true})
+		}
+	}
+	for i := len(m.entries) - 1; i >= 0; i-- {
+		if m.entries[i].custom {
+			m.fallback = append(m.fallback, m.entries[i])
+		}
+	}
+	for _, e := range m.entries {
+		if !e.custom {
+			m.fallback = append(m.fallback, e)
+		}
 	}
 	return m, nil
+}
+
+// applyPalette sets the palette WithFontPalette names for f's family.
+func (m *Measurer) applyPalette(f *Face) {
+	if f != nil {
+		f.palette = m.palettes[normFamily(f.Family)]
+	}
 }
 
 func orDefault(s, d string) string {
@@ -274,6 +355,7 @@ func orDefault(s, d string) string {
 
 func (m *Measurer) add(e *entry) {
 	e.norm = normFamily(e.family)
+	m.applyPalette(e.face)
 	if e.face != nil {
 		e.weight, e.italic = e.face.Weight, e.face.Italic
 		if m.first == nil {
@@ -395,12 +477,20 @@ func (m *Measurer) ShapeText(text, cssFont string) ([]Run, float64) {
 	return m.shapePlan(&p, true)
 }
 
-// FontData returns the font program of a face for embedding, or nil.
+// FontData returns the font program of a face for embedding, or nil: its
+// program, or for a face of a collection, or one larger than a font given in
+// memory may be, its OutlineProgram, which a collection's face would
+// otherwise be copied out whole for (Apple Color Emoji: 192 MB of bitmaps).
 func (m *Measurer) FontData(f *Face) []byte {
 	if f == nil {
 		return nil
 	}
-	return f.prog
+	if f.index != 0 || len(f.src) >= 4 && string(f.src[:4]) == "ttcf" || f.Size() > maxFontBytes {
+		if p := f.OutlineProgram(); p != nil {
+			return p
+		}
+	}
+	return f.Program()
 }
 
 // piece is a stretch of text set in one face.

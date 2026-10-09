@@ -26,7 +26,11 @@ type MetricsFace interface {
 // parseFaceMetrics reads the metrics from an sfnt font program. It is tolerant
 // of truncated or hostile tables: anything out of range reads as absent.
 func parseFaceMetrics(prog []byte, upem float64) (FaceMetrics, bool) {
-	tables := sfntTables(prog)
+	return faceMetricsOf(sfntTables(prog), upem)
+}
+
+// faceMetricsOf reads the metrics from a font's hhea, OS/2 and post tables.
+func faceMetricsOf(tables map[string][]byte, upem float64) (FaceMetrics, bool) {
 	if tables == nil {
 		return FaceMetrics{}, false
 	}

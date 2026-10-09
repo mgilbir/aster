@@ -1,6 +1,7 @@
 package aster
 
 import (
+	"maps"
 	"strings"
 	"time"
 )
@@ -11,6 +12,14 @@ type Option func(*config)
 type fontEntry struct {
 	family string
 	data   []byte
+	axes   map[string]float64 // WithFontInstance's point in the design space
+	face   int                // WithFontFace's face of a collection; -1 for every face
+}
+
+// fontPalette is a family's colour palette, WithFontPalette's.
+type fontPalette struct {
+	family string
+	index  int
 }
 
 type config struct {
@@ -22,6 +31,7 @@ type config struct {
 	vegaLiteVersion        string // human-readable, e.g. "6.4"
 	systemFonts            bool
 	fonts                  []fontEntry
+	palettes               []fontPalette // WithFontPalette, in order
 	defaultFontFamily      string
 	defaultSerifFamily     string
 	defaultMonospaceFamily string
@@ -110,10 +120,56 @@ func WithSystemFonts() Option {
 
 // WithFont registers a custom TTF font with the given family name. Custom
 // fonts take priority over system and embedded fonts. Multiple calls append
-// additional fonts; later fonts take higher priority.
+// additional fonts; later fonts take higher priority. A font collection
+// (.ttc, .otc) registers every face of it, each with its own weight and
+// style; WithFontFace registers one.
+//
+// A colour font (COLR, sbix, CBDT) draws its glyphs in colour in PNG and PDF
+// output. Registered with any family name, it is also what draws the
+// characters a spec's fonts lack, such as emoji, before the bundled
+// monochrome Noto Emoji.
 func WithFont(family string, ttf []byte) Option {
 	return func(c *config) {
-		c.fonts = append(c.fonts, fontEntry{family: family, data: ttf})
+		c.fonts = append(c.fonts, fontEntry{family: family, data: ttf, face: -1})
+	}
+}
+
+// WithFontFace registers one face of a font collection (.ttc, .otc), by
+// its index from 0, under family, as WithFont registers a font. WithFont
+// registers every face of a collection, which CSS font-weight and
+// font-style choose among; this is for a collection whose faces are not
+// one family's weights and styles.
+func WithFontFace(family string, ttc []byte, index int) Option {
+	return func(c *config) {
+		c.fonts = append(c.fonts, fontEntry{family: family, data: ttc, face: max(0, index)})
+	}
+}
+
+// WithFontPalette draws the colour glyphs (COLR, coloured by CPAL) of
+// family's fonts with their palette index, from 0, rather than the first:
+// a font's dark-mode palette, say. It applies to every font of the family,
+// given with WithFont, found with WithSystemFonts, or embedded; a palette a
+// font does not have is its first. A later call for a family wins.
+func WithFontPalette(family string, index int) Option {
+	return func(c *config) {
+		c.palettes = append(c.palettes, fontPalette{family, index})
+	}
+}
+
+// WithFontInstance registers a variable font with the given family name at
+// one point of its design space, as WithFont registers a font: axes are by
+// tag, {"wght": 650, "wdth": 75} say. The instance's outlines, metrics and
+// colour glyphs (COLR's variable paints) are drawn and measured; an axis not
+// named stays at its default, one outside its range is clamped to it, and
+// one the font does not have fails the first render, as a font that does not
+// load does. A variable font given
+// with WithFont is drawn at its default instance. Register the same font
+// more than once, under one family at different weights, to have CSS
+// font-weight choose among instances. Of a collection, its first face is
+// the one registered.
+func WithFontInstance(family string, ttf []byte, axes map[string]float64) Option {
+	return func(c *config) {
+		c.fonts = append(c.fonts, fontEntry{family: family, data: ttf, axes: maps.Clone(axes)})
 	}
 }
 

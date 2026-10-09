@@ -68,6 +68,7 @@ Files: `harness_security_test.go` (child-process harness, probe),
 | 15 | Low | `purego.go`, `internal/fontsubset` | `SubsetFont` returns an unsanitized PostScript name; `SVGToPDF` and `SubsetFont` have no `recover` |
 | 16 | Low | `internal/loader` | `FileLoader.Load` has no size cap; `HTTPLoader` 64 MiB default times parse amplification |
 | 17 | Low | `internal/vegalite` | Compiler panics (nil dereference) on an unknown `mark` type and on a non-drag `translate`; recovered as "internal error" |
+| 18 | Medium | `internal/raster`, `internal/svgpdf`, `internal/text` | Colour glyphs and mapped system fonts (added after the review): an unbounded image sampling loop, three PDF painter faults, and a process crash on a truncated system font |
 
 Verified safe (no finding): expression sandbox, expression / JSON / group
 nesting, XML entities in `SVGToPNG` / `SVGToPDF`, `data:` image limits, PDF
@@ -424,6 +425,34 @@ legend/guide layout, `collide`/`nbody`/link forces (poll per node batch, cap
   message about the invalid spec, and every such panic is a path whose state (lock, lazy signals) relies on
   the deferred cleanup. Fix: validate `mark` against the known mark types in `normalize`, and check the
   selector shape before indexing.
+
+## 18. Medium: colour glyphs and mapped system fonts
+
+**Status: Fixed. Added after the review, with the colour glyph painters (#67). Found by the fuzz targets below and by reading the code.**
+
+Scope: what a colour font given with `WithFont` (untrusted, by the threat model) or found by `WithSystemFonts` makes aster do. forme bounds the painting of one glyph: a COLR glyph whose painting runs past its work budget is refused before anything is painted (`shape.ErrPaintLimit`), and is then drawn from its outline. aster's side:
+
+- PNG (`internal/raster/colour.go`): each colour glyph is painted into layers that come from the rasterizer's pool, under `MaxLayerDepth` and `MaxCanvasBytes`. Groups nested past the depth are painted into the layer beneath rather than failing the render, so a font cannot fail a chart. Clip masks are bounded by the glyph's device box, and every fill is charged to `MaxPixelOps`.
+- PDF (`internal/svgpdf/colour.go`, `colourgroup.go`): a glyph is painted once per size and turn and reused (`paintedKey`), and its forms and shadings are deduplicated by content. So a glyph repeated 10,000 times costs one painting. A repeated gradient's function has at most 512 periods, and a sweep's mesh 720 triangles.
+- Bitmap glyphs decode through `imageref` with the image limits; decoded PNGs are cached per render (at most 256).
+- OpenType SVG glyph documents are font data, so as untrusted as an SVG given to `SVGToPNG`. They are gunzipped to at most `MaxInputBytes`, parsed by the rasterizer's own parser under its limits (and cached, at most 64 a render), and drawn under the same pixel, layer and depth budgets as the page. Text inside one draws its colour glyphs from their outlines, so a glyph cannot draw itself.
+
+Found and fixed:
+
+- **Unbounded image sampling (raster).** Averaging a device pixel's footprint visited every image pixel under it, including the edge copies past the image. An image box shrunk to nothing by a glyph's transform (a box 10^25 units wide and 10^-38 high, from `FuzzColourPainter`) looped on the order of 10^25 times. The loop is now clamped to the image, the edge pixels weighted for what lies beyond them. `TestImageShrunkToNothing` times it out on the old code. An `<image>` element was not found to reach it, because a box that thin covers no pixel and is never sampled.
+- **PDF painter faults (svgpdf), from `FuzzColourPainter`:** a PNG image with no bytes indexed an empty slice; two different EBDT masks of one size and colour shared one cached image, which drew the wrong glyph; and a Porter-Duff operator onto a backdrop with a clip open in it dropped the clip's `q`, leaving a stray `Q` that corrupts the page. forme does not paint the last two, but the painter now ignores pops it was not given pushes for, closes what a painting leaves open (`unwind`), and composites source-over in that case. `TestColourPainterUnbalanced`.
+- **A truncated system font kills the process (text).** `WithSystemFonts` maps font files into memory read-only instead of reading them (Apple Color Emoji is 190 MB). If such a file is truncated while a face of it is in use (a font being updated, or a user-writable font directory such as `~/Library/Fonts` or `~/.fonts` changed by another process), reading the pages past the new end faults, and Go ends the process (`fatal error: fault`, `SIGBUS`). Reads of a mapped face now run with `debug.SetPanicOnFault(true)`, so the fault is a panic that the text package's existing `recover` turns into an error or nothing drawn. Tables and programs it hands out are copied out of the mapping. `TestTruncatedAppleColorEmoji` truncates a copy of Apple Color Emoji while it is drawing: it crashes the process without the guard and returns an error with it.
+  - Residual: a fault in code outside the text package that reads mapped bytes would still end the process; the package copies everything it hands out so that none does. And a file changed in place, rather than truncated, is read as changed: the font is whatever the file says, which forme parses as it parses any font.
+
+Fuzz targets (`scripts/fuzz-targets.txt`, nightly):
+
+- `internal/raster` `FuzzColourPainter` and `internal/svgpdf` `FuzzColourPainter` play fuzz bytes as a painting: any sequence of pushes and pops, unbalanced, with NaN and infinite coordinates, out-of-range composite modes and junk images. They go through the PNG painter and its bounds pass, and through the PDF painter and the check that chooses it, which must leave its content balanced. 2.2 million and 0.9 million runs found the faults above and nothing after.
+- `FuzzColourFont` in both packages draws every glyph of a mutated `ColourTest.ttf` or `SbixTest.ttf`, each run within 10 s (`fuzzutil.Within`).
+- `FuzzColourPaintTree` in both packages plays fuzz bytes as a painting of the shape forme paints COLR glyphs in (`fuzzutil.PlayTree`): a tree of fills under transforms and clips, layered or composited, every push matched by its pop. Where the unbalanced targets check survival, these check what is drawn. The PNG painter must paint nothing outside the box the bounds pass finds, which a PDF's image of a glyph is cropped to. The PDF check must send a glyph to an image only for Xor or Plus, and the PDF painter must leave a balanced glyph and balanced forms. They found two faults in the rasterizer, outside the colour glyph code:
+  - A rectangle clip was built as y0 + (y1 − y0), which is 0 rather than −180416 for corners at −2.3e38 and −180416: the far edge moved into view (`TestColourClipRectFarCorners`).
+  - An edge was placed by x0 + (y − y0)·slope from its top end, in which a top end 1e29 pixels away, where a transform can put user coordinates within `coordLimit`, cancelled the position: a triangle reaching that far was not drawn at all. An edge starting more than 2²⁰ pixels above the clip is now placed from where it enters it, from its nearer end (`TestEdgeFarAboveClip`). Nearer edges are untouched: every SVG under `testdata` renders to the same pixels.
+
+System fonts are never a fallback: a spec must name the family, and `WithSystemFonts` must be set. That is for their licences, not for safety (Apple Color Emoji's does not allow drawing it into documents for distribution), and it also keeps what a spec can make aster read to what the host enabled.
 
 ## Documentation to fix with the code
 

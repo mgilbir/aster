@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/mgilbir/forme/shape"
+
 	"github.com/mgilbir/aster/internal/text"
 )
 
@@ -136,6 +138,20 @@ type renderer struct {
 	// lifetime of one render: axis labels repeat digits, so the same glyph
 	// is drawn many times.
 	glyphs map[glyphKey][]text.Segment
+	// glyphBoxes are where the colour glyphs drawn as images go, in font
+	// units, by their image's key.
+	glyphBoxes map[string]shape.Rect
+	// glyphShadings are the colour glyphs' gradients, each written once.
+	glyphShadings map[string]*gradient
+	// forms are the form XObjects drawn, in first-use order, each content
+	// once (see form).
+	forms     []*formDef
+	formIndex map[string]*formDef
+	// pageW and pageH are the page's size, which an inverted soft mask's
+	// BBox covers (see invertedMaskForm).
+	pageW, pageH float64
+	// painted are the colour glyphs painted so far (see paintColourGlyph).
+	painted map[paintedKey]paintedGlyph
 
 	ctx       context.Context
 	lim       Limits
@@ -202,6 +218,7 @@ func render(root *element, shaper TextShaper, fetched map[string][]byte, opts Op
 	// unchanged below this point. Glyph outlines are pre-flipped in
 	// drawText, so text is not mirrored by this.
 	r.w.concat(Matrix{A: 1, B: 0, C: 0, D: -1, E: 0, F: height})
+	r.pageW, r.pageH = width, height
 
 	// viewBox, when present, maps user units onto the width×height viewport.
 	if vb, ok := root.attr("viewBox"); ok {
@@ -217,7 +234,7 @@ func render(root *element, shaper TextShaper, fetched map[string][]byte, opts Op
 	if err := r.children(root, rootState()); err != nil {
 		return nil, nil, nil, nil, paintDefs{}, 0, 0, err
 	}
-	return r.w.stream(), r.w.gsNames, r.fonts, r.images, paintDefs{r.shadings, r.patterns}, width, height, nil
+	return r.w.stream(), r.w.gsNames, r.fonts, r.images, paintDefs{r.shadings, r.patterns, r.forms}, width, height, nil
 }
 
 func viewBoxMatrix(vb string, width, height float64) (Matrix, error) {

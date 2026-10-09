@@ -1,6 +1,7 @@
 package text
 
 import (
+	"bytes"
 	"math"
 	"strings"
 	"sync"
@@ -303,5 +304,31 @@ func TestGenericFamilyOverrides(t *testing.T) {
 		if a, b := plain.MeasureText("The quick brown fox", "13px sans-serif"), plain.MeasureText("The quick brown fox", "13px "+g); a != b {
 			t.Errorf("%s should resolve to sans: %.2f vs %.2f", g, a, b)
 		}
+	}
+}
+
+// TestEmbeddedFacesShareNoRecord: Measurers share the embedded fonts' parse
+// but not their record of the glyphs shaped, which is what a PDF's subset
+// holds. A subset after shaping "A" alone is the same however much another
+// Measurer shapes meanwhile.
+func TestEmbeddedFacesShareNoRecord(t *testing.T) {
+	subsetOf := func(m *Measurer) []byte {
+		runs, _ := m.ShapeText("A", "20px sans-serif")
+		b, err := runs[0].Face.Subset()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	alone, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := subsetOf(alone)
+	other, _ := New()
+	other.ShapeText("The quick brown fox jumps over the lazy dog 0123456789", "20px sans-serif")
+	m, _ := New()
+	if got := subsetOf(m); !bytes.Equal(got, want) {
+		t.Errorf("the subset of a Measurer that shaped \"A\" is %d bytes, %d alone: it holds another's glyphs", len(got), len(want))
 	}
 }

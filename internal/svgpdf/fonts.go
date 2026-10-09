@@ -2,7 +2,6 @@ package svgpdf
 
 import (
 	"bytes"
-	"compress/zlib"
 	"context"
 	"crypto/sha256"
 	"fmt"
@@ -345,13 +344,9 @@ func buildFontObjects(catalog *fontCatalog, nextNum int) (map[int]*pdf0.Indirect
 }
 
 func flateCompress(data []byte) ([]byte, error) {
-	var buf bytes.Buffer
-	zw := zlib.NewWriter(&buf)
-	if _, err := zw.Write(data); err != nil {
+	b, err := compress(data)
+	if err != nil {
 		return nil, fmt.Errorf("svgpdf: compressing stream: %w", err)
 	}
-	if err := zw.Close(); err != nil {
-		return nil, fmt.Errorf("svgpdf: compressing stream: %w", err)
-	}
-	return buf.Bytes(), nil
+	return b, nil
 }

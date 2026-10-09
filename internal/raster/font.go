@@ -6,6 +6,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/mgilbir/forme/shape"
+
 	"github.com/mgilbir/aster/internal/text"
 )
 
@@ -227,7 +229,17 @@ type textFace struct {
 
 // Metrics parses the font's hhea, OS/2 and post tables once.
 func (t *textFace) Metrics() (FaceMetrics, bool) {
-	t.once.Do(func() { t.fm, t.fmOK = parseFaceMetrics(t.f.Program(), t.UnitsPerEm()) })
+	t.once.Do(func() {
+		// The tables are read where they are: a face of a large collection is
+		// not copied out into a program of its own.
+		tables := map[string][]byte{}
+		for _, tag := range []string{"hhea", "OS/2", "post"} {
+			if tb := t.f.Table(tag); tb != nil {
+				tables[tag] = tb
+			}
+		}
+		t.fm, t.fmOK = faceMetricsOf(tables, t.UnitsPerEm())
+	})
 	return t.fm, t.fmOK
 }
 
@@ -271,6 +283,16 @@ func (t *textFace) Outline(gid uint32, sink OutlineSink) bool {
 		}
 	}
 	return true
+}
+
+// Colour reports whether glyph gid is painted rather than filled from its
+// outline: a COLR, SVG, sbix, CBDT or EBDT glyph.
+func (t *textFace) Colour(gid uint32, ppem int) bool {
+	return text.GlyphColour(t.f, int(gid), shape.PaintOptions{PPEM: ppem}) != shape.ColourNone
+}
+
+func (t *textFace) Paint(gid uint32, opts shape.PaintOptions, p shape.Painter) error {
+	return text.PaintGlyph(t.f, int(gid), opts, p)
 }
 
 var emptyPath = &path{}

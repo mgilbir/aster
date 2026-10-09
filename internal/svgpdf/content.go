@@ -17,6 +17,7 @@ type contentWriter struct {
 	// ExtGState registry: opacity values are applied through /GSn gs.
 	// gsNames preserves first-use order so output is deterministic.
 	gsIndex map[alphaPair]string
+	gsKeyed map[string]string // the other ExtGStates (see stateGS), by key
 	gsNames []gsEntry
 
 	// cur mirrors the graphics-state parameters this writer emits
@@ -75,6 +76,15 @@ type alphaPair struct {
 type gsEntry struct {
 	name  string
 	alpha alphaPair
+	// A blend mode, or a soft mask: the alpha of a transparency group, the
+	// form XObject named mask, inverted when maskInvert is set. An entry with
+	// either sets nothing else.
+	bm         string
+	mask       string
+	maskInvert bool
+	// maskLuminosity makes the soft mask the group's luminosity rather than
+	// its alpha.
+	maskLuminosity bool
 }
 
 func newContentWriter() *contentWriter {
@@ -304,6 +314,24 @@ func (w *contentWriter) opacity(fillAlpha, strokeAlpha float64) {
 		name = fmt.Sprintf("GS%d", len(w.gsNames))
 		w.gsIndex[key] = name
 		w.gsNames = append(w.gsNames, gsEntry{name: name, alpha: key})
+	}
+	w.buf = append(w.buf, '/')
+	w.buf = append(w.buf, name...)
+	w.buf = append(w.buf, " gs\n"...)
+}
+
+// stateGS sets an ExtGState with a blend mode or a soft mask, registering it
+// under key on first use.
+func (w *contentWriter) stateGS(key string, e gsEntry) {
+	name, ok := w.gsKeyed[key]
+	if !ok {
+		name = fmt.Sprintf("GS%d", len(w.gsNames))
+		if w.gsKeyed == nil {
+			w.gsKeyed = map[string]string{}
+		}
+		w.gsKeyed[key] = name
+		e.name = name
+		w.gsNames = append(w.gsNames, e)
 	}
 	w.buf = append(w.buf, '/')
 	w.buf = append(w.buf, name...)

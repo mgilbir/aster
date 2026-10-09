@@ -62,6 +62,28 @@ jobs:
       - name: go test -race
         run: go test -short -race -timeout 30m ./...
 
+  pdfium:
+    # aster's PDFs read back with PDFium, Chrome's PDF engine, and compared
+    # with its PNGs: what the colour glyph painters draw, not only what they
+    # write (TestPDFium*). pypdfium2 is pinned by digest.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: install pypdfium2
+        run: |
+          python -m venv "$RUNNER_TEMP/pdfium"
+          "$RUNNER_TEMP/pdfium/bin/pip" install --require-hashes -r scripts/pdfium/requirements.txt
+      - name: PDFs read back with PDFium
+        env:
+          ASTER_PDFIUM: ${{ runner.temp }}/pdfium/bin/python
+        run: go test -count=1 -run 'TestPDFium' -v ./internal/svgpdf
+
   fmacheck:
     # The engine must not let the compiler fuse multiply-adds where upstream
     # (V8) rounds each product; the script cross-compiles for arm64 on any host.

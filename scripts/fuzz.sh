@@ -10,6 +10,12 @@
 # is written under the package's testdata/fuzz/<Target>/; the script goes on
 # with the other targets and exits 1 at the end if any failed.
 #
+# Each new input the fuzzer finds interesting, and a failing one, is
+# minimized for up to FUZZMINIMIZETIME (10s by default, where go test's is
+# 60s) before fuzzing goes on: no input is run meanwhile, and on a target
+# whose inputs are slow, a minute a find was most of the run. A failing input
+# is written all the same, minimized for less long.
+#
 # go test -fuzz can fail with only "context deadline exceeded" when -fuzztime
 # runs out while it is still minimizing a new input (most likely on a cold
 # corpus): nothing crashed and no input is written. Such a run counts as a
@@ -33,7 +39,7 @@ cd "$here/.."
 
 fuzz_one() { # pkg target fuzztime
 	out=$(mktemp)
-	go test -run='^$' -fuzz="^$2\$" -fuzztime="$3" "$1" 2>&1 | tee "$out"
+	go test -run='^$' -fuzz="^$2\$" -fuzztime="$3" -fuzzminimizetime="${FUZZMINIMIZETIME:-10s}" "$1" 2>&1 | tee "$out"
 	if grep -q '^ok' "$out"; then
 		rm -f "$out"
 		return 0

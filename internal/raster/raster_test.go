@@ -307,3 +307,24 @@ func TestConcurrentRender(t *testing.T) {
 		}
 	}
 }
+
+// TestEdgeFarAboveClip draws a triangle whose corner a transform puts 1e29
+// pixels up and out, its user coordinates within coordLimit: near the canvas
+// its sides run at -45 degrees, from x 50 to 60 at y 0 and 0 to 10 at y 49.
+// An edge's x was p.x + (y - p.y)*slope from that far corner, in which
+// 1e29 - 1e29 cancelled the position away, and nothing was drawn.
+func TestEdgeFarAboveClip(t *testing.T) {
+	img, err := Render([]byte(`<svg xmlns="http://www.w3.org/2000/svg" width="100" height="60"><g transform="matrix(1e20 0 0 1e20 0 0)">`+
+		`<path d="M1e9 -1e9 L1e-19 5e-19 L0 5e-19 Z" fill="#000"/></g></svg>`), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		x, y    int
+		painted bool
+	}{{55, 0, true}, {35, 20, true}, {5, 49, true}, {30, 0, false}, {70, 0, false}, {20, 49, false}} {
+		if _, _, _, a := img.At(c.x, c.y).RGBA(); (a > 0x8000) != c.painted {
+			t.Errorf("(%d, %d): alpha %d, painted want %v", c.x, c.y, a>>8, c.painted)
+		}
+	}
+}
