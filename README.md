@@ -373,6 +373,13 @@ ASTER_FUZZ=3000 go test -run TestFuzzDifferential -v -timeout 3h .
 
 `go test -short ./...` needs no node: the unit tests replay vectors recorded from upstream (by the generators under each package's `testdata/`).
 
+Colour glyphs are checked against HarfBuzz's drawing of the same fonts (`hb-view`, images in `testdata/colourfonts`, among them a subset of Noto Color Emoji), and aster's PDFs are read back with PDFium, Chrome's PDF engine, and compared with its PNGs (`TestPDFium*`). Those need a Python with pypdfium2, pinned in `scripts/pdfium/requirements.txt`, and skip without one:
+
+```sh
+python3 -m venv .pdfium && .pdfium/bin/pip install --require-hashes -r scripts/pdfium/requirements.txt
+ASTER_PDFIUM=.pdfium/bin/python go test ./internal/svgpdf -run TestPDFium
+```
+
 Upstream's own test suites are replayed too. `scripts/record-upstream-vectors.sh` runs the test files of Vega's and d3's packages (from the git tag of the installed version) against the installed packages and records every call they make with upstream's answer, in `testdata/upstream-vectors-cache` (git-ignored, derived). The `TestUpstream*` tests in `internal/` replay those calls against the engine and compare exactly; they skip without the vectors, and fail with `ASTER_ORACLE=require`. Where the engine and upstream differ, the difference is listed, with its reason, in `testdata/upstream-vectors/known-divergences.txt`, and asserted both ways: an unlisted difference fails, and so does a listed one that has gone away.
 
 ### Building from source

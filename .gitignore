@@ -51,3 +51,4 @@ testdata/corpora-cache/
 testdata/upstream-vectors-cache/
 testdata/upstream-clones/
 testdata/oracle-node/.recorder-scratch/
+/.pdfium/
