@@ -722,10 +722,9 @@ func spread(e shape.Extend, t float64) float64 {
 	case shape.ExtendRepeat:
 		return t - math.Floor(t)
 	case shape.ExtendReflect:
-		t = math.Mod(t, 2)
-		if t < 0 {
-			t += 2
-		}
+		// t mod 2, in [0, 2): math.Mod takes a step a bit of the
+		// exponent, which a parameter far out, 1e38 say, makes slow.
+		t -= 2 * math.Floor(t/2)
 		if t > 1 {
 			t = 2 - t
 		}
