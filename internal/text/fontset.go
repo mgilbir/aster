@@ -28,6 +28,7 @@ func (e *entry) load(m *Measurer) *Face {
 		e.dead = true
 		return nil
 	}
+	m.applyPalette(f)
 	e.face = f
 	return f
 }

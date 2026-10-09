@@ -147,8 +147,10 @@ COLOR = {
 
 V0 = {"u1F534": [(SQ, 0), (TRI, 1)]}
 
-# Red, blue, and green.
-PALETTES = [[(0.9, 0.1, 0.1, 1.0), (0.1, 0.2, 0.9, 1.0), (0.1, 0.7, 0.2, 1.0)]]
+# Red, blue, and green; and a second palette, for WithFontPalette: yellow,
+# black, and magenta.
+PALETTES = [[(0.9, 0.1, 0.1, 1.0), (0.1, 0.2, 0.9, 1.0), (0.1, 0.7, 0.2, 1.0)],
+            [(0.95, 0.8, 0.1, 1.0), (0.1, 0.1, 0.1, 1.0), (0.8, 0.1, 0.7, 1.0)]]
 
 
 def base(family, order, cmap, outlines):

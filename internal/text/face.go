@@ -40,7 +40,10 @@ type Face struct {
 	src    []byte // the font file the face was loaded from
 	index  int    // which face of src, a collection, it is; 0 for a single font
 	mapped bool   // src is a system font file mapped into memory (see guard)
-	upem   int
+	// palette is the CPAL palette its colour glyphs are painted with
+	// (WithFontPalette).
+	palette int
+	upem    int
 
 	progOnce sync.Once
 	prog     []byte

@@ -600,6 +600,9 @@ func (c *Converter) fontOptions() []text.Option {
 			opts = append(opts, text.WithFont(f.family, f.data))
 		}
 	}
+	for _, p := range c.cfg.palettes {
+		opts = append(opts, text.WithFontPalette(p.family, p.index))
+	}
 	if f := c.cfg.defaultFontFamily; f != "" {
 		opts = append(opts, text.WithDefaultFontFamily(f))
 	}

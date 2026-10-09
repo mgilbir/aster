@@ -22,6 +22,7 @@ func GlyphColour(f *Face, gid int, opts shape.PaintOptions) (c shape.GlyphColour
 		}
 	}()
 	defer f.guard()()
+	opts.Palette = f.palette
 	return f.shape.GlyphColourFor(gid, opts)
 }
 
@@ -29,7 +30,8 @@ func GlyphColour(f *Face, gid int, opts shape.PaintOptions) (c shape.GlyphColour
 // does: its COLR paints, its SVG document, its CBDT or sbix image, its EBDT
 // or bdat image as a mask in the foreground, or failing all of them its
 // outline in the foreground. Coordinates are in font units with y pointing
-// up, the origin on the baseline at the glyph's pen position.
+// up, the origin on the baseline at the glyph's pen position. Its colours
+// are from the face's palette (WithFontPalette), whatever opts.Palette says.
 //
 // forme refuses a COLR glyph whose painting runs past its bounds before p is
 // called (shape.ErrPaintLimit). A panic, from a malformed font or from p, is
@@ -45,5 +47,6 @@ func PaintGlyph(f *Face, gid int, opts shape.PaintOptions, p shape.Painter) (err
 		}
 	}()
 	defer f.guard()()
+	opts.Palette = f.palette
 	return f.shape.PaintGlyph(gid, opts, p)
 }

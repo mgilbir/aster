@@ -281,3 +281,39 @@ func TestFontCollection(t *testing.T) {
 		t.Errorf("%v, want the bitmap's purple", got)
 	}
 }
+
+// TestFontPalette draws ColourTest's U+1F534, a square in palette colour 0,
+// with its second palette, where colour 0 is yellow, in PNG and PDF.
+func TestFontPalette(t *testing.T) {
+	data, err := os.ReadFile("testdata/colourfonts/ColourTest.ttf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	conv, err := aster.New(aster.WithFont("C", data), aster.WithFontPalette("C", 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conv.Close()
+	spec := []byte(`{"width": 100, "height": 100, "padding": 0, "background": "white",
+  "marks": [{"type": "text", "encode": {"enter": {"x": {"value": 0}, "y": {"value": 80},
+    "text": {"value": "🔴"}, "font": {"value": "C"}, "fontSize": {"value": 60}}}}]}`)
+	out, err := conv.VegaToPNG(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	img, err := png.Decode(bytes.NewReader(out))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The square's top left, above the triangle.
+	if got := color.NRGBAModel.Convert(img.At(8, 40)).(color.NRGBA); !closeTo(got, color.NRGBA{242, 204, 26, 255}) {
+		t.Errorf("PNG: %v, want the second palette's yellow", got)
+	}
+	pdf, err := conv.VegaToPDF(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(pdfContent(t, pdf), []byte("0.949 0.8 0.102 rg")) {
+		t.Error("PDF: no fill in the second palette's yellow")
+	}
+}

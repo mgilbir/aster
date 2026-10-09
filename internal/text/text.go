@@ -69,6 +69,7 @@ type config struct {
 	exact           bool
 	pango           pangoMode
 	fonts           []customFont
+	palettes        map[string]int // by normalised family, WithFontPalette
 	fallbackFamily  string
 	serifFamily     string
 	monospaceFamily string
@@ -103,6 +104,20 @@ func WithFont(family string, ttf []byte) Option {
 func WithFontFace(family string, ttc []byte, index int) Option {
 	return func(c *config) {
 		c.fonts = append(c.fonts, customFont{family: family, data: ttc, index: max(0, index)})
+	}
+}
+
+// WithFontPalette draws the colour glyphs of family's faces (COLR's, which
+// CPAL colours) with palette index, from 0, of their font's palettes, rather
+// than its first: a font's dark-mode palette, say. It applies to every face
+// of the family, given with WithFont, found with WithSystemFonts, or
+// embedded; a palette a font does not have is its first, as forme takes it.
+func WithFontPalette(family string, index int) Option {
+	return func(c *config) {
+		if c.palettes == nil {
+			c.palettes = map[string]int{}
+		}
+		c.palettes[normFamily(family)] = max(0, index)
 	}
 }
 
@@ -224,6 +239,7 @@ type measurerState struct {
 	monospaceFamily string
 	system          *systemIndex // nil unless WithSystemFonts
 	sysEntries      map[sysKey]*entry
+	palettes        map[string]int // WithFontPalette's, by normalised family
 
 	cssCache   map[string]CSSFont
 	listCache  map[listKey]*faceList
@@ -250,6 +266,7 @@ func New(opts ...Option) (*Measurer, error) {
 		fallbackFamily:  orDefault(cfg.fallbackFamily, "Liberation Sans"),
 		serifFamily:     orDefault(cfg.serifFamily, "Liberation Serif"),
 		monospaceFamily: orDefault(cfg.monospaceFamily, "Liberation Mono"),
+		palettes:        cfg.palettes,
 	}}
 
 	// Embedded fonts are registered first; Noto Emoji last among them so it
@@ -322,6 +339,13 @@ func New(opts ...Option) (*Measurer, error) {
 	return m, nil
 }
 
+// applyPalette sets the palette WithFontPalette names for f's family.
+func (m *Measurer) applyPalette(f *Face) {
+	if f != nil {
+		f.palette = m.palettes[normFamily(f.Family)]
+	}
+}
+
 func orDefault(s, d string) string {
 	if s == "" {
 		return d
@@ -331,6 +355,7 @@ func orDefault(s, d string) string {
 
 func (m *Measurer) add(e *entry) {
 	e.norm = normFamily(e.family)
+	m.applyPalette(e.face)
 	if e.face != nil {
 		e.weight, e.italic = e.face.Weight, e.face.Italic
 		if m.first == nil {

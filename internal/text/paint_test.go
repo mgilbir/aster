@@ -205,3 +205,36 @@ func TestWithFontInstance(t *testing.T) {
 		}
 	}
 }
+
+func TestWithFontPalette(t *testing.T) {
+	data, err := os.ReadFile("../../testdata/colourfonts/ColourTest.ttf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// U+1F534 is a square in palette colour 0 under a triangle in 1: red and
+	// blue in the first palette, yellow and black in the second.
+	for _, c := range []struct {
+		opts []Option
+		want string
+	}{
+		{nil, "Solid {230 26 26 255} false|PopClip|PushClipGlyph|Solid {26 51 230 255}"},
+		{[]Option{WithFontPalette("Colour Test", 1)}, "Solid {242 204 26 255} false|PopClip|PushClipGlyph|Solid {26 26 26 255}"},
+		// One the font does not have is its first.
+		{[]Option{WithFontPalette("colourtest", 7)}, "Solid {230 26 26 255} false|PopClip|PushClipGlyph|Solid {26 51 230 255}"},
+		// Another family's palette is not this one's.
+		{[]Option{WithFontPalette("Other", 1)}, "Solid {230 26 26 255} false|PopClip|PushClipGlyph|Solid {26 51 230 255}"},
+	} {
+		m, err := New(append([]Option{WithFont("ColourTest", data)}, c.opts...)...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		runs, _ := m.ShapeText("\U0001F534", "20px ColourTest")
+		var rec recorder
+		if err := PaintGlyph(runs[0].Face, runs[0].Glyphs[0].GID, shape.PaintOptions{}, &rec); err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Join(rec.calls, "|"); !strings.Contains(got, c.want) {
+			t.Errorf("painted %s, want %s", got, c.want)
+		}
+	}
+}

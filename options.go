@@ -16,6 +16,12 @@ type fontEntry struct {
 	face   int                // WithFontFace's face of a collection; -1 for every face
 }
 
+// fontPalette is a family's colour palette, WithFontPalette's.
+type fontPalette struct {
+	family string
+	index  int
+}
+
 type config struct {
 	loader                 Loader
 	theme                  string
@@ -25,6 +31,7 @@ type config struct {
 	vegaLiteVersion        string // human-readable, e.g. "6.4"
 	systemFonts            bool
 	fonts                  []fontEntry
+	palettes               []fontPalette // WithFontPalette, in order
 	defaultFontFamily      string
 	defaultSerifFamily     string
 	defaultMonospaceFamily string
@@ -135,6 +142,17 @@ func WithFont(family string, ttf []byte) Option {
 func WithFontFace(family string, ttc []byte, index int) Option {
 	return func(c *config) {
 		c.fonts = append(c.fonts, fontEntry{family: family, data: ttc, face: max(0, index)})
+	}
+}
+
+// WithFontPalette draws the colour glyphs (COLR, coloured by CPAL) of
+// family's fonts with their palette index, from 0, rather than the first:
+// a font's dark-mode palette, say. It applies to every font of the family,
+// given with WithFont, found with WithSystemFonts, or embedded; a palette a
+// font does not have is its first. A later call for a family wins.
+func WithFontPalette(family string, index int) Option {
+	return func(c *config) {
+		c.palettes = append(c.palettes, fontPalette{family, index})
 	}
 }
 
