@@ -1,8 +1,6 @@
 package svgpdf
 
 import (
-	"bytes"
-	"compress/zlib"
 	"fmt"
 	"math"
 	"strings"
@@ -21,12 +19,8 @@ type formDef struct {
 
 // stream is the form's XObject, drawing with resources.
 func (f *formDef) stream(resources pdf0.Object) (*pdf0.Stream, error) {
-	var b bytes.Buffer
-	zw := zlib.NewWriter(&b)
-	if _, err := zw.Write(f.content); err != nil {
-		return nil, fmt.Errorf("svgpdf: compressing a form: %w", err)
-	}
-	if err := zw.Close(); err != nil {
+	data, err := compress(f.content)
+	if err != nil {
 		return nil, fmt.Errorf("svgpdf: compressing a form: %w", err)
 	}
 	group := &pdf0.Dictionary{}
@@ -34,14 +28,14 @@ func (f *formDef) stream(resources pdf0.Object) (*pdf0.Stream, error) {
 	group.Set("S", pdf0.Name("Transparency"))
 	group.Set("CS", pdf0.Name("DeviceRGB"))
 	group.Set("I", pdf0.Boolean(true))
-	s := &pdf0.Stream{Data: b.Bytes()}
+	s := &pdf0.Stream{Data: data}
 	s.Dict.Set("Type", pdf0.Name("XObject"))
 	s.Dict.Set("Subtype", pdf0.Name("Form"))
 	s.Dict.Set("BBox", pdf0.Array{pdf0.Real(f.bbox[0]), pdf0.Real(f.bbox[1]), pdf0.Real(f.bbox[2]), pdf0.Real(f.bbox[3])})
 	s.Dict.Set("Group", group)
 	s.Dict.Set("Resources", resources)
 	s.Dict.Set("Filter", pdf0.Name("FlateDecode"))
-	s.Dict.Set("Length", pdf0.Integer(b.Len()))
+	s.Dict.Set("Length", pdf0.Integer(len(data)))
 	return s, nil
 }
 

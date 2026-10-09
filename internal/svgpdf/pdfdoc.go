@@ -2,7 +2,6 @@ package svgpdf
 
 import (
 	"bytes"
-	"compress/zlib"
 	"fmt"
 
 	pdf0 "github.com/mgilbir/pdf0"
@@ -180,13 +179,7 @@ func buildPDF(content [][]byte, gsList []gsEntry, fonts *fontCatalog, images *im
 	// Object 4: content stream, Flate-compressed. zlib output is
 	// deterministic for a given input and compression level.
 	var compressed bytes.Buffer
-	zw := zlib.NewWriter(&compressed)
-	for _, chunk := range content {
-		if _, err := zw.Write(chunk); err != nil {
-			return nil, fmt.Errorf("svgpdf: compressing content stream: %w", err)
-		}
-	}
-	if err := zw.Close(); err != nil {
+	if err := compressTo(&compressed, content...); err != nil {
 		return nil, fmt.Errorf("svgpdf: compressing content stream: %w", err)
 	}
 	contents := &pdf0.Stream{Data: compressed.Bytes()}

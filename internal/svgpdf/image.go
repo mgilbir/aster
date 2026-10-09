@@ -1,8 +1,6 @@
 package svgpdf
 
 import (
-	"bytes"
-	"compress/zlib"
 	"errors"
 	"fmt"
 	"image"
@@ -194,15 +192,11 @@ func encodeNRGBA(nrgba *image.NRGBA) (*pdfImage, error) {
 // deflate is zlib at the default level, which is deterministic for a given
 // input.
 func deflate(b []byte) ([]byte, error) {
-	var out bytes.Buffer
-	zw := zlib.NewWriter(&out)
-	if _, err := zw.Write(b); err != nil {
+	out, err := compress(b)
+	if err != nil {
 		return nil, fmt.Errorf("svgpdf: compressing image: %w", err)
 	}
-	if err := zw.Close(); err != nil {
-		return nil, fmt.Errorf("svgpdf: compressing image: %w", err)
-	}
-	return out.Bytes(), nil
+	return out, nil
 }
 
 // drawImage draws an <image> into its box (x, y, width, height), placed as
