@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -307,7 +308,7 @@ func (o *Oracle) start() (*proc, error) {
 	go func() {
 		defer close(lines)
 		sc := bufio.NewScanner(stdout)
-		sc.Buffer(make([]byte, 1<<20), 1<<31)
+		sc.Buffer(make([]byte, 1<<20), math.MaxInt32)
 		for sc.Scan() {
 			lines <- append([]byte(nil), sc.Bytes()...)
 		}

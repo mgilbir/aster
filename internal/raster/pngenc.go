@@ -9,6 +9,7 @@ import (
 	"hash/crc32"
 	"image"
 	"io"
+	"math/bits"
 	"sync"
 )
 
@@ -138,12 +139,12 @@ func (e *pngEncoder) writeRows(img *image.NRGBA, b image.Rectangle, bpp int, opa
 // without a branch.
 func abs8(d uint8) int {
 	s := int(int8(d))
-	m := s >> 63
+	m := s >> (bits.UintSize - 1)
 	return (s ^ m) - m
 }
 
 func absInt(x int) int {
-	m := x >> 63
+	m := x >> (bits.UintSize - 1)
 	return (x ^ m) - m
 }
 

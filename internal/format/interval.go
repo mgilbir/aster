@@ -38,11 +38,11 @@ type Interval struct {
 	weekday int // kWeek: the day the week starts on, 0 = Sunday
 	// k > 0 marks the optimised millisecond.every(k) / year.every(k)
 	// intervals: they floor to multiples of k and step by k units.
-	k int
+	k int64
 	// filter > 0 is interval.every(filter): the parent interval restricted to
 	// the boundaries that pass a divisibility test. Such an interval has no
 	// count or every of its own.
-	filter int
+	filter int64
 }
 
 // Millisecond is d3.timeMillisecond (identical in every zone).
@@ -517,9 +517,10 @@ func (iv Interval) Every(step float64) (Interval, bool) {
 	return out, true
 }
 
-func clampStep(f float64) int {
+// clampStep is int64 so that a step is the same on 32-bit platforms.
+func clampStep(f float64) int64 {
 	if f > 1<<40 {
 		return 1 << 40
 	}
-	return int(f)
+	return int64(f)
 }

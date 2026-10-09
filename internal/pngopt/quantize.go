@@ -7,6 +7,7 @@ import (
 	"image/draw"
 	"image/png"
 	"log/slog"
+	"math"
 	"slices"
 )
 
@@ -298,7 +299,7 @@ func ditherIndex(src *image.NRGBA, palette color.Palette, exact map[uint32]uint8
 			return idx
 		}
 		kr, kg, kb, ka := channelOf(key, 0), channelOf(key, 1), channelOf(key, 2), channelOf(key, 3)
-		best, bestDist := 0, 1<<62
+		best, bestDist := 0, math.MaxInt
 		for i, p := range pal {
 			dr, dg, db, da := kr-p[0], kg-p[1], kb-p[2], ka-p[3]
 			d := dr*dr + dg*dg + db*db + da*da
