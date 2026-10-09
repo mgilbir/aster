@@ -223,6 +223,42 @@ func newFaceInstance(id, family string, data []byte, index int, axes map[string]
 	return f, nil
 }
 
+// embeddedParses are the embedded fonts as forme parsed them, once per
+// process, by id.
+var embeddedParses struct {
+	sync.Mutex
+	m map[string]*shape.Face
+}
+
+// embeddedFace is the Face of an embedded font for one Measurer: a clone of
+// the font as parsed once per process, which shares the parse and its
+// caches and has a record of its own of the glyphs it shapes, what a PDF's
+// subset of it holds. Reading the 13 embedded fonts again for each
+// Measurer cost 3.4 ms and 4 MB.
+func embeddedFace(id, family string, weight int, italic bool, data []byte) (*Face, error) {
+	embeddedParses.Lock()
+	sf, ok := embeddedParses.m[id]
+	embeddedParses.Unlock()
+	if !ok {
+		parsed, err := shape.Load(data)
+		if err != nil {
+			return nil, fmt.Errorf("text: loading font %q: %w", family, err)
+		}
+		embeddedParses.Lock()
+		if embeddedParses.m == nil {
+			embeddedParses.m = map[string]*shape.Face{}
+		}
+		if seen, ok := embeddedParses.m[id]; ok {
+			parsed = seen
+		} else {
+			embeddedParses.m[id] = parsed
+		}
+		embeddedParses.Unlock()
+		sf = parsed
+	}
+	return faceOf(id, family, weight, italic, sf.Clone(), data, 0, false)
+}
+
 // newFaceAt is newFace for face index of data, which may be a collection,
 // and which is a system font file mapped into memory when mapped is set.
 func newFaceAt(id, family string, weight int, italic bool, data []byte, index int, mapped bool) (f *Face, err error) {

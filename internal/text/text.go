@@ -275,7 +275,7 @@ func New(opts ...Option) (*Measurer, error) {
 		{liberation.SerifBoldItalic, "liberation-serif-bolditalic", "Liberation Serif", 700, true},
 		{notoemoji.Regular, "noto-emoji", notoemoji.Family, 400, false},
 	} {
-		f, err := newFace(e.id, e.family, e.weight, e.italic, e.data)
+		f, err := embeddedFace(e.id, e.family, e.weight, e.italic, e.data)
 		if err != nil {
 			return nil, fmt.Errorf("text: embedded font %s: %w", e.id, err)
 		}
