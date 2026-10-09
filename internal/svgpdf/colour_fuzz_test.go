@@ -73,3 +73,61 @@ func FuzzColourFont(f *testing.F) {
 		})
 	})
 }
+
+// modes notes the composite modes a painting uses.
+type modes struct {
+	colourCheck
+	used map[shape.CompositeMode]bool
+}
+
+func (m *modes) PopGroup(mode shape.CompositeMode) {
+	m.used[mode] = true
+	m.colourCheck.PopGroup(mode)
+}
+
+// FuzzColourPaintTree paints trees of the shape forme paints COLR glyphs
+// in, every push matched by its pop, through the PDF painter: what it
+// writes, and each form, is balanced, and the check sends a glyph to an
+// image only for Xor or Plus, which PDF cannot draw; all else is vectors.
+func FuzzColourPaintTree(f *testing.F) {
+	for _, s := range fuzzutil.TreeSeeds() {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, ops []byte) {
+		fuzzutil.Within(t, 10*time.Second, "painting", func() {
+			m := &modes{used: map[shape.CompositeMode]bool{}}
+			fuzzutil.PlayTree(ops, m)
+			if want := !m.used[shape.CompositeXor] && !m.used[shape.CompositePlus]; m.vector() != want {
+				t.Fatalf("drawn as vectors: %v, want %v for modes %v", m.vector(), want, m.used)
+			}
+			r := &renderer{w: newContentWriter(), images: newImageCatalog(nil, Limits{}.withDefaults()), lim: Limits{}.withDefaults(), pageW: 100, pageH: 100}
+			p := &pdfPainter{r: r, upem: 1000, box: shape.Rect{XMax: 1000, YMax: 1000}, m: []Matrix{Identity()}}
+			p.beginGroup()
+			fuzzutil.PlayTree(ops, p)
+			if len(p.groups) != 1 || p.depth != 0 {
+				t.Fatalf("a balanced painting left %d groups and %d clips open", len(p.groups)-1, p.depth)
+			}
+			p.unwind()
+			balanced := func(what, c string) {
+				depth := 0
+				for _, tok := range strings.Fields(c) {
+					switch tok {
+					case "q":
+						depth++
+					case "Q":
+						if depth--; depth < 0 {
+							t.Fatalf("%s: unbalanced Q:\n%s", what, c)
+						}
+					}
+				}
+				if depth != 0 {
+					t.Fatalf("%s: %d q left open:\n%s", what, depth, c)
+				}
+			}
+			balanced("the glyph", string(p.endGroup()))
+			for _, fm := range r.forms {
+				balanced("form "+fm.res, string(fm.content))
+			}
+		})
+	})
+}

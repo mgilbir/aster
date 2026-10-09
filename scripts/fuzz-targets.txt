@@ -18,10 +18,12 @@
 ./internal/svgpdf	FuzzParseSVGFast	10
 ./internal/svgpdf	FuzzColourPainter	10
 ./internal/svgpdf	FuzzColourFont	10
+./internal/svgpdf	FuzzColourPaintTree	10
 ./internal/raster	FuzzRender	10
 ./internal/raster	FuzzParseDocument	10
 ./internal/raster	FuzzColourPainter	10
 ./internal/raster	FuzzColourFont	10
+./internal/raster	FuzzColourPaintTree	10
 ./internal/raster	FuzzPathData	5
 ./internal/raster	FuzzColorAndTransform	5
 ./internal/raster	FuzzCSS	5
