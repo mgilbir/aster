@@ -2,6 +2,7 @@ package raster
 
 import (
 	"errors"
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
@@ -400,3 +401,59 @@ func TestColourGlyphGradientFill(t *testing.T) {
 		t.Errorf("the triangle at its right is %v, want bluer than at its left, %v", right, left)
 	}
 }
+
+// TestNotoMatchesHarfBuzz draws a subset of Noto Color Emoji, a real COLRv1
+// font (testdata/colourfonts/noto.py), as testdata/colourfonts/noto-hb-view.png
+// has HarfBuzz draw it: faces, gradients and composites, a flag, a ZWJ
+// sequence and a skin tone.
+func TestNotoMatchesHarfBuzz(t *testing.T) {
+	data, err := os.ReadFile("../../testdata/colourfonts/NotoColorEmojiSubset.ttf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open("../../testdata/colourfonts/noto-hb-view.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref, err := png.Decode(f)
+	f.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := ref.Bounds()
+	// hb-view's margin is 10, its baseline the ascent, 950 of 1024 units,
+	// below it, rounded to a whole pixel (55.7 to 56); each glyph advances
+	// 1275 units.
+	got, err := Render([]byte(fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" width="%[1]d" height="%[2]d"><rect width="%[1]d" height="%[2]d" fill="#eee"/>
+<text x="10" y="%[3]g" font-family="Noto" font-size="60">%[4]s</text></svg>`, b.Dx(), b.Dy(), 10+math.Round(950.0/1024*60), notoText)),
+		Options{Fonts: []FontData{{Family: "Noto", Data: data}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	advance := 1275.0 / 1024 * 60
+	for i := range 15 {
+		x0 := 10 + int(float64(i)*advance)
+		var sum, far, n int
+		for y := 0; y < b.Dy(); y++ {
+			for x := x0; x < x0+int(advance) && x < b.Dx(); x++ {
+				d := maxChannelDiff(got.At(x, y), ref.At(x, y))
+				sum += d
+				if d > 48 {
+					far++
+				}
+				n++
+			}
+		}
+		// Noto's art is detailed, and its many edges are anti-aliased by
+		// cairo and by aster a little differently: up to 6 levels on
+		// average, and a few hundred edge pixels, on the busiest glyph
+		// (U+1F389). A paint drawn wrong is tens of levels off.
+		if mean := float64(sum) / float64(n); mean > 8 || far > n*6/100 {
+			t.Errorf("glyph %d: mean difference %.2f, %d of %d pixels far from HarfBuzz's", i, mean, far, n)
+		}
+	}
+}
+
+// notoText is noto.py's TEXT.
+const notoText = "\U0001F600\U0001F602\U0001F970\U0001F308\U0001F525\U0001F389\U0001F984\U0001F355\U0001F3A8\U0001F30D\U0001F680\U0001F49C" +
+	"\U0001F1F3\U0001F1F1\U0001F469\u200d\U0001F4BB\U0001F44D\U0001F3FD"
