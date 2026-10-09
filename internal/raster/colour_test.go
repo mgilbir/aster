@@ -457,3 +457,24 @@ func TestNotoMatchesHarfBuzz(t *testing.T) {
 // notoText is noto.py's TEXT.
 const notoText = "\U0001F600\U0001F602\U0001F970\U0001F308\U0001F525\U0001F389\U0001F984\U0001F355\U0001F3A8\U0001F30D\U0001F680\U0001F49C" +
 	"\U0001F1F3\U0001F1F1\U0001F469\u200d\U0001F4BB\U0001F44D\U0001F3FD"
+
+// TestColourClipRectFarCorners clips to a rectangle whose corners are far
+// apart, y from -2.3e38 to -180416, wholly below the glyph: nothing is
+// painted. It was built as y0 + (y1 - y0), which is 0 at that magnitude,
+// and the clip reached up into view.
+func TestColourClipRectFarCorners(t *testing.T) {
+	img := renderFake(t, func(p shape.Painter) error {
+		p.PushClipRect(shape.Rect{XMin: 0, YMin: -2.3419e38, XMax: 1000, YMax: -180416})
+		p.Solid(shape.Color{R: 255, A: 255}, false)
+		p.PopClip()
+		return nil
+	})
+	b := img.Bounds()
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			if r, _, _, _ := img.At(x, y).RGBA(); r > 0 {
+				t.Fatalf("painted at (%d, %d)", x, y)
+			}
+		}
+	}
+}

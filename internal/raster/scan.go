@@ -138,6 +138,18 @@ func (r *rasterizer) addLine(p, q point) {
 	}
 	ks, ke := int32(ksf), int32(kef)
 	dxdy := (q.x - p.x) / (q.y - p.y)
+	// The edge's x is p.x + (y - p.y) * dxdy. With p far above the clip,
+	// a million pixels or more, that sum cancels away the x near the clip,
+	// 1e29 - 1e29 + 60 say; the point where the edge enters the clip, from
+	// whichever end is nearer it, keeps it. Nearer edges are left as they
+	// were, so that no drawing moves by a bit.
+	if top := lo / ss; p.y < top-1<<20 {
+		x := p.x + (top-p.y)*dxdy
+		if q.y-top < top-p.y {
+			x = q.x - (q.y-top)*dxdy
+		}
+		p = point{x: x, y: top}
+	}
 	r.edges = append(r.edges, edge{x0: p.x, dxdy: dxdy, y0: p.y * ss, ks: ks, ke: ke, dir: dir})
 	if ks < r.minK {
 		r.minK = ks

@@ -550,8 +550,14 @@ func (r *renderer) rectClip(st *state, m matrix, rc rect) *mask {
 			return &mask{r: ir}
 		}
 	}
+	// The rectangle from its corners: x0 + (x1 - x0) is not x1 where the
+	// corners are far apart, 1e38 and -1e5 say, which moved the far edge.
 	var p path
-	p.addRect(rc.x0, rc.y0, rc.w(), rc.h())
+	p.moveTo(rc.x0, rc.y0)
+	p.lineTo(rc.x1, rc.y0)
+	p.lineTo(rc.x1, rc.y1)
+	p.lineTo(rc.x0, rc.y1)
+	p.close()
 	mk := r.pathsMask([]*path{&p}, []matrix{m}, []bool{false}, region)
 	return intersectMasks(mk, st.clip)
 }
