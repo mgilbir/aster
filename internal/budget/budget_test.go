@@ -68,6 +68,10 @@ func TestLoadAndPoints(t *testing.T) {
 	if Mul(math.MaxInt64, 2) != math.MaxInt64 || Mul(3, 4) != 12 || Mul(-1, 4) != 0 {
 		t.Fatal("Mul")
 	}
+	// 2^32 is math.MaxInt where int is 32 bits, not 0.
+	if MulInt(math.MaxInt, 2) != math.MaxInt || MulInt(1<<16, 1<<16) <= 0 || MulInt(3, 4) != 12 || MulInt(-1, 4) != 0 {
+		t.Fatal("MulInt")
+	}
 }
 
 func TestRowExcessCountsInRows(t *testing.T) {

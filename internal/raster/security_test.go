@@ -121,6 +121,13 @@ func TestFilterLimits(t *testing.T) {
 	if !errors.Is(err, errLimit) {
 		t.Errorf("filter storm: want resource limit error, got %v", err)
 	}
+	// A filter's work is its area times its primitives: 2^23 pixels times
+	// 2^9 primitives is 2^32, which must not wrap to 0 where int is 32 bits.
+	wide := `<svg xmlns="http://www.w3.org/2000/svg" width="4096" height="2048"><defs><filter id="f" filterUnits="userSpaceOnUse" x="0" y="0" width="4096" height="2048">` +
+		strings.Repeat(`<feOffset dx="1"/>`, 511) + `</filter></defs><rect width="4096" height="2048" filter="url(#f)"/></svg>`
+	if err := mustFinish(t, "primitives times area", wide, Limits{}, 5*time.Second); !errors.Is(err, errLimit) {
+		t.Errorf("primitives times area: want resource limit error, got %v", err)
+	}
 	// A filter region over MaxFilterPixels is skipped rather than allocated.
 	if err := mustFinish(t, "region cap", secHead+`<defs><filter id="f" filterUnits="userSpaceOnUse" x="-1000" y="-1000" width="3000" height="3000"><feGaussianBlur stdDeviation="3"/></filter></defs><rect width="10" height="10" filter="url(#f)"/></svg>`, Limits{MaxFilterPixels: 1000}, time.Second); err != nil {
 		t.Errorf("region cap: %v", err)

@@ -252,10 +252,10 @@ func number(s string, i, width int) (v float64, next int, ok bool) {
 	if k == start {
 		return 0, -1, false
 	}
-	if k-start <= 15 {
-		n := 0
+	if k-start <= 15 { // exact in an int64, as in a float64; not in a 32-bit int
+		var n int64
 		for _, c := range []byte(s[start:k]) {
-			n = n*10 + int(c-'0')
+			n = n*10 + int64(c-'0')
 		}
 		return float64(n), k, true
 	}

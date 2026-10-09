@@ -1,7 +1,9 @@
 package text
 
 import (
+	"encoding/binary"
 	"os"
+	"path/filepath"
 	"runtime"
 	"testing"
 
@@ -243,5 +245,63 @@ func TestWithFontCollection(t *testing.T) {
 		if p := m.FontData(runs[0].Face); p == nil || sfntTable(p, 0, "sbix") != nil || sfntTable(p, 0, "COLR") != nil {
 			t.Errorf("face %d: its embedding program is not its outlines", index)
 		}
+	}
+}
+
+// A collection's counts, offsets and lengths are 32-bit fields: read as an
+// int, 2^31 and more must not turn negative where int is 32 bits, and slip
+// past the bounds as such.
+func TestHostileCollectionFields(t *testing.T) {
+	b := make([]byte, 64)
+	copy(b, "ttcf")
+	binary.BigEndian.PutUint32(b[8:], 0xFFFFFFFF)  // faces
+	binary.BigEndian.PutUint32(b[12:], 0x7FFFFFF8) // face 0's directory, far past the file
+	if n := collectionSize(b); n != maxCollectionFonts {
+		t.Errorf("collectionSize = %d", n)
+	}
+	if _, ok := sfntDir(b, 0); ok {
+		t.Error("a directory past the file was accepted")
+	}
+	if sfntTable(b, 0, "head") != nil || sfntSize(b, 0) != len(b) || outlineProgram(b, 0) != nil {
+		t.Error("a directory past the file was read")
+	}
+
+	// A face whose table lengths sum past 2^32.
+	f := make([]byte, 12+16*3)
+	binary.BigEndian.PutUint32(f, 0x00010000)
+	binary.BigEndian.PutUint16(f[4:], 3)
+	for i := range 3 {
+		binary.BigEndian.PutUint32(f[12+16*i+12:], 0xFFFFFFF0)
+	}
+	if n := sfntSize(f, 0); n < len(f) {
+		t.Errorf("sfntSize = %d", n)
+	}
+
+	// A system font file whose name table is 4 GiB long: read up to the
+	// cap, not panic (readSysFace runs without readSysFonts' recover here).
+	name := make([]byte, 12+16)
+	binary.BigEndian.PutUint32(name, 0x00010000)
+	binary.BigEndian.PutUint16(name[4:], 1)
+	copy(name[12:], "name")
+	binary.BigEndian.PutUint32(name[12+12:], 0xFFFFFFF0)
+	path := filepath.Join(t.TempDir(), "hostile.ttf")
+	if err := os.WriteFile(path, name, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = file.Close() }()
+	if _, ok := readSysFace(file, path, 0, 0); ok {
+		t.Error("a face without a family was read")
+	}
+	// And a collection claiming 2^32-1 faces is no panic either.
+	path = filepath.Join(t.TempDir(), "hostile.ttc")
+	if err := os.WriteFile(path, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := readSysFonts(path); len(got) != 0 {
+		t.Errorf("faces read: %+v", got)
 	}
 }

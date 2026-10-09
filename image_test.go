@@ -130,11 +130,23 @@ func TestDataURIImageLimits(t *testing.T) {
 		b = binary.BigEndian.AppendUint32(b, crc32.ChecksumIEEE(chunk))
 		return "data:image/png;base64," + base64.StdEncoding.EncodeToString(b)
 	}
+	// sof0 is the start of a baseline JPEG: its frame header and the marker
+	// that ends what image.DecodeConfig reads.
+	sof0 := func(w, h uint16) string {
+		b := []byte{0xFF, 0xD8, 0xFF, 0xC0, 0, 11, 8}
+		b = binary.BigEndian.AppendUint16(b, h)
+		b = binary.BigEndian.AppendUint16(b, w)
+		b = append(b, 1, 1, 0x11, 0, 0xFF, 0xDA, 0, 2)
+		return "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(b)
+	}
 	for name, href := range map[string]string{
 		"base64 payload":  "data:image/png;base64," + strings.Repeat("A", 48<<20),
 		"escaped payload": "data:image/png," + strings.Repeat("a", 33<<20),
-		"pixel count":     ihdr(60000, 60000),
-		"dimension":       ihdr(70000, 1),
+		"pixel count":     ihdr(10000, 10000),
+		// 2.5e9 pixels, past a 32-bit int: image/jpeg leaves it to the
+		// limit (image/png refuses more than 2^28 pixels there itself).
+		"jpeg pixel count": sof0(50000, 50000),
+		"dimension":        ihdr(70000, 1),
 	} {
 		if _, err := renderImage(t, href); !errors.Is(err, aster.ErrLimit) {
 			t.Errorf("%s: err = %v, want a limit", name, err)

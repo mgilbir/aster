@@ -519,10 +519,15 @@ func (c *Converter) shapingLimits() text.ShapingLimits {
 // quarter of WithMemoryLimit when one is set.
 func (c *Converter) maxSVGBytes() int {
 	if n := c.cfg.memoryLimit; n > 0 {
-		return int(min(max(n/4, 1<<20), 1<<40))
+		return toInt(min(max(n/4, 1<<20), 1<<40))
 	}
 	return 128 << 20
 }
+
+// toInt converts a bound derived from WithMemoryLimit to an int, saturating
+// where int is 32 bits: a wrapped bound would read as unlimited (<= 0) or as
+// a spurious small one.
+func toInt(n uint64) int { return int(min(n, math.MaxInt)) }
 
 // specBytesDivisor sets the specification a memory limit admits: a sixteenth of
 // the limit in bytes. The rows and items budgets charge what a specification
@@ -555,8 +560,8 @@ func (c *Converter) limits() vega.Limits {
 	const bytesPerRow, bytesPerItem, bytesPerCell, bytesPerOp = 512, 1536, 16384, 1536
 	var l vega.Limits
 	if n := c.cfg.memoryLimit; n > 0 {
-		l.MaxRows = int(max(n/bytesPerRow, 1000))
-		l.MaxItems = int(max(n/bytesPerItem, 1000))
+		l.MaxRows = toInt(max(n/bytesPerRow, 1000))
+		l.MaxItems = toInt(max(n/bytesPerItem, 1000))
 		// A facet cell instantiates its own operators; the default (20,000)
 		// is the most that is left alone.
 		l.MaxSubflows = int(min(max(n/bytesPerCell, 1000), 20_000))

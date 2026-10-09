@@ -3,6 +3,8 @@ package raster
 import (
 	"math"
 	"strings"
+
+	"github.com/mgilbir/aster/internal/budget"
 )
 
 // Pattern fills follow resvg: the tile is rendered once into a pixmap of
@@ -145,7 +147,7 @@ func (r *renderer) patternPaint(pn *node, opacity float64, st *state, bbox func(
 	if pw < 1 || ph < 1 {
 		return paintSrc{}, false, true
 	}
-	if pw > r.lim.MaxDimension || ph > r.lim.MaxDimension || pw*ph > r.lim.MaxPixels {
+	if pw > r.lim.MaxDimension || ph > r.lim.MaxDimension || budget.MulInt(pw, ph) > r.lim.MaxPixels {
 		return paintSrc{}, false, true
 	}
 	key := patternKey{pn, pw, ph, sx, sy, content, bb.w(), bb.h()}

@@ -25,7 +25,7 @@ func newScaler(width, height, padding float64) (*scaler, error) {
 		// new Uint32Array of a negative length
 		return nil, fmt.Errorf("RangeError: Invalid typed array length: %d", (w*h+31)>>5)
 	}
-	if w*h > maxBitmapBits {
+	if budget.MulInt(w, h) > maxBitmapBits {
 		return nil, fmt.Errorf("%w: label: layout bitmap %dx%d is too large (check size and padding)", budget.ErrLimit, w, h)
 	}
 	return &scaler{width: width, height: height, padding: padding, ratio: ratio, w: w, h: h}, nil
@@ -59,8 +59,10 @@ func toInt32(f float64) int {
 // interior layer (marks to keep clear of) and, when labels may sit inside
 // their mark or on an area, the border layer.
 func markBitmaps(ctx context.Context, sc *scaler, r Rasterizer, baseMark []any, avoidMarks [][]any, labelInside, isGroupArea bool) ([2]*bitmap, error) {
-	width, height := int(sc.width), int(sc.height)
-	if width*height > maxMaskPixels {
+	// Each side within the limit before it is an int, and their product
+	// saturating, where int is 32 bits.
+	width, height := int(min(sc.width, maxMaskPixels+1)), int(min(sc.height, maxMaskPixels+1))
+	if budget.MulInt(width, height) > maxMaskPixels || width > maxMaskPixels || height > maxMaskPixels {
 		return [2]*bitmap{}, fmt.Errorf("%w: label: layout %dx%d is too large to rasterize", budget.ErrLimit, width, height)
 	}
 	border := labelInside || isGroupArea
