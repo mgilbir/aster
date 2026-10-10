@@ -8,9 +8,11 @@ github.com/mgilbir/golittlecms v0.0.0-20260727161601-f6af7cfe1556 h1:2ZUsOgMhxpH
 github.com/mgilbir/golittlecms v0.0.0-20260727161601-f6af7cfe1556/go.mod h1:8SmvcTVpsTeqGaLqnhlCphGYaBeoeedJQB6AsKNNQxo=
 github.com/mgilbir/gopenjpeg v0.1.1 h1:zf0iHWEkex7TsOtQKPy6t19qNJzf7ykxK7r5Sgl/V2A=
 github.com/mgilbir/gopenjpeg v0.1.1/go.mod h1:J72BFvnlK6fgFlVEtFycG+kbNYLX04tjzVI6eVmDAho=
-github.com/mgilbir/pdf0 v0.4.0 h1:C/Mg8Hbouc//sv7zRcNzxAveJ5yQnRh9seysoSA9So0=
-github.com/mgilbir/pdf0 v0.4.0/go.mod h1:iwJ15CY5as4UR0yey8IbbfPCZHkrPfOP24nDMmH8Y7s=
-golang.org/x/image v0.35.0 h1:LKjiHdgMtO8z7Fh18nGY6KDcoEtVfsgLDPeLyguqb7I=
-golang.org/x/image v0.35.0/go.mod h1:MwPLTVgvxSASsxdLzKrl8BRFuyqMyGhLwmC+TO1Sybk=
-golang.org/x/text v0.40.0 h1:Ub2Z6/xjgF1WrYQz2nuITOEegKFtiIy+rieRJ5lHZKs=
-golang.org/x/text v0.40.0/go.mod h1:hpnzDAfGV753zIKo+wk3u1bVKCGPbrnF7+7LBF/UHVY=
+github.com/mgilbir/pdf0 v0.5.0 h1:djuIA5eJgdjTIsw5NO2fV3RlL/APv0AcO+EAy58ftNc=
+github.com/mgilbir/pdf0 v0.5.0/go.mod h1:V9Vo9fwQZFFgq63wDtON6m8b0c9nGdqbpEqX5oTtoUs=
+golang.org/x/image v0.47.0 h1:za/8gVz++PPZqmZJBNSISICN5Rrj5zixP/8K++fgmqo=
+golang.org/x/image v0.47.0/go.mod h1:IkN5o4A7vq55vXN8FWjjnhg9Rs2GOtffqsSi9mWAKYE=
+golang.org/x/sys v0.49.0 h1:XbzkgYJHdqh/8m2Uu0W/dQv8nktxx4BFHp1M0gROTXA=
+golang.org/x/sys v0.49.0/go.mod h1:hNLxWAXmnKAxqDtdwIYC4bM9oQPEecfsnNMuSxOs3og=
+golang.org/x/text v0.43.0 h1:1QivrlhwAsnMOcqgOdl9my7s9OyZl8O5/UGUTJVXoWc=
+golang.org/x/text v0.43.0/go.mod h1:hbSIYA/amXcRXTFSZqh8tWHEoqRvvbKPJ2uz/KU+a+s=
