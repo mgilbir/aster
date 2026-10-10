@@ -65,11 +65,11 @@ var errLimit = fmt.Errorf("raster: %w", budget.ErrLimit)
 // chargePixels accounts for n pixels of filter or pattern-tile work and fails
 // the render when the budget is spent.
 func (r *renderer) chargePixels(n int) bool {
-	r.effectPx += n
-	if r.effectPx > r.lim.MaxEffectPixels || r.effectPx < 0 {
+	if n < 0 || n > r.lim.MaxEffectPixels-r.effectPx {
 		r.fail(fmt.Errorf("raster: filter and pattern work exceeds %d pixels: %w", r.lim.MaxEffectPixels, errLimit))
 		return false
 	}
+	r.effectPx += n
 	return r.chargeOps(n)
 }
 
@@ -79,12 +79,12 @@ func (r *renderer) chargeOps(n int) bool {
 	if r.err != nil {
 		return false
 	}
-	r.pixelOps += n
-	if r.pixelOps > r.lim.MaxPixelOps || r.pixelOps < 0 {
+	if n < 0 || n > r.lim.MaxPixelOps-r.pixelOps {
 		r.fail(fmt.Errorf("raster: render work exceeds %d pixel operations (output %dx%d; raise Limits.MaxPixelOps to allow it): %w",
 			r.lim.MaxPixelOps, r.cw, r.ch, errLimit))
 		return false
 	}
+	r.pixelOps += n
 	return r.poll(n >= 1<<14)
 }
 
@@ -108,8 +108,8 @@ func (r *renderer) allocCanvas(w, h int) *canvas {
 	if r.err != nil {
 		return nil
 	}
-	n := w * h * 4
-	if n < 0 || n > r.lim.MaxCanvasBytes-r.canvasBytes {
+	n := budget.MulInt(budget.MulInt(w, h), 4)
+	if n > r.lim.MaxCanvasBytes-r.canvasBytes {
 		r.fail(fmt.Errorf("raster: offscreen layers need more than %d MiB of pixel memory at once (raise Limits.MaxCanvasBytes or reduce nested opacity/filter/mask groups): %w",
 			r.lim.MaxCanvasBytes>>20, errLimit))
 		return nil
@@ -139,7 +139,7 @@ func (r *renderer) fillRast(evenOdd bool, sink spanSink) {
 		return
 	}
 	rem := r.lim.MaxPixelOps - r.pixelOps
-	r.rast.work, r.rast.workCap = 0, rem+1
+	r.rast.work, r.rast.workCap = 0, min(rem, math.MaxInt-1)+1
 	r.rast.fill(evenOdd, sink)
 	w := r.rast.work
 	r.rast.workCap = 0

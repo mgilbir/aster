@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sync/atomic"
 	"unsafe"
 
@@ -61,7 +62,7 @@ func NewShapingBudget(ctx context.Context, limits ShapingLimits) *ShapingBudget 
 	b.work = limits.Work
 	b.left.Store(limits.Work)
 	if limits.RunBytes > 0 {
-		b.maxGlyphs = int(max(limits.RunBytes/glyphBytes, 1))
+		b.maxGlyphs = int(min(max(limits.RunBytes/glyphBytes, 1), math.MaxInt))
 	}
 	return b
 }

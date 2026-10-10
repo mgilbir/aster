@@ -82,6 +82,18 @@ func Mul(a, b int64) int64 {
 	return a * b
 }
 
+// MulInt is Mul for int, which is 32 bits on some platforms: a product of
+// pixel counts there must saturate at math.MaxInt rather than wrap.
+func MulInt(a, b int) int {
+	if a <= 0 || b <= 0 {
+		return 0
+	}
+	if a > math.MaxInt/b {
+		return math.MaxInt
+	}
+	return a * b
+}
+
 // Reserve checks that n more rows (net of the rows a transform replaces) fit,
 // without recording them; the dataflow records the real growth when the
 // transform returns. Call it before allocating.

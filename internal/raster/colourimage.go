@@ -9,6 +9,7 @@ import (
 
 	"github.com/mgilbir/forme/shape"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/text"
 )
 
@@ -53,7 +54,7 @@ func ColourGlyphImage(f *text.Face, gid int, fg shape.Color, ppem int) (img *ima
 		return nil, box, fmt.Errorf("raster: a glyph at %d pixels per em is %dx%d pixels: %w", ppem, w, h, errLimit)
 	}
 	lim := Limits{}.withDefaults()
-	lim.MaxPixelOps = max(defaultMaxPixelOps, 16*w*h)
+	lim.MaxPixelOps = max(defaultMaxPixelOps, budget.MulInt(16, budget.MulInt(w, h)))
 	r := &renderer{lim: lim, rast: newRasterizer(), cw: w, ch: h, active: map[*node]bool{}}
 	if r.cv = r.allocCanvas(w, h); r.cv == nil {
 		return nil, box, r.err

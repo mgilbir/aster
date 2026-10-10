@@ -3,6 +3,7 @@ package raster
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -354,7 +355,7 @@ const (
 	defaultMaxRules    = 100_000
 	defaultMaxCSSWork  = 100_000_000
 	defaultMaxFilterPx = 32 << 20
-	defaultMaxEffectPx = 1 << 31
+	defaultMaxEffectPx = math.MaxInt32
 	defaultMaxPixelOps = 1 << 29
 	defaultMaxCanvasB  = 1 << 30
 )

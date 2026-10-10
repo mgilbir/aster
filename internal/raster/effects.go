@@ -3,6 +3,8 @@ package raster
 import (
 	"math"
 	"strings"
+
+	"github.com/mgilbir/aster/internal/budget"
 )
 
 // Group effects: filter, mask, opacity and mix-blend-mode follow resvg's
@@ -288,7 +290,8 @@ func (r *renderer) renderEffects(n *node, st *state, opacity float64, blend blen
 	if ib.empty() {
 		return
 	}
-	if ib.w()*ib.h() > r.lim.MaxFilterPixels {
+	area := budget.MulInt(ib.w(), ib.h())
+	if area > r.lim.MaxFilterPixels {
 		return // filter region too large to process
 	}
 	if r.depth >= r.lim.MaxLayerDepth {
@@ -299,7 +302,7 @@ func (r *renderer) renderEffects(n *node, st *state, opacity float64, blend blen
 	for _, sp := range specs {
 		nPrims += len(sp.prims)
 	}
-	if !r.chargePixels(ib.w() * ib.h() * nPrims) {
+	if !r.chargePixels(budget.MulInt(area, nPrims)) {
 		return
 	}
 	sub := r.allocCanvas(ib.w(), ib.h())

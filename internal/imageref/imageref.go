@@ -105,7 +105,7 @@ func Config(data []byte, lim Limits) (image.Config, string, error) {
 		return image.Config{}, "", fmt.Errorf("unsupported image format %q", format)
 	}
 	if cfg.Width <= 0 || cfg.Height <= 0 || cfg.Width > 65535 || cfg.Height > 65535 ||
-		cfg.Width*cfg.Height > lim.MaxPixels {
+		budget.MulInt(cfg.Width, cfg.Height) > lim.MaxPixels {
 		return image.Config{}, "", lim.over("image dimensions %dx%d exceed the limit", cfg.Width, cfg.Height)
 	}
 	return cfg, format, nil

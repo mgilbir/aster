@@ -537,7 +537,7 @@ func init() {
 		if pat.IsPattern() {
 			// A regexp can match at every position, so the result can be
 			// (len(src)+1)*len(repl) long; refuse before it is built.
-			if len(repl) > 1024 && (len(src)+1)*len(repl) > 4*MaxStringLength {
+			if len(repl) > 1024 && int64(len(src)+1)*int64(len(repl)) > 4*MaxStringLength {
 				throw("RangeError", "Invalid string length")
 			}
 			out, err := pat.PatternOf().Re.ReplaceAllStringErr(src, repl)

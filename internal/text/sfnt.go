@@ -2,6 +2,7 @@ package text
 
 import (
 	"encoding/binary"
+	"math"
 	"math/bits"
 	"slices"
 	"strings"
@@ -20,11 +21,16 @@ func sfntDir(b []byte, index int) (off int, ok bool) {
 	if string(b[:4]) != "ttcf" {
 		return 0, index == 0
 	}
-	n := int(binary.BigEndian.Uint32(b[8:12]))
-	if index >= n || index >= maxCollectionFonts || 12+4*(index+1) > len(b) {
+	n := binary.BigEndian.Uint32(b[8:12])
+	if index >= maxCollectionFonts || uint32(index) >= n || 12+4*(index+1) > len(b) {
 		return 0, false
 	}
-	return int(binary.BigEndian.Uint32(b[12+4*index:])), true
+	// Within b, so that dir+12 cannot overflow a 32-bit int.
+	dir := binary.BigEndian.Uint32(b[12+4*index:])
+	if uint64(dir) > uint64(len(b)) {
+		return 0, false
+	}
+	return int(dir), true
 }
 
 // collectionSize is the number of faces in a font file: those of a
@@ -33,7 +39,7 @@ func collectionSize(b []byte) int {
 	if len(b) < 12 || string(b[:4]) != "ttcf" {
 		return 1
 	}
-	return min(int(binary.BigEndian.Uint32(b[8:12])), maxCollectionFonts)
+	return int(min(binary.BigEndian.Uint32(b[8:12]), maxCollectionFonts))
 }
 
 // sfntTable returns table tag of face index of font file b, as a slice of b,
@@ -74,11 +80,11 @@ func sfntSize(b []byte, index int) int {
 	if n > 512 || dir+12+16*n > len(b) {
 		return len(b)
 	}
-	size := 12 + 16*n
+	size := int64(12 + 16*n) // int64: the lengths can sum past a 32-bit int
 	for i := range n {
-		size += (int(binary.BigEndian.Uint32(b[dir+12+16*i+12:])) + 3) &^ 3 // padded to 4 bytes
+		size += (int64(binary.BigEndian.Uint32(b[dir+12+16*i+12:])) + 3) &^ 3 // padded to 4 bytes
 	}
-	return size
+	return int(min(size, math.MaxInt))
 }
 
 // outlineTables are the tables of a font an embedder of its outlines reads:

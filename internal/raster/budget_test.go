@@ -3,6 +3,7 @@ package raster
 import (
 	"context"
 	"errors"
+	"math"
 	"os"
 	"strings"
 	"testing"
@@ -111,7 +112,7 @@ func TestContextCancelled(t *testing.T) {
 	ctx, cancel = context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	start := time.Now()
-	_, err := Render([]byte(rectsSVG(3000, 400)), Options{Context: ctx, Limits: Limits{MaxPixelOps: 1 << 40}})
+	_, err := Render([]byte(rectsSVG(3000, 400)), Options{Context: ctx, Limits: Limits{MaxPixelOps: math.MaxInt}})
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("deadline: got %v", err)
 	}

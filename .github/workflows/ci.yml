@@ -52,6 +52,24 @@ jobs:
       - name: go test -short
         run: go test -short -timeout 30m ./...
 
+  test-32bit:
+    # int is 32 bits on 386 and arm: what does not compile there, or what
+    # overflows in a size or budget check, shows only on such a target.
+    # linux/386 binaries run natively on the amd64 runner.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: go build
+        run: GOARCH=386 go build ./...
+      - name: go vet
+        # compiles the tests too
+        run: GOARCH=386 go vet ./...
+      - name: go test -short
+        run: GOARCH=386 go test -short -timeout 30m ./...
+
   race:
     runs-on: ubuntu-latest
     steps:

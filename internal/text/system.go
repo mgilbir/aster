@@ -151,7 +151,7 @@ func readSysFonts(path string) (out []sysFont) {
 		}
 		return out
 	}
-	n := min(int(binary.BigEndian.Uint32(hdr[8:12])), maxCollectionFonts)
+	n := int(min(binary.BigEndian.Uint32(hdr[8:12]), maxCollectionFonts))
 	offs := make([]byte, 4*n)
 	if _, err := f.ReadAt(offs, 12); err != nil {
 		return nil
@@ -190,10 +190,7 @@ func readSysFace(f *os.File, path string, index int, base int64) (sf sysFont, ok
 				continue
 			}
 			off := int64(binary.BigEndian.Uint32(rec[8:12]))
-			l := int(binary.BigEndian.Uint32(rec[12:16]))
-			if l > max {
-				l = max
-			}
+			l := int(min(int64(binary.BigEndian.Uint32(rec[12:16])), int64(max)))
 			b := make([]byte, l)
 			if _, err := f.ReadAt(b, off); err != nil && err != io.EOF {
 				return nil

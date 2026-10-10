@@ -190,7 +190,7 @@ func Render(svg []byte, opts Options) (img *image.NRGBA, err error) {
 	r.rast.ctx = opts.Context
 	if opts.Limits.MaxPixelOps <= 0 {
 		// Default work budget: 512 Mpx, or 16 canvases for big outputs.
-		r.lim.MaxPixelOps = max(defaultMaxPixelOps, 16*cw*ch)
+		r.lim.MaxPixelOps = max(defaultMaxPixelOps, budget.MulInt(16, budget.MulInt(cw, ch)))
 	}
 	r.rootState = rootState
 	if r.cv = r.allocCanvas(cw, ch); r.cv == nil {
