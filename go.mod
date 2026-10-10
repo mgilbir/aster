@@ -1,13 +1,13 @@
 module github.com/mgilbir/aster
 
-go 1.26
+go 1.26.0
 
 require (
 	github.com/mgilbir/forme v0.10.0
 	github.com/mgilbir/goecma262 v0.2.0
 	github.com/mgilbir/pdf0 v0.5.0
-	golang.org/x/image v0.35.0
-	golang.org/x/text v0.40.0
+	golang.org/x/image v0.47.0
+	golang.org/x/text v0.43.0
 )
 
 require (
