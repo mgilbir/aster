@@ -48,9 +48,10 @@ const (
 
 // lookupCurve resolves vega's interpolate/orient/tension triple (curves.js).
 // tension applies only to bundle (beta), cardinal (tension) and catmull-rom
-// (alpha) families, and only when the item set one. ok is false for an unknown
-// interpolate name, where upstream would fail with a TypeError.
-func lookupCurve(interp, orient string, tension Num) (curveSpec, bool) {
+// (alpha) families, and only when the item set one. An unknown interpolate
+// name, or a monotone orient other than horizontal or vertical, finds no
+// curve, which upstream then calls and fails with a TypeError.
+func lookupCurve(interp, orient string, tension Num) (curveSpec, error) {
 	var s curveSpec
 	switch interp {
 	case "basis":
@@ -78,11 +79,15 @@ func lookupCurve(interp, orient string, tension Num) (curveSpec, bool) {
 	case "linear-closed":
 		s.kind = curveLinearClosed
 	case "monotone":
-		// 'horizontal' orientation interpolates y as the function of x.
-		if orient == "horizontal" {
+		// `entry[orient || 'vertical']`: 'horizontal' interpolates y as the
+		// function of x; any other orient is a key the entry lacks.
+		switch orient {
+		case "horizontal":
 			s.kind = curveMonotoneY
-		} else {
+		case "vertical", "":
 			s.kind = curveMonotoneX
+		default:
+			return s, ErrUnknownOrient
 		}
 	case "natural":
 		s.kind = curveNatural
@@ -93,7 +98,7 @@ func lookupCurve(interp, orient string, tension Num) (curveSpec, bool) {
 	case "step-before":
 		s.kind = curveStepBefore
 	default:
-		return s, false
+		return s, ErrUnknownInterpolate
 	}
 	switch s.kind {
 	case curveBundle, curveCardinal, curveCardinalOpen, curveCardinalClosed,
@@ -102,7 +107,7 @@ func lookupCurve(interp, orient string, tension Num) (curveSpec, bool) {
 			s.param = tension.Val()
 		}
 	}
-	return s, true
+	return s, nil
 }
 
 func (s curveSpec) new(ctx PathContext) curve {

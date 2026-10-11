@@ -65,6 +65,7 @@ func (it *Item) setProp(l *jsonLoader, k string, val jsval.Value) (bool, error) 
 		it.strokeW().StrokeDashOffset = numOf(val)
 	case "strokeForeground":
 		it.strokeW().StrokeForeground = triOf(val)
+		it.setRawTri(k, val)
 	case "strokeOffset":
 		it.strokeW().StrokeOffset = numOf(val)
 	case "blend":
@@ -121,7 +122,8 @@ func (it *Item) setProp(l *jsonLoader, k string, val jsval.Value) (bool, error) 
 	case "orient":
 		it.lineW().Orient = strOfTruthy(val)
 	case "defined":
-		it.Defined = triOf(val)
+		it.Defined = FalseOf(val)
+		it.setRawTri(k, val)
 	case "text":
 		it.textW().Text = val
 	case "font":
@@ -163,9 +165,11 @@ func (it *Item) setProp(l *jsonLoader, k string, val jsval.Value) (bool, error) 
 	case "url":
 		it.imageW().URL = strOf(val)
 	case "aspect":
-		it.imageW().Aspect = triOf(val)
+		it.imageW().Aspect = FalseOf(val)
+		it.setRawTri(k, val)
 	case "smooth":
-		it.imageW().Smooth = triOf(val)
+		it.imageW().Smooth = FalseOf(val)
+		it.setRawTri(k, val)
 	case "cursor":
 		it.linkW().Cursor = strOf(val)
 	case "href":
@@ -181,7 +185,8 @@ func (it *Item) setProp(l *jsonLoader, k string, val jsval.Value) (bool, error) 
 	case "description":
 		it.Description = strOf(val)
 	case "aria":
-		it.Aria = triOf(val)
+		it.Aria = FalseOf(val)
+		it.setRawTri(k, val)
 	case "ariaRole":
 		it.AriaRole = strOf(val)
 	case "ariaRoleDescription":
@@ -436,8 +441,8 @@ func gradientValue(g *Gradient) jsval.Value {
 }
 
 // rawNumeric lists the numeric properties whose non-numeric values upstream
-// can observe: through a truthiness guard (angle) or by writing them to the
-// SVG verbatim (the style attributes).
+// can observe: through a truthiness guard (angle) or by writing String(value)
+// to the SVG (positions in transforms, the style attributes).
 func rawNumeric(k string) bool {
 	switch k {
 	case "angle", "strokeWidth", "strokeOpacity", "fillOpacity", "opacity", "strokeDashOffset",
@@ -491,6 +496,20 @@ func (it *Item) setRaw(k string, val jsval.Value) {
 	}
 }
 
+// setRawTri keeps the value given to a boolean property when it was not a
+// boolean, so that reading the property back (an expression's item.defined)
+// gives the value as upstream stores it, not the Tri it was reduced to.
+func (it *Item) setRawTri(k string, val jsval.Value) {
+	if val.IsNullish() || val.IsBool() {
+		delete(it.Raw, k)
+		return
+	}
+	if it.Raw == nil {
+		it.Raw = make(map[string]jsval.Value, 1)
+	}
+	it.Raw[k] = val
+}
+
 // RawValue returns the non-numeric value a numeric property was given, if any
 // (see Item.Raw).
 func (it *Item) RawValue(prop string) (jsval.Value, bool) {
@@ -522,7 +541,9 @@ func (it *Item) OrZero(prop string) float64 {
 }
 
 // PosValue is `item[prop] || 0` (prop is "x" or "y") as a JavaScript value: the
-// word the property was given, else the number.
+// word the property was given, else the number. A template string prints it
+// into a transform as it is, so the SVG writer escapes a word (it is spec or
+// data text).
 func (it *Item) PosValue(prop string) jsval.Value {
 	if v, ok := it.Raw[prop]; ok {
 		if !v.IsTruthy() {
@@ -531,19 +552,6 @@ func (it *Item) PosValue(prop string) jsval.Value {
 		return v
 	}
 	return jsval.Num(it.OrZero(prop))
-}
-
-// AppendPos appends `item[prop] || 0` (prop is "x" or "y") the way a template
-// string prints it into a transform: a word the property was given is written
-// as it is, where a number goes through AppendNumber.
-func (it *Item) AppendPos(dst []byte, prop string) []byte {
-	if v, ok := it.Raw[prop]; ok {
-		if !v.IsTruthy() {
-			return append(dst, '0')
-		}
-		return append(dst, v.AsString()...)
-	}
-	return AppendNumber(dst, it.OrZero(prop))
 }
 
 // AngleTruthy is upstream's `if (item.angle)`: the truthiness of the value as

@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/mgilbir/aster/internal/jsmath"
 )
 
 // Specifier is a parsed d3-format specifier:
@@ -118,12 +120,7 @@ func parseDigits(s string) float64 {
 }
 
 // toInt32 is JavaScript's ToInt32 (x | 0).
-func toInt32(f float64) int32 {
-	if math.IsNaN(f) || math.IsInf(f, 0) {
-		return 0
-	}
-	return int32(uint32(int64(math.Mod(math.Trunc(f), 4294967296))))
-}
+func toInt32(f float64) int32 { return jsmath.ToInt32(f) }
 
 // String is FormatSpecifier.prototype.toString: the canonical spelling, which
 // is what vega-format memoises formats by.

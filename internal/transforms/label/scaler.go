@@ -6,6 +6,7 @@ import (
 	"math"
 
 	"github.com/mgilbir/aster/internal/budget"
+	"github.com/mgilbir/aster/internal/jsmath"
 )
 
 // scaler maps layout coordinates to bitmap cells. Large layouts are
@@ -35,25 +36,8 @@ func (s *scaler) scale(v float64) int  { return toInt32((v + s.padding) / s.rati
 func (s *scaler) invert(v int) float64 { return float64(float64(v)*s.ratio) - s.padding }
 func (s *scaler) bitmap() *bitmap      { return newBitmap(s.w, s.h) }
 
-// toInt32 is JavaScript's `~~x`: truncation with 32-bit wraparound, NaN and
-// infinities becoming 0.
-func toInt32(f float64) int {
-	if math.IsNaN(f) || math.IsInf(f, 0) {
-		return 0
-	}
-	f = math.Trunc(f)
-	if math.Abs(f) < 1<<31 {
-		return int(f)
-	}
-	f = math.Mod(f, 1<<32)
-	if f < 0 {
-		f += 1 << 32
-	}
-	if f >= 1<<31 {
-		f -= 1 << 32
-	}
-	return int(f)
-}
+// toInt32 is JavaScript's `~~x`.
+func toInt32(f float64) int { return int(jsmath.ToInt32(f)) }
 
 // markBitmaps rasterizes the base and avoided marks and folds them into the
 // interior layer (marks to keep clear of) and, when labels may sit inside

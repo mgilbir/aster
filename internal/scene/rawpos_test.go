@@ -14,7 +14,7 @@ func TestPositionGivenAWord(t *testing.T) {
 	if _, err := it.Set("x", jsval.Str("grey")); err != nil {
 		t.Fatal(err)
 	}
-	if got := string(it.AppendPos(nil, "x")); got != "grey" {
+	if got := it.PosValue("x").AsString(); got != "grey" {
 		t.Errorf("transform text %q", got)
 	}
 	if !math.IsNaN(it.OrZero("x")) {
@@ -24,14 +24,14 @@ func TestPositionGivenAWord(t *testing.T) {
 		if _, err := it.Set("x", v); err != nil {
 			t.Fatal(err)
 		}
-		if got := string(it.AppendPos(nil, "x")); got != "0" || it.OrZero("x") != 0 {
+		if got := it.PosValue("x").AsString(); got != "0" || it.OrZero("x") != 0 {
 			t.Errorf("%v: %q %v", v, got, it.OrZero("x"))
 		}
 	}
 	if _, err := it.Set("x", jsval.Num(12.5)); err != nil {
 		t.Fatal(err)
 	}
-	if got := string(it.AppendPos(nil, "x")); got != "12.5" {
+	if got := it.PosValue("x").AsString(); got != "12.5" {
 		t.Errorf("number: %q", got)
 	}
 }

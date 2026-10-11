@@ -27,7 +27,7 @@ func ariaIgnored(role string) bool {
 func (r *renderer) markAria(m *scene.Mark) {
 	w := &r.w
 	if m.Aria.IsFalse() {
-		w.attrRaw("aria-hidden", "true")
+		w.attrLit("aria-hidden", "true")
 		return
 	}
 	if ariaIgnored(m.Role) {
@@ -117,7 +117,7 @@ func titleCaption(it *scene.Item) string {
 func (r *renderer) itemAria(m *scene.Mark, it *scene.Item) {
 	w := &r.w
 	if it.Aria.IsFalse() {
-		w.attrRaw("aria-hidden", "true")
+		w.attrLit("aria-hidden", "true")
 		return
 	}
 	if it.Description == "" {

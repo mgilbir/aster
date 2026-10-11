@@ -1,0 +1,1 @@
+{"width":60,"height":40,"scales":[{"name":"x","type":"linear","domain":[0,10],"range":"width"}],"config":{"axisX":{"tickDash":[4,null,2],"tickColor":"red","titleFont":"A B"},"axisY":{"tickDash":[1,1],"titleFont":"C"}},"axes":[{"orient":{"signal":"\"bottom\""},"scale":"x","tickCount":2,"labels":false,"title":"T"}]}

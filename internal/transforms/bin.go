@@ -263,17 +263,5 @@ func (b *Binner) Apply(ctx context.Context, data []jsval.Value, noInterval bool,
 	return nil
 }
 
-// binToInt32 is JavaScript's ~~x: truncation with 32-bit wraparound, NaN and
-// infinities giving 0.
-func binToInt32(x float64) float64 {
-	if math.IsNaN(x) || math.IsInf(x, 0) {
-		return 0
-	}
-	x = math.Mod(math.Trunc(x), 4294967296)
-	if x >= 2147483648 {
-		x -= 4294967296
-	} else if x < -2147483648 {
-		x += 4294967296
-	}
-	return x
-}
+// binToInt32 is JavaScript's ~~x.
+func binToInt32(x float64) float64 { return float64(jsmath.ToInt32(x)) }

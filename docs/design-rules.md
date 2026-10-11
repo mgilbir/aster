@@ -94,7 +94,12 @@ Specifications and data are untrusted.
 - Nothing attacker-controlled is written raw into the SVG: every attribute and
   text goes through the escaping writer (which also drops characters XML 1.0
   forbids), CSS-bound values (`blend`) are allow-listed, and image and link URLs
-  pass both the `Loader` and vega-loader's scheme allow-list.
+  pass both the `Loader` and vega-loader's scheme allow-list. In `internal/svg`
+  this holds by construction: only markup.go touches the output buffer, and
+  raw markup (names, constant values) is of type `lit`, which a string variable
+  cannot become without a conversion `TestNoRawMarkup` rejects. A value that is
+  a word where a number is expected (`x: "wide"`) is spec text too: upstream
+  prints it, and it is escaped like any other.
 - No reflection-based evaluation, no access to the host from expressions:
   the expression language can only call the whitelisted function table.
 - Data loading and image/link URLs only through the configured `Loader`.

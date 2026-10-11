@@ -117,7 +117,7 @@ func (l *jsonLoader) mark(v jsval.Value, group *Item, depth int) (*Mark, error) 
 	m.Name = strOf(o.Lookup("name"))
 	m.Role = strOf(o.Lookup("role"))
 	m.Description = strOf(o.Lookup("description"))
-	m.Aria = triOf(o.Lookup("aria"))
+	m.Aria = FalseOf(o.Lookup("aria"))
 	m.NonInteractive = o.Lookup("interactive").Kind() == jsval.KindBool && !o.Lookup("interactive").BoolValue()
 	m.Zindex = numOf(o.Lookup("zindex")).Zero()
 	m.GuideCaption = strOf(o.Lookup("guideCaption"))
@@ -180,11 +180,24 @@ func numOf(v jsval.Value) Num {
 	return N(jsval.ToNumber(v))
 }
 
+// triOf is a boolean property upstream reads for its truthiness
+// (`if (item.clip)`, `item.strokeForeground && item.stroke`).
 func triOf(v jsval.Value) Tri {
 	if v.IsNullish() {
 		return Unset
 	}
 	return B(v.IsTruthy())
+}
+
+// FalseOf is a boolean property upstream reads as `value === false`
+// (defined, aspect, smooth and aria, of marks and of items): only the
+// boolean false is No, and every other value set (0, "", NaN, "false") is
+// Yes.
+func FalseOf(v jsval.Value) Tri {
+	if v.IsNullish() {
+		return Unset
+	}
+	return B(!(v.IsBool() && !v.BoolValue()))
 }
 
 func (l *jsonLoader) paint(v jsval.Value) Paint {

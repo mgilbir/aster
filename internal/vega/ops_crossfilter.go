@@ -1,6 +1,7 @@
 package vega
 
 import (
+	"github.com/mgilbir/aster/internal/jsmath"
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/transforms"
 )
@@ -55,7 +56,7 @@ func init() {
 
 	transformFactories["resolvefilter"] = func(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *opParams) any) {
 		return nil, trFunc(func(n *opNode, p *opParams, pulse *flowPulse) *flowPulse {
-			ignore := ^uint32(jsval.ToNumber(orZeroV(p.Value("ignore"))))
+			ignore := ignoreMask(p.Value("ignore"))
 			b, _ := p.Get("filter").(*bitmaps)
 			if b == nil {
 				fail("resolvefilter requires a crossfilter")
@@ -73,4 +74,11 @@ func init() {
 			return changedPulse(pulse, out)
 		}), nil
 	}
+}
+
+// ignoreMask is ResolveFilter's `~(_.ignore || 0)`: the bits of the filters
+// not ignored. The complement works on ToInt32 of the number, which a Go
+// conversion to uint32 is not for a negative or huge value.
+func ignoreMask(v jsval.Value) uint32 {
+	return ^jsmath.ToUint32(jsval.ToNumber(orZeroV(v)))
 }

@@ -5,6 +5,7 @@ import (
 	"math"
 	"slices"
 
+	"github.com/mgilbir/aster/internal/jsmath"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -60,13 +61,7 @@ const (
 )
 
 // loessToInt32 is JavaScript's ~~x.
-func loessToInt32(f float64) int {
-	if math.IsNaN(f) || math.IsInf(f, 0) {
-		return 0
-	}
-	f = math.Trunc(f)
-	return int(int32(uint32(int64(math.Mod(f, 4294967296)))))
-}
+func loessToInt32(f float64) int { return int(jsmath.ToInt32(f)) }
 
 // LoessFit is vega-statistics' regressionLoess: robust local linear
 // regression over the k nearest neighbours (k = max(2, ~~(bandwidth*n))),

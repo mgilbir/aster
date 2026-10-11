@@ -15,6 +15,11 @@ import (
 // fails with a TypeError when it tries to use the missing curve.
 var ErrUnknownInterpolate = errors.New("scene: unknown interpolate type")
 
+// ErrUnknownOrient reports a monotone interpolation whose `orient` is
+// neither horizontal nor vertical: upstream finds no curve for it and fails
+// with the same TypeError as for an unknown interpolate.
+var ErrUnknownOrient = errors.New("scene: unknown orient for the monotone interpolation")
+
 // ErrNoShapeGenerator reports a shape mark item with no generator (neither
 // the mark's nor the item's); upstream calls `.context` on undefined.
 var ErrNoShapeGenerator = errors.New("Cannot read properties of undefined (reading 'context')")
@@ -38,11 +43,7 @@ func lineCurve(first *Item) (curveSpec, error) {
 	if interp == "" {
 		interp = "linear"
 	}
-	spec, ok := lookupCurve(interp, first.Orient(), first.Tension())
-	if !ok {
-		return spec, ErrUnknownInterpolate
-	}
-	return spec, nil
+	return lookupCurve(interp, first.Orient(), first.Tension())
 }
 
 // Line draws the polyline through items (a line mark). Interpolation, orient and

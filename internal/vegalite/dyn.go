@@ -390,33 +390,9 @@ func stringifyTo(b *strings.Builder, v Value) bool {
 	return true
 }
 
-// stringValue is vega-util's stringValue: a JS literal for use in expressions.
-// Arrays print as [a,b] with recursively converted elements; strings and
-// objects are JSON with U+2028/2029 escaped; anything else is String(x).
-func stringValue(v Value) string {
-	switch v.Kind() {
-	case jsval.KindArr:
-		items := v.Items()
-		parts := make([]string, len(items))
-		for i, it := range items {
-			switch {
-			case it.IsNull():
-				parts[i] = "null"
-			case it.IsUndefined():
-				parts[i] = ""
-			default:
-				parts[i] = stringValue(it)
-			}
-		}
-		return "[" + strings.Join(parts, ",") + "]"
-	case jsval.KindStr, jsval.KindObj:
-		s := string(jsval.AppendJSON(nil, v))
-		s = strings.ReplaceAll(s, "\u2028", "\\u2028")
-		s = strings.ReplaceAll(s, "\u2029", "\\u2029")
-		return s
-	}
-	return v.AsString()
-}
+// stringValue is vega-util's stringValue: a JS literal for use in
+// expressions (see jsval.StringValue).
+func stringValue(v Value) string { return jsval.StringValue(v) }
 
 func jsonString(s string) string { return stringValue(jsval.Str(s)) }
 

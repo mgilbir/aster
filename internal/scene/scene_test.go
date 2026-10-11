@@ -278,6 +278,35 @@ func TestFalsyInterpolateAndOrientAreUnset(t *testing.T) {
 	}
 }
 
+// The monotone curve is `entry[orient || 'vertical']`: an orient other than
+// horizontal or vertical finds no curve, which upstream's line and area
+// generators then call ("curve is not a function"). Other curves ignore
+// orient.
+func TestUnknownOrientOfMonotone(t *testing.T) {
+	for _, tc := range []struct {
+		interp, orient string
+		want           error
+	}{
+		{"monotone", "diagonal", ErrUnknownOrient},
+		{"monotone", "constructor", ErrUnknownOrient},
+		{"monotone", "Horizontal", ErrUnknownOrient},
+		{"monotone", "horizontal", nil},
+		{"monotone", "vertical", nil},
+		{"monotone", "", nil},
+		{"linear", "diagonal", nil},
+		{"step", "diagonal", nil},
+	} {
+		it := &Item{X: N(1), Y: N(2), line: &lineAttrs{Interpolate: tc.interp, Orient: tc.orient}}
+		var sp StringPath
+		if err := Line(&sp, []*Item{it, {X: N(3), Y: N(4)}}); err != tc.want {
+			t.Errorf("line %s/%s: %v, want %v", tc.interp, tc.orient, err, tc.want)
+		}
+		if err := Area(&sp, []*Item{it, {X: N(3), Y: N(4)}}); err != tc.want {
+			t.Errorf("area %s/%s: %v, want %v", tc.interp, tc.orient, err, tc.want)
+		}
+	}
+}
+
 func TestOrdered(t *testing.T) {
 	m := &Mark{}
 	for _, z := range []float64{0, 3, 1, 0, -2, 1} {
