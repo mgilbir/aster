@@ -60,7 +60,7 @@ func Bin(c BinConfig) (BinResult, error) {
 		maxb = 20
 	}
 	if maxb > MaxBins {
-		return BinResult{}, limitErr("maxbins", int(maxb), MaxBins)
+		return BinResult{}, limitErr("maxbins", maxb, MaxBins)
 	}
 	base := c.Base
 	if base == 0 || math.IsNaN(base) {

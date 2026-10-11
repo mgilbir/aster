@@ -3,6 +3,8 @@ package contour
 import (
 	"context"
 	"math"
+
+	"github.com/mgilbir/aster/internal/budget"
 )
 
 // Geometry is a GeoJSON MultiPolygon with the contour level attached, as
@@ -50,10 +52,16 @@ func Contours(ctx context.Context, values []float64, dx, dy int, thresholds []fl
 	if len(thresholds) > MaxThresholds {
 		return nil, errTooManyThresholds
 	}
-	m := &marcher{values: values, dx: dx, dy: dy, smooth: smooth}
+	if err := checkCtx(ctx); err != nil {
+		return nil, err
+	}
+	m := &marcher{values: values, dx: dx, dy: dy, smooth: smooth, meter: budget.NewMeter(ctx), ledger: budget.LedgerFrom(ctx)}
+	// The stitching scratch is reused from one level to the next and given
+	// back at the end; the rings are the output, charged as they are made.
+	defer func() { m.ledger.Free(m.scratch) }()
 	out := make([]Geometry, len(thresholds))
 	for i, t := range thresholds {
-		g, err := m.contour(ctx, t)
+		g, err := m.contour(t)
 		if err != nil {
 			return nil, err
 		}
@@ -61,6 +69,14 @@ func Contours(ctx context.Context, values []float64, dx, dy int, thresholds []fl
 	}
 	return out, nil
 }
+
+// Bytes the ledger is charged for the marching squares' memory: a stitched
+// point (node) and a ring vertex, and a fragment with its two map entries.
+const (
+	nodeBytes     = 24
+	vertexBytes   = 16
+	fragmentBytes = 32 + 2*48
+)
 
 type node struct {
 	p    [2]float64
@@ -76,6 +92,11 @@ type marcher struct {
 	values []float64
 	dx, dy int
 	smooth bool
+
+	meter   budget.Meter
+	ledger  *budget.Ledger
+	scratch int64 // bytes of nodes and fragments charged, freed at the end
+	err     error // a charge that failed inside the stitching
 
 	// Scratch reused across thresholds.
 	nodes   []node
@@ -104,10 +125,10 @@ func (m *marcher) ge(i int) int {
 // contour accumulates, smooths and nests the rings of one level. Rings with
 // positive shoelace area are exteriors, the rest holes; each hole joins the
 // first exterior containing any of its points (holes with none are dropped).
-func (m *marcher) contour(ctx context.Context, value float64) (Geometry, error) {
+func (m *marcher) contour(value float64) (Geometry, error) {
 	m.value = value
 	m.rings = m.rings[:0]
-	if err := m.isorings(ctx); err != nil {
+	if err := m.isorings(); err != nil {
 		return Geometry{}, err
 	}
 	var polygons [][][][2]float64
@@ -122,13 +143,8 @@ func (m *marcher) contour(ctx context.Context, value float64) (Geometry, error) 
 			holes = append(holes, ring)
 		}
 	}
-	for _, hole := range holes {
-		for i := range polygons {
-			if contains(polygons[i][0], hole) != -1 {
-				polygons[i] = append(polygons[i], hole)
-				break
-			}
-		}
+	if err := assignHoles(&m.meter, polygons, holes); err != nil {
+		return Geometry{}, err
 	}
 	if polygons == nil {
 		polygons = [][][][2]float64{}
@@ -141,7 +157,7 @@ func (m *marcher) index(p [2]float64) int {
 }
 
 // isorings runs marching squares, stitching segments into closed rings.
-func (m *marcher) isorings(ctx context.Context) error {
+func (m *marcher) isorings() error {
 	m.nodes = m.nodes[:0]
 	m.frags = m.frags[:0]
 	if m.byStart == nil {
@@ -166,8 +182,11 @@ func (m *marcher) isorings(ctx context.Context) error {
 
 	// Intermediate rows.
 	for m.y++; m.y < dy-1; m.y++ {
-		if err := checkCtx(ctx); err != nil {
+		if err := m.meter.Work(int64(1 + dx)); err != nil {
 			return err
+		}
+		if m.err != nil {
+			return m.err
 		}
 		y := m.y
 		m.x = -1
@@ -193,7 +212,7 @@ func (m *marcher) isorings(ctx context.Context) error {
 		m.stitchAll(cases[t2<<2|t3<<3])
 	}
 	m.stitchAll(cases[t2<<3])
-	return nil
+	return m.err
 }
 
 func (m *marcher) stitchAll(lines []seg) {
@@ -203,13 +222,30 @@ func (m *marcher) stitchAll(lines []seg) {
 }
 
 func (m *marcher) newNode(p [2]float64) int32 {
+	if len(m.nodes) == cap(m.nodes) {
+		m.charge(int64(max(cap(m.nodes), 64)) * nodeBytes)
+	}
 	m.nodes = append(m.nodes, node{p: p, next: -1})
 	return int32(len(m.nodes) - 1)
 }
 
 func (m *marcher) newFrag(f fragment) int32 {
+	if len(m.frags) == cap(m.frags) {
+		m.charge(int64(max(cap(m.frags), 64)) * fragmentBytes)
+	}
 	m.frags = append(m.frags, f)
 	return int32(len(m.frags) - 1)
+}
+
+// charge charges the scratch about to grow by n bytes (the slices double),
+// recording a failure for isorings to return.
+func (m *marcher) charge(n int64) {
+	if m.err != nil {
+		return
+	}
+	if m.err = m.ledger.Alloc(n); m.err == nil {
+		m.scratch += n
+	}
 }
 
 // stitch joins one segment to the open fragments. Upstream's second branch
@@ -263,13 +299,23 @@ func (m *marcher) stitch(l seg) {
 	}
 }
 
+// emit closes a ring. Its nodes form a chain that ends (stitching only ever
+// links a fragment's tail to another fragment's head), so the walk takes at
+// most as many steps as there are nodes; the bound makes that hold by
+// construction.
 func (m *marcher) emit(head int32) {
 	n := 0
-	for i := head; i >= 0; i = m.nodes[i].next {
+	for i := head; i >= 0 && n <= len(m.nodes); i = m.nodes[i].next {
 		n++
 	}
+	if m.err != nil {
+		return
+	}
+	if m.err = m.ledger.Alloc(int64(n) * vertexBytes); m.err != nil {
+		return
+	}
 	ring := make([][2]float64, 0, n)
-	for i := head; i >= 0; i = m.nodes[i].next {
+	for i := head; i >= 0 && len(ring) < n; i = m.nodes[i].next {
 		ring = append(ring, m.nodes[i].p)
 	}
 	m.rings = append(m.rings, ring)

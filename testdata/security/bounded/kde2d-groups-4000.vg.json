@@ -1,0 +1,4 @@
+{"width":100,"height":100,
+ "data":[{"name":"p","values":[{"g":"a","x":1,"y":1},{"g":"b","x":2,"y":2},{"g":"c","x":3,"y":3}],
+  "transform":[{"type":"kde2d","size":[4000,4000],"x":{"field":"x"},"y":{"field":"y"},"groupby":["g"],"cellSize":1,"bandwidth":[1,1]}]}],
+ "marks":[{"type":"image","from":{"data":"p"},"encode":{"update":{"width":{"value":10},"height":{"value":10}}}}]}

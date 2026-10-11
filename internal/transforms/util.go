@@ -31,8 +31,11 @@ const (
 // ErrLimit is wrapped by errors reporting an exceeded work limit.
 var ErrLimit = budget.ErrLimit
 
-func limitErr(what string, n, limit int) error {
-	return fmt.Errorf("%w: %s %d exceeds %d", ErrLimit, what, n, limit)
+// limitErr reports a count n over limit. n is the number the specification
+// asked for, printed as JavaScript prints it (1e+300, Infinity), never a
+// clamped or wrapped int.
+func limitErr(what string, n float64, limit int) error {
+	return fmt.Errorf("%w: %s %s exceeds %d", ErrLimit, what, jsval.JSNumberString(n), limit)
 }
 
 // ctxCheckMask sets how often loops poll the context: every 4096 iterations.

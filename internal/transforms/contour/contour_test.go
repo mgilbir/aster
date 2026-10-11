@@ -123,7 +123,7 @@ func TestCancel(t *testing.T) {
 
 func TestGridRoundTrip(t *testing.T) {
 	g := Grid{Values: []float64{1, 2, 3, 4}, Scale: 4, Width: 2, Height: 2, X1: 0, Y1: 0, X2: 2, Y2: 2}
-	back, err := GridFromValue(g.ToValue())
+	back, err := GridFromValue(context.Background(), g.ToValue())
 	if err != nil {
 		t.Fatal(err)
 	}

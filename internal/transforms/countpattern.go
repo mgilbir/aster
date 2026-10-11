@@ -88,6 +88,13 @@ func CountPattern(ctx context.Context, data []jsval.Value, p CountPatternParams)
 				continue
 			}
 			if _, ok := counts[tok]; !ok {
+				// Each distinct token is an output row: reserve them as they
+				// are found, a thousand at a time.
+				if len(order)&1023 == 0 {
+					if err := reserveOut(ctx, len(order)+1024, len(data)); err != nil {
+						return nil, err
+					}
+				}
 				order = append(order, tok)
 			}
 			counts[tok]++

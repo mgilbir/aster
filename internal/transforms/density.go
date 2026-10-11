@@ -136,7 +136,27 @@ func Density(ctx context.Context, source []jsval.Value, p DensityParams) ([]jsva
 		}
 		domain, valid = valuesExtent(k.Data())
 	}
+	// The samples are new tuples: reserve them before they are drawn.
+	if err := reserveOut(ctx, maxSamples(minsteps, maxsteps), len(source)); err != nil {
+		return nil, err
+	}
 	return sampleTuples(ctx, f, domain, valid, minsteps, maxsteps, nil, nil, p.As, 1)
+}
+
+// maxSamples is the most points SampleCurve returns for these step bounds:
+// it only halves an interval at least twice its resolution (span /
+// maxsteps) wide, so no interval is narrower and there are at most maxsteps
+// of them; past MaxSteps it fails. The bounds are spec numbers, compared in
+// floating point before they become an int.
+func maxSamples(minsteps, maxsteps float64) int {
+	n := math.Max(minsteps, maxsteps)
+	switch {
+	case !(n > 0):
+		return 1
+	case n > MaxSteps:
+		return MaxSteps + 1
+	}
+	return int(math.Ceil(n)) + 1
 }
 
 // valuesExtent is vega-util's extent over raw values, read as numbers.

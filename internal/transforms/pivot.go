@@ -73,7 +73,7 @@ func Pivot(ctx context.Context, data []jsval.Value, p PivotParams) ([]jsval.Valu
 
 	// Every tuple is offered to every column: rows x columns accessor calls.
 	if work := budget.Mul(int64(len(data)), int64(len(keys))); work > MaxPivotWork {
-		return nil, limitErr("pivot work (rows x columns)", int(min(work, math.MaxInt32)), MaxPivotWork)
+		return nil, limitErr("pivot work (rows x columns)", float64(work), MaxPivotWork)
 	}
 	measures := make([]Measure, len(keys))
 	for i, k := range keys {

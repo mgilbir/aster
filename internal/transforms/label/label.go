@@ -61,18 +61,34 @@ type Label struct {
 	Ref any
 }
 
-// Mask is a width x height coverage grid painted by a Rasterizer. A set
-// pixel means non-zero alpha.
+// Mask is a width x height coverage grid painted by a Rasterizer, one bit a
+// pixel. A set pixel means non-zero alpha.
 type Mask struct {
 	Width, Height int
-	Pix           []bool
+	bits          []uint64
+}
+
+func maskWords(w, h int) int { return (w*h + 63) / 64 }
+
+func newMask(w, h int) *Mask {
+	return &Mask{Width: w, Height: h, bits: make([]uint64, maskWords(w, h))}
 }
 
 // Set marks pixel (x, y); out-of-range pixels are ignored.
 func (m *Mask) Set(x, y int) {
 	if x >= 0 && y >= 0 && x < m.Width && y < m.Height {
-		m.Pix[y*m.Width+x] = true
+		i := y*m.Width + x
+		m.bits[i>>6] |= 1 << uint(i&63)
 	}
+}
+
+// Get reports pixel (x, y); out-of-range pixels are clear.
+func (m *Mask) Get(x, y int) bool {
+	if x < 0 || y < 0 || x >= m.Width || y >= m.Height {
+		return false
+	}
+	i := y*m.Width + x
+	return m.bits[i>>6]&(1<<uint(i&63)) != 0
 }
 
 // Rasterizer paints marks into a Mask, standing in for the canvas upstream
@@ -222,10 +238,11 @@ func Layout(ctx context.Context, labels []Label, o Options) ([]Placement, error)
 		}
 		padding = jsMax(maxTextWidth, maxTextHeight) + maxOff
 	}
-	sc, err := newScaler(o.Size[0], o.Size[1], padding)
+	sc, err := newScaler(ctx, o.Size[0], o.Size[1], padding)
 	if err != nil {
 		return nil, err
 	}
+	defer sc.release()
 
 	var bms [2]*bitmap
 	if !isNaiveGroupArea {
@@ -252,7 +269,9 @@ func Layout(ctx context.Context, labels []Label, o Options) ([]Placement, error)
 				return nil, err
 			}
 		} else {
-			bms[0] = sc.bitmap()
+			if bms[0], err = sc.bitmap(); err != nil {
+				return nil, err
+			}
 			if avoidBaseMark {
 				for _, d := range data {
 					bms[0].set(sc.scale(d.boundary[0]), sc.scale(d.boundary[3]))
@@ -268,7 +287,9 @@ func Layout(ctx context.Context, labels []Label, o Options) ([]Placement, error)
 		case "reduced-search":
 			place = p.reducedSearch
 		case "floodfill":
-			p.bm2 = sc.bitmap()
+			if p.bm2, err = sc.bitmap(); err != nil {
+				return nil, err
+			}
 			place = p.floodFill
 		default:
 			if method != "naive" {

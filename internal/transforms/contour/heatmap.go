@@ -52,10 +52,15 @@ func Heatmap(ctx context.Context, source []jsval.Value, p HeatmapParams) ([]*Ima
 		field = func(v jsval.Value) jsval.Value { return v }
 	}
 	grids := make([]Grid, len(source))
+	defer func() {
+		for _, g := range grids {
+			releaseGrid(ctx, g)
+		}
+	}()
 	hasValues := make([]bool, len(source))
 	for i, t := range source {
 		fv := field(t)
-		g, err := GridFromValue(fv)
+		g, err := GridFromValue(ctx, fv)
 		if err != nil {
 			return nil, err
 		}

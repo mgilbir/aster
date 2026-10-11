@@ -3,7 +3,9 @@ package transforms
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -120,5 +122,39 @@ func TestFoldRefusesHeavyCopiesBeforeMakingThem(t *testing.T) {
 	ctx := budget.With(context.Background(), &budget.Budget{MaxRows: 1000, RowBytes: 512})
 	if _, err := Fold(ctx, wide, fold); !errors.Is(err, ErrLimit) {
 		t.Errorf("by weight: %v", err)
+	}
+}
+
+// TestLimitMessagesNameTheNumber is the audit's C99: a count past a limit
+// was clamped (or wrapped) to an int before it was printed, so the message
+// named 2147483647 or MinInt64 instead of what the specification asked for.
+func TestLimitMessagesNameTheNumber(t *testing.T) {
+	ctx := context.Background()
+	check := func(what string, err error, want string) {
+		t.Helper()
+		if !errors.Is(err, ErrLimit) || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: %v, want it to name %s", what, err, want)
+		}
+	}
+	_, err := Sequence(ctx, SequenceParams{Start: 0, Stop: 1e300})
+	check("sequence", err, "sequence length 1e+300 exceeds")
+	_, err = Bin(BinConfig{Extent: [2]float64{0, 1}, MaxBins: 1e300})
+	check("bin", err, "maxbins 1e+300 exceeds")
+	_, err = Quantile(ctx, nil, QuantileParams{Field: FieldOf("x"), Step: 1e-300})
+	check("quantile", err, "quantile probabilities 9.9999999999999e+299 exceeds")
+	_, err = SampleCurve(func(float64) float64 { return 0 }, [2]float64{0, 1}, 1e300, 1e300)
+	check("density steps", err, "steps 1e+300 exceeds")
+}
+
+// TestCountPatternReservesRows: every distinct token is an output row, which
+// nothing reserved before the rows existed.
+func TestCountPatternReservesRows(t *testing.T) {
+	var sb strings.Builder
+	for i := 0; i < 5000; i++ {
+		fmt.Fprintf(&sb, "w%d ", i)
+	}
+	data := []jsval.Value{obj("t", jsval.Str(sb.String()))}
+	if _, err := CountPattern(budgetCtx(1000), data, CountPatternParams{Field: FieldOf("t")}); !errors.Is(err, ErrLimit) {
+		t.Fatalf("5,000 distinct tokens under 1,000 rows: %v", err)
 	}
 }

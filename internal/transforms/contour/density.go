@@ -107,15 +107,26 @@ func Density(ctx context.Context, data []jsval.Value, p DensityParams, counts bo
 		return Grid{}, errTooLarge
 	}
 	nn, mm := int(n), int(m)
+	// The two float32 rasters are scratch; the float64 values are the grid,
+	// which the caller gives back (releaseGrid) when it drops it.
+	if err := checkCtx(ctx); err != nil {
+		return Grid{}, err
+	}
+	led := budget.LedgerFrom(ctx)
+	scratch := 2 * 4 * n * m
+	if err := led.Alloc(scratch + gridValueBytes*n*m); err != nil {
+		return Grid{}, err
+	}
+	defer led.Free(scratch)
 	values0 := make([]float32, nn*mm)
 	values1 := make([]float32, nn*mm)
 	values := values0
+	meter := budget.NewMeter(ctx)
 
-	for i, d := range data {
-		if i&0xfff == 0 {
-			if err := checkCtx(ctx); err != nil {
-				return Grid{}, err
-			}
+	for _, d := range data {
+		if err := meter.Work(1); err != nil {
+			led.Free(gridValueBytes * n * m)
+			return Grid{}, err
 		}
 		xi := ox + int(toInt32(jsval.ToNumber(x(d))))>>k
 		yi := oy + int(toInt32(jsval.ToNumber(y(d))))>>k
@@ -128,6 +139,18 @@ func Density(ctx context.Context, data []jsval.Value, p DensityParams, counts bo
 		}
 	}
 
+	// Each pass is a sweep of the raster.
+	passes := 0
+	if rx > 0 {
+		passes += 3
+	}
+	if ry > 0 {
+		passes += 3
+	}
+	if err := meter.Work(int64(passes) * n * m); err != nil {
+		led.Free(gridValueBytes * n * m)
+		return Grid{}, err
+	}
 	switch {
 	case rx > 0 && ry > 0:
 		blurX(nn, mm, values0, values1, rx)

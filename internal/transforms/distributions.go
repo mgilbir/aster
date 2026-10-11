@@ -454,7 +454,7 @@ func SampleCurve(f func(float64) float64, extent [2]float64, minSteps, maxSteps 
 	}
 	maxSteps = math.Max(minSteps, maxSteps)
 	if maxSteps > MaxSteps {
-		return nil, limitErr("steps", int(min(maxSteps, math.MaxInt32)), MaxSteps)
+		return nil, limitErr("steps", maxSteps, MaxSteps)
 	}
 	point := func(x float64) [2]float64 { return [2]float64{x, f(x)} }
 	minX, maxX := extent[0], extent[1]
@@ -483,7 +483,7 @@ func SampleCurve(f func(float64) float64, extent [2]float64, minSteps, maxSteps 
 	budget := 8 * MaxSteps
 	for len(next) > 0 {
 		if budget--; budget < 0 {
-			return nil, limitErr("curve samples", 8*MaxSteps, 8*MaxSteps)
+			return nil, limitErr("curve samples", 8*MaxSteps+1, 8*MaxSteps)
 		}
 		p1 := next[len(next)-1]
 		// midpoint for potential curve subdivision

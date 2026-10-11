@@ -1,0 +1,1 @@
+{"data": [{"name": "d", "transform": [{"type": "sequence", "start": 0, "stop": 2500}, {"type": "pivot", "groupby": ["data"], "field": "data", "value": "data"}]}]}

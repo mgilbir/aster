@@ -634,12 +634,15 @@ func windowParams(p *opParams) transforms.WindowParams {
 		}
 		wp.Ops = append(wp.Ops, s)
 	}
-	if fr := p.nums("frame"); len(fr) == 2 {
-		conv := func(f float64) transforms.FrameBound {
-			if math.IsNaN(f) {
+	if fr := p.list("frame"); len(fr) == 2 {
+		// f == null is unbounded; any number, NaN included, is an offset
+		// (transforms.FrameBound).
+		conv := func(e any) transforms.FrameBound {
+			v, _ := e.(jsval.Value)
+			if v.IsNullish() {
 				return transforms.FrameBound{Unbounded: true}
 			}
-			return transforms.FrameBound{Offset: int(f)}
+			return transforms.FrameBound{Offset: jsval.ToNumber(v)}
 		}
 		wp.Frame = []transforms.FrameBound{conv(fr[0]), conv(fr[1])}
 	}
