@@ -3,8 +3,9 @@ package scene
 import (
 	"errors"
 	"math"
-	"sync"
 
+	"github.com/mgilbir/aster/internal/bcache"
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsmath"
 )
 
@@ -465,7 +466,7 @@ func Symbol(ctx PathContext, it *Item) error {
 	if drawBuiltinSymbol(ctx, name, size) {
 		return ctxErr(ctx)
 	}
-	cmds, err := customSymbol(name)
+	cmds, err := customSymbol(ledgerOf(ctx), name)
 	if err != nil {
 		return err
 	}
@@ -577,32 +578,28 @@ func drawBuiltinSymbol(ctx PathContext, name string, size float64) bool {
 	return true
 }
 
-// Custom symbol paths come from the specification, so the parse cache is
-// bounded: it is dropped wholesale when it grows past customSymbolCacheMax.
-const customSymbolCacheMax = 256
+// Custom symbol paths come from the specification or the data, and a parsed
+// path holds sixteen times the bytes of its string, so the parse cache is
+// bounded by the bytes it holds and keeps no path larger than a sixteenth of
+// it (C48).
+const (
+	customSymbolCacheBytes    = 16 << 20
+	customSymbolCacheMaxEntry = 1 << 20
+)
 
-var customSymbols struct {
-	sync.Mutex
-	m map[string][]PathCmd
-}
+var customSymbols = bcache.New[string, []PathCmd](customSymbolCacheBytes, customSymbolCacheMaxEntry)
 
-func customSymbol(path string) ([]PathCmd, error) {
-	customSymbols.Lock()
-	cmds, ok := customSymbols.m[path]
-	customSymbols.Unlock()
-	if ok {
+// customSymbol parses a custom symbol's path, charging l for a parse the
+// cache does not hold.
+func customSymbol(l *budget.Ledger, path string) ([]PathCmd, error) {
+	if cmds, ok := customSymbols.Get(path); ok {
 		return cmds, nil
 	}
-	cmds, err := ParsePath(path)
+	cmds, err := parsePath(l, path)
 	if err != nil {
 		return nil, err
 	}
-	customSymbols.Lock()
-	if customSymbols.m == nil || len(customSymbols.m) >= customSymbolCacheMax {
-		customSymbols.m = make(map[string][]PathCmd)
-	}
-	customSymbols.m[path] = cmds
-	customSymbols.Unlock()
+	customSymbols.Put(path, cmds, int64(len(path))+int64(cap(cmds))*pathCmdBytes)
 	return cmds, nil
 }
 

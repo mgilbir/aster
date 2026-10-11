@@ -76,21 +76,40 @@ Specifications and data are untrusted.
   lengths, `bin` step counts, tick counts, `maxbins`, wordcloud/force
   iterations, …). Choose limits far above any real chart and return an error
   when exceeded.
-- One per-render budget (`internal/budget`, carried in the `context.Context`)
-  counts data rows, loaded bytes and geographic path points; every transform
-  that multiplies tuples (`impute`, `kde`, `quantile`, `flatten`, `fold`,
-  `cross`, `sequence`, `pivot`, `aggregate` cells, `regression`) must charge it
-  with `budget.ReserveOut` **before** it allocates. The expression evaluator
-  has a separate render-wide budget for large strings and arrays
-  (`expr.StringBudget`) and a per-string length limit; every string builder
-  (`+`, `join`, `pad`, `replace`, array stringification) checks it before
-  building. `vega.Limits` holds the defaults; `WithMemoryLimit` scales them.
-- Honour `context.Context` cancellation in loops whose iterations can be long:
-  poll inside the loop (or with `budget.Ticker` when the cost per iteration
-  varies), not only between groups or phases. The converter's timeout covers
-  every stage of a public call (compile, Vega run, SVG writing, PNG, PDF), but
-  Vega-Lite compilation (`internal/vegalite`) and JSON parsing of the spec and
-  of loaded data are not interruptible, so they are bounded by size, not time.
+- **Bounds are charged where the work happens** ([ADR 0010](adr/0010-bounds-charged-where-work-happens.md)).
+  Each public call has one ledger (`budget.Ledger`, in the call's
+  `context.Context`; `budget.LedgerFrom(ctx)`), spanning every stage. Every
+  loop whose trip count the input controls meters its steps: `Ledger.Work(n)`
+  per coarse step (a row, a feature), or a `budget.Meter` in a tight loop.
+  Charging polls the call's context, so `WithTimeout` and `Close` stop the
+  loop that is running; a bare `ctx.Err()` at a stage boundary is not enough.
+  Every allocation the input sizes is charged **before** it is made, to its
+  own meter if it has one, otherwise to the ledger (`Ledger.Alloc`, `Free`
+  when released). Code that cannot return an error uses `MustWork` and
+  `MustAlloc`, which panic with a `*budget.Stop` that the public API recovers.
+- The older meters stay where they are and keep their semantics: data rows,
+  loaded bytes and path points (`budget.Budget`, one per Vega render); every
+  transform that multiplies tuples (`impute`, `kde`, `quantile`, `flatten`,
+  `fold`, `cross`, `sequence`, `pivot`, `aggregate` cells, `regression`)
+  charges it with `budget.ReserveOut` before it allocates. The expression
+  evaluator's budget for large strings and arrays (`expr.StringBudget`) and
+  its per-string length limit, which every string builder (`+`, `join`, `pad`,
+  `replace`, array stringification) checks before building. The rasterizer's
+  canvas and pixel budgets, the shaping budget, the SVG size.
+- Every bound is derived from `WithMemoryLimit` in one function,
+  `deriveLimits` (limits.go), and documented in [limits.md](limits.md), which
+  `TestLimitsDocMatchesCode` checks.
+- Where upstream's algorithm is unbounded or super-linear in the input, use a
+  bounded one with identical output, and refuse parameters past the point
+  where upstream's output is degenerate with an error wrapping `ErrLimit`
+  ([ADR 0011](adr/0011-faithful-output-free-algorithm.md)).
+- Every stage honours the call's context, Vega-Lite compilation included
+  (`vegalite.Options.Context`). Two steps cannot be interrupted, so they are
+  bounded by size, not time: parsing the specification's JSON, and parsing
+  loaded JSON data.
+- An input that once exhausted a bound goes into the bounded-input corpus
+  (`testdata/security/bounded`, run by `TestBoundedInputs` in every test run;
+  see [testing.md](testing.md#robustness)).
 - Nothing attacker-controlled is written raw into the SVG: every attribute and
   text goes through the escaping writer (which also drops characters XML 1.0
   forbids), CSS-bound values (`blend`) are allow-listed, and image and link URLs
@@ -137,10 +156,13 @@ per-step rounding) or check it against node.
 A `Converter` is safe for concurrent use; the engine keeps that
 true by construction. Package-level variables are one of: immutable after
 `init` (tables, registries filled by `init` functions), a `sync.Once`
-initialisation, or a cache behind a mutex or a `sync.Pool` (bounded, because
-specifications choose the keys). Everything a render mutates hangs off values
-the render creates: the dataflow, the scenegraph, projections (and the
-pipelines they cache for a `geo.Path`), the `Random`, the budget. A compiled
+initialisation, a `sync.Pool`, or a cache. A cache whose keys or values the
+input chooses is an `internal/bcache.Cache`, bounded by the bytes its entries
+hold as the caller estimates them (what the value retains, not its header),
+because an entry count is no bound when one entry can be a megabyte.
+Everything a render mutates hangs off values the render creates: the
+dataflow, the scenegraph, projections (and the pipelines they cache for a
+`geo.Path`), the `Random`, the budget, the ledger. A compiled
 `expr.Program` is immutable and shared between renders through
 `expr.CompileCached`. New package-level mutable state needs a lock and an
 entry in this list; `TestConcurrentConverterSharesNothing` (run it with

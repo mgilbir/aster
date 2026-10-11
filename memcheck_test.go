@@ -1,8 +1,8 @@
 package aster
 
 // Does WithMemoryLimit hold against the real heap? The option is not a heap
-// cap: limits() and rasterLimits() turn the byte limit into budgets (rows at
-// 256 bytes, scene items at 512, loaded bytes, large strings, canvas pixels, SVG
+// cap: deriveLimits (limits.go) turns the byte limit into budgets (rows at
+// 512 bytes, scene items at 1536, loaded bytes, large strings, canvas pixels, SVG
 // size), and the engine charges them as it works. This file renders
 // adversarial specifications under several limits and records the peak heap of
 // each render next to the limit, so the per-row and per-item estimates are
@@ -28,7 +28,7 @@ package aster
 // the second.
 //
 // Each case is sized in units of the budget it targets (the rows and items
-// limits() derives from the limit, the loaded bytes, ...) and run at two scales: 0.9 of the budget, which the render
+// deriveLimits derives from the limit, the loaded bytes, ...) and run at two scales: 0.9 of the budget, which the render
 // should complete or be refused by another budget, and 2, which should end in an
 // error wrapping ErrLimit. A (case, limit) holds if the render fails with
 // ErrLimit, or succeeds with a peak live heap of at most memcheckK times the
@@ -531,7 +531,7 @@ func (r memRow) holds() bool {
 }
 
 func memRun(c memCase, format string, limit uint64, scale float64) memRow {
-	lim := (&Converter{cfg: &config{memoryLimit: limit}}).limits()
+	lim := deriveLimits(limit).vega
 	rows := int(scale * float64(lim.MaxRows))
 	items := int(scale * float64(lim.MaxItems))
 	ms := c.gen(rows, items, limit, scale)

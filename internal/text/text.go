@@ -38,7 +38,9 @@ import (
 	"sync"
 	"unicode"
 	"unicode/utf8"
+	"unsafe"
 
+	"github.com/mgilbir/aster/internal/bcache"
 	"github.com/mgilbir/aster/internal/fonts/liberation"
 	"github.com/mgilbir/aster/internal/fonts/notoemoji"
 	"github.com/mgilbir/forme/shape"
@@ -50,15 +52,25 @@ const (
 	maxTextBytes  = 1 << 20 // longer text is measured up to this many bytes
 	maxSizePx     = 1 << 16 // larger CSS sizes are clamped
 	maxFamilies   = 32      // font-family entries considered per query
-	maxCacheItems = 1 << 14 // entries in each of the measurement caches
+	maxCacheItems = 1 << 14 // runes memoised per face list (see faceList)
+)
 
-	// maxWidthBytes bounds the width cache by what its entries hold: the key
-	// strings and widthEntryBytes of map overhead each. Labels are short, so
-	// the entry count usually ends the cache first; the bytes stop a few long
-	// texts (up to a specification's string limit each) from pinning memory
-	// that no render's budget accounts for, in a Measurer that outlives them.
-	maxWidthBytes   = 4 << 20
-	widthEntryBytes = 64
+// The measurement caches live as long as the Measurer, across renders, and
+// the specification and its data choose their keys: the texts, the CSS font
+// strings (with family names of any length) and the runes of the texts. So
+// each is bounded by the bytes its entries hold, not by their number, keeps
+// none too large to share it with others, and drops entries not used lately
+// (C32). Labels and font strings are short: the bounds hold thousands of
+// entries of a real chart; the width cache about 11,000 labels, no more than
+// the entry-counted cache it replaces held (a full cache costs the collector
+// a scan per cycle, which a bigger one would add to every miss).
+const (
+	widthCacheBytes    = 3 << 20
+	widthCacheMaxEntry = 256 << 10
+	cssCacheBytes      = 1 << 20
+	cssCacheMaxEntry   = 64 << 10
+	listCacheBytes     = 8 << 20
+	listCacheMaxEntry  = 1 << 20
 )
 
 // Option configures a Measurer.
@@ -263,11 +275,18 @@ type measurerState struct {
 	sysEntries      map[sysKey]*entry
 	palettes        map[string]int // WithFontPalette's, by normalised family
 
-	cssCache   map[string]CSSFont
-	listCache  map[listKey]*faceList
-	widthCache map[widthKey]float64
-	widthBytes int // what widthCache holds, as maxWidthBytes counts it
-	nextID     int
+	// The caches; see widthCacheBytes. cssCache and listCache are used under
+	// mu (plan), widthCache without it.
+	cssCache   *bcache.Cache[string, CSSFont]
+	listCache  *bcache.Cache[listKey, *faceList]
+	widthCache *bcache.Cache[widthKey, float64]
+	// last is the font plan resolved last (see font), under mu.
+	last struct {
+		font string
+		css  CSSFont
+		list *faceList
+	}
+	nextID int
 }
 
 type widthKey struct{ text, css string }
@@ -282,9 +301,9 @@ func New(opts ...Option) (*Measurer, error) {
 		exact:           cfg.exact,
 		pango:           cfg.pango,
 		byFam:           make(map[string][]*entry),
-		cssCache:        make(map[string]CSSFont),
-		listCache:       make(map[listKey]*faceList),
-		widthCache:      make(map[widthKey]float64),
+		cssCache:        bcache.New[string, CSSFont](cssCacheBytes, cssCacheMaxEntry),
+		listCache:       bcache.New[listKey, *faceList](listCacheBytes, listCacheMaxEntry),
+		widthCache:      bcache.New[widthKey, float64](widthCacheBytes, widthCacheMaxEntry),
 		fallbackFamily:  orDefault(cfg.fallbackFamily, "Liberation Sans"),
 		serifFamily:     orDefault(cfg.serifFamily, "Liberation Serif"),
 		monospaceFamily: orDefault(cfg.monospaceFamily, "Liberation Mono"),
@@ -420,34 +439,16 @@ func (m *Measurer) MeasureText(text, cssFont string) float64 {
 	}
 	key := widthKey{text, cssFont}
 	// Most measurements repeat (axis labels, legend entries): concurrent
-	// renders on one Measurer hit the cache under a shared lock.
-	m.mu.RLock()
-	w, ok := m.widthCache[key]
-	m.mu.RUnlock()
-	if ok {
+	// renders on one Measurer hit the cache without taking mu.
+	if w, ok := m.widthCache.Get(key); ok {
 		return w
 	}
 	m.mu.Lock()
-	if w, ok := m.widthCache[key]; ok {
-		m.mu.Unlock()
-		return w
-	}
 	p := m.plan(text, cssFont)
 	m.mu.Unlock()
 
-	_, w = m.shapePlan(&p, false)
-
-	m.mu.Lock()
-	// A text too large to share the cache with anything is not kept.
-	if n := len(text) + len(cssFont) + widthEntryBytes; n <= maxWidthBytes {
-		if len(m.widthCache) >= maxCacheItems || m.widthBytes+n > maxWidthBytes {
-			clear(m.widthCache)
-			m.widthBytes = 0
-		}
-		m.widthCache[key] = w
-		m.widthBytes += n
-	}
-	m.mu.Unlock()
+	_, w := m.shapePlan(&p, false)
+	m.widthCache.Put(key, w, int64(len(text)+len(cssFont)))
 	return w
 }
 
@@ -544,7 +545,7 @@ type planned struct {
 // plan resolves the CSS font and splits text into runs per face. It touches
 // the caches and may load a system font, so m.mu is held.
 func (m *Measurer) plan(text, cssFont string) planned {
-	css := m.parse(cssFont)
+	css, list := m.font(cssFont)
 	if len(text) > maxTextBytes {
 		n := maxTextBytes
 		for n > 0 && !utf8.RuneStart(text[n]) {
@@ -553,7 +554,6 @@ func (m *Measurer) plan(text, cssFont string) planned {
 		text = text[:n]
 	}
 	size := math.Min(css.Size, maxSizePx)
-	list := m.faces(css)
 
 	// The shaping size of the reference metric model: the size truncated to
 	// 1/64 px, then rounded up to a whole pixel.
@@ -642,18 +642,34 @@ func (m *Measurer) run(runs *[]Run, text string, a, b int, f *Face, size, shaped
 	return width
 }
 
+// font resolves a CSS font string to its parsed font and candidate faces.
+// A chart measures run after run in one font, so the last one resolved is
+// kept beside the caches, and a repeat costs a string comparison. m.mu is
+// held.
+func (m *Measurer) font(cssFont string) (CSSFont, *faceList) {
+	if m.last.list != nil && cssFont == m.last.font {
+		return m.last.css, m.last.list
+	}
+	css := m.parse(cssFont)
+	list := m.faces(css)
+	if len(cssFont) <= cssCacheMaxEntry {
+		m.last.font, m.last.css, m.last.list = cssFont, css, list
+	}
+	return css, list
+}
+
 func (m *Measurer) parse(s string) CSSFont {
-	if c, ok := m.cssCache[s]; ok {
+	if c, ok := m.cssCache.Get(s); ok {
 		return c
 	}
 	c := ParseCSSFont(s)
 	if len(c.Family) > maxFamilies {
 		c.Family = c.Family[:maxFamilies]
 	}
-	if len(m.cssCache) >= maxCacheItems {
-		clear(m.cssCache)
-	}
-	m.cssCache[s] = c
+	// The key, and the family names, which may be copies of it (unquoted),
+	// in a slice of string headers.
+	size := int64(2*len(s)) + int64(len(c.Family))*int64(unsafe.Sizeof(""))
+	m.cssCache.Put(s, c, size)
 	return c
 }
 

@@ -16,6 +16,15 @@ What changed between versions, for users of the library and the CLI. Breaking ch
 - An axis whose `orient` is a signal failed to parse its encoding when a config value was an array holding `null` (`tickDash: [4, null, 2]`) or a string holding U+2028 or U+2029; both are now spliced as upstream's `stringValue` does.
 - JavaScript's 32-bit integer conversion (`~~x`, `x | 0`) of a huge number, in text width estimates and a crossfilter's `ignore` mask, wrapped as on no JavaScript engine and differed between amd64 and arm64.
 
+### Bounds are charged where the work happens ([ADR 0010](docs/adr/0010-bounds-charged-where-work-happens.md))
+
+- Each call has a ledger that every stage charges, before allocating, for the memory the input makes it allocate, and that the loops the input controls charge for their work, polling the call's timeout. `WithMemoryLimit(n)` bounds it at `n`; without it, at 2 GiB ([docs/limits.md](docs/limits.md)). A render past it fails with `ErrLimit`.
+- Caches shared between calls are bounded by the bytes they hold, not by their number of entries: compiled expressions and regular expressions, custom symbol paths, and per converter the measured widths, CSS fonts, font fallback lists and glyph outlines. A 419-byte specification could keep 900 MB of compiled regular expressions alive after its render; a hostile CJK label under many font families, hundreds of MB.
+- The rasterizer's cache of pattern tiles and of decoded colour glyph bitmaps is charged to the call's ledger, so `WithMemoryLimit` bounds it (it was a fixed 256 MiB).
+- Parsed path data (custom symbol shapes and `path` marks) is charged to the call's ledger; a path string parses to sixteen times its size.
+- `SVGToPDF` and the PDF methods report a limit reached inside a stage that cannot return an error as `ErrLimit`, as the other outputs do, rather than as an internal error.
+- New: [ADR 0011](docs/adr/0011-faithful-output-free-algorithm.md), "faithful in output, free in algorithm".
+
 ### Errors reach the caller ([ADR 0006](docs/adr/0006-errors-reach-the-caller.md))
 
 - **breaking:** a render fails when upstream Vega would log a problem and draw without it. This covers a data URL the Loader refuses or fails to load (including every URL under the default `DenyLoader`), loaded data that does not parse, an image that cannot be loaded or decoded, and an exception an expression or operator raises during evaluation. Before, these rendered a chart missing the data or the image, with a nil error. Data and image failures are an `*aster.LoadError` (`Resource`, `URL`, `Err`).

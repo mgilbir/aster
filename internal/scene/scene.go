@@ -9,7 +9,10 @@
 // matters upstream use Num, Tri and Paint, whose zero values mean "unset".
 package scene
 
-import "github.com/mgilbir/aster/internal/jsval"
+import (
+	"github.com/mgilbir/aster/internal/budget"
+	"github.com/mgilbir/aster/internal/jsval"
+)
 
 // MarkType identifies the mark kind. Unknown types are rejected at load time;
 // upstream fails with a TypeError on them.
@@ -280,8 +283,8 @@ type Path struct {
 func P(d string) Path { return Path{D: d, Set: true} }
 
 // parsedPath returns the parsed commands of the item's path, caching them
-// until the path string changes.
-func (it *Item) parsedPath() ([]PathCmd, error) {
+// until the path string changes; a parse is charged to l.
+func (it *Item) parsedPath(l *budget.Ledger) ([]PathCmd, error) {
 	if it.path == nil {
 		return ParsePath("")
 	}
@@ -289,7 +292,7 @@ func (it *Item) parsedPath() ([]PathCmd, error) {
 	if p.parsedOK && p.parsedD == p.D {
 		return p.parsed, nil
 	}
-	cmds, err := ParsePath(p.D)
+	cmds, err := parsePath(l, p.D)
 	if err != nil {
 		return nil, err
 	}

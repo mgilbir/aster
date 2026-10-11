@@ -37,14 +37,15 @@ type renderer struct {
 	nest    int
 	err     error
 
-	imgs       map[*node]*rasterImage
-	fetched    map[string][]byte            // image bytes by href, from Options.Images
-	imageErr   func(href string, err error) // Options.ImageError
-	outlines   map[outlineKey]*path
-	colourImgs map[colourImageKey]*rasterImage // decoded bitmap glyphs
-	svgGlyphs  map[colourImageKey]*document    // parsed SVG glyph documents
-	inSVGGlyph bool                            // drawing one, whose text draws no other
-	grads      map[gradKey]*gradient
+	imgs        map[*node]*rasterImage
+	fetched     map[string][]byte            // image bytes by href, from Options.Images
+	imageErr    func(href string, err error) // Options.ImageError
+	outlines    map[outlineKey]*path
+	colourImgs  map[colourImageKey]*rasterImage // decoded bitmap glyphs
+	colourBytes int64                           // what colourImgs is charged to the ledger
+	svgGlyphs   map[colourImageKey]*document    // parsed SVG glyph documents
+	inSVGGlyph  bool                            // drawing one, whose text draws no other
+	grads       map[gradKey]*gradient
 
 	patterns     map[patternKey]*patternTile
 	patternBytes int
@@ -56,6 +57,7 @@ type renderer struct {
 	effectPx     int            // pixels charged to filters and pattern tiles so far
 
 	ctx         context.Context // nil = never cancelled
+	ledger      *budget.Ledger  // the call's, from ctx; holds the pattern tiles kept
 	pixelOps    int             // pixel work charged so far (see Limits.MaxPixelOps)
 	canvasBytes int             // pixel memory of live canvases (see Limits.MaxCanvasBytes)
 	ticks       int

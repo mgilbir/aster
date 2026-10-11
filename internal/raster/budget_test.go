@@ -140,8 +140,11 @@ func TestContextCancelledFilter(t *testing.T) {
 func TestSecurityReviewSVGs(t *testing.T) {
 	for _, name := range []string{"layers-8k.svg", "use-expansion-fullcanvas.svg", "rects-1000-fullcanvas.svg"} {
 		data, err := os.ReadFile("../../testdata/security/" + name)
+		if os.IsNotExist(err) {
+			data, err = os.ReadFile("../../testdata/security/bounded/" + name)
+		}
 		if err != nil {
-			t.Skip(err)
+			t.Fatal(err)
 		}
 		t.Run(name, func(t *testing.T) {
 			if testing.Short() {

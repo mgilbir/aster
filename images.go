@@ -37,7 +37,7 @@ type callImages struct {
 type callImagesKey struct{}
 
 func (c *Converter) newCallImages() *callImages {
-	allowance := c.limits().MaxLoadBytes
+	allowance := c.lim.vega.MaxLoadBytes
 	if allowance <= 0 {
 		allowance = 64 << 20
 	}

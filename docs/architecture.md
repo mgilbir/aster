@@ -41,7 +41,7 @@ flowchart LR
 | SVG → PNG | `raster`, `pngopt` | resvg (the reference it is tested against) |
 | SVG → PDF | `svgpdf`, `fontsubset` | none |
 | JavaScript's numbers, `Math` and sort | `jsval`, `jsmath`, `jssort` | V8, bit for bit |
-| resource budgets | `budget` | none (aster's own bounds) |
+| resource budgets, the per-call ledger, byte-bounded caches | `budget`, `bcache` | none (aster's own bounds) |
 | loaders | `loader` | vega-loader's policy |
 
 ## Resources and errors
@@ -88,7 +88,7 @@ stateDiagram-v2
   Closed --> Closed: every call returns ErrClosed; Close again returns nil
 ```
 
-Concurrency is by construction: a call's dataflow, scenegraph, random generator, budgets and deadline are its own. What calls share (fonts and their shaping caches, locales, colour schemes, compiled expressions) is immutable or synchronised. The rules that keep it so are in [design-rules.md](design-rules.md#concurrency).
+Concurrency is by construction: a call's dataflow, scenegraph, random generator, budgets, ledger and deadline are its own. What calls share (fonts and their shaping caches, colour schemes, compiled expressions) is immutable or synchronised, and the caches among it are bounded by the bytes they hold (`bcache`). The rules that keep it so are in [design-rules.md](design-rules.md#concurrency).
 
 ## Package layers
 
@@ -96,7 +96,7 @@ Each package imports only packages of lower layers, so there are no cycles and t
 
 <!-- layers:begin (checked by TestPackageLayers) -->
 ```text
-0: budget csscolor fonts/dejavu fonts/liberation fonts/notoemoji fontsubset jsmath jssort pngopt
+0: bcache budget csscolor fonts/dejavu fonts/liberation fonts/notoemoji fontsubset jsmath jssort pngopt
 1: imageref jsval loader text
 2: format geo raster scale/color scene transforms/contour transforms/force transforms/hierarchy transforms/label transforms/voronoi transforms/wordcloud
 3: expr geo/geoscene scale svg svgpdf transforms vega/layout vegalite

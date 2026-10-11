@@ -21,7 +21,7 @@ func addSVGSeeds(f *testing.F) {
 	for _, s := range featureSynths {
 		f.Add(s.svg)
 	}
-	for _, s := range fuzzutil.Files(f, "../../testdata/vl-convert/expected/v5_8/*.svg", "../../testdata/security/*.svg") {
+	for _, s := range fuzzutil.Files(f, "../../testdata/vl-convert/expected/v5_8/*.svg", "../../testdata/security/*.svg", "../../testdata/security/bounded/*.svg") {
 		f.Add(s)
 	}
 }

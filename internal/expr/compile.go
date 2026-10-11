@@ -6,9 +6,10 @@ import (
 	"slices"
 	"sort"
 	"strings"
-	"sync"
 	"sync/atomic"
+	"unsafe"
 
+	"github.com/mgilbir/aster/internal/bcache"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -83,42 +84,50 @@ func Compile(src string) (*Program, error) {
 
 // Compiled expressions are shared between renders: a chart compiles the same
 // few dozen expression strings (Vega-Lite emits them from a fixed set of
-// templates) every time it is drawn, and a Program is immutable. The cache is
-// bounded, since specifications choose the strings; it is dropped whole when
-// full and skips long sources.
+// templates) every time it is drawn, and a Program is immutable. The
+// specification chooses the strings, and a short one can hold a regular
+// expression compiled to megabytes (C8), so the cache is bounded by the bytes
+// its programs hold (Program.size) and keeps none of more than
+// programCacheMaxEntry. The bound is far above what the corpus uses: its
+// expressions hold a few kilobytes each.
 const (
-	programCacheMax    = 1024
-	programCacheMaxLen = 2048
+	programCacheBytes    = 32 << 20
+	programCacheMaxEntry = 1 << 20
 )
 
-var programCache = struct {
-	sync.Mutex
-	m map[string]*Program
-}{m: map[string]*Program{}}
+var programCache = bcache.New[string, *Program](programCacheBytes, programCacheMaxEntry)
 
 // CompileCached is Compile with a process-wide cache of successful compiles.
 // Errors are not cached. The Program is shared; it is safe for concurrent use.
 func CompileCached(src string) (*Program, error) {
-	if len(src) > programCacheMaxLen {
-		return Compile(src)
-	}
-	programCache.Lock()
-	p := programCache.m[src]
-	programCache.Unlock()
-	if p != nil {
+	if p, ok := programCache.Get(src); ok {
 		return p, nil
 	}
 	p, err := Compile(src)
 	if err != nil {
 		return nil, err
 	}
-	programCache.Lock()
-	if len(programCache.m) >= programCacheMax {
-		clear(programCache.m)
-	}
-	programCache.m[src] = p
-	programCache.Unlock()
+	programCache.Put(src, p, p.size())
 	return p, nil
+}
+
+// nodeBytes is what one node of a Program holds: the AST node and the closure
+// compiled from it with what the closure captures.
+const nodeBytes = int64(unsafe.Sizeof(Node{})) + 64
+
+// size estimates the bytes p holds: its source, its tree and the closures
+// compiled from it, the literal strings, and the programs of its regular
+// expression literals.
+func (p *Program) size() int64 {
+	n := int64(len(p.src))
+	p.ast.Walk(func(nd *Node) bool {
+		n += nodeBytes + int64(len(nd.Value.StrValue()))
+		if nd.Regex != nil {
+			n += patternBytes(nd.Regex)
+		}
+		return false
+	})
+	return n
 }
 
 // CompileNode compiles a parsed expression.

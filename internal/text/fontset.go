@@ -2,6 +2,7 @@ package text
 
 import (
 	"strings"
+	"unsafe"
 )
 
 // entry is a registered font: a loaded face, or a system font not yet read.
@@ -146,10 +147,20 @@ type listKey struct {
 // faceList is the ordered candidate faces for one (families, weight, style)
 // query, plus a memo of which face each rune resolves to.
 type faceList struct {
+	key   listKey
 	cands []*entry
 	ascii [128]*Face
 	seen  [128]bool
 	runes map[rune]*Face
+}
+
+// runeMemoBytes is what one rune of a faceList's memo holds in its map.
+const runeMemoBytes = 32
+
+// size is the bytes l holds, for the cache: its key, the list, its candidate
+// faces and its rune memo.
+func (l *faceList) size() int64 {
+	return int64(len(l.key.families)) + int64(unsafe.Sizeof(*l)) + 8*int64(len(l.cands)) + runeMemoBytes*int64(len(l.runes))
 }
 
 // faces builds (or recalls) the candidate list for a parsed CSS font.
@@ -166,7 +177,7 @@ type faceList struct {
 // monochrome Noto Emoji. WithFallbackFamilies replaces it with its families.
 func (m *Measurer) faces(css CSSFont) *faceList {
 	key := listKey{strings.Join(css.Family, "\x00"), css.Weight, css.Italic}
-	if l, ok := m.listCache[key]; ok {
+	if l, ok := m.listCache.Get(key); ok {
 		return l
 	}
 	families := make([]string, 0, len(css.Family)+4)
@@ -184,7 +195,7 @@ func (m *Measurer) faces(css CSSFont) *faceList {
 	}
 	families = append(families, m.fallbackFamily, "sans-serif")
 
-	l := &faceList{}
+	l := &faceList{key: key}
 	seen := map[*entry]bool{}
 	push := func(es []*entry) {
 		for _, e := range es {
@@ -225,10 +236,7 @@ func (m *Measurer) faces(css CSSFont) *faceList {
 		push(m.fallback)
 	}
 
-	if len(m.listCache) >= maxCacheItems {
-		clear(m.listCache)
-	}
-	m.listCache[key] = l
+	m.listCache.Put(key, l, l.size())
 	return l
 }
 
@@ -267,8 +275,14 @@ func (l *faceList) resolve(m *Measurer, r rune) *Face {
 	if l.runes == nil {
 		l.runes = make(map[rune]*Face)
 	}
-	if len(l.runes) < maxCacheItems {
+	if n := len(l.runes); n < maxCacheItems {
 		l.runes[r] = f
+		// The memo grows the list in the cache: its size is charged again
+		// as it doubles, so a list never holds more than twice what the
+		// cache counts. A list the cache has dropped meanwhile goes back.
+		if n+1 >= 64 && (n+1)&n == 0 {
+			m.listCache.Put(l.key, l, l.size())
+		}
 	}
 	return f
 }

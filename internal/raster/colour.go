@@ -431,11 +431,35 @@ func (r *renderer) colourImage(data []byte) *rasterImage {
 	if err != nil {
 		img = nil
 	}
-	if r.colourImgs == nil || len(r.colourImgs) >= maxColourImages {
+	r.keepColourImage(k, img)
+	return img
+}
+
+// keepColourImage caches a decoded bitmap glyph for the rest of the render.
+// The font is the caller's, and each of its bitmaps decodes to up to an
+// image's pixel limit, so what the cache keeps is charged to the call's
+// ledger, a third more for the halvings drawing may add; a bitmap the ledger
+// cannot hold is decoded again where it is drawn again.
+func (r *renderer) keepColourImage(k colourImageKey, img *rasterImage) {
+	n := int64(0)
+	if img != nil {
+		n = int64(len(img.pix)) * 4 / 3
+	}
+	if r.colourImgs == nil || len(r.colourImgs) >= maxColourImages || r.ledger.Alloc(n) != nil {
+		r.dropColourImages()
+		if r.ledger.Alloc(n) != nil {
+			return
+		}
 		r.colourImgs = map[colourImageKey]*rasterImage{}
 	}
 	r.colourImgs[k] = img
-	return img
+	r.colourBytes += n
+}
+
+// dropColourImages empties the bitmap glyph cache and gives its bytes back.
+func (r *renderer) dropColourImages() {
+	r.ledger.Free(r.colourBytes)
+	r.colourImgs, r.colourBytes = nil, 0
 }
 
 // maskImage is a monochrome or greyscale strike's coverage in its colour.

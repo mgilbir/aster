@@ -125,7 +125,7 @@ func (c *Converter) RenderPreparedForTest(spec []byte, lite bool) (func() error,
 			Location: c.location,
 			Now:      c.cfg.now,
 			Config:   c.theme,
-			Limits:   c.limits(),
+			Limits:   c.lim.vega,
 			Random:   transforms.LCG(randomSeed),
 			Shaper:   lazyShaper{c, nil},
 		}
@@ -144,13 +144,9 @@ const RaceSlowdownForTest = raceSlowdown
 // LimitsForTest is what each row of docs/limits.md's budget table is, in
 // bytes or counts, for WithMemoryLimit(n); 0 for "none".
 func LimitsForTest(n uint64) map[string]int64 {
-	c := &Converter{cfg: &config{memoryLimit: n}}
-	l := c.limits().WithDefaults()
-	r := c.rasterLimits().WithDefaults()
-	spec := int64(0)
-	if n > 0 {
-		spec = int64(max(n/specBytesDivisor, 1<<20))
-	}
+	c := deriveLimits(n)
+	l := c.vega.WithDefaults()
+	r := c.raster.WithDefaults()
 	return map[string]int64{
 		"data rows":              int64(l.MaxRows),
 		"scene items":            int64(l.MaxItems),
@@ -160,10 +156,11 @@ func LimitsForTest(n uint64) map[string]int64 {
 		"parsed JSON (spec and data)":                l.MaxParseBytes,
 		"expression strings and arrays":              l.MaxStringBytes,
 		"bitmaps the heatmap transform paints":       l.MaxCanvasBytes,
-		"SVG output":                                 int64(c.maxSVGBytes()),
-		"specification size":                         spec,
-		"glyphs of one shaped run of text":           c.shapingLimits().RunBytes,
+		"SVG output":                                 int64(c.svgBytes),
+		"specification size":                         int64(c.specBytes),
+		"glyphs of one shaped run of text":           c.shaping.RunBytes,
 		"rasterizer canvas memory (PNG)":             int64(r.MaxCanvasBytes),
 		"rasterizer pixels per canvas (PNG)":         int64(r.MaxPixels),
+		"memory charged to the call's ledger":        c.ledger.MaxBytes,
 	}
 }

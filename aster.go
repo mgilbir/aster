@@ -62,6 +62,7 @@ import (
 // ErrClosed. Closing more than once is harmless.
 type Converter struct {
 	cfg      *config
+	lim      callLimits // every bound of a call, from cfg.memoryLimit
 	location *time.Location
 	theme    jsval.Value // parsed WithTheme config; Undefined when none
 	vl       string      // vegalite compiler version (vegalite.Version64, ...)
@@ -159,7 +160,7 @@ func New(opts ...Option) (*Converter, error) {
 	if cfg.loader == nil {
 		cfg.loader = DenyLoader{}
 	}
-	c := &Converter{cfg: cfg, location: loc, vl: vlVersion}
+	c := &Converter{cfg: cfg, lim: deriveLimits(cfg.memoryLimit), location: loc, vl: vlVersion}
 	c.base, c.cancelAll = context.WithCancel(context.Background())
 	if cfg.theme != "" {
 		theme, err := jsval.ParseJSONString(cfg.theme)
@@ -232,9 +233,11 @@ func (c *Converter) enter() (release func(), ok bool) {
 }
 
 // opContext bounds one public call — every stage of it together — by the
-// converter's timeout, and by Close. The context carries the call's shaping
-// budget, so its text is shaped under the same timeout and within one
-// allowance of work, and the images it has fetched (see callImages).
+// converter's timeout, and by Close. The context carries the call's ledger
+// (internal/budget), which every stage charges the work and memory the input
+// makes it spend; the call's shaping budget, so its text is shaped under the
+// same timeout and within one allowance of work; and the images it has
+// fetched (see callImages).
 func (c *Converter) opContext() (context.Context, context.CancelFunc) {
 	var ctx context.Context
 	var cancel context.CancelFunc
@@ -243,7 +246,8 @@ func (c *Converter) opContext() (context.Context, context.CancelFunc) {
 	} else {
 		ctx, cancel = context.WithCancel(c.base)
 	}
-	ctx = text.WithShapingBudget(ctx, text.NewShapingBudget(ctx, c.shapingLimits()))
+	ctx = budget.WithLedger(ctx, budget.NewLedger(ctx, c.lim.ledger))
+	ctx = text.WithShapingBudget(ctx, text.NewShapingBudget(ctx, c.lim.shaping))
 	ctx = context.WithValue(ctx, callReportKey{}, &callReport{})
 	return context.WithValue(ctx, callImagesKey{}, c.newCallImages()), cancel
 }
@@ -407,7 +411,7 @@ func (c *Converter) vegaSVG(ctx context.Context, spec []byte) (string, error) {
 	if err := c.checkSpecSize(spec); err != nil {
 		return "", err
 	}
-	v, err := timed(ctx, "json", func() (jsval.Value, error) { return jsval.ParseJSONLimit(spec, c.limits().MaxParseBytes) })
+	v, err := timed(ctx, "json", func() (jsval.Value, error) { return jsval.ParseJSONLimit(spec, c.lim.vega.MaxParseBytes) })
 	if err != nil {
 		return "", fmt.Errorf("aster: parsing Vega spec: %w", err)
 	}
@@ -438,7 +442,7 @@ func (c *Converter) renderSVG(ctx context.Context, spec jsval.Value) (out string
 		// Set only by the tests' signal sweep (export_test.go).
 		SignalWrites: signalWritesFrom(ctx),
 		Config:       c.theme,
-		Limits:       c.limits(),
+		Limits:       c.lim.vega,
 		// Seeded per render so sample, jitter and
 		// bootstrap confidence intervals are reproducible. 123456789 is the
 		// seed Vega-Lite's own example renders use (vg2svg --seed).
@@ -472,7 +476,7 @@ func (c *Converter) renderSVG(ctx context.Context, spec jsval.Value) (out string
 		Height: res.Height,
 		Origin: res.Origin,
 		// An SVG past this size is not a chart anybody can use.
-		MaxBytes: c.maxSVGBytes(),
+		MaxBytes: c.lim.svgBytes,
 	}
 	if res.HasBackground {
 		so.Background = res.Background
@@ -552,59 +556,15 @@ func (c *Converter) renderSVG(ctx context.Context, spec jsval.Value) (out string
 	return out, nil
 }
 
-// rasterLimits turns WithMemoryLimit into the rasterizer's canvas budget:
-// the bytes of canvas, layers and masks alive at once, and the output size.
-func (c *Converter) rasterLimits() raster.Limits {
-	var l raster.Limits
-	if n := c.cfg.memoryLimit; n > 0 {
-		b := min(max(n, 4<<20), 1<<30)
-		l.MaxCanvasBytes = int(b)
-		l.MaxPixels = int(b / 8)
-	}
-	return l
-}
-
-// shapingLimits bounds the text shaping of one call: forme's lookup work, and
-// with WithMemoryLimit the glyphs of one run to a quarter of the limit, as the
-// SVG is.
-func (c *Converter) shapingLimits() text.ShapingLimits {
-	var l text.ShapingLimits
-	if n := c.cfg.memoryLimit; n > 0 {
-		l.RunBytes = int64(min(max(n/4, 1<<20), 1<<40))
-	}
-	return l
-}
-
-// maxSVGBytes bounds the SVG a render may produce: 128 MiB by default, a
-// quarter of WithMemoryLimit when one is set.
-func (c *Converter) maxSVGBytes() int {
-	if n := c.cfg.memoryLimit; n > 0 {
-		return toInt(min(max(n/4, 1<<20), 1<<40))
-	}
-	return 128 << 20
-}
-
-// toInt converts a bound derived from WithMemoryLimit to an int, saturating
-// where int is 32 bits: a wrapped bound would read as unlimited (<= 0) or as
-// a spurious small one.
-func toInt(n uint64) int { return int(min(n, math.MaxInt)) }
-
-// specBytesDivisor sets the specification a memory limit admits: a sixteenth of
-// the limit in bytes. The rows and items budgets charge what a specification
-// makes the engine build, and none of them sees the text itself, which is all
-// there is to an inline geometry; once parsed and compiled it holds about
-// nineteen times its size, so a sixteenth of the limit stays within twice it.
-const specBytesDivisor = 16
-
 // checkSpecSize refuses a specification too large for WithMemoryLimit. Every
 // entry point that takes a specification passes through it, whatever the form
 // the caller held it in: they all end up as the JSON bytes parsed here.
 func (c *Converter) checkSpecSize(spec []byte) error {
-	n := c.cfg.memoryLimit
-	if n == 0 {
+	limit := c.lim.specBytes
+	if limit == 0 {
 		return nil
 	}
-	if limit := max(n/specBytesDivisor, 1<<20); uint64(len(spec)) > limit {
+	if uint64(len(spec)) > limit {
 		return fmt.Errorf("aster: %w: the specification is too large for the memory limit (%d bytes, at most %d)", ErrLimit, len(spec), limit)
 	}
 	return nil
@@ -624,28 +584,6 @@ func inlineImage(url string) bool {
 
 // randomSeed seeds Vega's random() and every transform that samples.
 const randomSeed = 123456789
-
-// limits turns WithMemoryLimit into the engine's work bounds. The engine has
-// no separate heap to cap, so the byte budget is converted into the number of
-// rows and scene items a render may create, at a conservative per-object cost.
-func (c *Converter) limits() vega.Limits {
-	const bytesPerRow, bytesPerItem, bytesPerCell, bytesPerOp = 512, 1536, 16384, 1536
-	var l vega.Limits
-	if n := c.cfg.memoryLimit; n > 0 {
-		l.MaxRows = toInt(max(n/bytesPerRow, 1000))
-		l.MaxItems = toInt(max(n/bytesPerItem, 1000))
-		// A facet cell instantiates its own operators; the default (20,000)
-		// is the most that is left alone.
-		l.MaxSubflows = int(min(max(n/bytesPerCell, 1000), 20_000))
-		l.MaxOperators = int(min(max(n/bytesPerOp, 10_000), 500_000))
-		l.MaxLoadBytes = int64(max(n/2, 1<<20))
-		l.MaxStringBytes = int64(max(n/4, 1<<20))
-		l.MaxCanvasBytes = int64(max(n/2, 1<<20))
-		l.MaxParseBytes = int64(max(n/2, 1<<20))
-		l.RowBytes = bytesPerRow
-	}
-	return l
-}
 
 // newMeasurer builds the layout text measurer from the configured fonts.
 func (c *Converter) newMeasurer() (*text.Measurer, error) {
@@ -732,7 +670,7 @@ func (c *Converter) compileVegaLite(ctx context.Context, spec []byte) (jsval.Val
 	if err := c.checkSpecSize(spec); err != nil {
 		return jsval.Undefined, err
 	}
-	v, err := timed(ctx, "json", func() (jsval.Value, error) { return jsval.ParseJSONLimit(spec, c.limits().MaxParseBytes) })
+	v, err := timed(ctx, "json", func() (jsval.Value, error) { return jsval.ParseJSONLimit(spec, c.lim.vega.MaxParseBytes) })
 	if err != nil {
 		return jsval.Undefined, fmt.Errorf("aster: parsing Vega-Lite spec: %w", err)
 	}
@@ -857,7 +795,7 @@ func (c *Converter) rasterize(ctx context.Context, svg string, scale float64) ([
 	}
 	sh = raster.BoundShaper(sh, text.ShapingBudgetFrom(ctx))
 	out, err := timed(ctx, "png", func() ([]byte, error) {
-		return raster.RenderPNG([]byte(svg), raster.Options{Scale: scale, Shaper: sh, Context: ctx, Limits: c.rasterLimits(), Images: imagesFrom(ctx).load, ImageError: reportFrom(ctx).image})
+		return raster.RenderPNG([]byte(svg), raster.Options{Scale: scale, Shaper: sh, Context: ctx, Limits: c.lim.raster, Images: imagesFrom(ctx).load, ImageError: reportFrom(ctx).image})
 	})
 	if err == nil {
 		err = reportFrom(ctx).flushImages()
@@ -973,10 +911,11 @@ func (c *Converter) SVGToPDFUsage(svg string, opts ...PDFOption) ([]byte, []Font
 
 func (c *Converter) svgToPDF(ctx context.Context, svg string, opts []PDFOption) (pdf []byte, uses []FontUsage, err error) {
 	defer func() {
-		if r := recover(); r != nil {
-			pdf, uses, err = nil, nil, fmt.Errorf("aster: internal error: %v", r)
+		if err != nil {
+			pdf, uses = nil, nil
 		}
 	}()
+	defer recoverInto(&err)
 	cfg := &pdfConfig{text: PDFTextEmbed}
 	for _, opt := range opts {
 		opt.applyPDF(cfg)

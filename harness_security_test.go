@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -23,7 +24,7 @@ import (
 const secChildEnv = "ASTER_SEC_CHILD"
 
 type secJob struct {
-	Kind      string   `json:"kind"`    // vega, vl, vl2vega, svgpng, svgpdf
+	Kind      string   `json:"kind"`    // vega, vl, vl2vega, vegapng, vlpng, svgpng, vegapdf, vlpdf, svgpdf
 	Input     string   `json:"input"`   // spec JSON or SVG text
 	Timeout   string   `json:"timeout"` // WithTimeout value, "" = default
 	MemLimit  uint64   `json:"memLimit"`
@@ -39,7 +40,11 @@ type secJob struct {
 }
 
 type secResult struct {
-	Err       string   `json:"err"`
+	Err string `json:"err"`
+	// Limit and Deadline report that the error wraps ErrLimit or
+	// context.DeadlineExceeded (errors.Is, in the child).
+	Limit     bool     `json:"limit"`
+	Deadline  bool     `json:"deadline"`
 	Panic     string   `json:"panic"`
 	Seconds   float64  `json:"seconds"`
 	CPU       float64  `json:"cpu"` // user+system CPU seconds of the child
@@ -158,12 +163,16 @@ func runSecChild(job secJob) int {
 			out = []byte(s)
 		case "vl2vega":
 			out, err = c.VegaLiteToVega([]byte(job.Input))
-		case "vegapng":
+		case "vegapng", "vlpng":
 			scale := job.Scale
 			if scale == 0 {
 				scale = 1
 			}
-			out, err = c.VegaToPNG([]byte(job.Input), WithScale(scale))
+			if job.Kind == "vlpng" {
+				out, err = c.VegaLiteToPNG([]byte(job.Input), WithScale(scale))
+			} else {
+				out, err = c.VegaToPNG([]byte(job.Input), WithScale(scale))
+			}
 		case "svgpng":
 			scale := job.Scale
 			if scale == 0 {
@@ -174,12 +183,18 @@ func runSecChild(job secJob) int {
 			out, err = c.SVGToPDF(job.Input)
 		case "vegapdf":
 			out, err = c.VegaToPDF([]byte(job.Input))
+		case "vlpdf":
+			out, err = c.VegaLiteToPDF([]byte(job.Input))
+		default:
+			err = fmt.Errorf("unknown kind %q", job.Kind)
 		}
 		if err != nil {
 			res.Err = err.Error()
+			res.Limit = errors.Is(err, ErrLimit)
+			res.Deadline = errors.Is(err, context.DeadlineExceeded)
 		}
 		res.OutLen = len(out)
-		if len(out) < 1<<20 && job.Kind != "svgpng" && job.Kind != "vegapng" && job.Kind != "svgpdf" {
+		if len(out) < 1<<20 && !strings.HasSuffix(job.Kind, "png") && !strings.HasSuffix(job.Kind, "pdf") {
 			res.Out = string(out)
 		}
 	}()

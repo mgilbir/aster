@@ -12,6 +12,7 @@ import (
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 
+	"github.com/mgilbir/aster/internal/bcache"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -222,20 +223,21 @@ func digitValue(c byte) int {
 
 // patternCache memoises patterns compiled from strings (test('a+', x) in a
 // filter would otherwise compile per datum). Patterns with g or y flags carry
-// state and are never shared.
-var patternCache = struct {
-	sync.Mutex
-	m map[string]*jsval.Pattern
-}{m: map[string]*jsval.Pattern{}}
+// state and are never shared. The strings may come from the data, and a short
+// one can compile to megabytes (C8), so the cache is bounded by the bytes the
+// patterns hold and keeps none of more than patternCacheMaxEntry.
+const (
+	patternCacheBytes    = 32 << 20
+	patternCacheMaxEntry = 1 << 20
+)
+
+var patternCache = bcache.New[string, *jsval.Pattern](patternCacheBytes, patternCacheMaxEntry)
 
 func compilePattern(source, flags string) *jsval.Pattern {
 	shareable := !strings.ContainsAny(flags, "gy")
 	key := flags + "/" + source
 	if shareable {
-		patternCache.Lock()
-		p := patternCache.m[key]
-		patternCache.Unlock()
-		if p != nil {
+		if p, ok := patternCache.Get(key); ok {
 			return p
 		}
 	}
@@ -244,12 +246,7 @@ func compilePattern(source, flags string) *jsval.Pattern {
 		throw("SyntaxError", "%v", err)
 	}
 	if shareable {
-		patternCache.Lock()
-		if len(patternCache.m) >= 512 {
-			clear(patternCache.m)
-		}
-		patternCache.m[key] = p
-		patternCache.Unlock()
+		patternCache.Put(key, p, int64(len(key))+patternBytes(p))
 	}
 	return p
 }

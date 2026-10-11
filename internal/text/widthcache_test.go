@@ -6,16 +6,10 @@ import (
 	"testing"
 )
 
-// widthCacheHeld is what the width cache holds, counted as maxWidthBytes does.
-func widthCacheHeld(m *Measurer) int {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	n := 0
-	for k := range m.widthCache {
-		n += len(k.text) + len(k.css) + widthEntryBytes
-	}
-	return n
-}
+// widthCacheHeld is what the width cache holds.
+func widthCacheHeld(m *Measurer) int { return int(m.widthCache.Bytes()) }
+
+const maxWidthBytes = widthCacheBytes
 
 // The width cache is bounded by the bytes it holds as well as by its entries:
 // long texts, which the entry bound alone would let fill it with gigabytes,
@@ -41,8 +35,8 @@ func TestWidthCacheBytesBounded(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	if held := widthCacheHeld(m); m.widthBytes != held || held > maxWidthBytes {
-		t.Errorf("widthBytes = %d, the cache holds %d (max %d)", m.widthBytes, held, maxWidthBytes)
+	if held := widthCacheHeld(m); held > maxWidthBytes {
+		t.Errorf("the cache holds %d (max %d)", held, maxWidthBytes)
 	}
 	s := strings.Repeat("a", 1<<15) + "b"
 	if got, want := m.MeasureText(s, font), ref.MeasureText(s, font); got != want {

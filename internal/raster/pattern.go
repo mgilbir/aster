@@ -44,9 +44,42 @@ func (r *renderer) subRender(w, h int, fn func()) *canvas {
 	fn()
 	r.depth--
 	r.releasePool(r.pool)
-	r.releaseCanvas(sub) // the tile outlives the render budget; patternBytes caps the cache
+	r.releaseCanvas(sub) // a tile kept outlives the canvas budget; see keepPattern
 	r.cv, r.cw, r.ch, r.pool = parent, cw, ch, pool
 	return sub
+}
+
+// Pattern tiles are kept for the elements that paint with the same pattern.
+// A kept tile is no longer a live canvas, so it is charged to the call's
+// ledger instead (C63): the cache holds at most maxPatternCacheBytes and
+// maxPatternTiles, and only what the ledger allows; a tile it cannot keep is
+// drawn and dropped, and rendered again where it is used again.
+const (
+	maxPatternCacheBytes = 256 << 20
+	maxPatternTiles      = 64
+)
+
+// keepPattern caches img under key, within the bounds above.
+func (r *renderer) keepPattern(key patternKey, img *patternTile) {
+	n := len(img.pix)
+	if n > maxPatternCacheBytes {
+		return
+	}
+	if r.patterns == nil || r.patternBytes+n > maxPatternCacheBytes || len(r.patterns) >= maxPatternTiles || r.ledger.Alloc(int64(n)) != nil {
+		r.dropPatterns()
+		if r.ledger.Alloc(int64(n)) != nil {
+			return
+		}
+		r.patterns = map[patternKey]*patternTile{}
+	}
+	r.patterns[key] = img
+	r.patternBytes += n
+}
+
+// dropPatterns empties the pattern cache and gives its bytes back.
+func (r *renderer) dropPatterns() {
+	r.ledger.Free(int64(r.patternBytes))
+	r.patterns, r.patternBytes = nil, 0
 }
 
 func (r *renderer) patternAttr(pn *node, id attrID) (string, bool) {
@@ -170,12 +203,7 @@ func (r *renderer) patternPaint(pn *node, opacity float64, st *state, bbox func(
 			return paintSrc{}, false, true
 		}
 		img = &patternTile{w: pw, h: ph, pix: sub.pix}
-		if r.patterns == nil || r.patternBytes+len(sub.pix) > 256<<20 || len(r.patterns) >= 64 {
-			r.patterns = map[patternKey]*patternTile{}
-			r.patternBytes = 0
-		}
-		r.patterns[key] = img
-		r.patternBytes += len(sub.pix)
+		r.keepPattern(key, img)
 	}
 	// Shader transform: pattern space -> device.
 	full := st.ctm.mul(ptm).mul(translate(tile.x0, tile.y0)).mul(scaleM(1/sx, 1/sy))

@@ -191,7 +191,11 @@ func Render(svg []byte, opts Options) (img *image.NRGBA, err error) {
 		doc: doc, lim: lim, shaper: shaper,
 		rast: newRasterizer(), cw: cw, ch: ch, active: map[*node]bool{},
 		ctx: opts.Context, fetched: fetched, imageErr: opts.ImageError,
+		ledger: budget.LedgerFrom(opts.Context),
 	}
+	// The kept tiles and bitmaps go with the render.
+	defer r.dropColourImages()
+	defer r.dropPatterns()
 	r.rast.ctx = opts.Context
 	if opts.Limits.MaxPixelOps <= 0 {
 		// Default work budget: 512 Mpx, or 16 canvases for big outputs.

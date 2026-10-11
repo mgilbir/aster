@@ -29,9 +29,14 @@ func heavy(t *testing.T) {
 	}
 }
 
+// secFile reads a reproducer: from testdata/security, or from the bounded
+// corpus (testdata/security/bounded), which holds the ones that now pass.
 func secFile(t *testing.T, name string) string {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join("testdata", "security", name))
+	if os.IsNotExist(err) {
+		b, err = os.ReadFile(filepath.Join("testdata", "security", "bounded", name))
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
