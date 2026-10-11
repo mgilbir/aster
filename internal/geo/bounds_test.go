@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/mgilbir/aster/internal/budget"
@@ -335,8 +336,9 @@ func TestTopoPositionsKeepTheirLength(t *testing.T) {
 }
 
 // expandTopo is C5: one arc whose first position has c numbers, referenced r
-// times by one line.
-func expandTopo(t *testing.T, c, r int) jsval.Value {
+// times by one line. With a transform every reference makes its positions
+// anew; without one they are the input's arrays, as upstream's.
+func expandTopo(t *testing.T, c, r int, transform bool) jsval.Value {
 	t.Helper()
 	pos := make([]jsval.Value, c)
 	for i := range pos {
@@ -347,11 +349,17 @@ func expandTopo(t *testing.T, c, r int) jsval.Value {
 		refs[i] = jsval.Num(0)
 	}
 	arc := jsval.ArrOf(jsval.Arr(pos), jsval.ArrOf(jsval.Num(0), jsval.Num(0)))
-	return jsval.Obj(jsval.ObjectOf(
+	o := jsval.ObjectOf(
 		"type", jsval.Str("Topology"),
 		"arcs", jsval.ArrOf(arc),
 		"objects", jsval.Obj(jsval.ObjectOf("o", jsval.Obj(jsval.ObjectOf("type", jsval.Str("LineString"), "arcs", jsval.Arr(refs))))),
-	))
+	)
+	if transform {
+		o.Set("transform", jsval.Obj(jsval.ObjectOf(
+			"scale", jsval.ArrOf(jsval.Num(1), jsval.Num(1)),
+			"translate", jsval.ArrOf(jsval.Num(0), jsval.Num(0)))))
+	}
+	return jsval.Obj(o)
 }
 
 func ledgerCtx(maxBytes int64) (context.Context, *budget.Ledger) {
@@ -361,20 +369,20 @@ func ledgerCtx(maxBytes int64) (context.Context, *budget.Ledger) {
 
 // TestTopologyCharged: the positions references materialise are charged to
 // the ledger before they are made, so an expansion fails with ErrLimit
-// instead of allocating; what a topology decodes to is charged in full.
+// instead of allocating.
 func TestTopologyCharged(t *testing.T) {
 	// 2,000 references to an arc of a 2,000-number position: 4M values.
 	ctx, l := ledgerCtx(16 << 20)
-	if _, err := TopologyFeatures(ctx, expandTopo(t, 2000, 2000), "o", "", ""); !errors.Is(err, budget.ErrLimit) {
+	if _, err := TopologyFeatures(ctx, expandTopo(t, 2000, 2000, true), "o", "", ""); !errors.Is(err, budget.ErrLimit) {
 		t.Fatalf("4M-value expansion against a 16 MiB ledger: %v", err)
 	}
 	if l.Bytes() > 16<<20 {
 		t.Fatalf("ledger holds %d bytes past its limit", l.Bytes())
 	}
-	// A small expansion succeeds, and its output is charged: at least 16
+	// A small expansion succeeds, and what it makes is charged: at least 16
 	// bytes per value it holds (the decoded arcs are given back).
 	ctx, l = ledgerCtx(0)
-	feats, err := TopologyFeatures(ctx, expandTopo(t, 100, 100), "o", "", "")
+	feats, err := TopologyFeatures(ctx, expandTopo(t, 100, 100, true), "o", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -391,12 +399,22 @@ func TestTopologyCharged(t *testing.T) {
 	if l.WorkDone() < int64(values) {
 		t.Errorf("work %d for %d decoded values", l.WorkDone(), values)
 	}
+	// Without a transform the positions are shared, but each reference
+	// still takes a slot per position in its line.
+	ctx, l = ledgerCtx(0)
+	feats, err = TopologyFeatures(ctx, expandTopo(t, 100, 1000, false), "o", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := feats[0].Get("geometry").Get("coordinates").Len(); l.Bytes() < int64(n)*16 {
+		t.Errorf("ledger holds %d bytes for %d positions", l.Bytes(), n)
+	}
 }
 
 func TestTopologyCancelled(t *testing.T) {
 	done, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := TopologyFeatures(done, expandTopo(t, 2000, 100), "o", "", ""); !errors.Is(err, context.Canceled) {
+	if _, err := TopologyFeatures(done, expandTopo(t, 2000, 100, true), "o", "", ""); !errors.Is(err, context.Canceled) {
 		t.Fatalf("decoding with a cancelled context: %v", err)
 	}
 }
@@ -439,5 +457,140 @@ func TestGraticuleCharged(t *testing.T) {
 	}
 	if l.Bytes() < int64(points)*graticulePointBytes {
 		t.Errorf("ledger holds %d bytes for %d points", l.Bytes(), points)
+	}
+}
+
+// encTagged is JSON.stringify(v, (k, v) => Number.isNaN(v) ? "NaN!" : v):
+// JSON with NaN told apart from null.
+func encTagged(v jsval.Value) string {
+	switch v.Kind() {
+	case jsval.KindNum:
+		if math.IsNaN(v.NumValue()) {
+			return `"NaN!"`
+		}
+	case jsval.KindArr:
+		var b strings.Builder
+		b.WriteByte('[')
+		for i, it := range v.Items() {
+			if i > 0 {
+				b.WriteByte(',')
+			}
+			b.WriteString(encTagged(it))
+		}
+		b.WriteByte(']')
+		return b.String()
+	case jsval.KindObj:
+		o := v.ObjValue()
+		var b strings.Builder
+		b.WriteByte('{')
+		for i := 0; i < o.Len(); i++ {
+			if i > 0 {
+				b.WriteByte(',')
+			}
+			b.Write(jsval.AppendJSON(nil, jsval.Str(o.KeyAt(i))))
+			b.WriteByte(':')
+			b.WriteString(encTagged(o.ValueAt(i)))
+		}
+		b.WriteByte('}')
+		return b.String()
+	}
+	return string(jsval.AppendJSON(nil, v))
+}
+
+// TestTopoRawCoordinates holds decoding to topojson-client 3.1 (recorded with
+// node) for coordinates that are not numbers: without a transform the
+// positions are the input's arrays, values as they are; with one, the sums
+// and the translation are JavaScript `+`, so a string concatenates.
+func TestTopoRawCoordinates(t *testing.T) {
+	const objs = `"objects":{"l":{"type":"LineString","arcs":[0,1]},"p":{"type":"Point","coordinates":["3",null]},` +
+		`"mp":{"type":"MultiPoint","coordinates":[["1","2"],[null,4],[true,"x"]]},"pg":{"type":"Polygon","arcs":[[2]]},` +
+		`"c":{"type":"GeometryCollection","geometries":[{"type":"LineString","arcs":[0]},{"type":"LineString","arcs":[1]},{"type":"LineString","arcs":[3]}]}}`
+	const arcs = `"arcs":[[["1",2],["3",4],[null,"5"]],[[null,"5"],[2,"0"],[7,8,"z"]],[[0,0],["10",null],[20,"5"],[0,0]],[["0",""],[null,false]]]`
+	feat := func(g string) string { return `{"type":"Feature","properties":{},"geometry":` + g + `}` }
+	for _, c := range []struct {
+		transform string
+		want      map[string]string
+	}{
+		{"", map[string]string{
+			"l":        feat(`{"type":"LineString","coordinates":[["1",2],["3",4],[null,"5"],[2,"0"],[7,8,"z"]]}`),
+			"p":        feat(`{"type":"Point","coordinates":["3",null]}`),
+			"mp":       feat(`{"type":"MultiPoint","coordinates":[["1","2"],[null,4],[true,"x"]]}`),
+			"pg":       feat(`{"type":"Polygon","coordinates":[[[0,0],["10",null],[20,"5"],[0,0]]]}`),
+			"c":        `{"type":"FeatureCollection","features":[` + feat(`{"type":"LineString","coordinates":[["1",2],["3",4],[null,"5"]]}`) + `,` + feat(`{"type":"LineString","coordinates":[[null,"5"],[2,"0"],[7,8,"z"]]}`) + `,` + feat(`{"type":"LineString","coordinates":[["0",""],[null,false]]}`) + `]}`,
+			"mesh":     `{"type":"MultiLineString","coordinates":[[["0",""],[null,false]],[["1",2],["3",4],[null,"5"],[2,"0"],[7,8,"z"]]]}`,
+			"interior": `{"type":"MultiLineString","coordinates":[]}`,
+			"exterior": `{"type":"MultiLineString","coordinates":[[["0",""],[null,false]],[["1",2],["3",4],[null,"5"],[2,"0"],[7,8,"z"]]]}`,
+		}},
+		{`"transform":{"scale":[2,3],"translate":[10,"20"]},`, map[string]string{
+			"l":        feat(`{"type":"LineString","coordinates":[[12,"620"],[36,"1820"],[10,"1520"],[14,"15020"],[28,"152420","z"]]}`),
+			"p":        feat(`{"type":"Point","coordinates":[16,"020"]}`),
+			"mp":       feat(`{"type":"MultiPoint","coordinates":[[12,"620"],[10,"1220"],[12,"NaN20"]]}`),
+			"pg":       feat(`{"type":"Polygon","coordinates":[[[10,"020"],[30,"020"],[2050,"1520"],[20410,"15020"]]]}`),
+			"c":        `{"type":"FeatureCollection","features":[` + feat(`{"type":"LineString","coordinates":[[12,"620"],[36,"1820"],["NaN!","19520"]]}`) + `,` + feat(`{"type":"LineString","coordinates":[[10,"1520"],[14,"15020"],[28,"152420","z"]]}`) + `,` + feat(`{"type":"LineString","coordinates":[[10,"020"],["NaN!","NaN20"]]}`) + `]}`,
+			"mesh":     `{"type":"MultiLineString","coordinates":[[[10,"020"],["NaN!","NaN20"]],[[10,"1520"],[14,"15020"],[28,"152420","z"]],[[12,"620"],[36,"1820"],["NaN!","19520"]]]}`,
+			"interior": `{"type":"MultiLineString","coordinates":[]}`,
+			"exterior": `{"type":"MultiLineString","coordinates":[[[10,"020"],["NaN!","NaN20"]],[[10,"1520"],[14,"15020"],[28,"152420","z"]],[[12,"620"],[36,"1820"],["NaN!","19520"]]]}`,
+		}},
+	} {
+		topo := topoDoc(t, `{"type":"Topology",`+c.transform+arcs+`,`+objs+`}`)
+		for name, want := range c.want {
+			var got jsval.Value
+			var err error
+			switch name {
+			case "mesh", "interior", "exterior":
+				got, err = TopoMesh(bg, topo, topo.Get("objects").Get("c"), map[string]MeshFilter{"mesh": MeshAll, "interior": MeshInterior, "exterior": MeshExterior}[name])
+			default:
+				got, err = TopoFeature(bg, topo, topo.Get("objects").Get(name))
+			}
+			if err != nil {
+				t.Fatalf("%q %s: %v", c.transform, name, err)
+			}
+			if g := encTagged(got); g != want {
+				t.Errorf("%q %s:\n got %s\nwant %s", c.transform, name, g, want)
+			}
+		}
+	}
+}
+
+// TestTopoStringSumBounded: a quantized arc of string deltas sums to a
+// string as long as the arc; it is charged and its work metered.
+func TestTopoStringSumBounded(t *testing.T) {
+	pts := make([]jsval.Value, 8000)
+	for i := range pts {
+		pts[i] = jsval.ArrOf(jsval.Str("1"), jsval.Str("1"))
+	}
+	topo := jsval.Obj(jsval.ObjectOf(
+		"type", jsval.Str("Topology"),
+		"transform", jsval.Obj(jsval.ObjectOf("scale", jsval.ArrOf(jsval.Num(1), jsval.Num(1)), "translate", jsval.ArrOf(jsval.Num(0), jsval.Num(0)))),
+		"arcs", jsval.ArrOf(jsval.Arr(pts)),
+		"objects", jsval.Obj(jsval.ObjectOf("o", jsval.Obj(jsval.ObjectOf("type", jsval.Str("LineString"), "arcs", jsval.ArrOf(jsval.Num(0)))))),
+	))
+	ctx, l := ledgerCtx(0)
+	if _, err := TopologyFeatures(ctx, topo, "o", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	// Two sums of up to 8,000 digits, parsed at every position.
+	if l.WorkDone() < 8000*8000/16 {
+		t.Errorf("work %d", l.WorkDone())
+	}
+	done, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := TopologyFeatures(done, topo, "o", "", ""); !errors.Is(err, context.Canceled) {
+		t.Errorf("cancelled: %v", err)
+	}
+	// The string's bytes are charged as it grows, and given back.
+	ctx, l = ledgerCtx(4 << 10)
+	top := &topology{led: l, m: budget.NewMeter(ctx)}
+	var sum jsSum
+	var err error
+	for i := 0; i < 4000 && err == nil; i++ {
+		err = sum.add(jsval.Str("1"), top)
+	}
+	if !errors.Is(err, budget.ErrLimit) {
+		t.Errorf("a 4,000-byte sum against a 4 KiB ledger: %v", err)
+	}
+	sum.release(top)
+	if l.Bytes() != 0 {
+		t.Errorf("%d bytes still charged after release", l.Bytes())
 	}
 }

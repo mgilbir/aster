@@ -173,10 +173,15 @@ func (v *runView) read(value jsval.Value, raw []byte, schema jsval.Value) ([]jsv
 		if err != nil {
 			break
 		}
-		data, err = geo.TopologyFeatures(v.ctx, doc, schema.Get("feature").AsString(), schema.Get("mesh").AsString(), schema.Get("filter").AsString())
-		if err == nil && schema.Get("feature").IsNullish() && schema.Get("mesh").IsNullish() {
-			err = fmt.Errorf("Missing TopoJSON feature or mesh parameter.")
+		// vega-loader tests `format.feature`, then `format.mesh`, for
+		// truthiness: an absent one is not the object named "undefined".
+		name := func(k string) string {
+			if p := schema.Get(k); p.IsTruthy() {
+				return p.AsString()
+			}
+			return ""
 		}
+		data, err = geo.TopologyFeatures(v.ctx, doc, name("feature"), name("mesh"), schema.Get("filter").AsString())
 	default:
 		return nil, fmt.Errorf("Unknown data format type: %s", typ)
 	}

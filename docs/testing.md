@@ -18,7 +18,7 @@ make check                                  # every gate CI runs (scripts/check.
 
 ```mermaid
 flowchart LR
-  C["corpus 1,422 specs<br/>+ sweeps + external corpora"] --> E["engine"]
+  C["corpus 1,423 specs<br/>+ sweeps + external corpora"] --> E["engine"]
   C --> N["upstream in node<br/>(internal/oracle)"]
   N <--> K[("testdata/oracle-cache")]
   E --> D["internal/svgdiff<br/>structure; numbers ±0.5 px"]
@@ -35,7 +35,7 @@ The SVG is compared structurally: element tree, attributes, and numbers within h
 
 ## The corpus
 
-`TestCompareWithNode` (`compare_test.go`) runs over 1,422 specs: 260 Vega fixtures, 332 Vega-Lite fixtures, Vega's 92 example specs, the 627 Vega-Lite examples, 23 vl-convert specs, and 88 fuzz-found regressions (`testdata/corpus/regress`). The specs it does not match are listed with the reason in `testdata/oracle-expect.txt`. All five entries depend on the platform node runs on (emoji measurement in macOS's Pango, d3-cloud's rasterization, V8's last-bit trigonometry on x86-64). So the count that matches is 1,419 on macOS/arm64 and 1,420 on Linux/x86-64. The compiled Vega is identical to upstream's for every Vega-Lite spec.
+`TestCompareWithNode` (`compare_test.go`) runs over 1,423 specs: 260 Vega fixtures, 332 Vega-Lite fixtures, Vega's 92 example specs, the 627 Vega-Lite examples, 23 vl-convert specs, and 89 fuzz-found regressions (`testdata/corpus/regress`). The specs it does not match are listed with the reason in `testdata/oracle-expect.txt`. All five entries depend on the platform node runs on (emoji measurement in macOS's Pango, d3-cloud's rasterization, V8's last-bit trigonometry on x86-64). So the count that matches is 1,420 on macOS/arm64 and 1,421 on Linux/x86-64. The compiled Vega is identical to upstream's for every Vega-Lite spec.
 
 `go test -run TestCompareWithNode -v . -args -compare.report=/tmp/report.md` writes a per-spec report. `-compare.run name` compares one spec.
 

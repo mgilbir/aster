@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"strings"
 
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
@@ -40,8 +39,8 @@ func ParseMeshFilter(name string) MeshFilter {
 const maxTopoDepth = 256
 
 // topology is a decoded TopoJSON topology: its arcs and quantization
-// transform, and the call's ledger and work meter, which pay for decoding
-// and for every position materialised from it.
+// transform, and the call's ledger and work meter, which pay for every
+// position materialised from it.
 type topology struct {
 	arcs      []topoArc
 	transform *topoTransform
@@ -51,49 +50,34 @@ type topology struct {
 	bytes int64 // charged to led for the decoded arcs
 }
 
-// topoArc is one arc: n positions, flat in v. Positions keep their own
-// length, as topojson-client keeps each input position (only a transform
-// pads one to two numbers): dim is the length of every position, or -1 when
-// they differ and off holds the n+1 offsets of the positions in v. A
-// quantized arc's positions are deltas.
+// topoArc is one arc: its positions, the input's own arrays, which
+// topojson-client hands on as they are when the topology has no transform.
+// A quantized arc's positions are deltas.
 type topoArc struct {
-	n, dim int
-	off    []int
-	v      []float64
+	pts []jsval.Value
 	// outVals is the number of values the arc's positions hold once decoded
-	// with the topology's transform (each padded to two numbers).
+	// with the topology's transform (each padded to two).
 	outVals int
 }
 
-// pos returns position k.
-func (a *topoArc) pos(k int) []float64 {
-	if a.off == nil {
-		return a.v[k*a.dim : (k+1)*a.dim : (k+1)*a.dim]
-	}
-	return a.v[a.off[k]:a.off[k+1]:a.off[k+1]]
+// topoTransform is the quantization transform, read as topojson-client
+// uses it: `(x0 += input[0]) * kx + dx`, so the scales are numbers and the
+// translations stay the JSON values they are (a string one concatenates).
+type topoTransform struct {
+	kx, ky float64
+	dx, dy jsval.Value
 }
-
-// at is element i of a position, NaN past its end: undefined in JavaScript
-// arithmetic.
-func at(p []float64, i int) float64 {
-	if i < len(p) {
-		return p[i]
-	}
-	return nan
-}
-
-type topoTransform struct{ kx, ky, dx, dy float64 }
 
 var errTopology = errors.New("geo: invalid TopoJSON topology")
 
-// Bytes the decoding charges to the ledger: a decoded number, and an output
-// position, which is an array header in a slab (24), a slot in its line,
-// counted twice for the line's growth (32), and 16 per element.
+// Bytes the decoding charges to the ledger: an arc, an output position's
+// slot in its line, counted twice for the line's growth (32), a transformed
+// position's array header (24), and 16 per element it holds.
 const (
-	topoArcBytes = 72 // a topoArc
-	topoNumBytes = 8
-	topoPosBytes = 24 + 32
-	topoValBytes = 16
+	topoArcBytes  = 32 // a topoArc
+	topoSlotBytes = 32
+	topoArrBytes  = 24
+	topoValBytes  = 16
 )
 
 // charge pays for an allocation of n bytes about to be made, and for work
@@ -120,7 +104,7 @@ func decodeTopology(ctx context.Context, t jsval.Value) (*topology, error) {
 		}
 		top.transform = &topoTransform{
 			kx: coord(s.Index(0)), ky: coord(s.Index(1)),
-			dx: coord(tl.Index(0)), dy: coord(tl.Index(1)),
+			dx: tl.Index(0), dy: tl.Index(1),
 		}
 	}
 	arcs := t.Get("arcs")
@@ -128,83 +112,32 @@ func decodeTopology(ctx context.Context, t jsval.Value) (*topology, error) {
 		return nil, fmt.Errorf("%w: missing arcs", errTopology)
 	}
 	items := arcs.Items()
-	if err := top.alloc(budget.Mul(int64(len(items)), topoArcBytes), int64(len(items))); err != nil {
+	if err := top.charge(budget.Mul(int64(len(items)), topoArcBytes), int64(len(items))); err != nil {
 		return nil, err
 	}
+	top.bytes = budget.Mul(int64(len(items)), topoArcBytes)
 	top.arcs = make([]topoArc, len(items))
 	for i, a := range items {
 		if !a.IsArr() {
 			top.release()
 			return nil, fmt.Errorf("%w: arc %d is not an array", errTopology, i)
 		}
-		arc, err := top.decodeArc(a.Items())
-		if err != nil {
+		pts := a.Items()
+		if err := top.m.Work(int64(len(pts))); err != nil {
 			top.release()
-			if errors.Is(err, errTopology) {
-				return nil, fmt.Errorf("%w: arc %d has a malformed position", errTopology, i)
-			}
 			return nil, err
 		}
-		top.arcs[i] = arc
+		outVals := 0
+		for _, p := range pts {
+			if !p.IsArr() {
+				top.release()
+				return nil, fmt.Errorf("%w: arc %d has a malformed position", errTopology, i)
+			}
+			outVals += max(p.Len(), 2)
+		}
+		top.arcs[i] = topoArc{pts: pts, outVals: outVals}
 	}
 	return top, nil
-}
-
-// alloc is charge, for memory the topology keeps until release.
-func (t *topology) alloc(n, work int64) error {
-	if err := t.charge(n, work); err != nil {
-		return err
-	}
-	t.bytes += n
-	return nil
-}
-
-// decodeArc decodes the positions of one arc, charging them first.
-func (t *topology) decodeArc(pts []jsval.Value) (topoArc, error) {
-	arc := topoArc{n: len(pts)}
-	total, outVals := 0, 0
-	for k, p := range pts {
-		if !p.IsArr() {
-			return arc, errTopology
-		}
-		l := p.Len()
-		switch {
-		case k == 0:
-			arc.dim = l
-		case l != arc.dim:
-			arc.dim = -1
-		}
-		total += l
-		outVals += max(l, 2)
-	}
-	if t.transform != nil {
-		arc.outVals = outVals
-	} else {
-		arc.outVals = total
-	}
-	size := budget.Mul(int64(total), topoNumBytes)
-	if arc.dim < 0 {
-		size += budget.Mul(int64(len(pts)+1), 8)
-	}
-	if err := t.alloc(size, int64(len(pts))+int64(total)); err != nil {
-		return arc, err
-	}
-	arc.v = make([]float64, 0, total)
-	if arc.dim < 0 {
-		arc.off = make([]int, 0, len(pts)+1)
-	}
-	for _, p := range pts {
-		if arc.off != nil {
-			arc.off = append(arc.off, len(arc.v))
-		}
-		for _, c := range p.Items() {
-			arc.v = append(arc.v, coord(c))
-		}
-	}
-	if arc.off != nil {
-		arc.off = append(arc.off, len(arc.v))
-	}
-	return arc, nil
 }
 
 func (t *topology) arc(i int) (*topoArc, error) {
@@ -232,64 +165,68 @@ func arcIndex(v jsval.Value) (int, error) {
 // decoder builds GeoJSON geometry from topology geometry objects.
 type decoder struct{ t *topology }
 
-// outLen is the length of a decoded position of n numbers: topojson-client
-// returns an untransformed position as it is, and makes a transformed one
-// `new Array(n)` with elements 0 and 1 set.
-func (d decoder) outLen(n int) int {
-	if d.t.transform != nil {
-		return max(n, 2)
+// transformed is topojson-client's transform of one position, `output =
+// new Array(n)` with elements 0 and 1 set to `(x0 += input[0]) * kx + dx`
+// and `(y0 += input[1]) * ky + dy` and the others copied: the running sums
+// and the translations are JavaScript values, so a string coordinate
+// concatenates as it does upstream.
+func (d decoder) transformed(p jsval.Value, x0, y0 *jsSum) (jsval.Value, error) {
+	tr := d.t.transform
+	items := p.Items()
+	arr, out := jsval.MakeArr(max(len(items), 2))
+	if err := x0.add(p.Index(0), d.t); err != nil {
+		return arr, err
 	}
-	return n
-}
-
-// emit decodes one arc position into out, accumulating the deltas of a
-// quantized topology; it returns the running sums for the next one.
-func (d decoder) emit(p []float64, out []jsval.Value, x0, y0 float64) (float64, float64) {
-	j := 0
-	if tr := d.t.transform; tr != nil {
-		x0 += at(p, 0)
-		y0 += at(p, 1)
-		out[0] = jsval.Num(float64(x0*tr.kx) + tr.dx)
-		out[1] = jsval.Num(float64(y0*tr.ky) + tr.dy)
-		j = 2
+	if err := y0.add(p.Index(1), d.t); err != nil {
+		return arr, err
 	}
-	for ; j < len(p); j++ {
-		out[j] = jsval.Num(p[j])
+	var err error
+	if out[0], err = jsScaleAdd(x0, tr.kx, tr.dx, d.t); err != nil {
+		return arr, err
 	}
-	return x0, y0
+	if out[1], err = jsScaleAdd(y0, tr.ky, tr.dy, d.t); err != nil {
+		return arr, err
+	}
+	if len(items) > 2 {
+		copy(out[2:], items[2:])
+	}
+	return arr, nil
 }
 
 // arcInto appends the points of arc i (reversed for negative i) to points,
 // dropping the joint point shared with the previous arc. Every reference
 // materialises the arc anew, as upstream does, so a topology can reference
-// one long arc many times over: the positions are charged before they are
-// made (C5).
+// one long arc many times over: what it makes is charged first (C5).
+// Without a transform the positions are the input's arrays, as upstream's.
 func (d decoder) arcInto(i int, points []jsval.Value) ([]jsval.Value, error) {
 	a, err := d.t.arc(i)
 	if err != nil {
 		return nil, err
 	}
-	size := budget.Mul(int64(a.n), topoPosBytes) + budget.Mul(int64(a.outVals), topoValBytes)
-	if err := d.t.charge(size, int64(a.n)+int64(a.outVals)); err != nil {
+	n := len(a.pts)
+	size, work := budget.Mul(int64(n), topoSlotBytes), int64(n)
+	if d.t.transform != nil {
+		size += budget.Mul(int64(n), topoArrBytes) + budget.Mul(int64(a.outVals), topoValBytes)
+		work += int64(a.outVals)
+	}
+	if err := d.t.charge(size, work); err != nil {
 		return nil, err
 	}
 	if len(points) > 0 {
 		points = points[:len(points)-1]
 	}
 	start := len(points)
-	var x0, y0 float64
-	if a.dim >= 0 {
-		slab := jsval.NewArrSlab(a.n, d.outLen(a.dim))
-		for k := 0; k < a.n; k++ {
-			p, out := slab.Next()
-			x0, y0 = d.emit(a.pos(k), out, x0, y0)
-			points = append(points, p)
-		}
+	if d.t.transform == nil {
+		points = append(points, a.pts...)
 	} else {
-		for k := 0; k < a.n; k++ {
-			pk := a.pos(k)
-			p, out := jsval.MakeArr(d.outLen(len(pk)))
-			x0, y0 = d.emit(pk, out, x0, y0)
+		var x0, y0 jsSum
+		defer x0.release(d.t)
+		defer y0.release(d.t)
+		for _, pk := range a.pts {
+			p, err := d.transformed(pk, &x0, &y0)
+			if err != nil {
+				return nil, err
+			}
 			points = append(points, p)
 		}
 	}
@@ -350,24 +287,20 @@ func (d decoder) polygon(arcs jsval.Value) (jsval.Value, error) {
 	return jsval.Arr(out), nil
 }
 
-// point decodes a lone position, after charging it. It has no arc to
-// accumulate over: only the transform applies, padding the position to two
-// numbers as for an arc's.
+// point decodes a lone position: topojson-client returns it as it is, or
+// transformed as an arc's first position.
 func (d decoder) point(p jsval.Value) (jsval.Value, error) {
-	items := p.Items()
-	n := d.outLen(len(items))
-	if err := d.t.charge(topoPosBytes+budget.Mul(int64(n), topoValBytes), int64(n)+1); err != nil {
+	if d.t.transform == nil {
+		return p, d.t.charge(topoSlotBytes, 1)
+	}
+	n := max(p.Len(), 2)
+	if err := d.t.charge(topoSlotBytes+topoArrBytes+budget.Mul(int64(n), topoValBytes), int64(n)+1); err != nil {
 		return jsval.Undefined, err
 	}
-	arr, out := jsval.MakeArr(n)
-	for i, c := range items {
-		out[i] = jsval.Num(coord(c))
-	}
-	if tr := d.t.transform; tr != nil {
-		out[0] = jsval.Num(float64(coord(p.Index(0))*tr.kx) + tr.dx)
-		out[1] = jsval.Num(float64(coord(p.Index(1))*tr.ky) + tr.dy)
-	}
-	return arr, nil
+	var x0, y0 jsSum
+	defer x0.release(d.t)
+	defer y0.release(d.t)
+	return d.transformed(p, &x0, &y0)
 }
 
 // geometry decodes a TopoJSON geometry object into a GeoJSON geometry; unknown
@@ -759,19 +692,6 @@ func (m *fragMap) each(fn func(k string, f *fragment)) {
 	}
 }
 
-func posKey(v []float64) string {
-	var b strings.Builder
-	var buf []byte
-	for i, x := range v {
-		if i > 0 {
-			b.WriteByte(',')
-		}
-		buf = jsval.AppendJSNumber(buf[:0], x)
-		b.Write(buf)
-	}
-	return b.String()
-}
-
 // stitch joins arcs end to end into fragments (topojson-client's stitch), so a
 // mesh draws each border as long polylines instead of many small arcs.
 func stitch(t *topology, arcs []int) ([][]int, error) {
@@ -787,11 +707,10 @@ func stitch(t *topology, arcs []int) ([][]int, error) {
 		if err != nil {
 			return nil, err
 		}
-		if a.n < 2 {
+		if len(a.pts) < 2 {
 			return nil, fmt.Errorf("%w: arc %d has fewer than two positions", errTopology, i)
 		}
-		// `!arc[1][0] && !arc[1][1]`: a missing or NaN number is falsy too.
-		if p := a.pos(1); a.n < 3 && !truthy(at(p, 0)) && !truthy(at(p, 1)) {
+		if p := a.pts[1]; len(a.pts) < 3 && !p.Index(0).IsTruthy() && !p.Index(1).IsTruthy() {
 			emptyIndex++
 			tmp := arcs[emptyIndex]
 			arcs[emptyIndex] = i
@@ -799,33 +718,40 @@ func stitch(t *topology, arcs []int) ([][]int, error) {
 		}
 	}
 
-	ends := func(i int) (string, string) {
+	// ends is topojson-client's: the first position and the last (with a
+	// transform, the sums of the deltas, `p1[0] += dp[0]`), as the keys of
+	// JavaScript objects, so String(array).
+	ends := func(i int) (string, string, error) {
 		a, _ := t.arc(i)
-		p0 := a.pos(0)
-		var p1 []float64
+		p0 := a.pts[0].AsString()
+		var p1 string
 		if t.transform != nil {
-			p1 = []float64{0, 0}
-			for k := 0; k < a.n; k++ {
-				p := a.pos(k)
-				p1[0] += at(p, 0)
-				p1[1] += at(p, 1)
+			var x, y jsSum
+			defer x.release(t)
+			defer y.release(t)
+			for _, p := range a.pts {
+				if err := x.add(p.Index(0), t); err != nil {
+					return "", "", err
+				}
+				if err := y.add(p.Index(1), t); err != nil {
+					return "", "", err
+				}
 			}
+			p1 = x.String() + "," + y.String()
 		} else {
-			p1 = a.pos(a.n - 1)
+			p1 = a.pts[len(a.pts)-1].AsString()
 		}
 		if i < 0 {
-			return posKey(p1), posKey(p0)
+			return p1, p0, nil
 		}
-		return posKey(p0), posKey(p1)
+		return p0, p1, nil
 	}
 
 	for _, i := range arcs {
-		if a, _ := t.arc(i); a != nil {
-			if err := t.m.Work(int64(a.n)); err != nil {
-				return nil, err
-			}
+		start, end, err := ends(i)
+		if err != nil {
+			return nil, err
 		}
-		start, end := ends(i)
 		if f := byEnd.get(start); f != nil {
 			byEnd.del(f.end)
 			f.arcs = append(f.arcs, i)
