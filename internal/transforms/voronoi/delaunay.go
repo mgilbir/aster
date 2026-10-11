@@ -1,7 +1,7 @@
 package voronoi
 
 import (
-	"cmp"
+	"context"
 	"math"
 	"slices"
 
@@ -19,18 +19,25 @@ type delaunay struct {
 	hull      []int32
 	triangles []int32
 	collinear []int32 // point indices sorted along the line; nil unless all points are collinear
+	err       error   // set by a walk that overran: errDegenerate
 }
 
-func newDelaunay(points []float64) *delaunay {
+func newDelaunay(ctx context.Context, points []float64) (*delaunay, error) {
 	n := len(points) / 2
+	tri, err := newTriangulation(ctx, points)
+	if err != nil {
+		return nil, err
+	}
 	d := &delaunay{
 		points:    points,
-		tri:       newTriangulation(points),
+		tri:       tri,
 		inedges:   make([]int32, n),
 		hullIndex: make([]int32, n),
 	}
-	d.init()
-	return d
+	if err := d.init(ctx); err != nil {
+		return nil, err
+	}
+	return d, nil
 }
 
 // isCollinear reports whether every triangle is (numerically) flat.
@@ -45,6 +52,50 @@ func (d *delaunay) isCollinear() bool {
 		}
 	}
 	return true
+}
+
+// typedArraySort is V8's TypedArray.prototype.sort with a comparator: a
+// top-down merge sort that ping-pongs between two copies, taking the left
+// element on a verdict <= 0 and reading NaN as 0. The comparator above is
+// not a consistent order once coordinates are infinite or NaN, so the order
+// depends on which pairs are compared, and only V8's algorithm reproduces it.
+func typedArraySort(a []int32, cmp func(x, y int32) float64) {
+	if len(a) < 2 {
+		return
+	}
+	work := slices.Clone(a)
+	mergeSort(work, 0, len(a), a, cmp)
+}
+
+// mergeSort sorts source[from:to] into target, using target's range as the
+// source of the halves (V8's TypedArrayMergeSort); its depth is log2(len).
+func mergeSort(source []int32, from, to int, target []int32, cmp func(x, y int32) float64) {
+	middle := from + (to-from)>>1
+	if middle-from > 1 {
+		mergeSort(target, from, middle, source, cmp)
+	}
+	if to-middle > 1 {
+		mergeSort(target, middle, to, source, cmp)
+	}
+	left, right := from, middle
+	for i := from; i < to; i++ {
+		switch {
+		case left < middle && right >= to:
+			target[i] = source[left]
+			left++
+		case left < middle:
+			if c := cmp(source[left], source[right]); !(c > 0) { // NaN is 0
+				target[i] = source[left]
+				left++
+			} else {
+				target[i] = source[right]
+				right++
+			}
+		default:
+			target[i] = source[right]
+			right++
+		}
+	}
 }
 
 func jitter(x, y, r float64) (float64, float64) {
@@ -75,7 +126,7 @@ func hypot(a, b float64) float64 {
 	return math.Sqrt(sum) * m
 }
 
-func (d *delaunay) init() {
+func (d *delaunay) init(ctx context.Context) error {
 	points := d.points
 	t := d.tri
 
@@ -85,17 +136,12 @@ func (d *delaunay) init() {
 		for i := range col {
 			col[i] = int32(i)
 		}
-		// Stable, like Int32Array.prototype.sort; NaN differences fall
-		// through to the y comparison just as `a-b || c-d` does.
-		slices.SortStableFunc(col, func(i, j int32) int {
+		typedArraySort(col, func(i, j int32) float64 {
+			// points[2 * i] - points[2 * j] || points[2 * i + 1] - points[2 * j + 1]
 			if dx := points[2*i] - points[2*j]; dx != 0 && dx == dx {
-				return cmp.Compare(dx, 0)
+				return dx
 			}
-			dy := points[2*i+1] - points[2*j+1]
-			if dy != 0 && dy == dy {
-				return cmp.Compare(dy, 0)
-			}
-			return 0
+			return points[2*i+1] - points[2*j+1]
 		})
 		d.collinear = col
 		e, f := col[0], col[n-1]
@@ -103,7 +149,10 @@ func (d *delaunay) init() {
 		for i := 0; i < n; i++ {
 			points[2*i], points[2*i+1] = jitter(points[2*i], points[2*i+1], r)
 		}
-		t = newTriangulation(points)
+		var err error
+		if t, err = newTriangulation(ctx, points); err != nil {
+			return err
+		}
 		d.tri = t
 	} else {
 		d.collinear = nil
@@ -146,6 +195,7 @@ func (d *delaunay) init() {
 			d.triangles[2] = d.hull[1]
 		}
 	}
+	return nil
 }
 
 func sq(v float64) float64 { return float64(v * v) }
@@ -161,7 +211,13 @@ func (d *delaunay) step(i int32, x, y float64) int32 {
 	dc := sq(x-points[i*2]) + sq(y-points[i*2+1])
 	e0 := d.inedges[i]
 	e := e0
-	for {
+	// The walk turns around point i once; one longer than there are
+	// half-edges is cycling (upstream would not stop), and is degenerate.
+	for steps := 0; ; steps++ {
+		if steps > len(d.halfedges) {
+			d.err = errDegenerate
+			break
+		}
 		tt := d.triangles[e]
 		dt := sq(x-points[tt*2]) + sq(y-points[tt*2+1])
 		if dt < dc {

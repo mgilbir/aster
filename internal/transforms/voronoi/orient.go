@@ -24,6 +24,12 @@ func orient2d(ax, ay, bx, by, cx, cy float64) float64 {
 	detLeft := float64((ay - cy) * (bx - cx))
 	detRight := float64((ax - cx) * (by - cy))
 	det := detLeft - detRight
+	// Terms of opposite signs (or a zero) cannot cancel: det's sign is
+	// right as it is. For finite input the error bound below says the same;
+	// with infinite terms (Inf - -Inf) only this test answers.
+	if detLeft == 0 || detRight == 0 || (detLeft > 0) != (detRight > 0) {
+		return det
+	}
 	detSum := math.Abs(detLeft + detRight)
 	if math.Abs(det) >= ccwErrBoundA*detSum {
 		return det

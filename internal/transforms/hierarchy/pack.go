@@ -3,7 +3,10 @@ package hierarchy
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
+
+	"github.com/mgilbir/aster/internal/budget"
 )
 
 // errPackBasis is d3's bare `throw new Error` when the enclosing-circle basis
@@ -186,6 +189,10 @@ func place(b, a, c *Node) {
 	}
 }
 
+// errPackDegenerate reports a front chain whose links do not close: circles
+// for which d3's packSiblings would not stop.
+var errPackDegenerate = fmt.Errorf("%w: pack: degenerate circles", budget.ErrLimit)
+
 func intersects(a, b *Node) bool {
 	dr := a.R + b.R - 1e-6
 	dx, dy := b.X-a.X, b.Y-a.Y
@@ -228,10 +235,18 @@ func packSiblings(ctx context.Context, circles []*Node, rnd *lcg) (float64, erro
 	bn.next, an.previous = cn, cn
 	cn.next, bn.previous = an, an
 
+	// The front chain is a doubly linked cycle of at most n circles. Each
+	// retry of a circle drops at least one circle from the chain, so there
+	// are fewer than n of them in all, and each walk below goes round the
+	// chain at most once: those bounds hold by construction, and a walk past
+	// them means links that cycle elsewhere, refused as degenerate.
 	steps := 0
 pack:
 	for i := 3; i < n; i++ {
 		steps++
+		if steps > 2*n {
+			return 0, errPackDegenerate
+		}
 		if err := ctxErr(ctx, steps); err != nil {
 			return 0, err
 		}
@@ -243,7 +258,10 @@ pack:
 		// closeness is linear distance along the chain.
 		j, k := bn.next, an.previous
 		sj, sk := bn.c.R, an.c.R
-		for {
+		for walk := 0; ; walk++ {
+			if walk > n {
+				return 0, errPackDegenerate
+			}
 			if sj <= sk {
 				if intersects(j.c, cn.c) {
 					bn = j
@@ -273,7 +291,11 @@ pack:
 		bn = cn
 
 		aa := score(an)
+		walk := 0
 		for x := cn.next; x != bn; x = x.next {
+			if walk++; walk > n {
+				return 0, errPackDegenerate
+			}
 			if ca := score(x); ca < aa {
 				an, aa = x, ca
 			}
@@ -283,6 +305,9 @@ pack:
 
 	front := []circle{{bn.c.X, bn.c.Y, bn.c.R}}
 	for x := bn.next; x != bn; x = x.next {
+		if len(front) > n {
+			return 0, errPackDegenerate
+		}
 		front = append(front, circle{x.c.X, x.c.Y, x.c.R})
 	}
 	e, err := packEnclose(ctx, front, rnd)
