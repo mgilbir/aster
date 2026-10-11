@@ -1,9 +1,10 @@
 package expr
 
 import (
-	"strings"
+	"errors"
 	"testing"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -18,15 +19,40 @@ func evalBudget(t *testing.T, src string, b *StringBudget) (jsval.Value, error) 
 	return p.Eval(s)
 }
 
+// MaxStringLength is the engine's bound, far below V8's: reaching it ends the
+// render with ErrLimit, which no expression can catch (C43). A string past
+// V8's own limit is the RangeError upstream throws too.
 func TestStringGrowthIsBounded(t *testing.T) {
 	for _, src := range []string{
 		"pad('x', 16000000) + pad('x', 16000000)",
+		"pad('x', 16000000) + pad('x', 16000000) + 'y'",
 		"join([pad('x', 9000000), pad('x', 9000000)], '')",
-		"replace(pad('x', 4000000), regexp('x', 'g'), pad('y', 2000))",
+		"'' + [pad('x', 9000000), pad('x', 9000000)]",
+		"replace(pad('', 4000000, 'x'), regexp('x', 'g'), pad('y', 2000))",
+		"replace(pad('', 20000, 'x') + 'y', 'y', pad('', 2000, '$`'))",
+		"pad('x', 20000000)",
+		"pad('é', 6000000) + pad('é', 6000000) + pad('é', 6000000)",
+		"upper(pad('', 9000000, 'ß'))",
 	} {
-		if _, err := evalBudget(t, src, nil); err == nil || !strings.Contains(err.Error(), "string length") {
-			t.Errorf("%s: want a RangeError, got %v", src, err)
+		if _, err := evalBudget(t, src, nil); !errors.Is(err, budget.ErrLimit) {
+			t.Errorf("%s: want ErrLimit, got %v", src, err)
 		}
+	}
+	for _, src := range []string{"pad('x', 1e12)", "pad('', 1e9, 'ab')"} {
+		var e *Error
+		if _, err := evalBudget(t, src, nil); !errors.As(err, &e) || e.Name != "RangeError" {
+			t.Errorf("%s: want the RangeError V8 throws, got %v", src, err)
+		}
+	}
+	// The limit counts UTF-16 code units, not bytes (C97): 6M two-byte
+	// characters are 12 MB but 6M units.
+	if v, err := evalBudget(t, "length(pad('é', 6000000) + pad('é', 6000000))", nil); err != nil || v.NumValue() != 12e6 {
+		t.Errorf("12M two-byte characters: %v, %v", v, err)
+	}
+	// A regular expression replacement is as long as it really is, not
+	// refused by an estimate.
+	if v, err := evalBudget(t, "length(replace(pad('x', 4000000), regexp('x', 'g'), pad('y', 2000)))", nil); err != nil || v.NumValue() != 4001999 {
+		t.Errorf("one match: %v, %v", v, err)
 	}
 }
 
@@ -53,5 +79,30 @@ func TestSequenceIsCharged(t *testing.T) {
 	}
 	if _, err := evalBudget(t, "sequence(100)", b); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// String(array) and a chain of + are charged for what they build, once: a
+// result the budget holds must not fail because every prefix was charged
+// again (C44), and it must cost what join costs.
+func TestStringOfArrayChargedOnce(t *testing.T) {
+	items := make([]jsval.Value, 5000)
+	for i := range items {
+		items[i] = jsval.Str("abcdefghijklmnopqrst")
+	}
+	for _, src := range []string{"'' + datum", "join(datum, ',')", "toString(datum)", "'x' + datum + 'y' + datum"} {
+		p, err := Compile(src)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := NewScope(nil)
+		s.Datum = jsval.Arr(items)
+		s.Strings = NewStringBudget(1 << 20)
+		if _, err := p.Eval(s); err != nil {
+			t.Errorf("%s: %v", src, err)
+		}
+		if used := int64(1<<20) - s.Strings.left; used > 4*2*105_000 {
+			t.Errorf("%s: charged %d bytes for about %d", src, used, 105_000)
+		}
 	}
 }

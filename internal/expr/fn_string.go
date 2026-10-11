@@ -8,18 +8,13 @@ import (
 	"strings"
 	"sync"
 	"unicode/utf8"
+	"unsafe"
 
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 
-	"github.com/mgilbir/aster/internal/bcache"
 	"github.com/mgilbir/aster/internal/jsval"
 )
-
-// MaxStringLength bounds strings that pad, truncate and friends build, in
-// UTF-16 code units. Upstream would loop (or run out of memory) on
-// pad(x, 1e12).
-const MaxStringLength = 1 << 24
 
 func isJSSpace(r rune) bool {
 	switch r {
@@ -50,30 +45,48 @@ func sliceIndex(f float64, n int) int {
 
 // sliceUnits is s.slice(start, end) with float arguments; end is NaN-free
 // "absent" when hasEnd is false.
-func sliceUnits(str string, start float64, end float64, hasEnd bool) string {
+func (s *Scope) sliceUnits(str string, start float64, end float64, hasEnd bool) string {
 	n := utf16Len(str)
 	from := sliceIndex(start, n)
 	to := n
 	if hasEnd {
 		to = sliceIndex(end, n)
 	}
-	if to <= from {
-		return ""
-	}
-	return substrUnits(str, from, to)
+	return s.substr(str, from, to)
 }
 
-func repeatString(s *Scope, c string, reps float64) string {
-	if math.IsNaN(reps) || reps < 1 || c == "" {
-		return ""
+// padded is repeat(c, left) + str + repeat(c, right) as vega-util's pad
+// builds it: repeat is a loop of +=, so the copies of c, and c and str, join
+// where a high surrogate meets a low one. It is built in one buffer whose
+// length is checked, and charged, before it is made.
+func (s *Scope) padded(c string, left float64, str string, right float64) string {
+	reps := func(r float64) int {
+		if math.IsNaN(r) || r < 1 || c == "" {
+			return 0
+		}
+		return int(min(math.Floor(r), v8MaxStringLength+1))
 	}
-	count := math.Floor(reps)
-	if count*float64(utf16Len(c)) > MaxStringLength {
-		throw("RangeError", "Invalid string length")
+	l, r := reps(left), reps(right)
+	if n := len(c)*(l+r) + len(str); n <= smallString {
+		// A label: under the free size, so under every limit.
+		b := make([]byte, 0, n)
+		for range l {
+			b = appendJoin(b, c)
+		}
+		b = appendJoin(b, str)
+		for range r {
+			b = appendJoin(b, c)
+		}
+		return unsafe.String(unsafe.SliceData(b), len(b))
 	}
-	s.checkLen(len(c) * int(count))
-	s.tick()
-	return strings.Repeat(c, int(count))
+	cu := float64(utf16Len(c))
+	s.checkUnits(float64(float64(l+r)*cu) + float64(utf16Len(str)))
+	b := newStrBuilder(s)
+	b.reserve(len(c)*(l+r) + len(str))
+	b.addRepeat(c, l)
+	b.add(str)
+	b.addRepeat(c, r)
+	return b.String()
 }
 
 var (
@@ -203,6 +216,13 @@ func jsParseInt(str string, radix int32) float64 {
 		f, _ := strconv.ParseFloat(digits, 64)
 		return sign * f
 	}
+	// big.Int parses in time quadratic in the digits. Past 1100 significant
+	// digits the value is beyond the largest double in any radix (2^1100), so
+	// it is Infinity without parsing.
+	digits = strings.TrimLeft(digits, "0")
+	if len(digits) > 1100 {
+		return sign * math.Inf(1)
+	}
 	var z big.Int
 	z.SetString(digits, r)
 	f, _ := new(big.Float).SetInt(&z).Float64()
@@ -219,36 +239,6 @@ func digitValue(c byte) int {
 		return int(c-'A') + 10
 	}
 	return -1
-}
-
-// patternCache memoises patterns compiled from strings (test('a+', x) in a
-// filter would otherwise compile per datum). Patterns with g or y flags carry
-// state and are never shared. The strings may come from the data, and a short
-// one can compile to megabytes (C8), so the cache is bounded by the bytes the
-// patterns hold and keeps none of more than patternCacheMaxEntry.
-const (
-	patternCacheBytes    = 32 << 20
-	patternCacheMaxEntry = 1 << 20
-)
-
-var patternCache = bcache.New[string, *jsval.Pattern](patternCacheBytes, patternCacheMaxEntry)
-
-func compilePattern(source, flags string) *jsval.Pattern {
-	shareable := !strings.ContainsAny(flags, "gy")
-	key := flags + "/" + source
-	if shareable {
-		if p, ok := patternCache.Get(key); ok {
-			return p
-		}
-	}
-	p, err := jsval.NewPattern(escapeSource(source), canonicalFlags(flags))
-	if err != nil {
-		throw("SyntaxError", "%v", err)
-	}
-	if shareable {
-		patternCache.Put(key, p, int64(len(key))+patternBytes(p))
-	}
-	return p
 }
 
 // escapeSource is EscapeRegExpPattern: what RegExp.prototype.source reports for
@@ -326,26 +316,18 @@ func canonicalFlags(flags string) string {
 	return string(out)
 }
 
-// toPattern is RegExp(v) with no flags.
-func (s *Scope) toPattern(v jsval.Value) *jsval.Pattern {
-	if v.IsPattern() {
-		return v.PatternOf()
+// caseMapped is upper or lower of str: the result can be longer than str
+// (ß is SS), so its length is checked and the budget charged for it once it
+// is made, with what str's length predicts charged before.
+func (s *Scope) caseMapped(str string, f func(string) string) string {
+	s.chargeBytes(len(str))
+	s.workBytes(len(str))
+	out := f(str)
+	s.checkString(out)
+	if len(out) > len(str) {
+		s.chargeBytes(len(out) - len(str))
 	}
-	if v.IsUndefined() {
-		return compilePattern("", "")
-	}
-	return compilePattern(s.str(v), "")
-}
-
-func (s *Scope) patternTest(p *jsval.Pattern, str string) bool {
-	if strings.ContainsAny(p.Flags, "gy") {
-		return p.Re.MatchString(str) // stateful lastIndex, as RegExp.prototype.test
-	}
-	ok, err := p.Re.MatchStringErr(str)
-	if err != nil {
-		throw("RangeError", "regular expression too complex: %v", err)
-	}
-	return ok
+	return out
 }
 
 func init() {
@@ -358,14 +340,26 @@ func init() {
 			return nil
 		}})
 	fn("parseFloat", func(s *Scope, args []jsval.Value) jsval.Value {
-		return jsval.Num(jsParseFloat(s.str(arg(args, 0))))
+		str := s.str(arg(args, 0))
+		s.workBytes(len(str))
+		return jsval.Num(jsParseFloat(str))
 	})
 	fn("parseInt", func(s *Scope, args []jsval.Value) jsval.Value {
-		return jsval.Num(jsParseInt(s.str(arg(args, 0)), toInt32(s.num(arg(args, 1)))))
+		str := s.str(arg(args, 0))
+		s.workBytes(len(str))
+		return jsval.Num(jsParseInt(str, toInt32(s.num(arg(args, 1)))))
 	})
-	fnMin("upper", 1, func(s *Scope, args []jsval.Value) jsval.Value { return jsval.Str(jsUpper(s.str(args[0]))) })
-	fnMin("lower", 1, func(s *Scope, args []jsval.Value) jsval.Value { return jsval.Str(jsLower(s.str(args[0]))) })
-	fnMin("trim", 1, func(s *Scope, args []jsval.Value) jsval.Value { return jsval.Str(trimJSSpace(s.str(args[0]))) })
+	fnMin("upper", 1, func(s *Scope, args []jsval.Value) jsval.Value {
+		return jsval.Str(s.caseMapped(s.str(args[0]), jsUpper))
+	})
+	fnMin("lower", 1, func(s *Scope, args []jsval.Value) jsval.Value {
+		return jsval.Str(s.caseMapped(s.str(args[0]), jsLower))
+	})
+	fnMin("trim", 1, func(s *Scope, args []jsval.Value) jsval.Value {
+		str := s.str(args[0])
+		s.workBytes(len(str))
+		return jsval.Str(trimJSSpace(str))
+	})
 	fnMin("substring", 1, func(s *Scope, args []jsval.Value) jsval.Value {
 		str := s.str(args[0])
 		n := utf16Len(str)
@@ -386,7 +380,7 @@ func init() {
 		if a > b {
 			a, b = b, a
 		}
-		return jsval.Str(substrUnits(str, a, b))
+		return jsval.Str(s.substr(str, a, b))
 	})
 	fnMin("split", 1, func(s *Scope, args []jsval.Value) jsval.Value {
 		str := s.str(args[0])
@@ -398,47 +392,18 @@ func init() {
 		if limit == 0 {
 			return jsval.Arr(nil)
 		}
-		var parts []string
 		switch {
 		case sep.IsUndefined():
-			parts = []string{str}
+			return jsval.ArrOf(jsval.Str(str))
 		case sep.IsPattern():
-			items := s.regexpSplit(sep.PatternOf(), str)
-			if uint64(len(items)) > uint64(limit) {
-				items = items[:limit]
-			}
-			return jsval.Arr(items)
-		default:
-			sp := s.str(sep)
-			switch sp {
-			case "":
-				if isASCII(str) {
-					parts = make([]string, len(str))
-					for i := range str {
-						parts[i] = str[i : i+1]
-					}
-				} else {
-					u := toUTF16(str)
-					parts = make([]string, len(u))
-					for i := range u {
-						parts[i] = fromUTF16(u[i : i+1])
-					}
-				}
-			default:
-				parts = strings.Split(str, sp)
-			}
+			return jsval.Arr(s.regexpSplit(sep.PatternOf(), str, limit))
 		}
-		if uint64(len(parts)) > uint64(limit) {
-			parts = parts[:limit]
-		}
-		items := make([]jsval.Value, len(parts))
-		for i, p := range parts {
-			items[i] = jsval.Str(p)
-		}
-		return jsval.Arr(items)
+		return jsval.Arr(s.stringSplit(str, s.str(sep), limit))
 	})
 	fn("btoa", func(s *Scope, args []jsval.Value) jsval.Value {
 		str := s.str(arg(args, 0))
+		s.chargeBytes(len(str) + base64.StdEncoding.EncodedLen(len(str)))
+		s.workBytes(len(str))
 		b := make([]byte, 0, len(str))
 		for _, r := range str {
 			if r > 0xFF {
@@ -449,13 +414,18 @@ func init() {
 		return jsval.Str(base64.StdEncoding.EncodeToString(b))
 	})
 	fn("atob", func(s *Scope, args []jsval.Value) jsval.Value {
+		in := s.str(arg(args, 0))
+		// The output is at most three quarters of the input, each byte up to
+		// two in UTF-8, and the input is copied once without white space.
+		s.chargeBytes(3 * len(in))
+		s.workBytes(len(in))
 		str := strings.Map(func(r rune) rune {
 			switch r {
 			case ' ', '\t', '\n', '\f', '\r':
 				return -1
 			}
 			return r
-		}, s.str(arg(args, 0)))
+		}, in)
 		if len(str)%4 == 0 {
 			str = strings.TrimSuffix(strings.TrimSuffix(str, "=="), "=")
 		}
@@ -463,25 +433,28 @@ func init() {
 		if err != nil {
 			throw("Error", "The string to be decoded is not correctly encoded.")
 		}
-		r := make([]rune, len(b))
-		for i, c := range b {
-			r[i] = rune(c)
+		out := make([]byte, 0, len(b)+len(b)/2)
+		for _, c := range b {
+			out = utf8.AppendRune(out, rune(c))
 		}
-		return jsval.Str(string(r))
+		return jsval.Str(string(out))
 	})
 	fn("encodeURIComponent", func(s *Scope, args []jsval.Value) jsval.Value {
 		str := s.str(arg(args, 0))
-		var b strings.Builder
+		b := newStrBuilder(s)
 		const hexd = "0123456789ABCDEF"
+		esc := func(x byte) {
+			b.addByte('%')
+			b.addByte(hexd[x>>4])
+			b.addByte(hexd[x&15])
+		}
 		for i := 0; i < len(str); {
 			c := str[i]
 			if c < utf8.RuneSelf {
 				if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.IndexByte("-_.!~*'()", c) >= 0 {
-					b.WriteByte(c)
+					b.addByte(c)
 				} else {
-					b.WriteByte('%')
-					b.WriteByte(hexd[c>>4])
-					b.WriteByte(hexd[c&15])
+					esc(c)
 				}
 				i++
 				continue
@@ -490,10 +463,8 @@ func init() {
 			if r == utf8.RuneError && w <= 1 || c == 0xED && i+1 < len(str) && str[i+1] >= 0xA0 {
 				throw("URIError", "URI malformed")
 			}
-			for _, x := range []byte(str[i : i+w]) {
-				b.WriteByte('%')
-				b.WriteByte(hexd[x>>4])
-				b.WriteByte(hexd[x&15])
+			for k := i; k < i+w; k++ {
+				esc(str[k])
 			}
 			i += w
 		}
@@ -511,14 +482,14 @@ func init() {
 		if !fl.IsUndefined() {
 			flags = s.str(fl)
 		}
+		if pat.IsPattern() {
+			return jsval.PatternValue(s.compileEscaped(pat.PatternOf().Source, canonicalFlags(flags)))
+		}
 		source := ""
-		switch {
-		case pat.IsPattern():
-			source = pat.PatternOf().Source
-		case !pat.IsUndefined():
+		if !pat.IsUndefined() {
 			source = s.str(pat)
 		}
-		return jsval.PatternValue(compilePattern(source, flags))
+		return jsval.PatternValue(s.compilePattern(source, flags))
 	})
 	fnMin("test", 1, func(s *Scope, args []jsval.Value) jsval.Value {
 		p := s.toPattern(args[0])
@@ -532,30 +503,14 @@ func init() {
 		}
 		src := s.str(str)
 		if pat.IsPattern() {
-			// A regexp can match at every position, so the result can be
-			// (len(src)+1)*len(repl) long; refuse before it is built.
-			if len(repl) > 1024 && int64(len(src)+1)*int64(len(repl)) > 4*MaxStringLength {
-				throw("RangeError", "Invalid string length")
-			}
-			out, err := pat.PatternOf().Re.ReplaceAllStringErr(src, repl)
-			if err != nil {
-				throw("RangeError", "%v", err)
-			}
-			s.checkLen(len(out))
-			return jsval.Str(out)
+			return jsval.Str(s.regexpReplace(pat.PatternOf(), src, repl))
 		}
-		needle := pat.StrValue()
-		i := strings.Index(src, needle)
-		if i < 0 {
-			return jsval.Str(src)
-		}
-		rep := expandReplacement(repl, src, i, i+len(needle))
-		s.checkLen(len(src) + len(rep))
-		return jsval.Str(src[:i] + rep + src[i+len(needle):])
+		return jsval.Str(s.stringReplace(src, pat.StrValue(), repl))
 	})
 
 	fn("pad", func(s *Scope, args []jsval.Value) jsval.Value {
 		str := s.str(arg(args, 0)) // `str + ''`
+		s.workBytes(len(str))
 		length := s.num(arg(args, 1))
 		c := " "
 		if pc := arg(args, 2); pc.IsTruthy() {
@@ -568,14 +523,15 @@ func init() {
 		align := arg(args, 3)
 		switch {
 		case align.IsStr() && align.StrValue() == "left":
-			return jsval.Str(repeatString(s, c, n) + str)
+			return jsval.Str(s.padded(c, n, str, 0))
 		case align.IsStr() && align.StrValue() == "center":
-			return jsval.Str(repeatString(s, c, float64(toInt32(n/2))) + str + repeatString(s, c, math.Ceil(n/2)))
+			return jsval.Str(s.padded(c, float64(toInt32(n/2)), str, math.Ceil(n/2)))
 		}
-		return jsval.Str(str + repeatString(s, c, n))
+		return jsval.Str(s.padded(c, 0, str, n))
 	})
 	fn("truncate", func(s *Scope, args []jsval.Value) jsval.Value {
 		str := s.str(arg(args, 0))
+		s.workBytes(len(str))
 		length := s.num(arg(args, 1))
 		e := jsval.Str("\u2026")
 		if ev := arg(args, 3); !ev.IsNullish() {
@@ -593,89 +549,69 @@ func init() {
 		align := arg(args, 2)
 		switch {
 		case align.IsStr() && align.StrValue() == "left":
-			return jsval.Str(es + sliceUnits(str, n-l, 0, false))
+			return jsval.Str(s.concat(es, s.sliceUnits(str, n-l, 0, false)))
 		case align.IsStr() && align.StrValue() == "center":
-			return jsval.Str(sliceUnits(str, 0, math.Ceil(l/2), true) + es + sliceUnits(str, n-float64(toInt32(l/2)), 0, false))
+			return jsval.Str(s.concat(s.concat(s.sliceUnits(str, 0, math.Ceil(l/2), true), es), s.sliceUnits(str, n-float64(toInt32(l/2)), 0, false)))
 		}
-		return jsval.Str(sliceUnits(str, 0, l, true) + es)
+		return jsval.Str(s.concat(s.sliceUnits(str, 0, l, true), es))
 	})
 }
 
-// regexpSplit is String.prototype.split with a RegExp separator: capture
-// groups are spliced into the result (undefined for a group that did not
-// participate), as ECMA-262 specifies.
-func (s *Scope) regexpSplit(p *jsval.Pattern, str string) []jsval.Value {
-	if str == "" {
-		if ok, _ := p.Re.MatchStringErr(str); ok {
-			return []jsval.Value{}
-		}
-		return []jsval.Value{jsval.Str("")}
-	}
-	matches, err := p.Re.FindAllStringSubmatchIndexErr(str, -1)
-	if err != nil {
-		if p.Source == "(?:)" {
-			// Empty separator: split into UTF-16 code units.
-			u := toUTF16(str)
-			out := make([]jsval.Value, len(u))
-			for i := range u {
-				out[i] = jsval.Str(fromUTF16(u[i : i+1]))
+// stringSplit is String.prototype.split with a string separator, at most
+// limit pieces, in time linear in the string.
+func (s *Scope) stringSplit(str, sep string, limit uint32) []jsval.Value {
+	switch {
+	case sep == "":
+		return s.unitSplit(str, limit)
+	case unitSearch(sep):
+		// The separator can match half of a pair: split the code units.
+		u, v := s.toUnits(str), s.toUnits(sep)
+		b := itemBuilder{s: s}
+		pos := 0
+		for uint64(len(b.items)) < uint64(limit) {
+			i := searchFirst(s, u[pos:], v)
+			if i < 0 {
+				break
 			}
-			return out
+			piece := u[pos : pos+i]
+			s.chargeBytes(3 * len(piece))
+			b.push(jsval.Str(fromUTF16(piece)))
+			pos += i + len(v)
 		}
-		throw("RangeError", "regular expression cannot split this string: %v", err)
+		if uint64(len(b.items)) < uint64(limit) {
+			s.chargeBytes(3 * (len(u) - pos))
+			b.push(jsval.Str(fromUTF16(u[pos:])))
+		}
+		return b.items
 	}
-	var out []jsval.Value
+	b := itemBuilder{s: s}
 	pos := 0
-	for _, m := range matches {
-		start, end := m[0], m[1]
-		if start >= len(str) {
+	for uint64(len(b.items)) < uint64(limit) {
+		i := s.indexBytes(str, sep, pos)
+		if i < 0 {
+			b.push(jsval.Str(str[pos:]))
 			break
 		}
-		if end == pos {
-			continue // an empty match where the current piece began
-		}
-		out = append(out, jsval.Str(str[pos:start]))
-		for g := 2; g+1 < len(m); g += 2 {
-			if m[g] < 0 {
-				out = append(out, jsval.Undefined)
-			} else {
-				out = append(out, jsval.Str(str[m[g]:m[g+1]]))
-			}
-		}
-		pos = end
+		b.push(jsval.Str(str[pos:i]))
+		pos = i + len(sep)
 	}
-	return append(out, jsval.Str(str[pos:]))
+	return b.items
 }
 
-// expandReplacement handles the $ patterns of String.prototype.replace for a
-// string pattern (no capture groups): $$, $&, $` and $'.
-func expandReplacement(repl, src string, start, end int) string {
-	if !strings.Contains(repl, "$") {
-		return repl
+// stringReplace is String.prototype.replace with a string pattern: its first
+// occurrence replaced by the expansion of repl, where $$, $&, $` and $' are
+// the only patterns (there are no groups).
+func (s *Scope) stringReplace(src, needle, repl string) string {
+	i := s.indexOf(src, needle, 0)
+	if i < 0 {
+		return src
 	}
-	var b strings.Builder
-	for i := 0; i < len(repl); i++ {
-		c := repl[i]
-		if c != '$' || i+1 >= len(repl) {
-			b.WriteByte(c)
-			continue
-		}
-		switch repl[i+1] {
-		case '$':
-			b.WriteByte('$')
-			i++
-		case '&':
-			b.WriteString(src[start:end])
-			i++
-		case '`':
-			b.WriteString(src[:start])
-			i++
-		case '\'':
-			b.WriteString(src[end:])
-			i++
-		default:
-			b.WriteByte(c)
-		}
-	}
+	before := s.substr(src, 0, i)
+	n := utf16Len(needle)
+	after := s.substr(src, i+n, utf16Len(src))
+	b := newStrBuilder(s)
+	b.add(before)
+	expandTemplate(&b, repl, stringMatch{before, needle, after}, nil)
+	b.add(after)
 	return b.String()
 }

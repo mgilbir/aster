@@ -1,6 +1,7 @@
 package expr
 
 import (
+	"context"
 	"fmt"
 	"math/big"
 	"strconv"
@@ -86,6 +87,9 @@ type parser struct {
 	idx   int
 	look  token
 	depth int
+	// led pays for the programs of the regular expression literals: a short
+	// literal can compile to tens of megabytes (C8).
+	led *budget.Ledger
 }
 
 // Parse parses a Vega expression. It accepts exactly what vega-expression
@@ -94,11 +98,20 @@ type parser struct {
 // and the unary and binary operators of ECMAScript except ++, --, typeof, void,
 // delete, assignment and the comma operator, which are rejected. `this` and all
 // reserved words other than `if` are rejected.
-func Parse(src string) (n *Node, err error) {
+func Parse(src string) (n *Node, err error) { return parse(src, nil) }
+
+// ParseContext is Parse charging the programs of the regular expression
+// literals to the budget.Ledger in ctx, as each is compiled: a literal past
+// what the ledger can pay for is a SyntaxError that wraps budget.ErrLimit.
+func ParseContext(ctx context.Context, src string) (*Node, error) {
+	return parse(src, budget.LedgerFrom(ctx))
+}
+
+func parse(src string, led *budget.Ledger) (n *Node, err error) {
 	if len(src) > MaxLength {
 		return nil, &SyntaxError{Msg: "Expression too long", Limit: true}
 	}
-	p := &parser{src: src}
+	p := &parser{src: src, led: led}
 	defer func() {
 		if r := recover(); r != nil {
 			se, ok := r.(*SyntaxError)
@@ -686,7 +699,13 @@ func (p *parser) scanRegExp() (*jsval.Pattern, string) {
 	}
 	pat, err := jsval.NewPattern(body, canonicalFlags(flags))
 	if err != nil {
+		if newPatternError(err).limit {
+			p.failLimit("Regular expression too large: " + err.Error())
+		}
 		p.fail("Invalid regular expression")
+	}
+	if p.led.Alloc(patternBytes(pat)) != nil {
+		p.failLimit("Regular expression too large for the memory limit")
 	}
 	return pat, p.src[start:p.idx]
 }

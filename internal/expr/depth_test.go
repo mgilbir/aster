@@ -1,15 +1,18 @@
 package expr
 
 import (
+	"errors"
 	"runtime/debug"
-	"strings"
 	"testing"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
-// String(v) of an array nested as deep as a run-time value can be must throw
-// the RangeError V8 throws, not recurse until the goroutine stack overflows.
+// String(v) of an array nested as deep as a run-time value can be must stop
+// at jsval.MaxValueDepth, not recurse until the goroutine stack overflows. V8
+// throws its RangeError only some ten thousand frames deep, so the bound is
+// the engine's: an error wrapping ErrLimit, which no expression catches (C43).
 func TestStringOfDeepArrayThrows(t *testing.T) {
 	defer debug.SetMaxStack(debug.SetMaxStack(16 << 20))
 	deep := jsval.Num(1)
@@ -23,8 +26,8 @@ func TestStringOfDeepArrayThrows(t *testing.T) {
 		}
 		s := NewScope(nil)
 		s.Datum = deep
-		if _, err := p.Eval(s); err == nil || !strings.Contains(err.Error(), "call stack") {
-			t.Errorf("%s: want a RangeError, got %v", src, err)
+		if _, err := p.Eval(s); !errors.Is(err, budget.ErrLimit) {
+			t.Errorf("%s: want ErrLimit, got %v", src, err)
 		}
 	}
 	// Within the bound the string form is unchanged.

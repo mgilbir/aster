@@ -454,7 +454,7 @@ func (b *boundExpr) accessor() transforms.Field {
 // the scope, as vega-functions' parseExpression does. Unknown signal names are
 // an error, as upstream.
 func (s *Scope) parseExpression(code string) *exprFn {
-	prog, err := expr.CompileCached(code)
+	prog, err := expr.CompileCachedContext(s.opts.ctx, code)
 	if err != nil {
 		if errors.Is(err, budget.ErrLimit) {
 			perrLimit("Expression parse error: %v (in %.80q)", err, code)

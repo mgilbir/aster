@@ -355,5 +355,14 @@ func NewPattern(source, flags string) (*Pattern, error) {
 	return &Pattern{Source: source, Flags: flags, Re: re}, nil
 }
 
+// Fresh is a new RegExp object for the same compiled pattern, with lastIndex
+// 0: what evaluating a regular expression literal again makes. The program is
+// shared, not compiled again; only the g and y flags give a Pattern state.
+func (p *Pattern) Fresh() *Pattern {
+	re := *p.Re
+	re.SetLastIndex(0)
+	return &Pattern{Source: p.Source, Flags: p.Flags, Re: &re}
+}
+
 // String is JavaScript's String(regexp): the literal a reader would write.
 func (p *Pattern) String() string { return "/" + p.Source + "/" + p.Flags }

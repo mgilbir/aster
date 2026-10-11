@@ -7,15 +7,16 @@ import (
 	"os"
 	"strconv"
 	"testing"
-
-	"github.com/mgilbir/aster/internal/jsmath"
 )
 
-// TestMathBits compares the functions the expression library uses for Math.*
-// with V8's on recorded inputs (testdata/gen_math.mjs): the fdlibm ports of
-// package jsmath for sin, cos, asin, acos, atan, atan2 and pow, Go's math package
-// for tan, exp and log. The counts of results that are not bit-identical are
-// logged.
+// TestMathBits compares the functions the expression library runs for Math.*
+// (its function table) with V8's on recorded inputs (testdata/gen_math.mjs).
+// All are package jsmath's ports of V8's ieee754 functions, and a one-ulp
+// difference changes printed output, so every result must be bit-identical
+// (C45: exp, log and tan were Go's math, and 16%, 0.08% and 34% differed).
+// The exception is pow: the vectors were recorded with a V8 older than the
+// one jsmath.Pow follows (node 26's, which rounds pow(2, -0.5) correctly), so
+// it is held to one ulp here and checked bit for bit by package jsmath.
 func TestMathBits(t *testing.T) {
 	f, err := os.Open("testdata/math_bits.json.gz")
 	if err != nil {
@@ -30,13 +31,17 @@ func TestMathBits(t *testing.T) {
 	if err := json.NewDecoder(zr).Decode(&data); err != nil {
 		t.Fatal(err)
 	}
-	fns := map[string]func(args ...float64) float64{
-		"sin": func(a ...float64) float64 { return jsmath.Sin(a[0]) }, "cos": func(a ...float64) float64 { return jsmath.Cos(a[0]) },
-		"tan": func(a ...float64) float64 { return math.Tan(a[0]) }, "exp": func(a ...float64) float64 { return math.Exp(a[0]) },
-		"log": func(a ...float64) float64 { return math.Log(a[0]) }, "atan": func(a ...float64) float64 { return jsmath.Atan(a[0]) },
-		"asin": func(a ...float64) float64 { return jsmath.Asin(a[0]) }, "acos": func(a ...float64) float64 { return jsmath.Acos(a[0]) },
-		"atan2": func(a ...float64) float64 { return jsmath.Atan2(a[0], a[1]) },
-		"pow":   func(a ...float64) float64 { return jsmath.Pow(a[0], a[1]) },
+	fns := map[string]func(args ...float64) float64{}
+	for name := range data {
+		d := lookupFunc(name)
+		switch {
+		case d != nil && d.math1 != nil:
+			fns[name] = func(a ...float64) float64 { return d.math1(a[0]) }
+		case d != nil && d.math2 != nil:
+			fns[name] = func(a ...float64) float64 { return d.math2(a[0], a[1]) }
+		default:
+			t.Fatalf("%s is not a Math function of the table", name)
+		}
 	}
 	for name, rows := range data {
 		miss, worst := 0, 0.0
@@ -57,10 +62,12 @@ func TestMathBits(t *testing.T) {
 			}
 		}
 		t.Logf("%-5s %5d cases, %4d not bit-identical (worst rel diff %.2g)", name, len(rows), miss, worst)
-		// Every function must be within a couple of ulps of V8, and the fdlibm
-		// ports (package jsmath) must agree with it much more often than Go's own.
-		if worst > 4e-15 {
-			t.Errorf("%s drifts %.3g from V8", name, worst)
+		if name == "pow" {
+			if worst > 2.3e-16 {
+				t.Errorf("pow drifts %.3g from V8", worst)
+			}
+		} else if miss > 0 {
+			t.Errorf("%s: %d of %d results differ from V8 (worst rel diff %.2g)", name, miss, len(rows), worst)
 		}
 	}
 }

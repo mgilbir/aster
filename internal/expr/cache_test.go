@@ -56,11 +56,17 @@ func TestCachesKeepSmallEntries(t *testing.T) {
 	if p1 == nil || p1 != p2 {
 		t.Fatal("a small program must be cached")
 	}
-	if p, q := compilePattern("a+b", "i"), compilePattern("a+b", "i"); p != q {
+	s := NewScope(nil)
+	if p, q := s.compilePattern("a+b", "i"), s.compilePattern("a+b", "i"); p != q {
 		t.Fatal("a small pattern must be cached")
 	}
-	if p, q := compilePattern("a+b", "g"), compilePattern("a+b", "g"); p == q {
+	p, q := s.compilePattern("a+b", "g"), s.compilePattern("a+b", "g")
+	if p == q || p.Re == q.Re {
 		t.Fatal("a stateful pattern must not be shared")
+	}
+	p.Re.SetLastIndex(2)
+	if r := s.compilePattern("a+b", "g"); r.Re.LastIndex() != 0 {
+		t.Fatal("a stateful pattern must come fresh from the cache")
 	}
 	if s := p1.size(); s < 1024 || s > 1<<20 {
 		t.Fatalf("size of a small program: %d", s)

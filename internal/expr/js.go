@@ -87,11 +87,11 @@ func (s *Scope) str(v jsval.Value) string { return s.strDepth(v, 0) }
 
 // strDepth is str for an array nested depth levels deep. A value built at run
 // time can nest as deep as the specification is long, so the descent is
-// bounded by jsval.MaxValueDepth and throws the RangeError V8 throws when it
-// runs out of stack.
+// bounded by jsval.MaxValueDepth. V8 throws a RangeError only past about ten
+// thousand frames, so the bound is the engine's own and ends the render.
 func (s *Scope) strDepth(v jsval.Value, depth int) string {
 	if depth > jsval.MaxValueDepth {
-		throw("RangeError", "Maximum call stack size exceeded")
+		exceeded("a value nests deeper than %d levels", jsval.MaxValueDepth)
 	}
 	switch v.Kind() {
 	case jsval.KindStr:
@@ -109,19 +109,16 @@ func (s *Scope) strDepth(v jsval.Value, depth int) string {
 			}
 			return s.strDepth(items[0], depth+1)
 		}
-		var b []byte
+		b := newStrBuilder(s)
 		for i, it := range items {
 			if i > 0 {
-				b = append(b, ',')
+				b.addByte(',')
 			}
 			if !it.IsNullish() {
-				part := s.strDepth(it, depth+1)
-				s.checkLen(len(b) + len(part))
-				b = append(b, part...)
+				b.add(s.strDepth(it, depth+1))
 			}
-			s.tick()
 		}
-		return string(b)
+		return b.String()
 	case jsval.KindObj:
 		if c, ok := asColor(v); ok {
 			return c.String()
@@ -162,6 +159,12 @@ func (s *Scope) num(v jsval.Value) float64 {
 		return math.NaN()
 	case jsval.KindStr:
 		return jsval.StringToNumber(v.StrValue())
+	case jsval.KindArr:
+		// String(array) of two or more elements holds a comma, which no
+		// number literal does: the result is NaN without making the string.
+		if v.Len() >= 2 {
+			return math.NaN()
+		}
 	}
 	return jsval.StringToNumber(s.str(v))
 }
@@ -239,15 +242,8 @@ func (s *Scope) less(a, b jsval.Value) (lt, defined bool) {
 		}
 		return x < y, true
 	}
-	pa, pb := s.primitive(a, true), s.primitive(b, true)
-	if pa.IsStr() && pb.IsStr() {
-		return compareUTF16(pa.StrValue(), pb.StrValue()) < 0, true
-	}
-	x, y := s.num(pa), s.num(pb)
-	if math.IsNaN(x) || math.IsNaN(y) {
-		return false, false
-	}
-	return x < y, true
+	c, ok := jsval.RelatePrimitives(s.primitive(a, true), s.primitive(b, true))
+	return ok && c < 0, ok
 }
 
 func (s *Scope) lt(a, b jsval.Value) bool { r, _ := s.less(a, b); return r }
@@ -269,9 +265,7 @@ func (s *Scope) add(a, b jsval.Value) jsval.Value {
 	}
 	pa, pb := s.primitive(a, false), s.primitive(b, false)
 	if pa.IsStr() || pb.IsStr() {
-		x, y := s.str(pa), s.str(pb)
-		s.checkLen(len(x) + len(y))
-		return jsval.Str(x + y)
+		return jsval.Str(s.concat(s.str(pa), s.str(pb)))
 	}
 	return jsval.Num(s.num(pa) + s.num(pb))
 }

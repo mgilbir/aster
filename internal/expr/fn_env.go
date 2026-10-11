@@ -289,6 +289,8 @@ func init() {
 				}
 			}
 		}
+		s.chargeItems(len(lasso) + 1)
+		s.work(len(lasso))
 		out := make([]jsval.Value, 0, len(lasso)+1)
 		out = append(out, lasso...)
 		out = append(out, jsval.ArrOf(xv, yv)) // the point keeps the arguments as given
@@ -296,7 +298,7 @@ func init() {
 	})
 	fn("lassoPath", func(s *Scope, args []jsval.Value) jsval.Value {
 		lasso := toArray(arg(args, 0))
-		var out []byte
+		b := newStrBuilder(s)
 		for i, pt := range lasso {
 			// `[x, y]` destructuring needs an iterable.
 			if !pt.IsArr() && !pt.IsStr() {
@@ -305,22 +307,22 @@ func init() {
 			x, y := s.getIndex(pt, jsval.Num(0)), s.getIndex(pt, jsval.Num(1))
 			switch {
 			case i == 0:
-				out = append(out, "M "...)
-				out = append(out, s.str(x)...)
-				out = append(out, ',')
-				out = append(out, s.str(y)...)
-				out = append(out, ' ')
+				b.add("M ")
+				b.add(s.str(x))
+				b.addByte(',')
+				b.add(s.str(y))
+				b.addByte(' ')
 			case i == len(lasso)-1:
-				out = append(out, " Z"...)
+				b.add(" Z")
 			default:
-				out = append(out, "L "...)
-				out = append(out, s.str(x)...)
-				out = append(out, ',')
-				out = append(out, s.str(y)...)
-				out = append(out, ' ')
+				b.add("L ")
+				b.add(s.str(x))
+				b.addByte(',')
+				b.add(s.str(y))
+				b.addByte(' ')
 			}
 		}
-		return jsval.Str(string(out))
+		return jsval.Str(b.String())
 	})
 
 	// ---- pan and zoom ----

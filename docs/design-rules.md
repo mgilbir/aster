@@ -93,8 +93,11 @@ Specifications and data are untrusted.
   `fold`, `cross`, `sequence`, `pivot`, `aggregate` cells, `regression`)
   charges it with `budget.ReserveOut` before it allocates. The expression
   evaluator's budget for large strings and arrays (`expr.StringBudget`) and
-  its per-string length limit, which every string builder (`+`, `join`, `pad`,
-  `replace`, array stringification) checks before building. The rasterizer's
+  its per-string length limit: an expression function builds its strings and
+  arrays only through the evaluator's builders (`strBuilder`, `makeItems`,
+  `itemBuilder`, `concat`), which check the limit and charge the budget before
+  they allocate; `TestEveryBuiltinIsMetered` holds every function of the table
+  to it. The rasterizer's
   canvas and pixel budgets, the shaping budget, the SVG size.
 - Every bound is derived from `WithMemoryLimit` in one function,
   `deriveLimits` (limits.go), and documented in [limits.md](limits.md), which

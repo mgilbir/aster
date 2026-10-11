@@ -23,14 +23,14 @@ func TestConcatChain(t *testing.T) {
 			t.Errorf("%s = %q, want %q", src, got, want)
 		}
 	}
-	// Each concatenation is charged the length of its result, as when the
-	// additions were nested closures.
+	// The chain is built in one buffer, charged as it grows: about the final
+	// length once, not every prefix (C44).
 	b := NewStringBudget(1 << 20)
 	if _, err := evalBudget(t, "pad('x', 300) + pad('y', 300) + pad('z', 300)", b); err != nil {
 		t.Fatal(err)
 	}
-	if got := int64(1<<20) - b.left; got != 600+900 {
-		t.Errorf("charged %d bytes, want 1500", got)
+	if got := int64(1<<20) - b.left; got < 900 || got > 2*900 {
+		t.Errorf("charged %d bytes, want between 900 and 1800", got)
 	}
 	// A chain that outgrows the budget fails at the operand that does.
 	b = NewStringBudget(700)

@@ -1,12 +1,12 @@
 package expr
 
 import (
-	"github.com/mgilbir/aster/internal/jssort"
 	"math"
 	"slices"
 	"sort"
-	"strings"
+	"strconv"
 
+	"github.com/mgilbir/aster/internal/jssort"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -83,22 +83,16 @@ func init() {
 		if len(items) == 0 {
 			return jsval.Str("")
 		}
-		var b strings.Builder
+		b := newStrBuilder(s)
 		for i, it := range items {
 			if i > 0 {
-				b.WriteString(sep)
+				b.add(sep)
 			}
 			if !it.IsNullish() {
-				b.WriteString(s.str(it))
+				b.add(s.str(it))
 			}
-			// Checked while building, so the builder never grows past the
-			// limit by more than one element.
-			if b.Len() > MaxStringLength {
-				s.checkLen(b.Len())
-			}
-			s.tick()
+			s.work(1)
 		}
-		s.checkLen(b.Len())
 		return jsval.Str(b.String())
 	})
 	fn("indexof", func(s *Scope, args []jsval.Value) jsval.Value {
@@ -106,11 +100,12 @@ func init() {
 		requireSequence(seq, "indexOf")
 		x := arg(args, 1)
 		if seq.IsStr() {
+			str := seq.StrValue()
 			from := 0
 			if p := arg(args, 2); !p.IsUndefined() {
-				from = int(math.Max(0, math.Min(toInteger(s.num(p)), float64(utf16Len(seq.StrValue())))))
+				from = int(math.Max(0, math.Min(toInteger(s.num(p)), float64(utf16Len(str)))))
 			}
-			return jsval.Int(indexOfUnits(seq.StrValue(), s.str(x), from))
+			return jsval.Int(s.indexOf(str, s.str(x), from))
 		}
 		items := seq.Items()
 		start := 0
@@ -124,6 +119,7 @@ func init() {
 			}
 			start = int(f)
 		}
+		s.work(len(items) - start)
 		for i := start; i < len(items); i++ {
 			if strictEquals(items[i], x) {
 				return jsval.Int(i)
@@ -145,7 +141,7 @@ func init() {
 					from = int(math.Max(0, math.Min(toInteger(f), float64(n))))
 				}
 			}
-			return jsval.Int(lastIndexOfUnits(str, s.str(x), from))
+			return jsval.Int(s.lastIndexOf(str, s.str(x), from))
 		}
 		items := seq.Items()
 		start := len(items) - 1
@@ -159,6 +155,7 @@ func init() {
 			}
 			start = int(math.Min(f, float64(len(items)-1)))
 		}
+		s.work(start + 1)
 		for i := start; i >= 0; i-- {
 			if strictEquals(items[i], x) {
 				return jsval.Int(i)
@@ -176,7 +173,7 @@ func init() {
 			end = s.num(args[2])
 		}
 		if seq.IsStr() {
-			return jsval.Str(sliceUnits(seq.StrValue(), start, end, hasEnd))
+			return jsval.Str(s.sliceUnits(seq.StrValue(), start, end, hasEnd))
 		}
 		items := seq.Items()
 		from := sliceIndex(start, len(items))
@@ -187,15 +184,15 @@ func init() {
 		if to <= from {
 			return jsval.Arr(nil)
 		}
-		return jsval.Arr(slices.Clone(items[from:to]))
+		return jsval.Arr(s.cloneItems(items[from:to]))
 	})
 	fn("reverse", func(s *Scope, args []jsval.Value) jsval.Value {
-		items := slices.Clone(requireArray(arg(args, 0), "slice"))
+		items := s.cloneItems(requireArray(arg(args, 0), "slice"))
 		slices.Reverse(items)
 		return jsval.Arr(items)
 	})
 	fn("sort", func(s *Scope, args []jsval.Value) jsval.Value {
-		items := slices.Clone(requireArray(arg(args, 0), "slice"))
+		items := s.cloneItems(requireArray(arg(args, 0), "slice"))
 		// Array.prototype.sort moves undefined elements to the end without
 		// consulting the comparator.
 		defined := items[:0:0]
@@ -207,9 +204,8 @@ func init() {
 				defined = append(defined, it)
 			}
 		}
-		s.tick()
 		jssort.Sort(defined, func(a, b jsval.Value) int {
-			s.tick()
+			s.work(1)
 			return s.vegaAscending(a, b)
 		})
 		for i := 0; i < undef; i++ {
@@ -229,53 +225,7 @@ func init() {
 		}
 		return jsval.Num(d)
 	})
-	fn("extent", func(s *Scope, args []jsval.Value) jsval.Value {
-		a := arg(args, 0)
-		var elem func(i int) jsval.Value
-		n := 0
-		switch {
-		case a.IsArr():
-			items := a.Items()
-			n = len(items)
-			elem = func(i int) jsval.Value { return items[i] }
-		case a.IsStr():
-			n = utf16Len(a.StrValue())
-			elem = func(i int) jsval.Value { return charAt(a.StrValue(), i) }
-		case a.IsObj():
-			l := a.Get("length")
-			if f := s.num(l); f > 0 {
-				n = int(math.Min(f, 1<<24))
-			}
-			elem = func(i int) jsval.Value { return s.getProp(a, jsval.Int(i).AsString()) }
-		}
-		if n == 0 {
-			return jsval.ArrOf(jsval.Undefined, jsval.Undefined)
-		}
-		i := 0
-		v := elem(0)
-		for i < n && (v.IsNullish() || v.IsNum() && math.IsNaN(v.NumValue())) {
-			i++
-			if i < n {
-				v = elem(i)
-			} else {
-				v = jsval.Undefined
-			}
-		}
-		mn, mx := v, v
-		for ; i < n; i++ {
-			s.tick()
-			v = elem(i)
-			if !v.IsNullish() {
-				if s.lt(v, mn) {
-					mn = v
-				}
-				if s.gt(v, mx) {
-					mx = v
-				}
-			}
-		}
-		return jsval.ArrOf(mn, mx)
-	})
+	fn("extent", func(s *Scope, args []jsval.Value) jsval.Value { return s.extent(arg(args, 0)) })
 	fn("lerp", func(s *Scope, args []jsval.Value) jsval.Value {
 		a := arg(args, 0)
 		lo := s.getIndex(a, jsval.Num(0))
@@ -392,11 +342,8 @@ func init() {
 		if n32 > MaxSequenceLength {
 			exceeded("sequence length exceeds %d", MaxSequenceLength)
 		}
-		n := int(n32)
-		s.chargeItems(n)
-		out := make([]jsval.Value, n)
+		out := s.makeItems(int(n32))
 		for i := range out {
-			s.tick()
 			out[i] = jsval.Num(start + float64(float64(i)*step))
 		}
 		return jsval.Arr(out)
@@ -421,7 +368,8 @@ func init() {
 		}
 		if data.IsArr() {
 			items := data.Items()
-			out := make([]jsval.Value, len(items))
+			out := s.makeItems(len(items))
+			s.work(len(items) * len(path))
 			for i, it := range items {
 				out[i] = get(it)
 			}
@@ -435,27 +383,37 @@ func init() {
 		for _, a := range args {
 			switch a.Kind() {
 			case jsval.KindObj:
+				s.chargeMembers(a.Len())
 				for k, v := range a.ObjValue().All() {
 					out.Set(k, v)
 				}
 			case jsval.KindArr:
+				s.chargeMembers(a.Len())
 				for i, v := range a.Items() {
-					out.Set(jsval.Int(i).AsString(), v)
+					out.Set(strconv.Itoa(i), v)
 				}
 			case jsval.KindStr:
-				u := toUTF16(a.StrValue())
-				for i := range u {
-					out.Set(jsval.Int(i).AsString(), jsval.Str(fromUTF16(u[i:i+1])))
+				str := a.StrValue()
+				s.chargeMembers(utf16Len(str))
+				i := 0
+				for off := 0; off < len(str); {
+					_, w, u := charAt(str, off)
+					out.Set(strconv.Itoa(i), jsval.Str(unitString(str, off, false)))
+					if u == 2 {
+						out.Set(strconv.Itoa(i+1), jsval.Str(unitString(str, off, true)))
+					}
+					i += u
+					off += w
 				}
 			}
 		}
-		return jsval.Obj(jsOrder(out))
+		return jsval.Obj(s.jsOrder(out))
 	})
 }
 
 // jsOrder reorders an object's keys the way JavaScript enumerates them:
 // integer-like keys ascending, then the rest in insertion order.
-func jsOrder(o *jsval.Object) *jsval.Object {
+func (s *Scope) jsOrder(o *jsval.Object) *jsval.Object {
 	type kv struct {
 		k string
 		i int
@@ -470,6 +428,7 @@ func jsOrder(o *jsval.Object) *jsval.Object {
 		return o
 	}
 	sort.SliceStable(ints, func(a, b int) bool { return ints[a].i < ints[b].i })
+	s.chargeMembers(o.Len())
 	out := jsval.NewObject(o.Len())
 	for _, e := range ints {
 		out.Set(e.k, o.Lookup(e.k))
@@ -504,4 +463,141 @@ func (s *Scope) inRange(value, rng jsval.Value, left, right bool) bool {
 		okR = s.lt(value, r1)
 	}
 	return okR
+}
+
+// extent is vega-util's extent(array) without an accessor:
+//
+//	if (array && (n = array.length)) {
+//	  for (v = array[i]; i < n && (v == null || v !== v); v = array[++i]);
+//	  min = max = v;
+//	  for (; i < n; ++i) { v = array[i]; if (v != null) { if (v < min) min = v; if (v > max) max = v; } }
+//	}
+//	return [min, max];
+//
+// For an array-like object it runs over the integer keys the object holds
+// rather than over every index below its length: the others are undefined,
+// which neither loop looks at, so the result is the same for any length, where
+// upstream's loop would take minutes for {length: 3e9} (ADR 0011). A length
+// past 2^53, where i++ stops counting and upstream never returns, is refused.
+// When no element is valid the first loop leaves v = array[n], which an object
+// may hold.
+func (s *Scope) extent(a jsval.Value) jsval.Value {
+	undef := func() jsval.Value { return jsval.ArrOf(jsval.Undefined, jsval.Undefined) }
+	valid := func(v jsval.Value) bool { return !v.IsNullish() && !(v.IsNum() && math.IsNaN(v.NumValue())) }
+	var mn, mx jsval.Value
+	found := false
+	visit := func(v jsval.Value) {
+		s.work(1)
+		switch {
+		case !found:
+			if valid(v) {
+				mn, mx, found = v, v, true
+			}
+		case !v.IsNullish():
+			if s.lt(v, mn) {
+				mn = v
+			}
+			if s.gt(v, mx) {
+				mx = v
+			}
+		}
+	}
+	switch a.Kind() {
+	case jsval.KindArr:
+		items := a.Items()
+		if len(items) == 0 {
+			return undef()
+		}
+		for _, v := range items {
+			visit(v)
+		}
+		if !found {
+			return undef() // array[n]
+		}
+	case jsval.KindStr:
+		// Every element is a one-unit string, and two of those compare as
+		// their code units: the extent is the smallest and the largest unit.
+		str := a.StrValue()
+		if str == "" {
+			return undef()
+		}
+		s.workBytes(len(str))
+		lo, hi := uint16(0xFFFF), uint16(0)
+		for off := 0; off < len(str); {
+			r, w, u := charAt(str, off)
+			units := [2]uint16{uint16(r)}
+			if u == 2 {
+				units[0], units[1] = pairHalves(str, off)
+			}
+			for _, c := range units[:u] {
+				lo, hi = min(lo, c), max(hi, c)
+			}
+			off += w
+		}
+		return jsval.ArrOf(jsval.Str(string(appendUnit(nil, lo))), jsval.Str(string(appendUnit(nil, hi))))
+	case jsval.KindObj:
+		o := a.ObjValue()
+		l := o.Prop("length")
+		if !l.IsTruthy() {
+			return undef()
+		}
+		// The indices i < n: none for NaN or n <= 0, else ceil(n).
+		x := s.num(l)
+		count := 0.0
+		if x > 0 {
+			count = math.Ceil(x)
+		}
+		if count > 1<<53 {
+			exceeded("extent of an array-like object of length %v", x)
+		}
+		type elem struct {
+			i uint64
+			v jsval.Value
+		}
+		var elems []elem
+		s.chargeItems(o.Len())
+		for k, v := range o.All() {
+			if i, ok := indexKey(k); ok && float64(i) < count {
+				elems = append(elems, elem{i, v})
+			}
+		}
+		s.work(len(elems))
+		slices.SortFunc(elems, func(p, q elem) int { return cmpUint(p.i, q.i) })
+		for _, e := range elems {
+			visit(e.v)
+		}
+		if !found {
+			v := o.Prop(strconv.FormatFloat(count, 'f', -1, 64))
+			return jsval.ArrOf(v, v)
+		}
+	default:
+		return undef()
+	}
+	return jsval.ArrOf(mn, mx)
+}
+
+func cmpUint(a, b uint64) int {
+	switch {
+	case a < b:
+		return -1
+	case a > b:
+		return 1
+	}
+	return 0
+}
+
+// indexKey parses a property name that is the string of an integer below
+// 2^53 ("0", "17"; not "01", "-1" or "1.5").
+func indexKey(k string) (uint64, bool) {
+	if k == "" || len(k) > 16 || len(k) > 1 && k[0] == '0' {
+		return 0, false
+	}
+	var n uint64
+	for i := 0; i < len(k); i++ {
+		if k[i] < '0' || k[i] > '9' {
+			return 0, false
+		}
+		n = n*10 + uint64(k[i]-'0')
+	}
+	return n, n <= 1<<53
 }

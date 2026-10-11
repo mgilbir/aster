@@ -285,7 +285,7 @@ func Render(ctx context.Context, spec jsval.Value, opts Options) (res *Result, e
 		}
 	}
 	config := mergeConfig(defaultConfig(), opts.Config, spec.Get("config"))
-	scope := newScope(config, &parseOptions{maxOps: opts.Limits.withDefaults().MaxOperators})
+	scope := newScope(config, &parseOptions{maxOps: opts.Limits.withDefaults().MaxOperators, ctx: ctx})
 	parseView(spec, scope)
 	flow := scope.toRuntime()
 

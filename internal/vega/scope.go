@@ -1,6 +1,7 @@
 package vega
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"strings"
@@ -415,6 +416,9 @@ type Scope struct {
 type parseOptions struct {
 	// maxOps bounds the operators the parse produces, counted in ops.
 	maxOps, ops int
+	// ctx is the render's: the regular expressions an expression compiles
+	// are charged to its ledger.
+	ctx context.Context
 }
 
 func newScope(config jsval.Value, opts *parseOptions) *Scope {

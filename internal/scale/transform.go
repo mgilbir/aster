@@ -66,7 +66,7 @@ func powp(base float64) func(float64) float64 {
 	case 10:
 		return pow10
 	case math.E:
-		return math.Exp
+		return jsmath.Exp // d3-scale's Math.exp
 	}
 	return func(x float64) float64 { return jsPow(base, x) }
 }
@@ -74,7 +74,7 @@ func powp(base float64) func(float64) float64 {
 func logp(base float64) func(float64) float64 {
 	switch base {
 	case math.E:
-		return math.Log
+		return jsmath.Log // d3-scale's Math.log
 	case 10:
 		return log10
 	case 2:

@@ -41,9 +41,13 @@
 //
 // # Safety
 //
-// Inputs are untrusted. Parse bounds source length and nesting; evaluation bounds
-// what a specification can make large (sequence, pad, truncate), honours
-// Scope.Context in loops, and reports a JavaScript exception (reading a property
-// of null, an invalid regular expression) as an *Error result of Eval. No path
-// panics.
+// Inputs are untrusted. Parse bounds source length and nesting. Evaluation
+// meters its work and charges what it builds (build.go): every builtin call
+// charges a unit, every pass over a string or array its length, and every string or
+// array a builtin makes goes through a builder that checks MaxStringLength and
+// charges Scope.Strings before it allocates; regular expressions are charged
+// to the ledger in Scope.Context. A JavaScript exception (reading a property
+// of null, an invalid regular expression) is an *Error result of Eval; an
+// engine limit is an error wrapping budget.ErrLimit and cancellation the
+// context's error, which the runtime treats as fatal. No path panics.
 package expr
