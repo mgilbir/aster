@@ -40,7 +40,7 @@ func facLabel(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 		opts := label.Options{
 			Size:       [2]float64{size[0], size[1]},
 			LineAnchor: p.str("lineAnchor"),
-			MarkIndex:  int(p.num("markIndex", 0)), // `_.markIndex || 0`
+			MarkIndex:  markIndex(p.num("markIndex", 0)),
 			Method:     p.str("method"),
 		}
 		if p.has("anchor") {
@@ -277,4 +277,17 @@ func outlineItem(it *scene.Item) {
 		it.Stroke = scene.Color("#000")
 		it.FillOpacity = scene.N(0)
 	}
+}
+
+// markIndex is `_.markIndex || 0` as an index into a group's marks: one that
+// is not a whole number in range reads no mark (-1), decided before it is an
+// int.
+func markIndex(f float64) int {
+	switch {
+	case f != f:
+		return 0
+	case f < 0 || f > 1<<30 || f != math.Trunc(f):
+		return -1
+	}
+	return int(f)
 }

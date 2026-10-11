@@ -2,6 +2,7 @@ package vega
 
 import (
 	"github.com/mgilbir/aster/internal/jsval"
+	"github.com/mgilbir/aster/internal/transforms"
 	"github.com/mgilbir/aster/internal/transforms/wordcloud"
 )
 
@@ -16,6 +17,7 @@ func init() {
 			Spiral:   wordcloud.Spiral(p.str("spiral")),
 			Random:   v.randSource(),
 			Renderer: v.wcText,
+			String:   transforms.KeyStringer(n.g.ctx),
 		}
 		if sz := p.pair2("size"); sz != nil {
 			wp.Size = sz

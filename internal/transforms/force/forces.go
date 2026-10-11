@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -36,9 +37,12 @@ func (f *centerForce) apply(float64) {
 
 // Collide pushes overlapping circles apart. Radius defaults to 1.
 type Collide struct {
-	Radius     Param
-	Strength   float64
-	Iterations int
+	Radius   Param
+	Strength float64
+	// Iterations is d3's `iterations = +_`: the loop `k < iterations` runs
+	// ceil(Iterations) times for a positive number and never otherwise.
+	// More than MaxForceIterations is an error.
+	Iterations float64
 }
 
 // NewCollide returns a Collide as Vega effectively defaults it: radius 1,
@@ -53,6 +57,7 @@ func (c Collide) build() force { return &collideForce{cfg: c} }
 
 type collideForce struct {
 	cfg   Collide
+	iters int
 	s     *sim
 	radii []float64
 	tree  quadtree
@@ -60,7 +65,24 @@ type collideForce struct {
 	ys    []float64
 }
 
+// forceIterations is how many times `for (k = 0; k < n; ++k)` runs, or an
+// error past MaxForceIterations: a loop count the specification sets is
+// refused, not cut short.
+func forceIterations(which string, n float64) (int, error) {
+	switch {
+	case !(n > 0):
+		return 0, nil
+	case n > MaxForceIterations:
+		return 0, fmt.Errorf("%w: force: %s iterations %s exceeds the limit of %d", budget.ErrLimit, which, jsval.JSNumberString(n), MaxForceIterations)
+	}
+	return int(math.Ceil(n)), nil
+}
+
 func (f *collideForce) initialize(s *sim) error {
+	var err error
+	if f.iters, err = forceIterations("collide", f.cfg.Iterations); err != nil {
+		return err
+	}
 	f.s = s
 	f.radii = make([]float64, len(s.nodes))
 	for i := range s.nodes {
@@ -128,7 +150,7 @@ func (f *collideForce) apply(float64) {
 		}
 		return x0 > xi+r || x1 < xi-r || y0 > yi+r || y1 < yi-r
 	}
-	for k := 0; k < f.cfg.Iterations && k < MaxForceIterations; k++ {
+	for k := 0; k < f.iters; k++ {
 		for i := range nodes {
 			f.xs[i] = nodes[i].x + nodes[i].vx
 			f.ys[i] = nodes[i].y + nodes[i].vy
@@ -297,8 +319,8 @@ type Link struct {
 	Links      []jsval.Value // tuples with source and target
 	ID         Accessor      // node id; nil means the node's index
 	Distance   Param
-	Strength   *Param // nil: 1 / min(degree(source), degree(target))
-	Iterations int
+	Strength   *Param  // nil: 1 / min(degree(source), degree(target))
+	Iterations float64 // as Collide's
 }
 
 // NewLink returns a Link with Vega's defaults (distance 30, one iteration).
@@ -310,6 +332,7 @@ func (l Link) build() force { return &linkForce{cfg: l} }
 
 type linkForce struct {
 	cfg                  Link
+	iters                int
 	s                    *sim
 	src, tgt             []int32
 	strengths, distances []float64
@@ -341,6 +364,10 @@ func keyOf(v jsval.Value) idKey {
 }
 
 func (f *linkForce) initialize(s *sim) error {
+	var err error
+	if f.iters, err = forceIterations("link", f.cfg.Iterations); err != nil {
+		return err
+	}
 	f.s = s
 	links := f.cfg.Links
 	n, m := len(s.nodes), len(links)
@@ -412,7 +439,7 @@ func (f *linkForce) initialize(s *sim) error {
 func (f *linkForce) apply(alpha float64) {
 	nodes := f.s.nodes
 	rng := &f.s.rng
-	for k := 0; k < f.cfg.Iterations && k < MaxForceIterations; k++ {
+	for k := 0; k < f.iters; k++ {
 		for i := range f.src {
 			if f.s.halt(i) {
 				return

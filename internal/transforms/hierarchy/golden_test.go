@@ -180,14 +180,14 @@ func TestGolden(t *testing.T) {
 			for _, tr := range c.Get("transforms").Items() {
 				switch tr.Get("type").StrValue() {
 				case "stratify":
-					tree, err = Stratify(data, field(tr.Get("key").StrValue()), field(tr.Get("parentKey").StrValue()))
+					tree, err = Stratify(data, field(tr.Get("key").StrValue()), field(tr.Get("parentKey").StrValue()), nil)
 				case "nest":
 					var keys []Accessor
 					for _, k := range tr.Get("keys").Items() {
 						keys = append(keys, field(k.StrValue()))
 					}
 					var gen []jsval.Value
-					tree, gen, err = Nest(data, keys, tr.Get("generate").BoolValue())
+					tree, gen, err = Nest(data, keys, nil, tr.Get("generate").BoolValue())
 					out = append(append([]jsval.Value(nil), data...), gen...)
 				default:
 					err = runLayout(tree, tr, 600)

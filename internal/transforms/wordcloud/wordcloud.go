@@ -51,6 +51,10 @@ type Params struct {
 	// uses a fixed-seed LCG so results stay reproducible.
 	Random   func() float64
 	Renderer TextRenderer // nil means BoxRenderer
+	// String is String(v), which the canvas applies to the text and the
+	// font parts it draws and measures: a date writes as Date.prototype.
+	// toString does, in the view's zone. nil means jsval's AsString.
+	String func(jsval.Value) string
 }
 
 // DefaultOutput lists the output fields: x, y, font, fontSize, fontStyle,
@@ -124,11 +128,15 @@ func Transform(ctx context.Context, data []jsval.Value, p Params) error {
 	}
 
 	words := make([]*word, len(data))
+	str := p.String
+	if str == nil {
+		str = jsval.Value.AsString
+	}
 	for i, d := range data {
 		w := &word{datum: d}
-		w.text = text(d).AsString()
+		w.text = str(text(d))
 		w.font, w.style, w.weight = font(d), style(d), weight(d)
-		w.family, w.styleS, w.wtS = w.font.AsString(), w.style.AsString(), w.weight.AsString()
+		w.family, w.styleS, w.wtS = str(w.font), str(w.style), str(w.weight)
 		w.rotate = rotate(d)
 		w.rotDeg = jsval.ToNumber(w.rotate)
 		w.size = toInt32(jsval.ToNumber(fontSize(d)) + 1e-14)

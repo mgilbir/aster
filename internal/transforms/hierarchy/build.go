@@ -22,7 +22,15 @@ const maxNestKeys = 256
 // {key, values} (the root has only {values}). When generate is true those
 // internal tuples are also returned, breadth-first, so the caller can add
 // them to the output dataset as vega's Nest does.
-func Nest(tuples []jsval.Value, keys []Accessor, generate bool) (*Tree, []jsval.Value, error) {
+//
+// str is String(v), which keys the groups (upstream's `key(value) + ”`): a
+// date writes to the second in the view's zone, so two dates within one
+// second share a group. nil means jsval's AsString, dates as epoch
+// milliseconds.
+func Nest(tuples []jsval.Value, keys []Accessor, str func(jsval.Value) string, generate bool) (*Tree, []jsval.Value, error) {
+	if str == nil {
+		str = jsval.Value.AsString
+	}
 	if len(keys) > maxNestKeys {
 		return nil, nil, fmt.Errorf("%w: nest: too many keys (%d)", budget.ErrLimit, len(keys))
 	}
@@ -30,7 +38,7 @@ func Nest(tuples []jsval.Value, keys []Accessor, generate bool) (*Tree, []jsval.
 		return nil, nil, ErrTooLarge
 	}
 	rootNode := &Node{}
-	rootNode.Children, rootNode.Data = nestLevel(tuples, keys, 0, jsval.Undefined, false)
+	rootNode.Children, rootNode.Data = nestLevel(tuples, keys, str, 0, jsval.Undefined, false)
 	if err := finish(rootNode); err != nil {
 		return nil, nil, err
 	}
@@ -47,7 +55,7 @@ func Nest(tuples []jsval.Value, keys []Accessor, generate bool) (*Tree, []jsval.
 }
 
 // nestLevel builds the children of one group and the group's own datum.
-func nestLevel(items []jsval.Value, keys []Accessor, depth int, key jsval.Value, hasKey bool) ([]*Node, jsval.Value) {
+func nestLevel(items []jsval.Value, keys []Accessor, str func(jsval.Value) string, depth int, key jsval.Value, hasKey bool) ([]*Node, jsval.Value) {
 	var nodes []*Node
 	var values []jsval.Value
 	if depth >= len(keys) {
@@ -62,7 +70,7 @@ func nestLevel(items []jsval.Value, keys []Accessor, depth int, key jsval.Value,
 		var groups [][]jsval.Value
 		var names []string
 		for _, it := range items {
-			k := get(it).AsString()
+			k := str(get(it))
 			gi, ok := index[k]
 			if !ok {
 				gi = len(groups)
@@ -73,7 +81,7 @@ func nestLevel(items []jsval.Value, keys []Accessor, depth int, key jsval.Value,
 			groups[gi] = append(groups[gi], it)
 		}
 		for _, gi := range jsKeyOrder(names) {
-			kids, data := nestLevel(groups[gi], keys, depth+1, jsval.Str(names[gi]), true)
+			kids, data := nestLevel(groups[gi], keys, str, depth+1, jsval.Str(names[gi]), true)
 			nodes = append(nodes, &Node{Data: data, Children: kids})
 			values = append(values, data)
 		}
@@ -149,11 +157,17 @@ var (
 // counts as absent: a tuple without a parent id is a root and must be unique.
 // Duplicate ids are only an error when some tuple names one as its parent.
 // An empty input yields a single root with an empty object as datum.
-func Stratify(tuples []jsval.Value, key, parentKey Accessor) (*Tree, error) {
+//
+// str is String(v), which ids and lookups go through (d3's `id += ""`,
+// vega's lookup object); nil means jsval's AsString (see Nest).
+func Stratify(tuples []jsval.Value, key, parentKey Accessor, str func(jsval.Value) string) (*Tree, error) {
+	if str == nil {
+		str = jsval.Value.AsString
+	}
 	if len(tuples) == 0 {
 		root := &Node{Data: jsval.Obj(jsval.NewObject(0))}
 		t := &Tree{Root: root, byKey: map[string]*Node{}}
-		t.byKey[key(root.Data).AsString()] = root
+		t.byKey[str(key(root.Data))] = root
 		return t, nil
 	}
 	if len(tuples) > MaxNodes {
@@ -168,7 +182,7 @@ func Stratify(tuples []jsval.Value, key, parentKey Accessor) (*Tree, error) {
 		node := &Node{Data: d}
 		nodes[i] = node
 		if v := key(d); !v.IsNullish() {
-			if s := v.AsString(); s != "" {
+			if s := str(v); s != "" {
 				node.id = s
 				if _, dup := byKey[s]; dup {
 					ambiguous[s] = true
@@ -178,7 +192,7 @@ func Stratify(tuples []jsval.Value, key, parentKey Accessor) (*Tree, error) {
 			}
 		}
 		if v := parentKey(d); !v.IsNullish() {
-			parentID[i] = v.AsString()
+			parentID[i] = str(v)
 		}
 	}
 	var root *Node
@@ -227,6 +241,6 @@ func Stratify(tuples []jsval.Value, key, parentKey Accessor) (*Tree, error) {
 	t := &Tree{Root: root, byKey: make(map[string]*Node, n)}
 	// vega registers every node under String(key(tuple)) (so a missing key
 	// becomes "undefined"); on duplicates the last one visited wins.
-	root.each(func(nd *Node) { t.byKey[key(nd.Data).AsString()] = nd })
+	root.each(func(nd *Node) { t.byKey[str(key(nd.Data))] = nd })
 	return t, nil
 }

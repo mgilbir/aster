@@ -116,3 +116,6 @@ internal/vegalite.stringifyTo	# stringifies a value of the spec (or of what comp
 internal/vegalite.topDown$lit1	# walks the dataflow tree: its depth is the transform chain plus a few nodes per model level; transforms are limited to maxTransforms = 10000 per specification (internal/vegalite/dataparse.go: parseTransformArray; this recursion crashed at 1,000,000 transforms) and model nesting to 64; shape vl-transform-run
 internal/vegalite.val	# converts a nested []any literal written in the code to a Value: fixed structure, no input involved (internal/vegalite/dyn.go: val)
 internal/vegalite.writeConfig	# fixed depth 2: the nested call passes recurseAll=false and no keys, so it does not recurse again (internal/vegalite/config.go: writeConfig)
+internal/transforms.appendJoined internal/transforms.keyString	# array nesting, depth bounded by jsval.MaxValueDepth (appendJoined stops past it)
+internal/transforms.hasDate	# array nesting, depth bounded by jsval.MaxValueDepth
+internal/transforms/voronoi.mergeSort	# halves its range each level: depth log2(points)

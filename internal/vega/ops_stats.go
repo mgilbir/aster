@@ -110,7 +110,13 @@ func init() {
 				sim.SetAlpha(math.Max(sim.Alpha(), alpha))
 				sim.SetAlphaDecay(1 - jsmath.Pow(sim.AlphaMin(), 1/iters))
 				if static {
-					for i := int(iters); i > 0; i-- {
+					// for (sim.stop(); --iters >= 0;): floor(iters) ticks, none
+					// for a negative count (compared before it is an int).
+					ticks := 0
+					if iters > 0 {
+						ticks = int(iters)
+					}
+					for i := ticks; i > 0; i-- {
 						if err := ctx.Err(); err != nil {
 							return in, err
 						}
@@ -203,7 +209,7 @@ func init() {
 	})
 
 	tf["kde2d"] = tupleTransform(func(n *opNode, p *opParams, in []jsval.Value) ([]jsval.Value, error) {
-		kp := contour.KDE2DParams{Counts: p.bool("counts"), As: p.str("as")}
+		kp := contour.KDE2DParams{Counts: p.bool("counts"), As: p.str("as"), KeyString: transforms.KeyStringer(ctxOf(n))}
 		kp.Size = p.nums("size")
 		kp.X = contour.Accessor(p.field("x").Get)
 		kp.Y = contour.Accessor(p.field("y").Get)
@@ -304,7 +310,7 @@ func forceOf(p *opParams) force.Force {
 			c.Strength = p.num("strength", 1)
 		}
 		if p.has("iterations") {
-			c.Iterations = clampInt(p.num("iterations", 1))
+			c.Iterations = p.num("iterations", 1)
 		}
 		return c
 	case "nbody":
@@ -332,7 +338,7 @@ func forceOf(p *opParams) force.Force {
 			l.Strength = &s
 		}
 		if p.has("iterations") {
-			l.Iterations = clampInt(p.num("iterations", 1))
+			l.Iterations = p.num("iterations", 1)
 		}
 		return l
 	case "x":

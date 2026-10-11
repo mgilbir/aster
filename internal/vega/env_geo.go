@@ -179,7 +179,9 @@ func (c *rtContext) TreePath(name string, source, target jsval.Value) jsval.Valu
 	if t == nil {
 		return jsval.Undefined
 	}
-	s, d := t.NodeByKey(source.AsString()), t.NodeByKey(target.AsString())
+	// The tree's lookup object is keyed by String(key), dates in the view's
+	// zone (hierarchy.Stratify).
+	s, d := t.NodeByKey(c.view.jsString(source)), t.NodeByKey(c.view.jsString(target))
 	if s == nil || d == nil {
 		return jsval.Undefined
 	}
@@ -196,7 +198,7 @@ func (c *rtContext) TreeAncestors(name string, node jsval.Value) jsval.Value {
 	if t == nil {
 		return jsval.Undefined
 	}
-	n := t.NodeByKey(node.AsString())
+	n := t.NodeByKey(c.view.jsString(node))
 	if n == nil {
 		return jsval.Undefined
 	}
