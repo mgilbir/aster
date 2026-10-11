@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"runtime"
+	"runtime/debug"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -62,7 +63,10 @@ func TestPatternTilesChargedToLedger(t *testing.T) {
 		}
 		return out, (max(peak.Load(), base) - base) >> 20
 	}
-	free, _ := render(context.Background())
+	// Frequent collections keep dropped tiles from lingering as garbage in
+	// the sampled heap, so the peaks below measure what the renderer keeps.
+	defer debug.SetGCPercent(debug.SetGCPercent(10))
+	free, freeMB := render(context.Background())
 	l := budget.NewLedger(context.Background(), budget.LedgerLimits{MaxBytes: 16 << 20})
 	got, peakMB := render(budget.WithLedger(context.Background(), l))
 	if !bytes.Equal(got, free) {
@@ -71,10 +75,14 @@ func TestPatternTilesChargedToLedger(t *testing.T) {
 	if l.PeakBytes() > 16<<20 || l.Bytes() != 0 {
 		t.Fatalf("ledger peak %d, left %d", l.PeakBytes(), l.Bytes())
 	}
-	// The canvas and a tile in flight are 8 MB; the bound leaves room for
-	// the encoder and the collector's slack.
-	t.Logf("peak heap %d MB", peakMB)
-	if peakMB > 64 {
-		t.Errorf("peak heap %d MB with the tiles bounded at 16 MiB", peakMB)
+	// The unbounded render keeps every tile (160 MB); the bounded one keeps
+	// 16 MiB of them besides the 4 MB canvas and a tile in flight. The two
+	// peaks are compared rather than one checked against a fixed figure:
+	// the heap the sampler sees depends on the collector's pacing, which
+	// differs from machine to machine, and a ratio of two renders in the
+	// same process does not.
+	t.Logf("peak heap %d MB, %d MB without the ledger", peakMB, freeMB)
+	if 2*peakMB > freeMB {
+		t.Errorf("peak heap %d MB with the tiles bounded at 16 MiB, against %d MB unbounded", peakMB, freeMB)
 	}
 }
