@@ -21,8 +21,13 @@ type dataComponent struct {
 	ancestorParse                                  *ancestorParse
 }
 
-func findSource(data Value, sources []dfNode) *sourceNode {
+// findSource is upstream's findSource: the first source data can share. It
+// compares data with every source, so a spec with many distinct sources is
+// quadratic in them, as upstream is; each comparison is charged (by the rows
+// it may compare), so the scan stops at the deadline.
+func findSource(cc *compileCtx, data Value, sources []dfNode) *sourceNode {
 	for _, other := range sources {
+		cc.work(1 + int64(data.Get("values").Len()))
 		os, ok := other.(*sourceNode)
 		if !ok {
 			continue
@@ -90,7 +95,7 @@ func parseRoot(m Model, sources *sourceList) dfNode {
 			sources.items = append(sources.items, s)
 			return s
 		}
-		if existing := findSource(b.data, sources.items); existing != nil {
+		if existing := findSource(cc, b.data, sources.items); existing != nil {
 			if !isGenerator(b.data) {
 				existing.data.Set("format", jsval.Obj(mergeDeepFormat(b.data.Get("format"), existing.data.Lookup("format"))))
 			}
@@ -147,7 +152,7 @@ func parseTransformArray(head dfNode, m Model, ap *ancestorParse) dfNode {
 			n := newCalculateNode(head, t)
 			head, transformNode, derivedType = n, n, "derived"
 		case hasProperty(t, "filter"):
-			implicit := getImplicitFromFilterTransform(t)
+			implicit := getImplicitFromFilterTransform(cc, t)
 			pn := parseNodeWithAncestors(head, jsval.NewObject(0), implicit, ap)
 			if pn != nil {
 				head = pn
@@ -193,7 +198,7 @@ func parseTransformArray(head dfNode, m Model, ap *ancestorParse) dfNode {
 			n := newFoldNode(head, t)
 			head, transformNode, derivedType = n, n, "derived"
 		case !cc.v5 && hasProperty(t, "extent") && !hasProperty(t, "density") && !hasProperty(t, "regression"):
-			n := newXform(head, "extent", deepClone(t))
+			n := newXform(head, "extent", deepClone(cc, t))
 			head, transformNode, derivedType = n, n, "derived"
 		case hasProperty(t, "flatten"):
 			n := newFlattenNode(head, t)
@@ -223,6 +228,7 @@ func parseTransformArray(head dfNode, m Model, ap *ancestorParse) dfNode {
 		}
 		if transformNode != nil && derivedType != "" {
 			for _, field := range transformNode.producedFields().list() {
+				cc.work(1)
 				ap.set(field, jsval.Str(derivedType), false)
 			}
 		}
@@ -230,9 +236,9 @@ func parseTransformArray(head dfNode, m Model, ap *ancestorParse) dfNode {
 	return head
 }
 
-func getImplicitFromFilterTransform(t Value) *Object {
+func getImplicitFromFilterTransform(cc *compileCtx, t Value) *Object {
 	implicit := jsval.NewObject(2)
-	forEachLeaf(t.Get("filter"), func(filter Value) {
+	forEachLeaf(cc, t.Get("filter"), func(filter Value) {
 		if !isFieldPredicate(filter) {
 			return
 		}
@@ -261,15 +267,15 @@ func getImplicitFromFilterTransform(t Value) *Object {
 		if val.IsTruthy() {
 			switch {
 			case isDateTime(val):
-				jsSet(implicit, field, jsval.Str("date"))
+				jsSet(cc, implicit, field, jsval.Str("date"))
 			case val.IsNum():
-				jsSet(implicit, field, jsval.Str("number"))
+				jsSet(cc, implicit, field, jsval.Str("number"))
 			case val.IsStr():
-				jsSet(implicit, field, jsval.Str("string"))
+				jsSet(cc, implicit, field, jsval.Str("string"))
 			}
 		}
 		if filter.Get("timeUnit").IsTruthy() {
-			jsSet(implicit, field, jsval.Str("date"))
+			jsSet(cc, implicit, field, jsval.Str("date"))
 		}
 	}, 0)
 	return implicit
@@ -283,17 +289,17 @@ func getImplicitFromEncoding(m Model) *Object {
 		field := fd.Get("field").AsString()
 		switch {
 		case isFieldOrDatumDefForTimeFormat(cc, fd):
-			jsSet(implicit, field, jsval.Str("date"))
+			jsSet(cc, implicit, field, jsval.Str("date"))
 		case channelDefType(fd) == "quantitative" && isMinMaxOp(fd.Get("aggregate")):
-			jsSet(implicit, field, jsval.Str("number"))
+			jsSet(cc, implicit, field, jsval.Str("number"))
 		case accessPathDepth(field) > 1:
 			if !implicit.Has(field) {
-				jsSet(implicit, field, jsval.Str("flatten"))
+				jsSet(cc, implicit, field, jsval.Str("flatten"))
 			}
 		case isScaleFieldDef(fd) && isSortField(cc, fd.Get("sort")) && accessPathDepth(fd.Get("sort").Get("field").AsString()) > 1:
 			sf := fd.Get("sort").Get("field").AsString()
 			if !implicit.Has(sf) {
-				jsSet(implicit, sf, jsval.Str("flatten"))
+				jsSet(cc, implicit, sf, jsval.Str("flatten"))
 			}
 		}
 	}
@@ -326,7 +332,7 @@ func getImplicitFromEncoding(m Model) *Object {
 			}
 			dd := u.encoding.Get(dim)
 			if isFieldDef(cc, dd) && channelDefType(dd) == "quantitative" && !implicit.Has(dd.Get("field").AsString()) {
-				jsSet(implicit, dd.Get("field").AsString(), jsval.Str("number"))
+				jsSet(cc, implicit, dd.Get("field").AsString(), jsval.Str("number"))
 			}
 		}
 	}
@@ -334,13 +340,16 @@ func getImplicitFromEncoding(m Model) *Object {
 }
 
 func getImplicitFromSelection(m Model) *Object {
+	cc := m.b().ctx
 	implicit := jsval.NewObject(2)
 	if u := asUnit(m); u != nil && u.comp.selection != nil {
 		for _, name := range u.comp.selection.keyList() {
+			cc.work(1)
 			sel := u.comp.selection.lookup(name)
 			for _, proj := range sel.project.items {
+				cc.work(1)
 				if proj.channel == "" && accessPathDepth(proj.field) > 1 {
-					jsSet(implicit, proj.field, jsval.Str("flatten"))
+					jsSet(m.b().ctx, implicit, proj.field, jsval.Str("flatten"))
 				}
 			}
 		}
@@ -367,7 +376,7 @@ func parseDataFor(m Model) *dataComponent {
 	newData := data.IsTruthy() && (isGenerator(data) || isUrlData(data) || isInlineData(data))
 	var ap *ancestorParse
 	if !newData && b.parent != nil {
-		ap = b.parent.b().comp.data.ancestorParse.cloneAP()
+		ap = b.parent.b().comp.data.ancestorParse.cloneAP(b.ctx)
 	} else {
 		ap = newAncestorParse()
 	}

@@ -24,6 +24,8 @@ What changed between versions, for users of the library and the CLI. Breaking ch
 - Parsed path data (custom symbol shapes and `path` marks) is charged to the call's ledger; a path string parses to sixteen times its size.
 - `SVGToPDF` and the PDF methods report a limit reached inside a stage that cannot return an error as `ErrLimit`, as the other outputs do, rather than as an internal error.
 - New: [ADR 0011](docs/adr/0011-faithful-output-free-algorithm.md), "faithful in output, free in algorithm".
+- Vega-Lite compilation honours the timeout in every phase, from copying the input through normalization, parsing, the dataflow optimizer and assembly: each loop over views, selections, params, transforms, encodings, dataflow nodes and the values they hold charges the call's ledger. A spec with 100,000 point selections, which compiled for eight and a half minutes and returned up to six seconds past a 1 s timeout, now compiles in about 2.5 s and stops within milliseconds of the deadline.
+- Vega-Lite compilation is no longer quadratic in a spec's views and selections where upstream's algorithm is (output unchanged, ADR 0011): the dataflow optimizer's child removals and insertions, its deepest-first node order, the ordering of root data sets, and the brush test every point selection repeats.
 
 ### Errors reach the caller ([ADR 0006](docs/adr/0006-errors-reach-the-caller.md))
 

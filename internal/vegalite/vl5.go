@@ -11,11 +11,13 @@ import (
 // wrapCondition58 is vega-lite 5.8's wrapCondition: conditions come first, no
 // invalid-value reference, and the array form only when a condition exists.
 func wrapCondition58(o wrapConditionOpts) Value {
+	cc := o.model.ctx
 	main := o.mainRefFn(o.channelDef)
 	cond := o.channelDef.Get("condition")
 	if isConditionalDef(o.channelDef) && cond.IsTruthy() {
 		var refs []Value
 		for _, c := range arrayOf(cond) {
+			cc.work(1)
 			cvr := o.mainRefFn(c)
 			var test string
 			if isConditionalParameter(c) {
@@ -150,11 +152,12 @@ func getPathSort58(m *unitModel, dim string) Value {
 }
 
 // domainDefinitelyIncludesZero58 is 5.8's ScaleComponent.domainDefinitelyIncludesZero.
-func (s *scaleComponent) domainDefinitelyIncludesZero58() bool {
+func (s *scaleComponent) domainDefinitelyIncludesZero58(cc *compileCtx) bool {
 	if z := s.get("zero"); !(z.IsBool() && !z.BoolValue()) {
 		return true
 	}
 	for _, d := range s.get("domains").Items() {
+		cc.work(1)
 		if d.IsArr() && d.Len() == 2 {
 			lo, hi := d.Index(0), d.Index(1)
 			if !lo.IsUndefined() && !hi.IsUndefined() && jsval.ToNumber(lo) <= 0 && jsval.ToNumber(hi) >= 0 {
@@ -172,7 +175,7 @@ func pointPositionDefaultRef58(m *unitModel, defaultPos, channel, scaleName stri
 	case "zeroOrMin", "zeroOrMax":
 		if scaleName != "" {
 			scaleType := scale.get("type").AsString()
-			if !(scaleType == "log" || scaleType == "time" || scaleType == "utc") && scale.domainDefinitelyIncludesZero58() {
+			if !(scaleType == "log" || scaleType == "time" || scaleType == "utc") && scale.domainDefinitelyIncludesZero58(m.ctx) {
 				return mkv("scale", scaleName, "value", 0)
 			}
 		}
@@ -555,6 +558,7 @@ func legendSelectionUpdate(cc *compileCtx) string {
 // assembleLegends58 groups legends by the domains of their scales (6.x groups
 // them by field); legends of one domain that cannot merge stay separate.
 func assembleLegends58(m Model) []Value {
+	cc := m.b().ctx
 	index := m.b().comp.legends
 	byDomain := newOmap[[]*legendComponent]()
 	for _, channel := range index.keyList() {
@@ -563,16 +567,16 @@ func assembleLegends58(m Model) []Value {
 		if sc == nil {
 			throw("No scale found for the %s legend; check the `resolve` property.", channel)
 		}
-		domainHash := stringify(sc.get("domains"))
+		domainHash := stringify(cc, sc.get("domains"))
 		if !byDomain.has(domainHash) {
-			byDomain.set(domainHash, []*legendComponent{lc.cloneLegend()})
+			byDomain.set(domainHash, []*legendComponent{lc.cloneLegend(cc)})
 			continue
 		}
 		// Upstream appends while iterating, so the appended component is visited
 		// (and merged with itself) too.
 		list := byDomain.m[domainHash]
 		for i := 0; i < len(list); i++ {
-			if mergeLegendComponent(list[i], lc) == nil {
+			if mergeLegendComponent(cc, list[i], lc) == nil {
 				list = append(list, lc)
 			}
 		}

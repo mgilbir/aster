@@ -11,7 +11,7 @@ func datumDefToExpr(dd Value) string {
 	if isDateTime(datum) {
 		return dateTimeToExpr(datum)
 	}
-	return stringify(datum)
+	return stringify(nil, datum)
 }
 
 type midPointParams struct {
@@ -236,13 +236,13 @@ func getConditionalValueRefForIncludingInvalidValue(cc *compileCtx, scaleChannel
 	if fd.IsTruthy() && mode == "show" {
 		includeAs := coalesce(config.Get("scale").Get("invalid").Get(scaleChannel), jsval.Str("zero-or-min"))
 		o := mk("test", fieldValidPredicate(vgField(cc, fd, fieldRefOption{expr: "datum"}), false))
-		spread(o, refForInvalidValues(includeAs, scale, scaleName))
+		spread(o, refForInvalidValues(cc, includeAs, scale, scaleName))
 		return jsval.Obj(o)
 	}
 	return undef
 }
 
-func refForInvalidValues(includeAs Value, scale *scaleComponent, scaleName string) Value {
+func refForInvalidValues(cc *compileCtx, includeAs Value, scale *scaleComponent, scaleName string) Value {
 	if isObject(includeAs) && includeAs.IsObj() && includeAs.ObjValue().Has("value") {
 		v := includeAs.Get("value")
 		if isSignalRef(v) {
@@ -250,18 +250,18 @@ func refForInvalidValues(includeAs Value, scale *scaleComponent, scaleName strin
 		}
 		return mkv("value", v)
 	}
-	return scaledZeroOrMinOrMax(scaleName, scale, "zeroOrMin", "", "")
+	return scaledZeroOrMinOrMax(cc, scaleName, scale, "zeroOrMin", "", "")
 }
 
 // scaledZeroOrMinOrMax builds the ref for the scaled zero (or domain min/max).
-func scaledZeroOrMinOrMax(scaleName string, scale *scaleComponent, mode string, widthSignal, heightSignal string) Value {
+func scaledZeroOrMinOrMax(cc *compileCtx, scaleName string, scale *scaleComponent, mode string, widthSignal, heightSignal string) Value {
 	if scale == nil || scaleName == "" {
 		return undef
 	}
 	domain := "domain('" + scaleName + "')"
 	min := domain + "[0]"
 	max := "peek(" + domain + ")"
-	switch scale.domainHasZero() {
+	switch scale.domainHasZero(cc) {
 	case "definitely":
 		return mkv("scale", scaleName, "value", 0)
 	case "maybe":

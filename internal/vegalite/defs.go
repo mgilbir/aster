@@ -247,6 +247,7 @@ func timeUnitToString(cc *compileCtx, tu Value) string {
 	if rest.Lookup("unit").IsTruthy() {
 		b.WriteString(pfx)
 		for _, p := range rest.Keys() {
+			cc.work(1)
 			if p == "unit" {
 				b.WriteString(varName(rest.Lookup(p).AsString()))
 			} else {
@@ -257,6 +258,7 @@ func timeUnitToString(cc *compileCtx, tu Value) string {
 	}
 	b.WriteString(pfx + "timeunit")
 	for _, p := range rest.Keys() {
+		cc.work(1)
 		b.WriteString(varName("_" + p + "_" + rest.Lookup(p).AsString()))
 	}
 	return b.String()
@@ -269,7 +271,7 @@ func timeUnitSpecifierExpression(tu string) string {
 		return ""
 	}
 	parts := getTimeUnitParts(tu)
-	return "timeUnitSpecifier(" + stringify(strsVal(parts)) + ", " + stringify(jsval.Obj(vegaliteTimeFormat)) + ")"
+	return "timeUnitSpecifier(" + stringify(nil, strsVal(parts)) + ", " + stringify(nil, jsval.Obj(vegaliteTimeFormat)) + ")"
 }
 
 func formatExpression(tu, field string, isUTCScale bool) string {

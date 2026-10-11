@@ -22,12 +22,13 @@ func signalRefOrValue(v Value) Value {
 	return v
 }
 
-func signalOrValueRefWithCondition(v Value) Value {
+func signalOrValueRefWithCondition(cc *compileCtx, v Value) Value {
 	cond := v.Get("condition")
 	var c Value
 	if cond.IsArr() {
 		items := make([]Value, cond.Len())
 		for i, it := range cond.Items() {
+			cc.work(1)
 			items[i] = signalRefOrValue(it)
 		}
 		c = jsval.Arr(items)
@@ -139,6 +140,7 @@ func getMarkPropOrConfigSimple(channel string, mark, config Value) Value {
 func sortParams(cc *compileCtx, orderDef Value, opt fieldRefOption) (fields, orders []Value) {
 	defs := arrayOf(orderDef)
 	for _, d := range defs {
+		cc.work(1)
 		fields = append(fields, jsval.Str(vgField(cc, d, opt)))
 		orders = append(orders, coalesce(d.Get("sort"), jsval.Str("ascending")))
 	}

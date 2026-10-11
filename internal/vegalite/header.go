@@ -120,6 +120,7 @@ func parseFacetHeader(m *facetModel, channel string) {
 		if title.IsArr() {
 			var parts []string
 			for _, x := range title.Items() {
+				cc.work(1)
 				parts = append(parts, x.AsString())
 			}
 			t = strings.Join(parts, ", ")
@@ -189,6 +190,7 @@ func mergeChildAxis(m *facetModel, channel string) {
 		}
 		lh := layoutHeaders[headerChannel]
 		for _, ac := range childAxes {
+			cc.work(1)
 			ht := getHeaderType(ac.get("orient"))
 			list := lh.get(ht)
 			if list == nil {

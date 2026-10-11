@@ -38,6 +38,10 @@ func (p *normParams) clone() *normParams {
 }
 
 func (p *normParams) deeper() *normParams {
+	cc := p.cc
+	// Every view the normalizer maps goes one level deeper: the step charged
+	// for it bounds the normalization of a spec with many views.
+	cc.work(modelStep)
 	c := *p
 	c.depth++
 	if c.depth > maxDepth {
@@ -86,7 +90,7 @@ func (b *baseMapper) mapLayerOrUnit(spec Value, p *normParams) Value {
 	case isUnitSpec(spec):
 		return b.self.mapUnit(spec, p)
 	}
-	throw("Invalid spec: %s", stringify(spec))
+	throw("Invalid spec: %s", stringify(p.cc, spec))
 	return undef
 }
 
@@ -208,10 +212,12 @@ func (n *selectionCompatNormalizer) mapTop(spec Value, p *normParams) Value {
 }
 
 func (n *selectionCompatNormalizer) mapLayerOrUnit(spec Value, p *normParams) Value {
+	cc := p.cc
 	spec = normalizeTransforms(spec, p)
 	if enc := spec.Get("encoding"); enc.IsTruthy() {
 		out := jsval.NewObject(enc.Len())
 		for _, ch := range keysOf(enc) {
+			cc.work(1)
 			out.Set(ch, normalizeChannelDefCompat(enc.Get(ch), p))
 		}
 		o := cloneObj(spec.ObjValue())
@@ -222,6 +228,7 @@ func (n *selectionCompatNormalizer) mapLayerOrUnit(spec Value, p *normParams) Va
 }
 
 func (n *selectionCompatNormalizer) mapUnit(spec Value, p *normParams) Value {
+	cc := p.cc
 	selection := spec.Get("selection")
 	if !selection.IsTruthy() {
 		return spec
@@ -229,6 +236,7 @@ func (n *selectionCompatNormalizer) mapUnit(spec Value, p *normParams) Value {
 	rest := omit(spec, "selection")
 	var params []Value
 	for _, name := range keysOf(selection) {
+		cc.work(1)
 		selDef := selection.Get(name)
 		value, bind, empty := selDef.Get("init"), selDef.Get("bind"), selDef.Get("empty")
 		sel := omit(selDef, "init", "bind", "empty")
@@ -244,6 +252,7 @@ func (n *selectionCompatNormalizer) mapUnit(spec Value, p *normParams) Value {
 		emptyOK := !(empty.IsStr() && empty.StrValue() == "none")
 		p.emptySelections[name] = emptyOK
 		for _, pred := range p.selectionPredicates[name] {
+			cc.work(1)
 			pred.Set("empty", jsval.Bool(emptyOK))
 		}
 		params = append(params, mkv("name", name, "value", value, "select", jsval.Obj(sel), "bind", bind))
@@ -287,7 +296,7 @@ func normalizeChannelDefCompat(obj Value, p *normParams) Value {
 	if !obj.IsObj() {
 		return obj
 	}
-	enc := deepClone(obj)
+	enc := deepClone(cc, obj)
 	eo := enc.ObjValue()
 	if isFieldDef(cc, enc) && isObject(enc.Get("bin")) {
 		eo.Set("bin", normalizeBinExtent(enc.Get("bin")))
@@ -306,6 +315,7 @@ func normalizeChannelDefCompat(obj Value, p *normParams) Value {
 		cond := enc.Get("condition")
 		if cond.IsArr() {
 			eo.Set("condition", mapVals(cond, func(c Value) Value {
+				cc.work(1)
 				if c.Get("param").IsTruthy() {
 					return c
 				}
@@ -392,9 +402,11 @@ func addSpecNameToParams(spec Value, p *normParams) *normParams {
 }
 
 func (n *topLevelSelectionsNormalizer) mapTop(spec Value, p *normParams) Value {
+	cc := p.cc
 	if params := spec.Get("params"); params.IsTruthy() && !isUnitSpec(spec) {
 		var rest []Value
 		for _, param := range params.Items() {
+			cc.work(1)
 			if isSelectionParameter(param) {
 				p.sel.selections = append(p.sel.selections, param)
 			} else {
@@ -407,6 +419,7 @@ func (n *topLevelSelectionsNormalizer) mapTop(spec Value, p *normParams) Value {
 }
 
 func (n *topLevelSelectionsNormalizer) mapUnit(spec Value, p *normParams) Value {
+	cc := p.cc
 	selections := p.sel.selections
 	if len(selections) == 0 {
 		return spec
@@ -415,12 +428,14 @@ func (n *topLevelSelectionsNormalizer) mapUnit(spec Value, p *normParams) Value 
 	var params []Value
 	specName := spec.Get("name")
 	for _, sel := range selections {
+		cc.work(1)
 		views := sel.Get("views")
 		if !views.IsTruthy() || views.Len() == 0 {
 			params = append(params, sel)
 			continue
 		}
 		for _, view := range views.Items() {
+			cc.work(1)
 			switch {
 			case view.IsStr():
 				if (specName.IsStr() && view.StrValue() == specName.StrValue()) || contains(path, view.StrValue()) {
@@ -430,6 +445,7 @@ func (n *topLevelSelectionsNormalizer) mapUnit(spec Value, p *normParams) Value 
 				prev := -1
 				ok := true
 				for i, v := range view.Items() {
+					cc.work(1)
 					idx := indexOfStr(path, v.AsString())
 					if idx == -1 || (i > 0 && idx <= prev) {
 						ok = false
@@ -805,12 +821,14 @@ func mergeEncoding(cc *compileCtx, parentEncoding, encoding Value, layer bool) V
 		seen := map[string]bool{}
 		var channels []string
 		for _, k := range append(append([]string(nil), keysOf(parentEncoding)...), keysOf(encoding)...) {
+			cc.work(1)
 			if !seen[k] {
 				seen[k] = true
 				channels = append(channels, k)
 			}
 		}
 		for _, channel := range channels {
+			cc.work(1)
 			channelDef := encoding.Get(channel)
 			parentChannelDef := parentEncoding.Get(channel)
 			switch {
@@ -1192,6 +1210,7 @@ func replaceRepeaterInChannelDef(cc *compileCtx, cd, repeater Value) Value {
 func replaceRepeaterInMapping(cc *compileCtx, mapping, repeater Value) Value {
 	out := jsval.NewObject(mapping.Len())
 	for _, channel := range keysOf(mapping) {
+		cc.work(1)
 		if !hasProperty(mapping, channel) {
 			continue
 		}
@@ -1199,6 +1218,7 @@ func replaceRepeaterInMapping(cc *compileCtx, mapping, repeater Value) Value {
 		if cd.IsArr() {
 			var items []Value
 			for _, x := range cd.Items() {
+				cc.work(1)
 				if r := replaceRepeaterInChannelDef(cc, x, repeater); r.IsTruthy() {
 					items = append(items, r)
 				}

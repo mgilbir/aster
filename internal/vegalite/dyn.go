@@ -122,25 +122,27 @@ func cloneObj(o *Object) *Object {
 }
 
 // spread copies the keys of src (an object; anything else is ignored) into dst,
-// overwriting in place like JavaScript's spread.
+// overwriting in place like JavaScript's spread. It is not metered: its many
+// callers do not carry the compilation (jsSet's ordering cost, C4, is to be
+// made linear rather than polled).
 func spread(dst *Object, srcs ...Value) *Object {
 	for _, s := range srcs {
 		if s.IsStr() {
 			for i, u := range utf16Len(s.StrValue()) {
-				jsSet(dst, strconv.Itoa(i), jsval.Str(string(rune(u))))
+				jsSet(nil, dst, strconv.Itoa(i), jsval.Str(string(rune(u))))
 			}
 			continue
 		}
 		if s.IsArr() {
 			for i, it := range s.Items() {
-				jsSet(dst, strconv.Itoa(i), it)
+				jsSet(nil, dst, strconv.Itoa(i), it)
 			}
 			continue
 		}
 		if s.IsObj() {
 			so := s.ObjValue()
 			for i := 0; i < so.Len(); i++ {
-				jsSet(dst, so.KeyAt(i), so.ValueAt(i))
+				jsSet(nil, dst, so.KeyAt(i), so.ValueAt(i))
 			}
 		}
 	}
@@ -190,7 +192,7 @@ func stringifyJS(v Value) string {
 	if v.IsUndefined() {
 		return "undefined"
 	}
-	return stringify(v)
+	return stringify(nil, v)
 }
 
 // pick is upstream's pick: only the own defined-or-not keys listed.
@@ -308,20 +310,21 @@ func deepEqual(a, b Value) bool {
 }
 
 // deepClone is structuredClone for JSON-like values.
-func deepClone(v Value) Value {
+func deepClone(cc *compileCtx, v Value) Value {
+	cc.work(1)
 	switch v.Kind() {
 	case jsval.KindArr:
 		items := v.Items()
 		out := make([]Value, len(items))
 		for i, it := range items {
-			out[i] = deepClone(it)
+			out[i] = deepClone(cc, it)
 		}
 		return jsval.Arr(out)
 	case jsval.KindObj:
 		o := v.ObjValue()
 		c := jsval.NewObject(o.Len())
 		for i := 0; i < o.Len(); i++ {
-			jsSet(c, o.KeyAt(i), deepClone(o.ValueAt(i)))
+			jsSet(cc, c, o.KeyAt(i), deepClone(cc, o.ValueAt(i)))
 		}
 		return jsval.Obj(c)
 	}
@@ -330,13 +333,14 @@ func deepClone(v Value) Value {
 
 // stringify is upstream's util.stringify: JSON with sorted keys, used as a
 // hash key for structural comparison.
-func stringify(v Value) string {
+func stringify(cc *compileCtx, v Value) string {
 	var b strings.Builder
-	stringifyTo(&b, v)
+	stringifyTo(cc, &b, v)
 	return b.String()
 }
 
-func stringifyTo(b *strings.Builder, v Value) bool {
+func stringifyTo(cc *compileCtx, b *strings.Builder, v Value) bool {
+	cc.work(1)
 	switch v.Kind() {
 	case jsval.KindUndefined:
 		return false
@@ -355,7 +359,7 @@ func stringifyTo(b *strings.Builder, v Value) bool {
 			if i > 0 {
 				b.WriteByte(',')
 			}
-			if !stringifyTo(b, it) {
+			if !stringifyTo(cc, b, it) {
 				b.WriteString("null")
 			}
 		}
@@ -381,7 +385,7 @@ func stringifyTo(b *strings.Builder, v Value) bool {
 			first = false
 			b.Write(jsval.AppendJSON(nil, jsval.Str(k)))
 			b.WriteByte(':')
-			stringifyTo(b, x)
+			stringifyTo(cc, b, x)
 		}
 		b.WriteByte('}')
 	default:
@@ -397,7 +401,7 @@ func stringValue(v Value) string { return jsval.StringValue(v) }
 func jsonString(s string) string { return stringValue(jsval.Str(s)) }
 
 // hash is upstream's hash(): short strings are their own hash.
-func hashOf(v Value) string {
+func hashOf(cc *compileCtx, v Value) string {
 	if v.IsNum() {
 		return jsval.JSNumberString(v.NumValue())
 	}
@@ -405,16 +409,38 @@ func hashOf(v Value) string {
 	if v.IsStr() {
 		s = v.StrValue()
 	} else {
-		s = stringify(v)
+		s = stringify(cc, v)
 	}
-	if len(utf16Len(s)) < 250 {
+	// The code units are walked in place (as utf16Len would produce them),
+	// so a long key costs no copy and the walk is charged.
+	if len(s) < 250 || utf16Count(cc, s) < 250 {
 		return s
 	}
 	var h int32
-	for _, u := range utf16Len(s) {
-		h = (h << 5) - h + int32(u)
+	for _, r := range s {
+		cc.work(1)
+		if r >= 0x10000 {
+			r -= 0x10000
+			h = (h << 5) - h + int32(uint16(0xD800+(r>>10)))
+			h = (h << 5) - h + int32(uint16(0xDC00+(r&0x3FF)))
+		} else {
+			h = (h << 5) - h + int32(uint16(r))
+		}
 	}
 	return strconv.Itoa(int(h))
+}
+
+// utf16Count is len(utf16Len(s)) without building the code units.
+func utf16Count(cc *compileCtx, s string) int {
+	n := 0
+	for _, r := range s {
+		cc.work(1)
+		n++
+		if r >= 0x10000 {
+			n++
+		}
+	}
+	return n
 }
 
 func utf16Len(s string) []uint16 {
@@ -564,7 +590,7 @@ func arrayIndex(k string) (uint32, bool) {
 
 // jsSet is Object.Set with JavaScript's property order: a new array-index key
 // is placed among the leading index keys in ascending order.
-func jsSet(o *Object, k string, v Value) {
+func jsSet(cc *compileCtx, o *Object, k string, v Value) {
 	if len(k) == 0 || k[0] < '0' || k[0] > '9' || o.Has(k) {
 		o.Set(k, v)
 		return
@@ -577,6 +603,7 @@ func jsSet(o *Object, k string, v Value) {
 	keys := o.Keys()
 	pos := len(keys)
 	for i, e := range keys {
+		cc.work(1)
 		if m, isIdx := arrayIndex(e); !isIdx || m > n {
 			pos = i
 			break
@@ -590,13 +617,17 @@ func jsSet(o *Object, k string, v Value) {
 		k string
 		v Value
 	}
+	// Moving the tail costs a scan of the keys per key moved (C4); each move
+	// is charged, so the deadline stops it.
 	var tail []kv
 	for _, e := range append([]string(nil), keys[pos:]...) {
+		cc.work(int64(len(keys)))
 		tail = append(tail, kv{e, o.Lookup(e)})
 		o.Delete(e)
 	}
 	o.Set(k, v)
 	for _, e := range tail {
+		cc.work(1)
 		o.Set(e.k, e.v)
 	}
 }

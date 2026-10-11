@@ -160,9 +160,9 @@ func pointPositionDefaultRef(m *unitModel, defaultPos, channel, scaleName string
 		}
 		switch defaultPos {
 		case "zeroOrMin":
-			return zeroOrMinOrMaxPosition(mainChannel, "zeroOrMin", scaleName, scale, "", "")
+			return zeroOrMinOrMaxPosition(cc, mainChannel, "zeroOrMin", scaleName, scale, "", "")
 		case "zeroOrMax":
-			return zeroOrMinOrMaxPosition(mainChannel, "zeroOrMax", scaleName, scale, signalOf(m.width()), signalOf(m.height()))
+			return zeroOrMinOrMaxPosition(cc, mainChannel, "zeroOrMax", scaleName, scale, signalOf(m.width()), signalOf(m.height()))
 		case "mid":
 			var sizeRef Value
 			if getSizeChannel(channel) == "width" {
@@ -178,8 +178,8 @@ func pointPositionDefaultRef(m *unitModel, defaultPos, channel, scaleName string
 	}
 }
 
-func zeroOrMinOrMaxPosition(mainChannel, mode, scaleName string, scale *scaleComponent, widthSignal, heightSignal string) Value {
-	if v := scaledZeroOrMinOrMax(scaleName, scale, mode, widthSignal, heightSignal); !v.IsUndefined() {
+func zeroOrMinOrMaxPosition(cc *compileCtx, mainChannel, mode, scaleName string, scale *scaleComponent, widthSignal, heightSignal string) Value {
+	if v := scaledZeroOrMinOrMax(cc, scaleName, scale, mode, widthSignal, heightSignal); !v.IsUndefined() {
 		return v
 	}
 	switch mainChannel {

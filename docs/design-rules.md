@@ -104,7 +104,19 @@ Specifications and data are untrusted.
   where upstream's output is degenerate with an error wrapping `ErrLimit`
   ([ADR 0011](adr/0011-faithful-output-free-algorithm.md)).
 - Every stage honours the call's context, Vega-Lite compilation included
-  (`vegalite.Options.Context`). Two steps cannot be interrupted, so they are
+  (`vegalite.Options.Context`). In `internal/vegalite` a loop meters its
+  steps with `cc.work(n)` when its trip count comes from the spec or its
+  data: views and children, selections and params, transforms and their
+  field lists, encoding arrays and conditions, values, domains, expression
+  tokens, dataflow nodes, the items of a value walked whole. A loop over a
+  compile-time table (channels, property lists, fixed config property names)
+  does not; a spec-sized loop around one charges a heavier step instead
+  (`modelStep` per child model). A function takes the compilation once,
+  `cc := ...`, and a helper with such a loop takes the `*compileCtx`.
+  `TestDeadlineIsHonouredThroughoutCompile` is the guard: it compiles a
+  family of specs, each large in one dimension, and fails if any stretch of
+  the compilation goes 200 ms without a poll; a new spec-sized dimension
+  gets a spec there. Two steps cannot be interrupted, so they are
   bounded by size, not time: parsing the specification's JSON, and parsing
   loaded JSON data.
 - An input that once exhausted a bound goes into the bounded-input corpus

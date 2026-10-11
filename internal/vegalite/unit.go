@@ -15,6 +15,9 @@ type unitModel struct {
 	specifiedLegends    *Object
 	specifiedProjection Value
 	selection           []Value
+	// brushTests caches pointBrushTests for selection count brushN.
+	brushTests []string
+	brushN     int
 }
 
 func newUnitModel(cc *compileCtx, spec Value, parent Model, parentGivenName string, parentGivenSize *Object, config Value) *unitModel {
@@ -31,7 +34,7 @@ func newUnitModel(cc *compileCtx, spec Value, parent Model, parentGivenName stri
 		markDef = mk("type", spec.Get("mark"))
 	}
 	if t := markDef.Lookup("type"); !t.IsStr() || markCompilers[t.StrValue()].encodeEntry == nil {
-		throw("Invalid mark %s: expected one of the mark types (arc, area, bar, image, line, point, rect, rule, text, tick, trail, circle, square, geoshape, or a composite mark) or a mark definition with such a type", stringify(spec.Get("mark")))
+		throw("Invalid mark %s: expected one of the mark types (arc, area, bar, image, line, point, rect, rule, text, tick, trail, circle, square, geoshape, or a composite mark) or a mark definition with such a type", stringify(cc, spec.Get("mark")))
 	}
 	mark := markDef.Lookup("type").AsString()
 	if markDef.Lookup("filled").IsUndefined() {
@@ -64,6 +67,7 @@ func newUnitModel(cc *compileCtx, spec Value, parent Model, parentGivenName stri
 	u.specifiedLegends = u.initLegends(u.encoding)
 	u.specifiedProjection = spec.Get("projection")
 	for _, p := range spec.Get("params").Items() {
+		cc.work(1)
 		if isSelectionParameter(p) {
 			u.selection = append(u.selection, p)
 		}
@@ -127,7 +131,7 @@ func (u *unitModel) initScales(encoding Value) *Object {
 
 func (u *unitModel) initScale(scale Value) Value {
 	domain, rng := scale.Get("domain"), scale.Get("range")
-	internal := replaceExprRef(scale, 0)
+	internal := replaceExprRef(u.ctx, scale, 0)
 	io := internal.ObjValue()
 	if domain.IsArr() {
 		io.Set("domain", mapVals(domain, signalRefOrValue))
@@ -160,11 +164,13 @@ func (u *unitModel) initAxes(encoding Value) *Object {
 }
 
 func (u *unitModel) initAxis(axis Value) Value {
+	cc := u.ctx
 	out := jsval.NewObject(axis.Len())
 	for _, prop := range keysOf(axis) {
+		cc.work(1)
 		val := axis.Get(prop)
 		if isConditionalAxisValue(val) {
-			out.Set(prop, signalOrValueRefWithCondition(val))
+			out.Set(prop, signalOrValueRefWithCondition(u.ctx, val))
 		} else {
 			out.Set(prop, signalRefOrValue(val))
 		}
@@ -181,7 +187,7 @@ func (u *unitModel) initLegends(encoding Value) *Object {
 		if fod.IsTruthy() && supportLegend(channel) {
 			lg := fod.Get("legend")
 			if lg.IsTruthy() {
-				legends.Set(channel, replaceExprRef(lg, 0))
+				legends.Set(channel, replaceExprRef(cc, lg, 0))
 			} else {
 				legends.Set(channel, lg)
 			}
@@ -280,12 +286,14 @@ func (u *unitModel) correctDataNames(mark Value) Value {
 }
 
 func (u *unitModel) assembleMarks() []Value {
+	cc := u.ctx
 	marks := u.comp.mark
 	if u.parent == nil || !isLayerModel(u.parent) {
 		marks = assembleUnitSelectionMarks(u, marks)
 	}
 	out := make([]Value, len(marks))
 	for i, m := range marks {
+		cc.work(1)
 		out[i] = u.correctDataNames(m)
 	}
 	return out
@@ -336,7 +344,7 @@ func (u *unitModel) vgField(channel string, opt fieldRefOption) string {
 func (u *unitModel) forEachFieldDef(f func(fd Value, channel string)) {
 	cc := u.b().ctx
 
-	encodingEach(u.encoding, func(cd Value, c string) {
+	encodingEach(cc, u.encoding, func(cd Value, c string) {
 		if fd := getFieldDef(cc, cd); fd.IsTruthy() {
 			f(fd, c)
 		}
@@ -355,7 +363,7 @@ func defaultFilled(markDef Value, config Value, graticule bool) Value {
 }
 
 func initMarkdef(cc *compileCtx, original Value, encoding Value, config Value) Value {
-	mdv := replaceExprRef(original, 0)
+	mdv := replaceExprRef(cc, original, 0)
 	md := mdv.ObjValue()
 	specifiedOrient := getMarkPropOrConfigSimple("orient", mdv, config)
 	orient := markOrient(cc, md.Lookup("type").AsString(), encoding, specifiedOrient)

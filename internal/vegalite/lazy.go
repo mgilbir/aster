@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -29,6 +30,9 @@ type compileCtx struct {
 	loc *time.Location
 	// ctx is the caller's context, checked in loops that can run long.
 	ctx context.Context
+	// meter charges the compilation's work to the call's ledger (or polls
+	// ctx when there is none); see work.
+	meter budget.Meter
 	// lazySeq numbers the lazy signals; outputSeq the output nodes' hash keys.
 	lazySeq, outputSeq int64
 	// sigIdx speeds up signal lookups by name (see signalIndex).
@@ -47,6 +51,27 @@ func (c *compileCtx) check() {
 		panic(cancelError{err})
 	}
 }
+
+// work charges n steps of a loop whose trip count the specification
+// controls, and panics with the context's error once the caller's context is
+// done. A step costs an addition and a comparison; the context is polled
+// every thousand or so, so every loop that charges its steps stops within
+// about a millisecond of the deadline. Charge more than 1 for a step that
+// does more work than a few allocations (a model, a selection).
+func (c *compileCtx) work(n int64) {
+	if c == nil {
+		return
+	}
+	if err := c.meter.Work(n); err != nil {
+		panic(cancelError{err})
+	}
+}
+
+// modelStep is the work charged per child model in a loop over a model's
+// children, and per selection where every selection compiler runs on it:
+// each step runs a phase of the child or a fixed table of compilers, tens of
+// microseconds, so the deadline is polled every few dozen of them.
+const modelStep = 32
 
 // cancelError is the panic value Compile turns back into the context's error.
 type cancelError struct{ err error }
@@ -82,11 +107,12 @@ func signalOf(v Value) string {
 }
 
 // resolveLazy replaces every lazy signal in v with its evaluated expression.
-func resolveLazy(v Value) {
+func resolveLazy(cc *compileCtx, v Value) {
+	cc.work(1)
 	switch v.Kind() {
 	case jsval.KindArr:
 		for _, it := range v.Items() {
-			resolveLazy(it)
+			resolveLazy(cc, it)
 		}
 	case jsval.KindObj:
 		o := v.ObjValue()
@@ -95,7 +121,7 @@ func resolveLazy(v Value) {
 			o.SetStringer(nil)
 		}
 		for i := 0; i < o.Len(); i++ {
-			resolveLazy(o.ValueAt(i))
+			resolveLazy(cc, o.ValueAt(i))
 		}
 	}
 }

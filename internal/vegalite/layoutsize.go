@@ -72,18 +72,22 @@ func parseConcatLayoutSize(m *concatModel) {
 }
 
 func parseChildrenLayoutSize(m Model) {
+	cc := m.b().ctx
 	for _, child := range m.children() {
+		cc.work(modelStep)
 		child.parseLayoutSize()
 	}
 }
 
 func parseNonUnitLayoutSizeForChannel(m Model, layoutSizeType string) {
+	cc := m.b().ctx
 	b := m.b()
 	sizeType := getSizeTypeFromLayoutSizeType(layoutSizeType)
 	channel := getPositionScaleChannel(sizeType)
 	resolve := b.comp.resolve
 	var mergedSize *withExplicit
 	for _, child := range m.children() {
+		cc.work(modelStep)
 		childSize := child.b().comp.layoutSize.getWithExplicit(sizeType)
 		scaleResolve := resolve.scale[channel]
 		if scaleResolve == "" {
@@ -107,6 +111,7 @@ func parseNonUnitLayoutSizeForChannel(m Model, layoutSizeType string) {
 	}
 	if mergedSize != nil {
 		for _, child := range m.children() {
+			cc.work(modelStep)
 			b.renameSignal(child.b().getName(sizeType), b.getName(layoutSizeType))
 			child.b().comp.layoutSize.set(sizeType, jsval.Str("merged"), false)
 		}

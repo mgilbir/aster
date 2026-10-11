@@ -110,7 +110,7 @@ func (m *modelBase) b() *modelBase { return m }
 
 func newModelBase(cc *compileCtx, self Model, spec Value, typ string, parent Model, parentGivenName string, config Value, resolve *resolveIndex, view Value) *modelBase {
 	m := &modelBase{ctx: cc, self: self, typ: typ, parent: parent, config: config}
-	m.view = replaceExprRef(view, 0)
+	m.view = replaceExprRef(cc, view, 0)
 	if view.IsUndefined() {
 		m.view = undef
 	}
@@ -123,7 +123,7 @@ func newModelBase(cc *compileCtx, self Model, spec Value, typ string, parent Mod
 	case isText(t):
 		m.title = mkv("text", t)
 	case t.IsTruthy():
-		m.title = replaceExprRef(t, 0)
+		m.title = replaceExprRef(cc, t, 0)
 	}
 	if parent != nil {
 		pb := parent.b()
@@ -171,6 +171,7 @@ func newModelBase(cc *compileCtx, self Model, spec Value, typ string, parent Mod
 func normalizeTransformList(cc *compileCtx, tx Value) []Value {
 	var out []Value
 	for _, t := range tx.Items() {
+		cc.work(1)
 		if hasProperty(t, "filter") {
 			out = append(out, mkv("filter", normalizeLogicalComposition(t.Get("filter"), func(f Value) Value { return normalizePredicate(cc, f) }, 0)))
 		} else {
@@ -235,7 +236,7 @@ func (m *modelBase) getSizeSignalRef(layoutSizeType string) Value {
 			if hasDiscreteDomain(typ) && isVgRangeStep(rng) {
 				scaleName := sc.get("name").AsString()
 				domain := assembleDomain(m.self, channel)
-				field := getFieldFromDomain(domain)
+				field := getFieldFromDomain(cc, domain)
 				if field != "" {
 					fieldRef := vgField(cc, mkv("aggregate", "distinct", "field", field), fieldRefOption{expr: "datum"})
 					return sig(sizeExpr(scaleName, sc, fieldRef))
@@ -338,9 +339,11 @@ func (m *modelBase) projectionName(parse bool) string {
 }
 
 func (m *modelBase) hasAxisOrientSignalRef() bool {
+	cc := m.ctx
 	for _, ch := range []string{"x", "y"} {
 		axes, _ := m.comp.axes.get(ch)
 		for _, a := range axes {
+			cc.work(1)
 			if a.hasOrientSignalRef() {
 				return true
 			}
@@ -378,10 +381,12 @@ func (m *modelBase) renameTopLevelLayoutSizeSignal() {
 // ---- assemble ----
 
 func (m *modelBase) assembleGroupEncodeEntry(isTopLevel bool) Value {
+	cc := m.ctx
 	encodeEntry := jsval.NewObject(4)
 	if m.view.IsTruthy() {
 		base := omit(m.view, "style")
 		for _, p := range base.Keys() {
+			cc.work(1)
 			if v := base.Lookup(p); !v.IsUndefined() {
 				encodeEntry.Set(p, signalOrValueRef(v))
 			}

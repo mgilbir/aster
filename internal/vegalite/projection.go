@@ -44,14 +44,14 @@ func parseUnitProjection(u *unitModel) *projectionComponent {
 	if !u.hasProjection() {
 		return nil
 	}
-	proj := replaceExprRef(u.specifiedProjection, 0)
+	proj := replaceExprRef(u.ctx, u.specifiedProjection, 0)
 	fit := !(proj.IsObj() && (!proj.Get("scale").IsNullish() || !proj.Get("translate").IsNullish()))
 	var size, data []Value
 	if fit {
 		size = []Value{u.getSizeSignalRef("width"), u.getSizeSignalRef("height")}
 		data = gatherFitData(u)
 	}
-	comp := newProjectionComponent(u.projectionName(true), jsval.Obj(merged(replaceExprRef(u.config.Get("projection"), 0), proj)), size, data, fit)
+	comp := newProjectionComponent(u.projectionName(true), jsval.Obj(merged(replaceExprRef(u.ctx, u.config.Get("projection"), 0), proj)), size, data, fit)
 	if !comp.get("type").IsTruthy() {
 		comp.set("type", jsval.Str("equalEarth"), false)
 	}
@@ -110,16 +110,19 @@ func mergeProjectionIfNoConflict(first, second *projectionComponent) *projection
 }
 
 func parseNonUnitProjections(m Model) *projectionComponent {
+	cc := m.b().ctx
 	kids := m.children()
 	if len(kids) == 0 {
 		return nil
 	}
 	var nonUnit *projectionComponent
 	for _, c := range kids {
+		cc.work(1)
 		parseProjection(c)
 	}
 	mergable := true
 	for _, c := range kids {
+		cc.work(1)
 		p := c.b().comp.projection
 		if p == nil {
 			continue
@@ -141,6 +144,7 @@ func parseNonUnitProjections(m Model) *projectionComponent {
 		data := append([]Value(nil), nonUnit.data...)
 		mp := newProjectionComponent(name, nonUnit.specifiedProjection, nonUnit.size, data, nonUnit.hasData)
 		for _, c := range kids {
+			cc.work(1)
 			p := c.b().comp.projection
 			if p != nil {
 				if p.isFit() {
@@ -156,9 +160,11 @@ func parseNonUnitProjections(m Model) *projectionComponent {
 }
 
 func assembleProjections(m Model) []Value {
+	cc := m.b().ctx
 	if isLayerModel(m) || isConcatModel(m) {
 		out := assembleProjectionForModel(m)
 		for _, c := range m.children() {
+			cc.work(modelStep)
 			out = append(out, c.b().assembleProjections()...)
 		}
 		return out
@@ -167,6 +173,7 @@ func assembleProjections(m Model) []Value {
 }
 
 func assembleProjectionForModel(m Model) []Value {
+	cc := m.b().ctx
 	comp := m.b().comp.projection
 	if comp == nil || comp.merged {
 		return nil
@@ -185,6 +192,7 @@ func assembleProjectionForModel(m Model) []Value {
 	size := mkv("signal", "["+strings.Join(sizes, ", ")+"]")
 	var fits []string
 	for _, d := range comp.data {
+		cc.work(1)
 		var source string
 		if isSignalRef(d) {
 			source = signalOf(d)

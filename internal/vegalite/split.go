@@ -20,8 +20,8 @@ type split struct {
 
 func newSplit() *split { return &split{jsval.NewObject(4), jsval.NewObject(4)} }
 
-func (s *split) clone() *split {
-	return &split{deepClone(jsval.Obj(s.explicit)).ObjValue(), deepClone(jsval.Obj(s.implicit)).ObjValue()}
+func (s *split) clone(cc *compileCtx) *split {
+	return &split{deepClone(cc, jsval.Obj(s.explicit)).ObjValue(), deepClone(cc, jsval.Obj(s.implicit)).ObjValue()}
 }
 
 func (s *split) combine() *Object {
@@ -53,10 +53,10 @@ func (s *split) setWithExplicit(key string, w withExplicit) {
 func (s *split) set(key string, v Value, explicit bool) {
 	if explicit {
 		s.implicit.Delete(key)
-		jsSet(s.explicit, key, v)
+		jsSet(nil, s.explicit, key, v)
 	} else {
 		s.explicit.Delete(key)
-		jsSet(s.implicit, key, v)
+		jsSet(nil, s.implicit, key, v)
 	}
 }
 

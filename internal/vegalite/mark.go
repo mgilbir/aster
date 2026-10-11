@@ -377,6 +377,7 @@ func getMarkGroup(m *unitModel, fromPrefix string) []Value {
 	interactive := interactiveFlag(m)
 	if interactive.IsTruthy() && !cc.v5 {
 		for _, name := range m.comp.selection.keyList() {
+			cc.work(1)
 			s := m.comp.selection.lookup(name)
 			if s.typ == "point" && !s.props.Lookup("bind").IsTruthy() && s.props.Lookup("on").AsString() != "pointerover" {
 				if m.markDef.Get("cursor").IsNullish() {

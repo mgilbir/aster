@@ -13,6 +13,7 @@ func channelHasField(cc *compileCtx, enc Value, channel string) bool {
 	if cd.IsTruthy() {
 		if cd.IsArr() {
 			for _, fd := range cd.Items() {
+				cc.work(1)
 				if fd.Get("field").IsTruthy() {
 					return true
 				}
@@ -29,6 +30,7 @@ func channelHasFieldOrDatum(cc *compileCtx, enc Value, channel string) bool {
 	if cd.IsTruthy() {
 		if cd.IsArr() {
 			for _, fd := range cd.Items() {
+				cc.work(1)
 				if fd.Get("field").IsTruthy() {
 					return true
 				}
@@ -57,6 +59,7 @@ func encodingIsAggregate(cc *compileCtx, enc Value) bool {
 			cd := enc.Get(channel)
 			if cd.IsArr() {
 				for _, fd := range cd.Items() {
+					cc.work(1)
 					if fd.Get("aggregate").IsTruthy() {
 						return true
 					}
@@ -71,15 +74,17 @@ func encodingIsAggregate(cc *compileCtx, enc Value) bool {
 
 // encodingEach is forEach over a mapping: f is called for every channel def,
 // array elements individually.
-func encodingEach(mapping Value, f func(cd Value, channel string)) {
+func encodingEach(cc *compileCtx, mapping Value, f func(cd Value, channel string)) {
 	if !mapping.IsObj() {
 		return
 	}
 	o := mapping.ObjValue()
 	for _, channel := range append([]string(nil), o.Keys()...) {
+		cc.work(1)
 		el := o.Lookup(channel)
 		if el.IsArr() {
 			for _, cd := range el.Items() {
+				cc.work(1)
 				f(cd, channel)
 			}
 		} else {
@@ -92,8 +97,10 @@ func encodingEach(mapping Value, f func(cd Value, channel string)) {
 func fieldDefsOf(cc *compileCtx, enc Value) []Value {
 	var out []Value
 	for _, channel := range keysOf(enc) {
+		cc.work(1)
 		if channelHasField(cc, enc, channel) {
 			for _, def := range arrayOf(enc.Get(channel)) {
+				cc.work(1)
 				if isFieldDef(cc, def) {
 					out = append(out, def)
 				} else if hasConditionalFieldDef(cc, def) {
@@ -115,7 +122,7 @@ type extractedTransforms struct {
 // defs into explicit transforms (used by the composite marks).
 func extractTransformsFromEncoding(cc *compileCtx, oldEncoding Value, config Value) extractedTransforms {
 	r := extractedTransforms{encoding: jsval.NewObject(8)}
-	encodingEach(oldEncoding, func(cd Value, channel string) {
+	encodingEach(cc, oldEncoding, func(cd Value, channel string) {
 		if isFieldDef(cc, cd) {
 			field, aggOp, bin, timeUnit := cd.Get("field"), cd.Get("aggregate"), cd.Get("bin"), cd.Get("timeUnit")
 			remaining := omit(cd, "field", "aggregate", "bin", "timeUnit")
@@ -268,6 +275,7 @@ func initEncoding(cc *compileCtx, encoding Value, mark string, filled bool, conf
 				}
 				var defs []Value
 				for _, fd := range arrayOf(channelDef) {
+					cc.work(1)
 					if isFieldDef(cc, fd) {
 						defs = append(defs, initFieldDef(cc, fd, channel, false))
 					}
@@ -290,6 +298,7 @@ func initEncoding(cc *compileCtx, encoding Value, mark string, filled bool, conf
 func normalizeEncoding(cc *compileCtx, encoding Value, config Value) Value {
 	out := jsval.NewObject(encoding.Len())
 	for _, channel := range keysOf(encoding) {
+		cc.work(1)
 		out.Set(channel, initChannelDef(cc, encoding.Get(channel), channel, config, true))
 	}
 	return jsval.Obj(out)
@@ -300,6 +309,7 @@ func normalizeEncoding(cc *compileCtx, encoding Value, config Value) Value {
 func pathGroupingFields(cc *compileCtx, mark string, encoding Value) []string {
 	var details []string
 	for _, channel := range keysOf(encoding) {
+		cc.work(1)
 		switch channel {
 		case chX, chY, chHref, chDescription, chURL, chX2, chY2:
 		case chXOffset, chYOffset:
@@ -329,6 +339,7 @@ func pathGroupingFields(cc *compileCtx, mark string, encoding Value) []string {
 			cd := encoding.Get(channel)
 			if cd.IsArr() || isFieldDef(cc, cd) {
 				for _, fd := range arrayOf(cd) {
+					cc.work(1)
 					if !fd.Get("aggregate").IsTruthy() {
 						details = append(details, vgField(cc, fd, fieldRefOption{}))
 					}

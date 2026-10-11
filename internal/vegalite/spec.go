@@ -31,9 +31,10 @@ func isSelectionParameter(p Value) bool { return p.IsObj() && p.Get("select").Is
 
 // assembleParameterSignals converts variable parameters to Vega signals;
 // selection parameters are compiled elsewhere.
-func assembleParameterSignals(params Value) []Value {
+func assembleParameterSignals(cc *compileCtx, params Value) []Value {
 	var signals []Value
 	for _, p := range params.Items() {
+		cc.work(1)
 		if isSelectionParameter(p) {
 			continue
 		}

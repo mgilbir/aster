@@ -19,6 +19,7 @@ import (
 	"runtime/debug"
 	"time"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -34,9 +35,10 @@ type Options struct {
 	// Version is the Vega-Lite version to follow: "6.4" (also the default for
 	// "") or "5.8". Anything else is an error.
 	Version string
-	// Context, when set, bounds the compilation: it is checked in the loops
-	// that can run long and Compile returns the context's error once it is
-	// done. Nil means no bound.
+	// Context, when set, bounds the compilation: every loop the
+	// specification sizes charges its work to the ledger in it
+	// (budget.LedgerFrom), or polls it when there is none, and Compile
+	// returns the context's error once it is done. Nil means no bound.
 	Context context.Context
 }
 
@@ -72,7 +74,7 @@ func Compile(spec jsval.Value, opts Options) (out jsval.Value, err error) {
 	if err != nil {
 		return jsval.Undefined, err
 	}
-	cc := &compileCtx{v5: v5, loc: opts.Location, ctx: opts.Context}
+	cc := &compileCtx{v5: v5, loc: opts.Location, ctx: opts.Context, meter: budget.NewMeter(opts.Context)}
 	if !spec.IsObj() {
 		return jsval.Undefined, compileError{"Invalid spec: a Vega-Lite specification must be an object"}
 	}
@@ -81,7 +83,7 @@ func Compile(spec jsval.Value, opts Options) (out jsval.Value, err error) {
 			return jsval.Undefined, err
 		}
 	}
-	input := deepClone(spec)
+	input := deepClone(cc, spec)
 	return compileSpec(cc, input, opts), nil
 }
 
@@ -115,7 +117,7 @@ func compileSpec(cc *compileCtx, inputSpec jsval.Value, opts Options) jsval.Valu
 	optimizeDataflow(model.b().comp.data, model)
 	top := getTopLevelProperties(inputSpec, spec.Get("autosize"), config, model)
 	out := assembleTopLevelModel(model, top, inputSpec.Get("datasets"), inputSpec.Get("usermeta"))
-	resolveLazy(out)
+	resolveLazy(cc, out)
 	return out
 }
 
@@ -173,7 +175,7 @@ func assembleTopLevelModel(model Model, top *Object, datasets, usermeta jsval.Va
 	if b.config.IsTruthy() {
 		vgConfig = stripAndRedirectConfig(cc, b.config)
 	}
-	rootData := assembleRootData(b.comp.data, datasets)
+	rootData := assembleRootData(cc, b.comp.data, datasets)
 	var data []Value
 	if cc.v5 {
 		data = append(model.assembleSelectionData(nil), rootData...)
@@ -188,6 +190,7 @@ func assembleTopLevelModel(model Model, top *Object, datasets, usermeta jsval.Va
 	// width and height signals with a value move to top-level properties.
 	var kept []jsval.Value
 	for _, s := range layoutSignals {
+		cc.work(1)
 		n := s.Get("name")
 		if n.IsStr() && (n.StrValue() == "width" || n.StrValue() == "height") && !s.Get("value").IsUndefined() {
 			top.Set(n.StrValue(), jsval.Num(jsval.ToNumber(s.Get("value"))))
@@ -221,7 +224,7 @@ func assembleTopLevelModel(model Model, top *Object, datasets, usermeta jsval.Va
 	}
 	signals := append([]jsval.Value{}, kept...)
 	signals = append(signals, model.assembleSelectionTopLevelSignals(nil)...)
-	signals = append(signals, assembleParameterSignals(params)...)
+	signals = append(signals, assembleParameterSignals(cc, params)...)
 	spread(o, jsval.Obj(assembleGroup(model, signals)))
 	if vgConfig.IsTruthy() {
 		o.Set("config", vgConfig)

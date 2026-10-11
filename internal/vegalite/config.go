@@ -319,7 +319,7 @@ func getAxisConfigInternal(axisConfig Value) Value {
 	for _, prop := range keysOf(axisConfig) {
 		val := axisConfig.Get(prop)
 		if isConditionalAxisValue(val) {
-			out.Set(prop, signalOrValueRefWithCondition(val))
+			out.Set(prop, signalOrValueRefWithCondition(nil, val))
 		} else {
 			out.Set(prop, signalRefOrValue(val))
 		}
@@ -350,7 +350,7 @@ func initConfig(cc *compileCtx, specified Value) Value {
 	}
 	color, font, fontSize, selection := specified.Get("color"), specified.Get("font"), specified.Get("fontSize"), specified.Get("selection")
 	rest := omit(specified, "color", "font", "fontSize", "selection")
-	parts := []Value{jsval.Obj(jsval.NewObject(0)), deepClone(jsval.Obj(defaultConfig(cc)))}
+	parts := []Value{jsval.Obj(jsval.NewObject(0)), deepClone(cc, jsval.Obj(defaultConfig(cc)))}
 	if font.IsTruthy() {
 		parts = append(parts, jsval.Obj(fontConfig(font)))
 	}
@@ -374,7 +374,7 @@ func initConfig(cc *compileCtx, specified Value) Value {
 	}
 	for _, m := range markConfigs {
 		if v := merged.Lookup(m); v.IsTruthy() {
-			out.Set(m, replaceExprRef(v, 0))
+			out.Set(m, replaceExprRef(cc, v, 0))
 		}
 	}
 	for _, a := range axisConfigs {
@@ -384,19 +384,19 @@ func initConfig(cc *compileCtx, specified Value) Value {
 	}
 	for _, h := range headerConfigs {
 		if v := merged.Lookup(h); v.IsTruthy() {
-			out.Set(h, replaceExprRef(v, 0))
+			out.Set(h, replaceExprRef(cc, v, 0))
 		}
 	}
 	if v := merged.Lookup("legend"); v.IsTruthy() {
-		out.Set("legend", replaceExprRef(v, 0))
+		out.Set("legend", replaceExprRef(cc, v, 0))
 	}
 	if sc := merged.Lookup("scale"); sc.IsTruthy() && cc.v5 {
-		out.Set("scale", replaceExprRef(sc, 0))
+		out.Set("scale", replaceExprRef(cc, sc, 0))
 	} else if sc.IsTruthy() {
 		invalid := sc.Get("invalid")
 		other := jsval.Obj(omit(sc, "invalid"))
-		newInvalid := replaceExprRef(invalid, 1)
-		o := cloneObj(replaceExprRef(other, 0).ObjValue())
+		newInvalid := replaceExprRef(cc, invalid, 1)
+		o := cloneObj(replaceExprRef(cc, other, 0).ObjValue())
 		if newInvalid.Len() > 0 {
 			o.Set("invalid", newInvalid)
 		}
@@ -406,10 +406,10 @@ func initConfig(cc *compileCtx, specified Value) Value {
 		out.Set("style", getStyleConfigInternal(v))
 	}
 	if v := merged.Lookup("title"); v.IsTruthy() {
-		out.Set("title", replaceExprRef(v, 0))
+		out.Set("title", replaceExprRef(cc, v, 0))
 	}
 	if v := merged.Lookup("view"); v.IsTruthy() {
-		out.Set("view", replaceExprRef(v, 0))
+		out.Set("view", replaceExprRef(cc, v, 0))
 	}
 	return jsval.Obj(out)
 }
@@ -460,13 +460,14 @@ func vlOnlyMarkSpecificConfig(cc *compileCtx, markType string) []string {
 // stripAndRedirectConfig removes Vega-Lite-only config and moves mark configs
 // into Vega style configs; it returns undefined when nothing is left.
 func stripAndRedirectConfig(cc *compileCtx, cfg Value) Value {
-	c := deepClone(cfg).ObjValue()
+	c := deepClone(cc, cfg).ObjValue()
 	for _, p := range vlOnlyConfigProperties {
 		c.Delete(p)
 	}
 	if axis := c.Lookup("axis"); axis.IsObj() {
 		ao := axis.ObjValue()
 		for _, p := range append([]string(nil), ao.Keys()...) {
+			cc.work(1)
 			if isConditionalAxisValue(ao.Lookup(p)) {
 				ao.Delete(p)
 			}
@@ -488,7 +489,7 @@ func stripAndRedirectConfig(cc *compileCtx, cfg Value) Value {
 	}
 	if params := c.Lookup("params"); !params.IsUndefined() {
 		sigs := append([]Value(nil), c.Lookup("signals").Items()...)
-		sigs = append(sigs, assembleParameterSignals(params)...)
+		sigs = append(sigs, assembleParameterSignals(cc, params)...)
 		c.Set("signals", jsval.Arr(sigs))
 		c.Delete("params")
 	}
@@ -509,6 +510,7 @@ func stripAndRedirectConfig(cc *compileCtx, cfg Value) Value {
 	}
 	redirectTitleConfig(c)
 	for _, p := range append([]string(nil), c.Keys()...) {
+		cc.work(1)
 		if v := c.Lookup(p); isObject(v) && isEmptyObj(v) {
 			c.Delete(p)
 		}

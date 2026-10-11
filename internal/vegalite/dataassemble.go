@@ -37,6 +37,8 @@ func makeWalkTree(data *[]*vgData) func(node dfNode, ds *vgData) {
 	datasetIndex := 0
 	var walk func(node dfNode, ds *vgData)
 	walk = func(node dfNode, ds *vgData) {
+		cc := node.base().cc
+		cc.work(1)
 		if sn, ok := node.(*sourceNode); ok {
 			if !sn.generator && !isUrlData(jsval.Obj(sn.data)) {
 				*data = append(*data, ds)
@@ -125,7 +127,7 @@ func makeWalkTree(data *[]*vgData) func(node dfNode, ds *vgData) {
 				*data = append(*data, ds)
 			}
 		case 1:
-			walk(node.base().kids[0], ds)
+			walk(node.base().child(0), ds)
 		default:
 			if !ds.name().IsTruthy() {
 				ds.obj.Set("name", jsval.Str("data_"+jsval.JSNumberString(float64(datasetIndex))))
@@ -137,7 +139,7 @@ func makeWalkTree(data *[]*vgData) func(node dfNode, ds *vgData) {
 			} else {
 				source = ds.source()
 			}
-			for _, child := range node.base().kids {
+			for _, child := range node.base().children() {
 				walk(child, newVgData(jsval.Null, source))
 			}
 		}
@@ -158,24 +160,27 @@ func vgDataFromValue(v Value) *vgData {
 }
 
 func assembleFacetData(root *facetNode) []Value {
+	cc := root.cc
 	var data []*vgData
 	walk := makeWalkTree(&data)
-	for _, child := range append([]dfNode(nil), root.kids...) {
+	for _, child := range append([]dfNode(nil), root.children()...) {
 		// upstream passes {source: root.name, name: null, transform: []}: source first.
 		walk(child, &vgData{obj: mk("source", root.name, "name", jsval.Null, "transform", jsval.Undefined)})
 	}
 	out := make([]Value, len(data))
 	for i, d := range data {
+		cc.work(1)
 		out[i] = d.finish()
 	}
 	return out
 }
 
-func assembleRootData(dc *dataComponent, datasets Value) []Value {
+func assembleRootData(cc *compileCtx, dc *dataComponent, datasets Value) []Value {
 	var data []*vgData
 	walk := makeWalkTree(&data)
 	sourceIndex := 0
 	for _, root := range dc.sources.items {
+		cc.work(1)
 		sn := root.(*sourceNode)
 		if !sn.hasName() {
 			sn.name = "source_" + jsval.JSNumberString(float64(sourceIndex))
@@ -185,21 +190,23 @@ func assembleRootData(dc *dataComponent, datasets Value) []Value {
 		d.transform = nil
 		walk(root, d)
 	}
-	// data sets with no transform and no source come first
-	for i := 0; i < len(data); i++ {
-		_ = i
-	}
-	whereTo := 0
-	for i := 0; i < len(data); i++ {
-		d := data[i]
+	// Data sets with no transform and no source come first. Upstream moves
+	// each one with data.splice(whereTo++, 0, data.splice(i, 1)[0]) as it
+	// scans, a quadratic stable partition; the scan never revisits an
+	// element, so a single stable pass gives the same order (ADR 0011).
+	first := make([]*vgData, 0, len(data))
+	var rest []*vgData
+	for _, d := range data {
+		cc.work(1)
 		if len(d.transform) == 0 && !d.source().IsTruthy() {
-			// data.splice(whereTo++, 0, data.splice(i, 1)[0])
-			data = append(data[:i], data[i+1:]...)
-			data = append(data[:whereTo], append([]*vgData{d}, data[whereTo:]...)...)
-			whereTo++
+			first = append(first, d)
+		} else {
+			rest = append(rest, d)
 		}
 	}
+	data = append(first, rest...)
 	for _, d := range data {
+		cc.work(1 + int64(len(d.transform)))
 		for i, t := range d.transform {
 			if t.Get("type").IsStr() && t.Get("type").StrValue() == "lookup" {
 				o := cloneObj(t.ObjValue())
@@ -211,12 +218,14 @@ func assembleRootData(dc *dataComponent, datasets Value) []Value {
 		}
 	}
 	for _, d := range data {
+		cc.work(1)
 		if name := d.name(); name.IsStr() && datasets.IsObj() && datasets.ObjValue().Has(name.StrValue()) {
 			d.obj.Set("values", datasets.Get(name.StrValue()))
 		}
 	}
 	out := make([]Value, len(data))
 	for i, d := range data {
+		cc.work(1)
 		out[i] = d.finish()
 	}
 	return out

@@ -541,7 +541,7 @@ func valueExpr(cc *compileCtx, v Value, timeUnit Value, typ string, wrapTime, un
 		expr, have = dateTimeToExpr(v), true
 	case v.IsStr() || v.IsNum():
 		if isTime {
-			expr, have = "datetime("+stringify(v)+")", true
+			expr, have = "datetime("+stringify(cc, v)+")", true
 			if isLocalSingleTimeUnit(unit) {
 				// For a single timeUnit, dateTimeToExpr matches the number/string to the unit.
 				if (v.IsNum() && v.NumValue() < 10000) || (v.IsStr() && dateParseNaN(v.StrValue())) {
@@ -559,7 +559,7 @@ func valueExpr(cc *compileCtx, v Value, timeUnit Value, typ string, wrapTime, un
 	if undefinedIfExprNotRequired {
 		return "", false
 	}
-	return stringify(v), true
+	return stringify(cc, v), true
 }
 
 // valueArray maps values to signals when they need an expression.
@@ -567,6 +567,7 @@ func valueArray(cc *compileCtx, fod Value, values []Value) []Value {
 	typ := channelDefType(fod)
 	out := make([]Value, len(values))
 	for i, v := range values {
+		cc.work(1)
 		tu := undef
 		if isFieldDef(cc, fod) && !isBinnedTimeUnit(cc, fod.Get("timeUnit")) {
 			tu = fod.Get("timeUnit")

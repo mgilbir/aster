@@ -55,7 +55,7 @@ func (f *facetModel) initFacetFieldDef(fd Value, channel string) Value {
 	ffd := initFieldDef(cc, fd, channel, false)
 	o := ffd.ObjValue()
 	if h := o.Lookup("header"); h.IsTruthy() {
-		o.Set("header", replaceExprRef(h, 0))
+		o.Set("header", replaceExprRef(cc, h, 0))
 	} else if h.IsNull() {
 		o.Set("header", jsval.Null)
 	}
@@ -80,7 +80,7 @@ func (f *facetModel) vgField(channel string, opt fieldRefOption) string {
 func (f *facetModel) forEachFieldDef(fn func(fd Value, channel string)) {
 	cc := f.b().ctx
 
-	encodingEach(jsval.Obj(f.facet), func(cd Value, c string) {
+	encodingEach(cc, jsval.Obj(f.facet), func(cd Value, c string) {
 		if fd := getFieldDef(cc, cd); fd.IsTruthy() {
 			fn(fd, c)
 		}
@@ -244,7 +244,7 @@ func (f *facetModel) getCardinalityAggregateForChild() cardinalityAggregate {
 				typ, rng := cs.get("type").AsString(), cs.get("range")
 				if hasDiscreteDomain(typ) && isVgRangeStep(rng) {
 					domain := assembleDomain(f.child, channel)
-					if field := getFieldFromDomain(domain); field != "" {
+					if field := getFieldFromDomain(cc, domain); field != "" {
 						r.fields = append(r.fields, jsval.Str(field))
 						r.ops = append(r.ops, jsval.Str("distinct"))
 						r.as = append(r.as, jsval.Str("distinct_"+field))

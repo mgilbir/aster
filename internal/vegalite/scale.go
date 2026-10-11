@@ -20,7 +20,7 @@ func newScaleComponent(name string, typeWithExplicit withExplicit) *scaleCompone
 }
 
 // domainHasZero: "definitely", "definitely-not" or "maybe".
-func (s *scaleComponent) domainHasZero() string {
+func (s *scaleComponent) domainHasZero(cc *compileCtx) string {
 	scaleType := s.get("type").AsString()
 	if scaleType == "log" || scaleType == "time" || scaleType == "utc" {
 		return "definitely-not"
@@ -33,6 +33,7 @@ func (s *scaleComponent) domainHasZero() string {
 	if domains.Len() > 0 {
 		withZero, withoutZero, fieldBased := false, false, false
 		for _, d := range domains.Items() {
+			cc.work(1)
 			if d.IsArr() {
 				first, last := d.Index(0), d.Index(d.Len()-1)
 				if first.IsNum() && last.IsNum() {
@@ -153,12 +154,14 @@ var scaleTypeTieBreaker = tieBreakByComparing(func(a, b Value) int {
 })
 
 func parseNonUnitScaleCore(m Model) *omap[*scaleComponent] {
+	cc := m.b().ctx
 	b := m.b()
 	scales := newOmap[*scaleComponent]()
 	b.comp.scales = scales
 	typeIndex := newOmap[withExplicit]()
 	resolve := b.comp.resolve
 	for _, child := range m.children() {
+		cc.work(modelStep)
 		parseScaleCore(child)
 		cs := child.b().comp.scales
 		for _, channel := range cs.keyList() {
@@ -188,6 +191,7 @@ func parseNonUnitScaleCore(m Model) *omap[*scaleComponent] {
 		te, _ := typeIndex.get(channel)
 		scales.set(channel, newScaleComponent(name, te))
 		for _, child := range m.children() {
+			cc.work(modelStep)
 			if cs, ok := child.b().comp.scales.get(channel); ok && cs != nil {
 				child.b().renameScale(cs.get("name").AsString(), name)
 				cs.merged = true
@@ -555,8 +559,10 @@ func parseScaleRange(m Model) {
 }
 
 func parseNonUnitScaleProperty(m Model, property string) {
+	cc := m.b().ctx
 	local := m.b().comp.scales
 	for _, child := range m.children() {
+		cc.work(modelStep)
 		if property == "range" {
 			parseScaleRange(child)
 		} else {
@@ -582,6 +588,7 @@ func parseNonUnitScaleProperty(m Model, property string) {
 	for _, channel := range local.keyList() {
 		var valueWithExplicit *withExplicit
 		for _, child := range m.children() {
+			cc.work(modelStep)
 			cc, ok := child.b().comp.scales.get(channel)
 			if ok && cc != nil {
 				cv := cc.getWithExplicit(property)
@@ -599,9 +606,11 @@ func parseNonUnitScaleProperty(m Model, property string) {
 // ---- assemble ----
 
 func assembleScales(m Model) []Value {
+	cc := m.b().ctx
 	if isLayerModel(m) || isConcatModel(m) {
 		scales := assembleScalesForModel(m)
 		for _, child := range m.children() {
+			cc.work(modelStep)
 			scales = append(scales, assembleScales(child)...)
 		}
 		return scales

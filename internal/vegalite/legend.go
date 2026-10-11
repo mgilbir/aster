@@ -32,8 +32,8 @@ func newLegendComponent(explicit, implicit *Object) *legendComponent {
 	return &legendComponent{&split{explicit, implicit}}
 }
 
-func (l *legendComponent) cloneLegend() *legendComponent {
-	return &legendComponent{l.split.clone()}
+func (l *legendComponent) cloneLegend(cc *compileCtx) *legendComponent {
+	return &legendComponent{l.split.clone(cc)}
 }
 
 func parseLegend(m Model) {
@@ -199,8 +199,10 @@ func parseLegendForChannel(m *unitModel, channel string) *legendComponent {
 }
 
 func parseNonUnitLegend(m Model) *omap[*legendComponent] {
+	cc := m.b().ctx
 	legends, resolve := m.b().comp.legends, m.b().comp.resolve
 	for _, child := range m.children() {
+		cc.work(modelStep)
 		parseLegend(child)
 		cl := child.b().comp.legends
 		for _, channel := range cl.keyList() {
@@ -208,7 +210,7 @@ func parseNonUnitLegend(m Model) *omap[*legendComponent] {
 			if resolve.legend[channel] == "shared" {
 				cur, _ := legends.get(channel)
 				childLegend, _ := cl.get(channel)
-				merged := mergeLegendComponent(cur, childLegend)
+				merged := mergeLegendComponent(cc, cur, childLegend)
 				if merged == nil {
 					resolve.legend[channel] = "independent"
 					legends.del(channel)
@@ -220,6 +222,7 @@ func parseNonUnitLegend(m Model) *omap[*legendComponent] {
 	}
 	for _, channel := range legends.keyList() {
 		for _, child := range m.children() {
+			cc.work(modelStep)
 			if _, ok := child.b().comp.legends.get(channel); !ok {
 				continue
 			}
@@ -231,9 +234,9 @@ func parseNonUnitLegend(m Model) *omap[*legendComponent] {
 	return legends
 }
 
-func mergeLegendComponent(mergedLegend, childLegend *legendComponent) *legendComponent {
+func mergeLegendComponent(cc *compileCtx, mergedLegend, childLegend *legendComponent) *legendComponent {
 	if mergedLegend == nil {
-		return childLegend.cloneLegend()
+		return childLegend.cloneLegend(cc)
 	}
 	mo, co := mergedLegend.getWithExplicit("orient"), childLegend.getWithExplicit("orient")
 	if mo.explicit && co.explicit && !strictEq(mo.value, co.value) {
@@ -315,7 +318,7 @@ var legendRules = map[string]func(p legendRuleParams) Value{
 		if v := p.legend.Get("symbolType"); !v.IsNullish() {
 			return v
 		}
-		return defaultSymbolType(p.markDef.Get("type").AsString(), p.channel, p.encoding.Get("shape"), p.markDef.Get("shape"))
+		return defaultSymbolType(p.model.ctx, p.markDef.Get("type").AsString(), p.channel, p.encoding.Get("shape"), p.markDef.Get("shape"))
 	},
 	"title": func(p legendRuleParams) Value { return fieldTitle(p.model.ctx, p.fod, p.config, true, true) },
 	"type": func(p legendRuleParams) Value {
@@ -331,9 +334,9 @@ var legendRules = map[string]func(p legendRuleParams) Value{
 	"values": func(p legendRuleParams) Value { return guideValues(p.model.ctx, p.legend, p.fod) },
 }
 
-func defaultSymbolType(mark, channel string, shapeChannelDef, markShape Value) Value {
+func defaultSymbolType(cc *compileCtx, mark, channel string, shapeChannelDef, markShape Value) Value {
 	if channel != chShape {
-		shape := firstDefined(getFirstConditionValue(shapeChannelDef), markShape)
+		shape := firstDefined(getFirstConditionValue(cc, shapeChannelDef), markShape)
 		if shape.IsTruthy() {
 			return shape
 		}
@@ -412,10 +415,11 @@ func gradientLengthSignal(m *unitModel, sizeType string, min, max Value) Value {
 
 // ---- legend encode ----
 
-func getConditionValue(channelDef Value, reducer func(v, cond Value) Value) Value {
+func getConditionValue(cc *compileCtx, channelDef Value, reducer func(v, cond Value) Value) Value {
 	if hasConditionalValueDef(channelDef) {
 		acc := channelDef.Get("value")
 		for _, c := range arrayOf(channelDef.Get("condition")) {
+			cc.work(1)
 			acc = reducer(acc, c)
 		}
 		return acc
@@ -425,8 +429,8 @@ func getConditionValue(channelDef Value, reducer func(v, cond Value) Value) Valu
 	return undef
 }
 
-func getMaxValue(channelDef Value) Value {
-	return getConditionValue(channelDef, func(v, c Value) Value {
+func getMaxValue(cc *compileCtx, channelDef Value) Value {
+	return getConditionValue(cc, channelDef, func(v, c Value) Value {
 		a, b := jsval.ToNumber(v), jsval.ToNumber(c.Get("value"))
 		if a != a || b != b {
 			return jsval.Num(a + b)
@@ -438,11 +442,12 @@ func getMaxValue(channelDef Value) Value {
 	})
 }
 
-func getFirstConditionValue(channelDef Value) Value {
-	return getConditionValue(channelDef, func(v, c Value) Value { return firstDefined(v, c.Get("value")) })
+func getFirstConditionValue(cc *compileCtx, channelDef Value) Value {
+	return getConditionValue(cc, channelDef, func(v, c Value) Value { return firstDefined(v, c.Get("value")) })
 }
 
 func selectedCondition(m *unitModel, cmpt *legendComponent, fd Value) string {
+	cc := m.ctx
 	selections := cmpt.get("selections")
 	if !selections.IsArr() || selections.Len() == 0 {
 		return ""
@@ -450,6 +455,7 @@ func selectedCondition(m *unitModel, cmpt *legendComponent, fd Value) string {
 	field := stringValue(fd.Get("field"))
 	var parts []string
 	for _, n := range selections.Items() {
+		cc.work(1)
 		name := n.AsString()
 		store := stringValue(jsval.Str(varName(name) + storeSuffix))
 		parts = append(parts, "(!length(data("+store+")) || ("+name+"["+field+"] && indexof("+name+"["+field+"], datum.value) >= 0))")
@@ -473,7 +479,7 @@ func legendSymbolsEncode(symbolsSpec Value, fod Value, m *unitModel, channel str
 	symbolStrokeColor := coalesce(cmpt.get("symbolStrokeColor"), config.Get("legend").Get("symbolStrokeColor"))
 	opacity := undef
 	if symbolOpacity.IsUndefined() {
-		opacity = coalesce(getMaxValue(encoding.Get("opacity")), markDef.Get("opacity"))
+		opacity = coalesce(getMaxValue(cc, encoding.Get("opacity")), markDef.Get("opacity"))
 	}
 	if fill := out.Lookup("fill"); fill.IsTruthy() {
 		if channel == chFill || (filled && channel == chColor) {
@@ -490,7 +496,7 @@ func legendSymbolsEncode(symbolsSpec Value, fod Value, m *unitModel, channel str
 			if !src.IsTruthy() {
 				src = encoding.Get("color")
 			}
-			f := getFirstNonNullish3(getFirstConditionValue(src), markDef.Get("fill"), func() Value {
+			f := getFirstNonNullish3(getFirstConditionValue(cc, src), markDef.Get("fill"), func() Value {
 				if filled {
 					return markDef.Get("color")
 				}
@@ -515,7 +521,7 @@ func legendSymbolsEncode(symbolsSpec Value, fod Value, m *unitModel, channel str
 			if filled {
 				alt = markDef.Get("color")
 			}
-			s := firstDefined(getFirstConditionValue(src), markDef.Get("stroke"), alt)
+			s := firstDefined(getFirstConditionValue(cc, src), markDef.Get("stroke"), alt)
 			if s.IsTruthy() {
 				out.Set("stroke", mkv("value", s))
 			}
@@ -555,7 +561,7 @@ func legendGradientEncode(gradientSpec Value, m *unitModel, legendType string, c
 	gradientOpacity := coalesce(cmpt.get("gradientOpacity"), config.Get("legend").Get("gradientOpacity"))
 	opacity := undef
 	if gradientOpacity.IsUndefined() {
-		opacity = or(getMaxValue(encoding.Get("opacity")), markDef.Get("opacity"))
+		opacity = or(getMaxValue(m.ctx, encoding.Get("opacity")), markDef.Get("opacity"))
 	}
 	if opacity.IsTruthy() {
 		out.Set("opacity", signalOrValueRef(opacity))
@@ -641,6 +647,7 @@ func legendSetEncode(legend *Object, part, vgProp string, vgRef Value) {
 }
 
 func getFieldKeyForChannel(m Model, channel string) string {
+	cc := m.b().ctx
 	if u := asUnit(m); u != nil {
 		if fd := u.fieldDef(channel); fd.Get("field").IsTruthy() {
 			return fd.Get("field").AsString()
@@ -648,6 +655,7 @@ func getFieldKeyForChannel(m Model, channel string) string {
 	}
 	var childFields []string
 	for _, c := range m.children() {
+		cc.work(modelStep)
 		if f := getFieldKeyForChannel(c, channel); f != "" {
 			childFields = append(childFields, f)
 		}
@@ -679,10 +687,11 @@ func legendGroupKey(fieldKey, channel string) string {
 	return "channel:" + channel
 }
 
-func extractDiscreteValuesFromDomain(domain Value) []Value {
+func extractDiscreteValuesFromDomain(cc *compileCtx, domain Value) []Value {
 	if domain.IsArr() {
 		var out []Value
 		for _, d := range domain.Items() {
+			cc.work(1)
 			if d.IsStr() || d.IsNum() || d.IsBool() {
 				out = append(out, d)
 			}
@@ -695,8 +704,10 @@ func extractDiscreteValuesFromDomain(domain Value) []Value {
 	if isDataRefUnionedDomain(domain) {
 		var vals []Value
 		for _, f := range domain.Get("fields").Items() {
+			cc.work(1)
 			if f.IsArr() {
 				for _, d := range f.Items() {
+					cc.work(1)
 					if d.IsStr() || d.IsNum() || d.IsBool() {
 						vals = append(vals, d)
 					}
@@ -704,17 +715,18 @@ func extractDiscreteValuesFromDomain(domain Value) []Value {
 			}
 		}
 		if len(vals) > 0 {
-			return uniqueValues(vals)
+			return uniqueValues(cc, vals)
 		}
 	}
 	return nil
 }
 
-func uniqueValues(in []Value) []Value {
+func uniqueValues(cc *compileCtx, in []Value) []Value {
 	seen := map[string]bool{}
 	var out []Value
 	for _, v := range in {
-		h := hashOf(v)
+		cc.work(1)
+		h := hashOf(cc, v)
 		if !seen[h] {
 			seen[h] = true
 			out = append(out, v)
@@ -733,13 +745,13 @@ func getDiscreteValuesForChannel(m Model, channel string) (out []Value) {
 			panic(r)
 		}
 	}()
-	return extractDiscreteValuesFromDomain(assembleDomain(m, channel))
+	return extractDiscreteValuesFromDomain(m.b().ctx, assembleDomain(m, channel))
 }
 
 func unionDiscreteValuesForChannels(m Model, a, b string) []Value {
 	va, vb := getDiscreteValuesForChannel(m, a), getDiscreteValuesForChannel(m, b)
 	if va != nil && vb != nil {
-		return uniqueValues(append(append([]Value{}, va...), vb...))
+		return uniqueValues(m.b().ctx, append(append([]Value{}, va...), vb...))
 	}
 	return nil
 }
@@ -762,7 +774,7 @@ func domainsExplicitAndEqual(m Model, a, b string) bool {
 	if !(da.explicit && db.explicit) {
 		return false
 	}
-	return hashOf(assembleDomain(m, a)) == hashOf(assembleDomain(m, b))
+	return hashOf(m.b().ctx, assembleDomain(m, a)) == hashOf(m.b().ctx, assembleDomain(m, b))
 }
 
 type legendEntry struct {
@@ -783,7 +795,7 @@ func assembleLegends(m Model) []Value {
 		groupKey := legendGroupKey(fieldKey, channel)
 		lc, _ := index.get(channel)
 		if !byGroup.has(groupKey) {
-			byGroup.set(groupKey, []*legendEntry{{channel, lc.cloneLegend()}})
+			byGroup.set(groupKey, []*legendEntry{{channel, lc.cloneLegend(cc)}})
 			continue
 		}
 		merged := false
@@ -791,7 +803,7 @@ func assembleLegends(m Model) []Value {
 			if !legendsAreMergeCompatible(m, existing.channel, channel) {
 				continue
 			}
-			if mm := mergeLegendComponent(existing.cmpt, lc); mm != nil {
+			if mm := mergeLegendComponent(cc, existing.cmpt, lc); mm != nil {
 				ta, tb := m.b().getScaleType(existing.channel), m.b().getScaleType(channel)
 				if ta != "" && tb != "" && hasDiscreteDomain(ta) && hasDiscreteDomain(tb) {
 					if domainsExplicitAndEqual(m, existing.channel, channel) {
@@ -805,7 +817,7 @@ func assembleLegends(m Model) []Value {
 			}
 		}
 		if !merged {
-			byGroup.m[groupKey] = append(byGroup.m[groupKey], &legendEntry{channel, lc.cloneLegend()})
+			byGroup.m[groupKey] = append(byGroup.m[groupKey], &legendEntry{channel, lc.cloneLegend(cc)})
 		}
 	}
 	var out []Value

@@ -86,12 +86,14 @@ func isInternalField(name string) bool { return strings.HasPrefix(name, "__") }
 
 // prefixGenerator returns every prefix of every dotted path: "a.b.c" gives
 // a, a[b], a[b][c].
-func prefixGenerator(a map[string]bool) map[string]bool {
+func prefixGenerator(cc *compileCtx, a map[string]bool) map[string]bool {
 	out := make(map[string]bool)
 	for x := range a {
+		cc.work(1)
 		split := splitAccessPath(x)
 		wrapped := make([]string, len(split))
 		for i, y := range split {
+			cc.work(1)
 			if i == 0 {
 				wrapped[i] = y
 			} else {
@@ -99,6 +101,7 @@ func prefixGenerator(a map[string]bool) map[string]bool {
 			}
 		}
 		for i := range wrapped {
+			cc.work(1)
 			out[strings.Join(wrapped[:i+1], "")] = true
 		}
 	}
@@ -106,12 +109,13 @@ func prefixGenerator(a map[string]bool) map[string]bool {
 }
 
 // fieldIntersection: nil (undefined) means "unknown", which intersects everything.
-func fieldIntersection(a, b map[string]bool) bool {
+func fieldIntersection(cc *compileCtx, a, b map[string]bool) bool {
 	if a == nil || b == nil {
 		return true
 	}
-	pa, pb := prefixGenerator(a), prefixGenerator(b)
+	pa, pb := prefixGenerator(cc, a), prefixGenerator(cc, b)
 	for k := range pa {
+		cc.work(1)
 		if pb[k] {
 			return true
 		}

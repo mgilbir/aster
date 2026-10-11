@@ -29,9 +29,9 @@ func newBinNode(parent dfNode, bins *omap[*binComponent]) *binNode {
 	return initNode(&binNode{bins: bins}, parent)
 }
 
-func (b *binComponent) clone() *binComponent {
+func (b *binComponent) clone(cc *compileCtx) *binComponent {
 	c := *b
-	c.bin = deepClone(b.bin)
+	c.bin = deepClone(cc, b.bin)
 	c.as = make([][]string, len(b.as))
 	for i, a := range b.as {
 		c.as[i] = append([]string(nil), a...)
@@ -40,9 +40,11 @@ func (b *binComponent) clone() *binComponent {
 }
 
 func (n *binNode) clone() dfNode {
+	cc := n.cc
 	c := newOmap[*binComponent]()
 	for _, k := range n.bins.keys {
-		c.set(k, n.bins.m[k].clone())
+		cc.work(1)
+		c.set(k, n.bins.m[k].clone(n.cc))
 	}
 	return initNode(&binNode{bins: c}, nil)
 }
@@ -75,17 +77,22 @@ func (b *binComponent) toValue() Value {
 }
 
 func (n *binNode) hash() string {
+	cc := n.cc
 	o := jsval.NewObject(4)
 	for _, k := range n.bins.keys {
+		cc.work(1)
 		o.Set(k, n.bins.m[k].toValue())
 	}
-	return "Bin " + hashOf(jsval.Obj(o))
+	return "Bin " + hashOf(n.cc, jsval.Obj(o))
 }
 
 func (n *binNode) producedFields() *sset {
+	cc := n.cc
 	s := newSset()
 	for _, k := range n.bins.keys {
+		cc.work(1)
 		for _, as := range n.bins.m[k].as {
+			cc.work(1)
 			for _, f := range as {
 				s.add(f)
 			}
@@ -95,8 +102,10 @@ func (n *binNode) producedFields() *sset {
 }
 
 func (n *binNode) dependentFields() *sset {
+	cc := n.cc
 	s := newSset()
 	for _, k := range n.bins.keys {
+		cc.work(1)
 		s.add(n.bins.m[k].field)
 	}
 	return s
@@ -215,13 +224,16 @@ func makeBinFromTransform(parent dfNode, t Value, m Model) *binNode {
 }
 
 func (n *binNode) merge(other *binNode, rename func(oldName, newName string)) {
+	cc := n.cc
 	for _, key := range other.bins.keyList() {
+		cc.work(1)
 		if mine, ok := n.bins.get(key); ok {
 			rename(other.bins.m[key].signal, mine.signal)
 			seen := map[string]bool{}
 			var as [][]string
 			for _, a := range append(append([][]string{}, mine.as...), other.bins.m[key].as...) {
-				h := hashOf(strsVal(a))
+				cc.work(1)
+				h := hashOf(n.cc, strsVal(a))
 				if !seen[h] {
 					seen[h] = true
 					as = append(as, a)
@@ -241,6 +253,7 @@ func (n *binNode) assemble() []Value {
 
 	var out []Value
 	for _, key := range n.bins.keys {
+		cc.work(1)
 		bin := n.bins.m[key]
 		binAs := bin.as[0]
 		remainingAs := bin.as[1:]
@@ -269,6 +282,7 @@ func (n *binNode) assemble() []Value {
 		}
 		out = append(out, jsval.Obj(bt))
 		for _, as := range remainingAs {
+			cc.work(1)
 			for i := 0; i < 2; i++ {
 				out = append(out, mkv("type", "formula", "expr", vgField(cc, mkv("field", binAs[i]), fieldRefOption{expr: "datum"}), "as", as[i]))
 			}
@@ -292,9 +306,11 @@ func newTimeUnitNode(parent dfNode, tu *omap[*Object]) *timeUnitNode {
 }
 
 func (n *timeUnitNode) clone() dfNode {
+	cc := n.cc
 	c := newOmap[*Object]()
 	for _, k := range n.timeUnits.keys {
-		c.set(k, deepClone(jsval.Obj(n.timeUnits.m[k])).ObjValue())
+		cc.work(1)
+		c.set(k, deepClone(n.cc, jsval.Obj(n.timeUnits.m[k])).ObjValue())
 	}
 	return initNode(&timeUnitNode{timeUnits: c}, nil)
 }
@@ -302,8 +318,10 @@ func (n *timeUnitNode) clone() dfNode {
 func isTimeUnitTransformComponent(c *Object) bool { return !c.Lookup("as").IsUndefined() }
 
 func (n *timeUnitNode) producedFields() *sset {
+	cc := n.cc
 	s := newSset()
 	for _, k := range n.timeUnits.keys {
+		cc.work(1)
 		f := n.timeUnits.m[k]
 		if isTimeUnitTransformComponent(f) {
 			s.add(f.Lookup("as").AsString())
@@ -315,19 +333,23 @@ func (n *timeUnitNode) producedFields() *sset {
 }
 
 func (n *timeUnitNode) dependentFields() *sset {
+	cc := n.cc
 	s := newSset()
 	for _, k := range n.timeUnits.keys {
+		cc.work(1)
 		s.add(n.timeUnits.m[k].Lookup("field").AsString())
 	}
 	return s
 }
 
 func (n *timeUnitNode) hash() string {
+	cc := n.cc
 	o := jsval.NewObject(4)
 	for _, k := range n.timeUnits.keys {
+		cc.work(1)
 		o.Set(k, jsval.Obj(n.timeUnits.m[k]))
 	}
-	return "TimeUnit " + hashOf(jsval.Obj(o))
+	return "TimeUnit " + hashOf(n.cc, jsval.Obj(o))
 }
 
 const (
@@ -342,7 +364,7 @@ func makeTimeUnitFromEncoding(parent dfNode, m fieldDefModel) dfNode {
 		field, timeUnit := fd.Get("field"), fd.Get("timeUnit")
 		if timeUnit.IsTruthy() && cc.v5 {
 			component := mk("as", vgField(cc, fd, fieldRefOption{forAs: true}), "field", field, "timeUnit", timeUnit)
-			tc.set(hashOf(jsval.Obj(component)), component)
+			tc.set(hashOf(cc, jsval.Obj(component)), component)
 		} else if timeUnit.IsTruthy() {
 			var component *Object
 			u, isUnit := m.(*unitModel)
@@ -365,7 +387,7 @@ func makeTimeUnitFromEncoding(parent dfNode, m fieldDefModel) dfNode {
 				}
 			}
 			if component != nil {
-				tc.set(hashOf(jsval.Obj(component)), component)
+				tc.set(hashOf(cc, jsval.Obj(component)), component)
 			}
 		}
 		return tc
@@ -382,17 +404,20 @@ func makeTimeUnitFromTransform(cc *compileCtx, parent dfNode, t Value) *timeUnit
 	component := cloneObj(other)
 	component.Set("timeUnit", normalizeTimeUnit(cc, timeUnit))
 	tu := newOmap[*Object]()
-	tu.set(hashOf(jsval.Obj(component)), component)
+	tu.set(hashOf(cc, jsval.Obj(component)), component)
 	return newTimeUnitNode(parent, tu)
 }
 
 func (n *timeUnitNode) merge(other *timeUnitNode) {
+	cc := n.cc
 	c := newOmap[*Object]()
 	for _, k := range n.timeUnits.keys {
+		cc.work(1)
 		c.set(k, n.timeUnits.m[k])
 	}
 	n.timeUnits = c
 	for _, k := range other.timeUnits.keys {
+		cc.work(1)
 		if !n.timeUnits.has(k) {
 			n.timeUnits.set(k, other.timeUnits.m[k])
 		}
@@ -402,8 +427,10 @@ func (n *timeUnitNode) merge(other *timeUnitNode) {
 }
 
 func (n *timeUnitNode) removeFormulas(fields *sset) {
+	cc := n.cc
 	nf := newOmap[*Object]()
 	for _, k := range n.timeUnits.keys {
+		cc.work(1)
 		c := n.timeUnits.m[k]
 		var fieldAs string
 		if isTimeUnitTransformComponent(c) {
@@ -461,6 +488,7 @@ func (n *timeUnitNode) assemble() []Value {
 
 	var out []Value
 	for _, k := range n.timeUnits.keys {
+		cc.work(1)
 		f := n.timeUnits.m[k]
 		rect := f.Lookup("rectBandPosition")
 		nt := normalizeTimeUnit(cc, f.Lookup("timeUnit"))
@@ -506,11 +534,13 @@ func newAggregateNode(parent dfNode, dims *sset, measures *omap[*omap[*sset]]) *
 	return initNode(&aggregateNode{dimensions: dims, measures: measures}, parent)
 }
 
-func cloneMeasures(m *omap[*omap[*sset]]) *omap[*omap[*sset]] {
+func cloneMeasures(cc *compileCtx, m *omap[*omap[*sset]]) *omap[*omap[*sset]] {
 	c := newOmap[*omap[*sset]]()
 	for _, f := range m.keys {
+		cc.work(1)
 		ops := newOmap[*sset]()
 		for _, op := range m.m[f].keys {
+			cc.work(1)
 			ops.set(op, m.m[f].m[op].clone())
 		}
 		c.set(f, ops)
@@ -519,7 +549,7 @@ func cloneMeasures(m *omap[*omap[*sset]]) *omap[*omap[*sset]] {
 }
 
 func (n *aggregateNode) clone() dfNode {
-	return initNode(&aggregateNode{dimensions: n.dimensions.clone(), measures: cloneMeasures(n.measures)}, nil)
+	return initNode(&aggregateNode{dimensions: n.dimensions.clone(), measures: cloneMeasures(n.cc, n.measures)}, nil)
 }
 
 func (n *aggregateNode) groupBy() *sset { return n.dimensions }
@@ -580,17 +610,21 @@ func addDimension(dims *sset, channel string, fd Value, m Model) {
 	}
 }
 
-func mergeMeasures(parent, child *omap[*omap[*sset]]) {
+func mergeMeasures(cc *compileCtx, parent, child *omap[*omap[*sset]]) {
 	for _, field := range child.keys {
+		cc.work(1)
 		ops := child.m[field]
 		for _, op := range ops.keys {
+			cc.work(1)
 			if pf, ok := parent.get(field); ok {
 				existing, _ := pf.get(op)
 				merged := newSset()
 				for _, x := range existing.list() {
+					cc.work(1)
 					merged.add(x)
 				}
 				for _, x := range ops.m[op].list() {
+					cc.work(1)
 					merged.add(x)
 				}
 				pf.set(op, merged)
@@ -658,6 +692,7 @@ func makeAggregateFromTransform(cc *compileCtx, parent dfNode, t Value) *aggrega
 	dims := newSset()
 	meas := newOmap[*omap[*sset]]()
 	for _, s := range t.Get("aggregate").Items() {
+		cc.work(1)
 		op, field, as := s.Get("op"), s.Get("field"), s.Get("as")
 		if op.IsTruthy() {
 			name := as.AsString()
@@ -675,6 +710,7 @@ func makeAggregateFromTransform(cc *compileCtx, parent dfNode, t Value) *aggrega
 		}
 	}
 	for _, s := range t.Get("groupby").Items() {
+		cc.work(1)
 		dims.add(s.AsString())
 	}
 	if dims.size()+meas.len() == 0 {
@@ -685,7 +721,7 @@ func makeAggregateFromTransform(cc *compileCtx, parent dfNode, t Value) *aggrega
 
 func (n *aggregateNode) merge(other *aggregateNode) bool {
 	if setEqual(n.dimensions, other.dimensions) {
-		mergeMeasures(n.measures, other.measures)
+		mergeMeasures(n.cc, n.measures, other.measures)
 		return true
 	}
 	return false
@@ -698,22 +734,28 @@ func (n *aggregateNode) addDimensions(fields []string) {
 }
 
 func (n *aggregateNode) dependentFields() *sset {
+	cc := n.cc
 	s := n.dimensions.clone()
 	for _, k := range n.measures.keys {
+		cc.work(1)
 		s.add(k)
 	}
 	return s
 }
 
 func (n *aggregateNode) producedFields() *sset {
+	cc := n.cc
 	out := newSset()
 	for _, field := range n.measures.keys {
+		cc.work(1)
 		for _, op := range n.measures.m[field].keys {
+			cc.work(1)
 			m := n.measures.m[field].m[op]
 			if m.size() == 0 {
 				out.add(op + "_" + field)
 			} else {
 				for _, x := range m.list() {
+					cc.work(1)
 					out.add(x)
 				}
 			}
@@ -723,22 +765,29 @@ func (n *aggregateNode) producedFields() *sset {
 }
 
 func (n *aggregateNode) hash() string {
+	cc := n.cc
 	meas := jsval.NewObject(4)
 	for _, f := range n.measures.keys {
+		cc.work(1)
 		ops := jsval.NewObject(2)
 		for _, op := range n.measures.m[f].keys {
-			ops.Set(op, jsval.Str(setToHashString(n.measures.m[f].m[op])))
+			cc.work(1)
+			ops.Set(op, jsval.Str(setToHashString(n.cc, n.measures.m[f].m[op])))
 		}
 		meas.Set(f, jsval.Obj(ops))
 	}
-	return "Aggregate " + hashOf(mkv("dimensions", setToHashString(n.dimensions), "measures", jsval.Obj(meas)))
+	return "Aggregate " + hashOf(n.cc, mkv("dimensions", setToHashString(n.cc, n.dimensions), "measures", jsval.Obj(meas)))
 }
 
 func (n *aggregateNode) assemble() Value {
+	cc := n.cc
 	var ops, fields, as []Value
 	for _, field := range n.measures.keys {
+		cc.work(1)
 		for _, op := range n.measures.m[field].keys {
+			cc.work(1)
 			for _, alias := range n.measures.m[field].m[op].list() {
+				cc.work(1)
 				as = append(as, jsval.Str(alias))
 				ops = append(ops, jsval.Str(op))
 				if field == "*" {
@@ -751,6 +800,7 @@ func (n *aggregateNode) assemble() Value {
 	}
 	var groupby []Value
 	for _, d := range n.dimensions.list() {
+		cc.work(1)
 		groupby = append(groupby, jsval.Str(replacePathInField(d)))
 	}
 	return mkv("type", "aggregate", "groupby", jsval.Arr(groupby), "ops", jsval.Arr(ops), "fields", jsval.Arr(fields), "as", jsval.Arr(as))

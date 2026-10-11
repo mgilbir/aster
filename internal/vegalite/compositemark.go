@@ -47,7 +47,7 @@ type tooltipSummaryItem struct {
 
 func compositeTitle(def Value) Value { return firstDefined(def.Get("title"), def.Get("field")) }
 
-func filterTooltipWithAggregatedField(oldEncoding Value) (customWithout Value, filtered *Object) {
+func filterTooltipWithAggregatedField(cc *compileCtx, oldEncoding Value) (customWithout Value, filtered *Object) {
 	filtered = omit(oldEncoding, "tooltip")
 	tooltip := oldEncoding.Get("tooltip")
 	if !tooltip.IsTruthy() {
@@ -57,6 +57,7 @@ func filterTooltipWithAggregatedField(oldEncoding Value) (customWithout Value, f
 	haveWith, haveWithout := false, false
 	if tooltip.IsArr() {
 		for _, t := range tooltip.Items() {
+			cc.work(1)
 			if t.Get("aggregate").IsTruthy() {
 				haveWith = true
 				with = append(with, t)
@@ -108,8 +109,9 @@ func getCompositeMarkTooltip(cc *compileCtx, summary []tooltipSummaryItem, conti
 	}
 	seen := map[string]bool{}
 	for _, fd := range fieldDefsOf(cc, encodingWithoutContinuousAxis) {
+		cc.work(1)
 		sfd := toStringFieldDef(fd)
-		h := hashOf(sfd)
+		h := hashOf(cc, sfd)
 		if !seen[h] {
 			seen[h] = true
 			items = append(items, sfd)
@@ -468,7 +470,7 @@ func boxParams(cc *compileCtx, spec Value, extent Value, config Value) boxParams
 		}
 	}
 	oldEncodingWithout := omit(spec.Get("encoding"), cai.axis)
-	customTooltip, filteredEncoding := filterTooltipWithAggregatedField(jsval.Obj(oldEncodingWithout))
+	customTooltip, filteredEncoding := filterTooltipWithAggregatedField(cc, jsval.Obj(oldEncodingWithout))
 	ex := extractTransformsFromEncoding(cc, jsval.Obj(filteredEncoding), config)
 	ticksOrient := "vertical"
 	if orient == "vertical" {

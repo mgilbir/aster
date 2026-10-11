@@ -26,6 +26,8 @@ type exprNode struct {
 }
 
 type exprParser struct {
+	// cc is charged a step per token, so a long expression stops at the deadline.
+	cc    *compileCtx
 	src   string
 	pos   int
 	tok   string
@@ -76,7 +78,9 @@ func (e exprSyntaxError) err() error {
 }
 
 func (p *exprParser) skipSpace() {
+	cc := p.cc
 	for p.pos < len(p.src) {
+		cc.work(1)
 		r, w := utf8.DecodeRuneInString(p.src[p.pos:])
 		if r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == '\v' || r == '\f' || r == 0xA0 || r == 0xFEFF || r == 0x2028 || r == 0x2029 || unicode.Is(unicode.Zs, r) {
 			p.pos += w
@@ -96,6 +100,8 @@ func isIDPart(r rune) bool {
 
 // next advances to the next token. regexOK says a '/' starts a regex literal.
 func (p *exprParser) next(regexOK bool) {
+	cc := p.cc
+	cc.work(1)
 	p.skipSpace()
 	if p.pos >= len(p.src) {
 		p.kind, p.tok, p.val = "eof", "", ""
@@ -107,6 +113,7 @@ func (p *exprParser) next(regexOK bool) {
 		start := p.pos
 		p.pos += w
 		for p.pos < len(p.src) {
+			cc.work(1)
 			r, w2 := utf8.DecodeRuneInString(p.src[p.pos:])
 			if !isIDPart(r) {
 				break
@@ -120,15 +127,18 @@ func (p *exprParser) next(regexOK bool) {
 		if c == '0' && p.pos+1 < len(p.src) && (p.src[p.pos+1] == 'x' || p.src[p.pos+1] == 'X') {
 			p.pos += 2
 			for p.pos < len(p.src) && strings.ContainsRune("0123456789abcdefABCDEF", rune(p.src[p.pos])) {
+				cc.work(1)
 				p.pos++
 			}
 		} else {
 			for p.pos < len(p.src) && p.src[p.pos] >= '0' && p.src[p.pos] <= '9' {
+				cc.work(1)
 				p.pos++
 			}
 			if p.pos < len(p.src) && p.src[p.pos] == '.' {
 				p.pos++
 				for p.pos < len(p.src) && p.src[p.pos] >= '0' && p.src[p.pos] <= '9' {
+					cc.work(1)
 					p.pos++
 				}
 			}
@@ -139,6 +149,7 @@ func (p *exprParser) next(regexOK bool) {
 				}
 				if q < len(p.src) && p.src[q] >= '0' && p.src[q] <= '9' {
 					for q < len(p.src) && p.src[q] >= '0' && p.src[q] <= '9' {
+						cc.work(1)
 						q++
 					}
 					p.pos = q
@@ -158,6 +169,7 @@ func (p *exprParser) next(regexOK bool) {
 		p.pos += w
 		var sb strings.Builder
 		for {
+			cc.work(1)
 			if p.pos >= len(p.src) {
 				p.fail("Unexpected token ILLEGAL")
 			}
@@ -217,6 +229,7 @@ func (p *exprParser) next(regexOK bool) {
 		p.pos++
 		inClass := false
 		for {
+			cc.work(1)
 			if p.pos >= len(p.src) {
 				p.fail("Invalid regular expression: missing /")
 			}
@@ -235,6 +248,7 @@ func (p *exprParser) next(regexOK bool) {
 			}
 		}
 		for p.pos < len(p.src) {
+			cc.work(1)
 			r, w2 := utf8.DecodeRuneInString(p.src[p.pos:])
 			if !isIDPart(r) {
 				break
@@ -285,7 +299,7 @@ var exprDisabled = strSet([]string{
 	"continue", "debugger", "interface", "protected", "instanceof", "implements",
 })
 
-func parseExprAST(src string) (root *exprNode, err error) {
+func parseExprAST(cc *compileCtx, src string) (root *exprNode, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			if se, ok := r.(exprSyntaxError); ok {
@@ -295,7 +309,7 @@ func parseExprAST(src string) (root *exprNode, err error) {
 			panic(r)
 		}
 	}()
-	p := &exprParser{src: src}
+	p := &exprParser{cc: cc, src: src}
 	p.next(true)
 	root = p.parseConditional()
 	if p.kind != "eof" {
@@ -533,13 +547,14 @@ func startsWithDatum(n *exprNode) bool {
 }
 
 // getDependentFields lists the datum fields an expression reads.
-func getDependentFields(expression string) *sset {
-	ast, err := parseExprAST(expression)
+func getDependentFields(cc *compileCtx, expression string) *sset {
+	ast, err := parseExprAST(cc, expression)
 	if err != nil {
 		panic(err)
 	}
 	deps := newSset()
 	ast.visit(func(n *exprNode) {
+		cc.work(1)
 		if n.kind == "Member" && startsWithDatum(n) {
 			names := exprNames(n)
 			if len(names) > 0 {

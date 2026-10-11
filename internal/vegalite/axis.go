@@ -79,8 +79,8 @@ type axisComponent struct {
 
 func newAxisComponent() *axisComponent { return &axisComponent{split: newSplit()} }
 
-func (a *axisComponent) cloneAxis() *axisComponent {
-	return &axisComponent{split: a.split.clone(), mainExtracted: a.mainExtracted}
+func (a *axisComponent) cloneAxis(cc *compileCtx) *axisComponent {
+	return &axisComponent{split: a.split.clone(cc), mainExtracted: a.mainExtracted}
 }
 
 func isFalseOrNull(v Value) bool { return v.IsNull() || (v.IsBool() && !v.BoolValue()) }
@@ -115,13 +115,14 @@ func parseLayerAxes(m *layerModel) {
 	axes, resolve := m.comp.axes, m.comp.resolve
 	axisCount := map[string]int{"top": 0, "bottom": 0, "right": 0, "left": 0}
 	for _, child := range m.kids {
+		cc.work(modelStep)
 		child.parseAxesAndHeaders()
 		for _, channel := range child.b().comp.axes.keyList() {
 			resolve.axis[channel] = parseGuideResolve(m.comp.resolve, channel)
 			if resolve.axis[channel] == "shared" {
 				cur, _ := axes.get(channel)
 				childAxes, _ := child.b().comp.axes.get(channel)
-				mergedAxes, ok := mergeAxisComponents(cur, childAxes)
+				mergedAxes, ok := mergeAxisComponents(cc, cur, childAxes)
 				if !ok {
 					resolve.axis[channel] = "independent"
 					axes.del(channel)
@@ -133,6 +134,7 @@ func parseLayerAxes(m *layerModel) {
 	}
 	for _, channel := range positionScaleChannels {
 		for _, child := range m.kids {
+			cc.work(modelStep)
 			childAxes, ok := child.b().comp.axes.get(channel)
 			if !ok || childAxes == nil {
 				continue
@@ -141,6 +143,7 @@ func parseLayerAxes(m *layerModel) {
 				cur, _ := axes.get(channel)
 				axes.set(channel, append(append([]*axisComponent{}, cur...), childAxes...))
 				for _, ac := range childAxes {
+					cc.work(1)
 					we := ac.getWithExplicit("orient")
 					if isSignalRef(we.value) {
 						continue
@@ -160,6 +163,7 @@ func parseLayerAxes(m *layerModel) {
 		if resolve.axis[channel] == "independent" {
 			if list, ok := axes.get(channel); ok && len(list) > 1 {
 				for i, ac := range list {
+					cc.work(1)
 					if (cc.v5 || i > 0) && ac.get("grid").IsTruthy() && !ac.explicit.Lookup("grid").IsTruthy() {
 						ac.implicit.Set("grid", jsval.False)
 					}
@@ -169,12 +173,13 @@ func parseLayerAxes(m *layerModel) {
 	}
 }
 
-func mergeAxisComponents(merged, child []*axisComponent) ([]*axisComponent, bool) {
+func mergeAxisComponents(cc *compileCtx, merged, child []*axisComponent) ([]*axisComponent, bool) {
 	if merged != nil {
 		if len(merged) != len(child) {
 			return nil, false
 		}
 		for i := range merged {
+			cc.work(1)
 			mg, ch := merged[i], child[i]
 			if (mg != nil) != (ch != nil) {
 				return nil, false
@@ -190,7 +195,8 @@ func mergeAxisComponents(merged, child []*axisComponent) ([]*axisComponent, bool
 	}
 	out := make([]*axisComponent, len(child))
 	for i, c := range child {
-		out[i] = c.cloneAxis()
+		cc.work(1)
+		out[i] = c.cloneAxis(cc)
 	}
 	return out, true
 }
@@ -359,6 +365,7 @@ func guideEncodeEntry(encoding Value, m *unitModel) Value {
 
 	out := jsval.NewObject(4)
 	for _, channel := range keysOf(encoding) {
+		cc.work(1)
 		spreadV(out, wrapCondition(cc, wrapConditionOpts{
 			model: m, channelDef: encoding.Get(channel), vgChannel: channel,
 			mainRefFn: func(def Value) Value { return signalOrValueRef(def.Get("value")) },
@@ -855,6 +862,7 @@ func assembleAxisTitle(cc *compileCtx, title Value, config Value) Value {
 	if title.IsArr() && !isText(title) {
 		var parts []string
 		for _, fd := range title.Items() {
+			cc.work(1)
 			parts = append(parts, joinItem(defaultTitle(cc, fd, config)))
 		}
 		return jsval.Str(strings.Join(parts, ", "))
@@ -903,6 +911,7 @@ func assembleAxis(cc *compileCtx, a *axisComponent, kind string, config Value, h
 			if pi, ok := conditionalAxisProp[prop]; ok && !pi.isNull {
 				var vgRef []Value
 				for _, c := range conditions {
+					cc.work(1)
 					test := c.Get("test")
 					o := mk("test", expression(cc, nil, test, nil))
 					spreadV(o, jsval.Obj(omit(c, "test")))
@@ -914,6 +923,7 @@ func assembleAxis(cc *compileCtx, a *axisComponent, kind string, config Value, h
 			} else if ok && pi.isNull {
 				var sb strings.Builder
 				for _, c := range conditions {
+					cc.work(1)
 					sb.WriteString(expression(cc, nil, c.Get("test"), nil) + " ? " + exprFromValueRefOrSignalRef(jsval.Obj(omit(c, "test"))) + " : ")
 				}
 				sb.WriteString(exprFromValueRefOrSignalRef(valueOrSignalRef))
@@ -998,6 +1008,7 @@ func assembleAxis(cc *compileCtx, a *axisComponent, kind string, config Value, h
 func omap2(o *Object) *Object { return o }
 
 func assembleAxisSignals(m Model) []Value {
+	cc := m.b().ctx
 	var signals []Value
 	axes := m.b().comp.axes
 	for _, channel := range positionScaleChannels {
@@ -1006,6 +1017,7 @@ func assembleAxisSignals(m Model) []Value {
 			continue
 		}
 		for _, axis := range list {
+			cc.work(1)
 			if !axis.get("disable").IsTruthy() && !axis.get("gridScale").IsTruthy() {
 				sizeType := "width"
 				if channel == chX {
@@ -1027,6 +1039,7 @@ func assembleAxes(cc *compileCtx, axisComponents *omap[[]*axisComponent], config
 	var out []Value
 	add := func(list []*axisComponent, kind string) {
 		for _, a := range list {
+			cc.work(1)
 			if v := assembleAxis(cc, a, kind, config, false); v.IsTruthy() {
 				out = append(out, v)
 			}

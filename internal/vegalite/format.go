@@ -9,7 +9,7 @@ import (
 func customFormatExpr(formatType, field string, format Value) string {
 	f := ""
 	if format.IsTruthy() {
-		f = ", " + stringify(format)
+		f = ", " + stringify(nil, format)
 	}
 	return formatType + "(" + field + f + ")"
 }

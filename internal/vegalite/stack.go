@@ -146,6 +146,7 @@ func stackOf(cc *compileCtx, m Value, encoding Value) *stackProperties {
 	for _, channel := range nonPositionChannels {
 		if channel != chTooltip && channelHasField(cc, encoding, channel) {
 			for _, cDef := range arrayOf(encoding.Get(channel)) {
+				cc.work(1)
 				fd := getFieldDef(cc, cDef)
 				if fd.Get("aggregate").IsTruthy() {
 					continue

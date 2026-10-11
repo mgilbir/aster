@@ -33,7 +33,7 @@ var xformHashPrefix = map[string]string{
 
 func (n *xformNode) clone() dfNode {
 	c := &xformNode{kind: n.kind, secondary: n.secondary}
-	v := deepClone(n.tv())
+	v := deepClone(n.cc, n.tv())
 	c.transform = &v
 	initNode(c, nil)
 	return c
@@ -41,14 +41,15 @@ func (n *xformNode) clone() dfNode {
 
 func (n *xformNode) hash() string {
 	if n.kind == "lookup" {
-		return "Lookup " + hashOf(mkv("transform", n.tv(), "secondary", n.secondary))
+		return "Lookup " + hashOf(n.cc, mkv("transform", n.tv(), "secondary", n.secondary))
 	}
-	return xformHashPrefix[n.kind] + " " + hashOf(n.tv())
+	return xformHashPrefix[n.kind] + " " + hashOf(n.cc, n.tv())
 }
 
-func strItems(v Value) []string {
+func strItems(cc *compileCtx, v Value) []string {
 	var out []string
 	for _, x := range v.Items() {
+		cc.work(1)
 		out = append(out, x.AsString())
 	}
 	return out
@@ -64,66 +65,79 @@ func (n *xformNode) defaultName(def Value) string {
 }
 
 func (n *xformNode) dependentFields() *sset {
+	cc := n.cc
 	t := n.tv()
 	out := newSset()
 	switch n.kind {
 	case "window":
-		for _, g := range strItems(t.Get("groupby")) {
+		for _, g := range strItems(n.cc, t.Get("groupby")) {
+			cc.work(1)
 			out.add(g)
 		}
 		for _, m := range t.Get("sort").Items() {
+			cc.work(1)
 			out.add(m.Get("field").AsString())
 		}
 		for _, w := range t.Get("window").Items() {
+			cc.work(1)
 			if f := w.Get("field"); !f.IsUndefined() {
 				out.add(f.AsString())
 			}
 		}
 	case "joinaggregate":
-		for _, g := range strItems(t.Get("groupby")) {
+		for _, g := range strItems(n.cc, t.Get("groupby")) {
+			cc.work(1)
 			out.add(g)
 		}
 		for _, w := range t.Get("joinaggregate").Items() {
+			cc.work(1)
 			if f := w.Get("field"); !f.IsUndefined() {
 				out.add(f.AsString())
 			}
 		}
 	case "fold":
-		for _, f := range strItems(t.Get("fold")) {
+		for _, f := range strItems(n.cc, t.Get("fold")) {
+			cc.work(1)
 			out.add(f)
 		}
 	case "extent":
 		out.add(t.Get("extent").AsString())
 	case "flatten":
-		for _, f := range strItems(t.Get("flatten")) {
+		for _, f := range strItems(n.cc, t.Get("flatten")) {
+			cc.work(1)
 			out.add(f)
 		}
 	case "pivot":
 		out.add(t.Get("pivot").AsString())
 		out.add(t.Get("value").AsString())
-		for _, g := range strItems(t.Get("groupby")) {
+		for _, g := range strItems(n.cc, t.Get("groupby")) {
+			cc.work(1)
 			out.add(g)
 		}
 	case "density":
 		out.add(t.Get("density").AsString())
-		for _, g := range strItems(t.Get("groupby")) {
+		for _, g := range strItems(n.cc, t.Get("groupby")) {
+			cc.work(1)
 			out.add(g)
 		}
 	case "quantile":
 		out.add(t.Get("quantile").AsString())
-		for _, g := range strItems(t.Get("groupby")) {
+		for _, g := range strItems(n.cc, t.Get("groupby")) {
+			cc.work(1)
 			out.add(g)
 		}
 	case "regression":
 		out.add(t.Get("regression").AsString())
 		out.add(t.Get("on").AsString())
-		for _, g := range strItems(t.Get("groupby")) {
+		for _, g := range strItems(n.cc, t.Get("groupby")) {
+			cc.work(1)
 			out.add(g)
 		}
 	case "loess":
 		out.add(t.Get("loess").AsString())
 		out.add(t.Get("on").AsString())
-		for _, g := range strItems(t.Get("groupby")) {
+		for _, g := range strItems(n.cc, t.Get("groupby")) {
+			cc.work(1)
 			out.add(g)
 		}
 	case "lookup":
@@ -131,7 +145,8 @@ func (n *xformNode) dependentFields() *sset {
 	case "impute":
 		out.add(t.Get("impute").AsString())
 		out.add(t.Get("key").AsString())
-		for _, g := range strItems(t.Get("groupby")) {
+		for _, g := range strItems(n.cc, t.Get("groupby")) {
+			cc.work(1)
 			out.add(g)
 		}
 	}
@@ -139,31 +154,34 @@ func (n *xformNode) dependentFields() *sset {
 }
 
 func (n *xformNode) producedFields() *sset {
+	cc := n.cc
 	t := n.tv()
 	switch n.kind {
 	case "window":
 		s := newSset()
 		for _, w := range t.Get("window").Items() {
+			cc.work(1)
 			s.add(n.defaultName(w))
 		}
 		return s
 	case "joinaggregate":
 		s := newSset()
 		for _, w := range t.Get("joinaggregate").Items() {
+			cc.work(1)
 			s.add(n.defaultName(w))
 		}
 		return s
 	case "fold", "flatten", "density", "quantile", "regression", "loess":
-		return newSset(strItems(t.Get("as"))...)
+		return newSset(strItems(n.cc, t.Get("as"))...)
 	case "extent", "sample":
 		return newSset()
 	case "pivot":
 		return nil
 	case "lookup":
 		if t.Get("as").IsTruthy() {
-			return newSset(strItems(jsval.Arr(arrayOf(t.Get("as"))))...)
+			return newSset(strItems(n.cc, jsval.Arr(arrayOf(t.Get("as"))))...)
 		}
-		return newSset(strItems(t.Get("from").Get("fields"))...)
+		return newSset(strItems(n.cc, t.Get("from").Get("fields"))...)
 	case "impute":
 		return newSset(t.Get("impute").AsString())
 	}
@@ -172,6 +190,7 @@ func (n *xformNode) producedFields() *sset {
 
 // addDimensions is defined for window, joinaggregate and pivot nodes.
 func (n *xformNode) addDimensions(fields []string) {
+	cc := n.cc
 	t := n.tv()
 	var base []Value
 	switch n.kind {
@@ -194,6 +213,7 @@ func (n *xformNode) addDimensions(fields []string) {
 	seen := map[string]bool{}
 	var out []Value
 	for _, x := range base {
+		cc.work(1)
 		if !seen[x.AsString()] {
 			seen[x.AsString()] = true
 			out = append(out, x)
@@ -220,6 +240,7 @@ func (n *xformNode) assemble() []Value {
 	case "joinaggregate":
 		var fields, ops, as []Value
 		for _, j := range t.Get("joinaggregate").Items() {
+			cc.work(1)
 			ops = append(ops, j.Get("op"))
 			as = append(as, jsval.Str(n.defaultName(j)))
 			if j.Get("field").IsUndefined() {
@@ -282,6 +303,7 @@ func (n *xformNode) assembleWindow() Value {
 	t := n.tv()
 	var fields, ops, as, params []Value
 	for _, w := range t.Get("window").Items() {
+		cc.work(1)
 		ops = append(ops, w.Get("op"))
 		as = append(as, jsval.Str(n.defaultName(w)))
 		if p := w.Get("param"); p.IsUndefined() {
@@ -299,6 +321,7 @@ func (n *xformNode) assembleWindow() Value {
 	if frame.IsArr() && frame.Index(0).IsNull() && frame.Index(1).IsNull() {
 		all := true
 		for _, o := range ops {
+			cc.work(1)
 			if !isAggregateOp(cc, o) {
 				all = false
 			}
@@ -314,6 +337,7 @@ func (n *xformNode) assembleWindow() Value {
 	var sortFields, sortOrder []Value
 	if s := t.Get("sort"); !s.IsUndefined() {
 		for _, sf := range s.Items() {
+			cc.work(1)
 			sortFields = append(sortFields, sf.Get("field"))
 			sortOrder = append(sortOrder, coalesce(sf.Get("order"), jsval.Str("ascending")))
 		}
@@ -437,7 +461,7 @@ func makeImputeFromEncoding(parent dfNode, m *unitModel) dfNode {
 // ---- transform constructors that normalize their input ----
 
 func newDensityNode(cc *compileCtx, parent dfNode, t Value) dfNode {
-	t = deepClone(t)
+	t = deepClone(ccOf(parent), t)
 	as := t.Get("as")
 	o := cloneObj(t.ObjValue())
 	o.Set("as", arr(coalesce(jsIndex(as, 0), jsval.Str("value")), coalesce(jsIndex(as, 1), jsval.Str("density"))))
@@ -453,7 +477,7 @@ func newDensityNode(cc *compileCtx, parent dfNode, t Value) dfNode {
 }
 
 func newFoldNode(parent dfNode, t Value) dfNode {
-	t = deepClone(t)
+	t = deepClone(ccOf(parent), t)
 	as := t.Get("as")
 	o := cloneObj(t.ObjValue())
 	o.Set("as", arr(coalesce(jsIndex(as, 0), jsval.Str("key")), coalesce(jsIndex(as, 1), jsval.Str("value"))))
@@ -461,10 +485,12 @@ func newFoldNode(parent dfNode, t Value) dfNode {
 }
 
 func newFlattenNode(parent dfNode, t Value) dfNode {
-	t = deepClone(t)
+	cc := ccOf(parent)
+	t = deepClone(ccOf(parent), t)
 	as := t.Get("as")
 	var out []Value
 	for i, f := range t.Get("flatten").Items() {
+		cc.work(1)
 		out = append(out, coalesce(jsIndex(as, i), f))
 	}
 	o := cloneObj(t.ObjValue())
@@ -473,7 +499,7 @@ func newFlattenNode(parent dfNode, t Value) dfNode {
 }
 
 func newQuantileNode(parent dfNode, t Value) dfNode {
-	t = deepClone(t)
+	t = deepClone(ccOf(parent), t)
 	as := t.Get("as")
 	o := cloneObj(t.ObjValue())
 	o.Set("as", arr(coalesce(jsIndex(as, 0), jsval.Str("prob")), coalesce(jsIndex(as, 1), jsval.Str("value"))))
@@ -481,7 +507,7 @@ func newQuantileNode(parent dfNode, t Value) dfNode {
 }
 
 func newRegressionNode(parent dfNode, t Value, kind string, field string) dfNode {
-	t2 := deepClone(t)
+	t2 := deepClone(ccOf(parent), t)
 	as := t2.Get("as")
 	o := cloneObj(t2.ObjValue())
 	o.Set("as", arr(coalesce(jsIndex(as, 0), t.Get("on")), coalesce(jsIndex(as, 1), t.Get(field))))
@@ -498,7 +524,7 @@ func makeLookupNode(parent dfNode, m Model, t Value, counter int) dfNode {
 	var secondary string
 	switch {
 	case hasProperty(from, "data"):
-		fromSource := findSource(from.Get("data"), sources.sources.items)
+		fromSource := findSource(cc, from.Get("data"), sources.sources.items)
 		if fromSource == nil {
 			fromSource = newSourceNode(cc, from.Get("data"))
 			sources.sources.items = append(sources.sources.items, fromSource)
@@ -522,7 +548,7 @@ func makeLookupNode(parent dfNode, m Model, t Value, counter int) dfNode {
 			throw("Cannot define and lookup the %q selection in the same view. Try moving the lookup into a second, layered view?", selName)
 		}
 	default:
-		throw("Invalid lookup `from` %s: expected an object with a `data` or a `param` property.", stringify(from))
+		throw("Invalid lookup `from` %s: expected an object with a `data` or a `param` property.", stringify(cc, from))
 	}
 	secondary = fromOutput.getSource()
 	n := newXform(parent, "lookup", t)
@@ -559,7 +585,7 @@ func (n *stackNode) clone() dfNode {
 	c.facetby = append([]string(nil), n.st.facetby...)
 	c.stackby = append([]string(nil), n.st.stackby...)
 	c.as = append([]string(nil), n.st.as...)
-	c.sort = deepClone(n.st.sort)
+	c.sort = deepClone(n.cc, n.st.sort)
 	return initNode(&stackNode{st: &c}, nil)
 }
 
@@ -572,6 +598,7 @@ func (n *stackNode) getGroupbyFields() []string {
 	if len(st.dimensionFieldDefs) > 0 {
 		var out []string
 		for _, d := range st.dimensionFieldDefs {
+			cc.work(1)
 			if d.Get("bin").IsTruthy() {
 				if st.impute {
 					out = append(out, vgField(cc, d, fieldRefOption{binSuffix: "mid"}))
@@ -584,18 +611,21 @@ func (n *stackNode) getGroupbyFields() []string {
 		}
 		return out
 	}
-	return strItems(st.groupby)
+	return strItems(cc, st.groupby)
 }
 
 func (n *stackNode) dependentFields() *sset {
+	cc := n.cc
 	out := newSset(n.st.stackField)
 	for _, f := range n.getGroupbyFields() {
+		cc.work(1)
 		out.add(f)
 	}
 	for _, f := range n.st.facetby {
 		out.add(f)
 	}
-	for _, f := range strItems(n.st.sort.Get("field")) {
+	for _, f := range strItems(n.cc, n.st.sort.Get("field")) {
+		cc.work(1)
 		out.add(f)
 	}
 	return out
@@ -621,10 +651,11 @@ func (n *stackNode) hash() string {
 		o.Set("impute", jsval.True)
 	}
 	o.Set("as", strsVal(st.as))
-	return "Stack " + hashOf(jsval.Obj(o))
+	return "Stack " + hashOf(n.cc, jsval.Obj(o))
 }
 
 func makeStackFromTransform(parent dfNode, t Value) *stackNode {
+	cc := ccOf(parent)
 	stack, groupby, as := t.Get("stack"), t.Get("groupby"), t.Get("as")
 	offset := "zero"
 	if o := t.Get("offset"); !o.IsUndefined() {
@@ -632,6 +663,7 @@ func makeStackFromTransform(parent dfNode, t Value) *stackNode {
 	}
 	var sortFields, sortOrder []Value
 	for _, sf := range t.Get("sort").Items() {
+		cc.work(1)
 		sortFields = append(sortFields, sf.Get("field"))
 		sortOrder = append(sortOrder, firstDefined(sf.Get("order"), jsval.Str("ascending")))
 	}
@@ -640,13 +672,14 @@ func makeStackFromTransform(parent dfNode, t Value) *stackNode {
 	switch {
 	case as.IsArr() && as.Len() > 1 && func() bool {
 		for _, x := range as.Items() {
+			cc.work(1)
 			if !x.IsStr() {
 				return false
 			}
 		}
 		return true
 	}():
-		normalizedAs = strItems(as)
+		normalizedAs = strItems(ccOf(parent), as)
 	case as.IsStr():
 		normalizedAs = []string{as.StrValue(), as.StrValue() + "_end"}
 	default:
@@ -672,6 +705,7 @@ func makeStackFromEncoding(parent dfNode, m *unitModel) dfNode {
 	}
 	var stackby []string
 	for _, by := range sp.stackBy {
+		cc.work(1)
 		if f := vgField(cc, by.fieldDef, fieldRefOption{}); f != "" {
 			stackby = append(stackby, f)
 		}
@@ -694,6 +728,7 @@ func makeStackFromEncoding(parent dfNode, m *unitModel) dfNode {
 		var fields, orders []Value
 		seen := map[string]bool{}
 		for _, f := range stackby {
+			cc.work(1)
 			if cc.v5 || !seen[f] {
 				seen[f] = true
 				fields = append(fields, jsval.Str(f))
@@ -720,6 +755,7 @@ func (n *stackNode) assemble() []Value {
 	st := n.st
 	if st.impute {
 		for _, d := range st.dimensionFieldDefs {
+			cc.work(1)
 			bandPosition := 0.5
 			if bp := d.Get("bandPosition"); bp.IsNum() {
 				bandPosition = bp.NumValue()
@@ -760,14 +796,16 @@ func newGeoJSONNode(parent dfNode, fields Value, geojson, signal string) *geoJSO
 }
 
 func (n *geoJSONNode) clone() dfNode {
-	return initNode(&geoJSONNode{fields: deepClone(n.fields), geojson: n.geojson, signal: n.signal}, nil)
+	return initNode(&geoJSONNode{fields: deepClone(n.cc, n.fields), geojson: n.geojson, signal: n.signal}, nil)
 }
 func (n *geoJSONNode) dependentFields() *sset {
+	cc := n.cc
 	out := newSset()
 	if n.geojson != "" {
 		out.add(n.geojson)
 	}
 	for _, f := range n.fields.Items() {
+		cc.work(1)
 		if f.IsStr() {
 			out.add(f.StrValue())
 		}
@@ -776,7 +814,7 @@ func (n *geoJSONNode) dependentFields() *sset {
 }
 func (n *geoJSONNode) producedFields() *sset { return newSset() }
 func (n *geoJSONNode) hash() string {
-	return "GeoJSON " + n.geojson + " " + n.signal + " " + hashOf(n.fields)
+	return "GeoJSON " + n.geojson + " " + n.signal + " " + hashOf(n.cc, n.fields)
 }
 func (n *geoJSONNode) assemble() []Value {
 	var out []Value
@@ -846,11 +884,13 @@ func newGeoPointNode(parent dfNode, projection string, fields Value, as []string
 	return initNode(&geoPointNode{projection: projection, fields: fields, as: as}, parent)
 }
 func (n *geoPointNode) clone() dfNode {
-	return initNode(&geoPointNode{projection: n.projection, fields: deepClone(n.fields), as: append([]string(nil), n.as...)}, nil)
+	return initNode(&geoPointNode{projection: n.projection, fields: deepClone(n.cc, n.fields), as: append([]string(nil), n.as...)}, nil)
 }
 func (n *geoPointNode) dependentFields() *sset {
+	cc := n.cc
 	out := newSset()
 	for _, f := range n.fields.Items() {
+		cc.work(1)
 		if f.IsStr() {
 			out.add(f.StrValue())
 		}
@@ -859,7 +899,7 @@ func (n *geoPointNode) dependentFields() *sset {
 }
 func (n *geoPointNode) producedFields() *sset { return newSset(n.as...) }
 func (n *geoPointNode) hash() string {
-	return "Geopoint " + n.projection + " " + hashOf(n.fields) + " " + hashOf(strsVal(n.as))
+	return "Geopoint " + n.projection + " " + hashOf(n.cc, n.fields) + " " + hashOf(n.cc, strsVal(n.as))
 }
 func (n *geoPointNode) assemble() Value {
 	return mkv("type", "geopoint", "projection", n.projection, "fields", n.fields, "as", strsVal(n.as))
@@ -939,7 +979,7 @@ func (n *facetNode) facetHash(info *facetChannelInfo) string {
 	if info.sortIndexField != "" {
 		o.Set("sortIndexField", jsval.Str(info.sortIndexField))
 	}
-	return hashOf(jsval.Obj(o))
+	return hashOf(n.cc, jsval.Obj(o))
 }
 
 func (n *facetNode) hash() string {
@@ -986,7 +1026,7 @@ func (n *facetNode) getChildIndependentFieldsWithStep() map[string]string {
 			typ, rng := cs.get("type").AsString(), cs.get("range")
 			if hasDiscreteDomain(typ) && isVgRangeStep(rng) {
 				domain := assembleDomain(n.childModel, channel)
-				if field := getFieldFromDomain(domain); field != "" {
+				if field := getFieldFromDomain(n.cc, domain); field != "" {
 					out[channel] = field
 				}
 			}

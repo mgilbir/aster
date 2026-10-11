@@ -49,6 +49,7 @@ func wrapCondition(cc *compileCtx, o wrapConditionOpts) Value {
 	var valueRefs []Value
 	if cond := o.channelDef.Get("condition"); isConditionalDef(o.channelDef) && cond.IsTruthy() {
 		for _, c := range arrayOf(cond) {
+			cc.work(1)
 			cvr := o.mainRefFn(c)
 			if isConditionalParameter(c) {
 				test := parseSelectionPredicate(o.model, mkv("param", c.Get("param"), "empty", c.Get("empty")), nil, "datum")
@@ -334,6 +335,7 @@ func descriptionEncode(m *unitModel) Value {
 	var parts []string
 	idx := 0
 	for _, key := range data.keys {
+		cc.work(1)
 		value := data.m[key]
 		if cc.v5 && value == "" {
 			value = "undefined" // 5.8 interpolates a missing expression as is
@@ -432,6 +434,7 @@ func tooltipData(cc *compileCtx, encoding Value, stack *stackProperties, config 
 		}
 		var titleParts []string
 		for _, x := range arrayOf(titleV) {
+			cc.work(1)
 			titleParts = append(titleParts, x.AsString())
 		}
 		key := strings.Join(titleParts, ", ")
@@ -465,7 +468,7 @@ func tooltipData(cc *compileCtx, encoding Value, stack *stackProperties, config 
 		}
 		tuples = append(tuples, tooltipEntry{channel, key, value, true})
 	}
-	encodingEach(encoding, func(cd Value, channel string) {
+	encodingEach(cc, encoding, func(cd Value, channel string) {
 		if isFieldDef(cc, cd) {
 			add(cd, channel)
 		} else if hasConditionalFieldDef(cc, cd) {
@@ -474,6 +477,7 @@ func tooltipData(cc *compileCtx, encoding Value, stack *stackProperties, config 
 	})
 	out := newOmap[string]()
 	for _, t := range tuples {
+		cc.work(1)
 		// `!out[key]`: an earlier entry whose value was undefined does not block
 		// this one, and a key every object inherits (toString, constructor, ...)
 		// reads as an entry already there.
@@ -488,6 +492,7 @@ func tooltipRefForEncoding(cc *compileCtx, encoding Value, stack *stackPropertie
 	data := tooltipData(cc, encoding, stack, config, reactiveGeom)
 	var kv []string
 	for _, k := range data.keys {
+		cc.work(1)
 		kv = append(kv, `"`+k+`": `+jsName(data.m[k]))
 	}
 	if len(kv) > 0 {
