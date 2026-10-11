@@ -73,6 +73,8 @@ type config struct {
 	fallbackFamily  string
 	serifFamily     string
 	monospaceFamily string
+	fallbacks       []string // WithFallbackFamilies'; nil unless fallbackSet
+	fallbackSet     bool
 }
 
 type customFont struct {
@@ -88,15 +90,29 @@ type customFont struct {
 func WithSystemFonts() Option { return func(c *config) { c.systemFonts = true } }
 
 // WithFont registers a TrueType, OpenType or WOFF font under the given family
-// name. Its weight and style are read from the font. Fonts registered later
-// are tried after earlier ones when the same family name has several faces
-// of equal fit.
+// name. Its weight and style are read from the font. A family given faces
+// this way is made of them alone, as a CSS @font-face family is: embedded and
+// system faces of the same name are no longer that family. Among its faces
+// the best fit for the weight and style is drawn, and of faces that fit
+// equally the one registered last.
 //
 // A font collection (.ttc, .otc) registers every face of it under family,
 // each with its own weight and style, which CSS font-weight and font-style
 // then choose among; WithFontFace registers one.
 func WithFont(family string, ttf []byte) Option {
 	return func(c *config) { c.fonts = append(c.fonts, customFont{family: family, data: ttf, index: -1}) }
+}
+
+// WithFallbackFamilies sets the families tried, in order, for characters the
+// requested families (and the default family) lack, replacing the default
+// chain: every registered font, the latest first, then the embedded ones,
+// Noto Emoji last. No families means no fallback: such characters draw as
+// .notdef. A family may be registered, embedded, or (with WithSystemFonts) a
+// system one; one with no font makes New fail.
+func WithFallbackFamilies(families ...string) Option {
+	return func(c *config) {
+		c.fallbacks, c.fallbackSet = append([]string{}, families...), true
+	}
 }
 
 // WithFontFace registers face index (from 0) of a font collection under
@@ -232,7 +248,13 @@ type measurerState struct {
 	entries  []*entry // registration order
 	fallback []*entry // entries in fallback order (see faces)
 	byFam    map[string][]*entry
-	first    *Face // the face runes nothing covers fall back to (.notdef)
+	// own holds, by normalised family, the faces given with WithFont and its
+	// kin, the latest first: such a family is made of them alone.
+	own map[string][]*entry
+	// fallbackOrder is WithFallbackFamilies' chain, one list of faces per
+	// family; nil selects the default chain (fallback).
+	fallbackOrder [][]*entry
+	first         *Face // the face runes nothing covers fall back to (.notdef)
 
 	fallbackFamily  string
 	serifFamily     string
@@ -326,14 +348,26 @@ func New(opts ...Option) (*Measurer, error) {
 			m.add(&entry{face: face, family: f.family, custom: true})
 		}
 	}
+	m.own = map[string][]*entry{}
 	for i := len(m.entries) - 1; i >= 0; i-- {
-		if m.entries[i].custom {
-			m.fallback = append(m.fallback, m.entries[i])
+		if e := m.entries[i]; e.custom {
+			m.fallback = append(m.fallback, e)
+			m.own[e.norm] = append(m.own[e.norm], e)
 		}
 	}
 	for _, e := range m.entries {
 		if !e.custom {
 			m.fallback = append(m.fallback, e)
+		}
+	}
+	if cfg.fallbackSet {
+		m.fallbackOrder = [][]*entry{}
+		for _, fam := range cfg.fallbacks {
+			es := m.familyEntries(normFamily(fam))
+			if len(es) == 0 {
+				return nil, fmt.Errorf("text: fallback family %q has no font (register it, or enable system fonts for a system one)", fam)
+			}
+			m.fallbackOrder = append(m.fallbackOrder, es)
 		}
 	}
 	return m, nil

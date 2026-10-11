@@ -242,14 +242,9 @@ func TestVariableColourFont(t *testing.T) {
 	if !bytes.Contains(pdf, []byte("/ca 0.25")) { // 64/255
 		t.Error("the PDF does not draw the instance's alpha, 0.25")
 	}
-	// Fonts load on the first render, which fails for an axis the font does
-	// not have, as for a font that does not load.
-	bad, err := aster.New(aster.WithFontInstance("V", data, map[string]float64{"wdth": 75}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer bad.Close()
-	if _, err := bad.VegaToPNG(spec); err == nil || !strings.Contains(err.Error(), "wdth") {
+	// New loads the fonts, and fails for an axis the font does not have, as
+	// for a font that does not load.
+	if _, err := aster.New(aster.WithFontInstance("V", data, map[string]float64{"wdth": 75})); err == nil || !strings.Contains(err.Error(), "wdth") {
 		t.Errorf("an axis the font does not have: %v", err)
 	}
 }

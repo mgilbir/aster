@@ -367,10 +367,9 @@ func TestVLConvertPNGSpecs(t *testing.T) {
 			}
 
 			// RMSE threshold accounts for text anti-aliasing differences between
-			// resvg compiled to wasm32 (aster) vs native x86_64 (vl-convert).
-			// Both use resvg 0.45.1 + Liberation Sans, but sub-pixel glyph
-			// rasterization differs across architectures. Typical RMSE for
-			// text-heavy specs is 1100-2300 (the top of the band comes from
+			// aster's rasterizer and vl-convert's native resvg, which draw the
+			// same Liberation Sans glyphs with different sub-pixel coverage.
+			// Typical RMSE for text-heavy specs is 1100-2300 (the top of the band comes from
 			// 2x-scale trellis charts); structural regressions (shifted
 			// layers, wrong colors) produce values in the tens of thousands.
 			const threshold = 2500.0 // out of 65535 ≈ 3.8% tolerance

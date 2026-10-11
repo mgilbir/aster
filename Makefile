@@ -14,7 +14,8 @@ test:
 test-all:
 	go test ./...
 
-# Every gate, with the oracle required, and a ledger of what ran.
+# The gates CI runs, with the oracle required, and a ledger of what ran
+# (scripts/check.sh; `scripts/check.sh -fast` for the quick ones).
 check:
 	scripts/check.sh
 

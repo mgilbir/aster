@@ -73,6 +73,11 @@ type Options struct {
 	// filesystem itself. An image that cannot be fetched is skipped, as a
 	// broken image is; an error wrapping budget.ErrLimit fails the render.
 	Images func(ctx context.Context, href string) ([]byte, error)
+	// ImageError, when non-nil, is told of each <image> left undrawn because
+	// it could not be read (not fetched, not a PNG, JPEG or GIF, or not
+	// decodable), with its href, on the rendering goroutine. Errors wrapping
+	// budget.ErrLimit fail the render instead.
+	ImageError func(href string, err error)
 	// Background, when non-nil, is painted under the drawing. The default is
 	// fully transparent.
 	Background color.Color
@@ -185,7 +190,7 @@ func Render(svg []byte, opts Options) (img *image.NRGBA, err error) {
 	r := &renderer{
 		doc: doc, lim: lim, shaper: shaper,
 		rast: newRasterizer(), cw: cw, ch: ch, active: map[*node]bool{},
-		ctx: opts.Context, fetched: fetched,
+		ctx: opts.Context, fetched: fetched, imageErr: opts.ImageError,
 	}
 	r.rast.ctx = opts.Context
 	if opts.Limits.MaxPixelOps <= 0 {

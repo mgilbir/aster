@@ -188,9 +188,9 @@ func runSweepCase(t *testing.T, o *oracle.Oracle, c *aster.Converter, mode sweep
 	default:
 		want, err = o.SVG(sc.Lite, sc.Spec)
 		if sc.Lite {
-			got, gerr = c.VegaLiteToSVG(sc.Spec)
+			got, gerr = c.VegaLiteToSVG(sc.Spec, asUpstream)
 		} else {
-			got, gerr = c.VegaToSVG(sc.Spec)
+			got, gerr = c.VegaToSVG(sc.Spec, asUpstream)
 		}
 	}
 	if err != nil {

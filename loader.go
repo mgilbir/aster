@@ -6,30 +6,78 @@ import (
 	"github.com/mgilbir/aster/internal/loader"
 )
 
-// Loader controls how external resources (data files, remote URLs) are fetched.
-// By default, all loading is denied for security. Use HTTPLoader (or
-// NewHTTPLoader) to permit HTTP(S) requests, or implement a custom Loader for
-// fine-grained control.
+// Loader decides which resources a specification may use, and fetches them:
+// the data a data set's url names, the images image marks draw (and the
+// <image> elements of SVG given to SVGToPNG and SVGToPDF), and the links
+// (href) written into SVG. By default every one is refused (DenyLoader).
 //
-// Loaded payloads are read as UTF-8 text: Vega's supported formats (JSON,
-// CSV, TSV, TopoJSON) are all textual, and binary payloads are not supported.
+// Sanitize validates uri, and may rewrite it, before it is loaded or written
+// into the output; an error refuses it. Load returns the bytes at the URI
+// Sanitize returned. For a link only Sanitize is called, and vega-loader's
+// scheme allow-list is applied to its result as well, so a permissive Loader
+// cannot put a javascript: URL into the output.
+//
+// Data is read as UTF-8 text (JSON, CSV, TSV, DSV, TopoJSON); images are
+// binary (PNG, JPEG, GIF) and must be returned unchanged. An error from either
+// method becomes the Err of the *LoadError the render reports (see
+// WithErrorHandler), except that one wrapping ErrLimit is a limit and always
+// fails the call. A Loader is called from many goroutines at once and must be
+// safe for that; it should honour ctx, which carries the call's deadline, and
+// bound what it reads. If it implements io.Closer, Converter.Close closes it.
 type Loader = loader.Loader
 
-// The loader implementations live in internal/loader, which documents them.
+// The loader implementations live in internal/loader; their fields are
+// documented here.
 type (
-	// DenyLoader denies all resource loading. This is the default.
+	// DenyLoader refuses every resource. It is the default, and what
+	// WithLoader(nil) selects.
 	DenyLoader = loader.DenyLoader
-	// HTTPLoader allows loading resources over HTTP and HTTPS, to public addresses
-	// unless AllowPrivateNetworks is set.
+
+	// HTTPLoader loads over HTTP and HTTPS, to public addresses unless
+	// AllowPrivateNetworks is set. Its fields:
+	//
+	//   - Client *http.Client: nil (or http.DefaultClient) selects a client of
+	//     this package's own, which bounds connecting, TLS and the wait for
+	//     headers and honours HTTP_PROXY, HTTPS_PROXY and NO_PROXY.
+	//   - AllowedDomains []string: if non-empty, only these host names
+	//     (case-insensitive, one trailing dot ignored, ASCII only: write an
+	//     internationalized name in punycode).
+	//   - BaseURL string: relative URIs are resolved against it; without it
+	//     only absolute http(s) URLs are accepted.
+	//   - MaxResponseBytes int64: the body cap after decoding; 0 is 64 MiB,
+	//     negative none. A larger body fails with ErrLimit.
+	//   - Timeout time.Duration: one request, redirects and body included; 0
+	//     is 60 s, negative none.
+	//   - AllowPrivateNetworks bool: allow loopback, link-local (cloud
+	//     metadata), private, shared, multicast and unspecified addresses.
+	//   - BlockPrivateNetworks bool: deprecated and ignored.
+	//
+	// It refuses other schemes, URLs with userinfo, and hosts outside
+	// AllowedDomains, on every redirect hop (at most 10). The private-network
+	// check is made on the address actually connected to, so names that
+	// resolve inward, DNS rebinding and redirects do not get around it; it
+	// applies to the default client and to a Client whose Transport is an
+	// *http.Transport. A request a proxy carries, or that another
+	// RoundTripper makes, gets only the checks on the URL. See
+	// docs/loading-data.md.
 	HTTPLoader = loader.HTTPLoader
-	// FileLoader serves files from a base directory on disk. It accepts
-	// relative paths and rejects absolute URLs and path traversal.
+
+	// FileLoader serves files under BaseDir string, contained with os.Root:
+	// relative paths only, no "..", no scheme, no control characters, no
+	// symlink out of BaseDir, regular files only. MaxBytes int64 caps one file:
+	// 0 is 64 MiB, negative none; a larger file fails with ErrLimit. The
+	// directory is opened on first use (NewFileLoader opens it at once), and
+	// Close closes it: do not share one FileLoader between Converters.
 	FileLoader = loader.FileLoader
-	// StaticLoader returns a JSON-serialized payload for every Load call,
-	// regardless of the URI. Useful for injecting test data.
+
+	// StaticLoader returns Value any, as JSON, for every URI, and accepts
+	// every URI. For tests.
 	StaticLoader = loader.StaticLoader
-	// FallbackLoader routes requests to multiple child loaders in order; the
-	// first child whose Sanitize accepts the URI handles the request.
+
+	// FallbackLoader tries Loaders []Loader in order: the first whose
+	// Sanitize accepts a URI and whose Load succeeds answers it. A limit
+	// (ErrLimit) from a child ends the search. Close closes every child that
+	// implements io.Closer.
 	FallbackLoader = loader.FallbackLoader
 )
 

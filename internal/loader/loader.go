@@ -1,5 +1,5 @@
-// Package loader implements the resource loaders both rendering engines use
-// to fetch external data: deny-all, HTTP(S) with a host policy, a directory
+// Package loader implements the resource loaders the engine uses to fetch
+// data and images: deny-all, HTTP(S) with a host policy, a directory
 // confined with os.Root, static payloads, and fallback chains.
 package loader
 
@@ -24,9 +24,9 @@ import (
 // NewHTTPLoader) to permit HTTP(S) requests, or implement a custom Loader for
 // fine-grained control.
 //
-// Loaded payloads cross into the JavaScript runtime as UTF-8 text; Vega's
-// supported formats (JSON, CSV, TSV, TopoJSON) are all textual. Binary
-// payloads are not supported and would be corrupted in transit.
+// It serves data (read as UTF-8 text: JSON, CSV, TSV, DSV, TopoJSON) and
+// images (binary: PNG, JPEG, GIF, returned unchanged), and sanitizes the
+// links written into SVG. The root package's Loader documents the contract.
 type Loader interface {
 	// Load fetches the content at the given URI.
 	Load(ctx context.Context, uri string) ([]byte, error)

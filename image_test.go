@@ -47,8 +47,13 @@ func validPNGDataURL(t *testing.T) string {
 	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(redPNG(t))
 }
 
+// goOn is an error handler that lets every reported error go, as a browser
+// draws a broken image and goes on.
+var goOn = aster.WithErrorHandler(func(error) error { return nil })
+
 // renderImage rasterizes a 40x40 SVG containing a single <image> with href, and
-// returns the decoded output plus any render error.
+// returns the decoded output plus any render error. Images that cannot be read
+// are let go (goOn), so the output shows what is drawn without them.
 func renderImage(t *testing.T, href string, opts ...aster.Option) (image.Image, error) {
 	t.Helper()
 	c, err := aster.New(opts...)
@@ -59,7 +64,7 @@ func renderImage(t *testing.T, href string, opts ...aster.Option) (image.Image, 
 
 	svg := `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="40" height="40">` +
 		`<image xlink:href="` + href + `" x="0" y="0" width="40" height="40"/></svg>`
-	out, err := c.SVGToPNG(svg)
+	out, err := c.SVGToPNG(svg, goOn)
 	if err != nil {
 		return nil, err
 	}
@@ -242,8 +247,9 @@ func TestRelativeImageRenders(t *testing.T) {
 	}
 }
 
-// What the Loader refuses or cannot fetch is drawn as a broken image: not at
-// all, and the render goes on.
+// What the Loader refuses or cannot fetch fails the render with a
+// *LoadError; told to go on, the render draws it as a broken image: not at
+// all.
 func TestRefusedImageRendersBlank(t *testing.T) {
 	srv, hits := imageServer(t)
 	for name, tc := range map[string]struct {
@@ -263,6 +269,18 @@ func TestRefusedImageRendersBlank(t *testing.T) {
 		if n := countReddish(img); n != 0 {
 			t.Errorf("%s: %d red pixels, want none", name, n)
 		}
+		c, err := aster.New(tc.opts...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		svg := `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="40" height="40">` +
+			`<image xlink:href="` + tc.href + `" width="40" height="40"/></svg>`
+		_, err = c.SVGToPNG(svg)
+		var le *aster.LoadError
+		if !errors.As(err, &le) || le.Resource != "image" {
+			t.Errorf("%s: without a handler, err = %v, want a *LoadError for the image", name, err)
+		}
+		_ = c.Close()
 	}
 	if hits.Load() != 0 {
 		t.Errorf("a refused image was fetched %d times", hits.Load())
@@ -307,13 +325,18 @@ func TestImagesInPDF(t *testing.T) {
 		t.Error("the image mark was not embedded")
 	}
 
-	// The default loader leaves the image out, and the chart still converts.
+	// The default loader refuses the image: the conversion fails, or, told
+	// to go on, leaves the image out.
 	d, err := aster.New()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = d.Close() }()
-	pdf, err = d.SVGToPDF(svg)
+	var le *aster.LoadError
+	if _, err := d.SVGToPDF(svg); !errors.As(err, &le) {
+		t.Errorf("default loader: err = %v, want a *LoadError", err)
+	}
+	pdf, err = d.SVGToPDF(svg, goOn)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -377,13 +400,18 @@ func TestImageNaturalSize(t *testing.T) {
 		t.Errorf("a sized image mark was fetched %d times for its SVG", hits.Load())
 	}
 
-	// The default loader fetches nothing, and the size stays unknown.
+	// The default loader fetches nothing: the render fails, or, told to go
+	// on, leaves the size unknown.
 	d, err := aster.New()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = d.Close() }()
-	if svg, err := d.VegaToSVG(mark("")); err != nil || !strings.Contains(svg, `width="0" height="0"`) {
-		t.Errorf("default loader: %v\n%s", err, svg)
+	var le *aster.LoadError
+	if _, err := d.VegaToSVG(mark("")); !errors.As(err, &le) {
+		t.Errorf("default loader: err = %v, want a *LoadError", err)
+	}
+	if svg, err := d.VegaToSVG(mark(""), goOn); err != nil || !strings.Contains(svg, `width="0" height="0"`) {
+		t.Errorf("default loader, going on: %v\n%s", err, svg)
 	}
 }

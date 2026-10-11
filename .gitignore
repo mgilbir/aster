@@ -41,8 +41,10 @@ enginebench-out/
 # Oracle: node modules and cached upstream renderings (recreated on demand)
 testdata/oracle-node/node_modules/
 testdata/oracle-node-vl5/node_modules/
+testdata/mermaid/node_modules/
 testdata/oracle-cache/
-testdata/oracle-cache-quickjs/
+# fontconfig, in the oracle's node-canvas, marks every font directory it scans
+.uuid
 
 # External corpora fetched by scripts/fetch-corpora.sh
 testdata/corpora-cache/

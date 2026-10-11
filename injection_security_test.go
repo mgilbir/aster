@@ -8,6 +8,7 @@ package aster
 import (
 	"context"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -52,7 +53,9 @@ func renderVegaSVG(t *testing.T, spec string, opts ...Option) string {
 		t.Fatal(err)
 	}
 	defer c.Close()
-	svg, err := c.VegaToSVG([]byte(spec))
+	// What the Loader refuses is reported, and these tests look at what the
+	// render then writes, so they let it go on.
+	svg, err := c.VegaToSVG([]byte(spec), WithErrorHandler(func(error) error { return nil }))
 	if err != nil {
 		t.Fatalf("render: %v", err)
 	}
@@ -129,6 +132,17 @@ func TestImageURLGoesThroughLoader(t *testing.T) {
 	svg := renderVegaSVG(t, spec) // DenyLoader
 	if strings.Contains(svg, "169.254.169.254") {
 		t.Errorf("image URL emitted although the Loader denies everything: %s", svg[strings.Index(svg, "<image"):])
+	}
+	// Without an error handler the refusal fails the render.
+	c, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	_, err = c.VegaToSVG([]byte(spec))
+	var le *LoadError
+	if !errors.As(err, &le) || le.Resource != "image" || le.URL != "http://169.254.169.254/latest/meta-data/" {
+		t.Errorf("err = %v, want a *LoadError for the image", err)
 	}
 }
 

@@ -58,6 +58,7 @@ func (ci *callImages) load(ctx context.Context, href string) ([]byte, error) {
 	}
 	u, err := ci.c.cfg.loader.Sanitize(ctx, href)
 	if err != nil {
+		reportFrom(ctx).image(href, err)
 		return nil, err
 	}
 	return ci.fetch(ctx, u)
@@ -89,6 +90,9 @@ func (ci *callImages) fetch(ctx context.Context, u string) ([]byte, error) {
 	}
 	if err != nil {
 		ci.failed[u] = err
+		if ctx.Err() == nil { // a canceled call is not a failed image
+			reportFrom(ctx).image(u, err)
+		}
 		return nil, err
 	}
 	if ci.used += int64(len(b)); ci.used > ci.allowance {
@@ -114,10 +118,12 @@ func (ci *callImages) size(ctx context.Context, u string) (w, h float64, ok bool
 		data, err = ci.fetch(budget.With(ctx, &budget.Budget{MaxLoadBytes: maxImageBytes}), u)
 	}
 	if err != nil {
+		reportFrom(ctx).image(u, err)
 		return 0, 0, false
 	}
 	cfg, _, err := imageref.Config(data, lim)
 	if err != nil {
+		reportFrom(ctx).image(u, err)
 		return 0, 0, false
 	}
 	return float64(cfg.Width), float64(cfg.Height), true

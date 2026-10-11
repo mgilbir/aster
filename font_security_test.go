@@ -132,8 +132,14 @@ func TestHostileFonts(t *testing.T) {
 				done <- "internal: " + err.Error()
 				return
 			}
+			// New loads the font: a hostile one may be refused, but not with
+			// an internal error (a recovered panic).
 			c, err := New(WithFont("Evil", f), WithTimeout(5*time.Second))
 			if err != nil {
+				if strings.Contains(err.Error(), "internal") {
+					done <- "internal: " + err.Error()
+					return
+				}
 				done <- ""
 				return
 			}

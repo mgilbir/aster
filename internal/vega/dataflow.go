@@ -464,7 +464,8 @@ func failLimit(format string, args ...any) {
 // have an upstream counterpart and stay fatal.
 func fatal(err error, internal bool) bool {
 	var le *budget.Stop
-	return internal || errors.Is(err, budget.ErrLimit) || errors.As(err, &le) ||
+	var st *stopped
+	return internal || errors.Is(err, budget.ErrLimit) || errors.As(err, &le) || errors.As(err, &st) ||
 		errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
@@ -489,6 +490,8 @@ type flowGraph struct {
 	// facet cell instantiates.
 	maxOps   int
 	warnings []string
+	// onReport is Options.Report.
+	onReport func(error) error
 }
 
 func newGraph(ctx context.Context) *flowGraph {
@@ -706,8 +709,7 @@ func (g *flowGraph) evaluate(encode string) (err error) {
 		if fatal(err, internal) {
 			return err
 		}
-		g.warn(err.Error())
-		return nil
+		return g.report(err)
 	}
 	if len(g.postrun) > 0 {
 		pr := g.postrun
@@ -740,8 +742,7 @@ func (g *flowGraph) safely(fn func(*flowGraph)) (err error) {
 				err, internal = fmt.Errorf("vega: internal error: %v", r), true
 			}
 			if !fatal(err, internal) {
-				g.warn(err.Error())
-				err = nil
+				err = g.report(err)
 			}
 		}
 	}()

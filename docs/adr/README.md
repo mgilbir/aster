@@ -1,0 +1,15 @@
+# Architecture decision records
+
+Decisions whose reason is not visible in the code. Each says what was decided, why, and what it costs; a decision that is replaced is marked superseded, not deleted.
+
+| # | Decision | Status |
+|---|---|---|
+| [0001](0001-pure-go-engine.md) | A pure-Go engine instead of Vega in QuickJS/WebAssembly | accepted, 2026-10-01 |
+| [0002](0002-forme-text-engine.md) | forme for text shaping and measurement | accepted, 2026-09-30 |
+| [0003](0003-unrounded-advances.md) | Measure text with unrounded advances by default | accepted, 2026-09-30 |
+| [0004](0004-node-as-oracle.md) | Upstream in node is the test oracle | accepted, 2026-10-01 |
+| [0005](0005-bounded-untrusted-input.md) | Specifications are untrusted: errors, never panics, and bounded work | accepted |
+| [0006](0006-errors-reach-the-caller.md) | What upstream logs fails the call unless a handler lets it go | accepted, 2026-10-11 |
+| [0007](0007-system-fonts-never-fallback.md) | System fonts only by name, never as a fallback by default | accepted |
+| [0008](0008-cli-language-detection.md) | The CLI detects Vega vs Vega-Lite by schema, then by shape, and refuses to guess | accepted, 2026-10-11 |
+| [0009](0009-caller-chooses-fonts.md) | Registered families are the caller's, and so is the fallback chain | accepted, 2026-10-11 |

@@ -1,0 +1,13 @@
+{
+  "name": "aster-mermaid-check",
+  "private": true,
+  "description": "Renders the documentation's Mermaid diagrams for TestDocsMermaid, with Mermaid's own renderer on jsdom (no browser).",
+  "type": "module",
+  "dependencies": {
+    "jsdom": "30.1.2",
+    "mermaid": "12.1.0"
+  },
+  "volta": {
+    "node": "24.21.0"
+  }
+}

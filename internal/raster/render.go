@@ -38,7 +38,8 @@ type renderer struct {
 	err     error
 
 	imgs       map[*node]*rasterImage
-	fetched    map[string][]byte // image bytes by href, from Options.Images
+	fetched    map[string][]byte            // image bytes by href, from Options.Images
+	imageErr   func(href string, err error) // Options.ImageError
 	outlines   map[outlineKey]*path
 	colourImgs map[colourImageKey]*rasterImage // decoded bitmap glyphs
 	svgGlyphs  map[colourImageKey]*document    // parsed SVG glyph documents

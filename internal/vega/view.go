@@ -86,6 +86,9 @@ type Limits struct {
 	RowBytes int64
 }
 
+// WithDefaults is l with every zero field set to its default.
+func (l Limits) WithDefaults() Limits { return l.withDefaults() }
+
 func (l Limits) withDefaults() Limits {
 	if l.MaxRows == 0 {
 		l.MaxRows = 1_000_000
@@ -158,6 +161,12 @@ type Options struct {
 	Random func() float64
 	// Limits bound the work of the render.
 	Limits Limits
+	// Report is told of each error upstream logs and carries on past (a
+	// *LoadError, an exception an operator or an expression throws) and of
+	// each Warning, in the order they arise, and decides whether the render
+	// goes on: nil goes on as upstream does, an error ends the render with
+	// it. A nil Report always goes on.
+	Report func(err error) error
 }
 
 // SignalWrite is one View.signal(name, value) call.
@@ -242,6 +251,7 @@ func Render(ctx context.Context, spec jsval.Value, opts Options) (res *Result, e
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	defer func() { err = unstopped(err) }()
 	defer func() {
 		if r := recover(); r != nil {
 			switch e := r.(type) {
@@ -364,6 +374,7 @@ func newView(ctx context.Context, opts Options, locale jsval.Value) *runView {
 	v.g.view = v
 	v.g.maxVisits = limits.MaxVisits
 	v.g.maxOps = limits.MaxOperators
+	v.g.onReport = opts.Report
 	return v
 }
 
@@ -584,8 +595,6 @@ func (v *runView) countItems(n int) {
 		failLimit("scenegraph exceeds %d items", v.limits.MaxItems)
 	}
 }
-
-func (g *flowGraph) warn(msg string) { g.warnings = append(g.warnings, msg) }
 
 // registerMark records a mark for post-run processing.
 func (v *runView) registerMark(m *scene.Mark, c *rtContext) {

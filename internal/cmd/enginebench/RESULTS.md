@@ -118,6 +118,8 @@ Times are the median of repeated runs on a warm engine (budget 300 ms per case, 
 
 ## 2026-09-30: the run that retired the QuickJS engine
 
+> **Deprecated:** describes the QuickJS/WebAssembly engine (QuickJS-NG on wazero via andsifr, with resvg for PNG), removed in d1b6046 on 2026-10-01. Kept as the evidence for [ADR 0001](../../../docs/adr/0001-pure-go-engine.md); its "aster" rows are that engine, not today's.
+
 Produced by `run.sh` (node 20 via the default node, then node 24 with `volta run --node 24 node internal/cmd/enginebench/bench.mjs`), on an Apple M1 Pro, before the QuickJS engine was retired. aster is the QuickJS + resvg engine; purego is the pure-Go engine that replaced it.
 
 ### Engines
