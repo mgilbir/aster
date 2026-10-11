@@ -173,7 +173,7 @@ func (v *runView) read(value jsval.Value, raw []byte, schema jsval.Value) ([]jsv
 		if err != nil {
 			break
 		}
-		data, err = geo.TopologyFeatures(doc, schema.Get("feature").AsString(), schema.Get("mesh").AsString(), schema.Get("filter").AsString())
+		data, err = geo.TopologyFeatures(v.ctx, doc, schema.Get("feature").AsString(), schema.Get("mesh").AsString(), schema.Get("filter").AsString())
 		if err == nil && schema.Get("feature").IsNullish() && schema.Get("mesh").IsNullish() {
 			err = fmt.Errorf("Missing TopoJSON feature or mesh parameter.")
 		}

@@ -97,13 +97,13 @@ func TestFit(t *testing.T) {
 		obj := geoms[c.Target]
 		switch c.Mode {
 		case "extent":
-			p.FitExtent(12, 8, 512, 308, obj)
+			p.FitExtent(bg, 12, 8, 512, 308, obj)
 		case "size":
-			p.FitSize(640, 360, obj)
+			p.FitSize(bg, 640, 360, obj)
 		case "width":
-			p.FitWidth(500, obj)
+			p.FitWidth(bg, 500, obj)
 		case "height":
-			p.FitHeight(300, obj)
+			p.FitHeight(bg, 300, obj)
 		}
 		tx, ty := p.Translate()
 		if !same(p.Scale(), gnum(c.Scale)) || !same(tx, gnum(c.Translate[0])) || !same(ty, gnum(c.Translate[1])) {
@@ -181,12 +181,12 @@ func TestSphericalMeasures(t *testing.T) {
 	for k, want := range g.Spherical {
 		obj := geoms[k]
 		if s, ok := want.Area.(string); !ok || s != "ERR" {
-			if got := GeoArea(obj); !same(got, gnum(want.Area)) {
+			if got := areaOf(obj); !same(got, gnum(want.Area)) {
 				t.Errorf("%s: area %v want %v", k, got, want.Area)
 			}
 		}
 		if _, ok := want.Bounds.(string); !ok {
-			b := GeoBounds(obj)
+			b := boundsOf(obj)
 			w := want.Bounds.([]any)
 			w0, w1 := w[0].([]any), w[1].([]any)
 			exp := [2][2]float64{{gnum(w0[0]), gnum(w0[1])}, {gnum(w1[0]), gnum(w1[1])}}
@@ -195,7 +195,7 @@ func TestSphericalMeasures(t *testing.T) {
 			}
 		}
 		if _, ok := want.Centroid.(string); !ok {
-			c := GeoCentroid(obj)
+			c := centroidOf(obj)
 			w := want.Centroid.([]any)
 			if !same(c[0], gnum(w[0])) || !same(c[1], gnum(w[1])) {
 				t.Errorf("%s: centroid %v want %v", k, c, w)

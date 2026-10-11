@@ -10,6 +10,7 @@ import (
 	"unsafe"
 
 	"github.com/mgilbir/aster/internal/bcache"
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -192,6 +193,10 @@ func (p *Program) Eval(s *Scope) (v jsval.Value, err error) {
 				err = e.err
 			case *cancelled:
 				err = e.err
+			case *budget.Stop:
+				// A bound reached by a provider function (a geographic walk,
+				// ADR 0010).
+				err = e.Err
 			default:
 				err = fmt.Errorf("expr: internal error: %v", r)
 			}

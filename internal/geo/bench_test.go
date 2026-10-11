@@ -1,7 +1,10 @@
 package geo
 
 import (
+	"context"
 	"testing"
+
+	"github.com/mgilbir/aster/internal/budget"
 
 	"github.com/mgilbir/aster/internal/jsval"
 )
@@ -19,7 +22,7 @@ func benchPath(b *testing.B, typ string, fit bool) {
 		b.Fatal(err)
 	}
 	if fit {
-		p.FitSize(960, 500, countries)
+		p.FitSize(bg, 960, 500, countries)
 	}
 	path := p.Path()
 	b.ReportAllocs()
@@ -40,7 +43,7 @@ func BenchmarkWorldPathAlbers(b *testing.B)       { benchPath(b, "albers", false
 func BenchmarkPerFeaturePath(b *testing.B) {
 	_, countries := benchCountries(b)
 	p, _ := NewProjection("naturalEarth1")
-	p.FitSize(960, 500, countries)
+	p.FitSize(bg, 960, 500, countries)
 	path := p.Path()
 	feats := countries.Get("features").Items()
 	b.ReportAllocs()
@@ -70,7 +73,7 @@ func BenchmarkFitWorld(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		p.FitSize(960, 500, countries)
+		p.FitSize(bg, 960, 500, countries)
 	}
 }
 
@@ -91,7 +94,7 @@ func BenchmarkTopoFeatureWorld(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if _, err := TopoFeature(world, obj); err != nil {
+		if _, err := TopoFeature(bg, world, obj); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -103,7 +106,7 @@ func BenchmarkTopoMeshUS(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if _, err := TopoMesh(us, obj, MeshInterior); err != nil {
+		if _, err := TopoMesh(bg, us, obj, MeshInterior); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -123,9 +126,9 @@ func BenchmarkGeoCentroidBoundsArea(b *testing.B) {
 	_, countries := benchCountries(b)
 	b.ReportAllocs()
 	for b.Loop() {
-		GeoArea(countries)
-		GeoBounds(countries)
-		GeoCentroid(countries)
+		areaOf(countries)
+		boundsOf(countries)
+		centroidOf(countries)
 	}
 }
 
@@ -143,7 +146,7 @@ func (*drawSink) ReusableContext()                        {}
 func BenchmarkPerFeatureDraw(b *testing.B) {
 	_, countries := benchCountries(b)
 	p, _ := NewProjection("naturalEarth1")
-	p.FitSize(960, 500, countries)
+	p.FitSize(bg, 960, 500, countries)
 	path := p.Path()
 	ctx := &drawSink{}
 	path.SetContext(ctx)
@@ -154,5 +157,42 @@ func BenchmarkPerFeatureDraw(b *testing.B) {
 		for _, f := range feats {
 			path.Draw(f)
 		}
+	}
+}
+
+// benchBoundCtx is a render's context: a point budget and a ledger, which a
+// bound path charges.
+func benchBoundCtx() context.Context {
+	ctx := budget.With(context.Background(), &budget.Budget{MaxPoints: 1 << 40})
+	return budget.WithLedger(ctx, budget.NewLedger(ctx, budget.LedgerLimits{}))
+}
+
+// The per-feature path of a geoshape mark, bound as the mark binds it.
+func BenchmarkPerFeaturePathBound(b *testing.B) {
+	_, countries := benchCountries(b)
+	p, _ := NewProjection("naturalEarth1")
+	p.FitSize(bg, 960, 500, countries)
+	path := p.Path()
+	path.Bind(benchBoundCtx())
+	feats := countries.Get("features").Items()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for _, f := range feats {
+			path.String(f)
+		}
+	}
+}
+
+func BenchmarkUSStatesAlbersUsaBound(b *testing.B) {
+	us := loadTopology(b, "us-10m.json")
+	states := topoFeatureOf(b, us, "states")
+	p, _ := NewProjection("albersUsa")
+	path := p.Path()
+	path.Bind(benchBoundCtx())
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		path.String(states)
 	}
 }

@@ -40,7 +40,7 @@ It is not a heap cap: Go has none per call. It is converted into the budgets bel
 | memory charged to the call's ledger | 2 GiB | n, at least 1 MiB |
 <!-- limits:end -->
 
-The last row is the ledger's byte meter ([ADR 0010](adr/0010-bounds-charged-where-work-happens.md)): one per call, spanning every stage, charged by the code that allocates, before it allocates, for memory the rows above do not count. The rows above each bound their own kind of memory and keep their own semantics (rows are replaced as data flows, canvases come and go); an allocation is charged to one meter, its own if it has one and the ledger's otherwise, so together they stay within a small multiple of `n`. Today the ledger is charged for parsed path data (custom symbols and `path` marks), the pattern tiles and colour glyph bitmaps the rasterizer keeps for reuse, and whatever a stage adds to it as it is bounded. Its default is about fifteen times what the heaviest chart of the corpus holds at its peak (130 MiB, rendered to SVG, PNG and PDF).
+The last row is the ledger's byte meter ([ADR 0010](adr/0010-bounds-charged-where-work-happens.md)): one per call, spanning every stage, charged by the code that allocates, before it allocates, for memory the rows above do not count. The rows above each bound their own kind of memory and keep their own semantics (rows are replaced as data flows, canvases come and go); an allocation is charged to one meter, its own if it has one and the ledger's otherwise, so together they stay within a small multiple of `n`. Today the ledger is charged for parsed path data (custom symbols and `path` marks), the pattern tiles and colour glyph bitmaps the rasterizer keeps for reuse, the GeoJSON a TopoJSON document decodes to (every reference to an arc makes its positions anew) and the points of a graticule, and whatever a stage adds to it as it is bounded. Its default is about fifteen times what the heaviest chart of the corpus holds at its peak (130 MiB, rendered to SVG, PNG and PDF).
 
 The ledger also meters the call's *work*: a loop whose trip count the input controls charges each step, and charging polls the call's context, so `WithTimeout` and `Close` stop that loop, wherever it is. Work is counted, not capped: time is bounded by `WithTimeout`.
 
@@ -50,7 +50,8 @@ Fixed bounds, the same whatever `WithMemoryLimit` says:
 
 | Bound | Value |
 |---|---|
-| geographic path points | 2,000,000 per render |
+| geographic path points | 2,000,000 per render, counted where the projection produces them (after resampling, before the clip extent; each of albersUsa's three projections counts its own; a projection's `fit` counts too) |
+| projection `clipAngle` | magnitude below 2^50 radians, about 6.4e16 degrees: past it upstream's clip circle never finishes, and aster refuses the angle with `ErrLimit` ([ADR 0011](adr/0011-faithful-output-free-algorithm.md)) |
 | dataflow evaluations | 50,000,000 operator runs per render |
 | one image | 32 MiB, 64 Mi pixels |
 | HTTP response body | `HTTPLoader.MaxResponseBytes`, 64 MiB |

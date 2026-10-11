@@ -15,6 +15,8 @@ What changed between versions, for users of the library and the CLI. Breaking ch
 - A text whose `x` or `y` and `angle` are all strings had the angle escaped twice.
 - An axis whose `orient` is a signal failed to parse its encoding when a config value was an array holding `null` (`tickDash: [4, null, 2]`) or a string holding U+2028 or U+2029; both are now spliced as upstream's `stringValue` does.
 - JavaScript's 32-bit integer conversion (`~~x`, `x | 0`) of a huge number, in text width estimates and a crossfilter's `ignore` mask, wrapped as on no JavaScript engine and differed between amd64 and arm64.
+- TopoJSON positions keep their own length, as topojson-client keeps them: a position shorter or longer than its arc's first is no longer padded with `NaN` or cut to the first's length, and a transformed position of fewer than two numbers is padded to two. An arc whose second position has a `NaN` coordinate counts as empty when a mesh is stitched, as upstream.
+- A graticule's point count is `d3.range`'s, a 32-bit conversion: a step so small that the count passes 2^31 is the `RangeError` upstream throws, or wraps as upstream does, instead of an `ErrLimit`.
 
 ### Bounds are charged where the work happens ([ADR 0010](docs/adr/0010-bounds-charged-where-work-happens.md))
 
@@ -26,6 +28,8 @@ What changed between versions, for users of the library and the CLI. Breaking ch
 - New: [ADR 0011](docs/adr/0011-faithful-output-free-algorithm.md), "faithful in output, free in algorithm".
 - Vega-Lite compilation honours the timeout in every phase, from copying the input through normalization, parsing, the dataflow optimizer and assembly: each loop over views, selections, params, transforms, encodings, dataflow nodes and the values they hold charges the call's ledger. A spec with 100,000 point selections, which compiled for eight and a half minutes and returned up to six seconds past a 1 s timeout, now compiles in about 2.5 s and stops within milliseconds of the deadline.
 - Vega-Lite compilation is no longer quadratic in a spec's views and selections where upstream's algorithm is (output unchanged, ADR 0011): the dataflow optimizer's child removals and insertions, its deepest-first node order, the ordering of root data sets, and the brush test every point selection repeats.
+- Geographic work is bounded where it happens. The path-point budget counts the points a projection produces, after resampling and before its clip extent, so a tiny `precision` with a clip extent that drops everything fails with `ErrLimit` instead of running for seconds and allocating gigabytes; the measuring walk of a projection's `fit`, and `geoArea`, `geoBounds` and `geoCentroid` in expressions (with or without a projection), are bounded and stop at the timeout like a mark's paths. Decoding TopoJSON charges what it makes to the ledger first: one long arc referenced thousands of times no longer allocates gigabytes. Graticules charge their points. The clip circle's walk is bounded by construction, and polygon clipping rejoins its pieces in linear time (it was quadratic in the pieces). Charts render as before.
+- **breaking:** a projection `clipAngle` whose magnitude reaches 2^50 radians (about 6.4e16 degrees), infinity included, fails the render with `ErrLimit`. Upstream never finishes drawing a sphere or a clipped polygon with it; with 1e18 the render looped for ever and `Close` blocked behind it.
 
 ### Errors reach the caller ([ADR 0006](docs/adr/0006-errors-reach-the-caller.md))
 

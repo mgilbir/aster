@@ -1,10 +1,13 @@
 package geo
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"math"
 
 	"github.com/mgilbir/aster/internal/budget"
+	"github.com/mgilbir/aster/internal/jsmath"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -25,7 +28,20 @@ type Graticule struct {
 	precision      float64
 	budget         int
 	err            error
+
+	// The ledger and meter of the call making the lines (nil: none).
+	led *budget.Ledger
+	m   budget.Meter
 }
+
+// graticulePointBytes is what one point of a graticule holds until it is
+// returned: its range value (8), its pair (16), and the GeoJSON position, a
+// two-element array (a 64-byte allocation) in its line's slice (16).
+const graticulePointBytes = 8 + 16 + 64 + 16
+
+// errInvalidArrayLength is d3.range's RangeError for a count whose int32
+// conversion is negative (new Array(n)).
+var errInvalidArrayLength = errors.New("RangeError: Invalid array length")
 
 // NewGraticule returns a generator with d3's defaults: major extent
 // [[-180, -90+eps], [180, 90-eps]], minor extent [[-180, -80-eps],
@@ -83,18 +99,34 @@ func (g *Graticule) SetStepMinor(s [2]float64) { g.dx, g.dy = s[0], s[1] }
 func (g *Graticule) SetPrecision(p float64) { g.precision = p }
 
 // rangeOf is d3.range(start, stop, step): start + i*step for the i where it is
-// below stop. It reports false when that would exceed the point budget.
+// below stop. It reports false when that would exceed the point budget, or
+// the bytes the call's ledger allows.
 func (g *Graticule) rangeOf(start, stop, step float64) ([]float64, bool) {
-	n := math.Max(0, math.Ceil((stop-start)/step))
-	if math.IsNaN(n) || math.IsInf(n, 0) {
-		n = 0 // `| 0` in JavaScript
+	if g.err != nil {
+		return nil, false
 	}
-	if n > float64(maxGraticulePoints) || g.budget+int(n) > maxGraticulePoints {
+	// `Math.max(0, Math.ceil((stop - start) / step)) | 0`: ToInt32, so NaN and
+	// infinities count 0, and a count past 2^31 wraps; a negative one is the
+	// RangeError of `new Array(n)`.
+	n := int(jsmath.ToInt32(math.Max(0, math.Ceil((stop-start)/step))))
+	if n < 0 {
+		g.err = errInvalidArrayLength
+		return nil, false
+	}
+	if n > maxGraticulePoints || g.budget+n > maxGraticulePoints {
 		g.err = ErrGraticuleTooLarge
 		return nil, false
 	}
-	g.budget += int(n)
-	out := make([]float64, int(n))
+	if err := g.led.Alloc(int64(n) * graticulePointBytes); err != nil {
+		g.err = err
+		return nil, false
+	}
+	if err := g.m.Work(int64(n)); err != nil {
+		g.err = err
+		return nil, false
+	}
+	g.budget += n
+	out := make([]float64, n)
 	for i := range out {
 		out[i] = start + float64(float64(i)*step)
 	}
@@ -175,7 +207,13 @@ func lineValue(pts []ll) jsval.Value {
 }
 
 // Lines returns the graticule as a GeoJSON MultiLineString.
-func (g *Graticule) Lines() (jsval.Value, error) {
+func (g *Graticule) Lines() (jsval.Value, error) { return g.linesValue(context.Background()) }
+
+// linesValue is Lines with its points charged to the ledger in ctx (if any)
+// and its work metered, polling ctx.
+func (g *Graticule) linesValue(ctx context.Context) (jsval.Value, error) {
+	g.led, g.m = budget.LedgerFrom(ctx), budget.NewMeter(ctx)
+	defer func() { g.led, g.m = nil, budget.Meter{} }()
 	lines, err := g.lines()
 	if err != nil {
 		return jsval.Undefined, err

@@ -168,15 +168,15 @@ func TestNoPanicOnGarbage(t *testing.T) {
 				c := p.Copy()
 				c.Path().String(g)
 				fit, _ := NewProjection(p.Type())
-				fit.FitSize(300, 200, g)
-				fit.FitWidth(300, g)
-				fit.FitHeight(200, g)
-				fit.FitExtent(1, 2, 300, 200, g)
+				fit.FitSize(bg, 300, 200, g)
+				fit.FitWidth(bg, 300, g)
+				fit.FitHeight(bg, 200, g)
+				fit.FitExtent(bg, 1, 2, 300, 200, g)
 			}
 		}
-		GeoArea(g)
-		GeoBounds(g)
-		GeoCentroid(g)
+		areaOf(g)
+		boundsOf(g)
+		centroidOf(g)
 		GeoLength(g)
 		GeoContains(g, [2]float64{coord(weird(r)), coord(weird(r))})
 		CollectGeoJSON(jsval.ArrOf(g, g))
@@ -210,7 +210,7 @@ func TestNoPanicOnGarbageParams(t *testing.T) {
 				o.Set(k, v)
 			}
 		}
-		p, err := ConfigureProjection(nil, o, nil)
+		p, err := ConfigureProjection(bg, nil, o, nil)
 		if err != nil {
 			continue
 		}
@@ -253,7 +253,7 @@ func TestDeepGeometryCollection(t *testing.T) {
 	if strings.Contains(s, "NaN") {
 		t.Error(s)
 	}
-	GeoArea(g)
+	areaOf(g)
 	GeoContains(g, [2]float64{1, 2})
 }
 
@@ -287,9 +287,9 @@ func FuzzPath(f *testing.F) {
 				path.Bounds(g)
 				path.Centroid(g)
 			}
-			GeoArea(g)
-			GeoBounds(g)
-			GeoCentroid(g)
+			areaOf(g)
+			boundsOf(g)
+			centroidOf(g)
 		}()
 		select {
 		case <-done:

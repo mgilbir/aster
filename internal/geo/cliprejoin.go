@@ -33,8 +33,9 @@ type interpolateFunc func(from, to *cpoint, direction float64, s Stream)
 
 // clipRejoin is a generalised polygon clipping step: given a polygon already
 // cut into its visible line segments, it rejoins the segments by interpolating
-// along the clip edge.
-func clipRejoin(segments [][]cpoint, compare func(a, b *intersection) float64, startInside bool, interpolate interpolateFunc, s Stream) {
+// along the clip edge. It returns the steps its search for unvisited
+// intersections took, which the tests hold linear.
+func clipRejoin(segments [][]cpoint, compare func(a, b *intersection) float64, startInside bool, interpolate interpolateFunc, s Stream) (steps int) {
 	var subject, clip []*intersection
 
 	for _, segment := range segments {
@@ -67,7 +68,7 @@ func clipRejoin(segments [][]cpoint, compare func(a, b *intersection) float64, s
 	}
 
 	if len(subject) == 0 {
-		return
+		return 0
 	}
 
 	sortIntersections(clip, compare)
@@ -79,17 +80,25 @@ func clipRejoin(segments [][]cpoint, compare func(a, b *intersection) float64, s
 		c.e = startInside
 	}
 
+	// d3 searches for the first unvisited intersection from subject[0] again
+	// for every output ring, which is quadratic in the rings. Visited marks
+	// are never cleared, so every intersection between subject[0] and the
+	// last one found stays visited: resuming the search there finds the same
+	// intersection, in linear time overall.
 	start := subject[0]
+	from := start
 	for {
 		// Find first unvisited intersection.
-		current := start
+		current := from
 		isSubject := true
 		for current.v {
+			steps++
 			current = current.n
 			if current == start {
-				return
+				return steps
 			}
 		}
+		from = current
 		points := current.z
 		s.LineStart()
 		for {

@@ -68,7 +68,7 @@ func TestVegaPipeline(t *testing.T) {
 					o.Set("extent", parseJSONValue(t, pj.Extent))
 				}
 				var err error
-				if proj, err = ConfigureProjection(nil, o, nil); err != nil {
+				if proj, err = ConfigureProjection(bg, nil, o, nil); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -177,7 +177,7 @@ func TestVegaPipeline(t *testing.T) {
 						gp.Precision = &f
 					}
 				}
-				got, err := GraticuleFeature(gp)
+				got, err := GraticuleFeature(bg, gp)
 				if err != nil {
 					t.Fatal(err)
 				}

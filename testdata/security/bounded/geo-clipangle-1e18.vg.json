@@ -1,0 +1,1 @@
+{"width": 100, "height": 100, "projections": [{"name": "p", "type": "orthographic", "clipAngle": 1e+18, "clipExtent": [[-1000000000000.0, -1000000000000.0], [-1000000000000.0, -1000000000000.0]]}], "data": [{"name": "s", "values": [{"type": "Sphere"}]}], "marks": [{"type": "shape", "from": {"data": "s"}, "transform": [{"type": "geoshape", "projection": "p"}]}]}

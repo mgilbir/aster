@@ -1,6 +1,7 @@
 package geo
 
 import (
+	"context"
 	"math"
 
 	"github.com/mgilbir/aster/internal/jsmath"
@@ -160,10 +161,13 @@ func (s *sphereCentroidStream) ringPoint(lambda, phi float64) {
 }
 
 // GeoCentroid is d3.geoCentroid: the spherical centroid [lon, lat] in degrees
-// (NaN, NaN if undefined).
-func GeoCentroid(object jsval.Value) [2]float64 {
+// (NaN, NaN if undefined). The walk meters its work into the ledger in ctx
+// and stops with ctx's error.
+func GeoCentroid(ctx context.Context, object jsval.Value) ([2]float64, error) {
 	s := &sphereCentroidStream{}
-	StreamObject(object, s)
+	if err := streamBounded(ctx, object, func(b *walkBound) Stream { return meterInput(s, b) }); err != nil {
+		return [2]float64{nan, nan}, err
+	}
 
 	x, y, z := s.X2.value(), s.Y2.value(), s.Z2.value()
 	m := hypot3(x, y, z)
@@ -179,10 +183,10 @@ func GeoCentroid(object jsval.Value) [2]float64 {
 		m = hypot3(x, y, z)
 		// If the feature still has an undefined centroid, then return.
 		if m < epsilon2 {
-			return [2]float64{nan, nan}
+			return [2]float64{nan, nan}, nil
 		}
 	}
-	return [2]float64{float64(jsmath.Atan2(y, x) * degrees), float64(asin(z/m) * degrees)}
+	return [2]float64{float64(jsmath.Atan2(y, x) * degrees), float64(asin(z/m) * degrees)}, nil
 }
 
 // sphereLengthStream is d3.geoLength's stream: great-circle length.

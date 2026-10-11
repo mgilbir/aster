@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -153,15 +152,7 @@ type GeoPathParams struct {
 func GeoPath(ctx context.Context, tuples []jsval.Value, p GeoPathParams) (err error) {
 	path := projectionPath(p.Projection)
 	path.Bind(ctx)
-	defer func() {
-		if r := recover(); r != nil {
-			le, ok := r.(*budget.Stop)
-			if !ok {
-				panic(r)
-			}
-			err = le.Err
-		}
-	}()
+	defer recoverStop(&err)
 	field := p.Field
 	if field == nil {
 		field = Identity
@@ -330,8 +321,9 @@ type GraticuleParams struct {
 }
 
 // GraticuleFeature is vega-geo's Graticule transform: the GeoJSON MultiLineString
-// of the configured graticule.
-func GraticuleFeature(p GraticuleParams) (jsval.Value, error) {
+// of the configured graticule. Its points are charged to the ledger in ctx
+// before they are made, and their making meters work.
+func GraticuleFeature(ctx context.Context, p GraticuleParams) (jsval.Value, error) {
 	g := NewGraticule()
 	if p.Extent != nil {
 		g.SetExtent(*p.Extent)
@@ -354,7 +346,7 @@ func GraticuleFeature(p GraticuleParams) (jsval.Value, error) {
 	if p.Precision != nil {
 		g.SetPrecision(*p.Precision)
 	}
-	return g.Lines()
+	return g.linesValue(ctx)
 }
 
 // CollectGeoJSON is vega-geo's collectGeoJSON: the fit parameter of a
@@ -410,8 +402,9 @@ func CollectGeoJSON(data jsval.Value) (jsval.Value, error) {
 // The projection is created on the first call or when "type" changed, with
 // every non-null property applied in ProjectionProperties order; otherwise only
 // the modified properties are applied. A truthy "fit" then fits the projection
-// to the collected GeoJSON using "extent" or "size".
-func ConfigureProjection(current Projection, params *jsval.Object, modified func(name string) bool) (Projection, error) {
+// to the collected GeoJSON using "extent" or "size", a walk bounded by ctx
+// (see Projection.FitExtent).
+func ConfigureProjection(ctx context.Context, current Projection, params *jsval.Object, modified func(name string) bool) (Projection, error) {
 	get := func(name string) jsval.Value { return params.Lookup(name) }
 	proj := current
 	if proj == nil || (modified != nil && modified("type")) {
@@ -444,14 +437,14 @@ func ConfigureProjection(current Projection, params *jsval.Object, modified func
 		proj.Path().SetPointRadius(jsval.ToNumber(v))
 	}
 	if fitv := get("fit"); fitv.IsTruthy() {
-		if err := fitProjection(proj, fitv, get("extent"), get("size")); err != nil {
+		if err := fitProjection(ctx, proj, fitv, get("extent"), get("size")); err != nil {
 			return nil, err
 		}
 	}
 	return proj, nil
 }
 
-func fitProjection(proj Projection, fitValue, extent, size jsval.Value) error {
+func fitProjection(ctx context.Context, proj Projection, fitValue, extent, size jsval.Value) error {
 	data, err := CollectGeoJSON(fitValue)
 	if err != nil {
 		return err
@@ -470,14 +463,14 @@ func fitProjection(proj Projection, fitValue, extent, size jsval.Value) error {
 		if !oka || !okb || !okc || !okd {
 			return fmt.Errorf("geo: bad projection extent %s", extent.String())
 		}
-		proj.FitExtent(jsval.ToNumber(a), jsval.ToNumber(b), jsval.ToNumber(c), jsval.ToNumber(d), data)
+		return proj.FitExtent(ctx, jsval.ToNumber(a), jsval.ToNumber(b), jsval.ToNumber(c), jsval.ToNumber(d), data)
 	case size.IsTruthy():
 		w, okw := elem(size, 0)
 		h, okh := elem(size, 1)
 		if !okw || !okh {
 			return fmt.Errorf("geo: bad projection size %s", size.String())
 		}
-		proj.FitSize(jsval.ToNumber(w), jsval.ToNumber(h), data)
+		return proj.FitSize(ctx, jsval.ToNumber(w), jsval.ToNumber(h), data)
 	}
 	return nil
 }

@@ -1,8 +1,11 @@
 package geo
 
 import (
+	"context"
+	"fmt"
 	"math"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsmath"
 	"github.com/mgilbir/aster/internal/jsval"
 )
@@ -29,16 +32,21 @@ type Projection interface {
 	// Path is the geoPath bound to this projection.
 	Path() *Path
 	// Set applies a Vega projection property. An error is returned where
-	// upstream would throw (a null value for an array-valued property).
+	// upstream would throw (a null value for an array-valued property), and
+	// one wrapping budget.ErrLimit for a degenerate value aster refuses (see
+	// setClipAngle).
 	Set(prop string, v jsval.Value) error
 	// Scale and Translate read the current scale and translation.
 	Scale() float64
 	Translate() (x, y float64)
 	// Fit* scale and translate the projection so the object fills the box.
-	FitExtent(x0, y0, x1, y1 float64, object jsval.Value)
-	FitSize(width, height float64, object jsval.Value)
-	FitWidth(width float64, object jsval.Value)
-	FitHeight(height float64, object jsval.Value)
+	// Measuring the object is a walk through the projection, bounded like a
+	// path's (see Path.Bind) by the budget and the context in ctx; its error
+	// is returned.
+	FitExtent(ctx context.Context, x0, y0, x1, y1 float64, object jsval.Value) error
+	FitSize(ctx context.Context, width, height float64, object jsval.Value) error
+	FitWidth(ctx context.Context, width float64, object jsval.Value) error
+	FitHeight(ctx context.Context, height float64, object jsval.Value) error
 	// Copy returns an independent projection with the same settings, copied the
 	// way vega-projection copies (a fixed list of properties).
 	Copy() Projection
@@ -111,13 +119,18 @@ func (t *affine) inv(x, y float64) (float64, float64) {
 }
 
 // radiansRotate is d3's transformRadians followed by the rotation stage:
-// degrees in, rotated radians out.
+// degrees in, rotated radians out. It meters the points it reads into b
+// (when not nil): clipping may drop every one before it is produced.
 type radiansRotate struct {
 	rot  rotation
 	sink Stream
+	b    *walkBound
 }
 
 func (s *radiansRotate) Point(x, y float64) {
+	if s.b != nil {
+		s.b.work(1)
+	}
 	l, p := s.rot.forward(x*radians, y*radians)
 	s.sink.Point(l, p)
 }
@@ -237,6 +250,7 @@ type pipeKey struct {
 	delta2 float64
 	pre    *clipper
 	rot    rotation
+	b      *walkBound
 }
 
 // pipeCache is the last pipeline built for a reusable sink. d3-geo caches the
@@ -249,16 +263,18 @@ type pipeCache struct {
 	stream Stream
 }
 
-func (p *standard) Stream(sink Stream) Stream {
+func (p *standard) Stream(sink Stream) Stream { return p.streamBound(sink, nil) }
+
+func (p *standard) streamBound(sink Stream, b *walkBound) Stream {
 	_, reusable := sink.(reusableSink)
 	if !reusable {
-		return p.newStream(sink)
+		return p.newStream(sink, b)
 	}
-	k := pipeKey{p.postclip, p.resPt, p.resDelta2, p.preclip, p.rot}
+	k := pipeKey{p.postclip, p.resPt, p.resDelta2, p.preclip, p.rot, b}
 	if c := p.pipe; c != nil && c.key == k && c.sink == sink {
 		return c.stream
 	}
-	s := p.newStream(sink)
+	s := p.newStream(sink, b)
 	p.pipe = &pipeCache{k, sink, s}
 	return s
 }
@@ -267,13 +283,18 @@ func (p *standard) Stream(sink Stream) Stream {
 // have left its stages mid-ring.
 func (p *standard) dropStreamCache() { p.pipe = nil }
 
-func (p *standard) newStream(sink Stream) Stream {
+// newStream builds d3's pipeline, rotation, pre-clip, resampling and
+// post-clip, with the points the resampler produces charged to b.
+func (p *standard) newStream(sink Stream, b *walkBound) Stream {
 	if p.postclip != nil {
 		sink = p.postclip.stream(sink)
 	}
+	if b != nil {
+		sink = &pointCharge{b: b, sink: sink}
+	}
 	sink = newResample(p.resPt, p.resDelta2, sink)
 	sink = p.preclip.stream(sink)
-	return &radiansRotate{rot: p.rot, sink: sink}
+	return &radiansRotate{rot: p.rot, sink: sink, b: b}
 }
 
 func (p *standard) Forward(lon, lat float64) (float64, float64, bool) {
@@ -292,8 +313,27 @@ func (p *standard) Invert(x, y float64) (float64, float64, bool) {
 	return x * degrees, y * degrees, true
 }
 
-// clipAngle setter: 0 (or NaN) selects antimeridian clipping.
-func (p *standard) setClipAngle(a float64) {
+// maxClipRadians bounds the clip angle aster accepts, in radians: 2^50.
+// d3's clip circle walks its edge with `t -= step` from the angle plus a full
+// turn, in steps of 6 degrees; once the spacing of doubles near the angle
+// exceeds twice the step, `t -= step` leaves t unchanged and upstream's walk
+// never ends. That happens from 2^50 radians (about 6.4e16 degrees) on, so a
+// larger angle has no output upstream to be faithful to and is refused
+// (ADR 0011). circleStream also bounds its own loop.
+const maxClipRadians = 1 << 50
+
+// errClipAngle is the error for a clip angle past maxClipRadians.
+func errClipAngle(a float64) error {
+	return fmt.Errorf("%w: projection clipAngle %g exceeds %g degrees", budget.ErrLimit, a, maxClipRadians*degrees)
+}
+
+// clipAngle setter: 0 (or NaN) selects antimeridian clipping, as in d3. An
+// angle whose magnitude in radians reaches maxClipRadians (infinity
+// included) is refused.
+func (p *standard) setClipAngle(a float64) error {
+	if truthy(a) && !(abs(a*radians) < maxClipRadians) {
+		return errClipAngle(a)
+	}
 	if truthy(a) {
 		p.theta = a * radians
 		p.hasTheta = true
@@ -302,6 +342,7 @@ func (p *standard) setClipAngle(a float64) {
 		p.theta, p.hasTheta = 0, false
 		p.preclip = clipAntimeridian
 	}
+	return nil
 }
 
 // ClipAngle returns the clip angle in degrees (0 for none).
@@ -503,12 +544,18 @@ func (p *standard) setScaleTranslate(k, x, y float64) {
 	p.SetTranslate(x, y)
 }
 
-func (p *standard) FitExtent(x0, y0, x1, y1 float64, object jsval.Value) {
-	fitExtent(p, x0, y0, x1, y1, object)
+func (p *standard) FitExtent(ctx context.Context, x0, y0, x1, y1 float64, object jsval.Value) error {
+	return fitExtent(ctx, p, x0, y0, x1, y1, object)
 }
-func (p *standard) FitSize(w, h float64, object jsval.Value) { fitExtent(p, 0, 0, w, h, object) }
-func (p *standard) FitWidth(w float64, object jsval.Value)   { fitWidth(p, w, object) }
-func (p *standard) FitHeight(h float64, object jsval.Value)  { fitHeight(p, h, object) }
+func (p *standard) FitSize(ctx context.Context, w, h float64, object jsval.Value) error {
+	return fitExtent(ctx, p, 0, 0, w, h, object)
+}
+func (p *standard) FitWidth(ctx context.Context, w float64, object jsval.Value) error {
+	return fitWidth(ctx, p, w, object)
+}
+func (p *standard) FitHeight(ctx context.Context, h float64, object jsval.Value) error {
+	return fitHeight(ctx, p, h, object)
+}
 
 func (p *standard) Copy() Projection {
 	c, _ := NewProjection(p.typ)
@@ -521,7 +568,7 @@ func (p *standard) Copy() Projection {
 // order: clipAngle, clipExtent, scale, translate, center, rotate, parallels,
 // precision, reflectX, reflectY, and the path's point radius.
 func (p *standard) copyFrom(src *standard) {
-	p.setClipAngle(src.clipAngle())
+	_ = p.setClipAngle(src.clipAngle()) // src's angle was accepted
 	if ext, ok := src.clipExtent(); ok {
 		p.setClipExtent(&ext)
 	} else {

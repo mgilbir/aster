@@ -50,7 +50,7 @@ func TestGraticule(t *testing.T) {
 				p.Precision = &f
 			}
 		}
-		got, err := GraticuleFeature(p)
+		got, err := GraticuleFeature(bg, p)
 		want := parseJSONValue(t, c.Lines)
 		if err != nil {
 			t.Errorf("%s: %v", c.Cfg, err)
@@ -86,15 +86,15 @@ func TestGraticule(t *testing.T) {
 
 func TestGraticuleBounded(t *testing.T) {
 	huge := [2]float64{1e-9, 1e-9}
-	if _, err := GraticuleFeature(GraticuleParams{Step: &huge}); err == nil {
+	if _, err := GraticuleFeature(bg, GraticuleParams{Step: &huge}); err == nil {
 		t.Error("expected an error for a step that would generate billions of lines")
 	}
 	p := 1e-9
-	if _, err := GraticuleFeature(GraticuleParams{Precision: &p}); err == nil {
+	if _, err := GraticuleFeature(bg, GraticuleParams{Precision: &p}); err == nil {
 		t.Error("expected an error for a tiny precision")
 	}
 	zero := [2]float64{0, 0}
-	if v, err := GraticuleFeature(GraticuleParams{Step: &zero}); err != nil || v.IsUndefined() {
+	if v, err := GraticuleFeature(bg, GraticuleParams{Step: &zero}); err != nil || v.IsUndefined() {
 		t.Errorf("zero step: %v %v", v, err)
 	}
 }
