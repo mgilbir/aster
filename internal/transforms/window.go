@@ -64,6 +64,11 @@ type windowFrame struct {
 	// sortField is the field the comparator reads, for the error of handing
 	// it undefined.
 	sortField string
+	// x0 and x1 are the frame's ends as upstream holds them (NaN or
+	// fractional ones included), which the operations read rows at; err is
+	// the exception one of them raised.
+	x0, x1 float64
+	err    error
 }
 
 type windowOp interface {
@@ -154,24 +159,36 @@ func newWindowOp(spec WindowOpSpec) (op windowOp, ok bool, err error) {
 		if off == 0 || off != off {
 			off = 1
 		}
+		// lag tests i >= 0 and lead i < length, and nothing else: a row
+		// past the other end, or between two rows, is undefined, and
+		// reading its field is a TypeError.
+		name := spec.Field.Name
 		if spec.Op == "lag" {
 			return windowFn{nextFn: func(w *windowFrame) jsval.Value {
-				return rowFieldOrNull(get, w.data, float64(w.index)-off)
+				if i := float64(w.index) - off; i >= 0 {
+					return w.field(get, name, i)
+				}
+				return jsval.Null
 			}}, true, nil
 		}
 		return windowFn{nextFn: func(w *windowFrame) jsval.Value {
-			return rowFieldOrNull(get, w.data, float64(w.index)+off)
+			if i := float64(w.index) + off; i < float64(len(w.data)) {
+				return w.field(get, name, i)
+			}
+			return jsval.Null
 		}}, true, nil
 	case "first_value":
 		if err := needField(); err != nil {
 			return nil, true, err
 		}
-		return windowFn{nextFn: func(w *windowFrame) jsval.Value { return atOrUndefined(get, w.data, w.i0) }}, true, nil
+		name := spec.Field.Name
+		return windowFn{nextFn: func(w *windowFrame) jsval.Value { return w.field(get, name, w.x0) }}, true, nil
 	case "last_value":
 		if err := needField(); err != nil {
 			return nil, true, err
 		}
-		return windowFn{nextFn: func(w *windowFrame) jsval.Value { return atOrUndefined(get, w.data, w.i1-1) }}, true, nil
+		name := spec.Field.Name
+		return windowFn{nextFn: func(w *windowFrame) jsval.Value { return w.field(get, name, w.x1-1) }}, true, nil
 	case "nth_value":
 		if err := needField(); err != nil {
 			return nil, true, err
@@ -180,14 +197,12 @@ func newWindowOp(spec WindowOpSpec) (op windowOp, ok bool, err error) {
 		if !(nth > 0) {
 			return nil, true, errors.New("nth_value nth must be greater than zero")
 		}
+		name := spec.Field.Name
 		return windowFn{nextFn: func(w *windowFrame) jsval.Value {
-			// i = w.i0 + (nth - 1), compared with i1 in floating point: a
-			// huge nth is past the frame (null).
-			if i := float64(w.i0) + (nth - 1); i < float64(w.i1) {
-				if i != math.Trunc(i) {
-					return jsval.Undefined // not a row (see atOrUndefined)
-				}
-				return atOrUndefined(get, w.data, int(i))
+			// i = w.i0 + (nth - 1) < w.i1, in floating point: a huge nth is
+			// past the frame (null), a NaN end is never less.
+			if i := w.x0 + (nth - 1); i < w.x1 {
+				return w.field(get, name, i)
 			}
 			return jsval.Null
 		}}, true, nil
@@ -227,24 +242,18 @@ func newWindowOp(spec WindowOpSpec) (op windowOp, ok bool, err error) {
 	return nil, false, nil
 }
 
-// rowFieldOrNull is lag and lead: the field of row i, null where upstream
-// tests i against the partition. Upstream tests only one end (lag i >= 0,
-// lead i < length) and throws reading a field of the undefined row past the
-// other end or between two rows; this answers null there too.
-func rowFieldOrNull(get Accessor, data []jsval.Value, i float64) jsval.Value {
-	if i >= 0 && i < float64(len(data)) && i == math.Trunc(i) {
-		return get(data[int(i)])
+// field is field(w.data[i]) for a window operation: a position that is not
+// a row (past either end, between two rows, NaN) is undefined, and reading a
+// field of it is the TypeError upstream throws, recorded in w.err for Window
+// to return through the operator's error, as upstream's dataflow catches it.
+func (w *windowFrame) field(get Accessor, name string, i float64) jsval.Value {
+	if i >= 0 && i < float64(len(w.data)) && i == math.Trunc(i) {
+		return get(w.data[int(i)])
 	}
-	return jsval.Null
-}
-
-// atOrUndefined reads the field of data[i]. Upstream throws when i is out of
-// range (an empty frame); this answers undefined.
-func atOrUndefined(get Accessor, data []jsval.Value, i int) jsval.Value {
-	if i < 0 || i >= len(data) {
-		return jsval.Undefined
+	if w.err == nil {
+		w.err = readsUndefined(name)
 	}
-	return get(data[i])
+	return jsval.Undefined
 }
 
 // Window computes window calculations per partition and writes the results
@@ -348,6 +357,7 @@ func Window(ctx context.Context, data []jsval.Value, p WindowParams) ([]jsval.Va
 				}
 			}
 			w.i0, w.i1, w.index = frameIndex(x0), frameIndex(x1), i
+			w.x0, w.x1 = x0, x1
 			t := rows[i].ObjValue()
 			if c != nil {
 				var err error
@@ -372,7 +382,11 @@ func Window(ctx context.Context, data []jsval.Value, p WindowParams) ([]jsval.Va
 				}
 			}
 			for k, o := range wins {
-				if v := o.next(&w); t != nil {
+				v := o.next(&w)
+				if w.err != nil {
+					return nil, w.err
+				}
+				if t != nil {
 					t.Set(outs[k], v)
 				}
 			}
@@ -402,7 +416,7 @@ func clampFrame(x float64, n int) float64 {
 
 // frameIndex is a clamped frame position as an index, for the window
 // operations, which read data[i0] and data[i1 - 1]: a position that is not a
-// whole number reads past the rows (see atOrUndefined).
+// whole number reads past the rows (see windowFrame.field).
 func frameIndex(x float64) int {
 	if x != math.Trunc(x) { // NaN or fractional
 		return -1 << 30
@@ -443,7 +457,7 @@ func readsUndefined(field string) error {
 	if segs := jsval.ParseFieldPath(field); len(segs) > 0 {
 		field = segs[0]
 	}
-	return fmt.Errorf("Cannot read properties of undefined (reading '%s')", field)
+	return &jsval.Thrown{Name: "TypeError", Msg: "Cannot read properties of undefined (reading '" + field + "')"}
 }
 
 // peerBound is d3's bisector.left (right=false) or bisector.right over the

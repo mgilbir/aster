@@ -1,7 +1,6 @@
 package transforms
 
 import (
-	"errors"
 	"math"
 	"slices"
 
@@ -106,7 +105,7 @@ func windowMoveRegular(ms *measureSet, c *cell, st *windowStore, rows []jsval.Va
 }
 
 // errArrayLength is the RangeError of new Array(n) with n < 0.
-var errArrayLength = errors.New("Invalid array length")
+var errArrayLength = &jsval.Thrown{Name: "RangeError", Msg: "Invalid array length"}
 
 // windowMoveSlow is windowMoveRegular for a frame upstream does not keep within
 // the rows: positions are what upstream computes (NaN or fractional ones

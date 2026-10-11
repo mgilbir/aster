@@ -217,3 +217,27 @@ func TestErrClosed(t *testing.T) {
 		t.Errorf("err = %v, want ErrClosed", err)
 	}
 }
+
+// TestWindowExceptionReachesTheHandler: a window's first_value over an empty
+// frame reads a field of undefined, a TypeError upstream's dataflow catches
+// and logs. It reaches WithErrorHandler as any operator's exception does,
+// and a handler that goes on gets the rest of the chart.
+func TestWindowExceptionReachesTheHandler(t *testing.T) {
+	const spec = `{"width":50,"height":50,"data":[{"name":"t","values":[{"x":1},{"x":2}],
+	 "transform":[{"type":"window","frame":[5,6],"ops":["first_value"],"fields":["x"]}]}],
+	 "marks":[{"type":"rect","encode":{"enter":{"width":{"value":5},"height":{"value":5}}}}]}`
+	c, err := aster.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	const want = "TypeError: Cannot read properties of undefined (reading 'x')"
+	if _, err := c.VegaToSVG([]byte(spec)); err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("default: %v", err)
+	}
+	var got []error
+	svg, err := c.VegaToSVG([]byte(spec), aster.WithErrorHandler(func(err error) error { got = append(got, err); return nil }))
+	if err != nil || len(got) != 1 || !strings.Contains(got[0].Error(), want) || !strings.Contains(svg, "<path") {
+		t.Fatalf("handler saw %v, render %v", got, err)
+	}
+}

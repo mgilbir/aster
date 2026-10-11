@@ -76,12 +76,13 @@ for (const b of bounds) {
   }
 }
 // lag and lead with offsets past the partition: null, not a smaller offset.
-for (const params of [[1e300, 1e300, 3, 2], [{ e: '1/0' }, { e: '1/0' }, 0, null]]) {
+for (const params of [[1e300, 1e300, 3, 2], [{ e: '1/0' }, { e: '1/0' }, 0, null], [-1, -2, 0.5, -0.5], [-20, 20, -1e300, 1e300]]) {
   const tr = { type: 'window', ops: ['lag', 'lead', 'lag', 'lead'], fields: ['x', 'x', 'x', 'x'], as: ['lag0', 'lead1', 'lag2', 'lead3'],
     params: params.map((v) => (v && typeof v === 'object' ? { signal: v.e } : v)) };
-  const res = await runTransforms(structuredClone(rows), [tr]);
-  out.push({ name: `lag/lead ${JSON.stringify(params)}`, frame: [null, 0], transform: tr, paramNum: params.map((v) => encode(v && typeof v === 'object' ? Infinity : v)),
-    output: res.map((t) => ({ id: t.id, lag0: encode(t.lag0), lead1: encode(t.lead1), lag2: encode(t.lag2), lead3: encode(t.lead3) })) });
+  let res, error;
+  try { res = await runTransforms(structuredClone(rows), [tr]); } catch (e) { error = String(e && e.message || e); }
+  out.push({ error, name: `lag/lead ${JSON.stringify(params)}`, frame: [null, 0], transform: tr, paramNum: params.map((v) => (v === null ? null : encode(v && typeof v === 'object' ? Infinity : v))),
+    output: res && res.map((t) => ({ id: t.id, lag0: encode(t.lag0), lead1: encode(t.lead1), lag2: encode(t.lag2), lead3: encode(t.lead3) })) });
 }
 out.unshift({ rows });
 console.log(JSON.stringify(out));

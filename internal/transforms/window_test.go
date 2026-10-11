@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
-	"strings"
 	"testing"
 
 	"github.com/mgilbir/aster/internal/budget"
@@ -124,13 +123,8 @@ func TestWindowFramesGolden(t *testing.T) {
 				p.SortField = s.Get("field").Index(0).StrValue()
 			}
 			out, err := Window(context.Background(), cloneTuples(rows), p)
-			if want := c.Get("error").StrValue(); want != "" && err == nil && slices.Contains(strList(spec.Get("ops")), "first_value") {
-				// first_value and last_value of an empty frame read a field of
-				// undefined upstream; they answer undefined here (atOrUndefined).
-				t.Skip("known divergence: " + want)
-			}
 			if want := c.Get("error").StrValue(); want != "" {
-				if err == nil || !strings.HasSuffix(want, err.Error()) {
+				if err == nil || err.Error() != want {
 					t.Fatalf("got error %v, want %s", err, want)
 				}
 				return
@@ -218,7 +212,7 @@ func TestWindowNoPanicOnEdgeFrames(t *testing.T) {
 		// A range frame that starts past the last row or ends before the
 		// first hands undefined to the sort comparator, a TypeError upstream
 		// too; anything else is a bug.
-		if err != nil && err.Error() != "Cannot read properties of undefined (reading 'v')" {
+		if err != nil && err.Error() != "TypeError: Cannot read properties of undefined (reading 'v')" {
 			t.Fatal(err)
 		}
 	}

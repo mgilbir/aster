@@ -2,9 +2,11 @@ package transforms
 
 import (
 	"context"
+	"errors"
 	"math"
-	"strings"
+	"slices"
 
+	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -28,33 +30,90 @@ type StackParams struct {
 	As [2]string
 }
 
-// stackGroupKey mirrors JSON.stringify(values): distinct types stay distinct
-// (1 vs "1") while null, undefined and non-finite numbers all write null.
-func stackGroupKey(fields []Field, t jsval.Value, sb *strings.Builder) string {
-	sb.Reset()
-	for _, f := range fields {
-		v := f.Get(t)
-		switch {
-		case v.IsNullish():
-			sb.WriteString("n")
-		case v.IsNum():
-			if n := v.NumValue(); math.IsNaN(n) || math.IsInf(n, 0) {
-				sb.WriteString("n")
-			} else {
-				sb.WriteByte('d')
-				sb.WriteString(v.AsString())
-			}
-		case v.IsStr():
-			sb.WriteByte('s')
-			sb.WriteString(v.StrValue())
-		default:
-			sb.WriteByte('o')
-			sb.WriteString(v.Kind().String())
-			sb.WriteString(v.AsString())
+// errCircular is the TypeError JSON.stringify throws on a value that
+// contains itself.
+var errCircular = errors.New("TypeError: Converting circular structure to JSON")
+
+// appendStackKey appends upstream's stack group key,
+// JSON.stringify(groupby.map(get)), to dst.
+func appendStackKey(dst []byte, fields []Field, t jsval.Value, path *[]*jsval.Object) ([]byte, error) {
+	dst = append(dst, '[')
+	for i, f := range fields {
+		if i > 0 {
+			dst = append(dst, ',')
 		}
-		sb.WriteByte(0)
+		var err error
+		// In an array, undefined is written as null.
+		if dst, err = appendStringify(dst, f.Get(t), path, 0); err != nil {
+			return dst, err
+		}
 	}
-	return sb.String()
+	return append(dst, ']'), nil
+}
+
+// appendStringify is JSON.stringify(v) for a value in an array, or an object
+// member that is not undefined: null, undefined and non-finite numbers are
+// null; a date is its toJSON, the ISO string (null for an Invalid Date); an
+// object's members are in JavaScript's key order (integer keys ascending,
+// then the rest as inserted), undefined ones omitted; a value holding itself
+// is the TypeError upstream throws. path holds the objects being written.
+func appendStringify(dst []byte, v jsval.Value, path *[]*jsval.Object, depth int) ([]byte, error) {
+	switch v.Kind() {
+	case jsval.KindTimestamp:
+		iso, ok := format.ISOFormat(v.NumValue())
+		if !ok {
+			return append(dst, "null"...), nil
+		}
+		return jsval.AppendJSON(dst, jsval.Str(iso)), nil
+	case jsval.KindArr, jsval.KindObj:
+		if depth > jsval.MaxValueDepth {
+			return dst, errors.New("RangeError: Maximum call stack size exceeded")
+		}
+	default:
+		return jsval.AppendJSON(dst, v), nil
+	}
+	if v.IsArr() {
+		dst = append(dst, '[')
+		for i, it := range v.Items() {
+			if i > 0 {
+				dst = append(dst, ',')
+			}
+			var err error
+			if dst, err = appendStringify(dst, it, path, depth+1); err != nil {
+				return dst, err
+			}
+		}
+		return append(dst, ']'), nil
+	}
+	o := v.ObjValue()
+	if slices.Contains(*path, o) {
+		return dst, errCircular
+	}
+	*path = append(*path, o)
+	defer func() { *path = (*path)[:len(*path)-1] }()
+	keys := make([]string, 0, o.Len())
+	for i := 0; i < o.Len(); i++ {
+		keys = append(keys, o.KeyAt(i))
+	}
+	dst = append(dst, '{')
+	n := 0
+	for _, k := range OrderedKeys(keys) {
+		val := o.Lookup(k)
+		if val.IsUndefined() {
+			continue
+		}
+		if n > 0 {
+			dst = append(dst, ',')
+		}
+		n++
+		dst = jsval.AppendJSON(dst, jsval.Str(k))
+		dst = append(dst, ':')
+		var err error
+		if dst, err = appendStringify(dst, val, path, depth+1); err != nil {
+			return dst, err
+		}
+	}
+	return append(dst, '}'), nil
 }
 
 // Stack writes the stacked extent [y0, y1] of each tuple into the tuple itself
@@ -82,16 +141,20 @@ func Stack(ctx context.Context, data []jsval.Value, p StackParams) ([]jsval.Valu
 		groups = [][]jsval.Value{append([]jsval.Value(nil), data...)}
 	} else {
 		idx := map[string]int{}
-		var sb strings.Builder
+		var buf []byte
+		var path []*jsval.Object
 		for i, t := range data {
 			if err := poll(ctx, i); err != nil {
 				return nil, err
 			}
-			k := stackGroupKey(p.GroupBy, t, &sb)
-			gi, ok := idx[k]
+			var err error
+			if buf, err = appendStackKey(buf[:0], p.GroupBy, t, &path); err != nil {
+				return nil, err
+			}
+			gi, ok := idx[string(buf)]
 			if !ok {
 				gi = len(groups)
-				idx[k] = gi
+				idx[string(buf)] = gi
 				groups = append(groups, nil)
 			}
 			groups[gi] = append(groups[gi], t)

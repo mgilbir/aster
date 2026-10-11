@@ -119,3 +119,4 @@ internal/vegalite.writeConfig	# fixed depth 2: the nested call passes recurseAll
 internal/transforms.appendJoined internal/transforms.keyString	# array nesting, depth bounded by jsval.MaxValueDepth (appendJoined stops past it)
 internal/transforms.hasDate	# array nesting, depth bounded by jsval.MaxValueDepth
 internal/transforms/voronoi.mergeSort	# halves its range each level: depth log2(points)
+internal/transforms.appendStringify	# nested group-by values: RangeError past jsval.MaxValueDepth, and a cycle is the TypeError (internal/transforms/stack.go: appendStringify)
