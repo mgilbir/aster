@@ -360,6 +360,9 @@ const (
 	defaultMaxCanvasB  = 1 << 30
 )
 
+// WithDefaults is l with every zero field set to its default.
+func (l Limits) WithDefaults() Limits { return l.withDefaults() }
+
 func (l Limits) withDefaults() Limits {
 	if l.MaxInputBytes <= 0 {
 		l.MaxInputBytes = defaultMaxInput

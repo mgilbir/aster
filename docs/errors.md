@@ -1,0 +1,72 @@
+# Errors
+
+Every rendering method returns an `error`, and a non-nil one means the output is not the chart the specification describes. This page lists what can go wrong, how to tell the cases apart, and how to render past problems when a partial chart is what you want.
+
+```go
+svg, err := c.VegaLiteToSVG(spec)
+var le *aster.LoadError
+switch {
+case err == nil:
+case errors.As(err, &le):
+    // data or an image could not be loaded: le.Resource, le.URL, le.Err
+case errors.Is(err, aster.ErrLimit):
+    // the spec asks for more than this converter allows (see limits.md)
+case errors.Is(err, context.DeadlineExceeded):
+    // the render took longer than WithTimeout
+case errors.Is(err, aster.ErrClosed), errors.Is(err, context.Canceled):
+    // the Converter was closed (before, or during, the call)
+default:
+    // an invalid spec, or an error raised while evaluating it
+}
+```
+
+## Why a call fails where a browser draws something
+
+Upstream Vega, in a browser, logs some problems to the console and draws what it can: a data set whose URL fails to load is empty, an image that fails is not drawn, an expression that throws leaves its signal unchanged. A Go program usually has nobody watching a console, so aster turns each of these into an error by default. A chart that silently lacks its data is the failure mode this avoids.
+
+When the partial chart *is* what you want (a preview, a gallery of user charts, parity with what the browser shows), pass `WithErrorHandler` to the call. It works like `go/types`' `Config.Error`:
+
+```go
+var problems []error
+svg, err := c.VegaLiteToSVG(spec, aster.WithErrorHandler(func(err error) error {
+    problems = append(problems, err) // or log it
+    return nil                       // go on, as upstream does
+}))
+```
+
+- **No handler (the default):** the first such error fails the call. Warnings are dropped.
+- **With a handler:** it is called with each error and each warning, in the order they arise. Return `nil` to go on, or return an error to fail the call with it. For example, return `err` for a `*LoadError` but `nil` for everything else.
+- The handler is called on the goroutine that made the call, never concurrently, and before the call returns. Data and evaluation errors reach it as they happen. Image failures reach it when the stage that fetched or decoded them (SVG, PNG or PDF) is over.
+
+`WithErrorHandler` is a per-call option for every method (`RenderOption`, `PNGOption`, `PDFOption`), so concurrent calls on one `Converter` each have their own.
+
+## What the handler is told of
+
+| Value | When | Default (no handler) |
+|---|---|---|
+| `*aster.LoadError` with `Resource == "data"` | a `data.url` the Loader refused or failed to load, or whose body does not parse in its `format` | the call fails |
+| `*aster.LoadError` with `Resource == "image"` | an image mark (or an `<image>` in SVG input) whose URL the Loader refused, failed to load, or that is not a PNG, JPEG or GIF that decodes | the call fails |
+| another `error` | an exception an expression or an operator raised while the chart was evaluated (`TypeError`, `RangeError`, an invalid parameter, an unknown projection type) | the call fails |
+| `aster.Warning` | a Vega warning (`Infinite extent for field "x"`, `Unsupported scale property: …`), or a link (`href`) the Loader refused, which the output then lacks | ignored |
+
+`LoadError.Err` is the Loader's own error (for example the `HTTPLoader`'s "private/loopback address (blocked)"), so `errors.Is` reaches errors your Loader returns. When the handler lets a failure go, the result is upstream's: the data set is empty (or, for a body that does not parse, the text as one value), and the image is undrawn.
+
+Embedded PNG, JPEG and GIF images (`data:image/png;base64,…`, and `image/jpeg`, `image/gif`) are part of the specification, not resources: they need no Loader, and draw with the default one. Any other `data:` URL goes through the Loader like a remote one.
+
+## Errors the handler never sees
+
+These always fail the call:
+
+- **An invalid specification:** JSON that does not parse, a Vega-Lite spec the compiler rejects, an expression that does not parse, an unknown signal name in `WithSignal`.
+- **`ErrLimit`:** a resource bound was exceeded. This includes a response over the Loader's size cap. See [limits.md](limits.md).
+- **`context.DeadlineExceeded`:** `WithTimeout` expired. The message names the stage ("rendering Vega timed out after 30s").
+- **`context.Canceled`:** `Close` was called during the call.
+- **`ErrClosed`:** the call was made after `Close`.
+- **Configuration errors** are `New`'s: an unknown Vega-Lite version or time zone, a theme that is not a JSON object, a font that does not load, a fallback family with no font. See [api.md](api.md#errors-from-new).
+- **PDF of unsupported SVG:** `SVGToPDF` on SVG outside what Vega writes (embedded CSS, patterns) returns a descriptive error rather than an incomplete PDF.
+
+## Error messages
+
+Messages name the stage and wrap the cause: `aster: rendering Vega: data "data/cars.json" could not be loaded: aster: resource loading denied for "data/cars.json" (no loader configured)`. The stages are `parsing Vega-Lite spec`, `compiling Vega-Lite`, `rendering Vega`, `writing SVG`, `rendering PNG` and `rendering PDF`. An error that evaluation raised carries upstream's message (`TypeError: Cannot read properties of undefined (reading 'b')`), so it can be looked up against Vega's own behaviour.
+
+The CLI prints warnings to stderr, fails on errors, and with `-lenient` prints errors and goes on; see [cli.md](cli.md).

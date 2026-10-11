@@ -37,10 +37,12 @@ func WithPangoTextForTest(floor bool) Option {
 // VegaToSVGAfterSignalWritesForTest renders a Vega spec, writes each signal
 // (name, JSON value) as View.signal does, re-running after each, and returns
 // the chart after the last write.
+// Like the comparisons that use it, it renders as upstream does: past the
+// errors upstream logs.
 func (c *Converter) VegaToSVGAfterSignalWritesForTest(spec []byte, writes [][2]string) (string, error) {
 	release, ok := c.enter()
 	if !ok {
-		return "", errConverterClosed
+		return "", ErrClosed
 	}
 	defer release()
 	ctx, cancel := c.opContext()
@@ -53,6 +55,7 @@ func (c *Converter) VegaToSVGAfterSignalWritesForTest(spec []byte, writes [][2]s
 		}
 		ws = append(ws, vega.SignalWrite{Name: w[0], Value: v})
 	}
+	reportFrom(ctx).handler = func(error) error { return nil }
 	return c.vegaSVG(context.WithValue(ctx, signalWritesKey{}, ws), spec)
 }
 
@@ -62,7 +65,7 @@ func (c *Converter) VegaToSVGAfterSignalWritesForTest(spec []byte, writes [][2]s
 func (c *Converter) StagesForTest(spec []byte, lite bool) (map[string]time.Duration, error) {
 	release, ok := c.enter()
 	if !ok {
-		return nil, errConverterClosed
+		return nil, ErrClosed
 	}
 	defer release()
 	ctx, cancel := c.opContext()
@@ -111,7 +114,7 @@ func (c *Converter) RenderPreparedForTest(spec []byte, lite bool) (func() error,
 	return func() (err error) {
 		release, ok := c.enter()
 		if !ok {
-			return errConverterClosed
+			return ErrClosed
 		}
 		defer release()
 		ctx, cancel := c.opContext()
@@ -137,3 +140,30 @@ func (c *Converter) RenderPreparedForTest(spec []byte, lite bool) (func() error,
 
 // RaceSlowdownForTest is raceSlowdown, for the external tests' time limits.
 const RaceSlowdownForTest = raceSlowdown
+
+// LimitsForTest is what each row of docs/limits.md's budget table is, in
+// bytes or counts, for WithMemoryLimit(n); 0 for "none".
+func LimitsForTest(n uint64) map[string]int64 {
+	c := &Converter{cfg: &config{memoryLimit: n}}
+	l := c.limits().WithDefaults()
+	r := c.rasterLimits().WithDefaults()
+	spec := int64(0)
+	if n > 0 {
+		spec = int64(max(n/specBytesDivisor, 1<<20))
+	}
+	return map[string]int64{
+		"data rows":              int64(l.MaxRows),
+		"scene items":            int64(l.MaxItems),
+		"facet cells (subflows)": int64(l.MaxSubflows),
+		"dataflow operators":     int64(l.MaxOperators),
+		"loaded bytes (data and images of one call)": l.MaxLoadBytes,
+		"parsed JSON (spec and data)":                l.MaxParseBytes,
+		"expression strings and arrays":              l.MaxStringBytes,
+		"bitmaps the heatmap transform paints":       l.MaxCanvasBytes,
+		"SVG output":                                 int64(c.maxSVGBytes()),
+		"specification size":                         spec,
+		"glyphs of one shaped run of text":           c.shapingLimits().RunBytes,
+		"rasterizer canvas memory (PNG)":             int64(r.MaxCanvasBytes),
+		"rasterizer pixels per canvas (PNG)":         int64(r.MaxPixels),
+	}
+}

@@ -57,8 +57,9 @@ import (
 // use as well; the loaders in this package are.
 //
 // Close may be called at any time from any goroutine: it cancels the calls in
-// flight (they return an error), waits for them to finish, closes the Loader,
-// and makes every later call fail. Closing more than once is harmless.
+// flight (they fail with context.Canceled), waits for them to finish, closes
+// the Loader if it implements io.Closer, and makes every later call fail with
+// ErrClosed. Closing more than once is harmless.
 type Converter struct {
 	cfg      *config
 	location *time.Location
@@ -91,9 +92,6 @@ type Converter struct {
 	pdfErr      error
 }
 
-// errConverterClosed is returned by every rendering method after Close.
-var errConverterClosed = errors.New("aster: converter is closed")
-
 // supportedVersions are the Vega-Lite versions this engine compiles, sorted
 // by key. Every version renders with the Vega 6.4
 // runtime; VegaVersion says whose behaviour rendering follows.
@@ -115,13 +113,20 @@ type VersionInfo struct {
 	VegaLiteVersion string // Vega-Lite version the compiler follows
 }
 
-// AvailableVersions reports the Vega-Lite version sets bundled in this build,
-// sorted by key. Pass a VegaLiteVersion (e.g. "6.4") to WithVegaLiteVersion.
+// AvailableVersions reports the Vega-Lite compilers bundled in this build,
+// sorted by key. WithVegaLiteVersion takes the major.minor of a
+// VegaLiteVersion ("6.4" for "6.4.3"). The error is always nil.
 func AvailableVersions() ([]VersionInfo, error) {
 	return append([]VersionInfo(nil), supportedVersions...), nil
 }
 
-// New creates a new Converter with the given options.
+// New creates a Converter with the given options. It fails for an unknown
+// Vega-Lite version (WithVegaLiteVersion), an unknown time zone
+// (WithTimezone), a theme that is not a JSON object (WithTheme), a font that
+// does not load (WithFont, WithFontFace, WithFontInstance) and a fallback
+// family with no font (WithFontFallback). Fonts given that way are loaded
+// here; with the embedded fonts alone, New loads nothing and they load on
+// first use.
 func New(opts ...Option) (*Converter, error) {
 	cfg := defaultConfig()
 	for _, opt := range opts {
@@ -166,7 +171,32 @@ func New(opts ...Option) (*Converter, error) {
 		}
 		c.theme = theme
 	}
+	if err := c.loadFonts(); err != nil {
+		c.cancelAll()
+		return nil, err
+	}
 	return c, nil
+}
+
+// loadFonts loads the fonts given with WithFont and its kin, and resolves
+// WithFontFallback's families, so that one that does not load fails New
+// rather than every render. With text measurement on, what it builds is the
+// layout measurer the first render would otherwise build; without, it is
+// built to check and dropped. With the embedded fonts alone there is
+// nothing to check, and New stays cheap.
+func (c *Converter) loadFonts() (err error) {
+	if len(c.cfg.fonts) == 0 && !c.cfg.fallbackSet {
+		return nil
+	}
+	defer recoverInto(&err)
+	if c.cfg.textMeasure {
+		_, err = c.measurerInit()
+		return err
+	}
+	if _, err := text.New(c.fontOptions()...); err != nil {
+		return fmt.Errorf("aster: loading fonts: %w", err)
+	}
+	return nil
 }
 
 // Close releases all resources held by the Converter. It is safe to call
@@ -214,6 +244,7 @@ func (c *Converter) opContext() (context.Context, context.CancelFunc) {
 		ctx, cancel = context.WithCancel(c.base)
 	}
 	ctx = text.WithShapingBudget(ctx, text.NewShapingBudget(ctx, c.shapingLimits()))
+	ctx = context.WithValue(ctx, callReportKey{}, &callReport{})
 	return context.WithValue(ctx, callImagesKey{}, c.newCallImages()), cancel
 }
 
@@ -291,9 +322,13 @@ func signalWritesFrom(ctx context.Context) []vega.SignalWrite {
 	return w
 }
 
-// withSignals returns ctx carrying the writes of the signals rc sets, their
-// values turned into the JSON values they encode to.
-func withSignals(ctx context.Context, rc renderConfig) (context.Context, error) {
+// withRender returns ctx carrying the writes of the signals rc sets, their
+// values turned into the JSON values they encode to, and installs rc's error
+// handler in the call's report.
+func withRender(ctx context.Context, rc renderConfig) (context.Context, error) {
+	if rc.handler != nil {
+		reportFrom(ctx).handler = rc.handler
+	}
 	if len(rc.signals) == 0 {
 		return ctx, nil
 	}
@@ -340,12 +375,12 @@ func pdfRenderOptions(opts []PDFOption) renderConfig {
 func (c *Converter) VegaToSVG(spec []byte, opts ...RenderOption) (string, error) {
 	release, ok := c.enter()
 	if !ok {
-		return "", errConverterClosed
+		return "", ErrClosed
 	}
 	defer release()
 	ctx, cancel := c.opContext()
 	defer cancel()
-	ctx, err := withSignals(ctx, renderOptions(opts))
+	ctx, err := withRender(ctx, renderOptions(opts))
 	if err != nil {
 		return "", err
 	}
@@ -356,12 +391,12 @@ func (c *Converter) VegaToSVG(spec []byte, opts ...RenderOption) (string, error)
 func (c *Converter) VegaLiteToSVG(spec []byte, opts ...RenderOption) (string, error) {
 	release, ok := c.enter()
 	if !ok {
-		return "", errConverterClosed
+		return "", ErrClosed
 	}
 	defer release()
 	ctx, cancel := c.opContext()
 	defer cancel()
-	ctx, err := withSignals(ctx, renderOptions(opts))
+	ctx, err := withRender(ctx, renderOptions(opts))
 	if err != nil {
 		return "", err
 	}
@@ -426,6 +461,8 @@ func (c *Converter) renderSVG(ctx context.Context, spec jsval.Value) (out string
 	// The label transform paints the marks it avoids, text included; the
 	// shaper is only built if it does.
 	opts.Shaper = lazyShaper{c, shaping}
+	rep := reportFrom(ctx)
+	opts.Report = rep.vega
 	res, err := vega.Render(ctx, spec, opts)
 	if err != nil {
 		return "", c.stageErr(ctx, "rendering Vega", err)
@@ -447,16 +484,24 @@ func (c *Converter) renderSVG(ctx context.Context, spec jsval.Value) (out string
 	// which links a chart may carry, and a rejected URL renders no link.
 	// Vega's vega-loader allow-list (no javascript: and the like) applies as
 	// well: a permissive Loader cannot make a script URL a link.
+	// A dropped link is a Warning: the chart is drawn whole without it.
+	var hookErr error
+	dropLink := func(uri, why string) ([]svg.HrefAttr, bool) {
+		if e := rep.warn(fmt.Sprintf("link %q dropped: %s", uri, why)); e != nil && hookErr == nil {
+			hookErr = e
+		}
+		return nil, false
+	}
 	so.Href = func(uri string) ([]svg.HrefAttr, bool) {
 		if _, ok := svg.SanitizeURL(uri, svg.URLOptions{}); !ok {
-			return nil, false
+			return dropLink(uri, "its scheme is not allowed")
 		}
 		href, err := c.cfg.loader.Sanitize(ctx, uri)
 		if err != nil {
-			return nil, false
+			return dropLink(uri, err.Error())
 		}
 		if _, ok := svg.SanitizeURL(href, svg.URLOptions{}); !ok {
-			return nil, false
+			return dropLink(uri, "its scheme is not allowed")
 		}
 		return []svg.HrefAttr{{Name: "xlink:href", Value: href}}, true
 	}
@@ -467,16 +512,25 @@ func (c *Converter) renderSVG(ctx context.Context, spec jsval.Value) (out string
 	// upstream's SVG renderer does once the image has loaded; the image is
 	// fetched for that through the call's cache, which PNG and PDF output
 	// then draw from.
+	// A data: URI of an image the engine draws (PNG, JPEG, GIF) is part of
+	// the specification, not a resource to fetch, so it does not go through
+	// the Loader; the rasterizer and the PDF writer decode it within the image
+	// limits. Any other data: URL is the Loader's to allow, as before.
 	so.Image = func(url string, size bool) svg.ImageInfo {
 		if url == "" {
 			return svg.ImageInfo{}
 		}
-		u, err := c.cfg.loader.Sanitize(ctx, url)
-		if err != nil {
-			return svg.ImageInfo{}
+		u := url
+		if !inlineImage(url) {
+			var err error
+			if u, err = c.cfg.loader.Sanitize(ctx, url); err != nil {
+				rep.image(url, err)
+				return svg.ImageInfo{}
+			}
 		}
 		src, ok := svg.SanitizeURL(u, svg.URLOptions{})
 		if !ok {
+			rep.image(url, errors.New("its URL scheme is not allowed"))
 			return svg.ImageInfo{}
 		}
 		info := svg.ImageInfo{Src: src}
@@ -486,6 +540,12 @@ func (c *Converter) renderSVG(ctx context.Context, spec jsval.Value) (out string
 		return info
 	}
 	out, err = timed(ctx, "svg", func() (string, error) { return svg.Render(ctx, res.Scenegraph, so) })
+	if err == nil {
+		err = hookErr
+	}
+	if err == nil {
+		err = rep.flushImages()
+	}
 	if err != nil {
 		return "", c.stageErr(ctx, "writing SVG", err)
 	}
@@ -550,6 +610,18 @@ func (c *Converter) checkSpecSize(spec []byte) error {
 	return nil
 }
 
+// inlineImage reports whether url is a data: URI of an image format the
+// engine draws.
+func inlineImage(url string) bool {
+	u := strings.ToLower(strings.TrimSpace(url))
+	for _, t := range []string{"data:image/png", "data:image/jpeg", "data:image/gif"} {
+		if rest, ok := strings.CutPrefix(u, t); ok && (strings.HasPrefix(rest, ";") || strings.HasPrefix(rest, ",")) {
+			return true
+		}
+	}
+	return false
+}
+
 // randomSeed seeds Vega's random() and every transform that samples.
 const randomSeed = 123456789
 
@@ -575,8 +647,7 @@ func (c *Converter) limits() vega.Limits {
 	return l
 }
 
-// newMeasurer builds a text measurer from the configured fonts.
-// newMeasurer builds the layout text measurer.
+// newMeasurer builds the layout text measurer from the configured fonts.
 func (c *Converter) newMeasurer() (*text.Measurer, error) {
 	opts := c.fontOptions()
 	if !c.cfg.harfBuzzText {
@@ -607,6 +678,9 @@ func (c *Converter) fontOptions() []text.Option {
 	}
 	for _, p := range c.cfg.palettes {
 		opts = append(opts, text.WithFontPalette(p.family, p.index))
+	}
+	if c.cfg.fallbackSet {
+		opts = append(opts, text.WithFallbackFamilies(c.cfg.fallbacks...))
 	}
 	if f := c.cfg.defaultFontFamily; f != "" {
 		opts = append(opts, text.WithDefaultFontFamily(f))
@@ -640,7 +714,7 @@ func (c *Converter) measurerInit() (*text.Measurer, error) {
 func (c *Converter) VegaLiteToVega(spec []byte) ([]byte, error) {
 	release, ok := c.enter()
 	if !ok {
-		return nil, errConverterClosed
+		return nil, ErrClosed
 	}
 	defer release()
 	ctx, cancel := c.opContext()
@@ -675,12 +749,12 @@ func (c *Converter) compileVegaLite(ctx context.Context, spec []byte) (jsval.Val
 func (c *Converter) VegaToPNG(spec []byte, opts ...PNGOption) ([]byte, error) {
 	release, ok := c.enter()
 	if !ok {
-		return nil, errConverterClosed
+		return nil, ErrClosed
 	}
 	defer release()
 	ctx, cancel := c.opContext()
 	defer cancel()
-	ctx, err := withSignals(ctx, pngRenderOptions(opts))
+	ctx, err := withRender(ctx, pngRenderOptions(opts))
 	if err != nil {
 		return nil, err
 	}
@@ -695,12 +769,12 @@ func (c *Converter) VegaToPNG(spec []byte, opts ...PNGOption) ([]byte, error) {
 func (c *Converter) VegaLiteToPNG(spec []byte, opts ...PNGOption) ([]byte, error) {
 	release, ok := c.enter()
 	if !ok {
-		return nil, errConverterClosed
+		return nil, ErrClosed
 	}
 	defer release()
 	ctx, cancel := c.opContext()
 	defer cancel()
-	ctx, err := withSignals(ctx, pngRenderOptions(opts))
+	ctx, err := withRender(ctx, pngRenderOptions(opts))
 	if err != nil {
 		return nil, err
 	}
@@ -715,7 +789,7 @@ func (c *Converter) VegaLiteToPNG(spec []byte, opts ...PNGOption) ([]byte, error
 func (c *Converter) SVGToPNG(svg string, opts ...PNGOption) ([]byte, error) {
 	release, ok := c.enter()
 	if !ok {
-		return nil, errConverterClosed
+		return nil, ErrClosed
 	}
 	defer release()
 	ctx, cancel := c.opContext()
@@ -728,6 +802,9 @@ func (c *Converter) svgToPNG(ctx context.Context, svg string, opts []PNGOption) 
 	cfg := defaultPNGConfig()
 	for _, opt := range opts {
 		opt.applyPNG(cfg)
+	}
+	if cfg.render.handler != nil {
+		reportFrom(ctx).handler = cfg.render.handler
 	}
 	if !(cfg.scale > 0) || math.IsInf(cfg.scale, 1) {
 		return nil, fmt.Errorf("aster: invalid PNG scale %v (must be a positive, finite number)", cfg.scale)
@@ -780,8 +857,11 @@ func (c *Converter) rasterize(ctx context.Context, svg string, scale float64) ([
 	}
 	sh = raster.BoundShaper(sh, text.ShapingBudgetFrom(ctx))
 	out, err := timed(ctx, "png", func() ([]byte, error) {
-		return raster.RenderPNG([]byte(svg), raster.Options{Scale: scale, Shaper: sh, Context: ctx, Limits: c.rasterLimits(), Images: imagesFrom(ctx).load})
+		return raster.RenderPNG([]byte(svg), raster.Options{Scale: scale, Shaper: sh, Context: ctx, Limits: c.rasterLimits(), Images: imagesFrom(ctx).load, ImageError: reportFrom(ctx).image})
 	})
+	if err == nil {
+		err = reportFrom(ctx).flushImages()
+	}
 	if err != nil {
 		return nil, c.stageErr(ctx, "rendering PNG", err)
 	}
@@ -836,8 +916,11 @@ func WithPDFText(mode PDFTextMode) PDFOption {
 	})
 }
 
-// FontUsage reports the source bytes and referenced glyph IDs of one face in a
-// rendered PDF; see svgpdf.FontUsage.
+// FontUsage reports one font face a rendered PDF uses: PostScriptName string
+// (the /BaseFont PDFTextNamed output references), Source []byte (a copy of the
+// font program it was shaped with, which may be a registered, system or
+// embedded font) and GIDs []uint16 (the glyph IDs of Source it references,
+// sorted and deduplicated).
 //
 // It enables higher-level, file-level font embedding: render many charts with
 // WithPDFText(PDFTextNamed) (which does not embed fonts), union the reported
@@ -880,7 +963,7 @@ func (c *Converter) SVGToPDF(svg string, opts ...PDFOption) ([]byte, error) {
 func (c *Converter) SVGToPDFUsage(svg string, opts ...PDFOption) ([]byte, []FontUsage, error) {
 	release, ok := c.enter()
 	if !ok {
-		return nil, nil, errConverterClosed
+		return nil, nil, ErrClosed
 	}
 	defer release()
 	ctx, cancel := c.opContext()
@@ -897,6 +980,9 @@ func (c *Converter) svgToPDF(ctx context.Context, svg string, opts []PDFOption) 
 	cfg := &pdfConfig{text: PDFTextEmbed}
 	for _, opt := range opts {
 		opt.applyPDF(cfg)
+	}
+	if cfg.render.handler != nil {
+		reportFrom(ctx).handler = cfg.render.handler
 	}
 	var mode svgpdf.TextMode
 	switch cfg.text {
@@ -915,9 +1001,12 @@ func (c *Converter) svgToPDF(ctx context.Context, svg string, opts []PDFOption) 
 	}
 	m = m.Bounded(text.ShapingBudgetFrom(ctx))
 	t0 := time.Now()
-	pdf, uses, err = svgpdf.ConvertWithUsage(svg, m, svgpdf.Options{Text: mode, Context: ctx, Images: imagesFrom(ctx).load})
+	pdf, uses, err = svgpdf.ConvertWithUsage(svg, m, svgpdf.Options{Text: mode, Context: ctx, Images: imagesFrom(ctx).load, ImageError: reportFrom(ctx).image})
 	if st := stagesFrom(ctx); st != nil {
 		st("pdf", time.Since(t0))
+	}
+	if err == nil {
+		err = reportFrom(ctx).flushImages()
 	}
 	if err != nil {
 		return nil, nil, c.stageErr(ctx, "rendering PDF", err)
@@ -930,12 +1019,12 @@ func (c *Converter) svgToPDF(ctx context.Context, svg string, opts []PDFOption) 
 func (c *Converter) VegaToPDFUsage(spec []byte, opts ...PDFOption) ([]byte, []FontUsage, error) {
 	release, ok := c.enter()
 	if !ok {
-		return nil, nil, errConverterClosed
+		return nil, nil, ErrClosed
 	}
 	defer release()
 	ctx, cancel := c.opContext()
 	defer cancel()
-	ctx, err := withSignals(ctx, pdfRenderOptions(opts))
+	ctx, err := withRender(ctx, pdfRenderOptions(opts))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -951,12 +1040,12 @@ func (c *Converter) VegaToPDFUsage(spec []byte, opts ...PDFOption) ([]byte, []Fo
 func (c *Converter) VegaLiteToPDFUsage(spec []byte, opts ...PDFOption) ([]byte, []FontUsage, error) {
 	release, ok := c.enter()
 	if !ok {
-		return nil, nil, errConverterClosed
+		return nil, nil, ErrClosed
 	}
 	defer release()
 	ctx, cancel := c.opContext()
 	defer cancel()
-	ctx, err := withSignals(ctx, pdfRenderOptions(opts))
+	ctx, err := withRender(ctx, pdfRenderOptions(opts))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -990,7 +1079,7 @@ func (c *Converter) pdfMeasurerInit() (*text.Measurer, error) {
 // higher level and shared by every chart that references the same face.
 //
 // It returns the subset program and the source's PostScript name (matching the
-// PostScriptName reported by FontUsage and the /BaseFont written by TextNamed,
+// PostScriptName reported by FontUsage and the /BaseFont PDFTextNamed writes,
 // including the shared fallback for fonts that carry no PostScript name).
 // Only fonts with TrueType glyph outlines can be subset; others return an
 // error. Glyph IDs outside the font's range are ignored — GIDs sourced from

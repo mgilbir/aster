@@ -125,6 +125,10 @@ func oracleConverter(t testing.TB, o *oracle.Oracle, extra ...aster.Option) *ast
 	return c
 }
 
+// asUpstream renders as upstream does, past the errors it logs and carries
+// on from (failed loads, operator exceptions): what the comparisons compare.
+var asUpstream = aster.WithErrorHandler(func(error) error { return nil })
+
 type specResult struct {
 	id     string // set/name
 	status string
@@ -194,9 +198,9 @@ func compareOne(t *testing.T, o *oracle.Oracle, c *aster.Converter, set corpusSe
 	var got string
 	var gerr error
 	if set.lite {
-		got, gerr = c.VegaLiteToSVG(spec)
+		got, gerr = c.VegaLiteToSVG(spec, asUpstream)
 	} else {
-		got, gerr = c.VegaToSVG(spec)
+		got, gerr = c.VegaToSVG(spec, asUpstream)
 	}
 	var problems []string
 	switch {

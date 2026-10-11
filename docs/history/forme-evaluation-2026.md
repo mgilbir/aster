@@ -1,5 +1,15 @@
 # forme as the text engine for purego: evaluation
 
+> **Historical record.** The decision it led to is
+> [ADR 0002](../adr/0002-forme-text-engine.md). Its recommendation
+> to keep the reference (HarfBuzz-rounded) metric model as the default was
+> superseded: the default is unrounded advances
+> ([ADR 0003](../adr/0003-unrounded-advances.md)), and
+> `WithHarfBuzzTextMetrics` selects the model this document calls "default".
+>
+> It was kept in `internal/text`, so "this package" is `internal/text`,
+> and `testdata/` its `internal/text/testdata/`.
+>
 > Written while two engines coexisted: "purego" is the pure-Go engine, now the
 > root `aster` package, and "the root engine" the QuickJS one it replaced.
 

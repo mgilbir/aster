@@ -56,3 +56,7 @@ performance work. The first (2026-09-30, raw JSON in `results-2026-09-30/`) is
 the run that decided to replace the previous engine, Vega in QuickJS with resvg
 for PNG (both WebAssembly), with the pure-Go one: node 20 and 24, the QuickJS
 engine ("aster" there) and the pure-Go engine ("purego" there, now the package).
+The QuickJS engine is deprecated and removed; that run, and the raw JSON in
+`results-2026-09-30/aster.json`, are kept as the record of the decision
+([ADR 0001](../../../docs/adr/0001-pure-go-engine.md)). `run.sh` times only
+node and the current engine.

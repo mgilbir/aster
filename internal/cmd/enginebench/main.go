@@ -112,8 +112,8 @@ func main() {
 	}
 	rep.FirstMS = ms(time.Since(t0))
 
-	// Warm pass: every (spec, stage) once, so lazy initialisation (resvg on
-	// the first PNG, font loading, caches) is out of the timed runs, and
+	// Warm pass: every (spec, stage) once, so lazy initialisation (the PNG
+	// shaper on the first PNG, font loading, caches) is out of the timed runs, and
 	// failing cases are recorded rather than timed.
 	type job struct {
 		s     spec

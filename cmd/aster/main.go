@@ -7,10 +7,20 @@
 //	aster pdf -i input.vl.json -o output.pdf
 //	cat spec.json | aster svg > output.svg      # stdin/stdout
 //	aster compile -i input.vl.json              # Vega-Lite → Vega JSON
+//
+// Whether the input is Vega or Vega-Lite is read from its $schema, or else
+// from its top-level properties (see detectSpec); -from overrides both.
+// Warnings are printed to stderr. A failed data or image load, or an error
+// raised while the chart is evaluated, fails the command unless -lenient is
+// given, which renders past them as a browser does and prints each.
+//
+// Exit status: 0 on success, 1 on any error, 2 for invalid flags.
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -84,6 +94,8 @@ type commonOpts struct {
 	allowPrivate bool
 	version      string
 	timeout      time.Duration
+	from         string
+	lenient      bool
 }
 
 func registerCommonOpts(fs *flag.FlagSet) *commonOpts {
@@ -93,7 +105,54 @@ func registerCommonOpts(fs *flag.FlagSet) *commonOpts {
 	fs.BoolVar(&co.allowPrivate, "allow-private-networks", false, "let HTTP loading reach loopback, link-local and private addresses (denied by default)")
 	fs.StringVar(&co.version, "version", "", "Vega-Lite version, e.g. 5.8 or 6.4 (default: build default)")
 	fs.DurationVar(&co.timeout, "timeout", 0, "max duration per render, e.g. 30s; 0 disables the timeout (default: 30s)")
+	fs.StringVar(&co.from, "from", "auto", "input language: vega, vega-lite, or auto (from $schema, else from the top-level properties)")
+	fs.BoolVar(&co.lenient, "lenient", false, "render past failed data and image loads and evaluation errors, as a browser does, printing each to stderr")
 	return co
+}
+
+// lite reports whether spec is to be rendered as Vega-Lite, per -from.
+func (co *commonOpts) lite(spec []byte) (bool, error) {
+	switch co.from {
+	case "vega-lite":
+		return true, nil
+	case "vega":
+		return false, nil
+	case "auto", "":
+		k, err := detectSpec(spec)
+		if err != nil {
+			return false, fmt.Errorf("%w; pass -from vega or -from vega-lite", err)
+		}
+		return k == specVegaLite, nil
+	default:
+		return false, fmt.Errorf("invalid -from %q (must be vega, vega-lite or auto)", co.from)
+	}
+}
+
+// errorHandler prints warnings to stderr and, with -lenient, the errors it
+// lets go; without -lenient an error fails the render.
+func (co *commonOpts) errorHandler() aster.ErrorHandlerOption {
+	return aster.WithErrorHandler(func(err error) error {
+		var w aster.Warning
+		switch {
+		case errors.As(err, &w):
+			fmt.Fprintf(os.Stderr, "aster: warning: %v\n", err)
+		case co.lenient:
+			fmt.Fprintf(os.Stderr, "aster: ignored: %v\n", err)
+		default:
+			return withLoadHint(err)
+		}
+		return nil
+	})
+}
+
+// withLoadHint adds what to do to an error for a load the default loader
+// refused.
+func withLoadHint(err error) error {
+	var le *aster.LoadError
+	if errors.As(err, &le) && strings.Contains(le.Err.Error(), "no loader configured") {
+		return fmt.Errorf("%w (pass -allow-http or -allow-domain to load over HTTP, or -lenient to render without it)", err)
+	}
+	return err
 }
 
 func (co *commonOpts) options() ([]aster.Option, error) {
@@ -180,12 +239,16 @@ func runSVG(args []string) (err error) {
 		}
 	}()
 
-	var renderOpts []aster.RenderOption
+	lite, err := co.lite(spec)
+	if err != nil {
+		return err
+	}
+	renderOpts := []aster.RenderOption{co.errorHandler()}
 	for _, s := range *signals {
 		renderOpts = append(renderOpts, s)
 	}
 	var svg string
-	if isVegaLite(spec) {
+	if lite {
 		svg, err = c.VegaLiteToSVG(spec, renderOpts...)
 	} else {
 		svg, err = c.VegaToSVG(spec, renderOpts...)
@@ -228,7 +291,11 @@ func runPNG(args []string) (err error) {
 		}
 	}()
 
-	var pngOpts []aster.PNGOption
+	lite, err := co.lite(spec)
+	if err != nil {
+		return err
+	}
+	pngOpts := []aster.PNGOption{co.errorHandler()}
 	if *scale != 1.0 {
 		pngOpts = append(pngOpts, aster.WithScale(*scale))
 	}
@@ -240,7 +307,7 @@ func runPNG(args []string) (err error) {
 	}
 
 	var data []byte
-	if isVegaLite(spec) {
+	if lite {
 		data, err = c.VegaLiteToPNG(spec, pngOpts...)
 	} else {
 		data, err = c.VegaToPNG(spec, pngOpts...)
@@ -263,7 +330,7 @@ func runPDF(args []string) (err error) {
 		return err
 	}
 
-	var pdfOpts []aster.PDFOption
+	pdfOpts := []aster.PDFOption{co.errorHandler()}
 	switch *textMode {
 	case "embed":
 		// library default
@@ -279,6 +346,10 @@ func runPDF(args []string) (err error) {
 	}
 
 	spec, err := readInput(*input)
+	if err != nil {
+		return err
+	}
+	lite, err := co.lite(spec)
 	if err != nil {
 		return err
 	}
@@ -298,7 +369,7 @@ func runPDF(args []string) (err error) {
 	}()
 
 	var data []byte
-	if isVegaLite(spec) {
+	if lite {
 		data, err = c.VegaLiteToPDF(spec, pdfOpts...)
 	} else {
 		data, err = c.VegaToPDF(spec, pdfOpts...)
@@ -322,6 +393,9 @@ func runCompile(args []string) (err error) {
 	spec, err := readInput(*input)
 	if err != nil {
 		return err
+	}
+	if k, err := detectSpec(spec); err == nil && k == specVega {
+		return errors.New("the input is a Vega specification; compile takes Vega-Lite")
 	}
 
 	opts := []aster.Option{aster.WithTextMeasurement(false)}
@@ -368,14 +442,71 @@ func writeOutput(path string, data []byte) error {
 	return os.WriteFile(path, data, 0o644)
 }
 
-// isVegaLite checks the $schema field to auto-detect Vega vs Vega-Lite.
-func isVegaLite(spec []byte) bool {
-	var s struct {
-		Schema string `json:"$schema"`
+type specKind int
+
+const (
+	specVega specKind = iota
+	specVegaLite
+)
+
+// The top-level properties only one of the two languages has. Vega-Lite's
+// are a view (mark, encoding, a composition) and what only Vega-Lite allows
+// beside one; Vega's are its arrays of marks, signals, scales, guides and
+// projections. Both share data, width, height, padding, autosize, config,
+// background, title, description and usermeta, and a data that is an object
+// is Vega-Lite's, an array Vega's.
+var (
+	vegaLiteOnly = []string{"mark", "encoding", "layer", "facet", "repeat", "concat", "hconcat", "vconcat", "spec", "params", "transform", "resolve", "selection", "datasets", "projection", "view"}
+	vegaOnly     = []string{"marks", "signals", "scales", "axes", "legends", "projections", "encode"}
+)
+
+// detectSpec tells a Vega specification from a Vega-Lite one: by its $schema
+// when it names either language's schema, else by its top-level properties.
+// A specification with properties of both, or of neither, is an error rather
+// than a guess, since rendering one language as the other draws an empty
+// chart without failing.
+func detectSpec(spec []byte) (specKind, error) {
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(spec, &top); err != nil {
+		return 0, fmt.Errorf("the input is not a JSON object: %w", err)
 	}
-	if json.Unmarshal(spec, &s) == nil {
-		return strings.Contains(s.Schema, "vega-lite")
+	var schema string
+	if raw, ok := top["$schema"]; ok && json.Unmarshal(raw, &schema) == nil {
+		switch {
+		case strings.Contains(schema, "/vega-lite/"):
+			return specVegaLite, nil
+		case strings.Contains(schema, "/vega/"):
+			return specVega, nil
+		}
 	}
-	// If no $schema, assume Vega-Lite (more common).
-	return true
+	lite, vega := has(top, vegaLiteOnly), has(top, vegaOnly)
+	if d := bytes.TrimSpace(top["data"]); len(d) > 0 {
+		switch d[0] {
+		case '{':
+			lite = append(lite, "data (an object)")
+		case '[':
+			vega = append(vega, "data (an array)")
+		}
+	}
+	switch {
+	case len(lite) > 0 && len(vega) == 0:
+		return specVegaLite, nil
+	case len(vega) > 0 && len(lite) == 0:
+		return specVega, nil
+	case len(lite) > 0:
+		return 0, fmt.Errorf("cannot tell whether the input is Vega or Vega-Lite: it has no $schema, and has Vega-Lite's %s and Vega's %s",
+			strings.Join(lite, ", "), strings.Join(vega, ", "))
+	}
+	return 0, errors.New("cannot tell whether the input is Vega or Vega-Lite: it has no $schema and none of the properties that tell them apart")
+}
+
+// has lists the keys of top among names.
+func has(top map[string]json.RawMessage, names []string) []string {
+	var found []string
+	for _, n := range names {
+		if _, ok := top[n]; ok {
+			found = append(found, n)
+		}
+	}
+	return found
 }

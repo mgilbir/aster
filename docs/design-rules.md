@@ -1,7 +1,10 @@
-# Design: a pure-Go Vega / Vega-Lite engine
+# Design rules
 
-`aster` renders Vega and Vega-Lite specifications to SVG, PNG and PDF with no
-JavaScript and no WebAssembly.
+The rules the engine's code follows, for contributors and for coding agents
+working on it: what to treat as the source of truth, and the conventions that
+keep the engine bit-compatible with upstream, safe on untrusted input, and
+safe for concurrent use. Where it is in the code is [architecture.md](architecture.md);
+how it is tested, [testing.md](testing.md); why it is built this way, [adr/](adr/).
 
 Priorities, in order: **correctness** (output matches upstream Vega), **security**
 (specifications are untrusted input), **performance**.
@@ -24,37 +27,13 @@ Priorities, in order: **correctness** (output matches upstream Vega), **security
 
 ## Package map
 
-All packages live under `internal/` unless noted.
-
-| Package | Upstream counterpart | Contents |
-|---|---|---|
-| `aster` (public, module root) | vega-view, vl-convert | `Converter`, options, loaders |
-| `jsval` | JS values, `JSON` | `Value` (tagged struct), ordered `Object`, strict JSON parse/stringify, JS number formatting (`toFixed`, `toPrecision`, …), `Number()` coercion, field paths |
-| `jsmath` | V8's `Math` (src/base/ieee754.cc) | bit-exact ports of every transcendental `Math` function: trig, inverse trig, hyperbolic, exp/log family, pow, cbrt, hypot |
-| `format` | d3-format, d3-time, d3-time-format, vega-format, vega-time | number formats, locales, time intervals, time format/parse, time units, `timeFloor`, `timeSequence`, `timeBin` |
-| `expr` | vega-expression, vega-functions | expression parser → AST → compiled Go closures; the function library; hooks for signals/data/scales supplied by the runtime |
-| `scale` | d3-scale, vega-scale, d3-interpolate, d3-color, d3-scale-chromatic | every scale type, ticks, tick formats, schemes, colour parsing and interpolation |
-| `transforms` | vega-transforms, vega-statistics, vega-regression, vega-hierarchy, vega-force, vega-voronoi, vega-label, vega-wordcloud, vega-encode (non-mark) | data transforms as plain functions over tuples, with typed parameter structs |
-| `geo` | d3-geo, d3-geo-projection, vega-projection, vega-geo | projections, geo streams/clipping, geo path, graticule, geojson/topojson |
-| `scene` | vega-scenegraph | `Scenegraph`, `Mark`, `Item`; path generation for every mark type (d3-shape curves); bounds; text metrics interface |
-| `svg` | vega-scenegraph `SVGStringRenderer` | scenegraph → SVG text, byte-compatible with upstream |
-| `vega` | vega-parser, vega-dataflow, vega-runtime, vega-view, vega-view-transforms, vega-encode | spec parsing, the dataflow graph, signals, data loading, scales, mark encoding, guides (axes/legends/titles), layout and autosize; produces a `scene.Scenegraph` |
-| `vegalite` | vega-lite | Vega-Lite → Vega compiler |
-| `text` | (host) | text measurement and shaping with `github.com/mgilbir/forme`, shared by layout, `raster` and `svgpdf` |
-| `raster` | (resvg) | SVG → RGBA rasterizer for the SVG subset Vega emits, plus PNG encoding |
-
-PDF output is `svgpdf` (SVG → vector PDF, with `fontsubset`); `loader` and
-`pngopt` hold the loaders and PNG re-encoding; `oracle` drives the node
-oracle for tests.
-
-Dependency direction (no cycles): `jsval` ← `format` ← `expr` ← `scale` ←
-`transforms`/`geo` ← `scene` ← `vega` ← `aster`; `svg` depends on `scene`;
-`vegalite` depends only on `jsval` (it emits Vega JSON); `raster` and `text`
-depend on nothing engine-specific.
+[architecture.md](architecture.md) maps each package to its upstream counterpart and lists the package layers. Each package imports only packages of lower layers; `TestPackageLayers` checks that list against the code, so a new package goes into it and an import that goes up a layer fails.
 
 ## Core conventions
 
-**Values.** Everything dynamic is a `jsval.Value`. Its zero value is
+### Values
+
+Everything dynamic is a `jsval.Value`. Its zero value is
 `undefined`. Objects are `*jsval.Object` (insertion ordered). Numbers are
 `float64`. A date is `KindTimestamp` (epoch ms), distinct from a number. A
 regular expression is `KindPattern` compiled with `github.com/mgilbir/goecma262`
@@ -66,18 +45,31 @@ regular expression is `KindPattern` compiled with `github.com/mgilbir/goecma262`
 - `v.IsTruthy()` is JavaScript truthiness. `v.AsString()` is `String(v)`.
 - `jsval.JSNumberString` is `Number.prototype.toString`.
 
-**Tuples.** A datum is a `jsval.Value` of kind object. Identity is the
+### Tuples
+
+A datum is a `jsval.Value` of kind object. Identity is the
 `*jsval.Object` pointer. Transforms that derive new tuples create new objects;
 transforms that annotate (formula, stack, window, …) write fields into the
 object they were given, as upstream does, so do not share one object between two
 unrelated datasets without copying.
 
-**Errors, not panics.** Anything reachable from a specification returns an
-error or records a diagnostic; it never panics. A top-level `recover` in the
+### Errors, not panics
+
+Anything reachable from a specification returns an
+error or is reported; it never panics. A top-level `recover` in the
 public API converts an unexpected panic into an error, but relying on it is a
 bug.
 
-**Security.** Specifications and data are untrusted.
+What upstream logs and carries on past (a failed load, an operator's
+exception, a warning) is reported, never dropped: through the dataflow's
+`report` (`internal/vega/report.go`), or, for images, the call's report in the
+root package. The caller's `WithErrorHandler`, or by default the failure of the
+call, decides what happens next ([errors.md](errors.md)). A new place where
+upstream logs must report the same way.
+
+### Security
+
+Specifications and data are untrusted.
 
 - Bound recursion (expression nesting, group nesting, JSON depth, hierarchy
   depth) and bound work that a spec can make arbitrarily large (`sequence`
@@ -109,7 +101,9 @@ bug.
 - Regular expressions run through goecma262's bounded matcher; use its `Err`
   methods for untrusted patterns.
 
-**Floating point parity.** The Go spec allows `x*y + z` to be fused into a
+### Floating point parity
+
+The Go spec allows `x*y + z` to be fused into a
 single FMA instruction — **even across statements** — and on arm64 the
 compiler does so, which changes the last bit relative to JavaScript (and can
 change far more: `i := (n-1)*p; i - floor(i)` fused yields a tiny negative
@@ -124,14 +118,18 @@ disagree with V8 in the last bit for a large share of arguments, and a
 one-ulp difference changes printed output. Always use `jsmath` for them;
 `math` is fine for exact operations (`Floor`, `Sqrt`, `Abs`, `Max`, …).
 
-**Constants.** Go evaluates constant expressions exactly and rounds only the
+### Constants
+
+Go evaluates constant expressions exactly and rounds only the
 result; JavaScript rounds every intermediate to a double. So a multi-step
 constant such as `30 * (math.Pi / 180)` can fold to a different double than
 upstream computes. Where a constant expression has more than one rounding
 step and feeds output, declare it as a `var` (evaluated at run time with
 per-step rounding) or check it against node.
 
-**Concurrency.** A `Converter` is safe for concurrent use; the engine keeps that
+### Concurrency
+
+A `Converter` is safe for concurrent use; the engine keeps that
 true by construction. Package-level variables are one of: immutable after
 `init` (tables, registries filled by `init` functions), a `sync.Once`
 initialisation, or a cache behind a mutex or a `sync.Pool` (bounded, because
@@ -143,52 +141,24 @@ pipelines they cache for a `geo.Path`), the `Random`, the budget. A compiled
 entry in this list; `TestConcurrentConverterSharesNothing` (run it with
 `-race`, and with `ASTER_STRESS_FULL=1` for the whole corpus) is the guard.
 
-**Performance.** Avoid `interface{}` boxing on hot paths, avoid reflection,
+### Performance
+
+Avoid `interface{}` boxing on hot paths, avoid reflection,
 avoid `fmt` in inner loops, preallocate, compile expressions once to closures.
 Benchmarks live next to the code (`BenchmarkXxx`).
 
-**Style.** gofmt, `go vet` clean. Package doc comments. Comments explain *why*
+### Style
+
+gofmt, `go vet` clean. Package doc comments. Comments explain *why*
 and name the non-obvious upstream rule; they do not narrate the code. No
 references to other ports of Vega. Exported identifiers only where another
 package needs them.
 
 ## Oracles and tests
 
-Unit tests use golden vectors recorded from upstream with node. Each package
-that needs them keeps a generator under `testdata/` (e.g.
-`testdata/gen_ticks.js`) and the recorded output beside it, so tests need
-neither node nor network. Generators resolve upstream modules through
-`NODE_PATH`, which must point at `testdata/oracle-node/node_modules`:
-`testdata/oracle-node/package.json` pins every upstream module, and the node
-version (volta), exactly (`cd testdata/oracle-node && npm ci`).
-Vega 6.x modules are ESM, which ignores `NODE_PATH`, so generators are `.mjs`
-files that resolve modules explicitly:
+Unit tests use golden vectors recorded from upstream with node: each package that needs them keeps a generator beside its tests (`<pkg>/testdata/gen_*.mjs`) and the recorded output, so tests need neither node nor network. End to end, the engine's SVG and compiled Vega are compared with upstream's on the corpus and the sweeps, and every difference is listed with its reason or the test fails. How to run all of it, and how to write a generator, is in [testing.md](testing.md).
 
-```js
-import { createRequire } from 'node:module';
-import path from 'node:path';
-const require = createRequire(path.join(process.env.NODE_PATH, 'x.js'));
-const vega = await import(require.resolve('vega'));
-const d3 = await import(require.resolve('d3-format'));
-```
-
-Run as `NODE_PATH=... node testdata/gen_x.mjs > testdata/x.json`.
-
-End-to-end, `compare_test.go` renders the corpus with the engine and with
-upstream in node (`internal/oracle`, answers cached in the git-ignored
-`testdata/oracle-cache`) and compares the SVG structurally (element tree,
-attributes, numbers within half a pixel, since the two sides shape text with
-different engines) and the compiled Vega exactly. `testdata/oracle-expect.txt`
-lists the specs that do not match yet, with the reason; any other outcome
-fails the test. The raster tests compare with resvg, run by the same oracle.
-
-## Build environment
-
-The module proxy configured on this machine refuses `github.com/mgilbir/*`;
-always run Go with `GOPRIVATE='github.com/mgilbir/*'` (it fetches those
-modules directly). `GONOSUMDB` is set explicitly in this environment and
-therefore not derived from `GOPRIVATE`: when adding or upgrading one of those
-modules, also pass `GONOSUMDB='github.com/mgilbir/*'`.
+## Dependencies
 
 Do not add module dependencies beyond the standard library, `golang.org/x/image`,
 `golang.org/x/text`, `github.com/mgilbir/goecma262`, `github.com/mgilbir/forme`,

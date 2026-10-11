@@ -158,11 +158,12 @@ type faceList struct {
 // requested family (with "serif", "monospace", "cursive" and "fantasy"
 // first redirected to their configured concrete families), the configured
 // default family, then metric-compatible aliases of everything requested,
-// then every registered face that fits the weight and style, and finally
-// every registered face at all. Of the registered faces, those given with
-// WithFont come first, the latest first, as they take priority over the
-// embedded ones: a colour emoji font given so draws the emoji the families
-// asked for do not have, rather than the embedded monochrome Noto Emoji.
+// then the fallback chain. By default that is every registered face that
+// fits the weight and style, and then every registered face at all; of
+// those, the ones given with WithFont come first, the latest first, as they
+// take priority over the embedded ones: a colour emoji font given so draws
+// the emoji the families asked for do not have, rather than the embedded
+// monochrome Noto Emoji. WithFallbackFamilies replaces it with its families.
 func (m *Measurer) faces(css CSSFont) *faceList {
 	key := listKey{strings.Join(css.Family, "\x00"), css.Weight, css.Italic}
 	if l, ok := m.listCache[key]; ok {
@@ -209,9 +210,20 @@ func (m *Measurer) faces(css CSSFont) *faceList {
 			}
 		}
 	}
-	// Any registered face fitting the weight and style, then any at all.
-	push(bestMatch(m.fallback, css.Weight, css.Italic))
-	push(m.fallback)
+	// The fallback chain: WithFallbackFamilies' families in order, the best
+	// fit of each first, then their other faces; by default any registered
+	// face fitting the weight and style, then any at all.
+	if m.fallbackOrder != nil {
+		for _, es := range m.fallbackOrder {
+			push(bestMatch(es, css.Weight, css.Italic))
+		}
+		for _, es := range m.fallbackOrder {
+			push(es)
+		}
+	} else {
+		push(bestMatch(m.fallback, css.Weight, css.Italic))
+		push(m.fallback)
+	}
 
 	if len(m.listCache) >= maxCacheItems {
 		clear(m.listCache)
@@ -220,9 +232,14 @@ func (m *Measurer) faces(css CSSFont) *faceList {
 	return l
 }
 
-// familyEntries returns registered entries of a normalised family: the
-// embedded and WithFont ones, then system fonts.
+// familyEntries returns the faces of a normalised family: those given with
+// WithFont and its kin, the latest first, when there are any (they make the
+// family alone, as @font-face rules do); otherwise the embedded ones, then
+// system fonts.
 func (m *Measurer) familyEntries(norm string) []*entry {
+	if own := m.own[norm]; len(own) > 0 {
+		return own
+	}
 	es := m.byFam[norm]
 	if m.system != nil {
 		if sys := m.system.byFam[norm]; len(sys) > 0 {

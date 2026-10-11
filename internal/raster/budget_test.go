@@ -136,7 +136,7 @@ func TestContextCancelledFilter(t *testing.T) {
 	}
 }
 
-// The reproducers shipped with the security review (docs/SECURITY_REVIEW.md).
+// The reproducers shipped with the security review (docs/history/security-review-2026.md).
 func TestSecurityReviewSVGs(t *testing.T) {
 	for _, name := range []string{"layers-8k.svg", "use-expansion-fullcanvas.svg", "rects-1000-fullcanvas.svg"} {
 		data, err := os.ReadFile("../../testdata/security/" + name)

@@ -32,6 +32,8 @@ type config struct {
 	systemFonts            bool
 	fonts                  []fontEntry
 	palettes               []fontPalette // WithFontPalette, in order
+	fallbacks              []string      // WithFontFallback's families
+	fallbackSet            bool          // WithFontFallback was given
 	defaultFontFamily      string
 	defaultSerifFamily     string
 	defaultMonospaceFamily string
@@ -49,8 +51,9 @@ func defaultConfig() *config {
 	}
 }
 
-// WithLoader sets the resource loader used for external data.
-// By default, all loading is denied (DenyLoader).
+// WithLoader sets the Loader that decides which data, images and links a
+// specification may use, and fetches them. The default, and what a nil l
+// selects, is DenyLoader, which refuses all of them.
 func WithLoader(l Loader) Option {
 	return func(c *config) {
 		c.loader = l
@@ -60,69 +63,92 @@ func WithLoader(l Loader) Option {
 // WithTheme sets a Vega theme configuration (JSON string) applied to all
 // renders. The config is passed to the Vega-Lite compiler as well as the Vega
 // runtime, so compile-time keys (background, view.continuousWidth/Height, …)
-// take effect; VegaLiteToVega output therefore also reflects the theme.
+// take effect; VegaLiteToVega output therefore also reflects the theme. A
+// theme that is not a JSON object makes New return an error.
 func WithTheme(theme string) Option {
 	return func(c *config) {
 		c.theme = theme
 	}
 }
 
-// WithMemoryLimit bounds the memory a single render may use, in bytes. Zero
-// means no limit. The pure-Go engine has no separate heap to cap, so the limit
-// is enforced as a budget on what a specification can make the engine hold:
-// loaded data, parsed rows, generated scene items and the glyphs of each run
-// of text shaped (a quarter of the limit, at least 1 MiB). The specification is
-// bounded too, to a sixteenth of the limit (at least 1 MiB): it costs about
-// nineteen times its size once parsed and compiled, and an inline geometry is
-// all specification and no rows. A larger one is refused with an error wrapping
-// ErrLimit, whichever entry point it came in by.
+// WithMemoryLimit sets the memory budgets of a single render from one
+// number of bytes. Go has no per-call heap to cap, so the limit is converted
+// into budgets on what a specification can make the engine hold, each charged
+// before the allocation it pays for: data rows (512 bytes each), scene items
+// (1,536), loaded bytes (half the limit), the SVG and expression strings (a
+// quarter), the glyphs of a shaped run (a quarter), the rasterizer's canvas,
+// and the specification itself (a sixteenth: it costs about nineteen times
+// its size once parsed and compiled, and an inline geometry is all
+// specification and no rows). docs/limits.md lists every budget, its default
+// and its formula.
+//
+// The budgets replace the defaults: a limit above the defaults' scale raises
+// them (1 GiB allows 2M rows and 512 MiB of loaded data, against 1M and
+// 64 MiB by default). Zero, the default, keeps the defaults. A render past a
+// budget fails with an error wrapping ErrLimit.
 func WithMemoryLimit(bytes uint64) Option {
 	return func(c *config) {
 		c.memoryLimit = bytes
 	}
 }
 
-// WithTimeout sets the maximum duration for a single render operation: every
-// stage of it together, text shaping included.
+// WithTimeout sets the maximum duration of one call: every stage of it
+// together, text shaping included. The default is 30 s; zero or negative
+// means no timeout. A call past it fails with an error wrapping
+// context.DeadlineExceeded that names the stage.
 func WithTimeout(d time.Duration) Option {
 	return func(c *config) {
 		c.timeout = d
 	}
 }
 
-// WithTextMeasurement controls whether font-based text measurement is enabled.
-// When enabled, text widths are computed by shaping with the configured fonts
-// for accurate layout. When disabled, Vega's default estimation is used.
+// WithTextMeasurement controls whether font-based text measurement is enabled
+// (the default). When enabled, text widths are computed by shaping with the
+// configured fonts for accurate layout. When disabled, Vega's default
+// estimation is used, and the wordcloud transform, which needs to measure
+// words, fails as it does upstream without a canvas.
 func WithTextMeasurement(enabled bool) Option {
 	return func(c *config) {
 		c.textMeasure = enabled
 	}
 }
 
-// WithVegaLiteVersion sets the Vega-Lite version to use.
-// Accepts human-readable versions like "5.8", "6.4" which are mapped to
-// internal version set keys (e.g. "vl5_8", "vl6_4"). The default is "6.4".
-// An unknown version makes New return an error listing the available
-// versions; see AvailableVersions to discover them programmatically.
+// WithVegaLiteVersion sets the Vega-Lite compiler: "6.4" (Vega-Lite 6.4.3,
+// the default) or "5.8" (5.8.0); a leading "v" is accepted. A specification's
+// $schema does not choose it. An unknown version makes New return an error
+// listing the available ones; AvailableVersions lists them too.
 func WithVegaLiteVersion(v string) Option {
 	return func(c *config) {
 		c.vegaLiteVersion = strings.TrimPrefix(v, "v")
 	}
 }
 
-// WithSystemFonts enables scanning of system-installed fonts for text
-// measurement. System fonts supplement the always-present embedded fonts.
+// WithSystemFonts also makes the fonts installed on the machine available,
+// for layout, PNG and PDF alike. A system font is used only when a
+// specification names its family, or WithFontFallback lists it; never as a
+// fallback by default: some system fonts' licences forbid drawing them into
+// distributed documents, and output should not depend on the machine.
 func WithSystemFonts() Option {
 	return func(c *config) {
 		c.systemFonts = true
 	}
 }
 
-// WithFont registers a custom TTF font with the given family name. Custom
-// fonts take priority over system and embedded fonts. Multiple calls append
-// additional fonts; later fonts take higher priority. A font collection
-// (.ttc, .otc) registers every face of it, each with its own weight and
-// style; WithFontFace registers one.
+// WithFont registers a TrueType, OpenType or WOFF font under the given
+// family name, for layout, PNG and PDF alike; its weight and style are read
+// from the font. A font collection (.ttc, .otc) registers every face of it,
+// each with its own weight and style; WithFontFace registers one.
+//
+// A family you register faces for is made of your faces alone, as a CSS
+// @font-face family is: an embedded or system font of the same name
+// ("Liberation Sans", "Arial") is no longer that family, so registering one
+// replaces it. Among the family's faces, CSS font-weight and font-style choose
+// the best fit, and of faces that fit equally the one registered last wins.
+// Characters the family lacks are drawn from the fallback chain: by default
+// your registered fonts, the most recently registered first, then the
+// embedded ones; WithFontFallback sets it.
+//
+// A font that does not load makes New return an error.
 //
 // A colour font (COLR, sbix, CBDT) draws its glyphs in colour in PNG and PDF
 // output. Registered with any family name, it is also what draws the
@@ -131,6 +157,25 @@ func WithSystemFonts() Option {
 func WithFont(family string, ttf []byte) Option {
 	return func(c *config) {
 		c.fonts = append(c.fonts, fontEntry{family: family, data: ttf, face: -1})
+	}
+}
+
+// WithFontFallback sets the families that draw, in order, the characters a
+// specification's fonts lack (emoji, other scripts), replacing the default
+// chain: every font registered with WithFont and its kin, the most recently
+// registered first, then the embedded ones, Noto Emoji last. Each family's
+// best fit for the weight and style is tried first. With no families there
+// is no fallback, and such characters draw as the font's .notdef glyph.
+//
+// A family may be one you registered, an embedded one ("Liberation Sans",
+// "Noto Emoji"), or a system one with WithSystemFonts: naming a system family
+// here is how it becomes a fallback, which it never is by default (check its
+// licence before distributing what it draws). A family with no font makes New
+// return an error. The family WithDefaultFontFamily names is always tried before
+// the chain, as the generic sans-serif.
+func WithFontFallback(families ...string) Option {
+	return func(c *config) {
+		c.fallbacks, c.fallbackSet = append([]string{}, families...), true
 	}
 }
 
@@ -161,9 +206,9 @@ func WithFontPalette(family string, index int) Option {
 // tag, {"wght": 650, "wdth": 75} say. The instance's outlines, metrics and
 // colour glyphs (COLR's variable paints) are drawn and measured; an axis not
 // named stays at its default, one outside its range is clamped to it, and
-// one the font does not have fails the first render, as a font that does not
-// load does. A variable font given
-// with WithFont is drawn at its default instance. Register the same font
+// one the font does not have makes New return an error, as a font that does
+// not load does. A variable font given with WithFont is drawn at its default
+// instance. Register the same font
 // more than once, under one family at different weights, to have CSS
 // font-weight choose among instances. Of a collection, its first face is
 // the one registered.
@@ -173,31 +218,29 @@ func WithFontInstance(family string, ttf []byte, axes map[string]float64) Option
 	}
 }
 
-// WithDefaultFontFamily sets the font family name used as the fallback when
-// resolving the generic "sans-serif" CSS family. It applies to both text
-// measurement (SVG layout) and PNG rasterization. Defaults to "Liberation
-// Sans" (the embedded font). Use this with WithFont to switch the primary
-// font used across both pipelines.
+// WithDefaultFontFamily sets the family the generic "sans-serif" CSS family
+// resolves to, which is Vega's default font, for layout, PNG and PDF alike.
+// The default is "Liberation Sans" (embedded, metrically compatible with
+// Arial). Use it with WithFont to change the font most text is set in.
 func WithDefaultFontFamily(family string) Option {
 	return func(c *config) {
 		c.defaultFontFamily = family
 	}
 }
 
-// WithDefaultSerifFamily sets the font family name used to resolve the generic
-// "serif" CSS family. It applies to both text measurement (SVG layout) and PNG
-// rasterization. Defaults to "Liberation Serif" (the embedded font, metrically
-// compatible with Times New Roman). Register the matching TTF with WithFont.
+// WithDefaultSerifFamily sets the family the generic "serif" CSS family
+// resolves to, for layout, PNG and PDF alike. The default is "Liberation
+// Serif" (embedded, metrically compatible with Times New Roman). Register the
+// font with WithFont.
 func WithDefaultSerifFamily(family string) Option {
 	return func(c *config) {
 		c.defaultSerifFamily = family
 	}
 }
 
-// WithDefaultMonospaceFamily sets the font family name used to resolve the
-// generic "monospace" CSS family. It applies to both text measurement (SVG
-// layout) and PNG rasterization. Defaults to "Liberation Mono" (the embedded
-// font). Register the matching TTF with WithFont.
+// WithDefaultMonospaceFamily sets the family the generic "monospace" CSS
+// family resolves to, for layout, PNG and PDF alike. The default is
+// "Liberation Mono" (embedded). Register the font with WithFont.
 func WithDefaultMonospaceFamily(family string) Option {
 	return func(c *config) {
 		c.defaultMonospaceFamily = family
@@ -235,14 +278,15 @@ type pngOption func(*pngConfig)
 
 func (f pngOption) applyPNG(c *pngConfig) { f(c) }
 
-// RenderOption configures a single VegaToSVG or VegaLiteToSVG call. WithSignal
-// is the one there is.
+// RenderOption configures a single VegaToSVG or VegaLiteToSVG call:
+// WithSignal and WithErrorHandler.
 type RenderOption interface{ applyRender(*renderConfig) }
 
 // renderConfig is what configures the Vega render of a call, whatever its
 // output.
 type renderConfig struct {
 	signals []SignalOption
+	handler func(error) error // WithErrorHandler's
 }
 
 // SignalOption sets a top-level signal of the specification before the chart
@@ -273,6 +317,49 @@ func WithSignal(name string, value any) SignalOption {
 func (o SignalOption) applyRender(c *renderConfig) { c.signals = append(c.signals, o) }
 func (o SignalOption) applyPNG(c *pngConfig)       { o.applyRender(&c.render) }
 func (o SignalOption) applyPDF(c *pdfConfig)       { o.applyRender(&c.render) }
+
+// ErrorHandlerOption sets the error handler of one call; see
+// WithErrorHandler. It is a RenderOption, a PNGOption and a PDFOption.
+type ErrorHandlerOption struct {
+	handler func(error) error
+}
+
+// WithErrorHandler makes one call tell h of every error upstream Vega would
+// log and carry on past, and of every warning, and lets h decide whether the
+// call goes on, as go/types' Config.Error does for a type checker.
+//
+// Without a handler, the first such error fails the call (wrapped in the
+// error it returns) and warnings are dropped. With one, h is called with each
+// in turn: return nil and the call goes on as upstream does (the data set
+// stays empty, the image undrawn, the operator's value unchanged); return an
+// error and the call fails with it. h is told of:
+//
+//   - a *LoadError: data or an image that could not be loaded or read;
+//   - an error an expression or an operator raised while the chart was
+//     evaluated (a TypeError, a RangeError, an invalid parameter);
+//   - a Warning, which never fails the call unless h returns an error for it.
+//
+// Errors that do not depend on h always fail the call: an invalid
+// specification, an exceeded limit (ErrLimit), a timeout
+// (context.DeadlineExceeded), Close (context.Canceled).
+//
+// h is called on the goroutine that made the call, never concurrently, and
+// before the call returns. Data and evaluation errors reach it as they arise;
+// image failures once the stage that fetched or decoded them is over.
+//
+// To render what can be rendered, as a browser does, and log the rest:
+//
+//	svg, err := c.VegaLiteToSVG(spec, aster.WithErrorHandler(func(err error) error {
+//		log.Print(err)
+//		return nil
+//	}))
+func WithErrorHandler(h func(err error) error) ErrorHandlerOption {
+	return ErrorHandlerOption{handler: h}
+}
+
+func (o ErrorHandlerOption) applyRender(c *renderConfig) { c.handler = o.handler }
+func (o ErrorHandlerOption) applyPNG(c *pngConfig)       { o.applyRender(&c.render) }
+func (o ErrorHandlerOption) applyPDF(c *pdfConfig)       { o.applyRender(&c.render) }
 
 type pngConfig struct {
 	scale          float64

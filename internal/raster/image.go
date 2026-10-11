@@ -251,6 +251,9 @@ func (r *renderer) imageFor(n *node) (*rasterImage, error) {
 		if errors.Is(err, errLimit) {
 			r.fail(err)
 		}
+		if r.imageErr != nil {
+			r.imageErr(strings.TrimSpace(href), err)
+		}
 	}
 	if r.imgs == nil {
 		r.imgs = map[*node]*rasterImage{}

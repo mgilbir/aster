@@ -1,5 +1,12 @@
 # Security review
 
+**Status: all 18 findings are fixed** (each section's Status line says how, and
+what remains). This is the record of the 2026 review: findings, reproducers and
+fixes. The current security model and a hardening checklist are in
+[security.md](../security.md).
+
+`DESIGN.md` below is now [design-rules.md](../design-rules.md).
+
 The review was made when the engine was the `purego` package, before it
 replaced the QuickJS engine as the root package: `purego.go` there is
 `aster.go` now, `purego/*_security_test.go` the root package's
@@ -27,7 +34,6 @@ an Apple M1 Pro class machine.
 ## How to run the reproducers
 
 ```sh
-export GOPRIVATE='github.com/mgilbir/*' GONOSUMDB='github.com/mgilbir/*'
 # cheap, deterministic (injection, loader policy, XML validity, PDF names)
 go test . -run 'TestInjection|TestImageURL|TestHref|TestControlChar|TestPDFFontName|TestVegaLiteInvalid'
 # heavy: each case runs in a child process and is killed at a 4 GiB heap or a wall-clock cap
@@ -44,31 +50,32 @@ Ad-hoc input: `SEC_PROBE=file SEC_KIND=vega|vl|vl2vega|svgpng|svgpdf|vegapng|veg
 Files: `harness_security_test.go` (child-process harness, probe),
 `injection_security_test.go`, `resource_security_test.go`,
 `pdf_security_test.go`, `font_security_test.go`, `extreme_security_test.go`,
-`svgmutate_security_test.go`, `race_security_test.go`, `panic_security_test.go`; specs and SVGs in
+`svgmutate_security_test.go`, `race_security_test.go`, `panic_security_test.go`,
+`deepinput_security_test.go`; specs and SVGs in
 `testdata/security/`.
 
 ## Summary
 
-| # | Severity | Component | Finding |
-|---|---|---|---|
-| 1 | High | `internal/svg` | Attribute injection through a string `angle` (text, symbol, ...) |
-| 2 | High | `internal/svg` | Attribute injection through a gradient `id` (fill / stroke) |
-| 3 | High | `internal/expr` | Unbounded string concatenation: 530 B spec needs > 32 GB |
-| 4 | High | `internal/transforms` | `impute` (and `kde`, `quantile`, `flatten`) allocate unbounded output; `impute`: 250 B spec, > 12 GB |
-| 5 | High | `vega`, `purego.go` | Default limits (5M rows / 5M items, no output cap) allow 7.5 GiB and a 370 MB SVG from a 174 B spec |
-| 6 | High | many transforms, `vegalite`, `raster` | `WithTimeout` is not honoured: 18 to 46 CPU-s for a 1 s timeout; Vega-Lite compile, PNG and PDF have no context at all |
-| 7 | High | `internal/raster` | PNG rasterizer has no time bound and a multi-GB worst case (497 B SVG: 4.4 GiB) |
-| 8 | Medium | `vega`, data formats | `WithMemoryLimit` is checked after parsing / generating: 64 MiB limit still costs 0.7 to 6 GiB |
-| 9 | Medium | `internal/geo` | Projection resampling has no point budget: 515 B spec yields a 700 MB SVG |
-| 10 | Medium | `internal/svg` | Image URLs bypass `Loader.Sanitize` |
-| 11 | Medium | `purego.go`, `internal/loader` | `href` scheme allow-list is dropped when the Loader is permissive (`StaticLoader`): `javascript:` links |
-| 12 | Medium | `internal/svg` | CSS declaration injection through `blend` |
-| 13 | Medium | `vegalite` | Compile time is unbounded, quadratic in `params`; a 5.8 compile holds a process-wide write lock |
-| 14 | Low | `internal/svg` | C0 control characters / U+FFFE are written raw: output is not well-formed XML, `VegaToPDF` fails |
-| 15 | Low | `purego.go`, `internal/fontsubset` | `SubsetFont` returns an unsanitized PostScript name; `SVGToPDF` and `SubsetFont` have no `recover` |
-| 16 | Low | `internal/loader` | `FileLoader.Load` has no size cap; `HTTPLoader` 64 MiB default times parse amplification |
-| 17 | Low | `internal/vegalite` | Compiler panics (nil dereference) on an unknown `mark` type and on a non-drag `translate`; recovered as "internal error" |
-| 18 | Medium | `internal/raster`, `internal/svgpdf`, `internal/text` | Colour glyphs and mapped system fonts (added after the review): an unbounded image sampling loop, three PDF painter faults, and a process crash on a truncated system font |
+| # | Severity | Component | Finding | Status |
+|---|---|---|---|---|
+| 1 | High | `internal/svg` | Attribute injection through a string `angle` (text, symbol, ...) | Fixed |
+| 2 | High | `internal/svg` | Attribute injection through a gradient `id` (fill / stroke) | Fixed |
+| 3 | High | `internal/expr` | Unbounded string concatenation: 530 B spec needs > 32 GB | Fixed |
+| 4 | High | `internal/transforms` | `impute` (and `kde`, `quantile`, `flatten`) allocate unbounded output; `impute`: 250 B spec, > 12 GB | Fixed |
+| 5 | High | `vega`, `purego.go` | Default limits (5M rows / 5M items, no output cap) allow 7.5 GiB and a 370 MB SVG from a 174 B spec | Fixed |
+| 6 | High | many transforms, `vegalite`, `raster` | `WithTimeout` is not honoured: 18 to 46 CPU-s for a 1 s timeout; Vega-Lite compile, PNG and PDF have no context at all | Fixed |
+| 7 | High | `internal/raster` | PNG rasterizer has no time bound and a multi-GB worst case (497 B SVG: 4.4 GiB) | Fixed |
+| 8 | Medium | `vega`, data formats | `WithMemoryLimit` is checked after parsing / generating: 64 MiB limit still costs 0.7 to 6 GiB | Fixed |
+| 9 | Medium | `internal/geo` | Projection resampling has no point budget: 515 B spec yields a 700 MB SVG | Fixed |
+| 10 | Medium | `internal/svg` | Image URLs bypass `Loader.Sanitize` | Fixed |
+| 11 | Medium | `purego.go`, `internal/loader` | `href` scheme allow-list is dropped when the Loader is permissive (`StaticLoader`): `javascript:` links | Fixed |
+| 12 | Medium | `internal/svg` | CSS declaration injection through `blend` | Fixed |
+| 13 | Medium | `vegalite` | Compile time is unbounded, quadratic in `params`; a 5.8 compile holds a process-wide write lock | Fixed |
+| 14 | Low | `internal/svg` | C0 control characters / U+FFFE are written raw: output is not well-formed XML, `VegaToPDF` fails | Fixed |
+| 15 | Low | `purego.go`, `internal/fontsubset` | `SubsetFont` returns an unsanitized PostScript name; `SVGToPDF` and `SubsetFont` have no `recover` | Fixed |
+| 16 | Low | `internal/loader` | `FileLoader.Load` has no size cap; `HTTPLoader` 64 MiB default times parse amplification | Fixed |
+| 17 | Low | `internal/vegalite` | Compiler panics (nil dereference) on an unknown `mark` type and on a non-drag `translate`; recovered as "internal error" | Fixed |
+| 18 | Medium | `internal/raster`, `internal/svgpdf`, `internal/text` | Colour glyphs and mapped system fonts (added after the review): an unbounded image sampling loop, three PDF painter faults, and a process crash on a truncated system font | Fixed |
 
 Verified safe (no finding): expression sandbox, expression / JSON / group
 nesting, XML entities in `SVGToPNG` / `SVGToPDF`, `data:` image limits, PDF
@@ -455,6 +462,10 @@ Fuzz targets (`scripts/fuzz-targets.txt`, nightly):
 System fonts are never a fallback: a spec must name the family, and `WithSystemFonts` must be set. That is for their licences, not for safety (Apple Color Emoji's does not allow drawing it into documents for distribution), and it also keeps what a spec can make aster read to what the host enabled.
 
 ## Documentation to fix with the code
+
+**Resolved:** DESIGN.md's Security section and the README were corrected with
+the fixes; the limits are documented in [limits.md](../limits.md). As written at
+the time of the review:
 
 `DESIGN.md` Security section claims: "Honour `context.Context` cancellation in every loop that can run long" (see 6), "bound ... string
 repeats in `pad`" (concatenation is not bounded, 3), and "Data loading only through the configured `Loader`" (true for loads, not for

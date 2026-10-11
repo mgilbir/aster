@@ -36,12 +36,12 @@ func requireCorpus(t *testing.T, name string) {
 // Vega-Lite specifications with upstream's.
 func TestCorpusWild(t *testing.T) {
 	requireCorpus(t, "wild")
-	runSweep(t, sweep{name: "wild", mode: compareLite, floor: 1900})
+	runSweep(t, sweep{name: "wild", mode: compareLite, floor: 1981})
 }
 
 // TestCorpusDeneb compares the SVG of the Deneb templates, prepared as plain
 // Vega, with upstream's.
 func TestCorpusDeneb(t *testing.T) {
 	requireCorpus(t, "deneb")
-	runSweep(t, sweep{name: "deneb", mode: compareSVG, floor: 55})
+	runSweep(t, sweep{name: "deneb", mode: compareSVG, floor: 62})
 }

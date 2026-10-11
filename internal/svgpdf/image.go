@@ -31,9 +31,10 @@ type pdfImage struct {
 // order they are first drawn.
 type imageCatalog struct {
 	lim     imageref.Limits
-	fetched map[string][]byte    // bytes by href, from Options.Images
-	byHref  map[string]*pdfImage // nil: the image cannot be drawn
-	uses    []imageUse           // the XObjects drawn, in first-use order
+	fetched map[string][]byte            // bytes by href, from Options.Images
+	byHref  map[string]*pdfImage         // nil: the image cannot be drawn
+	onErr   func(href string, err error) // Options.ImageError
+	uses    []imageUse                   // the XObjects drawn, in first-use order
 }
 
 // imageUse is one XObject: an image, smoothed or not.
@@ -61,6 +62,9 @@ func (c *imageCatalog) get(href string) (*pdfImage, error) {
 			return nil, err
 		}
 		img = nil
+		if c.onErr != nil {
+			c.onErr(href, err)
+		}
 	}
 	if img != nil {
 		img.cat = c

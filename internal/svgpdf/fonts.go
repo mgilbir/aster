@@ -55,6 +55,11 @@ type Options struct {
 	// images undrawn. An image that cannot be fetched is left out, as a broken
 	// image is; an error wrapping budget.ErrLimit fails the conversion.
 	Images func(ctx context.Context, href string) ([]byte, error)
+	// ImageError, when non-nil, is told of each <image> left out because it
+	// could not be read (not fetched, not a PNG, JPEG or GIF, or not
+	// decodable), with its href. Errors wrapping budget.ErrLimit fail the
+	// conversion instead.
+	ImageError func(href string, err error)
 }
 
 // pdfFont accumulates the state of one font resource while rendering.

@@ -6,7 +6,7 @@
 //
 //   {"corpus": [{"name", "view": {...}, "scene": <root mark>, "svg": "..."}]}
 //
-// Usage (see DESIGN.md):
+// Usage (see docs/testing.md):
 //   NODE_PATH=testdata/oracle-node/node_modules \
 //   FIXTURES=<dir with vega spec files *.vg.json and data/> \
 //   node gen_corpus.mjs [name-regexp] > corpus.json

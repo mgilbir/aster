@@ -73,23 +73,29 @@ func (v *runView) parseValues(values, fmtSpec jsval.Value) []jsval.Value {
 	return data
 }
 
-// request is Dataflow.request: load a url, then parse it. A failed load is a
-// warning and the data set is empty. A body that does not parse is a warning
-// too, but the data stays what was loaded: the data set is that text, as one
-// tuple.
+// request is Dataflow.request: load a url, then parse it. A failed load is
+// reported (a *LoadError) and the data set is empty. A body that does not
+// parse is reported too, but the data stays what was loaded: the data set is
+// that text, as one tuple. Options.Report decides whether either ends the
+// render.
 func (v *runView) request(url, fmtSpec jsval.Value) []jsval.Value {
+	failed := func(uri string, parse bool, err error) {
+		if e := v.g.report(&LoadError{URL: uri, Parse: parse, Err: err}); e != nil {
+			failErr(e)
+		}
+	}
 	if !url.IsStr() {
-		v.g.warn("Loading failed: no url")
+		failed("", false, errors.New("no url"))
 		return nil
 	}
 	uri := url.StrValue()
 	if v.loader == nil {
-		v.g.warn("Loading failed " + uri + ": no loader")
+		failed(uri, false, errors.New("no loader"))
 		return nil
 	}
 	href, err := v.loader.Sanitize(v.ctx, uri)
 	if err != nil {
-		v.g.warn("Loading failed " + uri + ": " + err.Error())
+		failed(uri, false, err)
 		return nil
 	}
 	body, err := v.loader.Load(v.ctx, href)
@@ -102,7 +108,7 @@ func (v *runView) request(url, fmtSpec jsval.Value) []jsval.Value {
 		if errors.Is(err, budget.ErrLimit) {
 			failErr(err)
 		}
-		v.g.warn("Loading failed " + uri + ": " + err.Error())
+		failed(uri, false, err)
 		return nil
 	}
 	if err := v.bud.Load(int64(len(body))); err != nil {
@@ -110,7 +116,7 @@ func (v *runView) request(url, fmtSpec jsval.Value) []jsval.Value {
 	}
 	data, err := v.read(jsval.Undefined, body, fmtSpec)
 	if err != nil {
-		v.g.warn("Data ingestion failed " + uri + ": " + err.Error())
+		failed(uri, true, err)
 		// The data stays what was loaded, and the data set is that one value:
 		// the text, which a tuple wraps as {data: text}.
 		return []jsval.Value{jsval.Str(string(body))}

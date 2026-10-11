@@ -134,6 +134,8 @@ jobs:
         run: |
           (cd testdata/oracle-node && npm ci)
           (cd testdata/oracle-node-vl5 && npm ci)
+      - name: install the Mermaid renderer (TestDocsMermaid)
+        run: (cd testdata/mermaid && npm ci)
       - uses: actions/cache@v6
         with:
           # upstream's own test suites, recorded against the installed packages: the shallow clones

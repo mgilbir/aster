@@ -102,9 +102,9 @@ func TestFuzzDifferential(t *testing.T) {
 				t0 := time.Now()
 				_, rerr := renderGuarded(func() (string, error) {
 					if r.lite {
-						return pg.VegaLiteToSVG(r.spec)
+						return pg.VegaLiteToSVG(r.spec, asUpstream)
 					}
-					return pg.VegaToSVG(r.spec)
+					return pg.VegaToSVG(r.spec, asUpstream)
 				})
 				r.dur = time.Since(t0)
 				if r.dur <= budget && (rerr == nil || !strings.Contains(rerr.Error(), "timed out")) {
@@ -202,9 +202,9 @@ func fuzzOne(pg *aster.Converter, o *oracle.Oracle, pool []baseSpec, seed, n int
 		VegaToSVG([]byte, ...aster.RenderOption) (string, error)
 	}) (string, error) {
 		if b.lite {
-			return c.VegaLiteToSVG(spec)
+			return c.VegaLiteToSVG(spec, asUpstream)
 		}
-		return c.VegaToSVG(spec)
+		return c.VegaToSVG(spec, asUpstream)
 	}
 	t0 := time.Now()
 	got, gerr := renderGuarded(func() (string, error) { return render(pg) })
@@ -319,9 +319,9 @@ func fuzzPool(t *testing.T) []baseSpec {
 				t0 := time.Now()
 				var rerr error
 				if set.lite {
-					_, rerr = pg.VegaLiteToSVG(spec)
+					_, rerr = pg.VegaLiteToSVG(spec, asUpstream)
 				} else {
-					_, rerr = pg.VegaToSVG(spec)
+					_, rerr = pg.VegaToSVG(spec, asUpstream)
 				}
 				if rerr != nil || time.Since(t0) > 250*time.Millisecond {
 					continue
