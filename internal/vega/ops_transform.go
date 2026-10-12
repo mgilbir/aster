@@ -219,18 +219,24 @@ func tupleTransform(f txFn) factory { return statefulTransform(func() txFn { ret
 func statefulTransform(newFn func() txFn) factory {
 	return func(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *opParams) any) {
 		f := newFn()
-		def := definitions()[e.typ]
+		typ := e.typ
+		def := definitions()[typ]
 		return nil, trFunc(func(n *opNode, p *opParams, pulse *flowPulse) *flowPulse {
 			if pulse.items != nil {
 				return markTransform(n, p, pulse, f)
 			}
-			in := pulse.tuples
+			in := pulse.input(typ)
 			if len(pulse.multi) > 0 {
 				in = concatTuples(pulse.multi)
 			}
 			if len(in) > 0 {
 				requireFields(def, p)
 			}
+			if pulse.src != nil {
+				checkWritesAdds(typ, p, in)
+			}
+			n.g.view.txPulse = pulse
+			defer func() { n.g.view.txPulse = nil }()
 			before := n.g.view.rowExcess(in)
 			out, err := f(n, p, in)
 			if err == errStopPulse {
@@ -244,6 +250,7 @@ func statefulTransform(newFn func() txFn) factory {
 			// ties in; the operator holds them.
 			n.g.view.holdCreated(n, before, out)
 			res := changedPulse(pulse, out)
+			sourcePulse(typ, pulse, res)
 			if len(out) > 0 && len(in) > 0 && &out[0] == &in[0] {
 				res.tree = pulse.tree // annotated in place: still the same data set
 			}
@@ -399,6 +406,10 @@ func init() {
 		jp := transforms.JoinAggregateParams{GroupBy: p.fields("groupby"), Measures: measures(p), Rand: n.g.view.randSource()}
 		if kf := p.field("key"); !kf.IsNil() {
 			jp.Key = kf
+		}
+		// it aggregates what the pulse adds and writes into its source
+		if pl := n.g.view.txPulse; pl != nil && pl.src != nil {
+			jp.Into = pl.sourceView()
 		}
 		return transforms.JoinAggregate(ctxOf(n), in, jp)
 	})

@@ -14,6 +14,11 @@ type JoinAggregateParams struct {
 	Key Field
 	// Rand feeds ci0/ci1; nil means DefaultRand.
 	Rand Rand
+	// Into, when not nil, are the tuples the aggregates are written into
+	// (upstream visits the pulse's source to write them, which is not what
+	// it adds after a crossfilter). A tuple of a group data has none of is
+	// upstream's TypeError reading .tuple of undefined.
+	Into []jsval.Value
 }
 
 // JoinAggregate computes group aggregates and writes them into every input
@@ -77,15 +82,29 @@ func JoinAggregate(ctx context.Context, data []jsval.Value, p JoinAggregateParam
 			return nil, ms.err
 		}
 	}
-	for i, t := range data {
+	into := data
+	if p.Into != nil {
+		into = p.Into
+	}
+	for i, t := range into {
 		if err := poll(ctx, i); err != nil {
 			return nil, err
+		}
+		k := ""
+		if p.Into == nil {
+			k = keys[i]
+		} else {
+			k = cellKey(t)
+		}
+		jc := cells[k]
+		if jc == nil {
+			return nil, &jsval.Thrown{Name: "TypeError", Msg: "Cannot read properties of undefined (reading 'tuple')"}
 		}
 		o := t.ObjValue()
 		if o == nil {
 			continue
 		}
-		src := cells[keys[i]].tuple
+		src := jc.tuple
 		for j := 0; j < src.Len(); j++ {
 			o.Set(src.KeyAt(j), src.ValueAt(j))
 		}

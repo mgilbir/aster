@@ -50,7 +50,19 @@ func init() {
 			}
 			b.mask = uint32(1)<<uint(m) - 1
 			n.value = b
-			return &flowPulse{stamp: pulse.stamp, encode: pulse.encode, changed: true, tuples: pulse.tuples}
+			// Upstream hands on the indices of the tuples that pass at
+			// least one filter (CrossFilter.insert: curr[k] !== all), not
+			// the tuples, which stay the pulse's source (crossfilter_pulse.go).
+			// Its "all" is Bitmaps.all(), the mask of its bitmaps' width
+			// (at least 8 bits), not of the dimensions: 0xff below 257.
+			all := uint32(0xff)
+			idx := make([]jsval.Value, 0, len(b.data))
+			for k := range b.data {
+				if b.curr[k] != all {
+					idx = append(idx, jsval.Int(k))
+				}
+			}
+			return &flowPulse{stamp: pulse.stamp, encode: pulse.encode, changed: true, tuples: idx, src: &pulseSource{tuples: b.data}}
 		}), nil
 	}
 
@@ -64,13 +76,30 @@ func init() {
 			if b.mask&ignore == 0 {
 				return stopPulse
 			}
+			// What the pulse adds are a crossfilter's indices: each that
+			// passes is mapped to its tuple, `pass = k => !(curr[k] &
+			// ignore) ? data[k] : null`. The source is kept, filtered lazily
+			// by the tuples' _index (output.filter(SOURCE, ...)).
 			out := make([]jsval.Value, 0, len(pulse.tuples))
-			for _, t := range pulse.tuples {
-				if resolvePasses(b.curr, ignore, t.Get("_index")) {
-					out = append(out, t)
+			for _, k := range pulse.tuples {
+				if i, ok := resolveIndex(b.curr, ignore, k); ok && i < len(b.data) {
+					out = append(out, b.data[i])
 				}
 			}
-			return changedPulse(pulse, out)
+			res := changedPulse(pulse, out)
+			var prev func(jsval.Value) bool
+			if pulse.src != nil {
+				prev = pulse.src.filter
+			}
+			res.src = &pulseSource{tuples: pulse.rawSource()}
+			res.src.filter = func(t jsval.Value) bool {
+				if prev != nil && !prev(t) {
+					return false
+				}
+				i, ok := resolveIndex(b.curr, ignore, t.Get("_index"))
+				return ok && i < len(b.data)
+			}
+			return res
 		}), nil
 	}
 }
@@ -81,8 +110,14 @@ func init() {
 // undefined and the tuple does not pass. _index is the crossfilter's own,
 // unless a transform rewrote it.
 func resolvePasses(curr []uint32, ignore uint32, index jsval.Value) bool {
+	_, ok := resolveIndex(curr, ignore, index)
+	return ok
+}
+
+// resolveIndex is resolvePasses with the index it passes.
+func resolveIndex(curr []uint32, ignore uint32, index jsval.Value) (int, bool) {
 	k, ok := parseArrayIndex(index.AsString())
-	return ok && k < len(curr) && curr[k]&ignore == 0
+	return k, ok && k < len(curr) && curr[k]&ignore == 0
 }
 
 // ignoreMask is ResolveFilter's `~(_.ignore || 0)`: the bits of the filters

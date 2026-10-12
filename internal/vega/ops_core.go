@@ -443,7 +443,7 @@ func facSieve(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 		if pulse.items != nil {
 			n.value = pulse.items
 		} else {
-			n.value = pulse.tuples
+			n.value = pulse.rawSource() // Sieve keeps pulse.source, unfiltered
 		}
 		n.tree = pulse.tree
 		if pulse.changed {
@@ -456,7 +456,7 @@ func facSieve(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 func facValues(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *opParams) any) {
 	return nil, trFunc(func(n *opNode, p *opParams, pulse *flowPulse) *flowPulse {
 		if n.value == nil || p.Modified("field", "sort") || pulse.changed {
-			src := pulse.tuples
+			src := pulse.rawSource() // Values reads pulse.source
 			f, _ := p.Get("field").(transforms.Field)
 			if cmp := p.comparator("sort"); cmp != nil {
 				src = append([]jsval.Value(nil), src...)
@@ -475,7 +475,8 @@ func facValues(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode,
 func facExtent(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *opParams) any) {
 	return jsval.ArrOf(jsval.Undefined, jsval.Undefined), trFunc(func(n *opNode, p *opParams, pulse *flowPulse) *flowPulse {
 		f, _ := p.Get("field").(transforms.Field)
-		lo, hi, ok, err := transforms.FieldExtent(n.g.ctx, pulse.tuples, f)
+		// a changed pulse is visited whole: its source
+		lo, hi, ok, err := transforms.FieldExtent(n.g.ctx, pulse.sourceView(), f)
 		if err != nil {
 			failErr(err)
 		}
@@ -551,7 +552,7 @@ type tupleIndex struct {
 func facTupleIndex(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *opParams) any) {
 	return (*tupleIndex)(nil), trFunc(func(n *opNode, p *opParams, pulse *flowPulse) *flowPulse {
 		f, _ := p.Get("field").(transforms.Field)
-		tuples := pulse.tuples
+		tuples := pulse.sourceView() // a first run visits the source
 		if pulse.items != nil {
 			// A named mark's data are its items ("reactive geometry").
 			tuples = n.g.view.itemTuples(pulse.items)
@@ -566,7 +567,7 @@ func facTupleIndex(c *rtContext, n *opNode, e *entry) (any, transform, func(*opN
 		}
 		n.value = idx
 		n.modified = true
-		return &flowPulse{stamp: pulse.stamp, encode: pulse.encode, changed: pulse.changed, tuples: pulse.tuples}
+		return &flowPulse{stamp: pulse.stamp, encode: pulse.encode, changed: pulse.changed, tuples: pulse.tuples, src: pulse.src}
 	}), nil
 }
 
@@ -584,7 +585,11 @@ func facRelay(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 			src = concatTuples(pulse.multi)
 		}
 		if !p.Value("derive").IsTruthy() {
-			return &flowPulse{stamp: pulse.stamp, encode: pulse.encode, changed: true, tuples: src, tree: pulse.tree}
+			res := &flowPulse{stamp: pulse.stamp, encode: pulse.encode, changed: true, tuples: src, tree: pulse.tree}
+			if len(pulse.multi) == 0 {
+				res.src = pulse.src
+			}
+			return res
 		}
 		// Every tuple handed on is a copy the relay holds, as heavy as its
 		// source.
@@ -603,7 +608,12 @@ func facRelay(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 		for i, t := range src {
 			o := t.ObjValue()
 			if o == nil {
-				out[i] = t
+				// derive(t) copies the properties a for-in loop finds: a
+				// number (a crossfilter's index) has none, and its copy is
+				// an empty tuple.
+				e := jsval.NewObject(0)
+				e.EnsureTupleID()
+				out[i] = jsval.Obj(e)
 				continue
 			}
 			if lut == nil && !ids.add(o) {

@@ -204,9 +204,11 @@ type runView struct {
 	bud    *budget.Budget
 	led    *budget.Ledger // the call's, nil for none
 	lists  int64          // tuple list bytes charged to led (holdList)
-	strs   *expr.StringBudget
-	items  int
-	cells  int
+	// txPulse is the pulse the running tuple transform was given.
+	txPulse *flowPulse
+	strs    *expr.StringBudget
+	items   int
+	cells   int
 
 	loc     *time.Location
 	zone    format.Zone

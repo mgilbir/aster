@@ -107,8 +107,9 @@ func TestRelayDeriveMatchesMap(t *testing.T) {
 			for i := range want {
 				w, g := want[i].ObjValue(), got[i].ObjValue()
 				if w == nil {
-					if got[i].Key() != want[i].Key() {
-						t.Fatalf("round %d pulse %d tuple %d: %v, want %v", round, pi, i, got[i], want[i])
+					// derive(number) copies no property: an empty tuple
+					if g == nil || g.Len() != 0 || g.TupleID() == 0 {
+						t.Fatalf("round %d pulse %d tuple %d: %v, want an empty tuple for %v", round, pi, i, got[i], want[i])
 					}
 					continue
 				}

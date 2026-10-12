@@ -371,8 +371,10 @@ func (s *sim) writeBack() {
 		o.Set("index", jsval.Int(i))
 		o.Set("x", jsval.Num(nd.x))
 		o.Set("y", jsval.Num(nd.y))
-		o.Set("vx", jsval.Num(nd.vx))
+		// d3's initializeNodes sets `node.vx = node.vy = 0`, which assigns
+		// vy first: a node without velocities gets them in that order
 		o.Set("vy", jsval.Num(nd.vy))
+		o.Set("vx", jsval.Num(nd.vx))
 	}
 }
 

@@ -39,6 +39,12 @@ type flowPulse struct {
 
 	// Tuple flows.
 	tuples []jsval.Value
+	// src, when set, is upstream's pulse.source where it is not the
+	// tuples the pulse adds: a crossfilter adds the indices of its tuples
+	// and keeps the tuples as the source, and a resolvefilter maps the
+	// indices back, filtering the source lazily (Pulse.filter). Nil means
+	// the source is tuples, as it is everywhere else (crossfilter_pulse.go).
+	src *pulseSource
 	// tree is the hierarchy a tree data set carries (`source.root`).
 	tree *hierarchy.Tree
 	// multi holds the per-source tuple lists of an operator with several
@@ -662,6 +668,7 @@ func (g *flowGraph) singlePulse(s *opNode) *flowPulse {
 	p := &flowPulse{stamp: g.clock, encode: g.cur.encode}
 	if s != nil && s.pulse != nil && s.pulse != stopPulse {
 		p.tuples = s.pulse.tuples
+		p.src = s.pulse.src
 		p.items = s.pulse.items
 		p.tree = s.pulse.tree
 	}
