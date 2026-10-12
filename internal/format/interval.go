@@ -277,9 +277,12 @@ func ceilDiv(a, b float64) float64 { return math.Ceil(a / b) }
 // maxFilterIterations bounds each search loop of a filtered interval: one
 // floor, or one move of an offset to the next boundary that passes. A field
 // filter (seconds, minutes, hours, days of the month, months) finds its next
-// boundary within one period of the field, at most 62 steps; only a week
-// filter in a zone with daylight saving walks week by week, up to k weeks for
-// week.every(k), and gives an Invalid Date past this bound. Each move has the
+// boundary within one period of the field, at most 62 steps; a week filter
+// in a zone with daylight saving walks week by week up to k weeks for
+// week.every(k) only for a k up to weekWalk, and is searched past it
+// (weeksearch.go), except in the offset of a date that is not a week start,
+// which keeps the time of day it drifts to and gives an Invalid Date past
+// this bound (no specification reaches it: timeOffset has no every). Each move has the
 // whole bound (d3 searches each move afresh), so an offset of n moves may
 // take n times as many steps; those are metered (offsetWith).
 const maxFilterIterations = 1 << 16
@@ -313,6 +316,9 @@ func (iv Interval) Floor(t float64) float64 {
 		}
 		return parent.baseFloor(parent.baseOffset(d, -n))
 	}
+	if iv.weekSearch() {
+		return iv.weekFloor(d)
+	}
 	for i := 0; i < maxFilterIterations; i++ {
 		if iv.passes(d) {
 			return d
@@ -331,6 +337,9 @@ func (iv Interval) Ceil(t float64) float64 {
 		return math.NaN()
 	}
 	d := iv.Floor(t - 1)
+	if iv.weekSearch() {
+		return iv.weekNext(d)
+	}
 	d, _ = iv.offsetWith(nil, d, 1) // one move: bounded, never metered
 	return iv.Floor(d)
 }
@@ -433,7 +442,7 @@ func (iv Interval) offsetWith(m *budget.Meter, t, step float64) (float64, error)
 func maxMonthMoves(k float64) float64 {
 	gap := 12.0 // k >= 12: January only
 	if k < 12 {
-		last := math.Floor(11/k) * k // the last passing month of a year
+		last := float64(math.Floor(11/k) * k) // the last passing month of a year
 		gap = math.Min(k, 12-last)
 	}
 	const monthMs = 27 * msPerDay
@@ -473,11 +482,21 @@ func (iv Interval) rangeN(ctx context.Context, start, stop, step float64, max in
 		if err := m.Work(1); err != nil {
 			return nil, err
 		}
-		next, err := iv.offsetWith(&m, cur, step)
-		if err != nil {
-			return nil, err
+		if iv.weekSearch() {
+			// floor(offset(cur, step)): the step-th boundary after cur
+			for n := step; n > 0 && Valid(cur); n-- {
+				cur = iv.weekNext(cur)
+				if err := m.Work(64); err != nil {
+					return nil, err
+				}
+			}
+		} else {
+			next, err := iv.offsetWith(&m, cur, step)
+			if err != nil {
+				return nil, err
+			}
+			cur = iv.Floor(next)
 		}
-		cur = iv.Floor(next)
 		if !(prev < cur && cur < stop) {
 			return out, nil
 		}

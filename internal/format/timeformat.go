@@ -134,6 +134,15 @@ func floorToWeekday(days int64, weekday int) int64 {
 
 // AppendFormat appends the formatted instant to dst.
 func (f *TimeFormat) AppendFormat(dst []byte, t float64) []byte {
+	dst, _ = f.appendMax(dst, t, math.MaxInt)
+	return dst
+}
+
+// appendMax is AppendFormat that stops, with ok false, once dst passes max
+// bytes: before a literal (of the specifier, as long as it is) would, or
+// after a directive did (one writes a name of at most MaxLocaleName bytes,
+// or a number).
+func (f *TimeFormat) appendMax(dst []byte, t float64, max int) (out []byte, ok bool) {
 	valid := Valid(t)
 	var fl Fields
 	var di dayInfo
@@ -145,6 +154,9 @@ func (f *TimeFormat) AppendFormat(dst []byte, t float64) []byte {
 	}
 	l := f.loc
 	for _, op := range f.ops {
+		if len(dst)+len(op.lit) > max || len(dst) > max {
+			return dst, false // a directive writes a name or a number: dst is at most that past max
+		}
 		if op.dir == 0 {
 			dst = append(dst, op.lit...)
 			continue
@@ -250,7 +262,7 @@ func (f *TimeFormat) AppendFormat(dst []byte, t float64) []byte {
 			dst = f.appendZone(dst, t)
 		}
 	}
-	return dst
+	return dst, len(dst) <= max
 }
 
 // weekNumber is %U (weekStart 0, Sunday) or %W (1, Monday): the number of

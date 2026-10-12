@@ -482,3 +482,42 @@ func TestParseNumbersSkipJSWhiteSpace(t *testing.T) {
 		t.Errorf("parse with a no-break space = %v, %v", got, ok)
 	}
 }
+
+// TestParseZoneCountsUTF16 is X16: d3 parses with UTF-16 indices; %Z reads
+// a window of six code units and moves on by the length of what it matched,
+// wherever in the window that was (values from node 24).
+func TestParseZoneCountsUTF16(t *testing.T) {
+	for _, c := range []struct {
+		spec, in string
+		want     float64
+		ok       bool
+	}{
+		{"%Z0", "\u00e9+0130", -2208994200000.0, true},
+		{"%Z", "\u00e9+0130", math.NaN(), false},
+		{"%Zx", "+0130x", -2208994200000.0, true},
+		{"%Z", "ab+0100", math.NaN(), false},
+		{"%Z%S", "\u00e9\u00e9+0105", math.NaN(), false},
+		{"%Z05", "\u00e9\u00e9+0105", math.NaN(), false},
+		{"%d %Z", "05 \u00e9+0200", math.NaN(), false},
+		{"%Y-%m-%d%Z", "2001-02-03\u00e9+02", math.NaN(), false},
+		{"%Z", "Z", -2208988800000.0, true},
+		{"%Z", "\u65e5\u672c+0900", math.NaN(), false},
+		{"%Z00", "\u65e5+0900", math.NaN(), false},
+		{"%Z", "\U0001f600+01", math.NaN(), false},
+		{"%Z\u00e9%d", "+01\u00e905", -2208646800000.0, true},
+		{"%Z0", "\U0001f600+0130", math.NaN(), false},
+		{"%Z00", "ab+0100", math.NaN(), false},
+		{"%Z30", "\u00e9+0130", math.NaN(), false},
+		{"%Z130", "\u00e9+0130", math.NaN(), false},
+		{"%Z1", "\u00e9+01", -2208992400000.0, true},
+		{"%Z\u00e90", "\u00e9\u00e9+01", math.NaN(), false},
+		{"%Z", "\u00e9+01", math.NaN(), false},
+		{"%Z0", "\u00e9\u00e9\u00e9+0100", math.NaN(), false},
+		{"%Z", "\u3000+0100", math.NaN(), false},
+	} {
+		got, ok := DefaultTimeLocale().Parse(c.spec, UTC).Parse(c.in)
+		if ok != c.ok || (ok && got != c.want) {
+			t.Errorf("utcParse(%q)(%q) = %v, %v; want %v, %v", c.spec, c.in, got, ok, c.want, c.ok)
+		}
+	}
+}

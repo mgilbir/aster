@@ -320,10 +320,20 @@ type TimeFormatter func(t float64) string
 // dynamic specifier: a string is an ordinary format; anything else must be a
 // time multi-format object (see TimeMultiFormat).
 func (l *Locale) TimeFormatSpec(spec jsval.Value, utc bool) (TimeFormatter, error) {
-	if spec.IsStr() {
-		return l.timeFormat(spec.StrValue(), utc).Format, nil
+	pick, err := l.timePicker(spec, utc)
+	if err != nil {
+		return nil, err
 	}
-	return l.TimeMultiFormat(spec, utc)
+	return func(t float64) string { return pick(t).Format(t) }, nil
+}
+
+// timePicker is TimeFormatSpec as the format each instant uses.
+func (l *Locale) timePicker(spec jsval.Value, utc bool) (func(t float64) *TimeFormat, error) {
+	if spec.IsStr() {
+		f := l.timeFormat(spec.StrValue(), utc)
+		return func(float64) *TimeFormat { return f }, nil
+	}
+	return l.multiPicker(spec, utc)
 }
 
 // TimeMultiFormat is vega-format's timeMultiFormat: the default d3 "multi
@@ -333,6 +343,14 @@ func (l *Locale) TimeFormatSpec(spec jsval.Value, utc bool) (TimeFormatter, erro
 // "hours", "date", "day", "week", "month", "quarter", "year"); null or
 // undefined mean the defaults, other non-objects are an error.
 func (l *Locale) TimeMultiFormat(spec jsval.Value, utc bool) (TimeFormatter, error) {
+	pick, err := l.multiPicker(spec, utc)
+	if err != nil {
+		return nil, err
+	}
+	return func(t float64) string { return pick(t).Format(t) }, nil
+}
+
+func (l *Locale) multiPicker(spec jsval.Value, utc bool) (func(t float64) *TimeFormat, error) {
 	if spec.IsNullish() || !spec.IsTruthy() {
 		spec = jsval.Obj(nil)
 	}
@@ -363,7 +381,7 @@ func (l *Locale) TimeMultiFormat(spec jsval.Value, utc bool) (TimeFormatter, err
 	fm := pick([]string{"month"}, "%B")
 	fq := pick([]string{"quarter"}, "%B")
 	fy := pick([]string{"year"}, "%Y")
-	return func(t float64) string {
+	return func(t float64) *TimeFormat {
 		var f *TimeFormat
 		switch {
 		case second.Floor(t) < t:
@@ -389,7 +407,7 @@ func (l *Locale) TimeMultiFormat(spec jsval.Value, utc bool) (TimeFormatter, err
 		default:
 			f = fy
 		}
-		return f.Format(t)
+		return f
 	}, nil
 }
 
@@ -430,6 +448,24 @@ func (l *Locale) TimeFormatValue(v, spec jsval.Value, utc bool) (string, error) 
 		return "", err
 	}
 	return f(jsval.ToNumber(v)), nil
+}
+
+// AppendTimeFormatValue appends what TimeFormatValue returns to dst, but
+// stops once dst holds more than max bytes, with ok false: a specifier
+// chooses the length (each %c of a locale writes up to MaxLocaleExpansion
+// bytes), so a caller with a bound learns it is reached before the text is
+// all made.
+func (l *Locale) AppendTimeFormatValue(dst []byte, v, spec jsval.Value, utc bool, max int) (out []byte, ok bool, err error) {
+	if v.Kind() == jsval.KindNull {
+		return append(dst, "null"...), true, nil
+	}
+	pick, err := l.timePicker(spec, utc)
+	if err != nil {
+		return dst, false, err
+	}
+	t := jsval.ToNumber(v)
+	out, ok = pick(t).appendMax(dst, t, max)
+	return out, ok, nil
 }
 
 // TimeParseValue is the `timeParse(string, spec)` / `utcParse(string, spec)`

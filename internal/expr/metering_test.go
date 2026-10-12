@@ -63,16 +63,21 @@ func hostileValues(room int, k float64) hostileEnv {
 		"one":    jsval.Str("a"),
 		"unit":   jsval.Str("milliseconds"),
 		"needle": jsval.Str(strings.Repeat("a", b/6) + "b"),
+		// format specifiers that write far more than they hold: the widest
+		// field d3 pads, and %c, which the default locale writes in about
+		// ten times its length
+		"wide": jsval.Str("\u00e9>65536"),
+		"pcts": jsval.Str(strings.Repeat("%c", b/2)),
 	}
 }
 
 // hostileCalls are the argument lists every function is called with.
 func hostileCalls(short bool) [][]string {
 	first := []string{"ascii", "latin", "emoji", "nums", "strs", "alike", "huge", "one", "unit"}
-	second := []string{"ascii", "emoji", "nums", "alike", "huge", "big", "one", "needle"}
+	second := []string{"ascii", "emoji", "nums", "alike", "huge", "big", "one", "needle", "wide", "pcts"}
 	third := []string{"huge", "one", "ascii"}
 	if short {
-		second = []string{"ascii", "nums", "huge", "needle"}
+		second = []string{"ascii", "nums", "huge", "needle", "wide", "pcts"}
 		third = []string{"huge"}
 	}
 	var calls [][]string
@@ -97,10 +102,6 @@ func hostileCalls(short bool) [][]string {
 // matches with no way to charge or interrupt it (a search of a long string
 // runs to its step budget, 100 steps a byte, about a second for 6 MB).
 var meteringExempt = map[string]string{
-	// Number and time formats are package format's, and their caches.
-	"format": "format", "timeFormat": "format", "utcFormat": "format", "timeParse": "format", "utcParse": "format",
-	"monthFormat": "format", "monthAbbrevFormat": "format", "dayFormat": "format", "dayAbbrevFormat": "format",
-	"timeUnitSpecifier": "format",
 	// A pattern compiled from a hostile string: goecma262 builds up to its
 	// program cap (about 50 MB) before refusing it, with no hook to charge it
 	// first.
