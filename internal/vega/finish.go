@@ -1,8 +1,10 @@
 package vega
 
 import (
+	"errors"
 	"strings"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/scale"
 	"github.com/mgilbir/aster/internal/scene"
@@ -12,7 +14,11 @@ import (
 // builds it lazily while rendering, from the guide's scale and the item's
 // format properties (vega-scenegraph util/aria.js); here it is done once the
 // dataflow has settled, since it also reads the text of the guide's title.
-func (v *runView) setGuideCaptions() {
+//
+// A caption that fails for a limit or for the end of the call fails the
+// render; anything else fails as upstream's does, leaving the mark without
+// a caption.
+func (v *runView) setGuideCaptions() error {
 	for _, m := range v.marks {
 		if m == nil || len(m.Items) == 0 || m.Items[0] == nil || m.Description != "" {
 			continue
@@ -30,11 +36,15 @@ func (v *runView) setGuideCaptions() {
 		}
 		var caption string
 		ok := true
+		var err error
 		switch m.Role {
 		case "axis":
-			caption, ok = v.axisCaption(ctx, m.Items[0])
+			caption, ok, err = v.axisCaption(ctx, m.Items[0])
 		case "legend":
-			caption, ok = v.legendCaption(ctx, m.Items[0])
+			caption, ok, err = v.legendCaption(ctx, m.Items[0])
+		}
+		if err != nil {
+			return err
 		}
 		if !ok {
 			// ariaGuide catches what the caption throws and answers null:
@@ -44,6 +54,21 @@ func (v *runView) setGuideCaptions() {
 		}
 		m.GuideCaption = caption
 	}
+	return nil
+}
+
+// domainCaption is scale.DomainCaption for a guide's caption: ok is false
+// where upstream's throws, and err is set only for a limit or the end of the
+// call, which fail the render.
+func (v *runView) domainCaption(s scale.Scale, item *scene.Item) (dc string, ok bool, err error) {
+	dc, err = scale.DomainCaption(v.ctx, v.locale, s, v.captionOptions(item))
+	switch {
+	case err == nil:
+		return dc, true, nil
+	case errors.Is(err, budget.ErrLimit) || v.ctx.Err() != nil:
+		return "", false, err
+	}
+	return "", false, nil
 }
 
 func extractTitle(item *scene.Item) string {
@@ -88,16 +113,16 @@ func (v *runView) captionOptions(item *scene.Item) scale.CaptionOptions {
 
 // axisCaption is axisCaption of util/aria.js; ok is false where upstream's
 // throws (no such scale, a domain it cannot caption).
-func (v *runView) axisCaption(c *rtContext, item *scene.Item) (caption string, ok bool) {
+func (v *runView) axisCaption(c *rtContext, item *scene.Item) (caption string, ok bool, err error) {
 	datum := item.Datum
 	name := datum.Get("scale").AsString()
 	n := c.scaleNode(name)
 	if n == nil {
-		return "", false
+		return "", false, nil
 	}
 	s, _ := n.value.(scale.Scale)
 	if s == nil {
-		return "", false
+		return "", false, nil
 	}
 	title := ""
 	hasTitle := false
@@ -113,33 +138,33 @@ func (v *runView) axisCaption(c *rtContext, item *scene.Item) (caption string, o
 	if scale.IsDiscrete(typ) {
 		typ = "discrete"
 	}
-	dc, err := scale.DomainCaption(v.locale, s, v.captionOptions(item))
-	if err != nil {
-		return "", false
+	dc, ok, err := v.domainCaption(s, item)
+	if !ok {
+		return "", false, err
 	}
 	out := xy + "-axis"
 	if hasTitle {
 		out += " titled '" + title + "'"
 	}
-	return out + " for a " + typ + " scale with " + dc, true
+	return out + " for a " + typ + " scale with " + dc, true, nil
 }
 
 // legendCaption is legendCaption of util/aria.js; ok is false where upstream's
 // throws.
-func (v *runView) legendCaption(c *rtContext, item *scene.Item) (caption string, ok bool) {
+func (v *runView) legendCaption(c *rtContext, item *scene.Item) (caption string, ok bool, err error) {
 	datum := item.Datum
 	scales := datum.Get("scales").ObjValue()
 	if scales == nil || scales.Len() == 0 {
-		return "", false
+		return "", false, nil
 	}
 	props := append([]string(nil), scales.Keys()...)
 	n := c.scaleNode(scales.ValueAt(0).AsString())
 	if n == nil {
-		return "", false
+		return "", false, nil
 	}
 	s, _ := n.value.(scale.Scale)
 	if s == nil {
-		return "", false
+		return "", false, nil
 	}
 	title := ""
 	if datum.Get("title").IsTruthy() {
@@ -149,15 +174,15 @@ func (v *runView) legendCaption(c *rtContext, item *scene.Item) (caption string,
 	if typ != "" {
 		typ = strings.ToUpper(typ[:1]) + typ[1:]
 	}
-	dc, err := scale.DomainCaption(v.locale, s, v.captionOptions(item))
-	if err != nil {
-		return "", false
+	dc, ok, err := v.domainCaption(s, item)
+	if !ok {
+		return "", false, err
 	}
 	out := typ
 	if title != "" {
 		out += " titled '" + title + "'"
 	}
-	return out + " for " + channelCaption(props) + " with " + dc, true
+	return out + " for " + channelCaption(props) + " with " + dc, true, nil
 }
 
 func channelCaption(props []string) string {

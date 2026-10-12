@@ -1,6 +1,7 @@
 package scale
 
 import (
+	"context"
 	"math"
 
 	"github.com/mgilbir/aster/internal/format"
@@ -12,7 +13,7 @@ import (
 // en-US locale). Vega itself formats labels through TickFormat (which is
 // locale-aware and also handles time); these methods exist for callers that
 // want d3's own behaviour, including its log-scale label thinning.
-func d3TickFormat(loc *format.Locale, t *tspec, domain []float64, ticks func(TickCount) []float64, count TickCount, specifier jsval.Value) (func(float64) string, error) {
+func d3TickFormat(loc *format.Locale, t *tspec, domain []float64, ticks func(context.Context, TickCount) ([]float64, error), count TickCount, specifier jsval.Value) (func(float64) string, error) {
 	if t.kind != kindLog {
 		return d3LinearTickFormat(loc, domain, count.countOrDefault(), specifier)
 	}
@@ -43,7 +44,12 @@ func d3TickFormat(loc *format.Locale, t *tspec, domain []float64, ticks func(Tic
 	if math.IsInf(n, 1) {
 		return nf.Format, nil
 	}
-	keep := t.logKeep(n, len(ticks(TickCount{})))
+	// Only log scales get here, whose ticks walk no calendar.
+	all, err := ticks(context.Background(), TickCount{})
+	if err != nil {
+		return nil, err
+	}
+	keep := t.logKeep(n, len(all))
 	return func(d float64) string {
 		if keep(d) {
 			return nf.Format(d)
@@ -83,7 +89,7 @@ func (s *Identity) TickFormat(loc *format.Locale, count TickCount, specifier jsv
 // first and last domain values.
 func (b *BinOrdinal) TickFormat(loc *format.Locale, count TickCount, specifier jsval.Value) (func(float64) string, error) {
 	t := newTspec(kindLinear)
-	return d3TickFormat(loc, &t, b.domain, func(TickCount) []float64 { return nil }, count, specifier)
+	return d3TickFormat(loc, &t, b.domain, func(context.Context, TickCount) ([]float64, error) { return nil, nil }, count, specifier)
 }
 
 // TickFormat is the time scale's tickFormat: with no specifier, d3's multi-scale
@@ -100,11 +106,7 @@ func (s *Time) TickFormat(loc *format.Locale, count TickCount, specifier jsval.V
 // scaled by the SI prefix of the larger end point, even when a precision is
 // given.
 func d3LinearTickFormat(loc *format.Locale, domain []float64, count float64, specifier jsval.Value) (func(float64) string, error) {
-	spec, err := spanSpecifier(specifier)
-	if err != nil {
-		return nil, err
-	}
-	s, err := format.ParseSpecifier(spec)
+	s, err := format.ParseSpecifier(spanSpecifier(specifier))
 	if err != nil {
 		return nil, err
 	}
@@ -147,4 +149,16 @@ func d3LinearTickFormat(loc *format.Locale, domain []float64, count float64, spe
 		return nil, err
 	}
 	return nf.Format, nil
+}
+
+// numberSpecifier reads a number format specifier: undefined and null mean the
+// default ("" here). d3's formatSpecifier matches the specifier with a regular
+// expression's exec, which converts it to a string first, so a number such as
+// 42 is the specifier "42" (a width); whether that text is a legal specifier
+// is up to the parser.
+func numberSpecifier(v jsval.Value) (string, error) {
+	if v.IsNullish() {
+		return "", nil
+	}
+	return v.AsString(), nil
 }

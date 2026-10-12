@@ -311,7 +311,9 @@ func Render(ctx context.Context, spec jsval.Value, opts Options) (res *Result, e
 	if len(opts.SignalWrites) > 0 {
 		stage("writes")
 	}
-	v.setGuideCaptions()
+	if err := v.setGuideCaptions(); err != nil {
+		return nil, err
+	}
 	return v.result(scope), nil
 }
 
@@ -354,7 +356,7 @@ func newView(ctx context.Context, opts Options, locale jsval.Value) *runView {
 		// config.locale: {number: ..., time: ...}
 		l, err := format.NewLocale(locale.Get("number"), locale.Get("time"), v.zone)
 		if err != nil {
-			fail("invalid locale: %v", err)
+			fail("invalid locale: %w", err) // a member past its bound stays an ErrLimit
 		}
 		v.locale = l
 	default:

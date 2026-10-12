@@ -1,0 +1,1 @@
+{"width": 200, "height": 30, "scales": [{"name": "x", "type": "utc", "domain": [0, 3000000000000.0], "range": "width"}], "axes": [{"scale": "x", "orient": "bottom", "tickCount": {"interval": "minutes", "step": 2}}]}

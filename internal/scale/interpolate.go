@@ -594,21 +594,6 @@ func Piecewise(interpolate Interpolator, values []jsval.Value) func(t float64) j
 	}
 }
 
-// QuantizeSamples is d3.quantize: n evenly spaced samples of interpolator over [0,1].
-// n is bounded so a specification cannot request an unbounded sample.
-func QuantizeSamples(interpolator func(float64) jsval.Value, n int) []jsval.Value {
-	if n < 0 || n > maxSamples {
-		return nil
-	}
-	samples := make([]jsval.Value, n)
-	for i := range samples {
-		samples[i] = interpolator(float64(i) / float64(n-1))
-	}
-	return samples
-}
-
-const maxSamples = 1 << 20
-
 // Zoom is d3.interpolateZoom.rho(rho): it interpolates between two views
 // [cx, cy, width] and also reports the suggested duration in milliseconds.
 func Zoom(rho float64) func(p0, p1 [3]float64) (interp func(t float64) [3]float64, duration float64) {

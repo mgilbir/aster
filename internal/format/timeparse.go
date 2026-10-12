@@ -168,7 +168,7 @@ func (p *TimeParser) build(d *parseState) (float64, bool) {
 		} else {
 			week = monday.Floor(week)
 		}
-		week = zone.Day().Offset(week, (d.V-1)*7)
+		week = zone.Day().baseOffset(week, math.Floor((d.V-1)*7)) // d3: timeDay.offset
 		if Valid(week) {
 			f := zone.Fields(week)
 			d.y, d.m = float64(f.Year), float64(f.Month)
@@ -230,24 +230,25 @@ func (l *TimeLocale) run(d *parseState, ops []parseOp, s string, j int) int {
 	return j
 }
 
-func isJSSpace(c byte) bool {
-	return c == ' ' || c == '\t' || c == '\n' || c == '\v' || c == '\f' || c == '\r'
-}
-
-// number is /^\s*\d+/ applied to the window s[i:i+width] (width <= 0: the
-// rest of the string). It returns the digits' value and the index after them.
+// number is /^\s*\d+/ applied to the window s.slice(i, i+width) (width <= 0:
+// the rest of the string). The window counts UTF-16 units, as JavaScript's
+// slice does, and \s is JavaScript's white space: the Unicode space
+// separators, the line terminators and the byte order mark, not only ASCII.
+// It returns the digits' value and the index after them.
 func number(s string, i, width int) (v float64, next int, ok bool) {
-	end := len(s)
-	if width > 0 && i+width < end {
-		end = i + width
-	}
-	k := i
-	for k < end && isJSSpace(s[k]) {
-		k++
+	k, units := i, 0
+	for k < len(s) && (width <= 0 || units < width) {
+		r, w := utf8.DecodeRuneInString(s[k:])
+		if !isJSSpaceRune(r) { // every JavaScript space is one UTF-16 unit
+			break
+		}
+		k += w
+		units++
 	}
 	start := k
-	for k < end && s[k] >= '0' && s[k] <= '9' {
+	for k < len(s) && (width <= 0 || units < width) && s[k] >= '0' && s[k] <= '9' {
 		k++
+		units++
 	}
 	if k == start {
 		return 0, -1, false

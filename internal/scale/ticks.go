@@ -1,8 +1,11 @@
 package scale
 
 import (
+	"errors"
+	"fmt"
 	"math"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsmath"
 )
 
@@ -60,19 +63,28 @@ func tickSpec(start, stop, count float64) (i1, i2, inc float64) {
 	}
 }
 
-// maxTicks bounds the number of values Ticks will materialise; a specification
-// can ask for an absurd count over a huge domain.
-const maxTicks = 1 << 20
+// maxTickValues bounds the number of values Ticks will materialise; a
+// specification can ask for an absurd count over a huge domain.
+const maxTickValues = 1 << 20
 
 // Ticks is d3.ticks: about count nicely rounded values covering
 // [start, stop], in the direction of the arguments. Returns nil for a
-// non-positive or NaN count, and [start] for a degenerate interval.
-func Ticks(start, stop, count float64) []float64 {
+// non-positive or NaN count, and [start] for a degenerate interval. More
+// than maxTickValues values is an error wrapping budget.ErrLimit; a count
+// that is no array length (an infinite count over a span not starting at 0)
+// is the RangeError d3 throws.
+func Ticks(start, stop, count float64) ([]float64, error) {
+	return ticksN(start, stop, count, maxTickValues)
+}
+
+// ticksN is Ticks bounded by max values (at most maxTickValues), refused
+// before they are made.
+func ticksN(start, stop, count float64, max int) ([]float64, error) {
 	if !(count > 0) {
-		return nil
+		return nil, nil
 	}
 	if start == stop {
-		return []float64{start}
+		return []float64{start}, nil
 	}
 	reverse := stop < start
 	var i1, i2, inc float64
@@ -82,11 +94,14 @@ func Ticks(start, stop, count float64) []float64 {
 		i1, i2, inc = tickSpec(start, stop, count)
 	}
 	if !(i2 >= i1) {
-		return nil
+		return nil, nil
 	}
 	nf := i2 - i1 + 1
-	if !(nf <= maxTicks) {
-		return nil
+	switch {
+	case !(nf < 1<<32): // NaN too: d3's new Array(n) throws
+		return nil, errors.New("Invalid array length")
+	case nf > float64(min(max, maxTickValues)):
+		return nil, fmt.Errorf("%w: %v ticks requested, more than %d", budget.ErrLimit, nf, min(max, maxTickValues))
 	}
 	n := int(nf)
 	ticks := make([]float64, n)
@@ -108,7 +123,7 @@ func Ticks(start, stop, count float64) []float64 {
 			ticks[i] = (i1 + float64(i)) * inc
 		}
 	}
-	return ticks
+	return ticks, nil
 }
 
 // TickIncrement is d3.tickIncrement. A negative result -k denotes a step of 1/k.
@@ -134,26 +149,6 @@ func TickStep(start, stop, count float64) float64 {
 		return -s
 	}
 	return s
-}
-
-// Nice is d3.nice: extends [start, stop] to tick boundaries, iterating until
-// the step stabilises.
-func Nice(start, stop, count float64) (float64, float64) {
-	prestep := math.NaN()
-	for {
-		step := TickIncrement(start, stop, count)
-		if step == prestep || step == 0 || math.IsInf(step, 0) || math.IsNaN(step) {
-			return start, stop
-		}
-		if step > 0 {
-			start = math.Floor(start/step) * step
-			stop = math.Ceil(stop/step) * step
-		} else if step < 0 {
-			start = math.Ceil(start*step) / step
-			stop = math.Floor(stop*step) / step
-		}
-		prestep = step
-	}
 }
 
 // bisectRight is d3.bisectRight over a numeric slice within [lo, hi).

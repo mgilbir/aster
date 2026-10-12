@@ -1,8 +1,10 @@
 package scale
 
 import (
+	"context"
 	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/jsval"
+	"math"
 )
 
 // Scale is implemented by every scale. It is the common surface of a d3 scale
@@ -102,9 +104,11 @@ type Interpolating interface {
 
 // Ticker is implemented by scales with ticks(count) (all continuous scales,
 // including time). The values are numbers; for temporal scales they are epoch
-// milliseconds. Use TickValues for boxed values.
+// milliseconds. Use TickValues for boxed values. Ticks d3 would list but
+// that are too many to keep fail with an error wrapping budget.ErrLimit; a
+// calendar walk stops with ctx's error once the call is over.
 type Ticker interface {
-	Ticks(count TickCount) []float64
+	Ticks(ctx context.Context, count TickCount) ([]float64, error)
 }
 
 // Niceable is implemented by scales with nice(count).
@@ -144,6 +148,22 @@ type TickCount struct {
 	HasN bool
 	// Interval is non-nil for a time interval (time and utc scales).
 	Interval *format.Interval
+	// Null marks an unspecified count that is null rather than undefined.
+	// d3's ticks treat both as 10, but vega-scale also computes with the
+	// count, where null is 0 and undefined NaN (tickLog, formatSpan).
+	Null bool
+}
+
+// number is the count as JavaScript arithmetic reads it: N, 0 for null, NaN
+// for undefined or an interval.
+func (c TickCount) number() float64 {
+	switch {
+	case c.HasN:
+		return c.N
+	case c.Null && c.Interval == nil:
+		return 0
+	}
+	return math.NaN()
 }
 
 // IntervalCount makes a TickCount that names a calendar interval.

@@ -18,7 +18,7 @@ func init() {
 }
 
 func (v *runView) guidesEnv() *guides.Env {
-	return &guides.Env{Locale: v.locale, Warn: v.g.warn}
+	return &guides.Env{Locale: v.locale, Warn: v.g.warn, Context: v.ctx}
 }
 
 func facViewLayout(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *opParams) any) {

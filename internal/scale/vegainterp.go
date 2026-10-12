@@ -1,8 +1,11 @@
 package scale
 
 import (
+	"fmt"
 	"math"
 	"strings"
+
+	"github.com/mgilbir/aster/internal/budget"
 
 	"github.com/mgilbir/aster/internal/jsval"
 )
@@ -85,18 +88,27 @@ func InterpolateColors(colors []jsval.Value, typ string, gamma float64, hasGamma
 	return Piecewise(interp, colors)
 }
 
+// MaxSchemeSamples bounds the colours quantizeInterpolator samples from a
+// scheme for a discrete scale (schemeCount, or the size of the domain).
+const MaxSchemeSamples = 1 << 20
+
 // QuantizeInterpolator is vega-scale's quantizeInterpolator: count samples
-// at (i+1)/(count+1), i.e. excluding both ends of the ramp.
-func QuantizeInterpolator(interpolator UnitInterpolator, count int) []jsval.Value {
-	if count < 0 || count > maxSamples {
-		return nil
+// at (i+1)/(count+1), i.e. excluding both ends of the ramp. A count above
+// MaxSchemeSamples is an error wrapping budget.ErrLimit; a negative count is
+// the caller's to refuse (upstream's new Array(count) throws).
+func QuantizeInterpolator(interpolator UnitInterpolator, count int) ([]jsval.Value, error) {
+	if count > MaxSchemeSamples {
+		return nil, fmt.Errorf("%w: %d colours sampled from a scheme, more than %d", budget.ErrLimit, count, MaxSchemeSamples)
+	}
+	if count <= 0 {
+		return nil, nil
 	}
 	samples := make([]jsval.Value, count)
 	n := float64(count + 1)
 	for i := 0; i < count; i++ {
 		samples[i] = interpolator(float64(i+1) / n)
 	}
-	return samples
+	return samples, nil
 }
 
 // ScaleFraction is vega-scale's scaleFraction: a function that maps a value in

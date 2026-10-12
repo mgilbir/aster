@@ -1,10 +1,12 @@
 package scale
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/mgilbir/aster/internal/format"
+	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/upstream"
 )
 
@@ -99,10 +101,9 @@ func TestUpstreamVegaScale(t *testing.T) {
 				continue
 			}
 			countArg := upstream.ToValue(c.Arg(1))
-			var minStep *float64
+			minStep := jsval.Undefined
 			if c.Fn == "tickCount" && len(c.Args) > 2 && c.Args[2] != nil && !upstream.IsUndefined(c.Args[2]) {
-				m := upstream.Number(c.Args[2])
-				minStep = &m
+				minStep = jsval.Num(upstream.Number(c.Args[2]))
 			}
 			if c.Fn == "tickCount" {
 				tc, err := TickCountFor(s, countArg, minStep)
@@ -117,12 +118,17 @@ func TestUpstreamVegaScale(t *testing.T) {
 				r.Check(c, upstream.Enc(tc.N), false)
 				continue
 			}
-			tc, err := TickCountFor(s, countArg, nil)
+			tc, err := TickCountFor(s, countArg, jsval.Undefined)
 			if err != nil {
 				r.Check(c, nil, true)
 				continue
 			}
-			r.Check(c, valuesOf(TickValues(s, tc)), false)
+			vals, err := TickValues(context.Background(), s, tc)
+			if err != nil {
+				r.Check(c, nil, true)
+				continue
+			}
+			r.Check(c, valuesOf(vals), false)
 		default:
 			r.Skip("unmapped " + c.Fn)
 		}

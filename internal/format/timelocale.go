@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/mgilbir/aster/internal/budget"
+
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -52,10 +54,32 @@ func mustTimeLocale(d TimeLocaleDef) *TimeLocale {
 // DefaultTimeLocale is d3-time-format's built-in en-US locale.
 func DefaultTimeLocale() *TimeLocale { return defaultTimeLocale }
 
-// NewTimeLocale is d3.timeFormatLocale.
+// A time locale's patterns are copied into every label that uses %c, %x or
+// %X, and expand into each other, so a specification's config.locale could
+// make each label megabytes long; its names are tried in turn by every parse.
+// The members are bounded where the locale is built, far above any real
+// locale: in d3's locale files the longest pattern is 23 bytes, the longest
+// name 23 bytes, and a list holds at most 12 names.
+const (
+	// MaxLocalePattern bounds dateTime, date and time, in bytes.
+	MaxLocalePattern = 256
+	// MaxLocaleName bounds each period, day and month name, in bytes.
+	MaxLocaleName = 128
+	// MaxLocaleNames bounds the entries of each list of names.
+	MaxLocaleNames = 64
+	// MaxLocaleExpansion bounds the bytes %c, %x or %X can write once their
+	// patterns are expanded into each other.
+	MaxLocaleExpansion = 4096
+)
+
+// NewTimeLocale is d3.timeFormatLocale. It fails, with an error wrapping
+// budget.ErrLimit, for a member past the bounds above.
 func NewTimeLocale(def TimeLocaleDef) (*TimeLocale, error) {
 	if def.Periods == nil || def.Days == nil || def.ShortDays == nil || def.Months == nil || def.ShortMonths == nil {
 		return nil, errors.New("time locale needs periods, days, shortDays, months and shortMonths")
+	}
+	if err := def.check(); err != nil {
+		return nil, err
 	}
 	l := &TimeLocale{def: def}
 	l.periodLookup = lookupOf(def.Periods)
@@ -63,7 +87,67 @@ func NewTimeLocale(def TimeLocaleDef) (*TimeLocale, error) {
 	l.shortWeekdayLookup = lookupOf(def.ShortDays)
 	l.monthLookup = lookupOf(def.Months)
 	l.shortMonthLookup = lookupOf(def.ShortMonths)
+	for _, d := range [...]string{"%c", "%x", "%X"} {
+		if n := l.maxOutput(l.compileFormat(nil, d, 0, new(int))); n > MaxLocaleExpansion {
+			return nil, fmt.Errorf("%w: time locale %s expands to up to %d bytes, more than %d", budget.ErrLimit, d, n, MaxLocaleExpansion)
+		}
+	}
 	return l, nil
+}
+
+func (d TimeLocaleDef) check() error {
+	for _, p := range [...]struct {
+		name, v string
+	}{{"dateTime", d.DateTime}, {"date", d.Date}, {"time", d.Time}} {
+		if len(p.v) > MaxLocalePattern {
+			return fmt.Errorf("%w: time locale %s of %d bytes exceeds %d", budget.ErrLimit, p.name, len(p.v), MaxLocalePattern)
+		}
+	}
+	for _, l := range [...]struct {
+		name  string
+		names []string
+	}{{"periods", d.Periods}, {"days", d.Days}, {"shortDays", d.ShortDays}, {"months", d.Months}, {"shortMonths", d.ShortMonths}} {
+		if len(l.names) > MaxLocaleNames {
+			return fmt.Errorf("%w: time locale %s has %d names, more than %d", budget.ErrLimit, l.name, len(l.names), MaxLocaleNames)
+		}
+		for _, n := range l.names {
+			if len(n) > MaxLocaleName {
+				return fmt.Errorf("%w: a time locale name in %s of %d bytes exceeds %d", budget.ErrLimit, l.name, len(n), MaxLocaleName)
+			}
+		}
+	}
+	return nil
+}
+
+// maxOutput bounds the bytes a compiled format writes for any date.
+func (l *TimeLocale) maxOutput(ops []fmtOp) int {
+	longest := func(names []string) int {
+		m := 0
+		for _, n := range names {
+			m = max(m, len(n))
+		}
+		return m
+	}
+	n := 0
+	for _, op := range ops {
+		switch op.dir {
+		case 0:
+			n += len(op.lit)
+		case 'a':
+			n += longest(l.def.ShortDays)
+		case 'A':
+			n += longest(l.def.Days)
+		case 'b':
+			n += longest(l.def.ShortMonths)
+		case 'B':
+			n += longest(l.def.Months)
+		case 'p':
+			n += longest(l.def.Periods)
+		default:
+			n += 24 // a number: at most a sign and 17 digits, or "NaN000"
+		}
+	}
+	return n
 }
 
 func lookupOf(names []string) map[string]int {

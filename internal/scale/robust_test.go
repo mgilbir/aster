@@ -1,6 +1,8 @@
 package scale
 
 import (
+	"context"
+	"errors"
 	"math"
 	"math/rand"
 	"runtime/debug"
@@ -8,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/jsval"
 )
@@ -120,20 +123,22 @@ func TestNoPanics(t *testing.T) {
 				if n, ok := s.(Niceable); ok {
 					n.Nice(count)
 				}
-				TickValues(s, count)
-				LabelValues(s, count)
+				ctx := context.Background()
+				_, _ = TickValues(ctx, s, count)
+				_, _ = LabelValues(ctx, s, count)
 				LabelFraction(s)(1)
-				if f, err := TickFormat(loc, s, count, randValue(r, 0), "", false); err == nil {
+				if f, err := TickFormat(ctx, loc, s, count, randValue(r, 0), "", false); err == nil {
 					f(randValue(r, 0))
 				}
-				if f, err := LabelFormat(loc, s, count, SymbolLegend, jsval.Undefined, "", false); err == nil {
-					l := LabelValues(s, count)
-					for i, v := range l.Values {
-						f(v, i, l)
+				if f, err := LabelFormat(ctx, loc, s, count, SymbolLegend, jsval.Undefined, "", false); err == nil {
+					if l, err := LabelValues(ctx, s, count); err == nil {
+						for i, v := range l.Values {
+							f(v, i, l)
+						}
 					}
 				}
-				DomainCaption(loc, s, CaptionOptions{})
-				if _, err := TickCountFor(s, randValue(r, 0), nil); err != nil {
+				_, _ = DomainCaption(ctx, loc, s, CaptionOptions{})
+				if _, err := TickCountFor(s, randValue(r, 0), jsval.Undefined); err != nil {
 					_ = err
 				}
 				c := ScaleCopy(s)
@@ -145,29 +150,38 @@ func TestNoPanics(t *testing.T) {
 	}
 }
 
+// TestBoundedWork: a specification controls counts and extents. Where d3
+// would list more values than the engine keeps, the helpers fail with a
+// limit; they never answer an empty list instead (an axis without ticks).
 func TestBoundedWork(t *testing.T) {
-	// A specification controls counts and extents; none may be able to allocate
-	// without bound.
-	if got := Ticks(0, 1e300, 1e9); len(got) > maxTicks {
-		t.Errorf("Ticks returned %d values", len(got))
+	if got, err := Ticks(0, 1e300, 1e9); !errors.Is(err, budget.ErrLimit) || got != nil {
+		t.Errorf("Ticks(0, 1e300, 1e9) = %d values, %v; want a limit error", len(got), err)
 	}
-	if got := Ticks(0, 1, math.Inf(1)); len(got) > maxTicks {
-		t.Errorf("Ticks(inf) returned %d values", len(got))
+	if got, err := Ticks(0, 1, math.Inf(1)); err != nil || len(got) != 0 {
+		t.Errorf("Ticks(inf) = %v, %v; want none, as d3", got, err)
 	}
 	l := NewLog()
 	l.SetBase(1e12)
 	l.SetDomain(nums(1, 1e300))
 	start := time.Now()
-	if got := l.Ticks(Count(1e12)); len(got) > maxTicks {
-		t.Errorf("log ticks returned %d", len(got))
+	if got, err := l.Ticks(context.Background(), Count(1e12)); !errors.Is(err, budget.ErrLimit) {
+		t.Errorf("log ticks = %d values, %v; want a limit error", len(got), err)
 	}
 	if time.Since(start) > 5*time.Second {
 		t.Errorf("log ticks took %v", time.Since(start))
 	}
-	if got := QuantizeSamples(func(float64) jsval.Value { return jsval.Null }, 1<<30); got != nil {
-		t.Error("QuantizeSamples should refuse a huge count")
+	if _, err := QuantizeInterpolator(func(float64) jsval.Value { return jsval.Null }, 1<<30); !errors.Is(err, budget.ErrLimit) {
+		t.Errorf("QuantizeInterpolator(2^30) = %v; want a limit error", err)
 	}
-	if got := QuantizeInterpolator(func(float64) jsval.Value { return jsval.Null }, 1<<30); got != nil {
-		t.Error("QuantizeInterpolator should refuse a huge count")
+	u := NewUTC()
+	u.SetDomain([]jsval.Value{jsval.Num(0), jsval.Num(3e12)})
+	iv, _ := format.UTC.Minute().Every(2)
+	if _, err := u.Ticks(context.Background(), IntervalCount(iv)); !errors.Is(err, budget.ErrLimit) {
+		t.Errorf("utc ticks every 2 minutes over 95 years: %v; want a limit error", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := u.Ticks(ctx, IntervalCount(format.UTC.Day())); !errors.Is(err, context.Canceled) {
+		t.Errorf("ticks after the call ended: %v; want its error", err)
 	}
 }

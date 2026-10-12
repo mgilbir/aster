@@ -1,6 +1,7 @@
 package scale
 
 import (
+	"context"
 	"math"
 
 	"github.com/mgilbir/aster/internal/jsval"
@@ -203,8 +204,12 @@ func (s *Sequential) SetConstant(k float64) bool {
 func (s *Sequential) Constant() (float64, bool) { return s.constant, s.kind == kindSymlog }
 
 // Ticks is scale.ticks(count).
-func (s *Sequential) Ticks(count TickCount) []float64 {
-	return s.tspec.ticks([]float64{s.x0, s.x1}, count)
+func (s *Sequential) Ticks(ctx context.Context, count TickCount) ([]float64, error) {
+	return s.ticksN(ctx, count, maxTickValues)
+}
+
+func (s *Sequential) ticksN(_ context.Context, count TickCount, max int) ([]float64, error) {
+	return s.tspec.ticks([]float64{s.x0, s.x1}, count, max)
 }
 
 // Nice is scale.nice(count).
@@ -421,8 +426,12 @@ func (d *Diverging) SetConstant(k float64) bool {
 func (d *Diverging) Constant() (float64, bool) { return d.constant, d.kind == kindSymlog }
 
 // Ticks is scale.ticks(count): from the first to the last domain value.
-func (d *Diverging) Ticks(count TickCount) []float64 {
-	return d.tspec.ticks([]float64{d.x0, d.x1, d.x2}, count)
+func (d *Diverging) Ticks(ctx context.Context, count TickCount) ([]float64, error) {
+	return d.ticksN(ctx, count, maxTickValues)
+}
+
+func (d *Diverging) ticksN(_ context.Context, count TickCount, max int) ([]float64, error) {
+	return d.tspec.ticks([]float64{d.x0, d.x1, d.x2}, count, max)
 }
 
 // Nice is scale.nice(count): only the end points move.

@@ -141,7 +141,14 @@ func init() {
 			} else {
 				step = s.num(stepV)
 			}
-			t, ok := format.OffsetUnit(z, s.str(arg(args, 0)), s.num(arg(args, 1)), math.Floor(step))
+			ctx := s.Context
+			if ctx == nil {
+				ctx = backgroundContext
+			}
+			t, ok, err := format.OffsetUnit(ctx, z, s.str(arg(args, 0)), s.num(arg(args, 1)), math.Floor(step))
+			if err != nil {
+				panic(&cancelled{err}) // a quarter offset's walk stopped with the call
+			}
 			if !ok {
 				return jsval.Undefined
 			}

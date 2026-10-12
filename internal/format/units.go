@@ -187,13 +187,16 @@ func IntervalFor(z Zone, unit string) (Interval, bool) {
 }
 
 // OffsetUnit is vega-time's timeOffset / utcOffset: t moved by step units of
-// the given unit. ok is false for an unknown unit (undefined upstream).
-func OffsetUnit(z Zone, unit string, t, step float64) (float64, bool) {
+// the given unit. ok is false for an unknown unit (undefined upstream). A
+// quarter moves one quarter at a time, as d3 does, its work charged to the
+// ledger in ctx; err is ctx's error once the call is over.
+func OffsetUnit(ctx context.Context, z Zone, unit string, t, step float64) (float64, bool, error) {
 	iv, ok := IntervalFor(z, unit)
 	if !ok {
-		return 0, false
+		return 0, false, nil
 	}
-	return iv.Offset(t, step), true
+	off, err := iv.Offset(ctx, t, step)
+	return off, true, err
 }
 
 // SequenceUnit is vega-time's timeSequence / utcSequence: the unit boundaries

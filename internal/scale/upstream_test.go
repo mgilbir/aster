@@ -1,6 +1,7 @@
 package scale
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -465,7 +466,11 @@ func TestUpstreamD3Scale(t *testing.T) {
 				r.Skip("tick count the recording cannot identify")
 				continue
 			}
-			ticks := tk.Ticks(count)
+			ticks, err := tk.Ticks(context.Background(), count)
+			if err != nil {
+				r.Check(c, nil, true)
+				continue
+			}
 			if _, isTime := s.(*Time); isTime {
 				out := make([]any, len(ticks))
 				for j, v := range ticks {
@@ -577,15 +582,21 @@ func TestUpstreamD3ArrayTicks(t *testing.T) {
 		n := func(i int) float64 { return upstream.Number(c.Arg(i)) }
 		switch c.Fn {
 		case "ticks":
-			r.Check(c, upstream.Floats(Ticks(n(0), n(1), n(2))), false)
+			ticks, err := Ticks(n(0), n(1), n(2))
+			if err != nil {
+				r.Check(c, nil, true)
+				continue
+			}
+			r.Check(c, upstream.Floats(ticks), false)
 		case "tickStep":
 			r.Check(c, upstream.Enc(TickStep(n(0), n(1), n(2))), false)
 		case "tickIncrement":
 			r.Check(c, upstream.Enc(TickIncrement(n(0), n(1), n(2))), false)
 		case "nice":
-			lo, hi := Nice(n(0), n(1), n(2))
-			r.Check(c, upstream.Floats([]float64{lo, hi}), false)
+			// d3.nice, which loops until the step settles: nothing in Vega
+			// calls it (scales nice with linearish's bounded loop).
+			r.Skip("d3.nice is not used")
 		}
 	}
-	r.Done(250)
+	r.Done(220) // 223 since the unbounded, unused d3.nice was removed (29 vectors)
 }

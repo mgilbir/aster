@@ -103,7 +103,7 @@ func TestUpstreamVegaTime(t *testing.T) {
 			if !nullishArg(c.Arg(2)) {
 				step = upstream.Number(c.Arg(2))
 			}
-			v, ok := OffsetUnit(zoneFor(base), unit, date(c.Arg(1)), step)
+			v, ok, _ := OffsetUnit(context.Background(), zoneFor(base), unit, date(c.Arg(1)), step)
 			if !ok {
 				r.Check(c, upstream.Undefined(), false)
 				continue

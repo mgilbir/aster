@@ -258,7 +258,7 @@ func configureDomain(s scale.Scale, p *opParams, g *flowGraph) int {
 			var tc scale.TickCount
 			if !(nice.IsBool() && nice.BoolValue()) {
 				var err error
-				tc, err = scale.TickCountFor(s, nice, nil)
+				tc, err = scale.TickCountFor(s, nice, jsval.Undefined)
 				if err != nil {
 					failErr(err)
 				}
@@ -663,7 +663,8 @@ func configureScheme(typ string, p *opParams, count int) rangeSpec {
 		// (+_.schemeCount || count || DEFAULT_COUNT): the count of an
 		// interpolating scheme's samples; a discrete scheme is used whole.
 		if c := jsval.ToNumber(p.Value("schemeCount")); c != 0 && !math.IsNaN(c) {
-			count = int(c)
+			count = schemeCountInt(c)
+			countFrac = c != math.Trunc(c)
 		} else if count == 0 {
 			count = 5
 		}
@@ -672,7 +673,7 @@ func configureScheme(typ string, p *opParams, count int) rangeSpec {
 		if c == 0 || math.IsNaN(c) {
 			c = 5
 		}
-		count = int(c)
+		count = schemeCountInt(c)
 		countFrac = c != math.Trunc(c)
 	}
 
@@ -702,7 +703,11 @@ func configureScheme(typ string, p *opParams, count int) rangeSpec {
 		if count < 0 || countFrac {
 			fail("Invalid array length")
 		}
-		return rangeSpec{values: scale.QuantizeInterpolator(adjust(interp, false), count)}
+		samples, err := scale.QuantizeInterpolator(adjust(interp, false), count)
+		if err != nil {
+			failErr(err)
+		}
+		return rangeSpec{values: samples}
 	}
 	if typ == scale.TypeOrdinal {
 		return rangeSpec{values: colors}
@@ -715,6 +720,13 @@ func configureScheme(typ string, p *opParams, count int) rangeSpec {
 		count = len(colors)
 	}
 	return rangeSpec{values: colors[:count]}
+}
+
+// schemeCountInt truncates a scheme count for use as an int. A count past
+// what an int32 holds converts the same on every platform and stays past
+// every bound it meets (scale.MaxSchemeSamples, a scheme's length).
+func schemeCountInt(c float64) int {
+	return int(math.Max(math.Min(math.Trunc(c), math.MaxInt32), math.MinInt32))
 }
 
 // -- projection ----------------------------------------------------------------
@@ -904,5 +916,5 @@ func (c *rtContext) Gradient(ref, p0, p1, count, group jsval.Value) jsval.Value 
 	if s == nil {
 		return jsval.Undefined
 	}
-	return scaleGradient(s, p0, p1, count)
+	return scaleGradient(c.view.ctx, s, p0, p1, count)
 }

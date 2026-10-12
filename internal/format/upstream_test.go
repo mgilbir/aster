@@ -378,7 +378,7 @@ func TestUpstreamD3Time(t *testing.T) {
 		case "round":
 			r.Check(c, upstream.EncDate(iv.Round(date(c.Arg(0)))), false)
 		case "offset":
-			r.Check(c, upstream.EncDate(iv.Offset(date(c.Arg(0)), step(c.Arg(1)))), false)
+			r.Check(c, upstream.EncDate(offsetT(iv, date(c.Arg(0)), step(c.Arg(1)))), false)
 		case "range":
 			got, err := iv.Range(ctx, date(c.Arg(0)), date(c.Arg(1)), step(c.Arg(2)))
 			if err != nil {

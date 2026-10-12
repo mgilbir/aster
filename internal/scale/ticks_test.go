@@ -72,7 +72,7 @@ func TestTicksGolden(t *testing.T) {
 	for _, c := range cases {
 		a, b, n := decNum(t, c["a"]), decNum(t, c["b"]), decNum(t, c["c"])
 		want := decNums(t, c["ticks"])
-		if got := Ticks(a, b, n); !sameFloats(got, want) && !(len(got) == 0 && len(want) == 0) {
+		if got, err := Ticks(a, b, n); err != nil || !sameFloats(got, want) && !(len(got) == 0 && len(want) == 0) {
 			bad++
 			if bad < 10 {
 				t.Errorf("Ticks(%v,%v,%v) = %v want %v", a, b, n, got, want)
@@ -90,20 +90,13 @@ func TestTicksGolden(t *testing.T) {
 				t.Errorf("TickStep(%v,%v,%v) = %v want %v", a, b, n, got, w)
 			}
 		}
-		wn := decNums(t, c["nice"])
-		if x, y := Nice(a, b, n); !sameFloat(x, wn[0]) || !sameFloat(y, wn[1]) {
-			bad++
-			if bad < 10 {
-				t.Errorf("Nice(%v,%v,%v) = %v,%v want %v", a, b, n, x, y, wn)
-			}
-		}
 	}
 	t.Logf("%d cases, %d mismatches", len(cases), bad)
 }
 
 func BenchmarkTicks(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		_ = Ticks(0, 1234.5, 10)
+		_, _ = Ticks(0, 1234.5, 10)
 	}
 }
 

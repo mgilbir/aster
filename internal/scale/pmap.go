@@ -80,11 +80,14 @@ func newNumMap(domain, rng []float64) *pmap {
 
 func newPolyNum(domain, rng []float64, n int) *pmap {
 	j := n - 1
-	domain, rng = domain[:n], rng[:n]
+	// polymap reverses the whole arrays before it reads the first n of each:
+	// when the domain and range differ in length, the pairs that remain are
+	// not those of the truncated arrays.
 	if domain[j] < domain[0] {
 		domain = reversedCopy(domain)
 		rng = reversedCopy(rng)
 	}
+	domain, rng = domain[:n], rng[:n]
 	m := &pmap{poly: true, j: j, d: domain, num: true,
 		norm: make([]normalizer, j), nr: make([]numPair, j)}
 	for i := 0; i < j; i++ {
@@ -113,15 +116,15 @@ func newValueMap(domain []float64, rng []jsval.Value, interp Interpolator, round
 	m := &pmap{}
 	if n > 2 {
 		j := n - 1
-		domain, rng = domain[:n], rng[:n]
-		if domain[j] < domain[0] {
+		if domain[j] < domain[0] { // reverse the whole arrays, as polymap does
 			domain = reversedCopy(domain)
-			r := make([]jsval.Value, n)
+			r := make([]jsval.Value, len(rng))
 			for i, v := range rng {
-				r[n-1-i] = v
+				r[len(rng)-1-i] = v
 			}
 			rng = r
 		}
+		domain, rng = domain[:n], rng[:n]
 		m.poly, m.j, m.d = true, j, domain
 		m.norm = make([]normalizer, j)
 		pairs = make([][2]jsval.Value, j)

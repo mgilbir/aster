@@ -15,8 +15,5 @@ func TestTimeScalesGolden(t *testing.T) {
 	if err != nil {
 		t.Skip("no tzdata")
 	}
-	old := LocalZone
-	LocalZone = format.Local(loc)
-	defer func() { LocalZone = old }()
-	runGolden(t, "testdata/time.json.gz")
+	runGolden(t, "testdata/time.json.gz", format.Local(loc))
 }

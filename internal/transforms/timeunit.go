@@ -135,7 +135,11 @@ func TimeUnit(ctx context.Context, data []jsval.Value, p TimeUnitParams) ([]jsva
 		b := a
 		if band {
 			b = math.NaN()
-			if off, ok := format.OffsetUnit(p.Zone, unit, a, step); ok {
+			off, ok, err := format.OffsetUnit(ctx, p.Zone, unit, a, step)
+			if err != nil {
+				return data, info, err
+			}
+			if ok {
 				b = off
 			}
 			o.Set(u1, jsval.Timestamp(b))

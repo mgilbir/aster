@@ -1,13 +1,16 @@
 package vega
 
 import (
+	"context"
+
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/scale"
 )
 
 // scaleGradient is vega-functions' gradient(scale, p0, p1, count): a linear
 // gradient whose stops sample the scale at its ticks (plus the domain ends).
-func scaleGradient(s scale.Scale, p0, p1, count jsval.Value) jsval.Value {
+func scaleGradient(ctx context.Context, s scale.Scale, p0, p1, count jsval.Value) jsval.Value {
 	pt := func(p jsval.Value, i int, def float64) jsval.Value {
 		if p.IsTruthy() {
 			return p.Index(i)
@@ -52,7 +55,12 @@ func scaleGradient(s scale.Scale, p0, p1, count jsval.Value) jsval.Value {
 		if n == 0 || n != n {
 			n = 15
 		}
-		ticks := t.Ticks(scale.Count(n))
+		ticks, err := t.Ticks(ctx, scale.Count(n))
+		if err != nil {
+			// a limit or the end of the call, raised through the
+			// expression that called gradient()
+			panic(&budget.Stop{Err: err})
+		}
 		stops = make([]jsval.Value, 0, len(ticks)+2)
 		for _, f := range ticks {
 			if min.IsTimestamp() {

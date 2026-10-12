@@ -37,12 +37,15 @@ type Interval struct {
 	kind    unitKind
 	weekday int // kWeek: the day the week starts on, 0 = Sunday
 	// k > 0 marks the optimised millisecond.every(k) / year.every(k)
-	// intervals: they floor to multiples of k and step by k units.
-	k int64
+	// intervals: they floor to multiples of k and step by k units. It is
+	// the floored step itself, however large: d3 floors and steps with it
+	// unchanged, so millisecond.every(1e13) ticks every 1e13 ms.
+	k float64
 	// filter > 0 is interval.every(filter): the parent interval restricted to
 	// the boundaries that pass a divisibility test. Such an interval has no
-	// count or every of its own.
-	filter int64
+	// count or every of its own. Like k it is the floored step, unclamped:
+	// millisecond.every(k).every(f) divides counts up to 8.64e15/k.
+	filter float64
 }
 
 // Millisecond is d3.timeMillisecond (identical in every zone).
@@ -91,8 +94,7 @@ func (iv Interval) baseFloor(t float64) float64 {
 	switch iv.kind {
 	case kMillisecond:
 		if iv.k > 0 {
-			k := float64(iv.k)
-			return math.Floor(t/k) * k
+			return float64(math.Floor(t/iv.k) * iv.k)
 		}
 		return t
 	case kSecond:
@@ -134,8 +136,7 @@ func (iv Interval) baseFloor(t float64) float64 {
 		f := z.Fields(t)
 		y := float64(f.Year)
 		if iv.k > 0 {
-			k := float64(iv.k)
-			y = math.Floor(y/k) * k
+			y = float64(math.Floor(y/iv.k) * iv.k)
 		}
 		return z.make(y, 0, 1, 0, 0, 0, 0)
 	}
@@ -152,7 +153,7 @@ func (iv Interval) baseOffset(t, step float64) float64 {
 	switch iv.kind {
 	case kMillisecond:
 		if iv.k > 0 {
-			step *= float64(iv.k)
+			step = float64(step * iv.k) // rounded before the sum, as in JavaScript
 		}
 		return timeClip(t + step)
 	case kSecond:
@@ -178,7 +179,7 @@ func (iv Interval) baseOffset(t, step float64) float64 {
 		return z.make(float64(f.Year), float64(f.Month)+step, float64(f.Day), float64(f.Hour), float64(f.Minute), float64(f.Second), float64(f.Millisecond))
 	case kYear:
 		if iv.k > 0 {
-			step *= float64(iv.k)
+			step = float64(step * iv.k)
 		}
 		f := z.Fields(t)
 		return z.make(float64(f.Year)+step, float64(f.Month), float64(f.Day), float64(f.Hour), float64(f.Minute), float64(f.Second), float64(f.Millisecond))
@@ -194,7 +195,7 @@ func (iv Interval) baseCount(start, end float64) float64 {
 	switch iv.kind {
 	case kMillisecond:
 		if iv.k > 0 {
-			return (end - start) / float64(iv.k)
+			return (end - start) / iv.k
 		}
 		return end - start
 	case kSecond:
@@ -273,17 +274,21 @@ func floorDiv(a, b float64) float64 { return math.Floor(a / b) }
 
 func ceilDiv(a, b float64) float64 { return math.Ceil(a / b) }
 
-// maxFilterIterations bounds the search loops of filtered intervals. A
-// filtered interval only ever needs to walk back to the previous multiple of
-// a calendar field (at most a year of months, a month of days, ...), so the
-// bound is never reached by valid input; it exists so no input can spin.
+// maxFilterIterations bounds each search loop of a filtered interval: one
+// floor, or one move of an offset to the next boundary that passes. A field
+// filter (seconds, minutes, hours, days of the month, months) finds its next
+// boundary within one period of the field, at most 62 steps; only a week
+// filter in a zone with daylight saving walks week by week, up to k weeks for
+// week.every(k), and gives an Invalid Date past this bound. Each move has the
+// whole bound (d3 searches each move afresh), so an offset of n moves may
+// take n times as many steps; those are metered (offsetWith).
 const maxFilterIterations = 1 << 16
 
 func (iv Interval) passes(t float64) bool {
 	if iv.countBased() {
-		return math.Mod(iv.epochCount(t), float64(iv.filter)) == 0
+		return math.Mod(iv.epochCount(t), iv.filter) == 0
 	}
-	return math.Mod(iv.fieldValue(t), float64(iv.filter)) == 0
+	return math.Mod(iv.fieldValue(t), iv.filter) == 0
 }
 
 // ---- public operations ----
@@ -299,7 +304,7 @@ func (iv Interval) Floor(t float64) float64 {
 	parent := iv
 	parent.filter = 0
 	d := parent.baseFloor(t)
-	step := float64(iv.filter)
+	step := iv.filter
 	if iv.countBased() && iv.arithmetic() {
 		c := iv.epochCount(d)
 		n := c - float64(floorDiv(c, step)*step)
@@ -326,7 +331,7 @@ func (iv Interval) Ceil(t float64) float64 {
 		return math.NaN()
 	}
 	d := iv.Floor(t - 1)
-	d = iv.offset(d, 1)
+	d, _ = iv.offsetWith(nil, d, 1) // one move: bounded, never metered
 	return iv.Floor(d)
 }
 
@@ -341,98 +346,138 @@ func (iv Interval) Round(t float64) float64 {
 
 // Offset is interval.offset(t, step): t moved by floor(step) intervals.
 // (d3's default step of 1 is the caller's to pass.) A NaN step on a filtered
-// interval returns t unchanged, as d3 does.
-func (iv Interval) Offset(t, step float64) float64 {
-	return iv.offset(t, math.Floor(step))
+// interval returns t unchanged, as d3 does. A filtered interval (every())
+// moves one boundary at a time, as d3 does, so the work grows with the step;
+// it is charged to the ledger in ctx, and stops with ctx's error.
+func (iv Interval) Offset(ctx context.Context, t, step float64) (float64, error) {
+	if iv.filter == 0 {
+		return iv.baseOffset(t, math.Floor(step)), nil
+	}
+	m := budget.NewMeter(ctx)
+	return iv.offsetWith(&m, t, math.Floor(step))
 }
 
-func (iv Interval) offset(t, step float64) float64 {
+// offsetWith is offset with its moves charged to m (nil: not metered, for
+// the single moves of Ceil and Range's own meter).
+func (iv Interval) offsetWith(m *budget.Meter, t, step float64) (float64, error) {
 	if iv.filter == 0 {
-		return iv.baseOffset(t, step)
+		return iv.baseOffset(t, step), nil
 	}
 	if !(t == t) || math.IsNaN(step) {
-		return t
+		return t, nil
 	}
 	if !Valid(t) {
-		return math.NaN()
+		return math.NaN(), nil
 	}
 	parent := iv
 	parent.filter = 0
-	k := float64(iv.filter)
+	k := iv.filter
 	if iv.countBased() && iv.arithmetic() {
 		if math.IsInf(step, 0) {
-			return math.NaN()
+			return math.NaN(), nil
 		}
 		c := iv.epochCount(t)
 		var target float64
 		switch {
 		case step > 0:
-			target = (floorDiv(c, k) + step) * k
+			target = float64((floorDiv(c, k) + step) * k)
 		case step < 0:
-			target = (ceilDiv(c, k) + step) * k
+			target = float64((ceilDiv(c, k) + step) * k)
 		default:
-			return t
+			return t, nil
 		}
-		return parent.baseOffset(t, target-c)
+		return parent.baseOffset(t, target-c), nil
+	}
+	// d3's filtered offset: `while (--step >= 0) while (offseti(date, 1),
+	// !test(date)) {}`, each move searching afresh for the next boundary that
+	// passes. Upstream loops forever once the date is invalid; here an
+	// Invalid Date ends the walk, so an infinite step gives NaN.
+	dir := 1.0
+	if step < 0 {
+		dir, step = -1, -step
+	}
+	if iv.kind == kMonth && step > maxMonthMoves(iv.filter) {
+		// More moves than the valid dates hold: upstream walks off the end
+		// of time and never returns; the walk would end in an Invalid Date.
+		return math.NaN(), nil
 	}
 	d := t
-	budget := maxFilterIterations
-	move := func(dir float64) bool {
+	for n := step; n > 0; n-- {
+		i := 0 // the parent steps this move takes, charged to m
 		for {
+			if i == maxFilterIterations {
+				return math.NaN(), nil
+			}
+			i++
 			d = parent.baseOffset(d, dir)
 			if math.IsNaN(d) {
-				return false
+				return math.NaN(), nil
 			}
 			if iv.passes(d) {
-				return true
+				break
 			}
-			if budget--; budget < 0 {
-				d = math.NaN()
-				return false
+		}
+		if m != nil {
+			if err := m.Work(int64(i)); err != nil {
+				return math.NaN(), err
 			}
 		}
 	}
-	if step < 0 {
-		for n := step; n < 0; n++ {
-			if !move(-1) {
-				return math.NaN()
-			}
-		}
-	} else {
-		for n := step; n > 0; n-- {
-			if !move(1) {
-				return math.NaN()
-			}
-		}
+	return d, nil
+}
+
+// maxMonthMoves bounds the moves of month.every(k) between any two valid
+// dates. A move goes to the next month whose index is a multiple of k, at
+// least gap months on, and a month is at least 27 days of absolute time in
+// any zone (28 days, less a change of offset of at most a day).
+func maxMonthMoves(k float64) float64 {
+	gap := 12.0 // k >= 12: January only
+	if k < 12 {
+		last := math.Floor(11/k) * k // the last passing month of a year
+		gap = math.Min(k, 12-last)
 	}
-	return d
+	const monthMs = 27 * msPerDay
+	return math.Ceil(2*maxTime/float64(gap*monthMs)) + 1
 }
 
 // Range is interval.range(start, stop, step): the boundaries in
 // [ceil(start), stop) at every floor(step)-th interval. It fails with
 // ErrRangeTooLarge beyond MaxRangeLen dates or with the context's error.
 func (iv Interval) Range(ctx context.Context, start, stop, step float64) ([]float64, error) {
+	return iv.rangeN(ctx, start, stop, step, MaxRangeLen)
+}
+
+// rangeN is Range bounded by max dates (at most MaxRangeLen).
+func (iv Interval) rangeN(ctx context.Context, start, stop, step float64, max int) ([]float64, error) {
+	max = min(max, MaxRangeLen)
+	tooMany := ErrRangeTooLarge
+	if max < MaxRangeLen {
+		tooMany = fmt.Errorf("%w: more than %d dates", budget.ErrLimit, max)
+	}
 	step = math.Floor(step)
 	cur := iv.Ceil(start)
 	if !(cur < stop) || !(step > 0) { // also handles Invalid Date
 		return nil, nil
 	}
-	if iv.certainlyTooLong(stop-cur, step) {
-		return nil, ErrRangeTooLarge
+	if iv.certainlyTooLong(stop-cur, step, max) {
+		return nil, tooMany
 	}
+	m := budget.NewMeter(ctx)
 	var out []float64
 	for {
 		prev := cur
 		out = append(out, prev)
-		if len(out) > MaxRangeLen {
-			return nil, ErrRangeTooLarge
+		if len(out) > max {
+			return nil, tooMany
 		}
-		if len(out)&1023 == 0 && ctx != nil {
-			if err := ctx.Err(); err != nil {
-				return nil, err
-			}
+		if err := m.Work(1); err != nil {
+			return nil, err
 		}
-		cur = iv.Floor(iv.offset(cur, step))
+		next, err := iv.offsetWith(&m, cur, step)
+		if err != nil {
+			return nil, err
+		}
+		cur = iv.Floor(next)
 		if !(prev < cur && cur < stop) {
 			return out, nil
 		}
@@ -440,11 +485,11 @@ func (iv Interval) Range(ctx context.Context, start, stop, step float64) ([]floa
 }
 
 // certainlyTooLong reports whether a span of ms milliseconds holds more than
-// MaxRangeLen boundaries step units apart, so Range can fail before stepping
+// max boundaries step units apart, so Range can fail before stepping
 // through millions of dates. No calendar unit is longer than twice its nominal
 // length, so the test never rejects a range that fits. Filtered intervals keep
 // only some boundaries and are left to the loop.
-func (iv Interval) certainlyTooLong(ms, step float64) bool {
+func (iv Interval) certainlyTooLong(ms, step float64, max int) bool {
 	if iv.filter > 0 {
 		return false
 	}
@@ -472,7 +517,7 @@ func (iv Interval) certainlyTooLong(ms, step float64) bool {
 	if iv.k > 0 {
 		unit *= float64(iv.k)
 	}
-	return ms/(2*unit*step) > MaxRangeLen+1
+	return ms/(2*unit*step) > float64(max)+1
 }
 
 // Count is interval.count(start, end): the number of boundaries after start
@@ -485,16 +530,23 @@ func (iv Interval) Count(start, end float64) (n float64, ok bool) {
 	return math.Floor(iv.baseCount(iv.baseFloor(start), iv.baseFloor(end))), true
 }
 
+// HasEvery reports whether the interval has an every method of its own: d3
+// gives none to filtered intervals (the results of every()) nor to
+// year.every(k), which have no count; calling it on them throws.
+func (iv Interval) HasEvery() bool {
+	return iv.filter == 0 && !(iv.kind == kYear && iv.k > 0)
+}
+
 // Every is interval.every(step). ok is false where d3 returns null (step not
 // a finite number greater than 0) and for intervals that have no every of
-// their own (the results of Every). every(1) is the interval itself, except
-// on a year, where d3 builds a fresh year.every(1) without count or every.
+// their own (see HasEvery). every(1) is the interval itself, except on a
+// year, where d3 builds a fresh year.every(1) without count or every.
 func (iv Interval) Every(step float64) (Interval, bool) {
 	step = math.Floor(step)
 	if math.IsNaN(step) || math.IsInf(step, 0) || !(step > 0) {
 		return Interval{}, false
 	}
-	if iv.filter > 0 || (iv.kind == kYear && iv.k > 0) {
+	if !iv.HasEvery() {
 		return Interval{}, false
 	}
 	switch iv.kind {
@@ -503,24 +555,16 @@ func (iv Interval) Every(step float64) (Interval, bool) {
 			if !(step > 1) {
 				return iv, true
 			}
-			return Interval{z: iv.z, kind: kMillisecond, k: clampStep(step)}, true
+			return Interval{z: iv.z, kind: kMillisecond, k: step}, true
 		}
 	case kYear:
 		// year.every(k) is always its own interval, even for k = 1.
-		return Interval{z: iv.z, kind: kYear, k: clampStep(step)}, true
+		return Interval{z: iv.z, kind: kYear, k: step}, true
 	}
 	if !(step > 1) {
 		return iv, true
 	}
 	out := iv
-	out.filter = clampStep(step)
+	out.filter = step
 	return out, true
-}
-
-// clampStep is int64 so that a step is the same on 32-bit platforms.
-func clampStep(f float64) int64 {
-	if f > 1<<40 {
-		return 1 << 40
-	}
-	return int64(f)
 }
