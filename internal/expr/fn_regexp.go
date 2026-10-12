@@ -70,7 +70,12 @@ func (s *Scope) compilePattern(source, flags string) *jsval.Pattern {
 
 // compileEscaped compiles a source as RegExp.prototype.source reports it. A
 // compile the cache does not keep is held by the call, which pays for its
-// program with the ledger in the Scope's context.
+// program with the ledger in the Scope's context, before compiling it: the
+// compile cannot be interrupted, so a program past what the ledger has left
+// is refused from its bound (jsval.NewPattern), never built first, and
+// the compile's work polls the call's deadline before it starts. A refusal
+// depends on the call's budget, not on the pattern, so it is not remembered
+// in patternErrors.
 func (s *Scope) compileEscaped(source, flags string) *jsval.Pattern {
 	key := flags + "/" + source
 	if p, ok := patternCache.Get(key); ok {
@@ -83,15 +88,49 @@ func (s *Scope) compileEscaped(source, flags string) *jsval.Pattern {
 		exceeded("a regular expression of %d bytes exceeds the limit of %d", len(source), MaxPatternLength)
 	}
 	s.workBytes(len(source))
-	p, err := jsval.NewPattern(source, flags)
+	led := budget.LedgerFrom(s.Context)
+	// A pattern the cache will keep is bounded by the cache, as it is shared
+	// by every call; one too large for it is the call's to pay for.
+	cacheRoom := patternCacheMaxEntry - patternCache.EntryOverhead() - int64(len(key))
+	var (
+		first    = true
+		toLedger bool
+		held     int64 // what the ledger holds for the pattern
+		refused  int64 // the bytes the ledger refused, if it did
+	)
+	p, err := jsval.NewPattern(source, flags, func(bytes, work int64) error {
+		s.work(int(min(work, math.MaxInt32)))
+		if first {
+			first, toLedger = false, bytes > cacheRoom
+		}
+		if !toLedger {
+			return nil
+		}
+		if bytes < 0 {
+			led.Free(-bytes)
+			held += bytes
+			return nil
+		}
+		if err := led.Alloc(bytes); err != nil {
+			refused = bytes
+			return err
+		}
+		held += bytes
+		return nil
+	})
+	if refused > 0 {
+		exceeded("the regular expression /%.40s/ compiles to a program of %d bytes, past the memory limit", source, refused)
+	}
 	if err != nil {
 		e := newPatternError(err)
 		patternErrors.Put(key, e, int64(len(key)+len(e.msg)))
 		e.raise()
 	}
-	size := patternBytes(p)
-	if !patternCache.Put(key, p, int64(len(key))+size) {
-		if err := budget.LedgerFrom(s.Context).Alloc(size); err != nil {
+	size := p.Bytes()
+	if patternCache.Put(key, p, int64(len(key))+size) {
+		led.Free(held)
+	} else if held < size {
+		if err := led.Alloc(size - held); err != nil {
 			exceeded("the regular expression /%.40s/ compiles to a program of %d bytes, past the memory limit", source, size)
 		}
 	}
