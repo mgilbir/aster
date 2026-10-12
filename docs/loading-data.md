@@ -33,7 +33,7 @@ Inline data (`"values"`) and embedded PNG, JPEG and GIF images (`data:image/png;
 | `DenyLoader{}` | nothing | the default; `WithLoader(nil)` is the same |
 | `HTTPLoader` / `NewHTTPLoader(client)` | absolute `http`/`https` URLs, and relative ones when `BaseURL` is set | public addresses only unless `AllowPrivateNetworks`; see below |
 | `FileLoader{BaseDir}` / `NewFileLoader(dir)` | relative paths inside `BaseDir` | `NewFileLoader` opens the directory at once (error if missing); the zero-value struct opens it on first use |
-| `StaticLoader{Value}` | every URI | returns `Value` as JSON whatever the URI; for tests |
+| `&StaticLoader{Value}` | every URI | returns `Value` as JSON whatever the URI; for tests |
 | `FallbackLoader` / `NewFallbackLoader(...)` | what any child accepts | tries children in order; the first whose `Sanitize` accepts *and* whose `Load` succeeds answers. Its `Sanitize` returns what the first accepting child made of the URI (an `HTTPLoader`'s `BaseURL` resolved), and its `Load` routes that through the children again, so each child's `Sanitize` must be idempotent (see below) |
 
 ### HTTPLoader fields

@@ -52,7 +52,9 @@ Files: `harness_security_test.go` (child-process harness, probe),
 `pdf_security_test.go`, `font_security_test.go`, `extreme_security_test.go`,
 `svgmutate_security_test.go`, `race_security_test.go`, `panic_security_test.go`,
 `deepinput_security_test.go`; specs and SVGs in
-`testdata/security/`.
+`testdata/security/`, and, for the reproducers whose findings are fixed, in
+the bounded corpus `testdata/security/bounded/`, where every `go test` renders
+them under a memory limit and a timeout (`bounded_test.go`).
 
 ## Summary
 
@@ -89,7 +91,7 @@ PDF writer and text stack, data races. Details at the end.
 **Status: Fixed. `appendAngle` escapes the raw value with the attribute escaper (valid numeric angles are byte-identical); `clip-path` references also go through `attr`.**
 
 - Reproducer: `TestInjectionRotateAngleString/{text,symbol}`;
-  `testdata/security/attribute-injection.vg.json`.
+  `testdata/security/bounded/attribute-injection.vg.json`.
 - Input: `{"type":"text","encode":{"update":{"angle":{"value":"1)\" onmouseover=\"alert(1)\" data-x=\"("}}}}`.
 - Output: `<text ... transform="translate(10,10) rotate(1)" onmouseover="alert(1)" data-x="()" ...>`.
 - Root cause: `internal/svg/style.go` `appendAngle` appends `v.AsString()` of the raw
@@ -124,7 +126,7 @@ PDF writer and text stack, data races. Details at the end.
 **Status: Fixed. `Scope.checkLen` (per-string limit, `MaxStringLength`) runs before `+`, `join`, `pad`/repeat, `replace` (with a pre-check for regexp replacement), array stringification; strings over 512 bytes and arrays over 256 elements from `sequence()` are also charged to a render-wide `expr.StringBudget` (128 MiB default, `vega.Limits.MaxStringBytes`).**
 
 - Reproducer: `TestResourceStringConcatenationBounded`;
-  `testdata/security/string-doubling.vg.json`.
+  `testdata/security/bounded/string-doubling.vg.json`.
 - Input: 12 signals, `s0 = pad('x', 16000000)`, `s_i = s_{i-1} + s_{i-1}`. A single
   expression can do the same with `join([a,a,a,...])` (64 copies of a 16 MB
   string cost 1.9 GB in 1 s).

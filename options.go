@@ -309,7 +309,8 @@ type pngOption func(*pngConfig)
 func (f pngOption) applyPNG(c *pngConfig) { f(c) }
 
 // RenderOption configures a single VegaToSVG, VegaLiteToSVG or
-// VegaLiteToVega call: WithContext, WithSignal and WithErrorHandler.
+// VegaLiteToVega call: WithContext, WithSignal and WithErrorHandler
+// (VegaLiteToVega renders nothing, so it ignores WithSignal).
 type RenderOption interface{ applyRender(*renderConfig) }
 
 // renderConfig is what configures one call, whatever its output.

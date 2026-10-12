@@ -43,6 +43,7 @@ flowchart LR
 | JavaScript's numbers, `Math` and sort | `jsval`, `jsmath`, `jssort` | V8, bit for bit |
 | resource budgets, the per-call ledger, byte-bounded caches | `budget`, `bcache` | none (aster's own bounds) |
 | loaders | `loader` | vega-loader's policy |
+| image references, CSS colours, embedded fonts | `imageref`, `csscolor`, `fonts/liberation`, `fonts/notoemoji` | none |
 
 ## Resources and errors
 
@@ -79,13 +80,13 @@ sequenceDiagram
 
 ```mermaid
 stateDiagram-v2
-  [*] --> Ready: New(opts) validates version, time zone, theme; loads the fonts given to it
+  [*] --> Ready: New(opts) validates every option (version, time zone, theme, Loader, fonts and families); loads the fonts given to it
   Ready --> Rendering: a call (any number at once)
   Rendering --> Ready: returns
   note right of Rendering: with the embedded fonts alone, the first call needing text loads them
   Ready --> Closed: Close()
   Rendering --> Closed: Close() cancels calls in flight (context.Canceled), waits for them, closes the Loader if io.Closer
-  Closed --> Closed: every call returns ErrClosed; Close again returns nil
+  Closed --> Closed: every call returns ErrClosed; a later Close returns nil (the Loader's Close error comes once, from the first Close made outside a call)
 ```
 
 Concurrency is by construction: a call's dataflow, scenegraph, random generator, budgets, ledger and deadline are its own. What calls share (fonts and their shaping caches, colour schemes, compiled expressions) is immutable or synchronised, and the caches among it are bounded by the bytes they hold (`bcache`). The rules that keep it so are in [design-rules.md](design-rules.md#concurrency).
@@ -107,7 +108,7 @@ tools: cmd/enginebench cmd/recursionaudit fuzzutil oracle svgcheck svgdiff testu
 ```
 <!-- layers:end -->
 
-`tools` are not part of the engine: the commands and the test harness (`oracle` drives upstream in node, `svgcheck` checks the structure of the engine's SVG, `svgdiff` compares SVG, `upstream` replays upstream's test suites, `fuzzutil` serves the fuzz targets, `testutil` holds the race slowdown that keeps time-based tests independent of the machine). `fonts/dejavu` is imported by tests only.
+`tools` are not part of the engine: the commands and the test harness (`oracle` drives upstream in node, `svgcheck` checks the structure of the engine's SVG, `svgdiff` compares SVG, `upstream` replays upstream's test suites, `fuzzutil` serves the fuzz targets, `testutil` holds the race slowdown that keeps time-based tests independent of the machine). `internal/fonts/dejavu` is imported by tests only.
 
 <!-- deps:begin (checked by TestDependencyStatement) -->
 Beyond the standard library, a program that imports aster builds these modules, and no others:

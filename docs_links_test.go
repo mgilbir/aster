@@ -2,6 +2,7 @@ package aster_test
 
 import (
 	"os"
+	"os/exec"
 	"path"
 	"regexp"
 	"strings"
@@ -17,7 +18,9 @@ var (
 	// mdRefUse is a full reference link, `[text][id]`, or a collapsed one, `[id][]`.
 	mdRefUse = regexp.MustCompile(`\[([^\]\n]*)\]\[([^\]\n]*)\]`)
 	// mdHTML is the href or src of an HTML element.
-	mdHTML     = regexp.MustCompile(`(?i)<[a-z]+\s[^>]*?\b(?:href|src)\s*=\s*["']([^"']+)["']`)
+	mdHTML = regexp.MustCompile(`(?i)<[a-z]+\s[^>]*?\b(?:href|src)\s*=\s*["']([^"']+)["']`)
+	// mdPathSpan is a code span holding a path into the repository.
+	mdPathSpan = regexp.MustCompile("`((?:testdata|internal|docs|scripts|cmd)/[^`\\s]*)`")
 	mdHeading  = regexp.MustCompile(`(?m)^ {0,3}#+\s+(.*?)\s*#*\s*$`)
 	slugStrip  = regexp.MustCompile("[`*_]")
 	slugDelete = regexp.MustCompile(`[^\p{L}\p{N}_\- ]`)
@@ -102,6 +105,40 @@ func TestDocsLinks(t *testing.T) {
 				t.Errorf("%s: link %s: no heading %q in %s", p, link, frag, target)
 			}
 		}
+	}
+	// A repository path named in code (`testdata/security/x.vg.json`) is
+	// a reference too: it must name a tracked file or directory, so that a
+	// file moved or deleted does not leave the docs pointing at nothing.
+	paths := 0
+	for _, p := range files {
+		// An audit or a history records the tree it read, as it was; only
+		// its reproducers, which the tests still render, must still be there.
+		record := strings.HasPrefix(p, "docs/audits/") || strings.HasPrefix(p, "docs/history/")
+		b, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		prose, _ := splitMarkdown(string(b))
+		for _, m := range mdPathSpan.FindAllStringSubmatch(prose, -1) {
+			rp := strings.TrimSuffix(strings.TrimRight(m[1], ".,:;"), "/")
+			if strings.ContainsAny(rp, "*<>{}$ ") || strings.Contains(rp, "...") || strings.Contains(rp, "…") {
+				continue // a pattern or a placeholder, not a path
+			}
+			rp, _, _ = strings.Cut(rp, ":") // file.go:123
+			if i := strings.LastIndex(rp, "."); i > strings.LastIndex(rp, "/") && i+1 < len(rp) && rp[i+1] >= 'A' && rp[i+1] <= 'Z' {
+				rp = rp[:i] // internal/budget.Ledger: the package's directory
+			}
+			if record && !strings.HasPrefix(rp, "testdata/security/") {
+				continue
+			}
+			paths++
+			if !tracked[rp] && !tracked[path.Clean(path.Join(path.Dir(p), rp))] && !gitIgnored(rp) {
+				t.Errorf("%s: names %s, which is not a tracked file or directory", p, rp)
+			}
+		}
+	}
+	if paths < 50 {
+		t.Errorf("checked %d repository paths named in the docs, expected at least 50", paths)
 	}
 	// Floors, so that a walk or an extraction that finds nothing fails.
 	if len(files) < 30 || links < 150 {
@@ -193,4 +230,43 @@ var inlineCode = regexp.MustCompile("(`+)[^`]*?(`+)")
 // stripInlineCode blanks the code spans of prose.
 func stripInlineCode(prose string) string {
 	return inlineCode.ReplaceAllStringFunc(prose, func(s string) string { return strings.Repeat(" ", len(s)) })
+}
+
+// gitIgnored reports whether path is a place .gitignore keeps out of the
+// repository (a cache the tests make), which the docs may name.
+func gitIgnored(p string) bool {
+	// .gitignore's own lines first: check-ignore refuses a path through a
+	// symbolic link, which a cache shared between checkouts may be.
+	if b, err := os.ReadFile(".gitignore"); err == nil {
+		for _, l := range strings.Split(string(b), "\n") {
+			if l = strings.TrimPrefix(strings.TrimSpace(l), "/"); l == p || l == p+"/" {
+				return true
+			}
+		}
+	}
+	for _, q := range []string{p, p + "/x"} { // a directory pattern matches what is under it
+		if exec.Command("git", "check-ignore", "-q", "--no-index", "--", q).Run() == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// docs/adr/README.md indexes every decision record: an ADR added without its
+// row is one nobody finds.
+func TestADRIndexComplete(t *testing.T) {
+	idx, err := os.ReadFile("docs/adr/README.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, f := range trackedFiles(t, "docs/adr/[0-9]*.md") {
+		n++
+		if name := path.Base(f); !strings.Contains(string(idx), "]("+name+")") {
+			t.Errorf("docs/adr/README.md does not list %s", name)
+		}
+	}
+	if n < 12 {
+		t.Errorf("found %d ADRs, expected at least 12", n)
+	}
 }

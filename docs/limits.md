@@ -15,13 +15,13 @@ c, err := aster.New(
 
 It bounds one call from start to finish: compiling, evaluation, text shaping, writing SVG, PNG and PDF. A run of text stops partway when the time is up. The error wraps `context.DeadlineExceeded` and names the stage. Default 30 s; zero or negative means no timeout (the CLI's `-timeout 0`). Slow but legitimate charts are mostly geographic: projections of detailed maps, and faceted maps.
 
-Two steps are bounded by size rather than time, because they cannot be interrupted: parsing the specification's JSON, and parsing loaded JSON data. Both are bounded by the parsed-JSON budget below, by default as with `WithMemoryLimit`.
+Three steps are bounded by size rather than time, because they cannot be interrupted: parsing the specification's JSON, parsing loaded JSON data, and decoding an image. The JSON is bounded by the parsed-JSON budget below (1 GiB, or `n/2` with `WithMemoryLimit(n)`), the specification also by its size row and loaded data by the loaded-bytes allowance; an image by its bytes (32 MiB) and its pixels.
 
 `WithTimeout` bounds every call; `WithContext(ctx)` bounds one call by `ctx` as well (its cancellation and its deadline), which a server uses to stop a render whose client has gone away. A call whose context ends fails with the context's error and returns no output.
 
 ## WithMemoryLimit
 
-It is not a heap cap: Go has none per call. It is converted into the budgets below, each charged *before* the allocation it pays for. With `WithMemoryLimit(n)`, each budget becomes the formula in the third column, which **replaces** the default: a large `n` raises the bounds as well as a small one lowers them. `WithMemoryLimit(0)`, the default, keeps the defaults.
+It is not a heap cap: Go has none per call. It is converted into the budgets below, each charged *before* the allocation it pays for. With `WithMemoryLimit(n)`, each budget becomes the formula in the third column, which **replaces** the default: a large `n` raises the bounds that have no ceiling as a small one lowers them (the table gives each one's floor and ceiling), and the bounds that are none by default become bounded. `WithMemoryLimit(0)`, the default, keeps the defaults.
 
 <!-- limits:begin (checked by TestLimitsDocMatchesCode; edit with the code) -->
 | Budget | Default | With `WithMemoryLimit(n)` |
@@ -79,6 +79,7 @@ Fixed bounds, the same whatever `WithMemoryLimit` says:
 | a regular expression compiled from a string | 1 MiB of source; its program, up to goecma262's 200,000 instructions, is charged to the call's ledger unless the shared cache keeps it |
 | SVG input to `SVGToPNG` | 256 MiB, 4,000,000 elements, depth 256 |
 | style sheets of SVG input to `SVGToPNG` | 4 MiB, 100,000 rules, 100,000,000 selector-matching steps; past any of them the call fails rather than draw the document partly styled |
+| caches of one PNG render | gradients 8 MiB (4,096 entries), glyph outlines 32 MiB (16,384 entries), SVG glyph documents 64 MiB (64 documents), each charged to the call's ledger as it fills; one that would pass its bound is emptied first, and what it cannot keep is built again where it is used |
 | one filter region (PNG) | 32 Mi pixels; past it the call fails rather than leave the element undrawn |
 | SVG input to `SVGToPDF` | 64 MiB, 1,000,000 elements, 10,000,000 path segments, 16 MiB of text; per render, glyph outlines kept 8 MiB and painted colour glyphs 16 MiB (more is drawn, not kept), a dash pattern 256 values |
 | fonts | a font program given in memory 64 MiB, a system font file 1 GiB (mapped); per converter, 64 system font faces loaded at once (the one loaded longest ago is dropped past it) and 64 MiB of font programs cut out of collections and system fonts for PDF embedding, none over 32 MiB kept (each charged to the call's ledger when made) |

@@ -14,7 +14,7 @@ To cancel one call rather than the Converter, pass it `WithContext(ctx)`: every 
 | `VegaLiteToPNG(spec, …)` | Vega-Lite JSON → PNG `[]byte` | `PNGOption` |
 | `VegaLiteToPDF(spec, …)` | Vega-Lite JSON → PDF `[]byte` | `PDFOption` |
 | `VegaLiteToPDFUsage(spec, …)` | Vega-Lite JSON → PDF + `[]FontUsage` | `PDFOption` |
-| `VegaLiteToVega(spec, …)` | Vega-Lite JSON → Vega JSON `[]byte` | `RenderOption`: `WithContext`, and `WithErrorHandler`, told of the compiler's warnings |
+| `VegaLiteToVega(spec, …)` | Vega-Lite JSON → Vega JSON `[]byte` | `RenderOption`: `WithContext`, and `WithErrorHandler`, told of the compiler's warnings; `WithSignal` is ignored, nothing being rendered |
 | `VegaToSVG` / `VegaToPNG` / `VegaToPDF` / `VegaToPDFUsage` | the same, from Vega JSON | as above |
 | `SVGToPNG(svg, …)` / `SVGToPDF(svg, …)` / `SVGToPDFUsage(svg, …)` | an SVG string (best: one Vega wrote) → PNG / PDF | `PNGOption` / `PDFOption` |
 
@@ -43,12 +43,12 @@ The language of a spec is the method's, whatever its `$schema` says, and the `$s
 | Option | Type | Default | |
 |---|---|---|---|
 | `WithContext(ctx)` | `ContextOption` (render, PNG, PDF) | none | run the call under `ctx` as well: cancel it, give it a deadline, pass values to the Loader; see above |
-| `WithSignal(name, value)` | `SignalOption` (render, PNG, PDF) | none | set a top-level signal (a Vega-Lite parameter) before drawing, as `view.signal(name, value)`; `value` is anything `encoding/json` encodes; an undefined name fails; ignored by `SVGTo…` |
+| `WithSignal(name, value)` | `SignalOption` (render, PNG, PDF) | none | set a top-level signal (a Vega-Lite parameter) before drawing, as `view.signal(name, value)`; `value` is anything `encoding/json` encodes; an undefined name fails; ignored by `SVGTo…` and `VegaLiteToVega` |
 | `WithErrorHandler(h)` | `ErrorHandlerOption` (render, PNG, PDF) | none: errors fail the call | see [errors.md](errors.md) |
 | `WithScale(f)` | `PNGOption` | 1 | PNG size factor; must be positive and finite |
 | `WithRecodePNG()` | `PNGOption` | off | losslessly re-encode into the cheapest equivalent PNG (indexed or truecolor); same pixels, typically several times smaller |
-| `WithQuantizePNG(maxColors)` | `PNGOption` | off | lossily quantize to at most `maxColors` (2–256) colours, 8-bit indexed with dithering and a quality guard; falls back to `WithRecodePNG` when the guard trips; wins over `WithRecodePNG` |
-| `WithPDFText(mode)` | `PDFOption` | `PDFTextEmbed` | `PDFTextEmbed`, `PDFTextNamed`, `PDFTextOutlines`; [pdf.md](pdf.md) |
+| `WithQuantizePNG(maxColors)` | `PNGOption` | off | lossily quantize to at most `maxColors` colours (clamped to 2–256), 8-bit indexed with dithering and a quality guard; falls back to `WithRecodePNG` when the guard trips, and without trying for an image of more than 65,536 distinct colours; wins over `WithRecodePNG` |
+| `WithPDFText(mode PDFTextMode)` | `PDFOption` | `PDFTextEmbed` | `PDFTextEmbed`, `PDFTextNamed`, `PDFTextOutlines`; [pdf.md](pdf.md) |
 
 ## Errors and diagnostics
 
@@ -58,12 +58,15 @@ The language of a spec is the method's, whatever its `$schema` says, and the `$s
 | `ErrClosed` | returned by every call after `Close` |
 | `*LoadError` | `Resource` (`"data"` or `"image"`), `URL`, `Err`: a resource that could not be loaded or read |
 | `Warning` | a Vega warning or a dropped link, seen only through `WithErrorHandler` |
+| `context.DeadlineExceeded`, `context.Canceled` | wrapped by the error of a call that ran out of time (`WithTimeout`, or the deadline of a `WithContext` context) or was canceled (its context, or `Close`) |
+
+`HTTPLoader`'s refusal of a private address has no exported sentinel: it is the `Err` of a `*LoadError`.
 
 See [errors.md](errors.md).
 
 ## Loaders
 
-`Loader` (interface: `Sanitize`, `Load`), `DenyLoader`, `HTTPLoader` / `NewHTTPLoader`, `FileLoader` / `NewFileLoader`, `StaticLoader`, `FallbackLoader` / `NewFallbackLoader`. See [loading-data.md](loading-data.md) for their fields and for writing your own.
+`Loader` (interface: `Sanitize`, `Load`), `DenyLoader`, `HTTPLoader` / `NewHTTPLoader`, `FileLoader` / `NewFileLoader`, `StaticLoader` (its methods take a pointer: `&aster.StaticLoader{Value: v}`), `FallbackLoader` / `NewFallbackLoader`. See [loading-data.md](loading-data.md) for their fields and for writing your own.
 
 ## PDF fonts
 
