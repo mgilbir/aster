@@ -61,7 +61,6 @@ func predicateValueExpr(cc *compileCtx, v Value, timeUnit string) string {
 }
 
 func fieldFilterExpression(cc *compileCtx, p Value, useInRange bool) string {
-	field := p.Get("field").AsString()
 	nt := normalizeTimeUnit(cc, p.Get("timeUnit"))
 	unit := ""
 	if u := nt.Get("unit"); u.IsTruthy() {
@@ -74,7 +73,7 @@ func fieldFilterExpression(cc *compileCtx, p Value, useInRange bool) string {
 		// A timeUnit'ed predicate compares the truncated time, computed from the raw
 		// field unless the field was pre-binned.
 		if !binned {
-			fieldExpr = "time(" + timeUnitFieldExpr(unit, field, false) + ")"
+			fieldExpr = "time(" + timeUnitFieldExprV(unit, p.Get("field"), false) + ")"
 		} else {
 			fieldExpr = "time(" + rawFieldExpr + ")"
 		}
@@ -163,35 +162,18 @@ func normalizePredicate(cc *compileCtx, f Value) Value {
 func replaceExprRefObj(cc *compileCtx, idx Value) Value { return replaceExprRef(cc, idx, 0) }
 
 // replaceExprRef converts ExprRefs to SignalRefs in the properties of idx,
-// recursing level more times through nested objects.
+// recursing level more times through nested objects. It reads idx as
+// upstream does, `keys(index || {})` and `index[prop]`: a string's
+// characters and an array's elements by index, nothing of a number.
 func replaceExprRef(cc *compileCtx, idx Value, level int) Value {
 	out := jsval.NewObject(idx.Len())
-	if idx.IsObj() {
-		o := idx.ObjValue()
-		for i := 0; i < o.Len(); i++ {
-			cc.work(1)
-			v := o.ValueAt(i)
-			if level == 0 {
-				out.Set(o.KeyAt(i), signalRefOrValue(v))
-			} else {
-				out.Set(o.KeyAt(i), replaceExprRef(cc, v, level-1))
-			}
-		}
-	} else if idx.IsStr() {
-		// Object.keys of a string are its character indices.
-		for i, u := range utf16Len(idx.StrValue()) {
-			cc.work(1)
-			out.Set(jsval.JSNumberString(float64(i)), jsval.Str(string(rune(u))))
-		}
-	} else if idx.IsArr() {
-		for i, v := range idx.Items() {
-			cc.work(1)
-			k := jsval.JSNumberString(float64(i))
-			if level == 0 {
-				out.Set(k, signalRefOrValue(v))
-			} else {
-				out.Set(k, replaceExprRef(cc, v, level-1))
-			}
+	for _, k := range jsKeysOr(idx) {
+		cc.work(1)
+		v := jsProp(idx, k)
+		if level == 0 {
+			jsSet(cc, out, k, signalRefOrValue(cc, v))
+		} else {
+			jsSet(cc, out, k, replaceExprRef(cc, v, level-1))
 		}
 	}
 	return jsval.Obj(out)

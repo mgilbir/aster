@@ -67,9 +67,9 @@ func makeWalkTree(data *[]*vgData) func(node dfNode, ds *vgData) {
 			}
 			if !ds.source().IsTruthy() || len(ds.transform) > 0 {
 				*data = append(*data, ds)
-				fn.data = ds.name().AsString()
+				fn.data = ds.name()
 			} else {
-				fn.data = ds.source().AsString()
+				fn.data = ds.source()
 			}
 			for _, v := range fn.assemble() {
 				*data = append(*data, vgDataFromValue(v))
@@ -111,15 +111,15 @@ func makeWalkTree(data *[]*vgData) func(node dfNode, ds *vgData) {
 		if on, ok := node.(*outputNode); ok {
 			switch {
 			case ds.source().IsTruthy() && len(ds.transform) == 0:
-				on.setSource(ds.source().AsString())
+				on.setSource(ds.source())
 			case isOutput(on.par):
-				on.setSource(ds.name().AsString())
+				on.setSource(ds.name())
 			default:
 				if !ds.name().IsTruthy() {
 					ds.obj.Set("name", jsval.Str("data_"+jsval.JSNumberString(float64(datasetIndex))))
 					datasetIndex++
 				}
-				on.setSource(ds.name().AsString())
+				on.setSource(ds.name())
 				if on.numChildren() == 1 {
 					*data = append(*data, ds)
 					ds = newVgData(jsval.Null, ds.name())
@@ -188,7 +188,7 @@ func assembleRootData(cc *compileCtx, dc *dataComponent, datasets Value) []Value
 		cc.work(1)
 		sn := root.(*sourceNode)
 		if !sn.hasName() {
-			sn.name = "source_" + jsval.JSNumberString(float64(sourceIndex))
+			sn.name = jsval.Str("source_" + jsval.JSNumberString(float64(sourceIndex)))
 			sourceIndex++
 		}
 		d := &vgData{obj: sn.assemble()}
@@ -216,7 +216,7 @@ func assembleRootData(cc *compileCtx, dc *dataComponent, datasets Value) []Value
 			if t.Get("type").IsStr() && t.Get("type").StrValue() == "lookup" {
 				o := cloneObj(t.ObjValue())
 				if node, ok := dc.outputNodes[t.Get("from").AsString()]; ok && node != nil {
-					o.Set("from", jsval.Str(node.getSource()))
+					o.Set("from", node.getSource())
 				}
 				d.transform[i] = jsval.Obj(o)
 			}
@@ -224,11 +224,14 @@ func assembleRootData(cc *compileCtx, dc *dataComponent, datasets Value) []Value
 	}
 	for _, d := range data {
 		cc.work(1)
-		if !datasets.IsUndefined() && !isObject(datasets) {
-			jsIn(datasets, d.name().AsString()) // d.name in datasets
+		// if (d.name in datasets) d.values = datasets[d.name], datasets
+		// defaulting to {}: a name every object inherits is in it too.
+		ds := datasets
+		if ds.IsUndefined() {
+			ds = mkv()
 		}
-		if name := d.name(); name.IsStr() && datasets.IsObj() && datasets.ObjValue().Has(name.StrValue()) {
-			d.obj.Set("values", datasets.Get(name.StrValue()))
+		if key := d.name().AsString(); jsIn(ds, key) {
+			d.obj.Set("values", jsProp(ds, key))
 		}
 	}
 	out := make([]Value, len(data))

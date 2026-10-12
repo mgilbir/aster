@@ -46,6 +46,8 @@ type compileCtx struct {
 	// titleMerges are the title field-def lists merged so far, by their
 	// first element (see mergeTitleFieldDefs).
 	titleMerges map[*Value]*titleMerge
+	// jsr is the compilation's JavaScript realm (see jsRealm).
+	jsr *jsRealm
 }
 
 // check panics with the context's error once the caller's context is done.

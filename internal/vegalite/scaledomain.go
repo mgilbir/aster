@@ -33,7 +33,7 @@ func parseUnitScaleDomain(u *unitModel) {
 			if facetParent.b().comp.resolve.scale[channel] == "shared" {
 				for _, d := range domains.value.Items() {
 					cc.work(1)
-					if isDataRefDomain(d) {
+					if isDataRefDomain(cc, d) {
 						data := d.Get("data").AsString()
 						d.ObjValue().Set("data", jsval.Str(facetScalePrefix+strings.Replace(data, facetScalePrefix, "", 1)))
 					}
@@ -282,7 +282,7 @@ func normalizeSortField(sort Value, isStackedMeasure bool) Value {
 		o.Set("op", jsval.Str(defaultSortOp))
 	}
 	if field.IsTruthy() {
-		o.Set("field", jsval.Str(replacePathInField(field.AsString())))
+		o.Set("field", jsval.Str(replacePathInFieldV(field))) // the field as given
 	}
 	if order.IsTruthy() {
 		o.Set("order", order)
@@ -367,11 +367,11 @@ func mergeDomains(cc *compileCtx, domains []Value) Value {
 	for _, d := range domains {
 		cc.work(1)
 		x := d
-		if isDataRefDomain(d) {
+		if isDataRefDomain(cc, d) {
 			x = jsval.Obj(omit(d, "sort"))
 		}
 		h := hashOf(cc, x)
-		if !seen[h] {
+		if !jsSeen(cc, seen, h) {
 			seen[h] = true
 			uniqueDomains = append(uniqueDomains, x)
 		}
@@ -380,7 +380,7 @@ func mergeDomains(cc *compileCtx, domains []Value) Value {
 	seenS := map[string]bool{}
 	for _, d := range domains {
 		cc.work(1)
-		if !isDataRefDomain(d) {
+		if !isDataRefDomain(cc, d) {
 			continue
 		}
 		s := d.Get("sort")
@@ -396,7 +396,7 @@ func mergeDomains(cc *compileCtx, domains []Value) Value {
 			}
 		}
 		h := hashOf(cc, s)
-		if !seenS[h] {
+		if !jsSeen(cc, seenS, h) {
 			seenS[h] = true
 			sorts = append(sorts, s)
 		}
@@ -405,7 +405,7 @@ func mergeDomains(cc *compileCtx, domains []Value) Value {
 		return undef
 	} else if len(uniqueDomains) == 1 {
 		domain := domains[0]
-		if isDataRefDomain(domain) && len(sorts) > 0 {
+		if isDataRefDomain(cc, domain) && len(sorts) > 0 {
 			sort := sorts[0]
 			if len(sorts) > 1 {
 				cc.warn(msgMoreThanOneSort)
@@ -445,14 +445,14 @@ func mergeDomains(cc *compileCtx, domains []Value) Value {
 	for _, s := range sorts {
 		cc.work(1)
 		var x Value
-		if s.IsBool() || !(s.IsObj() && s.ObjValue().Has("op")) || (s.Get("op").IsStr() && multiDomainSortOps[s.Get("op").StrValue()]) {
+		if s.IsBool() || !(s.IsObj() && s.ObjValue().Has("op")) || (s.Get("op").IsStr() && (multiDomainSortOps[s.Get("op").StrValue()] || (cc.v5 && isInheritedKey(s.Get("op").StrValue())))) {
 			x = s
 		} else {
 			cc.warn(msgDomainSortDropped(cc, s))
 			x = jsval.True
 		}
 		h := hashOf(cc, x)
-		if !seenU[h] {
+		if !jsSeen(cc, seenU, h) {
 			seenU[h] = true
 			unionSorts = append(unionSorts, x)
 		}
@@ -469,14 +469,13 @@ func mergeDomains(cc *compileCtx, domains []Value) Value {
 	for _, d := range domains {
 		cc.work(1)
 		v := jsval.Null
-		if isDataRefDomain(d) {
+		if isDataRefDomain(cc, d) {
 			v = d.Get("data")
 		}
-		h := hashOf(cc, v)
-		if v.IsNull() {
-			h = "\x00null"
-		}
-		if !seenD[h] {
+		// unique(…, (x) => x): keyed by the value's text, so null and a
+		// data set named "null" are one, as two object names are.
+		h := v.AsString()
+		if !jsSeen(cc, seenD, h) {
 			seenD[h] = true
 			allData = append(allData, v)
 		}
@@ -502,13 +501,13 @@ func mergeDomains(cc *compileCtx, domains []Value) Value {
 
 func getFieldFromDomain(cc *compileCtx, domain Value) string {
 	switch {
-	case isDataRefDomain(domain) && domain.Get("field").IsStr():
+	case isDataRefDomain(cc, domain) && domain.Get("field").IsStr():
 		return domain.Get("field").StrValue()
 	case isDataRefUnionedDomain(domain):
 		field := ""
 		for _, nu := range domain.Get("fields").Items() {
 			cc.work(1)
-			if isDataRefDomain(nu) && nu.Get("field").IsStr() {
+			if isDataRefDomain(cc, nu) && nu.Get("field").IsStr() {
 				if field == "" {
 					field = nu.Get("field").StrValue()
 				} else if field != nu.Get("field").StrValue() {
@@ -537,8 +536,8 @@ func assembleDomain(m Model, channel string) Value {
 		if cc.v5 && !d.IsArr() {
 			jsIn(d, "field") // 5.8's isDataRefDomain
 		}
-		if isDataRefDomain(d) {
-			d.ObjValue().Set("data", jsval.Str(m.b().lookupDataSource(d.Get("data").AsString())))
+		if isDataRefDomain(cc, d) {
+			d.ObjValue().Set("data", m.b().lookupDataSource(d.Get("data").AsString()))
 		}
 		domains = append(domains, d)
 	}

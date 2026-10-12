@@ -117,6 +117,9 @@ type jsObj struct {
 	live int
 	// untidy says es holds dead entries or index keys out of order.
 	untidy bool
+	// proto is what assigning "__proto__" made the object's prototype (see
+	// jsRealm).
+	proto jsProto
 }
 
 type jsObjEntry struct {
@@ -189,19 +192,31 @@ func (j *jsObj) Lookup(k string) Value {
 	return undef
 }
 
-// Prop is the property read j[k] (see jsval.Object.Prop).
+// Prop is the property read j[k] (see jsval.Object.Prop and jsRealm).
 func (j *jsObj) Prop(k string) Value {
 	if i := j.find(k); i >= 0 {
 		return j.es[i].v
+	}
+	if j.proto.set {
+		return (&jsRealm{hosts: map[string]*jsHost{}}).inherited(j.proto, k).value()
+	}
+	if k == "__proto__" {
+		return jsval.Obj(jsval.NewObject(0)) // Object.prototype
 	}
 	v, _ := jsval.Inherited(k)
 	return v
 }
 
-// Set is the assignment j[k] = v.
+// Set is the assignment j[k] = v: to "__proto__" the object does not hold
+// as its own (JSON.parse makes one), it replaces the prototype (an object or
+// null) or does nothing (see jsRealm).
 func (j *jsObj) Set(k string, v Value) {
 	if i := j.find(k); i >= 0 {
 		j.es[i].v = v
+		return
+	}
+	if k == "__proto__" {
+		j.proto = protoAssigned(j.proto, v)
 		return
 	}
 	if n, ok := arrayIndex(k); ok && !j.untidy && len(j.es) > 0 {

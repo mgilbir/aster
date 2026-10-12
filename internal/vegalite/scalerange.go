@@ -81,7 +81,7 @@ func parseRangeForChannel(channel string, u *unitModel) withExplicit {
 				}
 				return makeExplicit(rng)
 			case "scheme":
-				return makeExplicit(parseScheme(sv))
+				return makeExplicit(parseScheme(u.ctx, sv))
 			}
 		}
 	}
@@ -120,8 +120,8 @@ func parseRangeForChannel(channel string, u *unitModel) withExplicit {
 	return makeImplicit(d)
 }
 
-func parseScheme(scheme Value) Value {
-	if isExtendedScheme(scheme) {
+func parseScheme(cc *compileCtx, scheme Value) Value {
+	if isExtendedScheme(cc, scheme) {
 		o := mk("scheme", scheme.Get("name"))
 		spread(o, jsval.Obj(omit(scheme, "name")))
 		return jsval.Obj(o)
@@ -191,7 +191,7 @@ func defaultRange(channel string, u *unitModel) Value {
 			return "min(" + u.getSignalName(wn) + "," + u.getSignalName(hn) + ")/2"
 		}))
 	case chTime:
-		return mkv("step", 1000/config.Get("scale").Get("framesPerSecond").AsDouble())
+		return mkv("step", 1000/jsval.ToNumber(config.Get("scale").Get("framesPerSecond")))
 	case chStrokeWidth:
 		return arr(config.Get("scale").Get("minStrokeWidth"), config.Get("scale").Get("maxStrokeWidth"))
 	case chStrokeDash:
@@ -291,7 +291,7 @@ func getOffsetRange(channel string, u *unitModel, offsetScaleType string) Value 
 		})
 		padding := u.config.Get("scale").Get("bandWithNestedOffsetPaddingInner")
 		bp := getBandPosition(cc, positionDef, undef, markDef, config)
-		bandPositionOffset := bp.AsDouble() - 0.5
+		bandPositionOffset := jsval.ToNumber(bp) - 0.5
 		if bp.IsUndefined() {
 			bandPositionOffset = math.NaN()
 		}
@@ -305,7 +305,7 @@ func getOffsetRange(channel string, u *unitModel, offsetScaleType string) Value 
 				startRatio = signalOf(padding) + "/2" + bandPositionOffsetExpr
 				endRatio = "(1 - " + signalOf(padding) + "/2)" + bandPositionOffsetExpr
 			} else {
-				p := padding.AsDouble()
+				p := jsval.ToNumber(padding)
 				startRatio = jsval.JSNumberString(p/2 + bandPositionOffset)
 				endRatio = jsval.JSNumberString(1 - p/2 + bandPositionOffset)
 			}
@@ -409,12 +409,12 @@ func sizeRangeMax(mark string, size *Object, u *unitModel, config Value) Value {
 func minXYStep(ctx *compileCtx, size *Object, xy [2]Value, view Value) Value {
 	var widthStep, heightStep float64
 	if w := size.Lookup("width"); isStep(w) {
-		widthStep = w.Get("step").AsDouble()
+		widthStep = jsval.ToNumber(w.Get("step"))
 	} else {
 		widthStep = getViewConfigDiscreteStep(view, "width")
 	}
 	if h := size.Lookup("height"); isStep(h) {
-		heightStep = h.Get("step").AsDouble()
+		heightStep = jsval.ToNumber(h.Get("step"))
 	} else {
 		heightStep = getViewConfigDiscreteStep(view, "height")
 	}

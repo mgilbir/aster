@@ -1,6 +1,7 @@
 package aster_test
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"math/rand"
@@ -37,7 +38,9 @@ var vlConfusedValues = []string{
 // in node, with Vega-Lite 6.4.3 and 5.8.0. Where node throws the engine must
 // return an error, where node compiles the engine must compile (ADR 0013), and
 // where both compile the compiler's warnings must be node's, in order and
-// count (C38).
+// count (C38), and the compiled Vega must be node's, exactly. The oracle
+// answers each mutant as a fresh node process would (upstream can change
+// JavaScript's built-ins, see internal/oracle).
 func TestVegaLiteTypeConfusionMatchesNode(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: compiles 1,500 mutants in node")
@@ -87,7 +90,15 @@ func TestVegaLiteTypeConfusionMatchesNode(t *testing.T) {
 		if err != nil {
 			t.Fatalf("oracle: %v", err)
 		}
-		gotWarn, gerr := compileWarnings(conv[version], mutant)
+		var gotWarn []string
+		got, gerr := conv[version].VegaLiteToVega(mutant, aster.WithErrorHandler(func(err error) error {
+			var w aster.Warning
+			if errors.As(err, &w) {
+				gotWarn = append(gotWarn, string(w))
+				return nil
+			}
+			return err
+		}))
 		pathKey := digits.ReplaceAllString("/"+s.pathString(), "/N")
 		var key string
 		switch {
@@ -100,6 +111,20 @@ func TestVegaLiteTypeConfusionMatchesNode(t *testing.T) {
 			// count.
 			key = fmt.Sprintf("%s %s=%s: warnings differ\n  engine: %s\n  node:   %s", version, pathKey, val,
 				strings.Join(gotWarn, " | "), strings.Join(want.Warnings, " | "))
+		case want.Err == "":
+			// Both compile: the compiled Vega must be node's, exactly, keys
+			// in node's order. Upstream's compiler is deterministic (the
+			// oracle pins the clock), so nothing is normalised beyond JSON
+			// text: both sides are parsed and printed by jsval.
+			g, err1 := jsval.ParseJSON(got)
+			w, err2 := jsval.ParseJSON(want.Vega)
+			if err1 != nil || err2 != nil {
+				t.Fatalf("unparsable output: %v / %v", err1, err2)
+			}
+			if string(jsval.AppendJSON(nil, g)) == string(jsval.AppendJSON(nil, w)) {
+				continue
+			}
+			key = fmt.Sprintf("%s %s=%s: compiled Vega differs: %s", version, pathKey, val, firstJSONDiff(g, w, ""))
 		default:
 			continue
 		}

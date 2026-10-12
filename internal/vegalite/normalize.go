@@ -1208,14 +1208,9 @@ func replaceRepeatInProp(cc *compileCtx, prop string, o, repeater Value) (Value,
 			c.Set(prop, jsval.Str(repr))
 			return jsval.Obj(c), true
 		}
-		if key == "__proto__" && repeater.IsObj() {
-			// Object.prototype, which has no own enumerable properties.
-			c := cloneObj(o.ObjValue())
-			c.Set(prop, mkv())
-			return jsval.Obj(c), true
-		}
-		if inh, ok := jsval.Inherited(key); ok && repeater.IsObj() {
-			// The datum becomes the inherited member itself (a function).
+		if inh, ok := inheritedValue(key); ok && repeater.IsObj() {
+			// The datum becomes what the name inherits: Object.prototype
+			// for "__proto__", else the member function.
 			c := cloneObj(o.ObjValue())
 			c.Set(prop, inh)
 			return jsval.Obj(c), true

@@ -1,0 +1,1 @@
+{"data":{"values":[{"v":1,"w":2},{"v":2,"w":3}]},"mark":"errorband","encoding":{"y":{"field":"__proto__","type":"quantitative"},"x":{"field":"v","type":"quantitative"}}}

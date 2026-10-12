@@ -2,6 +2,7 @@ package aster_test
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 
@@ -158,5 +159,22 @@ func TestSmallFidelityMatchesNode(t *testing.T) {
 		`{` + d + `},"mark":"point","params":[{"name":"s","select":{"type":"point","fields":["a"]},"value":[{"a":{"year":1e20}},{"a":{"year":2001.7,"month":13.5,"date":-3,"hours":1e10}},{"a":{"year":99,"utc":true}},{"a":{"year":"NaN"}}]}],"encoding":{"x":{"field":"b","type":"quantitative"}}}`,
 	} {
 		compileAgainstNode(t, spec, spec)
+	}
+}
+
+// TestPrototypeKeyedMapsMatchNode: field names Object.prototype holds
+// ("__proto__", "constructor") used where upstream keys a plain object by
+// field (parse, filter, aggregate measures, selections), compiled as one
+// upstream compilation does (ADR 0013), for both versions.
+func TestPrototypeKeyedMapsMatchNode(t *testing.T) {
+	for _, f := range []string{
+		"testdata/corpus/regress/error-band-over-a-field-named-proto.vl.json",
+		"testdata/corpus/regress/bar-chart-of-a-column-named-constructor.vl.json",
+	} {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		compileAgainstNode(t, f, string(b))
 	}
 }

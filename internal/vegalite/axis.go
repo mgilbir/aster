@@ -370,7 +370,7 @@ func guideEncodeEntry(encoding Value, m *unitModel) Value {
 		cc.work(1)
 		spreadV(out, wrapCondition(cc, wrapConditionOpts{
 			model: m, channelDef: encoding.Get(channel), vgChannel: channel,
-			mainRefFn: func(def Value) Value { return signalOrValueRef(def.Get("value")) },
+			mainRefFn: func(def Value) Value { return signalOrValueRef(cc, def.Get("value")) },
 		}))
 	}
 	return jsval.Obj(out)
@@ -531,7 +531,7 @@ func defaultLabelBaseline(angle, orient Value, channel string, alwaysIncludeMidd
 			return sig("(45 < " + a + " && " + a + " < 135) || (225 < " + a + " && " + a + " < 315) ? \"middle\" :" +
 				"(" + a + " <= 45 || 315 <= " + a + ") === " + orientIsTop + " ? \"bottom\" : \"top\"")
 		}
-		ang := angle.AsDouble()
+		ang := jsval.ToNumber(angle) // compared as JavaScript compares it
 		if (45 < ang && ang < 135) || (225 < ang && ang < 315) {
 			return jsval.Str("middle")
 		}
@@ -562,7 +562,7 @@ func defaultLabelBaseline(angle, orient Value, channel string, alwaysIncludeMidd
 		}
 		return sig(a + " <= 45 || 315 <= " + a + " || (135 <= " + a + " && " + a + " <= 225) ? " + middle + " : (45 <= " + a + " && " + a + " <= 135) === " + orientIsLeft + ` ? "top" : "bottom"`)
 	}
-	ang := angle.AsDouble()
+	ang := jsval.ToNumber(angle) // compared as JavaScript compares it
 	if ang <= 45 || 315 <= ang || (135 <= ang && ang <= 225) {
 		if alwaysIncludeMiddle {
 			return jsval.Str("middle")
@@ -623,8 +623,9 @@ func defaultLabelAlign(angle, orient Value, channel string) Value {
 		return sig("(" + lhs + " % 180 === 0) ? " + res + " :" +
 			"(" + sa + " < " + a + " && " + a + " < " + jsval.JSNumberString(180+startAngle) + ") === " + orientIsMain + ` ? "left" : "right"`)
 	}
-	ang := angle.AsDouble()
-	if math.Mod(ang+startAngle, 180) == 0 {
+	// (angle + startAngle) % 180 === 0: a string angle concatenates.
+	ang := jsval.ToNumber(angle)
+	if math.Mod(jsval.ToNumber(jsPlusNum(angle, startAngle)), 180) == 0 {
 		if isX {
 			return jsval.Null
 		}
@@ -799,7 +800,7 @@ func getAxisConfigStyle(types []string, config Value) Value {
 // getAxisConfig finds a property in the style config, then vlOnlyAxisConfig,
 // vgAxisConfig, axisConfigStyle; it returns the value and where it came from.
 func getAxisConfig(property string, styleConfigIndex Value, style Value, cfgs axisConfigSet) (Value, string) {
-	if sc := getStyleConfig(property, arrayStrings(style), styleConfigIndex); !sc.IsUndefined() {
+	if sc := getStyleConfig(property, arrayOf(style), styleConfigIndex); !sc.IsUndefined() {
 		return sc, "style"
 	}
 	for _, from := range []struct {
@@ -811,14 +812,6 @@ func getAxisConfig(property string, styleConfigIndex Value, style Value, cfgs ax
 		}
 	}
 	return undef, ""
-}
-
-func arrayStrings(v Value) []string {
-	var out []string
-	for _, x := range arrayOf(v) {
-		out = append(out, x.AsString())
-	}
-	return out
 }
 
 // ---- labels encode ----
@@ -981,7 +974,7 @@ func assembleAxis(cc *compileCtx, a *axisComponent, kind string, config Value, h
 			if !labelExpr.IsStr() {
 				throw("string.replace is not a function")
 			}
-			expr = jsval.Str(strings.ReplaceAll(labelExpr.StrValue(), "datum.label", signalOf(text)))
+			expr = jsval.Str(jsReplaceAll(labelExpr.StrValue(), "datum.label", signalOf(text)))
 		}
 		setAxisEncode(axis, "labels", "text", mkv("signal", expr))
 	}

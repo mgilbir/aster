@@ -38,6 +38,15 @@ func (s *sset) value(x string) Value {
 	return jsval.Str(x)
 }
 
+// ssetOfValues is new Set(values): each member kept as it is given.
+func ssetOfValues(values []Value) *sset {
+	s := newSset()
+	for _, v := range values {
+		s.addValue(v)
+	}
+	return s
+}
+
 func newSset(items ...string) *sset {
 	s := &sset{index: make(map[string]struct{}, len(items))}
 	for _, i := range items {
@@ -130,6 +139,9 @@ type omap[V any] struct {
 	m  map[string]V
 	// untidy says ks holds deleted keys or index keys out of order.
 	untidy bool
+	// proto is what assigning "__proto__" made the object's prototype (see
+	// jsRealm); the zero value is Object.prototype.
+	proto jsProto
 }
 
 func newOmap[V any]() *omap[V] { return &omap[V]{m: map[string]V{}} }

@@ -11,8 +11,8 @@ import (
 type binComponent struct {
 	bin          Value
 	field        string
-	fieldV       Value // t.field as the spec gave it, which the assembled bin's path functions read
-	as           [][]string
+	fieldV       Value     // t.field as the spec gave it, which the assembled bin's path functions read
+	as           [][]Value // the output field pairs, as upstream holds them
 	signal       string
 	extentSignal string
 	span         string
@@ -32,9 +32,9 @@ func newBinNode(parent dfNode, bins *omap[*binComponent]) *binNode {
 func (b *binComponent) clone(cc *compileCtx) *binComponent {
 	c := *b
 	c.bin = deepClone(cc, b.bin)
-	c.as = make([][]string, len(b.as))
+	c.as = make([][]Value, len(b.as))
 	for i, a := range b.as {
-		c.as[i] = append([]string(nil), a...)
+		c.as[i] = append([]Value(nil), a...)
 	}
 	return &c
 }
@@ -55,7 +55,7 @@ func (b *binComponent) toValue() Value {
 	o.Set("field", jsval.Str(b.field))
 	as := make([]Value, len(b.as))
 	for i, a := range b.as {
-		as[i] = strsVal(a)
+		as[i] = jsval.Arr(a)
 	}
 	o.Set("as", jsval.Arr(as))
 	if b.signal != "" {
@@ -94,7 +94,7 @@ func (n *binNode) producedFields() *sset {
 		for _, as := range n.bins.m[k].as {
 			cc.work(1)
 			for _, f := range as {
-				s.add(f)
+				s.addValue(f)
 			}
 		}
 	}
@@ -127,16 +127,18 @@ func getBinSignalName(m Model, field string, bin Value) string {
 func createBinComponent(t Value, bin Value, m Model, _ bool) (string, *binComponent) {
 	cc := m.b().ctx
 
-	var as []string
+	// isString(t.as) ? [t.as, `${t.as}_end`] : [t.as[0], t.as[1]], the
+	// values as given.
+	var as []Value
 	if t.IsObj() && t.ObjValue().Has("as") {
 		a := t.Get("as")
 		if a.IsStr() {
-			as = []string{a.StrValue(), a.StrValue() + "_end"}
+			as = []Value{a, jsval.Str(a.StrValue() + "_end")}
 		} else {
-			as = []string{jsProp(a, "0").AsString(), jsProp(a, "1").AsString()}
+			as = []Value{jsProp(a, "0"), jsProp(a, "1")}
 		}
 	} else {
-		as = []string{vgField(cc, t, fieldRefOption{forAs: true}), vgField(cc, t, fieldRefOption{binSuffix: "end", forAs: true})}
+		as = []Value{jsval.Str(vgField(cc, t, fieldRefOption{forAs: true})), jsval.Str(vgField(cc, t, fieldRefOption{binSuffix: "end", forAs: true}))}
 	}
 	nb := normalizeBin(bin, "")
 	var normalized *Object
@@ -155,7 +157,7 @@ func createBinComponent(t Value, bin Value, m Model, _ bool) (string, *binCompon
 		span = parseSelectionExtent(m, ext.Get("param"), ext)
 		normalized.Delete("extent")
 	}
-	return key, &binComponent{bin: jsval.Obj(normalized), field: t.Get("field").AsString(), fieldV: t.Get("field"), as: [][]string{as}, signal: signal, extentSignal: extentSignal, span: span}
+	return key, &binComponent{bin: jsval.Obj(normalized), field: t.Get("field").AsString(), fieldV: t.Get("field"), as: [][]Value{as}, signal: signal, extentSignal: extentSignal, span: span}
 }
 
 func rangeFormula(m fieldDefModel, fd Value, channel string, config Value) (formulaAs, formula string) {
@@ -179,7 +181,7 @@ func rangeFormula(m fieldDefModel, fd Value, channel string, config Value) (form
 
 func makeBinFromEncoding(parent dfNode, m fieldDefModel) dfNode {
 	bins := reduceFieldDef(m, func(idx *omap[*binComponent], fd Value, channel string) *omap[*binComponent] {
-		if isTypedFieldDefOf(ccOf(parent), fd) && isBinning(fd.Get("bin")) {
+		if isTypedFieldDefOf(m.b().ctx, fd) && isBinning(fd.Get("bin")) {
 			key, comp := createBinComponent(fd, fd.Get("bin"), m, false)
 			if existing, ok := idx.get(key); ok {
 				// {...binComponent, ...binComponentIndex[key], ...rangeFormula}
@@ -230,10 +232,10 @@ func (n *binNode) merge(other *binNode, rename func(oldName, newName string)) {
 		if mine, ok := n.bins.get(key); ok {
 			rename(other.bins.m[key].signal, mine.signal)
 			seen := map[string]bool{}
-			var as [][]string
-			for _, a := range append(append([][]string{}, mine.as...), other.bins.m[key].as...) {
+			var as [][]Value
+			for _, a := range append(append([][]Value{}, mine.as...), other.bins.m[key].as...) {
 				cc.work(1)
-				h := hashOf(n.cc, strsVal(a))
+				h := hashOf(n.cc, jsval.Arr(a))
 				if !seen[h] {
 					seen[h] = true
 					as = append(as, a)
@@ -262,7 +264,7 @@ func (n *binNode) assemble() []Value {
 		bt := jsval.NewObject(8)
 		bt.Set("type", jsval.Str("bin"))
 		bt.Set("field", jsval.Str(replacePathInFieldV(bin.fieldV)))
-		bt.Set("as", strsVal(binAs))
+		bt.Set("as", jsval.Arr(binAs))
 		bt.Set("signal", strOrUndef(bin.signal))
 		if !isParameterExtent(extent) {
 			bt.Set("extent", extent)
@@ -320,8 +322,9 @@ func (n *timeUnitNode) producedFields() *sset {
 	for _, k := range n.timeUnits.keysView() {
 		cc.work(1)
 		f := n.timeUnits.m[k]
-		if isTimeUnitTransformComponent(f) {
-			s.add(f.Lookup("as").AsString())
+		// f.as as given (5.8 always), else `${field}_end`.
+		if cc.v5 || isTimeUnitTransformComponent(f) {
+			s.addValue(f.Lookup("as"))
 		} else {
 			s.add(f.Lookup("field").AsString() + "_end")
 		}
@@ -334,7 +337,7 @@ func (n *timeUnitNode) dependentFields() *sset {
 	s := newSset()
 	for _, k := range n.timeUnits.keysView() {
 		cc.work(1)
-		s.add(n.timeUnits.m[k].Lookup("field").AsString())
+		s.addValue(n.timeUnits.m[k].Lookup("field"))
 	}
 	return s
 }
@@ -368,7 +371,7 @@ func makeTimeUnitFromEncoding(parent dfNode, m fieldDefModel) dfNode {
 			if isBinnedTimeUnit(cc, timeUnit) {
 				if isUnit {
 					bp := getBandPosition(cc, fd, undef, u.markDef, u.config)
-					if isRectBasedMark(cc, u.mark()) || (bp.IsTruthy() && bp.NumValue() != 0) {
+					if isRectBasedMark(cc, u.mark()) || bp.IsTruthy() {
 						component = mk("timeUnit", normalizeTimeUnit(cc, timeUnit), "field", field)
 					}
 				}
@@ -378,9 +381,10 @@ func makeTimeUnitFromEncoding(parent dfNode, m fieldDefModel) dfNode {
 			if isUnit {
 				bp := getBandPosition(cc, fd, undef, u.markDef, u.config)
 				if isRectBasedMark(cc, u.mark()) && isXorY(channel) && !(bp.IsNum() && bp.NumValue() == 0.5) {
-					if component != nil {
-						component.Set("rectBandPosition", bp)
+					if component == nil {
+						throw("Cannot set properties of undefined (setting 'rectBandPosition')")
 					}
+					component.Set("rectBandPosition", bp)
 				}
 			}
 			if component != nil {
@@ -442,39 +446,71 @@ func (n *timeUnitNode) removeFormulas(fields *sset) {
 	n.timeUnits = nf
 }
 
-func timeOffsetExpr(timeUnit Value, field string, reverse bool) string {
+func timeOffsetExpr(timeUnit Value, field Value, reverse bool) string {
 	unit, utc := timeUnit.Get("unit").AsString(), timeUnit.Get("utc").IsTruthy()
 	smallest := getSmallestTimeUnitPart(unit)
-	step := 1.0
-	if s := timeUnit.Get("step"); s.IsNum() {
-		step = s.NumValue()
-	}
-	part, st, ok := getDateTimePartAndStep(smallest, step)
+	part, _, ok := getDateTimePartAndStep(smallest, 1)
 	if !ok {
 		throw("Cannot destructure property 'part' of 'getDateTimePartAndStep(...)' as it is undefined.")
+	}
+	// getDateTimePartAndStep(unit, step = 1), then `${reverse ? -step :
+	// step}`: the step as given, multiplied for quarters and weeks.
+	step := timeUnit.Get("step")
+	if step.IsUndefined() {
+		step = jsval.Int(1)
+	}
+	switch smallest {
+	case "quarter":
+		step = jsval.Num(jsval.ToNumber(step) * 3)
+	case "week":
+		step = jsval.Num(jsval.ToNumber(step) * 7)
 	}
 	fn := "timeOffset"
 	if utc {
 		fn = "utcOffset"
 	}
+	st := step.AsString()
 	if reverse {
-		st = -st
+		st = jsval.JSNumberString(-jsval.ToNumber(step))
 	}
-	return fn + "('" + part + "', " + accessWithDatumToUnescapedPath(field) + ", " + jsval.JSNumberString(st) + ")"
+	return fn + "('" + part + "', " + accessWithDatumToUnescapedPathV(field) + ", " + st + ")"
 }
 
-func interpolateExpr(start, end string, fraction float64) string {
-	return jsval.JSNumberString(1-fraction) + " * " + start + " + " + jsval.JSNumberString(fraction) + " * " + end
+// interpolateExpr is `${1 - fraction} * ${start} + ${fraction} * ${end}`,
+// with JavaScript's arithmetic and string conversion.
+func interpolateExpr(start, end string, fraction Value) string {
+	return jsval.JSNumberString(1-jsval.ToNumber(fraction)) + " * " + start + " + " + fraction.AsString() + " * " + end
 }
 
-func offsettedRectFormulas(startField, endField string, rectBandPosition Value, timeUnit Value) []Value {
-	if rectBandPosition.IsNum() && rectBandPosition.NumValue() != 0.5 {
-		startExpr := accessWithDatumToUnescapedPath(startField)
-		endExpr := accessWithDatumToUnescapedPath(endField)
-		f := rectBandPosition.NumValue() + 0.5
+// jsNumPlus is JavaScript's a + b for a number a: a string (or an object,
+// whose primitive is a string) b concatenates, anything else adds.
+func jsNumPlus(a float64, b Value) Value {
+	if b.IsStr() || b.IsObj() || b.IsArr() {
+		return jsval.Str(jsval.JSNumberString(a) + b.AsString())
+	}
+	return jsval.Num(a + jsval.ToNumber(b))
+}
+
+// jsPlusNum is JavaScript's a + b for a number b: a string (or an object,
+// whose primitive is a string) concatenates, anything else adds.
+func jsPlusNum(a Value, b float64) Value {
+	if a.IsStr() || a.IsObj() || a.IsArr() {
+		return jsval.Str(a.AsString() + jsval.JSNumberString(b))
+	}
+	return jsval.Num(jsval.ToNumber(a) + b)
+}
+
+// offsettedRectFormulas: `rectBandPosition !== undefined && rectBandPosition
+// !== 0.5`, and `rectBandPosition + 0.5`, as JavaScript computes them for a
+// band position of any type.
+func offsettedRectFormulas(startField, endField Value, rectBandPosition Value, timeUnit Value) []Value {
+	if !rectBandPosition.IsUndefined() && !(rectBandPosition.IsNum() && rectBandPosition.NumValue() == 0.5) {
+		startExpr := accessWithDatumToUnescapedPathV(startField)
+		endExpr := accessWithDatumToUnescapedPathV(endField)
+		f := jsPlusNum(rectBandPosition, 0.5)
 		return []Value{
-			mkv("type", "formula", "expr", interpolateExpr(timeOffsetExpr(timeUnit, startField, true), startExpr, f), "as", startField+"_"+offsettedRectStartSuffix),
-			mkv("type", "formula", "expr", interpolateExpr(startExpr, endExpr, f), "as", startField+"_"+offsettedRectEndSuffix),
+			mkv("type", "formula", "expr", interpolateExpr(timeOffsetExpr(timeUnit, startField, true), startExpr, f), "as", startField.AsString()+"_"+offsettedRectStartSuffix),
+			mkv("type", "formula", "expr", interpolateExpr(startExpr, endExpr, f), "as", startField.AsString()+"_"+offsettedRectEndSuffix),
 		}
 	}
 	return nil
@@ -490,7 +526,15 @@ func (n *timeUnitNode) assemble() []Value {
 		rect := f.Lookup("rectBandPosition")
 		nt := normalizeTimeUnit(cc, f.Lookup("timeUnit"))
 		if isTimeUnitTransformComponent(f) {
-			field, as := f.Lookup("field"), f.Lookup("as").AsString()
+			// const {unit, utc, ...params} = normalizeTimeUnit(timeUnit)
+			if nt.IsNullish() {
+				if cc.v5 {
+					throw("Cannot destructure property 'unit' of 'normalizeTimeUnit(...)' as it is %s.", nullishName(nt))
+				}
+				throw("Cannot destructure property 'unit' of 'normalizedTimeUnit' as it is %s.", nullishName(nt))
+			}
+			field, as := f.Lookup("field"), f.Lookup("as")
+			asEnd := jsval.Str(as.AsString() + "_end") // `${as}_end`
 			unit, utc := nt.Get("unit"), nt.Get("utc")
 			params := omit(nt, "unit", "utc")
 			o := jsval.NewObject(8)
@@ -503,14 +547,14 @@ func (n *timeUnitNode) assemble() []Value {
 				o.Set("timezone", jsval.Str("utc"))
 			}
 			spread(o, jsval.Obj(params))
-			o.Set("as", arr(as, as+"_end"))
+			o.Set("as", arr(as, asEnd))
 			out = append(out, jsval.Obj(o))
-			out = append(out, offsettedRectFormulas(as, as+"_end", rect, nt)...)
+			out = append(out, offsettedRectFormulas(as, asEnd, rect, nt)...)
 		} else {
 			field := unescapeSingleQuoteAndPathDotV(f.Lookup("field"))
 			endAs := field + "_end"
-			out = append(out, mkv("type", "formula", "expr", timeOffsetExpr(nt, field, false), "as", endAs))
-			out = append(out, offsettedRectFormulas(field, endAs, rect, nt)...)
+			out = append(out, mkv("type", "formula", "expr", timeOffsetExpr(nt, jsval.Str(field), false), "as", endAs))
+			out = append(out, offsettedRectFormulas(jsval.Str(field), jsval.Str(endAs), rect, nt)...)
 		}
 	}
 	return out
@@ -556,32 +600,68 @@ func (n *aggregateNode) clone() dfNode {
 
 func (n *aggregateNode) groupBy() *sset { return n.dimensions }
 
-func measureSet(m *omap[*omap[*sset]], field, op string) *sset {
-	// meas[field][op] ??= new Set(): an op named after a member every object
-	// inherits finds that member, which has no add.
-	if _, inherited := jsval.Inherited(op); inherited || op == "__proto__" {
-		throw("meas[field][op].add is not a function")
-	}
-	ops, ok := m.get(field)
-	if !ok {
-		ops = newOmap[*sset]()
-		m.set(field, ops)
-	}
-	s, ok := ops.get(op)
-	if !ok {
-		s = newSset()
-		ops.set(op, s)
-	}
-	return s
+// measOps is meas[field] after `meas[field] ??= {}`: the field's own ops,
+// or what a field named after an inherited member finds there (a built-in,
+// see jsRealm), which keeps it, so the ops are written on the built-in and
+// the field is never output.
+type measOps struct {
+	own *omap[*sset]
+	ref jsRef
 }
 
-func ensureMeasureField(m *omap[*omap[*sset]], field string) *omap[*sset] {
-	ops, ok := m.get(field)
-	if !ok {
-		ops = newOmap[*sset]()
-		m.set(field, ops)
+func measField(cc *compileCtx, m *omap[*omap[*sset]], field string) measOps {
+	ops, own, ref := m.read(cc.realm(), field)
+	if own {
+		return measOps{own: ops}
 	}
-	return ops
+	if ref.host != nil || (ref.found && !isNullishAny(ref.val, true)) {
+		return measOps{ref: ref}
+	}
+	ops = newOmap[*sset]()
+	m.assign(field, ops)
+	return measOps{own: ops}
+}
+
+// set is meas[field][op] = s.
+func (t measOps) set(cc *compileCtx, op string, s *sset) {
+	if t.own != nil {
+		t.own.assign(op, s)
+		return
+	}
+	cc.realm().write(t.ref, op, s)
+}
+
+// get is meas[field][op].
+func (t measOps) get(cc *compileCtx, op string) (any, bool) {
+	if t.own != nil {
+		s, own, ref := t.own.read(cc.realm(), op)
+		if own {
+			return s, true
+		}
+		if ref.host != nil {
+			return ref.host, true
+		}
+		return ref.val, ref.found
+	}
+	return cc.realm().get(t.ref, op)
+}
+
+// measureSet is `meas[field][op] ??= new Set()`, the set .add then adds to.
+func measureSet(cc *compileCtx, m *omap[*omap[*sset]], field, op string) *sset {
+	t := measField(cc, m, field)
+	cur, found := t.get(cc, op)
+	if !isNullishAny(cur, found) {
+		// An op named after an inherited member finds that member, which has
+		// no add; a Set a field named "__proto__" left on Object.prototype
+		// is added to.
+		if s, ok := cur.(*sset); ok {
+			return s
+		}
+		throw("meas[field][op].add is not a function")
+	}
+	s := newSset()
+	t.set(cc, op, s)
+	return s
 }
 
 func addDimension(dims *sset, channel string, fd Value, m Model) {
@@ -618,27 +698,36 @@ func addDimension(dims *sset, channel string, fd Value, m Model) {
 }
 
 func mergeMeasures(cc *compileCtx, parent, child *omap[*omap[*sset]]) {
+	r := cc.realm()
 	for _, field := range child.keysView() {
 		cc.work(1)
 		ops := child.m[field]
 		for _, op := range ops.keysView() {
 			cc.work(1)
-			if pf, ok := parent.get(field); ok {
-				existing, _ := pf.get(op)
+			if parent.in(r, field) {
+				// parentMeasures[field][op] = new Set([...(parentMeasures[field][op] ?? []), ...ops[op]])
+				t := measField(cc, parent, field)
+				existing, found := t.get(cc, op)
 				merged := newSset()
-				for _, x := range existing.list() {
-					cc.work(1)
-					merged.add(x)
+				if !isNullishAny(existing, found) {
+					es, ok := existing.(*sset)
+					if !ok {
+						throw("(parentMeasures[field][op] ?? []) is not iterable")
+					}
+					for _, x := range es.list() {
+						cc.work(1)
+						merged.addValue(es.value(x))
+					}
 				}
 				for _, x := range ops.m[op].list() {
 					cc.work(1)
-					merged.add(x)
+					merged.addValue(ops.m[op].value(x))
 				}
-				pf.set(op, merged)
+				t.set(cc, op, merged)
 			} else {
 				nf := newOmap[*sset]()
-				nf.set(op, ops.m[op])
-				parent.set(field, nf)
+				nf.assign(op, ops.m[op])
+				parent.assign(field, nf)
 			}
 		}
 	}
@@ -663,31 +752,30 @@ func makeAggregateFromEncoding(parent dfNode, m *unitModel) *aggregateNode {
 		aggregate, field := fd.Get("aggregate"), fd.Get("field")
 		if aggregate.IsTruthy() {
 			if aggregate.IsStr() && aggregate.StrValue() == "count" {
-				ops := ensureMeasureField(meas, "*")
-				ops.set("count", newSset(vgField(cc, fd, fieldRefOption{forAs: true})))
+				measField(cc, meas, "*").set(cc, "count", newSset(vgField(cc, fd, fieldRefOption{forAs: true})))
 			} else {
 				if isArgminDef(aggregate) || isArgmaxDef(aggregate) {
 					op := "argmax"
 					if isArgminDef(aggregate) {
 						op = "argmin"
 					}
-					argField := aggregate.Get(op).AsString()
-					ops := ensureMeasureField(meas, argField)
-					ops.set(op, newSset(vgField(cc, mkv("op", op, "field", argField), fieldRefOption{forAs: true})))
+					// meas[argField] keys by its text; vgField reads it as given.
+					argField := aggregate.Get(op)
+					measField(cc, meas, argField.AsString()).set(cc, op, newSset(vgField(cc, mkv("op", op, "field", argField), fieldRefOption{forAs: true})))
 				} else {
-					ops := ensureMeasureField(meas, field.AsString())
-					if aggregate.AsString() == "__proto__" {
-						vgField(cc, fd, fieldRefOption{forAs: true})
+					t := measField(cc, meas, field.AsString())
+					set := newSset(vgField(cc, fd, fieldRefOption{forAs: true}))
+					if aggregate.AsString() == "__proto__" && t.own != nil {
+						// The ops object's prototype becomes the Set.
 						protoOp = true
-					} else {
-						ops.set(aggregate.AsString(), newSset(vgField(cc, fd, fieldRefOption{forAs: true})))
 					}
+					t.set(cc, aggregate.AsString(), set)
 				}
 				if isScaleChannel(cc, channel) {
 					if d := m.scaleDomain(channel); d.IsStr() && d.StrValue() == "unaggregated" {
-						ops := ensureMeasureField(meas, field.AsString())
-						ops.set("min", newSset(vgField(cc, mkv("field", field, "aggregate", "min"), fieldRefOption{forAs: true})))
-						ops.set("max", newSset(vgField(cc, mkv("field", field, "aggregate", "max"), fieldRefOption{forAs: true})))
+						t := measField(cc, meas, field.AsString())
+						t.set(cc, "min", newSset(vgField(cc, mkv("field", field, "aggregate", "min"), fieldRefOption{forAs: true})))
+						t.set(cc, "max", newSset(vgField(cc, mkv("field", field, "aggregate", "max"), fieldRefOption{forAs: true})))
 					}
 				}
 			}
@@ -711,21 +799,22 @@ func makeAggregateFromTransform(cc *compileCtx, parent dfNode, t Value) *aggrega
 		cc.work(1)
 		op, field, as := s.Get("op"), s.Get("field"), s.Get("as")
 		if op.IsTruthy() {
-			name := as.AsString()
+			// as ? as : vgField(s, {forAs: true}), the value as given.
+			name := as
 			if !as.IsTruthy() {
-				name = vgField(cc, s, fieldRefOption{forAs: true})
+				name = jsval.Str(vgField(cc, s, fieldRefOption{forAs: true}))
 			}
+			one := func() *sset { x := newSset(); x.addValue(name); return x }
 			if op.StrValue() == "count" {
-				ops := ensureMeasureField(meas, "*")
-				ops.set("count", newSset(name))
+				measField(cc, meas, "*").set(cc, "count", one())
 			} else if cc.v5 {
-				if ops := ensureMeasureField(meas, field.AsString()); op.AsString() == "__proto__" {
+				t := measField(cc, meas, field.AsString())
+				if op.AsString() == "__proto__" && t.own != nil {
 					protoOp = true
-				} else {
-					ops.set(op.AsString(), newSset(name))
 				}
+				t.set(cc, op.AsString(), one())
 			} else {
-				measureSet(meas, field.AsString(), op.AsString()).add(name)
+				measureSet(cc, meas, field.AsString(), op.AsString()).addValue(name)
 			}
 		}
 	}
@@ -824,9 +913,10 @@ func (n *aggregateNode) assemble() Value {
 		cc.work(1)
 		for _, op := range n.measures.m[field].keysView() {
 			cc.work(1)
-			for _, alias := range n.measures.m[field].m[op].list() {
+			set := n.measures.m[field].m[op]
+			for _, alias := range set.list() {
 				cc.work(1)
-				as = append(as, jsval.Str(alias))
+				as = append(as, set.value(alias))
 				ops = append(ops, jsval.Str(op))
 				if field == "*" {
 					fields = append(fields, jsval.Null)

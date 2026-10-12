@@ -135,6 +135,7 @@ func compileSpec(cc *compileCtx, inputSpec jsval.Value, opts Options) jsval.Valu
 }
 
 func getTopLevelProperties(inputSpec jsval.Value, autosize jsval.Value, config jsval.Value, model Model) *Object {
+	cc := model.b().ctx
 	b := model.b()
 	width, height := b.comp.layoutSize.get("width"), b.comp.layoutSize.get("height")
 	var as *Object
@@ -154,8 +155,8 @@ func getTopLevelProperties(inputSpec jsval.Value, autosize jsval.Value, config j
 		}
 		out := jsval.NewObject(6)
 		out.Set("autosize", autosize)
-		spread(out, jsval.Obj(extractTopLevelProperties(config, false)))
-		spread(out, jsval.Obj(extractTopLevelProperties(inputSpec, true)))
+		spread(out, jsval.Obj(extractTopLevelProperties(cc, config, false)))
+		spread(out, jsval.Obj(extractTopLevelProperties(cc, inputSpec, true)))
 		return out
 	default:
 		as = cloneObj(autosize.ObjValue())
@@ -192,8 +193,8 @@ func getTopLevelProperties(inputSpec jsval.Value, autosize jsval.Value, config j
 	} else {
 		out.Set("autosize", jsval.Obj(as))
 	}
-	spread(out, jsval.Obj(extractTopLevelProperties(config, false)))
-	spread(out, jsval.Obj(extractTopLevelProperties(inputSpec, true)))
+	spread(out, jsval.Obj(extractTopLevelProperties(cc, config, false)))
+	spread(out, jsval.Obj(extractTopLevelProperties(cc, inputSpec, true)))
 	return out
 }
 

@@ -92,7 +92,7 @@ func baseEncodeEntry(m *unitModel, ignore encodeIgnore) Value {
 		fill, stroke = c.Get("fill"), c.Get("stroke")
 	}
 	o := jsval.NewObject(16)
-	spreadV(o, markDefProperties(m.markDef, ignore))
+	spreadV(o, markDefProperties(m.ctx, m.markDef, ignore))
 	if cc.v5 {
 		spreadV(o, wrapAllFieldsInvalid58(m, "fill", fill))
 		spreadV(o, wrapAllFieldsInvalid58(m, "stroke", stroke))
@@ -114,14 +114,14 @@ func baseEncodeEntry(m *unitModel, ignore encodeIgnore) Value {
 	return jsval.Obj(o)
 }
 
-func markDefProperties(mark Value, ignore encodeIgnore) Value {
+func markDefProperties(cc *compileCtx, mark Value, ignore encodeIgnore) Value {
 	m := jsval.NewObject(8)
 	for _, prop := range vgMarkConfigs {
 		if prop == "aria" || prop == "width" || prop == "height" {
 			continue
 		}
 		if hasProperty(mark, prop) && ignore[prop] != "ignore" {
-			m.Set(prop, signalOrValueRef(mark.Get(prop)))
+			m.Set(prop, signalOrValueRef(cc, mark.Get(prop)))
 		}
 	}
 	return jsval.Obj(m)
@@ -180,10 +180,10 @@ func colorEncode(m *unitModel, filledOpt Value) Value {
 	}
 	out := jsval.NewObject(4)
 	if defaultFill.IsTruthy() {
-		out.Set("fill", signalOrValueRef(defaultFill))
+		out.Set("fill", signalOrValueRef(m.ctx, defaultFill))
 	}
 	if defaultStroke.IsTruthy() {
-		out.Set("stroke", signalOrValueRef(defaultStroke))
+		out.Set("stroke", signalOrValueRef(m.ctx, defaultStroke))
 	}
 	if md := markDef.ObjValue(); markDef.Get("color").IsTruthy() && md != nil {
 		other := markDef.Get("stroke")
@@ -231,7 +231,7 @@ func nonPosition(channel string, m *unitModel, opt nonPositionOpts) Value {
 			defaultValue = getMarkPropOrConfig(channel, markDef, config, opt.vgChannel, cc.v5 || !isConditionalDef(channelDef))
 		}
 		if !defaultValue.IsUndefined() {
-			defaultRef = signalOrValueRef(defaultValue)
+			defaultRef = signalOrValueRef(m.ctx, defaultValue)
 		}
 	}
 	scaleName := m.scaleName(channel, false)
@@ -267,7 +267,7 @@ func textEncode(m *unitModel, channel string) Value {
 func textRef(cc *compileCtx, channelDef Value, config Value, expr string) Value {
 	if channelDef.IsTruthy() {
 		if isValueDef(channelDef) {
-			return signalOrValueRef(channelDef.Get("value"))
+			return signalOrValueRef(cc, channelDef.Get("value"))
 		}
 		if isFieldOrDatumDef(cc, channelDef) {
 			format, formatType := getFormatMixins(channelDef)
@@ -286,7 +286,7 @@ func zindexEncode(m *unitModel) Value {
 	if !isPathMarkName(m.mark()) && isValueDef(order) {
 		return wrapCondition(cc, wrapConditionOpts{
 			model: m, channelDef: order, vgChannel: "zindex",
-			mainRefFn: func(cd Value) Value { return signalOrValueRef(cd.Get("value")) },
+			mainRefFn: func(cd Value) Value { return signalOrValueRef(m.ctx, cd.Get("value")) },
 		})
 	}
 	return mkv()
@@ -332,7 +332,7 @@ func descriptionEncode(m *unitModel) Value {
 	}
 	dv := getMarkPropOrConfigSimple("description", m.markDef, m.config)
 	if !dv.IsNullish() {
-		return mkv("description", signalOrValueRef(dv))
+		return mkv("description", signalOrValueRef(m.ctx, dv))
 	}
 	if m.config.Get("aria").IsBool() && !m.config.Get("aria").BoolValue() {
 		return mkv()
@@ -490,7 +490,7 @@ func tooltipData(cc *compileCtx, encoding Value, stack *stackProperties, config 
 		// `!out[key]`: an earlier entry whose value was undefined does not block
 		// this one, and a key every object inherits (toString, constructor, ...)
 		// reads as an entry already there.
-		if !toSkip[t.channel] && (!out.has(t.key) || out.m[t.key] == "") && !inheritedObjectKey(t.key) {
+		if !toSkip[t.channel] && (!out.has(t.key) || out.m[t.key] == "") && !isInheritedKey(t.key) {
 			out.set(t.key, t.value)
 		}
 	}

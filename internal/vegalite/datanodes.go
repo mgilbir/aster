@@ -414,7 +414,7 @@ func makeFilterInvalid(parent dfNode, m *unitModel, marks, scales string) dfNode
 			if sc := m.getScaleComponent(channel); sc != nil {
 				mode := getScaleInvalidDataMode(m.markDef, m.config, channel, sc.get("type").AsString(), isCountingAggregateOp(fd.Get("aggregate")))
 				if mode != "show" && mode != "always-valid" {
-					agg.set(fd.Get("field").AsString(), fd)
+					agg.assign(fd.Get("field").AsString(), fd)
 				}
 			}
 		}
@@ -439,7 +439,7 @@ func makeFilterInvalid58(parent dfNode, m *unitModel) dfNode {
 			if sc := m.getScaleComponent(channel); sc != nil {
 				agg2 := fd.Get("aggregate")
 				if hasContinuousDomain(sc.get("type").AsString()) && !(agg2.IsStr() && agg2.StrValue() == "count") && !isPathMarkName(m.mark()) {
-					agg.set(fd.Get("field").AsString(), fd)
+					agg.assign(fd.Get("field").AsString(), fd)
 				}
 			}
 		}

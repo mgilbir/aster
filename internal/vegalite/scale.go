@@ -231,7 +231,13 @@ func computeScaleType(cc *compileCtx, specified Value, channel string, fieldDef 
 			cc.warn(msgScaleTypeNotWorkWithChannel(channel, t, def))
 			return def
 		}
-		if isFieldDef(cc, fieldDef) && !scaleTypeSupportDataType(ts, channelDefType(fieldDef)) {
+		// The type is defined here: an empty text ("" or []) is not the
+		// undefined scaleTypeSupportDataType accepts.
+		supportTs := ts
+		if supportTs == "" {
+			supportTs = "\x00"
+		}
+		if isFieldDef(cc, fieldDef) && !scaleTypeSupportDataType(supportTs, channelDefType(fieldDef)) {
 			cc.warn(msgScaleTypeNotWorkWithFieldDef(t, def))
 			return def
 		}
@@ -509,7 +515,7 @@ func scalePaddingOuterRule(paddingValue Value, channel, scaleType string, paddin
 			if isSignalRef(paddingInnerValue) {
 				half = sig(signalOf(paddingInnerValue) + "/2")
 			} else {
-				half = jsval.Num(paddingInnerValue.AsDouble() / 2)
+				half = jsval.Num(jsval.ToNumber(paddingInnerValue) / 2)
 				if paddingInnerValue.IsUndefined() {
 					half = jsval.Num(math.NaN())
 				}
@@ -603,7 +609,7 @@ func parseNonUnitScaleProperty(m Model, property string) {
 		if property == "range" {
 			s1, s2 := v1.Get("step"), v2.Get("step")
 			if s1.IsTruthy() && s2.IsTruthy() {
-				d := s1.AsDouble() - s2.AsDouble()
+				d := jsval.ToNumber(s1) - jsval.ToNumber(s2)
 				switch {
 				case d > 0:
 					return 1
@@ -689,9 +695,9 @@ func assembleScaleRange(scaleRange Value, scaleName, channel string, m Model) Va
 		if isVgRangeStep(m.b().ctx, scaleRange) {
 			return mkv("step", sig(scaleName+"_step"))
 		}
-	} else if isObject(scaleRange) && isDataRefDomain(scaleRange) {
+	} else if isObject(scaleRange) && isDataRefDomain(m.b().ctx, scaleRange) {
 		o := cloneObj(scaleRange.ObjValue())
-		o.Set("data", jsval.Str(m.b().lookupDataSource(scaleRange.Get("data").AsString())))
+		o.Set("data", m.b().lookupDataSource(scaleRange.Get("data").AsString()))
 		return jsval.Obj(o)
 	}
 	return scaleRange
@@ -703,6 +709,16 @@ func isDataRefUnionedDomain(d Value) bool {
 func isFieldRefUnionDomain(d Value) bool {
 	return !d.IsArr() && hasProperty(d, "fields") && hasProperty(d, "data")
 }
-func isDataRefDomain(d Value) bool {
-	return !d.IsArr() && hasProperty(d, "field") && hasProperty(d, "data")
+
+// isDataRefDomain is hasProperty(d, 'field') && hasProperty(d, 'data') in
+// 6.4; 5.8 tests `'field' in d && 'data' in d`, which a key holding
+// undefined passes.
+func isDataRefDomain(cc *compileCtx, d Value) bool {
+	if d.IsArr() {
+		return false
+	}
+	if cc != nil && cc.v5 {
+		return d.IsObj() && d.ObjValue().Has("field") && d.ObjValue().Has("data")
+	}
+	return hasProperty(d, "field") && hasProperty(d, "data")
 }

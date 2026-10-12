@@ -197,7 +197,7 @@ func assembleProjectionForModel(m Model) []Value {
 		if isSignalRef(d) {
 			source = signalOf(d)
 		} else {
-			source = "data('" + m.b().lookupDataSource(d.AsString()) + "')"
+			source = "data('" + m.b().lookupDataSource(d.AsString()).AsString() + "')"
 		}
 		if !contains(fits, source) {
 			fits = append(fits, source)

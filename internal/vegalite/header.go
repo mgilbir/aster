@@ -303,7 +303,7 @@ func assembleLabelTitle(cc *compileCtx, fd Value, channel string, config Value) 
 		if !labelExpr.IsStr() {
 			throw("string.replace is not a function") // util.replaceAll(labelExpr, ...)
 		}
-		text = strings.ReplaceAll(strings.ReplaceAll(labelExpr.StrValue(), "datum.label", titleTextExpr), "datum.value", vgField(cc, fd, fieldRefOption{expr: "parent"}))
+		text = jsReplaceAll(jsReplaceAll(labelExpr.StrValue(), "datum.label", titleTextExpr), "datum.value", vgField(cc, fd, fieldRefOption{expr: "parent"}))
 	} else {
 		text = titleTextExpr
 	}
@@ -367,10 +367,13 @@ func assembleHeaderGroup(m Model, channel, headerType string, lh *layoutHeaderCo
 	return jsval.Null
 }
 
+// getLayoutTitleBand is LAYOUT_TITLE_BAND[headerChannel][titleAnchor]: the
+// anchor is looked up by its text, and a name every object inherits finds
+// that member (Object.prototype for "__proto__", which prints as {}).
 func getLayoutTitleBand(titleAnchor Value, headerChannel string) Value {
 	a := titleAnchor.AsString()
-	if !titleAnchor.IsStr() {
-		return undef
+	if v, ok := inheritedValue(a); ok {
+		return v
 	}
 	switch headerChannel {
 	case "column":

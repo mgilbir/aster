@@ -1,6 +1,7 @@
 package vegalite
 
 import (
+	"strconv"
 	"strings"
 	"time"
 
@@ -44,6 +45,14 @@ type selProjItem struct {
 }
 
 // fieldPath is replacePathInField(p.field).
+// fieldValue is the projection's field as upstream holds it.
+func (p *selProjItem) fieldValue() Value {
+	if !p.fieldV.IsUndefined() {
+		return p.fieldV
+	}
+	return jsval.Str(p.field)
+}
+
 func (p *selProjItem) fieldPath() string {
 	if !p.fieldV.IsUndefined() {
 		return replacePathInFieldV(p.fieldV)
@@ -70,7 +79,7 @@ func (p *selProjItem) assembled() Value {
 type selProjection struct {
 	items          []*selProjItem
 	hasChannel     *omap[*selProjItem]
-	hasField       map[string]*selProjItem
+	hasField       *omap[*selProjItem] // a plain object (see jsRealm)
 	hasSelectionID bool
 	timeUnit       *timeUnitNode
 }
@@ -213,9 +222,9 @@ func parseUnitSelection(m *unitModel, selDefs []Value) *omap[*selectionComponent
 			props.Set("events", jsval.Arr(arrayOf(deepClone(cc, on))))
 		}
 		sc := &selectionComponent{cc: cc, name: name, typ: typ, props: props, project: &selProjection{
-			hasChannel: newOmap[*selProjItem](), hasField: map[string]*selProjItem{},
+			hasChannel: newOmap[*selProjItem](), hasField: newOmap[*selProjItem](),
 		}}
-		selCmpts.set(name, sc)
+		selCmpts.assign(name, sc) // selCmpts[name] = …: a plain object (see jsRealm)
 		if isTimerSelection(cc, sc) {
 			nTimer++
 			if nTimer > 1 {
@@ -455,17 +464,40 @@ func cleanupEmptyOnArray(cc *compileCtx, signals []Value) []Value {
 }
 
 func assembleInitExpr(cc *compileCtx, init Value, wrap func(string) string) string {
+	s, _ := assembleInitExprOK(cc, init, wrap)
+	return s
+}
+
+// assembleInitExprOK is assembleInit(init) as an expression, and false
+// when it is undefined: stringify(undefined) is undefined, which the
+// identity wrap keeps (an array's join writes it as nothing) and another
+// wrap interpolates as "undefined".
+func assembleInitExprOK(cc *compileCtx, init Value, wrap func(string) string) (string, bool) {
 	if init.IsArr() {
 		parts := make([]string, init.Len())
 		for i, v := range init.Items() {
 			cc.work(1)
 			parts[i] = assembleInitExpr(cc, v, wrap)
 		}
-		return "[" + strings.Join(parts, ", ") + "]"
+		return "[" + strings.Join(parts, ", ") + "]", true
 	} else if isDateTime(init) {
-		return wrap(dateTimeToExpr(cc, init))
+		return applyWrap(wrap, dateTimeToExpr(cc, init)), true
 	}
-	return wrap(stringify(cc, init))
+	var b strings.Builder
+	if !stringifyTo(cc, &b, init) {
+		if wrap == nil {
+			return "", false
+		}
+		return wrap("undefined"), true
+	}
+	return applyWrap(wrap, b.String()), true
+}
+
+func applyWrap(wrap func(string) string, s string) string {
+	if wrap == nil {
+		return s
+	}
+	return wrap(s)
 }
 
 func assembleInitValue(cc *compileCtx, init Value, loc *time.Location) Value {
@@ -482,7 +514,8 @@ func assembleInitValue(cc *compileCtx, init Value, loc *time.Location) Value {
 	return init
 }
 
-func idWrap(s string) string { return s }
+// idWrap is the identity wrap (assembleInit's default).
+var idWrap func(string) string
 
 // dateTimeToTimestamp is upstream's: +new Date(...parts), or Date.UTC, with
 // the parts as JavaScript reads them (format's DatetimeArgs and UTCArgs:
@@ -706,7 +739,7 @@ func assembleUnitSelectionData(m *unitModel, acc *selDataAcc) {
 				added[storeName] = true
 			}
 			if isTimerSelection(cc, sel) && hadData {
-				sourceName := m.lookupDataSource(m.getDataName(dsMain))
+				sourceName := m.lookupDataSource(m.getDataName(dsMain)).AsString()
 				sourceData := acc.first[sourceName]
 				if sourceData.IsObj() {
 					var filterT Value
@@ -783,16 +816,28 @@ func parseInteractiveLegend(m *unitModel, channel string, legendCmpt *legendComp
 	for _, name := range m.comp.selection.keyList() {
 		cc.work(1)
 		sel := m.comp.selection.m[name]
-		proj := sel.project.hasField[field.AsString()]
-		if proj == nil {
-			proj, _ = sel.project.hasChannel.get(channel)
+		// selCmpt.project.hasField[field] ?? selCmpt.project.hasChannel[channel]:
+		// a field named after an inherited member finds a built-in.
+		proj, own, ref := sel.project.hasField.read(cc.realm(), field.AsString())
+		found := own && proj != nil
+		if !own {
+			if ref.host != nil || (ref.found && !isNullishAny(ref.val, true)) {
+				found = ref.host != nil || jsRefTruthy(ref)
+			} else {
+				proj, _ = sel.project.hasChannel.get(channel)
+				found = proj != nil
+			}
 		}
-		if proj != nil && legendsCompiler.defined(sel) {
+		if found && legendsCompiler.defined(sel) {
 			cur := legendCmpt.get("selections")
 			items := append([]Value{}, cur.Items()...)
 			items = append(items, jsval.Str(sel.name))
 			legendCmpt.set("selections", jsval.Arr(items), false)
-			proj.hasLegend = true
+			if proj != nil {
+				proj.hasLegend = true
+			} else {
+				cc.realm().write(ref, "hasLegend", jsval.True)
+			}
 		}
 	}
 }
@@ -844,7 +889,7 @@ var projectCompiler = selectionCompiler{
 		cc := m.ctx
 		name := sel.name
 		proj := sel.project
-		parsed := map[string]*selProjItem{}
+		parsed := newOmap[*selProjItem]() // a plain object (see jsRealm)
 		timeUnits := newOmap[*Object]()
 		names := newSignalNamer()
 		signalName := func(p *selProjItem, rangeK string) string {
@@ -961,7 +1006,7 @@ var projectCompiler = selectionCompiler{
 					component := mk("timeUnit", fd.Get("timeUnit"), "as", f, "field", fd.Get("field"))
 					timeUnits.set(hashOf(m.ctx, jsval.Obj(component)), component)
 				}
-				if parsed[f] == nil {
+				if !parsed.truthy(cc.realm(), f) {
 					tplType := "E"
 					if typ == "interval" && isScaleChannel(m.ctx, channel) && m.getScaleComponent(channel) == nil {
 						throw("Cannot read properties of undefined (reading 'get')") // model.getScaleComponent(channel).get
@@ -976,8 +1021,8 @@ var projectCompiler = selectionCompiler{
 					p.visSignal = signalName(p, "visual")
 					p.hasVisual = true
 					proj.items = append(proj.items, p)
-					parsed[f] = p
-					proj.hasField[f] = p
+					parsed.assign(f, p)
+					proj.hasField.assign(f, p)
 					proj.hasSelectionID = proj.hasSelectionID || f == selectionID
 					if isGeoPositionChannel(channel) {
 						p.geoChannel = channel
@@ -994,7 +1039,7 @@ var projectCompiler = selectionCompiler{
 		for _, fv := range fields {
 			cc.work(1)
 			field := fv.AsString()
-			if proj.hasField[field] != nil {
+			if proj.hasField.truthy(cc.realm(), field) {
 				continue
 			}
 			p := &selProjItem{typ: "E", field: field, index: len(proj.items)}
@@ -1003,7 +1048,7 @@ var projectCompiler = selectionCompiler{
 			}
 			p.dataSignal = signalName(p, "data")
 			proj.items = append(proj.items, p)
-			proj.hasField[field] = p
+			proj.hasField.assign(field, p)
 			proj.hasSelectionID = proj.hasSelectionID || field == selectionID
 		}
 		if init.IsTruthy() {
@@ -1114,7 +1159,7 @@ var pointCompiler = selectionCompiler{
 					vals = append(vals, "["+datum+"["+stringValue(jsval.Str(m.vgField(p.channel, fieldRefOption{})))+"], "+
 						datum+"["+stringValue(jsval.Str(m.vgField(p.channel, fieldRefOption{binSuffix: "end"})))+"]]")
 				} else {
-					vals = append(vals, datum+"["+stringValue(jsval.Str(p.field))+"]")
+					vals = append(vals, datum+"["+stringValue(p.fieldValue())+"]")
 				}
 			}
 			update += "fields: " + fieldsSg + ", values: [" + strings.Join(vals, ", ") + "]"
@@ -1326,9 +1371,10 @@ var intervalCompiler = selectionCompiler{
 			} else {
 				yinit = jsval.Str(centerSg + "[1]")
 			}
+			// `${xinit[0]}`: a string's character, a TypeError of null.
 			part := func(a Value, isCh bool, k int) string {
 				if isCh {
-					return a.Index(k).AsString()
+					return jsProp(a, strconv.Itoa(k)).AsString()
 				}
 				return a.AsString()
 			}
@@ -1563,12 +1609,16 @@ var inputsCompiler = selectionCompiler{
 			if findSignal(sel.cc, signals, sgname) == nil {
 				o := mk("name", sgname)
 				if init.IsTruthy() {
-					o.Set("init", jsval.Str(assembleInitExpr(m.b().ctx, init.Index(i), idWrap)))
+					if e, ok := assembleInitExprOK(m.b().ctx, init.Index(i), idWrap); ok {
+						o.Set("init", jsval.Str(e))
+					} else {
+						o.Set("init", undef) // JSON leaves it out
+					}
 				} else {
 					o.Set("value", jsval.Null)
 				}
 				if ev := sel.events(); ev.IsTruthy() {
-					o.Set("on", arr(mkv("events", ev, "update", "datum && item().mark.marktype !== 'group' ? "+datum+"["+stringValue(jsval.Str(p.field))+"] : null")))
+					o.Set("on", arr(mkv("events", ev, "update", "datum && item().mark.marktype !== 'group' ? "+datum+"["+stringValue(p.fieldValue())+"] : null")))
 				} else {
 					o.Set("on", jsval.Arr(nil))
 				}

@@ -12,7 +12,7 @@ type xformNode struct {
 	dfBase
 	kind      string // window, joinaggregate, fold, extent, flatten, pivot, sample, density, quantile, regression, loess, lookup, impute
 	transform *Value
-	secondary string // lookup
+	secondary Value // lookup
 }
 
 func newXform(parent dfNode, kind string, t Value) *xformNode {
@@ -55,6 +55,14 @@ func strItems(cc *compileCtx, v Value) []string {
 	return out
 }
 
+// defaultNameV is getDefaultName: `as ?? vgField(def)`, the value as given.
+func (n *xformNode) defaultNameV(def Value) Value {
+	if a := def.Get("as"); !a.IsNullish() {
+		return a
+	}
+	return jsval.Str(vgField(n.cc, def, fieldRefOption{}))
+}
+
 func (n *xformNode) defaultName(def Value) string {
 	cc := n.cc
 
@@ -74,9 +82,14 @@ func (n *xformNode) dependentFields() *sset {
 			cc.work(1)
 			out.add(g)
 		}
-		for _, m := range t.Get("sort").Items() {
+		// (this.transform.sort ?? []).forEach((m) => out.add(m.field))
+		var sorts []Value
+		if s := t.Get("sort"); !s.IsNullish() {
+			sorts = listOf(s, "(this.transform.sort ?? [])", "forEach")
+		}
+		for _, m := range sorts {
 			cc.work(1)
-			out.add(m.Get("field").AsString())
+			out.addValue(jsGet(m, "field"))
 		}
 		for _, w := range t.Get("window").Items() {
 			cc.work(1)
@@ -182,24 +195,21 @@ func (n *xformNode) producedFields() *sset {
 		}
 		return s
 	case "fold", "flatten", "density", "quantile", "regression", "loess":
-		return newSset(strItems(n.cc, t.Get("as"))...)
+		// new Set(this.transform.as): the names as given (the constructor
+		// made `as` an array).
+		return ssetOfValues(t.Get("as").Items())
 	case "extent", "sample":
 		return newSset()
 	case "pivot":
 		return nil
 	case "lookup":
 		if t.Get("as").IsTruthy() {
-			return newSset(strItems(n.cc, jsval.Arr(arrayOf(t.Get("as"))))...)
+			return ssetOfValues(arrayOf(t.Get("as")))
 		}
 		// new Set(this.transform.from.fields)
-		var fields []string
-		for _, f := range iterateNew(t.Get("from").Get("fields")) {
-			cc.work(1)
-			fields = append(fields, f.AsString())
-		}
-		return newSset(fields...)
+		return ssetOfValues(iterateNew(t.Get("from").Get("fields")))
 	case "impute":
-		return newSset(t.Get("impute").AsString())
+		return ssetOfValues([]Value{t.Get("impute")})
 	}
 	return newSset()
 }
@@ -226,17 +236,18 @@ func (n *xformNode) addDimensions(fields []string) {
 	default:
 		return
 	}
+	// unique(groupby.concat(fields), (d) => d)
 	seen := map[string]bool{}
 	var out []Value
 	for _, x := range base {
 		cc.work(1)
-		if !seen[x.AsString()] {
+		if !jsSeen(cc, seen, x.AsString()) {
 			seen[x.AsString()] = true
 			out = append(out, x)
 		}
 	}
 	for _, f := range fields {
-		if !seen[f] {
+		if !jsSeen(cc, seen, f) {
 			seen[f] = true
 			out = append(out, jsval.Str(f))
 		}
@@ -258,7 +269,7 @@ func (n *xformNode) assemble() []Value {
 		for _, j := range t.Get("joinaggregate").Items() {
 			cc.work(1)
 			ops = append(ops, j.Get("op"))
-			as = append(as, jsval.Str(n.defaultName(j)))
+			as = append(as, n.defaultNameV(j))
 			if j.Get("field").IsUndefined() {
 				fields = append(fields, jsval.Null)
 			} else {
@@ -321,7 +332,7 @@ func (n *xformNode) assembleWindow() Value {
 	for _, w := range t.Get("window").Items() {
 		cc.work(1)
 		ops = append(ops, w.Get("op"))
-		as = append(as, jsval.Str(n.defaultName(w)))
+		as = append(as, n.defaultNameV(w))
 		if p := w.Get("param"); p.IsUndefined() {
 			params = append(params, jsval.Null)
 		} else {
@@ -354,8 +365,8 @@ func (n *xformNode) assembleWindow() Value {
 	if s := t.Get("sort"); !s.IsUndefined() {
 		for _, sf := range iterate(s, "this.transform.sort") {
 			cc.work(1)
-			sortFields = append(sortFields, sf.Get("field"))
-			sortOrder = append(sortOrder, coalesce(sf.Get("order"), jsval.Str("ascending")))
+			sortFields = append(sortFields, jsGet(sf, "field"))
+			sortOrder = append(sortOrder, coalesce(jsGet(sf, "order"), jsval.Str("ascending")))
 		}
 	}
 	sort := mkv("field", jsval.Arr(sortFields), "order", jsval.Arr(sortOrder))
@@ -538,7 +549,7 @@ func makeLookupNode(parent dfNode, m Model, t Value, counter int) dfNode {
 	sources := b.comp.data
 	from := t.Get("from")
 	var fromOutput *outputNode
-	var secondary string
+	var secondary Value
 	switch {
 	case hasProperty(from, "data"):
 		fromSource := findSource(cc, from.Get("data"), sources.sources.items)
@@ -578,13 +589,16 @@ func makeLookupNode(parent dfNode, m Model, t Value, counter int) dfNode {
 type stackParams struct {
 	dimensionFieldDefs []Value
 	stackField         string
-	groupby            Value
-	offset             string
-	sort               Value
-	facetby            []string
-	stackby            []string
-	impute             bool
-	as                 []string
+	// stackFieldV is the stacked field as upstream holds it (a transform's
+	// `stack` of any type); unset, it is stackField.
+	stackFieldV Value
+	groupby     Value
+	offset      Value // as upstream holds it, of whatever type
+	sort        Value
+	facetby     []string
+	stackby     []string
+	impute      bool
+	as          []string
 }
 
 type stackNode struct {
@@ -593,6 +607,13 @@ type stackNode struct {
 	// assembling says getGroupbyFields is read by assemble (a spread)
 	// rather than by dependentFields (a forEach), for upstream's message.
 	assembling bool
+}
+
+func (st *stackParams) stackFieldValue() Value {
+	if !st.stackFieldV.IsUndefined() {
+		return st.stackFieldV
+	}
+	return jsval.Str(st.stackField)
 }
 
 func newStackNode(parent dfNode, st *stackParams) *stackNode {
@@ -612,21 +633,32 @@ func (n *stackNode) clone() dfNode {
 func (n *stackNode) addDimensions(fields []string) { n.st.facetby = append(n.st.facetby, fields...) }
 
 func (n *stackNode) getGroupbyFields() []string {
+	vs := n.getGroupbyFieldsV()
+	out := make([]string, len(vs))
+	for i, v := range vs {
+		out[i] = v.AsString()
+	}
+	return out
+}
+
+// getGroupbyFieldsV is getGroupbyFields with a transform's group-by entries
+// as given (a null stays null in the output).
+func (n *stackNode) getGroupbyFieldsV() []Value {
 	cc := n.cc
 
 	st := n.st
 	if len(st.dimensionFieldDefs) > 0 {
-		var out []string
+		var out []Value
 		for _, d := range st.dimensionFieldDefs {
 			cc.work(1)
 			if d.Get("bin").IsTruthy() {
 				if st.impute {
-					out = append(out, vgField(cc, d, fieldRefOption{binSuffix: "mid"}))
+					out = append(out, jsval.Str(vgField(cc, d, fieldRefOption{binSuffix: "mid"})))
 				} else {
-					out = append(out, vgField(cc, d, fieldRefOption{}), vgField(cc, d, fieldRefOption{binSuffix: "end"}))
+					out = append(out, jsval.Str(vgField(cc, d, fieldRefOption{})), jsval.Str(vgField(cc, d, fieldRefOption{binSuffix: "end"})))
 				}
 			} else {
-				out = append(out, vgField(cc, d, fieldRefOption{}))
+				out = append(out, jsval.Str(vgField(cc, d, fieldRefOption{})))
 			}
 		}
 		return out
@@ -640,14 +672,15 @@ func (n *stackNode) getGroupbyFields() []string {
 		if !g.IsStr() {
 			throw("this.getGroupbyFields is not a function or its return value is not iterable")
 		}
-		return strItems(cc, jsval.Arr(iterate(g, ""))) // a spread of a string: its characters
+		return iterate(g, "") // a spread of a string: its characters
 	}
-	return strItems(cc, st.groupby)
+	return st.groupby.Items()
 }
 
 func (n *stackNode) dependentFields() *sset {
 	cc := n.cc
-	out := newSset(n.st.stackField)
+	out := newSset()
+	out.addValue(n.st.stackFieldValue())
 	for _, f := range n.getGroupbyFields() {
 		cc.work(1)
 		out.add(f)
@@ -670,9 +703,9 @@ func (n *stackNode) hash() string {
 	copy(dims, st.dimensionFieldDefs)
 	o := jsval.NewObject(8)
 	o.Set("dimensionFieldDefs", jsval.Arr(dims))
-	o.Set("stackField", jsval.Str(st.stackField))
+	o.Set("stackField", st.stackFieldValue())
 	o.Set("groupby", st.groupby)
-	o.Set("offset", jsval.Str(st.offset))
+	o.Set("offset", st.offset)
 	o.Set("sort", st.sort)
 	o.Set("facetby", strsVal(st.facetby))
 	if st.stackby != nil {
@@ -688,15 +721,19 @@ func (n *stackNode) hash() string {
 func makeStackFromTransform(parent dfNode, t Value) *stackNode {
 	cc := ccOf(parent)
 	stack, groupby, as := t.Get("stack"), t.Get("groupby"), t.Get("as")
-	offset := "zero"
+	offset := jsval.Str("zero")
 	if o := t.Get("offset"); !o.IsUndefined() {
-		offset = o.AsString()
+		offset = o
 	}
+	// for (const sortField of stackTransform.sort): sortField.field and
+	// .order are read without a guard.
 	var sortFields, sortOrder []Value
-	for _, sf := range t.Get("sort").Items() {
-		cc.work(1)
-		sortFields = append(sortFields, sf.Get("field"))
-		sortOrder = append(sortOrder, firstDefined(sf.Get("order"), jsval.Str("ascending")))
+	if s := t.Get("sort"); !s.IsUndefined() {
+		for _, sf := range iterate(s, "stackTransform.sort") {
+			cc.work(1)
+			sortFields = append(sortFields, jsGet(sf, "field"))
+			sortOrder = append(sortOrder, firstDefined(jsGet(sf, "order"), jsval.Str("ascending")))
+		}
 	}
 	sort := mkv("field", jsval.Arr(sortFields), "order", jsval.Arr(sortOrder))
 	var normalizedAs []string
@@ -717,7 +754,7 @@ func makeStackFromTransform(parent dfNode, t Value) *stackNode {
 		normalizedAs = []string{stack.AsString() + "_start", stack.AsString() + "_end"}
 	}
 	return newStackNode(parent, &stackParams{
-		stackField: stack.AsString(), groupby: groupby, offset: offset, sort: sort, as: normalizedAs,
+		stackField: stack.AsString(), stackFieldV: stack, groupby: groupby, offset: offset, sort: sort, as: normalizedAs,
 	})
 }
 
@@ -770,7 +807,7 @@ func makeStackFromEncoding(parent dfNode, m *unitModel) dfNode {
 	}
 	return newStackNode(parent, &stackParams{
 		dimensionFieldDefs: dims, stackField: m.vgField(sp.fieldChannel, fieldRefOption{}),
-		stackby: stackby, sort: sort, offset: sp.offset, impute: sp.impute,
+		stackby: stackby, sort: sort, offset: sp.offsetV, impute: sp.impute,
 		groupby: undef,
 		as: []string{
 			m.vgField(sp.fieldChannel, fieldRefOption{suffix: "start", forAs: true}),
@@ -787,30 +824,37 @@ func (n *stackNode) assemble() []Value {
 	if st.impute {
 		for _, d := range st.dimensionFieldDefs {
 			cc.work(1)
-			bandPosition := 0.5
-			if bp := d.Get("bandPosition"); bp.IsNum() {
-				bandPosition = bp.NumValue()
+			// const {bandPosition = 0.5} = dimensionFieldDef, then
+			// `${bandPosition}*…+${1 - bandPosition}*…`: JavaScript's
+			// arithmetic and text for a band position of any type.
+			bp := d.Get("bandPosition")
+			if bp.IsUndefined() {
+				bp = jsval.Num(0.5)
 			}
 			if d.Get("bin").IsTruthy() {
 				binStart := vgField(cc, d, fieldRefOption{expr: "datum"})
 				binEnd := vgField(cc, d, fieldRefOption{expr: "datum", binSuffix: "end"})
-				bpS := jsval.JSNumberString(bandPosition)
-				expr := isValidFiniteNumberExpr(binStart) + " ? " + bpS + "*" + binStart + "+" + jsval.JSNumberString(1-bandPosition) + "*" + binEnd + " : " + binStart
+				bpS := bp.AsString()
+				oneMinus := jsval.JSNumberString(1 - jsval.ToNumber(bp))
+				expr := isValidFiniteNumberExpr(binStart) + " ? " + bpS + "*" + binStart + "+" + oneMinus + "*" + binEnd + " : " + binStart
 				if cc.v5 {
-					expr = bpS + "*" + binStart + "+" + jsval.JSNumberString(1-bandPosition) + "*" + binEnd
+					expr = bpS + "*" + binStart + "+" + oneMinus + "*" + binEnd
 				}
 				out = append(out, mkv("type", "formula",
 					"expr", expr,
 					"as", vgField(cc, d, fieldRefOption{binSuffix: "mid", forAs: true})))
 			}
 			gb := append(append([]string{}, st.stackby...), st.facetby...)
-			out = append(out, mkv("type", "impute", "field", st.stackField, "groupby", strsVal(gb),
+			out = append(out, mkv("type", "impute", "field", st.stackFieldValue(), "groupby", strsVal(gb),
 				"key", vgField(cc, d, fieldRefOption{binSuffix: "mid"}), "method", "value", "value", 0))
 		}
 	}
 	n.assembling = true
-	gb := append(n.getGroupbyFields(), st.facetby...)
-	out = append(out, mkv("type", "stack", "groupby", strsVal(gb), "field", st.stackField, "sort", st.sort, "as", strsVal(st.as), "offset", st.offset))
+	gb := n.getGroupbyFieldsV()
+	for _, f := range st.facetby {
+		gb = append(gb, jsval.Str(f))
+	}
+	out = append(out, mkv("type", "stack", "groupby", jsval.Arr(gb), "field", st.stackFieldValue(), "sort", st.sort, "as", strsVal(st.as), "offset", st.offset))
 	return out
 }
 
@@ -819,11 +863,11 @@ func (n *stackNode) assemble() []Value {
 type geoJSONNode struct {
 	dfBase
 	fields  Value // array or undefined
-	geojson string
+	geojson Value // the shape field as given; null for coordinates
 	signal  string
 }
 
-func newGeoJSONNode(parent dfNode, fields Value, geojson, signal string) *geoJSONNode {
+func newGeoJSONNode(parent dfNode, fields Value, geojson Value, signal string) *geoJSONNode {
 	return initNode(&geoJSONNode{fields: fields, geojson: geojson, signal: signal}, parent)
 }
 
@@ -833,8 +877,8 @@ func (n *geoJSONNode) clone() dfNode {
 func (n *geoJSONNode) dependentFields() *sset {
 	cc := n.cc
 	out := newSset()
-	if n.geojson != "" {
-		out.add(n.geojson)
+	if n.geojson.IsTruthy() {
+		out.addValue(n.geojson)
 	}
 	for _, f := range n.fields.Items() {
 		cc.work(1)
@@ -846,19 +890,19 @@ func (n *geoJSONNode) dependentFields() *sset {
 }
 func (n *geoJSONNode) producedFields() *sset { return newSset() }
 func (n *geoJSONNode) hash() string {
-	return "GeoJSON " + n.geojson + " " + n.signal + " " + hashOf(n.cc, n.fields)
+	return "GeoJSON " + n.geojson.AsString() + " " + n.signal + " " + hashOf(n.cc, n.fields)
 }
 func (n *geoJSONNode) assemble() []Value {
 	var out []Value
-	if n.geojson != "" {
-		out = append(out, mkv("type", "filter", "expr", `isValid(datum["`+n.geojson+`"])`))
+	if n.geojson.IsTruthy() {
+		out = append(out, mkv("type", "filter", "expr", `isValid(datum["`+n.geojson.AsString()+`"])`))
 	}
 	o := mk("type", "geojson")
 	if n.fields.IsTruthy() {
 		o.Set("fields", n.fields)
 	}
-	if n.geojson != "" {
-		o.Set("geojson", jsval.Str(n.geojson))
+	if n.geojson.IsTruthy() {
+		o.Set("geojson", n.geojson)
 	}
 	o.Set("signal", jsval.Str(n.signal))
 	return append(out, jsval.Obj(o))
@@ -892,14 +936,14 @@ func parseAllGeoJSON(parent dfNode, m *unitModel) dfNode {
 	for _, coords := range [][2]string{{chLongitude, chLatitude}, {chLongitude2, chLatitude2}} {
 		pair := geoPair(m, coords)
 		if pair.Index(0).IsTruthy() || pair.Index(1).IsTruthy() {
-			parent = newGeoJSONNode(parent, pair, "", m.getName("geojson_"+jsval.JSNumberString(float64(counter))))
+			parent = newGeoJSONNode(parent, pair, jsval.Null, m.getName("geojson_"+jsval.JSNumberString(float64(counter))))
 			counter++
 		}
 	}
 	if m.channelHasField(chShape) {
 		fd := m.typedFieldDef(chShape)
 		if channelDefType(fd) == "geojson" {
-			parent = newGeoJSONNode(parent, undef, fd.Get("field").AsString(), m.getName("geojson_"+jsval.JSNumberString(float64(counter))))
+			parent = newGeoJSONNode(parent, undef, fd.Get("field"), m.getName("geojson_"+jsval.JSNumberString(float64(counter))))
 		}
 	}
 	return parent
@@ -968,12 +1012,12 @@ type facetNode struct {
 	dfBase
 	model      *facetModel
 	name       string
-	data       string
+	data       Value // the facet's source, as upstream holds it
 	channels   map[string]*facetChannelInfo
 	childModel Model
 }
 
-func newFacetNode(parent dfNode, m *facetModel, name, data string) *facetNode {
+func newFacetNode(parent dfNode, m *facetModel, name string, data Value) *facetNode {
 	cc := m.b().ctx
 
 	n := &facetNode{model: m, name: name, data: data, channels: map[string]*facetChannelInfo{}}
@@ -998,8 +1042,8 @@ func newFacetNode(parent dfNode, m *facetModel, name, data string) *facetNode {
 	return n
 }
 
-func (n *facetNode) clone() dfNode     { throw("Cannot clone node"); return nil }
-func (n *facetNode) getSource() string { return n.name }
+func (n *facetNode) clone() dfNode    { throw("Cannot clone node"); return nil }
+func (n *facetNode) getSource() Value { return jsval.Str(n.name) }
 
 func (n *facetNode) facetHash(info *facetChannelInfo) string {
 	o := jsval.NewObject(4)
@@ -1086,7 +1130,7 @@ func (n *facetNode) assembleRowColumnHeaderData(channel, crossedDataName string,
 	}
 	info := n.channels[channel]
 	if info.sortField.IsTruthy() {
-		op := coalesce(info.sortField.Get("op"), jsval.Str(defaultSortOp))
+		op := firstDefined(info.sortField.Get("op"), jsval.Str(defaultSortOp)) // {op = DEFAULT_SORT_OP}: undefined only
 		fields = append(fields, info.sortField.Get("field"))
 		ops = append(ops, op)
 		as = append(as, jsval.Str(vgField(cc, info.sortField, fieldRefOption{forAs: true})))
@@ -1097,7 +1141,7 @@ func (n *facetNode) assembleRowColumnHeaderData(channel, crossedDataName string,
 	}
 	source := n.data
 	if crossedDataName != "" {
-		source = crossedDataName
+		source = jsval.Str(crossedDataName)
 	}
 	agg := mk("type", "aggregate", "groupby", strsVal(info.fields))
 	if len(fields) > 0 {

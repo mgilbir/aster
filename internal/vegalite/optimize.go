@@ -4,7 +4,11 @@ package vegalite
 // Node lists are walked with live indices where upstream iterates arrays that
 // the loop body mutates, so passes see the same nodes upstream's do.
 
-import "strconv"
+import (
+	"strconv"
+
+	"github.com/mgilbir/aster/internal/jsval"
+)
 
 const facetScalePrefix = "scale_"
 
@@ -542,8 +546,8 @@ func cloneSubtree(facet *facetNode) func(node dfNode) []dfNode {
 			cp := node.clone()
 			cp.base().cc = node.base().cc
 			if out, ok := cp.(*outputNode); ok {
-				newName := facetScalePrefix + out.getSource()
-				out.setSource(newName)
+				newName := facetScalePrefix + out.getSource().AsString()
+				out.setSource(jsval.Str(newName))
 				facet.model.comp.data.outputNodes[newName] = out
 			} else if isAddDimensionsNode(cp) {
 				addDimensionsTo(cp, facet.fields())

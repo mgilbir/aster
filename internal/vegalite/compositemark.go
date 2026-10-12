@@ -251,8 +251,10 @@ func compositeMarkOrient(cc *compileCtx, spec Value, compositeMark string) strin
 
 // ---- boxplot ----
 
-func boxParamsQuartiles(cc *compileCtx, field string) []Value {
-	aliased := cmAlias(cc, field)
+// boxParamsQuartiles takes the continuous field as upstream holds it: the
+// aggregate's field is that value, its name is built from its text.
+func boxParamsQuartiles(cc *compileCtx, field Value) []Value {
+	aliased := cmAliasV(cc, field)
 	return []Value{
 		mkv("op", "q1", "field", field, "as", "lower_box_"+aliased),
 		mkv("op", "q3", "field", field, "as", "upper_box_"+aliased),
@@ -279,8 +281,9 @@ func normalizeBoxPlot(cc *compileCtx, spec Value, config Value) Value {
 	isMinMax := boxPlotType.IsStr() && boxPlotType.StrValue() == "min-max"
 	isTukey := boxPlotType.IsStr() && boxPlotType.StrValue() == "tukey"
 	bp := boxParams(cc, spec, extent, config)
-	contField := cmFieldName(cc, bp.continuousAxisChannelDef.Get("field"))
-	aliasedFieldName := cmAlias(cc, contField)
+	contFieldV := bp.continuousAxisChannelDef.Get("field")
+	contField := cmFieldName(cc, contFieldV)
+	aliasedFieldName := cmAliasV(cc, contFieldV)
 	color, size := bp.encodingWithoutContinuousAxis.Get("color"), bp.encodingWithoutContinuousAxis.Get("size")
 	encodingWithoutSizeColorAndContinuousAxis := omit(bp.encodingWithoutContinuousAxis, "color", "size")
 	makePart := func(shared Value) partFactory {
@@ -372,11 +375,11 @@ func normalizeBoxPlot(cc *compileCtx, spec Value, config Value) Value {
 	extentStr := extent.AsString()
 	lowerWhiskerExpr := lowerBoxExpr + " - " + extentStr + " * " + iqrExpr
 	upperWhiskerExpr := upperBoxExpr + " + " + extentStr + " * " + iqrExpr
-	fieldExpr := cmAccess(cc, contField)
-	joinaggregate := mkv("joinaggregate", jsval.Arr(boxParamsQuartiles(cc, contField)), "groupby", jsval.Arr(bp.groupby))
+	fieldExpr := cmAccessV(cc, contFieldV)
+	joinaggregate := mkv("joinaggregate", jsval.Arr(boxParamsQuartiles(cc, contFieldV)), "groupby", jsval.Arr(bp.groupby))
 	aggs := []Value{
-		mkv("op", "min", "field", contField, "as", "lower_whisker_"+aliasedFieldName),
-		mkv("op", "max", "field", contField, "as", "upper_whisker_"+aliasedFieldName),
+		mkv("op", "min", "field", contFieldV, "as", "lower_whisker_"+aliasedFieldName),
+		mkv("op", "max", "field", contFieldV, "as", "upper_whisker_"+aliasedFieldName),
 		mkv("op", "min", "field", "lower_box_"+contField, "as", "lower_box_"+aliasedFieldName),
 		mkv("op", "max", "field", "upper_box_"+contField, "as", "upper_box_"+aliasedFieldName),
 	}
@@ -447,8 +450,9 @@ type boxParamsResult struct {
 func boxParams(cc *compileCtx, spec Value, extent Value, config Value) boxParamsResult {
 	orient := compositeMarkOrient(cc, spec, "boxplot")
 	cai := compositeMarkContinuousAxis(cc, spec, orient, "boxplot")
-	contField := cmFieldName(cc, cai.def.Get("field"))
-	aliased := cmAlias(cc, contField)
+	contFieldV := cai.def.Get("field")
+	cmFieldName(cc, contFieldV) // its TypeError for a missing field
+	aliased := cmAliasV(cc, contFieldV)
 	boxPlotType := extent
 	if extent.IsNum() {
 		boxPlotType = jsval.Str("tukey")
@@ -459,10 +463,10 @@ func boxParams(cc *compileCtx, spec Value, extent Value, config Value) boxParams
 	if isMinMax {
 		minAs, maxAs = "lower_whisker_", "upper_whisker_"
 	}
-	specific := append(boxParamsQuartiles(cc, contField),
-		mkv("op", "median", "field", contField, "as", "mid_box_"+aliased),
-		mkv("op", "min", "field", contField, "as", minAs+aliased),
-		mkv("op", "max", "field", contField, "as", maxAs+aliased),
+	specific := append(boxParamsQuartiles(cc, contFieldV),
+		mkv("op", "median", "field", contFieldV, "as", "mid_box_"+aliased),
+		mkv("op", "min", "field", contFieldV, "as", minAs+aliased),
+		mkv("op", "max", "field", contFieldV, "as", maxAs+aliased),
 	)
 	var post []Value
 	if !isMinMax && !isTukey {
@@ -613,14 +617,7 @@ func errorBarAggregationAndCalculation(cc *compileCtx, markDef, def, def2, defEr
 	contField := def.Get("field").AsString()
 	contFieldV := def.Get("field")
 	acc := func(s string) string { return cmAccess(cc, s) }
-	// accV is the same of a spec value: a missing field is "undefined" to
-	// 5.8's template, and a TypeError to 6.x's accessWithDatumToUnescapedPath.
-	accV := func(v Value) string {
-		if cc.v5 {
-			return `datum["` + tmpl(v) + `"]`
-		}
-		return accessWithDatumToUnescapedPathV(v)
-	}
+	accV := func(v Value) string { return cmAccessV(cc, v) }
 	if inputType == "raw" {
 		var center string
 		switch {

@@ -195,9 +195,14 @@ func vgField(cc *compileCtx, fd Value, opt fieldRefOption) string {
 		field, missing, pristine = internalField("count"), "", false
 	} else {
 		fn := ""
+		// opSet: `if (fn)` of fn = fieldDef.op, the op as given (an empty
+		// array is truthy and prints as nothing).
+		opSet := false
 		if !opt.nofn {
 			if hasProperty(fd, "op") {
-				fn = fd.Get("op").AsString()
+				if op := fd.Get("op"); op.IsTruthy() {
+					fn, opSet = op.AsString(), true
+				}
 			} else {
 				bin, aggregate, timeUnit := fd.Get("bin"), fd.Get("aggregate"), fd.Get("timeUnit")
 				switch {
@@ -226,7 +231,7 @@ func vgField(cc *compileCtx, fd Value, opt fieldRefOption) string {
 				}
 			}
 		}
-		if fn != "" {
+		if fn != "" || opSet {
 			if hasField {
 				field = fn + "_" + field
 			} else {
@@ -417,8 +422,10 @@ func getFieldOrDatumDef(cc *compileCtx, cd Value) Value {
 	return undef
 }
 
+// isCustomFormatType is `formatType && formatType !== 'number' &&
+// formatType !== 'time'`: any truthy value but those two names.
 func isCustomFormatType(ft Value) bool {
-	return ft.IsStr() && ft.StrValue() != "" && ft.StrValue() != "time" && ft.StrValue() != "number"
+	return ft.IsTruthy() && !(ft.IsStr() && (ft.StrValue() == "time" || ft.StrValue() == "number"))
 }
 
 // initChannelDef normalizes a channel definition (upstream initChannelDef).
@@ -496,7 +503,11 @@ func initDatumDef(dd Value) Value {
 	return jsval.Obj(o)
 }
 
-func isSortByChannel(c string) bool { return sortByChannel[c] }
+// isSortByChannel is `c in SORT_BY_CHANNEL_INDEX` in 5.8 (so an inherited
+// name passes), hasOwnProperty in 6.4.
+func isSortByChannel(cc *compileCtx, c string) bool {
+	return sortByChannel[c] || (cc.v5 && isInheritedKey(c))
+}
 
 func initFieldDef(cc *compileCtx, fd Value, channel string, compositeMark bool) Value {
 	aggregate, timeUnit, bin, field := fd.Get("aggregate"), fd.Get("timeUnit"), fd.Get("bin"), fd.Get("field")
@@ -552,10 +563,10 @@ func initFieldDef(cc *compileCtx, fd Value, channel string, compositeMark bool) 
 	}
 	if isSortableFieldDef(fdv) && fieldDef.Lookup("sort").IsStr() {
 		sort := fieldDef.Lookup("sort").StrValue()
-		if isSortByChannel(sort) {
+		if isSortByChannel(cc, sort) {
 			return jsval.Obj(spread(cloneObj(fieldDef), mkv("sort", mkv("encoding", sort))))
 		}
-		if len(sort) > 0 && sort[0] == '-' && isSortByChannel(sort[1:]) {
+		if len(sort) > 0 && sort[0] == '-' && isSortByChannel(cc, sort[1:]) {
 			return jsval.Obj(spread(cloneObj(fieldDef), mkv("sort", mkv("encoding", sort[1:], "order", "descending"))))
 		}
 	}
@@ -597,7 +608,7 @@ func valueExpr(cc *compileCtx, v Value, timeUnit Value, typ string, wrapTime, un
 	expr := ""
 	have := false
 	switch {
-	case isExprRef(v):
+	case isExprRef(cc, v):
 		expr, have = v.Get("expr").AsString(), true
 	case isSignalRef(v):
 		expr, have = v.Get("signal").AsString(), true
@@ -607,7 +618,7 @@ func valueExpr(cc *compileCtx, v Value, timeUnit Value, typ string, wrapTime, un
 	case v.IsStr() || v.IsNum():
 		if isTime {
 			expr, have = "datetime("+stringify(cc, v)+")", true
-			if isLocalSingleTimeUnit(unit) {
+			if isLocalSingleTimeUnit(cc, unit) {
 				// For a single timeUnit, dateTimeToExpr matches the number/string to the unit.
 				if (v.IsNum() && v.NumValue() < 10000) || (v.IsStr() && dateParseNaN(v.StrValue())) {
 					expr = dateTimeToExpr(cc, mkv(unit, v))

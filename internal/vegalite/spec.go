@@ -76,6 +76,9 @@ var compositionLayoutProps = []string{"align", "bounds", "center", "columns", "s
 // the spec and the composition config.
 func extractCompositionLayout(spec Value, specType string, config Value) *Object {
 	compositionConfig := config.Get(specType)
+	if compositionConfig.IsNullish() {
+		throw("Cannot destructure property 'spacing' of 'compositionConfig' as it is %s.", nullishName(compositionConfig))
+	}
 	layout := jsval.NewObject(4)
 	spacingConfig, columns := compositionConfig.Get("spacing"), compositionConfig.Get("columns")
 	if !spacingConfig.IsUndefined() {
@@ -99,8 +102,8 @@ func extractCompositionLayout(spec Value, specType string, config Value) *Object
 				layout.Set(prop, v)
 			} else {
 				layout.Set(prop, mkv(
-					"row", coalesce(v.Get("row"), spacingConfig),
-					"column", coalesce(v.Get("column"), spacingConfig),
+					"row", coalesce(jsGet(v, "row"), spacingConfig), // spacing.row: a TypeError of null
+					"column", coalesce(jsGet(v, "column"), spacingConfig),
 				))
 			}
 		} else {
@@ -120,11 +123,11 @@ func getFitType(sizeType string) string {
 }
 
 // extractTopLevelProperties picks background and padding (and params).
-func extractTopLevelProperties(t Value, includeParams bool) *Object {
+func extractTopLevelProperties(cc *compileCtx, t Value, includeParams bool) *Object {
 	o := jsval.NewObject(3)
 	for _, p := range []string{"background", "padding"} {
 		if t.IsObj() && !t.Get(p).IsUndefined() {
-			o.Set(p, signalRefOrValue(t.Get(p)))
+			o.Set(p, signalRefOrValue(cc, t.Get(p)))
 		}
 	}
 	if includeParams {

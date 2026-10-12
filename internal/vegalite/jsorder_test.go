@@ -228,3 +228,18 @@ func TestSplitAccessPathNMatchesStringSplit(t *testing.T) {
 		}
 	}
 }
+
+// TestJSReplaceAll: util.replaceAll's replacement patterns, against node's
+// String.prototype.replace with the same global, escaped expression.
+func TestJSReplaceAll(t *testing.T) {
+	for _, c := range [][4]string{
+		{"a datum.label b datum.label", "datum.label", "x$&y$$z$`w$'v$1$<n>$", "a xdatum.labely$za w b datum.labelv$1$<n>$ b xdatum.labely$za datum.label b wv$1$<n>$"},
+		{"datum.label", "datum.label", "$", "$"},
+		{"p datum.labelq", "datum.label", "[$`|$']", "p [p |q]q"},
+		{"no match", "datum.label", "$&", "no match"},
+	} {
+		if got := jsReplaceAll(c[0], c[1], c[2]); got != c[3] {
+			t.Errorf("jsReplaceAll(%q, %q, %q) = %q, want %q", c[0], c[1], c[2], got, c[3])
+		}
+	}
+}

@@ -248,6 +248,13 @@ func (o *Object) Has(key string) bool { return o.find(key) >= 0 }
 
 // Set inserts or overwrites key.
 func (o *Object) Set(key string, v Value) {
+	if o.host != nil {
+		// The functions Inherited and NativeFunction answer are shared by
+		// every caller in the process, so nothing may be written on them.
+		if _, ok := o.host.(nativeFunction); ok {
+			return
+		}
+	}
 	if i := o.find(key); i >= 0 {
 		o.vals[i] = v
 		return

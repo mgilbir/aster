@@ -103,7 +103,7 @@ func jsIn(v Value, key string) bool {
 	if !isObject(v) {
 		throw("Cannot use 'in' operator to search for '%s' in %s", key, v.AsString())
 	}
-	if _, ok := jsval.Inherited(key); ok {
+	if isInheritedKey(key) {
 		return true
 	}
 	if v.IsArr() {
@@ -176,6 +176,9 @@ func jsProp(v Value, key string) Value {
 		}
 		return undef
 	case v.IsObj():
+		if key == "__proto__" && !v.ObjValue().Has(key) {
+			return jsval.Obj(jsval.NewObject(0)) // Object.prototype, as JSON prints it
+		}
 		return v.ObjValue().Prop(key)
 	}
 	return undef
@@ -233,4 +236,13 @@ func jsGet(v Value, key string) Value {
 		throw("Cannot read properties of %s (reading '%s')", nullishName(v), key)
 	}
 	return v.Get(key)
+}
+
+// jsKeysOr is `keys(v || {})`: Object.keys of a truthy v, nothing of a falsy
+// one.
+func jsKeysOr(v Value) []string {
+	if !v.IsTruthy() {
+		return nil
+	}
+	return jsKeys(v)
 }

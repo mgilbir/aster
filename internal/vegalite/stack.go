@@ -17,7 +17,10 @@ type stackProperties struct {
 	fieldChannel    string
 	impute          bool
 	stackBy         []stackBy
-	offset          string
+	// offset is the offset when it is a string ("" otherwise), for
+	// comparisons; offsetV is the value as upstream holds it.
+	offset  string
+	offsetV Value
 }
 
 var stackableMarks = strSet([]string{"arc", "bar", "area", "rule", "point", "circle", "square", "line", "text", "tick"})
@@ -158,21 +161,33 @@ func stackOf(cc *compileCtx, m Value, encoding Value) *stackProperties {
 			}
 		}
 	}
-	offset := ""
-	haveOffset := false
+	offsetV := undef
 	if s := stackedFieldDef.Get("stack"); !s.IsUndefined() {
 		if s.IsBool() {
 			if s.BoolValue() {
-				offset, haveOffset = "zero", true
+				offsetV = jsval.Str("zero")
 			}
-		} else if s.IsStr() {
-			offset, haveOffset = s.StrValue(), true
+		} else {
+			offsetV = s
 		}
 	} else if stackByDefaultMarks[mark] {
-		offset, haveOffset = "zero", true
+		offsetV = jsval.Str("zero")
 	}
-	if !haveOffset || (offset != "zero" && offset != "center" && offset != "normalize") {
+	// isStackOffset: `s in STACK_OFFSET_INDEX` in 5.8, which a name every
+	// object inherits passes too; hasOwnProperty in 6.4. Both look the value
+	// up by its text.
+	if !offsetV.IsTruthy() {
 		return nil
+	}
+	switch key := offsetV.AsString(); {
+	case key == "zero" || key == "center" || key == "normalize":
+	case cc.v5 && isInheritedKey(key):
+	default:
+		return nil
+	}
+	offset := ""
+	if offsetV.IsStr() {
+		offset = offsetV.StrValue()
 	}
 	if encodingIsAggregate(cc, encoding) && len(stackByList) == 0 {
 		return nil
@@ -200,7 +215,7 @@ func stackOf(cc *compileCtx, m Value, encoding Value) *stackProperties {
 	}
 	return &stackProperties{
 		groupbyChannels: groupbyChannels, groupbyFields: groupbyFields, fieldChannel: fieldChannel,
-		impute: impute, stackBy: stackByList, offset: offset,
+		impute: impute, stackBy: stackByList, offset: offset, offsetV: offsetV,
 	}
 }
 

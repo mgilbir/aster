@@ -263,10 +263,12 @@ func (m *modelBase) renameSignal(old, nw string)     { m.signalNames.rename(old,
 func (m *modelBase) renameScale(old, nw string)      { m.scaleNames.rename(old, nw) }
 func (m *modelBase) renameProjection(old, nw string) { m.projNames.rename(old, nw) }
 
-func (m *modelBase) lookupDataSource(name string) string {
+// lookupDataSource is the data set an output node of that name reads, as
+// upstream holds its name (see outputNode.source).
+func (m *modelBase) lookupDataSource(name string) Value {
 	node, ok := m.comp.data.outputNodes[name]
 	if !ok || node == nil {
-		return name
+		return jsval.Str(name)
 	}
 	return node.getSource()
 }
@@ -354,11 +356,17 @@ func (m *modelBase) getScaleType(channel string) string {
 // (junk is true, and sel nil), and does not throw.
 func (m *modelBase) trySelectionComponent(variableName string) (sel *selectionComponent, junk bool) {
 	if m.comp.selection != nil {
-		if sel, ok := m.comp.selection.get(variableName); ok && sel != nil {
+		sel, own, ref := m.comp.selection.read(m.b().ctx.realm(), variableName)
+		if own && sel != nil {
 			return sel, false
 		}
+		// A selection named "__proto__" became the object's prototype, so
+		// that name reads it back.
+		if s, ok := ref.val.(*selectionComponent); ok && !own {
+			return s, false
+		}
 	}
-	if inheritedObjectKey(variableName) {
+	if isInheritedKey(variableName) {
 		return nil, true
 	}
 	if m.parent != nil {
@@ -446,13 +454,13 @@ func (m *modelBase) assembleGroupEncodeEntry(isTopLevel bool) Value {
 		for _, p := range base.Keys() {
 			cc.work(1)
 			if v := base.Lookup(p); !v.IsUndefined() {
-				encodeEntry.Set(p, signalOrValueRef(v))
+				encodeEntry.Set(p, signalOrValueRef(m.ctx, v))
 			}
 		}
 	}
 	if !isTopLevel {
 		if m.description.IsTruthy() {
-			encodeEntry.Set("description", signalOrValueRef(m.description))
+			encodeEntry.Set("description", signalOrValueRef(m.ctx, m.description))
 		}
 		if m.typ == "unit" || m.typ == "layer" {
 			o := mk("width", m.getSizeSignalRef("width"), "height", m.getSizeSignalRef("height"))

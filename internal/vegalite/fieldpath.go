@@ -165,7 +165,17 @@ func accessWithDatumToUnescapedPathV(v Value) string {
 
 // accessPathWithDatum turns "a.b" into "datum["a"] && datum["a"]["b"]".
 func accessPathWithDatum(path, datum string) string {
-	pieces := splitAccessPath(path)
+	return accessPathWithDatumPieces(splitAccessPath(path), datum)
+}
+
+// accessPathWithDatumV is accessPathWithDatum of a field as upstream holds
+// it: splitAccessPath of a value that is not a string reads its length, so a
+// number, a boolean or an object gives no pieces at all.
+func accessPathWithDatumV(path Value, datum string) string {
+	return accessPathWithDatumPieces(splitAccessPathV(path), datum)
+}
+
+func accessPathWithDatumPieces(pieces []string, datum string) string {
 	prefixes := make([]string, 0, len(pieces))
 	for i := 1; i <= len(pieces); i++ {
 		qs := make([]string, i)

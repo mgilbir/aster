@@ -28,7 +28,7 @@ func (t dataSourceType) String() string {
 }
 
 // sourceGetter is what a model's outputNodes map holds (an OutputNode or FacetNode).
-type sourceGetter interface{ getSource() string }
+type sourceGetter interface{ getSource() Value }
 
 type dfNode interface {
 	base() *dfBase
@@ -163,13 +163,15 @@ type outputNode struct {
 	dfBase
 	typ       dataSourceType
 	refCounts map[string]int
-	source    string
-	name      string
-	hashKey   string
+	// source is the data set the node reads, as upstream holds its name:
+	// a data object's name of any type reaches the output as it is.
+	source  Value
+	name    string
+	hashKey string
 }
 
 func newOutputNode(parent dfNode, source string, typ dataSourceType, refCounts map[string]int) *outputNode {
-	o := &outputNode{typ: typ, refCounts: refCounts, source: source, name: source}
+	o := &outputNode{typ: typ, refCounts: refCounts, source: jsval.Str(source), name: source}
 	if refCounts != nil {
 		if _, ok := refCounts[o.name]; !ok {
 			refCounts[o.name] = 0
@@ -197,19 +199,21 @@ func (o *outputNode) hash() string {
 	}
 	return o.hashKey
 }
-func (o *outputNode) getSource() string {
+func (o *outputNode) getSource() Value {
 	o.refCounts[o.name]++
 	return o.source
 }
-func (o *outputNode) isRequired() bool   { return o.refCounts[o.name] != 0 }
-func (o *outputNode) setSource(s string) { o.source = s }
+func (o *outputNode) isRequired() bool  { return o.refCounts[o.name] != 0 }
+func (o *outputNode) setSource(s Value) { o.source = s }
 
 // ---- source ----
 
 type sourceNode struct {
 	dfBase
-	data      *Object
-	name      string
+	data *Object
+	// name is the data object's name as given (undefined when it has
+	// none), of whatever type: upstream compares it with === and outputs it.
+	name      Value
 	generator bool
 	// extra generator payloads live in graticuleNode/sequenceNode
 }
@@ -279,7 +283,7 @@ func newSourceNode(cc *compileCtx, data Value) *sourceNode {
 	}
 	s.generator = isGenerator(data)
 	if n := data.Get("name"); n.IsTruthy() {
-		s.name = n.AsString()
+		s.name = n
 	}
 	if format != nil && format.Len() > 0 {
 		if s.data == nil {
@@ -304,7 +308,7 @@ func (s *sourceNode) clone() dfNode          { throw("Cannot clone node"); retur
 func (s *sourceNode) dependentFields() *sset { return newSset() }
 func (s *sourceNode) producedFields() *sset  { return nil }
 func (s *sourceNode) hash() string           { throw("Cannot hash sources"); return "" }
-func (s *sourceNode) hasName() bool          { return s.name != "" }
+func (s *sourceNode) hasName() bool          { return s.name.IsTruthy() }
 func (s *sourceNode) assemble() *Object {
 	o := mk("name", s.name)
 	spread(o, jsval.Obj(s.data))

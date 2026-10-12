@@ -154,7 +154,7 @@ func (f *facetModel) getHeaderLayoutMixins() *Object {
 				if headerType == "header" {
 					bandType = "headerBand"
 				}
-				if channel != chFacet && f.child.b().comp.layoutSize.get(sizeType).IsNullish() {
+				if channel != chFacet && !f.child.b().comp.layoutSize.get(sizeType).IsTruthy() {
 					band := layout.Lookup(bandType)
 					if band.IsNullish() {
 						band = mkv()
@@ -286,7 +286,7 @@ func (f *facetModel) assembleFacet() Value {
 		}
 		if isSortField(cc, sort) {
 			field := sort.Get("field")
-			op := coalesce(sort.Get("op"), jsval.Str(defaultSortOp))
+			op := firstDefined(sort.Get("op"), jsval.Str(defaultSortOp)) // {op = DEFAULT_SORT_OP}: undefined only
 			outputName := facetSortFieldName(cc, fd, sort, fieldRefOption{})
 			if row.IsTruthy() && column.IsTruthy() {
 				agg.fields = append(agg.fields, jsval.Str(outputName))

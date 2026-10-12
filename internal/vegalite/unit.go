@@ -141,10 +141,10 @@ func (u *unitModel) initScale(scale Value) Value {
 	internal := replaceExprRef(u.ctx, scale, 0)
 	io := internal.ObjValue()
 	if domain.IsArr() {
-		io.Set("domain", mapVals(domain, signalRefOrValue))
+		io.Set("domain", mapVals(domain, func(v Value) Value { return signalRefOrValue(u.ctx, v) }))
 	}
 	if rng.IsArr() {
-		io.Set("range", mapVals(rng, signalRefOrValue))
+		io.Set("range", mapVals(rng, func(v Value) Value { return signalRefOrValue(u.ctx, v) }))
 	}
 	return internal
 }
@@ -179,7 +179,7 @@ func (u *unitModel) initAxis(axis Value) Value {
 		if isConditionalAxisValue(val) {
 			out.Set(prop, signalOrValueRefWithCondition(u.ctx, val))
 		} else {
-			out.Set(prop, signalRefOrValue(val))
+			out.Set(prop, signalRefOrValue(cc, val))
 		}
 	}
 	return jsval.Obj(out)
@@ -282,12 +282,12 @@ func (u *unitModel) correctDataNames(mark Value) Value {
 	if from.Get("data").IsTruthy() {
 		d := u.lookupDataSource(from.Get("data").AsString())
 		if !cc.v5 && u.encoding.ObjValue().Has("time") {
-			d += curr
+			d = jsval.Str(d.AsString() + curr)
 		}
-		from.ObjValue().Set("data", jsval.Str(d))
+		from.ObjValue().Set("data", d)
 	}
 	if from.Get("facet").Get("data").IsTruthy() {
-		from.Get("facet").ObjValue().Set("data", jsval.Str(u.lookupDataSource(from.Get("facet").Get("data").AsString())))
+		from.Get("facet").ObjValue().Set("data", u.lookupDataSource(from.Get("facet").Get("data").AsString()))
 	}
 	return mark
 }

@@ -11,8 +11,8 @@ import (
 const binRangeDelimiter = " – "
 
 // signalRefOrValue turns an ExprRef {expr} into a SignalRef {signal}.
-func signalRefOrValue(v Value) Value {
-	if isExprRef(v) {
+func signalRefOrValue(cc *compileCtx, v Value) Value {
+	if isExprRef(cc, v) {
 		rest := omit(v, "expr")
 		o := jsval.NewObject(rest.Len() + 1)
 		o.Set("signal", v.Get("expr"))
@@ -29,21 +29,21 @@ func signalOrValueRefWithCondition(cc *compileCtx, v Value) Value {
 		items := make([]Value, cond.Len())
 		for i, it := range cond.Items() {
 			cc.work(1)
-			items[i] = signalRefOrValue(it)
+			items[i] = signalRefOrValue(cc, it)
 		}
 		c = jsval.Arr(items)
 	} else {
-		c = signalRefOrValue(cond)
+		c = signalRefOrValue(cc, cond)
 	}
-	o := cloneObj(signalRefOrValue(v).ObjValue())
+	o := cloneObj(signalRefOrValue(cc, v).ObjValue())
 	o.Set("condition", c)
 	return jsval.Obj(o)
 }
 
 // signalOrValueRef makes a value ref: {signal} stays, anything else becomes {value}.
-func signalOrValueRef(v Value) Value {
-	if isExprRef(v) {
-		return signalRefOrValue(v)
+func signalOrValueRef(cc *compileCtx, v Value) Value {
+	if isExprRef(cc, v) {
+		return signalRefOrValue(cc, v)
 	}
 	if isSignalRef(v) {
 		return v
@@ -79,24 +79,26 @@ func signalOrStringValue(v Value) Value {
 }
 
 // getStyles is [].concat(mark.type, mark.style ?? []).
-func getStyles(mark Value) []string {
-	out := []string{mark.Get("type").AsString()}
-	st := mark.Get("style")
-	switch {
-	case st.IsArr():
-		for _, s := range st.Items() {
-			out = append(out, s.AsString())
+// getStyles is `[].concat(mark.type, mark.style ?? [])`: the values as
+// given, an array's elements spread one level.
+func getStyles(mark Value) []Value {
+	var out []Value
+	for _, x := range []Value{mark.Get("type"), mark.Get("style")} {
+		switch {
+		case x.IsArr():
+			out = append(out, x.Items()...)
+		case x.IsNullish() && len(out) > 0: // mark.style ?? []
+		default:
+			out = append(out, x)
 		}
-	case !st.IsNullish():
-		out = append(out, st.AsString())
 	}
 	return out
 }
 
-func getStyleConfig(p string, styles []string, styleIndex Value) Value {
+func getStyleConfig(p string, styles []Value, styleIndex Value) Value {
 	v := undef
 	for _, s := range styles {
-		sc := styleIndex.Get(s)
+		sc := jsGet(styleIndex, s.AsString()) // styleConfigIndex[style]: a TypeError without one
 		if hasProperty(sc, p) {
 			v = sc.Get(p)
 		}
@@ -259,15 +261,4 @@ func spreadItems(v Value) []Value {
 		return iterate(v, "")
 	}
 	return iterateNew(v)
-}
-
-// inheritedObjectKey reports a key that reads as present on any plain object
-// through its prototype: `out[key]` of an empty `{}` is truthy for them.
-func inheritedObjectKey(key string) bool {
-	switch key {
-	case "constructor", "hasOwnProperty", "isPrototypeOf", "propertyIsEnumerable", "toString", "valueOf",
-		"toLocaleString", "__defineGetter__", "__defineSetter__", "__lookupGetter__", "__lookupSetter__", "__proto__":
-		return true
-	}
-	return false
 }

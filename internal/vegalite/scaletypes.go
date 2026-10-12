@@ -11,8 +11,19 @@ var scaleCategory = map[string]string{
 	"quantile": "discretizing", "quantize": "discretizing", "threshold": "discretizing",
 }
 
+// scaleCompatible compares SCALE_CATEGORY_INDEX[a] and [b]: a type every
+// object inherits reads as that member, equal only to itself.
 func scaleCompatible(a, b string) bool {
-	c1, c2 := scaleCategory[a], scaleCategory[b]
+	cat := func(t string) string {
+		if c, ok := scaleCategory[t]; ok {
+			return c
+		}
+		if isInheritedKey(t) {
+			return "\x00" + t
+		}
+		return ""
+	}
+	c1, c2 := cat(a), cat(b)
 	return c1 == c2 || (c1 == "ordinal-position" && c2 == "time") || (c2 == "ordinal-position" && c1 == "time")
 }
 
@@ -100,7 +111,14 @@ func defaultScaleConfig(cc *compileCtx) *Object {
 	)
 }
 
-func isExtendedScheme(v Value) bool { return !v.IsStr() && hasProperty(v, "name") }
+// isExtendedScheme is !isString(scheme) && hasProperty(scheme, 'name') in
+// 6.4; 5.8 reads !!scheme['name'], a TypeError of null.
+func isExtendedScheme(cc *compileCtx, v Value) bool {
+	if cc != nil && cc.v5 {
+		return !v.IsStr() && jsGet(v, "name").IsTruthy()
+	}
+	return !v.IsStr() && hasProperty(v, "name")
+}
 
 func isParameterDomain(v Value) bool { return hasProperty(v, "param") }
 func isDomainUnionWith(v Value) bool { return hasProperty(v, "unionWith") }

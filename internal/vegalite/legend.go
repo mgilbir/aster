@@ -103,7 +103,10 @@ type legendRuleParams struct {
 	channel                                              string
 	model                                                *unitModel
 	scaleType, orient, legendType                        string
-	direction                                            Value
+	// legendTypeV is the legend type as upstream holds it (a legend's
+	// `type` of any type); legendType is it when it is a string.
+	legendTypeV Value
+	direction   Value
 }
 
 func parseLegendForChannel(m *unitModel, channel string) *legendComponent {
@@ -136,10 +139,14 @@ func parseLegendForChannel(m *unitModel, channel string) *legendComponent {
 		}
 	}
 	orient := or(legend.Get("orient"), jsGet(config.Get("legend"), "orient"), jsval.Str("right")).AsString()
-	legendType := getLegendType(legend, channel, timeUnit, scaleType)
-	direction := getDirection(legendConfig, legendType, orient, legend)
+	legendTypeV := getLegendType(legend, channel, timeUnit, scaleType)
+	legendType := ""
+	if legendTypeV.IsStr() {
+		legendType = legendTypeV.StrValue()
+	}
+	direction := getDirection(legendConfig, legendTypeV, orient, legend)
 	rp := legendRuleParams{legend: legend, markDef: markDef, encoding: encoding, fod: fod, legendConfig: legendConfig, config: config,
-		channel: channel, model: m, scaleType: scaleType, orient: orient, legendType: legendType, direction: direction}
+		channel: channel, model: m, scaleType: scaleType, orient: orient, legendType: legendType, legendTypeV: legendTypeV, direction: direction}
 	for _, property := range legendComponentProperties {
 		if (legendType == "gradient" && strings.HasPrefix(property, "symbol")) || (legendType == "symbol" && strings.HasPrefix(property, "gradient")) {
 			continue
@@ -339,7 +346,7 @@ var legendRules = map[string]func(p legendRuleParams) Value{
 		} else if p.legendType == "symbol" {
 			return undef
 		}
-		return strOrUndef(p.legendType)
+		return p.legendTypeV
 	},
 	"values": func(p legendRuleParams) Value { return guideValues(p.model.ctx, p.legend, p.fod) },
 }
@@ -362,31 +369,38 @@ func defaultSymbolType(cc *compileCtx, mark, channel string, shapeChannelDef, ma
 	return undef
 }
 
-func getLegendType(legend Value, channel, timeUnit, scaleType string) string {
+// getLegendType is getFirstDefined(legend.type, defaultType(...)): the
+// legend's type as given, of whatever type.
+func getLegendType(legend Value, channel, timeUnit, scaleType string) Value {
 	if t := legend.Get("type"); !t.IsUndefined() {
-		return t.AsString()
+		return t
 	}
 	if isColorChannel(channel) {
 		if timeUnit == "quarter" || timeUnit == "month" || timeUnit == "day" {
-			return "symbol"
+			return jsval.Str("symbol")
 		}
 		if isContinuousToContinuous(scaleType) {
-			return "gradient"
+			return jsval.Str("gradient")
 		}
 	}
-	return "symbol"
+	return jsval.Str("symbol")
 }
 
-func getDirection(legendConfig Value, legendType, orient string, legend Value) Value {
+func getDirection(legendConfig Value, legendTypeV Value, orient string, legend Value) Value {
 	if v := legend.Get("direction"); !v.IsNullish() {
 		return v
 	}
+	// legendConfig[legendType ? 'gradientDirection' : 'symbolDirection']
 	key := "symbolDirection"
-	if legendType != "" {
+	if legendTypeV.IsTruthy() {
 		key = "gradientDirection"
 	}
 	if v := legendConfig.Get(key); !v.IsNullish() {
 		return v
+	}
+	legendType := ""
+	if legendTypeV.IsStr() {
+		legendType = legendTypeV.StrValue()
 	}
 	return defaultDirection(orient, legendType)
 }
@@ -498,8 +512,8 @@ func legendSymbolsEncode(symbolsSpec Value, fod Value, m *unitModel, channel str
 			if symbolFillColor.IsTruthy() {
 				out.Delete("fill")
 			} else {
-				out.Set("fill", signalOrValueRef(coalesce(jsGet(config.Get("legend"), "symbolBaseFillColor"), jsval.Str("black"))))
-				out.Set("fillOpacity", signalOrValueRef(coalesce(opacity, jsval.Int(1))))
+				out.Set("fill", signalOrValueRef(cc, coalesce(jsGet(config.Get("legend"), "symbolBaseFillColor"), jsval.Str("black"))))
+				out.Set("fillOpacity", signalOrValueRef(cc, coalesce(opacity, jsval.Int(1))))
 			}
 		} else if fill.IsArr() {
 			src := encoding.Get("fill")
@@ -513,7 +527,7 @@ func legendSymbolsEncode(symbolsSpec Value, fod Value, m *unitModel, channel str
 				return jsval.False
 			}())
 			if f.IsTruthy() {
-				out.Set("fill", signalOrValueRef(f))
+				out.Set("fill", signalOrValueRef(cc, f))
 			}
 		}
 	}
@@ -544,10 +558,10 @@ func legendSymbolsEncode(symbolsSpec Value, fod Value, m *unitModel, channel str
 		}
 		if condition != "" {
 			t := mk("test", condition)
-			spreadV(t, signalOrValueRef(coalesce(opacity, jsval.Int(1))))
-			out.Set("opacity", arr(jsval.Obj(t), signalOrValueRef(jsGet(config.Get("legend"), "unselectedOpacity"))))
+			spreadV(t, signalOrValueRef(cc, coalesce(opacity, jsval.Int(1))))
+			out.Set("opacity", arr(jsval.Obj(t), signalOrValueRef(cc, jsGet(config.Get("legend"), "unselectedOpacity"))))
 		} else if opacity.IsTruthy() {
-			out.Set("opacity", signalOrValueRef(opacity))
+			out.Set("opacity", signalOrValueRef(cc, opacity))
 		}
 	}
 	spreadV(out, symbolsSpec)
@@ -566,6 +580,7 @@ func legendGradientEncode(gradientSpec Value, m *unitModel, legendType string, c
 	if legendType != "gradient" {
 		return undef
 	}
+	cc := m.ctx
 	config, markDef, encoding := m.config, m.markDef, m.encoding
 	out := jsval.NewObject(2)
 	gradientOpacity := coalesce(cmpt.get("gradientOpacity"), jsGet(config.Get("legend"), "gradientOpacity"))
@@ -574,7 +589,7 @@ func legendGradientEncode(gradientSpec Value, m *unitModel, legendType string, c
 		opacity = or(getMaxValue(m.ctx, encoding.Get("opacity")), markDef.Get("opacity"))
 	}
 	if opacity.IsTruthy() {
-		out.Set("opacity", signalOrValueRef(opacity))
+		out.Set("opacity", signalOrValueRef(cc, opacity))
 	}
 	spreadV(out, gradientSpec)
 	if out.Len() == 0 {
@@ -641,10 +656,11 @@ var fillStrokeConfig = []string{
 
 // applyMarkConfig adds the mark config values of the listed properties to e.
 func applyMarkConfig(e Value, m *unitModel, props []string) Value {
+	cc := m.ctx
 	o := e.ObjValue()
 	for _, p := range props {
 		if v := getMarkConfig(p, m.markDef, m.config, ""); !v.IsUndefined() {
-			o.Set(p, signalOrValueRef(v))
+			o.Set(p, signalOrValueRef(cc, v))
 		}
 	}
 	return e
@@ -737,7 +753,7 @@ func uniqueValues(cc *compileCtx, in []Value) []Value {
 	for _, v := range in {
 		cc.work(1)
 		h := hashOf(cc, v)
-		if !seen[h] {
+		if !jsSeen(cc, seen, h) {
 			seen[h] = true
 			out = append(out, v)
 		}
@@ -869,10 +885,14 @@ func assembleLegend(cmpt *legendComponent, config Value) Value {
 		legend.Delete("title")
 	}
 	if !labelExpr.IsUndefined() {
-		expr := labelExpr.AsString()
+		// The expression as given; util.replaceAll calls string.replace on it.
+		expr := labelExpr
 		lu := legend.Lookup("encode").Get("labels").Get("update")
 		if lu.IsObj() && isSignalRef(lu.Get("text")) {
-			expr = strings.ReplaceAll(expr, "datum.label", signalOf(lu.Get("text")))
+			if !labelExpr.IsStr() {
+				throw("string.replace is not a function")
+			}
+			expr = jsval.Str(jsReplaceAll(labelExpr.StrValue(), "datum.label", signalOf(lu.Get("text"))))
 		}
 		legendSetEncode(legend, "labels", "text", mkv("signal", expr))
 	}

@@ -272,7 +272,7 @@ func positionAndSize58(fd Value, channel string, m *unitModel) Value {
 	var sizeMixins Value
 	if encoding.Get("size").IsTruthy() || markDef.Get("size").IsTruthy() {
 		if useVlSizeChannel {
-			sizeMixins = nonPosition("size", m, nonPositionOpts{vgChannel: vgSizeChannel, defaultRef: signalOrValueRef(markDef.Get("size"))})
+			sizeMixins = nonPosition("size", m, nonPositionOpts{vgChannel: vgSizeChannel, defaultRef: signalOrValueRef(m.ctx, markDef.Get("size"))})
 		} else {
 			m.ctx.warn(msgCannotApplySizeToNonOrientedMark(markDef.Get("type").AsString()))
 		}
@@ -313,7 +313,7 @@ func positionAndSize58(fd Value, channel string, m *unitModel) Value {
 		// upstream interpolates the ref itself (not .signal) here.
 		bandPosition = sig("(1-[object Object])/2")
 	case isRelativeBandSize(bandSize):
-		bandPosition = jsval.Num((1 - bandSize.Get("band").AsDouble()) / 2)
+		bandPosition = jsval.Num((1 - jsval.ToNumber(bandSize.Get("band"))) / 2) // (1 - bandSize.band) / 2
 	default:
 		bandPosition = jsval.Int(0)
 	}
@@ -376,7 +376,7 @@ func getBinSpacing58(channel string, spacing float64, reverse, axisTranslate, of
 	}
 	off := 0.0
 	if offset.IsTruthy() {
-		off = offset.AsDouble()
+		off = jsval.ToNumber(offset)
 	}
 	var delta float64
 	if reverse.IsTruthy() {
@@ -384,7 +384,7 @@ func getBinSpacing58(channel string, spacing float64, reverse, axisTranslate, of
 	} else {
 		delta = off + spacingOffset
 	}
-	return jsval.Num(axisTranslate.AsDouble() + delta)
+	return jsPlusNum(axisTranslate, delta)
 }
 
 func rectBinPosition58(fd, fd2 Value, channel string, m *unitModel) Value {
@@ -413,7 +413,7 @@ func rectBinPosition58(fd, fd2 Value, channel string, m *unitModel) Value {
 	spacing := 0.0
 	if isXorY(channel) {
 		if b := getMarkPropOrConfigSimple("binSpacing", markDef, config); !b.IsNullish() {
-			spacing = b.AsDouble()
+			spacing = jsval.ToNumber(b)
 		}
 	}
 	channel2 := getSecondaryRangeChannel(channel)
@@ -424,7 +424,7 @@ func rectBinPosition58(fd, fd2 Value, channel string, m *unitModel) Value {
 	case isSignalRef(bandSize):
 		bandPosition = sig("(1-" + signalOf(bandSize) + ")/2")
 	case isRelativeBandSize(bandSize):
-		bandPosition = jsval.Num((1 - bandSize.Get("band").AsDouble()) / 2)
+		bandPosition = jsval.Num((1 - jsval.ToNumber(bandSize.Get("band"))) / 2) // (1 - bandSize.band) / 2
 	default:
 		bandPosition = jsval.Num(0.5)
 	}
@@ -468,7 +468,7 @@ func tick58(m *unitModel) Value {
 		vgSizeChannel, vgThicknessChannel = "width", "height"
 	}
 	thick := jsval.NewObject(1)
-	thick.Set(vgThicknessChannel, signalOrValueRef(getMarkPropOrConfigSimple("thickness", markDef, config)))
+	thick.Set(vgThicknessChannel, signalOrValueRef(m.ctx, getMarkPropOrConfigSimple("thickness", markDef, config)))
 	return withBase(m, mkIgnore("ignore", "ignore", "include", "ignore", "ignore", "ignore"),
 		pointPosition(chX, m, pointPositionOpts{defaultPos: "mid", vgChannel: "xc"}),
 		pointPosition(chY, m, pointPositionOpts{defaultPos: "mid", vgChannel: "yc"}),
@@ -527,13 +527,23 @@ func cmAccess(cc *compileCtx, p string) string {
 	return accessWithDatumToUnescapedPath(p)
 }
 
-// cmAlias is the field name composite marks use in the names of their derived
-// fields: 6.x strips the path syntax, 5.8 does not.
-func cmAlias(cc *compileCtx, field string) string {
+// cmAccessV is cmAccess of a spec value: a missing field is "undefined" to
+// 5.8's template, and a value that is not a string a TypeError to 6.x's
+// accessWithDatumToUnescapedPath.
+func cmAccessV(cc *compileCtx, v Value) string {
 	if cc.v5 {
-		return field
+		return `datum["` + tmpl(v) + `"]`
 	}
-	return removePathFromField(field)
+	return accessWithDatumToUnescapedPathV(v)
+}
+
+// cmAliasV is cmAlias of the field as upstream holds it: 6.x's
+// removePathFromField splits a value that is not a string by its length.
+func cmAliasV(cc *compileCtx, field Value) string {
+	if cc.v5 {
+		return field.AsString()
+	}
+	return removePathFromFieldV(field)
 }
 
 // cmFieldName reads the continuous axis field a composite mark builds its

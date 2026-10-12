@@ -116,7 +116,15 @@ func hasProperty(v Value, key string) bool {
 }
 
 func isSignalRef(v Value) bool { return hasProperty(v, "signal") }
-func isExprRef(v Value) bool   { return hasProperty(v, "expr") }
+
+// isExprRef is hasProperty(o, 'expr') in 6.4; 5.8 tests !!o?.expr, so
+// an expr that is falsy is not one.
+func isExprRef(cc *compileCtx, v Value) bool {
+	if cc != nil && cc.v5 {
+		return v.IsObj() && v.Get("expr").IsTruthy()
+	}
+	return hasProperty(v, "expr")
+}
 
 // cloneObj is `{...o}`.
 func cloneObj(o *Object) *Object {
@@ -367,6 +375,16 @@ func deepClone(cc *compileCtx, v Value) Value {
 func stringify(cc *compileCtx, v Value) string {
 	var b strings.Builder
 	stringifyTo(cc, &b, v)
+	return b.String()
+}
+
+// stringifyText is `${stringify(v)}`: stringify's text, or "undefined"
+// for a value JSON has no text for.
+func stringifyText(cc *compileCtx, v Value) string {
+	var b strings.Builder
+	if !stringifyTo(cc, &b, v) {
+		return "undefined"
+	}
 	return b.String()
 }
 
@@ -656,7 +674,14 @@ func arrayIndex(k string) (uint32, bool) {
 // arbitrary non-index order costs O(log n) a key. A builder that inserts many
 // index keys out of order appends them with Set and calls jsOrderKeys once
 // instead (C4).
+//
+// It is JavaScript's assignment: to "__proto__" the object does not hold as
+// its own, it replaces the object's prototype or does nothing (jsAssign).
 func jsSet(cc *compileCtx, o *Object, k string, v Value) {
+	if k == "__proto__" && !o.Has(k) && cc != nil {
+		jsAssign(cc.realm(), o, k, v)
+		return
+	}
 	if len(k) == 0 || k[0] < '0' || k[0] > '9' || o.Has(k) {
 		o.Set(k, v)
 		return
@@ -805,4 +830,51 @@ func jsIndexOrGet(v Value, key string) Value {
 		return v.Index(i)
 	}
 	return v.Get(key)
+}
+
+// jsReplaceAll is upstream's util.replaceAll: string.replace with a global
+// regular expression of find taken literally, so the replacement's $
+// patterns apply: $$ is "$", $& the match, $` the text before it and $' the
+// text after it (there are no groups, so $1 and $<name> stay as they are).
+func jsReplaceAll(s, find, repl string) string {
+	if find == "" || !strings.Contains(s, find) {
+		return s
+	}
+	if !strings.Contains(repl, "$") {
+		return strings.ReplaceAll(s, find, repl)
+	}
+	var b strings.Builder
+	rest := 0
+	for {
+		i := strings.Index(s[rest:], find)
+		if i < 0 {
+			break
+		}
+		start := rest + i
+		end := start + len(find)
+		b.WriteString(s[rest:start])
+		for j := 0; j < len(repl); j++ {
+			if repl[j] != '$' || j+1 == len(repl) {
+				b.WriteByte(repl[j])
+				continue
+			}
+			switch repl[j+1] {
+			case '$':
+				b.WriteByte('$')
+			case '&':
+				b.WriteString(find)
+			case '`':
+				b.WriteString(s[:start])
+			case '\'':
+				b.WriteString(s[end:])
+			default:
+				b.WriteByte('$')
+				continue
+			}
+			j++
+		}
+		rest = end
+	}
+	b.WriteString(s[rest:])
+	return b.String()
 }
