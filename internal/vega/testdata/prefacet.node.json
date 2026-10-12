@@ -1,0 +1,79 @@
+{
+ "formula-field-rerun.vg.json": {
+  "writes": {
+   "n": 3
+  },
+  "errors": [
+   "PreFacet does not support field modification."
+  ],
+  "texts": [
+   "0",
+   "1",
+   "0",
+   "1"
+  ]
+ },
+ "formula-field.vg.json": {
+  "writes": {},
+  "errors": [],
+  "texts": [
+   "0",
+   "1",
+   "2",
+   "0",
+   "1",
+   "2"
+  ]
+ },
+ "not-array-5.vg.json": {
+  "writes": {},
+  "errors": [
+   "field(...).forEach is not a function"
+  ],
+  "texts": []
+ },
+ "not-array-ab.vg.json": {
+  "writes": {},
+  "errors": [
+   "field(...).forEach is not a function"
+  ],
+  "texts": []
+ },
+ "not-array-length2.vg.json": {
+  "writes": {},
+  "errors": [
+   "field(...).forEach is not a function"
+  ],
+  "texts": []
+ },
+ "not-array-missing.vg.json": {
+  "writes": {},
+  "errors": [
+   "Cannot read properties of undefined (reading 'forEach')"
+  ],
+  "texts": []
+ },
+ "not-array-null.vg.json": {
+  "writes": {},
+  "errors": [
+   "Cannot read properties of null (reading 'forEach')"
+  ],
+  "texts": []
+ },
+ "signal-field.vg.json": {
+  "writes": {},
+  "errors": [
+   "PreFacet does not support field modification."
+  ],
+  "texts": []
+ },
+ "values-field.vg.json": {
+  "writes": {},
+  "errors": [],
+  "texts": [
+   "1",
+   "2",
+   "3"
+  ]
+ }
+}

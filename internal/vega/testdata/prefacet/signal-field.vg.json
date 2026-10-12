@@ -1,0 +1,4 @@
+{"width":10,"height":10,"signals":[{"name":"f","value":"kids"}],
+ "data":[{"name":"d","values":[{"kids":[1,2],"other":[5]},{"kids":[3],"other":[6]}]}],
+ "marks":[{"type":"group","from":{"facet":{"name":"k","data":"d","field":{"signal":"f"}}},
+  "marks":[{"type":"text","from":{"data":"k"},"encode":{"enter":{"text":{"signal":"'' + datum.data"}}}}]}]}

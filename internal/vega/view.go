@@ -203,7 +203,9 @@ type runView struct {
 	limits Limits
 	bud    *budget.Budget
 	led    *budget.Ledger // the call's, nil for none
-	lists  int64          // tuple list bytes charged to led (holdList)
+	lists  int64          // bytes charged to led for the run (holdList, chargeRun)
+	// runBytes is what chargeRun charged, for the tests.
+	runBytes int64
 	// rowSlab is where operators' row records come from (rowsOf), the
 	// first from rowBuf, which the view's own allocation holds.
 	rowSlab    []opRows

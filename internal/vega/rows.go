@@ -181,6 +181,17 @@ func (v *runView) holdList(n *opNode, in *flowPulse, out []jsval.Value) {
 	n.listCap = c
 }
 
+// chargeRun charges the call's ledger n bytes an operator keeps for the rest
+// of the run (a prefacet's record of its cells), given back with the tuple
+// lists when the run is over.
+func (v *runView) chargeRun(n int64) {
+	if err := v.led.Alloc(n); err != nil {
+		failErr(err)
+	}
+	v.lists += n
+	v.runBytes += n
+}
+
 // releaseLists gives the ledger back the tuple lists charged: once the
 // render is over they are garbage, the scenegraph keeping the tuples only.
 func (v *runView) releaseLists() {
