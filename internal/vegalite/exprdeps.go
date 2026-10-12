@@ -36,14 +36,22 @@ type exprParser struct {
 	depth int
 }
 
-const maxExprDepth = 200
-
-// maxExprNodeDepth bounds the depth of the syntax tree. maxExprDepth bounds
-// the parser's own recursion, but a left-associative chain (a+b+c+..., a.b.c,
-// f()()()) is built in a loop and nests one level per operator in the tree,
-// which exprNode.visit and exprNames then walk recursively. It matches
-// expr.MaxDepth, which Vega's parser enforces on the same text later.
-const maxExprNodeDepth = 512
+// MaxExprDepth bounds how deeply an expression nests: the parser's own
+// recursion (parentheses, calls, array and object literals, unary operators,
+// a conditional's consequent) and the depth of the syntax tree it builds,
+// which exprNode.visit and exprNames walk recursively. It is the same bound
+// as internal/expr's MaxDepth (TestExprDepthMatchesVega checks), which Vega's
+// parser enforces on the same text later.
+//
+// Chains of binary operators (a || b || ...) and of conditionals in the
+// alternate (a ? 0 : b ? 1 : ..., which an explicit sort array compiles to)
+// are not nesting here: they are parsed in a loop into one node whose
+// operands are its children in source order, so their length is bounded by
+// the expression's, not by this depth (C10). Only the fields an expression
+// reads are taken from the tree, in the order a walk of upstream's tree
+// meets them, which is source order for the operands of a chain whatever
+// their precedence.
+const MaxExprDepth = 512
 
 // mk finishes a node that has children: it records its depth and fails when
 // the tree is too deep.
@@ -55,7 +63,7 @@ func (p *exprParser) mk(n *exprNode) *exprNode {
 		}
 	}
 	n.depth = d + 1
-	if n.depth > maxExprNodeDepth {
+	if n.depth > MaxExprDepth {
 		p.failLimit("expression too deeply nested")
 	}
 	return n
@@ -320,19 +328,25 @@ func parseExprAST(cc *compileCtx, src string) (root *exprNode, err error) {
 
 func (p *exprParser) parseConditional() *exprNode {
 	p.depth++
-	if p.depth > maxExprDepth {
+	if p.depth > MaxExprDepth {
 		p.failLimit("expression too deeply nested")
 	}
 	defer func() { p.depth-- }()
-	test := p.parseBinary(0)
-	if p.isP("?") {
-		p.next(true)
-		cons := p.parseConditional()
-		p.expect(":")
-		alt := p.parseConditional()
-		return p.mk(&exprNode{kind: "Conditional", kids: []*exprNode{test, cons, alt}})
+	test := p.parseBinary()
+	if !p.isP("?") {
+		return test
 	}
-	return test
+	// a ? b : c ? d : e is right-associative: the alternate of each is the
+	// next conditional. The chain is one node, [a, b, c, d, e].
+	kids := []*exprNode{test}
+	for p.isP("?") {
+		p.cc.work(1)
+		p.next(true)
+		kids = append(kids, p.parseConditional())
+		p.expect(":")
+		kids = append(kids, p.parseBinary())
+	}
+	return p.mk(&exprNode{kind: "Conditional", kids: kids})
 }
 
 var binPrec = map[string]int{
@@ -343,23 +357,32 @@ var binPrec = map[string]int{
 	"+": 9, "-": 9, "*": 10, "/": 10, "%": 10,
 }
 
-func (p *exprParser) parseBinary(minPrec int) *exprNode {
-	left := p.parseUnary()
+// parseBinary parses operands joined by binary operators into one node of
+// the operands in source order: the order a walk of the precedence tree
+// meets them, and every operator sequence the precedence grammar accepts.
+func (p *exprParser) parseBinary() *exprNode {
+	first := p.parseUnary()
+	if p.kind != "punct" {
+		return first
+	}
+	if _, ok := binPrec[p.tok]; !ok {
+		return first
+	}
+	kids := []*exprNode{first}
 	for p.kind == "punct" {
-		prec, ok := binPrec[p.tok]
-		if !ok || prec <= minPrec {
+		if _, ok := binPrec[p.tok]; !ok {
 			break
 		}
+		p.cc.work(1)
 		p.next(true)
-		right := p.parseBinary(prec)
-		left = p.mk(&exprNode{kind: "Binary", kids: []*exprNode{left, right}})
+		kids = append(kids, p.parseUnary())
 	}
-	return left
+	return p.mk(&exprNode{kind: "Binary", kids: kids})
 }
 
 func (p *exprParser) parseUnary() *exprNode {
 	p.depth++
-	if p.depth > maxExprDepth {
+	if p.depth > MaxExprDepth {
 		p.failLimit("expression too deeply nested")
 	}
 	defer func() { p.depth-- }()
