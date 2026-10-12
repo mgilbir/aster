@@ -14,7 +14,7 @@ func BenchmarkTextLong(b *testing.B) {
 	}
 	defer c.Close()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		spec := fmt.Sprintf(`{"width":400,"height":300,"data":[{"name":"t","transform":[{"type":"sequence","start":%d,"stop":%d,"as":"x"},{"type":"formula","as":"s","expr":"pad('' + datum.x, 200, 'z', 'left')"}]}],"marks":[{"type":"text","from":{"data":"t"},"encode":{"update":{"text":{"field":"s"},"x":{"value":0},"y":{"field":"x"}}}}]}`,
 			(i+1)*10000, (i+1)*10000+5000)
 		if _, err := c.VegaToSVG([]byte(spec)); err != nil {

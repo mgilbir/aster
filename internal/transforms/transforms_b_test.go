@@ -158,7 +158,15 @@ func bBenchTuples(n int) []jsval.Value {
 func BenchmarkBin100k(b *testing.B) {
 	data := bBenchTuples(100_000)
 	p := BinParams{Field: FieldOf("x"), Config: BinConfig{Extent: [2]float64{0, 100}, MaxBins: 30}}
+	// bin writes its fields into the tuples it is given: only the first run
+	// grows them, so it runs once off the clock and the loop measures the
+	// steady run, whatever b.N (counted in, that first run made allocs/op a
+	// one-off cost divided by b.N).
+	if _, err := BinTuples(context.Background(), data, p); err != nil {
+		b.Fatal(err)
+	}
 	b.ReportAllocs()
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		if _, err := BinTuples(context.Background(), data, p); err != nil {
 			b.Fatal(err)
@@ -170,6 +178,7 @@ func BenchmarkKDE10k(b *testing.B) {
 	data := bBenchTuples(10_000)
 	p := KDEParams{Field: FieldOf("x"), GroupBy: []Field{FieldOf("g")}, Steps: 100}
 	b.ReportAllocs()
+	b.ResetTimer() // the input is built once; allocs/op is one run's
 	for i := 0; i < b.N; i++ {
 		if _, err := KDE(context.Background(), data, p); err != nil {
 			b.Fatal(err)
@@ -181,6 +190,7 @@ func BenchmarkDensityKDE(b *testing.B) {
 	data := bBenchTuples(5_000)
 	p := DensityParams{Distribution: DistSpec{Kind: "kde", Field: FieldOf("x")}}
 	b.ReportAllocs()
+	b.ResetTimer() // the input is built once; allocs/op is one run's
 	for i := 0; i < b.N; i++ {
 		if _, err := Density(context.Background(), data, p); err != nil {
 			b.Fatal(err)

@@ -143,7 +143,7 @@ func BenchmarkWindowSumRank100k(b *testing.B) {
 		Ops:   []WindowOpSpec{{Op: "sum", Field: FieldOf("x")}, {Op: "rank"}, {Op: "mean", Field: FieldOf("x")}},
 	}
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		if _, err := Window(context.Background(), base, p); err != nil {
 			b.Fatal(err)
 		}

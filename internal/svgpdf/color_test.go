@@ -161,7 +161,7 @@ func BenchmarkAppendNum(b *testing.B) {
 		b.Run(f.name, func(b *testing.B) {
 			b.ReportAllocs()
 			var buf [32]byte
-			for i := 0; i < b.N; i++ {
+			for i := 0; b.Loop(); i++ {
 				_ = f.fn(buf[:0], vals[i%len(vals)])
 			}
 		})

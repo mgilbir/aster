@@ -74,7 +74,7 @@ func facetSpec(groups, per int) jsval.Value {
 func BenchmarkFacet200x10(b *testing.B) {
 	spec := facetSpec(200, 10)
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		if _, err := Render(context.Background(), spec, Options{}); err != nil {
 			b.Fatal(err)
 		}
@@ -84,7 +84,7 @@ func BenchmarkFacet200x10(b *testing.B) {
 func BenchmarkFacet1000x5(b *testing.B) {
 	spec := facetSpec(1000, 5)
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		if _, err := Render(context.Background(), spec, Options{}); err != nil {
 			b.Fatal(err)
 		}

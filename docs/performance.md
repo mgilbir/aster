@@ -28,4 +28,4 @@ The gap between a shared `Converter` and one per goroutine is the garbage collec
 
 ## Regressions
 
-CI gates pull requests on performance. `scripts/benchgate.sh` (`make benchgate`) benchmarks the base and the head alternately on one machine, and fails on a significant increase in allocations (over 2%), bytes (5%) or time (15%) in a fixed set of benchmarks. A PR label `perf-regression-ok` allows an intended trade-off.
+CI gates pull requests on performance. `scripts/benchgate.sh` (`make benchgate`) benchmarks the base and the head alternately on one machine, and fails on a significant increase in allocations (over 2%), bytes (5%) or time (15%) in a fixed set of benchmarks. Times come from timed runs at GOMAXPROCS 1; allocations and bytes come from a separate run of a fixed number of iterations with the collector off (`GOGC=off`), where they repeat exactly, because in a timed run the number of collections, and so what `sync.Pool` still holds, varies from run to run. A PR label `perf-regression-ok` allows an intended trade-off.

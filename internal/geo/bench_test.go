@@ -23,9 +23,8 @@ func benchPath(b *testing.B, typ string, fit bool) {
 	}
 	path := p.Path()
 	b.ReportAllocs()
-	b.ResetTimer()
 	n := 0
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		s, _ := path.String(countries)
 		n += len(s)
 	}
@@ -79,7 +78,7 @@ func BenchmarkForward(b *testing.B) {
 	p, _ := NewProjection("mercator")
 	b.ReportAllocs()
 	x := 0.0
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		px, py, _ := p.Forward(float64(i%360)-180, float64(i%170)-85)
 		x += px + py
 	}
@@ -123,7 +122,7 @@ func BenchmarkGraticule(b *testing.B) {
 func BenchmarkGeoCentroidBoundsArea(b *testing.B) {
 	_, countries := benchCountries(b)
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		GeoArea(countries)
 		GeoBounds(countries)
 		GeoCentroid(countries)

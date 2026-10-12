@@ -417,7 +417,7 @@ func BenchmarkPaths(b *testing.B) {
 			it.lineW().Interpolate = "basis"
 		}
 		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
+		for b.Loop() {
 			sp.Reset()
 			sp.SetDigits(3)
 			_ = Area(&sp, items)

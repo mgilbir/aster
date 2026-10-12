@@ -22,9 +22,8 @@ func BenchmarkLinearApplyFloat(b *testing.B) {
 	s.SetRange(nums(0, 500))
 	xs := benchInputs(1024)
 	b.ReportAllocs()
-	b.ResetTimer()
 	var sink float64
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		sink += s.ApplyFloat(xs[i&1023])
 	}
 	_ = sink
@@ -36,9 +35,8 @@ func BenchmarkLinearApplyValue(b *testing.B) {
 	s.SetRange(nums(0, 500))
 	vs := numsToValues(benchInputs(1024))
 	b.ReportAllocs()
-	b.ResetTimer()
 	var sink jsval.Value
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		sink = s.Apply(vs[i&1023])
 	}
 	_ = sink
@@ -50,9 +48,8 @@ func BenchmarkLinearPolyApply(b *testing.B) {
 	s.SetRange(nums(0, 10, 40, 50, 500))
 	xs := benchInputs(1024)
 	b.ReportAllocs()
-	b.ResetTimer()
 	var sink float64
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		sink += s.ApplyFloat(xs[i&1023])
 	}
 	_ = sink
@@ -64,9 +61,8 @@ func BenchmarkLogApply(b *testing.B) {
 	s.SetRange(nums(0, 500))
 	xs := benchInputs(1024)
 	b.ReportAllocs()
-	b.ResetTimer()
 	var sink float64
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		sink += s.ApplyFloat(xs[i&1023] + 1)
 	}
 	_ = sink
@@ -78,9 +74,8 @@ func BenchmarkLinearColorApply(b *testing.B) {
 	s.SetRange([]jsval.Value{jsval.Str("steelblue"), jsval.Str("orange")})
 	xs := benchInputs(1024)
 	b.ReportAllocs()
-	b.ResetTimer()
 	var sink jsval.Value
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		sink = s.ApplyNumber(xs[i&1023])
 	}
 	_ = sink
@@ -93,9 +88,8 @@ func BenchmarkSequentialScheme(b *testing.B) {
 	s.SetInterpolator(sc.Interpolator)
 	xs := benchInputs(1024)
 	b.ReportAllocs()
-	b.ResetTimer()
 	var sink jsval.Value
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		sink = s.ApplyNumber(xs[i&1023])
 	}
 	_ = sink
@@ -105,7 +99,7 @@ func BenchmarkLinearTicks(b *testing.B) {
 	s := NewLinear()
 	s.SetDomain(nums(0, 1234.5))
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = s.Ticks(Count(10))
 	}
 }
@@ -114,7 +108,7 @@ func BenchmarkLogTicks(b *testing.B) {
 	s := NewLog()
 	s.SetDomain(nums(1, 1e6))
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = s.Ticks(Count(10))
 	}
 }
@@ -130,9 +124,8 @@ func BenchmarkBandApply(b *testing.B) {
 	s.SetDomain(dom)
 	s.SetRange(nums(0, 800))
 	b.ReportAllocs()
-	b.ResetTimer()
 	var sink jsval.Value
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		sink = s.Apply(keys[i%200])
 	}
 	_ = sink
@@ -146,9 +139,8 @@ func BenchmarkOrdinalApply(b *testing.B) {
 		keys[i] = jsval.Str("k" + jsval.JSNumberString(float64(i)))
 	}
 	b.ReportAllocs()
-	b.ResetTimer()
 	var sink jsval.Value
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		sink = s.Apply(keys[i%50])
 	}
 	_ = sink
@@ -160,9 +152,8 @@ func BenchmarkQuantizeApply(b *testing.B) {
 	s.SetRange([]jsval.Value{jsval.Str("a"), jsval.Str("b"), jsval.Str("c"), jsval.Str("d")})
 	vs := numsToValues(benchInputs(1024))
 	b.ReportAllocs()
-	b.ResetTimer()
 	var sink jsval.Value
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		sink = s.Apply(vs[i&1023])
 	}
 	_ = sink

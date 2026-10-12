@@ -27,7 +27,7 @@ func benchUnary(b *testing.B, args []float64, js, gm func(float64) float64) {
 	}{{"jsmath", js}, {"gomath", gm}} {
 		b.Run(c.name, func(b *testing.B) {
 			var s float64
-			for i := 0; i < b.N; i++ {
+			for i := 0; b.Loop(); i++ {
 				s += c.f(args[i&1023])
 			}
 			benchSink = s
@@ -57,14 +57,14 @@ func BenchmarkPow(b *testing.B) {
 	xs, ys := benchArgs(0.1, 100), benchArgs(-5, 5)
 	b.Run("jsmath", func(b *testing.B) {
 		var s float64
-		for i := 0; i < b.N; i++ {
+		for i := 0; b.Loop(); i++ {
 			s += Pow(xs[i&1023], ys[i&1023])
 		}
 		benchSink = s
 	})
 	b.Run("gomath", func(b *testing.B) {
 		var s float64
-		for i := 0; i < b.N; i++ {
+		for i := 0; b.Loop(); i++ {
 			s += math.Pow(xs[i&1023], ys[i&1023])
 		}
 		benchSink = s

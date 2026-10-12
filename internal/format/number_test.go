@@ -233,7 +233,7 @@ func BenchmarkNumberFormat(b *testing.B) {
 		b.Run(spec, func(b *testing.B) {
 			b.ReportAllocs()
 			var buf [64]byte
-			for i := 0; i < b.N; i++ {
+			for i := 0; b.Loop(); i++ {
 				_ = f.AppendFormat(buf[:0], 1234567.891+float64(i&1023))
 			}
 		})

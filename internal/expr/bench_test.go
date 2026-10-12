@@ -52,7 +52,7 @@ func BenchmarkEval(b *testing.B) {
 		b.Run(src, func(b *testing.B) {
 			s := NewScope(nil)
 			b.ReportAllocs()
-			for i := 0; i < b.N; i++ {
+			for i := 0; b.Loop(); i++ {
 				s.Datum = data[i%len(data)]
 				if _, err := p.Eval(s); err != nil {
 					b.Fatal(err)
@@ -71,7 +71,7 @@ func BenchmarkFilter10k(b *testing.B) {
 	}
 	s := NewScope(nil)
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		kept := 0
 		for _, d := range data {
 			s.Datum = d
@@ -92,7 +92,7 @@ func BenchmarkCompileAndEval10k(b *testing.B) {
 	data := benchData(10000)
 	const src = "datum.x > 5 ? datum.a * 2 + datum.b : upper(datum.cat) + '-' + year(datum.date)"
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		p, err := Compile(src)
 		if err != nil {
 			b.Fatal(err)
@@ -126,7 +126,7 @@ func BenchmarkCompile(b *testing.B) {
 func BenchmarkParse(b *testing.B) {
 	const src = "datum.x > 5 && datum.cat === 'a' || (datum.a * 2 + datum.b) / max(datum.v, 1) < 10 ? timeFormat(datum.date, '%Y') : 'n/a'"
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		if _, err := Parse(src); err != nil {
 			b.Fatal(err)
 		}
