@@ -56,6 +56,7 @@ func (m *Measurer) keepSystemFace(e *entry) {
 	old.face = nil
 	m.listCache.Clear()
 	m.last.font, m.last.list = "", nil
+	m.lastParts.list = nil
 }
 
 // bestMatch picks, among candidates, the entries closest to the requested

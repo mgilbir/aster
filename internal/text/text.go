@@ -35,6 +35,7 @@ import (
 	"fmt"
 	"maps"
 	"math"
+	"slices"
 	"strings"
 	"sync"
 	"unicode"
@@ -297,6 +298,16 @@ type measurerState struct {
 		css  CSSFont
 		list *faceList
 	}
+	// lastParts is the font ShapeFont resolved last, as its parts: the
+	// families (a copy), weight and style, and their candidate faces. A
+	// writer draws label after label in one font, and building the cache
+	// key joins the families into a new string each time. Under mu.
+	lastParts struct {
+		families []string
+		weight   int
+		italic   bool
+		list     *faceList
+	}
 	nextID int
 }
 
@@ -537,13 +548,23 @@ func (m *Measurer) ShapeFont(text string, font CSSFont) ([]Run, float64) {
 		font.Family = font.Family[:maxFamilies]
 	}
 	if len(font.Family) == 0 {
-		font.Family = []string{"sans-serif"}
+		font.Family = sansSerif
 	}
 	m.mu.Lock()
-	p := m.planFont(text, font, m.faces(font))
+	lp := &m.lastParts
+	list := lp.list
+	if list == nil || lp.weight != font.Weight || lp.italic != font.Italic || !slices.Equal(lp.families, font.Family) {
+		list = m.faces(font)
+		lp.families = append(lp.families[:0], font.Family...)
+		lp.weight, lp.italic, lp.list = font.Weight, font.Italic, list
+	}
+	p := m.planFont(text, font, list)
 	m.mu.Unlock()
 	return m.shapePlan(&p, true)
 }
+
+// sansSerif is the family list of a font that names none.
+var sansSerif = []string{"sans-serif"}
 
 // FontData returns the font program of a face for embedding, or nil when it
 // has none to embed. A single font in memory, embedded or given with

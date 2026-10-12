@@ -1,6 +1,7 @@
 package text
 
 import (
+	"github.com/mgilbir/aster/internal/testutil"
 	"strings"
 	"testing"
 )
@@ -55,5 +56,28 @@ func TestMeasureNumericWeight(t *testing.T) {
 		if got := m.MeasureText("Hello", font); got != want {
 			t.Errorf("MeasureText(Hello, %q) = %v, want %v (as 12px Arial)", font, got, want)
 		}
+	}
+}
+
+// TestShapeFontRepeatsFree: shaping label after label in one font of
+// several families allocates no more than in a font of one, as the string
+// path does: the candidate list of the last font is kept (building its key
+// joined the families into a new string each time).
+func TestShapeFontRepeatsFree(t *testing.T) {
+	m, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if testutil.RaceEnabled {
+		t.Skip("allocation counts are not the code's under -race (see testutil.RaceEnabled)")
+	}
+	allocs := func(f CSSFont) float64 {
+		m.ShapeFont("Hello", f)
+		return testing.AllocsPerRun(100, func() { m.ShapeFont("Hello", f) })
+	}
+	one := allocs(CSSFont{Weight: 400, Size: 12, Family: []string{"Arial"}})
+	two := allocs(CSSFont{Weight: 400, Size: 12, Family: []string{"Helvetica Neue", "Arial", "sans-serif"}})
+	if two > one {
+		t.Errorf("%v allocations a run in a font of three families, %v in one", two, one)
 	}
 }
