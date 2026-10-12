@@ -1,6 +1,7 @@
 package vega
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -530,6 +531,11 @@ func (b *boundExpr) accessor() transforms.Field {
 func (s *Scope) parseExpression(code string) *exprFn {
 	prog, err := expr.CompileCachedContext(s.opts.ctx, code)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			// The call ended while a regular expression literal waited to
+			// be compiled: the call's error, not the expression's.
+			panic(&budget.Stop{Err: err})
+		}
 		if errors.Is(err, budget.ErrLimit) {
 			perrLimit("Expression parse error: %v (in %.80q)", err, code)
 		}
