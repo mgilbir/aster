@@ -320,14 +320,23 @@ func canonicalFlags(flags string) string {
 // (ß is SS), so its length is checked and the budget charged for it once it
 // is made, with what str's length predicts charged before.
 func (s *Scope) caseMapped(str string, f func(string) string) string {
-	s.chargeBytes(len(str))
-	s.workBytes(len(str))
+	if len(str) > smallString {
+		s.chargeBytes(len(str))
+		s.workBytes(len(str))
+	}
 	out := f(str)
-	s.checkString(out)
-	if len(out) > len(str) {
-		s.chargeBytes(len(out) - len(str))
+	if len(out) > smallString && (len(out) > len(str) || len(out) > MaxStringLength) {
+		s.caseGrown(len(str), out)
 	}
 	return out
+}
+
+// caseGrown checks and charges a case mapping that came out longer.
+func (s *Scope) caseGrown(was int, out string) {
+	s.checkString(out)
+	if len(out) > was {
+		s.chargeRaw(int64(len(out) - max(was, smallString)))
+	}
 }
 
 func init() {

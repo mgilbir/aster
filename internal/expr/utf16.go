@@ -54,7 +54,15 @@ func surrogateAt(s string, i int) rune {
 // surrogate ending b and a low one starting p become the one character they
 // encode, so the result stays canonical.
 func appendJoin(b []byte, p string) []byte {
-	if n := len(b); n >= 3 && startsWithLow(p) && endsWithHigh(unsafe.String(unsafe.SliceData(b), n)) {
+	// The first byte of a lone low surrogate is ED: anything else appends.
+	if len(p) < 3 || p[0] != 0xED || len(b) < 3 || b[len(b)-3] != 0xED {
+		return append(b, p...)
+	}
+	return appendJoinSlow(b, p)
+}
+
+func appendJoinSlow(b []byte, p string) []byte {
+	if n := len(b); startsWithLow(p) && endsWithHigh(unsafe.String(unsafe.SliceData(b), n)) {
 		hi := 0xD000 | rune(b[n-2]&0x3F)<<6 | rune(b[n-1]&0x3F)
 		lo := surrogateAt(p, 0)
 		b = utf8.AppendRune(b[:n-3], 0x10000+(hi-0xD800)<<10+(lo-0xDC00))

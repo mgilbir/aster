@@ -178,13 +178,25 @@ func (b *strBuilder) String() string {
 // chainState is a strBuilder for a buffer the caller owns (a stack array,
 // which a strBuilder would make escape): concatChain's.
 type chainState struct {
-	units   int // code units once the bytes may pass MaxStringLength; 0 before
+	// fast is the length up to which an operand is a plain append: the
+	// buffer's capacity, and 0 once its length is measured in code units.
+	fast    int
+	units   int // code units once the bytes may pass MaxStringLength
 	measure bool
 	charged int
 }
 
-// add appends p to buf as strBuilder.add does.
+// add appends p to buf as strBuilder.add does. The common case, a short
+// operand that fits the buffer, is a bounds check and an append; the chain's
+// work is charged once, by done.
 func (c *chainState) add(s *Scope, buf []byte, p string) []byte {
+	if len(buf)+len(p) <= c.fast && (p == "" || p[0] != 0xED) {
+		return append(buf, p...) // within the stack buffer or a charged one
+	}
+	return c.addSlow(s, buf, p)
+}
+
+func (c *chainState) addSlow(s *Scope, buf []byte, p string) []byte {
 	if p == "" {
 		return buf
 	}
@@ -205,9 +217,15 @@ func (c *chainState) add(s *Scope, buf []byte, p string) []byte {
 		copy(nb, buf)
 		buf = nb
 	}
-	s.workBytes(len(p))
+	c.fast = min(cap(buf), MaxStringLength)
+	if c.measure {
+		c.fast = 0
+	}
 	return appendJoin(buf, p)
 }
+
+// done charges the work of the chain, a pass over what it built.
+func (c *chainState) done(s *Scope, buf []byte) { s.workBytes(len(buf)) }
 
 // appended accounts for bytes a formatter appended to buf from start on.
 func (c *chainState) appended(s *Scope, buf []byte, start int) {
@@ -222,7 +240,10 @@ func (c *chainState) appended(s *Scope, buf []byte, start int) {
 		s.chargeRaw(int64(n - c.charged))
 		c.charged = n
 	}
-	s.workBytes(len(buf) - start)
+	c.fast = min(cap(buf), MaxStringLength)
+	if c.measure {
+		c.fast = 0
+	}
 }
 
 // perItem is what one element of an array an expression builds holds: the

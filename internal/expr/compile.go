@@ -956,7 +956,7 @@ func (c *compiler) concatChain(n *Node) (node, error) {
 		// it is charged before it is made, and the length is measured in
 		// code units once its bytes could pass MaxStringLength.
 		var scratch [96]byte
-		var c chainState
+		c := chainState{fast: len(scratch)}
 		buf := c.add(s, scratch[:0], acc.StrValue())
 		for ; i < len(ops); i++ {
 			if op := &ops[i]; op.v0 != nil {
@@ -971,6 +971,7 @@ func (c *compiler) concatChain(n *Node) (node, error) {
 				buf = c.add(s, buf, s.str(s.primitive(op.f(s), false)))
 			}
 		}
+		c.done(s, buf)
 		return jsval.Str(string(buf))
 	}, nil
 }
