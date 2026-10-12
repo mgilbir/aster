@@ -58,3 +58,37 @@ func TestDataURIAndConfig(t *testing.T) {
 		t.Errorf("not an image: err = %v", err)
 	}
 }
+
+// A URL's scheme is case-insensitive (RFC 3986 3.1), as resvg's data: URL
+// parser and browsers read it: the PNG and PDF writers and the SVG stage
+// must agree on which hrefs are inline images, or an image the SVG drew is
+// sent to the Loader by the writers and fails the call (C36).
+func TestDataSchemeCaseInsensitive(t *testing.T) {
+	for _, href := range []string{"data:,a", "DATA:,a", " Data:,a", "dAtA:,a"} {
+		if !IsData(href) {
+			t.Errorf("IsData(%q) = false", href)
+		}
+		if b, err := DataURI(href, testLimits); err != nil || string(b) != "a" {
+			t.Errorf("DataURI(%q) = %q, %v", href, b, err)
+		}
+	}
+	for _, href := range []string{"data", "datax:,a", "http://data:,a", ""} {
+		if IsData(href) {
+			t.Errorf("IsData(%q) = true", href)
+		}
+	}
+	for href, want := range map[string]bool{
+		"data:image/png;base64,AA":  true,
+		"DATA:IMAGE/PNG;base64,AA":  true,
+		" data:image/jpeg,x":        true,
+		"Data:Image/Gif;x=1,x":      true,
+		"data:image/pngx,x":         false,
+		"data:image/svg+xml,<svg/>": false,
+		"data:text/plain,x":         false,
+		"https://h/data:image/png,": false,
+	} {
+		if got := InlineImage(href); got != want {
+			t.Errorf("InlineImage(%q) = %v, want %v", href, got, want)
+		}
+	}
+}

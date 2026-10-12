@@ -20,6 +20,7 @@ What changed between versions, for users of the library and the CLI. Breaking ch
 - TopoJSON decodes as topojson-client does. Without a transform, positions are the input's arrays, with their own length and their values as they are (a `null` or string coordinate stays one, where it was turned into a number and every position padded or cut to its arc's first position's length). With one, the running sums and the translation are JavaScript `+`, so a string coordinate concatenates as upstream, and a position of fewer than two numbers is padded to two. Mesh stitching matches arc ends by their JavaScript string, and an arc counts as empty by the truthiness of its second position's values.
 - A `topojson` data format with a `mesh` and no `feature` failed with "Invalid TopoJSON object: undefined"; it now decodes the mesh.
 - A graticule's point count is `d3.range`'s, a 32-bit conversion: a step so small that the count passes 2^31 is the `RangeError` upstream throws, or wraps as upstream does, instead of an `ErrLimit`.
+- PNG and PDF read an image URL whose scheme is upper case (`DATA:image/png;…`) as the inline image the SVG writer drew, instead of sending it to the Loader and failing the call.
 
 ### Bounds are charged where the work happens ([ADR 0010](docs/adr/0010-bounds-charged-where-work-happens.md))
 

@@ -29,6 +29,7 @@ import (
 
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/fontsubset"
+	"github.com/mgilbir/aster/internal/imageref"
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/pngopt"
 	"github.com/mgilbir/aster/internal/raster"
@@ -525,7 +526,7 @@ func (c *Converter) renderSVG(ctx context.Context, spec jsval.Value) (out string
 			return svg.ImageInfo{}
 		}
 		u := url
-		if !inlineImage(url) {
+		if !imageref.InlineImage(url) {
 			var err error
 			if u, err = c.cfg.loader.Sanitize(ctx, url); err != nil {
 				rep.image(url, err)
@@ -568,18 +569,6 @@ func (c *Converter) checkSpecSize(spec []byte) error {
 		return fmt.Errorf("aster: %w: the specification is too large for the memory limit (%d bytes, at most %d)", ErrLimit, len(spec), limit)
 	}
 	return nil
-}
-
-// inlineImage reports whether url is a data: URI of an image format the
-// engine draws.
-func inlineImage(url string) bool {
-	u := strings.ToLower(strings.TrimSpace(url))
-	for _, t := range []string{"data:image/png", "data:image/jpeg", "data:image/gif"} {
-		if rest, ok := strings.CutPrefix(u, t); ok && (strings.HasPrefix(rest, ";") || strings.HasPrefix(rest, ",")) {
-			return true
-		}
-	}
-	return false
 }
 
 // randomSeed seeds Vega's random() and every transform that samples.
