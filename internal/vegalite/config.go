@@ -351,7 +351,7 @@ func initConfig(cc *compileCtx, specified Value) Value {
 	}
 	color, font, fontSize, selection := specified.Get("color"), specified.Get("font"), specified.Get("fontSize"), specified.Get("selection")
 	rest := omit(specified, "color", "font", "fontSize", "selection")
-	parts := []Value{jsval.Obj(jsval.NewObject(0)), deepClone(cc, jsval.Obj(defaultConfig(cc)))}
+	parts := []Value{jsval.Obj(jsval.NewObject(0)), duplicate(cc, jsval.Obj(defaultConfig(cc)))}
 	if font.IsTruthy() {
 		parts = append(parts, jsval.Obj(fontConfig(font)))
 	}
@@ -461,7 +461,7 @@ func vlOnlyMarkSpecificConfig(cc *compileCtx, markType string) []string {
 // stripAndRedirectConfig removes Vega-Lite-only config and moves mark configs
 // into Vega style configs; it returns undefined when nothing is left.
 func stripAndRedirectConfig(cc *compileCtx, cfg Value) Value {
-	c := deepClone(cc, cfg).ObjValue()
+	c := duplicate(cc, cfg).ObjValue()
 	for _, p := range vlOnlyConfigProperties {
 		c.Delete(p)
 	}
@@ -488,7 +488,7 @@ func stripAndRedirectConfig(cc *compileCtx, cfg Value) Value {
 			mo.Delete("tooltip")
 		}
 	}
-	if params := c.Lookup("params"); !params.IsUndefined() {
+	if params := c.Lookup("params"); params.IsTruthy() { // if (config.params)
 		// (config.signals || []).concat(...): a string concatenates the
 		// signals' text; anything else that is not an array has no concat.
 		cur := c.Lookup("signals")

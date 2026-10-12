@@ -587,9 +587,14 @@ func uniqueStrings(in []string) []string {
 	return out
 }
 
-func isNumericString(s string) bool {
-	f := jsval.StringToNumber(s)
-	return !math.IsNaN(f) && !math.IsNaN(parseFloatPrefix(s))
+// isNumericV is upstream's isNumeric of any value: a number, or a value
+// that isNaN (ToNumber) and parseFloat (of its text) both read as a number,
+// so [[1]] and "1" are numeric and true and null are not.
+func isNumericV(v Value) bool {
+	if v.IsNum() {
+		return true
+	}
+	return !math.IsNaN(jsval.ToNumber(v)) && !math.IsNaN(parseFloatPrefix(v.AsString()))
 }
 
 func parseFloatPrefix(s string) float64 {

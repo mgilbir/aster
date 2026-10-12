@@ -18,7 +18,7 @@ make check                                  # every gate CI runs (scripts/check.
 
 ```mermaid
 flowchart LR
-  C["corpus 1,423 specs<br/>+ sweeps + external corpora"] --> E["engine"]
+  C["corpus 1,427 specs<br/>+ sweeps + external corpora"] --> E["engine"]
   C --> N["upstream in node<br/>(internal/oracle)"]
   N <--> K[("testdata/oracle-cache")]
   E --> D["internal/svgdiff<br/>structure; numbers ±0.5 px"]
@@ -35,7 +35,7 @@ The SVG is compared structurally: element tree, attributes, and numbers within h
 
 ## The corpus
 
-`TestCompareWithNode` (`compare_test.go`) runs over 1,423 specs: 260 Vega fixtures, 332 Vega-Lite fixtures, Vega's 92 example specs, the 627 Vega-Lite examples, 23 vl-convert specs, and 89 fuzz-found regressions (`testdata/corpus/regress`). The specs it does not match are listed with the reason in `testdata/oracle-expect.txt`. All five entries depend on the platform node runs on (emoji measurement in macOS's Pango, d3-cloud's rasterization, V8's last-bit trigonometry on x86-64). So the count that matches is 1,420 on macOS/arm64 and 1,421 on Linux/x86-64. The compiled Vega is identical to upstream's for every Vega-Lite spec.
+`TestCompareWithNode` (`compare_test.go`) runs over 1,427 specs: 260 Vega fixtures, 332 Vega-Lite fixtures, Vega's 92 example specs, the 627 Vega-Lite examples, 23 vl-convert specs, and 93 regressions (`testdata/corpus/regress`). The specs it does not match are listed with the reason in `testdata/oracle-expect.txt`. Five of its six entries depend on the platform node runs on (emoji measurement in macOS's Pango, d3-cloud's rasterization, V8's last-bit trigonometry on x86-64); the sixth is a chart node's renderer cannot draw (upstream's compiler writes onto `Object.prototype` for a field named `__proto__`, and node's Vega then overflows its stack). So the count that matches is 1,423 on macOS/arm64 and 1,424 on Linux/x86-64. The compiled Vega is identical to upstream's for every Vega-Lite spec.
 
 `go test -run TestCompareWithNode -v . -args -compare.report=/tmp/report.md` writes a per-spec report. `-compare.run name` compares one spec.
 
@@ -55,6 +55,20 @@ Beyond the corpus, the same comparison runs over generated and collected inputs.
 | `TestCorpusDeneb` | 62 | 62 | Deneb's templates and examples (pinned) |
 
 All of them agree with upstream except a handful of CJK and emoji cases, where neither side has the glyphs and what node measures depends on the platform's font fallback. `scripts/fetch-corpora.sh` fetches the two external corpora (`-sweep.report dir` writes per-case TSVs).
+
+## The type-confusion differential
+
+`TestVegaLiteTypeConfusionMatchesNode` (`vltypeconfusion_oracle_test.go`) replaces one value of a corpus spec (`internal/vegalite/testdata/specs`) with a value of another type and compiles the mutant with the engine and with node, for Vega-Lite 6.4 and 5.8. The engine must fail where node throws, compile where node compiles, log node's warnings in order and count, and produce node's compiled Vega exactly ([ADR 0013](adr/0013-invalid-input-fails-where-upstream-throws.md)). Flags: `-typeconfusion.seed`, `-typeconfusion.n` (mutants; 1,500 by default), `-typeconfusion.budget` (stop after a duration) and `-typeconfusion.dump dir` (writes the first mutant of each difference as `NNNN-VERSION.json`, with its description in `.key`). The suite runs the default seed; seeds 7, 11, 13, 17, 43, 47, 53, 59, 61 and 67 (10,000 mutants each) also report no difference.
+
+The search is continuous: the `typeconfusion` job of `.github/workflows/fuzz.yml` runs it nightly with a new seed (the day number), as many mutants as its budget allows, against node 24 with a cold oracle cache, and uploads the dumped mutants as the `typeconfusion-seed-N` artifact when it finds a difference. A manual run of the workflow can name the seed and the budget.
+
+To turn a found divergence into a regression case:
+
+1. Reproduce it: `ASTER_ORACLE=require go test -run 'TestVegaLiteTypeConfusionMatchesNode$' . -args -typeconfusion.seed N -typeconfusion.n M -typeconfusion.dump /tmp/tc` (`M` at least the run's mutant count, which the log reports), or take the mutant from the artifact.
+2. Copy the mutant to `testdata/typeconfusion/`, named for what it changes, with the seed and the version: `repeat-null-seed43-6.4.json`. `TestTypeConfusionRegressionsMatchNode` replays every file there against node, so the case stays covered whatever the corpus becomes; check that it fails.
+3. Find where upstream diverges: compile the mutant in node with the stack of the throw, or diff the compiled Vega (`firstJSONDiff` names the first difference), and read the upstream source at that site (both versions: 5.8's predicates often differ from 6.4's).
+4. Mirror upstream's JavaScript there, as ADR 0013 describes: the TypeError with its text, the conversion a template or an operator applies, the plain-object semantics of a map keyed by name (`jsRealm`). Fix the class, not the instance: grep upstream for the same idiom.
+5. Check that the regression passes and the seeds above still report no difference; a spec worth keeping in the rendered corpus as well goes to `testdata/corpus/regress`.
 
 ## Upstream's own test suites
 

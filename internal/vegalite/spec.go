@@ -19,7 +19,7 @@ func isAnyConcatSpec(s Value) bool {
 func isLayerRepeatSpec(cc *compileCtx, s Value) bool {
 	if cc.v5 {
 		// 5.8: spec.repeat['layer'] is truthy.
-		return !s.Get("repeat").IsArr() && s.Get("repeat").Get("layer").IsTruthy()
+		return !s.Get("repeat").IsArr() && jsGet(s.Get("repeat"), "layer").IsTruthy()
 	}
 	return !s.Get("repeat").IsArr() && hasProperty(s.Get("repeat"), "layer")
 }

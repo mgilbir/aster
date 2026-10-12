@@ -118,6 +118,9 @@ func lazyFn(o *Object) (func() string, bool) {
 
 // signalOf reads ref.signal, evaluating a lazy signal.
 func signalOf(v Value) string {
+	if v.IsNullish() { // ref.signal of no ref
+		throw("Cannot read properties of %s (reading 'signal')", nullishName(v))
+	}
 	if v.IsObj() {
 		if fn, ok := lazyFn(v.ObjValue()); ok {
 			return fn()

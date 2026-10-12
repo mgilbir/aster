@@ -340,7 +340,7 @@ func normalizeChannelDefCompat(obj Value, p *normParams) Value {
 	if !obj.IsObj() {
 		return obj
 	}
-	enc := deepClone(cc, obj)
+	enc := duplicate(cc, obj)
 	eo := enc.ObjValue()
 	if isFieldDef(cc, enc) && isObject(enc.Get("bin")) {
 		eo.Set("bin", normalizeBinExtent(enc.Get("bin")))
@@ -671,12 +671,13 @@ func (n *coreNormalizer) mapNonLayerRepeat(spec Value, p *normParams) Value {
 	var rows, cols, repeatValues []Value
 	// for (const rowValue of row): a string's characters, and anything
 	// else that is not an array is not iterable.
-	if !repeat.IsArr() && repeat.Get("row").IsTruthy() {
+	// (!isArray(repeat) && repeat.row): a TypeError of a null repeat.
+	if !repeat.IsArr() && jsGet(repeat, "row").IsTruthy() {
 		rows = iterate(repeat.Get("row"), "row")
 	} else {
 		rows = single(repeater.Get("row"))
 	}
-	if !repeat.IsArr() && repeat.Get("column").IsTruthy() {
+	if !repeat.IsArr() && jsGet(repeat, "column").IsTruthy() {
 		cols = iterate(repeat.Get("column"), "column")
 	} else {
 		cols = single(repeater.Get("column"))

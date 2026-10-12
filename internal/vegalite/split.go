@@ -290,14 +290,24 @@ func (j *jsObj) tidy() {
 // JavaScript's order, each value cloned.
 func (j *jsObj) deepCloneInto(cc *compileCtx, c *jsObj) {
 	j.tidy()
+	v5 := cc != nil && cc.v5
+	if v5 {
+		// 5.8's duplicate is the clone package: it keeps the prototype and
+		// leaves out the keys Object.prototype holds (skipsInClone58);
+		// structuredClone (6.4) does neither.
+		c.proto = j.proto
+	}
 	if len(j.es) == 0 {
 		return
 	}
-	c.es = make([]jsObjEntry, len(j.es))
-	for i, e := range j.es {
-		c.es[i] = jsObjEntry{k: e.k, v: deepClone(cc, e.v)}
+	c.es = make([]jsObjEntry, 0, len(j.es))
+	for _, e := range j.es {
+		if v5 && skipsInClone58(cc, e.k) {
+			continue
+		}
+		c.es = append(c.es, jsObjEntry{k: e.k, v: duplicate(cc, e.v)})
 	}
-	c.live = len(j.es)
+	c.live = len(c.es)
 	c.reindex()
 }
 

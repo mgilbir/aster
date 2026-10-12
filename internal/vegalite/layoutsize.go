@@ -189,7 +189,7 @@ func sizeSignals(m Model, sizeType string) []Value {
 	if (!cc.v5 && size.IsNullish()) || (cc.v5 && !size.IsTruthy()) || (size.IsStr() && size.StrValue() == "merged") {
 		return nil
 	}
-	name := signalOf(b.getSizeSignalRef(sizeType))
+	name := signalOf(b.getSizeSignalRef(sizeType)) // .signal: a TypeError of null
 	if size.IsStr() && size.StrValue() == "step" {
 		sc := b.getScaleComponent(channel)
 		if sc != nil {

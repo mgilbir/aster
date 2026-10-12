@@ -61,7 +61,7 @@ func newParseNode(parent dfNode, parse *Object) *parseNode {
 }
 
 func (n *parseNode) clone() dfNode {
-	return initNode(&parseNode{parse: deepClone(n.cc, jsval.Obj(n.parse)).ObjValue()}, nil)
+	return initNode(&parseNode{parse: duplicate(n.cc, jsval.Obj(n.parse)).ObjValue()}, nil)
 }
 func (n *parseNode) hash() string { return "Parse " + hashOf(n.cc, jsval.Obj(n.parse)) }
 func (n *parseNode) producedFields() *sset {
@@ -279,7 +279,7 @@ func newCalculateNode(parent dfNode, transform Value) *calculateNode {
 	return initNode(&calculateNode{transform: transform, dep: getDependentFields(ccOf(parent), exprSource(transform.Get("calculate")))}, parent)
 }
 func (n *calculateNode) clone() dfNode {
-	return initNode(&calculateNode{transform: deepClone(n.cc, n.transform), dep: getDependentFields(n.cc, n.transform.Get("calculate").AsString())}, nil)
+	return initNode(&calculateNode{transform: duplicate(n.cc, n.transform), dep: getDependentFields(n.cc, n.transform.Get("calculate").AsString())}, nil)
 }
 
 // exprSource is an expression upstream hands to vega-expression's parser,
@@ -353,7 +353,7 @@ func newFilterNode(parent dfNode, m Model, filter Value) *filterNode {
 	n.dep = getDependentFields(m.b().ctx, n.expr)
 	return n
 }
-func (n *filterNode) clone() dfNode          { return newFilterNode(nil, n.model, deepClone(n.cc, n.filter)) }
+func (n *filterNode) clone() dfNode          { return newFilterNode(nil, n.model, duplicate(n.cc, n.filter)) }
 func (n *filterNode) dependentFields() *sset { return n.dep }
 func (n *filterNode) producedFields() *sset  { return newSset() }
 func (n *filterNode) hash() string           { return "Filter " + n.expr }

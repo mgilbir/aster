@@ -420,7 +420,7 @@ func isDateTime(v Value) bool {
 }
 
 func normalizeNamed(v Value, names []string, what string) float64 {
-	if v.IsStr() && isNumericString(v.StrValue()) {
+	if isNumericV(v) { // if (isNumeric(m)) m = +m
 		v = jsval.Num(jsval.ToNumber(v))
 	}
 	if v.IsNum() {
@@ -433,7 +433,8 @@ func normalizeNamed(v Value, names []string, what string) float64 {
 		throw("Cannot read properties of %s (reading 'toLowerCase')", nullishName(v))
 	}
 	if !v.IsStr() {
-		throw("%s", msgInvalidTimeUnit(nil, what, v))
+		// m.toLowerCase() (d for a day) of a value that is not a string.
+		throw("%s.toLowerCase is not a function", what[:1])
 	}
 	lower := strings.ToLower(v.StrValue())
 	for i, n := range names {
@@ -490,7 +491,7 @@ func dateTimeParts(cc *compileCtx, d Value, normalize bool) []string {
 	case !d.Get("quarter").IsUndefined():
 		q := d.Get("quarter")
 		if normalize {
-			if q.IsStr() && isNumericString(q.StrValue()) {
+			if isNumericV(q) {
 				q = jsval.Num(jsval.ToNumber(q))
 			}
 			if !q.IsNum() {
@@ -514,7 +515,7 @@ func dateTimeParts(cc *compileCtx, d Value, normalize bool) []string {
 	case !d.Get("day").IsUndefined():
 		day := d.Get("day")
 		if normalize {
-			if day.IsStr() && isNumericString(day.StrValue()) {
+			if isNumericV(day) {
 				day = jsval.Num(jsval.ToNumber(day))
 			}
 			var f float64
@@ -566,6 +567,9 @@ type titleConfigParts struct {
 }
 
 func extractTitleConfig(tc Value) titleConfigParts {
+	if tc.IsNullish() { // const {anchor, …} = titleConfig
+		throw("Cannot destructure property 'anchor' of 'titleConfig' as it is %s.", nullishName(tc))
+	}
 	rest := omit(tc, "anchor", "frame", "offset", "orient", "angle", "limit", "color", "subtitleColor",
 		"subtitleFont", "subtitleFontSize", "subtitleFontStyle", "subtitleFontWeight", "subtitleLineHeight", "subtitlePadding")
 	titleMark := cloneObj(rest)

@@ -31,7 +31,7 @@ func newBinNode(parent dfNode, bins *omap[*binComponent]) *binNode {
 
 func (b *binComponent) clone(cc *compileCtx) *binComponent {
 	c := *b
-	c.bin = deepClone(cc, b.bin)
+	c.bin = duplicate(cc, b.bin)
 	c.as = make([][]Value, len(b.as))
 	for i, a := range b.as {
 		c.as[i] = append([]Value(nil), a...)
@@ -309,7 +309,7 @@ func (n *timeUnitNode) clone() dfNode {
 	c := newOmap[*Object]()
 	for _, k := range n.timeUnits.keysView() {
 		cc.work(1)
-		c.set(k, deepClone(n.cc, jsval.Obj(n.timeUnits.m[k])).ObjValue())
+		c.set(k, duplicate(n.cc, jsval.Obj(n.timeUnits.m[k])).ObjValue())
 	}
 	return initNode(&timeUnitNode{timeUnits: c}, nil)
 }
@@ -580,13 +580,21 @@ func newAggregateNode(parent dfNode, dims *sset, measures *omap[*omap[*sset]]) *
 	return initNode(&aggregateNode{dimensions: dims, measures: measures}, parent)
 }
 
+// cloneMeasures is duplicate(this.measures): 5.8's clone package leaves
+// out a field or an op Object.prototype holds (see skipsInClone58).
 func cloneMeasures(cc *compileCtx, m *omap[*omap[*sset]]) *omap[*omap[*sset]] {
 	c := newOmap[*omap[*sset]]()
 	for _, f := range m.keysView() {
 		cc.work(1)
+		if cc.v5 && skipsInClone58(cc, f) {
+			continue
+		}
 		ops := newOmap[*sset]()
 		for _, op := range m.m[f].keysView() {
 			cc.work(1)
+			if cc.v5 && skipsInClone58(cc, op) {
+				continue
+			}
 			ops.set(op, m.m[f].m[op].clone())
 		}
 		c.set(f, ops)

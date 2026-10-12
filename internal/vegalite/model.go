@@ -129,6 +129,7 @@ type modelBase struct {
 	self        Model
 	typ         string
 	name        string
+	nameFalsy   bool // the spec's name is a falsy value with text (0, false)
 	parent      Model
 	config      Value
 	size        *Object
@@ -154,6 +155,7 @@ func newModelBase(cc *compileCtx, self Model, spec Value, typ string, parent Mod
 	}
 	if n := spec.Get("name"); !n.IsNullish() {
 		m.name = n.AsString()
+		m.nameFalsy = !n.IsTruthy()
 	} else {
 		m.name = parentGivenName
 	}
@@ -241,8 +243,9 @@ func asUnit(m Model) *unitModel {
 }
 
 func (m *modelBase) getName(text string) string {
+	// (this.name ? `${this.name}_` : ''): a name of 0 or false is no prefix.
 	prefix := ""
-	if m.name != "" {
+	if m.name != "" && !m.nameFalsy {
 		prefix = m.name + "_"
 	}
 	return varName(prefix + text)

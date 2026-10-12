@@ -33,7 +33,7 @@ var xformHashPrefix = map[string]string{
 
 func (n *xformNode) clone() dfNode {
 	c := &xformNode{kind: n.kind, secondary: n.secondary}
-	v := deepClone(n.cc, n.tv())
+	v := duplicate(n.cc, n.tv())
 	c.transform = &v
 	initNode(c, nil)
 	return c
@@ -489,7 +489,7 @@ func makeImputeFromEncoding(parent dfNode, m *unitModel) dfNode {
 // ---- transform constructors that normalize their input ----
 
 func newDensityNode(cc *compileCtx, parent dfNode, t Value) dfNode {
-	t = deepClone(ccOf(parent), t)
+	t = duplicate(ccOf(parent), t)
 	as := t.Get("as")
 	o := cloneObj(t.ObjValue())
 	o.Set("as", arr(coalesce(jsIndex(as, 0), jsval.Str("value")), coalesce(jsIndex(as, 1), jsval.Str("density"))))
@@ -505,7 +505,7 @@ func newDensityNode(cc *compileCtx, parent dfNode, t Value) dfNode {
 }
 
 func newFoldNode(parent dfNode, t Value) dfNode {
-	t = deepClone(ccOf(parent), t)
+	t = duplicate(ccOf(parent), t)
 	as := t.Get("as")
 	o := cloneObj(t.ObjValue())
 	o.Set("as", arr(coalesce(jsIndex(as, 0), jsval.Str("key")), coalesce(jsIndex(as, 1), jsval.Str("value"))))
@@ -514,7 +514,7 @@ func newFoldNode(parent dfNode, t Value) dfNode {
 
 func newFlattenNode(parent dfNode, t Value) dfNode {
 	cc := ccOf(parent)
-	t = deepClone(ccOf(parent), t)
+	t = duplicate(ccOf(parent), t)
 	as := t.Get("as")
 	var out []Value
 	for i, f := range listOf(t.Get("flatten"), "flatten", "map") {
@@ -527,7 +527,7 @@ func newFlattenNode(parent dfNode, t Value) dfNode {
 }
 
 func newQuantileNode(parent dfNode, t Value) dfNode {
-	t = deepClone(ccOf(parent), t)
+	t = duplicate(ccOf(parent), t)
 	as := t.Get("as")
 	o := cloneObj(t.ObjValue())
 	o.Set("as", arr(coalesce(jsIndex(as, 0), jsval.Str("prob")), coalesce(jsIndex(as, 1), jsval.Str("value"))))
@@ -535,7 +535,7 @@ func newQuantileNode(parent dfNode, t Value) dfNode {
 }
 
 func newRegressionNode(parent dfNode, t Value, kind string, field string) dfNode {
-	t2 := deepClone(ccOf(parent), t)
+	t2 := duplicate(ccOf(parent), t)
 	as := t2.Get("as")
 	o := cloneObj(t2.ObjValue())
 	o.Set("as", arr(coalesce(jsIndex(as, 0), t.Get("on")), coalesce(jsIndex(as, 1), t.Get(field))))
@@ -626,7 +626,7 @@ func (n *stackNode) clone() dfNode {
 	c.facetby = append([]string(nil), n.st.facetby...)
 	c.stackby = append([]string(nil), n.st.stackby...)
 	c.as = append([]string(nil), n.st.as...)
-	c.sort = deepClone(n.cc, n.st.sort)
+	c.sort = duplicate(n.cc, n.st.sort)
 	return initNode(&stackNode{st: &c}, nil)
 }
 
@@ -872,7 +872,7 @@ func newGeoJSONNode(parent dfNode, fields Value, geojson Value, signal string) *
 }
 
 func (n *geoJSONNode) clone() dfNode {
-	return initNode(&geoJSONNode{fields: deepClone(n.cc, n.fields), geojson: n.geojson, signal: n.signal}, nil)
+	return initNode(&geoJSONNode{fields: duplicate(n.cc, n.fields), geojson: n.geojson, signal: n.signal}, nil)
 }
 func (n *geoJSONNode) dependentFields() *sset {
 	cc := n.cc
@@ -960,7 +960,7 @@ func newGeoPointNode(parent dfNode, projection string, fields Value, as []string
 	return initNode(&geoPointNode{projection: projection, fields: fields, as: as}, parent)
 }
 func (n *geoPointNode) clone() dfNode {
-	return initNode(&geoPointNode{projection: n.projection, fields: deepClone(n.cc, n.fields), as: append([]string(nil), n.as...)}, nil)
+	return initNode(&geoPointNode{projection: n.projection, fields: duplicate(n.cc, n.fields), as: append([]string(nil), n.as...)}, nil)
 }
 func (n *geoPointNode) dependentFields() *sset {
 	cc := n.cc

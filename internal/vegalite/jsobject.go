@@ -402,3 +402,47 @@ func jsSeen(cc *compileCtx, seen map[string]bool, k string) bool {
 	}
 	return cc != nil && cc.jsr != nil && cc.jsr.host("").props.has(k)
 }
+
+// skipsInClone58 says whether 5.8's duplicate (the clone package) leaves out
+// an object's key: it copies by for…in but skips a key Object.prototype holds
+// as a data property, its members ("toString", "constructor", …) and
+// anything written there in this compilation; "__proto__" goes through the
+// setter, so it never becomes the copy's own key either.
+func skipsInClone58(cc *compileCtx, key string) bool {
+	if isInheritedKey(key) {
+		return true
+	}
+	return cc != nil && cc.jsr != nil && cc.jsr.host("").props.has(key)
+}
+
+// duplicate is upstream's duplicate: structuredClone in 6.4, the clone
+// package in 5.8 (see skipsInClone58).
+func duplicate(cc *compileCtx, v Value) Value {
+	if cc == nil || !cc.v5 {
+		return deepClone(cc, v)
+	}
+	cc.work(1)
+	switch v.Kind() {
+	case jsval.KindArr:
+		items := v.Items()
+		out := make([]Value, len(items))
+		for i, it := range items {
+			out[i] = duplicate(cc, it)
+		}
+		return jsval.Arr(out)
+	case jsval.KindObj:
+		if jsval.IsFunction(v) {
+			return v
+		}
+		o := v.ObjValue()
+		c := jsval.NewObject(o.Len())
+		for i := 0; i < o.Len(); i++ {
+			if k := o.KeyAt(i); !skipsInClone58(cc, k) {
+				c.Set(k, duplicate(cc, o.ValueAt(i)))
+			}
+		}
+		jsOrderKeys(cc, c)
+		return jsval.Obj(c)
+	}
+	return v
+}

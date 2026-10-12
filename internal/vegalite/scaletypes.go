@@ -121,8 +121,16 @@ func isExtendedScheme(cc *compileCtx, v Value) bool {
 }
 
 func isParameterDomain(v Value) bool { return hasProperty(v, "param") }
-func isDomainUnionWith(v Value) bool { return hasProperty(v, "unionWith") }
-func isFieldRange(v Value) bool      { return isObject(v) && v.IsObj() && v.ObjValue().Has("field") }
+
+// isDomainUnionWith is hasProperty(domain, 'unionWith') in 6.4; 5.8 reads
+// domain?.['unionWith'], so a falsy unionWith is no union.
+func isDomainUnionWith(cc *compileCtx, v Value) bool {
+	if cc != nil && cc.v5 {
+		return !v.IsNullish() && jsProp(v, "unionWith").IsTruthy()
+	}
+	return hasProperty(v, "unionWith")
+}
+func isFieldRange(v Value) bool { return isObject(v) && v.IsObj() && v.ObjValue().Has("field") }
 
 // nonTypeDomainRangeVegaScaleProperties drops type, domain, range, rangeMax,
 // rangeMin and scheme.

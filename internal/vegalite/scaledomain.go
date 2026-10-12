@@ -113,7 +113,7 @@ func normalizeUnaggregatedDomain(cc *compileCtx, domain Value, fd Value, scaleTy
 			cc.warn(reason)
 			return undef
 		}
-	} else if domain.IsUndefined() && scaleConfig.Get("useUnaggregatedDomain").IsTruthy() {
+	} else if domain.IsUndefined() && jsGet(scaleConfig, "useUnaggregatedDomain").IsTruthy() {
 		if ok, _ := canUseUnaggregatedDomain(cc, fd, scaleType); ok {
 			return jsval.Str("unaggregated")
 		}
@@ -175,7 +175,7 @@ func parseSingleChannelDomain(scaleType string, domain Value, u *unitModel, chan
 		dsType = getScaleDataSourceForHandlingInvalidValues(getMarkConfig("invalid", markDef, config, ""), isPathMarkName(mark))
 	}
 	switch {
-	case isDomainUnionWith(domain):
+	case isDomainUnionWith(cc, domain):
 		def := parseSingleChannelDomain(scaleType, undef, u, channel)
 		union := convertDomainIfItIsDateTime(cc, domain.Get("unionWith"), typ, timeUnit)
 		return makeExplicit(jsval.Arr(append(append([]Value{}, union...), def.value.Items()...)))

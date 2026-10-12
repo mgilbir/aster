@@ -45,6 +45,20 @@ type selProjItem struct {
 }
 
 // fieldPath is replacePathInField(p.field).
+// legendBound is proj.hasLegend: the projection's own flag, else what
+// Object.prototype holds under that name, which a legend over a field named
+// "__proto__" writes there (see jsRealm) for every projection to inherit.
+func (p *selProjItem) legendBound(cc *compileCtx) bool {
+	if p.hasLegend {
+		return true
+	}
+	if cc == nil || cc.jsr == nil {
+		return false
+	}
+	v, ok := cc.jsr.host("").props.get("hasLegend")
+	return ok && jsRefTruthy(jsRef{found: true, val: v})
+}
+
 // fieldValue is the projection's field as upstream holds it.
 func (p *selProjItem) fieldValue() Value {
 	if !p.fieldV.IsUndefined() {
@@ -193,7 +207,7 @@ func parseUnitSelection(m *unitModel, selDefs []Value) *omap[*selectionComponent
 		}
 		var defaults *Object
 		if isObject(selDef) {
-			defaults = deepClone(cc, selDef).ObjValue()
+			defaults = duplicate(cc, selDef).ObjValue()
 		} else {
 			defaults = mk("type", typ)
 		}
@@ -208,7 +222,7 @@ func parseUnitSelection(m *unitModel, selDefs []Value) *omap[*selectionComponent
 			}
 			dv := defaults.Lookup(key)
 			if dv.IsUndefined() || (dv.IsBool() && dv.BoolValue()) {
-				defaults.Set(key, deepClone(cc, coalesce(cfg.Get(key), dv)))
+				defaults.Set(key, duplicate(cc, coalesce(cfg.Get(key), dv)))
 			}
 		}
 		props := cloneObj(defaults)
@@ -219,7 +233,7 @@ func parseUnitSelection(m *unitModel, selDefs []Value) *omap[*selectionComponent
 		if on := defaults.Lookup("on"); on.IsStr() {
 			props.Set("events", jsval.Arr(parseSelector(on.StrValue(), "scope")))
 		} else {
-			props.Set("events", jsval.Arr(arrayOf(deepClone(cc, on))))
+			props.Set("events", jsval.Arr(arrayOf(duplicate(cc, on))))
 		}
 		sc := &selectionComponent{cc: cc, name: name, typ: typ, props: props, project: &selProjection{
 			hasChannel: newOmap[*selProjItem](), hasField: newOmap[*selProjItem](),
@@ -232,7 +246,7 @@ func parseUnitSelection(m *unitModel, selDefs []Value) *omap[*selectionComponent
 				continue
 			}
 		}
-		defClone := deepClone(cc, def)
+		defClone := duplicate(cc, def)
 		for _, c := range selectionCompilers {
 			if c.defined(sc) && c.parse != nil {
 				c.parse(m, sc, defClone)
@@ -1768,7 +1782,7 @@ var legendsCompiler = selectionCompiler{
 	},
 	parse: func(m *unitModel, sel *selectionComponent, selDef Value) {
 		cc := m.ctx
-		selDef2 := deepClone(m.ctx, selDef)
+		selDef2 := duplicate(m.ctx, selDef)
 		if s := selDef2.Get("select"); s.IsStr() {
 			selDef2.ObjValue().Set("select", mkv("type", s, "toggle", sel.props.Lookup("toggle")))
 		} else {
@@ -1823,14 +1837,14 @@ var legendsCompiler = selectionCompiler{
 		markName := func(name string) func(Value) Value {
 			return func(s Value) Value {
 				// ds.markname = name
-				ds := deepClone(m.b().ctx, s)
+				ds := duplicate(m.b().ctx, s)
 				jsSetProp(ds, "markname", jsval.Str(name))
 				return ds
 			}
 		}
 		for _, proj := range sel.project.items {
 			cc.work(1)
-			if !proj.hasLegend {
+			if !proj.legendBound(cc) {
 				continue
 			}
 			prefix := varName(proj.field) + "_legend"
@@ -1864,7 +1878,7 @@ var legendsCompiler = selectionCompiler{
 		var values, valid []string
 		for _, p := range sel.project.items {
 			cc.work(1)
-			if p.hasLegend {
+			if p.legendBound(cc) {
 				values = append(values, varName(name+"_"+varName(p.field)+"_legend"))
 			}
 		}
