@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/mgilbir/aster/internal/vega"
 )
@@ -28,9 +29,35 @@ func reportFrom(ctx context.Context) *callReport {
 	return r
 }
 
+// maxWarningText is the most bytes of a warning's text the handler hears:
+// warnings carry text from the specification (a field name, a transform, an
+// expression's arguments), from Vega, from the Vega-Lite compiler or from a
+// refused link, and every one passes through decide (docs/limits.md,
+// "warnings"). Vega cuts its own to the same length, with the same rule, so
+// that it counts distinct warnings by what the handler will see.
+const maxWarningText = 1024
+
+// cutWarning is s cut to at most maxWarningText bytes, at a character
+// boundary, with an ellipsis when anything was cut. It is internal/vega's
+// cutText, and like it, cutting a cut text again changes nothing.
+func cutWarning(s string) string {
+	n := maxWarningText
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n] + "…"
+}
+
 // decide is the handler's answer for err; without a handler a Warning goes on
-// and anything else ends the call.
+// and anything else ends the call. A Warning reaches the handler cut to
+// maxWarningText.
 func (r *callReport) decide(err error) error {
+	if w, ok := err.(Warning); ok {
+		err = Warning(cutWarning(string(w)))
+	}
 	if r == nil || r.handler == nil {
 		var w Warning
 		if errors.As(err, &w) {

@@ -51,7 +51,7 @@ svg, err := c.VegaLiteToSVG(spec, aster.WithErrorHandler(func(err error) error {
 
 `LoadError.Err` is the Loader's own error (for example the `HTTPLoader`'s "private/loopback address (blocked)"), so `errors.Is` reaches errors your Loader returns. When the handler lets a failure go, the result is upstream's: the data set is empty (or, for a body that does not parse, the text as one value), and the image is undrawn. A `null` row in a loaded JSON body leaves the data set empty: upstream's view never finishes rendering it, so there is no upstream result to match.
 
-Warnings carry text from the specification and repeat in every cell of a faceted group, so the handler hears of each distinct warning once per call, its text cut to 1 KiB, and of at most 256 of them; the 257th says that the rest are not reported. Errors are each reported. An expression's `info()` and `debug()` are below the warning level and are not reported, as upstream's logger drops them at its warning level.
+Warnings carry text from the specification, so every warning reaches the handler with its text cut to 1 KiB. Vega's repeat in every cell of a faceted group, so the handler hears of each distinct Vega warning once per call, and of at most 256 of them; the 257th says that the rest are not reported. The Vega-Lite compiler's are told as often as upstream logs them. Errors are each reported. An expression's `info()` and `debug()` are below the warning level and are not reported, as upstream's logger drops them at its warning level.
 
 Embedded PNG, JPEG and GIF images (`data:image/png;base64,…`, and `image/jpeg`, `image/gif`) are part of the specification, not resources: they need no Loader, and draw with the default one. Any other `data:` URL goes through the Loader like a remote one.
 

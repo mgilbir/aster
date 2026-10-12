@@ -59,10 +59,12 @@ func (e *LoadError) Error() string {
 func (e *LoadError) Unwrap() error { return e.Err }
 
 // Warning is a message Vega logs as a warning ("Infinite extent for field
-// ...", "Unsupported scale property: ...", an expression's warn()), or a link
-// the Loader refused and the output therefore lacks. A warning never fails a
-// render by itself; it is only seen through WithErrorHandler, once per
-// distinct text and call (see docs/errors.md).
+// ...", "Unsupported scale property: ...", an expression's warn()), one the
+// Vega-Lite compiler logs, or a link the Loader refused and the output
+// therefore lacks. A warning never fails a
+// render by itself; it is only seen through WithErrorHandler, its text cut
+// to 1 KiB, a Vega warning once per distinct text and call (see
+// docs/errors.md).
 type Warning string
 
 func (w Warning) Error() string { return string(w) }

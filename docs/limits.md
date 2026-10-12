@@ -66,7 +66,7 @@ Fixed bounds, the same whatever `WithMemoryLimit` says:
 | dataflow evaluations | 50,000,000 operator runs per render |
 | re-evaluations | in each run (the first, and each signal write's): 16 changes by the triggers of one data set, and 16 view size changes; a data set's change nests a run in the one that made it, 256 deep at most |
 | delimited data (CSV, TSV, DSV) | 65,536 columns; without `WithMemoryLimit`, 16 cells per data row the budget allows |
-| warnings | each distinct one reported once per call, its text cut to 1 KiB; past 256 distinct, one more says the rest are not reported |
+| warnings | every warning reaches the handler with its text cut to 1 KiB, at a character boundary, with an ellipsis: Vega's, the Vega-Lite compiler's and a refused link's. Vega's are reported once per distinct text and call, and past 256 distinct ones, one more says the rest are not reported; the Vega-Lite compiler's are reported as often as upstream logs them (each comes from compile work the call's budget meters, and none is kept) |
 | one image | 32 MiB, 64 Mi pixels (with `WithMemoryLimit`, the derived pixel bound above, the same in every output) |
 | HTTP response body | `HTTPLoader.MaxResponseBytes`, 64 MiB |
 | file | `FileLoader.MaxBytes`, 64 MiB |

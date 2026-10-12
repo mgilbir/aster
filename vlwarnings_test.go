@@ -3,7 +3,9 @@ package aster_test
 import (
 	"errors"
 	"slices"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/mgilbir/aster"
 )
@@ -48,5 +50,34 @@ func TestVegaLiteWarningsReachHandler(t *testing.T) {
 		if _, err := c.VegaLiteToVega([]byte(tc.spec), aster.WithErrorHandler(func(error) error { return stop })); !errors.Is(err, stop) {
 			t.Errorf("%s: a handler's error: got %v", tc.name, err)
 		}
+	}
+}
+
+// TestVegaLiteWarningTextIsBounded: a Vega-Lite warning carries spec text (an
+// invalid transform, with a field name of 100 KB), and reaches the handler cut to 1 KiB, as a
+// Vega warning does (docs/limits.md, "warnings").
+func TestVegaLiteWarningTextIsBounded(t *testing.T) {
+	c, err := aster.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	field := strings.Repeat("é", 50_000) // 100 KB, two bytes a character
+	spec := `{"data":{"values":[{"a":1}]},"mark":"point","transform":[{"calcualte":"1","as":"` + field + `"}],"encoding":{"x":{"field":"a","type":"quantitative"}}}`
+	got, err := compileWarnings(c, []byte(spec))
+	if err != nil || len(got) == 0 {
+		t.Fatalf("warnings %d (err %v), want some", len(got), err)
+	}
+	for _, w := range got {
+		if len(w) > 1024+len("…") || !utf8.ValidString(w) {
+			t.Errorf("warning of %d bytes (valid UTF-8 %v), want at most 1 KiB and an ellipsis", len(w), utf8.ValidString(w))
+		}
+	}
+	long := false
+	for _, w := range got {
+		long = long || strings.HasSuffix(w, "…") && strings.Contains(w, "éé")
+	}
+	if !long {
+		t.Errorf("no warning carries the cut field name: %.200q", got)
 	}
 }
