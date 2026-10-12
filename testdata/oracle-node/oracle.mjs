@@ -11,7 +11,7 @@
 //   request:  {"id": 1, "op": "svg" | "compile", "lite": true, "spec": "<JSON text>"}
 //             {"id": 2, "op": "png", "svg": "<svg ...>", "scale": 2}
 //   response: {"id": 1, "svg": "...", "vega": {...}, "png": "<base64>", "err": "...",
-//              "warnings": ["..."]}
+//              "warnings": ["..."], "tainted": "Object.prototype.mean"}
 //
 // "svg" renders (compiling first when lite) and also returns the compiled
 // Vega for Vega-Lite; "compile" only compiles, and lists the compiler's
@@ -355,6 +355,77 @@ write({
     (process.env.TZ === 'UTC' ? '' : ` / TZ ${process.env.TZ}`),
 });
 
+// Upstream can change the built-ins: Vega-Lite's aggregate node, given the
+// field "__proto__", assigns its measures to Object.prototype, and every later
+// compilation in the process then sees them (they appear in its config, which
+// vega-util's mergeConfig builds with for…in). An answer must be what a
+// fresh process gives, so after each request the built-ins are compared with
+// their state before the first one; when they changed, the answer (valid: the
+// change happened while computing it) is marked tainted and the Go side
+// replaces the process before the next request.
+const builtins = Object.entries({
+  globalThis,
+  Object, 'Object.prototype': Object.prototype,
+  Array, 'Array.prototype': Array.prototype,
+  Function, 'Function.prototype': Function.prototype,
+  String, 'String.prototype': String.prototype,
+  Number, 'Number.prototype': Number.prototype,
+  Boolean, 'Boolean.prototype': Boolean.prototype,
+  Symbol, 'Symbol.prototype': Symbol.prototype,
+  BigInt, 'BigInt.prototype': BigInt.prototype,
+  Date, 'Date.prototype': Date.prototype,
+  RegExp, 'RegExp.prototype': RegExp.prototype,
+  Error, 'Error.prototype': Error.prototype,
+  Map, 'Map.prototype': Map.prototype,
+  Set, 'Set.prototype': Set.prototype,
+  WeakMap, 'WeakMap.prototype': WeakMap.prototype,
+  Promise, 'Promise.prototype': Promise.prototype,
+  JSON, Math, Reflect,
+  'Iterator.prototype': Object.getPrototypeOf(Object.getPrototypeOf([][Symbol.iterator]())),
+  'TypedArray.prototype': Object.getPrototypeOf(Uint8Array.prototype),
+});
+const snapshotBuiltins = () =>
+  builtins.map(([name, obj]) => [
+    name,
+    Object.getPrototypeOf(obj),
+    Object.isExtensible(obj),
+    // node keeps its own lazily made state on globalThis under symbols
+    // (Symbol(undici.globalDispatcher.N), made by the first fetch), so there
+    // only the string keys, which scripts reach, are compared.
+    new Map(
+      (obj === globalThis ? Object.getOwnPropertyNames(obj) : Reflect.ownKeys(obj)).map((k) => [
+        k,
+        Object.getOwnPropertyDescriptor(obj, k),
+      ]),
+    ),
+  ]);
+const pristine = snapshotBuiltins();
+const changedBuiltin = () => {
+  const now = snapshotBuiltins();
+  for (let i = 0; i < now.length; i++) {
+    const [name, proto, ext, props] = now[i];
+    const [, proto0, ext0, props0] = pristine[i];
+    if (proto !== proto0 || ext !== ext0) return name;
+    for (const k of props0.keys()) if (!props.has(k)) return `${name}.${String(k)}`;
+    for (const [k, d] of props) {
+      const d0 = props0.get(k);
+      if (!d0) return `${name}.${String(k)}`;
+      for (const f of ['value', 'get', 'set', 'writable', 'enumerable', 'configurable']) {
+        if (!Object.is(d[f], d0[f])) return `${name}.${String(k)}`;
+      }
+    }
+  }
+  return '';
+};
+const answer = (res) => {
+  const changed = changedBuiltin();
+  if (changed) {
+    res.tainted = changed;
+    console.error(`oracle: upstream changed ${changed}; this process is replaced`);
+  }
+  write(res);
+};
+
 const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
 for await (const line of rl) {
   if (!line.trim()) continue;
@@ -362,24 +433,24 @@ for await (const line of rl) {
   try {
     req = JSON.parse(line);
   } catch (e) {
-    write({ id: null, err: 'oracle: bad request: ' + e.message });
+    answer({ id: null, err: 'oracle: bad request: ' + e.message });
     continue;
   }
   const res = { id: req.id };
   try {
     if (req.op === 'generate') {
       res.data = await generate(req.sweep);
-      write(res);
+      answer(res);
       continue;
     }
     if (req.op === 'signals') {
       res.svg = await renderAfter(JSON.parse(req.spec), req.writes || []);
-      write(res);
+      answer(res);
       continue;
     }
     if (req.op === 'png') {
       res.png = rasterize(req.svg, req.scale);
-      write(res);
+      answer(res);
       continue;
     }
     const spec = JSON.parse(req.spec);
@@ -399,7 +470,7 @@ for await (const line of rl) {
   } catch (e) {
     res.err = String((e && e.message) || e).split('\n')[0];
   }
-  write(res);
+  answer(res);
 }
 // stdin closed: the Go side is done with this process.
 process.exit(0);

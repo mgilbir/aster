@@ -216,16 +216,7 @@ func (o *Oracle) ask(req map[string]any) (Result, error) {
 		return res, nil
 	}
 
-	p := <-o.free
-	defer func() { o.free <- p }()
-	if p == nil || p.cmd == nil {
-		if p, err = o.start(); err != nil {
-			p = nil
-			return res, err
-		}
-	}
-	res, err = p.ask(req)
-	if err != nil {
+	if res, err = o.node(req); err != nil {
 		return res, err
 	}
 	if b, err := json.Marshal(res); err == nil {
@@ -239,6 +230,23 @@ func (o *Oracle) ask(req map[string]any) (Result, error) {
 		}
 	}
 	return res, nil
+}
+
+// node answers from one of the pool's processes, starting it if it is not
+// running (it never ran, or it stopped: it timed out, died, or upstream
+// changed a built-in while answering, so a later answer would not be a
+// fresh process's).
+func (o *Oracle) node(req map[string]any) (Result, error) {
+	p := <-o.free
+	defer func() { o.free <- p }()
+	if p == nil || p.cmd == nil {
+		var err error
+		if p, err = o.start(); err != nil {
+			p = nil
+			return Result{}, err
+		}
+	}
+	return p.ask(req)
 }
 
 func (p *proc) ask(req map[string]any) (Result, error) {
@@ -267,12 +275,19 @@ func (p *proc) ask(req map[string]any) (Result, error) {
 			Data json.RawMessage `json:"data"`
 			Err  string          `json:"err"`
 			Warn []string        `json:"warnings"`
+			// Tainted names a built-in upstream changed while answering
+			// (oracle.mjs): the answer stands, but a later one from this
+			// process would not be a fresh process's, so it is replaced.
+			Tainted string `json:"tainted"`
 		}
 		if err := json.Unmarshal(out, &got); err != nil || got.ID != p.nextID {
 			p.stop()
 			return res, fmt.Errorf("oracle: bad response %.200q", out)
 		}
 		res = Result{SVG: got.SVG, Vega: got.Veg, Data: got.Data, Err: got.Err, Warnings: got.Warn}
+		if got.Tainted != "" {
+			p.stop()
+		}
 		if got.PNG != "" {
 			if res.PNG, err = base64.StdEncoding.DecodeString(got.PNG); err != nil {
 				return res, fmt.Errorf("oracle: bad PNG: %w", err)
