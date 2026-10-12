@@ -15,28 +15,49 @@
 #
 # A site is listed as "file<TAB>enclosing function<TAB>source text" but matched
 # on file and source text only: the allowlist survives line shifts, and the
-# function (which depends on what the Go version inlines) is for readers. Usage:
-#   scripts/fmacheck.sh            check against fmacheck.allow (exit 1 on new sites)
-#   scripts/fmacheck.sh -list      print all current sites (allowlist format)
+# function (which depends on what the Go version inlines) is for readers.
+#
+# A check that finds nothing proves nothing, so it fails (exit 2) when the
+# build fails, and when it sees no fused instruction anywhere under the module
+# (jsmath fuses deliberately, so there are always some): positions it cannot
+# match, as -trimpath in GOFLAGS makes them, would otherwise read as "no
+# sites". GOFLAGS is unset for the build. A stale allowlist entry (a site no
+# longer fused) fails too (exit 1), so the list stays exact. Usage:
+#   scripts/fmacheck.sh                 check against fmacheck.allow
+#   scripts/fmacheck.sh -list           print all current sites (allowlist format)
+#   scripts/fmacheck.sh -allow FILE     check against FILE instead (the tests use it)
 set -eu
 export LC_ALL=C   # sort/comm order must not depend on the host locale
+unset GOFLAGS     # -trimpath would rewrite the positions matched below
 
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/.." && pwd)   # module root
 allow="$here/fmacheck.allow"
-mode=${1:-check}
+mode=check
+case ${1:-} in
+-list) mode=-list ;;
+-allow) allow=$2 ;;
+"") ;;
+*) echo "usage: fmacheck.sh [-list | -allow FILE]" >&2; exit 2 ;;
+esac
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
 cd "$root"
-GOARCH=arm64 CGO_ENABLED=0 go build -a -gcflags='all=-S' . ./internal/... >"$tmp/asm.txt" 2>&1 || {
-	if ! grep -q STEXT "$tmp/asm.txt"; then
-		cat "$tmp/asm.txt" >&2
-		echo "fmacheck: build failed" >&2
-		exit 2
-	fi
-}
+if ! GOARCH=arm64 CGO_ENABLED=0 go build -a -gcflags='all=-S' . ./internal/... >"$tmp/asm.txt" 2>&1; then
+	grep -v -e '^	' -e ' STEXT ' -e ' SRODATA ' -e ' SNOPTRDATA ' -e ' SDATA ' -e ' SBSS ' -e ' SNOPTRBSS ' -e ' SDWARF' "$tmp/asm.txt" | tail -40 >&2
+	echo "fmacheck: build failed" >&2
+	exit 2
+fi
+
+# Every fused instruction the build has whose position is in the module: the
+# canary that positions are matched at all.
+fused=$(grep -E '	(FMADDD|FMSUBD|FNMADDD|FNMSUBD|FMADDS|FMSUBS|FNMADDS|FNMSUBS)	' "$tmp/asm.txt" | grep -c -F "($root/internal/" || true)
+if [ "$fused" -eq 0 ]; then
+	echo "fmacheck: no fused instruction found under $root/internal (internal/jsmath has some): positions not matched, so nothing was checked" >&2
+	exit 2
+fi
 
 # Pass 1: (file, line, function) of every fused instruction under internal/.
 awk -v root="$root" '
@@ -81,13 +102,16 @@ comm -13 "$tmp/sitekeys.txt" "$tmp/allowkeys.txt" >"$tmp/stalekeys.txt"
 awk -F'\t' 'NR == FNR { k[$0]; next } ($1 "\t" $3) in k' "$tmp/newkeys.txt" "$tmp/sites.txt" >"$tmp/new.txt"
 awk -F'\t' 'NR == FNR { k[$0]; next } ($1 "\t" $3) in k' "$tmp/stalekeys.txt" "$tmp/allowed.txt" >"$tmp/stale.txt"
 
+status=0
 if [ -s "$tmp/stale.txt" ]; then
 	echo "fmacheck: stale allowlist entries (no longer fused; remove them):" >&2
 	sed 's/^/  /' "$tmp/stale.txt" >&2
+	status=1
 fi
 if [ -s "$tmp/new.txt" ]; then
 	echo "fmacheck: new fused multiply-add sites (round the product with float64(a*b), or allowlist with a justification):" >&2
 	awk -F'\t' '{printf "  %s [%s]\n      %s\n", $1, $2, $3}' "$tmp/new.txt" >&2
-	exit 1
+	status=1
 fi
-echo "fmacheck: ok ($(wc -l <"$tmp/sitekeys.txt" | tr -d ' ') allowlisted sites)"
+[ $status = 0 ] || exit $status
+echo "fmacheck: ok ($(wc -l <"$tmp/sitekeys.txt" | tr -d ' ') allowlisted sites, $fused fused instructions seen)"

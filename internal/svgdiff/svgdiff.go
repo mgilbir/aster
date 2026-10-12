@@ -1,7 +1,10 @@
 // Package svgdiff compares two SVG documents structurally: the element trees
-// must match name for name and attribute for attribute, and numbers embedded
-// in attribute values and text are compared within a tolerance so that
-// last-digit floating point noise is not reported as a difference.
+// must match name for name and attribute for attribute. The numbers of the
+// geometry attributes (coordinates, lengths, path data and transforms; see
+// IsGeometry) are compared within a tolerance, so that the last digits two
+// text engines place glyphs with are not reported as a difference. Every
+// other attribute, and all text, is compared exactly: a label "0.25" is not
+// "0.5", nor "1e+3" "1000", nor an opacity of 0.2 one of 0.6.
 //
 // It exists to measure how close the pure-Go engine's output is to upstream
 // Vega's, so it reports the first difference with enough context to find it.
@@ -20,8 +23,8 @@ import (
 
 // Options tunes the comparison.
 type Options struct {
-	// Abs and Rel bound how far two numbers may differ: |a-b| <= Abs or
-	// |a-b| <= Rel*max(|a|,|b|).
+	// Abs and Rel bound how far two numbers of a geometry attribute may
+	// differ: |a-b| <= Abs or |a-b| <= Rel*max(|a|,|b|).
 	Abs, Rel float64
 	// IgnoreAttrs lists attribute names skipped on every element.
 	IgnoreAttrs []string
@@ -193,11 +196,11 @@ func (c *comparer) node(g, w *node, path string) {
 			c.report(here, "missing attribute %s=%q", k, elide(wv))
 		case !wok:
 			c.report(here, "unexpected attribute %s=%q", k, elide(gv))
-		case !c.valuesEqual(gv, wv):
+		case !c.attrEqual(k, gv, wv):
 			c.report(here, "attribute %s=%q, want %q", k, elide(gv), elide(wv))
 		}
 	}
-	if !c.valuesEqual(strings.TrimSpace(g.text), strings.TrimSpace(w.text)) {
+	if g.text != w.text && (!blank(g.text) || !blank(w.text)) {
 		c.report(here, "text %q, want %q", g.text, w.text)
 	}
 	n := min(len(g.children), len(w.children))
@@ -217,17 +220,38 @@ func elide(s string) string {
 	return s[:120] + "..." + s[len(s)-20:]
 }
 
+// blank reports whether s is only whitespace: the formatting between
+// elements, which is not content.
+func blank(s string) bool { return strings.TrimSpace(s) == "" }
+
+// geometry are the attributes whose numbers are positions and lengths: where
+// two text engines' glyph advances, and what is laid out from them, differ in
+// the last digits.
+var geometry = map[string]bool{
+	"x": true, "y": true, "x1": true, "y1": true, "x2": true, "y2": true,
+	"cx": true, "cy": true, "r": true, "rx": true, "ry": true, "fx": true, "fy": true,
+	"dx": true, "dy": true, "width": true, "height": true, "d": true, "points": true,
+	"transform": true, "gradientTransform": true, "patternTransform": true, "viewBox": true,
+}
+
+// IsGeometry reports whether the numbers of the attribute name are compared
+// within the tolerance; every other attribute is compared exactly.
+func IsGeometry(name string) bool { return geometry[name] }
+
 const pngDataPrefix = "data:image/png;base64,"
 
-// valuesEqual compares two attribute values token by token, numbers within
-// tolerance and everything else exactly. Two embedded PNG images compare by
-// their pixels (see samePNG).
-func (c *comparer) valuesEqual(a, b string) bool {
+// attrEqual compares two values of the attribute name: a geometry attribute
+// token by token, numbers within tolerance and the rest exactly; any other
+// exactly. Two embedded PNG images compare by their pixels (see samePNG).
+func (c *comparer) attrEqual(name, a, b string) bool {
 	if a == b {
 		return true
 	}
 	if strings.HasPrefix(a, pngDataPrefix) && strings.HasPrefix(b, pngDataPrefix) {
 		return samePNG(a[len(pngDataPrefix):], b[len(pngDataPrefix):])
+	}
+	if !geometry[name] {
+		return false
 	}
 	ta, tb := tokenize(a), tokenize(b)
 	if len(ta) != len(tb) {
@@ -262,11 +286,11 @@ type token struct {
 	text string
 }
 
-// tokenize splits s into numbers and the text between them. A run of only
-// separators (spaces and commas) is dropped, so "1,2" and "1 2" compare
-// equal, as they do in path data and lists. Other text keeps its commas;
-// its whitespace is trimmed and each run of it collapses to one space, as
-// SVG collapses whitespace when it renders text.
+// tokenize splits a geometry value into numbers and the text between them. A
+// run of only separators (spaces and commas) is dropped, so "1,2" and "1 2"
+// compare equal, as they do in path data, lists and transforms. Other text
+// (a path command, a transform's name) keeps its commas; its whitespace is
+// trimmed and each run of it collapses to one space.
 func tokenize(s string) []token {
 	var out []token
 	i := 0

@@ -176,6 +176,12 @@ func mutationsOf(e *elem, path []int, parent *elem) []mutation {
 			ms = append(ms, mutation{an + " number+1", func(r *elem) { r.at(path).attrs[ai].Value = bumped }})
 			nan := a.Value[:s] + "NaN" + a.Value[en:]
 			ms = append(ms, mutation{an + " number→NaN", func(r *elem) { r.at(path).attrs[ai].Value = nan }})
+			if !svgdiff.IsGeometry(qn(a.Name)) {
+				// Within the geometry tolerance: only a geometry attribute
+				// may differ by it (C66).
+				nudged := a.Value[:s] + strconv.FormatFloat(v+0.25, 'g', -1, 64) + a.Value[en:]
+				ms = append(ms, mutation{an + " number+0.25", func(r *elem) { r.at(path).attrs[ai].Value = nudged }})
+			}
 		}
 		changed := a.Value + "x"
 		ms = append(ms, mutation{an + " changed", func(r *elem) { r.at(path).attrs[ai].Value = changed }})
@@ -195,6 +201,10 @@ func mutationsOf(e *elem, path []int, parent *elem) []mutation {
 			s, en, _, _ := firstNumber(e.text)
 			bumped := e.text[:s] + strconv.FormatFloat(v+1, 'g', -1, 64) + e.text[en:]
 			ms = append(ms, mutation{tag + " text number+1", func(r *elem) { r.at(path).text = bumped }})
+			nudged := e.text[:s] + strconv.FormatFloat(v+0.25, 'g', -1, 64) + e.text[en:]
+			ms = append(ms, mutation{tag + " text number+0.25", func(r *elem) { r.at(path).text = nudged }})
+			spaced := " " + e.text
+			ms = append(ms, mutation{tag + " text leading space", func(r *elem) { r.at(path).text = spaced }})
 		}
 	}
 	if parent != nil && len(path) > 0 {
@@ -331,8 +341,17 @@ func TestEquivalences(t *testing.T) {
 		{"negative zero", doc("M-0,0", "a"), doc("M0,0", "a"), true},
 		{"NaN is not a number", doc("MNaN,0", "a"), doc("M0,0", "a"), false},
 		{"NaN equals NaN", doc("MNaN,0", "a"), doc("MNaN,0", "a"), true},
-		{"text surrounding whitespace (collapsed when rendered)", doc("M0,0", " a "), doc("M0,0", "a"), true},
-		{"text inner whitespace runs (collapsed when rendered)", doc("M0,0", "a b"), doc("M0,0", "a  b"), true},
+		{"text is compared exactly: surrounding whitespace", doc("M0,0", " a "), doc("M0,0", "a"), false},
+		{"text is compared exactly: inner whitespace runs", doc("M0,0", "a b"), doc("M0,0", "a  b"), false},
+		{"text is compared exactly: a number within the tolerance", doc("M0,0", "0.25"), doc("M0,0", "0.5"), false},
+		{"text is compared exactly: exponent notation", doc("M0,0", "1e+3"), doc("M0,0", "1000"), false},
+		{"text is compared exactly: a sign", doc("M0,0", "+5%"), doc("M0,0", "5%"), false},
+		{"text is compared exactly: a thousands separator", doc("M0,0", "1,000"), doc("M0,0", "1 000"), false},
+		{"whitespace between elements is formatting", `<svg xmlns="http://www.w3.org/2000/svg"> <rect/></svg>`, `<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>`, true},
+		{"a non-geometry number is compared exactly", `<svg xmlns="http://www.w3.org/2000/svg"><rect opacity="0.2"/></svg>`, `<svg xmlns="http://www.w3.org/2000/svg"><rect opacity="0.6"/></svg>`, false},
+		{"a non-geometry number is compared exactly: last-digit noise", `<svg xmlns="http://www.w3.org/2000/svg"><rect stroke-width="1.0000001"/></svg>`, `<svg xmlns="http://www.w3.org/2000/svg"><rect stroke-width="1"/></svg>`, false},
+		{"a geometry number within the tolerance", `<svg xmlns="http://www.w3.org/2000/svg"><rect x="1.3" width="2"/></svg>`, `<svg xmlns="http://www.w3.org/2000/svg"><rect x="1" width="2.2"/></svg>`, true},
+		{"a transform within the tolerance", `<svg xmlns="http://www.w3.org/2000/svg"><g transform="translate(1.2,3)"/></svg>`, `<svg xmlns="http://www.w3.org/2000/svg"><g transform="translate(1,3)"/></svg>`, true},
 		{"a comma in text", doc("M0,0", "a, b"), doc("M0,0", "a b"), false},
 		{"a comma beside a number in text", doc("M0,0", "1, a"), doc("M0,0", "1 a"), false},
 		{"text that is a word, not a separator", doc("M0,0", "ab"), doc("M0,0", "a b"), false},
