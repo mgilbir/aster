@@ -217,7 +217,6 @@ func (p *Program) Eval(s *Scope) (v jsval.Value, err error) {
 			}
 		}
 	}()
-	s.work(1)
 	return p.run(s), nil
 }
 
@@ -610,7 +609,13 @@ func (c *compiler) binary(n *Node) (node, error) {
 	}
 	switch n.Op {
 	case "+":
-		return func(s *Scope) jsval.Value { return s.add(l(s), r(s)) }, nil
+		return func(s *Scope) jsval.Value {
+			a, b := l(s), r(s)
+			if a.IsNum() && b.IsNum() { // the common case, without the call
+				return jsval.Num(a.NumValue() + b.NumValue())
+			}
+			return s.add(a, b)
+		}, nil
 	case "-":
 		return arith(func(a, b float64) float64 { return a - b }), nil
 	case "*":
