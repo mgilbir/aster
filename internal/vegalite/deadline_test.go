@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/mgilbir/aster/internal/testutil"
 	"os"
 	"runtime"
 	"strings"
@@ -188,7 +189,7 @@ func TestDeadlineIsHonouredThroughoutCompile(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: compiles specifications with 100,000 views and parameters")
 	}
-	const maxGap = 200 * time.Millisecond
+	maxGap := testutil.Scaled(200 * time.Millisecond)
 	specs := deadlineSpecs()
 	for _, name := range deadlineSpecNames {
 		t.Run(name, func(t *testing.T) {
@@ -216,7 +217,7 @@ func TestDeadlineSweep(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: compiles specifications with 100,000 views and parameters")
 	}
-	const maxOvershoot = 200 * time.Millisecond
+	maxOvershoot := testutil.Scaled(200 * time.Millisecond)
 	specs := deadlineSpecs()
 	for _, name := range []string{"params", "layers", "concat-params"} {
 		spec := specs[name]()

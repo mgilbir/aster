@@ -1,15 +1,18 @@
 package vegalite
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"math"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
+	"github.com/mgilbir/aster/internal/testutil"
 )
 
 // complexitySpecs are families of specifications, each growing in one
@@ -98,53 +101,101 @@ func complexitySpecs() map[string]func(n int) Value {
 	}
 }
 
-// compileTime is the best of three compilations of spec.
-func compileTime(t *testing.T, spec Value) time.Duration {
+// compileAlloc is the least, over three compilations of spec, of the bytes
+// a compilation allocates: the same on every machine outside the race
+// detector (whose sync.Pool drops a random share of its items), the least
+// of three to leave out what other goroutines allocate meanwhile.
+func compileAlloc(t *testing.T, spec Value) int64 {
 	t.Helper()
-	best := time.Duration(1<<63 - 1)
+	least := int64(math.MaxInt64)
 	for range 3 {
-		start := time.Now()
+		var before, after runtime.MemStats
+		runtime.GC()
+		runtime.ReadMemStats(&before)
 		if _, err := Compile(spec, Options{}); err != nil {
 			t.Fatalf("compile: %v", err)
 		}
-		if d := time.Since(start); d < best {
-			best = d
-		}
+		runtime.ReadMemStats(&after)
+		least = min(least, int64(after.TotalAlloc-before.TotalAlloc))
 	}
-	return best
+	return least
 }
 
-// TestCompileTimeGrowsLinearly compiles each family at n and 4n and fails
-// when the time grows by more than a linear (or n log n) algorithm allows:
-// four times the input should take about four times as long (they measure
-// 3 to 5), a quadratic algorithm sixteen, a cubic one sixty-four. Where the
-// quadratic part is small next to the linear one at these sizes (the X13
-// families) it still shows as 8 to 9.
-func TestCompileTimeGrowsLinearly(t *testing.T) {
-	sizes := map[string]int{
-		"clone-index-keys":       400,
-		"spread-string":          2000,
-		"split-index-keys":       400,
-		"split-flip":             1000,
-		"omap-index-keys":        500,
-		"selection-signal-names": 1000,
-		"layer-titles":           1000,
-		"concat-selection-data":  1000,
+// compileWork is the work a compilation of spec charges to its ledger: the
+// steps of every loop whose trip count the specification controls, the
+// same on every machine.
+func compileWork(t *testing.T, spec Value) int64 {
+	t.Helper()
+	l := budget.NewLedger(context.Background(), budget.LedgerLimits{})
+	if _, err := Compile(spec, Options{Context: budget.WithLedger(context.Background(), l)}); err != nil {
+		t.Fatalf("compile: %v", err)
 	}
-	if testing.Short() {
-		for k := range sizes {
-			sizes[k] /= 2
-		}
-	}
-	const maxRatio = 7
-	for name, f := range complexitySpecs() {
+	return l.WorkDone()
+}
+
+// The complexity guards. Each family of complexitySpecs drove a quadratic
+// algorithm the compiler no longer has; the guard measures a quantity that
+// is the same on every machine, at n and 2n, and bounds its quadratic
+// coefficient, (M(2n) - 2·M(n)) / 2n²: zero (or nearly) for linear work, the
+// quadratic algorithm's own constant otherwise. No guard times anything,
+// because a time ratio on a shared CI runner is noise as much as signal.
+// Each bound was checked by planting the quadratic algorithm back.
+
+// TestCompileWorkGrowsLinearly bounds the work charged to the ledger, for
+// the families whose quadratic algorithm did charged work: the input clone
+// putting index keys in JavaScript's order on every insert (C4), the
+// selection signal counters (C16), the layer titles and the concatenated
+// selection data (X13). It runs under the race detector too. The
+// concatenated views keep upstream's own quadratic step, cleanupEmptyOnArray
+// over every signal so far once per view (0.5 per n²), so their bound is
+// 0.6; planted back, the algorithms measured 0.50 (clone), 0.50 (counters)
+// and 1.00 (titles, selection data) more.
+func TestCompileWorkGrowsLinearly(t *testing.T) {
+	specs := complexitySpecs()
+	for name, c := range map[string]struct {
+		n       int
+		maxQuad float64
+	}{
+		"clone-index-keys":       {1000, 0.25},
+		"selection-signal-names": {500, 0.25},
+		"layer-titles":           {500, 0.25},
+		"concat-selection-data":  {500, 0.6},
+	} {
 		t.Run(name, func(t *testing.T) {
-			n := sizes[name]
-			small, large := compileTime(t, f(n)), compileTime(t, f(4*n))
-			ratio := float64(large) / float64(max(small, time.Millisecond))
-			t.Logf("n=%d: %v, 4n: %v (×%.1f)", n, small, large, ratio)
-			if ratio > maxRatio {
-				t.Errorf("compile time grew ×%.1f for 4× the input (limit ×%d): super-linear", ratio, maxRatio)
+			w1, w2 := compileWork(t, specs[name](c.n)), compileWork(t, specs[name](2*c.n))
+			quad := float64(w2-2*w1) / float64(2*c.n*c.n)
+			t.Logf("n=%d: %d steps, 2n: %d; quadratic part %.3f steps per n²", c.n, w1, w2, quad)
+			if quad > c.maxQuad {
+				t.Errorf("%s: the work charged has a quadratic part of %.3f steps per n² (limit %.2f): super-linear", name, quad, c.maxQuad)
+			}
+		})
+	}
+}
+
+// TestCompileAllocGrowsLinearly bounds the bytes allocated, for the
+// families whose quadratic algorithm (C4) was ordering that charges nothing
+// (spread, a split and an omap order their keys without a compilation to
+// charge) but allocates its entries each time: `{...markDef.box}` of a
+// string, the ancestor parse gaining index keys in descending order or
+// flipping fields from explicit to derived, and a filter-invalid omap keyed
+// by index-like fields. Outside the race detector the bytes are the same on
+// every machine; clean, the quadratic parts measure -0.09 to 0.34 bytes per
+// n², and 44 to 169 with the eager ordering planted back. The race
+// detector's sync.Pool makes allocation vary, so the guard is skipped under
+// it.
+func TestCompileAllocGrowsLinearly(t *testing.T) {
+	if testutil.RaceEnabled {
+		t.Skip("allocation varies under the race detector")
+	}
+	const maxQuad = 5.0
+	specs := complexitySpecs()
+	for name, n := range map[string]int{"spread-string": 2000, "split-index-keys": 1000, "split-flip": 1000, "omap-index-keys": 1000} {
+		t.Run(name, func(t *testing.T) {
+			a1, a2 := compileAlloc(t, specs[name](n)), compileAlloc(t, specs[name](2*n))
+			quad := float64(a2-2*a1) / float64(2*n*n)
+			t.Logf("n=%d: %d bytes, 2n: %d; quadratic part %.3f bytes per n²", n, a1, a2, quad)
+			if quad > maxQuad {
+				t.Errorf("%s: the bytes allocated have a quadratic part of %.3f per n² (limit %.0f): super-linear", name, quad, maxQuad)
 			}
 		})
 	}

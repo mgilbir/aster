@@ -2,6 +2,7 @@ package vegalite
 
 import (
 	"errors"
+	"github.com/mgilbir/aster/internal/testutil"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -131,7 +132,7 @@ func TestRandomSpecsDoNotHang(t *testing.T) {
 			t.Fatalf("stack in error: %v", err)
 		}
 	}
-	if d := time.Since(start); d > 30*time.Second {
+	if d := time.Since(start); d > testutil.Scaled(30*time.Second) {
 		t.Fatalf("random specs took %v", d)
 	}
 }
