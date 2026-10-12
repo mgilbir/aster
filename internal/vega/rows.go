@@ -1,6 +1,7 @@
 package vega
 
 import (
+	"math"
 	"unsafe"
 
 	"github.com/mgilbir/aster/internal/budget"
@@ -35,18 +36,44 @@ type opRows struct {
 	held, src budget.Held
 }
 
-// held is the record of the rows n's transform made.
-func (n *opNode) held() *budget.Held {
+// rowsOf is n's records, made on first use from a slab the view keeps, so
+// that the few operators that hold rows cost no allocation each (and a chart
+// of a few data sets none at all).
+func (v *runView) rowsOf(n *opNode) *opRows {
 	if n.rows == nil {
-		n.rows = &opRows{}
+		if len(v.rowSlab) == 0 {
+			if !v.rowBufUsed {
+				v.rowSlab, v.rowBufUsed = v.rowBuf[:], true
+			} else {
+				v.rowSlab = make([]opRows, 16)
+			}
+		}
+		n.rows, v.rowSlab = &v.rowSlab[0], v.rowSlab[1:]
 	}
-	return &n.rows.held
+	return n.rows
 }
 
-// src is the record of a data set's own rows, held by its input operator.
-func (n *opNode) src() *budget.Held {
+// holdHeld replaces what n's transform holds; holdSrc what n holds of its
+// data set's own rows. An operator that has held nothing and holds nothing
+// needs no record.
+func (v *runView) holdHeld(n *opNode, rows, excess int64) {
+	if n.rows == nil && rows == 0 && excess == 0 {
+		return
+	}
+	v.hold(&v.rowsOf(n).held, rows, excess)
+}
+
+func (v *runView) holdSrc(n *opNode, rows, excess int64) {
+	if n.rows == nil && rows == 0 && excess == 0 {
+		return
+	}
+	v.hold(&v.rowsOf(n).src, rows, excess)
+}
+
+// srcRecord is n's record of its data set's own rows, nil when it has none.
+func (n *opNode) srcRecord() *budget.Held {
 	if n.rows == nil {
-		n.rows = &opRows{}
+		return nil
 	}
 	return &n.rows.src
 }
@@ -70,9 +97,14 @@ func (v *runView) hold(h *budget.Held, rows, excess int64) {
 	}
 }
 
-// holdRows is hold for the tuples rows, all of them made by the holder.
-func (v *runView) holdRows(h *budget.Held, rows []jsval.Value) {
-	v.hold(h, int64(len(rows)), v.rowExcess(rows))
+// holdSrcRows and holdHeldRows hold the tuples rows, all of them made by
+// the holder.
+func (v *runView) holdSrcRows(n *opNode, rows []jsval.Value) {
+	v.holdSrc(n, int64(len(rows)), v.rowExcess(rows))
+}
+
+func (v *runView) holdHeldRows(n *opNode, rows []jsval.Value) {
+	v.holdHeld(n, int64(len(rows)), v.rowExcess(rows))
 }
 
 // holdCreated makes n hold the tuples its transform created: those of out that
@@ -99,7 +131,7 @@ func (v *runView) holdCreated(n *opNode, before int64, out []jsval.Value) {
 			passedEx += max(jsval.RowCost(t)-unit, 0)
 		}
 	}
-	v.hold(n.held(), created, createdEx+max(passedEx-before, 0))
+	v.holdHeld(n, created, createdEx+max(passedEx-before, 0))
 }
 
 // rowExcess is how many bytes the rows weigh beyond what the budget counts
@@ -129,11 +161,15 @@ const valueBytes = int64(unsafe.Sizeof(jsval.Value{}))
 // exists, so a render overshoots the ledger by one list at most; the lists
 // are given back when the render is over (releaseLists).
 func (v *runView) holdList(n *opNode, in *flowPulse, out []jsval.Value) {
-	var b int64
+	var c uint32
 	if cap(out) > 0 && !aliases(out, in) {
-		b = int64(cap(out)) * valueBytes
+		c = uint32(min(uint64(cap(out)), math.MaxUint32))
 	}
-	switch d := b - n.list; {
+	if c == n.listCap {
+		return
+	}
+	b := int64(c) * valueBytes
+	switch d := b - int64(n.listCap)*valueBytes; {
 	case d > 0:
 		if err := v.led.Alloc(d); err != nil {
 			failErr(err)
@@ -141,8 +177,8 @@ func (v *runView) holdList(n *opNode, in *flowPulse, out []jsval.Value) {
 	case d < 0:
 		v.led.Free(-d)
 	}
-	v.lists += b - n.list
-	n.list = b
+	v.lists += b - int64(n.listCap)*valueBytes
+	n.listCap = c
 }
 
 // releaseLists gives the ledger back the tuple lists charged: once the

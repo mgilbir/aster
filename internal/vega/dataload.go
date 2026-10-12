@@ -25,7 +25,7 @@ func (v *runView) seedCollect(c *rtContext, n *opNode, e *entry) {
 	var data []jsval.Value
 	switch {
 	case e.literal != nil:
-		v.hold(n.src(), int64(len(e.literal)), v.rowExcess(e.literal))
+		v.holdSrc(n, int64(len(e.literal)), v.rowExcess(e.literal))
 		data = make([]jsval.Value, len(e.literal))
 		var cl jsval.Cloner
 		for i, t := range e.literal {
@@ -43,14 +43,14 @@ func (v *runView) seedCollect(c *rtContext, n *opNode, e *entry) {
 			}
 			data = nil
 		}
-		v.holdRows(n.src(), data)
+		v.holdSrcRows(n, data)
 		ingestRows(data)
 	case e.ingest != nil:
 		data = v.parseValues(e.ingest.values, e.ingest.format)
 		if nullRow(data) >= 0 {
 			fail("%s", errNullRow.Error())
 		}
-		v.holdRows(n.src(), data)
+		v.holdSrcRows(n, data)
 		ingestRows(data)
 	}
 	n.value = data

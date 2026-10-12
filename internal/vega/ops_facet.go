@@ -154,14 +154,14 @@ func facPreFacet(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNod
 		// cell, each charged before its tuples are made.
 		v := n.g.view
 		var rows, excess int64
-		v.hold(n.held(), 0, 0)
+		v.holdHeld(n, 0, 0)
 		for _, t := range pulse.tuples {
 			cl := st.subflow(n, t.Key(), flow, "", t, pulse)
 			if hasField && !field.IsNil() {
 				arr := field.Apply(t)
 				items := arr.Items()
 				rows, excess = rows+int64(len(items)), excess+v.rowExcess(items)
-				v.hold(n.held(), rows, excess)
+				v.holdHeld(n, rows, excess)
 				tuples := make([]jsval.Value, len(items))
 				for i, it := range items {
 					tuples[i] = ingestTuple(it)

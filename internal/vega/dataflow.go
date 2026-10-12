@@ -34,8 +34,9 @@ type flowPulse struct {
 	encode string
 	// changed is Pulse.changed(): the producer added, removed or modified
 	// something. Synthesized pulses (an operator that did not run this stamp)
-	// are unchanged.
-	changed bool
+	// are unchanged. reflow marks that every item counts as modified
+	// (Pulse.reflow()).
+	changed, reflow bool
 
 	// Tuple flows.
 	tuples []jsval.Value
@@ -54,8 +55,6 @@ type flowPulse struct {
 	// Item flows: the full item list plus this pulse's lifecycle sets.
 	items         []*scene.Item
 	add, rem, mod []*scene.Item
-	// reflow marks that every item counts as modified (Pulse.reflow()).
-	reflow bool
 }
 
 // stopPulse is StopPropagation: targets are not enqueued.
@@ -178,6 +177,11 @@ type opNode struct {
 	stamp       int
 	skip        bool
 	modified    bool
+	initonly    bool
+	// listCap is the capacity of the tuple list the operator outputs,
+	// charged to the call's ledger (holdList); with the flags, it fills one
+	// word.
+	listCap uint32
 
 	value any
 	// update is the value-update function of a plain operator (signals,
@@ -186,9 +190,8 @@ type opNode struct {
 	update func(n *opNode, p *opParams) any
 	tr     transform
 
-	argops   []argop
-	argval   *opParams
-	initonly bool
+	argops []argop
+	argval *opParams
 
 	targets  []*opNode
 	tree     *hierarchy.Tree // the hierarchy of a tree data set (Sieve, Collect)
@@ -197,10 +200,8 @@ type opNode struct {
 	dynTargs *[]*opNode
 
 	// rows are the data rows the operator holds (rows.go), nil for the
-	// many that hold none; list is the bytes of the tuple list it outputs,
-	// charged to the call's ledger (holdList).
+	// many that hold none.
 	rows *opRows
-	list int64
 }
 
 // Value returns the operator's value.

@@ -204,6 +204,11 @@ type runView struct {
 	bud    *budget.Budget
 	led    *budget.Ledger // the call's, nil for none
 	lists  int64          // tuple list bytes charged to led (holdList)
+	// rowSlab is where operators' row records come from (rowsOf), the
+	// first from rowBuf, which the view's own allocation holds.
+	rowSlab    []opRows
+	rowBuf     [16]opRows
+	rowBufUsed bool
 	// txPulse is the pulse the running tuple transform was given.
 	txPulse *flowPulse
 	strs    *expr.StringBudget

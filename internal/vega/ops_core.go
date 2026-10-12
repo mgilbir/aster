@@ -593,7 +593,7 @@ func facRelay(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 		}
 		// Every tuple handed on is a copy the relay holds, as heavy as its
 		// source.
-		n.g.view.holdRows(n.held(), src)
+		n.g.view.holdHeldRows(n, src)
 		out := make([]jsval.Value, len(src))
 		copies := make([]relayCopy, 0, len(src))
 		var lut map[*jsval.Object]*jsval.Object
@@ -708,7 +708,7 @@ func facLoad(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *
 			// The data set's rows are replaced: the ones it holds are free
 			// to the parse that makes the new ones.
 			bud := c.view.bud
-			defer bud.Replacing(bud.Replacing(n.src()))
+			defer bud.Replacing(bud.Replacing(n.srcRecord()))
 			// `if (_.values)`: a falsy value loads the url.
 			if v := p.Value("values"); v.IsTruthy() {
 				return c.view.parseValues(v, format)
@@ -717,7 +717,7 @@ func facLoad(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *
 		}()
 		// The Load transform's ingest wraps a null row as {data: null}; only
 		// a change set reads its id (see seedCollect).
-		c.view.holdRows(n.src(), data)
+		c.view.holdSrcRows(n, data)
 		var cl jsval.Cloner
 		for i := range data {
 			data[i] = ingestTupleWith(&cl, data[i])

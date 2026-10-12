@@ -170,7 +170,7 @@ func (v *runView) applyChanges(input *opNode, pc *pendingChange) {
 	}
 	// The data set now holds what is left and what is inserted, the
 	// inserted rows charged before they are copied in.
-	v.hold(input.src(), int64(len(out)+len(pc.inserts)), v.rowExcess(out)+v.rowExcess(pc.inserts))
+	v.holdSrc(input, int64(len(out)+len(pc.inserts)), v.rowExcess(out)+v.rowExcess(pc.inserts))
 	for _, t := range pc.inserts {
 		out = append(out, ingestTuple(t))
 	}
@@ -202,7 +202,7 @@ func (c *rtContext) SetData(name string, tuples jsval.Value) jsval.Value {
 		return jsval.Num(0)
 	}
 	items := arrayOf(tuples)
-	c.view.holdRows(input.src(), items)
+	c.view.holdSrcRows(input, items)
 	out := make([]jsval.Value, len(items))
 	for i, t := range items {
 		out[i] = ingestTuple(t)
