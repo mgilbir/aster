@@ -310,26 +310,32 @@ func (s *split) copyAll(o *split) {
 }
 
 // tieBreaker resolves two conflicting explicit/implicit values.
-type tieBreaker func(v1, v2 withExplicit, property, propertyOf string) withExplicit
+type tieBreaker func(cc *compileCtx, v1, v2 withExplicit, property, propertyOf string) withExplicit
 
-func defaultTieBreaker(v1, v2 withExplicit, _, _ string) withExplicit { return v1 }
+// defaultTieBreaker keeps v1, warning when both values were specified.
+func defaultTieBreaker(cc *compileCtx, v1, v2 withExplicit, property, propertyOf string) withExplicit {
+	if v1.explicit && v2.explicit {
+		cc.warn(msgMergeConflictingProperty(cc, property, propertyOf, v1.value, v2.value))
+	}
+	return v1
+}
 
 func tieBreakByComparing(compare func(a, b Value) int) tieBreaker {
-	return func(v1, v2 withExplicit, property, propertyOf string) withExplicit {
+	return func(cc *compileCtx, v1, v2 withExplicit, property, propertyOf string) withExplicit {
 		diff := compare(v1.value, v2.value)
 		if diff > 0 {
 			return v1
 		} else if diff < 0 {
 			return v2
 		}
-		return defaultTieBreaker(v1, v2, property, propertyOf)
+		return defaultTieBreaker(cc, v1, v2, property, propertyOf)
 	}
 }
 
 // mergeValuesWithExplicit merges two values of one property: explicit beats
 // implicit, equal values collapse, otherwise the tie breaker decides. v1 may be
 // nil (absent).
-func mergeValuesWithExplicit(v1 *withExplicit, v2 withExplicit, property, propertyOf string, tb tieBreaker) withExplicit {
+func mergeValuesWithExplicit(cc *compileCtx, v1 *withExplicit, v2 withExplicit, property, propertyOf string, tb tieBreaker) withExplicit {
 	if tb == nil {
 		tb = defaultTieBreaker
 	}
@@ -344,5 +350,5 @@ func mergeValuesWithExplicit(v1 *withExplicit, v2 withExplicit, property, proper
 	case deepEqual(v1.value, v2.value):
 		return *v1
 	}
-	return tb(*v1, v2, property, propertyOf)
+	return tb(cc, *v1, v2, property, propertyOf)
 }

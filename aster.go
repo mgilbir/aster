@@ -640,7 +640,12 @@ func (c *Converter) measurerInit() (*text.Measurer, error) {
 }
 
 // VegaLiteToVega compiles a Vega-Lite spec (JSON) to a full Vega spec (JSON).
-func (c *Converter) VegaLiteToVega(spec []byte) ([]byte, error) {
+//
+// Of the RenderOptions only WithErrorHandler applies (signals are set when a
+// chart renders): it is told of each warning the Vega-Lite compiler logs, as
+// an aster.Warning, and may fail the call for it. Without a handler, warnings
+// are dropped.
+func (c *Converter) VegaLiteToVega(spec []byte, opts ...RenderOption) ([]byte, error) {
 	release, ok := c.enter()
 	if !ok {
 		return nil, ErrClosed
@@ -648,6 +653,10 @@ func (c *Converter) VegaLiteToVega(spec []byte) ([]byte, error) {
 	defer release()
 	ctx, cancel := c.opContext()
 	defer cancel()
+	ctx, err := withRender(ctx, renderConfig{handler: renderOptions(opts).handler})
+	if err != nil {
+		return nil, err
+	}
 	vg, err := c.compileVegaLite(ctx, spec)
 	if err != nil {
 		return nil, err
@@ -666,7 +675,13 @@ func (c *Converter) compileVegaLite(ctx context.Context, spec []byte) (jsval.Val
 		return jsval.Undefined, fmt.Errorf("aster: parsing Vega-Lite spec: %w", err)
 	}
 	vg, err := timed(ctx, "compile", func() (jsval.Value, error) {
-		return vegalite.Compile(v, vegalite.Options{Config: c.theme, Location: c.location, Version: c.vl, Context: ctx, MaxViews: c.lim.vlViews})
+		opts := vegalite.Options{Config: c.theme, Location: c.location, Version: c.vl, Context: ctx, MaxViews: c.lim.vlViews}
+		// The compiler's warnings go to the call's report, which tells
+		// WithErrorHandler of them as Warnings.
+		if rep := reportFrom(ctx); rep != nil {
+			opts.Warn = rep.warn
+		}
+		return vegalite.Compile(v, opts)
 	})
 	if err != nil {
 		return jsval.Undefined, c.stageErr(ctx, "compiling Vega-Lite", err)

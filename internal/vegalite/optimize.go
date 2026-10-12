@@ -4,6 +4,8 @@ package vegalite
 // Node lists are walked with live indices where upstream iterates arrays that
 // the loop body mutates, so passes see the same nodes upstream's do.
 
+import "strconv"
+
 const facetScalePrefix = "scale_"
 
 const maxOptimizationRuns = 5
@@ -174,6 +176,9 @@ func optimizeDataflow(dc *dataComponent, m Model) {
 			break
 		}
 		second++
+	}
+	if max(first, second) == maxOptimizationRuns {
+		cc.warn("Maximum optimization runs(" + strconv.Itoa(maxOptimizationRuns) + ") reached.")
 	}
 }
 

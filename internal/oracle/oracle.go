@@ -56,6 +56,8 @@ type Result struct {
 	// Data is a generator's output (Generate).
 	Data json.RawMessage `json:"data,omitempty"`
 	Err  string          `json:"err,omitempty"`
+	// Warnings are what the Vega-Lite compiler logged (Compile only).
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // Oracle serves a module set from a small pool of node processes, so callers
@@ -264,12 +266,13 @@ func (p *proc) ask(req map[string]any) (Result, error) {
 			PNG  string          `json:"png"`
 			Data json.RawMessage `json:"data"`
 			Err  string          `json:"err"`
+			Warn []string        `json:"warnings"`
 		}
 		if err := json.Unmarshal(out, &got); err != nil || got.ID != p.nextID {
 			p.stop()
 			return res, fmt.Errorf("oracle: bad response %.200q", out)
 		}
-		res = Result{SVG: got.SVG, Vega: got.Veg, Data: got.Data, Err: got.Err}
+		res = Result{SVG: got.SVG, Vega: got.Veg, Data: got.Data, Err: got.Err, Warnings: got.Warn}
 		if got.PNG != "" {
 			if res.PNG, err = base64.StdEncoding.DecodeString(got.PNG); err != nil {
 				return res, fmt.Errorf("oracle: bad PNG: %w", err)

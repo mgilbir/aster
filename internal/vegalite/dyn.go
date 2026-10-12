@@ -1,6 +1,7 @@
 package vegalite
 
 import (
+	"errors"
 	"math"
 	"sort"
 	"strconv"
@@ -602,8 +603,10 @@ done:
 		}
 		return math.NaN()
 	}
+	// Out of range, ParseFloat answers ±Inf (or 0) with an error; parseFloat
+	// answers the same values ("1e999" is Infinity).
 	f, err := strconv.ParseFloat(s[:end], 64)
-	if err != nil {
+	if err != nil && !errors.Is(err, strconv.ErrRange) {
 		return math.NaN()
 	}
 	return f
@@ -776,6 +779,9 @@ func jsGreater(a, b Value) bool {
 	}
 	return jsval.ToNumber(a) > jsval.ToNumber(b)
 }
+
+// strIs reports whether v is the string s.
+func strIs(v Value, s string) bool { return v.IsStr() && v.StrValue() == s }
 
 // jsIndexOrGet is v[key] for an object or an array (whose keys are indices).
 func jsIndexOrGet(v Value, key string) Value {

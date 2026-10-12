@@ -375,6 +375,10 @@ func initMarkdef(cc *compileCtx, original Value, encoding Value, config Value) V
 	specifiedOrient := getMarkPropOrConfigSimple("orient", mdv, config)
 	orient := markOrient(cc, md.Lookup("type").AsString(), encoding, specifiedOrient)
 	md.Set("orient", strOrUndef(orient))
+	if o := md.Lookup("orient"); !specifiedOrient.IsUndefined() && !strictEq(specifiedOrient, o) {
+		// Upstream passes the computed orient as the "specified" one.
+		cc.warn(msgOrientOverridden(o, specifiedOrient))
+	}
 	if md.Lookup("type").AsString() == "bar" && orient != "" {
 		if cre := getMarkPropOrConfigSimple("cornerRadiusEnd", mdv, config); !cre.IsUndefined() {
 			var newProps []string

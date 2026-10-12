@@ -374,7 +374,7 @@ func durationExpr(cc *compileCtx, tu Value, wrap func(string) string) string {
 		if wrap == nil {
 			wrap = func(s string) string { return s }
 		}
-		return wrap(dateTimeToExpr(jsval.Obj(end))) + " - " + wrap(dateTimeToExpr(jsval.Obj(start)))
+		return wrap(dateTimeToExpr(cc, jsval.Obj(end))) + " - " + wrap(dateTimeToExpr(cc, jsval.Obj(start)))
 	}
 	return ""
 }
@@ -408,7 +408,7 @@ func normalizeNamed(v Value, names []string, what string) float64 {
 		return v.NumValue()
 	}
 	if !v.IsStr() {
-		throw("Invalid %s value: %s", what, v.AsString())
+		throw("%s", msgInvalidTimeUnit(nil, what, v))
 	}
 	lower := strings.ToLower(v.StrValue())
 	for i, n := range names {
@@ -425,17 +425,18 @@ func normalizeNamed(v Value, names []string, what string) float64 {
 			return float64(i)
 		}
 	}
-	throw("Invalid %s value: %s", what, v.StrValue())
+	throw("%s", msgInvalidTimeUnit(nil, what, v))
 	return 0
 }
 
 // dateTimeParts is upstream's dateTimeParts: the arguments of datetime(...)
 // as text. With normalize=true month/quarter/day names and 1-based numbers are
 // converted to the 0-based values datetime() expects.
-func dateTimeParts(d Value, normalize bool) []string {
+func dateTimeParts(cc *compileCtx, d Value, normalize bool) []string {
 	var parts []string
 	if normalize && !d.Get("day").IsUndefined() {
 		if d.Len() > 1 {
+			cc.warn(msgDroppedDay(cc, d))
 			d = jsval.Obj(omit(d, "day"))
 		}
 	}
@@ -460,7 +461,10 @@ func dateTimeParts(d Value, normalize bool) []string {
 				q = jsval.Num(jsval.ToNumber(q))
 			}
 			if !q.IsNum() {
-				throw("Invalid quarter value: %s", q.AsString())
+				throw("%s", msgInvalidTimeUnit(cc, "quarter", q))
+			}
+			if q.NumValue() > 4 {
+				cc.warn(msgInvalidTimeUnit(cc, "quarter", q))
 			}
 			parts = append(parts, jsval.JSNumberString((q.NumValue()-1)*3))
 		} else if q.IsNum() {
@@ -506,8 +510,8 @@ func dateTimeParts(d Value, normalize bool) []string {
 	return parts
 }
 
-func dateTimeToExpr(d Value) string {
-	s := strings.Join(dateTimeParts(d, true), ", ")
+func dateTimeToExpr(cc *compileCtx, d Value) string {
+	s := strings.Join(dateTimeParts(cc, d, true), ", ")
 	if d.Get("utc").IsTruthy() {
 		return "utc(" + s + ")"
 	}
@@ -515,7 +519,7 @@ func dateTimeToExpr(d Value) string {
 }
 
 func dateTimeExprToExpr(d Value) string {
-	s := strings.Join(dateTimeParts(d, false), ", ")
+	s := strings.Join(dateTimeParts(nil, d, false), ", ")
 	if d.Get("utc").IsTruthy() {
 		return "utc(" + s + ")"
 	}

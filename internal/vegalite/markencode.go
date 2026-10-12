@@ -185,6 +185,15 @@ func colorEncode(m *unitModel, filledOpt Value) Value {
 	if defaultStroke.IsTruthy() {
 		out.Set("stroke", signalOrValueRef(defaultStroke))
 	}
+	if md := markDef.ObjValue(); markDef.Get("color").IsTruthy() && md != nil {
+		other := markDef.Get("stroke")
+		if filled.IsTruthy() {
+			other = markDef.Get("fill")
+		}
+		if other.IsTruthy() {
+			m.ctx.warn(msgDroppingColor("property", md.Has("fill"), md.Has("stroke")))
+		}
+	}
 	dv := defaultStroke
 	if filled.IsTruthy() {
 		dv = defaultFill

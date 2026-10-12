@@ -339,6 +339,9 @@ type ErrorHandlerOption struct {
 //     evaluated (a TypeError, a RangeError, an invalid parameter);
 //   - a Warning, which never fails the call unless h returns an error for it.
 //
+// Warnings include the Vega-Lite compiler's, with upstream's text; they also
+// reach h from VegaLiteToVega.
+//
 // Errors that do not depend on h always fail the call: an invalid
 // specification, an exceeded limit (ErrLimit), a timeout
 // (context.DeadlineExceeded), Close (context.Canceled).

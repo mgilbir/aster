@@ -412,7 +412,15 @@ func runCompile(args []string) (err error) {
 		}
 	}()
 
-	vgSpec, err := c.VegaLiteToVega(spec)
+	// The compiler's warnings are printed, as a render's are.
+	vgSpec, err := c.VegaLiteToVega(spec, aster.WithErrorHandler(func(err error) error {
+		var w aster.Warning
+		if errors.As(err, &w) {
+			fmt.Fprintf(os.Stderr, "aster: warning: %v\n", err)
+			return nil
+		}
+		return err
+	}))
 	if err != nil {
 		return err
 	}

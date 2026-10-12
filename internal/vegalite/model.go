@@ -291,6 +291,7 @@ func (m *modelBase) getSizeSignalRef(layoutSizeType string) Value {
 					fieldRef := vgField(cc, mkv("aggregate", "distinct", "field", field), fieldRefOption{expr: "datum"})
 					return sig(sizeExpr(scaleName, sc, fieldRef))
 				}
+				cc.warn(msgUnknownField(channel))
 				return jsval.Null
 			}
 		}

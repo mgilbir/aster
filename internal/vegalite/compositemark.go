@@ -177,8 +177,11 @@ func partLayerMixins(markDef Value, part string, compositeMarkConfig Value, part
 	return nil
 }
 
-func filterAggregateFromChannelDef(def Value, compositeMark string) Value {
-	if def.Get("aggregate").IsTruthy() {
+func filterAggregateFromChannelDef(cc *compileCtx, def Value, compositeMark string) Value {
+	if agg := def.Get("aggregate"); agg.IsTruthy() {
+		if !(agg.IsStr() && agg.StrValue() == compositeMark) {
+			cc.warn(msgErrorBarContinuousAxisHasCustomizedAggregate(agg, compositeMark))
+		}
 		return jsval.Obj(omit(def, "aggregate"))
 	}
 	return def
@@ -189,17 +192,17 @@ type continuousAxisInfo struct {
 	axis                           string
 }
 
-func compositeMarkContinuousAxis(spec Value, orient, compositeMark string) continuousAxisInfo {
+func compositeMarkContinuousAxis(cc *compileCtx, spec Value, orient, compositeMark string) continuousAxisInfo {
 	encoding := spec.Get("encoding")
 	axis := chY
 	if orient != "vertical" {
 		axis = chX
 	}
 	return continuousAxisInfo{
-		def:       filterAggregateFromChannelDef(encoding.Get(axis), compositeMark),
-		def2:      filterAggregateFromChannelDef(encoding.Get(axis+"2"), compositeMark),
-		defError:  filterAggregateFromChannelDef(encoding.Get(axis+"Error"), compositeMark),
-		defError2: filterAggregateFromChannelDef(encoding.Get(axis+"Error2"), compositeMark),
+		def:       filterAggregateFromChannelDef(cc, encoding.Get(axis), compositeMark),
+		def2:      filterAggregateFromChannelDef(cc, encoding.Get(axis+"2"), compositeMark),
+		defError:  filterAggregateFromChannelDef(cc, encoding.Get(axis+"Error"), compositeMark),
+		defError2: filterAggregateFromChannelDef(cc, encoding.Get(axis+"Error2"), compositeMark),
 		axis:      axis,
 	}
 }
@@ -261,7 +264,9 @@ func normalizeBoxPlot(cc *compileCtx, spec Value, config Value) Value {
 	so.Set("encoding", normalizeEncoding(cc, spec.Get("encoding"), config))
 	spec = jsval.Obj(so)
 	mark, params := spec.Get("mark"), spec.Get("params")
-	_ = params
+	if params.IsTruthy() {
+		cc.warn(msgSelectionNotSupported("boxplot"))
+	}
 	outerSpec := omit(spec, "mark", "encoding", "params", "projection")
 	markDef := markDefOf(mark)
 	extent := coalesce(markDef.Get("extent"), config.Get("boxplot").Get("extent"))
@@ -387,7 +392,8 @@ func normalizeBoxPlot(cc *compileCtx, spec Value, config Value) Value {
 	scale, axis := bp.continuousAxisChannelDef.Get("scale"), bp.continuousAxisChannelDef.Get("axis")
 	title := compositeTitle(bp.continuousAxisChannelDef)
 	outEnc := jsval.NewObject(8)
-	cd := mk("field", contField, "type", bp.continuousAxisChannelDef.Get("type"))
+	// field: continuousAxisChannelDef.field, undefined when there is none.
+	cd := mk("field", bp.continuousAxisChannelDef.Get("field"), "type", bp.continuousAxisChannelDef.Get("type"))
 	if !title.IsUndefined() {
 		cd.Set("title", title)
 	}
@@ -440,7 +446,7 @@ type boxParamsResult struct {
 
 func boxParams(cc *compileCtx, spec Value, extent Value, config Value) boxParamsResult {
 	orient := compositeMarkOrient(cc, spec, "boxplot")
-	cai := compositeMarkContinuousAxis(spec, orient, "boxplot")
+	cai := compositeMarkContinuousAxis(cc, spec, orient, "boxplot")
 	contField := cmFieldName(cc, cai.def.Get("field"))
 	aliased := cmAlias(cc, contField)
 	boxPlotType := extent
@@ -561,8 +567,11 @@ func errorBarParams(cc *compileCtx, spec Value, compositeMark string, config Val
 	mark, encoding := spec.Get("mark"), spec.Get("encoding")
 	outerSpec := omit(spec, "mark", "encoding", "params", "projection")
 	markDef := markDefOf(mark)
+	if spec.Get("params").IsTruthy() {
+		cc.warn(msgSelectionNotSupported(compositeMark))
+	}
 	orient, inputType := errorBarOrientAndInputType(cc, spec, compositeMark)
-	cai := compositeMarkContinuousAxis(spec, orient, compositeMark)
+	cai := compositeMarkContinuousAxis(cc, spec, orient, compositeMark)
 	agg, post, tooltipSummary, tooltipTitleWithFieldName := errorBarAggregationAndCalculation(cc, markDef, cai.def, cai.def2, cai.defError, cai.defError2, inputType, compositeMark, config)
 	var axis2, err, err2 string
 	if cai.axis == "x" {
@@ -627,6 +636,9 @@ func errorBarAggregationAndCalculation(cc *compileCtx, markDef, def, def2, defEr
 		default:
 			extent = "iqr"
 		}
+		if (center == "median") != (extent == "iqr") {
+			cc.warn(msgErrorBarCenterIsUsedWithWrongExtent(jsval.Str(center), jsval.Str(extent), compositeMark))
+		}
 		if extent == "stderr" || extent == "stdev" {
 			agg = []Value{
 				mkv("op", extent, "field", contFieldV, "as", "extent_"+contField),
@@ -664,6 +676,9 @@ func errorBarAggregationAndCalculation(cc *compileCtx, markDef, def, def2, defEr
 			}
 		}
 	} else {
+		if markDef.Get("center").IsTruthy() || markDef.Get("extent").IsTruthy() {
+			cc.warn(msgErrorBarCenterAndExtentAreNotNeeded(markDef.Get("center"), markDef.Get("extent")))
+		}
 		switch inputType {
 		case "aggregated-upper-lower":
 			tooltipSummary = []tooltipSummaryItem{}
@@ -752,6 +767,10 @@ func normalizeErrorBand(cc *compileCtx, spec Value, config Value) Value {
 		bandMark.Set("ariaRoleDescription", jsval.Str("errorband"))
 		spread(bordersMark, jsval.Obj(interpolate))
 		bordersMark.Set("aria", jsval.False)
+	} else if def.Get("interpolate").IsTruthy() {
+		cc.warn(msgErrorBand1DNotSupport("interpolate"))
+	} else if def.Get("tension").IsTruthy() {
+		cc.warn(msgErrorBand1DNotSupport("tension"))
 	}
 	var layer []Value
 	layer = append(layer, makePart("band", jsval.Obj(bandMark), "lower", "upper", r.tooltipEncoding)...)

@@ -36,12 +36,19 @@ func (f *facetModel) initFacet(facet Value) *Object {
 		out.Set("facet", f.initFacetFieldDef(facet, "facet"))
 		return out
 	}
+	cc := f.b().ctx
 	for _, channel := range keysOf(facet) {
+		cc.work(1)
 		if channel != chRow && channel != chColumn {
+			cc.warn(msgIncompatibleChannel(channel, "facet", ""))
 			break
 		}
 		fd := facet.Get(channel)
+		if fd.IsNullish() {
+			throw("Cannot read properties of %s (reading 'field')", nullishName(fd))
+		}
 		if fd.Get("field").IsUndefined() {
+			cc.warn(msgEmptyFieldDef(cc, fd, channel))
 			break
 		}
 		out.Set(channel, f.initFacetFieldDef(fd, channel))
@@ -97,6 +104,7 @@ func (f *facetModel) parseLayoutSize() { parseChildrenLayoutSize(f) }
 func (f *facetModel) parseSelections() {
 	f.child.parseSelections()
 	f.comp.selection = f.child.b().comp.selection
+	warnMultiViewAnimation(f.b().ctx, f.comp.selection)
 }
 
 func (f *facetModel) parseMarkGroup() { f.child.parseMarkGroup() }
@@ -248,6 +256,8 @@ func (f *facetModel) getCardinalityAggregateForChild() cardinalityAggregate {
 						r.fields = append(r.fields, jsval.Str(field))
 						r.ops = append(r.ops, jsval.Str("distinct"))
 						r.as = append(r.as, jsval.Str("distinct_"+field))
+					} else {
+						cc.warn(msgUnknownField(channel))
 					}
 				}
 			}

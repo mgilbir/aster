@@ -401,6 +401,14 @@ func isCustomFormatType(ft Value) bool {
 // initChannelDef normalizes a channel definition (upstream initChannelDef).
 func initChannelDef(cc *compileCtx, cd Value, channel string, config Value, compositeMark bool) Value {
 	if cd.IsStr() || cd.IsNum() || cd.IsBool() {
+		typ := "boolean"
+		switch {
+		case cd.IsStr():
+			typ = "string"
+		case cd.IsNum():
+			typ = "number"
+		}
+		cc.warn(msgPrimitiveChannelDef(cc, channel, typ, cd))
 		return mkv("value", cd)
 	}
 	if isFieldOrDatumDef(cc, cd) {
@@ -417,6 +425,7 @@ func initFieldOrDatumDef(cc *compileCtx, fd Value, channel string, config Value,
 	if isStringFieldOrDatumDef(fd) {
 		formatType := fd.Get("formatType")
 		if isCustomFormatType(formatType) && !config.Get("customFormatTypes").IsTruthy() {
+			cc.warn(msgCustomFormatTypeNotAllowed(channel))
 			return initFieldOrDatumDef(cc, jsval.Obj(omit(fd, "format", "formatType")), channel, config, compositeMark)
 		}
 	} else {
@@ -432,6 +441,7 @@ func initFieldOrDatumDef(cc *compileCtx, fd Value, channel string, config Value,
 		if guideType != "" && fd.Get(guideType).IsTruthy() {
 			g := fd.Get(guideType)
 			if isCustomFormatType(g.Get("formatType")) && !config.Get("customFormatTypes").IsTruthy() {
+				cc.warn(msgCustomFormatTypeNotAllowed(channel))
 				o := cloneObj(fd.ObjValue())
 				o.Set(guideType, jsval.Obj(omit(g, "format", "formatType")))
 				return initFieldOrDatumDef(cc, jsval.Obj(o), channel, config, compositeMark)
@@ -469,6 +479,7 @@ func initFieldDef(cc *compileCtx, fd Value, channel string, compositeMark bool) 
 	aggregate, timeUnit, bin, field := fd.Get("aggregate"), fd.Get("timeUnit"), fd.Get("bin"), fd.Get("field")
 	fieldDef := cloneObj(fd.ObjValue())
 	if !compositeMark && aggregate.IsTruthy() && !isAggregateOp(cc, aggregate) && !isArgmaxDef(aggregate) && !isArgminDef(aggregate) {
+		cc.warn(msgInvalidAggregate(aggregate))
 		fieldDef.Delete("aggregate")
 	}
 	if timeUnit.IsTruthy() {
@@ -479,6 +490,9 @@ func initFieldDef(cc *compileCtx, fd Value, channel string, compositeMark bool) 
 	}
 	if isBinning(bin) {
 		fieldDef.Set("bin", normalizeBin(bin, channel))
+	}
+	if isBinned(bin) && !isXorY(channel) {
+		cc.warn(msgChannelShouldNotBeUsedForBinned(channel))
 	}
 	fdv := jsval.Obj(fieldDef)
 	if isTypedFieldDefOf(cc, fdv) {
@@ -501,11 +515,17 @@ func initFieldDef(cc *compileCtx, fd Value, channel string, compositeMark bool) 
 				fieldDef.Set("type", jsval.Str(fullType))
 			}
 		}
-		if t != "quantitative" && isCountingAggregateOp(aggregate) {
+		if !(tv.IsStr() && t == "quantitative") && isCountingAggregateOp(aggregate) {
+			cc.warn(msgInvalidFieldTypeForCountAggregate(tv, aggregate))
 			fieldDef.Set("type", jsval.Str("quantitative"))
 		}
 	} else if !isSecondaryRangeChannel(channel) {
 		fieldDef.Set("type", jsval.Str(defaultType(fdv, channel)))
+	}
+	if isTypedFieldDefOf(cc, fdv) {
+		if warning := channelCompatibilityWarning(cc, fdv, channel); warning != "" {
+			cc.warn(warning)
+		}
 	}
 	if isSortableFieldDef(fdv) && fieldDef.Lookup("sort").IsStr() {
 		sort := fieldDef.Lookup("sort").StrValue()
@@ -560,14 +580,14 @@ func valueExpr(cc *compileCtx, v Value, timeUnit Value, typ string, wrapTime, un
 		expr, have = v.Get("signal").AsString(), true
 	case isDateTime(v):
 		isTime = true
-		expr, have = dateTimeToExpr(v), true
+		expr, have = dateTimeToExpr(cc, v), true
 	case v.IsStr() || v.IsNum():
 		if isTime {
 			expr, have = "datetime("+stringify(cc, v)+")", true
 			if isLocalSingleTimeUnit(unit) {
 				// For a single timeUnit, dateTimeToExpr matches the number/string to the unit.
 				if (v.IsNum() && v.NumValue() < 10000) || (v.IsStr() && dateParseNaN(v.StrValue())) {
-					expr = dateTimeToExpr(mkv(unit, v))
+					expr = dateTimeToExpr(cc, mkv(unit, v))
 				}
 			}
 		}
@@ -670,4 +690,40 @@ func hasBandEnd(cc *compileCtx, fd, fd2 Value, markDef, config Value) bool {
 		return !getBandPosition(cc, fd, fd2, markDef, config).IsUndefined()
 	}
 	return false
+}
+
+// channelCompatibilityWarning is upstream's channelCompatibility: the warning
+// for a typed field def a channel should not be used with, or "".
+func channelCompatibilityWarning(cc *compileCtx, fd Value, channel string) string {
+	typ := fd.Get("type")
+	isType := func(t string) bool { return typ.IsStr() && typ.StrValue() == t }
+	if isType("geojson") && channel != chShape {
+		return "Channel " + channel + " should not be used with a geojson data."
+	}
+	switch channel {
+	case chRow, chColumn, chFacet:
+		if !isDiscreteDef(cc, fd) {
+			return msgChannelShouldBeDiscrete(channel)
+		}
+	case chLongitude, chLongitude2, chLatitude, chLatitude2:
+		if !isType("quantitative") {
+			return "Channel " + channel + " should be used with a quantitative field only, not " + tmpl(typ) + " field."
+		}
+	case chOpacity, chFillOpacity, chStrokeOpacity, chStrokeWidth, chSize, chTheta2, chRadius2, chX2, chY2, chTime:
+		if channel == chTime && cc.v5 {
+			return ""
+		}
+		if isType("nominal") && !fd.Get("sort").IsTruthy() {
+			return "Channel " + channel + " should not be used with an unsorted discrete field."
+		}
+	case chShape, chStrokeDash:
+		if !isDiscreteDef(cc, fd) && !(isScaleFieldDef(fd) && isContinuousToDiscrete(fd.Get("scale").Get("type").AsString())) {
+			return msgChannelShouldBeDiscreteOrDiscretizing(channel)
+		}
+	case chOrder:
+		if isType("nominal") && !fd.ObjValue().Has("sort") {
+			return "Channel order is inappropriate for nominal field, which has no inherent order."
+		}
+	}
+	return ""
 }

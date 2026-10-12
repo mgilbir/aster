@@ -55,7 +55,11 @@ func parseRangeForChannel(channel string, u *unitModel) withExplicit {
 		if sv := specifiedScale.Get(property); !sv.IsUndefined() {
 			supported := scaleTypeSupportProperty(scaleType, property)
 			incompatible := channelScalePropertyIncompatible(channel, property)
-			if !supported || incompatible {
+			if !supported {
+				u.ctx.warn(msgScalePropertyNotWorkWithScaleType(scaleType, property, channel))
+				continue
+			} else if incompatible {
+				u.ctx.warn(msgCannotUseScalePropertyWithNonColor(property))
 				continue
 			}
 			switch property {
@@ -92,6 +96,8 @@ func parseRangeForChannel(channel string, u *unitModel) withExplicit {
 				if step := getPositionStep(sizeValue, u, channel); step.IsTruthy() {
 					return makeExplicit(mkv("step", step))
 				}
+			} else {
+				u.ctx.warn(msgStepDropped(sizeChannel))
 			}
 		} else if isXorYOffset(channel) {
 			positionChannel := chY
@@ -169,7 +175,7 @@ func defaultRange(channel string, u *unitModel) Value {
 		}
 		rangeMax := sizeRangeMax(mark, size, u, config)
 		if isContinuousToDiscrete(scaleType) {
-			return interpolateRange(u.ctx, rangeMin, rangeMax, defaultContinuousToDiscreteCount(scaleType, config, domain, channel))
+			return interpolateRange(u.ctx, rangeMin, rangeMax, defaultContinuousToDiscreteCount(cc, scaleType, config, domain, channel))
 		}
 		return arr(rangeMin, rangeMax)
 	case chTheta:
@@ -322,7 +328,7 @@ func getDiscretePositionSize(cc *compileCtx, channel string, size *Object, view 
 	return getViewConfigDiscreteSize(view, sizeChannel)
 }
 
-func defaultContinuousToDiscreteCount(scaleType string, config Value, domain Value, channel string) Value {
+func defaultContinuousToDiscreteCount(cc *compileCtx, scaleType string, config Value, domain Value, channel string) Value {
 	switch scaleType {
 	case "quantile":
 		return config.Get("scale").Get("quantileCount")
@@ -332,6 +338,7 @@ func defaultContinuousToDiscreteCount(scaleType string, config Value, domain Val
 		if !domain.IsUndefined() && domain.IsArr() {
 			return jsval.Int(domain.Len() + 1)
 		}
+		cc.warn(msgDomainRequiredForThresholdScale(channel))
 		return jsval.Int(3)
 	}
 	return undef

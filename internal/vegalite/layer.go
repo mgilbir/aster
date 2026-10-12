@@ -114,6 +114,19 @@ func (l *layerModel) parseSelections() {
 			l.comp.selection.set(k, v)
 		}
 	}
+	warnMultiViewAnimation(cc, l.comp.selection)
+}
+
+// warnMultiViewAnimation is the error upstream logs (log.error, which does
+// not throw) when a composite view holds a timer selection.
+func warnMultiViewAnimation(cc *compileCtx, sels *omap[*selectionComponent]) {
+	for _, k := range sels.keysView() {
+		cc.work(1)
+		if isTimerSelection(cc, sels.lookup(k)) {
+			cc.warn(msgMultiViewAnimationUnsupported)
+			return
+		}
+	}
 }
 
 func (l *layerModel) parseMarkGroup() {
@@ -236,6 +249,9 @@ func newConcatModel(cc *compileCtx, spec Value, parent Model, parentGivenName st
 		resolve = resolveFromSpec(r)
 	}
 	c.modelBase = newModelBase(cc, c, spec, "concat", parent, parentGivenName, config, resolve, undef)
+	if ax := spec.Get("resolve").Get("axis"); strIs(ax.Get("x"), "shared") || strIs(ax.Get("y"), "shared") {
+		cc.warn(msgConcatCannotShareAxis)
+	}
 	var childSpecs Value
 	switch {
 	case isVConcatSpec(spec):
@@ -277,6 +293,7 @@ func (c *concatModel) parseSelections() {
 			c.comp.selection.set(key, v)
 		}
 	}
+	warnMultiViewAnimation(cc, c.comp.selection)
 }
 
 func (c *concatModel) parseMarkGroup() {

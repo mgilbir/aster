@@ -33,7 +33,7 @@ func positionOffset(baseChannel string, markDef Value, encoding Value, m *unitMo
 	return positionOffsetResult{}
 }
 
-func vgAlignedPositionChannel(channel string, markDef, config Value, defaultAlign string) string {
+func vgAlignedPositionChannel(cc *compileCtx, channel string, markDef, config Value, defaultAlign string) string {
 	if channel == chRadius || channel == chTheta {
 		return getVgPositionChannel(channel)
 	}
@@ -43,7 +43,9 @@ func vgAlignedPositionChannel(channel string, markDef, config Value, defaultAlig
 	}
 	align := getMarkPropOrConfigSimple(alignChannel, markDef, config)
 	alignExcl := ""
-	if !isSignalRef(align) && align.IsTruthy() {
+	if isSignalRef(align) {
+		cc.warn(msgRangeMarkAlignmentCannotBeExpression(alignChannel))
+	} else if align.IsTruthy() {
 		alignExcl = align.AsString()
 	}
 	if channel == chX {
@@ -228,7 +230,7 @@ func rangePosition(channel string, m *unitModel, o rangePosOpts) Value {
 	pos2 := pointPosition2OrSize(m, o.defaultPos2, channel2)
 	var vgChannel string
 	if pos2.Get(sizeChannel).IsTruthy() {
-		vgChannel = vgAlignedPositionChannel(channel, markDef, config, "middle")
+		vgChannel = vgAlignedPositionChannel(m.ctx, channel, markDef, config, "middle")
 	} else {
 		vgChannel = getVgPositionChannel(channel)
 	}
@@ -268,17 +270,17 @@ func pointPosition2OrSize(m *unitModel, defaultPos, channel string) Value {
 	if !valueRef.IsUndefined() {
 		return mkv(vgChannel, valueRef)
 	}
-	if r := position2orSize(channel, markDef); !r.IsUndefined() {
+	if r := position2orSize(m.ctx, channel, markDef); !r.IsUndefined() {
 		return r
 	}
 	styleObj := mkv(channel, getMarkStyleConfig(channel, markDef, config.Get("style")), sizeChannel, getMarkStyleConfig(sizeChannel, markDef, config.Get("style")))
-	if r := position2orSize(channel, styleObj); !r.IsUndefined() {
+	if r := position2orSize(m.ctx, channel, styleObj); !r.IsUndefined() {
 		return r
 	}
-	if r := position2orSize(channel, config.Get(m.mark())); !r.IsUndefined() {
+	if r := position2orSize(m.ctx, channel, config.Get(m.mark())); !r.IsUndefined() {
 		return r
 	}
-	if r := position2orSize(channel, config.Get("mark")); !r.IsUndefined() {
+	if r := position2orSize(m.ctx, channel, config.Get("mark")); !r.IsUndefined() {
 		return r
 	}
 	return mkv(vgChannel, pointPositionDefaultRef(m, defaultPos, channel, scaleName, scale)())
@@ -294,7 +296,7 @@ func position2Ref(cc *compileCtx, p midPointParams) Value {
 	})
 }
 
-func position2orSize(channel string, markDef Value) Value {
+func position2orSize(cc *compileCtx, channel string, markDef Value) Value {
 	sizeChannel := getSizeChannel(channel)
 	vgChannel := getVgPositionChannel(channel)
 	switch {
@@ -304,7 +306,9 @@ func position2orSize(channel string, markDef Value) Value {
 		return mkv(vgChannel, widthHeightValueOrSignalRef(channel, markDef.Get(channel)))
 	case markDef.Get(sizeChannel).IsTruthy():
 		dim := markDef.Get(sizeChannel)
-		if !isRelativeBandSize(dim) {
+		if isRelativeBandSize(dim) {
+			cc.warn(msgRelativeBandSizeNotSupported(sizeChannel))
+		} else {
 			return mkv(sizeChannel, widthHeightValueOrSignalRef(channel, dim))
 		}
 	}
@@ -346,7 +350,7 @@ func rectPosition(m *unitModel, channel string) Value {
 	return rangePosition(channel, m, rangePosOpts{defaultPos: "zeroOrMax", defaultPos2: "zeroOrMin"})
 }
 
-func defaultSizeRef(sizeChannel, scaleName string, scale *scaleComponent, config Value, bandSize Value, hasFieldDef bool, mark string) Value {
+func defaultSizeRef(cc *compileCtx, sizeChannel, scaleName string, scale *scaleComponent, config Value, bandSize Value, hasFieldDef bool, mark string) Value {
 	switch {
 	case isRelativeBandSize(bandSize):
 		if scale != nil {
@@ -361,6 +365,8 @@ func defaultSizeRef(sizeChannel, scaleName string, scale *scaleComponent, config
 					return sig("max(" + signalOrStringValue(minBandSize).AsString() + ", " + bandWidth + ")")
 				}
 				return sig(bandWidth)
+			} else if !(bandSize.Get("band").IsNum() && bandSize.Get("band").NumValue() == 1) {
+				cc.warn(msgCannotUseRelativeBandSizeWithNonBandScale(undefinedIfEmpty(scaleType)))
 			}
 		} else {
 			return mkv("mult", bandSize.Get("band"), "field", mkv("group", sizeChannel))
@@ -414,6 +420,8 @@ func positionAndSize(fd Value, channel string, m *unitModel) Value {
 	if encoding.Get("size").IsTruthy() || markDef.Get("size").IsTruthy() {
 		if useVlSizeChannel {
 			sizeMixins = nonPosition("size", m, nonPositionOpts{vgChannel: vgSizeChannel, defaultRef: signalOrValueRef(markDef.Get("size"))})
+		} else {
+			m.ctx.warn(msgCannotApplySizeToNonOrientedMark(markDef.Get("type").AsString()))
 		}
 	}
 	hasSizeFromMarkOrEncoding := sizeMixins.IsTruthy()
@@ -435,13 +443,13 @@ func positionAndSize(fd Value, channel string, m *unitModel) Value {
 		if name == "" {
 			name = scaleName
 		}
-		sizeMixins = mkv(vgSizeChannel, defaultSizeRef(vgSizeChannel, name, useScale, config, bandSize, fd.IsTruthy(), markDef.Get("type").AsString()))
+		sizeMixins = mkv(vgSizeChannel, defaultSizeRef(m.ctx, vgSizeChannel, name, useScale, config, bandSize, fd.IsTruthy(), markDef.Get("type").AsString()))
 	}
 	defaultBandAlign := "middle"
 	if scType == "band" && isRelativeBandSize(bandSize) && !hasSizeFromMarkOrEncoding {
 		defaultBandAlign = "top"
 	}
-	vgChannel := vgAlignedPositionChannel(channel, markDef, config, defaultBandAlign)
+	vgChannel := vgAlignedPositionChannel(m.ctx, channel, markDef, config, defaultBandAlign)
 	center := vgChannel == "xc" || vgChannel == "yc"
 	bp0 := jsval.Int(0)
 	if center {
@@ -627,6 +635,7 @@ func rectBinPosition(fd, fd2 Value, channel string, m *unitModel) Value {
 			))
 		}
 	}
+	cc.warn(msgChannelRequiredForBinned(getSecondaryRangeChannel(channel)))
 	return undef
 }
 

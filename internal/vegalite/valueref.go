@@ -6,10 +6,10 @@ import (
 
 // Value references for mark encoding — vega-lite/src/compile/mark/encode/valueref.ts.
 
-func datumDefToExpr(dd Value) string {
+func datumDefToExpr(cc *compileCtx, dd Value) string {
 	datum := dd.Get("datum")
 	if isDateTime(datum) {
-		return dateTimeToExpr(datum)
+		return dateTimeToExpr(cc, datum)
 	}
 	return stringify(nil, datum)
 }
@@ -54,7 +54,7 @@ func valueRefForFieldOrDatumDef(cc *compileCtx, fd Value, scaleName string, opt 
 		datum := fd.Get("datum")
 		switch {
 		case isDateTime(datum):
-			ref.Set("signal", jsval.Str(dateTimeToExpr(datum)))
+			ref.Set("signal", jsval.Str(dateTimeToExpr(cc, datum)))
 		case isSignalRef(datum):
 			ref.Set("signal", datum.Get("signal"))
 		case isExprRef(datum):
@@ -175,6 +175,11 @@ func midPoint(cc *compileCtx, p midPointParams) Value {
 					if isFieldDef(cc, p.channel2Def) {
 						return interpolatedSignalRef(cc, interpolatedOpts{scaleName: p.scaleName, fod: p.channelDef, fod2: p.channel2Def, bandPosition: bandPosition, offset: p.offset})
 					}
+					channel2 := chY2
+					if p.channel == chX {
+						channel2 = chX2
+					}
+					cc.warn(msgChannelRequiredForBinned(channel2))
 				}
 			}
 			opt := fieldRefOption{}

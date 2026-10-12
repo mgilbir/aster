@@ -149,7 +149,7 @@ func normalize(cc *compileCtx, spec Value, config Value) Value {
 	s := compat.mapTop(spec, p)
 	s = core.mapTop(s, p)
 	s = top.mapTop(s, p)
-	autosize := normalizeAutoSize(s, mkv("width", spec.Get("width"), "height", spec.Get("height"), "autosize", spec.Get("autosize")), config)
+	autosize := normalizeAutoSize(cc, s, mkv("width", spec.Get("width"), "height", spec.Get("height"), "autosize", spec.Get("autosize")), config)
 	o := cloneObj(s.ObjValue())
 	if autosize.IsTruthy() {
 		o.Set("autosize", autosize)
@@ -164,13 +164,23 @@ func normalizeAutoSizeValue(v Value) Value {
 	return coalesce(v, mkv())
 }
 
-func normalizeAutoSize(spec Value, sizeInfo Value, config Value) Value {
+func normalizeAutoSize(cc *compileCtx, spec Value, sizeInfo Value, config Value) Value {
 	width, height := sizeInfo.Get("width"), sizeInfo.Get("height")
 	isFitCompatible := isUnitSpec(spec) || isLayerSpec(spec)
 	autosizeDefault := jsval.NewObject(2)
-	isContainer := func(v Value) bool { return v.IsStr() && v.StrValue() == "container" }
-	// A container width/height is discarded for specs that cannot fit (only a warning upstream).
-	if isFitCompatible {
+	// width == 'container' (loose: an array prints as its items joined).
+	isContainer := func(v Value) bool { return (v.IsStr() || v.IsArr()) && v.AsString() == "container" }
+	if !isFitCompatible {
+		// A container width/height is discarded for specs that cannot fit.
+		if isContainer(width) {
+			cc.warn(msgContainerSizeNonSingle("width"))
+			width = undef
+		}
+		if isContainer(height) {
+			cc.warn(msgContainerSizeNonSingle("height"))
+			height = undef
+		}
+	} else {
 		switch {
 		case isContainer(width) && isContainer(height):
 			autosizeDefault.Set("type", jsval.Str("fit"))
@@ -189,8 +199,16 @@ func normalizeAutoSize(spec Value, sizeInfo Value, config Value) Value {
 		spread(autosize, normalizeAutoSizeValue(config.Get("autosize")))
 	}
 	spread(autosize, normalizeAutoSizeValue(spec.Get("autosize")))
-	if autosize.Lookup("type").IsStr() && autosize.Lookup("type").StrValue() == "fit" && !isFitCompatible {
+	typeIs := func(t string) bool { return autosize.Lookup("type").IsStr() && autosize.Lookup("type").StrValue() == t }
+	if typeIs("fit") && !isFitCompatible {
+		cc.warn(msgFitNonSingle)
 		autosize.Set("type", jsval.Str("pad"))
+	}
+	if isContainer(width) && !(typeIs("fit") || typeIs("fit-x")) {
+		cc.warn(msgContainerSizeNotCompatibleWithAutosize("width"))
+	}
+	if isContainer(height) && !(typeIs("fit") || typeIs("fit-y")) {
+		cc.warn(msgContainerSizeNotCompatibleWithAutosize("height"))
 	}
 	if deepEqual(jsval.Obj(autosize), mkv("type", "pad")) {
 		return undef
@@ -636,6 +654,7 @@ func (n *coreNormalizer) mapNonLayerRepeat(spec Value, p *normParams) Value {
 	remaining := omit(spec, "repeat", "spec", "data")
 	if !repeat.IsArr() && spec.Get("columns").IsTruthy() {
 		spec = jsval.Obj(omit(spec, "columns"))
+		p.cc.warn(msgColumnsNotSupportByRowCol("repeat"))
 		remaining = omit(spec, "repeat", "spec", "data")
 	}
 	repeater := p.repeater
@@ -723,6 +742,7 @@ func (n *coreNormalizer) mapFacet(spec Value, p *normParams) Value {
 	facet := spec.Get("facet")
 	if isFacetMapping(facet) && spec.Get("columns").IsTruthy() {
 		spec = jsval.Obj(omit(spec, "columns"))
+		p.cc.warn(msgColumnsNotSupportByRowCol("facet"))
 	}
 	return n.baseMapper.mapFacet(spec, p)
 }
@@ -731,7 +751,7 @@ func (n *coreNormalizer) mapUnitWithParentEncodingOrProjection(spec Value, p *no
 	cc := p.cc
 
 	encoding, projection := spec.Get("encoding"), spec.Get("projection")
-	mergedProjection := mergeProjection(p.parentProjection, projection)
+	mergedProjection := mergeProjection(p.cc, p.parentProjection, projection)
 	mergedEncoding := mergeEncoding(cc, p.parentEncoding, replaceRepeaterInEncoding(cc, encoding, p.repeater), false)
 	o := cloneObj(spec.ObjValue())
 	if mergedProjection.IsTruthy() {
@@ -785,6 +805,16 @@ func (n *coreNormalizer) getFacetMappingAndLayout(row, column, facet Value, p *n
 	cc := p.cc
 
 	if row.IsTruthy() || column.IsTruthy() {
+		if facet.IsTruthy() {
+			var chs []string
+			if row.IsTruthy() {
+				chs = append(chs, chRow)
+			}
+			if column.IsTruthy() {
+				chs = append(chs, chColumn)
+			}
+			p.cc.warn(msgFacetChannelDropped(chs))
+		}
 		facetMapping := jsval.NewObject(2)
 		layout := jsval.NewObject(3)
 		for _, ch := range []string{chRow, chColumn} {
@@ -827,7 +857,7 @@ func (n *coreNormalizer) mapLayer(spec Value, p *normParams) Value {
 	rest := omit(spec, "encoding", "projection")
 	cp := p.clone()
 	cp.parentEncoding = mergeEncoding(cc, p.parentEncoding, encoding, true)
-	cp.parentProjection = mergeProjection(p.parentProjection, projection)
+	cp.parentProjection = mergeProjection(p.cc, p.parentProjection, projection)
 	cp.deeper()
 	if spec.Get("name").IsTruthy() {
 		rest.Set("name", jsval.Str(joinNonEmpty(cp.repeaterPrefix, spec.Get("name").AsString())))
@@ -880,7 +910,10 @@ func mergeEncoding(cc *compileCtx, parentEncoding, encoding Value, layer bool) V
 
 func merged2(a, b Value) *Object { return spread(spread(jsval.NewObject(4), a), b) }
 
-func mergeProjection(parent, projection Value) Value {
+func mergeProjection(cc *compileCtx, parent, projection Value) Value {
+	if parent.IsTruthy() && projection.IsTruthy() {
+		cc.warn(msgProjectionOverridden(cc, parent, projection))
+	}
 	if projection.IsNullish() {
 		return parent
 	}
@@ -1113,7 +1146,8 @@ func (ruleForRangedLineNormalizer) hasMatchingType(spec Value, p *normParams) bo
 }
 
 func (ruleForRangedLineNormalizer) run(spec Value, p *normParams, normalize func(Value, *normParams) Value) Value {
-	mark := spec.Get("mark")
+	mark, encoding := spec.Get("mark"), spec.Get("encoding")
+	p.cc.warn(msgLineWithRange(encoding.Get("x2").IsTruthy(), encoding.Get("y2").IsTruthy()))
 	o := cloneObj(spec.ObjValue())
 	if isObject(mark) {
 		o.Set("mark", jsval.Obj(spread(cloneObj(mark.ObjValue()), mkv("type", "rule"))))
@@ -1164,6 +1198,7 @@ func replaceRepeatInProp(cc *compileCtx, prop string, o, repeater Value) (Value,
 			c.Set(prop, jsval.Str(repr))
 			return jsval.Obj(c), true
 		}
+		cc.warn(msgNoSuchRepeatedValue(val.Get("repeat")))
 		return undef, false
 	}
 	return o, true

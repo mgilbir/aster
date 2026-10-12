@@ -118,7 +118,7 @@ func parseLayerAxes(m *layerModel) {
 		cc.work(modelStep)
 		child.parseAxesAndHeaders()
 		for _, channel := range child.b().comp.axes.keyList() {
-			v := parseGuideResolve(m.comp.resolve, channel)
+			v := parseGuideResolve(cc, m.comp.resolve, channel)
 			resolve.write(resolveAxis, channel)
 			resolve.axis[channel] = v
 			if resolve.axis[channel] == "shared" {
@@ -207,14 +207,14 @@ func mergeAxisComponent(cc *compileCtx, merged, child *axisComponent) *axisCompo
 	for _, prop := range axisComponentProperties {
 		prop := prop
 		mv := merged.getWithExplicit(prop)
-		v := mergeValuesWithExplicit(&mv, child.getWithExplicit(prop), prop, "axis", func(v1, v2 withExplicit, _, _ string) withExplicit {
+		v := mergeValuesWithExplicit(cc, &mv, child.getWithExplicit(prop), prop, "axis", func(cc *compileCtx, v1, v2 withExplicit, _, _ string) withExplicit {
 			switch prop {
 			case "title":
 				return mergeTitleComponent(cc, v1, v2)
 			case "gridScale":
 				return withExplicit{v1.explicit, firstDefined(v1.value, v2.value)}
 			}
-			return defaultTieBreaker(v1, v2, prop, "axis")
+			return defaultTieBreaker(cc, v1, v2, prop, "axis")
 		})
 		merged.setWithExplicit(prop, v)
 	}

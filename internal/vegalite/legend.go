@@ -206,7 +206,7 @@ func parseNonUnitLegend(m Model) *omap[*legendComponent] {
 		parseLegend(child)
 		cl := child.b().comp.legends
 		for _, channel := range cl.keyList() {
-			v := parseGuideResolve(m.b().comp.resolve, channel)
+			v := parseGuideResolve(cc, m.b().comp.resolve, channel)
 			resolve.write(resolveLegend, channel)
 			resolve.legend[channel] = v
 			if resolve.legend[channel] == "shared" {
@@ -248,7 +248,7 @@ func mergeLegendComponent(cc *compileCtx, mergedLegend, childLegend *legendCompo
 	for _, prop := range legendComponentProperties {
 		prop := prop
 		mv := mergedLegend.getWithExplicit(prop)
-		v := mergeValuesWithExplicit(&mv, childLegend.getWithExplicit(prop), prop, "legend", func(v1, v2 withExplicit, _, _ string) withExplicit {
+		v := mergeValuesWithExplicit(cc, &mv, childLegend.getWithExplicit(prop), prop, "legend", func(cc *compileCtx, v1, v2 withExplicit, _, _ string) withExplicit {
 			switch prop {
 			case "symbolType":
 				if v2.value.IsStr() && v2.value.StrValue() == "circle" {
@@ -261,7 +261,7 @@ func mergeLegendComponent(cc *compileCtx, mergedLegend, childLegend *legendCompo
 				typeMerged = true
 				return makeImplicit(jsval.Str("symbol"))
 			}
-			return defaultTieBreaker(v1, v2, prop, "legend")
+			return defaultTieBreaker(cc, v1, v2, prop, "legend")
 		})
 		mergedLegend.setWithExplicit(prop, v)
 	}
@@ -766,10 +766,13 @@ func unionDiscreteValuesForChannels(m Model, a, b string) []Value {
 	return nil
 }
 
-func setImplicitLegendValues(c *legendComponent, values []Value) {
+func setImplicitLegendValues(cc *compileCtx, c *legendComponent, values []Value, warning string) {
 	if len(values) > 0 {
 		vp := c.getWithExplicit("values")
 		if !vp.explicit {
+			if warning != "" {
+				cc.warn(warning)
+			}
 			c.set("values", jsval.Arr(values), false)
 		}
 	}
@@ -817,9 +820,9 @@ func assembleLegends(m Model) []Value {
 				ta, tb := m.b().getScaleType(existing.channel), m.b().getScaleType(channel)
 				if ta != "" && tb != "" && hasDiscreteDomain(ta) && hasDiscreteDomain(tb) {
 					if domainsExplicitAndEqual(m, existing.channel, channel) {
-						setImplicitLegendValues(existing.cmpt, getDiscreteValuesForChannel(m, existing.channel))
+						setImplicitLegendValues(cc, existing.cmpt, getDiscreteValuesForChannel(m, existing.channel), "")
 					} else {
-						setImplicitLegendValues(existing.cmpt, unionDiscreteValuesForChannels(m, existing.channel, channel))
+						setImplicitLegendValues(cc, existing.cmpt, unionDiscreteValuesForChannels(m, existing.channel, channel), msgLegendValuesUnioned(existing.channel, channel))
 					}
 				}
 				merged = true

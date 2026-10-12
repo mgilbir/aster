@@ -221,6 +221,12 @@ func markChannelCompatible(cc *compileCtx, enc Value, channel, mark string) bool
 // not support or that conflict, and initializes each channel def.
 func initEncoding(cc *compileCtx, encoding Value, mark string, filled bool, config Value) Value {
 	normalized := jsval.NewObject(8)
+	for _, key := range keysOf(encoding) {
+		cc.work(1)
+		if !isChannel(cc, key) {
+			cc.warn(msgInvalidEncodingChannel(key))
+		}
+	}
 	for _, ch := range unitChannels {
 		channel := ch
 		if !encoding.Get(channel).IsTruthy() {
@@ -235,32 +241,39 @@ func initEncoding(cc *compileCtx, encoding Value, mark string, filled bool, conf
 			positionDef := normalized.Lookup(mainChannel)
 			if isFieldDef(cc, positionDef) && isContinuousType(channelDefType(positionDef)) {
 				if isFieldDef(cc, channelDef) && (cc.v5 || !positionDef.Get("timeUnit").IsTruthy()) {
+					cc.warn(msgOffsetNestedInsideContinuousPositionScaleDropped(mainChannel))
 					continue
 				}
 			} else if cc.v5 && !isFieldDef(cc, positionDef) {
 				// 5.8 turns an offset without a position into the position itself.
 				channel = mainChannel
+				cc.warn(msgReplaceOffsetWithMainChannel(mainChannel))
 			}
 		}
 		if channel == chAngle && mark == "arc" && !encoding.Get("theta").IsTruthy() {
+			cc.warn(msgReplaceAngleWithTheta)
 			channel = chTheta
 		}
 		if !markChannelCompatible(cc, encoding, channel, mark) {
+			cc.warn(msgIncompatibleChannel(channel, mark, ""))
 			continue
 		}
 		if channel == chSize && mark == "line" {
 			if fd := getFieldDef(cc, encoding.Get(channel)); fd.Get("aggregate").IsTruthy() {
+				cc.warn(msgLineWithVaryingSize)
 				continue
 			}
 		}
 		if channel == chColor {
+			eo := encoding.ObjValue()
 			has := false
 			if filled {
-				has = encoding.ObjValue().Has("fill")
+				has = eo.Has("fill")
 			} else {
-				has = encoding.ObjValue().Has("stroke")
+				has = eo.Has("stroke")
 			}
 			if has {
+				cc.warn(msgDroppingColor("encoding", eo.Has("fill"), eo.Has("stroke")))
 				continue
 			}
 		}
@@ -278,6 +291,8 @@ func initEncoding(cc *compileCtx, encoding Value, mark string, filled bool, conf
 					cc.work(1)
 					if isFieldDef(cc, fd) {
 						defs = append(defs, initFieldDef(cc, fd, channel, false))
+					} else {
+						cc.warn(msgEmptyFieldDef(cc, fd, channel))
 					}
 				}
 				normalized.Set(channel, jsval.Arr(defs))
@@ -286,6 +301,7 @@ func initEncoding(cc *compileCtx, encoding Value, mark string, filled bool, conf
 			if channel == chTooltip && channelDef.IsNull() {
 				normalized.Set(channel, jsval.Null)
 			} else if !isFieldDef(cc, channelDef) && !isDatumDef(channelDef) && !isValueDef(channelDef) && !isConditionalDef(channelDef) && !isSignalRef(channelDef) {
+				cc.warn(msgEmptyFieldDef(cc, channelDef, channel))
 				continue
 			} else {
 				normalized.Set(channel, initChannelDef(cc, channelDef, channel, config, false))

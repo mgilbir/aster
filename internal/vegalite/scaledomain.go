@@ -55,19 +55,23 @@ func parseNonUnitScaleDomain(m Model) {
 		var selectionExtent Value
 		for _, c := range m.children() {
 			cc.work(modelStep)
-			cc, ok := c.b().comp.scales.get(channel)
-			if !ok || cc == nil {
+			cs, ok := c.b().comp.scales.get(channel)
+			if !ok || cs == nil {
 				continue
 			}
-			cd := cc.getWithExplicit("domains")
+			cd := cs.getWithExplicit("domains")
 			if domains == nil {
 				d := cd
 				domains = &d
 			} else {
-				mv := mergeValuesWithExplicit(domains, cd, "domains", "scale", domainsTieBreaker)
+				mv := mergeValuesWithExplicit(cc, domains, cd, "domains", "scale", domainsTieBreaker)
 				domains = &mv
 			}
-			selectionExtent = cc.get("selectionExtent")
+			se := cs.get("selectionExtent")
+			if selectionExtent.IsTruthy() && se.IsTruthy() && !strictEq(selectionExtent.Get("param"), se.Get("param")) {
+				cc.warn(msgNeedsSameSelection)
+			}
+			selectionExtent = se
 		}
 		lc, _ := local.get(channel)
 		if domains != nil {
@@ -79,32 +83,38 @@ func parseNonUnitScaleDomain(m Model) {
 	}
 }
 
-func domainsTieBreaker(v1, v2 withExplicit, _, _ string) withExplicit {
+func domainsTieBreaker(cc *compileCtx, v1, v2 withExplicit, property, propertyOf string) withExplicit {
+	if v1.explicit && v2.explicit {
+		cc.warn(msgMergeConflictingDomainProperty(cc, property, propertyOf, v1.value, v2.value))
+	}
 	items := append(append([]Value{}, v1.value.Items()...), v2.value.Items()...)
 	return withExplicit{v1.explicit, jsval.Arr(items)}
 }
 
-func canUseUnaggregatedDomain(fd Value, scaleType string) bool {
+// canUseUnaggregatedDomain is upstream's: whether domain "unaggregated"
+// applies, and the warning why not.
+func canUseUnaggregatedDomain(cc *compileCtx, fd Value, scaleType string) (bool, string) {
 	aggregate := fd.Get("aggregate")
 	if !aggregate.IsTruthy() {
-		return false
+		return false, msgUnaggregateDomainHasNoEffectForRawField(cc, fd)
 	}
 	if aggregate.IsStr() && !sharedDomainOps[aggregate.StrValue()] {
-		return false
+		return false, msgUnaggregateDomainWithNonSharedDomainOp(aggregate)
 	}
 	if channelDefType(fd) == "quantitative" && scaleType == "log" {
-		return false
+		return false, msgUnaggregatedDomainWithLogScale(cc, fd)
 	}
-	return true
+	return true, ""
 }
 
-func normalizeUnaggregatedDomain(domain Value, fd Value, scaleType string, scaleConfig Value) Value {
+func normalizeUnaggregatedDomain(cc *compileCtx, domain Value, fd Value, scaleType string, scaleConfig Value) Value {
 	if domain.IsStr() && domain.StrValue() == "unaggregated" {
-		if !canUseUnaggregatedDomain(fd, scaleType) {
+		if ok, reason := canUseUnaggregatedDomain(cc, fd, scaleType); !ok {
+			cc.warn(reason)
 			return undef
 		}
 	} else if domain.IsUndefined() && scaleConfig.Get("useUnaggregatedDomain").IsTruthy() {
-		if canUseUnaggregatedDomain(fd, scaleType) {
+		if ok, _ := canUseUnaggregatedDomain(cc, fd, scaleType); ok {
 			return jsval.Str("unaggregated")
 		}
 	}
@@ -116,7 +126,7 @@ func parseDomainForChannel(u *unitModel, channel string) withExplicit {
 
 	scaleType := u.scaleTypeOf(channel)
 	encoding := u.encoding
-	domain := normalizeUnaggregatedDomain(u.scaleDomain(channel), u.typedFieldDef(channel), scaleType, u.config.Get("scale"))
+	domain := normalizeUnaggregatedDomain(cc, u.scaleDomain(channel), u.typedFieldDef(channel), scaleType, u.config.Get("scale"))
 	if !jsval.SameRef(domain, u.scaleDomain(channel)) {
 		o := cloneObj(coalesceObj(u.specifiedScales.Lookup(channel)).ObjValue())
 		o.Set("domain", domain)
@@ -125,13 +135,13 @@ func parseDomainForChannel(u *unitModel, channel string) withExplicit {
 	if channel == chX && getFieldOrDatumDef(cc, encoding.Get("x2")).IsTruthy() {
 		if getFieldOrDatumDef(cc, encoding.Get("x")).IsTruthy() {
 			a := parseSingleChannelDomain(scaleType, domain, u, "x")
-			return mergeValuesWithExplicit(&a, parseSingleChannelDomain(scaleType, domain, u, "x2"), "domain", "scale", domainsTieBreaker)
+			return mergeValuesWithExplicit(cc, &a, parseSingleChannelDomain(scaleType, domain, u, "x2"), "domain", "scale", domainsTieBreaker)
 		}
 		return parseSingleChannelDomain(scaleType, domain, u, "x2")
 	} else if channel == chY && getFieldOrDatumDef(cc, encoding.Get("y2")).IsTruthy() {
 		if getFieldOrDatumDef(cc, encoding.Get("y")).IsTruthy() {
 			a := parseSingleChannelDomain(scaleType, domain, u, "y")
-			return mergeValuesWithExplicit(&a, parseSingleChannelDomain(scaleType, domain, u, "y2"), "domain", "scale", domainsTieBreaker)
+			return mergeValuesWithExplicit(cc, &a, parseSingleChannelDomain(scaleType, domain, u, "y2"), "domain", "scale", domainsTieBreaker)
 		}
 		return parseSingleChannelDomain(scaleType, domain, u, "y2")
 	}
@@ -398,6 +408,7 @@ func mergeDomains(cc *compileCtx, domains []Value) Value {
 		if isDataRefDomain(domain) && len(sorts) > 0 {
 			sort := sorts[0]
 			if len(sorts) > 1 {
+				cc.warn(msgMoreThanOneSort)
 				var filtered []Value
 				allOp := true
 				for _, s := range sorts {
@@ -437,6 +448,7 @@ func mergeDomains(cc *compileCtx, domains []Value) Value {
 		if s.IsBool() || !(s.IsObj() && s.ObjValue().Has("op")) || (s.Get("op").IsStr() && multiDomainSortOps[s.Get("op").StrValue()]) {
 			x = s
 		} else {
+			cc.warn(msgDomainSortDropped(cc, s))
 			x = jsval.True
 		}
 		h := hashOf(cc, x)
@@ -449,6 +461,7 @@ func mergeDomains(cc *compileCtx, domains []Value) Value {
 	if len(unionSorts) == 1 {
 		sort = unionSorts[0]
 	} else if len(unionSorts) > 1 {
+		cc.warn(msgMoreThanOneSort)
 		sort = jsval.True
 	}
 	var allData []Value
@@ -499,12 +512,15 @@ func getFieldFromDomain(cc *compileCtx, domain Value) string {
 				if field == "" {
 					field = nu.Get("field").StrValue()
 				} else if field != nu.Get("field").StrValue() {
+					cc.warn(msgFacetedIndependentDiffSources)
 					return field
 				}
 			}
 		}
+		cc.warn(msgFacetedIndependentSameFields)
 		return field
 	case isFieldRefUnionDomain(domain):
+		cc.warn(msgFacetedIndependentSameSource)
 		if f := domain.Get("fields").Index(0); f.IsStr() {
 			return f.StrValue()
 		}

@@ -226,6 +226,9 @@ func parseUnitSelection(m *unitModel, selDefs []Value) *omap[*selectionComponent
 			}
 		}
 	}
+	if nTimer > 1 && !cc.v5 {
+		cc.warn(msgMultipleTimerAnimationSelection)
+	}
 	return selCmpts
 }
 
@@ -279,7 +282,6 @@ func parseSelectionPredicate(m Model, pred Value, dfnode dfNode, datum string) s
 
 func parseSelectionExtent(m Model, param Value, extent Value) string {
 	cc := m.b().ctx
-	name := param.AsString()
 	vname := varNameOf(param)
 	encoding := extent.Get("encoding")
 	field := extent.Get("field")
@@ -301,11 +303,18 @@ func parseSelectionExtent(m Model, param Value, extent Value) string {
 	if sel == nil {
 		return vname
 	}
-	if !encoding.IsTruthy() && !field.IsTruthy() {
+	// selCmpt.project.items[0].field
+	firstField := func() Value {
 		if len(sel.project.items) == 0 {
-			throw("The selection %q has no projected field to take the extent of.", name)
+			throw("Cannot read properties of undefined (reading 'field')")
 		}
-		field = jsval.Str(sel.project.items[0].field)
+		return jsval.Str(sel.project.items[0].field)
+	}
+	if !encoding.IsTruthy() && !field.IsTruthy() {
+		field = firstField()
+		if len(sel.project.items) > 1 {
+			cc.warn(msgSelectionAsScaleDomainWithoutField(field.StrValue()))
+		}
 	} else if encoding.IsTruthy() && !field.IsTruthy() {
 		var encs []*selProjItem
 		for _, p := range sel.project.items {
@@ -315,7 +324,8 @@ func parseSelectionExtent(m Model, param Value, extent Value) string {
 			}
 		}
 		if len(encs) != 1 {
-			field = jsval.Str(sel.project.items[0].field)
+			field = firstField()
+			cc.warn(msgSelectionAsScaleDomainWrongEncodings(len(encs), encoding, extent.Get("param"), field.StrValue()))
 		} else {
 			field = jsval.Str(encs[0].field)
 		}
@@ -449,7 +459,7 @@ func assembleInitExpr(cc *compileCtx, init Value, wrap func(string) string) stri
 		}
 		return "[" + strings.Join(parts, ", ") + "]"
 	} else if isDateTime(init) {
-		return wrap(dateTimeToExpr(init))
+		return wrap(dateTimeToExpr(cc, init))
 	}
 	return wrap(stringify(cc, init))
 }
@@ -463,15 +473,15 @@ func assembleInitValue(cc *compileCtx, init Value, loc *time.Location) Value {
 		}
 		return jsval.Arr(items)
 	} else if isDateTime(init) {
-		return jsval.Num(dateTimeToTimestamp(init, loc))
+		return jsval.Num(dateTimeToTimestamp(cc, init, loc))
 	}
 	return init
 }
 
 func idWrap(s string) string { return s }
 
-func dateTimeToTimestamp(d Value, local *time.Location) float64 {
-	parts := dateTimeParts(d, true)
+func dateTimeToTimestamp(cc *compileCtx, d Value, local *time.Location) float64 {
+	parts := dateTimeParts(cc, d, true)
 	var n [7]int
 	for i := 0; i < 7 && i < len(parts); i++ {
 		f := jsval.StringToNumber(parts[i])
@@ -894,6 +904,7 @@ var projectCompiler = selectionCompiler{
 						encList = append(encList, jsval.Str(key))
 						encodingsV = jsval.True // set below
 					case typ == "interval":
+						cc.warn(msgIntervalInitializedWithPos)
 						encodingsV, encOwned = cfgEncodings(), false
 					default:
 						// (fields ??= []).push(key)
@@ -935,7 +946,11 @@ var projectCompiler = selectionCompiler{
 			fd := m.fieldDef(channel)
 			if fd.IsTruthy() {
 				field := fd.Get("field")
-				if fd.Get("aggregate").IsTruthy() || !field.IsTruthy() {
+				if agg := fd.Get("aggregate"); agg.IsTruthy() {
+					cc.warn(msgCannotProjectAggregate(channel, agg))
+					continue
+				} else if !field.IsTruthy() {
+					cc.warn(msgCannotProjectOnChannelWithoutField(channel))
 					continue
 				}
 				f := field.AsString()
@@ -967,6 +982,8 @@ var projectCompiler = selectionCompiler{
 						proj.hasChannel.set(channel, p)
 					}
 				}
+			} else {
+				cc.warn(msgCannotProjectOnChannelWithoutField(channel))
 			}
 		}
 		for _, fv := range fields {
@@ -1163,6 +1180,7 @@ var intervalCompiler = selectionCompiler{
 				cc.work(1)
 				between := evt.Get("between")
 				if !between.IsTruthy() {
+					cc.warn(tmpl(evt) + " is not an ordered event stream for interval selections.")
 					continue
 				}
 				first := between.Index(0).ObjValue()
@@ -1612,7 +1630,11 @@ var scalesCompiler = selectionCompiler{
 			if scale != nil {
 				scaleType = scale.get("type").AsString()
 			}
+			if scaleType == "sequential" && !cc.v5 {
+				cc.warn(msgSequentialScaleDeprecated)
+			}
 			if scale == nil || !hasContinuousDomain(scaleType) {
+				cc.warn(msgScaleBindingsContinuous)
 				continue
 			}
 			scale.set("selectionExtent", mkv("param", sel.name, "field", proj.field), true)
@@ -1676,6 +1698,10 @@ var legendsCompiler = selectionCompiler{
 		bind := s.props.Lookup("bind")
 		spec := s.resolve() == "global" && bind.IsTruthy() && isLegendBinding(bind)
 		projLen := len(s.project.items) == 1 && s.project.items[0].field != selectionID
+		if spec && !projLen {
+			// Upstream warns here, in the predicate, each time it is asked.
+			s.cc.warn(msgLegendBindingsMustHaveProj)
+		}
 		return spec && projLen
 	},
 	parse: func(m *unitModel, sel *selectionComponent, selDef Value) {
@@ -2103,6 +2129,7 @@ var nearestCompiler = selectionCompiler{
 		x, _ := sel.project.hasChannel.get("x")
 		y, _ := sel.project.hasChannel.get("y")
 		if isPathMarkName(m.mark()) {
+			cc.warn(msgNearestNotSupportForContinuous(m.mark()))
 			return marks
 		}
 		upd := mk("fill", mkv("value", "transparent"), "strokeWidth", mkv("value", 0.35), "stroke", mkv("value", "transparent"), "isVoronoi", mkv("value", true))

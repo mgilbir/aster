@@ -177,11 +177,22 @@ func stackOf(cc *compileCtx, m Value, encoding Value) *stackProperties {
 	if encodingIsAggregate(cc, encoding) && len(stackByList) == 0 {
 		return nil
 	}
-	if st := stackedFieldDef.Get("scale").Get("type"); cc.v5 && st.IsTruthy() && !(st.IsStr() && st.StrValue() == "linear") {
-		return nil // 5.8 refuses to stack a non-linear scale
+	if st := stackedFieldDef.Get("scale").Get("type"); st.IsTruthy() && !(st.IsStr() && st.StrValue() == "linear") {
+		if stackedFieldDef.Get("stack").IsTruthy() {
+			cc.warn(msgStackNonLinearScale(cc.v5, st))
+		}
+		if cc.v5 {
+			return nil // 5.8 refuses to stack a non-linear scale
+		}
 	}
 	if sec := getSecondaryRangeChannel(fieldChannel); sec != "" && isFieldOrDatumDef(cc, encoding.Get(sec)) {
+		if !stackedFieldDef.Get("stack").IsUndefined() {
+			cc.warn(msgCannotStackRangedMark(fieldChannel))
+		}
 		return nil
+	}
+	if agg := stackedFieldDef.Get("aggregate"); isFieldDef(cc, stackedFieldDef) && agg.IsTruthy() && !(agg.IsStr() && sumOps[agg.StrValue()]) {
+		cc.warn(msgStackNonSummativeAggregate(agg))
 	}
 	impute := isPathMarkName(mark)
 	if stackedFieldDef.Get("impute").IsNull() {
@@ -192,6 +203,9 @@ func stackOf(cc *compileCtx, m Value, encoding Value) *stackProperties {
 		impute: impute, stackBy: stackByList, offset: offset,
 	}
 }
+
+// sumOps is upstream's SUM_OPS: the aggregates a stack sums meaningfully.
+var sumOps = strSet([]string{"count", "sum", "distinct", "valid", "missing"})
 
 func isPathMarkName(m string) bool { return m == "line" || m == "area" || m == "trail" }
 

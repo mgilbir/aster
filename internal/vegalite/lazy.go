@@ -41,6 +41,8 @@ type compileCtx struct {
 	transforms int
 	// maxViews is Options.MaxViews (see countViews).
 	maxViews int
+	// warnFn is Options.Warn.
+	warnFn func(string) error
 	// titleMerges are the title field-def lists merged so far, by their
 	// first element (see mergeTitleFieldDefs).
 	titleMerges map[*Value]*titleMerge
@@ -68,6 +70,17 @@ func (c *compileCtx) work(n int64) {
 		return
 	}
 	if err := c.meter.Work(n); err != nil {
+		panic(cancelError{err})
+	}
+}
+
+// warn logs a warning as upstream's log.warn does: the caller's Options.Warn
+// decides whether the compilation goes on.
+func (c *compileCtx) warn(msg string) {
+	if c == nil || c.warnFn == nil {
+		return
+	}
+	if err := c.warnFn(msg); err != nil {
 		panic(cancelError{err})
 	}
 }

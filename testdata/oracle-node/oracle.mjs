@@ -10,10 +10,12 @@
 //
 //   request:  {"id": 1, "op": "svg" | "compile", "lite": true, "spec": "<JSON text>"}
 //             {"id": 2, "op": "png", "svg": "<svg ...>", "scale": 2}
-//   response: {"id": 1, "svg": "...", "vega": {...}, "png": "<base64>", "err": "..."}
+//   response: {"id": 1, "svg": "...", "vega": {...}, "png": "<base64>", "err": "...",
+//              "warnings": ["..."]}
 //
 // "svg" renders (compiling first when lite) and also returns the compiled
-// Vega for Vega-Lite; "compile" only compiles; "png" rasterizes an SVG with
+// Vega for Vega-Lite; "compile" only compiles, and lists the compiler's
+// warnings; "png" rasterizes an SVG with
 // resvg (resvg-napi, only in testdata/oracle-node), the reference for
 // the engine's rasterizer. The first line written is {"ready": true,
 // "version": "..."}.
@@ -260,6 +262,37 @@ vega.View.prototype.timer = function () {};
 const quiet = vega.logger(vega.None);
 const compile = (spec) => vl.compile(spec, { logger: quiet }).spec;
 
+// compileWarnings compiles a Vega-Lite spec and collects what the compiler
+// logs as warnings (and errors it logs without throwing), each as the text it
+// would print.
+function compileWarnings(spec) {
+  const warnings = [];
+  let lvl = vega.Warn;
+  const text = (args) => args.map((a) => (typeof a === 'string' ? a : String(a))).join(' ');
+  const logger = {
+    level(l) {
+      if (l === undefined) return lvl;
+      lvl = l;
+      return logger;
+    },
+    error(...args) {
+      warnings.push(text(args));
+      return logger;
+    },
+    warn(...args) {
+      warnings.push(text(args));
+      return logger;
+    },
+    info() {
+      return logger;
+    },
+    debug() {
+      return logger;
+    },
+  };
+  return { vg: vl.compile(spec, { logger }).spec, warnings };
+}
+
 function newView(vg) {
   // Each render starts its clip-path/gradient ids at zero and reseeds the
   // random generator, as the engine does per render.
@@ -350,7 +383,12 @@ for await (const line of rl) {
       continue;
     }
     const spec = JSON.parse(req.spec);
-    const vg = req.lite ? compile(spec) : spec;
+    let vg = spec;
+    if (req.lite) {
+      const c = compileWarnings(spec);
+      vg = c.vg;
+      if (req.op === 'compile' && c.warnings.length) res.warnings = c.warnings;
+    }
     // Snapshot before rendering: vega.parse mutates the spec it is given
     // (it fills in defaults such as a CSV format's delimiter).
     if (req.lite) res.vega = structuredClone(vg);

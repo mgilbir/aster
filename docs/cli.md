@@ -53,7 +53,7 @@ The `$schema`'s *version* does not choose the compiler: a `v5.json` spec is comp
 | 1 | any error: unreadable input, a spec that is invalid or is neither Vega nor Vega-Lite detectably, a failed load or evaluation error (without `-lenient`), a limit, a timeout, an unwritable output |
 | 2 | invalid flags (the flag package's usage is printed) |
 
-Messages go to stderr, prefixed `aster:`. Vega's warnings are printed as `aster: warning: …` and do not change the exit status. With `-lenient`, errors the render goes past are printed as `aster: ignored: …`. A load the default (no `-allow-*`) configuration refused adds a hint to pass `-allow-http` or `-allow-domain`. See [errors.md](errors.md) for what counts as an error.
+Messages go to stderr, prefixed `aster:`. Vega's and the Vega-Lite compiler's warnings (`compile` prints the compiler's too) are printed as `aster: warning: …` and do not change the exit status. With `-lenient`, errors the render goes past are printed as `aster: ignored: …`. A load the default (no `-allow-*`) configuration refused adds a hint to pass `-allow-http` or `-allow-domain`. See [errors.md](errors.md) for what counts as an error.
 
 ## Library-only
 

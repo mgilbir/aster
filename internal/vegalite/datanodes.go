@@ -90,6 +90,8 @@ func parseNodeWithAncestors(parent dfNode, explicit, implicit *Object, ap *ances
 			if parsedAs.explicit || jsval.Equal(parsedAs.value, iv) || (parsedAs.value.IsStr() && parsedAs.value.StrValue() == "derived") ||
 				(iv.IsStr() && iv.StrValue() == "flatten") {
 				implicit.Delete(field)
+			} else {
+				cc.warn(msgDifferentParse(field, iv, parsedAs.value))
 			}
 		}
 	}
@@ -99,6 +101,8 @@ func parseNodeWithAncestors(parent dfNode, explicit, implicit *Object, ap *ances
 		if !parsedAs.IsUndefined() {
 			if jsval.Equal(parsedAs, explicit.Lookup(field)) {
 				explicit.Delete(field)
+			} else {
+				cc.warn(msgDifferentParse(field, explicit.Lookup(field), parsedAs))
 			}
 		}
 	}
@@ -178,6 +182,7 @@ func (n *parseNode) assembleTransforms(onlyNested bool) []Value {
 		}
 		expr := parseExpressionFor(field, pv.StrValue())
 		if expr == "" {
+			cc.warn(msgUnrecognizedParse(pv.StrValue()))
 			continue
 		}
 		out = append(out, mkv("type", "formula", "expr", expr, "as", removePathFromField(field)))

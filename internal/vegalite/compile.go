@@ -46,6 +46,10 @@ type Options struct {
 	// column and layer values). Past it Compile returns an error wrapping
 	// budget.ErrLimit. Zero means DefaultMaxViews.
 	MaxViews int
+	// Warn, when set, is told each warning the compiler logs, with upstream
+	// Vega-Lite's text, where upstream's compiler calls log.warn. An error it
+	// returns ends the compilation with that error. Nil drops the warnings.
+	Warn func(msg string) error
 }
 
 // panicHook, when set (by tests, before any compilation starts), receives the
@@ -80,7 +84,7 @@ func Compile(spec jsval.Value, opts Options) (out jsval.Value, err error) {
 	if err != nil {
 		return jsval.Undefined, err
 	}
-	cc := &compileCtx{v5: v5, loc: opts.Location, ctx: opts.Context, meter: budget.NewMeter(opts.Context), maxViews: opts.MaxViews}
+	cc := &compileCtx{v5: v5, loc: opts.Location, ctx: opts.Context, meter: budget.NewMeter(opts.Context), maxViews: opts.MaxViews, warnFn: opts.Warn}
 	if cc.maxViews <= 0 {
 		cc.maxViews = DefaultMaxViews
 	}
@@ -150,12 +154,18 @@ func getTopLevelProperties(inputSpec jsval.Value, autosize jsval.Value, config j
 		hStep := height.IsStr() && height.StrValue() == "step"
 		switch {
 		case wStep && hStep:
+			b.ctx.warn(msgDroppingFit(""))
 			as.Set("type", jsval.Str("pad"))
 		case wStep || hStep:
 			sizeType := "height"
 			if wStep {
 				sizeType = "width"
 			}
+			ch := chY
+			if sizeType == "width" {
+				ch = chX
+			}
+			b.ctx.warn(msgDroppingFit(ch))
 			inverse := "width"
 			if sizeType == "width" {
 				inverse = "height"

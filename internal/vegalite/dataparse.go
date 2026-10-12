@@ -230,6 +230,7 @@ func parseTransformArray(head dfNode, m Model, ap *ancestorParse) dfNode {
 			n := newRegressionNode(head, t, "loess", "loess")
 			head, transformNode, derivedType = n, n, "derived"
 		default:
+			cc.warn(msgInvalidTransformIgnored(cc, t))
 			continue
 		}
 		if transformNode != nil && derivedType != "" {

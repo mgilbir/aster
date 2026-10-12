@@ -45,6 +45,7 @@ func initLayoutSize(cc *compileCtx, encoding Value, size *Object) *Object {
 		if isStep(size.Lookup(sizeType)) {
 			if isContinuousFieldOrDatumDef(cc, encoding.Get(channel)) {
 				size.Delete(sizeType)
+				cc.warn(msgStepDropped(sizeType))
 			}
 		}
 	}
@@ -102,7 +103,7 @@ func parseNonUnitLayoutSizeForChannel(m Model, layoutSizeType string) {
 				mergedSize = nil
 				break
 			}
-			mv := mergeValuesWithExplicit(mergedSize, childSize, sizeType, "", nil)
+			mv := mergeValuesWithExplicit(cc, mergedSize, childSize, sizeType, "", nil)
 			mergedSize = &mv
 		} else {
 			cs := childSize

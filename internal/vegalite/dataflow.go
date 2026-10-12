@@ -88,6 +88,7 @@ func (b *dfBase) addChild(c dfNode, loc int) {
 	cc := b.cc
 	cc.work(1)
 	if b.hasChild(c) {
+		cc.warn(msgAddSameChildTwice)
 		return
 	}
 	n := b.kids.len()

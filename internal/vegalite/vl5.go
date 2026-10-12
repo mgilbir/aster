@@ -228,7 +228,7 @@ func rectPosition58(m *unitModel, channel string) Value {
 	return rangePosition(channel, m, rangePosOpts{defaultPos: "zeroOrMax", defaultPos2: "zeroOrMin"})
 }
 
-func defaultSizeRef58(sizeChannel, scaleName string, scale *scaleComponent, config Value, bandSize Value) Value {
+func defaultSizeRef58(cc *compileCtx, sizeChannel, scaleName string, scale *scaleComponent, config Value, bandSize Value) Value {
 	switch {
 	case isRelativeBandSize(bandSize):
 		if scale != nil {
@@ -239,6 +239,8 @@ func defaultSizeRef58(sizeChannel, scaleName string, scale *scaleComponent, conf
 					bandWidth = bandSize.Get("band").AsString() + " * " + bandWidth
 				}
 				return sig("max(0.25, " + bandWidth + ")")
+			} else if !(bandSize.Get("band").IsNum() && bandSize.Get("band").NumValue() == 1) {
+				cc.warn(msgCannotUseRelativeBandSizeWithNonBandScale(scaleType))
 			}
 		} else {
 			return mkv("mult", bandSize.Get("band"), "field", mkv("group", sizeChannel))
@@ -271,6 +273,8 @@ func positionAndSize58(fd Value, channel string, m *unitModel) Value {
 	if encoding.Get("size").IsTruthy() || markDef.Get("size").IsTruthy() {
 		if useVlSizeChannel {
 			sizeMixins = nonPosition("size", m, nonPositionOpts{vgChannel: vgSizeChannel, defaultRef: signalOrValueRef(markDef.Get("size"))})
+		} else {
+			m.ctx.warn(msgCannotApplySizeToNonOrientedMark(markDef.Get("type").AsString()))
 		}
 	}
 	hasSizeFromMarkOrEncoding := sizeMixins.IsTruthy()
@@ -284,13 +288,13 @@ func positionAndSize58(fd Value, channel string, m *unitModel) Value {
 		if name == "" {
 			name = scaleName
 		}
-		sizeMixins = mkv(vgSizeChannel, defaultSizeRef58(vgSizeChannel, name, scale, config, bandSize))
+		sizeMixins = mkv(vgSizeChannel, defaultSizeRef58(m.ctx, vgSizeChannel, name, scale, config, bandSize))
 	}
 	defaultBandAlign := "middle"
 	if scType == "band" && isRelativeBandSize(bandSize) && !hasSizeFromMarkOrEncoding {
 		defaultBandAlign = "top"
 	}
-	vgChannel := vgAlignedPositionChannel(channel, markDef, config, defaultBandAlign)
+	vgChannel := vgAlignedPositionChannel(m.ctx, channel, markDef, config, defaultBandAlign)
 	center := vgChannel == "xc" || vgChannel == "yc"
 	bp0 := jsval.Int(0)
 	if center {
@@ -446,6 +450,7 @@ func rectBinPosition58(fd, fd2 Value, channel string, m *unitModel) Value {
 			))
 		}
 	}
+	cc.warn(msgChannelRequiredForBinned(channel2))
 	return undef
 }
 

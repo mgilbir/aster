@@ -373,6 +373,7 @@ func (n *xformNode) assembleLookup() Value {
 	} else {
 		asName := t.Get("as")
 		if !asName.IsStr() {
+			n.cc.warn(msgNoFieldsNeedsAs)
 			asName = jsval.Str("_lookup")
 		}
 		foreign = mk("as", arr(asName))
@@ -1034,6 +1035,8 @@ func (n *facetNode) getChildIndependentFieldsWithStep() map[string]string {
 				domain := assembleDomain(n.childModel, channel)
 				if field := getFieldFromDomain(n.cc, domain); field != "" {
 					out[channel] = field
+				} else {
+					n.cc.warn(msgUnknownField(channel))
 				}
 			}
 		}
