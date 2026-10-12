@@ -69,8 +69,10 @@ func TestConvertLimits(t *testing.T) {
 
 type panicShaper struct{}
 
-func (panicShaper) ShapeText(string, string) ([]text.Run, float64) { panic("boom") }
-func (panicShaper) FontData(*text.Face) []byte                     { return nil }
+func (panicShaper) ShapeFont(string, text.CSSFont) ([]text.Run, float64) { panic("boom") }
+func (panicShaper) FontData(context.Context, *text.Face) ([]byte, error) {
+	return nil, nil
+}
 
 func TestConvertRecoversPanics(t *testing.T) {
 	svg := `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><text>hi</text></svg>`

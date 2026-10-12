@@ -31,7 +31,31 @@ func (e *entry) load(m *Measurer) *Face {
 	}
 	m.applyPalette(f)
 	e.face = f
+	m.keepSystemFace(e)
 	return f
+}
+
+// maxSystemFaces bounds the system font faces a Measurer keeps loaded. A
+// specification chooses which families it names, and so how many of the
+// machine's fonts are loaded, each holding about a megabyte of parsed
+// tables for as long as the Measurer lives (X5): past the bound the face
+// loaded longest ago is dropped, to be loaded again when named again.
+const maxSystemFaces = 64
+
+// keepSystemFace records that e's system face was loaded, dropping the
+// oldest loaded one past maxSystemFaces. The font lists and the last font
+// resolved, which remember faces by rune, are cleared with it, so that
+// nothing the Measurer keeps holds a dropped face. m.mu is held.
+func (m *Measurer) keepSystemFace(e *entry) {
+	m.sysLoaded = append(m.sysLoaded, e)
+	if len(m.sysLoaded) <= maxSystemFaces {
+		return
+	}
+	old := m.sysLoaded[0]
+	m.sysLoaded = append(m.sysLoaded[:0], m.sysLoaded[1:]...)
+	old.face = nil
+	m.listCache.Clear()
+	m.last.font, m.last.list = "", nil
 }
 
 // bestMatch picks, among candidates, the entries closest to the requested

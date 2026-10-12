@@ -50,6 +50,7 @@ var supportedElements = map[string]bool{
 	"image": true,
 
 	"linearGradient": true,
+	"pattern":        true, // only the one Vega wraps a radial gradient in (see collectPatterns)
 	"radialGradient": true,
 	"stop":           true,
 	"defs":           true,
@@ -85,6 +86,11 @@ func parseSVGXML(ctx context.Context, svg string, lim Limits) (*element, error) 
 	var root *element
 	var stack []*element
 	elements, tokens := 0, 0
+	// The character data of each <text> and <tspan> open, by depth, joined
+	// when it closes: encoding/xml gives each CDATA section and each stretch
+	// between children as a token of its own, and adding each to a string
+	// copies the text so far each time (C60).
+	var pieces [][]string
 
 	for {
 		if tokens++; tokens&1023 == 0 {
@@ -130,6 +136,10 @@ func parseSVGXML(ctx context.Context, svg string, lim Limits) (*element, error) 
 				parent.children = append(parent.children, el)
 			}
 			stack = append(stack, el)
+			if len(pieces) < len(stack) {
+				pieces = append(pieces, nil)
+			}
+			pieces[len(stack)-1] = pieces[len(stack)-1][:0]
 			if len(stack) > maxNestingDepth {
 				return nil, fmt.Errorf("%w: SVG nesting exceeds %d levels", ErrLimit, maxNestingDepth)
 			}
@@ -137,10 +147,13 @@ func parseSVGXML(ctx context.Context, svg string, lim Limits) (*element, error) 
 			if len(stack) == 0 {
 				return nil, fmt.Errorf("svgpdf: unbalanced SVG markup")
 			}
+			if top := len(stack) - 1; len(pieces[top]) > 0 {
+				stack[top].text = strings.Join(pieces[top], "")
+			}
 			stack = stack[:len(stack)-1]
 		case xml.CharData:
-			if len(stack) > 0 && (stack[len(stack)-1].name == "text" || stack[len(stack)-1].name == "tspan") {
-				stack[len(stack)-1].text += string(t)
+			if top := len(stack) - 1; top >= 0 && (stack[top].name == "text" || stack[top].name == "tspan") {
+				pieces[top] = append(pieces[top], string(t))
 			}
 		case xml.Comment, xml.ProcInst, xml.Directive:
 			// ignore

@@ -2,6 +2,7 @@ package svgpdf
 
 import (
 	"bytes"
+	"context"
 	"strings"
 	"testing"
 
@@ -126,7 +127,9 @@ func TestEmbedDeterministic(t *testing.T) {
 // system-font instance).
 type noFontDataShaper struct{ *text.Measurer }
 
-func (s noFontDataShaper) FontData(*text.Face) []byte { return nil }
+func (s noFontDataShaper) FontData(context.Context, *text.Face) ([]byte, error) {
+	return nil, nil
+}
 
 // TestEmbedFallsBackToOutlines: a face whose bytes the shaper cannot recover
 // must fall back to outlines rather than fail — mixed documents keep

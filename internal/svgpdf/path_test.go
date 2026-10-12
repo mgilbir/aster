@@ -182,23 +182,47 @@ func TestParsePathDataScientificNotation(t *testing.T) {
 	}
 }
 
-func TestParsePathDataErrors(t *testing.T) {
-	for _, d := range []string{
-		"X10,10",     // unknown command
-		"M",          // missing coordinates
-		"M0,0 L1",    // incomplete pair
-		"M0,0 A5,5",  // incomplete arc
-		"M0,0 12 34", // ok (implicit lineto)... see below
+// TestParsePathDataUpToError: path data with an error is the segments
+// before it (SVG 1.1, F.2), and none without a moveto first (X12).
+func TestParsePathDataUpToError(t *testing.T) {
+	for _, tc := range []struct {
+		d    string
+		segs int
+	}{
+		{"X10,10", 0},          // unknown command
+		{"L10,10", 0},          // no moveto first
+		{"M", 0},               // missing coordinates
+		{"M0,0 L1", 1},         // incomplete pair
+		{"M0,0 A5,5", 1},       // incomplete arc
+		{"M0,0 12 34", 2},      // implicit lineto
+		{"M0,0 L1,1 2,NaN", 2}, // NaN, as upstream writes for null
+		{"M0,0 L1e999,1", 1},   // a number no float64 holds
+		{"M0,0 L1,1 2,2 3", 3}, // the complete pairs of a repeated command
 	} {
-		_, err := parsePathData(d)
-		if d == "M0,0 12 34" {
-			if err != nil {
-				t.Errorf("%q: unexpected error %v", d, err)
-			}
-			continue
+		segs, err := parsePathData(tc.d)
+		if err != nil {
+			t.Errorf("%q: %v", tc.d, err)
+		} else if len(segs) != tc.segs {
+			t.Errorf("%q: %d segments, want %d", tc.d, len(segs), tc.segs)
 		}
-		if err == nil {
-			t.Errorf("%q: expected error, got none", d)
+	}
+}
+
+// TestArcHugeRadii: radii whose squares overflow make the arc's sweep NaN,
+// which becomes a line to the end, never an int of NaN (X1).
+func TestArcHugeRadii(t *testing.T) {
+	segs := appendArc(nil, Point{0, 0}, Point{10, 10}, 1e200, 1e200, 0, false, true)
+	if len(segs) != 1 || segs[0].Op != OpLineTo || segs[0].P3 != (Point{10, 10}) {
+		t.Errorf("got %+v", segs)
+	}
+}
+
+// TestUnit: the clamp before a float becomes a byte or a mesh coordinate
+// takes NaN to 0.
+func TestUnit(t *testing.T) {
+	for in, want := range map[float64]float64{math.NaN(): 0, -1: 0, 0.25: 0.25, 2: 1, math.Inf(1): 1, math.Inf(-1): 0} {
+		if got := unit(in); got != want {
+			t.Errorf("unit(%v) = %v", in, got)
 		}
 	}
 }

@@ -1,10 +1,8 @@
 package svgpdf
 
 import (
-	"fmt"
 	"math"
 	"regexp"
-	"strconv"
 	"strings"
 )
 
@@ -52,26 +50,28 @@ var transformFuncRe = regexp.MustCompile(`([a-zA-Z]+)\s*\(([^)]*)\)`)
 
 // parseTransform parses an SVG transform attribute (a sequence of
 // translate/rotate/scale/matrix/skewX/skewY functions) into a single matrix.
-func parseTransform(s string) (Matrix, error) {
+// ok is false for one that does not parse, which the caller ignores, as SVG
+// draws an element whose transform is invalid untransformed.
+func parseTransform(s string) (Matrix, bool) {
 	s = strings.TrimSpace(s)
 	if s == "" {
-		return Identity(), nil
+		return Identity(), true
 	}
 	if m, ok := parseTransformFast(s); ok {
-		return m, nil
+		return m, true
 	}
 	return parseTransformRegexp(s)
 }
 
 // parseTransformRegexp is parseTransform on a regular expression: the
-// reference for what a transform means and the source of every error.
-func parseTransformRegexp(s string) (Matrix, error) {
+// reference for what a transform means.
+func parseTransformRegexp(s string) (Matrix, bool) {
 	matches := transformFuncRe.FindAllStringSubmatchIndex(s, -1)
 	if matches == nil {
-		return Matrix{}, fmt.Errorf("svgpdf: invalid transform %q", s)
+		return Matrix{}, false
 	}
 	// Reject stray non-whitespace between/around the recognized functions so
-	// malformed input errors instead of being partially applied.
+	// malformed input is refused instead of being partially applied.
 	last := 0
 	var leftover strings.Builder
 	for _, loc := range matches {
@@ -80,23 +80,23 @@ func parseTransformRegexp(s string) (Matrix, error) {
 	}
 	leftover.WriteString(s[last:])
 	if strings.TrimFunc(leftover.String(), func(r rune) bool { return r == ' ' || r == ',' || r == '\t' || r == '\n' || r == '\r' }) != "" {
-		return Matrix{}, fmt.Errorf("svgpdf: invalid transform %q", s)
+		return Matrix{}, false
 	}
 
 	var ts []Matrix
 	for _, loc := range matches {
 		name := s[loc[2]:loc[3]]
-		args, err := parseNumberList(s[loc[4]:loc[5]])
-		if err != nil {
-			return Matrix{}, fmt.Errorf("svgpdf: transform %s: %w", name, err)
+		args, ok := parseNumberList(s[loc[4]:loc[5]])
+		if !ok {
+			return Matrix{}, false
 		}
-		t, err := transformFunc(name, args)
-		if err != nil {
-			return Matrix{}, err
+		t, ok := transformFunc(name, args)
+		if !ok {
+			return Matrix{}, false
 		}
 		ts = append(ts, t)
 	}
-	return composeTransforms(ts), nil
+	return composeTransforms(ts), true
 }
 
 // composeTransforms multiplies the matrices of a transform list, first to
@@ -114,8 +114,9 @@ func composeTransforms(ts []Matrix) Matrix {
 	return m
 }
 
-// transformFunc is the matrix of one transform function applied to args.
-func transformFunc(name string, args []float64) (Matrix, error) {
+// transformFunc is the matrix of one transform function applied to args; ok
+// is false for an unknown function or a wrong number of arguments.
+func transformFunc(name string, args []float64) (Matrix, bool) {
 	var t Matrix
 	switch name {
 	case "translate":
@@ -125,7 +126,7 @@ func transformFunc(name string, args []float64) (Matrix, error) {
 		case 2:
 			t = Matrix{A: 1, D: 1, E: args[0], F: args[1]}
 		default:
-			return Matrix{}, fmt.Errorf("svgpdf: translate expects 1 or 2 args, got %d", len(args))
+			return Matrix{}, false
 		}
 	case "scale":
 		switch len(args) {
@@ -134,7 +135,7 @@ func transformFunc(name string, args []float64) (Matrix, error) {
 		case 2:
 			t = Matrix{A: args[0], D: args[1]}
 		default:
-			return Matrix{}, fmt.Errorf("svgpdf: scale expects 1 or 2 args, got %d", len(args))
+			return Matrix{}, false
 		}
 	case "rotate":
 		var cx, cy float64
@@ -143,7 +144,7 @@ func transformFunc(name string, args []float64) (Matrix, error) {
 		case 3:
 			cx, cy = args[1], args[2]
 		default:
-			return Matrix{}, fmt.Errorf("svgpdf: rotate expects 1 or 3 args, got %d", len(args))
+			return Matrix{}, false
 		}
 		rad := args[0] * math.Pi / 180
 		sin, cos := math.Sin(rad), math.Cos(rad)
@@ -154,23 +155,23 @@ func transformFunc(name string, args []float64) (Matrix, error) {
 		}
 	case "matrix":
 		if len(args) != 6 {
-			return Matrix{}, fmt.Errorf("svgpdf: matrix expects 6 args, got %d", len(args))
+			return Matrix{}, false
 		}
 		t = Matrix{A: args[0], B: args[1], C: args[2], D: args[3], E: args[4], F: args[5]}
 	case "skewX":
 		if len(args) != 1 {
-			return Matrix{}, fmt.Errorf("svgpdf: skewX expects 1 arg, got %d", len(args))
+			return Matrix{}, false
 		}
 		t = Matrix{A: 1, D: 1, C: math.Tan(args[0] * math.Pi / 180)}
 	case "skewY":
 		if len(args) != 1 {
-			return Matrix{}, fmt.Errorf("svgpdf: skewY expects 1 arg, got %d", len(args))
+			return Matrix{}, false
 		}
 		t = Matrix{A: 1, D: 1, B: math.Tan(args[0] * math.Pi / 180)}
 	default:
-		return Matrix{}, fmt.Errorf("svgpdf: unsupported transform function %q", name)
+		return Matrix{}, false
 	}
-	return t, nil
+	return t, true
 }
 
 // parseTransformFast is parseTransformRegexp for the plain, valid forms Vega
@@ -208,35 +209,15 @@ func parseTransformFast(s string) (m Matrix, ok bool) {
 		i += end + 1
 
 		var buf [6]float64
-		n := 0
-		for len(args) > 0 {
-			if isListSep(args[0]) {
-				args = args[1:]
-				continue
-			}
-			f := len(args)
-			for j := 0; j < len(args); j++ {
-				if isListSep(args[j]) {
-					f = j
-					break
-				}
-			}
-			if n == len(buf) {
-				return Matrix{}, false
-			}
-			v, err := strconv.ParseFloat(args[:f], 64)
-			if err != nil {
-				return Matrix{}, false
-			}
-			buf[n] = v
-			n++
-			args = args[f:]
+		nums, ok := appendNumberList(buf[:0], args)
+		if !ok || len(nums) > len(buf) {
+			return Matrix{}, false
 		}
 		if funcs == len(ts) {
 			return Matrix{}, false
 		}
-		t, err := transformFunc(name, buf[:n])
-		if err != nil {
+		t, ok := transformFunc(name, nums)
+		if !ok {
 			return Matrix{}, false
 		}
 		ts[funcs] = t
@@ -248,8 +229,7 @@ func parseTransformFast(s string) (m Matrix, ok bool) {
 	return composeTransforms(ts[:funcs]), true
 }
 
-// isListSep reports whether b separates the numbers of a list, as in
-// parseNumberList.
+// isListSep reports whether b separates the numbers of a list.
 func isListSep(b byte) bool {
 	return b == ',' || b == ' ' || b == '\t' || b == '\n' || b == '\r'
 }

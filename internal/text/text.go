@@ -30,6 +30,7 @@
 package text
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"maps"
@@ -41,6 +42,7 @@ import (
 	"unsafe"
 
 	"github.com/mgilbir/aster/internal/bcache"
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/fonts/liberation"
 	"github.com/mgilbir/aster/internal/fonts/notoemoji"
 	"github.com/mgilbir/forme/shape"
@@ -71,6 +73,10 @@ const (
 	cssCacheMaxEntry   = 64 << 10
 	listCacheBytes     = 8 << 20
 	listCacheMaxEntry  = 1 << 20
+	// The font programs FontData cuts out of collections and system fonts
+	// for embedding (see FontData); a CJK font's is about 20 MB.
+	programCacheBytes    = 64 << 20
+	programCacheMaxEntry = 32 << 20
 )
 
 // Option configures a Measurer.
@@ -239,6 +245,9 @@ type Run struct {
 	ShapedSize float64
 	// Width is the sum of the glyph advances.
 	Width float64
+	// Start and End are the byte offsets in the shaped text of the text
+	// the run sets: its glyphs' clusters lie within them, in any order.
+	Start, End int
 }
 
 // Measurer computes text widths and shapes text. It is safe for concurrent
@@ -273,6 +282,7 @@ type measurerState struct {
 	monospaceFamily string
 	system          *systemIndex // nil unless WithSystemFonts
 	sysEntries      map[sysKey]*entry
+	sysLoaded       []*entry       // the system faces loaded, oldest first (see keepSystemFace)
 	palettes        map[string]int // WithFontPalette's, by normalised family
 
 	// The caches; see widthCacheBytes. cssCache and listCache are used under
@@ -280,6 +290,7 @@ type measurerState struct {
 	cssCache   *bcache.Cache[string, CSSFont]
 	listCache  *bcache.Cache[listKey, *faceList]
 	widthCache *bcache.Cache[widthKey, float64]
+	programs   *bcache.Cache[*Face, []byte]
 	// last is the font plan resolved last (see font), under mu.
 	last struct {
 		font string
@@ -304,6 +315,7 @@ func New(opts ...Option) (*Measurer, error) {
 		cssCache:        bcache.New[string, CSSFont](cssCacheBytes, cssCacheMaxEntry),
 		listCache:       bcache.New[listKey, *faceList](listCacheBytes, listCacheMaxEntry),
 		widthCache:      bcache.New[widthKey, float64](widthCacheBytes, widthCacheMaxEntry),
+		programs:        bcache.New[*Face, []byte](programCacheBytes, programCacheMaxEntry),
 		fallbackFamily:  orDefault(cfg.fallbackFamily, "Liberation Sans"),
 		serifFamily:     orDefault(cfg.serifFamily, "Liberation Serif"),
 		monospaceFamily: orDefault(cfg.monospaceFamily, "Liberation Mono"),
@@ -512,20 +524,63 @@ func (m *Measurer) ShapeText(text, cssFont string) ([]Run, float64) {
 	return m.shapePlan(&p, true)
 }
 
-// FontData returns the font program of a face for embedding, or nil: its
-// program, or for a face of a collection, or one larger than a font given in
-// memory may be, its OutlineProgram, which a collection's face would
-// otherwise be copied out whole for (Apple Color Emoji: 192 MB of bitmaps).
-func (m *Measurer) FontData(f *Face) []byte {
+// ShapeFont is ShapeText for a font given by its parts rather than as a CSS
+// font shorthand: what a writer that holds an element's font-family,
+// font-size, font-weight and font-style passes, so that no number goes
+// through a string to be read back. Text at a size of zero or less, or one
+// that is not a number, has no glyphs, as such text draws nothing.
+func (m *Measurer) ShapeFont(text string, font CSSFont) ([]Run, float64) {
+	if len(text) == 0 || !(font.Size > 0) {
+		return nil, 0
+	}
+	if len(font.Family) > maxFamilies {
+		font.Family = font.Family[:maxFamilies]
+	}
+	if len(font.Family) == 0 {
+		font.Family = []string{"sans-serif"}
+	}
+	m.mu.Lock()
+	p := m.planFont(text, font, m.faces(font))
+	m.mu.Unlock()
+	return m.shapePlan(&p, true)
+}
+
+// FontData returns the font program of a face for embedding, or nil when it
+// has none to embed. A single font in memory, embedded or given with
+// WithFont, is its own program, shared and not copied. A face of a
+// collection, a system font mapped from its file, and one larger than a font
+// given in memory may be are cut out as their OutlineProgram (Apple Color
+// Emoji, say, would otherwise be 192 MB of bitmaps): that is made once and
+// kept in a byte-bounded cache, and the bytes of each one made are charged
+// to the call's ledger in ctx before it is made (an error wrapping
+// budget.ErrLimit past it). One larger than maxFontBytes is not made: its
+// text is drawn as outlines.
+func (m *Measurer) FontData(ctx context.Context, f *Face) ([]byte, error) {
 	if f == nil {
-		return nil
+		return nil, nil
 	}
-	if f.index != 0 || len(f.src) >= 4 && string(f.src[:4]) == "ttcf" || f.Size() > maxFontBytes {
-		if p := f.OutlineProgram(); p != nil {
-			return p
-		}
+	if !f.mapped && f.index == 0 && !(len(f.src) >= 4 && string(f.src[:4]) == "ttcf") && f.Size() <= maxFontBytes {
+		return f.Program(), nil
 	}
-	return f.Program()
+	if p, ok := m.programs.Get(f); ok {
+		return p, nil
+	}
+	n := f.outlineSize()
+	switch {
+	case n == 0 && !f.mapped:
+		// A WOFF collection's face: only its unwrapped program has tables.
+		return f.Program(), nil
+	case n == 0 || n > maxFontBytes:
+		return nil, nil
+	}
+	if err := budget.LedgerFrom(ctx).Alloc(int64(n)); err != nil {
+		return nil, err
+	}
+	p := f.OutlineProgram()
+	if p != nil {
+		m.programs.Put(f, p, int64(len(p)))
+	}
+	return p, nil
 }
 
 // piece is a stretch of text set in one face.
@@ -546,6 +601,11 @@ type planned struct {
 // the caches and may load a system font, so m.mu is held.
 func (m *Measurer) plan(text, cssFont string) planned {
 	css, list := m.font(cssFont)
+	return m.planFont(text, css, list)
+}
+
+// planFont is plan for a font already resolved to its candidate faces.
+func (m *Measurer) planFont(text string, css CSSFont, list *faceList) planned {
 	if len(text) > maxTextBytes {
 		n := maxTextBytes
 		for n > 0 && !utf8.RuneStart(text[n]) {
@@ -637,7 +697,7 @@ func (m *Measurer) run(runs *[]Run, text string, a, b int, f *Face, size, shaped
 		}
 	}
 	if keep {
-		*runs = append(*runs, Run{Face: f, Glyphs: out, Size: size, ShapedSize: shaped, Width: width})
+		*runs = append(*runs, Run{Face: f, Glyphs: out, Size: size, ShapedSize: shaped, Width: width, Start: a, End: b})
 	}
 	return width
 }

@@ -2,17 +2,30 @@ package svgpdf
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"math"
 	"math/bits"
 	"strconv"
+
+	"github.com/mgilbir/aster/internal/budget"
 )
 
 // contentWriter builds a PDF content stream (plain-text graphics operators)
 // and tracks the ExtGState resources the stream references.
+//
+// Every number it writes goes through num, which writes only finite ones:
+// PDF has no syntax for NaN or an infinity, and a reader takes one for
+// garbage. A geometry that overflows to one (a path past 1e308) is recorded
+// in err, which fails the conversion, and 0 is written in its place so that
+// the stream stays well formed until then (C57).
 type contentWriter struct {
 	buf    []byte
 	chunks [][]byte // full chunks before buf; see spill
+	err    error    // the first number refused (see num)
+	// ledger is the call's, charged for the chunks of the stream and the
+	// resources it registers before they are made (nil: unbounded).
+	ledger *budget.Ledger
 
 	// ExtGState registry: opacity values are applied through /GSn gs.
 	// gsNames preserves first-use order so output is deterministic.
@@ -87,9 +100,34 @@ type gsEntry struct {
 	maskLuminosity bool
 }
 
-func newContentWriter() *contentWriter {
-	return &contentWriter{gsIndex: make(map[alphaPair]string), cur: defaultStreamState()}
+func newContentWriter(ledger *budget.Ledger) *contentWriter {
+	return &contentWriter{gsIndex: make(map[alphaPair]string), cur: defaultStreamState(), ledger: ledger}
 }
+
+// errNonFinite fails a conversion whose geometry has a number that is not
+// finite: one that overflowed in the arithmetic of transforms and paths.
+var errNonFinite = errors.New("svgpdf: a coordinate of the drawing is not a finite number")
+
+// num appends v to dst as appendNum does, if it is finite; otherwise it
+// records errNonFinite and appends 0.
+func (w *contentWriter) num(dst []byte, v float64) []byte {
+	if v-v == 0 { // finite: v-v is NaN for NaN and both infinities
+		return appendNum(dst, v)
+	}
+	return w.nonFinite(dst)
+}
+
+// nonFinite records errNonFinite and appends 0 in place of the number.
+func (w *contentWriter) nonFinite(dst []byte) []byte {
+	if w.err == nil {
+		w.err = errNonFinite
+	}
+	return append(dst, '0')
+}
+
+// gsEntryBytes is about what one registered ExtGState holds: its map entry
+// and record here, and its dictionary in the document.
+const gsEntryBytes = 256
 
 // fmtNum formats a coordinate for a content stream: fixed notation (PDF has
 // no exponent syntax), at most 4 decimals, trailing zeros trimmed.
@@ -100,7 +138,8 @@ func fmtNum(v float64) string {
 
 // appendNum appends fmtNum(v) to dst without allocating. Magnitudes below
 // 1e14 are rounded in integer arithmetic; strconv's 'f' format with a fixed
-// precision goes through its slowest, arbitrary-precision path.
+// precision goes through its slowest, arbitrary-precision path. v must be
+// finite: the content stream writes through contentWriter.num, which checks.
 func appendNum(dst []byte, v float64) []byte {
 	q, neg, ok := scaleFixed4(v)
 	if !ok {
@@ -187,7 +226,7 @@ func appendNumSlow(dst []byte, v float64) []byte {
 
 func (w *contentWriter) op(operator string, args ...float64) {
 	for _, a := range args {
-		w.buf = appendNum(w.buf, a)
+		w.buf = w.num(w.buf, a)
 		w.buf = append(w.buf, ' ')
 	}
 	w.buf = append(w.buf, operator...)
@@ -271,10 +310,10 @@ func (w *contentWriter) setDash(pattern []float64, phase float64) {
 		if i > 0 {
 			w.buf = append(w.buf, ' ')
 		}
-		w.buf = appendNum(w.buf, d)
+		w.buf = w.num(w.buf, d)
 	}
 	w.buf = append(w.buf, "] "...)
-	w.buf = appendNum(w.buf, phase)
+	w.buf = w.num(w.buf, phase)
 	w.buf = append(w.buf, " d\n"...)
 	w.cur.dash = append([]float64(nil), pattern...)
 	w.cur.dashOffset = phase
@@ -311,6 +350,8 @@ func (w *contentWriter) opacity(fillAlpha, strokeAlpha float64) {
 	key := alphaPair{fill: fillAlpha, stroke: strokeAlpha}
 	name, ok := w.gsIndex[key]
 	if !ok {
+		// A data-driven opacity can make one per element.
+		w.ledger.MustAlloc(gsEntryBytes)
 		name = fmt.Sprintf("GS%d", len(w.gsNames))
 		w.gsIndex[key] = name
 		w.gsNames = append(w.gsNames, gsEntry{name: name, alpha: key})
@@ -325,6 +366,7 @@ func (w *contentWriter) opacity(fillAlpha, strokeAlpha float64) {
 func (w *contentWriter) stateGS(key string, e gsEntry) {
 	name, ok := w.gsKeyed[key]
 	if !ok {
+		w.ledger.MustAlloc(gsEntryBytes + int64(len(key)))
 		name = fmt.Sprintf("GS%d", len(w.gsNames))
 		if w.gsKeyed == nil {
 			w.gsKeyed = map[string]string{}
@@ -347,7 +389,7 @@ func (w *contentWriter) setTextFont(res string, size float64) {
 	w.buf = append(w.buf, '/')
 	w.buf = append(w.buf, res...)
 	w.buf = append(w.buf, ' ')
-	w.buf = appendNum(w.buf, size)
+	w.buf = w.num(w.buf, size)
 	w.buf = append(w.buf, " Tf\n"...)
 }
 
@@ -371,7 +413,7 @@ func (w *contentWriter) showGlyphs(items []tjItem) {
 	w.buf = append(w.buf, '[')
 	for _, it := range items {
 		if it.isAdj {
-			w.buf = appendNum(w.buf, it.adj)
+			w.buf = w.num(w.buf, it.adj)
 			continue
 		}
 		w.buf = append(w.buf, '<')
@@ -479,6 +521,9 @@ const (
 // it between operators; a chunk boundary never changes the stream.
 func (w *contentWriter) spill() {
 	if len(w.buf) >= contentSpill {
+		// The stream grows with the input: each chunk is charged as it is
+		// made, which the call's memory limit then bounds.
+		w.ledger.MustAlloc(contentChunk)
 		w.chunks = append(w.chunks, w.buf)
 		w.buf = make([]byte, 0, contentChunk)
 	}
@@ -487,4 +532,43 @@ func (w *contentWriter) spill() {
 // stream returns the content stream as consecutive chunks.
 func (w *contentWriter) stream() [][]byte {
 	return append(w.chunks, w.buf)
+}
+
+// capture is what a writer held before beginCapture: the stream so far and
+// its state.
+type capture struct {
+	buf    []byte
+	chunks [][]byte
+	cur    streamState
+	stack  []streamState
+}
+
+// beginCapture starts writing into a stream of its own, the content of a
+// group (a form XObject) drawn where the stream is now: from the state the
+// stream has, with what a transparency group resets at its start reset
+// (blend mode, soft mask and the alphas, PDF 11.6.6), in the space the form
+// is drawn in, which a pattern in it is placed in.
+func (w *contentWriter) beginCapture() capture {
+	c := capture{w.buf, w.chunks, w.cur, w.stack}
+	w.buf, w.chunks, w.stack = nil, nil, nil
+	w.cur = c.cur.clone()
+	w.cur.fillAlpha, w.cur.strokeAlpha = 1, 1
+	w.cur.ctm = Identity()
+	return c
+}
+
+// endCapture returns what was written since beginCapture and goes back to
+// the stream as it was.
+func (w *contentWriter) endCapture(c capture) []byte {
+	n := len(w.buf)
+	for _, ch := range w.chunks {
+		n += len(ch)
+	}
+	out := make([]byte, 0, n)
+	for _, ch := range w.chunks {
+		out = append(out, ch...)
+	}
+	out = append(out, w.buf...)
+	w.buf, w.chunks, w.cur, w.stack = c.buf, c.chunks, c.cur, c.stack
+	return out
 }

@@ -1,6 +1,8 @@
 package svgpdf
 
 import (
+	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
 	"math"
 	"strings"
@@ -9,8 +11,13 @@ import (
 	pdf0 "github.com/mgilbir/pdf0"
 )
 
+// formDefBytes is about what a form holds besides its content: its record,
+// its index entry, and its dictionary in the document.
+const formDefBytes = 512
+
 // formDef is a form XObject: an isolated transparency group, the content of
-// a colour glyph's group, drawn in the user space it is drawn in.
+// a colour glyph's group or of an element with a blend mode, drawn in the
+// user space it is drawn in.
 type formDef struct {
 	res     string
 	content []byte
@@ -40,15 +47,26 @@ func (f *formDef) stream(resources pdf0.Object) (*pdf0.Stream, error) {
 }
 
 // form registers a form XObject of content over bbox, once for the same
-// content and box, and returns its resource name.
+// content and box, and returns its resource name. Forms are known by a
+// digest of the two, so that the index does not hold each content a second
+// time (X4); a new one is charged to the call's ledger.
 func (r *renderer) form(content []byte, bbox [4]float64) string {
-	key := fmt.Sprint(bbox) + "\x00" + string(content)
+	h := sha256.New()
+	var b [8]byte
+	for _, v := range bbox {
+		binary.LittleEndian.PutUint64(b[:], math.Float64bits(v))
+		h.Write(b[:])
+	}
+	h.Write(content)
+	var key [sha256.Size]byte
+	h.Sum(key[:0])
 	if f, ok := r.formIndex[key]; ok {
 		return f.res
 	}
+	r.alloc(int64(len(content)) + formDefBytes)
 	f := &formDef{res: fmt.Sprintf("Fm%d", len(r.forms)), content: content, bbox: bbox}
 	if r.formIndex == nil {
-		r.formIndex = map[string]*formDef{}
+		r.formIndex = map[[sha256.Size]byte]*formDef{}
 	}
 	r.formIndex[key] = f
 	r.forms = append(r.forms, f)
@@ -229,7 +247,7 @@ func (p *pdfPainter) formAt(content []byte, m Matrix, box [4]float64) string {
 // formIn is a form of content drawn in a user space m maps into the glyph's
 // page space, its BBox bbox in the glyph's page space.
 func (p *pdfPainter) formIn(content []byte, m Matrix, bbox [4]float64) string {
-	c := appendMatrix(nil, m)
+	c := p.r.w.appendMatrix(nil, m)
 	c = append(c, " cm\n"...)
 	c = append(c, content...)
 	return p.r.form(c, bbox)
@@ -280,12 +298,13 @@ func (p *pdfPainter) toForm() {
 	}
 }
 
-func appendMatrix(b []byte, m Matrix) []byte {
+// appendMatrix appends the six numbers of m, finite (see num).
+func (w *contentWriter) appendMatrix(b []byte, m Matrix) []byte {
 	for i, v := range []float64{m.A, m.B, m.C, m.D, m.E, m.F} {
 		if i > 0 {
 			b = append(b, ' ')
 		}
-		b = appendNum(b, v)
+		b = w.num(b, v)
 	}
 	return b
 }
@@ -352,7 +371,7 @@ func (p *pdfPainter) compositeOpen(mode shape.CompositeMode, src []byte, k int) 
 	fs := p.formAt(src, kc, bc)
 	region := append([]byte(nil), prefix...)
 	region = fmt.Appendf(region, "0 g\n")
-	region = appendRect(region, bc)
+	region = w.appendRect(region, bc)
 	region = append(region, "f\n"...)
 	region = append(region, closing...)
 	fc := p.formAt(region, kb, bb)
@@ -434,10 +453,10 @@ func mapBox(m Matrix, box [4]float64) [4]float64 {
 	return [4]float64{x0, y0, x1, y1}
 }
 
-// appendRect appends a re of box.
-func appendRect(b []byte, box [4]float64) []byte {
+// appendRect appends a re of box, its numbers finite (see num).
+func (w *contentWriter) appendRect(b []byte, box [4]float64) []byte {
 	for _, v := range []float64{box[0], box[1], box[2] - box[0], box[3] - box[1]} {
-		b = appendNum(b, v)
+		b = w.num(b, v)
 		b = append(b, ' ')
 	}
 	return append(b, "re\n"...)

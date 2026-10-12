@@ -96,11 +96,16 @@ func (d *diffStat) String() string {
 //     matching the requested weight and style, and Noto Emoji is regular, so
 //     for bold or italic text it draws emoji as .notdef of the sans face. This
 //     package falls back to Noto Emoji whatever the weight.
+//   - canvas-parse: the font strings the reference parsed differently from
+//     node-canvas's FontParser, which ParseCSSFont follows (canvasReadings).
 //   - pango-layout: text with line separators or tabs. The reference measured
 //     them as ordinary glyphs; node-canvas, the oracle for the layouts the
 //     charts are compared on, lays text out with Pango (lines at the
 //     separators, tab stops every eight spaces), and so does MeasureText.
 func explained(m *Measurer, text, css string) string {
+	if _, ok := canvasReadings[css]; ok {
+		return "canvas-parse"
+	}
 	for _, r := range text {
 		if r >= 0x0590 && r <= 0x05FF {
 			return "hebrew"
@@ -119,6 +124,18 @@ func explained(m *Measurer, text, css string) string {
 		}
 	}
 	return ""
+}
+
+// canvasReadings are the corpus fonts the reference parsed differently from
+// node-canvas's FontParser, the parser of upstream's canvas context, with
+// node-canvas's reading: style and weight in either order, lighter as 100,
+// pt as its float factor, and a size with no family as that size (C12).
+var canvasReadings = map[string]CSSFont{
+	"bold italic 14px Arial":                    {Italic: true, Weight: 700, Size: 14, Family: []string{"Arial"}},
+	"bold italic 14px 'Times New Roman', serif": {Italic: true, Weight: 700, Size: 14, Family: []string{"Times New Roman", "serif"}},
+	"lighter 12px sans-serif":                   {Weight: 100, Size: 12, Family: []string{"sans-serif"}},
+	"12pt Arial":                                {Weight: 400, Size: 12 * float64(float32(96.0)/float32(72.0)), Family: []string{"Arial"}},
+	"12px ":                                     {Weight: 400, Size: 12, Family: []string{"sans-serif"}},
 }
 
 // The reference numbers below were recorded from the go-text/typesetting
@@ -194,7 +211,7 @@ func TestCompareTextmeasure(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var compat, exact, unexplained, hebrew, emoji, layout diffStat
+	var compat, exact, unexplained, hebrew, emoji, layout, parse diffStat
 	var bad []string
 	for fi, css := range corpusFonts {
 		for si, s := range corpusStrings {
@@ -213,6 +230,8 @@ func TestCompareTextmeasure(t *testing.T) {
 				emoji.add(s, css, got, want)
 			case "pango-layout":
 				layout.add(s, css, got, want)
+			case "canvas-parse":
+				parse.add(s, css, got, want)
 			default:
 				unexplained.add(s, css, got, want)
 				bad = append(bad, fmt.Sprintf("%q @ %q: got %.6f want %.6f", s, css, got, want))
@@ -223,6 +242,7 @@ func TestCompareTextmeasure(t *testing.T) {
 	t.Logf("compat, unexplained:  %s", &unexplained)
 	t.Logf("compat, hebrew:       %s", &hebrew)
 	t.Logf("compat, emoji-aspect: %s", &emoji)
+	t.Logf("compat, canvas-parse: %s", &parse)
 	t.Logf("exact mode:           %s", &exact)
 	sort.Strings(bad)
 	for i, b := range bad {
@@ -234,9 +254,11 @@ func TestCompareTextmeasure(t *testing.T) {
 	if len(bad) > 0 {
 		t.Errorf("%d unexplained differences", len(bad))
 	}
-	if unexplained.exact != unexplained.n || unexplained.n+layout.n != 3846 || hebrew.n != 30 || emoji.n != 60 || layout.n == 0 {
-		t.Errorf("comparable/layout/unexplained/hebrew/emoji = %d/%d/%d/%d/%d exact %d, want 3846 in all with only the layout class apart",
-			unexplained.n, layout.n, unexplained.n-len(bad), hebrew.n, emoji.n, unexplained.exact)
+	// The strings in the canvas-parse fonts leave the hebrew and emoji
+	// classes for that one (4 and 10 of them).
+	if unexplained.exact != unexplained.n || unexplained.n+layout.n+parse.n != 3860 || hebrew.n != 26 || emoji.n != 50 || layout.n == 0 || parse.n == 0 {
+		t.Errorf("comparable/layout/parse/unexplained/hebrew/emoji = %d/%d/%d/%d/%d/%d exact %d, want 3860 in all with only the layout and parse classes apart",
+			unexplained.n, layout.n, parse.n, unexplained.n-len(bad), hebrew.n, emoji.n, unexplained.exact)
 	}
 }
 

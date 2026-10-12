@@ -1,10 +1,8 @@
 package svgpdf
 
 import (
-	"fmt"
+	"errors"
 	"math"
-	"strconv"
-	"strings"
 )
 
 // PathOp identifies a normalized path segment operation.
@@ -34,7 +32,13 @@ type Point struct {
 
 // parsePathData parses SVG path data (the d attribute) into normalized
 // absolute segments. Supported commands: M/m L/l H/h V/v C/c S/s Q/q T/t
-// A/a Z/z. Unknown commands are an error.
+// A/a Z/z.
+//
+// Path data with an error is drawn up to it, as SVG says (SVG 1.1, F.2): the
+// segments before the first one that does not parse (an unknown command, a
+// number missing or not a number, NaN as upstream writes for a null value),
+// and none when the data does not start with a moveto. The only error is the
+// segment limit.
 func parsePathData(d string) ([]PathSeg, error) {
 	return parsePathDataMax(d, defaultMaxSegments)
 }
@@ -70,18 +74,21 @@ type pathParser struct {
 }
 
 func (p *pathParser) parse() ([]PathSeg, error) {
-	for {
+	for first := true; ; first = false {
 		p.skipSep()
 		if p.pos >= len(p.data) {
 			return p.segs, nil
 		}
 		cmd := p.data[p.pos]
-		if !isPathCmd(cmd) {
-			return nil, fmt.Errorf("svgpdf: path data: expected command at %q", p.data[p.pos:min(p.pos+12, len(p.data))])
+		if !isPathCmd(cmd) || first && cmd|0x20 != 'm' {
+			return p.segs, nil
 		}
 		p.pos++
 		if err := p.runCommand(cmd); err != nil {
-			return nil, err
+			if errors.Is(err, ErrLimit) {
+				return nil, err
+			}
+			return p.segs, nil // drawn up to the error
 		}
 		if p.max > 0 && len(p.segs) > p.max {
 			return nil, limitErr("path has more than %d segments", p.max)
@@ -130,7 +137,7 @@ func (p *pathParser) runCommand(cmd byte) error {
 		case 'a':
 			err = p.arcTo(rel)
 		default:
-			return fmt.Errorf("svgpdf: path data: unsupported command %q", string(cmd))
+			return errPathData
 		}
 		if err != nil {
 			return err
@@ -381,6 +388,12 @@ func appendArc(dst []PathSeg, from, to Point, rx, ry, xRotDeg float64, largeArc,
 
 	// Split into <= 90° pieces, each approximated by one cubic with the
 	// standard tangent-length factor k = 4/3 tan(δ/4).
+	// dTheta is within ±2π, or NaN where radii past 1e154 overflowed: a
+	// NaN arc is a line, which the content writer then refuses if its
+	// ends are not finite (int of NaN is not defined in Go, X1).
+	if math.IsNaN(dTheta) {
+		return append(dst, PathSeg{Op: OpLineTo, P3: to})
+	}
 	n := int(math.Ceil(math.Abs(dTheta) / (math.Pi / 2)))
 	if n == 0 {
 		return dst
@@ -464,7 +477,7 @@ func (p *pathParser) point(rel bool) (Point, error) {
 func (p *pathParser) flag() (bool, error) {
 	p.skipSep()
 	if p.pos >= len(p.data) {
-		return false, fmt.Errorf("svgpdf: path data: expected arc flag at end of input")
+		return false, errPathData
 	}
 	switch p.data[p.pos] {
 	case '0':
@@ -474,55 +487,18 @@ func (p *pathParser) flag() (bool, error) {
 		p.pos++
 		return true, nil
 	}
-	return false, fmt.Errorf("svgpdf: path data: invalid arc flag %q", string(p.data[p.pos]))
+	return false, errPathData
 }
 
 func (p *pathParser) number() (float64, error) {
 	p.skipSep()
-	start := p.pos
-	if p.pos < len(p.data) && (p.data[p.pos] == '+' || p.data[p.pos] == '-') {
-		p.pos++
+	v, n, ok := scanNumber(p.data[p.pos:])
+	if !ok {
+		return 0, errPathData
 	}
-	digits := func() {
-		for p.pos < len(p.data) && p.data[p.pos] >= '0' && p.data[p.pos] <= '9' {
-			p.pos++
-		}
-	}
-	digits()
-	if p.pos < len(p.data) && p.data[p.pos] == '.' {
-		p.pos++
-		digits()
-	}
-	if p.pos < len(p.data) && (p.data[p.pos] == 'e' || p.data[p.pos] == 'E') {
-		p.pos++
-		if p.pos < len(p.data) && (p.data[p.pos] == '+' || p.data[p.pos] == '-') {
-			p.pos++
-		}
-		digits()
-	}
-	if p.pos == start {
-		return 0, fmt.Errorf("svgpdf: path data: expected number at %q", p.data[start:min(start+12, len(p.data))])
-	}
-	v, err := strconv.ParseFloat(p.data[start:p.pos], 64)
-	if err != nil {
-		return 0, fmt.Errorf("svgpdf: path data: invalid number %q", p.data[start:p.pos])
-	}
+	p.pos += n
 	return v, nil
 }
 
-// parseNumberList parses a whitespace/comma separated list of numbers
-// (transform arguments, stroke-dasharray values).
-func parseNumberList(s string) ([]float64, error) {
-	fields := strings.FieldsFunc(s, func(r rune) bool {
-		return r == ',' || r == ' ' || r == '\t' || r == '\n' || r == '\r'
-	})
-	out := make([]float64, 0, len(fields))
-	for _, f := range fields {
-		v, err := strconv.ParseFloat(f, 64)
-		if err != nil {
-			return nil, fmt.Errorf("invalid number %q", f)
-		}
-		out = append(out, v)
-	}
-	return out, nil
-}
+// errPathData is an error in path data, up to which the path is drawn.
+var errPathData = errors.New("svgpdf: path data: not a number")

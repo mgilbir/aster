@@ -58,7 +58,7 @@ Monochrome Noto Emoji is the fallback for emoji, so they always measure and draw
 
 `WithSystemFonts` indexes the machine's fonts (each face of a collection, too) and maps files into memory rather than reading them, so Apple Color Emoji (190 MB) costs only what is drawn from it. In PDF, emoji from such a font are also written as invisible text, in a subset cut from its outline tables alone, so they stay searchable and add about 100 KB, not the font's bitmaps.
 
-A system font is used **only when a spec names its family** (`"font": "Apple Color Emoji"`), or when you list it in `WithFontFallback`; never as a fallback by default. This is for licences: some system fonts may not be drawn into documents you distribute (Apple Color Emoji's licence forbids it). It also keeps what a spec can make aster read to what the host enabled. Check a font's licence before distributing what it draws.
+A system font is used **only when a spec names its family** (`"font": "Apple Color Emoji"`), or when you list it in `WithFontFallback`; never as a fallback by default. This is for licences: some system fonts may not be drawn into documents you distribute (Apple Color Emoji's licence forbids it). It also keeps what a spec can make aster read to what the host enabled. Check a font's licence before distributing what it draws. A converter keeps at most 64 system faces loaded (about a megabyte of parsed tables each); past that the one loaded longest ago is dropped, and loaded again if a later spec names it. In PDF, a system font is embedded from its outline tables, cut out of the file, never from a copy of the whole file.
 
 ## PDF text
 

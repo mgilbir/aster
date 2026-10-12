@@ -2,6 +2,7 @@ package svgpdf
 
 import (
 	"bytes"
+	"context"
 	"math"
 	"os"
 	"regexp"
@@ -184,7 +185,7 @@ func TestColourGlyphsComposite(t *testing.T) {
 // TestColourGlyphsInvertedMask composites with SrcOut: the source masked by
 // the inverse of the backdrop's alpha.
 func TestColourGlyphsInvertedMask(t *testing.T) {
-	r := &renderer{w: newContentWriter()}
+	r := &renderer{w: newContentWriter(nil)}
 	p := &pdfPainter{r: r, upem: 1000, box: shape.Rect{XMax: 1000, YMax: 1000}, m: []Matrix{Identity()}}
 	p.beginGroup()
 	p.PushClipRect(shape.Rect{XMax: 500, YMax: 500})
@@ -228,7 +229,7 @@ func TestColourGlyphsTextModes(t *testing.T) {
 // noFontData is a shaper whose faces have no program to embed.
 type noFontData struct{ *text.Measurer }
 
-func (noFontData) FontData(*text.Face) []byte { return nil }
+func (noFontData) FontData(context.Context, *text.Face) ([]byte, error) { return nil, nil }
 
 func TestColourGlyphsActualText(t *testing.T) {
 	// A run whose font cannot be embedded keeps its text as ActualText.
@@ -293,7 +294,7 @@ func TestColourGlyphFormsInPageSpace(t *testing.T) {
 // found: the page must stay balanced and nothing may panic.
 func TestColourPainterUnbalanced(t *testing.T) {
 	newPainter := func() (*renderer, *pdfPainter) {
-		r := &renderer{w: newContentWriter(), images: newImageCatalog(nil, Limits{}.withDefaults()), lim: Limits{}.withDefaults()}
+		r := &renderer{w: newContentWriter(nil), images: newImageCatalog(nil, Limits{}.withDefaults()), lim: Limits{}.withDefaults()}
 		p := &pdfPainter{r: r, upem: 1000, box: shape.Rect{XMax: 1000, YMax: 1000}, m: []Matrix{Identity()}}
 		p.beginGroup()
 		return r, p
@@ -405,7 +406,7 @@ func TestColourRadialFromZero(t *testing.T) {
 // under a soft mask of the clip's region, the outside's inverted and its
 // BBox the page, as Quartz needs.
 func TestColourCompositeOpenClip(t *testing.T) {
-	r := &renderer{w: newContentWriter(), images: newImageCatalog(nil, Limits{}.withDefaults()), lim: Limits{}.withDefaults(), pageW: 100, pageH: 100}
+	r := &renderer{w: newContentWriter(nil), images: newImageCatalog(nil, Limits{}.withDefaults()), lim: Limits{}.withDefaults(), pageW: 100, pageH: 100}
 	r.w.concat(Matrix{A: 1, D: -1, F: 100})
 	r.w.save()
 	r.w.concat(Matrix{A: 0.1, D: -0.1, F: 90})

@@ -74,6 +74,7 @@ type pdfFont struct {
 // fontCatalog resolves shaped faces to PDF font resources, caching failures
 // so unusable faces consistently fall back to outline drawing.
 type fontCatalog struct {
+	ctx    context.Context // the call's, whose ledger FontData charges
 	mode   TextMode
 	shaper TextShaper
 	fonts  map[*text.Face]*pdfFont
@@ -81,8 +82,12 @@ type fontCatalog struct {
 	list   []*pdfFont // first-use order, for deterministic output
 }
 
-func newFontCatalog(mode TextMode, shaper TextShaper) *fontCatalog {
+func newFontCatalog(ctx context.Context, mode TextMode, shaper TextShaper) *fontCatalog {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	return &fontCatalog{
+		ctx:    ctx,
 		mode:   mode,
 		shaper: shaper,
 		fonts:  make(map[*text.Face]*pdfFont),
@@ -91,29 +96,33 @@ func newFontCatalog(mode TextMode, shaper TextShaper) *fontCatalog {
 }
 
 // fontFor returns the PDF font for a shaped face, or nil when the face
-// cannot be represented as a PDF font (the caller then draws outlines).
-func (c *fontCatalog) fontFor(face *text.Face) *pdfFont {
+// cannot be represented as a PDF font (the caller then draws outlines). The
+// error is a limit the font program's bytes exceed.
+func (c *fontCatalog) fontFor(face *text.Face) (*pdfFont, error) {
 	if f, ok := c.fonts[face]; ok {
-		return f
+		return f, nil
 	}
 	if c.failed[face] {
-		return nil
+		return nil, nil
 	}
-	data := c.shaper.FontData(face)
+	data, err := c.shaper.FontData(c.ctx, face)
+	if err != nil {
+		return nil, err
+	}
 	if data == nil {
 		c.failed[face] = true
-		return nil
+		return nil, nil
 	}
 	parsed, err := fontsubset.Parse(data)
 	if err != nil {
 		c.failed[face] = true
-		return nil
+		return nil, nil
 	}
 	if c.mode == TextEmbed && !parsed.CanSubset() {
-		// No TrueType outlines to embed (CFF font); outlines still render it
-		// faithfully.
+		// No TrueType outlines to embed (a CFF font), or glyph data that
+		// cannot be subset: outlines still render it faithfully.
 		c.failed[face] = true
-		return nil
+		return nil, nil
 	}
 	f := &pdfFont{
 		res:    fmt.Sprintf("F%d", len(c.list)),
@@ -124,7 +133,7 @@ func (c *fontCatalog) fontFor(face *text.Face) *pdfFont {
 	}
 	c.fonts[face] = f
 	c.list = append(c.list, f)
-	return f
+	return f, nil
 }
 
 // PostScriptNameOrFallback returns the name used as /BaseFont for a font with
@@ -316,13 +325,23 @@ func buildFontObjects(catalog *fontCatalog, nextNum int) (map[int]*pdf0.Indirect
 
 		cidFont := &pdf0.Dictionary{}
 		cidFont.Set("Type", pdf0.Name("Font"))
-		cidFont.Set("Subtype", pdf0.Name("CIDFontType2"))
+		// A CFF font's CIDFont is a CIDFontType0 (ISO 32000-2, 9.7.4.1):
+		// only TextNamed writes one, as TextEmbed cannot subset it.
+		if f.parsed.IsCFF() {
+			cidFont.Set("Subtype", pdf0.Name("CIDFontType0"))
+		} else {
+			cidFont.Set("Subtype", pdf0.Name("CIDFontType2"))
+		}
 		cidFont.Set("BaseFont", pdf0.Name(baseName))
 		cidFont.Set("CIDSystemInfo", cidSystem)
 		cidFont.Set("FontDescriptor", descRef)
 		// Content-stream glyph codes ARE glyph IDs of the (subset) font
 		// program: the sparse subset preserves original glyph numbering.
-		cidFont.Set("CIDToGIDMap", pdf0.Name("Identity"))
+		// (A CIDFontType0 has no CIDToGIDMap: its CIDs are glyph indices
+		// through its own charset.)
+		if !f.parsed.IsCFF() {
+			cidFont.Set("CIDToGIDMap", pdf0.Name("Identity"))
+		}
 		cidFont.Set("W", f.widthsArray())
 		cidRef := add(cidFont)
 

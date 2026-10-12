@@ -26,6 +26,10 @@ func parseSVGFast(ctx context.Context, svg string, lim Limits) (root *element, o
 		pos      int
 		slab     []element
 		attrs    []attribute
+		// pieces are the stretches of character data of each <text> and
+		// <tspan> open, by depth (around its children), joined once when it
+		// closes rather than added up one by one (C60).
+		pieces [][]string
 	)
 	for pos < len(svg) {
 		// Character data up to the next tag.
@@ -45,11 +49,7 @@ func parseSVGFast(ctx context.Context, svg string, lim Limits) (root *element, o
 					return nil, false, nil
 				}
 			} else if top := stack[len(stack)-1]; top.name == "text" || top.name == "tspan" {
-				if top.text == "" {
-					top.text = data
-				} else {
-					top.text += data
-				}
+				pieces[len(stack)-1] = append(pieces[len(stack)-1], data)
 			}
 		}
 		if end >= len(svg) {
@@ -77,6 +77,13 @@ func parseSVGFast(ctx context.Context, svg string, lim Limits) (root *element, o
 				return nil, false, nil
 			}
 			pos++
+			switch ps := pieces[len(stack)-1]; len(ps) {
+			case 0:
+			case 1:
+				top.text = ps[0]
+			default:
+				top.text = strings.Join(ps, "")
+			}
 			stack = stack[:len(stack)-1]
 			continue
 		}
@@ -185,6 +192,10 @@ func parseSVGFast(ctx context.Context, svg string, lim Limits) (root *element, o
 		}
 		if !selfClose {
 			stack = append(stack, el)
+			if len(pieces) < len(stack) {
+				pieces = append(pieces, nil)
+			}
+			pieces[len(stack)-1] = pieces[len(stack)-1][:0]
 			if len(stack) > maxNestingDepth {
 				return nil, false, nil
 			}

@@ -85,7 +85,7 @@ func (c *Converter) StagesForTest(spec []byte, lite bool) (map[string]time.Durat
 	if _, err := c.svgToPNG(ctx, svg, nil); err != nil {
 		return nil, err
 	}
-	if _, _, err := c.svgToPDF(ctx, svg, nil); err != nil {
+	if _, _, err := c.svgToPDF(ctx, svg, nil, false); err != nil {
 		return nil, err
 	}
 	return stages, nil

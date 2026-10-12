@@ -880,13 +880,13 @@ type FontUsage = svgpdf.FontUsage
 
 // VegaToPDF renders a Vega spec (JSON) to a single-page vector PDF.
 func (c *Converter) VegaToPDF(spec []byte, opts ...PDFOption) ([]byte, error) {
-	out, _, err := c.VegaToPDFUsage(spec, opts...)
+	out, _, err := c.vegaToPDF(spec, opts, false)
 	return out, err
 }
 
 // VegaLiteToPDF renders a Vega-Lite spec (JSON) to a single-page vector PDF.
 func (c *Converter) VegaLiteToPDF(spec []byte, opts ...PDFOption) ([]byte, error) {
-	out, _, err := c.VegaLiteToPDFUsage(spec, opts...)
+	out, _, err := c.vegaLiteToPDF(spec, opts, false)
 	return out, err
 }
 
@@ -901,7 +901,14 @@ func (c *Converter) VegaLiteToPDF(spec []byte, opts ...PDFOption) ([]byte, error
 // constructs (embedded CSS, patterns, ...) return a descriptive error rather
 // than a silently incomplete chart; callers can fall back to SVGToPNG.
 func (c *Converter) SVGToPDF(svg string, opts ...PDFOption) ([]byte, error) {
-	out, _, err := c.SVGToPDFUsage(svg, opts...)
+	release, ok := c.enter()
+	if !ok {
+		return nil, ErrClosed
+	}
+	defer release()
+	ctx, cancel := c.opContext()
+	defer cancel()
+	out, _, err := c.svgToPDF(ctx, svg, opts, false)
 	return out, err
 }
 
@@ -916,10 +923,12 @@ func (c *Converter) SVGToPDFUsage(svg string, opts ...PDFOption) ([]byte, []Font
 	defer release()
 	ctx, cancel := c.opContext()
 	defer cancel()
-	return c.svgToPDF(ctx, svg, opts)
+	return c.svgToPDF(ctx, svg, opts, true)
 }
 
-func (c *Converter) svgToPDF(ctx context.Context, svg string, opts []PDFOption) (pdf []byte, uses []FontUsage, err error) {
+// svgToPDF converts svg, reporting its font usage when usage is set: usage
+// copies the font programs it reports.
+func (c *Converter) svgToPDF(ctx context.Context, svg string, opts []PDFOption, usage bool) (pdf []byte, uses []FontUsage, err error) {
 	defer func() {
 		if err != nil {
 			pdf, uses = nil, nil
@@ -950,7 +959,12 @@ func (c *Converter) svgToPDF(ctx context.Context, svg string, opts []PDFOption) 
 	}
 	m = m.Bounded(text.ShapingBudgetFrom(ctx))
 	t0 := time.Now()
-	pdf, uses, err = svgpdf.ConvertWithUsage(svg, m, svgpdf.Options{Text: mode, Context: ctx, Images: imagesFrom(ctx).load, ImageError: reportFrom(ctx).image})
+	popts := svgpdf.Options{Text: mode, Context: ctx, Images: imagesFrom(ctx).load, ImageError: reportFrom(ctx).image}
+	if usage {
+		pdf, uses, err = svgpdf.ConvertWithUsage(svg, m, popts)
+	} else {
+		pdf, err = svgpdf.Convert(svg, m, popts)
+	}
 	if st := stagesFrom(ctx); st != nil {
 		st("pdf", time.Since(t0))
 	}
@@ -966,6 +980,10 @@ func (c *Converter) svgToPDF(ctx context.Context, svg string, opts []PDFOption) 
 // VegaToPDFUsage renders a Vega spec (JSON) to a vector PDF and reports its
 // per-face glyph usage; see SVGToPDFUsage.
 func (c *Converter) VegaToPDFUsage(spec []byte, opts ...PDFOption) ([]byte, []FontUsage, error) {
+	return c.vegaToPDF(spec, opts, true)
+}
+
+func (c *Converter) vegaToPDF(spec []byte, opts []PDFOption, usage bool) ([]byte, []FontUsage, error) {
 	release, ok := c.enter()
 	if !ok {
 		return nil, nil, ErrClosed
@@ -981,12 +999,16 @@ func (c *Converter) VegaToPDFUsage(spec []byte, opts ...PDFOption) ([]byte, []Fo
 	if err != nil {
 		return nil, nil, err
 	}
-	return c.svgToPDF(ctx, svg, opts)
+	return c.svgToPDF(ctx, svg, opts, usage)
 }
 
 // VegaLiteToPDFUsage renders a Vega-Lite spec (JSON) to a vector PDF and
 // reports its per-face glyph usage; see SVGToPDFUsage.
 func (c *Converter) VegaLiteToPDFUsage(spec []byte, opts ...PDFOption) ([]byte, []FontUsage, error) {
+	return c.vegaLiteToPDF(spec, opts, true)
+}
+
+func (c *Converter) vegaLiteToPDF(spec []byte, opts []PDFOption, usage bool) ([]byte, []FontUsage, error) {
 	release, ok := c.enter()
 	if !ok {
 		return nil, nil, ErrClosed
@@ -1002,7 +1024,7 @@ func (c *Converter) VegaLiteToPDFUsage(spec []byte, opts ...PDFOption) ([]byte, 
 	if err != nil {
 		return nil, nil, err
 	}
-	return c.svgToPDF(ctx, svg, opts)
+	return c.svgToPDF(ctx, svg, opts, usage)
 }
 
 // pdfMeasurerInit returns the measurer PDF text is shaped with: the layout
@@ -1039,8 +1061,8 @@ func SubsetFont(source []byte, gids []uint16) (subset []byte, postScriptName str
 		return nil, "", fmt.Errorf("aster: parse font: %w", err)
 	}
 	name := svgpdf.PostScriptNameOrFallback(f.PostScriptName())
-	if !f.CanSubset() {
-		return nil, name, fmt.Errorf("aster: font %q has no TrueType outlines to subset", name)
+	if err := f.SubsetErr(); err != nil {
+		return nil, name, fmt.Errorf("aster: font %q cannot be subset: %w", name, err)
 	}
 	set := make(map[uint16]bool, len(gids))
 	for _, g := range gids {

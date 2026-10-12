@@ -116,10 +116,9 @@ func TestGradientStops(t *testing.T) {
 func TestGradientRefusals(t *testing.T) {
 	grad := `<linearGradient id="g">` + twoStops + `</linearGradient>`
 	for name, svg := range map[string]string{
-		"translucent stop": gradSVG(`<linearGradient id="g"><stop offset="0" stop-color="red" stop-opacity="0.5"/></linearGradient>`, `<rect width="5" height="5" fill="url(#g)"/>`),
-		"spread method":    gradSVG(`<linearGradient id="g" spreadMethod="reflect">`+twoStops+`</linearGradient>`, `<rect width="5" height="5" fill="url(#g)"/>`),
-		"transform":        gradSVG(`<linearGradient id="g" gradientTransform="rotate(45)">`+twoStops+`</linearGradient>`, `<rect width="5" height="5" fill="url(#g)"/>`),
-		"missing":          gradSVG(grad, `<rect width="5" height="5" fill="url(#nope)"/>`),
+		"spread method": gradSVG(`<linearGradient id="g" spreadMethod="reflect">`+twoStops+`</linearGradient>`, `<rect width="5" height="5" fill="url(#g)"/>`),
+		"transform":     gradSVG(`<linearGradient id="g" gradientTransform="rotate(45)">`+twoStops+`</linearGradient>`, `<rect width="5" height="5" fill="url(#g)"/>`),
+		"missing":       gradSVG(grad, `<rect width="5" height="5" fill="url(#nope)"/>`),
 	} {
 		if _, err := Convert(svg, nil, Options{}); err == nil || !strings.HasPrefix(err.Error(), "svgpdf:") {
 			t.Errorf("%s: err = %v, want an svgpdf error", name, err)

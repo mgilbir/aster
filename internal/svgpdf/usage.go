@@ -42,6 +42,12 @@ type FontUsage struct {
 // The conversion is bounded by opts.Limits and cancelled by opts.Context, and
 // it never panics: an internal failure is returned as an error.
 func ConvertWithUsage(svg string, shaper TextShaper, opts Options) (pdf []byte, uses []FontUsage, err error) {
+	return convert(svg, shaper, opts, true)
+}
+
+// convert is Convert, and ConvertWithUsage with usage set: the usage copies
+// each font program it reports, which Convert does not ask for (C102).
+func convert(svg string, shaper TextShaper, opts Options, usage bool) (pdf []byte, uses []FontUsage, err error) {
 	defer func() {
 		if p := recover(); p != nil {
 			if stop, ok := p.(*budget.Stop); ok {
@@ -75,6 +81,9 @@ func ConvertWithUsage(svg string, shaper TextShaper, opts Options) (pdf []byte, 
 	pdf, err = buildPDF(content, gsList, fonts, images, paints, width, height)
 	if err != nil {
 		return nil, nil, err
+	}
+	if !usage {
+		return pdf, nil, nil
 	}
 	return pdf, fonts.usage(), nil
 }

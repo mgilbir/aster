@@ -33,6 +33,8 @@ Each font's glyphs are then stored once, however many charts use them. `SubsetFo
 
 ## What is supported
 
-Only the SVG subset that Vega's SVG renderer writes: paths, text, images (fetched through the [Loader](loading-data.md), as PNG output fetches them), gradients and clipping. `SVGToPDF` of other SVG fails with a descriptive error for anything outside that (embedded CSS, patterns, …) rather than producing an incomplete page. Fall back to `SVGToPNG` for such input.
+Only the SVG subset that Vega's SVG renderer writes: paths, text, images (fetched through the [Loader](loading-data.md), as PNG output fetches them), gradients (translucent stops included, under a soft mask of their alpha, and the `<pattern>` Vega wraps a radial gradient in), clipping, `vector-effect="non-scaling-stroke"`, and `mix-blend-mode` (drawn as a group under PDF's blend mode). `SVGToPDF` of other SVG fails with a descriptive error for anything outside that (an element, attribute or style property it does not draw, other patterns, a document type declaration's entities, `<use>`, …) rather than producing an incomplete page. Fall back to `SVGToPNG` for such input.
+
+A presentation value that does not parse (a colour `notacolor`, an opacity `half`, a `NaN` stroke width, a transform that is not one) is ignored, as SVG says: the element is drawn as it is without it. Path data with an error is drawn up to the error. `font-variant` is drawn as normal, as in the PNG. Text is drawn after SVG's whitespace processing (newlines dropped, a tab a space, spaces collapsed), and text at a font size of zero is not drawn. A font is read from the element's `font-family`, `font-size`, `font-weight` and `font-style`; a numeric weight such as 450 is a weight.
 
 The PDFs are checked by reading them back (with pdf0, and with PDFium, Chrome's PDF engine, against the PNG output); see [testing.md](testing.md).

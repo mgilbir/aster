@@ -53,7 +53,6 @@ func FuzzLoadFont(f *testing.F) {
 		for _, gid := range []int{0, 1, 2, 100, face.shape.NumGlyphs() - 1} {
 			GlyphOutline(face, gid, 12)
 		}
-		face.Subset()
 	})
 }
 

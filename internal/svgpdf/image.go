@@ -109,29 +109,6 @@ func (img *pdfImage) res(smooth bool) string {
 	return *name
 }
 
-// imageSmoothing reads an image's style, which may set image-rendering alone,
-// as Vega writes it for an image mark with smooth false: pixelated (or
-// optimizeSpeed, crisp-edges) draws it without smoothing.
-func imageSmoothing(style string) (bool, error) {
-	smooth := true
-	for _, decl := range strings.Split(style, ";") {
-		if strings.TrimSpace(decl) == "" {
-			continue
-		}
-		prop, val, ok := strings.Cut(decl, ":")
-		if !ok || strings.TrimSpace(prop) != "image-rendering" {
-			return false, fmt.Errorf("svgpdf: unsupported style %q on <image>", style)
-		}
-		switch strings.TrimSpace(val) {
-		case "pixelated", "optimizeSpeed", "crisp-edges":
-			smooth = false
-		default:
-			smooth = true
-		}
-	}
-	return smooth, nil
-}
-
 func (c *imageCatalog) load(href string) (*pdfImage, error) {
 	data, ok := c.fetched[href]
 	if !ok {
@@ -209,41 +186,22 @@ func deflate(b []byte) ([]byte, error) {
 // from the image's own proportions, and a box missing both is the image's
 // size.
 func (r *renderer) drawImage(e *element, st gstate) error {
-	smooth, err := imageSmoothing(e.attrVal("style"))
-	if err != nil {
-		return err
-	}
 	img, err := r.images.get(e.attrVal("href"))
 	if err != nil || img == nil {
 		return err
 	}
-	num := func(name string) (float64, bool, error) {
+	// A side that is absent, or does not parse, takes the image's own.
+	num := func(name string, c lengthCtx) (float64, bool) {
 		v, ok := e.attr(name)
-		if !ok || strings.TrimSpace(v) == "" {
-			return 0, false, nil
+		if !ok {
+			return 0, false
 		}
-		f, err := parseLength(v)
-		if err != nil {
-			return 0, false, fmt.Errorf("svgpdf: <image> %s: %w", name, err)
-		}
-		return f, true, nil
+		return parseLength(v, c)
 	}
-	x, _, err := num("x")
-	if err != nil {
-		return err
-	}
-	y, _, err := num("y")
-	if err != nil {
-		return err
-	}
-	w, hasW, err := num("width")
-	if err != nil {
-		return err
-	}
-	h, hasH, err := num("height")
-	if err != nil {
-		return err
-	}
+	x, _ := num("x", st.lenX())
+	y, _ := num("y", st.lenY())
+	w, hasW := num("width", st.lenX())
+	h, hasH := num("height", st.lenY())
 	iw, ih := float64(img.w), float64(img.h)
 	switch {
 	case !hasW && !hasH:
@@ -263,7 +221,7 @@ func (r *renderer) drawImage(e *element, st gstate) error {
 		s := min(w/iw, h/ih)
 		dw, dh = iw*s, ih*s
 	default:
-		return fmt.Errorf("svgpdf: unsupported preserveAspectRatio %q on <image>", par)
+		return fmt.Errorf("svgpdf: unsupported preserveAspectRatio %s on <image>", quoted(par))
 	}
 	ox, oy := x+(w-dw)/2, y+(h-dh)/2
 
@@ -272,7 +230,7 @@ func (r *renderer) drawImage(e *element, st gstate) error {
 	// The image fills the unit square, its first row at the top: in this
 	// y-down space, the square's top edge goes to oy.
 	r.w.concat(Matrix{A: dw, D: -dh, E: ox, F: oy + dh})
-	r.w.drawXObject(img.res(smooth))
+	r.w.drawXObject(img.res(st.smooth))
 	r.w.restore()
 	return nil
 }

@@ -17,13 +17,13 @@ func TestParseTransformFastMatchesRegexp(t *testing.T) {
 		if s == "" {
 			return false
 		}
-		want, wantErr := parseTransformRegexp(s)
+		want, wantOK := parseTransformRegexp(s)
 		got, ok := parseTransformFast(s)
 		if !ok {
 			return false
 		}
-		if wantErr != nil {
-			t.Fatalf("scanner accepted %q, which the regexp rejects: %v", s, wantErr)
+		if !wantOK {
+			t.Fatalf("scanner accepted %q, which the regexp rejects", s)
 		}
 		for i, p := range [][2]float64{{got.A, want.A}, {got.B, want.B}, {got.C, want.C}, {got.D, want.D}, {got.E, want.E}, {got.F, want.F}} {
 			if math.Float64bits(p[0]) != math.Float64bits(p[1]) {
@@ -35,7 +35,7 @@ func TestParseTransformFastMatchesRegexp(t *testing.T) {
 	for _, s := range []string{
 		"translate(124,22)", "translate(5)", "rotate(-90)", "rotate(90, 10, 10)", "scale(2)", "scale(2 3)",
 		"matrix(1,0,0,1,5.5,-3e2)", "skewX(30)", "skewY(-12.5)", "translate(1,2) rotate(30) scale(.5)",
-		"  translate (1 , 2)\n,rotate( 45 )  ", "translate(1e-3,+4)", "translate(0x1p-2)",
+		"  translate (1 , 2)\n,rotate( 45 )  ", "translate(1e-3,+4)",
 	} {
 		if !check(s) {
 			t.Errorf("scanner declined %q", s)
@@ -45,6 +45,8 @@ func TestParseTransformFastMatchesRegexp(t *testing.T) {
 		"translate()", "translate(1,2,3)", "rotate(1,2)", "scale()", "matrix(1,2,3)", "skewX()", "foo(1)", "translate(1", "translate 1,2",
 		"x translate(1,2)", "translate(1,2) x", "translate(a)", "translate(1;2)", "(1)", "translate(1)(2)", "matrix(1,2,3,4,5,6,7)",
 		"translate(1,\f2)", "translate\v(1)", "scale(1) , , rotate(2)x",
+		// Not numbers in SVG's grammar (C57), which strconv reads.
+		"translate(0x1p-2)", "translate(NaN)", "translate(Inf,1)", "rotate(infinity)", "scale(1e999)",
 	} {
 		if check(s) {
 			t.Errorf("scanner accepted %q", s)
@@ -70,13 +72,13 @@ func TestParseTransformFastMatchesRegexp(t *testing.T) {
 func BenchmarkParseTransform(b *testing.B) {
 	for _, f := range []struct {
 		name string
-		fn   func(string) (Matrix, error)
+		fn   func(string) (Matrix, bool)
 	}{{"regexp", parseTransformRegexp}, {"scan", parseTransform}} {
 		b.Run(f.name, func(b *testing.B) {
 			b.ReportAllocs()
 			for b.Loop() {
-				if _, err := f.fn("translate(123.4567,89.0123)"); err != nil {
-					b.Fatal(err)
+				if _, ok := f.fn("translate(123.4567,89.0123)"); !ok {
+					b.Fatal("not parsed")
 				}
 			}
 		})
@@ -90,17 +92,17 @@ func matricesEqual(a, b Matrix) bool {
 }
 
 func TestParseTransformTranslate(t *testing.T) {
-	m, err := parseTransform("translate(124,22)")
-	if err != nil {
-		t.Fatalf("parseTransform: %v", err)
+	m, ok := parseTransform("translate(124,22)")
+	if !ok {
+		t.Fatal("parseTransform: not parsed")
 	}
 	if !matricesEqual(m, Matrix{A: 1, D: 1, E: 124, F: 22}) {
 		t.Errorf("got %+v", m)
 	}
 
-	m, err = parseTransform("translate(5)")
-	if err != nil {
-		t.Fatalf("parseTransform: %v", err)
+	m, ok = parseTransform("translate(5)")
+	if !ok {
+		t.Fatal("parseTransform: not parsed")
 	}
 	if !matricesEqual(m, Matrix{A: 1, D: 1, E: 5}) {
 		t.Errorf("single-arg translate: got %+v", m)
@@ -108,9 +110,9 @@ func TestParseTransformTranslate(t *testing.T) {
 }
 
 func TestParseTransformRotate(t *testing.T) {
-	m, err := parseTransform("rotate(-90)")
-	if err != nil {
-		t.Fatalf("parseTransform: %v", err)
+	m, ok := parseTransform("rotate(-90)")
+	if !ok {
+		t.Fatal("parseTransform: not parsed")
 	}
 	x, y := m.Apply(1, 0)
 	// SVG rotation is clockwise-positive in a y-down system; rotate(-90)
@@ -121,9 +123,9 @@ func TestParseTransformRotate(t *testing.T) {
 }
 
 func TestParseTransformRotateAboutCenter(t *testing.T) {
-	m, err := parseTransform("rotate(90, 10, 10)")
-	if err != nil {
-		t.Fatalf("parseTransform: %v", err)
+	m, ok := parseTransform("rotate(90, 10, 10)")
+	if !ok {
+		t.Fatal("parseTransform: not parsed")
 	}
 	// The center is a fixed point.
 	x, y := m.Apply(10, 10)
@@ -140,9 +142,9 @@ func TestParseTransformRotateAboutCenter(t *testing.T) {
 // "translate(a,b) rotate(-90) translate(0,c)" composes left to right, with
 // the rightmost transform applied to points first.
 func TestParseTransformSequence(t *testing.T) {
-	m, err := parseTransform("translate(-107,100) rotate(-90) translate(0,-2)")
-	if err != nil {
-		t.Fatalf("parseTransform: %v", err)
+	m, ok := parseTransform("translate(-107,100) rotate(-90) translate(0,-2)")
+	if !ok {
+		t.Fatal("parseTransform: not parsed")
 	}
 	want := Matrix{A: 1, D: 1, E: -107, F: 100}.
 		Mul(Matrix{A: math.Cos(-math.Pi / 2), B: math.Sin(-math.Pi / 2), C: -math.Sin(-math.Pi / 2), D: math.Cos(-math.Pi / 2)}).
@@ -159,23 +161,23 @@ func TestParseTransformSequence(t *testing.T) {
 }
 
 func TestParseTransformScaleAndMatrix(t *testing.T) {
-	m, err := parseTransform("scale(2)")
-	if err != nil {
-		t.Fatalf("parseTransform: %v", err)
+	m, ok := parseTransform("scale(2)")
+	if !ok {
+		t.Fatal("parseTransform: not parsed")
 	}
 	if !matricesEqual(m, Matrix{A: 2, D: 2}) {
 		t.Errorf("scale(2): got %+v", m)
 	}
-	m, err = parseTransform("matrix(1,2,3,4,5,6)")
-	if err != nil {
-		t.Fatalf("parseTransform: %v", err)
+	m, ok = parseTransform("matrix(1,2,3,4,5,6)")
+	if !ok {
+		t.Fatal("parseTransform: not parsed")
 	}
 	if !matricesEqual(m, Matrix{A: 1, B: 2, C: 3, D: 4, E: 5, F: 6}) {
 		t.Errorf("matrix: got %+v", m)
 	}
 }
 
-func TestParseTransformErrors(t *testing.T) {
+func TestParseTransformInvalid(t *testing.T) {
 	for _, s := range []string{
 		"frobnicate(1,2)",
 		"translate(1,2,3)",
@@ -183,8 +185,8 @@ func TestParseTransformErrors(t *testing.T) {
 		"translate(1,2) garbage",
 		"matrix(1,2,3)",
 	} {
-		if _, err := parseTransform(s); err == nil {
-			t.Errorf("%q: expected error, got none", s)
+		if _, ok := parseTransform(s); ok {
+			t.Errorf("%q: parsed", s)
 		}
 	}
 }

@@ -6,7 +6,6 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
-	"sync/atomic"
 
 	"github.com/mgilbir/forme/shape"
 
@@ -32,10 +31,7 @@ type Face struct {
 	Italic bool
 
 	// shape is the face as loaded. It is never shaped through directly:
-	// shaping uses clones from clones, which each keep their own record of
-	// the glyphs they returned, so goroutines shape concurrently. The glyphs
-	// they return are merged into shape under usedMu, which is what Subset
-	// keeps.
+	// shaping uses clones from clones, so goroutines shape concurrently.
 	shape  *shape.Face
 	src    []byte // the font file the face was loaded from
 	index  int    // which face of src, a collection, it is; 0 for a single font
@@ -48,16 +44,7 @@ type Face struct {
 	progOnce sync.Once
 	prog     []byte
 
-	outlineOnce sync.Once
-	outline     []byte
-
 	clones sync.Pool // of *shape.Face, clones of shape
-
-	// seen is a bitset of the glyphs already recorded in shape; it is
-	// read without the lock (once a glyph is recorded it stays so) and
-	// written under usedMu.
-	usedMu sync.Mutex
-	seen   []atomic.Uint64
 
 	outlines outlineCache
 }
@@ -88,20 +75,30 @@ func (f *Face) Program() []byte {
 // OutlineProgram returns the face's font with only the tables an embedder of
 // its outlines needs, such as a PDF writer's subset: no colour or bitmap
 // tables. It is a font of its own even for a face of a collection, and is
-// made from the file where it is, without making Program. The slice is
-// shared: callers must not modify it. It is nil for a face it cannot be made
-// of (WOFF, read through Program instead).
-func (f *Face) OutlineProgram() []byte {
-	f.outlineOnce.Do(func() {
-		defer func() {
-			if recover() != nil {
-				f.outline = nil
-			}
-		}()
-		defer f.guard()()
-		f.outline = outlineProgram(f.src, f.index)
-	})
-	return f.outline
+// made from the file where it is, without making Program, and anew on each
+// call: Measurer.FontData keeps what it makes within a bound. It is nil for
+// a face it cannot be made of (WOFF, read through Program instead, or a face
+// whose tables overlap: see sfntRecords).
+func (f *Face) OutlineProgram() (p []byte) {
+	defer func() {
+		if recover() != nil {
+			p = nil
+		}
+	}()
+	defer f.guard()()
+	return outlineProgram(f.src, f.index)
+}
+
+// outlineSize is the size of OutlineProgram, read from the face's table
+// directory without making it: 0 when there is none to make.
+func (f *Face) outlineSize() (n int) {
+	defer func() {
+		if recover() != nil {
+			n = 0
+		}
+	}()
+	defer f.guard()()
+	return outlineProgramSize(f.src, f.index)
 }
 
 // Table returns one table of the face's font, tag "hhea" say, read where it
@@ -152,24 +149,6 @@ func (f *Face) Name() (name string) {
 	}()
 	defer f.guard()()
 	return f.shape.Name()
-}
-
-// Subset returns a font program containing only the glyphs shaped through
-// this face so far (plus .notdef), as forme records them. It is what a PDF
-// writer embeds.
-//
-// forme v0.4.1's subsetter panicked on a malformed CFF font (found by fuzzing
-// FuzzLoadFont, fixed in v0.4.2); a panic is still reported as an error.
-func (f *Face) Subset() (out []byte, err error) {
-	f.usedMu.Lock()
-	defer f.usedMu.Unlock()
-	defer func() {
-		if r := recover(); r != nil {
-			out, err = nil, fmt.Errorf("text: subsetting font %q: %v", f.Family, r)
-		}
-	}()
-	defer f.guard()()
-	return f.shape.Subset()
 }
 
 // HasRune reports whether the face's character map covers r.
@@ -235,9 +214,8 @@ var embeddedParses struct {
 
 // embeddedFace is the Face of an embedded font for one Measurer: a clone of
 // the font as parsed once per process, which shares the parse and its
-// caches and has a record of its own of the glyphs it shapes, what a PDF's
-// subset of it holds. Reading the 13 embedded fonts again for each
-// Measurer cost 3.4 ms and 4 MB.
+// caches. Reading the 13 embedded fonts again for each Measurer cost 3.4 ms
+// and 4 MB.
 func embeddedFace(id, family string, weight int, italic bool, data []byte) (*Face, error) {
 	embeddedParses.Lock()
 	sf, ok := embeddedParses.m[id]
@@ -300,24 +278,19 @@ func faceOf(id, family string, weight int, italic bool, sf *shape.Face, src []by
 	f := &Face{
 		ID: id, Family: family, Weight: weight, Italic: italic,
 		shape: sf, src: src, index: index, mapped: mapped, upem: upem,
-		seen: make([]atomic.Uint64, (sf.NumGlyphs()+63)/64),
 	}
 	f.clones.New = func() any { return sf.Clone() }
 	return f, nil
 }
 
 // shapeGlyphs shapes s through a clone of the face, so that any number of
-// goroutines may shape through one Face at once, and records the glyphs
-// returned for Subset. It contains any panic a malformed font provokes. With
-// a budget the run is shaped under it, and a run it refuses panics with a
-// *budget.Stop (see ShapingBudget).
+// goroutines may shape through one Face at once. It contains any panic a
+// malformed font provokes. With a budget the run is shaped under it, and a
+// run it refuses panics with a *budget.Stop (see ShapingBudget).
 func (f *Face) shapeGlyphs(s string, b *ShapingBudget) (g []shape.Glyph, ok bool) {
 	g, ok, err := f.shapeOnClone(s, b)
 	if err != nil {
 		panic(&budget.Stop{Err: err})
-	}
-	if ok {
-		f.record(g)
 	}
 	return g, ok
 }
@@ -341,30 +314,6 @@ func (f *Face) shapeOnClone(s string, b *ShapingBudget) (g []shape.Glyph, ok boo
 	}
 	g, err = b.shape(c, s, f.Family)
 	return g, err == nil, err
-}
-
-// record merges the glyphs of g into the base face's record of used glyphs.
-// Shaping repeats the same few glyphs, so the common case takes no lock.
-func (f *Face) record(g []shape.Glyph) {
-	var fresh []int
-	for i := range g {
-		gid := g[i].GID
-		if gid < 0 || gid/64 >= len(f.seen) {
-			continue
-		}
-		if f.seen[gid/64].Load()&(uint64(1)<<(gid%64)) == 0 {
-			fresh = append(fresh, gid)
-		}
-	}
-	if len(fresh) == 0 {
-		return
-	}
-	f.usedMu.Lock()
-	for _, gid := range fresh {
-		f.seen[gid/64].Or(uint64(1) << (gid % 64))
-	}
-	f.shape.Use(fresh...)
-	f.usedMu.Unlock()
 }
 
 // styleOfFace reads the CSS weight and style a font states about

@@ -23,9 +23,9 @@ func TestParseColor(t *testing.T) {
 		{"White", Color{1, 1, 1}}, // keywords are case-insensitive
 	}
 	for _, c := range cases {
-		got, _, err := parseColor(c.in)
-		if err != nil {
-			t.Errorf("parseColor(%q): %v", c.in, err)
+		got, _, ok := parseColor(c.in)
+		if !ok {
+			t.Errorf("parseColor(%q): not a colour", c.in)
 			continue
 		}
 		if !almostEqual(got.R, c.want.R) || !almostEqual(got.G, c.want.G) || !almostEqual(got.B, c.want.B) {
@@ -34,7 +34,7 @@ func TestParseColor(t *testing.T) {
 	}
 }
 
-func TestParseColorErrors(t *testing.T) {
+func TestParseColorInvalid(t *testing.T) {
 	for _, s := range []string{
 		"#12345",   // bad hex length
 		"#gggggg",  // bad hex digits
@@ -42,8 +42,8 @@ func TestParseColorErrors(t *testing.T) {
 		"notacolor",
 		"",
 	} {
-		if _, _, err := parseColor(s); err == nil {
-			t.Errorf("parseColor(%q): expected error, got none", s)
+		if _, _, ok := parseColor(s); ok {
+			t.Errorf("parseColor(%q): a colour", s)
 		}
 	}
 }
@@ -63,33 +63,40 @@ func TestParseColorCSS(t *testing.T) {
 		{"rgba(255, 0, 0, 0.5)", Color{1, 0, 0}, 0.5},
 		{"hsl(120, 100%, 25%)", Color{0, 128 / 255.0, 0}, 1},
 	} {
-		got, alpha, err := parseColor(tc.in)
-		if err != nil || !almostEqual(got.R, tc.want.R) || !almostEqual(got.G, tc.want.G) || !almostEqual(got.B, tc.want.B) || math.Abs(alpha-tc.alpha) > 1e-6 {
-			t.Errorf("parseColor(%q) = %+v %g %v, want %+v %g", tc.in, got, alpha, err, tc.want, tc.alpha)
+		got, alpha, ok := parseColor(tc.in)
+		if !ok || !almostEqual(got.R, tc.want.R) || !almostEqual(got.G, tc.want.G) || !almostEqual(got.B, tc.want.B) || math.Abs(alpha-tc.alpha) > 1e-6 {
+			t.Errorf("parseColor(%q) = %+v %g %v, want %+v %g", tc.in, got, alpha, ok, tc.want, tc.alpha)
 		}
 	}
 }
 
 func TestParsePaint(t *testing.T) {
-	p, err := parsePaint("none")
-	if err != nil || !p.None {
-		t.Errorf("parsePaint(none): got %+v, err %v", p, err)
+	p, ok := parsePaint("none")
+	if !ok || !p.None {
+		t.Errorf("parsePaint(none): got %+v, %v", p, ok)
 	}
-	p, err = parsePaint("transparent")
-	if err != nil || !p.None {
-		t.Errorf("parsePaint(transparent): got %+v, err %v", p, err)
+	p, ok = parsePaint("transparent")
+	if !ok || !p.None {
+		t.Errorf("parsePaint(transparent): got %+v, %v", p, ok)
 	}
-	p, err = parsePaint("#4c78a8")
-	if err != nil || p.None {
-		t.Errorf("parsePaint(#4c78a8): got %+v, err %v", p, err)
+	p, ok = parsePaint("#4c78a8")
+	if !ok || p.None {
+		t.Errorf("parsePaint(#4c78a8): got %+v, %v", p, ok)
 	}
-	// A reference within the document is a gradient's; any other errors.
-	if p, err := parsePaint("url(#gradient_0)"); err != nil || p.Gradient != "gradient_0" {
-		t.Errorf("parsePaint(url(#gradient_0)): got %+v, err %v", p, err)
+	if p, ok := parsePaint("currentColor"); !ok || !p.Current {
+		t.Errorf("parsePaint(currentColor): got %+v, %v", p, ok)
 	}
-	for _, s := range []string{"url(other.svg#g)", "url(#)", "url()"} {
-		if _, err := parsePaint(s); err == nil {
-			t.Errorf("parsePaint(%s): expected error, got none", s)
+	// A reference within the document is a gradient's, with an optional
+	// fallback; anything else is not a paint.
+	if p, ok := parsePaint("url(#gradient_0)"); !ok || p.Gradient != "gradient_0" || p.Fallback != nil {
+		t.Errorf("parsePaint(url(#gradient_0)): got %+v, %v", p, ok)
+	}
+	if p, ok := parsePaint("url(#g) red"); !ok || p.Gradient != "g" || p.Fallback == nil || p.Fallback.Color != (Color{1, 0, 0}) {
+		t.Errorf("parsePaint(url(#g) red): got %+v, %v", p, ok)
+	}
+	for _, s := range []string{"url(other.svg#g)", "url(#)", "url()", "url(#g) url(#h)", "url(#g", "notacolor", ""} {
+		if _, ok := parsePaint(s); ok {
+			t.Errorf("parsePaint(%s): a paint", s)
 		}
 	}
 }
