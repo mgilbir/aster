@@ -313,7 +313,7 @@ func TestMutationsAreReported(t *testing.T) {
 		}
 	}
 	// The floor keeps the corpus from silently losing the kinds it exercises.
-	const floor = 330
+	const floor = 365
 	if len(kinds) < floor {
 		t.Errorf("only %d mutation kinds exercised, fewer than %d", len(kinds), floor)
 	}

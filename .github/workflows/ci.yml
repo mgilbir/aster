@@ -34,9 +34,7 @@ jobs:
         with:
           version: v2.14.0
       - name: go mod tidy
-        run: |
-          go mod tidy
-          git diff --exit-code go.mod go.sum
+        run: go mod tidy -diff
 
   test:
     strategy:
@@ -70,6 +68,52 @@ jobs:
       - name: go test -short
         run: GOARCH=386 go test -short -timeout 30m ./...
 
+  cross-build:
+    # What builds on linux need not on windows or darwin (a unix-only
+    # syscall in a tool or a test helper): build and vet, tests included,
+    # for both. Nothing runs; the macOS test job runs darwin's tests.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: windows
+        run: GOOS=windows go build ./... && GOOS=windows go vet ./...
+      - name: darwin
+        run: GOOS=darwin go build ./... && GOOS=darwin go vet ./...
+
+  security:
+    # The heavy hostile-input tests, opt in elsewhere because they allocate
+    # up to a few GiB in their child processes: the resource and timeout
+    # reproducers (ASTER_SECURITY) and the heap of adversarial renders under
+    # WithMemoryLimit (ASTER_MEMCHECK, the full matrix; its smoke version runs
+    # in every go test), the concurrency stress test over the whole corpus
+    # (ASTER_STRESS_FULL) and the expression metering test at full size
+    # (ASTER_METERING_FULL). Each hostile render runs in a child process
+    # capped in heap and wall time (harness_security_test.go), so a
+    # regression fails the job rather than the runner.
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: heavy security tests
+        env:
+          ASTER_SECURITY: "1"
+          ASTER_MEMCHECK: "1"
+        run: go test -count=1 -v -timeout 30m -run 'TestResource|TestTimeout|TestSVGToPNGIgnoresEntities|TestMemoryLimitHeap$' .
+      - name: concurrency stress over the whole corpus
+        env:
+          ASTER_STRESS_FULL: "1"
+        run: go test -count=1 -timeout 20m -run TestConcurrentConverterSharesNothing .
+      - name: expression metering at full size
+        env:
+          ASTER_METERING_FULL: "1"
+        run: go test -count=1 -timeout 20m -run TestEveryBuiltinIsMetered ./internal/expr
+
   race:
     runs-on: ubuntu-latest
     steps:
@@ -83,7 +127,8 @@ jobs:
   pdfium:
     # aster's PDFs read back with PDFium, Chrome's PDF engine, and compared
     # with its PNGs: what the colour glyph painters draw, not only what they
-    # write (TestPDFium*). pypdfium2 is pinned by digest.
+    # write (TestPDFium*). pypdfium2 is pinned by digest. Then with poppler:
+    # text extraction (ToUnicode) and the vector PDF against the PNG.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -101,6 +146,15 @@ jobs:
         env:
           ASTER_PDFIUM: ${{ runner.temp }}/pdfium/bin/python
         run: go test -count=1 -run 'TestPDFium' -v ./internal/svgpdf
+      - name: install poppler
+        run: sudo apt-get update -q && sudo apt-get install -y -q poppler-utils
+      - name: PDFs read back with poppler (text extraction, PDF and PNG drift)
+        # They skip without poppler elsewhere; here they must run.
+        env:
+          ASTER_POPPLER: require
+        run: |
+          go test -count=1 -run 'TestPDFTextIsExtractable|TestVectorPDFMatchesPNG' .
+          go test -count=1 -run 'TestToUnicodeClusters' ./internal/svgpdf
 
   fmacheck:
     # The engine must not let the compiler fuse multiply-adds where upstream

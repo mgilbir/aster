@@ -298,6 +298,9 @@ func TestVegaRadialPattern(t *testing.T) {
 func TestToUnicodeClusters(t *testing.T) {
 	bin, err := exec.LookPath("pdftotext")
 	if err != nil {
+		if os.Getenv("ASTER_POPPLER") == "require" {
+			t.Fatal("pdftotext (poppler) required (ASTER_POPPLER=require) but not installed")
+		}
 		t.Skip("no pdftotext")
 	}
 	m, err := text.New()

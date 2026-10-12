@@ -21,6 +21,8 @@ import (
 	"testing"
 	"time"
 	"unicode/utf8"
+
+	"github.com/mgilbir/aster/internal/testutil"
 )
 
 func heavy(t *testing.T) {
@@ -72,8 +74,10 @@ func runRes(t *testing.T, c resCase) {
 	if res.PeakMB > c.maxPeakMB {
 		t.Errorf("peak heap %.0f MiB exceeds %.0f MiB", res.PeakMB, c.maxPeakMB)
 	}
-	if c.maxCPU > 0 && res.CPU > c.maxCPU {
-		t.Errorf("used %.1f CPU-seconds with WithTimeout(%s); want under %.1f", res.CPU, c.timeout, c.maxCPU)
+	// CPU time, not wall time: a loaded runner stretches the second, not the
+	// first, and the race detector's slowdown is allowed for.
+	if limit := c.maxCPU * raceSlowdown; c.maxCPU > 0 && res.CPU > limit {
+		t.Errorf("used %.1f CPU-seconds with WithTimeout(%s); want under %.1f", res.CPU, c.timeout, limit)
 	}
 }
 
@@ -204,9 +208,14 @@ func TestTimeoutCoversLargeVegaLiteSpecs(t *testing.T) {
 		"params": `{"data":{"values":[{"a":1}]},"mark":"point","params":[` + items(100000, func(i int) string { return fmt.Sprintf(`{"name":"p%d","select":"point"}`, i) }) + `]}`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			res, killed := runSec(t, secJob{Kind: "vl2vega", Input: spec, Timeout: "1s"}, 60*time.Second)
-			if killed || res.Seconds > 3 {
-				t.Errorf("compiling took %.1fs with a 1s timeout (killed %v): %s", res.Seconds, killed, res.Err)
+			// A deadline guard: the property is that compiling stops near
+			// the deadline (it ran for 18 s and 12 s before), so the slack is
+			// generous, and scaled for the race detector, not a claim of speed.
+			// Building and parsing the 2 MB spec is part of it.
+			limit := (time.Second + testutil.Scaled(6*time.Second)).Seconds()
+			res, killed := runSec(t, secJob{Kind: "vl2vega", Input: spec, Timeout: "1s"}, 60*time.Second*raceSlowdown)
+			if killed || res.Seconds > limit {
+				t.Errorf("compiling took %.1fs with a 1s timeout, more than %.1fs (killed %v): %s", res.Seconds, limit, killed, res.Err)
 			}
 		})
 	}
