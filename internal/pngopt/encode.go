@@ -1,20 +1,27 @@
-package raster
+package pngopt
 
 import (
 	"bufio"
 	"bytes"
 	"compress/zlib"
+	"context"
 	"encoding/binary"
 	"errors"
 	"hash/crc32"
 	"image"
+	"image/color"
 	"io"
 	"math/bits"
 	"sync"
+
+	"github.com/mgilbir/aster/internal/budget"
 )
 
-// This file is image/png's encoder for an 8-bit NRGBA image at the default
-// compression level, byte for byte: the same chunks, the same adaptive filter
+// This file is image/png's encoder for an 8-bit NRGBA or paletted image at
+// the default compression level, byte for byte, polling a context as it
+// goes: a row is filtered and deflated at a time, so the work between two
+// polls is a few rows whatever the image (image/png runs a whole image
+// without one, a second for a large one on a slow machine). For NRGBA it is: the same chunks, the same adaptive filter
 // choice (libpng's minimum sum of absolute differences, in the same order,
 // with the same early exits) and the same deflate stream. It exists because
 // the filter search is a fifth of the encoding time and image/png's version
@@ -37,16 +44,19 @@ type pngEncoder struct {
 	zw  *zlib.Writer
 	bw  *bufio.Writer
 	out *bytes.Buffer
+	m   budget.Meter
 	hdr [8]byte
-	tmp [13]byte
+	tmp [3*256 + 256]byte
 }
 
 var pngEncoders sync.Pool
 
 var errPNGSize = errors.New("invalid image size")
 
-// encodePNG writes img to out as a PNG: RGB if it is fully opaque, else RGBA.
-func encodePNG(out *bytes.Buffer, img *image.NRGBA) error {
+// Encode writes img to out as a PNG, RGB if it is fully opaque, else RGBA,
+// image/png's bytes, polling ctx (and charging the call's ledger for the
+// work) per row: it returns ctx's error once ctx is done.
+func Encode(ctx context.Context, out *bytes.Buffer, img *image.NRGBA) error {
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()
 	if w <= 0 || h <= 0 {
@@ -58,7 +68,8 @@ func encodePNG(out *bytes.Buffer, img *image.NRGBA) error {
 	}
 	defer pngEncoders.Put(e)
 	e.out = out
-	defer func() { e.out = nil }()
+	e.m = budget.NewMeter(ctx)
+	defer func() { e.out, e.m = nil, budget.Meter{} }()
 
 	opaque := img.Opaque()
 	bpp, colorType := 4, byte(6)
@@ -72,6 +83,13 @@ func encodePNG(out *bytes.Buffer, img *image.NRGBA) error {
 	e.tmp[8], e.tmp[9], e.tmp[10], e.tmp[11], e.tmp[12] = 8, colorType, 0, 0, 0
 	e.chunk(e.tmp[:13], "IHDR")
 
+	e.startIDAT()
+	err := e.writeRows(img, b, bpp, opaque)
+	return e.finish(err)
+}
+
+// startIDAT points the deflater at a fresh run of IDAT chunks.
+func (e *pngEncoder) startIDAT() {
 	// IDAT chunks are whatever the 32 KiB buffer in front of the deflater
 	// flushes, as in image/png.
 	if e.bw == nil {
@@ -84,7 +102,10 @@ func encodePNG(out *bytes.Buffer, img *image.NRGBA) error {
 	} else {
 		e.zw.Reset(e.bw)
 	}
-	err := e.writeRows(img, b, bpp, opaque)
+}
+
+// finish ends the IDAT run (err is the rows' error) and writes IEND.
+func (e *pngEncoder) finish(err error) error {
 	if cerr := e.zw.Close(); err == nil {
 		err = cerr
 	}
@@ -125,6 +146,9 @@ func (e *pngEncoder) writeRows(img *image.NRGBA, b image.Rectangle, bpp int, opa
 			}
 		} else {
 			copy(row, src)
+		}
+		if err := e.m.Work(int64(w)); err != nil {
+			return err
 		}
 		f := filterRow(&e.cr, e.pr, bpp)
 		if _, err := e.zw.Write(e.cr[f]); err != nil {
@@ -282,3 +306,93 @@ func (w *idatWriter) Write(b []byte) (int, error) {
 }
 
 var _ io.Writer = (*idatWriter)(nil)
+
+// EncodePaletted writes img to out as an indexed PNG, image/png's bytes:
+// 1, 2, 4 or 8 bits a pixel by the palette's size, its PLTE and (when a
+// colour is not opaque) tRNS chunks, and rows unfiltered, as image/png
+// leaves a paletted image's. It polls ctx per row as Encode does.
+func EncodePaletted(ctx context.Context, out *bytes.Buffer, img *image.Paletted) error {
+	b := img.Bounds()
+	w, h := b.Dx(), b.Dy()
+	if w <= 0 || h <= 0 {
+		return errPNGSize
+	}
+	pal := img.Palette
+	if len(pal) < 1 || len(pal) > 256 {
+		return errors.New("png: bad palette length")
+	}
+	depth := 8
+	switch {
+	case len(pal) <= 2:
+		depth = 1
+	case len(pal) <= 4:
+		depth = 2
+	case len(pal) <= 16:
+		depth = 4
+	}
+	e, _ := pngEncoders.Get().(*pngEncoder)
+	if e == nil {
+		e = &pngEncoder{}
+	}
+	defer pngEncoders.Put(e)
+	e.out = out
+	e.m = budget.NewMeter(ctx)
+	defer func() { e.out, e.m = nil, budget.Meter{} }()
+
+	out.WriteString("\x89PNG\r\n\x1a\n")
+	binary.BigEndian.PutUint32(e.tmp[0:4], uint32(w))
+	binary.BigEndian.PutUint32(e.tmp[4:8], uint32(h))
+	e.tmp[8], e.tmp[9], e.tmp[10], e.tmp[11], e.tmp[12] = byte(depth), 3, 0, 0, 0
+	e.chunk(e.tmp[:13], "IHDR")
+	last := -1
+	for i, c := range pal {
+		c1 := color.NRGBAModel.Convert(c).(color.NRGBA)
+		e.tmp[3*i], e.tmp[3*i+1], e.tmp[3*i+2] = c1.R, c1.G, c1.B
+		if c1.A != 0xff {
+			last = i
+		}
+		e.tmp[3*256+i] = c1.A
+	}
+	e.chunk(e.tmp[:3*len(pal)], "PLTE")
+	if last != -1 {
+		e.chunk(e.tmp[3*256:3*256+1+last], "tRNS")
+	}
+
+	e.startIDAT()
+	sz := 1 + (w*depth+7)/8
+	if cap(e.pr) < sz {
+		e.pr = make([]byte, sz)
+	}
+	row := e.pr[:sz]
+	row[0] = ftNone
+	var err error
+	for y := 0; y < h && err == nil; y++ {
+		if err = e.m.Work(int64(w)); err != nil {
+			break
+		}
+		o := img.PixOffset(b.Min.X, b.Min.Y+y)
+		src := img.Pix[o : o+w]
+		if depth == 8 {
+			copy(row[1:], src)
+		} else {
+			// Packed most significant first, the last byte padded with
+			// zero bits, as image/png packs them.
+			per := 8 / depth
+			var a uint8
+			c, i := 0, 1
+			for _, v := range src {
+				a = a<<uint(depth) | v
+				if c++; c == per {
+					row[i] = a
+					i++
+					a, c = 0, 0
+				}
+			}
+			if c != 0 {
+				row[i] = a << uint(depth*(per-c))
+			}
+		}
+		_, err = e.zw.Write(row)
+	}
+	return e.finish(err)
+}

@@ -16,6 +16,7 @@
 package aster
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -798,7 +799,13 @@ func (c *Converter) rasterize(ctx context.Context, svg string, scale float64) (*
 		if err != nil {
 			return nil, err
 		}
-		return raster.EncodePNG(img)
+		// Encoded under ctx, polled per row, as every stage is.
+		var buf bytes.Buffer
+		buf.Grow(len(img.Pix) / 8)
+		if err := pngopt.Encode(ctx, &buf, img); err != nil {
+			return nil, fmt.Errorf("aster: encoding PNG: %w", err)
+		}
+		return buf.Bytes(), nil
 	})
 	if err == nil {
 		err = reportFrom(ctx).flushImages()

@@ -169,7 +169,14 @@ func QuantizeImage(ctx context.Context, nrgba *image.NRGBA, data []byte, maxColo
 			exact[e.key] = uint8(i)
 			palette = append(palette, unpackNRGBA(e.key))
 		}
-		out := encodePNG(indexExact(nrgba, palette, exact))
+		idx, err := indexExact(&m, nrgba, palette, exact)
+		if err != nil {
+			return nil, false, "", err
+		}
+		out, err := encodeIndexed(ctx, idx)
+		if err != nil {
+			return nil, false, "", err
+		}
 		if out == nil || len(out) > len(data)+len(data)/10 {
 			// The input is already the cheapest form; that still maintains
 			// the output, so it is a success, not a fallback.
@@ -207,10 +214,10 @@ func QuantizeImage(ctx context.Context, nrgba *image.NRGBA, data []byte, maxColo
 	if mean > maxMeanChannelError || peak > maxPeakChannelError {
 		return data, false, "quality guard exceeded", nil
 	}
-	if err := ctx.Err(); err != nil {
+	out, err := encodeIndexed(ctx, dst)
+	if err != nil {
 		return nil, false, "", err
 	}
-	out := encodePNG(dst)
 	if out == nil || len(out) > len(data)+len(data)/10 {
 		// The point of quantization is the ~4x cheaper *decode* in embedders,
 		// so a slightly larger file can still be a win — but dithering noise
@@ -352,12 +359,15 @@ func medianCut(m *budget.Meter, entries []colorCount, maxColors int) (color.Pale
 }
 
 // indexExact maps pixels whose colors all have palette slots (lossless path).
-func indexExact(src *image.NRGBA, palette color.Palette, exact map[uint32]uint8) *image.Paletted {
+func indexExact(m *budget.Meter, src *image.NRGBA, palette color.Palette, exact map[uint32]uint8) (*image.Paletted, error) {
 	dst := image.NewPaletted(src.Bounds(), palette)
 	for i, j := 0, 0; i < len(src.Pix); i, j = i+4, j+1 {
+		if err := m.Work(1); err != nil {
+			return nil, err
+		}
 		dst.Pix[j] = exact[packNRGBA(src.Pix[i:])]
 	}
-	return dst
+	return dst, nil
 }
 
 // ditherIndex maps pixels with Floyd–Steinberg error diffusion, returning
@@ -461,10 +471,17 @@ func ditherIndex(m *budget.Meter, src *image.NRGBA, palette color.Palette, exact
 	return dst, mean, peak, nil
 }
 
-func encodePNG(img image.Image) []byte {
+// encodeIndexed encodes img under ctx: nil (not an error) for an image the
+// encoder refuses, an error when ctx ends it.
+func encodeIndexed(ctx context.Context, img *image.Paletted) ([]byte, error) {
+	// Sized once rather than grown by doubling (see RecodeImage).
 	var out bytes.Buffer
-	if err := png.Encode(&out, img); err != nil {
-		return nil
+	out.Grow(len(img.Pix)/4 + 1024)
+	if err := EncodePaletted(ctx, &out, img); err != nil {
+		if e := ctx.Err(); e != nil {
+			return nil, e
+		}
+		return nil, nil
 	}
-	return out.Bytes()
+	return out.Bytes(), nil
 }

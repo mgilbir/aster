@@ -55,6 +55,7 @@ import (
 	"math"
 
 	"github.com/mgilbir/aster/internal/budget"
+	"github.com/mgilbir/aster/internal/pngopt"
 )
 
 // Options configures Render.
@@ -317,7 +318,7 @@ func (c *canvas) toNRGBA() *image.NRGBA {
 func EncodePNG(img *image.NRGBA) ([]byte, error) {
 	var buf bytes.Buffer
 	buf.Grow(len(img.Pix) / 8)
-	if err := encodePNG(&buf, img); err != nil {
+	if err := pngopt.Encode(context.Background(), &buf, img); err != nil {
 		return nil, fmt.Errorf("raster: encoding PNG: %w", err)
 	}
 	return buf.Bytes(), nil

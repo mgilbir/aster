@@ -1,14 +1,23 @@
-package raster
+package pngopt
 
 import (
 	"bytes"
+	"context"
 	"image"
+	"image/color"
 	"image/png"
 	"math/rand/v2"
 	"testing"
 )
 
-// TestEncodePNGMatchesStdlib: EncodePNG must write image/png's bytes for
+// encodeNRGBA is Encode into a fresh buffer.
+func encodeNRGBA(img *image.NRGBA) ([]byte, error) {
+	var b bytes.Buffer
+	err := Encode(context.Background(), &b, img)
+	return b.Bytes(), err
+}
+
+// TestEncodePNGMatchesStdlib: Encode must write image/png's bytes for
 // every kind of image a render can produce.
 func TestEncodePNGMatchesStdlib(t *testing.T) {
 	rng := rand.New(rand.NewPCG(7, 8))
@@ -62,7 +71,7 @@ func TestEncodePNGMatchesStdlib(t *testing.T) {
 		if err := png.Encode(&want, img); err != nil {
 			t.Fatal(err)
 		}
-		got, err := EncodePNG(img)
+		got, err := encodeNRGBA(img)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -105,7 +114,7 @@ func BenchmarkEncodePNG(b *testing.B) {
 	img := benchImage()
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := EncodePNG(img); err != nil {
+		if _, err := encodeNRGBA(img); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -119,6 +128,44 @@ func BenchmarkEncodePNGStdlib(b *testing.B) {
 		buf.Grow(len(img.Pix) / 8)
 		if err := png.Encode(&buf, img); err != nil {
 			b.Fatal(err)
+		}
+	}
+}
+
+// EncodePaletted writes image/png's bytes for every palette size (each bit
+// depth, a partial last byte) and with and without transparent colours.
+func TestEncodePalettedMatchesStdlib(t *testing.T) {
+	rng := rand.New(rand.NewPCG(9, 10))
+	for _, n := range []int{1, 2, 3, 4, 5, 16, 17, 200, 256} {
+		for _, alpha := range []bool{false, true} {
+			pal := make(color.Palette, n)
+			for i := range pal {
+				a := uint8(255)
+				if alpha && i%3 == 1 {
+					a = uint8(rng.IntN(255))
+				}
+				pal[i] = color.NRGBA{uint8(rng.IntN(256)), uint8(rng.IntN(256)), uint8(rng.IntN(256)), a}
+			}
+			for _, dim := range [][2]int{{1, 1}, {3, 5}, {9, 2}, {17, 1}, {301, 129}, {700, 400}} {
+				img := image.NewPaletted(image.Rect(0, 0, dim[0], dim[1]), pal)
+				for i := range img.Pix {
+					if rng.IntN(4) == 0 {
+						img.Pix[i] = uint8(rng.IntN(n))
+					} else if i > 0 {
+						img.Pix[i] = img.Pix[i-1]
+					}
+				}
+				var want, got bytes.Buffer
+				if err := png.Encode(&want, img); err != nil {
+					t.Fatal(err)
+				}
+				if err := EncodePaletted(context.Background(), &got, img); err != nil {
+					t.Fatal(err)
+				}
+				if !bytes.Equal(got.Bytes(), want.Bytes()) {
+					t.Fatalf("%d colours (alpha %v) %v: EncodePaletted differs from image/png", n, alpha, dim)
+				}
+			}
 		}
 	}
 }

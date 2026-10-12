@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"image"
 	"image/color"
-	"image/png"
 
 	"github.com/mgilbir/aster/internal/budget"
 )
@@ -49,11 +48,10 @@ func RecodeImage(ctx context.Context, nrgba *image.NRGBA, data []byte) ([]byte, 
 	colorIndex := make(map[[4]uint8]uint8, maxPaletteSize)
 	palette := make([]color.Color, 0, maxPaletteSize)
 	paletteOK := true
+	scan := budget.NewMeter(ctx)
 	for i := 0; i < len(nrgba.Pix); i += 4 {
-		if i&(1<<20-1) == 0 {
-			if err := ctx.Err(); err != nil {
-				return nil, err
-			}
+		if err := scan.Work(1); err != nil {
+			return nil, err
 		}
 		var key [4]uint8
 		copy(key[:], nrgba.Pix[i:i+4])
@@ -79,7 +77,10 @@ func RecodeImage(ctx context.Context, nrgba *image.NRGBA, data []byte) ([]byte, 
 		return nil, err
 	}
 
+	// Sized to the input once: growing by doubling copies the output whole,
+	// each copy a stretch without a poll as long as the output is large.
 	var out bytes.Buffer
+	out.Grow(len(data))
 	switch {
 	case paletteOK:
 		l := budget.LedgerFrom(ctx)
@@ -89,18 +90,28 @@ func RecodeImage(ctx context.Context, nrgba *image.NRGBA, data []byte) ([]byte, 
 		}
 		defer l.Free(n)
 		paletted := image.NewPaletted(bounds, palette)
+		m := budget.NewMeter(ctx)
 		for i, j := 0, 0; i < len(nrgba.Pix); i, j = i+4, j+1 {
+			if err := m.Work(1); err != nil {
+				return nil, err
+			}
 			var key [4]uint8
 			copy(key[:], nrgba.Pix[i:i+4])
 			paletted.Pix[j] = colorIndex[key]
 		}
-		if err := png.Encode(&out, paletted); err != nil {
+		if err := EncodePaletted(ctx, &out, paletted); err != nil {
+			if e := ctx.Err(); e != nil {
+				return nil, e
+			}
 			return data, nil
 		}
 	case opaque:
-		// The stdlib encoder detects a fully opaque image and writes 24-bit
-		// truecolor (no alpha channel).
-		if err := png.Encode(&out, nrgba); err != nil {
+		// Fully opaque: 24-bit truecolor (no alpha channel), as image/png
+		// writes it.
+		if err := Encode(ctx, &out, nrgba); err != nil {
+			if e := ctx.Err(); e != nil {
+				return nil, e
+			}
 			return data, nil
 		}
 	default:
