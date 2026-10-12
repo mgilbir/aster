@@ -205,7 +205,7 @@ func TestPDFiumOpenClipComposites(t *testing.T) {
 		p.unwind()
 		r.w.buf = append(r.w.buf, p.endGroup()...)
 		r.w.restore()
-		pdf, err := buildPDF(r.w.stream(), r.w.gsNames, nil, r.images, paintDefs{r.shadings, r.patterns, r.forms}, 100, 100)
+		pdf, err := buildPDF(r.w.stream(), r.w.gsNames, nil, r.images, paintDefs{r.shadings, r.patterns, r.forms, nil}, 100, 100)
 		if err != nil {
 			t.Fatal(err)
 		}

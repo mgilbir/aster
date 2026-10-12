@@ -42,6 +42,7 @@ func (e *element) attrVal(name string) string {
 var supportedElements = map[string]bool{
 	"svg":   true,
 	"g":     true,
+	"a":     true, // a link around marks with an href
 	"rect":  true,
 	"path":  true,
 	"line":  true,

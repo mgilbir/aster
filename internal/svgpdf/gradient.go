@@ -73,27 +73,32 @@ var gradientAttrs = map[string]map[string]bool{
 }
 
 // collectGradients gathers the gradients of the document by id.
-func collectGradients(root *element) (map[string]*gradient, error) {
+// The <pattern>s found on the way are returned for collectPatterns.
+func collectGradients(root *element) (map[string]*gradient, []*element, error) {
 	grads := map[string]*gradient{}
+	var patterns []*element
 	stack := []*element{root}
 	for len(stack) > 0 {
 		e := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
+		if e.name == "pattern" {
+			patterns = append(patterns, e)
+		}
 		if e.name != "linearGradient" && e.name != "radialGradient" {
 			stack = append(stack, e.children...)
 			continue
 		}
 		id, ok := e.attr("id")
 		if !ok {
-			return nil, fmt.Errorf("svgpdf: <%s> without id", e.name)
+			return nil, nil, fmt.Errorf("svgpdf: <%s> without id", e.name)
 		}
 		g, err := parseGradient(e)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		grads[id] = g
 	}
-	return grads, nil
+	return grads, patterns, nil
 }
 
 // collectPatterns finds the <pattern>s Vega writes around each radial
@@ -109,15 +114,8 @@ func collectGradients(root *element) (map[string]*gradient, error) {
 // sliced into the box does. They are added to grads under the pattern's id,
 // and named in sliced. Any other pattern is unsupported, an error where a
 // paint refers to it (in unsupported).
-func collectPatterns(root *element, grads map[string]*gradient) (sliced map[string]bool, unsupported map[string]bool) {
-	stack := []*element{root}
-	for len(stack) > 0 {
-		e := stack[len(stack)-1]
-		stack = stack[:len(stack)-1]
-		if e.name != "pattern" {
-			stack = append(stack, e.children...)
-			continue
-		}
+func collectPatterns(patterns []*element, grads map[string]*gradient) (sliced map[string]bool, unsupported map[string]bool) {
+	for _, e := range patterns {
 		id, ok := e.attr("id")
 		if !ok {
 			continue
@@ -439,6 +437,7 @@ type paintDefs struct {
 	shadings []*gradient
 	patterns []patternUse
 	forms    []*formDef
+	links    []linkAnnot // the page's link annotations
 }
 
 // patternUse is a gradient stroke: the shading pattern of a gradient placed

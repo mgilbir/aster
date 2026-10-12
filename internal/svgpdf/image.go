@@ -225,6 +225,7 @@ func (r *renderer) drawImage(e *element, st gstate) error {
 	}
 	ox, oy := x+(w-dw)/2, y+(h-dh)/2
 
+	r.w.markBox(ox, oy, ox+dw, oy+dh)
 	r.w.save()
 	r.w.setAlpha(st.opacity, st.opacity)
 	// The image fills the unit square, its first row at the top: in this

@@ -63,7 +63,7 @@ These always fail the call:
 - **`context.Canceled`:** `Close` was called during the call.
 - **`ErrClosed`:** the call was made after `Close`.
 - **Configuration errors** are `New`'s: an unknown Vega-Lite version or time zone, a theme that is not a JSON object, a font that does not load, a fallback family with no font. See [api.md](api.md#errors-from-new).
-- **PDF of unsupported SVG:** `SVGToPDF` on SVG outside what Vega writes (an element, attribute or style property it does not draw, patterns other than Vega's, entities, `<use>`) returns a descriptive error rather than an incomplete PDF. A value that merely does not parse is not an error: it is ignored, as SVG ignores it ([pdf.md](pdf.md)). A drawing whose coordinates overflow to infinity is an error.
+- **PDF of unsupported SVG:** `SVGToPDF` on SVG outside what Vega writes (an element, attribute or style property it does not draw, patterns other than Vega's, entities, `<use>`; `<a>` is drawn, see [pdf.md](pdf.md)) returns a descriptive error rather than an incomplete PDF. A value that merely does not parse is not an error: it is ignored, as SVG ignores it ([pdf.md](pdf.md)). A drawing whose coordinates overflow to infinity is an error.
 
 ## Error messages
 

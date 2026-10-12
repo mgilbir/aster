@@ -36,6 +36,10 @@ func FuzzConvert(f *testing.F) {
 			`<path d="M0,0L10,10A5,5,0,1,1,20,0Q1,2,3,4Z" fill="none" stroke="black"/><line x1="0" y1="0" x2="5" y2="5" stroke="green"/>` +
 			`<text x="2" y="12" font-family="sans-serif" font-size="9" text-anchor="middle" transform="rotate(-90)">Ünïcode ✓</text></g>` +
 			`<defs><clipPath id="c"><rect width="30" height="15"/></clipPath></defs></svg>`,
+		// Links, a blended group, a translucent gradient and Vega's radial pattern.
+		`<svg width="40" height="20"><defs><pattern id="p_g" viewBox="0,0,1,1" width="100%" height="100%" preserveAspectRatio="xMidYMid slice"><rect width="1" height="1" fill="url(#g)"/></pattern>` +
+			`<radialGradient id="g"><stop offset="0" stop-color="red"/><stop offset="1" stop-color="red" stop-opacity="0"/></radialGradient></defs>` +
+			`<a href="https://x.example/?a=(b)"><rect width="9" height="9" fill="url(#p_g)" style="mix-blend-mode: multiply"/></a><a href="javascript:x"><text font-size="9px" y="9">a&#9;b</text></a></svg>`,
 		`<svg width="1e9" height="-1"><rect width="nan" height="5"/><path d="M1e308,1e308L-1e308,0"/></svg>`,
 		`<?xml version="1.0"?><!DOCTYPE svg [<!ENTITY a "b">]><svg width="9" height="9"><text>&a;&#x41;</text></svg>`,
 		// Gradients (bounding box and user space, a gradient stroke), multi-line

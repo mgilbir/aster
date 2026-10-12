@@ -33,6 +33,12 @@ type contentWriter struct {
 	gsKeyed map[string]string // the other ExtGStates (see stateGS), by key
 	gsNames []gsEntry
 
+	// links are the boxes, in page space, of the <a> elements open, which
+	// every point drawn grows (see mark); origin maps the space cur.ctm
+	// starts from to the page (not the identity inside a captured group).
+	links  []*rect
+	origin Matrix
+
 	// cur mirrors the graphics-state parameters this writer emits
 	// conditionally; stack snapshots it across q/Q. See streamState.
 	cur   streamState
@@ -101,7 +107,34 @@ type gsEntry struct {
 }
 
 func newContentWriter(ledger *budget.Ledger) *contentWriter {
-	return &contentWriter{gsIndex: make(map[alphaPair]string), cur: defaultStreamState(), ledger: ledger}
+	return &contentWriter{gsIndex: make(map[alphaPair]string), cur: defaultStreamState(), ledger: ledger, origin: Identity()}
+}
+
+// mark grows the boxes of the links open by the point (x, y) of the current
+// user space.
+func (w *contentWriter) mark(x, y float64) {
+	if len(w.links) == 0 {
+		return
+	}
+	x, y = w.origin.Mul(w.cur.ctm).Apply(x, y)
+	if x-x != 0 || y-y != 0 {
+		return
+	}
+	for _, b := range w.links {
+		b.x0, b.y0 = math.Min(b.x0, x), math.Min(b.y0, y)
+		b.x1, b.y1 = math.Max(b.x1, x), math.Max(b.y1, y)
+	}
+}
+
+// markBox marks the corners of a box of the current user space.
+func (w *contentWriter) markBox(x0, y0, x1, y1 float64) {
+	if len(w.links) == 0 {
+		return
+	}
+	w.mark(x0, y0)
+	w.mark(x1, y0)
+	w.mark(x0, y1)
+	w.mark(x1, y1)
 }
 
 // errNonFinite fails a conversion whose geometry has a number that is not
@@ -425,14 +458,18 @@ func (w *contentWriter) showGlyphs(items []tjItem) {
 	w.buf = append(w.buf, "] TJ\n"...)
 }
 
-func (w *contentWriter) moveTo(p Point) { w.op("m", p.X, p.Y) }
-func (w *contentWriter) lineTo(p Point) { w.op("l", p.X, p.Y) }
+func (w *contentWriter) moveTo(p Point) { w.mark(p.X, p.Y); w.op("m", p.X, p.Y) }
+func (w *contentWriter) lineTo(p Point) { w.mark(p.X, p.Y); w.op("l", p.X, p.Y) }
 func (w *contentWriter) closePath()     { w.op("h") }
 func (w *contentWriter) rect(x, y, width, height float64) {
+	w.markBox(x, y, x+width, y+height)
 	w.op("re", x, y, width, height)
 }
 
 func (w *contentWriter) cubicTo(c1, c2, end Point) {
+	w.mark(c1.X, c1.Y)
+	w.mark(c2.X, c2.Y)
+	w.mark(end.X, end.Y)
 	w.op("c", c1.X, c1.Y, c2.X, c2.Y, end.X, end.Y)
 }
 
@@ -541,6 +578,7 @@ type capture struct {
 	chunks [][]byte
 	cur    streamState
 	stack  []streamState
+	origin Matrix
 }
 
 // beginCapture starts writing into a stream of its own, the content of a
@@ -549,7 +587,8 @@ type capture struct {
 // (blend mode, soft mask and the alphas, PDF 11.6.6), in the space the form
 // is drawn in, which a pattern in it is placed in.
 func (w *contentWriter) beginCapture() capture {
-	c := capture{w.buf, w.chunks, w.cur, w.stack}
+	c := capture{w.buf, w.chunks, w.cur, w.stack, w.origin}
+	w.origin = w.origin.Mul(w.cur.ctm)
 	w.buf, w.chunks, w.stack = nil, nil, nil
 	w.cur = c.cur.clone()
 	w.cur.fillAlpha, w.cur.strokeAlpha = 1, 1
@@ -569,6 +608,6 @@ func (w *contentWriter) endCapture(c capture) []byte {
 		out = append(out, ch...)
 	}
 	out = append(out, w.buf...)
-	w.buf, w.chunks, w.cur, w.stack = c.buf, c.chunks, c.cur, c.stack
+	w.buf, w.chunks, w.cur, w.stack, w.origin = c.buf, c.chunks, c.cur, c.stack, c.origin
 	return out
 }

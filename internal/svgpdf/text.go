@@ -229,6 +229,16 @@ func (r *renderer) drawTextLine(str string, st gstate, x, y float64) (float64, e
 		defer r.w.restore()
 	}
 
+	// A link around the text covers its em boxes: from an ascent of the
+	// size above the baseline to a quarter of it below. What the glyphs
+	// draw inside does not grow it (a colour glyph's clips reach far).
+	if len(r.w.links) > 0 {
+		r.w.markBox(penX, -st.fontSize, penX+advance, st.fontSize/4)
+		links := r.w.links
+		r.w.links = nil
+		defer func() { r.w.links = links }()
+	}
+
 	r.w.fillColor(st.fill.Color)
 	// Reconcile the alpha (text is fill-only, so fill and stroke alpha match).
 	fillAlpha := st.opacity * st.fillOpacity * st.fill.alpha()

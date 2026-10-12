@@ -44,6 +44,9 @@ type Face struct {
 	progOnce sync.Once
 	prog     []byte
 
+	sizeOnce sync.Once
+	size     int
+
 	clones sync.Pool // of *shape.Face, clones of shape
 
 	outlines outlineCache
@@ -127,14 +130,18 @@ func (f *Face) Table(tag string) (t []byte) {
 
 // Size is the size in bytes of the face's font program, without making it.
 // A file that cannot be read says it is as large as can be.
-func (f *Face) Size() (n int) {
-	defer func() {
-		if recover() != nil {
-			n = math.MaxInt
-		}
-	}()
-	defer f.guard()()
-	return sfntSize(f.src, f.index)
+func (f *Face) Size() int {
+	// The file does not change: read once (FontData asks on each render).
+	f.sizeOnce.Do(func() {
+		defer func() {
+			if recover() != nil {
+				f.size = math.MaxInt
+			}
+		}()
+		defer f.guard()()
+		f.size = sfntSize(f.src, f.index)
+	})
+	return f.size
 }
 
 // UnitsPerEm returns the face's design units per em.

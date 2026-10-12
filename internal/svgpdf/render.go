@@ -101,6 +101,7 @@ func isIgnorableAttr(name string) bool {
 var geometryAttrs = map[string]map[string]bool{
 	"svg":      {"width": true, "height": true, "viewBox": true},
 	"g":        {},
+	"a":        {"href": true, "target": true, "rel": true},
 	"rect":     {"x": true, "y": true, "width": true, "height": true},
 	"path":     {"d": true, "vector-effect": true},
 	"line":     {"x1": true, "y1": true, "x2": true, "y2": true},
@@ -166,6 +167,8 @@ type renderer struct {
 	// once (see form), by a digest of the content.
 	forms     []*formDef
 	formIndex map[[sha256.Size]byte]*formDef
+	// links are the link annotations of the page, in document order.
+	links []linkAnnot
 	// pageW and pageH are the page's size, which an inverted soft mask's
 	// BBox covers (see invertedMaskForm); vw and vh the viewport's, in user
 	// units, what a percentage is of.
@@ -243,13 +246,13 @@ func render(root *element, shaper TextShaper, fetched map[string][]byte, opts Op
 		return nil, nil, nil, nil, paintDefs{}, 0, 0, err
 	}
 
-	gradients, err := collectGradients(root)
+	gradients, patterns, err := collectGradients(root)
 	if err != nil {
 		return nil, nil, nil, nil, paintDefs{}, 0, 0, err
 	}
 
 	r := &renderer{clips: clips, gradients: gradients, shaper: shaper, ctx: opts.Context, lim: opts.Limits.withDefaults()}
-	r.sliced, r.badPatterns = collectPatterns(root, gradients)
+	r.sliced, r.badPatterns = collectPatterns(patterns, gradients)
 	if opts.Context != nil {
 		r.ledger = budget.LedgerFrom(opts.Context)
 	}
@@ -296,7 +299,7 @@ func (r *renderer) finish(width, height float64) (content [][]byte, gsList []gsE
 	if err := r.w.err; err != nil {
 		return nil, nil, nil, nil, paintDefs{}, 0, 0, err
 	}
-	return r.w.stream(), r.w.gsNames, r.fonts, r.images, paintDefs{r.shadings, r.patterns, r.forms}, width, height, nil
+	return r.w.stream(), r.w.gsNames, r.fonts, r.images, paintDefs{r.shadings, r.patterns, r.forms, r.links}, width, height, nil
 }
 
 // viewBoxMatrix maps a viewBox (min-x, min-y, width, height, the sizes
@@ -376,6 +379,8 @@ func (r *renderer) place(e *element, st gstate, transform Matrix, clip string) e
 	switch e.name {
 	case "g":
 		err = r.children(e, st)
+	case "a":
+		err = r.link(e, st)
 	case "rect":
 		err = r.drawRect(e, st)
 	case "path":
@@ -635,6 +640,10 @@ func (r *renderer) applyClip(id string) error {
 	if !ok {
 		return fmt.Errorf("svgpdf: clip-path references unknown id %s", quoted(id))
 	}
+	// A clip is no drawing: it grows no link's box.
+	links := r.w.links
+	r.w.links = nil
+	defer func() { r.w.links = links }()
 	// Every reference re-emits the clip geometry; charge it to the path budget.
 	if r.segsTotal += len(clip.children); r.segsTotal > r.lim.MaxPathSegments {
 		return limitErr("clip paths emitted more than %d segments", r.lim.MaxPathSegments)
