@@ -1,5 +1,12 @@
 name: CI
 
+# The quick gates, on every pull request (stacked ones included) and every
+# push to main: formatting, lint, vet, the -short suite, a 32-bit build, the
+# FMA and recursion audits. They take a few minutes. The slow gates (race,
+# oracle, PDFium, macOS, 32-bit tests, benchmarks) are in heavy.yml, which
+# runs on main and by hand before a release; run them locally with
+# `make check` and `make benchgate` before merging.
+
 on:
   push:
     branches: [main]
@@ -42,7 +49,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest] # macOS: heavy.yml
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -52,10 +59,10 @@ jobs:
       - name: go test -short
         run: go test -short -timeout 30m ./...
 
-  test-32bit:
+  build-32bit:
     # int is 32 bits on 386 and arm: what does not compile there, or what
     # overflows in a size or budget check, shows only on such a target.
-    # linux/386 binaries run natively on the amd64 runner.
+    # The tests run on 386 in heavy.yml.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -67,40 +74,6 @@ jobs:
       - name: go vet
         # compiles the tests too
         run: GOARCH=386 go vet ./...
-      - name: go test -short
-        run: GOARCH=386 go test -short -timeout 30m ./...
-
-  race:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-      - name: go test -race
-        run: go test -short -race -timeout 30m ./...
-
-  pdfium:
-    # aster's PDFs read back with PDFium, Chrome's PDF engine, and compared
-    # with its PNGs: what the colour glyph painters draw, not only what they
-    # write (TestPDFium*). pypdfium2 is pinned by digest.
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.13"
-      - name: install pypdfium2
-        run: |
-          python -m venv "$RUNNER_TEMP/pdfium"
-          "$RUNNER_TEMP/pdfium/bin/pip" install --require-hashes -r scripts/pdfium/requirements.txt
-      - name: PDFs read back with PDFium
-        env:
-          ASTER_PDFIUM: ${{ runner.temp }}/pdfium/bin/python
-        run: go test -count=1 -run 'TestPDFium' -v ./internal/svgpdf
 
   fmacheck:
     # The engine must not let the compiler fuse multiply-adds where upstream
@@ -114,66 +87,3 @@ jobs:
       - run: scripts/fmacheck.sh
       - name: recursion audit
         run: go run ./internal/cmd/recursionaudit
-
-  oracle:
-    # The full suite with the node oracle required: upstream Vega / Vega-Lite
-    # (and resvg) in node, pinned in testdata/oracle-node*, is what the
-    # engine's SVG, compiled Vega and PNG are compared with. Its answers are
-    # cached between runs; the cache key covers the oracle's script and
-    # lockfiles, and entries are keyed by content, so stale ones are unused.
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-      - uses: actions/setup-node@v7
-        with:
-          node-version-file: testdata/oracle-node/package.json
-      - name: install the oracle
-        run: |
-          (cd testdata/oracle-node && npm ci)
-          (cd testdata/oracle-node-vl5 && npm ci)
-      - name: install the Mermaid renderer (TestDocsMermaid)
-        run: (cd testdata/mermaid && npm ci)
-      - uses: actions/cache@v6
-        with:
-          # upstream's own test suites, recorded against the installed packages: the shallow clones
-          # of the git tags (their tests are not on npm) and the vectors, which the replays
-          # (TestUpstream*) need. The script skips recording when the vectors match its fingerprint.
-          path: |
-            testdata/upstream-clones
-            testdata/upstream-vectors-cache
-          key: upstream-vectors-${{ hashFiles('testdata/oracle-node/package-lock.json', 'testdata/oracle-node/record-upstream-tests.mjs', 'testdata/oracle-node/record-upstream-hooks.mjs', 'scripts/record-upstream-vectors.sh') }}
-      - name: record upstream's test vectors
-        run: scripts/record-upstream-vectors.sh
-      - uses: actions/cache@v6
-        with:
-          path: testdata/corpora-cache
-          key: corpora-${{ hashFiles('testdata/corpora/*.sha256', 'scripts/fetch-corpora.sh') }}
-      - name: fetch the external corpora
-        # Verified against the checked-in manifests; a cache hit is verified too.
-        run: scripts/fetch-corpora.sh
-      - uses: actions/cache@v6
-        with:
-          path: testdata/oracle-cache
-          key: oracle-${{ hashFiles('testdata/oracle-node/oracle.mjs', 'testdata/oracle-node/sweeps/*.mjs', 'testdata/corpora/*.sha256', 'testdata/oracle-node*/package-lock.json') }}-${{ github.sha }}
-          restore-keys: oracle-${{ hashFiles('testdata/oracle-node/oracle.mjs', 'testdata/oracle-node/sweeps/*.mjs', 'testdata/corpora/*.sha256', 'testdata/oracle-node*/package-lock.json') }}-
-      - name: full test suite
-        env:
-          ASTER_ORACLE: require
-        run: go test -timeout 60m ./...
-      - name: comparison report
-        if: always()
-        env:
-          ASTER_ORACLE: require
-        run: |
-          go test -count=1 -v -timeout 30m -run TestCompareWithNode . \
-            -args -compare.report="$RUNNER_TEMP/compare-report.md" | tee "$RUNNER_TEMP/compare.txt"
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: compare-with-node
-          path: |
-            ${{ runner.temp }}/compare-report.md
-            ${{ runner.temp }}/compare.txt
