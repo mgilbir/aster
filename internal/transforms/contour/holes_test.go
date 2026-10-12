@@ -6,7 +6,6 @@ import (
 	"math"
 	"math/rand"
 	"testing"
-	"time"
 
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
@@ -117,28 +116,32 @@ func isolatedZeros(size int) []float64 {
 }
 
 // TestContourHolesScale is the audit's C27: a grid of ones with isolated
-// zeros is one exterior ring around hundreds of thousands of holes, which
-// upstream's scan assigns in O(holes x ring) (8 s for 1024², success after
-// a 1 s deadline). The indexed assignment is linear, and the context ends it.
+// zeros is one exterior ring around a hole per zero, which upstream's scan
+// assigns in O(holes x ring), cubic in the grid's side (8 s for 1024², and
+// success after a 1 s deadline). The work charged to the ledger, which is
+// deterministic, must grow with the cells: doubling the side quadruples the
+// cells, and a scan of the ring per hole would multiply the work by eight.
 func TestContourHolesScale(t *testing.T) {
-	if testing.Short() {
-		t.Skip("large grid")
+	work := func(size int) int64 {
+		l := budget.NewLedger(context.Background(), budget.LedgerLimits{})
+		ctx := budget.WithLedger(context.Background(), l)
+		geoms, err := Contours(ctx, isolatedZeros(size), size, size, []float64{0.5}, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		holes := 0
+		for _, p := range geoms[0].Coordinates {
+			holes += len(p) - 1
+		}
+		if want := (size / 2) * (size / 2); holes < want*9/10 {
+			t.Fatalf("%d holes, want about %d", holes, want)
+		}
+		return l.WorkDone()
 	}
-	const size = 1024
-	values := isolatedZeros(size)
-	start := time.Now()
-	geoms, err := Contours(context.Background(), values, size, size, []float64{0.5}, true)
-	if err != nil {
-		t.Fatal(err)
+	a, b := work(256), work(512)
+	if r := float64(b) / float64(a); r > 5 {
+		t.Fatalf("work %d at 256², %d at 512²: ratio %.1f, want about 4 (linear in the cells)", a, b, r)
 	}
-	holes := 0
-	for _, p := range geoms[0].Coordinates {
-		holes += len(p) - 1
-	}
-	if d := time.Since(start); d > 5*time.Second || holes < 100_000 {
-		t.Fatalf("%d holes assigned in %v", holes, d)
-	}
-	t.Logf("%d holes assigned in %v", holes, time.Since(start))
 }
 
 // TestAssignHolesCancellable: the polygons a hole is tested against before

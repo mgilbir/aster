@@ -132,7 +132,14 @@ type measureSet struct {
 	groups    []*measureGroup
 	countOnly bool
 	needStore bool // some output reads the tuples of its cell
-	rand      Rand
+	// store is set by a window, which has one cell at a time: its emulated
+	// tuple store (windowStore), which gives the `values` output (one array
+	// shared between rows) and reports undefined entries in the cell's data
+	// (any statistic that reads a field of one throws upstream). Without
+	// it, `values` is a copy of the cell's data. Kept here, not on the cell,
+	// so an aggregate's cells stay as small as they were.
+	store *windowStore
+	rand  Rand
 	// ctx is polled by the statistics that cost a pass over the data each
 	// (bootstrap intervals); err records its cancellation for the caller.
 	ctx context.Context
@@ -219,14 +226,6 @@ type cell struct {
 	// caller maintains it (aggregate appends, window points it at the frame).
 	data []jsval.Value
 	memo storeMemo
-	// holes reports undefined entries in data: a window's emulated store
-	// (windowStore) can have them, and any statistic that reads a field of
-	// one throws upstream.
-	holes bool
-	// values, when set, produces the `values` output for tuple t under name
-	// (a window shares one array between rows, see windowStore); otherwise
-	// the output is a copy of data.
-	values func(t *jsval.Object, name string) jsval.Value
 }
 
 // firstField is the field the first measure reads: upstream's cell reads it
@@ -408,10 +407,11 @@ func (g *measureGroup) write(s *measureSet, id int, m *mstate, c *cell, t *jsval
 	get := g.field.Get
 	// readsHoles is the TypeError of reading this field of a hole.
 	readsHoles := func() bool {
-		if c.holes && s.err == nil {
+		holes := s.store != nil && s.store.holes
+		if holes && s.err == nil {
 			s.err = readsUndefined(g.field.Name)
 		}
-		return c.holes
+		return holes
 	}
 	extent := func() [2]jsval.Value {
 		if readsHoles() {
@@ -452,8 +452,8 @@ func (g *measureGroup) write(s *measureSet, id int, m *mstate, c *cell, t *jsval
 		var v jsval.Value
 		switch o.kind {
 		case opValues:
-			if c.values != nil {
-				v = c.values(t, o.name)
+			if s.store != nil {
+				v = s.store.share(t, o.name)
 			} else {
 				v = jsval.Arr(slices.Clone(data))
 			}

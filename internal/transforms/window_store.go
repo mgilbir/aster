@@ -29,6 +29,7 @@ type windowStore struct {
 	rows   []jsval.Value
 	slow   bool
 	ledger *budget.Ledger
+	holes  bool // add has undefined entries (see measureSet.store)
 
 	// The rows of the current epoch's array: rows[e0:hi] (regular frames), or
 	// add (slow ones).
@@ -193,6 +194,6 @@ func (st *windowStore) values(c *cell, m *budget.Meter) error {
 		st.add, st.rem = x, st.rem[:0]
 	}
 	c.data = st.add
-	c.holes = slices.ContainsFunc(st.add, jsval.Value.IsUndefined)
+	st.holes = slices.ContainsFunc(st.add, jsval.Value.IsUndefined)
 	return nil
 }

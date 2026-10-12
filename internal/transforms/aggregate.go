@@ -84,7 +84,7 @@ func Aggregate(ctx context.Context, data []jsval.Value, p AggregateParams) (res 
 	// output tuples, one field per dimension and measure, to the rows.
 	led := budget.LedgerFrom(ctx)
 	cellBytes := aggCellBytes + budget.Mul(int64(len(ms.groups)), mstateBytes)
-	var charged int64
+	var charged, chargedCells int64
 	defer func() { led.Free(charged) }()
 	rowExcess := int64(0)
 	if b := budget.From(ctx); b != nil && b.RowBytes > 0 {
@@ -95,10 +95,17 @@ func Aggregate(ctx context.Context, data []jsval.Value, p AggregateParams) (res 
 		if err := budget.ReserveWeight(ctx, n-int64(len(data)), budget.Mul(n, rowExcess)); err != nil {
 			panic(aggAbort{err})
 		}
-		if err := led.Alloc(cellBytes); err != nil {
-			panic(aggAbort{err})
+		// The ledger is charged ahead, for a batch of cells a quarter of
+		// those made so far (at least 64): one charge per batch, not per
+		// cell, still before the cells are made.
+		if n > chargedCells {
+			batch := max(chargedCells/4, 64)
+			if err := led.Alloc(budget.Mul(batch, cellBytes)); err != nil {
+				panic(aggAbort{err})
+			}
+			chargedCells += batch
+			charged += budget.Mul(batch, cellBytes)
 		}
-		charged += cellBytes
 		tuple := jsval.NewObject(len(dims) + len(ms.names))
 		for i, d := range dims {
 			tuple.Set(dnames[i], d.Get(t))

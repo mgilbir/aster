@@ -328,7 +328,7 @@ func Window(ctx context.Context, data []jsval.Value, p WindowParams) ([]jsval.Va
 			c = ms.newCell()
 			if ms.needStore {
 				st = &windowStore{rows: rows, slow: !regular, ledger: led}
-				c.values = st.share
+				ms.store = st
 			}
 		}
 		for _, o := range wins {
