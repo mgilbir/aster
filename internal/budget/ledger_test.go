@@ -6,7 +6,6 @@ import (
 	"math"
 	"sync"
 	"testing"
-	"time"
 )
 
 func TestNilLedgerIsUnlimited(t *testing.T) {
@@ -128,31 +127,34 @@ func TestLedgerWorkPollsContext(t *testing.T) {
 	l.MustWork(pollEvery)
 }
 
-// A deadline is honoured within a few milliseconds by a loop that meters each
-// of its steps, the steps here costing about what a loop's step does.
+// A loop that meters each of its steps stops within one poll of its context
+// ending: canceled at a known step, the meter reports it at most pollEvery
+// steps later. Counted in steps, not timed, so that a loaded machine's
+// scheduling cannot fail it (a 20 ms wall-clock bound did, on a CI runner).
 func TestMeterHonoursDeadline(t *testing.T) {
-	const timeout = 50 * time.Millisecond
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	ctx = WithLedger(ctx, NewLedger(ctx, LedgerLimits{}))
-	t0 := time.Now()
-	m := NewMeter(ctx)
-	x := 1.0
-	var err error
-	for err == nil {
-		for range 50 { // ~100 ns of arithmetic
-			x = x*1.0000001 + 1e-9
+	for _, withLedger := range []bool{true, false} {
+		ctx, cancel := context.WithCancel(context.Background())
+		if withLedger {
+			ctx = WithLedger(ctx, NewLedger(ctx, LedgerLimits{}))
 		}
-		err = m.Work(1)
-	}
-	late := time.Since(t0) - timeout
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatal(err)
-	}
-	// A poll every 1024 steps of ~100 ns is a poll every ~0.1 ms; the slack
-	// is for a loaded machine's scheduling, not for the meter.
-	if late > 20*time.Millisecond {
-		t.Errorf("the deadline was honoured %v late (x=%v)", late, x)
+		m := NewMeter(ctx)
+		const at = 5*pollEvery + 7
+		steps := 0
+		var err error
+		for err == nil && steps < at+10*pollEvery {
+			if steps == at {
+				cancel()
+			}
+			err = m.Work(1)
+			steps++
+		}
+		cancel()
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("ledger %v: no cancellation after %d steps: %v", withLedger, steps-at, err)
+		}
+		if late := steps - at; late > pollEvery {
+			t.Errorf("ledger %v: the cancellation was seen %d steps late, more than one poll (%d)", withLedger, late, pollEvery)
+		}
 	}
 }
 
