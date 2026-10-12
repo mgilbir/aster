@@ -210,6 +210,14 @@ func (b *Budget) Load(n int64) error {
 	return nil
 }
 
+// Loaded is how many bytes the Loader has returned.
+func (b *Budget) Loaded() int64 {
+	if b == nil {
+		return 0
+	}
+	return b.loaded
+}
+
 // LoadLeft is how many more bytes may be loaded (MaxInt64 when unlimited).
 func (b *Budget) LoadLeft() int64 {
 	if b == nil || b.MaxLoadBytes <= 0 {

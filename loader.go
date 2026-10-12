@@ -13,17 +13,26 @@ import (
 //
 // Sanitize validates uri, and may rewrite it, before it is loaded or written
 // into the output; an error refuses it. Load returns the bytes at the URI
-// Sanitize returned. For a link only Sanitize is called, and vega-loader's
-// scheme allow-list is applied to its result as well, so a permissive Loader
-// cannot put a javascript: URL into the output.
+// Sanitize returned. In one call, Sanitize is called once for each data
+// set's load and once for each distinct image or link URL, with the URL the
+// input names, and Load with exactly what Sanitize returned: never Sanitize
+// of its own answer, so a Sanitize that rewrites need not accept what it
+// returns (a FallbackLoader's children must; see FallbackLoader). For a link
+// only Sanitize is called, and vega-loader's scheme allow-list is applied to
+// its result as well, so a permissive Loader cannot put a javascript: URL
+// into the output.
 //
 // Data is read as UTF-8 text (JSON, CSV, TSV, DSV, TopoJSON); images are
 // binary (PNG, JPEG, GIF) and must be returned unchanged. An error from either
 // method becomes the Err of the *LoadError the render reports (see
-// WithErrorHandler), except that one wrapping ErrLimit is a limit and always
-// fails the call. A Loader is called from many goroutines at once and must be
-// safe for that; it should honour ctx, which carries the call's deadline, and
-// bound what it reads. If it implements io.Closer, Converter.Close closes it.
+// WithErrorHandler), under the URL the input names, once per resource and
+// call, except that one wrapping ErrLimit is a limit and always fails the
+// call. A Loader is called from many goroutines at once and must be safe for
+// that; it should honour ctx, which carries the call's deadline, Close's
+// cancellation and the values and end of a WithContext context, and bound
+// what it reads: the data and images of one call share one allowance of
+// loaded bytes. It may call Close, or start another call, on the Converter.
+// If it implements io.Closer, Converter.Close closes it.
 type Loader = loader.Loader
 
 // The loader implementations live in internal/loader; their fields are
@@ -57,7 +66,10 @@ type (
 	// check is made on the address actually connected to, so names that
 	// resolve inward, DNS rebinding and redirects do not get around it; it
 	// applies to the default client and to a Client whose Transport is an
-	// *http.Transport. A request a proxy carries, or that another
+	// *http.Transport, on every path that Transport dials (DialContext,
+	// DialTLSContext, the deprecated Dial and DialTLS, and net/http's own
+	// dialer when it sets none), and its error does not say which address a
+	// name resolved to. A request a proxy carries, or that another
 	// RoundTripper makes, gets only the checks on the URL. See
 	// docs/loading-data.md.
 	HTTPLoader = loader.HTTPLoader
@@ -75,9 +87,13 @@ type (
 	StaticLoader = loader.StaticLoader
 
 	// FallbackLoader tries Loaders []Loader in order: the first whose
-	// Sanitize accepts a URI and whose Load succeeds answers it. A limit
-	// (ErrLimit) from a child ends the search. Close closes every child that
-	// implements io.Closer.
+	// Sanitize accepts a URI and whose Load succeeds answers it. Its Sanitize
+	// returns what the first child to accept the URI made of it (an
+	// HTTPLoader's BaseURL resolved, say), and its Load routes that answer
+	// through the children again, Sanitize then Load: so every child's
+	// Sanitize must return its own answer unchanged when given it, as the
+	// loaders of this package do. A limit (ErrLimit) from a child ends the
+	// search. Close closes every child that implements io.Closer.
 	FallbackLoader = loader.FallbackLoader
 )
 

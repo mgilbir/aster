@@ -55,13 +55,16 @@ type boundedCase struct {
 	name, kind, input string
 	font              []byte
 	extra             []string
+	loader            string // the harness's Loader (secJob.Loader); "" denies
 }
 
 // boundedCases reads the corpus: one case per input file and output kind. A
 // file <base>.ttf beside <base>.<ext> is registered as the font family
-// "Evil" for that input. A base name ending in ".quantize" renders its PNG
-// outputs with WithQuantizePNG(256), the post-processing that runs after the
-// rasterizer.
+// "Evil" for that input. A file <base>.loader names the harness Loader the
+// input renders with (secJob.Loader: "record" serves every URL a tiny body,
+// "bigcsv:N" N MiB of CSV); without one every URL is refused. A base name
+// ending in ".quantize" renders its PNG outputs with WithQuantizePNG(256),
+// the post-processing that runs after the rasterizer.
 func boundedCases(t *testing.T) []boundedCase {
 	t.Helper()
 	dir := filepath.Join("testdata", "security", "bounded")
@@ -72,7 +75,7 @@ func boundedCases(t *testing.T) []boundedCase {
 	var cases []boundedCase
 	for _, f := range files {
 		name := f.Name()
-		if strings.HasSuffix(name, ".ttf") || name == "README.md" {
+		if strings.HasSuffix(name, ".ttf") || strings.HasSuffix(name, ".loader") || name == "README.md" {
 			continue
 		}
 		known := false
@@ -90,16 +93,20 @@ func boundedCases(t *testing.T) []boundedCase {
 			if err != nil && !os.IsNotExist(err) {
 				t.Fatal(err)
 			}
+			ld, err := os.ReadFile(filepath.Join(dir, base+".loader"))
+			if err != nil && !os.IsNotExist(err) {
+				t.Fatal(err)
+			}
 			var extra []string
 			if strings.HasSuffix(base, ".quantize") {
 				extra = append(extra, "quantize")
 			}
 			for _, k := range o.kinds {
-				cases = append(cases, boundedCase{name: base, kind: k, input: string(in), font: font, extra: extra})
+				cases = append(cases, boundedCase{name: base, kind: k, input: string(in), font: font, extra: extra, loader: strings.TrimSpace(string(ld))})
 			}
 		}
 		if !known {
-			t.Errorf("%s: not an input the bounded corpus knows (want %v)", name, []string{".vg.json", ".vl.json", ".png.svg", ".svg", ".ttf"})
+			t.Errorf("%s: not an input the bounded corpus knows (want %v)", name, []string{".vg.json", ".vl.json", ".png.svg", ".svg", ".ttf", ".loader"})
 		}
 	}
 	sort.Slice(cases, func(i, j int) bool { return cases[i].name+cases[i].kind < cases[j].name+cases[j].kind })
@@ -124,6 +131,7 @@ func TestBoundedInputs(t *testing.T) {
 				HeapCapMB: boundedHeapCapMB,
 				FontB64:   c.font,
 				Extra:     c.extra,
+				Loader:    c.loader,
 			}
 			res, killed := runSec(t, job, boundedWall*raceSlowdown)
 			checkBounded(t, res, killed)

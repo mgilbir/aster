@@ -269,6 +269,15 @@ func (m *Measurer) faces(css CSSFont) *faceList {
 // WithFont and its kin, the latest first, when there are any (they make the
 // family alone, as @font-face rules do); otherwise the embedded ones, then
 // system fonts.
+// hasFamily reports whether family norm has a face: registered, embedded or,
+// with system fonts, installed. It loads none.
+func (m *Measurer) hasFamily(norm string) bool {
+	if len(m.own[norm]) > 0 || len(m.byFam[norm]) > 0 {
+		return true
+	}
+	return m.system != nil && len(m.system.byFam[norm]) > 0
+}
+
 func (m *Measurer) familyEntries(norm string) []*entry {
 	if own := m.own[norm]; len(own) > 0 {
 		return own

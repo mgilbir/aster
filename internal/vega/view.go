@@ -192,6 +192,9 @@ type Result struct {
 	// Description is the view's aria description ("" for none).
 	Description    string
 	HasDescription bool
+	// LoadedBytes is what the Loader returned for the data, which the
+	// caller's later loads (images) share Limits.MaxLoadBytes with.
+	LoadedBytes int64
 }
 
 // runView is a running instance of a specification (vega-view's View).
@@ -618,7 +621,8 @@ func (v *runView) result(scope *Scope) *Result {
 	res := &Result{
 		Scenegraph: v.sg,
 		Width:      w, Height: h,
-		Origin: [2]float64{l + v.origin[0], t + v.origin[1]},
+		Origin:      [2]float64{l + v.origin[0], t + v.origin[1]},
+		LoadedBytes: v.bud.Loaded(),
 	}
 	if bg := v.backgroundSig; bg != nil {
 		val := bg.sig()

@@ -45,7 +45,7 @@ func (c *Converter) VegaToSVGAfterSignalWritesForTest(spec []byte, writes [][2]s
 		return "", ErrClosed
 	}
 	defer release()
-	ctx, cancel := c.opContext()
+	ctx, cancel := c.opContext(context.Background())
 	defer cancel()
 	var ws []vega.SignalWrite
 	for _, w := range writes {
@@ -68,7 +68,7 @@ func (c *Converter) StagesForTest(spec []byte, lite bool) (map[string]time.Durat
 		return nil, ErrClosed
 	}
 	defer release()
-	ctx, cancel := c.opContext()
+	ctx, cancel := c.opContext(context.Background())
 	defer cancel()
 	stages := map[string]time.Duration{}
 	ctx = context.WithValue(ctx, stagesKey{}, func(s string, d time.Duration) { stages[s] += d })
@@ -107,9 +107,12 @@ func (c *Converter) RenderPreparedForTest(spec []byte, lite bool) (func() error,
 	if err != nil {
 		return nil, err
 	}
-	m, err := c.measurerInit()
+	m, shaper, err := c.fontSet()
 	if err != nil {
 		return nil, err
+	}
+	if !c.cfg.textMeasure {
+		m = nil
 	}
 	return func() (err error) {
 		release, ok := c.enter()
@@ -117,7 +120,7 @@ func (c *Converter) RenderPreparedForTest(spec []byte, lite bool) (func() error,
 			return ErrClosed
 		}
 		defer release()
-		ctx, cancel := c.opContext()
+		ctx, cancel := c.opContext(context.Background())
 		defer cancel()
 		defer recoverInto(&err)
 		opts := vega.Options{
@@ -127,7 +130,7 @@ func (c *Converter) RenderPreparedForTest(spec []byte, lite bool) (func() error,
 			Config:   c.theme,
 			Limits:   c.lim.vega,
 			Random:   transforms.LCG(randomSeed),
-			Shaper:   lazyShaper{c, nil},
+			Shaper:   shaper,
 		}
 		if m != nil {
 			opts.TextMeasurer = text.NewCanvasContext(m)
@@ -142,28 +145,35 @@ func (c *Converter) RenderPreparedForTest(spec []byte, lite bool) (func() error,
 const RaceSlowdownForTest = raceSlowdown
 
 // LimitsForTest is what each row of docs/limits.md's budget table is, in
-// bytes or counts, for WithMemoryLimit(n); 0 for "none".
+// bytes or counts, for WithMemoryLimit(n); 0 for "none". It reads the bounds
+// a call passes on, as the call sites read them, not their defaults: a bound
+// the doc promises but no call applies must fail the doc test (C40).
 func LimitsForTest(n uint64) map[string]int64 {
 	c := deriveLimits(n)
-	l := c.vega.WithDefaults()
+	l := c.vega
 	r := c.raster.WithDefaults()
 	return map[string]int64{
 		"data rows":              int64(l.MaxRows),
 		"scene items":            int64(l.MaxItems),
 		"facet cells (subflows)": int64(l.MaxSubflows),
 		"dataflow operators":     int64(l.MaxOperators),
-		"loaded bytes (data and images of one call)":    l.MaxLoadBytes,
-		"parsed JSON (spec and data)":                   l.MaxParseBytes,
-		"expression strings and arrays":                 l.MaxStringBytes,
-		"bitmaps the heatmap transform paints":          l.MaxCanvasBytes,
-		"SVG output":                                    int64(c.svgBytes),
-		"specification size":                            int64(c.specBytes),
-		"glyphs of one shaped run of text":              c.shaping.RunBytes,
-		"rasterizer canvas memory (PNG)":                int64(r.MaxCanvasBytes),
-		"rasterizer pixels per canvas (PNG)":            int64(r.MaxPixels),
-		"rasterizer path points held at once (PNG)":     int64(r.MaxPathSegments),
-		"pixels of one image (SVG, PNG and PDF output)": int64((&Converter{lim: c}).imagePixels()),
-		"memory charged to the call's ledger":           c.ledger.MaxBytes,
-		"Vega-Lite views":                               int64(c.vlViews),
+		"loaded bytes (data and images of one call, together)": l.MaxLoadBytes,
+		"parsed JSON (spec and data)":                          l.MaxParseBytes,
+		"expression strings and arrays":                        l.MaxStringBytes,
+		"bitmaps the heatmap transform paints":                 l.MaxCanvasBytes,
+		"SVG output":                                           int64(c.svgBytes),
+		"specification size":                                   int64(c.specBytes),
+		"glyphs of one shaped run of text":                     c.shaping.RunBytes,
+		"rasterizer canvas memory (PNG)":                       int64(r.MaxCanvasBytes),
+		"rasterizer pixels per canvas (PNG)":                   int64(r.MaxPixels),
+		"rasterizer path points held at once (PNG)":            int64(r.MaxPathSegments),
+		"pixels of one image (SVG, PNG and PDF output)":        int64((&Converter{lim: c}).imagePixels()),
+		"memory charged to the call's ledger":                  c.ledger.MaxBytes,
+		"Vega-Lite views":                                      int64(c.vlViews),
 	}
+}
+
+// WithFontSetFailureForTest makes the Converter's fonts fail to load.
+func WithFontSetFailureForTest() Option {
+	return func(c *config) { c.fontFailForTest = true }
 }

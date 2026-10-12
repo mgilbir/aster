@@ -28,7 +28,7 @@ c, err := aster.New(
 | `WithTextMeasurement(false)` | on | don't measure text: use Vega's estimate (0.8 × length × size); the wordcloud transform then fails |
 | `WithHarfBuzzTextMetrics()` | off | measure with HarfBuzz's rounding (size rounded up to whole pixels, advances to 1/64 px) instead of browser-exact advances; for output byte-identical to earlier versions of aster |
 
-`New` loads the fonts you give it and fails if one does not load (or a `WithFontInstance` axis does not exist), so a broken font is caught at startup, not on every render. With the embedded fonts alone, `New` loads nothing and stays cheap; they load on first use.
+`New` loads the fonts you give it and fails if one does not load (or a `WithFontInstance` axis does not exist, a `WithFontFace` index is negative, or a `WithFontFallback` or `WithDefault*Family` family has no font), so a mistake is caught at startup, not on every render. It copies the bytes you pass, so the buffer is yours again once the option is made. The fonts load once, into one set that layout, PNG and PDF all draw from: no output parses a font, or scans the system's, a second time. With the embedded fonts alone, `New` loads nothing and stays cheap; they load on first use.
 
 ## Which font draws a character
 

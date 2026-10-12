@@ -1,6 +1,9 @@
 package aster
 
 import (
+	"bytes"
+	"context"
+	"fmt"
 	"maps"
 	"strings"
 	"time"
@@ -41,6 +44,16 @@ type config struct {
 	harfBuzzText           bool
 	pangoText              int              // 0: unrounded advances; 1 and 2: Pango's (see WithPangoTextForTest)
 	now                    func() time.Time // the clock for now(); nil is the system clock (tests pin it)
+	fontFailForTest        bool             // the tests' WithFontSetFailureForTest
+	// errs are the options' own mistakes, which New reports.
+	errs []error
+}
+
+// fontsGiven reports whether any option changes the fonts from the embedded
+// ones, so that New loads them (and fails for one that does not load).
+func (c *config) fontsGiven() bool {
+	return len(c.fonts) > 0 || c.fallbackSet || c.systemFonts || len(c.palettes) > 0 ||
+		c.defaultFontFamily != "" || c.defaultSerifFamily != "" || c.defaultMonospaceFamily != ""
 }
 
 func defaultConfig() *config {
@@ -53,7 +66,9 @@ func defaultConfig() *config {
 
 // WithLoader sets the Loader that decides which data, images and links a
 // specification may use, and fetches them. The default, and what a nil l
-// selects, is DenyLoader, which refuses all of them.
+// selects, is DenyLoader, which refuses all of them. A nil pointer in l, such
+// as a (*FileLoader)(nil) from a NewFileLoader whose error was dropped, makes
+// New return an error.
 func WithLoader(l Loader) Option {
 	return func(c *config) {
 		c.loader = l
@@ -113,8 +128,9 @@ func WithTextMeasurement(enabled bool) Option {
 	}
 }
 
-// WithVegaLiteVersion sets the Vega-Lite compiler: "6.4" (Vega-Lite 6.4.3,
-// the default) or "5.8" (5.8.0); a leading "v" is accepted. A specification's
+// WithVegaLiteVersion sets the Vega-Lite compiler: "6.4" or "6.4.3"
+// (Vega-Lite 6.4.3, the default), "5.8" or "5.8.0"; a leading "v" is
+// accepted. A specification's
 // $schema does not choose it. An unknown version makes New return an error
 // listing the available ones; AvailableVersions lists them too.
 func WithVegaLiteVersion(v string) Option {
@@ -148,13 +164,15 @@ func WithSystemFonts() Option {
 // your registered fonts, the most recently registered first, then the
 // embedded ones; WithFontFallback sets it.
 //
-// A font that does not load makes New return an error.
+// A font that does not load makes New return an error. The bytes are
+// copied: the caller may reuse ttf once WithFont returns.
 //
 // A colour font (COLR, sbix, CBDT) draws its glyphs in colour in PNG and PDF
 // output. Registered with any family name, it is also what draws the
 // characters a spec's fonts lack, such as emoji, before the bundled
 // monochrome Noto Emoji.
 func WithFont(family string, ttf []byte) Option {
+	ttf = bytes.Clone(ttf)
 	return func(c *config) {
 		c.fonts = append(c.fonts, fontEntry{family: family, data: ttf, face: -1})
 	}
@@ -183,10 +201,16 @@ func WithFontFallback(families ...string) Option {
 // its index from 0, under family, as WithFont registers a font. WithFont
 // registers every face of a collection, which CSS font-weight and
 // font-style choose among; this is for a collection whose faces are not
-// one family's weights and styles.
+// one family's weights and styles. A negative index makes New return an
+// error; the bytes are copied, as WithFont's are.
 func WithFontFace(family string, ttc []byte, index int) Option {
+	ttc = bytes.Clone(ttc)
 	return func(c *config) {
-		c.fonts = append(c.fonts, fontEntry{family: family, data: ttc, face: max(0, index)})
+		if index < 0 {
+			c.errs = append(c.errs, fmt.Errorf("aster: WithFontFace(%q): face index %d is negative", family, index))
+			return
+		}
+		c.fonts = append(c.fonts, fontEntry{family: family, data: ttc, face: index})
 	}
 }
 
@@ -211,17 +235,20 @@ func WithFontPalette(family string, index int) Option {
 // instance. Register the same font
 // more than once, under one family at different weights, to have CSS
 // font-weight choose among instances. Of a collection, its first face is
-// the one registered.
+// the one registered. The bytes are copied, as WithFont's are.
 func WithFontInstance(family string, ttf []byte, axes map[string]float64) Option {
+	ttf, axes = bytes.Clone(ttf), maps.Clone(axes)
 	return func(c *config) {
-		c.fonts = append(c.fonts, fontEntry{family: family, data: ttf, axes: maps.Clone(axes)})
+		c.fonts = append(c.fonts, fontEntry{family: family, data: ttf, axes: axes})
 	}
 }
 
 // WithDefaultFontFamily sets the family the generic "sans-serif" CSS family
 // resolves to, which is Vega's default font, for layout, PNG and PDF alike.
 // The default is "Liberation Sans" (embedded, metrically compatible with
-// Arial). Use it with WithFont to change the font most text is set in.
+// Arial). Use it with WithFont to change the font most text is set in. A
+// family with no font (registered, embedded, or with WithSystemFonts
+// installed) makes New return an error.
 func WithDefaultFontFamily(family string) Option {
 	return func(c *config) {
 		c.defaultFontFamily = family
@@ -231,7 +258,7 @@ func WithDefaultFontFamily(family string) Option {
 // WithDefaultSerifFamily sets the family the generic "serif" CSS family
 // resolves to, for layout, PNG and PDF alike. The default is "Liberation
 // Serif" (embedded, metrically compatible with Times New Roman). Register the
-// font with WithFont.
+// font with WithFont; a family with no font makes New return an error.
 func WithDefaultSerifFamily(family string) Option {
 	return func(c *config) {
 		c.defaultSerifFamily = family
@@ -240,7 +267,8 @@ func WithDefaultSerifFamily(family string) Option {
 
 // WithDefaultMonospaceFamily sets the family the generic "monospace" CSS
 // family resolves to, for layout, PNG and PDF alike. The default is
-// "Liberation Mono" (embedded). Register the font with WithFont.
+// "Liberation Mono" (embedded). Register the font with WithFont; a family
+// with no font makes New return an error.
 func WithDefaultMonospaceFamily(family string) Option {
 	return func(c *config) {
 		c.defaultMonospaceFamily = family
@@ -262,7 +290,9 @@ func WithHarfBuzzTextMetrics() Option {
 // WithTimezone sets the timezone used for local-time operations (time scales,
 // timeFormat, date parsing without a zone). Defaults to "UTC" for
 // deterministic output. Any IANA zone name known to the Go runtime is
-// accepted; New returns an error for an unknown one.
+// accepted; New returns an error for an unknown one, and for "Local": the
+// host's zone would make the output depend on the machine that renders it,
+// so name the zone instead.
 func WithTimezone(tz string) Option {
 	return func(c *config) {
 		c.timezone = tz
@@ -270,21 +300,21 @@ func WithTimezone(tz string) Option {
 }
 
 // PNGOption configures a single PNG render operation: WithScale,
-// WithRecodePNG, WithQuantizePNG, and WithSignal for the Vega and Vega-Lite
-// methods.
+// WithRecodePNG, WithQuantizePNG, WithContext, WithErrorHandler, and
+// WithSignal for the Vega and Vega-Lite methods.
 type PNGOption interface{ applyPNG(*pngConfig) }
 
 type pngOption func(*pngConfig)
 
 func (f pngOption) applyPNG(c *pngConfig) { f(c) }
 
-// RenderOption configures a single VegaToSVG or VegaLiteToSVG call:
-// WithSignal and WithErrorHandler.
+// RenderOption configures a single VegaToSVG, VegaLiteToSVG or
+// VegaLiteToVega call: WithContext, WithSignal and WithErrorHandler.
 type RenderOption interface{ applyRender(*renderConfig) }
 
-// renderConfig is what configures the Vega render of a call, whatever its
-// output.
+// renderConfig is what configures one call, whatever its output.
 type renderConfig struct {
+	ctx     context.Context // WithContext's; nil for none
 	signals []SignalOption
 	handler func(error) error // WithErrorHandler's
 }
@@ -348,7 +378,10 @@ type ErrorHandlerOption struct {
 //
 // h is called on the goroutine that made the call, never concurrently, and
 // before the call returns. Data and evaluation errors reach it as they arise;
-// image failures once the stage that fetched or decoded them is over.
+// image failures once the stage that fetched or decoded them is over, once
+// per image URL of the call, under the URL the input names. h may call the
+// Converter's Close (the call then fails with context.Canceled) or start
+// another call on it.
 //
 // To render what can be rendered, as a browser does, and log the rest:
 //

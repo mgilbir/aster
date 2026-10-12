@@ -304,7 +304,11 @@ func (r *renderer) imageFor(n *node) (*rasterImage, error) {
 	if data == nil {
 		// Only data: URIs are decoded here: the rasterizer never touches the
 		// network or the filesystem; other images are fetched by Options.Images.
-		data, err = imageref.DataURI(href, r.lim.imageLimits())
+		if imageref.IsData(href) {
+			data, err = imageref.DataURI(href, r.lim.imageLimits())
+		} else {
+			err = errNotFetched
+		}
 	}
 	var kept int64
 	if err == nil {
@@ -326,6 +330,9 @@ func (r *renderer) imageFor(n *node) (*rasterImage, error) {
 	r.imageBytes += kept
 	return img, err
 }
+
+// errNotFetched is the error of an image Options.Images did not fetch.
+var errNotFetched = errors.New("raster: image not fetched")
 
 // dropImages gives back what the decoded images are charged.
 func (r *renderer) dropImages() {

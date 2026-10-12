@@ -65,7 +65,10 @@ const specBytesDivisor = 16
 // the defaults). A bound derived from n replaces its default, so a large n
 // raises it as a small one lowers it.
 func deriveLimits(n uint64) callLimits {
-	l := callLimits{svgBytes: defaultSVGBytes, ledger: budget.LedgerLimits{MaxBytes: defaultLedgerBytes}, vlViews: vegalite.DefaultMaxViews}
+	// The Vega run's defaults are applied here, not left to the run: the
+	// call sites read them too (the specification's parse bound, the load
+	// allowance images share), and a zero read there is no bound (C40).
+	l := callLimits{vega: vega.Limits{}.WithDefaults(), svgBytes: defaultSVGBytes, ledger: budget.LedgerLimits{MaxBytes: defaultLedgerBytes}, vlViews: vegalite.DefaultMaxViews}
 	if n == 0 {
 		return l
 	}

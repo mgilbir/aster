@@ -40,10 +40,13 @@ import (
 // check is made on the address a connection is actually made to, not on the
 // name, so DNS rebinding and redirects cannot get around it. It is enforced
 // on the connections of the default client and of any Client whose Transport
-// is an *http.Transport (a DialContext or DialTLSContext of its own is wrapped
-// with the check). A Transport with a deprecated Dial function, and any other
-// http.RoundTripper, decide for themselves where they connect, as the caller
-// wrote them to: for those only address literals and localhost names are
+// is an *http.Transport, on every path it dials: its DialContext and
+// DialTLSContext, and the deprecated Dial and DialTLS, are wrapped with the
+// check, and when it sets no plain dial function the connection is made by
+// the guarded dialer rather than net/http's own (ErrPrivateAddress, which
+// does not say what address a name resolved to). Any other
+// http.RoundTripper decides for itself where it connects, as the caller
+// wrote it to: for those only address literals and localhost names are
 // refused, and AllowedDomains is the tool to confine them.
 //
 // A proxy is honoured: the HTTP_PROXY, HTTPS_PROXY and NO_PROXY environment
@@ -111,15 +114,16 @@ const (
 // loadCap is how many bytes one load may return: the configured cap (0 is the
 // default, negative none) lowered to what is left of the render's load budget,
 // so that a loader never reads more than the render may keep. Negative means
-// no cap.
-func loadCap(ctx context.Context, configured int64) int64 {
+// no cap. capName says which of the two it is, for the error of a body over
+// it: field, the loader's own setting, or the render's budget.
+func loadCap(ctx context.Context, configured int64, field string) (max int64, capName string) {
 	if configured == 0 {
 		configured = defaultMaxResponseBytes
 	}
 	if left := budget.From(ctx).LoadLeft(); left != math.MaxInt64 && (configured < 0 || left < configured) {
-		return left
+		return left, "what is left of the render's load budget (WithMemoryLimit raises it)"
 	}
-	return configured
+	return configured, field
 }
 
 // NewHTTPLoader creates a loader that allows HTTP(S) requests.
@@ -184,7 +188,7 @@ func (l *HTTPLoader) Load(ctx context.Context, uri string) ([]byte, error) {
 		return nil, fmt.Errorf("aster: HTTP %d loading %q", resp.StatusCode, uri)
 	}
 
-	max := loadCap(ctx, l.MaxResponseBytes)
+	max, capName := loadCap(ctx, l.MaxResponseBytes, "HTTPLoader.MaxResponseBytes")
 	if max < 0 {
 		data, err := io.ReadAll(resp.Body)
 		if err != nil {
@@ -196,7 +200,7 @@ func (l *HTTPLoader) Load(ctx context.Context, uri string) ([]byte, error) {
 	// The declared size can be a lie, but when it is over the cap there is
 	// nothing to read.
 	if resp.ContentLength > max {
-		return nil, fmt.Errorf("aster: response from %q is %d bytes, exceeds %d bytes (raise HTTPLoader.MaxResponseBytes or the memory limit to allow larger payloads): %w", uri, resp.ContentLength, max, budget.ErrLimit)
+		return nil, fmt.Errorf("aster: response from %q is %d bytes, exceeds the %d bytes of %s: %w", uri, resp.ContentLength, max, capName, budget.ErrLimit)
 	}
 	// Read one byte past the cap to distinguish "exactly at the cap" from
 	// "exceeds it".
@@ -205,7 +209,7 @@ func (l *HTTPLoader) Load(ctx context.Context, uri string) ([]byte, error) {
 		return nil, fmt.Errorf("aster: failed to read response from %q: %w", uri, err)
 	}
 	if int64(len(data)) > max {
-		return nil, fmt.Errorf("aster: response from %q exceeds %d bytes (raise HTTPLoader.MaxResponseBytes or the memory limit to allow larger payloads): %w", uri, max, budget.ErrLimit)
+		return nil, fmt.Errorf("aster: response from %q exceeds the %d bytes of %s: %w", uri, max, capName, budget.ErrLimit)
 	}
 	return data, nil
 }
@@ -306,8 +310,8 @@ func (l *HTTPLoader) transport(base http.RoundTripper) http.RoundTripper {
 	switch {
 	case base == nil || base == http.DefaultTransport:
 		t = nil
-	case t == nil || t.Dial != nil || t.DialTLS != nil: //nolint:staticcheck // a caller who set the deprecated Dial chooses where it connects
-		return base // the caller's own egress
+	case t == nil:
+		return base // another RoundTripper: the caller's own egress
 	case l.AllowPrivateNetworks:
 		return base // nothing to check
 	}
@@ -337,27 +341,61 @@ func (l *HTTPLoader) transport(base http.RoundTripper) http.RoundTripper {
 	if rt.Proxy != nil {
 		rt.Proxy = px.record(rt.Proxy)
 	}
-	if t != nil && (t.DialContext != nil || t.DialTLSContext != nil) {
-		rt.DialContext = checkedDial(t.DialContext, px)
-		rt.DialTLSContext = checkedDial(t.DialTLSContext, px)
+	// Every field that makes a connection is checked (C41). net/http dials a
+	// plain connection with DialContext, else the deprecated Dial, else its
+	// own zero Dialer, and a TLS one with DialTLSContext, else DialTLS, else
+	// the plain dial and a handshake. So the caller's dial functions are
+	// wrapped (the deprecated ones moved to their context forms, which take
+	// precedence) and a missing plain dial is the guarded dialer, never the
+	// zero Dialer.
+	dial, dialTLS := dialFuncs(t)
+	rt.Dial, rt.DialTLS = nil, nil //nolint:staticcheck // replaced by their checked context forms
+	if dial != nil {
+		rt.DialContext = checkedDial(dial, px)
 	} else {
 		direct := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
-		dialer := direct
+		guarded := *direct
 		if !l.AllowPrivateNetworks {
-			guarded := *direct
 			guarded.Control = denyPrivate
-			dialer = &guarded
 		}
 		rt.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 			if px.has(addr) {
 				return direct.DialContext(ctx, network, addr)
 			}
-			return dialer.DialContext(ctx, network, addr)
+			c, err := guarded.DialContext(ctx, network, addr)
+			if errors.Is(err, ErrPrivateAddress) {
+				// The *net.OpError names the address the name resolved to,
+				// which is the network's to know, not the spec's.
+				return nil, errPrivate
+			}
+			return c, err
 		}
-		rt.ForceAttemptHTTP2 = true
+		if t == nil || t.DialContext == nil && t.DialTLSContext == nil && t.Dial == nil && t.DialTLS == nil { //nolint:staticcheck // as above
+			// Setting DialContext turns off net/http's automatic HTTP/2;
+			// the transport had none, so it keeps it.
+			rt.ForceAttemptHTTP2 = true
+		}
 	}
+	rt.DialTLSContext = checkedDial(dialTLS, px)
 	l.cached = derivedTransport{base: t, allow: l.AllowPrivateNetworks, rt: rt, ok: true}
 	return rt
+}
+
+// dialFuncs are the functions t dials plain and TLS connections with, in
+// their context forms: DialContext, else the deprecated Dial; DialTLSContext,
+// else DialTLS. Nil for a nil t, and for one that leaves dialing to net/http.
+func dialFuncs(t *http.Transport) (dial, dialTLS func(context.Context, string, string) (net.Conn, error)) {
+	if t == nil {
+		return nil, nil
+	}
+	dial, dialTLS = t.DialContext, t.DialTLSContext
+	if f := t.Dial; dial == nil && f != nil { //nolint:staticcheck // a deprecated dial is still a dial
+		dial = func(_ context.Context, network, addr string) (net.Conn, error) { return f(network, addr) }
+	}
+	if f := t.DialTLS; dialTLS == nil && f != nil { //nolint:staticcheck // as above
+		dialTLS = func(_ context.Context, network, addr string) (net.Conn, error) { return f(network, addr) }
+	}
+	return dial, dialTLS
 }
 
 // proxies are the addresses of the proxies a transport's Proxy function has
@@ -405,7 +443,7 @@ func checkedDial(dial func(context.Context, string, string) (net.Conn, error), p
 		}
 		if tcp, ok := c.RemoteAddr().(*net.TCPAddr); ok && privateAddr(tcp.AddrPort().Addr()) {
 			_ = c.Close()
-			return nil, fmt.Errorf("aster: address %s is private/loopback (blocked)", tcp.IP)
+			return nil, errPrivate
 		}
 		return c, nil
 	}
@@ -419,7 +457,7 @@ func denyPrivate(_, address string, _ syscall.RawConn) error {
 		return err
 	}
 	if privateAddr(ap.Addr()) {
-		return fmt.Errorf("aster: address %s is private/loopback (blocked)", ap.Addr())
+		return ErrPrivateAddress
 	}
 	return nil
 }
@@ -537,3 +575,13 @@ func inPrivateNet(a netip.Addr) bool {
 	}
 	return false
 }
+
+// ErrPrivateAddress is wrapped by the error of a connection refused because
+// it would reach an address that is not on the public internet. Its text does
+// not say which address: the name's resolution is the network's to know, and
+// the error reaches whoever wrote the URL.
+var ErrPrivateAddress = errors.New("the host is a private or loopback address (blocked; AllowPrivateNetworks allows it)")
+
+// errPrivate is a refused dial's error, with no *net.OpError around it, which
+// would name the address.
+var errPrivate = fmt.Errorf("aster: %w", ErrPrivateAddress)

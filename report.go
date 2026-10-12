@@ -15,11 +15,15 @@ import (
 // and decoded inside a stage, are collected and decided once the stage is
 // over (flushImages), also on the calling goroutine.
 type callReport struct {
+	c       *Converter        // whose calls the handler is a callback of
 	handler func(error) error // nil: errors end the call, warnings are dropped
 
 	mu     sync.Mutex
 	images []*LoadError // image failures, the first for each URL, in order
 	seen   map[string]bool
+	// limit is the first limit an image reached: it ends the call however
+	// the image was reached (C34), and no handler can let it go.
+	limit error
 }
 
 type callReportKey struct{}
@@ -65,7 +69,12 @@ func (r *callReport) decide(err error) error {
 		}
 		return err
 	}
-	return r.handler(err)
+	if r.c == nil {
+		return r.handler(err)
+	}
+	var out error
+	r.c.callback(func() { out = r.handler(err) })
+	return out
 }
 
 // vega is vega.Options.Report: the dataflow's own types become the public
@@ -81,14 +90,22 @@ func (r *callReport) vega(err error) error {
 }
 
 // image records that the image at url could not be loaded or read. Only the
-// first failure of a URL is kept; limits are not recorded, as they end the
-// call by themselves.
+// first failure of a URL is kept. A limit is kept apart: the first one ends
+// the call when the stage is over (flushImages), whatever stage reached it
+// and whether or not the stage could return it itself (C34: the SVG writer,
+// reading an image's size, could not, and the image vanished).
 func (r *callReport) image(url string, err error) {
-	if r == nil || errors.Is(err, ErrLimit) {
+	if r == nil {
 		return
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if errors.Is(err, ErrLimit) {
+		if r.limit == nil {
+			r.limit = err
+		}
+		return
+	}
 	if r.seen[url] {
 		return
 	}
@@ -103,17 +120,20 @@ func (r *callReport) image(url string, err error) {
 // handler says so.
 func (r *callReport) warn(msg string) error { return r.decide(Warning(msg)) }
 
-// flushImages decides the image failures recorded since the last flush: the
-// first one the handler does not let go (without a handler, the first) ends
-// the call.
+// flushImages decides the image failures recorded since the last flush: a
+// limit ends the call, and so does the first failure the handler does not
+// let go (without a handler, the first).
 func (r *callReport) flushImages() error {
 	if r == nil {
 		return nil
 	}
 	r.mu.Lock()
-	pending := r.images
+	pending, limit := r.images, r.limit
 	r.images = nil
 	r.mu.Unlock()
+	if limit != nil {
+		return limit
+	}
 	for _, le := range pending {
 		if err := r.decide(le); err != nil {
 			return err

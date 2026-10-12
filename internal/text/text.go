@@ -256,16 +256,29 @@ type Run struct {
 // views share the fonts and caches.
 type Measurer struct {
 	*measurerState
+	*metrics
 	// budget bounds the shaping done through this view; nil shapes without
 	// bounds.
 	budget *ShapingBudget
 }
 
-// measurerState is what every view of a Measurer shares.
+// metrics is how a view of a Measurer turns glyph advances into widths, and
+// the widths it has measured that way. Views that measure alike share one;
+// Exact makes the other.
+type metrics struct {
+	exact      bool
+	pango      pangoMode
+	widthCache *bcache.Cache[widthKey, float64]
+}
+
+func newMetrics(exact bool, pango pangoMode) *metrics {
+	return &metrics{exact: exact, pango: pango, widthCache: bcache.New[widthKey, float64](widthCacheBytes, widthCacheMaxEntry)}
+}
+
+// measurerState is what every view of a Measurer shares: the fonts and what
+// is resolved from them, which no metric model changes.
 type measurerState struct {
-	mu    sync.RWMutex // guards the caches; the width cache is read under RLock
-	exact bool
-	pango pangoMode
+	mu sync.RWMutex // guards the caches; the width cache is read under RLock
 
 	entries  []*entry // registration order
 	fallback []*entry // entries in fallback order (see faces)
@@ -287,11 +300,13 @@ type measurerState struct {
 	palettes        map[string]int // WithFontPalette's, by normalised family
 
 	// The caches; see widthCacheBytes. cssCache and listCache are used under
-	// mu (plan), widthCache without it.
-	cssCache   *bcache.Cache[string, CSSFont]
-	listCache  *bcache.Cache[listKey, *faceList]
-	widthCache *bcache.Cache[widthKey, float64]
-	programs   *bcache.Cache[*Face, []byte]
+	// mu (plan), the metrics' width cache without it.
+	cssCache  *bcache.Cache[string, CSSFont]
+	listCache *bcache.Cache[listKey, *faceList]
+	programs  *bcache.Cache[*Face, []byte]
+	// exactOnce makes exactView, the view Exact returns.
+	exactOnce sync.Once
+	exactView *metrics
 	// last is the font plan resolved last (see font), under mu.
 	last struct {
 		font string
@@ -319,13 +334,10 @@ func New(opts ...Option) (*Measurer, error) {
 	for _, o := range opts {
 		o(&cfg)
 	}
-	m := &Measurer{measurerState: &measurerState{
-		exact:           cfg.exact,
-		pango:           cfg.pango,
+	m := &Measurer{metrics: newMetrics(cfg.exact, cfg.pango), measurerState: &measurerState{
 		byFam:           make(map[string][]*entry),
 		cssCache:        bcache.New[string, CSSFont](cssCacheBytes, cssCacheMaxEntry),
 		listCache:       bcache.New[listKey, *faceList](listCacheBytes, listCacheMaxEntry),
-		widthCache:      bcache.New[widthKey, float64](widthCacheBytes, widthCacheMaxEntry),
 		programs:        bcache.New[*Face, []byte](programCacheBytes, programCacheMaxEntry),
 		fallbackFamily:  orDefault(cfg.fallbackFamily, "Liberation Sans"),
 		serifFamily:     orDefault(cfg.serifFamily, "Liberation Serif"),
@@ -412,7 +424,34 @@ func New(opts ...Option) (*Measurer, error) {
 			m.fallbackOrder = append(m.fallbackOrder, es)
 		}
 	}
+	// A generic family set to one with no font would silently resolve to
+	// the first face; it is a mistake to report, as a fallback family is.
+	for _, d := range []struct{ opt, family string }{
+		{"WithDefaultFontFamily", cfg.fallbackFamily},
+		{"WithDefaultSerifFamily", cfg.serifFamily},
+		{"WithDefaultMonospaceFamily", cfg.monospaceFamily},
+	} {
+		if d.family != "" && !m.hasFamily(normFamily(d.family)) {
+			return nil, fmt.Errorf("text: %s: family %q has no font (register it, or enable system fonts for a system one)", d.opt, d.family)
+		}
+	}
 	return m, nil
+}
+
+// Exact returns a view of m that measures and shapes with the same fonts,
+// and shares their caches, but with unrounded advances at the exact size
+// (WithExactAdvances, without Pango's rounding), as resvg places glyphs. It
+// is m itself when m measures so already. Every call returns the same view,
+// so its widths are cached once.
+func (m *Measurer) Exact() *Measurer {
+	if m == nil {
+		return nil
+	}
+	if m.exact && m.pango == pangoNone {
+		return m
+	}
+	m.exactOnce.Do(func() { m.exactView = newMetrics(true, pangoNone) })
+	return &Measurer{measurerState: m.measurerState, metrics: m.exactView, budget: m.budget}
 }
 
 // applyPalette sets the palette WithFontPalette names for f's family.

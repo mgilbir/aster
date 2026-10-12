@@ -4,7 +4,9 @@ Every exported name of `github.com/mgilbir/aster`, grouped by task. The godoc ([
 
 ## Converter
 
-`aster.New(opts ...Option) (*Converter, error)` creates a converter. It is safe for concurrent use by any number of goroutines, and sharing one is cheaper than making one per goroutine (fonts load once). `Close()` cancels calls in flight (they fail with `context.Canceled`), waits for them, closes the Loader if it implements `io.Closer`, and makes every later call fail with `ErrClosed`. Closing twice is harmless.
+`aster.New(opts ...Option) (*Converter, error)` creates a converter. It is safe for concurrent use by any number of goroutines, and sharing one is cheaper than making one per goroutine (fonts load once, into one set every output uses). `Close()` cancels calls in flight (they fail with `context.Canceled`), waits for them, closes the Loader if it implements `io.Closer`, and makes every later call fail with `ErrClosed`. Closing twice is harmless, and so is closing from inside a call: from an error handler or a Loader method, `Close` cancels and returns at once, and the Loader is closed when the last call ends. A call started from a handler or a Loader (a nested render) is allowed too; after `Close` it fails with `ErrClosed`.
+
+To cancel one call rather than the Converter, pass it `WithContext(ctx)`: every method takes it. The call ends when `ctx` ends, the Converter's `WithTimeout` runs out, or `Close` is called, whichever is first, and fails with `context.Canceled` or `context.DeadlineExceeded`; the Loader's methods get a context derived from `ctx`, with its values. A call whose context ends never returns output.
 
 | Method | Input → output | Per-call options |
 |---|---|---|
@@ -12,7 +14,7 @@ Every exported name of `github.com/mgilbir/aster`, grouped by task. The godoc ([
 | `VegaLiteToPNG(spec, …)` | Vega-Lite JSON → PNG `[]byte` | `PNGOption` |
 | `VegaLiteToPDF(spec, …)` | Vega-Lite JSON → PDF `[]byte` | `PDFOption` |
 | `VegaLiteToPDFUsage(spec, …)` | Vega-Lite JSON → PDF + `[]FontUsage` | `PDFOption` |
-| `VegaLiteToVega(spec, …)` | Vega-Lite JSON → Vega JSON `[]byte` | `RenderOption`; only `WithErrorHandler` applies, told of the compiler's warnings |
+| `VegaLiteToVega(spec, …)` | Vega-Lite JSON → Vega JSON `[]byte` | `RenderOption`: `WithContext`, and `WithErrorHandler`, told of the compiler's warnings |
 | `VegaToSVG` / `VegaToPNG` / `VegaToPDF` / `VegaToPDFUsage` | the same, from Vega JSON | as above |
 | `SVGToPNG(svg, …)` / `SVGToPDF(svg, …)` / `SVGToPDFUsage(svg, …)` | an SVG string (best: one Vega wrote) → PNG / PDF | `PNGOption` / `PDFOption` |
 
@@ -22,24 +24,25 @@ The language of a spec is the method's, whatever its `$schema` says, and the `$s
 
 | Option | Default | |
 |---|---|---|
-| `WithLoader(l Loader)` | `DenyLoader{}` (also for `nil`) | what data and images may be loaded; [loading-data.md](loading-data.md) |
+| `WithLoader(l Loader)` | `DenyLoader{}` (also for `nil`) | what data and images may be loaded; [loading-data.md](loading-data.md). A nil pointer (`(*FileLoader)(nil)`) is an error |
 | `WithTimeout(d)` | 30 s; `<= 0` none | the whole call; [limits.md](limits.md) |
 | `WithMemoryLimit(bytes)` | 0: the fixed default budgets | replaces the memory budgets; [limits.md](limits.md) |
-| `WithVegaLiteVersion(v)` | `"6.4"` | `"6.4"` (Vega-Lite 6.4.3) or `"5.8"` (5.8.0); a leading `v` is accepted |
+| `WithVegaLiteVersion(v)` | `"6.4"` | `"6.4"` or `"6.4.3"` (Vega-Lite 6.4.3), `"5.8"` or `"5.8.0"`; a leading `v` is accepted |
 | `WithTheme(json string)` | none | a Vega config applied to every render, to the Vega-Lite compiler as well (so `VegaLiteToVega` reflects it); must be a JSON object |
-| `WithTimezone(tz)` | `"UTC"` | local time for time scales, `timeFormat`, dates without a zone; any IANA name Go knows |
+| `WithTimezone(tz)` | `"UTC"` | local time for time scales, `timeFormat`, dates without a zone; any IANA name Go knows. **`"Local"` is refused**: it would make the output depend on the host |
 | `WithFont`, `WithFontFace`, `WithFontInstance`, `WithFontPalette`, `WithFontFallback`, `WithDefaultFontFamily`, `WithDefaultSerifFamily`, `WithDefaultMonospaceFamily`, `WithSystemFonts`, `WithTextMeasurement`, `WithHarfBuzzTextMetrics` | see [fonts.md](fonts.md) | |
 
 ### Errors from New
 
-`New` fails for an unknown Vega-Lite version (the message lists the available ones), an unknown time zone, a theme that is not a JSON object, a font given with `WithFont`, `WithFontFace` or `WithFontInstance` that does not load, and a `WithFontFallback` family with no font. It loads the fonts you give it; with the embedded fonts alone it loads nothing, and they load on first use.
+`New` fails for an option that is not valid, rather than silently replacing it by a default: an unknown Vega-Lite version (the message lists the available ones), an unknown time zone or `"Local"`, a theme that is not a JSON object, a nil pointer as the Loader, a negative `WithFontFace` index, a font given with `WithFont`, `WithFontFace` or `WithFontInstance` that does not load, and a `WithFontFallback`, `WithDefaultFontFamily`, `WithDefaultSerifFamily` or `WithDefaultMonospaceFamily` family with no font. It loads the fonts when any font option is given (a copy of the bytes: the caller may reuse its buffer); with the embedded fonts alone it loads nothing, and they load on first use.
 
-`AvailableVersions() ([]VersionInfo, error)` lists the bundled compilers (`Key` such as `"vl6_4"`, `VegaVersion`, `VegaLiteVersion` such as `"6.4.3"`); pass the `major.minor` of `VegaLiteVersion` to `WithVegaLiteVersion`. Its error is always nil.
+`AvailableVersions() ([]VersionInfo, error)` lists the bundled compilers (`Key` such as `"vl6_4"`, `VegaVersion`, `VegaLiteVersion` such as `"6.4.3"`); `WithVegaLiteVersion` takes a `VegaLiteVersion` or its `major.minor`. Its error is always nil, and is kept so that existing callers compile.
 
 ## Per-call options
 
 | Option | Type | Default | |
 |---|---|---|---|
+| `WithContext(ctx)` | `ContextOption` (render, PNG, PDF) | none | run the call under `ctx` as well: cancel it, give it a deadline, pass values to the Loader; see above |
 | `WithSignal(name, value)` | `SignalOption` (render, PNG, PDF) | none | set a top-level signal (a Vega-Lite parameter) before drawing, as `view.signal(name, value)`; `value` is anything `encoding/json` encodes; an undefined name fails; ignored by `SVGTo…` |
 | `WithErrorHandler(h)` | `ErrorHandlerOption` (render, PNG, PDF) | none: errors fail the call | see [errors.md](errors.md) |
 | `WithScale(f)` | `PNGOption` | 1 | PNG size factor; must be positive and finite |

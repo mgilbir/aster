@@ -107,8 +107,9 @@ const vega = await import(require.resolve('vega'));
   | `name.png.svg` | SVG input only the rasterizer draws (filters, style sheets) | `SVGToPNG` |
   | `name.ttf`, beside one of the above | a font | registered as family `Evil` for that input |
   | `name.quantize.<ext>` | any of the above | its PNG outputs with `WithQuantizePNG(256)` |
+  | `name.loader`, beside one of the above | the harness Loader it renders with: `record` (a tiny body for every URL) or `bigcsv:N` (N MiB of CSV) | |
 
-  A case is self-contained: no Loader is configured, so its data is inline. It must be valid for every output it has (an SVG that `SVGToPDF` refuses as unsupported fails the test). The reproducer of a fixed resource finding belongs here, named after what it does (`regex-program-20x.vg.json`), so the bound it proves stays proved. The heavier reproducers under `testdata/security` run with `ASTER_SECURITY=1`.
+  A case is self-contained: without a `.loader` file no Loader is configured, so its data is inline. It must be valid for every output it has (an SVG that `SVGToPDF` refuses as unsupported fails the test). The reproducer of a fixed resource finding belongs here, named after what it does (`regex-program-20x.vg.json`), so the bound it proves stays proved. The heavier reproducers under `testdata/security` run with `ASTER_SECURITY=1`.
 - **Floating point:** `scripts/fmacheck.sh` rejects fused multiply-adds the Go compiler could introduce on arm64 where V8 does not have them ([design-rules.md](design-rules.md#floating-point-parity)).
 - **Concurrency:** `go test -race`; `TestConcurrentConverterSharesNothing` with `ASTER_STRESS_FULL=1` renders the whole corpus from 12 goroutines on one Converter.
 - **Colour glyphs and PDF:** colour glyphs are compared with HarfBuzz's drawing of the same fonts (`hb-view`, images in `testdata/colourfonts`). The PDFs are read back with PDFium, Chrome's PDF engine, and compared with the PNGs (`TestPDFium*`). That needs a Python with pypdfium2:

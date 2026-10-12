@@ -154,7 +154,7 @@ func (l *FileLoader) Load(ctx context.Context, uri string) ([]byte, error) {
 		return nil, errors.New("aster: FileLoader is closed")
 	}
 
-	max := loadCap(ctx, l.MaxBytes)
+	max, capName := loadCap(ctx, l.MaxBytes, "FileLoader.MaxBytes")
 
 	// Stat before opening: opening a FIFO would block until a writer shows up.
 	if fi, err := root.Stat(uri); err != nil {
@@ -175,7 +175,7 @@ func (l *FileLoader) Load(ctx context.Context, uri string) ([]byte, error) {
 		return nil, fmt.Errorf("aster: FileLoader %q is not a regular file", uri)
 	}
 	if max >= 0 && fi.Size() > max {
-		return nil, fmt.Errorf("aster: file %q is %d bytes, exceeds %d bytes (raise FileLoader.MaxBytes or the memory limit to allow larger files): %w", uri, fi.Size(), max, budget.ErrLimit)
+		return nil, fmt.Errorf("aster: file %q is %d bytes, exceeds the %d bytes of %s: %w", uri, fi.Size(), max, capName, budget.ErrLimit)
 	}
 	var r io.Reader = f
 	if max >= 0 {
@@ -187,7 +187,7 @@ func (l *FileLoader) Load(ctx context.Context, uri string) ([]byte, error) {
 		return nil, fmt.Errorf("aster: FileLoader failed to read %q: %w", uri, err)
 	}
 	if max >= 0 && int64(len(data)) > max {
-		return nil, fmt.Errorf("aster: file %q exceeds %d bytes (raise FileLoader.MaxBytes or the memory limit to allow larger files): %w", uri, max, budget.ErrLimit)
+		return nil, fmt.Errorf("aster: file %q exceeds the %d bytes of %s: %w", uri, max, capName, budget.ErrLimit)
 	}
 	return data, nil
 }
@@ -227,6 +227,15 @@ func (l *StaticLoader) Load(_ context.Context, _ string) ([]byte, error) {
 // FallbackLoader routes requests to multiple child loaders in order.
 // The first child whose Sanitize accepts the URI handles the request.
 //
+// Sanitize returns what that child's Sanitize made of the URI, so a link or
+// an image is written as the child resolved it (an HTTPLoader's BaseURL, a
+// proxy a child rewrites to). Load routes the URI it is given, which is that
+// answer, through the children again: each child's Sanitize, then its Load.
+// That reaches the same child as long as every child's Sanitize accepts what
+// it returned and returns it unchanged (Sanitize(Sanitize(u)) ==
+// Sanitize(u)), as the loaders of this package all do; a child of your own
+// should too.
+//
 // Order matters: a permissive child shadows every child after it. For
 // example a StaticLoader (whose Sanitize accepts any URI) placed first will
 // answer every request, so put the most specific loaders first and broad
@@ -243,13 +252,11 @@ func NewFallbackLoader(loaders ...Loader) *FallbackLoader {
 func (l *FallbackLoader) Sanitize(ctx context.Context, uri string) (string, error) {
 	var lastErr error
 	for _, child := range l.Loaders {
-		if _, err := child.Sanitize(ctx, uri); err == nil {
-			// At least one child accepts — return the original URI so Load()
-			// can independently route each child with its own Sanitize+Load.
-			return uri, nil
-		} else {
-			lastErr = err
+		s, err := child.Sanitize(ctx, uri)
+		if err == nil {
+			return s, nil
 		}
+		lastErr = err
 	}
 	if lastErr != nil {
 		return "", lastErr

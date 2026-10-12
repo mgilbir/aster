@@ -89,7 +89,7 @@ func (m *Measurer) Bounded(b *ShapingBudget) *Measurer {
 	if m == nil {
 		return nil
 	}
-	return &Measurer{measurerState: m.measurerState, budget: b}
+	return &Measurer{measurerState: m.measurerState, metrics: m.metrics, budget: b}
 }
 
 // runGlyphs bounds the glyphs of a run of n bytes. Shaping can multiply
