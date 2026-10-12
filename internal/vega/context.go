@@ -8,6 +8,7 @@ import (
 	"github.com/mgilbir/aster/internal/expr"
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/scene"
+	"github.com/mgilbir/aster/internal/textcut"
 	"github.com/mgilbir/aster/internal/transforms"
 )
 
@@ -401,7 +402,7 @@ func (c *rtContext) Log(level expr.LogLevel, args []jsval.Value) {
 	if level != expr.LogWarn {
 		return
 	}
-	c.g.warn(string(logText(args, maxWarningText)))
+	c.g.warn(string(logText(args, MaxWarningText)))
 }
 
 // logText is "EXPRESSION" and each argument as String() gives it, separated
@@ -498,7 +499,7 @@ func (f *exprFn) eval(c *rtContext, datum, item, event jsval.Value, vars exprVar
 	if err != nil {
 		// The source is the specification's, and an error a facet cell
 		// raises is raised in every cell: it is cut like a warning's text.
-		failErr(fmt.Errorf("%w (in expression %s)", err, cutText(f.src, maxWarningText)))
+		failErr(fmt.Errorf("%w (in expression %s)", err, textcut.Cut(f.src, MaxWarningText)))
 	}
 	return v
 }

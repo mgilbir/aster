@@ -5,7 +5,8 @@ import (
 	"math"
 	"strconv"
 	"strings"
-	"unicode/utf8"
+
+	"github.com/mgilbir/aster/internal/textcut"
 )
 
 // This file is the one place attribute values are read. SVG's rule for a
@@ -181,11 +182,7 @@ func quoted(s string) string {
 	if len(s) <= maxQuoted {
 		return strconv.Quote(s)
 	}
-	n := maxQuoted
-	for n > 0 && !utf8.RuneStart(s[n]) {
-		n--
-	}
-	return strconv.Quote(s[:n]) + fmt.Sprintf("… (%d bytes)", len(s))
+	return strconv.Quote(textcut.Prefix(s, maxQuoted)) + fmt.Sprintf("… (%d bytes)", len(s))
 }
 
 // prop is a presentation property: an attribute of that name, or a

@@ -44,6 +44,7 @@ flowchart LR
 | resource budgets, the per-call ledger, byte-bounded caches | `budget`, `bcache` | none (aster's own bounds) |
 | loaders | `loader` | vega-loader's policy |
 | image references, CSS colours, embedded fonts | `imageref`, `csscolor`, `fonts/liberation`, `fonts/notoemoji` | none |
+| cutting text to a byte bound at a character boundary (warnings, quoted input, measured text) | `textcut` | none |
 
 ## Resources and errors
 
@@ -97,7 +98,7 @@ Each package imports only packages of lower layers, so there are no cycles and t
 
 <!-- layers:begin (checked by TestPackageLayers) -->
 ```text
-0: bcache budget csscolor fonts/dejavu fonts/liberation fonts/notoemoji fontsubset jsmath jssort
+0: bcache budget csscolor fonts/dejavu fonts/liberation fonts/notoemoji fontsubset jsmath jssort textcut
 1: imageref jsval loader pngopt text
 2: format geo raster scale/color scene transforms/contour transforms/force transforms/hierarchy transforms/label transforms/voronoi transforms/wordcloud
 3: expr geo/geoscene scale svg svgpdf transforms vega/layout vegalite

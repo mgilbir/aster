@@ -74,7 +74,7 @@ func TestFixedLimitsDocMatchesCode(t *testing.T) {
 		"dataflow evaluations":           {{int64(vl.MaxVisits)}},
 		"re-evaluations":                 {{int64(vl.MaxReruns)}, {int64(vl.MaxReruns)}, {c("vega", "maxRunDepth")}},
 		"delimited data (CSV, TSV, DSV)": {{c("vega", "maxDSVColumns")}, {c("vega", "dsvCellsPerRow")}},
-		"warnings":                       {{c("vega", "maxWarningText")}, {c("vega", "maxWarnings")}},
+		"warnings":                       {{c("vega", "MaxWarningText")}, {c("vega", "maxWarnings")}},
 		"one image": {
 			{root["maxImageBytes"], int64(rl.MaxImageBytes), c("svgpdf", "defaultMaxImgBytes")},
 			{root["maxImagePixels"], int64(rl.MaxImagePixels), c("svgpdf", "defaultMaxImgPixels")},

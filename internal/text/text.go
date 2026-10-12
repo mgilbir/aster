@@ -46,6 +46,7 @@ import (
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/fonts/liberation"
 	"github.com/mgilbir/aster/internal/fonts/notoemoji"
+	"github.com/mgilbir/aster/internal/textcut"
 	"github.com/mgilbir/forme/shape"
 )
 
@@ -667,11 +668,7 @@ func (m *Measurer) plan(text, cssFont string) planned {
 // planFont is plan for a font already resolved to its candidate faces.
 func (m *Measurer) planFont(text string, css CSSFont, list *faceList) planned {
 	if len(text) > maxTextBytes {
-		n := maxTextBytes
-		for n > 0 && !utf8.RuneStart(text[n]) {
-			n--
-		}
-		text = text[:n]
+		text = textcut.Prefix(text, maxTextBytes)
 	}
 	size := math.Min(css.Size, maxSizePx)
 

@@ -39,8 +39,8 @@ func TestWarningsAreBounded(t *testing.T) {
 		if len(got) != 1 || !errors.As(got[0], &w) {
 			t.Fatalf("reported %d, want the warning once", len(got))
 		}
-		if len(w) > maxWarningText+len("…") || !strings.HasPrefix(string(w), "Unsupported scale property: ppp") || !strings.HasSuffix(string(w), "…") {
-			t.Errorf("warning of %d bytes %.60q…, want it cut to %d", len(w), w, maxWarningText)
+		if len(w) > MaxWarningText+len("…") || !strings.HasPrefix(string(w), "Unsupported scale property: ppp") || !strings.HasSuffix(string(w), "…") {
+			t.Errorf("warning of %d bytes %.60q…, want it cut to %d", len(w), w, MaxWarningText)
 		}
 	})
 	t.Run("a different warning in every cell", func(t *testing.T) {

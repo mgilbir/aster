@@ -20,7 +20,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-	"unicode/utf8"
 
 	"github.com/mgilbir/aster/internal/testutil"
 )
@@ -218,25 +217,5 @@ func TestTimeoutCoversLargeVegaLiteSpecs(t *testing.T) {
 				t.Errorf("compiling took %.1fs with a 1s timeout, more than %.1fs (killed %v): %s", res.Seconds, limit, killed, res.Err)
 			}
 		})
-	}
-}
-
-// TestCutWarningIsStable: a warning's text is cut to at most 1 KiB plus an
-// ellipsis, at a character boundary, whatever the byte the cut lands on; and
-// cutting a text Vega has already cut changes nothing, so the handler sees
-// Vega's cut text unchanged.
-func TestCutWarningIsStable(t *testing.T) {
-	for pad := 0; pad < 4; pad++ {
-		s := strings.Repeat("a", pad) + strings.Repeat("é€😀", 400)
-		c := cutWarning(s)
-		if len(c) > maxWarningText+len("…") || !utf8.ValidString(c) || !strings.HasSuffix(c, "…") || !strings.HasPrefix(s, strings.TrimSuffix(c, "…")) {
-			t.Errorf("pad %d: cut to %d bytes, %.40q…", pad, len(c), c[max(0, len(c)-40):])
-		}
-		if cc := cutWarning(c); cc != c {
-			t.Errorf("pad %d: cutting again gives %d bytes, want %d", pad, len(cc), len(c))
-		}
-	}
-	if s := strings.Repeat("a", maxWarningText); cutWarning(s) != s {
-		t.Error("a text of exactly 1 KiB is cut")
 	}
 }

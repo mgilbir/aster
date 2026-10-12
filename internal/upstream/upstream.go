@@ -49,7 +49,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
-	"unicode/utf8"
+
+	"github.com/mgilbir/aster/internal/textcut"
 )
 
 const (
@@ -162,11 +163,7 @@ func (c *Call) Signature() string {
 	s := strings.NewReplacer("\t", " ", "\n", " ", "\r", " ").Replace(b.String())
 	if len(s) > maxSignature {
 		sum := sha256.Sum256([]byte(s))
-		cut := maxSignature
-		for cut > 0 && !utf8.RuneStart(s[cut]) {
-			cut--
-		}
-		s = s[:cut] + "…#" + hex.EncodeToString(sum[:8])
+		s = textcut.Prefix(s, maxSignature) + "…#" + hex.EncodeToString(sum[:8])
 	}
 	return s
 }
@@ -460,10 +457,7 @@ func (r *Replay) Done(floor int) {
 func show(v any) string {
 	b, _ := json.Marshal(v)
 	s := string(b)
-	if len(s) > 400 {
-		s = s[:400] + "…"
-	}
-	return s
+	return textcut.Cut(s, 400)
 }
 
 // IsMarker reports whether v is a recorder marker (an object with a "$" key) and returns its kind.

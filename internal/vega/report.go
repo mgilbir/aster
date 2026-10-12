@@ -2,7 +2,8 @@ package vega
 
 import (
 	"fmt"
-	"unicode/utf8"
+
+	"github.com/mgilbir/aster/internal/textcut"
 )
 
 // Upstream's dataflow logs some errors and carries on: a load that fails
@@ -51,12 +52,15 @@ func (s *stopped) Unwrap() error { return s.err }
 // Warnings carry text from the specification (a property or field name, an
 // expression's arguments) and a faceted group repeats them in every cell, so
 // what one render reports is bounded: each distinct warning is reported once,
-// cut to maxWarningText bytes, and past maxWarnings distinct ones a last
+// cut to MaxWarningText bytes, and past maxWarnings distinct ones a last
 // warning says the rest are not reported.
-const (
-	maxWarnings    = 256
-	maxWarningText = 1024
-)
+const maxWarnings = 256
+
+// MaxWarningText is the most bytes of a warning's text: Vega cuts its own to
+// it (textcut.Cut), and the public API cuts every warning it hands a handler
+// to the same length by the same rule, so Vega counts distinct warnings by
+// what the handler will see.
+const MaxWarningText = 1024
 
 // report tells Options.Report of err (a Warning or an error the dataflow
 // carries on past) and asks whether to go on: nil goes on, a *stopped ends
@@ -64,7 +68,7 @@ const (
 // since each is one Options.Report may decide on.
 func (g *flowGraph) report(err error) error {
 	if w, ok := err.(Warning); ok {
-		w = Warning(cutText(string(w), maxWarningText))
+		w = Warning(textcut.Cut(string(w), MaxWarningText))
 		if _, dup := g.warned[w]; dup || len(g.warned) > maxWarnings {
 			return nil
 		}
@@ -84,18 +88,6 @@ func (g *flowGraph) report(err error) error {
 		return &stopped{e}
 	}
 	return nil
-}
-
-// cutText is s cut to at most n bytes, at a character boundary, with an
-// ellipsis when anything was cut.
-func cutText(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	for n > 0 && !utf8.RuneStart(s[n]) {
-		n--
-	}
-	return s[:n] + "…"
 }
 
 // warn reports a warning, ending the render from inside an operator when
