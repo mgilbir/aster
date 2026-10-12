@@ -29,7 +29,7 @@ var legendComponentProperties = append(append([]string{}, commonLegendProperties
 type legendComponent struct{ *split }
 
 func newLegendComponent(explicit, implicit *Object) *legendComponent {
-	return &legendComponent{&split{explicit, implicit}}
+	return &legendComponent{newSplitOf(explicit, implicit)}
 }
 
 func (l *legendComponent) cloneLegend(cc *compileCtx) *legendComponent {
@@ -254,7 +254,7 @@ func mergeLegendComponent(cc *compileCtx, mergedLegend, childLegend *legendCompo
 				}
 				return v1
 			case "title":
-				return mergeTitleComponent(v1, v2)
+				return mergeTitleComponent(cc, v1, v2)
 			case "type":
 				typeMerged = true
 				return makeImplicit(jsval.Str("symbol"))
@@ -265,10 +265,10 @@ func mergeLegendComponent(cc *compileCtx, mergedLegend, childLegend *legendCompo
 	}
 	if typeMerged {
 		if mergedLegend.implicit.Lookup("encode").Get("gradient").IsTruthy() {
-			deleteNestedProperty(jsval.Obj(mergedLegend.implicit), []string{"encode", "gradient"})
+			deleteNestedSplitProperty(&mergedLegend.implicit, "encode", "gradient")
 		}
 		if mergedLegend.explicit.Lookup("encode").Get("gradient").IsTruthy() {
-			deleteNestedProperty(jsval.Obj(mergedLegend.explicit), []string{"encode", "gradient"})
+			deleteNestedSplitProperty(&mergedLegend.explicit, "encode", "gradient")
 		}
 	}
 	return mergedLegend
@@ -283,6 +283,14 @@ func deleteNestedProperty(obj Value, props []string) bool {
 		obj.ObjValue().Delete(prop)
 	}
 	return isEmptyObj(obj)
+}
+
+// deleteNestedSplitProperty is deleteNestedProperty(side, [prop, ...rest]) on
+// one side of a split.
+func deleteNestedSplitProperty(side *jsObj, prop string, rest ...string) {
+	if side.Has(prop) && deleteNestedProperty(side.Lookup(prop), rest) {
+		side.Delete(prop)
+	}
 }
 
 var legendRules = map[string]func(p legendRuleParams) Value{
@@ -821,7 +829,7 @@ func assembleLegends(m Model) []Value {
 		}
 	}
 	var out []Value
-	for _, k := range byGroup.keys {
+	for _, k := range byGroup.keysView() {
 		for _, e := range byGroup.m[k] {
 			if l := assembleLegend(e.cmpt, m.b().config); l.IsTruthy() {
 				out = append(out, l)

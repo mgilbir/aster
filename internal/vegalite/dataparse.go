@@ -267,17 +267,20 @@ func getImplicitFromFilterTransform(cc *compileCtx, t Value) *Object {
 		if val.IsTruthy() {
 			switch {
 			case isDateTime(val):
-				jsSet(cc, implicit, field, jsval.Str("date"))
+				implicit.Set(field, jsval.Str("date"))
 			case val.IsNum():
-				jsSet(cc, implicit, field, jsval.Str("number"))
+				implicit.Set(field, jsval.Str("number"))
 			case val.IsStr():
-				jsSet(cc, implicit, field, jsval.Str("string"))
+				implicit.Set(field, jsval.Str("string"))
 			}
 		}
 		if filter.Get("timeUnit").IsTruthy() {
-			jsSet(cc, implicit, field, jsval.Str("date"))
+			implicit.Set(field, jsval.Str("date"))
 		}
 	}, 0)
+	// Built with Set and ordered once (C4): JavaScript gives the same order
+	// whatever order the keys were added in.
+	jsOrderKeys(cc, implicit)
 	return implicit
 }
 
@@ -289,17 +292,17 @@ func getImplicitFromEncoding(m Model) *Object {
 		field := fd.Get("field").AsString()
 		switch {
 		case isFieldOrDatumDefForTimeFormat(cc, fd):
-			jsSet(cc, implicit, field, jsval.Str("date"))
+			implicit.Set(field, jsval.Str("date"))
 		case channelDefType(fd) == "quantitative" && isMinMaxOp(fd.Get("aggregate")):
-			jsSet(cc, implicit, field, jsval.Str("number"))
+			implicit.Set(field, jsval.Str("number"))
 		case accessPathDepth(field) > 1:
 			if !implicit.Has(field) {
-				jsSet(cc, implicit, field, jsval.Str("flatten"))
+				implicit.Set(field, jsval.Str("flatten"))
 			}
 		case isScaleFieldDef(fd) && isSortField(cc, fd.Get("sort")) && accessPathDepth(fd.Get("sort").Get("field").AsString()) > 1:
 			sf := fd.Get("sort").Get("field").AsString()
 			if !implicit.Has(sf) {
-				jsSet(cc, implicit, sf, jsval.Str("flatten"))
+				implicit.Set(sf, jsval.Str("flatten"))
 			}
 		}
 	}
@@ -332,10 +335,13 @@ func getImplicitFromEncoding(m Model) *Object {
 			}
 			dd := u.encoding.Get(dim)
 			if isFieldDef(cc, dd) && channelDefType(dd) == "quantitative" && !implicit.Has(dd.Get("field").AsString()) {
-				jsSet(cc, implicit, dd.Get("field").AsString(), jsval.Str("number"))
+				implicit.Set(dd.Get("field").AsString(), jsval.Str("number"))
 			}
 		}
 	}
+	// Built with Set and ordered once (C4): JavaScript gives the same order
+	// whatever order the keys were added in.
+	jsOrderKeys(cc, implicit)
 	return implicit
 }
 
@@ -349,11 +355,14 @@ func getImplicitFromSelection(m Model) *Object {
 			for _, proj := range sel.project.items {
 				cc.work(1)
 				if proj.channel == "" && accessPathDepth(proj.field) > 1 {
-					jsSet(m.b().ctx, implicit, proj.field, jsval.Str("flatten"))
+					implicit.Set(proj.field, jsval.Str("flatten"))
 				}
 			}
 		}
 	}
+	// Built with Set and ordered once (C4): JavaScript gives the same order
+	// whatever order the keys were added in.
+	jsOrderKeys(cc, implicit)
 	return implicit
 }
 

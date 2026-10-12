@@ -178,9 +178,13 @@ func assembleTopLevelModel(model Model, top *Object, datasets, usermeta jsval.Va
 	rootData := assembleRootData(cc, b.comp.data, datasets)
 	var data []Value
 	if cc.v5 {
-		data = append(model.assembleSelectionData(nil), rootData...)
+		acc := newSelDataAcc(cc, nil)
+		model.assembleSelectionData(acc)
+		data = append(acc.list(), rootData...)
 	} else {
-		data = model.assembleSelectionData(rootData)
+		acc := newSelDataAcc(cc, rootData)
+		model.assembleSelectionData(acc)
+		data = acc.list()
 	}
 	projections := b.assembleProjections()
 	title := model.assembleTitle()

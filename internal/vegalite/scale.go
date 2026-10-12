@@ -14,7 +14,7 @@ type scaleComponent struct {
 }
 
 func newScaleComponent(name string, typeWithExplicit withExplicit) *scaleComponent {
-	s := &scaleComponent{split: &split{jsval.NewObject(4), mk("name", name)}}
+	s := &scaleComponent{split: newSplitOf(nil, mk("name", name))}
 	s.setWithExplicit("type", typeWithExplicit)
 	return s
 }

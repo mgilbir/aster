@@ -331,7 +331,7 @@ func mergeParseFn() func(root dfNode) bool {
 					for _, child := range original {
 						cc.work(1)
 						if pn, ok := child.(*parseNode); ok {
-							for _, k := range common.keys {
+							for _, k := range common.keysView() {
 								cc.work(1)
 								pn.parse.Delete(k)
 							}
@@ -350,7 +350,7 @@ func mergeParseFn() func(root dfNode) bool {
 
 func newOrderedObject(cc *compileCtx, m *omap[Value]) *Object {
 	o := mk()
-	for _, k := range m.keys {
+	for _, k := range m.keysView() {
 		cc.work(1)
 		jsSet(cc, o, k, m.m[k])
 	}
@@ -371,7 +371,7 @@ func mergeAggregatesFn() func(root dfNode) bool {
 					groups.set(k, append(list, agg))
 				}
 			}
-			for _, k := range groups.keys {
+			for _, k := range groups.keysView() {
 				cc.work(1)
 				mergeable := groups.m[k]
 				if len(mergeable) > 1 {
@@ -430,7 +430,7 @@ func mergeIdenticalNodesFn() func(root dfNode) bool {
 				list, _ := buckets.get(h)
 				buckets.set(h, append(list, c))
 			}
-			for _, k := range buckets.keys {
+			for _, k := range buckets.keysView() {
 				cc.work(1)
 				nodes := buckets.m[k]
 				if len(nodes) > 1 {

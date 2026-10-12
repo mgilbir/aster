@@ -544,9 +544,9 @@ func assembleTopLevelSignals(m Model, signals []Value) []Value {
 
 	sel := m.b().comp.selection
 	hasSelections := false
-	if sel != nil {
-		signals = append(make([]Value, 0, len(signals)+8*sel.len()), signals...)
-	}
+	// The list grows in place, as upstream's array does: copying it per
+	// unit would also make the signal index (signalPos) start over for
+	// every unit, quadratic in the units (X13).
 	if sel != nil {
 		for _, name := range sel.keyList() {
 			cc.work(modelStep)
@@ -579,17 +579,90 @@ func assembleTopLevelSignals(m Model, signals []Value) []Value {
 	return cleanupEmptyOnArray(cc, signals)
 }
 
-func assembleUnitSelectionData(m *unitModel, data []Value) []Value {
+// selDataAcc is the data list that assembleSelectionData threads through
+// every unit of the view tree. Upstream passes an array: each unit (6.x)
+// returns its selection stores, then the array it was given, then its
+// animation data, a new array per unit; 5.8 appends its stores to a copy.
+// Copying the array and searching it per unit is quadratic in the units
+// (X13), so the list is kept in blocks: the stores of each unit in front (a
+// later unit's before an earlier one's), the data given at the start, then
+// what was appended. Every name in the list is in names; first holds the
+// first entry of each name, which is what upstream's find returns.
+type selDataAcc struct {
+	cc    *compileCtx
+	front [][]Value // per unit, in the order prepended
+	mid   []Value
+	back  []Value
+	names map[string]bool
+	first map[string]Value
+}
+
+func newSelDataAcc(cc *compileCtx, data []Value) *selDataAcc {
+	a := &selDataAcc{cc: cc, mid: data, names: map[string]bool{}, first: map[string]Value{}}
+	for _, d := range data {
+		cc.work(1)
+		a.noteBack(d)
+	}
+	return a
+}
+
+func (a *selDataAcc) empty() bool { return len(a.front) == 0 && len(a.mid) == 0 && len(a.back) == 0 }
+
+// noteBack records d, now the last entry of the list.
+func (a *selDataAcc) noteBack(d Value) {
+	if n := d.Get("name"); n.IsStr() {
+		a.names[n.StrValue()] = true
+		if _, ok := a.first[n.StrValue()]; !ok {
+			a.first[n.StrValue()] = d
+		}
+	}
+}
+
+// prepend puts block before every entry of the list.
+func (a *selDataAcc) prepend(block []Value) {
+	if len(block) == 0 {
+		return
+	}
+	a.front = append(a.front, block)
+	for i := len(block) - 1; i >= 0; i-- {
+		a.cc.work(1)
+		if n := block[i].Get("name"); n.IsStr() {
+			a.names[n.StrValue()] = true
+			a.first[n.StrValue()] = block[i]
+		}
+	}
+}
+
+func (a *selDataAcc) appendAll(block []Value) {
+	for _, d := range block {
+		a.cc.work(1)
+		a.back = append(a.back, d)
+		a.noteBack(d)
+	}
+}
+
+// list is the whole list, in upstream's order.
+func (a *selDataAcc) list() []Value {
+	n := len(a.mid) + len(a.back)
+	for _, b := range a.front {
+		n += len(b)
+	}
+	out := make([]Value, 0, n)
+	for i := len(a.front) - 1; i >= 0; i-- {
+		out = append(out, a.front[i]...)
+	}
+	out = append(out, a.mid...)
+	return append(out, a.back...)
+}
+
+func assembleUnitSelectionData(m *unitModel, acc *selDataAcc) {
 	cc := m.b().ctx
 
 	var selectionData, animationData []Value
-	haveData := map[string]bool{}
-	for _, d := range data {
-		cc.work(1)
-		if n := d.Get("name"); n.IsStr() {
-			haveData[n.StrValue()] = true
-		}
-	}
+	// Store names added by this unit; upstream checks them together with
+	// the data it was given.
+	added := map[string]bool{}
+	hadData := !acc.empty()
 	unit := unitName(m, false)
 	if m.comp.selection != nil {
 		for _, name := range m.comp.selection.keyList() {
@@ -616,20 +689,13 @@ func assembleUnitSelectionData(m *unitModel, data []Value) []Value {
 				}
 				store.Set("values", jsval.Arr(vals))
 			}
-			if !haveData[sel.name+storeSuffix] {
+			if storeName := sel.name + storeSuffix; !acc.names[storeName] && !added[storeName] {
 				selectionData = append(selectionData, jsval.Obj(store))
-				haveData[sel.name+storeSuffix] = true
+				added[storeName] = true
 			}
-			if isTimerSelection(cc, sel) && len(data) > 0 {
+			if isTimerSelection(cc, sel) && hadData {
 				sourceName := m.lookupDataSource(m.getDataName(dsMain))
-				var sourceData Value
-				for _, d := range data {
-					cc.work(1)
-					if d.Get("name").IsStr() && d.Get("name").StrValue() == sourceName {
-						sourceData = d
-						break
-					}
-				}
+				sourceData := acc.first[sourceName]
 				if sourceData.IsObj() {
 					var filterT Value
 					var rest []Value
@@ -651,10 +717,11 @@ func assembleUnitSelectionData(m *unitModel, data []Value) []Value {
 	}
 	if cc.v5 {
 		// 5.8 appends the stores to the data it was given.
-		return append(append([]Value{}, data...), selectionData...)
+		acc.appendAll(selectionData)
+		return
 	}
-	out := append(append(selectionData, data...), animationData...)
-	return out
+	acc.prepend(selectionData)
+	acc.appendAll(animationData)
 }
 
 func assembleUnitSelectionMarks(m *unitModel, marks []Value) []Value {
@@ -720,6 +787,45 @@ func parseInteractiveLegend(m *unitModel, channel string, legendCmpt *legendComp
 
 // ---- projection ("project" compiler) ----
 
+// signalNamer names the signals of a selection's projected fields as
+// upstream's project compiler does: varName(`${name}_${suffix}`), or with
+// `_1`, `_2`, ... appended until the name is free.
+//
+// Upstream restarts the counter at 1 for every field, which is quadratic
+// when many fields share a name (every name of non-word characters is
+// underscores, C16). The candidates of a field depend only on its base name
+// varName(`${name}_${suffix}`): varName maps each character on its own and
+// `_1` is word characters, so varName(`${b}_${k}`) is varName(b) + `_${k}`.
+// Names only become taken, never free again, so the counters a base has
+// already tried stay taken and the next field of that base resumes after
+// them, picking the name upstream picks.
+type signalNamer struct {
+	taken *sset
+	tried map[string]int // per base name, the counters already found taken
+}
+
+func newSignalNamer() *signalNamer { return &signalNamer{taken: newSset(), tried: map[string]int{}} }
+
+func (n *signalNamer) next(cc *compileCtx, name, suffix string) string {
+	base := varName(name + "_" + suffix)
+	candidate := func(k int) string {
+		if k == 0 {
+			return base
+		}
+		return varName(name + "_" + suffix + "_" + jsval.JSNumberString(float64(k)))
+	}
+	k := n.tried[base]
+	sg := candidate(k)
+	for n.taken.has(sg) {
+		cc.work(1)
+		k++
+		sg = candidate(k)
+	}
+	n.tried[base] = k + 1
+	n.taken.add(sg)
+	return sg
+}
+
 var projectCompiler = selectionCompiler{
 	defined: func(*selectionComponent) bool { return true },
 	parse: func(m *unitModel, sel *selectionComponent, selDef Value) {
@@ -728,21 +834,13 @@ var projectCompiler = selectionCompiler{
 		proj := sel.project
 		parsed := map[string]*selProjItem{}
 		timeUnits := newOmap[*Object]()
-		signals := newSset()
+		names := newSignalNamer()
 		signalName := func(p *selProjItem, rangeK string) string {
 			suffix := p.field
 			if rangeK == "visual" {
 				suffix = p.channel
 			}
-			sg := varName(name + "_" + suffix)
-			// The counter restarts for every field, quadratic when many
-			// fields share a name (C16); each probe is charged.
-			for counter := 1; signals.has(sg); counter++ {
-				cc.work(1)
-				sg = varName(name + "_" + suffix + "_" + jsval.JSNumberString(float64(counter)))
-			}
-			signals.add(sg)
-			return sg
+			return names.next(cc, name, suffix)
 		}
 		typ := sel.typ
 		cfg := m.config.Get("selection").Get(typ)
@@ -1042,7 +1140,7 @@ var intervalCompiler = selectionCompiler{
 		name := sel.name
 		tupleSg := name + tupleSuffix
 		var channels []*selProjItem
-		for _, k := range sel.project.hasChannel.keys {
+		for _, k := range sel.project.hasChannel.keysView() {
 			p := sel.project.hasChannel.m[k]
 			if p.channel == chX || p.channel == chY {
 				channels = append(channels, p)

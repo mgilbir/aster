@@ -26,7 +26,7 @@ func newProjectionComponent(name string, specified Value, size, data []Value, ha
 	explicit := jsval.NewObject(4)
 	spreadV(explicit, specified)
 	return &projectionComponent{
-		split: &split{explicit, mk("name", name)}, specifiedProjection: specified, size: size, data: data, hasData: hasData,
+		split: newSplitOf(explicit, mk("name", name)), specifiedProjection: specified, size: size, data: data, hasData: hasData,
 	}
 }
 

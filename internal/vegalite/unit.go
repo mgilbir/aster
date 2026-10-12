@@ -260,8 +260,8 @@ func (u *unitModel) assembleSignals() []Value {
 	return append(out, assembleUnitSelectionSignals(u, nil)...)
 }
 
-func (u *unitModel) assembleSelectionData(data []Value) []Value {
-	return assembleUnitSelectionData(u, data)
+func (u *unitModel) assembleSelectionData(acc *selDataAcc) {
+	assembleUnitSelectionData(u, acc)
 }
 
 func (u *unitModel) assembleLayout() Value { return jsval.Null }

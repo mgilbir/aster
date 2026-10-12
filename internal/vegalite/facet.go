@@ -115,8 +115,8 @@ func (f *facetModel) assembleSignals() []Value {
 	return nil
 }
 
-func (f *facetModel) assembleSelectionData(data []Value) []Value {
-	return f.child.assembleSelectionData(data)
+func (f *facetModel) assembleSelectionData(acc *selDataAcc) {
+	f.child.assembleSelectionData(acc)
 }
 
 func (f *facetModel) getHeaderLayoutMixins() *Object {

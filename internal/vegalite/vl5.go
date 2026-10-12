@@ -583,7 +583,7 @@ func assembleLegends58(m Model) []Value {
 		byDomain.m[domainHash] = list
 	}
 	var out []Value
-	for _, k := range byDomain.keys {
+	for _, k := range byDomain.keysView() {
 		for _, l := range byDomain.m[k] {
 			if v := assembleLegend(l, m.b().config); v.IsTruthy() {
 				out = append(out, v)

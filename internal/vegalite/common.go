@@ -159,18 +159,60 @@ func arrayOf(v Value) []Value {
 	return []Value{v}
 }
 
-func mergeTitleFieldDefs(f1, f2 []Value) []Value {
-	merged := append([]Value(nil), f1...)
+func mergeTitleFieldDefs(cc *compileCtx, f1, f2 []Value) []Value {
+	// Upstream compares each new field def with every one merged so far, and
+	// a shared axis merges the defs of its views one view at a time: quadratic
+	// in the views (X13). Here the defs are bucketed by their stable JSON
+	// (deepEqual values print the same), so a def is compared only with the
+	// few of its bucket; and the buckets of the list a merge returns are kept
+	// (titleMerges), so the next merge, which is given that list, extends them
+	// instead of bucketing the whole list again. The list is append-only and
+	// the slice returned is capped at its length, so a later append by anyone
+	// else copies rather than writing into it.
+	var tm *titleMerge
+	if len(f1) > 0 && cc != nil {
+		if t := cc.titleMerges[&f1[0]]; t != nil && len(t.items) == len(f1) {
+			tm = t
+			delete(cc.titleMerges, &f1[0])
+		}
+	}
+	if tm == nil {
+		tm = &titleMerge{items: append([]Value(nil), f1...), byKey: map[string][]int{}}
+		for i, fd := range tm.items {
+			k := stringify(cc, fd)
+			tm.byKey[k] = append(tm.byKey[k], i)
+		}
+	}
 outer:
 	for _, fd := range f2 {
-		for _, m := range merged {
-			if deepEqual(m, fd) {
+		cc.work(1)
+		k := stringify(cc, fd)
+		for _, i := range tm.byKey[k] {
+			cc.work(1)
+			if deepEqual(tm.items[i], fd) {
 				continue outer
 			}
 		}
-		merged = append(merged, fd)
+		tm.byKey[k] = append(tm.byKey[k], len(tm.items))
+		tm.items = append(tm.items, fd)
 	}
-	return merged
+	if len(tm.items) == 0 {
+		return nil
+	}
+	if cc != nil {
+		if cc.titleMerges == nil {
+			cc.titleMerges = map[*Value]*titleMerge{}
+		}
+		cc.titleMerges[&tm.items[0]] = tm
+	}
+	return tm.items[:len(tm.items):len(tm.items)]
+}
+
+// titleMerge is a list of title field defs a merge returned, with its
+// buckets (see mergeTitleFieldDefs).
+type titleMerge struct {
+	items []Value
+	byKey map[string][]int
 }
 
 func mergeTitle(t1, t2 Value) Value {
@@ -187,7 +229,7 @@ func mergeTitle(t1, t2 Value) Value {
 }
 
 // mergeTitleComponent merges two title components (text or field-def lists).
-func mergeTitleComponent(v1, v2 withExplicit) withExplicit {
+func mergeTitleComponent(cc *compileCtx, v1, v2 withExplicit) withExplicit {
 	a, b := v1.value, v2.value
 	aText := isText(a) || isSignalRef(a)
 	bText := isText(b) || isSignalRef(b)
@@ -201,7 +243,7 @@ func mergeTitleComponent(v1, v2 withExplicit) withExplicit {
 	case bText:
 		return withExplicit{v1.explicit, b}
 	}
-	return withExplicit{v1.explicit, jsval.Arr(mergeTitleFieldDefs(a.Items(), b.Items()))}
+	return withExplicit{v1.explicit, jsval.Arr(mergeTitleFieldDefs(cc, a.Items(), b.Items()))}
 }
 
 // inheritedObjectKey reports a key that reads as present on any plain object

@@ -42,7 +42,7 @@ func (b *binComponent) clone(cc *compileCtx) *binComponent {
 func (n *binNode) clone() dfNode {
 	cc := n.cc
 	c := newOmap[*binComponent]()
-	for _, k := range n.bins.keys {
+	for _, k := range n.bins.keysView() {
 		cc.work(1)
 		c.set(k, n.bins.m[k].clone(n.cc))
 	}
@@ -79,7 +79,7 @@ func (b *binComponent) toValue() Value {
 func (n *binNode) hash() string {
 	cc := n.cc
 	o := jsval.NewObject(4)
-	for _, k := range n.bins.keys {
+	for _, k := range n.bins.keysView() {
 		cc.work(1)
 		o.Set(k, n.bins.m[k].toValue())
 	}
@@ -89,7 +89,7 @@ func (n *binNode) hash() string {
 func (n *binNode) producedFields() *sset {
 	cc := n.cc
 	s := newSset()
-	for _, k := range n.bins.keys {
+	for _, k := range n.bins.keysView() {
 		cc.work(1)
 		for _, as := range n.bins.m[k].as {
 			cc.work(1)
@@ -104,7 +104,7 @@ func (n *binNode) producedFields() *sset {
 func (n *binNode) dependentFields() *sset {
 	cc := n.cc
 	s := newSset()
-	for _, k := range n.bins.keys {
+	for _, k := range n.bins.keysView() {
 		cc.work(1)
 		s.add(n.bins.m[k].field)
 	}
@@ -252,7 +252,7 @@ func (n *binNode) assemble() []Value {
 	cc := n.cc
 
 	var out []Value
-	for _, key := range n.bins.keys {
+	for _, key := range n.bins.keysView() {
 		cc.work(1)
 		bin := n.bins.m[key]
 		binAs := bin.as[0]
@@ -308,7 +308,7 @@ func newTimeUnitNode(parent dfNode, tu *omap[*Object]) *timeUnitNode {
 func (n *timeUnitNode) clone() dfNode {
 	cc := n.cc
 	c := newOmap[*Object]()
-	for _, k := range n.timeUnits.keys {
+	for _, k := range n.timeUnits.keysView() {
 		cc.work(1)
 		c.set(k, deepClone(n.cc, jsval.Obj(n.timeUnits.m[k])).ObjValue())
 	}
@@ -320,7 +320,7 @@ func isTimeUnitTransformComponent(c *Object) bool { return !c.Lookup("as").IsUnd
 func (n *timeUnitNode) producedFields() *sset {
 	cc := n.cc
 	s := newSset()
-	for _, k := range n.timeUnits.keys {
+	for _, k := range n.timeUnits.keysView() {
 		cc.work(1)
 		f := n.timeUnits.m[k]
 		if isTimeUnitTransformComponent(f) {
@@ -335,7 +335,7 @@ func (n *timeUnitNode) producedFields() *sset {
 func (n *timeUnitNode) dependentFields() *sset {
 	cc := n.cc
 	s := newSset()
-	for _, k := range n.timeUnits.keys {
+	for _, k := range n.timeUnits.keysView() {
 		cc.work(1)
 		s.add(n.timeUnits.m[k].Lookup("field").AsString())
 	}
@@ -345,7 +345,7 @@ func (n *timeUnitNode) dependentFields() *sset {
 func (n *timeUnitNode) hash() string {
 	cc := n.cc
 	o := jsval.NewObject(4)
-	for _, k := range n.timeUnits.keys {
+	for _, k := range n.timeUnits.keysView() {
 		cc.work(1)
 		o.Set(k, jsval.Obj(n.timeUnits.m[k]))
 	}
@@ -411,12 +411,12 @@ func makeTimeUnitFromTransform(cc *compileCtx, parent dfNode, t Value) *timeUnit
 func (n *timeUnitNode) merge(other *timeUnitNode) {
 	cc := n.cc
 	c := newOmap[*Object]()
-	for _, k := range n.timeUnits.keys {
+	for _, k := range n.timeUnits.keysView() {
 		cc.work(1)
 		c.set(k, n.timeUnits.m[k])
 	}
 	n.timeUnits = c
-	for _, k := range other.timeUnits.keys {
+	for _, k := range other.timeUnits.keysView() {
 		cc.work(1)
 		if !n.timeUnits.has(k) {
 			n.timeUnits.set(k, other.timeUnits.m[k])
@@ -429,7 +429,7 @@ func (n *timeUnitNode) merge(other *timeUnitNode) {
 func (n *timeUnitNode) removeFormulas(fields *sset) {
 	cc := n.cc
 	nf := newOmap[*Object]()
-	for _, k := range n.timeUnits.keys {
+	for _, k := range n.timeUnits.keysView() {
 		cc.work(1)
 		c := n.timeUnits.m[k]
 		var fieldAs string
@@ -487,7 +487,7 @@ func (n *timeUnitNode) assemble() []Value {
 	cc := n.cc
 
 	var out []Value
-	for _, k := range n.timeUnits.keys {
+	for _, k := range n.timeUnits.keysView() {
 		cc.work(1)
 		f := n.timeUnits.m[k]
 		rect := f.Lookup("rectBandPosition")
@@ -536,10 +536,10 @@ func newAggregateNode(parent dfNode, dims *sset, measures *omap[*omap[*sset]]) *
 
 func cloneMeasures(cc *compileCtx, m *omap[*omap[*sset]]) *omap[*omap[*sset]] {
 	c := newOmap[*omap[*sset]]()
-	for _, f := range m.keys {
+	for _, f := range m.keysView() {
 		cc.work(1)
 		ops := newOmap[*sset]()
-		for _, op := range m.m[f].keys {
+		for _, op := range m.m[f].keysView() {
 			cc.work(1)
 			ops.set(op, m.m[f].m[op].clone())
 		}
@@ -611,10 +611,10 @@ func addDimension(dims *sset, channel string, fd Value, m Model) {
 }
 
 func mergeMeasures(cc *compileCtx, parent, child *omap[*omap[*sset]]) {
-	for _, field := range child.keys {
+	for _, field := range child.keysView() {
 		cc.work(1)
 		ops := child.m[field]
-		for _, op := range ops.keys {
+		for _, op := range ops.keysView() {
 			cc.work(1)
 			if pf, ok := parent.get(field); ok {
 				existing, _ := pf.get(op)
@@ -736,7 +736,7 @@ func (n *aggregateNode) addDimensions(fields []string) {
 func (n *aggregateNode) dependentFields() *sset {
 	cc := n.cc
 	s := n.dimensions.clone()
-	for _, k := range n.measures.keys {
+	for _, k := range n.measures.keysView() {
 		cc.work(1)
 		s.add(k)
 	}
@@ -746,9 +746,9 @@ func (n *aggregateNode) dependentFields() *sset {
 func (n *aggregateNode) producedFields() *sset {
 	cc := n.cc
 	out := newSset()
-	for _, field := range n.measures.keys {
+	for _, field := range n.measures.keysView() {
 		cc.work(1)
-		for _, op := range n.measures.m[field].keys {
+		for _, op := range n.measures.m[field].keysView() {
 			cc.work(1)
 			m := n.measures.m[field].m[op]
 			if m.size() == 0 {
@@ -767,10 +767,10 @@ func (n *aggregateNode) producedFields() *sset {
 func (n *aggregateNode) hash() string {
 	cc := n.cc
 	meas := jsval.NewObject(4)
-	for _, f := range n.measures.keys {
+	for _, f := range n.measures.keysView() {
 		cc.work(1)
 		ops := jsval.NewObject(2)
-		for _, op := range n.measures.m[f].keys {
+		for _, op := range n.measures.m[f].keysView() {
 			cc.work(1)
 			ops.Set(op, jsval.Str(setToHashString(n.cc, n.measures.m[f].m[op])))
 		}
@@ -782,9 +782,9 @@ func (n *aggregateNode) hash() string {
 func (n *aggregateNode) assemble() Value {
 	cc := n.cc
 	var ops, fields, as []Value
-	for _, field := range n.measures.keys {
+	for _, field := range n.measures.keysView() {
 		cc.work(1)
-		for _, op := range n.measures.m[field].keys {
+		for _, op := range n.measures.m[field].keysView() {
 			cc.work(1)
 			for _, alias := range n.measures.m[field].m[op].list() {
 				cc.work(1)

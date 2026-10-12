@@ -83,8 +83,8 @@ func TestJSKeyOrder(t *testing.T) {
 	for _, k := range []string{"x", "3", "y", "1"} {
 		m.set(k, 0)
 	}
-	if strings.Join(m.keys, ",") != "1,3,x,y" {
-		t.Errorf("omap key order = %v", m.keys)
+	if strings.Join(m.keysView(), ",") != "1,3,x,y" {
+		t.Errorf("omap key order = %v", m.keysView())
 	}
 }
 

@@ -39,6 +39,9 @@ type compileCtx struct {
 	sigIdx signalIndex
 	// transforms counts the data transforms parsed so far (see maxTransforms).
 	transforms int
+	// titleMerges are the title field-def lists merged so far, by their
+	// first element (see mergeTitleFieldDefs).
+	titleMerges map[*Value]*titleMerge
 }
 
 // check panics with the context's error once the caller's context is done.

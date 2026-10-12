@@ -102,7 +102,7 @@ func parseNodeWithAncestors(parent dfNode, explicit, implicit *Object, ap *ances
 			}
 		}
 	}
-	parse := &split{explicit, implicit}
+	parse := newSplitOf(explicit, implicit)
 	ap.copyAll(parse)
 	p := jsval.NewObject(4)
 	comb := parse.combine()
@@ -342,18 +342,18 @@ func newFilterInvalidNode(parent dfNode, filter *omap[Value]) *filterInvalidNode
 func (n *filterInvalidNode) clone() dfNode {
 	cc := n.cc
 	c := newOmap[Value]()
-	for _, k := range n.filter.keys {
+	for _, k := range n.filter.keysView() {
 		cc.work(1)
 		c.set(k, n.filter.m[k])
 	}
 	return initNode(&filterInvalidNode{filter: c}, nil)
 }
-func (n *filterInvalidNode) dependentFields() *sset { return newSset(n.filter.keys...) }
+func (n *filterInvalidNode) dependentFields() *sset { return newSset(n.filter.keysView()...) }
 func (n *filterInvalidNode) producedFields() *sset  { return newSset() }
 func (n *filterInvalidNode) hash() string {
 	cc := n.cc
 	o := jsval.NewObject(4)
-	for _, k := range n.filter.keys {
+	for _, k := range n.filter.keysView() {
 		cc.work(1)
 		o.Set(k, n.filter.m[k])
 	}
@@ -416,7 +416,7 @@ func (n *filterInvalidNode) assemble() Value {
 	cc := n.cc
 
 	var filters []string
-	for _, field := range n.filter.keys {
+	for _, field := range n.filter.keysView() {
 		cc.work(1)
 		fd := n.filter.m[field]
 		ref := vgField(cc, fd, fieldRefOption{expr: "datum"})

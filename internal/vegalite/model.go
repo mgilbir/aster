@@ -24,7 +24,7 @@ type Model interface {
 
 	assembleSelectionTopLevelSignals(signals []Value) []Value
 	assembleSignals() []Value
-	assembleSelectionData(data []Value) []Value
+	assembleSelectionData(acc *selDataAcc)
 	assembleGroupStyle() Value
 	assembleLayout() Value
 	assembleDefaultLayout() *Object

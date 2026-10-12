@@ -150,13 +150,12 @@ func (l *layerModel) assembleLayoutSignals() []Value {
 	return signals
 }
 
-func (l *layerModel) assembleSelectionData(data []Value) []Value {
+func (l *layerModel) assembleSelectionData(acc *selDataAcc) {
 	cc := l.b().ctx
 	for _, c := range l.kids {
 		cc.work(modelStep)
-		data = c.assembleSelectionData(data)
+		c.assembleSelectionData(acc)
 	}
-	return data
 }
 
 func (l *layerModel) assembleGroupStyle() Value {
@@ -321,13 +320,12 @@ func (c *concatModel) assembleLayoutSignals() []Value {
 	return signals
 }
 
-func (c *concatModel) assembleSelectionData(data []Value) []Value {
+func (c *concatModel) assembleSelectionData(acc *selDataAcc) {
 	cc := c.b().ctx
 	for _, k := range c.kids {
 		cc.work(modelStep)
-		data = k.assembleSelectionData(data)
+		k.assembleSelectionData(acc)
 	}
-	return data
 }
 
 func (c *concatModel) assembleMarks() []Value {

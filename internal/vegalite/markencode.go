@@ -334,7 +334,7 @@ func descriptionEncode(m *unitModel) Value {
 	}
 	var parts []string
 	idx := 0
-	for _, key := range data.keys {
+	for _, key := range data.keysView() {
 		cc.work(1)
 		value := data.m[key]
 		if cc.v5 && value == "" {
@@ -491,7 +491,7 @@ func tooltipData(cc *compileCtx, encoding Value, stack *stackProperties, config 
 func tooltipRefForEncoding(cc *compileCtx, encoding Value, stack *stackProperties, config Value, reactiveGeom bool) Value {
 	data := tooltipData(cc, encoding, stack, config, reactiveGeom)
 	var kv []string
-	for _, k := range data.keys {
+	for _, k := range data.keysView() {
 		cc.work(1)
 		kv = append(kv, `"`+k+`": `+jsName(data.m[k]))
 	}

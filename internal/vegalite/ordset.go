@@ -1,5 +1,10 @@
 package vegalite
 
+import (
+	"slices"
+	"sort"
+)
+
 // sset is an insertion-ordered set of strings (JavaScript's Set<string>).
 // A nil *sset stands for `undefined`, which upstream uses for "unknown".
 type sset struct {
@@ -91,10 +96,20 @@ func hasIntersection(a, b *sset) bool {
 	return false
 }
 
-// omap is an insertion-ordered string-keyed map.
+// omap is an insertion-ordered string-keyed map with JavaScript's key order:
+// array-index keys first, ascending, then the rest in insertion order.
+//
+// Keeping that order on every insert (upstream's own objects do) moves the
+// keys after an index key each time, quadratic over a map's keys; deleting
+// from the middle of the key list is linear too. So the list is kept lazily
+// (C4): a new key is appended and a deleted one only leaves the value map,
+// and the list is put in order the next time it is read, with the same
+// result as ordering on every insert.
 type omap[V any] struct {
-	keys []string
-	m    map[string]V
+	ks []string
+	m  map[string]V
+	// untidy says ks holds deleted keys or index keys out of order.
+	untidy bool
 }
 
 func newOmap[V any]() *omap[V] { return &omap[V]{m: map[string]V{}} }
@@ -117,29 +132,14 @@ func (o *omap[V]) has(k string) bool { _, ok := o.get(k); return ok }
 
 func (o *omap[V]) set(k string, v V) {
 	if _, ok := o.m[k]; !ok {
-		o.keys = insertJSKey(o.keys, k)
+		if n, isIdx := arrayIndex(k); isIdx && !o.untidy && len(o.ks) > 0 {
+			if m, lastIdx := arrayIndex(o.ks[len(o.ks)-1]); !lastIdx || m > n {
+				o.untidy = true
+			}
+		}
+		o.ks = append(o.ks, k)
 	}
 	o.m[k] = v
-}
-
-// insertJSKey appends k, or places an array-index key among the leading index
-// keys in ascending order (JavaScript's own-key order).
-func insertJSKey(keys []string, k string) []string {
-	n, ok := arrayIndex(k)
-	if !ok {
-		return append(keys, k)
-	}
-	pos := len(keys)
-	for i, e := range keys {
-		if m, isIdx := arrayIndex(e); !isIdx || m > n {
-			pos = i
-			break
-		}
-	}
-	keys = append(keys, "")
-	copy(keys[pos+1:], keys[pos:])
-	keys[pos] = k
-	return keys
 }
 
 func (o *omap[V]) del(k string) {
@@ -147,19 +147,57 @@ func (o *omap[V]) del(k string) {
 		return
 	}
 	delete(o.m, k)
-	for i, x := range o.keys {
-		if x == k {
-			o.keys = append(o.keys[:i], o.keys[i+1:]...)
-			break
+	o.untidy = true
+	// Compact once the deleted keys are most of the list, so its length
+	// stays proportional to the live keys.
+	if len(o.ks) > 32 && len(o.m) < len(o.ks)/2 {
+		o.tidy()
+	}
+}
+
+// tidy drops the deleted keys from the list and puts it in JavaScript's
+// order, which is what ordering on every insert would have given: index keys
+// ascending, then the others in the order they were (last) added.
+func (o *omap[V]) tidy() {
+	if !o.untidy {
+		return
+	}
+	// A key's live entry is its last one: a key deleted and set again was
+	// appended anew. Walk from the end, keeping the first entry of each
+	// key still in m.
+	seen := make(map[string]bool, len(o.m))
+	live := make([]string, 0, len(o.m))
+	var idx []string
+	for i := len(o.ks) - 1; i >= 0; i-- {
+		k := o.ks[i]
+		if _, ok := o.m[k]; !ok || seen[k] {
+			continue
+		}
+		seen[k] = true
+		if _, isIdx := arrayIndex(k); isIdx {
+			idx = append(idx, k)
+		} else {
+			live = append(live, k)
 		}
 	}
+	slices.Reverse(live)
+	if len(idx) > 0 {
+		sort.Slice(idx, func(i, j int) bool {
+			a, _ := arrayIndex(idx[i])
+			b, _ := arrayIndex(idx[j])
+			return a < b
+		})
+		live = append(idx, live...)
+	}
+	o.ks = live
+	o.untidy = false
 }
 
 func (o *omap[V]) len() int {
 	if o == nil {
 		return 0
 	}
-	return len(o.keys)
+	return len(o.m)
 }
 
 // keysView returns the keys without copying; the caller must not modify the
@@ -168,12 +206,20 @@ func (o *omap[V]) keysView() []string {
 	if o == nil {
 		return nil
 	}
-	return o.keys
+	o.tidy()
+	return o.ks
 }
 
 func (o *omap[V]) keyList() []string {
 	if o == nil {
 		return nil
 	}
-	return append([]string(nil), o.keys...)
+	o.tidy()
+	return append([]string(nil), o.ks...)
+}
+
+// jsEntry is a key and its value.
+type jsEntry struct {
+	k string
+	v Value
 }

@@ -188,7 +188,7 @@ func mergeAxisComponents(cc *compileCtx, merged, child []*axisComponent) ([]*axi
 				if mo.explicit && co.explicit && !strictEq(mo.value, co.value) {
 					return nil, false
 				}
-				merged[i] = mergeAxisComponent(mg, ch)
+				merged[i] = mergeAxisComponent(cc, mg, ch)
 			}
 		}
 		return merged, true
@@ -201,14 +201,14 @@ func mergeAxisComponents(cc *compileCtx, merged, child []*axisComponent) ([]*axi
 	return out, true
 }
 
-func mergeAxisComponent(merged, child *axisComponent) *axisComponent {
+func mergeAxisComponent(cc *compileCtx, merged, child *axisComponent) *axisComponent {
 	for _, prop := range axisComponentProperties {
 		prop := prop
 		mv := merged.getWithExplicit(prop)
 		v := mergeValuesWithExplicit(&mv, child.getWithExplicit(prop), prop, "axis", func(v1, v2 withExplicit, _, _ string) withExplicit {
 			switch prop {
 			case "title":
-				return mergeTitleComponent(v1, v2)
+				return mergeTitleComponent(cc, v1, v2)
 			case "gridScale":
 				return withExplicit{v1.explicit, firstDefined(v1.value, v2.value)}
 			}
@@ -454,7 +454,7 @@ var axisRules = map[string]func(p axisRuleParams) Value{
 		if isFieldDef(p.model.ctx, fd2) {
 			f2 = []Value{toFieldDefBase(fd2)}
 		}
-		return jsval.Arr(mergeTitleFieldDefs(f1, f2))
+		return jsval.Arr(mergeTitleFieldDefs(p.model.ctx, f1, f2))
 	},
 	"values": func(p axisRuleParams) Value { return guideValues(p.model.ctx, p.axis, p.fod) },
 	"zindex": func(p axisRuleParams) Value {
