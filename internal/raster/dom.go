@@ -109,6 +109,7 @@ const (
 	aLetterSpacing
 	aWordSpacing
 	aMixBlendMode
+	aVectorEffect
 	aOffset
 	aOpacity
 	aPoints
@@ -205,7 +206,7 @@ var attrNames = map[string]attrID{
 	"gradientTransform": aGradientTransform, "gradientUnits": aGradientUnits,
 	"height": aHeight, "href": aHref, "image-rendering": aImageRendering,
 	"letter-spacing": aLetterSpacing, "word-spacing": aWordSpacing,
-	"mix-blend-mode": aMixBlendMode, "offset": aOffset, "opacity": aOpacity,
+	"mix-blend-mode": aMixBlendMode, "vector-effect": aVectorEffect, "offset": aOffset, "opacity": aOpacity,
 	"points": aPoints, "preserveAspectRatio": aPreserveAspectRatio, "r": aR,
 	"rotate": aRotate, "rx": aRx, "ry": aRy, "spreadMethod": aSpreadMethod,
 	"stop-color": aStopColor, "stop-opacity": aStopOpacity, "stroke": aStroke,
@@ -248,7 +249,7 @@ var presentation = func() (t [256]bool) {
 		aOpacity, aOverflow, aPaintOrder, aShapeRendering, aStopColor, aStopOpacity,
 		aStroke, aStrokeDasharray, aStrokeDashoffset, aStrokeLinecap, aStrokeLinejoin,
 		aStrokeMiterlimit, aStrokeOpacity, aStrokeWidth, aTextAnchor, aTextDecoration,
-		aTextRendering, aTransform, aVisibility, aWordSpacing,
+		aTextRendering, aTransform, aVectorEffect, aVisibility, aWordSpacing,
 	} {
 		t[id] = true
 	}

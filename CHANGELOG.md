@@ -23,6 +23,8 @@ What changed between versions, for users of the library and the CLI. Breaking ch
 - PNG: a gradient whose geometry overflows (`x2="1e-160"` with `spreadMethod="repeat"`, a radius of `1e-320`) failed the render with an internal error. A linear gradient shorter than tiny-skia draws is now one colour as in resvg (the last stop's when padding, the average of its colours when repeating or reflecting), a radial one too small paints nothing, and no colour table or image index is computed from NaN. Overflowing transforms of images and paths no longer index out of range, and the number of segments of a curve whose coordinates overflow no longer differs between amd64 and arm64.
 - PNG and PDF read an image URL whose scheme is upper case (`DATA:image/png;…`) as the inline image the SVG writer drew, instead of sending it to the Loader and failing the call.
 - PNG: marker-mid on a path of many closed subpaths took time quadratic in its segments.
+- PNG: `vector-effect="non-scaling-stroke"`, which Vega writes on path marks it scales, is honoured (SVG 2): the stroke keeps its width, as in a browser, instead of being scaled with the path. resvg ignores it, so such charts no longer match resvg's PNG, which was wrong.
+- PNG (SVG input): an element whose font size is not set, or set invalid (negative), takes CSS's initial `medium`, 16px, as browsers and the PDF writer do, rather than resvg's tool default of 12px. Vega always sets a size; a negative `fontSize` now draws its text at 16px.
 
 ### Bounds are charged where the work happens ([ADR 0010](docs/adr/0010-bounds-charged-where-work-happens.md))
 

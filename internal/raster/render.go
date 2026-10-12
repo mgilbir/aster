@@ -65,6 +65,9 @@ type renderer struct {
 	// livePts is the path geometry held for the elements being drawn, in
 	// points (see holdPoints and Limits.MaxPathSegments).
 	livePts int
+	// host maps the host coordinate space (the root viewport's, before its
+	// viewBox) to the device: the output scale.
+	host matrix
 	// maskBytes is the clip coverage held for the elements being drawn,
 	// part of canvasBytes (see newMaskCoverage).
 	maskBytes int
@@ -959,6 +962,9 @@ func (r *renderer) buildShape(n *node, st *state, p *path) bool {
 const shapeTol = 0.1
 
 func (r *renderer) renderShape(n *node, st *state, opacity float64, blend blendMode) {
+	if v, ok := n.get(aVectorEffect); ok {
+		st.nonScaling = strings.TrimSpace(v) == "non-scaling-stroke"
+	}
 	r.pth.reset()
 	if !r.buildShape(n, st, &r.pth) {
 		return
@@ -1065,9 +1071,17 @@ func (r *renderer) drawPath(p *path, st *state, opacity float64, blend blendMode
 		}
 	}
 	doStroke := func() {
-		if stroke && r.mayCover(p, st.ctm, region, strokeReach(st)) {
+		sp, sst := p, st
+		if st.nonScaling {
+			sp, sst = r.hostStroke(p, st)
+			if sp == nil {
+				return
+			}
+		}
+		if stroke && r.mayCover(sp, sst.ctm, region, strokeReach(sst)) {
+			// The paint is the element's, in its user space.
 			if ps, ok := r.resolvePaint(st.stroke, so, st, needBBox); ok {
-				r.strokePath(p, st, ps)
+				r.strokePath(sp, sst, ps)
 			}
 		}
 	}
@@ -1118,6 +1132,31 @@ func (r *renderer) strokePath(p *path, st *state, ps paintSrc) {
 		r.so.pts[i] = st.ctm.apply(pt)
 	}
 	r.fillPolys(&r.so, false, ps, st)
+}
+
+// hostStroke is what a non-scaling stroke is built from (SVG 2, "vector-effect"):
+// the path in the host coordinate space, the root viewport's, where the
+// stroke's width, dashes, joins and caps are taken unscaled, and a state
+// whose transform maps that space to the device (the output scale only). As
+// a browser draws it, a path mark Vega scales keeps its stroke width. nil
+// when the element's transform cannot be taken out of the host's.
+func (r *renderer) hostStroke(p *path, st *state) (*path, *state) {
+	inv, ok := r.host.invert()
+	if !ok {
+		return nil, nil
+	}
+	l := inv.mul(st.ctm) // user space to host space
+	if !l.isFinite() {
+		return nil, nil
+	}
+	r.holdPoints(len(p.pts))
+	hp := &path{verbs: append([]uint8(nil), p.verbs...), pts: make([]point, len(p.pts))}
+	for i, pt := range p.pts {
+		hp.pts[i] = l.apply(pt)
+	}
+	hst := *st
+	hst.ctm = r.host
+	return hp, &hst
 }
 
 // clipRegion is the device area st may paint: the canvas within its clip.

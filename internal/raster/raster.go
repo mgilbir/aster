@@ -231,6 +231,7 @@ func Render(svg []byte, opts Options) (img *image.NRGBA, err error) {
 
 	st := rootState
 	st.ctm = scaleM(scale, scale)
+	r.host = st.ctm
 	if hasVB {
 		st.ctm = st.ctm.mul(viewBoxTransform(vb, w, h, root.str(aPreserveAspectRatio)))
 	}

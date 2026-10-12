@@ -70,6 +70,7 @@ func ColourGlyphImage(f *text.Face, gid int, fg shape.Color, ppem int) (img *ima
 	lim.MaxPixelOps = max(defaultMaxPixelOps, budget.MulInt(16, budget.MulInt(w, h)))
 	r := &renderer{lim: lim, rast: newRasterizer(), cw: w, ch: h, active: map[*node]bool{}}
 	r.fl.r = r
+	r.host = identity
 	r.initCaches()
 	if r.cv = r.allocCanvas(w, h); r.cv == nil {
 		return nil, box, r.err
