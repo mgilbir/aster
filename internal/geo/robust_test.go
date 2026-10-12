@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/mgilbir/aster/internal/jsval"
+	"github.com/mgilbir/aster/internal/testutil"
 )
 
 // weird returns a coordinate that is finite, huge, non-finite or not a number.
@@ -181,7 +182,9 @@ func TestNoPanicOnGarbage(t *testing.T) {
 		GeoContains(g, [2]float64{coord(weird(r)), coord(weird(r))})
 		CollectGeoJSON(jsval.ArrOf(g, g))
 	}
-	if d := time.Since(start); d > 60*time.Second {
+	// A hang guard, not a speed test: generous, and scaled for the race
+	// detector.
+	if d := time.Since(start); d > testutil.Scaled(60*time.Second) {
 		t.Errorf("garbage took %v", d)
 	}
 }
@@ -293,8 +296,8 @@ func FuzzPath(f *testing.F) {
 		}()
 		select {
 		case <-done:
-		case <-time.After(5 * time.Second):
-			t.Fatalf("input takes over 5s: %q", src)
+		case <-time.After(testutil.Scaled(5 * time.Second)):
+			t.Fatalf("input takes over %v: %q", testutil.Scaled(5*time.Second), src)
 		}
 	})
 }

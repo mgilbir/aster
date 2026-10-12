@@ -103,8 +103,8 @@ Each package imports only packages of lower layers, so there are no cycles and t
 4: vega/guides
 5: vega
 6: aster
-tools: cmd/enginebench cmd/recursionaudit fuzzutil oracle svgcheck svgdiff upstream
+tools: cmd/enginebench cmd/recursionaudit fuzzutil oracle svgcheck svgdiff testutil upstream
 ```
 <!-- layers:end -->
 
-`tools` are not part of the engine: the commands and the test harness (`oracle` drives upstream in node, `svgcheck` checks the structure of the engine's SVG, `svgdiff` compares SVG, `upstream` replays upstream's test suites, `fuzzutil` serves the fuzz targets). `fonts/dejavu` is imported by tests only. The module depends on nothing beyond the standard library, `golang.org/x/image`, `golang.org/x/text`, and `github.com/mgilbir/{forme,goecma262,pdf0}`.
+`tools` are not part of the engine: the commands and the test harness (`oracle` drives upstream in node, `svgcheck` checks the structure of the engine's SVG, `svgdiff` compares SVG, `upstream` replays upstream's test suites, `fuzzutil` serves the fuzz targets, `testutil` holds the race slowdown that keeps time-based tests independent of the machine). `fonts/dejavu` is imported by tests only. The module depends on nothing beyond the standard library, `golang.org/x/image`, `golang.org/x/text`, and `github.com/mgilbir/{forme,goecma262,pdf0}`.

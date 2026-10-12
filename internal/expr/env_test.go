@@ -13,6 +13,7 @@ import (
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/jsval"
+	"github.com/mgilbir/aster/internal/testutil"
 )
 
 // fakeEnv implements every capability interface and records what it was asked.
@@ -304,7 +305,7 @@ func TestBounds(t *testing.T) {
 		go func() { _, err := p.Eval(NewScope(nil)); done <- err }()
 		select {
 		case <-done:
-		case <-time.After(5 * time.Second):
+		case <-time.After(testutil.Scaled(5 * time.Second)):
 			t.Fatalf("%s did not terminate", src)
 		}
 	}

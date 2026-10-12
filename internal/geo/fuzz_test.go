@@ -7,6 +7,7 @@ import (
 
 	"github.com/mgilbir/aster/internal/fuzzutil"
 	"github.com/mgilbir/aster/internal/jsval"
+	"github.com/mgilbir/aster/internal/testutil"
 )
 
 // FuzzTopoJSON decodes arbitrary documents as topologies: every object of the
@@ -33,7 +34,7 @@ func FuzzTopoJSON(f *testing.F) {
 		if err != nil {
 			return
 		}
-		fuzzutil.Within(t, 10*time.Second, string(data), func() {
+		fuzzutil.Within(t, testutil.Scaled(10*time.Second), string(data), func() {
 			objects := topo.Get("objects")
 			if !objects.IsObj() {
 				return

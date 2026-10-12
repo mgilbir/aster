@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/mgilbir/aster/internal/fuzzutil"
+	"github.com/mgilbir/aster/internal/testutil"
 )
 
 // toAny is v as encoding/json decodes it into an interface value.
@@ -58,7 +59,7 @@ func FuzzParseJSON(f *testing.F) {
 		f.Add([]byte(s))
 	}
 	f.Fuzz(func(t *testing.T, data []byte) {
-		fuzzutil.Within(t, 10*time.Second, "ParseJSON", func() { parseJSONProps(t, data) })
+		fuzzutil.Within(t, testutil.Scaled(10*time.Second), "ParseJSON", func() { parseJSONProps(t, data) })
 	})
 }
 

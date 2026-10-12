@@ -13,6 +13,7 @@ import (
 
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
+	"github.com/mgilbir/aster/internal/testutil"
 )
 
 // The class guard of ADR 0010 for the expression library: every function of
@@ -124,7 +125,9 @@ func TestEveryBuiltinIsMetered(t *testing.T) {
 	sort.Strings(names)
 	const (
 		deadline = 20 * time.Millisecond
-		slack    = 450 * time.Millisecond
+		// The property is that a call stops, not that it is fast: the slack
+		// is generous, and scaled for the race detector.
+		slack = 450 * time.Millisecond * testutil.RaceSlowdown
 		// The budgets charge what is kept (a string, an array); making it
 		// also makes garbage (the string of each element of a joined array,
 		// a buffer outgrown), a few times as much at most.
