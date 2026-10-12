@@ -36,7 +36,7 @@ func Project(ctx context.Context, data []jsval.Value, p ProjectParams) ([]jsval.
 	out := make([]jsval.Value, len(data))
 	names := make([]string, len(p.Fields))
 	for i, f := range p.Fields {
-		names[i] = f.Name
+		names[i] = f.Key()
 		if i < len(p.As) && p.As[i] != "" {
 			names[i] = p.As[i]
 		}

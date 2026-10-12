@@ -171,9 +171,9 @@ func Impute(ctx context.Context, data []jsval.Value, p ImputeParams) ([]jsval.Va
 			t := jsval.NewObject(len(p.GroupBy) + 3)
 			t.Set("_impute", jsval.True)
 			for i, gv := range g.values {
-				t.Set(p.GroupBy[i].Name, gv)
+				t.Set(p.GroupBy[i].Key(), gv)
 			}
-			t.Set(p.Key.Name, kVal)
+			t.Set(p.Key.Key(), kVal)
 			if value.IsNum() && math.IsNaN(value.NumValue()) {
 				if method == "value" {
 					value = constant
@@ -187,7 +187,7 @@ func Impute(ctx context.Context, data []jsval.Value, p ImputeParams) ([]jsval.Va
 					value = imputeReduce(method, present)
 				}
 			}
-			t.Set(p.Field.Name, value)
+			t.Set(p.Field.Key(), value)
 			out = append(out, jsval.Obj(t))
 		}
 	}

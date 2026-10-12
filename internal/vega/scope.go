@@ -816,11 +816,11 @@ func (s *Scope) objectProperty(spec jsval.Value) P {
 	return s.signalRef(propertyLambda(spec))
 }
 
-func (s *Scope) exprRef(code string, name string) P {
+// exprRef is Scope.exprRef. The name an `as` gives is recorded upstream as
+// the parameter's $name, which the runtime never reads: the accessor stays
+// unnamed (boundExpr.accessor).
+func (s *Scope) exprRef(code string, _ string) P {
 	fn := s.parseExpression(code)
-	if name != "" {
-		fn.name = name
-	}
 	return s.add(mk("expression", "expr", pExpr{fn: fn}))
 }
 

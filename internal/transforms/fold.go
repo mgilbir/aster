@@ -40,7 +40,7 @@ func Fold(ctx context.Context, data []jsval.Value, p FoldParams) ([]jsval.Value,
 		}
 		for _, f := range p.Fields {
 			d := shallowCopyTuple(t)
-			d.Set(k, jsval.Str(f.Name))
+			d.Set(k, f.NameValue())
 			d.Set(v, f.Apply(t))
 			out = append(out, jsval.Obj(d))
 		}
@@ -62,8 +62,12 @@ func reserveFoldWeight(ctx context.Context, data []jsval.Value, copies int) erro
 		if err := poll(ctx, i); err != nil {
 			return err
 		}
+		// a copy holds the tuple's fields and two more
 		c := jsval.RowCost(t)
-		out += budget.Mul(int64(copies), max(c+2*jsval.RowField-b.RowBytes, 0))
+		if o := t.ObjValue(); o != nil {
+			c += jsval.ObjectCost(o.Len()+2) - jsval.ObjectCost(o.Len())
+		}
+		out += budget.Mul(int64(copies), max(c-b.RowBytes, 0))
 	}
 	return b.ReserveWeight(budget.Mul(int64(len(data)), int64(copies)), out)
 }

@@ -591,6 +591,7 @@ func (v *runView) itemAsValue(it *scene.Item) jsval.Value {
 		return jsval.Undefined
 	}
 	o := jsval.NewObject(16)
+	o.SetHost(it) // what item it presents (itemOf)
 	eachItemProp(it, func(name string, val jsval.Value) { o.Set(name, val) })
 	o.Set("datum", it.Datum)
 	o.Set("$id", jsval.Int(v.itemHandle(it)))

@@ -1,0 +1,3 @@
+{"width":10,"height":10,"marks":[{"type":"group","marks":[
+ {"type":"text","encode":{"enter":{"text":{"signal":"inScope(item) + '/' + inScope(null) + '/' + inScope(0)"}}}},
+ {"type":"text","encode":{"enter":{"text":{"signal":"'' + inScope({$id: 0/0})"}}}}]}]}

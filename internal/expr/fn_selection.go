@@ -19,6 +19,12 @@ func (s *Scope) storeEntries(name string) []jsval.Value {
 	if !ok {
 		return nil
 	}
+	if v.IsNull() {
+		// `entries = data ? data.values.value : []` is null for a store
+		// whose values operator has not run, and every selection function
+		// reads its length.
+		typeError("Cannot read properties of null (reading 'length')")
+	}
 	return v.Items()
 }
 

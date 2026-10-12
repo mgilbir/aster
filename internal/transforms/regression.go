@@ -69,9 +69,9 @@ func Regression(ctx context.Context, data []jsval.Value, p RegressionParams) ([]
 	}
 	names := make([]string, len(p.GroupBy))
 	for i, g := range p.GroupBy {
-		names[i] = g.Name
+		names[i] = g.Key()
 	}
-	as0, as1 := p.X.Name, p.Y.Name
+	as0, as1 := p.X.Key(), p.Y.Key()
 	if len(p.As) > 0 {
 		as0 = p.As[0]
 	}

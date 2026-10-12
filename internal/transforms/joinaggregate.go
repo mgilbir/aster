@@ -58,7 +58,7 @@ func JoinAggregate(ctx context.Context, data []jsval.Value, p JoinAggregateParam
 		if jc == nil {
 			jc = &joinCell{c: ms.newCell(), tuple: jsval.NewObject(len(p.GroupBy) + len(ms.names))}
 			for _, d := range p.GroupBy {
-				jc.tuple.Set(d.Name, d.Get(t))
+				jc.tuple.Set(d.Key(), d.Get(t))
 			}
 			cells[k] = jc
 			order = append(order, jc)

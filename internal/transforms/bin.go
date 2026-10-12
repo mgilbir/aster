@@ -190,7 +190,7 @@ func NewBinner(p BinParams) (*Binner, error) {
 	}
 	name := p.Name
 	if name == "" {
-		name = "bin_" + p.Field.Name
+		name = "bin_" + p.Field.Key()
 	}
 	return &Binner{Start: start, Stop: stop, Step: step, Name: name, field: p.Field}, nil
 }

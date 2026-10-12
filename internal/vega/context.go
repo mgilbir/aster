@@ -346,11 +346,17 @@ func toValue(x any) jsval.Value {
 	return jsval.Undefined
 }
 
-// Data implements expr.DataProvider: the current tuples of a data set.
+// Data implements expr.DataProvider: the current tuples of a data set
+// (vega-functions' data(): `data ? data.values.value : []`). A data set whose
+// values operator (a Sieve, made with the value null) has not run yet reads
+// as null, so length() of it is upstream's TypeError.
 func (c *rtContext) Data(name string) (jsval.Value, bool) {
 	n := c.dataNode(name, "values")
 	if n == nil {
 		return jsval.Arr(nil), true
+	}
+	if n.value == nil {
+		return jsval.Null, true
 	}
 	switch v := n.value.(type) {
 	case []jsval.Value:
@@ -449,7 +455,6 @@ func logText(args []jsval.Value, limit int) []byte {
 type exprFn struct {
 	prog   *expr.Program
 	src    string
-	name   string
 	fields []string
 	deps   []depRef
 	// usesItem/usesEvent report which free variables the expression reads.
@@ -509,13 +514,14 @@ func (b *boundExpr) call(datum jsval.Value) jsval.Value {
 	return b.fn.eval(b.ctx, datum, jsval.Undefined, jsval.Undefined, varDatum)
 }
 
-// accessor adapts the expression to a transforms accessor.
+// accessor adapts the expression to a transforms accessor. It has no name:
+// the runtime builds an expression's accessor with none (vega-runtime's
+// getExpression ignores the `$name` an `as` gives the parameter), so a
+// transform that names its output after it writes "undefined".
 func (b *boundExpr) accessor() transforms.Field {
-	name := b.fn.name
-	if name == "" {
-		name = b.fn.src
-	}
-	return transforms.NamedField(name, b.fn.fields, b.call)
+	f := transforms.NamedField("", b.fn.fields, b.call)
+	f.Unnamed = true
+	return f
 }
 
 // parseExpression compiles an expression and resolves its dependencies against

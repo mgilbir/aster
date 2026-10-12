@@ -171,10 +171,10 @@ func newMeasureSet(ms []Measure, rnd Rand) (*measureSet, error) {
 			continue
 		}
 		s.countOnly = false
-		g := byName[m.Field.Name]
+		g := byName[m.Field.Key()]
 		if g == nil {
 			g = &measureGroup{field: m.Field, expR: math.NaN()}
-			byName[m.Field.Name] = g
+			byName[m.Field.Key()] = g
 			s.groups = append(s.groups, g)
 		}
 		g.outs = append(g.outs, measureOut{name: name, kind: kind, idx: kind.index()})

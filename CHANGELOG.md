@@ -93,6 +93,11 @@ What changed between versions, for users of the library and the CLI. Breaking ch
 - A boolean item property set to `null` (`defined`, `aria`, …) reads back in expressions as `null`, not `undefined`.
 - `format.parse` no longer writes into the specification's inline values (C94).
 - Negative limits in the internal Vega options mean "no bound" for every field (C92), and internal errors no longer carry a goroutine stack in their message (C105).
+- `data('x')` of a data set whose values have not been computed yet is `null`, as upstream's, so `length()` of it is upstream's `TypeError`; the selection functions raise it too for such a store. It read as an empty array.
+- The copies a derived data set hands on are tuples of their own, with new ids, as upstream's `derive` makes them: a sort's ties among them follow the order they were copied in.
+- **breaking:** a transform field given as an expression (`{"expr": …}`) has no name, as upstream's, so the outputs named after it are upstream's: `fold`'s key is `undefined`, `flatten`, `project`, `lookup`, `impute`, `regression`, `loess` and the group-by fields of `aggregate`, `joinaggregate`, `kde`, `kde2d` and `quantile` write a field named `"undefined"`, a measure is named after its op alone (`sum`), and `bin` names its signal `bin_undefined`. They were named after the expression's text, or its `as`, which upstream ignores.
+- The weight of a row of more than 32 fields counts the hash index of its keys, which a row of a thousand fields holds 88 bytes a field with (it was charged 56).
+- `inScope(x)` finds the item it is given by identity and raises upstream's `TypeError` for a value that is not an item; it read a number off the value, converted to an int differently on amd64 and arm64. A `resolvefilter` reads a tuple's `_index` as a property key, as upstream does (`1.5` and `"01"` select no row).
 
 ### Errors reach the caller ([ADR 0006](docs/adr/0006-errors-reach-the-caller.md))
 

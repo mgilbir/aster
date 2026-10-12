@@ -16,11 +16,32 @@ type Accessor func(jsval.Value) jsval.Value
 type Field struct {
 	Get Accessor
 	// Name is accessorName: for a simple path it is the path segment, for a
-	// nested path ("a.b") the whole path text, otherwise whatever the runtime
-	// chose for a computed accessor (an expression's source text).
-	Name string
+	// nested path ("a.b") the whole path text. Unnamed marks an accessor
+	// whose accessorName is undefined (an expression's: the runtime builds it
+	// without a name, whatever `as` its specification gives), and Name is
+	// then "".
+	Name    string
+	Unnamed bool
 	// Fields are the tuple fields the accessor reads (accessorFields).
 	Fields []string
+}
+
+// Key is the accessor's name as a property key: what `t[accessorName(f)]`
+// writes to, "undefined" for an unnamed accessor.
+func (f Field) Key() string {
+	if f.Unnamed {
+		return "undefined"
+	}
+	return f.Name
+}
+
+// NameValue is accessorName(f) as a value: undefined for an unnamed
+// accessor.
+func (f Field) NameValue() jsval.Value {
+	if f.Unnamed {
+		return jsval.Undefined
+	}
+	return jsval.Str(f.Name)
 }
 
 // IsNil reports whether f is the null field.

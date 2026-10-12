@@ -480,7 +480,7 @@ func facExtent(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode,
 			failErr(err)
 		}
 		if !ok {
-			n.g.warn(infiniteExtent(n, f, lo, hi))
+			n.g.warn(infiniteExtent(f, lo, hi))
 			n.value = jsval.ArrOf(jsval.Undefined, jsval.Undefined)
 		} else {
 			n.value = jsval.ArrOf(jsval.Num(lo), jsval.Num(hi))
@@ -491,17 +491,14 @@ func facExtent(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode,
 
 // infiniteExtent is Extent's warning: `Infinite extent${name}: [${min},
 // ${max}]`, where name is ` for field "…"` when the accessor has a name. An
-// expression's accessor has none (the runtime builds it without one), and
-// the template prints undefined.
-func infiniteExtent(n *opNode, f transforms.Field, lo, hi float64) string {
+// expression's accessor has none, and the template prints undefined.
+func infiniteExtent(f transforms.Field, lo, hi float64) string {
 	name := ""
-	if f.Name != "" {
+	switch {
+	case f.Unnamed:
+		name = "undefined"
+	case f.Name != "":
 		name = ` for field "` + f.Name + `"`
-	}
-	for _, a := range n.argops {
-		if a.name == "field" && a.op.name == "expression" {
-			name = "undefined"
-		}
 	}
 	return "Infinite extent" + name + ": [" + jsval.JSNumberString(lo) + ", " + jsval.JSNumberString(hi) + "]"
 }
@@ -621,7 +618,11 @@ func facRelay(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 				d = lut[o]
 			}
 			if d == nil {
+				// derive(t) is rederive(t, ingest({})): the copy is a tuple
+				// of its own, with the next id, which a sort breaks ties by.
 				d = cl.Clone(o)
+				d.SetTupleID(0)
+				d.EnsureTupleID()
 				if lut != nil {
 					lut[o] = d
 				}
@@ -643,8 +644,8 @@ type relayCopy struct{ src, dst *jsval.Object }
 
 // tidSet is a set of tuples by tuple id: what an operator uses to know,
 // without a map, that a tuple of a pulse has not come before in that pulse.
-// Distinct tuples can share an id (a derived copy keeps its source's), so a
-// tuple add finds in the set has only perhaps come before. init fails when a
+// Distinct tuples can share an id (a copy ingest makes of a tuple keeps the
+// tuple's), so a tuple add finds in the set has only perhaps come before. init fails when a
 // tuple has no id, or the ids spread over more than 64 per tuple.
 type tidSet struct {
 	lo   uint32

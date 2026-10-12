@@ -221,7 +221,7 @@ func init() {
 		if p.has("groupby") {
 			kp.GroupBy = []contour.GroupField{}
 			for _, f := range p.fields("groupby") {
-				kp.GroupBy = append(kp.GroupBy, contour.GroupField{Name: f.Name, Get: contour.Accessor(f.Get)})
+				kp.GroupBy = append(kp.GroupBy, contour.GroupField{Name: f.Key(), Get: contour.Accessor(f.Get)})
 			}
 		}
 		return contour.KDE2D(ctxOf(n), in, kp)

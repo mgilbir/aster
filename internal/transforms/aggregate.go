@@ -64,7 +64,7 @@ func Aggregate(ctx context.Context, data []jsval.Value, p AggregateParams) (res 
 	dims := p.GroupBy
 	dnames := make([]string, len(dims))
 	for i, d := range dims {
-		dnames[i] = d.Name
+		dnames[i] = d.Key()
 	}
 	// The default key is built in a reusable buffer so that finding an
 	// existing cell does not allocate; a custom Key field is used as is.
@@ -88,7 +88,7 @@ func Aggregate(ctx context.Context, data []jsval.Value, p AggregateParams) (res 
 	defer func() { led.Free(charged) }()
 	rowExcess := int64(0)
 	if b := budget.From(ctx); b != nil && b.RowBytes > 0 {
-		rowExcess = max(jsval.RowBase+jsval.RowField*int64(len(dims)+nm)-b.RowBytes, 0)
+		rowExcess = max(jsval.ObjectCost(len(dims)+nm)-b.RowBytes, 0)
 	}
 	newCell := func(key string, t jsval.Value) *aggCell {
 		n := int64(len(order) + 1)

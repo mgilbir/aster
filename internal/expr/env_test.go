@@ -33,6 +33,9 @@ func (e *fakeEnv) Data(name string) (jsval.Value, bool) {
 	if name == "t" {
 		return jsval.ArrOf(jsval.Int(1), jsval.Int(2)), true
 	}
+	if name == "unrun" {
+		return jsval.Null, true // a store whose values operator has not run
+	}
 	return jsval.Undefined, false
 }
 func (e *fakeEnv) InData(name, field string, v jsval.Value) (int, bool) {
@@ -410,5 +413,26 @@ func TestPatternLiteralState(t *testing.T) {
 	v, err := p.Eval(NewScope(env))
 	if err != nil || v.StrValue() != "true,false" {
 		t.Errorf("stateful g pattern: %v %v", v, err)
+	}
+}
+
+// A selection store whose values operator has not run is null upstream
+// (`data ? data.values.value : []`), and every selection function reads its
+// length: a TypeError, not an empty selection.
+func TestSelectionOfAnUnrunStoreIsATypeError(t *testing.T) {
+	for _, src := range []string{
+		"vlSelectionTest('unrun', {a: 1})",
+		"vlSelectionIdTest('unrun', {_vgsid_: 1})",
+		"vlSelectionResolve('unrun')",
+	} {
+		p, err := Compile(src)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = p.Eval(NewScope(&fakeEnv{}))
+		var e *Error
+		if !errors.As(err, &e) || e.Error() != "TypeError: Cannot read properties of null (reading 'length')" {
+			t.Errorf("%s: err = %v", src, err)
+		}
 	}
 }

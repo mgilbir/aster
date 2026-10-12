@@ -61,7 +61,7 @@ func KDE(ctx context.Context, source []jsval.Value, p KDEParams) ([]jsval.Value,
 	}
 	names := make([]string, len(p.GroupBy))
 	for i, g := range p.GroupBy {
-		names[i] = g.Name
+		names[i] = g.Key()
 	}
 	var out []jsval.Value
 	for _, g := range Partition(zoneOf(ctx), source, p.GroupBy) {

@@ -468,7 +468,7 @@ func parseDSVLimit(ctx context.Context, text, delim string, bud *budget.Budget) 
 			return nil, nil, fmt.Errorf("%w: delimited data cells %d exceeds the limit of %d (%d per data row)", budget.ErrLimit, cells, maxCells, dsvCellsPerRow)
 		}
 		if bud != nil && bud.RowBytes > 0 {
-			w := int64(jsval.RowBase) + int64(jsval.RowField)*int64(len(columns))
+			w := jsval.ObjectCost(len(columns))
 			for i := range min(len(row), len(columns)) {
 				w += int64(len(row[i]))
 			}

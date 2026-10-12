@@ -66,17 +66,23 @@ func init() {
 			}
 			out := make([]jsval.Value, 0, len(pulse.tuples))
 			for _, t := range pulse.tuples {
-				// _index is the crossfilter's own, unless a transform
-				// rewrote it: checked as a float, as converting NaN or a huge
-				// number to an int is platform-dependent
-				f := jsval.ToNumber(t.Get("_index"))
-				if f > -1 && f < float64(len(b.curr)) && b.curr[int(f)]&ignore == 0 {
+				if resolvePasses(b.curr, ignore, t.Get("_index")) {
 					out = append(out, t)
 				}
 			}
 			return changedPulse(pulse, out)
 		}), nil
 	}
+}
+
+// resolvePasses is ResolveFilter's `pass(t._index)`: `curr[k]` and `data[k]`
+// are property reads, so k is an index only when String(k) is one ("1",
+// and -0, which prints "0"; not 1.5, "01" or NaN); any other key reads
+// undefined and the tuple does not pass. _index is the crossfilter's own,
+// unless a transform rewrote it.
+func resolvePasses(curr []uint32, ignore uint32, index jsval.Value) bool {
+	k, ok := parseArrayIndex(index.AsString())
+	return ok && k < len(curr) && curr[k]&ignore == 0
 }
 
 // ignoreMask is ResolveFilter's `~(_.ignore || 0)`: the bits of the filters

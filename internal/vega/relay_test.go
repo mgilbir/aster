@@ -125,7 +125,9 @@ func TestRelayDeriveMatchesMap(t *testing.T) {
 				} else if c != g {
 					t.Fatalf("round %d pulse %d tuple %d: a new copy, want the one handed on before", round, pi, i)
 				}
-				if g.Len() != w.Len() || g.TupleID() != w.TupleID() {
+				// a copy is a tuple of its own (derive), with an id that is
+				// not its source's
+				if g.Len() != w.Len() || g.TupleID() == 0 || (src[i].ObjValue().TupleID() != 0 && g.TupleID() == src[i].ObjValue().TupleID()) {
 					t.Fatalf("round %d pulse %d tuple %d: copy differs", round, pi, i)
 				}
 				for j := 0; j < w.Len(); j++ {
