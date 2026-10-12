@@ -3,19 +3,14 @@ package aster_test
 import (
 	"bytes"
 	"encoding/json"
-	"io/fs"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"regexp"
 	"strconv"
-	"strings"
 	"testing"
 )
 
-var mermaidBlock = regexp.MustCompile("(?ms)^```mermaid\n(.*?)^```")
-
-// Every Mermaid diagram in the documentation renders: GitHub draws them in
+// Every Mermaid diagram in the tracked documentation renders (a fence at any
+// indentation, as in a list item): GitHub draws them in
 // the reader's browser, and one that does not parse shows an error there
 // instead. testdata/mermaid renders each with Mermaid's own renderer on jsdom
 // (pinned there; install with npm ci). Without it the test skips, or fails
@@ -26,31 +21,17 @@ func TestDocsMermaid(t *testing.T) {
 		Source string `json:"source"`
 	}
 	var diagrams []diagram
-	err := filepath.WalkDir(".", func(path string, d fs.DirEntry, err error) error {
+	for _, p := range trackedFiles(t, "*.md") {
+		b, err := os.ReadFile(p)
 		if err != nil {
-			return err
+			t.Fatal(err)
 		}
-		if d.IsDir() {
-			if name := d.Name(); name == "node_modules" || name == ".git" || strings.HasSuffix(name, "-cache") || name == "upstream-clones" {
-				return fs.SkipDir
+		_, fences := splitMarkdown(string(b))
+		for _, f := range fences {
+			if f.info == "mermaid" {
+				diagrams = append(diagrams, diagram{Name: p + ":" + strconv.Itoa(f.line), Source: f.body})
 			}
-			return nil
 		}
-		if !strings.HasSuffix(path, ".md") {
-			return nil
-		}
-		b, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		for _, m := range mermaidBlock.FindAllSubmatchIndex(b, -1) {
-			line := 1 + bytes.Count(b[:m[0]], []byte("\n"))
-			diagrams = append(diagrams, diagram{Name: path + ":" + strconv.Itoa(line), Source: string(b[m[2]:m[3]])})
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 	// A floor, so a change to the extraction that finds nothing fails.
 	if len(diagrams) < 4 {

@@ -107,4 +107,14 @@ tools: cmd/enginebench cmd/recursionaudit fuzzutil oracle svgcheck svgdiff testu
 ```
 <!-- layers:end -->
 
-`tools` are not part of the engine: the commands and the test harness (`oracle` drives upstream in node, `svgcheck` checks the structure of the engine's SVG, `svgdiff` compares SVG, `upstream` replays upstream's test suites, `fuzzutil` serves the fuzz targets, `testutil` holds the race slowdown that keeps time-based tests independent of the machine). `fonts/dejavu` is imported by tests only. The module depends on nothing beyond the standard library, `golang.org/x/image`, `golang.org/x/text`, and `github.com/mgilbir/{forme,goecma262,pdf0}`.
+`tools` are not part of the engine: the commands and the test harness (`oracle` drives upstream in node, `svgcheck` checks the structure of the engine's SVG, `svgdiff` compares SVG, `upstream` replays upstream's test suites, `fuzzutil` serves the fuzz targets, `testutil` holds the race slowdown that keeps time-based tests independent of the machine). `fonts/dejavu` is imported by tests only.
+
+<!-- deps:begin (checked by TestDependencyStatement) -->
+Beyond the standard library, a program that imports aster builds these modules, and no others:
+
+- `golang.org/x/text`;
+- `github.com/mgilbir/forme` (text shaping), `github.com/mgilbir/goecma262` (regular expressions) and `github.com/mgilbir/pdf0` (PDF writing), the owner's;
+- through pdf0, also the owner's: `github.com/mgilbir/golittlecms` (colour management), `github.com/mgilbir/gopenjpeg` (JPEG 2000) and `github.com/mgilbir/formalis` (electronic invoices).
+<!-- deps:end -->
+
+`golang.org/x/image` is required by tests only.

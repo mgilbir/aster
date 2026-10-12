@@ -61,6 +61,7 @@ On 32-bit platforms a count or size past what an `int` holds saturates at 2 GiB 
 
 Fixed bounds, the same whatever `WithMemoryLimit` says:
 
+<!-- fixed:begin (checked by TestFixedLimitsDocMatchesCode; edit with the code) -->
 | Bound | Value |
 |---|---|
 | geographic path points | 2,000,000 per render, counted where the projection produces them (after resampling, before the clip extent; each of albersUsa's three projections counts its own; a projection's `fit` counts too) |
@@ -79,17 +80,18 @@ Fixed bounds, the same whatever `WithMemoryLimit` says:
 | SVG input to `SVGToPNG` | 256 MiB, 4,000,000 elements, depth 256 |
 | style sheets of SVG input to `SVGToPNG` | 4 MiB, 100,000 rules, 100,000,000 selector-matching steps; past any of them the call fails rather than draw the document partly styled |
 | one filter region (PNG) | 32 Mi pixels; past it the call fails rather than leave the element undrawn |
-| SVG input to `SVGToPDF` | 64 MiB, 1,000,000 elements; per render, glyph outlines kept 8 MiB and painted colour glyphs 16 MiB (more is drawn, not kept), a dash pattern 256 values |
-| fonts | a font program given in memory 64 MiB, a system font file 1 GiB (mapped); per converter, 64 system font faces loaded at once (the one loaded longest ago is dropped past it) and 64 MiB of font programs cut out of collections and system fonts for PDF embedding (each charged to the call's ledger when made) |
+| SVG input to `SVGToPDF` | 64 MiB, 1,000,000 elements, 10,000,000 path segments, 16 MiB of text; per render, glyph outlines kept 8 MiB and painted colour glyphs 16 MiB (more is drawn, not kept), a dash pattern 256 values |
+| fonts | a font program given in memory 64 MiB, a system font file 1 GiB (mapped); per converter, 64 system font faces loaded at once (the one loaded longest ago is dropped past it) and 64 MiB of font programs cut out of collections and system fonts for PDF embedding, none over 32 MiB kept (each charged to the call's ledger when made) |
 | text shaping | about sixty times the lookup work of the heaviest example chart, per call |
-| caches shared between calls | by the bytes they hold, entries not used lately dropped first: compiled expressions 32 MiB and regular expressions 32 MiB per process (no entry over 1 MiB), custom symbol paths 16 MiB per process (no entry over 1 MiB); per converter, measured widths 3 MiB, CSS fonts 1 MiB, font fallback lists 8 MiB, and glyph outlines 4 MiB per font face |
-| transforms that multiply rows | `sequence` 10,000,000 (`sequence()` in expressions 1,000,000), `bin` steps, `kde`/`quantile` steps 1,000,000, `regression` order 100, `force` iterations 100,000 (a `collide` or `link` force's own iterations 1,000), `cross` 4,000,000 cells, `contour` 16,000,000 cells, ticks and legend entries |
+| caches shared between calls | by the bytes they hold, entries not used lately dropped first: compiled expressions 32 MiB and regular expressions 32 MiB per process (no entry of either over 1 MiB), custom symbol paths 16 MiB per process (no entry over 1 MiB); per converter, measured widths 3 MiB (no entry over 256 KiB), CSS fonts 1 MiB (no entry over 64 KiB), font fallback lists 8 MiB (no entry over 1 MiB), and glyph outlines 4 MiB per font face (no entry over 256 KiB) |
+| transforms that multiply rows | `sequence` 10,000,000 (`sequence()` in expressions 1,048,576), `bin` steps 1,000,000, `kde`/`quantile` steps 1,000,000, `regression` order 100, `force` iterations 100,000 (a `collide` or `link` force's own iterations 1,000), `cross` 4,000,000 cells, `contour` 16,777,216 cells |
 | ticks, labels and legend entries of one guide | 100,000, refused before they are listed (a `tickCount` with `tickMinStep` included) |
 | values a scale's `ticks` lists | 1,048,576 (log ticks: 4,194,304 steps); calendar ticks and `timeSequence` 4,194,304 dates |
 | colours sampled from a scheme (`schemeCount`) | 1,048,576 |
 | `config.locale.number` | decimal, thousands separator, minus sign and each numeral 16 bytes; each currency part, percent sign and NaN text 64 bytes |
 | `config.locale.time` | `dateTime`, `date`, `time` 256 bytes, expanding into each other to 4 KiB at most; each name 128 bytes, 64 names per list |
 | format memos of one call (`format`, `timeFormat`, `timeParse` and labels) | 1 MiB each, by the bytes they hold, entries not used lately dropped first; no entry over 64 KiB |
+<!-- fixed:end -->
 
 ## Choosing a limit
 

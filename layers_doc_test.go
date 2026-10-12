@@ -4,7 +4,9 @@ import (
 	"go/build"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -36,6 +38,9 @@ func TestPackageLayers(t *testing.T) {
 			}
 		}
 		for _, p := range strings.Fields(pkgs) {
+			if prev, dup := layer[p]; dup {
+				t.Errorf("package %s is listed twice in docs/architecture.md's layers (layers %d and %d)", p, prev, n)
+			}
 			layer[p] = n
 		}
 	}
@@ -82,5 +87,43 @@ func TestPackageLayers(t *testing.T) {
 	}
 	if seen != len(layer) {
 		t.Errorf("docs/architecture.md lists %d packages, %d exist", len(layer), seen)
+	}
+}
+
+// docs/architecture.md names every module a program importing aster builds,
+// transitive ones included: what a reader auditing the supply chain needs.
+func TestDependencyStatement(t *testing.T) {
+	b, err := os.ReadFile("docs/architecture.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := string(b)
+	i, j := strings.Index(doc, "<!-- deps:begin"), strings.Index(doc, "<!-- deps:end")
+	if i < 0 || j < i {
+		t.Fatal("docs/architecture.md has no deps:begin/end block")
+	}
+	stated := map[string]bool{}
+	for _, m := range regexp.MustCompile("`((?:github\\.com|golang\\.org)/[^`]+)`").FindAllStringSubmatch(doc[i:j], -1) {
+		stated[m[1]] = true
+	}
+	out, err := exec.Command("go", "list", "-deps", "-f", "{{with .Module}}{{.Path}}{{end}}", ".").Output()
+	if err != nil {
+		t.Skipf("go list: %v", err)
+	}
+	built := map[string]bool{}
+	for _, m := range strings.Fields(string(out)) {
+		if m != "github.com/mgilbir/aster" {
+			built[m] = true
+		}
+	}
+	for m := range built {
+		if !stated[m] {
+			t.Errorf("aster builds %s, which docs/architecture.md does not name", m)
+		}
+	}
+	for m := range stated {
+		if !built[m] {
+			t.Errorf("docs/architecture.md names %s, which aster does not build", m)
+		}
 	}
 }

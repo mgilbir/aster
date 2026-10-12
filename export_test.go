@@ -177,3 +177,7 @@ func LimitsForTest(n uint64) map[string]int64 {
 func WithFontSetFailureForTest() Option {
 	return func(c *config) { c.fontFailForTest = true }
 }
+
+// FixedLimitsForTest are the root package's own fixed bounds of
+// docs/limits.md's fixed-bounds table, by name.
+var FixedLimitsForTest = map[string]int64{"maxImageBytes": maxImageBytes, "maxImagePixels": maxImagePixels}
