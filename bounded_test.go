@@ -154,6 +154,9 @@ func checkBounded(t *testing.T, res secResult, killed bool) {
 	if strings.Contains(res.Err, "internal error") {
 		t.Errorf("internal error: %s", res.Err)
 	}
+	if rep := repeatedPart(res.Err); rep != "" {
+		t.Errorf("the message repeats %q: %s", rep, res.Err)
+	}
 	if limit := (boundedTimeout + boundedSlack*raceSlowdown).Seconds(); res.Seconds > limit {
 		t.Errorf("took %.2fs under WithTimeout(%v); at most %.2fs", res.Seconds, boundedTimeout, limit)
 	}
@@ -163,4 +166,24 @@ func checkBounded(t *testing.T, res secResult, killed bool) {
 	if t.Failed() || testing.Verbose() {
 		t.Logf("%.2fs, peak %.0f MiB, err=%.200q", res.Seconds, res.PeakMB, res.Err)
 	}
+}
+
+// repeatedPart is a part of an error message that occurs twice: a package
+// prefix ("raster: ... raster: limit exceeded") or a whole cause ("context
+// deadline exceeded: context deadline exceeded"), the marks of an error
+// wrapped by code that also prefixed it, or that wrapped its own cause again.
+// The parts are what ": " separates; "" when none repeats.
+func repeatedPart(msg string) string {
+	seen := map[string]bool{}
+	for _, part := range strings.Split(msg, ": ") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if seen[part] {
+			return part
+		}
+		seen[part] = true
+	}
+	return ""
 }

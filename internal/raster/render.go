@@ -73,7 +73,14 @@ type renderer struct {
 	maskBytes int
 }
 
-var errLimit = fmt.Errorf("raster: %w", budget.ErrLimit)
+// errLimit is wrapped by every error a limit causes. Its own text is
+// budget.ErrLimit's, so a message that names the package and the bound
+// ("raster: style sheets of more than 4 bytes: limit exceeded") does not
+// name the package twice; errRasterLimit is the bare error, prefixed.
+var (
+	errLimit       = fmt.Errorf("%w", budget.ErrLimit)
+	errRasterLimit = fmt.Errorf("raster: %w", errLimit)
+)
 
 // chargePixels accounts for n pixels of filter or pattern-tile work and fails
 // the render when the budget is spent.
@@ -219,7 +226,7 @@ func (r *renderer) newLayer() *canvas {
 
 func (r *renderer) pushLayer() *canvas {
 	if r.depth >= r.lim.MaxLayerDepth {
-		r.fail(fmt.Errorf("%w: more than %d nested opacity/blend layers", errLimit, r.lim.MaxLayerDepth))
+		r.fail(fmt.Errorf("raster: more than %d nested opacity/blend layers: %w", r.lim.MaxLayerDepth, errLimit))
 		return nil
 	}
 	layer := r.newLayer()

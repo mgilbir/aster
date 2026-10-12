@@ -65,7 +65,7 @@ func (img *rasterImage) halve() *rasterImage {
 
 // imageLimits are the bounds of one image, as imageref takes them.
 func (lim Limits) imageLimits() imageref.Limits {
-	return imageref.Limits{MaxBytes: lim.MaxImageBytes, MaxPixels: lim.MaxImagePixels, Err: errLimit}
+	return imageref.Limits{MaxBytes: lim.MaxImageBytes, MaxPixels: lim.MaxImagePixels, Err: errRasterLimit}
 }
 
 // decodeImage decodes a PNG, JPEG or GIF (its first frame) into premultiplied

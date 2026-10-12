@@ -482,7 +482,7 @@ func parseDocument(src string, lim Limits) (*document, error) {
 // applies style sheets, the part whose work the input multiplies.
 func parseDocumentCtx(ctx context.Context, src string, lim Limits) (*document, error) {
 	if len(src) > lim.MaxInputBytes {
-		return nil, fmt.Errorf("%w: SVG input is %d bytes, limit is %d", errLimit, len(src), lim.MaxInputBytes)
+		return nil, fmt.Errorf("raster: SVG input is %d bytes, limit is %d: %w", len(src), lim.MaxInputBytes, errLimit)
 	}
 	doc := &document{ids: map[string]*node{}}
 	var ar arena
@@ -728,7 +728,7 @@ func parseDocumentCtx(ctx context.Context, src string, lim Limits) (*document, e
 			}
 			doc.count++
 			if doc.count > lim.MaxElements {
-				return nil, fmt.Errorf("%w: SVG has more than %d elements", errLimit, lim.MaxElements)
+				return nil, fmt.Errorf("raster: SVG has more than %d elements: %w", lim.MaxElements, errLimit)
 			}
 			nd := ar.newNode()
 			nd.tag = tag
@@ -760,7 +760,7 @@ func parseDocumentCtx(ctx context.Context, src string, lim Limits) (*document, e
 			}
 			if !selfClose {
 				if len(stack)+1 > lim.MaxDepth {
-					return nil, fmt.Errorf("%w: SVG nesting exceeds %d levels", errLimit, lim.MaxDepth)
+					return nil, fmt.Errorf("raster: SVG nesting exceeds %d levels: %w", lim.MaxDepth, errLimit)
 				}
 				stack = append(stack, nd)
 				if tag == tagText {

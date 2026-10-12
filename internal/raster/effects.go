@@ -300,7 +300,7 @@ func (r *renderer) renderEffects(n *node, st *state, opacity float64, blend blen
 		return
 	}
 	if r.depth >= r.lim.MaxLayerDepth {
-		r.fail(errLimit)
+		r.fail(errRasterLimit)
 		return
 	}
 	// Each primitive is a pass over the region, and so is each node of a

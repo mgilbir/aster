@@ -30,7 +30,7 @@ type patternTile struct {
 // current one, returning it (nil when the layer budget is exhausted).
 func (r *renderer) subRender(w, h int, fn func()) *canvas {
 	if r.depth >= r.lim.MaxLayerDepth {
-		r.fail(errLimit)
+		r.fail(errRasterLimit)
 		return nil
 	}
 	parent := r.cv
