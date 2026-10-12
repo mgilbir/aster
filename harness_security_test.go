@@ -282,7 +282,10 @@ func TestSecProbe(t *testing.T) {
 
 // bigLoader serves a generated payload of mb megabytes for every Load: many
 // tiny rows, the worst case for a row-count limit that is checked after
-// parsing.
+// parsing. It is built a MiB at a time, polling ctx between chunks as a
+// Loader should: generating 32 MiB byte by byte without a poll took half a
+// second under -race, and longer than the bounded corpus's whole deadline on
+// a loaded runner, which the call then noticed only once Load returned.
 type bigLoader struct {
 	kind string
 	mb   int
@@ -290,24 +293,26 @@ type bigLoader struct {
 }
 
 func (l *bigLoader) Sanitize(ctx context.Context, uri string) (string, error) { return uri, nil }
-func (l *bigLoader) Load(_ context.Context, uri string) ([]byte, error) {
-	n := l.mb << 20
-	switch l.kind {
-	case "bigcsv":
-		b := make([]byte, 0, n+8)
-		b = append(b, "a\n"...)
-		for len(b) < n {
-			b = append(b, "1\n"...)
-		}
-		return b, nil
-	default:
-		b := make([]byte, 0, n+8)
-		b = append(b, '[')
-		for len(b) < n {
-			b = append(b, "{},"...)
-		}
-		return append(b, "{}]"...), nil
+func (l *bigLoader) Load(ctx context.Context, uri string) ([]byte, error) {
+	head, unit, tail := "a\n", "1\n", ""
+	if l.kind != "bigcsv" {
+		head, unit, tail = "[", "{},", "{}]"
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	chunk := bytes.Repeat([]byte(unit), (1<<20)/len(unit))
+	b := make([]byte, 0, l.mb<<20+len(chunk)+len(head)+len(tail))
+	b = append(b, head...)
+	for len(b) < l.mb<<20 {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		b = append(b, chunk...)
+	}
+	// The payload is what it was when built a unit at a time.
+	n := len(head) + (l.mb<<20-len(head)+len(unit)-1)/len(unit)*len(unit)
+	return append(b[:n], tail...), nil
 }
 
 func cpuSeconds() float64 {
