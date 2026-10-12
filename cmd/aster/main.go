@@ -14,7 +14,8 @@
 // raised while the chart is evaluated, fails the command unless -lenient is
 // given, which renders past them as a browser does and prints each.
 //
-// Exit status: 0 on success, 1 on any error, 2 for invalid flags.
+// Exit status: 0 on success, 1 on any error, 2 for an invalid command line:
+// an unknown command or flag, or a flag value that is not valid.
 package main
 
 import (
@@ -24,26 +25,69 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
+	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/mgilbir/aster"
 )
 
-func main() {
-	if err := run(); err != nil {
-		// Library errors are already namespaced ("aster:" / "aster/runtime:");
-		// only add the program prefix to errors that aren't (flag parsing,
-		// file I/O) so we don't print "aster: aster: ...".
-		msg := err.Error()
-		if strings.HasPrefix(msg, "aster") {
-			fmt.Fprintln(os.Stderr, msg)
-		} else {
-			fmt.Fprintf(os.Stderr, "aster: %s\n", msg)
-		}
-		os.Exit(1)
+func main() { os.Exit(cliMain(os.Args[1:], os.Stderr)) }
+
+// cliMain runs the command line args and returns the exit status, printing
+// any error to stderr.
+func cliMain(args []string, stderr io.Writer) int {
+	err := run(args)
+	if err == nil || errors.Is(err, flag.ErrHelp) {
+		return 0
 	}
+	var ue *usageError
+	if errors.As(err, &ue) && ue.printed {
+		return 2 // the flag package printed it, and the usage
+	}
+	// Library errors are already namespaced ("aster:" / "aster/runtime:");
+	// only add the program prefix to errors that aren't (flag values, file
+	// I/O) so we don't print "aster: aster: ...".
+	msg := err.Error()
+	if strings.HasPrefix(msg, "aster") {
+		_, _ = fmt.Fprintln(stderr, msg)
+	} else {
+		_, _ = fmt.Fprintf(stderr, "aster: %s\n", msg)
+	}
+	if ue != nil {
+		return 2
+	}
+	return 1
+}
+
+// usageError is an invalid command line, which exits with status 2.
+type usageError struct {
+	err     error
+	printed bool // by the flag package, with the usage
+}
+
+func (e *usageError) Error() string { return e.err.Error() }
+func (e *usageError) Unwrap() error { return e.err }
+
+// invalid is an invalid flag value of the command fs parsed.
+func invalid(fs *flag.FlagSet, format string, args ...any) error {
+	return &usageError{err: fmt.Errorf(format+" (see aster %s -h)", append(args, fs.Name())...)}
+}
+
+// parse parses args with fs, which continues on error: the flag package has
+// printed the error and the usage, and the exit status is 2.
+func parse(fs *flag.FlagSet, args []string) error {
+	fs.Init(fs.Name(), flag.ContinueOnError)
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return err
+		}
+		return &usageError{err: err, printed: true}
+	}
+	return nil
 }
 
 const usage = `usage: aster <command> [flags]
@@ -56,26 +100,26 @@ Commands:
 
 Run "aster <command> -h" for command-specific flags.`
 
-func run() error {
-	if len(os.Args) < 2 {
-		return fmt.Errorf("%s", usage)
+func run(args []string) error {
+	if len(args) < 1 {
+		return &usageError{err: errors.New(usage)}
 	}
 
-	command := os.Args[1]
+	command := args[0]
 	switch command {
 	case "svg":
-		return runSVG(os.Args[2:])
+		return runSVG(args[1:])
 	case "png":
-		return runPNG(os.Args[2:])
+		return runPNG(args[1:])
 	case "pdf":
-		return runPDF(os.Args[2:])
+		return runPDF(args[1:])
 	case "compile":
-		return runCompile(os.Args[2:])
+		return runCompile(args[1:])
 	case "-h", "--help", "help":
 		fmt.Println(usage)
 		return nil
 	default:
-		return fmt.Errorf("unknown command %q\n\n%s", command, usage)
+		return &usageError{err: fmt.Errorf("unknown command %q\n\n%s", command, usage)}
 	}
 }
 
@@ -85,77 +129,36 @@ type stringList []string
 func (s *stringList) String() string     { return strings.Join(*s, ",") }
 func (s *stringList) Set(v string) error { *s = append(*s, v); return nil }
 
-// commonOpts holds flags shared by the rendering subcommands and turns them
-// into aster options.
-type commonOpts struct {
-	fs           *flag.FlagSet
-	allowHTTP    bool
-	allowDomains stringList
-	allowPrivate bool
-	version      string
-	timeout      time.Duration
-	from         string
-	lenient      bool
+// configOpts are the flags that configure the converter, shared by every
+// subcommand.
+type configOpts struct {
+	fs          *flag.FlagSet
+	version     string
+	timeout     time.Duration
+	memoryLimit string
+	timezone    string
+	theme       string // the theme file's JSON
 }
 
-func registerCommonOpts(fs *flag.FlagSet) *commonOpts {
-	co := &commonOpts{fs: fs}
-	fs.BoolVar(&co.allowHTTP, "allow-http", false, "allow HTTP(S) data loading from any public host")
-	fs.Var(&co.allowDomains, "allow-domain", "restrict HTTP loading to this host (repeatable); implies -allow-http")
-	fs.BoolVar(&co.allowPrivate, "allow-private-networks", false, "let HTTP loading reach loopback, link-local and private addresses (denied by default)")
+func registerConfigOpts(fs *flag.FlagSet) *configOpts {
+	co := &configOpts{fs: fs}
 	fs.StringVar(&co.version, "version", "", "Vega-Lite version, e.g. 5.8 or 6.4 (default: build default)")
 	fs.DurationVar(&co.timeout, "timeout", 0, "max duration per render, e.g. 30s; 0 disables the timeout (default: 30s)")
-	fs.StringVar(&co.from, "from", "auto", "input language: vega, vega-lite, or auto (from $schema, else from the top-level properties)")
-	fs.BoolVar(&co.lenient, "lenient", false, "render past failed data and image loads and evaluation errors, as a browser does, printing each to stderr")
+	fs.StringVar(&co.memoryLimit, "memory-limit", "", "the memory budgets of a render, from one size: bytes, or with a unit, e.g. 256MiB or 1GiB (default: the fixed defaults; see docs/limits.md)")
+	fs.StringVar(&co.timezone, "timezone", "", "IANA time zone for local-time operations, e.g. America/New_York (default: UTC)")
+	fs.Func("theme", "a Vega theme config: a JSON file whose object is applied to every render", func(path string) error {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		co.theme = string(b)
+		return nil
+	})
 	return co
 }
 
-// lite reports whether spec is to be rendered as Vega-Lite, per -from.
-func (co *commonOpts) lite(spec []byte) (bool, error) {
-	switch co.from {
-	case "vega-lite":
-		return true, nil
-	case "vega":
-		return false, nil
-	case "auto", "":
-		k, err := detectSpec(spec)
-		if err != nil {
-			return false, fmt.Errorf("%w; pass -from vega or -from vega-lite", err)
-		}
-		return k == specVegaLite, nil
-	default:
-		return false, fmt.Errorf("invalid -from %q (must be vega, vega-lite or auto)", co.from)
-	}
-}
-
-// errorHandler prints warnings to stderr and, with -lenient, the errors it
-// lets go; without -lenient an error fails the render.
-func (co *commonOpts) errorHandler() aster.ErrorHandlerOption {
-	return aster.WithErrorHandler(func(err error) error {
-		var w aster.Warning
-		switch {
-		case errors.As(err, &w):
-			fmt.Fprintf(os.Stderr, "aster: warning: %v\n", err)
-		case co.lenient:
-			fmt.Fprintf(os.Stderr, "aster: ignored: %v\n", err)
-		default:
-			return withLoadHint(err)
-		}
-		return nil
-	})
-}
-
-// withLoadHint adds what to do to an error for a load the default loader
-// refused.
-func withLoadHint(err error) error {
-	var le *aster.LoadError
-	if errors.As(err, &le) && strings.Contains(le.Err.Error(), "no loader configured") {
-		return fmt.Errorf("%w (pass -allow-http or -allow-domain to load over HTTP, or -lenient to render without it)", err)
-	}
-	return err
-}
-
-func (co *commonOpts) options() ([]aster.Option, error) {
+// options turns the flags into aster options.
+func (co *configOpts) options() ([]aster.Option, error) {
 	var opts []aster.Option
 	if co.version != "" {
 		opts = append(opts, aster.WithVegaLiteVersion(co.version))
@@ -170,16 +173,194 @@ func (co *commonOpts) options() ([]aster.Option, error) {
 		}
 	})
 	if co.timeout < 0 {
-		return nil, fmt.Errorf("invalid -timeout %v (must be >= 0; 0 disables the timeout)", co.timeout)
+		return nil, invalid(co.fs, "invalid -timeout %v (must be >= 0; 0 disables the timeout)", co.timeout)
 	}
 	if timeoutSet {
 		opts = append(opts, aster.WithTimeout(co.timeout))
 	}
+	if co.memoryLimit != "" {
+		n, err := parseSize(co.memoryLimit)
+		if err != nil {
+			return nil, invalid(co.fs, "invalid -memory-limit %q: %v", co.memoryLimit, err)
+		}
+		opts = append(opts, aster.WithMemoryLimit(n))
+	}
+	if co.timezone != "" {
+		opts = append(opts, aster.WithTimezone(co.timezone))
+	}
+	if co.theme != "" {
+		opts = append(opts, aster.WithTheme(co.theme))
+	}
+	return opts, nil
+}
+
+// parseSize reads a byte size: a whole number, then optionally a unit,
+// binary (KiB, MiB, GiB) or decimal (KB, MB, GB).
+func parseSize(s string) (uint64, error) {
+	units := []struct {
+		suffix string
+		mult   uint64
+	}{{"KiB", 1 << 10}, {"MiB", 1 << 20}, {"GiB", 1 << 30}, {"KB", 1e3}, {"MB", 1e6}, {"GB", 1e9}, {"B", 1}}
+	num, mult := strings.TrimSpace(s), uint64(1)
+	for _, u := range units {
+		if strings.HasSuffix(num, u.suffix) {
+			num, mult = strings.TrimSpace(strings.TrimSuffix(num, u.suffix)), u.mult
+			break
+		}
+	}
+	n, err := strconv.ParseUint(num, 10, 64)
+	if err != nil {
+		return 0, errors.New("want a number of bytes, optionally with a unit such as MiB")
+	}
+	if n > (1<<64-1)/mult {
+		return 0, errors.New("too large")
+	}
+	return n * mult, nil
+}
+
+// newConverter is aster.New with the options the flags give. Every error New
+// returns is an option's, so a flag's: an invalid command line.
+func newConverter(fs *flag.FlagSet, opts []aster.Option) (*aster.Converter, error) {
+	c, err := aster.New(opts...)
+	if err != nil {
+		return nil, &usageError{err: fmt.Errorf("%w (see aster %s -h)", err, fs.Name())}
+	}
+	return c, nil
+}
+
+// commonOpts holds flags shared by the rendering subcommands and turns them
+// into aster options.
+type commonOpts struct {
+	*configOpts
+	allowHTTP    bool
+	allowDomains stringList
+	allowPrivate bool
+	allowFiles   stringList
+	baseURL      string
+	fonts        []aster.Option
+	from         string
+	lenient      bool
+}
+
+func registerCommonOpts(fs *flag.FlagSet) *commonOpts {
+	co := &commonOpts{configOpts: registerConfigOpts(fs)}
+	fs.BoolVar(&co.allowHTTP, "allow-http", false, "allow HTTP(S) data loading from any public host")
+	fs.Var(&co.allowDomains, "allow-domain", "restrict HTTP loading to this host (repeatable); implies -allow-http")
+	fs.BoolVar(&co.allowPrivate, "allow-private-networks", false, "let HTTP loading reach loopback, link-local and private addresses (denied by default)")
+	fs.Var(&co.allowFiles, "allow-file", "load data and images named by a relative path from the files under this directory (repeatable: the first that has the file serves it)")
+	fs.StringVar(&co.baseURL, "base-url", "", "resolve relative data and image URLs against this http(s) URL, and load them over HTTP; implies -allow-http")
+	fs.Func("font", "register a font file under a family name, as FAMILY=FILE (repeatable)", func(v string) error {
+		family, path, ok := strings.Cut(v, "=")
+		if !ok || family == "" || path == "" {
+			return fmt.Errorf("want FAMILY=FILE, got %q", v)
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		co.fonts = append(co.fonts, aster.WithFont(family, b))
+		return nil
+	})
+	fs.StringVar(&co.from, "from", "auto", "input language: vega, vega-lite, or auto (from $schema, else from the top-level properties)")
+	fs.BoolVar(&co.lenient, "lenient", false, "render past failed data and image loads and evaluation errors, as a browser does, printing each to stderr")
+	return co
+}
+
+// check validates the flag values that need no input, before any is read.
+func (co *commonOpts) check() error {
+	switch co.from {
+	case "auto", "", "vega", "vega-lite":
+	default:
+		return invalid(co.fs, "invalid -from %q (must be vega, vega-lite or auto)", co.from)
+	}
+	if co.baseURL != "" {
+		u, err := url.Parse(co.baseURL)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return invalid(co.fs, "invalid -base-url %q (must be an absolute http or https URL)", co.baseURL)
+		}
+	}
+	return nil
+}
+
+// lite reports whether spec is to be rendered as Vega-Lite, per -from.
+func (co *commonOpts) lite(spec []byte) (bool, error) {
+	switch co.from {
+	case "vega-lite":
+		return true, nil
+	case "vega":
+		return false, nil
+	default:
+		k, err := detectSpec(spec)
+		if err != nil {
+			return false, fmt.Errorf("%w; pass -from vega or -from vega-lite", err)
+		}
+		return k == specVegaLite, nil
+	}
+}
+
+// httpAllowed reports whether a flag lets data load over HTTP.
+func (co *commonOpts) httpAllowed() bool {
+	return co.allowHTTP || len(co.allowDomains) > 0 || co.baseURL != ""
+}
+
+// errorHandler prints warnings to stderr and, with -lenient, the errors it
+// lets go; without -lenient an error fails the render.
+func (co *commonOpts) errorHandler() aster.ErrorHandlerOption {
+	return aster.WithErrorHandler(func(err error) error {
+		var w aster.Warning
+		switch {
+		case errors.As(err, &w):
+			fmt.Fprintf(os.Stderr, "aster: warning: %v\n", err)
+		case co.lenient:
+			fmt.Fprintf(os.Stderr, "aster: ignored: %v\n", err)
+		default:
+			return co.withLoadHint(err)
+		}
+		return nil
+	})
+}
+
+// withLoadHint adds what to do to the error of a load no flag allowed.
+func (co *commonOpts) withLoadHint(err error) error {
+	var le *aster.LoadError
+	if !errors.As(err, &le) || le.URL == "" {
+		return err
+	}
+	u, perr := url.Parse(le.URL)
 	switch {
-	case len(co.allowDomains) > 0:
-		opts = append(opts, aster.WithLoader(&aster.HTTPLoader{AllowedDomains: co.allowDomains, AllowPrivateNetworks: co.allowPrivate}))
-	case co.allowHTTP:
-		opts = append(opts, aster.WithLoader(&aster.HTTPLoader{AllowPrivateNetworks: co.allowPrivate}))
+	case perr == nil && u.Scheme == "" && len(co.allowFiles) == 0 && co.baseURL == "":
+		return fmt.Errorf("%w (a relative URL: pass -allow-file DIR to read it from the files under DIR, or -base-url URL to load it over HTTP; or -lenient to render without it)", err)
+	case perr == nil && (u.Scheme == "http" || u.Scheme == "https") && !co.httpAllowed():
+		return fmt.Errorf("%w (pass -allow-http or -allow-domain to load over HTTP, or -lenient to render without it)", err)
+	}
+	return err
+}
+
+func (co *commonOpts) options() ([]aster.Option, error) {
+	opts, err := co.configOpts.options()
+	if err != nil {
+		return nil, err
+	}
+	opts = append(opts, co.fonts...)
+	// Files first, then HTTP: a relative URL is a file under one of the
+	// directories when there is one, else it is resolved against -base-url.
+	var loaders []aster.Loader
+	for _, dir := range co.allowFiles {
+		fl, err := aster.NewFileLoader(dir)
+		if err != nil {
+			return nil, invalid(co.fs, "invalid -allow-file %q: %v", dir, err)
+		}
+		loaders = append(loaders, fl)
+	}
+	if co.httpAllowed() {
+		loaders = append(loaders, &aster.HTTPLoader{AllowedDomains: co.allowDomains, BaseURL: co.baseURL, AllowPrivateNetworks: co.allowPrivate})
+	}
+	switch len(loaders) {
+	case 0:
+	case 1:
+		opts = append(opts, aster.WithLoader(loaders[0]))
+	default:
+		opts = append(opts, aster.WithLoader(aster.NewFallbackLoader(loaders...)))
 	}
 	return opts, nil
 }
@@ -210,39 +391,60 @@ func registerSignals(fs *flag.FlagSet) *signalFlag {
 	return s
 }
 
+// render is the part of svg, png and pdf they share: parse and check the
+// flags, read the input, make the converter, and tell the language. It
+// returns the converter, which the caller closes, the spec and whether it is
+// Vega-Lite.
+func render(fs *flag.FlagSet, co *commonOpts, input *string, args []string, check func() error) (c *aster.Converter, spec []byte, lite bool, err error) {
+	if err := parse(fs, args); err != nil {
+		return nil, nil, false, err
+	}
+	if err := co.check(); err != nil {
+		return nil, nil, false, err
+	}
+	if check != nil {
+		if err := check(); err != nil {
+			return nil, nil, false, err
+		}
+	}
+	opts, err := co.options()
+	if err != nil {
+		return nil, nil, false, err
+	}
+	c, err = newConverter(fs, opts)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	spec, err = readInput(*input)
+	if err == nil {
+		lite, err = co.lite(spec)
+	}
+	if err != nil {
+		_ = c.Close()
+		return nil, nil, false, err
+	}
+	return c, spec, lite, nil
+}
+
+// closeInto closes c, keeping the first error.
+func closeInto(c *aster.Converter, err *error) {
+	if e := c.Close(); e != nil && *err == nil {
+		*err = e
+	}
+}
+
 func runSVG(args []string) (err error) {
-	fs := flag.NewFlagSet("svg", flag.ExitOnError)
+	fs := flag.NewFlagSet("svg", flag.ContinueOnError)
 	input := fs.String("i", "", "input spec file (- or omit for stdin)")
 	output := fs.String("o", "", "output SVG file (omit for stdout)")
 	co := registerCommonOpts(fs)
 	signals := registerSignals(fs)
-	if err := fs.Parse(args); err != nil {
+	c, spec, lite, err := render(fs, co, input, args, nil)
+	if err != nil {
 		return err
 	}
+	defer closeInto(c, &err)
 
-	spec, err := readInput(*input)
-	if err != nil {
-		return err
-	}
-
-	opts, err := co.options()
-	if err != nil {
-		return err
-	}
-	c, err := aster.New(opts...)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if e := c.Close(); e != nil && err == nil {
-			err = e
-		}
-	}()
-
-	lite, err := co.lite(spec)
-	if err != nil {
-		return err
-	}
 	renderOpts := []aster.RenderOption{co.errorHandler()}
 	for _, s := range *signals {
 		renderOpts = append(renderOpts, s)
@@ -256,45 +458,28 @@ func runSVG(args []string) (err error) {
 	if err != nil {
 		return err
 	}
-
 	return writeOutput(*output, []byte(svg))
 }
 
 func runPNG(args []string) (err error) {
-	fs := flag.NewFlagSet("png", flag.ExitOnError)
+	fs := flag.NewFlagSet("png", flag.ContinueOnError)
 	input := fs.String("i", "", "input spec file (- or omit for stdin)")
 	output := fs.String("o", "", "output PNG file (omit for stdout)")
 	scale := fs.Float64("scale", 1.0, "scale factor; 2 produces 2x dimensions")
 	recode := fs.Bool("recode", false, "losslessly re-encode the PNG into a smaller equivalent format")
 	co := registerCommonOpts(fs)
 	signals := registerSignals(fs)
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-
-	spec, err := readInput(*input)
-	if err != nil {
-		return err
-	}
-
-	opts, err := co.options()
-	if err != nil {
-		return err
-	}
-	c, err := aster.New(opts...)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if e := c.Close(); e != nil && err == nil {
-			err = e
+	c, spec, lite, err := render(fs, co, input, args, func() error {
+		if !(*scale > 0) || math.IsInf(*scale, 1) {
+			return invalid(fs, "invalid -scale %v (must be a positive, finite number)", *scale)
 		}
-	}()
-
-	lite, err := co.lite(spec)
+		return nil
+	})
 	if err != nil {
 		return err
 	}
+	defer closeInto(c, &err)
+
 	pngOpts := []aster.PNGOption{co.errorHandler()}
 	if *scale != 1.0 {
 		pngOpts = append(pngOpts, aster.WithScale(*scale))
@@ -305,7 +490,6 @@ func runPNG(args []string) (err error) {
 	for _, s := range *signals {
 		pngOpts = append(pngOpts, s)
 	}
-
 	var data []byte
 	if lite {
 		data, err = c.VegaLiteToPNG(spec, pngOpts...)
@@ -315,59 +499,38 @@ func runPNG(args []string) (err error) {
 	if err != nil {
 		return err
 	}
-
 	return writeOutput(*output, data)
 }
 
 func runPDF(args []string) (err error) {
-	fs := flag.NewFlagSet("pdf", flag.ExitOnError)
+	fs := flag.NewFlagSet("pdf", flag.ContinueOnError)
 	input := fs.String("i", "", "input spec file (- or omit for stdin)")
 	output := fs.String("o", "", "output PDF file (omit for stdout)")
 	textMode := fs.String("text", "embed", "PDF text mode: embed (subset fonts, selectable text), named (no font program; the assembling document must embed the same font), or outlines (glyphs as paths)")
 	co := registerCommonOpts(fs)
 	signals := registerSignals(fs)
-	if err := fs.Parse(args); err != nil {
+	pdfOpts := []aster.PDFOption{co.errorHandler()}
+	c, spec, lite, err := render(fs, co, input, args, func() error {
+		switch *textMode {
+		case "embed":
+			// library default
+		case "named":
+			pdfOpts = append(pdfOpts, aster.WithPDFText(aster.PDFTextNamed))
+		case "outlines":
+			pdfOpts = append(pdfOpts, aster.WithPDFText(aster.PDFTextOutlines))
+		default:
+			return invalid(fs, "invalid -text %q (must be embed, named, or outlines)", *textMode)
+		}
+		return nil
+	})
+	if err != nil {
 		return err
 	}
+	defer closeInto(c, &err)
 
-	pdfOpts := []aster.PDFOption{co.errorHandler()}
-	switch *textMode {
-	case "embed":
-		// library default
-	case "named":
-		pdfOpts = append(pdfOpts, aster.WithPDFText(aster.PDFTextNamed))
-	case "outlines":
-		pdfOpts = append(pdfOpts, aster.WithPDFText(aster.PDFTextOutlines))
-	default:
-		return fmt.Errorf("invalid -text %q (must be embed, named, or outlines)", *textMode)
-	}
 	for _, s := range *signals {
 		pdfOpts = append(pdfOpts, s)
 	}
-
-	spec, err := readInput(*input)
-	if err != nil {
-		return err
-	}
-	lite, err := co.lite(spec)
-	if err != nil {
-		return err
-	}
-
-	opts, err := co.options()
-	if err != nil {
-		return err
-	}
-	c, err := aster.New(opts...)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if e := c.Close(); e != nil && err == nil {
-			err = e
-		}
-	}()
-
 	var data []byte
 	if lite {
 		data, err = c.VegaLiteToPDF(spec, pdfOpts...)
@@ -377,18 +540,26 @@ func runPDF(args []string) (err error) {
 	if err != nil {
 		return err
 	}
-
 	return writeOutput(*output, data)
 }
 
 func runCompile(args []string) (err error) {
-	fs := flag.NewFlagSet("compile", flag.ExitOnError)
+	fs := flag.NewFlagSet("compile", flag.ContinueOnError)
 	input := fs.String("i", "", "input Vega-Lite spec file (- or omit for stdin)")
 	output := fs.String("o", "", "output Vega JSON file (omit for stdout)")
-	version := fs.String("version", "", "Vega-Lite version, e.g. 5.8 or 6.4 (default: build default)")
-	if err := fs.Parse(args); err != nil {
+	co := registerConfigOpts(fs)
+	if err := parse(fs, args); err != nil {
 		return err
 	}
+	opts, err := co.options()
+	if err != nil {
+		return err
+	}
+	c, err := newConverter(fs, append(opts, aster.WithTextMeasurement(false)))
+	if err != nil {
+		return err
+	}
+	defer closeInto(c, &err)
 
 	spec, err := readInput(*input)
 	if err != nil {
@@ -397,26 +568,11 @@ func runCompile(args []string) (err error) {
 	if k, err := detectSpec(spec); err == nil && k == specVega {
 		return errors.New("the input is a Vega specification; compile takes Vega-Lite")
 	}
-
-	opts := []aster.Option{aster.WithTextMeasurement(false)}
-	if *version != "" {
-		opts = append(opts, aster.WithVegaLiteVersion(*version))
-	}
-	c, err := aster.New(opts...)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if e := c.Close(); e != nil && err == nil {
-			err = e
-		}
-	}()
-
 	// The compiler's warnings are printed, as a render's are.
 	vgSpec, err := c.VegaLiteToVega(spec, aster.WithErrorHandler(func(err error) error {
 		var w aster.Warning
 		if errors.As(err, &w) {
-			fmt.Fprintf(os.Stderr, "aster: warning: %v\n", err)
+			_, _ = fmt.Fprintf(os.Stderr, "aster: warning: %v\n", err)
 			return nil
 		}
 		return err
@@ -431,7 +587,6 @@ func runCompile(args []string) (err error) {
 	if err != nil {
 		formatted = vgSpec
 	}
-
 	return writeOutput(*output, append(formatted, '\n'))
 }
 
