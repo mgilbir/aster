@@ -201,7 +201,7 @@ func moveParseUpFn() func(root dfNode) bool {
 						o.setModified()
 						np.merge(pc)
 					} else {
-						if fieldIntersection(node.base().cc, node.producedFields().asMap(), child.dependentFields().asMap()) {
+						if fieldIntersection(node.base().cc, node.producedFields(), child.dependentFields()) {
 							continue
 						}
 						o.setModified()
@@ -230,7 +230,7 @@ func mergeBinsFn(m Model) func(root dfNode) bool {
 			for _, child := range node.base().children() {
 				cc.work(1)
 				if bn, ok := child.(*binNode); ok {
-					if moveBinsUp && !fieldIntersection(node.base().cc, node.producedFields().asMap(), child.dependentFields().asMap()) {
+					if moveBinsUp && !fieldIntersection(node.base().cc, node.producedFields(), child.dependentFields()) {
 						promotable = append(promotable, bn)
 					} else {
 						remaining = append(remaining, bn)

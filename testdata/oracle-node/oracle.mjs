@@ -391,7 +391,10 @@ for await (const line of rl) {
     }
     // Snapshot before rendering: vega.parse mutates the spec it is given
     // (it fills in defaults such as a CSV format's delimiter).
-    if (req.lite) res.vega = structuredClone(vg);
+    // As JSON, which is what the compiled specification is: a value JSON
+    // cannot hold (a function a repeat reference resolved to) is dropped,
+    // as JSON.stringify drops it, rather than failing the clone.
+    if (req.lite) res.vega = JSON.parse(JSON.stringify(vg));
     if (req.op === 'svg') res.svg = await render(vg);
   } catch (e) {
     res.err = String((e && e.message) || e).split('\n')[0];

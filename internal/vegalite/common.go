@@ -113,11 +113,15 @@ func getMarkStyleConfig(prop string, mark Value, styleIndex Value) Value {
 // tried first at each level.
 func getMarkConfig(channel string, mark Value, config Value, vgChannel string) Value {
 	cfg := getMarkStyleConfig(channel, mark, config.Get("style"))
+	// config[mark.type][channel] and config.mark[channel] are read
+	// unguarded (all of getFirstDefined's arguments are evaluated): a mark
+	// config set to a falsy value is absent from the config, and reading it
+	// is a TypeError.
 	mt := config.Get(mark.Get("type").AsString())
 	if vgChannel != "" {
-		return firstDefined(cfg, cfg, mt.Get(vgChannel), mt.Get(channel), config.Get("mark").Get(vgChannel))
+		return firstDefined(cfg, cfg, jsGet(mt, vgChannel), jsGet(mt, channel), jsGet(config.Get("mark"), vgChannel))
 	}
-	return firstDefined(undef, cfg, undef, mt.Get(channel), config.Get("mark").Get(channel))
+	return firstDefined(undef, cfg, undef, jsGet(mt, channel), jsGet(config.Get("mark"), channel))
 }
 
 // getMarkPropOrConfig reads the mark property, falling back to config.
@@ -243,7 +247,18 @@ func mergeTitleComponent(cc *compileCtx, v1, v2 withExplicit) withExplicit {
 	case bText:
 		return withExplicit{v1.explicit, b}
 	}
-	return withExplicit{v1.explicit, jsval.Arr(mergeTitleFieldDefs(cc, a.Items(), b.Items()))}
+	// mergeTitleFieldDefs(f1, f2): [...f1], then f2.forEach.
+	f1 := spreadItems(a)
+	return withExplicit{v1.explicit, jsval.Arr(mergeTitleFieldDefs(cc, f1, listOf(b, "f2", "forEach")))}
+}
+
+// spreadItems is [...v]: an array's items, a string's code points; a
+// TypeError for anything else.
+func spreadItems(v Value) []Value {
+	if v.IsArr() || v.IsStr() {
+		return iterate(v, "")
+	}
+	return iterateNew(v)
 }
 
 // inheritedObjectKey reports a key that reads as present on any plain object

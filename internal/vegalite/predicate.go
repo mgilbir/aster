@@ -10,6 +10,16 @@ import (
 
 func isSelectionPredicate(p Value) bool { return hasProperty(p, "param") }
 
+// isSelectionPredicateOf is isSelectionPredicate as the version has it: 5.8
+// reads predicate?.['param'] for its truthiness, so a param of "" is a field
+// predicate there.
+func isSelectionPredicateOf(cc *compileCtx, p Value) bool {
+	if cc.v5 {
+		return isObject(p) && p.Get("param").IsTruthy()
+	}
+	return isSelectionPredicate(p)
+}
+
 func fieldTruthy(p Value) bool { return p.IsObj() && p.Get("field").IsTruthy() }
 
 func isFieldEqualPredicate(p Value) bool { return fieldTruthy(p) && !p.Get("equal").IsUndefined() }

@@ -36,9 +36,25 @@ func channelDefType(cd Value) string {
 
 func isDatumDef(cd Value) bool { return hasProperty(cd, "datum") }
 
+// isDatumDefOf is isDatumDef as the version has it: 5.8 tests
+// channelDef && 'datum' in channelDef.
+func isDatumDefOf(cc *compileCtx, cd Value) bool {
+	if cc.v5 {
+		return cd.IsTruthy() && jsIn(cd, "datum")
+	}
+	return isDatumDef(cd)
+}
+
 func isNumericDataDef(cd Value) bool { return isDatumDef(cd) && cd.Get("datum").IsNum() }
 
-func isFieldOrDatumDef(cc *compileCtx, cd Value) bool { return isFieldDef(cc, cd) || isDatumDef(cd) }
+func isFieldOrDatumDef(cc *compileCtx, cd Value) bool {
+	if isFieldDef(cc, cd) {
+		return true
+	}
+	// 5.8's isDatumDef holds for a datum key whose value is undefined, and
+	// throws on a primitive.
+	return isDatumDefOf(cc, cd)
+}
 
 func isTypedFieldDef(cd Value) bool {
 	return cd.IsTruthy() && (hasProperty(cd, "field") || aggIs(cd, "count")) && hasProperty(cd, "type")
@@ -96,8 +112,8 @@ func isContinuousFieldOrDatumDef(cc *compileCtx, cd Value) bool {
 	return (isTypedFieldDefOf(cc, cd) && !isDiscreteDef(cc, cd)) || isNumericDataDef(cd)
 }
 
-func isUnbinnedQuantitativeFieldOrDatumDef(cd Value) bool {
-	return (isTypedFieldDef(cd) && cd.Get("type").IsStr() && cd.Get("type").StrValue() == "quantitative" && !cd.Get("bin").IsTruthy()) || isNumericDataDef(cd)
+func isUnbinnedQuantitativeFieldOrDatumDef(cc *compileCtx, cd Value) bool {
+	return (isTypedFieldDefOf(cc, cd) && cd.Get("type").IsStr() && cd.Get("type").StrValue() == "quantitative" && !cd.Get("bin").IsTruthy()) || isNumericDataDef(cd)
 }
 
 func toStringFieldDef(fd Value) Value {
@@ -160,7 +176,7 @@ func vgField(cc *compileCtx, fd Value, opt fieldRefOption) string {
 	rawField := fd.Get("field")
 	if f := rawField; !f.IsNullish() {
 		field = f.AsString()
-		pristine = !f.IsStr() && !f.IsArr()
+		pristine = !f.IsStr()
 	} else if f.IsNull() {
 		missing = "null"
 	} else {
@@ -231,7 +247,14 @@ func vgField(cc *compileCtx, fd Value, opt fieldRefOption) string {
 		throw("Cannot read properties of %s (reading 'length')", missing)
 	}
 	if pristine {
-		field = ""
+		// The spec's own non-string value reaches the path functions.
+		switch {
+		case opt.forAs:
+			return removePathFromFieldV(rawField)
+		case opt.expr != "":
+			return flatAccessWithDatumV(rawField, opt.expr) + argAccessor
+		}
+		return replacePathInFieldV(rawField) + argAccessor
 	}
 	switch {
 	case opt.forAs:
@@ -262,7 +285,7 @@ func verbalTitleFormatter(cc *compileCtx, fd Value, config Value) Value {
 		} else if isArgminDef(aggregate) {
 			return jsval.Str(field.AsString() + " for min " + aggregate.Get("argmin").AsString())
 		}
-		return jsval.Str(titleCase(aggregate.AsString()) + " of " + field.AsString())
+		return jsval.Str(titleCaseV(aggregate) + " of " + field.AsString())
 	}
 	return field
 }
@@ -686,7 +709,7 @@ func getBandSize(cc *compileCtx, channel string, fd, fd2 Value, markDef, config 
 }
 
 func hasBandEnd(cc *compileCtx, fd, fd2 Value, markDef, config Value) bool {
-	if isBinning(fd.Get("bin")) || (fd.Get("timeUnit").IsTruthy() && isTypedFieldDef(fd) && channelDefType(fd) == "temporal") {
+	if isBinning(fd.Get("bin")) || (fd.Get("timeUnit").IsTruthy() && isTypedFieldDefOf(cc, fd) && channelDefType(fd) == "temporal") {
 		return !getBandPosition(cc, fd, fd2, markDef, config).IsUndefined()
 	}
 	return false

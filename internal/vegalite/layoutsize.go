@@ -9,7 +9,7 @@ import (
 // Layout size parsing and signals — vega-lite/src/compile/layoutsize/*.
 
 func getViewConfigContinuousSize(view Value, channel string) Value {
-	if v := view.Get(channel); !v.IsNullish() {
+	if v := jsGet(view, channel); !v.IsNullish() {
 		return v
 	}
 	if channel == "width" {
@@ -20,7 +20,7 @@ func getViewConfigContinuousSize(view Value, channel string) Value {
 
 func getViewConfigDiscreteSize(view Value, channel string) Value {
 	var size Value
-	if v := view.Get(channel); !v.IsNullish() {
+	if v := jsGet(view, channel); !v.IsNullish() {
 		size = v
 	} else if channel == "width" {
 		size = view.Get("discreteWidth")
@@ -151,7 +151,7 @@ func defaultUnitSize(u *unitModel, sizeType string) Value {
 		rng := sc.get("range")
 		if hasDiscreteDomain(scaleType) {
 			size := getViewConfigDiscreteSize(config.Get("view"), sizeType)
-			if isVgRangeStep(rng) || isStep(size) {
+			if isVgRangeStep(u.b().ctx, rng) || isStep(size) {
 				return jsval.Str("step")
 			}
 			return size
@@ -194,7 +194,7 @@ func sizeSignals(m Model, sizeType string) []Value {
 		sc := b.getScaleComponent(channel)
 		if sc != nil {
 			typ, rng := sc.get("type").AsString(), sc.get("range")
-			if hasDiscreteDomain(typ) && isVgRangeStep(rng) {
+			if hasDiscreteDomain(typ) && isVgRangeStep(m.b().ctx, rng) {
 				scaleName := b.scaleName(channel, false)
 				if b.parent != nil && isFacetModel(b.parent) {
 					if b.parent.b().comp.resolve.scale[channel] == "independent" {

@@ -251,7 +251,7 @@ func defaultSizeRef58(cc *compileCtx, sizeChannel, scaleName string, scale *scal
 		return mkv("value", bandSize)
 	}
 	if scale != nil {
-		if rng := scale.get("range"); isVgRangeStep(rng) && rng.Get("step").IsNum() {
+		if rng := scale.get("range"); isVgRangeStep(cc, rng) && rng.Get("step").IsNum() {
 			return mkv("value", rng.Get("step").NumValue()-2)
 		}
 	}
@@ -490,7 +490,7 @@ func tickDefaultSize58(m *unitModel) Value {
 		return v
 	}
 	if scale != nil {
-		if rng := scale.get("range"); rng.IsTruthy() && isVgRangeStep(rng) && rng.Get("step").IsNum() {
+		if rng := scale.get("range"); rng.IsTruthy() && isVgRangeStep(m.b().ctx, rng) && rng.Get("step").IsNum() {
 			return jsval.Num(float64(rng.Get("step").NumValue()*3) / 4)
 		}
 	}

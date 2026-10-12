@@ -268,10 +268,15 @@ func (n *selectionCompatNormalizer) mapUnit(spec Value, p *normParams) Value {
 	}
 	rest := omit(spec, "selection")
 	var params []Value
-	for _, name := range keysOf(selection) {
+	// entries(selection), then const {init: value, bind, empty, ...select} =
+	// selDef: a string's entries are its characters.
+	for _, name := range jsKeys(selection) {
 		cc.work(1)
-		selDef := selection.Get(name)
-		value, bind, empty := selDef.Get("init"), selDef.Get("bind"), selDef.Get("empty")
+		selDef := jsProp(selection, name)
+		if selDef.IsNullish() {
+			throw("Cannot destructure property 'init' of 'selDef' as it is %s.", nullishName(selDef))
+		}
+		value, bind, empty := jsProp(selDef, "init"), jsProp(selDef, "bind"), jsProp(selDef, "empty")
 		sel := omit(selDef, "init", "bind", "empty")
 		if t := sel.Lookup("type"); t.IsStr() {
 			switch t.StrValue() {
@@ -867,7 +872,8 @@ func (n *coreNormalizer) mapLayer(spec Value, p *normParams) Value {
 
 // mergeEncoding merges a layer's shared encoding into a child's encoding.
 func mergeEncoding(cc *compileCtx, parentEncoding, encoding Value, layer bool) Value {
-	if !encoding.IsTruthy() && !encoding.IsObj() {
+	// encoding = {} is the default of an undefined encoding only.
+	if encoding.IsUndefined() {
 		encoding = mkv()
 	}
 	var merged *Object
@@ -875,7 +881,7 @@ func mergeEncoding(cc *compileCtx, parentEncoding, encoding Value, layer bool) V
 		merged = jsval.NewObject(8)
 		seen := map[string]bool{}
 		var channels []string
-		for _, k := range append(append([]string(nil), keysOf(parentEncoding)...), keysOf(encoding)...) {
+		for _, k := range append(append([]string(nil), jsKeys(parentEncoding)...), jsKeys(encoding)...) {
 			cc.work(1)
 			if !seen[k] {
 				seen[k] = true
@@ -884,8 +890,8 @@ func mergeEncoding(cc *compileCtx, parentEncoding, encoding Value, layer bool) V
 		}
 		for _, channel := range channels {
 			cc.work(1)
-			channelDef := encoding.Get(channel)
-			parentChannelDef := parentEncoding.Get(channel)
+			channelDef := jsProp(encoding, channel)
+			parentChannelDef := jsProp(parentEncoding, channel)
 			switch {
 			case isFieldOrDatumDef(cc, channelDef):
 				merged.Set(channel, jsval.Obj(merged2(parentChannelDef, channelDef)))
@@ -899,10 +905,14 @@ func mergeEncoding(cc *compileCtx, parentEncoding, encoding Value, layer bool) V
 				merged.Set(channel, parentChannelDef)
 			}
 		}
-	} else if encoding.IsObj() {
-		merged = encoding.ObjValue()
+	} else {
+		// merged = encoding; !merged || isEmpty(merged) ? undefined : merged
+		if !encoding.IsTruthy() || len(jsKeys(encoding)) == 0 {
+			return undef
+		}
+		return encoding
 	}
-	if merged == nil || merged.Len() == 0 {
+	if merged.Len() == 0 {
 		return undef
 	}
 	return jsval.Obj(merged)
@@ -1136,7 +1146,7 @@ func (ruleForRangedLineNormalizer) hasMatchingType(spec Value, p *normParams) bo
 		for _, channel := range secondaryRangeChannels {
 			mainDef := encoding.Get(getMainRangeChannel(channel))
 			if encoding.Get(channel).IsTruthy() {
-				if (isFieldDef(cc, mainDef) && !isBinned(mainDef.Get("bin"))) || isDatumDef(mainDef) {
+				if (isFieldDef(cc, mainDef) && !isBinned(mainDef.Get("bin"))) || isDatumDefOf(cc, mainDef) {
 					return true
 				}
 			}
@@ -1198,6 +1208,18 @@ func replaceRepeatInProp(cc *compileCtx, prop string, o, repeater Value) (Value,
 			c.Set(prop, jsval.Str(repr))
 			return jsval.Obj(c), true
 		}
+		if key == "__proto__" && repeater.IsObj() {
+			// Object.prototype, which has no own enumerable properties.
+			c := cloneObj(o.ObjValue())
+			c.Set(prop, mkv())
+			return jsval.Obj(c), true
+		}
+		if inh, ok := jsval.Inherited(key); ok && repeater.IsObj() {
+			// The datum becomes the inherited member itself (a function).
+			c := cloneObj(o.ObjValue())
+			c.Set(prop, inh)
+			return jsval.Obj(c), true
+		}
 		cc.warn(msgNoSuchRepeatedValue(val.Get("repeat")))
 		return undef, false
 	}
@@ -1242,7 +1264,8 @@ func replaceRepeaterInFieldOrDatumDef(cc *compileCtx, def, repeater Value) Value
 	}
 	dd, ok := replaceRepeatInProp(cc, "datum", def, repeater)
 	if !ok {
-		return undef
+		// datumDef !== def && !datumDef.type, of undefined.
+		throw("Cannot read properties of undefined (reading 'type')")
 	}
 	if dd.ObjValue() != def.ObjValue() && !dd.Get("type").IsTruthy() {
 		dd.ObjValue().Set("type", jsval.Str("nominal"))

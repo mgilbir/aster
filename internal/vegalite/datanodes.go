@@ -72,8 +72,17 @@ func (n *parseNode) dependentFields() *sset { return newSset(n.parse.Keys()...) 
 func makeExplicitParse(parent dfNode, m Model, ap *ancestorParse) *parseNode {
 	explicit := jsval.NewObject(0)
 	data := m.b().data
-	if !isGenerator(data) && data.Get("format").Get("parse").IsObj() {
-		explicit = data.Get("format").Get("parse").ObjValue()
+	if p := data.Get("format").Get("parse"); !isGenerator(data) && p.IsObj() {
+		explicit = p.ObjValue()
+	} else if !isGenerator(data) && p.IsTruthy() {
+		// A parse that is not an object is read through its keys: a
+		// string's characters, an array's items.
+		explicit = jsval.NewObject(0)
+		for _, k := range jsKeys(p) {
+			cc := ccOf(parent)
+			cc.work(1)
+			explicit.Set(k, jsProp(p, k))
+		}
 	}
 	return parseNodeWithAncestors(parent, explicit, jsval.NewObject(0), ap)
 }
@@ -287,7 +296,11 @@ func exprSource(v Value) string {
 	return ""
 }
 
-func (n *calculateNode) producedFields() *sset  { return newSset(n.transform.Get("as").AsString()) }
+func (n *calculateNode) producedFields() *sset {
+	s := newSset()
+	s.addValue(n.transform.Get("as"))
+	return s
+}
 func (n *calculateNode) dependentFields() *sset { return n.dep }
 func (n *calculateNode) hash() string           { return "Calculate " + hashOf(n.cc, n.transform) }
 func (n *calculateNode) assemble() Value {
@@ -352,7 +365,7 @@ func expression(cc *compileCtx, m Model, filterOp Value, node dfNode) string {
 		switch {
 		case pred.IsStr():
 			return pred.StrValue()
-		case isSelectionPredicate(pred):
+		case isSelectionPredicateOf(cc, pred):
 			return parseSelectionPredicate(m, pred, node, "datum")
 		}
 		return fieldFilterExpression(cc, pred, true)

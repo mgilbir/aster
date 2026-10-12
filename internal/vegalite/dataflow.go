@@ -228,10 +228,21 @@ func isNamedData(d Value) bool {
 	return hasProperty(d, "name") && !isUrlData(d) && !isInlineData(d) && !isGenerator(d)
 }
 
+// dataAsVL58 is what 5.8's data predicates make of an array given as data:
+// they test with `in`, and 'values' in [] holds (Array.prototype.values), so
+// the array is inline data whose values are that function.
+func dataAsVL58(cc *compileCtx, data Value) Value {
+	if cc.v5 && data.IsArr() {
+		return mkv("values", jsval.NativeFunction("values"))
+	}
+	return data
+}
+
 func newSourceNode(cc *compileCtx, data Value) *sourceNode {
 	if data.IsNullish() {
 		data = mkv("name", "source")
 	}
+	data = dataAsVL58(cc, data)
 	if cc.v5 && !isObject(data) {
 		// 5.8's isGenerator (data && 'sequence' in data), then isInlineData.
 		if data.IsTruthy() {

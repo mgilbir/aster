@@ -250,7 +250,7 @@ func (f *facetModel) getCardinalityAggregateForChild() cardinalityAggregate {
 			cs, ok := f.child.b().comp.scales.get(channel)
 			if ok && cs != nil && !cs.merged {
 				typ, rng := cs.get("type").AsString(), cs.get("range")
-				if hasDiscreteDomain(typ) && isVgRangeStep(rng) {
+				if hasDiscreteDomain(typ) && isVgRangeStep(f.b().ctx, rng) {
 					domain := assembleDomain(f.child, channel)
 					if field := getFieldFromDomain(cc, domain); field != "" {
 						r.fields = append(r.fields, jsval.Str(field))

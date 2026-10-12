@@ -613,6 +613,14 @@ func errorBarAggregationAndCalculation(cc *compileCtx, markDef, def, def2, defEr
 	contField := def.Get("field").AsString()
 	contFieldV := def.Get("field")
 	acc := func(s string) string { return cmAccess(cc, s) }
+	// accV is the same of a spec value: a missing field is "undefined" to
+	// 5.8's template, and a TypeError to 6.x's accessWithDatumToUnescapedPath.
+	accV := func(v Value) string {
+		if cc.v5 {
+			return `datum["` + tmpl(v) + `"]`
+		}
+		return accessWithDatumToUnescapedPathV(v)
+	}
 	if inputType == "raw" {
 		var center string
 		switch {
@@ -683,16 +691,16 @@ func errorBarAggregationAndCalculation(cc *compileCtx, markDef, def, def2, defEr
 		case "aggregated-upper-lower":
 			tooltipSummary = []tooltipSummaryItem{}
 			post = []Value{
-				mkv("calculate", acc(def2.Get("field").AsString()), "as", "upper_"+contField),
-				mkv("calculate", acc(contField), "as", "lower_"+contField),
+				mkv("calculate", accV(def2.Get("field")), "as", "upper_"+contField),
+				mkv("calculate", accV(contFieldV), "as", "lower_"+contField),
 			}
 		case "aggregated-error":
 			tooltipSummary = []tooltipSummaryItem{{"", jsval.Str(contField)}}
-			post = []Value{mkv("calculate", acc(contField)+" + "+acc(defError.Get("field").AsString()), "as", "upper_"+contField)}
+			post = []Value{mkv("calculate", accV(contFieldV)+" + "+accV(defError.Get("field")), "as", "upper_"+contField)}
 			if defError2.IsTruthy() {
-				post = append(post, mkv("calculate", acc(contField)+" + "+acc(defError2.Get("field").AsString()), "as", "lower_"+contField))
+				post = append(post, mkv("calculate", accV(contFieldV)+" + "+accV(defError2.Get("field")), "as", "lower_"+contField))
 			} else {
-				post = append(post, mkv("calculate", acc(contField)+" - "+acc(defError.Get("field").AsString()), "as", "lower_"+contField))
+				post = append(post, mkv("calculate", accV(contFieldV)+" - "+accV(defError.Get("field")), "as", "lower_"+contField))
 			}
 		}
 		for _, c := range post {

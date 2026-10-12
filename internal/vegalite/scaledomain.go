@@ -149,7 +149,7 @@ func parseDomainForChannel(u *unitModel, channel string) withExplicit {
 }
 
 func mapDomainToDataSignal(cc *compileCtx, domain Value, typ string, timeUnit Value) Value {
-	return mapVals(domain, func(v Value) Value {
+	return mapList(domain, "domain", func(v Value) Value {
 		data, _ := valueExpr(cc, v, timeUnit, typ, false, false)
 		return mkv("signal", "{data: "+data+"}")
 	})
@@ -198,7 +198,7 @@ func parseSingleChannelDomain(scaleType string, domain Value, u *unitModel, chan
 	if isScaleChannel(cc, channel) && isFieldDef(cc, fod) {
 		sort = domainSort(u, channel, scaleType)
 	}
-	if isDatumDef(fod) {
+	if isDatumDefOf(cc, fod) {
 		return makeImplicit(jsval.Arr(convertDomainIfItIsDateTime(cc, arr(fod.Get("datum")), typ, timeUnit)))
 	}
 	fd := fod

@@ -23,11 +23,34 @@ func init() {
 		"__lookupGetter__":     "__lookupGetter__",
 		"__lookupSetter__":     "__lookupSetter__",
 	} {
-		o := &Object{}
+		o := &Object{host: nativeFunction{}}
 		src := "function " + name + "() { [native code] }"
 		o.str = func(*Object) string { return src }
 		protoFuncs[key] = Obj(o)
 	}
+}
+
+// nativeFunction marks the objects that stand for a function of
+// Object.prototype.
+type nativeFunction struct{}
+
+// NativeFunction is a function of a built-in prototype named name (an array's
+// values, say), as inert as Inherited's: it prints as native code and JSON
+// leaves it out.
+func NativeFunction(name string) Value {
+	src := "function " + name + "() { [native code] }"
+	return Obj(&Object{host: nativeFunction{}, str: func(*Object) string { return src }})
+}
+
+// IsFunction reports whether v is one of the functions Inherited answers.
+// JSON has no functions: JSON.stringify leaves such a member out of an object
+// and writes null for it in an array.
+func IsFunction(v Value) bool {
+	if v.Kind() != KindObj {
+		return false
+	}
+	_, ok := v.ObjValue().host.(nativeFunction)
+	return ok
 }
 
 // Inherited answers the member of Object.prototype named key (the same value

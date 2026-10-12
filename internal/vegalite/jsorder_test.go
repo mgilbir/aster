@@ -201,3 +201,30 @@ func TestTitleCase(t *testing.T) {
 		}
 	}
 }
+
+// TestSplitAccessPathNMatchesStringSplit: on a string, the port that takes
+// the loop bound of a non-string value splits as the string splitter does,
+// errors included.
+func TestSplitAccessPathNMatchesStringSplit(t *testing.T) {
+	rng := rand.New(rand.NewPCG(7, 8))
+	alphabet := []string{"a", "b", ".", "[", "]", "'", `"`, `\`, "é", "😀"}
+	split := func(f func() []string) (out []string, msg string) {
+		defer func() {
+			if r := recover(); r != nil {
+				msg = r.(compileError).msg
+			}
+		}()
+		return f(), ""
+	}
+	for iter := 0; iter < 20000; iter++ {
+		s := ""
+		for k := rng.IntN(8); k > 0; k-- {
+			s += alphabet[rng.IntN(len(alphabet))]
+		}
+		a, ea := split(func() []string { return splitAccessPath(s) })
+		b, eb := split(func() []string { return splitAccessPathN(s, len(utf16Len(s))) })
+		if ea != eb || !slices.Equal(a, b) {
+			t.Fatalf("%q: %q %q, port %q %q", s, a, ea, b, eb)
+		}
+	}
+}

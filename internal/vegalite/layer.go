@@ -69,22 +69,23 @@ func resolveFromSpec(r Value) *resolveIndex {
 			res.prim[kind] = &o
 		}
 	}
-	fill := func(dst map[string]string, v Value) {
+	// An invalid mode equals neither "shared" nor "independent". A scale's
+	// mode is defaulted with ??=, so only null and undefined are unset there;
+	// a guide's is read with || 'shared', so any falsy one is.
+	fill := func(dst map[string]string, v Value, nullishOnly bool) {
 		for _, k := range keysOf(v) {
 			s := v.Get(k)
 			switch {
-			case s.IsStr():
+			case s.IsStr() && s.StrValue() != "":
 				dst[k] = s.StrValue()
-			case s.IsTruthy():
-				// An invalid (non-string) resolve mode is truthy but equals neither
-				// "shared" nor "independent".
+			case s.IsTruthy() || (nullishOnly && !s.IsNullish()):
 				dst[k] = "\x00invalid"
 			}
 		}
 	}
-	fill(res.scale, r.Get("scale"))
-	fill(res.axis, r.Get("axis"))
-	fill(res.legend, r.Get("legend"))
+	fill(res.scale, r.Get("scale"), true)
+	fill(res.axis, r.Get("axis"), false)
+	fill(res.legend, r.Get("legend"), false)
 	return res
 }
 

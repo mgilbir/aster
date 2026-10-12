@@ -578,6 +578,9 @@ func appendJSON(dst []byte, v Value, indent, prefix string, depth int) []byte {
 	if depth > MaxValueDepth {
 		return append(dst, "null"...)
 	}
+	if IsFunction(v) {
+		return append(dst, "null"...) // as in an array; a member is left out
+	}
 	switch v.Kind() {
 	case KindUndefined, KindNull:
 		return append(dst, "null"...)
@@ -622,7 +625,7 @@ func appendJSON(dst []byte, v Value, indent, prefix string, depth int) []byte {
 		n := 0
 		for i := 0; i < o.Len(); i++ {
 			val := o.ValueAt(i)
-			if val.Kind() == KindUndefined {
+			if val.Kind() == KindUndefined || IsFunction(val) {
 				continue
 			}
 			if n > 0 {

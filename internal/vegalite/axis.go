@@ -770,10 +770,7 @@ func getAxisConfigs(channel, scaleType string, orient Value, config Value) axisC
 	}
 	axisOrient := "axisOrient"
 	if !isSignalRef(orient) {
-		if !orient.IsStr() && !orient.IsNullish() {
-			throw("s.charAt is not a function") // titleCase(orient)
-		}
-		axisOrient = "axis" + titleCase(orient.AsString())
+		axisOrient = "axis" + titleCaseV(orient)
 	}
 	vlOnly := append([]string{}, typeBased...)
 	for _, c := range typeBased {
@@ -976,10 +973,15 @@ func assembleAxis(cc *compileCtx, a *axisComponent, kind string, config Value, h
 		return undef
 	}
 	if !labelExpr.IsUndefined() {
-		expr := labelExpr.AsString()
+		// The labelExpr as it is, or replaceAll(labelExpr, ...), which
+		// calls labelExpr.replace.
+		expr := labelExpr
 		text := axis.Lookup("encode").Get("labels").Get("update").Get("text")
-		if axis.Lookup("encode").Get("labels").Get("update").IsObj() && isSignalRef(text) {
-			expr = strings.ReplaceAll(expr, "datum.label", signalOf(text))
+		if axis.Lookup("encode").Get("labels").Get("update").IsTruthy() && isSignalRef(text) {
+			if !labelExpr.IsStr() {
+				throw("string.replace is not a function")
+			}
+			expr = jsval.Str(strings.ReplaceAll(labelExpr.StrValue(), "datum.label", signalOf(text)))
 		}
 		setAxisEncode(axis, "labels", "text", mkv("signal", expr))
 	}

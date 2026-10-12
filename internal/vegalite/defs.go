@@ -43,6 +43,12 @@ func isAggregateOp(cc *compileCtx, v Value) bool {
 	if cc.v5 && v.IsStr() && (v.StrValue() == "exponential" || v.StrValue() == "exponentialb") {
 		return false // 6.x only
 	}
+	if cc.v5 && v.IsStr() {
+		// !!AGGREGATE_OP_INDEX[a]: the members an object inherits count.
+		if _, inherited := jsval.Inherited(v.StrValue()); inherited || v.StrValue() == "__proto__" {
+			return true
+		}
+	}
 	return v.IsStr() && aggregateOps[v.StrValue()]
 }
 func isCountingAggregateOp(v Value) bool {

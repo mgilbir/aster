@@ -161,6 +161,11 @@ func (n *xformNode) producedFields() *sset {
 		s := newSset()
 		for _, w := range listOf(t.Get("window"), "this.transform.window", "map") {
 			cc.work(1)
+			// getDefaultName: as ?? vgField(...), the as as it is given.
+			if a := w.Get("as"); !a.IsNullish() && !a.IsStr() {
+				s.addValue(a)
+				continue
+			}
 			s.add(n.defaultName(w))
 		}
 		return s
@@ -168,6 +173,11 @@ func (n *xformNode) producedFields() *sset {
 		s := newSset()
 		for _, w := range listOf(t.Get("joinaggregate"), "this.transform.joinaggregate", "map") {
 			cc.work(1)
+			// getDefaultName: as ?? vgField(...), the as as it is given.
+			if a := w.Get("as"); !a.IsNullish() && !a.IsStr() {
+				s.addValue(a)
+				continue
+			}
 			s.add(n.defaultName(w))
 		}
 		return s
@@ -580,6 +590,9 @@ type stackParams struct {
 type stackNode struct {
 	dfBase
 	st *stackParams
+	// assembling says getGroupbyFields is read by assemble (a spread)
+	// rather than by dependentFields (a forEach), for upstream's message.
+	assembling bool
 }
 
 func newStackNode(parent dfNode, st *stackParams) *stackNode {
@@ -617,6 +630,17 @@ func (n *stackNode) getGroupbyFields() []string {
 			}
 		}
 		return out
+	}
+	// groupby ?? [], which the callers iterate: a value that is not an
+	// array is upstream's TypeError, as forEach or as a spread.
+	if g := st.groupby; !g.IsNullish() && !g.IsArr() {
+		if !n.assembling {
+			throw("this.getGroupbyFields(...).forEach is not a function")
+		}
+		if !g.IsStr() {
+			throw("this.getGroupbyFields is not a function or its return value is not iterable")
+		}
+		return strItems(cc, jsval.Arr(iterate(g, ""))) // a spread of a string: its characters
 	}
 	return strItems(cc, st.groupby)
 }
@@ -784,6 +808,7 @@ func (n *stackNode) assemble() []Value {
 				"key", vgField(cc, d, fieldRefOption{binSuffix: "mid"}), "method", "value", "value", 0))
 		}
 	}
+	n.assembling = true
 	gb := append(n.getGroupbyFields(), st.facetby...)
 	out = append(out, mkv("type", "stack", "groupby", strsVal(gb), "field", st.stackField, "sort", st.sort, "as", strsVal(st.as), "offset", st.offset))
 	return out
@@ -848,7 +873,7 @@ func geoPair(m *unitModel, coords [2]string) Value {
 		switch {
 		case isFieldDef(cc, def):
 			pair[i] = def.Get("field")
-		case isDatumDef(def):
+		case isDatumDefOf(m.b().ctx, def):
 			pair[i] = mkv("expr", def.Get("datum").AsString())
 		case isValueDef(def):
 			pair[i] = mkv("expr", def.Get("value").AsString())
@@ -1031,7 +1056,7 @@ func (n *facetNode) getChildIndependentFieldsWithStep() map[string]string {
 		cs, ok := n.childModel.b().comp.scales.get(channel)
 		if ok && cs != nil && !cs.merged {
 			typ, rng := cs.get("type").AsString(), cs.get("range")
-			if hasDiscreteDomain(typ) && isVgRangeStep(rng) {
+			if hasDiscreteDomain(typ) && isVgRangeStep(n.cc, rng) {
 				domain := assembleDomain(n.childModel, channel)
 				if field := getFieldFromDomain(n.cc, domain); field != "" {
 					out[channel] = field

@@ -77,7 +77,7 @@ func parseRangeForChannel(channel string, u *unitModel) withExplicit {
 					}
 				} else if isObject(rng) {
 					return makeExplicit(mkv("data", u.requestDataName(dsMain), "field", rng.Get("field"),
-						"sort", mkv("op", "min", "field", u.vgField(channel, fieldRefOption{}))))
+						"sort", mkv("op", "min", "field", u.vgFieldValue(channel, fieldRefOption{}))))
 				}
 				return makeExplicit(rng)
 			case "scheme":

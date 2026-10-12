@@ -430,7 +430,7 @@ func tooltipData(cc *compileCtx, encoding Value, stack *stackProperties, config 
 	add := func(fDef Value, channel string) {
 		mainChannel := getMainRangeChannel(channel)
 		fd := fDef
-		if !isTypedFieldDef(fDef) {
+		if !isTypedFieldDefOf(cc, fDef) {
 			o := cloneObj(fDef.ObjValue())
 			o.Set("type", encoding.Get(mainChannel).Get("type"))
 			fd = jsval.Obj(o)

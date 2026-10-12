@@ -331,10 +331,19 @@ func (u *unitModel) fieldDef(channel string) Value {
 
 func (u *unitModel) typedFieldDef(channel string) Value {
 	fd := u.fieldDef(channel)
-	if isTypedFieldDef(fd) {
+	if isTypedFieldDefOf(u.b().ctx, fd) {
 		return fd
 	}
 	return undef
+}
+
+// vgFieldValue is model.vgField(channel), undefined for a channel without a
+// field def.
+func (u *unitModel) vgFieldValue(channel string, opt fieldRefOption) Value {
+	if !u.fieldDef(channel).IsTruthy() {
+		return undef
+	}
+	return jsval.Str(u.vgField(channel, opt))
 }
 
 func (u *unitModel) vgField(channel string, opt fieldRefOption) string {
@@ -374,7 +383,12 @@ func initMarkdef(cc *compileCtx, original Value, encoding Value, config Value) V
 	md := mdv.ObjValue()
 	specifiedOrient := getMarkPropOrConfigSimple("orient", mdv, config)
 	orient := markOrient(cc, md.Lookup("type").AsString(), encoding, specifiedOrient)
-	md.Set("orient", strOrUndef(orient))
+	orientV := strOrUndef(orient)
+	if specifiedOrient.IsTruthy() && !specifiedOrient.IsStr() && orient == specifiedOrient.AsString() && orient != "vertical" && orient != "horizontal" {
+		// orient() handed back the specified value itself, not its text.
+		orientV = specifiedOrient
+	}
+	md.Set("orient", orientV)
 	if o := md.Lookup("orient"); !specifiedOrient.IsUndefined() && !strictEq(specifiedOrient, o) {
 		// Upstream passes the computed orient as the "specified" one.
 		cc.warn(msgOrientOverridden(o, specifiedOrient))
@@ -509,8 +523,8 @@ func markOrient(cc *compileCtx, mark string, encoding Value, specifiedOrient Val
 		}
 	}
 	// line and tick (and fall-through from above)
-	xIsMeasure := isUnbinnedQuantitativeFieldOrDatumDef(x)
-	yIsMeasure := isUnbinnedQuantitativeFieldOrDatumDef(y)
+	xIsMeasure := isUnbinnedQuantitativeFieldOrDatumDef(cc, x)
+	yIsMeasure := isUnbinnedQuantitativeFieldOrDatumDef(cc, y)
 	switch {
 	case so != "":
 		return so
@@ -527,8 +541,8 @@ func markOrient(cc *compileCtx, mark string, encoding Value, specifiedOrient Val
 	case xIsMeasure && yIsMeasure:
 		return "vertical"
 	}
-	xIsTemporal := isTypedFieldDef(x) && channelDefType(x) == "temporal"
-	yIsTemporal := isTypedFieldDef(y) && channelDefType(y) == "temporal"
+	xIsTemporal := isTypedFieldDefOf(cc, x) && channelDefType(x) == "temporal"
+	yIsTemporal := isTypedFieldDefOf(cc, y) && channelDefType(y) == "temporal"
 	if xIsTemporal && !yIsTemporal {
 		return "vertical"
 	} else if !xIsTemporal && yIsTemporal {

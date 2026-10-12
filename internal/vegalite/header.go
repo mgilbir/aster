@@ -70,7 +70,7 @@ func getHeaderProperty(prop string, header Value, config Value, channel string) 
 	default:
 		specific = config.Get("headerFacet")
 	}
-	return firstDefined(coalesceObjV(header).Get(prop), specific.Get(prop), config.Get("header").Get(prop))
+	return firstDefined(coalesceObjV(header).Get(prop), jsGet(specific, prop), jsGet(config.Get("header"), prop))
 }
 
 func coalesceObjV(v Value) Value {
@@ -300,7 +300,10 @@ func assembleLabelTitle(cc *compileCtx, fd Value, channel string, config Value) 
 	headerChannel := getHeaderChannel(channel, labelOrient.AsString())
 	var text string
 	if labelExpr := props.Lookup("labelExpr"); labelExpr.IsTruthy() {
-		text = strings.ReplaceAll(strings.ReplaceAll(labelExpr.AsString(), "datum.label", titleTextExpr), "datum.value", vgField(cc, fd, fieldRefOption{expr: "parent"}))
+		if !labelExpr.IsStr() {
+			throw("string.replace is not a function") // util.replaceAll(labelExpr, ...)
+		}
+		text = strings.ReplaceAll(strings.ReplaceAll(labelExpr.StrValue(), "datum.label", titleTextExpr), "datum.value", vgField(cc, fd, fieldRefOption{expr: "parent"}))
 	} else {
 		text = titleTextExpr
 	}

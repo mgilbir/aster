@@ -38,12 +38,23 @@ type selProjItem struct {
 	geoChannel string
 	hasLegend  bool
 	isChannel  bool // built from an encoding channel (field, channel, type order)
+	// fieldV is the field as the spec gave it when it is not a string (a
+	// projected field of null): assembling reads it as an access path.
+	fieldV Value
+}
+
+// fieldPath is replacePathInField(p.field).
+func (p *selProjItem) fieldPath() string {
+	if !p.fieldV.IsUndefined() {
+		return replacePathInFieldV(p.fieldV)
+	}
+	return replacePathInField(p.field)
 }
 
 func (p *selProjItem) assembled() Value {
 	o := jsval.NewObject(4)
 	if p.isChannel {
-		o.Set("field", jsval.Str(replacePathInField(p.field)))
+		o.Set("field", jsval.Str(p.fieldPath()))
 		o.Set("channel", strOrUndef(p.channel))
 		o.Set("type", jsval.Str(p.typ))
 		if p.geoChannel != "" {
@@ -51,7 +62,7 @@ func (p *selProjItem) assembled() Value {
 		}
 	} else {
 		o.Set("type", jsval.Str(p.typ))
-		o.Set("field", jsval.Str(replacePathInField(p.field)))
+		o.Set("field", jsval.Str(p.fieldPath()))
 	}
 	return jsval.Obj(o)
 }
@@ -86,9 +97,10 @@ func isTimerSelection(cc *compileCtx, s *selectionComponent) bool {
 	if cc.v5 {
 		return false // timer (animation) selections are a 6.x feature
 	}
+	// events.find((e) => 'type' in e && e.type === 'timer')
 	for _, e := range s.events().Items() {
 		cc.work(1)
-		if e.IsObj() && e.ObjValue().Has("type") && e.Get("type").IsStr() && e.Get("type").StrValue() == "timer" {
+		if jsIn(e, "type") && strIs(jsProp(e, "type"), "timer") {
 			return true
 		}
 	}
@@ -199,15 +211,6 @@ func parseUnitSelection(m *unitModel, selDefs []Value) *omap[*selectionComponent
 			props.Set("events", jsval.Arr(parseSelector(on.StrValue(), "scope")))
 		} else {
 			props.Set("events", jsval.Arr(arrayOf(deepClone(cc, on))))
-		}
-		for _, e := range props.Lookup("events").Items() {
-			cc.work(1)
-			if !e.IsObj() {
-				throw("Invalid event stream %s in the selection %q: `on` must be an event selector string or event stream objects.", stringify(cc, e), name)
-			}
-			if b := e.Get("between"); b.IsTruthy() && (!b.IsArr() || b.Len() != 2 || !b.Index(0).IsObj()) {
-				throw("Invalid `between` %s in the selection %q: expected two event streams.", stringify(cc, b), name)
-			}
 		}
 		sc := &selectionComponent{cc: cc, name: name, typ: typ, props: props, project: &selProjection{
 			hasChannel: newOmap[*selProjItem](), hasField: map[string]*selProjItem{},
@@ -960,6 +963,9 @@ var projectCompiler = selectionCompiler{
 				}
 				if parsed[f] == nil {
 					tplType := "E"
+					if typ == "interval" && isScaleChannel(m.ctx, channel) && m.getScaleComponent(channel) == nil {
+						throw("Cannot read properties of undefined (reading 'get')") // model.getScaleComponent(channel).get
+					}
 					if typ == "interval" && isScaleChannel(m.ctx, channel) && hasContinuousDomain(m.scaleTypeOf(channel)) {
 						tplType = "R"
 					} else if fd.Get("bin").IsTruthy() {
@@ -992,6 +998,9 @@ var projectCompiler = selectionCompiler{
 				continue
 			}
 			p := &selProjItem{typ: "E", field: field, index: len(proj.items)}
+			if !fv.IsStr() {
+				p.fieldV = fv // JSON has no undefined, so the zero value still means "use field"
+			}
 			p.dataSignal = signalName(p, "data")
 			proj.items = append(proj.items, p)
 			proj.hasField[field] = p
@@ -1164,7 +1173,7 @@ var intervalCompiler = selectionCompiler{
 			def.Set("fields", arr(selectionID))
 			if !def.Lookup("encodings").IsTruthy() {
 				if v := selDef.Get("value"); v.IsTruthy() {
-					def.Set("encodings", strsVal(keysOf(v)))
+					def.Set("encodings", strsVal(jsKeys(v)))
 				} else {
 					def.Set("encodings", arr(chLongitude, chLatitude))
 				}
@@ -1177,16 +1186,21 @@ var intervalCompiler = selectionCompiler{
 			filterExpr := "!event.item || event.item.mark.name !== " + stringValue(jsval.Str(sel.name+brushSuffix))
 			for _, evt := range sel.events().Items() {
 				cc.work(1)
-				between := evt.Get("between")
+				between := jsProp(evt, "between")
 				if !between.IsTruthy() {
 					cc.warn(tmpl(evt) + " is not an ordered event stream for interval selections.")
 					continue
 				}
-				first := between.Index(0).ObjValue()
-				filters := arrayOf(first.Lookup("filter"))
-				if !first.Has("filter") || first.Lookup("filter").IsNullish() {
-					filters = nil
+				// const filters = array((evt.between[0].filter ??= []));
+				// filters.push(...): a filter that is not an array is
+				// wrapped in a new array, so the push does not reach it.
+				first := jsProp(between, "0")
+				f0 := jsProp(first, "filter")
+				if f0.IsNullish() {
+					f0 = jsval.Arr(nil)
+					jsSetProp(first, "filter", f0)
 				}
+				filters := arrayOf(f0)
 				found := false
 				for _, f := range filters {
 					cc.work(1)
@@ -1194,10 +1208,9 @@ var intervalCompiler = selectionCompiler{
 						found = true
 					}
 				}
-				if !found {
-					filters = append(append([]Value{}, filters...), jsval.Str(filterExpr))
+				if !found && f0.IsArr() {
+					jsSetProp(first, "filter", jsval.Arr(append(append([]Value{}, filters...), jsval.Str(filterExpr))))
 				}
-				first.Set("filter", jsval.Arr(filters))
 			}
 		}
 	},
@@ -1447,7 +1460,7 @@ func intervalChannelSignals(m *unitModel, sel *selectionComponent, proj *selProj
 	for _, evt := range sel.events().Items() {
 		cc.work(1)
 		von = append(von,
-			mkv("events", evt.Get("between").Index(0), "update", "["+coord+", "+coord+"]"),
+			mkv("events", jsProp(jsProp(evt, "between"), "0"), "update", "["+coord+", "+coord+"]"),
 			mkv("events", evt, "update", "["+vname+"[0], clamp("+coord+", 0, "+size+")]"),
 		)
 	}
@@ -1718,7 +1731,13 @@ var legendsCompiler = selectionCompiler{
 			legendFilter := `event.item && indexof(event.item.mark.role, "legend") < 0`
 			for _, evt := range sel.events().Items() {
 				cc.work(1)
-				filters := append([]Value{}, arrayOf(evt.Get("filter"))...)
+				// evt.filter = array(evt.filter ?? []), then a push.
+				f0 := jsProp(evt, "filter")
+				if f0.IsNullish() {
+					f0 = jsval.Arr(nil)
+				}
+				filters := append([]Value{}, arrayOf(f0)...)
+				jsSetProp(evt, "filter", jsval.Arr(filters))
 				found := false
 				for _, f := range filters {
 					cc.work(1)
@@ -1729,7 +1748,7 @@ var legendsCompiler = selectionCompiler{
 				if !found {
 					filters = append(filters, jsval.Str(legendFilter))
 				}
-				evt.ObjValue().Set("filter", jsval.Arr(filters))
+				jsSetProp(evt, "filter", jsval.Arr(filters))
 			}
 		}
 		evt := jsval.Str("click")
@@ -1753,12 +1772,9 @@ var legendsCompiler = selectionCompiler{
 		}
 		markName := func(name string) func(Value) Value {
 			return func(s Value) Value {
-				// ds.markname = name: an array keeps it as a property that
-				// JSON drops, and a primitive ignores it.
+				// ds.markname = name
 				ds := deepClone(m.b().ctx, s)
-				if ds.IsObj() {
-					ds.ObjValue().Set("markname", jsval.Str(name))
-				}
+				jsSetProp(ds, "markname", jsval.Str(name))
 				return ds
 			}
 		}
@@ -1942,23 +1958,19 @@ var translateCompiler = selectionCompiler{
 		anchor := name + translateAnchor
 		x, _ := sel.project.hasChannel.get("x")
 		y, _ := sel.project.hasChannel.get("y")
-		events := parseSelector(sel.props.Lookup("translate").AsString(), "scope")
-		for _, e := range events {
-			cc.work(1)
-			if b := e.Get("between"); !b.IsArr() || b.Len() == 0 || !b.Index(0).IsObj() {
-				throw("Invalid translate selector %s in the selection %q: expected a drag selector such as \"[mousedown, window:mouseup] > window:mousemove!\".", stringify(m.ctx, sel.props.Lookup("translate")), name)
-			}
-		}
+		events := parseSelectorOf(sel.props.Lookup("translate"), "scope")
 		if !boundScales {
+			// e.between[0].markname = ...: a selector without a between
+			// is upstream's TypeError.
 			for _, e := range events {
 				cc.work(1)
-				e.Get("between").Index(0).ObjValue().Set("markname", jsval.Str(name+brushSuffix))
+				jsSetProp(jsProp(jsProp(e, "between"), "0"), "markname", jsval.Str(name+brushSuffix))
 			}
 		}
 		var between []Value
 		for _, e := range events {
 			cc.work(1)
-			between = append(between, e.Get("between").Index(0))
+			between = append(between, jsProp(jsProp(e, "between"), "0"))
 		}
 		upd := "{x: x(unit), y: y(unit)"
 		if x != nil {
@@ -2050,7 +2062,7 @@ var zoomCompiler = selectionCompiler{
 		if n := m.scaleName(chY, false); n != "" {
 			sy = stringValue(jsval.Str(n))
 		}
-		events := parseSelector(sel.props.Lookup("zoom").AsString(), "scope")
+		events := parseSelectorOf(sel.props.Lookup("zoom"), "scope")
 		if !boundScales {
 			for _, e := range events {
 				cc.work(1)
@@ -2120,7 +2132,7 @@ var nearestCompiler = selectionCompiler{
 		cc := m.ctx
 		for _, s := range sel.events().Items() {
 			cc.work(1)
-			s.ObjValue().Set("markname", jsval.Str(m.getName("voronoi")))
+			jsSetProp(s, "markname", jsval.Str(m.getName("voronoi")))
 		}
 	},
 	marks: func(m *unitModel, sel *selectionComponent, marks []Value) []Value {

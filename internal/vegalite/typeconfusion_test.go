@@ -162,6 +162,9 @@ func TestInvalidSpecsReturnErrors(t *testing.T) {
 		"lookup from":      `{` + data + `,"transform":[{"lookup":"a","from":{"signal":"datum"}}],"mark":"point",` + enc + `}`,
 	} {
 		for _, version := range []string{Version64, Version58} {
+			if name == "on numbers" && version == Version58 {
+				continue // 5.8 has no timer selections, so nothing reads the events as objects; node compiles it
+			}
 			_, err := Compile(mustParse(t, spec), Options{Version: version})
 			if err == nil || strings.Contains(err.Error(), "internal error") {
 				t.Errorf("%s (%s): want a descriptive error, got %v", name, version, err)

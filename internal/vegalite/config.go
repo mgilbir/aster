@@ -505,6 +505,11 @@ func stripAndRedirectConfig(cc *compileCtx, cfg Value) Value {
 	}
 	for _, markType := range append([]string{"view"}, primitiveMarks...) {
 		mc := c.Lookup(markType)
+		if mc.IsNullish() {
+			// delete config[markType][prop] of a mark config a falsy value
+			// removed.
+			throw("Cannot convert undefined or null to object")
+		}
 		if mo := mc.ObjValue(); mo != nil {
 			for _, p := range vlOnlyMarkConfigProperties {
 				mo.Delete(p)

@@ -377,7 +377,7 @@ func defaultSizeRef(cc *compileCtx, sizeChannel, scaleName string, scale *scaleC
 		return mkv("value", bandSize)
 	}
 	if scale != nil {
-		if rng := scale.get("range"); isVgRangeStep(rng) && rng.Get("step").IsNum() {
+		if rng := scale.get("range"); isVgRangeStep(cc, rng) && rng.Get("step").IsNum() {
 			return mkv("value", rng.Get("step").NumValue()-2)
 		}
 	}

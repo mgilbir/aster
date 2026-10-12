@@ -528,6 +528,18 @@ func titleCase(s string) string {
 	return jsUpperCase(s[:n]) + s[n:]
 }
 
+// titleCaseV is titleCase of a spec value, which calls s.charAt.
+func titleCaseV(v Value) string {
+	switch {
+	case v.IsStr():
+		return titleCase(v.StrValue())
+	case v.IsNullish():
+		throw("Cannot read properties of %s (reading 'charAt')", nullishName(v))
+	}
+	throw("s.charAt is not a function")
+	return ""
+}
+
 // jsUpperCase is String.prototype.toUpperCase: full Unicode case mapping.
 func jsUpperCase(s string) string {
 	for i := 0; i < len(s); i++ {

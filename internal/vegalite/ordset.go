@@ -3,6 +3,8 @@ package vegalite
 import (
 	"slices"
 	"sort"
+
+	"github.com/mgilbir/aster/internal/jsval"
 )
 
 // sset is an insertion-ordered set of strings (JavaScript's Set<string>).
@@ -10,6 +12,30 @@ import (
 type sset struct {
 	items []string
 	index map[string]struct{}
+	// raw holds, by their text, the members that were added as values other
+	// than strings (a transform's `as` of null): upstream's set holds the
+	// values, and reading one as an access path differs from its text.
+	raw map[string]Value
+}
+
+// addValue adds v, keeping it as it is when it is not a string.
+func (s *sset) addValue(v Value) {
+	k := v.AsString()
+	if !v.IsStr() && !s.has(k) {
+		if s.raw == nil {
+			s.raw = map[string]Value{}
+		}
+		s.raw[k] = v
+	}
+	s.add(k)
+}
+
+// value is the member x as it was added.
+func (s *sset) value(x string) Value {
+	if v, ok := s.raw[x]; ok {
+		return v
+	}
+	return jsval.Str(x)
 }
 
 func newSset(items ...string) *sset {
@@ -59,20 +85,14 @@ func (s *sset) clone() *sset {
 		for _, i := range s.items {
 			c.add(i)
 		}
+		for k, v := range s.raw {
+			if c.raw == nil {
+				c.raw = map[string]Value{}
+			}
+			c.raw[k] = v
+		}
 	}
 	return c
-}
-
-// mapSet turns the set into a Go map (for the field-prefix helpers).
-func (s *sset) asMap() map[string]bool {
-	if s == nil {
-		return nil
-	}
-	m := make(map[string]bool, len(s.items))
-	for _, i := range s.items {
-		m[i] = true
-	}
-	return m
 }
 
 func setEqual(a, b *sset) bool {

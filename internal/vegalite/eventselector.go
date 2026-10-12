@@ -21,6 +21,20 @@ type eventParser struct {
 // any length. Real selectors nest once.
 const maxEventNesting = 64
 
+// parseSelectorOf is parseSelector of a spec value, which
+// vega-event-selector reads with selector.trim(): a TypeError for anything
+// but a string.
+func parseSelectorOf(v Value, source string) []Value {
+	switch {
+	case v.IsStr():
+		return parseSelector(v.StrValue(), source)
+	case v.IsNullish():
+		throw("Cannot read properties of %s (reading 'trim')", nullishName(v))
+	}
+	throw("selector.trim is not a function")
+	return nil
+}
+
 func parseSelector(selector, source string) []Value {
 	if source == "" {
 		source = "view"

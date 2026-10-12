@@ -37,7 +37,7 @@ func channelHasFieldOrDatum(cc *compileCtx, enc Value, channel string) bool {
 			}
 			return false
 		}
-		return isFieldDef(cc, cd) || isDatumDef(cd) || hasConditionalFieldOrDatumDef(cc, cd)
+		return isFieldDef(cc, cd) || isDatumDefOf(cc, cd) || hasConditionalFieldOrDatumDef(cc, cd)
 	}
 	return false
 }
@@ -45,7 +45,7 @@ func channelHasFieldOrDatum(cc *compileCtx, enc Value, channel string) bool {
 func channelHasNestedOffsetScale(cc *compileCtx, enc Value, channel string) bool {
 	if isXorY(channel) {
 		fd := enc.Get(channel)
-		if (isFieldDef(cc, fd) || isDatumDef(fd)) && (isDiscreteType(channelDefType(fd)) || (!cc.v5 && isFieldDef(cc, fd) && fd.Get("timeUnit").IsTruthy())) {
+		if (isFieldDef(cc, fd) || isDatumDefOf(cc, fd)) && (isDiscreteType(channelDefType(fd)) || (!cc.v5 && isFieldDef(cc, fd) && fd.Get("timeUnit").IsTruthy())) {
 			return channelHasFieldOrDatum(cc, enc, getOffsetScaleChannel(channel))
 		}
 	}
@@ -159,7 +159,7 @@ func extractTransformsFromEncoding(cc *compileCtx, oldEncoding Value, config Val
 					}
 				} else {
 					r.groupby = append(r.groupby, jsval.Str(newField))
-					if isTypedFieldDef(cd) && isBinning(bin) {
+					if isTypedFieldDefOf(cc, cd) && isBinning(bin) {
 						r.bins = append(r.bins, mkv("bin", bin, "field", field, "as", newField))
 						r.groupby = append(r.groupby, jsval.Str(vgField(cc, cd, fieldRefOption{binSuffix: "end"})))
 						if binRequiresRange(cc, cd, channel) {
@@ -175,7 +175,7 @@ func extractTransformsFromEncoding(cc *compileCtx, oldEncoding Value, config Val
 					} else if timeUnit.IsTruthy() && !isBinnedTimeUnit(cc, timeUnit) {
 						r.timeUnits = append(r.timeUnits, mkv("timeUnit", timeUnit, "field", field, "as", newField))
 						formatType := ""
-						if isTypedFieldDef(cd) && channelDefType(cd) != "temporal" {
+						if isTypedFieldDefOf(cc, cd) && channelDefType(cd) != "temporal" {
 							formatType = "time"
 						}
 						if formatType != "" {
@@ -300,7 +300,7 @@ func initEncoding(cc *compileCtx, encoding Value, mark string, filled bool, conf
 		} else {
 			if channel == chTooltip && channelDef.IsNull() {
 				normalized.Set(channel, jsval.Null)
-			} else if !isFieldDef(cc, channelDef) && !isDatumDef(channelDef) && !isValueDef(channelDef) && !isConditionalDef(channelDef) && !isSignalRef(channelDef) {
+			} else if !isFieldDef(cc, channelDef) && !isDatumDefOf(cc, channelDef) && !isValueDef(channelDef) && !isConditionalDef(channelDef) && !isSignalRef(channelDef) {
 				cc.warn(msgEmptyFieldDef(cc, channelDef, channel))
 				continue
 			} else {
@@ -313,9 +313,9 @@ func initEncoding(cc *compileCtx, encoding Value, mark string, filled bool, conf
 
 func normalizeEncoding(cc *compileCtx, encoding Value, config Value) Value {
 	out := jsval.NewObject(encoding.Len())
-	for _, channel := range keysOf(encoding) {
+	for _, channel := range jsKeys(encoding) {
 		cc.work(1)
-		out.Set(channel, initChannelDef(cc, encoding.Get(channel), channel, config, true))
+		out.Set(channel, initChannelDef(cc, jsProp(encoding, channel), channel, config, true))
 	}
 	return jsval.Obj(out)
 }

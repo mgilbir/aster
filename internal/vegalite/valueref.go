@@ -50,7 +50,7 @@ func valueRefForFieldOrDatumDef(cc *compileCtx, fd Value, scaleName string, opt 
 	if scaleName != "" {
 		ref.Set("scale", jsval.Str(scaleName))
 	}
-	if isDatumDef(fd) {
+	if isDatumDefOf(cc, fd) {
 		datum := fd.Get("datum")
 		switch {
 		case isDateTime(datum):
@@ -153,7 +153,7 @@ func midPoint(cc *compileCtx, p midPointParams) Value {
 				scaleType = p.scale.get("type").AsString()
 			}
 			bandPosition := p.bandPosition
-			if isTypedFieldDef(p.channelDef) {
+			if isTypedFieldDefOf(cc, p.channelDef) {
 				if bandPosition.IsNullish() {
 					bandPosition = getBandPosition(cc, p.channelDef, p.channel2Def, p.markDef, p.config)
 				}

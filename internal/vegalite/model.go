@@ -283,7 +283,7 @@ func (m *modelBase) getSizeSignalRef(layoutSizeType string) Value {
 		if sc, ok := m.comp.scales.get(channel); ok && sc != nil && !sc.merged {
 			typ := sc.get("type").AsString()
 			rng := sc.get("range")
-			if hasDiscreteDomain(typ) && isVgRangeStep(rng) {
+			if hasDiscreteDomain(typ) && isVgRangeStep(m.ctx, rng) {
 				scaleName := sc.get("name").AsString()
 				domain := assembleDomain(m.self, channel)
 				field := getFieldFromDomain(cc, domain)
@@ -299,7 +299,14 @@ func (m *modelBase) getSizeSignalRef(layoutSizeType string) Value {
 	return sig(m.signalNames.get(m.getName(layoutSizeType)))
 }
 
-func isVgRangeStep(rng Value) bool { return hasProperty(rng, "step") }
+// isVgRangeStep is 6.x's hasProperty(range, 'step'), and 5.8's
+// !!range['step'], which reads the property of an undefined range.
+func isVgRangeStep(cc *compileCtx, rng Value) bool {
+	if cc.v5 {
+		return jsGet(rng, "step").IsTruthy()
+	}
+	return hasProperty(rng, "step")
+}
 
 func getSizeTypeFromLayoutSizeType(t string) string {
 	switch t {

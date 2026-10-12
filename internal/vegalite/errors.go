@@ -2,6 +2,7 @@ package vegalite
 
 import (
 	"fmt"
+	"strconv"
 
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
@@ -153,4 +154,83 @@ func iterateNew(v Value) []Value {
 	}
 	throw("%s %s is not iterable (cannot read property Symbol(Symbol.iterator))", what, v.AsString())
 	return nil
+}
+
+// jsProp is the property read v[key] of any value, as JavaScript reads it:
+// a TypeError for null or undefined; an array's or a string's index or
+// length (a string's index is one UTF-16 unit); an object's own property or
+// what it inherits; nothing for a number or boolean.
+func jsProp(v Value, key string) Value {
+	switch {
+	case v.IsNullish():
+		throw("Cannot read properties of %s (reading '%s')", nullishName(v), key)
+	case v.IsArr(), v.IsStr():
+		if key == "length" {
+			if v.IsStr() {
+				return jsval.Int(len(utf16Len(v.StrValue())))
+			}
+			return jsval.Int(v.Len())
+		}
+		if n, ok := arrayIndex(key); ok {
+			return jsIndex(v, int(n))
+		}
+		return undef
+	case v.IsObj():
+		return v.ObjValue().Prop(key)
+	}
+	return undef
+}
+
+// jsTypeof is the typeof of a primitive, as a TypeError names it.
+func jsTypeof(v Value) string {
+	switch {
+	case v.IsNum():
+		return "number"
+	case v.IsBool():
+		return "boolean"
+	}
+	return "string"
+}
+
+// jsSetProp is the assignment v[key] = x in strict mode: a TypeError for null
+// or undefined, and for a primitive, which cannot hold a property. On an
+// array the property is kept by JavaScript but not by JSON, so nothing is
+// written.
+func jsSetProp(v Value, key string, x Value) {
+	switch {
+	case v.IsNullish():
+		throw("Cannot set properties of %s (setting '%s')", nullishName(v), key)
+	case v.IsObj():
+		v.ObjValue().Set(key, x)
+	case v.IsArr():
+	default:
+		throw("Cannot create property '%s' on %s '%s'", key, jsTypeof(v), v.AsString())
+	}
+}
+
+// jsKeys is Object.keys(v): a TypeError for null or undefined; a string's
+// and an array's indices; an object's keys; nothing for a number or boolean.
+func jsKeys(v Value) []string {
+	switch {
+	case v.IsNullish():
+		throw("Cannot convert undefined or null to object")
+	case v.IsStr():
+		n := len(utf16Len(v.StrValue()))
+		out := make([]string, n)
+		for i := range out {
+			out[i] = strconv.Itoa(i)
+		}
+		return out
+	}
+	return keysOf(v)
+}
+
+// jsGet is the property read v[key] where upstream reads it without a guard:
+// a TypeError when v is null or undefined (a config object a falsy value
+// removed, for one), else the property, undefined when v has none.
+func jsGet(v Value, key string) Value {
+	if v.IsNullish() {
+		throw("Cannot read properties of %s (reading '%s')", nullishName(v), key)
+	}
+	return v.Get(key)
 }

@@ -686,7 +686,7 @@ func assembleScalesForModel(m Model) []Value {
 
 func assembleScaleRange(scaleRange Value, scaleName, channel string, m Model) Value {
 	if isXorY(channel) {
-		if isVgRangeStep(scaleRange) {
+		if isVgRangeStep(m.b().ctx, scaleRange) {
 			return mkv("step", sig(scaleName+"_step"))
 		}
 	} else if isObject(scaleRange) && isDataRefDomain(scaleRange) {

@@ -26,6 +26,7 @@ type dataComponent struct {
 // quadratic in them, as upstream is; each comparison is charged (by the rows
 // it may compare), so the scan stops at the deadline.
 func findSource(cc *compileCtx, data Value, sources []dfNode) *sourceNode {
+	data = dataAsVL58(cc, data)
 	for _, other := range sources {
 		cc.work(1 + int64(data.Get("values").Len()))
 		if data.IsNullish() {
@@ -302,11 +303,11 @@ func getImplicitFromEncoding(m Model) *Object {
 			implicit.Set(field, jsval.Str("date"))
 		case channelDefType(fd) == "quantitative" && isMinMaxOp(fd.Get("aggregate")):
 			implicit.Set(field, jsval.Str("number"))
-		case accessPathDepth(field) > 1:
+		case accessPathDepthV(fd.Get("field")) > 1:
 			if !implicit.Has(field) {
 				implicit.Set(field, jsval.Str("flatten"))
 			}
-		case isScaleFieldDef(fd) && isSortField(cc, fd.Get("sort")) && accessPathDepth(fd.Get("sort").Get("field").AsString()) > 1:
+		case isScaleFieldDef(fd) && isSortField(cc, fd.Get("sort")) && accessPathDepthV(fd.Get("sort").Get("field")) > 1:
 			sf := fd.Get("sort").Get("field").AsString()
 			if !implicit.Has(sf) {
 				implicit.Set(sf, jsval.Str("flatten"))
@@ -315,7 +316,7 @@ func getImplicitFromEncoding(m Model) *Object {
 	}
 	if fm, ok := m.(fieldDefModel); ok {
 		fm.forEachFieldDef(func(fd Value, channel string) {
-			if isTypedFieldDef(fd) {
+			if isTypedFieldDefOf(cc, fd) {
 				add(fd)
 			} else {
 				mainChannel := getMainRangeChannel(channel)
@@ -361,7 +362,13 @@ func getImplicitFromSelection(m Model) *Object {
 			sel := u.comp.selection.lookup(name)
 			for _, proj := range sel.project.items {
 				cc.work(1)
-				if proj.channel == "" && accessPathDepth(proj.field) > 1 {
+				depth := 0
+				if proj.fieldV.IsUndefined() {
+					depth = accessPathDepth(proj.field)
+				} else {
+					depth = accessPathDepthV(proj.fieldV)
+				}
+				if proj.channel == "" && depth > 1 {
 					implicit.Set(proj.field, jsval.Str("flatten"))
 				}
 			}
@@ -541,8 +548,10 @@ func normalizeInvalidDataMode(mode Value, isPath bool) string {
 		return "filter"
 	case mode.IsNull():
 		return "show"
+	case mode.IsStr():
+		return mode.StrValue()
 	}
-	return mode.AsString()
+	return "" // matches no mode: upstream's switch compares with ===
 }
 
 func getDataSourcesForHandlingInvalidValues(invalid Value, isPath bool) (marks, scales string) {
@@ -566,6 +575,8 @@ func getDataSourcesForHandlingInvalidValues(invalid Value, isPath bool) (marks, 
 	case "show":
 		return "include-invalid-values", "include-invalid-values"
 	}
+	// Upstream returns undefined, and its callers destructure it.
+	throw("Cannot destructure property 'marks' of 'getDataSourcesForHandlingInvalidValues(...)' as it is undefined.")
 	return "", ""
 }
 

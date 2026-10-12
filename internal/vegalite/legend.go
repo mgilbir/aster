@@ -118,7 +118,7 @@ func parseLegendForChannel(m *unitModel, channel string) *legendComponent {
 	if !legend.IsUndefined() {
 		disable = jsval.Bool(!legend.IsTruthy())
 	} else {
-		disable = legendConfig.Get("disable")
+		disable = jsGet(legendConfig, "disable") // config.legend is read unguarded
 	}
 	cmpt.set("disable", disable, !legend.IsUndefined())
 	if disable.IsTruthy() {
@@ -135,7 +135,7 @@ func parseLegendForChannel(m *unitModel, channel string) *legendComponent {
 			timeUnit = u.AsString()
 		}
 	}
-	orient := or(legend.Get("orient"), config.Get("legend").Get("orient"), jsval.Str("right")).AsString()
+	orient := or(legend.Get("orient"), jsGet(config.Get("legend"), "orient"), jsval.Str("right")).AsString()
 	legendType := getLegendType(legend, channel, timeUnit, scaleType)
 	direction := getDirection(legendConfig, legendType, orient, legend)
 	rp := legendRuleParams{legend: legend, markDef: markDef, encoding: encoding, fod: fod, legendConfig: legendConfig, config: config,
@@ -152,7 +152,7 @@ func parseLegendForChannel(m *unitModel, channel string) *legendComponent {
 		}
 		if !value.IsUndefined() {
 			explicit := legendIsExplicit(value, property, legend, m.fieldDef(channel))
-			if explicit || config.Get("legend").Get(property).IsUndefined() {
+			if explicit || jsGet(config.Get("legend"), property).IsUndefined() {
 				cmpt.set(property, value, explicit)
 			}
 		}
@@ -484,9 +484,9 @@ func legendSymbolsEncode(symbolsSpec Value, fod Value, m *unitModel, channel str
 	out := jsval.NewObject(8)
 	spreadV(out, applyMarkConfig(mkv(), m, fillStrokeConfig))
 	spreadV(out, colorEncode(m, jsval.Bool(filled)))
-	symbolOpacity := coalesce(cmpt.get("symbolOpacity"), config.Get("legend").Get("symbolOpacity"))
-	symbolFillColor := coalesce(cmpt.get("symbolFillColor"), config.Get("legend").Get("symbolFillColor"))
-	symbolStrokeColor := coalesce(cmpt.get("symbolStrokeColor"), config.Get("legend").Get("symbolStrokeColor"))
+	symbolOpacity := coalesce(cmpt.get("symbolOpacity"), jsGet(config.Get("legend"), "symbolOpacity"))
+	symbolFillColor := coalesce(cmpt.get("symbolFillColor"), jsGet(config.Get("legend"), "symbolFillColor"))
+	symbolStrokeColor := coalesce(cmpt.get("symbolStrokeColor"), jsGet(config.Get("legend"), "symbolStrokeColor"))
 	opacity := undef
 	if symbolOpacity.IsUndefined() {
 		opacity = coalesce(getMaxValue(cc, encoding.Get("opacity")), markDef.Get("opacity"))
@@ -498,7 +498,7 @@ func legendSymbolsEncode(symbolsSpec Value, fod Value, m *unitModel, channel str
 			if symbolFillColor.IsTruthy() {
 				out.Delete("fill")
 			} else {
-				out.Set("fill", signalOrValueRef(coalesce(config.Get("legend").Get("symbolBaseFillColor"), jsval.Str("black"))))
+				out.Set("fill", signalOrValueRef(coalesce(jsGet(config.Get("legend"), "symbolBaseFillColor"), jsval.Str("black"))))
 				out.Set("fillOpacity", signalOrValueRef(coalesce(opacity, jsval.Int(1))))
 			}
 		} else if fill.IsArr() {
@@ -545,7 +545,7 @@ func legendSymbolsEncode(symbolsSpec Value, fod Value, m *unitModel, channel str
 		if condition != "" {
 			t := mk("test", condition)
 			spreadV(t, signalOrValueRef(coalesce(opacity, jsval.Int(1))))
-			out.Set("opacity", arr(jsval.Obj(t), signalOrValueRef(config.Get("legend").Get("unselectedOpacity"))))
+			out.Set("opacity", arr(jsval.Obj(t), signalOrValueRef(jsGet(config.Get("legend"), "unselectedOpacity"))))
 		} else if opacity.IsTruthy() {
 			out.Set("opacity", signalOrValueRef(opacity))
 		}
@@ -568,7 +568,7 @@ func legendGradientEncode(gradientSpec Value, m *unitModel, legendType string, c
 	}
 	config, markDef, encoding := m.config, m.markDef, m.encoding
 	out := jsval.NewObject(2)
-	gradientOpacity := coalesce(cmpt.get("gradientOpacity"), config.Get("legend").Get("gradientOpacity"))
+	gradientOpacity := coalesce(cmpt.get("gradientOpacity"), jsGet(config.Get("legend"), "gradientOpacity"))
 	opacity := undef
 	if gradientOpacity.IsUndefined() {
 		opacity = or(getMaxValue(m.ctx, encoding.Get("opacity")), markDef.Get("opacity"))
@@ -597,7 +597,7 @@ func legendLabelsEncode(specified Value, fod Value, m *unitModel, channel string
 	}
 	opacity := undef
 	if condition != "" {
-		opacity = arr(mkv("test", condition, "value", 1), mkv("value", config.Get("legend").Get("unselectedOpacity")))
+		opacity = arr(mkv("test", condition, "value", 1), mkv("value", jsGet(config.Get("legend"), "unselectedOpacity")))
 	}
 	format, formatType := legend.Get("format"), legend.Get("formatType")
 	text := undef
