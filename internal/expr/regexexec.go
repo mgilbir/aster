@@ -2,6 +2,7 @@ package expr
 
 import (
 	"errors"
+	"math"
 	"strings"
 
 	"github.com/mgilbir/aster/internal/budget"
@@ -34,12 +35,28 @@ type rawProgram struct {
 	unicode bool
 }
 
-// compileRaw compiles p for the VM, charging its program to the ledger; call
-// release when done with it.
+// compileRaw compiles p for the VM, charging its program to the ledger, and
+// its compile's work, before compiling it; call release when done with it.
 func compileRaw(s *Scope, p *jsval.Pattern) (r *rawProgram, release func(), err error) {
+	s.work(int(min(p.CompileWork(), math.MaxInt32)))
+	led := budget.LedgerFrom(s.Context)
+	size := p.Bytes()
+	if led.Alloc(size) != nil {
+		exceeded("the regular expression /%.40s/ compiles to a program of %d bytes, past the memory limit", p.Source, size)
+	}
+	r, err = compileRawPaid(p)
+	if err != nil {
+		led.Free(size)
+		return nil, nil, err
+	}
+	return r, func() { led.Free(size) }, nil
+}
+
+// compileRawPaid is compileRaw once the program is paid for.
+func compileRawPaid(p *jsval.Pattern) (*rawProgram, error) {
 	f, err := flags.Parse(p.Flags)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	ast, err := ecmaparser.New(p.Source, ecmaparser.Flags{
 		IgnoreCase:  f.Has(flags.IgnoreCase),
@@ -50,17 +67,11 @@ func compileRaw(s *Scope, p *jsval.Pattern) (r *rawProgram, release func(), err 
 		AnnexB:      true, // New applies it outside Unicode mode only, as Compile does
 	}).Parse()
 	if err != nil {
-		return nil, nil, err
-	}
-	led := budget.LedgerFrom(s.Context)
-	size := patternBytes(p)
-	if led.Alloc(size) != nil {
-		exceeded("the regular expression /%.40s/ compiles to a program of %d bytes, past the memory limit", p.Source, size)
+		return nil, err
 	}
 	code, groups, err := ecmacompiler.Compile(ast)
 	if err != nil {
-		led.Free(size)
-		return nil, nil, err
+		return nil, err
 	}
 	unicode := f.Has(flags.Unicode) || f.Has(flags.UnicodeSets)
 	return &rawProgram{
@@ -70,7 +81,7 @@ func compileRaw(s *Scope, p *jsval.Pattern) (r *rawProgram, release func(), err 
 		flags:   f,
 		sticky:  strings.Contains(p.Flags, "y"),
 		unicode: unicode,
-	}, func() { led.Free(size) }, nil
+	}, nil
 }
 
 // match is one search, with one step budget, from start: the leftmost match
