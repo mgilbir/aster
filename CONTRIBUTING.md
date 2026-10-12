@@ -20,12 +20,12 @@ ASTER_ORACLE=require go test ./...
 
 ## Before you open a pull request
 
-`make check` runs the gates CI runs (`scripts/check.sh`) and prints a ledger of what ran, failed or was skipped. `scripts/check.sh -fast` runs the quick ones (gofmt, golangci-lint, vet, `go mod tidy`, the `-short` suite). CI also runs on macOS, reads PDFs back with PDFium, and gates on benchmarks; see [docs/testing.md](docs/testing.md).
+`make check` runs the gates CI runs (`scripts/check.sh`) and prints a ledger of what ran, failed or was skipped. `scripts/check.sh -fast` runs the quick ones (gofmt, golangci-lint, vet, `go mod tidy`, the `-short` suite). CI runs only the quick gates on a pull request (`.github/workflows/ci.yml`). The slow ones (race, the oracle suite, PDFium, macOS, 32-bit tests and the benchmark gate, `.github/workflows/heavy.yml`) run on main and on a release candidate, so run `make check` and `make benchgate BASE=origin/main` before asking for a merge; see [docs/testing.md](docs/testing.md).
 
 - A behaviour change that makes the engine differ from upstream fails `TestCompareWithNode` or a sweep. Fix the engine, or, if the difference is deliberate, list it with its reason in the expectation file (`testdata/oracle-expect.txt`, `testdata/sweeps/*.txt`).
 - A bug found by fuzzing gets a regression spec under `testdata/corpus/regress`.
 - `docs/limits.md` and `docs/architecture.md` are checked by tests: change them with the code.
-- A performance regression over the gate's thresholds needs the `perf-regression-ok` label and a reason.
+- A performance regression over the gate's thresholds needs a reason in the pull request; a release candidate run with one is dispatched with `allow_regression`.
 
 ## Where things are and how to write them
 
