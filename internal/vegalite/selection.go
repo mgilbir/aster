@@ -415,7 +415,7 @@ func (c *compileCtx) signalPos(signals []Value, name string) int {
 	}
 	si := &c.sigIdx
 	if si.base != &signals[0] || si.n > len(signals) || si.idx == nil {
-		si.base, si.n, si.idx = &signals[0], 0, map[string]int{}
+		si.base, si.n, si.idx = &signals[0], 0, make(map[string]int, len(signals))
 	}
 	for ; si.n < len(signals); si.n++ {
 		c.work(1)
@@ -645,18 +645,18 @@ func assembleTopLevelSignals(m Model, signals []Value) []Value {
 // Copying the array and searching it per unit is quadratic in the units
 // (X13), so the list is kept in blocks: the stores of each unit in front (a
 // later unit's before an earlier one's), the data given at the start, then
-// what was appended. Every name in the list is in names; first holds the
-// first entry of each name, which is what upstream's find returns.
+// what was appended. first holds the first entry of each name in the list,
+// which is what upstream's find returns.
 type selDataAcc struct {
 	cc    *compileCtx
 	front [][]Value // per unit, in the order prepended
 	mid   []Value
 	back  []Value
-	// names and first are built on the first lookup (index), so a chart
-	// without selections, which never looks, never builds them; from then
-	// on each entry added keeps them current.
+	// first is the first entry of each name, built on the first lookup
+	// (index), so a chart without selections, which never looks, never
+	// builds it; from then on each entry added keeps it current. Its keys
+	// are the names the list holds.
 	indexed bool
-	names   map[string]bool
 	first   map[string]Value
 }
 
@@ -664,13 +664,13 @@ func newSelDataAcc(cc *compileCtx, data []Value) *selDataAcc {
 	return &selDataAcc{cc: cc, mid: data}
 }
 
-// index builds names and first from the whole list, once.
+// index builds first from the whole list, once.
 func (a *selDataAcc) index() {
 	if a.indexed {
 		return
 	}
 	a.indexed = true
-	a.names, a.first = map[string]bool{}, map[string]Value{}
+	a.first = map[string]Value{}
 	for _, d := range a.list() {
 		a.cc.work(1)
 		a.noteBack(d)
@@ -680,7 +680,8 @@ func (a *selDataAcc) index() {
 // hasName says whether an entry of the list is named n.
 func (a *selDataAcc) hasName(n string) bool {
 	a.index()
-	return a.names[n]
+	_, ok := a.first[n]
+	return ok
 }
 
 // firstNamed is the first entry of the list named n (upstream's find).
@@ -697,7 +698,6 @@ func (a *selDataAcc) noteBack(d Value) {
 		return
 	}
 	if n := d.Get("name"); n.IsStr() {
-		a.names[n.StrValue()] = true
 		if _, ok := a.first[n.StrValue()]; !ok {
 			a.first[n.StrValue()] = d
 		}
@@ -716,7 +716,6 @@ func (a *selDataAcc) prepend(block []Value) {
 	for i := len(block) - 1; i >= 0; i-- {
 		a.cc.work(1)
 		if n := block[i].Get("name"); n.IsStr() {
-			a.names[n.StrValue()] = true
 			a.first[n.StrValue()] = block[i]
 		}
 	}
