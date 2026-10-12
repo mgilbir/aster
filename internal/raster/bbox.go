@@ -162,7 +162,8 @@ func (r *renderer) addElemBBox(k *node, parent *state, acc *bbox) {
 		return
 	}
 	r.nest++
-	defer func() { r.nest-- }()
+	held := r.livePts // the geometry built for k's box is dropped with it
+	defer func() { r.nest--; r.livePts = held }()
 	if r.nest > r.lim.MaxDepth*2 {
 		r.fail(errLimit)
 		return

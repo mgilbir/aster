@@ -3,6 +3,7 @@ package raster
 import (
 	"bytes"
 	"compress/gzip"
+	"errors"
 	"io"
 	"math"
 	"sort"
@@ -10,6 +11,8 @@ import (
 	"strings"
 
 	"github.com/mgilbir/forme/shape"
+
+	"github.com/mgilbir/aster/internal/budget"
 )
 
 // ColourFace is a Face some of whose glyphs are painted in colour, as COLR,
@@ -181,7 +184,7 @@ func (p *colourPainter) PushClipGlyph(gid int) {
 	m := p.top().mul(scaleM(1, -1))
 	reg := p.region().intersect(deviceBounds(o, m))
 	mk := p.r.pathsMask([]*path{o}, []matrix{m}, []bool{false}, reg)
-	p.pushClip(intersectMasks(mk, p.st.clip))
+	p.pushClip(p.r.intersectMasks(mk, p.st.clip))
 }
 
 func (p *colourPainter) PushClipRect(rc shape.Rect) {
@@ -427,10 +430,15 @@ func (r *renderer) colourImage(data []byte) *rasterImage {
 	if img, ok := r.colourImgs[k]; ok {
 		return img
 	}
-	img, err := decodeImage(data, r.lim)
+	img, kept, err := r.decodeImage(data)
 	if err != nil {
+		if errors.Is(err, budget.ErrLimit) {
+			r.fail(err)
+		}
 		img = nil
 	}
+	// Charged again below, if the cache can keep it.
+	r.ledger.Free(kept)
 	r.keepColourImage(k, img)
 	return img
 }
@@ -631,7 +639,7 @@ func (g *colrGradient) shadeRow(y, x0 int, dst []uint8) {
 		}
 		var v uint32
 		if ok && !math.IsNaN(t) {
-			v = g.lut[int(g.spread(t)*(lutSize-1)+0.5)]
+			v = g.lut[lutIndex(g.spread(t))]
 		}
 		dst[i*4] = uint8(v)
 		dst[i*4+1] = uint8(v >> 8)
@@ -671,7 +679,7 @@ func (p *colourPainter) svgGlyph(data []byte) {
 	// The document is drawn as any is, through the renderer's own buffers;
 	// drawGlyphs is collecting the text's outlines in r.fl meanwhile.
 	saved, fl := r.doc, r.fl
-	r.doc, r.inSVGGlyph, r.fl = doc, true, flat{}
+	r.doc, r.inSVGGlyph, r.fl = doc, true, flat{r: r}
 	r.renderElement(n, &st)
 	r.doc, r.inSVGGlyph, r.fl = saved, false, fl
 }
@@ -680,7 +688,7 @@ func (p *colourPainter) svgGlyph(data []byte) {
 // render. One that does not parse is nil.
 func (r *renderer) svgGlyphDoc(data []byte) *document {
 	k := colourImageKey{&data[0], len(data)}
-	if doc, ok := r.svgGlyphs[k]; ok {
+	if doc, ok := r.svgGlyphs.get(k); ok {
 		return doc
 	}
 	src := data
@@ -699,9 +707,11 @@ func (r *renderer) svgGlyphDoc(data []byte) *document {
 		s := strings.NewReplacer("context-fill", "currentColor", "context-stroke", "currentColor").Replace(string(src))
 		doc, _ = parseDocument(s, r.lim)
 	}
-	if r.svgGlyphs == nil || len(r.svgGlyphs) >= maxSVGGlyphDocs {
-		r.svgGlyphs = map[colourImageKey]*document{}
+	// What a parsed document holds: its text and its elements.
+	n := int64(len(src)) + 64
+	if doc != nil {
+		n += int64(doc.count) * 256
 	}
-	r.svgGlyphs[k] = doc
+	r.svgGlyphs.put(r.ledger, k, doc, n)
 	return doc
 }

@@ -192,8 +192,10 @@ func parseNumPct(s string) (v float64, pct bool, ok bool) {
 	return v, pct, true
 }
 
+// ClampByte rounds v to a byte, clamped to [0, 255]; NaN is 0 (converting
+// it, or a value out of range, to an integer is implementation-defined).
 func ClampByte(v float64) uint8 {
-	if v <= 0 {
+	if !(v > 0) {
 		return 0
 	}
 	if v >= 255 {

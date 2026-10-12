@@ -24,6 +24,16 @@ const maxColourImageSide = 4096
 // a glyph paints, as a PDF cannot draw a sweep gradient, and draws its image
 // instead. A glyph that paints nothing returns a nil image.
 func ColourGlyphImage(f *text.Face, gid int, fg shape.Color, ppem int) (img *image.NRGBA, box shape.Rect, err error) {
+	defer func() {
+		// A bound reached deep in drawing stops it with budget.Stop.
+		if p := recover(); p != nil {
+			stop, ok := p.(*budget.Stop)
+			if !ok {
+				panic(p)
+			}
+			img, box, err = nil, shape.Rect{}, stop.Err
+		}
+	}()
 	if f == nil || ppem <= 0 {
 		return nil, box, errors.New("raster: no face or size to paint a glyph at")
 	}
@@ -46,16 +56,21 @@ func ColourGlyphImage(f *text.Face, gid int, fg shape.Color, ppem int) (img *ima
 	// Whole pixels, so that the image's pixels fall on the em's grid.
 	x0, x1 := math.Floor(b.r.x0*k), math.Ceil(b.r.x1*k)
 	y0, y1 := math.Floor(b.r.y0*k), math.Ceil(b.r.y1*k)
-	w, h := int(x1-x0), int(y1-y0)
-	if w <= 0 || h <= 0 {
+	// The size is checked in float64 before it becomes an int: a paint
+	// reaching to an infinity must not convert (implementation-defined).
+	fw, fh := x1-x0, y1-y0
+	if !(fw >= 1) || !(fh >= 1) {
 		return nil, box, nil
 	}
-	if w > maxColourImageSide || h > maxColourImageSide {
-		return nil, box, fmt.Errorf("raster: a glyph at %d pixels per em is %dx%d pixels: %w", ppem, w, h, errLimit)
+	if fw > maxColourImageSide || fh > maxColourImageSide {
+		return nil, box, fmt.Errorf("raster: a glyph at %d pixels per em is %.0fx%.0f pixels: %w", ppem, fw, fh, errLimit)
 	}
+	w, h := int(fw), int(fh)
 	lim := Limits{}.withDefaults()
 	lim.MaxPixelOps = max(defaultMaxPixelOps, budget.MulInt(16, budget.MulInt(w, h)))
 	r := &renderer{lim: lim, rast: newRasterizer(), cw: w, ch: h, active: map[*node]bool{}}
+	r.fl.r = r
+	r.initCaches()
 	if r.cv = r.allocCanvas(w, h); r.cv == nil {
 		return nil, box, r.err
 	}

@@ -2,6 +2,8 @@ package pngopt
 
 import (
 	"bytes"
+	"context"
+	"fmt"
 	"image"
 	"image/color"
 	"image/draw"
@@ -9,6 +11,8 @@ import (
 	"log/slog"
 	"math"
 	"slices"
+
+	"github.com/mgilbir/aster/internal/budget"
 )
 
 // Quality guard for lossy quantization: when the quantized image deviates
@@ -27,20 +31,48 @@ const (
 	maxPeakChannelError = 64
 )
 
+// maxDistinctColors is where quantization gives up on an image: past this
+// many distinct colours it is photographic or dense-gradient content, which
+// a 256-colour palette cannot keep within the quality guard anyway, and
+// which would cost the median cut and the dithering seconds (C29). Charts
+// have hundreds to a few thousand. Such an image falls back to the lossless
+// recode, as one that fails the guard does.
+const maxDistinctColors = 1 << 16
+
 // QuantizeOrRecode lossily quantizes data to at most maxColors colors,
 // falling back to the lossless recode when quantization cannot maintain the
 // output within the quality guard (or cannot shrink the image). The fallback
 // is logged at debug level: it is expected for non-chart-like content, and a
 // library should not write to the host's default log output for documented,
-// safe behavior — raise the log level to observe it.
+// safe behavior — raise the log level to observe it. It runs without a
+// context; the engine calls QuantizeOrRecodeImage.
 func QuantizeOrRecode(data []byte, maxColors int) []byte {
-	out, ok, reason := Quantize(data, maxColors)
+	img, ok := decodeNRGBA(data)
+	if !ok {
+		return data
+	}
+	out, err := QuantizeOrRecodeImage(context.Background(), img, data, maxColors)
+	if err != nil {
+		return data
+	}
+	return out
+}
+
+// QuantizeOrRecodeImage is QuantizeOrRecode for img, the image data encodes,
+// as the renderer holds it (no decoding), under ctx: it polls ctx and charges
+// its maps and buffers to the ledger ctx carries (budget.LedgerFrom), and
+// returns ctx's error or one wrapping budget.ErrLimit when either stops it.
+func QuantizeOrRecodeImage(ctx context.Context, img *image.NRGBA, data []byte, maxColors int) ([]byte, error) {
+	out, ok, reason, err := QuantizeImage(ctx, img, data, maxColors)
+	if err != nil {
+		return nil, err
+	}
 	if ok {
-		return out
+		return out, nil
 	}
 	slog.Debug("aster: png quantization fell back to lossless recode",
 		"reason", reason, "max_colors", maxColors, "bytes", len(data))
-	return Recode(data)
+	return RecodeImage(ctx, img, data)
 }
 
 // Quantize re-encodes a PNG as 8-bit indexed with at most maxColors
@@ -53,18 +85,26 @@ func QuantizeOrRecode(data []byte, maxColors int) []byte {
 // Images already within the palette budget take a lossless path identical to
 // Recode's indexed case. The boolean reports whether the result honours
 // the quality guard and is smaller than the input; when false, the returned
-// data is the input and reason says why.
+// data is the input and reason says why. It runs without a context; the
+// engine calls QuantizeImage.
 func Quantize(data []byte, maxColors int) (_ []byte, ok bool, reason string) {
-	if maxColors < 2 {
-		maxColors = 2
+	img, decoded := decodeNRGBA(data)
+	if !decoded {
+		return data, false, "decode failed"
 	}
-	if maxColors > 256 {
-		maxColors = 256
+	out, ok, reason, err := QuantizeImage(context.Background(), img, data, maxColors)
+	if err != nil {
+		return data, false, err.Error()
 	}
+	return out, ok, reason
+}
 
+// decodeNRGBA decodes a PNG into the non-premultiplied image the renderer
+// holds.
+func decodeNRGBA(data []byte) (*image.NRGBA, bool) {
 	src, err := png.Decode(bytes.NewReader(data))
 	if err != nil {
-		return data, false, "decode failed"
+		return nil, false
 	}
 	bounds := src.Bounds()
 	nrgba, isNRGBA := src.(*image.NRGBA)
@@ -72,6 +112,32 @@ func Quantize(data []byte, maxColors int) (_ []byte, ok bool, reason string) {
 		nrgba = image.NewNRGBA(bounds)
 		draw.Draw(nrgba, bounds, src, bounds.Min, draw.Src)
 	}
+	return nrgba, true
+}
+
+// mapEntryBytes is about what an entry of the colour maps below holds,
+// its share of the buckets included.
+const mapEntryBytes = 48
+
+// QuantizeImage is Quantize for nrgba, the image data encodes, under ctx
+// (see QuantizeOrRecodeImage). An image of more than 65,536 distinct colours
+// is not quantized (ok false).
+func QuantizeImage(ctx context.Context, nrgba *image.NRGBA, data []byte, maxColors int) (_ []byte, ok bool, reason string, err error) {
+	if maxColors < 2 {
+		maxColors = 2
+	}
+	if maxColors > 256 {
+		maxColors = 256
+	}
+	l := budget.LedgerFrom(ctx)
+	// The colour maps and lists, sized by the distinct colours (at most
+	// maxDistinctColors), and the indexed image with its dithering rows.
+	held := budget.Mul(maxDistinctColors, 5*mapEntryBytes) + int64(len(nrgba.Pix)/4) + 64*int64(nrgba.Rect.Dx()+2)
+	if err := l.Alloc(held); err != nil {
+		return nil, false, "", fmt.Errorf("pngopt: quantizing: %w", err)
+	}
+	defer l.Free(held)
+	m := budget.NewMeter(ctx)
 
 	// Histogram of exact colors in first-seen scan order: deterministic (no
 	// map iteration order involved) and spatially local, which the PNG
@@ -79,8 +145,14 @@ func Quantize(data []byte, maxColors int) (_ []byte, ok bool, reason string) {
 	hist := make(map[uint32]int, 1024)
 	order := make([]colorCount, 0, 1024)
 	for i := 0; i < len(nrgba.Pix); i += 4 {
+		if err := m.Work(1); err != nil {
+			return nil, false, "", err
+		}
 		key := packNRGBA(nrgba.Pix[i:])
 		if hist[key] == 0 {
+			if len(order) == maxDistinctColors {
+				return data, false, "too many distinct colors", nil
+			}
 			order = append(order, colorCount{key: key})
 		}
 		hist[key]++
@@ -101,14 +173,17 @@ func Quantize(data []byte, maxColors int) (_ []byte, ok bool, reason string) {
 		if out == nil || len(out) > len(data)+len(data)/10 {
 			// The input is already the cheapest form; that still maintains
 			// the output, so it is a success, not a fallback.
-			return data, true, ""
+			return data, true, "", nil
 		}
-		return out, true, ""
+		return out, true, "", nil
 	}
 
 	// medianCut sorts its input in place; hand it a copy so `order` keeps
 	// the first-seen invariant the renumbering below depends on.
-	boxPalette, boxOf := medianCut(append([]colorCount(nil), order...), maxColors)
+	boxPalette, boxOf, err := medianCut(&m, append([]colorCount(nil), order...), maxColors)
+	if err != nil {
+		return nil, false, "", err
+	}
 	// Re-number the boxes by first pixel occurrence so palette indices keep
 	// scan-order locality (same rationale as above).
 	remap := make([]int, len(boxPalette))
@@ -125,9 +200,15 @@ func Quantize(data []byte, maxColors int) (_ []byte, ok bool, reason string) {
 		exact[e.key] = uint8(remap[b])
 	}
 
-	dst, mean, peak := ditherIndex(nrgba, palette, exact)
+	dst, mean, peak, err := ditherIndex(&m, nrgba, palette, exact)
+	if err != nil {
+		return nil, false, "", err
+	}
 	if mean > maxMeanChannelError || peak > maxPeakChannelError {
-		return data, false, "quality guard exceeded"
+		return data, false, "quality guard exceeded", nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, false, "", err
 	}
 	out := encodePNG(dst)
 	if out == nil || len(out) > len(data)+len(data)/10 {
@@ -135,9 +216,9 @@ func Quantize(data []byte, maxColors int) (_ []byte, ok bool, reason string) {
 		// so a slightly larger file can still be a win — but dithering noise
 		// that bloats the encoding beyond ~10% signals content this palette
 		// cannot represent economically.
-		return data, false, "encoded size grew beyond tolerance"
+		return data, false, "encoded size grew beyond tolerance", nil
 	}
-	return out, true, ""
+	return out, true, "", nil
 }
 
 // packNRGBA packs the first four bytes (R,G,B,A) into a map-friendly key.
@@ -161,7 +242,7 @@ func channelOf(key uint32, ch int) int {
 
 // medianCut splits the histogram into maxColors boxes and returns the
 // weighted-average palette plus each source color's box index.
-func medianCut(entries []colorCount, maxColors int) (color.Palette, map[uint32]uint8) {
+func medianCut(m *budget.Meter, entries []colorCount, maxColors int) (color.Palette, map[uint32]uint8, error) {
 	type box struct {
 		entries []colorCount
 		pixels  int
@@ -201,6 +282,10 @@ func medianCut(entries []colorCount, maxColors int) (color.Palette, map[uint32]u
 	}
 
 	for len(boxes) < maxColors {
+		// Each split scans every box's colors.
+		if err := m.Work(int64(len(entries))); err != nil {
+			return nil, nil, err
+		}
 		// Split the most populous box that still has a color spread.
 		best, bestSpan, bestPixels := -1, 0, 0
 		for i, b := range boxes {
@@ -263,7 +348,7 @@ func medianCut(entries []colorCount, maxColors int) (color.Palette, map[uint32]u
 			B: uint8((bl + n/2) / n), A: uint8((a + n/2) / n),
 		})
 	}
-	return palette, boxOf
+	return palette, boxOf, nil
 }
 
 // indexExact maps pixels whose colors all have palette slots (lossless path).
@@ -280,7 +365,7 @@ func indexExact(src *image.NRGBA, palette color.Palette, exact map[uint32]uint8)
 // from the source (0-255 scale) for the quality guard. Pixels whose
 // error-adjusted color exactly matches a source color take the precomputed
 // slot; the rest do a nearest-palette search memoized per adjusted color.
-func ditherIndex(src *image.NRGBA, palette color.Palette, exact map[uint32]uint8) (_ *image.Paletted, mean float64, peak int) {
+func ditherIndex(m *budget.Meter, src *image.NRGBA, palette color.Palette, exact map[uint32]uint8) (_ *image.Paletted, mean float64, peak int, err error) {
 	bounds := src.Bounds()
 	w, h := bounds.Dx(), bounds.Dy()
 	dst := image.NewPaletted(bounds, palette)
@@ -307,6 +392,11 @@ func ditherIndex(src *image.NRGBA, palette color.Palette, exact map[uint32]uint8
 				best, bestDist = i, d
 			}
 		}
+		if len(nearestCache) >= maxDistinctColors {
+			// A memo, so emptying it changes nothing but the time: it is
+			// keyed by error-adjusted colours, as many as the pixels.
+			clear(nearestCache)
+		}
 		nearestCache[key] = uint8(best)
 		return uint8(best)
 	}
@@ -327,6 +417,10 @@ func ditherIndex(src *image.NRGBA, palette color.Palette, exact map[uint32]uint8
 	cur := make([]int, (w+2)*4)
 	next := make([]int, (w+2)*4)
 	for y := 0; y < h; y++ {
+		// A row's pixels, each up to a palette search.
+		if err := m.Work(int64(w) * int64(1+len(pal)/16)); err != nil {
+			return nil, 0, 0, err
+		}
 		rowOff := src.PixOffset(bounds.Min.X, bounds.Min.Y+y)
 		for x := 0; x < w; x++ {
 			si := rowOff + x*4
@@ -364,7 +458,7 @@ func ditherIndex(src *image.NRGBA, palette color.Palette, exact map[uint32]uint8
 	if total := int64(w) * int64(h) * 4; total > 0 {
 		mean = float64(devSum) / float64(total)
 	}
-	return dst, mean, peak
+	return dst, mean, peak, nil
 }
 
 func encodePNG(img image.Image) []byte {

@@ -37,10 +37,14 @@ It is not a heap cap: Go has none per call. It is converted into the budgets bel
 | glyphs of one shaped run of text | none | n/4, at least 1 MiB |
 | rasterizer canvas memory (PNG) | 1 GiB | n, between 4 MiB and 1 GiB |
 | rasterizer pixels per canvas (PNG) | 64 Mi | n/8, between 512 Ki and 128 Mi |
+| rasterizer path points held at once (PNG) | 128 Mi | n/16, at least 64 Ki |
+| pixels of one image the rasterizer decodes (PNG) | 64 Mi | n/16, between 64 Ki and 64 Mi |
 | memory charged to the call's ledger | 2 GiB | n, at least 1 MiB |
 <!-- limits:end -->
 
-The last row is the ledger's byte meter ([ADR 0010](adr/0010-bounds-charged-where-work-happens.md)): one per call, spanning every stage, charged by the code that allocates, before it allocates, for memory the rows above do not count. The rows above each bound their own kind of memory and keep their own semantics (rows are replaced as data flows, canvases come and go); an allocation is charged to one meter, its own if it has one and the ledger's otherwise, so together they stay within a small multiple of `n`. Today the ledger is charged for the programs of regular expressions an expression compiles (literals as the expression is parsed, patterns made from strings as they are made), parsed path data (custom symbols and `path` marks), the pattern tiles and colour glyph bitmaps the rasterizer keeps for reuse, the GeoJSON a TopoJSON document decodes to (every reference to an arc makes its positions anew) and the points of a graticule, the text of axis and legend labels (whose length a format's width and a locale choose), and whatever a stage adds to it as it is bounded. Its default is about fifteen times what the heaviest chart of the corpus holds at its peak (130 MiB, rendered to SVG, PNG and PDF).
+The rasterizer's canvas memory is every pixel buffer alive at once: the canvas, offscreen layers (opacity groups, masks, filters), clip coverage maps (one per clipped element, held while it draws) and every result and scratch buffer of a filter chain. Its path points are the geometry the elements being drawn hold: parsed path data, flattened polylines, stroke outlines and scan-converter edges (an edge counts as five points); geometry wholly outside the canvas or clip is not built.
+
+The last row is the ledger's byte meter ([ADR 0010](adr/0010-bounds-charged-where-work-happens.md)): one per call, spanning every stage, charged by the code that allocates, before it allocates, for memory the rows above do not count. The rows above each bound their own kind of memory and keep their own semantics (rows are replaced as data flows, canvases come and go); an allocation is charged to one meter, its own if it has one and the ledger's otherwise, so together they stay within a small multiple of `n`. Today the ledger is charged for the programs of regular expressions an expression compiles (literals as the expression is parsed, patterns made from strings as they are made), parsed path data (custom symbols and `path` marks), the images the rasterizer decodes (before it decodes them, once per distinct image), the pattern tiles, colour glyph bitmaps, gradients, glyph outlines and SVG glyph documents it keeps for reuse (each cache also bounded by its own bytes), the maps and buffers of PNG quantization and recoding, the GeoJSON a TopoJSON document decodes to (every reference to an arc makes its positions anew) and the points of a graticule, the text of axis and legend labels (whose length a format's width and a locale choose), and whatever a stage adds to it as it is bounded. Its default is about fifteen times what the heaviest chart of the corpus holds at its peak (130 MiB, rendered to SVG, PNG and PDF).
 
 The transforms charge the ledger for what they hold that is not rows: the rasters of `kde2d` and density `contour` (two float32 and a float64 raster a group, and the grid each group outputs), contour rings and their output geometry, the triangulation of `voronoi`, the running state of an `aggregate` or `pivot` cell for each measure, the `values` arrays of a `window`, the bitmaps and masks of `label`, and the board of `wordcloud`. A `density` reserves its samples as rows before drawing them, and `countpattern` its distinct tokens. Where upstream's algorithm would not end, aster refuses the input with `ErrLimit` ([ADR 0011](adr/0011-faithful-output-free-algorithm.md)): a `voronoi` whose coordinates leave the triangulation's links cycling, and a `pack` whose front chain does not close.
 
@@ -55,7 +59,7 @@ Fixed bounds, the same whatever `WithMemoryLimit` says:
 | geographic path points | 2,000,000 per render, counted where the projection produces them (after resampling, before the clip extent; each of albersUsa's three projections counts its own; a projection's `fit` counts too) |
 | projection `clipAngle` | magnitude below 2^50 radians, about 6.4e16 degrees: past it upstream's clip circle never finishes, and aster refuses the angle with `ErrLimit` ([ADR 0011](adr/0011-faithful-output-free-algorithm.md)) |
 | dataflow evaluations | 50,000,000 operator runs per render |
-| one image | 32 MiB, 64 Mi pixels |
+| one image | 32 MiB, 64 Mi pixels (PNG: the derived bound above) |
 | HTTP response body | `HTTPLoader.MaxResponseBytes`, 64 MiB |
 | file | `FileLoader.MaxBytes`, 64 MiB |
 | JSON nesting | 256 levels; values nested at run time 1,024 |
@@ -63,6 +67,8 @@ Fixed bounds, the same whatever `WithMemoryLimit` says:
 | one string an expression builds | 16,777,216 UTF-16 code units (V8's own limit, 536,870,888, is a `RangeError` as upstream) |
 | a regular expression compiled from a string | 1 MiB of source; its program, up to goecma262's 200,000 instructions, is charged to the call's ledger unless the shared cache keeps it |
 | SVG input to `SVGToPNG` | 256 MiB, 4,000,000 elements, depth 256 |
+| style sheets of SVG input to `SVGToPNG` | 4 MiB, 100,000 rules, 100,000,000 selector-matching steps; past any of them the call fails rather than draw the document partly styled |
+| one filter region (PNG) | 32 Mi pixels; past it the call fails rather than leave the element undrawn |
 | SVG input to `SVGToPDF` | 64 MiB, 1,000,000 elements |
 | text shaping | about sixty times the lookup work of the heaviest example chart, per call |
 | caches shared between calls | by the bytes they hold, entries not used lately dropped first: compiled expressions 32 MiB and regular expressions 32 MiB per process (no entry over 1 MiB), custom symbol paths 16 MiB per process (no entry over 1 MiB); per converter, measured widths 3 MiB, CSS fonts 1 MiB, font fallback lists 8 MiB, and glyph outlines 4 MiB per font face |

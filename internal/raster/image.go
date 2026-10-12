@@ -2,11 +2,14 @@ package raster
 
 import (
 	"errors"
+	"fmt"
 	"image"
+	"image/color"
 	"image/draw"
 	"math"
 	"strings"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/imageref"
 )
 
@@ -66,16 +69,64 @@ func (lim Limits) imageLimits() imageref.Limits {
 }
 
 // decodeImage decodes a PNG, JPEG or GIF (its first frame) into premultiplied
-// RGBA.
-func decodeImage(data []byte, lim Limits) (*rasterImage, error) {
-	img, err := imageref.Decode(data, lim.imageLimits())
+// RGBA. Before it decodes, it charges the call's ledger for what decoding
+// allocates: the decoder's own image, given back once converted, and the
+// premultiplied copy with every halving drawing may make of it, which stay
+// charged (kept, the bytes left charged, for the caller to give back). An
+// image the ledger cannot hold fails with an error wrapping budget.ErrLimit.
+func (r *renderer) decodeImage(data []byte) (img *rasterImage, kept int64, err error) {
+	cfg, _, err := imageref.Config(data, r.lim.imageLimits())
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	b := img.Bounds()
+	w, h := cfg.Width, cfg.Height
+	decoded := budget.Mul(budget.Mul(int64(w), int64(h)), decodedPixelBytes(cfg.ColorModel))
+	kept = imageBytes(w, h)
+	if err := r.ledger.Alloc(decoded + kept); err != nil {
+		return nil, 0, fmt.Errorf("raster: decoding a %dx%d image: %w", w, h, err)
+	}
+	src, err := imageref.Decode(data, r.lim.imageLimits())
+	if err != nil {
+		r.ledger.Free(decoded + kept)
+		return nil, 0, err
+	}
+	b := src.Bounds()
 	dst := image.NewRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
-	draw.Draw(dst, dst.Bounds(), img, b.Min, draw.Src) // draw.Src into RGBA premultiplies
-	return &rasterImage{w: b.Dx(), h: b.Dy(), pix: dst.Pix}, nil
+	draw.Draw(dst, dst.Bounds(), src, b.Min, draw.Src) // draw.Src into RGBA premultiplies
+	r.ledger.Free(decoded)
+	return &rasterImage{w: b.Dx(), h: b.Dy(), pix: dst.Pix}, kept, nil
+}
+
+// decodedPixelBytes is what the standard decoders hold a pixel of an image
+// in colour model m in: a byte for a palette or grey, three for JPEG's
+// YCbCr (with its chroma planes), eight for 16-bit colour, four otherwise.
+func decodedPixelBytes(m color.Model) int64 {
+	switch m.(type) {
+	case color.Palette:
+		return 1
+	}
+	switch m {
+	case color.GrayModel:
+		return 1
+	case color.Gray16Model:
+		return 2
+	case color.YCbCrModel:
+		return 3
+	case color.RGBA64Model, color.NRGBA64Model:
+		return 8
+	}
+	return 4
+}
+
+// imageBytes is the premultiplied RGBA of a w x h image and of every
+// halving of it (see level), as it is kept for drawing.
+func imageBytes(w, h int) int64 {
+	n := budget.Mul(budget.Mul(int64(w), int64(h)), 4)
+	for w > 1 || h > 1 {
+		w, h = (w+1)/2, (h+1)/2
+		n += budget.Mul(budget.Mul(int64(w), int64(h)), 4) // w, h <= 65535: no overflow
+	}
+	return n
 }
 
 // sampledLevel is what an image drawn through inv (device -> image pixels) is
@@ -98,9 +149,16 @@ func sampledLevel(img *rasterImage, inv matrix) (*rasterImage, matrix, bool) {
 		return img, inv, false
 	}
 	area := inv.b == 0 && inv.c == 0
-	k := int(math.Floor(math.Log2(f)))
+	// The halvings are counted in float64 and capped before they become an
+	// int: an infinite footprint (an image drawn at a subnormal size) must
+	// not convert to an implementation-defined int (X1).
+	kf := math.Floor(math.Log2(f))
 	if area {
-		k--
+		kf--
+	}
+	k := 62
+	if kf < 62 {
+		k = int(kf)
 	}
 	lvl, k := img.level(k)
 	s := float64(int(1) << k)
@@ -199,8 +257,10 @@ func (s *imageShader) shadeRow(y, x0 int, dst []uint8) {
 	py := float64(y) + 0.5
 	for i := 0; i < n; i++ {
 		px := float64(x0+i) + 0.5
-		u := s.inv.a*px + s.inv.c*py + s.inv.e
-		v := s.inv.b*px + s.inv.d*py + s.inv.f
+		// Kept finite (an overflowing transform gives Inf - Inf) before they
+		// become pixel indices; past 1e9 every sample is an edge pixel.
+		u := clampCoord(s.inv.a*px + s.inv.c*py + s.inv.e)
+		v := clampCoord(s.inv.b*px + s.inv.d*py + s.inv.f)
 		var r, g, b, a float64
 		switch {
 		case s.nearest:
@@ -224,42 +284,53 @@ func (s *imageShader) shadeRow(y, x0 int, dst []uint8) {
 	}
 }
 
-// imageFor decodes (once) the image an <image> element refers to: a data:
-// URI, or the bytes Options.Images fetched.
+// imageFor decodes the image an <image> element refers to: a data: URI, or
+// the bytes Options.Images fetched. It is decoded once per distinct href,
+// however many elements draw it, and kept, charged to the ledger, for the
+// rest of the render (dropImages gives it back); one that cannot be read is
+// reported once (Options.ImageError) and remembered as such.
 // Unsupported or unreachable images yield nil, as they are skipped by resvg;
 // an image over the limits fails the render.
 func (r *renderer) imageFor(n *node) (*rasterImage, error) {
-	href := n.str(aHref)
+	href := strings.TrimSpace(n.str(aHref))
 	if href == "" {
 		return nil, nil
 	}
-	if img, cached := r.imgs[n]; cached {
+	if img, cached := r.imgs[href]; cached {
 		return img, nil
 	}
 	var img *rasterImage
-	data, err := r.fetched[strings.TrimSpace(href)], error(nil)
+	data, err := r.fetched[href], error(nil)
 	if data == nil {
 		// Only data: URIs are decoded here: the rasterizer never touches the
 		// network or the filesystem; other images are fetched by Options.Images.
 		data, err = imageref.DataURI(href, r.lim.imageLimits())
 	}
+	var kept int64
 	if err == nil {
-		img, err = decodeImage(data, r.lim)
+		img, kept, err = r.decodeImage(data)
 	}
 	if err != nil {
 		img = nil
-		if errors.Is(err, errLimit) {
+		if errors.Is(err, budget.ErrLimit) {
 			r.fail(err)
 		}
 		if r.imageErr != nil {
-			r.imageErr(strings.TrimSpace(href), err)
+			r.imageErr(href, err)
 		}
 	}
 	if r.imgs == nil {
-		r.imgs = map[*node]*rasterImage{}
+		r.imgs = map[string]*rasterImage{}
 	}
-	r.imgs[n] = img
+	r.imgs[href] = img
+	r.imageBytes += kept
 	return img, err
+}
+
+// dropImages gives back what the decoded images are charged.
+func (r *renderer) dropImages() {
+	r.ledger.Free(r.imageBytes)
+	r.imgs, r.imageBytes = nil, 0
 }
 
 func (r *renderer) renderImage(n *node, st *state, opacity float64, blend blendMode) {
@@ -287,7 +358,8 @@ func (r *renderer) renderImage(n *node, st *state, opacity float64, blend blendM
 	im := viewBoxTransform(vb, w, h, par)
 	full := st.ctm.mul(translate(x, y)).mul(im) // image pixels -> device
 	inv, ok := full.invert()
-	if !ok || !full.isFinite() {
+	if !ok || !full.isFinite() || !inv.isFinite() {
+		// An image drawn so small its inverse overflows covers no pixel.
 		return
 	}
 	// Visible region: the image rectangle, clipped to the viewport (x,y,w,h)
@@ -308,7 +380,7 @@ func (r *renderer) renderImage(n *node, st *state, opacity float64, blend blendM
 		img:     img,
 		inv:     inv,
 		nearest: st.pixelated,
-		opacity: uint32(math.Round(math.Max(0, math.Min(1, opacity)) * 255)),
+		opacity: unitByte(opacity),
 	}
 	if !shader.nearest {
 		shader.img, shader.inv, shader.area = sampledLevel(img, inv)

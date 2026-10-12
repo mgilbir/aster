@@ -45,17 +45,23 @@ var boundedOutputs = []struct {
 }{
 	{".vg.json", []string{"vega", "vegapng", "vegapdf"}},
 	{".vl.json", []string{"vl2vega", "vl", "vlpng", "vlpdf"}},
+	// SVG that only the rasterizer draws (filters, CSS, gradient
+	// transforms: what SVGToPDF refuses as outside the SVG it accepts).
+	{".png.svg", []string{"svgpng"}},
 	{".svg", []string{"svgpng", "svgpdf"}},
 }
 
 type boundedCase struct {
 	name, kind, input string
 	font              []byte
+	extra             []string
 }
 
 // boundedCases reads the corpus: one case per input file and output kind. A
 // file <base>.ttf beside <base>.<ext> is registered as the font family
-// "Evil" for that input.
+// "Evil" for that input. A base name ending in ".quantize" renders its PNG
+// outputs with WithQuantizePNG(256), the post-processing that runs after the
+// rasterizer.
 func boundedCases(t *testing.T) []boundedCase {
 	t.Helper()
 	dir := filepath.Join("testdata", "security", "bounded")
@@ -72,7 +78,7 @@ func boundedCases(t *testing.T) []boundedCase {
 		known := false
 		for _, o := range boundedOutputs {
 			base, ok := strings.CutSuffix(name, o.ext)
-			if !ok {
+			if !ok || known {
 				continue
 			}
 			known = true
@@ -84,12 +90,16 @@ func boundedCases(t *testing.T) []boundedCase {
 			if err != nil && !os.IsNotExist(err) {
 				t.Fatal(err)
 			}
+			var extra []string
+			if strings.HasSuffix(base, ".quantize") {
+				extra = append(extra, "quantize")
+			}
 			for _, k := range o.kinds {
-				cases = append(cases, boundedCase{name: base, kind: k, input: string(in), font: font})
+				cases = append(cases, boundedCase{name: base, kind: k, input: string(in), font: font, extra: extra})
 			}
 		}
 		if !known {
-			t.Errorf("%s: not an input the bounded corpus knows (want %v)", name, []string{".vg.json", ".vl.json", ".svg", ".ttf"})
+			t.Errorf("%s: not an input the bounded corpus knows (want %v)", name, []string{".vg.json", ".vl.json", ".png.svg", ".svg", ".ttf"})
 		}
 	}
 	sort.Slice(cases, func(i, j int) bool { return cases[i].name+cases[i].kind < cases[j].name+cases[j].kind })
@@ -113,6 +123,7 @@ func TestBoundedInputs(t *testing.T) {
 				MemLimit:  boundedMemLimit,
 				HeapCapMB: boundedHeapCapMB,
 				FontB64:   c.font,
+				Extra:     c.extra,
 			}
 			res, killed := runSec(t, job, boundedWall*raceSlowdown)
 			checkBounded(t, res, killed)

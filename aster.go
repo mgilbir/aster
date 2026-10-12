@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
 	"io"
 	"math"
 	"strings"
@@ -736,15 +737,21 @@ func (c *Converter) svgToPNG(ctx context.Context, svg string, opts []PNGOption) 
 	if !(cfg.scale > 0) || math.IsInf(cfg.scale, 1) {
 		return nil, fmt.Errorf("aster: invalid PNG scale %v (must be a positive, finite number)", cfg.scale)
 	}
-	out, err = c.rasterize(ctx, svg, cfg.scale)
+	img, out, err := c.rasterize(ctx, svg, cfg.scale)
 	if err != nil {
 		return nil, err
 	}
+	// Post-processing works on the image the rasterizer drew, not on its
+	// PNG decoded again, under the call's context and ledger like every
+	// stage (C29).
 	switch {
 	case cfg.quantizeColors > 0:
-		out = pngopt.QuantizeOrRecode(out, cfg.quantizeColors)
+		out, err = pngopt.QuantizeOrRecodeImage(ctx, img, out, cfg.quantizeColors)
 	case cfg.recode:
-		out = pngopt.Recode(out)
+		out, err = pngopt.RecodeImage(ctx, img, out)
+	}
+	if err != nil {
+		return nil, c.stageErr(ctx, "optimizing PNG", err)
 	}
 	return out, nil
 }
@@ -777,22 +784,29 @@ func (l lazyShaper) Shape(text string, req raster.FontRequest, size float64) []r
 	return raster.BoundShaper(sh, l.b).Shape(text, req, size)
 }
 
-func (c *Converter) rasterize(ctx context.Context, svg string, scale float64) ([]byte, error) {
+// rasterize draws svg and returns the image and its PNG encoding.
+func (c *Converter) rasterize(ctx context.Context, svg string, scale float64) (*image.NRGBA, []byte, error) {
 	sh, err := c.shaperInit()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	sh = raster.BoundShaper(sh, text.ShapingBudgetFrom(ctx))
+	var img *image.NRGBA
 	out, err := timed(ctx, "png", func() ([]byte, error) {
-		return raster.RenderPNG([]byte(svg), raster.Options{Scale: scale, Shaper: sh, Context: ctx, Limits: c.lim.raster, Images: imagesFrom(ctx).load, ImageError: reportFrom(ctx).image})
+		var err error
+		img, err = raster.Render([]byte(svg), raster.Options{Scale: scale, Shaper: sh, Context: ctx, Limits: c.lim.raster, Images: imagesFrom(ctx).load, ImageError: reportFrom(ctx).image})
+		if err != nil {
+			return nil, err
+		}
+		return raster.EncodePNG(img)
 	})
 	if err == nil {
 		err = reportFrom(ctx).flushImages()
 	}
 	if err != nil {
-		return nil, c.stageErr(ctx, "rendering PNG", err)
+		return nil, nil, c.stageErr(ctx, "rendering PNG", err)
 	}
-	return out, nil
+	return img, out, nil
 }
 
 // PDFTextMode selects how text is represented in PDF output.

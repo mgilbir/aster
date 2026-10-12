@@ -243,8 +243,9 @@ func (s *patternShader) shadeRow(y, x0 int, dst []uint8) {
 	py := float64(y) + 0.5
 	for i := 0; i < n; i++ {
 		px := float64(x0+i) + 0.5
-		u := s.inv.a*px + s.inv.c*py + s.inv.e
-		v := s.inv.b*px + s.inv.d*py + s.inv.f
+		// Finite before they become tile indices (see imageShader.shadeRow).
+		u := clampCoord(s.inv.a*px + s.inv.c*py + s.inv.e)
+		v := clampCoord(s.inv.b*px + s.inv.d*py + s.inv.f)
 		var c [4]float32
 		if s.nearest {
 			ix := wrapIdx(int(math.Floor(u)), t.w)

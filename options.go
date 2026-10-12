@@ -385,9 +385,9 @@ func WithScale(scale float64) PNGOption {
 // distinct colors, 24-bit truecolor when it is fully opaque. Pixels are
 // unchanged; typical charts shrink several-fold. Worth enabling when the PNG
 // is embedded into documents (PDF, office formats), whose writers decode and
-// re-compress the pixel stream and therefore pay per decoded byte. Costs one
-// extra decode/encode round trip (tens of milliseconds for chart-sized
-// images).
+// re-compress the pixel stream and therefore pay per decoded byte. Costs a
+// scan of the rendered image and a second encoding, proportional to its
+// pixels, within the call's WithTimeout and WithMemoryLimit.
 func WithRecodePNG() PNGOption {
 	return pngOption(func(c *pngConfig) {
 		c.recode = true
@@ -403,13 +403,17 @@ func WithRecodePNG() PNGOption {
 // this also covers images with more than 256 distinct colors — the common
 // case for antialiased chart renders — shrinking them several-fold and, in
 // consumers that decode the pixel stream (PDF and office embedders), cutting
-// the decoded volume 4x versus RGBA. Costs one decode/encode round trip plus
-// the quantization pass: roughly tens of milliseconds for chart-sized images,
-// up to ~150ms at double-scale renders. When both quantize and recode are
-// requested, quantization applies. Falls back to the lossless WithRecodePNG
-// behaviour — logging at debug level via log/slog — whenever quantization
-// cannot maintain the output within the quality guard or cannot keep the
-// encoded size in check, so enabling it is always safe.
+// the decoded volume 4x versus RGBA. Costs the quantization pass over the
+// rendered image and a second encoding, proportional to its pixels and its
+// distinct colors; it runs within the call's WithTimeout and WithMemoryLimit
+// like the rest of the call, and a call that runs out of either fails with
+// their error. When both quantize and recode are requested, quantization
+// applies. Falls back to the lossless WithRecodePNG behaviour — logging at
+// debug level via log/slog — whenever quantization cannot maintain the
+// output within the quality guard or cannot keep the encoded size in check,
+// and, without trying, for an image of more than 65,536 distinct colors
+// (photographic or dense-gradient content, which a palette cannot keep
+// within the guard): the output is then lossless.
 func WithQuantizePNG(maxColors int) PNGOption {
 	return pngOption(func(c *pngConfig) {
 		c.quantizeColors = min(max(maxColors, 2), 256)

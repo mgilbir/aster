@@ -75,7 +75,15 @@ func deriveLimits(n uint64) callLimits {
 	}
 	// The canvas, layers and masks alive at once, and the pixels of one.
 	canvas := min(max(n, 4<<20), 1<<30)
-	l.raster = raster.Limits{MaxCanvasBytes: int(canvas), MaxPixels: int(canvas / 8)}
+	// The path geometry a render holds at once, in 16-byte points, and the
+	// pixels of one image it decodes (about 16 bytes each with its decoded
+	// form and halvings): each a sixteenth of the limit.
+	l.raster = raster.Limits{
+		MaxCanvasBytes:  int(canvas),
+		MaxPixels:       int(canvas / 8),
+		MaxPathSegments: toInt(max(n/16, 64<<10)),
+		MaxImagePixels:  int(min(max(n/16, 64<<10), 64<<20)),
+	}
 	// The glyphs of one run of text, and the SVG, each a quarter of the limit.
 	l.shaping = text.ShapingLimits{RunBytes: int64(min(max(n/4, 1<<20), 1<<40))}
 	l.svgBytes = toInt(min(max(n/4, 1<<20), 1<<40))

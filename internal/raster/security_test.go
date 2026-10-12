@@ -56,7 +56,12 @@ func TestCSSManyRulesManyElements(t *testing.T) {
 		fmt.Fprintf(&b, `<g><rect class="c%d" width="1" height="1"/></g>`, i)
 	}
 	b.WriteString("</svg>")
-	if err := mustFinish(t, "rules x elements", b.String(), Limits{MaxCSSRules: 30000, MaxCSSWork: 5_000_000}, 8*time.Second); err != nil {
+	// 40,001 rules over a limit of 30,000: refused, quickly.
+	if err := mustFinish(t, "rules x elements", b.String(), Limits{MaxCSSRules: 30000, MaxCSSWork: 5_000_000}, 8*time.Second); !errors.Is(err, errLimit) {
+		t.Fatalf("rules over the limit: %v", err)
+	}
+	// Within it, the matching work is bounded.
+	if err := mustFinish(t, "rules x elements", b.String(), Limits{MaxCSSRules: 50000, MaxCSSWork: 5_000_000}, 8*time.Second); err != nil && !errors.Is(err, errLimit) {
 		t.Fatal(err)
 	}
 }
@@ -128,9 +133,10 @@ func TestFilterLimits(t *testing.T) {
 	if err := mustFinish(t, "primitives times area", wide, Limits{}, 5*time.Second); !errors.Is(err, errLimit) {
 		t.Errorf("primitives times area: want resource limit error, got %v", err)
 	}
-	// A filter region over MaxFilterPixels is skipped rather than allocated.
-	if err := mustFinish(t, "region cap", secHead+`<defs><filter id="f" filterUnits="userSpaceOnUse" x="-1000" y="-1000" width="3000" height="3000"><feGaussianBlur stdDeviation="3"/></filter></defs><rect width="10" height="10" filter="url(#f)"/></svg>`, Limits{MaxFilterPixels: 1000}, time.Second); err != nil {
-		t.Errorf("region cap: %v", err)
+	// A filter region over MaxFilterPixels is not allocated, and fails the
+	// render rather than leave the element silently undrawn (C62).
+	if err := mustFinish(t, "region cap", secHead+`<defs><filter id="f" filterUnits="userSpaceOnUse" x="-1000" y="-1000" width="3000" height="3000"><feGaussianBlur stdDeviation="3"/></filter></defs><rect width="10" height="10" filter="url(#f)"/></svg>`, Limits{MaxFilterPixels: 1000}, time.Second); !errors.Is(err, errLimit) {
+		t.Errorf("region cap: want resource limit error, got %v", err)
 	}
 }
 

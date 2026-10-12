@@ -67,6 +67,6 @@ These always fail the call:
 
 ## Error messages
 
-Messages name the stage and wrap the cause: `aster: rendering Vega: data "data/cars.json" could not be loaded: aster: resource loading denied for "data/cars.json" (no loader configured)`. The stages are `parsing Vega-Lite spec`, `compiling Vega-Lite`, `rendering Vega`, `writing SVG`, `rendering PNG` and `rendering PDF`. An error that evaluation raised carries upstream's message (`TypeError: Cannot read properties of undefined (reading 'b')`), so it can be looked up against Vega's own behaviour.
+Messages name the stage and wrap the cause: `aster: rendering Vega: data "data/cars.json" could not be loaded: aster: resource loading denied for "data/cars.json" (no loader configured)`. The stages are `parsing Vega-Lite spec`, `compiling Vega-Lite`, `rendering Vega`, `writing SVG`, `rendering PNG`, `optimizing PNG` (`WithQuantizePNG`, `WithRecodePNG`) and `rendering PDF`. An error that evaluation raised carries upstream's message (`TypeError: Cannot read properties of undefined (reading 'b')`), so it can be looked up against Vega's own behaviour.
 
 The CLI prints warnings to stderr, fails on errors, and with `-lenient` prints errors and goes on; see [cli.md](cli.md).

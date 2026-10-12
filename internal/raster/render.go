@@ -37,15 +37,16 @@ type renderer struct {
 	nest    int
 	err     error
 
-	imgs        map[*node]*rasterImage
+	imgs        map[string]*rasterImage      // decoded images by href, nil for one that failed
+	imageBytes  int64                        // what imgs is charged to the ledger
 	fetched     map[string][]byte            // image bytes by href, from Options.Images
 	imageErr    func(href string, err error) // Options.ImageError
-	outlines    map[outlineKey]*path
-	colourImgs  map[colourImageKey]*rasterImage // decoded bitmap glyphs
-	colourBytes int64                           // what colourImgs is charged to the ledger
-	svgGlyphs   map[colourImageKey]*document    // parsed SVG glyph documents
-	inSVGGlyph  bool                            // drawing one, whose text draws no other
-	grads       map[gradKey]*gradient
+	outlines    renderCache[outlineKey, *path]
+	colourImgs  map[colourImageKey]*rasterImage        // decoded bitmap glyphs
+	colourBytes int64                                  // what colourImgs is charged to the ledger
+	svgGlyphs   renderCache[colourImageKey, *document] // parsed SVG glyph documents
+	inSVGGlyph  bool                                   // drawing one, whose text draws no other
+	grads       renderCache[gradKey, *gradient]
 
 	patterns     map[patternKey]*patternTile
 	patternBytes int
@@ -61,6 +62,12 @@ type renderer struct {
 	pixelOps    int             // pixel work charged so far (see Limits.MaxPixelOps)
 	canvasBytes int             // pixel memory of live canvases (see Limits.MaxCanvasBytes)
 	ticks       int
+	// livePts is the path geometry held for the elements being drawn, in
+	// points (see holdPoints and Limits.MaxPathSegments).
+	livePts int
+	// maskBytes is the clip coverage held for the elements being drawn,
+	// part of canvasBytes (see newMaskCoverage).
+	maskBytes int
 }
 
 var errLimit = fmt.Errorf("raster: %w", budget.ErrLimit)
@@ -89,6 +96,40 @@ func (r *renderer) chargeOps(n int) bool {
 	}
 	r.pixelOps += n
 	return r.poll(n >= 1<<14)
+}
+
+// holdPoints accounts for n points of path geometry the element being drawn
+// is about to hold: parsed path data, flattened polylines, stroke outlines
+// and the scan converter's edges (an edge as edgePoints points, its size).
+// An element gives back what it held when it is done (renderElement), its
+// buffers then being reused or dropped, so livePts is what the elements on
+// the stack hold at once, and MaxPathSegments bounds it. Past the limit the
+// render stops with budget.Stop, which Render turns into its error:
+// geometry is built deep in flattening and stroking, which have no error to
+// return.
+func (r *renderer) holdPoints(n int) {
+	if n <= 0 {
+		return
+	}
+	if n > r.lim.MaxPathSegments-r.livePts {
+		r.fail(fmt.Errorf("raster: a path's geometry exceeds %d points (raise Limits.MaxPathSegments or WithMemoryLimit): %w", r.lim.MaxPathSegments, errLimit))
+		panic(&budget.Stop{Err: r.err})
+	}
+	r.livePts += n
+}
+
+// edgePoints is what an edge of the scan converter counts as in holdPoints:
+// an edge, its index and its active copy take about five points' bytes.
+const edgePoints = 5
+
+// flatCharge charges flattening for kept points (holdPoints) and for work,
+// the points it computed, culled or not, to MaxPixelOps; it stops the
+// render as holdPoints does.
+func (r *renderer) flatCharge(kept, work int) {
+	r.holdPoints(kept)
+	if !r.chargeOps(work) {
+		panic(&budget.Stop{Err: r.err})
+	}
 }
 
 // poll checks the context, every call when force is set and otherwise every
@@ -303,7 +344,14 @@ func (r *renderer) renderElement(n *node, parent *state) {
 		return
 	}
 	r.nest++
-	defer func() { r.nest-- }()
+	held, masks := r.livePts, r.maskBytes
+	defer func() {
+		// What the element built for itself is dropped with it.
+		r.nest--
+		r.livePts = held
+		r.canvasBytes -= r.maskBytes - masks
+		r.maskBytes = masks
+	}()
 	if r.nest > r.lim.MaxDepth*2 {
 		r.fail(fmt.Errorf("raster: element nesting too deep: %w", errLimit))
 		return
@@ -548,7 +596,7 @@ func (r *renderer) rectClip(st *state, m matrix, rc rect) *mask {
 			ir := irect{clampInt(x0), clampInt(y0), clampInt(x1), clampInt(y1)}
 			ir = ir.intersect(region)
 			if st.clip != nil && st.clip.a != nil {
-				return intersectMasks(&mask{r: ir}, st.clip)
+				return r.intersectMasks(&mask{r: ir}, st.clip)
 			}
 			return &mask{r: ir}
 		}
@@ -562,7 +610,7 @@ func (r *renderer) rectClip(st *state, m matrix, rc rect) *mask {
 	p.lineTo(rc.x0, rc.y1)
 	p.close()
 	mk := r.pathsMask([]*path{&p}, []matrix{m}, []bool{false}, region)
-	return intersectMasks(mk, st.clip)
+	return r.intersectMasks(mk, st.clip)
 }
 
 func isNearInt(v float64) bool { return math.Abs(v-math.Round(v)) < 1e-6 && math.Abs(v) < 1e9 }
@@ -578,8 +626,25 @@ func clampInt(v float64) int {
 	return int(v)
 }
 
+// newMaskCoverage returns a coverage map for region, charged to the canvas
+// budget (C103): a clip lives as long as the element it clips, and nested
+// clips, one per level, each as large as the canvas, would otherwise add up
+// unbounded. The element that made it gives it back when it is done
+// (renderElement), as everything charged with maskBytes since it began.
+func (r *renderer) newMaskCoverage(region irect) []uint8 {
+	n := region.w() * region.h()
+	if n > r.lim.MaxCanvasBytes-r.canvasBytes {
+		r.fail(fmt.Errorf("raster: clip and mask coverage needs more than %d MiB of pixel memory at once (raise Limits.MaxCanvasBytes or WithMemoryLimit): %w",
+			r.lim.MaxCanvasBytes>>20, errLimit))
+		panic(&budget.Stop{Err: r.err})
+	}
+	r.canvasBytes += n
+	r.maskBytes += n
+	return make([]uint8, n)
+}
+
 // intersectMasks multiplies two coverage maps (nil means unrestricted).
-func intersectMasks(a, b *mask) *mask {
+func (r *renderer) intersectMasks(a, b *mask) *mask {
 	if a == nil {
 		return b
 	}
@@ -593,7 +658,7 @@ func intersectMasks(a, b *mask) *mask {
 	if a.a == nil && b.a == nil {
 		return &mask{r: reg}
 	}
-	out := &mask{r: reg, a: make([]uint8, reg.w()*reg.h())}
+	out := &mask{r: reg, a: r.newMaskCoverage(reg)}
 	w := reg.w()
 	for y := reg.y0; y < reg.y1; y++ {
 		row := out.a[(y-reg.y0)*w:][:w]
@@ -617,10 +682,15 @@ func (r *renderer) pathsMask(ps []*path, ms []matrix, evenOdd []bool, region ire
 	if !r.chargeOps(region.w()*region.h()/8 + 1) { // allocating and clearing the coverage map
 		return &mask{r: irect{}}
 	}
-	mk := &mask{r: region, a: make([]uint8, region.w()*region.h())}
-	var f flat
+	mk := &mask{r: region, a: r.newMaskCoverage(region)}
+	f := flat{r: r}
+	f.setCull(region)
 	for i, p := range ps {
+		if !r.mayCover(p, ms[i], region, 0) {
+			continue // beyond the region: it adds no coverage
+		}
 		f.flatten(p, ms[i], 0.1)
+		r.holdPoints(edgePoints * len(f.pts))
 		r.rast.begin(region)
 		r.rast.addPolys(&f)
 		r.fillRast(evenOdd[i], maskSink{mk})
@@ -766,7 +836,7 @@ func (r *renderer) buildClip(cn *node, st *state, depth int, bb *rect) *mask {
 		b, _ := ps[0].bounds()
 		result = r.rectClip(&state{clip: st.clip}, ms[0], b)
 	} else {
-		result = intersectMasks(r.pathsMask(ps, ms, eo, region), st.clip)
+		result = r.intersectMasks(r.pathsMask(ps, ms, eo, region), st.clip)
 	}
 	// A clipPath may itself be clipped.
 	if cp, ok := cn.get(aClipPath); ok {
@@ -778,7 +848,7 @@ func (r *renderer) buildClip(cn *node, st *state, depth int, bb *rect) *mask {
 				if m2 == nil {
 					return nil
 				}
-				result = intersectMasks(result, m2)
+				result = r.intersectMasks(result, m2)
 			}
 		}
 	}
@@ -795,7 +865,11 @@ func (r *renderer) buildShape(n *node, st *state, p *path) bool {
 		if !ok {
 			return false
 		}
-		parsePathData(d, p)
+		start := len(p.pts)
+		if !parsePathDataMax(d, p, start+r.lim.MaxPathSegments-r.livePts) {
+			r.holdPoints(r.lim.MaxPathSegments + 1) // fails the render
+		}
+		r.holdPoints(len(p.pts) - start)
 		return !p.empty()
 	case tagRect:
 		w := st.length(n.str(aWidth), 0, 0)
@@ -846,7 +920,11 @@ func (r *renderer) buildShape(n *node, st *state, p *path) bool {
 		p.lineTo(st.length(n.str(aX2), 0, 0), st.length(n.str(aY2), 1, 0))
 		return true
 	case tagPolyline, tagPolygon:
-		sc := numScanner{s: n.str(aPoints)}
+		pts := n.str(aPoints)
+		// Two numbers a point, each a character at least and most a
+		// separator too: at most a point per two characters.
+		r.holdPoints(len(pts)/2 + 1)
+		sc := numScanner{s: pts}
 		cnt := 0
 		for !sc.atEnd() {
 			x, ok := sc.number()
@@ -973,16 +1051,21 @@ func (r *renderer) drawPath(p *path, st *state, opacity float64, blend blendMode
 		}
 		return bboxLocal, bboxGood
 	}
+	// A paint whose geometry lies wholly beyond the clip is neither resolved
+	// nor flattened: it would draw nothing (see mayCover).
+	region := r.clipRegion(st)
 	doFill := func() {
-		if fill {
+		if fill && r.mayCover(p, st.ctm, region, 0) {
 			if ps, ok := r.resolvePaint(st.fill, fo, st, needBBox); ok {
+				r.fl.setCull(region)
 				r.fl.flatten(p, st.ctm, shapeTol)
+				r.fl.setCull(irect{})
 				r.fillPolys(&r.fl, st.evenOdd, ps, st)
 			}
 		}
 	}
 	doStroke := func() {
-		if stroke {
+		if stroke && r.mayCover(p, st.ctm, region, strokeReach(st)) {
 			if ps, ok := r.resolvePaint(st.stroke, so, st, needBBox); ok {
 				r.strokePath(p, st, ps)
 			}
@@ -1005,6 +1088,7 @@ func (r *renderer) strokePath(p *path, st *state, ps paintSrc) {
 	if ms <= 0 {
 		return
 	}
+	r.sf.r = r
 	r.sf.flatten(p, identity, shapeTol/ms)
 	if len(r.sf.subs) == 0 {
 		return
@@ -1028,11 +1112,83 @@ func (r *renderer) strokePath(p *path, st *state, ps paintSrc) {
 		}
 	}
 	ss := strokeStyle{width: width, cap: st.cap, join: st.join, miterLimit: st.miter, dash: st.dash, dashOffset: st.dashOffset, hairline: hair, lin: st.ctm}
+	r.stk.r = r
 	r.stk.stroke(&r.sf, ss, ms, &r.so)
 	for i, pt := range r.so.pts {
 		r.so.pts[i] = st.ctm.apply(pt)
 	}
 	r.fillPolys(&r.so, false, ps, st)
+}
+
+// clipRegion is the device area st may paint: the canvas within its clip.
+func (r *renderer) clipRegion(st *state) irect {
+	region := r.cv.bounds()
+	if st.clip != nil {
+		region = region.intersect(st.clip.r)
+	}
+	return region
+}
+
+// strokeReach is how far, in st's user units, a stroke's outline reaches
+// from the path: half the width times the longest a join or cap sticks out
+// (a miter up to the miter limit, a square cap the half diagonal), and the
+// width of a hairline, which is drawn a device pixel wide whatever its own.
+func strokeReach(st *state) float64 {
+	k := math.Sqrt2
+	if (st.join == joinMiter || st.join == joinMiterClip) && st.miter > k {
+		k = st.miter
+	}
+	reach := st.strokeWidth / 2 * k
+	if ms := st.ctm.maxScale(); ms > 0 && reach*ms < 2 {
+		reach = 2 / ms
+	}
+	return reach
+}
+
+// mayCover reports whether what p draws under m, reaching up to reach (user
+// units) beyond its outline, may touch region: false only when the box of
+// its control points, so grown and transformed, misses it by a pixel or
+// more, so that skipping it changes no pixel (the curve and every point
+// flattening takes lie within the control points' hull). It costs a pass
+// over the control points, against flattening and scan converting them.
+func (r *renderer) mayCover(p *path, m matrix, region irect, reach float64) bool {
+	if region.empty() {
+		return false
+	}
+	b, ok := p.bounds()
+	if !ok {
+		return false
+	}
+	r.geomWork(len(p.pts))
+	return mayCoverBox(b, m, region, reach)
+}
+
+// mayCoverBox is mayCover for geometry within the box b of local units.
+func mayCoverBox(b rect, m matrix, region irect, reach float64) bool {
+	if region.empty() {
+		return false
+	}
+	b = rect{b.x0 - reach, b.y0 - reach, b.x1 + reach, b.y1 + reach}
+	d := transformRect(b, m)
+	if !(d.x1 >= d.x0) || !(d.y1 >= d.y0) {
+		return true // NaN: leave it to the scan converter
+	}
+	// The corners and the points are transformed by different sums, each
+	// rounded: a margin of a pixel and of what rounding can move a point
+	// by where the terms are large.
+	lin := math.Abs(m.a) + math.Abs(m.b) + math.Abs(m.c) + math.Abs(m.d)
+	mag := lin*max(math.Abs(b.x0), math.Abs(b.x1), math.Abs(b.y0), math.Abs(b.y1)) + math.Abs(m.e) + math.Abs(m.f)
+	e := 1 + mag*0x1p-40
+	return d.x1+e >= float64(region.x0) && d.x0-e <= float64(region.x1) &&
+		d.y1+e >= float64(region.y0) && d.y0-e <= float64(region.y1)
+}
+
+// geomWork charges n units of geometry work to MaxPixelOps, stopping the
+// render as holdPoints does past it.
+func (r *renderer) geomWork(n int) {
+	if !r.chargeOps(n) {
+		panic(&budget.Stop{Err: r.err})
+	}
 }
 
 // fillPolys rasterizes device-space polygons with the given paint.
@@ -1075,6 +1231,7 @@ func (r *renderer) fillPolys(f *flat, evenOdd bool, ps paintSrc, st *state) {
 	if crisp {
 		r.rast.setAA(false)
 	}
+	r.holdPoints(edgePoints * len(f.pts))
 	r.rast.begin(clip)
 	r.rast.addPolys(f)
 	r.bl.cv = r.cv
@@ -1248,7 +1405,7 @@ func (r *renderer) serverPaint(p paint, opacity float64, st *state, bbox func() 
 		return st.toPx(f, u, axis)
 	}
 	key := gradKey{n, opacity}
-	base := r.grads[key]
+	base, _ := r.grads.get(key)
 	if base == nil {
 		base = &gradient{}
 		base.build(stops, opacity)
@@ -1260,10 +1417,7 @@ func (r *renderer) serverPaint(p paint, opacity float64, st *state, bbox func() 
 				base.spread = spreadRepeat
 			}
 		}
-		if r.grads == nil {
-			r.grads = map[gradKey]*gradient{}
-		}
-		r.grads[key] = base
+		r.grads.put(r.ledger, key, base, gradientBytes)
 	}
 	g := new(gradient)
 	*g = *base
@@ -1274,12 +1428,26 @@ func (r *renderer) serverPaint(p paint, opacity float64, st *state, bbox func() 
 		x2 := coord(aX2, "100%", 0)
 		y2 := coord(aY2, "0%", 1)
 		g.dx, g.dy = x2-g.x1, y2-g.y1
-		l2 := g.dx*g.dx + g.dy*g.dy
-		if l2 == 0 {
-			// Degenerate vector: the last stop colour fills everything.
-			return solidPaint(stops[len(stops)-1].c, opacity), true, true
+		// tiny-skia's LinearGradient::new: a vector whose length overflows
+		// paints nothing, and one too short to draw is one colour, the last
+		// stop's when padding and the average of the colour line when
+		// repeating or reflecting (it is repeated infinitely often).
+		switch length := f32Length(g.x1, g.y1, x2, y2); {
+		case math.IsInf(float64(length), 0) || length != length:
+			return paintSrc{}, false, true
+		case length <= degenerateThreshold:
+			if base.spread == spreadPad {
+				return solidPaint(stops[len(stops)-1].c, opacity), true, true
+			}
+			return averageStopColour(stops, opacity), true, true
 		}
+		l2 := g.dx*g.dx + g.dy*g.dy
 		g.invLen2 = 1 / l2
+		if math.IsInf(g.invLen2, 0) || g.invLen2 != g.invLen2 {
+			// Short in float32 terms but not in float64 ones cannot happen
+			// past the threshold above; kept so no NaN reaches the table.
+			return paintSrc{}, false, true
+		}
 	} else {
 		g.radial = true
 		g.cx = coord(aCx, "50%", 0)
@@ -1294,6 +1462,14 @@ func (r *renderer) serverPaint(p paint, opacity float64, st *state, bbox func() 
 		}
 		if !(g.r > 0) {
 			return solidPaint(stops[len(stops)-1].c, opacity), true, true
+		}
+		// tiny-skia's RadialGradient::new: a radius it rounds to nothing
+		// paints nothing, nor does a focal point at an infinite distance.
+		if float32(g.r) <= nearlyZero {
+			return paintSrc{}, false, true
+		}
+		if l := f32Length(g.fx, g.fy, g.cx, g.cy); math.IsInf(float64(l), 0) || l != l {
+			return paintSrc{}, false, true
 		}
 		// A focal point outside the circle is pulled onto it (SVG 2).
 		if d := math.Hypot(g.fx-g.cx, g.fy-g.cy); d > g.r*0.9999 {

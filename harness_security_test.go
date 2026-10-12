@@ -127,10 +127,13 @@ func runSecChild(job secJob) int {
 	if job.MemLimit > 0 {
 		opts = append(opts, WithMemoryLimit(job.MemLimit))
 	}
+	var pngOpts []PNGOption
 	for _, f := range job.Extra {
 		switch f {
 		case "nomeasure":
 			opts = append(opts, WithTextMeasurement(false))
+		case "quantize":
+			pngOpts = append(pngOpts, WithQuantizePNG(256))
 		}
 	}
 	if len(job.FontB64) > 0 {
@@ -169,16 +172,16 @@ func runSecChild(job secJob) int {
 				scale = 1
 			}
 			if job.Kind == "vlpng" {
-				out, err = c.VegaLiteToPNG([]byte(job.Input), WithScale(scale))
+				out, err = c.VegaLiteToPNG([]byte(job.Input), append(pngOpts, WithScale(scale))...)
 			} else {
-				out, err = c.VegaToPNG([]byte(job.Input), WithScale(scale))
+				out, err = c.VegaToPNG([]byte(job.Input), append(pngOpts, WithScale(scale))...)
 			}
 		case "svgpng":
 			scale := job.Scale
 			if scale == 0 {
 				scale = 1
 			}
-			out, err = c.SVGToPNG(job.Input, WithScale(scale))
+			out, err = c.SVGToPNG(job.Input, append(pngOpts, WithScale(scale))...)
 		case "svgpdf":
 			out, err = c.SVGToPDF(job.Input)
 		case "vegapdf":
