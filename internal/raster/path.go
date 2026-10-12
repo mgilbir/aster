@@ -615,7 +615,14 @@ func (f *flat) appendFlatten(p *path, m matrix, tol float64) {
 	subStart := -1
 	drew := false
 	cull := f.cull
-	mark, work := len(f.pts), 0
+	// Each point of p gives at most one kept point (a curve's end among
+	// them), charged up front with a step of work a verb; the points a
+	// curve adds besides are counted as they are kept and charged in
+	// batches, at most a thousand and a curve's past the last charge.
+	kept, work := 0, 0
+	if f.r != nil {
+		f.r.flatCharge(len(p.pts), len(p.verbs))
+	}
 	finish := func(closed bool) {
 		if subStart < 0 {
 			return
@@ -654,13 +661,6 @@ func (f *flat) appendFlatten(p *path, m matrix, tol float64) {
 	}
 	var startPt point
 	for _, v := range p.verbs {
-		if f.r != nil && (work >= 1<<12 || len(f.pts)-mark >= 1<<10) {
-			// Charged as it goes, a few hundred points past the last
-			// charge at most.
-			f.r.flatCharge(len(f.pts)-mark, work)
-			mark, work = len(f.pts), 0
-		}
-		work++
 		switch v {
 		case vMove:
 			finish(false)
@@ -696,13 +696,19 @@ func (f *flat) appendFlatten(p *path, m matrix, tol float64) {
 			ddy := cur.y - 2*c1.y + q.y
 			dd := math.Hypot(ddx, ddy)
 			n := curveSegs(math.Sqrt(dd / (4 * tol)))
+			if f.r != nil && (kept >= 1<<10 || work >= 1<<12) {
+				f.r.flatCharge(kept, work)
+				kept, work = 0, 0
+			}
 			work += n
+			before := len(f.pts)
 			for i := 1; i < n; i++ {
 				t := float64(i) / float64(n)
 				mt := 1 - t
 				add(point{mt*mt*cur.x + 2*mt*t*c1.x + t*t*q.x, mt*mt*cur.y + 2*mt*t*c1.y + t*t*q.y})
 			}
 			add(q)
+			kept += max(len(f.pts)-before-1, 0) // the end is charged up front
 			cur = q
 		case vCubic:
 			c1 := tr(p.pts[pi])
@@ -719,7 +725,12 @@ func (f *flat) appendFlatten(p *path, m matrix, tol float64) {
 			d2 := math.Hypot(c1.x-2*c2.x+q.x, c1.y-2*c2.y+q.y)
 			dd := math.Max(d1, d2)
 			n := curveSegs(math.Sqrt(0.75 * dd / tol))
+			if f.r != nil && (kept >= 1<<10 || work >= 1<<12) {
+				f.r.flatCharge(kept, work)
+				kept, work = 0, 0
+			}
 			work += n
+			before := len(f.pts)
 			for i := 1; i < n; i++ {
 				t := float64(i) / float64(n)
 				mt := 1 - t
@@ -730,6 +741,7 @@ func (f *flat) appendFlatten(p *path, m matrix, tol float64) {
 				add(point{a*cur.x + b*c1.x + c*c2.x + d*q.x, a*cur.y + b*c1.y + c*c2.y + d*q.y})
 			}
 			add(q)
+			kept += max(len(f.pts)-before-1, 0)
 			cur = q
 		case vClose:
 			if subStart >= 0 {
@@ -741,6 +753,6 @@ func (f *flat) appendFlatten(p *path, m matrix, tol float64) {
 	}
 	finish(false)
 	if f.r != nil {
-		f.r.flatCharge(len(f.pts)-mark, work)
+		f.r.flatCharge(kept, work)
 	}
 }

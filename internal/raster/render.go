@@ -1060,8 +1060,19 @@ func (r *renderer) drawPath(p *path, st *state, opacity float64, blend blendMode
 	// A paint whose geometry lies wholly beyond the clip is neither resolved
 	// nor flattened: it would draw nothing (see mayCover).
 	region := r.clipRegion(st)
+	// The control points' box, one pass for the fill and the stroke both.
+	var cb rect
+	cbOK, cbDone := false, false
+	covers := func(reach float64) bool {
+		if !cbDone {
+			cb, cbOK = p.bounds()
+			cbDone = true
+			r.geomWork(len(p.pts))
+		}
+		return cbOK && mayCoverBox(cb, st.ctm, region, reach)
+	}
 	doFill := func() {
-		if fill && r.mayCover(p, st.ctm, region, 0) {
+		if fill && covers(0) {
 			if ps, ok := r.resolvePaint(st.fill, fo, st, needBBox); ok {
 				r.fl.setCull(region)
 				r.fl.flatten(p, st.ctm, shapeTol)
@@ -1078,7 +1089,15 @@ func (r *renderer) drawPath(p *path, st *state, opacity float64, blend blendMode
 				return
 			}
 		}
-		if stroke && r.mayCover(sp, sst.ctm, region, strokeReach(sst)) {
+		may := false
+		if stroke {
+			if sp == p {
+				may = covers(strokeReach(sst))
+			} else {
+				may = r.mayCover(sp, sst.ctm, region, strokeReach(sst))
+			}
+		}
+		if may {
 			// The paint is the element's, in its user space.
 			if ps, ok := r.resolvePaint(st.stroke, so, st, needBBox); ok {
 				r.strokePath(sp, sst, ps)
