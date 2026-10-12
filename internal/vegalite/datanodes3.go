@@ -159,14 +159,14 @@ func (n *xformNode) producedFields() *sset {
 	switch n.kind {
 	case "window":
 		s := newSset()
-		for _, w := range t.Get("window").Items() {
+		for _, w := range listOf(t.Get("window"), "this.transform.window", "map") {
 			cc.work(1)
 			s.add(n.defaultName(w))
 		}
 		return s
 	case "joinaggregate":
 		s := newSset()
-		for _, w := range t.Get("joinaggregate").Items() {
+		for _, w := range listOf(t.Get("joinaggregate"), "this.transform.joinaggregate", "map") {
 			cc.work(1)
 			s.add(n.defaultName(w))
 		}
@@ -181,7 +181,13 @@ func (n *xformNode) producedFields() *sset {
 		if t.Get("as").IsTruthy() {
 			return newSset(strItems(n.cc, jsval.Arr(arrayOf(t.Get("as"))))...)
 		}
-		return newSset(strItems(n.cc, t.Get("from").Get("fields"))...)
+		// new Set(this.transform.from.fields)
+		var fields []string
+		for _, f := range iterateNew(t.Get("from").Get("fields")) {
+			cc.work(1)
+			fields = append(fields, f.AsString())
+		}
+		return newSset(fields...)
 	case "impute":
 		return newSset(t.Get("impute").AsString())
 	}
@@ -336,7 +342,7 @@ func (n *xformNode) assembleWindow() Value {
 	}
 	var sortFields, sortOrder []Value
 	if s := t.Get("sort"); !s.IsUndefined() {
-		for _, sf := range s.Items() {
+		for _, sf := range iterate(s, "this.transform.sort") {
 			cc.work(1)
 			sortFields = append(sortFields, sf.Get("field"))
 			sortOrder = append(sortOrder, coalesce(sf.Get("order"), jsval.Str("ascending")))
@@ -489,7 +495,7 @@ func newFlattenNode(parent dfNode, t Value) dfNode {
 	t = deepClone(ccOf(parent), t)
 	as := t.Get("as")
 	var out []Value
-	for i, f := range t.Get("flatten").Items() {
+	for i, f := range listOf(t.Get("flatten"), "flatten", "map") {
 		cc.work(1)
 		out = append(out, coalesce(jsIndex(as, i), f))
 	}
@@ -537,7 +543,7 @@ func makeLookupNode(parent dfNode, m Model, t Value, counter int) dfNode {
 		o := mk("as", selName)
 		spread(o, t)
 		t = jsval.Obj(o)
-		sel, junk := b.trySelectionComponent(varName(selName))
+		sel, junk := b.trySelectionComponent(varNameOf(from.Get("param")))
 		if sel == nil && !junk {
 			throw("Lookups can only be performed on selection parameters. %q is a variable parameter.", selName)
 		}

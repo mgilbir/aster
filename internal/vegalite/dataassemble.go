@@ -40,6 +40,11 @@ func makeWalkTree(data *[]*vgData) func(node dfNode, ds *vgData) {
 		cc := node.base().cc
 		cc.work(1)
 		if sn, ok := node.(*sourceNode); ok {
+			if cc.v5 && !sn.generator && sn.data == nil {
+				// 5.8's isUrlData(node.data) of a source that is none of
+				// inline, url, sphere or named data.
+				jsIn(undef, "url")
+			}
 			if !sn.generator && !isUrlData(jsval.Obj(sn.data)) {
 				*data = append(*data, ds)
 				ds = newVgData(jsval.Null, ds.name())
@@ -219,6 +224,9 @@ func assembleRootData(cc *compileCtx, dc *dataComponent, datasets Value) []Value
 	}
 	for _, d := range data {
 		cc.work(1)
+		if !datasets.IsUndefined() && !isObject(datasets) {
+			jsIn(datasets, d.name().AsString()) // d.name in datasets
+		}
 		if name := d.name(); name.IsStr() && datasets.IsObj() && datasets.ObjValue().Has(name.StrValue()) {
 			d.obj.Set("values", datasets.Get(name.StrValue()))
 		}

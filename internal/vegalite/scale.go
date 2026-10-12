@@ -76,6 +76,12 @@ func defaultScaleResolve(channel string, m Model) string {
 }
 
 func parseGuideResolve(resolve *resolveIndex, channel string) string {
+	resolve.read(resolveScale, channel)
+	if isXorY(channel) {
+		resolve.read(resolveAxis, channel)
+	} else {
+		resolve.read(resolveLegend, channel)
+	}
 	channelScaleResolve := resolve.scale[channel]
 	guide := resolve.legend
 	if isXorY(channel) {
@@ -165,7 +171,9 @@ func parseNonUnitScaleCore(m Model) *omap[*scaleComponent] {
 		parseScaleCore(child)
 		cs := child.b().comp.scales
 		for _, channel := range cs.keyList() {
+			resolve.read(resolveScale, channel)
 			if resolve.scale[channel] == "" {
+				resolve.write(resolveScale, channel)
 				resolve.scale[channel] = defaultScaleResolve(channel, m)
 			}
 			if resolve.scale[channel] == "shared" {
@@ -177,6 +185,7 @@ func parseNonUnitScaleCore(m Model) *omap[*scaleComponent] {
 						et := explicitType
 						typeIndex.set(channel, mergeValuesWithExplicit(&et, childType, "type", "scale", scaleTypeTieBreaker))
 					} else {
+						resolve.write(resolveScale, channel)
 						resolve.scale[channel] = "independent"
 						typeIndex.del(channel)
 					}

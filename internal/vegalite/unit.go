@@ -38,6 +38,9 @@ func newUnitModel(cc *compileCtx, spec Value, parent Model, parentGivenName stri
 	}
 	mark := markDef.Lookup("type").AsString()
 	if markDef.Lookup("filled").IsUndefined() {
+		if cc.v5 && spec.Get("data").IsTruthy() {
+			jsIn(spec.Get("data"), "graticule") // 5.8's isGraticuleGenerator
+		}
 		graticule := spec.Get("data").IsTruthy() && isGraticuleGenerator(spec.Get("data"))
 		markDef.Set("filled", defaultFilled(jsval.Obj(markDef), config, graticule))
 	}
@@ -66,7 +69,11 @@ func newUnitModel(cc *compileCtx, spec Value, parent Model, parentGivenName stri
 	u.specifiedAxes = u.initAxes(u.encoding)
 	u.specifiedLegends = u.initLegends(u.encoding)
 	u.specifiedProjection = spec.Get("projection")
-	for _, p := range spec.Get("params").Items() {
+	var params []Value
+	if ps := spec.Get("params"); !ps.IsNullish() {
+		params = listOf(ps, "(spec.params ?? [])", "filter")
+	}
+	for _, p := range params {
 		cc.work(1)
 		if isSelectionParameter(p) {
 			u.selection = append(u.selection, p)

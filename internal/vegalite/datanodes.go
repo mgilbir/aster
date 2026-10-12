@@ -171,7 +171,12 @@ func (n *parseNode) assembleTransforms(onlyNested bool) []Value {
 		if onlyNested && accessPathDepth(field) <= 1 {
 			continue
 		}
-		expr := parseExpressionFor(field, n.parse.Lookup(field).AsString())
+		pv := n.parse.Lookup(field)
+		if !pv.IsStr() {
+			// parse.startsWith, past the comparisons with the known names.
+			throw("parse.startsWith is not a function")
+		}
+		expr := parseExpressionFor(field, pv.StrValue())
 		if expr == "" {
 			continue
 		}
@@ -252,11 +257,26 @@ type calculateNode struct {
 }
 
 func newCalculateNode(parent dfNode, transform Value) *calculateNode {
-	return initNode(&calculateNode{transform: transform, dep: getDependentFields(ccOf(parent), transform.Get("calculate").AsString())}, parent)
+	return initNode(&calculateNode{transform: transform, dep: getDependentFields(ccOf(parent), exprSource(transform.Get("calculate")))}, parent)
 }
 func (n *calculateNode) clone() dfNode {
 	return initNode(&calculateNode{transform: deepClone(n.cc, n.transform), dep: getDependentFields(n.cc, n.transform.Get("calculate").AsString())}, nil)
 }
+
+// exprSource is an expression upstream hands to vega-expression's parser,
+// which reads it with source.length and source.charCodeAt: anything but a
+// string is a TypeError.
+func exprSource(v Value) string {
+	switch {
+	case v.IsStr():
+		return v.StrValue()
+	case v.IsNullish():
+		throw("Cannot read properties of %s (reading 'length')", nullishName(v))
+	}
+	throw("source.charCodeAt is not a function")
+	return ""
+}
+
 func (n *calculateNode) producedFields() *sset  { return newSset(n.transform.Get("as").AsString()) }
 func (n *calculateNode) dependentFields() *sset { return n.dep }
 func (n *calculateNode) hash() string           { return "Calculate " + hashOf(n.cc, n.transform) }

@@ -81,8 +81,11 @@ func fieldFilterExpression(cc *compileCtx, p Value, useInRange bool) string {
 	case isFieldGTEPredicate(p):
 		return fieldExpr + ">=" + predicateValueExpr(cc, p.Get("gte"), unit)
 	case isFieldOneOfPredicate(p):
+		// predicateValuesExpr(predicate.oneOf): the legacy `in` makes this a
+		// oneOf predicate too, but only oneOf is read, so `in` alone is a
+		// TypeError upstream (C49).
 		var parts []string
-		for _, v := range p.Get("oneOf").Items() {
+		for _, v := range listOf(p.Get("oneOf"), "vals", "map") {
 			cc.work(1)
 			parts = append(parts, predicateValueExpr(cc, v, unit))
 		}
@@ -220,9 +223,9 @@ func normalizeLogicalComposition(op Value, normalizer func(Value) Value, depth i
 	case isLogicalNot(op):
 		return mkv("not", normalizeLogicalComposition(op.Get("not"), normalizer, depth+1))
 	case isLogicalAnd(op):
-		return mkv("and", mapVals(op.Get("and"), func(o Value) Value { return normalizeLogicalComposition(o, normalizer, depth+1) }))
+		return mkv("and", mapList(op.Get("and"), "op.and", func(o Value) Value { return normalizeLogicalComposition(o, normalizer, depth+1) }))
 	case isLogicalOr(op):
-		return mkv("or", mapVals(op.Get("or"), func(o Value) Value { return normalizeLogicalComposition(o, normalizer, depth+1) }))
+		return mkv("or", mapList(op.Get("or"), "op.or", func(o Value) Value { return normalizeLogicalComposition(o, normalizer, depth+1) }))
 	}
 	return normalizer(op)
 }
@@ -254,6 +257,17 @@ func logicalExpr(cc *compileCtx, op Value, cb func(Value) string, depth int) str
 }
 
 // mapVals is Array.prototype.map over an array value.
+// mapList is expr.map(f) of a value upstream maps without checking it is an
+// array (see listOf).
+func mapList(a Value, expr string, f func(Value) Value) Value {
+	items := listOf(a, expr, "map")
+	out := make([]Value, len(items))
+	for i, it := range items {
+		out[i] = f(it)
+	}
+	return jsval.Arr(out)
+}
+
 func mapVals(a Value, f func(Value) Value) Value {
 	items := a.Items()
 	out := make([]Value, len(items))

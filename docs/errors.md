@@ -59,7 +59,7 @@ Embedded PNG, JPEG and GIF images (`data:image/png;base64,…`, and `image/jpeg`
 
 These always fail the call:
 
-- **An invalid specification:** JSON that does not parse, a Vega-Lite spec the compiler rejects, an expression that does not parse, an unknown signal name in `WithSignal`.
+- **An invalid specification:** JSON that does not parse, a Vega-Lite spec the compiler rejects, an expression that does not parse, an unknown signal name in `WithSignal`. The Vega-Lite compiler rejects what upstream's throws on, in the version selected: a value of the wrong type where upstream calls a method on it fails with the TypeError's text (`spec.layer.map is not a function` for `"layer": {}`), and the legacy `"in"` predicate, which upstream accepts but never reads, fails as upstream's does ([ADR 0013](adr/0013-invalid-input-fails-where-upstream-throws.md)).
 - **`ErrLimit`:** a resource bound was exceeded. This includes a response over the Loader's size cap, a `config.locale` member past its bound, and an axis, legend or scheme that would list more ticks, entries or colours than the engine keeps (where it once drew none, silently). See [limits.md](limits.md). A bound reached inside an expression is one too, never a JavaScript exception the handler could let go: a string past aster's length limit, a regular expression search that runs out of steps or a pattern past the compiler's size, a `timeSequence` of too many dates, a value nested too deep to print. Only a string past V8's own limit (`pad(x, 1e12)`) is the `RangeError` upstream throws.
 - **`context.DeadlineExceeded`:** `WithTimeout` expired. The message names the stage ("rendering Vega timed out after 30s").
 - **`context.Canceled`:** `Close` was called during the call.

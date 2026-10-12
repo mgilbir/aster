@@ -182,7 +182,9 @@ func mergeChildAxis(m *facetModel, channel string) {
 		return
 	}
 	layoutHeaders, resolve := m.comp.layoutHeaders, m.comp.resolve
-	resolve.axis[channel] = parseGuideResolve(resolve, channel)
+	v := parseGuideResolve(resolve, channel)
+	resolve.write(resolveAxis, channel)
+	resolve.axis[channel] = v
 	if resolve.axis[channel] == "shared" {
 		headerChannel := "row"
 		if channel == "x" {

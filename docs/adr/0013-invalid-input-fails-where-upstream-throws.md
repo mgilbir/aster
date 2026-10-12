@@ -1,0 +1,24 @@
+# 0013: Invalid Vega-Lite input fails where upstream throws
+
+**Status:** accepted, 2026-10-12.
+
+## Context
+
+Vega-Lite's compiler validates little. A value of the wrong type in a specification mostly reaches code that uses it as the right type, and the compilation then fails with the TypeError JavaScript raises: `spec.layer.map is not a function` for `"layer": {}`, `Cannot use 'in' operator to search for 'scale' in a` for a channel defined as `"a"` under 5.8. Aster's compiler read such values leniently instead: `Items()` of an object is empty, `AsString()` of a number is its text. So `"layer": {}`, `"transform": {}`, `"params": 1` or the legacy `"in"` predicate compiled to a blank chart with a nil error, where upstream fails (audit findings C49 and C50; a differential of 1,500 type-confused corpus specs found about 80 such mutants). The project had no stated policy on schema-invalid input (audit open question 4), and ADR 0006 already holds that a chart must not silently lose what the specification asked for.
+
+## Decision
+
+- **Where upstream throws, aster returns an error.** For each Vega-Lite version aster follows (6.4.3, and 5.8.0 behind `WithVegaLiteVersion`), a value that makes upstream's compiler throw makes aster's fail too, at the operation where upstream's would. Both versions are held to it: 5.8's predicates use JavaScript's `in` operator where 6.4 uses `hasProperty`, so 5.8 rejects primitives in many more places, and aster's 5.8 mode does as well.
+- **The error names what was wrong.** Where upstream throws an Error of its own (`Invalid field type "undefined".`) aster uses its message. Where upstream fails with a JavaScript TypeError, aster's message is that TypeError's text (`spec.layer.map is not a function`), which names the property, so a message can be matched against upstream's.
+- **Where upstream accepts a value, aster reproduces what it does with it**, including the lenient readings JavaScript gives it: a string where a list of repeat values is expected is iterated by character, as `for…of` does; a primitive channel definition in 6.4 becomes `{value: …}` with upstream's warning. Strictness beyond upstream's would make valid-in-practice specifications fail where Vega-Lite renders them.
+- **`TestVegaLiteTypeConfusionMatchesNode` is the guard.** It replaces one value of a corpus specification with a value of another type and compiles the mutant here and in node with both versions. Where node throws, the engine must fail; where node compiles, the engine must compile; where both compile, the engine's warnings must be node's, in order and count. It has no allowlist: with the default seed (1,500 mutants) and seeds 7, 11, 13 and 17 (10,000 each) it reports no difference in either direction. `TestInvalidStructureMatchesNode` holds the structural slots (composition lists, repeat, transform, params, field type, channel definitions, the legacy `in` predicate) to node's answer, both its errors and its output.
+
+## Why
+
+Fidelity to upstream (ADR 0004) is the engine's first rule, and an error is part of upstream's output: a specification that fails in the Vega-Lite editor should not render as an empty chart here. Mirroring upstream rather than validating against the JSON schema keeps the two in step: a schema check would reject specifications upstream renders (the schema is stricter than the compiler) and accept ones it rejects.
+
+## Consequences
+
+- A behaviour change: specifications that compiled to a blank or partial chart now return an error, as they do upstream.
+- Mirroring is per call site, so new code that reads a specification value must read it the way upstream does, including the TypeError where upstream's would raise one (`listOf`, `iterate`, `jsIn` and `varNameOf` in `internal/vegalite`).
+- Mirroring reaches into JavaScript semantics the specification can observe: the `in` operator sees `Object.prototype` (and, for arrays, `Array.prototype`) members, so under 5.8 an aggregate `"toString"` or `"__proto__"` behaves as upstream's does; JSON output drops function values a specification can reach that way; `splitAccessPath` bounds its loop by the field's length before string conversion. `internal/jsval` marks such inherited values so the compiler can tell them from data.

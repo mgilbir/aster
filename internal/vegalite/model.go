@@ -57,10 +57,48 @@ func (n *nameMap) get(name string) string {
 
 type resolveIndex struct {
 	scale, axis, legend map[string]string
+	// prim holds resolve.scale, .axis and .legend of the specification
+	// when it is there but not an object: upstream reads and writes it as an
+	// object, and writing a property of a primitive (or reading one of null)
+	// is a TypeError (see read and write).
+	prim [3]*Value
+}
+
+// The kinds of resolveIndex.prim.
+const (
+	resolveScale = iota
+	resolveAxis
+	resolveLegend
+)
+
+// read is upstream reading resolve[kind][channel].
+func (r *resolveIndex) read(kind int, channel string) {
+	if v := r.prim[kind]; v != nil && v.IsNull() {
+		throw("Cannot read properties of null (reading '%s')", channel)
+	}
+}
+
+// write is upstream assigning resolve[kind][channel].
+func (r *resolveIndex) write(kind int, channel string) {
+	v := r.prim[kind]
+	switch {
+	case v == nil:
+	case v.IsNull():
+		throw("Cannot set properties of null (setting '%s')", channel)
+	default:
+		typ := "string"
+		switch {
+		case v.IsNum():
+			typ = "number"
+		case v.IsBool():
+			typ = "boolean"
+		}
+		throw("Cannot create property '%s' on %s '%s'", channel, typ, v.AsString())
+	}
 }
 
 func (r *resolveIndex) clone() *resolveIndex {
-	c := &resolveIndex{map[string]string{}, map[string]string{}, map[string]string{}}
+	c := &resolveIndex{scale: map[string]string{}, axis: map[string]string{}, legend: map[string]string{}, prim: r.prim}
 	for k, v := range r.scale {
 		c.scale[k] = v
 	}
@@ -151,7 +189,7 @@ func newModelBase(cc *compileCtx, self Model, spec Value, typ string, parent Mod
 		dc.outputNodeRefCounts = map[string]int{}
 		dc.isFaceted = isFacetSpec(spec)
 	}
-	res := &resolveIndex{map[string]string{}, map[string]string{}, map[string]string{}}
+	res := &resolveIndex{scale: map[string]string{}, axis: map[string]string{}, legend: map[string]string{}}
 	if resolve != nil {
 		res = resolve.clone()
 	}
@@ -169,10 +207,22 @@ func newModelBase(cc *compileCtx, self Model, spec Value, typ string, parent Mod
 }
 
 func normalizeTransformList(cc *compileCtx, tx Value) []Value {
+	// spec.transform ?? [], then transform.map; 5.8 tests each with
+	// `'filter' in t`.
+	if tx.IsNullish() {
+		return nil
+	}
 	var out []Value
-	for _, t := range tx.Items() {
+	for _, t := range listOf(tx, "transform", "map") {
 		cc.work(1)
-		if hasProperty(t, "filter") {
+		if cc.v5 && t.IsArr() {
+			// 'filter' in t holds for an array (Array.prototype.filter), so
+			// 5.8 makes it a filter whose predicate is that function; its
+			// expression reads the field of the function, undefined, as an
+			// access path.
+			throw("Cannot read properties of undefined (reading 'length')")
+		}
+		if (cc.v5 && jsIn(t, "filter")) || (!cc.v5 && hasProperty(t, "filter")) {
 			out = append(out, mkv("filter", normalizeLogicalComposition(t.Get("filter"), func(f Value) Value { return normalizePredicate(cc, f) }, 0)))
 		} else {
 			out = append(out, t)

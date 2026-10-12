@@ -70,7 +70,8 @@ func setAtPath(root jsval.Value, path []string, nv jsval.Value) {
 // (every key, array element and container) by values of another type and checks
 // that the compiler returns an error or a result but never panics: a panic
 // surfaces from Compile as an "internal error" (its recover), which this test
-// rejects. The mutants are sampled deterministically; VEGALITE_FUZZ_N raises
+// rejects. Whether it fails exactly where upstream throws is checked against
+// node by the root package's TestVegaLiteTypeConfusionMatchesNode (ADR 0013). The mutants are sampled deterministically; VEGALITE_FUZZ_N raises
 // the count (and VEGALITE_FUZZ_SEED changes the sample).
 func TestTypeConfusion(t *testing.T) {
 	n := 1500

@@ -152,7 +152,7 @@ func createBinComponent(t Value, bin Value, m Model, _ bool) (string, *binCompon
 	span := ""
 	if isParameterExtent(normalized.Lookup("extent")) {
 		ext := normalized.Lookup("extent")
-		span = parseSelectionExtent(m, ext.Get("param").AsString(), ext)
+		span = parseSelectionExtent(m, ext.Get("param"), ext)
 		normalized.Delete("extent")
 	}
 	return key, &binComponent{bin: jsval.Obj(normalized), field: t.Get("field").AsString(), noField: t.Get("field").IsUndefined(), as: [][]string{as}, signal: signal, extentSignal: extentSignal, span: span}
@@ -691,7 +691,7 @@ func makeAggregateFromEncoding(parent dfNode, m *unitModel) *aggregateNode {
 func makeAggregateFromTransform(cc *compileCtx, parent dfNode, t Value) *aggregateNode {
 	dims := newSset()
 	meas := newOmap[*omap[*sset]]()
-	for _, s := range t.Get("aggregate").Items() {
+	for _, s := range iterate(t.Get("aggregate"), "t.aggregate") {
 		cc.work(1)
 		op, field, as := s.Get("op"), s.Get("field"), s.Get("as")
 		if op.IsTruthy() {
@@ -709,7 +709,11 @@ func makeAggregateFromTransform(cc *compileCtx, parent dfNode, t Value) *aggrega
 			}
 		}
 	}
-	for _, s := range t.Get("groupby").Items() {
+	var groupby []Value
+	if g := t.Get("groupby"); !g.IsNullish() {
+		groupby = iterate(g, "t.groupby ?? []")
+	}
+	for _, s := range groupby {
 		cc.work(1)
 		dims.add(s.AsString())
 	}

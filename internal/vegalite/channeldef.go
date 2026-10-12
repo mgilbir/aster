@@ -44,6 +44,17 @@ func isTypedFieldDef(cd Value) bool {
 	return cd.IsTruthy() && (hasProperty(cd, "field") || aggIs(cd, "count")) && hasProperty(cd, "type")
 }
 
+// isTypedFieldDefOf is isTypedFieldDef as the compiled version has it: 5.8
+// tests `'field' in channelDef` and `'type' in channelDef`, so a def whose
+// type an earlier normalization set to undefined (an invalid type) is still
+// typed there, and isDiscrete then rejects its type.
+func isTypedFieldDefOf(cc *compileCtx, cd Value) bool {
+	if !cc.v5 {
+		return isTypedFieldDef(cd)
+	}
+	return cd.IsTruthy() && (jsIn(cd, "field") || aggIs(cd, "count")) && jsIn(cd, "type")
+}
+
 func isValueDef(cd Value) bool { return hasProperty(cd, "value") }
 
 func isScaleFieldDef(cd Value) bool { return hasProperty(cd, "scale") || hasProperty(cd, "sort") }
@@ -82,7 +93,7 @@ func hasConditionalValueDef(cd Value) bool {
 }
 
 func isContinuousFieldOrDatumDef(cc *compileCtx, cd Value) bool {
-	return (isTypedFieldDef(cd) && !isDiscreteDef(cc, cd)) || isNumericDataDef(cd)
+	return (isTypedFieldDefOf(cc, cd) && !isDiscreteDef(cc, cd)) || isNumericDataDef(cd)
 }
 
 func isUnbinnedQuantitativeFieldOrDatumDef(cd Value) bool {
@@ -470,9 +481,20 @@ func initFieldDef(cc *compileCtx, fd Value, channel string, compositeMark bool) 
 		fieldDef.Set("bin", normalizeBin(bin, channel))
 	}
 	fdv := jsval.Obj(fieldDef)
-	if isTypedFieldDef(fdv) {
+	if isTypedFieldDefOf(cc, fdv) {
 		t := channelDefType(fdv)
-		if fullType := getFullName(t); t != fullType {
+		// getFullName(type): a truthy type is lower-cased (a TypeError when
+		// it is not a string), a falsy one is undefined; the type is
+		// replaced unless it is already the full name.
+		tv := fieldDef.Lookup("type")
+		fullType := ""
+		if tv.IsTruthy() {
+			if !tv.IsStr() {
+				throw("type.toLowerCase is not a function")
+			}
+			fullType = getFullName(t)
+		}
+		if !tv.IsStr() || t != fullType || fullType == "" {
 			if fullType == "" {
 				fieldDef.Set("type", undef)
 			} else {

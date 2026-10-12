@@ -83,3 +83,54 @@ func TestExprDepthMatchesVega(t *testing.T) {
 		t.Errorf("vegalite.MaxExprDepth = %d, expr.MaxDepth = %d", vegalite.MaxExprDepth, expr.MaxDepth)
 	}
 }
+
+// TestInvalidStructureMatchesNode compiles specifications with values of the
+// wrong type in their structural slots (composition lists, repeat, transform,
+// params, field type, channel definitions, the legacy `in` predicate) with
+// both Vega-Lite versions: where node throws the engine must fail too, and
+// where node compiles the engine must produce the same Vega (C49, C50,
+// ADR 0013).
+func TestInvalidStructureMatchesNode(t *testing.T) {
+	for _, spec := range []string{
+		`{"data":{"values":[{"a":1}]},"layer":{}}`,
+		`{"data":{"values":[{"a":1}]},"layer":"x"}`,
+		`{"data":{"values":[{"a":1}]},"layer":1}`,
+		`{"data":{"values":[{"a":1}]},"vconcat":"x"}`,
+		`{"data":{"values":[{"a":1}]},"hconcat":{}}`,
+		`{"data":{"values":[{"a":1}]},"concat":3}`,
+		`{"data":{"values":[{"a":1}]},"repeat":"x","spec":{"mark":"point"}}`,
+		`{"data":{"values":[{"a":1}]},"repeat":{"row":"x"},"spec":{"mark":"point"}}`,
+		`{"data":{"values":[{"a":1}]},"repeat":{"row":{}},"spec":{"mark":"point"}}`,
+		`{"data":{"values":[{"a":1}]},"repeat":{"layer":"x"},"spec":{"mark":"point"}}`,
+		`{"data":{"values":[{"a":1}]},"mark":"point","transform":{}}`,
+		`{"data":{"values":[{"a":1}]},"mark":"point","transform":"x"}`,
+		`{"data":{"values":[{"a":1}]},"mark":"point","transform":[1]}`,
+		`{"data":{"values":[{"a":1}]},"mark":"point","transform":[null]}`,
+		`{"data":{"values":[{"a":1}]},"mark":"point","params":1}`,
+		`{"data":{"values":[{"a":1}]},"mark":"point","params":{}}`,
+		`{"data":{"values":[{"a":1}]},"mark":"point","params":"x"}`,
+		`{"data":{"values":[{"a":1}]},"mark":"point","params":[1]}`,
+		`{"data":{"values":[{"a":1}]},"mark":"point","encoding":{"x":{"field":"a","type":0}}}`,
+		`{"data":{"values":[{"a":1}]},"mark":"point","encoding":{"x":{"field":"a","type":"bogus"}}}`,
+		`{"data":{"values":[{"a":1}]},"mark":"point","encoding":{"x":{"field":"a","type":{}}}}`,
+		`{"data":{"values":[{"a":1}]},"mark":"point","encoding":{"x":1}}`,
+		`{"data":{"values":[{"a":1}]},"mark":"point","encoding":{"x":[]}}`,
+		`{"data":{"values":[{"a":1}]},"mark":"point","encoding":{"x":"a"}}`,
+		`{"data":{"values":[{"a":1}]},"mark":"point","encoding":{"x":null}}`,
+		`{"data":{"values":[{"a":1}]},"mark":"point","encoding":{"tooltip":5}}`,
+		`{"data":{"values":[{"a":1}]},"mark":"point","encoding":{"detail":"x"}}`,
+		`{"data":{"values":[{"a":1}]},"mark":"point","encoding":1}`,
+		`{"data":{"values":[{"a":1}]},"mark":"point","encoding":[]}`,
+		`{"data":{"values":[{"a":1,"b":"x"}]},"mark":"point","transform":[{"filter":{"field":"b","in":["x"]}}],"encoding":{"x":{"field":"a","type":"quantitative"}}}`,
+		`{"data":{"values":[{"a":1,"b":"x"}]},"mark":"point","transform":[{"filter":{"field":"b","oneOf":["x"],"in":["y"]}}],"encoding":{"x":{"field":"a","type":"quantitative"}}}`,
+		`{"data":{"values":[{"a":1}]},"mark":"point","encoding":{"x":{"field":"a","type":"quantitative","aggregate":"avg"}}}`,
+		`{"data":{"values":[{"a":1}]},"mark":"point","transform":[{"calcualte":"1","as":"b"}]}`,
+		`{"data":{"values":[{"a":1}]},"layer":[1]}`,
+		`{"data":{"values":[{"a":1}]},"layer":[null]}`,
+		`{"data":{"values":[{"a":1}]},"hconcat":[1]}`,
+		`{"data":{"values":[{"a":1}]},"facet":{"row":{"field":"a"}},"spec":"x"}`,
+		`{"data":{"values":[{"a":1}]},"facet":"x","spec":{"mark":"point"}}`,
+	} {
+		compileAgainstNode(t, spec, spec)
+	}
+}

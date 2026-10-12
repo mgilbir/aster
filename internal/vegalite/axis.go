@@ -118,7 +118,9 @@ func parseLayerAxes(m *layerModel) {
 		cc.work(modelStep)
 		child.parseAxesAndHeaders()
 		for _, channel := range child.b().comp.axes.keyList() {
-			resolve.axis[channel] = parseGuideResolve(m.comp.resolve, channel)
+			v := parseGuideResolve(m.comp.resolve, channel)
+			resolve.write(resolveAxis, channel)
+			resolve.axis[channel] = v
 			if resolve.axis[channel] == "shared" {
 				cur, _ := axes.get(channel)
 				childAxes, _ := child.b().comp.axes.get(channel)
@@ -768,6 +770,9 @@ func getAxisConfigs(channel, scaleType string, orient Value, config Value) axisC
 	}
 	axisOrient := "axisOrient"
 	if !isSignalRef(orient) {
+		if !orient.IsStr() && !orient.IsNullish() {
+			throw("s.charAt is not a function") // titleCase(orient)
+		}
 		axisOrient = "axis" + titleCase(orient.AsString())
 	}
 	vlOnly := append([]string{}, typeBased...)

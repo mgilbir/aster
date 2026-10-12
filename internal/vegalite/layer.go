@@ -63,7 +63,12 @@ func newLayerModel(cc *compileCtx, spec Value, parent Model, parentGivenName str
 }
 
 func resolveFromSpec(r Value) *resolveIndex {
-	res := &resolveIndex{map[string]string{}, map[string]string{}, map[string]string{}}
+	res := &resolveIndex{scale: map[string]string{}, axis: map[string]string{}, legend: map[string]string{}}
+	for kind, key := range []string{"scale", "axis", "legend"} {
+		if o := r.Get(key); r.IsObj() && r.ObjValue().Has(key) && !o.IsUndefined() && !isObject(o) {
+			res.prim[kind] = &o
+		}
+	}
 	fill := func(dst map[string]string, v Value) {
 		for _, k := range keysOf(v) {
 			s := v.Get(k)

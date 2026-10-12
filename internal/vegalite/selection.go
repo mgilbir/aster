@@ -161,7 +161,7 @@ func parseUnitSelection(m *unitModel, selDefs []Value) *omap[*selectionComponent
 	nTimer := 0
 	for _, def := range selDefs {
 		cc.work(modelStep)
-		name := varName(def.Get("name").AsString())
+		name := varNameOf(def.Get("name"))
 		selDef := def.Get("select")
 		var typ string
 		if selDef.IsStr() {
@@ -230,13 +230,12 @@ func parseUnitSelection(m *unitModel, selDefs []Value) *omap[*selectionComponent
 }
 
 func parseSelectionPredicate(m Model, pred Value, dfnode dfNode, datum string) string {
-	var name string
+	var vname string
 	if pred.IsStr() {
-		name = pred.StrValue()
+		vname = varName(pred.StrValue())
 	} else {
-		name = pred.Get("param").AsString()
+		vname = varNameOf(pred.Get("param"))
 	}
-	vname := varName(name)
 	store := stringValue(jsval.Str(vname + storeSuffix))
 	var sel *selectionComponent
 	if m != nil {
@@ -278,9 +277,10 @@ func parseSelectionPredicate(m Model, pred Value, dfnode dfNode, datum string) s
 	return "!" + length + " || " + test
 }
 
-func parseSelectionExtent(m Model, name string, extent Value) string {
+func parseSelectionExtent(m Model, param Value, extent Value) string {
 	cc := m.b().ctx
-	vname := varName(name)
+	name := param.AsString()
+	vname := varNameOf(param)
 	encoding := extent.Get("encoding")
 	field := extent.Get("field")
 	sel, junk := m.b().trySelectionComponent(vname)
@@ -753,7 +753,7 @@ func assembleLayerSelectionMarks(m *layerModel, marks []Value) []Value {
 }
 
 func assembleSelectionScaleDomain(m Model, extent Value, sc *scaleComponent, domain Value) Value {
-	parsedExtent := parseSelectionExtent(m, extent.Get("param").AsString(), extent)
+	parsedExtent := parseSelectionExtent(m, extent.Get("param"), extent)
 	if hasContinuousDomain(sc.get("type").AsString()) && domain.IsArr() && jsGreater(domain.Index(0), domain.Index(1)) {
 		return sig("isValid(" + parsedExtent + ") && reverse(" + parsedExtent + ")")
 	}
@@ -843,21 +843,37 @@ var projectCompiler = selectionCompiler{
 			return names.next(cc, name, suffix)
 		}
 		typ := sel.typ
-		cfg := m.config.Get("selection").Get(typ)
+		// model.config.selection[type]: an invalid type reads undefined,
+		// or a member of Object.prototype ("constructor", "__proto__").
+		cfg := undef
+		if sc := m.config.Get("selection"); sc.IsObj() {
+			cfg = sc.ObjValue().Prop(typ)
+			if cfg.IsUndefined() && typ == "__proto__" {
+				cfg = mkv() // Object.prototype: no keys of its own
+			}
+		}
 		var init Value
 		if !selDef.Get("value").IsUndefined() {
 			init = jsval.Arr(arrayOf(selDef.Get("value")))
 		}
-		var fields, encodings []Value
+		// fields and encodings as upstream reads them: a falsy value is
+		// unspecified, an empty array is not.
+		fieldsV, encodingsV := undef, undef
 		if s := selDef.Get("select"); isObject(s) {
-			if f := s.Get("fields"); f.IsTruthy() {
-				fields = f.Items()
-			}
-			if e := s.Get("encodings"); e.IsTruthy() {
-				encodings = e.Items()
-			}
+			fieldsV, encodingsV = s.Get("fields"), s.Get("encodings")
 		}
-		if fields == nil && encodings == nil && init.IsTruthy() {
+		// cfgEncodings is cfg.encodings: a TypeError when the selection's
+		// type has no config (an invalid type).
+		cfgEncodings := func() Value {
+			if cfg.IsNullish() {
+				throw("Cannot read properties of %s (reading 'encodings')", nullishName(cfg))
+			}
+			return cfg.Get("encodings")
+		}
+		if !fieldsV.IsTruthy() && !encodingsV.IsTruthy() && init.IsTruthy() {
+			// The arrays pushed to are copied once, then grown here.
+			var encList, fieldList []Value
+			encOwned, fieldOwned := false, false
 			for _, initVal := range init.Items() {
 				cc.work(1)
 				if !isObject(initVal) {
@@ -865,21 +881,53 @@ var projectCompiler = selectionCompiler{
 				}
 				for _, key := range keysOf(initVal) {
 					cc.work(1)
-					if isSingleDefUnitChannel(m.ctx, key) {
-						encodings = append(encodings, jsval.Str(key))
-					} else if typ == "interval" {
-						encodings = cfg.Get("encodings").Items()
-					} else {
-						fields = append(fields, jsval.Str(key))
+					switch {
+					case isSingleDefUnitChannel(m.ctx, key):
+						// (encodings || (encodings = [])).push(key)
+						if !encOwned {
+							encList = nil
+							if encodingsV.IsTruthy() {
+								encList = append(encList, listOf(encodingsV, "(encodings || (encodings = []))", "push")...)
+							}
+							encOwned = true
+						}
+						encList = append(encList, jsval.Str(key))
+						encodingsV = jsval.True // set below
+					case typ == "interval":
+						encodingsV, encOwned = cfgEncodings(), false
+					default:
+						// (fields ??= []).push(key)
+						if !fieldOwned {
+							if !fieldsV.IsNullish() {
+								fieldList = append(fieldList, listOf(fieldsV, "(fields ??= [])", "push")...)
+							}
+							fieldOwned = true
+						}
+						fieldList = append(fieldList, jsval.Str(key))
+						fieldsV = jsval.True // set below
 					}
 				}
 			}
-		}
-		if fields == nil && encodings == nil {
-			encodings = cfg.Get("encodings").Items()
-			if cfg.IsObj() && cfg.ObjValue().Has("fields") {
-				fields = cfg.Get("fields").Items()
+			if encOwned {
+				encodingsV = jsval.Arr(encList)
 			}
+			if fieldOwned {
+				fieldsV = jsval.Arr(fieldList)
+			}
+		}
+		if !fieldsV.IsTruthy() && !encodingsV.IsTruthy() {
+			encodingsV = cfgEncodings()
+			if jsIn(cfg, "fields") {
+				fieldsV = cfg.Get("fields")
+			}
+		}
+		// for (const channel of encodings ?? []), and the same of fields.
+		var fields, encodings []Value
+		if !encodingsV.IsNullish() {
+			encodings = iterate(encodingsV, "(encodings ?? [])")
+		}
+		if !fieldsV.IsNullish() {
+			fields = iterate(fieldsV, "(fields ?? [])")
 		}
 		for _, ch := range encodings {
 			cc.work(1)
@@ -1680,8 +1728,12 @@ var legendsCompiler = selectionCompiler{
 		}
 		markName := func(name string) func(Value) Value {
 			return func(s Value) Value {
+				// ds.markname = name: an array keeps it as a property that
+				// JSON drops, and a primitive ignores it.
 				ds := deepClone(m.b().ctx, s)
-				ds.ObjValue().Set("markname", jsval.Str(name))
+				if ds.IsObj() {
+					ds.ObjValue().Set("markname", jsval.Str(name))
+				}
 				return ds
 			}
 		}

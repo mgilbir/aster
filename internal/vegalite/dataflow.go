@@ -231,6 +231,13 @@ func newSourceNode(cc *compileCtx, data Value) *sourceNode {
 	if data.IsNullish() {
 		data = mkv("name", "source")
 	}
+	if cc.v5 && !isObject(data) {
+		// 5.8's isGenerator (data && 'sequence' in data), then isInlineData.
+		if data.IsTruthy() {
+			jsIn(data, "sequence")
+		}
+		jsIn(data, "values")
+	}
 	s := &sourceNode{}
 	s.cc = cc
 	var format *Object

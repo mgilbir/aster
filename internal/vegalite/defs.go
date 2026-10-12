@@ -224,7 +224,15 @@ func normalizeTimeUnit(cc *compileCtx, tu Value) Value {
 			params.Set("unit", tu.Get("unit"))
 		}
 	default:
-		return undef
+		// params is undefined: params.unit is a TypeError.
+		throw("Cannot read properties of undefined (reading 'unit')")
+	}
+	// isUTCTimeUnit(params.unit) calls unit.startsWith.
+	switch u := params.Lookup("unit"); {
+	case u.IsNullish():
+		throw("Cannot read properties of %s (reading 'startsWith')", nullishName(u))
+	case !u.IsStr():
+		throw("t.startsWith is not a function")
 	}
 	if u := params.Lookup("unit"); u.IsStr() && isUTCTimeUnit(u.StrValue()) {
 		params.Set("utc", jsval.True)
@@ -555,4 +563,4 @@ func isText(v Value) bool {
 }
 
 func joinStrings(ss []string, sep string) string { return strings.Join(ss, sep) }
-func upper(s string) string                      { return strings.ToUpper(s) }
+func upper(s string) string                      { return jsUpperCase(s) }

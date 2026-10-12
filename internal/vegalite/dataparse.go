@@ -28,6 +28,9 @@ type dataComponent struct {
 func findSource(cc *compileCtx, data Value, sources []dfNode) *sourceNode {
 	for _, other := range sources {
 		cc.work(1 + int64(data.Get("values").Len()))
+		if data.IsNullish() {
+			throw("Cannot read properties of %s (reading 'name')", nullishName(data)) // data.name
+		}
 		os, ok := other.(*sourceNode)
 		if !ok {
 			continue
@@ -53,6 +56,9 @@ func findSource(cc *compileCtx, data Value, sources []dfNode) *sourceNode {
 		otherMesh := otherData.Get("format").Get("mesh")
 		if (formatMesh.IsTruthy() || otherMesh.IsTruthy()) && !strictEq(formatMesh, otherMesh) {
 			continue
+		}
+		if cc.v5 {
+			jsIn(data, "values") // 5.8's isInlineData
 		}
 		switch {
 		case isInlineData(data) && isInlineData(otherData):

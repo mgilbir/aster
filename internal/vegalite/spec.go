@@ -16,7 +16,11 @@ func isHConcatSpec(s Value) bool { return hasProperty(s, "hconcat") }
 func isAnyConcatSpec(s Value) bool {
 	return isVConcatSpec(s) || isHConcatSpec(s) || isConcatSpec(s)
 }
-func isLayerRepeatSpec(s Value) bool {
+func isLayerRepeatSpec(cc *compileCtx, s Value) bool {
+	if cc.v5 {
+		// 5.8: spec.repeat['layer'] is truthy.
+		return !s.Get("repeat").IsArr() && s.Get("repeat").Get("layer").IsTruthy()
+	}
 	return !s.Get("repeat").IsArr() && hasProperty(s.Get("repeat"), "layer")
 }
 func isFacetMapping(f Value) bool { return hasProperty(f, "row") || hasProperty(f, "column") }
@@ -33,10 +37,17 @@ func isSelectionParameter(p Value) bool { return p.IsObj() && p.Get("select").Is
 // selection parameters are compiled elsewhere.
 func assembleParameterSignals(cc *compileCtx, params Value) []Value {
 	var signals []Value
-	for _, p := range params.Items() {
+	var list []Value
+	if params.IsTruthy() {
+		list = iterate(params, "params || []")
+	}
+	for _, p := range list {
 		cc.work(1)
 		if isSelectionParameter(p) {
 			continue
+		}
+		if p.IsNullish() {
+			throw("Cannot destructure property 'expr' of 'param' as it is %s.", nullishName(p))
 		}
 		expr, bind := p.Get("expr"), p.Get("bind")
 		rest := omit(p, "expr", "bind")

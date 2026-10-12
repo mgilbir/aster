@@ -5,6 +5,10 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
+
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 
 	"github.com/mgilbir/aster/internal/jsval"
 )
@@ -511,11 +515,26 @@ func varName(s string) string {
 	return out
 }
 
+// titleCase is upstream's titleCase, s.charAt(0).toUpperCase() + s.substr(1):
+// the first UTF-16 unit, upper-cased with JavaScript's full case mapping
+// (ß becomes SS). A first character outside the BMP is a lone surrogate to
+// charAt, which has no upper case, so the string is unchanged.
 func titleCase(s string) string {
-	if s == "" {
+	r, n := utf8.DecodeRuneInString(s)
+	if n == 0 || r >= 0x10000 {
 		return s
 	}
-	return strings.ToUpper(s[:1]) + s[1:]
+	return jsUpperCase(s[:n]) + s[n:]
+}
+
+// jsUpperCase is String.prototype.toUpperCase: full Unicode case mapping.
+func jsUpperCase(s string) string {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= utf8.RuneSelf {
+			return cases.Upper(language.Und).String(s)
+		}
+	}
+	return strings.ToUpper(s)
 }
 
 // appendVals is Array.prototype.concat over Value slices.
@@ -756,4 +775,16 @@ func jsGreater(a, b Value) bool {
 		return len(x) > len(y)
 	}
 	return jsval.ToNumber(a) > jsval.ToNumber(b)
+}
+
+// jsIndexOrGet is v[key] for an object or an array (whose keys are indices).
+func jsIndexOrGet(v Value, key string) Value {
+	if v.IsArr() {
+		i, err := strconv.Atoi(key)
+		if err != nil {
+			return undef
+		}
+		return v.Index(i)
+	}
+	return v.Get(key)
 }

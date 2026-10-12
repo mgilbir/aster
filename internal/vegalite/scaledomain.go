@@ -332,6 +332,10 @@ func domainSort(u *unitModel, channel, scaleType string) Value {
 	case isSortByEncoding(sort):
 		encoding, order := sort.Get("encoding"), sort.Get("order")
 		fieldDefToSortBy := u.fieldDef(encoding.AsString())
+		if fieldDefToSortBy.IsNullish() {
+			// const {aggregate, field} = fieldDefToSortBy
+			throw("Cannot destructure property 'aggregate' of 'fieldDefToSortBy' as it is %s.", nullishName(fieldDefToSortBy))
+		}
 		aggregate, field := fieldDefToSortBy.Get("aggregate"), fieldDefToSortBy.Get("field")
 		isStacked := stack != nil && !stackDimensions.has(field.AsString())
 		if isArgminDef(aggregate) || isArgmaxDef(aggregate) {
@@ -514,6 +518,9 @@ func assembleDomain(m Model, channel string) Value {
 	var domains []Value
 	for _, d := range sc.get("domains").Items() {
 		cc.work(1)
+		if cc.v5 && !d.IsArr() {
+			jsIn(d, "field") // 5.8's isDataRefDomain
+		}
 		if isDataRefDomain(d) {
 			d.ObjValue().Set("data", jsval.Str(m.b().lookupDataSource(d.Get("data").AsString())))
 		}

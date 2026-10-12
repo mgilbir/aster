@@ -206,7 +206,9 @@ func parseNonUnitLegend(m Model) *omap[*legendComponent] {
 		parseLegend(child)
 		cl := child.b().comp.legends
 		for _, channel := range cl.keyList() {
-			resolve.legend[channel] = parseGuideResolve(m.b().comp.resolve, channel)
+			v := parseGuideResolve(m.b().comp.resolve, channel)
+			resolve.write(resolveLegend, channel)
+			resolve.legend[channel] = v
 			if resolve.legend[channel] == "shared" {
 				cur, _ := legends.get(channel)
 				childLegend, _ := cl.get(channel)
