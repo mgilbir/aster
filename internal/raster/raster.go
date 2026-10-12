@@ -32,8 +32,10 @@
 //
 // Not implemented: CSS filter functions (blur(), drop-shadow(), ...), feImage,
 // feTile, feMorphology, feConvolveMatrix, feDisplacementMap, feTurbulence and
-// the lighting filters, textPath, context-fill/stroke, external
-// resources, SVG images, and the writing-mode / vertical text.
+// the lighting filters, textPath, context-fill/stroke, external style
+// sheets and references into other documents (an <image> fetches its bytes
+// through Options.Images; one that is itself SVG is not drawn), and the
+// writing-mode / vertical text.
 //
 // The input is untrusted. Element count, nesting, canvas size, <use>
 // expansion, layer depth, embedded image size, style sheet size and matching

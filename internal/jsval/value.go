@@ -138,27 +138,6 @@ type (
 	}
 )
 
-// ArrSlab hands out n equally sized arrays from two allocations in all, for
-// decoders that produce one small array per point.
-type ArrSlab struct {
-	boxes []arrayBox
-	vals  []Value
-	dim   int
-}
-
-// NewArrSlab prepares n arrays of dim elements each.
-func NewArrSlab(n, dim int) *ArrSlab {
-	return &ArrSlab{boxes: make([]arrayBox, n), vals: make([]Value, n*dim), dim: dim}
-}
-
-// Next returns the next array and its element slice, to be filled in.
-func (s *ArrSlab) Next() (Value, []Value) {
-	b := &s.boxes[0]
-	b.items = s.vals[:s.dim:s.dim]
-	s.boxes, s.vals = s.boxes[1:], s.vals[s.dim:]
-	return ref(KindArr, unsafe.Pointer(b)), b.items
-}
-
 // MakeArr makes an array of n undefined elements and returns it with its
 // element slice, to be filled in before the array is shared.
 func MakeArr(n int) (Value, []Value) {

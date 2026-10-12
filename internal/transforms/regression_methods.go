@@ -289,14 +289,6 @@ func FitQuad(data []jsval.Value, x, y Accessor) RegressionModel {
 	}
 }
 
-// FitPoly fits a polynomial of the given order by solving the normal
-// equations with Gaussian elimination on mean-centred data. Orders 0, 1 and 2
-// use the constant, linear and quad fits. Coef is ascending in power.
-func FitPoly(data []jsval.Value, x, y Accessor, order float64) RegressionModel {
-	m, _ := fitPoly(context.Background(), data, x, y, order)
-	return m
-}
-
 func fitPoly(ctx context.Context, data []jsval.Value, x, y Accessor, order float64) (RegressionModel, error) {
 	switch order {
 	case 0:

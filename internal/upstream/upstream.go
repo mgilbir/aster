@@ -400,9 +400,6 @@ func (r *Replay) indexOf(c *Call) int {
 // Skip counts a vector the replay does not run, with the reason; Done reports them.
 func (r *Replay) Skip(reason string) { r.skipped[reason]++ }
 
-// Replayed is the number of vectors compared so far.
-func (r *Replay) Replayed() int { return r.replayed }
-
 // Done asserts the floor and the known divergences, and logs a summary. floor is the least number of
 // vectors this replay must have compared.
 func (r *Replay) Done(floor int) {

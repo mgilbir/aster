@@ -140,9 +140,6 @@ func AppendRgb(dst []byte, c RGB) []byte {
 // RGB is the rgb space; R, G, B are nominally 0..255.
 type RGB struct{ R, G, B, Opacity float64 }
 
-// RGBOf is d3.rgb(r, g, b) with opacity 1.
-func RGBOf(r, g, b float64) RGB { return RGB{r, g, b, 1} }
-
 // NaNRGB is what d3.rgb returns for an unparseable string (`new Rgb` with no
 // arguments): every channel, including opacity, is NaN.
 func NaNRGB() RGB { return RGB{nan, nan, nan, nan} }

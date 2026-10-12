@@ -280,15 +280,6 @@ func (m *Simulation) SetForce(i int, f Force) error {
 	return impl.initialize(m.s)
 }
 
-// Reinitialize hands the force at index i back to the simulation, which
-// initializes it again so it reads its parameters anew.
-func (m *Simulation) Reinitialize(i int) error {
-	if i >= len(m.s.forces) {
-		return nil
-	}
-	return m.s.forces[i].initialize(m.s)
-}
-
 // Trim removes the forces from index n on.
 func (m *Simulation) Trim(n int) {
 	if n < len(m.s.forces) {

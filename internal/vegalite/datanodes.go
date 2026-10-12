@@ -13,13 +13,10 @@ type fieldDefModel interface {
 	Model
 	forEachFieldDef(f func(fd Value, channel string))
 	fieldDefOf(channel string) Value
-	channelHasFieldOf(channel string) bool
 }
 
 func (u *unitModel) fieldDefOf(channel string) Value  { return u.fieldDef(channel) }
-func (u *unitModel) channelHasFieldOf(c string) bool  { return u.channelHasField(c) }
 func (f *facetModel) fieldDefOf(channel string) Value { return f.fieldDef(channel) }
-func (f *facetModel) channelHasFieldOf(c string) bool { return f.channelHasField(c) }
 
 // reduceFieldDef folds over every field def in the mapping.
 func reduceFieldDef[T any](m fieldDefModel, f func(acc T, fd Value, channel string) T, init T) T {

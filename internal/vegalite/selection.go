@@ -1379,12 +1379,6 @@ var intervalCompiler = selectionCompiler{
 			yvname = y.visSignal
 		}
 		sizeSg := func(layout string) string { return signalOf(m.getSizeSignalRef(layout)) }
-		pick := func(v, d string) string {
-			if v != "" {
-				return v
-			}
-			return d
-		}
 		xs, ys := "0", "0"
 		if xvname != "" {
 			xs = xvname + "[0]"
@@ -1399,7 +1393,6 @@ var intervalCompiler = selectionCompiler{
 		if yvname != "" {
 			ye = yvname + "[1]"
 		}
-		_ = pick
 		bbox := "[[" + xs + ", " + ys + "],[" + xe + ", " + ye + "]]"
 		hasInit := init.IsTruthy()
 		if hasInit {

@@ -74,7 +74,9 @@ type Program struct {
 func Compile(src string) (*Program, error) { return CompileContext(context.Background(), src) }
 
 // CompileContext is Compile charging the programs of the expression's regular
-// expression literals to the budget.Ledger in ctx (see ParseContext).
+// expression literals to the budget.Ledger in ctx, as each is compiled: a
+// literal past what the ledger can pay for is a SyntaxError that wraps
+// budget.ErrLimit.
 func CompileContext(ctx context.Context, src string) (*Program, error) {
 	ast, err := parse(src, budget.LedgerFrom(ctx))
 	if err != nil {

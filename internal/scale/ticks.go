@@ -190,10 +190,6 @@ func quantileSorted(values []float64, p float64) (float64, bool) {
 	return v0 + float64((v1-v0)*(i-float64(i0))), true
 }
 
-// QuantileSorted exposes quantileSorted for other packages (vega-statistics
-// style callers need d3.quantileSorted).
-func QuantileSorted(values []float64, p float64) (float64, bool) { return quantileSorted(values, p) }
-
 // pow10n is Math.pow(10, p) as V8 computes it: not the correctly rounded
 // power for every integral exponent (68 of them differ), and d3's ticks use
 // exactly what it returns.

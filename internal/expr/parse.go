@@ -1,7 +1,6 @@
 package expr
 
 import (
-	"context"
 	"fmt"
 	"math/big"
 	"strconv"
@@ -99,13 +98,6 @@ type parser struct {
 // delete, assignment and the comma operator, which are rejected. `this` and all
 // reserved words other than `if` are rejected.
 func Parse(src string) (n *Node, err error) { return parse(src, nil) }
-
-// ParseContext is Parse charging the programs of the regular expression
-// literals to the budget.Ledger in ctx, as each is compiled: a literal past
-// what the ledger can pay for is a SyntaxError that wraps budget.ErrLimit.
-func ParseContext(ctx context.Context, src string) (*Node, error) {
-	return parse(src, budget.LedgerFrom(ctx))
-}
 
 func parse(src string, led *budget.Ledger) (n *Node, err error) {
 	if len(src) > MaxLength {

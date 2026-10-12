@@ -53,9 +53,6 @@ func fnMin(name string, min int, f builtinFn) { def(name, &funcDef{fn: f, min: m
 
 func lookupFunc(name string) *funcDef { return funcTable[name] }
 
-// HasFunction reports whether name is in the expression function table.
-func HasFunction(name string) bool { return funcTable[name] != nil }
-
 func arg(args []jsval.Value, i int) jsval.Value {
 	if i < len(args) {
 		return args[i]

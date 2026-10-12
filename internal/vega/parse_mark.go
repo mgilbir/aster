@@ -236,7 +236,6 @@ func parseMark(spec jsval.Value, scope *Scope) {
 	var boundRef P = bound
 
 	if group {
-		var ops []*entry
 		if nested {
 			scope.operators = scope.operators[:len(scope.operators)-1]
 			if layoutEntry != nil {
@@ -261,7 +260,6 @@ func parseMark(spec jsval.Value, scope *Scope) {
 			scope.depth--
 		}
 		scope.popState()
-		_ = ops
 		if nested {
 			if layoutEntry != nil {
 				scope.operators = append(scope.operators, layoutEntry)

@@ -258,9 +258,3 @@ func (g *Graticule) Outline() (jsval.Value, error) {
 	}
 	return jsval.Obj(jsval.ObjectOf("type", jsval.Str("Polygon"), "coordinates", jsval.ArrOf(lineValue(ring)))), nil
 }
-
-// Graticule10 is d3.geoGraticule10(): the default 10-degree graticule.
-func Graticule10() jsval.Value {
-	v, _ := NewGraticule().Lines()
-	return v
-}

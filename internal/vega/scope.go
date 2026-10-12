@@ -318,14 +318,13 @@ func (d *dataScope) countsRef(scope *Scope, field jsval.Value, sort jsval.Value)
 
 func addSortField(scope *Scope, p *paramList, sort jsval.Value) {
 	as := aggrField(sort.Get("op"), sort.Get("field"))
-	if ops, ok := p.get("ops").([]P); ok {
+	if _, ok := p.get("ops").([]P); ok {
 		names, _ := p.get("as").([]P)
 		for _, n := range names {
 			if s, ok := n.(string); ok && s == as {
 				return
 			}
 		}
-		_ = ops
 	} else {
 		p.set("ops", []P{"count"})
 		p.set("fields", []P{nil})

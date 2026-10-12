@@ -48,11 +48,11 @@ func cliMain(args []string, stderr io.Writer) int {
 	if errors.As(err, &ue) && ue.printed {
 		return 2 // the flag package printed it, and the usage
 	}
-	// Library errors are already namespaced ("aster:" / "aster/runtime:");
-	// only add the program prefix to errors that aren't (flag values, file
-	// I/O) so we don't print "aster: aster: ...".
+	// The library's errors already begin "aster: "; only add the program
+	// prefix to errors that don't (flag values, file I/O), so as not to
+	// print "aster: aster: ...".
 	msg := err.Error()
-	if strings.HasPrefix(msg, "aster") {
+	if strings.HasPrefix(msg, "aster: ") {
 		_, _ = fmt.Fprintln(stderr, msg)
 	} else {
 		_, _ = fmt.Fprintf(stderr, "aster: %s\n", msg)

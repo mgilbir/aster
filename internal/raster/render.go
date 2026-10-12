@@ -1427,13 +1427,11 @@ func (r *renderer) serverPaint(p paint, opacity float64, st *state, bbox func() 
 		unitsBBox = false
 	}
 	m := st.ctm
-	var bb rect
 	if unitsBBox {
 		b, good := bbox()
 		if !good || b.w() <= 0 || b.h() <= 0 {
 			return paintSrc{}, false, true
 		}
-		bb = b
 		m = m.mul(matrix{b.w(), 0, 0, b.h(), b.x0, b.y0})
 	}
 	if v, has := r.gradAttr(n, aGradientTransform); has {
@@ -1536,6 +1534,5 @@ func (r *renderer) serverPaint(p paint, opacity float64, st *state, bbox func() 
 			g.fy = g.cy + (g.fy-g.cy)*k
 		}
 	}
-	_ = bb
 	return paintSrc{sh: g}, true, true
 }

@@ -22,6 +22,12 @@
 // untyped ones, 30*radians would be evaluated exactly instead of as
 // 30 * double(pi/180), a different double.
 //
+// GeoCircle, GeoContains, GeoDistance, GeoInterpolate, GeoLength and
+// GeoRotation are not called by the engine: Vega exposes no expression for
+// them. They complete the d3-geo port so that d3-geo's own test suite replays
+// against it (upstream_test.go), which tests, against upstream, the rotation,
+// circle and length streams the projections and clipping share with them.
+//
 // Nothing is safe for concurrent use: a Projection (and its Path) carries the
 // mutable state of d3's closures.
 package geo

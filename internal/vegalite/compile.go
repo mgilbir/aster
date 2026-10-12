@@ -105,28 +105,6 @@ func Compile(spec jsval.Value, opts Options) (out jsval.Value, err error) {
 	return out, nil
 }
 
-// CompileJSON compiles a specification (and optional config) given as JSON text
-// and returns the Vega specification as JSON text.
-func CompileJSON(specJSON []byte, configJSON string) ([]byte, error) {
-	spec, err := jsval.ParseJSON(specJSON)
-	if err != nil {
-		return nil, err
-	}
-	var opts Options
-	if configJSON != "" {
-		cfg, err := jsval.ParseJSONString(configJSON)
-		if err != nil {
-			return nil, fmt.Errorf("vegalite: invalid config: %w", err)
-		}
-		opts.Config = cfg
-	}
-	out, err := Compile(spec, opts)
-	if err != nil {
-		return nil, err
-	}
-	return jsval.AppendJSON(nil, out), nil
-}
-
 func compileSpec(cc *compileCtx, inputSpec jsval.Value, opts Options) jsval.Value {
 	config := initConfig(cc, jsval.Obj(mergeConfig(opts.Config, inputSpec.Get("config"))))
 	spec := normalize(cc, inputSpec, config)

@@ -281,26 +281,6 @@ func ReadsUndefined(f Field) error {
 	return fmt.Errorf("Cannot read properties of undefined (reading '%s')", prop)
 }
 
-// NumExtent is Extent for numeric fields: the min and max of the finite-order
-// numbers f yields (NaN skipped). ok is false when there are none.
-func NumExtent(n int, f func(i int) float64) (lo, hi float64, ok bool) {
-	lo, hi = math.Inf(1), math.Inf(-1)
-	for i := 0; i < n; i++ {
-		v := f(i)
-		if v != v {
-			continue
-		}
-		if v < lo {
-			lo = v
-		}
-		if v > hi {
-			hi = v
-		}
-		ok = true
-	}
-	return lo, hi, ok
-}
-
 // OrderedKeys returns keys in JavaScript's own-property enumeration order:
 // canonical array-index keys ascending first, then the rest in insertion order.
 // Vega builds several lookup tables as plain objects and iterates them, so
