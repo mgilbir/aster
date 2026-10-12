@@ -136,7 +136,7 @@ func (p *Program) size() int64 {
 	p.ast.Walk(func(nd *Node) bool {
 		n += nodeBytes + int64(len(nd.Value.StrValue()))
 		if nd.Regex != nil {
-			n += patternBytes(nd.Regex)
+			n += nd.Regex.Bytes()
 		}
 		return false
 	})
