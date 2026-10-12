@@ -294,7 +294,7 @@ func TestColourGlyphFormsInPageSpace(t *testing.T) {
 // found: the page must stay balanced and nothing may panic.
 func TestColourPainterUnbalanced(t *testing.T) {
 	newPainter := func() (*renderer, *pdfPainter) {
-		r := &renderer{w: newContentWriter(nil), images: newImageCatalog(nil, Limits{}.withDefaults()), lim: Limits{}.withDefaults()}
+		r := &renderer{w: newContentWriter(nil), images: newImageCatalog(nil, Limits{}.withDefaults(), nil), lim: Limits{}.withDefaults()}
 		p := &pdfPainter{r: r, upem: 1000, box: shape.Rect{XMax: 1000, YMax: 1000}, m: []Matrix{Identity()}}
 		p.beginGroup()
 		return r, p
@@ -406,7 +406,7 @@ func TestColourRadialFromZero(t *testing.T) {
 // under a soft mask of the clip's region, the outside's inverted and its
 // BBox the page, as Quartz needs.
 func TestColourCompositeOpenClip(t *testing.T) {
-	r := &renderer{w: newContentWriter(nil), images: newImageCatalog(nil, Limits{}.withDefaults()), lim: Limits{}.withDefaults(), pageW: 100, pageH: 100}
+	r := &renderer{w: newContentWriter(nil), images: newImageCatalog(nil, Limits{}.withDefaults(), nil), lim: Limits{}.withDefaults(), pageW: 100, pageH: 100}
 	r.w.concat(Matrix{A: 1, D: -1, F: 100})
 	r.w.save()
 	r.w.concat(Matrix{A: 0.1, D: -0.1, F: 90})

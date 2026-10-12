@@ -10,6 +10,7 @@ What changed between versions, for users of the library and the CLI. Breaking ch
 
 - A hostile font no longer amplifies memory when a PDF embeds it: a table directory naming one table hundreds of times (a 418 KB font gave a 132 MB font program) is read as every reader reads it, the first record of a tag being the table, and a font whose tables overlap, or whose glyphs overlap in `glyf` (a 140 KB font gave `SubsetFont` a 216 MB subset), is not cut or subset: its text is drawn as outlines, and `SubsetFont` returns an error saying why.
 - `SVGToPDF` joins a `<text>`'s character data in linear time: text in many CDATA sections took a minute for 6 MB.
+- The PDF writer decodes each distinct image once per conversion (by its href, and by its bytes when two hrefs carry the same image), writes it once however many marks draw it, and charges the pixels it decodes and the planes and streams made from them to the call's ledger before making them: a 4096² PNG drawn by 8 rows reached about 140 MiB under `WithMemoryLimit(64 MiB)` with no error, and now fails with `ErrLimit`. An 8-bit RGBA image is no longer copied before it is written.
 - The PDF writer's per-render caches (glyph outlines, painted colour glyphs, forms, ExtGStates) and its content stream are bounded by bytes or charged to the call's ledger, and a font program it cuts out of a collection or a system font is charged before it is made and kept within 64 MiB per converter. A converter with `WithSystemFonts` keeps at most 64 system font faces loaded, however many families specifications name.
 
 ### Fixed

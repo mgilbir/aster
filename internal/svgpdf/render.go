@@ -257,7 +257,7 @@ func render(root *element, shaper TextShaper, fetched map[string][]byte, opts Op
 		r.ledger = budget.LedgerFrom(opts.Context)
 	}
 	r.w = newContentWriter(r.ledger)
-	r.images = newImageCatalog(fetched, r.lim)
+	r.images = newImageCatalog(fetched, r.lim, r.ledger)
 	r.images.onErr = opts.ImageError
 	if opts.Text != TextOutlines && shaper != nil {
 		r.fonts = newFontCatalog(opts.Context, opts.Text, shaper)

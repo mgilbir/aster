@@ -1,6 +1,7 @@
 package svgpdf
 
 import (
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"image"
@@ -8,6 +9,7 @@ import (
 	"image/draw"
 	"strings"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/imageref"
 	pdf0 "github.com/mgilbir/pdf0"
 )
@@ -35,6 +37,12 @@ type imageCatalog struct {
 	byHref  map[string]*pdfImage         // nil: the image cannot be drawn
 	onErr   func(href string, err error) // Options.ImageError
 	uses    []imageUse                   // the XObjects drawn, in first-use order
+	// byData are the images by a digest of their bytes: one drawn under
+	// several hrefs is decoded and written once.
+	byData map[[sha256.Size]byte]*pdfImage
+	// ledger is the call's: an image's pixels and what is made of them are
+	// charged before they are made.
+	ledger *budget.Ledger
 }
 
 // imageUse is one XObject: an image, smoothed or not.
@@ -44,8 +52,8 @@ type imageUse struct {
 	res    string
 }
 
-func newImageCatalog(fetched map[string][]byte, lim Limits) *imageCatalog {
-	return &imageCatalog{lim: lim.imageLimits(), fetched: fetched, byHref: map[string]*pdfImage{}}
+func newImageCatalog(fetched map[string][]byte, lim Limits, ledger *budget.Ledger) *imageCatalog {
+	return &imageCatalog{lim: lim.imageLimits(), fetched: fetched, byHref: map[string]*pdfImage{}, ledger: ledger}
 }
 
 // get returns the image href refers to, or nil when there is none to draw: an
@@ -58,7 +66,7 @@ func (c *imageCatalog) get(href string) (*pdfImage, error) {
 	}
 	img, err := c.load(href)
 	if err != nil {
-		if errors.Is(err, ErrLimit) {
+		if errors.Is(err, budget.ErrLimit) {
 			return nil, err
 		}
 		img = nil
@@ -66,7 +74,7 @@ func (c *imageCatalog) get(href string) (*pdfImage, error) {
 			c.onErr(href, err)
 		}
 	}
-	if img != nil {
+	if img != nil && img.cat == nil {
 		img.cat = c
 	}
 	c.byHref[href] = img
@@ -120,6 +128,46 @@ func (c *imageCatalog) load(href string) (*pdfImage, error) {
 			return nil, err
 		}
 	}
+	key := sha256.Sum256(data)
+	if img, ok := c.byData[key]; ok {
+		return img, nil
+	}
+	img, err := c.decode(data)
+	if err != nil {
+		return nil, err
+	}
+	if c.byData == nil {
+		c.byData = map[[sha256.Size]byte]*pdfImage{}
+	}
+	c.byData[key] = img
+	return img, nil
+}
+
+// decodedBytes is about what decoding an image of the colour model takes, a
+// pixel.
+func decodedBytes(m color.Model) int64 {
+	switch m {
+	case color.GrayModel, color.AlphaModel:
+		return 1
+	case color.Gray16Model, color.Alpha16Model:
+		return 2
+	case color.YCbCrModel:
+		return 3
+	case color.RGBA64Model, color.NRGBA64Model:
+		return 8
+	}
+	if _, ok := m.(color.Palette); ok {
+		return 1
+	}
+	return 4
+}
+
+// decode is the image XObject of an image's bytes. What it makes is
+// charged to the call's ledger before it is made (C7's class): the decoded
+// pixels, their NRGBA copy where the decoder made another kind, the colour
+// and alpha planes, and the compressed streams it keeps; all but these are
+// given back once made.
+func (c *imageCatalog) decode(data []byte) (img *pdfImage, err error) {
 	cfg, format, err := imageref.Config(data, c.lim)
 	if err != nil {
 		return nil, err
@@ -134,30 +182,84 @@ func (c *imageCatalog) load(href string) (*pdfImage, error) {
 		}
 		return &pdfImage{w: cfg.Width, h: cfg.Height, data: data, filter: "DCTDecode", space: space}, nil
 	}
+	px := int64(cfg.Width) * int64(cfg.Height)
+	var held int64
+	charge := func(n int64) error {
+		if err := c.ledger.Alloc(n); err != nil {
+			return err
+		}
+		held += n
+		return nil
+	}
+	defer func() { c.ledger.Free(held) }()
+	if err := charge(px * decodedBytes(cfg.ColorModel)); err != nil {
+		return nil, err
+	}
 	src, err := imageref.Decode(data, c.lim)
 	if err != nil {
 		return nil, err
 	}
-	b := src.Bounds()
-	nrgba := image.NewNRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
-	draw.Draw(nrgba, nrgba.Bounds(), src, b.Min, draw.Src)
-	return encodeNRGBA(nrgba)
+	// The colour and alpha planes, and the streams compressed from them,
+	// which are no larger than the planes but for a few bytes.
+	if err := charge(4*px + 4*px); err != nil {
+		return nil, err
+	}
+	// The planes are read straight from the decoder's pixels where they are
+	// 8-bit RGBA, premultiplied or not (a PNG's usual decoding); any other
+	// kind is first drawn into NRGBA, as it always was.
+	switch m := src.(type) {
+	case *image.NRGBA:
+		img, err = encodePlanes(m.Pix, m.Stride, m.Rect.Dx(), m.Rect.Dy(), false)
+	case *image.RGBA:
+		img, err = encodePlanes(m.Pix, m.Stride, m.Rect.Dx(), m.Rect.Dy(), true)
+	default:
+		if err := charge(4 * px); err != nil {
+			return nil, err
+		}
+		b := src.Bounds()
+		nrgba := image.NewNRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
+		draw.Draw(nrgba, nrgba.Bounds(), src, b.Min, draw.Src)
+		img, err = encodeNRGBA(nrgba)
+	}
+	if err != nil {
+		return nil, err
+	}
+	// The streams stay for the document: charged as kept.
+	kept := int64(len(img.data) + len(img.smask))
+	if err := c.ledger.Alloc(kept); err != nil {
+		return nil, err
+	}
+	return img, nil
 }
 
 // encodeNRGBA is an image XObject of decoded pixels: their colour, and their
 // alpha as a soft mask when they are not all opaque.
 func encodeNRGBA(nrgba *image.NRGBA) (*pdfImage, error) {
-	b := nrgba.Bounds()
-	n := b.Dx() * b.Dy()
+	return encodePlanes(nrgba.Pix, nrgba.Stride, nrgba.Rect.Dx(), nrgba.Rect.Dy(), false)
+}
+
+// encodePlanes is encodeNRGBA of w×h 8-bit RGBA pixels, rows stride bytes
+// apart, premultiplied when premul is set: a translucent premultiplied pixel
+// is converted as draw.Draw converts it to NRGBA (color.NRGBAModel).
+func encodePlanes(pix []byte, stride, w, h int, premul bool) (*pdfImage, error) {
+	n := w * h
 	rgb := make([]byte, 0, 3*n)
 	alpha := make([]byte, 0, n)
 	opaque := true
-	for i := 0; i < len(nrgba.Pix); i += 4 {
-		rgb = append(rgb, nrgba.Pix[i], nrgba.Pix[i+1], nrgba.Pix[i+2])
-		alpha = append(alpha, nrgba.Pix[i+3])
-		opaque = opaque && nrgba.Pix[i+3] == 0xff
+	for y := range h {
+		row := pix[y*stride : y*stride+4*w]
+		for i := 0; i < len(row); i += 4 {
+			r, g, b, a := row[i], row[i+1], row[i+2], row[i+3]
+			if premul && a != 0xff {
+				c := color.NRGBAModel.Convert(color.RGBA{r, g, b, a}).(color.NRGBA)
+				r, g, b = c.R, c.G, c.B
+			}
+			rgb = append(rgb, r, g, b)
+			alpha = append(alpha, a)
+			opaque = opaque && a == 0xff
+		}
 	}
-	img := &pdfImage{w: b.Dx(), h: b.Dy(), filter: "FlateDecode", space: "DeviceRGB"}
+	img := &pdfImage{w: w, h: h, filter: "FlateDecode", space: "DeviceRGB"}
 	var err error
 	if img.data, err = deflate(rgb); err != nil {
 		return nil, err

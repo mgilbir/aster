@@ -183,7 +183,7 @@ func TestPDFiumOpenClipComposites(t *testing.T) {
 		{shape.CompositeSrcAtop, green, blue},
 		{shape.CompositeDestOver, blue, blue},
 	} {
-		r := &renderer{w: newContentWriter(nil), images: newImageCatalog(nil, Limits{}.withDefaults()), lim: Limits{}.withDefaults(), pageW: 100, pageH: 100}
+		r := &renderer{w: newContentWriter(nil), images: newImageCatalog(nil, Limits{}.withDefaults(), nil), lim: Limits{}.withDefaults(), pageW: 100, pageH: 100}
 		r.w.concat(Matrix{A: 1, D: -1, F: 100})
 		r.w.save()
 		r.w.concat(Matrix{A: 0.1, D: -0.1, F: 90})
