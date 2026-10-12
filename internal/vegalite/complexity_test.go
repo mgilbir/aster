@@ -1,12 +1,14 @@
 package vegalite
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -145,5 +147,41 @@ func TestCompileTimeGrowsLinearly(t *testing.T) {
 				t.Errorf("compile time grew ×%.1f for 4× the input (limit ×%d): super-linear", ratio, maxRatio)
 			}
 		})
+	}
+}
+
+// TestViewBudget checks that the views a repeat multiplies are counted
+// before they are built (C15): nested repeats past Options.MaxViews fail
+// with ErrLimit, the same specification within it compiles.
+func TestViewBudget(t *testing.T) {
+	fields := func(n int) Value {
+		items := make([]Value, n)
+		for i := range items {
+			items[i] = jsval.Str(fmt.Sprintf("f%d", i))
+		}
+		return jsval.Arr(items)
+	}
+	nested := func(levels, n int) Value {
+		s := mkv("mark", "point", "encoding", mkv("x", mkv("field", mkv("repeat", "repeat"), "type", "quantitative")))
+		for range levels {
+			s = mkv("repeat", fields(n), "spec", s)
+		}
+		s.ObjValue().Set("data", mkv("values", arr(mkv("f0", 1))))
+		return s
+	}
+	layered := mkv("data", mkv("values", arr(mkv("a", 1))),
+		"repeat", mkv("row", fields(30), "column", fields(30), "layer", fields(1000)),
+		"spec", mkv("mark", "point", "encoding", mkv("x", mkv("field", mkv("repeat", "layer"), "type", "quantitative"))))
+	for name, spec := range map[string]Value{"nested": nested(4, 30), "layer-rows-columns": layered} {
+		_, err := Compile(spec, Options{})
+		if !errors.Is(err, budget.ErrLimit) || !strings.Contains(err.Error(), "views") {
+			t.Errorf("%s: err = %v, want the view limit", name, err)
+		}
+	}
+	if _, err := Compile(nested(2, 30), Options{MaxViews: 1000}); err != nil {
+		t.Errorf("930 views under a limit of 1000: %v", err)
+	}
+	if _, err := Compile(nested(2, 30), Options{MaxViews: 900}); !errors.Is(err, budget.ErrLimit) {
+		t.Errorf("930 views under a limit of 900: err = %v, want ErrLimit", err)
 	}
 }

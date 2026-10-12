@@ -199,7 +199,7 @@ func TestTimeoutCoversLargeVegaLiteSpecs(t *testing.T) {
 		return strings.Join(parts, ",")
 	}
 	for name, spec := range map[string]string{
-		"layers": `{"data":{"values":[{"a":1}]},"layer":[` + items(100000, func(int) string { return `{"mark":"point"}` }) + `]}`,
+		"layers": `{"data":{"values":[{"a":1}]},"layer":[` + items(60000, func(int) string { return `{"mark":"point"}` }) + `]}`,
 		"params": `{"data":{"values":[{"a":1}]},"mark":"point","params":[` + items(100000, func(i int) string { return fmt.Sprintf(`{"name":"p%d","select":"point"}`, i) }) + `]}`,
 	} {
 		t.Run(name, func(t *testing.T) {

@@ -40,6 +40,12 @@ type Options struct {
 	// (budget.LedgerFrom), or polls it when there is none, and Compile
 	// returns the context's error once it is done. Nil means no bound.
 	Context context.Context
+	// MaxViews bounds the views the compilation creates, counted before
+	// normalization builds them: every view of the specification, a
+	// repeat's spec once per repeated value (and per combination of row,
+	// column and layer values). Past it Compile returns an error wrapping
+	// budget.ErrLimit. Zero means DefaultMaxViews.
+	MaxViews int
 }
 
 // panicHook, when set (by tests, before any compilation starts), receives the
@@ -74,7 +80,10 @@ func Compile(spec jsval.Value, opts Options) (out jsval.Value, err error) {
 	if err != nil {
 		return jsval.Undefined, err
 	}
-	cc := &compileCtx{v5: v5, loc: opts.Location, ctx: opts.Context, meter: budget.NewMeter(opts.Context)}
+	cc := &compileCtx{v5: v5, loc: opts.Location, ctx: opts.Context, meter: budget.NewMeter(opts.Context), maxViews: opts.MaxViews}
+	if cc.maxViews <= 0 {
+		cc.maxViews = DefaultMaxViews
+	}
 	if !spec.IsObj() {
 		return jsval.Undefined, compileError{"Invalid spec: a Vega-Lite specification must be an object"}
 	}

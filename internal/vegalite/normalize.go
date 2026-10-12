@@ -134,6 +134,13 @@ func (b *baseMapper) mapRepeat(spec Value, p *normParams) Value {
 
 // normalize returns the normalized spec (with an autosize object when it is not Vega's default).
 func normalize(cc *compileCtx, spec Value, config Value) Value {
+	// Repeat, layer repeat and their nesting multiply views: four nested
+	// repeats of 30 fields are 810,000 views from a 1 KB specification (C15).
+	// The views the specification describes are counted before any is built,
+	// against one budget for the whole compilation.
+	if n, limit := countViews(cc, spec, 0), cc.maxViews; n > float64(limit) {
+		exceeded("specification would create %s views (limit %d)", jsval.JSNumberString(n), limit)
+	}
 	p := &normParams{cc: cc, config: config, sel: &selectionState{}}
 	compat := newSelectionCompatNormalizer()
 	core := newCoreNormalizer(cc)
@@ -638,9 +645,6 @@ func (n *coreNormalizer) mapNonLayerRepeat(spec Value, p *normParams) Value {
 		repeatValues = repeat.Items()
 	} else {
 		repeatValues = single(repeater.Get("repeat"))
-	}
-	if len(repeatValues)*len(rows)*len(cols) > maxRepeatChildren {
-		exceeded("repeat would create %d views (limit %d)", len(repeatValues)*len(rows)*len(cols), maxRepeatChildren)
 	}
 	var concat []Value
 	for _, repeatValue := range repeatValues {
@@ -1229,4 +1233,55 @@ func replaceRepeaterInMapping(cc *compileCtx, mapping, repeater Value) Value {
 		}
 	}
 	return jsval.Obj(out)
+}
+
+// countViews is the number of views the normalization makes of spec: one per
+// view it maps, a repeat's spec once per combination of its row, column,
+// layer and repeat values. Composite marks and path overlays add a few
+// layers per unit on top, a small constant factor. The count saturates (it
+// is a float), and a spec nested past maxDepth counts as one view: the
+// normalizer rejects it.
+func countViews(cc *compileCtx, spec Value, depth int) float64 {
+	cc.work(1)
+	if !spec.IsObj() || depth > maxDepth {
+		return 1
+	}
+	sum := func(list Value) float64 {
+		n := 1.0
+		for _, s := range list.Items() {
+			n += countViews(cc, s, depth+1)
+		}
+		return n
+	}
+	// lenOr is the length of a truthy list, else 1 (an inherited value).
+	lenOr := func(v Value) float64 {
+		if v.IsTruthy() {
+			return float64(v.Len())
+		}
+		return 1
+	}
+	switch {
+	case isFacetSpec(spec):
+		return 1 + countViews(cc, spec.Get("spec"), depth+1)
+	case isRepeatSpec(spec):
+		repeat := spec.Get("repeat")
+		child := countViews(cc, spec.Get("spec"), depth+1)
+		if repeat.IsArr() {
+			return 1 + float64(float64(repeat.Len())*child)
+		}
+		n := lenOr(repeat.Get("row")) * lenOr(repeat.Get("column"))
+		if isLayerRepeatSpec(spec) {
+			n *= 1 + float64(repeat.Get("layer").Len())
+		}
+		return 1 + float64(n*child)
+	case isHConcatSpec(spec):
+		return sum(spec.Get("hconcat"))
+	case isVConcatSpec(spec):
+		return sum(spec.Get("vconcat"))
+	case isConcatSpec(spec):
+		return sum(spec.Get("concat"))
+	case isLayerSpec(spec):
+		return sum(spec.Get("layer"))
+	}
+	return 1
 }

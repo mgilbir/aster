@@ -7,6 +7,7 @@ import (
 	"github.com/mgilbir/aster/internal/raster"
 	"github.com/mgilbir/aster/internal/text"
 	"github.com/mgilbir/aster/internal/vega"
+	"github.com/mgilbir/aster/internal/vegalite"
 )
 
 // callLimits are every bound of one public call. They are derived from
@@ -25,6 +26,9 @@ type callLimits struct {
 	svgBytes int
 	// specBytes bounds the specification's JSON (0: no bound).
 	specBytes uint64
+	// vlViews bounds the views a Vega-Lite compilation creates (repeats
+	// multiply them).
+	vlViews int
 	// ledger bounds the memory charged to the call's ledger: what the
 	// specification makes the engine allocate that no other bound counts.
 	ledger budget.LedgerLimits
@@ -45,6 +49,11 @@ const (
 // what a counted row stands for, so heavier rows are charged the difference.
 const bytesPerRow, bytesPerItem, bytesPerCell, bytesPerOp = 512, 1536, 16384, 1536
 
+// bytesPerView turns a byte limit into the Vega-Lite views a compilation may
+// create: a plain unit view's compiled Vega retains about 24 KiB and the
+// compilation allocates ten times that as it goes.
+const bytesPerView = 32768
+
 // specBytesDivisor sets the specification a memory limit admits: a sixteenth of
 // the limit in bytes. The rows and items budgets charge what a specification
 // makes the engine build, and none of them sees the text itself, which is all
@@ -56,7 +65,7 @@ const specBytesDivisor = 16
 // the defaults). A bound derived from n replaces its default, so a large n
 // raises it as a small one lowers it.
 func deriveLimits(n uint64) callLimits {
-	l := callLimits{svgBytes: defaultSVGBytes, ledger: budget.LedgerLimits{MaxBytes: defaultLedgerBytes}}
+	l := callLimits{svgBytes: defaultSVGBytes, ledger: budget.LedgerLimits{MaxBytes: defaultLedgerBytes}, vlViews: vegalite.DefaultMaxViews}
 	if n == 0 {
 		return l
 	}
@@ -89,6 +98,7 @@ func deriveLimits(n uint64) callLimits {
 	l.svgBytes = toInt(min(max(n/4, 1<<20), 1<<40))
 	l.specBytes = max(n/specBytesDivisor, 1<<20)
 	l.ledger.MaxBytes = toInt64(max(n, 1<<20))
+	l.vlViews = toInt(max(n/bytesPerView, 64))
 	return l
 }
 

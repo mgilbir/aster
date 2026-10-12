@@ -85,7 +85,7 @@ func deadlineSpecs() map[string]func() Value {
 				"params", list(100000, func(i int) Value { return mkv("name", fmt.Sprintf("p%d", i), "select", "point") }))
 		},
 		"layers": func() Value {
-			return mkv("data", data(), "layer", list(100000, func(int) Value { return mkv("mark", "point") }))
+			return mkv("data", data(), "layer", list(60000, func(int) Value { return mkv("mark", "point") }))
 		},
 		"transforms": func() Value {
 			return mkv("data", data(), "mark", "point", "encoding", enc(),

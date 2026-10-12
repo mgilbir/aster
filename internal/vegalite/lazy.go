@@ -39,6 +39,8 @@ type compileCtx struct {
 	sigIdx signalIndex
 	// transforms counts the data transforms parsed so far (see maxTransforms).
 	transforms int
+	// maxViews is Options.MaxViews (see countViews).
+	maxViews int
 	// titleMerges are the title field-def lists merged so far, by their
 	// first element (see mergeTitleFieldDefs).
 	titleMerges map[*Value]*titleMerge

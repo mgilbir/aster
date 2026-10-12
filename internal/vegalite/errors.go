@@ -44,6 +44,7 @@ const maxDepth = 64
 // walk to a stack of a few MB.
 const maxTransforms = 10000
 
-// maxRepeatChildren bounds the views a repeat may expand into (the product of
-// its row, column and repeat lists); real charts use a few dozen.
-const maxRepeatChildren = 10000
+// DefaultMaxViews is the views a compilation may create when
+// Options.MaxViews is 0: what the default memory limit (2 GiB) admits at
+// about 32 KiB a compiled view (24 KiB of a plain unit's output is retained).
+const DefaultMaxViews = 65536

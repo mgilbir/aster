@@ -44,6 +44,7 @@
 (*internal/vegalite.modelBase).getScaleComponent	# walks up the parent chain of a model, at most maxDepth = 64 levels (buildModel, newLayerModel in internal/vegalite/layer.go)
 (*internal/vegalite.modelBase).trySelectionComponent	# walks up the parent chain of a model, at most maxDepth = 64 levels (buildModel, newLayerModel in internal/vegalite/layer.go)
 (internal/geo.decoder).geometry	# TopoJSON GeometryCollection nesting: depth parameter, errTopology past maxTopoDepth = 256 (internal/geo/topojson.go: decoder.geometry); shape topojson-collections
+internal/vegalite.countViews internal/vegalite.countViews$lit1	# walks the input spec's composition nesting before normalization; stops at maxDepth = 64 (counts one view below it), and the JSON parse bounds the input's depth at 256 (internal/vegalite/normalize.go: countViews)
 (internal/jsval.Value).AsDouble	# a chain of one-element arrays is followed in a loop (internal/jsval/value.go: AsDouble); the recursive call is made only on a non-array, so it recurses once
 (internal/jsval.Value).asString	# array nested at run time: depth parameter, writes nothing past jsval.MaxValueDepth = 1024 (internal/jsval/value.go: asString); test internal/jsval/depth_test.go
 internal/format.tickSpec	# fixed depth: recurses only when 0.5 <= count < 2 and doubles count, so at most twice (internal/format/ticks.go: tickSpec)

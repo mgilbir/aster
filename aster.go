@@ -666,7 +666,7 @@ func (c *Converter) compileVegaLite(ctx context.Context, spec []byte) (jsval.Val
 		return jsval.Undefined, fmt.Errorf("aster: parsing Vega-Lite spec: %w", err)
 	}
 	vg, err := timed(ctx, "compile", func() (jsval.Value, error) {
-		return vegalite.Compile(v, vegalite.Options{Config: c.theme, Location: c.location, Version: c.vl, Context: ctx})
+		return vegalite.Compile(v, vegalite.Options{Config: c.theme, Location: c.location, Version: c.vl, Context: ctx, MaxViews: c.lim.vlViews})
 	})
 	if err != nil {
 		return jsval.Undefined, c.stageErr(ctx, "compiling Vega-Lite", err)

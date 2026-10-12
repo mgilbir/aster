@@ -164,5 +164,6 @@ func LimitsForTest(n uint64) map[string]int64 {
 		"rasterizer path points held at once (PNG)":     int64(r.MaxPathSegments),
 		"pixels of one image (SVG, PNG and PDF output)": int64((&Converter{lim: c}).imagePixels()),
 		"memory charged to the call's ledger":           c.ledger.MaxBytes,
+		"Vega-Lite views":                               int64(c.vlViews),
 	}
 }

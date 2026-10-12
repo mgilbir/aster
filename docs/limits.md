@@ -40,6 +40,7 @@ It is not a heap cap: Go has none per call. It is converted into the budgets bel
 | rasterizer path points held at once (PNG) | 128 Mi | n/16, at least 64 Ki |
 | pixels of one image (SVG, PNG and PDF output) | 64 Mi | n/16, between 64 Ki and 64 Mi |
 | memory charged to the call's ledger | 2 GiB | n, at least 1 MiB |
+| Vega-Lite views | 65,536 | n/32768, at least 64 |
 <!-- limits:end -->
 
 The rasterizer's canvas memory is every pixel buffer alive at once: the canvas, offscreen layers (opacity groups, masks, filters), clip coverage maps (one per clipped element, held while it draws) and every result and scratch buffer of a filter chain. Its path points are the geometry the elements being drawn hold: parsed path data, flattened polylines, stroke outlines and scan-converter edges (an edge counts as five points); geometry wholly outside the canvas or clip is not built.
@@ -51,6 +52,8 @@ The last row is the ledger's byte meter ([ADR 0010](adr/0010-bounds-charged-wher
 The transforms charge the ledger for what they hold that is not rows: the rasters of `kde2d` and density `contour` (two float32 and a float64 raster a group, and the grid each group outputs), contour rings and their output geometry, the triangulation of `voronoi`, the running state of an `aggregate` or `pivot` cell for each measure, the `values` arrays of a `window`, the bitmaps and masks of `label`, and the board of `wordcloud`. A `density` reserves its samples as rows before drawing them, and `countpattern` its distinct tokens. Where upstream's algorithm would not end, aster refuses the input with `ErrLimit` ([ADR 0011](adr/0011-faithful-output-free-algorithm.md)): a `voronoi` whose coordinates leave the triangulation's links cycling, and a `pack` whose front chain does not close.
 
 The ledger also meters the call's *work*: a loop whose trip count the input controls charges each step, and charging polls the call's context, so `WithTimeout` and `Close` stop that loop, wherever it is. Work is counted, not capped: time is bounded by `WithTimeout`.
+
+Vega-Lite views are the views a Vega-Lite specification describes, counted before the compiler builds any: every unit, layer, concatenation and facet, and a repeat's spec once per repeated value (per combination of its `row`, `column` and `layer` values, nested repeats multiplying). A 1 KB specification of four nested repeats describes 810,000 views; past the bound it fails with `ErrLimit` naming the count.
 
 On 32-bit platforms a count or size past what an `int` holds saturates at 2 GiB − 1 rather than wrapping; that only matters for limits above 8 GiB.
 

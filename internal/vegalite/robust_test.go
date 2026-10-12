@@ -1,6 +1,7 @@
 package vegalite
 
 import (
+	"errors"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -64,14 +66,15 @@ func TestExpressionNestingIsBounded(t *testing.T) {
 }
 
 func TestRepeatIsBounded(t *testing.T) {
-	vals := make([]any, 200)
+	// 300 × 300 views is past DefaultMaxViews.
+	vals := make([]any, 300)
 	for i := range vals {
 		vals[i] = "f"
 	}
 	spec := mkv("repeat", mkv("row", vals, "column", vals), "spec", mkv("mark", "point",
 		"encoding", mkv("x", mkv("field", mkv("repeat", "row"), "type", "quantitative"))))
-	if _, err := Compile(spec, Options{}); err == nil {
-		t.Fatal("expected a repeat limit error")
+	if _, err := Compile(spec, Options{}); !errors.Is(err, budget.ErrLimit) {
+		t.Fatalf("err = %v, want the view limit", err)
 	}
 }
 
