@@ -109,7 +109,7 @@ func (ci *callImages) size(ctx context.Context, u string) (w, h float64, ok bool
 	if ci == nil {
 		return 0, 0, false
 	}
-	lim := imageref.Limits{MaxBytes: maxImageBytes, MaxPixels: maxImagePixels, Err: ErrLimit}
+	lim := imageref.Limits{MaxBytes: maxImageBytes, MaxPixels: ci.c.imagePixels(), Err: ErrLimit}
 	var data []byte
 	var err error
 	if imageref.IsData(u) {
@@ -127,4 +127,15 @@ func (ci *callImages) size(ctx context.Context, u string) (w, h float64, ok bool
 		return 0, 0, false
 	}
 	return float64(cfg.Width), float64(cfg.Height), true
+}
+
+// imagePixels bounds the pixels of one image every stage decodes (the SVG
+// writer reading a size, PNG and PDF output): a sixteenth of WithMemoryLimit
+// as the rasterizer has it, or maxImagePixels without one, so that no stage
+// admits an image another refuses.
+func (c *Converter) imagePixels() int {
+	if p := c.lim.raster.MaxImagePixels; p > 0 {
+		return p
+	}
+	return maxImagePixels
 }

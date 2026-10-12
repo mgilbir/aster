@@ -959,7 +959,7 @@ func (c *Converter) svgToPDF(ctx context.Context, svg string, opts []PDFOption, 
 	}
 	m = m.Bounded(text.ShapingBudgetFrom(ctx))
 	t0 := time.Now()
-	popts := svgpdf.Options{Text: mode, Context: ctx, Images: imagesFrom(ctx).load, ImageError: reportFrom(ctx).image}
+	popts := svgpdf.Options{Text: mode, Context: ctx, Images: imagesFrom(ctx).load, ImageError: reportFrom(ctx).image, Limits: svgpdf.Limits{MaxImagePixels: c.imagePixels()}}
 	if usage {
 		pdf, uses, err = svgpdf.ConvertWithUsage(svg, m, popts)
 	} else {

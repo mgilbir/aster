@@ -38,7 +38,7 @@ It is not a heap cap: Go has none per call. It is converted into the budgets bel
 | rasterizer canvas memory (PNG) | 1 GiB | n, between 4 MiB and 1 GiB |
 | rasterizer pixels per canvas (PNG) | 64 Mi | n/8, between 512 Ki and 128 Mi |
 | rasterizer path points held at once (PNG) | 128 Mi | n/16, at least 64 Ki |
-| pixels of one image the rasterizer decodes (PNG) | 64 Mi | n/16, between 64 Ki and 64 Mi |
+| pixels of one image (SVG, PNG and PDF output) | 64 Mi | n/16, between 64 Ki and 64 Mi |
 | memory charged to the call's ledger | 2 GiB | n, at least 1 MiB |
 <!-- limits:end -->
 
@@ -59,7 +59,7 @@ Fixed bounds, the same whatever `WithMemoryLimit` says:
 | geographic path points | 2,000,000 per render, counted where the projection produces them (after resampling, before the clip extent; each of albersUsa's three projections counts its own; a projection's `fit` counts too) |
 | projection `clipAngle` | magnitude below 2^50 radians, about 6.4e16 degrees: past it upstream's clip circle never finishes, and aster refuses the angle with `ErrLimit` ([ADR 0011](adr/0011-faithful-output-free-algorithm.md)) |
 | dataflow evaluations | 50,000,000 operator runs per render |
-| one image | 32 MiB, 64 Mi pixels (PNG: the derived bound above) |
+| one image | 32 MiB, 64 Mi pixels (with `WithMemoryLimit`, the derived pixel bound above, the same in every output) |
 | HTTP response body | `HTTPLoader.MaxResponseBytes`, 64 MiB |
 | file | `FileLoader.MaxBytes`, 64 MiB |
 | JSON nesting | 256 levels; values nested at run time 1,024 |
