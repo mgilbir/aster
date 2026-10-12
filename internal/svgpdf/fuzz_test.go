@@ -11,7 +11,11 @@ import (
 	"github.com/mgilbir/aster/internal/text"
 )
 
-var fuzzLimits = Limits{MaxInputBytes: 1 << 20, MaxElements: 5000, MaxPathSegments: 100_000, MaxTextBytes: 100_000}
+// fuzzLimits keep each input's work small, so the fuzzer spends its time on
+// structure: an image is at most a megapixel, as a 16 MiB WithMemoryLimit has
+// it (the corpus's PNG-only cases carry larger ones, which the default limits
+// decode and re-encode in seconds).
+var fuzzLimits = Limits{MaxInputBytes: 1 << 20, MaxElements: 5000, MaxPathSegments: 100_000, MaxTextBytes: 100_000, MaxImagePixels: 1 << 20}
 
 // FuzzConvert translates arbitrary SVG to PDF in each text mode. Convert
 // recovers a panic into an "internal error", so that counts as a failure here:

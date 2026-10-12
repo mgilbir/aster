@@ -8,7 +8,11 @@ import (
 	"github.com/mgilbir/aster/internal/fuzzutil"
 )
 
-var fuzzLimits = Limits{MaxPixels: 1 << 18, MaxDimension: 2048, MaxElements: 5000, MaxRenderNodes: 20000, MaxInputBytes: 1 << 20}
+// fuzzLimits keep each input's work small, so the fuzzer spends its time on
+// structure: an image is at most a quarter megapixel, as the canvas is (the
+// bounded corpus's cases, which FuzzRender reads as seeds, carry larger ones
+// that the default limits decode and halve in a second, minutes under -race).
+var fuzzLimits = Limits{MaxPixels: 1 << 18, MaxDimension: 2048, MaxElements: 5000, MaxRenderNodes: 20000, MaxInputBytes: 1 << 20, MaxImagePixels: 1 << 18}
 
 // addSVGSeeds seeds a target with the synthetic documents of the tests and
 // the SVG the engine produced for real charts (the vl-convert expectations and

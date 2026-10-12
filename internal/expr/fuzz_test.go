@@ -135,7 +135,7 @@ func FuzzParse(f *testing.F) {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, src string) {
-		fuzzutil.Within(t, testutil.Scaled(10*time.Second), fmt.Sprintf("Parse(%q)", src), func() {
+		fuzzutil.Within(t, 10*time.Second, fmt.Sprintf("Parse(%q)", src), func() {
 			n, err := Parse(src)
 			padded, err2 := Parse(" \t" + src + "\n ")
 			if err != nil {
