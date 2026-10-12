@@ -146,6 +146,17 @@ func getTopLevelProperties(inputSpec jsval.Value, autosize jsval.Value, config j
 		}
 	case autosize.IsStr():
 		as = mk("type", autosize)
+	case !autosize.IsObj():
+		// A number, boolean or array has no type: upstream reads
+		// autosize.type (a TypeError for null) and writes the value as it is.
+		if autosize.IsNull() {
+			throw("Cannot read properties of null (reading 'type')")
+		}
+		out := jsval.NewObject(6)
+		out.Set("autosize", autosize)
+		spread(out, jsval.Obj(extractTopLevelProperties(config, false)))
+		spread(out, jsval.Obj(extractTopLevelProperties(inputSpec, true)))
+		return out
 	default:
 		as = cloneObj(autosize.ObjValue())
 	}

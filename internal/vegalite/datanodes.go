@@ -140,7 +140,12 @@ func (n *parseNode) assembleFormatParse() *Object {
 }
 
 func unquote(pattern string) string {
-	if len(pattern) >= 2 && ((pattern[0] == '\'' && pattern[len(pattern)-1] == '\'') || (pattern[0] == '"' && pattern[len(pattern)-1] == '"')) {
+	// pattern.slice(1, -1): a lone quote both starts and ends the pattern,
+	// and leaves nothing.
+	if len(pattern) >= 1 && ((pattern[0] == '\'' && pattern[len(pattern)-1] == '\'') || (pattern[0] == '"' && pattern[len(pattern)-1] == '"')) {
+		if len(pattern) == 1 {
+			return ""
+		}
 		return pattern[1 : len(pattern)-1]
 	}
 	return pattern

@@ -407,6 +407,9 @@ func normalizeNamed(v Value, names []string, what string) float64 {
 		}
 		return v.NumValue()
 	}
+	if v.IsNullish() {
+		throw("Cannot read properties of %s (reading 'toLowerCase')", nullishName(v))
+	}
 	if !v.IsStr() {
 		throw("%s", msgInvalidTimeUnit(nil, what, v))
 	}
@@ -440,7 +443,15 @@ func dateTimeParts(cc *compileCtx, d Value, normalize bool) []string {
 			d = jsval.Obj(omit(d, "day"))
 		}
 	}
-	str := func(v Value) string { return v.AsString() }
+	// The parts are joined with Array.prototype.join, which writes null and
+	// undefined as nothing (a null part makes "datetime(2000, 0, , ...)",
+	// which upstream's expression parser then rejects).
+	str := func(v Value) string {
+		if v.IsNullish() {
+			return ""
+		}
+		return v.AsString()
+	}
 	if y := d.Get("year"); !y.IsUndefined() {
 		parts = append(parts, str(y))
 	} else {
@@ -470,7 +481,7 @@ func dateTimeParts(cc *compileCtx, d Value, normalize bool) []string {
 		} else if q.IsNum() {
 			parts = append(parts, jsval.JSNumberString(q.NumValue()*3))
 		} else {
-			parts = append(parts, str(q)+"*3")
+			parts = append(parts, tmpl(q)+"*3")
 		}
 	default:
 		parts = append(parts, "0")
@@ -494,7 +505,7 @@ func dateTimeParts(cc *compileCtx, d Value, normalize bool) []string {
 		} else if day.IsNum() {
 			parts = append(parts, jsval.JSNumberString(day.NumValue()+1))
 		} else {
-			parts = append(parts, str(day)+"+1")
+			parts = append(parts, tmpl(day)+"+1")
 		}
 	default:
 		parts = append(parts, "1")

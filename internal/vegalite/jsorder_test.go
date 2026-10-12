@@ -189,3 +189,15 @@ func TestSignalNamerMatchesUpstreamLoop(t *testing.T) {
 		}
 	}
 }
+
+// TestTitleCase: s.charAt(0).toUpperCase() + s.substr(1), on UTF-16 units
+// with JavaScript's case mapping (C104: the first byte was upper-cased).
+func TestTitleCase(t *testing.T) {
+	for in, want := range map[string]string{
+		"": "", "median": "Median", "ßa": "SSa", "éte": "Éte", "😀x": "😀x", "ǆ": "Ǆ", "1a": "1a",
+	} {
+		if got := titleCase(in); got != want {
+			t.Errorf("titleCase(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

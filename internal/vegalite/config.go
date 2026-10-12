@@ -488,9 +488,19 @@ func stripAndRedirectConfig(cc *compileCtx, cfg Value) Value {
 		}
 	}
 	if params := c.Lookup("params"); !params.IsUndefined() {
-		sigs := append([]Value(nil), c.Lookup("signals").Items()...)
-		sigs = append(sigs, assembleParameterSignals(cc, params)...)
-		c.Set("signals", jsval.Arr(sigs))
+		// (config.signals || []).concat(...): a string concatenates the
+		// signals' text; anything else that is not an array has no concat.
+		cur := c.Lookup("signals")
+		added := assembleParameterSignals(cc, params)
+		switch {
+		case !cur.IsTruthy() || cur.IsArr():
+			sigs := append([]Value(nil), cur.Items()...)
+			c.Set("signals", jsval.Arr(append(sigs, added...)))
+		case cur.IsStr():
+			c.Set("signals", jsval.Str(cur.StrValue()+jsval.Arr(added).AsString()))
+		default:
+			throw("(config.signals || []).concat is not a function")
+		}
 		c.Delete("params")
 	}
 	for _, markType := range append([]string{"view"}, primitiveMarks...) {

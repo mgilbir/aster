@@ -134,3 +134,29 @@ func TestInvalidStructureMatchesNode(t *testing.T) {
 		compileAgainstNode(t, spec, spec)
 	}
 }
+
+// TestSmallFidelityMatchesNode (C104): a date parse pattern that is a lone
+// quote, a datetime part of null, an autosize that is not an object or a
+// string, and a config whose signals are not an array, as node compiles them.
+func TestSmallFidelityMatchesNode(t *testing.T) {
+	d := `"data":{"values":[{"a":"2020-01-01","b":2}]`
+	for _, spec := range []string{
+		`{` + d + `,"format":{"parse":{"a":"date:'"}}},"mark":"point","encoding":{"x":{"field":"a","type":"temporal"}}}`,
+		`{` + d + `,"format":{"parse":{"a":"utc:\""}}},"mark":"point","encoding":{"x":{"field":"a","type":"temporal"}}}`,
+		`{` + d + `},"mark":"point","transform":[{"filter":{"field":"b","range":[{"year":2000,"date":null},5]}}],"encoding":{"x":{"field":"b","type":"quantitative"}}}`,
+		`{` + d + `},"mark":"point","transform":[{"filter":{"field":"b","equal":{"year":null,"month":2}}}],"encoding":{"x":{"field":"b","type":"quantitative"}}}`,
+		`{` + d + `},"mark":"point","encoding":{"x":{"field":"b","type":"quantitative","scale":{"domain":[{"year":2000,"hours":null},{"year":2001}]}}}}`,
+		`{` + d + `},"autosize":5,"mark":"point","encoding":{"x":{"field":"b","type":"quantitative"}}}`,
+		`{` + d + `},"autosize":true,"mark":"point","encoding":{"x":{"field":"b","type":"quantitative"}}}`,
+		`{` + d + `},"autosize":[1],"mark":"point","encoding":{"x":{"field":"b","type":"quantitative"}}}`,
+		`{` + d + `},"autosize":null,"mark":"point","encoding":{"x":{"field":"b","type":"quantitative"}}}`,
+		`{` + d + `},"config":{"signals":"x","params":[{"name":"p","value":1}]},"mark":"point","encoding":{"x":{"field":"b","type":"quantitative"}}}`,
+		`{` + d + `},"config":{"signals":{"a":1},"params":[{"name":"p","value":1}]},"mark":"point","encoding":{"x":{"field":"b","type":"quantitative"}}}`,
+		`{` + d + `},"config":{"signals":5,"params":[{"name":"p","value":1}]},"mark":"point","encoding":{"x":{"field":"b","type":"quantitative"}}}`,
+		// X1: datetime selection values JavaScript's Date reads as NaN, or
+		// with fractional and huge parts.
+		`{` + d + `},"mark":"point","params":[{"name":"s","select":{"type":"point","fields":["a"]},"value":[{"a":{"year":1e20}},{"a":{"year":2001.7,"month":13.5,"date":-3,"hours":1e10}},{"a":{"year":99,"utc":true}},{"a":{"year":"NaN"}}]}],"encoding":{"x":{"field":"b","type":"quantitative"}}}`,
+	} {
+		compileAgainstNode(t, spec, spec)
+	}
+}

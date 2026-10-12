@@ -4,6 +4,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -480,24 +481,22 @@ func assembleInitValue(cc *compileCtx, init Value, loc *time.Location) Value {
 
 func idWrap(s string) string { return s }
 
+// dateTimeToTimestamp is upstream's: +new Date(...parts), or Date.UTC, with
+// the parts as JavaScript reads them (format's DatetimeArgs and UTCArgs:
+// ToNumber, a non-finite part makes NaN, two-digit years are 19xx, and a time
+// out of range is NaN). The parts are spec values, so they are never
+// converted to Go integers, whose conversion of a huge or non-finite float is
+// implementation-defined.
 func dateTimeToTimestamp(cc *compileCtx, d Value, local *time.Location) float64 {
 	parts := dateTimeParts(cc, d, true)
-	var n [7]int
-	for i := 0; i < 7 && i < len(parts); i++ {
-		f := jsval.StringToNumber(parts[i])
-		n[i] = int(f)
+	args := make([]float64, len(parts))
+	for i, p := range parts {
+		args[i] = jsval.StringToNumber(p)
 	}
-	// Date(year, month, day, h, m, s, ms) with a two-digit year mapping (0..99 -> 1900+) as JavaScript does.
-	y := n[0]
-	if y >= 0 && y <= 99 {
-		y += 1900
+	if d.Get("utc").IsTruthy() {
+		return format.UTCArgs(args...)
 	}
-	loc := local
-	if loc == nil || d.Get("utc").IsTruthy() {
-		loc = time.UTC
-	}
-	t := time.Date(y, time.Month(n[1]+1), n[2], n[3], n[4], n[5], n[6]*1e6, loc)
-	return float64(t.UnixMilli())
+	return format.Local(local).DatetimeArgs(args...)
 }
 
 func assembleUnitSelectionSignals(m *unitModel, signals []Value) []Value {
