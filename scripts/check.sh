@@ -1,5 +1,6 @@
 #!/bin/sh
-# check.sh: the gates CI runs (.github/workflows/ci.yml), with the oracle
+# check.sh: the gates CI runs (.github/workflows/ci.yml on pull requests,
+# heavy.yml on main and release candidates), with the oracle
 # required, and a ledger of what ran. A gate that skips is worse than one that
 # fails, so a gate whose tool is missing fails too (golangci-lint, the Python
 # PDFium needs), unless -allow-missing says to record it as skipped; the

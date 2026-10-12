@@ -1,0 +1,231 @@
+name: Heavy gates
+
+# The slow gates, kept off pull requests so that a stack of them does not run
+# each one per push: the race detector, the hostile-input security tests, the
+# full suite with the node oracle, PDFs read back with PDFium and poppler, the
+# suite on macOS and on 32-bit linux/386, and the benchmark gate. They run on every push to main and by hand
+# (workflow_dispatch) on a release candidate, which must be green before it
+# is tagged. Locally: `make check` runs all but macOS and the benchmarks,
+# `make benchgate BASE=<ref>` the benchmarks.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      bench_base:
+        description: "benchgate base ref (default: the previous release tag, else HEAD~1). For a release: the last release tag."
+        required: false
+        default: ""
+      allow_regression:
+        description: "Report a benchmark regression without failing (an intended trade-off; say why in the release notes)"
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+
+# One run at a time per ref, never cancelled midway: a push that lands while
+# one runs waits for it. GitHub keeps one waiting run, so in a burst of
+# pushes the middle ones are skipped, and their commits are measured only
+# against the next run's base; the run on a release candidate compares the
+# whole range since the last release, which nothing skips.
+concurrency:
+  group: heavy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: go test -short
+        run: go test -short -timeout 30m ./...
+
+  test-32bit:
+    # int is 32 bits on 386 and arm: what overflows in a size or budget check
+    # shows only on such a target. linux/386 binaries run natively on the
+    # amd64 runner. (ci.yml builds and vets for 386 on every pull request.)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: go test -short
+        run: GOARCH=386 go test -short -timeout 30m ./...
+
+  security:
+    # The heavy hostile-input tests, opt in elsewhere because they allocate
+    # up to a few GiB in their child processes: the resource and timeout
+    # reproducers (ASTER_SECURITY) and the heap of adversarial renders under
+    # WithMemoryLimit (ASTER_MEMCHECK, the full matrix; its smoke version runs
+    # in every go test), the concurrency stress test over the whole corpus
+    # (ASTER_STRESS_FULL) and the expression metering test at full size
+    # (ASTER_METERING_FULL). Each hostile render runs in a child process
+    # capped in heap and wall time (harness_security_test.go), so a
+    # regression fails the job rather than the runner.
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: heavy security tests
+        env:
+          ASTER_SECURITY: "1"
+          ASTER_MEMCHECK: "1"
+        run: go test -count=1 -v -timeout 30m -run 'TestResource|TestTimeout|TestSVGToPNGIgnoresEntities|TestMemoryLimitHeap$' .
+      - name: concurrency stress over the whole corpus
+        env:
+          ASTER_STRESS_FULL: "1"
+        run: go test -count=1 -timeout 20m -run TestConcurrentConverterSharesNothing .
+      - name: expression metering at full size
+        env:
+          ASTER_METERING_FULL: "1"
+        run: go test -count=1 -timeout 20m -run TestEveryBuiltinIsMetered ./internal/expr
+
+  race:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: go test -race
+        run: go test -short -race -timeout 30m ./...
+
+  pdfium:
+    # aster's PDFs read back with PDFium, Chrome's PDF engine, and compared
+    # with its PNGs: what the colour glyph painters draw, not only what they
+    # write (TestPDFium*). pypdfium2 is pinned by digest. Then with poppler:
+    # text extraction (ToUnicode) and the vector PDF against the PNG.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: install pypdfium2
+        run: |
+          python -m venv "$RUNNER_TEMP/pdfium"
+          "$RUNNER_TEMP/pdfium/bin/pip" install --require-hashes -r scripts/pdfium/requirements.txt
+      - name: PDFs read back with PDFium
+        env:
+          ASTER_PDFIUM: ${{ runner.temp }}/pdfium/bin/python
+        run: go test -count=1 -run 'TestPDFium' -v ./internal/svgpdf
+      - name: install poppler
+        run: sudo apt-get update -q && sudo apt-get install -y -q poppler-utils
+      - name: PDFs read back with poppler (text extraction, PDF and PNG drift)
+        # They skip without poppler elsewhere; here they must run.
+        env:
+          ASTER_POPPLER: require
+        run: |
+          go test -count=1 -run 'TestPDFTextIsExtractable|TestVectorPDFMatchesPNG' .
+          go test -count=1 -run 'TestToUnicodeClusters' ./internal/svgpdf
+
+  oracle:
+    # The full suite with the node oracle required: upstream Vega / Vega-Lite
+    # (and resvg) in node, pinned in testdata/oracle-node*, is what the
+    # engine's SVG, compiled Vega and PNG are compared with. Its answers are
+    # cached between runs; the cache key covers the oracle's script and
+    # lockfiles, and entries are keyed by content, so stale ones are unused.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: testdata/oracle-node/package.json
+      - name: install the oracle
+        run: |
+          (cd testdata/oracle-node && npm ci)
+          (cd testdata/oracle-node-vl5 && npm ci)
+      - name: install the Mermaid renderer (TestDocsMermaid)
+        run: (cd testdata/mermaid && npm ci)
+      - uses: actions/cache@v6
+        with:
+          # upstream's own test suites, recorded against the installed packages: the shallow clones
+          # of the git tags (their tests are not on npm) and the vectors, which the replays
+          # (TestUpstream*) need. The script skips recording when the vectors match its fingerprint.
+          path: |
+            testdata/upstream-clones
+            testdata/upstream-vectors-cache
+          key: upstream-vectors-${{ hashFiles('testdata/oracle-node/package-lock.json', 'testdata/oracle-node/record-upstream-tests.mjs', 'testdata/oracle-node/record-upstream-hooks.mjs', 'scripts/record-upstream-vectors.sh') }}
+      - name: record upstream's test vectors
+        run: scripts/record-upstream-vectors.sh
+      - uses: actions/cache@v6
+        with:
+          path: testdata/corpora-cache
+          key: corpora-${{ hashFiles('testdata/corpora/*.sha256', 'scripts/fetch-corpora.sh') }}
+      - name: fetch the external corpora
+        # Verified against the checked-in manifests; a cache hit is verified too.
+        run: scripts/fetch-corpora.sh
+      - uses: actions/cache@v6
+        with:
+          path: testdata/oracle-cache
+          key: oracle-${{ hashFiles('testdata/oracle-node/oracle.mjs', 'testdata/oracle-node/sweeps/*.mjs', 'testdata/corpora/*.sha256', 'testdata/oracle-node*/package-lock.json') }}-${{ github.sha }}
+          restore-keys: oracle-${{ hashFiles('testdata/oracle-node/oracle.mjs', 'testdata/oracle-node/sweeps/*.mjs', 'testdata/corpora/*.sha256', 'testdata/oracle-node*/package-lock.json') }}-
+      - name: full test suite
+        env:
+          ASTER_ORACLE: require
+        run: go test -timeout 60m ./...
+      - name: comparison report
+        if: always()
+        env:
+          ASTER_ORACLE: require
+        run: |
+          go test -count=1 -v -timeout 30m -run TestCompareWithNode . \
+            -args -compare.report="$RUNNER_TEMP/compare-report.md" | tee "$RUNNER_TEMP/compare.txt"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: compare-with-node
+          path: |
+            ${{ runner.temp }}/compare-report.md
+            ${{ runner.temp }}/compare.txt
+
+  benchgate:
+    # The benchmarks must not get measurably slower or hungrier than the base:
+    # on a push, the commit before it; by hand, the given ref. The thresholds
+    # are in scripts/benchgate.sh.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: benchmark base and head
+        env:
+          BENCHGATE_ALLOW: ${{ inputs.allow_regression == true }}
+          BENCHGATE_OUT: ${{ runner.temp }}/benchgate
+          BENCH_BASE: ${{ inputs.bench_base }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          base=$BENCH_BASE
+          if [ -z "$base" ] && [ "$GITHUB_EVENT_NAME" = push ] && [ -n "$PUSH_BEFORE" ] && [ "$PUSH_BEFORE" != 0000000000000000000000000000000000000000 ]; then
+            base=$PUSH_BEFORE
+          fi
+          if [ -z "$base" ]; then
+            base=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || git rev-parse HEAD~1)
+          fi
+          echo "benchgate: base $base"
+          scripts/benchgate.sh "$base" "$GITHUB_SHA"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: benchgate
+          path: ${{ runner.temp }}/benchgate

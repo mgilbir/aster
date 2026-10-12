@@ -7,6 +7,7 @@ import (
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -38,11 +39,16 @@ func CountPattern(ctx context.Context, data []jsval.Value, p CountPatternParams)
 	if pattern == "" {
 		pattern = "[\\w']+"
 	}
-	match, err := jsval.NewPattern(pattern, "g")
+	// The two programs are the call's while it runs, paid for before they
+	// are compiled (see payPattern).
+	led := budget.LedgerFrom(ctx)
+	var held int64
+	defer func() { led.Free(held) }()
+	match, err := jsval.NewPattern(pattern, "g", payPattern(ctx, led, &held))
 	if err != nil {
 		return nil, err
 	}
-	stop, err := jsval.NewPattern("^"+p.Stopwords+"$", "i")
+	stop, err := jsval.NewPattern("^"+p.Stopwords+"$", "i", payPattern(ctx, led, &held))
 	if err != nil {
 		return nil, err
 	}
@@ -108,4 +114,29 @@ func CountPattern(ctx context.Context, data []jsval.Value, p CountPatternParams)
 		out = append(out, jsval.Obj(o))
 	}
 	return out, nil
+}
+
+// payPattern pays for a pattern's compile with the ledger, adding what it
+// holds to *held: goecma262 cannot be interrupted while it compiles, so the
+// program is charged from its bound and the deadline polled before the
+// compile starts. A program past the ledger is refused uncompiled.
+func payPattern(ctx context.Context, led *budget.Ledger, held *int64) jsval.PatternPay {
+	return func(bytes, work int64) error {
+		if err := led.Work(work); err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if bytes < 0 {
+			led.Free(-bytes)
+			*held += bytes
+			return nil
+		}
+		if err := led.Alloc(bytes); err != nil {
+			return fmt.Errorf("countpattern: a regular expression compiles to a program of %d bytes: %w", bytes, err)
+		}
+		*held += bytes
+		return nil
+	}
 }

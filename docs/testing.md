@@ -138,9 +138,9 @@ const vega = await import(require.resolve('vega'));
 | `ASTER_MEMCHECK=1` (`_OUT`, `_CASES`, `_LIMITS`) | measure the heap of adversarial renders under `WithMemoryLimit` | the `security` job, the full matrix (`TestMemoryLimitHeapSmoke` runs in every `go test`) |
 | `ASTER_METERING_FULL=1` | `TestEveryBuiltinIsMetered` at full size (1 MiB strings) | the `security` job |
 | `FUZZTIME`, `FUZZMINIMIZETIME` | `make fuzz` time per target | the nightly `fuzz.yml` |
-| `BENCHGATE_*`, `BENCHSTAT` | `scripts/benchgate.sh` thresholds and tools (see the script) | `perf.yml` |
+| `BENCHGATE_*`, `BENCHSTAT` | `scripts/benchgate.sh` thresholds and tools (see the script) | the `benchgate` job |
 | `RECORD_FORCE=1` | re-record the upstream vectors even when up to date | no: the recording is keyed by its inputs |
 
-`scripts/check.sh` runs what CI runs, these jobs included, and fails when a tool a gate needs is missing (`-allow-missing` records it as skipped instead). The other variables the tests read select or dump specs while debugging (`ASTER_COMPARE`, `ASTER_FULL`, `ASTER_TIME`, `ASTER_VEGA`, `ASTER_DUMP`, `ASTER_COMPARE_DUMP`, `ASTER_DEMO_DIR`, `ASTER_DRIFT_DIR`, `ASTER_GAP_STACKS`, `MERMAID_OUT`) and guard nothing on their own.
+The `oracle`, `pdfium`, `security` and `benchgate` jobs are in `.github/workflows/heavy.yml`, which runs on every push to main and by hand on a release candidate; pull requests run the quick gates of `ci.yml` only. `scripts/check.sh` runs what CI runs, these jobs included, and fails when a tool a gate needs is missing (`-allow-missing` records it as skipped instead). The other variables the tests read select or dump specs while debugging (`ASTER_COMPARE`, `ASTER_FULL`, `ASTER_TIME`, `ASTER_VEGA`, `ASTER_DUMP`, `ASTER_COMPARE_DUMP`, `ASTER_DEMO_DIR`, `ASTER_DRIFT_DIR`, `ASTER_GAP_STACKS`, `MERMAID_OUT`) and guard nothing on their own.
 
 Packages have further debugging knobs, documented where they are read (`grep -rn 'Getenv' --include=*_test.go`).

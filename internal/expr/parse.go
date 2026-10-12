@@ -31,11 +31,17 @@ type SyntaxError struct {
 	Msg   string
 	Pos   int
 	Limit bool
+	// cause is the call's context error, when parsing stopped at its
+	// deadline or cancellation.
+	cause error
 }
 
 func (e *SyntaxError) Error() string { return e.Msg }
 
 func (e *SyntaxError) Unwrap() error {
+	if e.cause != nil {
+		return e.cause
+	}
 	if e.Limit {
 		return budget.ErrLimit
 	}
@@ -689,15 +695,35 @@ func (p *parser) scanRegExp() (*jsval.Pattern, string) {
 			p.fail("Invalid regular expression")
 		}
 	}
-	pat, err := jsval.NewPattern(body, canonicalFlags(flags))
-	if err != nil {
+	// The literal's program is paid for before it is compiled, which cannot
+	// be interrupted: a program past what the ledger has left is refused
+	// from its bound, and the compile's work polls the call's deadline.
+	var stopped, refused error
+	pat, err := jsval.NewPattern(body, canonicalFlags(flags), func(bytes, work int64) error {
+		if err := p.led.Work(work); err != nil {
+			stopped = err
+			return err
+		}
+		if bytes < 0 {
+			p.led.Free(-bytes)
+			return nil
+		}
+		if err := p.led.Alloc(bytes); err != nil {
+			refused = err
+			return err
+		}
+		return nil
+	})
+	switch {
+	case stopped != nil:
+		panic(&SyntaxError{Msg: "Regular expression not compiled: " + stopped.Error(), Pos: p.idx, cause: stopped})
+	case refused != nil:
+		p.failLimit("Regular expression too large for the memory limit")
+	case err != nil:
 		if newPatternError(err).limit {
 			p.failLimit("Regular expression too large: " + err.Error())
 		}
 		p.fail("Invalid regular expression")
-	}
-	if p.led.Alloc(patternBytes(pat)) != nil {
-		p.failLimit("Regular expression too large for the memory limit")
 	}
 	return pat, p.src[start:p.idx]
 }
