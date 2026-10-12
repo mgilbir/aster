@@ -25,8 +25,9 @@
 # benchmarks cover the stages.
 #
 # For an intended trade-off, BENCHGATE_ALLOW=true reports the regression and
-# exits 0 (CI sets it from the PR label perf-regression-ok). Other settings:
-# BENCHGATE_COUNT (rounds, default 8), BENCHGATE_BENCHTIME (default 300ms),
+# exits 0 (CI sets it from the allow_regression input of the Heavy gates
+# workflow). Other settings: BENCHGATE_COUNT (rounds, default 8),
+# BENCHGATE_BENCHTIME (default 300ms),
 # BENCHGATE_NS_PCT, BENCHGATE_BYTES_PCT, BENCHGATE_ALLOCS_PCT, BENCHGATE_OUT
 # (a directory to keep the samples and the benchstat output in) and BENCHSTAT
 # (a benchstat binary, instead of installing the pinned version).
