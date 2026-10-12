@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/mgilbir/aster/internal/budget"
+	"github.com/mgilbir/aster/internal/testutil"
 )
 
 // countingServer is a loopback server and the number of requests it has seen.
@@ -203,7 +204,7 @@ func TestHTTPLoaderSlowServers(t *testing.T) {
 		if !errors.Is(err, context.DeadlineExceeded) {
 			t.Errorf("%s: err = %v, want a deadline", name, err)
 		}
-		if d := time.Since(start); d > 5*time.Second {
+		if d := time.Since(start); d > testutil.Scaled(5*time.Second) {
 			t.Errorf("%s: took %v", name, d)
 		}
 
@@ -254,7 +255,7 @@ func TestHTTPLoaderBodyLimits(t *testing.T) {
 	if _, err := l.Load(ctx, lie.URL+"/x"); !errors.Is(err, budget.ErrLimit) {
 		t.Errorf("declared length: err = %v, want a limit", err)
 	}
-	if d := time.Since(start); d > 2*time.Second {
+	if d := time.Since(start); d > testutil.Scaled(2*time.Second) {
 		t.Errorf("declared length: took %v", d)
 	}
 	if data, err := l.Load(context.Background(), short.URL+"/x"); err == nil {

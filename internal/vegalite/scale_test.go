@@ -1,11 +1,11 @@
 package vegalite
 
 import (
-	"github.com/mgilbir/aster/internal/testutil"
 	"testing"
 	"time"
 
 	"github.com/mgilbir/aster/internal/jsval"
+	"github.com/mgilbir/aster/internal/testutil"
 )
 
 // TestLargeSpecsFinishPromptly guards against accidentally super-linear work on

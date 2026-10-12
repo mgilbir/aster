@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/mgilbir/aster/internal/jsval"
+	"github.com/mgilbir/aster/internal/testutil"
 )
 
 func renderJSON(t testing.TB, ctx context.Context, spec string) (*Result, error) {
@@ -72,7 +73,7 @@ func TestHostileSpecs(t *testing.T) {
 			}()
 			select {
 			case <-done:
-			case <-time.After(30 * time.Second):
+			case <-time.After(testutil.Scaled(30 * time.Second)):
 				t.Fatal("hang")
 			}
 		})

@@ -24,6 +24,7 @@ import (
 
 	"github.com/mgilbir/aster"
 	"github.com/mgilbir/aster/internal/jsval"
+	"github.com/mgilbir/aster/internal/testutil"
 )
 
 var (
@@ -157,10 +158,10 @@ func runMutations(t *testing.T, mode string) {
 				var msg string
 				select {
 				case msg = <-done:
-				case <-time.After(20 * time.Second):
+				case <-time.After(testutil.Scaled(20 * time.Second)):
 					msg = "HANG(>20s with 3s timeout)"
 				}
-				if el := time.Since(start); msg == "" && el > 8*time.Second {
+				if el := time.Since(start); msg == "" && el > testutil.Scaled(8*time.Second) {
 					msg = fmt.Sprintf("SLOW %v with 3s timeout", el)
 				}
 				if msg != "" {

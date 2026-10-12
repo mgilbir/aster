@@ -12,6 +12,7 @@ import (
 
 	"github.com/mgilbir/aster/internal/expr"
 	"github.com/mgilbir/aster/internal/jsval"
+	"github.com/mgilbir/aster/internal/testutil"
 	"github.com/mgilbir/aster/internal/vegalite"
 )
 
@@ -63,7 +64,7 @@ func TestVegaLiteRuns(t *testing.T) {
 		cancel()
 		if rerr == nil {
 			ok++
-			if d := time.Since(start); d > 5*time.Second {
+			if d := time.Since(start); d > testutil.Scaled(5*time.Second) {
 				t.Logf("%s: slow (%v)", name, d)
 			}
 			continue

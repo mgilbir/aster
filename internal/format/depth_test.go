@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/mgilbir/aster/internal/testutil"
 )
 
 // A locale whose dateTime is many copies of %c expands b^maxLocaleNesting
@@ -21,7 +23,7 @@ func TestLocaleExpansionIsBounded(t *testing.T) {
 	_ = f.Format(0)
 	p := l.Parse("%c", Zone{})
 	_, _ = p.Parse("2020")
-	if d := time.Since(start); d > 5*time.Second {
+	if d := time.Since(start); d > testutil.Scaled(5*time.Second) {
 		t.Errorf("compiling a self-expanding locale took %v", d)
 	}
 }

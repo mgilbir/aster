@@ -2,7 +2,6 @@ package vegalite
 
 import (
 	"errors"
-	"github.com/mgilbir/aster/internal/testutil"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
+	"github.com/mgilbir/aster/internal/testutil"
 )
 
 func mustParse(t *testing.T, s string) jsval.Value {

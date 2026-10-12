@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/mgilbir/aster"
+	"github.com/mgilbir/aster/internal/testutil"
 )
 
 const tinySVG = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>`
@@ -105,7 +106,7 @@ func TestCloseNotBlockedByGeoWalk(t *testing.T) {
 	for _, ch := range []chan error{rendered, closed} {
 		select {
 		case <-ch:
-		case <-time.After(10 * time.Second):
+		case <-time.After(testutil.Scaled(10 * time.Second)):
 			t.Fatal("the render, or Close behind it, did not return")
 		}
 	}

@@ -3,11 +3,11 @@ package vegalite
 import (
 	"context"
 	"fmt"
-	"github.com/mgilbir/aster/internal/testutil"
 	"testing"
 	"time"
 
 	"github.com/mgilbir/aster/internal/jsval"
+	"github.com/mgilbir/aster/internal/testutil"
 )
 
 // Large-specification benchmarks: compile time must grow about linearly with

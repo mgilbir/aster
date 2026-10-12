@@ -11,6 +11,7 @@ import (
 
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
+	"github.com/mgilbir/aster/internal/testutil"
 )
 
 func budgetCtx(rows int) context.Context {
@@ -93,14 +94,14 @@ func TestLongLoopsStopOnCancel(t *testing.T) {
 	})
 	start := time.Now()
 	_, err := Regression(ctx, data, RegressionParams{Method: "poly", Order: 100, X: FieldOf("x"), Y: FieldOf("y")})
-	if err == nil || time.Since(start) > 2*time.Second {
+	if err == nil || time.Since(start) > testutil.Scaled(2*time.Second) {
 		t.Errorf("poly regression ignored the context: %v after %v", err, time.Since(start))
 	}
 	ctx2, cancel2 := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel2()
 	start = time.Now()
 	_, err = Aggregate(ctx2, data, AggregateParams{Measures: []Measure{{Op: "ci0", Field: FieldOf("y")}}})
-	if err == nil || time.Since(start) > 2*time.Second {
+	if err == nil || time.Since(start) > testutil.Scaled(2*time.Second) {
 		t.Errorf("bootstrap ignored the context: %v after %v", err, time.Since(start))
 	}
 }
