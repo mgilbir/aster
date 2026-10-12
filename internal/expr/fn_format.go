@@ -21,7 +21,8 @@ func init() {
 		// number, a few MB with a locale's numerals, so it is charged once
 		// made.
 		spec := s.specifier(jsval.Str(s.str(arg(args, 1))))
-		out, err := s.locale().AppendFormatValue(nil, arg(args, 0), spec)
+		var buf [64]byte // a label fits: the string is made once, at its length
+		out, err := s.locale().AppendFormatValue(buf[:0], arg(args, 0), spec)
 		if err != nil {
 			failFormat(err)
 		}
@@ -38,7 +39,8 @@ func init() {
 			// A time format writes as much as its specifier asks (each %c
 			// a locale pattern), so it stops at the room the string budget
 			// has left.
-			out, ok, err := s.locale().AppendTimeFormatValue(nil, v, s.specifier(arg(args, 1)), utc, s.formatRoom())
+			var buf [64]byte
+			out, ok, err := s.locale().AppendTimeFormatValue(buf[:0], v, s.specifier(arg(args, 1)), utc, s.formatRoom())
 			if err != nil {
 				failFormat(err)
 			}
@@ -117,7 +119,8 @@ func (s *Scope) formatRoom() int {
 }
 
 // keepFormatted checks and charges a string a formatter made, which complete
-// is false for when the formatter stopped at formatRoom.
+// is false for when the formatter stopped at formatRoom, and returns it as a
+// string of its own (b is the caller's buffer, often on its stack).
 func (s *Scope) keepFormatted(b []byte, complete bool) string {
 	if !complete {
 		if s.Strings.room() < 3*MaxStringLength {
@@ -125,9 +128,8 @@ func (s *Scope) keepFormatted(b []byte, complete bool) string {
 		}
 		exceeded("a formatted string of more than %d bytes exceeds the limit of %d UTF-16 code units", 3*MaxStringLength, MaxStringLength)
 	}
-	str := unsafe.String(unsafe.SliceData(b), len(b))
-	s.checkString(str)
-	s.chargeBytes(len(b))
+	s.checkString(unsafe.String(unsafe.SliceData(b), len(b)))
+	s.chargeBytes(len(b)) // before the string is made
 	s.workBytes(len(b))
-	return str
+	return string(b)
 }
