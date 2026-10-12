@@ -137,7 +137,7 @@ func Impute(ctx context.Context, data []jsval.Value, p ImputeParams) ([]jsval.Va
 			// them before allocating, or a few thousand distinct groups and
 			// keys cost gigabytes.
 			cells += grow
-			if err := reserveOut(ctx, cells, len(data)); err != nil {
+			if err := reserveRows(ctx, cells-len(data)); err != nil {
 				return nil, err
 			}
 			for len(g.vals) < j {
@@ -154,7 +154,7 @@ func Impute(ctx context.Context, data []jsval.Value, p ImputeParams) ([]jsval.Va
 	for _, g := range groups {
 		missing += len(domain) - g.present
 	}
-	if err := reserveOut(ctx, len(data)+missing, len(data)); err != nil {
+	if err := reserveRows(ctx, missing); err != nil {
 		return nil, err
 	}
 

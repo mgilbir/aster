@@ -55,7 +55,7 @@ func Flatten(ctx context.Context, data []jsval.Value, p FlattenParams) ([]jsval.
 		if !valid {
 			continue
 		}
-		if err := reserveOut(ctx, len(out)+maxlen, len(data)); err != nil {
+		if err := reserveRows(ctx, len(out)+maxlen); err != nil {
 			return nil, err
 		}
 		for k := 0; k < maxlen; k++ {

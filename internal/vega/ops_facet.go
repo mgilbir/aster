@@ -71,7 +71,7 @@ func (s *facetState) subflow(n *opNode, k any, make subflowMaker, key string, pa
 	if c == nil {
 		g := n.g
 		g.view.cells++
-		if g.view.cells > g.view.limits.MaxSubflows {
+		if lim := g.view.limits.MaxSubflows; lim >= 0 && g.view.cells > lim {
 			failLimit("more than %d facet cells", g.view.limits.MaxSubflows)
 		}
 		sf := g.add("subflow", nil)
@@ -150,11 +150,18 @@ func facPreFacet(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNod
 		}
 		st.active = st.active[:0]
 		seen := make(map[any]struct{}, len(pulse.tuples))
+		// The cells' tuples are the prefacet's: what it holds grows cell by
+		// cell, each charged before its tuples are made.
+		v := n.g.view
+		var rows, excess int64
+		v.hold(n.held(), 0, 0)
 		for _, t := range pulse.tuples {
 			cl := st.subflow(n, t.Key(), flow, "", t, pulse)
 			if hasField && !field.IsNil() {
 				arr := field.Apply(t)
 				items := arr.Items()
+				rows, excess = rows+int64(len(items)), excess+v.rowExcess(items)
+				v.hold(n.held(), rows, excess)
 				tuples := make([]jsval.Value, len(items))
 				for i, it := range items {
 					tuples[i] = ingestTuple(it)

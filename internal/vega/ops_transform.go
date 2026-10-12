@@ -239,15 +239,10 @@ func statefulTransform(newFn func() txFn) factory {
 			if err != nil {
 				failErr(err)
 			}
-			n.g.view.checkRows(len(out)-len(in), n.g.view.rowExcess(out)-before)
 			// The tuples a transform creates are ingested in output order
 			// (vega-dataflow's ingest), which is the order a sort breaks
-			// ties in.
-			for _, t := range out {
-				if o := t.ObjValue(); o != nil {
-					o.EnsureTupleID()
-				}
-			}
+			// ties in; the operator holds them.
+			n.g.view.holdCreated(n, before, out)
 			res := changedPulse(pulse, out)
 			if len(out) > 0 && len(in) > 0 && &out[0] == &in[0] {
 				res.tree = pulse.tree // annotated in place: still the same data set
@@ -321,6 +316,7 @@ func init() {
 			if err != nil {
 				failErr(err)
 			}
+			n.g.view.holdCreated(n, 0, out)
 			// A group mark faceted over this data set finds each group's
 			// tuple here; the cells are keyed like the aggregate's own
 			// groups (an explicit key, else the group-by values).

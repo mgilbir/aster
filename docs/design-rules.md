@@ -88,10 +88,18 @@ Specifications and data are untrusted.
   when released). Code that cannot return an error uses `MustWork` and
   `MustAlloc`, which panic with a `*budget.Stop` that the public API recovers.
 - The older meters stay where they are and keep their semantics: data rows,
-  loaded bytes and path points (`budget.Budget`, one per Vega render); every
-  transform that multiplies tuples (`impute`, `kde`, `quantile`, `flatten`,
-  `fold`, `cross`, `sequence`, `pivot`, `aggregate` cells, `regression`)
-  charges it with `budget.ReserveOut` before it allocates. The expression
+  loaded bytes and path points (`budget.Budget`, one per Vega render). Rows
+  are held by the operator that made them ([ADR 0012](adr/0012-rows-held-by-their-maker.md)):
+  every path that makes tuples (ingestion, a transform's new tuples, the
+  copies of a derived relay, a prefacet's cells, `modify()` and `setdata()`)
+  goes through the kernel's one charge point (`internal/vega/rows.go`), which
+  replaces what the operator held; an operator that passes tuples on holds
+  none. The tuple list an operator outputs, unless it is its input's, is
+  charged to the call's ledger the same way. Every transform that multiplies tuples (`impute`, `kde`, `quantile`,
+  `flatten`, `fold`, `cross`, `sequence`, `pivot`, `aggregate` cells,
+  `regression`) reserves the rows it makes with `budget.Reserve` before it
+  allocates, counting what its previous run held as free. The tests check that
+  no transform passes on a tuple no operator holds. The expression
   evaluator's budget for large strings and arrays (`expr.StringBudget`) and
   its per-string length limit: an expression function builds its strings and
   arrays only through the evaluator's builders (`strBuilder`, `makeItems`,

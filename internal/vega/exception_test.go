@@ -7,15 +7,6 @@ import (
 	"github.com/mgilbir/aster/internal/scene"
 )
 
-func hasWarning(res *Result, sub string) bool {
-	for _, w := range res.Warnings {
-		if strings.Contains(w, sub) {
-			return true
-		}
-	}
-	return false
-}
-
 // A legend whose `columns` is not a valid array length makes upstream's
 // gridLayout throw at `Array(ncols)`; the exception ends the pulse, so the
 // view layout never runs and the chart keeps its size: no legend room is
@@ -30,12 +21,12 @@ func TestLegendColumnsNotAnArrayLength(t *testing.T) {
 		t.Fatalf("a one-column legend should widen the view, width %v", ok.Width)
 	}
 	for _, cols := range []string{"0.5", "-4", "1e12"} {
-		res := renderSpec(t, strings.Replace(tmpl, "%s", cols, 1))
+		res, msgs := mustRenderReporting(t, strings.Replace(tmpl, "%s", cols, 1))
 		if res.Width != 110 {
 			t.Errorf("columns %s: width %v, want the unadjusted 110", cols, res.Width)
 		}
-		if !hasWarning(res, "Invalid array length") {
-			t.Errorf("columns %s: warnings %q lack the RangeError", cols, res.Warnings)
+		if !hasWarning(msgs, "Invalid array length") {
+			t.Errorf("columns %s: warnings %q lack the RangeError", cols, msgs)
 		}
 	}
 }
@@ -44,13 +35,13 @@ func TestLegendColumnsNotAnArrayLength(t *testing.T) {
 // position that is NaN (a sequential scale over an infinite extent) calls
 // undefined, a TypeError that ends the pulse like any exception.
 func TestSequentialScaleOverInfiniteExtent(t *testing.T) {
-	res := renderSpec(t, `{"width":100,"height":60,
+	res, msgs := mustRenderReporting(t, `{"width":100,"height":60,
 	  "data":[{"name":"t","values":[{"v":"Infinity"},{"v":"-Infinity"},{"v":1}]}],
 	  "scales":[{"name":"c","type":"linear","domain":{"data":"t","field":"v"},"range":{"scheme":"blues"}}],
 	  "legends":[{"fill":"c","type":"gradient"}],
 	  "marks":[{"type":"rect","from":{"data":"t"},"encode":{"enter":{"width":{"value":5},"height":{"value":5},"fill":{"scale":"c","field":"v"}}}}]}`)
-	if !hasWarning(res, "I[i] is not a function") {
-		t.Errorf("warnings %q lack the TypeError", res.Warnings)
+	if !hasWarning(msgs, "I[i] is not a function") {
+		t.Errorf("warnings %q lack the TypeError", msgs)
 	}
 	if res.Height != 60 { // the pulse stopped before the legend was laid out
 		t.Errorf("height %v: the legend must not have been laid out", res.Height)

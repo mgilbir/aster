@@ -62,7 +62,7 @@ func Quantile(ctx context.Context, source []jsval.Value, p QuantileParams) ([]js
 		names[i] = g.Name
 	}
 	groups := Partition(zoneOf(ctx), source, p.GroupBy)
-	if err := reserveOut(ctx, int(min(budget.Mul(int64(len(groups)), int64(len(probs))), math.MaxInt32)), len(source)); err != nil {
+	if err := reserveRows(ctx, int(min(budget.Mul(int64(len(groups)), int64(len(probs))), math.MaxInt32))); err != nil {
 		return nil, err
 	}
 	var out []jsval.Value

@@ -113,12 +113,13 @@ func TestCorpusCancelled(t *testing.T) {
 func TestUnknownLoaderIsDenied(t *testing.T) {
 	spec := `{"data":[{"name":"d","url":"https://example.com/x.json"}],"marks":[{"type":"rect","from":{"data":"d"}}]}`
 	v, _ := jsval.ParseJSONString(spec)
-	res, err := Render(context.Background(), v, Options{})
+	var msgs []string
+	_, err := Render(context.Background(), v, Options{Report: func(err error) error { msgs = append(msgs, err.Error()); return nil }})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Warnings) == 0 || !strings.Contains(res.Warnings[0], "Loading failed") {
-		t.Fatalf("expected a load warning, got %v", res.Warnings)
+	if len(msgs) == 0 || !strings.Contains(msgs[0], "Loading failed") {
+		t.Fatalf("expected a load warning, got %v", msgs)
 	}
 }
 

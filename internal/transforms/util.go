@@ -58,8 +58,10 @@ func dimValues(fields []Field, t jsval.Value) []jsval.Value {
 	return out
 }
 
-// reserveOut fails, before anything is allocated, when a transform that turns
-// in input rows into out output rows would exceed the render's row budget.
-func reserveOut(ctx context.Context, out, in int) error {
-	return budget.ReserveOut(ctx, int64(out), int64(in))
+// reserveRows fails, before anything is allocated, when the n rows a
+// transform is about to make would exceed the render's row budget. The rows
+// it passes on are held by the operators that made them, and those its
+// previous run made are being replaced, so only the new ones count.
+func reserveRows(ctx context.Context, n int) error {
+	return budget.Reserve(ctx, int64(n))
 }

@@ -1,0 +1,1 @@
+{"width": 10, "height": 10, "data": [{"name": "a", "values": "x\u00e9y\n1\u00e92\n\"3\"\u00e94", "format": {"type": "dsv", "delimiter": "\u00e9"}}, {"name": "b", "values": "1::2\n3::4", "format": {"type": "dsv", "delimiter": "::", "header": ["p", "q"]}}, {"name": "c", "values": "1\u20ac2", "format": {"type": "dsv", "delimiter": "\u20acX", "header": ["p", "q"]}}]}

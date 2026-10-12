@@ -480,13 +480,30 @@ func facExtent(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode,
 			failErr(err)
 		}
 		if !ok {
-			n.g.warn("Infinite extent for field \"" + f.Name + "\"")
+			n.g.warn(infiniteExtent(n, f, lo, hi))
 			n.value = jsval.ArrOf(jsval.Undefined, jsval.Undefined)
 		} else {
 			n.value = jsval.ArrOf(jsval.Num(lo), jsval.Num(hi))
 		}
 		return nil
 	}), nil
+}
+
+// infiniteExtent is Extent's warning: `Infinite extent${name}: [${min},
+// ${max}]`, where name is ` for field "…"` when the accessor has a name. An
+// expression's accessor has none (the runtime builds it without one), and
+// the template prints undefined.
+func infiniteExtent(n *opNode, f transforms.Field, lo, hi float64) string {
+	name := ""
+	if f.Name != "" {
+		name = ` for field "` + f.Name + `"`
+	}
+	for _, a := range n.argops {
+		if a.name == "field" && a.op.name == "expression" {
+			name = "undefined"
+		}
+	}
+	return "Infinite extent" + name + ": [" + jsval.JSNumberString(lo) + ", " + jsval.JSNumberString(hi) + "]"
 }
 
 func facMultiExtent(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *opParams) any) {
@@ -572,6 +589,9 @@ func facRelay(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 		if !p.Value("derive").IsTruthy() {
 			return &flowPulse{stamp: pulse.stamp, encode: pulse.encode, changed: true, tuples: src, tree: pulse.tree}
 		}
+		// Every tuple handed on is a copy the relay holds, as heavy as its
+		// source.
+		n.g.view.holdRows(n.held(), src)
 		out := make([]jsval.Value, len(src))
 		copies := make([]relayCopy, 0, len(src))
 		var lut map[*jsval.Object]*jsval.Object
@@ -673,12 +693,20 @@ func (s *tidSet) add(o *jsval.Object) bool {
 func facLoad(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *opParams) any) {
 	return []jsval.Value(nil), trFunc(func(n *opNode, p *opParams, pulse *flowPulse) *flowPulse {
 		format := p.Value("format")
-		var data []jsval.Value
-		if v := p.Value("values"); !v.IsUndefined() && p.Has("values") {
-			data = c.view.parseValues(v, format)
-		} else {
-			data = c.view.request(p.Value("url"), format)
-		}
+		data := func() []jsval.Value {
+			// The data set's rows are replaced: the ones it holds are free
+			// to the parse that makes the new ones.
+			bud := c.view.bud
+			defer bud.Replacing(bud.Replacing(n.src()))
+			// `if (_.values)`: a falsy value loads the url.
+			if v := p.Value("values"); v.IsTruthy() {
+				return c.view.parseValues(v, format)
+			}
+			return c.view.request(p.Value("url"), format)
+		}()
+		// The Load transform's ingest wraps a null row as {data: null}; only
+		// a change set reads its id (see seedCollect).
+		c.view.holdRows(n.src(), data)
 		var cl jsval.Cloner
 		for i := range data {
 			data[i] = ingestTupleWith(&cl, data[i])

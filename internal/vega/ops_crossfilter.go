@@ -66,8 +66,11 @@ func init() {
 			}
 			out := make([]jsval.Value, 0, len(pulse.tuples))
 			for _, t := range pulse.tuples {
-				k := int(jsval.ToNumber(t.Get("_index")))
-				if k >= 0 && k < len(b.curr) && b.curr[k]&ignore == 0 {
+				// _index is the crossfilter's own, unless a transform
+				// rewrote it: checked as a float, as converting NaN or a huge
+				// number to an int is platform-dependent
+				f := jsval.ToNumber(t.Get("_index"))
+				if f > -1 && f < float64(len(b.curr)) && b.curr[int(f)]&ignore == 0 {
 					out = append(out, t)
 				}
 			}

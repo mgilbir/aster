@@ -1,6 +1,8 @@
 package vega
 
 import (
+	"math"
+
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/scene"
 )
@@ -58,10 +60,14 @@ func (c *rtContext) InScope(item jsval.Value) bool {
 	if !id.IsNum() || c.group == nil {
 		return false
 	}
-	i := int(id.NumValue())
-	if i < 0 || i >= len(c.view.itemByID) {
+	// An item's $id is an index into the view's items; anything else an
+	// expression passes is checked as a float, since converting NaN or a
+	// huge number to an int is platform-dependent.
+	f := id.NumValue()
+	if !(f >= 0 && f < float64(len(c.view.itemByID)) && f == math.Trunc(f)) {
 		return false
 	}
+	i := int(f)
 	for it := c.view.itemByID[i]; it != nil; {
 		if it == c.group {
 			return true

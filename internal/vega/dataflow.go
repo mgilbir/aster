@@ -189,6 +189,12 @@ type opNode struct {
 	source   []*opNode       // `pulse` parameter operators
 	pulse    *flowPulse      // last output
 	dynTargs *[]*opNode
+
+	// rows are the data rows the operator holds (rows.go), nil for the
+	// many that hold none; list is the bytes of the tuple list it outputs,
+	// charged to the call's ledger (holdList).
+	rows *opRows
+	list int64
 }
 
 // Value returns the operator's value.
@@ -354,8 +360,18 @@ func (n *opNode) run(p *flowPulse) *flowPulse {
 func (n *opNode) evaluate(p *flowPulse) *flowPulse {
 	if n.tr != nil {
 		params := n.marshall(p.stamp)
-		out := n.tr.transform(n, params, p)
+		out := n.transform(params, p)
 		params.clear()
+		if out != stopPulse && n.g.view != nil {
+			var tuples []jsval.Value
+			if out != nil {
+				tuples = out.tuples
+			}
+			n.g.view.holdList(n, p, tuples)
+		}
+		if checkHeld && out != nil && out != stopPulse && unheld(out.tuples) {
+			panic(fmt.Sprintf("operator %s passed on tuples no operator holds", n.name))
+		}
 		return out
 	}
 	if upd := n.update; upd != nil {
@@ -370,6 +386,21 @@ func (n *opNode) evaluate(p *flowPulse) *flowPulse {
 		}
 	}
 	return nil
+}
+
+// transform runs the operator's transform. The rows it held from its last run
+// are being replaced, so the rows it reserves may use them (rows.go).
+func (n *opNode) transform(params *opParams, p *flowPulse) *flowPulse {
+	var bud *budget.Budget
+	if n.g.view != nil {
+		bud = n.g.view.bud
+	}
+	var held *budget.Held
+	if n.rows != nil {
+		held = &n.rows.held
+	}
+	defer bud.Replacing(bud.Replacing(held))
+	return n.tr.transform(n, params, p)
 }
 
 // nodeHeap is the evaluation priority queue: lowest rank first. It is
@@ -488,8 +519,9 @@ type flowGraph struct {
 	maxVisits int
 	// maxOps bounds the operators the graph holds, which every guide, mark and
 	// facet cell instantiates.
-	maxOps   int
-	warnings []string
+	maxOps int
+	// warned holds the warnings reported so far (report).
+	warned map[Warning]struct{}
 	// onReport is Options.Report.
 	onReport func(error) error
 }
@@ -666,9 +698,9 @@ func (g *flowGraph) evaluate(encode string) (err error) {
 				case *scale.Thrown, *expr.Error:
 					err = e.(error) // an exception a scale, an accessor or an expression threw
 				case error:
-					err, internal = fmt.Errorf("%w\n%s", e, shortStack()), true
+					err, internal = unexpected(e), true
 				default:
-					err, internal = fmt.Errorf("vega: internal error: %v\n%s", r, shortStack()), true
+					err, internal = unexpected(fmt.Errorf("vega: internal error: %v", r)), true
 				}
 			}
 		}()
@@ -739,7 +771,7 @@ func (g *flowGraph) safely(fn func(*flowGraph)) (err error) {
 			} else if ee, ok := r.(*expr.Error); ok {
 				err = ee
 			} else {
-				err, internal = fmt.Errorf("vega: internal error: %v", r), true
+				err, internal = unexpected(fmt.Errorf("vega: internal error: %v", r)), true
 			}
 			if !fatal(err, internal) {
 				err = g.report(err)

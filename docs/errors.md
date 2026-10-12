@@ -44,12 +44,14 @@ svg, err := c.VegaLiteToSVG(spec, aster.WithErrorHandler(func(err error) error {
 
 | Value | When | Default (no handler) |
 |---|---|---|
-| `*aster.LoadError` with `Resource == "data"` | a `data.url` the Loader refused or failed to load, or whose body does not parse in its `format` | the call fails |
+| `*aster.LoadError` with `Resource == "data"` | a `data.url` the Loader refused or failed to load, or whose body does not parse in its `format`, or a JSON body with a `null` row (which upstream's ingestion rejects after the view is made) | the call fails |
 | `*aster.LoadError` with `Resource == "image"` | an image mark (or an `<image>` in SVG input) whose URL the Loader refused, failed to load, or that is not a PNG, JPEG or GIF that decodes | the call fails |
 | another `error` | an exception an expression or an operator raised while the chart was evaluated (`TypeError`, `RangeError`, an invalid parameter, an unknown projection type) | the call fails |
-| `aster.Warning` | a Vega warning (`Infinite extent for field "x"`, `Unsupported scale property: …`), or a link (`href`) the Loader refused, which the output then lacks | ignored |
+| `aster.Warning` | a Vega warning (`Infinite extent for field "x": [Infinity, -Infinity]`, `Unsupported scale property: …`), an expression's `warn(…)` (`EXPRESSION` and its arguments as `String()` prints them), or a link (`href`) the Loader refused, which the output then lacks | ignored |
 
-`LoadError.Err` is the Loader's own error (for example the `HTTPLoader`'s "private/loopback address (blocked)"), so `errors.Is` reaches errors your Loader returns. When the handler lets a failure go, the result is upstream's: the data set is empty (or, for a body that does not parse, the text as one value), and the image is undrawn.
+`LoadError.Err` is the Loader's own error (for example the `HTTPLoader`'s "private/loopback address (blocked)"), so `errors.Is` reaches errors your Loader returns. When the handler lets a failure go, the result is upstream's: the data set is empty (or, for a body that does not parse, the text as one value), and the image is undrawn. A `null` row in a loaded JSON body leaves the data set empty: upstream's view never finishes rendering it, so there is no upstream result to match.
+
+Warnings carry text from the specification and repeat in every cell of a faceted group, so the handler hears of each distinct warning once per call, its text cut to 1 KiB, and of at most 256 of them; the 257th says that the rest are not reported. Errors are each reported. An expression's `info()` and `debug()` are below the warning level and are not reported, as upstream's logger drops them at its warning level.
 
 Embedded PNG, JPEG and GIF images (`data:image/png;base64,…`, and `image/jpeg`, `image/gif`) are part of the specification, not resources: they need no Loader, and draw with the default one. Any other `data:` URL goes through the Loader like a remote one.
 

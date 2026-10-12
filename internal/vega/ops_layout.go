@@ -145,6 +145,7 @@ func facAxisTicks(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNo
 		if err != nil {
 			failErr(err)
 		}
+		n.g.view.holdCreated(n, 0, ticks)
 		n.value = ticks
 		return changedPulse(pulse, ticks)
 	}), nil
@@ -182,6 +183,7 @@ func facLegendEntries(c *rtContext, n *opNode, e *entry) (any, transform, func(*
 		if err != nil {
 			failErr(err)
 		}
+		n.g.view.holdCreated(n, 0, entries)
 		n.value = entries
 		return changedPulse(pulse, entries)
 	}), nil

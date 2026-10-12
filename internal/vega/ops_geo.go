@@ -59,7 +59,9 @@ func init() {
 			if err != nil {
 				failErr(err)
 			}
-			return changedPulse(pulse, []jsval.Value{g})
+			out := []jsval.Value{g}
+			n.g.view.holdCreated(n, 0, out)
+			return changedPulse(pulse, out)
 		}), nil
 	}
 

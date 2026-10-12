@@ -137,7 +137,7 @@ func Density(ctx context.Context, source []jsval.Value, p DensityParams) ([]jsva
 		domain, valid = valuesExtent(k.Data())
 	}
 	// The samples are new tuples: reserve them before they are drawn.
-	if err := reserveOut(ctx, maxSamples(minsteps, maxsteps), len(source)); err != nil {
+	if err := reserveRows(ctx, maxSamples(minsteps, maxsteps)); err != nil {
 		return nil, err
 	}
 	return sampleTuples(ctx, f, domain, valid, minsteps, maxsteps, nil, nil, p.As, 1)

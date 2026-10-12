@@ -19,6 +19,7 @@ func init() {
 			if err != nil {
 				failErr(err)
 			}
+			n.g.view.holdCreated(n, 0, gen) // the generated parent nodes
 			out := append(append(make([]jsval.Value, 0, len(pulse.tuples)+len(gen)), pulse.tuples...), gen...)
 			res := changedPulse(pulse, out)
 			res.tree = tree
@@ -109,6 +110,7 @@ func init() {
 			if err != nil {
 				failErr(err)
 			}
+			n.g.view.holdCreated(n, 0, links)
 			return changedPulse(pulse, links)
 		}), nil
 	}

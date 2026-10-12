@@ -498,9 +498,10 @@ func (it *Item) setRaw(k string, val jsval.Value) {
 
 // setRawTri keeps the value given to a boolean property when it was not a
 // boolean, so that reading the property back (an expression's item.defined)
-// gives the value as upstream stores it, not the Tri it was reduced to.
+// gives the value as upstream stores it, not the Tri it was reduced to: null
+// included, which is Unset like undefined but reads back as null.
 func (it *Item) setRawTri(k string, val jsval.Value) {
-	if val.IsNullish() || val.IsBool() {
+	if val.IsUndefined() || val.IsBool() {
 		delete(it.Raw, k)
 		return
 	}

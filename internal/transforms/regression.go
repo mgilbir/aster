@@ -88,7 +88,7 @@ func Regression(ctx context.Context, data []jsval.Value, p RegressionParams) ([]
 			continue
 		}
 		// A fitted curve is at most 200 points (two for a line).
-		if err := reserveOut(ctx, len(out)+201, len(data)); err != nil {
+		if err := reserveRows(ctx, len(out)+201); err != nil {
 			return nil, err
 		}
 		model, err := FitRegressionCtx(ctx, method, g.Tuples, p.X.Get, p.Y.Get, p.Order)

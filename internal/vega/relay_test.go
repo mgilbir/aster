@@ -1,6 +1,7 @@
 package vega
 
 import (
+	"context"
 	"math/rand"
 	"testing"
 
@@ -92,13 +93,14 @@ func TestRelayDeriveMatchesMap(t *testing.T) {
 	r := rand.New(rand.NewSource(5))
 	p := newParams()
 	p.set("derive", jsval.Bool(true), true)
+	v := newView(context.Background(), Options{}, jsval.Undefined)
 	for round := 0; round < 200; round++ {
 		_, tr, _ := facRelay(nil, nil, nil)
 		ref := relayByMap()
 		copies := map[*jsval.Object]*jsval.Object{} // reference copy -> relay copy
 		for pi, src := range tuplePulses(r, 4) {
 			want := ref(src)
-			got := tr.transform(&opNode{}, p, &flowPulse{tuples: src}).tuples
+			got := tr.transform(&opNode{g: v.g}, p, &flowPulse{tuples: src}).tuples
 			if len(got) != len(want) {
 				t.Fatalf("round %d pulse %d: %d tuples, want %d", round, pi, len(got), len(want))
 			}

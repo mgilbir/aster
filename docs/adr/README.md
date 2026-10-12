@@ -15,3 +15,4 @@ Decisions whose reason is not visible in the code. Each says what was decided, w
 | [0009](0009-caller-chooses-fonts.md) | Registered families are the caller's, and so is the fallback chain | accepted, 2026-10-11 |
 | [0010](0010-bounds-charged-where-work-happens.md) | Bounds are charged where the work happens: a per-call ledger, byte-bounded caches, and a bounded-input corpus that CI runs | accepted, 2026-10-11 |
 | [0011](0011-faithful-output-free-algorithm.md) | Faithful in output, free in algorithm: bounded algorithms with identical output, and degenerate parameters refused | accepted, 2026-10-11 |
+| [0012](0012-rows-held-by-their-maker.md) | Rows are held by the operator that made them: one charge point, replaced per operator, checked by the tests | accepted, 2026-10-12 |

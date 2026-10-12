@@ -28,9 +28,10 @@ func (e *Stop) Unwrap() error { return e.Err }
 // Budget is the mutable state of one render. It is not safe for concurrent
 // use: a render is single-threaded.
 type Budget struct {
-	// MaxRows bounds the net number of data rows alive across the render
-	// (<= 0: unlimited), MaxLoadBytes the bytes the Loader returned in total,
-	// MaxPoints the path points geographic marks may emit.
+	// MaxRows bounds the data rows alive across the render (<= 0:
+	// unlimited): the rows every holder holds (see Hold). MaxLoadBytes bounds
+	// the bytes the Loader returned in total, MaxPoints the path points
+	// geographic marks may emit.
 	MaxRows      int
 	MaxLoadBytes int64
 	MaxPoints    int64
@@ -38,17 +39,29 @@ type Budget struct {
 	// (the heatmap's canvases), in total across the render.
 	MaxCanvasBytes int64
 	// RowBytes is the memory one counted row stands for (0: rows are only
-	// counted). With it set, AddRowExcess charges the bytes by which rows
-	// outweigh that, so that MaxRows bounds their memory (MaxRows * RowBytes)
-	// and not just their number.
+	// counted). With it set, the bytes by which rows outweigh that are held
+	// with them (Hold), so that MaxRows bounds their memory (MaxRows *
+	// RowBytes) and not just their number.
 	RowBytes int64
 
 	rows   int64
 	excess int64
-	loaded int64
-	points int64
-	canvas int64
+	// replacing is the holding about to be replaced: what it holds is free
+	// to a reservation (see Replacing).
+	replacing *Held
+	loaded    int64
+	points    int64
+	canvas    int64
 }
+
+// Held is what one holder of rows holds of a Budget: a dataflow operator
+// holds the tuples it made and still outputs. The zero value holds nothing.
+type Held struct {
+	rows, excess int64
+}
+
+// Rows is the number of rows h holds.
+func (h *Held) Rows() int64 { return h.rows }
 
 type key struct{}
 
@@ -94,48 +107,71 @@ func MulInt(a, b int) int {
 	return a * b
 }
 
-// Reserve checks that n more rows (net of the rows a transform replaces) fit,
-// without recording them; the dataflow records the real growth when the
-// transform returns. Call it before allocating.
+// Reserve checks that n more rows fit, without recording them: a holder
+// reserves the rows it is about to make, then holds them (Hold) once they
+// exist. What the holding being replaced holds (Replacing) counts as free.
+// Call it before allocating.
 func (b *Budget) Reserve(n int64) error {
 	if b == nil || b.MaxRows <= 0 || n <= 0 {
 		return nil
 	}
-	if n > int64(b.MaxRows) || b.used()+n > int64(b.MaxRows) {
-		return over("data rows", b.used()+min(n, math.MaxInt64-b.used()), int64(b.MaxRows))
+	used := max(b.used()-b.credit(), 0)
+	if n > int64(b.MaxRows) || used+n > int64(b.MaxRows) {
+		return over("data rows", used+min(n, math.MaxInt64-used), int64(b.MaxRows))
 	}
 	return nil
 }
 
-// ReserveWeight is Reserve for a transform that grows the weight of the rows
-// as well as their number: it checks that rows more rows and excess more bytes
-// of row excess (see AddRowExcess) fit, without recording them.
+// ReserveWeight is Reserve for rows that weigh more than RowBytes each: it
+// checks that rows more rows, outweighing RowBytes by excess bytes in all,
+// fit, without recording them.
 func (b *Budget) ReserveWeight(rows, excess int64) error {
 	if b == nil || b.RowBytes <= 0 {
 		return b.Reserve(rows)
 	}
-	return b.Reserve(rows + excess/b.RowBytes)
+	return b.Reserve(rows + max(excess, 0)/b.RowBytes)
 }
 
-// AddRows records n more rows (negative when rows were dropped) and fails when
-// the total exceeds MaxRows.
-func (b *Budget) AddRows(n int) error {
+// Hold replaces what h holds with rows rows, which outweigh RowBytes by
+// excess bytes in all, and fails when the rows held across the render then
+// exceed MaxRows. A holder that runs again replaces what it held rather than
+// adding to it, and one that holds less gives the difference back; nothing
+// can give back more than it holds.
+func (b *Budget) Hold(h *Held, rows, excess int64) error {
+	rows, excess = max(rows, 0), max(excess, 0)
 	if b == nil {
 		return nil
 	}
-	b.rows += int64(n)
+	if b.RowBytes <= 0 {
+		excess = 0
+	}
+	b.rows += rows - h.rows
+	b.excess += excess - h.excess
+	h.rows, h.excess = rows, excess
 	return b.checkRows()
 }
 
-// AddRowExcess records n more bytes (negative when rows were dropped or
-// shrank) by which the rows weigh more than the RowBytes each is counted for,
-// and fails when the rows and their excess exceed MaxRows.
-func (b *Budget) AddRowExcess(n int64) error {
-	if b == nil || b.RowBytes <= 0 {
+// Replacing marks h as the holding about to be replaced, until the holding it
+// returns is restored with another call: a reservation made meanwhile counts
+// what h holds as free, since the rows it reserves will replace them.
+func (b *Budget) Replacing(h *Held) (prev *Held) {
+	if b == nil {
 		return nil
 	}
-	b.excess = max(b.excess+n, 0)
-	return b.checkRows()
+	prev, b.replacing = b.replacing, h
+	return prev
+}
+
+// credit is what the holding being replaced holds, counted in rows.
+func (b *Budget) credit() int64 {
+	h := b.replacing
+	if h == nil {
+		return 0
+	}
+	if b.RowBytes <= 0 {
+		return h.rows
+	}
+	return h.rows + h.excess/b.RowBytes
 }
 
 func (b *Budget) checkRows() error {
@@ -145,7 +181,7 @@ func (b *Budget) checkRows() error {
 	return nil
 }
 
-// used is the rows recorded, the excess weight of the heavy ones counted in
+// used is the rows held, the excess weight of the heavy ones counted in
 // rows.
 func (b *Budget) used() int64 {
 	if b.RowBytes <= 0 {
@@ -154,7 +190,7 @@ func (b *Budget) used() int64 {
 	return b.rows + b.excess/b.RowBytes
 }
 
-// Rows is the number of rows recorded so far.
+// Rows is the number of rows held.
 func (b *Budget) Rows() int {
 	if b == nil {
 		return 0
@@ -182,12 +218,13 @@ func (b *Budget) LoadLeft() int64 {
 	return max(b.MaxLoadBytes-b.loaded, 0)
 }
 
-// RowsLeft is how many more rows may be created (MaxInt64 when unlimited).
+// RowsLeft is how many more rows may be created (MaxInt64 when unlimited),
+// counting what the holding being replaced holds as free.
 func (b *Budget) RowsLeft() int64 {
 	if b == nil || b.MaxRows <= 0 {
 		return math.MaxInt64
 	}
-	return max(int64(b.MaxRows)-b.used(), 0)
+	return max(int64(b.MaxRows)-max(b.used()-b.credit(), 0), 0)
 }
 
 // Points records n path points and fails past MaxPoints.
@@ -221,12 +258,6 @@ func (b *Budget) Canvas(n int64) error {
 
 // Reserve is Budget.Reserve on the Budget in ctx.
 func Reserve(ctx context.Context, n int64) error { return From(ctx).Reserve(n) }
-
-// ReserveOut checks that a transform producing out rows from in input rows
-// fits; the input rows are already counted.
-func ReserveOut(ctx context.Context, out, in int64) error {
-	return From(ctx).Reserve(out - in)
-}
 
 // ReserveWeight is Budget.ReserveWeight on the Budget in ctx.
 func ReserveWeight(ctx context.Context, rows, excess int64) error {

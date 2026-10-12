@@ -2,6 +2,7 @@ package vega
 
 import (
 	"testing"
+	"unicode/utf8"
 
 	"github.com/mgilbir/aster/internal/upstream"
 )
@@ -16,20 +17,21 @@ func TestUpstreamD3DsvParse(t *testing.T) {
 			r.Skip("oversized")
 			continue
 		}
-		var delim byte
+		var delim string
 		var text any
 		switch {
 		case c.Fn == "dsvFormat()" && c.Method == "parse" && len(c.Args) == 1:
 			d, ok := c.ConstructedWith[0].(string)
-			if !ok || len(d) != 1 {
+			if first, _ := utf8.DecodeRuneInString(d); !ok || d == "" || first > 0xFFFF {
+				// none, or one that is two UTF-16 code units (see parseDSVLimit)
 				r.Skip("delimiters of another shape")
 				continue
 			}
-			delim, text = d[0], c.Args[0]
+			delim, text = d, c.Args[0]
 		case c.Fn == "tsvParse" && len(c.Args) == 1:
-			delim, text = '\t', c.Args[0]
+			delim, text = "\t", c.Args[0]
 		case c.Fn == "csvParse" && len(c.Args) == 1:
-			delim, text = ',', c.Args[0]
+			delim, text = ",", c.Args[0]
 		default:
 			r.Skip("not a parse the engine has (formatters, parseRows, autoType, row functions)")
 			continue

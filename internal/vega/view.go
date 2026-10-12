@@ -26,7 +26,6 @@ import (
 	"errors"
 	"fmt"
 	"runtime/debug"
-	"strings"
 	"time"
 
 	"github.com/mgilbir/aster/internal/budget"
@@ -48,14 +47,17 @@ type Loader interface {
 	Sanitize(ctx context.Context, uri string) (string, error)
 }
 
-// Limits bound the work a specification can cause. Zero fields select the
-// defaults.
+// Limits bound the work a specification can cause. A zero field selects the
+// default; a negative one removes that bound, whichever field it is.
 type Limits struct {
-	// MaxRows is the total number of data rows a specification may load.
+	// MaxRows is the number of data rows alive at once: each operator holds
+	// the tuples it made (rows.go).
 	MaxRows int
 	// MaxVisits is the number of operator evaluations across all runs.
 	MaxVisits int
-	// MaxReruns is the number of layout-driven re-evaluations.
+	// MaxReruns is the number of re-evaluations one run may cause for one
+	// reason: the changes the triggers of one data set make, and the view's
+	// size changes. The first run and each signal write have their own.
 	MaxReruns int
 	// MaxItems is the number of scenegraph items.
 	MaxItems int
@@ -190,9 +192,6 @@ type Result struct {
 	// Description is the view's aria description ("" for none).
 	Description    string
 	HasDescription bool
-	// Warnings collects the dataflow warnings (failed loads, unsupported
-	// scale properties, ...).
-	Warnings []string
 }
 
 // runView is a running instance of a specification (vega-view's View).
@@ -203,6 +202,8 @@ type runView struct {
 	loader Loader
 	limits Limits
 	bud    *budget.Budget
+	led    *budget.Ledger // the call's, nil for none
+	lists  int64          // tuple list bytes charged to led (holdList)
 	strs   *expr.StringBudget
 	items  int
 	cells  int
@@ -231,7 +232,12 @@ type runView struct {
 	backgroundSig         *opNode
 	autosizeSig           *opNode
 	bgValue               jsval.Value
-	reruns                int
+
+	// layoutReruns and triggerRuns count the re-evaluations of the current
+	// run (run), runDepth how deep they nest (rerun).
+	layoutReruns int
+	triggerRuns  map[*opNode]int
+	runDepth     int
 
 	itemTupleCache map[*scene.Item]*jsval.Object
 	viewItem       map[*jsval.Object]*scene.Item
@@ -264,9 +270,9 @@ func Render(ctx context.Context, spec jsval.Value, opts Options) (res *Result, e
 			case *budget.Stop:
 				err = e.Err
 			case error:
-				err = fmt.Errorf("vega: %w\n%s", e, shortStack())
+				err = unexpected(fmt.Errorf("vega: %w", e))
 			default:
-				err = fmt.Errorf("vega: internal error: %v\n%s", r, shortStack())
+				err = unexpected(fmt.Errorf("vega: internal error: %v", r))
 			}
 			res = nil
 		}
@@ -290,6 +296,7 @@ func Render(ctx context.Context, spec jsval.Value, opts Options) (res *Result, e
 	flow := scope.toRuntime()
 
 	v := newView(ctx, opts, scope.locale)
+	defer v.releaseLists()
 	v.build(flow)
 	stage("parse")
 	if err := v.run(); err != nil {
@@ -317,15 +324,21 @@ func Render(ctx context.Context, spec jsval.Value, opts Options) (res *Result, e
 	return v.result(scope), nil
 }
 
-// shortStack is the top of the goroutine stack, for diagnosing unexpected
-// panics.
-func shortStack() string {
-	b := debug.Stack()
-	lines := strings.Split(string(b), "\n")
-	if len(lines) > 24 {
-		lines = lines[:24]
+// panicHook, when set (by tests, before any render starts), receives the
+// goroutine stack of every panic the engine did not expect. The error the
+// caller gets carries the panic's message only: a stack is for whoever
+// debugs the engine, and in a message it is noise every caller would have to
+// strip (and it names the host's file paths).
+var panicHook func(stack []byte)
+
+// unexpected is err, the error of a panic the engine did not expect, after
+// panicHook is told where it happened. It is called from the recover, so the
+// stack is still the panicking one.
+func unexpected(err error) error {
+	if panicHook != nil {
+		panicHook(debug.Stack())
 	}
-	return strings.Join(lines, "\n")
+	return err
 }
 
 func newView(ctx context.Context, opts Options, locale jsval.Value) *runView {
@@ -335,7 +348,7 @@ func newView(ctx context.Context, opts Options, locale jsval.Value) *runView {
 	bud := &budget.Budget{MaxRows: limits.MaxRows, MaxLoadBytes: limits.MaxLoadBytes, MaxPoints: limits.MaxPoints, MaxCanvasBytes: limits.MaxCanvasBytes, RowBytes: limits.RowBytes}
 	ctx = budget.With(ctx, bud)
 	v := &runView{
-		bud: bud, strs: expr.NewStringBudget(limits.MaxStringBytes),
+		bud: bud, led: budget.LedgerFrom(ctx), strs: expr.NewStringBudget(limits.MaxStringBytes),
 		ctx: ctx, loader: opts.Loader, limits: limits,
 		loc: opts.Location, sg: scene.New(),
 		bounder: scene.NewBounder(opts.TextMeasurer),
@@ -508,9 +521,32 @@ func (v *runView) initBackground() {
 	g.connect(n, n.parameters(single("bg", v.backgroundSig), true, false))
 }
 
-// run evaluates the dataflow (View.runAsync).
+// run evaluates the dataflow (View.runAsync). The re-evaluations it causes
+// (rerun) are bounded per run: each run, the first and each signal write's,
+// has its own allowance.
 func (v *runView) run() error {
+	v.layoutReruns = 0
+	clear(v.triggerRuns)
 	return v.g.evaluate("")
+}
+
+// maxRunDepth bounds how deep re-evaluations nest. A data set's change runs
+// the dataflow from inside the run that made it (upstream's modify() and
+// View._resizeView do the same), so a chain of data sets whose triggers each
+// change the next nests one evaluation per link, each a stack of Go frames;
+// MaxReruns bounds each data set, this the chain.
+const maxRunDepth = 256
+
+// rerun runs the dataflow again from inside a run's post-run callback.
+func (v *runView) rerun(encode string) {
+	if v.runDepth >= maxRunDepth {
+		failLimit("re-evaluations nested more than %d deep", maxRunDepth)
+	}
+	v.runDepth++
+	defer func() { v.runDepth-- }()
+	if err := v.g.run(encode); err != nil {
+		failErr(err)
+	}
 }
 
 // resizeView is the view-size adjustment ViewLayout requests (View._resizeView).
@@ -548,13 +584,11 @@ func (v *runView) resizeView(viewWidth, viewHeight, width, height float64, origi
 			v.origin = origin
 		}
 		if rerun {
-			v.reruns++
-			if v.reruns > v.limits.MaxReruns {
+			v.layoutReruns++
+			if v.limits.MaxReruns >= 0 && v.layoutReruns > v.limits.MaxReruns {
 				failLimit("view layout did not converge after %d re-evaluations", v.limits.MaxReruns)
 			}
-			if err := g.run("enter"); err != nil {
-				failErr(err)
-			}
+			v.rerun("enter")
 		}
 		if auto {
 			g.runAfter(func(*flowGraph) { v.autosize = 1 }, false, 0)
@@ -575,8 +609,7 @@ func (v *runView) result(scope *Scope) *Result {
 	res := &Result{
 		Scenegraph: v.sg,
 		Width:      w, Height: h,
-		Origin:   [2]float64{l + v.origin[0], t + v.origin[1]},
-		Warnings: v.g.warnings,
+		Origin: [2]float64{l + v.origin[0], t + v.origin[1]},
 	}
 	if bg := v.backgroundSig; bg != nil {
 		val := bg.sig()

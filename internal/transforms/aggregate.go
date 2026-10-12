@@ -92,7 +92,7 @@ func Aggregate(ctx context.Context, data []jsval.Value, p AggregateParams) (res 
 	}
 	newCell := func(key string, t jsval.Value) *aggCell {
 		n := int64(len(order) + 1)
-		if err := budget.ReserveWeight(ctx, n-int64(len(data)), budget.Mul(n, rowExcess)); err != nil {
+		if err := budget.ReserveWeight(ctx, n, budget.Mul(n, rowExcess)); err != nil {
 			panic(aggAbort{err})
 		}
 		// The ledger is charged ahead, for a batch of cells a quarter of
