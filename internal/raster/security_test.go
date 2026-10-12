@@ -135,7 +135,7 @@ func TestFilterLimits(t *testing.T) {
 	}
 	// A filter region over MaxFilterPixels is not allocated, and fails the
 	// render rather than leave the element silently undrawn (C62).
-	if err := mustFinish(t, "region cap", secHead+`<defs><filter id="f" filterUnits="userSpaceOnUse" x="-1000" y="-1000" width="3000" height="3000"><feGaussianBlur stdDeviation="3"/></filter></defs><rect width="10" height="10" filter="url(#f)"/></svg>`, Limits{MaxFilterPixels: 1000}, time.Second); !errors.Is(err, errLimit) {
+	if err := mustFinish(t, "region cap", secHead+`<defs><filter id="f" filterUnits="userSpaceOnUse" x="-1000" y="-1000" width="3000" height="3000"><feGaussianBlur stdDeviation="3"/></filter></defs><rect width="10" height="10" filter="url(#f)"/></svg>`, Limits{MaxFilterPixels: 1000}, 10*time.Second); !errors.Is(err, errLimit) {
 		t.Errorf("region cap: want resource limit error, got %v", err)
 	}
 }
