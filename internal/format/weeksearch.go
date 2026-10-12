@@ -41,8 +41,12 @@ func (iv Interval) weekAt(w, j float64) float64 {
 }
 
 // weekCount is the count the filter tests, of the week j weeks from w; NaN
-// once the week is not a valid date.
-func (iv Interval) weekCount(w, j float64) float64 {
+// once the week is not a valid date. Each call adds one to *evals when
+// evals is not nil (tests count the search's work).
+func (iv Interval) weekCount(w, j float64, evals *int) float64 {
+	if evals != nil {
+		*evals++
+	}
 	d := iv.weekAt(w, j)
 	if !Valid(d) {
 		return math.NaN()
@@ -52,9 +56,11 @@ func (iv Interval) weekCount(w, j float64) float64 {
 
 // weekFloor is Floor for weekSearch filters: from the week start w, the
 // latest week at or before it whose count is a multiple of k.
-func (iv Interval) weekFloor(w float64) float64 {
+func (iv Interval) weekFloor(w float64) float64 { return iv.weekFloorN(w, nil) }
+
+func (iv Interval) weekFloorN(w float64, evals *int) float64 {
 	k := iv.filter
-	j, v := 0.0, iv.weekCount(w, 0)
+	j, v := 0.0, iv.weekCount(w, 0, evals)
 	for range maxWeekSearches {
 		if math.IsNaN(v) {
 			return math.NaN() // the walk runs off the dates: upstream never ends
@@ -66,7 +72,7 @@ func (iv Interval) weekFloor(w float64) float64 {
 		// The latest week before j whose count is at most v - r. A week
 		// past the dates reads as below every count.
 		m := v - r
-		below := func(i float64) bool { c := iv.weekCount(w, i); return math.IsNaN(c) || c <= m }
+		below := func(i float64) bool { c := iv.weekCount(w, i, evals); return math.IsNaN(c) || c <= m }
 		step := r
 		lo := j - step
 		for !below(lo) {
@@ -82,16 +88,18 @@ func (iv Interval) weekFloor(w float64) float64 {
 				hi = mid
 			}
 		}
-		j, v = lo, iv.weekCount(w, lo)
+		j, v = lo, iv.weekCount(w, lo, evals)
 	}
 	return math.NaN()
 }
 
 // weekNext is Floor(Offset(w, 1)) for weekSearch filters and a week start
 // w: the first week after it whose count is a multiple of k.
-func (iv Interval) weekNext(w float64) float64 {
+func (iv Interval) weekNext(w float64) float64 { return iv.weekNextN(w, nil) }
+
+func (iv Interval) weekNextN(w float64, evals *int) float64 {
 	k := iv.filter
-	j, v := 1.0, iv.weekCount(w, 1)
+	j, v := 1.0, iv.weekCount(w, 1, evals)
 	for range maxWeekSearches {
 		if math.IsNaN(v) {
 			return math.NaN()
@@ -102,7 +110,7 @@ func (iv Interval) weekNext(w float64) float64 {
 		}
 		// The first week after j whose count is at least the next multiple.
 		m := v + (k - r)
-		above := func(i float64) bool { c := iv.weekCount(w, i); return math.IsNaN(c) || c >= m }
+		above := func(i float64) bool { c := iv.weekCount(w, i, evals); return math.IsNaN(c) || c >= m }
 		step := k - r
 		hi := j + step
 		for !above(hi) {
@@ -118,7 +126,7 @@ func (iv Interval) weekNext(w float64) float64 {
 				lo = mid
 			}
 		}
-		j, v = hi, iv.weekCount(w, hi)
+		j, v = hi, iv.weekCount(w, hi, evals)
 	}
 	return math.NaN()
 }

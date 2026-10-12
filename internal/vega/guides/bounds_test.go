@@ -5,7 +5,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/format"
@@ -33,8 +32,11 @@ func objOf(kv ...any) jsval.Value {
 // years are refused with a limit error, at once, where they were dropped and
 // the axis drawn without ticks.
 func TestTimeTicksPastTheBoundFail(t *testing.T) {
-	env := &Env{Locale: format.DefaultLocale()}
-	start := time.Now()
+	// The walk is counted, not timed: the ledger's work is the dates the
+	// calendar walk visits, refused before it passes the guide's bound
+	// (it walked 4,194,304 dates, format.MaxRangeLen, before it failed).
+	l := budget.NewLedger(context.Background(), budget.LedgerLimits{})
+	env := &Env{Locale: format.DefaultLocale(), Context: budget.WithLedger(context.Background(), l)}
 	_, err := env.AxisTicks(AxisTicksInput{
 		Scale: utcScale(t, 0, 3e12),
 		Count: objOf("interval", jsval.Str("minutes"), "step", jsval.Num(2)),
@@ -42,8 +44,20 @@ func TestTimeTicksPastTheBoundFail(t *testing.T) {
 	if !errors.Is(err, budget.ErrLimit) {
 		t.Errorf("AxisTicks = %v; want a limit error", err)
 	}
-	if d := time.Since(start); d > time.Second {
-		t.Errorf("took %v", d)
+	// a filtered interval is walked to the bound (one unit a date), a plain
+	// one refused before it starts
+	for name, count := range map[string]jsval.Value{
+		"every 2 minutes": objOf("interval", jsval.Str("minutes"), "step", jsval.Num(2)),
+		"minutes":         jsval.Str("minutes"),
+	} {
+		l := budget.NewLedger(context.Background(), budget.LedgerLimits{})
+		env.Context = budget.WithLedger(context.Background(), l)
+		if _, err := env.AxisTicks(AxisTicksInput{Scale: utcScale(t, 0, 3e12), Count: count}); !errors.Is(err, budget.ErrLimit) {
+			t.Errorf("%s: %v; want a limit error", name, err)
+		}
+		if w := l.WorkDone(); w > 4*scale.MaxTicks {
+			t.Errorf("%s: walked %d units of work before refusing, more than the guide's bound allows", name, w)
+		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

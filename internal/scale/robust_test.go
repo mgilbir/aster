@@ -13,6 +13,7 @@ import (
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/jsval"
+	"github.com/mgilbir/aster/internal/testutil"
 )
 
 func randValue(r *rand.Rand, depth int) jsval.Value {
@@ -164,11 +165,12 @@ func TestBoundedWork(t *testing.T) {
 	l.SetBase(1e12)
 	l.SetDomain(nums(1, 1e300))
 	start := time.Now()
-	if got, err := l.Ticks(context.Background(), Count(1e12)); !errors.Is(err, budget.ErrLimit) {
+	if got, err := l.ticksN(context.Background(), Count(1e12), MaxTicks); !errors.Is(err, budget.ErrLimit) {
 		t.Errorf("log ticks = %d values, %v; want a limit error", len(got), err)
 	}
-	if time.Since(start) > 5*time.Second {
-		t.Errorf("log ticks took %v", time.Since(start))
+	// a hang guard: the steps are bounded (maxLogIter), not timed
+	if d := time.Since(start); d > testutil.Scaled(5*time.Second) {
+		t.Errorf("log ticks took %v", d)
 	}
 	if _, err := QuantizeInterpolator(func(float64) jsval.Value { return jsval.Null }, 1<<30); !errors.Is(err, budget.ErrLimit) {
 		t.Errorf("QuantizeInterpolator(2^30) = %v; want a limit error", err)
@@ -176,7 +178,7 @@ func TestBoundedWork(t *testing.T) {
 	u := NewUTC()
 	u.SetDomain([]jsval.Value{jsval.Num(0), jsval.Num(3e12)})
 	iv, _ := format.UTC.Minute().Every(2)
-	if _, err := u.Ticks(context.Background(), IntervalCount(iv)); !errors.Is(err, budget.ErrLimit) {
+	if _, err := u.ticksN(context.Background(), IntervalCount(iv), MaxTicks); !errors.Is(err, budget.ErrLimit) {
 		t.Errorf("utc ticks every 2 minutes over 95 years: %v; want a limit error", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())

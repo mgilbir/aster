@@ -3,6 +3,8 @@ package format
 import (
 	"context"
 	"errors"
+	"github.com/mgilbir/aster/internal/budget"
+	"github.com/mgilbir/aster/internal/testutil"
 	"math"
 	"math/rand"
 	"testing"
@@ -108,8 +110,21 @@ func TestHugeOffsetsTerminate(t *testing.T) {
 	lw, _ := loc.Week(0).Every(1000000)
 	lw.Floor(1.6e12)
 	offsetT(lw, 1.6e12, 3)
-	if d := time.Since(start); d > 5*time.Second {
+	// a hang guard: each walk ends (Invalid Date, maxFilterIterations)
+	if d := time.Since(start); d > testutil.Scaled(5*time.Second) {
 		t.Errorf("took %v", d)
+	}
+	// Quarters past what the valid dates hold are refused before any step
+	// (upstream walks off the end of time): counted, as the ledger's work.
+	l := budget.NewLedger(context.Background(), budget.LedgerLimits{})
+	ctx := budget.WithLedger(context.Background(), l)
+	for _, step := range []float64{1e9, -1e9, math.Inf(1)} {
+		if got, err := q.Offset(ctx, 0, step); err != nil || !math.IsNaN(got) {
+			t.Errorf("quarter offset %v = %v, %v; want NaN", step, got, err)
+		}
+	}
+	if w := l.WorkDone(); w != 0 {
+		t.Errorf("refused quarter offsets walked %d steps", w)
 	}
 }
 

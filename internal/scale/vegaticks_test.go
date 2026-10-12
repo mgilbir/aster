@@ -6,7 +6,6 @@ import (
 	"math"
 	"math/rand"
 	"testing"
-	"time"
 
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/format"
@@ -49,7 +48,6 @@ func TestMinStepHugeCount(t *testing.T) {
 	s := NewLinear()
 	s.SetType(TypeLinear)
 	s.SetDomain([]jsval.Value{jsval.Num(0), jsval.Num(1)})
-	start := time.Now()
 	for _, c := range []struct {
 		count, minStep float64
 		want           float64 // 0: a limit error
@@ -71,8 +69,31 @@ func TestMinStepHugeCount(t *testing.T) {
 			t.Errorf("tickCount(%v, %v) = %+v, %v; want %v", c.count, c.minStep, tc, err, c.want)
 		}
 	}
-	if d := time.Since(start); d > time.Second {
-		t.Errorf("took %v", d)
+}
+
+// TestMinStepReductionIsLogarithmic is C14's work guard, counted rather than
+// timed: the reduction evaluates the tick step a few dozen times however
+// large the count, where upstream's loop evaluates it once per count it
+// passes (700 million times for tickCount 1e9 at tickMinStep 1.3e-9).
+func TestMinStepReductionIsLogarithmic(t *testing.T) {
+	for _, c := range []struct{ count, minStep float64 }{
+		{1e9, 1.3e-9}, {1e9, 1e-4}, {1e9, 1e-3}, {MaxTicks + 0.5, 1e-9}, {1e15, 1e-12}, {5000, 1e-9},
+	} {
+		calls := 0
+		below := func(n float64) bool {
+			if calls++; calls > 200 {
+				panic("more than 200 tick steps")
+			}
+			return TickStep(0, 1, n) < c.minStep
+		}
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("count %v, minStep %v: %v", c.count, c.minStep, r)
+				}
+			}()
+			_, _ = reduceForMinStep(math.Min(c.count, math.Floor(1/c.minStep)+1), below)
+		}()
 	}
 }
 
