@@ -73,7 +73,7 @@ Fixed bounds, the same whatever `WithMemoryLimit` says:
 | JSON nesting | 256 levels; values nested at run time 1,024 |
 | expression nesting | 512 levels, in the Vega-Lite compiler and in Vega. Vega counts a chain of binary operators (`a \|\| b \|\| …`) one level per operator; the Vega-Lite compiler, which only reads the fields an expression uses, counts such a chain, and a chain of conditionals (`a ? 0 : b ? 1 : …`, what an explicit `sort` array compiles to), as one level |
 | one string an expression builds | 16,777,216 UTF-16 code units (V8's own limit, 536,870,888, is a `RangeError` as upstream) |
-| a regular expression compiled from a string | 1 MiB of source; its program, up to goecma262's 200,000 instructions, is charged to the call's ledger unless the shared cache keeps it |
+| a regular expression compiled from a string | 1 MiB of source; its program, up to goecma262's 200,000 instructions, is charged to the call's ledger unless the shared cache keeps it, from a bound computed from the parsed pattern before it is compiled (a program past what the ledger has left, or past the 200,000, is refused unbuilt), as are literals and `countpattern`'s patterns |
 | SVG input to `SVGToPNG` | 256 MiB, 4,000,000 elements, depth 256 |
 | style sheets of SVG input to `SVGToPNG` | 4 MiB, 100,000 rules, 100,000,000 selector-matching steps; past any of them the call fails rather than draw the document partly styled |
 | one filter region (PNG) | 32 Mi pixels; past it the call fails rather than leave the element undrawn |

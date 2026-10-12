@@ -408,7 +408,7 @@ func TestPatternLiteralState(t *testing.T) {
 	// regexp() built once and tested twice does carry lastIndex.
 	p, _ = Compile("test(re, 'a') + ',' + test(re, 'a')")
 	env := &fakeEnv{signals: map[string]jsval.Value{}}
-	re, _ := jsval.NewPattern("a", "g")
+	re, _ := jsval.NewPattern("a", "g", unpaid)
 	env.signals["re"] = jsval.PatternValue(re)
 	v, err := p.Eval(NewScope(env))
 	if err != nil || v.StrValue() != "true,false" {
@@ -436,3 +436,6 @@ func TestSelectionOfAnUnrunStoreIsATypeError(t *testing.T) {
 		}
 	}
 }
+
+// unpaid pays for nothing: for patterns a test compiles outside a call.
+func unpaid(bytes, work int64) error { return nil }
