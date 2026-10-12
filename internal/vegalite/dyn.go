@@ -361,10 +361,15 @@ func deepClone(cc *compileCtx, v Value) Value {
 	case jsval.KindObj:
 		o := v.ObjValue()
 		c := jsval.NewObject(o.Len())
+		digit := false // a key that may be an array index
 		for i := 0; i < o.Len(); i++ {
-			c.Set(o.KeyAt(i), deepClone(cc, o.ValueAt(i)))
+			k := o.KeyAt(i)
+			digit = digit || (len(k) > 0 && k[0] >= '0' && k[0] <= '9')
+			c.Set(k, deepClone(cc, o.ValueAt(i)))
 		}
-		jsOrderKeys(cc, c)
+		if digit {
+			jsOrderKeys(cc, c)
+		}
 		return jsval.Obj(c)
 	}
 	return v
@@ -517,7 +522,18 @@ func contains(list []string, s string) bool {
 // varName is upstream's varName: non-word characters become '_' and a leading
 // digit is prefixed.
 func varName(s string) string {
+	// A name of identifier characters only, not led by a digit, is its own
+	// variable name (most are): return it as it is, allocating nothing.
+	clean := len(s) == 0 || s[0] < '0' || s[0] > '9'
+	for i := 0; clean && i < len(s); i++ {
+		c := s[i]
+		clean = c == '_' || (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+	}
+	if clean {
+		return s
+	}
 	var b strings.Builder
+	b.Grow(len(s) + 1)
 	for _, r := range s {
 		if r < 128 && (r == '_' || (r >= '0' && r <= '9') || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')) {
 			b.WriteRune(r)

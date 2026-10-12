@@ -48,6 +48,8 @@ type compileCtx struct {
 	titleMerges map[*Value]*titleMerge
 	// jsr is the compilation's JavaScript realm (see jsRealm).
 	jsr *jsRealm
+	// pending is the work counted and not yet charged (see work).
+	pending int64
 }
 
 // check panics with the context's error once the caller's context is done.
@@ -67,10 +69,34 @@ func (c *compileCtx) check() {
 // every thousand or so, so every loop that charges its steps stops within
 // about a millisecond of the deadline. Charge more than 1 for a step that
 // does more work than a few allocations (a model, a selection).
+//
+// Steps are counted here and handed to the Meter workBatch at a time, so a
+// loop of single steps costs an addition and a comparison, inlined; the
+// Meter polls every thousand or so as before (flushWork hands over the rest
+// when the compilation ends).
 func (c *compileCtx) work(n int64) {
 	if c == nil {
 		return
 	}
+	c.pending += min(max(n, 0), maxWorkCharge)
+	if c.pending >= workBatch {
+		c.flushWork()
+	}
+}
+
+// workBatch is how many steps work counts before handing them to the
+// Meter; maxWorkCharge caps one charge, as the Meter does, so the count
+// cannot wrap.
+const (
+	workBatch     = 256
+	maxWorkCharge = 1 << 40
+)
+
+// flushWork hands the counted steps to the Meter and panics with the
+// context's error once the caller's context is done.
+func (c *compileCtx) flushWork() {
+	n := c.pending
+	c.pending = 0
 	if err := c.meter.Work(n); err != nil {
 		panic(cancelError{err})
 	}

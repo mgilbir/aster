@@ -97,7 +97,12 @@ func Compile(spec jsval.Value, opts Options) (out jsval.Value, err error) {
 		}
 	}
 	input := deepClone(cc, spec)
-	return compileSpec(cc, input, opts), nil
+	out = compileSpec(cc, input, opts)
+	// The last steps counted reach the ledger too; the compilation is done,
+	// so a deadline that passed meanwhile does not undo it.
+	_ = cc.meter.Work(cc.pending)
+	cc.pending = 0
+	return out, nil
 }
 
 // CompileJSON compiles a specification (and optional config) given as JSON text

@@ -179,8 +179,8 @@ func TestCompileWorkGrowsLinearly(t *testing.T) {
 // string, the ancestor parse gaining index keys in descending order or
 // flipping fields from explicit to derived, and a filter-invalid omap keyed
 // by index-like fields. Outside the race detector the bytes are the same on
-// every machine; clean, the quadratic parts measure -0.09 to 0.34 bytes per
-// n², and 44 to 169 with the eager ordering planted back. The race
+// every machine; clean, the quadratic parts measure -0.08 to 0.34 bytes per
+// n², and 23 to 137 with the eager ordering planted back. The race
 // detector's sync.Pool makes allocation vary, so the guard is skipped under
 // it.
 func TestCompileAllocGrowsLinearly(t *testing.T) {

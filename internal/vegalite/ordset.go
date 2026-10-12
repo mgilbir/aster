@@ -11,6 +11,8 @@ import (
 // A nil *sset stands for `undefined`, which upstream uses for "unknown".
 type sset struct {
 	items []string
+	// index is made once the set is past ssetScan members; below that a
+	// scan of items is cheaper than a map, and most sets stay there.
 	index map[string]struct{}
 	// raw holds, by their text, the members that were added as values other
 	// than strings (a transform's `as` of null): upstream's set holds the
@@ -47,8 +49,13 @@ func ssetOfValues(values []Value) *sset {
 	return s
 }
 
+const ssetScan = 8
+
 func newSset(items ...string) *sset {
-	s := &sset{index: make(map[string]struct{}, len(items))}
+	s := &sset{}
+	if len(items) > 0 {
+		s.items = make([]string, 0, len(items))
+	}
 	for _, i := range items {
 		s.add(i)
 	}
@@ -56,22 +63,35 @@ func newSset(items ...string) *sset {
 }
 
 func (s *sset) add(x string) {
-	if s.index == nil {
-		s.index = map[string]struct{}{}
-	}
-	if _, ok := s.index[x]; ok {
+	if s.has(x) {
 		return
 	}
-	s.index[x] = struct{}{}
 	s.items = append(s.items, x)
+	switch {
+	case s.index != nil:
+		s.index[x] = struct{}{}
+	case len(s.items) > ssetScan:
+		s.index = make(map[string]struct{}, 2*len(s.items))
+		for _, i := range s.items {
+			s.index[i] = struct{}{}
+		}
+	}
 }
 
 func (s *sset) has(x string) bool {
 	if s == nil {
 		return false
 	}
-	_, ok := s.index[x]
-	return ok
+	if s.index != nil {
+		_, ok := s.index[x]
+		return ok
+	}
+	for _, i := range s.items {
+		if i == x {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *sset) size() int {
@@ -139,12 +159,22 @@ type omap[V any] struct {
 	m  map[string]V
 	// untidy says ks holds deleted keys or index keys out of order.
 	untidy bool
+	// unordered says the keys are never listed (newLookupOmap), so their
+	// order is not kept.
+	unordered bool
 	// proto is what assigning "__proto__" made the object's prototype (see
 	// jsRealm); the zero value is Object.prototype.
-	proto jsProto
+	proto *jsProto
 }
 
-func newOmap[V any]() *omap[V] { return &omap[V]{m: map[string]V{}} }
+// newOmap is an empty omap; its map is made on the first write, so one
+// that stays empty (no legends, no selections) allocates only itself.
+func newOmap[V any]() *omap[V] { return &omap[V]{} }
+
+// newLookupOmap is an omap upstream only reads and writes by key (a
+// selection's parsed projections, its hasField), never listing them: the
+// same plain-object semantics, without the key list.
+func newLookupOmap[V any]() *omap[V] { return &omap[V]{unordered: true} }
 
 func (o *omap[V]) get(k string) (V, bool) {
 	if o == nil {
@@ -163,6 +193,13 @@ func (o *omap[V]) lookup(k string) V {
 func (o *omap[V]) has(k string) bool { _, ok := o.get(k); return ok }
 
 func (o *omap[V]) set(k string, v V) {
+	if o.m == nil {
+		o.m = map[string]V{}
+	}
+	if o.unordered {
+		o.m[k] = v
+		return
+	}
 	if _, ok := o.m[k]; !ok {
 		if n, isIdx := arrayIndex(k); isIdx && !o.untidy && len(o.ks) > 0 {
 			if m, lastIdx := arrayIndex(o.ks[len(o.ks)-1]); !lastIdx || m > n {
@@ -238,6 +275,9 @@ func (o *omap[V]) keysView() []string {
 	if o == nil {
 		return nil
 	}
+	if o.unordered {
+		panic("vegalite: the keys of a lookup omap are not kept")
+	}
 	o.tidy()
 	return o.ks
 }
@@ -245,6 +285,9 @@ func (o *omap[V]) keysView() []string {
 func (o *omap[V]) keyList() []string {
 	if o == nil {
 		return nil
+	}
+	if o.unordered {
+		panic("vegalite: the keys of a lookup omap are not kept")
 	}
 	o.tidy()
 	return append([]string(nil), o.ks...)

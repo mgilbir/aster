@@ -56,18 +56,35 @@ type jsRef struct {
 
 func (c *compileCtx) realm() *jsRealm {
 	if c.jsr == nil {
-		c.jsr = &jsRealm{hosts: map[string]*jsHost{}}
+		c.jsr = &jsRealm{}
 	}
 	return c.jsr
 }
 
+// host is the built-in of that name, made on first use: a compilation that
+// writes on none (almost every one) allocates no host.
 func (r *jsRealm) host(name string) *jsHost {
 	h := r.hosts[name]
 	if h == nil {
+		if r.hosts == nil {
+			r.hosts = map[string]*jsHost{}
+		}
 		h = &jsHost{name: name, props: newOmap[any]()}
 		r.hosts[name] = h
 	}
 	return h
+}
+
+// protoProp is what upstream wrote on Object.prototype under key in this
+// compilation, without making the host.
+func (r *jsRealm) protoProp(key string) (any, bool) {
+	if r == nil {
+		return nil, false
+	}
+	if h := r.hosts[""]; h != nil {
+		return h.props.get(key)
+	}
+	return nil, false
 }
 
 // isJSObjectValue says whether x, assigned to "__proto__", is an object
@@ -88,6 +105,24 @@ func isJSObjectValue(x any) (object, null bool) {
 		return false, false
 	}
 	return true, false
+}
+
+// protoOf is the prototype a map's proto field holds: nil, the usual case,
+// is Object.prototype. Keeping it behind a pointer keeps every map a word
+// larger, not three.
+func protoOf(p *jsProto) jsProto {
+	if p == nil {
+		return jsProto{}
+	}
+	return *p
+}
+
+// protoPtr is p as a map's proto field.
+func protoPtr(p jsProto) *jsProto {
+	if !p.set {
+		return nil
+	}
+	return &p
 }
 
 // protoAssigned is the prototype after o.__proto__ = x, from p.
@@ -130,7 +165,7 @@ func (r *jsRealm) inherited(p jsProto, key string) jsRef {
 	if _, ok := jsval.Inherited(key); ok {
 		return jsRef{found: true, host: r.host(key)}
 	}
-	if x, ok := r.host("").props.get(key); ok {
+	if x, ok := r.protoProp(key); ok {
 		return jsRef{found: true, val: x}
 	}
 	return jsRef{}
@@ -202,7 +237,7 @@ func jsHasKey(r *jsRealm, o *Object, key string) bool {
 // assign is o[k] = v, JavaScript's assignment to a plain object.
 func (o *omap[V]) assign(k string, v V) {
 	if k == "__proto__" && !o.has(k) {
-		o.proto = protoAssigned(o.proto, v)
+		o.proto = protoPtr(protoAssigned(protoOf(o.proto), v))
 		return
 	}
 	o.set(k, v)
@@ -213,7 +248,7 @@ func (o *omap[V]) in(r *jsRealm, k string) bool {
 	if o.has(k) {
 		return true
 	}
-	return r.inherited(o.proto, k).found
+	return r.inherited(protoOf(o.proto), k).found
 }
 
 // read is o[k]: the own value (own true), else what the prototype chain
@@ -222,7 +257,7 @@ func (o *omap[V]) read(r *jsRealm, k string) (v V, own bool, ref jsRef) {
 	if v, ok := o.get(k); ok {
 		return v, true, jsRef{}
 	}
-	return v, false, r.inherited(o.proto, k)
+	return v, false, r.inherited(protoOf(o.proto), k)
 }
 
 // objectStatics are the functions Object holds (Object.keys, …), which a
@@ -282,7 +317,7 @@ func (r *jsRealm) hostGet(h *jsHost, key string) (any, bool) {
 	if _, ok := jsval.Inherited(key); ok {
 		return r.host(key), true
 	}
-	if x, ok := r.host("").props.get(key); ok {
+	if x, ok := r.protoProp(key); ok {
 		return x, true
 	}
 	return nil, false
@@ -400,7 +435,11 @@ func jsSeen(cc *compileCtx, seen map[string]bool, k string) bool {
 	if seen[k] || isInheritedKey(k) {
 		return true
 	}
-	return cc != nil && cc.jsr != nil && cc.jsr.host("").props.has(k)
+	if cc == nil {
+		return false
+	}
+	_, ok := cc.jsr.protoProp(k)
+	return ok
 }
 
 // skipsInClone58 says whether 5.8's duplicate (the clone package) leaves out
@@ -412,7 +451,11 @@ func skipsInClone58(cc *compileCtx, key string) bool {
 	if isInheritedKey(key) {
 		return true
 	}
-	return cc != nil && cc.jsr != nil && cc.jsr.host("").props.has(key)
+	if cc == nil {
+		return false
+	}
+	_, ok := cc.jsr.protoProp(key)
+	return ok
 }
 
 // duplicate is upstream's duplicate: structuredClone in 6.4, the clone
@@ -436,12 +479,16 @@ func duplicate(cc *compileCtx, v Value) Value {
 		}
 		o := v.ObjValue()
 		c := jsval.NewObject(o.Len())
+		digit := false // a key that may be an array index
 		for i := 0; i < o.Len(); i++ {
 			if k := o.KeyAt(i); !skipsInClone58(cc, k) {
+				digit = digit || (len(k) > 0 && k[0] >= '0' && k[0] <= '9')
 				c.Set(k, duplicate(cc, o.ValueAt(i)))
 			}
 		}
-		jsOrderKeys(cc, c)
+		if digit {
+			jsOrderKeys(cc, c)
+		}
 		return jsval.Obj(c)
 	}
 	return v

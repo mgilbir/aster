@@ -55,7 +55,7 @@ func (p *selProjItem) legendBound(cc *compileCtx) bool {
 	if cc == nil || cc.jsr == nil {
 		return false
 	}
-	v, ok := cc.jsr.host("").props.get("hasLegend")
+	v, ok := cc.jsr.protoProp("hasLegend")
 	return ok && jsRefTruthy(jsRef{found: true, val: v})
 }
 
@@ -236,7 +236,7 @@ func parseUnitSelection(m *unitModel, selDefs []Value) *omap[*selectionComponent
 			props.Set("events", jsval.Arr(arrayOf(duplicate(cc, on))))
 		}
 		sc := &selectionComponent{cc: cc, name: name, typ: typ, props: props, project: &selProjection{
-			hasChannel: newOmap[*selProjItem](), hasField: newOmap[*selProjItem](),
+			hasChannel: newOmap[*selProjItem](), hasField: newLookupOmap[*selProjItem](),
 		}}
 		selCmpts.assign(name, sc) // selCmpts[name] = …: a plain object (see jsRealm)
 		if isTimerSelection(cc, sc) {
@@ -652,23 +652,50 @@ type selDataAcc struct {
 	front [][]Value // per unit, in the order prepended
 	mid   []Value
 	back  []Value
-	names map[string]bool
-	first map[string]Value
+	// names and first are built on the first lookup (index), so a chart
+	// without selections, which never looks, never builds them; from then
+	// on each entry added keeps them current.
+	indexed bool
+	names   map[string]bool
+	first   map[string]Value
 }
 
 func newSelDataAcc(cc *compileCtx, data []Value) *selDataAcc {
-	a := &selDataAcc{cc: cc, mid: data, names: map[string]bool{}, first: map[string]Value{}}
-	for _, d := range data {
-		cc.work(1)
+	return &selDataAcc{cc: cc, mid: data}
+}
+
+// index builds names and first from the whole list, once.
+func (a *selDataAcc) index() {
+	if a.indexed {
+		return
+	}
+	a.indexed = true
+	a.names, a.first = map[string]bool{}, map[string]Value{}
+	for _, d := range a.list() {
+		a.cc.work(1)
 		a.noteBack(d)
 	}
-	return a
+}
+
+// hasName says whether an entry of the list is named n.
+func (a *selDataAcc) hasName(n string) bool {
+	a.index()
+	return a.names[n]
+}
+
+// firstNamed is the first entry of the list named n (upstream's find).
+func (a *selDataAcc) firstNamed(n string) Value {
+	a.index()
+	return a.first[n]
 }
 
 func (a *selDataAcc) empty() bool { return len(a.front) == 0 && len(a.mid) == 0 && len(a.back) == 0 }
 
 // noteBack records d, now the last entry of the list.
 func (a *selDataAcc) noteBack(d Value) {
+	if !a.indexed {
+		return
+	}
 	if n := d.Get("name"); n.IsStr() {
 		a.names[n.StrValue()] = true
 		if _, ok := a.first[n.StrValue()]; !ok {
@@ -683,6 +710,9 @@ func (a *selDataAcc) prepend(block []Value) {
 		return
 	}
 	a.front = append(a.front, block)
+	if !a.indexed {
+		return
+	}
 	for i := len(block) - 1; i >= 0; i-- {
 		a.cc.work(1)
 		if n := block[i].Get("name"); n.IsStr() {
@@ -748,13 +778,13 @@ func assembleUnitSelectionData(m *unitModel, acc *selDataAcc) {
 				}
 				store.Set("values", jsval.Arr(vals))
 			}
-			if storeName := sel.name + storeSuffix; !acc.names[storeName] && !added[storeName] {
+			if storeName := sel.name + storeSuffix; !acc.hasName(storeName) && !added[storeName] {
 				selectionData = append(selectionData, jsval.Obj(store))
 				added[storeName] = true
 			}
 			if isTimerSelection(cc, sel) && hadData {
 				sourceName := m.lookupDataSource(m.getDataName(dsMain)).AsString()
-				sourceData := acc.first[sourceName]
+				sourceData := acc.firstNamed(sourceName)
 				if sourceData.IsObj() {
 					var filterT Value
 					var rest []Value
@@ -903,7 +933,7 @@ var projectCompiler = selectionCompiler{
 		cc := m.ctx
 		name := sel.name
 		proj := sel.project
-		parsed := newOmap[*selProjItem]() // a plain object (see jsRealm)
+		parsed := newLookupOmap[*selProjItem]() // a plain object (see jsRealm)
 		timeUnits := newOmap[*Object]()
 		names := newSignalNamer()
 		signalName := func(p *selProjItem, rangeK string) string {

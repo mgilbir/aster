@@ -892,13 +892,21 @@ func assembleAxis(cc *compileCtx, a *axisComponent, kind string, config Value, h
 		return undef
 	}
 	// Properties are dropped after the loop: deleting from a large object one key
-	// at a time is quadratic.
-	drop := map[string]bool{}
-	for _, prop := range append([]string(nil), axis.Keys()...) {
+	// at a time is quadratic. drop is by position: the loop deletes nothing
+	// and only appends ("encode"), so the keys it visits keep their places.
+	var drop []bool
+	n := axis.Len()
+	dropAt := func(i int) {
+		if drop == nil {
+			drop = make([]bool, n)
+		}
+		drop[i] = true
+	}
+	for i := 0; i < n; i++ {
+		prop, propValue := axis.KeyAt(i), axis.ValueAt(i)
 		propType := axisPropertyType[prop]
-		propValue := axis.Lookup(prop)
 		if propType != "" && propType != kind && propType != "both" {
-			drop[prop] = true
+			dropAt(i)
 		} else if isConditionalAxisValue(propValue) {
 			condition := propValue.Get("condition")
 			valueOrSignalRef := jsval.Obj(omit(propValue, "condition"))
@@ -914,7 +922,7 @@ func assembleAxis(cc *compileCtx, a *axisComponent, kind string, config Value, h
 				}
 				vgRef = append(vgRef, valueOrSignalRef)
 				setAxisEncode(axis, pi.part, pi.vgProp, jsval.Arr(vgRef))
-				drop[prop] = true
+				dropAt(i)
 			} else if ok && pi.isNull {
 				var sb strings.Builder
 				for _, c := range conditions {
@@ -927,15 +935,15 @@ func assembleAxis(cc *compileCtx, a *axisComponent, kind string, config Value, h
 		} else if isSignalRef(propValue) {
 			if pi, ok := conditionalAxisProp[prop]; ok && !pi.isNull {
 				setAxisEncode(axis, pi.part, pi.vgProp, propValue)
-				drop[prop] = true
+				dropAt(i)
 			}
 		}
-		if (prop == "labelAlign" || prop == "labelBaseline") && axis.Lookup(prop).IsNull() {
-			drop[prop] = true
+		if (prop == "labelAlign" || prop == "labelBaseline") && axis.ValueAt(i).IsNull() {
+			dropAt(i)
 		}
 	}
-	if len(drop) > 0 {
-		axis = omitSet(axis, drop)
+	if drop != nil {
+		axis = omitAt(axis, drop)
 	}
 	if kind == "grid" {
 		if !axis.Lookup("grid").IsTruthy() {
@@ -1060,11 +1068,12 @@ func joinItem(v Value) string {
 	return v.AsString()
 }
 
-// omitSet copies o without the keys in drop, preserving order.
-func omitSet(o *Object, drop map[string]bool) *Object {
+// omitAt is o without the keys at the positions drop marks (keys past the
+// end of drop are kept).
+func omitAt(o *Object, drop []bool) *Object {
 	out := jsval.NewObject(o.Len())
 	for i := 0; i < o.Len(); i++ {
-		if !drop[o.KeyAt(i)] {
+		if i >= len(drop) || !drop[i] {
 			out.Set(o.KeyAt(i), o.ValueAt(i))
 		}
 	}

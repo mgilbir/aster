@@ -165,6 +165,10 @@ func arrayOf(v Value) []Value {
 	return []Value{v}
 }
 
+// titleMergeDirect is the most defs mergeTitleFieldDefs compares directly;
+// past it the buckets make the merge of many views linear.
+const titleMergeDirect = 8
+
 func mergeTitleFieldDefs(cc *compileCtx, f1, f2 []Value) []Value {
 	// Upstream compares each new field def with every one merged so far, and
 	// a shared axis merges the defs of its views one view at a time: quadratic
@@ -181,6 +185,23 @@ func mergeTitleFieldDefs(cc *compileCtx, f1, f2 []Value) []Value {
 			tm = t
 			delete(cc.titleMerges, &f1[0])
 		}
+	}
+	if tm == nil && len(f1)+len(f2) <= titleMergeDirect {
+		// A few defs (a chart of one or two views): compare each with each,
+		// as upstream does, without building the buckets.
+		merged := append([]Value(nil), f1...)
+	direct:
+		for _, fd := range f2 {
+			cc.work(1)
+			for _, m := range merged {
+				cc.work(1)
+				if deepEqual(m, fd) {
+					continue direct
+				}
+			}
+			merged = append(merged, fd)
+		}
+		return merged[:len(merged):len(merged)]
 	}
 	if tm == nil {
 		tm = &titleMerge{items: append([]Value(nil), f1...), byKey: map[string][]int{}}

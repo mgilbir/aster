@@ -45,13 +45,14 @@ func (s *split) combine() *Object {
 	s.implicit.tidy()
 	o := jsval.NewObject(s.explicit.Len() + s.implicit.Len())
 	reorder := false
-	for _, e := range s.explicit.es {
-		if !e.dead {
+	for i := range s.explicit.es {
+		if e := &s.explicit.es[i]; !e.dead() {
 			o.Set(e.k, e.v)
 		}
 	}
-	for _, e := range s.implicit.es {
-		if e.dead {
+	for i := range s.implicit.es {
+		e := &s.implicit.es[i]
+		if e.dead() {
 			continue
 		}
 		if !reorder && !o.Has(e.k) {
@@ -108,27 +109,48 @@ func (s *split) set(key string, v Value, explicit bool) {
 // order costs a move of the later keys per insert and per delete. Here a set
 // appends and a delete marks its entry dead, and the entries are put in
 // order (tidy) before they are listed, with the same result.
+//
+// The entries are allocated when the first key is set, jsObjFirst of them
+// at once (most sides hold a few keys), or exactly as many as an object
+// given to init or cloned holds.
 type jsObj struct {
 	es []jsObjEntry
 	// at is the position of each live key in es, kept once es is past
 	// jsObjIndexed entries; below that a scan is cheaper.
 	at map[string]int
 	// live is the number of live entries.
-	live int
+	live int32
 	// untidy says es holds dead entries or index keys out of order.
 	untidy bool
 	// proto is what assigning "__proto__" made the object's prototype (see
-	// jsRealm).
-	proto jsProto
+	// jsRealm); nil is Object.prototype.
+	proto *jsProto
 }
 
+// jsObjEntry is one key; a deleted one holds deadValue (a value no caller
+// can make), which keeps an entry at two words.
 type jsObjEntry struct {
-	k    string
-	v    Value
-	dead bool
+	k string
+	v Value
 }
 
-const jsObjIndexed = 32
+// deadObject marks a deleted entry (see jsObjEntry).
+var deadObject = jsval.NewObject(0)
+
+func (e *jsObjEntry) dead() bool { return e.v.IsObj() && e.v.ObjValue() == deadObject }
+
+const (
+	jsObjIndexed = 32
+	jsObjFirst   = 4
+)
+
+// entries is the list to append to, made with room for jsObjFirst keys.
+func (j *jsObj) entries() []jsObjEntry {
+	if j.es == nil {
+		j.es = make([]jsObjEntry, 0, jsObjFirst)
+	}
+	return j.es
+}
 
 // newJSObj makes a jsObj of o's keys, in o's order.
 func newJSObj(o *Object) *jsObj {
@@ -146,7 +168,7 @@ func (j *jsObj) init(o *Object) {
 	for i := range j.es {
 		j.es[i] = jsObjEntry{k: o.KeyAt(i), v: o.ValueAt(i)}
 	}
-	j.live = len(j.es)
+	j.live = int32(len(j.es))
 	j.reindex()
 }
 
@@ -156,9 +178,9 @@ func (j *jsObj) reindex() {
 		return
 	}
 	j.at = make(map[string]int, j.live)
-	for i, e := range j.es {
-		if !e.dead {
-			j.at[e.k] = i
+	for i := range j.es {
+		if !j.es[i].dead() {
+			j.at[j.es[i].k] = i
 		}
 	}
 }
@@ -171,7 +193,7 @@ func (j *jsObj) find(k string) int {
 		return -1
 	}
 	for i := range j.es {
-		if !j.es[i].dead && j.es[i].k == k {
+		if j.es[i].k == k && !j.es[i].dead() {
 			return i
 		}
 	}
@@ -179,7 +201,7 @@ func (j *jsObj) find(k string) int {
 }
 
 // Len is the number of keys.
-func (j *jsObj) Len() int { return j.live }
+func (j *jsObj) Len() int { return int(j.live) }
 
 // Has reports whether key is present.
 func (j *jsObj) Has(k string) bool { return j.find(k) >= 0 }
@@ -197,8 +219,8 @@ func (j *jsObj) Prop(k string) Value {
 	if i := j.find(k); i >= 0 {
 		return j.es[i].v
 	}
-	if j.proto.set {
-		return (&jsRealm{hosts: map[string]*jsHost{}}).inherited(j.proto, k).value()
+	if j.proto != nil {
+		return (&jsRealm{}).inherited(*j.proto, k).value()
 	}
 	if k == "__proto__" {
 		return jsval.Obj(jsval.NewObject(0)) // Object.prototype
@@ -216,7 +238,7 @@ func (j *jsObj) Set(k string, v Value) {
 		return
 	}
 	if k == "__proto__" {
-		j.proto = protoAssigned(j.proto, v)
+		j.proto = protoPtr(protoAssigned(protoOf(j.proto), v))
 		return
 	}
 	if n, ok := arrayIndex(k); ok && !j.untidy && len(j.es) > 0 {
@@ -224,7 +246,7 @@ func (j *jsObj) Set(k string, v Value) {
 			j.untidy = true
 		}
 	}
-	j.es = append(j.es, jsObjEntry{k: k, v: v})
+	j.es = append(j.entries(), jsObjEntry{k: k, v: v})
 	j.live++
 	if j.at != nil {
 		j.at[k] = len(j.es) - 1
@@ -239,21 +261,46 @@ func (j *jsObj) Delete(k string) {
 	if i < 0 {
 		return
 	}
-	j.es[i] = jsObjEntry{k: k, dead: true}
+	j.es[i] = jsObjEntry{k: k, v: jsval.Obj(deadObject)}
 	j.live--
 	j.untidy = true
 	if j.at != nil {
 		delete(j.at, k)
 	}
 	// Compact once the dead entries are most of the list.
-	if len(j.es) > 2*jsObjIndexed && j.live < len(j.es)/2 {
+	if len(j.es) > 2*jsObjIndexed && int(j.live) < len(j.es)/2 {
 		j.tidy()
 	}
 }
 
-// tidy drops the dead entries and puts the keys in JavaScript's order.
+// tidy drops the dead entries and puts the keys in JavaScript's order. With
+// no index key among them (the common case) the live entries are compacted
+// in place, allocating nothing; index keys, ordered once, cost one list.
 func (j *jsObj) tidy() {
 	if !j.untidy {
+		return
+	}
+	hasIndex := false
+	for i := range j.es {
+		if !j.es[i].dead() {
+			if _, ok := arrayIndex(j.es[i].k); ok {
+				hasIndex = true
+				break
+			}
+		}
+	}
+	if !hasIndex {
+		w := 0
+		for i := range j.es {
+			if !j.es[i].dead() {
+				j.es[w] = j.es[i]
+				w++
+			}
+		}
+		clear(j.es[w:])
+		j.es = j.es[:w]
+		j.untidy = false
+		j.reindex()
 		return
 	}
 	type idxEntry struct {
@@ -261,26 +308,25 @@ func (j *jsObj) tidy() {
 		e jsObjEntry
 	}
 	var idx []idxEntry
-	rest := make([]jsObjEntry, 0, j.live)
-	for _, e := range j.es {
-		if e.dead {
+	rest := 0
+	for i := range j.es {
+		e := j.es[i]
+		if e.dead() {
 			continue
 		}
 		if n, ok := arrayIndex(e.k); ok {
 			idx = append(idx, idxEntry{n, e})
 		} else {
-			rest = append(rest, e)
+			j.es[rest] = e // the other keys keep their order, compacted in place
+			rest++
 		}
 	}
-	es := rest
-	if len(idx) > 0 {
-		sort.Slice(idx, func(a, b int) bool { return idx[a].n < idx[b].n })
-		es = make([]jsObjEntry, 0, j.live)
-		for _, x := range idx {
-			es = append(es, x.e)
-		}
-		es = append(es, rest...)
+	sort.Slice(idx, func(a, b int) bool { return idx[a].n < idx[b].n })
+	es := make([]jsObjEntry, 0, j.live)
+	for _, x := range idx {
+		es = append(es, x.e)
 	}
+	es = append(es, j.es[:rest]...)
 	j.es = es
 	j.untidy = false
 	j.reindex()
@@ -307,14 +353,14 @@ func (j *jsObj) deepCloneInto(cc *compileCtx, c *jsObj) {
 		}
 		c.es = append(c.es, jsObjEntry{k: e.k, v: duplicate(cc, e.v)})
 	}
-	c.live = len(c.es)
+	c.live = int32(len(c.es))
 	c.reindex()
 }
 
 // object is the keys and values as a new object, in JavaScript's order.
 func (j *jsObj) object() *Object {
 	j.tidy()
-	o := jsval.NewObject(j.live)
+	o := jsval.NewObject(int(j.live))
 	for _, e := range j.es {
 		o.Set(e.k, e.v)
 	}
