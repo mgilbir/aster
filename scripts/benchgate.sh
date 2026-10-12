@@ -68,9 +68,14 @@
 #
 # A memory regression also needs an absolute increase: at least
 # BENCHGATE_BYTES_FLOOR (default 64) B/op or BENCHGATE_ALLOCS_FLOOR (default
-# 1) allocs/op, besides the percentage. On a value near zero a percentage is
-# noise: 3 bytes more of 5 is +60%, and the truncation above is worth that
-# much.
+# 3) allocs/op, besides the percentage. On a value near zero a percentage is
+# noise: 3 bytes more of 5 is +60%. Each side's difference is off by less
+# than 3 from its true value, and by different amounts on the two sides
+# (where truncation lands depends on each binary's one-time cost), so an
+# increase under 3 can be truncation alone: BenchmarkBin100k, whose true
+# rate lies between 1 and 2 allocs/op, measured 1 on one side and 2 on the
+# other of an unchanged loop. An added allocation of 64 bytes or more is
+# still caught, through its bytes.
 #
 # For an intended trade-off, BENCHGATE_ALLOW=true reports the regression and
 # exits 0 (CI sets it from the PR label perf-regression-ok). Other settings:
@@ -89,7 +94,7 @@ mem_target=${BENCHGATE_MEM_TARGET:-100ms}
 mem_cap=${BENCHGATE_MEM_CAP:-1073741824}
 memlimit=${BENCHGATE_MEMLIMIT:-4GiB}
 bytes_floor=${BENCHGATE_BYTES_FLOOR:-64}
-allocs_floor=${BENCHGATE_ALLOCS_FLOOR:-1}
+allocs_floor=${BENCHGATE_ALLOCS_FLOOR:-3}
 ns_pct=${BENCHGATE_NS_PCT:-15}
 bytes_pct=${BENCHGATE_BYTES_PCT:-5}
 allocs_pct=${BENCHGATE_ALLOCS_PCT:-2}
