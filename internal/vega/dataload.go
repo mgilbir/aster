@@ -138,9 +138,44 @@ func (v *runView) request(url, fmtSpec jsval.Value) []jsval.Value {
 		failed(uri, true, err)
 		// The data stays what was loaded, and the data set is that one value:
 		// the text, which a tuple wraps as {data: text}.
-		return []jsval.Value{jsval.Str(string(body))}
+		text, err := textOf(v.ctx, body)
+		if err != nil {
+			failErr(err)
+		}
+		return []jsval.Value{jsval.Str(text)}
 	}
 	return data
+}
+
+// textChunk is how much of a loaded body textOf copies between two polls of
+// the call's context.
+const textChunk = 1 << 20
+
+// textOf is the loaded body b as a string, copied a chunk at a time with the
+// call's context polled in between: a body is as large as the load budget
+// allows (32 MiB under WithMemoryLimit(64 MiB)), and its copy in one piece
+// was the longest stretch of a call without a poll.
+func textOf(ctx context.Context, b []byte) (string, error) {
+	// The copy is memory the load budget, which counted the bytes, does not:
+	// it is charged to the call's ledger first, and stays charged, since the
+	// text (or the substrings DSV fields take of it) lives as long as the data.
+	if err := budget.LedgerFrom(ctx).Alloc(int64(len(b))); err != nil {
+		return "", err
+	}
+	if len(b) <= textChunk {
+		return string(b), nil
+	}
+	var sb strings.Builder
+	sb.Grow(len(b))
+	for len(b) > 0 {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		n := min(len(b), textChunk)
+		sb.Write(b[:n])
+		b = b[n:]
+	}
+	return sb.String(), nil
 }
 
 // read is vega-loader's read: decode with the format reader, then apply `parse`.
@@ -167,7 +202,10 @@ func (v *runView) read(value jsval.Value, raw []byte, schema jsval.Value) ([]jsv
 				return nil, fmt.Errorf("dsv format requires a delimiter")
 			}
 		}
-		text := string(raw)
+		text, err := textOf(v.ctx, raw)
+		if err != nil {
+			failErr(err)
+		}
 		if !value.IsUndefined() {
 			text = value.AsString()
 		}
