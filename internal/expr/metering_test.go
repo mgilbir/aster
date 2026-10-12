@@ -101,9 +101,10 @@ var meteringExempt = map[string]string{
 	"format": "format", "timeFormat": "format", "utcFormat": "format", "timeParse": "format", "utcParse": "format",
 	"monthFormat": "format", "monthAbbrevFormat": "format", "dayFormat": "format", "dayAbbrevFormat": "format",
 	"timeUnitSpecifier": "format",
-	// A pattern compiled from a hostile string: goecma262 builds up to its
-	// program cap (about 50 MB) before refusing it, with no hook to charge it
-	// first.
+	// A pattern compiled from a hostile string: its program is charged
+	// before it is compiled (jsval.NewPattern), but goecma262's parser, which
+	// runs first, allocates up to about 190 bytes per byte of a source of up
+	// to MaxPatternLength (200 MB for a MiB of "a"), uncharged.
 	"regexp": "goecma262", "test": "goecma262",
 }
 

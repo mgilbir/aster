@@ -61,7 +61,7 @@ Fixed bounds, the same whatever `WithMemoryLimit` says:
 | JSON nesting | 256 levels; values nested at run time 1,024 |
 | expression nesting | 512 levels |
 | one string an expression builds | 16,777,216 UTF-16 code units (V8's own limit, 536,870,888, is a `RangeError` as upstream) |
-| a regular expression compiled from a string | 1 MiB of source; its program, up to goecma262's 200,000 instructions, is charged to the call's ledger unless the shared cache keeps it |
+| a regular expression compiled from a string | 1 MiB of source; its program, up to goecma262's 200,000 instructions, is charged to the call's ledger unless the shared cache keeps it, from a bound computed from the parsed pattern before it is compiled (a program past what the ledger has left, or past the 200,000, is refused unbuilt), as are literals and `countpattern`'s patterns |
 | SVG input to `SVGToPNG` | 256 MiB, 4,000,000 elements, depth 256 |
 | SVG input to `SVGToPDF` | 64 MiB, 1,000,000 elements |
 | text shaping | about sixty times the lookup work of the heaviest example chart, per call |
