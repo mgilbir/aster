@@ -46,6 +46,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/mgilbir/aster/internal/budget"
 	"math"
 	"os"
 	"os/exec"
@@ -103,8 +104,17 @@ type memLoader struct {
 }
 
 func (l memLoader) Sanitize(_ context.Context, uri string) (string, error) { return uri, nil }
-func (l memLoader) Load(_ context.Context, _ string) ([]byte, error) {
+
+// Load bounds what it makes by what the call may still load, as the Loader
+// contract asks and the package's loaders do: a body past it is refused with
+// ErrLimit before it exists, so the heap measured is the engine's, not the
+// harness's (built whole, a 64 MiB body under a 32 MiB load budget made the
+// render's peak 2.25 times a 64 MiB limit).
+func (l memLoader) Load(ctx context.Context, _ string) ([]byte, error) {
 	n := int(l.mb * (1 << 20))
+	if left := budget.From(ctx).LoadLeft(); int64(n) > left {
+		return nil, fmt.Errorf("%w: a body of %d bytes, %d left to load", ErrLimit, n, left)
+	}
 	b := make([]byte, 0, n+64)
 	switch l.kind {
 	case "csv":
