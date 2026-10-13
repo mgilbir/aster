@@ -286,3 +286,42 @@ func TestShortNumberPolls(t *testing.T) {
 		t.Errorf("a context ended at poll %d of %d did not stop the pass: %v", half.stop, ctx.polls, err)
 	}
 }
+
+// Go's strconv.ParseFloat (1.27.2) reads this literal as 0: 1.5 times the
+// smallest subnormal plus 2^-2100, written as a 1,777-digit integer times
+// 1e-2100. Near a midpoint its fast path gives up, and the slow path's
+// decimal.set (internal/strconv/atof.go, b.dp = b.nd at lines 110 and 133)
+// takes the decimal point to follow the 800th digit it keeps. JSON.parse
+// (node 24) and the exact value give 1e-323, as the parser must, whatever
+// ParseFloat does: the test holds the parse to big.Rat's exact rounding and
+// only logs ParseFloat's answer, so a Go that fixes it changes nothing here.
+func TestParseJSONReadsLongIntegerLiteralExactly(t *testing.T) {
+	x := new(big.Float).SetPrec(5000).SetMantExp(new(big.Float).SetPrec(5000).SetInt64(3), -1075)
+	x.Add(x, new(big.Float).SetPrec(5000).SetMantExp(new(big.Float).SetPrec(5000).SetInt64(1), -2100))
+	s := strings.TrimRight(x.Text('f', 2200), "0")
+	_, fp, _ := strings.Cut(s, ".")
+	digits := strings.TrimLeft(fp, "0")
+	for _, lit := range []string{
+		digits + "e-" + strconv.Itoa(len(fp)),                                              // no point
+		digits[:1000] + "." + digits[1000:] + "e" + strconv.Itoa(len(digits)-1000-len(fp)), // 1,000 digits before it
+	} {
+		want, ok := exactNumber(lit)
+		if !ok || want != 1e-323 {
+			t.Fatalf("the literal's exact value rounds to %v, want 1e-323", want)
+		}
+		pf, _ := strconv.ParseFloat(lit, 64)
+		t.Logf("%d bytes: strconv.ParseFloat reads %v (Go misreads it when 0)", len(lit), pf)
+		for _, doc := range []string{lit, "[" + lit + "]"} {
+			v, err := ParseJSONString(doc)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if doc[0] == '[' {
+				v = v.Index(0)
+			}
+			if got := v.NumValue(); math.Float64bits(got) != math.Float64bits(want) {
+				t.Errorf("ParseJSON(%.40q…) = %v, want %v (the exact rounding, and JSON.parse's)", doc, got, want)
+			}
+		}
+	}
+}
