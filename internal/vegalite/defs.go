@@ -99,7 +99,7 @@ func autoMaxBins(channel string) int {
 
 // binToString is upstream's binToString: "bin" plus one varName'd segment per
 // bin parameter, in key order.
-func binToString(bin Value) string {
+func binToString(cc *compileCtx, bin Value) string {
 	if bin.IsBool() {
 		bin = normalizeBin(bin, "")
 	}
@@ -107,8 +107,10 @@ func binToString(bin Value) string {
 	b.WriteString("bin")
 	// keys(bin) and bin[p]: a string's characters and an array's elements
 	// by index.
-	for _, p := range jsKeysOr(bin) {
-		x := jsProp(bin, p)
+	read := propReader(bin)
+	for _, p := range jsKeysOrCC(cc, bin) {
+		cc.work(1)
+		x := read.get(p)
 		if isParameterExtent(x) {
 			// `${entries(x)}` stringifies [[k, v], ...] with commas.
 			var parts []string
@@ -309,8 +311,8 @@ func formatExpression(tu, field string, isUTCScale bool) string {
 }
 
 // timeUnitFieldExprV is upstream's fieldExpr of a field as it holds it.
-func timeUnitFieldExprV(full string, field Value, end bool) string {
-	fieldRef := accessPathWithDatumV(field, "datum")
+func timeUnitFieldExprV(cc *compileCtx, full string, field Value, end bool) string {
+	fieldRef := accessPathWithDatumV(cc, field, "datum")
 	utc := ""
 	if isUTCTimeUnit(full) {
 		utc = "utc"

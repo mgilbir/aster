@@ -313,9 +313,10 @@ func initEncoding(cc *compileCtx, encoding Value, mark string, filled bool, conf
 
 func normalizeEncoding(cc *compileCtx, encoding Value, config Value) Value {
 	out := jsval.NewObject(encoding.Len())
-	for _, channel := range jsKeys(encoding) {
+	read := propReader(encoding)
+	for _, channel := range jsKeysCC(cc, encoding) {
 		cc.work(1)
-		out.Set(channel, initChannelDef(cc, jsProp(encoding, channel), channel, config, true))
+		out.Set(channel, initChannelDef(cc, read.get(channel), channel, config, true))
 	}
 	return jsval.Obj(out)
 }

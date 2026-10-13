@@ -67,7 +67,7 @@ func parseRangeForChannel(channel string, u *unitModel) withExplicit {
 				rng := specifiedScale.Get("range")
 				if rng.IsArr() {
 					if isXorY(channel) {
-						return makeExplicit(mapVals(rng, func(v Value) Value {
+						return makeExplicit(mapVals(u.ctx, rng, func(v Value) Value {
 							if v.IsStr() && (v.StrValue() == "width" || v.StrValue() == "height") {
 								sizeSignal := u.getName(v.StrValue())
 								return lazySignal(u.ctx, func() string { return u.getSignalName(sizeSignal) })

@@ -12,6 +12,9 @@ import (
 var defaultEventMarks = strSet([]string{"*", "arc", "area", "group", "image", "line", "path", "rect", "rule", "shape", "symbol", "text", "trail"})
 
 type eventParser struct {
+	// cc is charged for the selector's parts, by their length: a selector
+	// is a string of any length, read a few times over.
+	cc            *compileCtx
 	defaultSource string
 	depth         int // nesting of between selectors being parsed
 }
@@ -24,10 +27,10 @@ const maxEventNesting = 64
 // parseSelectorOf is parseSelector of a spec value, which
 // vega-event-selector reads with selector.trim(): a TypeError for anything
 // but a string.
-func parseSelectorOf(v Value, source string) []Value {
+func parseSelectorOf(cc *compileCtx, v Value, source string) []Value {
 	switch {
 	case v.IsStr():
-		return parseSelector(v.StrValue(), source)
+		return parseSelector(cc, v.StrValue(), source)
 	case v.IsNullish():
 		throw("Cannot read properties of %s (reading 'trim')", nullishName(v))
 	}
@@ -35,11 +38,11 @@ func parseSelectorOf(v Value, source string) []Value {
 	return nil
 }
 
-func parseSelector(selector, source string) []Value {
+func parseSelector(cc *compileCtx, selector, source string) []Value {
 	if source == "" {
 		source = "view"
 	}
-	p := &eventParser{defaultSource: source}
+	p := &eventParser{cc: cc, defaultSource: source}
 	parts := p.parseMerge(strings.TrimSpace(selector))
 	out := make([]Value, len(parts))
 	for i, s := range parts {
@@ -70,6 +73,7 @@ func (p *eventParser) parseMerge(s string) []string {
 	start, i := 0, 0
 	for i < n {
 		i = evFind(s, i, ',', "[{", "]}")
+		p.cc.work(1 + int64(i-start)/16)
 		out = append(out, strings.TrimSpace(s[start:i]))
 		i++
 		start = i
@@ -81,6 +85,8 @@ func (p *eventParser) parseMerge(s string) []string {
 }
 
 func (p *eventParser) parseOne(s string) Value {
+	// A part is read a few times over: a step per 4 bytes.
+	p.cc.work(4 + int64(len(s))/4)
 	if len(s) > 0 && s[0] == '[' {
 		return p.parseBetween(s)
 	}

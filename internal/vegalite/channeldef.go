@@ -207,7 +207,7 @@ func vgField(cc *compileCtx, fd Value, opt fieldRefOption) string {
 				bin, aggregate, timeUnit := fd.Get("bin"), fd.Get("aggregate"), fd.Get("timeUnit")
 				switch {
 				case isBinning(bin):
-					fn = binToString(bin)
+					fn = binToString(cc, bin)
 					suffix = opt.binSuffix + opt.suffix
 				case aggregate.IsTruthy():
 					if isArgmaxDef(aggregate) {

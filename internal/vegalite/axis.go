@@ -290,7 +290,7 @@ func parseAxis(channel string, m *unitModel) *axisComponent {
 	}
 	orient := or(axis.Get("orient"), config.Get(axisChannel).Get("orient"), config.Get("axis").Get("orient"), jsval.Str(defaultAxisOrient(channel)))
 	scaleType := m.scaleTypeOf(channel)
-	axisConfigs := getAxisConfigs(channel, scaleType, orient, m.config)
+	axisConfigs := getAxisConfigs(cc, channel, scaleType, orient, m.config)
 	var disable Value
 	if !axis.IsUndefined() {
 		disable = jsval.Bool(!axis.IsTruthy())
@@ -707,7 +707,7 @@ func getFieldDefTitle(m *unitModel, channel string) Value {
 	}
 	switch {
 	case t1.IsTruthy() && t2.IsTruthy():
-		return mergeTitle(t1, t2)
+		return mergeTitle(m.ctx, t1, t2)
 	case t1.IsTruthy():
 		return t1
 	case t2.IsTruthy():
@@ -733,7 +733,9 @@ type axisConfigSet struct {
 	vlOnlyAxisConfig, vgAxisConfig, axisConfigStyle Value
 }
 
-func getAxisConfigFromConfigTypes(configTypes []string, config Value, channel string, orient Value) Value {
+// getAxisConfigFromConfigTypes charges cc a step per key it copies or
+// unites: every axis of every view reads the axis configs again.
+func getAxisConfigFromConfigTypes(cc *compileCtx, configTypes []string, config Value, channel string, orient Value) Value {
 	out := jsval.NewObject(8)
 	for _, ct := range configTypes {
 		if ct == "axisOrient" {
@@ -742,18 +744,22 @@ func getAxisConfigFromConfigTypes(configTypes []string, config Value, channel st
 				orient1, key1, key2 = "bottom", "axisBottom", "axisTop"
 			}
 			oc1, oc2 := coalesceObj(config.Get(key1)), coalesceObj(config.Get(key2))
+			cc.work(int64(oc1.Len() + oc2.Len()))
 			props := uniqueStrings(append(append([]string{}, keysOf(oc1)...), keysOf(oc2)...))
 			for _, prop := range props {
+				cc.work(1)
 				out.Set(prop, mkv("signal", signalOf(orient)+` === "`+orient1+`" ? `+signalOrStringValue(oc1.Get(prop)).AsString()+" : "+signalOrStringValue(oc2.Get(prop)).AsString()))
 			}
 			continue
 		}
-		spreadV(out, config.Get(ct))
+		c := config.Get(ct)
+		cc.work(1 + int64(c.Len()))
+		spreadV(out, c)
 	}
 	return jsval.Obj(out)
 }
 
-func getAxisConfigs(channel, scaleType string, orient Value, config Value) axisConfigSet {
+func getAxisConfigs(cc *compileCtx, channel, scaleType string, orient Value, config Value) axisConfigSet {
 	var typeBased []string
 	switch {
 	case scaleType == "band":
@@ -779,18 +785,20 @@ func getAxisConfigs(channel, scaleType string, orient Value, config Value) axisC
 	}
 	vgTypes := []string{"axis", axisOrient, axisChannel}
 	return axisConfigSet{
-		vlOnlyAxisConfig: getAxisConfigFromConfigTypes(vlOnly, config, channel, orient),
-		vgAxisConfig:     getAxisConfigFromConfigTypes(vgTypes, config, channel, orient),
-		axisConfigStyle:  getAxisConfigStyle(append(append([]string{}, vgTypes...), vlOnly...), config),
+		vlOnlyAxisConfig: getAxisConfigFromConfigTypes(cc, vlOnly, config, channel, orient),
+		vgAxisConfig:     getAxisConfigFromConfigTypes(cc, vgTypes, config, channel, orient),
+		axisConfigStyle:  getAxisConfigStyle(cc, append(append([]string{}, vgTypes...), vlOnly...), config),
 	}
 }
 
-func getAxisConfigStyle(types []string, config Value) Value {
+func getAxisConfigStyle(cc *compileCtx, types []string, config Value) Value {
 	out := jsval.NewObject(4)
 	for _, ct := range types {
 		if style := config.Get(ct).Get("style"); style.IsTruthy() {
 			for _, s := range arrayOf(style) {
-				spreadV(out, config.Get("style").Get(s.AsString()))
+				c := config.Get("style").Get(s.AsString())
+				cc.work(1 + int64(c.Len()))
+				spreadV(out, c)
 			}
 		}
 	}

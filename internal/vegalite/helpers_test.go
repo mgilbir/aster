@@ -23,7 +23,7 @@ func loadHelperVectors(t testing.TB) jsval.Value {
 
 func TestParseSelectorMatchesUpstream(t *testing.T) {
 	for _, c := range loadHelperVectors(t).Get("selectors").Items() {
-		got := jsval.Arr(parseSelector(c.Get("input").StrValue(), c.Get("source").StrValue()))
+		got := jsval.Arr(parseSelector(nil, c.Get("input").StrValue(), c.Get("source").StrValue()))
 		want := c.Get("output")
 		if string(jsval.AppendJSON(nil, got)) != string(jsval.AppendJSON(nil, want)) {
 			t.Errorf("parseSelector(%q, %q)\n got %s\nwant %s", c.Get("input").StrValue(), c.Get("source").StrValue(),
@@ -110,7 +110,7 @@ func TestStringValue(t *testing.T) {
 func TestMergeConfig(t *testing.T) {
 	a := mustParse(t, `{"legend": {"layout": {"a": 1, "b": 2}, "x": 1}, "style": {"s": {"p": 1}}, "axis": {"x": 1}, "signals": [{"name": "s", "value": 1}]}`)
 	b := mustParse(t, `{"legend": {"layout": {"a": 9}, "y": 2}, "style": {"s": {"q": 2}}, "axis": {"y": 2}, "signals": [{"name": "s", "value": 2}, {"name": "t"}]}`)
-	got := string(jsval.AppendJSON(nil, jsval.Obj(mergeConfig(a, b))))
+	got := string(jsval.AppendJSON(nil, jsval.Obj(mergeConfig(nil, a, b))))
 	want := `{"legend":{"layout":{"a":9,"b":2},"x":1,"y":2},"style":{"s":{"p":1,"q":2}},"axis":{"y":2},"signals":[{"name":"s","value":2},{"name":"t"},{"name":"s","value":1}]}`
 	// Signals: b's entries first, a's added when the name is not present.
 	want = strings.Replace(want, `{"name":"s","value":2},{"name":"t"},{"name":"s","value":1}`, `{"name":"s","value":2},{"name":"t"}`, 1)
@@ -120,7 +120,7 @@ func TestMergeConfig(t *testing.T) {
 	}
 	// __proto__ keys are ignored.
 	c := mustParse(t, `{"__proto__": {"polluted": true}, "constructor": 1, "ok": 1}`)
-	if g := string(jsval.AppendJSON(nil, jsval.Obj(mergeConfig(c)))); g != `{"ok":1}` {
+	if g := string(jsval.AppendJSON(nil, jsval.Obj(mergeConfig(nil, c)))); g != `{"ok":1}` {
 		t.Errorf("illegal keys not dropped: %s", g)
 	}
 }

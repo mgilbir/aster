@@ -105,7 +105,7 @@ func parseRoot(m Model, sources *sourceList) dfNode {
 		}
 		if existing := findSource(cc, b.data, sources.items); existing != nil {
 			if !isGenerator(b.data) {
-				existing.data.Set("format", jsval.Obj(mergeDeepFormat(b.data.Get("format"), existing.data.Lookup("format"))))
+				existing.data.Set("format", jsval.Obj(mergeDeepFormat(cc, b.data.Get("format"), existing.data.Lookup("format"))))
 			}
 			if !existing.hasName() && b.data.Get("name").IsTruthy() {
 				existing.name = b.data.Get("name")
@@ -124,21 +124,22 @@ func parseRoot(m Model, sources *sourceList) dfNode {
 }
 
 // mergeDeepFormat is mergeDeep({}, a, b): b wins, objects merge recursively.
-func mergeDeepFormat(a, b Value) *Object {
+func mergeDeepFormat(cc *compileCtx, a, b Value) *Object {
 	dest := jsval.NewObject(4)
 	for _, src := range []Value{a, b} {
-		mergeDeepInto(dest, src)
+		mergeDeepInto(cc, dest, src)
 	}
 	return dest
 }
 
-func mergeDeepInto(dest *Object, src Value) {
+func mergeDeepInto(cc *compileCtx, dest *Object, src Value) {
 	if !src.IsObj() {
 		return
 	}
 	so := src.ObjValue()
 	for i := 0; i < so.Len(); i++ {
-		writeConfig(dest, so.KeyAt(i), so.ValueAt(i), true, nil)
+		cc.work(1)
+		writeConfig(cc, dest, so.KeyAt(i), so.ValueAt(i), true, nil)
 	}
 }
 

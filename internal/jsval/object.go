@@ -275,6 +275,37 @@ func (o *Object) reindex() {
 	}
 }
 
+// DeleteFunc removes every entry for which del reports true, preserving the
+// order of the rest, in one pass: deleting n keys one at a time moves the
+// keys after each, which is quadratic in a large object. del sees each entry
+// once, in order, and must not change the object.
+func (o *Object) DeleteFunc(del func(key string, v Value) bool) {
+	if o == nil {
+		return
+	}
+	j := 0
+	for i := range o.keys {
+		if del(o.keys[i], o.vals[i]) {
+			continue
+		}
+		o.keys[j], o.vals[j] = o.keys[i], o.vals[i]
+		j++
+	}
+	if j == len(o.keys) {
+		return
+	}
+	clear(o.keys[j:])
+	clear(o.vals[j:])
+	o.keys, o.vals = o.keys[:j], o.vals[:j]
+	if o.index != nil {
+		if j <= indexThreshold {
+			o.index = nil
+		} else {
+			o.reindex()
+		}
+	}
+}
+
 // Delete removes key, preserving the order of the rest.
 func (o *Object) Delete(key string) {
 	i := o.find(key)

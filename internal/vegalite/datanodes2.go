@@ -111,14 +111,16 @@ func (n *binNode) dependentFields() *sset {
 	return s
 }
 
-func binKey(bin Value, field string) string { return binToString(bin) + "_" + field }
+func binKey(cc *compileCtx, bin Value, field string) string {
+	return binToString(cc, bin) + "_" + field
+}
 
 func getBinSignalName(m Model, field string, bin Value) string {
 	nb := normalizeBin(bin, "")
 	if nb.IsUndefined() {
 		nb = mkv()
 	}
-	return m.b().getName(binKey(nb, field) + "_bins")
+	return m.b().getName(binKey(m.b().ctx, nb, field) + "_bins")
 }
 
 // createBinComponent builds a bin component from a bin transform or a field
@@ -147,7 +149,7 @@ func createBinComponent(t Value, bin Value, m Model, _ bool) (string, *binCompon
 	} else {
 		normalized = jsval.NewObject(0)
 	}
-	key := binKey(jsval.Obj(normalized), t.Get("field").AsString())
+	key := binKey(cc, jsval.Obj(normalized), t.Get("field").AsString())
 	b := m.b()
 	signal := b.getName(key + "_bins")
 	extentSignal := b.getName(key + "_extent")

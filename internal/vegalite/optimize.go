@@ -340,10 +340,11 @@ func mergeParseFn() func(root dfNode) bool {
 					for _, child := range original {
 						cc.work(1)
 						if pn, ok := child.(*parseNode); ok {
-							for _, k := range common.keysView() {
-								cc.work(1)
-								pn.parse.Delete(k)
-							}
+							cc.work(int64(pn.parse.Len()))
+							pn.parse.DeleteFunc(func(k string, _ Value) bool {
+								_, in := common.get(k)
+								return in
+							})
 						}
 						node.base().removeChild(child)
 						child.base().setParent(mergedParse)

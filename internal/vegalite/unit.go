@@ -141,10 +141,10 @@ func (u *unitModel) initScale(scale Value) Value {
 	internal := replaceExprRef(u.ctx, scale, 0)
 	io := internal.ObjValue()
 	if domain.IsArr() {
-		io.Set("domain", mapVals(domain, func(v Value) Value { return signalRefOrValue(u.ctx, v) }))
+		io.Set("domain", mapVals(u.ctx, domain, func(v Value) Value { return signalRefOrValue(u.ctx, v) }))
 	}
 	if rng.IsArr() {
-		io.Set("range", mapVals(rng, func(v Value) Value { return signalRefOrValue(u.ctx, v) }))
+		io.Set("range", mapVals(u.ctx, rng, func(v Value) Value { return signalRefOrValue(u.ctx, v) }))
 	}
 	return internal
 }

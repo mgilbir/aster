@@ -40,17 +40,23 @@ func (s *split) clone(cc *compileCtx) *split {
 }
 
 // combine is `{...explicit, ...implicit}`.
-func (s *split) combine() *Object {
+func (s *split) combine() *Object { return s.combineCC(nil) }
+
+// combineCC is combine charging cc a step an entry: a parse's split holds
+// as many fields as the specification parses.
+func (s *split) combineCC(cc *compileCtx) *Object {
 	s.explicit.tidy()
 	s.implicit.tidy()
 	o := jsval.NewObject(s.explicit.Len() + s.implicit.Len())
 	reorder := false
 	for i := range s.explicit.es {
+		cc.work(1)
 		if e := &s.explicit.es[i]; !e.dead() {
 			o.Set(e.k, e.v)
 		}
 	}
 	for i := range s.implicit.es {
+		cc.work(1)
 		e := &s.implicit.es[i]
 		if e.dead() {
 			continue
@@ -63,7 +69,7 @@ func (s *split) combine() *Object {
 		o.Set(e.k, e.v)
 	}
 	if reorder {
-		jsOrderKeys(nil, o)
+		jsOrderKeys(cc, o)
 	}
 	return o
 }
@@ -373,9 +379,10 @@ func (s *split) copyKeyFromObject(key string, o Value) {
 	}
 }
 
-func (s *split) copyAll(o *split) {
-	comb := o.combine()
+func (s *split) copyAll(cc *compileCtx, o *split) {
+	comb := o.combineCC(cc)
 	for _, k := range comb.Keys() {
+		cc.work(1)
 		s.setWithExplicit(k, o.getWithExplicit(k))
 	}
 }

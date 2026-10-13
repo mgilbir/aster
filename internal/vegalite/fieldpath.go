@@ -164,27 +164,58 @@ func accessWithDatumToUnescapedPathV(v Value) string {
 }
 
 // accessPathWithDatum turns "a.b" into "datum["a"] && datum["a"]["b"]".
-func accessPathWithDatum(path, datum string) string {
-	return accessPathWithDatumPieces(splitAccessPath(path), datum)
+func accessPathWithDatum(cc *compileCtx, path, datum string) string {
+	return accessPathWithDatumPieces(cc, splitAccessPath(path), datum)
 }
 
 // accessPathWithDatumV is accessPathWithDatum of a field as upstream holds
 // it: splitAccessPath of a value that is not a string reads its length, so a
 // number, a boolean or an object gives no pieces at all.
-func accessPathWithDatumV(path Value, datum string) string {
-	return accessPathWithDatumPieces(splitAccessPathV(path), datum)
+func accessPathWithDatumV(cc *compileCtx, path Value, datum string) string {
+	return accessPathWithDatumPieces(cc, splitAccessPathV(path), datum)
 }
 
-func accessPathWithDatumPieces(pieces []string, datum string) string {
-	prefixes := make([]string, 0, len(pieces))
-	for i := 1; i <= len(pieces); i++ {
-		qs := make([]string, i)
-		for j := 0; j < i; j++ {
-			qs[j] = jsonString(pieces[j])
-		}
-		prefixes = append(prefixes, datum+"["+strings.Join(qs, "][")+"]")
+// accessPathWithDatumPieces writes upstream's guard of each prefix of the
+// path in turn. The expression is quadratic in the pieces, as upstream's is
+// (a field of k pieces makes k prefixes of up to k): it is written once,
+// each piece quoted once, and charged to cc as it grows, a step per 16
+// bytes, so a long field path is paid for and polled, not built unseen.
+func accessPathWithDatumPieces(cc *compileCtx, pieces []string, datum string) string {
+	if len(pieces) == 0 {
+		return ""
 	}
-	return strings.Join(prefixes, " && ")
+	qs := make([]string, len(pieces))
+	for i, p := range pieces {
+		cc.work(1)
+		qs[i] = jsonString(p)
+	}
+	// The size is known: made at once, the buffer is not copied as it grows.
+	size, prefix := 0, len(datum)+1 // datum[
+	for i, q := range qs {
+		cc.work(1)
+		prefix += len(q) + 2 // the piece and "][" or "]"
+		size += prefix + 4*min(i, 1)
+	}
+	var b strings.Builder
+	b.Grow(size)
+	prefix = len(datum) + 1
+	for i, q := range qs {
+		if i > 0 {
+			b.WriteString(" && ")
+		}
+		cc.work(int64(prefix+len(q)+2*i) / 16)
+		b.WriteString(datum)
+		b.WriteByte('[')
+		for j := 0; j <= i; j++ {
+			if j > 0 {
+				b.WriteString("][")
+			}
+			b.WriteString(qs[j])
+		}
+		b.WriteByte(']')
+		prefix += len(q) + 2
+	}
+	return b.String()
 }
 
 // flatAccessWithDatum accesses a flattened field: datum["a.b"].
