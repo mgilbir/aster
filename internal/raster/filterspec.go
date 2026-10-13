@@ -398,8 +398,8 @@ func (r *renderer) resolveFilter(fn *node, st *state, bb rect, hasBB bool) *filt
 				p.kind = tagFeUnsupported
 			}
 		default:
-			// The primitives not drawn yet produce a transparent image (usvg's
-			// "dummy primitive"), keeping the chain intact.
+			// Every primitive is handled above; anything else would be
+			// usvg's dummy, a transparent result keeping the chain intact.
 			p.kind = tagFeUnsupported
 		}
 		p.linear = r.inheritedState(fe).filterLinear

@@ -52,7 +52,7 @@ func (run *filterRun) tile(p *fprim) (fimage, bool) {
 // builds do, at most n.
 func morphSize(r float32, n int) int {
 	k := satU32(math.Ceil(float64(r))) * 2
-	return min(int(k), n)
+	return int(min(int64(k), int64(n))) // in 64 bits: k may not fit a 32-bit int
 }
 
 // morphology is resvg's apply_morphology, the input in the primitive's

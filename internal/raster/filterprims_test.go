@@ -43,7 +43,9 @@ func resvgMorphology(dilate bool, rx, ry float32, pix []uint8, w, h int) []uint8
 // one whose size wraps to zero.
 func TestMorphologyMatchesResvgLoop(t *testing.T) {
 	rng := rand.New(rand.NewSource(7))
-	radii := []float32{0.3, 1, 1.5, 2, 3.7, 9, 40, 1e6, 2147483648}
+	// 2^31 wraps 2*ceil(r) to zero; for 1.5e9 it is past what a 32-bit int
+	// holds, and 3e9 wraps it.
+	radii := []float32{0.3, 1, 1.5, 2, 3.7, 9, 40, 1e6, 2147483648, 1.5e9, 3e9}
 	for _, size := range [][2]int{{1, 1}, {2, 3}, {17, 5}, {31, 23}} {
 		w, h := size[0], size[1]
 		src := make([]uint8, w*h*4)
