@@ -2,9 +2,6 @@ package jsval
 
 import (
 	"sync/atomic"
-
-	ecma262 "github.com/mgilbir/goecma262"
-	ecmacompiler "github.com/mgilbir/goecma262/compiler"
 )
 
 // indexThreshold is the size at which an Object builds a hash index. Below it
@@ -345,89 +342,3 @@ func (o *Object) Clone() *Object {
 	}
 	return c
 }
-
-// Pattern is a compiled ECMA-262 regular expression, the value regexp() makes.
-type Pattern struct {
-	Source string
-	Flags  string
-	Re     *ecma262.Regexp
-	// bytes is what the compiled pattern holds; work is its compile's work.
-	bytes, work int64
-}
-
-// PatternPay pays for a pattern's compile. NewPattern calls it with the
-// bytes the pattern will hold and the compile's work before compiling, and
-// compiles nothing when it returns an error. Afterwards it calls it with no
-// work to settle the bytes: negative to give back what was paid (the compile
-// failed, or the program is smaller than its bound), positive should the
-// program be larger.
-type PatternPay func(bytes, work int64) error
-
-// NewPattern compiles source with JavaScript flags ("gimsuyvd"), paid for
-// with pay. goecma262 cannot be interrupted while it compiles, and a few
-// bytes of source can compile to tens of megabytes, so the compile is bounded
-// (EstimatePattern) and paid for before it starts: a pattern past the budget
-// costs a parse, not a compile. An error from pay is returned as it is.
-func NewPattern(source, flags string, pay PatternPay) (*Pattern, error) {
-	c, ok := quickCost(source, flags)
-	if !ok {
-		var err error
-		if c, err = EstimatePattern(source, flags); err != nil {
-			return nil, err
-		}
-	}
-	if c.TooLarge {
-		return nil, tooLargeError(source, flags)
-	}
-	if err := pay(c.Bytes, c.Work); err != nil {
-		return nil, err
-	}
-	re, err := ecma262.CompileFlags(source, flags)
-	if err != nil {
-		pay(-c.Bytes, 0) //nolint:errcheck // giving back never fails
-		return nil, patternError(source, flags, err)
-	}
-	// The bound counts the program at the most capacity append can give it;
-	// the pattern holds what it really has.
-	held := c.Bytes
-	if slots, ok := codeSlots(re); ok {
-		held = c.Bytes - programBytes(0, programCap(c.Instructions), 0, 0) + programBytes(0, slots, 0, 0)
-	}
-	if held != c.Bytes {
-		if err := pay(held-c.Bytes, 0); err != nil {
-			pay(-c.Bytes, 0) //nolint:errcheck // giving back never fails
-			return nil, err
-		}
-	}
-	return &Pattern{Source: source, Flags: flags, Re: re, bytes: held, work: c.Work}, nil
-}
-
-// Bytes is what p holds: its program, the program's tables and what its
-// instructions own. A Pattern not made by NewPattern counts as the largest
-// program goecma262 compiles.
-func (p *Pattern) Bytes() int64 {
-	if p.Re == nil || p.bytes <= 0 {
-		return maxPatternBytes + int64(len(p.Source)+len(p.Flags))
-	}
-	return p.bytes
-}
-
-// CompileWork is the work of compiling p's program again, in instructions.
-func (p *Pattern) CompileWork() int64 {
-	if p.Re == nil || p.bytes <= 0 {
-		return ecmacompiler.MaxProgramSize
-	}
-	return p.work
-}
-
-// Fresh is a new RegExp object for the same compiled pattern, with lastIndex
-// 0: what evaluating a regular expression literal again makes. The program is
-// shared, not compiled again; only the g and y flags give a Pattern state.
-func (p *Pattern) Fresh() *Pattern {
-	re := *p.Re
-	re.SetLastIndex(0)
-	return &Pattern{Source: p.Source, Flags: p.Flags, Re: &re, bytes: p.bytes, work: p.work}
-}
-
-// String is JavaScript's String(regexp): the literal a reader would write.
-func (p *Pattern) String() string { return "/" + p.Source + "/" + p.Flags }

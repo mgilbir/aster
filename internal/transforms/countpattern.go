@@ -2,6 +2,7 @@ package transforms
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"golang.org/x/text/cases"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
+	ecma262 "github.com/mgilbir/goecma262"
 )
 
 // CountPatternParams configures CountPattern.
@@ -39,19 +41,23 @@ func CountPattern(ctx context.Context, data []jsval.Value, p CountPatternParams)
 	if pattern == "" {
 		pattern = "[\\w']+"
 	}
-	// The two programs are the call's while it runs, paid for before they
-	// are compiled (see payPattern).
+	// The two patterns are the call's while it runs, paid for before they
+	// are parsed and compiled (see payPattern).
 	led := budget.LedgerFrom(ctx)
 	var held int64
 	defer func() { led.Free(held) }()
-	match, err := jsval.NewPattern(pattern, "g", payPattern(ctx, led, &held))
+	match, err := newCountPattern(ctx, pattern, "g", led, &held)
 	if err != nil {
 		return nil, err
 	}
-	stop, err := jsval.NewPattern("^"+p.Stopwords+"$", "i", payPattern(ctx, led, &held))
+	stop, err := newCountPattern(ctx, "^"+p.Stopwords+"$", "i", led, &held)
 	if err != nil {
 		return nil, err
 	}
+	// The searches stop at the call's deadline. A copy made with
+	// WithContext shares the program; the g pattern's lastIndex is not used
+	// (FindAll searches the whole text).
+	matchRe, stopRe := match.Re.WithContext(ctx), stop.Re.WithContext(ctx)
 	textName, countName := p.As[0], p.As[1]
 	if textName == "" {
 		textName = "text"
@@ -80,15 +86,17 @@ func CountPattern(ctx context.Context, data []jsval.Value, p CountPatternParams)
 		if conv != nil {
 			text = conv(text)
 		}
-		ms, err := match.Re.FindAllStringSubmatchIndexErr(text, -1)
+		matchRe.SetMaxMemory(jsval.MatchMemory(led.Room(), len(text)))
+		ms, err := matchRe.FindAllStringSubmatchIndexErr(text, -1)
 		if err != nil {
-			return nil, fmt.Errorf("countpattern: %w", err)
+			return nil, searchFailed(err)
 		}
 		for _, m := range ms {
 			tok := text[m[0]:m[1]]
-			isStop, err := stop.Re.MatchStringErr(tok)
+			stopRe.SetMaxMemory(jsval.MatchMemory(led.Room(), len(tok)))
+			isStop, err := stopRe.MatchStringErr(tok)
 			if err != nil {
-				return nil, fmt.Errorf("countpattern: %w", err)
+				return nil, searchFailed(err)
 			}
 			if isStop {
 				continue
@@ -116,27 +124,43 @@ func CountPattern(ctx context.Context, data []jsval.Value, p CountPatternParams)
 	return out, nil
 }
 
-// payPattern pays for a pattern's compile with the ledger, adding what it
-// holds to *held: goecma262 cannot be interrupted while it compiles, so the
-// program is charged from its bound and the deadline polled before the
-// compile starts. A program past the ledger is refused uncompiled.
-func payPattern(ctx context.Context, led *budget.Ledger, held *int64) jsval.PatternPay {
-	return func(bytes, work int64) error {
-		if err := led.Work(work); err != nil {
-			return err
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
+// newCountPattern compiles one of the operator's patterns under ctx, paid
+// for with the ledger before its parse and its compile allocate, adding what
+// it holds to *held: a pattern past what the ledger has left is refused
+// unbuilt, and the deadline stops the compile. Its work is counted once it
+// is built.
+func newCountPattern(ctx context.Context, source, flags string, led *budget.Ledger, held *int64) (*jsval.Pattern, error) {
+	p, err := jsval.NewPattern(ctx, source, flags, func(bytes int64) error {
 		if bytes < 0 {
 			led.Free(-bytes)
 			*held += bytes
 			return nil
 		}
 		if err := led.Alloc(bytes); err != nil {
-			return fmt.Errorf("countpattern: a regular expression compiles to a program of %d bytes: %w", bytes, err)
+			return fmt.Errorf("countpattern: a regular expression needs %d bytes to compile: %w", bytes, err)
 		}
 		*held += bytes
 		return nil
+	})
+	if errors.Is(err, ecma262.ErrLimit) {
+		// Past one of goecma262's limits, which JavaScript does not have:
+		// an engine limit, as in expressions.
+		return nil, fmt.Errorf("countpattern: %w: %w", ErrLimit, err)
 	}
+	if err != nil {
+		return nil, err
+	}
+	if err := led.Work(int64(len(source) + p.Re.ProgramSize())); err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
+// searchFailed is the error of a search that failed: out of goecma262's step
+// or memory budget, an engine limit (ErrLimit), as in expressions.
+func searchFailed(err error) error {
+	if errors.Is(err, ecma262.ErrStepLimit) {
+		return fmt.Errorf("countpattern: %w: %w", ErrLimit, err)
+	}
+	return fmt.Errorf("countpattern: %w", err)
 }

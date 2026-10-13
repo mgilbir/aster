@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"runtime"
+	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/mgilbir/aster/internal/budget"
@@ -21,32 +23,33 @@ func allocated(f func()) uint64 {
 	return b.TotalAlloc - a.TotalAlloc
 }
 
-// bigPattern compiles to 150,452 instructions: about 40 MB held, over 100 MB
-// allocated while compiling, against a few kilobytes to parse it.
+// bigPattern compiles to 150,452 instructions: 24 MB held on 64-bit
+// platforms (13 MB on 32-bit ones), against a few kilobytes to parse it.
 const bigPattern = "(a{1000}){150}"
 
-// compiled is what a compile of bigPattern allocates at least; refusedMax
-// what a refusal may allocate at most.
+// compiled is what a compile of bigPattern allocates at least, on any
+// platform; refusedMax what a refusal may allocate at most.
 const (
-	compiled   = 16 << 20
+	compiled   = 8 << 20
 	refusedMax = 1 << 20
 )
 
 // ledgerForOne is a ledger with room for one program of bigPattern, not two.
 func ledgerForOne(t *testing.T, ctx context.Context) *budget.Ledger {
 	t.Helper()
-	cost, err := jsval.EstimatePattern(bigPattern+"x", "")
+	p, err := jsval.NewPattern(context.Background(), bigPattern+"x", "", unpaid)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return budget.NewLedger(ctx, budget.LedgerLimits{MaxBytes: cost.Bytes + cost.Bytes/2})
+	return budget.NewLedger(ctx, budget.LedgerLimits{MaxBytes: p.Bytes() + p.Bytes()/2})
 }
 
 // Every place that compiles a pattern pays for it first: a program past what
 // the call's ledger has left is refused with ErrLimit having cost a parse,
 // not a compile (C8, #115: regexp() over data, and literals, compiled a
-// second program of tens of megabytes before refusing it). The test counts
-// the bytes allocated, so it holds on any machine; the race detector
+// second program of tens of megabytes before refusing it). A search from
+// lastIndex runs the compiled program, and compiles nothing again. The test
+// counts the bytes allocated, so it holds on any machine; the race detector
 // allocates on its own, so it is skipped there.
 func TestPatternRefusedBeforeCompile(t *testing.T) {
 	if testutil.RaceSlowdown > 1 {
@@ -103,21 +106,25 @@ func TestPatternRefusedBeforeCompile(t *testing.T) {
 			t.Errorf("past goecma262's program cap: %v, %d bytes allocated", got, n)
 		}
 	})
-	t.Run("raw", func(t *testing.T) {
-		// The second compile of a pattern, for a search from lastIndex.
-		p, err := jsval.NewPattern(bigPattern+"z", "g", unpaid)
+	t.Run("search-from-lastIndex", func(t *testing.T) {
+		// test() of a g pattern past a match searches from lastIndex with
+		// the program it has (C97 compiled a second one for it).
+		p, err := jsval.NewPattern(context.Background(), bigPattern+"z", "g", unpaid)
 		if err != nil {
 			t.Fatal(err)
 		}
-		s := NewScope(nil)
-		s.Context = budget.WithLedger(context.Background(), budget.NewLedger(context.Background(), budget.LedgerLimits{MaxBytes: p.Bytes() - 1}))
-		var stopped any
-		n := allocated(func() {
-			defer func() { stopped = recover() }()
-			compileRaw(s, p)
-		})
-		if lp, ok := stopped.(*limitPanic); !ok || !errors.Is(lp.err, budget.ErrLimit) || n > refusedMax {
-			t.Errorf("past the ledger: %v, %d bytes allocated", stopped, n)
+		prog, err := Compile("test(re, 'zz')")
+		if err != nil {
+			t.Fatal(err)
+		}
+		led := budget.NewLedger(context.Background(), budget.LedgerLimits{MaxBytes: 1 << 20})
+		s := NewScope(&fakeEnv{signals: map[string]jsval.Value{"re": jsval.PatternValue(p)}})
+		s.Context = budget.WithLedger(context.Background(), led)
+		p.Re.SetLastIndex(1)
+		var v jsval.Value
+		n := allocated(func() { v, err = prog.Eval(s) })
+		if err != nil || v.BoolValue() || p.Re.LastIndex() != 0 || n > refusedMax || led.PeakBytes() != 0 {
+			t.Errorf("a search from lastIndex: %v, %v, lastIndex %d, %d bytes allocated, %d charged", v, err, p.Re.LastIndex(), n, led.PeakBytes())
 		}
 	})
 	t.Run("deadline", func(t *testing.T) {
@@ -140,4 +147,144 @@ func TestPatternRefusedBeforeCompile(t *testing.T) {
 			t.Errorf("after the deadline: literal %v, regexp %v, %d bytes allocated", err1, err2, n)
 		}
 	})
+}
+
+// goecma262's limits are told from invalid patterns by its typed errors
+// (ecma262.ErrLimit), not by words of the message, which quotes the source:
+// a pattern that is invalid is a SyntaxError whatever it says, and one past
+// a limit ends the render with ErrLimit, from a string or as a literal.
+func TestPatternErrorClassification(t *testing.T) {
+	prog, err := Compile("test(src, 'a')")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		src   string
+		limit bool
+	}{
+		{"too deeply nested(", false}, {"exceeds limit[", false}, {"compiled program too large)", false}, {"a**", false},
+		{"a{10001}", true}, {strings.Repeat("(", 201) + strings.Repeat(")", 201), true}, {"(a{1000}){201}", true},
+	} {
+		s := NewScope(&fakeEnv{signals: map[string]jsval.Value{"src": jsval.Str(c.src)}})
+		_, err := prog.Eval(s)
+		var je *Error
+		if got := errors.Is(err, budget.ErrLimit); got != c.limit || !c.limit && (!errors.As(err, &je) || je.Name != "SyntaxError") {
+			t.Errorf("regexp(%q): %v (a limit: %v)", c.src, err, got)
+		}
+		_, err = Compile("test(/" + c.src + "/, 'a')")
+		var se *SyntaxError
+		if !errors.As(err, &se) || se.Limit != c.limit {
+			t.Errorf("/%s/: %v, want a limit %v", c.src, err, c.limit)
+		}
+	}
+}
+
+// Searches give JavaScript's answers where a match begins or ends between
+// the two halves of a pair, which a WTF-8 string can hold: test() of a g
+// pattern searching from such a lastIndex, replace and split (node 24 gave
+// each answer).
+func TestRegexpSurrogateHalves(t *testing.T) {
+	for _, c := range []struct{ re, src, want string }{
+		{`\uD83D`, `test(re, '😀') + ',' + test(re, '😀') + ',' + test(re, '😀')`, "true,false,true"},
+		{`\uDE00`, `test(re, '😀') + ',' + test(re, '😀') + ',' + test(re, '😀')`, "true,false,true"},
+		{`a|\uDE00`, `test(re, 'a😀a') + ',' + test(re, 'a😀a') + ',' + test(re, 'a😀a') + ',' + test(re, 'a😀a')`, "true,true,true,false"},
+		{``, `replace('a😀b', /\uDE00/, 'X') === 'a\uD83DXb'`, "true"},
+		{``, `join(split('😀😀', /(?:)/), '|') === '\uD83D|\uDE00|\uD83D|\uDE00'`, "true"},
+		{``, `join(split('x😀y😀z', /\uD83D/), '|') === 'x|\uDE00y|\uDE00z'`, "true"},
+		{``, `replace('😀😀', /(?:)/g, '-') === '-\uD83D-\uDE00-\uD83D-\uDE00-'`, "true"},
+	} {
+		env := &fakeEnv{signals: map[string]jsval.Value{}}
+		if c.re != "" {
+			re, err := jsval.NewPattern(context.Background(), c.re, "g", unpaid)
+			if err != nil {
+				t.Fatal(err)
+			}
+			env.signals["re"] = jsval.PatternValue(re)
+		}
+		prog, err := Compile(c.src)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := NewScope(env)
+		s.Context = budget.WithLedger(context.Background(), budget.NewLedger(context.Background(), budget.LedgerLimits{}))
+		v, err := prog.Eval(s)
+		if err != nil || v.AsString() != c.want {
+			t.Errorf("%s with re = /%s/g: %v (%v), want %s", c.src, c.re, v, err, c.want)
+		}
+	}
+}
+
+// pollsLeft is a context that is done from its n-th poll on: a deadline
+// reached in the middle of a search, without a clock.
+type pollsLeft struct {
+	context.Context
+	n    atomic.Int64
+	done chan struct{}
+}
+
+func newPollsLeft(n int64) *pollsLeft {
+	c := &pollsLeft{Context: context.Background(), done: make(chan struct{})}
+	c.n.Store(n)
+	return c
+}
+
+func (c *pollsLeft) Done() <-chan struct{} { return c.done }
+
+func (c *pollsLeft) Err() error {
+	if c.n.Add(-1) < 0 {
+		return context.Canceled
+	}
+	return nil
+}
+
+// backtracker is a search that holds between 2 and 4 MiB for backtracking
+// over a 100 KB input and takes over half a million steps, within
+// goecma262's default budget for it (256 MiB, 11 million steps).
+var backtracker = struct{ expr, input string }{"test(/^(a|b|ab)*$/, s)", strings.Repeat("ab", 50000)}
+
+// A search stops at the call's deadline, which goecma262 polls as it
+// matches, and the evaluation ends with the context's error: not a step
+// limit, not a result. The literal is compiled before, without the context.
+func TestRegexpSearchStopsWithContext(t *testing.T) {
+	prog, err := Compile(backtracker.expr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := &fakeEnv{signals: map[string]jsval.Value{"s": jsval.Str(backtracker.input)}}
+	s := NewScope(env)
+	if v, err := prog.Eval(s); err != nil || !v.BoolValue() {
+		t.Fatalf("without a deadline: %v, %v", v, err)
+	}
+	// Done four polls in: the evaluation's own work polls once, then the
+	// search every few thousand steps.
+	s.Context = newPollsLeft(4)
+	if v, err := prog.Eval(s); !errors.Is(err, context.Canceled) || errors.Is(err, budget.ErrLimit) {
+		t.Errorf("past the deadline: %v, %v", v, err)
+	}
+}
+
+// A search holds for backtracking at most what the call's ledger has left:
+// the search that holds megabytes fails with ErrLimit when 64 KiB are left,
+// and succeeds when the ledger has room.
+func TestRegexpSearchMemoryBoundedByLedger(t *testing.T) {
+	prog, err := Compile(backtracker.expr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := &fakeEnv{signals: map[string]jsval.Value{"s": jsval.Str(backtracker.input)}}
+	run := func(room int64) (jsval.Value, error) {
+		led := budget.NewLedger(context.Background(), budget.LedgerLimits{MaxBytes: 64 << 20})
+		if err := led.Alloc(64<<20 - room); err != nil {
+			t.Fatal(err)
+		}
+		s := NewScope(env)
+		s.Context = budget.WithLedger(context.Background(), led)
+		return prog.Eval(s)
+	}
+	if v, err := run(32 << 20); err != nil || !v.BoolValue() {
+		t.Errorf("with room: %v, %v", v, err)
+	}
+	if v, err := run(64 << 10); !errors.Is(err, budget.ErrLimit) {
+		t.Errorf("with 64 KiB left: %v, %v", v, err)
+	}
 }

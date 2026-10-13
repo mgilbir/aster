@@ -146,7 +146,11 @@ Specifications and data are untrusted.
   the expression language can only call the whitelisted function table.
 - Data loading and image/link URLs only through the configured `Loader`.
 - Regular expressions run through goecma262's bounded matcher; use its `Err`
-  methods for untrusted patterns.
+  methods for untrusted patterns. Compile with `jsval.NewPattern`, which pays
+  for the parse and the compiled form before either allocates and stops at
+  the context's deadline, and search with a copy made by `WithContext` for
+  the call, its backtracking memory bounded by the ledger's room
+  (`jsval.MatchMemory`); never change a Regexp the pattern cache shares.
 
 ### Floating point parity
 

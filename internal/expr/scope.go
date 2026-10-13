@@ -11,6 +11,7 @@ import (
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/jsval"
+	ecma262 "github.com/mgilbir/goecma262"
 )
 
 // Error is a JavaScript exception raised while evaluating an expression, such
@@ -130,6 +131,8 @@ type Scope struct {
 	stack  []jsval.Value
 	// pending is the work charged since the last flush to the ledger.
 	pending int64
+	// re is the copy of reOf that matcher last made.
+	re, reOf *ecma262.Regexp
 	// searchSteps counts the comparison steps of the Knuth-Morris-Pratt
 	// searches (searchFirst, searchLast and their tables). Nothing reads it
 	// but the tests, which check that a search is linear by counting its

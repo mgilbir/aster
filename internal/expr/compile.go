@@ -78,7 +78,10 @@ func Compile(src string) (*Program, error) { return CompileContext(context.Backg
 // literal past what the ledger can pay for is a SyntaxError that wraps
 // budget.ErrLimit.
 func CompileContext(ctx context.Context, src string) (*Program, error) {
-	ast, err := parse(src, budget.LedgerFrom(ctx))
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ast, err := parse(ctx, src)
 	if err != nil {
 		return nil, err
 	}

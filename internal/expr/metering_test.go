@@ -97,20 +97,6 @@ func hostileCalls(short bool) [][]string {
 	return calls
 }
 
-// meteringExempt are the functions whose cost belongs to another package's
-// bound, and slowExempt those whose deadline does: goecma262 compiles and
-// matches with no way to charge or interrupt it (a search of a long string
-// runs to its step budget, 100 steps a byte, about a second for 6 MB).
-var meteringExempt = map[string]string{
-	// A pattern compiled from a hostile string: its program is charged
-	// before it is compiled (jsval.NewPattern), but goecma262's parser, which
-	// runs first, allocates up to about 190 bytes per byte of a source of up
-	// to MaxPatternLength (200 MB for a MiB of "a"), uncharged.
-	"regexp": "goecma262", "test": "goecma262",
-}
-
-var slowExempt = map[string]bool{"regexp": true, "test": true}
-
 func TestEveryBuiltinIsMetered(t *testing.T) {
 	full := os.Getenv("ASTER_METERING_FULL") != ""
 	stringRoom, allocSlack, k := 256<<10, int64(512<<10), 1.5
@@ -154,15 +140,12 @@ func TestEveryBuiltinIsMetered(t *testing.T) {
 			took := time.Since(start)
 			runtime.ReadMemStats(&after)
 			cancel()
-			if took > deadline+slack && !slowExempt[name] {
+			if took > deadline+slack {
 				t.Errorf("%s: took %v under a %v deadline (err %.80v)", src, took, deadline, err)
 			}
 			var je *Error
 			if errors.As(err, &je) && (strings.Contains(je.Msg, "context") || strings.Contains(je.Msg, "limit")) {
 				t.Errorf("%s: an engine limit or the deadline as a JavaScript exception: %v", src, err)
-			}
-			if _, ok := meteringExempt[name]; ok {
-				continue
 			}
 			charged := int64(stringRoom) - s.Strings.left + led.PeakBytes()
 			if got := int64(after.TotalAlloc - before.TotalAlloc); got > allocRatio*charged+allocSlack {

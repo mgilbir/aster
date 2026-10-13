@@ -85,9 +85,13 @@ func TestFixedLimitsDocMatchesCode(t *testing.T) {
 		"expression nesting":              {{c("expr", "MaxDepth"), c("vegalite", "MaxExprDepth")}},
 		"one string an expression builds": {{c("expr", "MaxStringLength")}, {c("expr", "v8MaxStringLength")}},
 		"a regular expression compiled from a string": {{c("expr", "MaxPatternLength")}, {c("github.com/mgilbir/goecma262/compiler", "MaxProgramSize")}},
-		"SVG input to `SVGToPNG`":                     {{int64(rl.MaxInputBytes)}, {int64(rl.MaxElements)}, {int64(rl.MaxDepth)}},
-		"style sheets of SVG input to `SVGToPNG`":     {{int64(rl.MaxStyleBytes)}, {int64(rl.MaxCSSRules)}, {int64(rl.MaxCSSWork)}},
-		"one filter region (PNG)":                     {{int64(rl.MaxFilterPixels)}},
+		"a regular expression search": {
+			{c("github.com/mgilbir/goecma262/vm", "DefaultMaxSteps")}, {c("github.com/mgilbir/goecma262/vm", "DefaultStepsPerByte")},
+			{c("github.com/mgilbir/goecma262/vm", "DefaultMaxMemory")}, {c("github.com/mgilbir/goecma262/vm", "DefaultMemoryPerByte")},
+		},
+		"SVG input to `SVGToPNG`":                 {{int64(rl.MaxInputBytes)}, {int64(rl.MaxElements)}, {int64(rl.MaxDepth)}},
+		"style sheets of SVG input to `SVGToPNG`": {{int64(rl.MaxStyleBytes)}, {int64(rl.MaxCSSRules)}, {int64(rl.MaxCSSWork)}},
+		"one filter region (PNG)":                 {{int64(rl.MaxFilterPixels)}},
 		"caches of one PNG render": {
 			{c("raster", "maxGradCacheBytes")}, {c("raster", "maxGradCacheEntries")}, {c("raster", "maxOutlineCacheBytes")},
 			{c("raster", "maxOutlineEntries")}, {c("raster", "maxSVGGlyphBytes")}, {c("raster", "maxSVGGlyphDocs")},
