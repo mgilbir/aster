@@ -19,6 +19,9 @@ func TestNilLedgerIsUnlimited(t *testing.T) {
 	if l.Bytes() != 0 || l.PeakBytes() != 0 || l.WorkDone() != 0 {
 		t.Fatal("a nil ledger records nothing")
 	}
+	if l.Room() != math.MaxInt64 {
+		t.Fatalf("a nil ledger has unlimited room: %d", l.Room())
+	}
 	if LedgerFrom(context.Background()) != nil || LedgerFrom(nil) != nil { //nolint:staticcheck // nil is what the API accepts
 		t.Fatal("no ledger in a plain context")
 	}
@@ -32,6 +35,9 @@ func TestLedgerAllocBeforeAllocation(t *testing.T) {
 	if err := l.Alloc(40); err != nil {
 		t.Fatalf("100 bytes fit: %v", err)
 	}
+	if l.Room() != 0 {
+		t.Fatalf("a full ledger has no room: %d", l.Room())
+	}
 	err := l.Alloc(1)
 	if !errors.Is(err, ErrLimit) {
 		t.Fatalf("101 bytes must not fit: %v", err)
@@ -40,8 +46,8 @@ func TestLedgerAllocBeforeAllocation(t *testing.T) {
 		t.Fatalf("a refused charge must record nothing: %d", l.Bytes())
 	}
 	l.Free(70)
-	if l.Bytes() != 30 || l.PeakBytes() != 100 {
-		t.Fatalf("free: %d, peak %d", l.Bytes(), l.PeakBytes())
+	if l.Bytes() != 30 || l.PeakBytes() != 100 || l.Room() != 70 {
+		t.Fatalf("free: %d, peak %d, room %d", l.Bytes(), l.PeakBytes(), l.Room())
 	}
 	if !errors.Is(l.Alloc(math.MaxInt64), ErrLimit) || l.Bytes() != 30 {
 		t.Fatal("a huge charge must fail without wrapping")
@@ -57,6 +63,9 @@ func TestLedgerAllocBeforeAllocation(t *testing.T) {
 	u := NewLedger(nil, LedgerLimits{}) //nolint:staticcheck // a nil ctx is documented as never done
 	if u.Alloc(math.MaxInt64) != nil || u.Alloc(math.MaxInt64) != nil || u.Bytes() != math.MaxInt64 {
 		t.Fatalf("an unlimited ledger saturates: %d", u.Bytes())
+	}
+	if u.Room() != math.MaxInt64 {
+		t.Fatalf("an unlimited ledger has unlimited room: %d", u.Room())
 	}
 }
 

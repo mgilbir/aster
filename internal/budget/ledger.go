@@ -179,6 +179,19 @@ func (l *Ledger) Bytes() int64 {
 	return l.bytes.Load()
 }
 
+// Room is how many more bytes Alloc would accept now: MaxBytes less what is
+// charged, never negative, and math.MaxInt64 for an unlimited (or nil)
+// Ledger. It bounds memory that a library allocates where it cannot be
+// charged piece by piece (a regular expression search's backtracking): such
+// memory never takes the call past MaxBytes, although the ledger does not
+// count it.
+func (l *Ledger) Room() int64 {
+	if l == nil || l.maxBytes <= 0 {
+		return math.MaxInt64
+	}
+	return max(l.maxBytes-l.bytes.Load(), 0)
+}
+
 // PeakBytes is the most bytes charged at once.
 func (l *Ledger) PeakBytes() int64 {
 	if l == nil {
