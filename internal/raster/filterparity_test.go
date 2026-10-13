@@ -112,6 +112,22 @@ var filterParity = []synth{
 	exact("conv-kernel-missing", `<feConvolveMatrix/>`),
 	exact("conv-kernel-bad", `<feConvolveMatrix kernelMatrix="1 1 1 1 x 1 1 1 1"/>`),
 
+	// ---- feDisplacementMap ----
+	// resvg multiplies the offset by the scale twice: a scale of 10 moves a
+	// pixel by up to 50 (0.5 x 10 x 10).
+	exact("disp-flood", `<feFlood flood-color="#80c0ff" result="m"/><feDisplacementMap in="SourceGraphic" in2="m" scale="2" xChannelSelector="R" yChannelSelector="B"/>`),
+	exact("disp-flood-translucent", `<feFlood flood-color="#c040ff" flood-opacity="0.6" result="m"/><feDisplacementMap in="SourceGraphic" in2="m" scale="10" xChannelSelector="R" yChannelSelector="G"/>`),
+	exact("disp-self", `<feDisplacementMap in="SourceGraphic" in2="SourceGraphic" scale="6" xChannelSelector="G" yChannelSelector="A"/>`),
+	exact("disp-alpha-default-channels", `<feDisplacementMap in2="SourceAlpha" scale="3"/>`),
+	exact("disp-scale-default", `<feDisplacementMap in2="SourceGraphic"/>`),
+	exact("disp-scale-negative", `<feDisplacementMap in2="SourceGraphic" scale="-7" xChannelSelector="B" yChannelSelector="R"/>`),
+	exact("disp-scale-huge", `<feDisplacementMap in2="SourceGraphic" scale="1e30" xChannelSelector="B" yChannelSelector="R"/>`),
+	exact("disp-channel-unknown", `<feDisplacementMap in2="SourceGraphic" scale="5" xChannelSelector="r" yChannelSelector="X"/>`),
+	exact("disp-srgb", `<feDisplacementMap in2="SourceGraphic" scale="4" xChannelSelector="R" yChannelSelector="G" color-interpolation-filters="sRGB"/>`),
+	exact("disp-transfer-map", `<feOffset dx="3" result="o"/><feComponentTransfer in="SourceGraphic" result="m"><feFuncR type="linear" slope="2" intercept="-0.3"/><feFuncG type="discrete" tableValues="0 0.3 0.8 1"/></feComponentTransfer><feDisplacementMap in="o" in2="m" scale="3.5" xChannelSelector="R" yChannelSelector="G"/>`),
+	{"disp-obb", filterSVG(`<feDisplacementMap in2="SourceGraphic" scale="0.05" xChannelSelector="R" yChannelSelector="G"/>`, `primitiveUnits="objectBoundingBox"`, alignedShapes), 0.01, 0},
+	{"disp-aa", filterSVG(`<feFlood flood-color="#80c0ff" result="m"/><feDisplacementMap in="SourceGraphic" in2="m" scale="2" xChannelSelector="R" yChannelSelector="B"/>`, "", aaShapes), 0.1, 0.25},
+
 	// ---- the filter region ----
 	// Larger than its layer (4x the canvas): cut to the layer, its
 	// primitives' sub-regions measured from the cut corner.

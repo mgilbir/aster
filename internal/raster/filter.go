@@ -591,6 +591,8 @@ func (run *filterRun) apply(p *fprim) (fimage, bool) {
 		return run.morphology(p)
 	case tagFeConvolveMatrix:
 		return run.convolve(p)
+	case tagFeDisplacementMap:
+		return run.displace(p)
 	}
 	// usvg's dummy primitive: transparent black.
 	return fimage{pix: run.blank(), region: run.region, owned: true}, true

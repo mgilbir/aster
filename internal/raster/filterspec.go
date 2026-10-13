@@ -71,6 +71,11 @@ type fprim struct {
 	dilate bool
 	rx, ry float64
 	conv   *convolveSpec
+
+	// feDisplacementMap: the scale (bbox-scaled, f32) and the channel of
+	// in2 each axis reads (0-3: R, G, B, A).
+	scale    float64
+	xch, ych uint8
 }
 
 // convolveSpec is a resolved feConvolveMatrix (usvg's ConvolveMatrix).
@@ -365,6 +370,14 @@ func (r *renderer) resolveFilter(fn *node, st *state, bb rect, hasBB bool) *filt
 			}
 			p.conv = conv
 			p.in1 = resolveInput(fe, aIn, prims)
+		case tagFeDisplacementMap:
+			// usvg scales by the mean of the bounding box's sides for
+			// primitiveUnits="objectBoundingBox" (one scale for both axes).
+			mean := float32(float32(scaleW)+float32(scaleH)) / 2
+			p.scale = float64(float32(numAttr32(fe, aScale, 0) * mean))
+			p.xch, p.ych = colorChannel(fe, aXChannelSelector), colorChannel(fe, aYChannelSelector)
+			p.in1 = resolveInput(fe, aIn, prims)
+			p.in2 = resolveInput(fe, aIn2, prims)
 		default:
 			// The primitives not drawn yet produce a transparent image (usvg's
 			// "dummy primitive"), keeping the chain intact.
@@ -772,6 +785,20 @@ func convolveMatrix(fe *node) (*convolveSpec, error) {
 		divisor: divisor, bias: numAttr32(fe, aBias, 0), edge: edge,
 		preserveAlpha: fe.str(aPreserveAlpha) == "true",
 	}, nil
+}
+
+// colorChannel is a channel selector, usvg's: R, G or B, and A for
+// anything else.
+func colorChannel(fe *node, id attrID) uint8 {
+	switch fe.str(id) {
+	case "R":
+		return 0
+	case "G":
+		return 1
+	case "B":
+		return 2
+	}
+	return 3
 }
 
 // countNums counts the numbers of a list without keeping them; ok is false

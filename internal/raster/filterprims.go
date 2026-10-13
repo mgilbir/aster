@@ -267,3 +267,38 @@ func convolvePixel(cm *convolveSpec, src, dst []uint8, w, h, x, y int) {
 	o[0], o[1], o[2] = calc(nr), calc(ng), calc(nb)
 	o[3] = satU8(float32(ba*255) + 0.5)
 }
+
+// displace is resvg's apply_displacement_map: both inputs in the
+// primitive's colour space, each pixel of the result the pixel of in1 the
+// map (in2, premultiplied as resvg leaves it) points to, transparent where
+// that is outside the image. resvg scales the offset by the primitive's
+// scale twice (scale_coordinates already multiplies the device scale by it,
+// and displacement_map::apply multiplies by it again); so does this, being
+// its output that is matched.
+func (run *filterRun) displace(p *fprim) (fimage, bool) {
+	w, h := run.w, run.h
+	src := run.toSpace(run.input(p.in1), p.linear)
+	defer run.free(src)
+	mp := run.toSpace(run.input(p.in2), p.linear)
+	defer run.free(mp)
+	pix := run.blank()
+	tx, ty := tsScale(run.ts)
+	k := float32(p.scale)
+	sx, sy := float32(k*float32(tx)), float32(k*float32(ty))
+	ok := run.rows(1, func(y0, y1 int) {
+		for y := y0; y < y1; y++ {
+			for x := 0; x < w; x++ {
+				m := mp.pix[(y*w+x)*4 : (y*w+x)*4+4]
+				dx := float32(m[p.xch])/255 - 0.5
+				dy := float32(m[p.ych])/255 - 0.5
+				ox := satI32(math.Round(float64(float32(x) + float32(float32(dx*sx)*k))))
+				oy := satI32(math.Round(float64(float32(y) + float32(float32(dy*sy)*k))))
+				if ox < 0 || int(ox) >= w || oy < 0 || int(oy) >= h {
+					continue
+				}
+				copy(pix[(y*w+x)*4:(y*w+x)*4+4], src.pix[(int(oy)*w+int(ox))*4:])
+			}
+		}
+	})
+	return fimage{pix: pix, region: run.region, linear: p.linear, owned: true}, ok
+}

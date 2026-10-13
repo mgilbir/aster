@@ -83,6 +83,9 @@ var filterPrims = []struct {
 	{"morphology, size wraps", fprim{kind: tagFeMorphology, rx: 2147483648, ry: 2, linear: true}, 1 + 1},
 	{"convolve", fprim{kind: tagFeConvolveMatrix, conv: testKernel(false), linear: true}, 1 + 1},
 	{"convolve, preserveAlpha", fprim{kind: tagFeConvolveMatrix, conv: testKernel(true), linear: true}, 1 + 1 + 1},
+	// Two conversions (in, and in2 a second time: SourceAlpha's own pass
+	// first) and the displacement.
+	{"displacement", fprim{kind: tagFeDisplacementMap, in2: finput{kind: inAlpha}, scale: 20, xch: 3, ych: 3, linear: true}, 1 + 1 + 1 + 1},
 }
 
 // testKernel is a 3x3 edge-detecting convolution.
