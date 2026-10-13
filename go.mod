@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/mgilbir/forme v0.10.0
-	github.com/mgilbir/goecma262 v0.3.1
+	github.com/mgilbir/goecma262 v0.3.2
 	github.com/mgilbir/pdf0 v0.5.0
 	golang.org/x/image v0.47.0
 	golang.org/x/text v0.43.0
