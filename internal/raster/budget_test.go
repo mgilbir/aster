@@ -77,6 +77,7 @@ func TestPixelOpsDefaultBudgetUseExpansion(t *testing.T) {
 	if !errors.Is(err, errLimit) {
 		t.Fatalf("want errLimit, got %v", err)
 	}
+	testutil.Timing(t, "pixel-ops default budget, use expansion", time.Since(start), testutil.Scaled(20*time.Second))
 	if d := time.Since(start); d > testutil.Scaled(20*time.Second) {
 		t.Errorf("took %v", d)
 	}
@@ -118,6 +119,7 @@ func TestContextCancelled(t *testing.T) {
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("deadline: got %v", err)
 	}
+	testutil.Timing(t, "render honours a 100ms deadline", time.Since(start), testutil.Scaled(3*time.Second))
 	if d := time.Since(start); d > testutil.Scaled(3*time.Second) {
 		t.Errorf("deadline honoured after %v", d)
 	}
@@ -133,6 +135,7 @@ func TestContextCancelledFilter(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error")
 	}
+	testutil.Timing(t, "filter render honours a 200ms deadline", time.Since(start), testutil.Scaled(5*time.Second))
 	if d := time.Since(start); d > testutil.Scaled(5*time.Second) {
 		t.Errorf("returned after %v (%v)", d, err)
 	}

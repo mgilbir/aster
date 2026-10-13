@@ -18,6 +18,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/mgilbir/aster/internal/testutil"
 )
 
 const (
@@ -157,6 +159,8 @@ func checkBounded(t *testing.T, res secResult, killed bool) {
 	if rep := repeatedPart(res.Err); rep != "" {
 		t.Errorf("the message repeats %q: %s", rep, res.Err)
 	}
+	testutil.TimingSeconds(t, "bounded post-deadline (seconds past WithTimeout vs slack)", res.Seconds-boundedTimeout.Seconds(), (boundedSlack * raceSlowdown).Seconds())
+	testutil.TimingSeconds(t, "bounded total (render seconds vs timeout+slack)", res.Seconds, (boundedTimeout + boundedSlack*raceSlowdown).Seconds())
 	if limit := (boundedTimeout + boundedSlack*raceSlowdown).Seconds(); res.Seconds > limit {
 		t.Errorf("took %.2fs under WithTimeout(%v); at most %.2fs", res.Seconds, boundedTimeout, limit)
 	}

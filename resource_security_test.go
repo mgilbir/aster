@@ -75,6 +75,9 @@ func runRes(t *testing.T, c resCase) {
 	}
 	// CPU time, not wall time: a loaded runner stretches the second, not the
 	// first, and the race detector's slowdown is allowed for.
+	if c.maxCPU > 0 {
+		testutil.TimingSeconds(t, "CPU-time (child user+sys seconds, "+c.file+")", res.CPU, c.maxCPU*raceSlowdown)
+	}
 	if limit := c.maxCPU * raceSlowdown; c.maxCPU > 0 && res.CPU > limit {
 		t.Errorf("used %.1f CPU-seconds with WithTimeout(%s); want under %.1f", res.CPU, c.timeout, limit)
 	}
@@ -213,6 +216,7 @@ func TestTimeoutCoversLargeVegaLiteSpecs(t *testing.T) {
 			// Building and parsing the 2 MB spec is part of it.
 			limit := (time.Second + testutil.Scaled(6*time.Second)).Seconds()
 			res, killed := runSec(t, secJob{Kind: "vl2vega", Input: spec, Timeout: "1s"}, 60*time.Second*raceSlowdown)
+			testutil.TimingSeconds(t, "large VL spec compile (child seconds, "+name+")", res.Seconds, limit)
 			if killed || res.Seconds > limit {
 				t.Errorf("compiling took %.1fs with a 1s timeout, more than %.1fs (killed %v): %s", res.Seconds, limit, killed, res.Err)
 			}

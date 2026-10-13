@@ -111,7 +111,9 @@ func TestHugeOffsetsTerminate(t *testing.T) {
 	lw.Floor(1.6e12)
 	offsetT(lw, 1.6e12, 3)
 	// a hang guard: each walk ends (Invalid Date, maxFilterIterations)
-	if d := time.Since(start); d > testutil.Scaled(5*time.Second) {
+	d := time.Since(start)
+	testutil.Timing(t, "huge offsets terminate (hang guard)", d, testutil.Scaled(5*time.Second))
+	if d > testutil.Scaled(5*time.Second) {
 		t.Errorf("took %v", d)
 	}
 	// Quarters past what the valid dates hold are refused before any step

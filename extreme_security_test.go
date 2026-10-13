@@ -161,6 +161,9 @@ func runMutations(t *testing.T, mode string) {
 				case <-time.After(testutil.Scaled(20 * time.Second)):
 					msg = "HANG(>20s with 3s timeout)"
 				}
+				if msg == "" {
+					testutil.Timing(t, "extreme mutant (SLOW bound, 3s timeout)", time.Since(start), testutil.Scaled(8*time.Second))
+				}
 				if el := time.Since(start); msg == "" && el > testutil.Scaled(8*time.Second) {
 					msg = fmt.Sprintf("SLOW %v with 3s timeout", el)
 				}

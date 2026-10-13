@@ -16,6 +16,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/mgilbir/aster/internal/testutil"
 )
 
 var secFontN = flag.Int("sec.fontn", 300, "hostile font mutants")
@@ -164,6 +166,9 @@ func TestHostileFonts(t *testing.T) {
 		case msg = <-done:
 		case <-time.After(30 * time.Second * raceSlowdown):
 			msg = fmt.Sprintf("HANG > %v", 30*time.Second*raceSlowdown)
+		}
+		if msg == "" {
+			testutil.Timing(t, "font mutant (SLOW bound)", time.Since(start), 10*time.Second*raceSlowdown)
 		}
 		if msg == "" && time.Since(start) > 10*time.Second*raceSlowdown {
 			msg = fmt.Sprintf("SLOW %v", time.Since(start))

@@ -36,6 +36,10 @@ func TestVegaLiteRuns(t *testing.T) {
 	only := os.Getenv("VEGA_ONLY")
 	ok, total := 0, 0
 	byError := map[string][]string{}
+	var worst time.Duration // Timing logs the slowest spec, not each of hundreds
+	defer func() {
+		testutil.Timing(t, "vega-lite corpus render (slowest spec; only logged)", worst, testutil.Scaled(5*time.Second))
+	}()
 	for _, f := range files {
 		name := strings.TrimSuffix(filepath.Base(f), ".vl.json")
 		if only != "" && !strings.Contains(name, only) {
@@ -64,7 +68,9 @@ func TestVegaLiteRuns(t *testing.T) {
 		cancel()
 		if rerr == nil {
 			ok++
-			if d := time.Since(start); d > testutil.Scaled(5*time.Second) {
+			d := time.Since(start)
+			worst = max(worst, d)
+			if d > testutil.Scaled(5*time.Second) {
 				t.Logf("%s: slow (%v)", name, d)
 			}
 			continue

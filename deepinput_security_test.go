@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/mgilbir/aster/internal/testutil"
 )
 
 // TestDeepInput feeds every input shape that nests, at depths far past any
@@ -28,6 +30,9 @@ func TestDeepInput(t *testing.T) {
 			t.Run(fmt.Sprintf("%s/%d", sh.name, depth), func(t *testing.T) {
 				t.Parallel()
 				res, killed := runSec(t, secJob{Kind: sh.kind, Input: sh.gen(depth), Timeout: "30s", MaxStackMB: deepStackMB}, deepWall)
+				if !killed {
+					testutil.TimingSeconds(t, "deep input render (child seconds)", res.Seconds, deepSlow)
+				}
 				switch {
 				case killed:
 					t.Errorf("did not come back: %s", firstLine(res.Err))

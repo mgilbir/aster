@@ -184,7 +184,9 @@ func TestNoPanicOnGarbage(t *testing.T) {
 	}
 	// A hang guard, not a speed test: generous, and scaled for the race
 	// detector.
-	if d := time.Since(start); d > testutil.Scaled(60*time.Second) {
+	d := time.Since(start)
+	testutil.Timing(t, "geo garbage (hang guard)", d, testutil.Scaled(60*time.Second))
+	if d > testutil.Scaled(60*time.Second) {
 		t.Errorf("garbage took %v", d)
 	}
 }
@@ -294,8 +296,10 @@ func FuzzPath(f *testing.F) {
 			boundsOf(g)
 			centroidOf(g)
 		}()
+		waitStart := time.Now()
 		select {
 		case <-done:
+			testutil.Timing(t, "geo input terminates (hang guard)", time.Since(waitStart), testutil.Scaled(5*time.Second))
 		case <-time.After(testutil.Scaled(5 * time.Second)):
 			t.Fatalf("input takes over %v: %q", testutil.Scaled(5*time.Second), src)
 		}

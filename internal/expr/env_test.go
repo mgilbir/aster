@@ -306,8 +306,10 @@ func TestBounds(t *testing.T) {
 		}
 		done := make(chan error, 1)
 		go func() { _, err := p.Eval(NewScope(nil)); done <- err }()
+		waitStart := time.Now()
 		select {
 		case <-done:
+			testutil.Timing(t, "oversized expression terminates (hang guard)", time.Since(waitStart), testutil.Scaled(5*time.Second))
 		case <-time.After(testutil.Scaled(5 * time.Second)):
 			t.Fatalf("%s did not terminate", src)
 		}

@@ -132,7 +132,9 @@ func TestRandomSpecsDoNotHang(t *testing.T) {
 			t.Fatalf("stack in error: %v", err)
 		}
 	}
-	if d := time.Since(start); d > testutil.Scaled(30*time.Second) {
+	d := time.Since(start)
+	testutil.Timing(t, "3000 random specs compile", d, testutil.Scaled(30*time.Second))
+	if d > testutil.Scaled(30*time.Second) {
 		t.Fatalf("random specs took %v", d)
 	}
 }

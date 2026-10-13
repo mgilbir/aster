@@ -203,6 +203,7 @@ func TestDeadlineIsHonouredThroughoutCompile(t *testing.T) {
 			_, err := Compile(spec, Options{Context: ctx})
 			gc.poll() // the stretch from the last poll to the return counts too
 			t.Logf("%v in %v, %d polls, longest gap %v", err, time.Since(start), gc.polls, gc.max)
+			testutil.Timing(t, "longest stretch without a context poll during compile", gc.max, maxGap)
 			if gc.max > maxGap {
 				t.Errorf("%v without polling the context (limit %v)\n%s", gc.max, maxGap, gc.maxSpan)
 			}
@@ -233,6 +234,7 @@ func TestDeadlineSweep(t *testing.T) {
 			if !errors.Is(err, context.DeadlineExceeded) {
 				t.Errorf("%s at %v: %v", name, d, err)
 			}
+			testutil.Timing(t, "compile overshoot past a real deadline", el-d, maxOvershoot)
 			if el > d+maxOvershoot {
 				t.Errorf("%s: returned %v after a %v deadline", name, el-d, d)
 			}

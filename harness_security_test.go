@@ -18,6 +18,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/mgilbir/aster/internal/testutil"
 )
 
 const secChildEnv = "ASTER_SEC_CHILD"
@@ -233,12 +235,24 @@ func runSec(t testing.TB, job secJob, wall time.Duration) (res secResult, killed
 	cmd.Stdin = bytes.NewReader(in)
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
+	runStart := time.Now()
 	err := cmd.Run()
+	// The kill wall is a hang guard; this records how long the child, spawn
+	// and teardown included, took against it.
+	testutil.Timing(t, "runSec child wall (kill bound)", time.Since(runStart), wall)
 	if ctx.Err() != nil {
 		return secResult{Err: "KILLED after " + wall.String()}, true
 	}
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
 	last := lines[len(lines)-1]
+	// A child may record timings of its own (testutil.Timing prints to its
+	// stdout, a pipe this process reads, and only the last line is the
+	// result), so the parent relays them to its own stdout.
+	for _, l := range lines[:len(lines)-1] {
+		if strings.HasPrefix(l, testutil.TimingPrefix+"\t") {
+			testutil.Relay(l)
+		}
+	}
 	if jerr := json.Unmarshal([]byte(last), &res); jerr != nil {
 		return secResult{Err: fmt.Sprintf("child failed: %v: %s %s", err, out.String(), errb.String())}, true
 	}

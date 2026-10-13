@@ -156,8 +156,10 @@ func TestImageShrunkToNothing(t *testing.T) {
 			s.shadeRow(0, 0, make([]uint8, 4*64))
 			close(done)
 		}()
+		waitStart := time.Now()
 		select {
 		case <-done:
+			testutil.Timing(t, "image sampling through a degenerate matrix (hang guard)", time.Since(waitStart), testutil.Scaled(10*time.Second))
 		case <-time.After(testutil.Scaled(10 * time.Second)):
 			t.Fatalf("sampling through %v did not finish in 10s", inv)
 		}

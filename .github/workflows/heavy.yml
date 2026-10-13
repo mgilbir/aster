@@ -22,6 +22,11 @@ on:
         type: boolean
         required: false
         default: false
+      timings:
+        description: "Measure every wall-clock bound in the tests on this runner (ASTER_TIMINGS): each test job uploads its timings.tsv, which scripts/timings.sh summarises; benchgate is skipped"
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -38,26 +43,50 @@ concurrency:
 jobs:
   test-macos:
     runs-on: macos-latest
+    env:
+      # Set by a manual run with the timings input (see testutil.Timing).
+      ASTER_TIMINGS: ${{ inputs.timings && '1' || '' }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+      - name: record test timings
+        if: inputs.timings
+        run: echo "ASTER_TIMINGS_FILE=$RUNNER_TEMP/timings.tsv" >> "$GITHUB_ENV"
       - name: go test -short
         run: go test -short -timeout 30m ./...
+      - uses: actions/upload-artifact@v7
+        if: always() && inputs.timings
+        with:
+          name: timings-test-macos
+          path: ${{ runner.temp }}/timings.tsv
+          if-no-files-found: warn
 
   test-32bit:
     # int is 32 bits on 386 and arm: what overflows in a size or budget check
     # shows only on such a target. linux/386 binaries run natively on the
     # amd64 runner. (ci.yml builds and vets for 386 on every pull request.)
     runs-on: ubuntu-latest
+    env:
+      # Set by a manual run with the timings input (see testutil.Timing).
+      ASTER_TIMINGS: ${{ inputs.timings && '1' || '' }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+      - name: record test timings
+        if: inputs.timings
+        run: echo "ASTER_TIMINGS_FILE=$RUNNER_TEMP/timings.tsv" >> "$GITHUB_ENV"
       - name: go test -short
         run: GOARCH=386 go test -short -timeout 30m ./...
+      - uses: actions/upload-artifact@v7
+        if: always() && inputs.timings
+        with:
+          name: timings-test-32bit
+          path: ${{ runner.temp }}/timings.tsv
+          if-no-files-found: warn
 
   security:
     # The heavy hostile-input tests, opt in elsewhere because they allocate
@@ -70,12 +99,18 @@ jobs:
     # capped in heap and wall time (harness_security_test.go), so a
     # regression fails the job rather than the runner.
     runs-on: ubuntu-latest
+    env:
+      # Set by a manual run with the timings input (see testutil.Timing).
+      ASTER_TIMINGS: ${{ inputs.timings && '1' || '' }}
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+      - name: record test timings
+        if: inputs.timings
+        run: echo "ASTER_TIMINGS_FILE=$RUNNER_TEMP/timings.tsv" >> "$GITHUB_ENV"
       - name: heavy security tests
         env:
           ASTER_SECURITY: "1"
@@ -89,16 +124,34 @@ jobs:
         env:
           ASTER_METERING_FULL: "1"
         run: go test -count=1 -timeout 20m -run TestEveryBuiltinIsMetered ./internal/expr
+      - uses: actions/upload-artifact@v7
+        if: always() && inputs.timings
+        with:
+          name: timings-security
+          path: ${{ runner.temp }}/timings.tsv
+          if-no-files-found: warn
 
   race:
     runs-on: ubuntu-latest
+    env:
+      # Set by a manual run with the timings input (see testutil.Timing).
+      ASTER_TIMINGS: ${{ inputs.timings && '1' || '' }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+      - name: record test timings
+        if: inputs.timings
+        run: echo "ASTER_TIMINGS_FILE=$RUNNER_TEMP/timings.tsv" >> "$GITHUB_ENV"
       - name: go test -race
         run: go test -short -race -timeout 30m ./...
+      - uses: actions/upload-artifact@v7
+        if: always() && inputs.timings
+        with:
+          name: timings-race
+          path: ${{ runner.temp }}/timings.tsv
+          if-no-files-found: warn
 
   pdfium:
     # aster's PDFs read back with PDFium, Chrome's PDF engine, and compared
@@ -106,11 +159,17 @@ jobs:
     # write (TestPDFium*). pypdfium2 is pinned by digest. Then with poppler:
     # text extraction (ToUnicode) and the vector PDF against the PNG.
     runs-on: ubuntu-latest
+    env:
+      # Set by a manual run with the timings input (see testutil.Timing).
+      ASTER_TIMINGS: ${{ inputs.timings && '1' || '' }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+      - name: record test timings
+        if: inputs.timings
+        run: echo "ASTER_TIMINGS_FILE=$RUNNER_TEMP/timings.tsv" >> "$GITHUB_ENV"
       - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
@@ -131,6 +190,12 @@ jobs:
         run: |
           go test -count=1 -run 'TestPDFTextIsExtractable|TestVectorPDFMatchesPNG' .
           go test -count=1 -run 'TestToUnicodeClusters' ./internal/svgpdf
+      - uses: actions/upload-artifact@v7
+        if: always() && inputs.timings
+        with:
+          name: timings-pdfium
+          path: ${{ runner.temp }}/timings.tsv
+          if-no-files-found: warn
 
   oracle:
     # The full suite with the node oracle required: upstream Vega / Vega-Lite
@@ -139,11 +204,17 @@ jobs:
     # cached between runs; the cache key covers the oracle's script and
     # lockfiles, and entries are keyed by content, so stale ones are unused.
     runs-on: ubuntu-latest
+    env:
+      # Set by a manual run with the timings input (see testutil.Timing).
+      ASTER_TIMINGS: ${{ inputs.timings && '1' || '' }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+      - name: record test timings
+        if: inputs.timings
+        run: echo "ASTER_TIMINGS_FILE=$RUNNER_TEMP/timings.tsv" >> "$GITHUB_ENV"
       - uses: actions/setup-node@v7
         with:
           node-version-file: testdata/oracle-node/package.json
@@ -194,11 +265,18 @@ jobs:
           path: |
             ${{ runner.temp }}/compare-report.md
             ${{ runner.temp }}/compare.txt
+      - uses: actions/upload-artifact@v7
+        if: always() && inputs.timings
+        with:
+          name: timings-oracle
+          path: ${{ runner.temp }}/timings.tsv
+          if-no-files-found: warn
 
   benchgate:
     # The benchmarks must not get measurably slower or hungrier than the base:
     # on a push, the commit before it; by hand, the given ref. The thresholds
     # are in scripts/benchgate.sh.
+    if: ${{ !inputs.timings }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

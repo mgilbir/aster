@@ -94,6 +94,7 @@ func TestLongLoopsStopOnCancel(t *testing.T) {
 	})
 	start := time.Now()
 	_, err := Regression(ctx, data, RegressionParams{Method: "poly", Order: 100, X: FieldOf("x"), Y: FieldOf("y")})
+	testutil.Timing(t, "poly regression stops at a 50ms deadline", time.Since(start), testutil.Scaled(2*time.Second))
 	if err == nil || time.Since(start) > testutil.Scaled(2*time.Second) {
 		t.Errorf("poly regression ignored the context: %v after %v", err, time.Since(start))
 	}
@@ -101,6 +102,7 @@ func TestLongLoopsStopOnCancel(t *testing.T) {
 	defer cancel2()
 	start = time.Now()
 	_, err = Aggregate(ctx2, data, AggregateParams{Measures: []Measure{{Op: "ci0", Field: FieldOf("y")}}})
+	testutil.Timing(t, "bootstrap stops at a 50ms deadline", time.Since(start), testutil.Scaled(2*time.Second))
 	if err == nil || time.Since(start) > testutil.Scaled(2*time.Second) {
 		t.Errorf("bootstrap ignored the context: %v after %v", err, time.Since(start))
 	}

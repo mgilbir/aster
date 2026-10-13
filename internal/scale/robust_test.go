@@ -169,7 +169,9 @@ func TestBoundedWork(t *testing.T) {
 		t.Errorf("log ticks = %d values, %v; want a limit error", len(got), err)
 	}
 	// a hang guard: the steps are bounded (maxLogIter), not timed
-	if d := time.Since(start); d > testutil.Scaled(5*time.Second) {
+	d := time.Since(start)
+	testutil.Timing(t, "log ticks with a huge base (hang guard)", d, testutil.Scaled(5*time.Second))
+	if d > testutil.Scaled(5*time.Second) {
 		t.Errorf("log ticks took %v", d)
 	}
 	if _, err := QuantizeInterpolator(func(float64) jsval.Value { return jsval.Null }, 1<<30); !errors.Is(err, budget.ErrLimit) {

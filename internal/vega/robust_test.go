@@ -71,8 +71,10 @@ func TestHostileSpecs(t *testing.T) {
 				_, err = Render(ctx, v, Options{})
 				t.Logf("%s: %v", name, err)
 			}()
+			waitStart := time.Now()
 			select {
 			case <-done:
+				testutil.Timing(t, "hostile spec renders (hang guard)", time.Since(waitStart), testutil.Scaled(30*time.Second))
 			case <-time.After(testutil.Scaled(30 * time.Second)):
 				t.Fatal("hang")
 			}

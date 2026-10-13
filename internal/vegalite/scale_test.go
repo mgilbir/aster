@@ -37,7 +37,9 @@ func TestLargeSpecsFinishPromptly(t *testing.T) {
 		if _, err := Compile(c.spec, Options{}); err != nil {
 			t.Fatalf("%s: %v", c.name, err)
 		}
-		if d := time.Since(start); d > testutil.Scaled(20*time.Second) {
+		d := time.Since(start)
+		testutil.Timing(t, "large spec compile "+c.name, d, testutil.Scaled(20*time.Second))
+		if d > testutil.Scaled(20*time.Second) {
 			t.Errorf("%s took %v", c.name, d)
 		}
 	}
@@ -51,7 +53,9 @@ func TestLargeSpecsFinishPromptly(t *testing.T) {
 	if _, err := Compile(spec, Options{}); err != nil {
 		t.Fatal(err)
 	}
-	if d := time.Since(start); d > testutil.Scaled(20*time.Second) {
+	d := time.Since(start)
+	testutil.Timing(t, "large spec compile transforms", d, testutil.Scaled(20*time.Second))
+	if d > testutil.Scaled(20*time.Second) {
 		t.Errorf("transforms took %v", d)
 	}
 }

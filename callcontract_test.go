@@ -263,8 +263,10 @@ func within(t *testing.T, what string, f func()) {
 	t.Helper()
 	done := make(chan struct{})
 	go func() { defer close(done); f() }()
+	start := time.Now()
 	select {
 	case <-done:
+		testutil.Timing(t, "within (hang guard: "+what+")", time.Since(start), testutil.Scaled(10*time.Second))
 	case <-time.After(testutil.Scaled(10 * time.Second)):
 		t.Fatalf("%s: still blocked (deadlock)", what)
 	}
@@ -486,10 +488,12 @@ func TestWithContextCancelsOneCall(t *testing.T) {
 		t.Errorf("after cancelled calls: %v", err)
 	}
 	// Nothing a cancelled call started is left running.
-	deadline := time.Now().Add(testutil.Scaled(5 * time.Second))
+	goroutineWait := time.Now()
+	deadline := goroutineWait.Add(testutil.Scaled(5 * time.Second))
 	for runtime.NumGoroutine() > before && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
+	testutil.Timing(t, "cancelled calls leave no goroutines (wait for them to exit)", time.Since(goroutineWait), testutil.Scaled(5*time.Second))
 	if n := runtime.NumGoroutine(); n > before {
 		t.Errorf("%d goroutines left behind by cancelled calls", n-before)
 	}

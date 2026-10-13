@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/mgilbir/aster"
+	"github.com/mgilbir/aster/internal/testutil"
 )
 
 var secSVGN = flag.Int("sec.svgn", 200, "SVG mutants")
@@ -111,6 +112,9 @@ func TestSVGMutations(t *testing.T) {
 			case msg = <-done:
 			case <-time.After(60 * time.Second * aster.RaceSlowdownForTest):
 				msg = fmt.Sprintf("HANG > %v", 60*time.Second*aster.RaceSlowdownForTest)
+			}
+			if msg == "" {
+				testutil.Timing(t, "svg mutant to "+target+" (SLOW bound)", time.Since(start), 15*time.Second*aster.RaceSlowdownForTest)
 			}
 			if msg == "" && time.Since(start) > 15*time.Second*aster.RaceSlowdownForTest {
 				msg = fmt.Sprintf("SLOW %v", time.Since(start))

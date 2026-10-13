@@ -324,6 +324,7 @@ func fuzzPool(t *testing.T) []baseSpec {
 				} else {
 					_, rerr = pg.VegaToSVG(spec, asUpstream)
 				}
+				testutil.Timing(t, "fuzz pool selection (render seconds; slower specs are left out of the pool)", time.Since(t0), testutil.Scaled(250*time.Millisecond))
 				if rerr != nil || time.Since(t0) > testutil.Scaled(250*time.Millisecond) {
 					continue
 				}

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mgilbir/aster/internal/testutil"
 	"github.com/mgilbir/aster/internal/text"
 )
 
@@ -21,7 +22,9 @@ func mustFinish(t *testing.T, name, svg string, lim Limits, max time.Duration) e
 	max *= raceSlowdown
 	start := time.Now()
 	_, err := Render([]byte(svg), Options{Limits: lim})
-	if d := time.Since(start); d > max {
+	d := time.Since(start)
+	testutil.Timing(t, "mustFinish "+name, d, max)
+	if d > max {
 		t.Errorf("%s: took %v (limit %v)", name, d, max)
 	}
 	return err

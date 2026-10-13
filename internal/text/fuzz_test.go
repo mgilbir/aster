@@ -34,7 +34,9 @@ func FuzzLoadFont(f *testing.F) {
 		start := time.Now()
 		defer func() {
 			// Work on a font must be bounded: a slow input is a finding.
-			if d := time.Since(start); d > testutil.Scaled(3*time.Second) {
+			d := time.Since(start)
+			testutil.Timing(t, "font load and shape (fuzz input)", d, testutil.Scaled(3*time.Second))
+			if d > testutil.Scaled(3*time.Second) {
 				t.Errorf("input of %d bytes took %v", len(data), d)
 			}
 		}()

@@ -121,6 +121,10 @@ func TestEveryBuiltinIsMetered(t *testing.T) {
 		// a buffer outgrown), a few times as much at most.
 		allocRatio = 8
 	)
+	var worstTook time.Duration // Timing logs the worst call, not each of thousands
+	defer func() {
+		testutil.Timing(t, "builtin under a 20ms deadline (worst call)", worstTook, deadline+slack)
+	}()
 	for _, name := range names {
 		for _, call := range hostileCalls(!full) {
 			src := name + "(" + strings.Join(call, ", ") + ")"
@@ -140,6 +144,7 @@ func TestEveryBuiltinIsMetered(t *testing.T) {
 			took := time.Since(start)
 			runtime.ReadMemStats(&after)
 			cancel()
+			worstTook = max(worstTook, took)
 			if took > deadline+slack {
 				t.Errorf("%s: took %v under a %v deadline (err %.80v)", src, took, deadline, err)
 			}
