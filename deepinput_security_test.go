@@ -311,6 +311,17 @@ var deepShapes = []deepShape{
 			return fmt.Sprintf(`<marker id="k%d" markerWidth="4" markerHeight="4">%s</marker>`, i, inner)
 		}) + `</defs>` + fmt.Sprintf(`<path d="M0 0L10 10" stroke="black" marker-end="url(#k%d)"/>`, d-1))
 	}},
+	// A chain of filters, each an feImage drawing an element filtered by
+	// the next.
+	{"svg-feimage-chain-png", "svgpng", func(d int) string {
+		return deepSVG(`<defs>` + chain(d, "", func(i int) string {
+			next := ""
+			if i+1 < d {
+				next = fmt.Sprintf(` filter="url(#f%d)"`, i+1)
+			}
+			return fmt.Sprintf(`<filter id="f%d" x="0" y="0" width="20" height="20" filterUnits="userSpaceOnUse"><feImage href="#e%d"/></filter><rect id="e%d" width="20" height="20"%s/>`, i, i, i, next)
+		}) + `</defs><rect width="20" height="20" filter="url(#f0)"/>`)
+	}},
 	// A style rule with sibling combinators, and as many siblings to match.
 	{"svg-css-sibling-selector-png", "svgpng", func(d int) string {
 		return deepSVG(`<style>` + chain(min(d, 1000), "+", func(int) string { return "rect" }) + `{fill:red}</style>` +
