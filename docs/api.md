@@ -26,8 +26,9 @@ The language of a spec is the method's, whatever its `$schema` says, and the `$s
 
 Filters (`<filter>` and the `filter` attribute) are drawn by `SVGToPNG` only. Vega never writes them, so they reach the engine only in SVG given to `SVGToPNG`; `SVGToPDF` fails for a `<filter>` element or a `filter` attribute ("svgpdf: unsupported SVG element <filter>").
 
-- **Drawn:** `feBlend`, `feColorMatrix`, `feComponentTransfer`, `feComposite`, `feDropShadow`, `feFlood`, `feGaussianBlur`, `feMerge` and `feOffset`.
-- **Not drawn:** `feImage`, `feTile`, `feMorphology`, `feConvolveMatrix`, `feDisplacementMap`, `feTurbulence`, `feDiffuseLighting` and `feSpecularLighting`. Each gives a transparent result and the chain goes on, so an element whose filter ends in one draws nothing.
+- **Drawn:** `feBlend`, `feColorMatrix`, `feComponentTransfer`, `feComposite`, `feConvolveMatrix` (`kernelUnitLength` is ignored, as by resvg), `feDropShadow`, `feFlood`, `feGaussianBlur`, `feMerge`, `feMorphology`, `feOffset` and `feTile`.
+- **Not drawn:** `feImage`, `feDisplacementMap`, `feTurbulence`, `feDiffuseLighting` and `feSpecularLighting`. Each gives a transparent result and the chain goes on, so an element whose filter ends in one draws nothing.
+- **Invalid parameters** are handled as resvg does: a primitive resvg replaces by a transparent result (an `feConvolveMatrix` whose `kernelMatrix` is not `orderX` × `orderY` numbers, whose target lies outside the kernel or whose divisor is zero) gives one here too.
 - **Ignored:** an element in a filter that is not a primitive (an unknown name), and CSS filter functions in the `filter` attribute (`blur(2px)`, `drop-shadow(…)`). An element whose `filter` has only functions is drawn unfiltered, where resvg applies them.
 
 A filter's work and memory are bounded ([limits.md](limits.md)): its region's pixels, the pixel memory its results hold, and the pixel operations its passes make.

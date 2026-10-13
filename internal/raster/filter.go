@@ -187,9 +187,17 @@ func (r *renderer) applyFilter(sp *filterSpec, ts matrix, cv *canvas) bool {
 	if !(rc.w() > 0 && rc.h() > 0) {
 		return false
 	}
+	// The region in the layer's pixels, cut to the layer (resvg's
+	// fit_to_rect): a filter region larger than the 4x-canvas bound of its
+	// layer is cut where the layer is, and its primitives' sub-regions are
+	// measured from the cut region's corner.
+	region := toIntRect(rc).intersect(irect{0, 0, cv.w, cv.h})
+	if region.empty() {
+		return false
+	}
 	run := r.newFilterRun(cv, ts)
 	defer run.end()
-	run.region = toIntRect(rc)
+	run.region = region
 	last := len(sp.prims) - 1
 	// Last use of each result name, to free buffers early.
 	lastUse := map[string]int{}
@@ -577,8 +585,14 @@ func (run *filterRun) apply(p *fprim) (fimage, bool) {
 			multiply(band)
 		})
 		return fimage{pix: pix, region: run.region, linear: p.linear, owned: true}, true
+	case tagFeTile:
+		return run.tile(p)
+	case tagFeMorphology:
+		return run.morphology(p)
+	case tagFeConvolveMatrix:
+		return run.convolve(p)
 	}
-	// Unsupported primitive: transparent black.
+	// usvg's dummy primitive: transparent black.
 	return fimage{pix: run.blank(), region: run.region, owned: true}, true
 }
 

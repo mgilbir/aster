@@ -54,7 +54,21 @@ const (
 	tagFeFuncG
 	tagFeFuncB
 	tagFeFuncA
-	tagFeUnsupported // a filter primitive this renderer does not implement
+	tagFeTile
+	tagFeMorphology
+	tagFeConvolveMatrix
+	tagFeDisplacementMap
+	tagFeTurbulence
+	tagFeDiffuseLighting
+	tagFeSpecularLighting
+	tagFeImage
+	tagFeDistantLight // the light sources, children of a lighting primitive
+	tagFePointLight
+	tagFeSpotLight
+	// tagFeUnsupported is the kind of a primitive usvg replaces by its "dummy"
+	// (a transparent result): a convolution or a lighting whose parameters
+	// are invalid, an feImage with nothing to draw.
+	tagFeUnsupported
 )
 
 var tagNames = map[string]tagID{
@@ -70,10 +84,11 @@ var tagNames = map[string]tagID{
 	"feMerge": tagFeMerge, "feMergeNode": tagFeMergeNode, "feBlend": tagFeBlend,
 	"feDropShadow": tagFeDropShadow, "feComponentTransfer": tagFeComponentTransfer,
 	"feFuncR": tagFeFuncR, "feFuncG": tagFeFuncG, "feFuncB": tagFeFuncB, "feFuncA": tagFeFuncA,
-	"feImage": tagFeUnsupported, "feTile": tagFeUnsupported, "feMorphology": tagFeUnsupported,
-	"feConvolveMatrix": tagFeUnsupported, "feDisplacementMap": tagFeUnsupported,
-	"feTurbulence": tagFeUnsupported, "feDiffuseLighting": tagFeUnsupported,
-	"feSpecularLighting": tagFeUnsupported,
+	"feImage": tagFeImage, "feTile": tagFeTile, "feMorphology": tagFeMorphology,
+	"feConvolveMatrix": tagFeConvolveMatrix, "feDisplacementMap": tagFeDisplacementMap,
+	"feTurbulence": tagFeTurbulence, "feDiffuseLighting": tagFeDiffuseLighting,
+	"feSpecularLighting": tagFeSpecularLighting, "feDistantLight": tagFeDistantLight,
+	"fePointLight": tagFePointLight, "feSpotLight": tagFeSpotLight,
 }
 
 type attrID uint8
@@ -194,6 +209,34 @@ const (
 	aColorInterpolationFilters
 	aPaintOrder
 	aTextRendering
+	aOrder
+	aKernelMatrix
+	aDivisor
+	aBias
+	aTargetX
+	aTargetY
+	aEdgeMode
+	aPreserveAlpha
+	aRadius
+	aScale
+	aXChannelSelector
+	aYChannelSelector
+	aBaseFrequency
+	aNumOctaves
+	aSeed
+	aStitchTiles
+	aSurfaceScale
+	aDiffuseConstant
+	aSpecularConstant
+	aSpecularExponent
+	aLightingColor
+	aAzimuth
+	aElevation
+	aZ
+	aPointsAtX
+	aPointsAtY
+	aPointsAtZ
+	aLimitingConeAngle
 )
 
 var attrNames = map[string]attrID{
@@ -235,6 +278,15 @@ var attrNames = map[string]attrID{
 	"amplitude": aAmplitude, "exponent": aExponent,
 	"color-interpolation-filters": aColorInterpolationFilters, "paint-order": aPaintOrder,
 	"text-rendering": aTextRendering,
+	"order":          aOrder, "kernelMatrix": aKernelMatrix, "divisor": aDivisor, "bias": aBias,
+	"targetX": aTargetX, "targetY": aTargetY, "edgeMode": aEdgeMode, "preserveAlpha": aPreserveAlpha,
+	"radius": aRadius, "scale": aScale, "xChannelSelector": aXChannelSelector,
+	"yChannelSelector": aYChannelSelector, "baseFrequency": aBaseFrequency, "numOctaves": aNumOctaves,
+	"seed": aSeed, "stitchTiles": aStitchTiles, "surfaceScale": aSurfaceScale,
+	"diffuseConstant": aDiffuseConstant, "specularConstant": aSpecularConstant,
+	"specularExponent": aSpecularExponent, "lighting-color": aLightingColor,
+	"azimuth": aAzimuth, "elevation": aElevation, "z": aZ, "pointsAtX": aPointsAtX,
+	"pointsAtY": aPointsAtY, "pointsAtZ": aPointsAtZ, "limitingConeAngle": aLimitingConeAngle,
 }
 
 // presentation lists the attributes that a style sheet or a style attribute may
@@ -244,7 +296,7 @@ var presentation = func() (t [256]bool) {
 		aAlignmentBaseline, aBaselineShift, aClipPath, aClipRule, aColor,
 		aColorInterpolationFilters, aDisplay, aDominantBaseline, aFill, aFillOpacity,
 		aFillRule, aFilter, aFloodColor, aFloodOpacity, aFontFamily, aFontSize,
-		aFontStyle, aFontWeight, aImageRendering, aIsolation, aLetterSpacing,
+		aFontStyle, aFontWeight, aImageRendering, aIsolation, aLetterSpacing, aLightingColor,
 		aMarkerStart, aMarkerMid, aMarkerEnd, aMask, aMaskType, aMixBlendMode,
 		aOpacity, aOverflow, aPaintOrder, aShapeRendering, aStopColor, aStopOpacity,
 		aStroke, aStrokeDasharray, aStrokeDashoffset, aStrokeLinecap, aStrokeLinejoin,
