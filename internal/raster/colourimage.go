@@ -71,8 +71,11 @@ func ColourGlyphImage(ctx context.Context, f *text.Face, gid int, fg shape.Color
 	}
 	w, h := int(fw), int(fh)
 	lim := Limits{}.withDefaults()
-	lim.MaxPixelOps = max(defaultMaxPixelOps, budget.MulInt(16, budget.MulInt(w, h)))
+	// The image is drawn at its own pixels, scale 1: the PNG render's budget
+	// for an output of its size.
+	lim.MaxPixelOps = Limits{}.PixelOps(1, w, h)
 	r := &renderer{lim: lim, rast: newRasterizer(), cw: w, ch: h, active: map[*node]bool{}, ctx: ctx}
+	defer r.reportWork(ctx, 1)
 	r.rast.ctx = ctx
 	r.fl.r = r
 	r.host = identity

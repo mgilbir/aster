@@ -246,7 +246,11 @@ func (lp *labelPainter) paint(m *label.Mask, typ scene.MarkType, items []*scene.
 	if err != nil {
 		failErr(err)
 	}
-	img, err := raster.Render([]byte(doc), raster.Options{Shaper: v.shaper, Context: v.ctx, Scale: float64(ss)})
+	// The bitmap's work budget is the PNG budget at scale 1 for its pixels,
+	// as for any image drawn at its own pixels: the supersampling is the
+	// transform's, not a scale the caller asked for, and does not raise it.
+	lim := raster.Limits{MaxPixelOps: raster.DefaultMaxPixelOps, PixelOpsPerPixel: raster.DefaultPixelOpsPerPixel}
+	img, err := raster.Render([]byte(doc), raster.Options{Shaper: v.shaper, Context: v.ctx, Scale: float64(ss), Limits: lim})
 	if err != nil {
 		failErr(err)
 	}

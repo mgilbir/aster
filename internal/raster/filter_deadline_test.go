@@ -164,13 +164,16 @@ func TestRenderFilterStops(t *testing.T) {
 		`<feComponentTransfer in="g"><feFuncA type="linear" slope=".8"/></feComponentTransfer><feMerge><feMergeNode in="h"/><feMergeNode in="i"/><feMergeNode/></feMerge>`)
 	fmt.Fprintf(&b, `</filter><rect width="%d" height="%d" fill="rgba(200,100,0,.7)" filter="url(#f)"/></svg>`, filterSide/2, filterSide)
 	svg := []byte(b.String())
+	// The chain spends about 192 pixel operations a pixel, past the default
+	// budget at this size: what is tested is where the context stops it.
+	lim := Limits{MaxPixelOps: math.MaxInt}
 	full := &pollCtx{Context: context.Background()}
-	if _, err := Render(svg, Options{Context: full}); err != nil {
+	if _, err := Render(svg, Options{Context: full, Limits: lim}); err != nil {
 		t.Fatal(err)
 	}
 	for _, stop := range []int{1, full.polls / 4, full.polls / 2, 3 * full.polls / 4, full.polls - 1} {
 		ctx := &pollCtx{Context: context.Background(), stop: stop}
-		if _, err := Render(svg, Options{Context: ctx}); !errors.Is(err, context.Canceled) {
+		if _, err := Render(svg, Options{Context: ctx, Limits: lim}); !errors.Is(err, context.Canceled) {
 			t.Errorf("a context ended at poll %d of %d: err = %v", stop, full.polls, err)
 		}
 	}

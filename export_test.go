@@ -180,4 +180,7 @@ func WithFontSetFailureForTest() Option {
 
 // FixedLimitsForTest are the root package's own fixed bounds of
 // docs/limits.md's fixed-bounds table, by name.
-var FixedLimitsForTest = map[string]int64{"maxImageBytes": maxImageBytes, "maxImagePixels": maxImagePixels}
+var FixedLimitsForTest = map[string]int64{
+	"maxImageBytes": maxImageBytes, "maxImagePixels": maxImagePixels,
+	"pixelOps": int64(deriveLimits(0).pixelOps), "pixelOpsPerPixel": int64(deriveLimits(0).pixelOpsPerPixel),
+}

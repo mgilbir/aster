@@ -689,7 +689,7 @@ func (c *Converter) rasterize(ctx context.Context, svg string, scale float64) (*
 	var img *image.NRGBA
 	out, err := timed(ctx, "png", func() ([]byte, error) {
 		var err error
-		img, err = raster.Render([]byte(svg), raster.Options{Scale: scale, Shaper: sh, Context: ctx, Limits: c.lim.raster, Images: imagesFrom(ctx).load, ImageError: imagesFrom(ctx).imageError(ctx)})
+		img, err = raster.Render([]byte(svg), raster.Options{Scale: scale, Shaper: sh, Context: ctx, Limits: c.lim.rasterAt(scale), Images: imagesFrom(ctx).load, ImageError: imagesFrom(ctx).imageError(ctx)})
 		if err != nil {
 			return nil, err
 		}
