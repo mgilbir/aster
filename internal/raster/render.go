@@ -145,7 +145,7 @@ func (r *renderer) affordOps(n int) bool {
 		return false
 	}
 	if n < 0 || n > r.lim.MaxPixelOps-r.pixelOps {
-		r.fail(fmt.Errorf("raster: render work exceeds %d pixel operations (output %dx%d; raise Limits.MaxPixelOps to allow it): %w",
+		r.fail(fmt.Errorf("raster: render work exceeds %d pixel operations (output %dx%d; raise Limits.MaxPixelOps or WithPixelWorkLimit to allow it): %w",
 			r.lim.MaxPixelOps, r.cw, r.ch, errLimit))
 		return false
 	}

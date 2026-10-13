@@ -41,6 +41,7 @@ A filter's work and memory are bounded ([limits.md](limits.md)): its region's pi
 | `WithLoader(l Loader)` | `DenyLoader{}` (also for `nil`) | what data and images may be loaded; [loading-data.md](loading-data.md). A nil pointer (`(*FileLoader)(nil)`) is an error |
 | `WithTimeout(d)` | 30 s; `<= 0` none | the whole call; [limits.md](limits.md) |
 | `WithMemoryLimit(bytes)` | 0: the fixed default budgets | replaces the memory budgets; [limits.md](limits.md) |
+| `WithPixelWorkLimit(ops)` | 128 Mi | the rasterizer's work budget at scale 1, times the scale squared above it and at least 16 per output pixel; raise it for SVG with large filters; 0 is refused; [limits.md](limits.md) |
 | `WithVegaLiteVersion(v)` | `"6.4"` | `"6.4"` or `"6.4.3"` (Vega-Lite 6.4.3), `"5.8"` or `"5.8.0"`; a leading `v` is accepted |
 | `WithTheme(json string)` | none | a Vega config applied to every render, to the Vega-Lite compiler as well (so `VegaLiteToVega` reflects it); must be a JSON object |
 | `WithTimezone(tz)` | `"UTC"` | local time for time scales, `timeFormat`, dates without a zone; any IANA name Go knows. **`"Local"` is refused**: it would make the output depend on the host |

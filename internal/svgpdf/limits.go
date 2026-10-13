@@ -17,6 +17,10 @@ type Limits struct {
 	MaxTextBytes    int // text content, summed over all <text> elements
 	MaxImageBytes   int // encoded size of one image
 	MaxImagePixels  int // pixels of one decoded image
+	// MaxPixelOps is the pixel work budget at scale 1 of the image a colour
+	// glyph the PDF cannot draw is painted into (see raster.ColourGlyphImage);
+	// 0 is the rasterizer's default.
+	MaxPixelOps int
 }
 
 const (

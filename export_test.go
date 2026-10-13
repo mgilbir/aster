@@ -149,7 +149,7 @@ const RaceSlowdownForTest = raceSlowdown
 // a call passes on, as the call sites read them, not their defaults: a bound
 // the doc promises but no call applies must fail the doc test (C40).
 func LimitsForTest(n uint64) map[string]int64 {
-	c := deriveLimits(n)
+	c := deriveLimits(n, 0)
 	l := c.vega
 	r := c.raster.WithDefaults()
 	return map[string]int64{
@@ -180,4 +180,7 @@ func WithFontSetFailureForTest() Option {
 
 // FixedLimitsForTest are the root package's own fixed bounds of
 // docs/limits.md's fixed-bounds table, by name.
-var FixedLimitsForTest = map[string]int64{"maxImageBytes": maxImageBytes, "maxImagePixels": maxImagePixels}
+var FixedLimitsForTest = map[string]int64{
+	"maxImageBytes": maxImageBytes, "maxImagePixels": maxImagePixels,
+	"pixelOps": int64(deriveLimits(0, 0).pixelOps), "pixelOpsPerPixel": int64(deriveLimits(0, 0).pixelOpsPerPixel),
+}

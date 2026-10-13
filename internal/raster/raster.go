@@ -215,10 +215,10 @@ func Render(svg []byte, opts Options) (img *image.NRGBA, err error) {
 	defer r.dropCaches()
 	r.rast.ctx = opts.Context
 	r.fl.r = r
-	if opts.Limits.MaxPixelOps <= 0 {
-		// Default work budget: 512 Mpx, or 16 canvases for big outputs.
-		r.lim.MaxPixelOps = max(defaultMaxPixelOps, budget.MulInt(16, budget.MulInt(cw, ch)))
-	}
+	// The work budget follows the scale and the canvas (see PixelOps), from
+	// the limits as given: withDefaults cannot know either.
+	r.lim.MaxPixelOps = opts.Limits.PixelOps(scale, cw, ch)
+	defer r.reportWork(opts.Context, scale)
 	r.rootState = rootState
 	if r.cv = r.allocCanvas(cw, ch); r.cv == nil {
 		return nil, r.err
