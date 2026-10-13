@@ -34,7 +34,8 @@ type callLimits struct {
 	ledger budget.LedgerLimits
 	// pixelOps and pixelOpsPerPixel are the rasterizer's work budget (PNG):
 	// pixelOps operations at scale 1, times the scale squared above it, and
-	// at least pixelOpsPerPixel per output pixel (rasterAt).
+	// at least pixelOpsPerPixel per output pixel (rasterAt); pixelOps is
+	// WithPixelWorkLimit's when given.
 	pixelOps, pixelOpsPerPixel int
 }
 
@@ -81,14 +82,20 @@ const bytesPerView = 32768
 const specBytesDivisor = 16
 
 // deriveLimits turns WithMemoryLimit(n) into every bound of a call (n == 0:
-// the defaults). A bound derived from n replaces its default, so a large n
-// raises it as a small one lowers it.
-func deriveLimits(n uint64) callLimits {
+// the defaults), and WithPixelWorkLimit(ops) into the rasterizer's work
+// budget at scale 1 (ops == 0: the default). A bound derived from n replaces
+// its default, so a large n raises it as a small one lowers it.
+func deriveLimits(n, ops uint64) callLimits {
 	// The Vega run's defaults are applied here, not left to the run: the
 	// call sites read them too (the specification's parse bound, the load
 	// allowance images share), and a zero read there is no bound (C40).
 	l := callLimits{vega: vega.Limits{}.WithDefaults(), svgBytes: defaultSVGBytes, ledger: budget.LedgerLimits{MaxBytes: defaultLedgerBytes}, vlViews: vegalite.DefaultMaxViews,
 		pixelOps: defaultPixelOps, pixelOpsPerPixel: defaultPixelOpsPerPixel}
+	if ops > 0 {
+		l.pixelOps = toInt(ops)
+	}
+	// The label transform's bitmaps have it too, at scale 1.
+	l.vega.RasterPixelOps = l.pixelOps
 	if n == 0 {
 		return l
 	}
@@ -104,6 +111,7 @@ func deriveLimits(n uint64) callLimits {
 		MaxCanvasBytes: toInt64(max(n/2, 1<<20)),
 		MaxParseBytes:  toInt64(max(n/2, 1<<20)),
 		RowBytes:       bytesPerRow,
+		RasterPixelOps: l.pixelOps,
 	}
 	// The canvas, layers and masks alive at once, and the pixels of one.
 	canvas := min(max(n, 4<<20), 1<<30)

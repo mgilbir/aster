@@ -26,8 +26,10 @@ const maxColourImageSide = 4096
 // instead. A glyph that paints nothing returns a nil image. Painting polls
 // ctx (nil: never done) as a render does, and returns its error once it is
 // done: the glyph's painting is the font's to choose, up to a 4096-pixel
-// square drawn many times over.
-func ColourGlyphImage(ctx context.Context, f *text.Face, gid int, fg shape.Color, ppem int) (img *image.NRGBA, box shape.Rect, err error) {
+// square drawn many times over. Its work is bounded by pixelOps operations
+// (0: DefaultMaxPixelOps), raised to DefaultPixelOpsPerPixel a pixel of the
+// image: a PNG's budget at scale 1 for an output of its size.
+func ColourGlyphImage(ctx context.Context, f *text.Face, gid int, fg shape.Color, ppem, pixelOps int) (img *image.NRGBA, box shape.Rect, err error) {
 	defer func() {
 		// A bound reached deep in drawing stops it with budget.Stop.
 		if p := recover(); p != nil {
@@ -73,7 +75,7 @@ func ColourGlyphImage(ctx context.Context, f *text.Face, gid int, fg shape.Color
 	lim := Limits{}.withDefaults()
 	// The image is drawn at its own pixels, scale 1: the PNG render's budget
 	// for an output of its size.
-	lim.MaxPixelOps = Limits{}.PixelOps(1, w, h)
+	lim.MaxPixelOps = Limits{MaxPixelOps: pixelOps, PixelOpsPerPixel: defaultPixelOpsPer}.PixelOps(1, w, h)
 	r := &renderer{lim: lim, rast: newRasterizer(), cw: w, ch: h, active: map[*node]bool{}, ctx: ctx}
 	defer r.reportWork(ctx, 1)
 	r.rast.ctx = ctx

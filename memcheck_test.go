@@ -541,7 +541,7 @@ func (r memRow) holds() bool {
 }
 
 func memRun(c memCase, format string, limit uint64, scale float64) memRow {
-	lim := deriveLimits(limit).vega
+	lim := deriveLimits(limit, 0).vega
 	rows := int(scale * float64(lim.MaxRows))
 	items := int(scale * float64(lim.MaxItems))
 	ms := c.gen(rows, items, limit, scale)

@@ -212,7 +212,7 @@ func (r *renderer) drawGlyphImage(face *text.Face, gid int, fg shape.Color, alph
 	var box shape.Rect
 	key := fmt.Sprintf("glyph:%p:%d:%d,%d,%d:%d", face, gid, fg.R, fg.G, fg.B, ppem)
 	img, err := r.images.put(key, func() (*image.NRGBA, error) {
-		px, b, err := raster.ColourGlyphImage(r.ctx, face, gid, fg, ppem)
+		px, b, err := raster.ColourGlyphImage(r.ctx, face, gid, fg, ppem, r.lim.MaxPixelOps)
 		box = b
 		return px, err
 	})
