@@ -18,13 +18,13 @@ import (
 func (r *renderer) style(m *scene.Mark, it *scene.Item, tag string, fill, stroke scene.Paint) {
 	w := &r.w
 	if tag == "bgrect" && m.NonInteractive {
-		w.attrRaw("pointer-events", "none")
+		w.attrLit("pointer-events", "none")
 	}
 	if tag == "bgfore" {
 		if m.NonInteractive {
-			w.attrRaw("pointer-events", "none")
+			w.attrLit("pointer-events", "none")
 		}
-		w.attrRaw("display", "none")
+		w.attrLit("display", "none")
 		if !fill.IsNull() {
 			return
 		}
@@ -37,9 +37,10 @@ func (r *renderer) style(m *scene.Mark, it *scene.Item, tag string, fill, stroke
 
 	if tag == "text" {
 		w.attr("font-family", scene.FontFamily(it, false))
-		w.attrName("font-size")
-		w.buf = scene.AppendNumber(w.buf, scene.FontSize(it))
-		w.buf = append(w.buf, "px\""...)
+		w.attrOpen("font-size")
+		w.valNum(scene.FontSize(it))
+		w.valLit("px")
+		w.attrClose()
 		if it.FontStyle() != "" {
 			w.attr("font-style", it.FontStyle())
 		}
@@ -70,32 +71,29 @@ func (r *renderer) style(m *scene.Mark, it *scene.Item, tag string, fill, stroke
 	r.itemNumAttr(it, "strokeMiterLimit", "stroke-miterlimit", it.StrokeMiterLimit())
 	r.itemNumAttr(it, "opacity", "opacity", it.Opacity)
 
-	blend := it.Blend()
-	if !blendModes[blend] {
-		blend = ""
-	}
+	blend := blendMode(it.Blend())
 	if smoothOff || blend != "" {
-		w.attrName("style")
+		w.attrOpen("style")
 		sep := false
 		if smoothOff {
-			w.buf = append(w.buf, "image-rendering: optimizeSpeed; image-rendering: pixelated;"...)
+			w.valLit("image-rendering: optimizeSpeed; image-rendering: pixelated;")
 			sep = true
 		}
 		if blend != "" {
 			if sep {
-				w.buf = append(w.buf, ' ')
+				w.valLit(" ")
 			}
-			w.buf = append(w.buf, "mix-blend-mode: "...)
-			w.buf = append(w.buf, blend...)
-			w.buf = append(w.buf, ';')
+			w.valLit("mix-blend-mode: ")
+			w.valLit(blend)
+			w.valLit(";")
 		}
-		w.buf = append(w.buf, '"')
+		w.attrClose()
 	}
 }
 
 // itemNumAttr is numAttr for an item property, writing a non-numeric value
 // the property was given as String(value), as upstream's renderer does.
-func (r *renderer) itemNumAttr(it *scene.Item, prop, name string, n scene.Num) {
+func (r *renderer) itemNumAttr(it *scene.Item, prop string, name lit, n scene.Num) {
 	if v, ok := it.RawValue(prop); ok {
 		r.w.attr(name, v.AsString())
 		return
@@ -103,16 +101,7 @@ func (r *renderer) itemNumAttr(it *scene.Item, prop, name string, n scene.Num) {
 	r.numAttr(name, n)
 }
 
-// appendAngle writes an item's angle as upstream interpolates it into
-// rotate(...): the raw value when it was not a number.
-func appendAngle(dst []byte, it *scene.Item) []byte {
-	if v, ok := it.RawValue("angle"); ok {
-		return appendEscaped(dst, v.AsString(), true)
-	}
-	return scene.AppendNumber(dst, it.Angle.Val())
-}
-
-func (r *renderer) numAttr(name string, n scene.Num) {
+func (r *renderer) numAttr(name lit, n scene.Num) {
 	if n.Set() {
 		r.w.attrNum(name, n.Val())
 	}
@@ -121,7 +110,7 @@ func (r *renderer) numAttr(name string, n scene.Num) {
 // paintAttr writes a fill or stroke: colours pass through ("transparent" is not
 // legal SVG, so it is skipped in favour of the default none) and gradients
 // become url references, registering their definition.
-func (r *renderer) paintAttr(name string, p scene.Paint) {
+func (r *renderer) paintAttr(name lit, p scene.Paint) {
 	if !p.Present() {
 		return
 	}

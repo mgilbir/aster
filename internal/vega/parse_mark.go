@@ -57,9 +57,9 @@ func definition(spec jsval.Value) *markDef {
 	if z := jsval.ToNumber(spec.Get("zindex")); z != 0 && z == z {
 		d.zindex = z
 	}
-	if a := spec.Get("aria"); !a.IsNullish() {
-		d.aria = scene.B(a.AsBoolean())
-	}
+	// The mark keeps the value as given; the renderer tests `mark.aria ===
+	// false`, so only false hides it.
+	d.aria = scene.FalseOf(spec.Get("aria"))
 	if desc := spec.Get("description"); desc.IsTruthy() {
 		d.description = desc.AsString()
 	}

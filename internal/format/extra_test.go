@@ -302,7 +302,7 @@ func BenchmarkTimeFormat(b *testing.B) {
 		b.Run(spec, func(b *testing.B) {
 			b.ReportAllocs()
 			var buf [64]byte
-			for i := 0; i < b.N; i++ {
+			for i := 0; b.Loop(); i++ {
 				_ = f.AppendFormat(buf[:0], 1.6e12+float64(i)*86400000)
 			}
 		})
@@ -312,7 +312,7 @@ func BenchmarkTimeFormat(b *testing.B) {
 	b.Run("local", func(b *testing.B) {
 		b.ReportAllocs()
 		var buf [64]byte
-		for i := 0; i < b.N; i++ {
+		for i := 0; b.Loop(); i++ {
 			_ = f.AppendFormat(buf[:0], 1.6e12+float64(i)*86400000)
 		}
 	})
@@ -321,7 +321,7 @@ func BenchmarkTimeFormat(b *testing.B) {
 func BenchmarkTimeParse(b *testing.B) {
 	p := DefaultTimeLocale().Parse("%Y-%m-%d %H:%M:%S", UTC)
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		p.Parse("2021-03-14 12:34:56")
 	}
 }
@@ -369,7 +369,7 @@ func BenchmarkFloorAndInterval(b *testing.B) {
 func BenchmarkMultiFormat(b *testing.B) {
 	f, _ := DefaultLocale().TimeMultiFormat(jsval.Undefined, true)
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		f(1.6e12 + float64(i%1000)*86400000)
 	}
 }

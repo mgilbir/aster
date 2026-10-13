@@ -376,7 +376,7 @@ func BenchmarkParseRGB(b *testing.B) {
 func BenchmarkFormatRgb(b *testing.B) {
 	c := RGB{76.4, 120.2, 168, 0.5}
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = c.FormatRgb()
 	}
 }
@@ -384,7 +384,7 @@ func BenchmarkFormatRgb(b *testing.B) {
 func BenchmarkFormatHex(b *testing.B) {
 	c := RGB{76.4, 120.2, 168, 1}
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = c.FormatHex()
 	}
 }

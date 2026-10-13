@@ -471,13 +471,7 @@ const maxBinValues = 1_000_000
 // a count that wraps negative is `new Array(n)`'s RangeError, while a count
 // that wraps to a small positive one yields that many values.
 func d3Range(start, stop, step float64) []float64 {
-	n := math.Max(0, math.Ceil((stop-start)/step))
-	if math.IsNaN(n) || math.IsInf(n, 0) {
-		n = 0 // NaN | 0 and Infinity | 0
-	}
-	if n > 2147483647 {
-		n = float64(int32(uint32(int64(math.Mod(n, 4294967296)))))
-	}
+	n := float64(jsmath.ToInt32(math.Max(0, math.Ceil((stop-start)/step))))
 	if n < 0 {
 		fail("Invalid array length")
 	}

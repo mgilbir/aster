@@ -240,8 +240,10 @@ type Item struct {
 	// Upstream stores such values untouched: arithmetic coerces them (+"3"
 	// is 3, +true is 1, +"wide" is NaN), a truthiness guard reads the raw
 	// value (`if (item.angle)` passes for "sideways"), and the SVG renderer
-	// writes String(value). The numeric field holds the coercion. Nil for
-	// nearly every item.
+	// writes String(value), escaped. The numeric field holds the coercion.
+	// Likewise it keeps the value given to a boolean property (defined,
+	// aspect, …) when it was not a boolean, which the Tri field reduces to
+	// how upstream reads it. Nil for nearly every item.
 	Raw map[string]jsval.Value
 
 	// The property groups, nil until a property of theirs is set (attrs.go).

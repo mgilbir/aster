@@ -48,6 +48,10 @@ type Options struct {
 	// fails as soon as the output passes it, instead of finishing a
 	// document nobody can use.
 	MaxBytes int
+
+	// skeleton, when set, receives the structure the writer meant to write
+	// (tests compare it with what the output parses back to).
+	skeleton *[]string
 }
 
 // ErrTooLarge is returned when the output exceeds Options.MaxBytes.
@@ -98,14 +102,15 @@ func AppendSVG(ctx context.Context, dst []byte, sg *scene.Scenegraph, opt Option
 		opt:     opt,
 		metrics: scene.Metrics{Measurer: opt.Measurer},
 	}
-	r.w.buf = dst
+	r.w.reset(dst)
+	r.w.skel = opt.skeleton
 	if r.opt.Href == nil {
 		r.opt.Href = DefaultHref(URLOptions{})
 	}
 	if err := r.root(sg.Root); err != nil {
 		return dst, err
 	}
-	return r.w.buf, nil
+	return r.w.bytes(), nil
 }
 
 type renderer struct {
@@ -142,12 +147,12 @@ func (r *renderer) root(scn *scene.Mark) error {
 	w.attr("class", "marks")
 	w.attrNum("width", r.opt.Width*scale)
 	w.attrNum("height", r.opt.Height*scale)
-	w.attrName("viewBox")
-	w.buf = append(w.buf, "0 0 "...)
-	w.buf = scene.AppendNumber(w.buf, r.opt.Width)
-	w.buf = append(w.buf, ' ')
-	w.buf = scene.AppendNumber(w.buf, r.opt.Height)
-	w.buf = append(w.buf, '"')
+	w.attrOpen("viewBox")
+	w.valLit("0 0 ")
+	w.valNum(r.opt.Width)
+	w.valLit(" ")
+	w.valNum(r.opt.Height)
+	w.attrClose()
 
 	if bg := r.opt.Background; bg != "" && bg != "transparent" && bg != "none" {
 		w.start("rect")
@@ -160,12 +165,9 @@ func (r *renderer) root(scn *scene.Mark) error {
 	w.start("g")
 	w.attr("fill", "none")
 	w.attr("stroke-miterlimit", "4")
-	w.attrName("transform")
-	w.buf = append(w.buf, "translate("...)
-	w.buf = scene.AppendNumber(w.buf, r.opt.Origin[0])
-	w.buf = append(w.buf, ',')
-	w.buf = scene.AppendNumber(w.buf, r.opt.Origin[1])
-	w.buf = append(w.buf, ")\""...)
+	w.attrOpen("transform")
+	w.translate(r.opt.Origin[0], r.opt.Origin[1])
+	w.attrClose()
 	if err := r.mark(scn, 0); err != nil {
 		return err
 	}
@@ -179,7 +181,7 @@ func (r *renderer) root(scn *scene.Mark) error {
 // tick reports cancellation every so many rendered items.
 func (r *renderer) tick() error {
 	r.count++
-	if r.opt.MaxBytes > 0 && len(r.w.buf) > r.opt.MaxBytes {
+	if r.opt.MaxBytes > 0 && r.w.size() > r.opt.MaxBytes {
 		return ErrTooLarge
 	}
 	if r.count&1023 == 0 {
@@ -189,7 +191,7 @@ func (r *renderer) tick() error {
 }
 
 // tagOf is the SVG element a mark type renders to.
-func tagOf(t scene.MarkType) string {
+func tagOf(t scene.MarkType) lit {
 	switch t {
 	case scene.MarkGroup:
 		return "g"
@@ -235,19 +237,20 @@ func orderedMarks(ms []*scene.Mark) []*scene.Mark {
 	return append(out, z...)
 }
 
+// cssClass is vega's cssClass(mark): the mark type, role and name.
 func cssClass(w *writer, m *scene.Mark) {
-	w.attrName("class")
-	w.buf = append(w.buf, "mark-"...)
-	w.buf = appendEscaped(w.buf, m.Type.String(), true)
+	w.attrOpen("class")
+	w.valLit("mark-")
+	w.valStr(m.Type.String())
 	if m.Role != "" {
-		w.buf = append(w.buf, " role-"...)
-		w.buf = appendEscaped(w.buf, m.Role, true)
+		w.valLit(" role-")
+		w.valStr(m.Role)
 	}
 	if m.Name != "" {
-		w.buf = append(w.buf, ' ')
-		w.buf = appendEscaped(w.buf, m.Name, true)
+		w.valLit(" ")
+		w.valStr(m.Name)
 	}
-	w.buf = append(w.buf, '"')
+	w.attrClose()
 }
 
 // mark renders one mark: a <g> container with its items.
@@ -269,7 +272,7 @@ func (r *renderer) mark(m *scene.Mark, depth int) error {
 	}
 	r.markAria(m)
 	if tag != "g" && m.NonInteractive {
-		w.attrRaw("pointer-events", "none")
+		w.attrLit("pointer-events", "none")
 	}
 
 	if m.Type.Nested() {
@@ -293,7 +296,7 @@ func (r *renderer) mark(m *scene.Mark, depth int) error {
 }
 
 // item renders one item, wrapped in <a> when it has an href.
-func (r *renderer) item(m *scene.Mark, it *scene.Item, tag string, depth int) error {
+func (r *renderer) item(m *scene.Mark, it *scene.Item, tag lit, depth int) error {
 	w := &r.w
 	var link bool
 	if it.Href() != "" {
@@ -301,7 +304,9 @@ func (r *renderer) item(m *scene.Mark, it *scene.Item, tag string, depth int) er
 			link = true
 			w.start("a")
 			for _, a := range attrs {
-				w.attr(a.Name, a.Value)
+				if name, ok := hrefAttrName(a.Name); ok {
+					w.attr(name, a.Value)
+				}
 			}
 		}
 	}
@@ -317,9 +322,9 @@ func (r *renderer) item(m *scene.Mark, it *scene.Item, tag string, depth int) er
 	case scene.MarkImage:
 		r.imageItem(m, it)
 	case scene.MarkRule:
-		w.attrName("transform")
-		w.buf = appendTranslateItem(w.buf, it)
-		w.buf = append(w.buf, '"')
+		w.attrOpen("transform")
+		w.translateItem(it)
+		w.attrClose()
 		x2, y2 := 0.0, 0.0
 		if it.X2.Set() {
 			x2 = it.X2.Val() - it.OrZero("x")
@@ -336,36 +341,34 @@ func (r *renderer) item(m *scene.Mark, it *scene.Item, tag string, depth int) er
 	case scene.MarkPath:
 		sx, sy := scaleOne(it.ScaleX()), scaleOne(it.ScaleY())
 		if sx != 1 || sy != 1 {
-			w.attrRaw("vector-effect", "non-scaling-stroke")
+			w.attrLit("vector-effect", "non-scaling-stroke")
 		}
-		w.attrName("transform")
-		w.buf = appendTranslateItem(w.buf, it)
+		w.attrOpen("transform")
+		w.translateItem(it)
 		if it.AngleTruthy() {
-			w.buf = append(w.buf, " rotate("...)
-			w.buf = appendAngle(w.buf, it)
-			w.buf = append(w.buf, ')')
+			w.valLit(" ")
+			w.rotate(it)
 		}
 		if it.ScaleX().Truthy() || it.ScaleY().Truthy() {
-			w.buf = append(w.buf, " scale("...)
-			w.buf = scene.AppendNumber(w.buf, sx)
-			w.buf = append(w.buf, ',')
-			w.buf = scene.AppendNumber(w.buf, sy)
-			w.buf = append(w.buf, ')')
+			w.valLit(" scale(")
+			w.valNum(sx)
+			w.valLit(",")
+			w.valNum(sy)
+			w.valLit(")")
 		}
-		w.buf = append(w.buf, '"')
+		w.attrClose()
 		if it.Path().Set {
 			w.attr("d", it.Path().D)
 		}
 		r.style(m, it, "path", it.Fill, it.Stroke)
 	case scene.MarkArc, scene.MarkSymbol, scene.MarkShape:
-		w.attrName("transform")
-		w.buf = appendTranslateItem(w.buf, it)
+		w.attrOpen("transform")
+		w.translateItem(it)
 		if it.AngleTruthy() {
-			w.buf = append(w.buf, " rotate("...)
-			w.buf = appendAngle(w.buf, it)
-			w.buf = append(w.buf, ')')
+			w.valLit(" ")
+			w.rotate(it)
 		}
-		w.buf = append(w.buf, '"')
+		w.attrClose()
 		d, ok, perr := scene.ItemPathData(&r.sp, m.Type, it)
 		if perr != nil {
 			return perr
@@ -401,21 +404,50 @@ func scaleOne(n scene.Num) float64 {
 	return 1
 }
 
-// appendTranslateItem is `translate(${item.x || 0},${item.y || 0})`.
-func appendTranslateItem(dst []byte, it *scene.Item) []byte {
-	dst = append(dst, "translate("...)
-	dst = it.AppendPos(dst, "x")
-	dst = append(dst, ',')
-	dst = it.AppendPos(dst, "y")
-	return append(dst, ')')
+// translateItem is `translate(${item.x || 0},${item.y || 0})`: a position
+// given a word (from the spec or from data) prints as that word, escaped.
+func (w *writer) translateItem(it *scene.Item) {
+	w.valLit("translate(")
+	w.valJS(it.PosValue("x"))
+	w.valLit(",")
+	w.valJS(it.PosValue("y"))
+	w.valLit(")")
 }
 
-func appendTranslate(dst []byte, x, y float64) []byte {
-	dst = append(dst, "translate("...)
-	dst = scene.AppendNumber(dst, x)
-	dst = append(dst, ',')
-	dst = scene.AppendNumber(dst, y)
-	return append(dst, ')')
+// translate is `translate(${x},${y})` for numbers.
+func (w *writer) translate(x, y float64) {
+	w.valLit("translate(")
+	w.valNum(x)
+	w.valLit(",")
+	w.valNum(y)
+	w.valLit(")")
+}
+
+// rotate is `rotate(${item.angle})`: an angle given a word prints as that
+// word, escaped.
+func (w *writer) rotate(it *scene.Item) {
+	w.valLit("rotate(")
+	if v, ok := it.RawValue("angle"); ok {
+		w.valJS(v)
+	} else {
+		w.valNum(it.Angle.Val())
+	}
+	w.valLit(")")
+}
+
+// hrefAttrName is the attribute a link attribute from Options.Href is
+// written as: only the ones vega-loader's sanitize gives a link (target, rel
+// and the href, which vega rewrites to xlink:href).
+func hrefAttrName(name string) (lit, bool) {
+	switch name {
+	case "target":
+		return "target", true
+	case "rel":
+		return "rel", true
+	case "xlink:href":
+		return "xlink:href", true
+	}
+	return "", false
 }
 
 // groupStrokeOffset is the half-pixel shift that keeps 1px strokes of group
@@ -443,9 +475,9 @@ func abs(f float64) float64 {
 // group renders a group item: background, content and foreground.
 func (r *renderer) group(m *scene.Mark, it *scene.Item, depth int) error {
 	w := &r.w
-	w.attrName("transform")
-	w.buf = appendTranslateItem(w.buf, it)
-	w.buf = append(w.buf, '"')
+	w.attrOpen("transform")
+	w.translateItem(it)
+	w.attrClose()
 
 	fore := it.StrokeForeground().IsTrue()
 	fill, stroke := it.Fill, it.Stroke
@@ -460,8 +492,8 @@ func (r *renderer) group(m *scene.Mark, it *scene.Item, depth int) error {
 	off := groupStrokeOffset(it, bgStroke)
 
 	w.start("path")
-	w.attrRaw("class", "background")
-	w.attrRaw("aria-hidden", "true")
+	w.attrLit("class", "background")
+	w.attrLit("aria-hidden", "true")
 	w.attrBytes("d", scene.RectPathData(&r.sp, it, true, off, off))
 	r.style(m, it, "bgrect", fill, bgStroke)
 	w.end()
@@ -494,19 +526,19 @@ func (r *renderer) group(m *scene.Mark, it *scene.Item, depth int) error {
 		}
 		off = groupStrokeOffset(it, stroke)
 		w.start("path")
-		w.attrRaw("class", "foreground")
-		w.attrRaw("aria-hidden", "true")
+		w.attrLit("class", "foreground")
+		w.attrLit("aria-hidden", "true")
 		w.attrBytes("d", scene.RectPathData(&r.sp, it, true, off, off))
 		r.style(m, it, "bgrect", fgFill, stroke)
 		w.end()
 	} else {
 		w.start("path")
-		w.attrRaw("class", "foreground")
-		w.attrRaw("aria-hidden", "true")
+		w.attrLit("class", "foreground")
+		w.attrLit("aria-hidden", "true")
 		if fore {
 			w.attrBytes("d", scene.RectPathData(&r.sp, it, true, off, off))
 		} else {
-			w.attrRaw("d", "")
+			w.attrLit("d", "")
 		}
 		r.style(m, it, "bgfore", fill, stroke)
 		w.end()

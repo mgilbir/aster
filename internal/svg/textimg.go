@@ -5,7 +5,7 @@ import (
 	"github.com/mgilbir/aster/internal/scene"
 )
 
-func textAnchor(align string) string {
+func textAnchor(align string) lit {
 	switch align {
 	case "center":
 		return "middle"
@@ -25,25 +25,22 @@ func (r *renderer) textItem(m *scene.Mark, it *scene.Item) {
 	dy := it.Dy().Zero() + scene.BaselineOffset(it)
 	x, y := scene.AnchorPoint(it)
 
-	w.attrRaw("text-anchor", textAnchor(it.Align))
-	w.attrName("transform")
+	w.attrLit("text-anchor", textAnchor(it.Align))
+	w.attrOpen("transform")
 	if xv, yv := it.PosValue("x"), it.PosValue("y"); (xv.IsStr() || yv.IsStr()) && it.Radius().Zero() == 0 {
-		// A position given a word: the template strings concatenate, and the
-		// word is spec text, so the attribute is escaped as a whole.
-		w.buf = appendEscapedBytes(w.buf, appendWordTransform(nil, it, xv, yv, dx, dy))
+		w.wordTransform(it, xv, yv, dx, dy)
 	} else if it.AngleTruthy() {
-		w.buf = appendTranslate(w.buf, x, y)
-		w.buf = append(w.buf, " rotate("...)
-		w.buf = appendAngle(w.buf, it)
-		w.buf = append(w.buf, ')')
+		w.translate(x, y)
+		w.valLit(" ")
+		w.rotate(it)
 		if dx != 0 || dy != 0 {
-			w.buf = append(w.buf, ' ')
-			w.buf = appendTranslate(w.buf, dx, dy)
+			w.valLit(" ")
+			w.translate(dx, dy)
 		}
 	} else {
-		w.buf = appendTranslate(w.buf, x+dx, y+dy)
+		w.translate(x+dx, y+dy)
 	}
-	w.buf = append(w.buf, '"')
+	w.attrClose()
 	r.style(m, it, "text", it.Fill, it.Stroke)
 
 	line, lines := scene.TextLine(it)
@@ -55,7 +52,7 @@ func (r *renderer) textItem(m *scene.Mark, it *scene.Item) {
 	for i, l := range lines {
 		w.start("tspan")
 		if i > 0 {
-			w.attrRaw("x", "0")
+			w.attrLit("x", "0")
 			w.attrNum("dy", lh)
 		}
 		w.text(r.metrics.TextValue(it, l))
@@ -63,41 +60,44 @@ func (r *renderer) textItem(m *scene.Mark, it *scene.Item) {
 	}
 }
 
-// appendWordTransform is the text transform of attr() in vega-scenegraph's
+// wordTransform is the text transform of attr() in vega-scenegraph's
 // marks/text.js when x or y is a string, where `x + dx` joins the strings
-// instead of adding.
-func appendWordTransform(dst []byte, it *scene.Item, xv, yv jsval.Value, dx, dy float64) []byte {
-	join := func(a jsval.Value, b float64) string {
+// instead of adding. The words are spec or data text, written escaped.
+func (w *writer) wordTransform(it *scene.Item, xv, yv jsval.Value, dx, dy float64) {
+	// join is `a + b`: a string followed by the number, or the sum.
+	join := func(a jsval.Value, b float64) {
 		if a.IsStr() {
-			return a.StrValue() + string(scene.AppendNumber(nil, b))
+			w.valStr(a.StrValue())
+			w.valNum(b)
+			return
 		}
-		return string(scene.AppendNumber(nil, jsval.ToNumber(a)+b))
+		w.valNum(jsval.ToNumber(a) + b)
 	}
-	text := func(v jsval.Value) string {
+	// text is the anchor coordinate as translate() prints it.
+	text := func(v jsval.Value) {
 		if v.IsStr() {
-			return v.StrValue()
+			w.valStr(v.StrValue())
+			return
 		}
-		return string(scene.AppendNumber(nil, jsval.ToNumber(v)))
+		w.valNum(jsval.ToNumber(v))
 	}
+	w.valLit("translate(")
 	if it.AngleTruthy() {
-		dst = append(dst, "translate("...)
-		dst = append(dst, text(xv)...)
-		dst = append(dst, ',')
-		dst = append(dst, text(yv)...)
-		dst = append(dst, ") rotate("...)
-		dst = appendAngle(dst, it)
-		dst = append(dst, ')')
+		text(xv)
+		w.valLit(",")
+		text(yv)
+		w.valLit(") ")
+		w.rotate(it)
 		if dx != 0 || dy != 0 {
-			dst = append(dst, ' ')
-			dst = appendTranslate(dst, dx, dy)
+			w.valLit(" ")
+			w.translate(dx, dy)
 		}
-		return dst
+		return
 	}
-	dst = append(dst, "translate("...)
-	dst = append(dst, join(xv, dx)...)
-	dst = append(dst, ',')
-	dst = append(dst, join(yv, dy)...)
-	return append(dst, ')')
+	join(xv, dx)
+	w.valLit(",")
+	join(yv, dy)
+	w.valLit(")")
 }
 
 // imageItem writes an <image>: source, placement (alignment offsets from the
@@ -115,15 +115,15 @@ func (r *renderer) imageItem(m *scene.Mark, it *scene.Item) {
 	}
 	x, y, iw, ih := scene.ImageGeometry(it, info.Width, info.Height)
 	w.attr("xlink:href", info.Src)
-	w.attrName("transform")
-	w.buf = appendTranslate(w.buf, x, y)
-	w.buf = append(w.buf, '"')
+	w.attrOpen("transform")
+	w.translate(x, y)
+	w.attrClose()
 	w.attrNum("width", iw)
 	w.attrNum("height", ih)
 	if it.Aspect().IsFalse() {
-		w.attrRaw("preserveAspectRatio", "none")
+		w.attrLit("preserveAspectRatio", "none")
 	} else {
-		w.attrRaw("preserveAspectRatio", "xMidYMid")
+		w.attrLit("preserveAspectRatio", "xMidYMid")
 	}
 	r.style(m, it, "image", it.Fill, it.Stroke)
 }

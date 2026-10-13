@@ -18,7 +18,7 @@ make check                                  # every gate CI runs (scripts/check.
 
 ```mermaid
 flowchart LR
-  C["corpus 1,418 specs<br/>+ sweeps + external corpora"] --> E["engine"]
+  C["corpus 1,422 specs<br/>+ sweeps + external corpora"] --> E["engine"]
   C --> N["upstream in node<br/>(internal/oracle)"]
   N <--> K[("testdata/oracle-cache")]
   E --> D["internal/svgdiff<br/>structure; numbers ±0.5 px"]
@@ -35,7 +35,7 @@ The SVG is compared structurally: element tree, attributes, and numbers within h
 
 ## The corpus
 
-`TestCompareWithNode` (`compare_test.go`) runs over 1,418 specs: 260 Vega fixtures, 332 Vega-Lite fixtures, Vega's 92 example specs, the 627 Vega-Lite examples, 23 vl-convert specs, and 84 fuzz-found regressions (`testdata/corpus/regress`). The specs it does not match are listed with the reason in `testdata/oracle-expect.txt`. All five entries depend on the platform node runs on (emoji measurement in macOS's Pango, d3-cloud's rasterization, V8's last-bit trigonometry on x86-64). So the count that matches is 1,415 on macOS/arm64 and 1,416 on Linux/x86-64. The compiled Vega is identical to upstream's for every Vega-Lite spec.
+`TestCompareWithNode` (`compare_test.go`) runs over 1,422 specs: 260 Vega fixtures, 332 Vega-Lite fixtures, Vega's 92 example specs, the 627 Vega-Lite examples, 23 vl-convert specs, and 88 fuzz-found regressions (`testdata/corpus/regress`). The specs it does not match are listed with the reason in `testdata/oracle-expect.txt`. All five entries depend on the platform node runs on (emoji measurement in macOS's Pango, d3-cloud's rasterization, V8's last-bit trigonometry on x86-64). So the count that matches is 1,419 on macOS/arm64 and 1,420 on Linux/x86-64. The compiled Vega is identical to upstream's for every Vega-Lite spec.
 
 `go test -run TestCompareWithNode -v . -args -compare.report=/tmp/report.md` writes a per-spec report. `-compare.run name` compares one spec.
 
@@ -80,7 +80,7 @@ const vega = await import(require.resolve('vega'));
 ## Robustness
 
 - **Differential fuzzing:** `ASTER_FUZZ=3000 go test -run TestFuzzDifferential -v -timeout 3h .` mutates corpus specs and renders each mutant on both sides, checking the engine for panics and a time budget. Each disagreement is triaged into a fix with a regression spec under `testdata/corpus/regress`, or into a stated reason.
-- **Coverage-guided fuzzing:** each parser has a `go test -fuzz` target, listed in `scripts/fuzz-targets.txt` (29 of them; `TestFuzzTargetsListed` keeps the list complete). `make fuzz` runs them (`FUZZTIME=30s` for a short pass), and the nightly `fuzz.yml` workflow runs each for minutes, keeping its corpus. Besides "no panic, bounded time" they check properties: the JSON reader agrees with `encoding/json`, the SVG writer writes well-formed XML, and every PDF reads back with pdf0. A crasher is fixed and kept under the package's `testdata/fuzz/`.
+- **Coverage-guided fuzzing:** each parser has a `go test -fuzz` target, listed in `scripts/fuzz-targets.txt` (29 of them; `TestFuzzTargetsListed` keeps the list complete). `make fuzz` runs them (`FUZZTIME=30s` for a short pass), and the nightly `fuzz.yml` workflow runs each for minutes, keeping its corpus. Besides "no panic, bounded time" they check properties: the JSON reader agrees with `encoding/json`, the SVG writer writes only its own elements and attributes, and its output parses back to exactly the structure it wrote, so no string in a scene made markup (`internal/svgcheck`; `TestValuesCreateNoStructure` and `TestSpecAndDataStringsMakeNoMarkup` give every property, spec value and data field such a string), and every PDF reads back with pdf0. A crasher is fixed and kept under the package's `testdata/fuzz/`.
 - **The comparator is tested:** `internal/svgdiff` is mutation-tested. Each of 336 kinds of change over 718 documents must be reported.
 - **Untrusted input:** `TestDeepInput` drives 69 deeply nested shapes to depths up to 100,000 in child processes with a capped stack. `go run ./internal/cmd/recursionaudit` finds every recursion in the call graph (113 cycles) and checks each against `scripts/recursion.allow`, which says how it is bounded. The security reproducers are described in [security-review-2026.md](history/security-review-2026.md).
 - **Floating point:** `scripts/fmacheck.sh` rejects fused multiply-adds the Go compiler could introduce on arm64 where V8 does not have them ([design-rules.md](design-rules.md#floating-point-parity)).

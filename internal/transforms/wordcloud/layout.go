@@ -65,16 +65,7 @@ type layout struct {
 }
 
 // toInt32 is JavaScript's ToInt32 (the effect of `~~x` and `x | 0`).
-func toInt32(f float64) int {
-	if math.IsNaN(f) || math.IsInf(f, 0) {
-		return 0
-	}
-	f = math.Trunc(f)
-	if f >= -2147483648 && f <= 2147483647 {
-		return int(f)
-	}
-	return int(int32(uint32(int64(math.Mod(f, 4294967296)))))
-}
+func toInt32(f float64) int { return int(jsmath.ToInt32(f)) }
 
 func lshift(a int32, n int) int32  { return a << (uint(n) & 31) }
 func urshift(a int32, n int) int32 { return int32(uint32(a) >> (uint(n) & 31)) }

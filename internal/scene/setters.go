@@ -32,8 +32,13 @@ func SetterFor(name string) Setter {
 		}
 	}
 	if f, ok := triFields[name]; ok {
+		conv := FalseOf
+		if name == "strokeForeground" {
+			conv = triOf
+		}
 		return func(it *Item, val jsval.Value) error {
-			*f(it) = triOf(val)
+			*f(it) = conv(val)
+			it.setRawTri(name, val)
 			return nil
 		}
 	}

@@ -238,7 +238,7 @@ func BenchmarkCorpus(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	var buf []byte
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		for _, p := range ps {
 			buf, _ = AppendSVG(context.Background(), buf[:0], p.sg, p.opt)
 		}

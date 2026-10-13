@@ -32,12 +32,12 @@ func TestEscapedOutputIsWellFormedXML(t *testing.T) {
 
 func TestBlendIsAllowListed(t *testing.T) {
 	for _, m := range []string{"multiply", "color-dodge", "luminosity"} {
-		if !blendModes[m] {
+		if string(blendMode(m)) != m {
 			t.Errorf("%s must be allowed", m)
 		}
 	}
 	for _, m := range []string{"normal;background:url(http://x)", "", "Multiply", "url(x)"} {
-		if m != "" && blendModes[m] {
+		if m != "" && blendMode(m) != "" {
 			t.Errorf("%q must be rejected", m)
 		}
 	}

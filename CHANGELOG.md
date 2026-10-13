@@ -4,6 +4,18 @@ What changed between versions, for users of the library and the CLI. Breaking ch
 
 ## Unreleased
 
+### Security
+
+- SVG output escapes a mark's `x`, `y` (and with them the `transform` attribute) when they are strings rather than numbers. Before, such a string, from the spec or from **data** (a Vega `{"field": …}`, a Vega-Lite channel with `"scale": null`), was written into `transform="translate(…)"` unescaped, so a data value could add markup, such as a `<script>` element, to SVG that a page inlines; PNG and PDF output, made from that SVG, could carry it too. The output is now upstream Vega's, escaped. Charts whose positions are numbers are unchanged. The SVG writer now accepts raw markup only as constants, and tests check that its output parses back to exactly the elements and attributes it wrote.
+
+### Fixed
+
+- `defined`, `aspect`, `smooth` and `aria` (of an item, and `aria` of a mark) treat only `false` as false, as upstream does: a `defined` of `0`, `""` or `NaN` no longer breaks a line or area, an `aspect` or `smooth` of `0` no longer changes an image, and an `aria` of `0` or `""` no longer hides a mark. Each reads back in expressions as the value given.
+- **breaking:** a `monotone` interpolation whose `orient` is neither `horizontal` nor `vertical` fails the render, as upstream's ("curve is not a function"), instead of drawing as `vertical`.
+- A text whose `x` or `y` and `angle` are all strings had the angle escaped twice.
+- An axis whose `orient` is a signal failed to parse its encoding when a config value was an array holding `null` (`tickDash: [4, null, 2]`) or a string holding U+2028 or U+2029; both are now spliced as upstream's `stringValue` does.
+- JavaScript's 32-bit integer conversion (`~~x`, `x | 0`) of a huge number, in text width estimates and a crossfilter's `ignore` mask, wrapped as on no JavaScript engine and differed between amd64 and arm64.
+
 ### Errors reach the caller ([ADR 0006](docs/adr/0006-errors-reach-the-caller.md))
 
 - **breaking:** a render fails when upstream Vega would log a problem and draw without it. This covers a data URL the Loader refuses or fails to load (including every URL under the default `DenyLoader`), loaded data that does not parse, an image that cannot be loaded or decoded, and an exception an expression or operator raises during evaluation. Before, these rendered a chart missing the data or the image, with a nil error. Data and image failures are an `*aster.LoadError` (`Resource`, `URL`, `Err`).

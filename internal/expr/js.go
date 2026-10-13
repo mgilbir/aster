@@ -4,6 +4,7 @@ import (
 	"math"
 
 	"github.com/mgilbir/aster/internal/format"
+	"github.com/mgilbir/aster/internal/jsmath"
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/scale/color"
 )
@@ -166,17 +167,9 @@ func (s *Scope) num(v jsval.Value) float64 {
 }
 
 // toInt32 is ToInt32.
-func toInt32(f float64) int32 {
-	if f >= -2147483648 && f <= 2147483647 {
-		return int32(f) // truncates toward zero; NaN fails the range test
-	}
-	if math.IsNaN(f) || math.IsInf(f, 0) {
-		return 0
-	}
-	return int32(uint32(int64(math.Mod(math.Trunc(f), 4294967296))))
-}
+func toInt32(f float64) int32 { return jsmath.ToInt32(f) }
 
-func toUint32(f float64) uint32 { return uint32(toInt32(f)) }
+func toUint32(f float64) uint32 { return jsmath.ToUint32(f) }
 
 // toInteger is ToIntegerOrInfinity.
 func toInteger(f float64) float64 {

@@ -1,8 +1,6 @@
 package guides
 
 import (
-	"strings"
-
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -119,31 +117,8 @@ func deref(v Value) Value {
 	return v
 }
 
-// stringValue is vega-util's stringValue converted the way a template literal
-// converts its result: strings and objects become JSON, anything else its
-// JavaScript string form.
-func stringValue(v Value) string {
-	switch v.Kind() {
-	case jsval.KindArr:
-		var b strings.Builder
-		b.WriteByte('[')
-		for i, it := range v.Items() {
-			if i > 0 {
-				b.WriteByte(',')
-			}
-			if !it.IsNullish() {
-				b.WriteString(stringValue(it))
-			}
-		}
-		b.WriteByte(']')
-		return b.String()
-	case jsval.KindObj, jsval.KindStr:
-		s := string(jsval.AppendJSON(nil, v))
-		s = strings.Replace(s, " ", ` `, 1)
-		return strings.Replace(s, " ", ` `, 1)
-	}
-	return v.AsString()
-}
+// stringValue is vega-util's stringValue (see jsval.StringValue).
+func stringValue(v Value) string { return jsval.StringValue(v) }
 
 // hasKey reports whether o (a possibly non-object value) owns key.
 func hasKey(o Value, key string) bool {

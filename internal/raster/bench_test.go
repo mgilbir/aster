@@ -43,7 +43,7 @@ func BenchmarkRenderPNG(b *testing.B) {
 func BenchmarkRenderScale2(b *testing.B) {
 	svg := benchSVG(b, "trellis_line_quarter")
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		if _, err := Render(svg, Options{Scale: 2}); err != nil {
 			b.Fatal(err)
 		}

@@ -216,7 +216,7 @@ func BenchmarkContours(b *testing.B) {
 	v := gridValues(300, 300)
 	th := []float64{0.1, 0.3, 0.5, 0.7, 0.9}
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		if _, err := Contours(context.Background(), v, 300, 300, th, true); err != nil {
 			b.Fatal(err)
 		}
@@ -230,7 +230,7 @@ func BenchmarkDensity(b *testing.B) {
 	}
 	p := DensityParams{X: field("x"), Y: field("y"), Size: []float64{800, 500}, Bandwidth: []float64{20}}
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		if _, err := Density(context.Background(), data, p, false); err != nil {
 			b.Fatal(err)
 		}

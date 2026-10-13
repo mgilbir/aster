@@ -918,9 +918,5 @@ func propertyLambda(spec jsval.Value) string {
 	return b.String()
 }
 
-// stringValue is vega-util's stringValue: JSON, with U+2028/9 escaped.
-func stringValue(v jsval.Value) string {
-	s := quote(v)
-	s = strings.ReplaceAll(s, " ", ` `)
-	return strings.ReplaceAll(s, " ", ` `)
-}
+// stringValue is vega-util's stringValue (see jsval.StringValue).
+func stringValue(v jsval.Value) string { return jsval.StringValue(v) }

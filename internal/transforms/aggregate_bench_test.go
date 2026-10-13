@@ -26,6 +26,7 @@ func BenchmarkAggregateSumMean100k(b *testing.B) {
 		},
 	}
 	b.ReportAllocs()
+	b.ResetTimer() // the input is built once; allocs/op is one run's
 	for i := 0; i < b.N; i++ {
 		if _, err := Aggregate(context.Background(), data, p); err != nil {
 			b.Fatal(err)
@@ -37,6 +38,7 @@ func BenchmarkAggregateMedian100k(b *testing.B) {
 	data := aggBenchData(100_000)
 	p := AggregateParams{GroupBy: FieldsOf("c"), Measures: []Measure{{Op: "median", Field: FieldOf("x")}, {Op: "distinct", Field: FieldOf("y")}}}
 	b.ReportAllocs()
+	b.ResetTimer() // the input is built once; allocs/op is one run's
 	for i := 0; i < b.N; i++ {
 		if _, err := Aggregate(context.Background(), data, p); err != nil {
 			b.Fatal(err)

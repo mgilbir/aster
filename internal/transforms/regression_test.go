@@ -117,7 +117,7 @@ func BenchmarkLoess10k(b *testing.B) {
 	d := benchPoints(10000)
 	p := LoessParams{X: FieldOf("x"), Y: FieldOf("y"), Bandwidth: 0.02}
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		if _, err := Loess(context.Background(), d, p); err != nil {
 			b.Fatal(err)
 		}
@@ -161,7 +161,7 @@ func BenchmarkRegressionPoly10k(b *testing.B) {
 	d := benchPoints(10000)
 	p := RegressionParams{X: FieldOf("x"), Y: FieldOf("y"), Method: "poly", Order: 4}
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		if _, err := Regression(context.Background(), d, p); err != nil {
 			b.Fatal(err)
 		}

@@ -1,0 +1,11 @@
+{"width":60,"height":60,"padding":5,
+"data":[{"name":"t","values":[{"a":"\"><script>alert(5)</script>"}]}],
+"marks":[
+{"type":"symbol","encode":{"enter":{"x":{"value":"1)\"/><script>alert(2)</script><g x=\""}}}},
+{"type":"symbol","from":{"data":"t"},"encode":{"enter":{"x":{"field":"a"},"y":{"field":"a"},"angle":{"field":"a"},"shape":{"value":"square"}}}},
+{"type":"text","encode":{"enter":{"text":{"value":"hi"},"x":{"value":"a&b\"<"},"y":{"value":"5"},"angle":{"value":"x&<\"y"}}}},
+{"type":"text","encode":{"enter":{"text":{"value":"hi"},"x":{"value":"a&b"},"y":{"value":7},"dx":{"value":3}}}},
+{"type":"path","encode":{"enter":{"path":{"value":"M0,0L5,5"},"x":{"value":"q&\"r"},"angle":{"value":"z<"},"scaleX":{"value":2}}}},
+{"type":"rule","encode":{"enter":{"x":{"value":"r&"},"y":{"value":2},"x2":{"value":5}}}},
+{"type":"group","encode":{"enter":{"x":{"value":"g\"&"},"y":{"value":true},"width":{"value":5}}}},
+{"type":"symbol","encode":{"enter":{"x":{"value":["a<",1]},"y":{"value":{"k":1}}}}}]}

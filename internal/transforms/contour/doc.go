@@ -20,6 +20,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+
+	"github.com/mgilbir/aster/internal/jsmath"
 )
 
 // Limits on spec-driven work. They are far above any real chart.
@@ -56,17 +58,4 @@ func jsRound(x float64) float64 {
 }
 
 // toInt32 is JavaScript's ToInt32 applied to a double (used by |0 and >>).
-func toInt32(x float64) int32 {
-	if math.IsNaN(x) || math.IsInf(x, 0) {
-		return 0
-	}
-	x = math.Trunc(x)
-	if x >= -2147483648 && x <= 2147483647 {
-		return int32(x)
-	}
-	m := math.Mod(x, 4294967296)
-	if m < 0 {
-		m += 4294967296
-	}
-	return int32(uint32(m))
-}
+func toInt32(x float64) int32 { return jsmath.ToInt32(x) }

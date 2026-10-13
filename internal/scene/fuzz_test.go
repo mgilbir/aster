@@ -11,7 +11,7 @@ import (
 )
 
 // sentinels are the errors a scene that upstream cannot draw gives.
-var sentinels = []error{ErrUnknownInterpolate, ErrNoShapeGenerator, ErrCurveNoArea, ErrInvalidPath, errPathParamCount, errPathParamType, errNegativeRadius}
+var sentinels = []error{ErrUnknownInterpolate, ErrUnknownOrient, ErrNoShapeGenerator, ErrCurveNoArea, ErrInvalidPath, errPathParamCount, errPathParamType, errNegativeRadius}
 
 // FuzzFromJSON reads arbitrary documents as serialized scenegraphs and bounds
 // what it accepts, as the renderer does: nothing panics, nothing runs away,

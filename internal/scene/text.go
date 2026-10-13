@@ -1,10 +1,10 @@
 package scene
 
 import (
-	"math"
 	"strings"
 	"unicode/utf16"
 
+	"github.com/mgilbir/aster/internal/jsmath"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -207,14 +207,10 @@ func utf16Len(s string) int {
 	return n
 }
 
-// estimateWidth is vega's fallback: ~~(0.8 * length * fontSize), truncating
-// toward zero like a 32-bit integer conversion.
+// estimateWidth is vega's fallback: ~~(0.8 * length * fontSize), JavaScript's
+// ToInt32 of the product.
 func estimateWidth(text string, fontSize float64) float64 {
-	v := 0.8 * float64(utf16Len(text)) * fontSize
-	if v != v || math.IsInf(v, 0) {
-		return 0
-	}
-	return float64(int32(int64(v)))
+	return float64(jsmath.ToInt32(0.8 * float64(utf16Len(text)) * fontSize))
 }
 
 func isASCII(s string) bool {

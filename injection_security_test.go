@@ -7,42 +7,24 @@ package aster
 
 import (
 	"context"
-	"encoding/xml"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"strings"
 	"testing"
+
+	"github.com/mgilbir/aster/internal/svgcheck"
 )
 
-// checkSVG parses svg strictly and reports attributes that no legitimate
-// Vega output carries (event handlers, data-*, script/foreignObject elements).
+// checkSVG checks svg against the grammar of the renderer's output
+// (svgcheck.Check): only the elements it writes, under their parents, with
+// the attributes it writes on them, and text only inside text elements. A
+// spec value that made markup (a <script>, an event handler, an attribute the
+// element does not carry) fails it.
 func checkSVG(t *testing.T, svg string) {
 	t.Helper()
-	dec := xml.NewDecoder(strings.NewReader(svg))
-	for {
-		tok, err := dec.Token()
-		if err == io.EOF {
-			return
-		}
-		if err != nil {
-			t.Errorf("output is not well-formed XML: %v", err)
-			return
-		}
-		se, ok := tok.(xml.StartElement)
-		if !ok {
-			continue
-		}
-		switch se.Name.Local {
-		case "script", "foreignObject", "iframe", "style", "use", "set", "animate":
-			t.Errorf("attacker-controlled element <%s> in output", se.Name.Local)
-		}
-		for _, a := range se.Attr {
-			n := strings.ToLower(a.Name.Local)
-			if strings.HasPrefix(n, "on") || strings.HasPrefix(n, "data-") {
-				t.Errorf("injected attribute %s=%q on <%s>", a.Name.Local, a.Value, se.Name.Local)
-			}
-		}
+	if err := svgcheck.Check(svg); err != nil {
+		t.Errorf("%v\n%s", err, svg)
 	}
 }
 
@@ -215,5 +197,161 @@ func TestControlCharactersKeepOutputWellFormed(t *testing.T) {
 	checkSVG(t, svg)
 	if _, err := c.VegaToPDF([]byte(spec)); err != nil {
 		t.Errorf("VegaToPDF: %v", err)
+	}
+}
+
+// hostileText would make markup if it reached the SVG unescaped: it closes
+// an attribute (and the transform's parenthesis), closes the element, opens a
+// <script>, and opens an element with an event handler.
+const hostileText = "1)\"/><script>alert(1)</script><g onload=\"x' &amp;"
+
+// benignText is hostileText with every character that is special in markup
+// replaced: a string of the same kind and length that can make no markup.
+var benignText = strings.Map(func(r rune) rune {
+	if strings.ContainsRune("<>&\"'", r) {
+		return '_'
+	}
+	return r
+}, hostileText)
+
+// structureOf renders a spec through the public API with a permissive
+// Loader, past every load or evaluation error, and returns its skeleton
+// (svgcheck.Skeleton) after checking it against the renderer's grammar.
+func structureOf(t *testing.T, c *Converter, lite bool, spec string) ([]string, error) {
+	t.Helper()
+	render := c.VegaToSVG
+	if lite {
+		render = c.VegaLiteToSVG
+	}
+	svg, err := render([]byte(spec), WithErrorHandler(func(error) error { return nil }))
+	if err != nil {
+		return nil, err
+	}
+	skel, err := svgcheck.Skeleton(svg)
+	if err != nil {
+		t.Errorf("%v\nspec: %s\n%s", err, spec, svg)
+	}
+	return skel, nil
+}
+
+// assertSameStructure renders the spec made with the hostile string and with
+// the benign one. The two must have the same elements and attributes: what a
+// string holds may change attribute values and text, never the structure.
+func assertSameStructure(t *testing.T, c *Converter, lite bool, label string, spec func(s string) string) {
+	t.Helper()
+	got, gerr := structureOf(t, c, lite, spec(hostileText))
+	want, werr := structureOf(t, c, lite, spec(benignText))
+	if (gerr == nil) != (werr == nil) {
+		t.Errorf("%s: hostile error %v, benign error %v", label, gerr, werr)
+		return
+	}
+	if gerr != nil || got == nil || want == nil {
+		return
+	}
+	if d := svgcheck.Diff(got, want); d != "" {
+		t.Errorf("%s: a string in the input changed the structure of the SVG: %s", label, d)
+	}
+}
+
+func jsonString(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
+}
+
+// Every encoding property of every Vega mark type, given a string as a value
+// and from a data field, and every Vega-Lite channel with a raw field
+// (scale: null) or a value: no string from the spec or the data can make
+// markup. Upstream escapes each through its markup writer; so must the
+// engine (C1 of the 2026-10-11 audit, where a string x reached transform
+// unescaped).
+func TestSpecAndDataStringsMakeNoMarkup(t *testing.T) {
+	c, err := New(WithLoader(&StaticLoader{Value: []any{}}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+
+	vgMarks := []string{"arc", "area", "group", "image", "line", "path", "rect", "rule", "shape", "symbol", "text", "trail"}
+	vgProps := []string{
+		"x", "y", "x2", "y2", "xc", "yc", "width", "height", "angle", "size", "fontSize", "path", "url", "href", "fill", "stroke",
+		"strokeWidth", "strokeDash", "strokeDashOffset", "strokeOpacity", "fillOpacity", "opacity", "strokeMiterLimit",
+		"strokeCap", "strokeJoin", "cornerRadius", "text", "font", "fontWeight", "fontStyle", "fontVariant", "align",
+		"baseline", "dx", "dy", "radius", "theta", "limit", "lineHeight", "ellipsis", "dir", "shape", "interpolate",
+		"orient", "description", "ariaRole", "ariaRoleDescription", "aria", "cursor", "tooltip", "blend",
+		"innerRadius", "outerRadius", "startAngle", "endAngle", "padAngle", "scaleX", "scaleY", "zindex", "clip",
+	}
+	for _, mt := range vgMarks {
+		for _, prop := range vgProps {
+			for _, fromData := range []bool{false, true} {
+				label := "vega " + mt + "." + prop
+				if fromData {
+					label += " (data)"
+				}
+				spec := func(s string) string {
+					ref := `{"value":` + jsonString(s) + `}`
+					if fromData {
+						ref = `{"field":"a"}`
+					}
+					return `{"width":60,"height":60,"data":[{"name":"t","values":[{"a":` + jsonString(s) + `,"i":0},{"a":` + jsonString(s) + `,"i":1}]}],` +
+						`"marks":[{"type":"` + mt + `","from":{"data":"t"},"encode":{"update":{` +
+						`"x":{"field":"i"},"y":{"field":"i"},"width":{"value":10},"height":{"value":10},"size":{"value":40},` +
+						`"angle":{"value":30},"text":{"value":"t"},"path":{"value":"M0,0L5,5"},"url":{"value":"a.png"},` +
+						`"href":{"value":"http://a.example/"},"fill":{"value":"red"},"stroke":{"value":"blue"},` +
+						`"outerRadius":{"value":5},"endAngle":{"value":1},"description":{"value":"d"},` +
+						jsonString(prop) + `:` + ref + `}}}]}`
+				}
+				assertSameStructure(t, c, false, label, spec)
+			}
+		}
+	}
+
+	vlMarks := []string{"point", "circle", "square", "text", "image", "rule", "bar", "line", "area", "tick", "rect", "trail", "arc"}
+	vlChannels := []string{
+		"x", "y", "x2", "y2", "xOffset", "yOffset", "theta", "radius", "angle", "size", "color", "fill", "stroke",
+		"opacity", "fillOpacity", "strokeOpacity", "strokeWidth", "strokeDash", "shape", "href", "url", "text",
+		"description", "tooltip",
+	}
+	for _, mt := range vlMarks {
+		for _, ch := range vlChannels {
+			for _, mode := range []string{"field", "value"} {
+				label := "vega-lite " + mt + "." + ch + " (" + mode + ")"
+				spec := func(s string) string {
+					def := `{"field":"a","type":"nominal","scale":null}`
+					switch {
+					case mode == "value":
+						def = `{"value":` + jsonString(s) + `}`
+					case ch == "href" || ch == "url" || ch == "text" || ch == "description" || ch == "tooltip":
+						def = `{"field":"a","type":"nominal"}`
+					}
+					enc := map[string]string{
+						"x": `{"field":"i","type":"quantitative"}`, "y": `{"field":"i","type":"quantitative"}`,
+					}
+					if mt == "text" {
+						enc["text"] = `{"value":"t"}`
+					}
+					if mt == "image" {
+						enc["url"] = `{"value":"a.png"}`
+					}
+					if mt == "arc" {
+						enc["theta"] = `{"field":"i","type":"quantitative"}`
+					}
+					enc[ch] = def
+					var b strings.Builder
+					for _, k := range []string{"x", "y", "theta", "text", "url", ch} {
+						if v, ok := enc[k]; ok {
+							if b.Len() > 0 {
+								b.WriteByte(',')
+							}
+							b.WriteString(jsonString(k) + ":" + v)
+							delete(enc, k)
+						}
+					}
+					return `{"$schema":"https://vega.github.io/schema/vega-lite/v6.json",` +
+						`"data":{"values":[{"a":` + jsonString(s) + `,"i":0},{"a":` + jsonString(s) + `,"i":1}]},` +
+						`"mark":{"type":"` + mt + `","width":10,"height":10},"encoding":{` + b.String() + `}}`
+				}
+				assertSameStructure(t, c, true, label, spec)
+			}
+		}
 	}
 }

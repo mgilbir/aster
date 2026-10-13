@@ -91,6 +91,12 @@ func benchRows(n int) []jsval.Value {
 func BenchmarkStack100k(b *testing.B) {
 	rows := benchRows(100_000)
 	p := StackParams{Field: FieldOf("v"), GroupBy: FieldsOf("g", "h"), Offset: StackZero}
+	// stack writes y0 and y1 into its rows: one run off the clock first (see
+	// BenchmarkBin100k).
+	if _, err := Stack(context.Background(), rows, p); err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		if _, err := Stack(context.Background(), rows, p); err != nil {

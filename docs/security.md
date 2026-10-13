@@ -12,7 +12,7 @@ The attacker controls the Vega or Vega-Lite specification, the data a Loader ret
 | bounded memory | per-render budgets on rows, items, loaded bytes, strings, SVG size, canvases, path points, each charged *before* allocating; `WithMemoryLimit` sets them ([limits.md](limits.md)) |
 | no crash | everything reachable from input returns an error; recursion is bounded and audited (every recursive cycle is listed with its bound); the public API recovers panics as a last resort; fuzzed nightly |
 | no access beyond the Loader's policy | every resource (data, images, links) goes through the Loader; the default refuses all; `HTTPLoader` refuses private networks by default |
-| no injection into the output | every SVG attribute and text is escaped (XML-invalid characters dropped); CSS-bound values are allow-listed; link and image URLs pass vega-loader's scheme allow-list after the Loader; PDF names and strings are escaped |
+| no injection into the output | every SVG attribute value and text that comes from a spec or its data is escaped (XML-invalid characters dropped): the SVG writer takes only constants as raw markup, and tests check that the output parses back to exactly the elements and attributes it wrote; CSS-bound values are allow-listed; link and image URLs pass vega-loader's scheme allow-list after the Loader; PDF names and strings are escaped |
 | no code execution | the expression language is parsed and compiled to Go closures over a whitelisted function table; no reflection, no host access; regular expressions run in a bounded matcher |
 
 ## Hardening checklist for untrusted specs
