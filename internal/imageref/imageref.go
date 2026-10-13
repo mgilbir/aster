@@ -134,20 +134,35 @@ func Config(data []byte, lim Limits) (image.Config, string, error) {
 	return cfg, format, nil
 }
 
-// Decode decodes an image Config accepts.
-func Decode(data []byte, lim Limits) (image.Image, error) {
+// Decode decodes an image Config accepts, under ctx (nil: never done). The
+// standard decoders cannot be interrupted, but they read their input as they
+// decode, and Decode polls ctx at each read: between two polls a decoder
+// makes at most about a quarter of a million pixels (see pollReader; JPEG and GIF have stretches bounded only by the pixel limit), whatever the image's
+// size, and Config has bounded that size before any of it is made. It
+// returns ctx's error once ctx is done.
+func Decode(ctx context.Context, data []byte, lim Limits) (image.Image, error) {
 	_, format, err := Config(data, lim)
 	if err != nil {
 		return nil, err
 	}
+	var img image.Image
+	r := reader(ctx, data, format)
 	switch format {
 	case "png":
-		return png.Decode(bytes.NewReader(data))
+		img, err = png.Decode(r)
 	case "jpeg":
-		return jpeg.Decode(bytes.NewReader(data))
+		img, err = jpeg.Decode(r)
 	default:
-		return gif.Decode(bytes.NewReader(data))
+		img, err = gif.Decode(r)
 	}
+	// A decoder may report the reader's error as its own (a truncated
+	// image): ctx's error is what stopped it.
+	if ctx != nil && err != nil {
+		if cerr := ctx.Err(); cerr != nil {
+			return nil, cerr
+		}
+	}
+	return img, err
 }
 
 const (

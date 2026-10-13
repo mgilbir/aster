@@ -1,12 +1,12 @@
 package svgpdf
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"hash/fnv"
 	"image"
 	"image/color"
-	"image/draw"
 	"math"
 	"sort"
 	"unicode/utf16"
@@ -212,7 +212,7 @@ func (r *renderer) drawGlyphImage(face *text.Face, gid int, fg shape.Color, alph
 	var box shape.Rect
 	key := fmt.Sprintf("glyph:%p:%d:%d,%d,%d:%d", face, gid, fg.R, fg.G, fg.B, ppem)
 	img, err := r.images.put(key, func() (*image.NRGBA, error) {
-		px, b, err := raster.ColourGlyphImage(face, gid, fg, ppem)
+		px, b, err := raster.ColourGlyphImage(r.ctx, face, gid, fg, ppem)
 		box = b
 		return px, err
 	})
@@ -770,14 +770,14 @@ func (p *pdfPainter) Image(img shape.Image) {
 	case shape.ImagePNG:
 		// The font's own bytes, which forme hands out without copying.
 		key = fmt.Sprintf("glyphpng:%p:%d", &img.Data[0], len(img.Data))
-		make = func() (*image.NRGBA, error) { return decodeNRGBA(img.Data, p.r.lim) }
+		make = func() (*image.NRGBA, error) { return decodeNRGBA(p.r.ctx, img.Data, p.r.lim) }
 	case shape.ImageMask:
 		// Made for the call, so known by what it holds.
 		c := img.Color
 		h := fnv.New64a()
 		h.Write(img.Data)
 		key = fmt.Sprintf("glyphmask:%x:%dx%d:%d,%d,%d,%d", h.Sum64(), img.Width, img.Height, c.R, c.G, c.B, c.A)
-		make = func() (*image.NRGBA, error) { return maskNRGBA(img), nil }
+		make = func() (*image.NRGBA, error) { return maskNRGBA(p.r.ctx, img) }
 	default:
 		return
 	}
@@ -791,34 +791,46 @@ func (p *pdfPainter) Image(img shape.Image) {
 	}
 }
 
-// decodeNRGBA decodes a bitmap glyph's PNG. One that does not decode is not
-// drawn; one over the limits is an error.
-func decodeNRGBA(data []byte, lim Limits) (*image.NRGBA, error) {
-	src, err := imageref.Decode(data, lim.imageLimits())
+// decodeNRGBA decodes a bitmap glyph's PNG under ctx (nil: never done),
+// which decoding and the conversion poll. One that does not decode is not
+// drawn; one over the limits, or stopped by ctx, is an error.
+func decodeNRGBA(ctx context.Context, data []byte, lim Limits) (*image.NRGBA, error) {
+	src, err := imageref.Decode(ctx, data, lim.imageLimits())
 	if err != nil {
-		if errors.Is(err, ErrLimit) {
+		if errors.Is(err, ErrLimit) || (ctx != nil && errors.Is(err, ctx.Err())) {
 			return nil, err
 		}
 		return nil, nil
 	}
 	b := src.Bounds()
 	out := image.NewNRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
-	draw.Draw(out, out.Bounds(), src, b.Min, draw.Src)
+	if err := imageref.DrawSrc(ctx, out, out.Bounds(), src, b.Min); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
-// maskNRGBA is a monochrome or greyscale strike's coverage in its colour.
-func maskNRGBA(img shape.Image) *image.NRGBA {
+// maskNRGBA is a monochrome or greyscale strike's coverage in its colour,
+// made a band of rows at a time, polling ctx (nil: never done): the strike's
+// size is the font's to choose.
+func maskNRGBA(ctx context.Context, img shape.Image) (*image.NRGBA, error) {
 	w, h := img.Width, img.Height
 	if w <= 0 || h <= 0 || len(img.Data) < w*h {
-		return nil
+		return nil, nil
 	}
 	out := image.NewNRGBA(image.Rect(0, 0, w, h))
 	c := img.Color
-	for i, cov := range img.Data[:w*h] {
-		out.SetNRGBA(i%w, i/w, color.NRGBA{c.R, c.G, c.B, uint8(uint32(c.A) * uint32(cov) / 255)})
+	rows := imageref.BandRows(w)
+	for y := 0; y < h; y += rows {
+		y1 := min(y+rows, h)
+		if err := imageref.Poll(ctx, (y1-y)*w); err != nil {
+			return nil, err
+		}
+		for i := y * w; i < y1*w; i++ {
+			out.SetNRGBA(i%w, i/w, color.NRGBA{c.R, c.G, c.B, uint8(uint32(c.A) * uint32(img.Data[i]) / 255)})
+		}
 	}
-	return out
+	return out, nil
 }
 
 // beginActualText starts marked content whose text, for search, selection and

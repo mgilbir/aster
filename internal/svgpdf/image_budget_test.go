@@ -76,11 +76,11 @@ func TestEncodePlanesMatchesDraw(t *testing.T) {
 	src.Pix[3] = 255
 	nrgba := image.NewNRGBA(image.Rect(0, 0, src.Rect.Dx(), src.Rect.Dy()))
 	draw.Draw(nrgba, nrgba.Bounds(), src, src.Rect.Min, draw.Src)
-	want, err := encodeNRGBA(nrgba)
+	want, err := encodeNRGBA(context.Background(), nrgba)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := encodePlanes(src.Pix, src.Stride, src.Rect.Dx(), src.Rect.Dy(), true)
+	got, err := encodePlanes(context.Background(), src.Pix, src.Stride, src.Rect.Dx(), src.Rect.Dy(), true)
 	if err != nil {
 		t.Fatal(err)
 	}

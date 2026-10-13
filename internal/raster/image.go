@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"image"
 	"image/color"
-	"image/draw"
 	"math"
 	"strings"
 
@@ -22,8 +21,10 @@ type rasterImage struct {
 
 // level is the image halved k times, or as many times as it can be (to 1x1),
 // and how many times that is. Halving averages 2x2 pixels in premultiplied
-// space, so the colour of a transparent pixel does not bleed.
-func (img *rasterImage) level(k int) (*rasterImage, int) {
+// space, so the colour of a transparent pixel does not bleed. Halvings are
+// charged to r (nil: never stopped; see halve); once r stops, level returns
+// the deepest level made.
+func (img *rasterImage) level(k int, r *renderer) (*rasterImage, int) {
 	for len(img.mips) < k {
 		prev := img
 		if n := len(img.mips); n > 0 {
@@ -32,7 +33,11 @@ func (img *rasterImage) level(k int) (*rasterImage, int) {
 		if prev.w == 1 && prev.h == 1 {
 			break
 		}
-		img.mips = append(img.mips, prev.halve())
+		h := prev.halve(r)
+		if h == nil {
+			break
+		}
+		img.mips = append(img.mips, h)
 	}
 	k = min(k, len(img.mips))
 	if k == 0 {
@@ -42,11 +47,19 @@ func (img *rasterImage) level(k int) (*rasterImage, int) {
 }
 
 // halve is the image at half its size, rounded up; at an odd edge the last
-// pixel stands for the one beyond it.
-func (img *rasterImage) halve() *rasterImage {
+// pixel stands for the one beyond it. Its memory was charged with the image
+// (imageBytes); its work, the pixels it reads, is charged to r's
+// MaxPixelOps a band of rows at a time, polling r's context (ADR 0010): a
+// halving of an image of 64 Mi pixels is seconds under the race detector. It
+// is nil once r stops (nil r: never).
+func (img *rasterImage) halve(r *renderer) *rasterImage {
 	w, h := (img.w+1)/2, (img.h+1)/2
 	pix := make([]uint8, w*h*4)
+	rows := imageref.BandRows(w)
 	for y := 0; y < h; y++ {
+		if r != nil && y%rows == 0 && !r.chargeOps(4*min(rows, h-y)*w) {
+			return nil
+		}
 		y0, y1 := 2*y, min(2*y+1, img.h-1)
 		for x := 0; x < w; x++ {
 			x0, x1 := 2*x, min(2*x+1, img.w-1)
@@ -74,6 +87,9 @@ func (lim Limits) imageLimits() imageref.Limits {
 // premultiplied copy with every halving drawing may make of it, which stay
 // charged (kept, the bytes left charged, for the caller to give back). An
 // image the ledger cannot hold fails with an error wrapping budget.ErrLimit.
+// Decoding and the conversion poll the render's context throughout, and the
+// conversion is charged to MaxPixelOps; once either stops, the render has
+// failed (r.err) and the error is its.
 func (r *renderer) decodeImage(data []byte) (img *rasterImage, kept int64, err error) {
 	cfg, _, err := imageref.Config(data, r.lim.imageLimits())
 	if err != nil {
@@ -85,14 +101,26 @@ func (r *renderer) decodeImage(data []byte) (img *rasterImage, kept int64, err e
 	if err := r.ledger.Alloc(decoded + kept); err != nil {
 		return nil, 0, fmt.Errorf("raster: decoding a %dx%d image: %w", w, h, err)
 	}
-	src, err := imageref.Decode(data, r.lim.imageLimits())
+	src, err := imageref.Decode(r.ctx, data, r.lim.imageLimits())
 	if err != nil {
 		r.ledger.Free(decoded + kept)
+		if r.ctx != nil && errors.Is(err, r.ctx.Err()) {
+			r.fail(err)
+		}
 		return nil, 0, err
 	}
 	b := src.Bounds()
+	if !r.chargeOps(b.Dx() * b.Dy()) {
+		r.ledger.Free(decoded + kept)
+		return nil, 0, r.err
+	}
 	dst := image.NewRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
-	draw.Draw(dst, dst.Bounds(), src, b.Min, draw.Src) // draw.Src into RGBA premultiplies
+	// draw.Src into RGBA premultiplies.
+	if err := imageref.DrawSrc(r.ctx, dst, dst.Bounds(), src, b.Min); err != nil {
+		r.ledger.Free(decoded + kept)
+		r.fail(err)
+		return nil, 0, r.err
+	}
 	r.ledger.Free(decoded)
 	return &rasterImage{w: b.Dx(), h: b.Dy(), pix: dst.Pix}, kept, nil
 }
@@ -141,9 +169,10 @@ func imageBytes(w, h int) int64 {
 //   - rotated or skewed, it is sampled bilinearly from the copy halved as
 //     many times as leaves the footprint between one and two pixels.
 //
-// Halved copies average 2x2 pixels in premultiplied space. The matrix returned
-// maps device pixels to the pixels of what is sampled.
-func sampledLevel(img *rasterImage, inv matrix) (*rasterImage, matrix, bool) {
+// Halved copies average 2x2 pixels in premultiplied space, made as drawing
+// first needs them and charged to r (see halve; nil r for none). The matrix
+// returned maps device pixels to the pixels of what is sampled.
+func sampledLevel(r *renderer, img *rasterImage, inv matrix) (*rasterImage, matrix, bool) {
 	f := max(math.Hypot(inv.a, inv.b), math.Hypot(inv.c, inv.d))
 	if !(f > 2) {
 		return img, inv, false
@@ -160,7 +189,7 @@ func sampledLevel(img *rasterImage, inv matrix) (*rasterImage, matrix, bool) {
 	if kf < 62 {
 		k = int(kf)
 	}
-	lvl, k := img.level(k)
+	lvl, k := img.level(k, r)
 	s := float64(int(1) << k)
 	return lvl, matrix{inv.a / s, inv.b / s, inv.c / s, inv.d / s, inv.e / s, inv.f / s}, area
 }
@@ -314,6 +343,11 @@ func (r *renderer) imageFor(n *node) (*rasterImage, error) {
 	if err == nil {
 		img, kept, err = r.decodeImage(data)
 	}
+	if err != nil && r.ctx != nil && errors.Is(err, r.ctx.Err()) {
+		// The render stopped (its context ended) while decoding: no image
+		// failed to read, and nothing is reported.
+		return nil, err
+	}
 	if err != nil {
 		img = nil
 		if errors.Is(err, budget.ErrLimit) {
@@ -390,7 +424,7 @@ func (r *renderer) renderImage(n *node, st *state, opacity float64, blend blendM
 		opacity: unitByte(opacity),
 	}
 	if !shader.nearest {
-		shader.img, shader.inv, shader.area = sampledLevel(img, inv)
+		shader.img, shader.inv, shader.area = sampledLevel(r, img, inv)
 	}
 	var prev *canvas
 	if blend != blendNormal {

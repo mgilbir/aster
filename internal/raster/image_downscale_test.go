@@ -106,7 +106,7 @@ func TestSampledLevel(t *testing.T) {
 		{matrix{3, 3, -3, 3, 0, 0}, 16, false, 1.0606601717798212},
 		{matrix{1000, 0, 0, 1000, 0, 0}, 1, true, 0},
 	} {
-		lvl, inv, area := sampledLevel(img, tc.inv)
+		lvl, inv, area := sampledLevel(nil, img, tc.inv)
 		if lvl.w != tc.w || area != tc.area {
 			t.Errorf("inv %v: sampled a %d px level by area %v, want %d by area %v", tc.inv, lvl.w, area, tc.w, tc.area)
 		}
@@ -122,7 +122,7 @@ func TestHalve(t *testing.T) {
 		0, 0, 0, 0,
 		0, 100, 0, 100,
 	}}
-	h := img.halve()
+	h := img.halve(nil)
 	if h.w != 2 || h.h != 1 {
 		t.Fatalf("halved to %dx%d, want 2x1", h.w, h.h)
 	}
@@ -130,7 +130,7 @@ func TestHalve(t *testing.T) {
 	if !bytes.Equal(h.pix, want) {
 		t.Errorf("halved pixels %v, want %v", h.pix, want)
 	}
-	if l, k := img.level(5); k != 2 || l.w != 1 || l.h != 1 {
+	if l, k := img.level(5, nil); k != 2 || l.w != 1 || l.h != 1 {
 		t.Errorf("level(5) = %dx%d at %d, want 1x1 at 2", l.w, l.h, k)
 	}
 }
@@ -149,7 +149,7 @@ func TestImageShrunkToNothing(t *testing.T) {
 		{math.Inf(1), 0, 0, 1, 0, 0},
 		{1, 0, 0, math.NaN(), 0, 0},
 	} {
-		lvl, linv, area := sampledLevel(img, inv)
+		lvl, linv, area := sampledLevel(nil, img, inv)
 		s := &imageShader{img: lvl, inv: linv, area: area, opacity: 255}
 		done := make(chan struct{})
 		go func() {

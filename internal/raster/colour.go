@@ -410,7 +410,7 @@ func (p *colourPainter) Image(img shape.Image) {
 	if !ok {
 		return
 	}
-	lvl, linv, area := sampledLevel(ri, inv)
+	lvl, linv, area := sampledLevel(p.r, ri, inv)
 	clip := p.r.rectClip(p.st, p.top(), rect{b.XMin, b.YMin, b.XMax, b.YMax})
 	if clip.r.empty() {
 		return
