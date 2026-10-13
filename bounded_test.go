@@ -32,8 +32,18 @@ const (
 	boundedPeakFactor = 4
 	// boundedSlack is how long after the deadline a render may still return:
 	// the time a loop takes to reach its next poll, and the unwinding.
-	boundedSlack = 500 * time.Millisecond
-	// The child is killed past these: a finding, reported as such.
+	// CI baseline of the time past the deadline (Heavy gates timings run, 716
+	// renders): 0.012 s without -race, 0.807 s under -race (the slack is
+	// scaled by 5 there, so 0.161 s unscaled). The limit is 2x the measured
+	// value: 2 x 0.807 = 1.61 s under -race needs 0.323 s unscaled, rounded up
+	// to 350 ms (1.75 s under -race); without -race 2 x 0.012 = 0.024 s, under
+	// the 250 ms minimum for a post-deadline allowance (the 1 s floor is for
+	// whole durations, which this is not). A render later than that is a
+	// finding to investigate, not a limit to pad.
+	boundedSlack = 350 * time.Millisecond
+	// The child is killed past these: a finding, reported as such. They are
+	// kill walls: a hang guard, not a calibrated bound (the speed property is
+	// boundedSlack's).
 	boundedHeapCapMB = 1024
 	boundedWall      = 15 * time.Second
 	// boundedParallel children run at once, each allowed boundedHeapCapMB.

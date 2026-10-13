@@ -32,7 +32,7 @@ func TestFileLoaderFIFODoesNotBlock(t *testing.T) {
 		if err == nil {
 			t.Error("FIFO loaded")
 		}
-	case <-time.After(testutil.Scaled(5 * time.Second)):
+	case <-time.After(testutil.Scaled(5 * time.Second)): // hang guard, not a calibrated bound
 		t.Fatal("Load blocked on a FIFO")
 	}
 }

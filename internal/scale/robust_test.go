@@ -168,10 +168,13 @@ func TestBoundedWork(t *testing.T) {
 	if got, err := l.ticksN(context.Background(), Count(1e12), MaxTicks); !errors.Is(err, budget.ErrLimit) {
 		t.Errorf("log ticks = %d values, %v; want a limit error", len(got), err)
 	}
-	// a hang guard: the steps are bounded (maxLogIter), not timed
+	// The steps are bounded (maxLogIter). Calibrated, although the site is named
+	// a hang guard: it asserts after the fact on the elapsed time. CI baseline
+	// 0.0092 s (0.0275 s under -race, 0.0055 s unscaled; Heavy gates timings
+	// run); limit 2x, floor 1 s: slower is a finding to investigate.
 	d := time.Since(start)
-	testutil.Timing(t, "log ticks with a huge base (hang guard)", d, testutil.Scaled(5*time.Second))
-	if d > testutil.Scaled(5*time.Second) {
+	testutil.Timing(t, "log ticks with a huge base (hang guard)", d, testutil.Scaled(1*time.Second))
+	if d > testutil.Scaled(1*time.Second) {
 		t.Errorf("log ticks took %v", d)
 	}
 	if _, err := QuantizeInterpolator(func(float64) jsval.Value { return jsval.Null }, 1<<30); !errors.Is(err, budget.ErrLimit) {

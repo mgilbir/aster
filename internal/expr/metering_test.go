@@ -113,9 +113,15 @@ func TestEveryBuiltinIsMetered(t *testing.T) {
 	sort.Strings(names)
 	const (
 		deadline = 20 * time.Millisecond
-		// The property is that a call stops, not that it is fast: the slack
-		// is generous, and scaled for the race detector.
-		slack = 450 * time.Millisecond * testutil.RaceSlowdown
+		// The property is that a call stops, not that it is fast. The slack is
+		// a post-deadline allowance, so the 1 s floor of whole durations does
+		// not apply; the rule is 2x the measured value, rounded up to 50 ms,
+		// never below 250 ms. CI baseline of the worst call 0.052 s without
+		// -race (0.067 s under -race, 0.013 s unscaled; Heavy gates timings
+		// run, worst of 5), so 0.032 s past the 20 ms deadline: 2x is under
+		// the minimum. Scaled for the race detector: slower is a finding to
+		// investigate.
+		slack = 250 * time.Millisecond * testutil.RaceSlowdown
 		// The budgets charge what is kept (a string, an array); making it
 		// also makes garbage (the string of each element of a joined array,
 		// a buffer outgrown), a few times as much at most.

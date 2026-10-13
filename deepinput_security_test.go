@@ -54,9 +54,15 @@ var deepDepths = []int{120, 250, 500, 5000, 100000}
 
 const (
 	deepStackMB = 64
-	deepWall    = 90 * time.Second
-	deepSlow    = 20.0 // seconds
+	// deepWall is runSec's kill wall: a hang guard, not a calibrated bound.
+	deepWall = 90 * time.Second
 )
+
+// deepSlow is the most a child may spend on one render, in seconds. CI
+// baseline 7.14 s (Heavy gates timings run, oracle job, not under -race; worst
+// of 345 renders); limit 2x, floor 1 s, rounded up: slower is a finding to
+// investigate, not a limit to pad. Scaled for -race.
+var deepSlow = testutil.Scaled(15 * time.Second).Seconds()
 
 func firstLine(s string) string {
 	s, _, _ = strings.Cut(s, "\n")

@@ -2,7 +2,7 @@
 # Summarise the ASTER_TIMING lines the tests print when ASTER_TIMINGS is set
 # (internal/testutil/timing.go): per site, the worst measured value, the bound
 # in force in that run, the ratio of the two, and a proposed bound of twice the
-# worst (never below 0.5 s, where a wall clock measures the runner's scheduling,
+# worst (never below 1 s, where a wall clock measures the runner's scheduling,
 # not the code).
 #
 # Usage: scripts/timings.sh FILE... | scripts/timings.sh < log
@@ -34,7 +34,7 @@ END {
 	for (key in worst) {
 		split(key, k, "\t")
 		r = bound[key] > 0 ? worst[key] / bound[key] : 0
-		p = 2 * worst[key]; if (p < 0.5) p = 0.5
+		p = 2 * worst[key]; if (p < 1) p = 1
 		printf "%.6f\t%-72s %4s %-5s %6d %9.3f %9.3f %7.3f %9.3f  %s\n", r, substr(k[1], 1, 72), k[2], k[3], n[key], worst[key], bound[key], r, p, who[key]
 	}
 }' | sort -rn -k1,1 | cut -f2- | {

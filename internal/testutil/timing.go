@@ -25,7 +25,11 @@ func timingInit() {
 
 // Timing records, when ASTER_TIMINGS is set, what a wall-clock (or CPU-time)
 // assertion measured and the bound it is held to, so one CI run can show the
-// real value of every such bound on the runner. Call it right before the
+// real value of every such bound on the runner. The limits in the tests are
+// calibrated from such a run: 2x the CI baseline, floor 1 s (a post-deadline
+// allowance: 2x, never below 250 ms), pure hang guards exempt and labelled.
+// To re-measure, dispatch Heavy gates with timings=true, then run
+// scripts/timings.sh over the logs or timings.tsv artifacts. Call it right before the
 // comparison, with the bound in force (after any race scaling). Unset, it
 // costs one sync.Once check and a bool test.
 //

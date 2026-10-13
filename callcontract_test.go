@@ -258,7 +258,9 @@ func TestOneLoadAllowancePerCall(t *testing.T) {
 }
 
 // within fails the test when f has not returned after a generous, race-scaled
-// time: the property is that it returns, not that it is fast.
+// time: the property is that it returns, not that it is fast. The 10 s is a
+// hang guard, not a calibrated bound: it stops a stuck test, and CI measured
+// every call under it at 0.25 s or less (Heavy gates timings run).
 func within(t *testing.T, what string, f func()) {
 	t.Helper()
 	done := make(chan struct{})
@@ -488,6 +490,8 @@ func TestWithContextCancelsOneCall(t *testing.T) {
 		t.Errorf("after cancelled calls: %v", err)
 	}
 	// Nothing a cancelled call started is left running.
+	// The 5 s is a hang guard, not a calibrated bound: it only stops a wait on
+	// a goroutine that never exits (CI measured no wait at all).
 	goroutineWait := time.Now()
 	deadline := goroutineWait.Add(testutil.Scaled(5 * time.Second))
 	for runtime.NumGoroutine() > before && time.Now().Before(deadline) {

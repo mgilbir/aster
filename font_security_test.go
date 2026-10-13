@@ -164,13 +164,17 @@ func TestHostileFonts(t *testing.T) {
 		}()
 		select {
 		case msg = <-done:
-		case <-time.After(30 * time.Second * raceSlowdown):
+		case <-time.After(30 * time.Second * raceSlowdown): // hang guard, not a calibrated bound
 			msg = fmt.Sprintf("HANG > %v", 30*time.Second*raceSlowdown)
 		}
+		// SLOW bound: CI baseline 0.106 s unscaled (0.528 s under -race, 0.036 s
+		// without; Heavy gates timings run, worst of 1200 mutants); limit 2x,
+		// floor 1 s: slower is a finding to investigate.
+		const slow = 1 * time.Second * raceSlowdown
 		if msg == "" {
-			testutil.Timing(t, "font mutant (SLOW bound)", time.Since(start), 10*time.Second*raceSlowdown)
+			testutil.Timing(t, "font mutant (SLOW bound)", time.Since(start), slow)
 		}
-		if msg == "" && time.Since(start) > 10*time.Second*raceSlowdown {
+		if msg == "" && time.Since(start) > slow {
 			msg = fmt.Sprintf("SLOW %v", time.Since(start))
 		}
 		if msg != "" {

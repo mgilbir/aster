@@ -310,7 +310,7 @@ func TestBounds(t *testing.T) {
 		select {
 		case <-done:
 			testutil.Timing(t, "oversized expression terminates (hang guard)", time.Since(waitStart), testutil.Scaled(5*time.Second))
-		case <-time.After(testutil.Scaled(5 * time.Second)):
+		case <-time.After(testutil.Scaled(5 * time.Second)): // hang guard, not a calibrated bound (CI baseline 0.0001 s)
 			t.Fatalf("%s did not terminate", src)
 		}
 	}

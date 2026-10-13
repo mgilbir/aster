@@ -74,7 +74,11 @@ func runRes(t *testing.T, c resCase) {
 		t.Errorf("peak heap %.0f MiB exceeds %.0f MiB", res.PeakMB, c.maxPeakMB)
 	}
 	// CPU time, not wall time: a loaded runner stretches the second, not the
-	// first, and the race detector's slowdown is allowed for.
+	// first, and the race detector's slowdown is allowed for. Each case's
+	// maxCPU is calibrated from the Heavy gates timings run (security job, not
+	// under -race, so its CI baseline is the unscaled value): 2x the worst CPU
+	// time seen, floor 1 s, rounded up. A render that needs more is a finding
+	// to investigate, not a limit to pad.
 	if c.maxCPU > 0 {
 		testutil.TimingSeconds(t, "CPU-time (child user+sys seconds, "+c.file+")", res.CPU, c.maxCPU*raceSlowdown)
 	}
@@ -130,26 +134,28 @@ func TestResourceFlattenArrays(t *testing.T) {
 // Geo: adaptive resampling has no point budget; at a huge projection scale a
 // 515 byte Vega-Lite spec writes a 700 MB SVG path.
 func TestResourceProjectionScale(t *testing.T) {
-	runRes(t, resCase{file: "projection-scale-1e12.vl.json", kind: "vl", timeout: "1s", maxPeakMB: 1024, maxCPU: 5, wall: 120 * time.Second})
+	// maxCPU 1: CI baseline 0.26 s CPU; 2x, floor 1 s.
+	runRes(t, resCase{file: "projection-scale-1e12.vl.json", kind: "vl", timeout: "1s", maxPeakMB: 1024, maxCPU: 1, wall: 120 * time.Second})
 }
 
 // --- cancellation -----------------------------------------------------------
 
-// WithTimeout(1s) must stop the render promptly. The allowance is 5 CPU
-// seconds, several times the timeout, to tolerate polling granularity.
+// WithTimeout(1s) must stop the render promptly. The CPU allowance is per case,
+// 2x the CI baseline (CPU seconds, security job, Heavy gates timings run; floor
+// 1 s: slower is a finding to investigate), to tolerate polling granularity.
 func TestTimeoutIsHonoured(t *testing.T) {
 	for _, c := range []resCase{
-		{name: "bootstrap confidence intervals (aggregate ci0/ci1)", file: "ci-bootstrap-200k.vg.json"},
-		{name: "polynomial regression order 100", file: "poly-regression-200k.vg.json"},
-		{name: "pivot with 200k distinct columns", file: "pivot-200k-columns.vg.json"},
-		{name: "window median over a wide frame", file: "window-median-wide-frame.vg.json"},
-		{name: "legend with 90k entries", file: "legend-90k-entries.vg.json"},
-		{name: "force collide, one tick, 100k nodes", file: "force-collide-100k.vg.json"},
-		{name: "formula building 16M-character strings", file: "formula-pad-20k-rows.vg.json"},
+		{name: "bootstrap confidence intervals (aggregate ci0/ci1)", file: "ci-bootstrap-200k.vg.json", maxCPU: 3}, // CI baseline 1.07 s
+		{name: "polynomial regression order 100", file: "poly-regression-200k.vg.json", maxCPU: 3},                 // CI baseline 1.04 s
+		{name: "pivot with 200k distinct columns", file: "pivot-200k-columns.vg.json", maxCPU: 1},                  // CI baseline 0.19 s
+		{name: "window median over a wide frame", file: "window-median-wide-frame.vg.json", maxCPU: 3},             // CI baseline 1.32 s
+		{name: "legend with 90k entries", file: "legend-90k-entries.vg.json", maxCPU: 4},                           // CI baseline 1.84 s
+		{name: "force collide, one tick, 100k nodes", file: "force-collide-100k.vg.json", maxCPU: 3},               // CI baseline 1.30 s
+		{name: "formula building 16M-character strings", file: "formula-pad-20k-rows.vg.json", maxCPU: 1},          // CI baseline 0.10 s
 	} {
 		c := c
 		t.Run(c.file, func(t *testing.T) {
-			c.kind, c.timeout, c.maxCPU, c.maxPeakMB, c.wall = "vega", "1s", 5, 2048, 100*time.Second
+			c.kind, c.timeout, c.maxPeakMB, c.wall = "vega", "1s", 2048, 100*time.Second
 			t.Log(c.name)
 			runRes(t, c)
 		})
@@ -160,7 +166,8 @@ func TestTimeoutIsHonoured(t *testing.T) {
 // with the Vega render, so compile time is unbounded; params-4000 (135 KB) is
 // quadratic in the number of params.
 func TestTimeoutCoversVegaLiteCompile(t *testing.T) {
-	runRes(t, resCase{file: "params-4000.vl.json", kind: "vl2vega", timeout: "500ms", maxCPU: 2.5, maxPeakMB: 512, wall: 100 * time.Second})
+	// maxCPU 1: CI baseline 0.11 s CPU; 2x, floor 1 s.
+	runRes(t, resCase{file: "params-4000.vl.json", kind: "vl2vega", timeout: "500ms", maxCPU: 1, maxPeakMB: 512, wall: 100 * time.Second})
 }
 
 // SVGToPNG / VegaToPNG take no context: WithTimeout does not reach the
@@ -168,14 +175,15 @@ func TestTimeoutCoversVegaLiteCompile(t *testing.T) {
 // cost minutes of CPU or gigabytes (16 nested opacity groups on a
 // 64-megapixel canvas allocate a 256 MiB layer each).
 func TestResourceRasterizer(t *testing.T) {
-	t.Run("layers", func(t *testing.T) {
-		runRes(t, resCase{file: "layers-8k.svg", kind: "svgpng", timeout: "1s", maxPeakMB: 1536, maxCPU: 5, wall: 100 * time.Second})
+	// maxCPU, per case: 2x the CI baseline CPU time, floor 1 s, rounded up.
+	t.Run("layers", func(t *testing.T) { // CI baseline 0.02 s
+		runRes(t, resCase{file: "layers-8k.svg", kind: "svgpng", timeout: "1s", maxPeakMB: 1536, maxCPU: 1, wall: 100 * time.Second})
 	})
-	t.Run("use-expansion-fullcanvas", func(t *testing.T) {
-		runRes(t, resCase{file: "use-expansion-fullcanvas.svg", kind: "svgpng", timeout: "1s", maxCPU: 5, wall: 100 * time.Second})
+	t.Run("use-expansion-fullcanvas", func(t *testing.T) { // CI baseline 1.01 s
+		runRes(t, resCase{file: "use-expansion-fullcanvas.svg", kind: "svgpng", timeout: "1s", maxCPU: 3, wall: 100 * time.Second})
 	})
-	t.Run("rects-1000-fullcanvas", func(t *testing.T) {
-		runRes(t, resCase{file: "rects-1000-fullcanvas.svg", kind: "svgpng", timeout: "1s", maxCPU: 5, wall: 100 * time.Second})
+	t.Run("rects-1000-fullcanvas", func(t *testing.T) { // CI baseline 1.01 s
+		runRes(t, resCase{file: "rects-1000-fullcanvas.svg", kind: "svgpng", timeout: "1s", maxCPU: 3, wall: 100 * time.Second})
 	})
 }
 
@@ -213,8 +221,11 @@ func TestTimeoutCoversLargeVegaLiteSpecs(t *testing.T) {
 			// A deadline guard: the property is that compiling stops near
 			// the deadline (it ran for 18 s and 12 s before), so the slack is
 			// generous, and scaled for the race detector, not a claim of speed.
-			// Building and parsing the 2 MB spec is part of it.
-			limit := (time.Second + testutil.Scaled(6*time.Second)).Seconds()
+			// Building and parsing the 2 MB spec is part of it. CI baseline
+			// 1.004 s for the whole child (the 1 s timeout plus 4 ms, Heavy
+			// gates timings run, not under -race); limit 2x, floor 1 s, which
+			// is the 1 s timeout plus 2 s scaled: slower is a finding.
+			limit := (time.Second + testutil.Scaled(2*time.Second)).Seconds()
 			res, killed := runSec(t, secJob{Kind: "vl2vega", Input: spec, Timeout: "1s"}, 60*time.Second*raceSlowdown)
 			testutil.TimingSeconds(t, "large VL spec compile (child seconds, "+name+")", res.Seconds, limit)
 			if killed || res.Seconds > limit {

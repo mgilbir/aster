@@ -91,8 +91,9 @@ func TestContextBoundsCompile(t *testing.T) {
 		t.Fatalf("timeout: got %v", err)
 	}
 	el := time.Since(start)
-	testutil.Timing(t, "compile stops after a 20ms deadline", el, testutil.Scaled(2*time.Second))
-	if el > testutil.Scaled(2*time.Second) {
+	// CI baseline 0.021 s (Heavy gates timings run); limit 2x, floor 1 s: slower is a finding to investigate.
+	testutil.Timing(t, "compile stops after a 20ms deadline", el, testutil.Scaled(1*time.Second))
+	if el > testutil.Scaled(1*time.Second) {
 		t.Fatalf("compile ran %v past a 20ms deadline", el)
 	}
 }

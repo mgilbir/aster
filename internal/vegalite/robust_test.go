@@ -133,8 +133,10 @@ func TestRandomSpecsDoNotHang(t *testing.T) {
 		}
 	}
 	d := time.Since(start)
-	testutil.Timing(t, "3000 random specs compile", d, testutil.Scaled(30*time.Second))
-	if d > testutil.Scaled(30*time.Second) {
+	// CI baseline 0.285 s (1.42 s under -race, which is 0.285 s unscaled; 0.17 s
+	// without; Heavy gates timings run); limit 2x, floor 1 s: slower is a finding to investigate.
+	testutil.Timing(t, "3000 random specs compile", d, testutil.Scaled(1*time.Second))
+	if d > testutil.Scaled(1*time.Second) {
 		t.Fatalf("random specs took %v", d)
 	}
 }

@@ -160,7 +160,7 @@ func TestImageShrunkToNothing(t *testing.T) {
 		select {
 		case <-done:
 			testutil.Timing(t, "image sampling through a degenerate matrix (hang guard)", time.Since(waitStart), testutil.Scaled(10*time.Second))
-		case <-time.After(testutil.Scaled(10 * time.Second)):
+		case <-time.After(testutil.Scaled(10 * time.Second)): // hang guard, not a calibrated bound (CI baseline 0.0001 s)
 			t.Fatalf("sampling through %v did not finish in 10s", inv)
 		}
 	}

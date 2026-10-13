@@ -110,13 +110,18 @@ func TestSVGMutations(t *testing.T) {
 			var msg string
 			select {
 			case msg = <-done:
-			case <-time.After(60 * time.Second * aster.RaceSlowdownForTest):
+			case <-time.After(60 * time.Second * aster.RaceSlowdownForTest): // hang guard, not a calibrated bound
 				msg = fmt.Sprintf("HANG > %v", 60*time.Second*aster.RaceSlowdownForTest)
 			}
+			// SLOW bound: CI baseline 0.394 s unscaled for png (1.97 s under
+			// -race, 0.12 s without) and 0.019 s for pdf (0.097 s under -race;
+			// Heavy gates timings run, worst of 800 mutants each); limit 2x,
+			// floor 1 s: slower is a finding to investigate.
+			const slow = 1 * time.Second * aster.RaceSlowdownForTest
 			if msg == "" {
-				testutil.Timing(t, "svg mutant to "+target+" (SLOW bound)", time.Since(start), 15*time.Second*aster.RaceSlowdownForTest)
+				testutil.Timing(t, "svg mutant to "+target+" (SLOW bound)", time.Since(start), slow)
 			}
-			if msg == "" && time.Since(start) > 15*time.Second*aster.RaceSlowdownForTest {
+			if msg == "" && time.Since(start) > slow {
 				msg = fmt.Sprintf("SLOW %v", time.Since(start))
 			}
 			if msg != "" {

@@ -38,7 +38,9 @@ func TestVegaLiteRuns(t *testing.T) {
 	byError := map[string][]string{}
 	var worst time.Duration // Timing logs the slowest spec, not each of hundreds
 	defer func() {
-		testutil.Timing(t, "vega-lite corpus render (slowest spec; only logged)", worst, testutil.Scaled(5*time.Second))
+		// Only logged, nothing asserts it. CI baseline 0.254 s (Heavy gates
+		// timings run); limit 2x, floor 1 s.
+		testutil.Timing(t, "vega-lite corpus render (slowest spec; only logged)", worst, testutil.Scaled(1*time.Second))
 	}()
 	for _, f := range files {
 		name := strings.TrimSuffix(filepath.Base(f), ".vl.json")
