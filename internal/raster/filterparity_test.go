@@ -159,6 +159,38 @@ var filterParity = []synth{
 	{"turb-displacement", filterSVG(`<feTurbulence type="turbulence" baseFrequency="0.05" numOctaves="2" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale="5" xChannelSelector="R" yChannelSelector="G"/>`, "", alignedShapes), 0.01, 0},
 	{"turb-displacement-aa", filterSVG(`<feTurbulence type="turbulence" baseFrequency="0.05" numOctaves="2" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale="2" xChannelSelector="R" yChannelSelector="G"/>`, "", aaShapes), 0.1, 0.25},
 
+	// ---- feDiffuseLighting, feSpecularLighting ----
+	exact("light-diffuse-distant", `<feDiffuseLighting surfaceScale="3" diffuseConstant="1.2" lighting-color="#f80"><feDistantLight azimuth="45" elevation="50"/></feDiffuseLighting>`),
+	exact("light-diffuse-point", `<feDiffuseLighting surfaceScale="5" lighting-color="#8cf"><fePointLight x="90" y="60" z="30"/></feDiffuseLighting>`),
+	exact("light-diffuse-spot-no-cone", `<feDiffuseLighting surfaceScale="2" lighting-color="yellow"><feSpotLight x="10" y="140" z="80" pointsAtX="150" pointsAtY="30" specularExponent="0"/></feDiffuseLighting>`),
+	exact("light-specular-spot-cone", `<feSpecularLighting surfaceScale="4" specularConstant="1.5" specularExponent="12" lighting-color="#fff"><feSpotLight x="60" y="20" z="60" pointsAtX="100" pointsAtY="90" pointsAtZ="0" specularExponent="2" limitingConeAngle="40"/></feSpecularLighting>`),
+	exact("light-specular-distant-exponent-1", `<feSpecularLighting surfaceScale="6" specularExponent="1" lighting-color="#fd0"><feDistantLight azimuth="-30" elevation="20"/></feSpecularLighting>`),
+	exact("light-specular-point-exponent-128", `<feSpecularLighting surfaceScale="3" specularExponent="128" specularConstant="2"><fePointLight x="120" y="90" z="15"/></feSpecularLighting>`),
+	exact("light-specular-negative-scale-cone", `<feSpecularLighting surfaceScale="-8" specularExponent="5"><feSpotLight x="100" y="75" z="40" pointsAtX="100" pointsAtY="75" pointsAtZ="-1" limitingConeAngle="-20"/></feSpecularLighting>`),
+	// Invalid: usvg's dummy (a transparent result).
+	exact("light-specular-exponent-over-128", `<feSpecularLighting specularExponent="129"><feDistantLight/></feSpecularLighting>`),
+	exact("light-specular-exponent-under-1", `<feSpecularLighting specularExponent="0.5"><feDistantLight/></feSpecularLighting>`),
+	exact("light-no-source", `<feDiffuseLighting surfaceScale="3"/>`),
+	// The first light source counts.
+	exact("light-two-sources", `<feDiffuseLighting surfaceScale="3"><fePointLight x="10" y="10" z="20"/><feDistantLight azimuth="90" elevation="10"/></feDiffuseLighting>`),
+	// lighting-color: used as it is in the primitive's space; currentColor,
+	// a bad colour (white), a style declaration with alpha (dropped).
+	exact("light-srgb", `<feDiffuseLighting surfaceScale="3" lighting-color="#f80" color-interpolation-filters="sRGB"><feDistantLight azimuth="135" elevation="30"/></feDiffuseLighting>`),
+	exact("light-current-color", `<feDiffuseLighting surfaceScale="3" lighting-color="currentColor" color="#0c6"><feDistantLight azimuth="135" elevation="30"/></feDiffuseLighting>`),
+	exact("light-bad-color", `<feDiffuseLighting surfaceScale="3" lighting-color="nope"><feDistantLight azimuth="135" elevation="30"/></feDiffuseLighting>`),
+	{"light-inherit-color", filterSVG(`<feDiffuseLighting surfaceScale="3" lighting-color="inherit"><feDistantLight azimuth="135" elevation="30"/></feDiffuseLighting>`, `lighting-color="#0af"`, alignedShapes), 0.01, 0},
+	exact("light-current-color-none", `<feDiffuseLighting surfaceScale="3" lighting-color="currentColor"><feDistantLight azimuth="135" elevation="30"/></feDiffuseLighting>`),
+	exact("light-style-color", `<feDiffuseLighting surfaceScale="3" style="lighting-color: rgba(0,100,255,0.3)"><feDistantLight azimuth="200" elevation="60"/></feDiffuseLighting>`),
+	{"light-obb-units", filterSVG(`<feDiffuseLighting surfaceScale="3"><fePointLight x="0.5" y="0.5" z="0.2"/></feDiffuseLighting>`, `primitiveUnits="objectBoundingBox"`, alignedShapes), 0.01, 0},
+	{"light-turbulence-bump", filterSVG(`<feTurbulence type="fractalNoise" baseFrequency="0.04" numOctaves="2" result="n"/><feDiffuseLighting in="n" surfaceScale="2" lighting-color="white"><feDistantLight azimuth="225" elevation="45"/></feDiffuseLighting>`, "", aaShapes), 0.01, 0},
+	// On anti-aliased shapes the normals amplify the edges' small alpha
+	// differences (the gradient of the alpha times surfaceScale).
+	{"light-diffuse-distant-aa", filterSVG(`<feDiffuseLighting surfaceScale="3" diffuseConstant="1" lighting-color="#f80"><feDistantLight azimuth="45" elevation="50"/></feDiffuseLighting>`, "", aaShapes), 0.15, 0.6},
+	{"light-specular-point-aa", filterSVG(`<feSpecularLighting surfaceScale="3" specularConstant="1" specularExponent="20" lighting-color="#f80"><fePointLight x="100" y="40" z="40"/></feSpecularLighting>`, "", aaShapes), 0.15, 0.6},
+	{"light-specular-spot-aa", filterSVG(`<feSpecularLighting surfaceScale="3" specularConstant="1" specularExponent="20" lighting-color="#f80"><feSpotLight x="60" y="20" z="60" pointsAtX="100" pointsAtY="90" pointsAtZ="0" specularExponent="2" limitingConeAngle="40"/></feSpecularLighting>`, "", aaShapes), 0.15, 0.6},
+	{"light-bevel-chain-aa", filterSVG(`<feGaussianBlur stdDeviation="3" result="b"/><feSpecularLighting in="b" surfaceScale="5" specularExponent="20" lighting-color="#fff" result="s"><fePointLight x="60" y="40" z="80"/></feSpecularLighting>`+
+		`<feComposite in="s" in2="SourceGraphic" operator="in" result="c"/><feComposite in="SourceGraphic" in2="c" operator="arithmetic" k1="0" k2="1" k3="1" k4="0"/>`, "", aaShapes), 0.15, 0.6},
+
 	// ---- the filter region ----
 	// Larger than its layer (4x the canvas): cut to the layer, its
 	// primitives' sub-regions measured from the cut corner.

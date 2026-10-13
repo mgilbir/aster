@@ -77,7 +77,8 @@ type fprim struct {
 	scale    float64
 	xch, ych uint8
 
-	turb *turbSpec
+	turb  *turbSpec
+	light *lightingSpec
 }
 
 // convolveSpec is a resolved feConvolveMatrix (usvg's ConvolveMatrix).
@@ -383,6 +384,13 @@ func (r *renderer) resolveFilter(fn *node, st *state, bb rect, hasBB bool) *filt
 		case tagFeTurbulence:
 			t := turbulenceOf(fe)
 			p.turb = &t
+		case tagFeDiffuseLighting, tagFeSpecularLighting:
+			p.light = r.lightingOf(fe, fe.tag == tagFeSpecularLighting)
+			if p.light == nil {
+				p.kind = tagFeUnsupported
+				break
+			}
+			p.in1 = resolveInput(fe, aIn, prims)
 		default:
 			// The primitives not drawn yet produce a transparent image (usvg's
 			// "dummy primitive"), keeping the chain intact.

@@ -595,6 +595,8 @@ func (run *filterRun) apply(p *fprim) (fimage, bool) {
 		return run.displace(p)
 	case tagFeTurbulence:
 		return run.turbulence(p)
+	case tagFeDiffuseLighting, tagFeSpecularLighting:
+		return run.lighting(p)
 	}
 	// usvg's dummy primitive: transparent black.
 	return fimage{pix: run.blank(), region: run.region, owned: true}, true
