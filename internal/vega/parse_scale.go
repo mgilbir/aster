@@ -492,8 +492,6 @@ func parseLegend(spec jsval.Value, scope *Scope) {
 	data := scope.add(mk("collect"))
 	data.literal = []jsval.Value{plan.Datum}
 	en := plan.Entries
-	cfg := scope.config.Get("legend")
-	_ = cfg
 	params := plist(
 		"type", jsval.Str(en.Type),
 		"scale", scope.scaleRef(en.Scale),

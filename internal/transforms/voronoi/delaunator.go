@@ -1,7 +1,11 @@
 package voronoi
 
 import (
+	"context"
+	"fmt"
 	"math"
+
+	"github.com/mgilbir/aster/internal/budget"
 )
 
 // triangulation is the result of Delaunator's sweep-hull algorithm. Products
@@ -24,11 +28,23 @@ type triangulation struct {
 	ids          []int32
 	dists        []float64
 	edgeStack    [512]int32
+
+	// The typed arrays' properties named "undefined"; see undefIndex.
+	uPrev, uNext, uTri int32
+
+	meter budget.Meter // one unit per inserted point
+	err   error        // the call's end, or errDegenerate
 }
+
+// errDegenerate reports links that cycle: coordinates for which upstream
+// would not terminate.
+var errDegenerate = fmt.Errorf("%w: voronoi: degenerate triangulation (non-finite or extreme coordinates)", budget.ErrLimit)
 
 const delaunatorEpsilon = 1.0 / (1 << 52)
 
-func newTriangulation(coords []float64) *triangulation {
+// newTriangulation triangulates coords. Its error is the context's, or
+// errDegenerate.
+func newTriangulation(ctx context.Context, coords []float64) (*triangulation, error) {
 	n := len(coords) >> 1
 	maxTriangles := max(2*n-5, 0)
 	t := &triangulation{
@@ -43,8 +59,22 @@ func newTriangulation(coords []float64) *triangulation {
 		dists:     make([]float64, n),
 	}
 	t.hullHash = make([]int32, t.hashSize)
+	t.uPrev, t.uNext, t.uTri = undefIndex, undefIndex, undefIndex
+	t.meter = budget.NewMeter(ctx)
 	t.build()
-	return t
+	if t.err != nil {
+		return nil, t.err
+	}
+	return t, nil
+}
+
+// coordAt is point i's coordinates, NaN (undefined, in arithmetic) for an
+// index upstream holds as undefined: -1 for an unset seed, or undefIndex.
+func coordAt(coords []float64, i int32) (float64, float64) {
+	if i < 0 {
+		return math.NaN(), math.NaN()
+	}
+	return coords[2*i], coords[2*i+1]
 }
 
 func dist2(ax, ay, bx, by float64) float64 {
@@ -79,10 +109,12 @@ func (t *triangulation) build() {
 	cx := (minX + maxX) / 2
 	cy := (minY + maxY) / 2
 
-	var i0, i1, i2 int32
-
 	// Seed: the point nearest the bbox centre, its nearest neighbour, and the
-	// third point giving the smallest circumcircle.
+	// third point giving the smallest circumcircle. Upstream declares the
+	// three without a value: when no distance is finite (coordinates whose
+	// squares overflow, NaN) one stays undefined, its coordinates read as
+	// NaN, and the input is taken for collinear. -1 stands for undefined.
+	i0, i1, i2 := int32(-1), int32(-1), int32(-1)
 	minDist := math.Inf(1)
 	for i := 0; i < n; i++ {
 		d := dist2(cx, cy, coords[2*i], coords[2*i+1])
@@ -91,7 +123,7 @@ func (t *triangulation) build() {
 			minDist = d
 		}
 	}
-	i0x, i0y := coords[2*i0], coords[2*i0+1]
+	i0x, i0y := coordAt(coords, i0)
 
 	minDist = math.Inf(1)
 	for i := 0; i < n; i++ {
@@ -104,7 +136,7 @@ func (t *triangulation) build() {
 			minDist = d
 		}
 	}
-	i1x, i1y := coords[2*i1], coords[2*i1+1]
+	i1x, i1y := coordAt(coords, i1)
 
 	minRadius := math.Inf(1)
 	for i := 0; i < n; i++ {
@@ -117,7 +149,7 @@ func (t *triangulation) build() {
 			minRadius = r
 		}
 	}
-	i2x, i2y := coords[2*i2], coords[2*i2+1]
+	i2x, i2y := coordAt(coords, i2)
 
 	if minRadius == math.Inf(1) {
 		// All points collinear (or coincident): order them along the line and
@@ -172,12 +204,14 @@ func (t *triangulation) build() {
 	for i := range hullHash {
 		hullHash[i] = -1
 	}
-	hullHash[t.hashKey(i0x, i0y)] = i0
-	hullHash[t.hashKey(i1x, i1y)] = i1
-	hullHash[t.hashKey(i2x, i2y)] = i2
+	t.setHash(i0x, i0y, i0)
+	t.setHash(i1x, i1y, i1)
+	t.setHash(i2x, i2y, i2)
 
 	t.trianglesLen = 0
-	t.addTriangle(i0, i1, i2, -1, -1, -1)
+	if _, ok := t.addTriangle(i0, i1, i2, -1, -1, -1); !ok {
+		return
+	}
 
 	var xp, yp float64
 	for k := 0; k < n; k++ {
@@ -194,25 +228,37 @@ func (t *triangulation) build() {
 			continue
 		}
 
-		// Find a visible hull edge using the angular hash.
-		start := int32(0)
-		key := t.hashKey(x, y)
-		for j := 0; j < t.hashSize; j++ {
-			start = hullHash[(key+j)%t.hashSize]
-			if start != -1 && start != hullNext[start] {
-				break
-			}
-		}
-		if start < 0 {
-			continue // only reachable with non-finite coordinates
+		if t.err = t.meter.Work(1); t.err != nil {
+			return
 		}
 
-		start = hullPrev[start]
+		// Find a visible hull edge using the angular hash. A NaN key reads
+		// hullHash[NaN], undefined, at every probe.
+		start := undefIndex
+		if key, ok := t.hashKey(x, y); ok {
+			for j := 0; j < t.hashSize; j++ {
+				start = hullHash[(key+j)%t.hashSize]
+				if start != -1 && start != hullNext[start] {
+					break
+				}
+			}
+		}
+
+		// Every walk below follows hull links, which non-finite coordinates
+		// can leave inconsistent; upstream would walk such a cycle forever.
+		// A walk longer than the hull is one, and the input is degenerate.
+		start = t.prev(start)
 		e := start
 		var q int32
-		for {
-			q = hullNext[e]
-			if !(orient2d(x, y, coords[2*e], coords[2*e+1], coords[2*q], coords[2*q+1]) >= 0) {
+		for steps := 0; ; steps++ {
+			if steps > n {
+				t.degenerate()
+				return
+			}
+			q = t.next(e)
+			ex, ey := t.coord(e)
+			qx, qy := t.coord(q)
+			if !(orient2d(x, y, ex, ey, qx, qy) >= 0) {
 				break
 			}
 			e = q
@@ -225,52 +271,72 @@ func (t *triangulation) build() {
 			continue // likely a near-duplicate point
 		}
 
-		tri := t.addTriangle(e, i, hullNext[e], -1, -1, hullTri[e])
-
+		tri, ok := t.addTriangle(e, i, t.next(e), -1, -1, t.tri(e))
+		if !ok {
+			return
+		}
 		hullTri[i] = t.legalize(tri + 2)
-		hullTri[e] = int32(tri)
+		t.setTri(e, int32(tri))
 		hullSize++
 
-		// Walk forward through the hull, adding triangles. The step bound
-		// only matters for degenerate non-finite input, where the walk could
-		// otherwise cycle.
-		nn := hullNext[e]
-		for steps := 0; steps <= n; steps++ {
-			q = hullNext[nn]
-			if !(orient2d(x, y, coords[2*nn], coords[2*nn+1], coords[2*q], coords[2*q+1]) < 0) {
+		// Walk forward through the hull, adding triangles.
+		nn := t.next(e)
+		for steps := 0; ; steps++ {
+			if steps > n {
+				t.degenerate()
+				return
+			}
+			q = t.next(nn)
+			nx, ny := t.coord(nn)
+			qx, qy := t.coord(q)
+			if !(orient2d(x, y, nx, ny, qx, qy) < 0) {
 				break
 			}
-			tri = t.addTriangle(nn, i, q, hullTri[i], -1, hullTri[nn])
+			if tri, ok = t.addTriangle(nn, i, q, hullTri[i], -1, t.tri(nn)); !ok {
+				return
+			}
 			hullTri[i] = t.legalize(tri + 2)
-			hullNext[nn] = nn
+			t.setNext(nn, nn)
 			hullSize--
 			nn = q
 		}
 
 		// Walk backward from the other side.
 		if e == start {
-			for steps := 0; steps <= n; steps++ {
-				q = hullPrev[e]
-				if !(orient2d(x, y, coords[2*q], coords[2*q+1], coords[2*e], coords[2*e+1]) < 0) {
+			for steps := 0; ; steps++ {
+				if steps > n {
+					t.degenerate()
+					return
+				}
+				q = t.prev(e)
+				qx, qy := t.coord(q)
+				ex, ey := t.coord(e)
+				if !(orient2d(x, y, qx, qy, ex, ey) < 0) {
 					break
 				}
-				tri = t.addTriangle(q, i, e, -1, hullTri[e], hullTri[q])
+				if tri, ok = t.addTriangle(q, i, e, -1, t.tri(e), t.tri(q)); !ok {
+					return
+				}
 				t.legalize(tri + 2)
-				hullTri[q] = int32(tri)
-				hullNext[e] = e
+				t.setTri(q, int32(tri))
+				t.setNext(e, e)
 				hullSize--
 				e = q
 			}
 		}
+		if t.err != nil {
+			return
+		}
 
 		t.hullStart = e
-		hullPrev[i] = e
-		hullNext[e] = i
-		hullPrev[nn] = i
-		hullNext[i] = nn
+		hullPrev[i] = stored(e)
+		t.setPrev(nn, i)
+		t.setNext(e, i)
+		hullNext[i] = stored(nn)
 
-		hullHash[t.hashKey(x, y)] = i
-		hullHash[t.hashKey(coords[2*e], coords[2*e+1])] = e
+		t.setHash(x, y, i)
+		ex, ey := t.coord(e)
+		t.setHash(ex, ey, e)
 	}
 
 	if hullSize < 0 {
@@ -279,8 +345,8 @@ func (t *triangulation) build() {
 	t.hull = make([]int32, hullSize)
 	e := t.hullStart
 	for i := 0; i < hullSize; i++ {
-		t.hull[i] = e
-		e = hullNext[e]
+		t.hull[i] = stored(e)
+		e = t.next(e)
 	}
 
 	t.triangles = t.triangles[:t.trianglesLen]
@@ -297,12 +363,103 @@ func pseudoAngle(dx, dy float64) float64 {
 	return (1 + p) / 4
 }
 
-func (t *triangulation) hashKey(x, y float64) int {
+func (t *triangulation) hashKey(x, y float64) (int, bool) {
 	f := math.Floor(pseudoAngle(x-t.cx, y-t.cy) * float64(t.hashSize))
 	if f != f || t.hashSize == 0 {
+		return 0, false // NaN: upstream indexes the hash with NaN
+	}
+	return int(f) % t.hashSize, true
+}
+
+// setHash is hullHash[_hashKey(x, y)] = i, which a NaN key makes a no-op.
+func (t *triangulation) setHash(x, y float64, i int32) {
+	if k, ok := t.hashKey(x, y); ok {
+		t.hullHash[k] = i
+	}
+}
+
+// undefIndex stands for a hull index upstream holds as undefined: hullPrev
+// read at -1, or the hash probed with a NaN key. Its coordinates are NaN,
+// and a typed array stores it as 0. Reading or writing a typed array AT
+// undefined uses an ordinary property named "undefined" (it is not a
+// numeric index), which keeps whatever is written there: hullNext[undefined]
+// = i is read back. uPrev, uNext and uTri hold those properties (undefIndex
+// while unset).
+const undefIndex int32 = -2
+
+// stored is a hull index as a Uint32Array stores it.
+func stored(i int32) int32 {
+	if i == undefIndex {
 		return 0
 	}
-	return int(f) % t.hashSize
+	return i
+}
+
+func (t *triangulation) coord(i int32) (float64, float64) { return coordAt(t.coords, i) }
+
+func (t *triangulation) prev(i int32) int32 {
+	switch {
+	case i >= 0:
+		return t.hullPrev[i]
+	case i == undefIndex:
+		return t.uPrev
+	}
+	return undefIndex // hullPrev[-1]
+}
+
+func (t *triangulation) next(i int32) int32 {
+	switch {
+	case i >= 0:
+		return t.hullNext[i]
+	case i == undefIndex:
+		return t.uNext
+	}
+	return undefIndex
+}
+
+func (t *triangulation) tri(i int32) int32 {
+	switch {
+	case i >= 0:
+		return t.hullTri[i]
+	case i == undefIndex:
+		return t.uTri
+	}
+	return undefIndex
+}
+
+func (t *triangulation) setPrev(i, v int32) {
+	switch {
+	case i >= 0:
+		t.hullPrev[i] = stored(v)
+	case i == undefIndex:
+		t.uPrev = v
+	}
+}
+
+func (t *triangulation) setNext(i, v int32) {
+	switch {
+	case i >= 0:
+		t.hullNext[i] = stored(v)
+	case i == undefIndex:
+		t.uNext = v
+	}
+}
+
+func (t *triangulation) setTri(i, v int32) {
+	switch {
+	case i >= 0:
+		t.hullTri[i] = stored(v)
+	case i == undefIndex:
+		t.uTri = v
+	}
+}
+
+// degenerate records that a walk over the triangulation's links overran its
+// size: the links form a cycle upstream would follow forever.
+func (t *triangulation) degenerate() {
+	if t.err == nil {
+		t.err = errDegenerate
+	}
 }
 
 // legalize flips edges that violate the Delaunay condition, using a fixed
@@ -311,6 +468,10 @@ func (t *triangulation) legalize(a int) int32 {
 	triangles, halfedges, coords := t.triangles, t.halfedges, t.coords
 	i := 0
 	ar := 0
+	// In exact arithmetic each flip adds an edge at the new point, so a
+	// legalization flips fewer edges than there are half-edges; past that
+	// the links are cycling, which upstream would follow forever.
+	flips := 0
 	for {
 		b := int(halfedges[a])
 		a0 := a - a%3
@@ -341,6 +502,10 @@ func (t *triangulation) legalize(a int) int32 {
 			coords[2*p1], coords[2*p1+1])
 
 		if illegal {
+			if flips++; flips > len(triangles) {
+				t.degenerate()
+				return int32(ar)
+			}
 			triangles[a] = p1
 			triangles[b] = p0
 
@@ -350,12 +515,16 @@ func (t *triangulation) legalize(a int) int32 {
 			// half-edge reference kept for that hull edge.
 			if hbl == -1 {
 				e := t.hullStart
-				for {
-					if int(t.hullTri[e]) == bl {
-						t.hullTri[e] = int32(a)
+				for steps := 0; ; steps++ {
+					if steps > len(t.hullPrev) {
+						t.degenerate()
+						return int32(ar)
+					}
+					if int(t.tri(e)) == bl {
+						t.setTri(e, int32(a))
 						break
 					}
-					e = t.hullPrev[e]
+					e = t.prev(e)
 					if e == t.hullStart {
 						break
 					}
@@ -383,22 +552,32 @@ func (t *triangulation) legalize(a int) int32 {
 }
 
 func (t *triangulation) link(a, b int) {
-	t.halfedges[a] = int32(b)
-	if b != -1 {
+	t.halfedges[a] = stored(int32(b))
+	switch {
+	case b >= 0:
 		t.halfedges[b] = int32(a)
 	}
+	// b undefined: the back link goes to a property named "undefined" that
+	// nothing reads.
 }
 
-func (t *triangulation) addTriangle(i0, i1, i2 int32, a, b, c int32) int {
+// addTriangle reports false, and the triangulation degenerate, when the
+// triangle does not fit: a valid triangulation of n points has at most
+// 2n-5 triangles (upstream would drop the writes past its typed arrays).
+func (t *triangulation) addTriangle(i0, i1, i2 int32, a, b, c int32) (int, bool) {
 	n := t.trianglesLen
-	t.triangles[n] = i0
-	t.triangles[n+1] = i1
-	t.triangles[n+2] = i2
+	if n+3 > len(t.triangles) {
+		t.degenerate()
+		return 0, false
+	}
+	t.triangles[n] = stored(i0)
+	t.triangles[n+1] = stored(i1)
+	t.triangles[n+2] = stored(i2)
 	t.link(n, int(a))
 	t.link(n+1, int(b))
 	t.link(n+2, int(c))
 	t.trianglesLen += 3
-	return n
+	return n, true
 }
 
 func inCircle(ax, ay, bx, by, cx, cy, px, py float64) bool {

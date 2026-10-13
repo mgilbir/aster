@@ -2,6 +2,7 @@ package expr
 
 import (
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -94,7 +95,7 @@ func fromTagged(v any) (jsval.Value, error) {
 		}
 		if re, ok := x["re"]; ok {
 			pair := re.([]any)
-			p, err := jsval.NewPattern(pair[0].(string), pair[1].(string))
+			p, err := jsval.NewPattern(context.Background(), pair[0].(string), pair[1].(string), unpaid)
 			if err != nil {
 				return jsval.Undefined, err
 			}

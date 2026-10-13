@@ -55,22 +55,23 @@ func (e *Env) AxisTicks(in AxisTicksInput) ([]jsval.Value, error) {
 			tally = jsval.Int(10)
 		}
 	}
-	count, err := e.TickCount(in.Scale, tally, in.MinStep)
+	count, err := e.tickCount(in.Scale, tally, in.MinStep)
 	if err != nil {
 		return nil, err
 	}
-	var format func(jsval.Value) jsval.Value
+	var format scale.Format
 	if in.Format != nil {
 		custom := in.Format
 		format = func(v jsval.Value) jsval.Value { return jsval.Str(custom(v)) }
-	} else if format, err = e.tickFormatValue(in.Scale, count, in.FormatSpecifier, in.FormatType, hasValues); err != nil {
+	} else if format, err = scale.TickFormat(e.ctx(), e.locale(), in.Scale, count, in.FormatSpecifier, in.FormatType, hasValues); err != nil {
 		return nil, err
 	}
 	if hasValues {
-		values = ValidTicks(in.Scale, values, count)
-	} else if values, err = TickValues(in.Scale, count); err != nil {
+		values = scale.ValidTicks(in.Scale, values, count)
+	} else if values, err = scale.TickValues(e.ctx(), in.Scale, count); err != nil {
 		return nil, err
 	}
+	meter := e.labelMeter()
 
 	denom := float64(len(values) - 1)
 	if len(values) <= 1 { // `values.length - 1 || 1`
@@ -78,11 +79,15 @@ func (e *Env) AxisTicks(in AxisTicksInput) ([]jsval.Value, error) {
 	}
 	ticks := make([]jsval.Value, 0, len(values)+1)
 	for i, v := range values {
+		label := format(v)
+		if err := meter.charge(label); err != nil {
+			return nil, err
+		}
 		ticks = append(ticks, objv(
 			"index", float64(i)/denom,
 			"tickIndex", i,
 			"value", v,
-			"label", format(v),
+			"label", label,
 		))
 	}
 	if in.Extra && len(ticks) > 0 {
@@ -137,48 +142,58 @@ func (e *Env) LegendEntries(in LegendEntriesInput) ([]jsval.Value, error) {
 	if countArg.IsNullish() {
 		countArg = jsval.Int(5)
 	}
-	count, err := e.TickCount(s, countArg, in.MinStep)
+	count, err := e.tickCount(s, countArg, in.MinStep)
 	if err != nil {
 		return nil, err
 	}
 	hasValues := in.Values.IsTruthy()
 	lskip := hasValues || typ == symbolLegend
-	format, err := e.LabelFormat(s, count, typ, in.FormatSpecifier, in.FormatType, lskip)
+	format, err := scale.LabelFormat(e.ctx(), e.locale(), s, count, typ, in.FormatSpecifier, in.FormatType, lskip)
 	if err != nil {
 		return nil, err
 	}
-	var set LabelValueSet
+	var set scale.Labels
 	if hasValues {
 		if !in.Values.IsArr() {
 			return nil, errors.New("LegendEntries: values must be an array")
 		}
-		set = LabelValueSet{Values: in.Values.Items(), Max: jsval.Undefined}
-	} else if set, err = LabelValues(s, count); err != nil {
+		set = scale.Labels{Values: in.Values.Items()}
+	} else if set, err = scale.LabelValues(e.ctx(), s, count); err != nil {
 		return nil, err
 	}
 	values := set.Values
-	if len(values) > maxTicks {
-		return nil, fmt.Errorf("%w: legend of %d entries exceeds the limit of %d", budget.ErrLimit, len(values), maxTicks)
+	if len(values) > scale.MaxTicks {
+		return nil, fmt.Errorf("%w: legend of %d entries exceeds the limit of %d", budget.ErrLimit, len(values), scale.MaxTicks)
 	}
+	label := e.chargedLabels(format)
 
 	switch typ {
 	case symbolLegend:
-		return e.symbolEntries(in, s, format, set, limit)
+		return e.symbolEntries(in, s, label, set, limit)
 	case gradientLegend:
-		return gradientEntries(s, format, set, hasValues), nil
+		return gradientEntries(s, label, set, hasValues)
 	}
-	return discreteEntries(s, format, set), nil
+	return discreteEntries(s, label, set)
 }
 
-func (e *Env) symbolEntries(in LegendEntriesInput, s scale.Scale, format LabelFormatFunc, set LabelValueSet, limit float64) ([]jsval.Value, error) {
+// chargedLabels is format with each label's text charged to the ledger.
+func (e *Env) chargedLabels(format scale.LabelFormatter) func(v jsval.Value, i int, l scale.Labels) (jsval.Value, error) {
+	meter := e.labelMeter()
+	return func(v jsval.Value, i int, l scale.Labels) (jsval.Value, error) {
+		label := format(v, i, l)
+		return label, meter.charge(label)
+	}
+}
+
+type labelFunc = func(v jsval.Value, i int, l scale.Labels) (jsval.Value, error)
+
+func (e *Env) symbolEntries(in LegendEntriesInput, s scale.Scale, format labelFunc, set scale.Labels, limit float64) ([]jsval.Value, error) {
 	values := set.Values
-	items := values
-	max := set.Max // slicing drops the `max` property of the array
+	items := set // slicing drops the `max` property of the array
 	ellipsis := false
 	if limit != 0 && !math.IsNaN(limit) && float64(len(values)) > limit {
 		e.warn("Symbol legend count exceeds limit, filtering items.")
-		items = values[:sliceEnd(len(values), limit-1)]
-		max = jsval.Undefined
+		items = scale.Labels{Values: values[:sliceEnd(len(values), limit-1)]}
 		ellipsis = true
 	}
 
@@ -190,16 +205,15 @@ func (e *Env) symbolEntries(in LegendEntriesInput, s scale.Scale, format LabelFo
 		// the same (an implicit ordinal domain grows by it).
 		if !in.Values.IsTruthy() {
 			first := jsval.Undefined
-			if len(items) > 0 {
-				first = items[0]
+			if len(items.Values) > 0 {
+				first = items.Values[0]
 			}
-			if r := s.Apply(first); r.IsNum() && r.NumValue() == 0 && len(items) > 0 {
-				items = items[1:]
-				max = jsval.Undefined
+			if r := s.Apply(first); r.IsNum() && r.NumValue() == 0 && len(items.Values) > 0 {
+				items = scale.Labels{Values: items.Values[1:]}
 			}
 		}
 		// compute the size offset for legend entries
-		for _, v := range items {
+		for _, v := range items.Values {
 			offset = jsMax(offset, jsval.ToNumber(size(v)))
 		}
 	} else {
@@ -211,11 +225,15 @@ func (e *Env) symbolEntries(in LegendEntriesInput, s scale.Scale, format LabelFo
 		size = func(jsval.Value) jsval.Value { return jsval.Num(offset) }
 	}
 
-	out := make([]jsval.Value, 0, len(items)+1)
-	for i, v := range items {
+	out := make([]jsval.Value, 0, len(items.Values)+1)
+	for i, v := range items.Values {
+		label, err := format(v, i, items)
+		if err != nil {
+			return nil, err
+		}
 		out = append(out, objv(
 			"index", i,
-			"label", format(v, i, items, max),
+			"label", label,
 			"value", v,
 			"offset", offset,
 			"size", size(v),
@@ -237,7 +255,7 @@ func (e *Env) symbolEntries(in LegendEntriesInput, s scale.Scale, format LabelFo
 	return out, nil
 }
 
-func gradientEntries(s scale.Scale, format LabelFormatFunc, set LabelValueSet, hasValues bool) []jsval.Value {
+func gradientEntries(s scale.Scale, format labelFunc, set scale.Labels, hasValues bool) ([]jsval.Value, error) {
 	values := set.Values
 	domain := s.Domain()
 	d0, dn := domain0(domain), peekValue(domain)
@@ -247,18 +265,22 @@ func gradientEntries(s scale.Scale, format LabelFormatFunc, set LabelValueSet, h
 	// domain end points instead (vega#1364); dates compare by identity
 	if len(values) < 3 && !hasValues && !sameEndpoint(domain) {
 		values = []jsval.Value{d0, dn}
-		set.Max = jsval.Undefined
+		set = scale.Labels{Values: values}
 	}
 	out := make([]jsval.Value, len(values))
 	for i, v := range values {
+		label, err := format(v, i, set)
+		if err != nil {
+			return nil, err
+		}
 		out[i] = objv(
 			"index", i,
-			"label", format(v, i, values, set.Max),
+			"label", label,
 			"value", v,
 			"perc", fraction(v),
 		)
 	}
-	return out
+	return out, nil
 }
 
 // sameEndpoint is `domain[0] === peek(domain)`.
@@ -273,10 +295,11 @@ func sameEndpoint(domain []jsval.Value) bool {
 	return jsval.SameRef(a, b)
 }
 
-func discreteEntries(s scale.Scale, format LabelFormatFunc, set LabelValueSet) []jsval.Value {
+func discreteEntries(s scale.Scale, format labelFunc, set scale.Labels) ([]jsval.Value, error) {
 	values := set.Values
 	last := len(values) - 1
-	fraction := LabelFraction(s)
+	frac := scale.LabelFraction(s)
+	fraction := func(v jsval.Value) float64 { return frac(jsval.ToNumber(v)) }
 	out := make([]jsval.Value, len(values))
 	for i, v := range values {
 		perc := jsval.Value(jsval.Int(0))
@@ -287,15 +310,19 @@ func discreteEntries(s scale.Scale, format LabelFormatFunc, set LabelValueSet) [
 		if i != last {
 			perc2 = jsval.Num(fraction(values[i+1]))
 		}
+		label, err := format(v, i, set)
+		if err != nil {
+			return nil, err
+		}
 		out[i] = objv(
 			"index", i,
-			"label", format(v, i, values, set.Max),
+			"label", label,
 			"value", v,
 			"perc", perc,
 			"perc2", perc2,
 		)
 	}
-	return out
+	return out, nil
 }
 
 // sliceEnd is where Array.prototype.slice(0, end) stops: end is truncated

@@ -1,6 +1,7 @@
 package scale
 
 import (
+	"context"
 	"math"
 	"testing"
 	"time"
@@ -274,7 +275,10 @@ func TestNewInZone(t *testing.T) {
 	}
 	day := 24 * 3600e3
 	s.SetDomain([]jsval.Value{jsval.Timestamp(0), jsval.Timestamp(3 * day)})
-	ticks := s.(Ticker).Ticks(Count(3))
+	ticks, err := s.(Ticker).Ticks(context.Background(), Count(3))
+	if err != nil {
+		t.Fatal(err)
+	}
 	// Local midnights in IST (UTC+5:30) fall at 18:30 UTC of the previous day.
 	if len(ticks) == 0 || math.Mod(ticks[0]+5.5*3600e3, day) != 0 {
 		t.Errorf("ticks are not local midnights: %v", ticks)
@@ -289,23 +293,22 @@ func TestTickCountFor(t *testing.T) {
 	s := NewLinear()
 	s.SetDomain(nums(0, 100))
 	s.SetType(TypeLinear)
-	ms := 30.0
-	tc, err := TickCountFor(s, jsval.Num(10), &ms)
+	tc, err := TickCountFor(s, jsval.Num(10), jsval.Num(30))
 	if err != nil || !tc.HasN || tc.N != 3 { // capped to floor(100/30)+1 = 4, then to 3 because tickStep(0,100,4) = 25 < 30
 		t.Errorf("tickCount = %+v %v", tc, err)
 	}
-	tc, _ = TickCountFor(s, jsval.Undefined, nil)
+	tc, _ = TickCountFor(s, jsval.Undefined, jsval.Undefined)
 	if tc.HasN || tc.Interval != nil {
 		t.Error("undefined count stays unspecified")
 	}
-	if _, err := TickCountFor(s, jsval.Str("day"), nil); err == nil {
+	if _, err := TickCountFor(s, jsval.Str("day"), jsval.Undefined); err == nil {
 		t.Error("interval strings are only for time scales")
 	}
 	u, _ := New(TypeUTC)
 	o := jsval.NewObject(2)
 	o.Set("interval", jsval.Str("month"))
 	o.Set("step", jsval.Num(3))
-	tc, err = TickCountFor(u, jsval.Obj(o), nil)
+	tc, err = TickCountFor(u, jsval.Obj(o), jsval.Undefined)
 	if err != nil || tc.Interval == nil {
 		t.Errorf("interval count = %+v %v", tc, err)
 	}

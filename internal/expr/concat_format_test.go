@@ -31,13 +31,13 @@ func TestConcatChainFormat(t *testing.T) {
 			t.Errorf("%s = %v, %v; want %q", src, v, err, want)
 		}
 	}
-	// The charge is that of the nested additions: 601 and 602 bytes, the two
-	// results over the free 512.
+	// The charge is the buffer the result is built in: the 602 bytes once,
+	// within the slack of its growth.
 	b := NewStringBudget(1 << 20)
 	if _, err := evalBudget(t, "pad('x', 300) + format(1, '') + pad('y', 300) + format(2, '')", b); err != nil {
 		t.Fatal(err)
 	}
-	if got := int64(1<<20) - b.left; got != 601+602 {
-		t.Errorf("charged %d bytes, want %d", got, 601+602)
+	if got := int64(1<<20) - b.left; got < 602 || got > 2*602 {
+		t.Errorf("charged %d bytes, want between 602 and %d", got, 2*602)
 	}
 }

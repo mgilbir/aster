@@ -17,6 +17,7 @@ import (
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/oracle"
 	"github.com/mgilbir/aster/internal/svgdiff"
+	"github.com/mgilbir/aster/internal/testutil"
 )
 
 // The differential fuzzer. Skipped unless ASTER_FUZZ is set to a mutation
@@ -286,7 +287,7 @@ func renderGuarded(f func() (string, error)) (string, error) {
 	select {
 	case r := <-ch:
 		return r.s, r.err
-	case <-time.After(60 * time.Second):
+	case <-time.After(testutil.Scaled(60 * time.Second)):
 		return "", fmt.Errorf("render timed out (watchdog): did not return in 60s")
 	}
 }
@@ -323,7 +324,7 @@ func fuzzPool(t *testing.T) []baseSpec {
 				} else {
 					_, rerr = pg.VegaToSVG(spec, asUpstream)
 				}
-				if rerr != nil || time.Since(t0) > 250*time.Millisecond {
+				if rerr != nil || time.Since(t0) > testutil.Scaled(250*time.Millisecond) {
 					continue
 				}
 				files = append(files, f)

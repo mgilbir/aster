@@ -1,0 +1,5 @@
+{"width":10,"height":10,"data":[
+ {"name":"a","values":[],"transform":[{"type":"extent","field":"v","signal":"ea"}]},
+ {"name":"b","values":[{"v":1},{"v":"Infinity"}],"transform":[{"type":"extent","field":"v","signal":"eb"}]},
+ {"name":"c","values":[{"v":-1e400}],"transform":[{"type":"extent","field":{"expr":"datum.v"},"signal":"ec"}]},
+ {"name":"d","values":[{"v":"x"}],"transform":[{"type":"extent","field":"a\\.b","signal":"ed"}]}]}

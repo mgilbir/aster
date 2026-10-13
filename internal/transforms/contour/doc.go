@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsmath"
 )
 
@@ -35,7 +36,17 @@ const (
 
 var (
 	errInvalidSize = errors.New("contour: invalid size")
-	errTooLarge    = fmt.Errorf("contour: raster larger than %d cells", MaxGridCells)
+	errTooLarge    = fmt.Errorf("%w: contour: raster larger than %d cells", budget.ErrLimit, MaxGridCells)
+)
+
+// Bytes the ledger is charged for what the transforms build: a grid value
+// (float64), a value of a grid's jsval array, and a vertex of an output
+// geometry as a jsval pair ([x, y]: the slice element, the box and the two
+// values).
+const (
+	gridValueBytes  = 8
+	jsValueBytes    = 16
+	pointValueBytes = 16 + 24 + 2*16
 )
 
 func checkCtx(ctx context.Context) error {

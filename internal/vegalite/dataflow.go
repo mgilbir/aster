@@ -28,7 +28,7 @@ func (t dataSourceType) String() string {
 }
 
 // sourceGetter is what a model's outputNodes map holds (an OutputNode or FacetNode).
-type sourceGetter interface{ getSource() string }
+type sourceGetter interface{ getSource() Value }
 
 type dfNode interface {
 	base() *dfBase
@@ -42,37 +42,28 @@ type dfBase struct {
 	// cc is the compilation the node belongs to; setParent copies it from the parent.
 	cc   *compileCtx
 	self dfNode
-	kids []dfNode
+	// kids is upstream's `_children` array (see kidList). Only this file's
+	// methods change it.
+	kids kidList
 	par  dfNode
-	// kidSet indexes kids once there are many, so membership is not a scan
-	// (a spec with a hundred thousand layers adds that many children to one
-	// node). Only this file's methods change kids, and they keep it in step.
-	kidSet map[dfNode]struct{}
 }
 
-// manyKids is the child count from which kidSet is kept.
-const manyKids = 32
-
-func (b *dfBase) hasChild(c dfNode) bool {
-	if b.kidSet != nil {
-		_, ok := b.kidSet[c]
-		return ok
+// ccOf is the compilation n belongs to (nil for no node).
+func ccOf(n dfNode) *compileCtx {
+	if n == nil {
+		return nil
 	}
-	return b.indexOf(c) >= 0
+	return n.base().cc
 }
 
-// noteAdded keeps kidSet in step after c joined kids.
-func (b *dfBase) noteAdded(c dfNode) {
-	switch {
-	case b.kidSet != nil:
-		b.kidSet[c] = struct{}{}
-	case len(b.kids) > manyKids:
-		b.kidSet = make(map[dfNode]struct{}, 2*len(b.kids))
-		for _, k := range b.kids {
-			b.kidSet[k] = struct{}{}
-		}
-	}
-}
+func (b *dfBase) hasChild(c dfNode) bool { return b.kids.has(c) }
+
+// children returns the children in order; see kidList.all for when the
+// slice is live.
+func (b *dfBase) children() []dfNode { return b.kids.all() }
+
+// child returns the i-th child.
+func (b *dfBase) child(i int) dfNode { return b.kids.at(i) }
 
 func (b *dfBase) base() *dfBase { return b }
 
@@ -89,52 +80,35 @@ func (b *dfBase) setParent(p dfNode) {
 	}
 }
 
-func (b *dfBase) numChildren() int { return len(b.kids) }
+func (b *dfBase) numChildren() int { return b.kids.len() }
 
-func (b *dfBase) indexOf(c dfNode) int {
-	for i, k := range b.kids {
-		if k == c {
-			return i
-		}
-	}
-	return -1
-}
+func (b *dfBase) indexOf(c dfNode) int { return b.kids.indexOf(c) }
 
 func (b *dfBase) addChild(c dfNode, loc int) {
+	cc := b.cc
+	cc.work(1)
 	if b.hasChild(c) {
+		cc.warn(msgAddSameChildTwice)
 		return
 	}
-	defer b.noteAdded(c)
-	if loc >= 0 {
-		if loc > len(b.kids) {
-			loc = len(b.kids)
-		}
-		b.kids = append(b.kids, nil)
-		copy(b.kids[loc+1:], b.kids[loc:])
-		b.kids[loc] = c
-		return
+	n := b.kids.len()
+	if loc < 0 || loc > n {
+		loc = n
 	}
-	b.kids = append(b.kids, c)
+	b.kids.insert(loc, c)
 }
 
 // removeChild mirrors Array.prototype.splice(indexOf(x), 1), including its
 // quirk that a missing child (index -1) removes the last one.
 func (b *dfBase) removeChild(c dfNode) int {
-	loc := -1
-	if b.hasChild(c) {
-		loc = b.indexOf(c)
-	}
+	cc := b.cc
+	cc.work(1)
+	loc := b.indexOf(c)
 	switch {
 	case loc >= 0:
-		b.kids = append(b.kids[:loc], b.kids[loc+1:]...)
-		if b.kidSet != nil {
-			delete(b.kidSet, c)
-		}
-	case len(b.kids) > 0:
-		if b.kidSet != nil {
-			delete(b.kidSet, b.kids[len(b.kids)-1])
-		}
-		b.kids = b.kids[:len(b.kids)-1]
+		b.kids.removeAt(loc)
+	case b.kids.len() > 0:
+		b.kids.removeAt(b.kids.len() - 1)
 	}
 	return loc
 }
@@ -144,7 +118,7 @@ func (b *dfBase) remove() {
 		throw("Source nodes are roots and cannot be removed.")
 	}
 	loc := b.par.base().removeChild(b.self)
-	for _, child := range append([]dfNode(nil), b.kids...) {
+	for _, child := range append([]dfNode(nil), b.children()...) {
 		child.base().par = b.par
 		b.par.base().addChild(child, loc)
 		if loc >= 0 {
@@ -163,10 +137,10 @@ func (b *dfBase) insertAsParentOf(other dfNode) {
 func (b *dfBase) swapWithParent() {
 	parent := b.par
 	newParent := parent.base().par
-	for _, child := range append([]dfNode(nil), b.kids...) {
+	for _, child := range append([]dfNode(nil), b.children()...) {
 		child.base().setParent(parent)
 	}
-	b.kids, b.kidSet = nil, nil
+	b.kids.clear()
 	parent.base().removeChild(b.self)
 	loc := parent.base().par.base().removeChild(parent)
 	b.par = newParent
@@ -189,13 +163,15 @@ type outputNode struct {
 	dfBase
 	typ       dataSourceType
 	refCounts map[string]int
-	source    string
-	name      string
-	hashKey   string
+	// source is the data set the node reads, as upstream holds its name:
+	// a data object's name of any type reaches the output as it is.
+	source  Value
+	name    string
+	hashKey string
 }
 
 func newOutputNode(parent dfNode, source string, typ dataSourceType, refCounts map[string]int) *outputNode {
-	o := &outputNode{typ: typ, refCounts: refCounts, source: source, name: source}
+	o := &outputNode{typ: typ, refCounts: refCounts, source: jsval.Str(source), name: source}
 	if refCounts != nil {
 		if _, ok := refCounts[o.name]; !ok {
 			refCounts[o.name] = 0
@@ -223,19 +199,21 @@ func (o *outputNode) hash() string {
 	}
 	return o.hashKey
 }
-func (o *outputNode) getSource() string {
+func (o *outputNode) getSource() Value {
 	o.refCounts[o.name]++
 	return o.source
 }
-func (o *outputNode) isRequired() bool   { return o.refCounts[o.name] != 0 }
-func (o *outputNode) setSource(s string) { o.source = s }
+func (o *outputNode) isRequired() bool  { return o.refCounts[o.name] != 0 }
+func (o *outputNode) setSource(s Value) { o.source = s }
 
 // ---- source ----
 
 type sourceNode struct {
 	dfBase
-	data      *Object
-	name      string
+	data *Object
+	// name is the data object's name as given (undefined when it has
+	// none), of whatever type: upstream compares it with === and outputs it.
+	name      Value
 	generator bool
 	// extra generator payloads live in graticuleNode/sequenceNode
 }
@@ -254,9 +232,27 @@ func isNamedData(d Value) bool {
 	return hasProperty(d, "name") && !isUrlData(d) && !isInlineData(d) && !isGenerator(d)
 }
 
+// dataAsVL58 is what 5.8's data predicates make of an array given as data:
+// they test with `in`, and 'values' in [] holds (Array.prototype.values), so
+// the array is inline data whose values are that function.
+func dataAsVL58(cc *compileCtx, data Value) Value {
+	if cc.v5 && data.IsArr() {
+		return mkv("values", jsval.NativeFunction("values"))
+	}
+	return data
+}
+
 func newSourceNode(cc *compileCtx, data Value) *sourceNode {
 	if data.IsNullish() {
 		data = mkv("name", "source")
+	}
+	data = dataAsVL58(cc, data)
+	if cc.v5 && !isObject(data) {
+		// 5.8's isGenerator (data && 'sequence' in data), then isInlineData.
+		if data.IsTruthy() {
+			jsIn(data, "sequence")
+		}
+		jsIn(data, "values")
 	}
 	s := &sourceNode{}
 	s.cc = cc
@@ -287,7 +283,7 @@ func newSourceNode(cc *compileCtx, data Value) *sourceNode {
 	}
 	s.generator = isGenerator(data)
 	if n := data.Get("name"); n.IsTruthy() {
-		s.name = n.AsString()
+		s.name = n
 	}
 	if format != nil && format.Len() > 0 {
 		if s.data == nil {
@@ -312,7 +308,7 @@ func (s *sourceNode) clone() dfNode          { throw("Cannot clone node"); retur
 func (s *sourceNode) dependentFields() *sset { return newSset() }
 func (s *sourceNode) producedFields() *sset  { return nil }
 func (s *sourceNode) hash() string           { throw("Cannot hash sources"); return "" }
-func (s *sourceNode) hasName() bool          { return s.name != "" }
+func (s *sourceNode) hasName() bool          { return s.name.IsTruthy() }
 func (s *sourceNode) assemble() *Object {
 	o := mk("name", s.name)
 	spread(o, jsval.Obj(s.data))
@@ -322,9 +318,10 @@ func (s *sourceNode) assemble() *Object {
 
 // ---- helpers for hashing ----
 
-func setToHashString(s *sset) string {
+func setToHashString(cc *compileCtx, s *sset) string {
 	parts := make([]string, 0, s.size())
 	for _, x := range s.list() {
+		cc.work(1)
 		parts = append(parts, jsonString(x))
 	}
 	return "Set(" + strings.Join(parts, ",") + ")"
@@ -335,8 +332,8 @@ func setToHashString(s *sset) string {
 // walks the array while removing from it, so every second child is skipped
 // (they stay behind and are moved by the following remove()).
 func (b *dfBase) moveChildrenLive(dst dfNode) {
-	for i := 0; i < len(b.kids); i++ {
-		child := b.kids[i]
+	for i := 0; i < b.numChildren(); i++ {
+		child := b.child(i)
 		b.removeChild(child)
 		child.base().setParent(dst)
 	}

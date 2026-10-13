@@ -9,3 +9,6 @@ node testdata/gen_number.mjs | gzip -9 > testdata/number.json.gz
 for tz in UTC America/New_York Europe/Amsterdam America/Sao_Paulo Asia/Kolkata Australia/Lord_Howe; do
   TZ=$tz node testdata/gen_time.mjs | gzip -9 > "testdata/time_$(echo $tz | tr / _).json.gz"
 done
+for tz in America/New_York America/Sao_Paulo Australia/Lord_Howe Pacific/Apia Europe/London America/St_Johns Asia/Kolkata; do
+  TZ=$tz node testdata/gen_weekevery.mjs
+done | gzip -9 > testdata/weekevery.jsonl.gz

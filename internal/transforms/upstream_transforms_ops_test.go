@@ -291,7 +291,7 @@ func (o *opCall) window() {
 			if b == nil {
 				p.Frame = append(p.Frame, FrameBound{Unbounded: true})
 			} else {
-				p.Frame = append(p.Frame, FrameBound{Offset: int(upstream.Number(b))})
+				p.Frame = append(p.Frame, FrameBound{Offset: upstream.Number(b)})
 			}
 		}
 	}

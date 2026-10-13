@@ -70,7 +70,7 @@ func getHeaderProperty(prop string, header Value, config Value, channel string) 
 	default:
 		specific = config.Get("headerFacet")
 	}
-	return firstDefined(coalesceObjV(header).Get(prop), specific.Get(prop), config.Get("header").Get(prop))
+	return firstDefined(coalesceObjV(header).Get(prop), jsGet(specific, prop), jsGet(config.Get("header"), prop))
 }
 
 func coalesceObjV(v Value) Value {
@@ -120,6 +120,7 @@ func parseFacetHeader(m *facetModel, channel string) {
 		if title.IsArr() {
 			var parts []string
 			for _, x := range title.Items() {
+				cc.work(1)
 				parts = append(parts, x.AsString())
 			}
 			t = strings.Join(parts, ", ")
@@ -181,7 +182,9 @@ func mergeChildAxis(m *facetModel, channel string) {
 		return
 	}
 	layoutHeaders, resolve := m.comp.layoutHeaders, m.comp.resolve
-	resolve.axis[channel] = parseGuideResolve(resolve, channel)
+	v := parseGuideResolve(cc, resolve, channel)
+	resolve.write(resolveAxis, channel)
+	resolve.axis[channel] = v
 	if resolve.axis[channel] == "shared" {
 		headerChannel := "row"
 		if channel == "x" {
@@ -189,6 +192,7 @@ func mergeChildAxis(m *facetModel, channel string) {
 		}
 		lh := layoutHeaders[headerChannel]
 		for _, ac := range childAxes {
+			cc.work(1)
 			ht := getHeaderType(ac.get("orient"))
 			list := lh.get(ht)
 			if list == nil {
@@ -296,7 +300,10 @@ func assembleLabelTitle(cc *compileCtx, fd Value, channel string, config Value) 
 	headerChannel := getHeaderChannel(channel, labelOrient.AsString())
 	var text string
 	if labelExpr := props.Lookup("labelExpr"); labelExpr.IsTruthy() {
-		text = strings.ReplaceAll(strings.ReplaceAll(labelExpr.AsString(), "datum.label", titleTextExpr), "datum.value", vgField(cc, fd, fieldRefOption{expr: "parent"}))
+		if !labelExpr.IsStr() {
+			throw("string.replace is not a function") // util.replaceAll(labelExpr, ...)
+		}
+		text = jsReplaceAll(jsReplaceAll(labelExpr.StrValue(), "datum.label", titleTextExpr), "datum.value", vgField(cc, fd, fieldRefOption{expr: "parent"}))
 	} else {
 		text = titleTextExpr
 	}
@@ -360,10 +367,13 @@ func assembleHeaderGroup(m Model, channel, headerType string, lh *layoutHeaderCo
 	return jsval.Null
 }
 
+// getLayoutTitleBand is LAYOUT_TITLE_BAND[headerChannel][titleAnchor]: the
+// anchor is looked up by its text, and a name every object inherits finds
+// that member (Object.prototype for "__proto__", which prints as {}).
 func getLayoutTitleBand(titleAnchor Value, headerChannel string) Value {
 	a := titleAnchor.AsString()
-	if !titleAnchor.IsStr() {
-		return undef
+	if v, ok := inheritedValue(a); ok {
+		return v
 	}
 	switch headerChannel {
 	case "column":

@@ -61,7 +61,7 @@ func KDE(ctx context.Context, source []jsval.Value, p KDEParams) ([]jsval.Value,
 	}
 	names := make([]string, len(p.GroupBy))
 	for i, g := range p.GroupBy {
-		names[i] = g.Name
+		names[i] = g.Key()
 	}
 	var out []jsval.Value
 	for _, g := range Partition(zoneOf(ctx), source, p.GroupBy) {
@@ -85,7 +85,7 @@ func KDE(ctx context.Context, source []jsval.Value, p KDEParams) ([]jsval.Value,
 		} else {
 			local, valid = valuesExtent(vals)
 		}
-		if err := reserveOut(ctx, len(out)+int(min(maxsteps, MaxSteps))+1, len(source)); err != nil {
+		if err := reserveRows(ctx, len(out)+maxSamples(minsteps, maxsteps)); err != nil {
 			return nil, err
 		}
 		pts, err := sampleTuples(ctx, f, local, valid, minsteps, maxsteps, names, g.Dims, p.As, scale)

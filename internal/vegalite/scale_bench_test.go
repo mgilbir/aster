@@ -3,11 +3,11 @@ package vegalite
 import (
 	"context"
 	"fmt"
-	"runtime"
 	"testing"
 	"time"
 
 	"github.com/mgilbir/aster/internal/jsval"
+	"github.com/mgilbir/aster/internal/testutil"
 )
 
 // Large-specification benchmarks: compile time must grow about linearly with
@@ -90,42 +90,31 @@ func TestContextBoundsCompile(t *testing.T) {
 	if err != context.DeadlineExceeded {
 		t.Fatalf("timeout: got %v", err)
 	}
-	if el := time.Since(start); el > 2*time.Second {
+	if el := time.Since(start); el > testutil.Scaled(2*time.Second) {
 		t.Fatalf("compile ran %v past a 20ms deadline", el)
 	}
 }
 
-// TestLargeSpecsScaleLinearly guards against quadratic behaviour: 4x the
-// params may cost far less than 16x the time.
+// TestLargeSpecsScaleLinearly guards against quadratic behaviour in
+// specifications with many params, layers, views or transforms. Allocated
+// bytes are a deterministic measure of the work a compile does, and the
+// quadratic behaviour this guards against (copy-on-append of signal lists)
+// shows up in them directly: 4x the input may allocate at most 8x (clean,
+// 3.8 to 5.1; with copy-on-append planted back, 14). Nothing is timed. The
+// race detector's sync.Pool makes allocation vary, so the guard is skipped
+// under it.
 func TestLargeSpecsScaleLinearly(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
 	}
-	// Allocated bytes are a deterministic measure of the work a compile
-	// does, unlike wall time on a machine running other tests; the
-	// quadratic behaviour this guards against (copy-on-append of signal
-	// lists) shows up in them directly. Wall time keeps a loose backstop.
+	if testutil.RaceEnabled {
+		t.Skip("allocation varies under the race detector")
+	}
 	for _, kind := range []string{"params", "layer", "concat", "transform"} {
-		run := func(n int) (uint64, time.Duration) {
-			spec := bigSpec(kind, n)
-			var before, after runtime.MemStats
-			runtime.GC()
-			runtime.ReadMemStats(&before)
-			start := time.Now()
-			if _, err := Compile(spec, Options{}); err != nil {
-				t.Fatal(err)
+		t.Run(kind, func(t *testing.T) {
+			if small, large := compileAlloc(t, bigSpec(kind, 500)), compileAlloc(t, bigSpec(kind, 2000)); large > 8*small {
+				t.Errorf("%s: 500 allocated %d bytes but 2000 allocated %d (super-linear)", kind, small, large)
 			}
-			el := time.Since(start)
-			runtime.ReadMemStats(&after)
-			return after.TotalAlloc - before.TotalAlloc, el
-		}
-		smallB, smallT := run(500)
-		largeB, largeT := run(2000)
-		if largeB > 8*smallB {
-			t.Errorf("%s: 500 allocated %d bytes but 2000 allocated %d (super-linear)", kind, smallB, largeB)
-		}
-		if largeT > 40*smallT+2*time.Second {
-			t.Errorf("%s: 500 took %v but 2000 took %v (super-linear)", kind, smallT, largeT)
-		}
+		})
 	}
 }

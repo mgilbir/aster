@@ -32,13 +32,18 @@
 //
 // Not implemented: CSS filter functions (blur(), drop-shadow(), ...), feImage,
 // feTile, feMorphology, feConvolveMatrix, feDisplacementMap, feTurbulence and
-// the lighting filters, textPath, context-fill/stroke, external
-// resources, SVG images, and the writing-mode / vertical text.
+// the lighting filters, textPath, context-fill/stroke, external style
+// sheets and references into other documents (an <image> fetches its bytes
+// through Options.Images; one that is itself SVG is not drawn), and the
+// writing-mode / vertical text.
 //
 // The input is untrusted. Element count, nesting, canvas size, <use>
 // expansion, layer depth, embedded image size, style sheet size and matching
-// work, filter region size and the pixels spent on filters and pattern tiles
-// are all bounded (see Limits); nothing is fetched from the network or the
+// work, filter region size, the pixels spent on filters and pattern tiles,
+// the path geometry held and computed, and every pixel buffer (layers, clip
+// coverage, filter intermediates) are all bounded (see Limits); decoded
+// images and the render's caches are charged to the call's ledger before
+// they are allocated; nothing is fetched from the network or the
 // filesystem; malformed input yields an error or is skipped, never a panic.
 package raster
 
@@ -52,6 +57,7 @@ import (
 	"math"
 
 	"github.com/mgilbir/aster/internal/budget"
+	"github.com/mgilbir/aster/internal/pngopt"
 )
 
 // Options configures Render.
@@ -94,7 +100,9 @@ func Render(svg []byte, opts Options) (img *image.NRGBA, err error) {
 	defer func() {
 		if p := recover(); p != nil {
 			if stop, ok := p.(*budget.Stop); ok {
-				// The shaper's budget or the context stopped a text run.
+				// A bound stopped drawing where it cannot return an error:
+				// the shaper's budget or the context in a text run, the
+				// geometry budget in flattening or stroking.
 				img, err = nil, stop.Err
 				return
 			}
@@ -118,9 +126,9 @@ func Render(svg []byte, opts Options) (img *image.NRGBA, err error) {
 		return nil, errors.New("raster: empty SVG input")
 	}
 	if len(svg) > lim.MaxInputBytes {
-		return nil, fmt.Errorf("%w: SVG input is %d bytes, limit is %d", errLimit, len(svg), lim.MaxInputBytes)
+		return nil, fmt.Errorf("raster: SVG input is %d bytes, limit is %d: %w", len(svg), lim.MaxInputBytes, errLimit)
 	}
-	doc, err := parseDocument(string(svg), lim)
+	doc, err := parseDocumentCtx(opts.Context, string(svg), lim)
 	if err != nil {
 		return nil, err
 	}
@@ -166,8 +174,8 @@ func Render(svg []byte, opts Options) (img *image.NRGBA, err error) {
 		return nil, errors.New("raster: SVG has zero dimensions")
 	}
 	if pw > float64(lim.MaxDimension) || ph > float64(lim.MaxDimension) || pw*ph > float64(lim.MaxPixels) {
-		return nil, fmt.Errorf("%w: output %.0fx%.0f px (width*height*scale^2) exceeds the limit of %d pixels / %d per side",
-			errLimit, pw, ph, lim.MaxPixels, lim.MaxDimension)
+		return nil, fmt.Errorf("raster: output %.0fx%.0f px (width*height*scale^2) exceeds the limit of %d pixels / %d per side: %w",
+			pw, ph, lim.MaxPixels, lim.MaxDimension, errLimit)
 	}
 	cw, ch := int(pw), int(ph)
 
@@ -191,8 +199,21 @@ func Render(svg []byte, opts Options) (img *image.NRGBA, err error) {
 		doc: doc, lim: lim, shaper: shaper,
 		rast: newRasterizer(), cw: cw, ch: ch, active: map[*node]bool{},
 		ctx: opts.Context, fetched: fetched, imageErr: opts.ImageError,
+		ledger: budget.LedgerFrom(opts.Context),
 	}
+	if r.ledger == nil {
+		// Called on its own (not through the public API), a render still
+		// has its memory bounded: by a ledger of its own.
+		r.ledger = budget.NewLedger(opts.Context, budget.LedgerLimits{MaxBytes: defaultLedgerBytes})
+	}
+	// The kept tiles, bitmaps and images go with the render.
+	defer r.dropColourImages()
+	defer r.dropPatterns()
+	defer r.dropImages()
+	r.initCaches()
+	defer r.dropCaches()
 	r.rast.ctx = opts.Context
+	r.fl.r = r
 	if opts.Limits.MaxPixelOps <= 0 {
 		// Default work budget: 512 Mpx, or 16 canvases for big outputs.
 		r.lim.MaxPixelOps = max(defaultMaxPixelOps, budget.MulInt(16, budget.MulInt(cw, ch)))
@@ -213,6 +234,7 @@ func Render(svg []byte, opts Options) (img *image.NRGBA, err error) {
 
 	st := rootState
 	st.ctm = scaleM(scale, scale)
+	r.host = st.ctm
 	if hasVB {
 		st.ctm = st.ctm.mul(viewBoxTransform(vb, w, h, root.str(aPreserveAspectRatio)))
 	}
@@ -261,16 +283,18 @@ func (r *renderer) renderRoot(root *node, st *state) {
 	}
 }
 
-// toNRGBA converts premultiplied pixels to a non-premultiplied image.
+// toNRGBA converts premultiplied pixels to a non-premultiplied image, in
+// place: the canvas is done with, and its pixels become the image's, so the
+// output costs no second canvas of memory (C103). c must not be used after.
 func (c *canvas) toNRGBA() *image.NRGBA {
-	out := image.NewNRGBA(image.Rect(0, 0, c.w, c.h))
+	out := &image.NRGBA{Pix: c.pix, Stride: 4 * c.w, Rect: image.Rect(0, 0, c.w, c.h)}
 	src, dst := c.pix, out.Pix
 	for i := 0; i < len(src); i += 4 {
 		a := uint32(src[i+3])
 		switch a {
 		case 0:
+			dst[i], dst[i+1], dst[i+2] = 0, 0, 0 // as a new image is
 		case 255:
-			dst[i], dst[i+1], dst[i+2], dst[i+3] = src[i], src[i+1], src[i+2], 255
 		default:
 			h := a / 2
 			r := (uint32(src[i])*255 + h) / a
@@ -296,7 +320,7 @@ func (c *canvas) toNRGBA() *image.NRGBA {
 func EncodePNG(img *image.NRGBA) ([]byte, error) {
 	var buf bytes.Buffer
 	buf.Grow(len(img.Pix) / 8)
-	if err := encodePNG(&buf, img); err != nil {
+	if err := pngopt.Encode(context.Background(), &buf, img); err != nil {
 		return nil, fmt.Errorf("raster: encoding PNG: %w", err)
 	}
 	return buf.Bytes(), nil

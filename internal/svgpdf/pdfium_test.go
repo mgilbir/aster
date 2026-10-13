@@ -183,7 +183,7 @@ func TestPDFiumOpenClipComposites(t *testing.T) {
 		{shape.CompositeSrcAtop, green, blue},
 		{shape.CompositeDestOver, blue, blue},
 	} {
-		r := &renderer{w: newContentWriter(), images: newImageCatalog(nil, Limits{}.withDefaults()), lim: Limits{}.withDefaults(), pageW: 100, pageH: 100}
+		r := &renderer{w: newContentWriter(nil), images: newImageCatalog(nil, Limits{}.withDefaults(), nil), lim: Limits{}.withDefaults(), pageW: 100, pageH: 100}
 		r.w.concat(Matrix{A: 1, D: -1, F: 100})
 		r.w.save()
 		r.w.concat(Matrix{A: 0.1, D: -0.1, F: 90})
@@ -205,7 +205,7 @@ func TestPDFiumOpenClipComposites(t *testing.T) {
 		p.unwind()
 		r.w.buf = append(r.w.buf, p.endGroup()...)
 		r.w.restore()
-		pdf, err := buildPDF(r.w.stream(), r.w.gsNames, nil, r.images, paintDefs{r.shadings, r.patterns, r.forms}, 100, 100)
+		pdf, err := buildPDF(r.w.stream(), r.w.gsNames, nil, r.images, paintDefs{r.shadings, r.patterns, r.forms, nil}, 100, 100)
 		if err != nil {
 			t.Fatal(err)
 		}

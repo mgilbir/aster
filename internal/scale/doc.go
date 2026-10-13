@@ -23,7 +23,7 @@
 //
 // # Ticks and labels
 //
-// Ticks, TickStep, TickIncrement and Nice are d3-array's, including its
+// Ticks, TickStep and TickIncrement are d3-array's, including its
 // floating point behaviour. TickCountFor, TickValues, ValidTicks, TickFormat,
 // LabelValues, LabelFormat, LabelFraction and DomainCaption are vega-scale's;
 // the formatters come from a format.Locale.

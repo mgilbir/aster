@@ -1,6 +1,7 @@
 package vega
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -8,6 +9,7 @@ import (
 	"github.com/mgilbir/aster/internal/expr"
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/scene"
+	"github.com/mgilbir/aster/internal/textcut"
 	"github.com/mgilbir/aster/internal/transforms"
 )
 
@@ -346,11 +348,17 @@ func toValue(x any) jsval.Value {
 	return jsval.Undefined
 }
 
-// Data implements expr.DataProvider: the current tuples of a data set.
+// Data implements expr.DataProvider: the current tuples of a data set
+// (vega-functions' data(): `data ? data.values.value : []`). A data set whose
+// values operator (a Sieve, made with the value null) has not run yet reads
+// as null, so length() of it is upstream's TypeError.
 func (c *rtContext) Data(name string) (jsval.Value, bool) {
 	n := c.dataNode(name, "values")
 	if n == nil {
 		return jsval.Arr(nil), true
+	}
+	if n.value == nil {
+		return jsval.Null, true
 	}
 	switch v := n.value.(type) {
 	case []jsval.Value:
@@ -379,20 +387,76 @@ func (c *rtContext) InData(name, field string, value jsval.Value) (int, bool) {
 	if cnt.IsNullish() {
 		return 0, false
 	}
-	return int(jsval.ToNumber(cnt)), true
+	// an aggregate's count, a whole number of rows; converted without the
+	// platform's out-of-range conversion all the same
+	return clampInt(jsval.ToNumber(cnt)), true
 }
 
 // IsTuple implements expr.TupleChecker.
 func (c *rtContext) IsTuple(v jsval.Value) bool { return v.IsObj() }
 
-// Log implements expr.Logger.
-func (c *rtContext) Log(level expr.LogLevel, args []jsval.Value) {}
+// Log implements expr.Logger: warn() is a warning, as upstream's logs it
+// with the view's logger ("EXPRESSION" and the arguments). info() and debug()
+// are below the warning level, which is all the view reports, and upstream's
+// logger at that level drops them too.
+func (c *rtContext) Log(level expr.LogLevel, args []jsval.Value) {
+	if level != expr.LogWarn {
+		return
+	}
+	c.g.warn(string(logText(args, MaxWarningText)))
+}
+
+// logText is "EXPRESSION" and each argument as String() gives it, separated
+// by spaces, as the console prints a warning's strings; it stops once it is
+// longer than limit, which report cuts it to, so a warning that names a
+// large array costs no more than one that does not.
+func logText(args []jsval.Value, limit int) []byte {
+	b := []byte("EXPRESSION")
+	// String(array) joins its elements with commas, nested arrays the same
+	// way and null or undefined as nothing; the walk keeps its own stack.
+	type frame struct {
+		items []jsval.Value
+		i     int
+	}
+	var stack []frame
+	for _, a := range args {
+		b = append(b, ' ')
+		if !a.IsArr() {
+			b = append(b, a.AsString()...)
+			continue
+		}
+		stack = append(stack[:0], frame{items: a.Items()})
+		for len(stack) > 0 && len(b) <= limit {
+			f := &stack[len(stack)-1]
+			if f.i == len(f.items) {
+				stack = stack[:len(stack)-1]
+				continue
+			}
+			if f.i > 0 {
+				b = append(b, ',')
+			}
+			x := f.items[f.i]
+			f.i++
+			switch {
+			case x.IsArr():
+				if len(stack) < jsval.MaxValueDepth {
+					stack = append(stack, frame{items: x.Items()})
+				}
+			case !x.IsNullish():
+				b = append(b, x.AsString()...)
+			}
+		}
+		if len(b) > limit {
+			break
+		}
+	}
+	return b
+}
 
 // exprFn is a compiled expression together with the operators it depends on.
 type exprFn struct {
 	prog   *expr.Program
 	src    string
-	name   string
 	fields []string
 	deps   []depRef
 	// usesItem/usesEvent report which free variables the expression reads.
@@ -418,14 +482,25 @@ const (
 	varEvent
 )
 
-// eval evaluates the expression in context c.
-func (f *exprFn) eval(c *rtContext, datum, item, event jsval.Value, vars exprVars) jsval.Value {
+// evalProgram evaluates prog in c's scope, which every evaluation in the
+// context shares. It is the one place the scope is reached, and it sets the
+// whole frame: datum, item and event, and which of them the generated
+// function has (an expression that reads one it lacks is a ReferenceError),
+// so nothing the last evaluation set can leak into this one.
+func (c *rtContext) evalProgram(prog *expr.Program, datum, item, event jsval.Value, vars exprVars) (jsval.Value, error) {
 	s := c.scope()
 	s.Datum, s.Item, s.Event = datum, item, event
 	s.NoDatum, s.NoItem, s.NoEvent = vars&varDatum == 0, vars&varItem == 0, vars&varEvent == 0
-	v, err := f.prog.Eval(s)
+	return prog.Eval(s)
+}
+
+// eval evaluates the expression in context c.
+func (f *exprFn) eval(c *rtContext, datum, item, event jsval.Value, vars exprVars) jsval.Value {
+	v, err := c.evalProgram(f.prog, datum, item, event, vars)
 	if err != nil {
-		failErr(fmt.Errorf("%w (in expression %s)", err, f.src))
+		// The source is the specification's, and an error a facet cell
+		// raises is raised in every cell: it is cut like a warning's text.
+		failErr(fmt.Errorf("%w (in expression %s)", err, textcut.Cut(f.src, MaxWarningText)))
 	}
 	return v
 }
@@ -441,21 +516,27 @@ func (b *boundExpr) call(datum jsval.Value) jsval.Value {
 	return b.fn.eval(b.ctx, datum, jsval.Undefined, jsval.Undefined, varDatum)
 }
 
-// accessor adapts the expression to a transforms accessor.
+// accessor adapts the expression to a transforms accessor. It has no name:
+// the runtime builds an expression's accessor with none (vega-runtime's
+// getExpression ignores the `$name` an `as` gives the parameter), so a
+// transform that names its output after it writes "undefined".
 func (b *boundExpr) accessor() transforms.Field {
-	name := b.fn.name
-	if name == "" {
-		name = b.fn.src
-	}
-	return transforms.NamedField(name, b.fn.fields, b.call)
+	f := transforms.NamedField("", b.fn.fields, b.call)
+	f.Unnamed = true
+	return f
 }
 
 // parseExpression compiles an expression and resolves its dependencies against
 // the scope, as vega-functions' parseExpression does. Unknown signal names are
 // an error, as upstream.
 func (s *Scope) parseExpression(code string) *exprFn {
-	prog, err := expr.CompileCached(code)
+	prog, err := expr.CompileCachedContext(s.opts.ctx, code)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			// The call ended while a regular expression literal waited to
+			// be compiled: the call's error, not the expression's.
+			panic(&budget.Stop{Err: err})
+		}
 		if errors.Is(err, budget.ErrLimit) {
 			perrLimit("Expression parse error: %v (in %.80q)", err, code)
 		}

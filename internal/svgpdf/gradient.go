@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
-	"strconv"
 	"strings"
 
 	pdf0 "github.com/mgilbir/pdf0"
@@ -13,8 +12,9 @@ import (
 
 // gradient is a <linearGradient> or <radialGradient>, as Vega writes them for
 // gradient fills and continuous colour legends: in objectBoundingBox units
-// unless gradientUnits says userSpaceOnUse, padded past its ends, with
-// opaque stops. It is drawn as a PDF shading (axial or radial) painted with
+// unless gradientUnits says userSpaceOnUse, padded past its ends. Its stops'
+// colours are its shading; translucent stops are drawn under a soft mask of
+// their alpha. It is drawn as a PDF shading (axial or radial) painted with
 // sh inside the shape, under the shape's bounding box when its units are the
 // box's.
 type gradient struct {
@@ -23,6 +23,10 @@ type gradient struct {
 	coords []float64 // linear: x1 y1 x2 y2; radial: fx fy fr cx cy r
 	stops  []gradStop
 	res    string // the shading's resource name, once drawn
+	// alphas are the stops' alphas, nil when every stop is opaque, and alpha
+	// the gradient of them a soft mask draws (see alphaGradient).
+	alphas []float64
+	alpha  *gradient
 
 	// The rest serve colour glyphs only. gray makes the shading one of
 	// DeviceGray, from each stop's colour's R: a soft mask's alpha.
@@ -69,56 +73,166 @@ var gradientAttrs = map[string]map[string]bool{
 }
 
 // collectGradients gathers the gradients of the document by id.
-func collectGradients(root *element) (map[string]*gradient, error) {
+// The <pattern>s found on the way are returned for collectPatterns.
+func collectGradients(root *element) (map[string]*gradient, []*element, error) {
 	grads := map[string]*gradient{}
+	var patterns []*element
 	stack := []*element{root}
 	for len(stack) > 0 {
 		e := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
+		if e.name == "pattern" {
+			patterns = append(patterns, e)
+		}
 		if e.name != "linearGradient" && e.name != "radialGradient" {
 			stack = append(stack, e.children...)
 			continue
 		}
 		id, ok := e.attr("id")
 		if !ok {
-			return nil, fmt.Errorf("svgpdf: <%s> without id", e.name)
+			return nil, nil, fmt.Errorf("svgpdf: <%s> without id", e.name)
 		}
 		g, err := parseGradient(e)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		grads[id] = g
 	}
-	return grads, nil
+	return grads, patterns, nil
+}
+
+// collectPatterns finds the <pattern>s Vega writes around each radial
+// gradient (vega-scenegraph's SVG renderers: "We wrap the radial gradient in
+// a pattern element, allowing us to maintain a circular gradient"):
+//
+//	<pattern id="p_ID" viewBox="0,0,1,1" width="100%" height="100%"
+//	  preserveAspectRatio="xMidYMid slice"><rect width="1" height="1"
+//	  fill="url(#ID)"/></pattern>
+//
+// A paint that refers to one paints the gradient over the square whose side
+// is the larger of the shape's box, centred on it, as the pattern's viewBox
+// sliced into the box does. They are added to grads under the pattern's id,
+// and named in sliced. Any other pattern is unsupported, an error where a
+// paint refers to it (in unsupported).
+func collectPatterns(patterns []*element, grads map[string]*gradient) (sliced map[string]bool, unsupported map[string]bool) {
+	for _, e := range patterns {
+		id, ok := e.attr("id")
+		if !ok {
+			continue
+		}
+		if g := vegaPatternGradient(e, grads); g != nil {
+			if sliced == nil {
+				sliced = map[string]bool{}
+			}
+			grads[id], sliced[id] = g, true
+		} else {
+			if unsupported == nil {
+				unsupported = map[string]bool{}
+			}
+			unsupported[id] = true
+		}
+	}
+	return sliced, unsupported
+}
+
+// vegaPatternGradient is the gradient of a pattern of Vega's form, or nil.
+func vegaPatternGradient(e *element, grads map[string]*gradient) *gradient {
+	for _, a := range e.attrs {
+		v := strings.TrimSpace(a.value)
+		switch a.name {
+		case "id":
+		case "viewBox":
+			if nums, ok := parseNumberList(v); !ok || len(nums) != 4 || nums[0] != 0 || nums[1] != 0 || nums[2] != 1 || nums[3] != 1 {
+				return nil
+			}
+		case "width", "height":
+			if v != "100%" {
+				return nil
+			}
+		case "preserveAspectRatio":
+			if strings.Join(strings.Fields(v), " ") != "xMidYMid slice" {
+				return nil
+			}
+		case "patternUnits":
+			if v != "objectBoundingBox" {
+				return nil
+			}
+		default:
+			if !isIgnorableAttr(a.name) {
+				return nil
+			}
+		}
+	}
+	if len(e.children) != 1 || len(e.attrVal("viewBox")) == 0 {
+		return nil
+	}
+	r := e.children[0]
+	if r.name != "rect" || len(r.children) > 0 {
+		return nil
+	}
+	for _, a := range r.attrs {
+		v := strings.TrimSpace(a.value)
+		switch a.name {
+		case "width", "height":
+			if n, ok := parseNumber(v); !ok || n != 1 {
+				return nil
+			}
+		case "x", "y":
+			if n, ok := parseNumber(v); !ok || n != 0 {
+				return nil
+			}
+		case "fill":
+		default:
+			if !isIgnorableAttr(a.name) {
+				return nil
+			}
+		}
+	}
+	id, ok := urlRef(r.attrVal("fill"))
+	if !ok {
+		return nil
+	}
+	return grads[id]
+}
+
+// sliceBox is the box a gradient of a Vega pattern is painted over: the
+// square of the larger side of box, centred on it.
+func sliceBox(box rect) rect {
+	s := math.Max(box.w(), box.h())
+	x0 := box.x0 + (box.w()-s)/2
+	y0 := box.y0 + (box.h()-s)/2
+	return rect{x0, y0, x0 + s, y0 + s}
 }
 
 // gradNumber reads a gradient coordinate or a stop offset: a number, or a
 // percentage of the box (or of 1).
-func gradNumber(s string) (float64, error) {
+func gradNumber(s string) (float64, bool) {
 	s = strings.TrimSpace(s)
 	if p, ok := strings.CutSuffix(s, "%"); ok {
-		v, err := strconv.ParseFloat(strings.TrimSpace(p), 64)
-		return v / 100, err
+		v, ok := parseNumber(p)
+		return v / 100, ok
 	}
-	return strconv.ParseFloat(s, 64)
+	return parseNumber(s)
 }
 
+// parseGradient reads a gradient element. A value that does not parse is
+// ignored, as for any attribute (see attrs.go): a coordinate takes its
+// initial value, a stop's offset 0, its colour black and its opacity 1.
+// What the renderer does not draw (a spread method, a percentage in user
+// space) is an error.
 func parseGradient(e *element) (*gradient, error) {
 	for _, a := range e.attrs {
 		if !gradientAttrs[e.name][a.name] && !isIgnorableAttr(a.name) {
-			return nil, fmt.Errorf("svgpdf: unsupported attribute %q on <%s>", a.name, e.name)
+			return nil, fmt.Errorf("svgpdf: unsupported attribute %s on <%s>", quoted(a.name), e.name)
 		}
 	}
 	g := &gradient{radial: e.name == "radialGradient"}
-	switch u := e.attrVal("gradientUnits"); u {
-	case "", "objectBoundingBox":
-	case "userSpaceOnUse":
+	if strings.TrimSpace(e.attrVal("gradientUnits")) == "userSpaceOnUse" {
 		g.user = true
-	default:
-		return nil, fmt.Errorf("svgpdf: unsupported gradientUnits %q", u)
 	}
-	if s := e.attrVal("spreadMethod"); s != "" && s != "pad" {
-		return nil, fmt.Errorf("svgpdf: unsupported spreadMethod %q", s)
+	switch strings.TrimSpace(e.attrVal("spreadMethod")) {
+	case "reflect", "repeat":
+		return nil, fmt.Errorf("svgpdf: a gradient spreadMethod other than pad is not supported")
 	}
 	num := func(name string, def float64) (float64, error) {
 		v, ok := e.attr(name)
@@ -128,9 +242,9 @@ func parseGradient(e *element) (*gradient, error) {
 		if g.user && strings.HasSuffix(strings.TrimSpace(v), "%") {
 			return 0, fmt.Errorf("svgpdf: a percentage %s in user space units is not supported", name)
 		}
-		f, err := gradNumber(v)
-		if err != nil {
-			return 0, fmt.Errorf("svgpdf: <%s> %s: %w", e.name, name, err)
+		f, ok := gradNumber(v)
+		if !ok {
+			return def, nil
 		}
 		return f, nil
 	}
@@ -171,41 +285,56 @@ func parseGradient(e *element) (*gradient, error) {
 	}
 
 	prev := 0.0
+	translucent := false
 	for _, s := range e.children {
 		if s.name != "stop" {
 			return nil, fmt.Errorf("svgpdf: unsupported element <%s> in <%s>", s.name, e.name)
 		}
 		for _, a := range s.attrs {
 			if !gradientAttrs["stop"][a.name] && !isIgnorableAttr(a.name) {
-				return nil, fmt.Errorf("svgpdf: unsupported attribute %q on <stop>", a.name)
+				return nil, fmt.Errorf("svgpdf: unsupported attribute %s on <stop>", quoted(a.name))
 			}
 		}
-		off, err := gradNumber(s.attrVal("offset"))
-		if err != nil && strings.TrimSpace(s.attrVal("offset")) != "" {
-			return nil, fmt.Errorf("svgpdf: <stop> offset: %w", err)
-		}
+		off, _ := gradNumber(s.attrVal("offset"))
 		// Offsets are clamped to 0..1 and to at least the one before.
 		off = math.Max(prev, clamp01(off))
 		prev = off
 		col, alpha := Color{}, 1.0
 		if v, ok := s.attr("stop-color"); ok {
-			if col, alpha, err = parseColor(v); err != nil {
-				return nil, err
+			if c, a, ok := parseColor(v); ok {
+				col, alpha = c, a
 			}
 		}
 		if v, ok := s.attr("stop-opacity"); ok {
-			o, err := gradNumber(v)
-			if err != nil {
-				return nil, fmt.Errorf("svgpdf: <stop> stop-opacity: %w", err)
+			if o, ok := parseOpacity(v); ok {
+				alpha *= o
 			}
-			alpha *= clamp01(o)
 		}
-		if alpha < 1 {
-			return nil, fmt.Errorf("svgpdf: a translucent gradient stop is not supported")
-		}
+		translucent = translucent || alpha < 1
 		g.stops = append(g.stops, gradStop{off, col})
+		g.alphas = append(g.alphas, alpha)
+	}
+	if !translucent {
+		g.alphas = nil
 	}
 	return g, nil
+}
+
+// alphaGradient is g's alpha as a gradient of grey, the same geometry: a
+// soft mask's (see paintShape). It is nil for an opaque gradient.
+func (g *gradient) alphaGradient() *gradient {
+	if g.alphas == nil {
+		return nil
+	}
+	if g.alpha == nil {
+		a := &gradient{radial: g.radial, user: g.user, coords: g.coords, gray: true}
+		for i, s := range g.stops {
+			v := g.alphas[i]
+			a.stops = append(a.stops, gradStop{s.offset, Color{v, v, v}})
+		}
+		g.alpha = a
+	}
+	return g.alpha
 }
 
 func hasAll(e *element, names []string) bool {
@@ -308,6 +437,7 @@ type paintDefs struct {
 	shadings []*gradient
 	patterns []patternUse
 	forms    []*formDef
+	links    []linkAnnot // the page's link annotations
 }
 
 // patternUse is a gradient stroke: the shading pattern of a gradient placed
@@ -327,25 +457,74 @@ func (r *renderer) shadingOf(g *gradient) string {
 	return g.res
 }
 
+// resolveGradients is st with a paint that refers to a gradient there is
+// none of replaced by its fallback ("url(#g) red"); one without a fallback
+// is an error.
+func (r *renderer) resolveGradients(st gstate) (gstate, error) {
+	for _, p := range []*Paint{&st.fill, &st.stroke} {
+		if p.Gradient == "" {
+			continue
+		}
+		if _, ok := r.gradients[p.Gradient]; ok {
+			continue
+		}
+		if r.badPatterns[p.Gradient] {
+			return st, fmt.Errorf("svgpdf: paint refers to a <pattern> other than Vega's radial gradient, which is not supported")
+		}
+		if p.Fallback == nil {
+			return st, fmt.Errorf("svgpdf: paint refers to a missing gradient %s", quoted(p.Gradient))
+		}
+		*p = *p.Fallback
+	}
+	return st, nil
+}
+
+// softMask sets, as the soft mask, the luminosity of the grey gradient a
+// (a gradient's alpha), painted as the gradient is: over the box when its
+// units are the box's. The mask is a form drawn in the current user space,
+// covering the page there.
+func (r *renderer) softMask(a *gradient, boxM Matrix) {
+	inv, ok := invert(r.w.cur.ctm)
+	if !ok {
+		return
+	}
+	var content []byte
+	if !a.user {
+		content = r.w.appendMatrix(content, boxM)
+		content = append(content, " cm\n"...)
+	}
+	content = append(content, '/')
+	content = append(content, r.shadingOf(a)...)
+	content = append(content, " sh\n"...)
+	fm := r.form(content, mapBox(inv, [4]float64{0, 0, r.pageW, r.pageH}))
+	r.w.stateGS("lum:"+fm, gsEntry{mask: fm, maskLuminosity: true})
+}
+
 // paintShape paints the path that addPath draws, of bounding box box, with
 // the fill and stroke of st, either or both of which is a gradient. A gradient
 // fill is a shading painted inside the path; a gradient stroke is a shading
 // pattern as the stroke colour, placed in page space. A gradient in
 // objectBoundingBox units stretches over the box, and paints nothing on a box
-// with no width or height, as in SVG.
+// with no width or height, as in SVG. A gradient with translucent stops is
+// painted under a soft mask of their alpha (C33).
 func (r *renderer) paintShape(st gstate, addPath func(), box rect, haveBox bool) error {
-	lookup := func(p Paint) (*gradient, error) {
-		g, ok := r.gradients[p.Gradient]
-		if !ok {
-			return nil, fmt.Errorf("svgpdf: paint refers to a missing gradient %q", p.Gradient)
-		}
-		return g, nil
+	st, err := r.resolveGradients(st)
+	if err != nil {
+		return err
 	}
 	boxed := haveBox && box.w() > 0 && box.h() > 0
-	boxM := Matrix{A: box.w(), D: box.h(), E: box.x0, F: box.y0}
+	// boxOf maps the unit square onto the box a paint's gradient covers.
+	boxOf := func(p Paint) Matrix {
+		b := box
+		if r.sliced[p.Gradient] {
+			b = sliceBox(box)
+		}
+		return Matrix{A: b.w(), D: b.h(), E: b.x0, F: b.y0}
+	}
 
 	// Fill.
 	if p := st.fill; !p.None {
+		boxM := boxOf(p)
 		if p.Gradient == "" {
 			solid := st
 			solid.stroke = Paint{None: true}
@@ -353,23 +532,25 @@ func (r *renderer) paintShape(st gstate, addPath func(), box rect, haveBox bool)
 			addPath()
 			r.w.paint(true, false, st.evenOdd)
 		} else {
-			g, err := lookup(p)
-			if err != nil {
-				return err
-			}
+			g := r.gradients[p.Gradient]
 			switch {
 			case len(g.stops) == 0:
 			case len(g.stops) == 1:
 				solid := st
-				solid.fill = Paint{Color: g.stops[0].color, Alpha: 1}
+				solid.fill = colorPaint(g.stops[0].color, alphaOf(g, 0))
 				solid.stroke = Paint{None: true}
-				r.setPaintState(solid)
-				addPath()
-				r.w.paint(true, false, st.evenOdd)
+				if !solid.fill.None {
+					r.setPaintState(solid)
+					addPath()
+					r.w.paint(true, false, st.evenOdd)
+				}
 			case g.user || boxed:
 				res := r.shadingOf(g)
 				r.w.save()
 				r.w.setAlpha(st.opacity*st.fillOpacity, r.w.cur.strokeAlpha)
+				if a := g.alphaGradient(); a != nil {
+					r.softMask(a, boxM)
+				}
 				addPath()
 				r.w.clipRule(st.evenOdd)
 				if !g.user {
@@ -395,15 +576,17 @@ func (r *renderer) paintShape(st gstate, addPath func(), box rect, haveBox bool)
 		}
 		return nil
 	}
-	g, err := lookup(p)
-	if err != nil {
-		return err
-	}
+	g := r.gradients[p.Gradient]
+	boxM := boxOf(p)
+	masked := false
 	switch {
 	case len(g.stops) == 0:
 		return nil
 	case len(g.stops) == 1:
-		strokeOnly.stroke = Paint{Color: g.stops[0].color, Alpha: 1}
+		strokeOnly.stroke = colorPaint(g.stops[0].color, alphaOf(g, 0))
+		if strokeOnly.stroke.None {
+			return nil
+		}
 		r.setPaintState(strokeOnly)
 	case g.user || boxed:
 		m := r.w.cur.ctm
@@ -413,6 +596,11 @@ func (r *renderer) paintShape(st gstate, addPath func(), box rect, haveBox bool)
 		r.shadingOf(g)
 		use := patternUse{res: fmt.Sprintf("P%d", len(r.patterns)), g: g, matrix: m}
 		r.patterns = append(r.patterns, use)
+		if a := g.alphaGradient(); a != nil {
+			r.w.save()
+			r.softMask(a, boxM)
+			masked = true
+		}
 		// The line state as for a solid stroke, then the pattern as its
 		// colour in place of the colour setPaintState sets.
 		strokeOnly.stroke = Paint{Alpha: 1}
@@ -423,7 +611,18 @@ func (r *renderer) paintShape(st gstate, addPath func(), box rect, haveBox bool)
 	}
 	addPath()
 	r.w.paint(false, true, false)
+	if masked {
+		r.w.restore()
+	}
 	return nil
+}
+
+// alphaOf is the alpha of stop i of g.
+func alphaOf(g *gradient, i int) float64 {
+	if g.alphas == nil {
+		return 1
+	}
+	return g.alphas[i]
 }
 
 // rect is a box: x0 <= x1, y0 <= y1.
@@ -516,7 +715,9 @@ func (g *gradient) repeat(fn pdf0.Object) pdf0.Object {
 			bounds = append(bounds, pdf0.Real(lo))
 		}
 		e0, e1 := lo-k, hi-k
-		if g.periods == periodsReflect && int64(k)%2 != 0 {
+		// The parity of k as a float: int64 of a k past its range, which
+		// a far-out parameter makes, is not defined in Go (X1).
+		if g.periods == periodsReflect && math.Mod(k, 2) != 0 {
 			e0, e1 = 1-e0, 1-e1
 		}
 		fns = append(fns, fn)
@@ -548,7 +749,7 @@ func (g *gradient) meshShading() pdf0.Object {
 		comps = 1
 	}
 	q := func(v, lo, hi float64) uint32 {
-		return uint32(math.Round(math.Max(0, math.Min(1, (v-lo)/(hi-lo))) * math.MaxUint32))
+		return uint32(math.Round(unit((v-lo)/(hi-lo)) * math.MaxUint32))
 	}
 	data := make([]byte, 0, len(g.mesh)*(9+comps))
 	for _, v := range g.mesh {
@@ -556,7 +757,7 @@ func (g *gradient) meshShading() pdf0.Object {
 		data = binary.BigEndian.AppendUint32(data, q(v.x, x0, x1))
 		data = binary.BigEndian.AppendUint32(data, q(v.y, y0, y1))
 		for _, c := range []float64{v.c.R, v.c.G, v.c.B}[:comps] {
-			data = append(data, uint8(math.Round(math.Max(0, math.Min(1, c))*255)))
+			data = append(data, uint8(math.Round(unit(c)*255)))
 		}
 	}
 	// Compressing into memory cannot fail.
@@ -622,4 +823,16 @@ func (g *gradient) key() string {
 		h.Write(b)
 	}
 	return string(h.Sum(nil))
+}
+
+// unit is v within 0..1, and 0 for NaN, so that converting a multiple of it
+// to an integer is defined (X1): math.Max and Min pass NaN through.
+func unit(v float64) float64 {
+	switch {
+	case v > 1:
+		return 1
+	case v > 0:
+		return v
+	}
+	return 0
 }

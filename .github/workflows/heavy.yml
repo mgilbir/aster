@@ -1,9 +1,9 @@
 name: Heavy gates
 
 # The slow gates, kept off pull requests so that a stack of them does not run
-# each one per push: the race detector, the full suite with the node oracle,
-# PDFs read back with PDFium, the suite on macOS and on 32-bit linux/386, and
-# the benchmark gate. They run on every push to main and by hand
+# each one per push: the race detector, the hostile-input security tests, the
+# full suite with the node oracle, PDFs read back with PDFium and poppler, the
+# suite on macOS and on 32-bit linux/386, and the benchmark gate. They run on every push to main and by hand
 # (workflow_dispatch) on a release candidate, which must be green before it
 # is tagged. Locally: `make check` runs all but macOS and the benchmarks,
 # `make benchgate BASE=<ref>` the benchmarks.
@@ -59,6 +59,37 @@ jobs:
       - name: go test -short
         run: GOARCH=386 go test -short -timeout 30m ./...
 
+  security:
+    # The heavy hostile-input tests, opt in elsewhere because they allocate
+    # up to a few GiB in their child processes: the resource and timeout
+    # reproducers (ASTER_SECURITY) and the heap of adversarial renders under
+    # WithMemoryLimit (ASTER_MEMCHECK, the full matrix; its smoke version runs
+    # in every go test), the concurrency stress test over the whole corpus
+    # (ASTER_STRESS_FULL) and the expression metering test at full size
+    # (ASTER_METERING_FULL). Each hostile render runs in a child process
+    # capped in heap and wall time (harness_security_test.go), so a
+    # regression fails the job rather than the runner.
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: heavy security tests
+        env:
+          ASTER_SECURITY: "1"
+          ASTER_MEMCHECK: "1"
+        run: go test -count=1 -v -timeout 30m -run 'TestResource|TestTimeout|TestSVGToPNGIgnoresEntities|TestMemoryLimitHeap$' .
+      - name: concurrency stress over the whole corpus
+        env:
+          ASTER_STRESS_FULL: "1"
+        run: go test -count=1 -timeout 20m -run TestConcurrentConverterSharesNothing .
+      - name: expression metering at full size
+        env:
+          ASTER_METERING_FULL: "1"
+        run: go test -count=1 -timeout 20m -run TestEveryBuiltinIsMetered ./internal/expr
+
   race:
     runs-on: ubuntu-latest
     steps:
@@ -72,7 +103,8 @@ jobs:
   pdfium:
     # aster's PDFs read back with PDFium, Chrome's PDF engine, and compared
     # with its PNGs: what the colour glyph painters draw, not only what they
-    # write (TestPDFium*). pypdfium2 is pinned by digest.
+    # write (TestPDFium*). pypdfium2 is pinned by digest. Then with poppler:
+    # text extraction (ToUnicode) and the vector PDF against the PNG.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -90,6 +122,15 @@ jobs:
         env:
           ASTER_PDFIUM: ${{ runner.temp }}/pdfium/bin/python
         run: go test -count=1 -run 'TestPDFium' -v ./internal/svgpdf
+      - name: install poppler
+        run: sudo apt-get update -q && sudo apt-get install -y -q poppler-utils
+      - name: PDFs read back with poppler (text extraction, PDF and PNG drift)
+        # They skip without poppler elsewhere; here they must run.
+        env:
+          ASTER_POPPLER: require
+        run: |
+          go test -count=1 -run 'TestPDFTextIsExtractable|TestVectorPDFMatchesPNG' .
+          go test -count=1 -run 'TestToUnicodeClusters' ./internal/svgpdf
 
   oracle:
     # The full suite with the node oracle required: upstream Vega / Vega-Lite

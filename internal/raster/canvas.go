@@ -2,6 +2,19 @@ package raster
 
 import "math"
 
+// unitByte is v, clamped to [0, 1] (NaN as 0), on the 0-255 scale, rounded:
+// an opacity as a byte. The clamp is done in float64, so no NaN or value out
+// of range is ever converted to an integer (implementation-defined in Go).
+func unitByte(v float64) uint32 {
+	if !(v > 0) {
+		return 0
+	}
+	if v >= 1 {
+		return 255
+	}
+	return uint32(math.Round(v * 255))
+}
+
 // mul255 returns round(a*b/255).
 func mul255(a, b uint32) uint32 {
 	t := a*b + 128
@@ -66,13 +79,7 @@ type paintSrc struct {
 }
 
 func solidPaint(c rgba, opacity float64) paintSrc {
-	a := float64(c.a) * opacity
-	if a < 0 {
-		a = 0
-	} else if a > 1 {
-		a = 1
-	}
-	a8 := uint32(math.Round(a * 255))
+	a8 := unitByte(float64(c.a) * opacity)
 	return paintSrc{solid: true, col: [4]uint8{
 		uint8(mul255(uint32(c.r), a8)), uint8(mul255(uint32(c.g), a8)), uint8(mul255(uint32(c.b), a8)), uint8(a8),
 	}}
@@ -310,7 +317,7 @@ func compositeLayer(dst, layer *canvas, r irect, opacity float64, m *mask, mode 
 		return
 	}
 	dst.markDirty(r)
-	op := uint32(math.Round(math.Max(0, math.Min(1, opacity)) * 255))
+	op := unitByte(opacity)
 	for y := r.y0; y < r.y1; y++ {
 		for x := r.x0; x < r.x1; x++ {
 			s := layer.pix[(y*layer.w+x)*4 : (y*layer.w+x)*4+4 : (y*layer.w+x)*4+4]
@@ -332,7 +339,7 @@ func compositeLayerAt(dst, layer *canvas, ox, oy int, opacity float64, m *mask, 
 		return
 	}
 	dst.markDirty(r)
-	op := uint32(math.Round(math.Max(0, math.Min(1, opacity)) * 255))
+	op := unitByte(opacity)
 	for y := r.y0; y < r.y1; y++ {
 		for x := r.x0; x < r.x1; x++ {
 			li := ((y-oy)*layer.w + (x - ox)) * 4

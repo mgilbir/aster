@@ -1,8 +1,10 @@
 package expr
 
 import (
+	"errors"
 	"math"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/jsval"
 )
@@ -139,7 +141,14 @@ func init() {
 			} else {
 				step = s.num(stepV)
 			}
-			t, ok := format.OffsetUnit(z, s.str(arg(args, 0)), s.num(arg(args, 1)), math.Floor(step))
+			ctx := s.Context
+			if ctx == nil {
+				ctx = backgroundContext
+			}
+			t, ok, err := format.OffsetUnit(ctx, z, s.str(arg(args, 0)), s.num(arg(args, 1)), math.Floor(step))
+			if err != nil {
+				panic(&cancelled{err}) // a quarter offset's walk stopped with the call
+			}
 			if !ok {
 				return jsval.Undefined
 			}
@@ -163,13 +172,16 @@ func init() {
 				ctx = backgroundContext
 			}
 			ts, ok, err := format.SequenceUnit(ctx, z, s.str(arg(args, 0)), s.num(arg(args, 1)), s.num(arg(args, 2)), step)
-			if err != nil {
-				throw("RangeError", "%v", err)
-			}
-			if !ok {
+			switch {
+			case errors.Is(err, budget.ErrLimit):
+				// MaxRangeLen is the engine's bound: it ends the render (C43).
+				panic(&limitPanic{err})
+			case err != nil:
+				panic(&cancelled{err})
+			case !ok:
 				return jsval.Undefined
 			}
-			out := make([]jsval.Value, len(ts))
+			out := s.makeItems(len(ts))
 			for i, t := range ts {
 				out[i] = jsval.Timestamp(t)
 			}
@@ -180,13 +192,15 @@ func init() {
 	fn("utcSequence", sequence(true))
 	fn("timeUnitSpecifier", func(s *Scope, args []jsval.Value) jsval.Value {
 		units := arg(args, 0)
+		s.chargeItems(units.Len())
+		s.work(units.Len())
 		names := make([]string, 0, units.Len())
 		for _, u := range units.Items() {
 			names = append(names, s.str(u))
 		}
 		spec, err := format.TimeUnitSpecifier(names, format.UnitSpecifiersFromValue(arg(args, 1)))
 		if err != nil {
-			throw("Error", "%v", err)
+			failFormat(err)
 		}
 		return jsval.Str(spec)
 	})

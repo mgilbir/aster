@@ -33,10 +33,10 @@ func Sequence(ctx context.Context, p SequenceParams) ([]jsval.Value, error) {
 		return nil, nil
 	}
 	if c > MaxSequence {
-		return nil, limitErr("sequence length", int(min(c, math.MaxInt32)), MaxSequence)
+		return nil, limitErr("sequence length", c, MaxSequence)
 	}
 	n := int(c)
-	if err := reserveOut(ctx, n, 0); err != nil {
+	if err := reserveRows(ctx, n); err != nil {
 		return nil, err
 	}
 	out := make([]jsval.Value, n)

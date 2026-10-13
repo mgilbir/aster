@@ -30,10 +30,10 @@ func Cross(ctx context.Context, data []jsval.Value, p CrossParams) ([]jsval.Valu
 		b = "b"
 	}
 	if p.Filter == nil && len(data) > 0 && len(data) > MaxGroupCells/len(data) {
-		return nil, limitErr("cross tuples", len(data)*len(data), MaxGroupCells)
+		return nil, limitErr("cross tuples", float64(len(data))*float64(len(data)), MaxGroupCells)
 	}
 	if p.Filter == nil {
-		if err := reserveOut(ctx, int(min(budget.Mul(int64(len(data)), int64(len(data))), math.MaxInt32)), len(data)); err != nil {
+		if err := reserveRows(ctx, int(min(budget.Mul(int64(len(data)), int64(len(data))), math.MaxInt32))); err != nil {
 			return nil, err
 		}
 	}
@@ -55,10 +55,10 @@ func Cross(ctx context.Context, data []jsval.Value, p CrossParams) ([]jsval.Valu
 			t.Set(b, data[j])
 			if p.Filter == nil || p.Filter(jsval.Obj(t)) {
 				if len(out) >= MaxGroupCells {
-					return nil, limitErr("cross tuples", len(out)+1, MaxGroupCells)
+					return nil, limitErr("cross tuples", float64(len(out)+1), MaxGroupCells)
 				}
 				if int64(len(out)) >= room {
-					return nil, reserveOut(ctx, len(out)+1, 0)
+					return nil, reserveRows(ctx, len(out)+1)
 				}
 				out = append(out, jsval.Obj(t))
 				t = jsval.NewObject(2)

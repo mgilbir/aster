@@ -66,7 +66,7 @@ func anglesOf(v jsval.Value) ([]float64, bool) {
 func (p *standard) Set(prop string, v jsval.Value) error {
 	switch prop {
 	case "clipAngle":
-		p.setClipAngle(jsval.ToNumber(v))
+		return p.setClipAngle(jsval.ToNumber(v))
 	case "clipExtent":
 		if v.IsNullish() {
 			p.setClipExtent(nil)

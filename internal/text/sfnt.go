@@ -2,7 +2,6 @@ package text
 
 import (
 	"encoding/binary"
-	"math"
 	"math/bits"
 	"slices"
 	"strings"
@@ -68,23 +67,67 @@ func sfntTable(b []byte, index int, tag string) []byte {
 	return nil
 }
 
-// sfntSize is the size of the font face index of b would be on its own: its
-// directory and its tables, each padded to four bytes (to within the padding
-// of the last).
-func sfntSize(b []byte, index int) int {
-	dir, ok := sfntDir(b, index)
+// sfntRecord is a table of a face: its tag and where its bytes are in the
+// font file.
+type sfntRecord struct {
+	tag     string
+	off, nb int
+}
+
+// sfntRecords reads the table directory of face index of b, the one
+// discipline every reader of a whole face here follows, since a font is
+// untrusted (C31): a tag named twice is the table its first record names, as
+// sfntTable and fontsubset take it, and a record whose bytes lie outside the
+// file is no table. ok is false for a face with no directory, and for one
+// whose tables add up to more than the file: tables lie apart in a sound
+// font, and ones that overlap would make whatever is written from them
+// larger than the font itself, many times over.
+func sfntRecords(b []byte, index int) (dir int, recs []sfntRecord, ok bool) {
+	dir, ok = sfntDir(b, index)
 	if !ok || dir < 0 || dir+12 > len(b) {
-		return len(b)
+		return 0, nil, false
 	}
 	n := int(binary.BigEndian.Uint16(b[dir+4:]))
 	if n > 512 || dir+12+16*n > len(b) {
+		return 0, nil, false
+	}
+	recs = make([]sfntRecord, 0, n)
+	seen := make(map[string]bool, n)
+	total := uint64(0)
+	for i := range n {
+		rec := b[dir+12+16*i:][:16]
+		tag := string(rec[:4])
+		if seen[tag] {
+			continue
+		}
+		seen[tag] = true
+		off := uint64(binary.BigEndian.Uint32(rec[8:]))
+		l := uint64(binary.BigEndian.Uint32(rec[12:]))
+		if off+l > uint64(len(b)) {
+			continue
+		}
+		if total += l; total > uint64(len(b)) {
+			return 0, nil, false
+		}
+		recs = append(recs, sfntRecord{tag, int(off), int(l)})
+	}
+	return dir, recs, true
+}
+
+// sfntSize is the size of the font face index of b would be on its own: its
+// directory and its tables, each padded to four bytes (to within the padding
+// of the last). It is never more than b holds, padding aside: a face whose
+// directory cannot be read says it is the size of b.
+func sfntSize(b []byte, index int) int {
+	_, recs, ok := sfntRecords(b, index)
+	if !ok {
 		return len(b)
 	}
-	size := int64(12 + 16*n) // int64: the lengths can sum past a 32-bit int
-	for i := range n {
-		size += (int64(binary.BigEndian.Uint32(b[dir+12+16*i+12:])) + 3) &^ 3 // padded to 4 bytes
+	size := 12 + 16*len(recs)
+	for _, r := range recs {
+		size += (r.nb + 3) &^ 3 // padded to 4 bytes
 	}
-	return int(min(size, math.MaxInt))
+	return size
 }
 
 // outlineTables are the tables of a font an embedder of its outlines reads:
@@ -96,15 +139,31 @@ var outlineTables = map[string]bool{
 	"CFF ": true, "CFF2": true, "VORG": true, "vhea": true, "vmtx": true,
 }
 
+// outlineProgramSize is the size of what outlineProgram writes, or 0 when it
+// writes nothing.
+func outlineProgramSize(b []byte, index int) int {
+	_, recs, ok := sfntRecords(b, index)
+	if !ok {
+		return 0
+	}
+	n, size := 0, 0
+	for _, r := range recs {
+		if outlineTables[r.tag] {
+			n++
+			size += (r.nb + 3) &^ 3
+		}
+	}
+	if n == 0 {
+		return 0
+	}
+	return 12 + 16*n + size
+}
+
 // outlineProgram writes the outline tables of face index of b as a font of
 // its own, or nil when b has no such face.
 func outlineProgram(b []byte, index int) []byte {
-	dir, ok := sfntDir(b, index)
-	if !ok || dir < 0 || dir+12 > len(b) {
-		return nil
-	}
-	n := int(binary.BigEndian.Uint16(b[dir+4:]))
-	if n > 512 || dir+12+16*n > len(b) {
+	dir, recs, ok := sfntRecords(b, index)
+	if !ok {
 		return nil
 	}
 	type table struct {
@@ -112,15 +171,10 @@ func outlineProgram(b []byte, index int) []byte {
 		data []byte
 	}
 	var tables []table
-	for i := range n {
-		rec := b[dir+12+16*i:][:16]
-		tag := string(rec[:4])
-		off := uint64(binary.BigEndian.Uint32(rec[8:]))
-		l := uint64(binary.BigEndian.Uint32(rec[12:]))
-		if !outlineTables[tag] || off+l > uint64(len(b)) {
-			continue
+	for _, r := range recs {
+		if outlineTables[r.tag] {
+			tables = append(tables, table{r.tag, b[r.off : r.off+r.nb]})
 		}
-		tables = append(tables, table{tag, b[off : off+l]})
 	}
 	if len(tables) == 0 {
 		return nil

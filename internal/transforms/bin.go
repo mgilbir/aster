@@ -60,7 +60,7 @@ func Bin(c BinConfig) (BinResult, error) {
 		maxb = 20
 	}
 	if maxb > MaxBins {
-		return BinResult{}, limitErr("maxbins", int(maxb), MaxBins)
+		return BinResult{}, limitErr("maxbins", maxb, MaxBins)
 	}
 	base := c.Base
 	if base == 0 || math.IsNaN(base) {
@@ -190,7 +190,7 @@ func NewBinner(p BinParams) (*Binner, error) {
 	}
 	name := p.Name
 	if name == "" {
-		name = "bin_" + p.Field.Name
+		name = "bin_" + p.Field.Key()
 	}
 	return &Binner{Start: start, Stop: stop, Step: step, Name: name, field: p.Field}, nil
 }

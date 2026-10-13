@@ -1,6 +1,7 @@
 package vegalite
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/mgilbir/aster/internal/jsval"
@@ -38,6 +39,10 @@ func (p *normParams) clone() *normParams {
 }
 
 func (p *normParams) deeper() *normParams {
+	cc := p.cc
+	// Every view the normalizer maps goes one level deeper: the step charged
+	// for it bounds the normalization of a spec with many views.
+	cc.work(modelStep)
 	c := *p
 	c.depth++
 	if c.depth > maxDepth {
@@ -86,31 +91,31 @@ func (b *baseMapper) mapLayerOrUnit(spec Value, p *normParams) Value {
 	case isUnitSpec(spec):
 		return b.self.mapUnit(spec, p)
 	}
-	throw("Invalid spec: %s", stringify(spec))
+	throw("Invalid spec: %s", stringify(p.cc, spec))
 	return undef
 }
 
 func (b *baseMapper) mapLayer(spec Value, p *normParams) Value {
 	o := cloneObj(spec.ObjValue())
-	o.Set("layer", mapVals(spec.Get("layer"), func(s Value) Value { return b.self.mapLayerOrUnit(s, p.deeper()) }))
+	o.Set("layer", mapList(spec.Get("layer"), "spec.layer", func(s Value) Value { return b.self.mapLayerOrUnit(s, p.deeper()) }))
 	return jsval.Obj(o)
 }
 
 func (b *baseMapper) mapHConcat(spec Value, p *normParams) Value {
 	o := cloneObj(spec.ObjValue())
-	o.Set("hconcat", mapVals(spec.Get("hconcat"), func(s Value) Value { return b.self.mapTop(s, p) }))
+	o.Set("hconcat", mapList(spec.Get("hconcat"), "spec.hconcat", func(s Value) Value { return b.self.mapTop(s, p) }))
 	return jsval.Obj(o)
 }
 
 func (b *baseMapper) mapVConcat(spec Value, p *normParams) Value {
 	o := cloneObj(spec.ObjValue())
-	o.Set("vconcat", mapVals(spec.Get("vconcat"), func(s Value) Value { return b.self.mapTop(s, p) }))
+	o.Set("vconcat", mapList(spec.Get("vconcat"), "spec.vconcat", func(s Value) Value { return b.self.mapTop(s, p) }))
 	return jsval.Obj(o)
 }
 
 func (b *baseMapper) mapConcat(spec Value, p *normParams) Value {
 	rest := omit(spec, "concat")
-	rest.Set("concat", mapVals(spec.Get("concat"), func(s Value) Value { return b.self.mapTop(s, p) }))
+	rest.Set("concat", mapList(spec.Get("concat"), "concat", func(s Value) Value { return b.self.mapTop(s, p) }))
 	return jsval.Obj(rest)
 }
 
@@ -130,6 +135,13 @@ func (b *baseMapper) mapRepeat(spec Value, p *normParams) Value {
 
 // normalize returns the normalized spec (with an autosize object when it is not Vega's default).
 func normalize(cc *compileCtx, spec Value, config Value) Value {
+	// Repeat, layer repeat and their nesting multiply views: four nested
+	// repeats of 30 fields are 810,000 views from a 1 KB specification (C15).
+	// The views the specification describes are counted before any is built,
+	// against one budget for the whole compilation.
+	if n, limit := countViews(cc, spec, 0), cc.maxViews; n > float64(limit) {
+		exceeded("specification would create %s views (limit %d)", jsval.JSNumberString(n), limit)
+	}
 	p := &normParams{cc: cc, config: config, sel: &selectionState{}}
 	compat := newSelectionCompatNormalizer()
 	core := newCoreNormalizer(cc)
@@ -137,7 +149,7 @@ func normalize(cc *compileCtx, spec Value, config Value) Value {
 	s := compat.mapTop(spec, p)
 	s = core.mapTop(s, p)
 	s = top.mapTop(s, p)
-	autosize := normalizeAutoSize(s, mkv("width", spec.Get("width"), "height", spec.Get("height"), "autosize", spec.Get("autosize")), config)
+	autosize := normalizeAutoSize(cc, s, mkv("width", spec.Get("width"), "height", spec.Get("height"), "autosize", spec.Get("autosize")), config)
 	o := cloneObj(s.ObjValue())
 	if autosize.IsTruthy() {
 		o.Set("autosize", autosize)
@@ -152,13 +164,23 @@ func normalizeAutoSizeValue(v Value) Value {
 	return coalesce(v, mkv())
 }
 
-func normalizeAutoSize(spec Value, sizeInfo Value, config Value) Value {
+func normalizeAutoSize(cc *compileCtx, spec Value, sizeInfo Value, config Value) Value {
 	width, height := sizeInfo.Get("width"), sizeInfo.Get("height")
 	isFitCompatible := isUnitSpec(spec) || isLayerSpec(spec)
 	autosizeDefault := jsval.NewObject(2)
-	isContainer := func(v Value) bool { return v.IsStr() && v.StrValue() == "container" }
-	// A container width/height is discarded for specs that cannot fit (only a warning upstream).
-	if isFitCompatible {
+	// width == 'container' (loose: an array prints as its items joined).
+	isContainer := func(v Value) bool { return (v.IsStr() || v.IsArr()) && v.AsString() == "container" }
+	if !isFitCompatible {
+		// A container width/height is discarded for specs that cannot fit.
+		if isContainer(width) {
+			cc.warn(msgContainerSizeNonSingle("width"))
+			width = undef
+		}
+		if isContainer(height) {
+			cc.warn(msgContainerSizeNonSingle("height"))
+			height = undef
+		}
+	} else {
 		switch {
 		case isContainer(width) && isContainer(height):
 			autosizeDefault.Set("type", jsval.Str("fit"))
@@ -177,8 +199,16 @@ func normalizeAutoSize(spec Value, sizeInfo Value, config Value) Value {
 		spread(autosize, normalizeAutoSizeValue(config.Get("autosize")))
 	}
 	spread(autosize, normalizeAutoSizeValue(spec.Get("autosize")))
-	if autosize.Lookup("type").IsStr() && autosize.Lookup("type").StrValue() == "fit" && !isFitCompatible {
+	typeIs := func(t string) bool { return autosize.Lookup("type").IsStr() && autosize.Lookup("type").StrValue() == t }
+	if typeIs("fit") && !isFitCompatible {
+		cc.warn(msgFitNonSingle)
 		autosize.Set("type", jsval.Str("pad"))
+	}
+	if isContainer(width) && !(typeIs("fit") || typeIs("fit-x")) {
+		cc.warn(msgContainerSizeNotCompatibleWithAutosize("width"))
+	}
+	if isContainer(height) && !(typeIs("fit") || typeIs("fit-y")) {
+		cc.warn(msgContainerSizeNotCompatibleWithAutosize("height"))
 	}
 	if deepEqual(jsval.Obj(autosize), mkv("type", "pad")) {
 		return undef
@@ -208,11 +238,20 @@ func (n *selectionCompatNormalizer) mapTop(spec Value, p *normParams) Value {
 }
 
 func (n *selectionCompatNormalizer) mapLayerOrUnit(spec Value, p *normParams) Value {
+	cc := p.cc
 	spec = normalizeTransforms(spec, p)
 	if enc := spec.Get("encoding"); enc.IsTruthy() {
+		// entries(spec.encoding): a string's entries are its characters.
 		out := jsval.NewObject(enc.Len())
+		if enc.IsStr() {
+			for i, u := range utf16Len(enc.StrValue()) {
+				cc.work(1)
+				out.Set(strconv.Itoa(i), normalizeChannelDefCompat(jsval.Str(string(rune(u))), p))
+			}
+		}
 		for _, ch := range keysOf(enc) {
-			out.Set(ch, normalizeChannelDefCompat(enc.Get(ch), p))
+			cc.work(1)
+			out.Set(ch, normalizeChannelDefCompat(jsIndexOrGet(enc, ch), p))
 		}
 		o := cloneObj(spec.ObjValue())
 		o.Set("encoding", jsval.Obj(out))
@@ -222,15 +261,22 @@ func (n *selectionCompatNormalizer) mapLayerOrUnit(spec Value, p *normParams) Va
 }
 
 func (n *selectionCompatNormalizer) mapUnit(spec Value, p *normParams) Value {
+	cc := p.cc
 	selection := spec.Get("selection")
 	if !selection.IsTruthy() {
 		return spec
 	}
 	rest := omit(spec, "selection")
 	var params []Value
-	for _, name := range keysOf(selection) {
-		selDef := selection.Get(name)
-		value, bind, empty := selDef.Get("init"), selDef.Get("bind"), selDef.Get("empty")
+	// entries(selection), then const {init: value, bind, empty, ...select} =
+	// selDef: a string's entries are its characters.
+	for _, name := range jsKeys(selection) {
+		cc.work(1)
+		selDef := jsProp(selection, name)
+		if selDef.IsNullish() {
+			throw("Cannot destructure property 'init' of 'selDef' as it is %s.", nullishName(selDef))
+		}
+		value, bind, empty := jsProp(selDef, "init"), jsProp(selDef, "bind"), jsProp(selDef, "empty")
 		sel := omit(selDef, "init", "bind", "empty")
 		if t := sel.Lookup("type"); t.IsStr() {
 			switch t.StrValue() {
@@ -244,6 +290,7 @@ func (n *selectionCompatNormalizer) mapUnit(spec Value, p *normParams) Value {
 		emptyOK := !(empty.IsStr() && empty.StrValue() == "none")
 		p.emptySelections[name] = emptyOK
 		for _, pred := range p.selectionPredicates[name] {
+			cc.work(1)
 			pred.Set("empty", jsval.Bool(emptyOK))
 		}
 		params = append(params, mkv("name", name, "value", value, "select", jsval.Obj(sel), "bind", bind))
@@ -258,7 +305,10 @@ func normalizeTransforms(spec Value, p *normParams) Value {
 		return spec
 	}
 	rest := omit(spec, "transform")
-	rest.Set("transform", mapVals(tx, func(t Value) Value {
+	rest.Set("transform", mapList(tx, "tx", func(t Value) Value {
+		if p.cc.v5 {
+			jsIn(t, "filter") // 5.8's isFilter
+		}
 		switch {
 		case hasProperty(t, "filter"):
 			return mkv("filter", normalizePredicateCompat(t, p))
@@ -284,10 +334,13 @@ func normalizeTransforms(spec Value, p *normParams) Value {
 func normalizeChannelDefCompat(obj Value, p *normParams) Value {
 	cc := p.cc
 
+	if cc.v5 && obj.IsTruthy() {
+		jsIn(obj, "scale") // 5.8's isScaleFieldDef: a TypeError on a primitive
+	}
 	if !obj.IsObj() {
 		return obj
 	}
-	enc := deepClone(obj)
+	enc := duplicate(cc, obj)
 	eo := enc.ObjValue()
 	if isFieldDef(cc, enc) && isObject(enc.Get("bin")) {
 		eo.Set("bin", normalizeBinExtent(enc.Get("bin")))
@@ -306,6 +359,7 @@ func normalizeChannelDefCompat(obj Value, p *normParams) Value {
 		cond := enc.Get("condition")
 		if cond.IsArr() {
 			eo.Set("condition", mapVals(cond, func(c Value) Value {
+				cc.work(1)
 				if c.Get("param").IsTruthy() {
 					return c
 				}
@@ -392,9 +446,11 @@ func addSpecNameToParams(spec Value, p *normParams) *normParams {
 }
 
 func (n *topLevelSelectionsNormalizer) mapTop(spec Value, p *normParams) Value {
+	cc := p.cc
 	if params := spec.Get("params"); params.IsTruthy() && !isUnitSpec(spec) {
 		var rest []Value
-		for _, param := range params.Items() {
+		for _, param := range iterate(params, "spec.params") {
+			cc.work(1)
 			if isSelectionParameter(param) {
 				p.sel.selections = append(p.sel.selections, param)
 			} else {
@@ -407,6 +463,7 @@ func (n *topLevelSelectionsNormalizer) mapTop(spec Value, p *normParams) Value {
 }
 
 func (n *topLevelSelectionsNormalizer) mapUnit(spec Value, p *normParams) Value {
+	cc := p.cc
 	selections := p.sel.selections
 	if len(selections) == 0 {
 		return spec
@@ -415,12 +472,14 @@ func (n *topLevelSelectionsNormalizer) mapUnit(spec Value, p *normParams) Value 
 	var params []Value
 	specName := spec.Get("name")
 	for _, sel := range selections {
+		cc.work(1)
 		views := sel.Get("views")
 		if !views.IsTruthy() || views.Len() == 0 {
 			params = append(params, sel)
 			continue
 		}
 		for _, view := range views.Items() {
+			cc.work(1)
 			switch {
 			case view.IsStr():
 				if (specName.IsStr() && view.StrValue() == specName.StrValue()) || contains(path, view.StrValue()) {
@@ -430,6 +489,7 @@ func (n *topLevelSelectionsNormalizer) mapUnit(spec Value, p *normParams) Value 
 				prev := -1
 				ok := true
 				for i, v := range view.Items() {
+					cc.work(1)
 					idx := indexOfStr(path, v.AsString())
 					if idx == -1 || (i > 0 && idx <= prev) {
 						ok = false
@@ -545,7 +605,7 @@ func (n *coreNormalizer) mapUnit(spec Value, p *normParams) Value {
 }
 
 func (n *coreNormalizer) mapRepeat(spec Value, p *normParams) Value {
-	if isLayerRepeatSpec(spec) {
+	if isLayerRepeatSpec(p.cc, spec) {
 		return n.mapLayerRepeat(spec, p)
 	}
 	return n.mapNonLayerRepeat(spec, p)
@@ -572,7 +632,7 @@ func (n *coreNormalizer) mapLayerRepeat(spec Value, p *normParams) Value {
 		ns.Set("spec", mkv("repeat", mkv("layer", layer), "spec", childSpec))
 		return n.mapRepeat(jsval.Obj(ns), p)
 	}
-	items := layer.Items()
+	items := listOf(layer, "layer", "map")
 	out := make([]Value, len(items))
 	for i, layerValue := range items {
 		childRepeater := cloneObj(repeater.ObjValue())
@@ -581,7 +641,7 @@ func (n *coreNormalizer) mapLayerRepeat(spec Value, p *normParams) Value {
 		if childSpec.Get("name").IsTruthy() {
 			prefix = childSpec.Get("name").AsString() + "_"
 		}
-		childName := prefix + p.repeaterPrefix + "child__layer_" + varName(layerValue.AsString())
+		childName := prefix + p.repeaterPrefix + "child__layer_" + varNameOf(layerValue)
 		cp := p.deeper()
 		cp.repeater = jsval.Obj(childRepeater)
 		cp.repeaterPrefix = childName
@@ -599,6 +659,7 @@ func (n *coreNormalizer) mapNonLayerRepeat(spec Value, p *normParams) Value {
 	remaining := omit(spec, "repeat", "spec", "data")
 	if !repeat.IsArr() && spec.Get("columns").IsTruthy() {
 		spec = jsval.Obj(omit(spec, "columns"))
+		p.cc.warn(msgColumnsNotSupportByRowCol("repeat"))
 		remaining = omit(spec, "repeat", "spec", "data")
 	}
 	repeater := p.repeater
@@ -608,13 +669,16 @@ func (n *coreNormalizer) mapNonLayerRepeat(spec Value, p *normParams) Value {
 	// row/column/repeat value lists: the specified list, or a single (possibly undefined) inherited value.
 	single := func(v Value) []Value { return []Value{v} }
 	var rows, cols, repeatValues []Value
-	if !repeat.IsArr() && repeat.Get("row").IsTruthy() {
-		rows = repeat.Get("row").Items()
+	// for (const rowValue of row): a string's characters, and anything
+	// else that is not an array is not iterable.
+	// (!isArray(repeat) && repeat.row): a TypeError of a null repeat.
+	if !repeat.IsArr() && jsGet(repeat, "row").IsTruthy() {
+		rows = iterate(repeat.Get("row"), "row")
 	} else {
 		rows = single(repeater.Get("row"))
 	}
-	if !repeat.IsArr() && repeat.Get("column").IsTruthy() {
-		cols = repeat.Get("column").Items()
+	if !repeat.IsArr() && jsGet(repeat, "column").IsTruthy() {
+		cols = iterate(repeat.Get("column"), "column")
 	} else {
 		cols = single(repeater.Get("column"))
 	}
@@ -622,9 +686,6 @@ func (n *coreNormalizer) mapNonLayerRepeat(spec Value, p *normParams) Value {
 		repeatValues = repeat.Items()
 	} else {
 		repeatValues = single(repeater.Get("repeat"))
-	}
-	if len(repeatValues)*len(rows)*len(cols) > maxRepeatChildren {
-		exceeded("repeat would create %d views (limit %d)", len(repeatValues)*len(rows)*len(cols), maxRepeatChildren)
 	}
 	var concat []Value
 	for _, repeatValue := range repeatValues {
@@ -637,13 +698,13 @@ func (n *coreNormalizer) mapNonLayerRepeat(spec Value, p *normParams) Value {
 				}
 				var suffix string
 				if repeat.IsArr() {
-					suffix = varName(repeatValue.AsString())
+					suffix = varNameOf(repeatValue)
 				} else {
 					if repeat.Get("row").IsTruthy() {
-						suffix += "row_" + varName(rowValue.AsString())
+						suffix += "row_" + varNameOf(rowValue)
 					}
 					if repeat.Get("column").IsTruthy() {
-						suffix += "column_" + varName(columnValue.AsString())
+						suffix += "column_" + varNameOf(columnValue)
 					}
 				}
 				childName := pre + p.repeaterPrefix + "child__" + suffix
@@ -661,7 +722,12 @@ func (n *coreNormalizer) mapNonLayerRepeat(spec Value, p *normParams) Value {
 	case repeat.IsArr():
 		columns = spec.Get("columns")
 	case repeat.Get("column").IsTruthy():
-		columns = jsval.Int(repeat.Get("column").Len())
+		// repeat.column.length: a string's length is in UTF-16 units.
+		if c := repeat.Get("column"); c.IsStr() {
+			columns = jsval.Int(utf16Count(p.cc, c.StrValue()))
+		} else {
+			columns = jsval.Int(c.Len())
+		}
 	default:
 		columns = jsval.Int(1)
 	}
@@ -682,6 +748,7 @@ func (n *coreNormalizer) mapFacet(spec Value, p *normParams) Value {
 	facet := spec.Get("facet")
 	if isFacetMapping(facet) && spec.Get("columns").IsTruthy() {
 		spec = jsval.Obj(omit(spec, "columns"))
+		p.cc.warn(msgColumnsNotSupportByRowCol("facet"))
 	}
 	return n.baseMapper.mapFacet(spec, p)
 }
@@ -690,7 +757,7 @@ func (n *coreNormalizer) mapUnitWithParentEncodingOrProjection(spec Value, p *no
 	cc := p.cc
 
 	encoding, projection := spec.Get("encoding"), spec.Get("projection")
-	mergedProjection := mergeProjection(p.parentProjection, projection)
+	mergedProjection := mergeProjection(p.cc, p.parentProjection, projection)
 	mergedEncoding := mergeEncoding(cc, p.parentEncoding, replaceRepeaterInEncoding(cc, encoding, p.repeater), false)
 	o := cloneObj(spec.ObjValue())
 	if mergedProjection.IsTruthy() {
@@ -744,6 +811,16 @@ func (n *coreNormalizer) getFacetMappingAndLayout(row, column, facet Value, p *n
 	cc := p.cc
 
 	if row.IsTruthy() || column.IsTruthy() {
+		if facet.IsTruthy() {
+			var chs []string
+			if row.IsTruthy() {
+				chs = append(chs, chRow)
+			}
+			if column.IsTruthy() {
+				chs = append(chs, chColumn)
+			}
+			p.cc.warn(msgFacetChannelDropped(chs))
+		}
 		facetMapping := jsval.NewObject(2)
 		layout := jsval.NewObject(3)
 		for _, ch := range []string{chRow, chColumn} {
@@ -786,7 +863,7 @@ func (n *coreNormalizer) mapLayer(spec Value, p *normParams) Value {
 	rest := omit(spec, "encoding", "projection")
 	cp := p.clone()
 	cp.parentEncoding = mergeEncoding(cc, p.parentEncoding, encoding, true)
-	cp.parentProjection = mergeProjection(p.parentProjection, projection)
+	cp.parentProjection = mergeProjection(p.cc, p.parentProjection, projection)
 	cp.deeper()
 	if spec.Get("name").IsTruthy() {
 		rest.Set("name", jsval.Str(joinNonEmpty(cp.repeaterPrefix, spec.Get("name").AsString())))
@@ -796,7 +873,8 @@ func (n *coreNormalizer) mapLayer(spec Value, p *normParams) Value {
 
 // mergeEncoding merges a layer's shared encoding into a child's encoding.
 func mergeEncoding(cc *compileCtx, parentEncoding, encoding Value, layer bool) Value {
-	if !encoding.IsTruthy() && !encoding.IsObj() {
+	// encoding = {} is the default of an undefined encoding only.
+	if encoding.IsUndefined() {
 		encoding = mkv()
 	}
 	var merged *Object
@@ -804,15 +882,17 @@ func mergeEncoding(cc *compileCtx, parentEncoding, encoding Value, layer bool) V
 		merged = jsval.NewObject(8)
 		seen := map[string]bool{}
 		var channels []string
-		for _, k := range append(append([]string(nil), keysOf(parentEncoding)...), keysOf(encoding)...) {
+		for _, k := range append(append([]string(nil), jsKeys(parentEncoding)...), jsKeys(encoding)...) {
+			cc.work(1)
 			if !seen[k] {
 				seen[k] = true
 				channels = append(channels, k)
 			}
 		}
 		for _, channel := range channels {
-			channelDef := encoding.Get(channel)
-			parentChannelDef := parentEncoding.Get(channel)
+			cc.work(1)
+			channelDef := jsProp(encoding, channel)
+			parentChannelDef := jsProp(parentEncoding, channel)
 			switch {
 			case isFieldOrDatumDef(cc, channelDef):
 				merged.Set(channel, jsval.Obj(merged2(parentChannelDef, channelDef)))
@@ -826,10 +906,14 @@ func mergeEncoding(cc *compileCtx, parentEncoding, encoding Value, layer bool) V
 				merged.Set(channel, parentChannelDef)
 			}
 		}
-	} else if encoding.IsObj() {
-		merged = encoding.ObjValue()
+	} else {
+		// merged = encoding; !merged || isEmpty(merged) ? undefined : merged
+		if !encoding.IsTruthy() || len(jsKeys(encoding)) == 0 {
+			return undef
+		}
+		return encoding
 	}
-	if merged == nil || merged.Len() == 0 {
+	if merged.Len() == 0 {
 		return undef
 	}
 	return jsval.Obj(merged)
@@ -837,7 +921,10 @@ func mergeEncoding(cc *compileCtx, parentEncoding, encoding Value, layer bool) V
 
 func merged2(a, b Value) *Object { return spread(spread(jsval.NewObject(4), a), b) }
 
-func mergeProjection(parent, projection Value) Value {
+func mergeProjection(cc *compileCtx, parent, projection Value) Value {
+	if parent.IsTruthy() && projection.IsTruthy() {
+		cc.warn(msgProjectionOverridden(cc, parent, projection))
+	}
 	if projection.IsNullish() {
 		return parent
 	}
@@ -1060,7 +1147,7 @@ func (ruleForRangedLineNormalizer) hasMatchingType(spec Value, p *normParams) bo
 		for _, channel := range secondaryRangeChannels {
 			mainDef := encoding.Get(getMainRangeChannel(channel))
 			if encoding.Get(channel).IsTruthy() {
-				if (isFieldDef(cc, mainDef) && !isBinned(mainDef.Get("bin"))) || isDatumDef(mainDef) {
+				if (isFieldDef(cc, mainDef) && !isBinned(mainDef.Get("bin"))) || isDatumDefOf(cc, mainDef) {
 					return true
 				}
 			}
@@ -1070,7 +1157,8 @@ func (ruleForRangedLineNormalizer) hasMatchingType(spec Value, p *normParams) bo
 }
 
 func (ruleForRangedLineNormalizer) run(spec Value, p *normParams, normalize func(Value, *normParams) Value) Value {
-	mark := spec.Get("mark")
+	mark, encoding := spec.Get("mark"), spec.Get("encoding")
+	p.cc.warn(msgLineWithRange(encoding.Get("x2").IsTruthy(), encoding.Get("y2").IsTruthy()))
 	o := cloneObj(spec.ObjValue())
 	if isObject(mark) {
 		o.Set("mark", jsval.Obj(spread(cloneObj(mark.ObjValue()), mkv("type", "rule"))))
@@ -1101,8 +1189,11 @@ func replaceRepeaterInEncoding(cc *compileCtx, encoding, repeater Value) Value {
 
 // replaceRepeatInProp substitutes {repeat: 'x'} in o[prop]. ok=false means the
 // referenced repeat value does not exist (upstream returns undefined).
-func replaceRepeatInProp(prop string, o, repeater Value) (Value, bool) {
+func replaceRepeatInProp(cc *compileCtx, prop string, o, repeater Value) (Value, bool) {
 	val := o.Get(prop)
+	if cc.v5 && val.IsTruthy() && !val.IsStr() {
+		jsIn(val, "repeat") // 5.8's isRepeatRef: field && !isString(field) && 'repeat' in field
+	}
 	if isRepeatRef(val) {
 		key := val.Get("repeat").AsString()
 		if repeater.IsObj() && repeater.ObjValue().Has(key) {
@@ -1118,6 +1209,14 @@ func replaceRepeatInProp(prop string, o, repeater Value) (Value, bool) {
 			c.Set(prop, jsval.Str(repr))
 			return jsval.Obj(c), true
 		}
+		if inh, ok := inheritedValue(key); ok && repeater.IsObj() {
+			// The datum becomes what the name inherits: Object.prototype
+			// for "__proto__", else the member function.
+			c := cloneObj(o.ObjValue())
+			c.Set(prop, inh)
+			return jsval.Obj(c), true
+		}
+		cc.warn(msgNoSuchRepeatedValue(val.Get("repeat")))
 		return undef, false
 	}
 	return o, true
@@ -1140,13 +1239,13 @@ func inheritedPropertyText(key string) (string, bool) {
 }
 
 func replaceRepeaterInFieldDef(cc *compileCtx, fd, repeater Value) Value {
-	fd2, ok := replaceRepeatInProp("field", fd, repeater)
+	fd2, ok := replaceRepeatInProp(cc, "field", fd, repeater)
 	if !ok {
 		return undef
 	}
 	fd = fd2
 	if isSortableFieldDef(fd) && isSortField(cc, fd.Get("sort")) {
-		if sort, ok := replaceRepeatInProp("field", fd.Get("sort"), repeater); ok && sort.IsTruthy() {
+		if sort, ok := replaceRepeatInProp(cc, "field", fd.Get("sort"), repeater); ok && sort.IsTruthy() {
 			c := cloneObj(fd.ObjValue())
 			c.Set("sort", sort)
 			fd = jsval.Obj(c)
@@ -1159,9 +1258,10 @@ func replaceRepeaterInFieldOrDatumDef(cc *compileCtx, def, repeater Value) Value
 	if isFieldDef(cc, def) {
 		return replaceRepeaterInFieldDef(cc, def, repeater)
 	}
-	dd, ok := replaceRepeatInProp("datum", def, repeater)
+	dd, ok := replaceRepeatInProp(cc, "datum", def, repeater)
 	if !ok {
-		return undef
+		// datumDef !== def && !datumDef.type, of undefined.
+		throw("Cannot read properties of undefined (reading 'type')")
 	}
 	if dd.ObjValue() != def.ObjValue() && !dd.Get("type").IsTruthy() {
 		dd.ObjValue().Set("type", jsval.Str("nominal"))
@@ -1192,6 +1292,7 @@ func replaceRepeaterInChannelDef(cc *compileCtx, cd, repeater Value) Value {
 func replaceRepeaterInMapping(cc *compileCtx, mapping, repeater Value) Value {
 	out := jsval.NewObject(mapping.Len())
 	for _, channel := range keysOf(mapping) {
+		cc.work(1)
 		if !hasProperty(mapping, channel) {
 			continue
 		}
@@ -1199,6 +1300,7 @@ func replaceRepeaterInMapping(cc *compileCtx, mapping, repeater Value) Value {
 		if cd.IsArr() {
 			var items []Value
 			for _, x := range cd.Items() {
+				cc.work(1)
 				if r := replaceRepeaterInChannelDef(cc, x, repeater); r.IsTruthy() {
 					items = append(items, r)
 				}
@@ -1209,4 +1311,58 @@ func replaceRepeaterInMapping(cc *compileCtx, mapping, repeater Value) Value {
 		}
 	}
 	return jsval.Obj(out)
+}
+
+// countViews is the number of views the normalization makes of spec: one per
+// view it maps, a repeat's spec once per combination of its row, column,
+// layer and repeat values. Composite marks and path overlays add a few
+// layers per unit on top, a small constant factor. The count saturates (it
+// is a float), and a spec nested past maxDepth counts as one view: the
+// normalizer rejects it.
+func countViews(cc *compileCtx, spec Value, depth int) float64 {
+	cc.work(1)
+	if !spec.IsObj() || depth > maxDepth {
+		return 1
+	}
+	sum := func(list Value) float64 {
+		n := 1.0
+		for _, s := range list.Items() {
+			n += countViews(cc, s, depth+1)
+		}
+		return n
+	}
+	// lenOr is the length of a truthy list, else 1 (an inherited value).
+	lenOr := func(v Value) float64 {
+		if v.IsStr() && v.IsTruthy() {
+			return float64(len(v.StrValue())) // its characters, at most its bytes
+		}
+		if v.IsTruthy() {
+			return float64(v.Len())
+		}
+		return 1
+	}
+	switch {
+	case isFacetSpec(spec):
+		return 1 + countViews(cc, spec.Get("spec"), depth+1)
+	case isRepeatSpec(spec):
+		repeat := spec.Get("repeat")
+		child := countViews(cc, spec.Get("spec"), depth+1)
+		if repeat.IsArr() {
+			return 1 + float64(float64(repeat.Len())*child)
+		}
+		n := lenOr(repeat.Get("row")) * lenOr(repeat.Get("column"))
+		if isLayerRepeatSpec(cc, spec) {
+			n *= 1 + float64(repeat.Get("layer").Len())
+		}
+		return 1 + float64(n*child)
+	case isHConcatSpec(spec):
+		return sum(spec.Get("hconcat"))
+	case isVConcatSpec(spec):
+		return sum(spec.Get("vconcat"))
+	case isConcatSpec(spec):
+		return sum(spec.Get("concat"))
+	case isLayerSpec(spec):
+		return sum(spec.Get("layer"))
+	}
+	return 1
 }

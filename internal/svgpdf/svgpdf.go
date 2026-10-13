@@ -2,8 +2,12 @@
 // single-page vector PDF.
 //
 // It supports exactly the SVG subset Vega emits (rect, g, path, line, text,
-// clipPath); anything outside that subset is a descriptive error, never a
-// silent omission, so callers can fall back to raster (PNG) rendering.
+// image, gradients, clipPath, the pattern Vega wraps a radial gradient in, and
+// a for links);
+// an element, attribute or style property outside that subset is a
+// descriptive error, never a silent omission, so callers can fall back to
+// raster (PNG) rendering. A value of a supported attribute that does not
+// parse is ignored, as SVG ignores it (attrs.go).
 //
 // Text is represented per Options.Text: as real PDF text with embedded
 // subset fonts (TextEmbed, the default — smallest self-contained output,
@@ -19,6 +23,6 @@ package svgpdf
 // Convert translates an SVG document into PDF bytes. The shaper is required
 // when the SVG contains text elements; pass nil only for text-free charts.
 func Convert(svg string, shaper TextShaper, opts Options) ([]byte, error) {
-	pdf, _, err := ConvertWithUsage(svg, shaper, opts)
+	pdf, _, err := convert(svg, shaper, opts, false)
 	return pdf, err
 }

@@ -13,13 +13,10 @@ type fieldDefModel interface {
 	Model
 	forEachFieldDef(f func(fd Value, channel string))
 	fieldDefOf(channel string) Value
-	channelHasFieldOf(channel string) bool
 }
 
 func (u *unitModel) fieldDefOf(channel string) Value  { return u.fieldDef(channel) }
-func (u *unitModel) channelHasFieldOf(c string) bool  { return u.channelHasField(c) }
 func (f *facetModel) fieldDefOf(channel string) Value { return f.fieldDef(channel) }
-func (f *facetModel) channelHasFieldOf(c string) bool { return f.channelHasField(c) }
 
 // reduceFieldDef folds over every field def in the mapping.
 func reduceFieldDef[T any](m fieldDefModel, f func(acc T, fd Value, channel string) T, init T) T {
@@ -41,8 +38,8 @@ type ancestorParse struct {
 
 func newAncestorParse() *ancestorParse { return &ancestorParse{split: newSplit()} }
 
-func (a *ancestorParse) cloneAP() *ancestorParse {
-	c := &ancestorParse{split: a.split.clone(), plain: true}
+func (a *ancestorParse) cloneAP(cc *compileCtx) *ancestorParse {
+	c := &ancestorParse{split: a.split.clone(cc), plain: true}
 	if !a.plain {
 		c.parseNothing = a.parseNothing
 	}
@@ -61,9 +58,9 @@ func newParseNode(parent dfNode, parse *Object) *parseNode {
 }
 
 func (n *parseNode) clone() dfNode {
-	return initNode(&parseNode{parse: deepClone(jsval.Obj(n.parse)).ObjValue()}, nil)
+	return initNode(&parseNode{parse: duplicate(n.cc, jsval.Obj(n.parse)).ObjValue()}, nil)
 }
-func (n *parseNode) hash() string { return "Parse " + hashOf(jsval.Obj(n.parse)) }
+func (n *parseNode) hash() string { return "Parse " + hashOf(n.cc, jsval.Obj(n.parse)) }
 func (n *parseNode) producedFields() *sset {
 	return newSset(n.parse.Keys()...)
 }
@@ -72,8 +69,17 @@ func (n *parseNode) dependentFields() *sset { return newSset(n.parse.Keys()...) 
 func makeExplicitParse(parent dfNode, m Model, ap *ancestorParse) *parseNode {
 	explicit := jsval.NewObject(0)
 	data := m.b().data
-	if !isGenerator(data) && data.Get("format").Get("parse").IsObj() {
-		explicit = data.Get("format").Get("parse").ObjValue()
+	if p := data.Get("format").Get("parse"); !isGenerator(data) && p.IsObj() {
+		explicit = p.ObjValue()
+	} else if !isGenerator(data) && p.IsTruthy() {
+		// A parse that is not an object is read through its keys: a
+		// string's characters, an array's items.
+		explicit = jsval.NewObject(0)
+		for _, k := range jsKeys(p) {
+			cc := ccOf(parent)
+			cc.work(1)
+			explicit.Set(k, jsProp(p, k))
+		}
 	}
 	return parseNodeWithAncestors(parent, explicit, jsval.NewObject(0), ap)
 }
@@ -81,31 +87,39 @@ func makeExplicitParse(parent dfNode, m Model, ap *ancestorParse) *parseNode {
 // parseNodeWithAncestors builds a parse node for the fields not already parsed
 // by an ancestor; it returns nil when nothing is left to parse.
 func parseNodeWithAncestors(parent dfNode, explicit, implicit *Object, ap *ancestorParse) *parseNode {
+	cc := ccOf(parent)
 	for _, field := range append([]string(nil), implicit.Keys()...) {
+		cc.work(1)
 		parsedAs := ap.getWithExplicit(field)
 		if !parsedAs.value.IsUndefined() {
 			iv := implicit.Lookup(field)
 			if parsedAs.explicit || jsval.Equal(parsedAs.value, iv) || (parsedAs.value.IsStr() && parsedAs.value.StrValue() == "derived") ||
 				(iv.IsStr() && iv.StrValue() == "flatten") {
 				implicit.Delete(field)
+			} else {
+				cc.warn(msgDifferentParse(field, iv, parsedAs.value))
 			}
 		}
 	}
 	for _, field := range append([]string(nil), explicit.Keys()...) {
+		cc.work(1)
 		parsedAs := ap.get(field)
 		if !parsedAs.IsUndefined() {
 			if jsval.Equal(parsedAs, explicit.Lookup(field)) {
 				explicit.Delete(field)
+			} else {
+				cc.warn(msgDifferentParse(field, explicit.Lookup(field), parsedAs))
 			}
 		}
 	}
-	parse := &split{explicit, implicit}
+	parse := newSplitOf(explicit, implicit)
 	ap.copyAll(parse)
 	p := jsval.NewObject(4)
 	comb := parse.combine()
 	for _, key := range comb.Keys() {
+		cc.work(1)
 		if val := parse.get(key); !val.IsNull() {
-			jsSet(p, key, val)
+			jsSet(ccOf(parent), p, key, val)
 		}
 	}
 	if p.Len() == 0 || ap.parseNothing {
@@ -120,8 +134,10 @@ func (n *parseNode) merge(other *parseNode) {
 }
 
 func (n *parseNode) assembleFormatParse() *Object {
+	cc := n.cc
 	out := jsval.NewObject(4)
 	for _, field := range n.parse.Keys() {
+		cc.work(1)
 		if accessPathDepth(field) == 1 {
 			out.Set(field, n.parse.Lookup(field))
 		}
@@ -130,7 +146,12 @@ func (n *parseNode) assembleFormatParse() *Object {
 }
 
 func unquote(pattern string) string {
-	if len(pattern) >= 2 && ((pattern[0] == '\'' && pattern[len(pattern)-1] == '\'') || (pattern[0] == '"' && pattern[len(pattern)-1] == '"')) {
+	// pattern.slice(1, -1): a lone quote both starts and ends the pattern,
+	// and leaves nothing.
+	if len(pattern) >= 1 && ((pattern[0] == '\'' && pattern[len(pattern)-1] == '\'') || (pattern[0] == '"' && pattern[len(pattern)-1] == '"')) {
+		if len(pattern) == 1 {
+			return ""
+		}
 		return pattern[1 : len(pattern)-1]
 	}
 	return pattern
@@ -158,13 +179,21 @@ func parseExpressionFor(field, parse string) string {
 }
 
 func (n *parseNode) assembleTransforms(onlyNested bool) []Value {
+	cc := n.cc
 	var out []Value
 	for _, field := range n.parse.Keys() {
+		cc.work(1)
 		if onlyNested && accessPathDepth(field) <= 1 {
 			continue
 		}
-		expr := parseExpressionFor(field, n.parse.Lookup(field).AsString())
+		pv := n.parse.Lookup(field)
+		if !pv.IsStr() {
+			// parse.startsWith, past the comparisons with the known names.
+			throw("parse.startsWith is not a function")
+		}
+		expr := parseExpressionFor(field, pv.StrValue())
 		if expr == "" {
+			cc.warn(msgUnrecognizedParse(pv.StrValue()))
 			continue
 		}
 		out = append(out, mkv("type", "formula", "expr", expr, "as", removePathFromField(field)))
@@ -195,7 +224,7 @@ func newGraticuleNode(parent dfNode, params Value) *graticuleNode {
 func (n *graticuleNode) clone() dfNode          { return initNode(&graticuleNode{params: n.params}, nil) }
 func (n *graticuleNode) dependentFields() *sset { return newSset() }
 func (n *graticuleNode) producedFields() *sset  { return nil }
-func (n *graticuleNode) hash() string           { return "Graticule " + hashOf(n.params) }
+func (n *graticuleNode) hash() string           { return "Graticule " + hashOf(n.cc, n.params) }
 func (n *graticuleNode) assemble() Value {
 	o := mk("type", "graticule")
 	if !(n.params.IsBool() && n.params.BoolValue()) {
@@ -220,7 +249,7 @@ func (n *sequenceNode) producedFields() *sset {
 	}
 	return newSset("data")
 }
-func (n *sequenceNode) hash() string { return "Hash " + hashOf(n.params) }
+func (n *sequenceNode) hash() string { return "Hash " + hashOf(n.cc, n.params) }
 func (n *sequenceNode) assemble() Value {
 	o := mk("type", "sequence")
 	spread(o, n.params)
@@ -244,14 +273,33 @@ type calculateNode struct {
 }
 
 func newCalculateNode(parent dfNode, transform Value) *calculateNode {
-	return initNode(&calculateNode{transform: transform, dep: getDependentFields(transform.Get("calculate").AsString())}, parent)
+	return initNode(&calculateNode{transform: transform, dep: getDependentFields(ccOf(parent), exprSource(transform.Get("calculate")))}, parent)
 }
 func (n *calculateNode) clone() dfNode {
-	return initNode(&calculateNode{transform: deepClone(n.transform), dep: getDependentFields(n.transform.Get("calculate").AsString())}, nil)
+	return initNode(&calculateNode{transform: duplicate(n.cc, n.transform), dep: getDependentFields(n.cc, n.transform.Get("calculate").AsString())}, nil)
 }
-func (n *calculateNode) producedFields() *sset  { return newSset(n.transform.Get("as").AsString()) }
+
+// exprSource is an expression upstream hands to vega-expression's parser,
+// which reads it with source.length and source.charCodeAt: anything but a
+// string is a TypeError.
+func exprSource(v Value) string {
+	switch {
+	case v.IsStr():
+		return v.StrValue()
+	case v.IsNullish():
+		throw("Cannot read properties of %s (reading 'length')", nullishName(v))
+	}
+	throw("source.charCodeAt is not a function")
+	return ""
+}
+
+func (n *calculateNode) producedFields() *sset {
+	s := newSset()
+	s.addValue(n.transform.Get("as"))
+	return s
+}
 func (n *calculateNode) dependentFields() *sset { return n.dep }
-func (n *calculateNode) hash() string           { return "Calculate " + hashOf(n.transform) }
+func (n *calculateNode) hash() string           { return "Calculate " + hashOf(n.cc, n.transform) }
 func (n *calculateNode) assemble() Value {
 	return mkv("type", "formula", "expr", n.transform.Get("calculate"), "as", n.transform.Get("as"))
 }
@@ -273,6 +321,7 @@ func parseAllCalculateForSortIndex(parent dfNode, m fieldDefModel) dfNode {
 		if isSortArray(sort) {
 			var sb strings.Builder
 			for i, sv := range sort.Items() {
+				cc.work(1)
 				pred := mkv("field", fd.Get("field"), "timeUnit", fd.Get("timeUnit"), "equal", sv)
 				sb.WriteString(fieldFilterExpression(cc, pred, true))
 				sb.WriteString(" ? " + jsval.JSNumberString(float64(i)) + " : ")
@@ -298,10 +347,10 @@ func newFilterNode(parent dfNode, m Model, filter Value) *filterNode {
 	n := &filterNode{model: m, filter: filter}
 	initNode(n, parent)
 	n.expr = expression(m.b().ctx, m, filter, n)
-	n.dep = getDependentFields(n.expr)
+	n.dep = getDependentFields(m.b().ctx, n.expr)
 	return n
 }
-func (n *filterNode) clone() dfNode          { return newFilterNode(nil, n.model, deepClone(n.filter)) }
+func (n *filterNode) clone() dfNode          { return newFilterNode(nil, n.model, duplicate(n.cc, n.filter)) }
 func (n *filterNode) dependentFields() *sset { return n.dep }
 func (n *filterNode) producedFields() *sset  { return newSset() }
 func (n *filterNode) hash() string           { return "Filter " + n.expr }
@@ -309,11 +358,11 @@ func (n *filterNode) assemble() Value        { return mkv("type", "filter", "exp
 
 // expression renders a filter (a predicate composition) as a Vega expression.
 func expression(cc *compileCtx, m Model, filterOp Value, node dfNode) string {
-	return logicalExpr(filterOp, func(pred Value) string {
+	return logicalExpr(cc, filterOp, func(pred Value) string {
 		switch {
 		case pred.IsStr():
 			return pred.StrValue()
-		case isSelectionPredicate(pred):
+		case isSelectionPredicateOf(cc, pred):
 			return parseSelectionPredicate(m, pred, node, "datum")
 		}
 		return fieldFilterExpression(cc, pred, true)
@@ -331,20 +380,24 @@ func newFilterInvalidNode(parent dfNode, filter *omap[Value]) *filterInvalidNode
 	return initNode(&filterInvalidNode{filter: filter}, parent)
 }
 func (n *filterInvalidNode) clone() dfNode {
+	cc := n.cc
 	c := newOmap[Value]()
-	for _, k := range n.filter.keys {
+	for _, k := range n.filter.keysView() {
+		cc.work(1)
 		c.set(k, n.filter.m[k])
 	}
 	return initNode(&filterInvalidNode{filter: c}, nil)
 }
-func (n *filterInvalidNode) dependentFields() *sset { return newSset(n.filter.keys...) }
+func (n *filterInvalidNode) dependentFields() *sset { return newSset(n.filter.keysView()...) }
 func (n *filterInvalidNode) producedFields() *sset  { return newSset() }
 func (n *filterInvalidNode) hash() string {
+	cc := n.cc
 	o := jsval.NewObject(4)
-	for _, k := range n.filter.keys {
+	for _, k := range n.filter.keysView() {
+		cc.work(1)
 		o.Set(k, n.filter.m[k])
 	}
-	return "FilterInvalid " + hashOf(jsval.Obj(o))
+	return "FilterInvalid " + hashOf(n.cc, jsval.Obj(o))
 }
 
 func makeFilterInvalid(parent dfNode, m *unitModel, marks, scales string) dfNode {
@@ -358,7 +411,7 @@ func makeFilterInvalid(parent dfNode, m *unitModel, marks, scales string) dfNode
 			if sc := m.getScaleComponent(channel); sc != nil {
 				mode := getScaleInvalidDataMode(m.markDef, m.config, channel, sc.get("type").AsString(), isCountingAggregateOp(fd.Get("aggregate")))
 				if mode != "show" && mode != "always-valid" {
-					agg.set(fd.Get("field").AsString(), fd)
+					agg.assign(fd.Get("field").AsString(), fd)
 				}
 			}
 		}
@@ -383,7 +436,7 @@ func makeFilterInvalid58(parent dfNode, m *unitModel) dfNode {
 			if sc := m.getScaleComponent(channel); sc != nil {
 				agg2 := fd.Get("aggregate")
 				if hasContinuousDomain(sc.get("type").AsString()) && !(agg2.IsStr() && agg2.StrValue() == "count") && !isPathMarkName(m.mark()) {
-					agg.set(fd.Get("field").AsString(), fd)
+					agg.assign(fd.Get("field").AsString(), fd)
 				}
 			}
 		}
@@ -403,7 +456,8 @@ func (n *filterInvalidNode) assemble() Value {
 	cc := n.cc
 
 	var filters []string
-	for _, field := range n.filter.keys {
+	for _, field := range n.filter.keysView() {
+		cc.work(1)
 		fd := n.filter.m[field]
 		ref := vgField(cc, fd, fieldRefOption{expr: "datum"})
 		switch channelDefType(fd) {

@@ -14,6 +14,7 @@ import (
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/fuzzutil"
 	"github.com/mgilbir/aster/internal/jsval"
+	"github.com/mgilbir/aster/internal/testutil"
 )
 
 func fuzzScope() *Scope {
@@ -45,7 +46,7 @@ func compileEvalNoPanic(t testing.TB, src string) {
 	}()
 	select {
 	case <-done:
-	case <-time.After(10 * time.Second):
+	case <-time.After(testutil.Scaled(10 * time.Second)):
 		t.Fatalf("%q: did not terminate", src)
 	}
 }

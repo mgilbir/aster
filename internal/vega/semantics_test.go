@@ -3,7 +3,6 @@ package vega
 import (
 	"context"
 	"math"
-	"strings"
 	"testing"
 
 	"github.com/mgilbir/aster/internal/jsval"
@@ -61,16 +60,12 @@ func equalFloats(a, b []float64) bool {
 // operator's evaluation, so the scale (and what depends on it) is never built;
 // the run goes on and reports it.
 func TestSchemeRangeErrorOnNegativeCount(t *testing.T) {
-	res := renderSpec(t, `{
+	_, msgs := mustRenderReporting(t, `{
 	  "data": [{"name": "t", "values": []}],
 	  "scales": [{"name": "c", "type": "bin-ordinal", "domain": {"data": "t", "field": "x"}, "range": {"scheme": "viridis"}}],
 	  "marks": [{"type": "rect", "from": {"data": "t"}, "encode": {"enter": {"fill": {"scale": "c", "field": "x"}}}}]}`)
-	found := false
-	for _, w := range res.Warnings {
-		found = found || strings.Contains(w, "Invalid array length")
-	}
-	if !found {
-		t.Errorf("warnings %q do not report the RangeError", res.Warnings)
+	if !hasWarning(msgs, "Invalid array length") {
+		t.Errorf("warnings %q do not report the RangeError", msgs)
 	}
 }
 
@@ -78,16 +73,12 @@ func TestSchemeRangeErrorOnNegativeCount(t *testing.T) {
 // the scale maps a value to NaN (an unbounded domain, no data): the mark that
 // asked for the color is not encoded, as upstream's.
 func TestInterpolatingScaleThrowsOnNaNPosition(t *testing.T) {
-	res := renderSpec(t, `{
+	_, msgs := mustRenderReporting(t, `{
 	  "data": [{"name": "t", "values": [{"x": 1}]}, {"name": "empty", "values": []}],
 	  "scales": [{"name": "c", "type": "linear", "domain": {"data": "empty", "field": "x"}, "range": ["red", "yellow", "green"]}],
 	  "marks": [{"type": "rect", "from": {"data": "t"}, "encode": {"enter": {"fill": {"scale": "c", "field": "x"}}}}]}`)
-	found := false
-	for _, w := range res.Warnings {
-		found = found || strings.Contains(w, "I[i] is not a function")
-	}
-	if !found {
-		t.Errorf("warnings %q do not report the TypeError", res.Warnings)
+	if !hasWarning(msgs, "I[i] is not a function") {
+		t.Errorf("warnings %q do not report the TypeError", msgs)
 	}
 }
 

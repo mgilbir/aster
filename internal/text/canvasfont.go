@@ -24,14 +24,11 @@ var canvasFontFamilyRe = regexp.MustCompile(`^(.*?\d[\d.]*(?:px|pt|em|rem|%)(?:\
 // engine resolves families the same way (testdata/oracle-node/oracle.mjs,
 // mapFonts) and swaps a registered family in before the context sees the
 // string; the family is replaced the same way for this check.
+//
+// ParseCSSFont reads a font by the same parser.
 func ValidCanvasFont(s string) bool {
-	if m := canvasFontFamilyRe.FindStringSubmatch(s); m != nil {
-		s = m[1] + `"DejaVu Sans"`
-	}
-	p := &fontParser{tk: tokenizer{in: s}}
-	p.cur = p.tk.next()
-	p.nxt = p.tk.next()
-	return p.parse()
+	_, ok := parseCanvasFont(s)
+	return ok
 }
 
 type tokType int
@@ -319,10 +316,11 @@ func (t *tokenizer) next() token {
 	c := t.peek()
 	fl := charData(c)
 	if fl&cdSpace != 0 {
+		start := t.pos
 		for t.pos < len(t.in) && charData(t.peek())&cdSpace != 0 {
 			t.pos++
 		}
-		return token{typ: tokWhitespace}
+		return token{typ: tokWhitespace, str: t.in[start:t.pos]}
 	}
 	if fl&cdNumStart != 0 {
 		if tk := t.number(); tk.typ != tokInvalid {
@@ -355,10 +353,34 @@ func (t *tokenizer) next() token {
 	return token{typ: tokInvalid}
 }
 
+// fontParser is node-canvas's FontParser. It records what it parses: the
+// style, the weight, the size in pixels and, when the family list is parsed
+// (see parseCanvasFont), its families.
 type fontParser struct {
 	tk       tokenizer
 	cur, nxt token
+
+	italic   bool
+	weight   int
+	size     float64
+	families []string
 }
+
+// canvasUnits are FontParser's unitMap: the pixels in one of each unit. They
+// are float constants in node-canvas (37.8f, 96.0f / 72.0f), widened to
+// double, so they are float32 values here too.
+var canvasUnits = map[string]float64{
+	"cm": float64(float32(37.8)),
+	"mm": float64(float32(3.78)),
+	"in": 96,
+	"pt": float64(float32(96.0) / float32(72.0)),
+	"pc": float64(float32(96.0) / float32(6.0)),
+	"em": 16,
+	"px": 1,
+}
+
+// canvasPercent is FontParser's multiplier for a percentage size, 16.0f / 100.0f.
+var canvasPercent = float64(float32(16.0) / float32(100.0))
 
 func (p *fontParser) advance() { p.cur, p.nxt = p.nxt, p.tk.next() }
 
@@ -383,32 +405,58 @@ func (p *fontParser) ident(names ...string) bool {
 	return false
 }
 
-func (p *fontParser) weight() bool {
+// parseWeight is FontParser::parseFontWeight: a number, truncated, from 1 to
+// 1000, or one of the keywords.
+func (p *fontParser) parseWeight() bool {
 	if p.cur.typ == tokNumber {
+		// The bounds are checked on the float first: int() of a number
+		// past the int range is not defined in Go.
+		if !(p.cur.num >= 1 && p.cur.num < 1001) {
+			return false
+		}
 		w := int(p.cur.num)
 		if w < 1 || w > 1000 {
+			return false
+		}
+		p.weight = w
+		p.advance()
+		return true
+	}
+	if p.cur.typ == tokIdent {
+		switch p.cur.str {
+		case "normal":
+			p.weight = weightNormal
+		case "bold", "bolder":
+			p.weight = weightBold
+		case "lighter":
+			p.weight = weightLighter
+		default:
 			return false
 		}
 		p.advance()
 		return true
 	}
-	return p.ident("normal", "bold", "lighter", "bolder")
+	return false
 }
 
-func (p *fontParser) size() bool {
+// parseSize is FontParser::parseFontSize: a number and its unit.
+func (p *fontParser) parseSize() bool {
 	if p.cur.typ != tokNumber {
 		return false
 	}
+	n := p.cur.num
 	p.advance()
 	switch p.cur.typ {
 	case tokIdent:
-		switch p.cur.str {
-		case "cm", "mm", "in", "pt", "pc", "em", "px":
-			p.advance()
-			return true
+		k, ok := canvasUnits[p.cur.str]
+		if !ok {
+			return false
 		}
-		return false
+		p.size = float64(n * k)
+		p.advance()
+		return true
 	case tokPercent:
+		p.size = float64(n * canvasPercent)
 		p.advance()
 		return true
 	}
@@ -445,11 +493,23 @@ func (p *fontParser) lineHeight() bool {
 	return true
 }
 
+// family is FontParser::parseFontFamily: families of identifiers and quoted
+// strings, the whitespace between their words kept, separated by commas.
 func (p *fontParser) family() bool {
 	for p.cur.typ != tokEnd {
 		found := false
+		var name, ws strings.Builder
 		for p.cur.typ == tokString || p.cur.typ == tokIdent || p.cur.typ == tokWhitespace {
-			if p.cur.typ != tokWhitespace {
+			if p.cur.typ == tokWhitespace {
+				if found {
+					ws.WriteString(p.cur.str)
+				}
+			} else {
+				if found {
+					name.WriteString(ws.String())
+					ws.Reset()
+				}
+				name.WriteString(p.cur.str)
 				found = true
 			}
 			p.advance()
@@ -457,6 +517,7 @@ func (p *fontParser) family() bool {
 		if !found {
 			return false
 		}
+		p.families = append(p.families, name.String())
 		if p.cur.typ == tokComma {
 			p.advance()
 		}
@@ -469,11 +530,13 @@ func (p *fontParser) parse() bool {
 	p.skipWS()
 	for i := 0; i < 3 && p.checkWS(); i++ {
 		switch {
-		case state&0b001 != 0 && p.ident("italic", "oblique", "normal"):
+		case state&0b001 != 0 && p.cur.typ == tokIdent && (p.cur.str == "italic" || p.cur.str == "oblique" || p.cur.str == "normal"):
+			p.italic = p.cur.str != "normal"
+			p.advance()
 			state &= 0b110
 		case state&0b010 != 0 && p.ident("small-caps", "normal"):
 			state &= 0b101
-		case state&0b100 != 0 && p.weight():
+		case state&0b100 != 0 && p.parseWeight():
 			state &= 0b011
 		default:
 			i = 3
@@ -481,7 +544,7 @@ func (p *fontParser) parse() bool {
 		}
 		p.skipWS()
 	}
-	if p.size() {
+	if p.parseSize() {
 		p.skipWS()
 		return p.lineHeight() && p.family()
 	}

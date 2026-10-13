@@ -48,6 +48,16 @@ type stroker struct {
 	left    []point // side outlines, reused across subpaths (emitPoly copies them)
 	right   []point
 	dashed  flat
+	// r, when set, is charged for the points the stroker builds (see
+	// renderer.holdPoints), before it builds them.
+	r *renderer
+}
+
+// hold charges n points the stroker is about to build.
+func (s *stroker) hold(n int) {
+	if s.r != nil {
+		s.r.holdPoints(n)
+	}
 }
 
 const strokeTolDev = 0.05 // device-space arc tolerance in pixels
@@ -89,6 +99,11 @@ func (s *stroker) emitPoly(pts []point) {
 }
 
 func (s *stroker) strokeSub(pts []point, closed bool) {
+	// A subpath of n points builds its cleaned copy, its reverse and their
+	// directions, a side outline each way with up to three points a vertex
+	// besides arcs (charged where they are made), and their copy in the
+	// output: at most ten points a vertex, and the caps.
+	s.hold(10*len(pts) + 16)
 	// Remove near-duplicate points to get well-defined directions.
 	clean := s.tmp[:0]
 	for i, p := range pts {
@@ -170,13 +185,13 @@ func (s *stroker) dot(p point) {
 // arc appends intermediate points of an arc around c starting at offset a
 // sweeping by the signed angle sweep (endpoints excluded).
 func (s *stroker) arc(dst []point, c, a point, sweep float64) []point {
-	steps := int(math.Ceil(math.Abs(sweep) / s.arcStep))
-	if steps < 1 {
-		steps = 1
+	// Counted in float64 (a NaN sweep, from directions that overflowed,
+	// must not be converted to an int).
+	steps := 1
+	if sf := math.Ceil(math.Abs(sweep) / s.arcStep); sf > 1 {
+		steps = int(min(sf, 2000))
 	}
-	if steps > 2000 {
-		steps = 2000
-	}
+	s.hold(2 * steps) // in a side outline, then copied to the output
 	for i := 1; i < steps; i++ {
 		sn, cs := math.Sincos(sweep * float64(i) / float64(steps))
 		dst = append(dst, point{c.x + a.x*cs - a.y*sn, c.y + a.x*sn + a.y*cs})
@@ -318,9 +333,12 @@ func (s *stroker) applyDash(src *flat, st strokeStyle, devScale float64) bool {
 			total += math.Hypot(pts[0].x-pts[len(pts)-1].x, pts[0].y-pts[len(pts)-1].y)
 		}
 	}
-	if total/sum*float64(len(pat)) > 2_000_000 {
+	dashes := total / sum * float64(len(pat))
+	if !(dashes <= 2_000_000) {
 		return false
 	}
+	// Each dash is a polyline of its ends and the vertices it spans.
+	s.hold(2*int(dashes) + 2*len(src.pts) + 16)
 	off := math.Mod(st.dashOffset, sum)
 	if off < 0 {
 		off += sum

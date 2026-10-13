@@ -8,8 +8,8 @@ package voronoi
 import (
 	"context"
 	"errors"
-	"fmt"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -30,28 +30,27 @@ type Params struct {
 
 var defaultExtent = [4]float64{-1e5, -1e5, 1e5, 1e5}
 
-// cancelStride is how many cells are drawn between context checks.
-const cancelStride = 256
+// bytesPerPoint is what the triangulation and the diagram hold per point:
+// the coordinates, the triangles and half-edges (at most 2n-5 triangles of
+// three int32 each, twice), the hull and sort scratch, the incoming edges,
+// the rays and the circumcentres.
+const bytesPerPoint = 16 + 2*6*4 + 4*4 + 8 + 2*4 + 32 + 2*16
 
 // Transform writes each datum's cell path (a string, or null for an empty or
 // degenerate cell) into field p.As of the datum. Data that are not objects
 // are skipped. Like upstream it does nothing for empty data.
-func Transform(ctx context.Context, data []jsval.Value, p Params) (err error) {
+//
+// Coordinates are read as upstream reads them, non-finite ones and ones whose
+// squares overflow included, and give the cells upstream gives (often none).
+// Links that would make upstream loop forever are an error wrapping
+// budget.ErrLimit.
+func Transform(ctx context.Context, data []jsval.Value, p Params) error {
 	if len(data) == 0 {
 		return nil
 	}
 	if p.X == nil || p.Y == nil {
 		return errors.New("voronoi: x and y accessors are required")
 	}
-	// The triangulation code indexes typed arrays; on non-finite coordinates
-	// upstream silently reads undefined where Go would fault, so convert any
-	// such fault into an error rather than crash the host.
-	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("voronoi: degenerate input: %v", r)
-		}
-	}()
-
 	as := p.As
 	if as == "" {
 		as = "path"
@@ -64,31 +63,50 @@ func Transform(ctx context.Context, data []jsval.Value, p Params) (err error) {
 		copy(b[:], p.Extent)
 	}
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	led := budget.LedgerFrom(ctx)
+	scratch := budget.Mul(int64(len(data)), bytesPerPoint)
+	if err := led.Alloc(scratch); err != nil {
+		return err
+	}
+	defer led.Free(scratch)
+
 	coords := make([]float64, 2*len(data))
 	for i, d := range data {
 		coords[2*i] = jsval.ToNumber(p.X(d))
 		coords[2*i+1] = jsval.ToNumber(p.Y(d))
 	}
-	dg, err := newDiagram(newDelaunay(coords), b[0], b[1], b[2], b[3])
+	dl, err := newDelaunay(ctx, coords)
+	if err != nil {
+		return err
+	}
+	dg, err := newDiagram(dl, b[0], b[1], b[2], b[3])
 	if err != nil {
 		return err
 	}
 
+	m := budget.NewMeter(ctx)
 	var buf []byte
 	for i, d := range data {
-		if i%cancelStride == 0 {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
+		if err := m.Work(1); err != nil {
+			return err
 		}
 		o := d.ObjValue()
 		if o == nil {
 			continue
 		}
 		poly := dg.cellPolygon(int32(i))
+		if dl.err != nil {
+			return dl.err
+		}
 		if len(poly) == 0 || isPoint(poly) {
 			o.Set(as, jsval.Null)
 			continue
+		}
+		if err := m.Work(int64(len(poly))); err != nil {
+			return err
 		}
 		buf = appendPath(buf[:0], poly)
 		o.Set(as, jsval.Str(string(buf)))
@@ -98,7 +116,7 @@ func Transform(ctx context.Context, data []jsval.Value, p Params) (err error) {
 
 // isPoint reports a polygon that is a single repeated point.
 func isPoint(p []float64) bool {
-	return len(p) == 4 && p[0] == p[2] && p[1] == p[3]
+	return len(p) == 4 && same(p[0], p[2]) && same(p[1], p[3])
 }
 
 // appendPath renders the polygon as "M x,y L x,y ... Z", dropping the closing
@@ -106,7 +124,7 @@ func isPoint(p []float64) bool {
 func appendPath(dst []byte, p []float64) []byte {
 	x, y := p[0], p[1]
 	n := len(p)/2 - 1
-	for n > 0 && p[2*n] == x && p[2*n+1] == y {
+	for n > 0 && same(p[2*n], x) && same(p[2*n+1], y) {
 		n--
 	}
 	dst = append(dst, 'M')
@@ -114,9 +132,18 @@ func appendPath(dst []byte, p []float64) []byte {
 		if i > 0 {
 			dst = append(dst, 'L')
 		}
-		dst = jsval.AppendJSNumber(dst, p[2*i])
+		dst = appendCoord(dst, p[2*i])
 		dst = append(dst, ',')
-		dst = jsval.AppendJSNumber(dst, p[2*i+1])
+		dst = appendCoord(dst, p[2*i+1])
 	}
 	return append(dst, 'Z')
+}
+
+// appendCoord prints a coordinate as Array.prototype.join does: undefined
+// as nothing.
+func appendCoord(dst []byte, x float64) []byte {
+	if isUndef(x) {
+		return dst
+	}
+	return jsval.AppendJSNumber(dst, x)
 }

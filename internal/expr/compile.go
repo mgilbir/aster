@@ -1,14 +1,17 @@
 package expr
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"slices"
 	"sort"
 	"strings"
-	"sync"
 	"sync/atomic"
+	"unsafe"
 
+	"github.com/mgilbir/aster/internal/bcache"
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -68,8 +71,17 @@ type Program struct {
 }
 
 // Compile parses and compiles an expression.
-func Compile(src string) (*Program, error) {
-	ast, err := Parse(src)
+func Compile(src string) (*Program, error) { return CompileContext(context.Background(), src) }
+
+// CompileContext is Compile charging the programs of the expression's regular
+// expression literals to the budget.Ledger in ctx, as each is compiled: a
+// literal past what the ledger can pay for is a SyntaxError that wraps
+// budget.ErrLimit.
+func CompileContext(ctx context.Context, src string) (*Program, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ast, err := parse(ctx, src)
 	if err != nil {
 		return nil, err
 	}
@@ -83,42 +95,57 @@ func Compile(src string) (*Program, error) {
 
 // Compiled expressions are shared between renders: a chart compiles the same
 // few dozen expression strings (Vega-Lite emits them from a fixed set of
-// templates) every time it is drawn, and a Program is immutable. The cache is
-// bounded, since specifications choose the strings; it is dropped whole when
-// full and skips long sources.
+// templates) every time it is drawn, and a Program is immutable. The
+// specification chooses the strings, and a short one can hold a regular
+// expression compiled to megabytes (C8), so the cache is bounded by the bytes
+// its programs hold (Program.size) and keeps none of more than
+// programCacheMaxEntry. The bound is far above what the corpus uses: its
+// expressions hold a few kilobytes each.
 const (
-	programCacheMax    = 1024
-	programCacheMaxLen = 2048
+	programCacheBytes    = 32 << 20
+	programCacheMaxEntry = 1 << 20
 )
 
-var programCache = struct {
-	sync.Mutex
-	m map[string]*Program
-}{m: map[string]*Program{}}
+var programCache = bcache.New[string, *Program](programCacheBytes, programCacheMaxEntry)
 
 // CompileCached is Compile with a process-wide cache of successful compiles.
 // Errors are not cached. The Program is shared; it is safe for concurrent use.
 func CompileCached(src string) (*Program, error) {
-	if len(src) > programCacheMaxLen {
-		return Compile(src)
-	}
-	programCache.Lock()
-	p := programCache.m[src]
-	programCache.Unlock()
-	if p != nil {
+	return CompileCachedContext(context.Background(), src)
+}
+
+// CompileCachedContext is CompileCached charging a compile that misses the
+// cache to the budget.Ledger in ctx (see CompileContext). A hit allocates
+// nothing and charges nothing: what the cache holds, it bounds.
+func CompileCachedContext(ctx context.Context, src string) (*Program, error) {
+	if p, ok := programCache.Get(src); ok {
 		return p, nil
 	}
-	p, err := Compile(src)
+	p, err := CompileContext(ctx, src)
 	if err != nil {
 		return nil, err
 	}
-	programCache.Lock()
-	if len(programCache.m) >= programCacheMax {
-		clear(programCache.m)
-	}
-	programCache.m[src] = p
-	programCache.Unlock()
+	programCache.Put(src, p, p.size())
 	return p, nil
+}
+
+// nodeBytes is what one node of a Program holds: the AST node and the closure
+// compiled from it with what the closure captures.
+const nodeBytes = int64(unsafe.Sizeof(Node{})) + 64
+
+// size estimates the bytes p holds: its source, its tree and the closures
+// compiled from it, the literal strings, and the programs of its regular
+// expression literals.
+func (p *Program) size() int64 {
+	n := int64(len(p.src))
+	p.ast.Walk(func(nd *Node) bool {
+		n += nodeBytes + int64(len(nd.Value.StrValue()))
+		if nd.Regex != nil {
+			n += nd.Regex.Bytes()
+		}
+		return false
+	})
+	return n
 }
 
 // CompileNode compiles a parsed expression.
@@ -168,8 +195,11 @@ func (p *Program) Source() string { return p.src }
 // Eval evaluates the expression in s. JavaScript exceptions (a property read
 // of null, an invalid regular expression, an unknown-scale error from the
 // runtime) are returned as *Error, an exceeded resource limit as an error
-// wrapping budget.ErrLimit, and context cancellation as its error; Eval does
-// not panic.
+// wrapping budget.ErrLimit (a *budget.Stop raised by the runtime included),
+// and context cancellation as its error. These are the only panics Eval
+// recovers: anything else a runtime callback raises, or a bug, is raised
+// again for the caller's own recover, which knows what its panics mean (the
+// dataflow ends the render on them, where an exception it would log).
 func (p *Program) Eval(s *Scope) (v jsval.Value, err error) {
 	base := len(s.stack)
 	defer func() {
@@ -183,8 +213,12 @@ func (p *Program) Eval(s *Scope) (v jsval.Value, err error) {
 				err = e.err
 			case *cancelled:
 				err = e.err
+			case *budget.Stop:
+				// A bound reached by a provider function (a geographic walk,
+				// ADR 0010).
+				err = e.Err
 			default:
-				err = fmt.Errorf("expr: internal error: %v", r)
+				panic(r)
 			}
 		}
 	}()
@@ -308,18 +342,12 @@ func (c *compiler) compile(n *Node) (node, error) {
 
 func (c *compiler) literal(n *Node) node {
 	if n.Regex != nil {
-		src, flags := n.Regex.Source, n.Regex.Flags
-		if strings.ContainsAny(flags, "gy") {
+		if strings.ContainsAny(n.Regex.Flags, "gy") {
 			// A regexp literal is a fresh object on every evaluation, and g/y
-			// patterns carry lastIndex state; recompile per evaluation so state
-			// never leaks between calls.
-			return func(s *Scope) jsval.Value {
-				p, err := jsval.NewPattern(src, flags)
-				if err != nil {
-					throw("SyntaxError", "%v", err)
-				}
-				return jsval.PatternValue(p)
-			}
+			// patterns carry lastIndex state: each evaluation gets its own
+			// object, sharing the program compiled once at parse.
+			pat := n.Regex
+			return func(s *Scope) jsval.Value { return jsval.PatternValue(pat.Fresh()) }
 		}
 		v := n.Value
 		return func(*Scope) jsval.Value { return v }
@@ -394,37 +422,35 @@ func (c *compiler) array(n *Node) (node, error) {
 	}, nil
 }
 
-// disallowedProperties are the Object.prototype method names (and __proto__)
-// that an object literal may not define with an identifier key.
-var disallowedProperties = map[string]bool{
-	"constructor": true, "__defineGetter__": true, "__defineSetter__": true, "hasOwnProperty": true,
-	"__lookupGetter__": true, "__lookupSetter__": true, "isPrototypeOf": true, "propertyIsEnumerable": true,
-	"toString": true, "valueOf": true, "__proto__": true, "toLocaleString": true,
-}
-
 // IsObjectPrototypeName reports whether name is a property every JavaScript
 // object inherits (constructor, toString, __proto__, ...). Upstream keeps its
 // signals, scales and data in plain objects, so a lookup by such a name finds
 // the inherited property instead of nothing.
-func IsObjectPrototypeName(name string) bool { return disallowedProperties[name] }
+func IsObjectPrototypeName(name string) bool { return objectProtoMembers[name] }
 
 func (c *compiler) object(n *Node) (node, error) {
 	type prop struct {
-		key  string
-		val  node
-		skip bool
+		key string
+		val node
+	}
+	// vega-expression checks every key before it generates any code: an
+	// identifier's name or a literal's String(value), against vega-util's
+	// DisallowedObjectProperties (Object.prototype's methods, __proto__ and
+	// then).
+	for _, p := range n.Elems {
+		key := p.Key.Name
+		if p.Key.Kind != KindIdentifier {
+			key = p.Key.Value.AsString()
+		}
+		if disallowedProperties[key] {
+			return nil, cerr("Illegal property: %s", key)
+		}
 	}
 	props := make([]prop, len(n.Elems))
 	special := false
 	for i, p := range n.Elems {
-		var key string
-		// Only identifier keys are checked, as upstream (`prop.key.name`).
-		if p.Key.Kind == KindIdentifier {
-			if disallowedProperties[p.Key.Name] {
-				return nil, cerr("Illegal property: %s", p.Key.Name)
-			}
-			key = p.Key.Name
-		} else {
+		key := p.Key.Name
+		if p.Key.Kind != KindIdentifier {
 			key = p.Key.Value.AsString()
 		}
 		f, err := c.compile(p.Right)
@@ -432,12 +458,6 @@ func (c *compiler) object(n *Node) (node, error) {
 			return nil, err
 		}
 		props[i] = prop{key: key, val: f}
-		// A quoted "__proto__" key sets the prototype in JavaScript instead of
-		// defining a property: the value is evaluated and dropped.
-		if key == "__proto__" {
-			props[i].skip = true
-			special = true
-		}
 		if _, ok := arrayIndex(key); ok {
 			special = true
 		}
@@ -477,9 +497,7 @@ func (c *compiler) object(n *Node) (node, error) {
 		}
 		o := jsval.NewObject(len(props))
 		for _, i := range order {
-			if !props[i].skip {
-				o.Set(props[i].key, tmp[i])
-			}
+			o.Set(props[i].key, tmp[i])
 		}
 		return jsval.Obj(o)
 	}, nil
@@ -596,7 +614,13 @@ func (c *compiler) binary(n *Node) (node, error) {
 	}
 	switch n.Op {
 	case "+":
-		return func(s *Scope) jsval.Value { return s.add(l(s), r(s)) }, nil
+		return func(s *Scope) jsval.Value {
+			a, b := l(s), r(s)
+			if a.IsNum() && b.IsNum() { // the common case, without the call
+				return jsval.Num(a.NumValue() + b.NumValue())
+			}
+			return s.add(a, b)
+		}, nil
 	case "-":
 		return arith(func(a, b float64) float64 { return a - b }), nil
 	case "*":
@@ -737,24 +761,29 @@ func (c *compiler) member(n *Node) (node, error) {
 	}, nil
 }
 
-// hasProperty is the `in` operator.
+// hasProperty is the `in` operator: an own property, or a member the value's
+// prototype chain gives it (Object.prototype's for every object, and
+// Array.prototype's, RegExp.prototype's or Date.prototype's for those).
 func (s *Scope) hasProperty(o, k jsval.Value) bool {
 	if !isObjectLike(o) {
 		typeError("Cannot use 'in' operator to search for '%s' in %s", s.str(k), s.str(o))
 	}
 	key := s.str(k)
+	if objectProtoMembers[key] {
+		return true
+	}
 	switch o.Kind() {
 	case jsval.KindObj:
 		return o.ObjValue().Has(key)
 	case jsval.KindArr:
-		if key == "length" {
-			return true
-		}
 		if i, ok := arrayIndex(key); ok {
 			return i < o.Len()
 		}
+		return arrayProtoMembers[key]
 	case jsval.KindPattern:
-		return !patternProp(o.PatternOf(), key).IsUndefined()
+		return key == "lastIndex" || regexpProtoMembers[key]
+	case jsval.KindTimestamp:
+		return dateProtoMembers[key]
 	}
 	return false
 }
@@ -789,10 +818,11 @@ func (s *Scope) getProp(obj jsval.Value, key string) jsval.Value {
 	case jsval.KindStr:
 		str := obj.StrValue()
 		if key == "length" {
+			s.workBytes(len(str))
 			return jsval.Int(utf16Len(str))
 		}
 		if i, ok := arrayIndex(key); ok {
-			return charAt(str, i)
+			return s.charAt(str, i)
 		}
 	case jsval.KindPattern:
 		return patternProp(obj.PatternOf(), key)
@@ -804,15 +834,15 @@ func (s *Scope) getProp(obj jsval.Value, key string) jsval.Value {
 
 // getIndex reads obj[k] for a computed key.
 func (s *Scope) getIndex(obj, k jsval.Value) jsval.Value {
-	if k.IsNum() {
-		f := k.NumValue()
-		if i := int(f); float64(i) == f && i >= 0 {
-			switch obj.Kind() {
-			case jsval.KindArr:
-				return obj.Index(i)
-			case jsval.KindStr:
-				return charAt(obj.StrValue(), i)
-			}
+	// An integral number in the range of an index reads the element without
+	// making its string; anything else (2^53, -1, 1.5) is a property name.
+	if f := k.NumValue(); k.IsNum() && f >= 0 && f < 1<<31 && f == math.Trunc(f) {
+		i := int(f)
+		switch obj.Kind() {
+		case jsval.KindArr:
+			return obj.Index(i)
+		case jsval.KindStr:
+			return s.charAt(obj.StrValue(), i)
 		}
 	}
 	if obj.IsNullish() {
@@ -821,16 +851,10 @@ func (s *Scope) getIndex(obj, k jsval.Value) jsval.Value {
 	return s.getProp(obj, s.str(k))
 }
 
-func charAt(str string, i int) jsval.Value {
-	if isASCII(str) {
-		if i < len(str) {
-			return jsval.Str(str[i : i+1])
-		}
-		return jsval.Undefined
-	}
-	u := toUTF16(str)
-	if i < len(u) {
-		return jsval.Str(fromUTF16(u[i : i+1]))
+// charAt is str[i]: the string of code unit i, undefined past the end.
+func (s *Scope) charAt(str string, i int) jsval.Value {
+	if u, ok := s.unitAt(str, i); ok {
+		return jsval.Str(u)
 	}
 	return jsval.Undefined
 }
@@ -887,11 +911,10 @@ func (h *slotHint) get(o *jsval.Object, key string) jsval.Value {
 // concatChain compiles a + b + c ...: the operands of a left-nested chain of
 // additions, evaluated in order, each added to the running result as the
 // nested closures would. Once the result is a string the rest of the chain is
-// concatenation, built in one allocation instead of one per operator; the
-// string budget is charged after each operand with the length the nested
-// concatenations would have made, so a limit trips at the same operand. An
-// operand that is a call of format(value, spec) is appended to the result
-// without making its own string first.
+// concatenation, built in one buffer instead of one string per operator, so
+// the string budget is charged for the result once, not for every prefix
+// (C44). An operand that is a call of format(value, spec) is appended to the
+// result without making its own string first.
 func (c *compiler) concatChain(n *Node) (node, error) {
 	var operands []*Node
 	for ; n.Kind == KindBinary && n.Op == "+"; n = n.Left {
@@ -939,10 +962,12 @@ func (c *compiler) concatChain(n *Node) (node, error) {
 		if i == len(ops) {
 			return acc
 		}
-		first := acc.StrValue()
+		// The common chain (a label) is built in a stack buffer; growth past
+		// it is charged before it is made, and the length is measured in
+		// code units once its bytes could pass MaxStringLength.
 		var scratch [96]byte
-		buf := append(scratch[:0], first...)
-		total := len(first)
+		c := chainState{fast: len(scratch)}
+		buf := c.add(s, scratch[:0], acc.StrValue())
 		for ; i < len(ops); i++ {
 			if op := &ops[i]; op.v0 != nil {
 				x, spec := op.v0(s), op.v1(s)
@@ -951,14 +976,12 @@ func (c *compiler) concatChain(n *Node) (node, error) {
 				if buf, err = s.locale().AppendFormatValue(buf, x, spec); err != nil {
 					failFormat(err)
 				}
-				total += len(buf) - start
+				c.appended(s, buf, start)
 			} else {
-				y := s.str(s.primitive(op.f(s), false))
-				total += len(y)
-				buf = append(buf, y...)
+				buf = c.add(s, buf, s.str(s.primitive(op.f(s), false)))
 			}
-			s.checkLen(total)
 		}
+		c.done(s, buf)
 		return jsval.Str(string(buf))
 	}, nil
 }

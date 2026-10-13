@@ -22,10 +22,15 @@ const (
 type segment struct {
 	kind      uint8
 	p1, p2, p point // cubic controls / end point; p for move and line
+	// start is the point of the last move before this segment (the origin
+	// when there is none): where a close returns to. Kept with each segment
+	// so that a vertex finds it at once rather than by walking back, which
+	// made marker-mid quadratic in a path's segments.
+	start point
 }
 
 func pathSegments(p *path) []segment {
-	var out []segment
+	out := make([]segment, 0, len(p.verbs))
 	pi := 0
 	var prev, prevMove point
 	for _, v := range p.verbs {
@@ -56,6 +61,14 @@ func pathSegments(p *path) []segment {
 			prev = prevMove
 		}
 	}
+	// Each segment's subpath start: the last move before it.
+	var start point
+	for i := range out {
+		out[i].start = start
+		if out[i].kind == segMove {
+			start = out[i].p
+		}
+	}
 	return out
 }
 
@@ -63,19 +76,25 @@ func approxEq(a, b float64) bool {
 	return math.Abs(a-b) <= 1e-6*math.Max(1, math.Max(math.Abs(a), math.Abs(b)))
 }
 
-func subpathStart(segs []segment, idx int) point {
-	for i := idx - 1; i >= 0; i-- {
-		if segs[i].kind == segMove {
-			return segs[i].p
-		}
-	}
-	return point{}
+// markerPath is a path's segments as marker placement reads them.
+type markerPath struct {
+	segs []segment
+	// reads counts the segments read to find the subpath starts of the
+	// vertices. Nothing reads it but TestMarkerMidLinear, which checks that
+	// placing markers on n vertices reads O(n) of them by counting, not
+	// timing; a lookup that walks segments must count each one it reads.
+	reads int
 }
 
-func prevVertex(segs []segment, idx int) point {
-	s := segs[idx-1]
+func (mp *markerPath) subpathStart(idx int) point {
+	mp.reads++
+	return mp.segs[idx].start
+}
+
+func (mp *markerPath) prevVertex(idx int) point {
+	s := mp.segs[idx-1]
 	if s.kind == segClose {
-		return subpathStart(segs, idx)
+		return mp.subpathStart(idx)
 	}
 	return s.p
 }
@@ -119,7 +138,8 @@ func calcCurvesAngle(px, py, cx1, cy1, x, y, cx2, cy2, nx, ny float64) float64 {
 	return calcAngle(cx1, cy1, x, y, x, y, cx2, cy2)
 }
 
-func vertexAngle(segs []segment, idx int) float64 {
+func (mp *markerPath) vertexAngle(idx int) float64 {
+	segs := mp.segs
 	n := len(segs)
 	if idx == 0 {
 		if n < 2 {
@@ -143,7 +163,7 @@ func vertexAngle(segs []segment, idx int) float64 {
 		case segMove:
 			return 0
 		case segLine:
-			pv := prevVertex(segs, idx)
+			pv := mp.prevVertex(idx)
 			return calcLineAngle(pv.x, pv.y, s2.p.x, s2.p.y)
 		case segCubic:
 			if approxEq(s2.p2.x, s2.p.x) && approxEq(s2.p2.y, s2.p.y) {
@@ -153,11 +173,11 @@ func vertexAngle(segs []segment, idx int) float64 {
 		case segClose:
 			switch s1.kind {
 			case segLine:
-				next := subpathStart(segs, idx)
+				next := mp.subpathStart(idx)
 				return calcLineAngle(s1.p.x, s1.p.y, next.x, next.y)
 			case segCubic:
-				pv := prevVertex(segs, idx)
-				next := subpathStart(segs, idx)
+				pv := mp.prevVertex(idx)
+				next := mp.subpathStart(idx)
 				return calcCurvesAngle(pv.x, pv.y, s1.p2.x, s1.p2.y, s1.p.x, s1.p.y, next.x, next.y, next.x, next.y)
 			}
 		}
@@ -170,33 +190,33 @@ func vertexAngle(segs []segment, idx int) float64 {
 	case s1.kind == segMove && s2.kind == segCubic:
 		return calcLineAngle(s1.p.x, s1.p.y, s2.p1.x, s2.p1.y)
 	case s1.kind == segLine && s2.kind == segLine:
-		pv := prevVertex(segs, idx)
+		pv := mp.prevVertex(idx)
 		return calcAngle(pv.x, pv.y, s1.p.x, s1.p.y, s1.p.x, s1.p.y, s2.p.x, s2.p.y)
 	case s1.kind == segCubic && s2.kind == segCubic:
-		pv := prevVertex(segs, idx)
+		pv := mp.prevVertex(idx)
 		return calcCurvesAngle(pv.x, pv.y, s1.p2.x, s1.p2.y, s1.p.x, s1.p.y, s2.p1.x, s2.p1.y, s2.p.x, s2.p.y)
 	case s1.kind == segLine && s2.kind == segCubic:
-		pv := prevVertex(segs, idx)
+		pv := mp.prevVertex(idx)
 		return calcCurvesAngle(pv.x, pv.y, pv.x, pv.y, s1.p.x, s1.p.y, s2.p1.x, s2.p1.y, s2.p.x, s2.p.y)
 	case s1.kind == segCubic && s2.kind == segLine:
-		pv := prevVertex(segs, idx)
+		pv := mp.prevVertex(idx)
 		return calcCurvesAngle(pv.x, pv.y, s1.p2.x, s1.p2.y, s1.p.x, s1.p.y, s2.p.x, s2.p.y, s2.p.x, s2.p.y)
 	case s1.kind == segLine && s2.kind == segMove:
-		pv := prevVertex(segs, idx)
+		pv := mp.prevVertex(idx)
 		return calcLineAngle(pv.x, pv.y, s1.p.x, s1.p.y)
 	case s1.kind == segCubic && s2.kind == segMove:
 		if approxEq(s1.p.x, s1.p2.x) && approxEq(s1.p.y, s1.p2.y) {
-			pv := prevVertex(segs, idx)
+			pv := mp.prevVertex(idx)
 			return calcLineAngle(pv.x, pv.y, s1.p.x, s1.p.y)
 		}
 		return calcLineAngle(s1.p2.x, s1.p2.y, s1.p.x, s1.p.y)
 	case s1.kind == segLine && s2.kind == segClose:
-		pv := prevVertex(segs, idx)
-		next := subpathStart(segs, idx)
+		pv := mp.prevVertex(idx)
+		next := mp.subpathStart(idx)
 		return calcAngle(pv.x, pv.y, s1.p.x, s1.p.y, s1.p.x, s1.p.y, next.x, next.y)
 	case s2.kind == segClose && s1.kind != segClose:
-		pv := prevVertex(segs, idx)
-		next := subpathStart(segs, idx)
+		pv := mp.prevVertex(idx)
+		next := mp.subpathStart(idx)
 		return calcLineAngle(pv.x, pv.y, next.x, next.y)
 	}
 	return 0
@@ -245,8 +265,9 @@ func (r *renderer) hasMarkers(n *node, st *state) bool {
 // drawMarkers draws the marker-start/mid/end symbols of path p (local
 // coordinates of the shape whose state is st).
 func (r *renderer) drawMarkers(p *path, st *state) {
-	segs := pathSegments(p)
-	if len(segs) == 0 {
+	r.holdPoints(4 * len(p.verbs)) // a segment is four points' bytes
+	mp := &markerPath{segs: pathSegments(p)}
+	if len(mp.segs) == 0 {
 		return
 	}
 	for kind := 0; kind < 3; kind++ {
@@ -258,14 +279,14 @@ func (r *renderer) drawMarkers(p *path, st *state) {
 		if mn == nil || mn.tag != tagMarker || r.active[mn] {
 			continue
 		}
-		r.drawMarker(mn, segs, kind, st)
+		r.drawMarker(mn, mp, kind, st)
 		if r.err != nil {
 			return
 		}
 	}
 }
 
-func (r *renderer) drawMarker(mn *node, segs []segment, kind int, st *state) {
+func (r *renderer) drawMarker(mn *node, mp *markerPath, kind int, st *state) {
 	mst := r.inheritedState(mn)
 	strokeScale := 1.0
 	if strings.TrimSpace(mn.str(aMarkerUnits)) != "userSpaceOnUse" {
@@ -290,17 +311,19 @@ func (r *renderer) drawMarker(mn *node, segs []segment, kind int, st *state) {
 	}
 	orient := strings.TrimSpace(mn.str(aOrient))
 
-	draw := func(pt point, idx int) {
+	// draw places the marker at a vertex; false ends the placement (the
+	// render has failed).
+	draw := func(pt point, idx int) bool {
 		if !r.budget() {
-			return
+			return r.err == nil
 		}
 		ts := translate(pt.x, pt.y)
 		var angle float64
 		switch {
 		case orient == "auto-start-reverse" && idx == 0:
-			angle = math.Mod(vertexAngle(segs, idx)+180, 360)
+			angle = math.Mod(mp.vertexAngle(idx)+180, 360)
 		case orient == "auto" || orient == "auto-start-reverse":
-			angle = vertexAngle(segs, idx)
+			angle = mp.vertexAngle(idx)
 		default:
 			if a, ok := parseAngle(orient); ok {
 				angle = a
@@ -324,22 +347,31 @@ func (r *renderer) drawMarker(mn *node, segs []segment, kind int, st *state) {
 		cs.clip = st.clip
 		cs.vw, cs.vh = st.vw, st.vh
 		if !cs.ctm.isFinite() || !cs.ctm.invertible() {
-			return
+			return r.err == nil
 		}
 		if clipped {
 			cs.clip = r.rectClip(&state{clip: st.clip}, cs.ctm, clipRect)
 			if cs.clip.r.empty() {
-				return
+				return r.err == nil
 			}
 		}
 		r.active[mn] = true
 		r.renderChildren(mn, &cs)
 		delete(r.active, mn)
+		return r.err == nil
 	}
 	if r.active == nil {
 		r.active = map[*node]bool{}
 	}
 
+	mp.eachVertex(kind, draw)
+}
+
+// eachVertex calls draw with each vertex a marker of kind (0 start, 1 mid,
+// 2 end) is placed on, and the index of its segment, until draw returns
+// false.
+func (mp *markerPath) eachVertex(kind int, draw func(pt point, idx int) bool) {
+	segs := mp.segs
 	switch kind {
 	case 0:
 		if segs[0].kind == segMove {
@@ -351,8 +383,7 @@ func (r *renderer) drawMarker(mn *node, segs []segment, kind int, st *state) {
 			if segs[i].kind == segClose {
 				continue
 			}
-			draw(segs[i].p, i)
-			if r.err != nil {
+			if !draw(segs[i].p, i) {
 				return
 			}
 		}
@@ -362,7 +393,7 @@ func (r *renderer) drawMarker(mn *node, segs []segment, kind int, st *state) {
 		case segLine, segCubic:
 			draw(segs[idx].p, idx)
 		case segClose:
-			draw(subpathStart(segs, idx), idx)
+			draw(mp.subpathStart(idx), idx)
 		}
 	}
 }

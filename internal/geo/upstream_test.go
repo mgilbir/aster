@@ -114,11 +114,11 @@ func TestUpstreamD3Geo(t *testing.T) {
 		obj := func(i int) jsval.Value { return upstream.ToValue(c.Arg(i)) }
 		switch c.Fn {
 		case "geoArea":
-			r.Check(c, upstream.Enc(GeoArea(obj(0))), false)
+			r.Check(c, upstream.Enc(areaOf(obj(0))), false)
 		case "geoBounds":
-			r.Check(c, extentValue(GeoBounds(obj(0))), false)
+			r.Check(c, extentValue(boundsOf(obj(0))), false)
 		case "geoCentroid":
-			r.Check(c, pairValue(GeoCentroid(obj(0))), false)
+			r.Check(c, pairValue(centroidOf(obj(0))), false)
 		case "geoContains":
 			p, ok := point(c.Arg(1))
 			if !ok {

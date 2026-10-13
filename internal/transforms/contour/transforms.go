@@ -6,6 +6,7 @@ import (
 	"math"
 	"strings"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -64,7 +65,8 @@ func Contour(ctx context.Context, source []jsval.Value, p ContourParams) ([]jsva
 	if !(w >= 0 && h >= 0) {
 		return nil, errInvalidSize
 	}
-	if w*h > MaxGridCells {
+	// Each side too, before it is an int: 0 x Infinity is NaN.
+	if w*h > MaxGridCells || w > MaxGridCells || h > MaxGridCells {
 		return nil, errTooLarge
 	}
 
@@ -80,6 +82,9 @@ func Contour(ctx context.Context, source []jsval.Value, p ContourParams) ([]jsva
 		}
 	}
 	geoms, err := Contours(ctx, values, int(w), int(h), thresholds, boolOr(p.Smooth, true))
+	if density {
+		releaseGrid(ctx, grid)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -90,11 +95,32 @@ func Contour(ctx context.Context, source []jsval.Value, p ContourParams) ([]jsva
 		}
 		transformGeometries(geoms, grid, s, s, 0, 0)
 	}
+	led := budget.LedgerFrom(ctx)
+	vertices, err := chargeValues(led, geoms)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]jsval.Value, len(geoms))
 	for i, g := range geoms {
 		out[i] = g.ToValue()
 	}
+	led.Free(vertices * vertexBytes)
 	return out, nil
+}
+
+// chargeValues charges the ledger for the jsval form of geoms before it is
+// built (it is output, kept as long as the dataflow), and returns the number
+// of vertices, whose rings the caller gives back once they are converted.
+func chargeValues(led *budget.Ledger, geoms []Geometry) (int64, error) {
+	var n int64
+	for _, g := range geoms {
+		for _, poly := range g.Coordinates {
+			for _, ring := range poly {
+				n += int64(len(ring))
+			}
+		}
+	}
+	return n, led.Alloc(n * pointValueBytes)
 }
 
 // IsocontourParams are the parameters of the vega-geo Isocontour transform.
@@ -128,14 +154,20 @@ func Isocontour(ctx context.Context, source []jsval.Value, p IsocontourParams) (
 		field = func(v jsval.Value) jsval.Value { return v }
 	}
 	grids := make([]Grid, len(source))
+	defer func() {
+		for _, g := range grids {
+			releaseGrid(ctx, g)
+		}
+	}()
 	for i, t := range source {
-		g, err := GridFromValue(field(t))
+		g, err := GridFromValue(ctx, field(t))
 		if err != nil {
 			return nil, err
 		}
 		grids[i] = g
 	}
 	smooth := boolOr(p.Smooth, true)
+	led := budget.LedgerFrom(ctx)
 
 	var shared []float64
 	quant := func([]float64) ([]float64, error) { return nil, nil }
@@ -178,6 +210,10 @@ func Isocontour(ctx context.Context, source []jsval.Value, p IsocontourParams) (
 			return nil, err
 		}
 		p.transformPaths(geoms, g, t)
+		vertices, err := chargeValues(led, geoms)
+		if err != nil {
+			return nil, err
+		}
 		for _, geom := range geoms {
 			var o *jsval.Object
 			if p.NoAs {
@@ -192,6 +228,7 @@ func Isocontour(ctx context.Context, source []jsval.Value, p IsocontourParams) (
 			}
 			out = append(out, jsval.Obj(o))
 		}
+		led.Free(vertices * vertexBytes)
 	}
 	return out, nil
 }
@@ -283,6 +320,10 @@ type KDE2DParams struct {
 	GroupBy []GroupField
 	Counts  bool
 	As      string // output field for the grid; "" means "grid"
+	// KeyString is String(v), which keys the groups (upstream keys an object
+	// by the array of group values, which String joins): a date writes to
+	// the second in the view's zone. nil means jsval's AsString.
+	KeyString func(jsval.Value) string
 }
 
 // KDE2D estimates one density raster per group. Each output tuple holds the
@@ -296,6 +337,10 @@ func KDE2D(ctx context.Context, source []jsval.Value, p KDE2DParams) ([]jsval.Va
 	if p.GroupBy == nil {
 		groups = []*group{{data: source}}
 	} else {
+		str := p.KeyString
+		if str == nil {
+			str = jsval.Value.AsString
+		}
 		index := map[string]*group{}
 		var sb strings.Builder
 		for _, t := range source {
@@ -307,7 +352,7 @@ func KDE2D(ctx context.Context, source []jsval.Value, p KDE2DParams) ([]jsval.Va
 					sb.WriteByte(',')
 				}
 				if !dims[i].IsNullish() {
-					sb.WriteString(dims[i].AsString())
+					sb.WriteString(str(dims[i]))
 				}
 			}
 			key := sb.String()
@@ -324,13 +369,21 @@ func KDE2D(ctx context.Context, source []jsval.Value, p KDE2DParams) ([]jsval.Va
 	if as == "" {
 		as = "grid"
 	}
+	led := budget.LedgerFrom(ctx)
 	out := make([]jsval.Value, 0, len(groups))
 	for _, g := range groups {
+		// Each group's grid is charged before it is made, and its jsval
+		// form, which the output keeps, before that is built.
 		grid, err := Density(ctx, g.data, p.DensityParams, p.Counts)
 		if err != nil {
 			return nil, err
 		}
+		if err := led.Alloc(jsValueBytes * int64(len(grid.Values))); err != nil {
+			releaseGrid(ctx, grid)
+			return nil, err
+		}
 		o := jsval.ObjectOf(as, grid.ToValue())
+		releaseGrid(ctx, grid)
 		for i, f := range p.GroupBy {
 			o.Set(f.Name, g.dims[i])
 		}

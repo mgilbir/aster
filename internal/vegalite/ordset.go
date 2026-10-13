@@ -1,14 +1,61 @@
 package vegalite
 
+import (
+	"slices"
+	"sort"
+
+	"github.com/mgilbir/aster/internal/jsval"
+)
+
 // sset is an insertion-ordered set of strings (JavaScript's Set<string>).
 // A nil *sset stands for `undefined`, which upstream uses for "unknown".
 type sset struct {
 	items []string
+	// index is made once the set is past ssetScan members; below that a
+	// scan of items is cheaper than a map, and most sets stay there.
 	index map[string]struct{}
+	// raw holds, by their text, the members that were added as values other
+	// than strings (a transform's `as` of null): upstream's set holds the
+	// values, and reading one as an access path differs from its text.
+	raw map[string]Value
 }
 
+// addValue adds v, keeping it as it is when it is not a string.
+func (s *sset) addValue(v Value) {
+	k := v.AsString()
+	if !v.IsStr() && !s.has(k) {
+		if s.raw == nil {
+			s.raw = map[string]Value{}
+		}
+		s.raw[k] = v
+	}
+	s.add(k)
+}
+
+// value is the member x as it was added.
+func (s *sset) value(x string) Value {
+	if v, ok := s.raw[x]; ok {
+		return v
+	}
+	return jsval.Str(x)
+}
+
+// ssetOfValues is new Set(values): each member kept as it is given.
+func ssetOfValues(values []Value) *sset {
+	s := newSset()
+	for _, v := range values {
+		s.addValue(v)
+	}
+	return s
+}
+
+const ssetScan = 8
+
 func newSset(items ...string) *sset {
-	s := &sset{index: make(map[string]struct{}, len(items))}
+	s := &sset{}
+	if len(items) > 0 {
+		s.items = make([]string, 0, len(items))
+	}
 	for _, i := range items {
 		s.add(i)
 	}
@@ -16,22 +63,35 @@ func newSset(items ...string) *sset {
 }
 
 func (s *sset) add(x string) {
-	if s.index == nil {
-		s.index = map[string]struct{}{}
-	}
-	if _, ok := s.index[x]; ok {
+	if s.has(x) {
 		return
 	}
-	s.index[x] = struct{}{}
 	s.items = append(s.items, x)
+	switch {
+	case s.index != nil:
+		s.index[x] = struct{}{}
+	case len(s.items) > ssetScan:
+		s.index = make(map[string]struct{}, 2*len(s.items))
+		for _, i := range s.items {
+			s.index[i] = struct{}{}
+		}
+	}
 }
 
 func (s *sset) has(x string) bool {
 	if s == nil {
 		return false
 	}
-	_, ok := s.index[x]
-	return ok
+	if s.index != nil {
+		_, ok := s.index[x]
+		return ok
+	}
+	for _, i := range s.items {
+		if i == x {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *sset) size() int {
@@ -54,20 +114,14 @@ func (s *sset) clone() *sset {
 		for _, i := range s.items {
 			c.add(i)
 		}
+		for k, v := range s.raw {
+			if c.raw == nil {
+				c.raw = map[string]Value{}
+			}
+			c.raw[k] = v
+		}
 	}
 	return c
-}
-
-// mapSet turns the set into a Go map (for the field-prefix helpers).
-func (s *sset) asMap() map[string]bool {
-	if s == nil {
-		return nil
-	}
-	m := make(map[string]bool, len(s.items))
-	for _, i := range s.items {
-		m[i] = true
-	}
-	return m
 }
 
 func setEqual(a, b *sset) bool {
@@ -91,13 +145,36 @@ func hasIntersection(a, b *sset) bool {
 	return false
 }
 
-// omap is an insertion-ordered string-keyed map.
+// omap is an insertion-ordered string-keyed map with JavaScript's key order:
+// array-index keys first, ascending, then the rest in insertion order.
+//
+// Keeping that order on every insert (upstream's own objects do) moves the
+// keys after an index key each time, quadratic over a map's keys; deleting
+// from the middle of the key list is linear too. So the list is kept lazily
+// (C4): a new key is appended and a deleted one only leaves the value map,
+// and the list is put in order the next time it is read, with the same
+// result as ordering on every insert.
 type omap[V any] struct {
-	keys []string
-	m    map[string]V
+	ks []string
+	m  map[string]V
+	// untidy says ks holds deleted keys or index keys out of order.
+	untidy bool
+	// unordered says the keys are never listed (newLookupOmap), so their
+	// order is not kept.
+	unordered bool
+	// proto is what assigning "__proto__" made the object's prototype (see
+	// jsRealm); the zero value is Object.prototype.
+	proto *jsProto
 }
 
-func newOmap[V any]() *omap[V] { return &omap[V]{m: map[string]V{}} }
+// newOmap is an empty omap; its map is made on the first write, so one
+// that stays empty (no legends, no selections) allocates only itself.
+func newOmap[V any]() *omap[V] { return &omap[V]{} }
+
+// newLookupOmap is an omap upstream only reads and writes by key (a
+// selection's parsed projections, its hasField), never listing them: the
+// same plain-object semantics, without the key list.
+func newLookupOmap[V any]() *omap[V] { return &omap[V]{unordered: true} }
 
 func (o *omap[V]) get(k string) (V, bool) {
 	if o == nil {
@@ -116,30 +193,22 @@ func (o *omap[V]) lookup(k string) V {
 func (o *omap[V]) has(k string) bool { _, ok := o.get(k); return ok }
 
 func (o *omap[V]) set(k string, v V) {
+	if o.m == nil {
+		o.m = map[string]V{}
+	}
+	if o.unordered {
+		o.m[k] = v
+		return
+	}
 	if _, ok := o.m[k]; !ok {
-		o.keys = insertJSKey(o.keys, k)
+		if n, isIdx := arrayIndex(k); isIdx && !o.untidy && len(o.ks) > 0 {
+			if m, lastIdx := arrayIndex(o.ks[len(o.ks)-1]); !lastIdx || m > n {
+				o.untidy = true
+			}
+		}
+		o.ks = append(o.ks, k)
 	}
 	o.m[k] = v
-}
-
-// insertJSKey appends k, or places an array-index key among the leading index
-// keys in ascending order (JavaScript's own-key order).
-func insertJSKey(keys []string, k string) []string {
-	n, ok := arrayIndex(k)
-	if !ok {
-		return append(keys, k)
-	}
-	pos := len(keys)
-	for i, e := range keys {
-		if m, isIdx := arrayIndex(e); !isIdx || m > n {
-			pos = i
-			break
-		}
-	}
-	keys = append(keys, "")
-	copy(keys[pos+1:], keys[pos:])
-	keys[pos] = k
-	return keys
 }
 
 func (o *omap[V]) del(k string) {
@@ -147,19 +216,57 @@ func (o *omap[V]) del(k string) {
 		return
 	}
 	delete(o.m, k)
-	for i, x := range o.keys {
-		if x == k {
-			o.keys = append(o.keys[:i], o.keys[i+1:]...)
-			break
+	o.untidy = true
+	// Compact once the deleted keys are most of the list, so its length
+	// stays proportional to the live keys.
+	if len(o.ks) > 32 && len(o.m) < len(o.ks)/2 {
+		o.tidy()
+	}
+}
+
+// tidy drops the deleted keys from the list and puts it in JavaScript's
+// order, which is what ordering on every insert would have given: index keys
+// ascending, then the others in the order they were (last) added.
+func (o *omap[V]) tidy() {
+	if !o.untidy {
+		return
+	}
+	// A key's live entry is its last one: a key deleted and set again was
+	// appended anew. Walk from the end, keeping the first entry of each
+	// key still in m.
+	seen := make(map[string]bool, len(o.m))
+	live := make([]string, 0, len(o.m))
+	var idx []string
+	for i := len(o.ks) - 1; i >= 0; i-- {
+		k := o.ks[i]
+		if _, ok := o.m[k]; !ok || seen[k] {
+			continue
+		}
+		seen[k] = true
+		if _, isIdx := arrayIndex(k); isIdx {
+			idx = append(idx, k)
+		} else {
+			live = append(live, k)
 		}
 	}
+	slices.Reverse(live)
+	if len(idx) > 0 {
+		sort.Slice(idx, func(i, j int) bool {
+			a, _ := arrayIndex(idx[i])
+			b, _ := arrayIndex(idx[j])
+			return a < b
+		})
+		live = append(idx, live...)
+	}
+	o.ks = live
+	o.untidy = false
 }
 
 func (o *omap[V]) len() int {
 	if o == nil {
 		return 0
 	}
-	return len(o.keys)
+	return len(o.m)
 }
 
 // keysView returns the keys without copying; the caller must not modify the
@@ -168,12 +275,26 @@ func (o *omap[V]) keysView() []string {
 	if o == nil {
 		return nil
 	}
-	return o.keys
+	if o.unordered {
+		panic("vegalite: the keys of a lookup omap are not kept")
+	}
+	o.tidy()
+	return o.ks
 }
 
 func (o *omap[V]) keyList() []string {
 	if o == nil {
 		return nil
 	}
-	return append([]string(nil), o.keys...)
+	if o.unordered {
+		panic("vegalite: the keys of a lookup omap are not kept")
+	}
+	o.tidy()
+	return append([]string(nil), o.ks...)
+}
+
+// jsEntry is a key and its value.
+type jsEntry struct {
+	k string
+	v Value
 }

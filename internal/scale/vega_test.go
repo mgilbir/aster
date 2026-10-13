@@ -2,6 +2,7 @@ package scale
 
 import (
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"math"
 	"os"
@@ -42,7 +43,7 @@ func loadVega(t testing.TB) []vegaCase {
 
 func tcOf(v any) TickCount {
 	if v == nil {
-		return TickCount{}
+		return TickCount{Null: true} // the generator's count is null
 	}
 	d := decVal(v)
 	if d.IsNum() {
@@ -51,12 +52,11 @@ func tcOf(v any) TickCount {
 	return TickCount{}
 }
 
-func minStepOf(v any) *float64 {
+func minStepOf(v any) jsval.Value {
 	if v == nil {
-		return nil
+		return jsval.Undefined
 	}
-	f := v.(float64)
-	return &f
+	return jsval.Num(v.(float64))
 }
 
 func TestVegaHelpersGolden(t *testing.T) {
@@ -64,7 +64,7 @@ func TestVegaHelpersGolden(t *testing.T) {
 	var st cmpStats
 	fail, total := 0, 0
 	for _, c := range loadVega(t) {
-		s, ok := applyOps(t, goldenCase{Name: c.Name, Type: c.Type, Ops: c.Ops})
+		s, ok := applyOps(t, goldenCase{Name: c.Name, Type: c.Type, Ops: c.Ops}, format.UTC)
 		if !ok {
 			continue
 		}
@@ -155,7 +155,8 @@ func runVega(s Scale, loc *format.Locale, tm map[string]any) (jsval.Value, error
 		if err != nil {
 			return jsval.Undefined, err
 		}
-		return jsval.Arr(TickValues(s, tc)), nil
+		vals, err := TickValues(context.Background(), s, tc)
+		return jsval.Arr(vals), err
 	case "validTicks":
 		return jsval.Arr(ValidTicks(s, decVal(tm["ticks"]).Items(), tcOf(tm["count"]))), nil
 	case "tickFormat":
@@ -163,7 +164,7 @@ func runVega(s Scale, loc *format.Locale, tm map[string]any) (jsval.Value, error
 		if err != nil {
 			return jsval.Undefined, err
 		}
-		f, err := TickFormat(loc, s, tc, specOf(tm), fmtTypeOf(tm), tm["noSkip"] == true)
+		f, err := TickFormat(context.Background(), loc, s, tc, specOf(tm), fmtTypeOf(tm), tm["noSkip"] == true)
 		if err != nil {
 			return jsval.Undefined, err
 		}
@@ -177,7 +178,10 @@ func runVega(s Scale, loc *format.Locale, tm map[string]any) (jsval.Value, error
 		if err != nil {
 			return jsval.Undefined, err
 		}
-		l := LabelValues(s, tc)
+		l, err := LabelValues(context.Background(), s, tc)
+		if err != nil {
+			return jsval.Undefined, err
+		}
 		o := jsval.NewObject(2)
 		o.Set("values", jsval.Arr(l.Values))
 		if l.HasMax {
@@ -192,15 +196,17 @@ func runVega(s Scale, loc *format.Locale, tm map[string]any) (jsval.Value, error
 			return jsval.Undefined, err
 		}
 		typ, _ := tm["type"].(string)
-		f, err := LabelFormat(loc, s, tc, typ, specOf(tm), fmtTypeOf(tm), tm["noSkip"] == true)
+		f, err := LabelFormat(context.Background(), loc, s, tc, typ, specOf(tm), fmtTypeOf(tm), tm["noSkip"] == true)
 		if err != nil {
 			return jsval.Undefined, err
 		}
-		l := LabelValues(s, tc)
+		l, err := LabelValues(context.Background(), s, tc)
+		if err != nil {
+			return jsval.Undefined, err
+		}
 		out := make([]jsval.Value, len(l.Values))
 		for i, v := range l.Values {
-			text, _ := f(v, i, l)
-			out[i] = text
+			out[i] = f(v, i, l)
 		}
 		return jsval.Arr(out), nil
 	case "labelFraction":
@@ -250,7 +256,7 @@ func runVega(s Scale, loc *format.Locale, tm map[string]any) (jsval.Value, error
 			opt.Format = o.Get("format")
 			opt.FormatType = o.Get("formatType").StrValue()
 		}
-		str, err := DomainCaption(loc, s, opt)
+		str, err := DomainCaption(context.Background(), loc, s, opt)
 		return jsval.Str(str), err
 	}
 	return jsval.Undefined, nil

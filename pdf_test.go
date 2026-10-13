@@ -189,7 +189,7 @@ func TestPDFTextModes(t *testing.T) {
 // Gated on pdftotext (poppler).
 func TestPDFTextIsExtractable(t *testing.T) {
 	if _, err := exec.LookPath("pdftotext"); err != nil {
-		t.Skip("pdftotext (poppler) not installed")
+		popplerMissing(t, "pdftotext")
 	}
 	c, err := aster.New(aster.WithTextMeasurement(false))
 	if err != nil {
@@ -216,4 +216,14 @@ func TestPDFTextIsExtractable(t *testing.T) {
 	if !strings.Contains(string(out), "Weighted Average 42") {
 		t.Errorf("extracted text %q does not contain the source string", strings.TrimSpace(string(out)))
 	}
+}
+
+// popplerMissing skips a test whose poppler tool is not installed, or fails
+// it with ASTER_POPPLER=require (as in CI), so that the check runs somewhere.
+func popplerMissing(t *testing.T, tool string) {
+	t.Helper()
+	if os.Getenv("ASTER_POPPLER") == "require" {
+		t.Fatalf("%s (poppler) required (ASTER_POPPLER=require) but not installed", tool)
+	}
+	t.Skipf("%s (poppler) not installed", tool)
 }

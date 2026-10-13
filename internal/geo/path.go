@@ -3,7 +3,6 @@ package geo
 import (
 	"context"
 
-	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -22,10 +21,10 @@ type Path struct {
 	ctx      PathContext
 	str      *pathString
 
-	// bctx carries the render's budget and cancellation (see Bind).
+	// bctx and wb bound the walks (see Bind).
 	bctx context.Context
-	bud  *budget.Budget
-	lim  *limitSink // reused wrapper around str or cs, so the projection's pipeline is too
+	wb   *walkBound
+	lim  *pointCharge // reused wrapper around str or cs for an unprojected path
 	cs   *pathContextStream
 
 	// walking is set while a string walk is in progress; still set at the next
@@ -34,38 +33,22 @@ type Path struct {
 	walking bool
 }
 
-// Bind charges every point the path emits to the budget carried by ctx and
-// stops the walk when ctx is done. Projection resampling can multiply the
-// points of a segment by 2^16, so this is what bounds geographic output.
+// Bind bounds the path's walks by ctx: every point the projection produces
+// (after resampling, before clipping), or every point an unprojected path
+// emits, is charged to the budget ctx carries, and the walk meters its work
+// to the call's ledger, so it stops when ctx is done. A walk past a bound
+// panics with a *budget.Stop, which the caller's API boundary recovers.
+// Binding the context the path is already bound to changes nothing.
 func (p *Path) Bind(ctx context.Context) {
+	if ctx == p.bctx {
+		return
+	}
 	p.bctx = ctx
-	p.bud = budget.From(ctx)
+	p.wb = newWalkBound(ctx)
+	p.lim = nil
 }
 
-// limitSink counts the points reaching the output.
-type limitSink struct {
-	Stream
-	p *Path
-	n int
-}
-
-func (*limitSink) reusableSink()  {}
 func (*pathString) reusableSink() {}
-
-func (s *limitSink) Point(x, y float64) {
-	s.n++
-	if s.p.bud != nil {
-		if err := s.p.bud.Points(1); err != nil {
-			panic(&budget.Stop{Err: err})
-		}
-	}
-	if s.n&4095 == 0 {
-		if err := s.p.bctx.Err(); err != nil {
-			panic(&budget.Stop{Err: err})
-		}
-	}
-	s.Stream.Point(x, y)
-}
 
 // NewPath returns a path generator for the projection (nil for none), with
 // digits DefaultDigits, point radius 4.5 and string output.
@@ -115,22 +98,21 @@ func (p *Path) restoreRadius(s radiusState) {
 }
 
 func (p *Path) stream(object jsval.Value, sink Stream) {
-	if p.bctx != nil {
-		if _, ok := sink.(reusableSink); ok {
-			// The same wrapper every call, so the projection can reuse its pipeline.
-			if p.lim == nil || p.lim.Stream != sink {
-				p.lim = &limitSink{Stream: sink, p: p}
-			}
-			sink = p.lim
-		} else {
-			sink = &limitSink{Stream: sink, p: p}
-		}
-	}
-	if p.proj != nil {
+	switch {
+	case p.proj != nil:
 		if d, ok := p.proj.(interface{ dropStreamCache() }); ok && p.walking {
 			d.dropStreamCache()
 		}
-		sink = p.proj.Stream(sink)
+		sink = p.proj.streamBound(sink, p.wb)
+	case p.wb != nil:
+		if _, ok := sink.(reusableSink); ok {
+			if p.lim == nil || p.lim.sink != sink {
+				p.lim = &pointCharge{b: p.wb, sink: sink}
+			}
+			sink = p.lim
+		} else {
+			sink = &pointCharge{b: p.wb, sink: sink}
+		}
 	}
 	p.walking = true
 	StreamObject(object, sink)

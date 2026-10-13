@@ -4,6 +4,7 @@ import (
 	"errors"
 	"math"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsmath"
 )
 
@@ -27,6 +28,18 @@ var errNegativeRadius = errors.New("scene: negative radius")
 type errContext interface{ Err() error }
 
 // ctxErr returns a builder's recorded error, if the context keeps one.
+// ledgerContext is a PathContext drawing for a render with a ledger, which a
+// generator charges the memory it allocates from the item (a custom symbol's
+// parsed path).
+type ledgerContext interface{ Ledger() *budget.Ledger }
+
+func ledgerOf(ctx PathContext) *budget.Ledger {
+	if c, ok := ctx.(ledgerContext); ok {
+		return c.Ledger()
+	}
+	return nil
+}
+
 func ctxErr(ctx PathContext) error {
 	if e, ok := ctx.(errContext); ok {
 		return e.Err()

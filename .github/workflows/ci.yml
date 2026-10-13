@@ -1,8 +1,8 @@
 name: CI
 
 # The quick gates, on every pull request (stacked ones included) and every
-# push to main: formatting, lint, vet, the -short suite, a 32-bit build, the
-# FMA and recursion audits. They take a few minutes. The slow gates (race,
+# push to main: formatting, lint, vet, the -short suite, 32-bit, windows and
+# darwin builds, the FMA and recursion audits. They take a few minutes. The slow gates (race,
 # oracle, PDFium, macOS, 32-bit tests, benchmarks) are in heavy.yml, which
 # runs on main and by hand before a release; run them locally with
 # `make check` and `make benchgate` before merging.
@@ -41,9 +41,7 @@ jobs:
         with:
           version: v2.14.0
       - name: go mod tidy
-        run: |
-          go mod tidy
-          git diff --exit-code go.mod go.sum
+        run: go mod tidy -diff
 
   test:
     strategy:
@@ -74,6 +72,21 @@ jobs:
       - name: go vet
         # compiles the tests too
         run: GOARCH=386 go vet ./...
+
+  cross-build:
+    # What builds on linux need not on windows or darwin (a unix-only
+    # syscall in a tool or a test helper): build and vet, tests included,
+    # for both. Nothing runs; heavy.yml's macOS job runs darwin's tests.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: windows
+        run: GOOS=windows go build ./... && GOOS=windows go vet ./...
+      - name: darwin
+        run: GOOS=darwin go build ./... && GOOS=darwin go vet ./...
 
   fmacheck:
     # The engine must not let the compiler fuse multiply-adds where upstream

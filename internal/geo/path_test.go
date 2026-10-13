@@ -30,7 +30,7 @@ func loadTopology(t testing.TB, name string) jsval.Value {
 
 func topoFeatureOf(t testing.TB, topo jsval.Value, object string) jsval.Value {
 	t.Helper()
-	f, err := TopoFeature(topo, topo.Get("objects").Get(object))
+	f, err := TopoFeature(bg, topo, topo.Get("objects").Get(object))
 	if err != nil {
 		t.Fatal(err)
 	}

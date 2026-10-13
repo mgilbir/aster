@@ -11,8 +11,8 @@ import (
 const binRangeDelimiter = " – "
 
 // signalRefOrValue turns an ExprRef {expr} into a SignalRef {signal}.
-func signalRefOrValue(v Value) Value {
-	if isExprRef(v) {
+func signalRefOrValue(cc *compileCtx, v Value) Value {
+	if isExprRef(cc, v) {
 		rest := omit(v, "expr")
 		o := jsval.NewObject(rest.Len() + 1)
 		o.Set("signal", v.Get("expr"))
@@ -22,27 +22,28 @@ func signalRefOrValue(v Value) Value {
 	return v
 }
 
-func signalOrValueRefWithCondition(v Value) Value {
+func signalOrValueRefWithCondition(cc *compileCtx, v Value) Value {
 	cond := v.Get("condition")
 	var c Value
 	if cond.IsArr() {
 		items := make([]Value, cond.Len())
 		for i, it := range cond.Items() {
-			items[i] = signalRefOrValue(it)
+			cc.work(1)
+			items[i] = signalRefOrValue(cc, it)
 		}
 		c = jsval.Arr(items)
 	} else {
-		c = signalRefOrValue(cond)
+		c = signalRefOrValue(cc, cond)
 	}
-	o := cloneObj(signalRefOrValue(v).ObjValue())
+	o := cloneObj(signalRefOrValue(cc, v).ObjValue())
 	o.Set("condition", c)
 	return jsval.Obj(o)
 }
 
 // signalOrValueRef makes a value ref: {signal} stays, anything else becomes {value}.
-func signalOrValueRef(v Value) Value {
-	if isExprRef(v) {
-		return signalRefOrValue(v)
+func signalOrValueRef(cc *compileCtx, v Value) Value {
+	if isExprRef(cc, v) {
+		return signalRefOrValue(cc, v)
 	}
 	if isSignalRef(v) {
 		return v
@@ -78,24 +79,26 @@ func signalOrStringValue(v Value) Value {
 }
 
 // getStyles is [].concat(mark.type, mark.style ?? []).
-func getStyles(mark Value) []string {
-	out := []string{mark.Get("type").AsString()}
-	st := mark.Get("style")
-	switch {
-	case st.IsArr():
-		for _, s := range st.Items() {
-			out = append(out, s.AsString())
+// getStyles is `[].concat(mark.type, mark.style ?? [])`: the values as
+// given, an array's elements spread one level.
+func getStyles(mark Value) []Value {
+	var out []Value
+	for _, x := range []Value{mark.Get("type"), mark.Get("style")} {
+		switch {
+		case x.IsArr():
+			out = append(out, x.Items()...)
+		case x.IsNullish() && len(out) > 0: // mark.style ?? []
+		default:
+			out = append(out, x)
 		}
-	case !st.IsNullish():
-		out = append(out, st.AsString())
 	}
 	return out
 }
 
-func getStyleConfig(p string, styles []string, styleIndex Value) Value {
+func getStyleConfig(p string, styles []Value, styleIndex Value) Value {
 	v := undef
 	for _, s := range styles {
-		sc := styleIndex.Get(s)
+		sc := jsGet(styleIndex, s.AsString()) // styleConfigIndex[style]: a TypeError without one
 		if hasProperty(sc, p) {
 			v = sc.Get(p)
 		}
@@ -112,11 +115,15 @@ func getMarkStyleConfig(prop string, mark Value, styleIndex Value) Value {
 // tried first at each level.
 func getMarkConfig(channel string, mark Value, config Value, vgChannel string) Value {
 	cfg := getMarkStyleConfig(channel, mark, config.Get("style"))
+	// config[mark.type][channel] and config.mark[channel] are read
+	// unguarded (all of getFirstDefined's arguments are evaluated): a mark
+	// config set to a falsy value is absent from the config, and reading it
+	// is a TypeError.
 	mt := config.Get(mark.Get("type").AsString())
 	if vgChannel != "" {
-		return firstDefined(cfg, cfg, mt.Get(vgChannel), mt.Get(channel), config.Get("mark").Get(vgChannel))
+		return firstDefined(cfg, cfg, jsGet(mt, vgChannel), jsGet(mt, channel), jsGet(config.Get("mark"), vgChannel))
 	}
-	return firstDefined(undef, cfg, undef, mt.Get(channel), config.Get("mark").Get(channel))
+	return firstDefined(undef, cfg, undef, jsGet(mt, channel), jsGet(config.Get("mark"), channel))
 }
 
 // getMarkPropOrConfig reads the mark property, falling back to config.
@@ -139,6 +146,7 @@ func getMarkPropOrConfigSimple(channel string, mark, config Value) Value {
 func sortParams(cc *compileCtx, orderDef Value, opt fieldRefOption) (fields, orders []Value) {
 	defs := arrayOf(orderDef)
 	for _, d := range defs {
+		cc.work(1)
 		fields = append(fields, jsval.Str(vgField(cc, d, opt)))
 		orders = append(orders, coalesce(d.Get("sort"), jsval.Str("ascending")))
 	}
@@ -157,18 +165,81 @@ func arrayOf(v Value) []Value {
 	return []Value{v}
 }
 
-func mergeTitleFieldDefs(f1, f2 []Value) []Value {
-	merged := append([]Value(nil), f1...)
+// titleMergeDirect is the most defs mergeTitleFieldDefs compares directly;
+// past it the buckets make the merge of many views linear.
+const titleMergeDirect = 8
+
+func mergeTitleFieldDefs(cc *compileCtx, f1, f2 []Value) []Value {
+	// Upstream compares each new field def with every one merged so far, and
+	// a shared axis merges the defs of its views one view at a time: quadratic
+	// in the views (X13). Here the defs are bucketed by their stable JSON
+	// (deepEqual values print the same), so a def is compared only with the
+	// few of its bucket; and the buckets of the list a merge returns are kept
+	// (titleMerges), so the next merge, which is given that list, extends them
+	// instead of bucketing the whole list again. The list is append-only and
+	// the slice returned is capped at its length, so a later append by anyone
+	// else copies rather than writing into it.
+	var tm *titleMerge
+	if len(f1) > 0 && cc != nil {
+		if t := cc.titleMerges[&f1[0]]; t != nil && len(t.items) == len(f1) {
+			tm = t
+			delete(cc.titleMerges, &f1[0])
+		}
+	}
+	if tm == nil && len(f1)+len(f2) <= titleMergeDirect {
+		// A few defs (a chart of one or two views): compare each with each,
+		// as upstream does, without building the buckets.
+		merged := append([]Value(nil), f1...)
+	direct:
+		for _, fd := range f2 {
+			cc.work(1)
+			for _, m := range merged {
+				cc.work(1)
+				if deepEqual(m, fd) {
+					continue direct
+				}
+			}
+			merged = append(merged, fd)
+		}
+		return merged[:len(merged):len(merged)]
+	}
+	if tm == nil {
+		tm = &titleMerge{items: append([]Value(nil), f1...), byKey: map[string][]int{}}
+		for i, fd := range tm.items {
+			k := stringify(cc, fd)
+			tm.byKey[k] = append(tm.byKey[k], i)
+		}
+	}
 outer:
 	for _, fd := range f2 {
-		for _, m := range merged {
-			if deepEqual(m, fd) {
+		cc.work(1)
+		k := stringify(cc, fd)
+		for _, i := range tm.byKey[k] {
+			cc.work(1)
+			if deepEqual(tm.items[i], fd) {
 				continue outer
 			}
 		}
-		merged = append(merged, fd)
+		tm.byKey[k] = append(tm.byKey[k], len(tm.items))
+		tm.items = append(tm.items, fd)
 	}
-	return merged
+	if len(tm.items) == 0 {
+		return nil
+	}
+	if cc != nil {
+		if cc.titleMerges == nil {
+			cc.titleMerges = map[*Value]*titleMerge{}
+		}
+		cc.titleMerges[&tm.items[0]] = tm
+	}
+	return tm.items[:len(tm.items):len(tm.items)]
+}
+
+// titleMerge is a list of title field defs a merge returned, with its
+// buckets (see mergeTitleFieldDefs).
+type titleMerge struct {
+	items []Value
+	byKey map[string][]int
 }
 
 func mergeTitle(t1, t2 Value) Value {
@@ -185,7 +256,7 @@ func mergeTitle(t1, t2 Value) Value {
 }
 
 // mergeTitleComponent merges two title components (text or field-def lists).
-func mergeTitleComponent(v1, v2 withExplicit) withExplicit {
+func mergeTitleComponent(cc *compileCtx, v1, v2 withExplicit) withExplicit {
 	a, b := v1.value, v2.value
 	aText := isText(a) || isSignalRef(a)
 	bText := isText(b) || isSignalRef(b)
@@ -199,16 +270,16 @@ func mergeTitleComponent(v1, v2 withExplicit) withExplicit {
 	case bText:
 		return withExplicit{v1.explicit, b}
 	}
-	return withExplicit{v1.explicit, jsval.Arr(mergeTitleFieldDefs(a.Items(), b.Items()))}
+	// mergeTitleFieldDefs(f1, f2): [...f1], then f2.forEach.
+	f1 := spreadItems(a)
+	return withExplicit{v1.explicit, jsval.Arr(mergeTitleFieldDefs(cc, f1, listOf(b, "f2", "forEach")))}
 }
 
-// inheritedObjectKey reports a key that reads as present on any plain object
-// through its prototype: `out[key]` of an empty `{}` is truthy for them.
-func inheritedObjectKey(key string) bool {
-	switch key {
-	case "constructor", "hasOwnProperty", "isPrototypeOf", "propertyIsEnumerable", "toString", "valueOf",
-		"toLocaleString", "__defineGetter__", "__defineSetter__", "__lookupGetter__", "__lookupSetter__", "__proto__":
-		return true
+// spreadItems is [...v]: an array's items, a string's code points; a
+// TypeError for anything else.
+func spreadItems(v Value) []Value {
+	if v.IsArr() || v.IsStr() {
+		return iterate(v, "")
 	}
-	return false
+	return iterateNew(v)
 }

@@ -40,7 +40,7 @@ const (
 
 func TestVectorPDFMatchesPNG(t *testing.T) {
 	if _, err := exec.LookPath("pdftoppm"); err != nil {
-		t.Skip("pdftoppm (poppler) not installed; skipping PDF/PNG drift check")
+		popplerMissing(t, "pdftoppm")
 	}
 	c, err := aster.New()
 	if err != nil {

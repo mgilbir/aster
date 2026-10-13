@@ -2,10 +2,13 @@ package scene
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"strconv"
 	"unicode/utf8"
+	"unsafe"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsmath"
 )
 
@@ -133,7 +136,16 @@ func scanNumber(s string, i int) (int, bool) {
 // letter followed by parameters, implicit repetition (with `m` repeating as
 // `l`), arc flags read as single 0/1 characters, and no validation that the
 // path starts with a moveto.
-func ParsePath(path string) ([]PathCmd, error) {
+func ParsePath(path string) ([]PathCmd, error) { return parsePath(nil, path) }
+
+// pathCmdBytes is what one parsed command holds: about sixteen times the
+// bytes of path data it is parsed from ("l1,2").
+const pathCmdBytes = int64(unsafe.Sizeof(PathCmd{}))
+
+// parsePath is ParsePath charging the commands to l before it allocates them
+// (C48): a path string is the specification's or the data's, and its parse
+// holds sixteen times its size.
+func parsePath(l *budget.Ledger, path string) ([]PathCmd, error) {
 	var cmds []PathCmd
 	i := 0
 	for i < len(path) {
@@ -167,7 +179,9 @@ func ParsePath(path string) ([]PathCmd, error) {
 		var c PathCmd
 		c.Cmd, c.N = cmd, uint8(pc)
 		copy(c.P[:], params[:pc])
-		cmds = append(cmds, c)
+		if cmds, err = appendCmd(l, cmds, c); err != nil {
+			return nil, err
+		}
 		if count == pc {
 			continue
 		}
@@ -181,10 +195,25 @@ func ParsePath(path string) ([]PathCmd, error) {
 		for k := pc; k < count; k += pc {
 			c = PathCmd{Cmd: cmd, N: uint8(pc)}
 			copy(c.P[:], params[k:k+pc])
-			cmds = append(cmds, c)
+			if cmds, err = appendCmd(l, cmds, c); err != nil {
+				return nil, err
+			}
 		}
 	}
 	return cmds, nil
+}
+
+// appendCmd appends c to cmds, charging l for the room before the slice
+// grows; without a ledger it is append.
+func appendCmd(l *budget.Ledger, cmds []PathCmd, c PathCmd) ([]PathCmd, error) {
+	if l != nil && len(cmds) == cap(cmds) {
+		n := max(2*cap(cmds), 8)
+		if err := l.Alloc(int64(n-cap(cmds)) * pathCmdBytes); err != nil {
+			return nil, fmt.Errorf("scene: parsing path data: %w", err)
+		}
+		cmds = append(make([]PathCmd, 0, n), cmds...)
+	}
+	return append(cmds, c), nil
 }
 
 func trimJS(s string) string {

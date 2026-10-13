@@ -1,6 +1,7 @@
 package raster
 
 import (
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -149,8 +150,11 @@ func TestCSSStructuralSelectors(t *testing.T) {
 	check("c", aFill, "")
 }
 
+// A document whose style sheets are over a limit fails with ErrLimit rather
+// than be drawn styled by part of them (C103): too many rules, sheets too
+// large, or matching them takes too many steps (where later elements went
+// unstyled).
 func TestCSSLimits(t *testing.T) {
-	// Many rules: capped, and the render still succeeds.
 	var b strings.Builder
 	b.WriteString(`<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><style>`)
 	for i := 0; i < 5000; i++ {
@@ -159,16 +163,22 @@ func TestCSSLimits(t *testing.T) {
 		b.WriteString(" rect { fill: red }\n")
 	}
 	b.WriteString(`</style><rect class="cx" width="10" height="10"/></svg>`)
-	lim := Limits{MaxCSSRules: 100}
-	if _, err := Render([]byte(b.String()), Options{Limits: lim}); err != nil {
-		t.Fatal(err)
+	if _, err := Render([]byte(b.String()), Options{Limits: Limits{MaxCSSRules: 100}}); !errors.Is(err, errLimit) {
+		t.Errorf("rules over the limit: err = %v", err)
 	}
-	// Style sheets over the size limit are ignored, not fatal.
-	doc, err := parseDocument(b.String(), Limits{MaxStyleBytes: 10}.withDefaults())
-	if err != nil {
-		t.Fatal(err)
+	if _, err := Render([]byte(b.String()), Options{Limits: Limits{MaxStyleBytes: 10}}); !errors.Is(err, errLimit) {
+		t.Errorf("a sheet over the size limit: err = %v", err)
 	}
-	for _, n := range doc.ids {
-		_ = n
+	var many strings.Builder
+	many.WriteString(`<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><style>rect { fill: red }</style>`)
+	for range 100 {
+		many.WriteString(`<rect width="10" height="10"/>`)
+	}
+	many.WriteString(`</svg>`)
+	if _, err := Render([]byte(many.String()), Options{Limits: Limits{MaxCSSWork: 50}}); !errors.Is(err, errLimit) {
+		t.Errorf("matching over the work limit: err = %v", err)
+	}
+	if _, err := Render([]byte(b.String()), Options{}); err != nil {
+		t.Errorf("within the limits: %v", err)
 	}
 }

@@ -1,6 +1,8 @@
 package raster
 
 import (
+	"context"
+	"fmt"
 	"sort"
 	"strings"
 )
@@ -581,30 +583,48 @@ type cssApplier struct {
 	budget int
 	cand   []int
 	tmp    []attr
+	ctx    context.Context
+	visits int
+	err    error
 }
 
 // applyCSS parses the document's style sheets and folds the matching
-// declarations into every element's style list.
-func (doc *document) applyCSS(lim Limits) {
+// declarations into every element's style list. A sheet past MaxStyleBytes,
+// rules past MaxCSSRules or matching past MaxCSSWork fail the render: a
+// document styled by part of its sheets, or with its later elements left
+// unstyled, would be drawn wrong without a word (C103).
+func (doc *document) applyCSS(ctx context.Context, lim Limits) error {
 	var rules []cssRule
 	total := 0
 	for _, src := range doc.css {
 		total += len(src)
 		if total > lim.MaxStyleBytes {
-			break
+			return fmt.Errorf("raster: style sheets of more than %d bytes: %w", lim.MaxStyleBytes, errLimit)
 		}
-		rules = parseStyleSheet(src, rules, lim.MaxCSSRules)
+		if rules = parseStyleSheet(src, rules, lim.MaxCSSRules+1); len(rules) > lim.MaxCSSRules {
+			return fmt.Errorf("raster: style sheets of more than %d rules: %w", lim.MaxCSSRules, errLimit)
+		}
 	}
 	doc.css = nil
 	if len(rules) == 0 {
-		return
+		return nil
 	}
-	a := &cssApplier{rules: rules, ix: buildIndex(rules), budget: lim.MaxCSSWork}
+	a := &cssApplier{rules: rules, ix: buildIndex(rules), budget: lim.MaxCSSWork, ctx: ctx}
 	a.visit(doc.root)
+	if a.err != nil {
+		return a.err
+	}
+	if a.budget < 0 {
+		return fmt.Errorf("raster: matching style sheets takes more than %d steps (raise Limits.MaxCSSWork): %w", lim.MaxCSSWork, errLimit)
+	}
+	return nil
 }
 
 func (a *cssApplier) visit(n *node) {
-	if a.budget > 0 {
+	if a.budget >= 0 && a.err == nil {
+		if a.visits++; a.ctx != nil && a.visits&255 == 0 {
+			a.err = a.ctx.Err()
+		}
 		a.apply(n)
 	}
 	var prev *node

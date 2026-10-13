@@ -10,6 +10,16 @@ import (
 
 func isSelectionPredicate(p Value) bool { return hasProperty(p, "param") }
 
+// isSelectionPredicateOf is isSelectionPredicate as the version has it: 5.8
+// reads predicate?.['param'] for its truthiness, so a param of "" is a field
+// predicate there.
+func isSelectionPredicateOf(cc *compileCtx, p Value) bool {
+	if cc.v5 {
+		return isObject(p) && p.Get("param").IsTruthy()
+	}
+	return isSelectionPredicate(p)
+}
+
 func fieldTruthy(p Value) bool { return p.IsObj() && p.Get("field").IsTruthy() }
 
 func isFieldEqualPredicate(p Value) bool { return fieldTruthy(p) && !p.Get("equal").IsUndefined() }
@@ -51,7 +61,6 @@ func predicateValueExpr(cc *compileCtx, v Value, timeUnit string) string {
 }
 
 func fieldFilterExpression(cc *compileCtx, p Value, useInRange bool) string {
-	field := p.Get("field").AsString()
 	nt := normalizeTimeUnit(cc, p.Get("timeUnit"))
 	unit := ""
 	if u := nt.Get("unit"); u.IsTruthy() {
@@ -64,7 +73,7 @@ func fieldFilterExpression(cc *compileCtx, p Value, useInRange bool) string {
 		// A timeUnit'ed predicate compares the truncated time, computed from the raw
 		// field unless the field was pre-binned.
 		if !binned {
-			fieldExpr = "time(" + timeUnitFieldExpr(unit, field, false) + ")"
+			fieldExpr = "time(" + timeUnitFieldExprV(unit, p.Get("field"), false) + ")"
 		} else {
 			fieldExpr = "time(" + rawFieldExpr + ")"
 		}
@@ -81,8 +90,12 @@ func fieldFilterExpression(cc *compileCtx, p Value, useInRange bool) string {
 	case isFieldGTEPredicate(p):
 		return fieldExpr + ">=" + predicateValueExpr(cc, p.Get("gte"), unit)
 	case isFieldOneOfPredicate(p):
+		// predicateValuesExpr(predicate.oneOf): the legacy `in` makes this a
+		// oneOf predicate too, but only oneOf is read, so `in` alone is a
+		// TypeError upstream (C49).
 		var parts []string
-		for _, v := range p.Get("oneOf").Items() {
+		for _, v := range listOf(p.Get("oneOf"), "vals", "map") {
+			cc.work(1)
 			parts = append(parts, predicateValueExpr(cc, v, unit))
 		}
 		return "indexof([" + strings.Join(parts, ",") + "], " + fieldExpr + ") !== -1"
@@ -95,7 +108,7 @@ func fieldFilterExpression(cc *compileCtx, p Value, useInRange bool) string {
 	case isFieldRangePredicate(p):
 		rp := p
 		if !cc.v5 {
-			rp = replaceExprRefObj(p)
+			rp = replaceExprRefObj(cc, p)
 		}
 		rng := rp.Get("range")
 		var lower, upper Value
@@ -120,7 +133,7 @@ func fieldFilterExpression(cc *compileCtx, p Value, useInRange bool) string {
 		}
 		return "true"
 	}
-	throw("Invalid field predicate: %s", stringify(p))
+	throw("Invalid field predicate: %s", stringify(cc, p))
 	return ""
 }
 
@@ -146,35 +159,21 @@ func normalizePredicate(cc *compileCtx, f Value) Value {
 }
 
 // replaceExprRefObj is replaceExprRef with level 0 (each top-level property).
-func replaceExprRefObj(idx Value) Value { return replaceExprRef(idx, 0) }
+func replaceExprRefObj(cc *compileCtx, idx Value) Value { return replaceExprRef(cc, idx, 0) }
 
 // replaceExprRef converts ExprRefs to SignalRefs in the properties of idx,
-// recursing level more times through nested objects.
-func replaceExprRef(idx Value, level int) Value {
+// recursing level more times through nested objects. It reads idx as
+// upstream does, `keys(index || {})` and `index[prop]`: a string's
+// characters and an array's elements by index, nothing of a number.
+func replaceExprRef(cc *compileCtx, idx Value, level int) Value {
 	out := jsval.NewObject(idx.Len())
-	if idx.IsObj() {
-		o := idx.ObjValue()
-		for i := 0; i < o.Len(); i++ {
-			v := o.ValueAt(i)
-			if level == 0 {
-				out.Set(o.KeyAt(i), signalRefOrValue(v))
-			} else {
-				out.Set(o.KeyAt(i), replaceExprRef(v, level-1))
-			}
-		}
-	} else if idx.IsStr() {
-		// Object.keys of a string are its character indices.
-		for i, u := range utf16Len(idx.StrValue()) {
-			out.Set(jsval.JSNumberString(float64(i)), jsval.Str(string(rune(u))))
-		}
-	} else if idx.IsArr() {
-		for i, v := range idx.Items() {
-			k := jsval.JSNumberString(float64(i))
-			if level == 0 {
-				out.Set(k, signalRefOrValue(v))
-			} else {
-				out.Set(k, replaceExprRef(v, level-1))
-			}
+	for _, k := range jsKeysOr(idx) {
+		cc.work(1)
+		v := jsProp(idx, k)
+		if level == 0 {
+			jsSet(cc, out, k, signalRefOrValue(cc, v))
+		} else {
+			jsSet(cc, out, k, replaceExprRef(cc, v, level-1))
 		}
 	}
 	return jsval.Obj(out)
@@ -186,20 +185,22 @@ func isLogicalOr(op Value) bool  { return hasProperty(op, "or") }
 func isLogicalAnd(op Value) bool { return hasProperty(op, "and") }
 func isLogicalNot(op Value) bool { return hasProperty(op, "not") }
 
-func forEachLeaf(op Value, fn func(Value), depth int) {
+func forEachLeaf(cc *compileCtx, op Value, fn func(Value), depth int) {
 	if depth > maxDepth*4 {
 		exceeded("logical composition nested too deeply")
 	}
 	switch {
 	case isLogicalNot(op):
-		forEachLeaf(op.Get("not"), fn, depth+1)
+		forEachLeaf(cc, op.Get("not"), fn, depth+1)
 	case isLogicalAnd(op):
 		for _, s := range op.Get("and").Items() {
-			forEachLeaf(s, fn, depth+1)
+			cc.work(1)
+			forEachLeaf(cc, s, fn, depth+1)
 		}
 	case isLogicalOr(op):
 		for _, s := range op.Get("or").Items() {
-			forEachLeaf(s, fn, depth+1)
+			cc.work(1)
+			forEachLeaf(cc, s, fn, depth+1)
 		}
 	default:
 		fn(op)
@@ -214,31 +215,33 @@ func normalizeLogicalComposition(op Value, normalizer func(Value) Value, depth i
 	case isLogicalNot(op):
 		return mkv("not", normalizeLogicalComposition(op.Get("not"), normalizer, depth+1))
 	case isLogicalAnd(op):
-		return mkv("and", mapVals(op.Get("and"), func(o Value) Value { return normalizeLogicalComposition(o, normalizer, depth+1) }))
+		return mkv("and", mapList(op.Get("and"), "op.and", func(o Value) Value { return normalizeLogicalComposition(o, normalizer, depth+1) }))
 	case isLogicalOr(op):
-		return mkv("or", mapVals(op.Get("or"), func(o Value) Value { return normalizeLogicalComposition(o, normalizer, depth+1) }))
+		return mkv("or", mapList(op.Get("or"), "op.or", func(o Value) Value { return normalizeLogicalComposition(o, normalizer, depth+1) }))
 	}
 	return normalizer(op)
 }
 
 // logicalExpr renders a logical composition through cb for each leaf.
-func logicalExpr(op Value, cb func(Value) string, depth int) string {
+func logicalExpr(cc *compileCtx, op Value, cb func(Value) string, depth int) string {
 	if depth > maxDepth*4 {
 		exceeded("logical composition nested too deeply")
 	}
 	switch {
 	case isLogicalNot(op):
-		return "!(" + logicalExpr(op.Get("not"), cb, depth+1) + ")"
+		return "!(" + logicalExpr(cc, op.Get("not"), cb, depth+1) + ")"
 	case isLogicalAnd(op):
 		var parts []string
 		for _, a := range op.Get("and").Items() {
-			parts = append(parts, logicalExpr(a, cb, depth+1))
+			cc.work(1)
+			parts = append(parts, logicalExpr(cc, a, cb, depth+1))
 		}
 		return "(" + strings.Join(parts, ") && (") + ")"
 	case isLogicalOr(op):
 		var parts []string
 		for _, a := range op.Get("or").Items() {
-			parts = append(parts, logicalExpr(a, cb, depth+1))
+			cc.work(1)
+			parts = append(parts, logicalExpr(cc, a, cb, depth+1))
 		}
 		return "(" + strings.Join(parts, ") || (") + ")"
 	}
@@ -246,6 +249,17 @@ func logicalExpr(op Value, cb func(Value) string, depth int) string {
 }
 
 // mapVals is Array.prototype.map over an array value.
+// mapList is expr.map(f) of a value upstream maps without checking it is an
+// array (see listOf).
+func mapList(a Value, expr string, f func(Value) Value) Value {
+	items := listOf(a, expr, "map")
+	out := make([]Value, len(items))
+	for i, it := range items {
+		out[i] = f(it)
+	}
+	return jsval.Arr(out)
+}
+
 func mapVals(a Value, f func(Value) Value) Value {
 	items := a.Items()
 	out := make([]Value, len(items))

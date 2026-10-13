@@ -6,6 +6,7 @@ package fuzzutil
 
 import (
 	"encoding/binary"
+	"github.com/mgilbir/aster/internal/testutil"
 	"math"
 	"os"
 	"path/filepath"
@@ -47,9 +48,12 @@ func Files(tb testing.TB, patterns ...string) []string {
 
 // Within runs fn and fails the test if it takes longer than d: a fuzzer
 // reports a hang as nothing at all, so an input that makes fn run away has to
-// become a failure here. what names the input in the message.
+// become a failure here. what names the input in the message. d is the budget
+// on a plain build and is stretched by testutil.RaceSlowdown under -race, so
+// that the bound tells a hang from slow instrumentation everywhere it runs.
 func Within(t testing.TB, d time.Duration, what string, fn func()) {
 	t.Helper()
+	d = testutil.Scaled(d)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)

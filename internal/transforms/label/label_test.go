@@ -3,10 +3,12 @@ package label
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"math"
 	"os"
 	"testing"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -302,5 +304,28 @@ func BenchmarkLayoutPoints(b *testing.B) {
 		if _, err := Layout(context.Background(), labels, o); err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+type nopRaster struct{}
+
+func (nopRaster) Draw(*Mask, []any, bool) {}
+
+// TestMasksCharged is the audit's C64: the canvas masks a layout paints are
+// as large as the layout (up to 64 Mi pixels, three of them, a byte a
+// pixel), and nothing charged them. They are bitsets now, charged with the
+// layout's bitmaps to the ledger, and given back when it is done.
+func TestMasksCharged(t *testing.T) {
+	labels := []Label{{Text: "a", FontSize: 10, X: 1, Y: 1}}
+	o := Options{Size: [2]float64{8000, 8000}, Rasterizer: nopRaster{}, AvoidMarks: [][]any{{1}}, TextWidth: testWidth, Anchor: []string{"middle"}}
+	const max = 16 << 20
+	l := budget.NewLedger(context.Background(), budget.LedgerLimits{MaxBytes: max})
+	ctx := budget.WithLedger(context.Background(), l)
+	if _, err := Layout(ctx, labels, o); !errors.Is(err, budget.ErrLimit) || l.PeakBytes() > max {
+		t.Fatalf("got %v, peak %d", err, l.PeakBytes())
+	}
+	o.Size = [2]float64{2000, 2000}
+	if _, err := Layout(ctx, labels, o); err != nil || l.Bytes() != 0 {
+		t.Fatalf("got %v, %d bytes still charged", err, l.Bytes())
 	}
 }

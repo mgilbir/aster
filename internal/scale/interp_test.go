@@ -134,17 +134,7 @@ func TestHelpersGolden(t *testing.T) {
 		case "piecewise":
 			check(c.F, c.Args, c.Ts, c.R, Piecewise(nil, toVals(c.Args)))
 		case "quantize":
-			n := int(decVal(c.Args.([]any)[0]).NumValue())
-			var f func(float64) jsval.Value
-			if n == 3 {
-				f = InterpolateRGB(jsval.Str("red"), jsval.Str("blue"))
-			} else {
-				f = InterpolateNumber(jsval.Num(0), jsval.Num(1))
-			}
-			got := QuantizeSamples(f, n)
-			if !valuesMatch(jsval.Arr(got), decVal(c.R), &st) {
-				t.Errorf("quantize %d = %v want %v", n, got, decVal(c.R))
-			}
+			// d3.quantize: recorded with the rest, but nothing in Vega calls it
 		case "quantizeInterpolator":
 			n := int(decVal(c.Args.([]any)[0]).NumValue())
 			var f UnitInterpolator
@@ -153,7 +143,10 @@ func TestHelpersGolden(t *testing.T) {
 			} else {
 				f = InterpolateNumber(jsval.Num(0), jsval.Num(1))
 			}
-			got := QuantizeInterpolator(f, n)
+			got, err := QuantizeInterpolator(f, n)
+			if err != nil {
+				t.Fatal(err)
+			}
 			if !valuesMatch(jsval.Arr(got), decVal(c.R), &st) {
 				t.Errorf("quantizeInterpolator %d = %v want %v", n, got, decVal(c.R))
 			}

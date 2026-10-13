@@ -17,7 +17,10 @@ type stackProperties struct {
 	fieldChannel    string
 	impute          bool
 	stackBy         []stackBy
-	offset          string
+	// offset is the offset when it is a string ("" otherwise), for
+	// comparisons; offsetV is the value as upstream holds it.
+	offset  string
+	offsetV Value
 }
 
 var stackableMarks = strSet([]string{"arc", "bar", "area", "rule", "point", "circle", "square", "line", "text", "tick"})
@@ -146,6 +149,7 @@ func stackOf(cc *compileCtx, m Value, encoding Value) *stackProperties {
 	for _, channel := range nonPositionChannels {
 		if channel != chTooltip && channelHasField(cc, encoding, channel) {
 			for _, cDef := range arrayOf(encoding.Get(channel)) {
+				cc.work(1)
 				fd := getFieldDef(cc, cDef)
 				if fd.Get("aggregate").IsTruthy() {
 					continue
@@ -157,30 +161,53 @@ func stackOf(cc *compileCtx, m Value, encoding Value) *stackProperties {
 			}
 		}
 	}
-	offset := ""
-	haveOffset := false
+	offsetV := undef
 	if s := stackedFieldDef.Get("stack"); !s.IsUndefined() {
 		if s.IsBool() {
 			if s.BoolValue() {
-				offset, haveOffset = "zero", true
+				offsetV = jsval.Str("zero")
 			}
-		} else if s.IsStr() {
-			offset, haveOffset = s.StrValue(), true
+		} else {
+			offsetV = s
 		}
 	} else if stackByDefaultMarks[mark] {
-		offset, haveOffset = "zero", true
+		offsetV = jsval.Str("zero")
 	}
-	if !haveOffset || (offset != "zero" && offset != "center" && offset != "normalize") {
+	// isStackOffset: `s in STACK_OFFSET_INDEX` in 5.8, which a name every
+	// object inherits passes too; hasOwnProperty in 6.4. Both look the value
+	// up by its text.
+	if !offsetV.IsTruthy() {
 		return nil
+	}
+	switch key := offsetV.AsString(); {
+	case key == "zero" || key == "center" || key == "normalize":
+	case cc.v5 && isInheritedKey(key):
+	default:
+		return nil
+	}
+	offset := ""
+	if offsetV.IsStr() {
+		offset = offsetV.StrValue()
 	}
 	if encodingIsAggregate(cc, encoding) && len(stackByList) == 0 {
 		return nil
 	}
-	if st := stackedFieldDef.Get("scale").Get("type"); cc.v5 && st.IsTruthy() && !(st.IsStr() && st.StrValue() == "linear") {
-		return nil // 5.8 refuses to stack a non-linear scale
+	if st := stackedFieldDef.Get("scale").Get("type"); st.IsTruthy() && !(st.IsStr() && st.StrValue() == "linear") {
+		if stackedFieldDef.Get("stack").IsTruthy() {
+			cc.warn(msgStackNonLinearScale(cc.v5, st))
+		}
+		if cc.v5 {
+			return nil // 5.8 refuses to stack a non-linear scale
+		}
 	}
 	if sec := getSecondaryRangeChannel(fieldChannel); sec != "" && isFieldOrDatumDef(cc, encoding.Get(sec)) {
+		if !stackedFieldDef.Get("stack").IsUndefined() {
+			cc.warn(msgCannotStackRangedMark(fieldChannel))
+		}
 		return nil
+	}
+	if agg := stackedFieldDef.Get("aggregate"); isFieldDef(cc, stackedFieldDef) && agg.IsTruthy() && !(agg.IsStr() && sumOps[agg.StrValue()]) {
+		cc.warn(msgStackNonSummativeAggregate(agg))
 	}
 	impute := isPathMarkName(mark)
 	if stackedFieldDef.Get("impute").IsNull() {
@@ -188,9 +215,12 @@ func stackOf(cc *compileCtx, m Value, encoding Value) *stackProperties {
 	}
 	return &stackProperties{
 		groupbyChannels: groupbyChannels, groupbyFields: groupbyFields, fieldChannel: fieldChannel,
-		impute: impute, stackBy: stackByList, offset: offset,
+		impute: impute, stackBy: stackByList, offset: offset, offsetV: offsetV,
 	}
 }
+
+// sumOps is upstream's SUM_OPS: the aggregates a stack sums meaningfully.
+var sumOps = strSet([]string{"count", "sum", "distinct", "valid", "missing"})
 
 func isPathMarkName(m string) bool { return m == "line" || m == "area" || m == "trail" }
 

@@ -9,9 +9,9 @@ import (
 // The positional shortcut of a trimmed "g" must write what the general path
 // writes, for any number, in any locale.
 func TestSimpleGMatchesGeneral(t *testing.T) {
-	de := NewNumberLocale(NumberLocaleDef{Decimal: ptr(","), Thousands: ptr("."), Minus: ptr("−")})
+	de := mustNumberLocale(NumberLocaleDef{Decimal: ptr(","), Thousands: ptr("."), Minus: ptr("−")})
 	r := rand.New(rand.NewSource(7))
-	for _, loc := range []*NumberLocale{NewNumberLocale(NumberLocaleDef{}), de} {
+	for _, loc := range []*NumberLocale{mustNumberLocale(NumberLocaleDef{}), de} {
 		for _, spec := range []string{"", ".12~g", ".3~g", ".1~g", ".14~g", "~g", ".6~g"} {
 			f, err := loc.Format(spec)
 			if err != nil {

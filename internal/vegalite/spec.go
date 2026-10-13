@@ -16,7 +16,11 @@ func isHConcatSpec(s Value) bool { return hasProperty(s, "hconcat") }
 func isAnyConcatSpec(s Value) bool {
 	return isVConcatSpec(s) || isHConcatSpec(s) || isConcatSpec(s)
 }
-func isLayerRepeatSpec(s Value) bool {
+func isLayerRepeatSpec(cc *compileCtx, s Value) bool {
+	if cc.v5 {
+		// 5.8: spec.repeat['layer'] is truthy.
+		return !s.Get("repeat").IsArr() && jsGet(s.Get("repeat"), "layer").IsTruthy()
+	}
 	return !s.Get("repeat").IsArr() && hasProperty(s.Get("repeat"), "layer")
 }
 func isFacetMapping(f Value) bool { return hasProperty(f, "row") || hasProperty(f, "column") }
@@ -31,11 +35,19 @@ func isSelectionParameter(p Value) bool { return p.IsObj() && p.Get("select").Is
 
 // assembleParameterSignals converts variable parameters to Vega signals;
 // selection parameters are compiled elsewhere.
-func assembleParameterSignals(params Value) []Value {
+func assembleParameterSignals(cc *compileCtx, params Value) []Value {
 	var signals []Value
-	for _, p := range params.Items() {
+	var list []Value
+	if params.IsTruthy() {
+		list = iterate(params, "params || []")
+	}
+	for _, p := range list {
+		cc.work(1)
 		if isSelectionParameter(p) {
 			continue
+		}
+		if p.IsNullish() {
+			throw("Cannot destructure property 'expr' of 'param' as it is %s.", nullishName(p))
 		}
 		expr, bind := p.Get("expr"), p.Get("bind")
 		rest := omit(p, "expr", "bind")
@@ -64,6 +76,9 @@ var compositionLayoutProps = []string{"align", "bounds", "center", "columns", "s
 // the spec and the composition config.
 func extractCompositionLayout(spec Value, specType string, config Value) *Object {
 	compositionConfig := config.Get(specType)
+	if compositionConfig.IsNullish() {
+		throw("Cannot destructure property 'spacing' of 'compositionConfig' as it is %s.", nullishName(compositionConfig))
+	}
 	layout := jsval.NewObject(4)
 	spacingConfig, columns := compositionConfig.Get("spacing"), compositionConfig.Get("columns")
 	if !spacingConfig.IsUndefined() {
@@ -87,8 +102,8 @@ func extractCompositionLayout(spec Value, specType string, config Value) *Object
 				layout.Set(prop, v)
 			} else {
 				layout.Set(prop, mkv(
-					"row", coalesce(v.Get("row"), spacingConfig),
-					"column", coalesce(v.Get("column"), spacingConfig),
+					"row", coalesce(jsGet(v, "row"), spacingConfig), // spacing.row: a TypeError of null
+					"column", coalesce(jsGet(v, "column"), spacingConfig),
 				))
 			}
 		} else {
@@ -108,11 +123,11 @@ func getFitType(sizeType string) string {
 }
 
 // extractTopLevelProperties picks background and padding (and params).
-func extractTopLevelProperties(t Value, includeParams bool) *Object {
+func extractTopLevelProperties(cc *compileCtx, t Value, includeParams bool) *Object {
 	o := jsval.NewObject(3)
 	for _, p := range []string{"background", "padding"} {
 		if t.IsObj() && !t.Get(p).IsUndefined() {
-			o.Set(p, signalRefOrValue(t.Get(p)))
+			o.Set(p, signalRefOrValue(cc, t.Get(p)))
 		}
 	}
 	if includeParams {

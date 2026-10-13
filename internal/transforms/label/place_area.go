@@ -14,6 +14,7 @@ type areaPlacer struct {
 	avoidBaseMark bool
 	markIndex     int
 	textWidth     func(*Label) float64
+	stack         [][2]int // the flood fill's, kept between labels
 }
 
 func (p *areaPlacer) points(d *item) []Point {
@@ -217,6 +218,17 @@ var (
 
 // floodFill grows outwards from each area slice's centre through free bitmap
 // cells, trying a label at every cell it reaches.
+// push appends to the flood-fill stack, which can grow to four entries a
+// bitmap cell: its growth is charged first.
+func (p *areaPlacer) push(stack [][2]int, c [2]int) ([][2]int, error) {
+	if len(stack) == cap(stack) {
+		if err := p.sc.alloc(int64(max(cap(stack), 64)) * 16); err != nil {
+			return stack, err
+		}
+	}
+	return append(stack, c), nil
+}
+
 func (p *areaPlacer) floodFill(d *item) (bool, error) {
 	pts := p.points(d)
 	textHeight := d.label.FontSize
@@ -227,12 +239,16 @@ func (p *areaPlacer) floodFill(d *item) (bool, error) {
 	}
 	placed, placed2 := false, false
 	maxAreaWidth := 0.0
-	var stack [][2]int
+	stack := p.stack[:0]
+	defer func() { p.stack = stack[:0] }() // reused by the next label: charged once
+	var err error
 	steps := 0
 
 	for _, pt := range pts {
 		x1, y1, x2, y2 := span(pt)
-		stack = append(stack, [2]int{p.sc.scale((x1 + x2) / 2), p.sc.scale((y1 + y2) / 2)})
+		if stack, err = p.push(stack, [2]int{p.sc.scale((x1 + x2) / 2), p.sc.scale((y1 + y2) / 2)}); err != nil {
+			return false, err
+		}
 		for len(stack) > 0 {
 			if steps++; steps&1023 == 0 {
 				if err := p.ctx.Err(); err != nil {
@@ -249,7 +265,9 @@ func (p *areaPlacer) floodFill(d *item) (bool, error) {
 			for j := 0; j < 4; j++ {
 				nx, ny := cx+floodDX[j], cy+floodDY[j]
 				if !p.bm2.outOfBounds(nx, ny, nx, ny) {
-					stack = append(stack, [2]int{nx, ny})
+					if stack, err = p.push(stack, [2]int{nx, ny}); err != nil {
+						return false, err
+					}
 				}
 			}
 			x, y := p.sc.invert(cx), p.sc.invert(cy)

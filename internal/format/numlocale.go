@@ -1,6 +1,7 @@
 package format
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"github.com/mgilbir/aster/internal/budget"
@@ -51,19 +52,68 @@ type grouper struct {
 	thousands string
 }
 
-var defaultNumberLocale = NewNumberLocale(NumberLocaleDef{
+var defaultNumberLocale = mustNumberLocale(NumberLocaleDef{
 	Thousands: ptr(","),
 	Grouping:  []float64{3},
 	Currency:  &[2]string{"$", ""},
 })
+
+func mustNumberLocale(d NumberLocaleDef) *NumberLocale {
+	l, err := NewNumberLocale(d)
+	if err != nil {
+		panic(err)
+	}
+	return l
+}
+
+// A locale's members are copied into every number it formats, the numerals
+// once per digit and per digit of every other member, so a specification's
+// config.locale could make each label megabytes long. The members are
+// bounded where the locale is built, far above any real locale: in d3's
+// locale files the longest decimal, thousands separator, minus sign or
+// numeral is 3 bytes, and the longest currency part or percent sign 10.
+const (
+	// MaxLocaleSymbol bounds the decimal point, the thousands separator,
+	// the minus sign and each numeral, in bytes.
+	MaxLocaleSymbol = 16
+	// MaxLocaleText bounds each currency part, the percent sign and the
+	// text of NaN, in bytes.
+	MaxLocaleText = 64
+)
+
+// check refuses a definition whose members exceed the bounds above.
+func (d NumberLocaleDef) check() error {
+	sym := func(name string, v *string, limit int) error {
+		if v != nil && len(*v) > limit {
+			return fmt.Errorf("%w: number locale %s of %d bytes exceeds %d", budget.ErrLimit, name, len(*v), limit)
+		}
+		return nil
+	}
+	err := cmp.Or(
+		sym("decimal", d.Decimal, MaxLocaleSymbol), sym("thousands", d.Thousands, MaxLocaleSymbol),
+		sym("minus", d.Minus, MaxLocaleSymbol), sym("percent", d.Percent, MaxLocaleText), sym("nan", d.NaN, MaxLocaleText),
+	)
+	if err == nil && d.Currency != nil {
+		err = cmp.Or(sym("currency", &d.Currency[0], MaxLocaleText), sym("currency", &d.Currency[1], MaxLocaleText))
+	}
+	for i := 0; err == nil && i < len(d.Numerals); i++ {
+		err = sym("numeral", &d.Numerals[i], MaxLocaleSymbol)
+	}
+	return err
+}
 
 func ptr[T any](v T) *T { return &v }
 
 // DefaultNumberLocale is d3-format's built-in en-US locale.
 func DefaultNumberLocale() *NumberLocale { return defaultNumberLocale }
 
-// NewNumberLocale is d3.formatLocale.
-func NewNumberLocale(def NumberLocaleDef) *NumberLocale {
+// NewNumberLocale is d3.formatLocale. It fails, with an error wrapping
+// budget.ErrLimit, for a member longer than MaxLocaleSymbol or
+// MaxLocaleText.
+func NewNumberLocale(def NumberLocaleDef) (*NumberLocale, error) {
+	if err := def.check(); err != nil {
+		return nil, err
+	}
 	l := &NumberLocale{decimal: ".", percent: "%", minus: "−", nan: "NaN"}
 	if def.Grouping != nil && def.Thousands != nil {
 		sizes := make([]int, len(def.Grouping))
@@ -97,7 +147,7 @@ func NewNumberLocale(def NumberLocaleDef) *NumberLocale {
 	if def.NaN != nil {
 		l.nan = *def.NaN
 	}
-	return l
+	return l, nil
 }
 
 // NumberLocaleFromValue reads a locale definition object as found in a Vega
@@ -131,7 +181,7 @@ func NumberLocaleFromValue(v jsval.Value) (*NumberLocale, error) {
 			def.Numerals = append(def.Numerals, it.AsString())
 		}
 	}
-	return NewNumberLocale(def), nil
+	return NewNumberLocale(def)
 }
 
 // NumberFormat is a compiled format function. Immutable; safe for concurrent

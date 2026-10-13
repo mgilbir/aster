@@ -1,9 +1,11 @@
 package scale
 
 import (
+	"fmt"
 	"math"
 	"strconv"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsmath"
 )
 
@@ -54,11 +56,13 @@ func pow10(x float64) float64 {
 	if x != math.Trunc(x) || math.Abs(x) >= 1e21 {
 		return math.NaN()
 	}
-	if x >= -323 && x <= 308 {
-		return pow10tab[int(x)+323]
+	switch {
+	case x > 308: // "1e309" and beyond parse as Infinity
+		return math.Inf(1)
+	case x < -323: // and "1e-324" and below as 0
+		return 0
 	}
-	f, _ := strconv.ParseFloat("1e"+strconv.FormatInt(int64(x), 10), 64)
-	return f
+	return pow10tab[int(x)+323]
 }
 
 func powp(base float64) func(float64) float64 {
@@ -66,7 +70,7 @@ func powp(base float64) func(float64) float64 {
 	case 10:
 		return pow10
 	case math.E:
-		return math.Exp
+		return jsmath.Exp // d3-scale's Math.exp
 	}
 	return func(x float64) float64 { return jsPow(base, x) }
 }
@@ -74,7 +78,7 @@ func powp(base float64) func(float64) float64 {
 func logp(base float64) func(float64) float64 {
 	switch base {
 	case math.E:
-		return math.Log
+		return jsmath.Log // d3-scale's Math.log
 	case 10:
 		return log10
 	case 2:
@@ -157,17 +161,21 @@ func (t *tspec) transform(domain0 float64) transform {
 	return transform{}
 }
 
-// maxLogIter bounds the work of log tick generation for absurd bases.
+// maxLogIter bounds the steps of log tick generation, which skips the
+// multiples below the domain without visiting them: past it the ticks would
+// be too many to keep anyway.
 const maxLogIter = 1 << 22
 
 // ticks is the tick generator of the family: d3's linearish ticks, or the
 // loggish variant that emits 1..base-1 multiples of each power.
-func (t *tspec) ticks(d []float64, count TickCount) []float64 {
+// More than max ticks (at most maxTickValues) is an error wrapping
+// budget.ErrLimit, raised before they are all made.
+func (t *tspec) ticks(d []float64, count TickCount, max int) ([]float64, error) {
 	u, v := endpoints(d)
 	if t.kind != kindLog {
-		return Ticks(u, v, count.countOrDefault())
+		return ticksN(u, v, count.countOrDefault(), max)
 	}
-	return t.logTicks(u, v, count.countOrDefault())
+	return t.logTicks(u, v, count.countOrDefault(), min(max, maxTickValues))
 }
 
 func endpoints(d []float64) (float64, float64) {
@@ -177,7 +185,14 @@ func endpoints(d []float64) (float64, float64) {
 	return d[0], d[len(d)-1]
 }
 
-func (t *tspec) logTicks(u, v, n float64) []float64 {
+// errLogTicks is the error past maxLogIter steps.
+var errLogTicks = fmt.Errorf("%w: log ticks take more than %d steps", budget.ErrLimit, maxLogIter)
+
+// logTicks is d3's loggish ticks. Its loops over the multiples k of each
+// power start at the first multiple that can reach the domain (firstMultiple)
+// rather than at 1: the multiples skipped are all below the domain, which
+// d3's loop passes over with `continue`, so the ticks are the same.
+func (t *tspec) logTicks(u, v, n float64, max int) ([]float64, error) {
 	r := v < u
 	if r {
 		u, v = v, u
@@ -187,18 +202,24 @@ func (t *tspec) logTicks(u, v, n float64) []float64 {
 	m := math.Mod(t.base, 1)
 	if (m == 0 || m != m) && j-i < n {
 		i, j = math.Floor(i), math.Ceil(j)
-		budget := maxLogIter
+		steps := maxLogIter
 		if u > 0 {
 			for ; i <= j; i++ {
-				for k := 1.0; k < t.base; k++ {
-					if budget--; budget < 0 {
-						return nil
+				var p float64 // x is k*p, or k/p for a negative power
+				if i < 0 {
+					p = t.pows(-i)
+				} else {
+					p = t.pows(i)
+				}
+				for k := firstMultiple(u, p, i < 0, t.base); k < t.base; k++ {
+					if steps--; steps < 0 {
+						return nil, errLogTicks
 					}
 					var x float64
 					if i < 0 {
-						x = k / t.pows(-i)
+						x = k / p
 					} else {
-						x = k * t.pows(i)
+						x = k * p
 					}
 					if x < u {
 						continue
@@ -206,14 +227,17 @@ func (t *tspec) logTicks(u, v, n float64) []float64 {
 					if x > v {
 						break
 					}
+					if len(z) == max {
+						return nil, fmt.Errorf("%w: more than %d log ticks", budget.ErrLimit, max)
+					}
 					z = append(z, x)
 				}
 			}
 		} else {
 			for ; i <= j; i++ {
 				for k := t.base - 1; k >= 1; k-- {
-					if budget--; budget < 0 {
-						return nil
+					if steps--; steps < 0 {
+						return nil, errLogTicks
 					}
 					var x float64
 					if i > 0 {
@@ -227,15 +251,24 @@ func (t *tspec) logTicks(u, v, n float64) []float64 {
 					if x > v {
 						break
 					}
+					if len(z) == max {
+						return nil, fmt.Errorf("%w: more than %d log ticks", budget.ErrLimit, max)
+					}
 					z = append(z, x)
 				}
 			}
 		}
 		if float64(len(z))*2 < n {
-			z = Ticks(u, v, n)
+			var err error
+			if z, err = ticksN(u, v, n, max); err != nil {
+				return nil, err
+			}
 		}
 	} else {
-		z = Ticks(i, j, math.Min(j-i, n))
+		var err error
+		if z, err = ticksN(i, j, math.Min(j-i, n), max); err != nil {
+			return nil, err
+		}
 		for k, x := range z {
 			z[k] = t.pows(x)
 		}
@@ -245,7 +278,24 @@ func (t *tspec) logTicks(u, v, n float64) []float64 {
 			z[a], z[b] = z[b], z[a]
 		}
 	}
-	return z
+	return z, nil
+}
+
+// firstMultiple is where logTicks' loop over k = 1, 2, ... base-1 may start
+// for the power p (x = k/p when div, else k*p) without skipping a tick: two
+// below the multiple nearest u, so that every k before it gives an x below u
+// however the quotient u/p and the product round. A positive p is assumed
+// (the u > 0 branch). It is 1 when u/p is not a finite number.
+func firstMultiple(u, p float64, div bool, base float64) float64 {
+	q := u / p
+	if div {
+		q = u * p
+	}
+	k := math.Floor(q) - 2
+	if !(k > 1) || math.IsInf(q, 0) {
+		return 1
+	}
+	return math.Min(k, base)
 }
 
 // nice returns the niced domain, or nil when d3 would leave the domain alone

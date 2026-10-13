@@ -41,8 +41,10 @@ flowchart LR
 | SVG → PNG | `raster`, `pngopt` | resvg (the reference it is tested against) |
 | SVG → PDF | `svgpdf`, `fontsubset` | none |
 | JavaScript's numbers, `Math` and sort | `jsval`, `jsmath`, `jssort` | V8, bit for bit |
-| resource budgets | `budget` | none (aster's own bounds) |
+| resource budgets, the per-call ledger, byte-bounded caches | `budget`, `bcache` | none (aster's own bounds) |
 | loaders | `loader` | vega-loader's policy |
+| image references, CSS colours, embedded fonts | `imageref`, `csscolor`, `fonts/liberation`, `fonts/notoemoji` | none |
+| cutting text to a byte bound at a character boundary (warnings, quoted input, measured text) | `textcut` | none |
 
 ## Resources and errors
 
@@ -79,16 +81,16 @@ sequenceDiagram
 
 ```mermaid
 stateDiagram-v2
-  [*] --> Ready: New(opts) validates version, time zone, theme; loads the fonts given to it
+  [*] --> Ready: New(opts) validates every option (version, time zone, theme, Loader, fonts and families); loads the fonts given to it
   Ready --> Rendering: a call (any number at once)
   Rendering --> Ready: returns
   note right of Rendering: with the embedded fonts alone, the first call needing text loads them
   Ready --> Closed: Close()
   Rendering --> Closed: Close() cancels calls in flight (context.Canceled), waits for them, closes the Loader if io.Closer
-  Closed --> Closed: every call returns ErrClosed; Close again returns nil
+  Closed --> Closed: every call returns ErrClosed; a later Close returns nil (the Loader's Close error comes once, from the first Close made outside a call)
 ```
 
-Concurrency is by construction: a call's dataflow, scenegraph, random generator, budgets and deadline are its own. What calls share (fonts and their shaping caches, locales, colour schemes, compiled expressions) is immutable or synchronised. The rules that keep it so are in [design-rules.md](design-rules.md#concurrency).
+Concurrency is by construction: a call's dataflow, scenegraph, random generator, budgets, ledger and deadline are its own. What calls share (fonts and their shaping caches, colour schemes, compiled expressions) is immutable or synchronised, and the caches among it are bounded by the bytes they hold (`bcache`). The rules that keep it so are in [design-rules.md](design-rules.md#concurrency).
 
 ## Package layers
 
@@ -96,15 +98,25 @@ Each package imports only packages of lower layers, so there are no cycles and t
 
 <!-- layers:begin (checked by TestPackageLayers) -->
 ```text
-0: budget csscolor fonts/dejavu fonts/liberation fonts/notoemoji fontsubset jsmath jssort pngopt
-1: imageref jsval loader text
+0: bcache budget csscolor fonts/dejavu fonts/liberation fonts/notoemoji fontsubset jsmath jssort textcut
+1: imageref jsval loader pngopt text
 2: format geo raster scale/color scene transforms/contour transforms/force transforms/hierarchy transforms/label transforms/voronoi transforms/wordcloud
 3: expr geo/geoscene scale svg svgpdf transforms vega/layout vegalite
 4: vega/guides
 5: vega
 6: aster
-tools: cmd/enginebench cmd/recursionaudit fuzzutil oracle svgcheck svgdiff upstream
+tools: cmd/enginebench cmd/recursionaudit fuzzutil oracle svgcheck svgdiff testutil upstream
 ```
 <!-- layers:end -->
 
-`tools` are not part of the engine: the commands and the test harness (`oracle` drives upstream in node, `svgcheck` checks the structure of the engine's SVG, `svgdiff` compares SVG, `upstream` replays upstream's test suites, `fuzzutil` serves the fuzz targets). `fonts/dejavu` is imported by tests only. The module depends on nothing beyond the standard library, `golang.org/x/image`, `golang.org/x/text`, and `github.com/mgilbir/{forme,goecma262,pdf0}`.
+`tools` are not part of the engine: the commands and the test harness (`oracle` drives upstream in node, `svgcheck` checks the structure of the engine's SVG, `svgdiff` compares SVG, `upstream` replays upstream's test suites, `fuzzutil` serves the fuzz targets, `testutil` holds the race slowdown that keeps time-based tests independent of the machine). `internal/fonts/dejavu` is imported by tests only.
+
+<!-- deps:begin (checked by TestDependencyStatement) -->
+Beyond the standard library, a program that imports aster builds these modules, and no others:
+
+- `golang.org/x/text`;
+- `github.com/mgilbir/forme` (text shaping), `github.com/mgilbir/goecma262` (regular expressions) and `github.com/mgilbir/pdf0` (PDF writing), the owner's;
+- through pdf0, also the owner's: `github.com/mgilbir/golittlecms` (colour management), `github.com/mgilbir/gopenjpeg` (JPEG 2000) and `github.com/mgilbir/formalis` (electronic invoices).
+<!-- deps:end -->
+
+`golang.org/x/image` is required by tests only.

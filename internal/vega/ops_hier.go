@@ -15,10 +15,11 @@ func init() {
 			for _, f := range p.fields("keys") {
 				keys = append(keys, hierarchy.Accessor(f.Get))
 			}
-			tree, gen, err := hierarchy.Nest(pulse.tuples, keys, p.bool("generate"))
+			tree, gen, err := hierarchy.Nest(pulse.tuples, keys, transforms.KeyStringer(n.g.ctx), p.bool("generate"))
 			if err != nil {
 				failErr(err)
 			}
+			n.g.view.holdCreated(n, 0, gen) // the generated parent nodes
 			out := append(append(make([]jsval.Value, 0, len(pulse.tuples)+len(gen)), pulse.tuples...), gen...)
 			res := changedPulse(pulse, out)
 			res.tree = tree
@@ -29,7 +30,8 @@ func init() {
 	tf["stratify"] = func(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *opParams) any) {
 		return nil, trFunc(func(n *opNode, p *opParams, pulse *flowPulse) *flowPulse {
 			tree, err := hierarchy.Stratify(pulse.tuples,
-				hierarchy.Accessor(p.field("key").Get), hierarchy.Accessor(p.field("parentKey").Get))
+				hierarchy.Accessor(p.field("key").Get), hierarchy.Accessor(p.field("parentKey").Get),
+				transforms.KeyStringer(n.g.ctx))
 			if err != nil {
 				failErr(err)
 			}
@@ -108,6 +110,7 @@ func init() {
 			if err != nil {
 				failErr(err)
 			}
+			n.g.view.holdCreated(n, 0, links)
 			return changedPulse(pulse, links)
 		}), nil
 	}

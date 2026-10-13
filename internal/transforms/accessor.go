@@ -1,6 +1,8 @@
 package transforms
 
 import (
+	"context"
+
 	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/jsval"
 )
@@ -14,11 +16,32 @@ type Accessor func(jsval.Value) jsval.Value
 type Field struct {
 	Get Accessor
 	// Name is accessorName: for a simple path it is the path segment, for a
-	// nested path ("a.b") the whole path text, otherwise whatever the runtime
-	// chose for a computed accessor (an expression's source text).
-	Name string
+	// nested path ("a.b") the whole path text. Unnamed marks an accessor
+	// whose accessorName is undefined (an expression's: the runtime builds it
+	// without a name, whatever `as` its specification gives), and Name is
+	// then "".
+	Name    string
+	Unnamed bool
 	// Fields are the tuple fields the accessor reads (accessorFields).
 	Fields []string
+}
+
+// Key is the accessor's name as a property key: what `t[accessorName(f)]`
+// writes to, "undefined" for an unnamed accessor.
+func (f Field) Key() string {
+	if f.Unnamed {
+		return "undefined"
+	}
+	return f.Name
+}
+
+// NameValue is accessorName(f) as a value: undefined for an unnamed
+// accessor.
+func (f Field) NameValue() jsval.Value {
+	if f.Unnamed {
+		return jsval.Undefined
+	}
+	return jsval.Str(f.Name)
 }
 
 // IsNil reports whether f is the null field.
@@ -196,15 +219,72 @@ func appendKeyValue(dst []byte, v jsval.Value, z format.Zone) []byte {
 	case jsval.KindTimestamp:
 		return append(dst, format.DateToString(v.NumValue(), z)...)
 	}
-	return append(dst, v.AsString()...)
+	return append(dst, keyString(v, z)...)
 }
 
-// keyString is String(v) with a date in the zone z.
+// keyString is String(v) with a date in the zone z, as Date.prototype.
+// toString writes it (to the second, in the view's local zone), also inside
+// an array, which String joins. It is the one way the transforms, and the
+// transform packages through KeyStringer, turn a value into a group key, a
+// column name or a lookup key.
 func keyString(v jsval.Value, z format.Zone) string {
-	if v.IsTimestamp() {
+	switch v.Kind() {
+	case jsval.KindTimestamp:
 		return format.DateToString(v.NumValue(), z)
+	case jsval.KindArr:
+		if hasDate(v, 0) {
+			return string(appendJoined(nil, v, z, 0))
+		}
 	}
 	return v.AsString()
+}
+
+// hasDate reports a date anywhere in array v (nested arrays included, to
+// jsval.MaxValueDepth, past which String gives up as AsString does).
+func hasDate(v jsval.Value, depth int) bool {
+	if depth > jsval.MaxValueDepth {
+		return false
+	}
+	for _, it := range v.Items() {
+		switch it.Kind() {
+		case jsval.KindTimestamp:
+			return true
+		case jsval.KindArr:
+			if hasDate(it, depth+1) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// appendJoined is Array.prototype.join(",") with keyString for the items:
+// null and undefined write nothing.
+func appendJoined(dst []byte, v jsval.Value, z format.Zone, depth int) []byte {
+	if depth > jsval.MaxValueDepth {
+		return dst
+	}
+	for i, it := range v.Items() {
+		if i > 0 {
+			dst = append(dst, ',')
+		}
+		switch it.Kind() {
+		case jsval.KindNull, jsval.KindUndefined:
+		case jsval.KindArr:
+			dst = appendJoined(dst, it, z, depth+1)
+		default:
+			dst = append(dst, keyString(it, z)...)
+		}
+	}
+	return dst
+}
+
+// KeyStringer is String(v) with dates in the zone of ctx's view (keyString),
+// for the transform packages, which key on values (nest, stratify, kde2d
+// groups, wordcloud text) and cannot import this one.
+func KeyStringer(ctx context.Context) func(jsval.Value) string {
+	z := zoneOf(ctx)
+	return func(v jsval.Value) string { return keyString(v, z) }
 }
 
 // keyAppender is KeyOf in append form: it writes the key of t onto dst, so a

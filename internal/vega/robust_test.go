@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/mgilbir/aster/internal/jsval"
+	"github.com/mgilbir/aster/internal/testutil"
 )
 
 func renderJSON(t testing.TB, ctx context.Context, spec string) (*Result, error) {
@@ -72,7 +73,7 @@ func TestHostileSpecs(t *testing.T) {
 			}()
 			select {
 			case <-done:
-			case <-time.After(30 * time.Second):
+			case <-time.After(testutil.Scaled(30 * time.Second)):
 				t.Fatal("hang")
 			}
 		})
@@ -113,12 +114,13 @@ func TestCorpusCancelled(t *testing.T) {
 func TestUnknownLoaderIsDenied(t *testing.T) {
 	spec := `{"data":[{"name":"d","url":"https://example.com/x.json"}],"marks":[{"type":"rect","from":{"data":"d"}}]}`
 	v, _ := jsval.ParseJSONString(spec)
-	res, err := Render(context.Background(), v, Options{})
+	var msgs []string
+	_, err := Render(context.Background(), v, Options{Report: func(err error) error { msgs = append(msgs, err.Error()); return nil }})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Warnings) == 0 || !strings.Contains(res.Warnings[0], "Loading failed") {
-		t.Fatalf("expected a load warning, got %v", res.Warnings)
+	if len(msgs) == 0 || !strings.Contains(msgs[0], "Loading failed") {
+		t.Fatalf("expected a load warning, got %v", msgs)
 	}
 }
 

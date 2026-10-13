@@ -69,9 +69,9 @@ func Regression(ctx context.Context, data []jsval.Value, p RegressionParams) ([]
 	}
 	names := make([]string, len(p.GroupBy))
 	for i, g := range p.GroupBy {
-		names[i] = g.Name
+		names[i] = g.Key()
 	}
-	as0, as1 := p.X.Name, p.Y.Name
+	as0, as1 := p.X.Key(), p.Y.Key()
 	if len(p.As) > 0 {
 		as0 = p.As[0]
 	}
@@ -88,7 +88,7 @@ func Regression(ctx context.Context, data []jsval.Value, p RegressionParams) ([]
 			continue
 		}
 		// A fitted curve is at most 200 points (two for a line).
-		if err := reserveOut(ctx, len(out)+201, len(data)); err != nil {
+		if err := reserveRows(ctx, len(out)+201); err != nil {
 			return nil, err
 		}
 		model, err := FitRegressionCtx(ctx, method, g.Tuples, p.X.Get, p.Y.Get, p.Order)

@@ -1,12 +1,14 @@
 package vegalite
 
-import (
-	"sort"
-)
-
 // Dataflow optimizer — vega-lite/src/compile/data/{optimize,optimizer,optimizers,subtree}.ts.
 // Node lists are walked with live indices where upstream iterates arrays that
 // the loop body mutates, so passes see the same nodes upstream's do.
+
+import (
+	"strconv"
+
+	"github.com/mgilbir/aster/internal/jsval"
+)
 
 const facetScalePrefix = "scale_"
 
@@ -21,35 +23,55 @@ func (o *optimizerFlag) setModified() { o.modified = true }
 func topDown(o *optimizerFlag, run func(n dfNode), node dfNode) bool {
 	var visit func(n dfNode)
 	visit = func(n dfNode) {
+		cc := n.base().cc
+		cc.work(1)
 		run(n)
-		kids := n.base().kids
-		for i := 0; i < len(n.base().kids); i++ {
-			visit(n.base().kids[i])
+		for i := 0; i < n.base().numChildren(); i++ {
+			visit(n.base().child(i))
 		}
-		_ = kids
 	}
 	visit(node)
 	return o.modified
 }
 
-// bottomUp runs run on every node of the subtree, deepest first.
+// bottomUp runs run on every node of the subtree, deepest first. Upstream
+// collects the nodes depth-first and stable-sorts them by decreasing depth; a
+// counting sort on the depth is that stable sort, in linear time.
 func bottomUp(o *optimizerFlag, run func(n dfNode), node dfNode) bool {
+	cc := node.base().cc
 	type nd struct {
 		n     dfNode
 		depth int
 	}
 	var list []nd
+	maxDepth := 0
 	var walk func(n dfNode, d int)
 	walk = func(n dfNode, d int) {
+		cc.work(1)
 		list = append(list, nd{n, d})
-		for _, c := range n.base().kids {
+		maxDepth = max(maxDepth, d)
+		for _, c := range n.base().children() {
 			walk(c, d+1)
 		}
 	}
 	walk(node, 0)
-	sort.SliceStable(list, func(i, j int) bool { return list[i].depth > list[j].depth })
+	// start[d] is where the nodes of depth d begin in the sorted order.
+	start := make([]int, maxDepth+2)
 	for _, e := range list {
-		run(e.n)
+		start[maxDepth-e.depth+1]++
+	}
+	for d := 1; d < len(start); d++ {
+		start[d] += start[d-1]
+	}
+	sorted := make([]dfNode, len(list))
+	for _, e := range list {
+		k := maxDepth - e.depth
+		sorted[start[k]] = e.n
+		start[k]++
+	}
+	for _, n := range sorted {
+		cc.work(1)
+		run(n)
 	}
 	return o.modified
 }
@@ -140,15 +162,17 @@ func optimizationDataflowHelper(dc *dataComponent, m Model, firstPass bool) bool
 }
 
 func optimizeDataflow(dc *dataComponent, m Model) {
+	cc := m.b().ctx
 	first, second := 0, 0
 	for i := 0; i < maxOptimizationRuns; i++ {
-		m.b().ctx.check()
+		cc.check()
 		if !optimizationDataflowHelper(dc, m, true) {
 			break
 		}
 		first++
 	}
 	for _, r := range dc.sources.items {
+		cc.work(1)
 		moveFacetDown(r)
 	}
 	for i := 0; i < maxOptimizationRuns; i++ {
@@ -157,11 +181,15 @@ func optimizeDataflow(dc *dataComponent, m Model) {
 		}
 		second++
 	}
+	if max(first, second) == maxOptimizationRuns {
+		cc.warn("Maximum optimization runs(" + strconv.Itoa(maxOptimizationRuns) + ") reached.")
+	}
 }
 
 func moveParseUpFn() func(root dfNode) bool {
 	o := &optimizerFlag{}
 	return func(root dfNode) bool {
+		cc := root.base().cc
 		return bottomUp(o, func(node dfNode) {
 			if isDataSourceNode(node) {
 				return
@@ -169,14 +197,15 @@ func moveParseUpFn() func(root dfNode) bool {
 			if node.base().numChildren() > 1 {
 				return
 			}
-			for i := 0; i < len(node.base().kids); i++ {
-				child := node.base().kids[i]
+			for i := 0; i < node.base().numChildren(); i++ {
+				cc.work(1)
+				child := node.base().child(i)
 				if pc, ok := child.(*parseNode); ok {
 					if np, ok := node.(*parseNode); ok {
 						o.setModified()
 						np.merge(pc)
 					} else {
-						if fieldIntersection(node.producedFields().asMap(), child.dependentFields().asMap()) {
+						if fieldIntersection(node.base().cc, node.producedFields(), child.dependentFields()) {
 							continue
 						}
 						o.setModified()
@@ -191,6 +220,7 @@ func moveParseUpFn() func(root dfNode) bool {
 func mergeBinsFn(m Model) func(root dfNode) bool {
 	o := &optimizerFlag{}
 	return func(root dfNode) bool {
+		cc := root.base().cc
 		return bottomUp(o, func(node dfNode) {
 			moveBinsUp := true
 			switch node.(type) {
@@ -201,9 +231,10 @@ func mergeBinsFn(m Model) func(root dfNode) bool {
 				moveBinsUp = false
 			}
 			var promotable, remaining []*binNode
-			for _, child := range node.base().kids {
+			for _, child := range node.base().children() {
+				cc.work(1)
 				if bn, ok := child.(*binNode); ok {
-					if moveBinsUp && !fieldIntersection(node.producedFields().asMap(), child.dependentFields().asMap()) {
+					if moveBinsUp && !fieldIntersection(node.base().cc, node.producedFields(), child.dependentFields()) {
 						promotable = append(promotable, bn)
 					} else {
 						remaining = append(remaining, bn)
@@ -215,6 +246,7 @@ func mergeBinsFn(m Model) func(root dfNode) bool {
 				promoted := promotable[len(promotable)-1]
 				promotable = promotable[:len(promotable)-1]
 				for _, bin := range promotable {
+					cc.work(1)
 					promoted.merge(bin, rename)
 				}
 				o.setModified()
@@ -228,6 +260,7 @@ func mergeBinsFn(m Model) func(root dfNode) bool {
 				rem := remaining[len(remaining)-1]
 				remaining = remaining[:len(remaining)-1]
 				for _, bin := range remaining {
+					cc.work(1)
 					rem.merge(bin, rename)
 				}
 				o.setModified()
@@ -239,8 +272,10 @@ func mergeBinsFn(m Model) func(root dfNode) bool {
 func removeDuplicateTimeUnitsFn() func(root dfNode) bool {
 	o := &optimizerFlag{}
 	return func(root dfNode) bool {
+		cc := root.base().cc
 		var run func(node dfNode, fields *sset)
 		run = func(node dfNode, timeUnitFields *sset) {
+			cc.work(1)
 			produced := newSset()
 			if tu, ok := node.(*timeUnitNode); ok {
 				produced = tu.producedFields()
@@ -252,9 +287,10 @@ func removeDuplicateTimeUnitsFn() func(root dfNode) bool {
 					tu.remove()
 				}
 			}
-			for _, child := range append([]dfNode(nil), node.base().kids...) {
+			for _, child := range append([]dfNode(nil), node.base().children()...) {
 				next := timeUnitFields.clone()
 				for _, f := range produced.list() {
+					cc.work(1)
 					next.add(f)
 				}
 				run(child, next)
@@ -268,10 +304,12 @@ func removeDuplicateTimeUnitsFn() func(root dfNode) bool {
 func mergeParseFn() func(root dfNode) bool {
 	o := &optimizerFlag{}
 	return func(root dfNode) bool {
+		cc := root.base().cc
 		return bottomUp(o, func(node dfNode) {
-			original := append([]dfNode(nil), node.base().kids...)
+			original := append([]dfNode(nil), node.base().children()...)
 			var parseChildren []*parseNode
-			for _, c := range node.base().kids {
+			for _, c := range node.base().children() {
+				cc.work(1)
 				if pn, ok := c.(*parseNode); ok {
 					parseChildren = append(parseChildren, pn)
 				}
@@ -280,7 +318,9 @@ func mergeParseFn() func(root dfNode) bool {
 				common := newOmap[Value]()
 				conflicting := newSset()
 				for _, pn := range parseChildren {
+					cc.work(1)
 					for _, k := range pn.parse.Keys() {
+						cc.work(1)
 						v := pn.parse.Lookup(k)
 						if cv, ok := common.get(k); !ok {
 							common.set(k, v)
@@ -290,15 +330,18 @@ func mergeParseFn() func(root dfNode) bool {
 					}
 				}
 				for _, f := range conflicting.list() {
+					cc.work(1)
 					common.del(f)
 				}
 				if common.len() > 0 {
 					o.setModified()
-					co := newOrderedObject(common)
+					co := newOrderedObject(node.base().cc, common)
 					mergedParse := newParseNode(node, co)
 					for _, child := range original {
+						cc.work(1)
 						if pn, ok := child.(*parseNode); ok {
-							for _, k := range common.keys {
+							for _, k := range common.keysView() {
+								cc.work(1)
 								pn.parse.Delete(k)
 							}
 						}
@@ -314,10 +357,11 @@ func mergeParseFn() func(root dfNode) bool {
 	}
 }
 
-func newOrderedObject(m *omap[Value]) *Object {
+func newOrderedObject(cc *compileCtx, m *omap[Value]) *Object {
 	o := mk()
-	for _, k := range m.keys {
-		jsSet(o, k, m.m[k])
+	for _, k := range m.keysView() {
+		cc.work(1)
+		jsSet(cc, o, k, m.m[k])
 	}
 	return o
 }
@@ -325,21 +369,25 @@ func newOrderedObject(m *omap[Value]) *Object {
 func mergeAggregatesFn() func(root dfNode) bool {
 	o := &optimizerFlag{}
 	return func(root dfNode) bool {
+		cc := root.base().cc
 		return bottomUp(o, func(node dfNode) {
 			groups := newOmap[[]*aggregateNode]()
-			for _, c := range node.base().kids {
+			for _, c := range node.base().children() {
+				cc.work(1)
 				if agg, ok := c.(*aggregateNode); ok {
-					k := setToHashString(agg.groupBy())
+					k := setToHashString(node.base().cc, agg.groupBy())
 					list, _ := groups.get(k)
 					groups.set(k, append(list, agg))
 				}
 			}
-			for _, k := range groups.keys {
+			for _, k := range groups.keysView() {
+				cc.work(1)
 				mergeable := groups.m[k]
 				if len(mergeable) > 1 {
 					mergedAggs := mergeable[len(mergeable)-1]
 					mergeable = mergeable[:len(mergeable)-1]
 					for _, agg := range mergeable {
+						cc.work(1)
 						if mergedAggs.merge(agg) {
 							node.base().removeChild(agg)
 							agg.base().setParent(mergedAggs)
@@ -356,9 +404,11 @@ func mergeAggregatesFn() func(root dfNode) bool {
 func mergeTimeUnitsFn() func(root dfNode) bool {
 	o := &optimizerFlag{}
 	return func(root dfNode) bool {
+		cc := root.base().cc
 		return bottomUp(o, func(node dfNode) {
 			var tus []*timeUnitNode
-			for _, c := range node.base().kids {
+			for _, c := range node.base().children() {
+				cc.work(1)
 				if t, ok := c.(*timeUnitNode); ok {
 					tus = append(tus, t)
 				}
@@ -369,6 +419,7 @@ func mergeTimeUnitsFn() func(root dfNode) bool {
 			combination := tus[len(tus)-1]
 			tus = tus[:len(tus)-1]
 			for _, t := range tus {
+				cc.work(1)
 				o.setModified()
 				combination.merge(t)
 			}
@@ -379,19 +430,23 @@ func mergeTimeUnitsFn() func(root dfNode) bool {
 func mergeIdenticalNodesFn() func(root dfNode) bool {
 	o := &optimizerFlag{}
 	return func(root dfNode) bool {
+		cc := root.base().cc
 		return topDown(o, func(node dfNode) {
 			buckets := newOmap[[]dfNode]()
-			for _, c := range node.base().kids {
+			for _, c := range node.base().children() {
+				cc.work(1)
 				h := c.hash()
 				list, _ := buckets.get(h)
 				buckets.set(h, append(list, c))
 			}
-			for _, k := range buckets.keys {
+			for _, k := range buckets.keysView() {
+				cc.work(1)
 				nodes := buckets.m[k]
 				if len(nodes) > 1 {
 					o.setModified()
 					merged := nodes[0]
 					for _, n := range nodes[1:] {
+						cc.work(1)
 						node.base().removeChild(n)
 						n.base().setParent(merged)
 						n.base().remove()
@@ -405,10 +460,12 @@ func mergeIdenticalNodesFn() func(root dfNode) bool {
 func mergeOutputsFn() func(root dfNode) bool {
 	o := &optimizerFlag{}
 	return func(root dfNode) bool {
+		cc := root.base().cc
 		return bottomUp(o, func(node dfNode) {
-			children := append([]dfNode(nil), node.base().kids...)
+			children := append([]dfNode(nil), node.base().children()...)
 			hasOutputChild := false
 			for _, c := range children {
+				cc.work(1)
 				if _, ok := c.(*outputNode); ok {
 					hasOutputChild = true
 				}
@@ -419,17 +476,19 @@ func mergeOutputsFn() func(root dfNode) bool {
 			var other []dfNode
 			var mainOutput dfNode
 			for _, child := range children {
+				cc.work(1)
 				if _, ok := child.(*outputNode); ok {
 					lastOutput := child
 					for lastOutput.base().numChildren() == 1 {
-						the := lastOutput.base().kids[0]
+						cc.work(1)
+						the := lastOutput.base().child(0)
 						if _, ok := the.(*outputNode); ok {
 							lastOutput = the
 						} else {
 							break
 						}
 					}
-					other = append(other, lastOutput.base().kids...)
+					other = append(other, lastOutput.base().children()...)
 					if mainOutput != nil {
 						node.base().removeChild(child)
 						child.base().setParent(mainOutput.base().par)
@@ -446,6 +505,7 @@ func mergeOutputsFn() func(root dfNode) bool {
 			if len(other) > 0 {
 				o.setModified()
 				for _, child := range other {
+					cc.work(1)
 					child.base().par.base().removeChild(child)
 					child.base().setParent(mainOutput)
 				}
@@ -479,19 +539,21 @@ func addDimensionsTo(n dfNode, fields []string) {
 }
 
 func cloneSubtree(facet *facetNode) func(node dfNode) []dfNode {
+	cc := facet.cc
 	var clone func(node dfNode) []dfNode
 	clone = func(node dfNode) []dfNode {
 		if _, isFacet := node.(*facetNode); !isFacet {
 			cp := node.clone()
 			cp.base().cc = node.base().cc
 			if out, ok := cp.(*outputNode); ok {
-				newName := facetScalePrefix + out.getSource()
-				out.setSource(newName)
+				newName := facetScalePrefix + out.getSource().AsString()
+				out.setSource(jsval.Str(newName))
 				facet.model.comp.data.outputNodes[newName] = out
 			} else if isAddDimensionsNode(cp) {
 				addDimensionsTo(cp, facet.fields())
 			}
-			for _, k := range node.base().kids {
+			for _, k := range node.base().children() {
+				cc.work(1)
 				for _, n := range clone(k) {
 					n.base().setParent(cp)
 				}
@@ -499,7 +561,8 @@ func cloneSubtree(facet *facetNode) func(node dfNode) []dfNode {
 			return []dfNode{cp}
 		}
 		var out []dfNode
-		for _, k := range node.base().kids {
+		for _, k := range node.base().children() {
+			cc.work(1)
 			out = append(out, clone(k)...)
 		}
 		return out
@@ -508,10 +571,11 @@ func cloneSubtree(facet *facetNode) func(node dfNode) []dfNode {
 }
 
 func moveFacetDown(node dfNode) {
+	cc := node.base().cc
 	if f, ok := node.(*facetNode); ok {
 		if f.numChildren() == 1 {
-			if _, isOut := f.kids[0].(*outputNode); !isOut {
-				child := f.kids[0]
+			if _, isOut := f.child(0).(*outputNode); !isOut {
+				child := f.child(0)
 				if isAddDimensionsNode(child) {
 					addDimensionsTo(child, f.fields())
 				}
@@ -524,15 +588,18 @@ func moveFacetDown(node dfNode) {
 		moveMainDownToFacet(facetMain)
 		cloner := cloneSubtree(f)
 		var copies []dfNode
-		for _, k := range f.kids {
+		for _, k := range f.children() {
+			cc.work(1)
 			copies = append(copies, cloner(k)...)
 		}
 		for _, c := range copies {
+			cc.work(1)
 			c.base().setParent(facetMain)
 		}
 		return
 	}
-	for _, k := range append([]dfNode(nil), node.base().kids...) {
+	for _, k := range append([]dfNode(nil), node.base().children()...) {
+		cc.work(1)
 		moveFacetDown(k)
 	}
 }
@@ -540,7 +607,7 @@ func moveFacetDown(node dfNode) {
 func moveMainDownToFacet(node dfNode) {
 	if out, ok := node.(*outputNode); ok && out.typ == dsMain {
 		if out.numChildren() == 1 {
-			child := out.kids[0]
+			child := out.child(0)
 			if _, isFacet := child.(*facetNode); !isFacet {
 				child.base().swapWithParent()
 				moveMainDownToFacet(node)

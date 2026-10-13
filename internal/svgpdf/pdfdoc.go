@@ -174,6 +174,9 @@ func buildPDF(content [][]byte, gsList []gsEntry, fonts *fontCatalog, images *im
 		pdf0.Integer(0), pdf0.Integer(0), pdf0.Real(width), pdf0.Real(height),
 	})
 	page.Set("Resources", pageResources)
+	if len(paints.links) > 0 {
+		page.Set("Annots", annotations(paints.links))
+	}
 	page.Set("Contents", pdf0.IndirectRef{Number: 4})
 
 	// Object 4: content stream, Flate-compressed. zlib output is

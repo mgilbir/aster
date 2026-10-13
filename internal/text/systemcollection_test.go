@@ -1,6 +1,7 @@
 package text
 
 import (
+	"bytes"
 	"encoding/binary"
 	"os"
 	"path/filepath"
@@ -146,7 +147,6 @@ func TestTruncatedSystemFont(t *testing.T) {
 	_ = f.Table("hhea")
 	_ = f.Size()
 	_ = f.Name()
-	_, _ = f.Subset()
 	_ = f.Program()
 }
 
@@ -193,9 +193,12 @@ func TestOutlineProgram(t *testing.T) {
 	m := pairMeasurer(t)
 	runs, _ := m.ShapeText("\U0001F600", "20px SbixTest")
 	f := runs[0].Face
-	p := m.FontData(f)
-	if p == nil || &p[0] != &f.OutlineProgram()[0] {
+	p := fontData(t, m, f)
+	if p == nil || !bytes.Equal(p, f.OutlineProgram()) {
 		t.Fatal("a collection face's FontData is not its OutlineProgram")
+	}
+	if again := fontData(t, m, f); &again[0] != &p[0] {
+		t.Error("a collection face's FontData is made again: it is not cached")
 	}
 	if sfntTable(p, 0, "sbix") != nil || sfntTable(p, 0, "glyf") == nil || sfntTable(p, 0, "hmtx") == nil {
 		t.Error("the outline program keeps the bitmaps or loses the outlines")
@@ -242,7 +245,7 @@ func TestWithFontCollection(t *testing.T) {
 			t.Errorf("face %d: U+1F600 is %d, want %d", index, c, want)
 		}
 		// Embedded from its own outline tables, not the whole collection.
-		if p := m.FontData(runs[0].Face); p == nil || sfntTable(p, 0, "sbix") != nil || sfntTable(p, 0, "COLR") != nil {
+		if p := fontData(t, m, runs[0].Face); p == nil || sfntTable(p, 0, "sbix") != nil || sfntTable(p, 0, "COLR") != nil {
 			t.Errorf("face %d: its embedding program is not its outlines", index)
 		}
 	}
@@ -266,14 +269,16 @@ func TestHostileCollectionFields(t *testing.T) {
 		t.Error("a directory past the file was read")
 	}
 
-	// A face whose table lengths sum past 2^32.
+	// A face whose table lengths sum past 2^32: no table lies in the file,
+	// so the face is its directory alone.
 	f := make([]byte, 12+16*3)
 	binary.BigEndian.PutUint32(f, 0x00010000)
 	binary.BigEndian.PutUint16(f[4:], 3)
 	for i := range 3 {
+		copy(f[12+16*i:], []string{"glyf", "loca", "head"}[i])
 		binary.BigEndian.PutUint32(f[12+16*i+12:], 0xFFFFFFF0)
 	}
-	if n := sfntSize(f, 0); n < len(f) {
+	if n := sfntSize(f, 0); n != 12 {
 		t.Errorf("sfntSize = %d", n)
 	}
 

@@ -132,7 +132,14 @@ type measureSet struct {
 	groups    []*measureGroup
 	countOnly bool
 	needStore bool // some output reads the tuples of its cell
-	rand      Rand
+	// store is set by a window, which has one cell at a time: its emulated
+	// tuple store (windowStore), which gives the `values` output (one array
+	// shared between rows) and reports undefined entries in the cell's data
+	// (any statistic that reads a field of one throws upstream). Without
+	// it, `values` is a copy of the cell's data. Kept here, not on the cell,
+	// so an aggregate's cells stay as small as they were.
+	store *windowStore
+	rand  Rand
 	// ctx is polled by the statistics that cost a pass over the data each
 	// (bootstrap intervals); err records its cancellation for the caller.
 	ctx context.Context
@@ -164,10 +171,10 @@ func newMeasureSet(ms []Measure, rnd Rand) (*measureSet, error) {
 			continue
 		}
 		s.countOnly = false
-		g := byName[m.Field.Name]
+		g := byName[m.Field.Key()]
 		if g == nil {
 			g = &measureGroup{field: m.Field, expR: math.NaN()}
-			byName[m.Field.Name] = g
+			byName[m.Field.Key()] = g
 			s.groups = append(s.groups, g)
 		}
 		g.outs = append(g.outs, measureOut{name: name, kind: kind, idx: kind.index()})
@@ -219,6 +226,15 @@ type cell struct {
 	// caller maintains it (aggregate appends, window points it at the frame).
 	data []jsval.Value
 	memo storeMemo
+}
+
+// firstField is the field the first measure reads: upstream's cell reads it
+// first from each tuple, so it names the TypeError of an undefined one.
+func (s *measureSet) firstField() string {
+	if len(s.groups) == 0 {
+		return ""
+	}
+	return s.groups[0].field.Name
 }
 
 func (s *measureSet) newCell() *cell {
@@ -363,7 +379,7 @@ func (s *measureSet) write(c *cell, t *jsval.Object) {
 	// memoised statistics belong to (but not the statistics themselves).
 	c.memo.owner = 0
 	for i, g := range s.groups {
-		g.write(s, i+1, &c.aggs[i], c.data, &c.memo, t)
+		g.write(s, i+1, &c.aggs[i], c, t)
 	}
 }
 
@@ -386,9 +402,21 @@ type storeMemo struct {
 	ciDone bool // ... and was defined
 }
 
-func (g *measureGroup) write(s *measureSet, id int, m *mstate, data []jsval.Value, memo *storeMemo, t *jsval.Object) {
+func (g *measureGroup) write(s *measureSet, id int, m *mstate, c *cell, t *jsval.Object) {
+	data, memo := c.data, &c.memo
 	get := g.field.Get
+	// readsHoles is the TypeError of reading this field of a hole.
+	readsHoles := func() bool {
+		holes := s.store != nil && s.store.holes
+		if holes && s.err == nil {
+			s.err = readsUndefined(g.field.Name)
+		}
+		return holes
+	}
 	extent := func() [2]jsval.Value {
+		if readsHoles() {
+			return [2]jsval.Value{}
+		}
 		if memo.owner != id || !memo.extOK {
 			lo, hi := ExtentIndex(len(data), func(i int) jsval.Value { return get(data[i]) })
 			memo.ext = [2]jsval.Value{elemAt(data, lo), elemAt(data, hi)}
@@ -397,6 +425,9 @@ func (g *measureGroup) write(s *measureSet, id int, m *mstate, data []jsval.Valu
 		return memo.ext
 	}
 	quart := func() [3]float64 {
+		if readsHoles() {
+			return [3]float64{math.NaN(), math.NaN(), math.NaN()}
+		}
 		if memo.owner != id || !memo.qOK {
 			memo.q = Quartiles(data, get)
 			memo.qOK, memo.owner = true, id
@@ -404,6 +435,9 @@ func (g *measureGroup) write(s *measureSet, id int, m *mstate, data []jsval.Valu
 		return memo.q
 	}
 	ci := func() ([2]float64, bool) {
+		if readsHoles() {
+			return [2]float64{}, false
+		}
 		if memo.owner != id || !memo.ciOK {
 			lo, hi, ok, err := BootstrapCICtx(s.ctx, data, 1000, 0.05, get, s.rand)
 			if err != nil {
@@ -418,7 +452,11 @@ func (g *measureGroup) write(s *measureSet, id int, m *mstate, data []jsval.Valu
 		var v jsval.Value
 		switch o.kind {
 		case opValues:
-			v = jsval.Arr(slices.Clone(data))
+			if s.store != nil {
+				v = s.store.share(t, o.name)
+			} else {
+				v = jsval.Arr(slices.Clone(data))
+			}
 		case opMissing:
 			v = jsval.Int(m.missing)
 		case opValid:
@@ -450,6 +488,9 @@ func (g *measureGroup) write(s *measureSet, id int, m *mstate, data []jsval.Valu
 				v = jsval.Num(math.Sqrt(math.Max(0, m.dev) / (valid * (valid - 1))))
 			}
 		case opDistinct:
+			if readsHoles() {
+				break
+			}
 			seen := make(map[string]struct{}, 16)
 			for i := len(data) - 1; i >= 0; i-- {
 				seen[keyString(get(data[i]), zoneOf(s.ctx))] = struct{}{}
@@ -461,7 +502,13 @@ func (g *measureGroup) write(s *measureSet, id int, m *mstate, data []jsval.Valu
 			}
 		case opMedian, opQ1, opQ3:
 			q := quart()
-			idx := map[opKind]int{opQ1: 0, opMedian: 1, opQ3: 2}[o.kind]
+			idx := 1
+			switch o.kind {
+			case opQ1:
+				idx = 0
+			case opQ3:
+				idx = 2
+			}
 			if f := q[idx]; !math.IsNaN(f) {
 				v = jsval.Num(f)
 			}

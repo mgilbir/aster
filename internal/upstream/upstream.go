@@ -13,13 +13,17 @@
 //
 // Known divergences are listed in testdata/upstream-vectors/known-divergences.txt, one per line:
 //
-//	<package> TAB <signature> TAB <reason citing upstream>
+//	<package> TAB <signature> TAB <answers> TAB <reason citing upstream>
 //
-// Each replay asserts its entries exactly: a vector that diverges and is not listed fails, and a
-// listed vector that no longer diverges fails too.
+// The signature is the whole call (a long one is cut and ends in a hash of the whole, so two calls
+// cannot share one); answers pins what diverges, a hash of upstream's answer and the engine's
+// (sha256:…, see answersHash), so an entry accepts that divergence only and not any other the vector
+// may later show. Each replay asserts its entries exactly: a vector that diverges and is not listed
+// fails, as does a listed vector whose answers changed, a listed vector that no longer diverges, and
+// an entry that names no recorded vector at all.
 //
 // One root cause shows up in too many vectors to list them one by one: a numeric answer that is a
-// few units in the last place off. A line whose signature is `*ulp<=N` accepts, for that package, any
+// few units in the last place off. A line whose signature is `*ulp<=N` (and answers `-`) accepts, for that package, any
 // vector whose answer equals upstream's except for numbers within N ulps. It is asserted the same way:
 // the replay fails when no vector uses it, so it cannot outlive its cause.
 //
@@ -32,6 +36,8 @@ package upstream
 import (
 	"bufio"
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -43,6 +49,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/mgilbir/aster/internal/textcut"
 )
 
 const (
@@ -117,8 +125,12 @@ func (c *Call) Chained(i int) (method string, args []any) {
 	return s.Method, s.Args
 }
 
+// maxSignature is the length past which a signature is cut, for the file to stay readable.
+const maxSignature = 300
+
 // Signature identifies a vector in the known-divergences file: a readable rendering of the call
-// that does not contain a tab or newline.
+// that does not contain a tab or newline. One longer than maxSignature is cut there and ends in a
+// hash of the whole rendering, so that two calls that differ only past the cut have two signatures.
 func (c *Call) Signature() string {
 	var b strings.Builder
 	name := c.Fn
@@ -148,11 +160,30 @@ func (c *Call) Signature() string {
 	if c.Args != nil || c.Op == "" {
 		b.WriteString(jsonText(c.Args))
 	}
-	s := b.String()
-	if len(s) > 300 {
-		s = s[:300] + "…"
+	s := strings.NewReplacer("\t", " ", "\n", " ", "\r", " ").Replace(b.String())
+	if len(s) > maxSignature {
+		sum := sha256.Sum256([]byte(s))
+		s = textcut.Prefix(s, maxSignature) + "…#" + hex.EncodeToString(sum[:8])
 	}
-	return strings.NewReplacer("\t", " ", "\n", " ", "\r", " ").Replace(s)
+	return s
+}
+
+// answersHash pins a divergence: a hash of upstream's answer and the engine's, a throw standing
+// for itself (messages are not compared). An entry of the known-divergences file accepts the
+// divergence whose answers hash to its own, and no other.
+func answersHash(want any, upstreamThrew bool, got any, engineThrew bool) string {
+	side := func(v any, threw bool) any {
+		if threw {
+			return map[string]any{"$": "throws"}
+		}
+		return v
+	}
+	b, err := json.Marshal([]any{side(want, upstreamThrew), side(got, engineThrew)})
+	if err != nil { // a raw NaN or Inf the adapter did not encode
+		b = fmt.Appendf(nil, "%#v|%#v", side(want, upstreamThrew), side(got, engineThrew))
+	}
+	sum := sha256.Sum256(b)
+	return "sha256:" + hex.EncodeToString(sum[:8])
 }
 
 func jsonText(v any) string {
@@ -171,8 +202,8 @@ func jsonText(v any) string {
 type Replay struct {
 	t        testing.TB
 	File     *File
-	known    map[string]string // signature -> reason, for this package
-	ulp      float64           // from a `*ulp<=N` line, else 0
+	known    map[string]knownEntry // by signature, for this package
+	ulp      float64               // from a `*ulp<=N` line, else 0
 	ulpUsed  int
 	ulpLine  string
 	visited  map[string]bool // signatures compared
@@ -181,6 +212,13 @@ type Replay struct {
 	skipped  map[string]int
 	failures int
 	name     string
+}
+
+// knownEntry is a line of the known-divergences file.
+type knownEntry struct {
+	answers string // answersHash of the divergence it accepts; "-" for a `*ulp<=N` line
+	reason  string
+	line    int
 }
 
 // Start loads a package's vectors. It skips the test when they were not recorded, or fails it when
@@ -221,22 +259,22 @@ func Start(t testing.TB, pkg string) *Replay {
 		t.Fatal(err)
 	}
 	rep := &Replay{
-		t: t, File: f, known: map[string]string{}, name: pkg,
+		t: t, File: f, known: map[string]knownEntry{}, name: pkg,
 		visited: map[string]bool{}, diverged: map[string]bool{}, skipped: map[string]int{},
 	}
 	maps.Copy(rep.known, known[pkg])
 	if f.Arch != "" {
-		for sig, why := range known[pkg+"@"+f.Arch] {
+		for sig, e := range known[pkg+"@"+f.Arch] {
 			if _, both := rep.known[sig]; both {
 				t.Fatalf("%s: %s is listed for %s and for %s@%s", divergencesFile, sig, pkg, pkg, f.Arch)
 			}
-			rep.known[sig] = why
+			rep.known[sig] = e
 		}
 	}
-	for sig := range rep.known {
+	for sig, e := range rep.known {
 		if n, ok := strings.CutPrefix(sig, "*ulp<="); ok {
-			if _, err := fmt.Sscanf(n, "%g", &rep.ulp); err != nil || rep.ulp <= 0 {
-				t.Fatalf("%s: bad signature %q", divergencesFile, sig)
+			if _, err := fmt.Sscanf(n, "%g", &rep.ulp); err != nil || rep.ulp <= 0 || e.answers != "-" {
+				t.Fatalf("%s:%d: bad `*ulp<=N` line %q (its answers must be -)", divergencesFile, e.line, sig)
 			}
 			delete(rep.known, sig)
 			rep.ulpLine = sig
@@ -245,8 +283,8 @@ func Start(t testing.TB, pkg string) *Replay {
 	return rep
 }
 
-func loadKnown(root string) (map[string]map[string]string, error) {
-	out := map[string]map[string]string{}
+func loadKnown(root string) (map[string]map[string]knownEntry, error) {
+	out := map[string]map[string]knownEntry{}
 	fh, err := os.Open(filepath.Join(root, divergencesFile))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -262,14 +300,18 @@ func loadKnown(root string) (map[string]map[string]string, error) {
 		if strings.TrimSpace(line) == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		parts := strings.SplitN(line, "\t", 3)
-		if len(parts) != 3 || strings.TrimSpace(parts[2]) == "" {
-			return nil, fmt.Errorf("%s:%d: want <package> TAB <signature> TAB <reason>", divergencesFile, n)
+		parts := strings.SplitN(line, "\t", 4)
+		if len(parts) != 4 || strings.TrimSpace(parts[3]) == "" ||
+			(parts[2] != "-" && !strings.HasPrefix(parts[2], "sha256:")) {
+			return nil, fmt.Errorf("%s:%d: want <package> TAB <signature> TAB <answers: sha256:… or -> TAB <reason>", divergencesFile, n)
 		}
 		if out[parts[0]] == nil {
-			out[parts[0]] = map[string]string{}
+			out[parts[0]] = map[string]knownEntry{}
 		}
-		out[parts[0]][parts[1]] = parts[2]
+		if _, dup := out[parts[0]][parts[1]]; dup {
+			return nil, fmt.Errorf("%s:%d: %s %s is listed twice", divergencesFile, n, parts[0], parts[1])
+		}
+		out[parts[0]][parts[1]] = knownEntry{answers: parts[2], reason: parts[3], line: n}
 	}
 	return out, sc.Err()
 }
@@ -320,7 +362,16 @@ func (r *Replay) CheckAgainst(c *Call, want, got any, threw bool) {
 		return
 	}
 	r.diverged[sig] = true
-	if _, ok := r.known[sig]; ok {
+	answers := answersHash(want, c.Threw != nil, got, threw)
+	if e, ok := r.known[sig]; ok {
+		if e.answers == answers {
+			return
+		}
+		r.failures++
+		if r.failures <= 25 {
+			r.t.Errorf("%s: %s (vector %d): the known divergence (%s:%d, answers %s) has changed, answers now %s\n\t%s",
+				r.name, sig, r.indexOf(c), divergencesFile, e.line, e.answers, answers, diff)
+		}
 		return
 	}
 	if r.ulp > 0 && c.Threw == nil && !threw && WithinUlps(got, want, r.ulp) {
@@ -329,7 +380,7 @@ func (r *Replay) CheckAgainst(c *Call, want, got any, threw bool) {
 	}
 	r.failures++
 	if r.failures <= 25 {
-		r.t.Errorf("%s: %s (vector %d)\n\t%s", r.name, sig, r.indexOf(c), diff)
+		r.t.Errorf("%s: %s (vector %d, answers %s)\n\t%s", r.name, sig, r.indexOf(c), answers, diff)
 	}
 }
 
@@ -345,9 +396,6 @@ func (r *Replay) indexOf(c *Call) int {
 
 // Skip counts a vector the replay does not run, with the reason; Done reports them.
 func (r *Replay) Skip(reason string) { r.skipped[reason]++ }
-
-// Replayed is the number of vectors compared so far.
-func (r *Replay) Replayed() int { return r.replayed }
 
 // Done asserts the floor and the known divergences, and logs a summary. floor is the least number of
 // vectors this replay must have compared.
@@ -365,6 +413,28 @@ func (r *Replay) Done(floor int) {
 	sort.Strings(stale)
 	for _, sig := range stale {
 		r.t.Errorf("%s: %s is listed as a known divergence but now agrees with upstream; remove it from %s", r.name, sig, divergencesFile)
+	}
+	// An entry this replay did not visit may belong to another replay of the package (d3-shape has
+	// several); one that names no recorded vector at all belongs to none.
+	var recorded map[string]bool
+	var orphans []string
+	for sig, e := range r.known {
+		if r.visited[sig] {
+			continue
+		}
+		if recorded == nil {
+			recorded = make(map[string]bool, len(r.File.Calls))
+			for i := range r.File.Calls {
+				recorded[r.File.Calls[i].Signature()] = true
+			}
+		}
+		if !recorded[sig] {
+			orphans = append(orphans, fmt.Sprintf("%s:%d %s", divergencesFile, e.line, sig))
+		}
+	}
+	sort.Strings(orphans)
+	for _, o := range orphans {
+		r.t.Errorf("%s: %s names no recorded vector; remove it (or the recording lost the vector)", r.name, o)
 	}
 	if r.ulp > 0 && r.ulpUsed == 0 {
 		r.t.Errorf("%s: the `%s` line of %s matched no vector; remove it", r.name, r.ulpLine, divergencesFile)
@@ -387,10 +457,7 @@ func (r *Replay) Done(floor int) {
 func show(v any) string {
 	b, _ := json.Marshal(v)
 	s := string(b)
-	if len(s) > 400 {
-		s = s[:400] + "…"
-	}
-	return s
+	return textcut.Cut(s, 400)
 }
 
 // IsMarker reports whether v is a recorder marker (an object with a "$" key) and returns its kind.

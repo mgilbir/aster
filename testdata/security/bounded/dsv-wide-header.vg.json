@@ -1,0 +1,1 @@
+{"width": 10, "height": 10, "signals": [{"name": "csv", "update": "join(sequence(0, 60000), ',') + pad('', 400, '\\n')"}], "data": [{"name": "d", "values": {"signal": "csv"}, "format": {"type": "csv"}}]}

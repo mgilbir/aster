@@ -3,6 +3,7 @@ package scene
 import (
 	"math"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsmath"
 )
 
@@ -11,11 +12,15 @@ import (
 // bound/boundContext.js). An optional rotation (degrees) is applied to every
 // point, which is how rotated symbols and paths are bounded without a matrix.
 type boundContext struct {
+	ledger         *budget.Ledger // the Bounder's (see Bounder.ledgerOf)
 	b              *Bounds
 	lx, ly         float64
 	rot            float64
 	ma, mb, mc, md float64
 }
+
+// Ledger is the ledger of the render being bounded (nil for none).
+func (c *boundContext) Ledger() *budget.Ledger { return c.ledger }
 
 var circleThreshold = tau - 1e-8
 

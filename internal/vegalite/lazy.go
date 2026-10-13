@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -29,12 +30,26 @@ type compileCtx struct {
 	loc *time.Location
 	// ctx is the caller's context, checked in loops that can run long.
 	ctx context.Context
+	// meter charges the compilation's work to the call's ledger (or polls
+	// ctx when there is none); see work.
+	meter budget.Meter
 	// lazySeq numbers the lazy signals; outputSeq the output nodes' hash keys.
 	lazySeq, outputSeq int64
 	// sigIdx speeds up signal lookups by name (see signalIndex).
 	sigIdx signalIndex
 	// transforms counts the data transforms parsed so far (see maxTransforms).
 	transforms int
+	// maxViews is Options.MaxViews (see countViews).
+	maxViews int
+	// warnFn is Options.Warn.
+	warnFn func(string) error
+	// titleMerges are the title field-def lists merged so far, by their
+	// first element (see mergeTitleFieldDefs).
+	titleMerges map[*Value]*titleMerge
+	// jsr is the compilation's JavaScript realm (see jsRealm).
+	jsr *jsRealm
+	// pending is the work counted and not yet charged (see work).
+	pending int64
 }
 
 // check panics with the context's error once the caller's context is done.
@@ -47,6 +62,62 @@ func (c *compileCtx) check() {
 		panic(cancelError{err})
 	}
 }
+
+// work charges n steps of a loop whose trip count the specification
+// controls, and panics with the context's error once the caller's context is
+// done. A step costs an addition and a comparison; the context is polled
+// every thousand or so, so every loop that charges its steps stops within
+// about a millisecond of the deadline. Charge more than 1 for a step that
+// does more work than a few allocations (a model, a selection).
+//
+// Steps are counted here and handed to the Meter workBatch at a time, so a
+// loop of single steps costs an addition and a comparison, inlined; the
+// Meter polls every thousand or so as before (flushWork hands over the rest
+// when the compilation ends).
+func (c *compileCtx) work(n int64) {
+	if c == nil {
+		return
+	}
+	c.pending += min(max(n, 0), maxWorkCharge)
+	if c.pending >= workBatch {
+		c.flushWork()
+	}
+}
+
+// workBatch is how many steps work counts before handing them to the
+// Meter; maxWorkCharge caps one charge, as the Meter does, so the count
+// cannot wrap.
+const (
+	workBatch     = 256
+	maxWorkCharge = 1 << 40
+)
+
+// flushWork hands the counted steps to the Meter and panics with the
+// context's error once the caller's context is done.
+func (c *compileCtx) flushWork() {
+	n := c.pending
+	c.pending = 0
+	if err := c.meter.Work(n); err != nil {
+		panic(cancelError{err})
+	}
+}
+
+// warn logs a warning as upstream's log.warn does: the caller's Options.Warn
+// decides whether the compilation goes on.
+func (c *compileCtx) warn(msg string) {
+	if c == nil || c.warnFn == nil {
+		return
+	}
+	if err := c.warnFn(msg); err != nil {
+		panic(cancelError{err})
+	}
+}
+
+// modelStep is the work charged per child model in a loop over a model's
+// children, and per selection where every selection compiler runs on it:
+// each step runs a phase of the child or a fixed table of compilers, tens of
+// microseconds, so the deadline is polled every few dozen of them.
+const modelStep = 32
 
 // cancelError is the panic value Compile turns back into the context's error.
 type cancelError struct{ err error }
@@ -73,6 +144,9 @@ func lazyFn(o *Object) (func() string, bool) {
 
 // signalOf reads ref.signal, evaluating a lazy signal.
 func signalOf(v Value) string {
+	if v.IsNullish() { // ref.signal of no ref
+		throw("Cannot read properties of %s (reading 'signal')", nullishName(v))
+	}
 	if v.IsObj() {
 		if fn, ok := lazyFn(v.ObjValue()); ok {
 			return fn()
@@ -82,11 +156,12 @@ func signalOf(v Value) string {
 }
 
 // resolveLazy replaces every lazy signal in v with its evaluated expression.
-func resolveLazy(v Value) {
+func resolveLazy(cc *compileCtx, v Value) {
+	cc.work(1)
 	switch v.Kind() {
 	case jsval.KindArr:
 		for _, it := range v.Items() {
-			resolveLazy(it)
+			resolveLazy(cc, it)
 		}
 	case jsval.KindObj:
 		o := v.ObjValue()
@@ -95,7 +170,7 @@ func resolveLazy(v Value) {
 			o.SetStringer(nil)
 		}
 		for i := 0; i < o.Len(); i++ {
-			resolveLazy(o.ValueAt(i))
+			resolveLazy(cc, o.ValueAt(i))
 		}
 	}
 }

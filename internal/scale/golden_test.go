@@ -2,12 +2,14 @@ package scale
 
 import (
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
 	"os"
 	"testing"
 
+	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -159,8 +161,8 @@ func tickCountOf(v any) TickCount {
 	return Count(decVal(v).NumValue())
 }
 
-func applyOps(t testing.TB, c goldenCase) (Scale, bool) {
-	s, ok := New(c.Type)
+func applyOps(t testing.TB, c goldenCase, local format.Zone) (Scale, bool) {
+	s, ok := NewIn(c.Type, local)
 	if !ok {
 		t.Fatalf("%s: unknown type %s", c.Name, c.Type)
 	}
@@ -245,7 +247,11 @@ func runQuery(t testing.TB, s Scale, q []any) (res jsval.Value, ok bool) {
 		}
 	case "ticks":
 		if tk, ok := s.(Ticker); ok {
-			ticks := tk.Ticks(tickCountOf(q[1]))
+			ticks, err := tk.Ticks(context.Background(), tickCountOf(q[1]))
+			if err != nil {
+				// d3 throws too (new Array(NaN)); runGolden checks it did
+				panic(&Thrown{Name: "RangeError", Msg: err.Error()})
+			}
 			if _, temporal := s.(*Time); temporal {
 				return jsval.Arr(numsToTimestamps(ticks)), true
 			}
@@ -281,15 +287,16 @@ func runQuery(t testing.TB, s Scale, q []any) (res jsval.Value, ok bool) {
 	return jsval.Undefined, false
 }
 
-func TestScalesGolden(t *testing.T) { runGolden(t, "testdata/scales.json.gz") }
+func TestScalesGolden(t *testing.T) { runGolden(t, "testdata/scales.json.gz", format.UTC) }
 
-func runGolden(t *testing.T, file string) {
+// runGolden replays recorded cases, with local the zone of "time" scales.
+func runGolden(t *testing.T, file string, local format.Zone) {
 	cases := loadGolden(t, file)
 	var st cmpStats
 	fail := 0
 	nq := 0
 	for _, c := range cases {
-		s, ok := applyOps(t, c)
+		s, ok := applyOps(t, c, local)
 		if !ok {
 			continue
 		}

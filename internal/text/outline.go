@@ -4,7 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"unsafe"
 
+	"github.com/mgilbir/aster/internal/bcache"
 	"github.com/mgilbir/forme/shape"
 )
 
@@ -47,15 +49,28 @@ var (
 	ErrGlyphRange = errors.New("text: glyph index out of range")
 )
 
-// maxOutlineCache bounds the per-face cache of unscaled outlines.
-const maxOutlineCache = 4096
+// The per-face cache of unscaled outlines is bounded by the bytes of its
+// segments: a font is the caller's, possibly hostile, and its glyphs can have
+// any number of points (C32). A Latin face's glyphs hold about 2 KB each.
+const (
+	outlineCacheBytes    = 4 << 20
+	outlineCacheMaxEntry = 256 << 10
+)
+
+// segmentBytes is what one cached segment holds.
+const segmentBytes = int64(unsafe.Sizeof(Segment{}))
 
 // outlineCache holds a face's outlines in font units, y down, so that a
 // repeated glyph costs only the scaling (forme keeps its own copy in font
 // units, y up, but handing it out means a callback per segment).
 type outlineCache struct {
-	mu sync.RWMutex
-	m  map[int][]Segment
+	once sync.Once
+	c    *bcache.Cache[int, []Segment]
+}
+
+func (o *outlineCache) cache() *bcache.Cache[int, []Segment] {
+	o.once.Do(func() { o.c = bcache.New[int, []Segment](outlineCacheBytes, outlineCacheMaxEntry) })
+	return o.c
 }
 
 // GlyphOutline returns the outline of glyph gid of face f scaled to the given
@@ -95,11 +110,8 @@ func GlyphOutline(f *Face, gid int, size float64) (segs []Segment, err error) {
 // outlineUnits returns the outline of gid in font units, y down. The slice is
 // shared and must not be modified.
 func (f *Face) outlineUnits(gid int) (segs []Segment, err error) {
-	c := &f.outlines
-	c.mu.RLock()
-	segs, ok := c.m[gid]
-	c.mu.RUnlock()
-	if ok {
+	c := f.outlines.cache()
+	if segs, ok := c.Get(gid); ok {
 		return segs, nil
 	}
 	defer func() {
@@ -137,14 +149,6 @@ func (f *Face) outlineUnits(gid int) (segs []Segment, err error) {
 	if open {
 		segs = append(segs, Segment{Kind: Close})
 	}
-	c.mu.Lock()
-	if c.m == nil {
-		c.m = make(map[int][]Segment)
-	}
-	if len(c.m) >= maxOutlineCache {
-		clear(c.m)
-	}
-	c.m[gid] = segs
-	c.mu.Unlock()
+	c.Put(gid, segs, int64(cap(segs))*segmentBytes)
 	return segs, nil
 }

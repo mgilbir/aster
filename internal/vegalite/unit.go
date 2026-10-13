@@ -15,6 +15,9 @@ type unitModel struct {
 	specifiedLegends    *Object
 	specifiedProjection Value
 	selection           []Value
+	// brushTests caches pointBrushTests for selection count brushN.
+	brushTests []string
+	brushN     int
 }
 
 func newUnitModel(cc *compileCtx, spec Value, parent Model, parentGivenName string, parentGivenSize *Object, config Value) *unitModel {
@@ -31,10 +34,13 @@ func newUnitModel(cc *compileCtx, spec Value, parent Model, parentGivenName stri
 		markDef = mk("type", spec.Get("mark"))
 	}
 	if t := markDef.Lookup("type"); !t.IsStr() || markCompilers[t.StrValue()].encodeEntry == nil {
-		throw("Invalid mark %s: expected one of the mark types (arc, area, bar, image, line, point, rect, rule, text, tick, trail, circle, square, geoshape, or a composite mark) or a mark definition with such a type", stringify(spec.Get("mark")))
+		throw("Invalid mark %s: expected one of the mark types (arc, area, bar, image, line, point, rect, rule, text, tick, trail, circle, square, geoshape, or a composite mark) or a mark definition with such a type", stringify(cc, spec.Get("mark")))
 	}
 	mark := markDef.Lookup("type").AsString()
 	if markDef.Lookup("filled").IsUndefined() {
+		if cc.v5 && spec.Get("data").IsTruthy() {
+			jsIn(spec.Get("data"), "graticule") // 5.8's isGraticuleGenerator
+		}
 		graticule := spec.Get("data").IsTruthy() && isGraticuleGenerator(spec.Get("data"))
 		markDef.Set("filled", defaultFilled(jsval.Obj(markDef), config, graticule))
 	}
@@ -63,7 +69,12 @@ func newUnitModel(cc *compileCtx, spec Value, parent Model, parentGivenName stri
 	u.specifiedAxes = u.initAxes(u.encoding)
 	u.specifiedLegends = u.initLegends(u.encoding)
 	u.specifiedProjection = spec.Get("projection")
-	for _, p := range spec.Get("params").Items() {
+	var params []Value
+	if ps := spec.Get("params"); !ps.IsNullish() {
+		params = listOf(ps, "(spec.params ?? [])", "filter")
+	}
+	for _, p := range params {
+		cc.work(1)
 		if isSelectionParameter(p) {
 			u.selection = append(u.selection, p)
 		}
@@ -127,13 +138,13 @@ func (u *unitModel) initScales(encoding Value) *Object {
 
 func (u *unitModel) initScale(scale Value) Value {
 	domain, rng := scale.Get("domain"), scale.Get("range")
-	internal := replaceExprRef(scale, 0)
+	internal := replaceExprRef(u.ctx, scale, 0)
 	io := internal.ObjValue()
 	if domain.IsArr() {
-		io.Set("domain", mapVals(domain, signalRefOrValue))
+		io.Set("domain", mapVals(domain, func(v Value) Value { return signalRefOrValue(u.ctx, v) }))
 	}
 	if rng.IsArr() {
-		io.Set("range", mapVals(rng, signalRefOrValue))
+		io.Set("range", mapVals(rng, func(v Value) Value { return signalRefOrValue(u.ctx, v) }))
 	}
 	return internal
 }
@@ -160,13 +171,15 @@ func (u *unitModel) initAxes(encoding Value) *Object {
 }
 
 func (u *unitModel) initAxis(axis Value) Value {
+	cc := u.ctx
 	out := jsval.NewObject(axis.Len())
 	for _, prop := range keysOf(axis) {
+		cc.work(1)
 		val := axis.Get(prop)
 		if isConditionalAxisValue(val) {
-			out.Set(prop, signalOrValueRefWithCondition(val))
+			out.Set(prop, signalOrValueRefWithCondition(u.ctx, val))
 		} else {
-			out.Set(prop, signalRefOrValue(val))
+			out.Set(prop, signalRefOrValue(cc, val))
 		}
 	}
 	return jsval.Obj(out)
@@ -181,7 +194,7 @@ func (u *unitModel) initLegends(encoding Value) *Object {
 		if fod.IsTruthy() && supportLegend(channel) {
 			lg := fod.Get("legend")
 			if lg.IsTruthy() {
-				legends.Set(channel, replaceExprRef(lg, 0))
+				legends.Set(channel, replaceExprRef(cc, lg, 0))
 			} else {
 				legends.Set(channel, lg)
 			}
@@ -254,8 +267,8 @@ func (u *unitModel) assembleSignals() []Value {
 	return append(out, assembleUnitSelectionSignals(u, nil)...)
 }
 
-func (u *unitModel) assembleSelectionData(data []Value) []Value {
-	return assembleUnitSelectionData(u, data)
+func (u *unitModel) assembleSelectionData(acc *selDataAcc) {
+	assembleUnitSelectionData(u, acc)
 }
 
 func (u *unitModel) assembleLayout() Value { return jsval.Null }
@@ -269,23 +282,25 @@ func (u *unitModel) correctDataNames(mark Value) Value {
 	if from.Get("data").IsTruthy() {
 		d := u.lookupDataSource(from.Get("data").AsString())
 		if !cc.v5 && u.encoding.ObjValue().Has("time") {
-			d += curr
+			d = jsval.Str(d.AsString() + curr)
 		}
-		from.ObjValue().Set("data", jsval.Str(d))
+		from.ObjValue().Set("data", d)
 	}
 	if from.Get("facet").Get("data").IsTruthy() {
-		from.Get("facet").ObjValue().Set("data", jsval.Str(u.lookupDataSource(from.Get("facet").Get("data").AsString())))
+		from.Get("facet").ObjValue().Set("data", u.lookupDataSource(from.Get("facet").Get("data").AsString()))
 	}
 	return mark
 }
 
 func (u *unitModel) assembleMarks() []Value {
+	cc := u.ctx
 	marks := u.comp.mark
 	if u.parent == nil || !isLayerModel(u.parent) {
 		marks = assembleUnitSelectionMarks(u, marks)
 	}
 	out := make([]Value, len(marks))
 	for i, m := range marks {
+		cc.work(1)
 		out[i] = u.correctDataNames(m)
 	}
 	return out
@@ -316,10 +331,19 @@ func (u *unitModel) fieldDef(channel string) Value {
 
 func (u *unitModel) typedFieldDef(channel string) Value {
 	fd := u.fieldDef(channel)
-	if isTypedFieldDef(fd) {
+	if isTypedFieldDefOf(u.b().ctx, fd) {
 		return fd
 	}
 	return undef
+}
+
+// vgFieldValue is model.vgField(channel), undefined for a channel without a
+// field def.
+func (u *unitModel) vgFieldValue(channel string, opt fieldRefOption) Value {
+	if !u.fieldDef(channel).IsTruthy() {
+		return undef
+	}
+	return jsval.Str(u.vgField(channel, opt))
 }
 
 func (u *unitModel) vgField(channel string, opt fieldRefOption) string {
@@ -336,7 +360,7 @@ func (u *unitModel) vgField(channel string, opt fieldRefOption) string {
 func (u *unitModel) forEachFieldDef(f func(fd Value, channel string)) {
 	cc := u.b().ctx
 
-	encodingEach(u.encoding, func(cd Value, c string) {
+	encodingEach(cc, u.encoding, func(cd Value, c string) {
 		if fd := getFieldDef(cc, cd); fd.IsTruthy() {
 			f(fd, c)
 		}
@@ -355,11 +379,20 @@ func defaultFilled(markDef Value, config Value, graticule bool) Value {
 }
 
 func initMarkdef(cc *compileCtx, original Value, encoding Value, config Value) Value {
-	mdv := replaceExprRef(original, 0)
+	mdv := replaceExprRef(cc, original, 0)
 	md := mdv.ObjValue()
 	specifiedOrient := getMarkPropOrConfigSimple("orient", mdv, config)
 	orient := markOrient(cc, md.Lookup("type").AsString(), encoding, specifiedOrient)
-	md.Set("orient", strOrUndef(orient))
+	orientV := strOrUndef(orient)
+	if specifiedOrient.IsTruthy() && !specifiedOrient.IsStr() && orient == specifiedOrient.AsString() && orient != "vertical" && orient != "horizontal" {
+		// orient() handed back the specified value itself, not its text.
+		orientV = specifiedOrient
+	}
+	md.Set("orient", orientV)
+	if o := md.Lookup("orient"); !specifiedOrient.IsUndefined() && !strictEq(specifiedOrient, o) {
+		// Upstream passes the computed orient as the "specified" one.
+		cc.warn(msgOrientOverridden(o, specifiedOrient))
+	}
 	if md.Lookup("type").AsString() == "bar" && orient != "" {
 		if cre := getMarkPropOrConfigSimple("cornerRadiusEnd", mdv, config); !cre.IsUndefined() {
 			var newProps []string
@@ -490,8 +523,8 @@ func markOrient(cc *compileCtx, mark string, encoding Value, specifiedOrient Val
 		}
 	}
 	// line and tick (and fall-through from above)
-	xIsMeasure := isUnbinnedQuantitativeFieldOrDatumDef(x)
-	yIsMeasure := isUnbinnedQuantitativeFieldOrDatumDef(y)
+	xIsMeasure := isUnbinnedQuantitativeFieldOrDatumDef(cc, x)
+	yIsMeasure := isUnbinnedQuantitativeFieldOrDatumDef(cc, y)
 	switch {
 	case so != "":
 		return so
@@ -508,8 +541,8 @@ func markOrient(cc *compileCtx, mark string, encoding Value, specifiedOrient Val
 	case xIsMeasure && yIsMeasure:
 		return "vertical"
 	}
-	xIsTemporal := isTypedFieldDef(x) && channelDefType(x) == "temporal"
-	yIsTemporal := isTypedFieldDef(y) && channelDefType(y) == "temporal"
+	xIsTemporal := isTypedFieldDefOf(cc, x) && channelDefType(x) == "temporal"
+	yIsTemporal := isTypedFieldDefOf(cc, y) && channelDefType(y) == "temporal"
 	if xIsTemporal && !yIsTemporal {
 		return "vertical"
 	} else if !xIsTemporal && yIsTemporal {

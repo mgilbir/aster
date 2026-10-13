@@ -2,7 +2,7 @@ package transforms
 
 import (
 	"context"
-	"math"
+	"unsafe"
 
 	"github.com/mgilbir/aster/internal/budget"
 
@@ -64,7 +64,7 @@ func Aggregate(ctx context.Context, data []jsval.Value, p AggregateParams) (res 
 	dims := p.GroupBy
 	dnames := make([]string, len(dims))
 	for i, d := range dims {
-		dnames[i] = d.Name
+		dnames[i] = d.Key()
 	}
 	// The default key is built in a reusable buffer so that finding an
 	// existing cell does not allocate; a custom Key field is used as is.
@@ -78,11 +78,33 @@ func Aggregate(ctx context.Context, data []jsval.Value, p AggregateParams) (res 
 
 	cells := make(map[string]*aggCell)
 	var order []*aggCell
+	// Every cell carries running state for every measure (pivot makes one
+	// measure per distinct value), so cells x measures is the real size: the
+	// states are charged to the ledger until the cells are written, and the
+	// output tuples, one field per dimension and measure, to the rows.
+	led := budget.LedgerFrom(ctx)
+	cellBytes := aggCellBytes + budget.Mul(int64(len(ms.groups)), mstateBytes)
+	var charged, chargedCells int64
+	defer func() { led.Free(charged) }()
+	rowExcess := int64(0)
+	if b := budget.From(ctx); b != nil && b.RowBytes > 0 {
+		rowExcess = max(jsval.ObjectCost(len(dims)+nm)-b.RowBytes, 0)
+	}
 	newCell := func(key string, t jsval.Value) *aggCell {
-		// Every cell carries state for every measure (pivot makes one
-		// measure per distinct value), so cells*measures is the real size.
-		if err := reserveOut(ctx, int(min(budget.Mul(int64(len(order)+1), int64(16+nm))/16, math.MaxInt32)), len(data)); err != nil {
+		n := int64(len(order) + 1)
+		if err := budget.ReserveWeight(ctx, n, budget.Mul(n, rowExcess)); err != nil {
 			panic(aggAbort{err})
+		}
+		// The ledger is charged ahead, for a batch of cells a quarter of
+		// those made so far (at least 64): one charge per batch, not per
+		// cell, still before the cells are made.
+		if n > chargedCells {
+			batch := max(chargedCells/4, 64)
+			if err := led.Alloc(budget.Mul(batch, cellBytes)); err != nil {
+				panic(aggAbort{err})
+			}
+			chargedCells += batch
+			charged += budget.Mul(batch, cellBytes)
 		}
 		tuple := jsval.NewObject(len(dims) + len(ms.names))
 		for i, d := range dims {
@@ -137,7 +159,7 @@ func crossCells(ctx context.Context, dims []Field, dnames []string, cells map[st
 	order []*aggCell, newCell func(string, jsval.Value) *aggCell) error {
 	n := len(dims)
 	if n > MaxGroupDims {
-		return limitErr("aggregate cross group-by fields", n, MaxGroupDims)
+		return limitErr("aggregate cross group-by fields", float64(n), MaxGroupDims)
 	}
 	type domain struct {
 		keys []string
@@ -162,7 +184,7 @@ func crossCells(ctx context.Context, dims []Field, dnames []string, cells map[st
 		doms[i].keys = OrderedKeys(doms[i].keys)
 		total *= max(len(doms[i].keys), 1)
 		if total > MaxGroupCells {
-			return limitErr("aggregate cross cells", total, MaxGroupCells)
+			return limitErr("aggregate cross cells", float64(total), MaxGroupCells)
 		}
 	}
 	// The scratch tuple is shared across the recursion exactly as upstream's:
@@ -197,6 +219,13 @@ func crossCells(ctx context.Context, dims []Field, dnames []string, cells map[st
 	}
 	return gen("", 0)
 }
+
+// What a cell holds while it accumulates: the running state of each measured
+// field, and the cell, its tuple's header and its map entry.
+const (
+	mstateBytes  = int64(unsafe.Sizeof(mstate{}))
+	aggCellBytes = int64(unsafe.Sizeof(aggCell{})+unsafe.Sizeof(cell{})) + 64
+)
 
 // aggAbort carries a limit error out of the cell constructor.
 type aggAbort struct{ err error }

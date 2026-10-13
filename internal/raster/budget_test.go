@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/mgilbir/aster/internal/testutil"
 )
 
 // Tests for the context and work/memory budgets: a small SVG must not be able
@@ -75,7 +77,7 @@ func TestPixelOpsDefaultBudgetUseExpansion(t *testing.T) {
 	if !errors.Is(err, errLimit) {
 		t.Fatalf("want errLimit, got %v", err)
 	}
-	if d := time.Since(start); d > 20*time.Second {
+	if d := time.Since(start); d > testutil.Scaled(20*time.Second) {
 		t.Errorf("took %v", d)
 	}
 }
@@ -116,7 +118,7 @@ func TestContextCancelled(t *testing.T) {
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("deadline: got %v", err)
 	}
-	if d := time.Since(start); d > 3*time.Second {
+	if d := time.Since(start); d > testutil.Scaled(3*time.Second) {
 		t.Errorf("deadline honoured after %v", d)
 	}
 }
@@ -131,7 +133,7 @@ func TestContextCancelledFilter(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error")
 	}
-	if d := time.Since(start); d > 5*time.Second {
+	if d := time.Since(start); d > testutil.Scaled(5*time.Second) {
 		t.Errorf("returned after %v (%v)", d, err)
 	}
 }
@@ -140,8 +142,11 @@ func TestContextCancelledFilter(t *testing.T) {
 func TestSecurityReviewSVGs(t *testing.T) {
 	for _, name := range []string{"layers-8k.svg", "use-expansion-fullcanvas.svg", "rects-1000-fullcanvas.svg"} {
 		data, err := os.ReadFile("../../testdata/security/" + name)
+		if os.IsNotExist(err) {
+			data, err = os.ReadFile("../../testdata/security/bounded/" + name)
+		}
 		if err != nil {
-			t.Skip(err)
+			t.Fatal(err)
 		}
 		t.Run(name, func(t *testing.T) {
 			if testing.Short() {

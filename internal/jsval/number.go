@@ -113,6 +113,10 @@ func ToNumber(v Value) float64 {
 		case 0:
 			return 0
 		case 1:
+			// [null] and [undefined] join to "", which is 0.
+			if items[0].IsNullish() {
+				return 0
+			}
 			return StringToNumber(items[0].AsString())
 		}
 	}

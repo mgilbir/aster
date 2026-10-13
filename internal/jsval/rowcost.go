@@ -11,9 +11,20 @@ package jsval
 // object what a container of that size takes. The string budget of the
 // expressions counts strings over 512 bytes as they are made, which is before
 // the rows that hold them are charged here.
+//
+// An object of more than indexThreshold keys also builds a hash index of
+// them, which the fields above do not count: measured after a collection,
+// with the keys set one by one, cloned or parsed, it holds 31 to 35 bytes a
+// key plus the slack of the table's power-of-two size (3,128 bytes for a row
+// of 33 fields where the fields alone come to 1,968; 88 bytes a field at a
+// thousand fields and more). rowIndexBase and rowIndexField cover it at every
+// size (TestRowCostCoversWhatARowHolds).
 const (
 	RowBase  = 120
 	RowField = 56
+	// The hash index of an object of more than indexThreshold keys.
+	rowIndexBase  = 1200
+	rowIndexField = 48
 	// Nested containers are counted one level deep: what is deeper is built
 	// by expressions, and charged by the budgets of what they build.
 	rowArray  = 24 + 16
@@ -30,7 +41,7 @@ func RowCost(t Value) int64 {
 	if o == nil {
 		return RowBase
 	}
-	n := int64(RowBase) + int64(RowField)*int64(o.Len())
+	n := ObjectCost(o.Len())
 	for i, k := 0, o.Len(); i < k; i++ {
 		switch f := o.ValueAt(i); f.Kind() {
 		case KindStr:
@@ -38,8 +49,23 @@ func RowCost(t Value) int64 {
 		case KindArr:
 			n += rowArray + rowElem*int64(f.Len())
 		case KindObj:
-			n += rowObject + rowMember*int64(f.Len())
+			n += rowObject + rowMember*int64(f.Len()) + indexCost(f.Len())
 		}
 	}
 	return n
+}
+
+// ObjectCost is what a row of the given number of fields holds before the
+// text of its strings and what its fields nest: what RowCost charges for a
+// row about to be built.
+func ObjectCost(fields int) int64 {
+	return RowBase + RowField*int64(fields) + indexCost(fields)
+}
+
+// indexCost is what the hash index of an object of n keys holds.
+func indexCost(n int) int64 {
+	if n <= indexThreshold {
+		return 0
+	}
+	return rowIndexBase + rowIndexField*int64(n)
 }

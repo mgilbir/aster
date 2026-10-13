@@ -2,12 +2,14 @@ package voronoi
 
 import (
 	"context"
+	"errors"
 	"math"
 	"math/rand"
 	"os"
 	"slices"
 	"testing"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -25,7 +27,15 @@ type goldenCase struct {
 
 func loadGolden(t testing.TB) []goldenCase {
 	t.Helper()
-	raw, err := os.ReadFile("testdata/voronoi.json")
+	return loadGoldenFile(t, "testdata/voronoi.json")
+}
+
+// loadGoldenFile reads recorded cases. A coordinate JSON cannot hold is
+// written as a string ("Infinity", "NaN") and read with Number(), as
+// upstream's Float64Array assignment does.
+func loadGoldenFile(t testing.TB, file string) []goldenCase {
+	t.Helper()
+	raw, err := os.ReadFile(file)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +47,7 @@ func loadGolden(t testing.TB) []goldenCase {
 	for _, c := range v.Get("cases").Items() {
 		g := goldenCase{Name: c.Get("name").StrValue()}
 		for _, p := range c.Get("points").Items() {
-			g.Points = append(g.Points, [2]float64{p.Index(0).NumValue(), p.Index(1).NumValue()})
+			g.Points = append(g.Points, [2]float64{jsval.ToNumber(p.Index(0)), jsval.ToNumber(p.Index(1))})
 		}
 		g.Size = nums(c.Get("size"))
 		g.Extent = nums(c.Get("extent"))
@@ -91,6 +101,22 @@ func TestGolden(t *testing.T) {
 	if len(cases) == 0 {
 		t.Fatal("no golden cases")
 	}
+	testGoldenCases(t, cases)
+}
+
+// TestGoldenHostile replays upstream on non-finite, overflowing and
+// subnormal coordinates (gen_voronoi_hostile.mjs): whatever upstream draws
+// for them, the port draws too, and it ends.
+func TestGoldenHostile(t *testing.T) {
+	cases := loadGoldenFile(t, "testdata/voronoi_hostile.json")
+	if len(cases) == 0 {
+		t.Fatal("no golden cases")
+	}
+	testGoldenCases(t, cases)
+	testTriangulationCases(t, cases)
+}
+
+func testGoldenCases(t *testing.T, cases []goldenCase) {
 	for _, c := range cases {
 		t.Run(c.Name, func(t *testing.T) {
 			data := tuples(c.Points)
@@ -115,18 +141,25 @@ func TestGolden(t *testing.T) {
 // TestTriangulation compares the raw Delaunator/Delaunay structures, which
 // pins the orientation and in-circle decisions independently of clipping.
 func TestTriangulation(t *testing.T) {
-	for _, c := range loadGolden(t) {
+	testTriangulationCases(t, loadGolden(t))
+}
+
+func testTriangulationCases(t *testing.T, cases []goldenCase) {
+	for _, c := range cases {
 		t.Run(c.Name, func(t *testing.T) {
 			coords := make([]float64, 0, 2*len(c.Points))
 			for _, p := range c.Points {
 				coords = append(coords, p[0], p[1])
 			}
-			d := newDelaunay(coords)
+			d, err := newDelaunay(context.Background(), coords)
+			if err != nil {
+				t.Fatal(err)
+			}
 			if !slices.Equal(d.triangles, c.Triangles) {
 				t.Errorf("triangles differ:\n got  %v\n want %v", d.triangles, c.Triangles)
 			}
 			if !slices.Equal(d.halfedges, c.Halfedges) {
-				t.Errorf("halfedges differ")
+				t.Errorf("halfedges differ:\n got  %v\n want %v", d.halfedges, c.Halfedges)
 			}
 			if !slices.Equal(d.hull, c.Hull) {
 				t.Errorf("hull: got %v want %v", d.hull, c.Hull)
@@ -195,10 +228,12 @@ func TestCustomOutputField(t *testing.T) {
 	}
 }
 
-// TestHostileInputs feeds non-finite and extreme coordinates: the result may
-// be garbage but the transform must return without hanging or panicking.
+// TestHostileInputs feeds non-finite and extreme coordinates (whose cells
+// TestGoldenHostile pins against upstream): the transform must return, with
+// no panic and no error but a limit.
 func TestHostileInputs(t *testing.T) {
 	nan, inf := math.NaN(), math.Inf(1)
+	extremes := []float64{nan, inf, -inf, 1e308, -1e308, 5e-324, 1e154, 0, 1, 2}
 	sets := [][][2]float64{
 		{{nan, nan}, {1, 2}, {3, 4}, {5, 1}},
 		{{inf, 0}, {1, 2}, {3, 4}, {5, 1}, {-inf, 3}},
@@ -207,18 +242,14 @@ func TestHostileInputs(t *testing.T) {
 		{{0, 0}, {0, 0}, {0, 0}, {0, 0}},
 	}
 	rnd := rand.New(rand.NewSource(1))
-	for k := 0; k < 200; k++ {
-		n := 3 + rnd.Intn(12)
+	for k := 0; k < 2000; k++ {
+		n := 3 + rnd.Intn(40)
 		s := make([][2]float64, n)
 		for i := range s {
 			for j := range s[i] {
 				switch rnd.Intn(8) {
-				case 0:
-					s[i][j] = nan
-				case 1:
-					s[i][j] = inf
-				case 2:
-					s[i][j] = float64(rnd.Intn(3))
+				case 0, 1, 2:
+					s[i][j] = extremes[rnd.Intn(len(extremes))]
 				default:
 					s[i][j] = rnd.Float64() * 100
 				}
@@ -227,10 +258,26 @@ func TestHostileInputs(t *testing.T) {
 		sets = append(sets, s)
 	}
 	for i, s := range sets {
-		if err := Transform(context.Background(), tuples(s), Params{X: field("x"), Y: field("y"), Size: []float64{100, 100}}); err != nil {
-			t.Logf("set %d: %v", i, err)
+		if err := Transform(context.Background(), tuples(s), Params{X: field("x"), Y: field("y"), Size: []float64{100, 100}}); err != nil && !errors.Is(err, budget.ErrLimit) {
+			t.Errorf("set %d: %v", i, err)
 		}
 	}
+}
+
+// TestAccessorExceptionPropagates: a TypeError thrown by a field accessor is
+// the dataflow's to report as the specification's error, so the transform
+// must let it through rather than turn it into an error of its own.
+func TestAccessorExceptionPropagates(t *testing.T) {
+	thrown := &jsval.Thrown{Name: "TypeError", Msg: "Cannot read properties of undefined (reading 'x')"}
+	defer func() {
+		if r := recover(); r != thrown {
+			t.Fatalf("recovered %v, want the accessor's TypeError", r)
+		}
+	}()
+	err := Transform(context.Background(), tuples([][2]float64{{1, 1}, {2, 3}}), Params{
+		X: func(jsval.Value) jsval.Value { panic(thrown) }, Y: field("y"),
+	})
+	t.Fatalf("returned %v", err)
 }
 
 func randomData(n int) []jsval.Value {
@@ -263,6 +310,32 @@ func BenchmarkTriangulate1k(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		newTriangulation(coords)
+		if _, err := newTriangulation(context.Background(), coords); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// TestCycleWalksAreBounded hands the cell walk and the nearest-point walk
+// half-edges whose turn around point 0 never comes back to where it started
+// (0 -> 1 -> 3 -> 4 -> 3 -> ...), as the audit's C2 input once made them: they
+// must stop with errDegenerate instead of looping (the cell walk grew until
+// the process died of a fatal out-of-memory).
+func TestCycleWalksAreBounded(t *testing.T) {
+	d := &delaunay{
+		points:    []float64{1, 1},
+		triangles: []int32{0, 0, 0, 0, 0, 0},
+		halfedges: []int32{-1, 3, -1, 1, 3, -1},
+		inedges:   []int32{0},
+		hullIndex: []int32{-1},
+	}
+	dg := &diagram{d: d, circumcenters: make([]float64, 4), vectors: make([]float64, 4), xmax: 100, ymax: 100}
+	if pts := dg.cell(0); pts != nil || d.err != errDegenerate {
+		t.Fatalf("cell walk: points %v, err %v", pts, d.err)
+	}
+	d.err = nil
+	d.step(0, 0, 0)
+	if d.err != errDegenerate {
+		t.Fatalf("step walk: err %v", d.err)
 	}
 }

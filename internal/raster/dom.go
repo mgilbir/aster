@@ -1,6 +1,7 @@
 package raster
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -108,6 +109,7 @@ const (
 	aLetterSpacing
 	aWordSpacing
 	aMixBlendMode
+	aVectorEffect
 	aOffset
 	aOpacity
 	aPoints
@@ -204,7 +206,7 @@ var attrNames = map[string]attrID{
 	"gradientTransform": aGradientTransform, "gradientUnits": aGradientUnits,
 	"height": aHeight, "href": aHref, "image-rendering": aImageRendering,
 	"letter-spacing": aLetterSpacing, "word-spacing": aWordSpacing,
-	"mix-blend-mode": aMixBlendMode, "offset": aOffset, "opacity": aOpacity,
+	"mix-blend-mode": aMixBlendMode, "vector-effect": aVectorEffect, "offset": aOffset, "opacity": aOpacity,
 	"points": aPoints, "preserveAspectRatio": aPreserveAspectRatio, "r": aR,
 	"rotate": aRotate, "rx": aRx, "ry": aRy, "spreadMethod": aSpreadMethod,
 	"stop-color": aStopColor, "stop-opacity": aStopOpacity, "stroke": aStroke,
@@ -247,7 +249,7 @@ var presentation = func() (t [256]bool) {
 		aOpacity, aOverflow, aPaintOrder, aShapeRendering, aStopColor, aStopOpacity,
 		aStroke, aStrokeDasharray, aStrokeDashoffset, aStrokeLinecap, aStrokeLinejoin,
 		aStrokeMiterlimit, aStrokeOpacity, aStrokeWidth, aTextAnchor, aTextDecoration,
-		aTextRendering, aTransform, aVisibility, aWordSpacing,
+		aTextRendering, aTransform, aVectorEffect, aVisibility, aWordSpacing,
 	} {
 		t[id] = true
 	}
@@ -315,28 +317,39 @@ type document struct {
 // Limits bounds the resources an untrusted SVG may consume. Zero fields select
 // the defaults below.
 type Limits struct {
-	MaxInputBytes   int // SVG source size
-	MaxElements     int // parsed elements
-	MaxDepth        int // element nesting
-	MaxPixels       int // output width*height after scaling
-	MaxDimension    int // output width or height
-	MaxRenderNodes  int // element visits while rendering (bounds <use> expansion)
-	MaxImageBytes   int // decoded size of one data: URI
-	MaxImagePixels  int // pixels of one decoded raster image
-	MaxLayerDepth   int // nested offscreen layers (opacity groups)
-	MaxPathSegments int // segments produced by flattening one path
+	MaxInputBytes  int // SVG source size
+	MaxElements    int // parsed elements
+	MaxDepth       int // element nesting
+	MaxPixels      int // output width*height after scaling
+	MaxDimension   int // output width or height
+	MaxRenderNodes int // element visits while rendering (bounds <use> expansion)
+	MaxImageBytes  int // decoded size of one data: URI
+	MaxImagePixels int // pixels of one decoded raster image
+	MaxLayerDepth  int // nested offscreen layers (opacity groups)
+	// MaxPathSegments bounds the path geometry held at once, in points: the
+	// path data parsed, the polylines flattened and the stroke outlines
+	// built for the elements being drawn (an element's are given back when
+	// it is done), and the scan converter's edges, each counted as five
+	// points (its size). It bounds the memory a path's geometry takes,
+	// which flattening (up to 400 points a curve) and stroking (up to 157
+	// a round join) multiply.
+	MaxPathSegments int
 	MaxStyleBytes   int // total size of <style> sheets
 	MaxCSSRules     int // rules across all style sheets
 	MaxCSSWork      int // selector-matching steps while applying style sheets
-	MaxFilterPixels int // pixels of one filter region
+	// (past MaxStyleBytes, MaxCSSRules or MaxCSSWork the render fails)
+	MaxFilterPixels int // pixels of one filter region; a larger one fails the render
 	MaxEffectPixels int // pixels processed by filters and pattern tiles in one render
 	// MaxPixelOps bounds the total pixel work of one render: pixels covered by
-	// fills and strokes, composited layer and mask areas and filter/pattern
-	// pixels, summed over the whole document. It bounds the product of element
+	// fills and strokes, edge crossings the scan converter computes, points
+	// flattening computes, composited layer and mask areas and filter/pattern
+	// pixels (a merge node a pass), summed over the whole document. It bounds the product of element
 	// count and canvas size that MaxRenderNodes and MaxPixels leave open.
 	MaxPixelOps int
 	// MaxCanvasBytes bounds the pixel memory alive at once: the canvas plus
-	// every offscreen layer (opacity group, mask, filter) in flight.
+	// every offscreen layer (opacity group, mask, filter) in flight, the
+	// clip coverage maps of the elements being drawn, and every result and
+	// scratch buffer of a filter chain.
 	MaxCanvasBytes int
 }
 
@@ -350,7 +363,7 @@ const (
 	defaultMaxImgBytes = 32 << 20
 	defaultMaxImgPix   = 64 << 20
 	defaultMaxLayers   = 16
-	defaultMaxSegs     = 50_000_000
+	defaultMaxSegs     = 128 << 20 // 2 GiB of 16-byte points
 	defaultMaxStyle    = 4 << 20
 	defaultMaxRules    = 100_000
 	defaultMaxCSSWork  = 100_000_000
@@ -358,6 +371,10 @@ const (
 	defaultMaxEffectPx = math.MaxInt32
 	defaultMaxPixelOps = 1 << 29
 	defaultMaxCanvasB  = 1 << 30
+	// defaultLedgerBytes bounds what a render charges to a ledger when its
+	// context carries none (Render called directly): the public API's
+	// default.
+	defaultLedgerBytes = 2 << 30
 )
 
 // WithDefaults is l with every zero field set to its default.
@@ -458,8 +475,14 @@ func (a *arena) takeAttrs(buf []attr) []attr {
 // beyond the predefined and numeric ones), namespaces are reduced to local
 // names, and only character data inside text elements is retained.
 func parseDocument(src string, lim Limits) (*document, error) {
+	return parseDocumentCtx(context.Background(), src, lim)
+}
+
+// parseDocumentCtx is parseDocument polling ctx while it
+// applies style sheets, the part whose work the input multiplies.
+func parseDocumentCtx(ctx context.Context, src string, lim Limits) (*document, error) {
 	if len(src) > lim.MaxInputBytes {
-		return nil, fmt.Errorf("%w: SVG input is %d bytes, limit is %d", errLimit, len(src), lim.MaxInputBytes)
+		return nil, fmt.Errorf("raster: SVG input is %d bytes, limit is %d: %w", len(src), lim.MaxInputBytes, errLimit)
 	}
 	doc := &document{ids: map[string]*node{}}
 	var ar arena
@@ -705,7 +728,7 @@ func parseDocument(src string, lim Limits) (*document, error) {
 			}
 			doc.count++
 			if doc.count > lim.MaxElements {
-				return nil, fmt.Errorf("%w: SVG has more than %d elements", errLimit, lim.MaxElements)
+				return nil, fmt.Errorf("raster: SVG has more than %d elements: %w", lim.MaxElements, errLimit)
 			}
 			nd := ar.newNode()
 			nd.tag = tag
@@ -737,7 +760,7 @@ func parseDocument(src string, lim Limits) (*document, error) {
 			}
 			if !selfClose {
 				if len(stack)+1 > lim.MaxDepth {
-					return nil, fmt.Errorf("%w: SVG nesting exceeds %d levels", errLimit, lim.MaxDepth)
+					return nil, fmt.Errorf("raster: SVG nesting exceeds %d levels: %w", lim.MaxDepth, errLimit)
 				}
 				stack = append(stack, nd)
 				if tag == tagText {
@@ -757,7 +780,9 @@ func parseDocument(src string, lim Limits) (*document, error) {
 		return nil, errors.New("raster: unbalanced markup")
 	}
 	if len(doc.css) > 0 {
-		doc.applyCSS(lim)
+		if err := doc.applyCSS(ctx, lim); err != nil {
+			return nil, err
+		}
 	}
 	return doc, nil
 }

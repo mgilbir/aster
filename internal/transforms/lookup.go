@@ -76,7 +76,7 @@ func Lookup(ctx context.Context, data []jsval.Value, p LookupParams) ([]jsval.Va
 		if len(as) == 0 {
 			as = make([]string, m)
 			for j, v := range p.Values {
-				as[j] = v.Name
+				as[j] = v.Key()
 			}
 		}
 	} else if len(as) == 0 {

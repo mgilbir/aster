@@ -48,7 +48,7 @@ func fixed(typ string, r *raw, scale float64, clipAngle float64) func() Projecti
 		p := newStandard(typ, func(_, _ float64) *raw { return r })
 		p.SetScale(scale)
 		if clipAngle != 0 {
-			p.setClipAngle(clipAngle)
+			_ = p.setClipAngle(clipAngle) // a constant within range
 		}
 		return p
 	}

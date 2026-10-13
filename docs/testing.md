@@ -14,14 +14,14 @@ make check                                  # every gate CI runs (scripts/check.
 
 ## The oracle
 
-`testdata/oracle-node` pins Vega 6.4.0, Vega-Lite 6.4.3 and resvg, and `testdata/oracle-node-vl5` pins Vega-Lite 5.8.0. Both pin their node version with volta. `internal/oracle` drives them and caches their answers in `testdata/oracle-cache`, which is git-ignored and recreated on demand. Delete it to force fresh answers.
+`testdata/oracle-node` pins Vega 6.4.0, Vega-Lite 6.4.3 and resvg, and `testdata/oracle-node-vl5` pins Vega-Lite 5.8.0. Both pin their node version with volta, 24.21.0, which CI installs (`node-version-file`) and the oracle runs under wherever volta is installed (it starts node in the module set's directory). Run the oracle, and record upstream's vectors, under that version only: another node's V8 can differ in the last bit of some `Math` functions (node 26's does), which shows as differences that are not the engine's. `internal/oracle` drives them and caches their answers in `testdata/oracle-cache`, which is git-ignored and recreated on demand. Delete it to force fresh answers.
 
 ```mermaid
 flowchart LR
-  C["corpus 1,422 specs<br/>+ sweeps + external corpora"] --> E["engine"]
+  C["corpus 1,427 specs<br/>+ sweeps + external corpora"] --> E["engine"]
   C --> N["upstream in node<br/>(internal/oracle)"]
   N <--> K[("testdata/oracle-cache")]
-  E --> D["internal/svgdiff<br/>structure; numbers ±0.5 px"]
+  E --> D["internal/svgdiff<br/>structure; geometry ±0.5 px,<br/>text and the rest exact"]
   N --> D
   E --> J["compiled Vega: exact"]
   N --> J
@@ -31,11 +31,11 @@ flowchart LR
   X -->|"unlisted difference,<br/>or stale entry"| F["fail"]
 ```
 
-The SVG is compared structurally: element tree, attributes, and numbers within half a pixel, since the two sides shape text with different engines (forme here, node-canvas there). The compiled Vega is compared exactly. The comparisons render as upstream does, past the errors it logs (`WithErrorHandler` returning nil), because that is what they compare. PNG output is compared with resvg's rendering of the same SVG, run by the same oracle.
+The SVG is compared structurally: element tree and attributes, the numbers of geometry attributes (coordinates, lengths, path data, transforms) within half a pixel, since the two sides shape text with different engines (forme here, node-canvas there), and text and every other attribute exactly, so a label `0.25` is not `0.5`, nor `1e+3` `1000`, nor an opacity of 0.2 one of 0.6. An oracle request that node does not answer within two minutes fails the test; it is never cached or counted as upstream rejecting the input. The compiled Vega is compared exactly. The comparisons render as upstream does, past the errors it logs (`WithErrorHandler` returning nil), because that is what they compare. PNG output is compared with resvg's rendering of the same SVG, run by the same oracle.
 
 ## The corpus
 
-`TestCompareWithNode` (`compare_test.go`) runs over 1,422 specs: 260 Vega fixtures, 332 Vega-Lite fixtures, Vega's 92 example specs, the 627 Vega-Lite examples, 23 vl-convert specs, and 88 fuzz-found regressions (`testdata/corpus/regress`). The specs it does not match are listed with the reason in `testdata/oracle-expect.txt`. All five entries depend on the platform node runs on (emoji measurement in macOS's Pango, d3-cloud's rasterization, V8's last-bit trigonometry on x86-64). So the count that matches is 1,419 on macOS/arm64 and 1,420 on Linux/x86-64. The compiled Vega is identical to upstream's for every Vega-Lite spec.
+`TestCompareWithNode` (`compare_test.go`) runs over 1,427 specs: 260 Vega fixtures, 332 Vega-Lite fixtures, Vega's 92 example specs, the 627 Vega-Lite examples, 23 vl-convert specs, and 93 regressions (`testdata/corpus/regress`). The specs it does not match are listed with the reason in `testdata/oracle-expect.txt`. Five of its six entries depend on the platform node runs on (emoji measurement in macOS's Pango, d3-cloud's rasterization, V8's last-bit trigonometry on x86-64); the sixth is a chart node's renderer cannot draw (upstream's compiler writes onto `Object.prototype` for a field named `__proto__`, and node's Vega then overflows its stack). So the count that matches is 1,423 on macOS/arm64 and 1,424 on Linux/x86-64. The compiled Vega is identical to upstream's for every Vega-Lite spec.
 
 `go test -run TestCompareWithNode -v . -args -compare.report=/tmp/report.md` writes a per-spec report. `-compare.run name` compares one spec.
 
@@ -54,11 +54,25 @@ Beyond the corpus, the same comparison runs over generated and collected inputs.
 | `TestCorpusWild` | 1,981 | 1,981 | Vega-Lite specs collected from the wild (chart-llm, pinned; [corpora](../testdata/corpora/README.md)) |
 | `TestCorpusDeneb` | 62 | 62 | Deneb's templates and examples (pinned) |
 
-All of them agree with upstream except a handful of CJK and emoji cases, where neither side has the glyphs and what node measures depends on the platform's font fallback. `scripts/fetch-corpora.sh` fetches the two external corpora (`-sweep.report dir` writes per-case TSVs).
+All of them agree with upstream except a handful of CJK and emoji cases, where neither side has the glyphs and what node measures depends on the platform's font fallback, and one log scale's legend gradient, a stop of which V8's x86-64 build rounds differently from its arm64 build (which the engine follows). `scripts/fetch-corpora.sh` fetches the two external corpora (`-sweep.report dir` writes per-case TSVs).
+
+## The type-confusion differential
+
+`TestVegaLiteTypeConfusionMatchesNode` (`vltypeconfusion_oracle_test.go`) replaces one value of a corpus spec (`internal/vegalite/testdata/specs`) with a value of another type and compiles the mutant with the engine and with node, for Vega-Lite 6.4 and 5.8. The engine must fail where node throws, compile where node compiles, log node's warnings in order and count, and produce node's compiled Vega exactly ([ADR 0013](adr/0013-invalid-input-fails-where-upstream-throws.md)). Flags: `-typeconfusion.seed`, `-typeconfusion.n` (mutants; 1,500 by default), `-typeconfusion.budget` (stop after a duration) and `-typeconfusion.dump dir` (writes the first mutant of each difference as `NNNN-VERSION.json`, with its description in `.key`). The suite runs the default seed; seeds 7, 11, 13, 17, 43, 47, 53, 59, 61 and 67 (10,000 mutants each) also report no difference.
+
+The search is continuous: the `typeconfusion` job of `.github/workflows/fuzz.yml` runs it nightly with a new seed (the day number), as many mutants as its budget allows, against node 24 with a cold oracle cache, and uploads the dumped mutants as the `typeconfusion-seed-N` artifact when it finds a difference. A manual run of the workflow can name the seed and the budget.
+
+To turn a found divergence into a regression case:
+
+1. Reproduce it: `ASTER_ORACLE=require go test -run 'TestVegaLiteTypeConfusionMatchesNode$' . -args -typeconfusion.seed N -typeconfusion.n M -typeconfusion.dump /tmp/tc` (`M` at least the run's mutant count, which the log reports), or take the mutant from the artifact.
+2. Copy the mutant to `testdata/typeconfusion/`, named for what it changes, with the seed and the version: `repeat-null-seed43-6.4.json`. `TestTypeConfusionRegressionsMatchNode` replays every file there against node, so the case stays covered whatever the corpus becomes; check that it fails.
+3. Find where upstream diverges: compile the mutant in node with the stack of the throw, or diff the compiled Vega (`firstJSONDiff` names the first difference), and read the upstream source at that site (both versions: 5.8's predicates often differ from 6.4's).
+4. Mirror upstream's JavaScript there, as ADR 0013 describes: the TypeError with its text, the conversion a template or an operator applies, the plain-object semantics of a map keyed by name (`jsRealm`). Fix the class, not the instance: grep upstream for the same idiom.
+5. Check that the regression passes and the seeds above still report no difference; a spec worth keeping in the rendered corpus as well goes to `testdata/corpus/regress`.
 
 ## Upstream's own test suites
 
-`scripts/record-upstream-vectors.sh` runs the test files of the Vega and d3 packages it lists (30; 29 record calls), at the installed versions and from their git tags, and records every call they make with upstream's answer in `testdata/upstream-vectors-cache` (git-ignored). The 34 `TestUpstream*` tests in `internal/` replay the vectors of 25 of those packages against the engine and require exact equality, with floors totalling 21,523 calls. They skip without the vectors (and fail with `ASTER_ORACLE=require`). Known divergences are listed with their cause in `testdata/upstream-vectors/known-divergences.txt`, some only for the architecture node recorded them on, and are asserted both ways.
+`scripts/record-upstream-vectors.sh` runs the test files of the Vega and d3 packages it lists (30; 29 record calls), at the installed versions and from their git tags, and records every call they make with upstream's answer in `testdata/upstream-vectors-cache` (git-ignored). The 34 `TestUpstream*` tests in `internal/` replay the vectors of 25 of those packages against the engine and require exact equality, with floors totalling 21,523 calls. They skip without the vectors (and fail with `ASTER_ORACLE=require`). Known divergences are listed with their cause in `testdata/upstream-vectors/known-divergences.txt`, some only for the architecture node recorded them on, and are asserted both ways. Each pins a hash of both answers, upstream's and the engine's, so it accepts that divergence and no other; a long signature ends in a hash of the whole call; a line that names no recorded vector fails. CI's oracle job runs on x86-64 Linux, so the lines for other architectures, and the macOS alternatives of the expectation files, are checked only where someone runs the oracle there.
 
 ## Unit tests without node
 
@@ -80,10 +94,24 @@ const vega = await import(require.resolve('vega'));
 ## Robustness
 
 - **Differential fuzzing:** `ASTER_FUZZ=3000 go test -run TestFuzzDifferential -v -timeout 3h .` mutates corpus specs and renders each mutant on both sides, checking the engine for panics and a time budget. Each disagreement is triaged into a fix with a regression spec under `testdata/corpus/regress`, or into a stated reason.
-- **Coverage-guided fuzzing:** each parser has a `go test -fuzz` target, listed in `scripts/fuzz-targets.txt` (29 of them; `TestFuzzTargetsListed` keeps the list complete). `make fuzz` runs them (`FUZZTIME=30s` for a short pass), and the nightly `fuzz.yml` workflow runs each for minutes, keeping its corpus. Besides "no panic, bounded time" they check properties: the JSON reader agrees with `encoding/json`, the SVG writer writes only its own elements and attributes, and its output parses back to exactly the structure it wrote, so no string in a scene made markup (`internal/svgcheck`; `TestValuesCreateNoStructure` and `TestSpecAndDataStringsMakeNoMarkup` give every property, spec value and data field such a string), and every PDF reads back with pdf0. A crasher is fixed and kept under the package's `testdata/fuzz/`.
-- **The comparator is tested:** `internal/svgdiff` is mutation-tested. Each of 336 kinds of change over 718 documents must be reported.
+- **Coverage-guided fuzzing:** each parser has a `go test -fuzz` target, listed in `scripts/fuzz-targets.txt` (29 of them; `TestFuzzTargetsListed` keeps the list complete). `make fuzz` runs them (`FUZZTIME=30s` for a short pass), and the nightly `fuzz.yml` workflow runs each for minutes, keeping its corpus. Besides "no panic, bounded time" they check properties: the JSON reader agrees with `encoding/json`, the SVG writer writes only its own elements and attributes, and its output parses back to exactly the structure it wrote, so no string in a scene made markup (`internal/svgcheck`; `TestValuesCreateNoStructure` and `TestSpecAndDataStringsMakeNoMarkup` give every property, spec value and data field such a string), and every PDF reads back with pdf0. A crasher is fixed and kept under the package's `<pkg>/testdata/fuzz/`.
+- **The comparator is tested:** `internal/svgdiff` is mutation-tested. Each of 369 kinds of change over 694 documents must be reported, a change within the geometry tolerance to any other number or to text included.
 - **Untrusted input:** `TestDeepInput` drives 69 deeply nested shapes to depths up to 100,000 in child processes with a capped stack. `go run ./internal/cmd/recursionaudit` finds every recursion in the call graph (113 cycles) and checks each against `scripts/recursion.allow`, which says how it is bounded. The security reproducers are described in [security-review-2026.md](history/security-review-2026.md).
-- **Floating point:** `scripts/fmacheck.sh` rejects fused multiply-adds the Go compiler could introduce on arm64 where V8 does not have them ([design-rules.md](design-rules.md#floating-point-parity)).
+- **Bounded inputs:** `TestBoundedInputs` renders every file under `testdata/security/bounded` to every output its kind has, each in a child process (`harness_security_test.go`), under `WithMemoryLimit(64 MiB)` and `WithTimeout(2 s)`. Each render must return within the timeout plus 0.5 s, with a peak heap under four times the limit, and end in success or an error wrapping `ErrLimit` or `context.DeadlineExceeded`: a child killed at its 1 GiB heap cap or 15 s wall cap, a panic, an "internal error" or any other error fails the test. An error message in which a part repeats (a package prefix, or a whole cause, as in `raster: …: raster: limit exceeded`) fails it too. It runs in every `go test`, `-short` included, four children at a time ([ADR 0010](adr/0010-bounds-charged-where-work-happens.md)). To add a case, add one file:
+
+  | File | Kind | Outputs rendered |
+  |---|---|---|
+  | `name.vg.json` | Vega | SVG, PNG, PDF |
+  | `name.vl.json` | Vega-Lite | compiled Vega, SVG, PNG, PDF |
+  | `name.svg` | SVG input | `SVGToPNG`, `SVGToPDF` |
+  | `name.png.svg` | SVG input only the rasterizer draws (filters, style sheets) | `SVGToPNG` |
+  | `name.ttf`, beside one of the above | a font | registered as family `Evil` for that input |
+  | `name.quantize.<ext>` | any of the above | its PNG outputs with `WithQuantizePNG(256)` |
+  | `name.loader`, beside one of the above | the harness Loader it renders with: `record` (a tiny body for every URL) or `bigcsv:N` (N MiB of CSV) | |
+
+  A case is self-contained: without a `.loader` file no Loader is configured, so its data is inline. It must be valid for every output it has (an SVG that `SVGToPDF` refuses as unsupported fails the test). The reproducer of a fixed resource finding belongs here, named after what it does (`regex-program-20x.vg.json`), so the bound it proves stays proved. The heavier reproducers under `testdata/security` run with `ASTER_SECURITY=1`, in CI's `security` job.
+- **Floating point:** `scripts/fmacheck.sh` rejects fused multiply-adds the Go compiler could introduce on arm64 where V8 does not have them ([design-rules.md](design-rules.md#floating-point-parity)). It fails on a stale allowlist entry, on a failed build, and when it sees no fused instruction at all (positions it cannot match, as `-trimpath` makes them); it unsets `GOFLAGS`.
+- **Time:** no test asserts a fixed wall-clock bound for a computation. A deadline or hang guard scales its slack by `internal/testutil`'s `RaceSlowdown` (the property is "stops", not "fast"), and a complexity guard counts deterministic work (steps, comparisons, work charged to the ledger) at n and 2n and bounds the ratio of the counts; no test compares times, which flaked on CI runners. `TestNoUnscaledWallClockBounds` fails on a comparison of `time.Since(…)` with an unscaled constant in any tracked test file.
 - **Concurrency:** `go test -race`; `TestConcurrentConverterSharesNothing` with `ASTER_STRESS_FULL=1` renders the whole corpus from 12 goroutines on one Converter.
 - **Colour glyphs and PDF:** colour glyphs are compared with HarfBuzz's drawing of the same fonts (`hb-view`, images in `testdata/colourfonts`). The PDFs are read back with PDFium, Chrome's PDF engine, and compared with the PNGs (`TestPDFium*`). That needs a Python with pypdfium2:
 
@@ -92,23 +120,27 @@ const vega = await import(require.resolve('vega'));
   ASTER_PDFIUM=.pdfium/bin/python go test ./internal/svgpdf -run TestPDFium
   ```
 
-- **Performance:** `BenchmarkScenes`; `ASTER_PERF=1 go test -run TestPerfReport -v .` (per stage); CI's benchmark gate, see [performance.md](performance.md#regressions).
-- **Docs:** `TestLimitsDocMatchesCode` checks [limits.md](limits.md) against the code, and `TestPackageLayers` checks [architecture.md](architecture.md#package-layers). `TestDocsMermaid` renders every Mermaid diagram in the repository's Markdown with Mermaid's own renderer, pinned in `testdata/mermaid` (`(cd testdata/mermaid && npm ci)`). It runs on jsdom rather than a browser, so text sizes are estimated, but parsing, layout and SVG writing all run, and a diagram GitHub would show as an error fails the test. `MERMAID_OUT=dir` keeps the SVGs for a look. `TestDocsLinks` checks that every relative link in the repository's Markdown reaches a file, and a heading for a `#fragment`.
+- **Performance:** `BenchmarkScenes`; `ASTER_PERF=1 go test -run TestPerfReport -v .` (per stage); CI's benchmark gate, see [performance.md](performance.md#regressions). A benchmark times only its loop: `for b.Loop()`, or a `b.N` loop with `b.ResetTimer()` after its setup, which `TestBenchmarksTimeOnlyTheLoop` checks in every test file.
+- **Docs:** `TestLimitsDocMatchesCode` checks [limits.md](limits.md) against the code, and `TestPackageLayers` checks [architecture.md](architecture.md#package-layers). `TestDocsMermaid` renders every Mermaid diagram in the repository's Markdown with Mermaid's own renderer, pinned in `testdata/mermaid` (`(cd testdata/mermaid && npm ci)`). It runs on jsdom rather than a browser, so text sizes are estimated, but parsing, layout and SVG writing all run, and a diagram GitHub would show as an error fails the test. `MERMAID_OUT=dir` keeps the SVGs for a look. `TestDocsLinks` checks that every relative link in the repository's Markdown (inline, reference and HTML) reaches a tracked file, and a heading for a `#fragment`; it and `TestDocsMermaid` read only tracked files, as GitHub does, fences at any indentation included. `TestFixedLimitsDocMatchesCode` checks the fixed bounds of limits.md, number by number, against the constants that enforce them, and `TestDependencyStatement` architecture.md's list of modules against `go list`.
 
 ## Environment variables
 
-| Variable | Effect |
-|---|---|
-| `ASTER_ORACLE=require` | tests that need node or the upstream vectors fail instead of skipping |
-| `ASTER_ORACLE_PROCS=n` | node processes the oracle runs |
-| `ASTER_FUZZ=n` (`ASTER_FUZZ_SEED`, `_START`, `_WORKERS`, `_BUDGET`, `_ORACLE`, `_OUT`) | run and steer the differential fuzzer |
-| `ASTER_PDFIUM=path` | the Python with pypdfium2, for `TestPDFium*` |
-| `ASTER_PERF=1` | run `TestPerfReport` |
-| `ASTER_SECURITY=1` | run the heavy resource reproducers ([security-review-2026.md](history/security-review-2026.md)) |
-| `ASTER_STRESS_FULL=1` | the concurrency stress test over the whole corpus |
-| `ASTER_MEMCHECK=1` (`_OUT`, `_CASES`, `_LIMITS`) | measure the heap of adversarial renders under `WithMemoryLimit` |
-| `FUZZTIME`, `FUZZMINIMIZETIME` | `make fuzz` time per target |
-| `BENCHGATE_*`, `BENCHSTAT` | `scripts/benchgate.sh` thresholds and tools (see the script) |
-| `RECORD_FORCE=1` | re-record the upstream vectors even when up to date |
+| Variable | Effect | In CI |
+|---|---|---|
+| `ASTER_ORACLE=require` | tests that need node or the upstream vectors fail instead of skipping | the `oracle` job |
+| `ASTER_ORACLE_PROCS=n` | node processes the oracle runs | a knob (default: half the CPUs) |
+| `ASTER_FUZZ=n` (`ASTER_FUZZ_SEED`, `_START`, `_WORKERS`, `_BUDGET`, `_ORACLE`, `_OUT`) | run and steer the differential fuzzer | no: hours with the oracle, and exploratory; what it finds is fixed and kept under `testdata/corpus/regress`, which CI compares |
+| `ASTER_PDFIUM=path` | the Python with pypdfium2, for `TestPDFium*` | the `pdfium` job |
+| `ASTER_POPPLER=require` | the tests that read PDFs back with poppler (`pdftotext`, `pdftoppm`) fail instead of skipping without it | the `pdfium` job |
+| `ASTER_PERF=1` | run `TestPerfReport` | no: a timing report for a quiet machine; the benchmark gate guards regressions |
+| `ASTER_SECURITY=1` | run the heavy resource reproducers ([security-review-2026.md](history/security-review-2026.md)) | the `security` job |
+| `ASTER_STRESS_FULL=1` | the concurrency stress test over the whole corpus | the `security` job (a sample runs in every `go test`) |
+| `ASTER_MEMCHECK=1` (`_OUT`, `_CASES`, `_LIMITS`) | measure the heap of adversarial renders under `WithMemoryLimit` | the `security` job, the full matrix (`TestMemoryLimitHeapSmoke` runs in every `go test`) |
+| `ASTER_METERING_FULL=1` | `TestEveryBuiltinIsMetered` at full size (1 MiB strings) | the `security` job |
+| `FUZZTIME`, `FUZZMINIMIZETIME` | `make fuzz` time per target | the nightly `fuzz.yml` |
+| `BENCHGATE_*`, `BENCHSTAT` | `scripts/benchgate.sh` thresholds and tools (see the script) | the `benchgate` job |
+| `RECORD_FORCE=1` | re-record the upstream vectors even when up to date | no: the recording is keyed by its inputs |
+
+The `oracle`, `pdfium`, `security` and `benchgate` jobs are in `.github/workflows/heavy.yml`, which runs on every push to main and by hand on a release candidate; pull requests run the quick gates of `ci.yml` only. `scripts/check.sh` runs what CI runs, these jobs included, and fails when a tool a gate needs is missing (`-allow-missing` records it as skipped instead). The other variables the tests read select or dump specs while debugging (`ASTER_COMPARE`, `ASTER_FULL`, `ASTER_TIME`, `ASTER_VEGA`, `ASTER_DUMP`, `ASTER_COMPARE_DUMP`, `ASTER_DEMO_DIR`, `ASTER_DRIFT_DIR`, `ASTER_GAP_STACKS`, `MERMAID_OUT`) and guard nothing on their own.
 
 Packages have further debugging knobs, documented where they are read (`grep -rn 'Getenv' --include=*_test.go`).

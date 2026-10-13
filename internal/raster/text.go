@@ -465,7 +465,7 @@ type outlineKey struct {
 
 func (r *renderer) glyphOutline(f Face, gid uint32) *path {
 	k := outlineKey{f, gid}
-	if p, ok := r.outlines[k]; ok {
+	if p, ok := r.outlines.get(k); ok {
 		if p == emptyPath {
 			return nil
 		}
@@ -477,13 +477,7 @@ func (r *renderer) glyphOutline(f Face, gid uint32) *path {
 	} else {
 		p = closeContours(p)
 	}
-	if r.outlines == nil {
-		r.outlines = map[outlineKey]*path{}
-	}
-	if len(r.outlines) > 1<<14 {
-		clear(r.outlines)
-	}
-	r.outlines[k] = p
+	r.outlines.put(r.ledger, k, p, pathBytes(p))
 	if p == emptyPath {
 		return nil
 	}
@@ -558,7 +552,15 @@ func (r *renderer) drawGlyphs(gs []glyphPos, sp *state, opacity float64, layered
 					fgPaint = &fp
 				}
 			}
+			// The run's glyphs are filled as one shape, as usvg makes one
+			// path of a span's outlines (overlapping glyphs are a union, not
+			// two coverages blended), but a glyph wholly beyond the clip
+			// adds nothing to it and is not flattened at all: its contours
+			// are closed, so its crossings left or right of the clip cancel
+			// on every row.
+			region := r.clipRegion(sp)
 			r.fl.reset()
+			r.fl.setCull(region)
 			for i := range gs {
 				g := &gs[i]
 				if g.g.Face == nil {
@@ -573,8 +575,13 @@ func (r *renderer) drawGlyphs(gs []glyphPos, sp *state, opacity float64, layered
 				if p == nil {
 					continue
 				}
-				r.fl.appendFlatten(p, ctm.mul(g.matrix()), shapeTol)
+				gm := ctm.mul(g.matrix())
+				if !r.mayCover(p, gm, region, 0) {
+					continue
+				}
+				r.fl.appendFlatten(p, gm, shapeTol)
 			}
+			r.fl.setCull(irect{})
 			r.fillPolys(&r.fl, false, ps, sp)
 		}
 	}
@@ -584,6 +591,7 @@ func (r *renderer) drawGlyphs(gs []glyphPos, sp *state, opacity float64, layered
 		}
 		if ps, ok := r.resolvePaint(sp.stroke, so, sp, bboxFn); ok {
 			var gp path
+			region, reach := r.clipRegion(sp), strokeReach(sp)
 			for i := range gs {
 				g := &gs[i]
 				if g.g.Face == nil {
@@ -597,6 +605,13 @@ func (r *renderer) drawGlyphs(gs []glyphPos, sp *state, opacity float64, layered
 					continue
 				}
 				gm := g.matrix()
+				// A glyph whose stroke lies wholly beyond the clip is not
+				// stroked: each glyph's outline is stroked apart from the
+				// others' (they share no subpath).
+				if b, ok := p.bounds(); !ok || !mayCoverBox(transformRect(b, gm), ctm, region, reach) {
+					continue
+				}
+				r.holdPoints(len(p.pts))
 				gp.verbs = append(gp.verbs, p.verbs...)
 				for _, pt := range p.pts {
 					gp.pts = append(gp.pts, gm.apply(pt))
@@ -710,6 +725,7 @@ func (r *renderer) textOutlinePath(n *node, st *state) *path {
 			continue
 		}
 		gm := g.matrix()
+		r.holdPoints(len(o.pts))
 		p.verbs = append(p.verbs, o.verbs...)
 		for _, pt := range o.pts {
 			p.pts = append(p.pts, gm.apply(pt))

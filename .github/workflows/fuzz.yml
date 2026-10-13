@@ -1,6 +1,7 @@
 name: Fuzz
 
-# Coverage-guided fuzzing (go test -fuzz) of the parsers, nightly. The targets
+# Coverage-guided fuzzing (go test -fuzz) of the parsers, nightly, and the
+# Vega-Lite type-confusion differential against node (job typeconfusion). The targets
 # and the minutes each one gets are listed in scripts/fuzz-targets.txt; the
 # matrix is built from that file, so a new target is added there only. Each
 # target keeps the inputs the fuzzer found interesting between runs in the
@@ -15,6 +16,14 @@ on:
         description: "-fuzztime for every target (e.g. 30s); empty runs the minutes listed in scripts/fuzz-targets.txt"
         required: false
         default: ""
+      seed:
+        description: "seed of the type-confusion differential; empty uses the day number"
+        required: false
+        default: ""
+      typeconfusion_budget:
+        description: "time the type-confusion differential searches for (e.g. 10m)"
+        required: false
+        default: "40m"
 
 permissions:
   contents: read
@@ -81,4 +90,48 @@ jobs:
         with:
           name: crashers-${{ matrix.key }}
           path: ${{ runner.temp }}/crashers
+          if-no-files-found: ignore
+
+  typeconfusion:
+    # The type-confusion differential (TestVegaLiteTypeConfusionMatchesNode)
+    # as a continuous search: each night a new seed, as many mutants as the
+    # budget allows, against node with a cold oracle cache (no answer is
+    # reused, so every one is a fresh upstream compilation). A difference
+    # fails the job and the first mutant of each is uploaded; docs/testing.md
+    # describes how one becomes a regression case.
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v7
+        with:
+          # node 24, as pinned for the oracle (volta)
+          node-version-file: testdata/oracle-node/package.json
+      - name: install the oracle
+        run: |
+          (cd testdata/oracle-node && npm ci)
+          (cd testdata/oracle-node-vl5 && npm ci)
+      - id: seed
+        # The seed rotates by day; a manual run can name one.
+        env:
+          SEED: ${{ inputs.seed }}
+        run: echo "seed=${SEED:-$(( $(date -u +%s) / 86400 ))}" >> "$GITHUB_OUTPUT"
+      - name: differential
+        env:
+          ASTER_ORACLE: require
+          SEED: ${{ steps.seed.outputs.seed }}
+          BUDGET: ${{ inputs.typeconfusion_budget || '40m' }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/typeconfusion"
+          go test -count=1 -v -timeout 55m -run 'TestVegaLiteTypeConfusionMatchesNode$' . \
+            -args -typeconfusion.seed "$SEED" -typeconfusion.n 100000000 -typeconfusion.budget "$BUDGET" \
+            -typeconfusion.dump "$RUNNER_TEMP/typeconfusion"
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: typeconfusion-seed-${{ steps.seed.outputs.seed }}
+          path: ${{ runner.temp }}/typeconfusion
           if-no-files-found: ignore

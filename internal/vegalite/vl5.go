@@ -11,11 +11,13 @@ import (
 // wrapCondition58 is vega-lite 5.8's wrapCondition: conditions come first, no
 // invalid-value reference, and the array form only when a condition exists.
 func wrapCondition58(o wrapConditionOpts) Value {
+	cc := o.model.ctx
 	main := o.mainRefFn(o.channelDef)
 	cond := o.channelDef.Get("condition")
 	if isConditionalDef(o.channelDef) && cond.IsTruthy() {
 		var refs []Value
 		for _, c := range arrayOf(cond) {
+			cc.work(1)
 			cvr := o.mainRefFn(c)
 			var test string
 			if isConditionalParameter(c) {
@@ -150,11 +152,12 @@ func getPathSort58(m *unitModel, dim string) Value {
 }
 
 // domainDefinitelyIncludesZero58 is 5.8's ScaleComponent.domainDefinitelyIncludesZero.
-func (s *scaleComponent) domainDefinitelyIncludesZero58() bool {
+func (s *scaleComponent) domainDefinitelyIncludesZero58(cc *compileCtx) bool {
 	if z := s.get("zero"); !(z.IsBool() && !z.BoolValue()) {
 		return true
 	}
 	for _, d := range s.get("domains").Items() {
+		cc.work(1)
 		if d.IsArr() && d.Len() == 2 {
 			lo, hi := d.Index(0), d.Index(1)
 			if !lo.IsUndefined() && !hi.IsUndefined() && jsval.ToNumber(lo) <= 0 && jsval.ToNumber(hi) >= 0 {
@@ -172,7 +175,7 @@ func pointPositionDefaultRef58(m *unitModel, defaultPos, channel, scaleName stri
 	case "zeroOrMin", "zeroOrMax":
 		if scaleName != "" {
 			scaleType := scale.get("type").AsString()
-			if !(scaleType == "log" || scaleType == "time" || scaleType == "utc") && scale.domainDefinitelyIncludesZero58() {
+			if !(scaleType == "log" || scaleType == "time" || scaleType == "utc") && scale.domainDefinitelyIncludesZero58(m.ctx) {
 				return mkv("scale", scaleName, "value", 0)
 			}
 		}
@@ -225,7 +228,7 @@ func rectPosition58(m *unitModel, channel string) Value {
 	return rangePosition(channel, m, rangePosOpts{defaultPos: "zeroOrMax", defaultPos2: "zeroOrMin"})
 }
 
-func defaultSizeRef58(sizeChannel, scaleName string, scale *scaleComponent, config Value, bandSize Value) Value {
+func defaultSizeRef58(cc *compileCtx, sizeChannel, scaleName string, scale *scaleComponent, config Value, bandSize Value) Value {
 	switch {
 	case isRelativeBandSize(bandSize):
 		if scale != nil {
@@ -236,6 +239,8 @@ func defaultSizeRef58(sizeChannel, scaleName string, scale *scaleComponent, conf
 					bandWidth = bandSize.Get("band").AsString() + " * " + bandWidth
 				}
 				return sig("max(0.25, " + bandWidth + ")")
+			} else if !(bandSize.Get("band").IsNum() && bandSize.Get("band").NumValue() == 1) {
+				cc.warn(msgCannotUseRelativeBandSizeWithNonBandScale(scaleType))
 			}
 		} else {
 			return mkv("mult", bandSize.Get("band"), "field", mkv("group", sizeChannel))
@@ -246,7 +251,7 @@ func defaultSizeRef58(sizeChannel, scaleName string, scale *scaleComponent, conf
 		return mkv("value", bandSize)
 	}
 	if scale != nil {
-		if rng := scale.get("range"); isVgRangeStep(rng) && rng.Get("step").IsNum() {
+		if rng := scale.get("range"); isVgRangeStep(cc, rng) && rng.Get("step").IsNum() {
 			return mkv("value", rng.Get("step").NumValue()-2)
 		}
 	}
@@ -267,7 +272,9 @@ func positionAndSize58(fd Value, channel string, m *unitModel) Value {
 	var sizeMixins Value
 	if encoding.Get("size").IsTruthy() || markDef.Get("size").IsTruthy() {
 		if useVlSizeChannel {
-			sizeMixins = nonPosition("size", m, nonPositionOpts{vgChannel: vgSizeChannel, defaultRef: signalOrValueRef(markDef.Get("size"))})
+			sizeMixins = nonPosition("size", m, nonPositionOpts{vgChannel: vgSizeChannel, defaultRef: signalOrValueRef(m.ctx, markDef.Get("size"))})
+		} else {
+			m.ctx.warn(msgCannotApplySizeToNonOrientedMark(markDef.Get("type").AsString()))
 		}
 	}
 	hasSizeFromMarkOrEncoding := sizeMixins.IsTruthy()
@@ -281,13 +288,13 @@ func positionAndSize58(fd Value, channel string, m *unitModel) Value {
 		if name == "" {
 			name = scaleName
 		}
-		sizeMixins = mkv(vgSizeChannel, defaultSizeRef58(vgSizeChannel, name, scale, config, bandSize))
+		sizeMixins = mkv(vgSizeChannel, defaultSizeRef58(m.ctx, vgSizeChannel, name, scale, config, bandSize))
 	}
 	defaultBandAlign := "middle"
 	if scType == "band" && isRelativeBandSize(bandSize) && !hasSizeFromMarkOrEncoding {
 		defaultBandAlign = "top"
 	}
-	vgChannel := vgAlignedPositionChannel(channel, markDef, config, defaultBandAlign)
+	vgChannel := vgAlignedPositionChannel(m.ctx, channel, markDef, config, defaultBandAlign)
 	center := vgChannel == "xc" || vgChannel == "yc"
 	bp0 := jsval.Int(0)
 	if center {
@@ -306,7 +313,7 @@ func positionAndSize58(fd Value, channel string, m *unitModel) Value {
 		// upstream interpolates the ref itself (not .signal) here.
 		bandPosition = sig("(1-[object Object])/2")
 	case isRelativeBandSize(bandSize):
-		bandPosition = jsval.Num((1 - bandSize.Get("band").AsDouble()) / 2)
+		bandPosition = jsval.Num((1 - jsval.ToNumber(bandSize.Get("band"))) / 2) // (1 - bandSize.band) / 2
 	default:
 		bandPosition = jsval.Int(0)
 	}
@@ -369,7 +376,7 @@ func getBinSpacing58(channel string, spacing float64, reverse, axisTranslate, of
 	}
 	off := 0.0
 	if offset.IsTruthy() {
-		off = offset.AsDouble()
+		off = jsval.ToNumber(offset)
 	}
 	var delta float64
 	if reverse.IsTruthy() {
@@ -377,7 +384,7 @@ func getBinSpacing58(channel string, spacing float64, reverse, axisTranslate, of
 	} else {
 		delta = off + spacingOffset
 	}
-	return jsval.Num(axisTranslate.AsDouble() + delta)
+	return jsPlusNum(axisTranslate, delta)
 }
 
 func rectBinPosition58(fd, fd2 Value, channel string, m *unitModel) Value {
@@ -406,7 +413,7 @@ func rectBinPosition58(fd, fd2 Value, channel string, m *unitModel) Value {
 	spacing := 0.0
 	if isXorY(channel) {
 		if b := getMarkPropOrConfigSimple("binSpacing", markDef, config); !b.IsNullish() {
-			spacing = b.AsDouble()
+			spacing = jsval.ToNumber(b)
 		}
 	}
 	channel2 := getSecondaryRangeChannel(channel)
@@ -417,7 +424,7 @@ func rectBinPosition58(fd, fd2 Value, channel string, m *unitModel) Value {
 	case isSignalRef(bandSize):
 		bandPosition = sig("(1-" + signalOf(bandSize) + ")/2")
 	case isRelativeBandSize(bandSize):
-		bandPosition = jsval.Num((1 - bandSize.Get("band").AsDouble()) / 2)
+		bandPosition = jsval.Num((1 - jsval.ToNumber(bandSize.Get("band"))) / 2) // (1 - bandSize.band) / 2
 	default:
 		bandPosition = jsval.Num(0.5)
 	}
@@ -443,6 +450,7 @@ func rectBinPosition58(fd, fd2 Value, channel string, m *unitModel) Value {
 			))
 		}
 	}
+	cc.warn(msgChannelRequiredForBinned(channel2))
 	return undef
 }
 
@@ -460,7 +468,7 @@ func tick58(m *unitModel) Value {
 		vgSizeChannel, vgThicknessChannel = "width", "height"
 	}
 	thick := jsval.NewObject(1)
-	thick.Set(vgThicknessChannel, signalOrValueRef(getMarkPropOrConfigSimple("thickness", markDef, config)))
+	thick.Set(vgThicknessChannel, signalOrValueRef(m.ctx, getMarkPropOrConfigSimple("thickness", markDef, config)))
 	return withBase(m, mkIgnore("ignore", "ignore", "include", "ignore", "ignore", "ignore"),
 		pointPosition(chX, m, pointPositionOpts{defaultPos: "mid", vgChannel: "xc"}),
 		pointPosition(chY, m, pointPositionOpts{defaultPos: "mid", vgChannel: "yc"}),
@@ -482,7 +490,7 @@ func tickDefaultSize58(m *unitModel) Value {
 		return v
 	}
 	if scale != nil {
-		if rng := scale.get("range"); rng.IsTruthy() && isVgRangeStep(rng) && rng.Get("step").IsNum() {
+		if rng := scale.get("range"); rng.IsTruthy() && isVgRangeStep(m.b().ctx, rng) && rng.Get("step").IsNum() {
 			return jsval.Num(float64(rng.Get("step").NumValue()*3) / 4)
 		}
 	}
@@ -519,13 +527,23 @@ func cmAccess(cc *compileCtx, p string) string {
 	return accessWithDatumToUnescapedPath(p)
 }
 
-// cmAlias is the field name composite marks use in the names of their derived
-// fields: 6.x strips the path syntax, 5.8 does not.
-func cmAlias(cc *compileCtx, field string) string {
+// cmAccessV is cmAccess of a spec value: a missing field is "undefined" to
+// 5.8's template, and a value that is not a string a TypeError to 6.x's
+// accessWithDatumToUnescapedPath.
+func cmAccessV(cc *compileCtx, v Value) string {
 	if cc.v5 {
-		return field
+		return `datum["` + tmpl(v) + `"]`
 	}
-	return removePathFromField(field)
+	return accessWithDatumToUnescapedPathV(v)
+}
+
+// cmAliasV is cmAlias of the field as upstream holds it: 6.x's
+// removePathFromField splits a value that is not a string by its length.
+func cmAliasV(cc *compileCtx, field Value) string {
+	if cc.v5 {
+		return field.AsString()
+	}
+	return removePathFromFieldV(field)
 }
 
 // cmFieldName reads the continuous axis field a composite mark builds its
@@ -555,6 +573,7 @@ func legendSelectionUpdate(cc *compileCtx) string {
 // assembleLegends58 groups legends by the domains of their scales (6.x groups
 // them by field); legends of one domain that cannot merge stay separate.
 func assembleLegends58(m Model) []Value {
+	cc := m.b().ctx
 	index := m.b().comp.legends
 	byDomain := newOmap[[]*legendComponent]()
 	for _, channel := range index.keyList() {
@@ -563,23 +582,23 @@ func assembleLegends58(m Model) []Value {
 		if sc == nil {
 			throw("No scale found for the %s legend; check the `resolve` property.", channel)
 		}
-		domainHash := stringify(sc.get("domains"))
+		domainHash := stringify(cc, sc.get("domains"))
 		if !byDomain.has(domainHash) {
-			byDomain.set(domainHash, []*legendComponent{lc.cloneLegend()})
+			byDomain.set(domainHash, []*legendComponent{lc.cloneLegend(cc)})
 			continue
 		}
 		// Upstream appends while iterating, so the appended component is visited
 		// (and merged with itself) too.
 		list := byDomain.m[domainHash]
 		for i := 0; i < len(list); i++ {
-			if mergeLegendComponent(list[i], lc) == nil {
+			if mergeLegendComponent(cc, list[i], lc) == nil {
 				list = append(list, lc)
 			}
 		}
 		byDomain.m[domainHash] = list
 	}
 	var out []Value
-	for _, k := range byDomain.keys {
+	for _, k := range byDomain.keysView() {
 		for _, l := range byDomain.m[k] {
 			if v := assembleLegend(l, m.b().config); v.IsTruthy() {
 				out = append(out, v)

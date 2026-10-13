@@ -24,7 +24,7 @@ type Model interface {
 
 	assembleSelectionTopLevelSignals(signals []Value) []Value
 	assembleSignals() []Value
-	assembleSelectionData(data []Value) []Value
+	assembleSelectionData(acc *selDataAcc)
 	assembleGroupStyle() Value
 	assembleLayout() Value
 	assembleDefaultLayout() *Object
@@ -57,10 +57,48 @@ func (n *nameMap) get(name string) string {
 
 type resolveIndex struct {
 	scale, axis, legend map[string]string
+	// prim holds resolve.scale, .axis and .legend of the specification
+	// when it is there but not an object: upstream reads and writes it as an
+	// object, and writing a property of a primitive (or reading one of null)
+	// is a TypeError (see read and write).
+	prim [3]*Value
+}
+
+// The kinds of resolveIndex.prim.
+const (
+	resolveScale = iota
+	resolveAxis
+	resolveLegend
+)
+
+// read is upstream reading resolve[kind][channel].
+func (r *resolveIndex) read(kind int, channel string) {
+	if v := r.prim[kind]; v != nil && v.IsNull() {
+		throw("Cannot read properties of null (reading '%s')", channel)
+	}
+}
+
+// write is upstream assigning resolve[kind][channel].
+func (r *resolveIndex) write(kind int, channel string) {
+	v := r.prim[kind]
+	switch {
+	case v == nil:
+	case v.IsNull():
+		throw("Cannot set properties of null (setting '%s')", channel)
+	default:
+		typ := "string"
+		switch {
+		case v.IsNum():
+			typ = "number"
+		case v.IsBool():
+			typ = "boolean"
+		}
+		throw("Cannot create property '%s' on %s '%s'", channel, typ, v.AsString())
+	}
 }
 
 func (r *resolveIndex) clone() *resolveIndex {
-	c := &resolveIndex{map[string]string{}, map[string]string{}, map[string]string{}}
+	c := &resolveIndex{scale: map[string]string{}, axis: map[string]string{}, legend: map[string]string{}, prim: r.prim}
 	for k, v := range r.scale {
 		c.scale[k] = v
 	}
@@ -91,6 +129,7 @@ type modelBase struct {
 	self        Model
 	typ         string
 	name        string
+	nameFalsy   bool // the spec's name is a falsy value with text (0, false)
 	parent      Model
 	config      Value
 	size        *Object
@@ -110,12 +149,13 @@ func (m *modelBase) b() *modelBase { return m }
 
 func newModelBase(cc *compileCtx, self Model, spec Value, typ string, parent Model, parentGivenName string, config Value, resolve *resolveIndex, view Value) *modelBase {
 	m := &modelBase{ctx: cc, self: self, typ: typ, parent: parent, config: config}
-	m.view = replaceExprRef(view, 0)
+	m.view = replaceExprRef(cc, view, 0)
 	if view.IsUndefined() {
 		m.view = undef
 	}
 	if n := spec.Get("name"); !n.IsNullish() {
 		m.name = n.AsString()
+		m.nameFalsy = !n.IsTruthy()
 	} else {
 		m.name = parentGivenName
 	}
@@ -123,7 +163,7 @@ func newModelBase(cc *compileCtx, self Model, spec Value, typ string, parent Mod
 	case isText(t):
 		m.title = mkv("text", t)
 	case t.IsTruthy():
-		m.title = replaceExprRef(t, 0)
+		m.title = replaceExprRef(cc, t, 0)
 	}
 	if parent != nil {
 		pb := parent.b()
@@ -151,7 +191,7 @@ func newModelBase(cc *compileCtx, self Model, spec Value, typ string, parent Mod
 		dc.outputNodeRefCounts = map[string]int{}
 		dc.isFaceted = isFacetSpec(spec)
 	}
-	res := &resolveIndex{map[string]string{}, map[string]string{}, map[string]string{}}
+	res := &resolveIndex{scale: map[string]string{}, axis: map[string]string{}, legend: map[string]string{}}
 	if resolve != nil {
 		res = resolve.clone()
 	}
@@ -169,9 +209,22 @@ func newModelBase(cc *compileCtx, self Model, spec Value, typ string, parent Mod
 }
 
 func normalizeTransformList(cc *compileCtx, tx Value) []Value {
+	// spec.transform ?? [], then transform.map; 5.8 tests each with
+	// `'filter' in t`.
+	if tx.IsNullish() {
+		return nil
+	}
 	var out []Value
-	for _, t := range tx.Items() {
-		if hasProperty(t, "filter") {
+	for _, t := range listOf(tx, "transform", "map") {
+		cc.work(1)
+		if cc.v5 && t.IsArr() {
+			// 'filter' in t holds for an array (Array.prototype.filter), so
+			// 5.8 makes it a filter whose predicate is that function; its
+			// expression reads the field of the function, undefined, as an
+			// access path.
+			throw("Cannot read properties of undefined (reading 'length')")
+		}
+		if (cc.v5 && jsIn(t, "filter")) || (!cc.v5 && hasProperty(t, "filter")) {
 			out = append(out, mkv("filter", normalizeLogicalComposition(t.Get("filter"), func(f Value) Value { return normalizePredicate(cc, f) }, 0)))
 		} else {
 			out = append(out, t)
@@ -190,8 +243,9 @@ func asUnit(m Model) *unitModel {
 }
 
 func (m *modelBase) getName(text string) string {
+	// (this.name ? `${this.name}_` : ''): a name of 0 or false is no prefix.
 	prefix := ""
-	if m.name != "" {
+	if m.name != "" && !m.nameFalsy {
 		prefix = m.name + "_"
 	}
 	return varName(prefix + text)
@@ -212,10 +266,12 @@ func (m *modelBase) renameSignal(old, nw string)     { m.signalNames.rename(old,
 func (m *modelBase) renameScale(old, nw string)      { m.scaleNames.rename(old, nw) }
 func (m *modelBase) renameProjection(old, nw string) { m.projNames.rename(old, nw) }
 
-func (m *modelBase) lookupDataSource(name string) string {
+// lookupDataSource is the data set an output node of that name reads, as
+// upstream holds its name (see outputNode.source).
+func (m *modelBase) lookupDataSource(name string) Value {
 	node, ok := m.comp.data.outputNodes[name]
 	if !ok || node == nil {
-		return name
+		return jsval.Str(name)
 	}
 	return node.getSource()
 }
@@ -232,14 +288,15 @@ func (m *modelBase) getSizeSignalRef(layoutSizeType string) Value {
 		if sc, ok := m.comp.scales.get(channel); ok && sc != nil && !sc.merged {
 			typ := sc.get("type").AsString()
 			rng := sc.get("range")
-			if hasDiscreteDomain(typ) && isVgRangeStep(rng) {
+			if hasDiscreteDomain(typ) && isVgRangeStep(m.ctx, rng) {
 				scaleName := sc.get("name").AsString()
 				domain := assembleDomain(m.self, channel)
-				field := getFieldFromDomain(domain)
+				field := getFieldFromDomain(cc, domain)
 				if field != "" {
 					fieldRef := vgField(cc, mkv("aggregate", "distinct", "field", field), fieldRefOption{expr: "datum"})
 					return sig(sizeExpr(scaleName, sc, fieldRef))
 				}
+				cc.warn(msgUnknownField(channel))
 				return jsval.Null
 			}
 		}
@@ -247,7 +304,14 @@ func (m *modelBase) getSizeSignalRef(layoutSizeType string) Value {
 	return sig(m.signalNames.get(m.getName(layoutSizeType)))
 }
 
-func isVgRangeStep(rng Value) bool { return hasProperty(rng, "step") }
+// isVgRangeStep is 6.x's hasProperty(range, 'step'), and 5.8's
+// !!range['step'], which reads the property of an undefined range.
+func isVgRangeStep(cc *compileCtx, rng Value) bool {
+	if cc.v5 {
+		return jsGet(rng, "step").IsTruthy()
+	}
+	return hasProperty(rng, "step")
+}
 
 func getSizeTypeFromLayoutSizeType(t string) string {
 	switch t {
@@ -295,11 +359,17 @@ func (m *modelBase) getScaleType(channel string) string {
 // (junk is true, and sel nil), and does not throw.
 func (m *modelBase) trySelectionComponent(variableName string) (sel *selectionComponent, junk bool) {
 	if m.comp.selection != nil {
-		if sel, ok := m.comp.selection.get(variableName); ok && sel != nil {
+		sel, own, ref := m.comp.selection.read(m.b().ctx.realm(), variableName)
+		if own && sel != nil {
 			return sel, false
 		}
+		// A selection named "__proto__" became the object's prototype, so
+		// that name reads it back.
+		if s, ok := ref.val.(*selectionComponent); ok && !own {
+			return s, false
+		}
 	}
-	if inheritedObjectKey(variableName) {
+	if isInheritedKey(variableName) {
 		return nil, true
 	}
 	if m.parent != nil {
@@ -338,9 +408,11 @@ func (m *modelBase) projectionName(parse bool) string {
 }
 
 func (m *modelBase) hasAxisOrientSignalRef() bool {
+	cc := m.ctx
 	for _, ch := range []string{"x", "y"} {
 		axes, _ := m.comp.axes.get(ch)
 		for _, a := range axes {
+			cc.work(1)
 			if a.hasOrientSignalRef() {
 				return true
 			}
@@ -378,18 +450,20 @@ func (m *modelBase) renameTopLevelLayoutSizeSignal() {
 // ---- assemble ----
 
 func (m *modelBase) assembleGroupEncodeEntry(isTopLevel bool) Value {
+	cc := m.ctx
 	encodeEntry := jsval.NewObject(4)
 	if m.view.IsTruthy() {
 		base := omit(m.view, "style")
 		for _, p := range base.Keys() {
+			cc.work(1)
 			if v := base.Lookup(p); !v.IsUndefined() {
-				encodeEntry.Set(p, signalOrValueRef(v))
+				encodeEntry.Set(p, signalOrValueRef(m.ctx, v))
 			}
 		}
 	}
 	if !isTopLevel {
 		if m.description.IsTruthy() {
-			encodeEntry.Set("description", signalOrValueRef(m.description))
+			encodeEntry.Set("description", signalOrValueRef(m.ctx, m.description))
 		}
 		if m.typ == "unit" || m.typ == "layer" {
 			o := mk("width", m.getSizeSignalRef("width"), "height", m.getSizeSignalRef("height"))

@@ -52,11 +52,17 @@ func (l Limits) withDefaults() Limits {
 
 // imageLimits are the bounds of one image, as imageref takes them.
 func (l Limits) imageLimits() imageref.Limits {
-	return imageref.Limits{MaxBytes: l.MaxImageBytes, MaxPixels: l.MaxImagePixels, Err: ErrLimit}
+	return imageref.Limits{MaxBytes: l.MaxImageBytes, MaxPixels: l.MaxImagePixels, Err: errSvgpdfLimit}
 }
 
-// ErrLimit is wrapped by every error caused by a resource limit.
-var ErrLimit = fmt.Errorf("svgpdf: %w", budget.ErrLimit)
+// ErrLimit is wrapped by every error caused by a resource limit. Its own
+// text is budget.ErrLimit's, so limitErr's messages ("svgpdf: X: limit
+// exceeded") name the package once; errSvgpdfLimit is it prefixed, for an
+// error that adds its text after it.
+var (
+	ErrLimit       = fmt.Errorf("%w", budget.ErrLimit)
+	errSvgpdfLimit = fmt.Errorf("svgpdf: %w", ErrLimit)
+)
 
 func limitErr(format string, args ...any) error {
 	return fmt.Errorf("svgpdf: "+format+": %w", append(args, ErrLimit)...)

@@ -2,10 +2,12 @@ package transforms
 
 import (
 	"context"
+	"errors"
 	"math"
 	"strings"
 	"testing"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -195,5 +197,15 @@ func BenchmarkDensityKDE(b *testing.B) {
 		if _, err := Density(context.Background(), data, p); err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+// TestDensityReservesRows is the audit's C64: density drew up to a million
+// samples, each a new tuple, before the row budget saw any.
+func TestDensityReservesRows(t *testing.T) {
+	ctx := budget.With(context.Background(), &budget.Budget{MaxRows: 1000})
+	_, err := Density(ctx, nil, DensityParams{Distribution: DistSpec{Kind: "normal"}, Extent: &[2]float64{0, 1}, Steps: 5000})
+	if !errors.Is(err, budget.ErrLimit) {
+		t.Fatalf("got %v, want ErrLimit", err)
 	}
 }

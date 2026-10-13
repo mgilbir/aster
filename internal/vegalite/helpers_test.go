@@ -35,7 +35,7 @@ func TestParseSelectorMatchesUpstream(t *testing.T) {
 func TestDependentFieldsMatchUpstream(t *testing.T) {
 	for _, c := range loadHelperVectors(t).Get("expressions").Items() {
 		in := c.Get("input").StrValue()
-		got := getDependentFields(in).list()
+		got := getDependentFields(nil, in).list()
 		var want []string
 		for _, d := range c.Get("deps").Items() {
 			want = append(want, d.AsString())
@@ -56,12 +56,12 @@ func TestEscapeMatchesUpstream(t *testing.T) {
 
 func TestExpressionSyntaxErrors(t *testing.T) {
 	for _, e := range []string{"datum.", "1 +", "(1", "a b", "'abc", "function(){}", "a = 1", "new Foo()", "this.x", "datum[", "1,2", "a ? b", "{a:}", "@"} {
-		if _, err := parseExprAST(e); err == nil {
+		if _, err := parseExprAST(nil, e); err == nil {
 			t.Errorf("parseExprAST(%q) should fail", e)
 		}
 	}
 	for _, e := range []string{"if(a, 1, 2)", "datum.a", "1", "/ab+c/g.test(datum.x)", "a[1][2]", "-a", "!a", "a?b:c"} {
-		if _, err := parseExprAST(e); err != nil {
+		if _, err := parseExprAST(nil, e); err != nil {
 			t.Errorf("parseExprAST(%q): %v", e, err)
 		}
 	}
@@ -75,7 +75,7 @@ func TestJSKeyOrder(t *testing.T) {
 	if got != "1,2,10,b,a,01" {
 		t.Errorf("spread key order = %s", got)
 	}
-	c := deepClone(jsval.Obj(o)).ObjValue()
+	c := deepClone(nil, jsval.Obj(o)).ObjValue()
 	if strings.Join(c.Keys(), ",") != "1,2,10,b,a,01" {
 		t.Errorf("deepClone key order = %v", c.Keys())
 	}
@@ -83,8 +83,8 @@ func TestJSKeyOrder(t *testing.T) {
 	for _, k := range []string{"x", "3", "y", "1"} {
 		m.set(k, 0)
 	}
-	if strings.Join(m.keys, ",") != "1,3,x,y" {
-		t.Errorf("omap key order = %v", m.keys)
+	if strings.Join(m.keysView(), ",") != "1,3,x,y" {
+		t.Errorf("omap key order = %v", m.keysView())
 	}
 }
 

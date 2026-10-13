@@ -43,7 +43,7 @@ func TestStratifyErrors(t *testing.T) {
 		{"cycle", []jsval.Value{row("id", "r", "p", nil), row("id", "a", "p", "b"), row("id", "b", "p", "a")}, "cycle"},
 	}
 	for _, c := range cases {
-		_, err := Stratify(c.rows, id, pid)
+		_, err := Stratify(c.rows, id, pid, nil)
 		if err == nil || err.Error() != c.want {
 			t.Errorf("%s: err = %v, want %q", c.name, err, c.want)
 		}
@@ -51,7 +51,7 @@ func TestStratifyErrors(t *testing.T) {
 }
 
 func TestStratifyEmpty(t *testing.T) {
-	tree, err := Stratify(nil, field("id"), field("p"))
+	tree, err := Stratify(nil, field("id"), field("p"), nil)
 	if err != nil || tree.Root == nil || len(tree.Root.Children) != 0 {
 		t.Fatalf("tree=%v err=%v", tree, err)
 	}
@@ -64,7 +64,7 @@ func TestNestOrderAndShape(t *testing.T) {
 	data := []jsval.Value{
 		row("k", "b", "n", 1), row("k", 10, "n", 2), row("k", "a", "n", 3), row("k", 2, "n", 4), row("k", "b", "n", 5),
 	}
-	tree, gen, err := Nest(data, []Accessor{field("k")}, true)
+	tree, gen, err := Nest(data, []Accessor{field("k")}, nil, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestNestOrderAndShape(t *testing.T) {
 
 func TestNestNoKeys(t *testing.T) {
 	data := []jsval.Value{row("a", 1), row("a", 2)}
-	tree, gen, err := Nest(data, nil, true)
+	tree, gen, err := Nest(data, nil, nil, true)
 	if err != nil || len(tree.Root.Children) != 2 || len(gen) != 1 {
 		t.Fatalf("%v %v %v", tree, gen, err)
 	}
@@ -109,7 +109,7 @@ func TestLimits(t *testing.T) {
 		}
 		rows[i] = row("id", fmt.Sprint(i), "p", p)
 	}
-	if _, err := Stratify(rows, field("id"), field("p")); !errors.Is(err, ErrTooLarge) {
+	if _, err := Stratify(rows, field("id"), field("p"), nil); !errors.Is(err, ErrTooLarge) {
 		t.Fatalf("err = %v", err)
 	}
 }
@@ -119,7 +119,7 @@ func TestCancel(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		rows = append(rows, row("id", fmt.Sprint(i), "p", "r", "v", 1))
 	}
-	tree, _ := Stratify(rows, field("id"), field("p"))
+	tree, _ := Stratify(rows, field("id"), field("p"), nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if err := LayoutPack(ctx, tree, PackParams{}); err == nil {
@@ -128,7 +128,7 @@ func TestCancel(t *testing.T) {
 }
 
 func TestBadMethods(t *testing.T) {
-	tree, _ := Stratify([]jsval.Value{row("id", "r", "p", nil)}, field("id"), field("p"))
+	tree, _ := Stratify([]jsval.Value{row("id", "r", "p", nil)}, field("id"), field("p"), nil)
 	if err := LayoutTree(context.Background(), tree, TreeParams{Method: "nope"}); err == nil {
 		t.Fatal("tree method")
 	}
@@ -150,7 +150,7 @@ func TestDegenerateNoPanic(t *testing.T) {
 			rows = append(rows, row("id", "x"+fmt.Sprint(i), "p", fmt.Sprint(i), "v", v))
 		}
 		build := func() *Tree {
-			tr, err := Stratify(rows, field("id"), field("p"))
+			tr, err := Stratify(rows, field("id"), field("p"), nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -172,7 +172,7 @@ func TestDegenerateNoPanic(t *testing.T) {
 
 func TestTreeLinksFilter(t *testing.T) {
 	rows := []jsval.Value{row("id", "r", "p", nil), row("id", "a", "p", "r"), row("id", "b", "p", "a")}
-	tree, _ := Stratify(rows, field("id"), field("p"))
+	tree, _ := Stratify(rows, field("id"), field("p"), nil)
 	links, _ := TreeLinks(tree, func(v jsval.Value) bool { return v.Get("id").AsString() != "a" })
 	if len(links) != 0 {
 		t.Fatalf("links through a filtered node must be dropped, got %d", len(links))
@@ -185,7 +185,7 @@ func TestTreeLinksFilter(t *testing.T) {
 
 func TestPath(t *testing.T) {
 	rows := []jsval.Value{row("id", "r", "p", nil), row("id", "a", "p", "r"), row("id", "b", "p", "a"), row("id", "c", "p", "r")}
-	tree, _ := Stratify(rows, field("id"), field("p"))
+	tree, _ := Stratify(rows, field("id"), field("p"), nil)
 	var ids string
 	for _, n := range tree.NodeByKey("b").Path(tree.NodeByKey("c")) {
 		ids += n.Data.Get("id").AsString()
@@ -207,7 +207,7 @@ func benchLayout(b *testing.B, kind string) {
 		p := int(seed>>33) % i
 		rows = append(rows, row("id", fmt.Sprint("n", i), "p", fmt.Sprint("n", p), "v", float64(i%17+1)))
 	}
-	tree, err := Stratify(rows, field("id"), field("p"))
+	tree, err := Stratify(rows, field("id"), field("p"), nil)
 	if err != nil {
 		b.Fatal(err)
 	}

@@ -118,9 +118,11 @@ func (p *path) arcTo(rx, ry, xrot float64, large, sweep bool, x, y float64) {
 	} else if sweep && dth < 0 {
 		dth += 2 * math.Pi
 	}
-	nseg := int(math.Ceil(math.Abs(dth) / (math.Pi / 2) * 0.999999))
-	if nseg < 1 {
-		nseg = 1
+	// Counted in float64: dth is NaN where the radii overflow, and a NaN
+	// converted to an int is implementation-defined.
+	nseg := 1
+	if nf := math.Ceil(math.Abs(dth) / (math.Pi / 2) * 0.999999); nf > 1 {
+		nseg = int(min(nf, 4))
 	}
 	delta := dth / float64(nseg)
 	t := 4.0 / 3.0 * math.Tan(delta/4)
@@ -254,8 +256,14 @@ func (n *numScanner) flag() (bool, bool) {
 }
 
 // parsePathData parses SVG path data. Per the SVG error-handling rules,
-// everything before the first error is kept.
-func parsePathData(d string, p *path) {
+// everything before the first error is kept: a path whose data turns bad
+// partway (a NaN where a coordinate should be, say) draws up to there.
+func parsePathData(d string, p *path) { parsePathDataMax(d, p, math.MaxInt) }
+
+// parsePathDataMax is parsePathData stopping once p holds more than maxPts
+// points, when it reports false: an arc becomes up to twelve points, so the
+// path data's length alone does not bound them.
+func parsePathDataMax(d string, p *path, maxPts int) bool {
 	sc := numScanner{s: d}
 	var cmd byte
 	var cx, cy float64   // current point
@@ -266,25 +274,25 @@ func parsePathData(d string, p *path) {
 	for {
 		sc.skipWS()
 		if sc.i >= len(sc.s) {
-			return
+			return true
 		}
 		c := sc.s[sc.i]
 		if isCmdLetter(c) {
 			cmd = c
 			sc.i++
 		} else if cmd == 0 || cmd == 'z' || cmd == 'Z' {
-			return
+			return true
 		} else if !(c == '-' || c == '+' || c == '.' || (c >= '0' && c <= '9')) {
-			return
+			return true
 		}
 		if first && cmd != 'M' && cmd != 'm' {
-			return
+			return true
 		}
 		first = false
 		rel := cmd >= 'a'
 		up := cmd &^ 0x20
 		if up != 'Z' && !started && up != 'M' {
-			return
+			return true
 		}
 		read := func(k int, out *[7]float64) bool {
 			for j := 0; j < k; j++ {
@@ -303,7 +311,7 @@ func parsePathData(d string, p *path) {
 		switch up {
 		case 'M':
 			if !read(2, &a) {
-				return
+				return true
 			}
 			if rel {
 				a[0] += cx
@@ -321,7 +329,7 @@ func parsePathData(d string, p *path) {
 			lastCmd = 'M'
 		case 'L':
 			if !read(2, &a) {
-				return
+				return true
 			}
 			if rel {
 				a[0] += cx
@@ -332,7 +340,7 @@ func parsePathData(d string, p *path) {
 			lastCmd = 'L'
 		case 'H':
 			if !read(1, &a) {
-				return
+				return true
 			}
 			if rel {
 				a[0] += cx
@@ -342,7 +350,7 @@ func parsePathData(d string, p *path) {
 			lastCmd = 'L'
 		case 'V':
 			if !read(1, &a) {
-				return
+				return true
 			}
 			if rel {
 				a[0] += cy
@@ -352,7 +360,7 @@ func parsePathData(d string, p *path) {
 			lastCmd = 'L'
 		case 'C':
 			if !read(6, &a) {
-				return
+				return true
 			}
 			if rel {
 				for j := 0; j < 6; j += 2 {
@@ -366,7 +374,7 @@ func parsePathData(d string, p *path) {
 			lastCmd = 'C'
 		case 'S':
 			if !read(4, &a) {
-				return
+				return true
 			}
 			if rel {
 				for j := 0; j < 4; j += 2 {
@@ -384,7 +392,7 @@ func parsePathData(d string, p *path) {
 			lastCmd = 'C'
 		case 'Q':
 			if !read(4, &a) {
-				return
+				return true
 			}
 			if rel {
 				for j := 0; j < 4; j += 2 {
@@ -398,7 +406,7 @@ func parsePathData(d string, p *path) {
 			lastCmd = 'Q'
 		case 'T':
 			if !read(2, &a) {
-				return
+				return true
 			}
 			if rel {
 				a[0] += cx
@@ -416,15 +424,15 @@ func parsePathData(d string, p *path) {
 			var rx, ry, rot float64
 			var ok bool
 			if rx, ok = sc.number(); !ok {
-				return
+				return true
 			}
 			sc.skipSep()
 			if ry, ok = sc.number(); !ok {
-				return
+				return true
 			}
 			sc.skipSep()
 			if rot, ok = sc.number(); !ok {
-				return
+				return true
 			}
 			sc.skipSep()
 			large, ok1 := sc.flag()
@@ -432,13 +440,13 @@ func parsePathData(d string, p *path) {
 			sweep, ok2 := sc.flag()
 			sc.skipSep()
 			if !ok1 || !ok2 {
-				return
+				return true
 			}
 			x, ok3 := sc.number()
 			sc.skipSep()
 			y, ok4 := sc.number()
 			if !ok3 || !ok4 {
-				return
+				return true
 			}
 			if rel {
 				x += cx
@@ -452,9 +460,12 @@ func parsePathData(d string, p *path) {
 			cx, cy = p.start.x, p.start.y
 			lastCmd = 'Z'
 		default:
-			return
+			return true
 		}
 		sc.skipSep()
+		if len(p.pts) > maxPts {
+			return false
+		}
 	}
 }
 
@@ -514,6 +525,42 @@ type polyline struct {
 type flat struct {
 	pts  []point
 	subs []polyline
+
+	// r, when set, is charged for what flattening builds and computes: the
+	// points kept (renderer.holdPoints, MaxPathSegments) and those computed
+	// (MaxPixelOps), as flattening goes, so one path cannot flatten past
+	// the limits before they are checked.
+	r *renderer
+	// cull, when set, keeps of a run of points beyond one side of the clip
+	// [cx0,cx1] x [cy0,cy1] only its first and last: what is filled is the
+	// same (see appendFlatten), and a curve that sweeps far beyond the
+	// canvas costs the points of its visible part.
+	cull               bool
+	cx0, cy0, cx1, cy1 float64
+}
+
+// setCull makes the next flattening into f drop the points that cannot
+// change a fill clipped to c (device pixels); an empty c turns culling off.
+func (f *flat) setCull(c irect) {
+	f.cull = !c.empty()
+	f.cx0, f.cy0, f.cx1, f.cy1 = float64(c.x0), float64(c.y0), float64(c.x1), float64(c.y1)
+}
+
+// side is the set of the clip's sides p lies strictly beyond (1 left,
+// 2 right, 4 above, 8 below), 0 inside it or on its edge, or NaN.
+func (f *flat) side(p point) uint8 {
+	var s uint8
+	if p.x < f.cx0 {
+		s = 1
+	} else if p.x > f.cx1 {
+		s = 2
+	}
+	if p.y < f.cy0 {
+		s |= 4
+	} else if p.y > f.cy1 {
+		s |= 8
+	}
+	return s
 }
 
 func (f *flat) reset() {
@@ -522,6 +569,22 @@ func (f *flat) reset() {
 }
 
 const maxCurveSegs = 400
+
+// curveSegs is ceil(f) clamped to [1, maxCurveSegs], clamped in float64: a
+// curve whose transformed control points overflow gives an infinite or NaN
+// f, and converting either to an int is implementation-defined (it differed
+// between amd64 and arm64, 1 or 400 segments for the same curve). An infinite
+// f takes the most segments, NaN the fewest.
+func curveSegs(f float64) int {
+	f = math.Ceil(f)
+	if !(f > 1) {
+		return 1
+	}
+	if f >= maxCurveSegs {
+		return maxCurveSegs
+	}
+	return int(f)
+}
 
 // flatten converts p, mapped through m, into polylines whose deviation from the
 // true curve is at most tol (in output units). Consecutive duplicate points
@@ -533,11 +596,33 @@ func (f *flat) flatten(p *path, m matrix, tol float64) {
 }
 
 // appendFlatten is flatten without clearing the existing subpaths.
+//
+// With culling on (setCull), a point that lies beyond the same side of the
+// clip as the two before it replaces the one before it: the three lie in a
+// half-plane outside the clip, so does the segment that now joins the first
+// and the third, and filling the polygon either way paints the same pixels.
+// The scan converter samples only rows within the clip, so edges above or
+// below it are not sampled at all; it takes a crossing left of the clip at
+// the clip's left edge and one right of it at its right edge, so of a chain
+// of edges beyond either only its signed count of crossings on each sampled
+// row matters, which the chord between its ends has too (each edge covers
+// the half-open range of rows between its ends, so the counts telescope).
+// The fill's bounding box only shrinks outside the clip. Strokes are
+// flattened unculled: their outline depends on every vertex.
 func (f *flat) appendFlatten(p *path, m matrix, tol float64) {
 	pi := 0
 	var cur point
 	subStart := -1
 	drew := false
+	cull := f.cull
+	// Each point of p gives at most one kept point (a curve's end among
+	// them), charged up front with a step of work a verb; the points a
+	// curve adds besides are counted as they are kept and charged in
+	// batches, at most a thousand and a curve's past the last charge.
+	kept, work := 0, 0
+	if f.r != nil {
+		f.r.flatCharge(len(p.pts), len(p.verbs))
+	}
 	finish := func(closed bool) {
 		if subStart < 0 {
 			return
@@ -555,8 +640,15 @@ func (f *flat) appendFlatten(p *path, m matrix, tol float64) {
 		subStart = -1
 	}
 	add := func(pt point) {
-		if n := len(f.pts); n > subStart && f.pts[n-1] == pt {
+		n := len(f.pts)
+		if n > subStart && f.pts[n-1] == pt {
 			return
+		}
+		if cull && n-subStart >= 2 {
+			if sd := f.side(pt); sd != 0 && sd&f.side(f.pts[n-1])&f.side(f.pts[n-2]) != 0 {
+				f.pts[n-1] = pt
+				return
+			}
 		}
 		f.pts = append(f.pts, pt)
 	}
@@ -603,19 +695,20 @@ func (f *flat) appendFlatten(p *path, m matrix, tol float64) {
 			ddx := cur.x - 2*c1.x + q.x
 			ddy := cur.y - 2*c1.y + q.y
 			dd := math.Hypot(ddx, ddy)
-			n := int(math.Ceil(math.Sqrt(dd / (4 * tol))))
-			if n < 1 {
-				n = 1
+			n := curveSegs(math.Sqrt(dd / (4 * tol)))
+			if f.r != nil && (kept >= 1<<10 || work >= 1<<12) {
+				f.r.flatCharge(kept, work)
+				kept, work = 0, 0
 			}
-			if n > maxCurveSegs {
-				n = maxCurveSegs
-			}
+			work += n
+			before := len(f.pts)
 			for i := 1; i < n; i++ {
 				t := float64(i) / float64(n)
 				mt := 1 - t
 				add(point{mt*mt*cur.x + 2*mt*t*c1.x + t*t*q.x, mt*mt*cur.y + 2*mt*t*c1.y + t*t*q.y})
 			}
 			add(q)
+			kept += max(len(f.pts)-before-1, 0) // the end is charged up front
 			cur = q
 		case vCubic:
 			c1 := tr(p.pts[pi])
@@ -631,13 +724,13 @@ func (f *flat) appendFlatten(p *path, m matrix, tol float64) {
 			d1 := math.Hypot(cur.x-2*c1.x+c2.x, cur.y-2*c1.y+c2.y)
 			d2 := math.Hypot(c1.x-2*c2.x+q.x, c1.y-2*c2.y+q.y)
 			dd := math.Max(d1, d2)
-			n := int(math.Ceil(math.Sqrt(0.75 * dd / tol)))
-			if n < 1 {
-				n = 1
+			n := curveSegs(math.Sqrt(0.75 * dd / tol))
+			if f.r != nil && (kept >= 1<<10 || work >= 1<<12) {
+				f.r.flatCharge(kept, work)
+				kept, work = 0, 0
 			}
-			if n > maxCurveSegs {
-				n = maxCurveSegs
-			}
+			work += n
+			before := len(f.pts)
 			for i := 1; i < n; i++ {
 				t := float64(i) / float64(n)
 				mt := 1 - t
@@ -648,6 +741,7 @@ func (f *flat) appendFlatten(p *path, m matrix, tol float64) {
 				add(point{a*cur.x + b*c1.x + c*c2.x + d*q.x, a*cur.y + b*c1.y + c*c2.y + d*q.y})
 			}
 			add(q)
+			kept += max(len(f.pts)-before-1, 0)
 			cur = q
 		case vClose:
 			if subStart >= 0 {
@@ -658,4 +752,7 @@ func (f *flat) appendFlatten(p *path, m matrix, tol float64) {
 		}
 	}
 	finish(false)
+	if f.r != nil {
+		f.r.flatCharge(kept, work)
+	}
 }

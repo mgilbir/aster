@@ -1,6 +1,7 @@
 package scale
 
 import (
+	"context"
 	"math"
 	"strings"
 
@@ -55,23 +56,26 @@ func hasSymbols(typ string) bool {
 
 // LabelValues is vega-scale's labelValues: the values to label for a scale -
 // bin edges, the visible log ticks, discretizing thresholds, or tick values.
-func LabelValues(s Scale, count TickCount) Labels {
+// Listing ticks is bounded as TickValues is.
+func LabelValues(ctx context.Context, s Scale, count TickCount) (Labels, error) {
 	if bins := binsOf(s); bins != nil {
 		vals := numsToValues(bins[:max(len(bins)-1, 0)])
 		l := Labels{Values: vals}
 		if len(bins) > 0 {
 			l.Max, l.HasMax = bins[len(bins)-1], true
 		}
-		return l
+		return l, nil
 	}
 	if s.Type() == TypeLog {
-		return Labels{Values: TickLogValues(s, count)}
+		_, vals, err := tickLog(ctx, s, count, true)
+		return Labels{Values: vals}, err
 	}
 	if hasSymbols(s.Type()) {
 		th, _ := scaleThresholds(s)
-		return thresholdValues(th)
+		return thresholdValues(th), nil
 	}
-	return Labels{Values: TickValues(s, count)}
+	vals, err := TickValues(ctx, s, count)
+	return Labels{Values: vals}, err
 }
 
 // thresholdFormat is vega-scale's thresholdFormat: a number format sized to the
@@ -97,12 +101,8 @@ func thresholdFormat(loc *format.Locale, s Scale, specifier jsval.Value) (Format
 	for i := 1; i < n; i++ {
 		d = math.Min(d, vals[i]-vals[i-1])
 	}
-	spec, err := spanSpecifier(specifier)
-	if err != nil {
-		return nil, err
-	}
 	// tickCount = 3 ticks times 10 for increased resolution
-	f, err := loc.FormatSpan(0, d, 3*10, spec)
+	f, err := loc.FormatSpan(0, d, 3*10, spanSpecifier(specifier))
 	if err != nil {
 		return nil, err
 	}
@@ -111,19 +111,20 @@ func thresholdFormat(loc *format.Locale, s Scale, specifier jsval.Value) (Format
 
 // LabelFormatter formats one label. index and labels give its position in the
 // list being formatted (range formats look at the next value and at the
-// list's Max). ok is false where upstream returns null (no label).
-type LabelFormatter func(value jsval.Value, index int, labels Labels) (text jsval.Value, ok bool)
+// list's Max). It answers null where upstream does (no label).
+type LabelFormatter func(value jsval.Value, index int, labels Labels) jsval.Value
 
 // LabelFormat is vega-scale's labelFormat(locale, scale, count, type,
 // specifier, formatType, noSkip). legendType is SymbolLegend, DiscreteLegend or
-// "" (axes and gradient legends).
-func LabelFormat(loc *format.Locale, s Scale, count TickCount, legendType string, specifier jsval.Value, formatType string, noSkip bool) (LabelFormatter, error) {
+// "" (axes and gradient legends). ctx bounds the ticks a log scale's label
+// filter lists.
+func LabelFormat(ctx context.Context, loc *format.Locale, s Scale, count TickCount, legendType string, specifier jsval.Value, formatType string, noSkip bool) (LabelFormatter, error) {
 	var f Format
 	var err error
 	if (s.Type() == TypeQuantile || s.Type() == TypeQuantize) && formatType != TypeTime && formatType != TypeUTC {
 		f, err = thresholdFormat(loc, s, specifier)
 	} else {
-		f, err = TickFormat(loc, s, count, specifier, formatType, noSkip)
+		f, err = TickFormat(ctx, loc, s, count, specifier, formatType, noSkip)
 	}
 	if err != nil {
 		return nil, err
@@ -133,19 +134,25 @@ func LabelFormat(loc *format.Locale, s Scale, count TickCount, legendType string
 	case legendType == SymbolLegend && isRange:
 		return formatRange(f), nil
 	case legendType == DiscreteLegend:
-		return func(v jsval.Value, i int, _ Labels) (jsval.Value, bool) {
+		return func(v jsval.Value, i int, _ Labels) jsval.Value {
 			if i == 0 {
-				return jsval.Null, false
+				return jsval.Null
 			}
-			return f(v), true
+			return f(v)
 		}, nil
 	}
-	return func(v jsval.Value, _ int, _ Labels) (jsval.Value, bool) { return f(v), true }, nil
+	return func(v jsval.Value, _ int, _ Labels) jsval.Value { return f(v) }, nil
 }
 
-// formatRange labels a bin as "lo – hi", "< hi" (no lower bound) or "≥ lo".
+// formatRange labels a bin as "lo – hi", "< hi" (no lower bound) or "≥ lo":
+//
+//	limit = get(array[index + 1], get(array.max, +Infinity))
+//	lo && hi ? lo + ' – ' + hi : hi ? '< ' + hi : '≥ ' + lo
+//
+// where lo and hi are null for a value that is not a finite number, so a bin
+// with neither reads "≥ null".
 func formatRange(f Format) LabelFormatter {
-	return func(value jsval.Value, index int, labels Labels) (jsval.Value, bool) {
+	return func(value jsval.Value, index int, labels Labels) jsval.Value {
 		var limit jsval.Value
 		switch {
 		case index+1 < len(labels.Values) && !labels.Values[index+1].IsNullish():
@@ -157,22 +164,21 @@ func formatRange(f Format) LabelFormatter {
 		}
 		lo, hi := formatFinite(value, f), formatFinite(limit, f)
 		switch {
-		case lo != "" && hi != "":
-			return jsval.Str(lo + " – " + hi), true
-		case hi != "":
-			return jsval.Str("< " + hi), true
+		case lo.IsTruthy() && hi.IsTruthy():
+			return jsval.Str(lo.AsString() + " – " + hi.AsString())
+		case hi.IsTruthy():
+			return jsval.Str("< " + hi.AsString())
 		}
-		return jsval.Str("≥ " + lo), true
+		return jsval.Str("≥ " + lo.AsString())
 	}
 }
 
-// formatFinite is `Number.isFinite(value) ? format(value) : null`, with null and
-// an empty string both reading as "no label" (they are equally falsy upstream).
-func formatFinite(v jsval.Value, f Format) string {
+// formatFinite is `Number.isFinite(value) ? format(value) : null`.
+func formatFinite(v jsval.Value, f Format) jsval.Value {
 	if !v.IsNum() || math.IsInf(v.NumValue(), 0) || math.IsNaN(v.NumValue()) {
-		return ""
+		return jsval.Null
 	}
-	return f(v).AsString()
+	return f(v)
 }
 
 // LabelFraction is vega-scale's labelFraction: the position of a value within
@@ -202,7 +208,7 @@ func LabelFraction(s Scale) func(value float64) float64 {
 // scale's domain in text. Abbreviated time specifiers are spelled out
 // (%a -> %A, %b -> %B) to read better for screen readers, and time scales with
 // no specifier get a full date-time format.
-func captionFormat(loc *format.Locale, s Scale, specifier jsval.Value, formatType string) (Format, error) {
+func captionFormat(ctx context.Context, loc *format.Locale, s Scale, specifier jsval.Value, formatType string) (Format, error) {
 	typ := formatType
 	if typ == "" {
 		typ = s.Type()
@@ -216,14 +222,11 @@ func captionFormat(loc *format.Locale, s Scale, specifier jsval.Value, formatTyp
 	case !specifier.IsTruthy() && typ == TypeUTC:
 		return timeFormatOf(loc, jsval.Str("%A, %d %B %Y, %X UTC"), true)
 	}
-	lf, err := LabelFormat(loc, s, Count(5), "", specifier, formatType, true)
+	lf, err := LabelFormat(ctx, loc, s, Count(5), "", specifier, formatType, true)
 	if err != nil {
 		return nil, err
 	}
-	return func(v jsval.Value) jsval.Value {
-		out, _ := lf(v, 0, Labels{})
-		return out
-	}, nil
+	return func(v jsval.Value) jsval.Value { return lf(v, 0, Labels{}) }, nil
 }
 
 // CaptionOptions are the options of vega-scale's domainCaption.
@@ -240,13 +243,13 @@ type CaptionOptions struct {
 // DomainCaption is vega-scale's domainCaption: a one-sentence description of a
 // scale's domain for accessibility ("5 values: a, b, ...", "values from 0 to
 // 10", "3 boundaries: ...").
-func DomainCaption(loc *format.Locale, s Scale, opt CaptionOptions) (string, error) {
+func DomainCaption(ctx context.Context, loc *format.Locale, s Scale, opt CaptionOptions) (string, error) {
 	maxlen := 7.0
 	if opt.MaxLen != 0 && opt.MaxLen == opt.MaxLen {
 		maxlen = opt.MaxLen
 	}
 	maxlen = math.Max(3, maxlen)
-	fmtv, err := captionFormat(loc, s, opt.Format, opt.FormatType)
+	fmtv, err := captionFormat(ctx, loc, s, opt.Format, opt.FormatType)
 	if err != nil {
 		return "", err
 	}
@@ -266,7 +269,11 @@ func DomainCaption(loc *format.Locale, s Scale, opt CaptionOptions) (string, err
 	}
 	switch {
 	case IsDiscretizing(s.Type()):
-		v := LabelValues(s, TickCount{}).Values
+		l, err := LabelValues(ctx, s, TickCount{})
+		if err != nil {
+			return "", err
+		}
+		v := l.Values
 		if len(v) > 0 {
 			v = v[1:]
 		}

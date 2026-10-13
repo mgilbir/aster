@@ -7,10 +7,14 @@ import (
 )
 
 // shallowCopyTuple is vega-dataflow's derive: a new tuple holding every field
-// of t in order. A non-object yields an empty tuple.
+// of t in order. A non-object yields an empty tuple. The copy is a tuple of
+// its own (derive ingests it, with the next id), so it does not keep t's id:
+// the dataflow gives it one, and counts it as a row the transform made.
 func shallowCopyTuple(t jsval.Value) *jsval.Object {
 	if o := t.ObjValue(); o != nil {
-		return o.Clone()
+		c := o.Clone()
+		c.SetTupleID(0)
+		return c
 	}
 	return jsval.NewObject(0)
 }
@@ -32,7 +36,7 @@ func Project(ctx context.Context, data []jsval.Value, p ProjectParams) ([]jsval.
 	out := make([]jsval.Value, len(data))
 	names := make([]string, len(p.Fields))
 	for i, f := range p.Fields {
-		names[i] = f.Name
+		names[i] = f.Key()
 		if i < len(p.As) && p.As[i] != "" {
 			names[i] = p.As[i]
 		}

@@ -1,10 +1,15 @@
 package vegalite
 
 import (
+	"errors"
 	"math"
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
+
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 
 	"github.com/mgilbir/aster/internal/jsval"
 )
@@ -111,7 +116,15 @@ func hasProperty(v Value, key string) bool {
 }
 
 func isSignalRef(v Value) bool { return hasProperty(v, "signal") }
-func isExprRef(v Value) bool   { return hasProperty(v, "expr") }
+
+// isExprRef is hasProperty(o, 'expr') in 6.4; 5.8 tests !!o?.expr, so
+// an expr that is falsy is not one.
+func isExprRef(cc *compileCtx, v Value) bool {
+	if cc != nil && cc.v5 {
+		return v.IsObj() && v.Get("expr").IsTruthy()
+	}
+	return hasProperty(v, "expr")
+}
 
 // cloneObj is `{...o}`.
 func cloneObj(o *Object) *Object {
@@ -122,27 +135,52 @@ func cloneObj(o *Object) *Object {
 }
 
 // spread copies the keys of src (an object; anything else is ignored) into dst,
-// overwriting in place like JavaScript's spread.
+// overwriting in place like JavaScript's spread. A new array-index key belongs
+// among dst's leading index keys; rather than moving the keys after it on
+// every insert (cubic over an object's keys, C4), the keys are appended and
+// put in JavaScript's order once at the end, which gives the same order (see
+// jsOrderKeys). It is linear in its input, so it needs no meter.
 func spread(dst *Object, srcs ...Value) *Object {
+	reorder := false
+	put := func(k string, v Value) {
+		if !reorder && len(k) > 0 && k[0] >= '0' && k[0] <= '9' && !dst.Has(k) {
+			if n, ok := arrayIndex(k); ok && !appendKeepsJSOrder(dst, n) {
+				reorder = true
+			}
+		}
+		dst.Set(k, v)
+	}
 	for _, s := range srcs {
 		if s.IsStr() {
-			for i, u := range utf16Len(s.StrValue()) {
-				jsSet(dst, strconv.Itoa(i), jsval.Str(string(rune(u))))
+			i := 0
+			for _, r := range s.StrValue() {
+				if r >= 0x10000 {
+					r -= 0x10000
+					put(strconv.Itoa(i), jsval.Str(string(rune(0xD800+(r>>10)))))
+					put(strconv.Itoa(i+1), jsval.Str(string(rune(0xDC00+(r&0x3FF)))))
+					i += 2
+					continue
+				}
+				put(strconv.Itoa(i), jsval.Str(string(r)))
+				i++
 			}
 			continue
 		}
 		if s.IsArr() {
 			for i, it := range s.Items() {
-				jsSet(dst, strconv.Itoa(i), it)
+				put(strconv.Itoa(i), it)
 			}
 			continue
 		}
 		if s.IsObj() {
 			so := s.ObjValue()
 			for i := 0; i < so.Len(); i++ {
-				jsSet(dst, so.KeyAt(i), so.ValueAt(i))
+				put(so.KeyAt(i), so.ValueAt(i))
 			}
 		}
+	}
+	if reorder {
+		jsOrderKeys(nil, dst)
 	}
 	return dst
 }
@@ -190,7 +228,7 @@ func stringifyJS(v Value) string {
 	if v.IsUndefined() {
 		return "undefined"
 	}
-	return stringify(v)
+	return stringify(nil, v)
 }
 
 // pick is upstream's pick: only the own defined-or-not keys listed.
@@ -307,21 +345,30 @@ func deepEqual(a, b Value) bool {
 	return jsval.Equal(a, b)
 }
 
-// deepClone is structuredClone for JSON-like values.
-func deepClone(v Value) Value {
+// deepClone is structuredClone for JSON-like values. The clone's keys are in
+// JavaScript's order (array-index keys first, ascending), which a parsed
+// document's need not be: they are ordered once per object.
+func deepClone(cc *compileCtx, v Value) Value {
+	cc.work(1)
 	switch v.Kind() {
 	case jsval.KindArr:
 		items := v.Items()
 		out := make([]Value, len(items))
 		for i, it := range items {
-			out[i] = deepClone(it)
+			out[i] = deepClone(cc, it)
 		}
 		return jsval.Arr(out)
 	case jsval.KindObj:
 		o := v.ObjValue()
 		c := jsval.NewObject(o.Len())
+		digit := false // a key that may be an array index
 		for i := 0; i < o.Len(); i++ {
-			jsSet(c, o.KeyAt(i), deepClone(o.ValueAt(i)))
+			k := o.KeyAt(i)
+			digit = digit || (len(k) > 0 && k[0] >= '0' && k[0] <= '9')
+			c.Set(k, deepClone(cc, o.ValueAt(i)))
+		}
+		if digit {
+			jsOrderKeys(cc, c)
 		}
 		return jsval.Obj(c)
 	}
@@ -330,13 +377,24 @@ func deepClone(v Value) Value {
 
 // stringify is upstream's util.stringify: JSON with sorted keys, used as a
 // hash key for structural comparison.
-func stringify(v Value) string {
+func stringify(cc *compileCtx, v Value) string {
 	var b strings.Builder
-	stringifyTo(&b, v)
+	stringifyTo(cc, &b, v)
 	return b.String()
 }
 
-func stringifyTo(b *strings.Builder, v Value) bool {
+// stringifyText is `${stringify(v)}`: stringify's text, or "undefined"
+// for a value JSON has no text for.
+func stringifyText(cc *compileCtx, v Value) string {
+	var b strings.Builder
+	if !stringifyTo(cc, &b, v) {
+		return "undefined"
+	}
+	return b.String()
+}
+
+func stringifyTo(cc *compileCtx, b *strings.Builder, v Value) bool {
+	cc.work(1)
 	switch v.Kind() {
 	case jsval.KindUndefined:
 		return false
@@ -355,7 +413,7 @@ func stringifyTo(b *strings.Builder, v Value) bool {
 			if i > 0 {
 				b.WriteByte(',')
 			}
-			if !stringifyTo(b, it) {
+			if !stringifyTo(cc, b, it) {
 				b.WriteString("null")
 			}
 		}
@@ -381,7 +439,7 @@ func stringifyTo(b *strings.Builder, v Value) bool {
 			first = false
 			b.Write(jsval.AppendJSON(nil, jsval.Str(k)))
 			b.WriteByte(':')
-			stringifyTo(b, x)
+			stringifyTo(cc, b, x)
 		}
 		b.WriteByte('}')
 	default:
@@ -397,7 +455,7 @@ func stringValue(v Value) string { return jsval.StringValue(v) }
 func jsonString(s string) string { return stringValue(jsval.Str(s)) }
 
 // hash is upstream's hash(): short strings are their own hash.
-func hashOf(v Value) string {
+func hashOf(cc *compileCtx, v Value) string {
 	if v.IsNum() {
 		return jsval.JSNumberString(v.NumValue())
 	}
@@ -405,16 +463,38 @@ func hashOf(v Value) string {
 	if v.IsStr() {
 		s = v.StrValue()
 	} else {
-		s = stringify(v)
+		s = stringify(cc, v)
 	}
-	if len(utf16Len(s)) < 250 {
+	// The code units are walked in place (as utf16Len would produce them),
+	// so a long key costs no copy and the walk is charged.
+	if len(s) < 250 || utf16Count(cc, s) < 250 {
 		return s
 	}
 	var h int32
-	for _, u := range utf16Len(s) {
-		h = (h << 5) - h + int32(u)
+	for _, r := range s {
+		cc.work(1)
+		if r >= 0x10000 {
+			r -= 0x10000
+			h = (h << 5) - h + int32(uint16(0xD800+(r>>10)))
+			h = (h << 5) - h + int32(uint16(0xDC00+(r&0x3FF)))
+		} else {
+			h = (h << 5) - h + int32(uint16(r))
+		}
 	}
 	return strconv.Itoa(int(h))
+}
+
+// utf16Count is len(utf16Len(s)) without building the code units.
+func utf16Count(cc *compileCtx, s string) int {
+	n := 0
+	for _, r := range s {
+		cc.work(1)
+		n++
+		if r >= 0x10000 {
+			n++
+		}
+	}
+	return n
 }
 
 func utf16Len(s string) []uint16 {
@@ -442,7 +522,18 @@ func contains(list []string, s string) bool {
 // varName is upstream's varName: non-word characters become '_' and a leading
 // digit is prefixed.
 func varName(s string) string {
+	// A name of identifier characters only, not led by a digit, is its own
+	// variable name (most are): return it as it is, allocating nothing.
+	clean := len(s) == 0 || s[0] < '0' || s[0] > '9'
+	for i := 0; clean && i < len(s); i++ {
+		c := s[i]
+		clean = c == '_' || (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+	}
+	if clean {
+		return s
+	}
 	var b strings.Builder
+	b.Grow(len(s) + 1)
 	for _, r := range s {
 		if r < 128 && (r == '_' || (r >= '0' && r <= '9') || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')) {
 			b.WriteRune(r)
@@ -459,11 +550,38 @@ func varName(s string) string {
 	return out
 }
 
+// titleCase is upstream's titleCase, s.charAt(0).toUpperCase() + s.substr(1):
+// the first UTF-16 unit, upper-cased with JavaScript's full case mapping
+// (ß becomes SS). A first character outside the BMP is a lone surrogate to
+// charAt, which has no upper case, so the string is unchanged.
 func titleCase(s string) string {
-	if s == "" {
+	r, n := utf8.DecodeRuneInString(s)
+	if n == 0 || r >= 0x10000 {
 		return s
 	}
-	return strings.ToUpper(s[:1]) + s[1:]
+	return jsUpperCase(s[:n]) + s[n:]
+}
+
+// titleCaseV is titleCase of a spec value, which calls s.charAt.
+func titleCaseV(v Value) string {
+	switch {
+	case v.IsStr():
+		return titleCase(v.StrValue())
+	case v.IsNullish():
+		throw("Cannot read properties of %s (reading 'charAt')", nullishName(v))
+	}
+	throw("s.charAt is not a function")
+	return ""
+}
+
+// jsUpperCase is String.prototype.toUpperCase: full Unicode case mapping.
+func jsUpperCase(s string) string {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= utf8.RuneSelf {
+			return cases.Upper(language.Und).String(s)
+		}
+	}
+	return strings.ToUpper(s)
 }
 
 // appendVals is Array.prototype.concat over Value slices.
@@ -485,9 +603,14 @@ func uniqueStrings(in []string) []string {
 	return out
 }
 
-func isNumericString(s string) bool {
-	f := jsval.StringToNumber(s)
-	return !math.IsNaN(f) && !math.IsNaN(parseFloatPrefix(s))
+// isNumericV is upstream's isNumeric of any value: a number, or a value
+// that isNaN (ToNumber) and parseFloat (of its text) both read as a number,
+// so [[1]] and "1" are numeric and true and null are not.
+func isNumericV(v Value) bool {
+	if v.IsNum() {
+		return true
+	}
+	return !math.IsNaN(jsval.ToNumber(v)) && !math.IsNaN(parseFloatPrefix(v.AsString()))
 }
 
 func parseFloatPrefix(s string) float64 {
@@ -531,8 +654,10 @@ done:
 		}
 		return math.NaN()
 	}
+	// Out of range, ParseFloat answers ±Inf (or 0) with an error; parseFloat
+	// answers the same values ("1e999" is Infinity).
 	f, err := strconv.ParseFloat(s[:end], 64)
-	if err != nil {
+	if err != nil && !errors.Is(err, strconv.ErrRange) {
 		return math.NaN()
 	}
 	return f
@@ -563,8 +688,21 @@ func arrayIndex(k string) (uint32, bool) {
 }
 
 // jsSet is Object.Set with JavaScript's property order: a new array-index key
-// is placed among the leading index keys in ascending order.
-func jsSet(o *Object, k string, v Value) {
+// is placed among the leading index keys in ascending order. o must be in
+// JavaScript's order already (every object the compiler builds with jsSet,
+// spread or deepClone is), so the place is found by binary search and only
+// the keys after it move: building an object key by key in ascending or
+// arbitrary non-index order costs O(log n) a key. A builder that inserts many
+// index keys out of order appends them with Set and calls jsOrderKeys once
+// instead (C4).
+//
+// It is JavaScript's assignment: to "__proto__" the object does not hold as
+// its own, it replaces the object's prototype or does nothing (jsAssign).
+func jsSet(cc *compileCtx, o *Object, k string, v Value) {
+	if k == "__proto__" && !o.Has(k) && cc != nil {
+		jsAssign(cc.realm(), o, k, v)
+		return
+	}
 	if len(k) == 0 || k[0] < '0' || k[0] > '9' || o.Has(k) {
 		o.Set(k, v)
 		return
@@ -575,28 +713,91 @@ func jsSet(o *Object, k string, v Value) {
 		return
 	}
 	keys := o.Keys()
-	pos := len(keys)
-	for i, e := range keys {
-		if m, isIdx := arrayIndex(e); !isIdx || m > n {
-			pos = i
-			break
-		}
-	}
+	pos := sort.Search(len(keys), func(i int) bool {
+		m, isIdx := arrayIndex(keys[i])
+		return !isIdx || m > n
+	})
 	if pos == len(keys) {
 		o.Set(k, v)
 		return
 	}
-	type kv struct {
-		k string
-		v Value
-	}
-	var tail []kv
-	for _, e := range append([]string(nil), keys[pos:]...) {
-		tail = append(tail, kv{e, o.Lookup(e)})
-		o.Delete(e)
+	// Remove the tail from the end (each removal of the last key is O(1)),
+	// then put the new key and the tail back.
+	cc.work(int64(len(keys) - pos))
+	tail := make([]jsEntry, len(keys)-pos)
+	for i := len(keys) - 1; i >= pos; i-- {
+		tail[i-pos] = jsEntry{k: keys[i], v: o.ValueAt(i)}
+		o.Delete(keys[i])
 	}
 	o.Set(k, v)
 	for _, e := range tail {
+		o.Set(e.k, e.v)
+	}
+}
+
+// appendKeepsJSOrder reports whether appending a new array-index key n to o,
+// an object in JavaScript's order, leaves it in that order: o is empty, or
+// its last key is an index below n (and so, by the order, all of them are).
+func appendKeepsJSOrder(o *Object, n uint32) bool {
+	if o.Len() == 0 {
+		return true
+	}
+	m, ok := arrayIndex(o.KeyAt(o.Len() - 1))
+	return ok && m < n
+}
+
+// jsOrderKeys puts o's keys in JavaScript's own-key order: array-index keys
+// first, ascending, then the others in their present order. That is the
+// order JavaScript gives an object whatever order its keys were added in, so
+// adding keys with Set and ordering once is the same as adding each with
+// jsSet, in O(n log n) instead of O(n) a key. An object already in order (any
+// without index keys) costs one scan.
+func jsOrderKeys(cc *compileCtx, o *Object) {
+	n := o.Len()
+	ordered, seenOther, last := true, false, int64(-1)
+	for i := 0; i < n; i++ {
+		k := o.KeyAt(i)
+		if len(k) == 0 || k[0] < '0' || k[0] > '9' {
+			seenOther = true
+			continue
+		}
+		m, ok := arrayIndex(k)
+		if !ok {
+			seenOther = true
+			continue
+		}
+		if seenOther || int64(m) <= last {
+			ordered = false
+			break
+		}
+		last = int64(m)
+	}
+	if ordered {
+		return
+	}
+	cc.work(int64(n))
+	type idxEntry struct {
+		n uint32
+		jsEntry
+	}
+	var idx []idxEntry
+	rest := make([]jsEntry, 0, n)
+	for i := 0; i < n; i++ {
+		k, v := o.KeyAt(i), o.ValueAt(i)
+		if m, ok := arrayIndex(k); ok {
+			idx = append(idx, idxEntry{m, jsEntry{k: k, v: v}})
+		} else {
+			rest = append(rest, jsEntry{k: k, v: v})
+		}
+	}
+	sort.Slice(idx, func(i, j int) bool { return idx[i].n < idx[j].n })
+	for i := n - 1; i >= 0; i-- {
+		o.Delete(o.KeyAt(i))
+	}
+	for _, e := range idx {
+		o.Set(e.k, e.v)
+	}
+	for _, e := range rest {
 		o.Set(e.k, e.v)
 	}
 }
@@ -635,4 +836,66 @@ func jsGreater(a, b Value) bool {
 		return len(x) > len(y)
 	}
 	return jsval.ToNumber(a) > jsval.ToNumber(b)
+}
+
+// strIs reports whether v is the string s.
+func strIs(v Value, s string) bool { return v.IsStr() && v.StrValue() == s }
+
+// jsIndexOrGet is v[key] for an object or an array (whose keys are indices).
+func jsIndexOrGet(v Value, key string) Value {
+	if v.IsArr() {
+		i, err := strconv.Atoi(key)
+		if err != nil {
+			return undef
+		}
+		return v.Index(i)
+	}
+	return v.Get(key)
+}
+
+// jsReplaceAll is upstream's util.replaceAll: string.replace with a global
+// regular expression of find taken literally, so the replacement's $
+// patterns apply: $$ is "$", $& the match, $` the text before it and $' the
+// text after it (there are no groups, so $1 and $<name> stay as they are).
+func jsReplaceAll(s, find, repl string) string {
+	if find == "" || !strings.Contains(s, find) {
+		return s
+	}
+	if !strings.Contains(repl, "$") {
+		return strings.ReplaceAll(s, find, repl)
+	}
+	var b strings.Builder
+	rest := 0
+	for {
+		i := strings.Index(s[rest:], find)
+		if i < 0 {
+			break
+		}
+		start := rest + i
+		end := start + len(find)
+		b.WriteString(s[rest:start])
+		for j := 0; j < len(repl); j++ {
+			if repl[j] != '$' || j+1 == len(repl) {
+				b.WriteByte(repl[j])
+				continue
+			}
+			switch repl[j+1] {
+			case '$':
+				b.WriteByte('$')
+			case '&':
+				b.WriteString(find)
+			case '`':
+				b.WriteString(s[:start])
+			case '\'':
+				b.WriteString(s[end:])
+			default:
+				b.WriteByte('$')
+				continue
+			}
+			j++
+		}
+		rest = end
+	}
+	b.WriteString(s[rest:])
+	return b.String()
 }

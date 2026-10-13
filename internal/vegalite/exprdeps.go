@@ -26,6 +26,8 @@ type exprNode struct {
 }
 
 type exprParser struct {
+	// cc is charged a step per token, so a long expression stops at the deadline.
+	cc    *compileCtx
 	src   string
 	pos   int
 	tok   string
@@ -34,14 +36,22 @@ type exprParser struct {
 	depth int
 }
 
-const maxExprDepth = 200
-
-// maxExprNodeDepth bounds the depth of the syntax tree. maxExprDepth bounds
-// the parser's own recursion, but a left-associative chain (a+b+c+..., a.b.c,
-// f()()()) is built in a loop and nests one level per operator in the tree,
-// which exprNode.visit and exprNames then walk recursively. It matches
-// expr.MaxDepth, which Vega's parser enforces on the same text later.
-const maxExprNodeDepth = 512
+// MaxExprDepth bounds how deeply an expression nests: the parser's own
+// recursion (parentheses, calls, array and object literals, unary operators,
+// a conditional's consequent) and the depth of the syntax tree it builds,
+// which exprNode.visit and exprNames walk recursively. It is the same bound
+// as internal/expr's MaxDepth (TestExprDepthMatchesVega checks), which Vega's
+// parser enforces on the same text later.
+//
+// Chains of binary operators (a || b || ...) and of conditionals in the
+// alternate (a ? 0 : b ? 1 : ..., which an explicit sort array compiles to)
+// are not nesting here: they are parsed in a loop into one node whose
+// operands are its children in source order, so their length is bounded by
+// the expression's, not by this depth (C10). Only the fields an expression
+// reads are taken from the tree, in the order a walk of upstream's tree
+// meets them, which is source order for the operands of a chain whatever
+// their precedence.
+const MaxExprDepth = 512
 
 // mk finishes a node that has children: it records its depth and fails when
 // the tree is too deep.
@@ -53,7 +63,7 @@ func (p *exprParser) mk(n *exprNode) *exprNode {
 		}
 	}
 	n.depth = d + 1
-	if n.depth > maxExprNodeDepth {
+	if n.depth > MaxExprDepth {
 		p.failLimit("expression too deeply nested")
 	}
 	return n
@@ -76,7 +86,9 @@ func (e exprSyntaxError) err() error {
 }
 
 func (p *exprParser) skipSpace() {
+	cc := p.cc
 	for p.pos < len(p.src) {
+		cc.work(1)
 		r, w := utf8.DecodeRuneInString(p.src[p.pos:])
 		if r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == '\v' || r == '\f' || r == 0xA0 || r == 0xFEFF || r == 0x2028 || r == 0x2029 || unicode.Is(unicode.Zs, r) {
 			p.pos += w
@@ -96,6 +108,8 @@ func isIDPart(r rune) bool {
 
 // next advances to the next token. regexOK says a '/' starts a regex literal.
 func (p *exprParser) next(regexOK bool) {
+	cc := p.cc
+	cc.work(1)
 	p.skipSpace()
 	if p.pos >= len(p.src) {
 		p.kind, p.tok, p.val = "eof", "", ""
@@ -107,6 +121,7 @@ func (p *exprParser) next(regexOK bool) {
 		start := p.pos
 		p.pos += w
 		for p.pos < len(p.src) {
+			cc.work(1)
 			r, w2 := utf8.DecodeRuneInString(p.src[p.pos:])
 			if !isIDPart(r) {
 				break
@@ -120,15 +135,18 @@ func (p *exprParser) next(regexOK bool) {
 		if c == '0' && p.pos+1 < len(p.src) && (p.src[p.pos+1] == 'x' || p.src[p.pos+1] == 'X') {
 			p.pos += 2
 			for p.pos < len(p.src) && strings.ContainsRune("0123456789abcdefABCDEF", rune(p.src[p.pos])) {
+				cc.work(1)
 				p.pos++
 			}
 		} else {
 			for p.pos < len(p.src) && p.src[p.pos] >= '0' && p.src[p.pos] <= '9' {
+				cc.work(1)
 				p.pos++
 			}
 			if p.pos < len(p.src) && p.src[p.pos] == '.' {
 				p.pos++
 				for p.pos < len(p.src) && p.src[p.pos] >= '0' && p.src[p.pos] <= '9' {
+					cc.work(1)
 					p.pos++
 				}
 			}
@@ -139,6 +157,7 @@ func (p *exprParser) next(regexOK bool) {
 				}
 				if q < len(p.src) && p.src[q] >= '0' && p.src[q] <= '9' {
 					for q < len(p.src) && p.src[q] >= '0' && p.src[q] <= '9' {
+						cc.work(1)
 						q++
 					}
 					p.pos = q
@@ -158,6 +177,7 @@ func (p *exprParser) next(regexOK bool) {
 		p.pos += w
 		var sb strings.Builder
 		for {
+			cc.work(1)
 			if p.pos >= len(p.src) {
 				p.fail("Unexpected token ILLEGAL")
 			}
@@ -217,6 +237,7 @@ func (p *exprParser) next(regexOK bool) {
 		p.pos++
 		inClass := false
 		for {
+			cc.work(1)
 			if p.pos >= len(p.src) {
 				p.fail("Invalid regular expression: missing /")
 			}
@@ -235,6 +256,7 @@ func (p *exprParser) next(regexOK bool) {
 			}
 		}
 		for p.pos < len(p.src) {
+			cc.work(1)
 			r, w2 := utf8.DecodeRuneInString(p.src[p.pos:])
 			if !isIDPart(r) {
 				break
@@ -285,7 +307,7 @@ var exprDisabled = strSet([]string{
 	"continue", "debugger", "interface", "protected", "instanceof", "implements",
 })
 
-func parseExprAST(src string) (root *exprNode, err error) {
+func parseExprAST(cc *compileCtx, src string) (root *exprNode, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			if se, ok := r.(exprSyntaxError); ok {
@@ -295,7 +317,7 @@ func parseExprAST(src string) (root *exprNode, err error) {
 			panic(r)
 		}
 	}()
-	p := &exprParser{src: src}
+	p := &exprParser{cc: cc, src: src}
 	p.next(true)
 	root = p.parseConditional()
 	if p.kind != "eof" {
@@ -306,19 +328,25 @@ func parseExprAST(src string) (root *exprNode, err error) {
 
 func (p *exprParser) parseConditional() *exprNode {
 	p.depth++
-	if p.depth > maxExprDepth {
+	if p.depth > MaxExprDepth {
 		p.failLimit("expression too deeply nested")
 	}
 	defer func() { p.depth-- }()
-	test := p.parseBinary(0)
-	if p.isP("?") {
-		p.next(true)
-		cons := p.parseConditional()
-		p.expect(":")
-		alt := p.parseConditional()
-		return p.mk(&exprNode{kind: "Conditional", kids: []*exprNode{test, cons, alt}})
+	test := p.parseBinary()
+	if !p.isP("?") {
+		return test
 	}
-	return test
+	// a ? b : c ? d : e is right-associative: the alternate of each is the
+	// next conditional. The chain is one node, [a, b, c, d, e].
+	kids := []*exprNode{test}
+	for p.isP("?") {
+		p.cc.work(1)
+		p.next(true)
+		kids = append(kids, p.parseConditional())
+		p.expect(":")
+		kids = append(kids, p.parseBinary())
+	}
+	return p.mk(&exprNode{kind: "Conditional", kids: kids})
 }
 
 var binPrec = map[string]int{
@@ -329,23 +357,32 @@ var binPrec = map[string]int{
 	"+": 9, "-": 9, "*": 10, "/": 10, "%": 10,
 }
 
-func (p *exprParser) parseBinary(minPrec int) *exprNode {
-	left := p.parseUnary()
+// parseBinary parses operands joined by binary operators into one node of
+// the operands in source order: the order a walk of the precedence tree
+// meets them, and every operator sequence the precedence grammar accepts.
+func (p *exprParser) parseBinary() *exprNode {
+	first := p.parseUnary()
+	if p.kind != "punct" {
+		return first
+	}
+	if _, ok := binPrec[p.tok]; !ok {
+		return first
+	}
+	kids := []*exprNode{first}
 	for p.kind == "punct" {
-		prec, ok := binPrec[p.tok]
-		if !ok || prec <= minPrec {
+		if _, ok := binPrec[p.tok]; !ok {
 			break
 		}
+		p.cc.work(1)
 		p.next(true)
-		right := p.parseBinary(prec)
-		left = p.mk(&exprNode{kind: "Binary", kids: []*exprNode{left, right}})
+		kids = append(kids, p.parseUnary())
 	}
-	return left
+	return p.mk(&exprNode{kind: "Binary", kids: kids})
 }
 
 func (p *exprParser) parseUnary() *exprNode {
 	p.depth++
-	if p.depth > maxExprDepth {
+	if p.depth > MaxExprDepth {
 		p.failLimit("expression too deeply nested")
 	}
 	defer func() { p.depth-- }()
@@ -533,13 +570,14 @@ func startsWithDatum(n *exprNode) bool {
 }
 
 // getDependentFields lists the datum fields an expression reads.
-func getDependentFields(expression string) *sset {
-	ast, err := parseExprAST(expression)
+func getDependentFields(cc *compileCtx, expression string) *sset {
+	ast, err := parseExprAST(cc, expression)
 	if err != nil {
 		panic(err)
 	}
 	deps := newSset()
 	ast.visit(func(n *exprNode) {
+		cc.work(1)
 		if n.kind == "Member" && startsWithDatum(n) {
 			names := exprNames(n)
 			if len(names) > 0 {

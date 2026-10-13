@@ -1,8 +1,11 @@
 package contour
 
 import (
+	"context"
 	"errors"
 	"math"
+
+	"github.com/mgilbir/aster/internal/budget"
 
 	"github.com/mgilbir/aster/internal/jsval"
 )
@@ -60,10 +63,17 @@ func numVals(f []float64) []jsval.Value {
 	return out
 }
 
+// releaseGrid gives back to the ledger in ctx the values of a grid made by
+// Density or GridFromValue, once the grid is dropped.
+func releaseGrid(ctx context.Context, g Grid) {
+	budget.LedgerFrom(ctx).Free(gridValueBytes * int64(len(g.Values)))
+}
+
 // GridFromValue reads a raster grid object ({values, width, height, scale,
 // x1.., translate}). Missing values become an empty grid (upstream treats
-// them as zero when rendering).
-func GridFromValue(v jsval.Value) (Grid, error) {
+// them as zero when rendering). The values are charged to the ledger in
+// ctx; releaseGrid gives them back.
+func GridFromValue(ctx context.Context, v jsval.Value) (Grid, error) {
 	if !v.IsObj() {
 		return Grid{}, errors.New("contour: field is not a raster grid")
 	}
@@ -78,12 +88,16 @@ func GridFromValue(v jsval.Value) (Grid, error) {
 	if !(w >= 0 && h >= 0) {
 		return Grid{}, errInvalidSize
 	}
-	if w*h > MaxGridCells {
+	// Each side too, before it is an int: 0 x Infinity is NaN.
+	if w*h > MaxGridCells || w > MaxGridCells || h > MaxGridCells {
 		return Grid{}, errTooLarge
 	}
 	g := Grid{Width: int(w), Height: int(h)}
 	if vals := v.Get("values"); vals.IsArr() {
 		items := vals.Items()
+		if err := budget.LedgerFrom(ctx).Alloc(gridValueBytes * int64(len(items))); err != nil {
+			return Grid{}, err
+		}
 		g.Values = make([]float64, len(items))
 		for i, it := range items {
 			g.Values[i] = jsval.ToNumber(it)

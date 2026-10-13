@@ -51,6 +51,10 @@ type state struct {
 	filterLinear  bool       // color-interpolation-filters: linearRGB (the default)
 	paintOrder    [3]uint8   // 0 fill, 1 stroke, 2 markers, in painting order
 	markers       *[3]string // marker-start, marker-mid, marker-end element ids (shared, copy on write)
+	// nonScaling is vector-effect="non-scaling-stroke" on the shape being
+	// drawn (not inherited): its stroke is built in the host coordinate
+	// space (see renderer.host).
+	nonScaling bool
 
 	families      []string
 	fontSize      float64
@@ -81,10 +85,15 @@ func initialState(vw, vh float64) state {
 		filterLinear:  true,
 		paintOrder:    [3]uint8{0, 1, 2},
 		families:      []string{"serif"},
-		fontSize:      12,
-		fontWeight:    400,
-		vw:            vw,
-		vh:            vh,
+		// CSS's initial font-size, medium, which browsers (for which Vega
+		// writes its SVG), the keyword table below and the PDF writer take
+		// as 16px. resvg takes 12 (usvg's Options::font_size, a tool
+		// default rather than the SVG's); Vega's text always sets a size,
+		// so this decides only SVG input that does not.
+		fontSize:   16,
+		fontWeight: 400,
+		vw:         vw,
+		vh:         vh,
 	}
 }
 

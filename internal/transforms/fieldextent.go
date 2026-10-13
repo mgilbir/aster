@@ -30,7 +30,7 @@ func FieldExtent(ctx context.Context, data []jsval.Value, f Field) (lo, hi float
 		}
 	}
 	if math.IsInf(lo, 0) || math.IsInf(hi, 0) {
-		return 0, 0, false, nil
+		return lo, hi, false, nil // what upstream's warning prints
 	}
 	return lo, hi, true, nil
 }

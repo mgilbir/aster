@@ -1,0 +1,1 @@
+{"width": 10, "height": 10, "signals": [{"name": "i", "update": "indexof(pad('', 8000000, 'a'), pad('', 4000000, 'a') + 'b')"}, {"name": "j", "update": "lastindexof(pad('', 8000000, 'a'), 'b' + pad('', 4000000, 'a'))"}]}

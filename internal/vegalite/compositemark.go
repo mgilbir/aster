@@ -47,7 +47,7 @@ type tooltipSummaryItem struct {
 
 func compositeTitle(def Value) Value { return firstDefined(def.Get("title"), def.Get("field")) }
 
-func filterTooltipWithAggregatedField(oldEncoding Value) (customWithout Value, filtered *Object) {
+func filterTooltipWithAggregatedField(cc *compileCtx, oldEncoding Value) (customWithout Value, filtered *Object) {
 	filtered = omit(oldEncoding, "tooltip")
 	tooltip := oldEncoding.Get("tooltip")
 	if !tooltip.IsTruthy() {
@@ -57,6 +57,7 @@ func filterTooltipWithAggregatedField(oldEncoding Value) (customWithout Value, f
 	haveWith, haveWithout := false, false
 	if tooltip.IsArr() {
 		for _, t := range tooltip.Items() {
+			cc.work(1)
 			if t.Get("aggregate").IsTruthy() {
 				haveWith = true
 				with = append(with, t)
@@ -108,8 +109,9 @@ func getCompositeMarkTooltip(cc *compileCtx, summary []tooltipSummaryItem, conti
 	}
 	seen := map[string]bool{}
 	for _, fd := range fieldDefsOf(cc, encodingWithoutContinuousAxis) {
+		cc.work(1)
 		sfd := toStringFieldDef(fd)
-		h := hashOf(sfd)
+		h := hashOf(cc, sfd)
 		if !seen[h] {
 			seen[h] = true
 			items = append(items, sfd)
@@ -175,8 +177,11 @@ func partLayerMixins(markDef Value, part string, compositeMarkConfig Value, part
 	return nil
 }
 
-func filterAggregateFromChannelDef(def Value, compositeMark string) Value {
-	if def.Get("aggregate").IsTruthy() {
+func filterAggregateFromChannelDef(cc *compileCtx, def Value, compositeMark string) Value {
+	if agg := def.Get("aggregate"); agg.IsTruthy() {
+		if !(agg.IsStr() && agg.StrValue() == compositeMark) {
+			cc.warn(msgErrorBarContinuousAxisHasCustomizedAggregate(agg, compositeMark))
+		}
 		return jsval.Obj(omit(def, "aggregate"))
 	}
 	return def
@@ -187,17 +192,17 @@ type continuousAxisInfo struct {
 	axis                           string
 }
 
-func compositeMarkContinuousAxis(spec Value, orient, compositeMark string) continuousAxisInfo {
+func compositeMarkContinuousAxis(cc *compileCtx, spec Value, orient, compositeMark string) continuousAxisInfo {
 	encoding := spec.Get("encoding")
 	axis := chY
 	if orient != "vertical" {
 		axis = chX
 	}
 	return continuousAxisInfo{
-		def:       filterAggregateFromChannelDef(encoding.Get(axis), compositeMark),
-		def2:      filterAggregateFromChannelDef(encoding.Get(axis+"2"), compositeMark),
-		defError:  filterAggregateFromChannelDef(encoding.Get(axis+"Error"), compositeMark),
-		defError2: filterAggregateFromChannelDef(encoding.Get(axis+"Error2"), compositeMark),
+		def:       filterAggregateFromChannelDef(cc, encoding.Get(axis), compositeMark),
+		def2:      filterAggregateFromChannelDef(cc, encoding.Get(axis+"2"), compositeMark),
+		defError:  filterAggregateFromChannelDef(cc, encoding.Get(axis+"Error"), compositeMark),
+		defError2: filterAggregateFromChannelDef(cc, encoding.Get(axis+"Error2"), compositeMark),
 		axis:      axis,
 	}
 }
@@ -246,8 +251,10 @@ func compositeMarkOrient(cc *compileCtx, spec Value, compositeMark string) strin
 
 // ---- boxplot ----
 
-func boxParamsQuartiles(cc *compileCtx, field string) []Value {
-	aliased := cmAlias(cc, field)
+// boxParamsQuartiles takes the continuous field as upstream holds it: the
+// aggregate's field is that value, its name is built from its text.
+func boxParamsQuartiles(cc *compileCtx, field Value) []Value {
+	aliased := cmAliasV(cc, field)
 	return []Value{
 		mkv("op", "q1", "field", field, "as", "lower_box_"+aliased),
 		mkv("op", "q3", "field", field, "as", "upper_box_"+aliased),
@@ -259,7 +266,9 @@ func normalizeBoxPlot(cc *compileCtx, spec Value, config Value) Value {
 	so.Set("encoding", normalizeEncoding(cc, spec.Get("encoding"), config))
 	spec = jsval.Obj(so)
 	mark, params := spec.Get("mark"), spec.Get("params")
-	_ = params
+	if params.IsTruthy() {
+		cc.warn(msgSelectionNotSupported("boxplot"))
+	}
 	outerSpec := omit(spec, "mark", "encoding", "params", "projection")
 	markDef := markDefOf(mark)
 	extent := coalesce(markDef.Get("extent"), config.Get("boxplot").Get("extent"))
@@ -272,8 +281,9 @@ func normalizeBoxPlot(cc *compileCtx, spec Value, config Value) Value {
 	isMinMax := boxPlotType.IsStr() && boxPlotType.StrValue() == "min-max"
 	isTukey := boxPlotType.IsStr() && boxPlotType.StrValue() == "tukey"
 	bp := boxParams(cc, spec, extent, config)
-	contField := cmFieldName(cc, bp.continuousAxisChannelDef.Get("field"))
-	aliasedFieldName := cmAlias(cc, contField)
+	contFieldV := bp.continuousAxisChannelDef.Get("field")
+	contField := cmFieldName(cc, contFieldV)
+	aliasedFieldName := cmAliasV(cc, contFieldV)
 	color, size := bp.encodingWithoutContinuousAxis.Get("color"), bp.encodingWithoutContinuousAxis.Get("size")
 	encodingWithoutSizeColorAndContinuousAxis := omit(bp.encodingWithoutContinuousAxis, "color", "size")
 	makePart := func(shared Value) partFactory {
@@ -365,11 +375,11 @@ func normalizeBoxPlot(cc *compileCtx, spec Value, config Value) Value {
 	extentStr := extent.AsString()
 	lowerWhiskerExpr := lowerBoxExpr + " - " + extentStr + " * " + iqrExpr
 	upperWhiskerExpr := upperBoxExpr + " + " + extentStr + " * " + iqrExpr
-	fieldExpr := cmAccess(cc, contField)
-	joinaggregate := mkv("joinaggregate", jsval.Arr(boxParamsQuartiles(cc, contField)), "groupby", jsval.Arr(bp.groupby))
+	fieldExpr := cmAccessV(cc, contFieldV)
+	joinaggregate := mkv("joinaggregate", jsval.Arr(boxParamsQuartiles(cc, contFieldV)), "groupby", jsval.Arr(bp.groupby))
 	aggs := []Value{
-		mkv("op", "min", "field", contField, "as", "lower_whisker_"+aliasedFieldName),
-		mkv("op", "max", "field", contField, "as", "upper_whisker_"+aliasedFieldName),
+		mkv("op", "min", "field", contFieldV, "as", "lower_whisker_"+aliasedFieldName),
+		mkv("op", "max", "field", contFieldV, "as", "upper_whisker_"+aliasedFieldName),
 		mkv("op", "min", "field", "lower_box_"+contField, "as", "lower_box_"+aliasedFieldName),
 		mkv("op", "max", "field", "upper_box_"+contField, "as", "upper_box_"+aliasedFieldName),
 	}
@@ -385,7 +395,8 @@ func normalizeBoxPlot(cc *compileCtx, spec Value, config Value) Value {
 	scale, axis := bp.continuousAxisChannelDef.Get("scale"), bp.continuousAxisChannelDef.Get("axis")
 	title := compositeTitle(bp.continuousAxisChannelDef)
 	outEnc := jsval.NewObject(8)
-	cd := mk("field", contField, "type", bp.continuousAxisChannelDef.Get("type"))
+	// field: continuousAxisChannelDef.field, undefined when there is none.
+	cd := mk("field", bp.continuousAxisChannelDef.Get("field"), "type", bp.continuousAxisChannelDef.Get("type"))
 	if !title.IsUndefined() {
 		cd.Set("title", title)
 	}
@@ -438,9 +449,10 @@ type boxParamsResult struct {
 
 func boxParams(cc *compileCtx, spec Value, extent Value, config Value) boxParamsResult {
 	orient := compositeMarkOrient(cc, spec, "boxplot")
-	cai := compositeMarkContinuousAxis(spec, orient, "boxplot")
-	contField := cmFieldName(cc, cai.def.Get("field"))
-	aliased := cmAlias(cc, contField)
+	cai := compositeMarkContinuousAxis(cc, spec, orient, "boxplot")
+	contFieldV := cai.def.Get("field")
+	cmFieldName(cc, contFieldV) // its TypeError for a missing field
+	aliased := cmAliasV(cc, contFieldV)
 	boxPlotType := extent
 	if extent.IsNum() {
 		boxPlotType = jsval.Str("tukey")
@@ -451,10 +463,10 @@ func boxParams(cc *compileCtx, spec Value, extent Value, config Value) boxParams
 	if isMinMax {
 		minAs, maxAs = "lower_whisker_", "upper_whisker_"
 	}
-	specific := append(boxParamsQuartiles(cc, contField),
-		mkv("op", "median", "field", contField, "as", "mid_box_"+aliased),
-		mkv("op", "min", "field", contField, "as", minAs+aliased),
-		mkv("op", "max", "field", contField, "as", maxAs+aliased),
+	specific := append(boxParamsQuartiles(cc, contFieldV),
+		mkv("op", "median", "field", contFieldV, "as", "mid_box_"+aliased),
+		mkv("op", "min", "field", contFieldV, "as", minAs+aliased),
+		mkv("op", "max", "field", contFieldV, "as", maxAs+aliased),
 	)
 	var post []Value
 	if !isMinMax && !isTukey {
@@ -468,7 +480,7 @@ func boxParams(cc *compileCtx, spec Value, extent Value, config Value) boxParams
 		}
 	}
 	oldEncodingWithout := omit(spec.Get("encoding"), cai.axis)
-	customTooltip, filteredEncoding := filterTooltipWithAggregatedField(jsval.Obj(oldEncodingWithout))
+	customTooltip, filteredEncoding := filterTooltipWithAggregatedField(cc, jsval.Obj(oldEncodingWithout))
 	ex := extractTransformsFromEncoding(cc, jsval.Obj(filteredEncoding), config)
 	ticksOrient := "vertical"
 	if orient == "vertical" {
@@ -559,8 +571,11 @@ func errorBarParams(cc *compileCtx, spec Value, compositeMark string, config Val
 	mark, encoding := spec.Get("mark"), spec.Get("encoding")
 	outerSpec := omit(spec, "mark", "encoding", "params", "projection")
 	markDef := markDefOf(mark)
+	if spec.Get("params").IsTruthy() {
+		cc.warn(msgSelectionNotSupported(compositeMark))
+	}
 	orient, inputType := errorBarOrientAndInputType(cc, spec, compositeMark)
-	cai := compositeMarkContinuousAxis(spec, orient, compositeMark)
+	cai := compositeMarkContinuousAxis(cc, spec, orient, compositeMark)
 	agg, post, tooltipSummary, tooltipTitleWithFieldName := errorBarAggregationAndCalculation(cc, markDef, cai.def, cai.def2, cai.defError, cai.defError2, inputType, compositeMark, config)
 	var axis2, err, err2 string
 	if cai.axis == "x" {
@@ -602,6 +617,7 @@ func errorBarAggregationAndCalculation(cc *compileCtx, markDef, def, def2, defEr
 	contField := def.Get("field").AsString()
 	contFieldV := def.Get("field")
 	acc := func(s string) string { return cmAccess(cc, s) }
+	accV := func(v Value) string { return cmAccessV(cc, v) }
 	if inputType == "raw" {
 		var center string
 		switch {
@@ -624,6 +640,9 @@ func errorBarAggregationAndCalculation(cc *compileCtx, markDef, def, def2, defEr
 			extent = "stderr"
 		default:
 			extent = "iqr"
+		}
+		if (center == "median") != (extent == "iqr") {
+			cc.warn(msgErrorBarCenterIsUsedWithWrongExtent(jsval.Str(center), jsval.Str(extent), compositeMark))
 		}
 		if extent == "stderr" || extent == "stdev" {
 			agg = []Value{
@@ -662,20 +681,23 @@ func errorBarAggregationAndCalculation(cc *compileCtx, markDef, def, def2, defEr
 			}
 		}
 	} else {
+		if markDef.Get("center").IsTruthy() || markDef.Get("extent").IsTruthy() {
+			cc.warn(msgErrorBarCenterAndExtentAreNotNeeded(markDef.Get("center"), markDef.Get("extent")))
+		}
 		switch inputType {
 		case "aggregated-upper-lower":
 			tooltipSummary = []tooltipSummaryItem{}
 			post = []Value{
-				mkv("calculate", acc(def2.Get("field").AsString()), "as", "upper_"+contField),
-				mkv("calculate", acc(contField), "as", "lower_"+contField),
+				mkv("calculate", accV(def2.Get("field")), "as", "upper_"+contField),
+				mkv("calculate", accV(contFieldV), "as", "lower_"+contField),
 			}
 		case "aggregated-error":
 			tooltipSummary = []tooltipSummaryItem{{"", jsval.Str(contField)}}
-			post = []Value{mkv("calculate", acc(contField)+" + "+acc(defError.Get("field").AsString()), "as", "upper_"+contField)}
+			post = []Value{mkv("calculate", accV(contFieldV)+" + "+accV(defError.Get("field")), "as", "upper_"+contField)}
 			if defError2.IsTruthy() {
-				post = append(post, mkv("calculate", acc(contField)+" + "+acc(defError2.Get("field").AsString()), "as", "lower_"+contField))
+				post = append(post, mkv("calculate", accV(contFieldV)+" + "+accV(defError2.Get("field")), "as", "lower_"+contField))
 			} else {
-				post = append(post, mkv("calculate", acc(contField)+" - "+acc(defError.Get("field").AsString()), "as", "lower_"+contField))
+				post = append(post, mkv("calculate", accV(contFieldV)+" - "+accV(defError.Get("field")), "as", "lower_"+contField))
 			}
 		}
 		for _, c := range post {
@@ -750,6 +772,10 @@ func normalizeErrorBand(cc *compileCtx, spec Value, config Value) Value {
 		bandMark.Set("ariaRoleDescription", jsval.Str("errorband"))
 		spread(bordersMark, jsval.Obj(interpolate))
 		bordersMark.Set("aria", jsval.False)
+	} else if def.Get("interpolate").IsTruthy() {
+		cc.warn(msgErrorBand1DNotSupport("interpolate"))
+	} else if def.Get("tension").IsTruthy() {
+		cc.warn(msgErrorBand1DNotSupport("tension"))
 	}
 	var layer []Value
 	layer = append(layer, makePart("band", jsval.Obj(bandMark), "lower", "upper", r.tooltipEncoding)...)

@@ -45,14 +45,14 @@ func FuzzTopoJSON(f *testing.F) {
 			}
 			o := objects.ObjValue()
 			for i := 0; i < o.Len(); i++ {
-				v, err := TopoFeature(topo, o.ValueAt(i))
+				v, err := TopoFeature(bg, topo, o.ValueAt(i))
 				check("feature", v, err)
 				for _, filter := range []MeshFilter{MeshAll, MeshInterior, MeshExterior} {
-					v, err := TopoMesh(topo, o.ValueAt(i), filter)
+					v, err := TopoMesh(bg, topo, o.ValueAt(i), filter)
 					check("mesh", v, err)
 				}
-				_, _ = TopologyFeatures(topo, o.KeyAt(i), "", "")
-				_, _ = TopologyFeatures(topo, "", o.KeyAt(i), "interior")
+				_, _ = TopologyFeatures(bg, topo, o.KeyAt(i), "", "")
+				_, _ = TopologyFeatures(bg, topo, "", o.KeyAt(i), "interior")
 			}
 		})
 	})

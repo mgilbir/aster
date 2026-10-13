@@ -1,0 +1,1 @@
+{"width": 10, "height": 10, "signals": [{"name": "n", "update": "length(split(pad('', 16000000, 'a'), ''))"}]}

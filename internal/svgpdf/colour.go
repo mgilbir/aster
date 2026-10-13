@@ -49,26 +49,22 @@ func hasColour(run text.Run) bool {
 	return false
 }
 
-// drawTextRunColour draws a run that has colour glyphs: those painted, the
-// rest as outlines. In the modes that write text, the run is also written as
+// drawTextRunColour draws a run that has colour glyphs, in font f (nil for
+// none): those painted, the rest as outlines. In the modes that write text, the run is also written as
 // invisible text in its own font, as a scanned page's OCR text is, so that it
 // is found, selected and copied as text; its subset keeps the outlines and
 // none of the colour tables, and is cut from the face's outline tables alone
 // (text.Measurer.FontData), even of a 192 MB collection. A run whose font
 // cannot be embedded is marked with its source text as ActualText instead,
 // which only some readers take: PDFium drops the text inside such a span.
-func (r *renderer) drawTextRunColour(run text.Run, penX float64, str string, textStart, textEnd int, st gstate) (float64, error) {
-	var f *pdfFont
-	if r.fonts != nil {
-		f = r.fonts.fontFor(run.Face)
-	}
-	actual := r.fonts != nil && f == nil && textStart >= 0 && textStart < textEnd && textEnd <= len(str)
+func (r *renderer) drawTextRunColour(run text.Run, f *pdfFont, penX float64, str string, st gstate) (float64, error) {
+	actual := r.fonts != nil && f == nil && run.Start >= 0 && run.Start < run.End && run.End <= len(str)
 	if actual {
-		r.w.beginActualText(str[textStart:textEnd])
+		r.w.beginActualText(str[run.Start:run.End])
 	}
 	if f != nil {
 		r.w.textRender(3) // neither filled nor stroked
-		_, err := r.drawTextRunFont(f, run, penX, str, textEnd)
+		_, err := r.drawTextRunFont(f, run, penX, str)
 		r.w.textRender(0)
 		if err != nil {
 			return penX, err
@@ -116,10 +112,16 @@ func (r *renderer) drawColourGlyph(face *text.Face, gid int, size, x, y float64,
 	g, ok := r.painted[key]
 	if !ok {
 		g = r.paintColourGlyph(face, gid, fgc, upem)
-		if r.painted == nil {
-			r.painted = map[paintedKey]paintedGlyph{}
+		// Kept within maxPaintedBytes, charged to the call's ledger: a
+		// glyph at another size or turn is another painting (X4).
+		if n := int64(len(g.content)) + paintedEntryBytes; r.paintedBytes+n <= maxPaintedBytes {
+			r.alloc(n)
+			r.paintedBytes += n
+			if r.painted == nil {
+				r.painted = map[paintedKey]paintedGlyph{}
+			}
+			r.painted[key] = g
 		}
-		r.painted[key] = g
 	}
 	switch {
 	case g.err != nil:
@@ -152,6 +154,10 @@ type paintedKey struct {
 	fg         shape.Color
 	a, b, c, d float64
 }
+
+// paintedEntryBytes is about what an entry of the painted cache holds
+// besides its content.
+const paintedEntryBytes = 160
 
 // paintedGlyph is how a colour glyph is drawn: as an image, or as its
 // content, the operators that paint it at the current transform, empty for
@@ -234,7 +240,7 @@ func (r *renderer) drawImageIn(img *pdfImage, box shape.Rect, alpha float64) {
 	r.w.restore()
 }
 
-func byteOf(v float64) uint8 { return uint8(math.Round(math.Max(0, math.Min(1, v)) * 255)) }
+func byteOf(v float64) uint8 { return uint8(math.Round(unit(v) * 255)) }
 
 // colourCheck is a painter that paints nothing and finds whether PDF can
 // draw a glyph's painting as it is: with no Xor or Plus, which PDF has no way

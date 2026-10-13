@@ -53,9 +53,6 @@ func fnMin(name string, min int, f builtinFn) { def(name, &funcDef{fn: f, min: m
 
 func lookupFunc(name string) *funcDef { return funcTable[name] }
 
-// HasFunction reports whether name is in the expression function table.
-func HasFunction(name string) bool { return funcTable[name] != nil }
-
 func arg(args []jsval.Value, i int) jsval.Value {
 	if i < len(args) {
 		return args[i]
@@ -138,11 +135,15 @@ func (c *compiler) call(n *Node) (node, error) {
 	f := d.fn
 	switch len(args) {
 	case 0:
-		return func(s *Scope) jsval.Value { return f(s, nil) }, nil
+		return func(s *Scope) jsval.Value {
+			s.work(1)
+			return f(s, nil)
+		}, nil
 	case 1:
 		a0 := args[0]
 		return func(s *Scope) jsval.Value {
 			v := a0(s)
+			s.work(1)
 			base := len(s.stack)
 			s.stack = append(s.stack, v)
 			r := f(s, s.stack[base:base+1:base+1])
@@ -154,6 +155,7 @@ func (c *compiler) call(n *Node) (node, error) {
 		return func(s *Scope) jsval.Value {
 			v0 := a0(s)
 			v1 := a1(s)
+			s.work(1)
 			base := len(s.stack)
 			s.stack = append(s.stack, v0, v1)
 			r := f(s, s.stack[base:base+2:base+2])
@@ -164,9 +166,9 @@ func (c *compiler) call(n *Node) (node, error) {
 	return func(s *Scope) jsval.Value {
 		base := len(s.stack)
 		for _, a := range args {
-			v := a(s)
-			s.stack = append(s.stack, v)
+			s.stack = append(s.stack, a(s))
 		}
+		s.work(1)
 		end := len(s.stack)
 		r := f(s, s.stack[base:end:end])
 		s.stack = s.stack[:base]

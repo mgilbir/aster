@@ -1,6 +1,8 @@
 package geo
 
 import (
+	"context"
+
 	"github.com/mgilbir/aster/internal/jsmath"
 	"github.com/mgilbir/aster/internal/jsval"
 )
@@ -80,9 +82,16 @@ func (s *identityStage) PolygonStart() { s.sink.PolygonStart() }
 func (s *identityStage) PolygonEnd()   { s.sink.PolygonEnd() }
 func (s *identityStage) Sphere()       { s.sink.Sphere() }
 
-func (p *identityProj) Stream(sink Stream) Stream {
+func (p *identityProj) Stream(sink Stream) Stream { return p.streamBound(sink, nil) }
+
+// streamBound charges the points of the planar transform to b: an identity
+// projection produces exactly the points it reads.
+func (p *identityProj) streamBound(sink Stream, b *walkBound) Stream {
 	if p.postclip != nil {
 		sink = p.postclip.stream(sink)
+	}
+	if b != nil {
+		sink = &pointCharge{b: b, sink: sink}
 	}
 	return &identityStage{p: p, sink: sink}
 }
@@ -131,12 +140,18 @@ func (p *identityProj) setScaleTranslate(k, x, y float64) {
 	p.SetTranslate(x, y)
 }
 
-func (p *identityProj) FitExtent(x0, y0, x1, y1 float64, object jsval.Value) {
-	fitExtent(p, x0, y0, x1, y1, object)
+func (p *identityProj) FitExtent(ctx context.Context, x0, y0, x1, y1 float64, object jsval.Value) error {
+	return fitExtent(ctx, p, x0, y0, x1, y1, object)
 }
-func (p *identityProj) FitSize(w, h float64, object jsval.Value) { fitExtent(p, 0, 0, w, h, object) }
-func (p *identityProj) FitWidth(w float64, object jsval.Value)   { fitWidth(p, w, object) }
-func (p *identityProj) FitHeight(h float64, object jsval.Value)  { fitHeight(p, h, object) }
+func (p *identityProj) FitSize(ctx context.Context, w, h float64, object jsval.Value) error {
+	return fitExtent(ctx, p, 0, 0, w, h, object)
+}
+func (p *identityProj) FitWidth(ctx context.Context, w float64, object jsval.Value) error {
+	return fitWidth(ctx, p, w, object)
+}
+func (p *identityProj) FitHeight(ctx context.Context, h float64, object jsval.Value) error {
+	return fitHeight(ctx, p, h, object)
+}
 
 func (p *identityProj) Copy() Projection {
 	c := newIdentity(p.typ)

@@ -1,0 +1,1 @@
+{"width":200,"height":30,"scales":[{"name":"x","type":"linear","domain":[0,1],"range":"width"}],"axes":[{"scale":"x","orient":"bottom","tickCount":1e9,"tickMinStep":1.3e-9}]}

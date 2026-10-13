@@ -19,6 +19,12 @@ func (s *Scope) storeEntries(name string) []jsval.Value {
 	if !ok {
 		return nil
 	}
+	if v.IsNull() {
+		// `entries = data ? data.values.value : []` is null for a store
+		// whose values operator has not run, and every selection function
+		// reads its length.
+		typeError("Cannot read properties of null (reading 'length')")
+	}
 	return v.Items()
 }
 
@@ -42,7 +48,8 @@ func sameValueZero(a, b jsval.Value) bool {
 	return strictEquals(a, b)
 }
 
-func includes(items []jsval.Value, v jsval.Value) bool {
+func (s *Scope) includes(items []jsval.Value, v jsval.Value) bool {
+	s.work(len(items))
 	for _, it := range items {
 		if sameValueZero(it, v) {
 			return true
@@ -63,15 +70,16 @@ func dateToNumber(v jsval.Value) jsval.Value {
 func (s *Scope) testPoint(datum, entry jsval.Value) bool {
 	fields := s.getProp(entry, "fields")
 	values := s.getProp(entry, "values")
-	n := int(s.num(s.getProp(fields, "length")))
-	for i := 0; i < n; i++ {
+	n := s.num(s.getProp(fields, "length"))
+	for i := 0; float64(i) < n; i++ {
+		s.work(1)
 		f := s.getIndex(fields, jsval.Int(i))
 		dval := dateToNumber(s.readPath(datum, s.str(s.getProp(f, "field"))))
 		val := s.getIndex(values, jsval.Int(i))
 		val = dateToNumber(val)
 		if val.IsArr() && val.Len() > 0 && val.Index(0).IsTimestamp() {
 			items := val.Items()
-			conv := make([]jsval.Value, len(items))
+			conv := s.makeItems(len(items))
 			for j, it := range items {
 				conv[j] = jsval.Num(s.num(it))
 			}
@@ -81,7 +89,7 @@ func (s *Scope) testPoint(datum, entry jsval.Value) bool {
 		switch typ {
 		case "E":
 			if val.IsArr() {
-				if !includes(val.Items(), dval) {
+				if !s.includes(val.Items(), dval) {
 					return false
 				}
 			} else if !strictEquals(dval, val) {
@@ -143,7 +151,7 @@ func (s *Scope) indexOfStrict(seq, x jsval.Value) int {
 		}
 		return -1
 	case seq.IsStr():
-		return indexOfUnits(seq.StrValue(), s.str(x), 0)
+		return s.indexOf(seq.StrValue(), s.str(x), 0)
 	}
 	typeError("Cannot read properties of %s (reading 'indexOf')", seq.AsString())
 	return -1
@@ -275,9 +283,10 @@ func selectionTuples(s *Scope, args []jsval.Value) jsval.Value {
 		throw("Error", "Second argument to selectionTuples must be an object.")
 	}
 	items := arr.Items()
-	out := make([]jsval.Value, len(items))
+	out := s.makeItems(len(items))
 	fields := s.getProp(base, "fields")
 	for i, x := range items {
+		s.chargeMembers(fields.Len() + base.Len() + 1)
 		t := jsval.NewObject(4)
 		datum := s.getProp(x, "datum")
 		if fields.IsTruthy() {
@@ -285,7 +294,7 @@ func selectionTuples(s *Scope, args []jsval.Value) jsval.Value {
 				typeError("base.fields.map is not a function")
 			}
 			fs := fields.Items()
-			vals := make([]jsval.Value, len(fs))
+			vals := s.makeItems(len(fs))
 			for j, f := range fs {
 				vals[j] = s.readPath(datum, s.str(s.getProp(f, "field")))
 			}
@@ -303,7 +312,7 @@ func selectionTuples(s *Scope, args []jsval.Value) jsval.Value {
 				t.Set(jsval.Int(j).AsString(), v)
 			}
 		}
-		out[i] = jsval.Obj(jsOrder(t))
+		out[i] = jsval.Obj(s.jsOrder(t))
 	}
 	return jsval.Arr(out)
 }
@@ -334,15 +343,17 @@ func (r resolveOps) union(typ byte, base, value []jsval.Value) []jsval.Value {
 	switch typ {
 	case 'E':
 		if len(base) == 0 {
-			return append([]jsval.Value(nil), value...)
+			return s.cloneItems(value)
 		}
-		out := append([]jsval.Value(nil), base...)
+		// vega-selections pushes onto base, which is always an array this
+		// resolution made (the first union copies its values).
+		out := itemBuilder{s: s, items: base, charged: cap(base)}
 		for _, v := range value {
-			if !includes(out, v) {
-				out = append(out, v)
+			if !s.includes(out.items, v) {
+				out.push(v)
 			}
 		}
-		return out
+		return out.items
 	case 'R':
 		lo, hi := jsval.Num(s.num(idx(value, 0))), jsval.Num(s.num(idx(value, 1)))
 		if s.gt(lo, hi) {
@@ -369,11 +380,11 @@ func (r resolveOps) intersect(typ byte, base, value []jsval.Value) []jsval.Value
 	switch typ {
 	case 'E':
 		if len(base) == 0 {
-			return append([]jsval.Value(nil), value...)
+			return s.cloneItems(value)
 		}
 		var out []jsval.Value
 		for _, v := range base {
-			if includes(value, v) {
+			if s.includes(value, v) {
 				out = append(out, v)
 			}
 		}
@@ -411,16 +422,20 @@ func idx(v []jsval.Value, i int) jsval.Value {
 
 // internKey identifies a value the way d3's InternSet does: primitives by
 // value.
-func internKey(v jsval.Value) string {
-	return v.Kind().String() + ":" + v.AsString()
+// The keys are held in a set while it is built, so each is charged.
+func (s *Scope) internKey(v jsval.Value) string {
+	k := v.Kind().String() + ":" + v.AsString()
+	s.workBytes(len(k))
+	s.chargeBytes(len(k) + 48)
+	return k
 }
 
-func internUnion(lists ...[]jsval.Value) []jsval.Value {
+func (s *Scope) internUnion(lists ...[]jsval.Value) []jsval.Value {
 	seen := map[string]struct{}{}
 	var out []jsval.Value
 	for _, l := range lists {
 		for _, v := range l {
-			k := internKey(v)
+			k := s.internKey(v)
 			if _, ok := seen[k]; !ok {
 				seen[k] = struct{}{}
 				out = append(out, v)
@@ -430,19 +445,19 @@ func internUnion(lists ...[]jsval.Value) []jsval.Value {
 	return out
 }
 
-func internIntersection(first []jsval.Value, others ...[]jsval.Value) []jsval.Value {
+func (s *Scope) internIntersection(first []jsval.Value, others ...[]jsval.Value) []jsval.Value {
 	sets := make([]map[string]struct{}, len(others))
 	for i, o := range others {
 		sets[i] = map[string]struct{}{}
 		for _, v := range o {
-			sets[i][internKey(v)] = struct{}{}
+			sets[i][s.internKey(v)] = struct{}{}
 		}
 	}
 	var out []jsval.Value
 	seen := map[string]struct{}{}
 next:
 	for _, v := range first {
-		k := internKey(v)
+		k := s.internKey(v)
 		if _, dup := seen[k]; dup {
 			continue
 		}
@@ -492,8 +507,9 @@ func selectionResolve(s *Scope, args []jsval.Value) jsval.Value {
 		unit := s.str(unitV)
 		fields, values := s.getProp(entry, "fields"), s.getProp(entry, "values")
 		if fields.IsTruthy() && values.IsTruthy() {
-			n := int(s.num(s.getProp(fields, "length")))
-			for j := 0; j < n; j++ {
+			n := s.num(s.getProp(fields, "length"))
+			for j := 0; float64(j) < n; j++ {
+				s.work(1)
 				f := s.getIndex(fields, jsval.Int(j))
 				fname := s.str(s.getProp(f, "field"))
 				res := resolvedFor(fname)
@@ -506,8 +522,10 @@ func selectionResolve(s *Scope, args []jsval.Value) jsval.Value {
 				res.set(unit, ops.union(typ, res.get(unit), toArray(s.getIndex(values, jsval.Int(j)))))
 			}
 			if isMulti {
-				obj := jsval.NewObject(n)
-				for j, cur := range toArray(values) {
+				vals := toArray(values)
+				s.chargeMembers(len(vals))
+				obj := jsval.NewObject(len(vals))
+				for j, cur := range vals {
 					f := s.getIndex(fields, jsval.Int(j))
 					obj.Set(s.str(s.getProp(f, "field")), cur)
 				}
@@ -536,12 +554,12 @@ func selectionResolve(s *Scope, args []jsval.Value) jsval.Value {
 		var set []jsval.Value
 		switch op {
 		case "union":
-			set = internUnion(lists...)
+			set = s.internUnion(lists...)
 		case "intersect":
 			if len(lists) == 0 {
 				typeError("Cannot read properties of undefined")
 			}
-			set = internIntersection(lists[0], lists[1:]...)
+			set = s.internIntersection(lists[0], lists[1:]...)
 		default:
 			typeError("ops[`_vgsid__%s`] is not a function", op)
 		}

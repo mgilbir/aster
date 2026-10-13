@@ -103,6 +103,32 @@ func (v *diagram) init() {
 	}
 }
 
+// undef stands for JavaScript's undefined in a coordinate d3-delaunay leaves
+// unset (_project when no side of the extent is hit, as with a NaN ray). It
+// is a NaN with its own payload: arithmetic on it is NaN, as on undefined,
+// but two of them are equal (undefined === undefined) and it prints as
+// nothing (Array.prototype.join), where NaN prints "NaN". Arithmetic results
+// go through num, since the hardware passes the payload on.
+var undef = math.Float64frombits(undefBits)
+
+const undefBits = 0x7ff8_0000_0000_0bad
+
+func isUndef(x float64) bool { return math.Float64bits(x) == undefBits }
+
+// same is JavaScript's === on coordinates that may be undefined.
+func same(a, b float64) bool { return a == b || isUndef(a) && isUndef(b) }
+
+// num is the result of arithmetic: undefined in, NaN out.
+func num(x float64) float64 {
+	if x != x {
+		return math.NaN()
+	}
+	return x
+}
+
+// truthy is a number's truthiness: 0 and NaN are false.
+func truthy(x float64) bool { return x != 0 && x == x }
+
 func sign(x float64) float64 {
 	switch {
 	case x > 0:
@@ -124,14 +150,14 @@ func (v *diagram) cellPolygon(i int32) []float64 {
 	out := make([]float64, 0, len(pts)+2)
 	out = append(out, pts[0], pts[1])
 	n := len(pts)
-	for pts[0] == pts[n-2] && pts[1] == pts[n-1] && n > 1 {
+	for same(pts[0], pts[n-2]) && same(pts[1], pts[n-1]) && n > 1 {
 		n -= 2
 		if n < 2 {
 			break
 		}
 	}
 	for i := 2; i < n; i += 2 {
-		if pts[i] != pts[i-2] || pts[i+1] != pts[i-1] {
+		if !same(pts[i], pts[i-2]) || !same(pts[i+1], pts[i-1]) {
 			out = append(out, pts[i], pts[i+1])
 		}
 	}
@@ -154,7 +180,14 @@ func (v *diagram) cell(i int32) []float64 {
 	}
 	var points []float64
 	e := e0
-	for {
+	// One turn around point i visits each of its half-edges once; a walk
+	// longer than there are half-edges is cycling (upstream would not stop,
+	// and the cell would grow until memory ran out), and is degenerate.
+	for steps := 0; ; steps++ {
+		if steps > len(d.halfedges) {
+			d.err = errDegenerate
+			return nil
+		}
 		t := int(e / 3)
 		points = append(points, v.circumcenters[t*2], v.circumcenters[t*2+1])
 		if e%3 == 2 {
@@ -183,7 +216,7 @@ func (v *diagram) clip(i int32) []float64 {
 	}
 	V := v.vectors
 	k := int(i) * 4
-	if V[k] != 0 || V[k+1] != 0 {
+	if truthy(V[k]) || truthy(V[k+1]) { // V[v] || V[v + 1]
 		return v.simplify(v.clipInfinite(i, points, V[k], V[k+1], V[k+2], V[k+3]))
 	}
 	return v.simplify(v.clipFinite(i, points))
@@ -281,6 +314,7 @@ func (v *diagram) clipSegment(x0, y0, x1, y1 float64, c0, c1 int) ([4]float64, b
 			y = y0 + (y1-y0)*(v.xmin-x0)/(x1-x0)
 			x = v.xmin
 		}
+		x, y = num(x), num(y)
 		if c0 != 0 {
 			x0, y0 = x, y
 			c0 = v.regionCode(x0, y0)
@@ -359,14 +393,15 @@ func (v *diagram) edge(i int32, e0, e1 int, P []float64, j int) ([]float64, int)
 
 func (v *diagram) project(x0, y0, vx, vy float64) (x, y float64, ok bool) {
 	t := math.Inf(1)
-	if vy < 0 { // top
+	x, y = undef, undef // left unset when no side is hit
+	if vy < 0 {         // top
 		if y0 <= v.ymin {
 			return 0, 0, false
 		}
 		if c := (v.ymin - y0) / vy; c < t {
 			y = v.ymin
 			t = c
-			x = x0 + float64(t*vx)
+			x = num(x0 + float64(t*vx))
 		}
 	} else if vy > 0 { // bottom
 		if y0 >= v.ymax {
@@ -375,7 +410,7 @@ func (v *diagram) project(x0, y0, vx, vy float64) (x, y float64, ok bool) {
 		if c := (v.ymax - y0) / vy; c < t {
 			y = v.ymax
 			t = c
-			x = x0 + float64(t*vx)
+			x = num(x0 + float64(t*vx))
 		}
 	}
 	if vx > 0 { // right
@@ -385,7 +420,7 @@ func (v *diagram) project(x0, y0, vx, vy float64) (x, y float64, ok bool) {
 		if c := (v.xmax - x0) / vx; c < t {
 			x = v.xmax
 			t = c
-			y = y0 + float64(t*vy)
+			y = num(y0 + float64(t*vy))
 		}
 	} else if vx < 0 { // left
 		if x0 <= v.xmin {
@@ -394,7 +429,7 @@ func (v *diagram) project(x0, y0, vx, vy float64) (x, y float64, ok bool) {
 		if c := (v.xmin - x0) / vx; c < t {
 			x = v.xmin
 			t = c
-			y = y0 + float64(t*vy)
+			y = num(y0 + float64(t*vy))
 		}
 	}
 	return x, y, true
@@ -437,7 +472,7 @@ func (v *diagram) simplify(P []float64) []float64 {
 		for i := 0; i < len(P); i += 2 {
 			j := (i + 2) % len(P)
 			k := (i + 4) % len(P)
-			if P[i] == P[j] && P[j] == P[k] || P[i+1] == P[j+1] && P[j+1] == P[k+1] {
+			if same(P[i], P[j]) && same(P[j], P[k]) || same(P[i+1], P[j+1]) && same(P[j+1], P[k+1]) {
 				P = slices.Delete(P, j, j+2)
 				i -= 2
 				if len(P) == 0 {

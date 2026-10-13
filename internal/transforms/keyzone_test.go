@@ -8,6 +8,8 @@ import (
 
 	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/jsval"
+	"github.com/mgilbir/aster/internal/transforms/contour"
+	"github.com/mgilbir/aster/internal/transforms/hierarchy"
 )
 
 // A group key is String(value), and String(date) is exact to the second: two
@@ -39,5 +41,49 @@ func TestDatesWithinASecondShareAKey(t *testing.T) {
 	out, err = Aggregate(WithZone(context.Background(), loc), rows, AggregateParams{GroupBy: []Field{d}})
 	if err != nil || len(out) != 2 {
 		t.Errorf("aggregate in a zone: %v, %d groups", err, len(out))
+	}
+}
+
+// TestTransformPackagesKeyDatesLikeString is the audit's C52: nest,
+// stratify, kde2d and wordcloud built their keys with AsString, which writes
+// a date as epoch milliseconds, so dates 500 ms apart made two nest groups
+// keyed "100" and "600" where upstream makes one keyed String(date). They
+// take the transforms' one key function, KeyStringer, from the caller.
+func TestTransformPackagesKeyDatesLikeString(t *testing.T) {
+	tokyo, err := time.LoadLocation("Asia/Tokyo")
+	if err != nil {
+		t.Skip("no tz database")
+	}
+	ctx := WithZone(context.Background(), format.Local(tokyo))
+	str := KeyStringer(ctx)
+	rows := []jsval.Value{obj("d", jsval.Timestamp(100), "id", jsval.Int(1)), obj("d", jsval.Timestamp(600), "id", jsval.Int(2))}
+	get := func(k string) func(jsval.Value) jsval.Value {
+		return func(v jsval.Value) jsval.Value { return v.Get(k) }
+	}
+
+	tree, _, err := hierarchy.Nest(rows, []hierarchy.Accessor{get("d")}, str, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kids := tree.Root.Children; len(kids) != 1 || !strings.HasPrefix(kids[0].Data.Get("key").StrValue(), "Thu Jan 01 1970 09:00:00 GMT+0900") {
+		t.Errorf("nest: %d groups, first %v", len(kids), kids[0].Data.Get("key"))
+	}
+
+	srows := []jsval.Value{obj("id", jsval.Timestamp(0)), obj("id", jsval.Int(7), "p", jsval.Timestamp(0))}
+	st, err := hierarchy.Stratify(srows, get("id"), get("p"), str)
+	if err != nil || st.NodeByKey(str(jsval.Timestamp(0))) == nil {
+		t.Errorf("stratify by date: %v", err)
+	}
+
+	out, err := contour.KDE2D(ctx, rows, contour.KDE2DParams{
+		DensityParams: contour.DensityParams{X: get("id"), Y: get("id"), Size: []float64{8, 8}},
+		GroupBy:       []contour.GroupField{{Name: "d", Get: get("d")}}, KeyString: str,
+	})
+	if err != nil || len(out) != 1 {
+		t.Errorf("kde2d: %v, %d groups", err, len(out))
+	}
+
+	if got := str(jsval.ArrOf(jsval.Int(1), jsval.Null, jsval.Timestamp(0))); !strings.HasPrefix(got, "1,,Thu Jan 01 1970 09:00:00 GMT+0900") {
+		t.Errorf("array key %q", got)
 	}
 }

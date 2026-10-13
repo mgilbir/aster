@@ -1,6 +1,7 @@
 package vega
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"strings"
@@ -317,14 +318,13 @@ func (d *dataScope) countsRef(scope *Scope, field jsval.Value, sort jsval.Value)
 
 func addSortField(scope *Scope, p *paramList, sort jsval.Value) {
 	as := aggrField(sort.Get("op"), sort.Get("field"))
-	if ops, ok := p.get("ops").([]P); ok {
+	if _, ok := p.get("ops").([]P); ok {
 		names, _ := p.get("as").([]P)
 		for _, n := range names {
 			if s, ok := n.(string); ok && s == as {
 				return
 			}
 		}
-		_ = ops
 	} else {
 		p.set("ops", []P{"count"})
 		p.set("fields", []P{nil})
@@ -415,6 +415,9 @@ type Scope struct {
 type parseOptions struct {
 	// maxOps bounds the operators the parse produces, counted in ops.
 	maxOps, ops int
+	// ctx is the render's: the regular expressions an expression compiles
+	// are charged to its ledger.
+	ctx context.Context
 }
 
 func newScope(config jsval.Value, opts *parseOptions) *Scope {
@@ -812,11 +815,11 @@ func (s *Scope) objectProperty(spec jsval.Value) P {
 	return s.signalRef(propertyLambda(spec))
 }
 
-func (s *Scope) exprRef(code string, name string) P {
+// exprRef is Scope.exprRef. The name an `as` gives is recorded upstream as
+// the parameter's $name, which the runtime never reads: the accessor stays
+// unnamed (boundExpr.accessor).
+func (s *Scope) exprRef(code string, _ string) P {
 	fn := s.parseExpression(code)
-	if name != "" {
-		fn.name = name
-	}
 	return s.add(mk("expression", "expr", pExpr{fn: fn}))
 }
 

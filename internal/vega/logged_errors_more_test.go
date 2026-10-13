@@ -1,7 +1,6 @@
 package vega
 
 import (
-	"context"
 	"strings"
 	"testing"
 )
@@ -27,13 +26,13 @@ func TestExpressionContextVariables(t *testing.T) {
 		},
 	}
 	for _, c := range cases {
-		res, err := renderJSON(t, context.Background(), c.spec)
+		_, msgs, err := renderReporting(t, c.spec)
 		if err != nil {
 			t.Errorf("%s: %v", c.name, err)
 			continue
 		}
-		if len(res.Warnings) == 0 || !strings.Contains(res.Warnings[0], c.want) {
-			t.Errorf("%s: warnings %q, want %q", c.name, res.Warnings, c.want)
+		if len(msgs) == 0 || !strings.Contains(msgs[0], c.want) {
+			t.Errorf("%s: warnings %q, want %q", c.name, msgs, c.want)
 		}
 	}
 }

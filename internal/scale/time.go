@@ -7,11 +7,6 @@ import (
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
-// LocalZone is the calendar used by "time" scales (d3's local time). The engine
-// is deterministic, so it defaults to UTC; set it once at start-up to render in
-// another zone.
-var LocalZone = format.UTC
-
 // Time is d3.scaleTime / d3.scaleUtc: a continuous scale over dates whose
 // ticks, niceing and default labels follow a calendar.
 type Time struct {
@@ -67,27 +62,21 @@ func (s *Time) InvertRange(lo, hi jsval.Value) (jsval.Value, bool) {
 	return jsval.ArrOf(s.Invert(lo), s.Invert(hi)), true
 }
 
-// maxTimeTicks bounds tick generation for absurd extents; the format package
-// enforces its own limit and reports an error beyond it.
-func (s *Time) tickValues(count TickCount) []float64 {
-	start, stop := endpoints(s.domain)
-	var (
-		out []float64
-		err error
-	)
-	if count.Interval != nil {
-		out, err = format.TicksWith(context.Background(), *count.Interval, start, stop)
-	} else {
-		out, err = s.zone.Ticks(context.Background(), start, stop, count.countOrDefault())
-	}
-	if err != nil {
-		return nil
-	}
-	return out
+// Ticks is scale.ticks(count | interval): the calendar boundaries in the
+// domain. The walk is charged to the ledger in ctx and stops with ctx's
+// error; more boundaries than format.MaxRangeLen is an error wrapping
+// budget.ErrLimit (format.ErrRangeTooLarge), where d3 would list them all.
+func (s *Time) Ticks(ctx context.Context, count TickCount) ([]float64, error) {
+	return s.ticksN(ctx, count, format.MaxRangeLen)
 }
 
-// Ticks is scale.ticks(count | interval): the calendar boundaries in the domain.
-func (s *Time) Ticks(count TickCount) []float64 { return s.tickValues(count) }
+func (s *Time) ticksN(ctx context.Context, count TickCount, max int) ([]float64, error) {
+	start, stop := endpoints(s.domain)
+	if count.Interval != nil {
+		return format.TicksWithN(ctx, *count.Interval, start, stop, max)
+	}
+	return s.zone.TicksN(ctx, start, stop, count.countOrDefault(), max)
+}
 
 // Nice is scale.nice(count | interval): floors and ceils the domain end points
 // to the interval. A count picks the interval d3 would tick with; when no

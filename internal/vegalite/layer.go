@@ -19,7 +19,7 @@ func buildModel(cc *compileCtx, spec Value, parent Model, parentGivenName string
 	case isAnyConcatSpec(spec):
 		return newConcatModel(cc, spec, parent, parentGivenName, config, depth)
 	}
-	throw("Invalid spec: %s", stringify(spec))
+	throw("Invalid spec: %s", stringify(cc, spec))
 	return nil
 }
 
@@ -47,6 +47,7 @@ func newLayerModel(cc *compileCtx, spec Value, parent Model, parentGivenName str
 		layoutSize.Set("height", v)
 	}
 	for i, layer := range spec.Get("layer").Items() {
+		cc.work(1)
 		cc.check()
 		name := l.getName("layer_" + jsval.JSNumberString(float64(i)))
 		switch {
@@ -55,39 +56,46 @@ func newLayerModel(cc *compileCtx, spec Value, parent Model, parentGivenName str
 		case isUnitSpec(layer):
 			l.kids = append(l.kids, newUnitModel(cc, layer, l, name, layoutSize, config))
 		default:
-			throw("Invalid spec: %s", stringify(layer))
+			throw("Invalid spec: %s", stringify(cc, layer))
 		}
 	}
 	return l
 }
 
 func resolveFromSpec(r Value) *resolveIndex {
-	res := &resolveIndex{map[string]string{}, map[string]string{}, map[string]string{}}
-	fill := func(dst map[string]string, v Value) {
+	res := &resolveIndex{scale: map[string]string{}, axis: map[string]string{}, legend: map[string]string{}}
+	for kind, key := range []string{"scale", "axis", "legend"} {
+		if o := r.Get(key); r.IsObj() && r.ObjValue().Has(key) && !o.IsUndefined() && !isObject(o) {
+			res.prim[kind] = &o
+		}
+	}
+	// An invalid mode equals neither "shared" nor "independent". A scale's
+	// mode is defaulted with ??=, so only null and undefined are unset there;
+	// a guide's is read with || 'shared', so any falsy one is.
+	fill := func(dst map[string]string, v Value, nullishOnly bool) {
 		for _, k := range keysOf(v) {
 			s := v.Get(k)
 			switch {
-			case s.IsStr():
+			case s.IsStr() && s.StrValue() != "":
 				dst[k] = s.StrValue()
-			case s.IsTruthy():
-				// An invalid (non-string) resolve mode is truthy but equals neither
-				// "shared" nor "independent".
+			case s.IsTruthy() || (nullishOnly && !s.IsNullish()):
 				dst[k] = "\x00invalid"
 			}
 		}
 	}
-	fill(res.scale, r.Get("scale"))
-	fill(res.axis, r.Get("axis"))
-	fill(res.legend, r.Get("legend"))
+	fill(res.scale, r.Get("scale"), true)
+	fill(res.axis, r.Get("axis"), false)
+	fill(res.legend, r.Get("legend"), false)
 	return res
 }
 
 func (l *layerModel) children() []Model { return l.kids }
 
 func (l *layerModel) parseData() {
+	cc := l.b().ctx
 	l.comp.data = parseDataFor(l)
 	for _, c := range l.kids {
-		l.b().ctx.check()
+		cc.work(modelStep)
 		c.parseData()
 	}
 }
@@ -95,21 +103,37 @@ func (l *layerModel) parseData() {
 func (l *layerModel) parseLayoutSize() { parseLayerLayoutSize(l) }
 
 func (l *layerModel) parseSelections() {
+	cc := l.b().ctx
 	l.comp.selection = newOmap[*selectionComponent]()
 	for _, c := range l.kids {
-		l.b().ctx.check()
+		cc.work(modelStep)
 		c.parseSelections()
 		cs := c.b().comp.selection
 		for _, k := range cs.keyList() {
+			cc.work(1)
 			v, _ := cs.get(k)
 			l.comp.selection.set(k, v)
+		}
+	}
+	warnMultiViewAnimation(cc, l.comp.selection)
+}
+
+// warnMultiViewAnimation is the error upstream logs (log.error, which does
+// not throw) when a composite view holds a timer selection.
+func warnMultiViewAnimation(cc *compileCtx, sels *omap[*selectionComponent]) {
+	for _, k := range sels.keysView() {
+		cc.work(1)
+		if isTimerSelection(cc, sels.lookup(k)) {
+			cc.warn(msgMultiViewAnimationUnsupported)
+			return
 		}
 	}
 }
 
 func (l *layerModel) parseMarkGroup() {
+	cc := l.b().ctx
 	for _, c := range l.kids {
-		l.b().ctx.check()
+		cc.work(modelStep)
 		c.parseMarkGroup()
 	}
 }
@@ -117,45 +141,50 @@ func (l *layerModel) parseMarkGroup() {
 func (l *layerModel) parseAxesAndHeaders() { parseLayerAxes(l) }
 
 func (l *layerModel) assembleSelectionTopLevelSignals(signals []Value) []Value {
+	cc := l.b().ctx
 	for _, c := range l.kids {
-		l.b().ctx.check()
+		cc.work(modelStep)
 		signals = c.assembleSelectionTopLevelSignals(signals)
 	}
 	return signals
 }
 
 func (l *layerModel) assembleSignals() []Value {
+	cc := l.b().ctx
 	signals := assembleAxisSignals(l)
 	for _, c := range l.kids {
-		l.b().ctx.check()
+		cc.work(modelStep)
 		signals = append(signals, c.assembleSignals()...)
 	}
 	return signals
 }
 
 func (l *layerModel) assembleLayoutSignals() []Value {
+	cc := l.b().ctx
 	signals := assembleLayoutSignals(l)
 	for _, c := range l.kids {
-		l.b().ctx.check()
+		cc.work(modelStep)
 		signals = append(signals, c.assembleLayoutSignals()...)
 	}
 	return signals
 }
 
-func (l *layerModel) assembleSelectionData(data []Value) []Value {
+func (l *layerModel) assembleSelectionData(acc *selDataAcc) {
+	cc := l.b().ctx
 	for _, c := range l.kids {
-		l.b().ctx.check()
-		data = c.assembleSelectionData(data)
+		cc.work(modelStep)
+		c.assembleSelectionData(acc)
 	}
-	return data
 }
 
 func (l *layerModel) assembleGroupStyle() Value {
+	cc := l.b().ctx
 	seen := map[string]bool{}
 	var styles []string
 	for _, c := range l.kids {
-		l.b().ctx.check()
+		cc.work(modelStep)
 		for _, s := range arrayOf(c.assembleGroupStyle()) {
+			cc.work(1)
 			if !seen[s.AsString()] {
 				seen[s.AsString()] = true
 				styles = append(styles, s.AsString())
@@ -172,11 +201,12 @@ func (l *layerModel) assembleGroupStyle() Value {
 }
 
 func (l *layerModel) assembleTitle() Value {
+	cc := l.b().ctx
 	if t := l.modelBase.assembleTitle(); t.IsTruthy() {
 		return t
 	}
 	for _, c := range l.kids {
-		l.b().ctx.check()
+		cc.work(modelStep)
 		if t := c.assembleTitle(); t.IsTruthy() {
 			return t
 		}
@@ -187,18 +217,20 @@ func (l *layerModel) assembleTitle() Value {
 func (l *layerModel) assembleLayout() Value { return jsval.Null }
 
 func (l *layerModel) assembleMarks() []Value {
+	cc := l.b().ctx
 	var marks []Value
 	for _, c := range l.kids {
-		l.b().ctx.check()
+		cc.work(modelStep)
 		marks = append(marks, c.assembleMarks()...)
 	}
 	return assembleLayerSelectionMarks(l, marks)
 }
 
 func (l *layerModel) assembleLegends() []Value {
+	cc := l.b().ctx
 	legends := assembleLegends(l)
 	for _, c := range l.kids {
-		l.b().ctx.check()
+		cc.work(modelStep)
 		legends = append(legends, c.assembleLegends()...)
 	}
 	return legends
@@ -218,6 +250,9 @@ func newConcatModel(cc *compileCtx, spec Value, parent Model, parentGivenName st
 		resolve = resolveFromSpec(r)
 	}
 	c.modelBase = newModelBase(cc, c, spec, "concat", parent, parentGivenName, config, resolve, undef)
+	if ax := spec.Get("resolve").Get("axis"); strIs(ax.Get("x"), "shared") || strIs(ax.Get("y"), "shared") {
+		cc.warn(msgConcatCannotShareAxis)
+	}
 	var childSpecs Value
 	switch {
 	case isVConcatSpec(spec):
@@ -228,6 +263,7 @@ func newConcatModel(cc *compileCtx, spec Value, parent Model, parentGivenName st
 		childSpecs = spec.Get("concat")
 	}
 	for i, child := range childSpecs.Items() {
+		cc.work(1)
 		cc.check()
 		c.kids = append(c.kids, buildModel(cc, child, c, c.getName("concat_"+jsval.JSNumberString(float64(i))), nil, config, depth+1))
 	}
@@ -237,36 +273,42 @@ func newConcatModel(cc *compileCtx, spec Value, parent Model, parentGivenName st
 func (c *concatModel) children() []Model { return c.kids }
 
 func (c *concatModel) parseData() {
+	cc := c.b().ctx
 	c.comp.data = parseDataFor(c)
 	for _, k := range c.kids {
-		c.b().ctx.check()
+		cc.work(modelStep)
 		k.parseData()
 	}
 }
 
 func (c *concatModel) parseSelections() {
+	cc := c.b().ctx
 	c.comp.selection = newOmap[*selectionComponent]()
 	for _, k := range c.kids {
-		c.b().ctx.check()
+		cc.work(modelStep)
 		k.parseSelections()
 		cs := k.b().comp.selection
 		for _, key := range cs.keyList() {
+			cc.work(1)
 			v, _ := cs.get(key)
 			c.comp.selection.set(key, v)
 		}
 	}
+	warnMultiViewAnimation(cc, c.comp.selection)
 }
 
 func (c *concatModel) parseMarkGroup() {
+	cc := c.b().ctx
 	for _, k := range c.kids {
-		c.b().ctx.check()
+		cc.work(modelStep)
 		k.parseMarkGroup()
 	}
 }
 
 func (c *concatModel) parseAxesAndHeaders() {
+	cc := c.b().ctx
 	for _, k := range c.kids {
-		c.b().ctx.check()
+		cc.work(modelStep)
 		k.parseAxesAndHeaders()
 	}
 }
@@ -274,42 +316,46 @@ func (c *concatModel) parseAxesAndHeaders() {
 func (c *concatModel) parseLayoutSize() { parseConcatLayoutSize(c) }
 
 func (c *concatModel) assembleSelectionTopLevelSignals(signals []Value) []Value {
+	cc := c.b().ctx
 	for _, k := range c.kids {
-		c.b().ctx.check()
+		cc.work(modelStep)
 		signals = k.assembleSelectionTopLevelSignals(signals)
 	}
 	return signals
 }
 
 func (c *concatModel) assembleSignals() []Value {
+	cc := c.b().ctx
 	for _, k := range c.kids {
-		c.b().ctx.check()
+		cc.work(modelStep)
 		k.assembleSignals()
 	}
 	return nil
 }
 
 func (c *concatModel) assembleLayoutSignals() []Value {
+	cc := c.b().ctx
 	signals := assembleLayoutSignals(c)
 	for _, k := range c.kids {
-		c.b().ctx.check()
+		cc.work(modelStep)
 		signals = append(signals, k.assembleLayoutSignals()...)
 	}
 	return signals
 }
 
-func (c *concatModel) assembleSelectionData(data []Value) []Value {
+func (c *concatModel) assembleSelectionData(acc *selDataAcc) {
+	cc := c.b().ctx
 	for _, k := range c.kids {
-		c.b().ctx.check()
-		data = k.assembleSelectionData(data)
+		cc.work(modelStep)
+		k.assembleSelectionData(acc)
 	}
-	return data
 }
 
 func (c *concatModel) assembleMarks() []Value {
+	cc := c.b().ctx
 	var out []Value
 	for _, k := range c.kids {
-		c.b().ctx.check()
+		cc.work(modelStep)
 		title := k.assembleTitle()
 		style := k.assembleGroupStyle()
 		encodeEntry := k.b().assembleGroupEncodeEntry(false)

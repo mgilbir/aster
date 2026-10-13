@@ -3,10 +3,12 @@ package wordcloud
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"math"
 	"os"
 	"testing"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -134,5 +136,17 @@ func BenchmarkLayout(b *testing.B) {
 		if err := Transform(context.Background(), data, p); err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+// TestBoardCharged: the placement board is sized by the cloud (up to
+// 2^28 pixels, 32 MB), and is charged to the ledger before it is made.
+func TestBoardCharged(t *testing.T) {
+	l := budget.NewLedger(context.Background(), budget.LedgerLimits{MaxBytes: 1 << 20})
+	ctx := budget.WithLedger(context.Background(), l)
+	data := []jsval.Value{jsval.Obj(jsval.ObjectOf("text", jsval.Str("a")))}
+	err := Transform(ctx, data, Params{Size: &[2]float64{8192, 8192}, Text: func(v jsval.Value) jsval.Value { return v.Get("text") }})
+	if !errors.Is(err, budget.ErrLimit) || l.PeakBytes() > 1<<20 {
+		t.Fatalf("got %v, peak %d", err, l.PeakBytes())
 	}
 }

@@ -65,8 +65,8 @@ func TestHeatmapHostileGrid(t *testing.T) {
 	} {
 		spec := `{"data":[{"name":"g","values":[{"grid":` + grid + `}],"transform":[{"type":"heatmap","field":"grid"}]}]}`
 		// The dataflow logs the failure and goes on, as upstream does.
-		res, err := renderJSON(t, context.Background(), spec)
-		if err == nil && len(res.Warnings) == 0 {
+		_, msgs, err := renderReporting(t, spec)
+		if err == nil && len(msgs) == 0 {
 			t.Errorf("%s: want the transform to fail", name)
 		}
 	}

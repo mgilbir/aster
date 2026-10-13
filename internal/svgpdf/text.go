@@ -1,19 +1,22 @@
 package svgpdf
 
 import (
+	"context"
 	"fmt"
 	"math"
+	"slices"
 	"strings"
+	"unsafe"
 
 	"github.com/mgilbir/aster/internal/text"
 )
 
-// TextShaper shapes a text string with a CSS font specification into
-// positioned glyph runs, and can recover the raw font bytes behind a shaped
-// face (nil when unavailable). *text.Measurer implements it.
+// TextShaper shapes text in a font given by its parts into positioned glyph
+// runs, and recovers the font program behind a shaped face for embedding
+// (nil when there is none to embed). *text.Measurer implements it.
 type TextShaper interface {
-	ShapeText(s, cssFont string) ([]text.Run, float64)
-	FontData(face *text.Face) []byte
+	ShapeFont(s string, font text.CSSFont) ([]text.Run, float64)
+	FontData(ctx context.Context, face *text.Face) ([]byte, error)
 }
 
 // drawText renders a <text> element. Depending on the text mode, glyphs are
@@ -30,48 +33,153 @@ type TextShaper interface {
 // with x="0" and a dy of the line height. A tspan's x and y set the position,
 // its dx and dy move it, and its text is anchored on its own (each x starts a
 // new chunk); a tspan without x continues where the text before it ended.
+//
+// Its text is drawn after SVG's whitespace processing (xml:space default,
+// as the PNG writer does it): newlines are dropped, a tab is a space, spaces
+// collapse to one across the element, and the element's leading and trailing
+// space go (C59). No control character reaches the shaper, to be drawn as a
+// .notdef box.
 func (r *renderer) drawText(e *element, st gstate) error {
+	// The <text>'s own position, where its first line starts.
+	var x, y float64
+	if err := textPosition(e, &st, &x, &y); err != nil {
+		return err
+	}
 	if len(e.children) == 0 {
-		_, err := r.drawTextLine(e.text, st, 0, 0)
+		str, _ := collapseSpace(e.text, true)
+		_, err := r.drawTextLine(strings.TrimSuffix(str, " "), st, x, y)
 		return err
 	}
 	if strings.TrimSpace(e.text) != "" {
 		return fmt.Errorf("svgpdf: <text> mixing its own text with <tspan> is not supported")
 	}
-	var x, y float64
+	// The tspans' text after whitespace processing, which runs across them,
+	// then each drawn where its position says.
+	type line struct {
+		e   *element
+		st  gstate
+		str string
+	}
+	lines := make([]line, 0, len(e.children))
+	prevSpace, last := true, -1
 	for _, c := range e.children {
 		if c.name != "tspan" || len(c.children) > 0 {
 			return fmt.Errorf("svgpdf: <text> may hold only <tspan> elements of text, got <%s>", c.name)
 		}
-		if err := checkAttrs(c); err != nil {
-			return err
-		}
-		cst, err := applyPresentation(c, st)
+		cst, ep, err := r.applyPresentation(c, st)
 		if err != nil {
 			return err
 		}
-		for _, a := range []struct {
-			name string
-			set  func(float64)
-		}{
-			{"x", func(v float64) { x = v }}, {"y", func(v float64) { y = v }},
-			{"dx", func(v float64) { x += v }}, {"dy", func(v float64) { y += v }},
-		} {
-			if v, ok := c.attr(a.name); ok {
-				f, err := parseLength(v)
-				if err != nil {
-					return fmt.Errorf("svgpdf: <tspan> %s: %w", a.name, err)
-				}
-				a.set(f)
-			}
+		if ep.hidden {
+			continue
 		}
-		end, err := r.drawTextLine(c.text, cst, x, y)
+		var str string
+		str, prevSpace = collapseSpace(c.text, prevSpace)
+		if str != "" {
+			last = len(lines)
+		}
+		lines = append(lines, line{c, cst, str})
+	}
+	if last >= 0 {
+		lines[last].str = strings.TrimSuffix(lines[last].str, " ")
+	}
+	for _, l := range lines {
+		if err := textPosition(l.e, &l.st, &x, &y); err != nil {
+			return err
+		}
+		end, err := r.drawTextLine(l.str, l.st, x, y)
 		if err != nil {
 			return err
 		}
 		x = end
 	}
 	return nil
+}
+
+// textPosition applies the x, y, dx and dy of a <text> or <tspan> to the
+// current text position: x and y set it, dx and dy move it. A value that does
+// not parse is ignored; a list of them, a position per character, is not
+// supported.
+func textPosition(e *element, st *gstate, x, y *float64) error {
+	if len(e.attrs) == 0 {
+		return nil
+	}
+	for i, name := range [4]string{"x", "y", "dx", "dy"} {
+		v, ok := e.attr(name)
+		if !ok {
+			continue
+		}
+		c := st.lenX()
+		if i%2 == 1 {
+			c = st.lenY()
+		}
+		f, ok := parseLength(v, c)
+		if !ok {
+			if _, ok := parseNumberList(v); ok {
+				return fmt.Errorf("svgpdf: <%s> %s: a position per character is not supported", e.name, name)
+			}
+			continue // a value that does not parse is ignored
+		}
+		switch i {
+		case 0:
+			*x = f
+		case 1:
+			*y = f
+		case 2:
+			*x += f
+		case 3:
+			*y += f
+		}
+	}
+	return nil
+}
+
+// collapseSpace applies SVG's default whitespace rule to s: newlines are
+// dropped, a tab is a space, and a run of spaces is one, none at all after
+// a space before s (prevSpace). It reports whether s ends with a space, for
+// the text after it. s is returned as it is when there is nothing to do.
+func collapseSpace(s string, prevSpace bool) (string, bool) {
+	clean := true
+	ps := prevSpace
+	for i := 0; i < len(s) && clean; i++ {
+		switch c := s[i]; c {
+		case '\n', '\r', '\t':
+			clean = false
+		case ' ':
+			clean = !ps
+			ps = true
+		default:
+			ps = false
+		}
+	}
+	if clean {
+		return s, ps
+	}
+	b := make([]byte, 0, len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch c {
+		case '\n', '\r':
+			continue
+		case '\t':
+			c = ' '
+		}
+		if c == ' ' {
+			if prevSpace {
+				continue
+			}
+			prevSpace = true
+		} else {
+			prevSpace = false
+		}
+		b = append(b, c)
+	}
+	return string(b), prevSpace
+}
+
+// font is the font of the state, as its parts.
+func (st *gstate) font() text.CSSFont {
+	return text.CSSFont{Italic: st.italic, Weight: st.fontWeight, Size: st.fontSize, Family: st.fontFamily}
 }
 
 // drawTextLine draws one line of text with its anchor at (x, y), and returns
@@ -98,7 +206,9 @@ func (r *renderer) drawTextLine(str string, st gstate, x, y float64) (float64, e
 		return x, err
 	}
 
-	runs, advance := r.shaper.ShapeText(str, r.cssFont(st))
+	// The font as the element states it, never through a font string to be
+	// read back (C12). A size of zero draws nothing.
+	runs, advance := r.shaper.ShapeFont(str, st.font())
 	if len(runs) == 0 {
 		return x, nil
 	}
@@ -119,36 +229,39 @@ func (r *renderer) drawTextLine(str string, st gstate, x, y float64) (float64, e
 		defer r.w.restore()
 	}
 
+	// A link around the text covers its em boxes: from an ascent of the
+	// size above the baseline to a quarter of it below. What the glyphs
+	// draw inside does not grow it (a colour glyph's clips reach far).
+	if len(r.w.links) > 0 {
+		r.w.markBox(penX, -st.fontSize, penX+advance, st.fontSize/4)
+		links := r.w.links
+		r.w.links = nil
+		defer func() { r.w.links = links }()
+	}
+
 	r.w.fillColor(st.fill.Color)
 	// Reconcile the alpha (text is fill-only, so fill and stroke alpha match).
 	fillAlpha := st.opacity * st.fillOpacity * st.fill.alpha()
 	r.w.setAlpha(fillAlpha, fillAlpha)
 
-	for k, run := range runs {
-		// The source text a run's last cluster covers ends where the next
-		// run's text begins (or at the end of the string).
-		end := len(str)
-		if k+1 < len(runs) && len(runs[k+1].Glyphs) > 0 {
-			end = runs[k+1].Glyphs[0].Cluster
+	for _, run := range runs {
+		var f *pdfFont
+		if r.fonts != nil {
+			var err error
+			if f, err = r.fonts.fontFor(run.Face); err != nil {
+				return x, err
+			}
 		}
 		if hasColour(run) {
-			start := -1
-			if len(run.Glyphs) > 0 {
-				start = run.Glyphs[0].Cluster
-			}
 			var err error
-			if penX, err = r.drawTextRunColour(run, penX, str, start, end, st); err != nil {
+			if penX, err = r.drawTextRunColour(run, f, penX, str, st); err != nil {
 				return x, err
 			}
 			continue
 		}
-		var f *pdfFont
-		if r.fonts != nil {
-			f = r.fonts.fontFor(run.Face)
-		}
 		var err error
 		if f != nil {
-			penX, err = r.drawTextRunFont(f, run, penX, str, end)
+			penX, err = r.drawTextRunFont(f, run, penX, str)
 		} else {
 			penX, err = r.drawTextRunOutline(run, penX)
 		}
@@ -166,13 +279,18 @@ func (r *renderer) drawTextLine(str string, st gstate, x, y float64) (float64, e
 // The content stream operates under the global y-flip, so the text matrix
 // negates y again (D = -1) to keep glyphs upright; text-space x then
 // coincides with local x, letting shaped advances map 1:1.
-func (r *renderer) drawTextRunFont(f *pdfFont, run text.Run, penX float64, str string, textEnd int) (float64, error) {
+func (r *renderer) drawTextRunFont(f *pdfFont, run text.Run, penX float64, str string) (float64, error) {
 	size := run.Size
-	if size <= 0 {
-		return penX, fmt.Errorf("svgpdf: non-positive font size in shaped run")
-	}
 	upem := float64(f.parsed.UnitsPerEm())
 	penXStart := penX
+
+	// The run's text, for extraction: through the font's ToUnicode map, or,
+	// where a glyph of the run already maps to other text there, as the
+	// ActualText of the run (C58).
+	actual := r.mapRun(f, run, str) && run.Start >= 0 && run.Start < run.End && run.End <= len(str)
+	if actual {
+		r.w.beginActualText(str[run.Start:run.End])
+	}
 
 	r.w.beginText()
 	r.w.setTextFont(f.res, size)
@@ -199,10 +317,9 @@ func (r *renderer) drawTextRunFont(f *pdfFont, run text.Run, penX float64, str s
 
 	penText := 0.0 // viewer pen position in text space (== local px)
 	rise := 0.0
-	for i, g := range run.Glyphs {
+	for _, g := range run.Glyphs {
 		gid := uint16(g.GID)
 		f.used[gid] = true
-		r.recordToUnicode(f, run, i, str, textEnd)
 
 		// Vertical offset (mark positioning): PDF text rise. Shaping y is
 		// up; under the doubly-flipped text matrix a positive rise moves the
@@ -233,31 +350,63 @@ func (r *renderer) drawTextRunFont(f *pdfFont, run text.Run, penX float64, str s
 		r.w.textRise(0)
 	}
 	r.w.endText()
+	if actual {
+		r.w.endMarkedContent()
+	}
 	return penX, nil
 }
 
-// recordToUnicode maps a glyph to the source text of its cluster, for the
-// font's ToUnicode CMap (text extraction). The first mapping wins.
-func (r *renderer) recordToUnicode(f *pdfFont, run text.Run, i int, str string, textEnd int) {
-	gid := uint16(run.Glyphs[i].GID)
-	if _, ok := f.toUni[gid]; ok {
-		return
+// mapRun records, for the font's ToUnicode map, the text each glyph of the
+// run stands for, and reports whether a glyph of it already stands for other
+// text there, which a ToUnicode map, one text per glyph, cannot say.
+//
+// A cluster's text is the source text from its start to the next cluster's
+// start in logical order (or the run's end); it is mapped by the cluster's
+// first glyph in logical order, and its other glyphs (marks, the parts of a
+// decomposition) stand for nothing. Runs are in visual order: a right-to-left
+// run's clusters descend.
+func (r *renderer) mapRun(f *pdfFont, run text.Run, str string) (conflict bool) {
+	n := len(run.Glyphs)
+	if n == 0 || run.Start < 0 || run.End > len(str) || run.Start >= run.End {
+		return false
 	}
-	start := run.Glyphs[i].Cluster // byte offset in str
-	if start < 0 || start >= len(str) {
-		return
+	starts := r.clusterBuf[:0]
+	for _, g := range run.Glyphs {
+		starts = append(starts, g.Cluster)
 	}
-	end := textEnd
-	for _, g := range run.Glyphs[i+1:] {
-		if g.Cluster != start {
-			end = g.Cluster
-			break
+	slices.Sort(starts)
+	starts = slices.Compact(starts)
+	r.clusterBuf = starts
+	endOf := func(c int) int {
+		i, _ := slices.BinarySearch(starts, c+1)
+		if i < len(starts) {
+			return starts[i]
 		}
+		return run.End
 	}
-	if end <= start || end > len(str) {
-		return
+	rtl := n > 1 && run.Glyphs[0].Cluster > run.Glyphs[n-1].Cluster
+	prev := -1
+	for k := range n {
+		i := k
+		if rtl {
+			i = n - 1 - k
+		}
+		g := run.Glyphs[i]
+		want := ""
+		if c := g.Cluster; c != prev {
+			prev = c
+			if e := endOf(c); c >= run.Start && e <= run.End && c < e {
+				want = str[c:e]
+			}
+		}
+		gid := uint16(g.GID)
+		if have, ok := f.toUni[gid]; ok {
+			conflict = conflict || have != want
+			continue
+		}
+		f.toUni[gid] = want
 	}
-	f.toUni[gid] = str[start:end]
+	return conflict
 }
 
 // drawTextRunOutline emits one shaped run as filled glyph outlines (the
@@ -267,7 +416,12 @@ func (r *renderer) drawTextRunOutline(run text.Run, penX float64) (float64, erro
 	for _, g := range run.Glyphs {
 		outline, ok := r.glyphOutline(run.Face, g.GID, run.Size)
 		if !ok {
-			return penX, fmt.Errorf("svgpdf: glyph %d has non-outline data; bitmap/SVG fonts are not supported", g.GID)
+			// A glyph whose outline cannot be read (malformed, or a format
+			// forme does not draw) draws nothing, as in the PNG; colour
+			// glyphs never come here (drawTextRunColour). This was an error
+			// that blamed bitmap fonts whatever the cause (C102).
+			penX += g.Advance
+			continue
 		}
 		ox := penX + g.XOffset
 		oy := -g.YOffset
@@ -305,12 +459,26 @@ func (r *renderer) glyphOutline(face *text.Face, gid int, size float64) ([]text.
 	if err != nil {
 		return nil, false
 	}
-	if r.glyphs == nil {
-		r.glyphs = make(map[glyphKey][]text.Segment)
+	// Kept within maxGlyphCacheBytes, each charged to the call's ledger; a
+	// chart with more distinct glyphs and sizes than that has the rest made
+	// again where they repeat.
+	if n := int64(len(outline))*segmentBytes + glyphKeyBytes; r.glyphsBytes+n <= maxGlyphCacheBytes {
+		r.alloc(n)
+		r.glyphsBytes += n
+		if r.glyphs == nil {
+			r.glyphs = make(map[glyphKey][]text.Segment)
+		}
+		r.glyphs[key] = outline
 	}
-	r.glyphs[key] = outline
 	return outline, true
 }
+
+// segmentBytes is what one segment of an outline holds, and glyphKeyBytes
+// about what a cache entry holds besides.
+const (
+	segmentBytes  = int64(unsafe.Sizeof(text.Segment{}))
+	glyphKeyBytes = int64(unsafe.Sizeof(glyphKey{})) + 48
+)
 
 // emitGlyphOutline writes one glyph's outline as path operators and reports
 // whether anything was emitted (whitespace glyphs have empty outlines).
@@ -347,38 +515,4 @@ func emitGlyphOutline(w *contentWriter, outline []text.Segment, ox, oy float64) 
 		}
 	}
 	return true
-}
-
-// cssFont is cssFontString with the last result remembered: a chart's labels
-// share a handful of fonts, and formatting the size dominates a short label.
-func (r *renderer) cssFont(st gstate) string {
-	key := fontKey{st.fontStyle, st.fontWeight, st.fontSize, st.fontFamily}
-	if r.cssFontKey != key || r.cssFontStr == "" {
-		r.cssFontKey, r.cssFontStr = key, cssFontString(st)
-	}
-	return r.cssFontStr
-}
-
-// fontKey is the part of the graphics state cssFontString reads.
-type fontKey struct {
-	style, weight string
-	size          float64
-	family        string
-}
-
-// cssFontString rebuilds the CSS font shorthand that the text package parses,
-// from the inherited font state: "[style] [weight] <size>px <family>".
-func cssFontString(st gstate) string {
-	var b strings.Builder
-	if st.fontStyle == "italic" || st.fontStyle == "oblique" {
-		b.WriteString(st.fontStyle)
-		b.WriteByte(' ')
-	}
-	if st.fontWeight != "" && st.fontWeight != "normal" {
-		b.WriteString(st.fontWeight)
-		b.WriteByte(' ')
-	}
-	fmt.Fprintf(&b, "%gpx ", st.fontSize)
-	b.WriteString(st.fontFamily)
-	return b.String()
 }

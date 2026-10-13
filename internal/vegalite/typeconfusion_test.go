@@ -70,7 +70,8 @@ func setAtPath(root jsval.Value, path []string, nv jsval.Value) {
 // (every key, array element and container) by values of another type and checks
 // that the compiler returns an error or a result but never panics: a panic
 // surfaces from Compile as an "internal error" (its recover), which this test
-// rejects. The mutants are sampled deterministically; VEGALITE_FUZZ_N raises
+// rejects. Whether it fails exactly where upstream throws is checked against
+// node by the root package's TestVegaLiteTypeConfusionMatchesNode (ADR 0013). The mutants are sampled deterministically; VEGALITE_FUZZ_N raises
 // the count (and VEGALITE_FUZZ_SEED changes the sample).
 func TestTypeConfusion(t *testing.T) {
 	n := 1500
@@ -161,6 +162,9 @@ func TestInvalidSpecsReturnErrors(t *testing.T) {
 		"lookup from":      `{` + data + `,"transform":[{"lookup":"a","from":{"signal":"datum"}}],"mark":"point",` + enc + `}`,
 	} {
 		for _, version := range []string{Version64, Version58} {
+			if name == "on numbers" && version == Version58 {
+				continue // 5.8 has no timer selections, so nothing reads the events as objects; node compiles it
+			}
 			_, err := Compile(mustParse(t, spec), Options{Version: version})
 			if err == nil || strings.Contains(err.Error(), "internal error") {
 				t.Errorf("%s (%s): want a descriptive error, got %v", name, version, err)

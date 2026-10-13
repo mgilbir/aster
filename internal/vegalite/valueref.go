@@ -6,12 +6,12 @@ import (
 
 // Value references for mark encoding — vega-lite/src/compile/mark/encode/valueref.ts.
 
-func datumDefToExpr(dd Value) string {
+func datumDefToExpr(cc *compileCtx, dd Value) string {
 	datum := dd.Get("datum")
 	if isDateTime(datum) {
-		return dateTimeToExpr(datum)
+		return dateTimeToExpr(cc, datum)
 	}
-	return stringify(datum)
+	return stringifyText(nil, datum) // `${stringify(datum)}`
 }
 
 type midPointParams struct {
@@ -50,14 +50,14 @@ func valueRefForFieldOrDatumDef(cc *compileCtx, fd Value, scaleName string, opt 
 	if scaleName != "" {
 		ref.Set("scale", jsval.Str(scaleName))
 	}
-	if isDatumDef(fd) {
+	if isDatumDefOf(cc, fd) {
 		datum := fd.Get("datum")
 		switch {
 		case isDateTime(datum):
-			ref.Set("signal", jsval.Str(dateTimeToExpr(datum)))
+			ref.Set("signal", jsval.Str(dateTimeToExpr(cc, datum)))
 		case isSignalRef(datum):
 			ref.Set("signal", datum.Get("signal"))
-		case isExprRef(datum):
+		case isExprRef(cc, datum):
 			ref.Set("signal", datum.Get("expr"))
 		default:
 			ref.Set("value", datum)
@@ -92,10 +92,11 @@ func interpolatedSignalRef(cc *compileCtx, o interpolatedOpts) Value {
 	if endSuffix == "" {
 		endSuffix = "end"
 	}
+	// `0 < bandPosition && bandPosition < 1` compares as JavaScript does,
+	// the band position read as a number, whatever its type.
+	n := jsval.ToNumber(bandPosition)
 	expr := ""
-	if cc.v5 && bandPosition.IsNum() && 0 < bandPosition.NumValue() && bandPosition.NumValue() < 1 {
-		expr = "datum"
-	} else if !cc.v5 && !isSignalRef(bandPosition) && bandPosition.IsNum() && 0 < bandPosition.NumValue() && bandPosition.NumValue() < 1 {
+	if (cc.v5 || !isSignalRef(bandPosition)) && 0 < n && n < 1 {
 		expr = "datum"
 	}
 	start := vgField(cc, o.fod, fieldRefOption{expr: expr, suffix: o.startSuffix})
@@ -121,15 +122,14 @@ func interpolatedSignalRef(cc *compileCtx, o interpolatedOpts) Value {
 				bp := signalOf(bandPosition)
 				datum = bp + " * " + start + " + (1-" + bp + ") * " + end
 			} else {
-				bp := bandPosition.NumValue()
-				datum = jsval.JSNumberString(bp) + " * " + start + " + " + jsval.JSNumberString(1-bp) + " * " + end
+				// `${bandPosition} * … + ${1 - bandPosition} * …`
+				datum = bandPosition.AsString() + " * " + start + " + " + jsval.JSNumberString(1-n) + " * " + end
 			}
 		} else if isSignalRef(bandPosition) {
 			bp := signalOf(bandPosition)
 			datum = "(1-" + bp + ") * " + start + " + " + bp + " * " + end
 		} else {
-			bp := bandPosition.NumValue()
-			datum = jsval.JSNumberString(1-bp) + " * " + start + " + " + jsval.JSNumberString(bp) + " * " + end
+			datum = jsval.JSNumberString(1-n) + " * " + start + " + " + bandPosition.AsString() + " * " + end
 		}
 		ref.Set("signal", jsval.Str(`scale("`+jsName(o.scaleName)+`", `+datum+")"))
 	}
@@ -153,7 +153,7 @@ func midPoint(cc *compileCtx, p midPointParams) Value {
 				scaleType = p.scale.get("type").AsString()
 			}
 			bandPosition := p.bandPosition
-			if isTypedFieldDef(p.channelDef) {
+			if isTypedFieldDefOf(cc, p.channelDef) {
 				if bandPosition.IsNullish() {
 					bandPosition = getBandPosition(cc, p.channelDef, p.channel2Def, p.markDef, p.config)
 				}
@@ -175,6 +175,11 @@ func midPoint(cc *compileCtx, p midPointParams) Value {
 					if isFieldDef(cc, p.channel2Def) {
 						return interpolatedSignalRef(cc, interpolatedOpts{scaleName: p.scaleName, fod: p.channelDef, fod2: p.channel2Def, bandPosition: bandPosition, offset: p.offset})
 					}
+					channel2 := chY2
+					if p.channel == chX {
+						channel2 = chX2
+					}
+					cc.warn(msgChannelRequiredForBinned(channel2))
 				}
 			}
 			opt := fieldRefOption{}
@@ -188,7 +193,7 @@ func midPoint(cc *compileCtx, p midPointParams) Value {
 			return valueRefForFieldOrDatumDef(cc, p.channelDef, p.scaleName, opt, refOffsetBand{offset: p.offset, band: band})
 		} else if isValueDef(p.channelDef) {
 			value := p.channelDef.Get("value")
-			o := cloneObj(widthHeightValueOrSignalRef(p.channel, value).ObjValue())
+			o := cloneObj(widthHeightValueOrSignalRef(cc, p.channel, value).ObjValue())
 			if p.offset.IsTruthy() {
 				o.Set("offset", p.offset)
 			}
@@ -209,14 +214,14 @@ func midPoint(cc *compileCtx, p midPointParams) Value {
 	return defaultRef
 }
 
-func widthHeightValueOrSignalRef(channel string, value Value) Value {
+func widthHeightValueOrSignalRef(cc *compileCtx, channel string, value Value) Value {
 	if (channel == "x" || channel == "x2") && value.IsStr() && value.StrValue() == "width" {
 		return mkv("field", mkv("group", "width"))
 	}
 	if (channel == "y" || channel == "y2") && value.IsStr() && value.StrValue() == "height" {
 		return mkv("field", mkv("group", "height"))
 	}
-	r := signalOrValueRef(value)
+	r := signalOrValueRef(cc, value)
 	if r.IsUndefined() {
 		return mkv()
 	}
@@ -236,13 +241,13 @@ func getConditionalValueRefForIncludingInvalidValue(cc *compileCtx, scaleChannel
 	if fd.IsTruthy() && mode == "show" {
 		includeAs := coalesce(config.Get("scale").Get("invalid").Get(scaleChannel), jsval.Str("zero-or-min"))
 		o := mk("test", fieldValidPredicate(vgField(cc, fd, fieldRefOption{expr: "datum"}), false))
-		spread(o, refForInvalidValues(includeAs, scale, scaleName))
+		spread(o, refForInvalidValues(cc, includeAs, scale, scaleName))
 		return jsval.Obj(o)
 	}
 	return undef
 }
 
-func refForInvalidValues(includeAs Value, scale *scaleComponent, scaleName string) Value {
+func refForInvalidValues(cc *compileCtx, includeAs Value, scale *scaleComponent, scaleName string) Value {
 	if isObject(includeAs) && includeAs.IsObj() && includeAs.ObjValue().Has("value") {
 		v := includeAs.Get("value")
 		if isSignalRef(v) {
@@ -250,18 +255,18 @@ func refForInvalidValues(includeAs Value, scale *scaleComponent, scaleName strin
 		}
 		return mkv("value", v)
 	}
-	return scaledZeroOrMinOrMax(scaleName, scale, "zeroOrMin", "", "")
+	return scaledZeroOrMinOrMax(cc, scaleName, scale, "zeroOrMin", "", "")
 }
 
 // scaledZeroOrMinOrMax builds the ref for the scaled zero (or domain min/max).
-func scaledZeroOrMinOrMax(scaleName string, scale *scaleComponent, mode string, widthSignal, heightSignal string) Value {
+func scaledZeroOrMinOrMax(cc *compileCtx, scaleName string, scale *scaleComponent, mode string, widthSignal, heightSignal string) Value {
 	if scale == nil || scaleName == "" {
 		return undef
 	}
 	domain := "domain('" + scaleName + "')"
 	min := domain + "[0]"
 	max := "peek(" + domain + ")"
-	switch scale.domainHasZero() {
+	switch scale.domainHasZero(cc) {
 	case "definitely":
 		return mkv("scale", scaleName, "value", 0)
 	case "maybe":

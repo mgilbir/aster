@@ -12,10 +12,13 @@ import (
 )
 
 // FrameBound is one end of a window frame: an offset in rows relative to the
-// current row (negative before, positive after), or unbounded.
+// current row (negative before, positive after), or unbounded. The offset is
+// any number, as upstream adds it to the row index and clamps the sum to the
+// partition: an infinite or huge one reaches the partition's end, and a NaN
+// or fractional one leaves the frame where upstream leaves it.
 type FrameBound struct {
 	Unbounded bool
-	Offset    int
+	Offset    float64
 }
 
 // WindowOpSpec is one window or aggregate operation of the window transform.
@@ -58,10 +61,14 @@ type windowFrame struct {
 	i0, i1, p0, p1, index int
 	data                  []jsval.Value
 	compare               Comparator // never nil: without Sort it always says "different"
-	// sortField is the field the comparator reads; err is set by adjustPeers
-	// when upstream's comparator would be handed undefined.
+	// sortField is the field the comparator reads, for the error of handing
+	// it undefined.
 	sortField string
-	err       error
+	// x0 and x1 are the frame's ends as upstream holds them (NaN or
+	// fractional ones included), which the operations read rows at; err is
+	// the exception one of them raised.
+	x0, x1 float64
+	err    error
 }
 
 type windowOp interface {
@@ -146,21 +153,27 @@ func newWindowOp(spec WindowOpSpec) (op windowOp, ok bool, err error) {
 		if err := needField(); err != nil {
 			return nil, true, err
 		}
-		off := 1
-		if p := spec.Param; p == p && p != 0 && math.Abs(p) < 1e9 {
-			off = int(p) // `+offset || 1`: NaN and 0 fall back to 1
+		// offset = +offset || 1: NaN and 0 fall back to 1. Any other number
+		// is used as it is, so a huge one reads past the partition (null).
+		off := spec.Param
+		if off == 0 || off != off {
+			off = 1
 		}
+		// lag tests i >= 0 and lead i < length, and nothing else: a row
+		// past the other end, or between two rows, is undefined, and
+		// reading its field is a TypeError.
+		name := spec.Field.Name
 		if spec.Op == "lag" {
 			return windowFn{nextFn: func(w *windowFrame) jsval.Value {
-				if i := w.index - off; i >= 0 && i < len(w.data) {
-					return get(w.data[i])
+				if i := float64(w.index) - off; i >= 0 {
+					return w.field(get, name, i)
 				}
 				return jsval.Null
 			}}, true, nil
 		}
 		return windowFn{nextFn: func(w *windowFrame) jsval.Value {
-			if i := w.index + off; i >= 0 && i < len(w.data) {
-				return get(w.data[i])
+			if i := float64(w.index) + off; i < float64(len(w.data)) {
+				return w.field(get, name, i)
 			}
 			return jsval.Null
 		}}, true, nil
@@ -168,12 +181,14 @@ func newWindowOp(spec WindowOpSpec) (op windowOp, ok bool, err error) {
 		if err := needField(); err != nil {
 			return nil, true, err
 		}
-		return windowFn{nextFn: func(w *windowFrame) jsval.Value { return atOrUndefined(get, w.data, w.i0) }}, true, nil
+		name := spec.Field.Name
+		return windowFn{nextFn: func(w *windowFrame) jsval.Value { return w.field(get, name, w.x0) }}, true, nil
 	case "last_value":
 		if err := needField(); err != nil {
 			return nil, true, err
 		}
-		return windowFn{nextFn: func(w *windowFrame) jsval.Value { return atOrUndefined(get, w.data, w.i1-1) }}, true, nil
+		name := spec.Field.Name
+		return windowFn{nextFn: func(w *windowFrame) jsval.Value { return w.field(get, name, w.x1-1) }}, true, nil
 	case "nth_value":
 		if err := needField(); err != nil {
 			return nil, true, err
@@ -182,12 +197,12 @@ func newWindowOp(spec WindowOpSpec) (op windowOp, ok bool, err error) {
 		if !(nth > 0) {
 			return nil, true, errors.New("nth_value nth must be greater than zero")
 		}
+		name := spec.Field.Name
 		return windowFn{nextFn: func(w *windowFrame) jsval.Value {
-			if nth > float64(len(w.data)) {
-				return jsval.Null
-			}
-			if i := w.i0 + int(nth) - 1; i < w.i1 {
-				return atOrUndefined(get, w.data, i)
+			// i = w.i0 + (nth - 1) < w.i1, in floating point: a huge nth is
+			// past the frame (null), a NaN end is never less.
+			if i := w.x0 + (nth - 1); i < w.x1 {
+				return w.field(get, name, i)
 			}
 			return jsval.Null
 		}}, true, nil
@@ -227,13 +242,18 @@ func newWindowOp(spec WindowOpSpec) (op windowOp, ok bool, err error) {
 	return nil, false, nil
 }
 
-// atOrUndefined reads the field of data[i]. Upstream throws when i is out of
-// range (an empty frame); this answers undefined.
-func atOrUndefined(get Accessor, data []jsval.Value, i int) jsval.Value {
-	if i < 0 || i >= len(data) {
-		return jsval.Undefined
+// field is field(w.data[i]) for a window operation: a position that is not
+// a row (past either end, between two rows, NaN) is undefined, and reading a
+// field of it is the TypeError upstream throws, recorded in w.err for Window
+// to return through the operator's error, as upstream's dataflow catches it.
+func (w *windowFrame) field(get Accessor, name string, i float64) jsval.Value {
+	if i >= 0 && i < float64(len(w.data)) && i == math.Trunc(i) {
+		return get(w.data[int(i)])
 	}
-	return get(data[i])
+	if w.err == nil {
+		w.err = readsUndefined(name)
+	}
+	return jsval.Undefined
 }
 
 // Window computes window calculations per partition and writes the results
@@ -278,7 +298,20 @@ func Window(ctx context.Context, data []jsval.Value, p WindowParams) ([]jsval.Va
 		compare = func(a, b jsval.Value) int { return -1 }
 	}
 
-	tick := budget.NewTicker(ctx)
+	f0, f1 := math.Inf(-1), math.Inf(1)
+	if !frame[0].Unbounded {
+		f0 = frame[0].Offset
+	}
+	if !frame[1].Unbounded {
+		f1 = frame[1].Offset
+	}
+	// A frame whose ends are whole (or infinite) and never cross keeps the
+	// rows of a cell exactly [i0, i1); any other runs upstream's tuple store
+	// as it is (windowStore.slow).
+	regular := wholeOrInf(f0) && wholeOrInf(f1) && f0 <= f1+1
+
+	m := budget.NewMeter(ctx)
+	led := budget.LedgerFrom(ctx)
 	for _, g := range GroupByKey(data, KeyOf(zoneOf(ctx), p.GroupBy...)) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -290,47 +323,56 @@ func Window(ctx context.Context, data []jsval.Value, p WindowParams) ([]jsval.Va
 		n := len(rows)
 		w := windowFrame{data: rows, compare: compare, sortField: p.SortField}
 		var c *cell
+		var st *windowStore
 		if ms != nil {
 			c = ms.newCell()
+			if ms.needStore {
+				st = &windowStore{rows: rows, slow: !regular, ledger: led}
+				ms.store = st
+			}
 		}
 		for _, o := range wins {
 			o.init()
 		}
+		var x0, x1 float64 // the frame as upstream holds it, for the slow store
 		for i := 0; i < n; i++ {
-			if err := tick.Add(1); err != nil {
+			if err := m.Work(1); err != nil {
 				return nil, err
 			}
 			w.p0, w.p1 = w.i0, w.i1
-			start := 0
+			p0, p1 := x0, x1
+			// start = f[0] == null ? 0 : i + f[0], end = f[1] == null ? n :
+			// i + f[1] + 1, each clamped to [0, n].
+			x0, x1 = 0, float64(n)
 			if !frame[0].Unbounded {
-				start = i + frame[0].Offset
+				x0 = clampFrame(float64(i)+f0, n)
 			}
-			end := n
 			if !frame[1].Unbounded {
-				end = i + frame[1].Offset + 1
+				x1 = clampFrame(float64(i)+f1+1, n)
 			}
-			w.i0, w.i1, w.index = min(max(start, 0), n), min(max(end, 0), n), i
 			if rangeFrame {
-				if adjustPeers(&w); w.err != nil {
-					return nil, w.err
+				var err error
+				if x0, x1, err = adjustPeers(&w, x0, x1); err != nil {
+					return nil, err
 				}
 			}
+			w.i0, w.i1, w.index = frameIndex(x0), frameIndex(x1), i
+			w.x0, w.x1 = x0, x1
 			t := rows[i].ObjValue()
 			if c != nil {
-				for j := w.p0; j < w.i0; j++ {
-					ms.rem(c, rows[j])
+				var err error
+				if regular {
+					err = windowMoveRegular(ms, c, st, rows, w.p0, w.p1, w.i0, w.i1)
+				} else {
+					err = windowMoveSlow(ms, c, st, rows, p0, p1, x0, x1, &m)
 				}
-				for j := w.p1; j < w.i1; j++ {
-					ms.add(c, rows[j])
-				}
-				c.data = nil
-				if w.i0 < w.i1 {
-					c.data = rows[w.i0:w.i1]
+				if err != nil {
+					return nil, err
 				}
 				if t != nil {
 					// Writing costs a pass over the frame (median, quartiles,
-					// bootstrap, ...), so large frames are polled every row.
-					if err := tick.Add(w.i1 - w.i0); err != nil {
+					// bootstrap, ...), so large frames are metered every row.
+					if err := m.Work(int64(len(c.data))); err != nil {
 						return nil, err
 					}
 					ms.write(c, t)
@@ -340,37 +382,74 @@ func Window(ctx context.Context, data []jsval.Value, p WindowParams) ([]jsval.Va
 				}
 			}
 			for k, o := range wins {
-				if v := o.next(&w); t != nil {
+				v := o.next(&w)
+				if w.err != nil {
+					return nil, w.err
+				}
+				if t != nil {
 					t.Set(outs[k], v)
 				}
 			}
+		}
+		if err := st.flush(); err != nil {
+			return nil, err
 		}
 	}
 	return data, nil
 }
 
-// adjustPeers widens the frame to whole peer groups (rows equal under the sort
-// comparator), as upstream's range frames do.
+// wholeOrInf reports an offset that is an integer or infinite.
+func wholeOrInf(f float64) bool {
+	return math.IsInf(f, 0) || f == math.Trunc(f)
+}
+
+// clampFrame is upstream's clamp(x, 0, n); NaN stays NaN.
+func clampFrame(x float64, n int) float64 {
+	switch {
+	case x < 0:
+		return 0
+	case x > float64(n):
+		return float64(n)
+	}
+	return x
+}
+
+// frameIndex is a clamped frame position as an index, for the window
+// operations, which read data[i0] and data[i1 - 1]: a position that is not a
+// whole number reads past the rows (see windowFrame.field).
+func frameIndex(x float64) int {
+	if x != math.Trunc(x) { // NaN or fractional
+		return -1 << 30
+	}
+	return int(x)
+}
+
+// adjustPeers widens the frame [x0, x1) to whole peer groups (rows equal
+// under the sort comparator), as upstream's range frames do.
 //
 // Upstream indexes d[r0] and d[r1] without a bounds check: a window that
-// starts past the last row (r0 == len) or ends before the first (r1 == -1)
-// hands undefined to the comparator, which reads a field of it and throws.
-func adjustPeers(w *windowFrame) {
-	r0, r1, d, n := w.i0, w.i1-1, w.data, len(w.data)-1
-	if r0 > 0 && r0 >= len(d) {
-		w.err = readsUndefined(w.sortField)
-		return
+// starts past the last row (r0 == len), ends before the first (r1 == -1), or
+// has a fractional end hands undefined to the comparator, which reads a
+// field of it and throws. A NaN end is never compared.
+func adjustPeers(w *windowFrame, x0, x1 float64) (float64, float64, error) {
+	d, n := w.data, float64(len(w.data)-1)
+	if r0 := x0; r0 > 0 {
+		if r0 > n || r0 != math.Trunc(r0) {
+			return x0, x1, readsUndefined(w.sortField)
+		}
+		if i := int(r0); w.compare(d[i], d[i-1]) == 0 {
+			x0 = float64(peerBound(d, d[i], w.compare, false))
+		}
 	}
-	if r0 > 0 && w.compare(d[r0], d[r0-1]) == 0 {
-		w.i0 = peerBound(d, d[r0], w.compare, false)
+	if r1 := x1 - 1; r1 < n {
+		if r1 < 0 || r1 != math.Trunc(r1) {
+			return x0, x1, readsUndefined(w.sortField)
+		}
+		if i := int(r1); w.compare(d[i], d[i+1]) == 0 {
+			x1 = float64(peerBound(d, d[i], w.compare, true))
+		}
 	}
-	if r1 < n && r1 < 0 {
-		w.err = readsUndefined(w.sortField)
-		return
-	}
-	if r1 < n && w.compare(d[r1], d[r1+1]) == 0 {
-		w.i1 = peerBound(d, d[r1], w.compare, true)
-	}
+	return x0, x1, nil
 }
 
 // readsUndefined is the TypeError of a comparator reading field of undefined.
@@ -378,7 +457,7 @@ func readsUndefined(field string) error {
 	if segs := jsval.ParseFieldPath(field); len(segs) > 0 {
 		field = segs[0]
 	}
-	return fmt.Errorf("Cannot read properties of undefined (reading '%s')", field)
+	return &jsval.Thrown{Name: "TypeError", Msg: "Cannot read properties of undefined (reading '" + field + "')"}
 }
 
 // peerBound is d3's bisector.left (right=false) or bisector.right over the

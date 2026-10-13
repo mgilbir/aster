@@ -443,7 +443,7 @@ func facSieve(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 		if pulse.items != nil {
 			n.value = pulse.items
 		} else {
-			n.value = pulse.tuples
+			n.value = pulse.rawSource() // Sieve keeps pulse.source, unfiltered
 		}
 		n.tree = pulse.tree
 		if pulse.changed {
@@ -456,7 +456,7 @@ func facSieve(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 func facValues(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *opParams) any) {
 	return nil, trFunc(func(n *opNode, p *opParams, pulse *flowPulse) *flowPulse {
 		if n.value == nil || p.Modified("field", "sort") || pulse.changed {
-			src := pulse.tuples
+			src := pulse.rawSource() // Values reads pulse.source
 			f, _ := p.Get("field").(transforms.Field)
 			if cmp := p.comparator("sort"); cmp != nil {
 				src = append([]jsval.Value(nil), src...)
@@ -475,18 +475,33 @@ func facValues(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode,
 func facExtent(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *opParams) any) {
 	return jsval.ArrOf(jsval.Undefined, jsval.Undefined), trFunc(func(n *opNode, p *opParams, pulse *flowPulse) *flowPulse {
 		f, _ := p.Get("field").(transforms.Field)
-		lo, hi, ok, err := transforms.FieldExtent(n.g.ctx, pulse.tuples, f)
+		// a changed pulse is visited whole: its source
+		lo, hi, ok, err := transforms.FieldExtent(n.g.ctx, pulse.sourceView(), f)
 		if err != nil {
 			failErr(err)
 		}
 		if !ok {
-			n.g.warn("Infinite extent for field \"" + f.Name + "\"")
+			n.g.warn(infiniteExtent(f, lo, hi))
 			n.value = jsval.ArrOf(jsval.Undefined, jsval.Undefined)
 		} else {
 			n.value = jsval.ArrOf(jsval.Num(lo), jsval.Num(hi))
 		}
 		return nil
 	}), nil
+}
+
+// infiniteExtent is Extent's warning: `Infinite extent${name}: [${min},
+// ${max}]`, where name is ` for field "…"` when the accessor has a name. An
+// expression's accessor has none, and the template prints undefined.
+func infiniteExtent(f transforms.Field, lo, hi float64) string {
+	name := ""
+	switch {
+	case f.Unnamed:
+		name = "undefined"
+	case f.Name != "":
+		name = ` for field "` + f.Name + `"`
+	}
+	return "Infinite extent" + name + ": [" + jsval.JSNumberString(lo) + ", " + jsval.JSNumberString(hi) + "]"
 }
 
 func facMultiExtent(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *opParams) any) {
@@ -537,7 +552,7 @@ type tupleIndex struct {
 func facTupleIndex(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *opParams) any) {
 	return (*tupleIndex)(nil), trFunc(func(n *opNode, p *opParams, pulse *flowPulse) *flowPulse {
 		f, _ := p.Get("field").(transforms.Field)
-		tuples := pulse.tuples
+		tuples := pulse.sourceView() // a first run visits the source
 		if pulse.items != nil {
 			// A named mark's data are its items ("reactive geometry").
 			tuples = n.g.view.itemTuples(pulse.items)
@@ -552,7 +567,7 @@ func facTupleIndex(c *rtContext, n *opNode, e *entry) (any, transform, func(*opN
 		}
 		n.value = idx
 		n.modified = true
-		return &flowPulse{stamp: pulse.stamp, encode: pulse.encode, changed: pulse.changed, tuples: pulse.tuples}
+		return &flowPulse{stamp: pulse.stamp, encode: pulse.encode, changed: pulse.changed, tuples: pulse.tuples, src: pulse.src}
 	}), nil
 }
 
@@ -570,8 +585,15 @@ func facRelay(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 			src = concatTuples(pulse.multi)
 		}
 		if !p.Value("derive").IsTruthy() {
-			return &flowPulse{stamp: pulse.stamp, encode: pulse.encode, changed: true, tuples: src, tree: pulse.tree}
+			res := &flowPulse{stamp: pulse.stamp, encode: pulse.encode, changed: true, tuples: src, tree: pulse.tree}
+			if len(pulse.multi) == 0 {
+				res.src = pulse.src
+			}
+			return res
 		}
+		// Every tuple handed on is a copy the relay holds, as heavy as its
+		// source.
+		n.g.view.holdHeldRows(n, src)
 		out := make([]jsval.Value, len(src))
 		copies := make([]relayCopy, 0, len(src))
 		var lut map[*jsval.Object]*jsval.Object
@@ -586,7 +608,12 @@ func facRelay(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 		for i, t := range src {
 			o := t.ObjValue()
 			if o == nil {
-				out[i] = t
+				// derive(t) copies the properties a for-in loop finds: a
+				// number (a crossfilter's index) has none, and its copy is
+				// an empty tuple.
+				e := jsval.NewObject(0)
+				e.EnsureTupleID()
+				out[i] = jsval.Obj(e)
 				continue
 			}
 			if lut == nil && !ids.add(o) {
@@ -601,7 +628,11 @@ func facRelay(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 				d = lut[o]
 			}
 			if d == nil {
+				// derive(t) is rederive(t, ingest({})): the copy is a tuple
+				// of its own, with the next id, which a sort breaks ties by.
 				d = cl.Clone(o)
+				d.SetTupleID(0)
+				d.EnsureTupleID()
 				if lut != nil {
 					lut[o] = d
 				}
@@ -623,8 +654,8 @@ type relayCopy struct{ src, dst *jsval.Object }
 
 // tidSet is a set of tuples by tuple id: what an operator uses to know,
 // without a map, that a tuple of a pulse has not come before in that pulse.
-// Distinct tuples can share an id (a derived copy keeps its source's), so a
-// tuple add finds in the set has only perhaps come before. init fails when a
+// Distinct tuples can share an id (a copy ingest makes of a tuple keeps the
+// tuple's), so a tuple add finds in the set has only perhaps come before. init fails when a
 // tuple has no id, or the ids spread over more than 64 per tuple.
 type tidSet struct {
 	lo   uint32
@@ -673,12 +704,20 @@ func (s *tidSet) add(o *jsval.Object) bool {
 func facLoad(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *opParams) any) {
 	return []jsval.Value(nil), trFunc(func(n *opNode, p *opParams, pulse *flowPulse) *flowPulse {
 		format := p.Value("format")
-		var data []jsval.Value
-		if v := p.Value("values"); !v.IsUndefined() && p.Has("values") {
-			data = c.view.parseValues(v, format)
-		} else {
-			data = c.view.request(p.Value("url"), format)
-		}
+		data := func() []jsval.Value {
+			// The data set's rows are replaced: the ones it holds are free
+			// to the parse that makes the new ones.
+			bud := c.view.bud
+			defer bud.Replacing(bud.Replacing(n.srcRecord()))
+			// `if (_.values)`: a falsy value loads the url.
+			if v := p.Value("values"); v.IsTruthy() {
+				return c.view.parseValues(v, format)
+			}
+			return c.view.request(p.Value("url"), format)
+		}()
+		// The Load transform's ingest wraps a null row as {data: null}; only
+		// a change set reads its id (see seedCollect).
+		c.view.holdSrcRows(n, data)
 		var cl jsval.Cloner
 		for i := range data {
 			data[i] = ingestTupleWith(&cl, data[i])

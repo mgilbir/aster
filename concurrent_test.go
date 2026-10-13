@@ -106,8 +106,10 @@ func TestConcurrentConverterSharesNothing(t *testing.T) {
 				}
 				if k%25 == 0 && err == nil {
 					// PNG and PDF are exercised for races only; svgpdf supports
-					// a subset of SVG, so its errors are expected.
-					if _, err := c.SVGToPNG(got); err != nil {
+					// a subset of SVG, so its errors are expected. An image
+					// the offline corpus loader refuses fails the PNG (ADR
+					// 0006), so the PNG renders past it, as upstream would.
+					if _, err := c.SVGToPNG(got, asUpstream); err != nil {
 						t.Errorf("png: %v", err)
 					}
 					_, _ = c.SVGToPDF(got)

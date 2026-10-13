@@ -3,6 +3,8 @@ package format
 import (
 	"context"
 	"errors"
+	"github.com/mgilbir/aster/internal/budget"
+	"github.com/mgilbir/aster/internal/testutil"
 	"math"
 	"math/rand"
 	"testing"
@@ -95,21 +97,34 @@ func TestRangeBounds(t *testing.T) {
 func TestHugeOffsetsTerminate(t *testing.T) {
 	q, _ := IntervalFor(UTC, UnitQuarter)
 	start := time.Now()
-	for _, step := range []float64{1e9, -1e9, math.Inf(1), math.Inf(-1), 1e300} {
-		if got := q.Offset(0, step); !math.IsNaN(got) {
+	for _, step := range []float64{1e9, math.Inf(-1)} {
+		if got := offsetT(q, 0, step); !math.IsNaN(got) {
 			t.Errorf("quarter offset %v = %v, want NaN", step, got)
 		}
 	}
 	w3, _ := UTC.Week(0).Every(3)
-	if got := w3.Offset(0, 1e12); !math.IsNaN(got) {
+	if got := offsetT(w3, 0, 1e12); !math.IsNaN(got) {
 		t.Errorf("week.every(3) offset huge = %v", got)
 	}
 	loc := Local(mustLoc(t, "America/New_York"))
 	lw, _ := loc.Week(0).Every(1000000)
 	lw.Floor(1.6e12)
-	lw.Offset(1.6e12, 3)
-	if d := time.Since(start); d > 5*time.Second {
+	offsetT(lw, 1.6e12, 3)
+	// a hang guard: each walk ends (Invalid Date, maxFilterIterations)
+	if d := time.Since(start); d > testutil.Scaled(5*time.Second) {
 		t.Errorf("took %v", d)
+	}
+	// Quarters past what the valid dates hold are refused before any step
+	// (upstream walks off the end of time): counted, as the ledger's work.
+	l := budget.NewLedger(context.Background(), budget.LedgerLimits{})
+	ctx := budget.WithLedger(context.Background(), l)
+	for _, step := range []float64{1e9, -1e9, math.Inf(1)} {
+		if got, err := q.Offset(ctx, 0, step); err != nil || !math.IsNaN(got) {
+			t.Errorf("quarter offset %v = %v, %v; want NaN", step, got, err)
+		}
+	}
+	if w := l.WorkDone(); w != 0 {
+		t.Errorf("refused quarter offsets walked %d steps", w)
 	}
 }
 
@@ -253,8 +268,8 @@ func TestRandomInputsDoNotPanic(t *testing.T) {
 				for _, iv := range []Interval{z.Day(), z.Week(3), z.Month(), z.Year(), z.Hour()} {
 					iv.Floor(v)
 					iv.Ceil(v)
-					iv.Offset(v, v)
-					iv.Offset(0, v)
+					offsetT(iv, v, v)
+					offsetT(iv, 0, v)
 				}
 				NewFloor(z, []string{UnitYear, UnitWeek, UnitDay}, v).Floor(v)
 			}
@@ -398,5 +413,126 @@ func TestLocaleConcurrentUse(t *testing.T) {
 	}
 	for g := 0; g < 8; g++ {
 		<-done
+	}
+}
+
+// offsetT is Interval.Offset without a ledger, for tests.
+func offsetT(iv Interval, t, step float64) float64 {
+	v, err := iv.Offset(context.Background(), t, step)
+	if err != nil {
+		panic(err)
+	}
+	return v
+}
+
+// TestFilteredOffsetMovesSearchAfresh is C54: d3's filtered offset searches
+// for each boundary afresh, so a long offset is exact however many moves it
+// makes (node: utcOffset('quarter', new Date(0), 33000) is +010220-01-01,
+// and -5000 quarters is 0720-01-01).
+func TestFilteredOffsetMovesSearchAfresh(t *testing.T) {
+	q, _ := IntervalFor(UTC, UnitQuarter)
+	for _, c := range []struct{ step, want float64 }{
+		{33000, UTC.Date(10220, 0, 1, 0, 0, 0, 0)},
+		{-5000, UTC.Date(720, 0, 1, 0, 0, 0, 0)},
+		{1, UTC.Date(1970, 3, 1, 0, 0, 0, 0)},
+	} {
+		if got := offsetT(q, 0, c.step); got != c.want {
+			t.Errorf("utcOffset('quarter', 0, %v) = %v, want %v", c.step, got, c.want)
+		}
+	}
+	// A cancelled context stops a long walk with its error.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := q.Offset(ctx, 0, 1e6); !errors.Is(err, context.Canceled) {
+		t.Errorf("cancelled offset: err = %v", err)
+	}
+}
+
+// TestMillisecondEveryKeepsLargeSteps is C55: millisecond.every(k) floors and
+// steps by k itself, however large (node: utcMillisecond.every(1e13).range(0,
+// 1e14) is the ten multiples of 1e13; floor(1.5e13) is 1e13).
+func TestMillisecondEveryKeepsLargeSteps(t *testing.T) {
+	ms, ok := UTC.Millisecond().Every(1e13)
+	if !ok {
+		t.Fatal("no interval")
+	}
+	if got := ms.Floor(1.5e13); got != 1e13 {
+		t.Errorf("floor = %v, want 1e13", got)
+	}
+	got, err := ms.Range(context.Background(), 0, 1e14, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 10 || got[1] != 1e13 || got[9] != 9e13 {
+		t.Errorf("range = %v, want the multiples of 1e13 below 1e14", got)
+	}
+	y, _ := UTC.Year().Every(3e12)
+	if got := y.Floor(0); got != -62167219200000 { // year 0 (node)
+		t.Errorf("year.every(3e12).floor(0) = %v", got)
+	}
+}
+
+// TestParseNumbersSkipJSWhiteSpace is C100: d3 reads a number with
+// /^\s*\d+/, and JavaScript's \s is Unicode white space, counted in the
+// directive's window in UTF-16 units (values from node).
+func TestParseNumbersSkipJSWhiteSpace(t *testing.T) {
+	d := DefaultTimeLocale().Parse("%d", UTC)
+	for _, c := range []struct {
+		in   string
+		want float64
+		ok   bool
+	}{
+		{"\u00a05", -2208643200000, true},
+		{"\ufeff7", -2208470400000, true},
+		{"\u20285", -2208643200000, true},
+		{"\u3000\u30005", 0, false}, // the window of two units holds no digit
+		{"\u00855", 0, false},       // NEL is not white space in JavaScript
+	} {
+		got, ok := d.Parse(c.in)
+		if ok != c.ok || (ok && got != c.want) {
+			t.Errorf("utcParse('%%d')(%q) = %v, %v; want %v, %v", c.in, got, ok, c.want, c.ok)
+		}
+	}
+	if got, ok := DefaultTimeLocale().Parse("%Y-%m-%d", UTC).Parse("2001-\u00a02-03"); !ok || got != 981158400000 {
+		t.Errorf("parse with a no-break space = %v, %v", got, ok)
+	}
+}
+
+// TestParseZoneCountsUTF16 is X16: d3 parses with UTF-16 indices; %Z reads
+// a window of six code units and moves on by the length of what it matched,
+// wherever in the window that was (values from node 24).
+func TestParseZoneCountsUTF16(t *testing.T) {
+	for _, c := range []struct {
+		spec, in string
+		want     float64
+		ok       bool
+	}{
+		{"%Z0", "\u00e9+0130", -2208994200000.0, true},
+		{"%Z", "\u00e9+0130", math.NaN(), false},
+		{"%Zx", "+0130x", -2208994200000.0, true},
+		{"%Z", "ab+0100", math.NaN(), false},
+		{"%Z%S", "\u00e9\u00e9+0105", math.NaN(), false},
+		{"%Z05", "\u00e9\u00e9+0105", math.NaN(), false},
+		{"%d %Z", "05 \u00e9+0200", math.NaN(), false},
+		{"%Y-%m-%d%Z", "2001-02-03\u00e9+02", math.NaN(), false},
+		{"%Z", "Z", -2208988800000.0, true},
+		{"%Z", "\u65e5\u672c+0900", math.NaN(), false},
+		{"%Z00", "\u65e5+0900", math.NaN(), false},
+		{"%Z", "\U0001f600+01", math.NaN(), false},
+		{"%Z\u00e9%d", "+01\u00e905", -2208646800000.0, true},
+		{"%Z0", "\U0001f600+0130", math.NaN(), false},
+		{"%Z00", "ab+0100", math.NaN(), false},
+		{"%Z30", "\u00e9+0130", math.NaN(), false},
+		{"%Z130", "\u00e9+0130", math.NaN(), false},
+		{"%Z1", "\u00e9+01", -2208992400000.0, true},
+		{"%Z\u00e90", "\u00e9\u00e9+01", math.NaN(), false},
+		{"%Z", "\u00e9+01", math.NaN(), false},
+		{"%Z0", "\u00e9\u00e9\u00e9+0100", math.NaN(), false},
+		{"%Z", "\u3000+0100", math.NaN(), false},
+	} {
+		got, ok := DefaultTimeLocale().Parse(c.spec, UTC).Parse(c.in)
+		if ok != c.ok || (ok && got != c.want) {
+			t.Errorf("utcParse(%q)(%q) = %v, %v; want %v, %v", c.spec, c.in, got, ok, c.want, c.ok)
+		}
 	}
 }

@@ -415,3 +415,32 @@ func TestImageNaturalSize(t *testing.T) {
 		t.Errorf("default loader, going on: %v\n%s", err, svg)
 	}
 }
+
+// The data: scheme is case-insensitive in every stage (C36): an image mark
+// whose URL is "DATA:image/png;..." is drawn by the SVG writer without the
+// Loader, and the PNG and PDF writers must read it as the same inline image
+// rather than send it to the Loader, which refuses it and fails the call.
+func TestDataSchemeCaseInsensitiveEveryOutput(t *testing.T) {
+	url := "DATA:IMAGE/PNG;BASE64," + strings.TrimPrefix(validPNGDataURL(t), "data:image/png;base64,")
+	spec := []byte(`{"data":{"values":[{}]},"width":40,"height":40,"autosize":"none","padding":0,` +
+		`"mark":{"type":"image","url":"` + url + `","width":40,"height":40,"x":0,"y":0,"align":"left","baseline":"top"}}`)
+	c, err := aster.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Close() }()
+	out, err := c.VegaLiteToPNG(spec)
+	if err != nil {
+		t.Fatalf("VegaLiteToPNG: %v", err)
+	}
+	img, err := png.Decode(bytes.NewReader(out))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := countReddish(img); n < 1000 {
+		t.Errorf("PNG: the DATA: image is not drawn (%d red pixels)", n)
+	}
+	if _, err := c.VegaLiteToPDF(spec); err != nil {
+		t.Errorf("VegaLiteToPDF: %v", err)
+	}
+}

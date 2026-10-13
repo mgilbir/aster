@@ -10,6 +10,8 @@ import (
 	"math"
 	"testing"
 	"time"
+
+	"github.com/mgilbir/aster/internal/testutil"
 )
 
 func pngDataURI(t *testing.T, img image.Image) string {
@@ -156,7 +158,7 @@ func TestImageShrunkToNothing(t *testing.T) {
 		}()
 		select {
 		case <-done:
-		case <-time.After(10 * time.Second):
+		case <-time.After(testutil.Scaled(10 * time.Second)):
 			t.Fatalf("sampling through %v did not finish in 10s", inv)
 		}
 	}

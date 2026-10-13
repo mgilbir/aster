@@ -13,6 +13,7 @@ func channelHasField(cc *compileCtx, enc Value, channel string) bool {
 	if cd.IsTruthy() {
 		if cd.IsArr() {
 			for _, fd := range cd.Items() {
+				cc.work(1)
 				if fd.Get("field").IsTruthy() {
 					return true
 				}
@@ -29,13 +30,14 @@ func channelHasFieldOrDatum(cc *compileCtx, enc Value, channel string) bool {
 	if cd.IsTruthy() {
 		if cd.IsArr() {
 			for _, fd := range cd.Items() {
+				cc.work(1)
 				if fd.Get("field").IsTruthy() {
 					return true
 				}
 			}
 			return false
 		}
-		return isFieldDef(cc, cd) || isDatumDef(cd) || hasConditionalFieldOrDatumDef(cc, cd)
+		return isFieldDef(cc, cd) || isDatumDefOf(cc, cd) || hasConditionalFieldOrDatumDef(cc, cd)
 	}
 	return false
 }
@@ -43,7 +45,7 @@ func channelHasFieldOrDatum(cc *compileCtx, enc Value, channel string) bool {
 func channelHasNestedOffsetScale(cc *compileCtx, enc Value, channel string) bool {
 	if isXorY(channel) {
 		fd := enc.Get(channel)
-		if (isFieldDef(cc, fd) || isDatumDef(fd)) && (isDiscreteType(channelDefType(fd)) || (!cc.v5 && isFieldDef(cc, fd) && fd.Get("timeUnit").IsTruthy())) {
+		if (isFieldDef(cc, fd) || isDatumDefOf(cc, fd)) && (isDiscreteType(channelDefType(fd)) || (!cc.v5 && isFieldDef(cc, fd) && fd.Get("timeUnit").IsTruthy())) {
 			return channelHasFieldOrDatum(cc, enc, getOffsetScaleChannel(channel))
 		}
 	}
@@ -57,6 +59,7 @@ func encodingIsAggregate(cc *compileCtx, enc Value) bool {
 			cd := enc.Get(channel)
 			if cd.IsArr() {
 				for _, fd := range cd.Items() {
+					cc.work(1)
 					if fd.Get("aggregate").IsTruthy() {
 						return true
 					}
@@ -71,15 +74,17 @@ func encodingIsAggregate(cc *compileCtx, enc Value) bool {
 
 // encodingEach is forEach over a mapping: f is called for every channel def,
 // array elements individually.
-func encodingEach(mapping Value, f func(cd Value, channel string)) {
+func encodingEach(cc *compileCtx, mapping Value, f func(cd Value, channel string)) {
 	if !mapping.IsObj() {
 		return
 	}
 	o := mapping.ObjValue()
 	for _, channel := range append([]string(nil), o.Keys()...) {
+		cc.work(1)
 		el := o.Lookup(channel)
 		if el.IsArr() {
 			for _, cd := range el.Items() {
+				cc.work(1)
 				f(cd, channel)
 			}
 		} else {
@@ -92,8 +97,10 @@ func encodingEach(mapping Value, f func(cd Value, channel string)) {
 func fieldDefsOf(cc *compileCtx, enc Value) []Value {
 	var out []Value
 	for _, channel := range keysOf(enc) {
+		cc.work(1)
 		if channelHasField(cc, enc, channel) {
 			for _, def := range arrayOf(enc.Get(channel)) {
+				cc.work(1)
 				if isFieldDef(cc, def) {
 					out = append(out, def)
 				} else if hasConditionalFieldDef(cc, def) {
@@ -115,7 +122,7 @@ type extractedTransforms struct {
 // defs into explicit transforms (used by the composite marks).
 func extractTransformsFromEncoding(cc *compileCtx, oldEncoding Value, config Value) extractedTransforms {
 	r := extractedTransforms{encoding: jsval.NewObject(8)}
-	encodingEach(oldEncoding, func(cd Value, channel string) {
+	encodingEach(cc, oldEncoding, func(cd Value, channel string) {
 		if isFieldDef(cc, cd) {
 			field, aggOp, bin, timeUnit := cd.Get("field"), cd.Get("aggregate"), cd.Get("bin"), cd.Get("timeUnit")
 			remaining := omit(cd, "field", "aggregate", "bin", "timeUnit")
@@ -152,7 +159,7 @@ func extractTransformsFromEncoding(cc *compileCtx, oldEncoding Value, config Val
 					}
 				} else {
 					r.groupby = append(r.groupby, jsval.Str(newField))
-					if isTypedFieldDef(cd) && isBinning(bin) {
+					if isTypedFieldDefOf(cc, cd) && isBinning(bin) {
 						r.bins = append(r.bins, mkv("bin", bin, "field", field, "as", newField))
 						r.groupby = append(r.groupby, jsval.Str(vgField(cc, cd, fieldRefOption{binSuffix: "end"})))
 						if binRequiresRange(cc, cd, channel) {
@@ -168,7 +175,7 @@ func extractTransformsFromEncoding(cc *compileCtx, oldEncoding Value, config Val
 					} else if timeUnit.IsTruthy() && !isBinnedTimeUnit(cc, timeUnit) {
 						r.timeUnits = append(r.timeUnits, mkv("timeUnit", timeUnit, "field", field, "as", newField))
 						formatType := ""
-						if isTypedFieldDef(cd) && channelDefType(cd) != "temporal" {
+						if isTypedFieldDefOf(cc, cd) && channelDefType(cd) != "temporal" {
 							formatType = "time"
 						}
 						if formatType != "" {
@@ -214,6 +221,12 @@ func markChannelCompatible(cc *compileCtx, enc Value, channel, mark string) bool
 // not support or that conflict, and initializes each channel def.
 func initEncoding(cc *compileCtx, encoding Value, mark string, filled bool, config Value) Value {
 	normalized := jsval.NewObject(8)
+	for _, key := range keysOf(encoding) {
+		cc.work(1)
+		if !isChannel(cc, key) {
+			cc.warn(msgInvalidEncodingChannel(key))
+		}
+	}
 	for _, ch := range unitChannels {
 		channel := ch
 		if !encoding.Get(channel).IsTruthy() {
@@ -228,32 +241,39 @@ func initEncoding(cc *compileCtx, encoding Value, mark string, filled bool, conf
 			positionDef := normalized.Lookup(mainChannel)
 			if isFieldDef(cc, positionDef) && isContinuousType(channelDefType(positionDef)) {
 				if isFieldDef(cc, channelDef) && (cc.v5 || !positionDef.Get("timeUnit").IsTruthy()) {
+					cc.warn(msgOffsetNestedInsideContinuousPositionScaleDropped(mainChannel))
 					continue
 				}
 			} else if cc.v5 && !isFieldDef(cc, positionDef) {
 				// 5.8 turns an offset without a position into the position itself.
 				channel = mainChannel
+				cc.warn(msgReplaceOffsetWithMainChannel(mainChannel))
 			}
 		}
 		if channel == chAngle && mark == "arc" && !encoding.Get("theta").IsTruthy() {
+			cc.warn(msgReplaceAngleWithTheta)
 			channel = chTheta
 		}
 		if !markChannelCompatible(cc, encoding, channel, mark) {
+			cc.warn(msgIncompatibleChannel(channel, mark, ""))
 			continue
 		}
 		if channel == chSize && mark == "line" {
 			if fd := getFieldDef(cc, encoding.Get(channel)); fd.Get("aggregate").IsTruthy() {
+				cc.warn(msgLineWithVaryingSize)
 				continue
 			}
 		}
 		if channel == chColor {
+			eo := encoding.ObjValue()
 			has := false
 			if filled {
-				has = encoding.ObjValue().Has("fill")
+				has = eo.Has("fill")
 			} else {
-				has = encoding.ObjValue().Has("stroke")
+				has = eo.Has("stroke")
 			}
 			if has {
+				cc.warn(msgDroppingColor("encoding", eo.Has("fill"), eo.Has("stroke")))
 				continue
 			}
 		}
@@ -268,8 +288,11 @@ func initEncoding(cc *compileCtx, encoding Value, mark string, filled bool, conf
 				}
 				var defs []Value
 				for _, fd := range arrayOf(channelDef) {
+					cc.work(1)
 					if isFieldDef(cc, fd) {
 						defs = append(defs, initFieldDef(cc, fd, channel, false))
+					} else {
+						cc.warn(msgEmptyFieldDef(cc, fd, channel))
 					}
 				}
 				normalized.Set(channel, jsval.Arr(defs))
@@ -277,7 +300,8 @@ func initEncoding(cc *compileCtx, encoding Value, mark string, filled bool, conf
 		} else {
 			if channel == chTooltip && channelDef.IsNull() {
 				normalized.Set(channel, jsval.Null)
-			} else if !isFieldDef(cc, channelDef) && !isDatumDef(channelDef) && !isValueDef(channelDef) && !isConditionalDef(channelDef) && !isSignalRef(channelDef) {
+			} else if !isFieldDef(cc, channelDef) && !isDatumDefOf(cc, channelDef) && !isValueDef(channelDef) && !isConditionalDef(channelDef) && !isSignalRef(channelDef) {
+				cc.warn(msgEmptyFieldDef(cc, channelDef, channel))
 				continue
 			} else {
 				normalized.Set(channel, initChannelDef(cc, channelDef, channel, config, false))
@@ -289,8 +313,9 @@ func initEncoding(cc *compileCtx, encoding Value, mark string, filled bool, conf
 
 func normalizeEncoding(cc *compileCtx, encoding Value, config Value) Value {
 	out := jsval.NewObject(encoding.Len())
-	for _, channel := range keysOf(encoding) {
-		out.Set(channel, initChannelDef(cc, encoding.Get(channel), channel, config, true))
+	for _, channel := range jsKeys(encoding) {
+		cc.work(1)
+		out.Set(channel, initChannelDef(cc, jsProp(encoding, channel), channel, config, true))
 	}
 	return jsval.Obj(out)
 }
@@ -300,6 +325,7 @@ func normalizeEncoding(cc *compileCtx, encoding Value, config Value) Value {
 func pathGroupingFields(cc *compileCtx, mark string, encoding Value) []string {
 	var details []string
 	for _, channel := range keysOf(encoding) {
+		cc.work(1)
 		switch channel {
 		case chX, chY, chHref, chDescription, chURL, chX2, chY2:
 		case chXOffset, chYOffset:
@@ -329,6 +355,7 @@ func pathGroupingFields(cc *compileCtx, mark string, encoding Value) []string {
 			cd := encoding.Get(channel)
 			if cd.IsArr() || isFieldDef(cc, cd) {
 				for _, fd := range arrayOf(cd) {
+					cc.work(1)
 					if !fd.Get("aggregate").IsTruthy() {
 						details = append(details, vgField(cc, fd, fieldRefOption{}))
 					}

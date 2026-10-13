@@ -1,6 +1,7 @@
 package vega
 
 import (
+	"github.com/mgilbir/aster/internal/expr"
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/scene"
 )
@@ -52,17 +53,19 @@ func (v *runView) itemHandle(it *scene.Item) int {
 }
 
 // InScope is inScope(item): whether the item lies within the group this
-// context draws into.
+// context draws into. Upstream walks `item = item.mark.group` up from the
+// object it is given, so a value that is not an item (an object an
+// expression made, a number) reads mark of undefined: a TypeError. The item
+// is found by identity, as upstream compares it, not by a number it carries.
 func (c *rtContext) InScope(item jsval.Value) bool {
-	id := item.Get("$id")
-	if !id.IsNum() || c.group == nil {
+	if c.group == nil || !item.IsTruthy() {
 		return false
 	}
-	i := int(id.NumValue())
-	if i < 0 || i >= len(c.view.itemByID) {
-		return false
+	it := c.view.itemOf(item)
+	if it == nil {
+		panic(&expr.Error{Name: "TypeError", Msg: "Cannot read properties of undefined (reading 'group')"})
 	}
-	for it := c.view.itemByID[i]; it != nil; {
+	for it != nil {
 		if it == c.group {
 			return true
 		}
@@ -72,6 +75,20 @@ func (c *rtContext) InScope(item jsval.Value) bool {
 		it = it.Mark.Group
 	}
 	return false
+}
+
+// itemOf is the scenegraph item a value presents (itemAsValue, itemTuple),
+// or nil when it presents none.
+func (v *runView) itemOf(x jsval.Value) *scene.Item {
+	o := x.ObjValue()
+	if o == nil {
+		return nil
+	}
+	if it := v.viewItem[o]; it != nil {
+		return it
+	}
+	it, _ := o.Host().(*scene.Item)
+	return it
 }
 
 // Intersect and IntersectLasso select items by a pixel region, which needs an

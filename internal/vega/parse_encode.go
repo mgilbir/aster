@@ -462,9 +462,8 @@ func (c *encCompiler) color(enc jsval.Value) valueFn {
 		d.Set("x", comps[0](ev))
 		d.Set("y", comps[1](ev))
 		d.Set("z", comps[2](ev))
-		s := ev.ctx.scope()
-		s.Datum = jsval.Obj(d)
-		v, err := prog.Eval(s)
+		// the helper is a function of datum alone
+		v, err := ev.ctx.evalProgram(prog, jsval.Obj(d), jsval.Undefined, jsval.Undefined, varDatum)
 		if err != nil {
 			failErr(err)
 		}
@@ -615,8 +614,10 @@ func propOf(v, key jsval.Value) jsval.Value {
 		return v.ObjValue().Lookup(key.AsString())
 	case jsval.KindArr:
 		if key.IsNum() {
+			// in range as a float: converting a huge index or Infinity to
+			// an int is platform-dependent
 			f := key.NumValue()
-			if f >= 0 && f == math.Trunc(f) {
+			if f >= 0 && f == math.Trunc(f) && f < float64(v.Len()) {
 				return v.Index(int(f))
 			}
 			return jsval.Undefined

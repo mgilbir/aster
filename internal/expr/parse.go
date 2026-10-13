@@ -1,6 +1,8 @@
 package expr
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"strconv"
@@ -31,11 +33,17 @@ type SyntaxError struct {
 	Msg   string
 	Pos   int
 	Limit bool
+	// cause is the call's context error, when parsing stopped at its
+	// deadline or cancellation.
+	cause error
 }
 
 func (e *SyntaxError) Error() string { return e.Msg }
 
 func (e *SyntaxError) Unwrap() error {
+	if e.cause != nil {
+		return e.cause
+	}
 	if e.Limit {
 		return budget.ErrLimit
 	}
@@ -86,6 +94,11 @@ type parser struct {
 	idx   int
 	look  token
 	depth int
+	// ctx is the call the expression is parsed for: its ledger pays for the
+	// programs of the regular expression literals (a short literal can
+	// compile to tens of megabytes, C8), and its deadline stops their
+	// compile.
+	ctx context.Context
 }
 
 // Parse parses a Vega expression. It accepts exactly what vega-expression
@@ -94,11 +107,13 @@ type parser struct {
 // and the unary and binary operators of ECMAScript except ++, --, typeof, void,
 // delete, assignment and the comma operator, which are rejected. `this` and all
 // reserved words other than `if` are rejected.
-func Parse(src string) (n *Node, err error) {
+func Parse(src string) (n *Node, err error) { return parse(context.Background(), src) }
+
+func parse(ctx context.Context, src string) (n *Node, err error) {
 	if len(src) > MaxLength {
 		return nil, &SyntaxError{Msg: "Expression too long", Limit: true}
 	}
-	p := &parser{src: src}
+	p := &parser{src: src, ctx: ctx}
 	defer func() {
 		if r := recover(); r != nil {
 			se, ok := r.(*SyntaxError)
@@ -684,9 +699,31 @@ func (p *parser) scanRegExp() (*jsval.Pattern, string) {
 			p.fail("Invalid regular expression")
 		}
 	}
-	pat, err := jsval.NewPattern(body, canonicalFlags(flags))
+	// The literal is paid for before its parse and its compile allocate
+	// (jsval.NewPattern): one past what the ledger has left is refused
+	// unbuilt, and the call's deadline stops the compile.
+	led := budget.LedgerFrom(p.ctx)
+	pat, err := jsval.NewPattern(p.ctx, body, canonicalFlags(flags), func(bytes int64) error {
+		if bytes < 0 {
+			led.Free(-bytes)
+			return nil
+		}
+		return led.Alloc(bytes)
+	})
 	if err != nil {
+		if cerr := p.ctx.Err(); cerr != nil && errors.Is(err, cerr) {
+			panic(&SyntaxError{Msg: "Regular expression not compiled: " + cerr.Error(), Pos: p.idx, cause: cerr})
+		}
+		if errors.Is(err, budget.ErrLimit) {
+			p.failLimit("Regular expression too large for the memory limit")
+		}
+		if newPatternError(err).limit {
+			p.failLimit("Regular expression too large: " + err.Error())
+		}
 		p.fail("Invalid regular expression")
+	}
+	if err := led.Work(int64(len(body) + pat.Re.ProgramSize())); err != nil {
+		panic(&SyntaxError{Msg: "Regular expression not compiled: " + err.Error(), Pos: p.idx, cause: err})
 	}
 	return pat, p.src[start:p.idx]
 }

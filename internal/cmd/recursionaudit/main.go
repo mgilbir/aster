@@ -243,7 +243,6 @@ func funcName(fn *types.Func) string {
 // innermost function literal or declaration around it; a literal assigned to
 // a variable is the target of calls through that variable.
 func (g *graph) addFile(fset *token.FileSet, f *ast.File, info *types.Info) {
-	pkgName := f.Name.Name
 	for _, d := range f.Decls {
 		fd, ok := d.(*ast.FuncDecl)
 		if !ok || fd.Body == nil {
@@ -302,7 +301,6 @@ func (g *graph) addFile(fset *token.FileSet, f *ast.File, info *types.Info) {
 			}
 			return true
 		})
-		_ = pkgName
 		visit = func(n ast.Node) bool {
 			switch x := n.(type) {
 			case *ast.FuncLit:

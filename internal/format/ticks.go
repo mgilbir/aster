@@ -161,30 +161,42 @@ func (z Zone) TickInterval(start, stop, count float64) (Interval, bool) {
 }
 
 // Ticks is d3.timeTicks / d3.utcTicks(start, stop, count): the interval
-// boundaries from start to stop inclusive.
+// boundaries from start to stop inclusive. More than MaxRangeLen of them is
+// ErrRangeTooLarge; the walk stops with ctx's error.
 func (z Zone) Ticks(ctx context.Context, start, stop, count float64) ([]float64, error) {
+	return z.TicksN(ctx, start, stop, count, MaxRangeLen)
+}
+
+// TicksN is Ticks that fails, with an error wrapping budget.ErrLimit, past
+// max boundaries (at most MaxRangeLen), before it has walked or kept them.
+func (z Zone) TicksN(ctx context.Context, start, stop, count float64, max int) ([]float64, error) {
 	reverse := stop < start
 	if reverse {
 		start, stop = stop, start
 	}
 	iv, ok := z.TickInterval(start, stop, count)
-	return z.ticksWith(ctx, iv, ok, start, stop, reverse)
+	return z.ticksWith(ctx, iv, ok, start, stop, reverse, max)
 }
 
 // TicksWith is Ticks with an explicit interval instead of a tick count.
 func TicksWith(ctx context.Context, iv Interval, start, stop float64) ([]float64, error) {
+	return TicksWithN(ctx, iv, start, stop, MaxRangeLen)
+}
+
+// TicksWithN is TicksWith with the bound of TicksN.
+func TicksWithN(ctx context.Context, iv Interval, start, stop float64, max int) ([]float64, error) {
 	reverse := stop < start
 	if reverse {
 		start, stop = stop, start
 	}
-	return iv.z.ticksWith(ctx, iv, true, start, stop, reverse)
+	return iv.z.ticksWith(ctx, iv, true, start, stop, reverse, max)
 }
 
-func (z Zone) ticksWith(ctx context.Context, iv Interval, ok bool, start, stop float64, reverse bool) ([]float64, error) {
+func (z Zone) ticksWith(ctx context.Context, iv Interval, ok bool, start, stop float64, reverse bool, max int) ([]float64, error) {
 	if !ok {
 		return nil, nil
 	}
-	out, err := iv.Range(ctx, start, stop+1, 1) // inclusive stop
+	out, err := iv.rangeN(ctx, start, stop+1, 1, max) // inclusive stop
 	if err != nil {
 		return nil, err
 	}

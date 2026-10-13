@@ -34,11 +34,18 @@ type flowPulse struct {
 	encode string
 	// changed is Pulse.changed(): the producer added, removed or modified
 	// something. Synthesized pulses (an operator that did not run this stamp)
-	// are unchanged.
-	changed bool
+	// are unchanged. reflow marks that every item counts as modified
+	// (Pulse.reflow()).
+	changed, reflow bool
 
 	// Tuple flows.
 	tuples []jsval.Value
+	// src, when set, is upstream's pulse.source where it is not the
+	// tuples the pulse adds: a crossfilter adds the indices of its tuples
+	// and keeps the tuples as the source, and a resolvefilter maps the
+	// indices back, filtering the source lazily (Pulse.filter). Nil means
+	// the source is tuples, as it is everywhere else (crossfilter_pulse.go).
+	src *pulseSource
 	// tree is the hierarchy a tree data set carries (`source.root`).
 	tree *hierarchy.Tree
 	// multi holds the per-source tuple lists of an operator with several
@@ -48,8 +55,6 @@ type flowPulse struct {
 	// Item flows: the full item list plus this pulse's lifecycle sets.
 	items         []*scene.Item
 	add, rem, mod []*scene.Item
-	// reflow marks that every item counts as modified (Pulse.reflow()).
-	reflow bool
 }
 
 // stopPulse is StopPropagation: targets are not enqueued.
@@ -172,6 +177,11 @@ type opNode struct {
 	stamp       int
 	skip        bool
 	modified    bool
+	initonly    bool
+	// listCap is the capacity of the tuple list the operator outputs,
+	// charged to the call's ledger (holdList); with the flags, it fills one
+	// word.
+	listCap uint32
 
 	value any
 	// update is the value-update function of a plain operator (signals,
@@ -180,15 +190,18 @@ type opNode struct {
 	update func(n *opNode, p *opParams) any
 	tr     transform
 
-	argops   []argop
-	argval   *opParams
-	initonly bool
+	argops []argop
+	argval *opParams
 
 	targets  []*opNode
 	tree     *hierarchy.Tree // the hierarchy of a tree data set (Sieve, Collect)
 	source   []*opNode       // `pulse` parameter operators
 	pulse    *flowPulse      // last output
 	dynTargs *[]*opNode
+
+	// rows are the data rows the operator holds (rows.go), nil for the
+	// many that hold none.
+	rows *opRows
 }
 
 // Value returns the operator's value.
@@ -354,8 +367,18 @@ func (n *opNode) run(p *flowPulse) *flowPulse {
 func (n *opNode) evaluate(p *flowPulse) *flowPulse {
 	if n.tr != nil {
 		params := n.marshall(p.stamp)
-		out := n.tr.transform(n, params, p)
+		out := n.transform(params, p)
 		params.clear()
+		if out != stopPulse && n.g.view != nil {
+			var tuples []jsval.Value
+			if out != nil {
+				tuples = out.tuples
+			}
+			n.g.view.holdList(n, p, tuples)
+		}
+		if checkHeld && out != nil && out != stopPulse && unheld(out.tuples) {
+			panic(fmt.Sprintf("operator %s passed on tuples no operator holds", n.name))
+		}
 		return out
 	}
 	if upd := n.update; upd != nil {
@@ -370,6 +393,21 @@ func (n *opNode) evaluate(p *flowPulse) *flowPulse {
 		}
 	}
 	return nil
+}
+
+// transform runs the operator's transform. The rows it held from its last run
+// are being replaced, so the rows it reserves may use them (rows.go).
+func (n *opNode) transform(params *opParams, p *flowPulse) *flowPulse {
+	var bud *budget.Budget
+	if n.g.view != nil {
+		bud = n.g.view.bud
+	}
+	var held *budget.Held
+	if n.rows != nil {
+		held = &n.rows.held
+	}
+	defer bud.Replacing(bud.Replacing(held))
+	return n.tr.transform(n, params, p)
 }
 
 // nodeHeap is the evaluation priority queue: lowest rank first. It is
@@ -488,8 +526,9 @@ type flowGraph struct {
 	maxVisits int
 	// maxOps bounds the operators the graph holds, which every guide, mark and
 	// facet cell instantiates.
-	maxOps   int
-	warnings []string
+	maxOps int
+	// warned holds the warnings reported so far (report).
+	warned map[Warning]struct{}
 	// onReport is Options.Report.
 	onReport func(error) error
 }
@@ -630,6 +669,7 @@ func (g *flowGraph) singlePulse(s *opNode) *flowPulse {
 	p := &flowPulse{stamp: g.clock, encode: g.cur.encode}
 	if s != nil && s.pulse != nil && s.pulse != stopPulse {
 		p.tuples = s.pulse.tuples
+		p.src = s.pulse.src
 		p.items = s.pulse.items
 		p.tree = s.pulse.tree
 	}
@@ -666,9 +706,9 @@ func (g *flowGraph) evaluate(encode string) (err error) {
 				case *scale.Thrown, *expr.Error:
 					err = e.(error) // an exception a scale, an accessor or an expression threw
 				case error:
-					err, internal = fmt.Errorf("%w\n%s", e, shortStack()), true
+					err, internal = unexpected(e), true
 				default:
-					err, internal = fmt.Errorf("vega: internal error: %v\n%s", r, shortStack()), true
+					err, internal = unexpected(fmt.Errorf("vega: internal error: %v", r)), true
 				}
 			}
 		}()
@@ -739,7 +779,7 @@ func (g *flowGraph) safely(fn func(*flowGraph)) (err error) {
 			} else if ee, ok := r.(*expr.Error); ok {
 				err = ee
 			} else {
-				err, internal = fmt.Errorf("vega: internal error: %v", r), true
+				err, internal = unexpected(fmt.Errorf("vega: internal error: %v", r)), true
 			}
 			if !fatal(err, internal) {
 				err = g.report(err)

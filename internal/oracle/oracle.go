@@ -28,6 +28,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -45,8 +46,20 @@ const (
 	script   = "testdata/oracle-node/oracle.mjs"
 	sweepDir = "testdata/oracle-node/sweeps"
 	cache    = "testdata/oracle-cache"
-	timeout  = 2 * time.Minute
 )
+
+// answerTimeout is how long node may take over one request.
+var answerTimeout = 2 * time.Minute
+
+// ErrNoAnswer is the error of a request node did not answer in time. It is an
+// oracle failure, not upstream's answer: it is never cached, and a test must
+// not count it as upstream rejecting the input (which would make "both
+// fail" look like agreement).
+var ErrNoAnswer = errors.New("oracle: no answer in time")
+
+// legacyTimeout is how a timeout used to be recorded, as upstream's error, in
+// the cache; such an entry is not an answer and is asked again.
+const legacyTimeout = "oracle: no answer within "
 
 // Result is one answer. Err is upstream's error for an input it rejects.
 type Result struct {
@@ -56,6 +69,8 @@ type Result struct {
 	// Data is a generator's output (Generate).
 	Data json.RawMessage `json:"data,omitempty"`
 	Err  string          `json:"err,omitempty"`
+	// Warnings are what the Vega-Lite compiler logged (Compile only).
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // Oracle serves a module set from a small pool of node processes, so callers
@@ -202,28 +217,17 @@ func (o *Oracle) Generate(name string) (Result, error) {
 // ask answers from the cache or from node. The error reports an oracle
 // failure (node died or misbehaved), not an input upstream rejects.
 func (o *Oracle) ask(req map[string]any) (Result, error) {
-	body, err := json.Marshal(req)
+	path, err := o.cachePath(req)
 	if err != nil {
 		return Result{}, err
 	}
-	sum := sha256.Sum256(append([]byte(o.fingerprint+"\x00"), body...))
-	key := hex.EncodeToString(sum[:])
-	path := filepath.Join(o.root, cache, key[:2], key+".json")
 	var res Result
-	if b, err := os.ReadFile(path); err == nil && json.Unmarshal(b, &res) == nil {
+	if b, err := os.ReadFile(path); err == nil && json.Unmarshal(b, &res) == nil && !strings.HasPrefix(res.Err, legacyTimeout) {
 		return res, nil
 	}
+	res = Result{}
 
-	p := <-o.free
-	defer func() { o.free <- p }()
-	if p == nil || p.cmd == nil {
-		if p, err = o.start(); err != nil {
-			p = nil
-			return res, err
-		}
-	}
-	res, err = p.ask(req)
-	if err != nil {
+	if res, err = o.node(req); err != nil {
 		return res, err
 	}
 	if b, err := json.Marshal(res); err == nil {
@@ -237,6 +241,35 @@ func (o *Oracle) ask(req map[string]any) (Result, error) {
 		}
 	}
 	return res, nil
+}
+
+// node answers from one of the pool's processes, starting it if it is not
+// running (it never ran, or it stopped: it timed out, died, or upstream
+// changed a built-in while answering, so a later answer would not be a
+// fresh process's).
+func (o *Oracle) node(req map[string]any) (Result, error) {
+	p := <-o.free
+	defer func() { o.free <- p }()
+	if p == nil || p.cmd == nil {
+		var err error
+		if p, err = o.start(); err != nil {
+			p = nil
+			return Result{}, err
+		}
+	}
+	return p.ask(req)
+}
+
+// cachePath is where the answer to req is cached: its key covers the
+// oracle's fingerprint and the whole request.
+func (o *Oracle) cachePath(req map[string]any) (string, error) {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(append([]byte(o.fingerprint+"\x00"), body...))
+	key := hex.EncodeToString(sum[:])
+	return filepath.Join(o.root, cache, key[:2], key+".json"), nil
 }
 
 func (p *proc) ask(req map[string]any) (Result, error) {
@@ -264,22 +297,31 @@ func (p *proc) ask(req map[string]any) (Result, error) {
 			PNG  string          `json:"png"`
 			Data json.RawMessage `json:"data"`
 			Err  string          `json:"err"`
+			Warn []string        `json:"warnings"`
+			// Tainted names a built-in upstream changed while answering
+			// (oracle.mjs): the answer stands, but a later one from this
+			// process would not be a fresh process's, so it is replaced.
+			Tainted string `json:"tainted"`
 		}
 		if err := json.Unmarshal(out, &got); err != nil || got.ID != p.nextID {
 			p.stop()
 			return res, fmt.Errorf("oracle: bad response %.200q", out)
 		}
-		res = Result{SVG: got.SVG, Vega: got.Veg, Data: got.Data, Err: got.Err}
+		res = Result{SVG: got.SVG, Vega: got.Veg, Data: got.Data, Err: got.Err, Warnings: got.Warn}
+		if got.Tainted != "" {
+			p.stop()
+		}
 		if got.PNG != "" {
 			if res.PNG, err = base64.StdEncoding.DecodeString(got.PNG); err != nil {
 				return res, fmt.Errorf("oracle: bad PNG: %w", err)
 			}
 		}
-	case <-time.After(timeout):
-		// An input upstream cannot finish is an answer too; restart node
-		// for the next request.
+	case <-time.After(answerTimeout):
+		// Restart node for the next request. A slow runner is not upstream
+		// rejecting the input, so this is a failure of the oracle (and not
+		// cached), not an answer.
 		p.stop()
-		res.Err = fmt.Sprintf("oracle: no answer within %v", timeout)
+		return Result{}, fmt.Errorf("%w (%v)", ErrNoAnswer, answerTimeout)
 	}
 	return res, nil
 }

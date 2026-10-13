@@ -2,8 +2,10 @@ package transforms
 
 import (
 	"context"
+	"errors"
 	"testing"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -52,5 +54,27 @@ func TestAggregateGolden(t *testing.T) {
 				t.Fatal(d)
 			}
 		})
+	}
+}
+
+// TestPivotCellsCharged is the audit's C26: a pivot keeps a running state
+// per measure (one per distinct value) in every cell, which the row budget
+// counted as a sixteenth of a row: 2,500 keys x 2,500 values held 1.5 GB
+// under a 256 MiB limit. The states are charged to the ledger.
+func TestPivotCellsCharged(t *testing.T) {
+	var data []jsval.Value
+	for i := 0; i < 600; i++ {
+		data = append(data, obj("k", jsval.Int(i), "c", jsval.Int(i), "v", jsval.Int(1)))
+	}
+	const max = 16 << 20
+	l := budget.NewLedger(context.Background(), budget.LedgerLimits{MaxBytes: max})
+	ctx := budget.WithLedger(context.Background(), l)
+	_, err := Pivot(ctx, data, PivotParams{GroupBy: FieldsOf("k"), Field: FieldOf("c"), Value: FieldOf("v")})
+	if !errors.Is(err, budget.ErrLimit) || l.PeakBytes() > max {
+		t.Fatalf("got %v, peak %d", err, l.PeakBytes())
+	}
+	// What fits is given back once the cells are written.
+	if _, err := Pivot(ctx, data[:100], PivotParams{GroupBy: FieldsOf("k"), Field: FieldOf("c"), Value: FieldOf("v")}); err != nil || l.Bytes() != 0 {
+		t.Fatalf("got %v, %d bytes still charged", err, l.Bytes())
 	}
 }

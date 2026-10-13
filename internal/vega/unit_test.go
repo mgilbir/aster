@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -53,7 +54,7 @@ func mustJSON(t testing.TB, s string) jsval.Value {
 }
 
 func TestParseDSV(t *testing.T) {
-	rows, cols := parseDSV("a,b,c\n1,\"x,y\",3\r\n4,\"q\"\"r\"\n\n", ',')
+	rows, cols := parseDSV("a,b,c\n1,\"x,y\",3\r\n4,\"q\"\"r\"\n\n", ",")
 	if len(cols) != 3 || cols[2] != "c" {
 		t.Fatalf("columns %v", cols)
 	}
@@ -69,7 +70,7 @@ func TestParseDSV(t *testing.T) {
 	if v := rows[1].Get("c"); !v.IsStr() || v.StrValue() != "" {
 		t.Errorf("a missing cell is the empty string, got %v", v)
 	}
-	if r, c := parseDSV("", ','); len(r) != 0 || len(c) != 0 {
+	if r, c := parseDSV("", ","); len(r) != 0 || len(c) != 0 {
 		t.Errorf("empty input: %v %v", r, c)
 	}
 }
@@ -161,20 +162,20 @@ func TestSignalUpdatesAndInit(t *testing.T) {
 
 func TestParseDSVLimitFailsBeforeAllocating(t *testing.T) {
 	text := "a\n" + strings.Repeat("1\n", 10000)
-	if _, _, err := parseDSVLimit(context.Background(), text, ',', 100); err == nil {
+	if _, _, err := parseDSVLimit(context.Background(), text, ",", &budget.Budget{MaxRows: 100}); err == nil {
 		t.Fatal("10000 rows against a limit of 100 must fail")
 	}
-	rows, _, err := parseDSVLimit(context.Background(), text, ',', 20000)
+	rows, _, err := parseDSVLimit(context.Background(), text, ",", &budget.Budget{MaxRows: 20000})
 	if err != nil || len(rows) != 10000 {
 		t.Fatalf("within the limit: %d rows, %v", len(rows), err)
 	}
 	wide := strings.Repeat("c,", 99) + "c\n" + strings.Repeat("1\n", 2000)
-	if _, _, err := parseDSVLimit(context.Background(), wide, ',', 100); err == nil {
+	if _, _, err := parseDSVLimit(context.Background(), wide, ",", &budget.Budget{MaxRows: 100}); err == nil {
 		t.Fatal("wide rows must be bounded by cells")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, _, err := parseDSVLimit(ctx, text, ',', 1<<30); err == nil {
+	if _, _, err := parseDSVLimit(ctx, text, ",", nil); err == nil {
 		t.Fatal("cancelled context must stop parsing")
 	}
 }

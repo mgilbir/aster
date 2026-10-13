@@ -46,15 +46,17 @@ func (e *SyntaxError) Error() string {
 var ErrJSONSize = fmt.Errorf("json: document is too large to hold in memory: %w", budget.ErrLimit)
 
 // What a parsed value holds, as ParseJSONLimit counts it: a Value in an array
-// (48 bytes), a member of an object (a 16 byte key header and a Value), the
-// Object header and the slice header of an array. Strings count their bytes,
-// keys too (a key shared between rows is charged each time, which keeps the
-// count independent of what the table happens to hold).
+// and a member of an object (its key's string header and its Value), each
+// twice over for the slack of a slice that grows by doubling; the Object and
+// the box of an array. Strings count their bytes, keys too (a key shared
+// between rows is charged each time, which keeps the count independent of
+// what the table happens to hold). They are sizes of the types, so they
+// follow a change of representation (they once assumed a 48-byte Value).
 const (
-	costElem   = 48
-	costMember = 64
-	costObject = 80
-	costArray  = 24
+	costElem   = 2 * int64(unsafe.Sizeof(Value{}))
+	costMember = 2 * (int64(unsafe.Sizeof("")) + int64(unsafe.Sizeof(Value{})))
+	costObject = int64(unsafe.Sizeof(Object{}))
+	costArray  = int64(unsafe.Sizeof(arrayBox{}))
 )
 
 // ParseJSON parses text with JSON.parse semantics: strict RFC 8259 grammar,
@@ -576,6 +578,9 @@ func appendJSON(dst []byte, v Value, indent, prefix string, depth int) []byte {
 	if depth > MaxValueDepth {
 		return append(dst, "null"...)
 	}
+	if IsFunction(v) {
+		return append(dst, "null"...) // as in an array; a member is left out
+	}
 	switch v.Kind() {
 	case KindUndefined, KindNull:
 		return append(dst, "null"...)
@@ -620,7 +625,7 @@ func appendJSON(dst []byte, v Value, indent, prefix string, depth int) []byte {
 		n := 0
 		for i := 0; i < o.Len(); i++ {
 			val := o.ValueAt(i)
-			if val.Kind() == KindUndefined {
+			if val.Kind() == KindUndefined || IsFunction(val) {
 				continue
 			}
 			if n > 0 {

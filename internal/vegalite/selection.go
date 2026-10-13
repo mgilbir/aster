@@ -1,9 +1,11 @@
 package vegalite
 
 import (
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -37,12 +39,45 @@ type selProjItem struct {
 	geoChannel string
 	hasLegend  bool
 	isChannel  bool // built from an encoding channel (field, channel, type order)
+	// fieldV is the field as the spec gave it when it is not a string (a
+	// projected field of null): assembling reads it as an access path.
+	fieldV Value
+}
+
+// fieldPath is replacePathInField(p.field).
+// legendBound is proj.hasLegend: the projection's own flag, else what
+// Object.prototype holds under that name, which a legend over a field named
+// "__proto__" writes there (see jsRealm) for every projection to inherit.
+func (p *selProjItem) legendBound(cc *compileCtx) bool {
+	if p.hasLegend {
+		return true
+	}
+	if cc == nil || cc.jsr == nil {
+		return false
+	}
+	v, ok := cc.jsr.protoProp("hasLegend")
+	return ok && jsRefTruthy(jsRef{found: true, val: v})
+}
+
+// fieldValue is the projection's field as upstream holds it.
+func (p *selProjItem) fieldValue() Value {
+	if !p.fieldV.IsUndefined() {
+		return p.fieldV
+	}
+	return jsval.Str(p.field)
+}
+
+func (p *selProjItem) fieldPath() string {
+	if !p.fieldV.IsUndefined() {
+		return replacePathInFieldV(p.fieldV)
+	}
+	return replacePathInField(p.field)
 }
 
 func (p *selProjItem) assembled() Value {
 	o := jsval.NewObject(4)
 	if p.isChannel {
-		o.Set("field", jsval.Str(replacePathInField(p.field)))
+		o.Set("field", jsval.Str(p.fieldPath()))
 		o.Set("channel", strOrUndef(p.channel))
 		o.Set("type", jsval.Str(p.typ))
 		if p.geoChannel != "" {
@@ -50,7 +85,7 @@ func (p *selProjItem) assembled() Value {
 		}
 	} else {
 		o.Set("type", jsval.Str(p.typ))
-		o.Set("field", jsval.Str(replacePathInField(p.field)))
+		o.Set("field", jsval.Str(p.fieldPath()))
 	}
 	return jsval.Obj(o)
 }
@@ -58,7 +93,7 @@ func (p *selProjItem) assembled() Value {
 type selProjection struct {
 	items          []*selProjItem
 	hasChannel     *omap[*selProjItem]
-	hasField       map[string]*selProjItem
+	hasField       *omap[*selProjItem] // a plain object (see jsRealm)
 	hasSelectionID bool
 	timeUnit       *timeUnitNode
 }
@@ -85,8 +120,10 @@ func isTimerSelection(cc *compileCtx, s *selectionComponent) bool {
 	if cc.v5 {
 		return false // timer (animation) selections are a 6.x feature
 	}
+	// events.find((e) => 'type' in e && e.type === 'timer')
 	for _, e := range s.events().Items() {
-		if e.IsObj() && e.ObjValue().Has("type") && e.Get("type").IsStr() && e.Get("type").StrValue() == "timer" {
+		cc.work(1)
+		if jsIn(e, "type") && strIs(jsProp(e, "type"), "timer") {
 			return true
 		}
 	}
@@ -133,11 +170,13 @@ func unitName(m Model, escape bool) string {
 }
 
 func requiresSelectionID(m Model) bool {
+	cc := m.b().ctx
 	sel := m.b().comp.selection
 	if sel == nil {
 		return false
 	}
 	for _, k := range sel.keyList() {
+		cc.work(1)
 		if sel.m[k].project.hasSelectionID {
 			return true
 		}
@@ -157,8 +196,8 @@ func parseUnitSelection(m *unitModel, selDefs []Value) *omap[*selectionComponent
 	}
 	nTimer := 0
 	for _, def := range selDefs {
-		cc.check()
-		name := varName(def.Get("name").AsString())
+		cc.work(modelStep)
+		name := varNameOf(def.Get("name"))
 		selDef := def.Get("select")
 		var typ string
 		if selDef.IsStr() {
@@ -168,12 +207,13 @@ func parseUnitSelection(m *unitModel, selDefs []Value) *omap[*selectionComponent
 		}
 		var defaults *Object
 		if isObject(selDef) {
-			defaults = deepClone(selDef).ObjValue()
+			defaults = duplicate(cc, selDef).ObjValue()
 		} else {
 			defaults = mk("type", typ)
 		}
 		cfg := selectionConfig.Get(typ)
 		for _, key := range keysOf(cfg) {
+			cc.work(1)
 			if key == "fields" || key == "encodings" {
 				continue
 			}
@@ -182,7 +222,7 @@ func parseUnitSelection(m *unitModel, selDefs []Value) *omap[*selectionComponent
 			}
 			dv := defaults.Lookup(key)
 			if dv.IsUndefined() || (dv.IsBool() && dv.BoolValue()) {
-				defaults.Set(key, deepClone(coalesce(cfg.Get(key), dv)))
+				defaults.Set(key, duplicate(cc, coalesce(cfg.Get(key), dv)))
 			}
 		}
 		props := cloneObj(defaults)
@@ -193,20 +233,12 @@ func parseUnitSelection(m *unitModel, selDefs []Value) *omap[*selectionComponent
 		if on := defaults.Lookup("on"); on.IsStr() {
 			props.Set("events", jsval.Arr(parseSelector(on.StrValue(), "scope")))
 		} else {
-			props.Set("events", jsval.Arr(arrayOf(deepClone(on))))
-		}
-		for _, e := range props.Lookup("events").Items() {
-			if !e.IsObj() {
-				throw("Invalid event stream %s in the selection %q: `on` must be an event selector string or event stream objects.", stringify(e), name)
-			}
-			if b := e.Get("between"); b.IsTruthy() && (!b.IsArr() || b.Len() != 2 || !b.Index(0).IsObj()) {
-				throw("Invalid `between` %s in the selection %q: expected two event streams.", stringify(b), name)
-			}
+			props.Set("events", jsval.Arr(arrayOf(duplicate(cc, on))))
 		}
 		sc := &selectionComponent{cc: cc, name: name, typ: typ, props: props, project: &selProjection{
-			hasChannel: newOmap[*selProjItem](), hasField: map[string]*selProjItem{},
+			hasChannel: newOmap[*selProjItem](), hasField: newLookupOmap[*selProjItem](),
 		}}
-		selCmpts.set(name, sc)
+		selCmpts.assign(name, sc) // selCmpts[name] = …: a plain object (see jsRealm)
 		if isTimerSelection(cc, sc) {
 			nTimer++
 			if nTimer > 1 {
@@ -214,24 +246,26 @@ func parseUnitSelection(m *unitModel, selDefs []Value) *omap[*selectionComponent
 				continue
 			}
 		}
-		defClone := deepClone(def)
+		defClone := duplicate(cc, def)
 		for _, c := range selectionCompilers {
 			if c.defined(sc) && c.parse != nil {
 				c.parse(m, sc, defClone)
 			}
 		}
 	}
+	if nTimer > 1 && !cc.v5 {
+		cc.warn(msgMultipleTimerAnimationSelection)
+	}
 	return selCmpts
 }
 
 func parseSelectionPredicate(m Model, pred Value, dfnode dfNode, datum string) string {
-	var name string
+	var vname string
 	if pred.IsStr() {
-		name = pred.StrValue()
+		vname = varName(pred.StrValue())
 	} else {
-		name = pred.Get("param").AsString()
+		vname = varNameOf(pred.Get("param"))
 	}
-	vname := varName(name)
 	store := stringValue(jsval.Str(vname + storeSuffix))
 	var sel *selectionComponent
 	if m != nil {
@@ -273,8 +307,9 @@ func parseSelectionPredicate(m Model, pred Value, dfnode dfNode, datum string) s
 	return "!" + length + " || " + test
 }
 
-func parseSelectionExtent(m Model, name string, extent Value) string {
-	vname := varName(name)
+func parseSelectionExtent(m Model, param Value, extent Value) string {
+	cc := m.b().ctx
+	vname := varNameOf(param)
 	encoding := extent.Get("encoding")
 	field := extent.Get("field")
 	sel, junk := m.b().trySelectionComponent(vname)
@@ -295,20 +330,29 @@ func parseSelectionExtent(m Model, name string, extent Value) string {
 	if sel == nil {
 		return vname
 	}
-	if !encoding.IsTruthy() && !field.IsTruthy() {
+	// selCmpt.project.items[0].field
+	firstField := func() Value {
 		if len(sel.project.items) == 0 {
-			throw("The selection %q has no projected field to take the extent of.", name)
+			throw("Cannot read properties of undefined (reading 'field')")
 		}
-		field = jsval.Str(sel.project.items[0].field)
+		return jsval.Str(sel.project.items[0].field)
+	}
+	if !encoding.IsTruthy() && !field.IsTruthy() {
+		field = firstField()
+		if len(sel.project.items) > 1 {
+			cc.warn(msgSelectionAsScaleDomainWithoutField(field.StrValue()))
+		}
 	} else if encoding.IsTruthy() && !field.IsTruthy() {
 		var encs []*selProjItem
 		for _, p := range sel.project.items {
+			cc.work(1)
 			if p.channel == encoding.AsString() {
 				encs = append(encs, p)
 			}
 		}
 		if len(encs) != 1 {
-			field = jsval.Str(sel.project.items[0].field)
+			field = firstField()
+			cc.warn(msgSelectionAsScaleDomainWrongEncodings(len(encs), encoding, extent.Get("param"), field.StrValue()))
 		} else {
 			field = jsval.Str(encs[0].field)
 		}
@@ -317,11 +361,12 @@ func parseSelectionExtent(m Model, name string, extent Value) string {
 }
 
 func materializeSelections(m *unitModel, main *outputNode) {
+	cc := m.ctx
 	if m.comp.selection == nil {
 		return
 	}
 	for _, name := range m.comp.selection.keyList() {
-		m.b().ctx.check()
+		cc.work(1)
 		sel := m.comp.selection.m[name]
 		lookupName := m.getName("lookup_" + name)
 		fn := newFilterNode(main, m, mkv("param", name))
@@ -370,9 +415,10 @@ func (c *compileCtx) signalPos(signals []Value, name string) int {
 	}
 	si := &c.sigIdx
 	if si.base != &signals[0] || si.n > len(signals) || si.idx == nil {
-		si.base, si.n, si.idx = &signals[0], 0, map[string]int{}
+		si.base, si.n, si.idx = &signals[0], 0, make(map[string]int, len(signals))
 	}
 	for ; si.n < len(signals); si.n++ {
+		c.work(1)
 		if n := signals[si.n].Get("name"); n.IsStr() {
 			if _, ok := si.idx[n.StrValue()]; !ok {
 				si.idx[n.StrValue()] = si.n
@@ -385,6 +431,7 @@ func (c *compileCtx) signalPos(signals []Value, name string) int {
 		}
 		si.base = nil // stale: rescan next time
 		for j, s := range signals {
+			c.work(1)
 			if n := s.Get("name"); n.IsStr() && n.StrValue() == name {
 				return j
 			}
@@ -418,8 +465,9 @@ func pushOn(sg *Object, handler Value) {
 	sg.Set("on", jsval.Arr(items))
 }
 
-func cleanupEmptyOnArray(signals []Value) []Value {
+func cleanupEmptyOnArray(cc *compileCtx, signals []Value) []Value {
 	for _, s := range signals {
+		cc.work(1)
 		if o := s.ObjValue(); o != nil {
 			if on := o.Lookup("on"); on.IsArr() && on.Len() == 0 {
 				o.Delete("on")
@@ -429,63 +477,87 @@ func cleanupEmptyOnArray(signals []Value) []Value {
 	return signals
 }
 
-func assembleInitExpr(init Value, wrap func(string) string) string {
+func assembleInitExpr(cc *compileCtx, init Value, wrap func(string) string) string {
+	s, _ := assembleInitExprOK(cc, init, wrap)
+	return s
+}
+
+// assembleInitExprOK is assembleInit(init) as an expression, and false
+// when it is undefined: stringify(undefined) is undefined, which the
+// identity wrap keeps (an array's join writes it as nothing) and another
+// wrap interpolates as "undefined".
+func assembleInitExprOK(cc *compileCtx, init Value, wrap func(string) string) (string, bool) {
 	if init.IsArr() {
 		parts := make([]string, init.Len())
 		for i, v := range init.Items() {
-			parts[i] = assembleInitExpr(v, wrap)
+			cc.work(1)
+			parts[i] = assembleInitExpr(cc, v, wrap)
 		}
-		return "[" + strings.Join(parts, ", ") + "]"
+		return "[" + strings.Join(parts, ", ") + "]", true
 	} else if isDateTime(init) {
-		return wrap(dateTimeToExpr(init))
+		return applyWrap(wrap, dateTimeToExpr(cc, init)), true
 	}
-	return wrap(stringify(init))
+	var b strings.Builder
+	if !stringifyTo(cc, &b, init) {
+		if wrap == nil {
+			return "", false
+		}
+		return wrap("undefined"), true
+	}
+	return applyWrap(wrap, b.String()), true
 }
 
-func assembleInitValue(init Value, loc *time.Location) Value {
+func applyWrap(wrap func(string) string, s string) string {
+	if wrap == nil {
+		return s
+	}
+	return wrap(s)
+}
+
+func assembleInitValue(cc *compileCtx, init Value, loc *time.Location) Value {
 	if init.IsArr() {
 		items := make([]Value, init.Len())
 		for i, v := range init.Items() {
-			items[i] = assembleInitValue(v, loc)
+			cc.work(1)
+			items[i] = assembleInitValue(cc, v, loc)
 		}
 		return jsval.Arr(items)
 	} else if isDateTime(init) {
-		return jsval.Num(dateTimeToTimestamp(init, loc))
+		return jsval.Num(dateTimeToTimestamp(cc, init, loc))
 	}
 	return init
 }
 
-func idWrap(s string) string { return s }
+// idWrap is the identity wrap (assembleInit's default).
+var idWrap func(string) string
 
-func dateTimeToTimestamp(d Value, local *time.Location) float64 {
-	parts := dateTimeParts(d, true)
-	var n [7]int
-	for i := 0; i < 7 && i < len(parts); i++ {
-		f := jsval.StringToNumber(parts[i])
-		n[i] = int(f)
+// dateTimeToTimestamp is upstream's: +new Date(...parts), or Date.UTC, with
+// the parts as JavaScript reads them (format's DatetimeArgs and UTCArgs:
+// ToNumber, a non-finite part makes NaN, two-digit years are 19xx, and a time
+// out of range is NaN). The parts are spec values, so they are never
+// converted to Go integers, whose conversion of a huge or non-finite float is
+// implementation-defined.
+func dateTimeToTimestamp(cc *compileCtx, d Value, local *time.Location) float64 {
+	parts := dateTimeParts(cc, d, true)
+	args := make([]float64, len(parts))
+	for i, p := range parts {
+		args[i] = jsval.StringToNumber(p)
 	}
-	// Date(year, month, day, h, m, s, ms) with a two-digit year mapping (0..99 -> 1900+) as JavaScript does.
-	y := n[0]
-	if y >= 0 && y <= 99 {
-		y += 1900
+	if d.Get("utc").IsTruthy() {
+		return format.UTCArgs(args...)
 	}
-	loc := local
-	if loc == nil || d.Get("utc").IsTruthy() {
-		loc = time.UTC
-	}
-	t := time.Date(y, time.Month(n[1]+1), n[2], n[3], n[4], n[5], n[6]*1e6, loc)
-	return float64(t.UnixMilli())
+	return format.Local(local).DatetimeArgs(args...)
 }
 
 func assembleUnitSelectionSignals(m *unitModel, signals []Value) []Value {
 	if m.comp.selection == nil {
-		return cleanupEmptyOnArray(signals)
+		return cleanupEmptyOnArray(m.ctx, signals)
 	}
 	// Compilers append to signals in place; work on a private copy.
 	cc := m.ctx
 	signals = append(make([]Value, 0, len(signals)+8*m.comp.selection.len()), signals...)
 	for _, name := range m.comp.selection.keyList() {
-		cc.check()
+		cc.work(modelStep)
 		sel := m.comp.selection.m[name]
 		var resolveExpr string
 		if sel.resolve() == "global" {
@@ -510,7 +582,7 @@ func assembleUnitSelectionSignals(m *unitModel, signals []Value) []Value {
 			"on", arr(mkv("events", mkv("signal", sel.name+tupleSuffix), "update", "modify("+stringValue(jsval.Str(sel.name+storeSuffix))+", "+modifyExpr+")")),
 		))
 	}
-	return cleanupEmptyOnArray(signals)
+	return cleanupEmptyOnArray(cc, signals)
 }
 
 func assembleFacetSignals(m *facetModel, signals []Value) []Value {
@@ -523,7 +595,7 @@ func assembleFacetSignals(m *facetModel, signals []Value) []Value {
 			"update", "isTuple(facet) ? facet : group("+name+").datum")))
 		signals = append([]Value{sg}, signals...)
 	}
-	return cleanupEmptyOnArray(signals)
+	return cleanupEmptyOnArray(cc, signals)
 }
 
 func assembleTopLevelSignals(m Model, signals []Value) []Value {
@@ -531,11 +603,12 @@ func assembleTopLevelSignals(m Model, signals []Value) []Value {
 
 	sel := m.b().comp.selection
 	hasSelections := false
-	if sel != nil {
-		signals = append(make([]Value, 0, len(signals)+8*sel.len()), signals...)
-	}
+	// The list grows in place, as upstream's array does: copying it per
+	// unit would also make the signal index (signalPos) start over for
+	// every unit, quadratic in the units (X13).
 	if sel != nil {
 		for _, name := range sel.keyList() {
+			cc.work(modelStep)
 			s := sel.m[name]
 			store := stringValue(jsval.Str(s.name + storeSuffix))
 			if findSignal(cc, signals, s.name) == nil {
@@ -562,23 +635,126 @@ func assembleTopLevelSignals(m Model, signals []Value) []Value {
 			signals = append([]Value{mkv("name", "unit", "value", mkv(), "on", arr(mkv("events", mouseMoveEvent(cc), "update", "isTuple(group()) ? group() : unit")))}, signals...)
 		}
 	}
-	return cleanupEmptyOnArray(signals)
+	return cleanupEmptyOnArray(cc, signals)
 }
 
-func assembleUnitSelectionData(m *unitModel, data []Value) []Value {
+// selDataAcc is the data list that assembleSelectionData threads through
+// every unit of the view tree. Upstream passes an array: each unit (6.x)
+// returns its selection stores, then the array it was given, then its
+// animation data, a new array per unit; 5.8 appends its stores to a copy.
+// Copying the array and searching it per unit is quadratic in the units
+// (X13), so the list is kept in blocks: the stores of each unit in front (a
+// later unit's before an earlier one's), the data given at the start, then
+// what was appended. first holds the first entry of each name in the list,
+// which is what upstream's find returns.
+type selDataAcc struct {
+	cc    *compileCtx
+	front [][]Value // per unit, in the order prepended
+	mid   []Value
+	back  []Value
+	// first is the first entry of each name, built on the first lookup
+	// (index), so a chart without selections, which never looks, never
+	// builds it; from then on each entry added keeps it current. Its keys
+	// are the names the list holds.
+	indexed bool
+	first   map[string]Value
+}
+
+func newSelDataAcc(cc *compileCtx, data []Value) *selDataAcc {
+	return &selDataAcc{cc: cc, mid: data}
+}
+
+// index builds first from the whole list, once.
+func (a *selDataAcc) index() {
+	if a.indexed {
+		return
+	}
+	a.indexed = true
+	a.first = map[string]Value{}
+	for _, d := range a.list() {
+		a.cc.work(1)
+		a.noteBack(d)
+	}
+}
+
+// hasName says whether an entry of the list is named n.
+func (a *selDataAcc) hasName(n string) bool {
+	a.index()
+	_, ok := a.first[n]
+	return ok
+}
+
+// firstNamed is the first entry of the list named n (upstream's find).
+func (a *selDataAcc) firstNamed(n string) Value {
+	a.index()
+	return a.first[n]
+}
+
+func (a *selDataAcc) empty() bool { return len(a.front) == 0 && len(a.mid) == 0 && len(a.back) == 0 }
+
+// noteBack records d, now the last entry of the list.
+func (a *selDataAcc) noteBack(d Value) {
+	if !a.indexed {
+		return
+	}
+	if n := d.Get("name"); n.IsStr() {
+		if _, ok := a.first[n.StrValue()]; !ok {
+			a.first[n.StrValue()] = d
+		}
+	}
+}
+
+// prepend puts block before every entry of the list.
+func (a *selDataAcc) prepend(block []Value) {
+	if len(block) == 0 {
+		return
+	}
+	a.front = append(a.front, block)
+	if !a.indexed {
+		return
+	}
+	for i := len(block) - 1; i >= 0; i-- {
+		a.cc.work(1)
+		if n := block[i].Get("name"); n.IsStr() {
+			a.first[n.StrValue()] = block[i]
+		}
+	}
+}
+
+func (a *selDataAcc) appendAll(block []Value) {
+	for _, d := range block {
+		a.cc.work(1)
+		a.back = append(a.back, d)
+		a.noteBack(d)
+	}
+}
+
+// list is the whole list, in upstream's order.
+func (a *selDataAcc) list() []Value {
+	n := len(a.mid) + len(a.back)
+	for _, b := range a.front {
+		n += len(b)
+	}
+	out := make([]Value, 0, n)
+	for i := len(a.front) - 1; i >= 0; i-- {
+		out = append(out, a.front[i]...)
+	}
+	out = append(out, a.mid...)
+	return append(out, a.back...)
+}
+
+func assembleUnitSelectionData(m *unitModel, acc *selDataAcc) {
 	cc := m.b().ctx
 
 	var selectionData, animationData []Value
-	haveData := map[string]bool{}
-	for _, d := range data {
-		if n := d.Get("name"); n.IsStr() {
-			haveData[n.StrValue()] = true
-		}
-	}
+	// Store names added by this unit; upstream checks them together with
+	// the data it was given.
+	added := map[string]bool{}
+	hadData := !acc.empty()
 	unit := unitName(m, false)
 	if m.comp.selection != nil {
 		for _, name := range m.comp.selection.keyList() {
-			cc.check()
+			cc.work(1)
 			sel := m.comp.selection.m[name]
 			store := mk("name", sel.name+storeSuffix)
 			if sel.project.hasSelectionID {
@@ -587,35 +763,32 @@ func assembleUnitSelectionData(m *unitModel, data []Value) []Value {
 			if init := sel.props.Lookup("init"); init.IsTruthy() {
 				var fields []Value
 				for _, p := range sel.project.items {
+					cc.work(1)
 					fields = append(fields, p.assembled())
 				}
 				var vals []Value
 				for _, i := range init.Items() {
+					cc.work(1)
 					if sel.project.hasSelectionID {
-						vals = append(vals, mkv("unit", unit, selectionID, assembleInitValue(i, m.ctx.loc).Index(0)))
+						vals = append(vals, mkv("unit", unit, selectionID, assembleInitValue(cc, i, m.ctx.loc).Index(0)))
 					} else {
-						vals = append(vals, mkv("unit", unit, "fields", jsval.Arr(fields), "values", assembleInitValue(i, m.ctx.loc)))
+						vals = append(vals, mkv("unit", unit, "fields", jsval.Arr(fields), "values", assembleInitValue(cc, i, m.ctx.loc)))
 					}
 				}
 				store.Set("values", jsval.Arr(vals))
 			}
-			if !haveData[sel.name+storeSuffix] {
+			if storeName := sel.name + storeSuffix; !acc.hasName(storeName) && !added[storeName] {
 				selectionData = append(selectionData, jsval.Obj(store))
-				haveData[sel.name+storeSuffix] = true
+				added[storeName] = true
 			}
-			if isTimerSelection(cc, sel) && len(data) > 0 {
-				sourceName := m.lookupDataSource(m.getDataName(dsMain))
-				var sourceData Value
-				for _, d := range data {
-					if d.Get("name").IsStr() && d.Get("name").StrValue() == sourceName {
-						sourceData = d
-						break
-					}
-				}
+			if isTimerSelection(cc, sel) && hadData {
+				sourceName := m.lookupDataSource(m.getDataName(dsMain)).AsString()
+				sourceData := acc.firstNamed(sourceName)
 				if sourceData.IsObj() {
 					var filterT Value
 					var rest []Value
 					for _, t := range sourceData.Get("transform").Items() {
+						cc.work(1)
 						if !filterT.IsObj() && t.Get("type").IsStr() && t.Get("type").StrValue() == "filter" && strings.Contains(t.Get("expr").AsString(), "vlSelectionTest") {
 							filterT = t
 						} else {
@@ -632,17 +805,20 @@ func assembleUnitSelectionData(m *unitModel, data []Value) []Value {
 	}
 	if cc.v5 {
 		// 5.8 appends the stores to the data it was given.
-		return append(append([]Value{}, data...), selectionData...)
+		acc.appendAll(selectionData)
+		return
 	}
-	out := append(append(selectionData, data...), animationData...)
-	return out
+	acc.prepend(selectionData)
+	acc.appendAll(animationData)
 }
 
 func assembleUnitSelectionMarks(m *unitModel, marks []Value) []Value {
+	cc := m.ctx
 	if m.comp.selection == nil {
 		return marks
 	}
 	for _, name := range m.comp.selection.keyList() {
+		cc.work(modelStep)
 		sel := m.comp.selection.m[name]
 		for _, c := range selectionCompilers {
 			if c.defined(sel) && c.marks != nil {
@@ -654,7 +830,9 @@ func assembleUnitSelectionMarks(m *unitModel, marks []Value) []Value {
 }
 
 func assembleLayerSelectionMarks(m *layerModel, marks []Value) []Value {
+	cc := m.b().ctx
 	for _, child := range m.kids {
+		cc.work(modelStep)
 		if u := asUnit(child); u != nil {
 			marks = assembleUnitSelectionMarks(u, marks)
 		}
@@ -663,7 +841,7 @@ func assembleLayerSelectionMarks(m *layerModel, marks []Value) []Value {
 }
 
 func assembleSelectionScaleDomain(m Model, extent Value, sc *scaleComponent, domain Value) Value {
-	parsedExtent := parseSelectionExtent(m, extent.Get("param").AsString(), extent)
+	parsedExtent := parseSelectionExtent(m, extent.Get("param"), extent)
 	if hasContinuousDomain(sc.get("type").AsString()) && domain.IsArr() && jsGreater(domain.Index(0), domain.Index(1)) {
 		return sig("isValid(" + parsedExtent + ") && reverse(" + parsedExtent + ")")
 	}
@@ -673,101 +851,209 @@ func assembleSelectionScaleDomain(m Model, extent Value, sc *scaleComponent, dom
 // ---- interactive legend parse ----
 
 func parseInteractiveLegend(m *unitModel, channel string, legendCmpt *legendComponent) {
+	cc := m.ctx
 	field := m.fieldDef(channel).Get("field")
 	if m.comp.selection == nil {
 		return
 	}
 	for _, name := range m.comp.selection.keyList() {
+		cc.work(1)
 		sel := m.comp.selection.m[name]
-		proj := sel.project.hasField[field.AsString()]
-		if proj == nil {
-			proj, _ = sel.project.hasChannel.get(channel)
+		// selCmpt.project.hasField[field] ?? selCmpt.project.hasChannel[channel]:
+		// a field named after an inherited member finds a built-in.
+		proj, own, ref := sel.project.hasField.read(cc.realm(), field.AsString())
+		found := own && proj != nil
+		if !own {
+			if ref.host != nil || (ref.found && !isNullishAny(ref.val, true)) {
+				found = ref.host != nil || jsRefTruthy(ref)
+			} else {
+				proj, _ = sel.project.hasChannel.get(channel)
+				found = proj != nil
+			}
 		}
-		if proj != nil && legendsCompiler.defined(sel) {
+		if found && legendsCompiler.defined(sel) {
 			cur := legendCmpt.get("selections")
 			items := append([]Value{}, cur.Items()...)
 			items = append(items, jsval.Str(sel.name))
 			legendCmpt.set("selections", jsval.Arr(items), false)
-			proj.hasLegend = true
+			if proj != nil {
+				proj.hasLegend = true
+			} else {
+				cc.realm().write(ref, "hasLegend", jsval.True)
+			}
 		}
 	}
 }
 
 // ---- projection ("project" compiler) ----
 
+// signalNamer names the signals of a selection's projected fields as
+// upstream's project compiler does: varName(`${name}_${suffix}`), or with
+// `_1`, `_2`, ... appended until the name is free.
+//
+// Upstream restarts the counter at 1 for every field, which is quadratic
+// when many fields share a name (every name of non-word characters is
+// underscores, C16). The candidates of a field depend only on its base name
+// varName(`${name}_${suffix}`): varName maps each character on its own and
+// `_1` is word characters, so varName(`${b}_${k}`) is varName(b) + `_${k}`.
+// Names only become taken, never free again, so the counters a base has
+// already tried stay taken and the next field of that base resumes after
+// them, picking the name upstream picks.
+type signalNamer struct {
+	taken *sset
+	tried map[string]int // per base name, the counters already found taken
+}
+
+func newSignalNamer() *signalNamer { return &signalNamer{taken: newSset(), tried: map[string]int{}} }
+
+func (n *signalNamer) next(cc *compileCtx, name, suffix string) string {
+	base := varName(name + "_" + suffix)
+	candidate := func(k int) string {
+		if k == 0 {
+			return base
+		}
+		return varName(name + "_" + suffix + "_" + jsval.JSNumberString(float64(k)))
+	}
+	k := n.tried[base]
+	sg := candidate(k)
+	for n.taken.has(sg) {
+		cc.work(1)
+		k++
+		sg = candidate(k)
+	}
+	n.tried[base] = k + 1
+	n.taken.add(sg)
+	return sg
+}
+
 var projectCompiler = selectionCompiler{
 	defined: func(*selectionComponent) bool { return true },
 	parse: func(m *unitModel, sel *selectionComponent, selDef Value) {
+		cc := m.ctx
 		name := sel.name
 		proj := sel.project
-		parsed := map[string]*selProjItem{}
+		parsed := newLookupOmap[*selProjItem]() // a plain object (see jsRealm)
 		timeUnits := newOmap[*Object]()
-		signals := newSset()
+		names := newSignalNamer()
 		signalName := func(p *selProjItem, rangeK string) string {
 			suffix := p.field
 			if rangeK == "visual" {
 				suffix = p.channel
 			}
-			sg := varName(name + "_" + suffix)
-			for counter := 1; signals.has(sg); counter++ {
-				sg = varName(name + "_" + suffix + "_" + jsval.JSNumberString(float64(counter)))
-			}
-			signals.add(sg)
-			return sg
+			return names.next(cc, name, suffix)
 		}
 		typ := sel.typ
-		cfg := m.config.Get("selection").Get(typ)
+		// model.config.selection[type]: an invalid type reads undefined,
+		// or a member of Object.prototype ("constructor", "__proto__").
+		cfg := undef
+		if sc := m.config.Get("selection"); sc.IsObj() {
+			cfg = sc.ObjValue().Prop(typ)
+			if cfg.IsUndefined() && typ == "__proto__" {
+				cfg = mkv() // Object.prototype: no keys of its own
+			}
+		}
 		var init Value
 		if !selDef.Get("value").IsUndefined() {
 			init = jsval.Arr(arrayOf(selDef.Get("value")))
 		}
-		var fields, encodings []Value
+		// fields and encodings as upstream reads them: a falsy value is
+		// unspecified, an empty array is not.
+		fieldsV, encodingsV := undef, undef
 		if s := selDef.Get("select"); isObject(s) {
-			if f := s.Get("fields"); f.IsTruthy() {
-				fields = f.Items()
-			}
-			if e := s.Get("encodings"); e.IsTruthy() {
-				encodings = e.Items()
-			}
+			fieldsV, encodingsV = s.Get("fields"), s.Get("encodings")
 		}
-		if fields == nil && encodings == nil && init.IsTruthy() {
+		// cfgEncodings is cfg.encodings: a TypeError when the selection's
+		// type has no config (an invalid type).
+		cfgEncodings := func() Value {
+			if cfg.IsNullish() {
+				throw("Cannot read properties of %s (reading 'encodings')", nullishName(cfg))
+			}
+			return cfg.Get("encodings")
+		}
+		if !fieldsV.IsTruthy() && !encodingsV.IsTruthy() && init.IsTruthy() {
+			// The arrays pushed to are copied once, then grown here.
+			var encList, fieldList []Value
+			encOwned, fieldOwned := false, false
 			for _, initVal := range init.Items() {
+				cc.work(1)
 				if !isObject(initVal) {
 					continue
 				}
 				for _, key := range keysOf(initVal) {
-					if isSingleDefUnitChannel(m.ctx, key) {
-						encodings = append(encodings, jsval.Str(key))
-					} else if typ == "interval" {
-						encodings = cfg.Get("encodings").Items()
-					} else {
-						fields = append(fields, jsval.Str(key))
+					cc.work(1)
+					switch {
+					case isSingleDefUnitChannel(m.ctx, key):
+						// (encodings || (encodings = [])).push(key)
+						if !encOwned {
+							encList = nil
+							if encodingsV.IsTruthy() {
+								encList = append(encList, listOf(encodingsV, "(encodings || (encodings = []))", "push")...)
+							}
+							encOwned = true
+						}
+						encList = append(encList, jsval.Str(key))
+						encodingsV = jsval.True // set below
+					case typ == "interval":
+						cc.warn(msgIntervalInitializedWithPos)
+						encodingsV, encOwned = cfgEncodings(), false
+					default:
+						// (fields ??= []).push(key)
+						if !fieldOwned {
+							if !fieldsV.IsNullish() {
+								fieldList = append(fieldList, listOf(fieldsV, "(fields ??= [])", "push")...)
+							}
+							fieldOwned = true
+						}
+						fieldList = append(fieldList, jsval.Str(key))
+						fieldsV = jsval.True // set below
 					}
 				}
 			}
-		}
-		if fields == nil && encodings == nil {
-			encodings = cfg.Get("encodings").Items()
-			if cfg.IsObj() && cfg.ObjValue().Has("fields") {
-				fields = cfg.Get("fields").Items()
+			if encOwned {
+				encodingsV = jsval.Arr(encList)
+			}
+			if fieldOwned {
+				fieldsV = jsval.Arr(fieldList)
 			}
 		}
+		if !fieldsV.IsTruthy() && !encodingsV.IsTruthy() {
+			encodingsV = cfgEncodings()
+			if jsIn(cfg, "fields") {
+				fieldsV = cfg.Get("fields")
+			}
+		}
+		// for (const channel of encodings ?? []), and the same of fields.
+		var fields, encodings []Value
+		if !encodingsV.IsNullish() {
+			encodings = iterate(encodingsV, "(encodings ?? [])")
+		}
+		if !fieldsV.IsNullish() {
+			fields = iterate(fieldsV, "(fields ?? [])")
+		}
 		for _, ch := range encodings {
+			cc.work(1)
 			channel := ch.AsString()
 			fd := m.fieldDef(channel)
 			if fd.IsTruthy() {
 				field := fd.Get("field")
-				if fd.Get("aggregate").IsTruthy() || !field.IsTruthy() {
+				if agg := fd.Get("aggregate"); agg.IsTruthy() {
+					cc.warn(msgCannotProjectAggregate(channel, agg))
+					continue
+				} else if !field.IsTruthy() {
+					cc.warn(msgCannotProjectOnChannelWithoutField(channel))
 					continue
 				}
 				f := field.AsString()
 				if fd.Get("timeUnit").IsTruthy() && !isBinnedTimeUnit(m.ctx, fd.Get("timeUnit")) {
 					f = m.vgField(channel, fieldRefOption{})
 					component := mk("timeUnit", fd.Get("timeUnit"), "as", f, "field", fd.Get("field"))
-					timeUnits.set(hashOf(jsval.Obj(component)), component)
+					timeUnits.set(hashOf(m.ctx, jsval.Obj(component)), component)
 				}
-				if parsed[f] == nil {
+				if !parsed.truthy(cc.realm(), f) {
 					tplType := "E"
+					if typ == "interval" && isScaleChannel(m.ctx, channel) && m.getScaleComponent(channel) == nil {
+						throw("Cannot read properties of undefined (reading 'get')") // model.getScaleComponent(channel).get
+					}
 					if typ == "interval" && isScaleChannel(m.ctx, channel) && hasContinuousDomain(m.scaleTypeOf(channel)) {
 						tplType = "R"
 					} else if fd.Get("bin").IsTruthy() {
@@ -778,8 +1064,8 @@ var projectCompiler = selectionCompiler{
 					p.visSignal = signalName(p, "visual")
 					p.hasVisual = true
 					proj.items = append(proj.items, p)
-					parsed[f] = p
-					proj.hasField[f] = p
+					parsed.assign(f, p)
+					proj.hasField.assign(f, p)
 					proj.hasSelectionID = proj.hasSelectionID || f == selectionID
 					if isGeoPositionChannel(channel) {
 						p.geoChannel = channel
@@ -789,24 +1075,32 @@ var projectCompiler = selectionCompiler{
 						proj.hasChannel.set(channel, p)
 					}
 				}
+			} else {
+				cc.warn(msgCannotProjectOnChannelWithoutField(channel))
 			}
 		}
 		for _, fv := range fields {
+			cc.work(1)
 			field := fv.AsString()
-			if proj.hasField[field] != nil {
+			if proj.hasField.truthy(cc.realm(), field) {
 				continue
 			}
 			p := &selProjItem{typ: "E", field: field, index: len(proj.items)}
+			if !fv.IsStr() {
+				p.fieldV = fv // JSON has no undefined, so the zero value still means "use field"
+			}
 			p.dataSignal = signalName(p, "data")
 			proj.items = append(proj.items, p)
-			proj.hasField[field] = p
+			proj.hasField.assign(field, p)
 			proj.hasSelectionID = proj.hasSelectionID || field == selectionID
 		}
 		if init.IsTruthy() {
 			var out []Value
 			for _, v := range init.Items() {
+				cc.work(1)
 				var row []Value
 				for _, p := range proj.items {
+					cc.work(1)
 					if isObject(v) {
 						k := p.channel
 						if p.geoChannel != "" {
@@ -830,12 +1124,14 @@ var projectCompiler = selectionCompiler{
 		}
 	},
 	signals: func(m *unitModel, sel *selectionComponent, signals []Value) []Value {
+		cc := m.ctx
 		name := sel.name + tupleFields
 		if findSignal(sel.cc, signals, name) != nil || sel.project.hasSelectionID {
 			return signals
 		}
 		items := make([]Value, len(sel.project.items))
 		for i, p := range sel.project.items {
+			cc.work(1)
 			items[i] = p.assembled()
 		}
 		return append(signals, mkv("name", name, "value", jsval.Arr(items)))
@@ -881,17 +1177,12 @@ var pointCompiler = selectionCompiler{
 		return signals
 	},
 	signals: func(m *unitModel, sel *selectionComponent, signals []Value) []Value {
+		cc := m.ctx
 		name := sel.name
 		fieldsSg := name + tupleFields
 		project := sel.project
 		datum := "(item().isVoronoi ? datum.datum : datum)"
-		var brushes []string
-		for _, n := range m.comp.selection.keysView() {
-			c := m.comp.selection.m[n]
-			if c.typ == "interval" {
-				brushes = append(brushes, "indexof(item().mark.name, '"+c.name+brushSuffix+"') < 0")
-			}
-		}
+		brushes := pointBrushTests(m)
 		test := "datum && item().mark.marktype !== 'group' && indexof(item().mark.role, 'legend') < 0"
 		if len(brushes) > 0 {
 			test += " && " + strings.Join(brushes, " && ")
@@ -905,12 +1196,13 @@ var pointCompiler = selectionCompiler{
 		default:
 			var vals []string
 			for _, p := range project.items {
+				cc.work(1)
 				fd := m.fieldDef(p.channel)
 				if fd.Get("bin").IsTruthy() {
 					vals = append(vals, "["+datum+"["+stringValue(jsval.Str(m.vgField(p.channel, fieldRefOption{})))+"], "+
 						datum+"["+stringValue(jsval.Str(m.vgField(p.channel, fieldRefOption{binSuffix: "end"})))+"]]")
 				} else {
-					vals = append(vals, datum+"["+stringValue(jsval.Str(p.field))+"]")
+					vals = append(vals, datum+"["+stringValue(p.fieldValue())+"]")
 				}
 			}
 			update += "fields: " + fieldsSg + ", values: [" + strings.Join(vals, ", ") + "]"
@@ -932,11 +1224,35 @@ var pointCompiler = selectionCompiler{
 	},
 }
 
+// pointBrushTests is the list upstream's point signals build from the
+// unit's interval selections, so that a click on a brush is not a point
+// selection. Upstream rebuilds it for every point selection, a scan of all
+// the unit's selections each time (quadratic in a spec's params); it depends
+// only on the unit's selections, which no longer change once assembly
+// starts, so it is built once per unit and reused (ADR 0011).
+func pointBrushTests(m *unitModel) []string {
+	cc := m.ctx
+	n := m.comp.selection.len()
+	if m.brushTests != nil && m.brushN == n {
+		return m.brushTests
+	}
+	brushes := []string{}
+	for _, k := range m.comp.selection.keysView() {
+		cc.work(1)
+		if c := m.comp.selection.m[k]; c.typ == "interval" {
+			brushes = append(brushes, "indexof(item().mark.name, '"+c.name+brushSuffix+"') < 0")
+		}
+	}
+	m.brushTests, m.brushN = brushes, n
+	return brushes
+}
+
 // ---- interval ----
 
 var intervalCompiler = selectionCompiler{
 	defined: func(s *selectionComponent) bool { return s.typ == "interval" },
 	parse: func(m *unitModel, sel *selectionComponent, selDef Value) {
+		cc := m.ctx
 		if m.hasProjection() {
 			def := jsval.NewObject(4)
 			if s := selDef.Get("select"); isObject(s) {
@@ -945,7 +1261,7 @@ var intervalCompiler = selectionCompiler{
 			def.Set("fields", arr(selectionID))
 			if !def.Lookup("encodings").IsTruthy() {
 				if v := selDef.Get("value"); v.IsTruthy() {
-					def.Set("encodings", strsVal(keysOf(v)))
+					def.Set("encodings", strsVal(jsKeys(v)))
 				} else {
 					def.Set("encodings", arr(chLongitude, chLatitude))
 				}
@@ -957,25 +1273,32 @@ var intervalCompiler = selectionCompiler{
 		if sel.props.Lookup("translate").IsTruthy() && !scalesCompiler.defined(sel) {
 			filterExpr := "!event.item || event.item.mark.name !== " + stringValue(jsval.Str(sel.name+brushSuffix))
 			for _, evt := range sel.events().Items() {
-				between := evt.Get("between")
+				cc.work(1)
+				between := jsProp(evt, "between")
 				if !between.IsTruthy() {
+					cc.warn(tmpl(evt) + " is not an ordered event stream for interval selections.")
 					continue
 				}
-				first := between.Index(0).ObjValue()
-				filters := arrayOf(first.Lookup("filter"))
-				if !first.Has("filter") || first.Lookup("filter").IsNullish() {
-					filters = nil
+				// const filters = array((evt.between[0].filter ??= []));
+				// filters.push(...): a filter that is not an array is
+				// wrapped in a new array, so the push does not reach it.
+				first := jsProp(between, "0")
+				f0 := jsProp(first, "filter")
+				if f0.IsNullish() {
+					f0 = jsval.Arr(nil)
+					jsSetProp(first, "filter", f0)
 				}
+				filters := arrayOf(f0)
 				found := false
 				for _, f := range filters {
+					cc.work(1)
 					if f.IsStr() && f.StrValue() == filterExpr {
 						found = true
 					}
 				}
-				if !found {
-					filters = append(append([]Value{}, filters...), jsval.Str(filterExpr))
+				if !found && f0.IsArr() {
+					jsSetProp(first, "filter", jsval.Arr(append(append([]Value{}, filters...), jsval.Str(filterExpr))))
 				}
-				first.Set("filter", jsval.Arr(filters))
 			}
 		}
 	},
@@ -983,7 +1306,7 @@ var intervalCompiler = selectionCompiler{
 		name := sel.name
 		tupleSg := name + tupleSuffix
 		var channels []*selProjItem
-		for _, k := range sel.project.hasChannel.keys {
+		for _, k := range sel.project.hasChannel.keysView() {
 			p := sel.project.hasChannel.m[k]
 			if p.channel == chX || p.channel == chY {
 				channels = append(channels, p)
@@ -1035,7 +1358,7 @@ var intervalCompiler = selectionCompiler{
 			update := "unit: " + unitName(m, true) + ", fields: " + name + tupleFields + ", values"
 			o := mk("name", tupleSg)
 			if init.IsTruthy() {
-				o.Set("init", jsval.Str("{"+update+": "+assembleInitExpr(init, idWrap)+"}"))
+				o.Set("init", jsval.Str("{"+update+": "+assembleInitExpr(m.ctx, init, idWrap)+"}"))
 			}
 			if len(dataSignals) > 0 {
 				o.Set("on", arr(mkv(
@@ -1056,12 +1379,6 @@ var intervalCompiler = selectionCompiler{
 			yvname = y.visSignal
 		}
 		sizeSg := func(layout string) string { return signalOf(m.getSizeSignalRef(layout)) }
-		pick := func(v, d string) string {
-			if v != "" {
-				return v
-			}
-			return d
-		}
 		xs, ys := "0", "0"
 		if xvname != "" {
 			xs = xvname + "[0]"
@@ -1076,7 +1393,6 @@ var intervalCompiler = selectionCompiler{
 		if yvname != "" {
 			ye = yvname + "[1]"
 		}
-		_ = pick
 		bbox := "[[" + xs + ", " + ys + "],[" + xe + ", " + ye + "]]"
 		hasInit := init.IsTruthy()
 		if hasInit {
@@ -1091,9 +1407,10 @@ var intervalCompiler = selectionCompiler{
 			} else {
 				yinit = jsval.Str(centerSg + "[1]")
 			}
+			// `${xinit[0]}`: a string's character, a TypeError of null.
 			part := func(a Value, isCh bool, k int) string {
 				if isCh {
-					return a.Index(k).AsString()
+					return jsProp(a, strconv.Itoa(k)).AsString()
 				}
 				return a.AsString()
 			}
@@ -1132,6 +1449,7 @@ var intervalCompiler = selectionCompiler{
 		return signals
 	},
 	marks: func(m *unitModel, sel *selectionComponent, marks []Value) []Value {
+		cc := m.ctx
 		name := sel.name
 		x, _ := sel.project.hasChannel.get("x")
 		y, _ := sel.project.hasChannel.get("y")
@@ -1156,6 +1474,7 @@ var intervalCompiler = selectionCompiler{
 		update := mk("x", updateX, "y", updateY, "x2", updateX2, "y2", updateY2)
 		if sel.resolve() == "global" {
 			for _, k := range append([]string(nil), update.Keys()...) {
+				cc.work(1)
 				t := mk("test", store+".length && "+store+"[0].unit === "+unitName(m, true))
 				spread(t, update.Lookup(k))
 				update.Set(k, arr(jsval.Obj(t), mkv("value", 0)))
@@ -1166,6 +1485,7 @@ var intervalCompiler = selectionCompiler{
 		stroke := omit(selMark, "fill", "fillOpacity", "cursor")
 		vgStroke := jsval.NewObject(4)
 		for _, k := range stroke.Keys() {
+			cc.work(1)
 			var tests []string
 			if x != nil {
 				tests = append(tests, xvname+"[0] !== "+xvname+"[1]")
@@ -1201,6 +1521,7 @@ var intervalCompiler = selectionCompiler{
 }
 
 func intervalChannelSignals(m *unitModel, sel *selectionComponent, proj *selProjItem, init Value) []Value {
+	cc := m.ctx
 	scaledInterval := !m.hasProjection()
 	channel := proj.channel
 	vname := proj.visSignal
@@ -1219,8 +1540,9 @@ func intervalChannelSignals(m *unitModel, sel *selectionComponent, proj *selProj
 	coord := channel + "(unit)"
 	var von []Value
 	for _, evt := range sel.events().Items() {
+		cc.work(1)
 		von = append(von,
-			mkv("events", evt.Get("between").Index(0), "update", "["+coord+", "+coord+"]"),
+			mkv("events", jsProp(jsProp(evt, "between"), "0"), "update", "["+coord+", "+coord+"]"),
 			mkv("events", evt, "update", "["+vname+"[0], clamp("+coord+", 0, "+size+")]"),
 		)
 	}
@@ -1234,7 +1556,7 @@ func intervalChannelSignals(m *unitModel, sel *selectionComponent, proj *selProj
 		}
 		var vinit *Object
 		if init.IsTruthy() {
-			vinit = mk("init", assembleInitExpr(init, scaled))
+			vinit = mk("init", assembleInitExpr(m.ctx, init, scaled))
 		} else {
 			vinit = mk("value", jsval.Arr(nil))
 		}
@@ -1253,7 +1575,7 @@ func intervalChannelSignals(m *unitModel, sel *selectionComponent, proj *selProj
 		s1.Set("on", jsval.Arr(von))
 		s2 := mk("name", dname)
 		if init.IsTruthy() {
-			s2.Set("init", jsval.Str(assembleInitExpr(init, idWrap)))
+			s2.Set("init", jsval.Str(assembleInitExpr(m.ctx, init, idWrap)))
 		}
 		s2.Set("on", arr(mkv("events", mkv("signal", vname), "update", vname+"[0] === "+vname+"[1] ? null : invert("+scaleName+", "+vname+")")))
 		return []Value{jsval.Obj(s1), jsval.Obj(s2)}
@@ -1306,6 +1628,7 @@ var inputsCompiler = selectionCompiler{
 	},
 	parse: func(m *unitModel, sel *selectionComponent, selDef Value) { disableDirectManipulation(sel, selDef) },
 	topLevelSignals: func(m Model, sel *selectionComponent, signals []Value) []Value {
+		cc := m.b().ctx
 		name := sel.name
 		bind := sel.props.Lookup("bind")
 		var init Value
@@ -1317,16 +1640,21 @@ var inputsCompiler = selectionCompiler{
 			datum = "(item().isVoronoi ? datum.datum : datum)"
 		}
 		for i, p := range sel.project.items {
+			cc.work(1)
 			sgname := varName(name + "_" + p.field)
 			if findSignal(sel.cc, signals, sgname) == nil {
 				o := mk("name", sgname)
 				if init.IsTruthy() {
-					o.Set("init", jsval.Str(assembleInitExpr(init.Index(i), idWrap)))
+					if e, ok := assembleInitExprOK(m.b().ctx, init.Index(i), idWrap); ok {
+						o.Set("init", jsval.Str(e))
+					} else {
+						o.Set("init", undef) // JSON leaves it out
+					}
 				} else {
 					o.Set("value", jsval.Null)
 				}
 				if ev := sel.events(); ev.IsTruthy() {
-					o.Set("on", arr(mkv("events", ev, "update", "datum && item().mark.marktype !== 'group' ? "+datum+"["+stringValue(jsval.Str(p.field))+"] : null")))
+					o.Set("on", arr(mkv("events", ev, "update", "datum && item().mark.marktype !== 'group' ? "+datum+"["+stringValue(p.fieldValue())+"] : null")))
 				} else {
 					o.Set("on", jsval.Arr(nil))
 				}
@@ -1338,15 +1666,18 @@ var inputsCompiler = selectionCompiler{
 		return signals
 	},
 	signals: func(m *unitModel, sel *selectionComponent, signals []Value) []Value {
+		cc := m.ctx
 		name := sel.name
 		signal := findSignal(sel.cc, signals, name+tupleSuffix)
 		fields := name + tupleFields
 		var values []string
 		for _, p := range sel.project.items {
+			cc.work(1)
 			values = append(values, varName(name+"_"+p.field))
 		}
 		var valid []string
 		for _, v := range values {
+			cc.work(1)
 			valid = append(valid, v+" !== null")
 		}
 		if len(values) > 0 && signal != nil {
@@ -1384,8 +1715,10 @@ var scalesCompiler = selectionCompiler{
 		return s.typ == "interval" && s.resolve() == "global" && bind.IsStr() && bind.StrValue() == "scales"
 	},
 	parse: func(m *unitModel, sel *selectionComponent, _ Value) {
+		cc := m.ctx
 		sel.scalesBound = nil
 		for _, proj := range sel.project.items {
+			cc.work(1)
 			channel := proj.channel
 			if !isScaleChannel(m.ctx, channel) {
 				continue
@@ -1395,7 +1728,11 @@ var scalesCompiler = selectionCompiler{
 			if scale != nil {
 				scaleType = scale.get("type").AsString()
 			}
+			if scaleType == "sequential" && !cc.v5 {
+				cc.warn(msgSequentialScaleDeprecated)
+			}
 			if scale == nil || !hasContinuousDomain(scaleType) {
+				cc.warn(msgScaleBindingsContinuous)
 				continue
 			}
 			scale.set("selectionExtent", mkv("param", sel.name, "field", proj.field), true)
@@ -1459,10 +1796,15 @@ var legendsCompiler = selectionCompiler{
 		bind := s.props.Lookup("bind")
 		spec := s.resolve() == "global" && bind.IsTruthy() && isLegendBinding(bind)
 		projLen := len(s.project.items) == 1 && s.project.items[0].field != selectionID
+		if spec && !projLen {
+			// Upstream warns here, in the predicate, each time it is asked.
+			s.cc.warn(msgLegendBindingsMustHaveProj)
+		}
 		return spec && projLen
 	},
 	parse: func(m *unitModel, sel *selectionComponent, selDef Value) {
-		selDef2 := deepClone(selDef)
+		cc := m.ctx
+		selDef2 := duplicate(m.ctx, selDef)
 		if s := selDef2.Get("select"); s.IsStr() {
 			selDef2.ObjValue().Set("select", mkv("type", s, "toggle", sel.props.Lookup("toggle")))
 		} else {
@@ -1474,9 +1816,17 @@ var legendsCompiler = selectionCompiler{
 		if s := selDef.Get("select"); isObject(s) && (s.Get("on").IsTruthy() || s.Get("clear").IsTruthy()) {
 			legendFilter := `event.item && indexof(event.item.mark.role, "legend") < 0`
 			for _, evt := range sel.events().Items() {
-				filters := append([]Value{}, arrayOf(evt.Get("filter"))...)
+				cc.work(1)
+				// evt.filter = array(evt.filter ?? []), then a push.
+				f0 := jsProp(evt, "filter")
+				if f0.IsNullish() {
+					f0 = jsval.Arr(nil)
+				}
+				filters := append([]Value{}, arrayOf(f0)...)
+				jsSetProp(evt, "filter", jsval.Arr(filters))
 				found := false
 				for _, f := range filters {
+					cc.work(1)
 					if f.IsStr() && f.StrValue() == legendFilter {
 						found = true
 					}
@@ -1484,7 +1834,7 @@ var legendsCompiler = selectionCompiler{
 				if !found {
 					filters = append(filters, jsval.Str(legendFilter))
 				}
-				evt.ObjValue().Set("filter", jsval.Arr(filters))
+				jsSetProp(evt, "filter", jsval.Arr(filters))
 			}
 		}
 		evt := jsval.Str("click")
@@ -1500,6 +1850,7 @@ var legendsCompiler = selectionCompiler{
 		sel.props.Set("bind", mkv("legend", mkv("merge", stream)))
 	},
 	topLevelSignals: func(m Model, sel *selectionComponent, signals []Value) []Value {
+		cc := m.b().ctx
 		selName := sel.name
 		var stream Value
 		if isLegendStreamBinding(sel.props.Lookup("bind")) {
@@ -1507,13 +1858,15 @@ var legendsCompiler = selectionCompiler{
 		}
 		markName := func(name string) func(Value) Value {
 			return func(s Value) Value {
-				ds := deepClone(s)
-				ds.ObjValue().Set("markname", jsval.Str(name))
+				// ds.markname = name
+				ds := duplicate(m.b().ctx, s)
+				jsSetProp(ds, "markname", jsval.Str(name))
 				return ds
 			}
 		}
 		for _, proj := range sel.project.items {
-			if !proj.hasLegend {
+			cc.work(1)
+			if !proj.legendBound(cc) {
 				continue
 			}
 			prefix := varName(proj.field) + "_legend"
@@ -1522,6 +1875,7 @@ var legendsCompiler = selectionCompiler{
 				var events []Value
 				for _, suffix := range []string{"_symbols", "_labels", "_entries"} {
 					for _, s := range stream.Get("merge").Items() {
+						cc.work(1)
 						events = append(events, markName(prefix+suffix)(s))
 					}
 				}
@@ -1539,22 +1893,26 @@ var legendsCompiler = selectionCompiler{
 		return signals
 	},
 	signals: func(m *unitModel, sel *selectionComponent, signals []Value) []Value {
+		cc := m.ctx
 		name := sel.name
 		tuple := findSignal(sel.cc, signals, name+tupleSuffix)
 		fields := name + tupleFields
 		var values, valid []string
 		for _, p := range sel.project.items {
-			if p.hasLegend {
+			cc.work(1)
+			if p.legendBound(cc) {
 				values = append(values, varName(name+"_"+varName(p.field)+"_legend"))
 			}
 		}
 		for _, v := range values {
+			cc.work(1)
 			valid = append(valid, v+" !== null")
 		}
 		update := strings.Join(valid, " && ") + " ? {fields: " + fields + ", values: [" + strings.Join(values, ", ") + "]} : null"
 		if sel.events().IsTruthy() && len(values) > 0 {
 			var evs []Value
 			for _, v := range values {
+				cc.work(1)
 				evs = append(evs, mkv("signal", v))
 			}
 			pushOn(tuple, mkv("events", jsval.Arr(evs), "update", update))
@@ -1601,8 +1959,10 @@ var clearCompiler = selectionCompiler{
 		}
 	},
 	topLevelSignals: func(m Model, sel *selectionComponent, signals []Value) []Value {
+		cc := m.b().ctx
 		if inputsCompiler.defined(sel) {
 			for _, p := range sel.project.items {
+				cc.work(1)
 				idx := findSignalIndex(sel.cc, signals, varName(sel.name+"_"+p.field))
 				if idx != -1 {
 					pushOn(signals[idx].ObjValue(), mkv("events", sel.props.Lookup("clear"), "update", "null"))
@@ -1612,6 +1972,7 @@ var clearCompiler = selectionCompiler{
 		return signals
 	},
 	signals: func(m *unitModel, sel *selectionComponent, signals []Value) []Value {
+		cc := m.ctx
 		addClear := func(idx int, update string) {
 			if idx != -1 && signals[idx].Get("on").IsTruthy() {
 				pushOn(signals[idx].ObjValue(), mkv("events", sel.props.Lookup("clear"), "update", update))
@@ -1619,6 +1980,7 @@ var clearCompiler = selectionCompiler{
 		}
 		if sel.typ == "interval" {
 			for _, p := range sel.project.items {
+				cc.work(1)
 				vIdx := findSignalIndex(sel.cc, signals, p.visSignal)
 				addClear(vIdx, "[0, 0]")
 				if vIdx == -1 {
@@ -1676,25 +2038,25 @@ func panFnFor(boundScales bool, scale *scaleComponent, prefix string) (fn, arg s
 var translateCompiler = selectionCompiler{
 	defined: func(s *selectionComponent) bool { return s.typ == "interval" && s.props.Lookup("translate").IsTruthy() },
 	signals: func(m *unitModel, sel *selectionComponent, signals []Value) []Value {
+		cc := m.ctx
 		name := sel.name
 		boundScales := scalesCompiler.defined(sel)
 		anchor := name + translateAnchor
 		x, _ := sel.project.hasChannel.get("x")
 		y, _ := sel.project.hasChannel.get("y")
-		events := parseSelector(sel.props.Lookup("translate").AsString(), "scope")
-		for _, e := range events {
-			if b := e.Get("between"); !b.IsArr() || b.Len() == 0 || !b.Index(0).IsObj() {
-				throw("Invalid translate selector %s in the selection %q: expected a drag selector such as \"[mousedown, window:mouseup] > window:mousemove!\".", stringify(sel.props.Lookup("translate")), name)
-			}
-		}
+		events := parseSelectorOf(sel.props.Lookup("translate"), "scope")
 		if !boundScales {
+			// e.between[0].markname = ...: a selector without a between
+			// is upstream's TypeError.
 			for _, e := range events {
-				e.Get("between").Index(0).ObjValue().Set("markname", jsval.Str(name+brushSuffix))
+				cc.work(1)
+				jsSetProp(jsProp(jsProp(e, "between"), "0"), "markname", jsval.Str(name+brushSuffix))
 			}
 		}
 		var between []Value
 		for _, e := range events {
-			between = append(between, e.Get("between").Index(0))
+			cc.work(1)
+			between = append(between, jsProp(jsProp(e, "between"), "0"))
 		}
 		upd := "{x: x(unit), y: y(unit)"
 		if x != nil {
@@ -1773,6 +2135,7 @@ func translateOnDelta(m *unitModel, sel *selectionComponent, proj *selProjItem, 
 var zoomCompiler = selectionCompiler{
 	defined: func(s *selectionComponent) bool { return s.typ == "interval" && s.props.Lookup("zoom").IsTruthy() },
 	signals: func(m *unitModel, sel *selectionComponent, signals []Value) []Value {
+		cc := m.ctx
 		name := sel.name
 		boundScales := scalesCompiler.defined(sel)
 		delta := name + zoomDelta
@@ -1785,9 +2148,10 @@ var zoomCompiler = selectionCompiler{
 		if n := m.scaleName(chY, false); n != "" {
 			sy = stringValue(jsval.Str(n))
 		}
-		events := parseSelector(sel.props.Lookup("zoom").AsString(), "scope")
+		events := parseSelectorOf(sel.props.Lookup("zoom"), "scope")
 		if !boundScales {
 			for _, e := range events {
+				cc.work(1)
 				e.ObjValue().Set("markname", jsval.Str(name+brushSuffix))
 			}
 		}
@@ -1851,14 +2215,18 @@ func zoomOnDelta(m *unitModel, sel *selectionComponent, proj *selProjItem, size 
 var nearestCompiler = selectionCompiler{
 	defined: func(s *selectionComponent) bool { return s.typ == "point" && s.props.Lookup("nearest").IsTruthy() },
 	parse: func(m *unitModel, sel *selectionComponent, _ Value) {
+		cc := m.ctx
 		for _, s := range sel.events().Items() {
-			s.ObjValue().Set("markname", jsval.Str(m.getName("voronoi")))
+			cc.work(1)
+			jsSetProp(s, "markname", jsval.Str(m.getName("voronoi")))
 		}
 	},
 	marks: func(m *unitModel, sel *selectionComponent, marks []Value) []Value {
+		cc := m.ctx
 		x, _ := sel.project.hasChannel.get("x")
 		y, _ := sel.project.hasChannel.get("y")
 		if isPathMarkName(m.mark()) {
+			cc.warn(msgNearestNotSupportForContinuous(m.mark()))
 			return marks
 		}
 		upd := mk("fill", mkv("value", "transparent"), "strokeWidth", mkv("value", 0.35), "stroke", mkv("value", "transparent"), "isVoronoi", mkv("value", true))
@@ -1889,6 +2257,7 @@ var nearestCompiler = selectionCompiler{
 			firstMarkName = m.comp.mark[0].Get("name").AsString()
 		}
 		for i, mk_ := range marks {
+			cc.work(1)
 			n := mk_.Get("name").AsString()
 			if n == firstMarkName {
 				index = i

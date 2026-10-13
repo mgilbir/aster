@@ -1,7 +1,10 @@
 package raster
 
 import (
+	"fmt"
 	"math"
+
+	"github.com/mgilbir/aster/internal/budget"
 )
 
 // The filter pipeline is a port of resvg's (crates/resvg/src/filter): images
@@ -14,6 +17,10 @@ type fimage struct {
 	pix    []uint8
 	region irect // where the data is valid, in filter coordinates
 	linear bool
+	// owned is set on an image the run allocated for itself, charged to the
+	// canvas budget until it is freed; one that is the source, SourceAlpha
+	// or another result (a primitive that passes its input through) is not.
+	owned bool
 }
 
 type fresult struct {
@@ -21,19 +28,68 @@ type fresult struct {
 	img  fimage
 }
 
+// filterRun is one filter applied to one canvas. Every buffer it allocates,
+// results, colour-space copies and blur scratch, is charged to the canvas
+// budget (Limits.MaxCanvasBytes, the pixel memory alive at once) before it
+// is allocated and given back when it is dropped, so a chain of primitives
+// whose results stay alive is bounded by WithMemoryLimit like any layer
+// (C30).
 type filterRun struct {
+	r       *renderer
 	w, h    int
 	region  irect
 	src     []uint8
 	ts      matrix
 	results []fresult
-	live    int // bytes held by results
-	limit   int
-	failed  bool
+	alpha   fimage      // SourceAlpha, made once a run (C28)
 	stop    func() bool // reports a cancelled render; nil = never
 }
 
-const maxFilterLiveBytes = 1 << 30
+// alloc returns a zeroed buffer of n bytes charged to the canvas budget. Past
+// the budget it stops the render (budget.Stop), as the primitives that
+// allocate have no error to return.
+func (run *filterRun) alloc(n int) []uint8 {
+	run.charge(n)
+	return make([]uint8, n)
+}
+
+// charge accounts for n bytes of filter memory about to be allocated.
+func (run *filterRun) charge(n int) {
+	r := run.r
+	if r == nil {
+		return
+	}
+	if n > r.lim.MaxCanvasBytes-r.canvasBytes {
+		r.fail(fmt.Errorf("raster: a filter needs more than %d MiB of pixel memory at once (raise Limits.MaxCanvasBytes or WithMemoryLimit): %w",
+			r.lim.MaxCanvasBytes>>20, errLimit))
+		panic(&budget.Stop{Err: r.err})
+	}
+	r.canvasBytes += n
+}
+
+// uncharge gives back n bytes charged with charge.
+func (run *filterRun) uncharge(n int) {
+	if run.r != nil {
+		run.r.canvasBytes -= n
+	}
+}
+
+// free gives back an owned image's bytes; img must not be used again.
+func (run *filterRun) free(img fimage) {
+	if img.owned {
+		run.uncharge(len(img.pix))
+	}
+}
+
+// end gives back everything the run still holds.
+func (run *filterRun) end() {
+	for i := range run.results {
+		run.free(run.results[i].img)
+		run.results[i].img = fimage{}
+	}
+	run.free(run.alpha)
+	run.alpha = fimage{}
+}
 
 func f32(v float64) float32 { return float32(v) }
 
@@ -78,7 +134,8 @@ func (r *renderer) applyFilter(sp *filterSpec, ts matrix, cv *canvas) bool {
 	if !(rc.w() > 0 && rc.h() > 0) {
 		return false
 	}
-	run := &filterRun{w: cv.w, h: cv.h, src: cv.pix, ts: ts, limit: maxFilterLiveBytes, stop: func() bool { return !r.poll(true) }}
+	run := &filterRun{r: r, w: cv.w, h: cv.h, src: cv.pix, ts: ts, stop: func() bool { return !r.poll(true) }}
+	defer run.end()
 	run.region = toIntRect(rc)
 	last := len(sp.prims) - 1
 	// Last use of each result name, to free buffers early.
@@ -114,7 +171,8 @@ func (r *renderer) applyFilter(sp *filterSpec, ts matrix, cv *canvas) bool {
 			}
 		}
 		res, ok := run.apply(p)
-		if !ok || run.failed {
+		if !ok || r.err != nil {
+			run.free(res)
 			return false
 		}
 		if run.region != sub {
@@ -124,44 +182,39 @@ func (r *renderer) applyFilter(sp *filterSpec, ts matrix, cv *canvas) bool {
 			} else {
 				sub2 = irect{sub.x0 - run.region.x0, sub.y0 - run.region.y0, sub.x1 - run.region.x0, sub.y1 - run.region.y0}
 			}
-			pix := res.pix
-			if run.shared(pix) {
-				pix = append([]uint8(nil), pix...)
+			if !res.owned {
+				// An input passed through: clear a copy, not the input.
+				pix := run.alloc(len(res.pix))
+				copy(pix, res.pix)
+				res = fimage{pix: pix, region: res.region, linear: res.linear, owned: true}
 			}
-			clearOutside(pix, run.w, run.h, sub2)
-			res = fimage{pix: pix, region: sub, linear: res.linear}
+			clearOutside(res.pix, run.w, run.h, sub2)
+			res.region = sub
 		}
-		run.push(fresult{name: p.result, img: res})
-		if run.failed {
-			return false
-		}
+		run.results = append(run.results, fresult{name: p.result, img: res})
 		// Drop results nobody reads any more (the last one is the output).
 		if i != last {
-			run.release(sp, i, lastUse)
+			run.release(i, lastUse)
 		}
 	}
 	if len(run.results) == 0 {
 		return false
 	}
-	out := run.results[len(run.results)-1].img
-	out = toSpace(out, false)
+	out := run.toSpace(run.results[len(run.results)-1].img, false)
 	copy(cv.pix, out.pix)
 	if len(out.pix) < len(cv.pix) {
 		clear(cv.pix[len(out.pix):])
 	}
+	if out.owned && !run.held(out.pix) {
+		run.free(out)
+	}
 	return true
 }
 
-func (run *filterRun) push(res fresult) {
-	run.results = append(run.results, res)
-	run.live += len(res.img.pix)
-	if run.live > run.limit {
-		run.failed = true
-	}
-}
-
-func (run *filterRun) release(sp *filterSpec, i int, lastUse map[string]int) {
-	// Free earlier results whose last reader has run; keep the newest.
+// release drops the earlier results whose last reader has run; the newest
+// is kept. A dropped result that another still live one passes through
+// hands its bytes over to it.
+func (run *filterRun) release(i int, lastUse map[string]int) {
 	for j := 0; j < len(run.results)-1; j++ {
 		res := &run.results[j]
 		if res.img.pix == nil {
@@ -172,16 +225,32 @@ func (run *filterRun) release(sp *filterSpec, i int, lastUse map[string]int) {
 		}
 		// A later primitive may reuse the name; the most recent one wins for
 		// lookups, so only free when a newer result shadows or nobody reads it.
-		run.live -= len(res.img.pix)
-		res.img.pix = nil
+		if res.img.owned {
+			if k := run.alias(j); k >= 0 {
+				run.results[k].img.owned = true
+			} else {
+				run.free(res.img)
+			}
+		}
+		res.img = fimage{}
 	}
 }
 
-// shared reports whether pix is held by a stored result or is the source.
-func (run *filterRun) shared(pix []uint8) bool {
-	if len(pix) > 0 && len(run.src) > 0 && &pix[0] == &run.src[0] {
-		return true
+// alias is the index of a live result other than j that holds result j's
+// pixels, or -1.
+func (run *filterRun) alias(j int) int {
+	p := run.results[j].img.pix
+	for k := range run.results {
+		q := run.results[k].img.pix
+		if k != j && len(q) > 0 && len(p) > 0 && &q[0] == &p[0] {
+			return k
+		}
 	}
+	return -1
+}
+
+// held reports whether pix is the pixels of a stored result.
+func (run *filterRun) held(pix []uint8) bool {
 	for i := range run.results {
 		p := run.results[i].img.pix
 		if len(p) > 0 && len(pix) > 0 && &p[0] == &pix[0] {
@@ -208,33 +277,42 @@ func clearOutside(pix []uint8, w, h int, keep irect) {
 	}
 }
 
+// input is the image a primitive reads: SourceGraphic, SourceAlpha or a
+// named result. It is never owned by the caller, which must not change it.
 func (run *filterRun) input(in finput) fimage {
 	switch in.kind {
 	case inAlpha:
-		pix := make([]uint8, len(run.src))
-		for i := 3; i < len(pix); i += 4 {
-			pix[i] = run.src[i]
+		// Made once a run, however many primitives (or merge nodes) read it.
+		if run.alpha.pix == nil {
+			pix := run.alloc(len(run.src))
+			for i := 3; i < len(pix); i += 4 {
+				pix[i] = run.src[i]
+			}
+			run.alpha = fimage{pix: pix, region: run.region, owned: true}
 		}
-		return fimage{pix: pix, region: run.region}
+		return fimage{pix: run.alpha.pix, region: run.region}
 	case inRef:
 		for j := len(run.results) - 1; j >= 0; j-- {
 			if run.results[j].name == in.name && run.results[j].img.pix != nil {
-				return run.results[j].img
+				img := run.results[j].img
+				img.owned = false
+				return img
 			}
 		}
 	}
 	return fimage{pix: run.src, region: run.region}
 }
 
-func (run *filterRun) blank() []uint8 { return make([]uint8, run.w*run.h*4) }
+func (run *filterRun) blank() []uint8 { return run.alloc(run.w * run.h * 4) }
 
-// toSpace converts img to the requested colour space (returns img itself when
-// unchanged; the result never aliases the input otherwise).
-func toSpace(img fimage, linear bool) fimage {
+// toSpace converts img to the requested colour space: img itself when it is
+// in it already, otherwise a new image the caller owns (and frees).
+func (run *filterRun) toSpace(img fimage, linear bool) fimage {
 	if img.linear == linear {
 		return img
 	}
-	pix := append([]uint8(nil), img.pix...)
+	pix := run.alloc(len(img.pix))
+	copy(pix, img.pix)
 	demultiply(pix)
 	tbl := &linearToSRGBTable
 	if linear {
@@ -246,7 +324,18 @@ func toSpace(img fimage, linear bool) fimage {
 		pix[i+2] = tbl[pix[i+2]]
 	}
 	multiply(pix)
-	return fimage{pix: pix, region: img.region, linear: linear}
+	return fimage{pix: pix, region: img.region, linear: linear, owned: true}
+}
+
+// owned returns img's pixels as a buffer the caller owns: img's own when it
+// owns them (a colour-space copy), a charged copy otherwise.
+func (run *filterRun) ownCopy(img fimage) []uint8 {
+	if img.owned {
+		return img.pix
+	}
+	pix := run.alloc(len(img.pix))
+	copy(pix, img.pix)
+	return pix
 }
 
 func satU8(v float32) uint8 {
@@ -317,9 +406,9 @@ func (run *filterRun) apply(p *fprim) (fimage, bool) {
 		g := satU8(float32(float32(p.color.g)*af) + 0.5)
 		b := satU8(float32(float32(p.color.b)*af) + 0.5)
 		for i := 0; i < len(pix); i += 4 {
-			pix[i], pix[i+1], pix[i+2], pix[i+3] = r, g, b, uint8(a8)
+			pix[i], pix[i+1], pix[i+2], pix[i+3] = r, g, b, satU8(a8)
 		}
-		return fimage{pix: pix, region: run.region}, true
+		return fimage{pix: pix, region: run.region, owned: true}, true
 	case tagFeOffset:
 		in := run.input(p.in1)
 		sx, sy := tsScale(run.ts)
@@ -329,27 +418,22 @@ func (run *filterRun) apply(p *fprim) (fimage, bool) {
 		}
 		pix := run.blank()
 		drawOver(pix, in.pix, w, h, satInt(dx), satInt(dy))
-		return fimage{pix: pix, region: run.region, linear: in.linear}, true
+		return fimage{pix: pix, region: run.region, linear: in.linear, owned: true}, true
 	case tagFeGaussianBlur:
 		in := run.input(p.in1)
 		sx, sy, box, ok := run.stdDev(p.stdX, p.stdY)
 		if !ok {
 			return in, true
 		}
-		in = toSpace(in, p.linear)
-		pix := append([]uint8(nil), in.pix...)
-		if box {
-			boxBlur(sx, sy, pix, w, h, run.stop)
-		} else {
-			iirBlur(sx, sy, pix, w, h, run.stop)
-		}
-		return fimage{pix: pix, region: run.region, linear: p.linear}, true
+		pix := run.ownCopy(run.toSpace(in, p.linear))
+		run.blur(sx, sy, box, pix)
+		return fimage{pix: pix, region: run.region, linear: p.linear, owned: true}, true
 	case tagFeDropShadow:
 		return run.dropShadow(p)
 	case tagFeBlend:
-		in1 := toSpace(run.input(p.in1), p.linear)
-		in2 := toSpace(run.input(p.in2), p.linear)
-		pix := append([]uint8(nil), in2.pix...)
+		in1 := run.toSpace(run.input(p.in1), p.linear)
+		defer run.free(in1)
+		pix := run.ownCopy(run.toSpace(run.input(p.in2), p.linear))
 		for i := 0; i < len(pix); i += 4 {
 			s := in1.pix[i : i+4]
 			if s[3] == 0 {
@@ -366,14 +450,16 @@ func (run *filterRun) apply(p *fprim) (fimage, bool) {
 				blendPixel(d, uint32(s[0]), uint32(s[1]), uint32(s[2]), uint32(s[3]), p.mode)
 			}
 		}
-		return fimage{pix: pix, region: run.region, linear: p.linear}, true
+		return fimage{pix: pix, region: run.region, linear: p.linear, owned: true}, true
 	case tagFeComposite:
-		in1 := toSpace(run.input(p.in1), p.linear)
-		in2 := toSpace(run.input(p.in2), p.linear)
+		in1 := run.toSpace(run.input(p.in1), p.linear)
+		defer run.free(in1)
+		in2 := run.toSpace(run.input(p.in2), p.linear)
+		defer run.free(in2)
 		pix := run.blank()
 		if p.op == opArithmetic {
 			arithmetic(p.k, in1.pix, in2.pix, pix)
-			return fimage{pix: pix, region: run.region, linear: p.linear}, true
+			return fimage{pix: pix, region: run.region, linear: p.linear, owned: true}, true
 		}
 		copy(pix, in2.pix)
 		for i := 0; i < len(pix); i += 4 {
@@ -407,31 +493,55 @@ func (run *filterRun) apply(p *fprim) (fimage, bool) {
 				}
 			}
 		}
-		return fimage{pix: pix, region: run.region, linear: p.linear}, true
+		return fimage{pix: pix, region: run.region, linear: p.linear, owned: true}, true
 	case tagFeMerge:
 		pix := run.blank()
 		for _, in := range p.merge {
-			img := toSpace(run.input(in), p.linear)
+			// Each node is a pass over the region: the context is polled
+			// per node, as per primitive (C28).
+			if run.stop != nil && run.stop() {
+				run.free(fimage{pix: pix, owned: true})
+				return fimage{}, false
+			}
+			img := run.toSpace(run.input(in), p.linear)
 			drawOver(pix, img.pix, w, h, 0, 0)
+			run.free(img)
 		}
-		return fimage{pix: pix, region: run.region, linear: p.linear}, true
+		return fimage{pix: pix, region: run.region, linear: p.linear, owned: true}, true
 	case tagFeColorMatrix:
-		in := toSpace(run.input(p.in1), p.linear)
-		pix := append([]uint8(nil), in.pix...)
+		pix := run.ownCopy(run.toSpace(run.input(p.in1), p.linear))
 		demultiply(pix)
 		colorMatrix(p, pix)
 		multiply(pix)
-		return fimage{pix: pix, region: run.region, linear: p.linear}, true
+		return fimage{pix: pix, region: run.region, linear: p.linear, owned: true}, true
 	case tagFeComponentTransfer:
-		in := toSpace(run.input(p.in1), p.linear)
-		pix := append([]uint8(nil), in.pix...)
+		pix := run.ownCopy(run.toSpace(run.input(p.in1), p.linear))
 		demultiply(pix)
 		componentTransfer(p, pix)
 		multiply(pix)
-		return fimage{pix: pix, region: run.region, linear: p.linear}, true
+		return fimage{pix: pix, region: run.region, linear: p.linear, owned: true}, true
 	}
 	// Unsupported primitive: transparent black.
-	return fimage{pix: run.blank(), region: run.region}, true
+	return fimage{pix: run.blank(), region: run.region, owned: true}, true
+}
+
+// blur blurs pix in place (resvg's box blur from sigma 2, IIR below it),
+// charging its scratch to the canvas budget while it lives.
+func (run *filterRun) blur(sx, sy float64, box bool, pix []uint8) {
+	w, h := run.w, run.h
+	if box {
+		// A copy of the image, and four prefix-sum lines of one row or
+		// column at a time.
+		n := len(pix) + 16*(max(w, h)+1)
+		run.charge(n)
+		boxBlur(sx, sy, pix, w, h, run.stop)
+		run.uncharge(n)
+		return
+	}
+	n := 8 * w * h // a float64 a pixel
+	run.charge(n)
+	iirBlur(sx, sy, pix, w, h, run.stop)
+	run.uncharge(n)
 }
 
 func satInt(v float32) int {
@@ -473,15 +583,13 @@ func (run *filterRun) dropShadow(p *fprim) (fimage, bool) {
 	in := run.input(p.in1)
 	tx, ty := tsScale(run.ts)
 	dx, dy := float32(p.dx)*float32(tx), float32(p.dy)*float32(ty)
-	inp := toSpace(in, p.linear)
+	inp := run.toSpace(in, p.linear)
+	defer run.free(inp)
 	pix := run.blank()
-	shadow := append([]uint8(nil), inp.pix...)
+	shadow := run.alloc(len(inp.pix))
+	copy(shadow, inp.pix)
 	if sx, sy, box, ok := run.stdDev(p.stdX, p.stdY); ok {
-		if box {
-			boxBlur(sx, sy, shadow, w, h, run.stop)
-		} else {
-			iirBlur(sx, sy, shadow, w, h, run.stop)
-		}
+		run.blur(sx, sy, box, shadow)
 	}
 	// Flood the blurred alpha with the shadow colour.
 	col := [3]float32{float32(p.color.r), float32(p.color.g), float32(p.color.b)}
@@ -495,12 +603,16 @@ func (run *filterRun) dropShadow(p *fprim) (fimage, bool) {
 		shadow[i+2] = satU8(float32(col[2]*a) + 0.5)
 		shadow[i+3] = satU8(a*255 + 0.5)
 	}
-	sh := fimage{pix: shadow, linear: false}
-	sh = toSpace(sh, p.linear)
+	sh := fimage{pix: shadow, linear: false, owned: true}
+	if conv := run.toSpace(sh, p.linear); conv.owned && &conv.pix[0] != &shadow[0] {
+		run.free(sh)
+		sh = conv
+	}
 	sh.linear = p.linear
 	drawOver(pix, sh.pix, w, h, satInt(dx), satInt(dy))
+	run.free(sh)
 	drawOver(pix, inp.pix, w, h, 0, 0)
-	return fimage{pix: pix, region: run.region, linear: p.linear}, true
+	return fimage{pix: pix, region: run.region, linear: p.linear, owned: true}, true
 }
 
 func arithmetic(k [4]float64, s1, s2, dst []uint8) {

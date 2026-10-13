@@ -1,6 +1,7 @@
 package vega
 
 import (
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/geo"
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/scene"
@@ -10,6 +11,10 @@ import (
 // This file implements the expression environment's projection, shape and tree
 // functions on the context (vega-functions geo.js, shape.js, tree.js).
 
+// projectionOf resolves a projection reference. Its path generator is bound
+// to the view's context, so the walks of the geo functions are bounded as a
+// mark's are, whether or not a mark used the projection (C18): they panic
+// with a *budget.Stop, which ends the evaluation.
 func (c *rtContext) projectionOf(ref jsval.Value) (geo.Projection, bool) {
 	if !ref.IsStr() {
 		return nil, false
@@ -19,6 +24,9 @@ func (c *rtContext) projectionOf(ref jsval.Value) (geo.Projection, bool) {
 		return nil, false
 	}
 	p, ok := n.value.(geo.Projection)
+	if ok {
+		p.Path().Bind(c.view.ctx)
+	}
 	return p, ok
 }
 
@@ -31,7 +39,11 @@ func (c *rtContext) GeoArea(projection, geojson, group jsval.Value) jsval.Value 
 		}
 		return jsval.Num(p.Path().Area(geojson))
 	}
-	return jsval.Num(geo.GeoArea(geojson))
+	a, err := geo.GeoArea(c.view.ctx, geojson)
+	if err != nil {
+		panic(&budget.Stop{Err: err}) // a bound: Program.Eval returns it
+	}
+	return jsval.Num(a)
 }
 
 func boundsValue(b [2][2]float64) jsval.Value {
@@ -49,7 +61,11 @@ func (c *rtContext) GeoBounds(projection, geojson, group jsval.Value) jsval.Valu
 		}
 		return boundsValue(p.Path().Bounds(geojson))
 	}
-	return boundsValue(geo.GeoBounds(geojson))
+	b, err := geo.GeoBounds(c.view.ctx, geojson)
+	if err != nil {
+		panic(&budget.Stop{Err: err}) // a bound: Program.Eval returns it
+	}
+	return boundsValue(b)
 }
 
 func (c *rtContext) GeoCentroid(projection, geojson, group jsval.Value) jsval.Value {
@@ -61,7 +77,11 @@ func (c *rtContext) GeoCentroid(projection, geojson, group jsval.Value) jsval.Va
 		}
 		return pt(p.Path().Centroid(geojson))
 	}
-	return pt(geo.GeoCentroid(geojson))
+	cen, err := geo.GeoCentroid(c.view.ctx, geojson)
+	if err != nil {
+		panic(&budget.Stop{Err: err}) // a bound: Program.Eval returns it
+	}
+	return pt(cen)
 }
 
 func (c *rtContext) GeoScale(projection, group jsval.Value) jsval.Value {
@@ -123,7 +143,7 @@ func (c *rtContext) PathShape(path jsval.Value) jsval.Value {
 	}
 	fn, err := scene.PathFuncFromString(path.AsString())
 	if err != nil {
-		failErr(err)
+		panic(&budget.Stop{Err: err}) // a bound: Program.Eval returns it
 	}
 	return c.view.newShape(func(ctx scene.PathContext, _ *scene.Item) string { return fn(ctx) })
 }
@@ -144,11 +164,13 @@ func (v *runView) shapeOf(h jsval.Value) scene.ShapeFunc {
 	if !id.IsNum() {
 		return nil
 	}
-	i := int(id.NumValue())
-	if i < 0 || i >= len(v.shapes) {
+	// Range-checked as a float: converting NaN or a huge number to int is
+	// platform-dependent.
+	f := id.NumValue()
+	if !(f >= 0 && f < float64(len(v.shapes))) {
 		return nil
 	}
-	return v.shapes[i]
+	return v.shapes[int(f)]
 }
 
 // TreePath implements expr.TreeProvider.
@@ -157,7 +179,9 @@ func (c *rtContext) TreePath(name string, source, target jsval.Value) jsval.Valu
 	if t == nil {
 		return jsval.Undefined
 	}
-	s, d := t.NodeByKey(source.AsString()), t.NodeByKey(target.AsString())
+	// The tree's lookup object is keyed by String(key), dates in the view's
+	// zone (hierarchy.Stratify).
+	s, d := t.NodeByKey(c.view.jsString(source)), t.NodeByKey(c.view.jsString(target))
 	if s == nil || d == nil {
 		return jsval.Undefined
 	}
@@ -174,7 +198,7 @@ func (c *rtContext) TreeAncestors(name string, node jsval.Value) jsval.Value {
 	if t == nil {
 		return jsval.Undefined
 	}
-	n := t.NodeByKey(node.AsString())
+	n := t.NodeByKey(c.view.jsString(node))
 	if n == nil {
 		return jsval.Undefined
 	}

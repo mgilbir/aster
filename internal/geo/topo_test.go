@@ -29,7 +29,7 @@ func TestTopoJSON(t *testing.T) {
 		}
 		for key, w := range want {
 			obj := topo.Get("objects").Get(key)
-			f, err := TopoFeature(topo, obj)
+			f, err := TopoFeature(bg, topo, obj)
 			if err != nil {
 				t.Fatalf("%s/%s: %v", name, key, err)
 			}
@@ -37,7 +37,7 @@ func TestTopoJSON(t *testing.T) {
 				t.Errorf("%s/%s feature: %v want %v", name, key, h, w["feature"])
 			}
 			for mode, filter := range map[string]MeshFilter{"mesh": MeshAll, "interior": MeshInterior, "exterior": MeshExterior} {
-				m, err := TopoMesh(topo, obj, filter)
+				m, err := TopoMesh(bg, topo, obj, filter)
 				if err != nil {
 					t.Fatalf("%s/%s %s: %v", name, key, mode, err)
 				}
@@ -49,7 +49,7 @@ func TestTopoJSON(t *testing.T) {
 	}
 	// The whole decoded land feature, structurally.
 	world := loadTopology(t, "world-110m.json")
-	land, err := TopoFeature(world, world.Get("objects").Get("land"))
+	land, err := TopoFeature(bg, world, world.Get("objects").Get("land"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,25 +61,25 @@ func TestTopoJSON(t *testing.T) {
 
 func TestTopologyFeatures(t *testing.T) {
 	world := loadTopology(t, "world-110m.json")
-	feats, err := TopologyFeatures(world, "countries", "", "")
+	feats, err := TopologyFeatures(bg, world, "countries", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(feats) != 177 {
 		t.Errorf("countries: %d features", len(feats))
 	}
-	one, err := TopologyFeatures(world, "land", "", "")
+	one, err := TopologyFeatures(bg, world, "land", "", "")
 	if err != nil || len(one) != 1 {
 		t.Errorf("land: %v %d", err, len(one))
 	}
-	mesh, err := TopologyFeatures(world, "", "countries", "interior")
+	mesh, err := TopologyFeatures(bg, world, "", "countries", "interior")
 	if err != nil || len(mesh) != 1 || mesh[0].Get("type").StrValue() != "MultiLineString" {
 		t.Errorf("mesh: %v %v", err, mesh)
 	}
-	if _, err := TopologyFeatures(world, "", "", ""); err == nil {
+	if _, err := TopologyFeatures(bg, world, "", "", ""); err == nil {
 		t.Error("missing feature/mesh should fail")
 	}
-	if _, err := TopologyFeatures(world, "nosuch", "", ""); err == nil {
+	if _, err := TopologyFeatures(bg, world, "nosuch", "", ""); err == nil {
 		t.Error("missing object should fail")
 	}
 }
@@ -97,8 +97,8 @@ func TestTopoJSONMalformed(t *testing.T) {
 		topo := parseJSONValue(t, []byte(src))
 		obj := topo.Get("objects").Get("a")
 		// None of these may panic.
-		_, _ = TopoFeature(topo, obj)
-		_, _ = TopoMesh(topo, obj, MeshAll)
-		_, _ = TopologyFeatures(topo, "a", "", "")
+		_, _ = TopoFeature(bg, topo, obj)
+		_, _ = TopoMesh(bg, topo, obj, MeshAll)
+		_, _ = TopologyFeatures(bg, topo, "a", "", "")
 	}
 }

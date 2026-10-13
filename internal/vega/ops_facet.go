@@ -71,7 +71,7 @@ func (s *facetState) subflow(n *opNode, k any, make subflowMaker, key string, pa
 	if c == nil {
 		g := n.g
 		g.view.cells++
-		if g.view.cells > g.view.limits.MaxSubflows {
+		if lim := g.view.limits.MaxSubflows; lim >= 0 && g.view.cells > lim {
 			failLimit("more than %d facet cells", g.view.limits.MaxSubflows)
 		}
 		sf := g.add("subflow", nil)
@@ -136,25 +136,82 @@ func facFacet(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 	}), nil
 }
 
+// prefacetLastBytes is what an entry of a prefacet's last map holds: the key,
+// the value and the map's own share.
+const prefacetLastBytes = 48
+
+// prefacetFieldModified reports a tuple faceted before (one with a cell)
+// whose field now holds another value than the cell was filled from:
+// upstream's pulse then carries it as modified, with its field among the
+// modified fields. A first run has nothing to compare, and costs nothing.
+func prefacetFieldModified(st *facetState, last map[*cell]jsval.Value, tuples []jsval.Value, field transforms.Field) bool {
+	if len(last) == 0 {
+		return false
+	}
+	for _, t := range tuples {
+		cl := st.flows[t.Key()]
+		if cl == nil {
+			continue
+		}
+		if prev, ok := last[cl]; ok {
+			if v := field.Apply(t); !jsval.SameRef(prev, v) || prev.Kind() != v.Kind() {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func facPreFacet(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *opParams) any) {
 	st := newFacetNode(n)
+	// last is the field value each cell's tuple had when the cell was last
+	// filled: what tells a rewrite of the field (prefacetFieldModified). It
+	// grows by a cell the first time the cell is filled, charged to the
+	// call's ledger then (prefacetLastBytes), and is updated in place after.
+	var last map[*cell]jsval.Value
 	return nil, trFunc(func(n *opNode, p *opParams, pulse *flowPulse) *flowPulse {
 		flow, _ := p.Get("subflow").(subflowMaker)
 		if flow == nil {
 			fail("prefacet requires a subflow")
 		}
 		field, hasField := p.Get("field").(transforms.Field)
-		if p.Modified("field") && n.stamp > 1 && hasField {
-			// upstream: "PreFacet does not support field modification"
-			_ = field
+		hasField = hasField && !field.IsNil()
+		// `if (_.modified('field') || field &&
+		// pulse.modified(accessorFields(field)))`: the parameter changed (a
+		// signal's, on the first run too), or a tuple the facet had before
+		// comes back with its field rewritten (a formula that ran again).
+		if p.Modified("field") || hasField && prefacetFieldModified(st, last, pulse.tuples, field) {
+			fail("PreFacet does not support field modification.")
 		}
 		st.active = st.active[:0]
 		seen := make(map[any]struct{}, len(pulse.tuples))
+		// The cells' tuples are the prefacet's: what it holds grows cell by
+		// cell, each charged before its tuples are made.
+		v := n.g.view
+		var rows, excess int64
+		v.holdHeld(n, 0, 0)
 		for _, t := range pulse.tuples {
 			cl := st.subflow(n, t.Key(), flow, "", t, pulse)
-			if hasField && !field.IsNil() {
+			if hasField {
 				arr := field.Apply(t)
+				// field(t).forEach(...): a value that is not an array has
+				// no forEach
+				switch {
+				case arr.IsNullish():
+					fail("TypeError: Cannot read properties of %s (reading 'forEach')", arr.AsString())
+				case !arr.IsArr():
+					fail("TypeError: field(...).forEach is not a function")
+				}
+				if last == nil {
+					last = map[*cell]jsval.Value{}
+				}
+				if _, ok := last[cl]; !ok {
+					v.chargeRun(prefacetLastBytes)
+				}
+				last[cl] = arr
 				items := arr.Items()
+				rows, excess = rows+int64(len(items)), excess+v.rowExcess(items)
+				v.holdHeld(n, rows, excess)
 				tuples := make([]jsval.Value, len(items))
 				for i, it := range items {
 					tuples[i] = ingestTuple(it)

@@ -112,12 +112,16 @@ func filterOut(in []string, drop ...string) []string {
 	return out
 }
 
-func isChannel(cc *compileCtx, s string) bool { return channelSet[s] && !(cc.v5 && s == chTime) }
+// The channel predicates are hasOwnProperty tests in 6.4; 5.8 tests
+// !!INDEX[channel], which a name every object inherits passes.
+func isChannel(cc *compileCtx, s string) bool {
+	return (channelSet[s] && !(cc.v5 && s == chTime)) || (cc.v5 && isInheritedKey(s))
+}
 func isSingleDefUnitChannel(cc *compileCtx, s string) bool {
-	return singleDefUnitSet[s] && !(cc.v5 && s == chTime)
+	return (singleDefUnitSet[s] && !(cc.v5 && s == chTime)) || (cc.v5 && isInheritedKey(s))
 }
 func isScaleChannel(cc *compileCtx, s string) bool {
-	return scaleChannelSet[s] && !(cc.v5 && s == chTime)
+	return (scaleChannelSet[s] && !(cc.v5 && s == chTime)) || (cc.v5 && isInheritedKey(s))
 }
 func isGeoPositionChannel(s string) bool    { return geoPositionSet[s] }
 func isPolarPositionChannel(s string) bool  { return polarPositionChannels[s] }
@@ -127,7 +131,7 @@ func isXorYOffset(s string) bool            { return s == chXOffset || s == chYO
 func isTimeChannel(s string) bool           { return s == chTime }
 func isColorChannel(s string) bool          { return s == chColor || s == chFill || s == chStroke }
 func isNonPositionScaleChannel(cc *compileCtx, s string) bool {
-	return nonPositionChannelSet[s] && !(cc.v5 && s == chTime)
+	return (nonPositionChannelSet[s] && !(cc.v5 && s == chTime)) || (cc.v5 && isInheritedKey(s))
 }
 
 // isNonPositionScaleChannel upstream is hasOwnProperty(NONPOSITION_CHANNEL_INDEX,

@@ -13,3 +13,8 @@ Decisions whose reason is not visible in the code. Each says what was decided, w
 | [0007](0007-system-fonts-never-fallback.md) | System fonts only by name, never as a fallback by default | accepted |
 | [0008](0008-cli-language-detection.md) | The CLI detects Vega vs Vega-Lite by schema, then by shape, and refuses to guess | accepted, 2026-10-11 |
 | [0009](0009-caller-chooses-fonts.md) | Registered families are the caller's, and so is the fallback chain | accepted, 2026-10-11 |
+| [0010](0010-bounds-charged-where-work-happens.md) | Bounds are charged where the work happens: a per-call ledger, byte-bounded caches, and a bounded-input corpus that CI runs | accepted, 2026-10-11 |
+| [0011](0011-faithful-output-free-algorithm.md) | Faithful in output, free in algorithm: bounded algorithms with identical output, and degenerate parameters refused | accepted, 2026-10-11 |
+| [0012](0012-rows-held-by-their-maker.md) | Rows are held by the operator that made them: one charge point, replaced per operator, checked by the tests | accepted, 2026-10-12 |
+| [0013](0013-invalid-input-fails-where-upstream-throws.md) | Invalid Vega-Lite input fails where upstream throws, in both versions, with upstream's message | accepted, 2026-10-12 |
+| [0014](0014-library-memory-bounded-by-ledger-room.md) | Memory a library allocates as it works, unsized beforehand, is bounded by the ledger's room rather than charged | accepted, 2026-10-13 |

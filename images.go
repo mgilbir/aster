@@ -16,32 +16,63 @@ const (
 	maxImagePixels = 64 << 20
 )
 
-// callImages are the images one call fetches through the Loader, as every
-// resource of a call is fetched: the href sanitized, then loaded, under the
-// call's context. Each is fetched once, whichever stages need it: the SVG
-// writer reads the size of one an item has none for, PNG and PDF output draw
-// them. An image is read up to the per-image limit, and the images of one call
-// together up to the data allowance (64 MiB, or half of WithMemoryLimit). A
-// rejected or failed load is remembered too, and leaves the image undrawn, as
-// a broken image is.
+// callImages are the images of one call: each URL the specification (or the
+// SVG given to SVGToPNG and SVGToPDF) names, what the Loader's Sanitize made
+// of it, and the bytes its Load returned or the error that refused it. It is
+// the one table every stage of the call consults (C35), so that the Loader
+// sees each resource once per call, whichever outputs draw it:
+//
+//   - the SVG writer resolves an image mark's URL, writes what Sanitize
+//     returned as the <image>'s href, and fetches the image when the mark
+//     has no size to read it from;
+//   - PNG and PDF output, reading that SVG back, look the href up and draw
+//     what the SVG stage resolved, rather than sanitize their own answer a
+//     second time (a rewriting Loader would see it, a Loader of logical
+//     names would refuse it);
+//   - an href no stage of the call resolved, as in SVG given to SVGToPNG,
+//     is resolved then, once.
+//
+// Every failure is reported once, as the URL the input names. An image is
+// read up to the per-image limit, and the data and images of one call
+// together up to its loaded-bytes allowance (C80). A link (an item's href)
+// is resolved once per URL too, in a table of its own.
 type callImages struct {
-	c         *Converter
-	allowance int64
+	c *Converter
 
-	mu     sync.Mutex
-	used   int64
-	got    map[string][]byte // by sanitized URL
-	failed map[string]error
+	mu sync.Mutex
+	// allowance is what the call may load, data and images together; used is
+	// what it has (see chargeData).
+	allowance, used int64
+	byURL           map[string]*resource // by the URL the input names
+	byHref          map[string]*resource // by the href the SVG stage wrote
+	links           map[string]linkResolution
+	fetched         map[string]*fetch // by sanitized URL
+}
+
+// resource is one image URL of the call, resolved.
+type resource struct {
+	url string // as the input names it
+	u   string // what Sanitize returned; url itself for an inline image
+	err error  // Sanitize's refusal
+}
+
+// fetch is what one Load of a sanitized URL gave.
+type fetch struct {
+	done chan struct{} // closed once data and err are set
+	data []byte
+	err  error
+}
+
+type linkResolution struct {
+	href string
+	err  error
 }
 
 type callImagesKey struct{}
 
 func (c *Converter) newCallImages() *callImages {
-	allowance := c.limits().MaxLoadBytes
-	if allowance <= 0 {
-		allowance = 64 << 20
-	}
-	return &callImages{c: c, allowance: allowance, got: map[string][]byte{}, failed: map[string]error{}}
+	return &callImages{c: c, allowance: c.lim.vega.MaxLoadBytes,
+		byURL: map[string]*resource{}, byHref: map[string]*resource{}, links: map[string]linkResolution{}, fetched: map[string]*fetch{}}
 }
 
 // imagesFrom is the call's images, from its context (see opContext).
@@ -50,81 +81,237 @@ func imagesFrom(ctx context.Context) *callImages {
 	return ci
 }
 
-// load fetches the image href refers to, for raster.Options.Images and
-// svgpdf.Options.Images.
+// chargeData counts the n bytes the call's data loaded against the
+// allowance images draw from, once the Vega run that loaded them is over.
+func (ci *callImages) chargeData(n int64) {
+	ci.mu.Lock()
+	ci.used += n
+	ci.mu.Unlock()
+}
+
+// entryBytes is what one table entry is charged to the call's ledger: its
+// strings and the maps' own share of an entry.
+func entryBytes(s ...string) int64 {
+	n := int64(96)
+	for _, x := range s {
+		n += int64(len(x))
+	}
+	return n
+}
+
+// resolve is the image at url resolved for this call: sanitized by the Loader
+// the first time it is asked for, or taken as it is when it is a data: URI of
+// an image the engine draws, which is part of the document, not a resource.
+func (ci *callImages) resolve(ctx context.Context, url string) (*resource, error) {
+	ci.mu.Lock()
+	r, ok := ci.byURL[url]
+	ci.mu.Unlock()
+	if ok {
+		return r, nil
+	}
+	r = &resource{url: url, u: url}
+	if !imageref.InlineImage(url) {
+		r.u, r.err = ci.c.loader.Sanitize(ctx, url)
+	}
+	if err := budget.LedgerFrom(ctx).Alloc(entryBytes(r.url, r.u)); err != nil {
+		return nil, err
+	}
+	ci.mu.Lock()
+	defer ci.mu.Unlock()
+	if prev, ok := ci.byURL[url]; ok { // resolved meanwhile on another goroutine
+		return prev, nil
+	}
+	ci.byURL[url] = r
+	return r, nil
+}
+
+// written records that the SVG stage wrote href for r, so that PNG and PDF
+// output of the same call draw r from it.
+func (ci *callImages) written(ctx context.Context, href string, r *resource) error {
+	ci.mu.Lock()
+	_, ok := ci.byHref[href]
+	ci.mu.Unlock()
+	if ok {
+		return nil
+	}
+	if err := budget.LedgerFrom(ctx).Alloc(entryBytes(href)); err != nil {
+		return err
+	}
+	ci.mu.Lock()
+	ci.byHref[href] = r
+	ci.mu.Unlock()
+	return nil
+}
+
+// forHref is the resource an <image> href stands for: the one the SVG stage
+// wrote it for, or else href resolved as a URL of its own.
+func (ci *callImages) forHref(ctx context.Context, href string) (*resource, error) {
+	ci.mu.Lock()
+	r, ok := ci.byHref[href]
+	ci.mu.Unlock()
+	if ok {
+		return r, nil
+	}
+	return ci.resolve(ctx, href)
+}
+
+// url is the URL the input names for an <image> href, which reports use.
+func (ci *callImages) url(href string) string {
+	if ci == nil {
+		return href
+	}
+	ci.mu.Lock()
+	defer ci.mu.Unlock()
+	if r, ok := ci.byHref[href]; ok {
+		return r.url
+	}
+	return href
+}
+
+// load fetches the image an <image> href refers to, for raster.Options.Images
+// and svgpdf.Options.Images: each a failure the call reports once, as the URL
+// the input names.
 func (ci *callImages) load(ctx context.Context, href string) ([]byte, error) {
 	if ci == nil {
 		return nil, errors.New("aster: no images for this call")
 	}
-	u, err := ci.c.cfg.loader.Sanitize(ctx, href)
+	r, err := ci.forHref(ctx, href)
 	if err != nil {
-		reportFrom(ctx).image(href, err)
 		return nil, err
 	}
-	return ci.fetch(ctx, u)
+	if r.err != nil {
+		reportFrom(ctx).image(r.url, r.err)
+		return nil, r.err
+	}
+	return ci.fetch(ctx, r)
 }
 
-// fetch loads the sanitized URL u, or answers it from what the call fetched.
-// The loader reads up to what the budget in ctx allows, and what is left of
-// the allowance.
-func (ci *callImages) fetch(ctx context.Context, u string) ([]byte, error) {
-	ci.mu.Lock()
-	if b, ok := ci.got[u]; ok {
-		ci.mu.Unlock()
-		return b, nil
+// imageError is raster.Options.ImageError and svgpdf.Options.ImageError: a
+// stage's report of an image it could not draw, under the URL the input
+// names, so that a failure the fetch already reported is not reported again.
+func (ci *callImages) imageError(ctx context.Context) func(href string, err error) {
+	rep := reportFrom(ctx)
+	return func(href string, err error) { rep.image(ci.url(href), err) }
+}
+
+// fetch returns the bytes of r: loaded once per sanitized URL for the call,
+// up to the per-image limit and what is left of the call's allowance. A
+// failure is reported as r's URL.
+func (ci *callImages) fetch(ctx context.Context, r *resource) ([]byte, error) {
+	if imageref.IsData(r.u) {
+		// Decoded in place, as PNG and PDF output decode a data: href.
+		data, err := imageref.DataURI(r.u, ci.limits())
+		if err != nil {
+			reportFrom(ctx).image(r.url, err)
+		}
+		return data, err
 	}
-	if err, ok := ci.failed[u]; ok {
-		ci.mu.Unlock()
-		return nil, err
+	ci.mu.Lock()
+	f, ok := ci.fetched[r.u]
+	if !ok {
+		f = &fetch{done: make(chan struct{})}
+		ci.fetched[r.u] = f
 	}
 	left := ci.allowance - ci.used
 	ci.mu.Unlock()
+	if !ok {
+		f.data, f.err = ci.loadBytes(ctx, r, left)
+		close(f.done)
+	} else {
+		select {
+		case <-f.done:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	if f.err != nil && ctx.Err() == nil { // a canceled call is not a failed image
+		reportFrom(ctx).image(r.url, f.err)
+	}
+	return f.data, f.err
+}
+
+// loadBytes is one Load of r, the first for its sanitized URL in the call,
+// with left of the allowance to read from.
+func (ci *callImages) loadBytes(ctx context.Context, r *resource, left int64) ([]byte, error) {
 	if left <= 0 {
-		return nil, fmt.Errorf("%w: images over %d bytes in total", ErrLimit, ci.allowance)
+		return nil, ci.overAllowance(r)
 	}
-	b, err := ci.c.cfg.loader.Load(budget.With(ctx, &budget.Budget{MaxLoadBytes: min(left, budget.From(ctx).LoadLeft())}), u)
-	ci.mu.Lock()
-	defer ci.mu.Unlock()
-	if prev, ok := ci.got[u]; ok { // fetched meanwhile by another stage's fetcher
-		return prev, nil
-	}
+	limit := min(left, maxImageBytes)
+	b, err := ci.c.loader.Load(budget.With(ctx, &budget.Budget{MaxLoadBytes: limit}), r.u)
 	if err != nil {
-		ci.failed[u] = err
-		if ctx.Err() == nil { // a canceled call is not a failed image
-			reportFrom(ctx).image(u, err)
+		if errors.Is(err, budget.ErrLimit) && limit == maxImageBytes {
+			// The Loader read up to what it was given, which was the
+			// per-image limit, not what its message says (C88).
+			return nil, fmt.Errorf("aster: image %q is over %d bytes, the limit of one image: %w", r.url, maxImageBytes, ErrLimit)
 		}
 		return nil, err
 	}
-	if ci.used += int64(len(b)); ci.used > ci.allowance {
-		return nil, fmt.Errorf("%w: images over %d bytes in total", ErrLimit, ci.allowance)
+	if int64(len(b)) > maxImageBytes {
+		return nil, fmt.Errorf("aster: image %q is over %d bytes, the limit of one image: %w", r.url, maxImageBytes, ErrLimit)
 	}
-	ci.got[u] = b
+	ci.mu.Lock()
+	defer ci.mu.Unlock()
+	if ci.used += int64(len(b)); ci.used > ci.allowance {
+		return nil, ci.overAllowance(r)
+	}
 	return b, nil
 }
 
-// size is the natural size of the image at the sanitized URL u, read from its
-// header, or ok false when it cannot be fetched or is not a PNG, JPEG or GIF
-// within the limits.
-func (ci *callImages) size(ctx context.Context, u string) (w, h float64, ok bool) {
+func (ci *callImages) overAllowance(r *resource) error {
+	return fmt.Errorf("aster: image %q: %w: the data and images of the call are over %d bytes (loaded bytes; WithMemoryLimit raises it)", r.url, ErrLimit, ci.allowance)
+}
+
+// limits are the bounds of one image, as every stage applies them.
+func (ci *callImages) limits() imageref.Limits {
+	return imageref.Limits{MaxBytes: maxImageBytes, MaxPixels: ci.c.imagePixels(), Err: ErrLimit}
+}
+
+// size is the natural size of the image r, read from its header, or ok false
+// when it cannot be fetched or is not a PNG, JPEG or GIF within the limits.
+// A failure is reported, and one over a limit ends the call (C34) once the
+// SVG stage is over (see callReport.image).
+func (ci *callImages) size(ctx context.Context, r *resource) (w, h float64, ok bool) {
 	if ci == nil {
 		return 0, 0, false
 	}
-	lim := imageref.Limits{MaxBytes: maxImageBytes, MaxPixels: maxImagePixels, Err: ErrLimit}
-	var data []byte
-	var err error
-	if imageref.IsData(u) {
-		data, err = imageref.DataURI(u, lim)
-	} else {
-		data, err = ci.fetch(budget.With(ctx, &budget.Budget{MaxLoadBytes: maxImageBytes}), u)
-	}
+	data, err := ci.fetch(ctx, r)
 	if err != nil {
-		reportFrom(ctx).image(u, err)
-		return 0, 0, false
+		return 0, 0, false // fetch reported it
 	}
-	cfg, _, err := imageref.Config(data, lim)
+	cfg, _, err := imageref.Config(data, ci.limits())
 	if err != nil {
-		reportFrom(ctx).image(u, err)
+		reportFrom(ctx).image(r.url, err)
 		return 0, 0, false
 	}
 	return float64(cfg.Width), float64(cfg.Height), true
+}
+
+// link is what the Loader's Sanitize made of a link's URL, once per URL for
+// the call.
+func (ci *callImages) link(ctx context.Context, uri string) (string, error) {
+	ci.mu.Lock()
+	l, ok := ci.links[uri]
+	ci.mu.Unlock()
+	if ok {
+		return l.href, l.err
+	}
+	l.href, l.err = ci.c.loader.Sanitize(ctx, uri)
+	if err := budget.LedgerFrom(ctx).Alloc(entryBytes(uri, l.href)); err != nil {
+		return "", err
+	}
+	ci.mu.Lock()
+	ci.links[uri] = l
+	ci.mu.Unlock()
+	return l.href, l.err
+}
+
+// imagePixels bounds the pixels of one image every stage decodes (the SVG
+// writer reading a size, PNG and PDF output): a sixteenth of WithMemoryLimit
+// as the rasterizer has it, or maxImagePixels without one, so that no stage
+// admits an image another refuses.
+func (c *Converter) imagePixels() int {
+	if p := c.lim.raster.MaxImagePixels; p > 0 {
+		return p
+	}
+	return maxImagePixels
 }

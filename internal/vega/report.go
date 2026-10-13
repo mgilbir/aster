@@ -1,5 +1,11 @@
 package vega
 
+import (
+	"fmt"
+
+	"github.com/mgilbir/aster/internal/textcut"
+)
+
 // Upstream's dataflow logs some errors and carries on: a load that fails
 // (Dataflow.request), an operator that throws (Dataflow.evaluate's catch
 // clause), a post-run callback that throws (asyncCallback). It also logs
@@ -43,11 +49,38 @@ type stopped struct{ err error }
 func (s *stopped) Error() string { return s.err.Error() }
 func (s *stopped) Unwrap() error { return s.err }
 
-// report records err (a Warning or an error the dataflow carries on past)
-// and asks Options.Report whether to go on: nil goes on, a *stopped ends the
-// render.
+// Warnings carry text from the specification (a property or field name, an
+// expression's arguments) and a faceted group repeats them in every cell, so
+// what one render reports is bounded: each distinct warning is reported once,
+// cut to MaxWarningText bytes, and past maxWarnings distinct ones a last
+// warning says the rest are not reported.
+const maxWarnings = 256
+
+// MaxWarningText is the most bytes of a warning's text: Vega cuts its own to
+// it (textcut.Cut), and the public API cuts every warning it hands a handler
+// to the same length by the same rule, so Vega counts distinct warnings by
+// what the handler will see.
+const MaxWarningText = 1024
+
+// report tells Options.Report of err (a Warning or an error the dataflow
+// carries on past) and asks whether to go on: nil goes on, a *stopped ends
+// the render. Warnings are bounded (maxWarnings); errors are each reported,
+// since each is one Options.Report may decide on.
 func (g *flowGraph) report(err error) error {
-	g.warnings = append(g.warnings, err.Error())
+	if w, ok := err.(Warning); ok {
+		w = Warning(textcut.Cut(string(w), MaxWarningText))
+		if _, dup := g.warned[w]; dup || len(g.warned) > maxWarnings {
+			return nil
+		}
+		if g.warned == nil {
+			g.warned = map[Warning]struct{}{}
+		}
+		g.warned[w] = struct{}{}
+		if len(g.warned) > maxWarnings {
+			w = Warning(fmt.Sprintf("more than %d warnings: further warnings are not reported", maxWarnings))
+		}
+		err = w
+	}
 	if g.onReport == nil {
 		return nil
 	}

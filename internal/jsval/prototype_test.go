@@ -33,3 +33,19 @@ func TestInheritedProperties(t *testing.T) {
 		t.Error("length is not inherited from Object.prototype")
 	}
 }
+
+// TestInheritedFunctionsAreImmutable: the members Inherited answers are one
+// value per process, so a write on one must not reach a later read
+// (upstream's writes on built-ins are kept per compilation by its caller).
+func TestInheritedFunctionsAreImmutable(t *testing.T) {
+	f, _ := Inherited("constructor")
+	f.ObjValue().Set("mean", Str("x"))
+	if g, _ := Inherited("constructor"); g.ObjValue().Has("mean") {
+		t.Fatal("a write on an inherited function is visible to the next reader")
+	}
+	n := NativeFunction("values")
+	n.ObjValue().Set("a", Int(1))
+	if n.ObjValue().Has("a") {
+		t.Fatal("a native function was written to")
+	}
+}

@@ -168,7 +168,7 @@ func (p *TimeParser) build(d *parseState) (float64, bool) {
 		} else {
 			week = monday.Floor(week)
 		}
-		week = zone.Day().Offset(week, (d.V-1)*7)
+		week = zone.Day().baseOffset(week, math.Floor((d.V-1)*7)) // d3: timeDay.offset
 		if Valid(week) {
 			f := zone.Fields(week)
 			d.y, d.m = float64(f.Year), float64(f.Month)
@@ -230,24 +230,25 @@ func (l *TimeLocale) run(d *parseState, ops []parseOp, s string, j int) int {
 	return j
 }
 
-func isJSSpace(c byte) bool {
-	return c == ' ' || c == '\t' || c == '\n' || c == '\v' || c == '\f' || c == '\r'
-}
-
-// number is /^\s*\d+/ applied to the window s[i:i+width] (width <= 0: the
-// rest of the string). It returns the digits' value and the index after them.
+// number is /^\s*\d+/ applied to the window s.slice(i, i+width) (width <= 0:
+// the rest of the string). The window counts UTF-16 units, as JavaScript's
+// slice does, and \s is JavaScript's white space: the Unicode space
+// separators, the line terminators and the byte order mark, not only ASCII.
+// It returns the digits' value and the index after them.
 func number(s string, i, width int) (v float64, next int, ok bool) {
-	end := len(s)
-	if width > 0 && i+width < end {
-		end = i + width
-	}
-	k := i
-	for k < end && isJSSpace(s[k]) {
-		k++
+	k, units := i, 0
+	for k < len(s) && (width <= 0 || units < width) {
+		r, w := utf8.DecodeRuneInString(s[k:])
+		if !isJSSpaceRune(r) { // every JavaScript space is one UTF-16 unit
+			break
+		}
+		k += w
+		units++
 	}
 	start := k
-	for k < end && s[k] >= '0' && s[k] <= '9' {
+	for k < len(s) && (width <= 0 || units < width) && s[k] >= '0' && s[k] <= '9' {
 		k++
+		units++
 	}
 	if k == start {
 		return 0, -1, false
@@ -410,41 +411,74 @@ func matchName(d *parseState, names []string, lookup map[string]int, s string, i
 	return -1
 }
 
-// parseZone reproduces /^(Z)|([+-]\d\d)(?::?(\d\d))?/ on the six characters at
-// i. Only the first alternative is anchored, so an offset may be found later
-// in the window; the match length is then added to i without accounting for
-// the skipped characters, exactly as d3 does.
+// parseZone reproduces /^(Z)|([+-]\d\d)(?::?(\d\d))?/ on the six UTF-16
+// code units at i (string.slice(i, i + 6)). Only the first alternative is
+// anchored, so an offset may be found later in the window; the match length
+// is then added to i without accounting for the units skipped, exactly as d3
+// does. The parser indexes bytes, so the window and the index d3 moves to are
+// counted in code units and turned back into bytes; an index inside a
+// character of two units would leave d3 at a lone surrogate, which no
+// literal or number matches and which is not the end of the string, so the
+// parse fails there (d3 could only read on past it with another %Z, whose
+// unanchored search starts at any unit; that is not followed).
 func parseZone(d *parseState, s string, i int) int {
-	end := min(len(s), i+6)
+	end, units := i, 0
+	for end < len(s) && units < 6 {
+		r, w := utf8.DecodeRuneInString(s[end:])
+		if units+utf16Units(r) > 6 {
+			break // the window ends inside this character
+		}
+		end += w
+		units += utf16Units(r)
+	}
 	w := s[i:end]
 	for p := 0; p < len(w); p++ {
 		if p == 0 && w[0] == 'Z' {
 			d.Z, d.flags = 0, d.flags|hasZ
 			return i + 1
 		}
-		if (w[p] == '+' || w[p] == '-') && p+2 < len(w)+0 && isDigit(w[p+1]) && isDigit(w[p+2]) {
+		if (w[p] == '+' || w[p] == '-') && p+2 < len(w) && isDigit(w[p+1]) && isDigit(w[p+2]) {
 			n := 3
 			hh, mm := w[p:p+3], "00"
 			q := p + 3
 			if q < len(w) && w[q] == ':' {
 				q++
 			}
-			if q+1 < len(w)+0 && isDigit(w[q]) && isDigit(w[q+1]) {
+			if q+1 < len(w) && isDigit(w[q]) && isDigit(w[q+1]) {
 				mm = w[q : q+2]
 				n = q + 2 - p
 			}
 			v, _ := strconv.Atoi(hh[1:] + mm)
 			if hh[0] == '+' {
-				v = -v
-			} else {
-				// -( "-0530" ) is +530
-				_ = v
+				v = -v // -( "+0530" ) is -530; -( "-0530" ) is +530
 			}
 			d.Z, d.flags = float64(v), d.flags|hasZ
-			return i + n
+			return advanceUnits(s, i, n) // i + n[0].length, in code units
 		}
 	}
 	return -1
+}
+
+func utf16Units(r rune) int {
+	if r > 0xFFFF {
+		return 2
+	}
+	return 1
+}
+
+// advanceUnits is the byte index n UTF-16 code units after byte index i, or
+// -1 when that falls inside a character of two units (see parseZone).
+func advanceUnits(s string, i, n int) int {
+	for n > 0 && i < len(s) {
+		r, w := utf8.DecodeRuneInString(s[i:])
+		if u := utf16Units(r); u > n {
+			return -1
+		} else {
+			n -= u
+		}
+		i += w
+	}
+	return i
 }
 
 func isDigit(c byte) bool { return c >= '0' && c <= '9' }

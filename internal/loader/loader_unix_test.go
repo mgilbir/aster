@@ -8,6 +8,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/mgilbir/aster/internal/testutil"
 )
 
 // A FIFO inside the base directory must be rejected without blocking on open.
@@ -28,7 +30,7 @@ func TestFileLoaderFIFODoesNotBlock(t *testing.T) {
 		if err == nil {
 			t.Error("FIFO loaded")
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(testutil.Scaled(5 * time.Second)):
 		t.Fatal("Load blocked on a FIFO")
 	}
 }

@@ -137,7 +137,7 @@ func Impute(ctx context.Context, data []jsval.Value, p ImputeParams) ([]jsval.Va
 			// them before allocating, or a few thousand distinct groups and
 			// keys cost gigabytes.
 			cells += grow
-			if err := reserveOut(ctx, cells, len(data)); err != nil {
+			if err := reserveRows(ctx, cells-len(data)); err != nil {
 				return nil, err
 			}
 			for len(g.vals) < j {
@@ -154,7 +154,7 @@ func Impute(ctx context.Context, data []jsval.Value, p ImputeParams) ([]jsval.Va
 	for _, g := range groups {
 		missing += len(domain) - g.present
 	}
-	if err := reserveOut(ctx, len(data)+missing, len(data)); err != nil {
+	if err := reserveRows(ctx, missing); err != nil {
 		return nil, err
 	}
 
@@ -171,9 +171,9 @@ func Impute(ctx context.Context, data []jsval.Value, p ImputeParams) ([]jsval.Va
 			t := jsval.NewObject(len(p.GroupBy) + 3)
 			t.Set("_impute", jsval.True)
 			for i, gv := range g.values {
-				t.Set(p.GroupBy[i].Name, gv)
+				t.Set(p.GroupBy[i].Key(), gv)
 			}
-			t.Set(p.Key.Name, kVal)
+			t.Set(p.Key.Key(), kVal)
 			if value.IsNum() && math.IsNaN(value.NumValue()) {
 				if method == "value" {
 					value = constant
@@ -187,7 +187,7 @@ func Impute(ctx context.Context, data []jsval.Value, p ImputeParams) ([]jsval.Va
 					value = imputeReduce(method, present)
 				}
 			}
-			t.Set(p.Field.Name, value)
+			t.Set(p.Field.Key(), value)
 			out = append(out, jsval.Obj(t))
 		}
 	}

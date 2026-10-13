@@ -280,15 +280,6 @@ func (m *Simulation) SetForce(i int, f Force) error {
 	return impl.initialize(m.s)
 }
 
-// Reinitialize hands the force at index i back to the simulation, which
-// initializes it again so it reads its parameters anew.
-func (m *Simulation) Reinitialize(i int) error {
-	if i >= len(m.s.forces) {
-		return nil
-	}
-	return m.s.forces[i].initialize(m.s)
-}
-
 // Trim removes the forces from index n on.
 func (m *Simulation) Trim(n int) {
 	if n < len(m.s.forces) {
@@ -371,8 +362,10 @@ func (s *sim) writeBack() {
 		o.Set("index", jsval.Int(i))
 		o.Set("x", jsval.Num(nd.x))
 		o.Set("y", jsval.Num(nd.y))
-		o.Set("vx", jsval.Num(nd.vx))
+		// d3's initializeNodes sets `node.vx = node.vy = 0`, which assigns
+		// vy first: a node without velocities gets them in that order
 		o.Set("vy", jsval.Num(nd.vy))
+		o.Set("vx", jsval.Num(nd.vx))
 	}
 }
 

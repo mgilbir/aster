@@ -276,11 +276,11 @@ func testIntervals(t *testing.T, g *timeGolden, zoneName string) {
 			{"floor", rec.Floor, iv.Floor},
 			{"ceil", rec.Ceil, iv.Ceil},
 			{"round", rec.Round, iv.Round},
-			{"offset1", rec.Off1, func(v float64) float64 { return iv.Offset(v, 1) }},
-			{"offset-1", rec.Offm1, func(v float64) float64 { return iv.Offset(v, -1) }},
-			{"offset5", rec.Off5, func(v float64) float64 { return iv.Offset(v, 5) }},
-			{"offset-13", rec.Offm13, func(v float64) float64 { return iv.Offset(v, -13) }},
-			{"offset0", rec.Off0, func(v float64) float64 { return iv.Offset(v, 0) }},
+			{"offset1", rec.Off1, func(v float64) float64 { return offsetT(iv, v, 1) }},
+			{"offset-1", rec.Offm1, func(v float64) float64 { return offsetT(iv, v, -1) }},
+			{"offset5", rec.Off5, func(v float64) float64 { return offsetT(iv, v, 5) }},
+			{"offset-13", rec.Offm13, func(v float64) float64 { return offsetT(iv, v, -13) }},
+			{"offset0", rec.Off0, func(v float64) float64 { return offsetT(iv, v, 0) }},
 		}
 		for _, op := range ops {
 			for i, v := range ins {
@@ -496,7 +496,7 @@ func testVegaTime(t *testing.T, g *timeGolden, zoneName string) {
 	for _, c := range g.Offsets {
 		z := zoneFor(t, zoneName, c.UTC)
 		for i, v := range ins {
-			got, ok := OffsetUnit(z, c.Unit, v, c.Step)
+			got, ok, _ := OffsetUnit(context.Background(), z, c.Unit, v, c.Step)
 			var want string
 			if !ok {
 				want = "undef"

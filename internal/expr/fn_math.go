@@ -87,8 +87,8 @@ func numArgs(s *Scope, args []jsval.Value) []float64 {
 func init() {
 	for name, f := range map[string]func(float64) float64{
 		"abs": math.Abs, "acos": jsmath.Acos, "asin": jsmath.Asin, "atan": jsmath.Atan,
-		"ceil": math.Ceil, "cos": jsmath.Cos, "exp": math.Exp, "floor": math.Floor,
-		"log": math.Log, "round": jsRound, "sin": jsmath.Sin, "sqrt": math.Sqrt, "tan": math.Tan,
+		"ceil": math.Ceil, "cos": jsmath.Cos, "exp": jsmath.Exp, "floor": math.Floor,
+		"log": jsmath.Log, "round": jsRound, "sin": jsmath.Sin, "sqrt": math.Sqrt, "tan": jsmath.Tan,
 	} {
 		def(name, &funcDef{math1: f})
 	}

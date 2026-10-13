@@ -1,6 +1,7 @@
 package geo
 
 import (
+	"context"
 	"math"
 	"sort"
 
@@ -85,10 +86,13 @@ func (s *sphereAreaStream) areaPoint(lambda, phi float64) {
 }
 
 // GeoArea is d3.geoArea: the spherical area of a GeoJSON object in steradians.
-func GeoArea(object jsval.Value) float64 {
+// The walk meters its work into the ledger in ctx and stops with ctx's error.
+func GeoArea(ctx context.Context, object jsval.Value) (float64, error) {
 	s := &sphereAreaStream{}
-	StreamObject(object, s)
-	return s.sum.value() * 2
+	if err := streamBounded(ctx, object, func(b *walkBound) Stream { return meterInput(s, b) }); err != nil {
+		return nan, err
+	}
+	return s.sum.value() * 2, nil
 }
 
 // boundsState is d3.geoBounds' stream.
@@ -298,9 +302,13 @@ func rangeContains(r *[2]float64, x float64) bool {
 // GeoBounds is d3.geoBounds: the spherical bounding box
 // [[west, south], [east, north]] in degrees; west may exceed east when the box
 // crosses the antimeridian.
-func GeoBounds(object jsval.Value) [2][2]float64 {
+//
+// The walk meters its work into the ledger in ctx and stops with ctx's error.
+func GeoBounds(ctx context.Context, object jsval.Value) ([2][2]float64, error) {
 	s := &boundsState{lambda0: math.Inf(1), phi0: math.Inf(1), lambda1: math.Inf(-1), phi1: math.Inf(-1)}
-	StreamObject(object, s)
+	if err := streamBounded(ctx, object, func(b *walkBound) Stream { return meterInput(s, b) }); err != nil {
+		return [2][2]float64{{nan, nan}, {nan, nan}}, err
+	}
 
 	if n := len(s.ranges); n > 0 {
 		// First, sort ranges by their minimum longitudes.
@@ -340,7 +348,7 @@ func GeoBounds(object jsval.Value) [2][2]float64 {
 	}
 
 	if s.lambda0 == math.Inf(1) || s.phi0 == math.Inf(1) {
-		return [2][2]float64{{nan, nan}, {nan, nan}}
+		return [2][2]float64{{nan, nan}, {nan, nan}}, nil
 	}
-	return [2][2]float64{{s.lambda0, s.phi0}, {s.lambda1, s.phi1}}
+	return [2][2]float64{{s.lambda0, s.phi0}, {s.lambda1, s.phi1}}, nil
 }

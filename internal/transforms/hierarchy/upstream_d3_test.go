@@ -143,7 +143,7 @@ func TestUpstreamD3HierarchyStratify(t *testing.T) {
 			r.Skip("rows whose fields are functions (toString)")
 			continue
 		}
-		tree, err := Stratify(tuples, key, parentKey)
+		tree, err := Stratify(tuples, key, parentKey, nil)
 		if err != nil {
 			r.Check(c, nil, true)
 			continue

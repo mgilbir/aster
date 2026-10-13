@@ -1,19 +1,27 @@
 package scale
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"math"
 	"sort"
 
-	"github.com/mgilbir/aster/internal/jsmath"
-
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/format"
+	"github.com/mgilbir/aster/internal/jsmath"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
 // ErrIntervalString is returned when an interval string is given to a scale
 // that is not a time or utc scale.
 var ErrIntervalString = errors.New("Only time and utc scales accept interval strings.")
+
+// MaxTicks bounds the ticks, labels and legend entries one guide may list
+// (TickValues, LabelValues and the minimum-step reduction of TickCountFor): a
+// specification can otherwise ask for billions (tickCount: 1e9). Past it the
+// helpers fail with an error wrapping budget.ErrLimit.
+const MaxTicks = 100000
 
 // Format is a label formatter: it maps a value (number, date, string, ...) to
 // its text. Like vega-scale's formatters it answers a jsval.Value because a
@@ -39,43 +47,36 @@ func defaultFormatter(v jsval.Value) jsval.Value {
 
 // TickCountFor is vega-scale's tickCount(scale, count, minStep): it resolves a
 // specification's `count` (a number, an interval name, or {interval, step}) to
-// the argument scale.ticks expects. A numeric count is capped by the number of
-// bins and, when minStep is given, by the domain span divided by minStep and by
-// the largest count whose d3 tick step is not below minStep. The zone selects
-// the calendar for interval names of time scales.
-func TickCountFor(s Scale, count jsval.Value, minStep *float64) (TickCount, error) {
-	var out TickCount
-	bins := binsOf(s)
-	step := 0.0
-	if count.IsNum() {
+// the argument scale.ticks expects. A numeric count is raised to the number of
+// bins and, when minStep is not null or undefined, capped by the domain span
+// divided by minStep and lowered until the d3 tick step is not below minStep.
+// Interval names of a time scale use the scale's own calendar.
+//
+// Any other count passes through as upstream's does: a boolean is the number
+// it reads as wherever the count is used, and anything else is unspecified.
+func TickCountFor(s Scale, count, minStep jsval.Value) (TickCount, error) {
+	switch {
+	case count.IsNum():
 		n := count.NumValue()
+		bins := binsOf(s)
 		if bins != nil {
-			n = math.Max(n, float64(len(bins)))
+			n = math.Max(n, float64(len(bins))) // Math.max: NaN wins, as in Go
 		}
-		if minStep != nil {
-			d := s.Domain()
-			if len(d) > 0 {
-				d0, dn := jsval.ToNumber(d[0]), jsval.ToNumber(d[len(d)-1])
-				lo, hi := math.Min(d0, dn), math.Max(d0, dn)
-				span := (hi - lo) / *minStep
-				if span == 0 || span != span {
-					span = 1
-				}
-				n = math.Min(n, math.Floor(span)+1)
-				if bins == nil && !IsLogarithmic(s.Type()) && !IsTemporal(s.Type()) && lo < hi {
-					// d3 tick steps grow monotonically as the count shrinks
-					for n > 1 && TickStep(lo, hi, n) < *minStep {
-						n--
-					}
-				}
+		if !minStep.IsNullish() {
+			var err error
+			if n, err = minStepCount(s, n, bins != nil, jsval.ToNumber(minStep)); err != nil {
+				return TickCount{}, err
 			}
 		}
 		return Count(n), nil
+	case count.IsBool():
+		return Count(jsval.ToNumber(count)), nil
+	case count.IsNull():
+		return TickCount{Null: true}, nil
 	}
+	step := jsval.Undefined
 	if count.IsObj() || count.IsArr() {
-		if sv := count.Get("step"); sv.IsTruthy() {
-			step = jsval.ToNumber(sv)
-		}
+		step = count.Get("step")
 		count = count.Get("interval")
 	}
 	if count.IsStr() {
@@ -86,38 +87,121 @@ func TickCountFor(s Scale, count jsval.Value, minStep *float64) (TickCount, erro
 		case TypeUTC:
 			z = format.UTC
 		default:
-			return out, ErrIntervalString
+			return TickCount{}, ErrIntervalString
 		}
 		iv, ok := format.IntervalFor(z, count.StrValue())
+		if !step.IsTruthy() {
+			if !ok {
+				// vega-time answers undefined for an unknown unit: the
+				// scale's default count.
+				return TickCount{}, nil
+			}
+			return IntervalCount(iv), nil
+		}
+		// `if (step) count = count.every(step)`: on undefined, or on an
+		// interval with no every of its own (the quarter is already
+		// month.every(3)), that call throws.
+		switch {
+		case !ok:
+			return TickCount{}, errors.New("Cannot read properties of undefined (reading 'every')")
+		case !iv.HasEvery():
+			return TickCount{}, errors.New("count.every is not a function")
+		}
+		e, ok := iv.Every(jsval.ToNumber(step))
 		if !ok {
-			// vega-time answers undefined for an unknown unit, so the ticks
-			// fall back to the default count - unless a step was given, in
-			// which case upstream calls undefined.every() and throws.
-			if step != 0 {
-				return out, errors.New("Unrecognized interval: " + count.StrValue())
-			}
-			return out, nil
+			return TickCount{}, nil // every() answers null: the default count
 		}
-		if step != 0 {
-			if e, ok := iv.Every(step); ok {
-				iv = e
-			} else {
-				return out, nil
-			}
+		return IntervalCount(e), nil
+	}
+	switch {
+	case count.IsNum():
+		return Count(count.NumValue()), nil // {interval: 5}
+	case count.IsBool():
+		return Count(jsval.ToNumber(count)), nil
+	case count.IsNull():
+		return TickCount{Null: true}, nil // {interval: null}
+	}
+	return TickCount{}, nil
+}
+
+// minStepCount is the minimum-step half of tickCount for a numeric count n:
+//
+//	count = Math.min(count, Math.floor((hi - lo) / minStep || 1) + 1);
+//	if (!bins && !log && !temporal && lo < hi)
+//	  while (count > 1 && tickStep(lo, hi, count) < minStep) --count;
+//
+// The loop is linear in the count, which a specification chooses (1e9 and
+// more), so it is replaced by one with the same result (ADR 0011). d3's tick
+// step grows as the count shrinks while the count is at least 2 (below 2,
+// tickSpec may double the count, and there is at most one candidate there),
+// so the first count at least 2 that leaves the loop is found by bisection.
+// A loop that would stop above MaxTicks fails instead, as would the guide;
+// a count so large that --count cannot change it is a loop upstream never
+// leaves, and fails too.
+func minStepCount(s Scale, n float64, binned bool, minStep float64) (float64, error) {
+	d := s.Domain()
+	d0, dn := math.NaN(), math.NaN()
+	if len(d) > 0 {
+		d0, dn = jsval.ToNumber(d[0]), jsval.ToNumber(d[len(d)-1])
+	}
+	lo, hi := math.Min(d0, dn), math.Max(d0, dn)
+	span := (hi - lo) / minStep
+	if span == 0 || math.IsNaN(span) {
+		span = 1
+	}
+	n = math.Min(n, math.Floor(span)+1)
+	if binned || IsLogarithmic(s.Type()) || IsTemporal(s.Type()) || !(lo < hi) {
+		return n, nil
+	}
+	return reduceForMinStep(n, func(c float64) bool { return TickStep(lo, hi, c) < minStep })
+}
+
+// reduceForMinStep is `while (count > 1 && below(count)) --count` for a
+// below that is true for large counts and false for small ones (the tick
+// step is monotone in the count from 2 up), without visiting every count.
+func reduceForMinStep(n float64, below func(float64) bool) (float64, error) {
+	if !(n > 1) || !below(n) {
+		return n, nil
+	}
+	if n > MaxTicks+1 {
+		if n-1 == n {
+			return 0, fmt.Errorf("%w: tick count %v with a minimum step cannot be reduced", budget.ErrLimit, n)
 		}
-		return IntervalCount(iv), nil
+		// The counts from n down to n2 all stay in the loop if n2 does:
+		// skip them. Subtracting whole numbers is exact below 2^53.
+		n2 := n - math.Ceil(n-(MaxTicks+1))
+		if !below(n2) {
+			return 0, fmt.Errorf("%w: tick count %v exceeds the limit of %d", budget.ErrLimit, n2, MaxTicks)
+		}
+		n = n2
 	}
-	if count.IsNum() {
-		return Count(count.NumValue()), nil
+	// The loop's candidates are n-k for k = 1, 2, ...; those of at least 2
+	// are k <= kA. Find the first that leaves the loop.
+	kA := max(math.Floor(n-2), 0)
+	a, b := 1.0, kA+1
+	for a < b {
+		mid := math.Floor((a + b) / 2)
+		if below(n - mid) {
+			a = mid + 1
+		} else {
+			b = mid
+		}
 	}
-	return out, nil
+	if a <= kA {
+		return n - a, nil
+	}
+	c := n - (kA + 1) // below 2: the last candidate, or the loop's end
+	if c > 1 && below(c) {
+		c--
+	}
+	return c, nil
 }
 
 func zoneOf(s Scale) format.Zone {
 	if t, ok := s.(*Time); ok {
 		return t.zone
 	}
-	return LocalZone
+	return format.UTC // only *Time is a "time" scale
 }
 
 func binsOf(s Scale) []float64 {
@@ -128,16 +212,14 @@ func binsOf(s Scale) []float64 {
 }
 
 // ValidTicks is vega-scale's validTicks: it keeps the tick values whose scaled
-// position lies within the scale range, orders them along the range, and -
-// when count is a positive number - thins them (dropping every other tick)
-// until at most count remain, always keeping the end points.
+// position lies within the scale range, orders them along the range (vega
+// #2579), and - when count is a positive number - thins them (dropping every
+// other tick) until at most count remain, always keeping the end points.
 func ValidTicks(s Scale, ticks []jsval.Value, count TickCount) []jsval.Value {
 	rng := s.Range()
-	var lo, hi float64
+	lo, hi := math.NaN(), math.NaN()
 	if len(rng) > 0 {
 		lo, hi = jsval.ToNumber(rng[0]), jsval.ToNumber(rng[len(rng)-1])
-	} else {
-		lo, hi = math.NaN(), math.NaN()
 	}
 	descending := false
 	if lo > hi {
@@ -186,57 +268,84 @@ func ValidTicks(s Scale, ticks []jsval.Value, count TickCount) []jsval.Value {
 }
 
 // TickValues is vega-scale's tickValues: the bins (validated) for a binned
-// scale, else scale.ticks(count), else the whole domain.
-func TickValues(s Scale, count TickCount) []jsval.Value {
+// scale, else scale.ticks(count), else the whole domain. More than MaxTicks
+// values is an error wrapping budget.ErrLimit; ctx bounds a calendar walk.
+func TickValues(ctx context.Context, s Scale, count TickCount) ([]jsval.Value, error) {
 	if bins := binsOf(s); bins != nil {
-		return ValidTicks(s, numsToValues(bins), count)
+		if len(bins) > MaxTicks {
+			return nil, errTooMany("bins", len(bins))
+		}
+		return ValidTicks(s, numsToValues(bins), count), nil
 	}
 	if t, ok := s.(Ticker); ok {
-		ticks := t.Ticks(count)
-		if IsTemporal(s.Type()) {
-			return numsToTimestamps(ticks)
+		var ticks []float64
+		var err error
+		if b, ok := s.(boundedTicker); ok {
+			// refused before more than MaxTicks are walked or kept
+			ticks, err = b.ticksN(ctx, count, MaxTicks)
+		} else {
+			ticks, err = t.Ticks(ctx, count)
 		}
-		return numsToValues(ticks)
+		if err != nil {
+			return nil, err
+		}
+		if len(ticks) > MaxTicks {
+			return nil, errTooMany("ticks", len(ticks))
+		}
+		if IsTemporal(s.Type()) {
+			return numsToTimestamps(ticks), nil
+		}
+		return numsToValues(ticks), nil
 	}
-	return s.Domain()
+	d := s.Domain()
+	if len(d) > MaxTicks {
+		return nil, errTooMany("domain values", len(d))
+	}
+	return d, nil
 }
 
-// logKeep is vega-scale's tickLog test: whether a log-scale label is dense
-// enough to show (d3's loggish tickFormat criterion). count is the requested
-// tick count (0 when unspecified).
-func logKeep(s Scale, count TickCount) func(d float64) bool {
-	// An unspecified count reads as 0 here (upstream sees null, which is 0 in
-	// arithmetic; undefined would give NaN and hide every label).
-	n := 0.0
-	if count.HasN {
-		n = count.N
+// boundedTicker is a Ticker that can stop at a number of ticks (every scale
+// of this package that has ticks).
+type boundedTicker interface {
+	ticksN(ctx context.Context, count TickCount, max int) ([]float64, error)
+}
+
+func errTooMany(what string, n int) error {
+	return fmt.Errorf("%w: the scale gives %d %s to label, more than the limit of %d", budget.ErrLimit, n, what, MaxTicks)
+}
+
+// tickLog is vega-scale's tickLog(scale, count, values): d3-scale's log label
+// filter, keeping a tick when it is a dense enough multiple of a power of the
+// base. The test is returned, and with values the ticks that pass it. A null
+// count reads as 0 here; an undefined one makes k NaN, which hides every
+// label.
+func tickLog(ctx context.Context, s Scale, count TickCount, values bool) (test func(float64) bool, out []jsval.Value, err error) {
+	ticks, err := TickValues(ctx, s, count)
+	if err != nil {
+		return nil, nil, err
 	}
-	ticks := TickValues(s, count)
-	base, _ := Get(s, "base")
-	b := base.NumValue()
-	logb := jsmath.Log(b)
-	k := math.Max(1, b*n/float64(len(ticks)))
-	return func(d float64) bool {
-		i := d / jsPow(b, jsRound(jsmath.Log(d)/logb))
-		if i*b < b-0.5 {
-			i *= b
+	base := 10.0
+	if b, ok := Get(s, "base"); ok {
+		base = jsval.ToNumber(b)
+	}
+	logb := jsmath.Log(base)
+	k := math.Max(1, float64(base*count.number())/float64(len(ticks)))
+	test = func(d float64) bool {
+		i := d / jsPow(base, jsRound(jsmath.Log(d)/logb))
+		if float64(i*base) < base-0.5 {
+			i *= base
 		}
 		return i <= k
 	}
-}
-
-// TickLogValues is vega-scale's tickLog(scale, count, true): the log ticks that
-// pass the density test.
-func TickLogValues(s Scale, count TickCount) []jsval.Value {
-	test := logKeep(s, count)
-	ticks := TickValues(s, count)
-	out := ticks[:0:0]
-	for _, t := range ticks {
-		if test(t.NumValue()) {
-			out = append(out, t)
+	if values {
+		out = ticks[:0:0]
+		for _, t := range ticks {
+			if test(jsval.ToNumber(t)) {
+				out = append(out, t)
+			}
 		}
 	}
-	return out
+	return test, out, nil
 }
 
 // TickFormat is vega-scale's tickFormat(locale, scale, count, specifier,
@@ -244,8 +353,8 @@ func TickLogValues(s Scale, count TickCount) []jsval.Value {
 // d3 number/time format string, or (for time scales) a multi-format object.
 // formatType, when "time" or "utc", forces a time format regardless of the
 // scale type. Log scales hide labels that are too dense unless noSkip is set or
-// the scale is binned.
-func TickFormat(loc *format.Locale, s Scale, count TickCount, specifier jsval.Value, formatType string, noSkip bool) (Format, error) {
+// the scale is binned; finding them lists the ticks, which ctx bounds.
+func TickFormat(ctx context.Context, loc *format.Locale, s Scale, count TickCount, specifier jsval.Value, formatType string, noSkip bool) (Format, error) {
 	typ := s.Type()
 	switch {
 	case typ == TypeTime || formatType == TypeTime:
@@ -253,9 +362,9 @@ func TickFormat(loc *format.Locale, s Scale, count TickCount, specifier jsval.Va
 	case typ == TypeUTC || formatType == TypeUTC:
 		return timeFormatOf(loc, specifier, true)
 	case IsLogarithmic(typ):
-		spec, err := numberSpecifier(specifier)
-		if err != nil {
-			return nil, err
+		spec := "" // formatFloat(spec || ',')
+		if specifier.IsTruthy() {
+			spec = specifier.AsString()
 		}
 		varfmt, err := loc.FormatFloat(spec)
 		if err != nil {
@@ -264,7 +373,10 @@ func TickFormat(loc *format.Locale, s Scale, count TickCount, specifier jsval.Va
 		if noSkip || binsOf(s) != nil {
 			return strFormat(varfmt), nil
 		}
-		test := logKeep(s, count)
+		test, _, err := tickLog(ctx, s, count, false)
+		if err != nil {
+			return nil, err
+		}
 		return func(v jsval.Value) jsval.Value {
 			if x := jsval.ToNumber(v); test(x) {
 				return jsval.Str(varfmt(x))
@@ -275,58 +387,38 @@ func TickFormat(loc *format.Locale, s Scale, count TickCount, specifier jsval.Va
 	if tf, ok := s.(TickFormatter); ok && tf.HasTickFormat() {
 		// if a d3 scale has tickFormat, it must be continuous
 		d := s.Domain()
-		spec, err := spanSpecifier(specifier)
-		if err != nil {
-			return nil, err
-		}
-		n := math.NaN()
-		if count.HasN {
-			n = count.N
-		}
+		n := count.number()
 		d0, dn := math.NaN(), math.NaN()
 		if len(d) > 0 {
 			d0, dn = jsval.ToNumber(d[0]), jsval.ToNumber(d[len(d)-1])
 		}
-		f, err := loc.FormatSpan(d0, dn, n, spec)
+		f, err := loc.FormatSpan(d0, dn, n, spanSpecifier(specifier))
 		if err != nil {
 			return nil, err
 		}
 		return strFormat(f), nil
 	}
 	if specifier.IsTruthy() {
-		spec, err := numberSpecifier(specifier)
+		nf, err := loc.NumberFormat(specifier.AsString())
 		if err != nil {
 			return nil, err
 		}
-		nf, err := loc.NumberFormat(spec)
-		if err != nil {
-			return nil, err
-		}
-		return strFormat(nf.Format), nil
+		// d3's format reads +value, except "c", which prints the value.
+		return func(v jsval.Value) jsval.Value { return jsval.Str(nf.FormatValue(v)) }, nil
 	}
 	return defaultFormatter, nil
 }
 
-// spanSpecifier is numberSpecifier for locale.formatSpan, which defaults a null
-// or undefined specifier to ",f" but honours an explicit empty string as the
-// blank specifier.
-func spanSpecifier(v jsval.Value) (string, error) {
+// spanSpecifier is the specifier of locale.formatSpan, which substitutes ",f"
+// for null and undefined but keeps an empty string as a specifier of its own.
+// d3's formatSpecifier matches the specifier with a regular expression's
+// exec, which converts it to a string first, so a number such as 42 is the
+// specifier "42" (a width).
+func spanSpecifier(v jsval.Value) string {
 	if v.IsNullish() {
-		return ",f", nil
+		return ",f"
 	}
-	return numberSpecifier(v)
-}
-
-// numberSpecifier reads a number format specifier: undefined and null mean the
-// default ("" here). d3's formatSpecifier matches the specifier with a regular
-// expression's exec, which converts it to a string first, so a number such as
-// 42 is the specifier "42" (a width); whether that text is a legal specifier
-// is up to the parser.
-func numberSpecifier(v jsval.Value) (string, error) {
-	if v.IsNullish() {
-		return "", nil
-	}
-	return v.AsString(), nil
+	return v.AsString()
 }
 
 func timeFormatOf(loc *format.Locale, specifier jsval.Value, utc bool) (Format, error) {

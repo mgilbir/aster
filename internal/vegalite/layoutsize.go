@@ -9,7 +9,7 @@ import (
 // Layout size parsing and signals — vega-lite/src/compile/layoutsize/*.
 
 func getViewConfigContinuousSize(view Value, channel string) Value {
-	if v := view.Get(channel); !v.IsNullish() {
+	if v := jsGet(view, channel); !v.IsNullish() {
 		return v
 	}
 	if channel == "width" {
@@ -20,7 +20,7 @@ func getViewConfigContinuousSize(view Value, channel string) Value {
 
 func getViewConfigDiscreteSize(view Value, channel string) Value {
 	var size Value
-	if v := view.Get(channel); !v.IsNullish() {
+	if v := jsGet(view, channel); !v.IsNullish() {
 		size = v
 	} else if channel == "width" {
 		size = view.Get("discreteWidth")
@@ -45,6 +45,7 @@ func initLayoutSize(cc *compileCtx, encoding Value, size *Object) *Object {
 		if isStep(size.Lookup(sizeType)) {
 			if isContinuousFieldOrDatumDef(cc, encoding.Get(channel)) {
 				size.Delete(sizeType)
+				cc.warn(msgStepDropped(sizeType))
 			}
 		}
 	}
@@ -72,18 +73,22 @@ func parseConcatLayoutSize(m *concatModel) {
 }
 
 func parseChildrenLayoutSize(m Model) {
+	cc := m.b().ctx
 	for _, child := range m.children() {
+		cc.work(modelStep)
 		child.parseLayoutSize()
 	}
 }
 
 func parseNonUnitLayoutSizeForChannel(m Model, layoutSizeType string) {
+	cc := m.b().ctx
 	b := m.b()
 	sizeType := getSizeTypeFromLayoutSizeType(layoutSizeType)
 	channel := getPositionScaleChannel(sizeType)
 	resolve := b.comp.resolve
 	var mergedSize *withExplicit
 	for _, child := range m.children() {
+		cc.work(modelStep)
 		childSize := child.b().comp.layoutSize.getWithExplicit(sizeType)
 		scaleResolve := resolve.scale[channel]
 		if scaleResolve == "" {
@@ -98,7 +103,7 @@ func parseNonUnitLayoutSizeForChannel(m Model, layoutSizeType string) {
 				mergedSize = nil
 				break
 			}
-			mv := mergeValuesWithExplicit(mergedSize, childSize, sizeType, "", nil)
+			mv := mergeValuesWithExplicit(cc, mergedSize, childSize, sizeType, "", nil)
 			mergedSize = &mv
 		} else {
 			cs := childSize
@@ -107,6 +112,7 @@ func parseNonUnitLayoutSizeForChannel(m Model, layoutSizeType string) {
 	}
 	if mergedSize != nil {
 		for _, child := range m.children() {
+			cc.work(modelStep)
 			b.renameSignal(child.b().getName(sizeType), b.getName(layoutSizeType))
 			child.b().comp.layoutSize.set(sizeType, jsval.Str("merged"), false)
 		}
@@ -145,7 +151,7 @@ func defaultUnitSize(u *unitModel, sizeType string) Value {
 		rng := sc.get("range")
 		if hasDiscreteDomain(scaleType) {
 			size := getViewConfigDiscreteSize(config.Get("view"), sizeType)
-			if isVgRangeStep(rng) || isStep(size) {
+			if isVgRangeStep(u.b().ctx, rng) || isStep(size) {
 				return jsval.Str("step")
 			}
 			return size
@@ -183,12 +189,12 @@ func sizeSignals(m Model, sizeType string) []Value {
 	if (!cc.v5 && size.IsNullish()) || (cc.v5 && !size.IsTruthy()) || (size.IsStr() && size.StrValue() == "merged") {
 		return nil
 	}
-	name := signalOf(b.getSizeSignalRef(sizeType))
+	name := signalOf(b.getSizeSignalRef(sizeType)) // .signal: a TypeError of null
 	if size.IsStr() && size.StrValue() == "step" {
 		sc := b.getScaleComponent(channel)
 		if sc != nil {
 			typ, rng := sc.get("type").AsString(), sc.get("range")
-			if hasDiscreteDomain(typ) && isVgRangeStep(rng) {
+			if hasDiscreteDomain(typ) && isVgRangeStep(m.b().ctx, rng) {
 				scaleName := b.scaleName(channel, false)
 				if b.parent != nil && isFacetModel(b.parent) {
 					if b.parent.b().comp.resolve.scale[channel] == "independent" {

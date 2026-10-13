@@ -43,9 +43,14 @@ func Quantile(ctx context.Context, source []jsval.Value, p QuantileParams) ([]js
 		}
 		// d3.range(step/2, 1 - EPSILON, step)
 		start, stop := step/2, 1-quantileEpsilon
+		// d3.range: n = Math.max(0, Math.ceil((stop - start) / step)) | 0,
+		// so NaN is no probability at all. Past MaxSteps is refused.
 		n := math.Max(0, math.Ceil((stop-start)/step))
-		if math.IsNaN(n) || n > MaxSteps {
-			return nil, limitErr("quantile probabilities", int(min(n, math.MaxInt32)), MaxSteps)
+		if math.IsNaN(n) {
+			n = 0
+		}
+		if n > MaxSteps {
+			return nil, limitErr("quantile probabilities", n, MaxSteps)
 		}
 		probs = make([]float64, int(n))
 		for i := range probs {
@@ -54,10 +59,10 @@ func Quantile(ctx context.Context, source []jsval.Value, p QuantileParams) ([]js
 	}
 	names := make([]string, len(p.GroupBy))
 	for i, g := range p.GroupBy {
-		names[i] = g.Name
+		names[i] = g.Key()
 	}
 	groups := Partition(zoneOf(ctx), source, p.GroupBy)
-	if err := reserveOut(ctx, int(min(budget.Mul(int64(len(groups)), int64(len(probs))), math.MaxInt32)), len(source)); err != nil {
+	if err := reserveRows(ctx, int(min(budget.Mul(int64(len(groups)), int64(len(probs))), math.MaxInt32))); err != nil {
 		return nil, err
 	}
 	var out []jsval.Value

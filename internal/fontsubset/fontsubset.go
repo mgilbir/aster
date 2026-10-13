@@ -13,6 +13,7 @@ package fontsubset
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -31,6 +32,9 @@ type Font struct {
 	cvt, fpgm, prep, os2, cmap         []byte
 
 	longLoca bool
+	cff      bool // CFF outlines (see IsCFF)
+	// subsetErr is why the font cannot be subset, or nil (see SubsetErr).
+	subsetErr error
 
 	metrics Metrics
 	psName  string
@@ -132,6 +136,7 @@ func Parse(ttf []byte) (font *Font, err error) {
 	// the font unsuitable for sparse subsetting but metrics still work.
 	f.glyf = optional("glyf")
 	f.loca = optional("loca")
+	f.cff = binary.BigEndian.Uint32(ttf) == 0x4F54544F || optional("CFF ") != nil || optional("CFF2") != nil
 	f.cvt = optional("cvt ")
 	f.fpgm = optional("fpgm")
 	f.prep = optional("prep")
@@ -182,8 +187,58 @@ func Parse(ttf []byte) (font *Font, err error) {
 		f.metrics.FixedPitch = binary.BigEndian.Uint32(post[12:]) != 0
 	}
 	f.psName = postScriptName(optional("name"))
+	f.subsetErr = f.checkGlyphData()
 
 	return f, nil
+}
+
+// checkGlyphData is why the font's glyph data cannot be subset, or nil. A
+// font is untrusted (C31): loca can give glyphs ranges of glyf that overlap,
+// so that a subset copying each kept glyph would be many times the font. In
+// a sound font they lie apart, in order (loca ascending, as the OpenType
+// specification requires), or out of order but still apart; either is
+// subset, and anything else is refused.
+func (f *Font) checkGlyphData() error {
+	if len(f.glyf) == 0 || len(f.loca) == 0 {
+		return errors.New("fontsubset: the font has no TrueType outlines (glyf and loca); CFF fonts are not subset")
+	}
+	entry := 2
+	if f.longLoca {
+		entry = 4
+	}
+	if len(f.loca) < (int(f.numGlyphs)+1)*entry {
+		return errors.New("fontsubset: the font's loca table is shorter than its glyph count")
+	}
+	at := func(i int) uint32 {
+		if f.longLoca {
+			return binary.BigEndian.Uint32(f.loca[4*i:])
+		}
+		return uint32(binary.BigEndian.Uint16(f.loca[2*i:])) * 2
+	}
+	ascending := true
+	for g := 0; g < int(f.numGlyphs) && ascending; g++ {
+		ascending = at(g) <= at(g+1)
+	}
+	if ascending {
+		return nil
+	}
+	// Out of order: the ranges, sorted, must not overlap. One that is
+	// malformed on its own (start past end, or past glyf) is an error only
+	// for a subset that keeps it, as before.
+	type span struct{ start, end uint32 }
+	spans := make([]span, 0, f.numGlyphs)
+	for g := 0; g < int(f.numGlyphs); g++ {
+		if a, b := at(g), at(g+1); a < b && int(b) <= len(f.glyf) {
+			spans = append(spans, span{a, b})
+		}
+	}
+	sort.Slice(spans, func(i, j int) bool { return spans[i].start < spans[j].start })
+	for i := 1; i < len(spans); i++ {
+		if spans[i].start < spans[i-1].end {
+			return errors.New("fontsubset: the font's glyphs overlap in glyf (a malformed loca)")
+		}
+	}
+	return nil
 }
 
 // UnitsPerEm returns the font's design grid size.
@@ -208,10 +263,16 @@ func (f *Font) Metrics() Metrics { return f.metrics }
 func (f *Font) PostScriptName() string { return f.psName }
 
 // CanSubset reports whether the font has TrueType outlines (glyf/loca) that
-// the sparse subsetter can process.
-func (f *Font) CanSubset() bool {
-	return len(f.glyf) > 0 && len(f.loca) > 0
-}
+// the sparse subsetter can process; SubsetErr says why not.
+func (f *Font) CanSubset() bool { return f.subsetErr == nil }
+
+// SubsetErr is why the font cannot be subset, or nil when it can: it has no
+// TrueType outlines (a CFF font), or its glyph data is malformed.
+func (f *Font) SubsetErr() error { return f.subsetErr }
+
+// IsCFF reports whether the font's outlines are CFF (an OpenType "OTTO"
+// font), whose PDF CIDFont is a CIDFontType0, not a CIDFontType2.
+func (f *Font) IsCFF() bool { return f.cff }
 
 // glyphData returns the raw glyf entry for gid.
 func (f *Font) glyphData(gid uint16) ([]byte, error) {
@@ -319,8 +380,8 @@ func (f *Font) Subset(gids map[uint16]bool) (out []byte, err error) {
 			out, err = nil, fmt.Errorf("fontsubset: malformed font: %v", p)
 		}
 	}()
-	if !f.CanSubset() {
-		return nil, fmt.Errorf("fontsubset: font has no TrueType outlines (CFF fonts are not supported)")
+	if f.subsetErr != nil {
+		return nil, f.subsetErr
 	}
 	keep, err := f.closure(gids)
 	if err != nil {
@@ -338,12 +399,18 @@ func (f *Font) Subset(gids map[uint16]bool) (out []byte, err error) {
 	// 4-byte aligned (some rasterizers read glyf fields as aligned words).
 	var glyf bytes.Buffer
 	loca := make([]byte, (int(f.numGlyphs)+1)*4)
+	copied := 0
 	for g := 0; g < int(f.numGlyphs); g++ {
 		binary.BigEndian.PutUint32(loca[g*4:], uint32(glyf.Len()))
 		if keep[uint16(g)] {
 			data, err := f.glyphData(uint16(g))
 			if err != nil {
 				return nil, err
+			}
+			// The kept glyphs lie apart in glyf (checkGlyphData), so
+			// together they are no more than it.
+			if copied += len(data); copied > len(f.glyf) {
+				return nil, errors.New("fontsubset: the font's glyphs overlap in glyf (a malformed loca)")
 			}
 			stripped, err := stripInstructions(data)
 			if err != nil {

@@ -9,11 +9,11 @@ The attacker controls the Vega or Vega-Lite specification, the data a Loader ret
 | Goal | How aster provides it |
 |---|---|
 | bounded time | `WithTimeout` covers every stage of a call; loops whose iterations can be long poll the deadline |
-| bounded memory | per-render budgets on rows, items, loaded bytes, strings, SVG size, canvases, path points, each charged *before* allocating; `WithMemoryLimit` sets them ([limits.md](limits.md)) |
+| bounded memory | per-render budgets on rows, items, loaded bytes, strings, SVG size, canvases, path points, and a per-call ledger for the rest ([ADR 0010](adr/0010-bounds-charged-where-work-happens.md)), each charged *before* allocating; `WithMemoryLimit` sets them ([limits.md](limits.md)); one image is bounded in bytes (32 MiB) and pixels (64 Mi, `n/16` with `WithMemoryLimit`), alike in every output; caches shared between calls are bounded by the bytes they hold. Every input of the bounded corpus (`testdata/security/bounded`, each reproducer of a fixed finding) is rendered to every output in every `go test`, under `WithMemoryLimit(64 MiB)` and a 2 s timeout, and must end with output or a limit or deadline error (`bounded_test.go`) |
 | no crash | everything reachable from input returns an error; recursion is bounded and audited (every recursive cycle is listed with its bound); the public API recovers panics as a last resort; fuzzed nightly |
-| no access beyond the Loader's policy | every resource (data, images, links) goes through the Loader; the default refuses all; `HTTPLoader` refuses private networks by default |
-| no injection into the output | every SVG attribute value and text that comes from a spec or its data is escaped (XML-invalid characters dropped): the SVG writer takes only constants as raw markup, and tests check that the output parses back to exactly the elements and attributes it wrote; CSS-bound values are allow-listed; link and image URLs pass vega-loader's scheme allow-list after the Loader; PDF names and strings are escaped |
-| no code execution | the expression language is parsed and compiled to Go closures over a whitelisted function table; no reflection, no host access; regular expressions run in a bounded matcher |
+| no access beyond the Loader's policy | every resource (data, images, links) goes through the Loader; the default refuses all; `HTTPLoader` refuses private networks by default, checked on the address each connection (plain or TLS dial) actually reaches, so DNS rebinding and redirects do not get past it; a `FallbackLoader` allows what any of its children allows |
+| no injection into the output | every SVG attribute value and text that comes from a spec or its data is escaped (XML-invalid characters dropped): the SVG writer takes only constants as raw markup, and tests check that the output parses back to exactly the elements and attributes it wrote; CSS-bound values are allow-listed; link and image URLs pass vega-loader's scheme allow-list after the Loader; PDF names and strings are escaped, and a PDF Link annotation opens only an absolute `http:`, `https:` or `mailto:` URL, so a `javascript:`, `data:`, `file:` or relative href in SVG input never becomes a PDF action |
+| no code execution | the expression language is parsed and compiled to Go closures over a whitelisted function table; no reflection, no host access; regular expressions are paid for before they are parsed and compiled, and run in a bounded matcher that stops at the deadline |
 
 ## Hardening checklist for untrusted specs
 
@@ -27,7 +27,7 @@ The attacker controls the Vega or Vega-Lite specification, the data a Loader ret
 
 ## Known residual risks
 
-- Parsing the specification's JSON and loaded JSON data is not interruptible. It is bounded by size (the parse budget), not by `WithTimeout`.
-- There is no per-item memory model. Very long strings or paths on one item are bounded only by the string budget and the SVG size cap.
+- Parsing the specification's JSON and loaded JSON data, and decoding an image (PNG, JPEG, GIF), are not interruptible. They are bounded by size (the parse budget; the per-image byte and pixel bounds), not by `WithTimeout`.
+- There is no per-item memory model. Very long strings on one item are bounded only by the string budget and the SVG size cap; parsed path data is charged to the call's ledger.
 - A Loader you write is trusted: aster charges what it returns to the budget only after `Load` returns it, so bound what your Loader reads.
 - A `Transport` of your own that is not an `*http.Transport` decides itself where it connects. Only address literals and `localhost` names are refused for it.

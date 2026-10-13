@@ -255,6 +255,8 @@ func writeConfig(output *Object, key string, value Value, recurseAll bool, recur
 	output.Set(key, value)
 }
 
+// mergeNamed is vega-util's: `if (!map[item.name])` reads a plain object,
+// so a name every object inherits counts as already added.
 func mergeNamed(a, b Value) Value {
 	if a.IsNullish() {
 		return b
@@ -266,7 +268,7 @@ func mergeNamed(a, b Value) Value {
 	var out []Value
 	add := func(it Value) {
 		n := it.Get("name").AsString()
-		if !seen[n] {
+		if !jsSeen(nil, seen, n) {
 			seen[n] = true
 			out = append(out, it)
 		}
@@ -284,23 +286,25 @@ func mergeNamed(a, b Value) Value {
 func mergeConfig(configs ...Value) *Object {
 	out := jsval.NewObject(8)
 	for _, src := range configs {
-		if !src.IsObj() {
-			continue
+		// for (const key in source): a string's and an array's indices too,
+		// nothing of a number, a boolean or null.
+		var ks []string
+		if !src.IsNullish() {
+			ks = jsKeys(src)
 		}
-		so := src.ObjValue()
-		for i := 0; i < so.Len(); i++ {
-			key := so.KeyAt(i)
+		for _, key := range ks {
+			val := jsProp(src, key)
 			if key == "signals" {
-				out.Set("signals", mergeNamed(out.Lookup("signals"), so.ValueAt(i)))
+				out.Set("signals", mergeNamed(out.Lookup("signals"), val))
 				continue
 			}
 			switch key {
 			case "legend":
-				writeConfig(out, key, so.ValueAt(i), false, map[string]bool{"layout": true})
+				writeConfig(out, key, val, false, map[string]bool{"layout": true})
 			case "style":
-				writeConfig(out, key, so.ValueAt(i), true, nil)
+				writeConfig(out, key, val, true, nil)
 			default:
-				writeConfig(out, key, so.ValueAt(i), false, nil)
+				writeConfig(out, key, val, false, nil)
 			}
 		}
 	}
@@ -309,28 +313,25 @@ func mergeConfig(configs ...Value) *Object {
 
 func isConditionalAxisValue(v Value) bool { return v.Get("condition").IsTruthy() }
 
-func getAxisConfigInternal(axisConfig Value) Value {
-	if axisConfig.IsStr() {
-		out := jsval.NewObject(0)
-		spread(out, axisConfig)
-		return jsval.Obj(out)
-	}
+func getAxisConfigInternal(cc *compileCtx, axisConfig Value) Value {
 	out := jsval.NewObject(axisConfig.Len())
-	for _, prop := range keysOf(axisConfig) {
-		val := axisConfig.Get(prop)
+	for _, prop := range jsKeysOr(axisConfig) {
+		cc.work(1)
+		val := jsProp(axisConfig, prop)
 		if isConditionalAxisValue(val) {
-			out.Set(prop, signalOrValueRefWithCondition(val))
+			jsSet(cc, out, prop, signalOrValueRefWithCondition(nil, val))
 		} else {
-			out.Set(prop, signalRefOrValue(val))
+			jsSet(cc, out, prop, signalRefOrValue(cc, val))
 		}
 	}
 	return jsval.Obj(out)
 }
 
-func getStyleConfigInternal(styleConfig Value) Value {
+func getStyleConfigInternal(cc *compileCtx, styleConfig Value) Value {
 	out := jsval.NewObject(styleConfig.Len())
-	for _, prop := range keysOf(styleConfig) {
-		out.Set(prop, getAxisConfigInternal(styleConfig.Get(prop)))
+	for _, prop := range jsKeys(styleConfig) {
+		cc.work(1)
+		jsSet(cc, out, prop, getAxisConfigInternal(cc, jsProp(styleConfig, prop)))
 	}
 	return jsval.Obj(out)
 }
@@ -350,7 +351,7 @@ func initConfig(cc *compileCtx, specified Value) Value {
 	}
 	color, font, fontSize, selection := specified.Get("color"), specified.Get("font"), specified.Get("fontSize"), specified.Get("selection")
 	rest := omit(specified, "color", "font", "fontSize", "selection")
-	parts := []Value{jsval.Obj(jsval.NewObject(0)), deepClone(jsval.Obj(defaultConfig(cc)))}
+	parts := []Value{jsval.Obj(jsval.NewObject(0)), duplicate(cc, jsval.Obj(defaultConfig(cc)))}
 	if font.IsTruthy() {
 		parts = append(parts, jsval.Obj(fontConfig(font)))
 	}
@@ -369,47 +370,47 @@ func initConfig(cc *compileCtx, specified Value) Value {
 	out := omit(mv, configPropsWithExpr...)
 	for _, prop := range []string{"background", "lineBreak", "padding"} {
 		if v := merged.Lookup(prop); v.IsTruthy() {
-			out.Set(prop, signalRefOrValue(v))
+			out.Set(prop, signalRefOrValue(cc, v))
 		}
 	}
 	for _, m := range markConfigs {
 		if v := merged.Lookup(m); v.IsTruthy() {
-			out.Set(m, replaceExprRef(v, 0))
+			out.Set(m, replaceExprRef(cc, v, 0))
 		}
 	}
 	for _, a := range axisConfigs {
 		if v := merged.Lookup(a); v.IsTruthy() {
-			out.Set(a, getAxisConfigInternal(v))
+			out.Set(a, getAxisConfigInternal(cc, v))
 		}
 	}
 	for _, h := range headerConfigs {
 		if v := merged.Lookup(h); v.IsTruthy() {
-			out.Set(h, replaceExprRef(v, 0))
+			out.Set(h, replaceExprRef(cc, v, 0))
 		}
 	}
 	if v := merged.Lookup("legend"); v.IsTruthy() {
-		out.Set("legend", replaceExprRef(v, 0))
+		out.Set("legend", replaceExprRef(cc, v, 0))
 	}
 	if sc := merged.Lookup("scale"); sc.IsTruthy() && cc.v5 {
-		out.Set("scale", replaceExprRef(sc, 0))
+		out.Set("scale", replaceExprRef(cc, sc, 0))
 	} else if sc.IsTruthy() {
 		invalid := sc.Get("invalid")
 		other := jsval.Obj(omit(sc, "invalid"))
-		newInvalid := replaceExprRef(invalid, 1)
-		o := cloneObj(replaceExprRef(other, 0).ObjValue())
+		newInvalid := replaceExprRef(cc, invalid, 1)
+		o := cloneObj(replaceExprRef(cc, other, 0).ObjValue())
 		if newInvalid.Len() > 0 {
 			o.Set("invalid", newInvalid)
 		}
 		out.Set("scale", jsval.Obj(o))
 	}
 	if v := merged.Lookup("style"); v.IsTruthy() {
-		out.Set("style", getStyleConfigInternal(v))
+		out.Set("style", getStyleConfigInternal(cc, v))
 	}
 	if v := merged.Lookup("title"); v.IsTruthy() {
-		out.Set("title", replaceExprRef(v, 0))
+		out.Set("title", replaceExprRef(cc, v, 0))
 	}
 	if v := merged.Lookup("view"); v.IsTruthy() {
-		out.Set("view", replaceExprRef(v, 0))
+		out.Set("view", replaceExprRef(cc, v, 0))
 	}
 	return jsval.Obj(out)
 }
@@ -460,13 +461,14 @@ func vlOnlyMarkSpecificConfig(cc *compileCtx, markType string) []string {
 // stripAndRedirectConfig removes Vega-Lite-only config and moves mark configs
 // into Vega style configs; it returns undefined when nothing is left.
 func stripAndRedirectConfig(cc *compileCtx, cfg Value) Value {
-	c := deepClone(cfg).ObjValue()
+	c := duplicate(cc, cfg).ObjValue()
 	for _, p := range vlOnlyConfigProperties {
 		c.Delete(p)
 	}
 	if axis := c.Lookup("axis"); axis.IsObj() {
 		ao := axis.ObjValue()
 		for _, p := range append([]string(nil), ao.Keys()...) {
+			cc.work(1)
 			if isConditionalAxisValue(ao.Lookup(p)) {
 				ao.Delete(p)
 			}
@@ -486,14 +488,29 @@ func stripAndRedirectConfig(cc *compileCtx, cfg Value) Value {
 			mo.Delete("tooltip")
 		}
 	}
-	if params := c.Lookup("params"); !params.IsUndefined() {
-		sigs := append([]Value(nil), c.Lookup("signals").Items()...)
-		sigs = append(sigs, assembleParameterSignals(params)...)
-		c.Set("signals", jsval.Arr(sigs))
+	if params := c.Lookup("params"); params.IsTruthy() { // if (config.params)
+		// (config.signals || []).concat(...): a string concatenates the
+		// signals' text; anything else that is not an array has no concat.
+		cur := c.Lookup("signals")
+		added := assembleParameterSignals(cc, params)
+		switch {
+		case !cur.IsTruthy() || cur.IsArr():
+			sigs := append([]Value(nil), cur.Items()...)
+			c.Set("signals", jsval.Arr(append(sigs, added...)))
+		case cur.IsStr():
+			c.Set("signals", jsval.Str(cur.StrValue()+jsval.Arr(added).AsString()))
+		default:
+			throw("(config.signals || []).concat is not a function")
+		}
 		c.Delete("params")
 	}
 	for _, markType := range append([]string{"view"}, primitiveMarks...) {
 		mc := c.Lookup(markType)
+		if mc.IsNullish() {
+			// delete config[markType][prop] of a mark config a falsy value
+			// removed.
+			throw("Cannot convert undefined or null to object")
+		}
 		if mo := mc.ObjValue(); mo != nil {
 			for _, p := range vlOnlyMarkConfigProperties {
 				mo.Delete(p)
@@ -509,6 +526,7 @@ func stripAndRedirectConfig(cc *compileCtx, cfg Value) Value {
 	}
 	redirectTitleConfig(c)
 	for _, p := range append([]string(nil), c.Keys()...) {
+		cc.work(1)
 		if v := c.Lookup(p); isObject(v) && isEmptyObj(v) {
 			c.Delete(p)
 		}

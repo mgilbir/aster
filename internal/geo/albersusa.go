@@ -1,6 +1,8 @@
 package geo
 
 import (
+	"context"
+
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -116,8 +118,12 @@ func (m *multiplex) Sphere() {
 	}
 }
 
-func (a *albersUSA) Stream(sink Stream) Stream {
-	return &multiplex{a.lower48.Stream(sink), a.alaska.Stream(sink), a.hawaii.Stream(sink)}
+func (a *albersUSA) Stream(sink Stream) Stream { return a.streamBound(sink, nil) }
+
+// streamBound charges what each of the three projections produces: each
+// resamples every point before its clip extent keeps its region.
+func (a *albersUSA) streamBound(sink Stream, b *walkBound) Stream {
+	return &multiplex{a.lower48.streamBound(sink, b), a.alaska.streamBound(sink, b), a.hawaii.streamBound(sink, b)}
 }
 
 func (a *albersUSA) dropStreamCache() {
@@ -169,12 +175,18 @@ func (a *albersUSA) setScaleTranslate(k, x, y float64) {
 	a.SetTranslate(x, y)
 }
 
-func (a *albersUSA) FitExtent(x0, y0, x1, y1 float64, object jsval.Value) {
-	fitExtent(a, x0, y0, x1, y1, object)
+func (a *albersUSA) FitExtent(ctx context.Context, x0, y0, x1, y1 float64, object jsval.Value) error {
+	return fitExtent(ctx, a, x0, y0, x1, y1, object)
 }
-func (a *albersUSA) FitSize(w, h float64, object jsval.Value) { fitExtent(a, 0, 0, w, h, object) }
-func (a *albersUSA) FitWidth(w float64, object jsval.Value)   { fitWidth(a, w, object) }
-func (a *albersUSA) FitHeight(h float64, object jsval.Value)  { fitHeight(a, h, object) }
+func (a *albersUSA) FitSize(ctx context.Context, w, h float64, object jsval.Value) error {
+	return fitExtent(ctx, a, 0, 0, w, h, object)
+}
+func (a *albersUSA) FitWidth(ctx context.Context, w float64, object jsval.Value) error {
+	return fitWidth(ctx, a, w, object)
+}
+func (a *albersUSA) FitHeight(ctx context.Context, h float64, object jsval.Value) error {
+	return fitHeight(ctx, a, h, object)
+}
 
 func (a *albersUSA) Copy() Projection {
 	c := newAlbersUSA()

@@ -1,6 +1,7 @@
 package vega
 
 import (
+	"context"
 	"math/rand"
 	"testing"
 
@@ -92,21 +93,23 @@ func TestRelayDeriveMatchesMap(t *testing.T) {
 	r := rand.New(rand.NewSource(5))
 	p := newParams()
 	p.set("derive", jsval.Bool(true), true)
+	v := newView(context.Background(), Options{}, jsval.Undefined)
 	for round := 0; round < 200; round++ {
 		_, tr, _ := facRelay(nil, nil, nil)
 		ref := relayByMap()
 		copies := map[*jsval.Object]*jsval.Object{} // reference copy -> relay copy
 		for pi, src := range tuplePulses(r, 4) {
 			want := ref(src)
-			got := tr.transform(&opNode{}, p, &flowPulse{tuples: src}).tuples
+			got := tr.transform(&opNode{g: v.g}, p, &flowPulse{tuples: src}).tuples
 			if len(got) != len(want) {
 				t.Fatalf("round %d pulse %d: %d tuples, want %d", round, pi, len(got), len(want))
 			}
 			for i := range want {
 				w, g := want[i].ObjValue(), got[i].ObjValue()
 				if w == nil {
-					if got[i].Key() != want[i].Key() {
-						t.Fatalf("round %d pulse %d tuple %d: %v, want %v", round, pi, i, got[i], want[i])
+					// derive(number) copies no property: an empty tuple
+					if g == nil || g.Len() != 0 || g.TupleID() == 0 {
+						t.Fatalf("round %d pulse %d tuple %d: %v, want an empty tuple for %v", round, pi, i, got[i], want[i])
 					}
 					continue
 				}
@@ -123,7 +126,9 @@ func TestRelayDeriveMatchesMap(t *testing.T) {
 				} else if c != g {
 					t.Fatalf("round %d pulse %d tuple %d: a new copy, want the one handed on before", round, pi, i)
 				}
-				if g.Len() != w.Len() || g.TupleID() != w.TupleID() {
+				// a copy is a tuple of its own (derive), with an id that is
+				// not its source's
+				if g.Len() != w.Len() || g.TupleID() == 0 || (src[i].ObjValue().TupleID() != 0 && g.TupleID() == src[i].ObjValue().TupleID()) {
 					t.Fatalf("round %d pulse %d tuple %d: copy differs", round, pi, i)
 				}
 				for j := 0; j < w.Len(); j++ {

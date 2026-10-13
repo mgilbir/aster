@@ -3,11 +3,17 @@
 // vega-lite example specs that reference external data via relative URLs
 // like "data/cars.json".
 //
-// It also writes a LICENSE file noting the BSD-3-Clause license.
+// Every file is checked against testdata/vega-datasets/SHA256SUMS, the
+// checked-in manifest of what that version serves: a download that differs
+// (a compromised or changed CDN answer) fails the command before any file is
+// written. It also writes a LICENSE file noting the BSD-3-Clause license.
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log"
@@ -21,6 +27,9 @@ const (
 	vegaDatasetsVersion = "3.2.1"
 	jsdelivrBase        = "https://cdn.jsdelivr.net/npm"
 	outDir              = "testdata/vega-datasets"
+	manifestFile        = "SHA256SUMS"
+	// maxFileBytes bounds one download; the largest file is 2 MB.
+	maxFileBytes = 64 << 20
 )
 
 // dataFiles lists the 43 data files referenced by vega-lite v6.4.0 example specs.
@@ -79,24 +88,36 @@ func main() {
 		log.Fatalf("creating output dir: %v", err)
 	}
 
+	manifest, err := readManifest(filepath.Join(outDir, manifestFile))
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := checkListed(manifest); err != nil {
+		log.Fatal(err)
+	}
+
 	log.Printf("downloading %d data files from vega-datasets@%s...", len(dataFiles), vegaDatasetsVersion)
 
+	// Everything is downloaded and verified before anything is written, so a
+	// bad answer leaves the vendored files as they were.
+	got := make(map[string][]byte, len(dataFiles))
 	for _, file := range dataFiles {
-		filename := filepath.Base(file)
 		url := fmt.Sprintf("%s/vega-datasets@%s/%s", jsdelivrBase, vegaDatasetsVersion, file)
-		dest := filepath.Join(outDir, file)
-
 		data, err := download(url)
 		if err != nil {
-			log.Fatalf("downloading %s: %v", filename, err)
+			log.Fatalf("downloading %s: %v", file, err)
 		}
-
-		if err := os.WriteFile(dest, data, 0o644); err != nil {
+		if err := verify(manifest, file, data); err != nil {
+			log.Fatal(err)
+		}
+		got[file] = data
+		log.Printf("  %s (%d bytes, verified)", file, len(data))
+	}
+	for _, file := range dataFiles {
+		dest := filepath.Join(outDir, file)
+		if err := os.WriteFile(dest, got[file], 0o644); err != nil {
 			log.Fatalf("writing %s: %v", dest, err)
 		}
-
-		hash := sha256.Sum256(data)
-		log.Printf("  %s (%d bytes, sha256:%x)", filename, len(data), hash)
 	}
 
 	// Write LICENSE file.
@@ -127,10 +148,60 @@ func download(url string) ([]byte, error) {
 		return nil, fmt.Errorf("HTTP %d from %s", resp.StatusCode, url)
 	}
 
-	data, err := io.ReadAll(resp.Body)
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxFileBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("reading response from %s: %w", url, err)
 	}
-
+	if len(data) > maxFileBytes {
+		return nil, fmt.Errorf("%s is larger than %d bytes", url, maxFileBytes)
+	}
 	return data, nil
+}
+
+// readManifest reads a sha256sum-format manifest: "<hex>  <path>" per line,
+// "#" comments.
+func readManifest(path string) (map[string]string, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("reading the manifest: %w", err)
+	}
+	out := map[string]string{}
+	sc := bufio.NewScanner(bytes.NewReader(b))
+	for n := 1; sc.Scan(); n++ {
+		line := sc.Text()
+		if line == "" || line[0] == '#' {
+			continue
+		}
+		sum, file, ok := bytes.Cut([]byte(line), []byte("  "))
+		if !ok || len(sum) != 64 {
+			return nil, fmt.Errorf("%s:%d: want <sha256>  <path>", path, n)
+		}
+		if _, dup := out[string(file)]; dup {
+			return nil, fmt.Errorf("%s:%d: %s is listed twice", path, n, file)
+		}
+		out[string(file)] = string(sum)
+	}
+	return out, sc.Err()
+}
+
+// checkListed requires the manifest and dataFiles to name the same files.
+func checkListed(manifest map[string]string) error {
+	if len(manifest) != len(dataFiles) {
+		return fmt.Errorf("the manifest lists %d files, dataFiles %d", len(manifest), len(dataFiles))
+	}
+	for _, f := range dataFiles {
+		if _, ok := manifest[f]; !ok {
+			return fmt.Errorf("%s is not in the manifest", f)
+		}
+	}
+	return nil
+}
+
+// verify checks data against the manifest's hash for file.
+func verify(manifest map[string]string, file string, data []byte) error {
+	sum := sha256.Sum256(data)
+	if got := hex.EncodeToString(sum[:]); got != manifest[file] {
+		return fmt.Errorf("%s: sha256 %s, the manifest says %s; nothing written", file, got, manifest[file])
+	}
+	return nil
 }

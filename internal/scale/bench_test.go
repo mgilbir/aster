@@ -1,6 +1,7 @@
 package scale
 
 import (
+	"context"
 	"testing"
 
 	"github.com/mgilbir/aster/internal/jsval"
@@ -100,7 +101,7 @@ func BenchmarkLinearTicks(b *testing.B) {
 	s.SetDomain(nums(0, 1234.5))
 	b.ReportAllocs()
 	for b.Loop() {
-		_ = s.Ticks(Count(10))
+		_, _ = s.Ticks(context.Background(), Count(10))
 	}
 }
 
@@ -109,7 +110,7 @@ func BenchmarkLogTicks(b *testing.B) {
 	s.SetDomain(nums(1, 1e6))
 	b.ReportAllocs()
 	for b.Loop() {
-		_ = s.Ticks(Count(10))
+		_, _ = s.Ticks(context.Background(), Count(10))
 	}
 }
 

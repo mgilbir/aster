@@ -72,8 +72,17 @@ func urshift(a int32, n int) int32 { return int32(uint32(a) >> (uint(n) & 31)) }
 
 func (l *layout) run(words []*word) ([]*word, error) {
 	sw := int(toInt32(l.size[0]) >> 5)
-	rows := int(math.Ceil(l.size[1]))
+	// A board one column (32 px) wide holds at most maxArea pixels, so the
+	// row count is clamped there before it is an int; a board with no column
+	// holds nothing however many rows it has.
+	rows := int(math.Min(math.Ceil(l.size[1]), maxArea))
 	l.sw = sw
+	board := int64(sw*rows+sw+2) * 4
+	led := budget.LedgerFrom(l.ctx)
+	if err := led.Alloc(board); err != nil {
+		return nil, err
+	}
+	defer led.Free(board)
 	l.board = make([]int32, sw*rows+sw+2)
 	l.mask = newMask()
 

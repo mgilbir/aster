@@ -39,13 +39,36 @@ func (l Limits) over(format string, args ...any) error {
 // budget.Budget whose MaxLoadBytes is the most the loader should read.
 type Loader func(ctx context.Context, href string) ([]byte, error)
 
-// IsData reports whether href is a data: URI.
-func IsData(href string) bool { return strings.HasPrefix(strings.TrimSpace(href), "data:") }
+// IsData reports whether href is a data: URI. A URL's scheme is
+// case-insensitive (RFC 3986, section 3.1), and resvg's data: URL parser, as
+// browsers do, reads "DATA:" as "data:": this is the one test of it that the
+// SVG writer, the rasterizer and the PDF writer share, so that no stage takes
+// for a resource to fetch what another drew as an inline image.
+func IsData(href string) bool {
+	href = strings.TrimSpace(href)
+	return len(href) >= 5 && strings.EqualFold(href[:5], "data:")
+}
+
+// InlineImage reports whether href is a data: URI of an image format the
+// engine draws (PNG, JPEG or GIF): part of the document, decoded in place
+// rather than fetched. The scheme and the media type are case-insensitive.
+func InlineImage(href string) bool {
+	if !IsData(href) {
+		return false
+	}
+	meta := strings.TrimSpace(href)[5:]
+	for _, t := range [...]string{"image/png", "image/jpeg", "image/gif"} {
+		if len(meta) > len(t) && strings.EqualFold(meta[:len(t)], t) && (meta[len(t)] == ';' || meta[len(t)] == ',') {
+			return true
+		}
+	}
+	return false
+}
 
 // DataURI returns the payload of a data: URI, base64 or percent-encoded.
 func DataURI(href string, lim Limits) ([]byte, error) {
 	href = strings.TrimSpace(href)
-	if !strings.HasPrefix(href, "data:") {
+	if !IsData(href) {
 		return nil, errors.New("not a data: URI")
 	}
 	comma := strings.IndexByte(href, ',')

@@ -30,17 +30,23 @@
 package text
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"maps"
 	"math"
+	"slices"
 	"strings"
 	"sync"
 	"unicode"
 	"unicode/utf8"
+	"unsafe"
 
+	"github.com/mgilbir/aster/internal/bcache"
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/fonts/liberation"
 	"github.com/mgilbir/aster/internal/fonts/notoemoji"
+	"github.com/mgilbir/aster/internal/textcut"
 	"github.com/mgilbir/forme/shape"
 )
 
@@ -50,15 +56,29 @@ const (
 	maxTextBytes  = 1 << 20 // longer text is measured up to this many bytes
 	maxSizePx     = 1 << 16 // larger CSS sizes are clamped
 	maxFamilies   = 32      // font-family entries considered per query
-	maxCacheItems = 1 << 14 // entries in each of the measurement caches
+	maxCacheItems = 1 << 14 // runes memoised per face list (see faceList)
+)
 
-	// maxWidthBytes bounds the width cache by what its entries hold: the key
-	// strings and widthEntryBytes of map overhead each. Labels are short, so
-	// the entry count usually ends the cache first; the bytes stop a few long
-	// texts (up to a specification's string limit each) from pinning memory
-	// that no render's budget accounts for, in a Measurer that outlives them.
-	maxWidthBytes   = 4 << 20
-	widthEntryBytes = 64
+// The measurement caches live as long as the Measurer, across renders, and
+// the specification and its data choose their keys: the texts, the CSS font
+// strings (with family names of any length) and the runes of the texts. So
+// each is bounded by the bytes its entries hold, not by their number, keeps
+// none too large to share it with others, and drops entries not used lately
+// (C32). Labels and font strings are short: the bounds hold thousands of
+// entries of a real chart; the width cache about 11,000 labels, no more than
+// the entry-counted cache it replaces held (a full cache costs the collector
+// a scan per cycle, which a bigger one would add to every miss).
+const (
+	widthCacheBytes    = 3 << 20
+	widthCacheMaxEntry = 256 << 10
+	cssCacheBytes      = 1 << 20
+	cssCacheMaxEntry   = 64 << 10
+	listCacheBytes     = 8 << 20
+	listCacheMaxEntry  = 1 << 20
+	// The font programs FontData cuts out of collections and system fonts
+	// for embedding (see FontData); a CJK font's is about 20 MB.
+	programCacheBytes    = 64 << 20
+	programCacheMaxEntry = 32 << 20
 )
 
 // Option configures a Measurer.
@@ -227,6 +247,9 @@ type Run struct {
 	ShapedSize float64
 	// Width is the sum of the glyph advances.
 	Width float64
+	// Start and End are the byte offsets in the shaped text of the text
+	// the run sets: its glyphs' clusters lie within them, in any order.
+	Start, End int
 }
 
 // Measurer computes text widths and shapes text. It is safe for concurrent
@@ -234,16 +257,29 @@ type Run struct {
 // views share the fonts and caches.
 type Measurer struct {
 	*measurerState
+	*metrics
 	// budget bounds the shaping done through this view; nil shapes without
 	// bounds.
 	budget *ShapingBudget
 }
 
-// measurerState is what every view of a Measurer shares.
+// metrics is how a view of a Measurer turns glyph advances into widths, and
+// the widths it has measured that way. Views that measure alike share one;
+// Exact makes the other.
+type metrics struct {
+	exact      bool
+	pango      pangoMode
+	widthCache *bcache.Cache[widthKey, float64]
+}
+
+func newMetrics(exact bool, pango pangoMode) *metrics {
+	return &metrics{exact: exact, pango: pango, widthCache: bcache.New[widthKey, float64](widthCacheBytes, widthCacheMaxEntry)}
+}
+
+// measurerState is what every view of a Measurer shares: the fonts and what
+// is resolved from them, which no metric model changes.
 type measurerState struct {
-	mu    sync.RWMutex // guards the caches; the width cache is read under RLock
-	exact bool
-	pango pangoMode
+	mu sync.RWMutex // guards the caches; the width cache is read under RLock
 
 	entries  []*entry // registration order
 	fallback []*entry // entries in fallback order (see faces)
@@ -261,13 +297,34 @@ type measurerState struct {
 	monospaceFamily string
 	system          *systemIndex // nil unless WithSystemFonts
 	sysEntries      map[sysKey]*entry
+	sysLoaded       []*entry       // the system faces loaded, oldest first (see keepSystemFace)
 	palettes        map[string]int // WithFontPalette's, by normalised family
 
-	cssCache   map[string]CSSFont
-	listCache  map[listKey]*faceList
-	widthCache map[widthKey]float64
-	widthBytes int // what widthCache holds, as maxWidthBytes counts it
-	nextID     int
+	// The caches; see widthCacheBytes. cssCache and listCache are used under
+	// mu (plan), the metrics' width cache without it.
+	cssCache  *bcache.Cache[string, CSSFont]
+	listCache *bcache.Cache[listKey, *faceList]
+	programs  *bcache.Cache[*Face, []byte]
+	// exactOnce makes exactView, the view Exact returns.
+	exactOnce sync.Once
+	exactView *metrics
+	// last is the font plan resolved last (see font), under mu.
+	last struct {
+		font string
+		css  CSSFont
+		list *faceList
+	}
+	// lastParts is the font ShapeFont resolved last, as its parts: the
+	// families (a copy), weight and style, and their candidate faces. A
+	// writer draws label after label in one font, and building the cache
+	// key joins the families into a new string each time. Under mu.
+	lastParts struct {
+		families []string
+		weight   int
+		italic   bool
+		list     *faceList
+	}
+	nextID int
 }
 
 type widthKey struct{ text, css string }
@@ -278,13 +335,11 @@ func New(opts ...Option) (*Measurer, error) {
 	for _, o := range opts {
 		o(&cfg)
 	}
-	m := &Measurer{measurerState: &measurerState{
-		exact:           cfg.exact,
-		pango:           cfg.pango,
+	m := &Measurer{metrics: newMetrics(cfg.exact, cfg.pango), measurerState: &measurerState{
 		byFam:           make(map[string][]*entry),
-		cssCache:        make(map[string]CSSFont),
-		listCache:       make(map[listKey]*faceList),
-		widthCache:      make(map[widthKey]float64),
+		cssCache:        bcache.New[string, CSSFont](cssCacheBytes, cssCacheMaxEntry),
+		listCache:       bcache.New[listKey, *faceList](listCacheBytes, listCacheMaxEntry),
+		programs:        bcache.New[*Face, []byte](programCacheBytes, programCacheMaxEntry),
 		fallbackFamily:  orDefault(cfg.fallbackFamily, "Liberation Sans"),
 		serifFamily:     orDefault(cfg.serifFamily, "Liberation Serif"),
 		monospaceFamily: orDefault(cfg.monospaceFamily, "Liberation Mono"),
@@ -370,7 +425,34 @@ func New(opts ...Option) (*Measurer, error) {
 			m.fallbackOrder = append(m.fallbackOrder, es)
 		}
 	}
+	// A generic family set to one with no font would silently resolve to
+	// the first face; it is a mistake to report, as a fallback family is.
+	for _, d := range []struct{ opt, family string }{
+		{"WithDefaultFontFamily", cfg.fallbackFamily},
+		{"WithDefaultSerifFamily", cfg.serifFamily},
+		{"WithDefaultMonospaceFamily", cfg.monospaceFamily},
+	} {
+		if d.family != "" && !m.hasFamily(normFamily(d.family)) {
+			return nil, fmt.Errorf("text: %s: family %q has no font (register it, or enable system fonts for a system one)", d.opt, d.family)
+		}
+	}
 	return m, nil
+}
+
+// Exact returns a view of m that measures and shapes with the same fonts,
+// and shares their caches, but with unrounded advances at the exact size
+// (WithExactAdvances, without Pango's rounding), as resvg places glyphs. It
+// is m itself when m measures so already. Every call returns the same view,
+// so its widths are cached once.
+func (m *Measurer) Exact() *Measurer {
+	if m == nil {
+		return nil
+	}
+	if m.exact && m.pango == pangoNone {
+		return m
+	}
+	m.exactOnce.Do(func() { m.exactView = newMetrics(true, pangoNone) })
+	return &Measurer{measurerState: m.measurerState, metrics: m.exactView, budget: m.budget}
 }
 
 // applyPalette sets the palette WithFontPalette names for f's family.
@@ -420,34 +502,16 @@ func (m *Measurer) MeasureText(text, cssFont string) float64 {
 	}
 	key := widthKey{text, cssFont}
 	// Most measurements repeat (axis labels, legend entries): concurrent
-	// renders on one Measurer hit the cache under a shared lock.
-	m.mu.RLock()
-	w, ok := m.widthCache[key]
-	m.mu.RUnlock()
-	if ok {
+	// renders on one Measurer hit the cache without taking mu.
+	if w, ok := m.widthCache.Get(key); ok {
 		return w
 	}
 	m.mu.Lock()
-	if w, ok := m.widthCache[key]; ok {
-		m.mu.Unlock()
-		return w
-	}
 	p := m.plan(text, cssFont)
 	m.mu.Unlock()
 
-	_, w = m.shapePlan(&p, false)
-
-	m.mu.Lock()
-	// A text too large to share the cache with anything is not kept.
-	if n := len(text) + len(cssFont) + widthEntryBytes; n <= maxWidthBytes {
-		if len(m.widthCache) >= maxCacheItems || m.widthBytes+n > maxWidthBytes {
-			clear(m.widthCache)
-			m.widthBytes = 0
-		}
-		m.widthCache[key] = w
-		m.widthBytes += n
-	}
-	m.mu.Unlock()
+	_, w := m.shapePlan(&p, false)
+	m.widthCache.Put(key, w, int64(len(text)+len(cssFont)))
 	return w
 }
 
@@ -511,20 +575,73 @@ func (m *Measurer) ShapeText(text, cssFont string) ([]Run, float64) {
 	return m.shapePlan(&p, true)
 }
 
-// FontData returns the font program of a face for embedding, or nil: its
-// program, or for a face of a collection, or one larger than a font given in
-// memory may be, its OutlineProgram, which a collection's face would
-// otherwise be copied out whole for (Apple Color Emoji: 192 MB of bitmaps).
-func (m *Measurer) FontData(f *Face) []byte {
+// ShapeFont is ShapeText for a font given by its parts rather than as a CSS
+// font shorthand: what a writer that holds an element's font-family,
+// font-size, font-weight and font-style passes, so that no number goes
+// through a string to be read back. Text at a size of zero or less, or one
+// that is not a number, has no glyphs, as such text draws nothing.
+func (m *Measurer) ShapeFont(text string, font CSSFont) ([]Run, float64) {
+	if len(text) == 0 || !(font.Size > 0) {
+		return nil, 0
+	}
+	if len(font.Family) > maxFamilies {
+		font.Family = font.Family[:maxFamilies]
+	}
+	if len(font.Family) == 0 {
+		font.Family = sansSerif
+	}
+	m.mu.Lock()
+	lp := &m.lastParts
+	list := lp.list
+	if list == nil || lp.weight != font.Weight || lp.italic != font.Italic || !slices.Equal(lp.families, font.Family) {
+		list = m.faces(font)
+		lp.families = append(lp.families[:0], font.Family...)
+		lp.weight, lp.italic, lp.list = font.Weight, font.Italic, list
+	}
+	p := m.planFont(text, font, list)
+	m.mu.Unlock()
+	return m.shapePlan(&p, true)
+}
+
+// sansSerif is the family list of a font that names none.
+var sansSerif = []string{"sans-serif"}
+
+// FontData returns the font program of a face for embedding, or nil when it
+// has none to embed. A single font in memory, embedded or given with
+// WithFont, is its own program, shared and not copied. A face of a
+// collection, a system font mapped from its file, and one larger than a font
+// given in memory may be are cut out as their OutlineProgram (Apple Color
+// Emoji, say, would otherwise be 192 MB of bitmaps): that is made once and
+// kept in a byte-bounded cache, and the bytes of each one made are charged
+// to the call's ledger in ctx before it is made (an error wrapping
+// budget.ErrLimit past it). One larger than maxFontBytes is not made: its
+// text is drawn as outlines.
+func (m *Measurer) FontData(ctx context.Context, f *Face) ([]byte, error) {
 	if f == nil {
-		return nil
+		return nil, nil
 	}
-	if f.index != 0 || len(f.src) >= 4 && string(f.src[:4]) == "ttcf" || f.Size() > maxFontBytes {
-		if p := f.OutlineProgram(); p != nil {
-			return p
-		}
+	if !f.mapped && f.index == 0 && !(len(f.src) >= 4 && string(f.src[:4]) == "ttcf") && f.Size() <= maxFontBytes {
+		return f.Program(), nil
 	}
-	return f.Program()
+	if p, ok := m.programs.Get(f); ok {
+		return p, nil
+	}
+	n := f.outlineSize()
+	switch {
+	case n == 0 && !f.mapped:
+		// A WOFF collection's face: only its unwrapped program has tables.
+		return f.Program(), nil
+	case n == 0 || n > maxFontBytes:
+		return nil, nil
+	}
+	if err := budget.LedgerFrom(ctx).Alloc(int64(n)); err != nil {
+		return nil, err
+	}
+	p := f.OutlineProgram()
+	if p != nil {
+		m.programs.Put(f, p, int64(len(p)))
+	}
+	return p, nil
 }
 
 // piece is a stretch of text set in one face.
@@ -544,16 +661,16 @@ type planned struct {
 // plan resolves the CSS font and splits text into runs per face. It touches
 // the caches and may load a system font, so m.mu is held.
 func (m *Measurer) plan(text, cssFont string) planned {
-	css := m.parse(cssFont)
+	css, list := m.font(cssFont)
+	return m.planFont(text, css, list)
+}
+
+// planFont is plan for a font already resolved to its candidate faces.
+func (m *Measurer) planFont(text string, css CSSFont, list *faceList) planned {
 	if len(text) > maxTextBytes {
-		n := maxTextBytes
-		for n > 0 && !utf8.RuneStart(text[n]) {
-			n--
-		}
-		text = text[:n]
+		text = textcut.Prefix(text, maxTextBytes)
 	}
 	size := math.Min(css.Size, maxSizePx)
-	list := m.faces(css)
 
 	// The shaping size of the reference metric model: the size truncated to
 	// 1/64 px, then rounded up to a whole pixel.
@@ -637,23 +754,39 @@ func (m *Measurer) run(runs *[]Run, text string, a, b int, f *Face, size, shaped
 		}
 	}
 	if keep {
-		*runs = append(*runs, Run{Face: f, Glyphs: out, Size: size, ShapedSize: shaped, Width: width})
+		*runs = append(*runs, Run{Face: f, Glyphs: out, Size: size, ShapedSize: shaped, Width: width, Start: a, End: b})
 	}
 	return width
 }
 
+// font resolves a CSS font string to its parsed font and candidate faces.
+// A chart measures run after run in one font, so the last one resolved is
+// kept beside the caches, and a repeat costs a string comparison. m.mu is
+// held.
+func (m *Measurer) font(cssFont string) (CSSFont, *faceList) {
+	if m.last.list != nil && cssFont == m.last.font {
+		return m.last.css, m.last.list
+	}
+	css := m.parse(cssFont)
+	list := m.faces(css)
+	if len(cssFont) <= cssCacheMaxEntry {
+		m.last.font, m.last.css, m.last.list = cssFont, css, list
+	}
+	return css, list
+}
+
 func (m *Measurer) parse(s string) CSSFont {
-	if c, ok := m.cssCache[s]; ok {
+	if c, ok := m.cssCache.Get(s); ok {
 		return c
 	}
 	c := ParseCSSFont(s)
 	if len(c.Family) > maxFamilies {
 		c.Family = c.Family[:maxFamilies]
 	}
-	if len(m.cssCache) >= maxCacheItems {
-		clear(m.cssCache)
-	}
-	m.cssCache[s] = c
+	// The key, and the family names, which may be copies of it (unquoted),
+	// in a slice of string headers.
+	size := int64(2*len(s)) + int64(len(c.Family))*int64(unsafe.Sizeof(""))
+	m.cssCache.Put(s, c, size)
 	return c
 }
 

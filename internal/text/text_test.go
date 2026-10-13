@@ -1,7 +1,6 @@
 package text
 
 import (
-	"bytes"
 	"math"
 	"strings"
 	"sync"
@@ -22,13 +21,13 @@ func TestParseCSSFont(t *testing.T) {
 		{"bold 14px Arial", false, 700, 14, []string{"Arial"}},
 		{"italic bold 14px Arial, Helvetica, sans-serif", true, 700, 14, []string{"Arial", "Helvetica", "sans-serif"}},
 		{"oblique 700 12px 'Times New Roman'", true, 700, 12, []string{"Times New Roman"}},
-		{"lighter 10px x", false, 300, 10, []string{"x"}},
+		{"lighter 10px x", false, 100, 10, []string{"x"}},
 		{"bolder 10px x", false, 700, 10, []string{"x"}},
-		{"12pt Arial", false, 400, 16, []string{"Arial"}},
+		{"12pt Arial", false, 400, 12 * float64(float32(96.0)/float32(72.0)), []string{"Arial"}},
 		{"1.5em serif", false, 400, 24, []string{"serif"}},
 		{"", false, 400, 11, []string{"sans-serif"}},
 		{"nonsense", false, 400, 11, []string{"sans-serif"}},
-		{"12px ", false, 400, 11, []string{"sans-serif"}},
+		{"12px ", false, 400, 12, []string{"sans-serif"}},
 		{"normal normal 13px \"A B\", 'C'", false, 400, 13, []string{"A B", "C"}},
 	}
 	for _, tt := range tests {
@@ -46,6 +45,9 @@ func TestParseMatchesReference(t *testing.T) {
 	g := loadGolden(t)
 	for i, css := range corpusFonts {
 		got, want := ParseCSSFont(css), g.Parsed[i]
+		if r, ok := canvasReadings[css]; ok {
+			want = goldenCSS(r)
+		}
 		if got.Size != want.Size || strings.Join(got.Family, "|") != strings.Join(want.Family, "|") ||
 			got.Italic != want.Italic || got.Weight != want.Weight {
 			t.Errorf("%q: got %+v, reference %+v", css, got, want)
@@ -168,7 +170,7 @@ func TestWithFont(t *testing.T) {
 		t.Errorf("custom font width %v, want 24", got)
 	}
 	runs, _ := m.ShapeText("i", "10px Acme")
-	if runs[0].Face.Family != "Acme" || len(m.FontData(runs[0].Face)) != len(liberation.MonoRegular) {
+	if runs[0].Face.Family != "Acme" || len(fontData(t, m, runs[0].Face)) != len(liberation.MonoRegular) {
 		t.Errorf("custom font identity: %+v", runs[0].Face)
 	}
 	for name, data := range map[string][]byte{
@@ -220,8 +222,8 @@ func TestConcurrent(t *testing.T) {
 }
 
 // Parallel cold measurements shape through per-goroutine clones: results must
-// equal the serial ones, and the glyphs they used must all reach Subset.
-func TestParallelColdMatchesSerialAndSubset(t *testing.T) {
+// equal the serial ones.
+func TestParallelColdMatchesSerial(t *testing.T) {
 	const css = "13px Helvetica, sans-serif"
 	texts := make([]string, 400)
 	for i := range texts {
@@ -247,15 +249,6 @@ func TestParallelColdMatchesSerialAndSubset(t *testing.T) {
 		}(g)
 	}
 	wg.Wait()
-
-	runs, _ := m.ShapeText("Hello", css)
-	sub, err := runs[0].Face.Subset()
-	if err != nil || len(sub) == 0 || len(sub) >= len(runs[0].Face.Program()) {
-		t.Errorf("Subset: %d bytes of %d, err %v", len(sub), len(runs[0].Face.Program()), err)
-	}
-	if len(runs[0].Face.shape.Used()) == 0 {
-		t.Error("no glyphs recorded on the base face")
-	}
 }
 
 func TestSystemFonts(t *testing.T) {
@@ -304,31 +297,5 @@ func TestGenericFamilyOverrides(t *testing.T) {
 		if a, b := plain.MeasureText("The quick brown fox", "13px sans-serif"), plain.MeasureText("The quick brown fox", "13px "+g); a != b {
 			t.Errorf("%s should resolve to sans: %.2f vs %.2f", g, a, b)
 		}
-	}
-}
-
-// TestEmbeddedFacesShareNoRecord: Measurers share the embedded fonts' parse
-// but not their record of the glyphs shaped, which is what a PDF's subset
-// holds. A subset after shaping "A" alone is the same however much another
-// Measurer shapes meanwhile.
-func TestEmbeddedFacesShareNoRecord(t *testing.T) {
-	subsetOf := func(m *Measurer) []byte {
-		runs, _ := m.ShapeText("A", "20px sans-serif")
-		b, err := runs[0].Face.Subset()
-		if err != nil {
-			t.Fatal(err)
-		}
-		return b
-	}
-	alone, err := New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := subsetOf(alone)
-	other, _ := New()
-	other.ShapeText("The quick brown fox jumps over the lazy dog 0123456789", "20px sans-serif")
-	m, _ := New()
-	if got := subsetOf(m); !bytes.Equal(got, want) {
-		t.Errorf("the subset of a Measurer that shaped \"A\" is %d bytes, %d alone: it holds another's glyphs", len(got), len(want))
 	}
 }

@@ -43,9 +43,9 @@ aster svg -i chart.vl.json -allow-domain cdn.jsdelivr.net   # let it load data
 
 Four things to know before the first real chart:
 
-- **Nothing is loaded unless you allow it.** A spec that reads `data.url` or draws a remote image needs a [Loader](docs/loading-data.md) (`aster.NewHTTPLoader(nil)`, `&aster.FileLoader{BaseDir: "data"}`; CLI `-allow-http`). Without one the render **fails** with an `*aster.LoadError` naming the URL.
+- **Nothing is loaded unless you allow it.** A spec that reads `data.url` or draws a remote image needs a [Loader](docs/loading-data.md) (`aster.NewHTTPLoader(nil)`, `&aster.FileLoader{BaseDir: "data"}`; CLI `-allow-http`, `-allow-domain`, `-allow-file DIR`, `-base-url URL`). Without one the render **fails** with an `*aster.LoadError` naming the URL.
 - **Errors are errors.** Where upstream Vega logs a problem and draws what it can (a failed load, an expression that throws), aster returns an error by default; `WithErrorHandler` lets a call render past them as a browser does. See [Errors](docs/errors.md).
-- **Specs are untrusted input.** Every render is bounded in time (`WithTimeout`, 30 s) and memory (`WithMemoryLimit`); exceeding a bound fails with `aster.ErrLimit`. See [Limits](docs/limits.md).
+- **Specs are untrusted input.** Every render is bounded in time (`WithTimeout`, 30 s, and `WithContext` per call) and memory (`WithMemoryLimit`); exceeding a memory or size bound fails with `aster.ErrLimit`, running out of time with `context.DeadlineExceeded`. See [Limits](docs/limits.md).
 - **Fonts:** Liberation Sans/Serif/Mono (metrically Arial/Times/Courier) and monochrome Noto Emoji are embedded. Register others with `WithFont`. See [Fonts](docs/fonts.md).
 
 ## Features
@@ -79,7 +79,8 @@ The full index is [docs/README.md](docs/README.md); changes between versions are
 - **No interaction.** A chart is rendered at its initial state, or at the state `WithSignal` sets; pointer, timer and input events are not simulated.
 - **No colour font is bundled.** Emoji draw in monochrome unless you register a colour font; SVG output leaves emoji as text for the viewer to draw.
 - **The wordcloud transform needs text measurement**, which is on by default (`WithTextMeasurement(false)` makes it fail, as upstream does without a canvas).
-- Tested on Linux (amd64 and 386) and macOS (arm64); being pure Go, it is expected to work wherever Go does.
+- **`SVGToPDF` takes the SVG Vega writes**; other SVG (`<use>`, entities, elements Vega does not write) fails with an error rather than giving an incomplete PDF. `SVGToPNG` draws general SVG.
+- Tested on Linux (amd64 and 386) and macOS (arm64), and built for Windows; being pure Go, it is expected to work wherever Go does.
 
 ## Acknowledgments
 

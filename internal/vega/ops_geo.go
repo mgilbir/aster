@@ -55,11 +55,13 @@ func init() {
 				f := p.num("precision", 2.5)
 				gp.Precision = &f
 			}
-			g, err := geo.GraticuleFeature(gp)
+			g, err := geo.GraticuleFeature(ctxOf(n), gp)
 			if err != nil {
 				failErr(err)
 			}
-			return changedPulse(pulse, []jsval.Value{g})
+			out := []jsval.Value{g}
+			n.g.view.holdCreated(n, 0, out)
+			return changedPulse(pulse, out)
 		}), nil
 	}
 

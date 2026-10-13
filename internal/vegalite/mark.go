@@ -133,8 +133,8 @@ var markCompilers = map[string]markCompiler{
 			textEncode(m, "text"),
 			nonPosition("size", m, nonPositionOpts{vgChannel: "fontSize"}),
 			nonPosition("angle", m, nonPositionOpts{}),
-			valueIfDefined("align", align),
-			valueIfDefined("baseline", baseline),
+			valueIfDefined(m.ctx, "align", align),
+			valueIfDefined(m.ctx, "baseline", baseline),
 			pointPosition(chRadius, m, pointPositionOpts{defaultPos: ""}),
 			pointPosition(chTheta, m, pointPositionOpts{defaultPos: ""}),
 		)
@@ -153,7 +153,7 @@ var markCompilers = map[string]markCompiler{
 			vgc = "yc"
 		}
 		thick := jsval.NewObject(1)
-		thick.Set(vgThicknessChannel, signalOrValueRef(getMarkPropOrConfigSimple("thickness", m.markDef, m.config)))
+		thick.Set(vgThicknessChannel, signalOrValueRef(m.ctx, getMarkPropOrConfigSimple("thickness", m.markDef, m.config)))
 		return withBase(m, mkIgnore("ignore", "ignore", "include", "ignore", "ignore", "ignore"),
 			rectPosition(m, vgSizeAxis),
 			pointPosition(vgThicknessAxis, m, pointPositionOpts{defaultPos: "mid", vgChannel: vgc}),
@@ -162,9 +162,9 @@ var markCompilers = map[string]markCompiler{
 	}},
 }
 
-func valueIfDefined(prop string, value Value) Value {
+func valueIfDefined(cc *compileCtx, prop string, value Value) Value {
 	if !value.IsUndefined() {
-		return mkv(prop, signalOrValueRef(value))
+		return mkv(prop, signalOrValueRef(cc, value))
 	}
 	return undef
 }
@@ -293,7 +293,7 @@ func getGroupsForStackedBarWithCornerRadius(m *unitModel) []Value {
 			groupUpdate.Set(key, uo.Lookup(key))
 			uo.Delete(key)
 		} else if configValue.IsTruthy() {
-			groupUpdate.Set(key, signalOrValueRef(configValue))
+			groupUpdate.Set(key, signalOrValueRef(m.ctx, configValue))
 		}
 		if configValue.IsTruthy() {
 			uo.Set(key, mkv("value", 0))
@@ -313,7 +313,7 @@ func getGroupsForStackedBarWithCornerRadius(m *unitModel) []Value {
 		if v := uo.Lookup(prop); v.IsTruthy() {
 			groupUpdate.Set(prop, v)
 		} else if cv := getMarkConfig(prop, m.markDef, m.config, ""); !cv.IsUndefined() {
-			groupUpdate.Set(prop, signalOrValueRef(cv))
+			groupUpdate.Set(prop, signalOrValueRef(m.ctx, cv))
 		}
 	}
 	if groupUpdate.Lookup("stroke").IsTruthy() {
@@ -377,6 +377,7 @@ func getMarkGroup(m *unitModel, fromPrefix string) []Value {
 	interactive := interactiveFlag(m)
 	if interactive.IsTruthy() && !cc.v5 {
 		for _, name := range m.comp.selection.keyList() {
+			cc.work(1)
 			s := m.comp.selection.lookup(name)
 			if s.typ == "point" && !s.props.Lookup("bind").IsTruthy() && s.props.Lookup("on").AsString() != "pointerover" {
 				if m.markDef.Get("cursor").IsNullish() {
@@ -400,7 +401,7 @@ func getMarkGroup(m *unitModel, fromPrefix string) []Value {
 		o.Set("clip", clip)
 	}
 	if len(style) > 0 {
-		o.Set("style", strsVal(style))
+		o.Set("style", jsval.Arr(style))
 	}
 	if key.IsTruthy() {
 		o.Set("key", key.Get("field"))

@@ -1,6 +1,7 @@
 package scale
 
 import (
+	"context"
 	"math"
 	"sort"
 
@@ -256,8 +257,12 @@ func (q *Quantize) SetUnknown(v jsval.Value) { q.unknown = v }
 func (q *Quantize) Thresholds() []float64 { return append([]float64(nil), q.domain...) }
 
 // Ticks is scale.ticks(count) (quantize is linearish).
-func (q *Quantize) Ticks(count TickCount) []float64 {
-	return Ticks(q.x0, q.x1, count.countOrDefault())
+func (q *Quantize) Ticks(ctx context.Context, count TickCount) ([]float64, error) {
+	return q.ticksN(ctx, count, maxTickValues)
+}
+
+func (q *Quantize) ticksN(_ context.Context, count TickCount, max int) ([]float64, error) {
+	return ticksN(q.x0, q.x1, count.countOrDefault(), max)
 }
 
 // Nice is scale.nice(count).
@@ -492,9 +497,13 @@ func (s *Identity) Unknown() jsval.Value { return s.unknown }
 func (s *Identity) SetUnknown(v jsval.Value) { s.unknown = v }
 
 // Ticks is scale.ticks(count).
-func (s *Identity) Ticks(count TickCount) []float64 {
+func (s *Identity) Ticks(ctx context.Context, count TickCount) ([]float64, error) {
+	return s.ticksN(ctx, count, maxTickValues)
+}
+
+func (s *Identity) ticksN(_ context.Context, count TickCount, max int) ([]float64, error) {
 	u, v := endpoints(s.domain)
-	return Ticks(u, v, count.countOrDefault())
+	return ticksN(u, v, count.countOrDefault(), max)
 }
 
 // Nice is scale.nice(count).

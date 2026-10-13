@@ -31,8 +31,11 @@ const (
 // ErrLimit is wrapped by errors reporting an exceeded work limit.
 var ErrLimit = budget.ErrLimit
 
-func limitErr(what string, n, limit int) error {
-	return fmt.Errorf("%w: %s %d exceeds %d", ErrLimit, what, n, limit)
+// limitErr reports a count n over limit. n is the number the specification
+// asked for, printed as JavaScript prints it (1e+300, Infinity), never a
+// clamped or wrapped int.
+func limitErr(what string, n float64, limit int) error {
+	return fmt.Errorf("%w: %s %s exceeds %d", ErrLimit, what, jsval.JSNumberString(n), limit)
 }
 
 // ctxCheckMask sets how often loops poll the context: every 4096 iterations.
@@ -55,8 +58,10 @@ func dimValues(fields []Field, t jsval.Value) []jsval.Value {
 	return out
 }
 
-// reserveOut fails, before anything is allocated, when a transform that turns
-// in input rows into out output rows would exceed the render's row budget.
-func reserveOut(ctx context.Context, out, in int) error {
-	return budget.ReserveOut(ctx, int64(out), int64(in))
+// reserveRows fails, before anything is allocated, when the n rows a
+// transform is about to make would exceed the render's row budget. The rows
+// it passes on are held by the operators that made them, and those its
+// previous run made are being replaced, so only the new ones count.
+func reserveRows(ctx context.Context, n int) error {
+	return budget.Reserve(ctx, int64(n))
 }

@@ -30,7 +30,7 @@ ASTER_ORACLE=require go test ./...
 ## Where things are and how to write them
 
 - [docs/architecture.md](docs/architecture.md): which package does what, and which upstream module it follows.
-- [docs/design-rules.md](docs/design-rules.md): the rules the code follows. Read it before writing engine code. In particular: keep upstream's semantics exactly; return errors, never panic; charge the budget before allocating; report what upstream logs; round products explicitly where V8 does; use `jsmath`, not `math`, for transcendental functions.
+- [docs/design-rules.md](docs/design-rules.md): the rules the code follows. Read it before writing engine code. In particular: keep upstream's semantics exactly; return errors, never panic; charge the budget before allocating and meter the work of every loop the input sizes (ADR 0010); report what upstream logs; round products explicitly where V8 does; use `jsmath`, not `math`, for transcendental functions.
 - [docs/adr/](docs/adr/README.md): the decisions behind the design; a change to one adds a new record.
 - Comments explain *why* and name the upstream rule that is not obvious. gofmt and `go vet` clean.
 

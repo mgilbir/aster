@@ -1,0 +1,5 @@
+{"width":100,"height":100,
+ "signals":[{"name":"row","update":"pad('',1024,'1') + pad('',512,'10')"},
+            {"name":"grid","update":"split(pad('',512,row),'')"}],
+ "data":[{"name":"c","transform":[{"type":"contour","size":[1024,1024],"values":{"signal":"grid"},"thresholds":[0.5]}]}],
+ "marks":[{"type":"path","from":{"data":"c"},"encode":{"enter":{"stroke":{"value":"black"}}},"transform":[{"type":"geopath","field":"datum"}]}]}

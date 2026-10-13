@@ -63,7 +63,7 @@ type rasterizer struct {
 	minX, maxX float64
 
 	ctx     context.Context // polled every few rows; nil = never cancelled
-	work    int             // pixels processed by fill since the caller last reset it
+	work    int             // pixels and edge crossings processed by fill since the caller last reset it
 	workCap int             // fill stops once work exceeds this (0 = no cap)
 	stopped bool            // the last fill was cut short (cancelled or over the cap)
 }
@@ -323,6 +323,10 @@ func (r *rasterizer) fill(evenOdd bool, sink spanSink) {
 			if len(active) == 0 {
 				continue
 			}
+			// Each active edge is crossed on each sub-scanline: work the
+			// pixel budget counts with the pixels a row covers, so that many
+			// edges over few pixels are not free.
+			r.work += len(active)
 			yc := (float64(k) + 0.5) * invSS
 			if n := int64(len(active)); n > int64(binMin) && n*n > int64(sortSpread)*int64(qmax) {
 				// Very dense: bin straight from the edges, skipping the
@@ -334,7 +338,7 @@ func (r *rasterizer) fill(evenOdd bool, sink spanSink) {
 					x := e.x0 + (yc-e.y0)*e.dxdy
 					qf := math.Floor((x-xoff)*fx + 0.5)
 					var q int32
-					if qf <= float64(qmin) {
+					if !(qf > float64(qmin)) { // NaN too: see below
 						q = qmin
 					} else if qf >= float64(qmax) {
 						q = qmax
@@ -359,7 +363,11 @@ func (r *rasterizer) fill(evenOdd bool, sink spanSink) {
 				x := e.x0 + (yc-e.y0)*e.dxdy
 				qf := math.Floor((x-xoff)*fx + 0.5)
 				var q int32
-				if qf <= float64(qmin) {
+				// A NaN crossing (an edge whose coordinates overflowed to
+				// infinities: Inf - Inf) takes the clip's left edge rather
+				// than an implementation-defined int32 that indexes out of
+				// range.
+				if !(qf > float64(qmin)) {
 					q = qmin
 				} else if qf >= float64(qmax) {
 					q = qmax
@@ -415,6 +423,10 @@ func (r *rasterizer) fill(evenOdd bool, sink spanSink) {
 		}
 		minPx, maxPx := r.minPx, r.maxPx
 		if maxPx < 0 {
+			if r.workCap > 0 && r.work > r.workCap {
+				r.stopped = true // over the budget on crossings alone
+				break
+			}
 			continue
 		}
 		if maxPx >= int32(W) {

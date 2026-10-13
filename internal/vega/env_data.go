@@ -87,10 +87,15 @@ func (c *rtContext) Modify(name string, insert, remove, toggle, modify, values j
 			v.pending = map[*opNode]*pendingChange{}
 		}
 		v.pending[input] = pc
-		node := input
+		// The callback applies the change set it was made for, as
+		// upstream's closes over `changes`: a later run may start another
+		// one for this data set before this one is applied.
+		node, changes := input, pc
 		c.g.runAfter(func(g *flowGraph) {
-			v.applyChanges(node, v.pending[node])
-			delete(v.pending, node)
+			if v.pending[node] == changes {
+				delete(v.pending, node)
+			}
+			v.applyChanges(node, changes)
 		}, true, 1)
 	}
 	if remove.IsTruthy() {
@@ -163,6 +168,9 @@ func (v *runView) applyChanges(input *opNode, pc *pendingChange) {
 			out = append(out, t)
 		}
 	}
+	// The data set now holds what is left and what is inserted, the
+	// inserted rows charged before they are copied in.
+	v.holdSrc(input, int64(len(out)+len(pc.inserts)), v.rowExcess(out)+v.rowExcess(pc.inserts))
 	for _, t := range pc.inserts {
 		out = append(out, ingestTuple(t))
 	}
@@ -173,14 +181,18 @@ func (v *runView) applyChanges(input *opNode, pc *pendingChange) {
 	}
 	input.value = out
 	v.g.pulseInput(input, &flowPulse{tuples: out, changed: true})
-	// A trigger that keeps firing would nest evaluations without end.
-	v.reruns++
-	if v.reruns > v.limits.MaxReruns {
-		failLimit("data triggers did not settle after %d re-evaluations", v.limits.MaxReruns)
+	// Triggers that keep changing a data set (one whose trigger reads a
+	// signal the change updates) loop without end upstream. Each data set
+	// may be changed so many times in one run; independent data sets do
+	// not share the allowance.
+	if v.triggerRuns == nil {
+		v.triggerRuns = map[*opNode]int{}
 	}
-	if err := v.g.run(""); err != nil {
-		failErr(err)
+	v.triggerRuns[input]++
+	if v.limits.MaxReruns >= 0 && v.triggerRuns[input] > v.limits.MaxReruns {
+		failLimit("the triggers of a data set did not settle after %d re-evaluations", v.limits.MaxReruns)
 	}
+	v.rerun("")
 }
 
 // SetData implements expr.DataWriter: replace the contents of a data set.
@@ -190,6 +202,7 @@ func (c *rtContext) SetData(name string, tuples jsval.Value) jsval.Value {
 		return jsval.Num(0)
 	}
 	items := arrayOf(tuples)
+	c.view.holdSrcRows(input, items)
 	out := make([]jsval.Value, len(items))
 	for i, t := range items {
 		out[i] = ingestTuple(t)
@@ -212,7 +225,7 @@ func (c *rtContext) UnitCounts(name string) (map[string]int, bool) {
 	}
 	out := make(map[string]int, len(idx.m))
 	for k, t := range idx.m {
-		out[k] = int(jsval.ToNumber(t.Get("count")))
+		out[k] = clampInt(jsval.ToNumber(t.Get("count")))
 	}
 	return out, true
 }

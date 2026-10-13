@@ -14,13 +14,13 @@ type scaleComponent struct {
 }
 
 func newScaleComponent(name string, typeWithExplicit withExplicit) *scaleComponent {
-	s := &scaleComponent{split: &split{jsval.NewObject(4), mk("name", name)}}
+	s := &scaleComponent{split: newSplitOf(nil, mk("name", name))}
 	s.setWithExplicit("type", typeWithExplicit)
 	return s
 }
 
 // domainHasZero: "definitely", "definitely-not" or "maybe".
-func (s *scaleComponent) domainHasZero() string {
+func (s *scaleComponent) domainHasZero(cc *compileCtx) string {
 	scaleType := s.get("type").AsString()
 	if scaleType == "log" || scaleType == "time" || scaleType == "utc" {
 		return "definitely-not"
@@ -33,6 +33,7 @@ func (s *scaleComponent) domainHasZero() string {
 	if domains.Len() > 0 {
 		withZero, withoutZero, fieldBased := false, false, false
 		for _, d := range domains.Items() {
+			cc.work(1)
 			if d.IsArr() {
 				first, last := d.Index(0), d.Index(d.Len()-1)
 				if first.IsNum() && last.IsNum() {
@@ -74,13 +75,22 @@ func defaultScaleResolve(channel string, m Model) string {
 	return ""
 }
 
-func parseGuideResolve(resolve *resolveIndex, channel string) string {
+func parseGuideResolve(cc *compileCtx, resolve *resolveIndex, channel string) string {
+	resolve.read(resolveScale, channel)
+	if isXorY(channel) {
+		resolve.read(resolveAxis, channel)
+	} else {
+		resolve.read(resolveLegend, channel)
+	}
 	channelScaleResolve := resolve.scale[channel]
 	guide := resolve.legend
 	if isXorY(channel) {
 		guide = resolve.axis
 	}
 	if channelScaleResolve == "independent" {
+		if guide[channel] == "shared" {
+			cc.warn(msgIndependentScaleMeansIndependentGuide(channel))
+		}
 		return "independent"
 	}
 	if g := guide[channel]; g != "" {
@@ -124,7 +134,11 @@ func parseUnitScaleCore(u *unitModel) *omap[*scaleComponent] {
 		}
 		specified := fod.Get("scale")
 		if cc.v5 && isXorYOffset(channel) && !channelHasNestedOffsetScale(cc, u.encoding, getMainChannelFromOffsetChannel(channel)) {
-			continue // 5.8 ignores an offset scale without a nested main scale
+			// 5.8 ignores an offset scale without a nested main scale.
+			if fod.IsTruthy() && specified.IsTruthy() {
+				cc.warn(msgOffsetEncodingScaleIgnored(channel))
+			}
+			continue
 		}
 		if fod.IsTruthy() && !specified.IsNull() && !(specified.IsBool() && !specified.BoolValue()) {
 			if specified.IsUndefined() {
@@ -153,16 +167,20 @@ var scaleTypeTieBreaker = tieBreakByComparing(func(a, b Value) int {
 })
 
 func parseNonUnitScaleCore(m Model) *omap[*scaleComponent] {
+	cc := m.b().ctx
 	b := m.b()
 	scales := newOmap[*scaleComponent]()
 	b.comp.scales = scales
 	typeIndex := newOmap[withExplicit]()
 	resolve := b.comp.resolve
 	for _, child := range m.children() {
+		cc.work(modelStep)
 		parseScaleCore(child)
 		cs := child.b().comp.scales
 		for _, channel := range cs.keyList() {
+			resolve.read(resolveScale, channel)
 			if resolve.scale[channel] == "" {
+				resolve.write(resolveScale, channel)
 				resolve.scale[channel] = defaultScaleResolve(channel, m)
 			}
 			if resolve.scale[channel] == "shared" {
@@ -172,8 +190,9 @@ func parseNonUnitScaleCore(m Model) *omap[*scaleComponent] {
 				if have {
 					if scaleCompatible(explicitType.value.AsString(), childType.value.AsString()) {
 						et := explicitType
-						typeIndex.set(channel, mergeValuesWithExplicit(&et, childType, "type", "scale", scaleTypeTieBreaker))
+						typeIndex.set(channel, mergeValuesWithExplicit(cc, &et, childType, "type", "scale", scaleTypeTieBreaker))
 					} else {
+						resolve.write(resolveScale, channel)
 						resolve.scale[channel] = "independent"
 						typeIndex.del(channel)
 					}
@@ -188,6 +207,7 @@ func parseNonUnitScaleCore(m Model) *omap[*scaleComponent] {
 		te, _ := typeIndex.get(channel)
 		scales.set(channel, newScaleComponent(name, te))
 		for _, child := range m.children() {
+			cc.work(modelStep)
 			if cs, ok := child.b().comp.scales.get(channel); ok && cs != nil {
 				child.b().renameScale(cs.get("name").AsString(), name)
 				cs.merged = true
@@ -208,9 +228,17 @@ func computeScaleType(cc *compileCtx, specified Value, channel string, fieldDef 
 	if !t.IsUndefined() {
 		ts := t.AsString()
 		if !channelSupportScaleType(cc, channel, ts, false) {
+			cc.warn(msgScaleTypeNotWorkWithChannel(channel, t, def))
 			return def
 		}
-		if isFieldDef(cc, fieldDef) && !scaleTypeSupportDataType(ts, channelDefType(fieldDef)) {
+		// The type is defined here: an empty text ("" or []) is not the
+		// undefined scaleTypeSupportDataType accepts.
+		supportTs := ts
+		if supportTs == "" {
+			supportTs = "\x00"
+		}
+		if isFieldDef(cc, fieldDef) && !scaleTypeSupportDataType(supportTs, channelDefType(fieldDef)) {
+			cc.warn(msgScaleTypeNotWorkWithFieldDef(t, def))
 			return def
 		}
 		return ts
@@ -223,6 +251,9 @@ func defaultScaleType(cc *compileCtx, channel string, fieldDef Value, mark Value
 	switch channelDefType(fieldDef) {
 	case "nominal", "ordinal":
 		if isColorChannel(channel) || rangeType(channel) == "discrete" {
+			if channel == chShape && channelDefType(fieldDef) == "ordinal" {
+				cc.warn(msgDiscreteChannelCannotEncode(channel, "ordinal"))
+			}
 			return "ordinal"
 		}
 		if isTimeChannel(channel) {
@@ -252,6 +283,7 @@ func defaultScaleType(cc *compileCtx, channel string, fieldDef Value, mark Value
 		case isColorChannel(channel):
 			return "time"
 		case rangeType(channel) == "discrete":
+			cc.warn(msgDiscreteChannelCannotEncode(channel, "temporal"))
 			return "ordinal"
 		case isFieldDef(cc, fieldDef) && fieldDef.Get("timeUnit").IsTruthy() && normalizeTimeUnit(cc, fieldDef.Get("timeUnit")).Get("utc").IsTruthy():
 			return "utc"
@@ -267,6 +299,7 @@ func defaultScaleType(cc *compileCtx, channel string, fieldDef Value, mark Value
 			}
 			return "linear"
 		case rangeType(channel) == "discrete":
+			cc.warn(msgDiscreteChannelCannotEncode(channel, "quantitative"))
 			return "ordinal"
 		case isTimeChannel(channel):
 			return "band"
@@ -307,6 +340,13 @@ func parseUnitScaleProperty(u *unitModel, property string) {
 		scalePaddingInner := merged.get("paddingInner")
 		supported := scaleTypeSupportProperty(scaleType, property)
 		incompatible := channelScalePropertyIncompatible(channel, property)
+		if !specifiedValue.IsUndefined() {
+			if !supported {
+				cc.warn(msgScalePropertyNotWorkWithScaleType(scaleType, property, channel))
+			} else if incompatible {
+				cc.warn(msgCannotUseScalePropertyWithNonColor(property))
+			}
+		}
 		if supported && !incompatible {
 			if !specifiedValue.IsUndefined() {
 				switch property {
@@ -475,7 +515,7 @@ func scalePaddingOuterRule(paddingValue Value, channel, scaleType string, paddin
 			if isSignalRef(paddingInnerValue) {
 				half = sig(signalOf(paddingInnerValue) + "/2")
 			} else {
-				half = jsval.Num(paddingInnerValue.AsDouble() / 2)
+				half = jsval.Num(jsval.ToNumber(paddingInnerValue) / 2)
 				if paddingInnerValue.IsUndefined() {
 					half = jsval.Num(math.NaN())
 				}
@@ -555,8 +595,10 @@ func parseScaleRange(m Model) {
 }
 
 func parseNonUnitScaleProperty(m Model, property string) {
+	cc := m.b().ctx
 	local := m.b().comp.scales
 	for _, child := range m.children() {
+		cc.work(modelStep)
 		if property == "range" {
 			parseScaleRange(child)
 		} else {
@@ -567,7 +609,7 @@ func parseNonUnitScaleProperty(m Model, property string) {
 		if property == "range" {
 			s1, s2 := v1.Get("step"), v2.Get("step")
 			if s1.IsTruthy() && s2.IsTruthy() {
-				d := s1.AsDouble() - s2.AsDouble()
+				d := jsval.ToNumber(s1) - jsval.ToNumber(s2)
 				switch {
 				case d > 0:
 					return 1
@@ -582,10 +624,11 @@ func parseNonUnitScaleProperty(m Model, property string) {
 	for _, channel := range local.keyList() {
 		var valueWithExplicit *withExplicit
 		for _, child := range m.children() {
-			cc, ok := child.b().comp.scales.get(channel)
-			if ok && cc != nil {
-				cv := cc.getWithExplicit(property)
-				merged := mergeValuesWithExplicit(valueWithExplicit, cv, property, "scale", tb)
+			cc.work(modelStep)
+			cs, ok := child.b().comp.scales.get(channel)
+			if ok && cs != nil {
+				cv := cs.getWithExplicit(property)
+				merged := mergeValuesWithExplicit(cc, valueWithExplicit, cv, property, "scale", tb)
 				valueWithExplicit = &merged
 			}
 		}
@@ -599,9 +642,11 @@ func parseNonUnitScaleProperty(m Model, property string) {
 // ---- assemble ----
 
 func assembleScales(m Model) []Value {
+	cc := m.b().ctx
 	if isLayerModel(m) || isConcatModel(m) {
 		scales := assembleScalesForModel(m)
 		for _, child := range m.children() {
+			cc.work(modelStep)
 			scales = append(scales, assembleScales(child)...)
 		}
 		return scales
@@ -647,12 +692,12 @@ func assembleScalesForModel(m Model) []Value {
 
 func assembleScaleRange(scaleRange Value, scaleName, channel string, m Model) Value {
 	if isXorY(channel) {
-		if isVgRangeStep(scaleRange) {
+		if isVgRangeStep(m.b().ctx, scaleRange) {
 			return mkv("step", sig(scaleName+"_step"))
 		}
-	} else if isObject(scaleRange) && isDataRefDomain(scaleRange) {
+	} else if isObject(scaleRange) && isDataRefDomain(m.b().ctx, scaleRange) {
 		o := cloneObj(scaleRange.ObjValue())
-		o.Set("data", jsval.Str(m.b().lookupDataSource(scaleRange.Get("data").AsString())))
+		o.Set("data", m.b().lookupDataSource(scaleRange.Get("data").AsString()))
 		return jsval.Obj(o)
 	}
 	return scaleRange
@@ -664,6 +709,16 @@ func isDataRefUnionedDomain(d Value) bool {
 func isFieldRefUnionDomain(d Value) bool {
 	return !d.IsArr() && hasProperty(d, "fields") && hasProperty(d, "data")
 }
-func isDataRefDomain(d Value) bool {
-	return !d.IsArr() && hasProperty(d, "field") && hasProperty(d, "data")
+
+// isDataRefDomain is hasProperty(d, 'field') && hasProperty(d, 'data') in
+// 6.4; 5.8 tests `'field' in d && 'data' in d`, which a key holding
+// undefined passes.
+func isDataRefDomain(cc *compileCtx, d Value) bool {
+	if d.IsArr() {
+		return false
+	}
+	if cc != nil && cc.v5 {
+		return d.IsObj() && d.ObjValue().Has("field") && d.ObjValue().Has("data")
+	}
+	return hasProperty(d, "field") && hasProperty(d, "data")
 }

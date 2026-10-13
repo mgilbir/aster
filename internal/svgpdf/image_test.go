@@ -220,7 +220,7 @@ func TestImageRendering(t *testing.T) {
 	if n := bytes.Count(pdf, []byte("/Interpolate true")); n != 1 || len(pdfImages(t, pdf)) != 2 {
 		t.Errorf("an image drawn smooth and pixelated: %d interpolated of %d", n, len(pdfImages(t, pdf)))
 	}
-	if _, err := Convert(imageSVG(imageEl(src, ` style="opacity: 0.5"`)), nil, Options{}); err == nil {
-		t.Error("an image with another style converted")
+	if _, err := Convert(imageSVG(imageEl(src, ` style="filter: blur(2px)"`)), nil, Options{}); err == nil {
+		t.Error("an image with a style property svgpdf does not draw converted")
 	}
 }

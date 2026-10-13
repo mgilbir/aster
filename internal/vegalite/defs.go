@@ -43,6 +43,12 @@ func isAggregateOp(cc *compileCtx, v Value) bool {
 	if cc.v5 && v.IsStr() && (v.StrValue() == "exponential" || v.StrValue() == "exponentialb") {
 		return false // 6.x only
 	}
+	if cc.v5 && v.IsStr() {
+		// !!AGGREGATE_OP_INDEX[a]: the members an object inherits count.
+		if isInheritedKey(v.StrValue()) {
+			return true
+		}
+	}
 	return v.IsStr() && aggregateOps[v.StrValue()]
 }
 func isCountingAggregateOp(v Value) bool {
@@ -99,8 +105,10 @@ func binToString(bin Value) string {
 	}
 	var b strings.Builder
 	b.WriteString("bin")
-	for _, p := range keysOf(bin) {
-		x := bin.Get(p)
+	// keys(bin) and bin[p]: a string's characters and an array's elements
+	// by index.
+	for _, p := range jsKeysOr(bin) {
+		x := jsProp(bin, p)
 		if isParameterExtent(x) {
 			// `${entries(x)}` stringifies [[k, v], ...] with commas.
 			var parts []string
@@ -121,8 +129,9 @@ func normalizeBin(bin Value, channel string) Value {
 		return mkv("maxbins", autoMaxBins(channel))
 	case bin.IsStr() && bin.StrValue() == "binned":
 		return mkv("binned", true)
-	case !bin.Get("maxbins").IsTruthy() && !bin.Get("step").IsTruthy():
-		return jsval.Obj(spread(cloneObj(bin.ObjValue()), mkv("maxbins", autoMaxBins(channel))))
+	case !jsProp(bin, "maxbins").IsTruthy() && !jsProp(bin, "step").IsTruthy():
+		// {...bin, maxbins}: a string's or an array's indices too.
+		return jsval.Obj(spread(jsval.NewObject(bin.Len()+1), bin, mkv("maxbins", autoMaxBins(channel))))
 	}
 	return bin
 }
@@ -151,7 +160,11 @@ var timeUnitParts = []string{
 	"year", "quarter", "month", "week", "day", "dayofyear", "date", "hours", "minutes", "seconds", "milliseconds",
 }
 
-func isLocalSingleTimeUnit(u string) bool { return contains(timeUnitParts, u) }
+// isLocalSingleTimeUnit: 5.8 tests !!LOCAL_SINGLE_TIMEUNIT_INDEX[unit], so a
+// name every object inherits passes.
+func isLocalSingleTimeUnit(cc *compileCtx, u string) bool {
+	return contains(timeUnitParts, u) || (cc != nil && cc.v5 && isInheritedKey(u))
+}
 
 func isBinnedTimeUnit(cc *compileCtx, tu Value) bool {
 	if cc.v5 {
@@ -224,7 +237,15 @@ func normalizeTimeUnit(cc *compileCtx, tu Value) Value {
 			params.Set("unit", tu.Get("unit"))
 		}
 	default:
-		return undef
+		// params is undefined: params.unit is a TypeError.
+		throw("Cannot read properties of undefined (reading 'unit')")
+	}
+	// isUTCTimeUnit(params.unit) calls unit.startsWith.
+	switch u := params.Lookup("unit"); {
+	case u.IsNullish():
+		throw("Cannot read properties of %s (reading 'startsWith')", nullishName(u))
+	case !u.IsStr():
+		throw("t.startsWith is not a function")
 	}
 	if u := params.Lookup("unit"); u.IsStr() && isUTCTimeUnit(u.StrValue()) {
 		params.Set("utc", jsval.True)
@@ -247,6 +268,7 @@ func timeUnitToString(cc *compileCtx, tu Value) string {
 	if rest.Lookup("unit").IsTruthy() {
 		b.WriteString(pfx)
 		for _, p := range rest.Keys() {
+			cc.work(1)
 			if p == "unit" {
 				b.WriteString(varName(rest.Lookup(p).AsString()))
 			} else {
@@ -257,6 +279,7 @@ func timeUnitToString(cc *compileCtx, tu Value) string {
 	}
 	b.WriteString(pfx + "timeunit")
 	for _, p := range rest.Keys() {
+		cc.work(1)
 		b.WriteString(varName("_" + p + "_" + rest.Lookup(p).AsString()))
 	}
 	return b.String()
@@ -269,7 +292,7 @@ func timeUnitSpecifierExpression(tu string) string {
 		return ""
 	}
 	parts := getTimeUnitParts(tu)
-	return "timeUnitSpecifier(" + stringify(strsVal(parts)) + ", " + stringify(jsval.Obj(vegaliteTimeFormat)) + ")"
+	return "timeUnitSpecifier(" + stringify(nil, strsVal(parts)) + ", " + stringify(nil, jsval.Obj(vegaliteTimeFormat)) + ")"
 }
 
 func formatExpression(tu, field string, isUTCScale bool) string {
@@ -285,9 +308,9 @@ func formatExpression(tu, field string, isUTCScale bool) string {
 	return fn + "Format(" + field + ", " + expr + ")"
 }
 
-// timeUnitFieldExpr is fieldExpr in timeunit.ts.
-func timeUnitFieldExpr(full, field string, end bool) string {
-	fieldRef := accessPathWithDatum(field, "datum")
+// timeUnitFieldExprV is upstream's fieldExpr of a field as it holds it.
+func timeUnitFieldExprV(full string, field Value, end bool) string {
+	fieldRef := accessPathWithDatumV(field, "datum")
 	utc := ""
 	if isUTCTimeUnit(full) {
 		utc = "utc"
@@ -336,35 +359,44 @@ func durationExpr(cc *compileCtx, tu Value, wrap func(string) string) string {
 	smallest := getSmallestTimeUnitPart(n.Get("unit").AsString())
 	if smallest != "" && smallest != "day" {
 		start := mk("year", 2001, "month", 1, "date", 1, "hours", 0, "minutes", 0, "seconds", 0, "milliseconds", 0)
-		step := 1.0
-		if s := n.Get("step"); s.IsNum() {
-			step = s.NumValue()
-		}
-		part, st, ok := getDateTimePartAndStep(smallest, step)
-		if !ok && !cc.v5 {
-			throw("Cannot destructure property 'step' of 'getDateTimePartAndStep(...)' as it is undefined.")
-		}
+		// The step as upstream holds it: `+startDate[part] + step` is
+		// JavaScript's +, which concatenates a step that is a string or an
+		// array; quarters and weeks multiply it first.
+		stepV := n.Get("step")
 		end := cloneObj(start)
 		if cc.v5 {
-			// 5.8 bumps the smallest part itself (a quarter is three months);
-			// parts a datetime does not have, week and dayofyear, add nothing.
-			if s := n.Get("step"); !s.IsTruthy() {
-				step = 1
+			// 5.8: step || 1, and it bumps the smallest part itself (a
+			// quarter is three months); parts a datetime does not have,
+			// week and dayofyear, add nothing.
+			if !stepV.IsTruthy() {
+				stepV = jsval.Int(1)
 			}
-			part, st = smallest, step
+			part := smallest
 			if smallest == "quarter" {
-				part, st = "month", step*3
-			}
-			if start.Has(part) {
-				end.Set(part, jsval.Num(start.Lookup(part).NumValue()+st))
+				end.Set("month", jsval.Num(1+float64(jsval.ToNumber(stepV)*3)))
+			} else if start.Has(part) {
+				end.Set(part, jsNumPlus(start.Lookup(part).NumValue(), stepV))
 			}
 		} else {
-			end.Set(part, jsval.Num(start.Lookup(part).NumValue()+st))
+			if stepV.IsUndefined() { // getDateTimePartAndStep(unit, step = 1)
+				stepV = jsval.Int(1)
+			}
+			part, _, ok := getDateTimePartAndStep(smallest, 1)
+			if !ok {
+				throw("Cannot destructure property 'step' of 'getDateTimePartAndStep(...)' as it is undefined.")
+			}
+			switch smallest {
+			case "quarter":
+				stepV = jsval.Num(jsval.ToNumber(stepV) * 3)
+			case "week":
+				stepV = jsval.Num(jsval.ToNumber(stepV) * 7)
+			}
+			end.Set(part, jsNumPlus(start.Lookup(part).NumValue(), stepV))
 		}
 		if wrap == nil {
 			wrap = func(s string) string { return s }
 		}
-		return wrap(dateTimeToExpr(jsval.Obj(end))) + " - " + wrap(dateTimeToExpr(jsval.Obj(start)))
+		return wrap(dateTimeToExpr(cc, jsval.Obj(end))) + " - " + wrap(dateTimeToExpr(cc, jsval.Obj(start)))
 	}
 	return ""
 }
@@ -388,7 +420,7 @@ func isDateTime(v Value) bool {
 }
 
 func normalizeNamed(v Value, names []string, what string) float64 {
-	if v.IsStr() && isNumericString(v.StrValue()) {
+	if isNumericV(v) { // if (isNumeric(m)) m = +m
 		v = jsval.Num(jsval.ToNumber(v))
 	}
 	if v.IsNum() {
@@ -397,8 +429,12 @@ func normalizeNamed(v Value, names []string, what string) float64 {
 		}
 		return v.NumValue()
 	}
+	if v.IsNullish() {
+		throw("Cannot read properties of %s (reading 'toLowerCase')", nullishName(v))
+	}
 	if !v.IsStr() {
-		throw("Invalid %s value: %s", what, v.AsString())
+		// m.toLowerCase() (d for a day) of a value that is not a string.
+		throw("%s.toLowerCase is not a function", what[:1])
 	}
 	lower := strings.ToLower(v.StrValue())
 	for i, n := range names {
@@ -415,21 +451,30 @@ func normalizeNamed(v Value, names []string, what string) float64 {
 			return float64(i)
 		}
 	}
-	throw("Invalid %s value: %s", what, v.StrValue())
+	throw("%s", msgInvalidTimeUnit(nil, what, v))
 	return 0
 }
 
 // dateTimeParts is upstream's dateTimeParts: the arguments of datetime(...)
 // as text. With normalize=true month/quarter/day names and 1-based numbers are
 // converted to the 0-based values datetime() expects.
-func dateTimeParts(d Value, normalize bool) []string {
+func dateTimeParts(cc *compileCtx, d Value, normalize bool) []string {
 	var parts []string
 	if normalize && !d.Get("day").IsUndefined() {
 		if d.Len() > 1 {
+			cc.warn(msgDroppedDay(cc, d))
 			d = jsval.Obj(omit(d, "day"))
 		}
 	}
-	str := func(v Value) string { return v.AsString() }
+	// The parts are joined with Array.prototype.join, which writes null and
+	// undefined as nothing (a null part makes "datetime(2000, 0, , ...)",
+	// which upstream's expression parser then rejects).
+	str := func(v Value) string {
+		if v.IsNullish() {
+			return ""
+		}
+		return v.AsString()
+	}
 	if y := d.Get("year"); !y.IsUndefined() {
 		parts = append(parts, str(y))
 	} else {
@@ -446,17 +491,20 @@ func dateTimeParts(d Value, normalize bool) []string {
 	case !d.Get("quarter").IsUndefined():
 		q := d.Get("quarter")
 		if normalize {
-			if q.IsStr() && isNumericString(q.StrValue()) {
+			if isNumericV(q) {
 				q = jsval.Num(jsval.ToNumber(q))
 			}
 			if !q.IsNum() {
-				throw("Invalid quarter value: %s", q.AsString())
+				throw("%s", msgInvalidTimeUnit(cc, "quarter", q))
+			}
+			if q.NumValue() > 4 {
+				cc.warn(msgInvalidTimeUnit(cc, "quarter", q))
 			}
 			parts = append(parts, jsval.JSNumberString((q.NumValue()-1)*3))
 		} else if q.IsNum() {
 			parts = append(parts, jsval.JSNumberString(q.NumValue()*3))
 		} else {
-			parts = append(parts, str(q)+"*3")
+			parts = append(parts, tmpl(q)+"*3")
 		}
 	default:
 		parts = append(parts, "0")
@@ -467,7 +515,7 @@ func dateTimeParts(d Value, normalize bool) []string {
 	case !d.Get("day").IsUndefined():
 		day := d.Get("day")
 		if normalize {
-			if day.IsStr() && isNumericString(day.StrValue()) {
+			if isNumericV(day) {
 				day = jsval.Num(jsval.ToNumber(day))
 			}
 			var f float64
@@ -480,7 +528,7 @@ func dateTimeParts(d Value, normalize bool) []string {
 		} else if day.IsNum() {
 			parts = append(parts, jsval.JSNumberString(day.NumValue()+1))
 		} else {
-			parts = append(parts, str(day)+"+1")
+			parts = append(parts, tmpl(day)+"+1")
 		}
 	default:
 		parts = append(parts, "1")
@@ -496,8 +544,8 @@ func dateTimeParts(d Value, normalize bool) []string {
 	return parts
 }
 
-func dateTimeToExpr(d Value) string {
-	s := strings.Join(dateTimeParts(d, true), ", ")
+func dateTimeToExpr(cc *compileCtx, d Value) string {
+	s := strings.Join(dateTimeParts(cc, d, true), ", ")
 	if d.Get("utc").IsTruthy() {
 		return "utc(" + s + ")"
 	}
@@ -505,7 +553,7 @@ func dateTimeToExpr(d Value) string {
 }
 
 func dateTimeExprToExpr(d Value) string {
-	s := strings.Join(dateTimeParts(d, false), ", ")
+	s := strings.Join(dateTimeParts(nil, d, false), ", ")
 	if d.Get("utc").IsTruthy() {
 		return "utc(" + s + ")"
 	}
@@ -519,6 +567,9 @@ type titleConfigParts struct {
 }
 
 func extractTitleConfig(tc Value) titleConfigParts {
+	if tc.IsNullish() { // const {anchor, …} = titleConfig
+		throw("Cannot destructure property 'anchor' of 'titleConfig' as it is %s.", nullishName(tc))
+	}
 	rest := omit(tc, "anchor", "frame", "offset", "orient", "angle", "limit", "color", "subtitleColor",
 		"subtitleFont", "subtitleFontSize", "subtitleFontStyle", "subtitleFontWeight", "subtitleLineHeight", "subtitlePadding")
 	titleMark := cloneObj(rest)
@@ -553,4 +604,4 @@ func isText(v Value) bool {
 }
 
 func joinStrings(ss []string, sep string) string { return strings.Join(ss, sep) }
-func upper(s string) string                      { return strings.ToUpper(s) }
+func upper(s string) string                      { return jsUpperCase(s) }

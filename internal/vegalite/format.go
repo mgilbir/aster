@@ -9,7 +9,7 @@ import (
 func customFormatExpr(formatType, field string, format Value) string {
 	f := ""
 	if format.IsTruthy() {
-		f = ", " + stringify(format)
+		f = ", " + stringify(nil, format)
 	}
 	return formatType + "(" + field + f + ")"
 }
@@ -80,7 +80,7 @@ func fieldToFormat(cc *compileCtx, fod Value, expr string, normalizeStack bool) 
 		}
 		return vgField(cc, fod, fieldRefOption{expr: expr})
 	}
-	return datumDefToExpr(fod)
+	return datumDefToExpr(cc, fod)
 }
 
 func formatCustomType(cc *compileCtx, fod, format, formatType Value, expr string, normalizeStack bool, config Value, field string) Value {

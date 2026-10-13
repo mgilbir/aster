@@ -3,10 +3,13 @@ package force
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"math"
 	"os"
+	"strings"
 	"testing"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -95,7 +98,7 @@ func buildParams(c *goldenCase, links []jsval.Value) Params {
 			cf := NewCollide()
 			cf.Radius = param(f, "radius", cf.Radius)
 			cf.Strength = num(f, "strength", cf.Strength)
-			cf.Iterations = int(num(f, "iterations", 1))
+			cf.Iterations = num(f, "iterations", 1)
 			p.Forces = append(p.Forces, cf)
 		case "nbody":
 			nb := NewNBody()
@@ -114,7 +117,7 @@ func buildParams(c *goldenCase, links []jsval.Value) Params {
 				s := param(f, "strength", Param{})
 				l.Strength = &s
 			}
-			l.Iterations = int(num(f, "iterations", 1))
+			l.Iterations = num(f, "iterations", 1)
 			p.Forces = append(p.Forces, l)
 		case "x":
 			x := NewX()
@@ -233,5 +236,50 @@ func TestErrors(t *testing.T) {
 	cancel()
 	if err := Run(cctx, nodes, p); err == nil {
 		t.Fatal("expected cancellation")
+	}
+}
+
+// TestForceIterationsRefusedNotTruncated is the audit's C99: collide and
+// link ran at most 1,000 iterations whatever the specification asked, a
+// silently different layout. Past the limit is an error naming the number;
+// below it, d3's `k < iterations` runs ceil(iterations) times.
+func TestForceIterationsRefusedNotTruncated(t *testing.T) {
+	ctx := context.Background()
+	N := jsval.Num
+	obj := func(kv ...any) jsval.Value { return jsval.Obj(jsval.ObjectOf(kv...)) }
+	nodes := func() []jsval.Value {
+		var out []jsval.Value
+		for i := 0; i < 20; i++ {
+			out = append(out, obj("x", N(float64(i%5)), "y", N(float64(i/5))))
+		}
+		return out
+	}
+	run := func(iters float64) ([]jsval.Value, error) {
+		ns := nodes()
+		p := DefaultParams()
+		p.Static, p.Iterations = true, 5
+		c := NewCollide()
+		c.Radius, c.Iterations = Constant(3), iters
+		p.Forces = []Force{c}
+		return ns, Run(ctx, ns, p)
+	}
+	for _, iters := range []float64{1001, 1e300, math.Inf(1)} {
+		if _, err := run(iters); !errors.Is(err, budget.ErrLimit) || !strings.Contains(err.Error(), jsval.JSNumberString(iters)) {
+			t.Errorf("collide iterations %v: %v", iters, err)
+		}
+	}
+	a, _ := run(1.5)
+	b, _ := run(2)
+	c, _ := run(1)
+	same := func(x, y []jsval.Value) bool {
+		for i := range x {
+			if x[i].Get("x").NumValue() != y[i].Get("x").NumValue() {
+				return false
+			}
+		}
+		return true
+	}
+	if !same(a, b) || same(a, c) {
+		t.Error("1.5 iterations must run twice, as k < 1.5 does")
 	}
 }

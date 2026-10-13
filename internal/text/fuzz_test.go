@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/mgilbir/aster/internal/fonts/liberation"
+	"github.com/mgilbir/aster/internal/testutil"
 	"github.com/mgilbir/forme/shape"
 )
 
@@ -33,7 +34,7 @@ func FuzzLoadFont(f *testing.F) {
 		start := time.Now()
 		defer func() {
 			// Work on a font must be bounded: a slow input is a finding.
-			if d := time.Since(start); d > 3*time.Second {
+			if d := time.Since(start); d > testutil.Scaled(3*time.Second) {
 				t.Errorf("input of %d bytes took %v", len(data), d)
 			}
 		}()
@@ -53,7 +54,6 @@ func FuzzLoadFont(f *testing.F) {
 		for _, gid := range []int{0, 1, 2, 100, face.shape.NumGlyphs() - 1} {
 			GlyphOutline(face, gid, 12)
 		}
-		face.Subset()
 	})
 }
 

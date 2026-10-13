@@ -37,6 +37,12 @@ func BenchmarkConvertColour(b *testing.B) {
 		s.WriteString(`</svg>`)
 		svg := s.String()
 		b.Run(c.name, func(b *testing.B) {
+			// The measurer's caches (colour glyph paintings, outlines) fill
+			// on the first conversion: warm them off the clock, so that
+			// what is measured is a conversion's own cost.
+			if _, err := Convert(svg, c.m, Options{}); err != nil {
+				b.Fatal(err)
+			}
 			b.ReportAllocs()
 			for b.Loop() {
 				if _, err := Convert(svg, c.m, Options{}); err != nil {

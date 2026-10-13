@@ -219,18 +219,24 @@ func tupleTransform(f txFn) factory { return statefulTransform(func() txFn { ret
 func statefulTransform(newFn func() txFn) factory {
 	return func(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *opParams) any) {
 		f := newFn()
-		def := definitions()[e.typ]
+		typ := e.typ
+		def := definitions()[typ]
 		return nil, trFunc(func(n *opNode, p *opParams, pulse *flowPulse) *flowPulse {
 			if pulse.items != nil {
 				return markTransform(n, p, pulse, f)
 			}
-			in := pulse.tuples
+			in := pulse.input(typ)
 			if len(pulse.multi) > 0 {
 				in = concatTuples(pulse.multi)
 			}
 			if len(in) > 0 {
 				requireFields(def, p)
 			}
+			if pulse.src != nil {
+				checkWritesAdds(typ, p, in)
+			}
+			n.g.view.txPulse = pulse
+			defer func() { n.g.view.txPulse = nil }()
 			before := n.g.view.rowExcess(in)
 			out, err := f(n, p, in)
 			if err == errStopPulse {
@@ -239,16 +245,12 @@ func statefulTransform(newFn func() txFn) factory {
 			if err != nil {
 				failErr(err)
 			}
-			n.g.view.checkRows(len(out)-len(in), n.g.view.rowExcess(out)-before)
 			// The tuples a transform creates are ingested in output order
 			// (vega-dataflow's ingest), which is the order a sort breaks
-			// ties in.
-			for _, t := range out {
-				if o := t.ObjValue(); o != nil {
-					o.EnsureTupleID()
-				}
-			}
+			// ties in; the operator holds them.
+			n.g.view.holdCreated(n, before, out)
 			res := changedPulse(pulse, out)
+			sourcePulse(typ, pulse, res)
 			if len(out) > 0 && len(in) > 0 && &out[0] == &in[0] {
 				res.tree = pulse.tree // annotated in place: still the same data set
 			}
@@ -321,6 +323,7 @@ func init() {
 			if err != nil {
 				failErr(err)
 			}
+			n.g.view.holdCreated(n, 0, out)
 			// A group mark faceted over this data set finds each group's
 			// tuple here; the cells are keyed like the aggregate's own
 			// groups (an explicit key, else the group-by values).
@@ -403,6 +406,10 @@ func init() {
 		jp := transforms.JoinAggregateParams{GroupBy: p.fields("groupby"), Measures: measures(p), Rand: n.g.view.randSource()}
 		if kf := p.field("key"); !kf.IsNil() {
 			jp.Key = kf
+		}
+		// it aggregates what the pulse adds and writes into its source
+		if pl := n.g.view.txPulse; pl != nil && pl.src != nil {
+			jp.Into = pl.sourceView()
 		}
 		return transforms.JoinAggregate(ctxOf(n), in, jp)
 	})
@@ -634,12 +641,15 @@ func windowParams(p *opParams) transforms.WindowParams {
 		}
 		wp.Ops = append(wp.Ops, s)
 	}
-	if fr := p.nums("frame"); len(fr) == 2 {
-		conv := func(f float64) transforms.FrameBound {
-			if math.IsNaN(f) {
+	if fr := p.list("frame"); len(fr) == 2 {
+		// f == null is unbounded; any number, NaN included, is an offset
+		// (transforms.FrameBound).
+		conv := func(e any) transforms.FrameBound {
+			v, _ := e.(jsval.Value)
+			if v.IsNullish() {
 				return transforms.FrameBound{Unbounded: true}
 			}
-			return transforms.FrameBound{Offset: int(f)}
+			return transforms.FrameBound{Offset: jsval.ToNumber(v)}
 		}
 		wp.Frame = []transforms.FrameBound{conv(fr[0]), conv(fr[1])}
 	}

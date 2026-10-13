@@ -79,8 +79,8 @@ type axisComponent struct {
 
 func newAxisComponent() *axisComponent { return &axisComponent{split: newSplit()} }
 
-func (a *axisComponent) cloneAxis() *axisComponent {
-	return &axisComponent{split: a.split.clone(), mainExtracted: a.mainExtracted}
+func (a *axisComponent) cloneAxis(cc *compileCtx) *axisComponent {
+	return &axisComponent{split: a.split.clone(cc), mainExtracted: a.mainExtracted}
 }
 
 func isFalseOrNull(v Value) bool { return v.IsNull() || (v.IsBool() && !v.BoolValue()) }
@@ -115,13 +115,16 @@ func parseLayerAxes(m *layerModel) {
 	axes, resolve := m.comp.axes, m.comp.resolve
 	axisCount := map[string]int{"top": 0, "bottom": 0, "right": 0, "left": 0}
 	for _, child := range m.kids {
+		cc.work(modelStep)
 		child.parseAxesAndHeaders()
 		for _, channel := range child.b().comp.axes.keyList() {
-			resolve.axis[channel] = parseGuideResolve(m.comp.resolve, channel)
+			v := parseGuideResolve(cc, m.comp.resolve, channel)
+			resolve.write(resolveAxis, channel)
+			resolve.axis[channel] = v
 			if resolve.axis[channel] == "shared" {
 				cur, _ := axes.get(channel)
 				childAxes, _ := child.b().comp.axes.get(channel)
-				mergedAxes, ok := mergeAxisComponents(cur, childAxes)
+				mergedAxes, ok := mergeAxisComponents(cc, cur, childAxes)
 				if !ok {
 					resolve.axis[channel] = "independent"
 					axes.del(channel)
@@ -133,6 +136,7 @@ func parseLayerAxes(m *layerModel) {
 	}
 	for _, channel := range positionScaleChannels {
 		for _, child := range m.kids {
+			cc.work(modelStep)
 			childAxes, ok := child.b().comp.axes.get(channel)
 			if !ok || childAxes == nil {
 				continue
@@ -141,6 +145,7 @@ func parseLayerAxes(m *layerModel) {
 				cur, _ := axes.get(channel)
 				axes.set(channel, append(append([]*axisComponent{}, cur...), childAxes...))
 				for _, ac := range childAxes {
+					cc.work(1)
 					we := ac.getWithExplicit("orient")
 					if isSignalRef(we.value) {
 						continue
@@ -160,6 +165,7 @@ func parseLayerAxes(m *layerModel) {
 		if resolve.axis[channel] == "independent" {
 			if list, ok := axes.get(channel); ok && len(list) > 1 {
 				for i, ac := range list {
+					cc.work(1)
 					if (cc.v5 || i > 0) && ac.get("grid").IsTruthy() && !ac.explicit.Lookup("grid").IsTruthy() {
 						ac.implicit.Set("grid", jsval.False)
 					}
@@ -169,12 +175,13 @@ func parseLayerAxes(m *layerModel) {
 	}
 }
 
-func mergeAxisComponents(merged, child []*axisComponent) ([]*axisComponent, bool) {
+func mergeAxisComponents(cc *compileCtx, merged, child []*axisComponent) ([]*axisComponent, bool) {
 	if merged != nil {
 		if len(merged) != len(child) {
 			return nil, false
 		}
 		for i := range merged {
+			cc.work(1)
 			mg, ch := merged[i], child[i]
 			if (mg != nil) != (ch != nil) {
 				return nil, false
@@ -183,30 +190,31 @@ func mergeAxisComponents(merged, child []*axisComponent) ([]*axisComponent, bool
 				if mo.explicit && co.explicit && !strictEq(mo.value, co.value) {
 					return nil, false
 				}
-				merged[i] = mergeAxisComponent(mg, ch)
+				merged[i] = mergeAxisComponent(cc, mg, ch)
 			}
 		}
 		return merged, true
 	}
 	out := make([]*axisComponent, len(child))
 	for i, c := range child {
-		out[i] = c.cloneAxis()
+		cc.work(1)
+		out[i] = c.cloneAxis(cc)
 	}
 	return out, true
 }
 
-func mergeAxisComponent(merged, child *axisComponent) *axisComponent {
+func mergeAxisComponent(cc *compileCtx, merged, child *axisComponent) *axisComponent {
 	for _, prop := range axisComponentProperties {
 		prop := prop
 		mv := merged.getWithExplicit(prop)
-		v := mergeValuesWithExplicit(&mv, child.getWithExplicit(prop), prop, "axis", func(v1, v2 withExplicit, _, _ string) withExplicit {
+		v := mergeValuesWithExplicit(cc, &mv, child.getWithExplicit(prop), prop, "axis", func(cc *compileCtx, v1, v2 withExplicit, _, _ string) withExplicit {
 			switch prop {
 			case "title":
-				return mergeTitleComponent(v1, v2)
+				return mergeTitleComponent(cc, v1, v2)
 			case "gridScale":
 				return withExplicit{v1.explicit, firstDefined(v1.value, v2.value)}
 			}
-			return defaultTieBreaker(v1, v2, prop, "axis")
+			return defaultTieBreaker(cc, v1, v2, prop, "axis")
 		})
 		merged.setWithExplicit(prop, v)
 	}
@@ -359,9 +367,10 @@ func guideEncodeEntry(encoding Value, m *unitModel) Value {
 
 	out := jsval.NewObject(4)
 	for _, channel := range keysOf(encoding) {
+		cc.work(1)
 		spreadV(out, wrapCondition(cc, wrapConditionOpts{
 			model: m, channelDef: encoding.Get(channel), vgChannel: channel,
-			mainRefFn: func(def Value) Value { return signalOrValueRef(def.Get("value")) },
+			mainRefFn: func(def Value) Value { return signalOrValueRef(cc, def.Get("value")) },
 		}))
 	}
 	return jsval.Obj(out)
@@ -447,7 +456,7 @@ var axisRules = map[string]func(p axisRuleParams) Value{
 		if isFieldDef(p.model.ctx, fd2) {
 			f2 = []Value{toFieldDefBase(fd2)}
 		}
-		return jsval.Arr(mergeTitleFieldDefs(f1, f2))
+		return jsval.Arr(mergeTitleFieldDefs(p.model.ctx, f1, f2))
 	},
 	"values": func(p axisRuleParams) Value { return guideValues(p.model.ctx, p.axis, p.fod) },
 	"zindex": func(p axisRuleParams) Value {
@@ -522,7 +531,7 @@ func defaultLabelBaseline(angle, orient Value, channel string, alwaysIncludeMidd
 			return sig("(45 < " + a + " && " + a + " < 135) || (225 < " + a + " && " + a + " < 315) ? \"middle\" :" +
 				"(" + a + " <= 45 || 315 <= " + a + ") === " + orientIsTop + " ? \"bottom\" : \"top\"")
 		}
-		ang := angle.AsDouble()
+		ang := jsval.ToNumber(angle) // compared as JavaScript compares it
 		if (45 < ang && ang < 135) || (225 < ang && ang < 315) {
 			return jsval.Str("middle")
 		}
@@ -553,7 +562,7 @@ func defaultLabelBaseline(angle, orient Value, channel string, alwaysIncludeMidd
 		}
 		return sig(a + " <= 45 || 315 <= " + a + " || (135 <= " + a + " && " + a + " <= 225) ? " + middle + " : (45 <= " + a + " && " + a + " <= 135) === " + orientIsLeft + ` ? "top" : "bottom"`)
 	}
-	ang := angle.AsDouble()
+	ang := jsval.ToNumber(angle) // compared as JavaScript compares it
 	if ang <= 45 || 315 <= ang || (135 <= ang && ang <= 225) {
 		if alwaysIncludeMiddle {
 			return jsval.Str("middle")
@@ -614,8 +623,9 @@ func defaultLabelAlign(angle, orient Value, channel string) Value {
 		return sig("(" + lhs + " % 180 === 0) ? " + res + " :" +
 			"(" + sa + " < " + a + " && " + a + " < " + jsval.JSNumberString(180+startAngle) + ") === " + orientIsMain + ` ? "left" : "right"`)
 	}
-	ang := angle.AsDouble()
-	if math.Mod(ang+startAngle, 180) == 0 {
+	// (angle + startAngle) % 180 === 0: a string angle concatenates.
+	ang := jsval.ToNumber(angle)
+	if math.Mod(jsval.ToNumber(jsPlusNum(angle, startAngle)), 180) == 0 {
 		if isX {
 			return jsval.Null
 		}
@@ -761,7 +771,7 @@ func getAxisConfigs(channel, scaleType string, orient Value, config Value) axisC
 	}
 	axisOrient := "axisOrient"
 	if !isSignalRef(orient) {
-		axisOrient = "axis" + titleCase(orient.AsString())
+		axisOrient = "axis" + titleCaseV(orient)
 	}
 	vlOnly := append([]string{}, typeBased...)
 	for _, c := range typeBased {
@@ -790,7 +800,7 @@ func getAxisConfigStyle(types []string, config Value) Value {
 // getAxisConfig finds a property in the style config, then vlOnlyAxisConfig,
 // vgAxisConfig, axisConfigStyle; it returns the value and where it came from.
 func getAxisConfig(property string, styleConfigIndex Value, style Value, cfgs axisConfigSet) (Value, string) {
-	if sc := getStyleConfig(property, arrayStrings(style), styleConfigIndex); !sc.IsUndefined() {
+	if sc := getStyleConfig(property, arrayOf(style), styleConfigIndex); !sc.IsUndefined() {
 		return sc, "style"
 	}
 	for _, from := range []struct {
@@ -802,14 +812,6 @@ func getAxisConfig(property string, styleConfigIndex Value, style Value, cfgs ax
 		}
 	}
 	return undef, ""
-}
-
-func arrayStrings(v Value) []string {
-	var out []string
-	for _, x := range arrayOf(v) {
-		out = append(out, x.AsString())
-	}
-	return out
 }
 
 // ---- labels encode ----
@@ -855,6 +857,7 @@ func assembleAxisTitle(cc *compileCtx, title Value, config Value) Value {
 	if title.IsArr() && !isText(title) {
 		var parts []string
 		for _, fd := range title.Items() {
+			cc.work(1)
 			parts = append(parts, joinItem(defaultTitle(cc, fd, config)))
 		}
 		return jsval.Str(strings.Join(parts, ", "))
@@ -889,13 +892,21 @@ func assembleAxis(cc *compileCtx, a *axisComponent, kind string, config Value, h
 		return undef
 	}
 	// Properties are dropped after the loop: deleting from a large object one key
-	// at a time is quadratic.
-	drop := map[string]bool{}
-	for _, prop := range append([]string(nil), axis.Keys()...) {
+	// at a time is quadratic. drop is by position: the loop deletes nothing
+	// and only appends ("encode"), so the keys it visits keep their places.
+	var drop []bool
+	n := axis.Len()
+	dropAt := func(i int) {
+		if drop == nil {
+			drop = make([]bool, n)
+		}
+		drop[i] = true
+	}
+	for i := 0; i < n; i++ {
+		prop, propValue := axis.KeyAt(i), axis.ValueAt(i)
 		propType := axisPropertyType[prop]
-		propValue := axis.Lookup(prop)
 		if propType != "" && propType != kind && propType != "both" {
-			drop[prop] = true
+			dropAt(i)
 		} else if isConditionalAxisValue(propValue) {
 			condition := propValue.Get("condition")
 			valueOrSignalRef := jsval.Obj(omit(propValue, "condition"))
@@ -903,6 +914,7 @@ func assembleAxis(cc *compileCtx, a *axisComponent, kind string, config Value, h
 			if pi, ok := conditionalAxisProp[prop]; ok && !pi.isNull {
 				var vgRef []Value
 				for _, c := range conditions {
+					cc.work(1)
 					test := c.Get("test")
 					o := mk("test", expression(cc, nil, test, nil))
 					spreadV(o, jsval.Obj(omit(c, "test")))
@@ -910,10 +922,11 @@ func assembleAxis(cc *compileCtx, a *axisComponent, kind string, config Value, h
 				}
 				vgRef = append(vgRef, valueOrSignalRef)
 				setAxisEncode(axis, pi.part, pi.vgProp, jsval.Arr(vgRef))
-				drop[prop] = true
+				dropAt(i)
 			} else if ok && pi.isNull {
 				var sb strings.Builder
 				for _, c := range conditions {
+					cc.work(1)
 					sb.WriteString(expression(cc, nil, c.Get("test"), nil) + " ? " + exprFromValueRefOrSignalRef(jsval.Obj(omit(c, "test"))) + " : ")
 				}
 				sb.WriteString(exprFromValueRefOrSignalRef(valueOrSignalRef))
@@ -922,15 +935,15 @@ func assembleAxis(cc *compileCtx, a *axisComponent, kind string, config Value, h
 		} else if isSignalRef(propValue) {
 			if pi, ok := conditionalAxisProp[prop]; ok && !pi.isNull {
 				setAxisEncode(axis, pi.part, pi.vgProp, propValue)
-				drop[prop] = true
+				dropAt(i)
 			}
 		}
-		if (prop == "labelAlign" || prop == "labelBaseline") && axis.Lookup(prop).IsNull() {
-			drop[prop] = true
+		if (prop == "labelAlign" || prop == "labelBaseline") && axis.ValueAt(i).IsNull() {
+			dropAt(i)
 		}
 	}
-	if len(drop) > 0 {
-		axis = omitSet(axis, drop)
+	if drop != nil {
+		axis = omitAt(axis, drop)
 	}
 	if kind == "grid" {
 		if !axis.Lookup("grid").IsTruthy() {
@@ -961,10 +974,15 @@ func assembleAxis(cc *compileCtx, a *axisComponent, kind string, config Value, h
 		return undef
 	}
 	if !labelExpr.IsUndefined() {
-		expr := labelExpr.AsString()
+		// The labelExpr as it is, or replaceAll(labelExpr, ...), which
+		// calls labelExpr.replace.
+		expr := labelExpr
 		text := axis.Lookup("encode").Get("labels").Get("update").Get("text")
-		if axis.Lookup("encode").Get("labels").Get("update").IsObj() && isSignalRef(text) {
-			expr = strings.ReplaceAll(expr, "datum.label", signalOf(text))
+		if axis.Lookup("encode").Get("labels").Get("update").IsTruthy() && isSignalRef(text) {
+			if !labelExpr.IsStr() {
+				throw("string.replace is not a function")
+			}
+			expr = jsval.Str(jsReplaceAll(labelExpr.StrValue(), "datum.label", signalOf(text)))
 		}
 		setAxisEncode(axis, "labels", "text", mkv("signal", expr))
 	}
@@ -998,6 +1016,7 @@ func assembleAxis(cc *compileCtx, a *axisComponent, kind string, config Value, h
 func omap2(o *Object) *Object { return o }
 
 func assembleAxisSignals(m Model) []Value {
+	cc := m.b().ctx
 	var signals []Value
 	axes := m.b().comp.axes
 	for _, channel := range positionScaleChannels {
@@ -1006,6 +1025,7 @@ func assembleAxisSignals(m Model) []Value {
 			continue
 		}
 		for _, axis := range list {
+			cc.work(1)
 			if !axis.get("disable").IsTruthy() && !axis.get("gridScale").IsTruthy() {
 				sizeType := "width"
 				if channel == chX {
@@ -1027,6 +1047,7 @@ func assembleAxes(cc *compileCtx, axisComponents *omap[[]*axisComponent], config
 	var out []Value
 	add := func(list []*axisComponent, kind string) {
 		for _, a := range list {
+			cc.work(1)
 			if v := assembleAxis(cc, a, kind, config, false); v.IsTruthy() {
 				out = append(out, v)
 			}
@@ -1047,11 +1068,12 @@ func joinItem(v Value) string {
 	return v.AsString()
 }
 
-// omitSet copies o without the keys in drop, preserving order.
-func omitSet(o *Object, drop map[string]bool) *Object {
+// omitAt is o without the keys at the positions drop marks (keys past the
+// end of drop are kept).
+func omitAt(o *Object, drop []bool) *Object {
 	out := jsval.NewObject(o.Len())
 	for i := 0; i < o.Len(); i++ {
-		if !drop[o.KeyAt(i)] {
+		if i >= len(drop) || !drop[i] {
 			out.Set(o.KeyAt(i), o.ValueAt(i))
 		}
 	}

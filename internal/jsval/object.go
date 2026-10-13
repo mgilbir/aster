@@ -1,10 +1,7 @@
 package jsval
 
 import (
-	"fmt"
 	"sync/atomic"
-
-	ecma262 "github.com/mgilbir/goecma262"
 )
 
 // indexThreshold is the size at which an Object builds a hash index. Below it
@@ -248,6 +245,13 @@ func (o *Object) Has(key string) bool { return o.find(key) >= 0 }
 
 // Set inserts or overwrites key.
 func (o *Object) Set(key string, v Value) {
+	if o.host != nil {
+		// The functions Inherited and NativeFunction answer are shared by
+		// every caller in the process, so nothing may be written on them.
+		if _, ok := o.host.(nativeFunction); ok {
+			return
+		}
+	}
 	if i := o.find(key); i >= 0 {
 		o.vals[i] = v
 		return
@@ -338,22 +342,3 @@ func (o *Object) Clone() *Object {
 	}
 	return c
 }
-
-// Pattern is a compiled ECMA-262 regular expression, the value regexp() makes.
-type Pattern struct {
-	Source string
-	Flags  string
-	Re     *ecma262.Regexp
-}
-
-// NewPattern compiles source with JavaScript flags ("gimsuyvd").
-func NewPattern(source, flags string) (*Pattern, error) {
-	re, err := ecma262.CompileFlags(source, flags)
-	if err != nil {
-		return nil, fmt.Errorf("invalid regular expression /%s/%s: %w", source, flags, err)
-	}
-	return &Pattern{Source: source, Flags: flags, Re: re}, nil
-}
-
-// String is JavaScript's String(regexp): the literal a reader would write.
-func (p *Pattern) String() string { return "/" + p.Source + "/" + p.Flags }

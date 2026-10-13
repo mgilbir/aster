@@ -25,7 +25,7 @@ type FlattenParams struct {
 func Flatten(ctx context.Context, data []jsval.Value, p FlattenParams) ([]jsval.Value, error) {
 	names := make([]string, len(p.Fields))
 	for i, f := range p.Fields {
-		names[i] = f.Name
+		names[i] = f.Key()
 		if i < len(p.As) && p.As[i] != "" {
 			names[i] = p.As[i]
 		}
@@ -55,7 +55,7 @@ func Flatten(ctx context.Context, data []jsval.Value, p FlattenParams) ([]jsval.
 		if !valid {
 			continue
 		}
-		if err := reserveOut(ctx, len(out)+maxlen, len(data)); err != nil {
+		if err := reserveRows(ctx, len(out)+maxlen); err != nil {
 			return nil, err
 		}
 		for k := 0; k < maxlen; k++ {

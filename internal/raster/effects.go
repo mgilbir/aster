@@ -1,6 +1,7 @@
 package raster
 
 import (
+	"fmt"
 	"math"
 	"strings"
 
@@ -292,15 +293,24 @@ func (r *renderer) renderEffects(n *node, st *state, opacity float64, blend blen
 	}
 	area := budget.MulInt(ib.w(), ib.h())
 	if area > r.lim.MaxFilterPixels {
-		return // filter region too large to process
-	}
-	if r.depth >= r.lim.MaxLayerDepth {
-		r.fail(errLimit)
+		// Not drawing the element would be silent, and drawing it
+		// unfiltered would draw what the document does not (a shadow
+		// without its blur, say): a bound, then, like every other (C62).
+		r.fail(fmt.Errorf("raster: a filter region of %dx%d pixels exceeds %d (raise Limits.MaxFilterPixels): %w", ib.w(), ib.h(), r.lim.MaxFilterPixels, errLimit))
 		return
 	}
+	if r.depth >= r.lim.MaxLayerDepth {
+		r.fail(errRasterLimit)
+		return
+	}
+	// Each primitive is a pass over the region, and so is each node of a
+	// merge (C28).
 	nPrims := 1
 	for _, sp := range specs {
 		nPrims += len(sp.prims)
+		for i := range sp.prims {
+			nPrims += len(sp.prims[i].merge)
+		}
 	}
 	if !r.chargePixels(budget.MulInt(area, nPrims)) {
 		return

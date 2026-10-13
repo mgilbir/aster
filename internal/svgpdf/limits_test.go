@@ -32,12 +32,14 @@ func TestConvertLimits(t *testing.T) {
 		if !errors.Is(err, ErrLimit) {
 			t.Fatalf("got %v", err)
 		}
+		onePrefix(t, err)
 	})
 	t.Run("input", func(t *testing.T) {
 		_, err := Convert(head+`</svg>`, nil, Options{Limits: Limits{MaxInputBytes: 20}})
 		if !errors.Is(err, ErrLimit) {
 			t.Fatalf("got %v", err)
 		}
+		onePrefix(t, err)
 	})
 	t.Run("path", func(t *testing.T) {
 		svg := head + `<path d="M0,0` + strings.Repeat("L1,1", 100) + `"/></svg>`
@@ -45,6 +47,7 @@ func TestConvertLimits(t *testing.T) {
 		if !errors.Is(err, ErrLimit) {
 			t.Fatalf("got %v", err)
 		}
+		onePrefix(t, err)
 	})
 	t.Run("clip-amplification", func(t *testing.T) {
 		var b strings.Builder
@@ -59,6 +62,7 @@ func TestConvertLimits(t *testing.T) {
 		if !errors.Is(err, ErrLimit) {
 			t.Fatalf("got %v", err)
 		}
+		onePrefix(t, err)
 	})
 	t.Run("ok", func(t *testing.T) {
 		if _, err := Convert(head+`<path d="M0,0L5,5"/></svg>`, nil, Options{}); err != nil {
@@ -69,8 +73,10 @@ func TestConvertLimits(t *testing.T) {
 
 type panicShaper struct{}
 
-func (panicShaper) ShapeText(string, string) ([]text.Run, float64) { panic("boom") }
-func (panicShaper) FontData(*text.Face) []byte                     { return nil }
+func (panicShaper) ShapeFont(string, text.CSSFont) ([]text.Run, float64) { panic("boom") }
+func (panicShaper) FontData(context.Context, *text.Face) ([]byte, error) {
+	return nil, nil
+}
 
 func TestConvertRecoversPanics(t *testing.T) {
 	svg := `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><text>hi</text></svg>`
@@ -85,5 +91,14 @@ func TestConvertTextLimit(t *testing.T) {
 	_, err := Convert(svg, panicShaper{}, Options{Limits: Limits{MaxTextBytes: 10}})
 	if !errors.Is(err, ErrLimit) {
 		t.Fatalf("got %v", err)
+	}
+}
+
+// onePrefix requires a limit error to name the package once (X18): it is
+// made with limitErr, which prefixes, and wraps ErrLimit, which must not.
+func onePrefix(t *testing.T, err error) {
+	t.Helper()
+	if n := strings.Count(err.Error(), "svgpdf: "); n != 1 {
+		t.Errorf("%q names the package %d times", err, n)
 	}
 }

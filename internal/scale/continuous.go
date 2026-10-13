@@ -1,6 +1,7 @@
 package scale
 
 import (
+	"context"
 	"math"
 
 	"github.com/mgilbir/aster/internal/jsval"
@@ -280,7 +281,13 @@ func (c *Continuous) SetConstant(k float64) bool {
 }
 
 // Ticks is scale.ticks(count).
-func (c *Continuous) Ticks(count TickCount) []float64 { return c.tspec.ticks(c.domain, count) }
+func (c *Continuous) Ticks(ctx context.Context, count TickCount) ([]float64, error) {
+	return c.ticksN(ctx, count, maxTickValues)
+}
+
+func (c *Continuous) ticksN(_ context.Context, count TickCount, max int) ([]float64, error) {
+	return c.tspec.ticks(c.domain, count, max)
+}
 
 // Nice is scale.nice(count). For log scales the count is ignored.
 func (c *Continuous) Nice(count TickCount) {

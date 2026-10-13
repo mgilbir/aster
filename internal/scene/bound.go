@@ -32,6 +32,16 @@ type Bounder struct {
 	// shape and measure every string).
 	Context context.Context
 	n       int
+	// lctx is the Context ctx.ledger was read from.
+	lctx context.Context
+}
+
+// ledger is the ledger in the Bounder's Context, read once per Context.
+func (bd *Bounder) ledger() *budget.Ledger {
+	if bd.lctx != bd.Context {
+		bd.lctx, bd.ctx.ledger = bd.Context, budget.LedgerFrom(bd.Context)
+	}
+	return bd.ctx.ledger
 }
 
 // NewBounder returns a Bounder using measurer for text widths (nil selects
@@ -185,6 +195,7 @@ func (bd *Bounder) itemBounds(t MarkType, b *Bounds, it *Item) error {
 		case MarkArc:
 			err = Arc(&bd.ctx, it)
 		case MarkSymbol:
+			bd.ledger()
 			err = Symbol(&bd.ctx, it)
 		default:
 			fn := it.Shape.Func
@@ -250,7 +261,7 @@ func (bd *Bounder) pathBounds(b *Bounds, it *Item) error {
 		b.Set(0, 0, 0, 0)
 		return nil
 	}
-	cmds, err := it.parsedPath()
+	cmds, err := it.parsedPath(bd.ledger())
 	if err != nil {
 		return err
 	}

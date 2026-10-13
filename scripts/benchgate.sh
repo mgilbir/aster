@@ -77,6 +77,12 @@
 # other of an unchanged loop. An added allocation of 64 bytes or more is
 # still caught, through its bytes.
 #
+# A benchmark package that does not compile on the head side fails the gate
+# (exit 2), as does one that compiled on the base side and not on the head;
+# so does a -bench regex that matches no benchmark of the head: a gate that
+# measures nothing must not pass. A package new in the change (absent from
+# the base) is left out, there is nothing to compare it with.
+#
 # For an intended trade-off, BENCHGATE_ALLOW=true reports the regression and
 # exits 0 (CI sets it from the allow_regression input of the Heavy gates
 # workflow). Other settings: BENCHGATE_COUNT (rounds, default 8),
@@ -152,28 +158,44 @@ git worktree add --detach --quiet "$work/head" "$head"
 echo "benchgate: base $(git log -1 --format='%h %s' "$base")"
 echo "benchgate: head $(git log -1 --format='%h %s' "$head")"
 
-# Build both sides before running either; a package missing from the base (a
-# new one) or without the benchmark is left out, there is nothing to compare.
-# -trimpath keeps the checkout directories out of the binaries, so that a
+# Build both sides before running either. -trimpath keeps the checkout directories out of the binaries, so that a
 # package the change does not reach builds the same bytes on both sides; such
 # a package is left out too, as two runs of one program can only differ by
 # noise (a shared runner once showed one 23% apart, p < 0.001).
 entries=$work/entries
 : >"$entries"
+benchmarks >"$work/list" # read below without a pipe: an exit in the loop must end the script
 n=0
-benchmarks | while read -r pkg regex; do
+while read -r pkg regex; do
 	n=$((n + 1))
-	for side in base head; do
-		(cd "$work/$side" && [ -d "$pkg" ] && go test -c -trimpath -o "$work/$side.$n.test" "./$pkg" 2>/dev/null) || continue
-	done
-	if ! [ -x "$work/base.$n.test" ] || ! [ -x "$work/head.$n.test" ]; then
-		echo "benchgate: skipping $pkg ($regex): no test binary on both sides"
-	elif cmp -s "$work/base.$n.test" "$work/head.$n.test"; then
+	if ! [ -d "$work/head/$pkg" ]; then
+		echo "benchgate: $pkg is listed but does not exist on the head side" >&2
+		exit 2
+	fi
+	if ! (cd "$work/head" && go test -c -trimpath -o "$work/head.$n.test" "./$pkg" >"$work/build.log" 2>&1); then
+		cat "$work/build.log" >&2
+		echo "benchgate: $pkg does not build on the head side" >&2
+		exit 2
+	fi
+	if ! [ -d "$work/base/$pkg" ]; then
+		echo "benchgate: skipping $pkg ($regex): new in the change, nothing to compare"
+		continue
+	fi
+	if ! (cd "$work/base" && go test -c -trimpath -o "$work/base.$n.test" "./$pkg" >"$work/build.log" 2>&1); then
+		cat "$work/build.log" >&2
+		echo "benchgate: $pkg does not build on the base side" >&2
+		exit 2
+	fi
+	if ! (cd "$work/head/$pkg" && "$work/head.$n.test" -test.list "$(printf '%s' "$regex" | cut -d/ -f1)" | grep -q '^Benchmark'); then
+		echo "benchgate: $pkg: -bench $regex matches no benchmark on the head side" >&2
+		exit 2
+	fi
+	if cmp -s "$work/base.$n.test" "$work/head.$n.test"; then
 		echo "benchgate: skipping $pkg ($regex): unchanged by the change"
 	else
 		printf '%s %s %s\n' "$n" "$pkg" "$regex" >>"$entries"
 	fi
-done
+done <"$work/list"
 
 if ! [ -s "$entries" ]; then
 	verdict="benchgate: no regression (the change reaches none of the benchmarked packages)"

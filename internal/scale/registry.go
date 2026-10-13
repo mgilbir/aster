@@ -59,7 +59,9 @@ func init() {
 	register(TypeSqrt, c, func() Scale { return NewSqrt() })
 	register(TypeSymlog, c, func() Scale { return NewSymlog() })
 	// backwards compatibility: plain "sequential" is sequential-linear
-	register(TypeTime, c|fTemporal, func() Scale { return NewTime(LocalZone) })
+	// New("time") is local time in UTC: the engine never reads the host's
+	// zone. The runtime makes its time scales with NewIn and its locale's zone.
+	register(TypeTime, c|fTemporal, func() Scale { return NewTime(format.UTC) })
 	register(TypeUTC, c|fTemporal, func() Scale { return NewUTC() })
 	register(TypeSequential, c|i, func() Scale { return NewSequential() })
 	register("sequential-linear", c|i, func() Scale { return NewSequential() })

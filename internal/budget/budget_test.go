@@ -9,8 +9,12 @@ import (
 
 func TestNilBudgetIsUnlimited(t *testing.T) {
 	var b *Budget
-	if b.Reserve(1<<60) != nil || b.AddRows(1<<30) != nil || b.Load(1<<60) != nil || b.Points(1<<60) != nil {
+	var h Held
+	if b.Reserve(1<<60) != nil || b.Hold(&h, 1<<30, 0) != nil || b.Load(1<<60) != nil || b.Points(1<<60) != nil {
 		t.Fatal("nil budget must not limit")
+	}
+	if b.Replacing(&h) != nil {
+		t.Fatal("nil budget has no holding")
 	}
 	if From(context.Background()) != nil {
 		t.Fatal("no budget in a plain context")
@@ -19,7 +23,8 @@ func TestNilBudgetIsUnlimited(t *testing.T) {
 
 func TestReserveBeforeAllocation(t *testing.T) {
 	b := &Budget{MaxRows: 100}
-	if err := b.AddRows(60); err != nil {
+	var h Held
+	if err := b.Hold(&h, 60, 0); err != nil {
 		t.Fatal(err)
 	}
 	if err := b.Reserve(40); err != nil {
@@ -35,8 +40,48 @@ func TestReserveBeforeAllocation(t *testing.T) {
 	if !errors.Is(b.Reserve(math.MaxInt64), ErrLimit) {
 		t.Fatal("huge reservation must fail without overflow")
 	}
-	if !errors.Is(b.AddRows(41), ErrLimit) {
-		t.Fatal("AddRows past the limit must fail")
+	var g Held
+	if !errors.Is(b.Hold(&g, 41, 0), ErrLimit) {
+		t.Fatal("holding past the limit must fail")
+	}
+}
+
+// A holder that holds again replaces what it held: it is never charged
+// twice, and it gives back what it no longer holds, never more.
+func TestHoldReplaces(t *testing.T) {
+	b := &Budget{MaxRows: 100}
+	var a, c Held
+	if b.Hold(&a, 60, 0) != nil || b.Hold(&a, 70, 0) != nil || b.Rows() != 70 || a.Rows() != 70 {
+		t.Fatalf("a rerun of 70 rows holds 70, not 130: %d", b.Rows())
+	}
+	if b.Hold(&a, 10, 0) != nil || b.Rows() != 10 {
+		t.Fatalf("holding 10 gives 60 back: %d", b.Rows())
+	}
+	if b.Hold(&c, 90, 0) != nil {
+		t.Fatal("what a gave back is free")
+	}
+	if b.Hold(&a, -5, 0) != nil || b.Rows() != 90 || a.Rows() != 0 {
+		t.Fatalf("nothing gives back more than it holds: %d", b.Rows())
+	}
+}
+
+// What the holding being replaced holds is free to a reservation: a
+// transform that runs again may make as many rows as it held before.
+func TestReplacingCountsTheHoldingAsFree(t *testing.T) {
+	b := &Budget{MaxRows: 100}
+	var a, c Held
+	_ = b.Hold(&a, 70, 0)
+	_ = b.Hold(&c, 20, 0)
+	if !errors.Is(b.Reserve(71), ErrLimit) || b.RowsLeft() != 10 {
+		t.Fatal("80 held rows leave 10")
+	}
+	prev := b.Replacing(&a)
+	if b.Reserve(80) != nil || !errors.Is(b.Reserve(81), ErrLimit) || b.RowsLeft() != 80 {
+		t.Fatalf("a's 70 rows are being replaced: %d left", b.RowsLeft())
+	}
+	b.Replacing(prev)
+	if !errors.Is(b.Reserve(11), ErrLimit) {
+		t.Fatal("restored: a's rows count again")
 	}
 }
 
@@ -46,11 +91,8 @@ func TestContextRoundTrip(t *testing.T) {
 	if From(ctx) != b {
 		t.Fatal("budget lost")
 	}
-	if !errors.Is(ReserveOut(ctx, 10, 2), ErrLimit) {
-		t.Fatal("ReserveOut")
-	}
-	if ReserveOut(ctx, 10, 9) != nil {
-		t.Fatal("net growth of 1 fits")
+	if !errors.Is(Reserve(ctx, 6), ErrLimit) || Reserve(ctx, 5) != nil {
+		t.Fatal("Reserve")
 	}
 }
 
@@ -76,22 +118,24 @@ func TestLoadAndPoints(t *testing.T) {
 
 func TestRowExcessCountsInRows(t *testing.T) {
 	b := &Budget{MaxRows: 10, RowBytes: 100}
-	if err := b.AddRows(4); err != nil {
-		t.Fatal(err)
-	}
-	if err := b.AddRowExcess(550); err != nil { // five rows' worth more
+	var h Held
+	if err := b.Hold(&h, 4, 550); err != nil { // five rows' worth more
 		t.Fatalf("9 rows' worth fit: %v", err)
 	}
 	if b.RowsLeft() != 1 || !errors.Is(b.Reserve(2), ErrLimit) {
 		t.Fatalf("excess must take from what is left: %d", b.RowsLeft())
 	}
-	if !errors.Is(b.AddRowExcess(200), ErrLimit) {
+	if !errors.Is(b.Hold(&h, 4, 750), ErrLimit) {
 		t.Fatal("excess past the limit must fail")
 	}
-	if b.AddRowExcess(-10_000) != nil || b.RowsLeft() != 6 {
-		t.Fatal("dropped rows give their excess back, down to zero")
+	if b.Hold(&h, 4, 0) != nil || b.RowsLeft() != 6 {
+		t.Fatal("rows that shrank give their excess back")
 	}
-	if err := (&Budget{MaxRows: 1}).AddRowExcess(1 << 40); err != nil {
+	if !errors.Is(b.ReserveWeight(1, 600), ErrLimit) || b.ReserveWeight(1, 500) != nil {
+		t.Fatal("ReserveWeight counts the excess in rows")
+	}
+	var g Held
+	if err := (&Budget{MaxRows: 1}).Hold(&g, 1, 1<<40); err != nil {
 		t.Fatalf("without RowBytes only rows are counted: %v", err)
 	}
 }

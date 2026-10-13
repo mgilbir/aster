@@ -9,13 +9,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"runtime"
 	"runtime/debug"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -23,7 +23,7 @@ import (
 const secChildEnv = "ASTER_SEC_CHILD"
 
 type secJob struct {
-	Kind      string   `json:"kind"`    // vega, vl, vl2vega, svgpng, svgpdf
+	Kind      string   `json:"kind"`    // vega, vl, vl2vega, vegapng, vlpng, svgpng, vegapdf, vlpdf, svgpdf
 	Input     string   `json:"input"`   // spec JSON or SVG text
 	Timeout   string   `json:"timeout"` // WithTimeout value, "" = default
 	MemLimit  uint64   `json:"memLimit"`
@@ -39,7 +39,11 @@ type secJob struct {
 }
 
 type secResult struct {
-	Err       string   `json:"err"`
+	Err string `json:"err"`
+	// Limit and Deadline report that the error wraps ErrLimit or
+	// context.DeadlineExceeded (errors.Is, in the child).
+	Limit     bool     `json:"limit"`
+	Deadline  bool     `json:"deadline"`
 	Panic     string   `json:"panic"`
 	Seconds   float64  `json:"seconds"`
 	CPU       float64  `json:"cpu"` // user+system CPU seconds of the child
@@ -122,10 +126,13 @@ func runSecChild(job secJob) int {
 	if job.MemLimit > 0 {
 		opts = append(opts, WithMemoryLimit(job.MemLimit))
 	}
+	var pngOpts []PNGOption
 	for _, f := range job.Extra {
 		switch f {
 		case "nomeasure":
 			opts = append(opts, WithTextMeasurement(false))
+		case "quantize":
+			pngOpts = append(pngOpts, WithQuantizePNG(256))
 		}
 	}
 	if len(job.FontB64) > 0 {
@@ -158,28 +165,38 @@ func runSecChild(job secJob) int {
 			out = []byte(s)
 		case "vl2vega":
 			out, err = c.VegaLiteToVega([]byte(job.Input))
-		case "vegapng":
+		case "vegapng", "vlpng":
 			scale := job.Scale
 			if scale == 0 {
 				scale = 1
 			}
-			out, err = c.VegaToPNG([]byte(job.Input), WithScale(scale))
+			if job.Kind == "vlpng" {
+				out, err = c.VegaLiteToPNG([]byte(job.Input), append(pngOpts, WithScale(scale))...)
+			} else {
+				out, err = c.VegaToPNG([]byte(job.Input), append(pngOpts, WithScale(scale))...)
+			}
 		case "svgpng":
 			scale := job.Scale
 			if scale == 0 {
 				scale = 1
 			}
-			out, err = c.SVGToPNG(job.Input, WithScale(scale))
+			out, err = c.SVGToPNG(job.Input, append(pngOpts, WithScale(scale))...)
 		case "svgpdf":
 			out, err = c.SVGToPDF(job.Input)
 		case "vegapdf":
 			out, err = c.VegaToPDF([]byte(job.Input))
+		case "vlpdf":
+			out, err = c.VegaLiteToPDF([]byte(job.Input))
+		default:
+			err = fmt.Errorf("unknown kind %q", job.Kind)
 		}
 		if err != nil {
 			res.Err = err.Error()
+			res.Limit = errors.Is(err, ErrLimit)
+			res.Deadline = errors.Is(err, context.DeadlineExceeded)
 		}
 		res.OutLen = len(out)
-		if len(out) < 1<<20 && job.Kind != "svgpng" && job.Kind != "vegapng" && job.Kind != "svgpdf" {
+		if len(out) < 1<<20 && !strings.HasSuffix(job.Kind, "png") && !strings.HasSuffix(job.Kind, "pdf") {
 			res.Out = string(out)
 		}
 	}()
@@ -264,7 +281,10 @@ func TestSecProbe(t *testing.T) {
 
 // bigLoader serves a generated payload of mb megabytes for every Load: many
 // tiny rows, the worst case for a row-count limit that is checked after
-// parsing.
+// parsing. It is built a MiB at a time, polling ctx between chunks as a
+// Loader should: generating 32 MiB byte by byte without a poll took half a
+// second under -race, and longer than the bounded corpus's whole deadline on
+// a loaded runner, which the call then noticed only once Load returned.
 type bigLoader struct {
 	kind string
 	mb   int
@@ -272,30 +292,24 @@ type bigLoader struct {
 }
 
 func (l *bigLoader) Sanitize(ctx context.Context, uri string) (string, error) { return uri, nil }
-func (l *bigLoader) Load(_ context.Context, uri string) ([]byte, error) {
-	n := l.mb << 20
-	switch l.kind {
-	case "bigcsv":
-		b := make([]byte, 0, n+8)
-		b = append(b, "a\n"...)
-		for len(b) < n {
-			b = append(b, "1\n"...)
-		}
-		return b, nil
-	default:
-		b := make([]byte, 0, n+8)
-		b = append(b, '[')
-		for len(b) < n {
-			b = append(b, "{},"...)
-		}
-		return append(b, "{}]"...), nil
+func (l *bigLoader) Load(ctx context.Context, uri string) ([]byte, error) {
+	head, unit, tail := "a\n", "1\n", ""
+	if l.kind != "bigcsv" {
+		head, unit, tail = "[", "{},", "{}]"
 	}
-}
-
-func cpuSeconds() float64 {
-	var ru syscall.Rusage
-	if syscall.Getrusage(syscall.RUSAGE_SELF, &ru) != nil {
-		return 0
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
-	return float64(ru.Utime.Sec) + float64(ru.Utime.Usec)/1e6 + float64(ru.Stime.Sec) + float64(ru.Stime.Usec)/1e6
+	chunk := bytes.Repeat([]byte(unit), (1<<20)/len(unit))
+	b := make([]byte, 0, l.mb<<20+len(chunk)+len(head)+len(tail))
+	b = append(b, head...)
+	for len(b) < l.mb<<20 {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		b = append(b, chunk...)
+	}
+	// The payload is what it was when built a unit at a time.
+	n := len(head) + (l.mb<<20-len(head)+len(unit)-1)/len(unit)*len(unit)
+	return append(b[:n], tail...), nil
 }

@@ -2,6 +2,7 @@ package vegalite
 
 import (
 	"strings"
+	"unicode/utf16"
 
 	"github.com/mgilbir/aster/internal/jsval"
 )
@@ -18,9 +19,163 @@ func splitAccessPath(p string) []string {
 	return segs
 }
 
+// splitAccessPathV is splitAccessPath of a spec value, as vega-util's reads
+// it: n = p.length is taken before p becomes a string, so null and undefined
+// are TypeErrors, an array is split over the first length units of its text
+// (["a.b"] splits as "a", "b"; [{}] is "[object Object]" cut at one unit, a
+// bracket left open), and a number, boolean or object has no length and is
+// the empty path.
+func splitAccessPathV(v Value) []string {
+	switch {
+	case v.IsStr():
+		return splitAccessPath(v.StrValue())
+	case v.IsNullish():
+		throw("Cannot read properties of %s (reading 'length')", nullishName(v))
+	case v.IsArr():
+		return splitAccessPathN(v.AsString(), v.Len())
+	}
+	return nil
+}
+
+// splitAccessPathN is vega-util's splitAccessPath of the text p with its
+// loop bound n (p.length before the conversion to text), on UTF-16 units.
+func splitAccessPathN(text string, n int) []string {
+	p := utf16Len(text)
+	sub := func(i, j int) string {
+		i, j = min(max(i, 0), len(p)), min(max(j, 0), len(p))
+		if i >= j {
+			return ""
+		}
+		return string(utf16.Decode(p[i:j]))
+	}
+	var path []string
+	q := uint16(0)
+	inQuote := false
+	b, s := 0, ""
+	i, j := 0, 0
+	push := func() {
+		path = append(path, s+sub(i, j))
+		s = ""
+		i = j + 1
+	}
+	for i, j = 0, 0; j < n; j++ {
+		var c uint16
+		if j < len(p) {
+			c = p[j]
+		}
+		switch {
+		case j >= len(p):
+			// p[j] is undefined past the text: no case matches.
+		case c == '\\':
+			s += sub(i, j)
+			j++
+			i = j
+		case inQuote && c == q:
+			push()
+			inQuote = false
+			b = -1
+		case inQuote:
+			continue
+		case i == b && (c == '"' || c == '\''):
+			i = j + 1
+			q, inQuote = c, true
+		case c == '.' && b == 0:
+			if j > i {
+				push()
+			} else {
+				i = j + 1
+			}
+		case c == '[':
+			if j > i {
+				push()
+			}
+			b = j + 1
+			i = b
+		case c == ']':
+			if b == 0 {
+				throw("Access path missing open bracket: %s", text)
+			}
+			if b > 0 {
+				push()
+			}
+			b = 0
+			i = j + 1
+		}
+	}
+	if b != 0 {
+		throw("Access path missing closing bracket: %s", text)
+	}
+	if inQuote {
+		throw("Access path missing closing quote: %s", text)
+	}
+	if j > i {
+		j++
+		push()
+	}
+	return path
+}
+
+func replacePathInFieldV(v Value) string {
+	parts := splitAccessPathV(v)
+	for i, p := range parts {
+		parts[i] = escapePathAccess(p)
+	}
+	return strings.Join(parts, "\\.")
+}
+
+func removePathFromFieldV(v Value) string { return strings.Join(splitAccessPathV(v), ".") }
+
+func flatAccessWithDatumV(v Value, datum string) string {
+	return datum + "[" + jsonString(strings.Join(splitAccessPathV(v), ".")) + "]"
+}
+
+// accessPathDepthV is accessPathDepth of a spec value: 0 for a falsy one.
+func accessPathDepthV(v Value) int {
+	if !v.IsTruthy() {
+		return 0
+	}
+	return len(splitAccessPathV(v))
+}
+
+// unescapeSingleQuoteAndPathDotV is unescapeSingleQuoteAndPathDot of a spec
+// value, which calls escapedPath.replaceAll.
+func unescapeSingleQuoteAndPathDotV(v Value) string {
+	switch {
+	case v.IsStr():
+		return unescapeSingleQuoteAndPathDot(v.StrValue())
+	case v.IsNullish():
+		throw("Cannot read properties of %s (reading 'replaceAll')", nullishName(v))
+	}
+	throw("escapedPath.replaceAll is not a function")
+	return ""
+}
+
+// accessWithDatumToUnescapedPathV is accessWithDatumToUnescapedPath of a spec
+// value, which calls unescapedPath.replaceAll.
+func accessWithDatumToUnescapedPathV(v Value) string {
+	switch {
+	case v.IsStr():
+		return accessWithDatumToUnescapedPath(v.StrValue())
+	case v.IsNullish():
+		throw("Cannot read properties of %s (reading 'replaceAll')", nullishName(v))
+	}
+	throw("unescapedPath.replaceAll is not a function")
+	return ""
+}
+
 // accessPathWithDatum turns "a.b" into "datum["a"] && datum["a"]["b"]".
 func accessPathWithDatum(path, datum string) string {
-	pieces := splitAccessPath(path)
+	return accessPathWithDatumPieces(splitAccessPath(path), datum)
+}
+
+// accessPathWithDatumV is accessPathWithDatum of a field as upstream holds
+// it: splitAccessPath of a value that is not a string reads its length, so a
+// number, a boolean or an object gives no pieces at all.
+func accessPathWithDatumV(path Value, datum string) string {
+	return accessPathWithDatumPieces(splitAccessPathV(path), datum)
+}
+
+func accessPathWithDatumPieces(pieces []string, datum string) string {
 	prefixes := make([]string, 0, len(pieces))
 	for i := 1; i <= len(pieces); i++ {
 		qs := make([]string, i)
@@ -86,12 +241,14 @@ func isInternalField(name string) bool { return strings.HasPrefix(name, "__") }
 
 // prefixGenerator returns every prefix of every dotted path: "a.b.c" gives
 // a, a[b], a[b][c].
-func prefixGenerator(a map[string]bool) map[string]bool {
+func prefixGenerator(cc *compileCtx, a *sset) map[string]bool {
 	out := make(map[string]bool)
-	for x := range a {
-		split := splitAccessPath(x)
+	for _, x := range a.list() {
+		cc.work(1)
+		split := splitAccessPathV(a.value(x))
 		wrapped := make([]string, len(split))
 		for i, y := range split {
+			cc.work(1)
 			if i == 0 {
 				wrapped[i] = y
 			} else {
@@ -99,19 +256,22 @@ func prefixGenerator(a map[string]bool) map[string]bool {
 			}
 		}
 		for i := range wrapped {
+			cc.work(1)
 			out[strings.Join(wrapped[:i+1], "")] = true
 		}
 	}
 	return out
 }
 
-// fieldIntersection: nil (undefined) means "unknown", which intersects everything.
-func fieldIntersection(a, b map[string]bool) bool {
+// fieldIntersection is upstream's: true when either set is unknown (nil) or
+// the two share a field path prefix.
+func fieldIntersection(cc *compileCtx, a, b *sset) bool {
 	if a == nil || b == nil {
 		return true
 	}
-	pa, pb := prefixGenerator(a), prefixGenerator(b)
+	pa, pb := prefixGenerator(cc, a), prefixGenerator(cc, b)
 	for k := range pa {
+		cc.work(1)
 		if pb[k] {
 			return true
 		}

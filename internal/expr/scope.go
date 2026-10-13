@@ -11,6 +11,7 @@ import (
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/jsval"
+	ecma262 "github.com/mgilbir/goecma262"
 )
 
 // Error is a JavaScript exception raised while evaluating an expression, such
@@ -104,8 +105,11 @@ type Scope struct {
 	Now func() float64
 	// Rand supplies randomness. Nil uses the global generator.
 	Rand *Random
-	// Context is checked periodically inside long loops (sequence, pad,
-	// sort). Nil means never cancelled.
+	// Context is the call the evaluation belongs to. Evaluation work is
+	// charged to the budget.Ledger it carries (or the context polled, when it
+	// has none), so a timeout or a cancellation ends a long loop; the regular
+	// expressions an evaluation compiles are charged to the ledger's bytes.
+	// Nil means never cancelled and nothing charged.
 	Context context.Context
 	// Strings is the render-wide budget for the large strings expressions
 	// build; nil charges nothing (the per-string limit still applies).
@@ -113,19 +117,27 @@ type Scope struct {
 
 	env Env
 	// capability views of env, resolved once in SetEnv
-	data    DataProvider
-	indata  InDataProvider
-	units   UnitIndexProvider
-	writer  DataWriter
-	scales  ScaleProvider
-	geo     GeoProvider
-	tree    TreeProvider
-	view    ViewProvider
-	logger  Logger
-	tuples  TupleChecker
-	dflt    *format.Locale
-	stack   []jsval.Value
-	checked int
+	data   DataProvider
+	indata InDataProvider
+	units  UnitIndexProvider
+	writer DataWriter
+	scales ScaleProvider
+	geo    GeoProvider
+	tree   TreeProvider
+	view   ViewProvider
+	logger Logger
+	tuples TupleChecker
+	dflt   *format.Locale
+	stack  []jsval.Value
+	// pending is the work charged since the last flush to the ledger.
+	pending int64
+	// re is the copy of reOf that matcher last made.
+	re, reOf *ecma262.Regexp
+	// searchSteps counts the comparison steps of the Knuth-Morris-Pratt
+	// searches (searchFirst, searchLast and their tables). Nothing reads it
+	// but the tests, which check that a search is linear by counting its
+	// steps at n and 2n instead of timing it.
+	searchSteps int64
 }
 
 // NewScope makes a Scope bound to env (which may be nil).
@@ -173,20 +185,37 @@ func (s *Scope) nowMs() float64 {
 	return float64(time.Now().UnixMilli())
 }
 
-// tick is called once per iteration of loops that can run long; it consults
-// the context every 1024 calls.
-func (s *Scope) tick() {
+// workFlush is how much work an evaluation charges locally before it reports
+// it to the call's ledger, which polls the context: a unit is one step of a
+// loop (an element, a character, 64 bytes scanned), tens of nanoseconds, so a
+// flush comes every few microseconds of work at most.
+const workFlush = 1 << 10
+
+// work charges n units of evaluation work. Every loop whose trip count the
+// input controls charges its steps here, and so does every call of a builtin
+// (see compiler.call), so a timeout or a Close ends the evaluation wherever it
+// is (ADR 0010).
+func (s *Scope) work(n int) {
+	if s.pending += int64(n); s.pending >= workFlush {
+		s.flushWork()
+	}
+}
+
+// flushWork reports the pending work to the ledger, which polls the context.
+func (s *Scope) flushWork() {
+	n := s.pending
+	s.pending = 0
 	if s.Context == nil {
 		return
 	}
-	s.checked++
-	if s.checked&1023 != 0 {
-		return
-	}
-	if err := s.Context.Err(); err != nil {
+	m := budget.NewMeter(s.Context)
+	if err := m.Work(n); err != nil {
 		panic(&cancelled{err})
 	}
 }
+
+// workBytes charges a pass over n bytes of a string.
+func (s *Scope) workBytes(n int) { s.work(1 + n>>6) }
 
 type cancelled struct{ err error }
 
@@ -210,31 +239,30 @@ func NewStringBudget(n int64) *StringBudget {
 	return &StringBudget{left: n}
 }
 
-// checkLen throws the RangeError V8 throws for a string that is too long, and
-// charges the budget for a large one. n is the byte length about to be built;
-// call it before the allocation.
-func (s *Scope) checkLen(n int) {
-	if n > MaxStringLength {
-		throw("RangeError", "Invalid string length")
+// room is how many more bytes the budget can pay for.
+func (b *StringBudget) room() int64 {
+	if b == nil {
+		return math.MaxInt64
 	}
-	s.chargeBytes(n)
+	return b.left
 }
 
-// chargeItems charges the budget for an array of n elements an expression is
-// about to build (sequence and friends).
-func (s *Scope) chargeItems(n int) {
-	const perItem = 24
-	if n > 256 {
-		s.chargeBytes(n * perItem)
-	}
-}
-
+// chargeBytes charges the budget for a string of n bytes about to be made;
+// one of smallString bytes or less is free.
 func (s *Scope) chargeBytes(n int) {
-	if n <= smallString || s.Strings == nil {
+	if n > smallString {
+		s.chargeRaw(int64(n))
+	}
+}
+
+// chargeRaw charges n bytes whatever their size: the growth of a buffer
+// whose string is already past smallString.
+func (s *Scope) chargeRaw(n int64) {
+	if s.Strings == nil || n <= 0 {
 		return
 	}
-	if int64(n) > s.Strings.left {
+	if n > s.Strings.left {
 		exceeded("the expression string budget of this render is used up")
 	}
-	s.Strings.left -= int64(n)
+	s.Strings.left -= n
 }

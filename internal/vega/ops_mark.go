@@ -64,7 +64,19 @@ func (m *joinMap) find(t jsval.Value) *joinEntry {
 		}
 		return m.objs[o]
 	}
-	return m.vals[t.Key()]
+	return m.vals[joinValueKey(t)]
+}
+
+// joinValueKey is the key a datum that is no object joins by. Upstream's
+// default key is tupleid(t): an array or a date is a tuple of its own, but a
+// primitive (a crossfilter's index) has no id, and every primitive joins as
+// the one key undefined.
+func joinValueKey(t jsval.Value) jsval.Key {
+	switch t.Kind() {
+	case jsval.KindArr, jsval.KindTimestamp:
+		return t.Key()
+	}
+	return jsval.Undefined.Key()
 }
 
 // index builds objs from the entries.
@@ -87,7 +99,7 @@ func (m *joinMap) put(t jsval.Value, e *joinEntry) {
 			m.objs[e.key] = e
 		}
 	default:
-		m.vals[t.Key()] = e
+		m.vals[joinValueKey(t)] = e
 	}
 	m.order = append(m.order, e)
 }
@@ -591,6 +603,7 @@ func (v *runView) itemAsValue(it *scene.Item) jsval.Value {
 		return jsval.Undefined
 	}
 	o := jsval.NewObject(16)
+	o.SetHost(it) // what item it presents (itemOf)
 	eachItemProp(it, func(name string, val jsval.Value) { o.Set(name, val) })
 	o.Set("datum", it.Datum)
 	o.Set("$id", jsval.Int(v.itemHandle(it)))

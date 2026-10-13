@@ -1,6 +1,7 @@
 package scale
 
 import (
+	"context"
 	"math"
 
 	"github.com/mgilbir/aster/internal/format"
@@ -94,7 +95,13 @@ func (r *Radial) Unknown() jsval.Value { return r.unknown }
 func (r *Radial) SetUnknown(v jsval.Value) { r.unknown = v }
 
 // Ticks is scale.ticks(count).
-func (r *Radial) Ticks(count TickCount) []float64 { return r.squared.Ticks(count) }
+func (r *Radial) Ticks(ctx context.Context, count TickCount) ([]float64, error) {
+	return r.squared.Ticks(ctx, count)
+}
+
+func (r *Radial) ticksN(ctx context.Context, count TickCount, max int) ([]float64, error) {
+	return r.squared.ticksN(ctx, count, max)
+}
 
 // Nice is scale.nice(count).
 func (r *Radial) Nice(count TickCount) { r.squared.Nice(count) }

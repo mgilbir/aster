@@ -1,8 +1,8 @@
 package aster
 
 // Does WithMemoryLimit hold against the real heap? The option is not a heap
-// cap: limits() and rasterLimits() turn the byte limit into budgets (rows at
-// 256 bytes, scene items at 512, loaded bytes, large strings, canvas pixels, SVG
+// cap: deriveLimits (limits.go) turns the byte limit into budgets (rows at
+// 512 bytes, scene items at 1536, loaded bytes, large strings, canvas pixels, SVG
 // size), and the engine charges them as it works. This file renders
 // adversarial specifications under several limits and records the peak heap of
 // each render next to the limit, so the per-row and per-item estimates are
@@ -28,7 +28,7 @@ package aster
 // the second.
 //
 // Each case is sized in units of the budget it targets (the rows and items
-// limits() derives from the limit, the loaded bytes, ...) and run at two scales: 0.9 of the budget, which the render
+// deriveLimits derives from the limit, the loaded bytes, ...) and run at two scales: 0.9 of the budget, which the render
 // should complete or be refused by another budget, and 2, which should end in an
 // error wrapping ErrLimit. A (case, limit) holds if the render fails with
 // ErrLimit, or succeeds with a peak live heap of at most memcheckK times the
@@ -46,6 +46,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/mgilbir/aster/internal/budget"
 	"math"
 	"os"
 	"os/exec"
@@ -103,8 +104,17 @@ type memLoader struct {
 }
 
 func (l memLoader) Sanitize(_ context.Context, uri string) (string, error) { return uri, nil }
-func (l memLoader) Load(_ context.Context, _ string) ([]byte, error) {
+
+// Load bounds what it makes by what the call may still load, as the Loader
+// contract asks and the package's loaders do: a body past it is refused with
+// ErrLimit before it exists, so the heap measured is the engine's, not the
+// harness's (built whole, a 64 MiB body under a 32 MiB load budget made the
+// render's peak 2.25 times a 64 MiB limit).
+func (l memLoader) Load(ctx context.Context, _ string) ([]byte, error) {
 	n := int(l.mb * (1 << 20))
+	if left := budget.From(ctx).LoadLeft(); int64(n) > left {
+		return nil, fmt.Errorf("%w: a body of %d bytes, %d left to load", ErrLimit, n, left)
+	}
 	b := make([]byte, 0, n+64)
 	switch l.kind {
 	case "csv":
@@ -531,7 +541,7 @@ func (r memRow) holds() bool {
 }
 
 func memRun(c memCase, format string, limit uint64, scale float64) memRow {
-	lim := (&Converter{cfg: &config{memoryLimit: limit}}).limits()
+	lim := deriveLimits(limit).vega
 	rows := int(scale * float64(lim.MaxRows))
 	items := int(scale * float64(lim.MaxItems))
 	ms := c.gen(rows, items, limit, scale)

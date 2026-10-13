@@ -5,15 +5,23 @@ import (
 	"math"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"unicode/utf16"
+	"unsafe"
 
+	"github.com/mgilbir/aster/internal/bcache"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
-// maxCachedFormats bounds each memo table. Specifiers can come from data (a
-// format string per row), so the caches of vega-format's memoize() must not
-// grow without limit; past the bound formats are simply rebuilt.
-const maxCachedFormats = 1024
+// The memo tables of vega-format's memoize() are keyed by specifiers, which
+// can come from data (a format string per row) and be of any length, so each
+// is bounded by the bytes its entries hold; past that, formats not used
+// lately are dropped and built again when asked for. A real chart uses a
+// handful of formats of a few dozen bytes each.
+const (
+	formatMemoBytes    = 1 << 20
+	formatMemoMaxEntry = 64 << 10
+)
 
 // Locale is vega-format's locale: a number locale and a time locale, with
 // the memoised formatter factories Vega's expression functions and guide
@@ -24,15 +32,36 @@ type Locale struct {
 	// Local is the calendar of the timeXxx functions (UTC unless configured).
 	Local Zone
 
-	mu      sync.Mutex
-	numFmt  map[string]*NumberFormat
-	timeFmt map[timeKey]*TimeFormat
-	parsers map[timeKey]*TimeParser
+	memoOnce sync.Once
+	numFmt   *bcache.Cache[string, *NumberFormat]
+	timeFmt  *bcache.Cache[timeKey, *TimeFormat]
+	parsers  *bcache.Cache[timeKey, *TimeParser]
+	// The format each table last made: a column formats every row with one
+	// specifier, which this answers with a load and a comparison. (Set on a
+	// miss only, so that alternating specifiers allocate nothing.)
+	lastNum  atomic.Pointer[memoEntry[string, *NumberFormat]]
+	lastTime atomic.Pointer[memoEntry[timeKey, *TimeFormat]]
+}
+
+type memoEntry[K comparable, V any] struct {
+	key K
+	val V
 }
 
 type timeKey struct {
 	spec string
 	utc  bool
+}
+
+// memos returns the memo tables, made on first use (they allocate nothing
+// until an entry is added).
+func (l *Locale) memos() *Locale {
+	l.memoOnce.Do(func() {
+		l.numFmt = bcache.New[string, *NumberFormat](formatMemoBytes, formatMemoMaxEntry)
+		l.timeFmt = bcache.New[timeKey, *TimeFormat](formatMemoBytes, formatMemoMaxEntry)
+		l.parsers = bcache.New[timeKey, *TimeParser](formatMemoBytes, formatMemoMaxEntry)
+	})
+	return l
 }
 
 // NewLocale is vega-format's locale(numberSpec, timeSpec). An undefined or
@@ -65,24 +94,27 @@ func DefaultLocale() *Locale {
 // NumberFormat is locale.format(spec): the d3 format for a specifier,
 // memoised.
 func (l *Locale) NumberFormat(spec string) (*NumberFormat, error) {
-	l.mu.Lock()
-	f, ok := l.numFmt[spec]
-	l.mu.Unlock()
-	if ok {
+	if e := l.lastNum.Load(); e != nil && e.key == spec {
+		return e.val, nil
+	}
+	m := l.memos().numFmt
+	if f, ok := m.Get(spec); ok {
 		return f, nil
 	}
 	f, err := l.Number.Format(spec)
 	if err != nil {
 		return nil, err
 	}
-	l.mu.Lock()
-	if l.numFmt == nil || len(l.numFmt) >= maxCachedFormats {
-		l.numFmt = make(map[string]*NumberFormat)
+	// The key and the format's own strings (the specifier's fill, a prefix
+	// and suffix of locale text).
+	if m.Put(spec, f, int64(2*len(spec)+len(f.prefix)+len(f.suffix))+numberFormatBytes) {
+		l.lastNum.Store(&memoEntry[string, *NumberFormat]{spec, f})
 	}
-	l.numFmt[spec] = f
-	l.mu.Unlock()
 	return f, nil
 }
+
+// numberFormatBytes is what a NumberFormat holds besides its strings.
+const numberFormatBytes = int64(unsafe.Sizeof(NumberFormat{}))
 
 func (l *Locale) numberFormatSpec(s Specifier) (*NumberFormat, error) {
 	return l.NumberFormat(s.String())
@@ -233,25 +265,32 @@ func (l *Locale) UTCFormat(spec string) *TimeFormat { return l.timeFormat(spec, 
 
 func (l *Locale) timeFormat(spec string, utc bool) *TimeFormat {
 	key := timeKey{spec, utc}
-	l.mu.Lock()
-	f, ok := l.timeFmt[key]
-	l.mu.Unlock()
-	if ok {
+	if e := l.lastTime.Load(); e != nil && e.key == key {
+		return e.val
+	}
+	m := l.memos().timeFmt
+	if f, ok := m.Get(key); ok {
 		return f
 	}
 	z := l.Local
 	if utc {
 		z = UTC
 	}
-	f = l.Time.Format(spec, z)
-	l.mu.Lock()
-	if l.timeFmt == nil || len(l.timeFmt) >= maxCachedFormats {
-		l.timeFmt = make(map[timeKey]*TimeFormat)
+	f := l.Time.Format(spec, z)
+	// The key and the compiled steps (their literals are slices of the
+	// specifier or of the locale's patterns).
+	if m.Put(key, f, int64(len(spec))+int64(cap(f.ops))*fmtOpBytes+timeFormatBytes) {
+		l.lastTime.Store(&memoEntry[timeKey, *TimeFormat]{key, f})
 	}
-	l.timeFmt[key] = f
-	l.mu.Unlock()
 	return f
 }
+
+const (
+	fmtOpBytes      = int64(unsafe.Sizeof(fmtOp{}))
+	timeFormatBytes = int64(unsafe.Sizeof(TimeFormat{}))
+	parseOpBytes    = int64(unsafe.Sizeof(parseOp{}))
+	timeParserBytes = int64(unsafe.Sizeof(TimeParser{}))
+)
 
 // TimeParse is locale.timeParse (memoised).
 func (l *Locale) TimeParse(spec string) *TimeParser { return l.timeParser(spec, false) }
@@ -261,23 +300,16 @@ func (l *Locale) UTCParse(spec string) *TimeParser { return l.timeParser(spec, t
 
 func (l *Locale) timeParser(spec string, utc bool) *TimeParser {
 	key := timeKey{spec, utc}
-	l.mu.Lock()
-	p, ok := l.parsers[key]
-	l.mu.Unlock()
-	if ok {
+	m := l.memos().parsers
+	if p, ok := m.Get(key); ok {
 		return p
 	}
 	z := l.Local
 	if utc {
 		z = UTC
 	}
-	p = l.Time.Parse(spec, z)
-	l.mu.Lock()
-	if l.parsers == nil || len(l.parsers) >= maxCachedFormats {
-		l.parsers = make(map[timeKey]*TimeParser)
-	}
-	l.parsers[key] = p
-	l.mu.Unlock()
+	p := l.Time.Parse(spec, z)
+	m.Put(key, p, int64(len(spec))+int64(cap(p.ops))*parseOpBytes+timeParserBytes)
 	return p
 }
 
@@ -288,10 +320,20 @@ type TimeFormatter func(t float64) string
 // dynamic specifier: a string is an ordinary format; anything else must be a
 // time multi-format object (see TimeMultiFormat).
 func (l *Locale) TimeFormatSpec(spec jsval.Value, utc bool) (TimeFormatter, error) {
-	if spec.IsStr() {
-		return l.timeFormat(spec.StrValue(), utc).Format, nil
+	pick, err := l.timePicker(spec, utc)
+	if err != nil {
+		return nil, err
 	}
-	return l.TimeMultiFormat(spec, utc)
+	return func(t float64) string { return pick(t).Format(t) }, nil
+}
+
+// timePicker is TimeFormatSpec as the format each instant uses.
+func (l *Locale) timePicker(spec jsval.Value, utc bool) (func(t float64) *TimeFormat, error) {
+	if spec.IsStr() {
+		f := l.timeFormat(spec.StrValue(), utc)
+		return func(float64) *TimeFormat { return f }, nil
+	}
+	return l.multiPicker(spec, utc)
 }
 
 // TimeMultiFormat is vega-format's timeMultiFormat: the default d3 "multi
@@ -301,6 +343,14 @@ func (l *Locale) TimeFormatSpec(spec jsval.Value, utc bool) (TimeFormatter, erro
 // "hours", "date", "day", "week", "month", "quarter", "year"); null or
 // undefined mean the defaults, other non-objects are an error.
 func (l *Locale) TimeMultiFormat(spec jsval.Value, utc bool) (TimeFormatter, error) {
+	pick, err := l.multiPicker(spec, utc)
+	if err != nil {
+		return nil, err
+	}
+	return func(t float64) string { return pick(t).Format(t) }, nil
+}
+
+func (l *Locale) multiPicker(spec jsval.Value, utc bool) (func(t float64) *TimeFormat, error) {
 	if spec.IsNullish() || !spec.IsTruthy() {
 		spec = jsval.Obj(nil)
 	}
@@ -331,7 +381,7 @@ func (l *Locale) TimeMultiFormat(spec jsval.Value, utc bool) (TimeFormatter, err
 	fm := pick([]string{"month"}, "%B")
 	fq := pick([]string{"quarter"}, "%B")
 	fy := pick([]string{"year"}, "%Y")
-	return func(t float64) string {
+	return func(t float64) *TimeFormat {
 		var f *TimeFormat
 		switch {
 		case second.Floor(t) < t:
@@ -357,7 +407,7 @@ func (l *Locale) TimeMultiFormat(spec jsval.Value, utc bool) (TimeFormatter, err
 		default:
 			f = fy
 		}
-		return f.Format(t)
+		return f
 	}, nil
 }
 
@@ -398,6 +448,24 @@ func (l *Locale) TimeFormatValue(v, spec jsval.Value, utc bool) (string, error) 
 		return "", err
 	}
 	return f(jsval.ToNumber(v)), nil
+}
+
+// AppendTimeFormatValue appends what TimeFormatValue returns to dst, but
+// stops once dst holds more than max bytes, with ok false: a specifier
+// chooses the length (each %c of a locale writes up to MaxLocaleExpansion
+// bytes), so a caller with a bound learns it is reached before the text is
+// all made.
+func (l *Locale) AppendTimeFormatValue(dst []byte, v, spec jsval.Value, utc bool, max int) (out []byte, ok bool, err error) {
+	if v.Kind() == jsval.KindNull {
+		return append(dst, "null"...), true, nil
+	}
+	pick, err := l.timePicker(spec, utc)
+	if err != nil {
+		return dst, false, err
+	}
+	t := jsval.ToNumber(v)
+	out, ok = pick(t).appendMax(dst, t, max)
+	return out, ok, nil
 }
 
 // TimeParseValue is the `timeParse(string, spec)` / `utcParse(string, spec)`

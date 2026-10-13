@@ -55,7 +55,11 @@ func parseRangeForChannel(channel string, u *unitModel) withExplicit {
 		if sv := specifiedScale.Get(property); !sv.IsUndefined() {
 			supported := scaleTypeSupportProperty(scaleType, property)
 			incompatible := channelScalePropertyIncompatible(channel, property)
-			if !supported || incompatible {
+			if !supported {
+				u.ctx.warn(msgScalePropertyNotWorkWithScaleType(scaleType, property, channel))
+				continue
+			} else if incompatible {
+				u.ctx.warn(msgCannotUseScalePropertyWithNonColor(property))
 				continue
 			}
 			switch property {
@@ -73,11 +77,11 @@ func parseRangeForChannel(channel string, u *unitModel) withExplicit {
 					}
 				} else if isObject(rng) {
 					return makeExplicit(mkv("data", u.requestDataName(dsMain), "field", rng.Get("field"),
-						"sort", mkv("op", "min", "field", u.vgField(channel, fieldRefOption{}))))
+						"sort", mkv("op", "min", "field", u.vgFieldValue(channel, fieldRefOption{}))))
 				}
 				return makeExplicit(rng)
 			case "scheme":
-				return makeExplicit(parseScheme(sv))
+				return makeExplicit(parseScheme(u.ctx, sv))
 			}
 		}
 	}
@@ -92,6 +96,8 @@ func parseRangeForChannel(channel string, u *unitModel) withExplicit {
 				if step := getPositionStep(sizeValue, u, channel); step.IsTruthy() {
 					return makeExplicit(mkv("step", step))
 				}
+			} else {
+				u.ctx.warn(msgStepDropped(sizeChannel))
 			}
 		} else if isXorYOffset(channel) {
 			positionChannel := chY
@@ -114,8 +120,8 @@ func parseRangeForChannel(channel string, u *unitModel) withExplicit {
 	return makeImplicit(d)
 }
 
-func parseScheme(scheme Value) Value {
-	if isExtendedScheme(scheme) {
+func parseScheme(cc *compileCtx, scheme Value) Value {
+	if isExtendedScheme(cc, scheme) {
 		o := mk("scheme", scheme.Get("name"))
 		spread(o, jsval.Obj(omit(scheme, "name")))
 		return jsval.Obj(o)
@@ -169,7 +175,7 @@ func defaultRange(channel string, u *unitModel) Value {
 		}
 		rangeMax := sizeRangeMax(mark, size, u, config)
 		if isContinuousToDiscrete(scaleType) {
-			return interpolateRange(u.ctx, rangeMin, rangeMax, defaultContinuousToDiscreteCount(scaleType, config, domain, channel))
+			return interpolateRange(u.ctx, rangeMin, rangeMax, defaultContinuousToDiscreteCount(cc, scaleType, config, domain, channel))
 		}
 		return arr(rangeMin, rangeMax)
 	case chTheta:
@@ -185,7 +191,7 @@ func defaultRange(channel string, u *unitModel) Value {
 			return "min(" + u.getSignalName(wn) + "," + u.getSignalName(hn) + ")/2"
 		}))
 	case chTime:
-		return mkv("step", 1000/config.Get("scale").Get("framesPerSecond").AsDouble())
+		return mkv("step", 1000/jsval.ToNumber(config.Get("scale").Get("framesPerSecond")))
 	case chStrokeWidth:
 		return arr(config.Get("scale").Get("minStrokeWidth"), config.Get("scale").Get("maxStrokeWidth"))
 	case chStrokeDash:
@@ -285,7 +291,7 @@ func getOffsetRange(channel string, u *unitModel, offsetScaleType string) Value 
 		})
 		padding := u.config.Get("scale").Get("bandWithNestedOffsetPaddingInner")
 		bp := getBandPosition(cc, positionDef, undef, markDef, config)
-		bandPositionOffset := bp.AsDouble() - 0.5
+		bandPositionOffset := jsval.ToNumber(bp) - 0.5
 		if bp.IsUndefined() {
 			bandPositionOffset = math.NaN()
 		}
@@ -299,7 +305,7 @@ func getOffsetRange(channel string, u *unitModel, offsetScaleType string) Value 
 				startRatio = signalOf(padding) + "/2" + bandPositionOffsetExpr
 				endRatio = "(1 - " + signalOf(padding) + "/2)" + bandPositionOffsetExpr
 			} else {
-				p := padding.AsDouble()
+				p := jsval.ToNumber(padding)
 				startRatio = jsval.JSNumberString(p/2 + bandPositionOffset)
 				endRatio = jsval.JSNumberString(1 - p/2 + bandPositionOffset)
 			}
@@ -322,7 +328,7 @@ func getDiscretePositionSize(cc *compileCtx, channel string, size *Object, view 
 	return getViewConfigDiscreteSize(view, sizeChannel)
 }
 
-func defaultContinuousToDiscreteCount(scaleType string, config Value, domain Value, channel string) Value {
+func defaultContinuousToDiscreteCount(cc *compileCtx, scaleType string, config Value, domain Value, channel string) Value {
 	switch scaleType {
 	case "quantile":
 		return config.Get("scale").Get("quantileCount")
@@ -332,6 +338,7 @@ func defaultContinuousToDiscreteCount(scaleType string, config Value, domain Val
 		if !domain.IsUndefined() && domain.IsArr() {
 			return jsval.Int(domain.Len() + 1)
 		}
+		cc.warn(msgDomainRequiredForThresholdScale(channel))
 		return jsval.Int(3)
 	}
 	return undef
@@ -402,12 +409,12 @@ func sizeRangeMax(mark string, size *Object, u *unitModel, config Value) Value {
 func minXYStep(ctx *compileCtx, size *Object, xy [2]Value, view Value) Value {
 	var widthStep, heightStep float64
 	if w := size.Lookup("width"); isStep(w) {
-		widthStep = w.Get("step").AsDouble()
+		widthStep = jsval.ToNumber(w.Get("step"))
 	} else {
 		widthStep = getViewConfigDiscreteStep(view, "width")
 	}
 	if h := size.Lookup("height"); isStep(h) {
-		heightStep = h.Get("step").AsDouble()
+		heightStep = jsval.ToNumber(h.Get("step"))
 	} else {
 		heightStep = getViewConfigDiscreteStep(view, "height")
 	}
