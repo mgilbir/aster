@@ -277,8 +277,13 @@ func FuzzNewPattern(f *testing.F) {
 // bounds the caches that keep patterns: goecma262's MemoryFootprint is
 // within a few percent above the heap it retains. Each pattern is compiled
 // once first, so that tables built once per process (Unicode properties)
-// are not counted.
+// are not counted. The heap is measured over k copies held at once (k as
+// many as fit in 16 MiB, up to 32): what the runtime allocates around a
+// measurement (a few KB on darwin/arm64, where one copy was measured 5 KB
+// over its charge by a different pattern each run) is the same whatever k,
+// while an undercharge grows with it, so a small one is seen too.
 func TestPatternBytes(t *testing.T) {
+	const noise = 8 << 10
 	for _, c := range []patternCase{
 		{"(a{1000}){190}", ""}, {"[a-z]{3,50}x(\\d+)", ""}, {"(?:foo|bar|baz){20}", ""}, {"\\p{L}{50}", "u"},
 		{"[\\u0100-\\uffff]{100}", ""}, {"(x{100}){100}", ""}, {"a{129}", ""}, {"a{257}", ""}, {"(a|b){5000}", ""},
@@ -287,24 +292,32 @@ func TestPatternBytes(t *testing.T) {
 		{"(?<n>a)\\k<n>{300}", ""}, {"(?:(?<=[a-f]{20})x){50}", ""}, {"[\\q{abc|d|}]{300}", "v"}, {"\\p{RGI_Emoji}{3}", "v"},
 		{"(?:(?<=\\p{RGI_Emoji_Flag_Sequence})x){20}", "v"}, {"[[a-z]--[aeiou]]{400}", "v"}, {"\\P{Lu}{400}", "v"},
 	} {
-		if _, err := NewPattern(context.Background(), c.src, c.flags, unpaid); err != nil {
+		first, err := NewPattern(context.Background(), c.src, c.flags, unpaid)
+		if err != nil {
 			t.Fatal(err)
 		}
+		k := int(min(max((16<<20)/max(first.Bytes(), 1), 1), 32))
+		ps := make([]*Pattern, k)
 		runtime.GC()
 		var a, b runtime.MemStats
 		runtime.ReadMemStats(&a)
-		p, err := NewPattern(context.Background(), c.src, c.flags, unpaid)
-		if err != nil {
-			t.Fatal(err)
+		for i := range ps {
+			if ps[i], err = NewPattern(context.Background(), c.src, c.flags, unpaid); err != nil {
+				t.Fatal(err)
+			}
 		}
 		runtime.GC()
 		runtime.ReadMemStats(&b)
 		held := int64(b.HeapAlloc) - int64(a.HeapAlloc)
-		runtime.KeepAlive(p)
-		if p.Bytes() < held-4<<10 || p.Bytes() > held+held/8+16<<10 {
-			t.Errorf("/%s/%s: charged %d bytes, the heap holds %d", c.src, c.flags, p.Bytes(), held)
+		var charged int64
+		for _, p := range ps {
+			charged += p.Bytes()
 		}
-		t.Logf("/%s/%s: charged %d, held %d (%.3f)", c.src, c.flags, p.Bytes(), held, float64(p.Bytes())/float64(max(held, 1)))
+		runtime.KeepAlive(ps)
+		if charged < held-noise || charged > held+held/8+int64(k)*(16<<10) {
+			t.Errorf("/%s/%s: %d copies charged %d bytes, the heap holds %d", c.src, c.flags, k, charged, held)
+		}
+		t.Logf("/%s/%s: %d copies charged %d, held %d (%.3f)", c.src, c.flags, k, charged, held, float64(charged)/float64(max(held, 1)))
 	}
 }
 
