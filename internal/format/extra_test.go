@@ -110,8 +110,14 @@ func TestHugeOffsetsTerminate(t *testing.T) {
 	lw, _ := loc.Week(0).Every(1000000)
 	lw.Floor(1.6e12)
 	offsetT(lw, 1.6e12, 3)
-	// a hang guard: each walk ends (Invalid Date, maxFilterIterations)
-	if d := time.Since(start); d > testutil.Scaled(5*time.Second) {
+	// Each walk ends (Invalid Date, maxFilterIterations). Calibrated, although
+	// the site is named a hang guard: it asserts after the fact on the elapsed
+	// time, a claim about speed. CI baseline 1.05 s (Heavy gates timings run,
+	// without -race; 1.07 s under -race, 0.21 s unscaled); limit 2x = 2.1 s,
+	// rounded up to 3 s, scaled for -race: slower is a finding to investigate.
+	d := time.Since(start)
+	testutil.Timing(t, "huge offsets terminate (hang guard)", d, testutil.Scaled(3*time.Second))
+	if d > testutil.Scaled(3*time.Second) {
 		t.Errorf("took %v", d)
 	}
 	// Quarters past what the valid dates hold are refused before any step

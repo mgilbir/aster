@@ -112,12 +112,17 @@ func (c *rtContext) dataRoles(name string) map[string]*opNode {
 // parse instantiates a flow specification in this context.
 func (c *rtContext) parse(spec *flowSpec) *rtContext {
 	for _, e := range spec.operators {
+		// An operator's instantiation (its transform, its tables) costs
+		// a microsecond or more: 4 steps.
+		c.g.work(4)
 		c.parseOperator(e)
 	}
 	for _, e := range spec.operators {
+		c.g.work(1)
 		c.parseOperatorParameters(e)
 	}
 	for _, u := range spec.updates {
+		c.g.work(1)
 		c.parseUpdate(u)
 	}
 	c.resolve()
@@ -126,6 +131,7 @@ func (c *rtContext) parse(spec *flowSpec) *rtContext {
 
 func (c *rtContext) resolve() {
 	for _, f := range c.unresolved {
+		c.g.work(1)
 		f()
 	}
 	c.unresolved = nil
@@ -217,6 +223,7 @@ func (b *paramBuilder) set(name string, v any) { b.raw.set(name, v) }
 
 func (c *rtContext) parseParameters(l *paramList, b *paramBuilder) {
 	for i := 0; i < l.m.len(); i++ {
+		c.g.work(1)
 		b.set(l.m.keyAt(i), c.parseParameter(l.m.valAt(i), b))
 	}
 }
@@ -240,6 +247,7 @@ func (c *rtContext) parseParameter(p P, b *paramBuilder) any {
 	case []P:
 		out := make([]any, len(v))
 		for i, e := range v {
+			c.g.work(1)
 			out[i] = c.parseParameter(e, b)
 		}
 		return out
@@ -263,6 +271,7 @@ func (c *rtContext) parseParameter(p P, b *paramBuilder) any {
 		return c.keyFn(v)
 	case pExpr:
 		for _, d := range v.fn.deps {
+			c.g.work(1)
 			if d.e == undefinedRef {
 				fail("Operator not defined: undefined")
 			}
@@ -530,6 +539,10 @@ func (b *boundExpr) accessor() transforms.Field {
 // the scope, as vega-functions' parseExpression does. Unknown signal names are
 // an error, as upstream.
 func (s *Scope) parseExpression(code string) *exprFn {
+	// The compile, a hit's hash and the walks below are linear in the
+	// source, which expr.MaxLength bounds: a compile costs microseconds,
+	// counted as 8 steps and one per 8 bytes.
+	s.work(8 + len(code)/8)
 	prog, err := expr.CompileCachedContext(s.opts.ctx, code)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
@@ -579,6 +592,7 @@ func (s *Scope) parseExpression(code string) *exprFn {
 	if d.AllScales {
 		for c := s; c != nil; c = c.parentScope {
 			for name := range c.scales {
+				s.work(1)
 				addScale(name)
 			}
 		}

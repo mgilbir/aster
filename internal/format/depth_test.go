@@ -23,7 +23,10 @@ func TestLocaleExpansionIsBounded(t *testing.T) {
 	_ = f.Format(0)
 	p := l.Parse("%c", Zone{})
 	_, _ = p.Parse("2020")
-	if d := time.Since(start); d > testutil.Scaled(5*time.Second) {
+	d := time.Since(start)
+	// CI baseline 0.0002 s (Heavy gates timings run); limit 2x, floor 1 s: slower is a finding to investigate.
+	testutil.Timing(t, "self-expanding locale compile", d, testutil.Scaled(1*time.Second))
+	if d > testutil.Scaled(1*time.Second) {
 		t.Errorf("compiling a self-expanding locale took %v", d)
 	}
 }

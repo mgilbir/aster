@@ -2,12 +2,14 @@ package jsval
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"reflect"
 	"testing"
 	"time"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/fuzzutil"
 )
 
@@ -64,6 +66,13 @@ func FuzzParseJSON(f *testing.F) {
 
 func parseJSONProps(t *testing.T, data []byte) {
 	v, err := ParseJSON(data)
+	// A metered parse, charged every few bytes so that a charge falls
+	// inside every token, reads the document the same, error for error.
+	m := budget.NewMeter(context.Background())
+	if mv, merr := parseJSON(&m, 1+len(data)%7, data, 0); (err == nil) != (merr == nil) ||
+		(err != nil && err.Error() != merr.Error()) || (err == nil && !bytes.Equal(AppendJSON(nil, v), AppendJSON(nil, mv))) {
+		t.Fatalf("%q: the metered parse gives %v, %v; the parse %v, %v", data, mv, merr, v, err)
+	}
 	valid := json.Valid(data)
 	if err != nil {
 		var se *SyntaxError

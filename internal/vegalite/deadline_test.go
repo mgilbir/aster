@@ -189,7 +189,13 @@ func TestDeadlineIsHonouredThroughoutCompile(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: compiles specifications with 100,000 views and parameters")
 	}
-	maxGap := testutil.Scaled(200 * time.Millisecond)
+	// A stretch without a poll is a post-deadline allowance (a deadline ends
+	// the compile within it), so the 1 s floor of whole durations does not
+	// apply: 2x the measured value, rounded up to 50 ms, never below 250 ms.
+	// CI baseline 0.049 s (Heavy gates timings run, oracle job, not under
+	// -race; worst of 18 specs); 2x = 0.098 s, under the minimum. Scaled for
+	// -race (not measured there): slower is a finding to investigate.
+	maxGap := testutil.Scaled(250 * time.Millisecond)
 	specs := deadlineSpecs()
 	for _, name := range deadlineSpecNames {
 		t.Run(name, func(t *testing.T) {
@@ -203,6 +209,7 @@ func TestDeadlineIsHonouredThroughoutCompile(t *testing.T) {
 			_, err := Compile(spec, Options{Context: ctx})
 			gc.poll() // the stretch from the last poll to the return counts too
 			t.Logf("%v in %v, %d polls, longest gap %v", err, time.Since(start), gc.polls, gc.max)
+			testutil.Timing(t, "longest stretch without a context poll during compile", gc.max, maxGap)
 			if gc.max > maxGap {
 				t.Errorf("%v without polling the context (limit %v)\n%s", gc.max, maxGap, gc.maxSpan)
 			}
@@ -217,7 +224,12 @@ func TestDeadlineSweep(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: compiles specifications with 100,000 views and parameters")
 	}
-	maxOvershoot := testutil.Scaled(200 * time.Millisecond)
+	// A post-deadline allowance, so the 1 s floor of whole durations does not
+	// apply: 2x the measured value, rounded up to 50 ms, never below 250 ms.
+	// CI baseline 0.0106 s past the deadline (Heavy gates timings run, oracle
+	// job, not under -race; worst of 14); 2x = 0.021 s, under the minimum.
+	// Scaled for -race (not measured there): slower is a finding to investigate.
+	maxOvershoot := testutil.Scaled(250 * time.Millisecond)
 	specs := deadlineSpecs()
 	for _, name := range []string{"params", "layers", "concat-params"} {
 		spec := specs[name]()
@@ -233,6 +245,7 @@ func TestDeadlineSweep(t *testing.T) {
 			if !errors.Is(err, context.DeadlineExceeded) {
 				t.Errorf("%s at %v: %v", name, d, err)
 			}
+			testutil.Timing(t, "compile overshoot past a real deadline", el-d, maxOvershoot)
 			if el > d+maxOvershoot {
 				t.Errorf("%s: returned %v after a %v deadline", name, el-d, d)
 			}

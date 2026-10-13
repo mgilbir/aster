@@ -258,13 +258,17 @@ func TestOneLoadAllowancePerCall(t *testing.T) {
 }
 
 // within fails the test when f has not returned after a generous, race-scaled
-// time: the property is that it returns, not that it is fast.
+// time: the property is that it returns, not that it is fast. The 10 s is a
+// hang guard, not a calibrated bound: it stops a stuck test, and CI measured
+// every call under it at 0.25 s or less (Heavy gates timings run).
 func within(t *testing.T, what string, f func()) {
 	t.Helper()
 	done := make(chan struct{})
 	go func() { defer close(done); f() }()
+	start := time.Now()
 	select {
 	case <-done:
+		testutil.Timing(t, "within (hang guard: "+what+")", time.Since(start), testutil.Scaled(10*time.Second))
 	case <-time.After(testutil.Scaled(10 * time.Second)):
 		t.Fatalf("%s: still blocked (deadlock)", what)
 	}
@@ -486,10 +490,14 @@ func TestWithContextCancelsOneCall(t *testing.T) {
 		t.Errorf("after cancelled calls: %v", err)
 	}
 	// Nothing a cancelled call started is left running.
-	deadline := time.Now().Add(testutil.Scaled(5 * time.Second))
+	// The 5 s is a hang guard, not a calibrated bound: it only stops a wait on
+	// a goroutine that never exits (CI measured no wait at all).
+	goroutineWait := time.Now()
+	deadline := goroutineWait.Add(testutil.Scaled(5 * time.Second))
 	for runtime.NumGoroutine() > before && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
+	testutil.Timing(t, "cancelled calls leave no goroutines (wait for them to exit)", time.Since(goroutineWait), testutil.Scaled(5*time.Second))
 	if n := runtime.NumGoroutine(); n > before {
 		t.Errorf("%d goroutines left behind by cancelled calls", n-before)
 	}

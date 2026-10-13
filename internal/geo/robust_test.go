@@ -182,9 +182,15 @@ func TestNoPanicOnGarbage(t *testing.T) {
 		GeoContains(g, [2]float64{coord(weird(r)), coord(weird(r))})
 		CollectGeoJSON(jsval.ArrOf(g, g))
 	}
-	// A hang guard, not a speed test: generous, and scaled for the race
-	// detector.
-	if d := time.Since(start); d > testutil.Scaled(60*time.Second) {
+	// Calibrated, although the site is named a hang guard: it asserts after the
+	// fact that the fixed-seed loop took no longer than expected, which is a
+	// claim about speed, not a kill or a wait. CI baseline 6.14 s (Heavy gates
+	// timings run, without -race; 3.26 s under -race, 0.65 s unscaled); limit 2x
+	// = 12.3 s, rounded up to 15 s, scaled for -race: slower is a finding to
+	// investigate.
+	d := time.Since(start)
+	testutil.Timing(t, "geo garbage (hang guard)", d, testutil.Scaled(15*time.Second))
+	if d > testutil.Scaled(15*time.Second) {
 		t.Errorf("garbage took %v", d)
 	}
 }
@@ -294,9 +300,11 @@ func FuzzPath(f *testing.F) {
 			boundsOf(g)
 			centroidOf(g)
 		}()
+		waitStart := time.Now()
 		select {
 		case <-done:
-		case <-time.After(testutil.Scaled(5 * time.Second)):
+			testutil.Timing(t, "geo input terminates (hang guard)", time.Since(waitStart), testutil.Scaled(5*time.Second))
+		case <-time.After(testutil.Scaled(5 * time.Second)): // hang guard, not a calibrated bound (CI baseline 0.012 s)
 			t.Fatalf("input takes over %v: %q", testutil.Scaled(5*time.Second), src)
 		}
 	})

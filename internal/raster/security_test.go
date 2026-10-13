@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mgilbir/aster/internal/testutil"
 	"github.com/mgilbir/aster/internal/text"
 )
 
@@ -16,12 +17,20 @@ import (
 
 const secHead = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200">`
 
+// mustFinish scales max by raceSlowdown. Every max passed to it is calibrated
+// from the CI timings (Heavy gates timings run, oracle job and race job):
+// base = max(worst without -race, worst under -race / 5), limit 2x base, floor
+// 1 s, rounded up. The baseline is at each call; sites that need no more than
+// the floor say "floor". Slower than the limit is a finding to investigate,
+// not a limit to pad.
 func mustFinish(t *testing.T, name, svg string, lim Limits, max time.Duration) error {
 	t.Helper()
 	max *= raceSlowdown
 	start := time.Now()
 	_, err := Render([]byte(svg), Options{Limits: lim})
-	if d := time.Since(start); d > max {
+	d := time.Since(start)
+	testutil.Timing(t, "mustFinish "+name, d, max)
+	if d > max {
 		t.Errorf("%s: took %v (limit %v)", name, d, max)
 	}
 	return err
@@ -40,7 +49,7 @@ func TestCSSSelectorBacktracking(t *testing.T) {
 		b.WriteString("</g>")
 	}
 	b.WriteString("</svg>")
-	if err := mustFinish(t, "backtracking", b.String(), Limits{MaxCSSWork: 2_000_000}, 5*time.Second); err != nil {
+	if err := mustFinish(t, "backtracking", b.String(), Limits{MaxCSSWork: 2_000_000}, 1*time.Second); err != nil { // CI baseline 0.001 s: floor
 		t.Fatal(err)
 	}
 }
@@ -56,12 +65,13 @@ func TestCSSManyRulesManyElements(t *testing.T) {
 		fmt.Fprintf(&b, `<g><rect class="c%d" width="1" height="1"/></g>`, i)
 	}
 	b.WriteString("</svg>")
+	// CI baseline 0.19 s (0.96 s under -race, which is 0.19 s unscaled; 0.19 s without): floor.
 	// 40,001 rules over a limit of 30,000: refused, quickly.
-	if err := mustFinish(t, "rules x elements", b.String(), Limits{MaxCSSRules: 30000, MaxCSSWork: 5_000_000}, 8*time.Second); !errors.Is(err, errLimit) {
+	if err := mustFinish(t, "rules x elements", b.String(), Limits{MaxCSSRules: 30000, MaxCSSWork: 5_000_000}, 1*time.Second); !errors.Is(err, errLimit) {
 		t.Fatalf("rules over the limit: %v", err)
 	}
 	// Within it, the matching work is bounded.
-	if err := mustFinish(t, "rules x elements", b.String(), Limits{MaxCSSRules: 50000, MaxCSSWork: 5_000_000}, 8*time.Second); err != nil && !errors.Is(err, errLimit) {
+	if err := mustFinish(t, "rules x elements", b.String(), Limits{MaxCSSRules: 50000, MaxCSSWork: 5_000_000}, 1*time.Second); err != nil && !errors.Is(err, errLimit) {
 		t.Fatal(err)
 	}
 }
@@ -89,7 +99,8 @@ func TestSelfReferencingEffects(t *testing.T) {
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {
-			_ = mustFinish(t, name, secHead+body+"</svg>", Limits{}, 5*time.Second)
+			// CI baseline 0.02 s or less (mask-self the slowest): floor.
+			_ = mustFinish(t, name, secHead+body+"</svg>", Limits{}, 1*time.Second)
 		})
 	}
 }
@@ -112,7 +123,14 @@ func TestFilterLimits(t *testing.T) {
 	for name, def := range cases {
 		t.Run(name, func(t *testing.T) {
 			svg := secHead + `<defs>` + def + `</defs><rect x="20" y="20" width="60" height="60" fill="red" filter="url(#f)"/></svg>`
-			_ = mustFinish(t, name, svg, Limits{}, 10*time.Second)
+			// CI baseline: 0.13 s for huge-region, 0.66 s for many-prims, 0.03 s
+			// or less for the rest. Limit 2x, floor 1 s, so 1 s, and 1.5 s for
+			// many-prims.
+			lim := 1 * time.Second
+			if name == "many-prims" {
+				lim = 1500 * time.Millisecond
+			}
+			_ = mustFinish(t, name, svg, Limits{}, lim)
 		})
 	}
 	// The pixel budget rejects filter storms.
@@ -122,7 +140,8 @@ func TestFilterLimits(t *testing.T) {
 		b.WriteString(`<rect width="150" height="150" filter="url(#f)"/>`)
 	}
 	b.WriteString("</svg>")
-	err := mustFinish(t, "filter storm", b.String(), Limits{MaxEffectPixels: 3_000_000}, 20*time.Second)
+	// CI baseline 1.49 s (1.37 s unscaled under -race, 1.49 s without); limit 2x = 2.98 s, so 3 s.
+	err := mustFinish(t, "filter storm", b.String(), Limits{MaxEffectPixels: 3_000_000}, 3*time.Second)
 	if !errors.Is(err, errLimit) {
 		t.Errorf("filter storm: want resource limit error, got %v", err)
 	}
@@ -130,23 +149,25 @@ func TestFilterLimits(t *testing.T) {
 	// 2^9 primitives is 2^32, which must not wrap to 0 where int is 32 bits.
 	wide := `<svg xmlns="http://www.w3.org/2000/svg" width="4096" height="2048"><defs><filter id="f" filterUnits="userSpaceOnUse" x="0" y="0" width="4096" height="2048">` +
 		strings.Repeat(`<feOffset dx="1"/>`, 511) + `</filter></defs><rect width="4096" height="2048" filter="url(#f)"/></svg>`
-	if err := mustFinish(t, "primitives times area", wide, Limits{}, 5*time.Second); !errors.Is(err, errLimit) {
+	// CI baseline 0.02 s: floor.
+	if err := mustFinish(t, "primitives times area", wide, Limits{}, 1*time.Second); !errors.Is(err, errLimit) {
 		t.Errorf("primitives times area: want resource limit error, got %v", err)
 	}
 	// A filter region over MaxFilterPixels is not allocated, and fails the
 	// render rather than leave the element silently undrawn (C62).
-	if err := mustFinish(t, "region cap", secHead+`<defs><filter id="f" filterUnits="userSpaceOnUse" x="-1000" y="-1000" width="3000" height="3000"><feGaussianBlur stdDeviation="3"/></filter></defs><rect width="10" height="10" filter="url(#f)"/></svg>`, Limits{MaxFilterPixels: 1000}, 10*time.Second); !errors.Is(err, errLimit) {
+	if err := mustFinish(t, "region cap", secHead+`<defs><filter id="f" filterUnits="userSpaceOnUse" x="-1000" y="-1000" width="3000" height="3000"><feGaussianBlur stdDeviation="3"/></filter></defs><rect width="10" height="10" filter="url(#f)"/></svg>`, Limits{MaxFilterPixels: 1000}, 1*time.Second); !errors.Is(err, errLimit) { // CI baseline 0.0003 s: floor.
 		t.Errorf("region cap: want resource limit error, got %v", err)
 	}
 }
 
 func TestPatternLimits(t *testing.T) {
+	// The tile cases: CI baseline 0.004 s (huge and tiny tile): floor.
 	huge := secHead + `<defs><pattern id="p" width="1e9" height="1e9" patternUnits="userSpaceOnUse"><rect width="10" height="10"/></pattern></defs><rect width="100" height="100" fill="url(#p)"/></svg>`
-	if err := mustFinish(t, "huge tile", huge, Limits{}, 2*time.Second); err != nil {
+	if err := mustFinish(t, "huge tile", huge, Limits{}, 1*time.Second); err != nil {
 		t.Errorf("huge tile: %v", err)
 	}
 	tiny := secHead + `<defs><pattern id="p" width="1e-9" height="1e-9" patternUnits="userSpaceOnUse"><rect width="10" height="10"/></pattern></defs><rect width="100" height="100" fill="url(#p)"/></svg>`
-	if err := mustFinish(t, "tiny tile", tiny, Limits{}, 2*time.Second); err != nil {
+	if err := mustFinish(t, "tiny tile", tiny, Limits{}, 1*time.Second); err != nil {
 		t.Errorf("tiny tile: %v", err)
 	}
 	// A pattern per element (objectBoundingBox) is charged to the pixel budget.
@@ -156,7 +177,8 @@ func TestPatternLimits(t *testing.T) {
 		fmt.Fprintf(&b, `<rect x="%d" width="%d" height="100" fill="url(#p)"/>`, i%50, 100+i)
 	}
 	b.WriteString("</svg>")
-	err := mustFinish(t, "pattern storm", b.String(), Limits{MaxEffectPixels: 1_000_000}, 10*time.Second)
+	// CI baseline 0.12 s (0.62 s under -race, 0.06 s without): floor.
+	err := mustFinish(t, "pattern storm", b.String(), Limits{MaxEffectPixels: 1_000_000}, 1*time.Second)
 	if !errors.Is(err, errLimit) {
 		t.Errorf("pattern storm: want resource limit error, got %v", err)
 	}
@@ -169,7 +191,8 @@ func TestMarkerBomb(t *testing.T) {
 		fmt.Fprintf(&d, " L%d %d", i%190, (i*7)%190)
 	}
 	svg := secHead + `<defs><marker id="m" markerWidth="4" markerHeight="4">` + strings.Repeat(`<circle r="1"/>`, 50) + `</marker></defs><path d="` + d.String() + `" stroke="black" marker-mid="url(#m)"/></svg>`
-	err := mustFinish(t, "marker bomb", svg, Limits{MaxRenderNodes: 100_000}, 10*time.Second)
+	// CI baseline 0.48 s (2.38 s under -race, 0.40 s without): 2x = 0.95 s, so 1 s.
+	err := mustFinish(t, "marker bomb", svg, Limits{MaxRenderNodes: 100_000}, 1*time.Second)
 	if !errors.Is(err, errLimit) {
 		t.Errorf("marker bomb: want resource limit error, got %v", err)
 	}
@@ -187,7 +210,8 @@ func TestTextEdgeCases(t *testing.T) {
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {
-			_ = mustFinish(t, name, secHead+body+"</svg>", Limits{}, 5*time.Second)
+			// CI baseline 0.001 s: floor.
+			_ = mustFinish(t, name, secHead+body+"</svg>", Limits{}, 1*time.Second)
 		})
 	}
 }
@@ -280,7 +304,7 @@ func TestClipUseChains(t *testing.T) {
 		fmt.Fprintf(&b, `<use id="u%d" href="#u%d"/>`, i, (i+1)%n)
 	}
 	b.WriteString(`</clipPath></defs><rect width="5" height="5" clip-path="url(#c)"/></svg>`)
-	if err := mustFinish(t, "loop of uses", b.String(), Limits{}, 2*time.Second); err != nil {
+	if err := mustFinish(t, "loop of uses", b.String(), Limits{}, 1*time.Second); err != nil { // CI baseline 0.27 s: floor.
 		t.Errorf("a loop of uses: %v", err)
 	}
 
@@ -294,7 +318,8 @@ func TestClipUseChains(t *testing.T) {
 		fmt.Fprintf(&b, `<use id="u%d" href="#%s"/>`, i, next)
 	}
 	b.WriteString(`</clipPath></defs><rect width="5" height="5" clip-path="url(#c)"/></svg>`)
-	err := mustFinish(t, "chain of uses", b.String(), Limits{MaxRenderNodes: 1_000_000}, 5*time.Second)
+	// CI baseline 1.32 s (0.70 s unscaled under -race, 1.32 s without); limit 2x = 2.63 s, so 3 s.
+	err := mustFinish(t, "chain of uses", b.String(), Limits{MaxRenderNodes: 1_000_000}, 3*time.Second)
 	if !errors.Is(err, errLimit) {
 		t.Errorf("a long chain of uses from each of %d uses: %v, want the render-node limit", n, err)
 	}

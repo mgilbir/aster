@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/mgilbir/aster/internal/testutil"
 )
 
 // TestDeepInput feeds every input shape that nests, at depths far past any
@@ -28,6 +30,9 @@ func TestDeepInput(t *testing.T) {
 			t.Run(fmt.Sprintf("%s/%d", sh.name, depth), func(t *testing.T) {
 				t.Parallel()
 				res, killed := runSec(t, secJob{Kind: sh.kind, Input: sh.gen(depth), Timeout: "30s", MaxStackMB: deepStackMB}, deepWall)
+				if !killed {
+					testutil.TimingSeconds(t, "deep input render (child seconds)", res.Seconds, deepSlow)
+				}
 				switch {
 				case killed:
 					t.Errorf("did not come back: %s", firstLine(res.Err))
@@ -49,9 +54,15 @@ var deepDepths = []int{120, 250, 500, 5000, 100000}
 
 const (
 	deepStackMB = 64
-	deepWall    = 90 * time.Second
-	deepSlow    = 20.0 // seconds
+	// deepWall is runSec's kill wall: a hang guard, not a calibrated bound.
+	deepWall = 90 * time.Second
 )
+
+// deepSlow is the most a child may spend on one render, in seconds. CI
+// baseline 7.14 s (Heavy gates timings run, oracle job, not under -race; worst
+// of 345 renders); limit 2x, floor 1 s, rounded up: slower is a finding to
+// investigate, not a limit to pad. Scaled for -race.
+var deepSlow = testutil.Scaled(15 * time.Second).Seconds()
 
 func firstLine(s string) string {
 	s, _, _ = strings.Cut(s, "\n")

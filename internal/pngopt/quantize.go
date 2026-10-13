@@ -100,7 +100,10 @@ func Quantize(data []byte, maxColors int) (_ []byte, ok bool, reason string) {
 }
 
 // decodeNRGBA decodes a PNG into the non-premultiplied image the renderer
-// holds.
+// holds. It serves the entry points that run without a context (Quantize,
+// QuantizeOrRecode, Recode), so it has none to poll: the engine hands
+// QuantizeOrRecodeImage and RecodeImage the renderer's own image, and never
+// decodes or converts one here.
 func decodeNRGBA(data []byte) (*image.NRGBA, bool) {
 	src, err := png.Decode(bytes.NewReader(data))
 	if err != nil {

@@ -1,15 +1,16 @@
 package raster
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"image"
-	"image/draw"
 	"math"
 
 	"github.com/mgilbir/forme/shape"
 
 	"github.com/mgilbir/aster/internal/budget"
+	"github.com/mgilbir/aster/internal/imageref"
 	"github.com/mgilbir/aster/internal/text"
 )
 
@@ -22,8 +23,11 @@ const maxColourImageSide = 4096
 // origin on the baseline at the glyph's pen position: the image's top-left
 // corner is the box's (XMin, YMax). It is for a writer that cannot draw what
 // a glyph paints, as a PDF cannot draw a sweep gradient, and draws its image
-// instead. A glyph that paints nothing returns a nil image.
-func ColourGlyphImage(f *text.Face, gid int, fg shape.Color, ppem int) (img *image.NRGBA, box shape.Rect, err error) {
+// instead. A glyph that paints nothing returns a nil image. Painting polls
+// ctx (nil: never done) as a render does, and returns its error once it is
+// done: the glyph's painting is the font's to choose, up to a 4096-pixel
+// square drawn many times over.
+func ColourGlyphImage(ctx context.Context, f *text.Face, gid int, fg shape.Color, ppem int) (img *image.NRGBA, box shape.Rect, err error) {
 	defer func() {
 		// A bound reached deep in drawing stops it with budget.Stop.
 		if p := recover(); p != nil {
@@ -68,7 +72,8 @@ func ColourGlyphImage(f *text.Face, gid int, fg shape.Color, ppem int) (img *ima
 	w, h := int(fw), int(fh)
 	lim := Limits{}.withDefaults()
 	lim.MaxPixelOps = max(defaultMaxPixelOps, budget.MulInt(16, budget.MulInt(w, h)))
-	r := &renderer{lim: lim, rast: newRasterizer(), cw: w, ch: h, active: map[*node]bool{}}
+	r := &renderer{lim: lim, rast: newRasterizer(), cw: w, ch: h, active: map[*node]bool{}, ctx: ctx}
+	r.rast.ctx = ctx
 	r.fl.r = r
 	r.host = identity
 	r.initCaches()
@@ -84,7 +89,9 @@ func ColourGlyphImage(f *text.Face, gid int, fg shape.Color, ppem int) (img *ima
 	if r.err != nil {
 		return nil, box, r.err
 	}
-	img = r.cv.toNRGBA()
+	if img = r.cv.toNRGBA(r); img == nil {
+		return nil, box, r.err
+	}
 	if svg {
 		// Cropped to what it painted.
 		c := opaqueBounds(img)
@@ -93,7 +100,9 @@ func ColourGlyphImage(f *text.Face, gid int, fg shape.Color, ppem int) (img *ima
 		}
 		// A copy of its own: a sub-image's rows are its parent's.
 		crop := image.NewNRGBA(image.Rect(0, 0, c.Dx(), c.Dy()))
-		draw.Draw(crop, crop.Bounds(), img, c.Min, draw.Src)
+		if err := imageref.DrawSrc(ctx, crop, crop.Bounds(), img, c.Min); err != nil {
+			return nil, box, err
+		}
 		img = crop
 		x0, x1 = x0+float64(c.Min.X), x0+float64(c.Max.X)
 		y0, y1 = y1-float64(c.Max.Y), y1-float64(c.Min.Y)

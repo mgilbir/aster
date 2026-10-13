@@ -158,8 +158,16 @@ func runMutations(t *testing.T, mode string) {
 				var msg string
 				select {
 				case msg = <-done:
-				case <-time.After(testutil.Scaled(20 * time.Second)):
+				case <-time.After(testutil.Scaled(20 * time.Second)): // hang guard, not a calibrated bound
 					msg = "HANG(>20s with 3s timeout)"
+				}
+				// SLOW bound: the render is cut by the 3 s timeout, so CI baseline
+				// 3.005 s (3.027 s under -race; the timeout is wall time and does
+				// not scale; Heavy gates timings run, worst of 1200 mutants);
+				// limit 2x = 6.01 s, floor 1 s, rounded up to 8 s: slower is a
+				// finding to investigate.
+				if msg == "" {
+					testutil.Timing(t, "extreme mutant (SLOW bound, 3s timeout)", time.Since(start), testutil.Scaled(8*time.Second))
 				}
 				if el := time.Since(start); msg == "" && el > testutil.Scaled(8*time.Second) {
 					msg = fmt.Sprintf("SLOW %v with 3s timeout", el)

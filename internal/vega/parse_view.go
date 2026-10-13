@@ -1,6 +1,9 @@
 package vega
 
 import (
+	"strings"
+
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -24,10 +27,12 @@ func arrayOf(v jsval.Value) []jsval.Value {
 	return []jsval.Value{v}
 }
 
-// extendObj copies src's entries onto dst (vega-util extend).
-func extendObj(dst *jsval.Object, src jsval.Value) *jsval.Object {
+// extendObj copies src's entries onto dst (vega-util extend), charging each
+// to m (nil: no meter).
+func extendObj(m *budget.Meter, dst *jsval.Object, src jsval.Value) *jsval.Object {
 	if o := src.ObjValue(); o != nil {
 		for i := 0; i < o.Len(); i++ {
+			charge(m, 1)
 			dst.Set(o.KeyAt(i), o.ValueAt(i))
 		}
 	}
@@ -35,14 +40,15 @@ func extendObj(dst *jsval.Object, src jsval.Value) *jsval.Object {
 }
 
 // extended returns a copy of a with b's entries applied.
-func extended(a, b jsval.Value) jsval.Value {
+func extended(m *budget.Meter, a, b jsval.Value) jsval.Value {
 	var o *jsval.Object
 	if a.IsObj() {
+		charge(m, a.ObjValue().Len())
 		o = a.ObjValue().Clone()
 	} else {
 		o = jsval.NewObject(4)
 	}
-	return jsval.Obj(extendObj(o, b))
+	return jsval.Obj(extendObj(m, o, b))
 }
 
 func isObject(v jsval.Value) bool { return v.IsObj() || v.IsArr() }
@@ -56,22 +62,23 @@ func valueOr(v, d jsval.Value) jsval.Value {
 	return v
 }
 
-func rootEncode(specEncode jsval.Value) jsval.Value {
+func rootEncode(m *budget.Meter, specEncode jsval.Value) jsval.Value {
 	base := obj(
 		"enter", obj("x", obj("value", jsval.Num(0)), "y", obj("value", jsval.Num(0))),
 		"update", obj("width", obj("signal", sv("width")), "height", obj("signal", sv("height"))),
 	)
-	return extendEncode(base, specEncode, nil)
+	return extendEncode(m, base, specEncode, nil)
 }
 
 // extendEncode merges the encode sets of extra into encode (util.extendEncode).
-func extendEncode(encode, extra jsval.Value, skip map[string]bool) jsval.Value {
+func extendEncode(m *budget.Meter, encode, extra jsval.Value, skip map[string]bool) jsval.Value {
 	eo := encode.ObjValue()
 	xo := extra.ObjValue()
 	if xo == nil {
 		return encode
 	}
 	for i := 0; i < xo.Len(); i++ {
+		charge(m, 1)
 		name := xo.KeyAt(i)
 		if skip != nil && skip[name] {
 			continue
@@ -79,11 +86,12 @@ func extendEncode(encode, extra jsval.Value, skip map[string]bool) jsval.Value {
 		cur := eo.Lookup(name)
 		var dst *jsval.Object
 		if cur.IsObj() && !cur.IsNullish() {
+			charge(m, cur.ObjValue().Len())
 			dst = cur.ObjValue().Clone()
 		} else {
 			dst = jsval.NewObject(4)
 		}
-		eo.Set(name, jsval.Obj(extendObj(dst, xo.ValueAt(i))))
+		eo.Set(name, jsval.Obj(extendObj(m, dst, xo.ValueAt(i))))
 	}
 	return encode
 }
@@ -134,7 +142,7 @@ func signalObject(name string, v jsval.Value) jsval.Value {
 // autosize, padding, width, height) take their initial value from the spec, or
 // the config, and a spec signal of the same name is merged over them; config
 // signals are added only when the spec does not define the name.
-func collectSignals(spec, config jsval.Value) []jsval.Value {
+func collectSignals(m *budget.Meter, spec, config jsval.Value) []jsval.Value {
 	get := func(name string) jsval.Value { return valueOr(spec.Get(name), config.Get(name)) }
 	orZero := func(v jsval.Value) jsval.Value {
 		if v.IsTruthy() {
@@ -155,10 +163,11 @@ func collectSignals(spec, config jsval.Value) []jsval.Value {
 	}
 	seen := map[string]bool{}
 	for _, s := range arrayOf(spec.Get("signals")) {
+		charge(m, 1)
 		name := s.Get("name").AsString()
 		if i, ok := pre[name]; ok {
 			merged := signals[i].ObjValue().Clone()
-			extendObj(merged, s)
+			extendObj(m, merged, s)
 			signals[i] = jsval.Obj(merged)
 		} else {
 			signals = append(signals, s)
@@ -166,6 +175,7 @@ func collectSignals(spec, config jsval.Value) []jsval.Value {
 		seen[name] = true
 	}
 	for _, s := range arrayOf(config.Get("signals")) {
+		charge(m, 1)
 		name := s.Get("name").AsString()
 		if _, ok := pre[name]; ok || seen[name] {
 			continue
@@ -180,8 +190,9 @@ func parseView(spec jsval.Value, scope *Scope) {
 	config := scope.config
 
 	scope.root = scope.add(operatorEntry(nil))
-	signals := collectSignals(spec, config)
+	signals := collectSignals(scope.meter(), spec, config)
 	for _, s := range signals {
+		scope.work(1)
 		parseSignal(s, scope)
 	}
 
@@ -198,7 +209,7 @@ func parseView(spec jsval.Value, scope *Scope) {
 	input := scope.add(mk("itemstore"))
 
 	enc := scope.add(newEntry("encode", nil, parseEncode(
-		rootEncode(spec.Get("encode")), "group", "frame", spec.Get("style"), scope,
+		rootEncode(scope.meter(), spec.Get("encode")), "group", "frame", spec.Get("style"), scope,
 		plist("pulse", input),
 	)))
 
@@ -235,19 +246,24 @@ func parseScopeSpec(spec jsval.Value, scope *Scope, preprocessed []jsval.Value) 
 
 	if preprocessed == nil {
 		for _, s := range signals {
+			scope.work(1)
 			parseSignal(s, scope)
 		}
 	}
 	for _, p := range arrayOf(spec.Get("projections")) {
+		scope.work(1)
 		parseProjection(p, scope)
 	}
 	for _, s := range scales {
+		scope.work(1)
 		initScale(s, scope)
 	}
 	for _, d := range arrayOf(spec.Get("data")) {
+		scope.work(1)
 		parseData(d, scope)
 	}
 	for _, s := range scales {
+		scope.work(1)
 		parseScale(s, scope)
 	}
 	upd := signals
@@ -255,15 +271,19 @@ func parseScopeSpec(spec jsval.Value, scope *Scope, preprocessed []jsval.Value) 
 		upd = preprocessed
 	}
 	for _, s := range upd {
+		scope.work(1)
 		parseSignalUpdates(s, scope)
 	}
 	for _, a := range arrayOf(spec.Get("axes")) {
+		scope.work(1)
 		parseAxis(a, scope)
 	}
 	for _, m := range arrayOf(spec.Get("marks")) {
+		scope.work(1)
 		parseMark(m, scope)
 	}
 	for _, l := range arrayOf(spec.Get("legends")) {
+		scope.work(1)
 		parseLegend(l, scope)
 	}
 	if t := spec.Get("title"); t.IsTruthy() {
@@ -319,6 +339,7 @@ func parseSignalUpdates(sig jsval.Value, scope *Scope) {
 		setExprUpdate(op, scope.parseExpression(expr.AsString()))
 	}
 	for _, on := range arrayOf(sig.Get("on")) {
+		scope.work(1)
 		parseUpdate(on, scope, op)
 	}
 }
@@ -334,6 +355,7 @@ func parseUpdate(spec jsval.Value, scope *Scope, target *entry) {
 	var sources []jsval.Value
 	if !events.IsStr() {
 		for _, s := range arrayOf(events) {
+			scope.work(1)
 			if s.IsObj() && (s.Get("signal").IsTruthy() || s.Get("scale").IsTruthy()) {
 				sources = append(sources, s)
 			}
@@ -367,19 +389,23 @@ func parseUpdate(spec jsval.Value, scope *Scope, target *entry) {
 	}
 	var source P
 	if len(sources) > 1 {
-		code := "["
+		// Built in one buffer: concatenating per source is quadratic in
+		// the number of sources.
+		var code strings.Builder
+		code.WriteByte('[')
 		for i, s := range sources {
+			scope.work(1)
 			if i > 0 {
-				code += ","
+				code.WriteByte(',')
 			}
 			if sc := s.Get("scale"); sc.IsTruthy() {
-				code += `scale("` + sc.AsString() + `")`
+				code.WriteString(`scale("` + sc.AsString() + `")`)
 			} else {
-				code += s.Get("signal").AsString()
+				code.WriteString(s.Get("signal").AsString())
 			}
 		}
-		code += "]"
-		source = scope.signalRef(code)
+		code.WriteByte(']')
+		source = scope.signalRef(code.String())
 	} else {
 		s := sources[0]
 		if s.Get("signal").IsTruthy() {

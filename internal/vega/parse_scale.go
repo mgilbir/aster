@@ -45,6 +45,7 @@ func parseScale(spec jsval.Value, scope *Scope) {
 	}
 	if o := spec.ObjValue(); o != nil {
 		for i := 0; i < o.Len(); i++ {
+			scope.work(1)
 			key := o.KeyAt(i)
 			if params.has(key) || key == "name" {
 				continue
@@ -72,6 +73,7 @@ func parseArray(v jsval.Value, scope *Scope) P {
 	items := v.Items()
 	out := make([]P, len(items))
 	for i, it := range items {
+		scope.work(1)
 		out[i] = parseLiteral(it, scope)
 	}
 	return out
@@ -102,6 +104,7 @@ func parseScaleDomain(domain jsval.Value, spec jsval.Value, scope *Scope) P {
 func explicitDomain(domain jsval.Value, scope *Scope) P {
 	out := make([]P, domain.Len())
 	for i, v := range domain.Items() {
+		scope.work(1)
 		out[i] = parseLiteral(v, scope)
 	}
 	return out
@@ -133,6 +136,7 @@ func multipleDomain(domain, spec jsval.Value, scope *Scope) P {
 	data := domain.Get("data")
 	var fields []jsval.Value
 	for _, d := range domain.Get("fields").Items() {
+		scope.work(1)
 		switch {
 		case d.IsStr():
 			fields = append(fields, obj("data", data, "field", d))
@@ -178,6 +182,7 @@ func ordinalMultipleDomain(domain jsval.Value, scope *Scope, fields []jsval.Valu
 	sort := parseSort(domain.Get("sort"), true)
 	var counts []P
 	for _, f := range fields {
+		scope.work(1)
 		data := scope.findData(f.Get("data").AsString())
 		if data == nil {
 			dataLookupError(f.Get("data"))
@@ -232,6 +237,7 @@ func parseSort(sort jsval.Value, multidomain bool) jsval.Value {
 func quantileMultipleDomain(scope *Scope, fields []jsval.Value) P {
 	var values []P
 	for _, f := range fields {
+		scope.work(1)
 		data := scope.findData(f.Get("data").AsString())
 		if data == nil {
 			dataLookupError(f.Get("data"))
@@ -244,6 +250,7 @@ func quantileMultipleDomain(scope *Scope, fields []jsval.Value) P {
 func numericMultipleDomain(scope *Scope, fields []jsval.Value) P {
 	var extents []P
 	for _, f := range fields {
+		scope.work(1)
 		data := scope.findData(f.Get("data").AsString())
 		if data == nil {
 			dataLookupError(f.Get("data"))
@@ -313,7 +320,7 @@ func parseScaleRangeAlias(spec jsval.Value, scope *Scope, params *paramList, dep
 			if depth >= maxRangeAliases {
 				perrLimit("Scale range aliases nest too deeply: %s", quote(rng))
 			}
-			return parseScaleRangeAlias(extended(spec, obj("range", config.Get(name))), scope, params, depth+1)
+			return parseScaleRangeAlias(extended(scope.meter(), spec, obj("range", config.Get(name))), scope, params, depth+1)
 		}
 		switch name {
 		case "width":
@@ -353,6 +360,7 @@ func parseScaleRangeAlias(spec jsval.Value, scope *Scope, params *paramList, dep
 	items := rng.Items()
 	out := make([]P, len(items))
 	for i, v := range items {
+		scope.work(1)
 		if v.IsArr() {
 			out[i] = parseArray(v, scope)
 		} else {
@@ -369,6 +377,7 @@ func parseProjection(proj jsval.Value, scope *Scope) {
 	params := newParamList()
 	if o := proj.ObjValue(); o != nil {
 		for i := 0; i < o.Len(); i++ {
+			scope.work(1)
 			name := o.KeyAt(i)
 			if name == "name" {
 				continue
@@ -378,6 +387,7 @@ func parseProjection(proj jsval.Value, scope *Scope) {
 	}
 	if co := config.ObjValue(); co != nil {
 		for i := 0; i < co.Len(); i++ {
+			scope.work(1)
 			name := co.KeyAt(i)
 			if cur := params.get(name); cur == nil || isNullP(cur) {
 				params.set(name, parseProjectionParameter(co.ValueAt(i), name, scope))
@@ -398,6 +408,7 @@ func parseProjectionParameter(v jsval.Value, name string, scope *Scope) P {
 		items := v.Items()
 		out := make([]P, len(items))
 		for i, it := range items {
+			scope.work(1)
 			out[i] = parseProjectionParameter(it, name, scope)
 		}
 		return out
@@ -420,6 +431,7 @@ func (s *Scope) projectionRef(name string) P { return s.scaleRef(name) }
 type guideScope struct{ s *Scope }
 
 func (g guideScope) Config() jsval.Value { return g.s.config }
+func (g guideScope) Work(n int)          { g.s.work(n) }
 func (g guideScope) ScaleType(name string) string {
 	if e := g.s.findScale(name); e != nil {
 		return g.s.scaleType(name)

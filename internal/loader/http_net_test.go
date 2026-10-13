@@ -204,7 +204,11 @@ func TestHTTPLoaderSlowServers(t *testing.T) {
 		if !errors.Is(err, context.DeadlineExceeded) {
 			t.Errorf("%s: err = %v, want a deadline", name, err)
 		}
-		if d := time.Since(start); d > testutil.Scaled(5*time.Second) {
+		d := time.Since(start)
+		// CI baseline 0.301 s (the 300 ms timeout itself; Heavy gates timings
+		// run, same with and without -race); limit 2x, floor 1 s: slower is a finding to investigate.
+		testutil.Timing(t, "HTTPLoader 300ms timeout, slow server: "+name, d, testutil.Scaled(1*time.Second))
+		if d > testutil.Scaled(1*time.Second) {
 			t.Errorf("%s: took %v", name, d)
 		}
 
@@ -255,7 +259,10 @@ func TestHTTPLoaderBodyLimits(t *testing.T) {
 	if _, err := l.Load(ctx, lie.URL+"/x"); !errors.Is(err, budget.ErrLimit) {
 		t.Errorf("declared length: err = %v, want a limit", err)
 	}
-	if d := time.Since(start); d > testutil.Scaled(2*time.Second) {
+	d := time.Since(start)
+	// CI baseline 0.012 s (Heavy gates timings run); limit 2x, floor 1 s: slower is a finding to investigate.
+	testutil.Timing(t, "HTTPLoader declared length over the limit", d, testutil.Scaled(1*time.Second))
+	if d > testutil.Scaled(1*time.Second) {
 		t.Errorf("declared length: took %v", d)
 	}
 	if data, err := l.Load(context.Background(), short.URL+"/x"); err == nil {

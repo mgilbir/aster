@@ -259,6 +259,7 @@ func render(root *element, shaper TextShaper, fetched map[string][]byte, opts Op
 	r.w = newContentWriter(r.ledger)
 	r.images = newImageCatalog(fetched, r.lim, r.ledger)
 	r.images.onErr = opts.ImageError
+	r.images.ctx = opts.Context
 	if opts.Text != TextOutlines && shaper != nil {
 		r.fonts = newFontCatalog(opts.Context, opts.Text, shaper)
 	}

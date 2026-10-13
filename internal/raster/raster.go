@@ -57,6 +57,7 @@ import (
 	"math"
 
 	"github.com/mgilbir/aster/internal/budget"
+	"github.com/mgilbir/aster/internal/imageref"
 	"github.com/mgilbir/aster/internal/pngopt"
 )
 
@@ -226,8 +227,15 @@ func Render(svg []byte, opts Options) (img *image.NRGBA, err error) {
 		nc := color.NRGBAModel.Convert(opts.Background).(color.NRGBA)
 		a := uint32(nc.A)
 		pr := [4]uint8{uint8(mul255(uint32(nc.R), a)), uint8(mul255(uint32(nc.G), a)), uint8(mul255(uint32(nc.B), a)), nc.A}
-		for i := 0; i < len(r.cv.pix); i += 4 {
-			copy(r.cv.pix[i:i+4], pr[:])
+		// A band at a time, polling: the canvas is the output's size.
+		for b := 0; b < len(r.cv.pix); b += 4 * imageref.BandPixels {
+			if !r.poll(true) {
+				return nil, r.err
+			}
+			band := r.cv.pix[b:min(b+4*imageref.BandPixels, len(r.cv.pix))]
+			for i := 0; i < len(band); i += 4 {
+				copy(band[i:i+4], pr[:])
+			}
 		}
 		r.cv.dirty = r.cv.bounds()
 	}
@@ -243,7 +251,11 @@ func Render(svg []byte, opts Options) (img *image.NRGBA, err error) {
 	if r.err != nil {
 		return nil, r.err
 	}
-	return r.cv.toNRGBA(), nil
+	out := r.cv.toNRGBA(r)
+	if out == nil {
+		return nil, r.err
+	}
+	return out, nil
 }
 
 func (r *renderer) renderRoot(root *node, st *state) {
@@ -286,9 +298,24 @@ func (r *renderer) renderRoot(root *node, st *state) {
 // toNRGBA converts premultiplied pixels to a non-premultiplied image, in
 // place: the canvas is done with, and its pixels become the image's, so the
 // output costs no second canvas of memory (C103). c must not be used after.
-func (c *canvas) toNRGBA() *image.NRGBA {
+// It polls r's context a band of pixels at a time (the canvas is as large as
+// the output, which a deadline must reach into too), and is nil once r
+// stops.
+func (c *canvas) toNRGBA(r *renderer) *image.NRGBA {
 	out := &image.NRGBA{Pix: c.pix, Stride: 4 * c.w, Rect: image.Rect(0, 0, c.w, c.h)}
-	src, dst := c.pix, out.Pix
+	for b := 0; b < len(c.pix); b += 4 * imageref.BandPixels {
+		if !r.poll(true) {
+			return nil
+		}
+		unpremultiply(c.pix[b:min(b+4*imageref.BandPixels, len(c.pix))])
+	}
+	return out
+}
+
+// unpremultiply converts premultiplied RGBA pixels to non-premultiplied ones,
+// in place.
+func unpremultiply(px []uint8) {
+	src, dst := px, px
 	for i := 0; i < len(src); i += 4 {
 		a := uint32(src[i+3])
 		switch a {
@@ -312,7 +339,6 @@ func (c *canvas) toNRGBA() *image.NRGBA {
 			dst[i], dst[i+1], dst[i+2], dst[i+3] = uint8(r), uint8(g), uint8(b), uint8(a)
 		}
 	}
-	return out
 }
 
 // EncodePNG encodes img as PNG. Fully opaque images are written as RGB

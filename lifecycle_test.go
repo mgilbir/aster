@@ -103,9 +103,13 @@ func TestCloseNotBlockedByGeoWalk(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	closed := make(chan error, 1)
 	go func() { closed <- c.Close() }()
+	// The 10 s below is a hang guard, not a calibrated bound: it stops a
+	// deadlock (CI measured 0.0002 s).
+	waitStart := time.Now()
 	for _, ch := range []chan error{rendered, closed} {
 		select {
 		case <-ch:
+			testutil.Timing(t, "render and Close return (hang guard)", time.Since(waitStart), testutil.Scaled(10*time.Second))
 		case <-time.After(testutil.Scaled(10 * time.Second)):
 			t.Fatal("the render, or Close behind it, did not return")
 		}

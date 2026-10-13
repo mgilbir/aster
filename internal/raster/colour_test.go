@@ -1,6 +1,7 @@
 package raster
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"image"
@@ -282,7 +283,7 @@ func TestColourGlyphImage(t *testing.T) {
 	fg := shape.Color{G: 170, B: 136, A: 255}
 	// COLRv0: the square, 100 to 900 across and 0 to 800 up, is the box, at
 	// 100 pixels per em 80 pixels a side; its top left corner is red.
-	img, box, err := ColourGlyphImage(runs[0].Face, runs[0].Glyphs[0].GID, fg, 100)
+	img, box, err := ColourGlyphImage(context.Background(), runs[0].Face, runs[0].Glyphs[0].GID, fg, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -293,14 +294,14 @@ func TestColourGlyphImage(t *testing.T) {
 		t.Errorf("top left %v, want red", got)
 	}
 	// The rotated triangle reaches past the square, and the box with it.
-	_, box, err = ColourGlyphImage(runs[0].Face, runs[0].Glyphs[1].GID, fg, 100)
+	_, box, err = ColourGlyphImage(context.Background(), runs[0].Face, runs[0].Glyphs[1].GID, fg, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if box.XMin >= 100 || box.XMax <= 900 || box.YMin >= 0 || box.YMax <= 800 {
 		t.Errorf("rotated glyph's box %v does not reach past the square", box)
 	}
-	if _, _, err := ColourGlyphImage(nil, 1, fg, 100); err == nil {
+	if _, _, err := ColourGlyphImage(context.Background(), nil, 1, fg, 100); err == nil {
 		t.Error("nil face: no error")
 	}
 }
@@ -349,7 +350,7 @@ func TestSVGGlyphImage(t *testing.T) {
 		t.Fatal(err)
 	}
 	runs, _ := m.ShapeText("\U0001F308", "20px SvgTest")
-	img, box, err := ColourGlyphImage(runs[0].Face, runs[0].Glyphs[0].GID, shape.Color{A: 255}, 100)
+	img, box, err := ColourGlyphImage(context.Background(), runs[0].Face, runs[0].Glyphs[0].GID, shape.Color{A: 255}, 100)
 	if err != nil || img == nil {
 		t.Fatalf("no image: %v", err)
 	}

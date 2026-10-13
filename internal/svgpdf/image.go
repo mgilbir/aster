@@ -1,12 +1,12 @@
 package svgpdf
 
 import (
+	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
 	"image"
 	"image/color"
-	"image/draw"
 	"strings"
 
 	"github.com/mgilbir/aster/internal/budget"
@@ -43,6 +43,9 @@ type imageCatalog struct {
 	// ledger is the call's: an image's pixels and what is made of them are
 	// charged before they are made.
 	ledger *budget.Ledger
+	// ctx is the call's (nil: never done), polled as images are decoded,
+	// converted and compressed: each is a loop over up to the pixel limit.
+	ctx context.Context
 }
 
 // imageUse is one XObject: an image, smoothed or not.
@@ -66,7 +69,7 @@ func (c *imageCatalog) get(href string) (*pdfImage, error) {
 	}
 	img, err := c.load(href)
 	if err != nil {
-		if errors.Is(err, budget.ErrLimit) {
+		if errors.Is(err, budget.ErrLimit) || c.stopped(err) {
 			return nil, err
 		}
 		img = nil
@@ -79,6 +82,12 @@ func (c *imageCatalog) get(href string) (*pdfImage, error) {
 	}
 	c.byHref[href] = img
 	return img, nil
+}
+
+// stopped reports whether err is the call's context ending: no image failed
+// to read, and the call stops.
+func (c *imageCatalog) stopped(err error) bool {
+	return c.ctx != nil && c.ctx.Err() != nil && errors.Is(err, c.ctx.Err())
 }
 
 // put returns the image drawn from the pixels make returns, under key, made
@@ -94,7 +103,7 @@ func (c *imageCatalog) put(key string, make func() (*image.NRGBA, error)) (*pdfI
 	}
 	var img *pdfImage
 	if px != nil && px.Rect.Dx() > 0 && px.Rect.Dy() > 0 {
-		if img, err = encodeNRGBA(px); err != nil {
+		if img, err = encodeNRGBA(c.ctx, px); err != nil {
 			return nil, err
 		}
 		img.cat = c
@@ -195,7 +204,7 @@ func (c *imageCatalog) decode(data []byte) (img *pdfImage, err error) {
 	if err := charge(px * decodedBytes(cfg.ColorModel)); err != nil {
 		return nil, err
 	}
-	src, err := imageref.Decode(data, c.lim)
+	src, err := imageref.Decode(c.ctx, data, c.lim)
 	if err != nil {
 		return nil, err
 	}
@@ -209,17 +218,19 @@ func (c *imageCatalog) decode(data []byte) (img *pdfImage, err error) {
 	// kind is first drawn into NRGBA, as it always was.
 	switch m := src.(type) {
 	case *image.NRGBA:
-		img, err = encodePlanes(m.Pix, m.Stride, m.Rect.Dx(), m.Rect.Dy(), false)
+		img, err = encodePlanes(c.ctx, m.Pix, m.Stride, m.Rect.Dx(), m.Rect.Dy(), false)
 	case *image.RGBA:
-		img, err = encodePlanes(m.Pix, m.Stride, m.Rect.Dx(), m.Rect.Dy(), true)
+		img, err = encodePlanes(c.ctx, m.Pix, m.Stride, m.Rect.Dx(), m.Rect.Dy(), true)
 	default:
 		if err := charge(4 * px); err != nil {
 			return nil, err
 		}
 		b := src.Bounds()
 		nrgba := image.NewNRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
-		draw.Draw(nrgba, nrgba.Bounds(), src, b.Min, draw.Src)
-		img, err = encodeNRGBA(nrgba)
+		if err := imageref.DrawSrc(c.ctx, nrgba, nrgba.Bounds(), src, b.Min); err != nil {
+			return nil, err
+		}
+		img, err = encodeNRGBA(c.ctx, nrgba)
 	}
 	if err != nil {
 		return nil, err
@@ -234,19 +245,28 @@ func (c *imageCatalog) decode(data []byte) (img *pdfImage, err error) {
 
 // encodeNRGBA is an image XObject of decoded pixels: their colour, and their
 // alpha as a soft mask when they are not all opaque.
-func encodeNRGBA(nrgba *image.NRGBA) (*pdfImage, error) {
-	return encodePlanes(nrgba.Pix, nrgba.Stride, nrgba.Rect.Dx(), nrgba.Rect.Dy(), false)
+func encodeNRGBA(ctx context.Context, nrgba *image.NRGBA) (*pdfImage, error) {
+	return encodePlanes(ctx, nrgba.Pix, nrgba.Stride, nrgba.Rect.Dx(), nrgba.Rect.Dy(), false)
 }
 
 // encodePlanes is encodeNRGBA of w×h 8-bit RGBA pixels, rows stride bytes
 // apart, premultiplied when premul is set: a translucent premultiplied pixel
-// is converted as draw.Draw converts it to NRGBA (color.NRGBAModel).
-func encodePlanes(pix []byte, stride, w, h int, premul bool) (*pdfImage, error) {
+// is converted as draw.Draw converts it to NRGBA (color.NRGBAModel). The
+// planes are split and compressed a band of rows at a time, polling ctx
+// before each (nil: never done), so a deadline reaches into an image of up
+// to the pixel limit.
+func encodePlanes(ctx context.Context, pix []byte, stride, w, h int, premul bool) (*pdfImage, error) {
 	n := w * h
 	rgb := make([]byte, 0, 3*n)
 	alpha := make([]byte, 0, n)
 	opaque := true
+	rows := imageref.BandRows(w)
 	for y := range h {
+		if y%rows == 0 {
+			if err := imageref.Poll(ctx, min(rows, h-y)*w); err != nil {
+				return nil, err
+			}
+		}
 		row := pix[y*stride : y*stride+4*w]
 		for i := 0; i < len(row); i += 4 {
 			r, g, b, a := row[i], row[i+1], row[i+2], row[i+3]
@@ -261,11 +281,11 @@ func encodePlanes(pix []byte, stride, w, h int, premul bool) (*pdfImage, error) 
 	}
 	img := &pdfImage{w: w, h: h, filter: "FlateDecode", space: "DeviceRGB"}
 	var err error
-	if img.data, err = deflate(rgb); err != nil {
+	if img.data, err = deflate(ctx, rgb); err != nil {
 		return nil, err
 	}
 	if !opaque {
-		if img.smask, err = deflate(alpha); err != nil {
+		if img.smask, err = deflate(ctx, alpha); err != nil {
 			return nil, err
 		}
 	}
@@ -273,10 +293,13 @@ func encodePlanes(pix []byte, stride, w, h int, premul bool) (*pdfImage, error) 
 }
 
 // deflate is zlib at the default level, which is deterministic for a given
-// input.
-func deflate(b []byte) ([]byte, error) {
-	out, err := compress(b)
+// input, polling ctx (see compressPolled).
+func deflate(ctx context.Context, b []byte) ([]byte, error) {
+	out, err := compressPolled(ctx, b)
 	if err != nil {
+		if ctx != nil && errors.Is(err, ctx.Err()) {
+			return nil, err
+		}
 		return nil, fmt.Errorf("svgpdf: compressing image: %w", err)
 	}
 	return out, nil

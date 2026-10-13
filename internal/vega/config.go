@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"sync"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -36,7 +37,11 @@ func illegalKey(k string) bool { return k == "__proto__" || k == "constructor" |
 // Signals are merged by name (later wins), legend.layout is merged recursively,
 // style is merged at every level, and every other object replaces wholesale
 // after a one-level key copy.
-func mergeConfig(configs ...jsval.Value) jsval.Value {
+func mergeConfig(configs ...jsval.Value) jsval.Value { return mergeConfigWork(nil, configs...) }
+
+// mergeConfigWork is mergeConfig charging each key it copies to m (nil: no
+// meter): a specification's config is as large as the specification.
+func mergeConfigWork(m *budget.Meter, configs ...jsval.Value) jsval.Value {
 	out := jsval.NewObject(16)
 	for _, src := range configs {
 		so := src.ObjValue()
@@ -44,19 +49,20 @@ func mergeConfig(configs ...jsval.Value) jsval.Value {
 			continue
 		}
 		for i := 0; i < so.Len(); i++ {
+			charge(m, 1)
 			key := so.KeyAt(i)
 			val := so.ValueAt(i)
 			if key == "signals" {
-				out.Set("signals", mergeNamed(out.Lookup("signals"), val))
+				out.Set("signals", mergeNamed(m, out.Lookup("signals"), val))
 				continue
 			}
 			switch key {
 			case "legend":
-				writeConfig(out, key, val, recLayout)
+				writeConfig(m, out, key, val, recLayout)
 			case "style":
-				writeConfig(out, key, val, recAll)
+				writeConfig(m, out, key, val, recAll)
 			default:
-				writeConfig(out, key, val, recNone)
+				writeConfig(m, out, key, val, recNone)
 			}
 		}
 	}
@@ -71,7 +77,7 @@ const (
 	recAll
 )
 
-func writeConfig(out *jsval.Object, key string, v jsval.Value, r recurse) {
+func writeConfig(m *budget.Meter, out *jsval.Object, key string, v jsval.Value, r recurse) {
 	if illegalKey(key) {
 		return
 	}
@@ -85,9 +91,10 @@ func writeConfig(out *jsval.Object, key string, v jsval.Value, r recurse) {
 		}
 		vo := v.ObjValue()
 		for i := 0; i < vo.Len(); i++ {
+			charge(m, 1)
 			k := vo.KeyAt(i)
 			if r == recAll || (r == recLayout && k == "layout") {
-				writeConfig(o, k, vo.ValueAt(i), recNone)
+				writeConfig(m, o, k, vo.ValueAt(i), recNone)
 			} else if !illegalKey(k) {
 				o.Set(k, vo.ValueAt(i))
 			}
@@ -98,7 +105,7 @@ func writeConfig(out *jsval.Object, key string, v jsval.Value, r recurse) {
 }
 
 // mergeNamed merges two arrays of named objects; b takes precedence.
-func mergeNamed(a, b jsval.Value) jsval.Value {
+func mergeNamed(m *budget.Meter, a, b jsval.Value) jsval.Value {
 	if a.IsNullish() {
 		return b
 	}
@@ -108,6 +115,7 @@ func mergeNamed(a, b jsval.Value) jsval.Value {
 	seen := map[string]bool{}
 	var res []jsval.Value
 	add := func(it jsval.Value) {
+		charge(m, 1)
 		n := it.Get("name").AsString()
 		if !seen[n] {
 			seen[n] = true
