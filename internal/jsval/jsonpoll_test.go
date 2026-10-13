@@ -32,7 +32,7 @@ func (c *pollCtx) Err() error {
 
 // pollDocs are documents a step of the parser reads long in each of the
 // ways a document can be long: many values, one long string with escapes or
-// without, a long run of white space, a long key.
+// without, a long run of white space, a long key, a long number.
 var pollDocs = map[string][]byte{
 	"rows":    rowsJSON(8000),
 	"numbers": []byte("[" + strings.Repeat("1.5,", 1<<18) + "0]"),
@@ -40,6 +40,11 @@ var pollDocs = map[string][]byte{
 	"escapes": []byte(`["` + strings.Repeat(`a\né`, 1<<16) + `"]`),
 	"space":   []byte(`[1,` + strings.Repeat(" \n\t\r", 1<<18) + `2]`),
 	"key":     []byte(`[{"` + strings.Repeat("k", 1<<20) + `":1}]` + strings.Repeat(" ", slabMinDoc)),
+	// One number literal, long in its integer digits, the zeros of its
+	// fraction or its exponent's digits.
+	"integer":  []byte("[" + strings.Repeat("7", 1<<20) + "]"),
+	"fraction": []byte("[0." + strings.Repeat("0", 1<<20) + "1]"),
+	"exponent": []byte("[-1.5e-" + strings.Repeat("0", 1<<20) + "1]"),
 }
 
 // A metered parse polls its context throughout the document, inside a
@@ -116,5 +121,45 @@ func TestParseJSONMeteredMatches(t *testing.T) {
 				t.Fatalf("%.40q every %d: read differently", doc, every)
 			}
 		}
+	}
+}
+
+// ledgerCtx records, at each poll, the work its ledger has been charged.
+type ledgerCtx struct {
+	context.Context
+	led *budget.Ledger
+	at  []int64
+}
+
+func (c *ledgerCtx) Err() error {
+	c.at = append(c.at, c.led.WorkDone())
+	return nil
+}
+
+// No stretch of a metered parse goes unpolled, inside a token as between
+// them: no two polls are more than a few charges apart. A charge is
+// jsonPollBytes of text (256 steps) and the meter polls each 1,024 steps, so
+// polls come every 1,024 steps of work or so; a scan that read a whole token
+// before charging it (a megabyte: 65,536 steps) would show as one gap. The
+// gaps are counted in the ledger's work, not timed.
+func TestParseJSONWorkBetweenPolls(t *testing.T) {
+	const maxGap = 4 * 1024
+	for name, doc := range pollDocs {
+		t.Run(name, func(t *testing.T) {
+			ctx := &ledgerCtx{Context: context.Background()}
+			ctx.led = budget.NewLedger(ctx, budget.LedgerLimits{})
+			if _, err := ParseJSONContext(budget.WithLedger(ctx, ctx.led), doc, 0); err != nil {
+				t.Fatal(err)
+			}
+			marks := append([]int64{0}, ctx.at...)
+			worst := int64(0)
+			for i := 1; i < len(marks); i++ {
+				worst = max(worst, marks[i]-marks[i-1])
+			}
+			t.Logf("%d polls, at most %d steps apart", len(ctx.at), worst)
+			if worst > maxGap {
+				t.Errorf("%d steps of work between two polls; want at most %d", worst, maxGap)
+			}
+		})
 	}
 }

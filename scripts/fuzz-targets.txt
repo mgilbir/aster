@@ -8,6 +8,7 @@
 # function is missing from it.
 ./internal/jsval	FuzzParseJSON	10
 ./internal/jsval	FuzzNewPattern	10
+./internal/jsval	FuzzShortNumber	5
 ./internal/expr	FuzzParse	10
 ./internal/expr	FuzzCompileEval	10
 ./internal/vegalite	FuzzEventSelector	10
