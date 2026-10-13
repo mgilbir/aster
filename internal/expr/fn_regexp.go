@@ -63,7 +63,31 @@ func (s *Scope) compilePattern(source, flags string) *jsval.Pattern {
 		exceeded("a regular expression of %d bytes exceeds the limit of %d", len(source), MaxPatternLength)
 	}
 	checkFlags(source, flags)
-	return s.compileEscaped(escapeSource(source), canonicalFlags(flags))
+	s.workBytes(len(source))
+	n, copied := escapedLen(source)
+	if n > MaxPatternLength {
+		exceeded("a regular expression of %d bytes exceeds the limit of %d", n, MaxPatternLength)
+	}
+	if copied {
+		// The escaped copy is paid for before it is made, and given back once
+		// the pattern is built: the pattern's own charge (Bytes) counts the
+		// source it holds, so while it is held the copy is paid for twice at
+		// most.
+		led := s.pay(int64(n), "a regular expression source")
+		defer led.Free(int64(n))
+	}
+	return s.compileEscaped(escapeSource(source, n, copied), canonicalFlags(flags))
+}
+
+// pay charges n bytes of the call's ledger for a copy about to be made, and
+// returns the ledger, to give them back with Free. A copy the ledger cannot
+// pay for ends the render with ErrLimit before it is made.
+func (s *Scope) pay(n int64, what string) *budget.Ledger {
+	led := budget.LedgerFrom(s.Context)
+	if err := led.Alloc(n); err != nil {
+		exceeded("%s of %d bytes is past the memory limit", what, n)
+	}
+	return led
 }
 
 // checkFlags throws the SyntaxError of RegExp(source, flags) for flags that
@@ -86,15 +110,20 @@ func checkFlags(source, flags string) {
 // not on the pattern, so it is not remembered in patternErrors.
 func (s *Scope) compileEscaped(source, flags string) *jsval.Pattern {
 	checkFlags(source, flags)
+	if len(source) > MaxPatternLength {
+		exceeded("a regular expression of %d bytes exceeds the limit of %d", len(source), MaxPatternLength)
+	}
+	// The key is a copy of the source: paid for before it is made, and given
+	// back on return, when the cache holds it at its own cost (bcache counts
+	// the key in the entry's size) or nothing does.
+	keyBytes := int64(len(flags) + 1 + len(source))
+	defer s.pay(keyBytes, "the key of a regular expression").Free(keyBytes)
 	key := flags + "/" + source
 	if p, ok := patternCache.Get(key); ok {
 		return fresh(p)
 	}
 	if e, ok := patternErrors.Get(key); ok {
 		e.raise()
-	}
-	if len(source) > MaxPatternLength {
-		exceeded("a regular expression of %d bytes exceeds the limit of %d", len(source), MaxPatternLength)
 	}
 	s.workBytes(len(source))
 	ctx := s.Context

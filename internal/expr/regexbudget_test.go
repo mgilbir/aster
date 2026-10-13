@@ -288,3 +288,99 @@ func TestRegexpSearchMemoryBoundedByLedger(t *testing.T) {
 		t.Errorf("with 64 KiB left: %v, %v", v, err)
 	}
 }
+
+// compileUnder is s.compilePattern(src, "") under a ledger of max bytes: the
+// pattern, or the limit it ended with.
+func compileUnder(led *budget.Ledger) func(src string) (p *jsval.Pattern, err error) {
+	return func(src string) (p *jsval.Pattern, err error) {
+		defer func() {
+			if r := recover(); r != nil {
+				lp, ok := r.(*limitPanic)
+				if !ok {
+					panic(r)
+				}
+				err = lp.err
+			}
+		}()
+		s := NewScope(nil)
+		s.Context = budget.WithLedger(context.Background(), led)
+		return s.compilePattern(src, ""), nil
+	}
+}
+
+// The two copies a string pattern makes, its escaped source and the cache
+// key, are paid for with the call's ledger before they are made (ADR 0010):
+// a ledger without room for a copy refuses the pattern having allocated none
+// of it, whether the pattern is new or cached, and gives both back once the
+// pattern is built. Counted: bytes allocated (skipped under -race, which
+// allocates on its own) and the ledger's own counters.
+func TestPatternSourceCopiesArePaidFirst(t *testing.T) {
+	const n = 16 << 10
+	cases := []struct {
+		name string
+		src  string
+		copy int // the copy the ledger must have room for first
+	}{
+		// A newline escapes to two bytes: the escaped source is twice the raw
+		// one. A class of one character compiles to a few bytes, so that the
+		// cache keeps the pattern.
+		{"escaped source", "[" + strings.Repeat("\n", n/2) + "]", n + 2},
+		// Nothing to escape: only the key, flags + "/" + source.
+		{"key", "[" + strings.Repeat("a", n-2) + "]", n + 1},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			// Warmed under a free ledger, so that the key is looked up.
+			warm := budget.NewLedger(context.Background(), budget.LedgerLimits{})
+			if _, err := compileUnder(warm)(c.src); err != nil {
+				t.Fatal(err)
+			}
+			if got := warm.Bytes(); got != 0 {
+				t.Errorf("a cached pattern leaves %d bytes charged, want 0 (copies given back)", got)
+			}
+			// Room for all but one byte of the first copy.
+			led := budget.NewLedger(context.Background(), budget.LedgerLimits{MaxBytes: int64(c.copy) - 1})
+			var err error
+			got := allocated(func() { _, err = compileUnder(led)(c.src) })
+			if !errors.Is(err, budget.ErrLimit) {
+				t.Fatalf("err = %v, want ErrLimit", err)
+			}
+			if led.PeakBytes() != 0 || led.Bytes() != 0 {
+				t.Errorf("the refused call charged peak %d, held %d; want 0", led.PeakBytes(), led.Bytes())
+			}
+			if !testutil.RaceEnabled && got > uint64(c.copy)/4 {
+				t.Errorf("the refused call allocated %d bytes, a copy is %d", got, c.copy)
+			}
+		})
+	}
+}
+
+// With room for exactly the first copy and nothing else, the pattern is
+// refused at the next charge, not before: each copy is charged, one after
+// the other, and the peak shows both were counted.
+func TestPatternSourceCopiesAreBothCounted(t *testing.T) {
+	const n = 64 << 10
+	src := strings.Repeat("/", n/2) // escaped: n bytes; key: n+1
+	led := budget.NewLedger(context.Background(), budget.LedgerLimits{MaxBytes: n + n + 1})
+	_, err := compileUnder(led)(src)
+	if !errors.Is(err, budget.ErrLimit) && err != nil {
+		t.Fatal(err)
+	}
+	if led.PeakBytes() < 2*n+1 {
+		t.Errorf("peak %d: the escaped source and the key were not both charged (%d)", led.PeakBytes(), 2*n+1)
+	}
+	if led.Bytes() > led.PeakBytes() {
+		t.Errorf("held %d past the peak %d", led.Bytes(), led.PeakBytes())
+	}
+}
+
+// escapedLen is what escapeSource makes, to the byte, for every shape of
+// source: the charge before the copy is the copy's size.
+func TestEscapedLenIsTheEscapedLength(t *testing.T) {
+	for _, src := range []string{"", "abc", "a/b", "[/]/", "\\\n", "\n\r  ", "\\ x\\ ", "a\xffb/", "\\", "/\\", "[\\]/]/", "é/ü\n"} {
+		n, copied := escapedLen(src)
+		if got := escapeSource(src, n, copied); len(got) != n {
+			t.Errorf("%q: escapedLen %d, escaped %q is %d bytes", src, n, got, len(got))
+		}
+	}
+}
