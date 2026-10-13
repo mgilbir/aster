@@ -342,10 +342,22 @@ type Limits struct {
 	MaxEffectPixels int // pixels processed by filters and pattern tiles in one render
 	// MaxPixelOps bounds the total pixel work of one render: pixels covered by
 	// fills and strokes, edge crossings the scan converter computes, points
-	// flattening computes, composited layer and mask areas and filter/pattern
-	// pixels (a merge node a pass), summed over the whole document. It bounds the product of element
-	// count and canvas size that MaxRenderNodes and MaxPixels leave open.
+	// flattening computes, composited layer and mask areas, pattern tile
+	// pixels, and the pixels of every pass a filter makes over its region (a
+	// merge node a pass; a blur's passes count each channel, and a pass that
+	// demultiplies and multiplies again counts three), summed over the whole
+	// document. It bounds the product of element count and canvas size that
+	// MaxRenderNodes and MaxPixels leave open. Set, it is the budget at every
+	// scale, raised only to PixelOpsPerPixel operations per output pixel (no
+	// floor when that is zero): an override. Zero selects the default,
+	// PixelOps(scale, width, height): 128 Mi operations at scale 1, times
+	// the scale squared above it, and at least 16 per output pixel.
 	MaxPixelOps int
+	// PixelOpsPerPixel raises a set MaxPixelOps to this many operations per
+	// output pixel, so that a large canvas is not refused for drawing
+	// itself a few times over (zero: no floor; with MaxPixelOps zero too,
+	// the default's 16).
+	PixelOpsPerPixel int
 	// MaxCanvasBytes bounds the pixel memory alive at once: the canvas plus
 	// every offscreen layer (opacity group, mask, filter) in flight, the
 	// clip coverage maps of the elements being drawn, and every result and
@@ -369,7 +381,8 @@ const (
 	defaultMaxCSSWork  = 100_000_000
 	defaultMaxFilterPx = 32 << 20
 	defaultMaxEffectPx = math.MaxInt32
-	defaultMaxPixelOps = 1 << 29
+	defaultMaxPixelOps = 128 << 20 // at scale 1; see PixelOps
+	defaultPixelOpsPer = 16
 	defaultMaxCanvasB  = 1 << 30
 	// defaultLedgerBytes bounds what a render charges to a ledger when its
 	// context carries none (Render called directly): the public API's

@@ -329,9 +329,10 @@ func compositeLayer(dst, layer *canvas, r irect, opacity float64, m *mask, mode 
 	}
 }
 
-// compositeLayerAt draws layer onto dst with its origin at (ox, oy).
-func compositeLayerAt(dst, layer *canvas, ox, oy int, opacity float64, m *mask, mode blendMode) {
-	r := irect{ox, oy, ox + layer.w, oy + layer.h}.intersect(dst.bounds())
+// compositeLayerAt draws layer onto dst with its origin at (ox, oy), within
+// reg.
+func compositeLayerAt(dst, layer *canvas, ox, oy int, reg irect, opacity float64, m *mask, mode blendMode) {
+	r := irect{ox, oy, ox + layer.w, oy + layer.h}.intersect(dst.bounds()).intersect(reg)
 	if m != nil {
 		r = r.intersect(m.r)
 	}

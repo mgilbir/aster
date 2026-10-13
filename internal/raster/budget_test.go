@@ -72,17 +72,108 @@ func TestPixelOpsDefaultBudgetUseExpansion(t *testing.T) {
 	if testing.Short() {
 		t.Skip("spends the whole default pixel budget (slow under -race)")
 	}
+	var w Work
+	ctx := WithWorkReport(context.Background(), func(got Work) { w = got })
 	start := time.Now()
-	_, err := Render(useBomb(), Options{})
+	_, err := Render(useBomb(), Options{Context: ctx})
+	d := time.Since(start)
 	if !errors.Is(err, errLimit) {
 		t.Fatalf("want errLimit, got %v", err)
 	}
-	// CI baseline 15.33 s (Heavy gates timings run, oracle job, not under
-	// -race). The owner's decision: the limit is 2x, 30.7 s, rounded up to
-	// 32 s, scaled for -race: slower is a finding to investigate.
-	testutil.Timing(t, "pixel-ops default budget, use expansion", time.Since(start), testutil.Scaled(32*time.Second))
-	if d := time.Since(start); d > testutil.Scaled(32*time.Second) {
+	// Counted: the render stopped at the default budget, 128 Mi at scale 1
+	// (its 2000x2000 canvas's floor, 16 a pixel, is less), and not before
+	// it had spent all but one canvas-sized fill of it.
+	if w.Budget != 128<<20 || w.Width != 2000 || w.Height != 2000 {
+		t.Fatalf("budget %d for %dx%d, want %d for 2000x2000", w.Budget, w.Width, w.Height, 128<<20)
+	}
+	if w.Ops > w.Budget || w.Ops < w.Budget-2*2000*2000 {
+		t.Errorf("stopped after %d pixel operations of %d", w.Ops, w.Budget)
+	}
+	t.Logf("%d pixel operations in %v", w.Ops, d)
+	// The time limit only catches work that is no longer linear in the
+	// budget. CI spent 15.33 s on the old 512 Mi budget (Heavy gates timings
+	// run, oracle job, not under -race), 28.6 ns an operation; at 128 Mi that
+	// is 3.84 s, and the limit is 2x, 7.7 s, scaled for -race: slower is a
+	// finding to investigate.
+	const limit = 7700 * time.Millisecond
+	testutil.Timing(t, "pixel-ops default budget, use expansion", d, testutil.Scaled(limit))
+	if d > testutil.Scaled(limit) {
 		t.Errorf("took %v", d)
+	}
+}
+
+// The default work budget is 128 Mi operations at scale 1, times the scale
+// squared above it, and at least 16 per output pixel; a set MaxPixelOps is
+// the budget at every scale, raised only by a set PixelOpsPerPixel.
+func TestPixelOpsDerivation(t *testing.T) {
+	const mi = 1 << 20
+	sat := func(v float64) int {
+		if v >= float64(math.MaxInt) {
+			return math.MaxInt
+		}
+		return int(v)
+	}
+	for _, c := range []struct {
+		lim  Limits
+		s    float64
+		w, h int
+		want int
+	}{
+		{Limits{}, 1, 100, 100, 128 * mi},
+		{Limits{}, 0.5, 100, 100, 128 * mi},
+		{Limits{}, 1.5, 100, 100, sat(128 * mi * 2.25)},
+		{Limits{}, 2, 800, 600, sat(512 * mi)},
+		{Limits{}, 3, 800, 600, sat(1152 * mi)},
+		{Limits{}, 4.5, 800, 600, sat(128 * mi * 20.25)},
+		{Limits{}, 1e200, 1, 1, math.MaxInt},
+		// A large canvas: 16 a pixel passes the scaled budget.
+		{Limits{}, 1, 4000, 4000, 16 * 4000 * 4000},
+		{Limits{}, 2, 8000, 8000, sat(16 * 8000 * 8000)},
+		{Limits{}, 2, 4000, 4000, sat(512 * mi)},
+		// Overrides: the budget as set, at every scale and size.
+		{Limits{MaxPixelOps: 10_000_000}, 1, 100, 100, 10_000_000},
+		{Limits{MaxPixelOps: 10_000_000}, 3, 4000, 4000, 10_000_000},
+		{Limits{MaxPixelOps: 1000, PixelOpsPerPixel: 16}, 3, 100, 100, 160_000},
+		{Limits{MaxPixelOps: 1 << 30, PixelOpsPerPixel: 16}, 3, 100, 100, 1 << 30},
+		// A floor without a budget: the default budget, that floor.
+		{Limits{PixelOpsPerPixel: 64}, 1, 4000, 4000, sat(64 * 4000 * 4000)},
+	} {
+		if got := c.lim.PixelOps(c.s, c.w, c.h); got != c.want {
+			t.Errorf("Limits{MaxPixelOps: %d, PixelOpsPerPixel: %d}.PixelOps(%v, %d, %d) = %d, want %d",
+				c.lim.MaxPixelOps, c.lim.PixelOpsPerPixel, c.s, c.w, c.h, got, c.want)
+		}
+	}
+	if DefaultMaxPixelOps != 128*mi || DefaultPixelOpsPerPixel != 16 {
+		t.Errorf("defaults %d, %d", DefaultMaxPixelOps, DefaultPixelOpsPerPixel)
+	}
+}
+
+// Render applies the derivation: a default render at scale 2 has four times
+// the budget, an override has its own, and the work it reports is what it
+// charged.
+func TestPixelOpsRenderBudget(t *testing.T) {
+	svg := []byte(rectsSVG(100, 3))
+	for _, c := range []struct {
+		opts Options
+		want int
+	}{
+		{Options{}, 128 << 20},
+		{Options{Scale: 2}, 512 << 20},
+		{Options{Scale: 2, Limits: Limits{MaxPixelOps: 5_000_000}}, 5_000_000},
+	} {
+		var w Work
+		c.opts.Context = WithWorkReport(context.Background(), func(got Work) { w = got })
+		if _, err := Render(svg, c.opts); err != nil {
+			t.Fatal(err)
+		}
+		px := int(100 * max(c.opts.Scale, 1))
+		if w.Budget != c.want || w.Width != px || w.Height != px {
+			t.Errorf("scale %v: budget %d for %dx%d, want %d for %dx%d", c.opts.Scale, w.Budget, w.Width, w.Height, c.want, px, px)
+		}
+		// Three canvas-sized fills: at least their pixels.
+		if w.Ops < 3*px*px {
+			t.Errorf("scale %v: %d pixel operations reported for three %dx%d fills", c.opts.Scale, w.Ops, px, px)
+		}
 	}
 }
 
