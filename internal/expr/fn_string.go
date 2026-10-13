@@ -243,59 +243,104 @@ func digitValue(c byte) int {
 
 // escapeSource is EscapeRegExpPattern: what RegExp.prototype.source reports for
 // a pattern built from a string ("/" and line terminators escaped, empty
-// pattern "(?:)").
-func escapeSource(src string) string {
-	if src == "" {
-		return "(?:)"
-	}
-	if !strings.ContainsAny(src, "/\n\r\u2028\u2029") {
+// pattern "(?:)"). escapedLen says first how long the result is, and whether
+// making it copies src, so that a caller can pay for the copy before it is
+// made; n and copied are its results.
+func escapeSource(src string, n int, copied bool) string {
+	if !copied {
+		if src == "" {
+			return "(?:)"
+		}
 		return src
 	}
 	var b strings.Builder
+	b.Grow(n)
+	escapeWalk(&escapeSink{b: &b}, src)
+	return b.String()
+}
+
+// escapedLen is the length of escapeSource(src), and whether it is a new
+// string rather than src or a constant. It reads src and allocates nothing.
+func escapedLen(src string) (n int, copied bool) {
+	if src == "" {
+		return len("(?:)"), false
+	}
+	if !strings.ContainsAny(src, "/\n\r\u2028\u2029") {
+		return len(src), false
+	}
+	var c escapeSink
+	escapeWalk(&c, src)
+	return c.n, true
+}
+
+// escapeSink is what escapeWalk writes to: a builder, or with no builder a
+// count of the bytes it would write.
+type escapeSink struct {
+	n int
+	b *strings.Builder
+}
+
+func (e *escapeSink) str(s string) {
+	e.n += len(s)
+	if e.b != nil {
+		e.b.WriteString(s) //nolint:errcheck // a Builder's writes never fail
+	}
+}
+
+func (e *escapeSink) rune(r rune) {
+	e.n += utf8.RuneLen(r) // r is decoded from a string: valid, or U+FFFD
+	if e.b != nil {
+		e.b.WriteRune(r) //nolint:errcheck // a Builder's writes never fail
+	}
+}
+
+// escapeWalk writes the escaped form of src (one that has something to
+// escape) to b: the one rule, run to count and run to build, so the two
+// cannot differ.
+func escapeWalk(b *escapeSink, src string) {
 	inClass := false
 	for i := 0; i < len(src); {
 		r, w := utf8.DecodeRuneInString(src[i:])
 		switch {
 		case r == '\\' && i+w < len(src):
-			b.WriteString(src[i : i+w])
+			b.str(src[i : i+w])
 			i += w
 			r2, w2 := utf8.DecodeRuneInString(src[i:])
 			switch r2 {
 			case '\n':
-				b.WriteString("n")
+				b.str("n")
 			case '\r':
-				b.WriteString("r")
+				b.str("r")
 			case 0x2028:
-				b.WriteString("u2028")
+				b.str("u2028")
 			case 0x2029:
-				b.WriteString("u2029")
+				b.str("u2029")
 			default:
-				b.WriteString(src[i : i+w2])
+				b.str(src[i : i+w2])
 			}
 			i += w2
 			continue
 		case r == '/' && !inClass:
-			b.WriteString("\\/")
+			b.str("\\/")
 		case r == '[':
 			inClass = true
-			b.WriteRune(r)
+			b.rune(r)
 		case r == ']':
 			inClass = false
-			b.WriteRune(r)
+			b.rune(r)
 		case r == '\n':
-			b.WriteString("\\n")
+			b.str("\\n")
 		case r == '\r':
-			b.WriteString("\\r")
+			b.str("\\r")
 		case r == 0x2028:
-			b.WriteString("\\u2028")
+			b.str("\\u2028")
 		case r == 0x2029:
-			b.WriteString("\\u2029")
+			b.str("\\u2029")
 		default:
-			b.WriteRune(r)
+			b.rune(r)
 		}
 		i += w
 	}
-	return b.String()
 }
 
 // canonicalFlags orders RegExp flags as RegExp.prototype.flags reports them.
