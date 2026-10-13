@@ -72,6 +72,10 @@ type renderer struct {
 	// maskBytes is the clip coverage held for the elements being drawn,
 	// part of canvasBytes (see newMaskCoverage).
 	maskBytes int
+	// inFeImage is set while an feImage draws: a filter layer is bounded by
+	// the canvas there (resvg's max_bbox is the feImage's region), not by
+	// four times it.
+	inFeImage bool
 }
 
 // errLimit is wrapped by every error a limit causes. Its own text is

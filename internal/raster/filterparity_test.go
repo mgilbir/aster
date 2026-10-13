@@ -44,6 +44,9 @@ func exact(name, prims string) synth {
 	return synth{name, filterSVG(prims, "", alignedShapes), 0.01, 0}
 }
 
+// feImagePNG is a 16x16 PNG, as a data: URI.
+const feImagePNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAALUlEQVR4nGNgaGD4j4z/o2GC8sPCgP//kfF/NExQflgYMPCxMPAGDHwsDLABAMHmfh/dG/h0AAAAAElFTkSuQmCC"
+
 const kernel9x7 = `-0.82 -1.484 -0.02 -1.225 -1.667 0.008 2.59 2.002 1.826 -0.89 0.683 -0.617 -1.137 -1.469 -0.928 2.637 2.145 2.033 2.002 -1.033 -0.451 ` +
 	`1.135 1.659 2.273 2.4 -1.566 1.029 1.359 0.53 -1.111 0.368 -1.553 2.673 2.327 0.738 -0.499 2.544 0.862 2.412 2.24 0.542 0.07 0.995 ` +
 	`0.155 -1.193 -0.474 2.063 -1.784 -1.768 1.132 -0.598 0.673 0.356 -0.286 2.986 -1.022 0.064 -0.987 1.163 -0.618 -0.221 1.735 -0.397`
@@ -190,6 +193,57 @@ var filterParity = []synth{
 	{"light-specular-spot-aa", filterSVG(`<feSpecularLighting surfaceScale="3" specularConstant="1" specularExponent="20" lighting-color="#f80"><feSpotLight x="60" y="20" z="60" pointsAtX="100" pointsAtY="90" pointsAtZ="0" specularExponent="2" limitingConeAngle="40"/></feSpecularLighting>`, "", aaShapes), 0.15, 0.6},
 	{"light-bevel-chain-aa", filterSVG(`<feGaussianBlur stdDeviation="3" result="b"/><feSpecularLighting in="b" surfaceScale="5" specularExponent="20" lighting-color="#fff" result="s"><fePointLight x="60" y="40" z="80"/></feSpecularLighting>`+
 		`<feComposite in="s" in2="SourceGraphic" operator="in" result="c"/><feComposite in="SourceGraphic" in2="c" operator="arithmetic" k1="0" k2="1" k3="1" k4="0"/>`, "", aaShapes), 0.15, 0.6},
+
+	// ---- feImage ----
+	// An image, as an <image> draws it (its smoothing differs from resvg's
+	// as a plain <image>'s does: the same numbers).
+	{"image-data", filterSVG(`<feImage xlink:href="`+feImagePNG+`" x="20" y="20" width="80" height="80"/>`, "", alignedShapes), 0.6, 4},
+	{"image-data-slice", filterSVG(`<feImage xlink:href="`+feImagePNG+`" x="20" y="20" width="120" height="60" preserveAspectRatio="xMidYMid slice"/>`, "", alignedShapes), 0.6, 8},
+	{"image-data-xmax-over", filterSVG(`<feImage xlink:href="`+feImagePNG+`" x="20" y="10" width="140" height="60" preserveAspectRatio="xMaxYMax meet"/><feComposite in2="SourceGraphic" operator="over"/>`, "", alignedShapes), 0.3, 4},
+	{"image-data-obb", filterSVG(`<feImage xlink:href="`+feImagePNG+`" x="0.1" y="0.2" width="0.5" height="0.5"/>`, `primitiveUnits="objectBoundingBox"`, alignedShapes), 0.6, 8},
+	// Exact at scale 1; at 2.5 a nearest sample's edge falls a pixel apart
+	// from resvg's, as a plain pixelated <image>'s does (the same numbers).
+	{"image-data-pixelated", filterSVG(`<feImage xlink:href="`+feImagePNG+`" x="20" y="10" width="140" height="60" preserveAspectRatio="none" image-rendering="optimizeSpeed"/>`, "", alignedShapes), 0.25, 0.4},
+	// The dummy: no href, an image that does not decode, a fragment of no
+	// element.
+	exact("image-none", `<feImage/>`),
+	exact("image-data-bad", `<feImage xlink:href="data:image/png;base64,AAAA"/>`),
+	exact("image-fragment-missing", `<feImage xlink:href="#nope"/>`),
+	// An element, at its own coordinates from the sub-region's corner, with
+	// its own transform, inherited fill, opacity and text.
+	{"image-fragment", `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="200" height="150"><defs><filter id="f" x="0" y="0" width="200" height="150" filterUnits="userSpaceOnUse">` +
+		`<feImage xlink:href="#shp" x="10" y="10" width="100" height="100"/></filter><circle id="shp" cx="40" cy="40" r="25" fill="orange"/></defs>` +
+		`<rect width="200" height="150" fill="#345"/><g filter="url(#f)">` + aaShapes + `</g></svg>`, 0.1, 0.3},
+	{"image-fragment-group", `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="200" height="150"><defs><filter id="f" x="0" y="0" width="200" height="150" filterUnits="userSpaceOnUse">` +
+		`<feImage xlink:href="#gg" x="30" y="20"/><feOffset dx="5" dy="3"/></filter><g id="gg" transform="rotate(10)" fill="#e70"><rect x="10" y="10" width="40" height="30"/>` +
+		`<circle cx="70" cy="40" r="18" fill-opacity="0.6"/><text x="10" y="80" font-family="sans-serif" font-size="20">Ab</text></g></defs>` +
+		`<rect width="200" height="150" fill="#345"/><g filter="url(#f)"><rect x="40" y="30" width="60" height="50" fill="#c33"/></g></svg>`, 0.1, 0.3},
+	{"image-fragment-merge", filterSVG(`<feImage xlink:href="#ar" x="30" y="20"/><feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>`, "", alignedShapes+`<rect id="ar" x="2" y="4" width="20" height="16" fill="#0cf"/>`), 0.01, 0},
+	// The device scale applies, the user transform's translation does not.
+	{"image-fragment-scaled", `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="200" height="150" viewBox="0 0 100 75"><defs><filter id="f" x="0" y="0" width="100" height="75" filterUnits="userSpaceOnUse">` +
+		`<feImage xlink:href="#cc" x="10" y="5"/></filter><rect id="cc" x="8" y="8" width="24" height="20" fill="orange"/></defs>` +
+		`<rect width="100" height="75" fill="#345"/><g filter="url(#f)" transform="translate(7 4)"><rect x="20" y="15" width="30" height="25" fill="#c33"/></g></svg>`, 0.01, 0},
+	// An element whose filter is the feImage's own has that filter set to
+	// none (usvg's fix_recursive_fe_image), where the feImage draws it and
+	// where the document does.
+	{"image-fragment-self", `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="200" height="150"><defs><filter id="f" x="0" y="0" width="200" height="150" filterUnits="userSpaceOnUse">` +
+		`<feImage xlink:href="#r"/><feOffset dx="40" dy="20"/></filter></defs><rect width="200" height="150" fill="#345"/>` +
+		`<rect id="r" x="10" y="10" width="50" height="40" fill="lime" filter="url(#f)"/><rect x="120" y="70" width="60" height="60" fill="#36c" filter="url(#f)"/></svg>`, 0.01, 0},
+	// A chain: each feImage draws an element filtered by the next filter.
+	{"image-chain", `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="200" height="150"><defs>` +
+		`<filter id="f1" x="0" y="0" width="200" height="150" filterUnits="userSpaceOnUse"><feImage xlink:href="#e1"/><feOffset dx="10" dy="5"/></filter>` +
+		`<filter id="f2" x="0" y="0" width="200" height="150" filterUnits="userSpaceOnUse"><feImage xlink:href="#e2"/><feOffset dx="10" dy="5"/></filter>` +
+		`<filter id="f3" x="0" y="0" width="200" height="150" filterUnits="userSpaceOnUse"><feImage xlink:href="#e3"/><feOffset dx="10" dy="5"/></filter>` +
+		`<rect id="e1" x="20" y="20" width="30" height="30" fill="red" filter="url(#f2)"/><rect id="e2" x="30" y="30" width="30" height="30" fill="green" filter="url(#f3)"/>` +
+		`<rect id="e3" x="40" y="40" width="30" height="30" fill="blue"/></defs><rect width="200" height="150" fill="#345"/>` +
+		`<rect x="100" y="80" width="40" height="40" fill="#c33" filter="url(#f1)"/></svg>`, 0.01, 0},
+	// A filtered element in an feImage: its layer is bounded by the
+	// feImage's region (resvg's max_bbox), not by four times the canvas, so
+	// what lies past the canvas does not blur in.
+	{"image-fragment-filtered", `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="200" height="150"><defs>` +
+		`<filter id="b"><feGaussianBlur stdDeviation="4"/></filter><filter id="f" x="0" y="0" width="200" height="150" filterUnits="userSpaceOnUse"><feImage xlink:href="#e"/></filter>` +
+		`<rect id="e" x="150" y="100" width="80" height="80" fill="gold" filter="url(#b)"/></defs><rect width="200" height="150" fill="#345"/>` +
+		`<rect x="10" y="10" width="40" height="40" fill="#c33" filter="url(#f)"/></svg>`, 0.01, 0},
 
 	// ---- the filter region ----
 	// Larger than its layer (4x the canvas): cut to the layer, its

@@ -444,3 +444,47 @@ func TestDataSchemeCaseInsensitiveEveryOutput(t *testing.T) {
 		t.Errorf("VegaLiteToPDF: %v", err)
 	}
 }
+
+// An feImage's URL is fetched through the Loader as an <image>'s is: drawn
+// when the Loader allows it, a *LoadError for the image when it refuses it,
+// and never fetched then.
+func TestFeImageThroughLoader(t *testing.T) {
+	srv, hits := imageServer(t)
+	svg := func(href string) string {
+		return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="40" height="40">` +
+			`<filter id="f" x="0" y="0" width="40" height="40" filterUnits="userSpaceOnUse"><feImage xlink:href="` + href + `"/></filter>` +
+			`<rect width="10" height="10" fill="blue" filter="url(#f)"/></svg>`
+	}
+	c, err := aster.New(aster.WithLoader(&aster.HTTPLoader{AllowPrivateNetworks: true}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Close() }()
+	out, err := c.SVGToPNG(svg(srv.URL + "/red.png"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	img, err := png.Decode(bytes.NewReader(out))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := countReddish(img); n < 1000 {
+		t.Errorf("an feImage the Loader fetched: %d red pixels, want the 40x40 image", n)
+	}
+	if hits.Load() != 1 {
+		t.Errorf("fetched %d times, want once", hits.Load())
+	}
+	deny, err := aster.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = deny.Close() }()
+	_, err = deny.SVGToPNG(svg(srv.URL + "/red.png"))
+	var le *aster.LoadError
+	if !errors.As(err, &le) || le.Resource != "image" {
+		t.Errorf("an feImage the Loader refuses: err = %v, want a *LoadError for the image", err)
+	}
+	if hits.Load() != 1 {
+		t.Errorf("a refused feImage was fetched (%d fetches in all)", hits.Load())
+	}
+}

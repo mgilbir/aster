@@ -363,7 +363,10 @@ type document struct {
 	root  *node
 	ids   map[string]*node
 	count int
-	css   []string // style sheet sources in document order
+	// feImages are the document's feImage elements (see
+	// fixRecursiveFeImage).
+	feImages []*node
+	css      []string // style sheet sources in document order
 }
 
 // Limits bounds the resources an untrusted SVG may consume. Zero fields select
@@ -787,6 +790,9 @@ func parseDocumentCtx(ctx context.Context, src string, lim Limits) (*document, e
 			}
 			nd := ar.newNode()
 			nd.tag = tag
+			if tag == tagFeImage {
+				doc.feImages = append(doc.feImages, nd)
+			}
 			nd.attrs = ar.takeAttrs(abuf)
 			nd.style = ar.takeAttrs(sbuf)
 			if wantCSS {
@@ -839,7 +845,59 @@ func parseDocumentCtx(ctx context.Context, src string, lim Limits) (*document, e
 			return nil, err
 		}
 	}
+	doc.fixRecursiveFeImage()
 	return doc, nil
+}
+
+// fixRecursiveFeImage is usvg's fix_recursive_fe_image: an element an
+// feImage draws whose own filter is the feImage's filter (a filter that
+// draws itself) has its filter set to none, where it is drawn by the
+// feImage and everywhere else. Each element's filter list is read once,
+// however many feImages draw it. A longer cycle, through other elements or
+// filters, is cut when it is drawn (see renderEffects).
+func (doc *document) fixRecursiveFeImage() {
+	var refs map[*node]map[string]bool // an element's filter list, as ids
+	for _, fe := range doc.feImages {
+		href := fe.str(aHref)
+		if len(href) < 2 || href[0] != '#' || fe.parent == nil {
+			continue
+		}
+		t := doc.ids[href[1:]]
+		pid := fe.parent.str(aID)
+		if t == nil || pid == "" {
+			continue
+		}
+		if refs == nil {
+			refs = map[*node]map[string]bool{}
+		}
+		ids, seen := refs[t]
+		if !seen {
+			if v, ok := t.get(aFilter); ok {
+				for _, item := range splitFilterList(v) {
+					if id, isURL := parseURLRef(item); isURL {
+						if ids == nil {
+							ids = map[string]bool{}
+						}
+						ids[id] = true
+					}
+				}
+			}
+			refs[t] = ids
+		}
+		if ids[pid] {
+			for i := range t.style {
+				if t.style[i].id == aFilter {
+					t.style[i].val = "none"
+				}
+			}
+			for i := range t.attrs {
+				if t.attrs[i].id == aFilter {
+					t.attrs[i].val = "none"
+				}
+			}
+			refs[t] = nil
+		}
+	}
 }
 
 func isSpaceByte(c byte) bool { return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' }

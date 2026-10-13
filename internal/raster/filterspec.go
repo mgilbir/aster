@@ -79,6 +79,7 @@ type fprim struct {
 
 	turb  *turbSpec
 	light *lightingSpec
+	img   *feImageSpec
 }
 
 // convolveSpec is a resolved feConvolveMatrix (usvg's ConvolveMatrix).
@@ -99,6 +100,7 @@ const (
 
 // filterSpec is a resolved filter element for one referencing element.
 type filterSpec struct {
+	node  *node // the filter element
 	rect  rect
 	prims []fprim
 }
@@ -270,7 +272,7 @@ func (r *renderer) resolveFilter(fn *node, st *state, bb rect, hasBB bool) *filt
 	if primOBB {
 		scaleW, scaleH = bb.w(), bb.h()
 	}
-	spec := &filterSpec{rect: region}
+	spec := &filterSpec{node: fn, rect: region}
 	names := map[string]bool{}
 	idx := 1
 	for _, fe := range src.kids {
@@ -391,6 +393,10 @@ func (r *renderer) resolveFilter(fn *node, st *state, bb rect, hasBB bool) *filt
 				break
 			}
 			p.in1 = resolveInput(fe, aIn, prims)
+		case tagFeImage:
+			if p.img = r.feImageOf(fe, sub); p.img == nil {
+				p.kind = tagFeUnsupported
+			}
 		default:
 			// The primitives not drawn yet produce a transparent image (usvg's
 			// "dummy primitive"), keeping the chain intact.

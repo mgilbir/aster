@@ -67,7 +67,7 @@ An `*http.Transport` of your own is checked on every path it dials: its `DialCon
 |---|---|---|
 | a data set's `url` | `Sanitize`, then `Load` | during the render, once per data set |
 | an image mark's `url` | `Sanitize`; `Load` of what it returned when the image is drawn (PNG, PDF) or its size is needed (no `width`/`height`) | each distinct URL once per call, shared by the SVG, PNG and PDF stages: PNG and PDF draw what the SVG stage resolved, and do not sanitize the href it wrote again |
-| an `<image href>` in SVG given to `SVGToPNG`/`SVGToPDF` | `Sanitize`, then `Load` | once per distinct href |
+| an `<image href>` in SVG given to `SVGToPNG`/`SVGToPDF`, and an `feImage`'s `href` (`SVGToPNG`) that is not a `data:` URI or a `#id` | `Sanitize`, then `Load` | once per distinct href |
 | a mark's `href` (a link in the SVG) | `Sanitize` only; the returned string is what is written | once per distinct URL per call, while writing SVG |
 
 Links are also checked against vega-loader's scheme allow-list after your `Sanitize`, so a permissive Loader cannot put a `javascript:` URL into the output. A refused link is left out and reported as a [`Warning`](errors.md).

@@ -287,7 +287,11 @@ func (r *renderer) renderEffects(n *node, st *state, opacity float64, blend blen
 	if !(dr.w() > 0 && dr.h() > 0) {
 		return
 	}
-	ib := toIntRect(dr).intersect(irect{-2 * r.cw, -2 * r.ch, 3 * r.cw, 3 * r.ch})
+	bound := irect{-2 * r.cw, -2 * r.ch, 3 * r.cw, 3 * r.ch}
+	if r.inFeImage {
+		bound = irect{0, 0, r.cw, r.ch}
+	}
+	ib := toIntRect(dr).intersect(bound)
 	if ib.empty() {
 		return
 	}
@@ -334,7 +338,15 @@ func (r *renderer) renderEffects(n *node, st *state, opacity float64, blend blen
 	s2.clip = nil
 	r.drawContent(n, &s2, 1, blendNormal)
 	if r.err == nil {
+		// A filter being applied is not applied again by an element its
+		// feImage draws (the element is not drawn there).
+		for _, sp := range specs {
+			r.active[sp.node] = true
+		}
 		r.applyFilters(specs, s2.ctm, sub)
+		for _, sp := range specs {
+			delete(r.active, sp.node)
+		}
 		if ms != nil {
 			sub.dirty = sub.bounds()
 			r.applyMask(ms, &s2)
