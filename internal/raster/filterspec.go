@@ -76,6 +76,8 @@ type fprim struct {
 	// in2 each axis reads (0-3: R, G, B, A).
 	scale    float64
 	xch, ych uint8
+
+	turb *turbSpec
 }
 
 // convolveSpec is a resolved feConvolveMatrix (usvg's ConvolveMatrix).
@@ -378,6 +380,9 @@ func (r *renderer) resolveFilter(fn *node, st *state, bb rect, hasBB bool) *filt
 			p.xch, p.ych = colorChannel(fe, aXChannelSelector), colorChannel(fe, aYChannelSelector)
 			p.in1 = resolveInput(fe, aIn, prims)
 			p.in2 = resolveInput(fe, aIn2, prims)
+		case tagFeTurbulence:
+			t := turbulenceOf(fe)
+			p.turb = &t
 		default:
 			// The primitives not drawn yet produce a transparent image (usvg's
 			// "dummy primitive"), keeping the chain intact.

@@ -1,6 +1,7 @@
 package raster
 
 import (
+	"math"
 	"math/rand"
 	"testing"
 )
@@ -84,5 +85,93 @@ func TestMorphologyLinearInRadius(t *testing.T) {
 	t.Logf("window 2: %d steps; window %d: %d", small, n, whole)
 	if whole > 2*small {
 		t.Errorf("a window of the whole line takes %d steps, %d for a window of 2: not linear in the line", whole, small)
+	}
+}
+
+// resvgTurbulence is resvg's turbulence() loop as written: every octave,
+// no early end.
+func resvgTurbulence(t *turbTables, ch int, x, y float64, tb *turbSpec, octaves int) float64 {
+	sum, ratio := 0.0, 1.0
+	x *= tb.freqX
+	y *= tb.freqY
+	for o := 0; o < octaves; o++ {
+		n := t.noise2(ch, x, y, nil)
+		if !tb.fractal {
+			n = math.Abs(n)
+		}
+		sum += n / ratio
+		x *= 2
+		y *= 2
+		ratio *= 2
+	}
+	return sum
+}
+
+// Octaves past maxTurbulenceOctaves change nothing, so computing at most
+// that many is exact: at points from the origin to the extremes of f64, the
+// sum of 2099 octaves (ending early once it is NaN) is the sum of 6,000 as
+// resvg computes them. The bound is not loose for nothing: stopping where
+// 2^k overflows (1,024 octaves) would not be exact.
+func TestTurbulenceOctaveCap(t *testing.T) {
+	coords := []float64{0, math.SmallestNonzeroFloat64, 1e-300, 3e-200, 1e-10, 0.37, -2.5, 1e10, 1e300, -1e300}
+	tables := newTurbTables(5)
+	least := 0 // the fewest octaves that give every sum here
+	for _, fractal := range []bool{false, true} {
+		for _, x := range coords {
+			for _, y := range coords {
+				for ch := 0; ch < 4; ch++ {
+					want := resvgTurbulence(tables, ch, x, y, &turbSpec{freqX: 1, freqY: 1, fractal: fractal}, 6000)
+					same := func(n uint32) bool {
+						got := tables.sum(ch, x, y, 1, 1, nil, fractal, n)
+						return math.Float64bits(got) == math.Float64bits(want) || (got != got && want != want)
+					}
+					if !same(maxTurbulenceOctaves) {
+						t.Errorf("(%g, %g) channel %d fractal %v: %d octaves differ from 6000", x, y, ch, fractal, maxTurbulenceOctaves)
+					}
+					n := sortSearch(maxTurbulenceOctaves, same)
+					least = max(least, n)
+				}
+			}
+		}
+	}
+	t.Logf("the fewest octaves that give every sum: %d (the cap: %d)", least, maxTurbulenceOctaves)
+	if least <= 1024 {
+		t.Errorf("%d octaves give every sum: the test points do not reach past where 2^k overflows", least)
+	}
+}
+
+// sortSearch is the least n in [0, hi] for which ok holds from n on (ok is
+// monotone over the octaves past where the sum stops changing).
+func sortSearch(hi uint32, ok func(uint32) bool) int {
+	lo := uint32(0)
+	for lo < hi {
+		mid := lo + (hi-lo)/2
+		if ok(mid) {
+			hi = mid
+		} else {
+			lo = mid + 1
+		}
+	}
+	return int(lo)
+}
+
+// A numOctaves of a billion renders, as the 2,099 octaves it computes do,
+// and gives their image: the cap holds in the primitive, not only in the
+// sum.
+func TestTurbulenceHugeOctaves(t *testing.T) {
+	render := func(octaves string) []uint8 {
+		svg := `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="12"><defs><filter id="f" x="-3" y="-2" width="20" height="15" filterUnits="userSpaceOnUse">` +
+			`<feTurbulence baseFrequency="1e-30 0.3" numOctaves="` + octaves + `" stitchTiles="stitch"/></filter></defs><rect width="16" height="12" filter="url(#f)"/></svg>`
+		img, err := Render([]byte(svg), Options{})
+		if err != nil {
+			t.Fatalf("numOctaves %s: %v", octaves, err)
+		}
+		return img.Pix
+	}
+	capped, huge := render("2099"), render("1e9")
+	for i := range capped {
+		if capped[i] != huge[i] {
+			t.Fatalf("byte %d: %d with 2099 octaves, %d with 1e9", i, capped[i], huge[i])
+		}
 	}
 }

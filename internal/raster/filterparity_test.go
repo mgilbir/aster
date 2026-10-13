@@ -128,6 +128,37 @@ var filterParity = []synth{
 	{"disp-obb", filterSVG(`<feDisplacementMap in2="SourceGraphic" scale="0.05" xChannelSelector="R" yChannelSelector="G"/>`, `primitiveUnits="objectBoundingBox"`, alignedShapes), 0.01, 0},
 	{"disp-aa", filterSVG(`<feFlood flood-color="#80c0ff" result="m"/><feDisplacementMap in="SourceGraphic" in2="m" scale="2" xChannelSelector="R" yChannelSelector="B"/>`, "", aaShapes), 0.1, 0.25},
 
+	// ---- feTurbulence ----
+	// The noise is the same bits as resvg's: these are exact whatever the
+	// source (the source is not read).
+	exact("turb-turbulence", `<feTurbulence type="turbulence" baseFrequency="0.05" numOctaves="2"/>`),
+	exact("turb-fractal", `<feTurbulence type="fractalNoise" baseFrequency="0.05" numOctaves="2" seed="1"/>`),
+	exact("turb-stitch-fractal", `<feTurbulence type="fractalNoise" baseFrequency="0.03 0.07" numOctaves="3" seed="5" stitchTiles="stitch"/>`),
+	exact("turb-stitch-odd", `<feTurbulence baseFrequency="0.013 0.0217" numOctaves="5" stitchTiles="stitch" type="fractalNoise" seed="3"/>`),
+	exact("turb-stitch-turbulence", `<feTurbulence baseFrequency="0.04" numOctaves="3" stitchTiles="stitch" seed="11"/>`),
+	exact("turb-subregion", `<feTurbulence x="30" y="20" width="90" height="70" baseFrequency="0.05" numOctaves="2" stitchTiles="stitch"/>`),
+	exact("turb-srgb", `<feTurbulence baseFrequency="0.05" numOctaves="2" color-interpolation-filters="sRGB"/>`),
+	exact("turb-seed-fraction", `<feTurbulence baseFrequency="0.02 0.08" numOctaves="4" seed="-7.9"/>`),
+	exact("turb-seed-min", `<feTurbulence baseFrequency="0.03" numOctaves="2" seed="-1e10" type="fractalNoise"/>`),
+	exact("turb-seed-max", `<feTurbulence baseFrequency="0.03" numOctaves="2" seed="1e10"/>`),
+	exact("turb-octaves-zero", `<feTurbulence baseFrequency="0.03" numOctaves="0" type="fractalNoise"/>`),
+	exact("turb-octaves-negative", `<feTurbulence baseFrequency="0.03" numOctaves="-3"/>`),
+	exact("turb-octaves-fraction", `<feTurbulence baseFrequency="0.03" numOctaves="2.5"/>`),
+	exact("turb-octaves-40", `<feTurbulence baseFrequency="0.05" numOctaves="40"/>`),
+	exact("turb-frequency-zero", `<feTurbulence baseFrequency="0" numOctaves="3" type="fractalNoise"/>`),
+	exact("turb-frequency-negative", `<feTurbulence baseFrequency="0.05 -0.1" numOctaves="3"/>`),
+	exact("turb-frequency-three", `<feTurbulence baseFrequency="0.05 0.1 0.2" numOctaves="3"/>`),
+	exact("turb-frequency-high", `<feTurbulence baseFrequency="3.7" numOctaves="3"/>`),
+	exact("turb-type-case", `<feTurbulence baseFrequency="0.05" numOctaves="2" type="FractalNoise"/>`),
+	// Past 1,024 octaves 2^k is infinite: the noise, where it is not finite,
+	// makes the sum NaN (transparent), elsewhere adds nothing.
+	{"turb-octaves-3000", `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="18"><defs><filter id="f" x="-5" y="-3" width="30" height="25" filterUnits="userSpaceOnUse">` +
+		`<feTurbulence baseFrequency="1e-40" numOctaves="3000"/></filter></defs><rect width="24" height="18" fill="#345" filter="url(#f)"/></svg>`, 0.01, 0},
+	{"turb-octaves-1100-tiny-scale", `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="18" viewBox="0 0 2.4e-30 1.8e-30"><defs><filter id="f" x="0" y="0" width="2.4e-30" height="1.8e-30" filterUnits="userSpaceOnUse">` +
+		`<feTurbulence baseFrequency="3e-45 1e-20" numOctaves="1100" stitchTiles="stitch" type="fractalNoise"/></filter></defs><rect width="2.4e-30" height="1.8e-30" fill="#345" filter="url(#f)"/></svg>`, 0.01, 0},
+	{"turb-displacement", filterSVG(`<feTurbulence type="turbulence" baseFrequency="0.05" numOctaves="2" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale="5" xChannelSelector="R" yChannelSelector="G"/>`, "", alignedShapes), 0.01, 0},
+	{"turb-displacement-aa", filterSVG(`<feTurbulence type="turbulence" baseFrequency="0.05" numOctaves="2" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale="2" xChannelSelector="R" yChannelSelector="G"/>`, "", aaShapes), 0.1, 0.25},
+
 	// ---- the filter region ----
 	// Larger than its layer (4x the canvas): cut to the layer, its
 	// primitives' sub-regions measured from the cut corner.

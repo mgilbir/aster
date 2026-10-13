@@ -86,6 +86,8 @@ var filterPrims = []struct {
 	// Two conversions (in, and in2 a second time: SourceAlpha's own pass
 	// first) and the displacement.
 	{"displacement", fprim{kind: tagFeDisplacementMap, in2: finput{kind: inAlpha}, scale: 20, xch: 3, ych: 3, linear: true}, 1 + 1 + 1 + 1},
+	{"turbulence", fprim{kind: tagFeTurbulence, turb: &turbSpec{freqX: 0.05, freqY: 0.02, octaves: 2}, linear: true}, 1},
+	{"fractal noise, stitched", fprim{kind: tagFeTurbulence, turb: &turbSpec{freqX: 0.05, freqY: 0.02, octaves: 1, stitch: true, fractal: true}}, 1},
 }
 
 // testKernel is a 3x3 edge-detecting convolution.
