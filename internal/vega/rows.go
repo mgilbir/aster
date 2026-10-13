@@ -144,6 +144,7 @@ func (v *runView) rowExcess(rows []jsval.Value) int64 {
 	}
 	var n int64
 	for _, t := range rows {
+		v.work(1)
 		n += max(jsval.RowCost(t)-unit, 0)
 	}
 	return n

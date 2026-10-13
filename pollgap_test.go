@@ -3,6 +3,7 @@ package aster
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -30,6 +31,39 @@ func TestBigLoaderStopsPartway(t *testing.T) {
 		b, err := l.Load(&pollsCtx{Context: context.Background(), n: 2}, "x")
 		if !errors.Is(err, context.Canceled) || b != nil {
 			t.Errorf("%s: %d bytes, %v; want it stopped by the context", kind, len(b), err)
+		}
+	}
+}
+
+// The parse of a specification's JSON polls the call's context (ADR 0010):
+// a call whose context has ended stops in that parse, not after it, however
+// large the specification. Counted in polls, not timed: the context ends
+// before the call starts, and the error names the stage that saw it.
+func TestSpecParsePolls(t *testing.T) {
+	values := "[" + strings.Repeat("0,", 200_000) + "0]"
+	c, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	for _, tc := range []struct {
+		stage string
+		run   func() error
+	}{
+		{"parsing Vega spec", func() error {
+			_, err := c.VegaToSVG([]byte(`{"data":[{"name":"t","values":`+values+`}]}`), WithContext(ctx))
+			return err
+		}},
+		{"parsing Vega-Lite spec", func() error {
+			_, err := c.VegaLiteToSVG([]byte(`{"data":{"values":`+values+`},"mark":"point"}`), WithContext(ctx))
+			return err
+		}},
+	} {
+		err := tc.run()
+		if !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), tc.stage) {
+			t.Errorf("a call whose context had ended returned %v; want the context's error, in %s", err, tc.stage)
 		}
 	}
 }

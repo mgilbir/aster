@@ -127,9 +127,11 @@ Specifications and data are untrusted.
   `TestDeadlineIsHonouredThroughoutCompile` is the guard: it compiles a
   family of specs, each large in one dimension, and fails if any stretch of
   the compilation goes 200 ms without a poll; a new spec-sized dimension
-  gets a spec there. Two steps cannot be interrupted, so they are
-  bounded by size, not time: parsing the specification's JSON, and parsing
-  loaded JSON data.
+  gets a spec there. The Vega parser and the dataflow's build charge
+  `Scope.work` and `flowGraph.work` the same way, guarded by
+  `TestParsePollsThroughout`. JSON an input supplies (a specification, a
+  `values` string, a loaded file) is parsed with `jsval.ParseJSONContext`,
+  which polls as it reads.
 - An input that once exhausted a bound goes into the bounded-input corpus
   (`testdata/security/bounded`, run by `TestBoundedInputs` in every test run;
   see [testing.md](testing.md#robustness)).

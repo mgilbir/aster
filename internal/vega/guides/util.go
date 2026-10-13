@@ -62,17 +62,29 @@ func objv(pairs ...any) Value { return jsval.Obj(obj(pairs...)) }
 
 // extend copies the properties of every source object into dst
 // (vega-util's extend).
-func extend(dst *Object, sources ...Value) *Object {
+func extend(dst *Object, sources ...Value) *Object { return extendWork(nil, dst, sources...) }
+
+// extendWork is extend charging each property it copies to sc (Scope.Work),
+// for sources the specification or its config supply.
+func extendWork(sc Scope, dst *Object, sources ...Value) *Object {
 	for _, s := range sources {
 		src := s.ObjValue()
 		if src == nil {
 			continue
 		}
 		for i := 0; i < src.Len(); i++ {
+			work(sc, 1)
 			set(dst, src.KeyAt(i), src.ValueAt(i))
 		}
 	}
 	return dst
+}
+
+// work charges n steps to sc (Scope.Work); a nil sc charges nothing.
+func work(sc Scope, n int) {
+	if sc != nil {
+		sc.Work(n)
+	}
 }
 
 // isObject is vega-util's isObject: arrays, dates and patterns count.
@@ -127,8 +139,13 @@ func hasKey(o Value, key string) bool {
 }
 
 // lookup implements guide-util's lookup(): a property is looked up in the
-// axis/legend/title spec first and in the matching config block second.
-type lookup struct{ spec, config Value }
+// axis/legend/title spec first and in the matching config block second. sc
+// is the guide's Scope, which the builders charge their copies of the
+// specification's encode blocks to (nil: none).
+type lookup struct {
+	spec, config Value
+	sc           Scope
+}
 
 func (l lookup) get(name string) Value {
 	return value(l.spec.Get(name), l.config.Get(name))

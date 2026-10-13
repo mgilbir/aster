@@ -27,7 +27,7 @@ The attacker controls the Vega or Vega-Lite specification, the data a Loader ret
 
 ## Known residual risks
 
-- Parsing the specification's JSON and loaded JSON data are not interruptible. They are bounded by size (the parse budget), not by `WithTimeout`. Decoding an image is interrupted only between reads of its bytes: about every quarter of a million pixels for a PNG, and for a JPEG or GIF in stretches bounded only by the per-image byte and pixel bounds ([limits.md](limits.md#withtimeout)).
+- Decoding an image is interrupted only between reads of its bytes: about every quarter of a million pixels for a PNG, and for a JPEG or GIF in stretches bounded only by the per-image byte and pixel bounds ([limits.md](limits.md#withtimeout)).
 - There is no per-item memory model. Very long strings on one item are bounded only by the string budget and the SVG size cap; parsed path data is charged to the call's ledger.
 - A Loader you write is trusted: aster charges what it returns to the budget only after `Load` returns it, so bound what your Loader reads.
 - A `Transport` of your own that is not an `*http.Transport` decides itself where it connects. Only address literals and `localhost` names are refused for it.

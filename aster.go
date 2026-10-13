@@ -333,7 +333,7 @@ func (c *Converter) vegaSVG(ctx context.Context, spec []byte) (string, error) {
 	if err := c.checkSpecSize(spec); err != nil {
 		return "", err
 	}
-	v, err := timed(ctx, "json", func() (jsval.Value, error) { return jsval.ParseJSONLimit(spec, c.lim.vega.MaxParseBytes) })
+	v, err := timed(ctx, "json", func() (jsval.Value, error) { return jsval.ParseJSONContext(ctx, spec, c.lim.vega.MaxParseBytes) })
 	if err != nil {
 		return "", c.stageErr(ctx, "parsing Vega spec", err)
 	}
@@ -600,7 +600,7 @@ func (c *Converter) compileVegaLite(ctx context.Context, spec []byte) (jsval.Val
 	if err := c.checkSpecSize(spec); err != nil {
 		return jsval.Undefined, err
 	}
-	v, err := timed(ctx, "json", func() (jsval.Value, error) { return jsval.ParseJSONLimit(spec, c.lim.vega.MaxParseBytes) })
+	v, err := timed(ctx, "json", func() (jsval.Value, error) { return jsval.ParseJSONContext(ctx, spec, c.lim.vega.MaxParseBytes) })
 	if err != nil {
 		return jsval.Undefined, c.stageErr(ctx, "parsing Vega-Lite spec", err)
 	}

@@ -88,7 +88,7 @@ func NewLegend(spec Value, sc Scope) (*LegendPlan, error) {
 		return nil, errors.New("legend: specification must be an object")
 	}
 	config := sc.Config().Get("legend")
-	l := lookup{spec: spec, config: config}
+	l := lookup{spec: spec, config: config, sc: sc}
 	encode := spec.Get("encode")
 
 	scales := jsval.NewObject(0)
@@ -183,7 +183,7 @@ func (p *LegendPlan) Mark(dataRef, entryRef Value) Value {
 	m := obj(
 		"role", "legend",
 		"from", dataRef,
-		"encode", jsval.Obj(extendEncode(p.legendEncode(), legendEncode)),
+		"encode", jsval.Obj(extendEncode(l.sc, p.legendEncode(), legendEncode)),
 		"marks", jsval.Arr(kids),
 		"aria", l.get("aria"),
 		"description", l.get("description"),

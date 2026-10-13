@@ -531,16 +531,25 @@ type flowGraph struct {
 	warned map[Warning]struct{}
 	// onReport is Options.Report.
 	onReport func(error) error
+	// meter charges the steps of the view's own loops (building the graph
+	// from its specification, ranking it, ingesting a data set's rows) to
+	// the call's ledger, which polls the call's context (ADR 0010).
+	meter budget.Meter
 }
 
 func newGraph(ctx context.Context) *flowGraph {
-	return &flowGraph{ctx: ctx, touchSet: map[*opNode]struct{}{}, input: map[*opNode]*flowPulse{}}
+	return &flowGraph{ctx: ctx, touchSet: map[*opNode]struct{}{}, input: map[*opNode]*flowPulse{}, meter: budget.NewMeter(ctx)}
 }
+
+// work charges n steps to the graph's meter, ending the render, through the
+// *budget.Stop that evaluate and Render recover, once its call is over.
+func (g *flowGraph) work(n int) { g.meter.MustWork(int64(n)) }
 
 var errReentrant = errors.New("vega: dataflow already running")
 
 // add creates an operator, assigns it the next rank and touches it.
 func (g *flowGraph) add(name string, value any) *opNode {
+	g.work(1)
 	g.idCtr++
 	if g.maxOps > 0 && g.idCtr > g.maxOps {
 		failLimit("more than %d dataflow operators", g.maxOps)
@@ -556,6 +565,7 @@ func (g *flowGraph) add(name string, value any) *opNode {
 // topologically ordered.
 func (g *flowGraph) connect(target *opNode, sources []*opNode) {
 	for _, s := range sources {
+		g.work(1)
 		if target.rank < s.rank {
 			g.rerank(target)
 			return
@@ -567,6 +577,7 @@ func (g *flowGraph) rerank(op *opNode) {
 	queue := []*opNode{op}
 	guard := 0
 	for len(queue) > 0 {
+		g.work(1)
 		cur := queue[len(queue)-1]
 		queue = queue[:len(queue)-1]
 		g.rankCtr++

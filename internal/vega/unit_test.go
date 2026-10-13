@@ -94,7 +94,7 @@ func TestInferType(t *testing.T) {
 		{[]string{"a", "1"}, "string"},
 	}
 	for _, c := range cases {
-		if got := inferType(data(c.vals...), "f"); got != c.want {
+		if got := inferType(nil, data(c.vals...), "f"); got != c.want {
 			t.Errorf("%v: got %s want %s", c.vals, got, c.want)
 		}
 	}

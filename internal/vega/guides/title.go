@@ -28,7 +28,7 @@ func NewTitle(spec Value, sc Scope) (*TitlePlan, error) {
 	return &TitlePlan{
 		Datum: objv(),
 		spec:  spec,
-		l:     lookup{spec: spec, config: sc.Config().Get("title")},
+		l:     lookup{spec: spec, config: sc.Config().Get("title"), sc: sc},
 	}, nil
 }
 
@@ -40,7 +40,7 @@ func (p *TitlePlan) Mark(dataRef Value) Value {
 	userEncode := encode.Get("group")
 	name := userEncode.Get("name")
 
-	children := []Value{buildTitle(spec, l, titleEncode(spec), dataRef)}
+	children := []Value{buildTitle(spec, l, titleEncode(l.sc, spec), dataRef)}
 	if spec.Get("subtitle").IsTruthy() {
 		children = append(children, buildSubtitle(spec, l, encode.Get("subtitle"), dataRef))
 	}
@@ -63,13 +63,13 @@ func (p *TitlePlan) Mark(dataRef Value) Value {
 // titleEncode provides backwards compatibility for the deprecated top-level
 // title encode block: unless encode.title exists, the whole encode block
 // (plus name, interactive and style of the title) customizes the text mark.
-func titleEncode(spec Value) Value {
+func titleEncode(sc Scope, spec Value) Value {
 	encode := spec.Get("encode")
 	if t := encode.Get("title"); t.IsTruthy() {
 		return t
 	}
 	o := obj("name", spec.Get("name"), "interactive", spec.Get("interactive"), "style", spec.Get("style"))
-	return jsval.Obj(extend(o, encode))
+	return jsval.Obj(extendWork(sc, o, encode))
 }
 
 func titleGroupEncode(l lookup, userEncode Value) *Object {
@@ -84,7 +84,7 @@ func titleGroupEncode(l lookup, userEncode Value) *Object {
 		{"offset", or(l.get("offset"), jsval.Int(0))},
 		{"padding", l.get("subtitlePadding")},
 	}, nil)
-	return extendEncode(encode, userEncode)
+	return extendEncode(l.sc, encode, userEncode)
 }
 
 // titleText builds the shared shape of the title and subtitle text marks.
@@ -108,7 +108,7 @@ func titleText(text Value, l lookup, userEncode, dataRef Value, role, style stri
 		{"angle", l.get("angle")},
 		{"baseline", l.get("baseline")},
 	})
-	return guideMark(obj("type", "text", "role", role, "style", style, "from", dataRef, "encode", encode), userEncode)
+	return guideMark(l, obj("type", "text", "role", role, "style", style, "from", dataRef, "encode", encode), userEncode)
 }
 
 func buildTitle(spec Value, l lookup, userEncode, dataRef Value) Value {

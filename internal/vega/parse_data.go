@@ -132,6 +132,7 @@ func parseParameter(def *paramDef, spec jsval.Value, scope *Scope) P {
 		items := arrayOf(value)
 		out := make([]P, len(items))
 		for i, v := range items {
+			scope.work(1)
 			out[i] = parameterValue(def, v, scope)
 		}
 		return out
@@ -211,6 +212,7 @@ func parseSubParameters(def *paramDef, spec jsval.Value, scope *Scope) P {
 		items := value.Items()
 		out := make([]P, len(items))
 		for i, v := range items {
+			scope.work(1)
 			out[i] = parseSubParameter(def, v, scope)
 		}
 		return out
@@ -252,10 +254,12 @@ func parseSubParameter(def *paramDef, value jsval.Value, scope *Scope) P {
 func parseData(data jsval.Value, scope *Scope) {
 	var transforms []*entry
 	for _, tx := range arrayOf(data.Get("transform")) {
+		scope.work(1)
 		transforms = append(transforms, parseTransform(tx, scope))
 	}
 	name := data.Get("name").AsString()
 	for _, on := range arrayOf(data.Get("on")) {
+		scope.work(1)
 		parseTrigger(on, scope, name)
 	}
 	scope.addDataPipeline(name, analyzeData(data, scope, transforms))
@@ -280,7 +284,7 @@ func analyzeData(data jsval.Value, scope *Scope, ops []*entry) []*entry {
 
 	switch {
 	case data.Get("values").IsTruthy(): // JS truthiness: null, 0 and "" mean absent
-		if isSignalObj(data.Get("values")) || hasSignal(data.Get("format")) {
+		if isSignalObj(data.Get("values")) || hasSignal(scope.meter(), data.Get("format")) {
 			output = append(output, loadEntry(scope, data))
 			source = collectEntry(nil, nil)
 			output = append(output, source)
@@ -289,7 +293,7 @@ func analyzeData(data jsval.Value, scope *Scope, ops []*entry) []*entry {
 			output = append(output, source)
 		}
 	case data.Get("url").IsTruthy():
-		if hasSignal(data.Get("url")) || hasSignal(data.Get("format")) {
+		if hasSignal(scope.meter(), data.Get("url")) || hasSignal(scope.meter(), data.Get("format")) {
 			output = append(output, loadEntry(scope, data))
 			source = collectEntry(nil, nil)
 			output = append(output, source)
@@ -299,6 +303,7 @@ func analyzeData(data jsval.Value, scope *Scope, ops []*entry) []*entry {
 		}
 	case data.Get("source").IsTruthy():
 		for _, d := range arrayOf(data.Get("source")) {
+			scope.work(1)
 			upstream = append(upstream, scope.getData(d.AsString()).output)
 		}
 		source = nil
@@ -308,6 +313,7 @@ func analyzeData(data jsval.Value, scope *Scope, ops []*entry) []*entry {
 
 	haveSource := source != nil || fromSource
 	for _, t := range ops {
+		scope.work(1)
 		m := t.meta
 		if !haveSource && !m.source {
 			source = collectEntry(nil, nil)

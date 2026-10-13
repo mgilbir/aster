@@ -46,7 +46,7 @@ func NewAxis(spec Value, sc Scope) (*AxisPlan, error) {
 	if err != nil {
 		return nil, err
 	}
-	l := lookup{spec: spec, config: config}
+	l := lookup{spec: spec, config: config, sc: sc}
 	band := tickBand(l)
 	p := &AxisPlan{spec: spec, config: config, l: l, band: band}
 	p.Datum = objv(
@@ -103,7 +103,7 @@ func (p *AxisPlan) Mark(dataRef, ticksRef Value) Value {
 	m := obj(
 		"role", "axis",
 		"from", dataRef,
-		"encode", jsval.Obj(extendEncode(p.axisEncode(), axisEncode)),
+		"encode", jsval.Obj(extendEncode(l.sc, p.axisEncode(), axisEncode)),
 		"marks", jsval.Arr(children),
 		"aria", l.get("aria"),
 		"description", l.get("description"),
@@ -164,7 +164,7 @@ func axisDomain(spec Value, l lookup, userEncode, dataRef Value) Value {
 	set(enter, "y2", y2)
 	set(update, "y2", y2)
 
-	return guideMark(obj("type", "rule", "role", "axis-domain", "from", dataRef, "encode", encode), userEncode)
+	return guideMark(l, obj("type", "rule", "role", "axis-domain", "from", dataRef, "encode", encode), userEncode)
 }
 
 // offsetValue negates a grid offset for right and bottom axes (sign -1),
@@ -272,7 +272,7 @@ func axisGrid(spec Value, l lookup, userEncode, dataRef Value, band tickBandInfo
 	set(exit, "x", ifX(orient, tickPos(), jsval.Undefined))
 	set(exit, "y", ifY(orient, tickPos(), jsval.Undefined))
 
-	return guideMark(obj("type", "rule", "role", "axis-grid", "key", fValue, "from", dataRef, "encode", encode), userEncode)
+	return guideMark(l, obj("type", "rule", "role", "axis-grid", "key", fValue, "from", dataRef, "encode", encode), userEncode)
 }
 
 func axisTicks(spec Value, l lookup, userEncode, dataRef, size Value, band tickBandInfo) Value {
@@ -324,7 +324,7 @@ func axisTicks(spec Value, l lookup, userEncode, dataRef, size Value, band tickB
 	set(enter, "x2", x2)
 	set(exit, "y", ifY(orient, tickPos(), jsval.Undefined))
 
-	return guideMark(obj("type", "rule", "role", "axis-tick", "key", fValue, "from", dataRef, "encode", encode), userEncode)
+	return guideMark(l, obj("type", "rule", "role", "axis-tick", "key", fValue, "from", dataRef, "encode", encode), userEncode)
 }
 
 func flushExpr(scale string, threshold Value, a, b, c string) Value {
@@ -445,7 +445,7 @@ func axisLabels(spec Value, l lookup, userEncode, dataRef, size Value, band tick
 		set(update, "baseline", patch(update.Lookup("baseline"), baseline))
 	}
 
-	return guideMark(obj(
+	return guideMark(l, obj(
 		"type", "text",
 		"role", "axis-label",
 		"style", guideLabelStyle,
@@ -498,7 +498,7 @@ func axisTitle(spec Value, l lookup, userEncode, dataRef Value) Value {
 	set(update, "angle", patch(update.Lookup("angle"), enter.Lookup("angle")))
 	set(update, "baseline", patch(update.Lookup("baseline"), enter.Lookup("baseline")))
 
-	return guideMark(obj("type", "text", "role", "axis-title", "style", guideTitleStyle, "from", dataRef, "encode", encode), userEncode)
+	return guideMark(l, obj("type", "text", "role", "axis-title", "style", guideTitleStyle, "from", dataRef, "encode", encode), userEncode)
 }
 
 // axisTitleAutoLayout sets the title's `auto` flag: the title is positioned by

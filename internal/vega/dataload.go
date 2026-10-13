@@ -29,11 +29,12 @@ func (v *runView) seedCollect(c *rtContext, n *opNode, e *entry) {
 		data = make([]jsval.Value, len(e.literal))
 		var cl jsval.Cloner
 		for i, t := range e.literal {
+			v.work(1)
 			data[i] = ingestTupleWith(&cl, t)
 		}
 	case e.ingest != nil && e.ingest.request:
 		data = v.request(e.ingest.url, e.ingest.format)
-		if i := nullRow(data); i >= 0 {
+		if i := v.nullRow(data); i >= 0 {
 			// Upstream ingests the rows of a load as they arrive, after the
 			// dataflow is made (Dataflow.preload): the TypeError rejects that
 			// promise rather than throwing out of the View, so it is the
@@ -44,14 +45,14 @@ func (v *runView) seedCollect(c *rtContext, n *opNode, e *entry) {
 			data = nil
 		}
 		v.holdSrcRows(n, data)
-		ingestRows(data)
+		v.ingestRows(data)
 	case e.ingest != nil:
 		data = v.parseValues(e.ingest.values, e.ingest.format)
-		if nullRow(data) >= 0 {
+		if v.nullRow(data) >= 0 {
 			fail("%s", errNullRow.Error())
 		}
 		v.holdSrcRows(n, data)
-		ingestRows(data)
+		v.ingestRows(data)
 	}
 	n.value = data
 	v.g.pulseInput(n, &flowPulse{tuples: data, changed: true})
@@ -63,8 +64,9 @@ func (v *runView) seedCollect(c *rtContext, n *opNode, e *entry) {
 var errNullRow = errors.New("Cannot read properties of null (reading 'Symbol(vega_id)')")
 
 // nullRow is the index of the first null row of data, or -1.
-func nullRow(data []jsval.Value) int {
+func (v *runView) nullRow(data []jsval.Value) int {
 	for i, t := range data {
+		v.work(1)
 		if t.IsNull() {
 			return i
 		}
@@ -74,9 +76,10 @@ func nullRow(data []jsval.Value) int {
 
 // ingestRows ingests rows that arrive through a change set, none of them
 // null (nullRow).
-func ingestRows(data []jsval.Value) {
+func (v *runView) ingestRows(data []jsval.Value) {
 	var cl jsval.Cloner
 	for i := range data {
+		v.work(1)
 		data[i] = ingestTupleWith(&cl, data[i])
 	}
 }
@@ -190,7 +193,7 @@ func (v *runView) read(value jsval.Value, raw []byte, schema jsval.Value) ([]jsv
 	var err error
 	switch typ {
 	case "json":
-		data, err = readJSON(value, raw, schema, v.limits.MaxParseBytes)
+		data, err = readJSON(v.ctx, value, raw, schema, v.limits.MaxParseBytes)
 	case "csv", "tsv", "dsv":
 		delim := ","
 		switch typ {
@@ -226,7 +229,7 @@ func (v *runView) read(value jsval.Value, raw []byte, schema jsval.Value) ([]jsv
 		}
 	case "topojson":
 		var doc jsval.Value
-		doc, err = jsonDocument(value, raw, schema, v.limits.MaxParseBytes)
+		doc, err = jsonDocument(v.ctx, value, raw, schema, v.limits.MaxParseBytes)
 		if err != nil {
 			break
 		}
@@ -243,10 +246,14 @@ func (v *runView) read(value jsval.Value, raw []byte, schema jsval.Value) ([]jsv
 		return nil, fmt.Errorf("Unknown data format type: %s", typ)
 	}
 	if err != nil {
-		// A document past a resource limit ends the render; it is not a
-		// body that failed to parse.
+		// A document past a resource limit ends the render, as the end of
+		// the call does while a document is parsed: neither is a body that
+		// failed to parse.
 		if errors.Is(err, budget.ErrLimit) {
 			failErr(err)
+		}
+		if cerr := v.ctx.Err(); cerr != nil {
+			failErr(cerr)
 		}
 		return nil, err
 	}
@@ -258,6 +265,7 @@ func (v *runView) read(value jsval.Value, raw []byte, schema jsval.Value) ([]jsv
 			// copies, which ingest would make anyway.
 			var cl jsval.Cloner
 			for i, t := range data {
+				v.work(1)
 				if o := t.ObjValue(); o != nil {
 					data[i] = jsval.Obj(cl.Clone(o))
 				}
@@ -271,17 +279,17 @@ func (v *runView) read(value jsval.Value, raw []byte, schema jsval.Value) ([]jsv
 }
 
 // jsonDocument decodes a JSON payload (or takes an already decoded value) and
-// selects the `property` path.
-func jsonDocument(value jsval.Value, raw []byte, schema jsval.Value, limit int64) (jsval.Value, error) {
+// selects the `property` path. The decoding polls ctx, the call's.
+func jsonDocument(ctx context.Context, value jsval.Value, raw []byte, schema jsval.Value, limit int64) (jsval.Value, error) {
 	var doc jsval.Value
 	if value.IsUndefined() {
-		d, err := jsval.ParseJSONLimit(raw, limit)
+		d, err := jsval.ParseJSONContext(ctx, raw, limit)
 		if err != nil {
 			return jsval.Undefined, err
 		}
 		doc = d
 	} else if value.IsStr() {
-		d, err := jsval.ParseJSONLimit([]byte(value.StrValue()), limit)
+		d, err := jsval.ParseJSONContext(ctx, []byte(value.StrValue()), limit)
 		if err != nil {
 			return jsval.Undefined, err
 		}
@@ -302,8 +310,8 @@ func walkFieldPath(v jsval.Value, path string) jsval.Value {
 	return v
 }
 
-func readJSON(value jsval.Value, raw []byte, schema jsval.Value, limit int64) ([]jsval.Value, error) {
-	doc, err := jsonDocument(value, raw, schema, limit)
+func readJSON(ctx context.Context, value jsval.Value, raw []byte, schema jsval.Value, limit int64) ([]jsval.Value, error) {
+	doc, err := jsonDocument(ctx, value, raw, schema, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -543,9 +551,10 @@ func (v *runView) applyParse(data []jsval.Value, columns []string, types jsval.V
 	var typeOf map[string]string
 	var order []string
 	if types.IsStr() && types.StrValue() == "auto" {
-		typeOf = inferTypes(data, fields)
+		typeOf = inferTypes(&v.g.meter, data, fields)
 		order = make([]string, 0, len(typeOf))
 		for _, f := range fields {
+			v.work(1)
 			if _, dup := typeOf[f]; dup && !contains(order, f) {
 				order = append(order, f)
 			}
@@ -553,6 +562,7 @@ func (v *runView) applyParse(data []jsval.Value, columns []string, types jsval.V
 	} else if o := types.ObjValue(); o != nil {
 		typeOf = map[string]string{}
 		for i := 0; i < o.Len(); i++ {
+			v.work(1)
 			typeOf[o.KeyAt(i)] = o.ValueAt(i).AsString()
 			order = append(order, o.KeyAt(i))
 		}
@@ -561,6 +571,7 @@ func (v *runView) applyParse(data []jsval.Value, columns []string, types jsval.V
 	}
 	parsers := make([]func(jsval.Value) jsval.Value, len(order))
 	for i, field := range order {
+		v.work(1)
 		t := typeOf[field]
 		if strings.HasPrefix(t, "date:") || strings.HasPrefix(t, "utc:") {
 			utc := strings.HasPrefix(t, "utc:")
@@ -593,6 +604,7 @@ func (v *runView) applyParse(data []jsval.Value, columns []string, types jsval.V
 		parsers[i] = p
 	}
 	for _, d := range data {
+		v.work(1 + len(order))
 		o := d.ObjValue()
 		if o == nil {
 			continue
@@ -663,10 +675,10 @@ func toNumberValue(x jsval.Value) jsval.Value {
 
 // -- inference -----------------------------------------------------------------
 
-func inferTypes(data []jsval.Value, fields []string) map[string]string {
+func inferTypes(m *budget.Meter, data []jsval.Value, fields []string) map[string]string {
 	out := make(map[string]string, len(fields))
 	for _, f := range fields {
-		out[f] = inferType(data, f)
+		out[f] = inferType(m, data, f)
 	}
 	return out
 }
@@ -713,13 +725,14 @@ func testDate(x jsval.Value) bool {
 var typeTests = [...]func(jsval.Value) bool{testBoolean, testInteger, testNumber, testDate}
 var typeList = [...]string{"boolean", "integer", "number", "date"}
 
-func inferType(data []jsval.Value, field string) string {
+func inferType(m *budget.Meter, data []jsval.Value, field string) string {
 	if len(data) == 0 {
 		return "unknown"
 	}
 	a := [4]int{1, 2, 3, 4}
 	t := 0
 	for _, d := range data {
+		charge(m, 1)
 		x := d.Get(field)
 		for j := range typeTests {
 			if a[j] != 0 && validValue(x) && !typeTests[j](x) {
