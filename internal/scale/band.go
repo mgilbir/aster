@@ -53,6 +53,12 @@ func NewPoint() *Band {
 	return b
 }
 
+// SetWork is meta.SetWork, for the band's own loops and its ordinal's.
+func (b *Band) SetWork(f func(steps int)) {
+	b.meta.SetWork(f)
+	b.ord.SetWork(f)
+}
+
 // IsPoint reports whether this is a point scale.
 func (b *Band) IsPoint() bool { return b.point }
 
@@ -81,6 +87,7 @@ func (b *Band) rescale() {
 	count := len(b.ord.domain)
 	values := make([]jsval.Value, count)
 	for i := 0; i < count; i++ {
+		b.charge(i, count)
 		v := start + float64(step*float64(i))
 		if reverse {
 			values[count-1-i] = jsval.Num(v)

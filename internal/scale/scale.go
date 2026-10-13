@@ -37,6 +37,28 @@ type Scale interface {
 type meta struct {
 	typ  string
 	bins []float64
+	// work is what SetWork installed: it is told the steps of the scale's
+	// loops over its domain, a batch at a time.
+	work func(steps int)
+}
+
+// workBatch is how many domain values a scale's loops go between two reports
+// of their work.
+const workBatch = 256
+
+// SetWork installs a function the scale tells the steps of its loops over a
+// domain (a step a value), a batch at a time, so that a caller can charge
+// them to a budget and poll its context (ADR 0010): a domain is as long as a
+// data set's distinct values. The function may end the caller's work by
+// panicking, which leaves the scale part updated. nil installs none.
+func (m *meta) SetWork(f func(steps int)) { m.work = f }
+
+// charge reports, at value i of a loop over n, the batch of steps that
+// starts there.
+func (m *meta) charge(i, n int) {
+	if m.work != nil && i&(workBatch-1) == 0 {
+		m.work(min(workBatch, n-i))
+	}
 }
 
 func (m *meta) Type() string { return m.typ }

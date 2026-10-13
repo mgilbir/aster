@@ -17,6 +17,11 @@ import (
 // `clip` of `{"path": "M..."}` and a shape item's `shape` of `{"path": "M..."}`
 // become PathFunc/ShapeFunc that replay the path data. The bounds and
 // z-order caches are not read; use Bounder to compute bounds.
+//
+// It reads trusted input only: tests and fuzz targets load upstream's
+// serialized scenegraphs with it, and no public API or render path calls it,
+// so its parse is not metered (jsval.ParseJSONContext) and has no context to
+// poll. A caller that hands it untrusted JSON needs one first.
 func FromJSON(data []byte) (*Scenegraph, error) {
 	v, err := jsval.ParseJSON(data)
 	if err != nil {

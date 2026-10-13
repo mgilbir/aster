@@ -545,6 +545,57 @@ func newGraph(ctx context.Context) *flowGraph {
 // *budget.Stop that evaluate and Render recover, once its call is over.
 func (g *flowGraph) work(n int) { g.meter.MustWork(int64(n)) }
 
+// rowBatch is how many rows (tuples or items) a per-row loop of the
+// dataflow's own operators goes between two charges of its work: the meter
+// polls every 1,024 steps, so a loop of cheap steps polls every 1,024 rows
+// and one of dearer steps sooner.
+const rowBatch = 256
+
+// rows charges, at row i of a loop over n rows, the steps of the batch of
+// rows that starts there, cost steps a row: a per-row loop pays an AND and a
+// branch a row, and polls the call's context between batches (ADR 0010).
+func (g *flowGraph) rows(i, n, cost int) {
+	if i&(rowBatch-1) == 0 {
+		g.work(min(rowBatch, n-i) * cost)
+	}
+}
+
+// copyChunk is how many values of a tuple or item list appendRows copies
+// between two charges: 256 KiB, a step per 16 values (what a copy costs
+// against a step of a loop), so a meter's poll every 16,384 values.
+const copyChunk = 16 << 10
+
+// appendRows is append(dst, src...) for a list of rows, copied a chunk at a
+// time with each chunk charged before it is copied: a list of a million rows
+// is 16 MB. dst should have room for src, as a single append would make it.
+func appendRows[T any](g *flowGraph, dst, src []T) []T {
+	for len(src) > 0 {
+		k := min(len(src), copyChunk)
+		g.work(k/16 + 1)
+		dst = append(dst, src[:k]...)
+		src = src[k:]
+	}
+	return dst
+}
+
+// copyRows is a copy of the list rows, made by appendRows.
+func copyRows[T any](g *flowGraph, rows []T) []T {
+	return appendRows(g, make([]T, 0, len(rows)), rows)
+}
+
+// meteredCompare is cmp charging a step per comparison, a batch at a time:
+// a sort of n rows makes n log n of them, the longest stretch of an
+// operator. A sort the charge stops is left part done, as the render is.
+func meteredCompare[T any](g *flowGraph, cmp func(a, b T) int) func(a, b T) int {
+	n := 0
+	return func(a, b T) int {
+		if n++; n&(rowBatch-1) == 0 {
+			g.work(rowBatch)
+		}
+		return cmp(a, b)
+	}
+}
+
 var errReentrant = errors.New("vega: dataflow already running")
 
 // add creates an operator, assigns it the next rank and touches it.

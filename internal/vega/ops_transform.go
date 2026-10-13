@@ -225,15 +225,15 @@ func statefulTransform(newFn func() txFn) factory {
 			if pulse.items != nil {
 				return markTransform(n, p, pulse, f)
 			}
-			in := pulse.input(typ)
+			in := pulse.input(n.g, typ)
 			if len(pulse.multi) > 0 {
-				in = concatTuples(pulse.multi)
+				in = concatTuples(n.g, pulse.multi)
 			}
 			if len(in) > 0 {
 				requireFields(def, p)
 			}
 			if pulse.src != nil {
-				checkWritesAdds(typ, p, in)
+				checkWritesAdds(n.g, typ, p, in)
 			}
 			n.g.view.txPulse = pulse
 			defer func() { n.g.view.txPulse = nil }()
@@ -284,7 +284,8 @@ func init() {
 			}
 			// initonly applies to tuples that entered since the last run only
 			todo := make([]jsval.Value, 0, len(in))
-			for _, t := range in {
+			for i, t := range in {
+				n.g.rows(i, len(in), 2)
 				if o := t.ObjValue(); o != nil {
 					if _, ok := seen[o]; !ok {
 						seen[o] = struct{}{}
@@ -310,7 +311,7 @@ func init() {
 			}
 			in := pulse.tuples
 			if len(pulse.multi) > 0 {
-				in = concatTuples(pulse.multi) // several source data sets
+				in = concatTuples(n.g, pulse.multi) // several source data sets
 			}
 			// A null group-by accessor (an empty field name) must not crash
 			// the grouping; it reads as undefined.
@@ -409,7 +410,7 @@ func init() {
 		}
 		// it aggregates what the pulse adds and writes into its source
 		if pl := n.g.view.txPulse; pl != nil && pl.src != nil {
-			jp.Into = pl.sourceView()
+			jp.Into = pl.sourceView(n.g)
 		}
 		return transforms.JoinAggregate(ctxOf(n), in, jp)
 	})
@@ -693,6 +694,7 @@ func markTransform(n *opNode, p *opParams, pulse *flowPulse, f txFn) *flowPulse 
 	views := v.itemTuples(items)
 	before := make([]map[string]jsval.Value, len(views))
 	for i, t := range views {
+		n.g.rows(i, len(views), itemTupleCost)
 		o := t.ObjValue()
 		snap := make(map[string]jsval.Value, o.Len())
 		for j := 0; j < o.Len(); j++ {
@@ -705,6 +707,7 @@ func markTransform(n *opNode, p *opParams, pulse *flowPulse, f txFn) *flowPulse 
 	// nodes before a link it cannot resolve throws).
 	copyBack := func() {
 		for i, t := range views {
+			n.g.rows(i, len(views), itemTupleCost)
 			o := t.ObjValue()
 			for j := 0; j < o.Len(); j++ {
 				k, val := o.KeyAt(j), o.ValueAt(j)

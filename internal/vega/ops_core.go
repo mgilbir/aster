@@ -337,16 +337,16 @@ func facCollect(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode
 		if pulse.changed {
 			src := pulse.tuples
 			if len(pulse.multi) > 0 {
-				src = concatTuples(pulse.multi)
+				src = concatTuples(n.g, pulse.multi)
 			}
 			if cmp == nil {
-				list = collectIncremental(list, src)
+				list = collectIncremental(n.g, list, src)
 			} else {
-				list = append(make([]jsval.Value, 0, len(src)), src...)
+				list = copyRows(n.g, src)
 			}
 		}
 		if cmp != nil && mod {
-			transforms.SortTuples(list, transforms.StableComparator(cmp))
+			transforms.SortTuples(list, meteredCompare(n.g, transforms.StableComparator(cmp)))
 		}
 		n.value = list
 		n.modified = mod
@@ -372,37 +372,42 @@ func facCollect(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode
 // and modify lists, so which tuples left and which arrived is read off the
 // difference. That needs distinct objects: anything else (a repeated or a
 // non-object tuple) is taken as a new set in the order it came.
-func collectIncremental(list, src []jsval.Value) []jsval.Value {
-	if len(list) == 0 || sameObjects(list, src) {
-		return append(make([]jsval.Value, 0, len(src)), src...)
+//
+// g charges its steps (rowBatch).
+func collectIncremental(g *flowGraph, list, src []jsval.Value) []jsval.Value {
+	if len(list) == 0 || sameObjects(g, list, src) {
+		return copyRows(g, src)
 	}
 	incoming := make(map[*jsval.Object]struct{}, len(src))
-	for _, t := range src {
+	for i, t := range src {
+		g.rows(i, len(src), 2)
 		if !t.IsObj() {
-			return append(make([]jsval.Value, 0, len(src)), src...)
+			return copyRows(g, src)
 		}
 		o := t.ObjValue()
 		if _, dup := incoming[o]; dup {
-			return append(make([]jsval.Value, 0, len(src)), src...)
+			return copyRows(g, src)
 		}
 		incoming[o] = struct{}{}
 	}
 	out := make([]jsval.Value, 0, len(src))
 	kept := make(map[*jsval.Object]struct{}, len(list))
-	for _, t := range list {
+	for i, t := range list {
+		g.rows(i, len(list), 2)
 		if !t.IsObj() {
-			return append(make([]jsval.Value, 0, len(src)), src...)
+			return copyRows(g, src)
 		}
 		o := t.ObjValue()
 		if _, dup := kept[o]; dup {
-			return append(make([]jsval.Value, 0, len(src)), src...)
+			return copyRows(g, src)
 		}
 		if _, ok := incoming[o]; ok {
 			out = append(out, t)
 			kept[o] = struct{}{}
 		}
 	}
-	for _, t := range src {
+	for i, t := range src {
+		g.rows(i, len(src), 1)
 		if _, ok := kept[t.ObjValue()]; !ok {
 			out = append(out, t)
 		}
@@ -412,11 +417,12 @@ func collectIncremental(list, src []jsval.Value) []jsval.Value {
 
 // sameObjects reports whether a and b are the same objects in the same order,
 // for which collectIncremental's answer is b, whatever the sets hold.
-func sameObjects(a, b []jsval.Value) bool {
+func sameObjects(g *flowGraph, a, b []jsval.Value) bool {
 	if len(a) != len(b) {
 		return false
 	}
 	for i := range a {
+		g.rows(i, len(a), 1)
 		o := a[i].ObjValue()
 		if o == nil || o != b[i].ObjValue() {
 			return false
@@ -425,14 +431,14 @@ func sameObjects(a, b []jsval.Value) bool {
 	return true
 }
 
-func concatTuples(lists [][]jsval.Value) []jsval.Value {
+func concatTuples(g *flowGraph, lists [][]jsval.Value) []jsval.Value {
 	n := 0
 	for _, l := range lists {
 		n += len(l)
 	}
 	out := make([]jsval.Value, 0, n)
 	for _, l := range lists {
-		out = append(out, l...)
+		out = appendRows(g, out, l)
 	}
 	return out
 }
@@ -459,11 +465,12 @@ func facValues(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode,
 			src := pulse.rawSource() // Values reads pulse.source
 			f, _ := p.Get("field").(transforms.Field)
 			if cmp := p.comparator("sort"); cmp != nil {
-				src = append([]jsval.Value(nil), src...)
-				transforms.SortTuples(src, transforms.StableComparator(cmp))
+				src = copyRows(n.g, src)
+				transforms.SortTuples(src, meteredCompare(n.g, transforms.StableComparator(cmp)))
 			}
 			out := make([]jsval.Value, len(src))
 			for i, t := range src {
+				n.g.rows(i, len(src), 1)
 				out[i] = f.Apply(t)
 			}
 			n.value = jsval.Arr(out)
@@ -476,7 +483,7 @@ func facExtent(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode,
 	return jsval.ArrOf(jsval.Undefined, jsval.Undefined), trFunc(func(n *opNode, p *opParams, pulse *flowPulse) *flowPulse {
 		f, _ := p.Get("field").(transforms.Field)
 		// a changed pulse is visited whole: its source
-		lo, hi, ok, err := transforms.FieldExtent(n.g.ctx, pulse.sourceView(), f)
+		lo, hi, ok, err := transforms.FieldExtent(n.g.ctx, pulse.sourceView(n.g), f)
 		if err != nil {
 			failErr(err)
 		}
@@ -511,7 +518,8 @@ func facMultiExtent(c *rtContext, n *opNode, e *entry) (any, transform, func(*op
 		}
 		lo, hi := jsval.Num(math.Inf(1)), jsval.Num(math.Inf(-1))
 		if exts, ok := p.Get("extents").([]any); ok {
-			for _, x := range exts {
+			for i, x := range exts {
+				n.g.rows(i, len(exts), 1)
 				ev, _ := x.(jsval.Value)
 				if transforms.Less(ev.Index(0), lo) {
 					lo = ev.Index(0)
@@ -534,7 +542,7 @@ func facMultiValues(c *rtContext, n *opNode, e *entry) (any, transform, func(*op
 		if vals, ok := p.Get("values").([]any); ok {
 			for _, x := range vals {
 				v, _ := x.(jsval.Value)
-				out = append(out, v.Items()...)
+				out = appendRows(n.g, out, v.Items())
 			}
 		}
 		return jsval.Arr(out)
@@ -552,7 +560,7 @@ type tupleIndex struct {
 func facTupleIndex(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *opParams) any) {
 	return (*tupleIndex)(nil), trFunc(func(n *opNode, p *opParams, pulse *flowPulse) *flowPulse {
 		f, _ := p.Get("field").(transforms.Field)
-		tuples := pulse.sourceView() // a first run visits the source
+		tuples := pulse.sourceView(n.g) // a first run visits the source
 		if pulse.items != nil {
 			// A named mark's data are its items ("reactive geometry").
 			tuples = n.g.view.itemTuples(pulse.items)
@@ -562,7 +570,8 @@ func facTupleIndex(c *rtContext, n *opNode, e *entry) (any, transform, func(*opN
 			failErr(err)
 		}
 		idx := &tupleIndex{lookup: lookup, m: make(map[string]jsval.Value, len(tuples))}
-		for _, t := range tuples {
+		for i, t := range tuples {
+			n.g.rows(i, len(tuples), 2)
 			idx.m[f.Apply(t).AsString()] = t
 		}
 		n.value = idx
@@ -582,7 +591,7 @@ func facRelay(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 	return nil, trFunc(func(n *opNode, p *opParams, pulse *flowPulse) *flowPulse {
 		src := pulse.tuples
 		if len(pulse.multi) > 0 {
-			src = concatTuples(pulse.multi)
+			src = concatTuples(n.g, pulse.multi)
 		}
 		if !p.Value("derive").IsTruthy() {
 			res := &flowPulse{stamp: pulse.stamp, encode: pulse.encode, changed: true, tuples: src, tree: pulse.tree}
@@ -598,14 +607,17 @@ func facRelay(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 		copies := make([]relayCopy, 0, len(src))
 		var lut map[*jsval.Object]*jsval.Object
 		var ids tidSet
-		if len(last) > 0 || !ids.init(src) {
+		if len(last) > 0 || !ids.init(n.g, src) {
 			lut = make(map[*jsval.Object]*jsval.Object, max(len(src), len(last)))
-			for _, c := range last {
+			for i, c := range last {
+				n.g.rows(i, len(last), 1)
 				lut[c.src] = c.dst
 			}
 		}
 		var cl jsval.Cloner
 		for i, t := range src {
+			// A copy, or an update of one, sets each of the tuple's fields.
+			n.g.rows(i, len(src), 4)
 			o := t.ObjValue()
 			if o == nil {
 				// derive(t) copies the properties a for-in loop finds: a
@@ -619,7 +631,8 @@ func facRelay(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 			if lut == nil && !ids.add(o) {
 				// Perhaps a tuple this pulse has had already.
 				lut = make(map[*jsval.Object]*jsval.Object, len(src))
-				for _, c := range copies {
+				for j, c := range copies {
+					n.g.rows(j, len(copies), 1)
 					lut[c.src] = c.dst
 				}
 			}
@@ -662,9 +675,10 @@ type tidSet struct {
 	bits []uint64
 }
 
-func (s *tidSet) init(tuples []jsval.Value) bool {
+func (s *tidSet) init(g *flowGraph, tuples []jsval.Value) bool {
 	lo, hi, n := uint32(math.MaxUint32), uint32(0), 0
-	for _, t := range tuples {
+	for i, t := range tuples {
+		g.rows(i, len(tuples), 1)
 		o := t.ObjValue()
 		if o == nil {
 			continue
@@ -734,6 +748,7 @@ func facLoad(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *
 func (v *runView) itemTuples(items []*scene.Item) []jsval.Value {
 	out := make([]jsval.Value, len(items))
 	for i, it := range items {
+		v.g.rows(i, len(items), itemTupleCost)
 		out[i] = v.itemTuple(it)
 	}
 	return out

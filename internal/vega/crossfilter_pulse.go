@@ -22,8 +22,9 @@ type pulseSource struct {
 	filter func(jsval.Value) bool
 }
 
-// sourceView is the pulse's source, materialised: filtered.
-func (p *flowPulse) sourceView() []jsval.Value {
+// sourceView is the pulse's source, materialised: filtered, a filter's
+// test charged to g a row at a time.
+func (p *flowPulse) sourceView(g *flowGraph) []jsval.Value {
 	if p.src == nil {
 		return p.tuples
 	}
@@ -31,7 +32,8 @@ func (p *flowPulse) sourceView() []jsval.Value {
 		return p.src.tuples
 	}
 	out := make([]jsval.Value, 0, len(p.src.tuples))
-	for _, t := range p.src.tuples {
+	for i, t := range p.src.tuples {
+		g.rows(i, len(p.src.tuples), 2)
 		if p.src.filter(t) {
 			out = append(out, t)
 		}
@@ -72,10 +74,10 @@ const (
 )
 
 // input is the list a transform of type typ reads from pulse.
-func (p *flowPulse) input(typ string) []jsval.Value {
+func (p *flowPulse) input(g *flowGraph, typ string) []jsval.Value {
 	switch readsSource[typ] {
 	case materialised:
-		return p.sourceView()
+		return p.sourceView(g)
 	case raw:
 		return p.rawSource()
 	}
@@ -124,12 +126,13 @@ func firstAs(p *opParams, def string) string {
 
 // checkWritesAdds raises the TypeError a transform of type typ meets writing
 // its first field into a primitive the pulse adds.
-func checkWritesAdds(typ string, p *opParams, in []jsval.Value) {
+func checkWritesAdds(g *flowGraph, typ string, p *opParams, in []jsval.Value) {
 	name := writesAdds[typ]
 	if name == nil {
 		return
 	}
-	for _, t := range in {
+	for i, t := range in {
+		g.rows(i, len(in), 1)
 		var kind string
 		switch t.Kind() {
 		case jsval.KindNum:

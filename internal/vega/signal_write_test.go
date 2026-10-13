@@ -105,20 +105,21 @@ func TestCollectIncremental(t *testing.T) {
 		}
 		return strings.Join(s, "")
 	}
-	list := collectIncremental(nil, rows[1:])
+	g := newGraph(context.Background())
+	list := collectIncremental(g, nil, rows[1:])
 	if got := names(list); got != "bcd" {
 		t.Fatalf("first set %s", got)
 	}
-	list = collectIncremental(list, rows)
+	list = collectIncremental(g, list, rows)
 	if got := names(list); got != "bcda" {
 		t.Errorf("re-admitted row: %s, want bcda", got)
 	}
-	list = collectIncremental(list, []jsval.Value{rows[3], rows[1]})
+	list = collectIncremental(g, list, []jsval.Value{rows[3], rows[1]})
 	if got := names(list); got != "bd" {
 		t.Errorf("rows dropped: %s, want bd", got)
 	}
 	// A repeated tuple is not an identity this can follow: the set is taken as it comes.
-	list = collectIncremental(list, []jsval.Value{rows[2], rows[2], rows[0]})
+	list = collectIncremental(g, list, []jsval.Value{rows[2], rows[2], rows[0]})
 	if got := names(list); got != "cca" {
 		t.Errorf("repeated tuple: %s, want cca", got)
 	}

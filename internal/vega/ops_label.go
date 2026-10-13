@@ -3,6 +3,7 @@ package vega
 import (
 	"math"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/raster"
 	"github.com/mgilbir/aster/internal/scene"
@@ -246,7 +247,14 @@ func (lp *labelPainter) paint(m *label.Mask, typ scene.MarkType, items []*scene.
 	if err != nil {
 		failErr(err)
 	}
+	// The rasterizer reads bytes: the copy of the document, as long as the
+	// marks make it, is charged to the call's ledger while it lives.
+	led := budget.LedgerFrom(v.ctx)
+	if err := led.Alloc(int64(len(doc))); err != nil {
+		failErr(err)
+	}
 	img, err := raster.Render([]byte(doc), raster.Options{Shaper: v.shaper, Context: v.ctx, Scale: float64(ss)})
+	led.Free(int64(len(doc)))
 	if err != nil {
 		failErr(err)
 	}

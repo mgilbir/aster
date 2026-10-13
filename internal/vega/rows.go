@@ -116,7 +116,8 @@ func (v *runView) holdHeldRows(n *opNode, rows []jsval.Value) {
 func (v *runView) holdCreated(n *opNode, before int64, out []jsval.Value) {
 	unit := v.bud.RowBytes
 	var created, createdEx, passedEx int64
-	for _, t := range out {
+	for i, t := range out {
+		v.g.rows(i, len(out), 1)
 		o := t.ObjValue()
 		if o == nil {
 			continue
