@@ -21,6 +21,7 @@ import (
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/testutil"
 	ecma262 "github.com/mgilbir/goecma262"
+	ecmacompiler "github.com/mgilbir/goecma262/compiler"
 	ecmaparser "github.com/mgilbir/goecma262/parser"
 	"github.com/mgilbir/goecma262/vm"
 )
@@ -449,6 +450,58 @@ func TestNewPatternStopsWithContext(t *testing.T) {
 	}
 }
 
+// On the exact path, a context that ends while the parsed pattern is being
+// bounded stops the walk (compiler.BoundContext polls it), so nothing is
+// charged for a program, rather than the whole AST being walked and its
+// program paid for before the compile notices. Counted, from goecma262's own
+// parser and bound run apart: NewPattern polls once on entry, then its parse
+// polls as the parser alone does, then the walk; the run is stopped at the
+// walk's first poll.
+func TestNewPatternStopsWhileBounding(t *testing.T) {
+	src := strings.Repeat("(?:ab|cd)", 32<<10)
+	const many = 1 << 40
+	parse := newPollsLeft(many)
+	ast, err := ecmaparser.New(src, ecmaparser.Flags{}).ParseContext(parse)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsePolls := many - parse.n.Load()
+	walk := newPollsLeft(many)
+	if _, err := ecmacompiler.BoundContext(walk, ast); err != nil {
+		t.Fatal(err)
+	}
+	walkPolls := many - walk.n.Load()
+	if walkPolls < 4 {
+		t.Fatalf("the walk polls %d times: nothing to stop", walkPolls)
+	}
+	// An unstopped run on the exact path (its first charge, the allowance,
+	// refused) must poll the walk between its parse and paying for the
+	// program, its third charge.
+	ctx := newPollsLeft(many)
+	var atProgram int64
+	log := &payLog{led: budget.NewLedger(context.Background(), budget.LedgerLimits{}), refuseFirstN: 1}
+	if _, err := NewPattern(ctx, src, "", func(n int64) error {
+		if n > 0 && log.charges == 2 {
+			atProgram = many - ctx.n.Load()
+		}
+		return log.pay(n)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if want := 1 + parsePolls + walkPolls; atProgram != want {
+		t.Fatalf("%d polls before the program is paid for, want %d (1 + %d parsing + %d bounding)", atProgram, want, parsePolls, walkPolls)
+	}
+	stopped := newPollsLeft(1 + parsePolls)
+	log = &payLog{led: budget.NewLedger(context.Background(), budget.LedgerLimits{}), refuseFirstN: 1}
+	p, err := NewPattern(stopped, src, "", log.pay)
+	if !errors.Is(err, context.Canceled) || p != nil || log.paid != 0 {
+		t.Fatalf("stopped while bounding: compiled %v, %v, %d bytes still paid", p != nil, err, log.paid)
+	}
+	if log.charges != 2 {
+		t.Errorf("stopped while bounding, it made %d charges: the program was paid for after the context ended", log.charges)
+	}
+}
+
 // MatchMemory is goecma262's default unless the ledger has less room left,
 // and never the 0 that would restore the default when the ledger is full.
 func TestMatchMemory(t *testing.T) {
@@ -466,31 +519,32 @@ func TestMatchMemory(t *testing.T) {
 // patternSize is what a Pattern holds besides its Regexp.
 var patternSize = func() int64 { return (&Pattern{}).Bytes() }()
 
-// ValidFlags accepts exactly the flags PatternFlags parses: every string of
-// up to four of the flag characters and a few others, and long ones.
-func TestValidFlags(t *testing.T) {
-	alphabet := []string{"d", "g", "i", "m", "s", "u", "v", "y", "x", "G", "é"}
-	var all func(prefix string, n int)
-	all = func(prefix string, n int) {
-		_, err := PatternFlags("a", prefix)
-		if ValidFlags(prefix) != (err == nil) {
-			t.Errorf("flags %q: ValidFlags %v, PatternFlags %v", prefix, ValidFlags(prefix), err)
-		}
-		if n == 0 {
-			return
-		}
-		for _, c := range alphabet {
-			all(prefix+c, n-1)
-		}
+// PatternFlags costs nothing the flags' length sizes: valid flags allocate
+// nothing, and flags a mebibyte long, which RegExp(source, flags) may be
+// given, allocate no more than invalid flags of a few bytes (the error).
+func TestPatternFlagsCostIsNotSizedByTheFlags(t *testing.T) {
+	if testutil.RaceEnabled {
+		t.Skip("the race detector's allocations")
 	}
-	all("", 4)
-	for _, f := range []string{"dgimsuy", "dgimsvy", "dgimsuvy", "dgimsyvd", strings.Repeat("g", 1<<20), "dgimsvyx"} {
-		_, err := PatternFlags("a", f)
-		if ValidFlags(f) != (err == nil) {
-			t.Errorf("flags %.20q: ValidFlags %v, PatternFlags %v", f, ValidFlags(f), err)
-		}
+	if n := testing.AllocsPerRun(10, func() { PatternFlags("a", "dgimsy") }); n != 0 {
+		t.Errorf("valid flags: %v allocations", n)
 	}
-	if n := testing.AllocsPerRun(10, func() { ValidFlags("gimsuy") }); n != 0 {
-		t.Errorf("ValidFlags allocates %v times", n)
+	allocated := func(f string) uint64 {
+		var a, b runtime.MemStats
+		runtime.GC()
+		runtime.ReadMemStats(&a)
+		for range 10 {
+			if _, err := PatternFlags("a", f); err == nil {
+				t.Fatalf("flags %.20q accepted", f)
+			}
+		}
+		runtime.ReadMemStats(&b)
+		return (b.TotalAlloc - a.TotalAlloc) / 10
+	}
+	short := allocated("gg")
+	for _, f := range []string{strings.Repeat("x", 1<<20), strings.Repeat("g", 1<<20), "dgimsy" + strings.Repeat("é", 1<<19)} {
+		if long := allocated(f); long > short+1024 {
+			t.Errorf("flags %.20q of %d bytes: %d bytes allocated, against %d for \"gg\"", f, len(f), long, short)
+		}
 	}
 }

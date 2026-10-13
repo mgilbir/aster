@@ -71,9 +71,6 @@ func (s *Scope) compilePattern(source, flags string) *jsval.Pattern {
 // sizes is made: the flags may be a megabyte long, and are then certainly
 // invalid.
 func checkFlags(source, flags string) {
-	if jsval.ValidFlags(flags) {
-		return
-	}
 	if _, err := jsval.PatternFlags(source, flags); err != nil {
 		newPatternError(err).raise()
 	}

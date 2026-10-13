@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"strings"
 	"unsafe"
 
 	ecma262 "github.com/mgilbir/goecma262"
@@ -36,7 +35,7 @@ type PatternPay func(bytes int64) error
 // guessBytes is what NewPattern first allows a pattern's compiled form
 // besides its parse bound: enough for nearly every pattern a chart writes,
 // whose programs hold a few kilobytes. A pattern that holds more is bounded
-// exactly (compiler.Bound), at the cost of a second parse.
+// exactly (compiler.BoundContext), at the cost of a second parse.
 const guessBytes = 64 << 10
 
 // NewPattern compiles source with JavaScript flags ("gimsuyvd") under ctx,
@@ -46,7 +45,7 @@ const guessBytes = 64 << 10
 // (parser.AllocBound, by the source's length), and then the compiled form,
 // which goecma262's budget (WithBudget) holds to what was paid: first an
 // allowance of guessBytes more, and when the pattern needs more, its exact
-// bound (compiler.Bound) from a parse of its own. The parse is given back
+// bound (compiler.BoundContext) from a parse of its own. The parse is given back
 // once the pattern is built, and the payment trued to what it holds.
 //
 // An error from pay is returned as it is, and so is the context's error
@@ -81,7 +80,7 @@ func NewPattern(ctx context.Context, source, flagStr string, pay PatternPay) (*P
 	if err != nil {
 		return b.settle(nil, fmt.Errorf("parse error: %w", err))
 	}
-	cost, err := ecmacompiler.Bound(ast)
+	cost, err := ecmacompiler.BoundContext(ctx, ast)
 	if err != nil {
 		return b.settle(nil, fmt.Errorf("compile error: %w", err))
 	}
@@ -103,20 +102,11 @@ func NewPattern(ctx context.Context, source, flagStr string, pay PatternPay) (*P
 
 // PatternFlags parses JavaScript flags as NewPattern does, failing with the
 // error it gives for source. It allocates nothing that the flags' length
-// sizes: flags.Parse makes a map as large as its argument, and a string of
-// valid flags has at most eight, so it is given no more than the first nine
-// characters, among which a longer string's first invalid or repeated flag
-// is (flags.Parse reports that one).
+// sizes (flags.Parse allocates only its error, and the error quotes a bounded
+// prefix of the flags), so flags a megabyte long cost no more than invalid
+// ones of a few bytes.
 func PatternFlags(source, flagStr string) (flags.Flags, error) {
-	head, n := flagStr, 0
-	for i := range flagStr {
-		if n == 9 {
-			head = flagStr[:i]
-			break
-		}
-		n++
-	}
-	f, err := flags.Parse(head)
+	f, err := flags.Parse(flagStr)
 	if err != nil {
 		return 0, patternError(source, flagStr, err)
 	}
@@ -125,21 +115,6 @@ func PatternFlags(source, flagStr string) (flags.Flags, error) {
 		return 0, patternError(source, flagStr, errors.New("incompatible flags: u and v"))
 	}
 	return f, nil
-}
-
-// ValidFlags reports whether PatternFlags accepts flags, without
-// allocating: each of "dgimsuvy" at most once, and not both u and v.
-func ValidFlags(flags string) bool {
-	var seen uint
-	for i := 0; i < len(flags); i++ {
-		k := strings.IndexByte("dgimsuvy", flags[i])
-		if k < 0 || seen&(1<<k) != 0 {
-			return false
-		}
-		seen |= 1 << k
-	}
-	const u, v = 1 << 5, 1 << 6
-	return seen&(u|v) != u|v
 }
 
 // patternBuild is one NewPattern: what it compiles, and what it has paid.

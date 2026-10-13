@@ -6,7 +6,7 @@
 
 [ADR 0010](0010-bounds-charged-where-work-happens.md) charges memory to the call's ledger before it is allocated. That needs a size known before the allocation. A regular expression search does not have one: goecma262 grows its backtrack stack and failure memo as it searches, and how far depends on the pattern and the input together. Its default bound is fixed by the input's length (256 MiB and 32 bytes a byte), whatever the call's `WithMemoryLimit` says, so a 64 MiB render could hold 256 MiB in one search. Charging the default before each search, and giving it back after, would make every `test()` reserve 256 MiB: a call with less room could match nothing, and the ledger's peak would report memory that was never used.
 
-The compile of a pattern is different: goecma262 v0.3.0 bounds it before it allocates (`parser.AllocBound`, `compiler.Bound`) and holds it to a budget (`WithBudget`), so it is charged first as ADR 0010 says.
+The compile of a pattern is different: goecma262 (since v0.3.0) bounds it before it allocates (`parser.AllocBound`, `compiler.BoundContext`) and holds it to a budget (`WithBudget`), so it is charged first as ADR 0010 says.
 
 ## Decision
 

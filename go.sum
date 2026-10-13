@@ -2,8 +2,8 @@ github.com/mgilbir/formalis v0.3.1 h1:NyYe/EcRYJ2jUjgaZG98lNXgJ7H+jgy6mq7HXOnQxl
 github.com/mgilbir/formalis v0.3.1/go.mod h1:M82rAk4SewJbe1B3bhgQKw0w7ojFOHus7Nm1roqZYEk=
 github.com/mgilbir/forme v0.10.0 h1:EkGrIgTBnDgSJc4LcbfZyZXeRW5egYKBuXvGZUNHTKA=
 github.com/mgilbir/forme v0.10.0/go.mod h1:VWH98Gvv6a4tUBmhvB0efHmpPEAHrO49EJpu4UGwfw0=
-github.com/mgilbir/goecma262 v0.3.0 h1:1qUpR9NZcpi8zdZZQjSNm4jw4Y8j3IMVzLIWahoaP2k=
-github.com/mgilbir/goecma262 v0.3.0/go.mod h1:wQvOAFchLrhVSiF4JsSzH+yE6eLpc8gOBrvpuahNucI=
+github.com/mgilbir/goecma262 v0.3.1 h1:a232P1d9z8nWOcf3ET4O7HDPMYbC2GnBBmk4H01hUWQ=
+github.com/mgilbir/goecma262 v0.3.1/go.mod h1:wQvOAFchLrhVSiF4JsSzH+yE6eLpc8gOBrvpuahNucI=
 github.com/mgilbir/golittlecms v0.0.0-20260727161601-f6af7cfe1556 h1:2ZUsOgMhxpHCYC8jyzeEnJZFLYGbXhqjAJWJBvY8q4U=
 github.com/mgilbir/golittlecms v0.0.0-20260727161601-f6af7cfe1556/go.mod h1:8SmvcTVpsTeqGaLqnhlCphGYaBeoeedJQB6AsKNNQxo=
 github.com/mgilbir/gopenjpeg v0.1.1 h1:zf0iHWEkex7TsOtQKPy6t19qNJzf7ykxK7r5Sgl/V2A=
