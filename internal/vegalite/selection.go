@@ -231,7 +231,7 @@ func parseUnitSelection(m *unitModel, selDefs []Value) *omap[*selectionComponent
 		props.Set("init", def.Get("value"))
 		props.Set("bind", def.Get("bind"))
 		if on := defaults.Lookup("on"); on.IsStr() {
-			props.Set("events", jsval.Arr(parseSelector(on.StrValue(), "scope")))
+			props.Set("events", jsval.Arr(parseSelector(cc, on.StrValue(), "scope")))
 		} else {
 			props.Set("events", jsval.Arr(arrayOf(duplicate(cc, on))))
 		}
@@ -591,7 +591,7 @@ func assembleFacetSignals(m *facetModel, signals []Value) []Value {
 	if m.comp.selection != nil && m.comp.selection.len() > 0 {
 		name := stringValue(jsval.Str(m.getName("cell")))
 		sg := mkv("name", "facet", "value", mkv(), "on", arr(mkv(
-			"events", jsval.Arr(parseSelector(mouseMoveEvent(cc), "scope")),
+			"events", jsval.Arr(parseSelector(cc, mouseMoveEvent(cc), "scope")),
 			"update", "isTuple(facet) ? facet : group("+name+").datum")))
 		signals = append([]Value{sg}, signals...)
 	}
@@ -1843,7 +1843,7 @@ var legendsCompiler = selectionCompiler{
 		}
 		var stream Value
 		if evt.IsStr() {
-			stream = jsval.Arr(parseSelector(evt.StrValue(), "view"))
+			stream = jsval.Arr(parseSelector(m.ctx, evt.StrValue(), "view"))
 		} else {
 			stream = jsval.Arr(arrayOf(evt))
 		}
@@ -1954,7 +1954,7 @@ var clearCompiler = selectionCompiler{
 	parse: func(m *unitModel, sel *selectionComponent, _ Value) {
 		if c := sel.props.Lookup("clear"); c.IsTruthy() {
 			if c.IsStr() {
-				sel.props.Set("clear", jsval.Arr(parseSelector(c.StrValue(), "view")))
+				sel.props.Set("clear", jsval.Arr(parseSelector(m.ctx, c.StrValue(), "view")))
 			}
 		}
 	},
@@ -2044,7 +2044,7 @@ var translateCompiler = selectionCompiler{
 		anchor := name + translateAnchor
 		x, _ := sel.project.hasChannel.get("x")
 		y, _ := sel.project.hasChannel.get("y")
-		events := parseSelectorOf(sel.props.Lookup("translate"), "scope")
+		events := parseSelectorOf(cc, sel.props.Lookup("translate"), "scope")
 		if !boundScales {
 			// e.between[0].markname = ...: a selector without a between
 			// is upstream's TypeError.
@@ -2148,7 +2148,7 @@ var zoomCompiler = selectionCompiler{
 		if n := m.scaleName(chY, false); n != "" {
 			sy = stringValue(jsval.Str(n))
 		}
-		events := parseSelectorOf(sel.props.Lookup("zoom"), "scope")
+		events := parseSelectorOf(m.ctx, sel.props.Lookup("zoom"), "scope")
 		if !boundScales {
 			for _, e := range events {
 				cc.work(1)

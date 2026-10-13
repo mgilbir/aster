@@ -417,7 +417,8 @@ type tooltipEntry struct {
 
 // tooltipData maps each tooltip key to its value expression.
 func tooltipData(cc *compileCtx, encoding Value, stack *stackProperties, config Value, reactiveGeom bool) *omap[string] {
-	formatConfig := merged(config, config.Get("tooltipFormat"))
+	// {...config, ...config.tooltipFormat}, for every mark of every view.
+	formatConfig := mergedCC(cc, config, config.Get("tooltipFormat"))
 	if cc.v5 {
 		formatConfig = config.ObjValue()
 	}

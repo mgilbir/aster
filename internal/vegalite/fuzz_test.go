@@ -79,7 +79,7 @@ func tryParseSelector(selector, source string) (out []Value, err error) {
 			panic(r)
 		}
 	}()
-	return parseSelector(selector, source), nil
+	return parseSelector(nil, selector, source), nil
 }
 
 // FuzzEventSelector feeds arbitrary selector strings to the event selector

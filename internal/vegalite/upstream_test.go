@@ -30,7 +30,7 @@ func TestUpstreamVegaEventSelector(t *testing.T) {
 					threw = true
 				}
 			}()
-			for _, v := range parseSelector(selector, source) {
+			for _, v := range parseSelector(nil, selector, source) {
 				out = append(out, upstream.FromValue(v))
 			}
 			return out, false

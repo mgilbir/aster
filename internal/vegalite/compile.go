@@ -106,7 +106,7 @@ func Compile(spec jsval.Value, opts Options) (out jsval.Value, err error) {
 }
 
 func compileSpec(cc *compileCtx, inputSpec jsval.Value, opts Options) jsval.Value {
-	config := initConfig(cc, jsval.Obj(mergeConfig(opts.Config, inputSpec.Get("config"))))
+	config := initConfig(cc, jsval.Obj(mergeConfig(cc, opts.Config, inputSpec.Get("config"))))
 	spec := normalize(cc, inputSpec, config)
 	model := buildModel(cc, spec, nil, "", jsval.NewObject(0), config, 0)
 	parseModel(model)

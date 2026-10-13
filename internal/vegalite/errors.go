@@ -156,6 +156,47 @@ func iterateNew(v Value) []Value {
 	return nil
 }
 
+// propReader is jsProp(v, ·) for a loop that reads many properties of one
+// value: a string's UTF-16 units are made once, not once a read, which made a
+// loop over the keys of a long string (a config, a format.parse, a selection
+// or a flatten's as given as a string) quadratic. It is a value, so that the
+// common case, an object, allocates nothing.
+func propReader(v Value) propRead {
+	r := propRead{v: v}
+	if v.IsStr() {
+		r.units, r.str = utf16Len(v.StrValue()), true
+	}
+	return r
+}
+
+// propRead is what propReader returns; get reads a property.
+type propRead struct {
+	v     Value
+	units []uint16
+	str   bool
+}
+
+func (r propRead) get(key string) Value {
+	if !r.str {
+		return jsProp(r.v, key)
+	}
+	if key == "length" {
+		return jsval.Int(len(r.units))
+	}
+	if n, ok := arrayIndex(key); ok {
+		return unitAt(r.units, int(n))
+	}
+	return undef
+}
+
+// unitAt is the string of one UTF-16 unit, u[i], as jsIndex reads it.
+func unitAt(u []uint16, i int) Value {
+	if i >= 0 && i < len(u) {
+		return jsval.Str(string(rune(u[i])))
+	}
+	return undef
+}
+
 // jsProp is the property read v[key] of any value, as JavaScript reads it:
 // a TypeError for null or undefined; an array's or a string's index or
 // length (a string's index is one UTF-16 unit); an object's own property or
@@ -228,6 +269,32 @@ func jsKeys(v Value) []string {
 	return keysOf(v)
 }
 
+// jsKeysCC is jsKeys for a loop that charges cc: a string's keys (one an
+// index, as many as it has UTF-16 units) are made a batch at a time, each
+// batch charged before it is made.
+func jsKeysCC(cc *compileCtx, v Value) []string {
+	if !v.IsStr() {
+		return jsKeys(v)
+	}
+	n := len(utf16Len(v.StrValue()))
+	out := make([]string, n)
+	for i := range out {
+		if i%workBatch == 0 {
+			cc.work(int64(min(workBatch, n-i)))
+		}
+		out[i] = strconv.Itoa(i)
+	}
+	return out
+}
+
+// jsKeysOrCC is `keys(v || {})`, charging cc (jsKeysCC).
+func jsKeysOrCC(cc *compileCtx, v Value) []string {
+	if !v.IsTruthy() {
+		return nil
+	}
+	return jsKeysCC(cc, v)
+}
+
 // jsGet is the property read v[key] where upstream reads it without a guard:
 // a TypeError when v is null or undefined (a config object a falsy value
 // removed, for one), else the property, undefined when v has none.
@@ -236,13 +303,4 @@ func jsGet(v Value, key string) Value {
 		throw("Cannot read properties of %s (reading '%s')", nullishName(v), key)
 	}
 	return v.Get(key)
-}
-
-// jsKeysOr is `keys(v || {})`: Object.keys of a truthy v, nothing of a falsy
-// one.
-func jsKeysOr(v Value) []string {
-	if !v.IsTruthy() {
-		return nil
-	}
-	return jsKeys(v)
 }

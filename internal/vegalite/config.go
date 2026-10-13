@@ -223,7 +223,7 @@ func isLegalKey(k string) bool { return k != "__proto__" && k != "constructor" &
 
 // writeConfig writes value at output[key]. recurse is nil (shallow), or a
 // predicate over child keys; recurseAll makes every level recurse.
-func writeConfig(output *Object, key string, value Value, recurseAll bool, recurseKeys map[string]bool) {
+func writeConfig(cc *compileCtx, output *Object, key string, value Value, recurseAll bool, recurseKeys map[string]bool) {
 	if !isLegalKey(key) {
 		return
 	}
@@ -243,9 +243,10 @@ func writeConfig(output *Object, key string, value Value, recurseAll bool, recur
 		}
 		vo := value.ObjValue()
 		for i := 0; i < vo.Len(); i++ {
+			cc.work(1)
 			k := vo.KeyAt(i)
 			if recurseAll || recurseKeys[k] {
-				writeConfig(target, k, vo.ValueAt(i), false, nil)
+				writeConfig(cc, target, k, vo.ValueAt(i), false, nil)
 			} else if isLegalKey(k) {
 				target.Set(k, vo.ValueAt(i))
 			}
@@ -257,7 +258,7 @@ func writeConfig(output *Object, key string, value Value, recurseAll bool, recur
 
 // mergeNamed is vega-util's: `if (!map[item.name])` reads a plain object,
 // so a name every object inherits counts as already added.
-func mergeNamed(a, b Value) Value {
+func mergeNamed(cc *compileCtx, a, b Value) Value {
 	if a.IsNullish() {
 		return b
 	}
@@ -267,6 +268,7 @@ func mergeNamed(a, b Value) Value {
 	seen := map[string]bool{}
 	var out []Value
 	add := func(it Value) {
+		cc.work(1)
 		n := it.Get("name").AsString()
 		if !jsSeen(nil, seen, n) {
 			seen[n] = true
@@ -282,29 +284,32 @@ func mergeNamed(a, b Value) Value {
 	return jsval.Arr(out)
 }
 
-// mergeConfig is vega-util's mergeConfig.
-func mergeConfig(configs ...Value) *Object {
+// mergeConfig is vega-util's mergeConfig. Each key it copies, at every
+// level, charges cc a step: a config is as large as the specification.
+func mergeConfig(cc *compileCtx, configs ...Value) *Object {
 	out := jsval.NewObject(8)
 	for _, src := range configs {
 		// for (const key in source): a string's and an array's indices too,
 		// nothing of a number, a boolean or null.
 		var ks []string
 		if !src.IsNullish() {
-			ks = jsKeys(src)
+			ks = jsKeysCC(cc, src)
 		}
+		prop := propReader(src)
 		for _, key := range ks {
-			val := jsProp(src, key)
+			cc.work(1)
+			val := prop.get(key)
 			if key == "signals" {
-				out.Set("signals", mergeNamed(out.Lookup("signals"), val))
+				out.Set("signals", mergeNamed(cc, out.Lookup("signals"), val))
 				continue
 			}
 			switch key {
 			case "legend":
-				writeConfig(out, key, val, false, map[string]bool{"layout": true})
+				writeConfig(cc, out, key, val, false, map[string]bool{"layout": true})
 			case "style":
-				writeConfig(out, key, val, true, nil)
+				writeConfig(cc, out, key, val, true, nil)
 			default:
-				writeConfig(out, key, val, false, nil)
+				writeConfig(cc, out, key, val, false, nil)
 			}
 		}
 	}
@@ -315,9 +320,10 @@ func isConditionalAxisValue(v Value) bool { return v.Get("condition").IsTruthy()
 
 func getAxisConfigInternal(cc *compileCtx, axisConfig Value) Value {
 	out := jsval.NewObject(axisConfig.Len())
-	for _, prop := range jsKeysOr(axisConfig) {
+	read := propReader(axisConfig)
+	for _, prop := range jsKeysOrCC(cc, axisConfig) {
 		cc.work(1)
-		val := jsProp(axisConfig, prop)
+		val := read.get(prop)
 		if isConditionalAxisValue(val) {
 			jsSet(cc, out, prop, signalOrValueRefWithCondition(nil, val))
 		} else {
@@ -329,9 +335,10 @@ func getAxisConfigInternal(cc *compileCtx, axisConfig Value) Value {
 
 func getStyleConfigInternal(cc *compileCtx, styleConfig Value) Value {
 	out := jsval.NewObject(styleConfig.Len())
-	for _, prop := range jsKeys(styleConfig) {
+	read := propReader(styleConfig)
+	for _, prop := range jsKeysCC(cc, styleConfig) {
 		cc.work(1)
-		jsSet(cc, out, prop, getAxisConfigInternal(cc, jsProp(styleConfig, prop)))
+		jsSet(cc, out, prop, getAxisConfigInternal(cc, read.get(prop)))
 	}
 	return jsval.Obj(out)
 }
@@ -362,9 +369,9 @@ func initConfig(cc *compileCtx, specified Value) Value {
 		parts = append(parts, jsval.Obj(fontSizeSignalConfig(fontSize)))
 	}
 	parts = append(parts, jsval.Obj(rest))
-	merged := mergeConfig(parts...)
+	merged := mergeConfig(cc, parts...)
 	if selection.IsTruthy() {
-		writeConfig(merged, "selection", selection, true, nil)
+		writeConfig(cc, merged, "selection", selection, true, nil)
 	}
 	mv := jsval.Obj(merged)
 	out := omit(mv, configPropsWithExpr...)
@@ -467,12 +474,8 @@ func stripAndRedirectConfig(cc *compileCtx, cfg Value) Value {
 	}
 	if axis := c.Lookup("axis"); axis.IsObj() {
 		ao := axis.ObjValue()
-		for _, p := range append([]string(nil), ao.Keys()...) {
-			cc.work(1)
-			if isConditionalAxisValue(ao.Lookup(p)) {
-				ao.Delete(p)
-			}
-		}
+		cc.work(int64(ao.Len()))
+		ao.DeleteFunc(func(_ string, v Value) bool { return isConditionalAxisValue(v) })
 	}
 	if lg := c.Lookup("legend"); lg.IsObj() {
 		for _, p := range vlOnlyLegendConfig {
@@ -525,12 +528,8 @@ func stripAndRedirectConfig(cc *compileCtx, cfg Value) Value {
 		c.Delete(m)
 	}
 	redirectTitleConfig(c)
-	for _, p := range append([]string(nil), c.Keys()...) {
-		cc.work(1)
-		if v := c.Lookup(p); isObject(v) && isEmptyObj(v) {
-			c.Delete(p)
-		}
-	}
+	cc.work(int64(c.Len()))
+	c.DeleteFunc(func(_ string, v Value) bool { return isObject(v) && isEmptyObj(v) })
 	if c.Len() == 0 {
 		return undef
 	}

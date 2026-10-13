@@ -80,8 +80,8 @@ func ParseJSONLimit(text []byte, max int64) (Value, error) {
 // ctx's error, not a syntax error, once ctx is done. A document is as large
 // as the specification or a data file, tens of megabytes, and its parse in
 // one piece was the longest stretch of a call without a poll. The polls fall
-// between values and inside a long string or run of white space, so no
-// token holds one off; a single number literal is scanned whole.
+// between values and inside a long string, run of white space or number
+// literal, so no token holds one off.
 func ParseJSONContext(ctx context.Context, text []byte, max int64) (Value, error) {
 	if ctx == nil {
 		return parseJSON(nil, 0, text, max)
@@ -130,7 +130,19 @@ func parseJSON(m *budget.Meter, every int, text []byte, max int64) (Value, error
 }
 
 // ParseJSONString is ParseJSON over a string.
-func ParseJSONString(text string) (Value, error) { return ParseJSON([]byte(text)) }
+func ParseJSONString(text string) (Value, error) { return ParseJSON(readOnlyBytes(text)) }
+
+// ParseJSONStringContext is ParseJSONContext over a string: a JSON document a
+// specification holds as a string value (a data set's values), parsed where
+// it is, not copied first.
+func ParseJSONStringContext(ctx context.Context, text string, max int64) (Value, error) {
+	return ParseJSONContext(ctx, readOnlyBytes(text), max)
+}
+
+// readOnlyBytes is the bytes of s, shared, not copied. The parser only reads
+// its text, and every string it makes of it is a copy, so the parse of a
+// string needs no copy of the string, which is as long as the document.
+func readOnlyBytes(s string) []byte { return unsafe.Slice(unsafe.StringData(s), len(s)) }
 
 // slabs holds the chunks small containers are carved from, one allocation per
 // chunk: a data file is millions of coordinate pairs and rows.
@@ -158,7 +170,7 @@ type slabs struct {
 const slabMinDoc = 16 << 10
 
 type parser struct {
-	s []byte
+	s []byte // read, never written: it may be a string's bytes (readOnlyBytes)
 	i int
 
 	// left is what the values built so far leave of the memory limit, which
@@ -317,20 +329,14 @@ func (p *parser) number() (Value, error) {
 	if p.s[p.i] == '0' {
 		p.i++
 	} else if p.s[p.i] >= '1' && p.s[p.i] <= '9' {
-		for p.i < len(p.s) && p.s[p.i] >= '0' && p.s[p.i] <= '9' {
-			p.i++
-		}
+		p.i++
+		p.digits()
 	} else {
 		return Undefined, p.errf("invalid number")
 	}
 	if p.i < len(p.s) && p.s[p.i] == '.' {
 		p.i++
-		n := 0
-		for p.i < len(p.s) && p.s[p.i] >= '0' && p.s[p.i] <= '9' {
-			p.i++
-			n++
-		}
-		if n == 0 {
+		if p.digits() == 0 {
 			return Undefined, p.errf("invalid number")
 		}
 	}
@@ -339,19 +345,25 @@ func (p *parser) number() (Value, error) {
 		if p.i < len(p.s) && (p.s[p.i] == '+' || p.s[p.i] == '-') {
 			p.i++
 		}
-		n := 0
-		for p.i < len(p.s) && p.s[p.i] >= '0' && p.s[p.i] <= '9' {
-			p.i++
-			n++
-		}
-		if n == 0 {
+		if p.digits() == 0 {
 			return Undefined, p.errf("invalid number")
 		}
 	}
-	if f, ok := fastNumber(p.s[start:p.i]); ok {
+	if p.stop != nil {
+		return Undefined, p.stop
+	}
+	lit := p.s[start:p.i]
+	if f, ok := fastNumber(lit); ok {
 		return Num(f), nil
 	}
-	f, err := strconv.ParseFloat(string(p.s[start:p.i]), 64)
+	if len(lit) > numberDigits {
+		short, err := p.shortNumber(lit)
+		if err != nil {
+			return Undefined, err
+		}
+		lit = short
+	}
+	f, err := strconv.ParseFloat(string(lit), 64)
 	if err != nil {
 		var ne *strconv.NumError
 		if !errors.As(err, &ne) || ne.Err != strconv.ErrRange {
@@ -360,6 +372,121 @@ func (p *parser) number() (Value, error) {
 		// JSON.parse rounds out-of-range literals to ±Infinity or 0.
 	}
 	return Num(f), nil
+}
+
+// digits skips a run of decimal digits, polling at end, and reports how
+// many it skipped.
+func (p *parser) digits() int {
+	start := p.i
+	for {
+		for p.i < p.end && p.s[p.i]-'0' < 10 {
+			p.i++
+		}
+		if p.i < p.end || !p.due() || p.poll() != nil {
+			return p.i - start
+		}
+	}
+}
+
+// numberDigits is how many significant digits of a number decide which
+// float64 it rounds to, with whether any digit after them is not zero. A
+// boundary between two roundings (a float64, or the midpoint of two
+// neighbours, the overflow and underflow thresholds among them) has at most
+// 768 significant digits (a midpoint of subnormals, an odd multiple of
+// 2^-1075, has 767 and the largest normal ones fewer), so it cannot lie
+// strictly between a literal's first numberDigits digits t and t plus a unit
+// in their last place: a literal cut to those digits, with a digit 1 after
+// them if a digit it drops is not zero, lies strictly inside the same
+// interval as the literal (or is the literal, when it drops only zeros), and
+// rounds to the same float64. strconv's own slow path keeps 800 digits for
+// the same reason, but it misplaces the decimal point of a literal with more
+// than 800 digits before it (it takes the point to follow the 800th), which
+// the cut form, 0.ddd…, never has: Go 1.27's ParseFloat reads a 1,783-digit
+// integer times 1e-2100, a little over 1.5 times the smallest subnormal, as
+// 0, where JSON.parse reads 1e-323.
+//
+// ParseFloat reads every digit it is given, at once, so a literal longer
+// than numberDigits bytes is cut before it is converted, as it is read and
+// polled (shortNumber); a shorter one has too few digits to be misread.
+const numberDigits = 800
+
+// shortNumber is the validated JSON number literal lit cut to its first
+// numberDigits significant digits, a sticky digit and its decimal exponent,
+// in the form [-]0.ddd…e±x: the literal ParseFloat rounds to the float64 lit
+// rounds to (numberDigits), and at most numberDigits+30 bytes, so that the
+// conversion is bounded and the literal is not copied. The pass over lit
+// charges its bytes as the scan does, and stops with the context's error.
+func (p *parser) shortNumber(lit []byte) ([]byte, error) {
+	out := make([]byte, 0, numberDigits+32)
+	i := 0
+	if lit[0] == '-' {
+		out = append(out, '-')
+		i = 1
+	}
+	out = append(out, '0', '.')
+	// The literal is 0.d₁d₂… × 10^point, d₁ its first digit that is not
+	// zero; the exponent's digits saturate far past where every literal
+	// rounds to 0 or Infinity.
+	var point, exp int64
+	sig, sticky, frac, inExp, expNeg := 0, false, false, false, false
+	chunk := len(lit)
+	if p.meter != nil {
+		chunk = p.every
+	}
+	for i < len(lit) {
+		end := min(len(lit), i+chunk)
+		for ; i < end; i++ {
+			c := lit[i]
+			switch {
+			case inExp:
+				switch c {
+				case '-':
+					expNeg = true
+				case '+':
+				default:
+					exp = min(exp*10+int64(c-'0'), 1<<40)
+				}
+			case c == '.':
+				frac = true
+			case c == 'e' || c == 'E':
+				inExp = true
+			case sig == 0 && c == '0':
+				if frac {
+					point--
+				}
+			default:
+				if !frac {
+					point++
+				}
+				if sig < numberDigits {
+					out = append(out, c)
+				} else if c != '0' {
+					sticky = true
+				}
+				sig++
+			}
+		}
+		if p.meter != nil && end < len(lit) {
+			if err := p.meter.Work(int64(chunk) / jsonBytesPerStep); err != nil {
+				p.stop = err
+				return nil, err
+			}
+		}
+	}
+	if sig == 0 {
+		return append(out[:len(out)-2], '0'), nil // ±0
+	}
+	if sticky {
+		out = append(out, '1')
+	}
+	if expNeg {
+		exp = -exp
+	}
+	// 0.1e1000 is past the largest float64 and 0.9e-1000 under half the
+	// smallest: clamped there, the exponent rounds as the literal's does.
+	point = min(max(point+exp, -1000), 1000)
+	out = append(out, 'e')
+	return strconv.AppendInt(out, point, 10), nil
 }
 
 var pow10tab = [...]float64{1e0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12, 1e13, 1e14, 1e15}

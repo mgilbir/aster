@@ -225,7 +225,7 @@ func normalizeTransformList(cc *compileCtx, tx Value) []Value {
 			throw("Cannot read properties of undefined (reading 'length')")
 		}
 		if (cc.v5 && jsIn(t, "filter")) || (!cc.v5 && hasProperty(t, "filter")) {
-			out = append(out, mkv("filter", normalizeLogicalComposition(t.Get("filter"), func(f Value) Value { return normalizePredicate(cc, f) }, 0)))
+			out = append(out, mkv("filter", normalizeLogicalComposition(cc, t.Get("filter"), func(f Value) Value { return normalizePredicate(cc, f) }, 0)))
 		} else {
 			out = append(out, t)
 		}

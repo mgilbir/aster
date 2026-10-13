@@ -73,7 +73,7 @@ func fieldFilterExpression(cc *compileCtx, p Value, useInRange bool) string {
 		// A timeUnit'ed predicate compares the truncated time, computed from the raw
 		// field unless the field was pre-binned.
 		if !binned {
-			fieldExpr = "time(" + timeUnitFieldExprV(unit, p.Get("field"), false) + ")"
+			fieldExpr = "time(" + timeUnitFieldExprV(cc, unit, p.Get("field"), false) + ")"
 		} else {
 			fieldExpr = "time(" + rawFieldExpr + ")"
 		}
@@ -167,9 +167,10 @@ func replaceExprRefObj(cc *compileCtx, idx Value) Value { return replaceExprRef(
 // characters and an array's elements by index, nothing of a number.
 func replaceExprRef(cc *compileCtx, idx Value, level int) Value {
 	out := jsval.NewObject(idx.Len())
-	for _, k := range jsKeysOr(idx) {
+	read := propReader(idx)
+	for _, k := range jsKeysOrCC(cc, idx) {
 		cc.work(1)
-		v := jsProp(idx, k)
+		v := read.get(k)
 		if level == 0 {
 			jsSet(cc, out, k, signalRefOrValue(cc, v))
 		} else {
@@ -207,17 +208,17 @@ func forEachLeaf(cc *compileCtx, op Value, fn func(Value), depth int) {
 	}
 }
 
-func normalizeLogicalComposition(op Value, normalizer func(Value) Value, depth int) Value {
+func normalizeLogicalComposition(cc *compileCtx, op Value, normalizer func(Value) Value, depth int) Value {
 	if depth > maxDepth*4 {
 		exceeded("logical composition nested too deeply")
 	}
 	switch {
 	case isLogicalNot(op):
-		return mkv("not", normalizeLogicalComposition(op.Get("not"), normalizer, depth+1))
+		return mkv("not", normalizeLogicalComposition(cc, op.Get("not"), normalizer, depth+1))
 	case isLogicalAnd(op):
-		return mkv("and", mapList(op.Get("and"), "op.and", func(o Value) Value { return normalizeLogicalComposition(o, normalizer, depth+1) }))
+		return mkv("and", mapList(cc, op.Get("and"), "op.and", func(o Value) Value { return normalizeLogicalComposition(cc, o, normalizer, depth+1) }))
 	case isLogicalOr(op):
-		return mkv("or", mapList(op.Get("or"), "op.or", func(o Value) Value { return normalizeLogicalComposition(o, normalizer, depth+1) }))
+		return mkv("or", mapList(cc, op.Get("or"), "op.or", func(o Value) Value { return normalizeLogicalComposition(cc, o, normalizer, depth+1) }))
 	}
 	return normalizer(op)
 }
@@ -251,19 +252,24 @@ func logicalExpr(cc *compileCtx, op Value, cb func(Value) string, depth int) str
 // mapVals is Array.prototype.map over an array value.
 // mapList is expr.map(f) of a value upstream maps without checking it is an
 // array (see listOf).
-func mapList(a Value, expr string, f func(Value) Value) Value {
+// mapList is a.map(f) of a list the specification gives, a step charged to
+// cc per item.
+func mapList(cc *compileCtx, a Value, expr string, f func(Value) Value) Value {
 	items := listOf(a, expr, "map")
 	out := make([]Value, len(items))
 	for i, it := range items {
+		cc.work(1)
 		out[i] = f(it)
 	}
 	return jsval.Arr(out)
 }
 
-func mapVals(a Value, f func(Value) Value) Value {
+// mapVals is mapList of an array, charging cc the same.
+func mapVals(cc *compileCtx, a Value, f func(Value) Value) Value {
 	items := a.Items()
 	out := make([]Value, len(items))
 	for i, it := range items {
+		cc.work(1)
 		out[i] = f(it)
 	}
 	return jsval.Arr(out)

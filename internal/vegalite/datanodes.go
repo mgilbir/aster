@@ -75,10 +75,10 @@ func makeExplicitParse(parent dfNode, m Model, ap *ancestorParse) *parseNode {
 		// A parse that is not an object is read through its keys: a
 		// string's characters, an array's items.
 		explicit = jsval.NewObject(0)
-		for _, k := range jsKeys(p) {
-			cc := ccOf(parent)
+		cc, read := ccOf(parent), propReader(p)
+		for _, k := range jsKeysCC(cc, p) {
 			cc.work(1)
-			explicit.Set(k, jsProp(p, k))
+			explicit.Set(k, read.get(k))
 		}
 	}
 	return parseNodeWithAncestors(parent, explicit, jsval.NewObject(0), ap)
@@ -88,34 +88,55 @@ func makeExplicitParse(parent dfNode, m Model, ap *ancestorParse) *parseNode {
 // by an ancestor; it returns nil when nothing is left to parse.
 func parseNodeWithAncestors(parent dfNode, explicit, implicit *Object, ap *ancestorParse) *parseNode {
 	cc := ccOf(parent)
-	for _, field := range append([]string(nil), implicit.Keys()...) {
+	// The fields an ancestor parses are dropped together, once each loop
+	// has decided (DeleteFunc): deleted one at a time, a parse of many
+	// fields was quadratic. Each decision reads only its own field.
+	var drop map[string]bool // made when a field is dropped
+	mark := func(field string) {
+		if drop == nil {
+			drop = map[string]bool{}
+		}
+		drop[field] = true
+	}
+	for _, field := range implicit.Keys() {
 		cc.work(1)
 		parsedAs := ap.getWithExplicit(field)
 		if !parsedAs.value.IsUndefined() {
 			iv := implicit.Lookup(field)
 			if parsedAs.explicit || jsval.Equal(parsedAs.value, iv) || (parsedAs.value.IsStr() && parsedAs.value.StrValue() == "derived") ||
 				(iv.IsStr() && iv.StrValue() == "flatten") {
-				implicit.Delete(field)
+				mark(field)
 			} else {
 				cc.warn(msgDifferentParse(field, iv, parsedAs.value))
 			}
 		}
 	}
-	for _, field := range append([]string(nil), explicit.Keys()...) {
+	if len(drop) > 0 {
+		cc.work(int64(implicit.Len()))
+		implicit.DeleteFunc(func(k string, _ Value) bool { return drop[k] })
+		clear(drop)
+	}
+	for _, field := range explicit.Keys() {
 		cc.work(1)
 		parsedAs := ap.get(field)
 		if !parsedAs.IsUndefined() {
 			if jsval.Equal(parsedAs, explicit.Lookup(field)) {
-				explicit.Delete(field)
+				mark(field)
 			} else {
 				cc.warn(msgDifferentParse(field, explicit.Lookup(field), parsedAs))
 			}
 		}
 	}
+	if len(drop) > 0 {
+		cc.work(int64(explicit.Len()))
+		explicit.DeleteFunc(func(k string, _ Value) bool { return drop[k] })
+	}
+	// The split is a copy of the fields, a step per 8.
+	cc.work(int64(explicit.Len()+implicit.Len())/8 + 1)
 	parse := newSplitOf(explicit, implicit)
-	ap.copyAll(parse)
+	ap.copyAll(cc, parse)
 	p := jsval.NewObject(4)
-	comb := parse.combine()
+	comb := parse.combineCC(cc)
 	for _, key := range comb.Keys() {
 		cc.work(1)
 		if val := parse.get(key); !val.IsNull() {
@@ -157,8 +178,8 @@ func unquote(pattern string) string {
 	return pattern
 }
 
-func parseExpressionFor(field, parse string) string {
-	f := accessPathWithDatum(field, "datum")
+func parseExpressionFor(cc *compileCtx, field, parse string) string {
+	f := accessPathWithDatum(cc, field, "datum")
 	switch {
 	case parse == "number":
 		return "toNumber(" + f + ")"
@@ -191,7 +212,7 @@ func (n *parseNode) assembleTransforms(onlyNested bool) []Value {
 			// parse.startsWith, past the comparisons with the known names.
 			throw("parse.startsWith is not a function")
 		}
-		expr := parseExpressionFor(field, pv.StrValue())
+		expr := parseExpressionFor(cc, field, pv.StrValue())
 		if expr == "" {
 			cc.warn(msgUnrecognizedParse(pv.StrValue()))
 			continue

@@ -242,7 +242,10 @@ type titleMerge struct {
 	byKey map[string][]int
 }
 
-func mergeTitle(t1, t2 Value) Value {
+// mergeTitle charges cc by the titles' text: merged across views, a title
+// grows with each, as upstream's does.
+func mergeTitle(cc *compileCtx, t1, t2 Value) Value {
+	cc.work(1 + int64(len(t1.AsString())+len(t2.AsString()))/16)
 	if deepEqual(t1, t2) || !t2.IsTruthy() {
 		return t1
 	} else if !t1.IsTruthy() {
@@ -250,6 +253,7 @@ func mergeTitle(t1, t2 Value) Value {
 	}
 	var parts []string
 	for _, x := range append(append([]Value(nil), arrayOf(t1)...), arrayOf(t2)...) {
+		cc.work(1)
 		parts = append(parts, x.AsString())
 	}
 	return jsval.Str(strings.Join(parts, ", "))
@@ -264,7 +268,7 @@ func mergeTitleComponent(cc *compileCtx, v1, v2 withExplicit) withExplicit {
 	case a.IsNullish() || b.IsNull():
 		return withExplicit{v1.explicit, jsval.Null}
 	case aText && bText:
-		return withExplicit{v1.explicit, mergeTitle(a, b)}
+		return withExplicit{v1.explicit, mergeTitle(cc, a, b)}
 	case aText:
 		return withExplicit{v1.explicit, a}
 	case bText:

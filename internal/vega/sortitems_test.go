@@ -1,6 +1,7 @@
 package vega
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"testing"
@@ -61,7 +62,7 @@ func TestSortItemsByKeysMatchesViews(t *testing.T) {
 		a := mk(200)
 		r.Seed(11)
 		b := mk(200)
-		v1, v2 := &runView{}, &runView{}
+		v1, v2 := &runView{g: newGraph(context.Background())}, &runView{g: newGraph(context.Background())}
 		v1.sortItemsByKeys(a, cs)
 		v2.sortItemsByViews(b, cs.cmp)
 		for i := range a {

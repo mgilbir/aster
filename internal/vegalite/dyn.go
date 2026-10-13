@@ -139,10 +139,15 @@ func cloneObj(o *Object) *Object {
 // among dst's leading index keys; rather than moving the keys after it on
 // every insert (cubic over an object's keys, C4), the keys are appended and
 // put in JavaScript's order once at the end, which gives the same order (see
-// jsOrderKeys). It is linear in its input, so it needs no meter.
-func spread(dst *Object, srcs ...Value) *Object {
+// jsOrderKeys). It is linear in its input; spreadCC charges it.
+func spread(dst *Object, srcs ...Value) *Object { return spreadCC(nil, dst, srcs...) }
+
+// spreadCC is spread charging cc a step per key, for the spreads of a
+// specification-sized object (the config) that every view makes.
+func spreadCC(cc *compileCtx, dst *Object, srcs ...Value) *Object {
 	reorder := false
 	put := func(k string, v Value) {
+		cc.work(1)
 		if !reorder && len(k) > 0 && k[0] >= '0' && k[0] <= '9' && !dst.Has(k) {
 			if n, ok := arrayIndex(k); ok && !appendKeepsJSOrder(dst, n) {
 				reorder = true
@@ -180,18 +185,21 @@ func spread(dst *Object, srcs ...Value) *Object {
 		}
 	}
 	if reorder {
-		jsOrderKeys(nil, dst)
+		jsOrderKeys(cc, dst)
 	}
 	return dst
 }
 
 // merged is `{...a, ...b, ...}`.
-func merged(srcs ...Value) *Object {
+func merged(srcs ...Value) *Object { return mergedCC(nil, srcs...) }
+
+// mergedCC is merged charging cc (spreadCC).
+func mergedCC(cc *compileCtx, srcs ...Value) *Object {
 	n := 0
 	for _, s := range srcs {
 		n += s.Len()
 	}
-	return spread(jsval.NewObject(n), srcs...)
+	return spreadCC(cc, jsval.NewObject(n), srcs...)
 }
 
 // omit is upstream's omit: a shallow copy without the given keys.
@@ -425,6 +433,7 @@ func stringifyTo(cc *compileCtx, b *strings.Builder, v Value) bool {
 			return true
 		}
 		ks := append([]string(nil), o.Keys()...)
+		cc.work(int64(len(ks))) // the sort, past a step a key
 		sort.Strings(ks)
 		b.WriteByte('{')
 		first := true
@@ -443,6 +452,9 @@ func stringifyTo(cc *compileCtx, b *strings.Builder, v Value) bool {
 		}
 		b.WriteByte('}')
 	default:
+		if v.IsStr() {
+			cc.work(int64(len(v.StrValue())) / 16) // a string is escaped a byte at a time
+		}
 		b.Write(jsval.AppendJSON(nil, v))
 	}
 	return true
@@ -775,7 +787,9 @@ func jsOrderKeys(cc *compileCtx, o *Object) {
 	if ordered {
 		return
 	}
-	cc.work(int64(n))
+	// Each loop, and the sort's comparisons, charge a step an entry: an
+	// object is as large as the specification. A compilation the charge
+	// ends leaves o part reordered; nothing reads it after.
 	type idxEntry struct {
 		n uint32
 		jsEntry
@@ -783,6 +797,7 @@ func jsOrderKeys(cc *compileCtx, o *Object) {
 	var idx []idxEntry
 	rest := make([]jsEntry, 0, n)
 	for i := 0; i < n; i++ {
+		cc.work(1)
 		k, v := o.KeyAt(i), o.ValueAt(i)
 		if m, ok := arrayIndex(k); ok {
 			idx = append(idx, idxEntry{m, jsEntry{k: k, v: v}})
@@ -790,14 +805,20 @@ func jsOrderKeys(cc *compileCtx, o *Object) {
 			rest = append(rest, jsEntry{k: k, v: v})
 		}
 	}
-	sort.Slice(idx, func(i, j int) bool { return idx[i].n < idx[j].n })
+	sort.Slice(idx, func(i, j int) bool {
+		cc.work(1)
+		return idx[i].n < idx[j].n
+	})
 	for i := n - 1; i >= 0; i-- {
+		cc.work(1)
 		o.Delete(o.KeyAt(i))
 	}
 	for _, e := range idx {
+		cc.work(1)
 		o.Set(e.k, e.v)
 	}
 	for _, e := range rest {
+		cc.work(1)
 		o.Set(e.k, e.v)
 	}
 }
@@ -814,11 +835,7 @@ func jsName(s string) string {
 // jsIndex is v[i] for arrays and strings (a string yields one UTF-16 unit).
 func jsIndex(v Value, i int) Value {
 	if v.IsStr() {
-		u := utf16Len(v.StrValue())
-		if i >= 0 && i < len(u) {
-			return jsval.Str(string(rune(u[i])))
-		}
-		return undef
+		return unitAt(utf16Len(v.StrValue()), i)
 	}
 	return v.Index(i)
 }

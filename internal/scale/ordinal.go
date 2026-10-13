@@ -104,7 +104,8 @@ func (o *Ordinal) SetDomain(d []jsval.Value) {
 	o.domain = make([]jsval.Value, 0, len(d))
 	o.index = make(map[ordKey]int, len(d))
 	o.refs = o.refs[:0]
-	for _, v := range d {
+	for i, v := range d {
+		o.charge(i, len(d))
 		if _, ok := o.lookup(v); ok {
 			continue
 		}

@@ -146,6 +146,12 @@ func facScale(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 			if !ok {
 				fail("unrecognized scale type: %s", key)
 			}
+			// The loops of an ordinal, band or point scale over its domain
+			// (indexing each value, placing each band) charge the graph:
+			// two steps a value.
+			if w, ok := ns.(interface{ SetWork(func(int)) }); ok {
+				w.SetWork(func(k int) { g.work(2 * k) })
+			}
 			s = ns
 			n.value = s
 		}
@@ -365,7 +371,8 @@ func domainCheck(typ string, domain []jsval.Value, g *flowGraph) {
 		return
 	}
 	s := 0
-	for _, v := range domain {
+	for i, v := range domain {
+		g.rows(i, len(domain), 1)
 		f := jsval.ToNumber(v)
 		switch {
 		case f < 0:

@@ -2,7 +2,6 @@ package vega
 
 import (
 	"github.com/mgilbir/aster/internal/jssort"
-	"slices"
 
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/scene"
@@ -54,13 +53,13 @@ type joinMap struct {
 
 func (m *joinMap) size() int { return len(m.order) }
 
-func (m *joinMap) find(t jsval.Value) *joinEntry {
+func (m *joinMap) find(g *flowGraph, t jsval.Value) *joinEntry {
 	if m.keyFn != nil {
 		return m.strs[m.keyFn(t)]
 	}
 	if o := t.ObjValue(); o != nil {
 		if m.objs == nil {
-			m.index()
+			m.index(g)
 		}
 		return m.objs[o]
 	}
@@ -80,9 +79,10 @@ func joinValueKey(t jsval.Value) jsval.Key {
 }
 
 // index builds objs from the entries.
-func (m *joinMap) index() {
+func (m *joinMap) index(g *flowGraph) {
 	m.objs = make(map[*jsval.Object]*joinEntry, len(m.order))
-	for _, e := range m.order {
+	for i, e := range m.order {
+		g.rows(i, len(m.order), 1)
 		if e.key != nil {
 			m.objs[e.key] = e
 		}
@@ -105,8 +105,8 @@ func (m *joinMap) put(t jsval.Value, e *joinEntry) {
 }
 
 // lookup finds the item of a datum by the join key (`map.lookup`).
-func (m *joinMap) lookup(t jsval.Value) *scene.Item {
-	if e := m.find(t); e != nil {
+func (m *joinMap) lookup(g *flowGraph, t jsval.Value) *scene.Item {
+	if e := m.find(g, t); e != nil {
 		return e.item
 	}
 	return nil
@@ -140,7 +140,7 @@ func facDataJoin(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNod
 		// On a first run by tuple identity, a tuple whose id the run has not
 		// had is a new one, found without the index.
 		var ids tidSet
-		fresh := jm.keyFn == nil && len(jm.order) == 0 && jm.objs == nil && ids.init(tuples)
+		fresh := jm.keyFn == nil && len(jm.order) == 0 && jm.objs == nil && ids.init(n.g, tuples)
 		if jm.order == nil {
 			jm.order = make([]*joinEntry, 0, len(tuples))
 		}
@@ -149,14 +149,10 @@ func facDataJoin(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNod
 		var slab []scene.Item
 		var entries []joinEntry
 		for i, t := range tuples {
-			if i&1023 == 0 {
-				if err := n.g.ctx.Err(); err != nil {
-					failErr(err)
-				}
-			}
+			n.g.rows(i, len(tuples), 2)
 			var x *joinEntry
 			if o := t.ObjValue(); !fresh || o == nil || jm.objs != nil || !ids.add(o) {
-				x = jm.find(t)
+				x = jm.find(n.g, t)
 			}
 			if x != nil {
 				if x.exit {
@@ -188,7 +184,8 @@ func facDataJoin(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNod
 		}
 
 		var rem []*scene.Item
-		for _, x := range jm.order {
+		for i, x := range jm.order {
+			n.g.rows(i, len(jm.order), 1)
 			if x.seen != jm.run && !x.exit {
 				rem = append(rem, x.item)
 				x.exit = true
@@ -208,11 +205,13 @@ func facItemStore(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNo
 		changed := len(pulse.add) > 0 || len(pulse.rem) > 0 || len(pulse.mod) > 0
 		if len(pulse.rem) > 0 {
 			gone := make(map[*scene.Item]struct{}, len(pulse.rem))
-			for _, it := range pulse.rem {
+			for i, it := range pulse.rem {
+				n.g.rows(i, len(pulse.rem), 2)
 				gone[it] = struct{}{}
 			}
 			kept := make([]*scene.Item, 0, len(list))
-			for _, it := range list {
+			for i, it := range list {
+				n.g.rows(i, len(list), 2)
 				if _, ok := gone[it]; !ok {
 					kept = append(kept, it)
 				}
@@ -221,7 +220,7 @@ func facItemStore(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNo
 		}
 		if len(pulse.add) > 0 {
 			// Copy so that slices handed to marks earlier are not appended into.
-			list = append(slices.Clip(list), pulse.add...)
+			list = appendRows(n.g, appendRows(n.g, make([]*scene.Item, 0, len(list)+len(pulse.add)), list), pulse.add)
 		}
 		n.value = list
 		n.modified = changed
@@ -241,7 +240,7 @@ func facMark(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *
 			if def == nil {
 				fail("mark operator without a mark definition")
 			}
-			group := lookupGroup(p)
+			group := lookupGroup(n.g, p)
 			idx := int(p.Value("index").NumValue())
 			if group == nil {
 				group = c.view.sg.RootItem()
@@ -262,7 +261,8 @@ func facMark(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *
 			applyMarkFlags(mark, p, c.view)
 			c.view.registerMark(mark, ctx)
 		}
-		for _, it := range pulse.add {
+		for i, it := range pulse.add {
+			n.g.rows(i, len(pulse.add), 1)
 			it.Mark = mark
 			if mark.Type == scene.MarkGroup && it.Items == nil {
 				it.Items = []*scene.Mark{}
@@ -282,7 +282,7 @@ func facMark(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *
 
 // lookupGroup finds the group item a new mark belongs in: the only group item
 // of the parent mark, or the one bound to the parent datum.
-func lookupGroup(p *opParams) *scene.Item {
+func lookupGroup(fg *flowGraph, p *opParams) *scene.Item {
 	g, _ := p.Get("groups").(*joinMap)
 	if g == nil {
 		return nil
@@ -294,7 +294,7 @@ func lookupGroup(p *opParams) *scene.Item {
 	if parent.IsUndefined() && !p.Has("parent") {
 		return nil
 	}
-	return g.lookup(parent)
+	return g.lookup(fg, parent)
 }
 
 func applyMarkFlags(mark *scene.Mark, p *opParams, view *runView) {
@@ -456,9 +456,13 @@ func facEncode(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode,
 			set = encoders[encode]
 		}
 
+		// An item's encoding evaluates each channel of each set it runs:
+		// a step a channel.
+		g, cost := n.g, encodeCost(enter, update, set, exit)
 		var outMod []*scene.Item
 		if len(pulse.add) > 0 {
-			for _, t := range pulse.add {
+			for i, t := range pulse.add {
+				g.rows(i, len(pulse.add), cost)
 				if enter != nil {
 					enter.run(t, false)
 				}
@@ -467,23 +471,26 @@ func facEncode(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode,
 				}
 			}
 			if set != nil && set != update {
-				for _, t := range pulse.add {
+				for i, t := range pulse.add {
+					g.rows(i, len(pulse.add), cost)
 					set.run(t, false)
 				}
 			}
 		}
 		if len(pulse.rem) > 0 && exit != nil {
-			for _, t := range pulse.rem {
+			for i, t := range pulse.rem {
+				g.rows(i, len(pulse.rem), cost)
 				exit.run(t, false)
 			}
 		}
 		if reenter || set != nil {
 			items := pulse.mod
 			if p.Modified() {
-				items = reflowItems(pulse)
+				items = reflowItems(g, pulse)
 			}
 			if reenter {
-				for _, t := range items {
+				for i, t := range items {
+					g.rows(i, len(items), cost)
 					mod := fmod
 					if enter != nil && enter.run(t, true) {
 						mod = true
@@ -496,7 +503,8 @@ func facEncode(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode,
 					}
 				}
 			} else {
-				for _, t := range items {
+				for i, t := range items {
+					g.rows(i, len(items), cost)
 					if set.run(t, true) || fmod {
 						outMod = append(outMod, t)
 					}
@@ -511,9 +519,21 @@ func facEncode(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode,
 	}), nil
 }
 
+// encodeCost is the steps the encoding of one item costs: one, and one for
+// each channel of each set that may run on it.
+func encodeCost(sets ...*boundSet) int {
+	n := 1
+	for _, b := range sets {
+		if b != nil {
+			n += len(b.set.channels)
+		}
+	}
+	return n
+}
+
 // reflowItems is the set Pulse.visit(MOD|REFLOW) reaches: the modified items
 // plus every source item that is neither added nor modified.
-func reflowItems(p *flowPulse) []*scene.Item {
+func reflowItems(g *flowGraph, p *flowPulse) []*scene.Item {
 	src := p.items
 	sum := len(p.add) + len(p.mod)
 	if sum == len(src) {
@@ -523,14 +543,17 @@ func reflowItems(p *flowPulse) []*scene.Item {
 		return src
 	}
 	skip := make(map[*scene.Item]struct{}, sum)
-	for _, it := range p.add {
+	for i, it := range p.add {
+		g.rows(i, len(p.add), 2)
 		skip[it] = struct{}{}
 	}
-	for _, it := range p.mod {
+	for i, it := range p.mod {
+		g.rows(i, len(p.mod), 2)
 		skip[it] = struct{}{}
 	}
-	out := append([]*scene.Item(nil), p.mod...)
-	for _, it := range src {
+	out := copyRows(g, p.mod)
+	for i, it := range src {
+		g.rows(i, len(src), 1)
 		if _, ok := skip[it]; !ok {
 			out = append(out, it)
 		}
@@ -634,6 +657,10 @@ func (v *runView) markAsValue(m *scene.Mark, withGroup bool) jsval.Value {
 	return jsval.Obj(o)
 }
 
+// itemTupleCost is the steps of an item's tuple view (itemTuple): it sets
+// each of the item's properties.
+const itemTupleCost = 4
+
 // itemTuple is an item as a tuple, for marks and transforms fed from another
 // mark's items. The tuple object is stable per item and refreshed on each call.
 func (v *runView) itemTuple(it *scene.Item) jsval.Value {
@@ -673,6 +700,7 @@ func (v *runView) markItemsValue(m *scene.Mark) jsval.Value {
 	}
 	items := make([]jsval.Value, len(m.Items))
 	for i, it := range m.Items {
+		v.g.rows(i, len(m.Items), itemTupleCost)
 		if it == nil {
 			continue
 		}
@@ -697,12 +725,14 @@ type markItems struct {
 // derivedTuples lists the tuples of the items a derived mark is joined to.
 func (v *runView) derivedTuples(jm *joinMap, pulse *flowPulse) []jsval.Value {
 	live := make(map[*scene.Item]struct{}, len(pulse.items))
-	for _, it := range pulse.items {
+	for i, it := range pulse.items {
+		v.g.rows(i, len(pulse.items), 2)
 		live[it] = struct{}{}
 	}
 	out := make([]jsval.Value, 0, len(pulse.items))
 	seen := make(map[*scene.Item]struct{}, len(pulse.items))
-	for _, e := range jm.order {
+	for i, e := range jm.order {
+		v.g.rows(i, len(jm.order), itemTupleCost)
 		d := e.item.Datum.ObjValue()
 		if d == nil {
 			continue
@@ -716,14 +746,16 @@ func (v *runView) derivedTuples(jm *joinMap, pulse *flowPulse) []jsval.Value {
 			seen[it] = struct{}{}
 		}
 	}
-	for _, it := range pulse.add {
+	for i, it := range pulse.add {
+		v.g.rows(i, len(pulse.add), itemTupleCost)
 		if _, ok := seen[it]; !ok {
 			out = append(out, v.itemTuple(it))
 			seen[it] = struct{}{}
 		}
 	}
 	// items neither joined nor added (a reflow of an unrelated change)
-	for _, it := range pulse.items {
+	for i, it := range pulse.items {
+		v.g.rows(i, len(pulse.items), itemTupleCost)
 		if _, ok := seen[it]; !ok {
 			out = append(out, v.itemTuple(it))
 		}
@@ -737,25 +769,27 @@ func (v *runView) derivedTuples(jm *joinMap, pulse *flowPulse) []jsval.Value {
 func (v *runView) sortItemsByViews(items []*scene.Item, cmp transforms.Comparator) {
 	views := make(map[*scene.Item]jsval.Value, len(items))
 	var temp []*scene.Item
-	for _, it := range items {
+	for i, it := range items {
+		v.g.rows(i, len(items), itemTupleCost)
 		if v.itemTupleCache[it] == nil {
 			temp = append(temp, it)
 		}
 		views[it] = v.itemTuple(it)
 	}
 	defer func() {
-		for _, it := range temp {
+		for i, it := range temp {
+			v.g.rows(i, len(temp), 1)
 			delete(v.viewItem, v.itemTupleCache[it])
 			delete(v.itemTupleCache, it)
 		}
 	}()
 	// stableCompare: ties go by tuple id, the order the items were created.
-	jssort.Sort(items, func(a, b *scene.Item) int {
+	jssort.Sort(items, meteredCompare(v.g, func(a, b *scene.Item) int {
 		if c := cmp(views[a], views[b]); c != 0 {
 			return c
 		}
 		return cmpSeq(a, b)
-	})
+	}))
 }
 
 func cmpSeq(a, b *scene.Item) int {
@@ -806,6 +840,7 @@ func (v *runView) sortItemsByKeys(items []*scene.Item, cs *compareSpec) {
 	recs := make([]sortRec, len(items))
 	var scratch *jsval.Object // a partial view of an item, for the paths it cannot answer
 	for i, it := range items {
+		v.g.rows(i, len(items), 1+nf)
 		if v.itemTupleCache[it] != nil {
 			// A view that exists is refreshed, as a sort over views does.
 			v.itemTuple(it)
@@ -844,15 +879,16 @@ func (v *runView) sortItemsByKeys(items []*scene.Item, cs *compareSpec) {
 			order[j] = -1
 		}
 	}
-	jssort.Sort(recs, func(a, b sortRec) int {
+	jssort.Sort(recs, meteredCompare(v.g, func(a, b sortRec) int {
 		for j := 0; j < nf; j++ {
 			if c := transforms.Ascending(keys[a.off+j], keys[b.off+j]); c != 0 {
 				return c * order[j]
 			}
 		}
 		return cmpSeq(a.it, b.it)
-	})
+	}))
 	for i, r := range recs {
+		v.g.rows(i, len(recs), 1)
 		items[i] = r.it
 	}
 }

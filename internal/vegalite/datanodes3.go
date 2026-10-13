@@ -517,9 +517,20 @@ func newFlattenNode(parent dfNode, t Value) dfNode {
 	t = duplicate(ccOf(parent), t)
 	as := t.Get("as")
 	var out []Value
+	// as[i]: a string's units are made once (jsIndex makes them per read).
+	var units []uint16
+	if as.IsStr() {
+		units = utf16Len(as.StrValue())
+	}
 	for i, f := range listOf(t.Get("flatten"), "flatten", "map") {
 		cc.work(1)
-		out = append(out, coalesce(jsIndex(as, i), f))
+		var a Value
+		if as.IsStr() {
+			a = unitAt(units, i)
+		} else {
+			a = jsIndex(as, i)
+		}
+		out = append(out, coalesce(a, f))
 	}
 	o := cloneObj(t.ObjValue())
 	o.Set("as", jsval.Arr(out))

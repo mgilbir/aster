@@ -149,7 +149,7 @@ func parseDomainForChannel(u *unitModel, channel string) withExplicit {
 }
 
 func mapDomainToDataSignal(cc *compileCtx, domain Value, typ string, timeUnit Value) Value {
-	return mapList(domain, "domain", func(v Value) Value {
+	return mapList(cc, domain, "domain", func(v Value) Value {
 		data, _ := valueExpr(cc, v, timeUnit, typ, false, false)
 		return mkv("signal", "{data: "+data+"}")
 	})

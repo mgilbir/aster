@@ -97,25 +97,25 @@ func (b *baseMapper) mapLayerOrUnit(spec Value, p *normParams) Value {
 
 func (b *baseMapper) mapLayer(spec Value, p *normParams) Value {
 	o := cloneObj(spec.ObjValue())
-	o.Set("layer", mapList(spec.Get("layer"), "spec.layer", func(s Value) Value { return b.self.mapLayerOrUnit(s, p.deeper()) }))
+	o.Set("layer", mapList(p.cc, spec.Get("layer"), "spec.layer", func(s Value) Value { return b.self.mapLayerOrUnit(s, p.deeper()) }))
 	return jsval.Obj(o)
 }
 
 func (b *baseMapper) mapHConcat(spec Value, p *normParams) Value {
 	o := cloneObj(spec.ObjValue())
-	o.Set("hconcat", mapList(spec.Get("hconcat"), "spec.hconcat", func(s Value) Value { return b.self.mapTop(s, p) }))
+	o.Set("hconcat", mapList(p.cc, spec.Get("hconcat"), "spec.hconcat", func(s Value) Value { return b.self.mapTop(s, p) }))
 	return jsval.Obj(o)
 }
 
 func (b *baseMapper) mapVConcat(spec Value, p *normParams) Value {
 	o := cloneObj(spec.ObjValue())
-	o.Set("vconcat", mapList(spec.Get("vconcat"), "spec.vconcat", func(s Value) Value { return b.self.mapTop(s, p) }))
+	o.Set("vconcat", mapList(p.cc, spec.Get("vconcat"), "spec.vconcat", func(s Value) Value { return b.self.mapTop(s, p) }))
 	return jsval.Obj(o)
 }
 
 func (b *baseMapper) mapConcat(spec Value, p *normParams) Value {
 	rest := omit(spec, "concat")
-	rest.Set("concat", mapList(spec.Get("concat"), "concat", func(s Value) Value { return b.self.mapTop(s, p) }))
+	rest.Set("concat", mapList(p.cc, spec.Get("concat"), "concat", func(s Value) Value { return b.self.mapTop(s, p) }))
 	return jsval.Obj(rest)
 }
 
@@ -270,9 +270,10 @@ func (n *selectionCompatNormalizer) mapUnit(spec Value, p *normParams) Value {
 	var params []Value
 	// entries(selection), then const {init: value, bind, empty, ...select} =
 	// selDef: a string's entries are its characters.
-	for _, name := range jsKeys(selection) {
+	readSel := propReader(selection)
+	for _, name := range jsKeysCC(cc, selection) {
 		cc.work(1)
-		selDef := jsProp(selection, name)
+		selDef := readSel.get(name)
 		if selDef.IsNullish() {
 			throw("Cannot destructure property 'init' of 'selDef' as it is %s.", nullishName(selDef))
 		}
@@ -305,7 +306,7 @@ func normalizeTransforms(spec Value, p *normParams) Value {
 		return spec
 	}
 	rest := omit(spec, "transform")
-	rest.Set("transform", mapList(tx, "tx", func(t Value) Value {
+	rest.Set("transform", mapList(p.cc, tx, "tx", func(t Value) Value {
 		if p.cc.v5 {
 			jsIn(t, "filter") // 5.8's isFilter
 		}
@@ -358,7 +359,7 @@ func normalizeChannelDefCompat(obj Value, p *normParams) Value {
 	if isConditionalDef(enc) {
 		cond := enc.Get("condition")
 		if cond.IsArr() {
-			eo.Set("condition", mapVals(cond, func(c Value) Value {
+			eo.Set("condition", mapVals(cc, cond, func(c Value) Value {
 				cc.work(1)
 				if c.Get("param").IsTruthy() {
 					return c
@@ -396,7 +397,7 @@ func normalizeBinExtent(bin Value) Value {
 
 func normalizePredicateCompat(op Value, p *normParams) Value {
 	normSel := func(o Value) Value {
-		return normalizeLogicalComposition(o, func(param Value) Value {
+		return normalizeLogicalComposition(p.cc, o, func(param Value) Value {
 			name := param.AsString()
 			empty, ok := p.emptySelections[name]
 			if !ok {
@@ -414,7 +415,7 @@ func normalizePredicateCompat(op Value, p *normParams) Value {
 	if !src.IsTruthy() {
 		src = op.Get("filter")
 	}
-	return normalizeLogicalComposition(src, func(o Value) Value {
+	return normalizeLogicalComposition(p.cc, src, func(o Value) Value {
 		if o.IsNullish() {
 			// a condition with neither selection nor test
 			throw("Cannot read properties of %s (reading 'selection')", o.AsString())
@@ -882,17 +883,18 @@ func mergeEncoding(cc *compileCtx, parentEncoding, encoding Value, layer bool) V
 		merged = jsval.NewObject(8)
 		seen := map[string]bool{}
 		var channels []string
-		for _, k := range append(append([]string(nil), jsKeys(parentEncoding)...), jsKeys(encoding)...) {
+		for _, k := range append(append([]string(nil), jsKeysCC(cc, parentEncoding)...), jsKeysCC(cc, encoding)...) {
 			cc.work(1)
 			if !seen[k] {
 				seen[k] = true
 				channels = append(channels, k)
 			}
 		}
+		readEnc, readParent := propReader(encoding), propReader(parentEncoding)
 		for _, channel := range channels {
 			cc.work(1)
-			channelDef := jsProp(encoding, channel)
-			parentChannelDef := jsProp(parentEncoding, channel)
+			channelDef := readEnc.get(channel)
+			parentChannelDef := readParent.get(channel)
 			switch {
 			case isFieldOrDatumDef(cc, channelDef):
 				merged.Set(channel, jsval.Obj(merged2(parentChannelDef, channelDef)))

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/bits"
 	"strings"
 	"unicode/utf8"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/geo"
 	"github.com/mgilbir/aster/internal/jsval"
+	"github.com/mgilbir/aster/internal/transforms"
 )
 
 // This file ports vega-loader: data formats (json, csv/tsv/dsv, topojson), the
@@ -289,7 +291,7 @@ func jsonDocument(ctx context.Context, value jsval.Value, raw []byte, schema jsv
 		}
 		doc = d
 	} else if value.IsStr() {
-		d, err := jsval.ParseJSONContext(ctx, []byte(value.StrValue()), limit)
+		d, err := jsval.ParseJSONStringContext(ctx, value.StrValue(), limit)
 		if err != nil {
 			return jsval.Undefined, err
 		}
@@ -545,27 +547,23 @@ func (v *runView) applyParse(data []jsval.Value, columns []string, types jsval.V
 	fields := columns
 	if fields == nil {
 		if o := data[0].ObjValue(); o != nil {
-			fields = append([]string(nil), o.Keys()...)
+			fields = o.Keys() // read, not kept: typeKeys copies it
 		}
 	}
 	var typeOf map[string]string
 	var order []string
 	if types.IsStr() && types.StrValue() == "auto" {
-		typeOf = inferTypes(&v.g.meter, data, fields)
-		order = make([]string, 0, len(typeOf))
-		for _, f := range fields {
-			v.work(1)
-			if _, dup := typeOf[f]; dup && !contains(order, f) {
-				order = append(order, f)
-			}
-		}
+		// Upstream's inferTypes assigns types[field] for each field in
+		// turn, and the parse goes over Object.keys(types).
+		order = v.typeKeys(fields)
+		typeOf = inferTypes(&v.g.meter, data, order)
 	} else if o := types.ObjValue(); o != nil {
-		typeOf = map[string]string{}
+		typeOf = make(map[string]string, o.Len())
 		for i := 0; i < o.Len(); i++ {
 			v.work(1)
 			typeOf[o.KeyAt(i)] = o.ValueAt(i).AsString()
-			order = append(order, o.KeyAt(i))
 		}
+		order = v.jsKeyOrder(o.Keys())
 	} else {
 		return nil
 	}
@@ -616,13 +614,34 @@ func (v *runView) applyParse(data []jsval.Value, columns []string, types jsval.V
 	return nil
 }
 
-func contains(l []string, s string) bool {
-	for _, x := range l {
-		if x == s {
-			return true
+// typeKeys is Object.keys of the object upstream's inferTypes builds over
+// fields: each field once, where it first appears (a CSV header may repeat a
+// column), but not __proto__, whose assignment of a string sets nothing, in
+// JavaScript's key order (jsKeyOrder). The repeats are found in a set, a step
+// a field: a header has up to 65,536 columns, and the first row of JSON data
+// as many keys as the document gives it.
+func (v *runView) typeKeys(fields []string) []string {
+	seen := make(map[string]struct{}, len(fields))
+	keys := make([]string, 0, len(fields))
+	for _, f := range fields {
+		v.work(1)
+		if _, dup := seen[f]; dup || f == "__proto__" {
+			continue
 		}
+		seen[f] = struct{}{}
+		keys = append(keys, f)
 	}
-	return false
+	return v.jsKeyOrder(keys)
+}
+
+// jsKeyOrder puts keys, distinct, in the order Object.keys lists an object's
+// own keys: array-index keys ascending, then the rest as they were added. It
+// is the order the parsers run in, which a row missing a field gains it in,
+// and which picks the field an illegal pattern names. The sort it may need is
+// charged before it runs.
+func (v *runView) jsKeyOrder(keys []string) []string {
+	v.work(len(keys) * (1 + bits.Len(uint(len(keys)))))
+	return transforms.OrderedKeys(keys)
 }
 
 func (v *runView) typeParser(t string) func(jsval.Value) jsval.Value {
