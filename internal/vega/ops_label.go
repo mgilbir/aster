@@ -247,13 +247,20 @@ func (lp *labelPainter) paint(m *label.Mask, typ scene.MarkType, items []*scene.
 	if err != nil {
 		failErr(err)
 	}
+	// The bitmap's work budget is the PNG budget at scale 1 for its pixels,
+	// as for any image drawn at its own pixels: the supersampling is the
+	// transform's, not a scale the caller asked for, and does not raise it.
+	lim := raster.Limits{MaxPixelOps: raster.DefaultMaxPixelOps, PixelOpsPerPixel: raster.DefaultPixelOpsPerPixel}
+	if v.limits.RasterPixelOps > 0 {
+		lim.MaxPixelOps = v.limits.RasterPixelOps // WithPixelWorkLimit's
+	}
 	// The rasterizer reads bytes: the copy of the document, as long as the
 	// marks make it, is charged to the call's ledger while it lives.
 	led := budget.LedgerFrom(v.ctx)
 	if err := led.Alloc(int64(len(doc))); err != nil {
 		failErr(err)
 	}
-	img, err := raster.Render([]byte(doc), raster.Options{Shaper: v.shaper, Context: v.ctx, Scale: float64(ss)})
+	img, err := raster.Render([]byte(doc), raster.Options{Shaper: v.shaper, Context: v.ctx, Scale: float64(ss), Limits: lim})
 	led.Free(int64(len(doc)))
 	if err != nil {
 		failErr(err)

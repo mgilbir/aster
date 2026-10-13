@@ -195,14 +195,14 @@ func TestColourGlyphImagePolls(t *testing.T) {
 	face, gid := runs[0].Face, runs[0].Glyphs[0].GID
 	const ppem = 4000 // a 3200-pixel square
 	full := &pollCtx{Context: context.Background()}
-	if _, _, err := ColourGlyphImage(full, face, gid, shape.Color{A: 255}, ppem); err != nil {
+	if _, _, err := ColourGlyphImage(full, face, gid, shape.Color{A: 255}, ppem, 0); err != nil {
 		t.Fatal(err)
 	}
 	if bands := 3200 * 3200 / imageref.BandPixels; full.polls < bands {
 		t.Errorf("%d polls painting a glyph of %d bands", full.polls, bands)
 	}
 	half := &pollCtx{Context: context.Background(), stop: full.polls / 2}
-	if _, _, err := ColourGlyphImage(half, face, gid, shape.Color{A: 255}, ppem); !errors.Is(err, context.Canceled) {
+	if _, _, err := ColourGlyphImage(half, face, gid, shape.Color{A: 255}, ppem, 0); !errors.Is(err, context.Canceled) {
 		t.Errorf("a context ended at poll %d of %d: err = %v", half.stop, full.polls, err)
 	}
 }

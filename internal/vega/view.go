@@ -86,6 +86,10 @@ type Limits struct {
 	// weigh more (many fields, long strings) are charged for the difference,
 	// so MaxRows * RowBytes bounds the data; 0 counts rows only.
 	RowBytes int64
+	// RasterPixelOps is the pixel work budget at scale 1 of the bitmaps the
+	// label transform rasterizes (raster.Limits.MaxPixelOps); 0 is the
+	// rasterizer's default.
+	RasterPixelOps int
 }
 
 // WithDefaults is l with every zero field set to its default.

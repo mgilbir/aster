@@ -321,7 +321,11 @@ func (s *imageShader) shadeRow(y, x0 int, dst []uint8) {
 // Unsupported or unreachable images yield nil, as they are skipped by resvg;
 // an image over the limits fails the render.
 func (r *renderer) imageFor(n *node) (*rasterImage, error) {
-	href := strings.TrimSpace(n.str(aHref))
+	return r.imageHref(strings.TrimSpace(n.str(aHref)))
+}
+
+// imageHref is imageFor of an href: an <image>'s or an feImage's.
+func (r *renderer) imageHref(href string) (*rasterImage, error) {
 	if href == "" {
 		return nil, nil
 	}
@@ -394,8 +398,14 @@ func (r *renderer) renderImage(n *node, st *state, opacity float64, blend blendM
 	if !(w > 0 && h > 0) {
 		return
 	}
+	r.drawImage(img, x, y, w, h, n.str(aPreserveAspectRatio), st, opacity, blend)
+}
+
+// drawImage draws img into the viewport (x, y, w, h), w and h positive,
+// placed by preserveAspectRatio par: an <image>'s, or an feImage's
+// (usvg's convert_inner, which both share).
+func (r *renderer) drawImage(img *rasterImage, x, y, w, h float64, par string, st *state, opacity float64, blend blendMode) {
 	vb := rect{0, 0, float64(img.w), float64(img.h)}
-	par := n.str(aPreserveAspectRatio)
 	im := viewBoxTransform(vb, w, h, par)
 	full := st.ctm.mul(translate(x, y)).mul(im) // image pixels -> device
 	inv, ok := full.invert()

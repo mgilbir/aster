@@ -85,7 +85,7 @@ func runSynths(t *testing.T, prefix string, list []synth) {
 					t.Fatal("resvg failed")
 				}
 				st := compareImages(ours, ref, 24)
-				t.Logf("scale %g: MAE %.3f  >24: %.3f%%  >64: %.3f%%  PSNR %.1f max %d", scale, st.MAE, st.PctOver, st.PctBig, st.PSNR, st.Max)
+				t.Logf("scale %g: MAE %.3f  >24: %.3f%%  >64: %.3f%%  PSNR %.1f RMSE %.3f max %d", scale, st.MAE, st.PctOver, st.PctBig, st.PSNR, st.RMSE, st.Max)
 				if st.SizeDiff {
 					t.Fatalf("size mismatch %v vs %v", ours.Rect, ref.Rect)
 				}

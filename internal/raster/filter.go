@@ -5,6 +5,7 @@ import (
 	"math"
 
 	"github.com/mgilbir/aster/internal/budget"
+	"github.com/mgilbir/aster/internal/imageref"
 )
 
 // The filter pipeline is a port of resvg's (crates/resvg/src/filter): images
@@ -34,6 +35,14 @@ type fresult struct {
 // is allocated and given back when it is dropped, so a chain of primitives
 // whose results stay alive is bounded by WithMemoryLimit like any layer
 // (C30).
+//
+// Every pass a primitive makes over the region runs a band of rows (or of
+// columns) at a time, each band's pixels charged to MaxPixelOps before it
+// runs (filterRun.work), which polls the render's context: a deadline
+// reaches into a primitive's work, not only the boundaries between
+// primitives, as the canvas passes and the image work do (ADR 0010). Once
+// the budget or the context stops a pass, it runs no further band, the
+// render has failed and the primitive's result is dropped.
 type filterRun struct {
 	r       *renderer
 	w, h    int
@@ -41,9 +50,48 @@ type filterRun struct {
 	src     []uint8
 	ts      matrix
 	results []fresult
-	alpha   fimage      // SourceAlpha, made once a run (C28)
-	stop    func() bool // reports a cancelled render; nil = never
+	alpha   fimage // SourceAlpha, made once a run (C28)
 }
+
+// work charges n pixel operations of filter work to MaxPixelOps, polling the
+// render's context (chargeOps); it reports whether the run may go on. A run
+// without a renderer is never stopped.
+func (run *filterRun) work(n int) bool {
+	if run.r == nil {
+		return true
+	}
+	return run.r.chargeOps(n)
+}
+
+// rows makes one pass over the region, f(y0, y1) a band of rows at a time,
+// cost pixel operations a pixel. It reports whether the pass ran to its end.
+func (run *filterRun) rows(cost int, f func(y0, y1 int)) bool {
+	return bandRows(run.w, run.h, cost, run.work, f)
+}
+
+// bandRows runs f over the h rows of an image w pixels wide, a band of about
+// imageref.BandPixels pixels at a time, charging work cost pixel operations
+// a pixel of the band before it runs (nil work: free). Once work refuses, no
+// further band runs, and bandRows reports false.
+func bandRows(w, h, cost int, work func(int) bool, f func(y0, y1 int)) bool {
+	step := imageref.BandRows(w)
+	for y := 0; y < h; y += step {
+		y1 := min(y+step, h)
+		if work != nil && !work(cost*w*(y1-y)) {
+			return false
+		}
+		f(y, y1)
+	}
+	return true
+}
+
+// unmultiplyCost is what a pixel of a pass that demultiplies, works on
+// the colour and multiplies again (a colour-space conversion, a colour
+// matrix, a transfer function) is charged: three passes' work, made in one.
+const unmultiplyCost = 3
+
+// rowsOf is rows [y0, y1) of pix, an image w pixels wide.
+func rowsOf(pix []uint8, w, y0, y1 int) []uint8 { return pix[y0*w*4 : y1*w*4] }
 
 // alloc returns a zeroed buffer of n bytes charged to the canvas budget. Past
 // the budget it stops the render (budget.Stop), as the primitives that
@@ -112,8 +160,9 @@ func toIntRect(rc rect) irect {
 
 func tsScale(m matrix) (float64, float64) {
 	// tiny-skia's Transform::get_scale uses the row norms.
-	sx := float64(float32(math.Sqrt(float64(float32(m.a*m.a + m.c*m.c)))))
-	sy := float64(float32(math.Sqrt(float64(float32(m.b*m.b + m.d*m.d)))))
+	// Each product rounded before the sum (arm64 would fuse them).
+	sx := float64(float32(math.Sqrt(float64(float32(float64(m.a*m.a) + float64(m.c*m.c))))))
+	sy := float64(float32(math.Sqrt(float64(float32(float64(m.b*m.b) + float64(m.d*m.d))))))
 	return sx, sy
 }
 
@@ -129,14 +178,27 @@ func (r *renderer) applyFilters(specs []*filterSpec, ts matrix, cv *canvas) {
 	cv.dirty = cv.bounds()
 }
 
+// newFilterRun is a run of a filter over cv, at ctm-shifted coordinates ts.
+func (r *renderer) newFilterRun(cv *canvas, ts matrix) *filterRun {
+	return &filterRun{r: r, w: cv.w, h: cv.h, src: cv.pix, ts: ts}
+}
+
 func (r *renderer) applyFilter(sp *filterSpec, ts matrix, cv *canvas) bool {
 	rc := transformRect32(sp.rect, ts)
 	if !(rc.w() > 0 && rc.h() > 0) {
 		return false
 	}
-	run := &filterRun{r: r, w: cv.w, h: cv.h, src: cv.pix, ts: ts, stop: func() bool { return !r.poll(true) }}
+	// The region in the layer's pixels, cut to the layer (resvg's
+	// fit_to_rect): a filter region larger than the 4x-canvas bound of its
+	// layer is cut where the layer is, and its primitives' sub-regions are
+	// measured from the cut region's corner.
+	region := toIntRect(rc).intersect(irect{0, 0, cv.w, cv.h})
+	if region.empty() {
+		return false
+	}
+	run := r.newFilterRun(cv, ts)
 	defer run.end()
-	run.region = toIntRect(rc)
+	run.region = region
 	last := len(sp.prims) - 1
 	// Last use of each result name, to free buffers early.
 	lastUse := map[string]int{}
@@ -182,13 +244,22 @@ func (r *renderer) applyFilter(sp *filterSpec, ts matrix, cv *canvas) bool {
 			} else {
 				sub2 = irect{sub.x0 - run.region.x0, sub.y0 - run.region.y0, sub.x1 - run.region.x0, sub.y1 - run.region.y0}
 			}
+			var from []uint8
 			if !res.owned {
 				// An input passed through: clear a copy, not the input.
-				pix := run.alloc(len(res.pix))
-				copy(pix, res.pix)
-				res = fimage{pix: pix, region: res.region, linear: res.linear, owned: true}
+				from = res.pix
+				res = fimage{pix: run.alloc(len(res.pix)), region: res.region, linear: res.linear, owned: true}
 			}
-			clearOutside(res.pix, run.w, run.h, sub2)
+			keep := sub2.intersect(irect{0, 0, run.w, run.h})
+			if !run.rows(1, func(y0, y1 int) {
+				if from != nil {
+					copy(rowsOf(res.pix, run.w, y0, y1), rowsOf(from, run.w, y0, y1))
+				}
+				clearOutside(res.pix, run.w, keep, y0, y1)
+			}) {
+				run.free(res)
+				return false
+			}
 			res.region = sub
 		}
 		run.results = append(run.results, fresult{name: p.result, img: res})
@@ -201,14 +272,16 @@ func (r *renderer) applyFilter(sp *filterSpec, ts matrix, cv *canvas) bool {
 		return false
 	}
 	out := run.toSpace(run.results[len(run.results)-1].img, false)
-	copy(cv.pix, out.pix)
-	if len(out.pix) < len(cv.pix) {
+	done := r.err == nil && run.rows(1, func(y0, y1 int) {
+		copy(rowsOf(cv.pix, run.w, y0, y1), rowsOf(out.pix, run.w, y0, y1))
+	})
+	if done && len(out.pix) < len(cv.pix) {
 		clear(cv.pix[len(out.pix):])
 	}
 	if out.owned && !run.held(out.pix) {
 		run.free(out)
 	}
-	return true
+	return done
 }
 
 // release drops the earlier results whose last reader has run; the newest
@@ -260,13 +333,14 @@ func (run *filterRun) held(pix []uint8) bool {
 	return false
 }
 
-func clearOutside(pix []uint8, w, h int, keep irect) {
-	keep = keep.intersect(irect{0, 0, w, h})
+// clearOutside clears rows [y0, y1) of pix, an image w pixels wide, outside
+// keep (within the image).
+func clearOutside(pix []uint8, w int, keep irect, y0, y1 int) {
 	if keep.empty() {
-		clear(pix)
+		clear(rowsOf(pix, w, y0, y1))
 		return
 	}
-	for y := 0; y < h; y++ {
+	for y := y0; y < y1; y++ {
 		row := pix[y*w*4 : (y+1)*w*4]
 		if y < keep.y0 || y >= keep.y1 {
 			clear(row)
@@ -285,10 +359,12 @@ func (run *filterRun) input(in finput) fimage {
 		// Made once a run, however many primitives (or merge nodes) read it.
 		if run.alpha.pix == nil {
 			pix := run.alloc(len(run.src))
-			for i := 3; i < len(pix); i += 4 {
-				pix[i] = run.src[i]
-			}
 			run.alpha = fimage{pix: pix, region: run.region, owned: true}
+			run.rows(1, func(y0, y1 int) {
+				for i := y0*run.w*4 + 3; i < y1*run.w*4; i += 4 {
+					pix[i] = run.src[i]
+				}
+			})
 		}
 		return fimage{pix: run.alpha.pix, region: run.region}
 	case inRef:
@@ -312,18 +388,22 @@ func (run *filterRun) toSpace(img fimage, linear bool) fimage {
 		return img
 	}
 	pix := run.alloc(len(img.pix))
-	copy(pix, img.pix)
-	demultiply(pix)
 	tbl := &linearToSRGBTable
 	if linear {
 		tbl = &srgbToLinearTable
 	}
-	for i := 0; i < len(pix); i += 4 {
-		pix[i] = tbl[pix[i]]
-		pix[i+1] = tbl[pix[i+1]]
-		pix[i+2] = tbl[pix[i+2]]
-	}
-	multiply(pix)
+	// Each pixel is converted on its own, so a band at a time is the same.
+	run.rows(unmultiplyCost, func(y0, y1 int) {
+		band := rowsOf(pix, run.w, y0, y1)
+		copy(band, rowsOf(img.pix, run.w, y0, y1))
+		demultiply(band)
+		for i := 0; i < len(band); i += 4 {
+			band[i] = tbl[band[i]]
+			band[i+1] = tbl[band[i+1]]
+			band[i+2] = tbl[band[i+2]]
+		}
+		multiply(band)
+	})
 	return fimage{pix: pix, region: img.region, linear: linear, owned: true}
 }
 
@@ -334,7 +414,7 @@ func (run *filterRun) ownCopy(img fimage) []uint8 {
 		return img.pix
 	}
 	pix := run.alloc(len(img.pix))
-	copy(pix, img.pix)
+	run.rows(1, func(y0, y1 int) { copy(rowsOf(pix, run.w, y0, y1), rowsOf(img.pix, run.w, y0, y1)) })
 	return pix
 }
 
@@ -368,9 +448,10 @@ func multiply(pix []uint8) {
 
 func div255(v uint32) uint32 { return (v + 255) >> 8 }
 
-// drawOver composites src onto dst (both w*h) at offset (dx,dy), source-over.
-func drawOver(dst, src []uint8, w, h, dx, dy int) {
-	for y := 0; y < h; y++ {
+// drawOver composites src onto rows [y0, y1) of dst (both w*h) at offset
+// (dx,dy), source-over.
+func drawOver(dst, src []uint8, w, h, dx, dy, y0, y1 int) {
+	for y := y0; y < y1; y++ {
 		sy := y - dy
 		if sy < 0 || sy >= h {
 			continue
@@ -405,9 +486,11 @@ func (run *filterRun) apply(p *fprim) (fimage, bool) {
 		r := satU8(float32(float32(p.color.r)*af) + 0.5)
 		g := satU8(float32(float32(p.color.g)*af) + 0.5)
 		b := satU8(float32(float32(p.color.b)*af) + 0.5)
-		for i := 0; i < len(pix); i += 4 {
-			pix[i], pix[i+1], pix[i+2], pix[i+3] = r, g, b, satU8(a8)
-		}
+		run.rows(1, func(y0, y1 int) {
+			for i := y0 * w * 4; i < y1*w*4; i += 4 {
+				pix[i], pix[i+1], pix[i+2], pix[i+3] = r, g, b, satU8(a8)
+			}
+		})
 		return fimage{pix: pix, region: run.region, owned: true}, true
 	case tagFeOffset:
 		in := run.input(p.in1)
@@ -417,7 +500,7 @@ func (run *filterRun) apply(p *fprim) (fimage, bool) {
 			return in, true
 		}
 		pix := run.blank()
-		drawOver(pix, in.pix, w, h, satInt(dx), satInt(dy))
+		run.rows(1, func(y0, y1 int) { drawOver(pix, in.pix, w, h, satInt(dx), satInt(dy), y0, y1) })
 		return fimage{pix: pix, region: run.region, linear: in.linear, owned: true}, true
 	case tagFeGaussianBlur:
 		in := run.input(p.in1)
@@ -434,22 +517,24 @@ func (run *filterRun) apply(p *fprim) (fimage, bool) {
 		in1 := run.toSpace(run.input(p.in1), p.linear)
 		defer run.free(in1)
 		pix := run.ownCopy(run.toSpace(run.input(p.in2), p.linear))
-		for i := 0; i < len(pix); i += 4 {
-			s := in1.pix[i : i+4]
-			if s[3] == 0 {
-				continue
+		run.rows(1, func(y0, y1 int) {
+			for i := y0 * w * 4; i < y1*w*4; i += 4 {
+				s := in1.pix[i : i+4]
+				if s[3] == 0 {
+					continue
+				}
+				d := pix[i : i+4]
+				if p.mode == blendNormal {
+					ia := 255 - uint32(s[3])
+					d[0] = uint8(uint32(s[0]) + div255(uint32(d[0])*ia))
+					d[1] = uint8(uint32(s[1]) + div255(uint32(d[1])*ia))
+					d[2] = uint8(uint32(s[2]) + div255(uint32(d[2])*ia))
+					d[3] = uint8(uint32(s[3]) + div255(uint32(d[3])*ia))
+				} else {
+					blendPixel(d, uint32(s[0]), uint32(s[1]), uint32(s[2]), uint32(s[3]), p.mode)
+				}
 			}
-			d := pix[i : i+4]
-			if p.mode == blendNormal {
-				ia := 255 - uint32(s[3])
-				d[0] = uint8(uint32(s[0]) + div255(uint32(d[0])*ia))
-				d[1] = uint8(uint32(s[1]) + div255(uint32(d[1])*ia))
-				d[2] = uint8(uint32(s[2]) + div255(uint32(d[2])*ia))
-				d[3] = uint8(uint32(s[3]) + div255(uint32(d[3])*ia))
-			} else {
-				blendPixel(d, uint32(s[0]), uint32(s[1]), uint32(s[2]), uint32(s[3]), p.mode)
-			}
-		}
+		})
 		return fimage{pix: pix, region: run.region, linear: p.linear, owned: true}, true
 	case tagFeComposite:
 		in1 := run.toSpace(run.input(p.in1), p.linear)
@@ -458,75 +543,109 @@ func (run *filterRun) apply(p *fprim) (fimage, bool) {
 		defer run.free(in2)
 		pix := run.blank()
 		if p.op == opArithmetic {
-			arithmetic(p.k, in1.pix, in2.pix, pix)
+			run.rows(1, func(y0, y1 int) {
+				arithmetic(p.k, rowsOf(in1.pix, w, y0, y1), rowsOf(in2.pix, w, y0, y1), rowsOf(pix, w, y0, y1))
+			})
 			return fimage{pix: pix, region: run.region, linear: p.linear, owned: true}, true
 		}
-		copy(pix, in2.pix)
-		for i := 0; i < len(pix); i += 4 {
-			s := in1.pix[i : i+4]
-			d := pix[i : i+4]
-			sa, da := uint32(s[3]), uint32(d[3])
-			switch p.op {
-			case opOver:
-				if sa == 0 {
-					continue
-				}
-				ia := 255 - sa
-				for c := 0; c < 4; c++ {
-					d[c] = uint8(uint32(s[c]) + div255(uint32(d[c])*ia))
-				}
-			case opIn:
-				for c := 0; c < 4; c++ {
-					d[c] = uint8(div255(uint32(s[c]) * da))
-				}
-			case opOut:
-				for c := 0; c < 4; c++ {
-					d[c] = uint8(div255(uint32(s[c]) * (255 - da)))
-				}
-			case opAtop:
-				for c := 0; c < 4; c++ {
-					d[c] = uint8(div255(uint32(s[c])*da + uint32(d[c])*(255-sa)))
-				}
-			case opXor:
-				for c := 0; c < 4; c++ {
-					d[c] = uint8(div255(uint32(s[c])*(255-da) + uint32(d[c])*(255-sa)))
-				}
-			}
-		}
+		run.rows(1, func(y0, y1 int) {
+			compositeOp(p.op, rowsOf(in1.pix, w, y0, y1), rowsOf(in2.pix, w, y0, y1), rowsOf(pix, w, y0, y1))
+		})
 		return fimage{pix: pix, region: run.region, linear: p.linear, owned: true}, true
 	case tagFeMerge:
 		pix := run.blank()
+		// Each node is a pass over the region, polled a band at a time as a
+		// primitive is (C28).
 		for _, in := range p.merge {
-			// Each node is a pass over the region: the context is polled
-			// per node, as per primitive (C28).
-			if run.stop != nil && run.stop() {
+			img := run.toSpace(run.input(in), p.linear)
+			ok := run.r == nil || run.r.err == nil
+			ok = ok && run.rows(1, func(y0, y1 int) { drawOver(pix, img.pix, w, h, 0, 0, y0, y1) })
+			run.free(img)
+			if !ok {
 				run.free(fimage{pix: pix, owned: true})
 				return fimage{}, false
 			}
-			img := run.toSpace(run.input(in), p.linear)
-			drawOver(pix, img.pix, w, h, 0, 0)
-			run.free(img)
 		}
 		return fimage{pix: pix, region: run.region, linear: p.linear, owned: true}, true
 	case tagFeColorMatrix:
 		pix := run.ownCopy(run.toSpace(run.input(p.in1), p.linear))
-		demultiply(pix)
-		colorMatrix(p, pix)
-		multiply(pix)
+		// Each pixel is its own: a band at a time is the same.
+		run.rows(unmultiplyCost, func(y0, y1 int) {
+			band := rowsOf(pix, w, y0, y1)
+			demultiply(band)
+			colorMatrix(p, band)
+			multiply(band)
+		})
 		return fimage{pix: pix, region: run.region, linear: p.linear, owned: true}, true
 	case tagFeComponentTransfer:
 		pix := run.ownCopy(run.toSpace(run.input(p.in1), p.linear))
-		demultiply(pix)
-		componentTransfer(p, pix)
-		multiply(pix)
+		run.rows(unmultiplyCost, func(y0, y1 int) {
+			band := rowsOf(pix, w, y0, y1)
+			demultiply(band)
+			componentTransfer(p, band)
+			multiply(band)
+		})
 		return fimage{pix: pix, region: run.region, linear: p.linear, owned: true}, true
+	case tagFeTile:
+		return run.tile(p)
+	case tagFeMorphology:
+		return run.morphology(p)
+	case tagFeConvolveMatrix:
+		return run.convolve(p)
+	case tagFeDisplacementMap:
+		return run.displace(p)
+	case tagFeTurbulence:
+		return run.turbulence(p)
+	case tagFeDiffuseLighting, tagFeSpecularLighting:
+		return run.lighting(p)
+	case tagFeImage:
+		return run.feImage(p)
 	}
-	// Unsupported primitive: transparent black.
+	// usvg's dummy primitive: transparent black.
 	return fimage{pix: run.blank(), region: run.region, owned: true}, true
 }
 
+// compositeOp is feComposite's operator op (any but arithmetic): s1 composited
+// onto a copy of s2, into dst.
+func compositeOp(op uint8, s1, s2, dst []uint8) {
+	copy(dst, s2)
+	for i := 0; i < len(dst); i += 4 {
+		s := s1[i : i+4]
+		d := dst[i : i+4]
+		sa, da := uint32(s[3]), uint32(d[3])
+		switch op {
+		case opOver:
+			if sa == 0 {
+				continue
+			}
+			ia := 255 - sa
+			for c := 0; c < 4; c++ {
+				d[c] = uint8(uint32(s[c]) + div255(uint32(d[c])*ia))
+			}
+		case opIn:
+			for c := 0; c < 4; c++ {
+				d[c] = uint8(div255(uint32(s[c]) * da))
+			}
+		case opOut:
+			for c := 0; c < 4; c++ {
+				d[c] = uint8(div255(uint32(s[c]) * (255 - da)))
+			}
+		case opAtop:
+			for c := 0; c < 4; c++ {
+				d[c] = uint8(div255(uint32(s[c])*da + uint32(d[c])*(255-sa)))
+			}
+		case opXor:
+			for c := 0; c < 4; c++ {
+				d[c] = uint8(div255(uint32(s[c])*(255-da) + uint32(d[c])*(255-sa)))
+			}
+		}
+	}
+}
+
 // blur blurs pix in place (resvg's box blur from sigma 2, IIR below it),
-// charging its scratch to the canvas budget while it lives.
+// charging its scratch to the canvas budget while it lives. Each of a blur's
+// passes visits every channel of every pixel, and is charged a pixel
+// operation a channel: a blur pass costs about four times a primitive's.
 func (run *filterRun) blur(sx, sy float64, box bool, pix []uint8) {
 	w, h := run.w, run.h
 	if box {
@@ -534,13 +653,13 @@ func (run *filterRun) blur(sx, sy float64, box bool, pix []uint8) {
 		// column at a time.
 		n := len(pix) + 16*(max(w, h)+1)
 		run.charge(n)
-		boxBlur(sx, sy, pix, w, h, run.stop)
+		boxBlur(sx, sy, pix, w, h, run.work)
 		run.uncharge(n)
 		return
 	}
 	n := 8 * w * h // a float64 a pixel
 	run.charge(n)
-	iirBlur(sx, sy, pix, w, h, run.stop)
+	iirBlur(sx, sy, pix, w, h, run.work)
 	run.uncharge(n)
 }
 
@@ -587,7 +706,7 @@ func (run *filterRun) dropShadow(p *fprim) (fimage, bool) {
 	defer run.free(inp)
 	pix := run.blank()
 	shadow := run.alloc(len(inp.pix))
-	copy(shadow, inp.pix)
+	run.rows(1, func(y0, y1 int) { copy(rowsOf(shadow, w, y0, y1), rowsOf(inp.pix, w, y0, y1)) })
 	if sx, sy, box, ok := run.stdDev(p.stdX, p.stdY); ok {
 		run.blur(sx, sy, box, shadow)
 	}
@@ -595,23 +714,25 @@ func (run *filterRun) dropShadow(p *fprim) (fimage, bool) {
 	col := [3]float32{float32(p.color.r), float32(p.color.g), float32(p.color.b)}
 	a8 := float32(math.Round(float64(float32(p.alpha) * 255)))
 	base := a8 / 255
-	for i := 0; i < len(shadow); i += 4 {
-		ca := float32(shadow[i+3]) / 255.0
-		a := float32(base * ca)
-		shadow[i] = satU8(float32(col[0]*a) + 0.5)
-		shadow[i+1] = satU8(float32(col[1]*a) + 0.5)
-		shadow[i+2] = satU8(float32(col[2]*a) + 0.5)
-		shadow[i+3] = satU8(a*255 + 0.5)
-	}
+	run.rows(1, func(y0, y1 int) {
+		for i := y0 * w * 4; i < y1*w*4; i += 4 {
+			ca := float32(shadow[i+3]) / 255.0
+			a := float32(base * ca)
+			shadow[i] = satU8(float32(col[0]*a) + 0.5)
+			shadow[i+1] = satU8(float32(col[1]*a) + 0.5)
+			shadow[i+2] = satU8(float32(col[2]*a) + 0.5)
+			shadow[i+3] = satU8(float32(a*255) + 0.5)
+		}
+	})
 	sh := fimage{pix: shadow, linear: false, owned: true}
 	if conv := run.toSpace(sh, p.linear); conv.owned && &conv.pix[0] != &shadow[0] {
 		run.free(sh)
 		sh = conv
 	}
 	sh.linear = p.linear
-	drawOver(pix, sh.pix, w, h, satInt(dx), satInt(dy))
+	run.rows(1, func(y0, y1 int) { drawOver(pix, sh.pix, w, h, satInt(dx), satInt(dy), y0, y1) })
 	run.free(sh)
-	drawOver(pix, inp.pix, w, h, 0, 0)
+	run.rows(1, func(y0, y1 int) { drawOver(pix, inp.pix, w, h, 0, 0, y0, y1) })
 	return fimage{pix: pix, region: run.region, linear: p.linear, owned: true}, true
 }
 
@@ -669,19 +790,29 @@ func colorMatrix(p *fprim, pix []uint8) {
 		}
 	case cmSaturate:
 		v := float32(math.Max(0, p.cmValues[0]))
+		// Each product rounded before it is added, as resvg's f32 (no fused
+		// multiply-add, which arm64 would otherwise make).
+		f := func(c float32) float32 { return float32(c * v) }
 		m := [9]float32{
-			0.213 + 0.787*v, 0.715 - 0.715*v, 0.072 - 0.072*v,
-			0.213 - 0.213*v, 0.715 + 0.285*v, 0.072 - 0.072*v,
-			0.213 - 0.213*v, 0.715 - 0.715*v, 0.072 + 0.928*v,
+			0.213 + f(0.787), 0.715 - f(0.715), 0.072 - f(0.072),
+			0.213 - f(0.213), 0.715 + f(0.285), 0.072 - f(0.072),
+			0.213 - f(0.213), 0.715 - f(0.715), 0.072 + f(0.928),
 		}
 		apply3(m, pix)
 	case cmHueRotate:
-		ang := float64(float32(p.cmValues[0])) * math.Pi / 180
-		a1, a2 := float32(math.Cos(ang)), float32(math.Sin(ang))
+		// The angle in radians and its cosine and sine in f32, as resvg's
+		// f32::to_radians, cos and sin: at 90 degrees the cosine is
+		// -4.37e-8, not the 6e-17 of an f64 angle, and the matrix's
+		// zeros are a few ulps either side of zero, which the truncation to
+		// a byte tells apart.
+		ang := radians32(float32(p.cmValues[0]))
+		a1, a2 := cos32(ang), sin32(ang)
+		c := func(k float32) float32 { return float32(k * a1) }
+		s := func(k float32) float32 { return float32(k * a2) }
 		m := [9]float32{
-			0.213 + 0.787*a1 - 0.213*a2, 0.715 - 0.715*a1 - 0.715*a2, 0.072 - 0.072*a1 + 0.928*a2,
-			0.213 - 0.213*a1 + 0.143*a2, 0.715 + 0.285*a1 + 0.140*a2, 0.072 - 0.072*a1 - 0.283*a2,
-			0.213 - 0.213*a1 - 0.787*a2, 0.715 - 0.715*a1 + 0.715*a2, 0.072 + 0.928*a1 + 0.072*a2,
+			0.213 + c(0.787) - s(0.213), 0.715 - c(0.715) - s(0.715), 0.072 - c(0.072) + s(0.928),
+			0.213 - c(0.213) + s(0.143), 0.715 + c(0.285) + s(0.140), 0.072 - c(0.072) - s(0.283),
+			0.213 - c(0.213) - s(0.787), 0.715 - c(0.715) + s(0.715), 0.072 + c(0.928) + s(0.072),
 		}
 		apply3(m, pix)
 	case cmLuminance:
@@ -725,7 +856,7 @@ func (f *transferFn) apply(v uint8) uint8 {
 			c = float32(f.table[k])
 		} else {
 			vk, vk1 := float32(f.table[k]), float32(f.table[k+1])
-			c = vk + float32(float32(c-float32(k)/float32(n))*float32(n))*(vk1-vk)
+			c = vk + float32(float32(float32(c-float32(k)/float32(n))*float32(n))*(vk1-vk))
 		}
 	case 2:
 		n := len(f.table)
@@ -774,7 +905,7 @@ func createBoxGauss(sigma float32) [boxSteps]int {
 		}
 		wu := wl + 2
 		wlf := float32(wl)
-		mIdeal := (float32(12*sigma*sigma) - float32(n*wlf*wlf) - float32(4*n*wlf) - 3*n) / (-4*wlf - 4)
+		mIdeal := (float32(12*sigma*sigma) - float32(n*wlf*wlf) - float32(4*n*wlf) - float32(3*n)) / (float32(-4*wlf) - 4)
 		m := int(math.Round(float64(mIdeal)))
 		for i := range sizes {
 			if i < m {
@@ -791,122 +922,159 @@ func createBoxGauss(sigma float32) [boxSteps]int {
 	return sizes
 }
 
-func boxBlur(sigmaX, sigmaY float64, pix []uint8, w, h int, stop func() bool) {
+// boxBlur is resvg's box blur, each of its passes a band of lines at a time,
+// charged to work (nil: free) a pixel operation a channel; it stops, pix
+// partly blurred, once work refuses.
+func boxBlur(sigmaX, sigmaY float64, pix []uint8, w, h int, work func(int) bool) {
 	bh := createBoxGauss(float32(sigmaX))
 	bv := createBoxGauss(float32(sigmaY))
 	tmp := make([]uint8, len(pix))
 	for i := 0; i < boxSteps; i++ {
-		if stop != nil && stop() {
-			return
-		}
 		rh := (bh[i] - 1) / 2
 		rv := (bv[i] - 1) / 2
 		// vertical: pix -> tmp, then horizontal: tmp -> pix
-		boxPass(tmp, pix, w, h, rv, w*4, 4, h, w)
-		boxPass(pix, tmp, w, h, rh, 4, w*4, w, h)
+		if !boxPass(tmp, pix, w, h, rv, w*4, 4, h, w, work) || !boxPass(pix, tmp, w, h, rh, 4, w*4, w, h, work) {
+			return
+		}
 	}
 }
 
 // boxPass blurs lines of length n along the given step, for `lines` lines whose
 // starts are lineStep bytes apart; zero padded, output rounded to nearest even.
-func boxPass(dst, src []uint8, w, h, radius, step, lineStep, n, lines int) {
+// It runs a band of lines (about imageref.BandPixels pixels) at a time, each
+// charged to work first, and reports whether it ran to its end.
+func boxPass(dst, src []uint8, w, h, radius, step, lineStep, n, lines int, work func(int) bool) bool {
 	if radius <= 0 {
-		copy(dst, src)
-		return
+		// A copy, a band of rows at a time.
+		return bandRows(w, h, 4, work, func(y0, y1 int) { copy(rowsOf(dst, w, y0, y1), rowsOf(src, w, y0, y1)) })
 	}
 	iarr := float32(1) / float32(radius+radius+1)
 	var pre [4][]int32
 	for c := range pre {
 		pre[c] = make([]int32, n+1)
 	}
-	for l := 0; l < lines; l++ {
-		base := l * lineStep
-		for c := 0; c < 4; c++ {
-			pc := pre[c]
-			for i := 0; i < n; i++ {
-				pc[i+1] = pc[i] + int32(src[base+i*step+c])
-			}
+	per := imageref.BandRows(n)
+	for l0 := 0; l0 < lines; l0 += per {
+		l1 := min(l0+per, lines)
+		if work != nil && !work(4*n*(l1-l0)) {
+			return false
 		}
-		for i := 0; i < n; i++ {
-			lo, hi := i-radius, i+radius+1
-			if lo < 0 {
-				lo = 0
-			}
-			if hi > n {
-				hi = n
-			}
+		for l := l0; l < l1; l++ {
+			base := l * lineStep
 			for c := 0; c < 4; c++ {
-				sum := pre[c][hi] - pre[c][lo]
-				v := float32(sum) * iarr
-				dst[base+i*step+c] = satU8(float32(math.RoundToEven(float64(v))))
+				pc := pre[c]
+				for i := 0; i < n; i++ {
+					pc[i+1] = pc[i] + int32(src[base+i*step+c])
+				}
+			}
+			for i := 0; i < n; i++ {
+				lo, hi := i-radius, i+radius+1
+				if lo < 0 {
+					lo = 0
+				}
+				if hi > n {
+					hi = n
+				}
+				for c := 0; c < 4; c++ {
+					sum := pre[c][hi] - pre[c][lo]
+					v := float32(sum) * iarr
+					dst[base+i*step+c] = satU8(float32(math.RoundToEven(float64(v))))
+				}
 			}
 		}
 	}
+	return true
 }
 
-func iirBlur(sigmaX, sigmaY float64, pix []uint8, w, h int, stop func() bool) {
+// iirBlur is resvg's IIR blur, a channel at a time; each pass over a
+// channel runs a band of rows or columns at a time, charged to work (nil:
+// free) a pixel operation a pixel a sweep. It stops, pix partly blurred,
+// once work refuses.
+func iirBlur(sigmaX, sigmaY float64, pix []uint8, w, h int, work func(int) bool) {
 	buf := make([]float64, w*h)
 	for ch := 0; ch < 4; ch++ {
-		if stop != nil && stop() {
+		if !bandRows(w, h, 1, work, func(y0, y1 int) {
+			for i := y0 * w; i < y1*w; i++ {
+				buf[i] = float64(pix[i*4+ch]) / 255.0
+			}
+		}) {
 			return
 		}
-		for i := 0; i < w*h; i++ {
-			buf[i] = float64(pix[i*4+ch]) / 255.0
+		if !gaussianIIR2D(buf, w, h, sigmaX, sigmaY, 4, work) {
+			return
 		}
-		gaussianIIR2D(buf, w, h, sigmaX, sigmaY, 4)
-		for i := 0; i < w*h; i++ {
-			v := buf[i] * 255.0
-			switch {
-			case v != v || v <= 0:
-				pix[i*4+ch] = 0
-			case v >= 255:
-				pix[i*4+ch] = 255
-			default:
-				pix[i*4+ch] = uint8(v)
+		if !bandRows(w, h, 1, work, func(y0, y1 int) {
+			for i := y0 * w; i < y1*w; i++ {
+				v := buf[i] * 255.0
+				switch {
+				case v != v || v <= 0:
+					pix[i*4+ch] = 0
+				case v >= 255:
+					pix[i*4+ch] = 255
+				default:
+					pix[i*4+ch] = uint8(v)
+				}
 			}
+		}) {
+			return
 		}
 	}
 }
 
 func iirCoefficients(sigma float64, steps int) (float64, float64) {
 	lambda := (sigma * sigma) / (2.0 * float64(steps))
-	dnu := (1.0 + 2.0*lambda - math.Sqrt(1.0+4.0*lambda)) / (2.0 * lambda)
+	dnu := (1.0 + float64(2.0*lambda) - math.Sqrt(1.0+float64(4.0*lambda))) / (2.0 * lambda)
 	return lambda, dnu
 }
 
-func gaussianIIR2D(buf []float64, w, h int, sigmaX, sigmaY float64, steps int) {
+// gaussianIIR2D filters buf (w x h) in place, rows then columns, steps
+// sweeps each way, and scales it. Each pass runs a band of rows or columns
+// at a time, charged to work first (a pixel operation a pixel a sweep); it
+// reports whether it ran to its end.
+func gaussianIIR2D(buf []float64, w, h int, sigmaX, sigmaY float64, steps int, work func(int) bool) bool {
 	lambdaX, dnuX := 1.0, 1.0
 	if sigmaX > 0 {
 		lambdaX, dnuX = iirCoefficients(sigmaX, steps)
-		for y := 0; y < h; y++ {
-			idx := w * y
-			for s := 0; s < steps; s++ {
-				for x := 1; x < w; x++ {
-					buf[idx+x] += dnuX * buf[idx+x-1]
-				}
-				for x := w - 1; x > 0; x-- {
-					buf[idx+x-1] += dnuX * buf[idx+x]
+		if !bandRows(w, h, 2*steps, work, func(y0, y1 int) {
+			for y := y0; y < y1; y++ {
+				idx := w * y
+				for s := 0; s < steps; s++ {
+					for x := 1; x < w; x++ {
+						buf[idx+x] += float64(dnuX * buf[idx+x-1])
+					}
+					for x := w - 1; x > 0; x-- {
+						buf[idx+x-1] += float64(dnuX * buf[idx+x])
+					}
 				}
 			}
+		}) {
+			return false
 		}
 	}
 	lambdaY, dnuY := 1.0, 1.0
 	if sigmaY > 0 {
 		lambdaY, dnuY = iirCoefficients(sigmaY, steps)
-		for x := 0; x < w; x++ {
-			idx := x
-			for s := 0; s < steps; s++ {
-				for y := w; y < len(buf); y += w {
-					buf[idx+y] += dnuY * buf[idx+y-w]
-				}
-				for y := len(buf) - w; y > 0; y -= w {
-					buf[idx+y-w] += dnuY * buf[idx+y]
+		// A band of columns at a time (the image transposed, h wide).
+		if !bandRows(h, w, 2*steps, work, func(x0, x1 int) {
+			for x := x0; x < x1; x++ {
+				idx := x
+				for s := 0; s < steps; s++ {
+					for y := w; y < len(buf); y += w {
+						buf[idx+y] += float64(dnuY * buf[idx+y-w])
+					}
+					for y := len(buf) - w; y > 0; y -= w {
+						buf[idx+y-w] += float64(dnuY * buf[idx+y])
+					}
 				}
 			}
+		}) {
+			return false
 		}
 	}
 	post := math.Pow(math.Sqrt(dnuX*dnuY)/math.Sqrt(lambdaX*lambdaY), float64(2*steps))
-	for i := range buf {
-		buf[i] *= post
-	}
+	return bandRows(w, h, 1, work, func(y0, y1 int) {
+		for i := y0 * w; i < y1*w; i++ {
+			buf[i] *= post
+		}
+	})
 }

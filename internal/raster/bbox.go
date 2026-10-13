@@ -171,6 +171,9 @@ func (r *renderer) addElemBBox(k *node, parent *state, acc *bbox) {
 	ks := *parent
 	ks.applyProps(k)
 	tm := elemTransform(k)
+	if x, y, ok := r.useOffset(k, &ks); ok {
+		tm = tm.mul(translate(x, y))
+	}
 	lb, ok := r.contentBBox(k, &ks)
 	if !ok {
 		return
@@ -292,11 +295,9 @@ func (r *renderer) contentBBox(k *node, ks *state) (rect, bool) {
 			}
 			return transformRect(vr, translate(x, y)), true
 		default:
+			// In the coordinates after the use's x and y (useOffset).
 			r.addElemBBox(target, ks, &b)
-			if !b.ok {
-				return rect{}, false
-			}
-			return transformRect(b.r, translate(x, y)), true
+			return b.r, b.ok
 		}
 	}
 	return rect{}, false

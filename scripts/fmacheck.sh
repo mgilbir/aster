@@ -9,7 +9,10 @@
 # the engine's internal packages, and compares the sites with fmacheck.allow.
 #
 # Excluded: internal/jsmath (fuses deliberately, mirroring V8's compiled
-# fdlibm), internal/raster (rasterization, not V8 bit parity), internal/csscolor
+# fdlibm), internal/raster (rasterization, not V8 bit parity) but for its
+# filter primitives (filter*.go, turbulence.go, lighting.go, feimage.go),
+# which port resvg's f32 and f64 arithmetic product by product and must not
+# fuse either (Rust never does), internal/csscolor
 # (the colours of the PNG and PDF writers) and the text, font, PDF and loader
 # packages, which do not compute Vega's layout.
 #
@@ -73,7 +76,7 @@ awk -v root="$root" '
 	n = split(loc, p, ":"); line = p[n]; file = substr(loc, 1, length(loc) - length(line) - 1)
 	if (index(file, root "/internal/") != 1) next
 	rel = substr(file, length(root) + 2)
-	if (rel ~ /^internal\/(jsmath|raster|csscolor|text|svgpdf|fontsubset|fonts|loader|pngopt|cmd)\//) next
+	if (rel ~ /^internal\/(jsmath|raster|csscolor|text|svgpdf|fontsubset|fonts|loader|pngopt|cmd)\// && rel !~ /^internal\/raster\/(filter|filterprims|filterspec|turbulence|lighting|feimage)\.go$/) next
 	print rel "\t" line "\t" fn
 }' "$tmp/asm.txt" | sort -u >"$tmp/raw.txt"
 

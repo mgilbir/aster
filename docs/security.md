@@ -8,7 +8,7 @@ The attacker controls the Vega or Vega-Lite specification, the data a Loader ret
 
 | Goal | How aster provides it |
 |---|---|
-| bounded time | `WithTimeout` covers every stage of a call; loops whose iterations can be long poll the deadline |
+| bounded time | `WithTimeout` covers every stage of a call; loops whose iterations can be long poll the deadline; a PNG render's pixel work is bounded as well, 128 Mi operations at scale 1 ([limits.md](limits.md)) |
 | bounded memory | per-render budgets on rows, items, loaded bytes, strings, SVG size, canvases, path points, and a per-call ledger for the rest ([ADR 0010](adr/0010-bounds-charged-where-work-happens.md)), each charged *before* allocating; `WithMemoryLimit` sets them ([limits.md](limits.md)); one image is bounded in bytes (32 MiB) and pixels (64 Mi, `n/16` with `WithMemoryLimit`), alike in every output; caches shared between calls are bounded by the bytes they hold. Every input of the bounded corpus (`testdata/security/bounded`, each reproducer of a fixed finding) is rendered to every output in every `go test`, under `WithMemoryLimit(64 MiB)` and a 2 s timeout, and must end with output or a limit or deadline error (`bounded_test.go`) |
 | no crash | everything reachable from input returns an error; recursion is bounded and audited (every recursive cycle is listed with its bound); the public API recovers panics as a last resort; fuzzed nightly |
 | no access beyond the Loader's policy | every resource (data, images, links) goes through the Loader; the default refuses all; `HTTPLoader` refuses private networks by default, checked on the address each connection (plain or TLS dial) actually reaches, so DNS rebinding and redirects do not get past it; a `FallbackLoader` allows what any of its children allows |
@@ -27,6 +27,7 @@ The attacker controls the Vega or Vega-Lite specification, the data a Loader ret
 
 ## Known residual risks
 
+- A filter's result and scratch buffers (up to 256 MiB for a blur of the largest region) are allocated and zeroed between two deadline checks; every pass over them checks it every 65,536 pixels.
 - Decoding an image is interrupted only between reads of its bytes: about every quarter of a million pixels for a PNG, and for a JPEG or GIF in stretches bounded only by the per-image byte and pixel bounds ([limits.md](limits.md#withtimeout)).
 - There is no per-item memory model. Very long strings on one item are bounded only by the string budget and the SVG size cap; parsed path data is charged to the call's ledger.
 - A Loader you write is trusted: aster charges what it returns to the budget only after `Load` returns it, so bound what your Loader reads.

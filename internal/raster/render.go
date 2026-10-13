@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/mgilbir/aster/internal/budget"
+	"github.com/mgilbir/aster/internal/imageref"
 )
 
 type gradKey struct {
@@ -71,6 +72,10 @@ type renderer struct {
 	// maskBytes is the clip coverage held for the elements being drawn,
 	// part of canvasBytes (see newMaskCoverage).
 	maskBytes int
+	// inFeImage is set while an feImage draws: a filter layer is bounded by
+	// the canvas there (resvg's max_bbox is the feImage's region), not by
+	// four times it.
+	inFeImage bool
 }
 
 // errLimit is wrapped by every error a limit causes. Its own text is
@@ -85,27 +90,66 @@ var (
 // chargePixels accounts for n pixels of filter or pattern-tile work and fails
 // the render when the budget is spent.
 func (r *renderer) chargePixels(n int) bool {
+	return r.chargeEffect(n) && r.chargeOps(n)
+}
+
+// chargeEffect accounts for n pixels of filter work against
+// Limits.MaxEffectPixels alone: the filter charges its work to MaxPixelOps
+// as it does it, a band at a time (filterRun.work).
+func (r *renderer) chargeEffect(n int) bool {
 	if n < 0 || n > r.lim.MaxEffectPixels-r.effectPx {
 		r.fail(fmt.Errorf("raster: filter and pattern work exceeds %d pixels: %w", r.lim.MaxEffectPixels, errLimit))
 		return false
 	}
 	r.effectPx += n
-	return r.chargeOps(n)
+	return r.err == nil
+}
+
+// bands makes one pass over reg, f a band of rows (about
+// imageref.BandPixels pixels) at a time, each band's pixels charged to
+// MaxPixelOps first (chargeOps, which polls the context): a pass over a
+// layer as large as the canvas, compositing it or applying a mask, reaches
+// the deadline as the canvas's own passes do. It reports whether the pass
+// ran to its end; once it stops, no further band runs and the render has
+// failed.
+func (r *renderer) bands(reg irect, f func(band irect)) bool {
+	if reg.empty() {
+		return r.err == nil
+	}
+	step := imageref.BandRows(reg.w())
+	for y := reg.y0; y < reg.y1; y += step {
+		band := irect{reg.x0, y, reg.x1, min(y+step, reg.y1)}
+		if !r.chargeOps(band.w() * band.h()) {
+			return false
+		}
+		f(band)
+	}
+	return true
 }
 
 // chargeOps accounts for n pixels of work against Limits.MaxPixelOps and
 // polls the context. It reports whether rendering may continue.
 func (r *renderer) chargeOps(n int) bool {
-	if r.err != nil {
-		return false
-	}
-	if n < 0 || n > r.lim.MaxPixelOps-r.pixelOps {
-		r.fail(fmt.Errorf("raster: render work exceeds %d pixel operations (output %dx%d; raise Limits.MaxPixelOps to allow it): %w",
-			r.lim.MaxPixelOps, r.cw, r.ch, errLimit))
+	if !r.affordOps(n) {
 		return false
 	}
 	r.pixelOps += n
 	return r.poll(n >= 1<<14)
+}
+
+// affordOps reports whether n pixel operations fit what is left of
+// Limits.MaxPixelOps, failing the render when they do not, without charging
+// them: work known to be at least n fails before it starts.
+func (r *renderer) affordOps(n int) bool {
+	if r.err != nil {
+		return false
+	}
+	if n < 0 || n > r.lim.MaxPixelOps-r.pixelOps {
+		r.fail(fmt.Errorf("raster: render work exceeds %d pixel operations (output %dx%d; raise Limits.MaxPixelOps or WithPixelWorkLimit to allow it): %w",
+			r.lim.MaxPixelOps, r.cw, r.ch, errLimit))
+		return false
+	}
+	return true
 }
 
 // holdPoints accounts for n points of path geometry the element being drawn
@@ -243,8 +287,8 @@ func (r *renderer) popLayer(prev *canvas, opacity float64, mode blendMode) {
 	layer := r.cv
 	r.cv = prev
 	r.depth--
-	if d := layer.dirty.intersect(layer.bounds()); !d.empty() && r.chargeOps(d.w()*d.h()) {
-		compositeLayer(prev, layer, layer.dirty, opacity, nil, mode)
+	if d := layer.dirty.intersect(layer.bounds()); !d.empty() {
+		r.bands(d, func(band irect) { compositeLayer(prev, layer, band, opacity, nil, mode) })
 	}
 	layer.clearDirty()
 	r.pool = append(r.pool, layer)
@@ -288,6 +332,9 @@ func (r *renderer) prepare(n *node, parent *state, st *state) bool {
 		if m, valid := parseTransform(tf); valid {
 			st.ctm = st.ctm.mul(m)
 		}
+	}
+	if x, y, ok := r.useOffset(n, st); ok {
+		st.ctm = st.ctm.mul(translate(x, y))
 	}
 	if !st.ctm.isFinite() || !st.ctm.invertible() {
 		return false
@@ -536,6 +583,27 @@ func (r *renderer) renderViewport(n *node, st *state, x, y, w, h float64, clipDe
 	r.renderChildren(n, st)
 }
 
+// useOffset is the translation a <use> of an element other than a symbol or
+// an svg adds to its transform: its x and y. usvg makes the use a group whose
+// transform is the use's transform then translate(x, y), and puts the use's
+// clip-path, mask and filter on that group: they are in the coordinates after
+// the translation (prepare adds it), and its bounding box is its target's in
+// them. A symbol's and an svg's viewport are placed by renderUse instead.
+func (r *renderer) useOffset(n *node, st *state) (x, y float64, ok bool) {
+	if n.tag != tagUse {
+		return 0, 0, false
+	}
+	href := n.str(aHref)
+	if len(href) < 2 || href[0] != '#' {
+		return 0, 0, false
+	}
+	t := r.doc.ids[href[1:]]
+	if t == nil || t.tag == tagSymbol || t.tag == tagSVG {
+		return 0, 0, false
+	}
+	return st.length(n.str(aX), 0, 0), st.length(n.str(aY), 1, 0), true
+}
+
 func (r *renderer) renderUse(n *node, st *state) {
 	href := n.str(aHref)
 	if !strings.HasPrefix(href, "#") {
@@ -553,7 +621,10 @@ func (r *renderer) renderUse(n *node, st *state) {
 	}
 	x := st.length(n.str(aX), 0, 0)
 	y := st.length(n.str(aY), 1, 0)
-	st.ctm = st.ctm.mul(translate(x, y))
+	switch target.tag {
+	case tagSymbol, tagSVG:
+		st.ctm = st.ctm.mul(translate(x, y))
+	}
 	switch target.tag {
 	case tagSymbol:
 		s2 := *st
@@ -579,7 +650,7 @@ func (r *renderer) renderUse(n *node, st *state) {
 		}
 		r.renderViewport(target, &s2, ux, uy, w, h, true)
 	default:
-		r.renderElement(target, st)
+		r.renderElement(target, st) // st has the use's x and y (prepare)
 	}
 }
 
@@ -670,16 +741,18 @@ func (r *renderer) intersectMasks(a, b *mask) *mask {
 	}
 	out := &mask{r: reg, a: r.newMaskCoverage(reg)}
 	w := reg.w()
-	for y := reg.y0; y < reg.y1; y++ {
-		row := out.a[(y-reg.y0)*w:][:w]
-		for x := 0; x < w; x++ {
-			v := uint32(a.at(reg.x0+x, y))
-			if v != 0 {
-				v = mul255(v, uint32(b.at(reg.x0+x, y)))
+	r.bands(reg, func(band irect) {
+		for y := band.y0; y < band.y1; y++ {
+			row := out.a[(y-reg.y0)*w:][:w]
+			for x := 0; x < w; x++ {
+				v := uint32(a.at(reg.x0+x, y))
+				if v != 0 {
+					v = mul255(v, uint32(b.at(reg.x0+x, y)))
+				}
+				row[x] = uint8(v)
 			}
-			row[x] = uint8(v)
 		}
-	}
+	})
 	return out
 }
 

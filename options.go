@@ -3,6 +3,7 @@ package aster
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"strings"
@@ -29,6 +30,7 @@ type config struct {
 	loader                 Loader
 	theme                  string
 	memoryLimit            uint64
+	pixelWork              uint64 // WithPixelWorkLimit's; 0: the default
 	timeout                time.Duration
 	textMeasure            bool
 	vegaLiteVersion        string // human-readable, e.g. "6.4"
@@ -104,6 +106,31 @@ func WithTheme(theme string) Option {
 func WithMemoryLimit(bytes uint64) Option {
 	return func(c *config) {
 		c.memoryLimit = bytes
+	}
+}
+
+// WithPixelWorkLimit sets the rasterizer's work budget for PNG output: the
+// pixel operations one render may make at scale 1 (pixels filled and
+// stroked, edge crossings, points flattened, layers composited, masks,
+// pattern tiles, and every pass a filter makes over its region). The default
+// is 128 Mi; the heaviest chart of the corpora spends less than a fifth of
+// it. The budget follows the render's scale as the default does: ops times
+// the scale squared above scale 1 (a render at scale 2 has four times the
+// pixels to draw, and four times the budget), and at least 16 operations per
+// output pixel, so that one value fits every scale. SVG input with filters
+// over large regions (a blur costs about 49 operations a pixel) may need
+// more; a service rendering untrusted SVG may want less. The label
+// transform's bitmaps and a PDF's images of colour glyphs, drawn at their
+// own pixels, have it at scale 1. A render past it fails with an error
+// wrapping ErrLimit. Zero is refused by New: the budget cannot be turned
+// off, only raised (a value past what an int holds saturates).
+func WithPixelWorkLimit(ops uint64) Option {
+	return func(c *config) {
+		if ops == 0 {
+			c.errs = append(c.errs, errors.New("aster: WithPixelWorkLimit(0): the pixel work budget must be positive (it cannot be turned off; pass a large value to raise it)"))
+			return
+		}
+		c.pixelWork = ops
 	}
 }
 

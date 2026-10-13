@@ -191,17 +191,17 @@ func (r *renderer) applyMask(ms *maskSpec, st *state) {
 	if ms.nested != nil {
 		r.applyMask(ms.nested, st)
 	}
-	if d := content.dirty.intersect(content.bounds()); !d.empty() && r.chargeOps(d.w()*d.h()) {
-		multiplyByMask(content, layer, ms.alpha)
+	if d := content.dirty.intersect(content.bounds()); !d.empty() {
+		r.bands(d, func(band irect) { multiplyByMask(content, layer, band, ms.alpha) })
 	}
 	layer.clearDirty()
 	r.pool = append(r.pool, layer)
 }
 
-// multiplyByMask scales dst's pixels by the luminance (or alpha) coverage of
-// mk, tiny-skia's Mask::from_pixmap followed by Pixmap::apply_mask.
-func multiplyByMask(dst, mk *canvas, alpha bool) {
-	reg := dst.dirty.intersect(dst.bounds())
+// multiplyByMask scales dst's pixels within reg (part of its dirty region)
+// by the luminance (or alpha) coverage of mk, tiny-skia's Mask::from_pixmap
+// followed by Pixmap::apply_mask.
+func multiplyByMask(dst, mk *canvas, reg irect, alpha bool) {
 	for y := reg.y0; y < reg.y1; y++ {
 		for x := reg.x0; x < reg.x1; x++ {
 			i := (y*dst.w + x) * 4
@@ -287,7 +287,11 @@ func (r *renderer) renderEffects(n *node, st *state, opacity float64, blend blen
 	if !(dr.w() > 0 && dr.h() > 0) {
 		return
 	}
-	ib := toIntRect(dr).intersect(irect{-2 * r.cw, -2 * r.ch, 3 * r.cw, 3 * r.ch})
+	bound := irect{-2 * r.cw, -2 * r.ch, 3 * r.cw, 3 * r.ch}
+	if r.inFeImage {
+		bound = irect{0, 0, r.cw, r.ch}
+	}
+	ib := toIntRect(dr).intersect(bound)
 	if ib.empty() {
 		return
 	}
@@ -304,7 +308,10 @@ func (r *renderer) renderEffects(n *node, st *state, opacity float64, blend blen
 		return
 	}
 	// Each primitive is a pass over the region, and so is each node of a
-	// merge (C28).
+	// merge (C28): MaxEffectPixels is charged for them before they run, and
+	// a filter whose passes cannot fit what is left of MaxPixelOps fails
+	// before it starts. MaxPixelOps itself is charged by the passes, a band
+	// at a time as they run (filterRun.work): a blur makes many.
 	nPrims := 1
 	for _, sp := range specs {
 		nPrims += len(sp.prims)
@@ -312,7 +319,7 @@ func (r *renderer) renderEffects(n *node, st *state, opacity float64, blend blen
 			nPrims += len(sp.prims[i].merge)
 		}
 	}
-	if !r.chargePixels(budget.MulInt(area, nPrims)) {
+	if work := budget.MulInt(area, nPrims); !r.chargeEffect(work) || !r.affordOps(work) {
 		return
 	}
 	sub := r.allocCanvas(ib.w(), ib.h())
@@ -331,7 +338,15 @@ func (r *renderer) renderEffects(n *node, st *state, opacity float64, blend blen
 	s2.clip = nil
 	r.drawContent(n, &s2, 1, blendNormal)
 	if r.err == nil {
+		// A filter being applied is not applied again by an element its
+		// feImage draws (the element is not drawn there).
+		for _, sp := range specs {
+			r.active[sp.node] = true
+		}
 		r.applyFilters(specs, s2.ctm, sub)
+		for _, sp := range specs {
+			delete(r.active, sp.node)
+		}
 		if ms != nil {
 			sub.dirty = sub.bounds()
 			r.applyMask(ms, &s2)
@@ -340,8 +355,10 @@ func (r *renderer) renderEffects(n *node, st *state, opacity float64, blend blen
 	r.depth--
 	r.releasePool(r.pool)
 	r.cv, r.cw, r.ch, r.pool = parent, saved.cw, saved.ch, saved.pool
-	if r.err == nil && r.chargeOps(ib.w()*ib.h()) {
-		compositeLayerAt(parent, sub, ib.x0, ib.y0, opacity, st.clip, blend)
+	if r.err == nil {
+		r.bands(ib.intersect(parent.bounds()), func(band irect) {
+			compositeLayerAt(parent, sub, ib.x0, ib.y0, band, opacity, st.clip, blend)
+		})
 	}
 	r.releaseCanvas(sub)
 }

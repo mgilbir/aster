@@ -119,9 +119,9 @@ func AvailableVersions() ([]VersionInfo, error) {
 // that is not valid: an unknown Vega-Lite version (WithVegaLiteVersion), an
 // unknown time zone or "Local" (WithTimezone), a theme that is not a JSON
 // object (WithTheme), a nil pointer as the Loader (WithLoader), a negative
-// face index (WithFontFace), a font that does not load (WithFont,
-// WithFontFace, WithFontInstance), and a family with no font given to
-// WithFontFallback or WithDefault*Family. The fonts are loaded here when any
+// face index (WithFontFace), a zero WithPixelWorkLimit, a font that does
+// not load (WithFont, WithFontFace, WithFontInstance), and a family with no
+// font given to WithFontFallback or WithDefault*Family. The fonts are loaded here when any
 // font option is given; with the embedded fonts alone, New loads nothing and
 // they load on first use.
 func New(opts ...Option) (*Converter, error) {
@@ -155,7 +155,7 @@ func New(opts ...Option) (*Converter, error) {
 	} else if isNilPointer(cfg.loader) {
 		return nil, fmt.Errorf("aster: WithLoader: a nil %T (pass nil for the default, DenyLoader)", cfg.loader)
 	}
-	c := &Converter{cfg: cfg, lim: deriveLimits(cfg.memoryLimit), location: loc, vl: vlVersion}
+	c := &Converter{cfg: cfg, lim: deriveLimits(cfg.memoryLimit, cfg.pixelWork), location: loc, vl: vlVersion}
 	c.loader = trackedLoader{c, cfg.loader}
 	if cfg.theme != "" {
 		theme, err := jsval.ParseJSONString(cfg.theme)
@@ -689,7 +689,7 @@ func (c *Converter) rasterize(ctx context.Context, svg string, scale float64) (*
 	var img *image.NRGBA
 	out, err := timed(ctx, "png", func() ([]byte, error) {
 		var err error
-		img, err = raster.Render([]byte(svg), raster.Options{Scale: scale, Shaper: sh, Context: ctx, Limits: c.lim.raster, Images: imagesFrom(ctx).load, ImageError: imagesFrom(ctx).imageError(ctx)})
+		img, err = raster.Render([]byte(svg), raster.Options{Scale: scale, Shaper: sh, Context: ctx, Limits: c.lim.rasterAt(scale), Images: imagesFrom(ctx).load, ImageError: imagesFrom(ctx).imageError(ctx)})
 		if err != nil {
 			return nil, err
 		}
@@ -868,7 +868,7 @@ func (c *Converter) svgToPDF(ctx context.Context, svg string, opts []PDFOption, 
 	}
 	m = m.Bounded(text.ShapingBudgetFrom(ctx))
 	t0 := time.Now()
-	popts := svgpdf.Options{Text: mode, Context: ctx, Images: imagesFrom(ctx).load, ImageError: imagesFrom(ctx).imageError(ctx), Limits: svgpdf.Limits{MaxImagePixels: c.imagePixels()}}
+	popts := svgpdf.Options{Text: mode, Context: ctx, Images: imagesFrom(ctx).load, ImageError: imagesFrom(ctx).imageError(ctx), Limits: svgpdf.Limits{MaxImagePixels: c.imagePixels(), MaxPixelOps: c.lim.pixelOps}}
 	if usage {
 		pdf, uses, err = svgpdf.ConvertWithUsage(svg, m, popts)
 	} else {

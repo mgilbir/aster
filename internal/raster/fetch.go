@@ -7,8 +7,9 @@ import (
 	"github.com/mgilbir/aster/internal/imageref"
 )
 
-// fetchImages fetches through load the image of every <image> element of doc
-// whose href is not a data: URI, each distinct href once (see imageref.Fetch).
+// fetchImages fetches through load the image of every <image> and feImage
+// element of doc whose href is not a data: URI or a reference into the
+// document, each distinct href once (see imageref.Fetch).
 func fetchImages(ctx context.Context, doc *document, load imageref.Loader, lim Limits) (map[string][]byte, error) {
 	if load == nil {
 		return nil, nil
@@ -20,7 +21,7 @@ func fetchImages(ctx context.Context, doc *document, load imageref.Loader, lim L
 		n := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
 		stack = append(stack, n.kids...)
-		if n.tag != tagImage {
+		if n.tag != tagImage && n.tag != tagFeImage {
 			continue
 		}
 		href := strings.TrimSpace(n.str(aHref))
