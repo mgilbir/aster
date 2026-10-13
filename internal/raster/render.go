@@ -329,6 +329,9 @@ func (r *renderer) prepare(n *node, parent *state, st *state) bool {
 			st.ctm = st.ctm.mul(m)
 		}
 	}
+	if x, y, ok := r.useOffset(n, st); ok {
+		st.ctm = st.ctm.mul(translate(x, y))
+	}
 	if !st.ctm.isFinite() || !st.ctm.invertible() {
 		return false
 	}
@@ -576,6 +579,27 @@ func (r *renderer) renderViewport(n *node, st *state, x, y, w, h float64, clipDe
 	r.renderChildren(n, st)
 }
 
+// useOffset is the translation a <use> of an element other than a symbol or
+// an svg adds to its transform: its x and y. usvg makes the use a group whose
+// transform is the use's transform then translate(x, y), and puts the use's
+// clip-path, mask and filter on that group: they are in the coordinates after
+// the translation (prepare adds it), and its bounding box is its target's in
+// them. A symbol's and an svg's viewport are placed by renderUse instead.
+func (r *renderer) useOffset(n *node, st *state) (x, y float64, ok bool) {
+	if n.tag != tagUse {
+		return 0, 0, false
+	}
+	href := n.str(aHref)
+	if len(href) < 2 || href[0] != '#' {
+		return 0, 0, false
+	}
+	t := r.doc.ids[href[1:]]
+	if t == nil || t.tag == tagSymbol || t.tag == tagSVG {
+		return 0, 0, false
+	}
+	return st.length(n.str(aX), 0, 0), st.length(n.str(aY), 1, 0), true
+}
+
 func (r *renderer) renderUse(n *node, st *state) {
 	href := n.str(aHref)
 	if !strings.HasPrefix(href, "#") {
@@ -593,7 +617,10 @@ func (r *renderer) renderUse(n *node, st *state) {
 	}
 	x := st.length(n.str(aX), 0, 0)
 	y := st.length(n.str(aY), 1, 0)
-	st.ctm = st.ctm.mul(translate(x, y))
+	switch target.tag {
+	case tagSymbol, tagSVG:
+		st.ctm = st.ctm.mul(translate(x, y))
+	}
 	switch target.tag {
 	case tagSymbol:
 		s2 := *st
@@ -619,7 +646,7 @@ func (r *renderer) renderUse(n *node, st *state) {
 		}
 		r.renderViewport(target, &s2, ux, uy, w, h, true)
 	default:
-		r.renderElement(target, st)
+		r.renderElement(target, st) // st has the use's x and y (prepare)
 	}
 }
 
