@@ -789,19 +789,29 @@ func colorMatrix(p *fprim, pix []uint8) {
 		}
 	case cmSaturate:
 		v := float32(math.Max(0, p.cmValues[0]))
+		// Each product rounded before it is added, as resvg's f32 (no fused
+		// multiply-add, which arm64 would otherwise make).
+		f := func(c float32) float32 { return float32(c * v) }
 		m := [9]float32{
-			0.213 + 0.787*v, 0.715 - 0.715*v, 0.072 - 0.072*v,
-			0.213 - 0.213*v, 0.715 + 0.285*v, 0.072 - 0.072*v,
-			0.213 - 0.213*v, 0.715 - 0.715*v, 0.072 + 0.928*v,
+			0.213 + f(0.787), 0.715 - f(0.715), 0.072 - f(0.072),
+			0.213 - f(0.213), 0.715 + f(0.285), 0.072 - f(0.072),
+			0.213 - f(0.213), 0.715 - f(0.715), 0.072 + f(0.928),
 		}
 		apply3(m, pix)
 	case cmHueRotate:
-		ang := float64(float32(p.cmValues[0])) * math.Pi / 180
-		a1, a2 := float32(math.Cos(ang)), float32(math.Sin(ang))
+		// The angle in radians and its cosine and sine in f32, as resvg's
+		// f32::to_radians, cos and sin: at 90 degrees the cosine is
+		// -4.37e-8, not the 6e-17 of an f64 angle, and the matrix's
+		// zeros are a few ulps either side of zero, which the truncation to
+		// a byte tells apart.
+		ang := radians32(float32(p.cmValues[0]))
+		a1, a2 := cos32(ang), sin32(ang)
+		c := func(k float32) float32 { return float32(k * a1) }
+		s := func(k float32) float32 { return float32(k * a2) }
 		m := [9]float32{
-			0.213 + 0.787*a1 - 0.213*a2, 0.715 - 0.715*a1 - 0.715*a2, 0.072 - 0.072*a1 + 0.928*a2,
-			0.213 - 0.213*a1 + 0.143*a2, 0.715 + 0.285*a1 + 0.140*a2, 0.072 - 0.072*a1 - 0.283*a2,
-			0.213 - 0.213*a1 - 0.787*a2, 0.715 - 0.715*a1 + 0.715*a2, 0.072 + 0.928*a1 + 0.072*a2,
+			0.213 + c(0.787) - s(0.213), 0.715 - c(0.715) - s(0.715), 0.072 - c(0.072) + s(0.928),
+			0.213 - c(0.213) + s(0.143), 0.715 + c(0.285) + s(0.140), 0.072 - c(0.072) - s(0.283),
+			0.213 - c(0.213) - s(0.787), 0.715 - c(0.715) + s(0.715), 0.072 + c(0.928) + s(0.072),
 		}
 		apply3(m, pix)
 	case cmLuminance:

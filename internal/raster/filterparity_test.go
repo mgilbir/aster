@@ -245,6 +245,20 @@ var filterParity = []synth{
 		`<rect id="e" x="150" y="100" width="80" height="80" fill="gold" filter="url(#b)"/></defs><rect width="200" height="150" fill="#345"/>` +
 		`<rect x="10" y="10" width="40" height="40" fill="#c33" filter="url(#f)"/></svg>`, 0.01, 0},
 
+	// ---- feColorMatrix hueRotate ----
+	// The angle and its cosine and sine in f32, as resvg's: at 90 degrees
+	// (cosine -4.37e-8 in f32, 6e-17 in f64) a zero of the matrix is a few
+	// ulps below zero, and a channel truncates one lower.
+	{"hue-90-aa", filterSVG(`<feColorMatrix type="hueRotate" values="90"/>`, "", aaShapes), 0.1, 0.25},
+	exact("hue-90", `<feColorMatrix type="hueRotate" values="90"/>`),
+	exact("hue-90-srgb", `<feColorMatrix type="hueRotate" values="90" color-interpolation-filters="sRGB"/>`),
+	exact("hue-30", `<feColorMatrix type="hueRotate" values="30"/>`),
+	exact("hue-270", `<feColorMatrix type="hueRotate" values="270"/>`),
+	exact("hue-negative", `<feColorMatrix type="hueRotate" values="-45"/>`),
+	exact("hue-large", `<feColorMatrix type="hueRotate" values="1e6"/>`),
+	exact("hue-fraction", `<feColorMatrix type="hueRotate" values="123.456"/>`),
+	exact("saturate-over-1", `<feColorMatrix type="saturate" values="2"/>`),
+
 	// ---- the filter region ----
 	// Larger than its layer (4x the canvas): cut to the layer, its
 	// primitives' sub-regions measured from the cut corner.
