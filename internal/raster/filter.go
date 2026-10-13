@@ -160,8 +160,9 @@ func toIntRect(rc rect) irect {
 
 func tsScale(m matrix) (float64, float64) {
 	// tiny-skia's Transform::get_scale uses the row norms.
-	sx := float64(float32(math.Sqrt(float64(float32(m.a*m.a + m.c*m.c)))))
-	sy := float64(float32(math.Sqrt(float64(float32(m.b*m.b + m.d*m.d)))))
+	// Each product rounded before the sum (arm64 would fuse them).
+	sx := float64(float32(math.Sqrt(float64(float32(float64(m.a*m.a) + float64(m.c*m.c))))))
+	sy := float64(float32(math.Sqrt(float64(float32(float64(m.b*m.b) + float64(m.d*m.d))))))
 	return sx, sy
 }
 
@@ -720,7 +721,7 @@ func (run *filterRun) dropShadow(p *fprim) (fimage, bool) {
 			shadow[i] = satU8(float32(col[0]*a) + 0.5)
 			shadow[i+1] = satU8(float32(col[1]*a) + 0.5)
 			shadow[i+2] = satU8(float32(col[2]*a) + 0.5)
-			shadow[i+3] = satU8(a*255 + 0.5)
+			shadow[i+3] = satU8(float32(a*255) + 0.5)
 		}
 	})
 	sh := fimage{pix: shadow, linear: false, owned: true}
@@ -855,7 +856,7 @@ func (f *transferFn) apply(v uint8) uint8 {
 			c = float32(f.table[k])
 		} else {
 			vk, vk1 := float32(f.table[k]), float32(f.table[k+1])
-			c = vk + float32(float32(c-float32(k)/float32(n))*float32(n))*(vk1-vk)
+			c = vk + float32(float32(float32(c-float32(k)/float32(n))*float32(n))*(vk1-vk))
 		}
 	case 2:
 		n := len(f.table)
@@ -904,7 +905,7 @@ func createBoxGauss(sigma float32) [boxSteps]int {
 		}
 		wu := wl + 2
 		wlf := float32(wl)
-		mIdeal := (float32(12*sigma*sigma) - float32(n*wlf*wlf) - float32(4*n*wlf) - 3*n) / (-4*wlf - 4)
+		mIdeal := (float32(12*sigma*sigma) - float32(n*wlf*wlf) - float32(4*n*wlf) - float32(3*n)) / (float32(-4*wlf) - 4)
 		m := int(math.Round(float64(mIdeal)))
 		for i := range sizes {
 			if i < m {
@@ -1022,7 +1023,7 @@ func iirBlur(sigmaX, sigmaY float64, pix []uint8, w, h int, work func(int) bool)
 
 func iirCoefficients(sigma float64, steps int) (float64, float64) {
 	lambda := (sigma * sigma) / (2.0 * float64(steps))
-	dnu := (1.0 + 2.0*lambda - math.Sqrt(1.0+4.0*lambda)) / (2.0 * lambda)
+	dnu := (1.0 + float64(2.0*lambda) - math.Sqrt(1.0+float64(4.0*lambda))) / (2.0 * lambda)
 	return lambda, dnu
 }
 
@@ -1039,10 +1040,10 @@ func gaussianIIR2D(buf []float64, w, h int, sigmaX, sigmaY float64, steps int, w
 				idx := w * y
 				for s := 0; s < steps; s++ {
 					for x := 1; x < w; x++ {
-						buf[idx+x] += dnuX * buf[idx+x-1]
+						buf[idx+x] += float64(dnuX * buf[idx+x-1])
 					}
 					for x := w - 1; x > 0; x-- {
-						buf[idx+x-1] += dnuX * buf[idx+x]
+						buf[idx+x-1] += float64(dnuX * buf[idx+x])
 					}
 				}
 			}
@@ -1059,10 +1060,10 @@ func gaussianIIR2D(buf []float64, w, h int, sigmaX, sigmaY float64, steps int, w
 				idx := x
 				for s := 0; s < steps; s++ {
 					for y := w; y < len(buf); y += w {
-						buf[idx+y] += dnuY * buf[idx+y-w]
+						buf[idx+y] += float64(dnuY * buf[idx+y-w])
 					}
 					for y := len(buf) - w; y > 0; y -= w {
-						buf[idx+y-w] += dnuY * buf[idx+y]
+						buf[idx+y-w] += float64(dnuY * buf[idx+y])
 					}
 				}
 			}

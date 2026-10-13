@@ -273,7 +273,9 @@ func (run *filterRun) lighting(p *fprim) (fimage, bool) {
 			for x := 0; x < w; x++ {
 				n := normalAt(alpha, x, y, w, h)
 				if ls.kind != lightDistant {
-					nz := float32(float32(alpha(x, y))/255) * l.surfaceScale
+					// Rounded before the subtraction below, which arm64 would
+					// otherwise fuse with it.
+					nz := float32(float32(float32(alpha(x, y))/255) * l.surfaceScale)
 					v := vec3{ls.x, ls.y, ls.z}.sub(vec3{float32(x), float32(y), nz})
 					lv = v.normalized()
 				}
