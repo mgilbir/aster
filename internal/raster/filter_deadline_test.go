@@ -75,6 +75,30 @@ var filterPrims = []struct {
 	{"hue rotate", fprim{kind: tagFeColorMatrix, cmKind: cmHueRotate, cmValues: []float64{30}, linear: true}, 1 + 1},
 	{"luminance to alpha", fprim{kind: tagFeColorMatrix, cmKind: cmLuminance, linear: true}, 1 + 1},
 	{"component transfer", fprim{kind: tagFeComponentTransfer, funcs: [4]transferFn{{kind: 4, a: 1, b: 2}, {kind: 3, a: 0.5}, {kind: 1, table: []float64{0, 1}}, {kind: 2, table: []float64{0, 0.5, 1}}}, linear: true}, 1 + 1},
+	{"tile", fprim{kind: tagFeTile}, 1},
+	// A conversion, the pass along rows and the pass along columns.
+	{"morphology", fprim{kind: tagFeMorphology, dilate: true, rx: 3, ry: 2, linear: true}, 1 + 2},
+	{"morphology, sRGB", fprim{kind: tagFeMorphology, rx: 300, ry: 1e6}, 1 + 2},
+	{"morphology, radius 0", fprim{kind: tagFeMorphology, linear: true}, 1 + 1},
+	{"morphology, size wraps", fprim{kind: tagFeMorphology, rx: 2147483648, ry: 2, linear: true}, 1 + 1},
+	{"convolve", fprim{kind: tagFeConvolveMatrix, conv: testKernel(false), linear: true}, 1 + 1},
+	{"convolve, preserveAlpha", fprim{kind: tagFeConvolveMatrix, conv: testKernel(true), linear: true}, 1 + 1 + 1},
+	// Two conversions (in, and in2 a second time: SourceAlpha's own pass
+	// first) and the displacement.
+	{"displacement", fprim{kind: tagFeDisplacementMap, in2: finput{kind: inAlpha}, scale: 20, xch: 3, ych: 3, linear: true}, 1 + 1 + 1 + 1},
+	{"turbulence", fprim{kind: tagFeTurbulence, turb: &turbSpec{freqX: 0.05, freqY: 0.02, octaves: 2}, linear: true}, 1},
+	{"fractal noise, stitched", fprim{kind: tagFeTurbulence, turb: &turbSpec{freqX: 0.05, freqY: 0.02, octaves: 1, stitch: true, fractal: true}}, 1},
+	{"diffuse, distant light", fprim{kind: tagFeDiffuseLighting, light: &lightingSpec{surfaceScale: 3, constant: 1, color: [3]uint8{255, 128, 0}, light: lightSource{kind: lightDistant, azimuth: 45, elevation: 30}}, linear: true}, 1},
+	{"specular, spot light", fprim{kind: tagFeSpecularLighting, light: &lightingSpec{specular: true, surfaceScale: 3, constant: 1, exponent: 20, color: [3]uint8{255, 255, 255},
+		light: lightSource{kind: lightSpot, x: 100, y: 100, z: 50, pointsX: 500, pointsY: 500, spotExp: 2, cone: 40, hasCone: true}}, linear: true}, 1},
+}
+
+// testKernel is a 3x3 edge-detecting convolution.
+func testKernel(preserveAlpha bool) *convolveSpec {
+	return &convolveSpec{
+		cols: 3, rows: 3, targetX: 1, targetY: 1, kernel: []float32{-1, -1, -1, -1, 8, -1, -1, -1, -1},
+		divisor: 1, edge: edgeWrap, preserveAlpha: preserveAlpha,
+	}
 }
 
 // Every filter primitive polls the render's context, and charges its pixels

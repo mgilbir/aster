@@ -30,11 +30,10 @@
 //     rotate, textLength with lengthAdjust, and text decorations and baseline
 //     shifts placed from the font's own metrics.
 //
-// Not implemented: CSS filter functions (blur(), drop-shadow(), ...), feImage,
-// feTile, feMorphology, feConvolveMatrix, feDisplacementMap, feTurbulence and
-// the lighting filters, textPath, context-fill/stroke, external style
-// sheets and references into other documents (an <image> fetches its bytes
-// through Options.Images; one that is itself SVG is not drawn), and the
+// Not implemented: CSS filter functions (blur(), drop-shadow(), ...),
+// textPath, context-fill/stroke, external style sheets and references into
+// other documents (an <image> or an feImage fetches its bytes through
+// Options.Images; one that is itself SVG is not drawn), and the
 // writing-mode / vertical text.
 //
 // The input is untrusted. Element count, nesting, canvas size, <use>
@@ -73,17 +72,18 @@ type Options struct {
 	// Shaper turns text into glyphs. nil selects the default shaper over the
 	// embedded fonts plus Fonts.
 	Shaper Shaper
-	// Images fetches the image an <image> element refers to by anything but
-	// a data: URI (which is decoded in place). It is called once per distinct
+	// Images fetches the image an <image> or feImage element refers to by
+	// anything but a data: URI (which is decoded in place) or, for an
+	// feImage, a reference to an element. It is called once per distinct
 	// href, before drawing, from several goroutines at once. nil leaves such
 	// images undrawn: the rasterizer touches neither the network nor the
 	// filesystem itself. An image that cannot be fetched is skipped, as a
 	// broken image is; an error wrapping budget.ErrLimit fails the render.
 	Images func(ctx context.Context, href string) ([]byte, error)
-	// ImageError, when non-nil, is told of each <image> left undrawn because
-	// it could not be read (not fetched, not a PNG, JPEG or GIF, or not
-	// decodable), with its href, on the rendering goroutine. Errors wrapping
-	// budget.ErrLimit fail the render instead.
+	// ImageError, when non-nil, is told of each <image> or feImage left
+	// undrawn because it could not be read (not fetched, not a PNG, JPEG or
+	// GIF, or not decodable), with its href, on the rendering goroutine.
+	// Errors wrapping budget.ErrLimit fail the render instead.
 	ImageError func(href string, err error)
 	// Background, when non-nil, is painted under the drawing. The default is
 	// fully transparent.

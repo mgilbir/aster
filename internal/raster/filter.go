@@ -160,8 +160,9 @@ func toIntRect(rc rect) irect {
 
 func tsScale(m matrix) (float64, float64) {
 	// tiny-skia's Transform::get_scale uses the row norms.
-	sx := float64(float32(math.Sqrt(float64(float32(m.a*m.a + m.c*m.c)))))
-	sy := float64(float32(math.Sqrt(float64(float32(m.b*m.b + m.d*m.d)))))
+	// Each product rounded before the sum (arm64 would fuse them).
+	sx := float64(float32(math.Sqrt(float64(float32(float64(m.a*m.a) + float64(m.c*m.c))))))
+	sy := float64(float32(math.Sqrt(float64(float32(float64(m.b*m.b) + float64(m.d*m.d))))))
 	return sx, sy
 }
 
@@ -187,9 +188,17 @@ func (r *renderer) applyFilter(sp *filterSpec, ts matrix, cv *canvas) bool {
 	if !(rc.w() > 0 && rc.h() > 0) {
 		return false
 	}
+	// The region in the layer's pixels, cut to the layer (resvg's
+	// fit_to_rect): a filter region larger than the 4x-canvas bound of its
+	// layer is cut where the layer is, and its primitives' sub-regions are
+	// measured from the cut region's corner.
+	region := toIntRect(rc).intersect(irect{0, 0, cv.w, cv.h})
+	if region.empty() {
+		return false
+	}
 	run := r.newFilterRun(cv, ts)
 	defer run.end()
-	run.region = toIntRect(rc)
+	run.region = region
 	last := len(sp.prims) - 1
 	// Last use of each result name, to free buffers early.
 	lastUse := map[string]int{}
@@ -577,8 +586,22 @@ func (run *filterRun) apply(p *fprim) (fimage, bool) {
 			multiply(band)
 		})
 		return fimage{pix: pix, region: run.region, linear: p.linear, owned: true}, true
+	case tagFeTile:
+		return run.tile(p)
+	case tagFeMorphology:
+		return run.morphology(p)
+	case tagFeConvolveMatrix:
+		return run.convolve(p)
+	case tagFeDisplacementMap:
+		return run.displace(p)
+	case tagFeTurbulence:
+		return run.turbulence(p)
+	case tagFeDiffuseLighting, tagFeSpecularLighting:
+		return run.lighting(p)
+	case tagFeImage:
+		return run.feImage(p)
 	}
-	// Unsupported primitive: transparent black.
+	// usvg's dummy primitive: transparent black.
 	return fimage{pix: run.blank(), region: run.region, owned: true}, true
 }
 
@@ -698,7 +721,7 @@ func (run *filterRun) dropShadow(p *fprim) (fimage, bool) {
 			shadow[i] = satU8(float32(col[0]*a) + 0.5)
 			shadow[i+1] = satU8(float32(col[1]*a) + 0.5)
 			shadow[i+2] = satU8(float32(col[2]*a) + 0.5)
-			shadow[i+3] = satU8(a*255 + 0.5)
+			shadow[i+3] = satU8(float32(a*255) + 0.5)
 		}
 	})
 	sh := fimage{pix: shadow, linear: false, owned: true}
@@ -767,19 +790,29 @@ func colorMatrix(p *fprim, pix []uint8) {
 		}
 	case cmSaturate:
 		v := float32(math.Max(0, p.cmValues[0]))
+		// Each product rounded before it is added, as resvg's f32 (no fused
+		// multiply-add, which arm64 would otherwise make).
+		f := func(c float32) float32 { return float32(c * v) }
 		m := [9]float32{
-			0.213 + 0.787*v, 0.715 - 0.715*v, 0.072 - 0.072*v,
-			0.213 - 0.213*v, 0.715 + 0.285*v, 0.072 - 0.072*v,
-			0.213 - 0.213*v, 0.715 - 0.715*v, 0.072 + 0.928*v,
+			0.213 + f(0.787), 0.715 - f(0.715), 0.072 - f(0.072),
+			0.213 - f(0.213), 0.715 + f(0.285), 0.072 - f(0.072),
+			0.213 - f(0.213), 0.715 - f(0.715), 0.072 + f(0.928),
 		}
 		apply3(m, pix)
 	case cmHueRotate:
-		ang := float64(float32(p.cmValues[0])) * math.Pi / 180
-		a1, a2 := float32(math.Cos(ang)), float32(math.Sin(ang))
+		// The angle in radians and its cosine and sine in f32, as resvg's
+		// f32::to_radians, cos and sin: at 90 degrees the cosine is
+		// -4.37e-8, not the 6e-17 of an f64 angle, and the matrix's
+		// zeros are a few ulps either side of zero, which the truncation to
+		// a byte tells apart.
+		ang := radians32(float32(p.cmValues[0]))
+		a1, a2 := cos32(ang), sin32(ang)
+		c := func(k float32) float32 { return float32(k * a1) }
+		s := func(k float32) float32 { return float32(k * a2) }
 		m := [9]float32{
-			0.213 + 0.787*a1 - 0.213*a2, 0.715 - 0.715*a1 - 0.715*a2, 0.072 - 0.072*a1 + 0.928*a2,
-			0.213 - 0.213*a1 + 0.143*a2, 0.715 + 0.285*a1 + 0.140*a2, 0.072 - 0.072*a1 - 0.283*a2,
-			0.213 - 0.213*a1 - 0.787*a2, 0.715 - 0.715*a1 + 0.715*a2, 0.072 + 0.928*a1 + 0.072*a2,
+			0.213 + c(0.787) - s(0.213), 0.715 - c(0.715) - s(0.715), 0.072 - c(0.072) + s(0.928),
+			0.213 - c(0.213) + s(0.143), 0.715 + c(0.285) + s(0.140), 0.072 - c(0.072) - s(0.283),
+			0.213 - c(0.213) - s(0.787), 0.715 - c(0.715) + s(0.715), 0.072 + c(0.928) + s(0.072),
 		}
 		apply3(m, pix)
 	case cmLuminance:
@@ -823,7 +856,7 @@ func (f *transferFn) apply(v uint8) uint8 {
 			c = float32(f.table[k])
 		} else {
 			vk, vk1 := float32(f.table[k]), float32(f.table[k+1])
-			c = vk + float32(float32(c-float32(k)/float32(n))*float32(n))*(vk1-vk)
+			c = vk + float32(float32(float32(c-float32(k)/float32(n))*float32(n))*(vk1-vk))
 		}
 	case 2:
 		n := len(f.table)
@@ -872,7 +905,7 @@ func createBoxGauss(sigma float32) [boxSteps]int {
 		}
 		wu := wl + 2
 		wlf := float32(wl)
-		mIdeal := (float32(12*sigma*sigma) - float32(n*wlf*wlf) - float32(4*n*wlf) - 3*n) / (-4*wlf - 4)
+		mIdeal := (float32(12*sigma*sigma) - float32(n*wlf*wlf) - float32(4*n*wlf) - float32(3*n)) / (float32(-4*wlf) - 4)
 		m := int(math.Round(float64(mIdeal)))
 		for i := range sizes {
 			if i < m {
@@ -990,7 +1023,7 @@ func iirBlur(sigmaX, sigmaY float64, pix []uint8, w, h int, work func(int) bool)
 
 func iirCoefficients(sigma float64, steps int) (float64, float64) {
 	lambda := (sigma * sigma) / (2.0 * float64(steps))
-	dnu := (1.0 + 2.0*lambda - math.Sqrt(1.0+4.0*lambda)) / (2.0 * lambda)
+	dnu := (1.0 + float64(2.0*lambda) - math.Sqrt(1.0+float64(4.0*lambda))) / (2.0 * lambda)
 	return lambda, dnu
 }
 
@@ -1007,10 +1040,10 @@ func gaussianIIR2D(buf []float64, w, h int, sigmaX, sigmaY float64, steps int, w
 				idx := w * y
 				for s := 0; s < steps; s++ {
 					for x := 1; x < w; x++ {
-						buf[idx+x] += dnuX * buf[idx+x-1]
+						buf[idx+x] += float64(dnuX * buf[idx+x-1])
 					}
 					for x := w - 1; x > 0; x-- {
-						buf[idx+x-1] += dnuX * buf[idx+x]
+						buf[idx+x-1] += float64(dnuX * buf[idx+x])
 					}
 				}
 			}
@@ -1027,10 +1060,10 @@ func gaussianIIR2D(buf []float64, w, h int, sigmaX, sigmaY float64, steps int, w
 				idx := x
 				for s := 0; s < steps; s++ {
 					for y := w; y < len(buf); y += w {
-						buf[idx+y] += dnuY * buf[idx+y-w]
+						buf[idx+y] += float64(dnuY * buf[idx+y-w])
 					}
 					for y := len(buf) - w; y > 0; y -= w {
-						buf[idx+y-w] += dnuY * buf[idx+y]
+						buf[idx+y-w] += float64(dnuY * buf[idx+y])
 					}
 				}
 			}

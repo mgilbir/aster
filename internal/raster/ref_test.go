@@ -73,6 +73,7 @@ type diffStats struct {
 	PctOver  float64 // % of pixels whose worst channel differs by more than thr
 	PctBig   float64 // % of pixels differing by more than 64
 	PSNR     float64
+	RMSE     float64 // root mean square error per channel, 0..255
 	Max      int
 	SizeDiff bool
 }
@@ -129,7 +130,7 @@ func compareImages(a, b *image.NRGBA, thr int) diffStats {
 	}
 	return diffStats{
 		MAE: sum / float64(4*n), PctOver: 100 * float64(over) / float64(n),
-		PctBig: 100 * float64(big) / float64(n), PSNR: psnr, Max: mx,
+		PctBig: 100 * float64(big) / float64(n), PSNR: psnr, RMSE: math.Sqrt(mse), Max: mx,
 	}
 }
 

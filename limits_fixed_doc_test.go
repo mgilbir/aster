@@ -92,6 +92,7 @@ func TestFixedLimitsDocMatchesCode(t *testing.T) {
 		"SVG input to `SVGToPNG`":                 {{int64(rl.MaxInputBytes)}, {int64(rl.MaxElements)}, {int64(rl.MaxDepth)}},
 		"style sheets of SVG input to `SVGToPNG`": {{int64(rl.MaxStyleBytes)}, {int64(rl.MaxCSSRules)}, {int64(rl.MaxCSSWork)}},
 		"one filter region (PNG)":                 {{int64(rl.MaxFilterPixels)}},
+		"filter primitives (PNG)":                 {{c("raster", "maxConvolveTaps")}, {c("raster", "maxTurbulenceOctaves")}, {int64(rl.MaxLayerDepth)}},
 		"pixel work of one PNG render": {
 			{root["pixelOps"], c("raster", "defaultMaxPixelOps")}, {root["pixelOpsPerPixel"], c("raster", "defaultPixelOpsPer")},
 		},

@@ -20,6 +20,20 @@ To cancel one call rather than the Converter, pass it `WithContext(ctx)`: every 
 
 The language of a spec is the method's, whatever its `$schema` says, and the `$schema`'s version does not choose the Vega-Lite compiler (`WithVegaLiteVersion` does).
 
+### SVG input
+
+`SVGToPNG` draws general SVG as [resvg](https://github.com/linebender/resvg) does, the reference its output is tested against. `SVGToPDF` draws only what Vega's SVG renderer writes ([pdf.md](pdf.md#what-is-supported)) and fails for anything else.
+
+Filters (`<filter>` and the `filter` attribute) are drawn by `SVGToPNG` only. Vega never writes them, so they reach the engine only in SVG given to `SVGToPNG`; `SVGToPDF` fails for a `<filter>` element or a `filter` attribute ("svgpdf: unsupported SVG element <filter>").
+
+- **Drawn:** every primitive of SVG 1.1 and `feDropShadow`: `feBlend`, `feColorMatrix`, `feComponentTransfer`, `feComposite`, `feConvolveMatrix` (`kernelUnitLength` is ignored, as by resvg), `feDiffuseLighting` and `feSpecularLighting` (distant, point and spot lights), `feDisplacementMap`, `feDropShadow`, `feFlood`, `feGaussianBlur`, `feImage`, `feMerge`, `feMorphology`, `feOffset`, `feTile` and `feTurbulence`.
+- **`feImage`** draws an image or an element of the document. An image is a `data:` URI or an href fetched through the [Loader](loading-data.md#what-goes-through-the-loader), as an `<image>` is, with the same limits; one that cannot be read gives a transparent result and is reported as an `<image>` would be. An element (`href="#id"`) is drawn with the render's own bounds (elements, pixel work, layer depth); an element whose filter is the feImage's own is drawn with no filter, there and elsewhere (as resvg does), and an element whose filter is being applied further up (a longer cycle) is not drawn inside it. A chain of feImages drawing filtered elements is bounded by the layer depth ([limits.md](limits.md)).
+- **Invalid parameters** are handled as resvg does: a primitive resvg replaces by a transparent result (an `feConvolveMatrix` whose `kernelMatrix` is not `orderX` × `orderY` numbers, whose target lies outside the kernel or whose divisor is zero; a lighting with no light source, or a `specularExponent` outside 1–128; an `feImage` with no href, or whose `#id` is no element) gives one here too.
+- **resvg's own choices are kept**, since its output is what the PNG is tested against: `feDisplacementMap` moves a pixel by the scale squared (resvg multiplies by `scale` twice) and reads the map premultiplied; `feTile` gives an sRGB result whatever its input's space; `feTurbulence` samples a pixel at its corner, not its centre; a lighting's `lighting-color` is used as it is in the primitive's colour space (not converted to linearRGB), and its light's position ignores `primitiveUnits`; `feImage` draws an element at its own user coordinates measured from the corner of the primitive's sub-region, with the device scale but not the rest of the filtered element's transform, and an image fitted to the sub-region's size.
+- **Ignored:** an element in a filter that is not a primitive (an unknown name), and CSS filter functions in the `filter` attribute (`blur(2px)`, `drop-shadow(…)`). An element whose `filter` has only functions is drawn unfiltered, where resvg applies them.
+
+A filter's work and memory are bounded ([limits.md](limits.md)): its region's pixels, the pixel memory its results hold, and the pixel operations its passes make.
+
 ## Options for New
 
 | Option | Default | |

@@ -54,7 +54,21 @@ const (
 	tagFeFuncG
 	tagFeFuncB
 	tagFeFuncA
-	tagFeUnsupported // a filter primitive this renderer does not implement
+	tagFeTile
+	tagFeMorphology
+	tagFeConvolveMatrix
+	tagFeDisplacementMap
+	tagFeTurbulence
+	tagFeDiffuseLighting
+	tagFeSpecularLighting
+	tagFeImage
+	tagFeDistantLight // the light sources, children of a lighting primitive
+	tagFePointLight
+	tagFeSpotLight
+	// tagFeUnsupported is the kind of a primitive usvg replaces by its "dummy"
+	// (a transparent result): a convolution or a lighting whose parameters
+	// are invalid, an feImage with nothing to draw.
+	tagFeUnsupported
 )
 
 var tagNames = map[string]tagID{
@@ -70,10 +84,11 @@ var tagNames = map[string]tagID{
 	"feMerge": tagFeMerge, "feMergeNode": tagFeMergeNode, "feBlend": tagFeBlend,
 	"feDropShadow": tagFeDropShadow, "feComponentTransfer": tagFeComponentTransfer,
 	"feFuncR": tagFeFuncR, "feFuncG": tagFeFuncG, "feFuncB": tagFeFuncB, "feFuncA": tagFeFuncA,
-	"feImage": tagFeUnsupported, "feTile": tagFeUnsupported, "feMorphology": tagFeUnsupported,
-	"feConvolveMatrix": tagFeUnsupported, "feDisplacementMap": tagFeUnsupported,
-	"feTurbulence": tagFeUnsupported, "feDiffuseLighting": tagFeUnsupported,
-	"feSpecularLighting": tagFeUnsupported,
+	"feImage": tagFeImage, "feTile": tagFeTile, "feMorphology": tagFeMorphology,
+	"feConvolveMatrix": tagFeConvolveMatrix, "feDisplacementMap": tagFeDisplacementMap,
+	"feTurbulence": tagFeTurbulence, "feDiffuseLighting": tagFeDiffuseLighting,
+	"feSpecularLighting": tagFeSpecularLighting, "feDistantLight": tagFeDistantLight,
+	"fePointLight": tagFePointLight, "feSpotLight": tagFeSpotLight,
 }
 
 type attrID uint8
@@ -194,6 +209,34 @@ const (
 	aColorInterpolationFilters
 	aPaintOrder
 	aTextRendering
+	aOrder
+	aKernelMatrix
+	aDivisor
+	aBias
+	aTargetX
+	aTargetY
+	aEdgeMode
+	aPreserveAlpha
+	aRadius
+	aScale
+	aXChannelSelector
+	aYChannelSelector
+	aBaseFrequency
+	aNumOctaves
+	aSeed
+	aStitchTiles
+	aSurfaceScale
+	aDiffuseConstant
+	aSpecularConstant
+	aSpecularExponent
+	aLightingColor
+	aAzimuth
+	aElevation
+	aZ
+	aPointsAtX
+	aPointsAtY
+	aPointsAtZ
+	aLimitingConeAngle
 )
 
 var attrNames = map[string]attrID{
@@ -235,6 +278,15 @@ var attrNames = map[string]attrID{
 	"amplitude": aAmplitude, "exponent": aExponent,
 	"color-interpolation-filters": aColorInterpolationFilters, "paint-order": aPaintOrder,
 	"text-rendering": aTextRendering,
+	"order":          aOrder, "kernelMatrix": aKernelMatrix, "divisor": aDivisor, "bias": aBias,
+	"targetX": aTargetX, "targetY": aTargetY, "edgeMode": aEdgeMode, "preserveAlpha": aPreserveAlpha,
+	"radius": aRadius, "scale": aScale, "xChannelSelector": aXChannelSelector,
+	"yChannelSelector": aYChannelSelector, "baseFrequency": aBaseFrequency, "numOctaves": aNumOctaves,
+	"seed": aSeed, "stitchTiles": aStitchTiles, "surfaceScale": aSurfaceScale,
+	"diffuseConstant": aDiffuseConstant, "specularConstant": aSpecularConstant,
+	"specularExponent": aSpecularExponent, "lighting-color": aLightingColor,
+	"azimuth": aAzimuth, "elevation": aElevation, "z": aZ, "pointsAtX": aPointsAtX,
+	"pointsAtY": aPointsAtY, "pointsAtZ": aPointsAtZ, "limitingConeAngle": aLimitingConeAngle,
 }
 
 // presentation lists the attributes that a style sheet or a style attribute may
@@ -244,7 +296,7 @@ var presentation = func() (t [256]bool) {
 		aAlignmentBaseline, aBaselineShift, aClipPath, aClipRule, aColor,
 		aColorInterpolationFilters, aDisplay, aDominantBaseline, aFill, aFillOpacity,
 		aFillRule, aFilter, aFloodColor, aFloodOpacity, aFontFamily, aFontSize,
-		aFontStyle, aFontWeight, aImageRendering, aIsolation, aLetterSpacing,
+		aFontStyle, aFontWeight, aImageRendering, aIsolation, aLetterSpacing, aLightingColor,
 		aMarkerStart, aMarkerMid, aMarkerEnd, aMask, aMaskType, aMixBlendMode,
 		aOpacity, aOverflow, aPaintOrder, aShapeRendering, aStopColor, aStopOpacity,
 		aStroke, aStrokeDasharray, aStrokeDashoffset, aStrokeLinecap, aStrokeLinejoin,
@@ -311,7 +363,10 @@ type document struct {
 	root  *node
 	ids   map[string]*node
 	count int
-	css   []string // style sheet sources in document order
+	// feImages are the document's feImage elements (see
+	// fixRecursiveFeImage).
+	feImages []*node
+	css      []string // style sheet sources in document order
 }
 
 // Limits bounds the resources an untrusted SVG may consume. Zero fields select
@@ -745,6 +800,9 @@ func parseDocumentCtx(ctx context.Context, src string, lim Limits) (*document, e
 			}
 			nd := ar.newNode()
 			nd.tag = tag
+			if tag == tagFeImage {
+				doc.feImages = append(doc.feImages, nd)
+			}
 			nd.attrs = ar.takeAttrs(abuf)
 			nd.style = ar.takeAttrs(sbuf)
 			if wantCSS {
@@ -797,7 +855,59 @@ func parseDocumentCtx(ctx context.Context, src string, lim Limits) (*document, e
 			return nil, err
 		}
 	}
+	doc.fixRecursiveFeImage()
 	return doc, nil
+}
+
+// fixRecursiveFeImage is usvg's fix_recursive_fe_image: an element an
+// feImage draws whose own filter is the feImage's filter (a filter that
+// draws itself) has its filter set to none, where it is drawn by the
+// feImage and everywhere else. Each element's filter list is read once,
+// however many feImages draw it. A longer cycle, through other elements or
+// filters, is cut when it is drawn (see renderEffects).
+func (doc *document) fixRecursiveFeImage() {
+	var refs map[*node]map[string]bool // an element's filter list, as ids
+	for _, fe := range doc.feImages {
+		href := fe.str(aHref)
+		if len(href) < 2 || href[0] != '#' || fe.parent == nil {
+			continue
+		}
+		t := doc.ids[href[1:]]
+		pid := fe.parent.str(aID)
+		if t == nil || pid == "" {
+			continue
+		}
+		if refs == nil {
+			refs = map[*node]map[string]bool{}
+		}
+		ids, seen := refs[t]
+		if !seen {
+			if v, ok := t.get(aFilter); ok {
+				for _, item := range splitFilterList(v) {
+					if id, isURL := parseURLRef(item); isURL {
+						if ids == nil {
+							ids = map[string]bool{}
+						}
+						ids[id] = true
+					}
+				}
+			}
+			refs[t] = ids
+		}
+		if ids[pid] {
+			for i := range t.style {
+				if t.style[i].id == aFilter {
+					t.style[i].val = "none"
+				}
+			}
+			for i := range t.attrs {
+				if t.attrs[i].id == aFilter {
+					t.attrs[i].val = "none"
+				}
+			}
+			refs[t] = nil
+		}
+	}
 }
 
 func isSpaceByte(c byte) bool { return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' }
