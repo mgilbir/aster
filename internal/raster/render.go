@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/mgilbir/aster/internal/budget"
+	"github.com/mgilbir/aster/internal/imageref"
 )
 
 type gradKey struct {
@@ -85,17 +86,57 @@ var (
 // chargePixels accounts for n pixels of filter or pattern-tile work and fails
 // the render when the budget is spent.
 func (r *renderer) chargePixels(n int) bool {
+	return r.chargeEffect(n) && r.chargeOps(n)
+}
+
+// chargeEffect accounts for n pixels of filter work against
+// Limits.MaxEffectPixels alone: the filter charges its work to MaxPixelOps
+// as it does it, a band at a time (filterRun.work).
+func (r *renderer) chargeEffect(n int) bool {
 	if n < 0 || n > r.lim.MaxEffectPixels-r.effectPx {
 		r.fail(fmt.Errorf("raster: filter and pattern work exceeds %d pixels: %w", r.lim.MaxEffectPixels, errLimit))
 		return false
 	}
 	r.effectPx += n
-	return r.chargeOps(n)
+	return r.err == nil
+}
+
+// bands makes one pass over reg, f a band of rows (about
+// imageref.BandPixels pixels) at a time, each band's pixels charged to
+// MaxPixelOps first (chargeOps, which polls the context): a pass over a
+// layer as large as the canvas, compositing it or applying a mask, reaches
+// the deadline as the canvas's own passes do. It reports whether the pass
+// ran to its end; once it stops, no further band runs and the render has
+// failed.
+func (r *renderer) bands(reg irect, f func(band irect)) bool {
+	if reg.empty() {
+		return r.err == nil
+	}
+	step := imageref.BandRows(reg.w())
+	for y := reg.y0; y < reg.y1; y += step {
+		band := irect{reg.x0, y, reg.x1, min(y+step, reg.y1)}
+		if !r.chargeOps(band.w() * band.h()) {
+			return false
+		}
+		f(band)
+	}
+	return true
 }
 
 // chargeOps accounts for n pixels of work against Limits.MaxPixelOps and
 // polls the context. It reports whether rendering may continue.
 func (r *renderer) chargeOps(n int) bool {
+	if !r.affordOps(n) {
+		return false
+	}
+	r.pixelOps += n
+	return r.poll(n >= 1<<14)
+}
+
+// affordOps reports whether n pixel operations fit what is left of
+// Limits.MaxPixelOps, failing the render when they do not, without charging
+// them: work known to be at least n fails before it starts.
+func (r *renderer) affordOps(n int) bool {
 	if r.err != nil {
 		return false
 	}
@@ -104,8 +145,7 @@ func (r *renderer) chargeOps(n int) bool {
 			r.lim.MaxPixelOps, r.cw, r.ch, errLimit))
 		return false
 	}
-	r.pixelOps += n
-	return r.poll(n >= 1<<14)
+	return true
 }
 
 // holdPoints accounts for n points of path geometry the element being drawn
@@ -243,8 +283,8 @@ func (r *renderer) popLayer(prev *canvas, opacity float64, mode blendMode) {
 	layer := r.cv
 	r.cv = prev
 	r.depth--
-	if d := layer.dirty.intersect(layer.bounds()); !d.empty() && r.chargeOps(d.w()*d.h()) {
-		compositeLayer(prev, layer, layer.dirty, opacity, nil, mode)
+	if d := layer.dirty.intersect(layer.bounds()); !d.empty() {
+		r.bands(d, func(band irect) { compositeLayer(prev, layer, band, opacity, nil, mode) })
 	}
 	layer.clearDirty()
 	r.pool = append(r.pool, layer)
@@ -670,16 +710,18 @@ func (r *renderer) intersectMasks(a, b *mask) *mask {
 	}
 	out := &mask{r: reg, a: r.newMaskCoverage(reg)}
 	w := reg.w()
-	for y := reg.y0; y < reg.y1; y++ {
-		row := out.a[(y-reg.y0)*w:][:w]
-		for x := 0; x < w; x++ {
-			v := uint32(a.at(reg.x0+x, y))
-			if v != 0 {
-				v = mul255(v, uint32(b.at(reg.x0+x, y)))
+	r.bands(reg, func(band irect) {
+		for y := band.y0; y < band.y1; y++ {
+			row := out.a[(y-reg.y0)*w:][:w]
+			for x := 0; x < w; x++ {
+				v := uint32(a.at(reg.x0+x, y))
+				if v != 0 {
+					v = mul255(v, uint32(b.at(reg.x0+x, y)))
+				}
+				row[x] = uint8(v)
 			}
-			row[x] = uint8(v)
 		}
-	}
+	})
 	return out
 }
 

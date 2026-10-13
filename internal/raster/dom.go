@@ -342,9 +342,12 @@ type Limits struct {
 	MaxEffectPixels int // pixels processed by filters and pattern tiles in one render
 	// MaxPixelOps bounds the total pixel work of one render: pixels covered by
 	// fills and strokes, edge crossings the scan converter computes, points
-	// flattening computes, composited layer and mask areas and filter/pattern
-	// pixels (a merge node a pass), summed over the whole document. It bounds the product of element
-	// count and canvas size that MaxRenderNodes and MaxPixels leave open.
+	// flattening computes, composited layer and mask areas, pattern tile
+	// pixels, and the pixels of every pass a filter makes over its region (a
+	// merge node a pass; a blur's passes count each channel, and a pass that
+	// demultiplies and multiplies again counts three), summed over the whole
+	// document. It bounds the product of element count and canvas size that
+	// MaxRenderNodes and MaxPixels leave open.
 	MaxPixelOps int
 	// MaxCanvasBytes bounds the pixel memory alive at once: the canvas plus
 	// every offscreen layer (opacity group, mask, filter) in flight, the
