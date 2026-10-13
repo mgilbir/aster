@@ -79,7 +79,7 @@ The full index is [docs/README.md](docs/README.md); changes between versions are
 - **No interaction.** A chart is rendered at its initial state, or at the state `WithSignal` sets; pointer, timer and input events are not simulated.
 - **No colour font is bundled.** Emoji draw in monochrome unless you register a colour font; SVG output leaves emoji as text for the viewer to draw.
 - **The wordcloud transform needs text measurement**, which is on by default (`WithTextMeasurement(false)` makes it fail, as upstream does without a canvas).
-- **`SVGToPDF` takes the SVG Vega writes**; other SVG (`<use>`, entities, elements Vega does not write) fails with an error rather than giving an incomplete PDF. `SVGToPNG` draws general SVG.
+- **`SVGToPDF` takes the SVG Vega writes**; other SVG (`<use>`, entities, filters, elements Vega does not write) fails with an error rather than giving an incomplete PDF. `SVGToPNG` draws general SVG, filters included ([which primitives](docs/api.md#svg-input)).
 - Tested on Linux (amd64 and 386) and macOS (arm64), and built for Windows; being pure Go, it is expected to work wherever Go does.
 
 ## Acknowledgments
