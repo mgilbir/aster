@@ -48,13 +48,15 @@ func addEncoders(encode *Object, enter []kv, update []kv) {
 }
 
 // extendEncode merges a user encode block into a generated one, block by
-// block (enter/update/exit/...), skipping the mark-level keys.
-func extendEncode(encode *Object, extra Value) *Object {
+// block (enter/update/exit/...), skipping the mark-level keys. The user's
+// blocks are charged to sc, key by key (Scope.Work).
+func extendEncode(sc Scope, encode *Object, extra Value) *Object {
 	eo := extra.ObjValue()
 	if eo == nil {
 		return encode
 	}
 	for i := 0; i < eo.Len(); i++ {
+		work(sc, 1)
 		name := eo.KeyAt(i)
 		if skipKey(name) {
 			continue
@@ -63,7 +65,7 @@ func extendEncode(encode *Object, extra Value) *Object {
 		if block == nil {
 			block = jsval.NewObject(0)
 		}
-		set(encode, name, jsval.Obj(extend(block, eo.ValueAt(i))))
+		set(encode, name, jsval.Obj(extendWork(sc, block, eo.ValueAt(i))))
 	}
 	return encode
 }
@@ -74,8 +76,8 @@ func hasEncoder(key string, encode Value) bool {
 }
 
 // guideMark finishes a guide mark definition with the user's per-mark extras
-// (name, style, interactive and extra encoders).
-func guideMark(mark *Object, extras Value) Value {
+// (name, style, interactive and extra encoders), charged to l's Scope.
+func guideMark(l lookup, mark *Object, extras Value) Value {
 	if extras.IsObj() {
 		set(mark, "name", extras.Get("name"))
 		st := extras.Get("style")
@@ -84,7 +86,7 @@ func guideMark(mark *Object, extras Value) Value {
 		}
 		set(mark, "style", st)
 		mark.Set("interactive", jsval.Bool(extras.Get("interactive").IsTruthy()))
-		set(mark, "encode", jsval.Obj(extendEncode(mark.Lookup("encode").ObjValue(), extras)))
+		set(mark, "encode", jsval.Obj(extendEncode(l.sc, mark.Lookup("encode").ObjValue(), extras)))
 	} else {
 		mark.Set("interactive", jsval.False)
 	}

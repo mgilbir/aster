@@ -37,7 +37,7 @@ func legendGradient(spec Value, scale string, l lookup, userEncode Value) Value 
 		{"opacity", l.get("gradientOpacity")},
 	})
 
-	return guideMark(obj("type", "rect", "role", "legend-gradient", "encode", encode), userEncode)
+	return guideMark(l, obj("type", "rect", "role", "legend-gradient", "encode", encode), userEncode)
 }
 
 func legendGradientDiscrete(spec Value, scale string, l lookup, userEncode, dataRef Value) Value {
@@ -72,7 +72,7 @@ func legendGradientDiscrete(spec Value, scale string, l lookup, userEncode, data
 		{"opacity", l.get("gradientOpacity")},
 	})
 
-	return guideMark(obj("type", "rect", "role", "legend-band", "key", fValue, "from", dataRef, "encode", encode), userEncode)
+	return guideMark(l, obj("type", "rect", "role", "legend-band", "key", fValue, "from", dataRef, "encode", encode), userEncode)
 }
 
 const (
@@ -129,7 +129,7 @@ func legendGradientLabels(spec Value, l lookup, userEncode, dataRef Value) Value
 		ov = objv("separation", l.get("labelSeparation"), "method", overlap, "order", "datum."+fIndex)
 	}
 
-	return guideMark(obj(
+	return guideMark(l, obj(
 		"type", "text",
 		"role", "legend-label",
 		"style", guideLabelStyle,
@@ -198,7 +198,7 @@ func legendSymbolGroups(spec Value, l lookup, config, userEncode, dataRef, colum
 	if height.IsTruthy() {
 		clip = jsval.True
 	}
-	symbols := guideMark(obj(
+	symbols := guideMark(l, obj(
 		"type", "symbol",
 		"role", "legend-symbol",
 		"key", fValue,
@@ -234,7 +234,7 @@ func legendSymbolGroups(spec Value, l lookup, config, userEncode, dataRef, colum
 		{"fontWeight", l.get("labelFontWeight")},
 		{"limit", l.get("labelLimit")},
 	}, nil)
-	labels := guideMark(obj(
+	labels := guideMark(l, obj(
 		"type", "text",
 		"role", "legend-label",
 		"style", guideLabelStyle,
@@ -282,7 +282,7 @@ func legendSymbolGroups(spec Value, l lookup, config, userEncode, dataRef, colum
 	return guideGroup(obj(
 		"role", "scope",
 		"from", facet,
-		"encode", jsval.Obj(extendEncode(encode, entries)),
+		"encode", jsval.Obj(extendEncode(l.sc, encode, entries)),
 		"marks", jsval.ArrOf(symbols, labels),
 		"name", name,
 		"interactive", jsval.Bool(interactive),
@@ -331,5 +331,5 @@ func legendTitle(spec Value, l lookup, userEncode, dataRef Value) Value {
 		{"align", l.get("titleAlign")},
 		{"baseline", l.get("titleBaseline")},
 	})
-	return guideMark(obj("type", "text", "role", "legend-title", "style", guideTitleStyle, "from", dataRef, "encode", encode), userEncode)
+	return guideMark(l, obj("type", "text", "role", "legend-title", "style", guideTitleStyle, "from", dataRef, "encode", encode), userEncode)
 }

@@ -138,7 +138,7 @@ func parseMarkData(from jsval.Value, group bool, scope *Scope) facetInput {
 				spec := jsval.NewObject(4)
 				spec.Set("type", sv("aggregate"))
 				spec.Set("groupby", jsval.Arr(arrayOf(facet.Get("groupby"))))
-				extendObj(spec, facet.Get("aggregate"))
+				extendObj(scope.meter(), spec, facet.Get("aggregate"))
 				op := parseTransform(jsval.Obj(spec), scope)
 				op.param("key", scope.keyRef(facet.Get("groupby"), false))
 				op.param("pulse", getDataRef(facet, scope))
@@ -201,6 +201,7 @@ func parseMark(spec jsval.Value, scope *Scope) {
 
 	op := enc
 	for _, t := range arrayOf(spec.Get("transform")) {
+		scope.work(1)
 		tx := parseTransform(t, scope)
 		if tx.meta.generates || tx.meta.changes {
 			perr("Mark transforms should not generate new data.")
@@ -279,6 +280,7 @@ func parseMark(spec jsval.Value, scope *Scope) {
 	if name := spec.Get("name"); !name.IsNullish() && name.IsTruthy() {
 		scope.addData(name.AsString(), newDataScope(scope, store, render, sieve, nil))
 		for _, on := range arrayOf(spec.Get("on")) {
+			scope.work(1)
 			if on.Get("insert").IsTruthy() || on.Get("remove").IsTruthy() || on.Get("toggle").IsTruthy() {
 				perr("Marks only support modify triggers.")
 			}

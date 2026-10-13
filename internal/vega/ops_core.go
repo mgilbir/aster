@@ -720,6 +720,7 @@ func facLoad(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *
 		c.view.holdSrcRows(n, data)
 		var cl jsval.Cloner
 		for i := range data {
+			c.view.work(1)
 			data[i] = ingestTupleWith(&cl, data[i])
 		}
 		n.value = data

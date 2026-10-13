@@ -1,6 +1,7 @@
 package jsval
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -70,7 +71,40 @@ func ParseJSON(text []byte) (Value, error) { return ParseJSONLimit(text, 0) }
 // times that on the heap, so the size of the text does not bound the parse.
 // max <= 0 is unlimited.
 func ParseJSONLimit(text []byte, max int64) (Value, error) {
-	p := parser{s: text, left: math.MaxInt64}
+	return parseJSON(nil, 0, text, max)
+}
+
+// ParseJSONContext is ParseJSONLimit for a document an untrusted input
+// supplies: it charges its work to the budget.Ledger in ctx (a step per
+// jsonBytesPerStep bytes), polling ctx as it goes (ADR 0010), and returns
+// ctx's error, not a syntax error, once ctx is done. A document is as large
+// as the specification or a data file, tens of megabytes, and its parse in
+// one piece was the longest stretch of a call without a poll. The polls fall
+// between values and inside a long string or run of white space, so no
+// token holds one off; a single number literal is scanned whole.
+func ParseJSONContext(ctx context.Context, text []byte, max int64) (Value, error) {
+	if ctx == nil {
+		return parseJSON(nil, 0, text, max)
+	}
+	m := budget.NewMeter(ctx)
+	return parseJSON(&m, jsonPollBytes, text, max)
+}
+
+// jsonPollBytes is how many bytes of a metered parse pass between two
+// charges of its work, and jsonBytesPerStep how many make one step: a byte
+// costs a few nanoseconds, so a charge is a few hundred steps and the meter
+// polls every few tens of microseconds of parsing.
+const (
+	jsonPollBytes    = 4 << 10
+	jsonBytesPerStep = 16
+)
+
+// parseJSON parses text, charging m (nil: no meter) every every bytes.
+func parseJSON(m *budget.Meter, every int, text []byte, max int64) (Value, error) {
+	p := parser{s: text, left: math.MaxInt64, end: len(text), meter: m, every: every}
+	if m != nil {
+		p.end = min(len(text), every)
+	}
 	if max > 0 {
 		p.left, p.max = max, max
 	}
@@ -79,10 +113,16 @@ func ParseJSONLimit(text []byte, max int64) (Value, error) {
 	}
 	p.ws()
 	v, err := p.value(0)
+	if p.stop != nil {
+		return Undefined, p.stop
+	}
 	if err != nil {
 		return Undefined, err
 	}
 	p.ws()
+	if p.stop != nil {
+		return Undefined, p.stop
+	}
 	if p.i != len(p.s) {
 		return Undefined, p.errf("unexpected trailing data")
 	}
@@ -136,6 +176,42 @@ type parser struct {
 	// sl carves small arrays and objects out of chunks; only documents big
 	// enough to repay it (data files) get one.
 	sl *slabs
+
+	// meter charges a metered parse's work (ParseJSONContext), nil for
+	// none, every every bytes. end is where the loops over the text stop
+	// to charge it: the end of the text, or for a metered parse the next
+	// charge if that is sooner. charged is the offset charged up to; stop
+	// is the context's error once the meter reports it.
+	meter   *budget.Meter
+	every   int
+	end     int
+	charged int
+	stop    error
+}
+
+// due reports whether the parse has reached end short of the end of the
+// text: a metered parse's next poll.
+func (p *parser) due() bool { return p.i >= p.end && p.end < len(p.s) }
+
+// poll charges the bytes read since the last charge to the meter and moves
+// end on. Once the call is over it records the context's error in stop and
+// truncates the text where the parse is, so whatever is being read ends at
+// once (as at the end of the input); the result is then stop, not the error
+// that ending gives.
+func (p *parser) poll() error {
+	if p.stop != nil {
+		return p.stop
+	}
+	err := p.meter.Work(int64(p.i-p.charged) / jsonBytesPerStep)
+	p.charged = p.i
+	if err != nil {
+		p.stop = err
+		p.s = p.s[:p.i]
+		p.end = p.i
+		return err
+	}
+	p.end = min(len(p.s), p.i+p.every)
+	return nil
 }
 
 func (p *parser) errf(format string, args ...any) error {
@@ -153,18 +229,38 @@ func (p *parser) tooLarge() error {
 	return fmt.Errorf("%w (more than %d bytes)", ErrJSONSize, p.max)
 }
 
+// ws skips white space. Its test of the next byte is small enough to inline,
+// so that compact text (data files) pays no call between tokens.
 func (p *parser) ws() {
-	for p.i < len(p.s) {
-		switch p.s[p.i] {
-		case ' ', '\t', '\n', '\r':
+	if p.i < len(p.s) && jsonSpace[p.s[p.i]] {
+		p.wsRun()
+	}
+}
+
+// wsRun skips a run of white space, polling at end.
+func (p *parser) wsRun() {
+	for {
+		for p.i < p.end {
+			if !jsonSpace[p.s[p.i]] {
+				return
+			}
 			p.i++
-		default:
+		}
+		if !p.due() || p.poll() != nil {
 			return
 		}
 	}
 }
 
+// jsonSpace marks the bytes JSON's grammar reads as white space.
+var jsonSpace = [256]bool{' ': true, '\t': true, '\n': true, '\r': true}
+
 func (p *parser) value(depth int) (Value, error) {
+	if p.due() {
+		if err := p.poll(); err != nil {
+			return Undefined, err
+		}
+	}
 	if p.i >= len(p.s) {
 		return Undefined, p.errf("unexpected end of input")
 	}
@@ -315,23 +411,38 @@ func (p *parser) str() (string, error) {
 	p.i++ // opening quote
 	start := p.i
 	// Fast path: no escapes, valid UTF-8, no control characters.
-	for p.i < len(p.s) {
-		c := p.s[p.i]
-		if c == '"' {
-			raw := p.s[start:p.i]
-			p.i++
-			if utf8.Valid(raw) {
-				return string(raw), nil
+fast:
+	for {
+		for p.i < p.end {
+			c := p.s[p.i]
+			if c == '"' {
+				raw := p.s[start:p.i]
+				p.i++
+				if utf8.Valid(raw) {
+					return string(raw), nil
+				}
+				return string([]rune(string(raw))), nil
 			}
-			return string([]rune(string(raw))), nil
+			if c == '\\' || c < 0x20 {
+				break fast
+			}
+			p.i++
 		}
-		if c == '\\' || c < 0x20 {
+		if !p.due() {
 			break
 		}
-		p.i++
+		if err := p.poll(); err != nil {
+			return "", err
+		}
 	}
 	buf := append([]byte(nil), p.s[start:p.i]...)
 	for p.i < len(p.s) {
+		if p.due() {
+			if err := p.poll(); err != nil {
+				return "", err
+			}
+			continue // the text may now end here
+		}
 		c := p.s[p.i]
 		switch {
 		case c == '"':
@@ -479,13 +590,18 @@ func (p *parser) object(depth int) (Value, error) {
 	}
 }
 
+// maxInternKey is the longest key the parser shares between occurrences.
+const maxInternKey = 1 << 10
+
 // key reads an object key, sharing the string between occurrences.
 func (p *parser) key() (string, error) {
 	if p.sl == nil { // a small document repeats few keys; skip the table
 		return p.str()
 	}
+	// A key past maxInternKey bytes is read (and polled within) as any
+	// string is, and not shared.
 	start := p.i + 1
-	for j := start; j < len(p.s); j++ {
+	for j, end := start, min(len(p.s), start+maxInternKey); j < end; j++ {
 		c := p.s[j]
 		if c == '"' {
 			raw := p.s[start:j]

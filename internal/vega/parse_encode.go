@@ -5,6 +5,7 @@ import (
 	"math"
 	"strings"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/expr"
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/scene"
@@ -61,6 +62,7 @@ func (c *encCompiler) dep(name string, e *entry) {
 
 func (c *encCompiler) depExpr(f *exprFn) {
 	for _, d := range f.deps {
+		c.scope.work(1)
 		c.dep(d.name, d.e)
 	}
 }
@@ -76,6 +78,7 @@ func (c *encCompiler) scaleDeps(literal jsval.Value, isLiteral bool) {
 	}
 	for s := c.scope; s != nil; s = s.parentScope {
 		for name, e := range s.scales {
+			c.scope.work(1)
 			c.dep("%"+name, e)
 		}
 	}
@@ -87,11 +90,12 @@ func parseEncode(encode jsval.Value, typ, role string, style jsval.Value, scope 
 	if params == nil {
 		params = newParamList()
 	}
-	encode = applyEncodeDefaults(encode, typ, role, style, scope.config)
+	encode = applyEncodeDefaults(scope.meter(), encode, typ, role, style, scope.config)
 	pe := pEncode{sets: map[string]*encodeSet{}}
 	c := &encCompiler{scope: scope, params: params}
 	if o := encode.ObjValue(); o != nil {
 		for i := 0; i < o.Len(); i++ {
+			scope.work(1)
 			name := o.KeyAt(i)
 			pe.sets[name] = c.parseBlock(o.ValueAt(i), typ)
 			pe.order = append(pe.order, name)
@@ -112,6 +116,7 @@ func (c *encCompiler) parseBlock(block jsval.Value, typ string) *encodeSet {
 		return set
 	}
 	for i := 0; i < o.Len(); i++ {
+		c.scope.work(1)
 		name := o.KeyAt(i)
 		set.output = append(set.output, name)
 		enc := o.ValueAt(i)
@@ -157,6 +162,7 @@ func (c *encCompiler) rule(rules jsval.Value) valueFn {
 		perr("Expression parse error: ")
 	}
 	for i, r := range items {
+		c.scope.work(1)
 		if !r.Get("test").IsTruthy() && i < len(items)-1 {
 			// Upstream concatenates the source of every rule, with no stop at
 			// the unconditional one: what follows it is appended to its value
@@ -167,6 +173,7 @@ func (c *encCompiler) rule(rules jsval.Value) valueFn {
 		}
 	}
 	for _, r := range items {
+		c.scope.work(1)
 		val := c.entry(r)
 		if t := r.Get("test"); t.IsTruthy() {
 			f := c.scope.parseExpression(t.AsString())
@@ -195,6 +202,7 @@ func (c *encCompiler) rule(rules jsval.Value) valueFn {
 func (c *encCompiler) concatenatedRules(items []jsval.Value) (valueFn, bool) {
 	var code strings.Builder
 	for _, r := range items {
+		c.scope.work(1)
 		var src string
 		switch {
 		case !r.IsObj() || !r.Get("gradient").IsNullish() || !r.Get("scale").IsNullish() || !r.Get("exponent").IsNullish() ||
@@ -207,10 +215,15 @@ func (c *encCompiler) concatenatedRules(items []jsval.Value) (valueFn, bool) {
 			if !f.IsStr() {
 				return nil, false
 			}
-			src = "datum"
+			// Built in one buffer: concatenating per segment is
+			// quadratic in the path's length.
+			var b strings.Builder
+			b.WriteString("datum")
 			for _, seg := range jsval.ParseFieldPath(f.StrValue()) {
-				src += "[" + stringValue(jsval.Str(seg)) + "]"
+				c.scope.work(1)
+				b.WriteString("[" + stringValue(jsval.Str(seg)) + "]")
 			}
+			src = b.String()
 		case !r.Get("value").IsUndefined():
 			v := r.Get("value")
 			if v.IsObj() || v.IsArr() {
@@ -262,6 +275,7 @@ func (t term) fn() valueFn {
 }
 
 func (c *encCompiler) entry(enc jsval.Value) valueFn {
+	c.scope.work(1)
 	if !enc.Get("gradient").IsNullish() {
 		return c.gradient(enc)
 	}
@@ -497,6 +511,7 @@ func (c *encCompiler) field(ref jsval.Value) valueFn {
 // fieldObj compiles a field reference object. A nested reference is not
 // wrapped as a datum path: a non-object there is an invalid reference.
 func (c *encCompiler) fieldObj(ref jsval.Value) valueFn {
+	c.scope.work(1)
 	if !ref.IsObj() {
 		perr("Invalid field reference: %s", quote(ref))
 	}
@@ -574,6 +589,7 @@ func (c *encCompiler) fieldPath(key jsval.Value) func(ev *encEval) []jsval.Value
 		fns := make([]valueFn, len(segs))
 		quirky := false
 		for i, s := range segs {
+			c.scope.work(1)
 			vals[i] = jsval.Str(s)
 			if quirkyLiteral(s) {
 				// A quoted segment of the generated datum access is parsed
@@ -736,7 +752,7 @@ func hasEncodeKey(key string, encode jsval.Value) bool {
 // marks, and the config.style entries named by the mark's `style`, in that
 // order of increasing precedence. A default that is a signal goes to `update`
 // (it may change), everything else to `enter`.
-func applyEncodeDefaults(encode jsval.Value, typ, role string, style jsval.Value, config jsval.Value) jsval.Value {
+func applyEncodeDefaults(m *budget.Meter, encode jsval.Value, typ, role string, style jsval.Value, config jsval.Value) jsval.Value {
 	defaults := jsval.NewObject(8)
 	setDefault := func(key string, v jsval.Value) {
 		if isSignalObj(v) {
@@ -760,12 +776,13 @@ func applyEncodeDefaults(encode jsval.Value, typ, role string, style jsval.Value
 		props = config.Get("group")
 	case "mark":
 		merged := jsval.NewObject(8)
-		extendObj(merged, config.Get("mark"))
-		extendObj(merged, config.Get(typ))
+		extendObj(m, merged, config.Get("mark"))
+		extendObj(m, merged, config.Get(typ))
 		props = jsval.Obj(merged)
 	}
 	if po := props.ObjValue(); po != nil {
 		for i := 0; i < po.Len(); i++ {
+			charge(m, 1)
 			key := po.KeyAt(i)
 			skip := hasEncodeKey(key, encode) ||
 				((key == "fill" || key == "stroke") && (hasEncodeKey("fill", encode) || hasEncodeKey("stroke", encode)))
@@ -776,6 +793,7 @@ func applyEncodeDefaults(encode jsval.Value, typ, role string, style jsval.Value
 	}
 
 	for _, name := range arrayOf(style) {
+		charge(m, 1)
 		if !config.Get("style").IsObj() {
 			break
 		}
@@ -784,6 +802,7 @@ func applyEncodeDefaults(encode jsval.Value, typ, role string, style jsval.Value
 			continue
 		}
 		for i := 0; i < sp.Len(); i++ {
+			charge(m, 1)
 			key := sp.KeyAt(i)
 			if !hasEncodeKey(key, encode) {
 				setDefault(key, sp.ValueAt(i))
@@ -793,11 +812,12 @@ func applyEncodeDefaults(encode jsval.Value, typ, role string, style jsval.Value
 
 	out := jsval.NewObject(4)
 	if encode.IsObj() {
-		extendObj(out, encode)
+		extendObj(m, out, encode)
 	}
 	enter := jsval.NewObject(defaults.Len())
 	var update *jsval.Object
 	for i := 0; i < defaults.Len(); i++ {
+		charge(m, 1)
 		key := defaults.KeyAt(i)
 		p := defaults.ValueAt(i)
 		if p.Get("signal").IsTruthy() {
@@ -809,10 +829,10 @@ func applyEncodeDefaults(encode jsval.Value, typ, role string, style jsval.Value
 			enter.Set(key, p)
 		}
 	}
-	extendObj(enter, encode.Get("enter"))
+	extendObj(m, enter, encode.Get("enter"))
 	out.Set("enter", jsval.Obj(enter))
 	if update != nil {
-		extendObj(update, encode.Get("update"))
+		extendObj(m, update, encode.Get("update"))
 		out.Set("update", jsval.Obj(update))
 	}
 	return jsval.Obj(out)

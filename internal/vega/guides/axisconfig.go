@@ -13,6 +13,11 @@ type Scope interface {
 	Config() Value
 	// ScaleType returns the type name of the named scale ("" if unknown).
 	ScaleType(name string) string
+	// Work charges n steps of a guide's preparation to the render, which
+	// polls the call's context (ADR 0010): the loops over the config and
+	// the specification's guide blocks charge each step. Once the call is
+	// over it panics with the *budget.Stop the renderer recovers.
+	Work(n int)
 }
 
 // axisFallback resolves one property for the signal-orient case: an axis
@@ -56,12 +61,13 @@ func lowerFirst(s string) string {
 }
 
 // keyUnion collects the property names of the given objects.
-func keyUnion(objects ...Value) []string {
+func keyUnion(sc Scope, objects ...Value) []string {
 	var keys []string
 	seen := map[string]bool{}
 	for _, o := range objects {
 		ob := o.ObjValue()
 		for i := 0; i < ob.Len(); i++ {
+			work(sc, 1)
 			if k := ob.KeyAt(i); !seen[k] {
 				seen[k] = true
 				keys = append(keys, k)
@@ -90,7 +96,9 @@ func axisConfig(spec Value, sc Scope) (Value, error) {
 	if isSignal(orient) {
 		axisX, axisY := cfg.Get("axisX"), cfg.Get("axisY")
 		xyObj := jsval.NewObject(0)
-		for _, key := range keyUnion(axisX, axisY) {
+		// A key builds conditional expressions of its fallbacks: 4 steps.
+		for _, key := range keyUnion(sc, axisX, axisY) {
+			work(sc, 4)
 			xyObj.Set(key, ifX(orient, axisFallback(key, axisX, axis, style), axisFallback(key, axisY, axis, style)))
 		}
 		xy = jsval.Obj(xyObj)
@@ -98,7 +106,8 @@ func axisConfig(spec Value, sc Scope) (Value, error) {
 		axisTop, axisBottom := cfg.Get("axisTop"), cfg.Get("axisBottom")
 		axisLeft, axisRight := cfg.Get("axisLeft"), cfg.Get("axisRight")
 		orObj := jsval.NewObject(0)
-		for _, key := range keyUnion(axisTop, axisBottom, axisLeft, axisRight) {
+		for _, key := range keyUnion(sc, axisTop, axisBottom, axisLeft, axisRight) {
+			work(sc, 4)
 			orObj.Set(key, ifOrient(signalOf(orient),
 				axisFallback(key, axisTop, axis, style),
 				axisFallback(key, axisBottom, axis, style),
@@ -120,7 +129,9 @@ func axisConfig(spec Value, sc Scope) (Value, error) {
 	}
 
 	if xy.IsTruthy() || or.IsTruthy() || band.IsTruthy() {
-		return jsval.Obj(extend(jsval.NewObject(0), axis, xy, or, band)), nil
+		// Once per axis, over the whole axis config: the copies of a large
+		// config for many axes are charged key by key.
+		return jsval.Obj(extendWork(sc, jsval.NewObject(0), axis, xy, or, band)), nil
 	}
 	return axis, nil
 }

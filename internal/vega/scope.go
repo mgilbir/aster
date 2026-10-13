@@ -321,6 +321,7 @@ func addSortField(scope *Scope, p *paramList, sort jsval.Value) {
 	if _, ok := p.get("ops").([]P); ok {
 		names, _ := p.get("as").([]P)
 		for _, n := range names {
+			scope.work(1)
 			if s, ok := n.(string); ok && s == as {
 				return
 			}
@@ -418,6 +419,29 @@ type parseOptions struct {
 	// ctx is the render's: the regular expressions an expression compiles
 	// are charged to its ledger.
 	ctx context.Context
+	// meter charges the parse's work to the call's ledger, which polls ctx
+	// (ADR 0010): every loop over what the specification lists (signals,
+	// data sets, marks, channels, config keys) charges its steps, so a
+	// deadline ends a parse of a specification thousands of definitions
+	// long, not only the dataflow it builds. The zero Meter of a parse
+	// without a context never stops.
+	meter budget.Meter
+}
+
+// work charges n steps of the parse (parseOptions.meter), ending the
+// render, through the *budget.Stop that Render recovers, once its call is
+// over.
+func (s *Scope) work(n int) { s.opts.meter.MustWork(int64(n)) }
+
+// meter is the parse's meter, for the helpers that take one.
+func (s *Scope) meter() *budget.Meter { return &s.opts.meter }
+
+// charge is Scope.work for the helpers that walk a specification before
+// there is a Scope, or without one: m may be nil, which never stops.
+func charge(m *budget.Meter, n int) {
+	if m != nil {
+		m.MustWork(int64(n))
+	}
 }
 
 func newScope(config jsval.Value, opts *parseOptions) *Scope {
@@ -459,9 +483,11 @@ func (s *Scope) finish() {
 		s.root.root = true
 	}
 	for name, e := range s.signals {
+		s.work(1)
 		e.signalName = name
 	}
 	for name, e := range s.scales {
+		s.work(1)
 		e.scaleName = name
 	}
 	annotate := func(e *entry, name, role string) {
@@ -474,6 +500,7 @@ func (s *Scope) finish() {
 		e.dataRoles[name] = append(e.dataRoles[name], role)
 	}
 	for name, ds := range s.data {
+		s.work(1 + len(ds.index))
 		annotate(ds.input, name, "input")
 		annotate(ds.output, name, "output")
 		annotate(ds.values, name, "values")
@@ -484,6 +511,7 @@ func (s *Scope) finish() {
 }
 
 func (s *Scope) add(e *entry) *entry {
+	s.work(1)
 	if o := s.opts; o.maxOps > 0 {
 		if o.ops++; o.ops > o.maxOps {
 			failLimit("more than %d dataflow operators", o.maxOps)
@@ -625,7 +653,10 @@ func isSignalObj(v jsval.Value) bool { return v.IsObj() && v.Get("signal").IsTru
 
 func isExprObj(v jsval.Value) bool { return v.IsObj() && v.Get("expr").IsTruthy() }
 
-func hasSignal(v jsval.Value) bool {
+// hasSignal reports whether v holds a signal reference at any depth,
+// charging each value it visits to m (nil: no meter).
+func hasSignal(m *budget.Meter, v jsval.Value) bool {
+	charge(m, 1)
 	if isSignalObj(v) {
 		return true
 	}
@@ -633,13 +664,13 @@ func hasSignal(v jsval.Value) bool {
 	case jsval.KindObj:
 		o := v.ObjValue()
 		for i := 0; i < o.Len(); i++ {
-			if hasSignal(o.ValueAt(i)) {
+			if hasSignal(m, o.ValueAt(i)) {
 				return true
 			}
 		}
 	case jsval.KindArr:
 		for _, it := range v.Items() {
-			if hasSignal(it) {
+			if hasSignal(m, it) {
 				return true
 			}
 		}
@@ -688,6 +719,7 @@ func (s *Scope) compareRef(cmp jsval.Value) P {
 		}
 		if v.IsArr() {
 			for _, it := range v.Items() {
+				s.work(1)
 				out = append(out, check(it))
 			}
 			return out
@@ -716,6 +748,7 @@ func (s *Scope) keyRef(fields jsval.Value, flat bool) P {
 	}
 	if fields.IsArr() {
 		for _, it := range fields.Items() {
+			s.work(1)
 			add(it)
 		}
 	} else if !fields.IsUndefined() {
@@ -792,6 +825,7 @@ func (s *Scope) signalRef(name string) P {
 
 func (s *Scope) parseLambdas() {
 	for name, op := range s.lambdas {
+		s.work(1)
 		setExprUpdate(op, s.parseExpression(name))
 	}
 }
@@ -812,7 +846,7 @@ func (s *Scope) objectProperty(spec jsval.Value) P {
 	if spec.IsObj() && spec.Get("signal").IsTruthy() {
 		return s.signalRef(spec.Get("signal").AsString())
 	}
-	return s.signalRef(propertyLambda(spec))
+	return s.signalRef(propertyLambda(s.meter(), spec))
 }
 
 // exprRef is Scope.exprRef. The name an `as` gives is recorded upstream as
@@ -881,11 +915,13 @@ func (s *Scope) addDataPipeline(name string, entries []*entry) *dataScope {
 }
 
 // propertyLambda writes the expression that rebuilds an object or array whose
-// leaves may be signal expressions.
-func propertyLambda(spec jsval.Value) string {
+// leaves may be signal expressions, charging each value it writes to m (nil:
+// no meter).
+func propertyLambda(m *budget.Meter, spec jsval.Value) string {
 	var b strings.Builder
 	var write func(v jsval.Value)
 	write = func(v jsval.Value) {
+		charge(m, 1)
 		if v.IsObj() || v.IsArr() {
 			if v.IsObj() && v.Get("signal").IsTruthy() {
 				b.WriteString(v.Get("signal").AsString())

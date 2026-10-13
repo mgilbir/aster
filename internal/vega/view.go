@@ -302,8 +302,9 @@ func Render(ctx context.Context, spec jsval.Value, opts Options) (res *Result, e
 			t0 = now
 		}
 	}
-	config := mergeConfig(defaultConfig(), opts.Config, spec.Get("config"))
-	scope := newScope(config, &parseOptions{maxOps: opts.Limits.withDefaults().MaxOperators, ctx: ctx})
+	po := &parseOptions{maxOps: opts.Limits.withDefaults().MaxOperators, ctx: ctx, meter: budget.NewMeter(ctx)}
+	config := mergeConfigWork(&po.meter, defaultConfig(), opts.Config, spec.Get("config"))
+	scope := newScope(config, po)
 	parseView(spec, scope)
 	flow := scope.toRuntime()
 
@@ -352,6 +353,9 @@ func unexpected(err error) error {
 	}
 	return err
 }
+
+// work charges n steps of the view's own loops (flowGraph.work).
+func (v *runView) work(n int) { v.g.work(n) }
 
 func newView(ctx context.Context, opts Options, locale jsval.Value) *runView {
 	limits := opts.Limits.withDefaults()

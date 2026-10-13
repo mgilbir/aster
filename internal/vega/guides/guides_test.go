@@ -15,6 +15,7 @@ type testScope struct {
 }
 
 func (s testScope) Config() Value { return s.config }
+func (s testScope) Work(int)      {}
 func (s testScope) ScaleType(n string) string {
 	return s.types[n]
 }
