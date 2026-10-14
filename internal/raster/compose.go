@@ -35,6 +35,7 @@ func compositeMode(dst, layer *canvas, r irect, m *mask, mode shape.CompositeMod
 		return
 	}
 	dst.markDirty(r)
+	dst.mustHold(r)
 	for y := r.y0; y < r.y1; y++ {
 		for x := r.x0; x < r.x1; x++ {
 			cov := 1.0
@@ -45,9 +46,9 @@ func compositeMode(dst, layer *canvas, r irect, m *mask, mode shape.CompositeMod
 				}
 				cov = float64(c) / 255
 			}
-			i := (y*dst.w + x) * 4
+			i := dst.off(x, y)
 			d := dst.pix[i : i+4 : i+4]
-			s := layer.pix[i : i+4 : i+4]
+			s := layer.pixelAt(x, y)
 			if mode == shape.CompositeSrcOver && cov == 1 {
 				if s[3] != 0 {
 					ia := 255 - uint32(s[3])

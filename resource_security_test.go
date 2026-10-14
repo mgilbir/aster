@@ -173,11 +173,15 @@ func TestTimeoutCoversVegaLiteCompile(t *testing.T) {
 // SVGToPNG / VegaToPNG take no context: WithTimeout does not reach the
 // rasterizer, and nothing bounds pixels x elements, so a few hundred bytes
 // cost minutes of CPU or gigabytes (16 nested opacity groups on a
-// 64-megapixel canvas allocate a 256 MiB layer each).
+// 64-megapixel canvas allocated a 256 MiB layer each). A layer now holds the
+// pixels drawn into it and one given back is reused, so those 16 layers need
+// three canvases at once: the document is no longer refused by the canvas
+// memory bound before it draws, but runs, as the full-canvas cases below do,
+// until the deadline or the pixel work budget stops it.
 func TestResourceRasterizer(t *testing.T) {
 	// maxCPU, per case: 2x the CI baseline CPU time, floor 1 s, rounded up.
-	t.Run("layers", func(t *testing.T) { // CI baseline 0.02 s
-		runRes(t, resCase{file: "layers-8k.svg", kind: "svgpng", timeout: "1s", maxPeakMB: 1536, maxCPU: 1, wall: 100 * time.Second})
+	t.Run("layers", func(t *testing.T) { // baseline 1.06 s, measured locally (runs to its timeout); was 0.02 s on CI when refused up front
+		runRes(t, resCase{file: "layers-8k.svg", kind: "svgpng", timeout: "1s", maxPeakMB: 1536, maxCPU: 3, wall: 100 * time.Second})
 	})
 	t.Run("use-expansion-fullcanvas", func(t *testing.T) { // CI baseline 1.01 s
 		runRes(t, resCase{file: "use-expansion-fullcanvas.svg", kind: "svgpng", timeout: "1s", maxCPU: 3, wall: 100 * time.Second})

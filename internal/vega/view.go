@@ -91,6 +91,10 @@ type Limits struct {
 	// label transform rasterizes (raster.Limits.MaxPixelOps); 0 is the
 	// rasterizer's default.
 	RasterPixelOps int
+	// RasterCanvasBytes bounds the pixel memory a rasterization of the label
+	// transform holds at once (raster.Limits.MaxCanvasBytes); 0 is the
+	// rasterizer's default.
+	RasterCanvasBytes int
 }
 
 // WithDefaults is l with every zero field set to its default.

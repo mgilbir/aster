@@ -1,7 +1,6 @@
 package vega
 
 import (
-	"image"
 	"math"
 
 	"github.com/mgilbir/aster/internal/budget"
@@ -174,6 +173,8 @@ func labelBase(v *runView, t *scene.Item, markIndex int) *label.Base {
 // reproduces, takes 4), and a single such pixel can move a label. The mask is
 // therefore taken from a 4x supersampled rendering, where a pixel counts when
 // any of its 16 samples is covered; that contains the slivers cairo reports.
+// The rasterizer reports those pixels (raster.RenderCoverage) without
+// holding the supersampled canvas.
 // It is not cairo's exact coverage: on an unusual shape a sliver could still
 // differ. Text is shaped with the engine's fonts, not the canvas's.
 type labelPainter struct{ v *runView }
@@ -251,7 +252,8 @@ func (lp *labelPainter) paint(m *label.Mask, typ scene.MarkType, items []*scene.
 	// The bitmap's work budget is the PNG budget at scale 1 for its pixels,
 	// as for any image drawn at its own pixels: the supersampling is the
 	// transform's, not a scale the caller asked for, and does not raise it.
-	lim := raster.Limits{MaxPixelOps: raster.DefaultMaxPixelOps, PixelOpsPerPixel: raster.DefaultPixelOpsPerPixel}
+	// Its pixel memory is bounded as a PNG's is (WithMemoryLimit's).
+	lim := raster.Limits{MaxPixelOps: raster.DefaultMaxPixelOps, PixelOpsPerPixel: raster.DefaultPixelOpsPerPixel, MaxCanvasBytes: v.limits.RasterCanvasBytes}
 	if v.limits.RasterPixelOps > 0 {
 		lim.MaxPixelOps = v.limits.RasterPixelOps // WithPixelWorkLimit's
 	}
@@ -261,42 +263,20 @@ func (lp *labelPainter) paint(m *label.Mask, typ scene.MarkType, items []*scene.
 	if err := led.Alloc(int64(len(doc))); err != nil {
 		failErr(err)
 	}
-	// Only alpha is read, so the premultiplied canvas serves, and only where
-	// it has ink.
-	img, ink, err := raster.RenderRGBA([]byte(doc), raster.Options{Shaper: v.shaper, Context: v.ctx, Scale: float64(ss), Limits: lim})
+	// Only which ss x ss blocks of samples are left with alpha is read: the
+	// rasterizer reports that without a canvas of the samples.
+	cov, err := raster.RenderCoverage([]byte(doc), ss, raster.Options{Shaper: v.shaper, Context: v.ctx, Scale: float64(ss), Limits: lim})
 	led.Free(int64(len(doc)))
 	if err != nil {
 		failErr(err)
 	}
-	markSamples(img, ink, ss, m.Width, m.Height, m.Set, func() {
-		if err := v.ctx.Err(); err != nil {
-			failErr(err)
-		}
-	})
-}
-
-// markSamples calls set(x, y) for every pixel of a w x h mask whose ss x ss
-// block of samples in img has one with non-zero alpha. ink bounds the
-// samples that can; poll is called every 256 sample rows.
-func markSamples(img *image.RGBA, ink image.Rectangle, ss, w, h int, set func(x, y int), poll func()) {
-	ink = ink.Intersect(image.Rect(0, 0, w*ss, h*ss)).Intersect(img.Rect)
-	for y := ink.Min.Y; y < ink.Max.Y; y++ {
+	for y := range min(cov.H, m.Height) {
 		if y&255 == 0 {
-			poll()
-		}
-		row := img.Pix[(y-img.Rect.Min.Y)*img.Stride:]
-		my := y / ss
-		// x walks the samples, mx the mask pixel they fall in.
-		mx, k := ink.Min.X/ss, ink.Min.X%ss
-		for x := ink.Min.X; x < ink.Max.X; x++ {
-			if row[(x-img.Rect.Min.X)*4+3] != 0 {
-				set(mx, my)
-			}
-			if k++; k == ss {
-				k = 0
-				mx++
+			if err := v.ctx.Err(); err != nil {
+				failErr(err)
 			}
 		}
+		cov.Row(y, func(x int) { m.Set(x, y) })
 	}
 }
 

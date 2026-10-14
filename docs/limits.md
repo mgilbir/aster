@@ -37,7 +37,7 @@ It is not a heap cap: Go has none per call. It is converted into the budgets bel
 | SVG output | 128 MiB | n/4, at least 1 MiB |
 | specification size | none | n/16, at least 1 MiB |
 | glyphs of one shaped run of text | none | n/4, at least 1 MiB |
-| rasterizer canvas memory (PNG) | 1 GiB | n, between 4 MiB and 1 GiB |
+| rasterizer canvas memory (PNG, and the `label` transform's drawing) | 1 GiB | n, between 4 MiB and 1 GiB |
 | rasterizer pixels per canvas (PNG) | 64 Mi | n/8, between 512 Ki and 128 Mi |
 | rasterizer path points held at once (PNG) | 128 Mi | n/16, at least 64 Ki |
 | pixels of one image (SVG, PNG and PDF output) | 64 Mi | n/16, between 64 Ki and 64 Mi |
@@ -45,7 +45,7 @@ It is not a heap cap: Go has none per call. It is converted into the budgets bel
 | Vega-Lite views | 65,536 | n/32768, at least 64 |
 <!-- limits:end -->
 
-The rasterizer's canvas memory is every pixel buffer alive at once: the canvas, offscreen layers (opacity groups, masks, filters), clip coverage maps (one per clipped element, held while it draws) and every result and scratch buffer of a filter chain. Its path points are the geometry the elements being drawn hold: parsed path data, flattened polylines, stroke outlines and scan-converter edges (an edge counts as five points); geometry wholly outside the canvas or clip is not built.
+The rasterizer's canvas memory is every pixel buffer alive at once: the canvas, offscreen layers (opacity groups, masks, filters), clip coverage maps (one per clipped element, held while it draws) and every result and scratch buffer of a filter chain. An offscreen layer holds the pixels drawn into it, not the canvas's: it grows to hold what is drawn, so a small opacity group costs little on a large canvas. The `label` transform draws the marks it avoids at four samples a pixel each way (fewer on a layout of more than 1 Mi pixels) without a canvas of the samples, keeping one bit for each pixel of the layout and the layers its marks are drawn through, under this bound. Its path points are the geometry the elements being drawn hold: parsed path data, flattened polylines, stroke outlines and scan-converter edges (an edge counts as five points); geometry wholly outside the canvas or clip is not built.
 
 Data rows are the tuples alive at once, each held by the operator that made it: a data set's loaded or inline rows, the rows a transform makes (an `aggregate`'s groups, a `sequence`, a `fold`), the copies a derived data set hands on, the rows `modify()` inserts, a prefacet's cells. A transform that runs again replaces what it held, so a signal write is not charged twice, and an operator that only passes rows on (a `filter`, a sort) holds none ([ADR 0012](adr/0012-rows-held-by-their-maker.md)). With `WithMemoryLimit`, a row is also weighed: one that outweighs 512 bytes (many fields, long strings) counts for more than one, so the rows bound their memory, not just their number. Delimited text (CSV, TSV, DSV) is charged a row at a time, before the row is made.
 

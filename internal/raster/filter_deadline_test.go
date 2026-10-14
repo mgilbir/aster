@@ -222,8 +222,12 @@ func layerRenderer(ctx context.Context, side int) *renderer {
 	return r
 }
 
-// paintLayer covers c with a translucent colour and marks it dirty.
-func paintLayer(c *canvas) {
+// paintLayer covers c, the current canvas of r, with a translucent colour
+// and marks it dirty.
+func paintLayer(r *renderer, c *canvas) {
+	if !r.reserve(c, c.bounds()) {
+		panic(r.err)
+	}
 	for i := 0; i < len(c.pix); i += 4 {
 		copy(c.pix[i:i+4], []uint8{100, 50, 0, 128})
 	}
@@ -242,13 +246,13 @@ func TestLayerPassesPoll(t *testing.T) {
 	}{
 		{"opacity group", func(r *renderer) {
 			prev := r.pushLayer()
-			paintLayer(r.cv)
+			paintLayer(r, r.cv)
 			r.popLayer(prev, 0.5, blendMultiply)
 		}},
 		{"COLR group", func(r *renderer) {
 			p := &colourPainter{r: r, st: &state{}}
 			p.PushGroup()
-			paintLayer(r.cv)
+			paintLayer(r, r.cv)
 			p.PopGroup(shape.CompositeSrcIn)
 		}},
 		{"clip intersection", func(r *renderer) {
