@@ -2,12 +2,26 @@ package raster
 
 import "math"
 
-// feTurbulence is resvg's turbulence.rs, the SVG specification's reference
-// Perlin noise, in f64 as resvg computes it. resvg samples each pixel at its
-// top-left corner (not its centre), mapped to user space by the device
-// scale and the region's offset, and stitches tiles with the stitch values
-// recomputed for every pixel from the pixel's own index: both kept, being
-// its output that is matched.
+// feTurbulence is Filter Effects 1 §9.21's reference code ("The C code
+// below shows the exact algorithm used for this filter effect"), in f64 as
+// resvg's turbulence.rs computes it. resvg ports SVG 1.1's version of the
+// code; this follows Filter Effects 1's where they differ:
+//   - the gradients: Filter Effects 1 draws each gradient again while it is
+//     zero, and discards one longer than 1 ("discard the current random
+//     vector; try it again"; the specification's changes: "Make
+//     feTurbulence algorithms respect uniformity"), where SVG 1.1
+//     normalizes every one;
+//   - the tile stitched: "The filter primitive subregion is to be passed as
+//     the arguments fTileX, fTileY, fTileWidth and fTileHeight", in user
+//     space as the point is, where resvg passes the filter region's size in
+//     pixels and each pixel's own index as the tile's position;
+//   - the seed, "truncated, i.e. rounded to the closest integer value
+//     towards zero", is that integer, where resvg saturates it to 32 bits
+//     first.
+// A pixel is sampled at its top-left corner, mapped to user space by the
+// device scale and the region's offset, as resvg (and Firefox) do: the
+// specification does not say which point of a pixel is sampled, and
+// Chromium (Skia) samples its centre.
 
 const (
 	turbRandM   int32 = 2147483647 // 2**31 - 1
@@ -38,7 +52,7 @@ const maxTurbulenceOctaves = 2099
 type turbSpec struct {
 	freqX, freqY float64 // base frequencies, f32 as usvg's
 	octaves      uint32
-	seed         int32
+	seed         int64 // truncated
 	stitch       bool
 	fractal      bool // fractalNoise, else turbulence
 }
@@ -58,12 +72,18 @@ func turbulenceOf(fe *node) turbSpec {
 			t.freqX, t.freqY = float64(x), float64(y)
 		}
 	}
-	oct := numAttr32(fe, aNumOctaves, 1)
-	if math.Signbit(float64(oct)) {
+	// numOctaves = "<integer>": a number that is not a whole one is not a
+	// value, and the initial 1 holds (usvg rounds it). "Negative values are
+	// unsupported": none (usvg's).
+	oct := numAttr(fe, aNumOctaves, 1)
+	if oct != math.Trunc(oct) {
+		oct = 1
+	}
+	if math.Signbit(oct) {
 		oct = 0
 	}
-	t.octaves = satU32(math.Round(float64(oct)))
-	t.seed = satI32(math.Trunc(float64(numAttr32(fe, aSeed, 0))))
+	t.octaves = satU32(oct)
+	t.seed = satI64(math.Trunc(numAttr(fe, aSeed, 0)))
 	t.stitch = fe.str(aStitchTiles) == "stitch"
 	t.fractal = fe.str(aType) == "fractalNoise"
 	return t
@@ -84,31 +104,48 @@ func turbRandom(seed int32) int32 {
 	return r
 }
 
-func newTurbTables(seed int32) *turbTables {
+func newTurbTables(seed int64) *turbTables {
 	t := &turbTables{}
+	// setup_seed, in the integer it is given: the result is in [1, m-1].
+	const m = int64(turbRandM)
 	if seed <= 0 {
-		seed = -seed%(turbRandM-1) + 1 // i32, wrapping as Rust's release build does
+		seed = -(seed % (m - 1)) + 1
 	}
-	if seed > turbRandM-1 {
-		seed = turbRandM - 1
+	if seed > m-1 {
+		seed = m - 1
 	}
+	s := int32(seed)
 	for k := 0; k < 4; k++ {
 		for i := 0; i < turbBSize; i++ {
 			t.lattice[i] = i
-			for j := 0; j < 2; j++ {
-				seed = turbRandom(seed)
-				t.gradient[k][i][j] = float64((seed%(turbBSize+turbBSize))-turbBSize) / turbBSize
-			}
 			g := &t.gradient[k][i]
-			s := math.Sqrt(float64(g[0]*g[0]) + float64(g[1]*g[1]))
-			g[0] /= s
-			g[1] /= s
+			for {
+				for j := 0; j < 2; j++ {
+					s = turbRandom(s)
+					g[j] = float64((s%(turbBSize+turbBSize))-turbBSize) / turbBSize
+				}
+				if g[0] != 0 || g[1] != 0 {
+					break
+				}
+			}
+			// A gradient is drawn again while it is zero or longer than 1.
+			// The draws are the generator's numbers in order, and nowhere
+			// in its whole cycle (2^31 - 2 numbers, either way of pairing
+			// them) are more than 14 draws in a row thrown away: a gradient
+			// takes at most 15, whatever the seed.
+			n := math.Sqrt(float64(g[0]*g[0]) + float64(g[1]*g[1]))
+			if n > 1 {
+				i-- // discard the current random vector; try it again
+				continue
+			}
+			g[0] /= n
+			g[1] /= n
 		}
 	}
 	for i := turbBSize - 1; i > 0; i-- {
 		k := t.lattice[i]
-		seed = turbRandom(seed)
-		j := int(seed % turbBSize)
+		s = turbRandom(s)
+		j := int(s % turbBSize)
 		t.lattice[i] = t.lattice[j]
 		t.lattice[j] = k
 	}
@@ -194,12 +231,12 @@ func (t *turbTables) noise2(ch int, x, y float64, st *turbStitch) float64 {
 	return turbLerp(sy, a, b)
 }
 
-// stitchFreq is resvg's adjustment of a base frequency f for stitching a
-// tile of side n: whichever of the nearest frequencies making a whole number
-// of periods over the tile is nearer (by ratio), so that its borders are
-// continuous.
+// stitchFreq is the reference code's adjustment of a base frequency f for
+// stitching a tile of side n: whichever of the nearest frequencies making a
+// whole number of periods over the tile is nearer (by ratio), so that its
+// borders are continuous ("if(fBaseFreqX != 0.0)").
 func stitchFreq(f, n float64) float64 {
-	if approxZero64(f) {
+	if f == 0 {
 		return f
 	}
 	lo := math.Floor(float64(n*f)) / n
@@ -210,9 +247,9 @@ func stitchFreq(f, n float64) float64 {
 	return hi
 }
 
-// stitchAt is resvg's initial stitch values for the pixel (x, y) of a tile
-// w x h at (stitch-adjusted) frequencies fx, fy: resvg passes each pixel's
-// own index as the tile's position.
+// stitchAt is the reference code's initial stitch values for a tile at (x,
+// y), w x h, at (stitch-adjusted) frequencies fx, fy, each converted to an
+// int as C does (truncated; saturated here).
 func stitchAt(x, y, w, h, fx, fy float64) turbStitch {
 	var st turbStitch
 	st.width = satI32(float64(w*fx) + 0.5)
@@ -259,18 +296,13 @@ func (t *turbTables) sum(ch int, x, y, fx, fy float64, st0 *turbStitch, fractal 
 	return sum
 }
 
-// approxZero64 is usvg's approx_zero_ulps(4) for an f64.
-func approxZero64(v float64) bool {
-	if math.Signbit(v) {
-		return v == 0
-	}
-	return math.Float64bits(v) <= 4
-}
-
 // turbulence is resvg's apply_turbulence: noise over the region's pixels
 // (from the image's corner, as resvg's region-sized image is drawn), in the
-// primitive's colour space, made premultiplied. Each pixel is its octaves
-// times four channels of work, charged as such.
+// primitive's colour space (§9.21: "The generated color and alpha values
+// are in the color space determined by the color-interpolation-filters
+// property"), made premultiplied. Stitched, the tile is the primitive's
+// sub-region in user space. Each pixel is its octaves times four channels
+// of work, charged as such.
 func (run *filterRun) turbulence(p *fprim) (fimage, bool) {
 	w := run.w
 	pix := run.blank()
@@ -286,8 +318,12 @@ func (run *filterRun) turbulence(p *fprim) (fimage, bool) {
 	offX := float64(run.region.x0) - float64(float32(run.ts.e))
 	offY := float64(run.region.y0) - float64(float32(run.ts.f))
 	fx, fy := tb.freqX, tb.freqY
+	var st *turbStitch
 	if tb.stitch {
-		fx, fy = stitchFreq(fx, float64(rw)), stitchFreq(fy, float64(rh))
+		tile := p.rect
+		fx, fy = stitchFreq(fx, tile.w()), stitchFreq(fy, tile.h())
+		s := stitchAt(tile.x0, tile.y0, tile.w(), tile.h(), fx, fy)
+		st = &s
 	}
 	// Four channels of octaves a pixel, and its setting up, each charged as
 	// a noise evaluation: w x h x numOctaves x channels.
@@ -296,11 +332,6 @@ func (run *filterRun) turbulence(p *fprim) (fimage, bool) {
 		for y := y0; y < y1; y++ {
 			for x := 0; x < rw; x++ {
 				tx, ty := (float64(x)+offX)/sx, (float64(y)+offY)/sy
-				var st *turbStitch
-				if tb.stitch {
-					s := stitchAt(float64(x), float64(y), float64(rw), float64(rh), fx, fy)
-					st = &s
-				}
 				o := pix[(y*w+x)*4 : (y*w+x)*4+4]
 				for ch := 0; ch < 4; ch++ {
 					n := tables.sum(ch, tx, ty, fx, fy, st, tb.fractal, octaves)

@@ -79,18 +79,27 @@ var filterPrims = []struct {
 	// A conversion, the pass along rows and the pass along columns.
 	{"morphology", fprim{kind: tagFeMorphology, dilate: true, rx: 3, ry: 2, linear: true}, 1 + 2},
 	{"morphology, sRGB", fprim{kind: tagFeMorphology, rx: 300, ry: 1e6}, 1 + 2},
-	{"morphology, radius 0", fprim{kind: tagFeMorphology, linear: true}, 1 + 1},
-	{"morphology, size wraps", fprim{kind: tagFeMorphology, rx: 2147483648, ry: 2, linear: true}, 1 + 1},
+	// A radius past 2^31 (whose size resvg's u32 wraps) is the whole line.
+	{"morphology, radius past 2^31", fprim{kind: tagFeMorphology, rx: 2147483648, ry: 2, linear: true}, 1 + 2},
 	{"convolve", fprim{kind: tagFeConvolveMatrix, conv: testKernel(false), linear: true}, 1 + 1},
 	{"convolve, preserveAlpha", fprim{kind: tagFeConvolveMatrix, conv: testKernel(true), linear: true}, 1 + 1 + 1},
-	// Two conversions (in, and in2 a second time: SourceAlpha's own pass
-	// first) and the displacement.
-	{"displacement", fprim{kind: tagFeDisplacementMap, in2: finput{kind: inAlpha}, scale: 20, xch: 3, ych: 3, linear: true}, 1 + 1 + 1 + 1},
+	{"convolve, kernelUnitLength", fprim{kind: tagFeConvolveMatrix, conv: spacedKernel(), linear: true}, 1 + 1},
+	// SourceAlpha's own pass, in2's conversion (in is not converted) and
+	// the displacement.
+	{"displacement", fprim{kind: tagFeDisplacementMap, in2: finput{kind: inAlpha}, scaleX: 20, scaleY: 20, xch: 3, ych: 3, linear: true}, 1 + 1 + 1},
 	{"turbulence", fprim{kind: tagFeTurbulence, turb: &turbSpec{freqX: 0.05, freqY: 0.02, octaves: 2}, linear: true}, 1},
 	{"fractal noise, stitched", fprim{kind: tagFeTurbulence, turb: &turbSpec{freqX: 0.05, freqY: 0.02, octaves: 1, stitch: true, fractal: true}}, 1},
 	{"diffuse, distant light", fprim{kind: tagFeDiffuseLighting, light: &lightingSpec{surfaceScale: 3, constant: 1, color: [3]uint8{255, 128, 0}, light: lightSource{kind: lightDistant, azimuth: 45, elevation: 30}}, linear: true}, 1},
 	{"specular, spot light", fprim{kind: tagFeSpecularLighting, light: &lightingSpec{specular: true, surfaceScale: 3, constant: 1, exponent: 20, color: [3]uint8{255, 255, 255},
 		light: lightSource{kind: lightSpot, x: 100, y: 100, z: 50, pointsX: 500, pointsY: 500, spotExp: 2, cone: 40, hasCone: true}}, linear: true}, 1},
+	{"diffuse, kernelUnitLength", fprim{kind: tagFeDiffuseLighting, light: &lightingSpec{surfaceScale: 3, constant: 1, color: [3]uint8{255, 128, 0}, light: lightSource{kind: lightDistant, azimuth: 45, elevation: 30}, unitX: 2.5, unitY: 0.5}, linear: true}, 1},
+}
+
+// spacedKernel is testKernel(false) with its cells 2.5 x 0.75 pixels apart.
+func spacedKernel() *convolveSpec {
+	k := testKernel(false)
+	k.unitX, k.unitY = 2.5, 0.75
+	return k
 }
 
 // testKernel is a 3x3 edge-detecting convolution.

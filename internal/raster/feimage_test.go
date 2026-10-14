@@ -96,8 +96,9 @@ func pixelAt(img *image.NRGBA, x, y int) [4]uint8 {
 }
 
 // An feImage that draws an element whose filter is being applied (a cycle
-// through a group) ends: the element is not drawn inside its own filter's
-// feImage. usvg's own tree recurses until its stack overflows.
+// through a group) ends: the reference is circular (SVG 2 §16.1.2), and
+// the feImage's result transparent black (Filter Effects 1 §9.15). usvg's
+// own tree recurses until its stack overflows.
 func TestFeImageCycle(t *testing.T) {
 	svg := []byte(`<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="200" height="150"><defs>
 <filter id="f" x="0" y="0" width="200" height="150" filterUnits="userSpaceOnUse"><feImage xlink:href="#g"/><feOffset dx="50" dy="40"/></filter></defs>
@@ -106,17 +107,17 @@ func TestFeImageCycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The group's lime square, drawn by the feImage and moved by (50, 40);
-	// the filtered red square itself is not drawn inside it (it would be
-	// moved to (150, 120)), and the filter's result replaces it.
+	// The group's lime square, drawn by the document; the filtered red
+	// square's filter result, an offset of the transparent feImage, is
+	// transparent: no copy of the group, moved by (50, 40), and no square.
 	for _, tc := range []struct {
 		x, y int
 		want [4]uint8
 	}{
 		{20, 20, [4]uint8{0, 255, 0, 255}}, // the group's own lime square
-		{70, 60, [4]uint8{0, 255, 0, 255}}, // the feImage's copy, moved
+		{70, 60, [4]uint8{0, 0, 0, 0}},     // no copy of it, moved
 		{110, 90, [4]uint8{0, 0, 0, 0}},    // the filtered square: its result
-		{160, 130, [4]uint8{0, 0, 0, 0}},   // nor drawn moved inside it
+		{160, 130, [4]uint8{0, 0, 0, 0}},
 		{150, 120, [4]uint8{0, 0, 0, 0}},
 	} {
 		if got := pixelAt(img, tc.x, tc.y); got != tc.want {
