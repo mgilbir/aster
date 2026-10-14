@@ -362,9 +362,10 @@ func (c *Converter) renderSVG(ctx context.Context, spec jsval.Value) (out string
 	shaping := text.ShapingBudgetFrom(ctx)
 	m = m.Bounded(shaping)
 	opts := vega.Options{
-		Loader:   c.loader,
-		Location: c.location,
-		Now:      c.cfg.now,
+		Loader:      c.loader,
+		Location:    c.location,
+		Projections: c.cfg.projections,
+		Now:         c.cfg.now,
 		// Set only by the tests' signal sweep (export_test.go).
 		SignalWrites: signalWritesFrom(ctx),
 		Config:       c.theme,

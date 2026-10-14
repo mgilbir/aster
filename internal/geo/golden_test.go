@@ -93,7 +93,7 @@ func projFromGolden(t testing.TB, typ string, props json.RawMessage) Projection 
 			}
 		}
 	}
-	p, err := ConfigureProjection(bg, nil, obj, nil)
+	p, err := ConfigureProjection(bg, nil, nil, obj, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

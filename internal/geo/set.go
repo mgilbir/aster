@@ -113,6 +113,10 @@ func (p *standard) Set(prop string, v jsval.Value) error {
 		p.SetReflectX(v.IsTruthy())
 	case "reflectY":
 		p.SetReflectY(v.IsTruthy())
+	case "coefficient", "distance", "fraction", "lobes", "parallel", "radius", "ratio", "spacing", "tilt":
+		if p.custom != nil {
+			return p.setParam(prop, v)
+		}
 	}
 	return nil
 }

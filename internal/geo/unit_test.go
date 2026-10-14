@@ -224,14 +224,14 @@ func TestProjectionSetErrors(t *testing.T) {
 
 func TestConfigureProjectionUpdates(t *testing.T) {
 	o := jsval.ObjectOf("type", jsval.Str("mercator"), "scale", jsval.Num(100))
-	p, err := ConfigureProjection(bg, nil, o, nil)
+	p, err := ConfigureProjection(bg, nil, nil, o, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	o.Set("scale", jsval.Num(250))
 	o.Set("translate", jsval.ArrOf(jsval.Num(10), jsval.Num(20)))
 	// Only modified properties are re-applied to an existing projection.
-	p2, err := ConfigureProjection(bg, p, o, func(name string) bool { return name == "scale" })
+	p2, err := ConfigureProjection(bg, nil, p, o, func(name string) bool { return name == "scale" })
 	if err != nil || p2 != p {
 		t.Fatalf("update: %v", err)
 	}
@@ -240,11 +240,11 @@ func TestConfigureProjectionUpdates(t *testing.T) {
 	}
 	// A modified type builds a new projection.
 	o.Set("type", jsval.Str("orthographic"))
-	p3, err := ConfigureProjection(bg, p, o, func(name string) bool { return name == "type" })
+	p3, err := ConfigureProjection(bg, nil, p, o, func(name string) bool { return name == "type" })
 	if err != nil || p3 == p || p3.Type() != "orthographic" || p3.Scale() != 250 {
 		t.Errorf("type change: %v %v", p3, err)
 	}
-	if _, err := ConfigureProjection(bg, nil, jsval.ObjectOf("type", jsval.Str("nosuch")), nil); err == nil {
+	if _, err := ConfigureProjection(bg, nil, nil, jsval.ObjectOf("type", jsval.Str("nosuch")), nil); err == nil {
 		t.Error("unknown type")
 	}
 }

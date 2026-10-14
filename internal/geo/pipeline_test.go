@@ -68,7 +68,7 @@ func TestVegaPipeline(t *testing.T) {
 					o.Set("extent", parseJSONValue(t, pj.Extent))
 				}
 				var err error
-				if proj, err = ConfigureProjection(bg, nil, o, nil); err != nil {
+				if proj, err = ConfigureProjection(bg, customPorts, nil, o, nil); err != nil {
 					t.Fatal(err)
 				}
 			}

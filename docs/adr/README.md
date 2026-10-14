@@ -19,3 +19,4 @@ Decisions whose reason is not visible in the code. Each says what was decided, w
 | [0013](0013-invalid-input-fails-where-upstream-throws.md) | Invalid Vega-Lite input fails where upstream throws, in both versions, with upstream's message | accepted, 2026-10-12 |
 | [0014](0014-library-memory-bounded-by-ledger-room.md) | Memory a library allocates as it works, unsized beforehand, is bounded by the ledger's room rather than charged | accepted, 2026-10-13 |
 | [0015](0015-filters-follow-the-specification.md) | PNG filters follow the Filter Effects spec where resvg departs from it | accepted, 2026-10-14 |
+| [0016](0016-custom-projections.md) | Custom projections are a raw projection and its parameters, per Converter | accepted, 2026-10-14 |
