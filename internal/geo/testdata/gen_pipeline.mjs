@@ -1,5 +1,7 @@
 // Records end-to-end vega runs of the geo transforms (projection operator,
-// geopoint, geopath, geojson, graticule) from vega 6.4.0:
+// geopoint, geopath, geojson, graticule) from vega 6.4.0, with
+// d3-geo-projection's constructors registered by vega.projection(name,
+// constructor) for the custom projection cases:
 //
 //   NODE_PATH=/path/to/node_modules node testdata/gen_pipeline.mjs
 //
@@ -15,6 +17,12 @@ import { fileURLToPath } from 'node:url';
 const require = createRequire(path.join(process.env.NODE_PATH, 'x.js'));
 const vega = await import(require.resolve('vega'));
 const topo = await import(require.resolve('topojson-client'));
+const d3gp = await import(require.resolve('d3-geo-projection'));
+
+// Custom projection types, registered as a page registers them; the Go test
+// registers its ports of their raw projections under the same names.
+const custom = { airy: d3gp.geoAiry, hammer: d3gp.geoHammer, bottomley: d3gp.geoBottomley, bonne: d3gp.geoBonne, winkel3: d3gp.geoWinkel3, littrow: d3gp.geoLittrow };
+for (const [name, ctor] of Object.entries(custom)) vega.projection(name, ctor);
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const dataDir = path.join(here, '../../../testdata/vega-datasets/data');
@@ -61,6 +69,23 @@ cases.push({ name: 'geopath no projection point radius const', kind: 'geopath', 
 cases.push({ name: 'geopath point radius const', kind: 'geopath', dataset: 'pointFeatures', projection: { type: 'mercator', props: {} }, params: { pointRadius: 3.25 } });
 cases.push({ name: 'geopath point radius projection', kind: 'geopath', dataset: 'pointFeatures', projection: { type: 'mercator', props: { pointRadius: 9 } }, params: {} });
 cases.push({ name: 'geopath point radius expr', kind: 'geopath', dataset: 'pointFeatures', projection: { type: 'mercator', props: {} }, params: { pointRadiusExpr: 'datum.id + 1' } });
+
+// ---- custom projections (vega.projection) --------------------------------------
+for (const type of Object.keys(custom)) {
+  cases.push({ name: `custom geopath fit size ${type}`, kind: 'geopath', dataset: 'some', projection: { type, props: {}, fit: 'some', size: [640, 380] }, params: {} });
+  cases.push({ name: `custom geopath props ${type}`, kind: 'geopath', dataset: 'some', projection: { type, props: { scale: 120, translate: [300, 200], rotate: [30, -20, 10], center: [10, 5], precision: 0.3 } }, params: {} });
+  cases.push({ name: `custom geopath default ${type}`, kind: 'geopath', dataset: 'some', projection: { type, props: {} }, params: {} });
+  cases.push({ name: `custom geopoint ${type}`, kind: 'geopoint', dataset: 'points', projection: { type, props: {} }, params: { fields: ['lon', 'lat'] } });
+}
+for (const [type, props] of [
+  ['airy', { radius: 30 }], ['airy', { radius: 120 }], ['airy', { radius: 60, clipAngle: 100 }],
+  ['hammer', { coefficient: 1 }], ['hammer', { coefficient: 1.5 }], ['hammer', { coefficient: 3 }],
+  ['bottomley', { fraction: 0.2 }], ['bottomley', { fraction: 0.9 }],
+  ['bonne', { parallel: 0 }], ['bonne', { parallel: 20 }], ['bonne', { parallel: 60 }],
+  ['winkel3', { radius: 50, coefficient: 2 }],
+]) {
+  cases.push({ name: `custom geopath fit ${type} ${JSON.stringify(props)}`, kind: 'geopath', dataset: 'some', projection: { type, props, fit: 'some', size: [640, 380] }, params: {} });
+}
 
 // ---- geojson ---------------------------------------------------------------
 cases.push({ name: 'geojson fields', kind: 'geojson', dataset: 'points', params: { fields: ['lon', 'lat'] } });

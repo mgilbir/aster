@@ -219,7 +219,7 @@ func TestNoPanicOnGarbageParams(t *testing.T) {
 				o.Set(k, v)
 			}
 		}
-		p, err := ConfigureProjection(bg, nil, o, nil)
+		p, err := ConfigureProjection(bg, nil, nil, o, nil)
 		if err != nil {
 			continue
 		}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -126,6 +127,47 @@ func ExampleWithSignal() {
 	}
 	fmt.Println(strings.Contains(svg, ">after<"))
 	// Output: true
+}
+
+// A projection Vega does not have, d3-geo-projection's Hammer, registered
+// under a name specifications use. Its "coefficient" parameter is one a
+// specification can set.
+func ExampleWithProjection() {
+	// The raw projection on the unit sphere: an azimuthal equal-area
+	// projection of longitude divided by B, stretched by B.
+	hammer := aster.Projection{
+		Raw: func(params map[string]float64) aster.RawProjection {
+			b := params["coefficient"]
+			return aster.RawProjection{Forward: func(lambda, phi float64) (float64, float64) {
+				lambda /= b
+				cl, cp := math.Cos(lambda), math.Cos(phi)
+				k := math.Sqrt(2 / (1 + cl*cp))
+				return b * k * cp * math.Sin(lambda), k * math.Sin(phi)
+			}}
+		},
+		Params: map[string]float64{"coefficient": 2},
+		Scale:  169.529,
+	}
+	c, err := aster.New(aster.WithProjection("hammer", hammer))
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer c.Close()
+
+	spec := `{
+	  "width": 600, "height": 300,
+	  "projections": [{"name": "p", "type": "hammer", "coefficient": 3, "translate": [300, 150]}],
+	  "marks": [{"type": "text", "encode": {"enter": {"text": {"signal": "format(scale('p', [90, 45])[0], '.1f')"}}}}]
+	}`
+	svg, err := c.VegaToSVG([]byte(spec))
+	if err != nil {
+		log.Fatal(err)
+	}
+	_, text, _ := strings.Cut(svg, "<text")
+	_, text, _ = strings.Cut(text, ">")
+	x, _, _ := strings.Cut(text, "<")
+	fmt.Println(x)
+	// Output: 500.3
 }
 
 // PDFTextNamed output, assembled into one document, embeds each font once:

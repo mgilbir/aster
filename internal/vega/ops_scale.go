@@ -747,7 +747,7 @@ func facProjection(c *rtContext, n *opNode, e *entry) (any, transform, func(*opN
 			params.Set(name, projectionParam(p.Get(name)))
 		}
 		cur, _ := n.value.(geo.Projection)
-		proj, err := geo.ConfigureProjection(n.g.ctx, cur, params, func(name string) bool { return p.Modified(name) })
+		proj, err := geo.ConfigureProjection(n.g.ctx, c.view.projections, cur, params, func(name string) bool { return p.Modified(name) })
 		if err != nil {
 			failErr(err)
 		}

@@ -31,6 +31,7 @@ import (
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/expr"
 	"github.com/mgilbir/aster/internal/format"
+	"github.com/mgilbir/aster/internal/geo"
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/raster"
 	"github.com/mgilbir/aster/internal/scale"
@@ -142,6 +143,9 @@ type Options struct {
 	// Shaper draws text when the label transform paints the marks it avoids;
 	// nil selects the rasterizer's default fonts.
 	Shaper raster.Shaper
+	// Projections are projection types registered by name, looked up before
+	// the built-in ones, as vega.projection(name, constructor) registers them.
+	Projections geo.Registry
 	// WordcloudText measures and draws words for the wordcloud transform,
 	// which upstream does with a canvas; nil makes the transform fail as it
 	// does when no canvas is available.
@@ -232,6 +236,8 @@ type runView struct {
 	bounder *scene.Bounder
 	shaper  raster.Shaper // text for the label transform's painter
 	wcText  wordcloud.TextRenderer
+	// projections are the caller's projection types (Options.Projections).
+	projections geo.Registry
 
 	root *rtContext
 
@@ -371,9 +377,10 @@ func newView(ctx context.Context, opts Options, locale jsval.Value) *runView {
 		bud: bud, led: budget.LedgerFrom(ctx), strs: expr.NewStringBudget(limits.MaxStringBytes),
 		ctx: ctx, loader: opts.Loader, limits: limits,
 		loc: opts.Location, sg: scene.New(),
-		bounder: scene.NewBounder(opts.TextMeasurer),
-		shaper:  opts.Shaper,
-		wcText:  opts.WordcloudText,
+		bounder:     scene.NewBounder(opts.TextMeasurer),
+		shaper:      opts.Shaper,
+		wcText:      opts.WordcloudText,
+		projections: opts.Projections,
 	}
 	if v.loc == nil {
 		v.loc = time.UTC

@@ -393,8 +393,9 @@ func CollectGeoJSON(data jsval.Value) (jsval.Value, error) {
 	return jsval.Obj(jsval.ObjectOf("type", jsval.Str("FeatureCollection"), "features", jsval.Arr(features))), nil
 }
 
-// ConfigureProjection is vega-geo's Projection operator. params holds the
-// resolved operator parameters ("type", the ProjectionProperties, "pointRadius",
+// ConfigureProjection is vega-geo's Projection operator, with the projection
+// types of reg as well as the built-in ones. params holds the resolved
+// operator parameters ("type", the ProjectionProperties, "pointRadius",
 // "fit", "extent", "size"). current is the projection created by an earlier
 // call (nil the first time). modified reports whether a parameter changed since
 // then; it may be nil when current is nil.
@@ -404,7 +405,7 @@ func CollectGeoJSON(data jsval.Value) (jsval.Value, error) {
 // the modified properties are applied. A truthy "fit" then fits the projection
 // to the collected GeoJSON using "extent" or "size", a walk bounded by ctx
 // (see Projection.FitExtent).
-func ConfigureProjection(ctx context.Context, current Projection, params *jsval.Object, modified func(name string) bool) (Projection, error) {
+func ConfigureProjection(ctx context.Context, reg Registry, current Projection, params *jsval.Object, modified func(name string) bool) (Projection, error) {
 	get := func(name string) jsval.Value { return params.Lookup(name) }
 	proj := current
 	if proj == nil || (modified != nil && modified("type")) {
@@ -414,7 +415,7 @@ func ConfigureProjection(ctx context.Context, current Projection, params *jsval.
 			name = typ.AsString()
 		}
 		var err error
-		if proj, err = NewProjection(name); err != nil {
+		if proj, err = reg.NewProjection(name); err != nil {
 			return nil, err
 		}
 		for _, prop := range ProjectionProperties {

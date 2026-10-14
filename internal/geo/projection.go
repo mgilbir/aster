@@ -152,6 +152,11 @@ type standard struct {
 	projectAt func(phi0, phi1 float64) *raw
 	project   *raw
 
+	// custom is the registered type of a custom projection (nil for a
+	// built-in one), params its current parameters.
+	custom *CustomType
+	params map[string]float64
+
 	conic      bool
 	phi0, phi1 float64 // parallels in radians
 	mercator   bool
@@ -558,6 +563,17 @@ func (p *standard) FitHeight(ctx context.Context, h float64, object jsval.Value)
 }
 
 func (p *standard) Copy() Projection {
+	if p.custom != nil {
+		// The type's own constructor, not a registry lookup: the name may
+		// be registered to another type, or none, where the copy is made.
+		cs, err := newCustom(p.typ, p.custom)
+		if err != nil {
+			// The type made p with the same defaults.
+			panic(fmt.Sprintf("geo: copying projection %q: %v", p.typ, err))
+		}
+		cs.copyFrom(p)
+		return cs
+	}
 	c, _ := NewProjection(p.typ)
 	cs := c.(*standard)
 	cs.copyFrom(p)
@@ -590,6 +606,13 @@ func (p *standard) copyFrom(src *standard) {
 	p.SetPrecision(src.Precision())
 	p.SetReflectX(src.sx < 0)
 	p.SetReflectY(src.sy < 0)
+	// The extended properties, after the standard ones, and only those
+	// whose value is truthy: copy() runs `if (p[prop]) c[prop](p[prop]())`.
+	for _, k := range ExtendedProperties {
+		if v, ok := src.params[k]; ok && v != 0 && !math.IsNaN(v) {
+			_ = p.setParam(k, jsval.Num(v)) // src's Raw took the value
+		}
+	}
 	p.Path().radius = src.Path().radius
 	p.Path().radiusFn = src.Path().radiusFn
 }

@@ -60,12 +60,47 @@ A filter's work and memory are bounded ([limits.md](limits.md)): its region's pi
 | `WithTheme(json string)` | none | a Vega config applied to every render, to the Vega-Lite compiler as well (so `VegaLiteToVega` reflects it); must be a JSON object |
 | `WithTimezone(tz)` | `"UTC"` | local time for time scales, `timeFormat`, dates without a zone; any IANA name Go knows. **`"Local"` is refused**: it would make the output depend on the host |
 | `WithFont`, `WithFontFace`, `WithFontInstance`, `WithFontPalette`, `WithFontFallback`, `WithDefaultFontFamily`, `WithDefaultSerifFamily`, `WithDefaultMonospaceFamily`, `WithSystemFonts`, `WithTextMeasurement`, `WithHarfBuzzTextMetrics` | see [fonts.md](fonts.md) | |
+| `WithProjection(name, p Projection)` | the 17 types Vega registers | adds a projection type specifications can name; see [Custom projections](#custom-projections) |
 
 ### Errors from New
 
-`New` fails for an option that is not valid, rather than silently replacing it by a default: an unknown Vega-Lite version (the message lists the available ones), an unknown time zone or `"Local"`, a theme that is not a JSON object, a nil pointer as the Loader, a negative `WithFontFace` index, a font given with `WithFont`, `WithFontFace` or `WithFontInstance` that does not load, and a `WithFontFallback`, `WithDefaultFontFamily`, `WithDefaultSerifFamily` or `WithDefaultMonospaceFamily` family with no font. It loads the fonts when any font option is given (a copy of the bytes: the caller may reuse its buffer); with the embedded fonts alone it loads nothing, and they load on first use.
+`New` fails for an option that is not valid, rather than silently replacing it by a default: an unknown Vega-Lite version (the message lists the available ones), an unknown time zone or `"Local"`, a theme that is not a JSON object, a nil pointer as the Loader, a negative `WithFontFace` index, a `WithProjection` definition that is not usable (see below), a font given with `WithFont`, `WithFontFace` or `WithFontInstance` that does not load, and a `WithFontFallback`, `WithDefaultFontFamily`, `WithDefaultSerifFamily` or `WithDefaultMonospaceFamily` family with no font. It loads the fonts when any font option is given (a copy of the bytes: the caller may reuse its buffer); with the embedded fonts alone it loads nothing, and they load on first use.
 
 `AvailableVersions() ([]VersionInfo, error)` lists the bundled compilers (`Key` such as `"vl6_4"`, `VegaVersion`, `VegaLiteVersion` such as `"6.4.3"`); `WithVegaLiteVersion` takes a `VegaLiteVersion` or its `major.minor`. Its error is always nil, and is kept so that existing callers compile.
+
+### Custom projections
+
+Vega has 17 projection types: d3-geo's 16 and `mollweide`. A specification that names another one, such as `airy` from d3-geo-projection, fails here, as it does upstream: "unrecognized projection type: airy". A page registers more with `vega.projection(name, constructor)`. A Go caller registers them on a Converter with `WithProjection`:
+
+```go
+hammer := aster.Projection{
+	// The raw projection on the unit sphere, for the current parameters.
+	Raw: func(params map[string]float64) aster.RawProjection {
+		b := params["coefficient"]
+		return aster.RawProjection{Forward: func(lambda, phi float64) (float64, float64) {
+			lambda /= b
+			cl, cp := math.Cos(lambda), math.Cos(phi)
+			k := math.Sqrt(2 / (1 + cl*cp))
+			return b * k * cp * math.Sin(lambda), k * math.Sin(phi)
+		}}
+	},
+	Params: map[string]float64{"coefficient": 2}, // "coefficient": 3 in a spec changes it
+	Scale:  169.529,
+}
+c, err := aster.New(aster.WithProjection("hammer", hammer))
+```
+
+A type is described the way d3-geo-projection's constructors build one:
+
+- `Raw(params)` returns the forward function and, optionally, the inverse (`Invert`; without it, `invert()` of the projection gives nothing). Both are on the unit sphere, in radians, y up. It is called again when a parameter changes.
+- `Params` are the parameters with their defaults. Each is one of the properties Vega forwards: `coefficient`, `distance`, `fraction`, `lobes`, `parallel`, `radius`, `ratio`, `spacing`, `tilt`. Values arrive as the spec gives them; convert degrees in `Raw`.
+- `Scale`, `ClipAngle`, `Center` and `Rotate` are the constructor's defaults. A zero value is d3's default.
+
+Everything else works as for the built-in types: the spec's `scale`, `translate`, `center`, `rotate`, `clipAngle`, `clipExtent`, `precision`, `reflectX`/`Y`, `fit`/`size`/`extent`, and `invert()`. Names are case-insensitive, and registering a built-in name (`"mercator"`) replaces it on that Converter. Other Converters are unaffected.
+
+`New` calls `Raw` once with the defaults. It returns an error for an empty name, a missing `Raw` or `Forward`, a `Raw` that panics, a parameter not in the list, or a default that is not finite. The functions are called from every render that uses the type, from several at once, and must be safe for that. A panic in one fails that render with an error.
+
+Projections that replace d3's clipping stream cannot be described: interrupted and polyhedral projections, and a few others with their own clipping ([ADR 0016](adr/0016-custom-projections.md)). The CLI has no way to register a projection.
 
 ## Per-call options
 
