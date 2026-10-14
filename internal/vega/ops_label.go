@@ -1,6 +1,7 @@
 package vega
 
 import (
+	"image"
 	"math"
 
 	"github.com/mgilbir/aster/internal/budget"
@@ -260,22 +261,40 @@ func (lp *labelPainter) paint(m *label.Mask, typ scene.MarkType, items []*scene.
 	if err := led.Alloc(int64(len(doc))); err != nil {
 		failErr(err)
 	}
-	img, err := raster.Render([]byte(doc), raster.Options{Shaper: v.shaper, Context: v.ctx, Scale: float64(ss), Limits: lim})
+	// Only alpha is read, so the premultiplied canvas serves, and only where
+	// it has ink.
+	img, ink, err := raster.RenderRGBA([]byte(doc), raster.Options{Shaper: v.shaper, Context: v.ctx, Scale: float64(ss), Limits: lim})
 	led.Free(int64(len(doc)))
 	if err != nil {
 		failErr(err)
 	}
-	b := img.Bounds()
-	for y := 0; y < b.Dy() && y/ss < m.Height; y++ {
-		if y&255 == 0 {
-			if err := v.ctx.Err(); err != nil {
-				failErr(err)
-			}
+	markSamples(img, ink, ss, m.Width, m.Height, m.Set, func() {
+		if err := v.ctx.Err(); err != nil {
+			failErr(err)
 		}
-		row := img.Pix[y*img.Stride:]
-		for x := 0; x < b.Dx() && x/ss < m.Width; x++ {
-			if row[x*4+3] != 0 {
-				m.Set(x/ss, y/ss)
+	})
+}
+
+// markSamples calls set(x, y) for every pixel of a w x h mask whose ss x ss
+// block of samples in img has one with non-zero alpha. ink bounds the
+// samples that can; poll is called every 256 sample rows.
+func markSamples(img *image.RGBA, ink image.Rectangle, ss, w, h int, set func(x, y int), poll func()) {
+	ink = ink.Intersect(image.Rect(0, 0, w*ss, h*ss)).Intersect(img.Rect)
+	for y := ink.Min.Y; y < ink.Max.Y; y++ {
+		if y&255 == 0 {
+			poll()
+		}
+		row := img.Pix[(y-img.Rect.Min.Y)*img.Stride:]
+		my := y / ss
+		// x walks the samples, mx the mask pixel they fall in.
+		mx, k := ink.Min.X/ss, ink.Min.X%ss
+		for x := ink.Min.X; x < ink.Max.X; x++ {
+			if row[(x-img.Rect.Min.X)*4+3] != 0 {
+				set(mx, my)
+			}
+			if k++; k == ss {
+				k = 0
+				mx++
 			}
 		}
 	}

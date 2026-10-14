@@ -97,23 +97,60 @@ type Options struct {
 }
 
 // Render rasterizes svg and returns a non-premultiplied image.
-func Render(svg []byte, opts Options) (img *image.NRGBA, err error) {
+func Render(svg []byte, opts Options) (*image.NRGBA, error) {
+	var img *image.NRGBA
+	err := renderDoc(svg, opts, func(r *renderer) error {
+		if img = r.cv.toNRGBA(r); img == nil {
+			return r.err
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return img, nil
+}
+
+// RenderRGBA rasterizes svg and returns the canvas as drawn, premultiplied,
+// and ink, outside which every pixel is transparent. It skips Render's
+// conversion to non-premultiplied colour (which leaves alpha as it is), for a
+// caller that reads coverage.
+func RenderRGBA(svg []byte, opts Options) (*image.RGBA, image.Rectangle, error) {
+	var img *image.RGBA
+	var ink image.Rectangle
+	err := renderDoc(svg, opts, func(r *renderer) error {
+		c := r.cv
+		img = &image.RGBA{Pix: c.pix, Stride: 4 * c.w, Rect: image.Rect(0, 0, c.w, c.h)}
+		if d := c.dirty.intersect(c.bounds()); !d.empty() {
+			ink = image.Rect(d.x0, d.y0, d.x1, d.y1)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, image.Rectangle{}, err
+	}
+	return img, ink, nil
+}
+
+// renderDoc draws svg and passes the renderer to finish, which reads the canvas
+// out while the render's resources are still held.
+func renderDoc(svg []byte, opts Options, finish func(*renderer) error) (err error) {
 	defer func() {
 		if p := recover(); p != nil {
 			if stop, ok := p.(*budget.Stop); ok {
 				// A bound stopped drawing where it cannot return an error:
 				// the shaper's budget or the context in a text run, the
 				// geometry budget in flattening or stroking.
-				img, err = nil, stop.Err
+				err = stop.Err
 				return
 			}
-			img, err = nil, fmt.Errorf("raster: internal error: %v", p)
+			err = fmt.Errorf("raster: internal error: %v", p)
 		}
 	}()
 	lim := opts.Limits.withDefaults()
 	if opts.Context != nil {
 		if err := opts.Context.Err(); err != nil {
-			return nil, err
+			return err
 		}
 	}
 	scale := opts.Scale
@@ -121,17 +158,17 @@ func Render(svg []byte, opts Options) (img *image.NRGBA, err error) {
 		scale = 1
 	}
 	if !(scale > 0) || math.IsInf(scale, 0) {
-		return nil, fmt.Errorf("raster: invalid scale %v (must be a positive, finite number)", opts.Scale)
+		return fmt.Errorf("raster: invalid scale %v (must be a positive, finite number)", opts.Scale)
 	}
 	if len(svg) == 0 {
-		return nil, errors.New("raster: empty SVG input")
+		return errors.New("raster: empty SVG input")
 	}
 	if len(svg) > lim.MaxInputBytes {
-		return nil, fmt.Errorf("raster: SVG input is %d bytes, limit is %d: %w", len(svg), lim.MaxInputBytes, errLimit)
+		return fmt.Errorf("raster: SVG input is %d bytes, limit is %d: %w", len(svg), lim.MaxInputBytes, errLimit)
 	}
 	doc, err := parseDocumentCtx(opts.Context, string(svg), lim)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	root := doc.root
 
@@ -166,16 +203,16 @@ func Render(svg []byte, opts Options) (img *image.NRGBA, err error) {
 	w, okW := sizeOf(aWidth, 0, vb.w())
 	h, okH := sizeOf(aHeight, 1, vb.h())
 	if !okW || !okH || !(w > 0) || !(h > 0) || math.IsInf(w, 0) || math.IsInf(h, 0) {
-		return nil, errors.New("raster: SVG has no valid size (width/height or viewBox required)")
+		return errors.New("raster: SVG has no valid size (width/height or viewBox required)")
 	}
 	// resvg keeps the size as f32 and takes ceil in f64 after scaling.
 	pw := math.Ceil(float64(float32(w)) * scale)
 	ph := math.Ceil(float64(float32(h)) * scale)
 	if !(pw >= 1) || !(ph >= 1) {
-		return nil, errors.New("raster: SVG has zero dimensions")
+		return errors.New("raster: SVG has zero dimensions")
 	}
 	if pw > float64(lim.MaxDimension) || ph > float64(lim.MaxDimension) || pw*ph > float64(lim.MaxPixels) {
-		return nil, fmt.Errorf("raster: output %.0fx%.0f px (width*height*scale^2) exceeds the limit of %d pixels / %d per side: %w",
+		return fmt.Errorf("raster: output %.0fx%.0f px (width*height*scale^2) exceeds the limit of %d pixels / %d per side: %w",
 			pw, ph, lim.MaxPixels, lim.MaxDimension, errLimit)
 	}
 	cw, ch := int(pw), int(ph)
@@ -189,12 +226,12 @@ func Render(svg []byte, opts Options) (img *image.NRGBA, err error) {
 			shaper, err = NewShaper(opts.Fonts...)
 		}
 		if err != nil {
-			return nil, err
+			return err
 		}
 	}
 	fetched, err := fetchImages(opts.Context, doc, opts.Images, lim)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	r := &renderer{
 		doc: doc, lim: lim, shaper: shaper,
@@ -221,7 +258,7 @@ func Render(svg []byte, opts Options) (img *image.NRGBA, err error) {
 	defer r.reportWork(opts.Context, scale)
 	r.rootState = rootState
 	if r.cv = r.allocCanvas(cw, ch); r.cv == nil {
-		return nil, r.err
+		return r.err
 	}
 	if opts.Background != nil {
 		nc := color.NRGBAModel.Convert(opts.Background).(color.NRGBA)
@@ -230,7 +267,7 @@ func Render(svg []byte, opts Options) (img *image.NRGBA, err error) {
 		// A band at a time, polling: the canvas is the output's size.
 		for b := 0; b < len(r.cv.pix); b += 4 * imageref.BandPixels {
 			if !r.poll(true) {
-				return nil, r.err
+				return r.err
 			}
 			band := r.cv.pix[b:min(b+4*imageref.BandPixels, len(r.cv.pix))]
 			for i := 0; i < len(band); i += 4 {
@@ -249,13 +286,9 @@ func Render(svg []byte, opts Options) (img *image.NRGBA, err error) {
 	st.applyProps(root)
 	r.renderRoot(root, &st)
 	if r.err != nil {
-		return nil, r.err
+		return r.err
 	}
-	out := r.cv.toNRGBA(r)
-	if out == nil {
-		return nil, r.err
-	}
-	return out, nil
+	return finish(r)
 }
 
 func (r *renderer) renderRoot(root *node, st *state) {
