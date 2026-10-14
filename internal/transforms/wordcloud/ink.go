@@ -48,15 +48,22 @@ type inkRaster struct {
 	contours [][]pt
 	cur      []pt
 	edges    []inkEdge
-	active   []int
-	cross    []crossing
+	cross    []crossing // the active edges at a sub-scanline, by x
 	row      []float32
+	first    []int32 // edges by the sub-scanline they join at: see scan
+	byStart  []int32
 }
 
+// crossing is where an active edge crosses the current sub-scanline.
 type crossing struct {
 	x   float64
 	dir int
+	e   int // index into edges
 }
+
+// sortBatch is the most edges joining the active list at one sub-scanline
+// that are sorted into place one by one; a larger batch is sorted whole.
+const sortBatch = 16
 
 func (r *inkRaster) reset() {
 	r.contours = r.contours[:0]
@@ -238,20 +245,12 @@ func (r *inkRaster) scan(m *Mask) {
 	if len(r.edges) == 0 {
 		return
 	}
-	slices.SortFunc(r.edges, func(a, b inkEdge) int {
-		switch {
-		case a.y0 < b.y0:
-			return -1
-		case a.y0 > b.y0:
-			return 1
-		}
-		return 0
-	})
 	minX, maxX := math.Inf(1), math.Inf(-1)
-	minY, maxY := r.edges[0].y0, math.Inf(-1)
+	minY, maxY := math.Inf(1), math.Inf(-1)
 	for _, e := range r.edges {
 		minX = math.Min(minX, math.Min(e.x0, e.x1))
 		maxX = math.Max(maxX, math.Max(e.x0, e.x1))
+		minY = math.Min(minY, e.y0)
 		maxY = math.Max(maxY, e.y1)
 	}
 	px0 := int(math.Max(math.Floor(minX), 0))
@@ -265,37 +264,89 @@ func (r *inkRaster) scan(m *Mask) {
 		r.row = make([]float32, px1-px0)
 	}
 	row := r.row[:px1-px0]
-	next := 0
-	r.active = r.active[:0]
+
+	// An edge joins the active list at the first sub-scanline at or below
+	// its top; the edges are bucketed by that sub-scanline (a counting
+	// sort). The order within a bucket does not matter, as the list is
+	// sorted by x before it is read.
+	nsub := (py1 - py0) * subRows
+	ysAt := func(g int) float64 { return float64(py0+g/subRows) + (float64(g%subRows)+0.5)/subRows }
+	r.first = slices.Grow(r.first[:0], nsub+1)[:nsub+1]
+	clear(r.first)
+	r.byStart = slices.Grow(r.byStart[:0], len(r.edges))[:len(r.edges)]
+	join := func(y0 float64) int {
+		g := 0
+		if t := float64((y0-float64(py0))*subRows) - 0.5; t > 0 {
+			g = int(math.Min(math.Ceil(t), float64(nsub)))
+		}
+		for g > 0 && ysAt(g-1) >= y0 {
+			g--
+		}
+		for g < nsub && ysAt(g) < y0 {
+			g++
+		}
+		return g
+	}
+	for _, e := range r.edges {
+		if g := join(e.y0); g < nsub {
+			r.first[g+1]++
+		}
+	}
+	for g := 1; g <= nsub; g++ {
+		r.first[g] += r.first[g-1]
+	}
+	for i, e := range r.edges {
+		if g := join(e.y0); g < nsub {
+			r.byStart[r.first[g]] = int32(i)
+			r.first[g]++
+		}
+	}
+	// first[g] is now the end of bucket g, and so the start of bucket g+1.
+
+	r.cross = r.cross[:0]
 	const w = float32(1.0 / subRows)
+	g := 0
 	for y := py0; y < py1; y++ {
 		clear(row)
 		for k := 0; k < subRows; k++ {
 			ys := float64(y) + (float64(k)+0.5)/subRows
-			for next < len(r.edges) && r.edges[next].y0 <= ys {
-				r.active = append(r.active, next)
-				next++
+			lo := int32(0)
+			if g > 0 {
+				lo = r.first[g-1]
 			}
-			r.cross = r.cross[:0]
-			live := r.active[:0]
-			for _, i := range r.active {
-				e := &r.edges[i]
+			added := int(r.first[g] - lo)
+			for _, i := range r.byStart[lo:r.first[g]] {
+				r.cross = append(r.cross, crossing{e: int(i)})
+			}
+			g++
+			live := r.cross[:0]
+			for _, c := range r.cross {
+				e := &r.edges[c.e]
 				if e.y1 <= ys {
 					continue
 				}
-				live = append(live, i)
-				r.cross = append(r.cross, crossing{e.x0 + float64((ys-e.y0)*e.dxdy), e.dir})
+				c.x, c.dir = e.x0+float64((ys-e.y0)*e.dxdy), e.dir
+				live = append(live, c)
 			}
-			r.active = live
-			slices.SortFunc(r.cross, func(a, b crossing) int {
-				switch {
-				case a.x < b.x:
-					return -1
-				case a.x > b.x:
-					return 1
-				}
-				return 0
-			})
+			r.cross = live
+			// The list is still in the previous sub-scanline's order, which
+			// edges crossing each other or joining it disturb only a little.
+			// The order of crossings at equal x does not matter: the spans
+			// between them are empty, and the winding on either side of them
+			// is their sum.
+			if added > sortBatch {
+				slices.SortFunc(r.cross, func(a, b crossing) int {
+					switch {
+					case a.x < b.x:
+						return -1
+					case a.x > b.x:
+						return 1
+					}
+					return 0
+				})
+			} else {
+				insertionSort(r.cross)
+			}
 			wind := 0
 			for i := 0; i+1 < len(r.cross); i++ {
 				wind += r.cross[i].dir
@@ -313,11 +364,30 @@ func (r *inkRaster) scan(m *Mask) {
 	}
 }
 
+// insertionSort orders cs by x, in time linear in its length plus the
+// number of pairs out of order.
+func insertionSort(cs []crossing) {
+	for i := 1; i < len(cs); i++ {
+		c := cs[i]
+		j := i
+		for ; j > 0 && cs[j-1].x > c.x; j-- {
+			cs[j] = cs[j-1]
+		}
+		cs[j] = c
+	}
+}
+
 // addSpan adds the horizontal coverage of [xa, xb) to the pixels of row, each
-// scaled by w; row[0] is pixel x0.
+// scaled by w; row[0] is pixel x0. The bounds are clamped by comparison, not
+// math.Max and math.Min: no crossing is NaN, and a -0 bound gives the
+// same coverage as +0.
 func addSpan(row []float32, x0 int, xa, xb float64, w float32) {
-	xa = math.Max(xa, float64(x0))
-	xb = math.Min(xb, float64(x0+len(row)))
+	if lo := float64(x0); xa < lo {
+		xa = lo
+	}
+	if hi := float64(x0 + len(row)); xb > hi {
+		xb = hi
+	}
 	if xa >= xb {
 		return
 	}

@@ -167,6 +167,14 @@ Where the output differed from upstream Vega and Vega-Lite, it is now upstream's
 - CLI: `-allow-file DIR` (repeatable) loads local data through a `FileLoader`, `-base-url URL` resolves relative URLs over HTTP, and they compose (files first) (C72); a refused relative URL's message says which to pass. New flags `-memory-limit`, `-theme FILE`, `-timezone`, `-font FAMILY=FILE`; `compile` takes `-timeout`, `-memory-limit`, `-theme` and `-timezone` too.
 - `compile` refuses a spec it detects as Vega.
 
+### Performance
+
+Output is byte for byte what it was.
+
+- A `wordcloud` lays out in less than half the time (the gallery's word cloud: 369 ms to 157 ms). Scan-converting each word's outline kept its edges sorted from one sub-scanline to the next instead of sorting them again for each.
+- The `label` transform paints the marks it avoids in about two thirds of the time (the gallery's labelled scatter plot: 87 ms to 60 ms to SVG). It reads coverage from the rasterizer's own canvas, only where something was drawn, instead of converting the whole canvas to an image first.
+- PNG output does not draw shapes and text at opacity 0, which Vega emits for every label the `label` transform could not place, and which upstream's canvas renderer skips too (the labelled scatter plot: 181 ms to 87 ms to PNG).
+
 ### Docs
 
 - The README was split into task-oriented guides under [docs/](docs/README.md), and architecture decision records were added. Tests now keep the documentation true: the limits table, the package layers, every Mermaid diagram (rendered with Mermaid's renderer) and every relative link. The documented memory-limit costs, font priority and Loader contract, which did not match the code, were corrected.
