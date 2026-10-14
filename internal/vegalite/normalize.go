@@ -70,15 +70,15 @@ type baseMapper struct{ self mapperImpl }
 func (b *baseMapper) mapTop(spec Value, p *normParams) Value {
 	p = p.deeper()
 	switch {
-	case isFacetSpec(spec):
+	case isFacetSpec(p.cc, spec):
 		return b.self.mapFacet(spec, p)
-	case isRepeatSpec(spec):
+	case isRepeatSpec(p.cc, spec):
 		return b.self.mapRepeat(spec, p)
-	case isHConcatSpec(spec):
+	case isHConcatSpec(p.cc, spec):
 		return b.self.mapHConcat(spec, p)
-	case isVConcatSpec(spec):
+	case isVConcatSpec(p.cc, spec):
 		return b.self.mapVConcat(spec, p)
-	case isConcatSpec(spec):
+	case isConcatSpec(p.cc, spec):
 		return b.self.mapConcat(spec, p)
 	}
 	return b.self.mapLayerOrUnit(spec, p)
@@ -86,12 +86,12 @@ func (b *baseMapper) mapTop(spec Value, p *normParams) Value {
 
 func (b *baseMapper) mapLayerOrUnit(spec Value, p *normParams) Value {
 	switch {
-	case isLayerSpec(spec):
+	case isLayerSpec(p.cc, spec):
 		return b.self.mapLayer(spec, p)
-	case isUnitSpec(spec):
+	case isUnitSpec(p.cc, spec):
 		return b.self.mapUnit(spec, p)
 	}
-	throw("Invalid spec: %s", stringify(p.cc, spec))
+	throw("%s", msgInvalidSpec(p.cc, spec))
 	return undef
 }
 
@@ -166,7 +166,7 @@ func normalizeAutoSizeValue(v Value) Value {
 
 func normalizeAutoSize(cc *compileCtx, spec Value, sizeInfo Value, config Value) Value {
 	width, height := sizeInfo.Get("width"), sizeInfo.Get("height")
-	isFitCompatible := isUnitSpec(spec) || isLayerSpec(spec)
+	isFitCompatible := isUnitSpec(cc, spec) || isLayerSpec(cc, spec)
 	autosizeDefault := jsval.NewObject(2)
 	// width == 'container' (loose: an array prints as its items joined).
 	isContainer := func(v Value) bool { return (v.IsStr() || v.IsArr()) && v.AsString() == "container" }
@@ -301,6 +301,10 @@ func (n *selectionCompatNormalizer) mapUnit(spec Value, p *normParams) Value {
 }
 
 func normalizeTransforms(spec Value, p *normParams) Value {
+	if spec.IsNullish() {
+		// const {transform: tx, ...rest} = spec
+		throw("Cannot destructure property 'transform' of 'spec' as it is %s.", nullishName(spec))
+	}
 	tx := spec.Get("transform")
 	if !tx.IsTruthy() {
 		return spec
@@ -361,6 +365,9 @@ func normalizeChannelDefCompat(obj Value, p *normParams) Value {
 		if cond.IsArr() {
 			eo.Set("condition", mapVals(cc, cond, func(c Value) Value {
 				cc.work(1)
+				if c.IsNullish() {
+					throw("Cannot destructure property 'selection' of 'c' as it is %s.", nullishName(c))
+				}
 				if c.Get("param").IsTruthy() {
 					return c
 				}
@@ -370,6 +377,9 @@ func normalizeChannelDefCompat(obj Value, p *normParams) Value {
 			}))
 		} else {
 			nc := normalizeChannelDefCompat(cond, p)
+			if nc.IsNullish() {
+				throw("Cannot destructure property 'selection' of 'normalizeChannelDef(...)' as it is %s.", nullishName(nc))
+			}
 			if nc.Get("param").IsTruthy() {
 				eo.Set("condition", cond)
 			} else {
@@ -448,7 +458,7 @@ func addSpecNameToParams(spec Value, p *normParams) *normParams {
 
 func (n *topLevelSelectionsNormalizer) mapTop(spec Value, p *normParams) Value {
 	cc := p.cc
-	if params := spec.Get("params"); params.IsTruthy() && !isUnitSpec(spec) {
+	if params := spec.Get("params"); params.IsTruthy() && !isUnitSpec(cc, spec) {
 		var rest []Value
 		for _, param := range iterate(params, "spec.params") {
 			cc.work(1)
@@ -474,12 +484,14 @@ func (n *topLevelSelectionsNormalizer) mapUnit(spec Value, p *normParams) Value 
 	specName := spec.Get("name")
 	for _, sel := range selections {
 		cc.work(1)
+		// !selection.views || !selection.views.length, then for…of: a
+		// string of views is its characters, each a view name.
 		views := sel.Get("views")
-		if !views.IsTruthy() || views.Len() == 0 {
+		if !views.IsTruthy() || !jsProp(views, "length").IsTruthy() {
 			params = append(params, sel)
 			continue
 		}
-		for _, view := range views.Items() {
+		for _, view := range iterate(views, "selection.views") {
 			cc.work(1)
 			switch {
 			case view.IsStr():
@@ -563,7 +575,7 @@ func newCoreNormalizer(cc *compileCtx) *coreNormalizer {
 func (n *coreNormalizer) mapTop(spec Value, p *normParams) Value {
 	cc := p.cc
 
-	if isUnitSpec(spec) {
+	if isUnitSpec(cc, spec) {
 		enc := spec.Get("encoding")
 		if channelHasField(cc, enc, chRow) || channelHasField(cc, enc, chColumn) || channelHasField(cc, enc, chFacet) {
 			return n.mapFacetedUnit(spec, p.deeper())
@@ -747,7 +759,7 @@ func (n *coreNormalizer) mapNonLayerRepeat(spec Value, p *normParams) Value {
 
 func (n *coreNormalizer) mapFacet(spec Value, p *normParams) Value {
 	facet := spec.Get("facet")
-	if isFacetMapping(facet) && spec.Get("columns").IsTruthy() {
+	if isFacetMapping(p.cc, facet) && spec.Get("columns").IsTruthy() {
 		spec = jsval.Obj(omit(spec, "columns"))
 		p.cc.warn(msgColumnsNotSupportByRowCol("facet"))
 	}
@@ -904,7 +916,7 @@ func mergeEncoding(cc *compileCtx, parentEncoding, encoding Value, layer bool) V
 				merged.Set(channel, jsval.Obj(o))
 			case channelDef.IsTruthy() || channelDef.IsNull():
 				merged.Set(channel, channelDef)
-			case layer || isValueDef(parentChannelDef) || isSignalRef(parentChannelDef) || isFieldOrDatumDef(cc, parentChannelDef) || parentChannelDef.IsArr():
+			case layer || isValueDef(parentChannelDef) || isSignalRef(cc, parentChannelDef) || isFieldOrDatumDef(cc, parentChannelDef) || parentChannelDef.IsArr():
 				merged.Set(channel, parentChannelDef)
 			}
 		}
@@ -1008,17 +1020,25 @@ func getLineOverlay(markDef, markConfig Value) (Value, bool) {
 	return undef, false
 }
 
-func markDefOf(mark Value) Value {
-	if isMarkDef(mark) {
+func markDefOf(cc *compileCtx, mark Value) Value {
+	if isMarkDef(cc, mark) {
 		return mark
 	}
 	return mkv("type", mark)
 }
 
-func isMarkDef(mark Value) bool { return hasProperty(mark, "type") }
+// isMarkDef is hasProperty(mark, 'type') in 6.4; 5.8 reads mark['type'],
+// so a type of "", 0 or null is no mark definition, and a null mark fails
+// the read.
+func isMarkDef(cc *compileCtx, mark Value) bool {
+	if cc != nil && cc.v5 {
+		return jsProp(mark, "type").IsTruthy()
+	}
+	return hasProperty(mark, "type")
+}
 
-func getMarkType(m Value) string {
-	if isMarkDef(m) {
+func getMarkType(cc *compileCtx, m Value) string {
+	if isMarkDef(cc, m) {
 		return m.Get("type").AsString()
 	}
 	return m.AsString()
@@ -1026,10 +1046,10 @@ func getMarkType(m Value) string {
 
 func (pathOverlayNormalizer) hasMatchingType(spec Value, p *normParams) bool {
 	config := p.config
-	if !isUnitSpec(spec) {
+	if !isUnitSpec(p.cc, spec) {
 		return false
 	}
-	markDef := markDefOf(spec.Get("mark"))
+	markDef := markDefOf(p.cc, spec.Get("mark"))
 	typ := markDef.Get("type").AsString()
 	switch typ {
 	case "line", "rule", "trail":
@@ -1062,7 +1082,7 @@ func (pathOverlayNormalizer) run(spec Value, p *normParams, normalize func(Value
 	params, projection, mark, name, e := spec.Get("params"), spec.Get("projection"), spec.Get("mark"), spec.Get("name"), spec.Get("encoding")
 	outerSpec := omit(spec, "params", "projection", "mark", "name", "encoding")
 	encoding := normalizeEncoding(cc, e, config)
-	markDef := markDefOf(mark)
+	markDef := markDefOf(cc, mark)
 	pointOverlay, hasPoint := getPointOverlay(markDef, config.Get(markDef.Get("type").AsString()), encoding)
 	lineOverlay, hasLine := undef, false
 	if markDef.Get("type").AsString() == "area" {
@@ -1141,13 +1161,15 @@ type ruleForRangedLineNormalizer struct{}
 func (ruleForRangedLineNormalizer) hasMatchingType(spec Value, p *normParams) bool {
 	cc := p.cc
 
-	if !isUnitSpec(spec) {
+	if !isUnitSpec(cc, spec) {
 		return false
 	}
 	mark, encoding := spec.Get("mark"), spec.Get("encoding")
-	if mark.IsStr() && mark.StrValue() == "line" || (isMarkDef(mark) && mark.Get("type").AsString() == "line") {
+	if mark.IsStr() && mark.StrValue() == "line" || (isMarkDef(cc, mark) && mark.Get("type").AsString() == "line") {
 		for _, channel := range secondaryRangeChannels {
-			mainDef := encoding.Get(getMainRangeChannel(channel))
+			// encoding[mainChannel]: a line without an encoding object
+			// (null, or none) fails here.
+			mainDef := jsProp(encoding, getMainRangeChannel(channel))
 			if encoding.Get(channel).IsTruthy() {
 				if (isFieldDef(cc, mainDef) && !isBinned(mainDef.Get("bin"))) || isDatumDefOf(cc, mainDef) {
 					return true
@@ -1176,7 +1198,7 @@ func replaceRepeaterInFacet(cc *compileCtx, facet, repeater Value) Value {
 	if !repeater.IsTruthy() {
 		return facet
 	}
-	if isFacetMapping(facet) {
+	if isFacetMapping(cc, facet) {
 		return replaceRepeaterInMapping(cc, facet, repeater)
 	}
 	return replaceRepeaterInFieldDef(cc, facet, repeater)
@@ -1344,9 +1366,9 @@ func countViews(cc *compileCtx, spec Value, depth int) float64 {
 		return 1
 	}
 	switch {
-	case isFacetSpec(spec):
+	case isFacetSpec(nil, spec):
 		return 1 + countViews(cc, spec.Get("spec"), depth+1)
-	case isRepeatSpec(spec):
+	case isRepeatSpec(nil, spec):
 		repeat := spec.Get("repeat")
 		child := countViews(cc, spec.Get("spec"), depth+1)
 		if repeat.IsArr() {
@@ -1357,13 +1379,13 @@ func countViews(cc *compileCtx, spec Value, depth int) float64 {
 			n *= 1 + float64(repeat.Get("layer").Len())
 		}
 		return 1 + float64(n*child)
-	case isHConcatSpec(spec):
+	case isHConcatSpec(nil, spec):
 		return sum(spec.Get("hconcat"))
-	case isVConcatSpec(spec):
+	case isVConcatSpec(nil, spec):
 		return sum(spec.Get("vconcat"))
-	case isConcatSpec(spec):
+	case isConcatSpec(nil, spec):
 		return sum(spec.Get("concat"))
-	case isLayerSpec(spec):
+	case isLayerSpec(nil, spec):
 		return sum(spec.Get("layer"))
 	}
 	return 1

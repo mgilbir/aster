@@ -154,7 +154,7 @@ func createBinComponent(t Value, bin Value, m Model, _ bool) (string, *binCompon
 	signal := b.getName(key + "_bins")
 	extentSignal := b.getName(key + "_extent")
 	span := ""
-	if isParameterExtent(normalized.Lookup("extent")) {
+	if isParameterExtent(cc, normalized.Lookup("extent")) {
 		ext := normalized.Lookup("extent")
 		span = parseSelectionExtent(m, ext.Get("param"), ext)
 		normalized.Delete("extent")
@@ -268,7 +268,7 @@ func (n *binNode) assemble() []Value {
 		bt.Set("field", jsval.Str(replacePathInFieldV(bin.fieldV)))
 		bt.Set("as", jsval.Arr(binAs))
 		bt.Set("signal", strOrUndef(bin.signal))
-		if !isParameterExtent(extent) {
+		if !isParameterExtent(cc, extent) {
 			bt.Set("extent", extent)
 		} else {
 			bt.Set("extent", jsval.Null)
@@ -574,7 +574,8 @@ type aggregateNode struct {
 	rawDims map[string]Value
 	// protoOp says 5.8 assigned meas[field]['__proto__'], which sets the
 	// object's prototype to a Set instead of adding an op: the op is not
-	// output, and stringifying the measures (the node's hash) fails.
+	// output, and stringifying the measures (the node's hash) or cloning
+	// them fails.
 	protoOp bool
 }
 
@@ -605,6 +606,11 @@ func cloneMeasures(cc *compileCtx, m *omap[*omap[*sset]]) *omap[*omap[*sset]] {
 }
 
 func (n *aggregateNode) clone() dfNode {
+	if n.protoOp && n.cc.v5 {
+		// duplicate(this.measures): the clone package takes the ops object
+		// whose prototype is a Set for a Set and calls its forEach.
+		throw("Method Set.prototype.forEach called on incompatible receiver #<Set>")
+	}
 	return initNode(&aggregateNode{dimensions: n.dimensions.clone(), measures: cloneMeasures(n.cc, n.measures), rawDims: n.rawDims, protoOp: n.protoOp}, nil)
 }
 
@@ -764,13 +770,13 @@ func makeAggregateFromEncoding(parent dfNode, m *unitModel) *aggregateNode {
 			if aggregate.IsStr() && aggregate.StrValue() == "count" {
 				measField(cc, meas, "*").set(cc, "count", newSset(vgField(cc, fd, fieldRefOption{forAs: true})))
 			} else {
-				if isArgminDef(aggregate) || isArgmaxDef(aggregate) {
+				if isArgminDef(cc, aggregate) || isArgmaxDef(cc, aggregate) {
 					op := "argmax"
-					if isArgminDef(aggregate) {
+					if isArgminDef(cc, aggregate) {
 						op = "argmin"
 					}
 					// meas[argField] keys by its text; vgField reads it as given.
-					argField := aggregate.Get(op)
+					argField := argDefOf(cc, aggregate, op)
 					measField(cc, meas, argField.AsString()).set(cc, op, newSset(vgField(cc, mkv("op", op, "field", argField), fieldRefOption{forAs: true})))
 				} else {
 					t := measField(cc, meas, field.AsString())
@@ -807,6 +813,9 @@ func makeAggregateFromTransform(cc *compileCtx, parent dfNode, t Value) *aggrega
 	protoOp := false
 	for _, s := range iterate(t.Get("aggregate"), "t.aggregate") {
 		cc.work(1)
+		if s.IsNullish() {
+			throw("Cannot destructure property 'op' of 's' as it is %s.", nullishName(s))
+		}
 		op, field, as := s.Get("op"), s.Get("field"), s.Get("as")
 		if op.IsTruthy() {
 			// as ? as : vgField(s, {forAs: true}), the value as given.
@@ -890,7 +899,7 @@ func (n *aggregateNode) producedFields() *sset {
 			} else {
 				for _, x := range m.list() {
 					cc.work(1)
-					out.add(x)
+					out.addValue(m.value(x))
 				}
 			}
 		}

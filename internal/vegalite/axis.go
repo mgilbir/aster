@@ -95,7 +95,9 @@ func (a *axisComponent) hasAxisPart(part string) bool {
 	return !isFalseOrNull(a.get(part))
 }
 
-func (a *axisComponent) hasOrientSignalRef() bool { return isSignalRef(a.explicit.Lookup("orient")) }
+func (a *axisComponent) hasOrientSignalRef(cc *compileCtx) bool {
+	return isSignalRef(cc, a.explicit.Lookup("orient"))
+}
 
 func parseUnitAxes(u *unitModel) *omap[[]*axisComponent] {
 	axes := newOmap[[]*axisComponent]()
@@ -147,7 +149,7 @@ func parseLayerAxes(m *layerModel) {
 				for _, ac := range childAxes {
 					cc.work(1)
 					we := ac.getWithExplicit("orient")
-					if isSignalRef(we.value) {
+					if isSignalRef(cc, we.value) {
 						continue
 					}
 					orient := we.value.AsString()
@@ -221,7 +223,7 @@ func mergeAxisComponent(cc *compileCtx, merged, child *axisComponent) *axisCompo
 	return merged
 }
 
-func axisIsExplicit(value Value, property string, axis Value, m *unitModel, channel string) bool {
+func axisIsExplicit(cc *compileCtx, value Value, property string, axis Value, m *unitModel, channel string) bool {
 	if property == "disable" {
 		return !axis.IsUndefined()
 	}
@@ -232,7 +234,7 @@ func axisIsExplicit(value Value, property string, axis Value, m *unitModel, chan
 	case "titleAngle", "labelAngle":
 		la := axis.Get("labelAngle")
 		var want Value
-		if isSignalRef(la) {
+		if isSignalRef(cc, la) {
 			want = la
 		} else {
 			want = normalizeAngle(la)
@@ -317,7 +319,7 @@ func parseAxis(channel string, m *unitModel) *axisComponent {
 			value = axis.Get(property)
 		}
 		hasValue := !value.IsUndefined()
-		explicit := axisIsExplicit(value, property, axis, m, channel)
+		explicit := axisIsExplicit(cc, value, property, axis, m, channel)
 		if hasValue && explicit {
 			axisComponent.set(property, value, explicit)
 		} else {
@@ -329,7 +331,7 @@ func parseAxis(channel string, m *unitModel) *axisComponent {
 			hasConfigValue := !configValue.IsUndefined()
 			if hasValue && !hasConfigValue {
 				axisComponent.set(property, value, explicit)
-			} else if configFrom != "vgAxisConfig" || (propsToAlwaysIncludeConfig[property] && hasConfigValue) || isConditionalAxisValue(configValue) || isSignalRef(configValue) {
+			} else if configFrom != "vgAxisConfig" || (propsToAlwaysIncludeConfig[property] && hasConfigValue) || isConditionalAxisValue(configValue) || isSignalRef(cc, configValue) {
 				axisComponent.set(property, configValue, false)
 			}
 		}
@@ -368,9 +370,9 @@ func guideEncodeEntry(encoding Value, m *unitModel) Value {
 	out := jsval.NewObject(4)
 	for _, channel := range keysOf(encoding) {
 		cc.work(1)
-		spreadV(out, wrapCondition(cc, wrapConditionOpts{
+		spreadV(out, wrapCondition(m.ctx, wrapConditionOpts{
 			model: m, channelDef: encoding.Get(channel), vgChannel: channel,
-			mainRefFn: func(def Value) Value { return signalOrValueRef(cc, def.Get("value")) },
+			mainRefFn: func(def Value) Value { return signalOrValueRef(m.ctx, def.Get("value")) },
 		}))
 	}
 	return jsval.Obj(out)
@@ -391,14 +393,14 @@ var axisRules = map[string]func(p axisRuleParams) Value{
 		if v := p.axis.Get("labelAlign"); v.IsTruthy() {
 			return v
 		}
-		return defaultLabelAlign(p.labelAngle, p.orient, p.channel)
+		return defaultLabelAlign(p.model.ctx, p.labelAngle, p.orient, p.channel)
 	},
 	"labelAngle": func(p axisRuleParams) Value { return p.labelAngle },
 	"labelBaseline": func(p axisRuleParams) Value {
 		if v := p.axis.Get("labelBaseline"); v.IsTruthy() {
 			return v
 		}
-		return defaultLabelBaseline(p.labelAngle, p.orient, p.channel, false)
+		return defaultLabelBaseline(p.model.ctx, p.labelAngle, p.orient, p.channel, false)
 	},
 	"labelFlush": func(p axisRuleParams) Value {
 		if v := p.axis.Get("labelFlush"); !v.IsNullish() {
@@ -471,7 +473,7 @@ func guideValues(cc *compileCtx, guide Value, fod Value) Value {
 	vals := guide.Get("values")
 	if vals.IsArr() {
 		return jsval.Arr(valueArray(cc, fod, vals.Items()))
-	} else if isSignalRef(vals) {
+	} else if isSignalRef(cc, vals) {
 		return vals
 	}
 	return undef
@@ -495,7 +497,7 @@ func gridScaleFor(m *unitModel, channel string) Value {
 func getLabelAngle(cc *compileCtx, fod Value, axis Value, channel string, styleConfig Value, axisConfigs axisConfigSet) Value {
 	labelAngle := axis.Get("labelAngle")
 	if !labelAngle.IsUndefined() {
-		if isSignalRef(labelAngle) {
+		if isSignalRef(cc, labelAngle) {
 			return labelAngle
 		}
 		return normalizeAngle(labelAngle)
@@ -515,15 +517,15 @@ func normalizeAngleExpr(angle Value) string {
 	return "(((" + signalOf(angle) + " % 360) + 360) % 360)"
 }
 
-func defaultLabelBaseline(angle, orient Value, channel string, alwaysIncludeMiddle bool) Value {
+func defaultLabelBaseline(cc *compileCtx, angle, orient Value, channel string, alwaysIncludeMiddle bool) Value {
 	if angle.IsUndefined() {
 		return undef
 	}
 	if channel == chX {
-		if isSignalRef(angle) {
+		if isSignalRef(cc, angle) {
 			a := normalizeAngleExpr(angle)
 			var orientIsTop string
-			if isSignalRef(orient) {
+			if isSignalRef(cc, orient) {
 				orientIsTop = "(" + signalOf(orient) + ` === "top")`
 			} else {
 				orientIsTop = boolStr(orient.IsStr() && orient.StrValue() == "top")
@@ -535,7 +537,7 @@ func defaultLabelBaseline(angle, orient Value, channel string, alwaysIncludeMidd
 		if (45 < ang && ang < 135) || (225 < ang && ang < 315) {
 			return jsval.Str("middle")
 		}
-		if isSignalRef(orient) {
+		if isSignalRef(cc, orient) {
 			op := "!=="
 			if ang <= 45 || 315 <= ang {
 				op = "==="
@@ -548,10 +550,10 @@ func defaultLabelBaseline(angle, orient Value, channel string, alwaysIncludeMidd
 		}
 		return jsval.Str("top")
 	}
-	if isSignalRef(angle) {
+	if isSignalRef(cc, angle) {
 		a := normalizeAngleExpr(angle)
 		var orientIsLeft string
-		if isSignalRef(orient) {
+		if isSignalRef(cc, orient) {
 			orientIsLeft = "(" + signalOf(orient) + ` === "left")`
 		} else {
 			orientIsLeft = boolStr(orient.IsStr() && orient.StrValue() == "left")
@@ -569,7 +571,7 @@ func defaultLabelBaseline(angle, orient Value, channel string, alwaysIncludeMidd
 		}
 		return jsval.Null
 	}
-	if isSignalRef(orient) {
+	if isSignalRef(cc, orient) {
 		op := "!=="
 		if 45 <= ang && ang <= 135 {
 			op = "==="
@@ -590,7 +592,7 @@ func boolStr(b bool) string {
 	return "false"
 }
 
-func defaultLabelAlign(angle, orient Value, channel string) Value {
+func defaultLabelAlign(cc *compileCtx, angle, orient Value, channel string) Value {
 	if angle.IsUndefined() {
 		return undef
 	}
@@ -601,10 +603,10 @@ func defaultLabelAlign(angle, orient Value, channel string) Value {
 		startAngle = 90
 		mainOrient = "left"
 	}
-	if isSignalRef(angle) {
+	if isSignalRef(cc, angle) {
 		a := normalizeAngleExpr(angle)
 		var orientIsMain string
-		if isSignalRef(orient) {
+		if isSignalRef(cc, orient) {
 			orientIsMain = "(" + signalOf(orient) + ` === "` + mainOrient + `")`
 		} else {
 			orientIsMain = boolStr(orient.IsStr() && orient.StrValue() == mainOrient)
@@ -631,7 +633,7 @@ func defaultLabelAlign(angle, orient Value, channel string) Value {
 		}
 		return jsval.Str("center")
 	}
-	if isSignalRef(orient) {
+	if isSignalRef(cc, orient) {
 		op := "!=="
 		if startAngle < ang && ang < 180+startAngle {
 			op = "==="
@@ -748,7 +750,7 @@ func getAxisConfigFromConfigTypes(cc *compileCtx, configTypes []string, config V
 			props := uniqueStrings(append(append([]string{}, keysOf(oc1)...), keysOf(oc2)...))
 			for _, prop := range props {
 				cc.work(1)
-				out.Set(prop, mkv("signal", signalOf(orient)+` === "`+orient1+`" ? `+signalOrStringValue(oc1.Get(prop)).AsString()+" : "+signalOrStringValue(oc2.Get(prop)).AsString()))
+				out.Set(prop, mkv("signal", signalOf(orient)+` === "`+orient1+`" ? `+signalOrStringValue(cc, oc1.Get(prop)).AsString()+" : "+signalOrStringValue(cc, oc2.Get(prop)).AsString()))
 			}
 			continue
 		}
@@ -776,7 +778,7 @@ func getAxisConfigs(cc *compileCtx, channel, scaleType string, orient Value, con
 		axisChannel = "axisX"
 	}
 	axisOrient := "axisOrient"
-	if !isSignalRef(orient) {
+	if !isSignalRef(cc, orient) {
 		axisOrient = "axis" + titleCaseV(orient)
 	}
 	vlOnly := append([]string{}, typeBased...)
@@ -935,12 +937,12 @@ func assembleAxis(cc *compileCtx, a *axisComponent, kind string, config Value, h
 				var sb strings.Builder
 				for _, c := range conditions {
 					cc.work(1)
-					sb.WriteString(expression(cc, nil, c.Get("test"), nil) + " ? " + exprFromValueRefOrSignalRef(jsval.Obj(omit(c, "test"))) + " : ")
+					sb.WriteString(expression(cc, nil, c.Get("test"), nil) + " ? " + exprFromValueRefOrSignalRef(cc, jsval.Obj(omit(c, "test"))) + " : ")
 				}
-				sb.WriteString(exprFromValueRefOrSignalRef(valueOrSignalRef))
+				sb.WriteString(exprFromValueRefOrSignalRef(cc, valueOrSignalRef))
 				axis.Set(prop, mkv("signal", sb.String()))
 			}
-		} else if isSignalRef(propValue) {
+		} else if isSignalRef(cc, propValue) {
 			if pi, ok := conditionalAxisProp[prop]; ok && !pi.isNull {
 				setAxisEncode(axis, pi.part, pi.vgProp, propValue)
 				dropAt(i)
@@ -986,7 +988,7 @@ func assembleAxis(cc *compileCtx, a *axisComponent, kind string, config Value, h
 		// calls labelExpr.replace.
 		expr := labelExpr
 		text := axis.Lookup("encode").Get("labels").Get("update").Get("text")
-		if axis.Lookup("encode").Get("labels").Get("update").IsTruthy() && isSignalRef(text) {
+		if axis.Lookup("encode").Get("labels").Get("update").IsTruthy() && isSignalRef(cc, text) {
 			if !labelExpr.IsStr() {
 				throw("string.replace is not a function")
 			}

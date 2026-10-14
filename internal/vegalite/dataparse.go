@@ -133,6 +133,12 @@ func mergeDeepFormat(cc *compileCtx, a, b Value) *Object {
 }
 
 func mergeDeepInto(cc *compileCtx, dest *Object, src Value) {
+	if src.IsStr() || src.IsArr() {
+		// keys(src): a string's or an array's are its indices.
+		c := jsval.NewObject(src.Len())
+		spread(c, src)
+		src = jsval.Obj(c)
+	}
 	if !src.IsObj() {
 		return
 	}
@@ -265,7 +271,7 @@ func parseTransformArray(head dfNode, m Model, ap *ancestorParse) dfNode {
 func getImplicitFromFilterTransform(cc *compileCtx, t Value) *Object {
 	implicit := jsval.NewObject(2)
 	forEachLeaf(cc, t.Get("filter"), func(filter Value) {
-		if !isFieldPredicate(filter) {
+		if !isFieldPredicate(cc, filter) {
 			return
 		}
 		val := jsval.Null
@@ -280,7 +286,7 @@ func getImplicitFromFilterTransform(cc *compileCtx, t Value) *Object {
 			val = signalRefOrValue(cc, filter.Get("gt"))
 		case isFieldGTEPredicate(filter):
 			val = signalRefOrValue(cc, filter.Get("gte"))
-		case isFieldRangePredicate(filter):
+		case isFieldRangePredicate(cc, filter):
 			val = filter.Get("range").Index(0)
 		case isFieldOneOfPredicate(filter):
 			oneOf := filter.Get("oneOf")
@@ -356,7 +362,7 @@ func getImplicitFromEncoding(m Model) *Object {
 	if u := asUnit(m); u != nil {
 		if isPathMarkName(u.mark()) && !u.encoding.Get("order").IsTruthy() {
 			dim := chX
-			if u.markDef.Get("orient").AsString() == "horizontal" {
+			if markDefOrient(u.markDef) == "horizontal" {
 				dim = chY
 			}
 			dd := u.encoding.Get(dim)

@@ -15,8 +15,8 @@ type compositeNormalizer struct {
 	fn   func(cc *compileCtx, spec Value, config Value) Value
 }
 
-func (c compositeNormalizer) hasMatchingType(spec Value, _ *normParams) bool {
-	return isUnitSpec(spec) && getMarkType(spec.Get("mark")) == c.name
+func (c compositeNormalizer) hasMatchingType(spec Value, p *normParams) bool {
+	return isUnitSpec(p.cc, spec) && getMarkType(p.cc, spec.Get("mark")) == c.name
 }
 
 func (c compositeNormalizer) run(spec Value, p *normParams, _ func(Value, *normParams) Value) Value {
@@ -96,7 +96,7 @@ func getCompositeMarkTooltip(cc *compileCtx, summary []tooltipSummaryItem, conti
 			mainTitle = " of " + compositeTitle(continuousAxisChannelDef).AsString()
 		}
 		var title Value
-		if isSignalRef(s.titlePrefix) {
+		if isSignalRef(cc, s.titlePrefix) {
 			title = mkv("signal", signalOf(s.titlePrefix)+`"`+jsEscape(mainTitle)+`"`)
 		} else {
 			title = jsval.Str(s.titlePrefix.AsString() + mainTitle)
@@ -122,7 +122,7 @@ func getCompositeMarkTooltip(cc *compileCtx, summary []tooltipSummaryItem, conti
 
 type partFactory func(partName string, mark Value, positionPrefix, endPositionPrefix string, extraEncoding Value) []Value
 
-func makeCompositeAggregatePartFactory(compositeMarkDef Value, continuousAxis string, continuousAxisChannelDef Value, sharedEncoding Value, compositeMarkConfig Value) partFactory {
+func makeCompositeAggregatePartFactory(cc *compileCtx, compositeMarkDef Value, continuousAxis string, continuousAxisChannelDef Value, sharedEncoding Value, compositeMarkConfig Value) partFactory {
 	scale, axis := continuousAxisChannelDef.Get("scale"), continuousAxisChannelDef.Get("axis")
 	return func(partName string, mark Value, positionPrefix, endPositionPrefix string, extraEncoding Value) []Value {
 		title := compositeTitle(continuousAxisChannelDef)
@@ -146,11 +146,11 @@ func makeCompositeAggregatePartFactory(compositeMarkDef Value, continuousAxis st
 		}
 		spread(enc, sharedEncoding)
 		spread(enc, extraEncoding)
-		return partLayerMixins(compositeMarkDef, partName, compositeMarkConfig, mkv("mark", mark, "encoding", jsval.Obj(enc)))
+		return partLayerMixins(cc, compositeMarkDef, partName, compositeMarkConfig, mkv("mark", mark, "encoding", jsval.Obj(enc)))
 	}
 }
 
-func partLayerMixins(markDef Value, part string, compositeMarkConfig Value, partBaseSpec Value) []Value {
+func partLayerMixins(cc *compileCtx, markDef Value, part string, compositeMarkConfig Value, partBaseSpec Value) []Value {
 	clip, color, opacity := markDef.Get("clip"), markDef.Get("color"), markDef.Get("opacity")
 	mark := markDef.Get("type").AsString()
 	if markDef.Get(part).IsTruthy() || (markDef.Get(part).IsUndefined() && compositeMarkConfig.Get(part).IsTruthy()) {
@@ -165,7 +165,7 @@ func partLayerMixins(markDef Value, part string, compositeMarkConfig Value, part
 		if opacity.IsTruthy() {
 			m.Set("opacity", opacity)
 		}
-		spread(m, markDefOf(partBaseSpec.Get("mark")))
+		spread(m, markDefOf(cc, partBaseSpec.Get("mark")))
 		m.Set("style", jsval.Str(mark+"-"+part))
 		if !markDef.Get(part).IsBool() {
 			spread(m, markDef.Get(part))
@@ -210,7 +210,7 @@ func compositeMarkContinuousAxis(cc *compileCtx, spec Value, orient, compositeMa
 func compositeMarkOrient(cc *compileCtx, spec Value, compositeMark string) string {
 	mark, encoding := spec.Get("mark"), spec.Get("encoding")
 	x, y := encoding.Get("x"), encoding.Get("y")
-	if isMarkDef(mark) && mark.Get("orient").IsTruthy() {
+	if isMarkDef(cc, mark) && mark.Get("orient").IsTruthy() {
 		return mark.Get("orient").AsString()
 	}
 	if isContinuousFieldOrDatumDef(cc, x) {
@@ -270,7 +270,7 @@ func normalizeBoxPlot(cc *compileCtx, spec Value, config Value) Value {
 		cc.warn(msgSelectionNotSupported("boxplot"))
 	}
 	outerSpec := omit(spec, "mark", "encoding", "params", "projection")
-	markDef := markDefOf(mark)
+	markDef := markDefOf(cc, mark)
 	extent := coalesce(markDef.Get("extent"), config.Get("boxplot").Get("extent"))
 	sizeValue := getMarkPropOrConfigSimple("size", markDef, config)
 	invalid := markDef.Get("invalid")
@@ -287,7 +287,7 @@ func normalizeBoxPlot(cc *compileCtx, spec Value, config Value) Value {
 	color, size := bp.encodingWithoutContinuousAxis.Get("color"), bp.encodingWithoutContinuousAxis.Get("size")
 	encodingWithoutSizeColorAndContinuousAxis := omit(bp.encodingWithoutContinuousAxis, "color", "size")
 	makePart := func(shared Value) partFactory {
-		return makeCompositeAggregatePartFactory(markDef, bp.continuousAxis, bp.continuousAxisChannelDef, shared, config.Get("boxplot"))
+		return makeCompositeAggregatePartFactory(cc, markDef, bp.continuousAxis, bp.continuousAxisChannelDef, shared, config.Get("boxplot"))
 	}
 	makeExtent := makePart(jsval.Obj(encodingWithoutSizeColorAndContinuousAxis))
 	makeBox := makePart(bp.encodingWithoutContinuousAxis)
@@ -419,7 +419,7 @@ func normalizeBoxPlot(cc *compileCtx, spec Value, config Value) Value {
 	if bp.customTooltipWithoutAggregatedField.IsTruthy() {
 		outEnc.Set("tooltip", bp.customTooltipWithoutAggregatedField)
 	}
-	outlierList := partLayerMixins(markDef, "outliers", config.Get("boxplot"), mkv(
+	outlierList := partLayerMixins(cc, markDef, "outliers", config.Get("boxplot"), mkv(
 		"transform", arr(mkv("filter", "("+fieldExpr+" < "+lowerWhiskerExpr+") || ("+fieldExpr+" > "+upperWhiskerExpr+")")),
 		"mark", "point",
 		"encoding", jsval.Obj(outEnc),
@@ -570,7 +570,7 @@ type errorBarParamsResult struct {
 func errorBarParams(cc *compileCtx, spec Value, compositeMark string, config Value) errorBarParamsResult {
 	mark, encoding := spec.Get("mark"), spec.Get("encoding")
 	outerSpec := omit(spec, "mark", "encoding", "params", "projection")
-	markDef := markDefOf(mark)
+	markDef := markDefOf(cc, mark)
 	if spec.Get("params").IsTruthy() {
 		cc.warn(msgSelectionNotSupported(compositeMark))
 	}
@@ -718,7 +718,7 @@ func normalizeErrorBar(cc *compileCtx, spec Value, config Value) Value {
 	spec = jsval.Obj(so)
 	r := errorBarParams(cc, spec, "errorbar", config)
 	r.encodingWithoutContinuousAxis.Delete("size")
-	makePart := makeCompositeAggregatePartFactory(r.markDef, r.continuousAxis, r.continuousAxisChannelDef, jsval.Obj(r.encodingWithoutContinuousAxis), config.Get("errorbar"))
+	makePart := makeCompositeAggregatePartFactory(cc, r.markDef, r.continuousAxis, r.continuousAxisChannelDef, jsval.Obj(r.encodingWithoutContinuousAxis), config.Get("errorbar"))
 	thickness, size := r.markDef.Get("thickness"), r.markDef.Get("size")
 	tick := mk("type", "tick", "orient", r.ticksOrient, "aria", false)
 	if !thickness.IsUndefined() {
@@ -752,7 +752,7 @@ func normalizeErrorBand(cc *compileCtx, spec Value, config Value) Value {
 	spec = jsval.Obj(so)
 	r := errorBarParams(cc, spec, "errorband", config)
 	def := r.markDef
-	makePart := makeCompositeAggregatePartFactory(def, r.continuousAxis, r.continuousAxisChannelDef, jsval.Obj(r.encodingWithoutContinuousAxis), config.Get("errorband"))
+	makePart := makeCompositeAggregatePartFactory(cc, def, r.continuousAxis, r.continuousAxisChannelDef, jsval.Obj(r.encodingWithoutContinuousAxis), config.Get("errorband"))
 	is2D := !spec.Get("encoding").Get("x").IsUndefined() && !spec.Get("encoding").Get("y").IsUndefined()
 	bandMark := mk("type", "rect")
 	bordersMark := mk("type", "rule")

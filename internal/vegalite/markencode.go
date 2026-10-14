@@ -396,7 +396,7 @@ func tooltipEncode(m *unitModel, reactiveGeom bool) Value {
 		case markTooltip.IsStr():
 			return mkv("value", markTooltip)
 		case isObject(markTooltip):
-			if isSignalRef(markTooltip) {
+			if isSignalRef(cc, markTooltip) {
 				return markTooltip
 			} else if markTooltip.Get("content").IsStr() && markTooltip.Get("content").StrValue() == "encoding" {
 				return tooltipRefForEncoding(cc, encoding, stack, config, reactiveGeom)
@@ -445,7 +445,7 @@ func tooltipData(cc *compileCtx, encoding Value, stack *stackProperties, config 
 		var titleParts []string
 		for _, x := range arrayOf(titleV) {
 			cc.work(1)
-			titleParts = append(titleParts, x.AsString())
+			titleParts = append(titleParts, joinItem(x)) // array(title).join(', ')
 		}
 		key := strings.Join(titleParts, ", ")
 		if !cc.v5 {

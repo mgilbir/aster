@@ -1,0 +1,1 @@
+{"$schema":"https://vega.github.io/schema/vega-lite/v6.json","description":"A rect asking for a fraction of its bucket, drawn inside the bucket rather than across it.","data":{"url":"data/stocks.csv"},"mark":{"type":"bar","width":{"band":null}},"encoding":{"x":{"timeUnit":"month","field":"date"},"y":{"aggregate":"mean","field":"price"}}}

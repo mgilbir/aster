@@ -1,0 +1,1 @@
+{"data":{"values":[{"a":1,"b":"x"}]},"mark":"point","transform":[{"window":["abc"]}],"encoding":{"x":{"field":"a","type":"quantitative"}}}

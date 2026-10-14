@@ -138,7 +138,12 @@ func parseLegendForChannel(m *unitModel, channel string) *legendComponent {
 			timeUnit = u.AsString()
 		}
 	}
-	orient := or(legend.Get("orient"), jsGet(config.Get("legend"), "orient"), jsval.Str("right")).AsString()
+	// legend.orient || config.legend.orient || 'right', compared with ===:
+	// an orient that is not a string (a truthy [] or {}) is no named one.
+	orient := ""
+	if o := or(legend.Get("orient"), jsGet(config.Get("legend"), "orient"), jsval.Str("right")); o.IsStr() {
+		orient = o.StrValue()
+	}
 	legendTypeV := getLegendType(legend, channel, timeUnit, scaleType)
 	legendType := ""
 	if legendTypeV.IsStr() {
@@ -409,7 +414,7 @@ func defaultDirection(orient, legendType string) Value {
 	switch orient {
 	case "top", "bottom":
 		return jsval.Str("horizontal")
-	case "left", "right", "none", "":
+	case "left", "right", "none":
 		return undef
 	}
 	if legendType == "gradient" {
@@ -672,27 +677,30 @@ func legendSetEncode(legend *Object, part, vgProp string, vgRef Value) {
 	setAxisEncode(legend, part, vgProp, vgRef)
 }
 
-func getFieldKeyForChannel(m Model, channel string) string {
+// getFieldKeyForChannel is the field a channel's legends share: the
+// unit's field as given, else the one field all children agree on, by
+// util.unique(childFields, hash), whose plain-object seen set drops a field
+// named "__proto__" (see jsSeen); undefined when there is none.
+func getFieldKeyForChannel(m Model, channel string) Value {
 	cc := m.b().ctx
 	if u := asUnit(m); u != nil {
-		if fd := u.fieldDef(channel); fd.Get("field").IsTruthy() {
-			return fd.Get("field").AsString()
+		if f := u.fieldDef(channel).Get("field"); f.IsTruthy() {
+			return f
 		}
 	}
-	var childFields []string
+	var childFields []Value
 	for _, c := range m.children() {
 		cc.work(modelStep)
-		if f := getFieldKeyForChannel(c, channel); f != "" {
+		if f := getFieldKeyForChannel(c, channel); f.IsTruthy() {
 			childFields = append(childFields, f)
 		}
 	}
 	if len(childFields) > 0 {
-		u := uniqueStrings(childFields)
-		if len(u) == 1 {
+		if u := uniqueValues(cc, childFields); len(u) == 1 {
 			return u[0]
 		}
 	}
-	return ""
+	return undef
 }
 
 func legendsAreMergeCompatible(m Model, a, b string) bool {
@@ -706,9 +714,9 @@ func legendsAreMergeCompatible(m Model, a, b string) bool {
 	return hasDiscreteDomain(ta) == hasDiscreteDomain(tb)
 }
 
-func legendGroupKey(fieldKey, channel string) string {
-	if fieldKey != "" {
-		return "field:" + fieldKey
+func legendGroupKey(fieldKey Value, channel string) string {
+	if fieldKey.IsTruthy() {
+		return "field:" + fieldKey.AsString()
 	}
 	return "channel:" + channel
 }
@@ -852,7 +860,7 @@ func assembleLegends(m Model) []Value {
 	var out []Value
 	for _, k := range byGroup.keysView() {
 		for _, e := range byGroup.m[k] {
-			if l := assembleLegend(e.cmpt, m.b().config); l.IsTruthy() {
+			if l := assembleLegend(cc, e.cmpt, m.b().config); l.IsTruthy() {
 				out = append(out, l)
 			}
 		}
@@ -860,7 +868,7 @@ func assembleLegends(m Model) []Value {
 	return out
 }
 
-func assembleLegend(cmpt *legendComponent, config Value) Value {
+func assembleLegend(cc *compileCtx, cmpt *legendComponent, config Value) Value {
 	comb := cmpt.combine()
 	disable, labelExpr := comb.Lookup("disable"), comb.Lookup("labelExpr")
 	legend := omit(jsval.Obj(comb), "disable", "labelExpr", "selections")
@@ -888,7 +896,7 @@ func assembleLegend(cmpt *legendComponent, config Value) Value {
 		// The expression as given; util.replaceAll calls string.replace on it.
 		expr := labelExpr
 		lu := legend.Lookup("encode").Get("labels").Get("update")
-		if lu.IsObj() && isSignalRef(lu.Get("text")) {
+		if lu.IsObj() && isSignalRef(cc, lu.Get("text")) {
 			if !labelExpr.IsStr() {
 				throw("string.replace is not a function")
 			}

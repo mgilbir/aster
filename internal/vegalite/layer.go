@@ -10,16 +10,16 @@ func buildModel(cc *compileCtx, spec Value, parent Model, parentGivenName string
 		exceeded(depthMsg)
 	}
 	switch {
-	case isFacetSpec(spec):
+	case isFacetSpec(cc, spec):
 		return newFacetModel(cc, spec, parent, parentGivenName, config, depth)
-	case isLayerSpec(spec):
+	case isLayerSpec(cc, spec):
 		return newLayerModel(cc, spec, parent, parentGivenName, unitSize, config, depth)
-	case isUnitSpec(spec):
+	case isUnitSpec(cc, spec):
 		return newUnitModel(cc, spec, parent, parentGivenName, unitSize, config)
-	case isAnyConcatSpec(spec):
+	case isAnyConcatSpec(cc, spec):
 		return newConcatModel(cc, spec, parent, parentGivenName, config, depth)
 	}
-	throw("Invalid spec: %s", stringify(cc, spec))
+	throw("%s", msgInvalidSpec(cc, spec))
 	return nil
 }
 
@@ -51,9 +51,9 @@ func newLayerModel(cc *compileCtx, spec Value, parent Model, parentGivenName str
 		cc.check()
 		name := l.getName("layer_" + jsval.JSNumberString(float64(i)))
 		switch {
-		case isLayerSpec(layer):
+		case isLayerSpec(cc, layer):
 			l.kids = append(l.kids, newLayerModel(cc, layer, l, name, layoutSize, config, depth+1))
-		case isUnitSpec(layer):
+		case isUnitSpec(cc, layer):
 			l.kids = append(l.kids, newUnitModel(cc, layer, l, name, layoutSize, config))
 		default:
 			throw("Invalid spec: %s", stringify(cc, layer))
@@ -255,9 +255,9 @@ func newConcatModel(cc *compileCtx, spec Value, parent Model, parentGivenName st
 	}
 	var childSpecs Value
 	switch {
-	case isVConcatSpec(spec):
+	case isVConcatSpec(cc, spec):
 		childSpecs = spec.Get("vconcat")
-	case isHConcatSpec(spec):
+	case isHConcatSpec(cc, spec):
 		childSpecs = spec.Get("hconcat")
 	default:
 		childSpecs = spec.Get("concat")

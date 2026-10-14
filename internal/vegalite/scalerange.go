@@ -104,8 +104,7 @@ func parseRangeForChannel(channel string, u *unitModel) withExplicit {
 			if channel == chXOffset {
 				positionChannel = chX
 			}
-			pc := u.getScaleComponent(positionChannel)
-			if pc != nil && pc.get("type").AsString() == "band" {
+			if mustScale(u.getScaleComponent(positionChannel)).get("type").AsString() == "band" {
 				if step := getOffsetStep(sizeValue, scaleType); step.IsTruthy() {
 					return makeExplicit(step)
 				}
@@ -169,7 +168,7 @@ func defaultRange(channel string, u *unitModel) Value {
 	case chSize:
 		var rangeMin Value
 		if cc.v5 {
-			rangeMin = sizeRangeMin58(mark, merged.get("zero"), config)
+			rangeMin = sizeRangeMin58(cc, mark, merged.get("zero"), config)
 		} else {
 			rangeMin = sizeRangeMin(mark, config)
 		}
@@ -237,7 +236,7 @@ func getPositionStep(step Value, u *unitModel, channel string) Value {
 	offsetDef := encoding.Get(offsetChannel)
 	stepFor := getStepFor(step, isFieldOrDatumDef(cc, offsetDef) && isDiscreteType(channelDefType(offsetDef)))
 	if stepFor == "offset" && channelHasFieldOrDatum(cc, encoding, offsetChannel) {
-		offsetCmpt := u.getScaleComponent(offsetChannel)
+		offsetCmpt := mustScale(u.getScaleComponent(offsetChannel))
 		offsetScaleName := u.scaleName(offsetChannel, false)
 		stepCount := "domain('" + offsetScaleName + "').length"
 		if offsetCmpt.get("type").AsString() == "band" {
@@ -246,7 +245,7 @@ func getPositionStep(step Value, u *unitModel, channel string) Value {
 			stepCount = "bandspace(" + stepCount + ", " + inner.AsString() + ", " + outer.AsString() + ")"
 		}
 		paddingInner := coalesce(merged.get("paddingInner"), merged.get("padding"))
-		return sig(step.Get("step").AsString() + " * " + stepCount + " / (1-" + exprFromSignalRefOrValue(paddingInner) + ")")
+		return sig(step.Get("step").AsString() + " * " + stepCount + " / (1-" + exprFromSignalRefOrValue(cc, paddingInner) + ")")
 	}
 	return step.Get("step")
 }
@@ -268,7 +267,7 @@ func getOffsetRange(channel string, u *unitModel, offsetScaleType string) Value 
 	pc := u.getScaleComponent(positionChannel)
 	if pc == nil {
 		if cc.v5 {
-			throw("Cannot use %s scale if %s scale is not discrete.", channel, positionChannel)
+			mustScale(pc) // 5.8 reads positionScaleCmpt.get('type') unchecked
 		}
 		return fullWidthOrHeightRange(positionChannel, u, offsetScaleType, true)
 	}
@@ -301,7 +300,7 @@ func getOffsetRange(channel string, u *unitModel, offsetScaleType string) Value 
 		}
 		if padding.IsTruthy() {
 			var startRatio, endRatio string
-			if isSignalRef(padding) {
+			if isSignalRef(cc, padding) {
 				startRatio = signalOf(padding) + "/2" + bandPositionOffsetExpr
 				endRatio = "(1 - " + signalOf(padding) + "/2)" + bandPositionOffsetExpr
 			} else {
@@ -309,7 +308,15 @@ func getOffsetRange(channel string, u *unitModel, offsetScaleType string) Value 
 				startRatio = jsval.JSNumberString(p/2 + bandPositionOffset)
 				endRatio = jsval.JSNumberString(1 - p/2 + bandPositionOffset)
 			}
-			return arr(sig(startRatio+" * ("+duration+")"), sig(endRatio+" * ("+duration+")"))
+			// `${duration}`: a unit without a smallest part has none.
+			d := duration
+			if d == "" {
+				d = "undefined"
+			}
+			return arr(sig(startRatio+" * ("+d+")"), sig(endRatio+" * ("+d+")"))
+		}
+		if duration == "" {
+			return arr(0, mkv("signal", undef))
 		}
 		return arr(0, sig(duration))
 	}
@@ -346,12 +353,12 @@ func defaultContinuousToDiscreteCount(cc *compileCtx, scaleType string, config V
 
 func interpolateRange(ctx *compileCtx, rangeMin, rangeMax, cardinality Value) Value {
 	f := func() string {
-		rMax := signalOrStringValue(rangeMax).AsString()
-		rMin := signalOrStringValue(rangeMin).AsString()
+		rMax := signalOrStringValue(ctx, rangeMax).AsString()
+		rMin := signalOrStringValue(ctx, rangeMin).AsString()
 		step := "(" + rMax + " - " + rMin + ") / (" + cardinality.AsString() + " - 1)"
 		return "sequence(" + rMin + ", " + rMax + " + " + step + ", " + step + ")"
 	}
-	if isSignalRef(rangeMax) {
+	if isSignalRef(ctx, rangeMax) {
 		return lazySignal(ctx, f)
 	}
 	return sig(f())
@@ -407,14 +414,16 @@ func sizeRangeMax(mark string, size *Object, u *unitModel, config Value) Value {
 }
 
 func minXYStep(ctx *compileCtx, size *Object, xy [2]Value, view Value) Value {
-	var widthStep, heightStep float64
+	// The steps as given: exprs.join(', ') writes each as an array element
+	// (null as ""), and Math.min converts each to a number.
+	var widthStep, heightStep Value
 	if w := size.Lookup("width"); isStep(w) {
-		widthStep = jsval.ToNumber(w.Get("step"))
+		widthStep = w.Get("step")
 	} else {
 		widthStep = getViewConfigDiscreteStep(view, "width")
 	}
 	if h := size.Lookup("height"); isStep(h) {
-		heightStep = jsval.ToNumber(h.Get("step"))
+		heightStep = h.Get("step")
 	} else {
 		heightStep = getViewConfigDiscreteStep(view, "height")
 	}
@@ -424,15 +433,15 @@ func minXYStep(ctx *compileCtx, size *Object, xy [2]Value, view Value) Value {
 			if xy[0].IsTruthy() {
 				exprs[0] = signalOf(xy[0])
 			} else {
-				exprs[0] = jsval.JSNumberString(widthStep)
+				exprs[0] = jsval.Arr([]Value{widthStep}).AsString()
 			}
 			if xy[1].IsTruthy() {
 				exprs[1] = signalOf(xy[1])
 			} else {
-				exprs[1] = jsval.JSNumberString(heightStep)
+				exprs[1] = jsval.Arr([]Value{heightStep}).AsString()
 			}
 			return "min(" + exprs[0] + ", " + exprs[1] + ")"
 		})
 	}
-	return jsval.Num(math.Min(widthStep, heightStep))
+	return jsval.Num(math.Min(jsval.ToNumber(widthStep), jsval.ToNumber(heightStep)))
 }

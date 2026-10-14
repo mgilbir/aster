@@ -139,13 +139,13 @@ func extractTransformsFromEncoding(cc *compileCtx, oldEncoding Value, config Val
 				if aggOp.IsTruthy() {
 					op := ""
 					switch {
-					case isArgmaxDef(aggOp):
+					case isArgmaxDef(cc, aggOp):
 						op = "argmax"
-						newField = vgField(cc, mkv("op", "argmax", "field", aggOp.Get("argmax")), fieldRefOption{forAs: true})
+						newField = vgField(cc, mkv("op", "argmax", "field", argDefOf(cc, aggOp, "argmax")), fieldRefOption{forAs: true})
 						nf.Set("field", jsval.Str(newField+"."+field.AsString()))
-					case isArgminDef(aggOp):
+					case isArgminDef(cc, aggOp):
 						op = "argmin"
-						newField = vgField(cc, mkv("op", "argmin", "field", aggOp.Get("argmin")), fieldRefOption{forAs: true})
+						newField = vgField(cc, mkv("op", "argmin", "field", argDefOf(cc, aggOp, "argmin")), fieldRefOption{forAs: true})
 						nf.Set("field", jsval.Str(newField+"."+field.AsString()))
 					case aggOp.IsStr() && aggOp.StrValue() != "boxplot" && aggOp.StrValue() != "errorbar" && aggOp.StrValue() != "errorband":
 						op = aggOp.StrValue()
@@ -300,7 +300,7 @@ func initEncoding(cc *compileCtx, encoding Value, mark string, filled bool, conf
 		} else {
 			if channel == chTooltip && channelDef.IsNull() {
 				normalized.Set(channel, jsval.Null)
-			} else if !isFieldDef(cc, channelDef) && !isDatumDefOf(cc, channelDef) && !isValueDef(channelDef) && !isConditionalDef(channelDef) && !isSignalRef(channelDef) {
+			} else if !isFieldDef(cc, channelDef) && !isDatumDefOf(cc, channelDef) && !isValueDef(channelDef) && !isConditionalDef(channelDef) && !isSignalRef(cc, channelDef) {
 				cc.warn(msgEmptyFieldDef(cc, channelDef, channel))
 				continue
 			} else {

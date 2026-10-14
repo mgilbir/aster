@@ -120,7 +120,14 @@ func isExtendedScheme(cc *compileCtx, v Value) bool {
 	return !v.IsStr() && hasProperty(v, "name")
 }
 
-func isParameterDomain(v Value) bool { return hasProperty(v, "param") }
+// isParameterDomain is hasProperty(domain, 'param') in 6.4; 5.8 reads
+// domain?.['param'], so a falsy param is no parameter domain.
+func isParameterDomain(cc *compileCtx, v Value) bool {
+	if cc.v5 {
+		return !v.IsNullish() && jsProp(v, "param").IsTruthy()
+	}
+	return hasProperty(v, "param")
+}
 
 // isDomainUnionWith is hasProperty(domain, 'unionWith') in 6.4; 5.8 reads
 // domain?.['unionWith'], so a falsy unionWith is no union.

@@ -194,7 +194,7 @@ func assembleProjectionForModel(m Model) []Value {
 	for _, d := range comp.data {
 		cc.work(1)
 		var source string
-		if isSignalRef(d) {
+		if isSignalRef(cc, d) {
 			source = signalOf(d)
 		} else {
 			source = "data('" + m.b().lookupDataSource(d.AsString()).AsString() + "')"

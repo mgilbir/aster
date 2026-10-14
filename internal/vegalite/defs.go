@@ -37,8 +37,42 @@ var aggregateOps = strSet([]string{
 	"stdevp", "sum", "valid", "values", "variance", "variancep",
 })
 
-func isArgminDef(v Value) bool { return hasProperty(v, "argmin") }
-func isArgmaxDef(v Value) bool { return hasProperty(v, "argmax") }
+func isArgminDef(cc *compileCtx, v Value) bool { return isArgDef(cc, v, "argmin") }
+func isArgmaxDef(cc *compileCtx, v Value) bool { return isArgDef(cc, v, "argmax") }
+
+// isArgDef is hasProperty(a, key) in 6.4; 5.8 tests !!a && !!a[key], so an
+// argmax of 0, false or null is no argmax (and an invalid aggregate), and
+// one Object.prototype holds (see argDefOf) makes every aggregate one.
+func isArgDef(cc *compileCtx, v Value, key string) bool {
+	if cc.v5 {
+		return v.IsTruthy() && argDefOf(cc, v, key).IsTruthy()
+	}
+	return hasProperty(v, key)
+}
+
+// argDefOf is a[key] of an argmin or argmax def. In 5.8 an aggregate over
+// a field named "__proto__" writes its op on Object.prototype
+// (meas['__proto__'][op] = new Set(...), see jsRealm), and from then on
+// every aggregate that does not hold the key itself, a string op included,
+// reads that Set, whose text is "[object Set]".
+func argDefOf(cc *compileCtx, a Value, key string) Value {
+	if !cc.v5 || (a.IsObj() && a.ObjValue().Has(key)) {
+		return a.Get(key)
+	}
+	x, ok := cc.jsr.protoProp(key)
+	if !ok {
+		return a.Get(key)
+	}
+	switch x := x.(type) {
+	case Value:
+		return x
+	case *sset:
+		o := jsval.NewObject(0)
+		o.SetStringer(func(*Object) string { return "[object Set]" })
+		return jsval.Obj(o)
+	}
+	return jsval.Obj(jsval.NewObject(0))
+}
 func isAggregateOp(cc *compileCtx, v Value) bool {
 	if cc.v5 && v.IsStr() && (v.StrValue() == "exponential" || v.StrValue() == "exponentialb") {
 		return false // 6.x only
@@ -84,7 +118,14 @@ func isBinned(bin Value) bool {
 	return isObject(bin) && bin.Get("binned").IsBool() && bin.Get("binned").BoolValue()
 }
 
-func isParameterExtent(v Value) bool { return hasProperty(v, "param") }
+// isParameterExtent is hasProperty(extent, 'param') in 6.4; 5.8 reads
+// extent?.['param'], so a falsy param is no parameter extent.
+func isParameterExtent(cc *compileCtx, v Value) bool {
+	if cc.v5 {
+		return !v.IsNullish() && jsProp(v, "param").IsTruthy()
+	}
+	return hasProperty(v, "param")
+}
 
 func autoMaxBins(channel string) int {
 	switch channel {
@@ -111,7 +152,7 @@ func binToString(cc *compileCtx, bin Value) string {
 	for _, p := range jsKeysOrCC(cc, bin) {
 		cc.work(1)
 		x := read.get(p)
-		if isParameterExtent(x) {
+		if isParameterExtent(cc, x) {
 			// `${entries(x)}` stringifies [[k, v], ...] with commas.
 			var parts []string
 			for _, k := range keysOf(x) {
@@ -147,7 +188,14 @@ var sortByChannel = strSet([]string{
 	chFillOpacity, chStrokeOpacity, chOpacity, chText,
 })
 
-func isSortByEncoding(v Value) bool { return hasProperty(v, "encoding") }
+// isSortByEncoding is hasProperty(sort, 'encoding') in 6.4; 5.8 tests
+// !!sort?.['encoding'].
+func isSortByEncoding(cc *compileCtx, v Value) bool {
+	if cc.v5 {
+		return !v.IsNullish() && jsProp(v, "encoding").IsTruthy()
+	}
+	return hasProperty(v, "encoding")
+}
 func isSortField(cc *compileCtx, v Value) bool {
 	if cc.v5 {
 		return v.IsTruthy() && (v.Get("op").IsStr() && v.Get("op").StrValue() == "count" || v.Get("field").IsTruthy())
@@ -460,35 +508,30 @@ func normalizeNamed(v Value, names []string, what string) float64 {
 // dateTimeParts is upstream's dateTimeParts: the arguments of datetime(...)
 // as text. With normalize=true month/quarter/day names and 1-based numbers are
 // converted to the 0-based values datetime() expects.
-func dateTimeParts(cc *compileCtx, d Value, normalize bool) []string {
-	var parts []string
+// dateTimeParts are the arguments upstream's dateTimeParts collects, as the
+// values it pushes: the ones the datetime gives, as given, and the numbers
+// and expression texts it makes. A timestamp converts each with ToNumber
+// (Date.UTC(...parts)); an expression joins them (dateTimePartsText).
+func dateTimeParts(cc *compileCtx, d Value, normalize bool) []Value {
+	var parts []Value
 	if normalize && !d.Get("day").IsUndefined() {
 		if d.Len() > 1 {
 			cc.warn(msgDroppedDay(cc, d))
 			d = jsval.Obj(omit(d, "day"))
 		}
 	}
-	// The parts are joined with Array.prototype.join, which writes null and
-	// undefined as nothing (a null part makes "datetime(2000, 0, , ...)",
-	// which upstream's expression parser then rejects).
-	str := func(v Value) string {
-		if v.IsNullish() {
-			return ""
-		}
-		return v.AsString()
-	}
 	if y := d.Get("year"); !y.IsUndefined() {
-		parts = append(parts, str(y))
+		parts = append(parts, y)
 	} else {
-		parts = append(parts, "2012")
+		parts = append(parts, jsval.Int(2012))
 	}
 	switch {
 	case !d.Get("month").IsUndefined():
 		m := d.Get("month")
 		if normalize {
-			parts = append(parts, jsval.JSNumberString(normalizeNamed(m, monthNames, "month")))
+			parts = append(parts, jsval.Num(normalizeNamed(m, monthNames, "month")))
 		} else {
-			parts = append(parts, str(m))
+			parts = append(parts, m)
 		}
 	case !d.Get("quarter").IsUndefined():
 		q := d.Get("quarter")
@@ -502,18 +545,18 @@ func dateTimeParts(cc *compileCtx, d Value, normalize bool) []string {
 			if q.NumValue() > 4 {
 				cc.warn(msgInvalidTimeUnit(cc, "quarter", q))
 			}
-			parts = append(parts, jsval.JSNumberString((q.NumValue()-1)*3))
+			parts = append(parts, jsval.Num((q.NumValue()-1)*3))
 		} else if q.IsNum() {
-			parts = append(parts, jsval.JSNumberString(q.NumValue()*3))
+			parts = append(parts, jsval.Num(q.NumValue()*3))
 		} else {
-			parts = append(parts, tmpl(q)+"*3")
+			parts = append(parts, jsval.Str(tmpl(q)+"*3"))
 		}
 	default:
-		parts = append(parts, "0")
+		parts = append(parts, jsval.Int(0))
 	}
 	switch {
 	case !d.Get("date").IsUndefined():
-		parts = append(parts, str(d.Get("date")))
+		parts = append(parts, d.Get("date"))
 	case !d.Get("day").IsUndefined():
 		day := d.Get("day")
 		if normalize {
@@ -526,28 +569,39 @@ func dateTimeParts(cc *compileCtx, d Value, normalize bool) []string {
 			} else {
 				f = normalizeNamed(day, dayNames, "day")
 			}
-			parts = append(parts, jsval.JSNumberString(f+1))
+			parts = append(parts, jsval.Num(f+1))
 		} else if day.IsNum() {
-			parts = append(parts, jsval.JSNumberString(day.NumValue()+1))
+			parts = append(parts, jsval.Num(day.NumValue()+1))
 		} else {
-			parts = append(parts, tmpl(day)+"+1")
+			parts = append(parts, jsval.Str(tmpl(day)+"+1"))
 		}
 	default:
-		parts = append(parts, "1")
+		parts = append(parts, jsval.Int(1))
 	}
 	for _, u := range []string{"hours", "minutes", "seconds", "milliseconds"} {
 		x := d.Get(u)
 		if x.IsUndefined() {
-			parts = append(parts, "0")
+			parts = append(parts, jsval.Int(0))
 		} else {
-			parts = append(parts, str(x))
+			parts = append(parts, x)
 		}
 	}
 	return parts
 }
 
+// dateTimePartsText is parts.join(', '), which writes null and undefined as
+// nothing (a null part makes "datetime(2000, 0, , ...)", which upstream's
+// expression parser then rejects).
+func dateTimePartsText(parts []Value) string {
+	ss := make([]string, len(parts))
+	for i, p := range parts {
+		ss[i] = joinItem(p)
+	}
+	return strings.Join(ss, ", ")
+}
+
 func dateTimeToExpr(cc *compileCtx, d Value) string {
-	s := strings.Join(dateTimeParts(cc, d, true), ", ")
+	s := dateTimePartsText(dateTimeParts(cc, d, true))
 	if d.Get("utc").IsTruthy() {
 		return "utc(" + s + ")"
 	}
@@ -555,7 +609,7 @@ func dateTimeToExpr(cc *compileCtx, d Value) string {
 }
 
 func dateTimeExprToExpr(d Value) string {
-	s := strings.Join(dateTimeParts(nil, d, false), ", ")
+	s := dateTimePartsText(dateTimeParts(nil, d, false))
 	if d.Get("utc").IsTruthy() {
 		return "utc(" + s + ")"
 	}

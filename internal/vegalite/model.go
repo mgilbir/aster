@@ -129,7 +129,7 @@ type modelBase struct {
 	self        Model
 	typ         string
 	name        string
-	nameFalsy   bool // the spec's name is a falsy value with text (0, false)
+	nameV       Value // the name as given (spec.name ?? parentGivenName)
 	parent      Model
 	config      Value
 	size        *Object
@@ -154,10 +154,9 @@ func newModelBase(cc *compileCtx, self Model, spec Value, typ string, parent Mod
 		m.view = undef
 	}
 	if n := spec.Get("name"); !n.IsNullish() {
-		m.name = n.AsString()
-		m.nameFalsy = !n.IsTruthy()
+		m.name, m.nameV = n.AsString(), n
 	} else {
-		m.name = parentGivenName
+		m.name, m.nameV = parentGivenName, jsval.Str(parentGivenName)
 	}
 	switch t := spec.Get("title"); {
 	case isText(t):
@@ -177,7 +176,7 @@ func newModelBase(cc *compileCtx, self Model, spec Value, typ string, parent Mod
 	if typ == "layer" || typ == "unit" {
 		m.layout = jsval.NewObject(0)
 	} else {
-		m.layout = extractCompositionLayout(spec, typ, config)
+		m.layout = extractCompositionLayout(cc, spec, typ, config)
 	}
 	dc := &dataComponent{sources: &sourceList{}}
 	if parent != nil {
@@ -185,11 +184,11 @@ func newModelBase(cc *compileCtx, self Model, spec Value, typ string, parent Mod
 		dc.sources = pd.sources
 		dc.outputNodes = pd.outputNodes
 		dc.outputNodeRefCounts = pd.outputNodeRefCounts
-		dc.isFaceted = isFacetSpec(spec) || (pd.isFaceted && spec.Get("data").IsUndefined())
+		dc.isFaceted = isFacetSpec(cc, spec) || (pd.isFaceted && spec.Get("data").IsUndefined())
 	} else {
 		dc.outputNodes = map[string]sourceGetter{}
 		dc.outputNodeRefCounts = map[string]int{}
-		dc.isFaceted = isFacetSpec(spec)
+		dc.isFaceted = isFacetSpec(cc, spec)
 	}
 	res := &resolveIndex{scale: map[string]string{}, axis: map[string]string{}, legend: map[string]string{}}
 	if resolve != nil {
@@ -243,9 +242,10 @@ func asUnit(m Model) *unitModel {
 }
 
 func (m *modelBase) getName(text string) string {
-	// (this.name ? `${this.name}_` : ''): a name of 0 or false is no prefix.
+	// (this.name ? `${this.name}_` : ''): a name of 0 or false is no prefix,
+	// one of [] is "_".
 	prefix := ""
-	if m.name != "" && !m.nameFalsy {
+	if m.nameV.IsTruthy() {
 		prefix = m.name + "_"
 	}
 	return varName(prefix + text)
@@ -294,7 +294,7 @@ func (m *modelBase) getSizeSignalRef(layoutSizeType string) Value {
 				field := getFieldFromDomain(cc, domain)
 				if field != "" {
 					fieldRef := vgField(cc, mkv("aggregate", "distinct", "field", field), fieldRefOption{expr: "datum"})
-					return sig(sizeExpr(scaleName, sc, fieldRef))
+					return sig(sizeExpr(cc, scaleName, sc, fieldRef))
 				}
 				cc.warn(msgUnknownField(channel))
 				return jsval.Null
@@ -330,6 +330,16 @@ func (m *modelBase) scaleTypeOf(channel string) string {
 		return sc.get("type").AsString()
 	}
 	return ""
+}
+
+// mustScale is a scale component upstream reads without checking that it
+// exists (scale.get(...)): for a channel without one (a scale of null or
+// false) the read fails as upstream's does.
+func mustScale(s *scaleComponent) *scaleComponent {
+	if s == nil {
+		throw("Cannot read properties of undefined (reading 'get')")
+	}
+	return s
 }
 
 func (m *modelBase) getScaleComponent(channel string) *scaleComponent {
@@ -413,7 +423,7 @@ func (m *modelBase) hasAxisOrientSignalRef() bool {
 		axes, _ := m.comp.axes.get(ch)
 		for _, a := range axes {
 			cc.work(1)
-			if a.hasOrientSignalRef() {
+			if a.hasOrientSignalRef(cc) {
 				return true
 			}
 		}

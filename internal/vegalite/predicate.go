@@ -29,13 +29,13 @@ func isFieldGTPredicate(p Value) bool    { return fieldTruthy(p) && !p.Get("gt")
 func isFieldGTEPredicate(p Value) bool   { return fieldTruthy(p) && !p.Get("gte").IsUndefined() }
 func isFieldValidPredicate(p Value) bool { return fieldTruthy(p) && !p.Get("valid").IsUndefined() }
 
-func isFieldRangePredicate(p Value) bool {
+func isFieldRangePredicate(cc *compileCtx, p Value) bool {
 	if fieldTruthy(p) {
 		r := p.Get("range")
 		if r.IsArr() && r.Len() == 2 {
 			return true
 		}
-		if isSignalRef(r) {
+		if isSignalRef(cc, r) {
 			return true
 		}
 	}
@@ -46,8 +46,8 @@ func isFieldOneOfPredicate(p Value) bool {
 	return fieldTruthy(p) && (p.Get("oneOf").IsArr() || p.Get("in").IsArr())
 }
 
-func isFieldPredicate(p Value) bool {
-	return isFieldOneOfPredicate(p) || isFieldEqualPredicate(p) || isFieldRangePredicate(p) ||
+func isFieldPredicate(cc *compileCtx, p Value) bool {
+	return isFieldOneOfPredicate(p) || isFieldEqualPredicate(p) || isFieldRangePredicate(cc, p) ||
 		isFieldLTPredicate(p) || isFieldGTPredicate(p) || isFieldLTEPredicate(p) || isFieldGTEPredicate(p)
 }
 
@@ -105,14 +105,14 @@ func fieldFilterExpression(cc *compileCtx, p Value, useInRange bool) string {
 			valid = v.IsTruthy()
 		}
 		return fieldValidPredicate(fieldExpr, valid)
-	case isFieldRangePredicate(p):
+	case isFieldRangePredicate(cc, p):
 		rp := p
 		if !cc.v5 {
 			rp = replaceExprRefObj(cc, p)
 		}
 		rng := rp.Get("range")
 		var lower, upper Value
-		if isSignalRef(rng) {
+		if isSignalRef(cc, rng) {
 			lower = mkv("signal", signalOf(rng)+"[0]")
 			upper = mkv("signal", signalOf(rng)+"[1]")
 		} else {
@@ -145,7 +145,7 @@ func fieldValidPredicate(fieldExpr string, valid bool) string {
 }
 
 func normalizePredicate(cc *compileCtx, f Value) Value {
-	if isFieldPredicate(f) && f.Get("timeUnit").IsTruthy() {
+	if isFieldPredicate(cc, f) && f.Get("timeUnit").IsTruthy() {
 		o := cloneObj(f.ObjValue())
 		if cc.v5 {
 			// 5.8 keeps only the unit's name (a UTC unit loses its `utc` flag).
@@ -182,24 +182,33 @@ func replaceExprRef(cc *compileCtx, idx Value, level int) Value {
 
 // ---- logical.ts ----
 
-func isLogicalOr(op Value) bool  { return hasProperty(op, "or") }
-func isLogicalAnd(op Value) bool { return hasProperty(op, "and") }
-func isLogicalNot(op Value) bool { return hasProperty(op, "not") }
+func isLogicalOr(cc *compileCtx, op Value) bool  { return isLogicalOp(cc, op, "or") }
+func isLogicalAnd(cc *compileCtx, op Value) bool { return isLogicalOp(cc, op, "and") }
+func isLogicalNot(cc *compileCtx, op Value) bool { return isLogicalOp(cc, op, "not") }
+
+// isLogicalOp is hasProperty(op, key) in 6.4; 5.8 tests !!op[key], so a
+// falsy operand ({"not": ""}) is a leaf, and a null op fails the read.
+func isLogicalOp(cc *compileCtx, op Value, key string) bool {
+	if cc.v5 {
+		return jsProp(op, key).IsTruthy()
+	}
+	return hasProperty(op, key)
+}
 
 func forEachLeaf(cc *compileCtx, op Value, fn func(Value), depth int) {
 	if depth > maxDepth*4 {
 		exceeded("logical composition nested too deeply")
 	}
 	switch {
-	case isLogicalNot(op):
+	case isLogicalNot(cc, op):
 		forEachLeaf(cc, op.Get("not"), fn, depth+1)
-	case isLogicalAnd(op):
-		for _, s := range op.Get("and").Items() {
+	case isLogicalAnd(cc, op):
+		for _, s := range iterate(op.Get("and"), "op.and") {
 			cc.work(1)
 			forEachLeaf(cc, s, fn, depth+1)
 		}
-	case isLogicalOr(op):
-		for _, s := range op.Get("or").Items() {
+	case isLogicalOr(cc, op):
+		for _, s := range iterate(op.Get("or"), "op.or") {
 			cc.work(1)
 			forEachLeaf(cc, s, fn, depth+1)
 		}
@@ -213,11 +222,11 @@ func normalizeLogicalComposition(cc *compileCtx, op Value, normalizer func(Value
 		exceeded("logical composition nested too deeply")
 	}
 	switch {
-	case isLogicalNot(op):
+	case isLogicalNot(cc, op):
 		return mkv("not", normalizeLogicalComposition(cc, op.Get("not"), normalizer, depth+1))
-	case isLogicalAnd(op):
+	case isLogicalAnd(cc, op):
 		return mkv("and", mapList(cc, op.Get("and"), "op.and", func(o Value) Value { return normalizeLogicalComposition(cc, o, normalizer, depth+1) }))
-	case isLogicalOr(op):
+	case isLogicalOr(cc, op):
 		return mkv("or", mapList(cc, op.Get("or"), "op.or", func(o Value) Value { return normalizeLogicalComposition(cc, o, normalizer, depth+1) }))
 	}
 	return normalizer(op)
@@ -229,18 +238,18 @@ func logicalExpr(cc *compileCtx, op Value, cb func(Value) string, depth int) str
 		exceeded("logical composition nested too deeply")
 	}
 	switch {
-	case isLogicalNot(op):
+	case isLogicalNot(cc, op):
 		return "!(" + logicalExpr(cc, op.Get("not"), cb, depth+1) + ")"
-	case isLogicalAnd(op):
+	case isLogicalAnd(cc, op):
 		var parts []string
-		for _, a := range op.Get("and").Items() {
+		for _, a := range listOf(op.Get("and"), "op.and", "map") {
 			cc.work(1)
 			parts = append(parts, logicalExpr(cc, a, cb, depth+1))
 		}
 		return "(" + strings.Join(parts, ") && (") + ")"
-	case isLogicalOr(op):
+	case isLogicalOr(cc, op):
 		var parts []string
-		for _, a := range op.Get("or").Items() {
+		for _, a := range listOf(op.Get("or"), "op.or", "map") {
 			cc.work(1)
 			parts = append(parts, logicalExpr(cc, a, cb, depth+1))
 		}

@@ -179,9 +179,9 @@ func parseSingleChannelDomain(scaleType string, domain Value, u *unitModel, chan
 		def := parseSingleChannelDomain(scaleType, undef, u, channel)
 		union := convertDomainIfItIsDateTime(cc, domain.Get("unionWith"), typ, timeUnit)
 		return makeExplicit(jsval.Arr(append(append([]Value{}, union...), def.value.Items()...)))
-	case isSignalRef(domain):
+	case isSignalRef(cc, domain):
 		return makeExplicit(arr(domain))
-	case domain.IsTruthy() && !(domain.IsStr() && domain.StrValue() == "unaggregated") && !isParameterDomain(domain):
+	case domain.IsTruthy() && !(domain.IsStr() && domain.StrValue() == "unaggregated") && !isParameterDomain(cc, domain):
 		return makeExplicit(jsval.Arr(convertDomainIfItIsDateTime(cc, domain, typ, timeUnit)))
 	}
 	if stack != nil && channel == stack.fieldChannel {
@@ -295,10 +295,10 @@ func parseSelectionDomain(u *unitModel, channel string) {
 	spec := u.specifiedScales.Lookup(channel).Get("domain")
 	bin := u.fieldDef(channel).Get("bin")
 	var domain, extent Value
-	if isParameterDomain(spec) {
+	if isParameterDomain(u.ctx, spec) {
 		domain = spec
 	}
-	if isObject(bin) && isParameterExtent(bin.Get("extent")) {
+	if isObject(bin) && isParameterExtent(u.ctx, bin.Get("extent")) {
 		extent = bin.Get("extent")
 	}
 	if domain.IsTruthy() || extent.IsTruthy() {
@@ -339,7 +339,7 @@ func domainSort(u *unitModel, channel, scaleType string) Value {
 	case isSortField(cc, sort):
 		isStacked := stack != nil && !stackDimensions.has(sort.Get("field").AsString())
 		return normalizeSortField(sort, isStacked)
-	case isSortByEncoding(sort):
+	case isSortByEncoding(cc, sort):
 		encoding, order := sort.Get("encoding"), sort.Get("order")
 		fieldDefToSortBy := u.fieldDef(encoding.AsString())
 		if fieldDefToSortBy.IsNullish() {
@@ -348,7 +348,7 @@ func domainSort(u *unitModel, channel, scaleType string) Value {
 		}
 		aggregate, field := fieldDefToSortBy.Get("aggregate"), fieldDefToSortBy.Get("field")
 		isStacked := stack != nil && !stackDimensions.has(field.AsString())
-		if isArgminDef(aggregate) || isArgmaxDef(aggregate) {
+		if isArgminDef(cc, aggregate) || isArgmaxDef(cc, aggregate) {
 			return normalizeSortField(mkv("field", vgField(cc, fieldDefToSortBy, fieldRefOption{}), "order", order), isStacked)
 		} else if isAggregateOp(cc, aggregate) || !aggregate.IsTruthy() {
 			return normalizeSortField(mkv("op", aggregate, "field", field, "order", order), isStacked)

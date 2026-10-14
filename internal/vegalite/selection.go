@@ -157,7 +157,7 @@ func getFacetModelOf(m Model) *facetModel {
 func unitName(m Model, escape bool) string {
 	name := m.b().name
 	if escape {
-		name = stringValue(jsval.Str(name))
+		name = stringValue(m.b().nameV) // stringValue(model.name), as given
 	}
 	if f := getFacetModelOf(m); f != nil {
 		for _, channel := range facetChannels {
@@ -541,7 +541,7 @@ func dateTimeToTimestamp(cc *compileCtx, d Value, local *time.Location) float64 
 	parts := dateTimeParts(cc, d, true)
 	args := make([]float64, len(parts))
 	for i, p := range parts {
-		args[i] = jsval.StringToNumber(p)
+		args[i] = jsval.ToNumber(p) // Date.UTC(...parts)
 	}
 	if d.Get("utc").IsTruthy() {
 		return format.UTCArgs(args...)
