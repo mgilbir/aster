@@ -107,19 +107,9 @@ var filterParity = []synth{
 	exact("disp-scale-huge", `<feDisplacementMap in2="SourceGraphic" scale="1e30" xChannelSelector="B" yChannelSelector="R"/>`),
 
 	// ---- feTurbulence ----
-	// The noise is the same bits as resvg's (the reference code's): these are
-	// exact whatever the source (the source is not read). Stitched noise, a
-	// seed past 32 bits and a numOctaves that is not whole diverge
-	// (filterDivergences).
-	exact("turb-turbulence", `<feTurbulence type="turbulence" baseFrequency="0.05" numOctaves="2"/>`),
-	exact("turb-fractal", `<feTurbulence type="fractalNoise" baseFrequency="0.05" numOctaves="2" seed="1"/>`),
-	exact("turb-srgb", `<feTurbulence baseFrequency="0.05" numOctaves="2" color-interpolation-filters="sRGB"/>`),
-	exact("turb-seed-fraction", `<feTurbulence baseFrequency="0.02 0.08" numOctaves="4" seed="-7.9"/>`),
-	exact("turb-seed-max", `<feTurbulence baseFrequency="0.03" numOctaves="2" seed="1e10"/>`),
-	exact("turb-octaves-40", `<feTurbulence baseFrequency="0.05" numOctaves="40"/>`),
-	exact("turb-frequency-high", `<feTurbulence baseFrequency="3.7" numOctaves="3"/>`),
-	exact("turb-type-case", `<feTurbulence baseFrequency="0.05" numOctaves="2" type="FractalNoise"/>`),
-	{"light-turbulence-bump", filterSVG(`<feTurbulence type="fractalNoise" baseFrequency="0.04" numOctaves="2" result="n"/><feDiffuseLighting in="n" surfaceScale="2" lighting-color="white"><feDistantLight azimuth="225" elevation="45"/></feDiffuseLighting>`, "", aaShapes), 0.01, 0},
+	// Noise that is the same whatever the gradients (none, or none that
+	// counts): exact whatever the source (the source is not read). The rest
+	// diverge (filterDivergences).
 	exact("turb-octaves-zero", `<feTurbulence baseFrequency="0.03" numOctaves="0" type="fractalNoise"/>`),
 	exact("turb-octaves-negative", `<feTurbulence baseFrequency="0.03" numOctaves="-3"/>`),
 	exact("turb-frequency-zero", `<feTurbulence baseFrequency="0" numOctaves="3" type="fractalNoise"/>`),

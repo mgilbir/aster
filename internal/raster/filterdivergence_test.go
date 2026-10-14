@@ -29,7 +29,7 @@ const (
 	citeConvDivisor       = `§9.9: "If the specified divisor is 0 then the default value will be used instead"`
 	citeKernelUnit        = `§9.9, §9.10: "kernelUnitLength, in combination with the other attributes, defines an implicit pixel grid in the filter effects coordinate system"; "the dx and dy values (e.g., I(x-dx,y-dy)), represent deltas ... determined by the value (explicit or implicit) of attribute kernelUnitLength"`
 	citeDisplacement      = `§9.11: "P'(x,y) ← P( x + scale * (XC(x,y) - .5), y + scale * (YC(x,y) - .5))"; "The calculations using the pixel values from in2 are performed using non-premultiplied color values"; "The in source image must remain in its current color space"`
-	citeTurbulence        = `§9.21: "The filter primitive subregion is to be passed as the arguments fTileX, fTileY, fTileWidth and fTileHeight"; the seed "must first be truncated, i.e. rounded to the closest integer value towards zero"; numOctaves = "<integer>"`
+	citeTurbulence        = `§9.21: the reference code draws a gradient again "while(fGradient[k][i][0] == 0 && fGradient[k][i][1] == 0)" and "if (s > 1) { i--; // discard the current random vector; try it again"; "The filter primitive subregion is to be passed as the arguments fTileX, fTileY, fTileWidth and fTileHeight"; numOctaves = "<integer>"`
 	citeLightingColor     = `§9.1: "The color space in which a particular filter primitive performs its operations is determined by the value of the property color-interpolation-filters on the given filter primitive"`
 	citeSpecularExp       = `§9.19: specularExponent, "Exponent for specular term, larger is more "shiny". The initial value for specularExponent is 1." (no range; SVG 1.1's 1-128 is gone); §11.4: a spot light's "The initial value for specularExponent is 1."`
 	citeLightingInherit   = `§3: "all properties defined in this specification also accept the inherit keyword as their property value"; §11.5: lighting-color "Inherited: no"`
@@ -84,14 +84,23 @@ var filterDivergences = []divergence{
 	{exact("disp-transfer-map", `<feOffset dx="3" result="o"/><feComponentTransfer in="SourceGraphic" result="m"><feFuncR type="linear" slope="2" intercept="-0.3"/><feFuncG type="discrete" tableValues="0 0.3 0.8 1"/></feComponentTransfer><feDisplacementMap in="o" in2="m" scale="3.5" xChannelSelector="R" yChannelSelector="G"/>`), citeDisplacement, "TestSpecDisplacementMap"},
 	{synth{"disp-obb", filterSVG(`<feDisplacementMap in2="SourceGraphic" scale="0.05" xChannelSelector="R" yChannelSelector="G"/>`, `primitiveUnits="objectBoundingBox"`, alignedShapes), 0.01, 0}, citeDisplacement, "TestSpecDisplacementMap"},
 	{synth{"disp-aa", filterSVG(`<feFlood flood-color="#80c0ff" result="m"/><feDisplacementMap in="SourceGraphic" in2="m" scale="2" xChannelSelector="R" yChannelSelector="B"/>`, "", aaShapes), 0.1, 0.25}, citeDisplacement, "TestSpecDisplacementMap"},
+	{exact("turb-turbulence", `<feTurbulence type="turbulence" baseFrequency="0.05" numOctaves="2"/>`), citeTurbulence, "TestSpecTurbulence"},
+	{exact("turb-fractal", `<feTurbulence type="fractalNoise" baseFrequency="0.05" numOctaves="2" seed="1"/>`), citeTurbulence, "TestSpecTurbulence"},
 	{exact("turb-stitch-fractal", `<feTurbulence type="fractalNoise" baseFrequency="0.03 0.07" numOctaves="3" seed="5" stitchTiles="stitch"/>`), citeTurbulence, "TestSpecTurbulence"},
 	{exact("turb-stitch-odd", `<feTurbulence baseFrequency="0.013 0.0217" numOctaves="5" stitchTiles="stitch" type="fractalNoise" seed="3"/>`), citeTurbulence, "TestSpecTurbulence"},
 	{exact("turb-stitch-turbulence", `<feTurbulence baseFrequency="0.04" numOctaves="3" stitchTiles="stitch" seed="11"/>`), citeTurbulence, "TestSpecTurbulence"},
 	{exact("turb-subregion", `<feTurbulence x="30" y="20" width="90" height="70" baseFrequency="0.05" numOctaves="2" stitchTiles="stitch"/>`), citeTurbulence, "TestSpecTurbulence"},
+	{exact("turb-srgb", `<feTurbulence baseFrequency="0.05" numOctaves="2" color-interpolation-filters="sRGB"/>`), citeTurbulence, "TestSpecTurbulence"},
+	{exact("turb-seed-fraction", `<feTurbulence baseFrequency="0.02 0.08" numOctaves="4" seed="-7.9"/>`), citeTurbulence, "TestSpecTurbulence"},
 	{exact("turb-seed-min", `<feTurbulence baseFrequency="0.03" numOctaves="2" seed="-1e10" type="fractalNoise"/>`), citeTurbulence, "TestSpecTurbulence"},
+	{exact("turb-seed-max", `<feTurbulence baseFrequency="0.03" numOctaves="2" seed="1e10"/>`), citeTurbulence, "TestSpecTurbulence"},
 	{exact("turb-octaves-fraction", `<feTurbulence baseFrequency="0.03" numOctaves="2.5"/>`), citeTurbulence, "TestSpecTurbulence"},
+	{exact("turb-octaves-40", `<feTurbulence baseFrequency="0.05" numOctaves="40"/>`), citeTurbulence, "TestSpecTurbulence"},
+	{exact("turb-frequency-high", `<feTurbulence baseFrequency="3.7" numOctaves="3"/>`), citeTurbulence, "TestSpecTurbulence"},
+	{exact("turb-type-case", `<feTurbulence baseFrequency="0.05" numOctaves="2" type="FractalNoise"/>`), citeTurbulence, "TestSpecTurbulence"},
 	{synth{"turb-displacement", filterSVG(`<feTurbulence type="turbulence" baseFrequency="0.05" numOctaves="2" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale="5" xChannelSelector="R" yChannelSelector="G"/>`, "", alignedShapes), 0.01, 0}, citeTurbulence, "TestSpecTurbulence"},
 	{synth{"turb-displacement-aa", filterSVG(`<feTurbulence type="turbulence" baseFrequency="0.05" numOctaves="2" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale="2" xChannelSelector="R" yChannelSelector="G"/>`, "", aaShapes), 0.1, 0.25}, citeTurbulence, "TestSpecTurbulence"},
+	{synth{"light-turbulence-bump", filterSVG(`<feTurbulence type="fractalNoise" baseFrequency="0.04" numOctaves="2" result="n"/><feDiffuseLighting in="n" surfaceScale="2" lighting-color="white"><feDistantLight azimuth="225" elevation="45"/></feDiffuseLighting>`, "", aaShapes), 0.01, 0}, citeTurbulence, "TestSpecTurbulence"},
 	{exact("light-diffuse-distant", `<feDiffuseLighting surfaceScale="3" diffuseConstant="1.2" lighting-color="#f80"><feDistantLight azimuth="45" elevation="50"/></feDiffuseLighting>`), citeLightingColor, "TestSpecLightingColor"},
 	{exact("light-diffuse-point", `<feDiffuseLighting surfaceScale="5" lighting-color="#8cf"><fePointLight x="90" y="60" z="30"/></feDiffuseLighting>`), citeLightingColor, "TestSpecLightingColor"},
 	{exact("light-specular-distant-exponent-1", `<feSpecularLighting surfaceScale="6" specularExponent="1" lighting-color="#fd0"><feDistantLight azimuth="-30" elevation="20"/></feSpecularLighting>`), citeLightingColor, "TestSpecLightingColor"},

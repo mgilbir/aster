@@ -6,6 +6,11 @@ import "math"
 // below shows the exact algorithm used for this filter effect"), in f64 as
 // resvg's turbulence.rs computes it. resvg ports SVG 1.1's version of the
 // code; this follows Filter Effects 1's where they differ:
+//   - the gradients: Filter Effects 1 draws each gradient again while it is
+//     zero, and discards one longer than 1 ("discard the current random
+//     vector; try it again"; the specification's changes: "Make
+//     feTurbulence algorithms respect uniformity"), where SVG 1.1
+//     normalizes every one;
 //   - the tile stitched: "The filter primitive subregion is to be passed as
 //     the arguments fTileX, fTileY, fTileWidth and fTileHeight", in user
 //     space as the point is, where resvg passes the filter region's size in
@@ -114,11 +119,25 @@ func newTurbTables(seed int64) *turbTables {
 		for i := 0; i < turbBSize; i++ {
 			t.lattice[i] = i
 			g := &t.gradient[k][i]
-			for j := 0; j < 2; j++ {
-				s = turbRandom(s)
-				g[j] = float64((s%(turbBSize+turbBSize))-turbBSize) / turbBSize
+			for {
+				for j := 0; j < 2; j++ {
+					s = turbRandom(s)
+					g[j] = float64((s%(turbBSize+turbBSize))-turbBSize) / turbBSize
+				}
+				if g[0] != 0 || g[1] != 0 {
+					break
+				}
 			}
+			// A gradient is drawn again while it is zero or longer than 1.
+			// The draws are the generator's numbers in order, and nowhere
+			// in its whole cycle (2^31 - 2 numbers, either way of pairing
+			// them) are more than 14 draws in a row thrown away: a gradient
+			// takes at most 15, whatever the seed.
 			n := math.Sqrt(float64(g[0]*g[0]) + float64(g[1]*g[1]))
+			if n > 1 {
+				i-- // discard the current random vector; try it again
+				continue
+			}
 			g[0] /= n
 			g[1] /= n
 		}

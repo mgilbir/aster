@@ -168,8 +168,7 @@ func TestSpecTile(t *testing.T) {
 // ---- feTurbulence (§9.21) ------------------------------------------------------
 
 // refTurbulence is Filter Effects 1's reference code, transcribed: the
-// random number generator, init, noise2 and turbulence. Its init draws the
-// gradients as SVG 1.1's does, every one normalized.
+// random number generator, init with its retries, noise2 and turbulence.
 type refTurbulence struct {
 	lattice  [0x100 + 0x100 + 2]int
 	gradient [4][0x100 + 0x100 + 2][2]float64
@@ -203,11 +202,20 @@ func newRefTurbulence(seed int64) *refTurbulence {
 	for k := 0; k < 4; k++ {
 		for i = 0; i < bSize; i++ {
 			t.lattice[i] = i
-			for j := 0; j < 2; j++ {
-				seed = refRandom(seed)
-				t.gradient[k][i][j] = float64((seed%(bSize+bSize))-bSize) / bSize
+			for {
+				for j := 0; j < 2; j++ {
+					seed = refRandom(seed)
+					t.gradient[k][i][j] = float64((seed%(bSize+bSize))-bSize) / bSize
+				}
+				if !(t.gradient[k][i][0] == 0 && t.gradient[k][i][1] == 0) {
+					break
+				}
 			}
 			s := math.Sqrt(float64(t.gradient[k][i][0]*t.gradient[k][i][0]) + float64(t.gradient[k][i][1]*t.gradient[k][i][1]))
+			if s > 1 {
+				i-- // discard the current random vector; try it again.
+				continue
+			}
 			t.gradient[k][i][0] /= s
 			t.gradient[k][i][1] /= s
 		}
