@@ -20,6 +20,8 @@ type renderer struct {
 	doc    *document
 	lim    Limits
 	shaper Shaper
+	// wholeLayers is Options.wholeLayers.
+	wholeLayers bool
 
 	cv    *canvas
 	rast  *rasterizer
@@ -218,20 +220,34 @@ func (r *renderer) allocCanvas(w, h int) *canvas {
 	if r.err != nil {
 		return nil
 	}
-	n := budget.MulInt(budget.MulInt(w, h), 4)
+	if !r.chargeCanvas(budget.MulInt(budget.MulInt(w, h), 4)) {
+		return nil
+	}
+	return newCanvas(w, h)
+}
+
+// chargeCanvas accounts for n bytes of canvas memory about to be allocated,
+// failing the render when the live canvas memory would exceed
+// Limits.MaxCanvasBytes. The layers idle in the pool are dropped first when
+// that makes room: memory held for reuse does not refuse a render.
+func (r *renderer) chargeCanvas(n int) bool {
+	for len(r.pool) > 0 && n > r.lim.MaxCanvasBytes-r.canvasBytes {
+		r.releaseCanvas(r.pool[len(r.pool)-1])
+		r.pool = r.pool[:len(r.pool)-1]
+	}
 	if n > r.lim.MaxCanvasBytes-r.canvasBytes {
 		r.fail(fmt.Errorf("raster: offscreen layers need more than %d MiB of pixel memory at once (raise Limits.MaxCanvasBytes or reduce nested opacity/filter/mask groups): %w",
 			r.lim.MaxCanvasBytes>>20, errLimit))
-		return nil
+		return false
 	}
 	r.canvasBytes += n
-	return newCanvas(w, h)
+	return true
 }
 
 // releaseCanvas returns c's memory to the budget (c must not be used again).
 func (r *renderer) releaseCanvas(c *canvas) {
 	if c != nil {
-		r.canvasBytes -= len(c.pix)
+		r.canvasBytes -= cap(c.pix)
 	}
 }
 
@@ -268,6 +284,8 @@ func (r *renderer) fail(err error) {
 	}
 }
 
+// newLayer is a transparent layer as large as the canvas, holding no pixels
+// until drawing reserves them.
 func (r *renderer) newLayer() *canvas {
 	for n := len(r.pool); n > 0; n = len(r.pool) {
 		c := r.pool[n-1]
@@ -277,7 +295,104 @@ func (r *renderer) newLayer() *canvas {
 		}
 		r.releaseCanvas(c)
 	}
-	return r.allocCanvas(r.cw, r.ch)
+	if r.err != nil {
+		return nil
+	}
+	c := &canvas{w: r.cw, h: r.ch}
+	if r.wholeLayers && !r.reserve(c, c.bounds()) {
+		return nil
+	}
+	return c
+}
+
+// reserveHint has c hold need ahead of drawing that will reserve it, when
+// that fits the canvas budget: it saves growing c piece by piece, and where
+// it does not fit, drawing reserves what it draws, as it would anyway.
+func (r *renderer) reserveHint(c *canvas, need irect) {
+	need = need.intersect(c.bounds())
+	if r.err != nil || c.cov != nil || c.holds(need) {
+		return
+	}
+	if budget.MulInt(budget.MulInt(need.w(), need.h()), 4) > r.lim.MaxCanvasBytes-r.canvasBytes {
+		return
+	}
+	r.reserve(c, need)
+}
+
+// reserve makes c hold every pixel of need within its bounds, failing the
+// render when the pixel memory alive at once would exceed
+// Limits.MaxCanvasBytes (the old pixels and the new both, while they are
+// copied). Only the dirty pixels are kept: the pixels held are placed anew
+// around them and need, in the buffer c has when it is large enough (a layer
+// taken from the pool is placed where it is drawn next), and in a new one
+// otherwise. Growing a layer that holds drawing, it grows past need towards
+// the side it grows, by half its size, so that a layer drawn into piece by
+// piece is copied a few times, not once a piece. A coverage canvas holds no
+// pixels and needs none.
+func (r *renderer) reserve(c *canvas, need irect) bool {
+	if r.err != nil {
+		return false
+	}
+	need = need.intersect(c.bounds())
+	if c.cov != nil || c.holds(need) {
+		return true
+	}
+	keep := c.dirty.intersect(c.a)
+	a := keep.union(need)
+	if !keep.empty() {
+		gx, gy := a.w()/2, a.h()/2
+		if need.x0 < keep.x0 {
+			a.x0 -= gx
+		}
+		if need.x1 > keep.x1 {
+			a.x1 += gx
+		}
+		if need.y0 < keep.y0 {
+			a.y0 -= gy
+		}
+		if need.y1 > keep.y1 {
+			a.y1 += gy
+		}
+		a = a.intersect(c.bounds())
+	}
+	n := budget.MulInt(budget.MulInt(a.w(), a.h()), 4)
+	if keep.empty() && n <= cap(c.pix) {
+		// Every pixel of the buffer is transparent: only its shape changes.
+		c.a, c.pix = a, c.pix[:n]
+		return true
+	}
+	// A layer idle in the pool lends its buffer, if it is large enough,
+	// and takes c's: memory held idle is not allocated again.
+	var donor *canvas
+	for _, l := range r.pool {
+		if cap(l.pix) >= n && (donor == nil || cap(l.pix) < cap(donor.pix)) {
+			donor = l
+		}
+	}
+	var pix []uint8
+	if donor != nil {
+		pix = donor.pix[:n] // a pooled layer is transparent
+	} else {
+		if !r.chargeCanvas(n) {
+			return false
+		}
+		pix = make([]uint8, n)
+	}
+	for y := keep.y0; y < keep.y1; y++ {
+		o := ((y-a.y0)*a.w() + keep.x0 - a.x0) * 4
+		copy(pix[o:o+4*keep.w()], c.pix[c.off(keep.x0, y):c.off(keep.x1, y)])
+	}
+	if donor != nil {
+		// The kept pixels have moved: the buffer goes to the pool transparent.
+		for y := keep.y0; y < keep.y1; y++ {
+			clear(c.pix[c.off(keep.x0, y):c.off(keep.x1, y)])
+		}
+		donor.a, donor.pix = irect{}, c.pix[:0]
+	} else {
+		r.canvasBytes -= cap(c.pix)
+	}
+	c.a, c.pix = a, pix
+	return true
 }
 
 func (r *renderer) pushLayer() *canvas {
@@ -299,7 +414,7 @@ func (r *renderer) popLayer(prev *canvas, opacity float64, mode blendMode) {
 	layer := r.cv
 	r.cv = prev
 	r.depth--
-	if d := layer.dirty.intersect(layer.bounds()); !d.empty() {
+	if d := layer.dirty.intersect(layer.bounds()); !d.empty() && r.reserve(prev, d) {
 		r.bands(d, func(band irect) { compositeLayer(prev, layer, band, opacity, nil, mode) })
 	}
 	layer.clearDirty()
@@ -1181,6 +1296,18 @@ func (r *renderer) drawPath(p *path, st *state, opacity float64, blend blendMode
 		}
 		return cbOK && mayCoverBox(cb, st.ctm, region, reach)
 	}
+	if layered && !st.nonScaling {
+		// The layer of one path holds its fill and its stroke, both within
+		// the control points' box grown by the stroke's reach: held from the
+		// start, the stroke does not grow it again.
+		reach := 0.0
+		if stroke {
+			reach = strokeReach(st)
+		}
+		if covers(reach) {
+			r.reserveHint(r.cv, deviceBox(cb, st.ctm, reach).intersect(region))
+		}
+	}
 	doFill := func() {
 		if fill && covers(0) {
 			if ps, ok := r.resolvePaint(st.fill, fo, st, needBBox); ok {
@@ -1336,19 +1463,40 @@ func mayCoverBox(b rect, m matrix, region irect, reach float64) bool {
 	if region.empty() {
 		return false
 	}
-	b = rect{b.x0 - reach, b.y0 - reach, b.x1 + reach, b.y1 + reach}
-	d := transformRect(b, m)
-	if !(d.x1 >= d.x0) || !(d.y1 >= d.y0) {
+	d, e, ok := reachBox(b, m, reach)
+	if !ok {
 		return true // NaN: leave it to the scan converter
+	}
+	return d.x1+e >= float64(region.x0) && d.x0-e <= float64(region.x1) &&
+		d.y1+e >= float64(region.y0) && d.y0-e <= float64(region.y1)
+}
+
+// reachBox is the device box of the box b of local units grown by reach,
+// under m, and the margin e by which a point of what is drawn within it may
+// lie outside it; ok is false when the box is not a number.
+func reachBox(b rect, m matrix, reach float64) (d rect, e float64, ok bool) {
+	b = rect{b.x0 - reach, b.y0 - reach, b.x1 + reach, b.y1 + reach}
+	d = transformRect(b, m)
+	if !(d.x1 >= d.x0) || !(d.y1 >= d.y0) {
+		return d, 0, false
 	}
 	// The corners and the points are transformed by different sums, each
 	// rounded: a margin of a pixel and of what rounding can move a point
 	// by where the terms are large.
 	lin := math.Abs(m.a) + math.Abs(m.b) + math.Abs(m.c) + math.Abs(m.d)
 	mag := lin*max(math.Abs(b.x0), math.Abs(b.x1), math.Abs(b.y0), math.Abs(b.y1)) + math.Abs(m.e) + math.Abs(m.f)
-	e := 1 + mag*0x1p-40
-	return d.x1+e >= float64(region.x0) && d.x0-e <= float64(region.x1) &&
-		d.y1+e >= float64(region.y0) && d.y0-e <= float64(region.y1)
+	return d, 1 + mag*0x1p-40, true
+}
+
+// deviceBox is the pixels what is drawn within the box b of local units,
+// reaching up to reach beyond it, may touch under m (as mayCoverBox reckons),
+// the empty rectangle when the box is not a number.
+func deviceBox(b rect, m matrix, reach float64) irect {
+	d, e, ok := reachBox(b, m, reach)
+	if !ok {
+		return irect{}
+	}
+	return irect{clampInt(math.Floor(d.x0 - e)), clampInt(math.Floor(d.y0 - e)), clampInt(math.Ceil(d.x1 + e)), clampInt(math.Ceil(d.y1 + e))}
 }
 
 // geomWork charges n units of geometry work to MaxPixelOps, stopping the
@@ -1389,7 +1537,7 @@ func (r *renderer) fillPolys(f *flat, evenOdd bool, ps paintSrc, st *state) {
 	}
 	bb := irect{clampInt(math.Floor(minX)), clampInt(math.Floor(minY)), clampInt(math.Ceil(maxX)), clampInt(math.Ceil(maxY))}
 	clip = clip.intersect(bb)
-	if clip.empty() {
+	if clip.empty() || !r.reserve(r.cv, clip) {
 		return
 	}
 	crisp := st.crisp

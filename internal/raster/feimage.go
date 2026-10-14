@@ -88,7 +88,7 @@ func (run *filterRun) feImage(p *fprim) (fimage, bool) {
 			return res, r.err == nil
 		}
 	}
-	cv := &canvas{w: run.w, h: run.h, pix: pix}
+	cv := canvasOver(run.w, run.h, pix)
 	depth := r.feDepth + 1
 	ok := r.drawInto(cv, func() {
 		if fi.target != nil {

@@ -201,14 +201,15 @@ func (r *renderer) applyMask(ms *maskSpec, st *state) {
 // by the luminance (or alpha) coverage of mk, tiny-skia's Mask::from_pixmap
 // followed by Pixmap::apply_mask.
 func multiplyByMask(dst, mk *canvas, reg irect, alpha bool) {
+	dst.mustHold(reg)
 	for y := reg.y0; y < reg.y1; y++ {
 		for x := reg.x0; x < reg.x1; x++ {
-			i := (y*dst.w + x) * 4
+			i := dst.off(x, y)
 			d := dst.pix[i : i+4 : i+4]
 			if d[3] == 0 && d[0] == 0 {
 				continue
 			}
-			m := mk.pix[i : i+4 : i+4]
+			m := mk.pixelAt(x, y)
 			var cov uint32
 			if alpha {
 				cov = uint32(m[3])
@@ -383,7 +384,7 @@ func (r *renderer) renderEffects(n *node, st *state, opacity float64, blend blen
 	r.depth--
 	r.releasePool(r.pool)
 	r.cv, r.cw, r.ch, r.pool = parent, saved.cw, saved.ch, saved.pool
-	if r.err == nil {
+	if r.err == nil && r.reserve(parent, ib) {
 		r.bands(ib.intersect(parent.bounds()), func(band irect) {
 			compositeLayerAt(parent, sub, ib.x0, ib.y0, band, opacity, st.clip, blend)
 		})

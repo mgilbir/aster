@@ -182,6 +182,7 @@ func (r *renderer) applyFilters(specs []*filterSpec, ts matrix, cv *canvas) {
 
 // newFilterRun is a run of a filter over cv, at ctm-shifted coordinates ts.
 func (r *renderer) newFilterRun(cv *canvas, ts matrix) *filterRun {
+	cv.mustHold(cv.bounds()) // a filter's canvas holds all its pixels
 	return &filterRun{r: r, w: cv.w, h: cv.h, src: cv.pix, ts: ts}
 }
 

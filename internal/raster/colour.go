@@ -256,7 +256,7 @@ func (p *colourPainter) PopGroup(mode shape.CompositeMode) {
 	if c := p.st.clip; c != nil {
 		reg = reg.intersect(c.r)
 	}
-	if !reg.empty() {
+	if !reg.empty() && r.reserve(prev, reg) {
 		r.bands(reg, func(band irect) { compositeMode(prev, layer, band, p.st.clip, mode) })
 	}
 	layer.clearDirty()

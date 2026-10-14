@@ -178,23 +178,39 @@ func TestPixelOpsRenderBudget(t *testing.T) {
 }
 
 func TestCanvasBytesBudget(t *testing.T) {
-	var b strings.Builder
-	b.WriteString(`<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1000">`)
-	for i := 0; i < 10; i++ {
-		b.WriteString(`<g opacity=".5">`)
+	nested := func(content string) []byte {
+		var b strings.Builder
+		b.WriteString(`<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1000">`)
+		for i := 0; i < 10; i++ {
+			b.WriteString(`<g opacity=".5">`)
+		}
+		b.WriteString(content)
+		for i := 0; i < 10; i++ {
+			b.WriteString(`</g>`)
+		}
+		b.WriteString(`</svg>`)
+		return []byte(b.String())
 	}
-	b.WriteString(`<rect width="10" height="10"/>`)
-	for i := 0; i < 10; i++ {
-		b.WriteString(`</g>`)
-	}
-	b.WriteString(`</svg>`)
-	// 4 MB canvas; allow the canvas and only two layers.
-	_, err := Render([]byte(b.String()), Options{Limits: Limits{MaxCanvasBytes: 12_000_000}})
+	// 4 MB canvas. Nested layers are composited one into the next, so at
+	// most three canvases are held at once (the canvas, the layer composited
+	// and the one it is composited into; one given back is reused, not
+	// allocated again): a byte less is refused.
+	const canvas = 1000 * 1000 * 4
+	whole := nested(`<rect width="1000" height="1000"/>`)
+	_, err := Render(whole, Options{Limits: Limits{MaxCanvasBytes: 3*canvas - 1}})
 	if !errors.Is(err, errLimit) || !strings.Contains(err.Error(), "pixel memory") {
 		t.Fatalf("want pixel memory error, got %v", err)
 	}
-	if _, err := Render([]byte(b.String()), Options{}); err != nil {
+	if _, err := Render(whole, Options{Limits: Limits{MaxCanvasBytes: 3 * canvas}}); err != nil {
+		t.Fatalf("three canvases: %v", err)
+	}
+	if _, err := Render(whole, Options{}); err != nil {
 		t.Fatalf("default limits: %v", err)
+	}
+	// A layer holds the pixels drawn into it, not the canvas's: ten layers
+	// of a small square fit where two of the whole canvas do not.
+	if _, err := Render(nested(`<rect width="10" height="10"/>`), Options{Limits: Limits{MaxCanvasBytes: 2*canvas - 1}}); err != nil {
+		t.Fatalf("small layers: %v", err)
 	}
 }
 

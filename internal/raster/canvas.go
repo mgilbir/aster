@@ -1,6 +1,9 @@
 package raster
 
-import "math"
+import (
+	"fmt"
+	"math"
+)
 
 // unitByte is v, clamped to [0, 1] (NaN as 0), on the 0-255 scale, rounded:
 // an opacity as a byte. The clamp is done in float64, so no NaN or value out
@@ -21,33 +24,77 @@ func mul255(a, b uint32) uint32 {
 	return (t + t>>8) >> 8
 }
 
-// canvas is a premultiplied RGBA8 pixel buffer.
+// canvas is a premultiplied RGBA8 pixel buffer over the device pixels
+// [0,w) x [0,h). pix holds the pixels of a, row-major; every pixel outside a
+// is transparent. A canvas from newCanvas holds all its pixels. A layer
+// (renderer.newLayer) starts with none and is grown (renderer.reserve) to
+// hold what is drawn into it, so an offscreen layer costs the memory of what
+// it holds, not of the canvas. A coverage canvas (cov set) holds no pixels:
+// what is drawn onto it marks the cells of cov it leaves with alpha.
 type canvas struct {
 	w, h  int
+	a     irect // the pixels pix holds
 	pix   []uint8
-	dirty irect // bounding box of pixels possibly non-transparent
+	dirty irect // bounding box of pixels possibly non-transparent, within a
+	cov   *Coverage
 }
 
 func newCanvas(w, h int) *canvas {
-	return &canvas{w: w, h: h, pix: make([]uint8, w*h*4)}
+	return canvasOver(w, h, make([]uint8, w*h*4))
+}
+
+// canvasOver is a canvas holding all its pixels in pix (w*h*4 bytes).
+func canvasOver(w, h int, pix []uint8) *canvas {
+	return &canvas{w: w, h: h, a: irect{0, 0, w, h}, pix: pix}
 }
 
 func (c *canvas) bounds() irect { return irect{0, 0, c.w, c.h} }
 
 func (c *canvas) markDirty(r irect) { c.dirty = c.dirty.union(r) }
 
+// off is the offset in pix of pixel (x, y), which a holds.
+func (c *canvas) off(x, y int) int { return ((y-c.a.y0)*c.a.w() + x - c.a.x0) * 4 }
+
+// holds reports whether pix holds every pixel of r.
+func (c *canvas) holds(r irect) bool {
+	return r.empty() || (r.x0 >= c.a.x0 && r.y0 >= c.a.y0 && r.x1 <= c.a.x1 && r.y1 <= c.a.y1)
+}
+
+// mustHold panics unless pix holds every pixel of r: pixels are only ever
+// written where the canvas was first grown to hold them (renderer.reserve),
+// and a write elsewhere would be lost. The render reports the panic as an
+// internal error.
+func (c *canvas) mustHold(r irect) {
+	if c.cov != nil || !c.holds(r) {
+		panic(fmt.Sprintf("raster: write to %v of a canvas holding %v (coverage %v)", r, c.a, c.cov != nil))
+	}
+}
+
+// noPixel is the transparent pixel read where a canvas holds none.
+var noPixel [4]uint8
+
+// pixelAt is pixel (x, y) for reading only: noPixel where the canvas holds
+// none.
+func (c *canvas) pixelAt(x, y int) []uint8 {
+	if x < c.a.x0 || y < c.a.y0 || x >= c.a.x1 || y >= c.a.y1 {
+		return noPixel[:4:4]
+	}
+	i := c.off(x, y)
+	return c.pix[i : i+4 : i+4]
+}
+
 // clearDirty zeroes the dirty region so the buffer can be reused as a layer.
 func (c *canvas) clearDirty() {
-	d := c.dirty.intersect(c.bounds())
+	d := c.dirty.intersect(c.a)
 	if d.empty() {
 		c.dirty = irect{}
 		return
 	}
-	if d.x0 == 0 && d.x1 == c.w {
-		clear(c.pix[d.y0*c.w*4 : d.y1*c.w*4])
+	if d.x0 == c.a.x0 && d.x1 == c.a.x1 {
+		clear(c.pix[c.off(d.x0, d.y0):c.off(d.x0, d.y1)])
 	} else {
 		for y := d.y0; y < d.y1; y++ {
-			clear(c.pix[(y*c.w+d.x0)*4 : (y*c.w+d.x1)*4])
+			clear(c.pix[c.off(d.x0, y):c.off(d.x1, y)])
 		}
 	}
 	c.dirty = irect{}
@@ -113,7 +160,6 @@ func (b *blitter) blitRow(y, x0 int, cov []uint8) {
 		cov = cov[:cv.w-x0]
 	}
 	n := len(cov)
-	dst := cv.pix[(y*cv.w+x0)*4 : (y*cv.w+x0+n)*4]
 	var mrow []uint8
 	if m := b.mask; m != nil {
 		if y < m.r.y0 || y >= m.r.y1 {
@@ -132,7 +178,6 @@ func (b *blitter) blitRow(y, x0 int, cov []uint8) {
 		}
 		if lo != x0 || hi != x0+n {
 			cov = cov[lo-x0 : hi-x0]
-			dst = dst[(lo-x0)*4 : (hi-x0)*4]
 			x0 = lo
 			n = hi - lo
 		}
@@ -141,6 +186,16 @@ func (b *blitter) blitRow(y, x0 int, cov []uint8) {
 			mrow = m.a[(y-m.r.y0)*w+(x0-m.r.x0):][:n]
 		}
 	}
+	if n == 0 {
+		return
+	}
+	if cv.cov != nil {
+		b.blitCoverage(y, x0, cov, mrow)
+		return
+	}
+	cv.mustHold(irect{x0, y, x0 + n, y + 1})
+	i := cv.off(x0, y)
+	dst := cv.pix[i : i+n*4]
 	if b.paint.solid {
 		b.blitSolid(dst, cov, mrow)
 		return
@@ -318,13 +373,24 @@ func compositeLayer(dst, layer *canvas, r irect, opacity float64, m *mask, mode 
 	}
 	dst.markDirty(r)
 	op := unitByte(opacity)
+	// The layer's dirty region is within what it holds.
+	layer.mustHold(r)
+	if dst.cov != nil {
+		for y := r.y0; y < r.y1; y++ {
+			dst.cov.compositeRow(layer.pix[layer.off(r.x0, y):layer.off(r.x1, y)], r.x0, y, op, m)
+		}
+		return
+	}
+	dst.mustHold(r)
 	for y := r.y0; y < r.y1; y++ {
 		for x := r.x0; x < r.x1; x++ {
-			s := layer.pix[(y*layer.w+x)*4 : (y*layer.w+x)*4+4 : (y*layer.w+x)*4+4]
+			i := layer.off(x, y)
+			s := layer.pix[i : i+4 : i+4]
 			if s[3] == 0 {
 				continue
 			}
-			compositePixel(dst.pix[(y*dst.w+x)*4:(y*dst.w+x)*4+4:(y*dst.w+x)*4+4], s, op, m, x, y, mode)
+			j := dst.off(x, y)
+			compositePixel(dst.pix[j:j+4:j+4], s, op, m, x, y, mode)
 		}
 	}
 }
@@ -341,14 +407,25 @@ func compositeLayerAt(dst, layer *canvas, ox, oy int, reg irect, opacity float64
 	}
 	dst.markDirty(r)
 	op := unitByte(opacity)
+	// layer holds all its pixels (a filter's).
+	layer.mustHold(layer.bounds())
+	if dst.cov != nil {
+		for y := r.y0; y < r.y1; y++ {
+			li := layer.off(r.x0-ox, y-oy)
+			dst.cov.compositeRow(layer.pix[li:li+4*r.w()], r.x0, y, op, m)
+		}
+		return
+	}
+	dst.mustHold(r)
 	for y := r.y0; y < r.y1; y++ {
 		for x := r.x0; x < r.x1; x++ {
-			li := ((y-oy)*layer.w + (x - ox)) * 4
+			li := layer.off(x-ox, y-oy)
 			s := layer.pix[li : li+4 : li+4]
 			if s[3] == 0 {
 				continue
 			}
-			compositePixel(dst.pix[(y*dst.w+x)*4:(y*dst.w+x)*4+4:(y*dst.w+x)*4+4], s, op, m, x, y, mode)
+			j := dst.off(x, y)
+			compositePixel(dst.pix[j:j+4:j+4], s, op, m, x, y, mode)
 		}
 	}
 }

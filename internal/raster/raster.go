@@ -94,6 +94,11 @@ type Options struct {
 	// block of scanlines, between filter primitives and when compositing
 	// layers); Render returns the context's error once it is done.
 	Context context.Context
+
+	// wholeLayers makes every offscreen layer hold the whole canvas from the
+	// start, as layers once did: the tests' reference for layers that hold
+	// what is drawn.
+	wholeLayers bool
 }
 
 // Render rasterizes svg and returns a non-premultiplied image.
@@ -132,9 +137,46 @@ func RenderRGBA(svg []byte, opts Options) (*image.RGBA, image.Rectangle, error) 
 	return img, ink, nil
 }
 
-// renderDoc draws svg and passes the renderer to finish, which reads the canvas
-// out while the render's resources are still held.
-func renderDoc(svg []byte, opts Options, finish func(*renderer) error) (err error) {
+// renderDoc draws svg onto a canvas of pixels and passes the renderer to
+// finish, which reads the canvas out while the render's resources are still
+// held.
+func renderDoc(svg []byte, opts Options, finish func(*renderer) error) error {
+	return renderDocInto(svg, opts, pixelTarget{}, finish)
+}
+
+// renderTarget makes the root canvas of a render, of cw x ch pixels, with the
+// background bg (nil: none); nil when the render has failed.
+type renderTarget interface {
+	root(r *renderer, cw, ch int, bg color.Color) *canvas
+}
+
+// pixelTarget is a root canvas of pixels.
+type pixelTarget struct{}
+
+func (pixelTarget) root(r *renderer, cw, ch int, bg color.Color) *canvas {
+	c := r.allocCanvas(cw, ch)
+	if c == nil || bg == nil {
+		return c
+	}
+	nc := color.NRGBAModel.Convert(bg).(color.NRGBA)
+	a := uint32(nc.A)
+	pr := [4]uint8{uint8(mul255(uint32(nc.R), a)), uint8(mul255(uint32(nc.G), a)), uint8(mul255(uint32(nc.B), a)), nc.A}
+	// A band at a time, polling: the canvas is the output's size.
+	for b := 0; b < len(c.pix); b += 4 * imageref.BandPixels {
+		if !r.poll(true) {
+			return nil
+		}
+		band := c.pix[b:min(b+4*imageref.BandPixels, len(c.pix))]
+		for i := 0; i < len(band); i += 4 {
+			copy(band[i:i+4], pr[:])
+		}
+	}
+	c.dirty = c.bounds()
+	return c
+}
+
+// renderDocInto is renderDoc onto the root canvas target makes.
+func renderDocInto(svg []byte, opts Options, target renderTarget, finish func(*renderer) error) (err error) {
 	defer func() {
 		if p := recover(); p != nil {
 			if stop, ok := p.(*budget.Stop); ok {
@@ -237,7 +279,7 @@ func renderDoc(svg []byte, opts Options, finish func(*renderer) error) (err erro
 		doc: doc, lim: lim, shaper: shaper,
 		rast: newRasterizer(), cw: cw, ch: ch, active: map[*node]bool{},
 		ctx: opts.Context, fetched: fetched, imageErr: opts.ImageError,
-		ledger: budget.LedgerFrom(opts.Context),
+		ledger: budget.LedgerFrom(opts.Context), wholeLayers: opts.wholeLayers,
 	}
 	if r.ledger == nil {
 		// Called on its own (not through the public API), a render still
@@ -257,24 +299,8 @@ func renderDoc(svg []byte, opts Options, finish func(*renderer) error) (err erro
 	r.lim.MaxPixelOps = opts.Limits.PixelOps(scale, cw, ch)
 	defer r.reportWork(opts.Context, scale)
 	r.rootState = rootState
-	if r.cv = r.allocCanvas(cw, ch); r.cv == nil {
+	if r.cv = target.root(r, cw, ch, opts.Background); r.cv == nil {
 		return r.err
-	}
-	if opts.Background != nil {
-		nc := color.NRGBAModel.Convert(opts.Background).(color.NRGBA)
-		a := uint32(nc.A)
-		pr := [4]uint8{uint8(mul255(uint32(nc.R), a)), uint8(mul255(uint32(nc.G), a)), uint8(mul255(uint32(nc.B), a)), nc.A}
-		// A band at a time, polling: the canvas is the output's size.
-		for b := 0; b < len(r.cv.pix); b += 4 * imageref.BandPixels {
-			if !r.poll(true) {
-				return r.err
-			}
-			band := r.cv.pix[b:min(b+4*imageref.BandPixels, len(r.cv.pix))]
-			for i := 0; i < len(band); i += 4 {
-				copy(band[i:i+4], pr[:])
-			}
-		}
-		r.cv.dirty = r.cv.bounds()
 	}
 
 	st := rootState

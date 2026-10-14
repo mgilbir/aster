@@ -124,6 +124,8 @@ func deriveLimits(n, ops uint64) callLimits {
 		MaxPathSegments: toInt(max(n/16, 64<<10)),
 		MaxImagePixels:  int(min(max(n/16, 64<<10), 64<<20)),
 	}
+	// The label transform's bitmaps hold their pixels as a PNG does.
+	l.vega.RasterCanvasBytes = l.raster.MaxCanvasBytes
 	// The glyphs of one run of text, and the SVG, each a quarter of the limit.
 	l.shaping = text.ShapingLimits{RunBytes: int64(min(max(n/4, 1<<20), 1<<40))}
 	l.svgBytes = toInt(min(max(n/4, 1<<20), 1<<40))
