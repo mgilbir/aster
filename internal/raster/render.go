@@ -72,10 +72,22 @@ type renderer struct {
 	// maskBytes is the clip coverage held for the elements being drawn,
 	// part of canvasBytes (see newMaskCoverage).
 	maskBytes int
-	// inFeImage is set while an feImage draws: a filter layer is bounded by
-	// the canvas there (resvg's max_bbox is the feImage's region), not by
-	// four times it.
-	inFeImage bool
+	// feDepth is how many feImages are drawing, one inside another;
+	// applying holds each filter being applied with the feDepth at which it
+	// was (a stack, in filterBuf while it is short: no allocation for a
+	// render's few nested filters). cycleFloor, when not 0, is the depth of
+	// the outermost feImage on a circle of references met while drawing
+	// (see feImage).
+	feDepth    int
+	applying   []filterAt
+	filterBuf  [8]filterAt
+	cycleFloor int
+}
+
+// filterAt is a filter being applied, and the feDepth at which it was.
+type filterAt struct {
+	node  *node
+	depth int
 }
 
 // errLimit is wrapped by every error a limit causes. Its own text is

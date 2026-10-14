@@ -72,10 +72,11 @@ var featureSynths = []synth{
 <feOffset in="SourceAlpha" dx="6" dy="5" result="o"/><feGaussianBlur in="o" stdDeviation="3" result="b"/><feFlood flood-color="#333" flood-opacity="0.6" result="fl"/><feComposite in="fl" in2="b" operator="in" result="sh"/>
 <feMerge><feMergeNode in="sh"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
 <g filter="url(#f)"><rect x="20" y="20" width="50" height="40" fill="gold"/><circle cx="80" cy="60" r="18" fill="tomato"/></g></svg>`, 0.52, 0.25},
-	{"filter-colormatrix", svgHead + `<defs><filter id="a"><feColorMatrix type="saturate" values="0.2"/></filter><filter id="b"><feColorMatrix type="hueRotate" values="90"/></filter>
-<filter id="c"><feColorMatrix type="luminanceToAlpha"/></filter><filter id="d" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="0 1 0 0 0  1 0 0 0 0  0 0 1 0 0  0 0 0 1 0"/></filter></defs>
-<rect x="5" y="5" width="25" height="40" fill="#e03030" filter="url(#a)"/><rect x="35" y="5" width="25" height="40" fill="#e03030" filter="url(#b)"/>
-<rect x="65" y="5" width="25" height="40" fill="#e03030" filter="url(#c)"/><rect x="95" y="5" width="20" height="40" fill="#e03030" filter="url(#d)"/></svg>`, 0.17, 0.25},
+	// hueRotate and luminanceToAlpha follow Filter Effects 1 where resvg
+	// does not (filterDivergences, TestSpecHueRotate, TestSpecColorMatrix).
+	{"filter-colormatrix", svgHead + `<defs><filter id="a"><feColorMatrix type="saturate" values="0.2"/></filter>
+<filter id="d" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="0 1 0 0 0  1 0 0 0 0  0 0 1 0 0  0 0 0 1 0"/></filter></defs>
+<rect x="5" y="5" width="25" height="40" fill="#e03030" filter="url(#a)"/><rect x="95" y="5" width="20" height="40" fill="#e03030" filter="url(#d)"/></svg>`, 0.17, 0.25},
 	{"filter-composite-over", svgHead + `<defs><filter id="o" x="0" y="0" width="1" height="1"><feFlood flood-color="blue" flood-opacity="0.7" result="f"/><feComposite in="SourceGraphic" in2="f" operator="over"/></filter></defs>
 <g filter="url(#o)"><circle cx="40" cy="50" r="30" fill="red"/></g></svg>`, 0.12, 0.27},
 	{"filter-composite-in", svgHead + `<defs><filter id="o" x="0" y="0" width="1" height="1"><feFlood flood-color="blue" flood-opacity="0.7" result="f"/><feComposite in="SourceGraphic" in2="f" operator="in"/></filter></defs>
@@ -93,14 +94,15 @@ var featureSynths = []synth{
 <rect x="20" y="20" width="60" height="50" rx="8" fill="#9c6" filter="url(#f)"/></svg>`, 0.1, 0.25},
 	{"filter-userspace-units", svgHead + `<defs><filter id="f" filterUnits="userSpaceOnUse" x="10" y="10" width="80" height="60" primitiveUnits="userSpaceOnUse"><feGaussianBlur stdDeviation="3"/><feOffset dx="5" dy="5"/></filter></defs>
 <rect x="15" y="15" width="70" height="70" fill="purple" filter="url(#f)"/></svg>`, 0.1, 0.25},
-	{"filter-primitive-subregion", svgHead + `<defs><filter id="f" primitiveUnits="objectBoundingBox"><feFlood x="0.2" y="0.2" width="0.5" height="0.5" flood-color="lime"/><feGaussianBlur stdDeviation="0.05"/></filter></defs>
-<rect x="10" y="10" width="100" height="80" fill="gray" filter="url(#f)"/></svg>`, 0.1, 0.25},
+	// filter-primitive-subregion is filterDivergences' subregion-obb-blur:
+	// the blur's sub-region defaults to its input's (Filter Effects 1 §9.4).
 	{"filter-transformed", svgHead + `<defs><filter id="f"><feGaussianBlur stdDeviation="3"/></filter></defs>
 <g transform="translate(60 50) rotate(25) scale(1.3 0.8)"><rect x="-30" y="-20" width="60" height="40" fill="orange" filter="url(#f)"/></g></svg>`, 0.1, 0.25},
 	{"filter-opacity-mask-clip", svgHead + `<defs><filter id="f"><feGaussianBlur stdDeviation="2.5"/></filter><clipPath id="c"><rect x="0" y="0" width="70" height="100"/></clipPath>
 <mask id="m"><rect width="120" height="100" fill="#ccc"/></mask></defs>
 <rect x="30" y="20" width="60" height="60" fill="darkred" filter="url(#f)" clip-path="url(#c)" mask="url(#m)" opacity="0.7"/></svg>`, 0.1, 0.25},
-	{"filter-invalid-link", svgHead + `<rect width="50" height="50" fill="red" filter="url(#nope)"/><rect x="60" width="50" height="50" fill="blue"/></svg>`, 0.1, 0.25},
+	// filter-invalid-link is in filterDivergences: an invalid reference
+	// draws the element unfiltered (Filter Effects 1 §5).
 	// ---- pattern ----
 	{"pattern-userspace", svgHead + `<defs><pattern id="p" patternUnits="userSpaceOnUse" x="3" y="2" width="20" height="16"><circle cx="8" cy="8" r="6" fill="crimson"/><rect width="20" height="16" fill="none" stroke="navy" stroke-width="1"/></pattern></defs>
 <rect x="5" y="5" width="110" height="90" fill="url(#p)"/></svg>`, 2.65, 7.5},

@@ -12,7 +12,9 @@ import (
 // are premultiplied RGBA8 the size of the filter region, colour-space
 // conversion goes through the same u8 tables, blurs are resvg's box blur
 // (sigma >= 2) and IIR blur, and the compositing arithmetic uses the same
-// integer / f32 formulas, so results agree to within rounding.
+// integer / f32 formulas, so results agree to within rounding. Where resvg
+// departs from W3C Filter Effects Module Level 1 the pipeline follows the
+// specification instead (ADR 0015; each departure is in filterDivergences).
 
 type fimage struct {
 	pix    []uint8
@@ -220,17 +222,15 @@ func (r *renderer) applyFilter(sp *filterSpec, ts matrix, cv *canvas) bool {
 		if !r.poll(true) {
 			return false
 		}
-		sub := toIntRect(transformRect32(p.rect, ts))
-		if !(p.rect.w() > 0 && p.rect.h() > 0) {
-			return false
-		}
-		if p.kind == tagFeOffset && p.in1.kind == inRef {
-			for j := len(run.results) - 1; j >= 0; j-- {
-				if run.results[j].name == p.in1.name {
-					sub = run.results[j].img.region
-					break
-				}
-			}
+		// The sub-region, in the layer's pixels: a hard clip on the result
+		// (Filter Effects 1 §9.4: "The filter primitive subregion acts as a
+		// hard clip clipping rectangle on the filter primitive result"),
+		// feOffset's as any other's (resvg leaves an feOffset's result
+		// unclipped, its region its input's). An empty one (a disabled
+		// primitive, whose result is transparent black) clips everything.
+		sub := irect{}
+		if p.rect.w() > 0 && p.rect.h() > 0 {
+			sub = toIntRect(transformRect32(p.rect, ts))
 		}
 		res, ok := run.apply(p)
 		if !ok || r.err != nil {
@@ -238,12 +238,7 @@ func (r *renderer) applyFilter(sp *filterSpec, ts matrix, cv *canvas) bool {
 			return false
 		}
 		if run.region != sub {
-			var sub2 irect
-			if p.kind == tagFeOffset {
-				sub2 = irect{0, 0, run.region.w(), run.region.h()}
-			} else {
-				sub2 = irect{sub.x0 - run.region.x0, sub.y0 - run.region.y0, sub.x1 - run.region.x0, sub.y1 - run.region.y0}
-			}
+			sub2 := irect{sub.x0 - run.region.x0, sub.y0 - run.region.y0, sub.x1 - run.region.x0, sub.y1 - run.region.y0}
 			var from []uint8
 			if !res.owned {
 				// An input passed through: clear a copy, not the input.
@@ -600,8 +595,13 @@ func (run *filterRun) apply(p *fprim) (fimage, bool) {
 		return run.lighting(p)
 	case tagFeImage:
 		return run.feImage(p)
+	case tagFePassThrough:
+		// Filter Effects 1 §4: "The pass through filter output is equal to
+		// the primary input of the filter primitive", in the input's own
+		// colour space.
+		return run.input(p.in1), true
 	}
-	// usvg's dummy primitive: transparent black.
+	// A disabled primitive, or one with nothing to draw: transparent black.
 	return fimage{pix: run.blank(), region: run.region, owned: true}, true
 }
 
@@ -637,6 +637,12 @@ func compositeOp(op uint8, s1, s2, dst []uint8) {
 		case opXor:
 			for c := 0; c < 4; c++ {
 				d[c] = uint8(div255(uint32(s[c])*(255-da) + uint32(d[c])*(255-sa)))
+			}
+		case opLighter:
+			// Compositing and Blending's plus-lighter, premultiplied: "co =
+			// min(1, cs + cb)", "αo = min(1, αs + αb)".
+			for c := 0; c < 4; c++ {
+				d[c] = uint8(min(uint32(s[c])+uint32(d[c]), 255))
 			}
 		}
 	}
@@ -789,7 +795,9 @@ func colorMatrix(p *fprim, pix []uint8) {
 			pix[i], pix[i+1], pix[i+2], pix[i+3] = fromNorm(nr), fromNorm(ng), fromNorm(nb), fromNorm(na)
 		}
 	case cmSaturate:
-		v := float32(math.Max(0, p.cmValues[0]))
+		// Not clamped: Filter Effects 1 §9.6, "Values outside the 0..1 range
+		// under- or oversaturates the filter input image respectively".
+		v := float32(p.cmValues[0])
 		// Each product rounded before it is added, as resvg's f32 (no fused
 		// multiply-add, which arm64 would otherwise make).
 		f := func(c float32) float32 { return float32(c * v) }
@@ -800,28 +808,54 @@ func colorMatrix(p *fprim, pix []uint8) {
 		}
 		apply3(m, pix)
 	case cmHueRotate:
-		// The angle in radians and its cosine and sine in f32, as resvg's
-		// f32::to_radians, cos and sin: at 90 degrees the cosine is
-		// -4.37e-8, not the 6e-17 of an f64 angle, and the matrix's
-		// zeros are a few ulps either side of zero, which the truncation to
-		// a byte tells apart.
-		ang := radians32(float32(p.cmValues[0]))
-		a1, a2 := cos32(ang), sin32(ang)
-		c := func(k float32) float32 { return float32(k * a1) }
-		s := func(k float32) float32 { return float32(k * a2) }
-		m := [9]float32{
-			0.213 + c(0.787) - s(0.213), 0.715 - c(0.715) - s(0.715), 0.072 - c(0.072) + s(0.928),
-			0.213 - c(0.213) + s(0.143), 0.715 + c(0.285) + s(0.140), 0.072 - c(0.072) - s(0.283),
-			0.213 - c(0.213) - s(0.787), 0.715 - c(0.715) + s(0.715), 0.072 + c(0.928) + s(0.072),
-		}
-		apply3(m, pix)
+		hueRotate(p.cmValues[0], pix)
 	case cmLuminance:
+		// Filter Effects 1 §9.6's luminanceToAlpha row, 0.2126, 0.7152,
+		// 0.0722 ("The precision of the luminance coefficients increased in
+		// comparison to previous specification texts"); resvg keeps SVG
+		// 1.1's 0.2125, 0.7154, 0.0721.
 		for i := 0; i < len(pix); i += 4 {
 			r, g, b := float32(pix[i])/255, float32(pix[i+1])/255, float32(pix[i+2])/255
-			na := float32(r*0.2125) + float32(g*0.7154) + float32(b*0.0721)
+			na := float32(r*0.2126) + float32(g*0.7152) + float32(b*0.0722)
 			pix[i], pix[i+1], pix[i+2], pix[i+3] = 0, 0, 0, fromNorm(na)
 		}
 	}
+}
+
+// hueRotate applies feColorMatrix's hueRotate by deg degrees to pix
+// (demultiplied), Filter Effects 1 §9.6's matrix in f64 throughout: the
+// specification sets no precision, and f64 agrees with exact arithmetic
+// where f32 does not (at 90 degrees an f32 angle's cosine is -4.37e-8, and
+// the matrix's zeros fall a few ulps below zero, truncating a whole byte
+// one lower; resvg computes it so). Each product is rounded before it is
+// added (arm64 would fuse them).
+func hueRotate(deg float64, pix []uint8) {
+	ang := deg * math.Pi / 180
+	a1, a2 := math.Cos(ang), math.Sin(ang)
+	c := func(k float64) float64 { return float64(k * a1) }
+	s := func(k float64) float64 { return float64(k * a2) }
+	m := [9]float64{
+		0.213 + c(0.787) - s(0.213), 0.715 - c(0.715) - s(0.715), 0.072 - c(0.072) + s(0.928),
+		0.213 - c(0.213) + s(0.143), 0.715 + c(0.285) + s(0.140), 0.072 - c(0.072) - s(0.283),
+		0.213 - c(0.213) - s(0.787), 0.715 - c(0.715) + s(0.715), 0.072 + c(0.928) + s(0.072),
+	}
+	for i := 0; i < len(pix); i += 4 {
+		r, g, b := float64(pix[i])/255, float64(pix[i+1])/255, float64(pix[i+2])/255
+		pix[i] = fromNorm64(float64(r*m[0]) + float64(g*m[1]) + float64(b*m[2]))
+		pix[i+1] = fromNorm64(float64(r*m[3]) + float64(g*m[4]) + float64(b*m[5]))
+		pix[i+2] = fromNorm64(float64(r*m[6]) + float64(g*m[7]) + float64(b*m[8]))
+	}
+}
+
+// fromNorm64 is fromNorm for an f64: clamped to [0, 1], times 255,
+// truncated.
+func fromNorm64(c float64) uint8 {
+	if c > 1 {
+		c = 1
+	} else if c < 0 || c != c {
+		c = 0
+	}
+	return uint8(float64(c * 255))
 }
 
 func apply3(m [9]float32, pix []uint8) {

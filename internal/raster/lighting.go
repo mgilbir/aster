@@ -5,13 +5,16 @@ import (
 	"strings"
 )
 
-// feDiffuseLighting and feSpecularLighting are resvg's lighting.rs: the
-// specification's surface normals (Sobel kernels, with their own factors at
-// the edges and corners) of the input's alpha, lit by a distant, point or
-// spot light, in f32 as resvg computes them. resvg uses the lighting colour
-// as it is, in whatever space the primitive works in (the result is tagged
-// with it, unconverted), and ignores primitiveUnits for the light's
-// position: both kept, being its output that is matched.
+// feDiffuseLighting and feSpecularLighting are resvg's lighting.rs where it
+// follows Filter Effects 1 (§9.10, §9.19, §11): the specification's surface
+// normals (Sobel kernels, with their own factors at the edges and corners)
+// of the input's alpha, lit by a distant, point or spot light, in f32 as
+// resvg computes them. Where resvg departs from the specification this
+// follows the specification: the lighting colour is converted to the space
+// the primitive works in, the light's position is in primitiveUnits,
+// lighting-color="inherit" inherits, a specularExponent is not limited to
+// 1-128, kernelUnitLength spaces the normals' samples, and an image two
+// pixels wide or high is lit.
 
 const (
 	lightDistant uint8 = iota
@@ -19,7 +22,7 @@ const (
 	lightSpot
 )
 
-// lightSource is usvg's LightSource, in user space.
+// lightSource is a light source, in user space.
 type lightSource struct {
 	kind               uint8
 	azimuth, elevation float32 // distant
@@ -35,19 +38,30 @@ type lightingSpec struct {
 	specular     bool
 	surfaceScale float32
 	constant     float32 // diffuseConstant or specularConstant
-	exponent     float32 // specularExponent, in [1, 128]
+	exponent     float32 // specularExponent
 	color        [3]uint8
 	light        lightSource
+	// unitX and unitY are the kernelUnitLength, user space; 0 when it is
+	// not specified (the normals' samples are then a pixel apart).
+	unitX, unitY float64
 }
 
-// lightingOf resolves a lighting primitive as usvg's
-// convert_diffuse_lighting and convert_specular_lighting: nil (usvg's dummy,
-// a transparent result) without a light source, or with a
-// specularExponent outside [1, 128].
-func (r *renderer) lightingOf(fe *node, specular bool) *lightingSpec {
-	ls, ok := lightSourceOf(fe)
+// lightingOf resolves a lighting primitive (usvg's convert_diffuse_lighting
+// and convert_specular_lighting): nil, a transparent result, without a
+// light source (the content model asks for "exactly one light source
+// element", and the specification says no more; Chromium gives a
+// transparent result too). Filter Effects 1 gives specularExponent no range
+// ("Exponent for specular term, larger is more "shiny". The initial value
+// for specularExponent is 1."): usvg, keeping SVG 1.1's 1-128, makes the
+// primitive transparent outside it.
+func (r *renderer) lightingOf(fe *node, specular bool, u primUnits) *lightingSpec {
+	ls, ok := lightSourceOf(fe, u)
 	if !ok {
 		return nil
+	}
+	sw, sh := 1.0, 1.0
+	if u.obb {
+		sw, sh = u.bb.w(), u.bb.h()
 	}
 	l := &lightingSpec{
 		specular:     specular,
@@ -55,37 +69,40 @@ func (r *renderer) lightingOf(fe *node, specular bool) *lightingSpec {
 		light:        ls,
 		color:        r.lightingColor(fe),
 	}
+	l.unitX, l.unitY = kernelUnitLength(fe, sw, sh)
 	if specular {
 		l.constant = numAttr32(fe, aSpecularConstant, 1)
 		l.exponent = numAttr32(fe, aSpecularExponent, 1)
-		if !(l.exponent >= 1 && l.exponent <= 128) {
-			return nil
-		}
 	} else {
 		l.constant = numAttr32(fe, aDiffuseConstant, 1)
 	}
 	return l
 }
 
-// lightSourceOf is usvg's convert_light_source: the first child that is a
-// light source.
-func lightSourceOf(fe *node) (lightSource, bool) {
+// lightSourceOf is the first child of fe that is a light source, its
+// position in user space: Filter Effects 1 §11.3 and §11.4, x, y and z are
+// each a "location for the light source in the coordinate system
+// established by attribute primitiveUnits on the filter element", and so
+// are pointsAtX, Y and Z (usvg reads them as user space whatever the
+// units). A spot light's specularExponent is any number (§11.4: "The
+// initial value for specularExponent is 1"; usvg makes a negative one 1).
+func lightSourceOf(fe *node, u primUnits) (lightSource, bool) {
+	at := func(c *node, ix, iy, iz attrID) (float32, float32, float32) {
+		x, y := u.point(numAttr(c, ix, 0), numAttr(c, iy, 0))
+		return float32(x), float32(y), float32(u.length(numAttr(c, iz, 0)))
+	}
 	for _, c := range fe.kids {
 		switch c.tag {
 		case tagFeDistantLight:
 			return lightSource{kind: lightDistant, azimuth: numAttr32(c, aAzimuth, 0), elevation: numAttr32(c, aElevation, 0)}, true
 		case tagFePointLight:
-			return lightSource{kind: lightPoint, x: numAttr32(c, aX, 0), y: numAttr32(c, aY, 0), z: numAttr32(c, aZ, 0)}, true
+			ls := lightSource{kind: lightPoint}
+			ls.x, ls.y, ls.z = at(c, aX, aY, aZ)
+			return ls, true
 		case tagFeSpotLight:
-			ls := lightSource{
-				kind: lightSpot, x: numAttr32(c, aX, 0), y: numAttr32(c, aY, 0), z: numAttr32(c, aZ, 0),
-				pointsX: numAttr32(c, aPointsAtX, 0), pointsY: numAttr32(c, aPointsAtY, 0), pointsZ: numAttr32(c, aPointsAtZ, 0),
-				spotExp: numAttr32(c, aSpecularExponent, 1),
-			}
-			// usvg's PositiveF32: finite and not negative, else 1.
-			if !(ls.spotExp >= 0) || math.IsInf(float64(ls.spotExp), 0) {
-				ls.spotExp = 1
-			}
+			ls := lightSource{kind: lightSpot, spotExp: numAttr32(c, aSpecularExponent, 1)}
+			ls.x, ls.y, ls.z = at(c, aX, aY, aZ)
+			ls.pointsX, ls.pointsY, ls.pointsZ = at(c, aPointsAtX, aPointsAtY, aPointsAtZ)
 			if v, ok := c.get(aLimitingConeAngle); ok {
 				if f, good := parseNum(v); good {
 					ls.cone, ls.hasCone = float32(f), true
@@ -97,25 +114,33 @@ func lightSourceOf(fe *node) (lightSource, bool) {
 	return lightSource{}, false
 }
 
-// lightingColor is usvg's convert_lighting_color: white when absent, not a
-// colour or inherit (resvg finds no value to inherit, the filter's
-// included), the color property for currentColor (black when it has none),
-// its alpha dropped.
+// lightingColor is fe's lighting-color, Filter Effects 1 §11.5 (initial
+// white, not inherited), its alpha dropped: white when absent or not a
+// colour, the color property for currentColor, and for inherit the value
+// of the parent's (§3: "all properties defined in this specification also
+// accept the inherit keyword"), the filter element's, and so up: usvg
+// finds nothing to inherit and gives white.
 func (r *renderer) lightingColor(fe *node) [3]uint8 {
-	v, ok := fe.get(aLightingColor)
-	if !ok {
-		return [3]uint8{255, 255, 255}
-	}
-	v = strings.TrimSpace(v)
-	if v == "currentColor" {
-		c := r.inheritedState(fe).color
+	for n := fe; n != nil; n = n.parent {
+		v, ok := n.get(aLightingColor)
+		if !ok {
+			break
+		}
+		v = strings.TrimSpace(v)
+		switch v {
+		case "inherit":
+			continue
+		case "currentColor":
+			c := r.inheritedState(n).color
+			return [3]uint8{c.r, c.g, c.b}
+		}
+		c, good := parseColor(v)
+		if !good {
+			break
+		}
 		return [3]uint8{c.r, c.g, c.b}
 	}
-	c, good := parseColor(v)
-	if !good {
-		return [3]uint8{255, 255, 255}
-	}
-	return [3]uint8{c.r, c.g, c.b}
+	return [3]uint8{255, 255, 255}
 }
 
 type vec3 struct{ x, y, z float32 }
@@ -247,31 +272,59 @@ func (l *lightingSpec) cost() int {
 	return c
 }
 
-// lighting is resvg's apply_diffuse_lighting / apply_specular_lighting:
-// the light source moved into the region's pixels (transform_light_source),
-// then each pixel lit by the normal of the input's alpha. An image smaller
-// than 3x3 stays transparent, as resvg leaves it.
+// lighting is feDiffuseLighting / feSpecularLighting (resvg's
+// apply_diffuse_lighting / apply_specular_lighting): the light source moved
+// into the region's pixels (transform_light_source), then each pixel lit by
+// the normal of the input's alpha. The lighting colour is a colour of the
+// document, sRGB; the primitive works in its color-interpolation-filters
+// space (§9.1: "The color space in which a particular filter primitive
+// performs its operations is determined by the value of the property
+// color-interpolation-filters"), so in linearRGB the colour is converted to
+// it first, as Chromium does (resvg uses it unconverted). An image less
+// than two pixels wide or high has no normal (the specification's kernels
+// need a neighbour each way) and stays transparent; resvg leaves one less
+// than three so too.
 func (run *filterRun) lighting(p *fprim) (fimage, bool) {
 	w, h := run.w, run.h
 	l := p.light
 	in := run.input(p.in1)
 	pix := run.blank()
 	res := fimage{pix: pix, region: run.region, linear: p.linear, owned: true}
-	if w < 3 || h < 3 {
+	if w < 2 || h < 2 {
 		return res, true
+	}
+	color := l.color
+	if p.linear {
+		for i, c := range color {
+			color[i] = srgbToLinearTable[c]
+		}
 	}
 	ls := run.deviceLight(l.light)
 	alpha := func(x, y int) int { return int(in.pix[(y*w+x)*4+3]) }
+	cost := l.cost()
+	// kernelUnitLength in device pixels: the distance of the normal's
+	// samples. One pixel (or unspecified) is the plain kernel.
+	tx, ty := tsScale(run.ts)
+	dx, dy := min(l.unitX*tx, 1e290), min(l.unitY*ty, 1e290)
+	spaced := l.unitX != 0 && (dx != 1 || dy != 1)
+	if spaced {
+		cost += lightSpacedCost
+	}
 	// A distant light's vector is the same everywhere.
 	var lv vec3
 	if ls.kind == lightDistant {
 		az, el := radians32(ls.azimuth), radians32(ls.elevation)
 		lv = vec3{float32(cos32(az) * cos32(el)), float32(sin32(az) * cos32(el)), sin32(el)}
 	}
-	ok := run.rows(l.cost(), func(y0, y1 int) {
+	ok := run.rows(cost, func(y0, y1 int) {
 		for y := y0; y < y1; y++ {
 			for x := 0; x < w; x++ {
-				n := normalAt(alpha, x, y, w, h)
+				var n lightNormal
+				if spaced {
+					n = normalSpaced(in.pix, x, y, w, h, dx, dy)
+				} else {
+					n = normalAt(alpha, x, y, w, h)
+				}
 				if ls.kind != lightDistant {
 					// Rounded before the subtraction below, which arm64 would
 					// otherwise fuse with it.
@@ -279,7 +332,7 @@ func (run *filterRun) lighting(p *fprim) (fimage, bool) {
 					v := vec3{ls.x, ls.y, ls.z}.sub(vec3{float32(x), float32(y), nz})
 					lv = v.normalized()
 				}
-				col := lightColour(&ls, l.color, lv)
+				col := lightColour(&ls, color, lv)
 				f := l.factor(n, lv)
 				o := pix[(y*w+x)*4 : (y*w+x)*4+4]
 				for c := 0; c < 3; c++ {
@@ -294,6 +347,79 @@ func (run *filterRun) lighting(p *fprim) (fimage, bool) {
 		}
 	})
 	return res, ok
+}
+
+// lightSpacedCost is what a pixel's normal costs more with its samples
+// kernelUnitLength apart: eight bilinear samples, four pixels each.
+const lightSpacedCost = 8
+
+// normalSpaced is normalAt with the samples dx and dy device pixels from
+// the pixel, Filter Effects 1 §9.10: "the dx and dy values (e.g.,
+// I(x-dx,y-dy)), represent deltas relative to a given (x,y) position for
+// the purpose of estimating the slope of the surface at that point. These
+// deltas are determined by the value (explicit or implicit) of attribute
+// kernelUnitLength." A sample between pixels is interpolated (bilinear) from
+// the four around it. The kernel is the specification's for where the
+// sample falls: the interior one where both samples along an axis are in
+// the image, an edge's where only the one inward is, and where neither is
+// (a distance past half the image) the interior one with the pixel's own
+// value for both, a flat surface along that axis. A doubled sample is
+// rounded on its own, as the sums are not fused (doubling is exact, so this
+// changes nothing but what arm64 is allowed to emit).
+func normalSpaced(pix []uint8, x, y, w, h int, dx, dy float64) lightNormal {
+	a := func(fx, fy float64) float32 {
+		q := bilinear(pix, w, h, fx, fy, edgeDuplicate)
+		return q[3]
+	}
+	fx, fy := float64(x), float64(y)
+	// The position of each side's sample, and whether it is in the image.
+	l, r := fx-dx, fx+dx
+	t, b := fy-dy, fy+dy
+	hasL, hasR := l >= 0, r <= float64(w-1)
+	hasT, hasB := t >= 0, b <= float64(h-1)
+	// An axis with neither sample is flat: both are the pixel's own.
+	if !hasL && !hasR {
+		l, r, hasL, hasR = fx, fx, true, true
+	}
+	if !hasT && !hasB {
+		t, b, hasT, hasB = fy, fy, true, true
+	}
+	switch {
+	case !hasT && !hasL: // top-left corner
+		c, rt, bt, br := a(fx, fy), a(r, fy), a(fx, b), a(r, b)
+		return lightNormal{factor23, factor23, -(-float32(2*c) + float32(2*rt) - bt + br), -(-float32(2*c) - rt + float32(2*bt) + br)}
+	case !hasT && !hasR: // top-right corner
+		lt, c, bl, bt := a(l, fy), a(fx, fy), a(l, b), a(fx, b)
+		return lightNormal{factor23, factor23, -(-float32(2*lt) + float32(2*c) - bl + bt), -(-lt - float32(2*c) + bl + float32(2*bt))}
+	case !hasB && !hasL: // bottom-left corner
+		tp, tr, c, rt := a(fx, t), a(r, t), a(fx, fy), a(r, fy)
+		return lightNormal{factor23, factor23, -(-tp + tr - float32(2*c) + float32(2*rt)), -(-float32(2*tp) - tr + float32(2*c) + rt)}
+	case !hasB && !hasR: // bottom-right corner
+		tl, tp, lt, c := a(l, t), a(fx, t), a(l, fy), a(fx, fy)
+		return lightNormal{factor23, factor23, -(-tl + tp - float32(2*lt) + float32(2*c)), -(-tl - float32(2*tp) + lt + float32(2*c))}
+	case !hasT: // top row
+		lt, c, rt := a(l, fy), a(fx, fy), a(r, fy)
+		bl, bt, br := a(l, b), a(fx, b), a(r, b)
+		return lightNormal{factor13, factor12, -(-float32(2*lt) + float32(2*rt) - bl + br), -(-lt - float32(2*c) - rt + bl + float32(2*bt) + br)}
+	case !hasB: // bottom row
+		tl, tp, tr := a(l, t), a(fx, t), a(r, t)
+		lt, c, rt := a(l, fy), a(fx, fy), a(r, fy)
+		return lightNormal{factor13, factor12, -(-tl + tr - float32(2*lt) + float32(2*rt)), -(-tl - float32(2*tp) - tr + lt + float32(2*c) + rt)}
+	case !hasL: // left column
+		tp, tr := a(fx, t), a(r, t)
+		c, rt := a(fx, fy), a(r, fy)
+		bt, br := a(fx, b), a(r, b)
+		return lightNormal{factor12, factor13, -(-tp + tr - float32(2*c) + float32(2*rt) - bt + br), -(-float32(2*tp) - tr + float32(2*bt) + br)}
+	case !hasR: // right column
+		tl, tp := a(l, t), a(fx, t)
+		lt, c := a(l, fy), a(fx, fy)
+		bl, bt := a(l, b), a(fx, b)
+		return lightNormal{factor12, factor13, -(-tl + tp - float32(2*lt) + float32(2*c) - bl + bt), -(-tl - float32(2*tp) + bl + float32(2*bt))}
+	}
+	tl, tp, tr := a(l, t), a(fx, t), a(r, t)
+	lt, rt := a(l, fy), a(r, fy)
+	bl, bt, br := a(l, b), a(fx, b), a(r, b)
+	return lightNormal{factor14, factor14, -(-tl + tr - float32(2*lt) + float32(2*rt) - bl + br), -(-tl - float32(2*tp) - tr + bl + float32(2*bt) + br)}
 }
 
 // deviceLight is resvg's transform_light_source: a point's and a spot's

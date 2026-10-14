@@ -27,8 +27,8 @@ func (r *renderer) urlTarget(n *node, id attrID) (target *node, present bool) {
 }
 
 // effectRefs resolves the mask and filter references of n. ok is false when
-// the element must not be rendered (broken filter link, mask that is not a
-// mask element, ...), following usvg.
+// the element must not be rendered (a mask that is not a mask element),
+// following usvg.
 func (r *renderer) effectRefs(n *node) (mk *node, fls []*node, ok bool) {
 	if t, present := r.urlTarget(n, aMask); present && t != nil {
 		if t.tag != tagMask {
@@ -41,23 +41,22 @@ func (r *renderer) effectRefs(n *node) (mk *node, fls []*node, ok bool) {
 	if v, has := n.get(aFilter); has {
 		v = strings.TrimSpace(v)
 		if v != "" && v != "none" {
-			invalid := false
-			any := false
 			for _, item := range splitFilterList(v) {
-				any = true
 				ref, isURL := parseURLRef(item)
 				if !isURL {
 					continue // CSS filter functions are not supported
 				}
 				t := r.doc.ids[ref]
 				if t == nil || t.tag != tagFilter {
-					invalid = true
-					continue
+					// Filter Effects 1 §5: "If the filter references a
+					// non-existent object or the referenced object is not a
+					// filter element, then the whole filter chain is
+					// ignored. No filter is applied to the object." (usvg
+					// does not render the element.)
+					fls = nil
+					break
 				}
 				fls = append(fls, t)
-			}
-			if any && len(fls) == 0 && invalid {
-				return nil, nil, false
 			}
 		}
 	}
@@ -254,13 +253,35 @@ func (r *renderer) renderEffects(n *node, st *state, opacity float64, blend blen
 	var specs []*filterSpec
 	for _, f := range fls {
 		if r.active[f] {
-			continue
+			// A filter being applied, met again inside one of its feImages:
+			// every feImage drawn since it was applied is on a circle (and
+			// draws nothing), this element included.
+			for i := len(r.applying) - 1; i >= 0; i-- {
+				if at := r.applying[i]; at.node == f {
+					if r.cycleFloor == 0 || at.depth+1 < r.cycleFloor {
+						r.cycleFloor = at.depth + 1
+					}
+					break
+				}
+			}
+			return
 		}
-		if sp := r.resolveFilter(f, st, bb, hasBB); sp != nil {
-			specs = append(specs, sp)
+		sp, ignored := r.resolveFilter(f, st, bb, hasBB)
+		if r.err != nil {
+			return
 		}
+		if sp == nil {
+			if ignored {
+				continue
+			}
+			return
+		}
+		specs = append(specs, sp)
 	}
-	if len(fls) > 0 && len(specs) == 0 {
+	if len(specs) == 0 && ms == nil {
+		// Every filter left out (and no mask): drawn as without them.
+		s2 := *st
+		r.drawContent(n, &s2, opacity, blend)
 		return
 	}
 	if len(specs) == 0 {
@@ -287,10 +308,10 @@ func (r *renderer) renderEffects(n *node, st *state, opacity float64, blend blen
 	if !(dr.w() > 0 && dr.h() > 0) {
 		return
 	}
+	// The layer is bounded by four times the canvas each way (inside an
+	// feImage, its canvas), a bound on its memory; resvg bounds a filter
+	// layer inside an feImage by the feImage's region.
 	bound := irect{-2 * r.cw, -2 * r.ch, 3 * r.cw, 3 * r.ch}
-	if r.inFeImage {
-		bound = irect{0, 0, r.cw, r.ch}
-	}
 	ib := toIntRect(dr).intersect(bound)
 	if ib.empty() {
 		return
@@ -340,13 +361,20 @@ func (r *renderer) renderEffects(n *node, st *state, opacity float64, blend blen
 	if r.err == nil {
 		// A filter being applied is not applied again by an element its
 		// feImage draws (the element is not drawn there).
+		if r.applying == nil {
+			r.applying = r.filterBuf[:0]
+		}
+		base := len(r.applying)
 		for _, sp := range specs {
 			r.active[sp.node] = true
+			r.applying = append(r.applying, filterAt{sp.node, r.feDepth})
 		}
 		r.applyFilters(specs, s2.ctm, sub)
 		for _, sp := range specs {
 			delete(r.active, sp.node)
 		}
+		clear(r.applying[base:])
+		r.applying = r.applying[:base]
 		if ms != nil {
 			sub.dirty = sub.bounds()
 			r.applyMask(ms, &s2)
