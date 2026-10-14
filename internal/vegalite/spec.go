@@ -6,15 +6,25 @@ import (
 
 // Spec-type predicates and top-level helpers (vega-lite/src/spec/*.ts, parameter.ts).
 
-func isUnitSpec(s Value) bool    { return hasProperty(s, "mark") }
-func isLayerSpec(s Value) bool   { return hasProperty(s, "layer") }
-func isFacetSpec(s Value) bool   { return hasProperty(s, "facet") }
-func isRepeatSpec(s Value) bool  { return hasProperty(s, "repeat") }
-func isConcatSpec(s Value) bool  { return hasProperty(s, "concat") }
-func isVConcatSpec(s Value) bool { return hasProperty(s, "vconcat") }
-func isHConcatSpec(s Value) bool { return hasProperty(s, "hconcat") }
-func isAnyConcatSpec(s Value) bool {
-	return isVConcatSpec(s) || isHConcatSpec(s) || isConcatSpec(s)
+func isUnitSpec(cc *compileCtx, s Value) bool    { return specHas(cc, s, "mark") }
+func isLayerSpec(cc *compileCtx, s Value) bool   { return specHas(cc, s, "layer") }
+func isFacetSpec(cc *compileCtx, s Value) bool   { return specHas(cc, s, "facet") }
+func isRepeatSpec(cc *compileCtx, s Value) bool  { return specHas(cc, s, "repeat") }
+func isConcatSpec(cc *compileCtx, s Value) bool  { return specHas(cc, s, "concat") }
+func isVConcatSpec(cc *compileCtx, s Value) bool { return specHas(cc, s, "vconcat") }
+func isHConcatSpec(cc *compileCtx, s Value) bool { return specHas(cc, s, "hconcat") }
+func isAnyConcatSpec(cc *compileCtx, s Value) bool {
+	return isVConcatSpec(cc, s) || isHConcatSpec(cc, s) || isConcatSpec(cc, s)
+}
+
+// specHas is hasProperty(spec, key) in 6.4; 5.8's spec predicates use the
+// in operator, a TypeError on a spec that is not an object. A nil cc (the
+// engine's own view count, which upstream does not have) never throws.
+func specHas(cc *compileCtx, s Value, key string) bool {
+	if cc != nil && cc.v5 {
+		return jsIn(s, key)
+	}
+	return hasProperty(s, key)
 }
 func isLayerRepeatSpec(cc *compileCtx, s Value) bool {
 	if cc.v5 {
@@ -23,7 +33,15 @@ func isLayerRepeatSpec(cc *compileCtx, s Value) bool {
 	}
 	return !s.Get("repeat").IsArr() && hasProperty(s.Get("repeat"), "layer")
 }
-func isFacetMapping(f Value) bool { return hasProperty(f, "row") || hasProperty(f, "column") }
+
+// isFacetMapping is hasProperty(f, 'row') || hasProperty(f, 'column') in
+// 6.4; 5.8 uses the in operator, a TypeError on a primitive.
+func isFacetMapping(cc *compileCtx, f Value) bool {
+	if cc != nil && cc.v5 {
+		return jsIn(f, "row") || jsIn(f, "column")
+	}
+	return hasProperty(f, "row") || hasProperty(f, "column")
+}
 
 func isStep(size Value) bool { return hasProperty(size, "step") }
 
@@ -74,7 +92,7 @@ var compositionLayoutProps = []string{"align", "bounds", "center", "columns", "s
 
 // extractCompositionLayout collects spacing/columns/align/bounds/center from
 // the spec and the composition config.
-func extractCompositionLayout(spec Value, specType string, config Value) *Object {
+func extractCompositionLayout(cc *compileCtx, spec Value, specType string, config Value) *Object {
 	compositionConfig := config.Get(specType)
 	if compositionConfig.IsNullish() {
 		throw("Cannot destructure property 'spacing' of 'compositionConfig' as it is %s.", nullishName(compositionConfig))
@@ -85,11 +103,11 @@ func extractCompositionLayout(spec Value, specType string, config Value) *Object
 		layout.Set("spacing", spacingConfig)
 	}
 	if !columns.IsUndefined() {
-		if (isFacetSpec(spec) && !isFacetMapping(spec.Get("facet"))) || isConcatSpec(spec) {
+		if (isFacetSpec(cc, spec) && !isFacetMapping(cc, spec.Get("facet"))) || isConcatSpec(cc, spec) {
 			layout.Set("columns", columns)
 		}
 	}
-	if isVConcatSpec(spec) {
+	if isVConcatSpec(cc, spec) {
 		layout.Set("columns", jsval.Int(1))
 	}
 	for _, prop := range compositionLayoutProps {

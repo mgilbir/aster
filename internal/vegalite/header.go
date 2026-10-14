@@ -90,8 +90,8 @@ func getHeaderProperties(props []string, header Value, config Value, channel str
 	return out
 }
 
-func getHeaderType(orient Value) string {
-	if isSignalRef(orient) || (orient.IsStr() && (orient.StrValue() == "top" || orient.StrValue() == "left")) {
+func getHeaderType(cc *compileCtx, orient Value) string {
+	if isSignalRef(cc, orient) || (orient.IsStr() && (orient.StrValue() == "top" || orient.StrValue() == "left")) {
 		return "header"
 	}
 	return "footer"
@@ -193,7 +193,7 @@ func mergeChildAxis(m *facetModel, channel string) {
 		lh := layoutHeaders[headerChannel]
 		for _, ac := range childAxes {
 			cc.work(1)
-			ht := getHeaderType(ac.get("orient"))
+			ht := getHeaderType(cc, ac.get("orient"))
 			list := lh.get(ht)
 			if list == nil {
 				list = []*headerComponent{makeHeaderComponent(m, headerChannel, jsval.False)}
@@ -227,13 +227,13 @@ func assembleTitleGroup(m Model, channel string) Value {
 		t.Set("orient", jsval.Str("left"))
 	}
 	t.Set("style", jsval.Str("guide-title"))
-	spreadV(t, defaultHeaderGuideBaseline(titleAngle, headerChannel))
-	spreadV(t, defaultHeaderGuideAlign(headerChannel, titleAngle, props.Lookup("titleAnchor")))
+	spreadV(t, defaultHeaderGuideBaseline(m.b().ctx, titleAngle, headerChannel))
+	spreadV(t, defaultHeaderGuideAlign(m.b().ctx, headerChannel, titleAngle, props.Lookup("titleAnchor")))
 	spread(t, jsval.Obj(assembleHeaderProperties(config, facetFieldDef, channel, headerTitlePropertiesMap)))
 	return mkv("name", channel+"-title", "type", "group", "role", headerChannel+"-title", "title", jsval.Obj(t))
 }
 
-func defaultHeaderGuideAlign(headerChannel string, angle Value, anchor Value) Value {
+func defaultHeaderGuideAlign(cc *compileCtx, headerChannel string, angle Value, anchor Value) Value {
 	a := "middle"
 	if anchor.IsStr() {
 		a = anchor.StrValue()
@@ -250,18 +250,18 @@ func defaultHeaderGuideAlign(headerChannel string, angle Value, anchor Value) Va
 	if headerChannel == "row" {
 		orient, ch = "left", chY
 	}
-	if align := defaultLabelAlign(angle, jsval.Str(orient), ch); align.IsTruthy() {
+	if align := defaultLabelAlign(cc, angle, jsval.Str(orient), ch); align.IsTruthy() {
 		return mkv("align", align)
 	}
 	return mkv()
 }
 
-func defaultHeaderGuideBaseline(angle Value, channel string) Value {
+func defaultHeaderGuideBaseline(cc *compileCtx, angle Value, channel string) Value {
 	orient, ch := "top", chX
 	if channel == "row" {
 		orient, ch = "left", chY
 	}
-	if b := defaultLabelBaseline(angle, jsval.Str(orient), ch, true); b.IsTruthy() {
+	if b := defaultLabelBaseline(cc, angle, jsval.Str(orient), ch, true); b.IsTruthy() {
 		return mkv("baseline", b)
 	}
 	return mkv()
@@ -314,8 +314,8 @@ func assembleLabelTitle(cc *compileCtx, fd Value, channel string, config Value) 
 	o.Set("style", jsval.Str("guide-label"))
 	o.Set("frame", jsval.Str("group"))
 	labelAngle := props.Lookup("labelAngle")
-	spreadV(o, defaultHeaderGuideBaseline(labelAngle, headerChannel))
-	spreadV(o, defaultHeaderGuideAlign(headerChannel, labelAngle, props.Lookup("labelAnchor")))
+	spreadV(o, defaultHeaderGuideBaseline(cc, labelAngle, headerChannel))
+	spreadV(o, defaultHeaderGuideAlign(cc, headerChannel, labelAngle, props.Lookup("labelAnchor")))
 	spread(o, jsval.Obj(assembleHeaderProperties(config, fd, channel, headerLabelPropertiesMap)))
 	return jsval.Obj(o)
 }
@@ -338,7 +338,7 @@ func assembleHeaderGroup(m Model, channel, headerType string, lh *layoutHeaderCo
 		}
 	}
 	f, _ := m.(*facetModel)
-	isFacetWithoutRowCol := f != nil && !isFacetMapping(jsval.Obj(f.facet))
+	isFacetWithoutRowCol := f != nil && !isFacetMapping(cc, jsval.Obj(f.facet))
 	hasAxes := len(hc.axes) > 0
 	if title.IsTruthy() || hasAxes {
 		sizeChannel := "width"

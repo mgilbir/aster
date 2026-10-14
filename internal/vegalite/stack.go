@@ -36,7 +36,7 @@ func potentialStackedChannel(cc *compileCtx, encoding Value, x string, markDef V
 	if x == chX {
 		y = chY
 	}
-	mark, orient := markDef.Get("type").AsString(), markDef.Get("orient").AsString()
+	mark, orient := markDef.Get("type").AsString(), markDefOrient(markDef)
 	isCartesianBarOrArea := x == chX && (mark == "bar" || mark == "area")
 	if cc.v5 {
 		isCartesianBarOrArea = x == chX && mark == "bar"
@@ -99,7 +99,7 @@ func getDimensionChannel(channel string) string {
 // stackOf computes the stack properties of a unit spec, or nil when it does not stack.
 func stackOf(cc *compileCtx, m Value, encoding Value) *stackProperties {
 	markDef := m
-	if !isMarkDef(m) {
+	if !isMarkDef(cc, m) {
 		markDef = mkv("type", m)
 	}
 	mark := markDef.Get("type").AsString()

@@ -55,7 +55,7 @@ func valueRefForFieldOrDatumDef(cc *compileCtx, fd Value, scaleName string, opt 
 		switch {
 		case isDateTime(datum):
 			ref.Set("signal", jsval.Str(dateTimeToExpr(cc, datum)))
-		case isSignalRef(datum):
+		case isSignalRef(cc, datum):
 			ref.Set("signal", datum.Get("signal"))
 		case isExprRef(cc, datum):
 			ref.Set("signal", datum.Get("expr"))
@@ -96,7 +96,7 @@ func interpolatedSignalRef(cc *compileCtx, o interpolatedOpts) Value {
 	// the band position read as a number, whatever its type.
 	n := jsval.ToNumber(bandPosition)
 	expr := ""
-	if (cc.v5 || !isSignalRef(bandPosition)) && 0 < n && n < 1 {
+	if (cc.v5 || !isSignalRef(cc, bandPosition)) && 0 < n && n < 1 {
 		expr = "datum"
 	}
 	start := vgField(cc, o.fod, fieldRefOption{expr: expr, suffix: o.startSuffix})
@@ -118,14 +118,14 @@ func interpolatedSignalRef(cc *compileCtx, o interpolatedOpts) Value {
 		var datum string
 		if cc.v5 {
 			// Vega-Lite 5.8 weights the start by the band position, 6.x the end.
-			if isSignalRef(bandPosition) {
+			if isSignalRef(cc, bandPosition) {
 				bp := signalOf(bandPosition)
 				datum = bp + " * " + start + " + (1-" + bp + ") * " + end
 			} else {
 				// `${bandPosition} * … + ${1 - bandPosition} * …`
 				datum = bandPosition.AsString() + " * " + start + " + " + jsval.JSNumberString(1-n) + " * " + end
 			}
-		} else if isSignalRef(bandPosition) {
+		} else if isSignalRef(cc, bandPosition) {
 			bp := signalOf(bandPosition)
 			datum = "(1-" + bp + ") * " + start + " + " + bp + " * " + end
 		} else {
@@ -250,7 +250,7 @@ func getConditionalValueRefForIncludingInvalidValue(cc *compileCtx, scaleChannel
 func refForInvalidValues(cc *compileCtx, includeAs Value, scale *scaleComponent, scaleName string) Value {
 	if isObject(includeAs) && includeAs.IsObj() && includeAs.ObjValue().Has("value") {
 		v := includeAs.Get("value")
-		if isSignalRef(v) {
+		if isSignalRef(cc, v) {
 			return mkv("signal", v.Get("signal"))
 		}
 		return mkv("value", v)

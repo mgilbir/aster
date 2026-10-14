@@ -32,7 +32,7 @@ func (f *facetModel) children() []Model { return []Model{f.child} }
 
 func (f *facetModel) initFacet(facet Value) *Object {
 	out := jsval.NewObject(2)
-	if !isFacetMapping(facet) {
+	if !isFacetMapping(f.b().ctx, facet) {
 		out.Set("facet", f.initFacetFieldDef(facet, "facet"))
 		return out
 	}

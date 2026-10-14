@@ -215,6 +215,25 @@ func (n *xformNode) producedFields() *sset {
 }
 
 // addDimensions is defined for window, joinaggregate and pivot nodes.
+// groupbyConcat is what unique() iterates of groupby.concat(fields): an
+// array's items and the fields; a string's characters, as String.prototype
+// .concat appends the fields' text to it ("1e999" and ["rev"] make
+// "1e999rev"); anything else has no concat.
+func groupbyConcat(g Value, fields []string) []Value {
+	switch {
+	case g.IsArr():
+		out := append([]Value(nil), g.Items()...)
+		for _, f := range fields {
+			out = append(out, jsval.Str(f))
+		}
+		return out
+	case g.IsStr():
+		return iterate(jsval.Str(g.StrValue()+strings.Join(fields, ",")), "")
+	}
+	throw("this.transform.groupby.concat is not a function")
+	return nil
+}
+
 func (n *xformNode) addDimensions(fields []string) {
 	cc := n.cc
 	t := n.tv()
@@ -229,10 +248,14 @@ func (n *xformNode) addDimensions(fields []string) {
 		case g.IsNull():
 			throw("Cannot read properties of null (reading 'concat')")
 		default:
-			base = g.Items()
+			base = groupbyConcat(g, fields)
 		}
 	case "pivot":
-		base = arrayOf(t.Get("groupby"))
+		g := t.Get("groupby")
+		if g.IsNullish() {
+			g = jsval.Arr(nil) // (groupby ?? [])
+		}
+		base = groupbyConcat(g, fields)
 	default:
 		return
 	}
@@ -244,12 +267,6 @@ func (n *xformNode) addDimensions(fields []string) {
 		if !jsSeen(cc, seen, x.AsString()) {
 			seen[x.AsString()] = true
 			out = append(out, x)
-		}
-	}
-	for _, f := range fields {
-		if !jsSeen(cc, seen, f) {
-			seen[f] = true
-			out = append(out, jsval.Str(f))
 		}
 	}
 	o := cloneObj(t.ObjValue())
@@ -417,10 +434,16 @@ func (n *xformNode) assembleImpute() []Value {
 	it := mk("type", "impute", "field", impute, "key", key)
 	if keyvals.IsTruthy() {
 		if hasProperty(keyvals, "stop") {
-			start := coalesce(keyvals.Get("start"), jsval.Int(0))
-			parts := []string{start.AsString(), keyvals.Get("stop").AsString()}
+			// const {start = 0, stop, step} = keyvals (the default for an
+			// undefined start only), then [start, stop, ...].join(','),
+			// which writes null as "".
+			start := keyvals.Get("start")
+			if start.IsUndefined() {
+				start = jsval.Int(0)
+			}
+			parts := []string{joinItem(start), joinItem(keyvals.Get("stop"))}
 			if keyvals.Get("step").IsTruthy() {
-				parts = append(parts, keyvals.Get("step").AsString())
+				parts = append(parts, joinItem(keyvals.Get("step")))
 			}
 			it.Set("keyvals", mkv("signal", "sequence("+strings.Join(parts, ",")+")"))
 		} else {

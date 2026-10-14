@@ -270,7 +270,7 @@ func defaultScaleType(cc *compileCtx, channel string, fieldDef Value, mark Value
 			return "band"
 		}
 		if sc := getSizeChannel(channel); sc != "" {
-			if isRelativeBandSize(mark.Get(sc)) {
+			if isRelativeBandSize(cc, mark.Get(sc)) {
 				return "band"
 			}
 		}
@@ -312,7 +312,14 @@ func defaultScaleType(cc *compileCtx, channel string, fieldDef Value, mark Value
 	return ""
 }
 
-func isRelativeBandSize(v Value) bool { return hasProperty(v, "band") }
+// isRelativeBandSize is hasProperty(o, 'band') in 6.4; 5.8 tests
+// o && o['band'] != undefined, so a band of null is no relative size.
+func isRelativeBandSize(cc *compileCtx, v Value) bool {
+	if cc.v5 {
+		return v.IsTruthy() && !jsProp(v, "band").IsNullish()
+	}
+	return hasProperty(v, "band")
+}
 
 // ---- properties ----
 
@@ -333,7 +340,7 @@ func parseUnitScaleProperty(u *unitModel, property string) {
 		specifiedScale := u.specifiedScales.Lookup(channel)
 		localCmpt, _ := local.get(channel)
 		merged := u.getScaleComponent(channel)
-		fod := getFieldOrDatumDef(cc, u.encoding.Get(channel))
+		fod := getFieldOrDatumDef(u.ctx, u.encoding.Get(channel))
 		specifiedValue := specifiedScale.Get(property)
 		scaleType := merged.get("type").AsString()
 		scalePadding := merged.get("padding")
@@ -353,7 +360,7 @@ func parseUnitScaleProperty(u *unitModel, property string) {
 				case "domainMax", "domainMin":
 					timeUnit, typ := fod.Get("timeUnit"), channelDefType(fod)
 					if isDateTime(specifiedValue) || typ == "temporal" || timeUnit.IsTruthy() {
-						e, _ := valueExpr(cc, specifiedValue, timeUnit, typ, false, false)
+						e, _ := valueExpr(u.ctx, specifiedValue, timeUnit, typ, false, false)
 						localCmpt.set(property, sig(e), true)
 					} else {
 						localCmpt.set(property, specifiedValue, true)
@@ -369,7 +376,7 @@ func parseUnitScaleProperty(u *unitModel, property string) {
 						scalePadding: scalePadding, scalePaddingInner: scalePaddingInner,
 						domain: specifiedScale.Get("domain"), domainMin: specifiedScale.Get("domainMin"), domainMax: specifiedScale.Get("domainMax"),
 						markDef: u.markDef, config: config,
-						hasNestedOffsetScale:     channelHasNestedOffsetScale(cc, u.encoding, channel),
+						hasNestedOffsetScale:     channelHasNestedOffsetScale(u.ctx, u.encoding, channel),
 						hasSecondaryRangeChannel: u.encoding.Get(getSecondaryRangeChannel(channel)).IsTruthy(),
 					})
 				} else {
@@ -418,14 +425,14 @@ var scaleRules = map[string]func(p scaleRuleParams) Value{
 		return scalePaddingInnerRule(p.model.ctx, p.scalePadding, p.channel, p.markDef.Get("type").AsString(), p.scaleType, p.config.Get("scale"), p.hasNestedOffsetScale)
 	},
 	"paddingOuter": func(p scaleRuleParams) Value {
-		return scalePaddingOuterRule(p.scalePadding, p.channel, p.scaleType, p.scalePaddingInner, p.config.Get("scale"), p.hasNestedOffsetScale)
+		return scalePaddingOuterRule(p.model.ctx, p.scalePadding, p.channel, p.scaleType, p.scalePaddingInner, p.config.Get("scale"), p.hasNestedOffsetScale)
 	},
 	"reverse": func(p scaleRuleParams) Value {
 		sort := undef
 		if isFieldDef(p.model.ctx, p.fod) {
 			sort = p.fod.Get("sort")
 		}
-		return scaleReverse(p.scaleType, sort, p.channel, p.config.Get("scale"))
+		return scaleReverse(p.model.ctx, p.scaleType, sort, p.channel, p.config.Get("scale"))
 	},
 	"zero": func(p scaleRuleParams) Value {
 		return scaleZero(p.model.ctx, p.channel, p.fod, p.domain, p.markDef, p.scaleType, p.config.Get("scale"), p.hasSecondaryRangeChannel)
@@ -459,7 +466,7 @@ func scalePaddingRule(cc *compileCtx, channel, scaleType string, scaleConfig Val
 			if cp := scaleConfig.Get("continuousPadding"); !cp.IsUndefined() {
 				return cp
 			}
-			typ, orient := markDef.Get("type").AsString(), markDef.Get("orient").AsString()
+			typ, orient := markDef.Get("type").AsString(), markDefOrient(markDef)
 			if typ == "bar" && !(isFieldDef(cc, fod) && (fod.Get("bin").IsTruthy() || fod.Get("timeUnit").IsTruthy())) {
 				if (orient == "vertical" && channel == chX) || (orient == "horizontal" && channel == chY) {
 					return barConfig.Get("continuousBandSize")
@@ -502,7 +509,7 @@ func scalePaddingInnerRule(cc *compileCtx, paddingValue Value, channel, mark, sc
 	return undef
 }
 
-func scalePaddingOuterRule(paddingValue Value, channel, scaleType string, paddingInnerValue Value, scaleConfig Value, hasNested bool) Value {
+func scalePaddingOuterRule(cc *compileCtx, paddingValue Value, channel, scaleType string, paddingInnerValue Value, scaleConfig Value, hasNested bool) Value {
 	if !paddingValue.IsUndefined() {
 		return undef
 	}
@@ -512,7 +519,7 @@ func scalePaddingOuterRule(paddingValue Value, channel, scaleType string, paddin
 		}
 		if scaleType == "band" {
 			var half Value
-			if isSignalRef(paddingInnerValue) {
+			if isSignalRef(cc, paddingInnerValue) {
 				half = sig(signalOf(paddingInnerValue) + "/2")
 			} else {
 				half = jsval.Num(jsval.ToNumber(paddingInnerValue) / 2)
@@ -532,12 +539,12 @@ func scalePaddingOuterRule(paddingValue Value, channel, scaleType string, paddin
 	return undef
 }
 
-func scaleReverse(scaleType string, sort Value, channel string, scaleConfig Value) Value {
+func scaleReverse(cc *compileCtx, scaleType string, sort Value, channel string, scaleConfig Value) Value {
 	descending := sort.IsStr() && sort.StrValue() == "descending"
 	if channel == chX && !scaleConfig.Get("xReverse").IsUndefined() {
 		xr := scaleConfig.Get("xReverse")
 		if hasContinuousDomain(scaleType) && descending {
-			if isSignalRef(xr) {
+			if isSignalRef(cc, xr) {
 				return sig("!" + signalOf(xr))
 			}
 			return jsval.Bool(!xr.IsTruthy())
@@ -572,7 +579,7 @@ func scaleZero(cc *compileCtx, channel string, fd Value, specifiedDomain Value, 
 		return jsval.True
 	}
 	if !(isFieldDef(cc, fd) && fd.Get("bin").IsTruthy()) && (channel == chX || channel == chY || channel == chTheta || channel == chRadius) {
-		orient, typ := markDef.Get("orient").AsString(), markDef.Get("type").AsString()
+		orient, typ := markDefOrient(markDef), markDef.Get("type").AsString()
 		if contains([]string{"bar", "area", "line", "trail"}, typ) {
 			if (orient == "horizontal" && channel == chY) || (orient == "vertical" && channel == chX) {
 				return jsval.False

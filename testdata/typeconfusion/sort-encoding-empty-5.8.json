@@ -1,0 +1,1 @@
+{"data":{"values":[{"a":1,"b":"x"}]},"mark":"bar","encoding":{"x":{"field":"b","type":"nominal","sort":{"encoding":""}},"y":{"field":"a","type":"quantitative"}}}

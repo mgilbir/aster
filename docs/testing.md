@@ -18,7 +18,7 @@ make check                                  # every gate CI runs (scripts/check.
 
 ```mermaid
 flowchart LR
-  C["corpus 1,427 specs<br/>+ sweeps + external corpora"] --> E["engine"]
+  C["corpus 1,438 specs<br/>+ sweeps + external corpora"] --> E["engine"]
   C --> N["upstream in node<br/>(internal/oracle)"]
   N <--> K[("testdata/oracle-cache")]
   E --> D["internal/svgdiff<br/>structure; geometry ±0.5 px,<br/>text and the rest exact"]
@@ -35,7 +35,7 @@ The SVG is compared structurally: element tree and attributes, the numbers of ge
 
 ## The corpus
 
-`TestCompareWithNode` (`compare_test.go`) runs over 1,427 specs: 260 Vega fixtures, 332 Vega-Lite fixtures, Vega's 92 example specs, the 627 Vega-Lite examples, 23 vl-convert specs, and 93 regressions (`testdata/corpus/regress`). The specs it does not match are listed with the reason in `testdata/oracle-expect.txt`. Five of its six entries depend on the platform node runs on (emoji measurement in macOS's Pango, d3-cloud's rasterization, V8's last-bit trigonometry on x86-64); the sixth is a chart node's renderer cannot draw (upstream's compiler writes onto `Object.prototype` for a field named `__proto__`, and node's Vega then overflows its stack). So the count that matches is 1,423 on macOS/arm64 and 1,424 on Linux/x86-64. The compiled Vega is identical to upstream's for every Vega-Lite spec.
+`TestCompareWithNode` (`compare_test.go`) runs over 1,438 specs: 260 Vega fixtures, 332 Vega-Lite fixtures, Vega's 92 example specs, the 627 Vega-Lite examples, 23 vl-convert specs, and 104 regressions (`testdata/corpus/regress`). The specs it does not match are listed with the reason in `testdata/oracle-expect.txt`. Five of its six entries depend on the platform node runs on (emoji measurement in macOS's Pango, d3-cloud's rasterization, V8's last-bit trigonometry on x86-64); the sixth is a chart node's renderer cannot draw (upstream's compiler writes onto `Object.prototype` for a field named `__proto__`, and node's Vega then overflows its stack). So the count that matches is 1,423 on macOS/arm64 and 1,424 on Linux/x86-64. The compiled Vega is identical to upstream's for every Vega-Lite spec.
 
 `go test -run TestCompareWithNode -v . -args -compare.report=/tmp/report.md` writes a per-spec report. `-compare.run name` compares one spec.
 
@@ -58,7 +58,7 @@ All of them agree with upstream except a handful of CJK and emoji cases, where n
 
 ## The type-confusion differential
 
-`TestVegaLiteTypeConfusionMatchesNode` (`vltypeconfusion_oracle_test.go`) replaces one value of a corpus spec (`internal/vegalite/testdata/specs`) with a value of another type and compiles the mutant with the engine and with node, for Vega-Lite 6.4 and 5.8. The engine must fail where node throws, compile where node compiles, log node's warnings in order and count, and produce node's compiled Vega exactly ([ADR 0013](adr/0013-invalid-input-fails-where-upstream-throws.md)). Flags: `-typeconfusion.seed`, `-typeconfusion.n` (mutants; 1,500 by default), `-typeconfusion.budget` (stop after a duration) and `-typeconfusion.dump dir` (writes the first mutant of each difference as `NNNN-VERSION.json`, with its description in `.key`). The suite runs the default seed; seeds 7, 11, 13, 17, 43, 47, 53, 59, 61 and 67 (10,000 mutants each) also report no difference.
+`TestVegaLiteTypeConfusionMatchesNode` (`vltypeconfusion_oracle_test.go`) replaces one value of a corpus spec (`internal/vegalite/testdata/specs`) with a value of another type and compiles the mutant with the engine and with node, for Vega-Lite 6.4 and 5.8. The engine must fail where node throws, compile where node compiles, log node's warnings in order and count, and produce node's compiled Vega exactly ([ADR 0013](adr/0013-invalid-input-fails-where-upstream-throws.md)). Flags: `-typeconfusion.seed`, `-typeconfusion.n` (mutants; 1,500 by default), `-typeconfusion.budget` (stop after a duration) and `-typeconfusion.dump dir` (writes the first mutant of each difference as `NNNN-VERSION.json`, with its description in `.key`). The suite runs the default seed; seeds 7, 11, 13, 17, 43, 47, 53, 59, 61 and 67 (10,000 mutants each) and 20740 (784,629, a nightly run's) also report no difference.
 
 The search is continuous: the `typeconfusion` job of `.github/workflows/fuzz.yml` runs it nightly with a new seed (the day number), as many mutants as its budget allows, against node 24 with a cold oracle cache, and uploads the dumped mutants as the `typeconfusion-seed-N` artifact when it finds a difference. A manual run of the workflow can name the seed and the budget.
 

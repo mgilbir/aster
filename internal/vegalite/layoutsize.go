@@ -30,12 +30,15 @@ func getViewConfigDiscreteSize(view Value, channel string) Value {
 	return firstDefined(size, mkv("step", view.Get("step")))
 }
 
-func getViewConfigDiscreteStep(view Value, channel string) float64 {
+// getViewConfigDiscreteStep is the step of the view config's discrete size
+// as given (a step of null, "" or [] included), else the default step;
+// callers convert it as upstream's arithmetic (step - 2) or template does.
+func getViewConfigDiscreteStep(view Value, channel string) Value {
 	size := getViewConfigDiscreteSize(view, channel)
 	if isStep(size) {
-		return size.Get("step").AsDouble()
+		return size.Get("step")
 	}
-	return defaultStep
+	return jsval.Num(defaultStep)
 }
 
 // initLayoutSize drops a step size for a continuous position channel (mutating size, as upstream does).
@@ -198,12 +201,12 @@ func sizeSignals(m Model, sizeType string) []Value {
 				scaleName := b.scaleName(channel, false)
 				if b.parent != nil && isFacetModel(b.parent) {
 					if b.parent.b().comp.resolve.scale[channel] == "independent" {
-						return []Value{stepSignal(scaleName, rng)}
+						return []Value{stepSignal(cc, scaleName, rng)}
 					}
 				}
 				return []Value{
-					stepSignal(scaleName, rng),
-					mkv("name", name, "update", sizeExpr(scaleName, sc, "domain('"+scaleName+"').length")),
+					stepSignal(cc, scaleName, rng),
+					mkv("name", name, "update", sizeExpr(cc, scaleName, sc, "domain('"+scaleName+"').length")),
 				}
 			}
 		}
@@ -222,15 +225,15 @@ func sizeSignals(m Model, sizeType string) []Value {
 	return []Value{mkv("name", name, "value", size)}
 }
 
-func stepSignal(scaleName string, rng Value) Value {
+func stepSignal(cc *compileCtx, scaleName string, rng Value) Value {
 	name := scaleName + "_step"
-	if isSignalRef(rng.Get("step")) {
+	if isSignalRef(cc, rng.Get("step")) {
 		return mkv("name", name, "update", signalOf(rng.Get("step")))
 	}
 	return mkv("name", name, "value", rng.Get("step"))
 }
 
-func sizeExpr(scaleName string, sc *scaleComponent, cardinality string) string {
+func sizeExpr(cc *compileCtx, scaleName string, sc *scaleComponent, cardinality string) string {
 	typ := sc.get("type").AsString()
 	padding := sc.get("padding")
 	paddingOuter := firstDefined(sc.get("paddingOuter"), padding)
@@ -242,5 +245,5 @@ func sizeExpr(scaleName string, sc *scaleComponent, cardinality string) string {
 	} else {
 		paddingInner = jsval.Int(1)
 	}
-	return "bandspace(" + cardinality + ", " + signalOrStringValue(paddingInner).AsString() + ", " + signalOrStringValue(paddingOuter).AsString() + ") * " + scaleName + "_step"
+	return "bandspace(" + cardinality + ", " + signalOrStringValue(cc, paddingInner).AsString() + ", " + signalOrStringValue(cc, paddingOuter).AsString() + ") * " + scaleName + "_step"
 }

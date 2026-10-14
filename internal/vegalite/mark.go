@@ -51,8 +51,8 @@ var markCompilers = map[string]markCompiler{
 		)
 	}},
 	"area": {vgMark: "area", encodeEntry: func(m *unitModel) Value {
-		horizontal := m.markDef.Get("orient").AsString() == "horizontal"
-		vertical := m.markDef.Get("orient").AsString() == "vertical"
+		horizontal := markDefOrient(m.markDef) == "horizontal"
+		vertical := markDefOrient(m.markDef) == "vertical"
 		return withBase(m, mkIgnore("ignore", "ignore", "include", "include", "ignore", "ignore"),
 			pointOrRangePosition(chX, m, rangePosOpts{defaultPos: "zeroOrMin", defaultPos2: "zeroOrMin", rangeFlag: horizontal}),
 			pointOrRangePosition(chY, m, rangePosOpts{defaultPos: "zeroOrMin", defaultPos2: "zeroOrMin", rangeFlag: vertical}),
@@ -101,7 +101,7 @@ var markCompilers = map[string]markCompiler{
 			rectPosition(m, chX), rectPosition(m, chY))
 	}},
 	"rule": {vgMark: "rule", encodeEntry: func(m *unitModel) Value {
-		orient := m.markDef.Get("orient").AsString()
+		orient := markDefOrient(m.markDef)
 		enc := m.encoding
 		if !enc.Get("x").IsTruthy() && !enc.Get("y").IsTruthy() && !enc.Get("latitude").IsTruthy() && !enc.Get("longitude").IsTruthy() {
 			return mkv()
@@ -143,7 +143,7 @@ var markCompilers = map[string]markCompiler{
 		if m.ctx.v5 {
 			return tick58(m)
 		}
-		orient := m.markDef.Get("orient").AsString()
+		orient := markDefOrient(m.markDef)
 		vgSizeAxis, vgThicknessAxis, vgThicknessChannel := chY, chX, "width"
 		if orient == "horizontal" {
 			vgSizeAxis, vgThicknessAxis, vgThicknessChannel = chX, chY, "height"
@@ -353,7 +353,7 @@ func getSort(m *unitModel) Value {
 		return mkv("field", jsval.Arr(f), "order", jsval.Arr(o))
 	} else if isPathMarkName(mark) {
 		dim := chX
-		if markDef.Get("orient").AsString() == "horizontal" {
+		if markDefOrient(markDef) == "horizontal" {
 			dim = chY
 		}
 		if cc.v5 {

@@ -1,0 +1,1 @@
+{"data":{"values":[{"a":1,"b":"p","c":"q"}]},"width":{"step":20},"mark":"bar","encoding":{"x":{"field":"b","type":"nominal","scale":null},"xOffset":{"field":"c","type":"nominal"},"y":{"field":"a","type":"quantitative"}}}

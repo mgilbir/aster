@@ -128,7 +128,7 @@ func guideFormat(cc *compileCtx, fod Value, typ string, format, formatType Value
 }
 
 func guideFormatType(cc *compileCtx, formatType Value, fod Value, scaleType string) Value {
-	if formatType.IsTruthy() && (isSignalRef(formatType) || (formatType.IsStr() && (formatType.StrValue() == "number" || formatType.StrValue() == "time"))) {
+	if formatType.IsTruthy() && (isSignalRef(cc, formatType) || (formatType.IsStr() && (formatType.StrValue() == "number" || formatType.StrValue() == "time"))) {
 		return formatType
 	}
 	if isFieldOrDatumDefForTimeFormat(cc, fod) && scaleType != "time" && scaleType != "utc" {

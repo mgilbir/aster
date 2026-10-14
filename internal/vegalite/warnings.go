@@ -369,3 +369,7 @@ func stringifyJSCC(cc *compileCtx, v Value) string {
 	}
 	return stringify(cc, v)
 }
+
+func msgInvalidSpec(cc *compileCtx, spec Value) string {
+	return "Invalid specification " + stringifyText(cc, spec) + `. Make sure the specification includes at least one of the following properties: "mark", "layer", "facet", "hconcat", "vconcat", "concat", or "repeat".`
+}

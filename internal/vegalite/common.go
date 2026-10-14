@@ -45,7 +45,7 @@ func signalOrValueRef(cc *compileCtx, v Value) Value {
 	if isExprRef(cc, v) {
 		return signalRefOrValue(cc, v)
 	}
-	if isSignalRef(v) {
+	if isSignalRef(cc, v) {
 		return v
 	}
 	if !v.IsUndefined() {
@@ -54,26 +54,31 @@ func signalOrValueRef(cc *compileCtx, v Value) Value {
 	return undef
 }
 
-func exprFromSignalRefOrValue(ref Value) string {
-	if isSignalRef(ref) {
+func exprFromSignalRefOrValue(cc *compileCtx, ref Value) string {
+	if isSignalRef(cc, ref) {
 		return signalOf(ref)
 	}
 	return stringValue(ref)
 }
 
-func exprFromValueRefOrSignalRef(ref Value) string {
-	if isSignalRef(ref) {
+func exprFromValueRefOrSignalRef(cc *compileCtx, ref Value) string {
+	if isSignalRef(cc, ref) {
 		return signalOf(ref)
 	}
 	return stringValue(ref.Get("value"))
 }
 
-func signalOrStringValue(v Value) Value {
-	if isSignalRef(v) {
+func signalOrStringValue(cc *compileCtx, v Value) Value {
+	if isSignalRef(cc, v) {
 		return jsval.Str(signalOf(v))
 	}
 	if v.IsNullish() {
 		return jsval.Null
+	}
+	if v.IsNum() || v.IsBool() {
+		// vega-util's stringValue returns a number or a boolean as it is,
+		// so a 0 or false is falsy where the expression is tested.
+		return v
 	}
 	return jsval.Str(stringValue(v))
 }
@@ -262,8 +267,8 @@ func mergeTitle(cc *compileCtx, t1, t2 Value) Value {
 // mergeTitleComponent merges two title components (text or field-def lists).
 func mergeTitleComponent(cc *compileCtx, v1, v2 withExplicit) withExplicit {
 	a, b := v1.value, v2.value
-	aText := isText(a) || isSignalRef(a)
-	bText := isText(b) || isSignalRef(b)
+	aText := isText(a) || isSignalRef(cc, a)
+	bText := isText(b) || isSignalRef(cc, b)
 	switch {
 	case a.IsNullish() || b.IsNull():
 		return withExplicit{v1.explicit, jsval.Null}

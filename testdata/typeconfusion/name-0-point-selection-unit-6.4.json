@@ -1,0 +1,1 @@
+{"data":{"values":[{"a":1,"b":2}]},"name":0,"params":[{"name":"p","select":"point"}],"mark":"point","encoding":{"x":{"field":"a","type":"quantitative"},"y":{"field":"b","type":"quantitative"}}}

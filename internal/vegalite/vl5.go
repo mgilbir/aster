@@ -139,7 +139,7 @@ func getPathSort58(m *unitModel, dim string) Value {
 			agg = s.Get("op")
 		}
 		return mkv("field", vgField(cc, mkv("aggregate", agg, "field", s.Get("field")), fieldRefOption{expr: "datum"}))
-	case isSortByEncoding(s):
+	case isSortByEncoding(cc, s):
 		return mkv("field", vgField(cc, m.fieldDef(s.Get("encoding").AsString()), fieldRefOption{expr: "datum"}), "order", s.Get("order"))
 	case s.IsNull():
 		return undef
@@ -214,12 +214,12 @@ func rectPosition58(m *unitModel, channel string) Value {
 	if scale != nil {
 		scaleType = scale.get("type").AsString()
 	}
-	orient := markDef.Get("orient").AsString()
+	orient := markDefOrient(markDef)
 	hasSizeDef := coalesce(encoding.Get(sizeChannel), encoding.Get("size"), getMarkPropOrConfig("size", markDef, config, sizeChannel, false))
 	isBarBand := mark == "bar" && ((channel == chX && orient == "vertical") || (channel != chX && orient == "horizontal"))
 	if isFieldDef(cc, channelDef) &&
 		(isBinning(channelDef.Get("bin")) || isBinned(channelDef.Get("bin")) || (channelDef.Get("timeUnit").IsTruthy() && !channelDef2.IsTruthy())) &&
-		!(hasSizeDef.IsTruthy() && !isRelativeBandSize(hasSizeDef)) &&
+		!(hasSizeDef.IsTruthy() && !isRelativeBandSize(cc, hasSizeDef)) &&
 		!hasDiscreteDomain(scaleType) {
 		return rectBinPosition58(channelDef, channelDef2, channel, m)
 	} else if ((isFieldOrDatumDef(cc, channelDef) && hasDiscreteDomain(scaleType)) || isBarBand) && !channelDef2.IsTruthy() {
@@ -230,7 +230,7 @@ func rectPosition58(m *unitModel, channel string) Value {
 
 func defaultSizeRef58(cc *compileCtx, sizeChannel, scaleName string, scale *scaleComponent, config Value, bandSize Value) Value {
 	switch {
-	case isRelativeBandSize(bandSize):
+	case isRelativeBandSize(cc, bandSize):
 		if scale != nil {
 			scaleType := scale.get("type").AsString()
 			if scaleType == "band" {
@@ -245,7 +245,7 @@ func defaultSizeRef58(cc *compileCtx, sizeChannel, scaleName string, scale *scal
 		} else {
 			return mkv("mult", bandSize.Get("band"), "field", mkv("group", sizeChannel))
 		}
-	case isSignalRef(bandSize):
+	case isSignalRef(cc, bandSize):
 		return bandSize
 	case bandSize.IsTruthy():
 		return mkv("value", bandSize)
@@ -255,14 +255,14 @@ func defaultSizeRef58(cc *compileCtx, sizeChannel, scaleName string, scale *scal
 			return mkv("value", rng.Get("step").NumValue()-2)
 		}
 	}
-	return mkv("value", getViewConfigDiscreteStep(config.Get("view"), sizeChannel)-2)
+	return mkv("value", jsval.ToNumber(getViewConfigDiscreteStep(config.Get("view"), sizeChannel))-2)
 }
 
 func positionAndSize58(fd Value, channel string, m *unitModel) Value {
 	cc := m.b().ctx
 
 	markDef, encoding, config, stack := m.markDef, m.encoding, m.config, m.stack
-	orient := markDef.Get("orient").AsString()
+	orient := markDefOrient(markDef)
 	scaleName := m.scaleName(channel, false)
 	scale := m.getScaleComponent(channel)
 	vgSizeChannel := getSizeChannel(channel)
@@ -291,7 +291,7 @@ func positionAndSize58(fd Value, channel string, m *unitModel) Value {
 		sizeMixins = mkv(vgSizeChannel, defaultSizeRef58(m.ctx, vgSizeChannel, name, scale, config, bandSize))
 	}
 	defaultBandAlign := "middle"
-	if scType == "band" && isRelativeBandSize(bandSize) && !hasSizeFromMarkOrEncoding {
+	if scType == "band" && isRelativeBandSize(cc, bandSize) && !hasSizeFromMarkOrEncoding {
 		defaultBandAlign = "top"
 	}
 	vgChannel := vgAlignedPositionChannel(m.ctx, channel, markDef, config, defaultBandAlign)
@@ -309,10 +309,10 @@ func positionAndSize58(fd Value, channel string, m *unitModel) Value {
 		} else {
 			bandPosition = jsval.Num(0.5)
 		}
-	case isSignalRef(bandSize):
+	case isSignalRef(cc, bandSize):
 		// upstream interpolates the ref itself (not .signal) here.
 		bandPosition = sig("(1-[object Object])/2")
-	case isRelativeBandSize(bandSize):
+	case isRelativeBandSize(cc, bandSize):
 		bandPosition = jsval.Num((1 - jsval.ToNumber(bandSize.Get("band"))) / 2) // (1 - bandSize.band) / 2
 	default:
 		bandPosition = jsval.Int(0)
@@ -347,7 +347,7 @@ func positionAndSize58(fd Value, channel string, m *unitModel) Value {
 	return mkv(jsKey(vgChannel), posRef, vgChannel2, second)
 }
 
-func getBinSpacing58(channel string, spacing float64, reverse, axisTranslate, offset Value) Value {
+func getBinSpacing58(cc *compileCtx, channel string, spacing float64, reverse, axisTranslate, offset Value) Value {
 	if isPolarPositionChannel(channel) {
 		return jsval.Int(0)
 	}
@@ -355,10 +355,10 @@ func getBinSpacing58(channel string, spacing float64, reverse, axisTranslate, of
 	if channel == chX || channel == chY2 {
 		spacingOffset = -spacing / 2
 	}
-	if isSignalRef(reverse) || isSignalRef(offset) || isSignalRef(axisTranslate) {
-		reverseExpr := signalOrStringValue(reverse)
-		offsetExpr := signalOrStringValue(offset)
-		axisTranslateExpr := signalOrStringValue(axisTranslate)
+	if isSignalRef(cc, reverse) || isSignalRef(cc, offset) || isSignalRef(cc, axisTranslate) {
+		reverseExpr := signalOrStringValue(cc, reverse)
+		offsetExpr := signalOrStringValue(cc, offset)
+		axisTranslateExpr := signalOrStringValue(cc, axisTranslate)
 		so := jsval.JSNumberString(spacingOffset)
 		t := ""
 		if axisTranslateExpr.IsTruthy() {
@@ -393,12 +393,8 @@ func rectBinPosition58(fd, fd2 Value, channel string, m *unitModel) Value {
 	config, markDef, encoding := m.config, m.markDef, m.encoding
 	scale := m.getScaleComponent(channel)
 	scaleName := m.scaleName(channel, false)
-	scaleType := ""
-	reverse := undef
-	if scale != nil {
-		scaleType = scale.get("type").AsString()
-		reverse = scale.get("reverse")
-	}
+	reverse := mustScale(scale).get("reverse")
+	scaleType := scale.get("type").AsString()
 	bandSize := getBandSize(cc, channel, fd, undef, markDef, config, scaleType, false)
 	var axis *axisComponent
 	if axes, ok := m.comp.axes.get(channel); ok && len(axes) > 0 {
@@ -421,32 +417,32 @@ func rectBinPosition58(fd, fd2 Value, channel string, m *unitModel) Value {
 	offset := positionOffset(channel, markDef, encoding, m, jsval.Int(0)).offset
 	var bandPosition Value
 	switch {
-	case isSignalRef(bandSize):
+	case isSignalRef(cc, bandSize):
 		bandPosition = sig("(1-" + signalOf(bandSize) + ")/2")
-	case isRelativeBandSize(bandSize):
+	case isRelativeBandSize(cc, bandSize):
 		bandPosition = jsval.Num((1 - jsval.ToNumber(bandSize.Get("band"))) / 2) // (1 - bandSize.band) / 2
 	default:
 		bandPosition = jsval.Num(0.5)
 	}
 	if isBinning(fd.Get("bin")) || fd.Get("timeUnit").IsTruthy() {
 		var second Value
-		if isSignalRef(bandPosition) {
+		if isSignalRef(cc, bandPosition) {
 			second = sig("1-" + signalOf(bandPosition))
 		} else {
 			second = jsval.Num(1 - bandPosition.NumValue())
 		}
 		return mkv(
-			vgChannel2, rectBinRef58(cc, fd, scaleName, bandPosition, getBinSpacing58(channel2, spacing, reverse, axisTranslate, offset)),
-			vgChannel, rectBinRef58(cc, fd, scaleName, second, getBinSpacing58(channel, spacing, reverse, axisTranslate, offset)),
+			vgChannel2, rectBinRef58(cc, fd, scaleName, bandPosition, getBinSpacing58(cc, channel2, spacing, reverse, axisTranslate, offset)),
+			vgChannel, rectBinRef58(cc, fd, scaleName, second, getBinSpacing58(cc, channel, spacing, reverse, axisTranslate, offset)),
 		)
 	} else if isBinned(fd.Get("bin")) {
-		startRef := valueRefForFieldOrDatumDef(cc, fd, scaleName, fieldRefOption{}, refOffsetBand{offset: getBinSpacing58(channel2, spacing, reverse, axisTranslate, offset)})
+		startRef := valueRefForFieldOrDatumDef(cc, fd, scaleName, fieldRefOption{}, refOffsetBand{offset: getBinSpacing58(cc, channel2, spacing, reverse, axisTranslate, offset)})
 		if isFieldDef(cc, fd2) {
-			return mkv(vgChannel2, startRef, vgChannel, valueRefForFieldOrDatumDef(cc, fd2, scaleName, fieldRefOption{}, refOffsetBand{offset: getBinSpacing58(channel, spacing, reverse, axisTranslate, offset)}))
+			return mkv(vgChannel2, startRef, vgChannel, valueRefForFieldOrDatumDef(cc, fd2, scaleName, fieldRefOption{}, refOffsetBand{offset: getBinSpacing58(cc, channel, spacing, reverse, axisTranslate, offset)}))
 		} else if isObject(fd.Get("bin")) && fd.Get("bin").Get("step").IsTruthy() {
 			return mkv(vgChannel2, startRef, vgChannel, mkv(
 				"signal", `scale("`+scaleName+`", `+vgField(cc, fd, fieldRefOption{expr: "datum"})+" + "+fd.Get("bin").Get("step").AsString()+")",
-				"offset", getBinSpacing58(channel, spacing, reverse, axisTranslate, offset),
+				"offset", getBinSpacing58(cc, channel, spacing, reverse, axisTranslate, offset),
 			))
 		}
 	}
@@ -462,7 +458,7 @@ func rectBinRef58(cc *compileCtx, fd Value, scaleName string, bandPosition, offs
 // thickness, not a rect.
 func tick58(m *unitModel) Value {
 	config, markDef := m.config, m.markDef
-	orient := markDef.Get("orient").AsString()
+	orient := markDefOrient(markDef)
 	vgSizeChannel, vgThicknessChannel := "height", "width"
 	if orient == "horizontal" {
 		vgSizeChannel, vgThicknessChannel = "width", "height"
@@ -479,7 +475,7 @@ func tick58(m *unitModel) Value {
 
 func tickDefaultSize58(m *unitModel) Value {
 	config, markDef := m.config, m.markDef
-	orient := markDef.Get("orient").AsString()
+	orient := markDefOrient(markDef)
 	vgSizeChannel, axis := "height", chY
 	if orient == "horizontal" {
 		vgSizeChannel, axis = "width", chX
@@ -494,7 +490,7 @@ func tickDefaultSize58(m *unitModel) Value {
 			return jsval.Num(float64(rng.Get("step").NumValue()*3) / 4)
 		}
 	}
-	return jsval.Num(float64(getViewConfigDiscreteStep(config.Get("view"), vgSizeChannel)*3) / 4)
+	return jsval.Num(jsval.ToNumber(getViewConfigDiscreteStep(config.Get("view"), vgSizeChannel)) * 3 / 4)
 }
 
 // mouseMoveEvent is the unit-tracking event: 6.x listens to pointer events,
@@ -508,10 +504,10 @@ func mouseMoveEvent(cc *compileCtx) string {
 
 // sizeRangeMin58 is 5.8's size range minimum, which starts at 0 for a scale
 // that includes zero.
-func sizeRangeMin58(mark string, zero Value, config Value) Value {
+func sizeRangeMin58(cc *compileCtx, mark string, zero Value, config Value) Value {
 	if zero.IsTruthy() {
-		if isSignalRef(zero) {
-			return sig(signalOf(zero) + " ? 0 : " + signalOrStringValue(sizeRangeMin(mark, config)).AsString())
+		if isSignalRef(cc, zero) {
+			return sig(signalOf(zero) + " ? 0 : " + signalOrStringValue(cc, sizeRangeMin(mark, config)).AsString())
 		}
 		return jsval.Int(0)
 	}
@@ -600,7 +596,7 @@ func assembleLegends58(m Model) []Value {
 	var out []Value
 	for _, k := range byDomain.keysView() {
 		for _, l := range byDomain.m[k] {
-			if v := assembleLegend(l, m.b().config); v.IsTruthy() {
+			if v := assembleLegend(cc, l, m.b().config); v.IsTruthy() {
 				out = append(out, v)
 			}
 		}

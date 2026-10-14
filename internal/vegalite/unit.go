@@ -28,13 +28,25 @@ func newUnitModel(cc *compileCtx, spec Value, parent Model, parentGivenName stri
 	}
 	u.modelBase = newModelBase(cc, u, spec, "unit", parent, parentGivenName, config, nil, view)
 	var markDef *Object
-	if isMarkDef(spec.Get("mark")) {
+	if isMarkDef(cc, spec.Get("mark")) {
 		markDef = cloneObj(spec.Get("mark").ObjValue())
 	} else {
 		markDef = mk("type", spec.Get("mark"))
 	}
 	if t := markDef.Lookup("type"); !t.IsStr() || markCompilers[t.StrValue()].encodeEntry == nil {
-		throw("Invalid mark %s: expected one of the mark types (arc, area, bar, image, line, point, rect, rule, text, tick, trail, circle, square, geoshape, or a composite mark) or a mark definition with such a type", stringify(cc, spec.Get("mark")))
+		// Upstream has no such check: a type that names no mark reads
+		// config[type], undefined, first for defaultFilled (unless filled
+		// is given) and then for initMarkdef's orient; a member of
+		// Object.prototype reads as a function there and fails only at
+		// markCompiler[mark].encodeEntry(...). The engine stops here, with
+		// the error upstream reaches.
+		switch {
+		case t.IsStr() && isInheritedKey(t.StrValue()):
+			throw("markCompiler[mark].encodeEntry is not a function")
+		case markDef.Lookup("filled").IsUndefined():
+			throw("Cannot read properties of undefined (reading 'filled')")
+		}
+		throw("Cannot read properties of undefined (reading 'orient')")
 	}
 	mark := markDef.Lookup("type").AsString()
 	if markDef.Lookup("filled").IsUndefined() {
@@ -240,7 +252,7 @@ func (u *unitModel) alignStackOrderWithColorDomain() {
 			}
 			orderExpression := "indexof(" + stringValue(domain) + ", datum['" + field.StrValue() + "'])"
 			sort := "descending"
-			if u.markDef.Get("orient").AsString() == "horizontal" {
+			if markDefOrient(u.markDef) == "horizontal" {
 				sort = "ascending"
 			}
 			u.transforms = append(u.transforms, mkv("calculate", orderExpression, "as", orderFieldName))
@@ -382,26 +394,29 @@ func initMarkdef(cc *compileCtx, original Value, encoding Value, config Value) V
 	mdv := replaceExprRef(cc, original, 0)
 	md := mdv.ObjValue()
 	specifiedOrient := getMarkPropOrConfigSimple("orient", mdv, config)
-	orient := markOrient(cc, md.Lookup("type").AsString(), encoding, specifiedOrient)
-	orientV := strOrUndef(orient)
-	if specifiedOrient.IsTruthy() && !specifiedOrient.IsStr() && orient == specifiedOrient.AsString() && orient != "vertical" && orient != "horizontal" {
-		// orient() handed back the specified value itself, not its text.
-		orientV = specifiedOrient
-	}
-	md.Set("orient", orientV)
-	if o := md.Lookup("orient"); !specifiedOrient.IsUndefined() && !strictEq(specifiedOrient, o) {
+	md.Set("orient", markOrient(cc, md.Lookup("type").AsString(), encoding, specifiedOrient))
+	orient := md.Lookup("orient")
+	if !specifiedOrient.IsUndefined() && !strictEq(specifiedOrient, orient) {
 		// Upstream passes the computed orient as the "specified" one.
-		cc.warn(msgOrientOverridden(o, specifiedOrient))
+		cc.warn(msgOrientOverridden(orient, specifiedOrient))
 	}
-	if md.Lookup("type").AsString() == "bar" && orient != "" {
+	if md.Lookup("type").AsString() == "bar" && orient.IsTruthy() {
 		if cre := getMarkPropOrConfigSimple("cornerRadiusEnd", mdv, config); !cre.IsUndefined() {
 			var newProps []string
-			if (orient == "horizontal" && encoding.Get("x2").IsTruthy()) || (orient == "vertical" && encoding.Get("y2").IsTruthy()) {
+			if (strIs(orient, "horizontal") && encoding.Get("x2").IsTruthy()) || (strIs(orient, "vertical") && encoding.Get("y2").IsTruthy()) {
 				newProps = []string{"cornerRadius"}
-			} else if orient == "horizontal" {
-				newProps = []string{"cornerRadiusTopRight", "cornerRadiusBottomRight"}
 			} else {
-				newProps = []string{"cornerRadiusTopLeft", "cornerRadiusTopRight"}
+				// BAR_CORNER_RADIUS_INDEX[markDef.orient]: an orient that
+				// names neither entry reads undefined (or a member of
+				// Object.prototype), and for…of over it throws.
+				switch orient.AsString() {
+				case "horizontal":
+					newProps = []string{"cornerRadiusTopRight", "cornerRadiusBottomRight"}
+				case "vertical":
+					newProps = []string{"cornerRadiusTopLeft", "cornerRadiusTopRight"}
+				default:
+					throw("newProps is not iterable")
+				}
 			}
 			for _, p := range newProps {
 				md.Set(p, cre)
@@ -438,20 +453,16 @@ func markOpacity(cc *compileCtx, mark string, encoding Value) Value {
 	return undef
 }
 
-func markOrient(cc *compileCtx, mark string, encoding Value, specifiedOrient Value) string {
+func markOrient(cc *compileCtx, mark string, encoding Value, specifiedOrient Value) Value {
 	switch mark {
 	case "point", "circle", "square", "rect", "image":
-		return ""
+		return undef
 	case "text":
 		if cc.v5 {
-			return ""
+			return undef
 		}
 	}
 	x, y, x2, y2 := encoding.Get("x"), encoding.Get("y"), encoding.Get("x2"), encoding.Get("y2")
-	so := ""
-	if specifiedOrient.IsTruthy() {
-		so = specifiedOrient.AsString()
-	}
 	// The cases below fall through in upstream: text/bar -> rule -> area -> line/tick.
 	stage := 0
 	switch mark {
@@ -464,41 +475,41 @@ func markOrient(cc *compileCtx, mark string, encoding Value, specifiedOrient Val
 	case "line", "tick":
 		stage = 3
 	default:
-		return "vertical"
+		return jsval.Str("vertical")
 	}
 	if stage == 0 {
 		if isFieldDef(cc, x) && (isBinned(x.Get("bin")) || (isFieldDef(cc, y) && y.Get("aggregate").IsTruthy() && !x.Get("aggregate").IsTruthy())) {
-			return "vertical"
+			return jsval.Str("vertical")
 		}
 		if isFieldDef(cc, y) && (isBinned(y.Get("bin")) || (isFieldDef(cc, x) && x.Get("aggregate").IsTruthy() && !y.Get("aggregate").IsTruthy())) {
-			return "horizontal"
+			return jsval.Str("horizontal")
 		}
 		if y2.IsTruthy() || x2.IsTruthy() {
-			if so != "" {
-				return so
+			if specifiedOrient.IsTruthy() {
+				return specifiedOrient
 			}
 			if !x2.IsTruthy() {
 				if (isFieldDef(cc, x) && channelDefType(x) == "quantitative" && !isBinning(x.Get("bin"))) || isNumericDataDef(x) {
 					if isFieldDef(cc, y) && isBinned(y.Get("bin")) {
-						return "horizontal"
+						return jsval.Str("horizontal")
 					}
 				}
-				return "vertical"
+				return jsval.Str("vertical")
 			}
 			if !y2.IsTruthy() {
 				if (isFieldDef(cc, y) && channelDefType(y) == "quantitative" && !isBinning(y.Get("bin"))) || isNumericDataDef(y) {
 					if isFieldDef(cc, x) && isBinned(x.Get("bin")) {
-						return "vertical"
+						return jsval.Str("vertical")
 					}
 				}
-				return "horizontal"
+				return jsval.Str("horizontal")
 			}
 		}
 		stage = 1
 	}
 	if stage == 1 {
 		if x2.IsTruthy() && !(isFieldDef(cc, x) && isBinned(x.Get("bin"))) && y2.IsTruthy() && !(isFieldDef(cc, y) && isBinned(y.Get("bin"))) {
-			return ""
+			return undef
 		}
 		stage = 2
 	}
@@ -506,19 +517,19 @@ func markOrient(cc *compileCtx, mark string, encoding Value, specifiedOrient Val
 		switch {
 		case y2.IsTruthy():
 			if isFieldDef(cc, y) && isBinned(y.Get("bin")) {
-				return "horizontal"
+				return jsval.Str("horizontal")
 			}
-			return "vertical"
+			return jsval.Str("vertical")
 		case x2.IsTruthy():
 			if isFieldDef(cc, x) && isBinned(x.Get("bin")) {
-				return "vertical"
+				return jsval.Str("vertical")
 			}
-			return "horizontal"
+			return jsval.Str("horizontal")
 		case mark == "rule":
 			if x.IsTruthy() && !y.IsTruthy() {
-				return "vertical"
+				return jsval.Str("vertical")
 			} else if y.IsTruthy() && !x.IsTruthy() {
-				return "horizontal"
+				return jsval.Str("horizontal")
 			}
 		}
 	}
@@ -526,27 +537,37 @@ func markOrient(cc *compileCtx, mark string, encoding Value, specifiedOrient Val
 	xIsMeasure := isUnbinnedQuantitativeFieldOrDatumDef(cc, x)
 	yIsMeasure := isUnbinnedQuantitativeFieldOrDatumDef(cc, y)
 	switch {
-	case so != "":
-		return so
+	case specifiedOrient.IsTruthy():
+		return specifiedOrient
 	case xIsMeasure && !yIsMeasure:
 		if mark != "tick" {
-			return "horizontal"
+			return jsval.Str("horizontal")
 		}
-		return "vertical"
+		return jsval.Str("vertical")
 	case !xIsMeasure && yIsMeasure:
 		if mark != "tick" {
-			return "vertical"
+			return jsval.Str("vertical")
 		}
-		return "horizontal"
+		return jsval.Str("horizontal")
 	case xIsMeasure && yIsMeasure:
-		return "vertical"
+		return jsval.Str("vertical")
 	}
 	xIsTemporal := isTypedFieldDefOf(cc, x) && channelDefType(x) == "temporal"
 	yIsTemporal := isTypedFieldDefOf(cc, y) && channelDefType(y) == "temporal"
 	if xIsTemporal && !yIsTemporal {
-		return "vertical"
+		return jsval.Str("vertical")
 	} else if !xIsTemporal && yIsTemporal {
-		return "horizontal"
+		return jsval.Str("horizontal")
+	}
+	return undef
+}
+
+// markDefOrient is markDef.orient for upstream's comparisons with
+// 'horizontal' and 'vertical' (===): an orient that is not a string, which
+// a ranged bar, a line or a tick keeps as specified, is neither.
+func markDefOrient(markDef Value) string {
+	if o := markDef.Get("orient"); o.IsStr() {
+		return o.StrValue()
 	}
 	return ""
 }

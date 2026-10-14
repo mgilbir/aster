@@ -115,7 +115,14 @@ func hasProperty(v Value, key string) bool {
 	return ok && !x.IsUndefined()
 }
 
-func isSignalRef(v Value) bool { return hasProperty(v, "signal") }
+// isSignalRef is hasProperty(o, 'signal') in 6.4; 5.8 tests !!o?.signal,
+// so a signal of "", 0, false or null is a plain value there.
+func isSignalRef(cc *compileCtx, v Value) bool {
+	if cc != nil && cc.v5 {
+		return !v.IsNullish() && jsProp(v, "signal").IsTruthy()
+	}
+	return hasProperty(v, "signal")
+}
 
 // isExprRef is hasProperty(o, 'expr') in 6.4; 5.8 tests !!o?.expr, so
 // an expr that is falsy is not one.

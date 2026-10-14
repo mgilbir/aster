@@ -199,7 +199,9 @@ func vgField(cc *compileCtx, fd Value, opt fieldRefOption) string {
 		// array is truthy and prints as nothing).
 		opSet := false
 		if !opt.nofn {
-			if hasProperty(fd, "op") {
+			// isOpFieldDef: hasProperty(fieldDef, 'op') in 6.4, 'op' in
+			// fieldDef in 5.8 (a TypeError on a primitive).
+			if (cc.v5 && jsIn(fd, "op")) || (!cc.v5 && hasProperty(fd, "op")) {
 				if op := fd.Get("op"); op.IsTruthy() {
 					fn, opSet = op.AsString(), true
 				}
@@ -210,13 +212,13 @@ func vgField(cc *compileCtx, fd Value, opt fieldRefOption) string {
 					fn = binToString(cc, bin)
 					suffix = opt.binSuffix + opt.suffix
 				case aggregate.IsTruthy():
-					if isArgmaxDef(aggregate) {
+					if isArgmaxDef(cc, aggregate) {
 						argAccessor = `["` + jsField() + `"]`
-						field, missing, pristine = "argmax_"+aggregate.Get("argmax").AsString(), "", false
+						field, missing, pristine = "argmax_"+argDefOf(cc, aggregate, "argmax").AsString(), "", false
 						hasField = true
-					} else if isArgminDef(aggregate) {
+					} else if isArgminDef(cc, aggregate) {
 						argAccessor = `["` + jsField() + `"]`
-						field, missing, pristine = "argmin_"+aggregate.Get("argmin").AsString(), "", false
+						field, missing, pristine = "argmin_"+argDefOf(cc, aggregate, "argmin").AsString(), "", false
 						hasField = true
 					} else {
 						fn = aggregate.AsString()
@@ -285,10 +287,10 @@ func verbalTitleFormatter(cc *compileCtx, fd Value, config Value) Value {
 			return jsval.Str(field.AsString() + " (" + joinStrings(getTimeUnitParts(unit.AsString()), "-") + ")")
 		}
 	case aggregate.IsTruthy():
-		if isArgmaxDef(aggregate) {
-			return jsval.Str(field.AsString() + " for max " + aggregate.Get("argmax").AsString())
-		} else if isArgminDef(aggregate) {
-			return jsval.Str(field.AsString() + " for min " + aggregate.Get("argmin").AsString())
+		if isArgmaxDef(cc, aggregate) {
+			return jsval.Str(field.AsString() + " for max " + argDefOf(cc, aggregate, "argmax").AsString())
+		} else if isArgminDef(cc, aggregate) {
+			return jsval.Str(field.AsString() + " for min " + argDefOf(cc, aggregate, "argmin").AsString())
 		}
 		return jsval.Str(titleCaseV(aggregate) + " of " + field.AsString())
 	}
@@ -297,10 +299,10 @@ func verbalTitleFormatter(cc *compileCtx, fd Value, config Value) Value {
 
 func functionalTitleFormatter(cc *compileCtx, fd Value) Value {
 	aggregate, bin, timeUnit, field := fd.Get("aggregate"), fd.Get("bin"), fd.Get("timeUnit"), fd.Get("field")
-	if isArgmaxDef(aggregate) {
-		return jsval.Str(field.AsString() + " for argmax(" + aggregate.Get("argmax").AsString() + ")")
-	} else if isArgminDef(aggregate) {
-		return jsval.Str(field.AsString() + " for argmin(" + aggregate.Get("argmin").AsString() + ")")
+	if isArgmaxDef(cc, aggregate) {
+		return jsval.Str(field.AsString() + " for argmax(" + argDefOf(cc, aggregate, "argmax").AsString() + ")")
+	} else if isArgminDef(cc, aggregate) {
+		return jsval.Str(field.AsString() + " for argmin(" + argDefOf(cc, aggregate, "argmin").AsString() + ")")
 	}
 	var tup Value
 	if timeUnit.IsTruthy() && !isBinnedTimeUnit(cc, timeUnit) {
@@ -372,7 +374,7 @@ func getFormatMixins(fd Value) (format, formatType Value) {
 }
 
 // defaultType infers the type of a field def that lacks one.
-func defaultType(fd Value, channel string) string {
+func defaultType(cc *compileCtx, fd Value, channel string) string {
 	switch channel {
 	case chLatitude, chLongitude:
 		return "quantitative"
@@ -388,7 +390,7 @@ func defaultType(fd Value, channel string) string {
 	if timeUnit.IsTruthy() {
 		return "temporal"
 	}
-	if bin.IsTruthy() || (aggregate.IsTruthy() && !isArgmaxDef(aggregate) && !isArgminDef(aggregate)) {
+	if bin.IsTruthy() || (aggregate.IsTruthy() && !isArgmaxDef(cc, aggregate) && !isArgminDef(cc, aggregate)) {
 		return "quantitative"
 	}
 	if isScaleFieldDef(fd) {
@@ -512,7 +514,7 @@ func isSortByChannel(cc *compileCtx, c string) bool {
 func initFieldDef(cc *compileCtx, fd Value, channel string, compositeMark bool) Value {
 	aggregate, timeUnit, bin, field := fd.Get("aggregate"), fd.Get("timeUnit"), fd.Get("bin"), fd.Get("field")
 	fieldDef := cloneObj(fd.ObjValue())
-	if !compositeMark && aggregate.IsTruthy() && !isAggregateOp(cc, aggregate) && !isArgmaxDef(aggregate) && !isArgminDef(aggregate) {
+	if !compositeMark && aggregate.IsTruthy() && !isAggregateOp(cc, aggregate) && !isArgmaxDef(cc, aggregate) && !isArgminDef(cc, aggregate) {
 		cc.warn(msgInvalidAggregate(aggregate))
 		fieldDef.Delete("aggregate")
 	}
@@ -554,7 +556,7 @@ func initFieldDef(cc *compileCtx, fd Value, channel string, compositeMark bool) 
 			fieldDef.Set("type", jsval.Str("quantitative"))
 		}
 	} else if !isSecondaryRangeChannel(channel) {
-		fieldDef.Set("type", jsval.Str(defaultType(fdv, channel)))
+		fieldDef.Set("type", jsval.Str(defaultType(cc, fdv, channel)))
 	}
 	if isTypedFieldDefOf(cc, fdv) {
 		if warning := channelCompatibilityWarning(cc, fdv, channel); warning != "" {
@@ -610,7 +612,7 @@ func valueExpr(cc *compileCtx, v Value, timeUnit Value, typ string, wrapTime, un
 	switch {
 	case isExprRef(cc, v):
 		expr, have = v.Get("expr").AsString(), true
-	case isSignalRef(v):
+	case isSignalRef(cc, v):
 		expr, have = v.Get("signal").AsString(), true
 	case isDateTime(v):
 		isTime = true
