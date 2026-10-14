@@ -2,7 +2,7 @@
 
 What changed between versions, for users of the library and the CLI. Breaking changes are marked **breaking**.
 
-## Unreleased
+## v0.2.0 (2026-10-14)
 
 ### Security
 
