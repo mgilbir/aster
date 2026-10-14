@@ -442,7 +442,25 @@ func (r *renderer) renderElement(n *node, parent *state) {
 		r.renderEffects(n, &st, opacity, blend, mk, fls)
 		return
 	}
+	if opacity == 0 && invisibleAtZeroOpacity(n.tag) && !r.inSVGGlyph {
+		return
+	}
 	r.drawContent(n, &st, opacity, blend)
+}
+
+// invisibleAtZeroOpacity reports whether an element of the tag, drawn with no
+// mask or filter at opacity 0, has no effect at all, so need not be drawn:
+// a shape or text only paints (composited at zero alpha, any blend mode leaves
+// the backdrop as it is). Vega emits every label its label transform could
+// not place as text at opacity 0, which the canvas renderer upstream skips
+// too. Images are drawn, as one that cannot be read is reported, and so are
+// groups, which may hold images.
+func invisibleAtZeroOpacity(tag tagID) bool {
+	switch tag {
+	case tagPath, tagRect, tagCircle, tagEllipse, tagLine, tagPolyline, tagPolygon, tagText:
+		return true
+	}
+	return false
 }
 
 // drawContent draws the element's own content (children, shape, text or

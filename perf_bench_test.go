@@ -15,10 +15,11 @@ import (
 
 // galleryBench are Vega gallery specs that stress different hot paths:
 // contours, force layout, a map with many paths, stacks, hierarchies, dense
-// scatter plots and heat maps.
+// scatter plots and heat maps, and text rasterized for layout (word cloud
+// sprites, label occupancy masks).
 var galleryBench = []string{
 	"scatter-plot", "stacked-area-chart", "treemap", "county-unemployment",
-	"force-directed-layout", "beeswarm-plot",
+	"force-directed-layout", "beeswarm-plot", "word-cloud", "labeled-scatter-plot",
 }
 
 // memLoader answers from memory what the wrapped loader served once, so the
