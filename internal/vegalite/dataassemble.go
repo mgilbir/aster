@@ -213,6 +213,11 @@ func assembleRootData(cc *compileCtx, dc *dataComponent, datasets Value) []Value
 	for _, d := range data {
 		cc.work(1 + int64(len(d.transform)))
 		for i, t := range d.transform {
+			if t.IsNullish() {
+				// t.type of the null a FilterInvalidNode assembles to when
+				// none of its fields is quantitative or temporal.
+				throw("Cannot read properties of %s (reading 'type')", nullishName(t))
+			}
 			if t.Get("type").IsStr() && t.Get("type").StrValue() == "lookup" {
 				o := cloneObj(t.ObjValue())
 				if node, ok := dc.outputNodes[t.Get("from").AsString()]; ok && node != nil {

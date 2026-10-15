@@ -896,7 +896,7 @@ func (n *stackNode) assemble() []Value {
 
 type geoJSONNode struct {
 	dfBase
-	fields  Value // array or undefined
+	fields  Value // the coordinate pair, or null for a shape (hash reads "null")
 	geojson Value // the shape field as given; null for coordinates
 	signal  string
 }
@@ -977,7 +977,7 @@ func parseAllGeoJSON(parent dfNode, m *unitModel) dfNode {
 	if m.channelHasField(chShape) {
 		fd := m.typedFieldDef(chShape)
 		if channelDefType(fd) == "geojson" {
-			parent = newGeoJSONNode(parent, undef, fd.Get("field"), m.getName("geojson_"+jsval.JSNumberString(float64(counter))))
+			parent = newGeoJSONNode(parent, jsval.Null, fd.Get("field"), m.getName("geojson_"+jsval.JSNumberString(float64(counter))))
 		}
 	}
 	return parent
