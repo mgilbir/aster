@@ -108,7 +108,9 @@ func interpolatedSignalRef(cc *compileCtx, o interpolatedOpts) Value {
 	}
 	ref := jsval.NewObject(4)
 	if bandPosition.IsNum() && (bandPosition.NumValue() == 0 || bandPosition.NumValue() == 1) {
-		ref.Set("scale", jsval.Str(o.scaleName))
+		if o.scaleName != "" { // {scale: undefined} of a channel with no scale is no key
+			ref.Set("scale", jsval.Str(o.scaleName))
+		}
 		if bandPosition.NumValue() == 0 {
 			ref.Set("field", jsval.Str(start))
 		} else {

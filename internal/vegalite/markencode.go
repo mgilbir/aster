@@ -345,16 +345,22 @@ func descriptionEncode(m *unitModel) Value {
 	idx := 0
 	for _, key := range data.keysView() {
 		cc.work(1)
-		value := data.m[key]
-		if cc.v5 && value == "" {
-			value = "undefined" // 5.8 interpolates a missing expression as is
-		} else if !cc.v5 {
+		var value string
+		if cc.v5 {
+			value = data.m[key].text() // 5.8 interpolates a missing expression as is
+		} else {
 			// Vega-Lite 6 hides internal (underscore-prefixed) signals from the
 			// description and flattens line breaks; 5.8 prints everything.
 			if strings.HasPrefix(key, "_") {
 				continue
 			}
-			value = strings.ReplaceAll(value, `\n`, " ")
+			if !data.m[key].ok {
+				// value.replaceAll of a ref with no signal: a field def that
+				// is also a value def ({value, field}, as a layer's value
+				// merged into a child's field makes) is read as the value.
+				throw("Cannot read properties of undefined (reading 'replaceAll')")
+			}
+			value = strings.ReplaceAll(data.m[key].s, `\n`, " ")
 		}
 		sep := ""
 		if idx > 0 {
@@ -411,12 +417,32 @@ func tooltipEncode(m *unitModel, reactiveGeom bool) Value {
 type tooltipEntry struct {
 	channel string
 	key     string
-	value   string
+	value   tipValue
 	has     bool
 }
 
+// tipValue is a tooltip entry's expression: ok is false where upstream's is
+// undefined (a ref with no signal), which reads differently from an empty
+// expression: an aria description's value.replaceAll throws on it, a
+// template prints it as "undefined".
+type tipValue struct {
+	s  string
+	ok bool
+}
+
+// truthy is the expression as `!out[key]` reads it.
+func (v tipValue) truthy() bool { return v.ok && v.s != "" }
+
+// text is the expression as a template interpolates it.
+func (v tipValue) text() string {
+	if !v.ok {
+		return "undefined"
+	}
+	return v.s
+}
+
 // tooltipData maps each tooltip key to its value expression.
-func tooltipData(cc *compileCtx, encoding Value, stack *stackProperties, config Value, reactiveGeom bool) *omap[string] {
+func tooltipData(cc *compileCtx, encoding Value, stack *stackProperties, config Value, reactiveGeom bool) *omap[tipValue] {
 	// {...config, ...config.tooltipFormat}, for every mark of every view.
 	formatConfig := mergedCC(cc, config, config.Get("tooltipFormat"))
 	if cc.v5 {
@@ -451,7 +477,7 @@ func tooltipData(cc *compileCtx, encoding Value, stack *stackProperties, config 
 		if !cc.v5 {
 			key = strings.ReplaceAll(key, `"`, `\"`)
 		}
-		value := ""
+		var value tipValue
 		hasValue := false
 		if isXorY(channel) {
 			channel2 := chY2
@@ -463,18 +489,18 @@ func tooltipData(cc *compileCtx, encoding Value, stack *stackProperties, config 
 				startField := vgField(cc, fd, fieldRefOption{expr: expr})
 				endField := vgField(cc, fd2, fieldRefOption{expr: expr})
 				format, formatType := getFormatMixins(fd)
-				value = binFormatExpression(startField, endField, format, formatType, jsval.Obj(formatConfig))
+				value = tipValue{binFormatExpression(startField, endField, format, formatType, jsval.Obj(formatConfig)), true}
 				hasValue = true
 				toSkip[channel2] = true
 			}
 		}
 		if (isXorY(channel) || channel == chTheta || channel == chRadius) && stack != nil && stack.fieldChannel == channel && stack.offset == "normalize" {
 			format, formatType := getFormatMixins(fd)
-			value = signalOrEmpty(formatSignalRef(cc, formatSignalOpts{fieldOrDatumDef: fd, format: format, formatType: formatType, expr: expr, config: jsval.Obj(formatConfig), normalizeStack: true}))
+			value = signalOrUndefined(formatSignalRef(cc, formatSignalOpts{fieldOrDatumDef: fd, format: format, formatType: formatType, expr: expr, config: jsval.Obj(formatConfig), normalizeStack: true}))
 			hasValue = true
 		}
 		if !hasValue {
-			value = signalOrEmpty(tooltipTextRef(cc, fd, jsval.Obj(formatConfig), expr))
+			value = signalOrUndefined(tooltipTextRef(cc, fd, jsval.Obj(formatConfig), expr))
 		}
 		tuples = append(tuples, tooltipEntry{channel, key, value, true})
 	}
@@ -485,13 +511,13 @@ func tooltipData(cc *compileCtx, encoding Value, stack *stackProperties, config 
 			add(cd.Get("condition"), channel)
 		}
 	})
-	out := newOmap[string]()
+	out := newOmap[tipValue]()
 	for _, t := range tuples {
 		cc.work(1)
 		// `!out[key]`: an earlier entry whose value was undefined does not block
 		// this one, and a key every object inherits (toString, constructor, ...)
 		// reads as an entry already there.
-		if !toSkip[t.channel] && (!out.has(t.key) || out.m[t.key] == "") && !isInheritedKey(t.key) {
+		if !toSkip[t.channel] && (!out.has(t.key) || !out.m[t.key].truthy()) && !isInheritedKey(t.key) {
 			out.set(t.key, t.value)
 		}
 	}
@@ -503,7 +529,7 @@ func tooltipRefForEncoding(cc *compileCtx, encoding Value, stack *stackPropertie
 	var kv []string
 	for _, k := range data.keysView() {
 		cc.work(1)
-		kv = append(kv, `"`+k+`": `+jsName(data.m[k]))
+		kv = append(kv, `"`+k+`": `+data.m[k].text())
 	}
 	if len(kv) > 0 {
 		return mkv("signal", "{"+strings.Join(kv, ", ")+"}")
@@ -533,9 +559,10 @@ func addLineBreaksToTooltip(cc *compileCtx, channelDef Value, config Value, expr
 
 // signalOrEmpty is ref.signal where an undefined signal is "" (a real signal
 // expression is never empty).
-func signalOrEmpty(ref Value) string {
+// signalOrUndefined is ref.signal, undefined where ref has none.
+func signalOrUndefined(ref Value) tipValue {
 	if s := ref.Get("signal"); !s.IsUndefined() {
-		return signalOf(ref)
+		return tipValue{signalOf(ref), true}
 	}
-	return ""
+	return tipValue{}
 }

@@ -475,6 +475,12 @@ func jsonString(s string) string { return stringValue(jsval.Str(s)) }
 
 // hash is upstream's hash(): short strings are their own hash.
 func hashOf(cc *compileCtx, v Value) string {
+	if v.IsUndefined() {
+		// stringify(undefined) is undefined, and hash reads its length: a
+		// domain that merges to nothing (every domain dropped by unique's
+		// `in`, as "constructor" is) fails where its hash is taken.
+		throw("Cannot read properties of undefined (reading 'length')")
+	}
 	if v.IsNum() {
 		return jsval.JSNumberString(v.NumValue())
 	}

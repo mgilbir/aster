@@ -481,8 +481,10 @@ func tickDefaultSize58(m *unitModel) Value {
 		vgSizeChannel, axis = "width", chX
 	}
 	scale := m.getScaleComponent(axis)
+	// getMarkPropOrConfig(...) ?? config.tick.bandSize, then `!== undefined`:
+	// a null bandSize is the default size, so the tick draws no size channel.
 	v := coalesce(getMarkPropOrConfig("size", markDef, config, vgSizeChannel, false), config.Get("tick").Get("bandSize"))
-	if !v.IsUndefined() && !v.IsNull() {
+	if !v.IsUndefined() {
 		return v
 	}
 	if scale != nil {
