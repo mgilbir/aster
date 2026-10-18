@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/mgilbir/aster/internal/jsval"
+	"github.com/mgilbir/aster/internal/svgpdf"
 	"github.com/mgilbir/aster/internal/text"
 	"github.com/mgilbir/aster/internal/transforms"
 	"github.com/mgilbir/aster/internal/transforms/wordcloud"
@@ -82,10 +83,10 @@ func (c *Converter) StagesForTest(spec []byte, lite bool) (map[string]time.Durat
 	if err != nil {
 		return nil, err
 	}
-	if _, err := c.svgToPNG(ctx, svg, nil); err != nil {
+	if _, err := c.svgToPNG(ctx, svg, defaultPNGConfig()); err != nil {
 		return nil, err
 	}
-	if _, _, err := c.svgToPDF(ctx, svg, nil, false); err != nil {
+	if _, _, err := c.svgToPDF(ctx, svg, svgpdf.TextEmbed, false); err != nil {
 		return nil, err
 	}
 	return stages, nil
@@ -122,7 +123,8 @@ func (c *Converter) RenderPreparedForTest(spec []byte, lite bool) (func() error,
 		defer release()
 		ctx, cancel := c.opContext(context.Background())
 		defer cancel()
-		defer recoverInto(&err)
+		stage := "rendering Vega"
+		defer c.recoverStage(ctx, &stage, &err)
 		opts := vega.Options{
 			Loader:   c.cfg.loader,
 			Location: c.location,

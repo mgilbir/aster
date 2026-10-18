@@ -90,6 +90,7 @@ type config struct {
 	pango           pangoMode
 	fonts           []customFont
 	palettes        map[string]int // by normalised family, WithFontPalette
+	paletteFamilies []string       // WithFontPalette's families, as given, for New's check
 	fallbackFamily  string
 	serifFamily     string
 	monospaceFamily string
@@ -154,6 +155,7 @@ func WithFontPalette(family string, index int) Option {
 			c.palettes = map[string]int{}
 		}
 		c.palettes[normFamily(family)] = max(0, index)
+		c.paletteFamilies = append(c.paletteFamilies, family)
 	}
 }
 
@@ -423,6 +425,13 @@ func New(opts ...Option) (*Measurer, error) {
 				return nil, fmt.Errorf("text: fallback family %q has no font (register it, or enable system fonts for a system one)", fam)
 			}
 			m.fallbackOrder = append(m.fallbackOrder, es)
+		}
+	}
+	// A palette for a family with no font would silently do nothing: a
+	// mistake to report, as a default family with no font is (C57).
+	for _, fam := range cfg.paletteFamilies {
+		if !m.hasFamily(normFamily(fam)) {
+			return nil, fmt.Errorf("text: WithFontPalette: family %q has no font (register it, or enable system fonts for a system one)", fam)
 		}
 	}
 	// A generic family set to one with no font would silently resolve to

@@ -1,6 +1,7 @@
 package vega
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -138,6 +139,7 @@ func (v *runView) request(url, fmtSpec jsval.Value) []jsval.Value {
 	if err := v.bud.Load(int64(len(body))); err != nil {
 		failErr(err)
 	}
+	body = stripBOM(body)
 	data, err := v.read(jsval.Undefined, body, fmtSpec)
 	if err != nil {
 		failed(uri, true, err)
@@ -150,6 +152,21 @@ func (v *runView) request(url, fmtSpec jsval.Value) []jsval.Value {
 		return []jsval.Value{jsval.Str(text)}
 	}
 	return data
+}
+
+// utf8BOM is the UTF-8 encoding of U+FEFF, which a text file exported by
+// many Windows tools starts with.
+var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
+
+// stripBOM is a loaded body without the one UTF-8 byte order mark it may
+// start with (C39). Upstream reads a URL's body with fetch's
+// Response.text(), whose UTF-8 decode drops it, so that JSON.parse reads the
+// document and a CSV's first header is the column's name. vega-loader's
+// file path (fs.readFile) keeps it, and then fails to parse what its HTTP
+// path reads; the Loader here says nothing of the transport, so every
+// loaded body is read as the HTTP path reads it.
+func stripBOM(b []byte) []byte {
+	return bytes.TrimPrefix(b, utf8BOM)
 }
 
 // textChunk is how much of a loaded body textOf copies between two polls of

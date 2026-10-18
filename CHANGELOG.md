@@ -12,6 +12,22 @@ What changed between versions, for users of the library and the CLI. Breaking ch
   - under 5.8, a mark whose invalid-value filter is left with no field to filter;
   - views whose shared scale merges a `range` of `null` with another range, whose `step` upstream reads.
 - Where upstream compiles such input, the output now matches it: under 5.8 a tick with `config.tick.bandSize: null` has no size channel; a binned position on a channel with `scale: null` names no scale; an empty expression in a tooltip built from the encoding is written empty, not as `undefined`; and a scale `type` that a `datum` encoding keeps without checking it (`{}`, `[]`, a number, a boolean) is written as given, not as its text (`"[object Object]"`, `"1"`).
+- A loaded data body that starts with a UTF-8 byte order mark reads as it does upstream over HTTP, without it (C39): a JSON body was a syntax error, and a CSV's first column took the mark into its name.
+
+### Security
+
+- **breaking:** `HTTPLoader` with a `Transport` of your own sends nothing to a private address of a name (C18, audit 2026-10-18). With a `DialContext` (or `Dial`) of yours, the private-network check ran on the connection it had made: an open port of the internal network saw a connection, and a closed one's error named the address the name resolved to and said "connection refused", so a specification could scan the network. The loader now resolves the name, refuses it when it has no public address, and calls your `DialContext` with the vetted address (`ip:port`) rather than the name; the request's `Host` and TLS server name are still the name. A `DialTLSContext` (or `DialTLS`) is called with the name once the loader's resolution found a public address, and its connection is checked again. Every failed dial to a name is one error, "could not connect to the host", whatever the cause.
+- `HTTPLoader`s built around one `*http.Transport` share one checked copy of it, and its connection pool (C28): each made a copy of its own, which nothing closed, so a loader per request kept a connection per request open forever. The copy closes a connection idle for 90 s when the `Transport` sets no `IdleConnTimeout`, and is dropped with the `Transport`. Loaders with a nil `Client` share the package's own transport.
+- The images that PNG and PDF output fetch in parallel reserve their share of the call's loaded-bytes allowance before the Loader is called (C19): each read up to what was left when it started, so eight could read eight times the allowance (8 × 32 MiB against 64 MiB by default). A fetch whose share is held waits for it, so no image that fits is refused; fewer images may be fetched at once (two at the default limit).
+
+### Reliability
+
+- A panic in your code is an error, never a crash (C15, C17): a Loader method (on the image fetches' own goroutines too, where it killed the process), the error handler, a `WithSignal` value's `MarshalJSON`, the Loader's `Close` (which also wedged every later `Converter.Close`). A Loader that calls `Converter.Close` from its `Close`, or a projection that calls it during a render, no longer deadlocks.
+- **breaking (fewer successes):** `New` refuses a `FallbackLoader` with a nil child, at any depth (the `*FileLoader` of a `NewFileLoader` whose error was dropped): it passed, then failed data loads, crashed image loads and wedged `Close` (C16). The package's loaders are nil-safe: a nil one's methods return an error. A `FileLoader` closed unused no longer opens its directory to close it (C141).
+- A nil option is no option, for `New` and for every method, and the methods of a `Converter` that `New` did not make return an error: all of them panicked (C55).
+- An invalid `WithScale` or `WithPDFText` fails the call before it starts, rather than after the whole render and its Loader calls (C56).
+- **breaking (fewer successes):** `WithFontPalette` with a family that has no font, or a negative index, fails `New`, as the other options naming a family do (C57).
+- A bound or deadline reached deep inside a stage names the stage in its error ("aster: writing SVG timed out after 30s: …"), as errors.md says (C58).
 
 ## v0.2.0 (2026-10-14)
 

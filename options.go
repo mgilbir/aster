@@ -248,9 +248,15 @@ func WithFontFace(family string, ttc []byte, index int) Option {
 // family's fonts with their palette index, from 0, rather than the first:
 // a font's dark-mode palette, say. It applies to every font of the family,
 // given with WithFont, found with WithSystemFonts, or embedded; a palette a
-// font does not have is its first. A later call for a family wins.
+// font does not have is its first. A later call for a family wins. A family
+// with no font, or a negative index, makes New return an error, as the other
+// options naming a family do.
 func WithFontPalette(family string, index int) Option {
 	return func(c *config) {
+		if index < 0 {
+			c.errs = append(c.errs, fmt.Errorf("aster: WithFontPalette(%q): palette index %d is negative", family, index))
+			return
+		}
 		c.palettes = append(c.palettes, fontPalette{family, index})
 	}
 }
@@ -340,7 +346,8 @@ func (f pngOption) applyPNG(c *pngConfig) { f(c) }
 
 // RenderOption configures a single VegaToSVG, VegaLiteToSVG or
 // VegaLiteToVega call: WithContext, WithSignal and WithErrorHandler
-// (VegaLiteToVega renders nothing, so it ignores WithSignal).
+// (VegaLiteToVega renders nothing, so it ignores WithSignal). A nil
+// RenderOption, PNGOption or PDFOption is no option.
 type RenderOption interface{ applyRender(*renderConfig) }
 
 // renderConfig is what configures one call, whatever its output.
@@ -369,7 +376,8 @@ type SignalOption struct {
 // before the next is set.
 //
 // A name the specification does not define fails the render, as it does
-// upstream. The SVG-input methods (SVGToPNG, SVGToPDF) render no
+// upstream; so does a value encoding/json cannot encode, or whose MarshalJSON
+// panics. The SVG-input methods (SVGToPNG, SVGToPDF) render no
 // specification and ignore it.
 func WithSignal(name string, value any) SignalOption {
 	return SignalOption{name: name, value: value}
@@ -408,7 +416,8 @@ type ErrorHandlerOption struct {
 // (context.DeadlineExceeded), Close (context.Canceled).
 //
 // h is called on the goroutine that made the call, never concurrently, and
-// before the call returns. Data and evaluation errors reach it as they arise;
+// before the call returns. A panic in h is recovered, and fails the call with
+// an error saying so. Data and evaluation errors reach it as they arise;
 // image failures once the stage that fetched or decoded them is over, once
 // per image URL of the call, under the URL the input names. h may call the
 // Converter's Close (the call then fails with context.Canceled) or start
@@ -440,7 +449,9 @@ func defaultPNGConfig() *pngConfig {
 }
 
 // WithScale sets the scale factor for PNG rendering. A scale of 2.0 produces
-// an image with twice the dimensions. Default is 1.0.
+// an image with twice the dimensions. Default is 1.0. A scale that is not a
+// positive, finite number fails the call before it starts: before any
+// Loader call and any render.
 func WithScale(scale float64) PNGOption {
 	return pngOption(func(c *pngConfig) {
 		c.scale = scale

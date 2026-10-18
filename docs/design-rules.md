@@ -58,7 +58,16 @@ unrelated datasets without copying.
 Anything reachable from a specification returns an
 error or is reported; it never panics. A top-level `recover` in the
 public API converts an unexpected panic into an error, but relying on it is a
-bug.
+bug. In the root package it is `recoverStage`, which makes a stage's panic
+the stage's error through `stageErr`, so a bound or a deadline reached deep
+inside a stage is named as one returned would be.
+
+The caller's code (a Loader's methods, the error handler, a `WithSignal`
+value's `MarshalJSON`) is called only through `Converter.callback`: the one
+boundary that marks the goroutine as inside a call, for `Close`, and turns a
+panic in that code into its error, whatever goroutine runs it. A goroutine
+the library starts recovers a panic first thing, since no other recover
+reaches it. `TestPanicBoundaries` checks the three on the source ([ADR 0021](adr/0021-caller-code-behind-one-boundary.md)).
 
 What upstream logs and carries on past (a failed load, an operator's
 exception, a warning) is reported, never dropped: through the dataflow's
@@ -193,7 +202,9 @@ Everything a render mutates hangs off values the render creates: the
 dataflow, the scenegraph, projections (and the pipelines they cache for a
 `geo.Path`), the `Random`, the budget, the ledger. A compiled
 `expr.Program` is immutable and shared between renders through
-`expr.CompileCached`. New package-level mutable state needs a lock and an
+`expr.CompileCached`. The HTTP transports `internal/loader` derives from a
+caller's `*http.Transport` are a cache keyed by a weak pointer to it, under a
+lock, dropped with it. New package-level mutable state needs a lock and an
 entry in this list; `TestConcurrentConverterSharesNothing` (run it with
 `-race`, and with `ASTER_STRESS_FULL=1` for the whole corpus) is the guard.
 

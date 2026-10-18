@@ -1,0 +1,122 @@
+package aster_test
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/mgilbir/aster"
+)
+
+// rendezvousLoader passes every Load to inner once n Loads are in flight
+// together, or after a while without the others: it lets fetches that can run
+// together do so, whatever the scheduler does, and tells the bytes inner
+// returned.
+type rendezvousLoader struct {
+	inner    aster.Loader
+	n        int32
+	inFlight atomic.Int32
+	returned atomic.Int64
+}
+
+func (l *rendezvousLoader) Sanitize(ctx context.Context, u string) (string, error) {
+	return l.inner.Sanitize(ctx, u)
+}
+
+func (l *rendezvousLoader) Load(ctx context.Context, u string) ([]byte, error) {
+	l.inFlight.Add(1)
+	defer l.inFlight.Add(-1)
+	// Not a time bound: a wait that lets the other fetches start (up to
+	// 200 ms when they cannot, as when they wait for an allowance).
+	for i := 0; i < 200 && l.inFlight.Load() < l.n; i++ {
+		time.Sleep(time.Millisecond)
+	}
+	b, err := l.inner.Load(ctx, u)
+	l.returned.Add(int64(len(b)))
+	return b, err
+}
+
+// Images fetched in parallel for PNG and PDF output read, together, no more
+// than the call's loaded-bytes allowance (C19): each fetch took a snapshot of
+// what was left at its start, and eight of them read eight times it. The
+// Loader is a FileLoader, which reads only what the call gives it.
+func TestParallelFetchesStayWithinTheAllowance(t *testing.T) {
+	const images, size = 8, 7 << 20
+	dir := t.TempDir()
+	var sb strings.Builder
+	sb.WriteString(`<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">`)
+	for i := range images {
+		name := fmt.Sprintf("img%d.png", i)
+		if err := os.WriteFile(filepath.Join(dir, name), make([]byte, size), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		fmt.Fprintf(&sb, `<image href="%s" width="10" height="10"/>`, name)
+	}
+	sb.WriteString(`</svg>`)
+	for _, out := range []string{"PNG", "PDF"} {
+		fl, err := aster.NewFileLoader(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		l := &rendezvousLoader{inner: fl, n: images}
+		// WithMemoryLimit(16 MiB): the call's loaded-bytes allowance is 8 MiB.
+		const allowance = 8 << 20
+		c, err := aster.New(aster.WithLoader(l), aster.WithMemoryLimit(2*allowance))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out == "PNG" {
+			_, err = c.SVGToPNG(sb.String())
+		} else {
+			_, err = c.SVGToPDF(sb.String())
+		}
+		_ = c.Close()
+		if !errors.Is(err, aster.ErrLimit) {
+			t.Errorf("%s: %v, want ErrLimit: the images are over the allowance together", out, err)
+		}
+		if got := l.returned.Load(); got > allowance {
+			t.Errorf("%s: the Loader returned %d MiB, past the %d MiB allowance", out, got>>20, allowance>>20)
+		}
+	}
+}
+
+// Reserving does not refuse what fits: images that fit the allowance together
+// are all fetched, whatever order the fetches run in.
+func TestParallelFetchesThatFitAllLoad(t *testing.T) {
+	dir := t.TempDir()
+	png := redPNG(t)
+	var sb strings.Builder
+	sb.WriteString(`<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">`)
+	for i := range 20 {
+		name := fmt.Sprintf("img%d.png", i)
+		// Each 1 MiB, 20 MiB in all: within the default 64 MiB allowance,
+		// far less than 20 per-image reservations of 32 MiB.
+		if err := os.WriteFile(filepath.Join(dir, name), append(append([]byte{}, png...), make([]byte, 1<<20)...), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		fmt.Fprintf(&sb, `<image href="%s" width="10" height="10"/>`, name)
+	}
+	sb.WriteString(`</svg>`)
+	fl, err := aster.NewFileLoader(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l := &rendezvousLoader{inner: fl, n: 1}
+	c, err := aster.New(aster.WithLoader(l))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Close() }()
+	if _, err := c.SVGToPNG(sb.String()); err != nil {
+		t.Errorf("PNG: %v", err)
+	}
+	if _, err := c.SVGToPDF(sb.String()); err != nil {
+		t.Errorf("PDF: %v", err)
+	}
+}

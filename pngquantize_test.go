@@ -2,12 +2,59 @@ package aster
 
 import (
 	"bytes"
+	"context"
 	"image"
 	"image/color"
+	"image/draw"
 	"image/png"
 	"math"
 	"testing"
+
+	"github.com/mgilbir/aster/internal/pngopt"
 )
+
+// quantizePNG and quantizeOrRecodePNG run the entry points the API calls
+// (pngopt.QuantizeImage, under QuantizeOrRecodeImage) on a PNG's image, as
+// the API runs them on the image it drew (C140: they were aliases, in a
+// library file the library did not use, of the byte-slice forms, a different
+// entry point). Input that does not decode is returned as it is.
+func quantizePNG(data []byte, maxColors int) ([]byte, bool, string) {
+	img, ok := testNRGBA(data)
+	if !ok {
+		return data, false, "decode failed"
+	}
+	out, ok, reason, err := pngopt.QuantizeImage(context.Background(), img, data, maxColors)
+	if err != nil {
+		return data, false, err.Error()
+	}
+	return out, ok, reason
+}
+
+func quantizeOrRecodePNG(data []byte, maxColors int) []byte {
+	img, ok := testNRGBA(data)
+	if !ok {
+		return data
+	}
+	out, err := pngopt.QuantizeOrRecodeImage(context.Background(), img, data, maxColors)
+	if err != nil {
+		return data
+	}
+	return out
+}
+
+// testNRGBA is the image a PNG decodes to, as the rasterizer holds one.
+func testNRGBA(data []byte) (*image.NRGBA, bool) {
+	src, err := png.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, false
+	}
+	if n, ok := src.(*image.NRGBA); ok {
+		return n, true
+	}
+	n := image.NewNRGBA(src.Bounds())
+	draw.Draw(n, n.Bounds(), src, src.Bounds().Min, draw.Src)
+	return n, true
+}
 
 // syntheticChart builds a chart-like NRGBA test image: flat panels and bars,
 // antialiased-looking edges with per-pixel variation, and a noisy strip

@@ -33,6 +33,12 @@ import (
 // what it reads: the data and images of one call share one allowance of
 // loaded bytes. It may call Close, or start another call, on the Converter.
 // If it implements io.Closer, Converter.Close closes it.
+//
+// A panic in any of its methods is recovered, whatever goroutine the engine
+// called it on, and is that method's error: the resource is not loaded (a
+// *LoadError, which WithErrorHandler may let go), or Close returns it. A bug
+// in a Loader fails what it was asked for, never the process. The Loaders of
+// this package are nil-safe: a nil one's methods return an error.
 type Loader = loader.Loader
 
 // The loader implementations live in internal/loader; their fields are
@@ -63,15 +69,18 @@ type (
 	//
 	// It refuses other schemes, URLs with userinfo, and hosts outside
 	// AllowedDomains, on every redirect hop (at most 10). The private-network
-	// check is made on the address actually connected to, so names that
+	// check is made on the addresses a name resolves to before anything is
+	// sent to them, and on the address actually connected to, so names that
 	// resolve inward, DNS rebinding and redirects do not get around it; it
 	// applies to the default client and to a Client whose Transport is an
-	// *http.Transport, on every path that Transport dials (DialContext,
-	// DialTLSContext, the deprecated Dial and DialTLS, and net/http's own
-	// dialer when it sets none), and its error does not say which address a
-	// name resolved to. A request a proxy carries, or that another
-	// RoundTripper makes, gets only the checks on the URL. See
-	// docs/loading-data.md.
+	// *http.Transport, on every path that Transport dials (DialContext and
+	// the deprecated Dial, which are given the vetted address rather than the
+	// name, DialTLSContext and DialTLS, and net/http's own dialer when it sets
+	// none). A failed connection's error says neither which address a name
+	// resolved to nor whether a port answered. HTTPLoaders built around one
+	// *http.Transport share one checked copy of it, and its connections. A
+	// request a proxy carries, or that another RoundTripper makes, gets only
+	// the checks on the URL. See docs/loading-data.md.
 	HTTPLoader = loader.HTTPLoader
 
 	// FileLoader serves files under BaseDir string, contained with os.Root:
@@ -93,7 +102,10 @@ type (
 	// through the children again, Sanitize then Load: so every child's
 	// Sanitize must return its own answer unchanged when given it, as the
 	// loaders of this package do. A limit (ErrLimit) from a child ends the
-	// search. Close closes every child that implements io.Closer.
+	// search. Close closes every child that implements io.Closer. A nil
+	// child, such as the *FileLoader of a NewFileLoader whose error was
+	// dropped, makes New return an error, at any depth of nesting; used
+	// directly, it refuses every URI.
 	FallbackLoader = loader.FallbackLoader
 )
 
@@ -105,7 +117,8 @@ func NewHTTPLoader(client *http.Client) *HTTPLoader { return loader.NewHTTPLoade
 // It returns an error if dir does not exist or cannot be opened.
 func NewFileLoader(dir string) (*FileLoader, error) { return loader.NewFileLoader(dir) }
 
-// NewFallbackLoader creates a FallbackLoader from the given children.
+// NewFallbackLoader creates a FallbackLoader from the given children. A nil
+// child is refused by New (see FallbackLoader).
 func NewFallbackLoader(loaders ...Loader) *FallbackLoader {
 	return loader.NewFallbackLoader(loaders...)
 }
