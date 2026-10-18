@@ -6,11 +6,12 @@ What changed between versions, for users of the library and the CLI. Breaking ch
 
 ### Fidelity
 
-- **breaking (fewer successes):** more Vega-Lite input that upstream's compiler rejects fails as upstream's does, with its message ([ADR 0013](docs/adr/0013-invalid-input-fails-where-upstream-throws.md)), found by the nightly type-confusion differential (seed 20741):
+- **breaking (fewer successes):** more Vega-Lite input that upstream's compiler rejects fails as upstream's does, with its message ([ADR 0013](docs/adr/0013-invalid-input-fails-where-upstream-throws.md)), found by the nightly type-confusion differential (seeds 20741 and 20742):
   - a scale `domain` naming a member of `Object.prototype` (`"constructor"`, `"toString"`, `"__proto__"`, …), which upstream's deduplication reads as already seen, so hashing the empty domain fails;
   - under 6.4, an encoding that is both a value and a field (a layer's `{"value": …}` merged into a child's field definition), whose aria description upstream fails to build;
-  - under 5.8, a mark whose invalid-value filter is left with no field to filter.
-- Where upstream compiles such input, the output now matches it: under 5.8 a tick with `config.tick.bandSize: null` has no size channel; a binned position on a channel with `scale: null` names no scale; and an empty expression in a tooltip built from the encoding is written empty, not as `undefined`.
+  - under 5.8, a mark whose invalid-value filter is left with no field to filter;
+  - views whose shared scale merges a `range` of `null` with another range, whose `step` upstream reads.
+- Where upstream compiles such input, the output now matches it: under 5.8 a tick with `config.tick.bandSize: null` has no size channel; a binned position on a channel with `scale: null` names no scale; an empty expression in a tooltip built from the encoding is written empty, not as `undefined`; and a scale `type` that a `datum` encoding keeps without checking it (`{}`, `[]`, a number, a boolean) is written as given, not as its text (`"[object Object]"`, `"1"`).
 
 ## v0.2.0 (2026-10-14)
 

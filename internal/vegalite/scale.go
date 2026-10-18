@@ -147,8 +147,8 @@ func parseUnitScaleCore(u *unitModel) *omap[*scaleComponent] {
 			hasNested := channelHasNestedOffsetScale(cc, u.encoding, channel)
 			sType := computeScaleType(cc, specified, channel, fod, u.markDef, hasNested)
 			scales.set(channel, newScaleComponent(u.scaleName(channel, true), withExplicit{
-				value:    strOrUndef(sType),
-				explicit: specified.Get("type").IsStr() && specified.Get("type").StrValue() == sType,
+				value:    sType,
+				explicit: strictEq(specified.Get("type"), sType), // specifiedScale.type === sType
 			}))
 		}
 	}
@@ -218,17 +218,20 @@ func parseNonUnitScaleCore(m Model) *omap[*scaleComponent] {
 }
 
 // computeScaleType is upstream's scaleType(): the specified type when the
-// channel and data type support it, else the default.
-func computeScaleType(cc *compileCtx, specified Value, channel string, fieldDef Value, mark Value, hasNested bool) string {
-	def := defaultScaleType(cc, channel, fieldDef, mark, hasNested)
+// channel and data type support it, else the default. The specified type is
+// returned as given, not as its text: a datum's type is not checked against
+// a data type, so a type of {} (which no index holds, as its text does not)
+// is the scale's type in the output.
+func computeScaleType(cc *compileCtx, specified Value, channel string, fieldDef Value, mark Value, hasNested bool) Value {
+	def := strOrUndef(defaultScaleType(cc, channel, fieldDef, mark, hasNested))
 	t := specified.Get("type")
 	if !isScaleChannel(cc, channel) {
-		return ""
+		return undef
 	}
 	if !t.IsUndefined() {
 		ts := t.AsString()
 		if !channelSupportScaleType(cc, channel, ts, false) {
-			cc.warn(msgScaleTypeNotWorkWithChannel(channel, t, def))
+			cc.warn(msgScaleTypeNotWorkWithChannel(channel, t, def.AsString()))
 			return def
 		}
 		// The type is defined here: an empty text ("" or []) is not the
@@ -238,10 +241,10 @@ func computeScaleType(cc *compileCtx, specified Value, channel string, fieldDef 
 			supportTs = "\x00"
 		}
 		if isFieldDef(cc, fieldDef) && !scaleTypeSupportDataType(supportTs, channelDefType(fieldDef)) {
-			cc.warn(msgScaleTypeNotWorkWithFieldDef(t, def))
+			cc.warn(msgScaleTypeNotWorkWithFieldDef(t, def.AsString()))
 			return def
 		}
-		return ts
+		return t
 	}
 	return def
 }
@@ -614,7 +617,16 @@ func parseNonUnitScaleProperty(m Model, property string) {
 	}
 	tb := tieBreakByComparing(func(v1, v2 Value) int {
 		if property == "range" {
-			s1, s2 := v1.Get("step"), v2.Get("step")
+			// v1.step && v2.step: a null range (a scale's range: null) is
+			// read for its step and throws, v2's only once v1's is truthy.
+			if v1.IsNullish() {
+				throw("Cannot read properties of %s (reading 'step')", nullishName(v1))
+			}
+			s1 := v1.Get("step")
+			if s1.IsTruthy() && v2.IsNullish() {
+				throw("Cannot read properties of %s (reading 'step')", nullishName(v2))
+			}
+			s2 := v2.Get("step")
 			if s1.IsTruthy() && s2.IsTruthy() {
 				d := jsval.ToNumber(s1) - jsval.ToNumber(s2)
 				switch {
