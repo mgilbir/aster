@@ -134,6 +134,41 @@ func loadCap(ctx context.Context, configured int64, field string) (max int64, ca
 	return configured, field
 }
 
+// streamChunk is the most one read takes before it is charged to a shared
+// allowance (budget.Stream): what a load reading past the call's allowance
+// can hold beyond it.
+const streamChunk = 32 << 10
+
+// readBody reads r whole. When the load's budget shares the call's allowance
+// with loads running at once (the images PNG and PDF output fetch in
+// parallel), every chunk read is charged to it as it is read, so that the
+// loads together stop where the call's allowance ends rather than each read
+// up to what was left when it started (C19).
+func readBody(ctx context.Context, r io.Reader) ([]byte, error) {
+	if b := budget.From(ctx); b.Streams() {
+		r = &streamReader{r: r, b: b}
+	}
+	return io.ReadAll(r)
+}
+
+type streamReader struct {
+	r io.Reader
+	b *budget.Budget
+}
+
+func (s *streamReader) Read(p []byte) (int, error) {
+	if len(p) > streamChunk {
+		p = p[:streamChunk]
+	}
+	n, err := s.r.Read(p)
+	if n > 0 {
+		if e := s.b.Stream(int64(n)); e != nil {
+			return 0, e
+		}
+	}
+	return n, err
+}
+
 // NewHTTPLoader creates a loader that allows HTTP(S) requests.
 // If client is nil, the client described on HTTPLoader is used.
 func NewHTTPLoader(client *http.Client) *HTTPLoader {
@@ -201,7 +236,7 @@ func (l *HTTPLoader) Load(ctx context.Context, uri string) ([]byte, error) {
 
 	max, capName := loadCap(ctx, l.MaxResponseBytes, "HTTPLoader.MaxResponseBytes")
 	if max < 0 {
-		data, err := io.ReadAll(resp.Body)
+		data, err := readBody(ctx, resp.Body)
 		if err != nil {
 			return nil, fmt.Errorf("aster: failed to read response from %q: %w", uri, err)
 		}
@@ -215,7 +250,7 @@ func (l *HTTPLoader) Load(ctx context.Context, uri string) ([]byte, error) {
 	}
 	// Read one byte past the cap to distinguish "exactly at the cap" from
 	// "exceeds it".
-	data, err := io.ReadAll(io.LimitReader(resp.Body, max+1))
+	data, err := readBody(ctx, io.LimitReader(resp.Body, max+1))
 	if err != nil {
 		return nil, fmt.Errorf("aster: failed to read response from %q: %w", uri, err)
 	}

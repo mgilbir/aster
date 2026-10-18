@@ -197,7 +197,7 @@ func (l *FileLoader) Load(ctx context.Context, uri string) ([]byte, error) {
 		// The file may grow after the stat; read one byte past the cap.
 		r = io.LimitReader(f, max+1)
 	}
-	data, err := io.ReadAll(r)
+	data, err := readBody(ctx, r)
 	if err != nil {
 		return nil, fmt.Errorf("aster: FileLoader failed to read %q: %w", uri, err)
 	}

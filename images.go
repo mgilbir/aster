@@ -37,31 +37,28 @@ const (
 // together up to its loaded-bytes allowance (C80). A link (an item's href)
 // is resolved once per URL too, in a table of its own.
 //
-// The allowance is reserved, not charged after the fact (C19): each Load is
-// given at most what it has reserved, under the lock, before it starts, and
-// gives back what it did not use when it returns. PNG and PDF output fetch
-// several images at once (imageref.Fetch), and a share of what was left
-// taken by each at its start let them read together several times the
-// allowance. A fetch reserves what it would be given alone, what is left of
-// the allowance up to the per-image limit, and waits for fetches in flight
-// to give back theirs when that is not free: so no fetch is refused for
-// bytes another holds and then does not use, and the outcome is the one the
-// fetches would have one at a time.
+// The allowance is charged as the bytes are read, not after the fact (C19):
+// PNG and PDF output fetch several images at once (imageref.Fetch), and each
+// read up to what was left when it started, so eight of them read together
+// several times the allowance. Each Load's budget now shares the call's
+// allowance (budget.Allowance), which the package's loaders charge a chunk
+// at a time as they read, so the fetches together stop where it ends, all of
+// them in flight at once; what a Loader of the caller's own returns, unread
+// by any charge, is charged once it returns, before it is decoded. Bytes
+// charged are kept, even those of a load that then fails, so a call goes
+// past the allowance only when the bytes its loads read do, whatever order
+// they ran in.
 type callImages struct {
 	c *Converter
 
 	mu sync.Mutex
-	// allowance is what the call may load, data and images together; used is
-	// what it has (see chargeData); reserved is what the fetches in flight
-	// may still read.
-	allowance, used, reserved int64
-	// freed is closed, and replaced, when a fetch gives back its
-	// reservation: the fetches waiting for one try again.
-	freed   chan struct{}
-	byURL   map[string]*resource // by the URL the input names
-	byHref  map[string]*resource // by the href the SVG stage wrote
-	links   map[string]linkResolution
-	fetched map[string]*fetch // by sanitized URL
+	// allowance is what the call may load, data and images together (see
+	// chargeData), charged as it is read.
+	allowance *budget.Allowance
+	byURL     map[string]*resource // by the URL the input names
+	byHref    map[string]*resource // by the href the SVG stage wrote
+	links     map[string]linkResolution
+	fetched   map[string]*fetch // by sanitized URL
 }
 
 // resource is one image URL of the call, resolved.
@@ -86,7 +83,7 @@ type linkResolution struct {
 type callImagesKey struct{}
 
 func (c *Converter) newCallImages() *callImages {
-	return &callImages{c: c, allowance: c.lim.vega.MaxLoadBytes, freed: make(chan struct{}),
+	return &callImages{c: c, allowance: budget.NewAllowance(c.lim.vega.MaxLoadBytes),
 		byURL: map[string]*resource{}, byHref: map[string]*resource{}, links: map[string]linkResolution{}, fetched: map[string]*fetch{}}
 }
 
@@ -99,9 +96,8 @@ func imagesFrom(ctx context.Context) *callImages {
 // chargeData counts the n bytes the call's data loaded against the
 // allowance images draw from, once the Vega run that loaded them is over.
 func (ci *callImages) chargeData(n int64) {
-	ci.mu.Lock()
-	ci.used += n
-	ci.mu.Unlock()
+	// Within the allowance already: the Vega run's own budget bounded it.
+	ci.allowance.Force(n)
 }
 
 // entryBytes is what one table entry is charged to the call's ledger: its
@@ -245,21 +241,15 @@ func (ci *callImages) fetch(ctx context.Context, r *resource) ([]byte, error) {
 }
 
 // loadBytes is one Load of r, the first for its sanitized URL in the call,
-// within what it reserved of the allowance.
+// charged to the call's allowance as it reads (see callImages).
 func (ci *callImages) loadBytes(ctx context.Context, r *resource) ([]byte, error) {
-	limit, err := ci.reserve(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if limit <= 0 {
+	if ci.allowance.Left() <= 0 {
 		return nil, ci.overAllowance(r)
 	}
-	var b []byte
-	defer func() { ci.settle(limit, int64(len(b))) }()
-	b, err = ci.c.loader.Load(budget.With(ctx, &budget.Budget{MaxLoadBytes: limit}), r.u)
+	bud := &budget.Budget{MaxLoadBytes: maxImageBytes, Shared: ci.allowance}
+	b, err := ci.c.loader.Load(budget.With(ctx, bud), r.u)
 	if err != nil {
-		b = nil
-		if errors.Is(err, budget.ErrLimit) && limit == maxImageBytes {
+		if errors.Is(err, budget.ErrLimit) && !bud.SharedBound() {
 			// The Loader read up to what it was given, which was the
 			// per-image limit, not what its message says (C88).
 			return nil, fmt.Errorf("aster: image %q is over %d bytes, the limit of one image: %w", r.url, maxImageBytes, ErrLimit)
@@ -267,65 +257,18 @@ func (ci *callImages) loadBytes(ctx context.Context, r *resource) ([]byte, error
 		return nil, err
 	}
 	if int64(len(b)) > maxImageBytes {
-		b = nil // not kept, so not charged
 		return nil, fmt.Errorf("aster: image %q is over %d bytes, the limit of one image: %w", r.url, maxImageBytes, ErrLimit)
 	}
-	// A Loader of the caller's own may return more than it was given: the
-	// allowance is charged what it returned, and fails past it.
-	if int64(len(b)) > limit {
-		ci.mu.Lock()
-		over := ci.used+ci.reserved-limit+int64(len(b)) > ci.allowance
-		ci.mu.Unlock()
-		if over {
-			b = nil
-			return nil, ci.overAllowance(r)
-		}
+	// What the Loader returned beyond what it charged as it read: all of it
+	// for a Loader of the caller's own, which does not read the budget.
+	if extra := int64(len(b)) - bud.Streamed(); extra > 0 && !ci.allowance.Take(extra) {
+		return nil, ci.overAllowance(r)
 	}
 	return b, nil
 }
 
-// reserve takes from the allowance what one fetch may read: what is left of
-// it, up to the per-image limit, once the fetches in flight leave that much
-// free; 0 when nothing is left whatever they give back. It waits for them
-// with ctx.
-func (ci *callImages) reserve(ctx context.Context) (int64, error) {
-	ci.mu.Lock()
-	for {
-		left := ci.allowance - ci.used
-		if left <= 0 {
-			ci.mu.Unlock()
-			return 0, nil
-		}
-		want := min(left, maxImageBytes)
-		if left-ci.reserved >= want {
-			ci.reserved += want
-			ci.mu.Unlock()
-			return want, nil
-		}
-		freed := ci.freed
-		ci.mu.Unlock()
-		select {
-		case <-freed:
-		case <-ctx.Done():
-			return 0, ctx.Err()
-		}
-		ci.mu.Lock()
-	}
-}
-
-// settle ends a fetch that reserved reserved bytes and keeps n: n is charged,
-// and the rest given back to the fetches waiting.
-func (ci *callImages) settle(reserved, n int64) {
-	ci.mu.Lock()
-	ci.reserved -= reserved
-	ci.used += n
-	close(ci.freed)
-	ci.freed = make(chan struct{})
-	ci.mu.Unlock()
-}
-
 func (ci *callImages) overAllowance(r *resource) error {
-	return fmt.Errorf("aster: image %q: %w: the data and images of the call are over %d bytes (loaded bytes; WithMemoryLimit raises it)", r.url, ErrLimit, ci.allowance)
+	return fmt.Errorf("aster: image %q: %w: the data and images of the call are over %d bytes (loaded bytes; WithMemoryLimit raises it)", r.url, ErrLimit, ci.allowance.Max())
 }
 
 // limits are the bounds of one image, as every stage applies them.

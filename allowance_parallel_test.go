@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -118,5 +119,71 @@ func TestParallelFetchesThatFitAllLoad(t *testing.T) {
 	}
 	if _, err := c.SVGToPDF(sb.String()); err != nil {
 		t.Errorf("PDF: %v", err)
+	}
+}
+
+// barrierLoader serves a small PNG for every URI, each Load waiting until n
+// Loads are in flight together: it returns only if the call runs n fetches
+// at once. The call's context ends the wait, so a call that cannot reach n
+// fails at its timeout instead of hanging.
+type barrierLoader struct {
+	n        int32
+	png      []byte
+	inFlight atomic.Int32
+	peak     atomic.Int32
+	once     sync.Once
+	all      chan struct{}
+}
+
+func (l *barrierLoader) Sanitize(_ context.Context, u string) (string, error) { return u, nil }
+
+func (l *barrierLoader) Load(ctx context.Context, _ string) ([]byte, error) {
+	n := l.inFlight.Add(1)
+	defer l.inFlight.Add(-1)
+	for p := l.peak.Load(); n > p && !l.peak.CompareAndSwap(p, n); p = l.peak.Load() {
+	}
+	if n >= l.n {
+		l.once.Do(func() { close(l.all) })
+	}
+	select {
+	case <-l.all:
+		return l.png, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// Under the default limits, the eight fetches imageref.Fetch runs at once
+// all run at once (C19: reserving each image's 32 MiB bound up front let two
+// of them run at a time under the 64 MiB allowance). Counted, not timed:
+// the Loader returns only once eight Loads are in flight together.
+func TestImageFetchesRunInParallel(t *testing.T) {
+	const fetches = 8
+	var sb strings.Builder
+	sb.WriteString(`<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10">`)
+	for i := range fetches {
+		fmt.Fprintf(&sb, `<image href="http://example.com/%d.png" width="10" height="10"/>`, i)
+	}
+	sb.WriteString(`</svg>`)
+	for _, out := range []string{"PNG", "PDF"} {
+		l := &barrierLoader{n: fetches, png: redPNG(t), all: make(chan struct{})}
+		// The timeout is a hang backstop only: with eight fetches at once
+		// the call returns at once.
+		c, err := aster.New(aster.WithLoader(l), aster.WithTimeout(time.Minute))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out == "PNG" {
+			_, err = c.SVGToPNG(sb.String())
+		} else {
+			_, err = c.SVGToPDF(sb.String())
+		}
+		_ = c.Close()
+		if err != nil {
+			t.Errorf("%s: %v", out, err)
+		}
+		if p := l.peak.Load(); p != fetches {
+			t.Errorf("%s: at most %d fetches ran at once, want %d", out, p, fetches)
+		}
 	}
 }
