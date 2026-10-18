@@ -6,8 +6,11 @@ vendor-datasets:
 build:
 	go build ./...
 
+# The -short suite (no node needed), ending with a summary of the tests that
+# skipped and why: under -short every comparison with upstream does, and the
+# replays of upstream's test vectors do without scripts/record-upstream-vectors.sh.
 test:
-	go test -short ./...
+	go test -short -json ./... | go run ./internal/cmd/testsummary
 
 # The full suite; tests that compare with upstream need the node oracle:
 # (cd testdata/oracle-node && npm ci) && (cd testdata/oracle-node-vl5 && npm ci)

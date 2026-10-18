@@ -127,5 +127,5 @@ func TestUpstreamD3ShapeLine(t *testing.T) {
 		}
 		r.Check(c, sp.String(), false)
 	}
-	r.Done(130)
+	r.Done(148)
 }

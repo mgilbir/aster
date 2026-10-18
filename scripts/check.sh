@@ -67,7 +67,8 @@ else
 	missing "golangci-lint" "not installed; CI runs v2.14.0"
 fi
 gate "go mod tidy" go mod tidy -diff
-gate "tests (-short)" go test -short -timeout 30m ./...
+gate "tests (-short)" sh -c 'go test -short -json -timeout 30m ./... | go run ./internal/cmd/testsummary'
+gate "fixed bounds match docs/limits.md" go test -count=1 -run '^TestFixedLimitsDocMatchesCode$' .
 if [ $fast = 1 ]; then
 	skip "linux/386, windows and darwin builds, fmacheck, recursion audit, race, PDFium, oracle, upstream vectors, sweeps, corpora, heavy security tests" "-fast"
 else

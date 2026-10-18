@@ -162,7 +162,7 @@ func TestUpstreamD3Interpolate(t *testing.T) {
 		}
 		r.Check(c, upstream.FromValue(unit(upstream.Number(c.Args[0]))), false)
 	}
-	r.Done(200)
+	r.Done(242)
 }
 
 func floatsOf(v any) []float64 {
@@ -528,7 +528,7 @@ func TestUpstreamD3Scale(t *testing.T) {
 			r.Skip("unmapped method " + c.Method)
 		}
 	}
-	r.Done(836)
+	r.Done(1809)
 }
 
 func argOf(args []any, i int) any {
@@ -598,5 +598,5 @@ func TestUpstreamD3ArrayTicks(t *testing.T) {
 			r.Skip("d3.nice is not used")
 		}
 	}
-	r.Done(220) // 223 since the unbounded, unused d3.nice was removed (29 vectors)
+	r.Done(223) // the 29 d3.nice vectors are not replayed: the unbounded, unused d3.nice was removed
 }

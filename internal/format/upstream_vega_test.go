@@ -210,5 +210,5 @@ func TestUpstreamVegaTime(t *testing.T) {
 			r.Skip("unmapped " + c.Fn)
 		}
 	}
-	r.Done(450)
+	r.Done(707)
 }

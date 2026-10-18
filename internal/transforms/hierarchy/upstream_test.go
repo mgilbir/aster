@@ -50,5 +50,5 @@ func TestUpstreamD3HierarchyPackSiblings(t *testing.T) {
 		}
 		r.Check(c, out, false)
 	}
-	r.Done(4000)
+	r.Done(5289)
 }
