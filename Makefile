@@ -9,8 +9,10 @@ build:
 test:
 	go test -short ./...
 
-# The full suite; tests that compare with upstream need the node oracle:
+# The full suite; tests that compare with upstream need the node oracle, the
+# recorded upstream vectors and the external corpora, and skip without them:
 # (cd testdata/oracle-node && npm ci) && (cd testdata/oracle-node-vl5 && npm ci)
+# scripts/record-upstream-vectors.sh && scripts/fetch-corpora.sh
 test-all:
 	go test ./...
 

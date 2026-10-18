@@ -43,10 +43,11 @@ const (
 	compareLite                     // a Vega-Lite case: compare the SVG and, as a second status, the compiled Vega
 )
 
+// sweep is one sweep; its floor, the least number of cases the generator
+// must produce, is sweepFloors' entry for the test that runs it.
 type sweep struct {
-	name  string
-	mode  sweepMode
-	floor int // the generator must produce at least this many cases
+	name string
+	mode sweepMode
 }
 
 // sweepCase is one generated case.
@@ -93,9 +94,14 @@ func runSweep(t *testing.T, sw sweep) {
 	if err := json.Unmarshal(gen.Data, &out); err != nil {
 		t.Fatalf("generator output: %v", err)
 	}
-	if len(out.Cases) < sw.floor {
-		t.Fatalf("%s generated %d cases, fewer than its floor of %d", sw.name, len(out.Cases), sw.floor)
+	floor, ok := sweepFloors[t.Name()]
+	if !ok {
+		t.Fatalf("sweepFloors has no floor for %s", t.Name())
 	}
+	if len(out.Cases) < floor {
+		t.Fatalf("%s generated %d cases, fewer than its floor of %d", sw.name, len(out.Cases), floor)
+	}
+	checkSweepDocCases(t, len(out.Cases))
 	for i := range out.Cases {
 		if out.Cases[i].SpecText != "" {
 			out.Cases[i].Spec = json.RawMessage(out.Cases[i].SpecText)

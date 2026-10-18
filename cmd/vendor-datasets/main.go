@@ -32,7 +32,11 @@ const (
 	maxFileBytes = 64 << 20
 )
 
-// dataFiles lists the 43 data files referenced by vega-lite v6.4.0 example specs.
+// examplesDir holds the Vega-Lite example specs whose data dataFiles is.
+const examplesDir = "testdata/vega-lite/v6.4.3/specs"
+
+// dataFiles lists the data files the example specs under examplesDir name by
+// a relative URL (TestDataFilesAreTheExamples keeps it so).
 var dataFiles = []string{
 	"data/airports.csv",
 	"data/anscombe.json",
@@ -82,18 +86,23 @@ var dataFiles = []string{
 func main() {
 	log.SetFlags(0)
 	log.SetPrefix("vendor-datasets: ")
-
-	dataDir := filepath.Join(outDir, "data")
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
-		log.Fatalf("creating output dir: %v", err)
+	if len(os.Args) > 1 {
+		log.Fatalf("unexpected argument %q: the command takes none (run it from the repository root)", os.Args[1])
 	}
-
-	manifest, err := readManifest(filepath.Join(outDir, manifestFile))
-	if err != nil {
+	if err := run(outDir, download); err != nil {
 		log.Fatal(err)
+	}
+}
+
+// run fetches every data file with get into dir, verified against dir's
+// manifest.
+func run(dir string, get func(url string) ([]byte, error)) error {
+	manifest, err := readManifest(filepath.Join(dir, manifestFile))
+	if err != nil {
+		return err
 	}
 	if err := checkListed(manifest); err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	log.Printf("downloading %d data files from vega-datasets@%s...", len(dataFiles), vegaDatasetsVersion)
@@ -103,20 +112,25 @@ func main() {
 	got := make(map[string][]byte, len(dataFiles))
 	for _, file := range dataFiles {
 		url := fmt.Sprintf("%s/vega-datasets@%s/%s", jsdelivrBase, vegaDatasetsVersion, file)
-		data, err := download(url)
+		data, err := get(url)
 		if err != nil {
-			log.Fatalf("downloading %s: %v", file, err)
+			return fmt.Errorf("downloading %s: %w", file, err)
 		}
 		if err := verify(manifest, file, data); err != nil {
-			log.Fatal(err)
+			return err
 		}
 		got[file] = data
 		log.Printf("  %s (%d bytes, verified)", file, len(data))
 	}
+	// Only now is anything written: run outside the repository root, the
+	// manifest is missing and the command fails having made nothing.
+	if err := os.MkdirAll(filepath.Join(dir, "data"), 0o755); err != nil {
+		return fmt.Errorf("creating output dir: %w", err)
+	}
 	for _, file := range dataFiles {
-		dest := filepath.Join(outDir, file)
+		dest := filepath.Join(dir, file)
 		if err := os.WriteFile(dest, got[file], 0o644); err != nil {
-			log.Fatalf("writing %s: %v", dest, err)
+			return fmt.Errorf("writing %s: %w", dest, err)
 		}
 	}
 
@@ -125,12 +139,13 @@ func main() {
 Source: https://github.com/vega/vega-datasets
 License: BSD-3-Clause (see package.json in the source repository)
 `, vegaDatasetsVersion)
-	licensePath := filepath.Join(outDir, "LICENSE")
+	licensePath := filepath.Join(dir, "LICENSE")
 	if err := os.WriteFile(licensePath, []byte(licenseText), 0o644); err != nil {
-		log.Fatalf("writing LICENSE: %v", err)
+		return fmt.Errorf("writing LICENSE: %w", err)
 	}
 
-	log.Printf("done: %d data files + LICENSE written to %s", len(dataFiles), outDir)
+	log.Printf("done: %d data files + LICENSE written to %s", len(dataFiles), dir)
+	return nil
 }
 
 // httpClient bounds each download so a stalled CDN connection cannot hang the

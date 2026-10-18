@@ -158,18 +158,18 @@ func (l *FileLoader) Load(ctx context.Context, uri string) ([]byte, error) {
 
 	// Stat before opening: opening a FIFO would block until a writer shows up.
 	if fi, err := root.Stat(uri); err != nil {
-		return nil, fmt.Errorf("aster: FileLoader failed to read %q: %w", uri, err)
+		return nil, &readError{uri: uri, err: err}
 	} else if !fi.Mode().IsRegular() {
 		return nil, fmt.Errorf("aster: FileLoader %q is not a regular file", uri)
 	}
 	f, err := root.Open(uri)
 	if err != nil {
-		return nil, fmt.Errorf("aster: FileLoader failed to read %q: %w", uri, err)
+		return nil, &readError{uri: uri, err: err}
 	}
 	defer func() { _ = f.Close() }()
 	fi, err := f.Stat()
 	if err != nil {
-		return nil, fmt.Errorf("aster: FileLoader failed to read %q: %w", uri, err)
+		return nil, &readError{uri: uri, err: err}
 	}
 	if !fi.Mode().IsRegular() {
 		return nil, fmt.Errorf("aster: FileLoader %q is not a regular file", uri)
@@ -184,13 +184,36 @@ func (l *FileLoader) Load(ctx context.Context, uri string) ([]byte, error) {
 	}
 	data, err := io.ReadAll(r)
 	if err != nil {
-		return nil, fmt.Errorf("aster: FileLoader failed to read %q: %w", uri, err)
+		return nil, &readError{uri: uri, err: err}
 	}
 	if max >= 0 && int64(len(data)) > max {
 		return nil, fmt.Errorf("aster: file %q exceeds the %d bytes of %s: %w", uri, max, capName, budget.ErrLimit)
 	}
 	return data, nil
 }
+
+// readError is a FileLoader's failure to read uri. It says that the URI
+// resolves against BaseDir, not against the spec's own directory, and gives
+// the cause without os.Root's operation name ("statat data/cars.json: no
+// such file or directory"); the *fs.PathError still unwraps (C70, audit
+// 2026-10-18). It does not name BaseDir: the error reaches whoever supplied
+// the URI, who is not told where the server keeps its files (a caller that
+// owns the directory, as the CLI, names it; see TestFileLoaderErrorsDoNotLeakPaths).
+type readError struct {
+	uri string
+	err error
+}
+
+func (e *readError) Error() string {
+	cause := e.err
+	var pe *fs.PathError
+	if errors.As(cause, &pe) {
+		cause = pe.Err
+	}
+	return fmt.Sprintf("aster: FileLoader failed to read %q, relative to its BaseDir: %v", e.uri, cause)
+}
+
+func (e *readError) Unwrap() error { return e.err }
 
 // Close releases the OS-level directory handle. Safe to call multiple times.
 func (l *FileLoader) Close() error {
@@ -236,7 +259,9 @@ func (l *StaticLoader) Load(_ context.Context, _ string) ([]byte, error) {
 // Sanitize(u)), as the loaders of this package all do; a child of your own
 // should too.
 //
-// Order matters: a permissive child shadows every child after it. For
+// When no child answers, the error is every child's failure, in order
+// (childrenFailed). Order matters: a permissive child shadows every child
+// after it. For
 // example a StaticLoader (whose Sanitize accepts any URI) placed first will
 // answer every request, so put the most specific loaders first and broad
 // catch-alls last.
@@ -250,26 +275,23 @@ func NewFallbackLoader(loaders ...Loader) *FallbackLoader {
 }
 
 func (l *FallbackLoader) Sanitize(ctx context.Context, uri string) (string, error) {
-	var lastErr error
+	var errs []error
 	for _, child := range l.Loaders {
 		s, err := child.Sanitize(ctx, uri)
 		if err == nil {
 			return s, nil
 		}
-		lastErr = err
+		errs = append(errs, err)
 	}
-	if lastErr != nil {
-		return "", lastErr
-	}
-	return "", fmt.Errorf("aster: FallbackLoader has no child loaders")
+	return "", childrenFailed(errs)
 }
 
 func (l *FallbackLoader) Load(ctx context.Context, uri string) ([]byte, error) {
-	var lastErr error
+	var errs []error
 	for _, child := range l.Loaders {
 		sanitized, err := child.Sanitize(ctx, uri)
 		if err != nil {
-			lastErr = err
+			errs = append(errs, err)
 			continue
 		}
 		data, err := child.Load(ctx, sanitized)
@@ -279,16 +301,46 @@ func (l *FallbackLoader) Load(ctx context.Context, uri string) ([]byte, error) {
 			if errors.Is(err, budget.ErrLimit) || ctx.Err() != nil {
 				return nil, err
 			}
-			lastErr = err
+			errs = append(errs, err)
 			continue
 		}
 		return data, nil
 	}
-	if lastErr != nil {
-		return nil, lastErr
-	}
-	return nil, fmt.Errorf("aster: FallbackLoader has no child loaders")
+	return nil, childrenFailed(errs)
 }
+
+// childrenFailed is a FallbackLoader's error when no child answered: every
+// child's failure, in order, so that a file missing from a FileLoader is not
+// hidden behind the refusal of the HTTPLoader after it (C70, audit
+// 2026-10-18: only the last was reported). One child's failure is returned
+// as it is.
+func childrenFailed(errs []error) error {
+	switch len(errs) {
+	case 0:
+		return fmt.Errorf("aster: FallbackLoader has no child loaders")
+	case 1:
+		return errs[0]
+	}
+	return &fallbackError{errs: errs}
+}
+
+// fallbackError is the failures of a FallbackLoader's children, each still
+// matched by errors.Is and errors.As.
+type fallbackError struct{ errs []error }
+
+func (e *fallbackError) Error() string {
+	var b strings.Builder
+	b.WriteString("aster: no loader answered: ")
+	for i, err := range e.errs {
+		if i > 0 {
+			b.WriteString("; then ")
+		}
+		b.WriteString(strings.TrimPrefix(err.Error(), "aster: "))
+	}
+	return b.String()
+}
+
+func (e *fallbackError) Unwrap() []error { return e.errs }
 
 // Close closes any children that implement io.Closer.
 func (l *FallbackLoader) Close() error {

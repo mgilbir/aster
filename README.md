@@ -39,6 +39,7 @@ aster pdf -i chart.vl.json -o chart.pdf
 cat chart.vl.json | aster svg > chart.svg
 aster compile -i chart.vl.json -o chart.vg.json      # Vega-Lite → Vega
 aster svg -i chart.vl.json -allow-domain cdn.jsdelivr.net   # let it load data
+aster version
 ```
 
 Four things to know before the first real chart:

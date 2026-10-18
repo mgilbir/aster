@@ -6,6 +6,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -70,6 +71,11 @@ func main() {
 		report     = flag.Bool("report", false, "merge the JSON files given as arguments into a markdown report")
 	)
 	flag.Parse()
+	if !*report && flag.NArg() > 0 {
+		// Only -report takes arguments, and the flag package stops at the
+		// first that is not a flag: the flags after it would be ignored.
+		fatal(fmt.Errorf("unexpected argument %q (only -report takes files)", flag.Arg(0)))
+	}
 	if *report {
 		if err := writeReport(os.Stdout, flag.Args()); err != nil {
 			fatal(err)
@@ -90,7 +96,10 @@ func main() {
 			fatal(fmt.Errorf("unknown stage %q", s))
 		}
 	}
-	loader := newMemLoader(root)
+	loader, err := newMemLoader(root)
+	if err != nil {
+		fatal(err)
+	}
 
 	bar, err := os.ReadFile(filepath.Join(root, "testdata/vega-lite/v6.4.3/specs/bar.vl.json"))
 	if err != nil {
@@ -144,17 +153,22 @@ func main() {
 	}
 	rep.RSSMB = peakRSSMB()
 
-	b, err := json.MarshalIndent(rep, "", " ")
-	if err != nil {
+	// Spec names and error texts are written as they are, not with <, > and
+	// & escaped for HTML, as bench.mjs's JSON.stringify writes them.
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", " ")
+	if err := enc.Encode(rep); err != nil {
 		fatal(err)
 	}
 	if *out == "" {
-		if _, err := os.Stdout.Write(append(b, '\n')); err != nil {
+		if _, err := os.Stdout.Write(b.Bytes()); err != nil {
 			fatal(err)
 		}
 		return
 	}
-	if err := os.WriteFile(*out, append(b, '\n'), 0o644); err != nil {
+	if err := os.WriteFile(*out, b.Bytes(), 0o644); err != nil {
 		fatal(err)
 	}
 }
@@ -242,28 +256,48 @@ func loadSpecs(root, filter string) ([]spec, error) {
 }
 
 // memLoader serves the vega-datasets checkout (and testdata/data)
-// from memory, mapping the CDN URLs examples use onto the local copy, so the
-// timings measure the engines and not the file system. bench.mjs does the
-// same.
+// from memory, mapping the URLs that serve copies of it onto the local copy,
+// so the timings measure the engines and not the file system. bench.mjs does
+// the same.
 type memLoader struct {
 	dirs []string
+	// urls are the URL forms that serve vega-datasets' data/ directory, as
+	// testdata/oracle-node/dataset-urls.json lists them for the oracle and the
+	// corpus comparison: the first group is the path under the checkout.
+	urls []*regexp.Regexp
 	mu   sync.Mutex
 	data map[string][]byte
 }
 
-func newMemLoader(root string) *memLoader {
-	return &memLoader{
+func newMemLoader(root string) (*memLoader, error) {
+	b, err := os.ReadFile(filepath.Join(root, "testdata/oracle-node/dataset-urls.json"))
+	if err != nil {
+		return nil, err
+	}
+	var f struct{ Patterns []string }
+	if err := json.Unmarshal(b, &f); err != nil {
+		return nil, fmt.Errorf("dataset-urls.json: %w", err)
+	}
+	m := &memLoader{
 		dirs: []string{filepath.Join(root, "testdata/vega-datasets"), filepath.Join(root, "testdata/data")},
 		data: map[string][]byte{},
 	}
+	for _, p := range f.Patterns {
+		re, err := regexp.Compile(p)
+		if err != nil {
+			return nil, fmt.Errorf("dataset-urls.json: %w", err)
+		}
+		m.urls = append(m.urls, re)
+	}
+	return m, nil
 }
-
-var cdn = regexp.MustCompile(`^https?://(?:cdn\.jsdelivr\.net/npm/vega-datasets@[^/]+|raw\.githubusercontent\.com/vega/vega-datasets/[^/]+|vega\.github\.io/vega-datasets)/(data/.+)$`)
 
 // Sanitize also serves hyperlink hrefs, so only Load rejects non-local URIs.
 func (m *memLoader) Sanitize(_ context.Context, uri string) (string, error) {
-	if s := cdn.FindStringSubmatch(uri); s != nil {
-		uri = s[1]
+	for _, re := range m.urls {
+		if s := re.FindStringSubmatch(uri); s != nil {
+			return s[1], nil
+		}
 	}
 	return uri, nil
 }

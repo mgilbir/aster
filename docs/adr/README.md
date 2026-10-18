@@ -20,3 +20,4 @@ Decisions whose reason is not visible in the code. Each says what was decided, w
 | [0014](0014-library-memory-bounded-by-ledger-room.md) | Memory a library allocates as it works, unsized beforehand, is bounded by the ledger's room rather than charged | accepted, 2026-10-13 |
 | [0015](0015-filters-follow-the-specification.md) | PNG filters follow the Filter Effects spec where resvg departs from it | accepted, 2026-10-14 |
 | [0016](0016-custom-projections.md) | Custom projections are a raw projection and its parameters, per Converter | accepted, 2026-10-14 |
+| [0017](0017-cli-input-is-a-flag.md) | The CLI's input is a flag, and nothing is read implicitly from a terminal | accepted, 2026-10-18 |

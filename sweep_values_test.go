@@ -6,5 +6,5 @@ import "testing"
 // chart per (journey, column of unusual values). See
 // testdata/oracle-node/sweeps/values.mjs for the columns and the journeys.
 func TestSweepValues(t *testing.T) {
-	runSweep(t, sweep{name: "values", mode: compareSVG, floor: 500})
+	runSweep(t, sweep{name: "values", mode: compareSVG})
 }

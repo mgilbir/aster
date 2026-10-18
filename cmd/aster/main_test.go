@@ -231,3 +231,105 @@ func TestRunSVGFailedLoad(t *testing.T) {
 		t.Fatalf("-lenient: %v", err)
 	}
 }
+
+// compile writes the compiled Vega as the library and upstream's
+// JSON.stringify do, without escaping <, > and & for HTML (C69).
+func TestCompileDoesNotEscapeHTML(t *testing.T) {
+	dir := t.TempDir()
+	in := filepath.Join(dir, "t.vl.json")
+	if err := os.WriteFile(in, []byte(`{"title":"a<b & c>d","data":{"values":[{"a":1}]},"mark":"bar","encoding":{"x":{"field":"a","type":"quantitative"}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "t.vg.json")
+	if err := runCompile([]string{"-i", in, "-o", out}); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(b, []byte(`"a<b & c>d"`)) || bytes.Contains(b, []byte(`\u00`)) {
+		t.Errorf("the title is not written as given:\n%s", b)
+	}
+}
+
+// compile -timezone is the zone of a selection's DateTime initial value,
+// which Vega-Lite compiles to a timestamp (C144: the flag is kept for that).
+func TestCompileTimezone(t *testing.T) {
+	dir := t.TempDir()
+	in := filepath.Join(dir, "t.vl.json")
+	if err := os.WriteFile(in, []byte(`{"data":{"values":[{"d":"2000-01-01","v":1}]},
+	  "params":[{"name":"s","select":{"type":"point","fields":["d"]},"value":[{"d":{"year":2000,"month":1,"date":1}}]}],
+	  "mark":"point","encoding":{"x":{"field":"d","type":"temporal"},"y":{"field":"v","type":"quantitative"}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	compile := func(args ...string) string {
+		out := filepath.Join(dir, "out.json")
+		if err := runCompile(append([]string{"-i", in, "-o", out}, args...)); err != nil {
+			t.Fatal(err)
+		}
+		b, _ := os.ReadFile(out)
+		return string(b)
+	}
+	utc, ny := compile(), compile("-timezone", "America/New_York")
+	if !strings.Contains(utc, "946684800000") || !strings.Contains(ny, "946702800000") {
+		t.Errorf("the initial value is not the zone's midnight:\nUTC: %.400s\nNew York: %.400s", utc, ny)
+	}
+}
+
+// -default-font (and its serif and monospace forms) set the family the
+// generic families resolve to, so a font registered with -font draws a spec
+// that names none (C68: -font alone changed nothing for such a spec).
+func TestDefaultFontFlags(t *testing.T) {
+	dir := t.TempDir()
+	in := filepath.Join(dir, "t.vl.json")
+	if err := os.WriteFile(in, []byte(`{"data":{"values":[{"a":"Wide labels","b":1}]},"mark":"bar","encoding":{"x":{"field":"a","type":"nominal"},"y":{"field":"b","type":"quantitative"}}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	font := "../../internal/fonts/dejavu/DejaVuSans.ttf"
+	mono := "../../internal/fonts/dejavu/DejaVuSansMono.ttf"
+	svg := func(args ...string) string {
+		out := filepath.Join(dir, "out.svg")
+		if err := runSVG(append([]string{"-i", in, "-o", out}, args...)); err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+		b, _ := os.ReadFile(out)
+		return string(b)
+	}
+	plain, registered := svg(), svg("-font", "Dv="+font)
+	if plain != registered {
+		t.Fatal("-font alone changed a spec that names no family; the premise of the test is gone")
+	}
+	if svg("-font", "Dv="+font, "-default-font", "Dv") == plain {
+		t.Error("-default-font did not change the sans-serif text")
+	}
+	for _, flag := range []string{"-default-serif-font", "-default-monospace-font"} {
+		if err := runSVG([]string{"-i", in, "-o", filepath.Join(dir, "x.svg"), "-font", "Dm=" + mono, flag, "Dm"}); err != nil {
+			t.Errorf("%s: %v", flag, err)
+		}
+		if err := runSVG([]string{"-i", in, "-o", filepath.Join(dir, "x.svg"), flag, "Nope"}); err == nil {
+			t.Errorf("%s Nope: no error for a family with no font", flag)
+		}
+	}
+}
+
+// A relative URL no -allow-file directory has names the directories it was
+// looked for in, and with HTTP loading too, every loader's failure, not only
+// the last's (C70, audit 2026-10-18).
+func TestFailedFileLoadSaysWhereItLooked(t *testing.T) {
+	dir := t.TempDir()
+	spec := filepath.Join(dir, "spec.vl.json")
+	if err := os.WriteFile(spec, []byte(`{"data":{"url":"data/missing.json"},"mark":"point"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a, b := t.TempDir(), t.TempDir()
+	out := filepath.Join(dir, "out.svg")
+	err := runSVG([]string{"-i", spec, "-o", out, "-allow-file", a, "-allow-file", b})
+	if err == nil || !strings.Contains(err.Error(), a) || !strings.Contains(err.Error(), b) || !strings.Contains(err.Error(), "not") {
+		t.Errorf("two -allow-file: %v, want both directories named", err)
+	}
+	err = runSVG([]string{"-i", spec, "-o", out, "-allow-file", a, "-base-url", "http://127.0.0.1:1/"})
+	if err == nil || !strings.Contains(err.Error(), "FileLoader failed to read") || !strings.Contains(err.Error(), "private/loopback") || !strings.Contains(err.Error(), a) {
+		t.Errorf("-allow-file and -base-url: %v, want the file miss, the directory and the HTTP refusal", err)
+	}
+}

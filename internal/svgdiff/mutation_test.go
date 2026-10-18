@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -318,6 +319,19 @@ func TestMutationsAreReported(t *testing.T) {
 		t.Errorf("only %d mutation kinds exercised, fewer than %d", len(kinds), floor)
 	}
 	t.Logf("%d mutation kinds over %d documents, every one reported", len(kinds), len(docs))
+	// docs/testing.md states both counts; they are pinned here, where they
+	// are known (C61, audit 2026-10-18).
+	doc, err := os.ReadFile("../../docs/testing.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := regexp.MustCompile(`Each of ([\d,]+) kinds of change over ([\d,]+) documents`).FindSubmatch(doc)
+	if m == nil {
+		t.Fatal("docs/testing.md no longer states the mutation counts; reword the test with the doc")
+	}
+	if want := fmt.Sprintf("%d %d", len(kinds), len(docs)); strings.ReplaceAll(string(m[1])+" "+string(m[2]), ",", "") != want {
+		t.Errorf("docs/testing.md states %s kinds over %s documents, the test exercises %d over %d", m[1], m[2], len(kinds), len(docs))
+	}
 }
 
 // TestEquivalences pins the differences svgdiff deliberately ignores, each of

@@ -93,7 +93,9 @@ type (
 	// through the children again, Sanitize then Load: so every child's
 	// Sanitize must return its own answer unchanged when given it, as the
 	// loaders of this package do. A limit (ErrLimit) from a child ends the
-	// search. Close closes every child that implements io.Closer.
+	// search. When no child answers, the error is every child's failure, in
+	// order, each matched by errors.Is and errors.As (one child's is returned
+	// as it is). Close closes every child that implements io.Closer.
 	FallbackLoader = loader.FallbackLoader
 )
 

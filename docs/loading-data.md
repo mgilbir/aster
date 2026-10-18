@@ -9,7 +9,8 @@ c, err := aster.New(aster.WithLoader(aster.NewHTTPLoader(nil)))
 // ...only to these hosts, with relative URLs resolved against a base:
 c, err := aster.New(aster.WithLoader(&aster.HTTPLoader{
     AllowedDomains: []string{"cdn.jsdelivr.net"},
-    BaseURL:        "https://cdn.jsdelivr.net/npm/vega-datasets@3.2.1/data/",
+    // The package root: the Vega-Lite examples' "data/cars.json" is under it.
+    BaseURL:        "https://cdn.jsdelivr.net/npm/vega-datasets@3.2.1/",
 }))
 
 // Files under a directory (relative paths only, contained with os.Root):
@@ -34,7 +35,7 @@ Inline data (`"values"`) and embedded PNG, JPEG and GIF images (`data:image/png;
 | `HTTPLoader` / `NewHTTPLoader(client)` | absolute `http`/`https` URLs, and relative ones when `BaseURL` is set | public addresses only unless `AllowPrivateNetworks`; see below |
 | `FileLoader{BaseDir}` / `NewFileLoader(dir)` | relative paths inside `BaseDir` | `NewFileLoader` opens the directory at once (error if missing); the zero-value struct opens it on first use |
 | `&StaticLoader{Value}` | every URI | returns `Value` as JSON whatever the URI; for tests |
-| `FallbackLoader` / `NewFallbackLoader(...)` | what any child accepts | tries children in order; the first whose `Sanitize` accepts *and* whose `Load` succeeds answers. Its `Sanitize` returns what the first accepting child made of the URI (an `HTTPLoader`'s `BaseURL` resolved), and its `Load` routes that through the children again, so each child's `Sanitize` must be idempotent (see below) |
+| `FallbackLoader` / `NewFallbackLoader(...)` | what any child accepts | tries children in order; the first whose `Sanitize` accepts *and* whose `Load` succeeds answers; when none does, the error is every child's failure, in order. Its `Sanitize` returns what the first accepting child made of the URI (an `HTTPLoader`'s `BaseURL` resolved), and its `Load` routes that through the children again, so each child's `Sanitize` must be idempotent (see below) |
 
 ### HTTPLoader fields
 
@@ -42,7 +43,7 @@ Inline data (`"values"`) and embedded PNG, JPEG and GIF images (`data:image/png;
 |---|---|---|
 | `Client *http.Client` | a client of the package's own (bounded connect, TLS and header waits; honours `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY`) | `http.DefaultClient` selects the same |
 | `AllowedDomains []string` | empty: every public host | exact host names, case-insensitive, one trailing dot ignored, ASCII only (write IDNs in punycode) |
-| `BaseURL string` | empty: only absolute URLs | relative URIs are resolved against it |
+| `BaseURL string` | empty: only absolute URLs | relative URIs are resolved against it, as a browser resolves a link (a directory ends in `/`) |
 | `MaxResponseBytes int64` | 0 = 64 MiB | body cap after decompression; negative = none. Over the cap: `ErrLimit` |
 | `Timeout time.Duration` | 0 = 60 s | one request, redirects and body included; negative = none |
 | `AllowPrivateNetworks bool` | false | let requests reach loopback, link-local, private, CGNAT, multicast and unspecified addresses |
