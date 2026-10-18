@@ -661,6 +661,9 @@ func (c *Converter) svgToPNG(ctx context.Context, svg string, opts []PNGOption) 
 	if !(cfg.scale > 0) || math.IsInf(cfg.scale, 1) {
 		return nil, fmt.Errorf("aster: invalid PNG scale %v (must be a positive, finite number)", cfg.scale)
 	}
+	if cfg.quantizeErr != nil {
+		return nil, cfg.quantizeErr
+	}
 	img, out, err := c.rasterize(ctx, svg, cfg.scale)
 	if err != nil {
 		return nil, err
@@ -689,8 +692,19 @@ func (c *Converter) rasterize(ctx context.Context, svg string, scale float64) (*
 	sh = raster.BoundShaper(sh, text.ShapingBudgetFrom(ctx))
 	var img *image.NRGBA
 	out, err := timed(ctx, "png", func() ([]byte, error) {
+		lim := c.lim.rasterAt(scale)
+		// The copy of the input Render takes is charged first, and an input
+		// past the bound is refused before it is made (C8).
+		if m := lim.WithDefaults().MaxInputBytes; len(svg) > m {
+			return nil, fmt.Errorf("raster: SVG input is %d bytes, limit is %d: %w", len(svg), m, ErrLimit)
+		}
+		l := budget.LedgerFrom(ctx)
+		if err := l.Alloc(int64(len(svg))); err != nil {
+			return nil, err
+		}
+		defer l.Free(int64(len(svg)))
 		var err error
-		img, err = raster.Render([]byte(svg), raster.Options{Scale: scale, Shaper: sh, Context: ctx, Limits: c.lim.rasterAt(scale), Images: imagesFrom(ctx).load, ImageError: imagesFrom(ctx).imageError(ctx)})
+		img, err = raster.Render([]byte(svg), raster.Options{Scale: scale, Shaper: sh, Context: ctx, Limits: lim, Images: imagesFrom(ctx).load, ImageError: imagesFrom(ctx).imageError(ctx)})
 		if err != nil {
 			return nil, err
 		}

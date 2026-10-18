@@ -2,12 +2,60 @@ package aster
 
 import (
 	"bytes"
+	"context"
 	"image"
 	"image/color"
+	"image/draw"
 	"image/png"
 	"math"
+	"strings"
 	"testing"
+
+	"github.com/mgilbir/aster/internal/pngopt"
 )
+
+// quantizePNG and quantizeOrRecodePNG run the entry points the API calls
+// (pngopt.QuantizeImage, under QuantizeOrRecodeImage) on a PNG's image, as
+// the API runs them on the image it drew (C140: they were aliases, in a
+// library file the library did not use, of the byte-slice forms, a different
+// entry point). Input that does not decode is returned as it is.
+func quantizePNG(data []byte, maxColors int) ([]byte, bool, string) {
+	img, ok := testNRGBA(data)
+	if !ok {
+		return data, false, "decode failed"
+	}
+	out, ok, reason, err := pngopt.QuantizeImage(context.Background(), img, data, maxColors)
+	if err != nil {
+		return data, false, err.Error()
+	}
+	return out, ok, reason
+}
+
+func quantizeOrRecodePNG(data []byte, maxColors int) []byte {
+	img, ok := testNRGBA(data)
+	if !ok {
+		return data
+	}
+	out, err := pngopt.QuantizeOrRecodeImage(context.Background(), img, data, maxColors)
+	if err != nil {
+		return data
+	}
+	return out
+}
+
+// testNRGBA is the image a PNG decodes to, as the rasterizer holds one.
+func testNRGBA(data []byte) (*image.NRGBA, bool) {
+	src, err := png.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, false
+	}
+	if n, ok := src.(*image.NRGBA); ok {
+		return n, true
+	}
+	n := image.NewNRGBA(src.Bounds())
+	draw.Draw(n, n.Bounds(), src, src.Bounds().Min, draw.Src)
+	return n, true
+}
 
 // syntheticChart builds a chart-like NRGBA test image: flat panels and bars,
 // antialiased-looking edges with per-pixel variation, and a noisy strip
@@ -284,13 +332,12 @@ func TestQuantizeRejectsPhotographicContent(t *testing.T) {
 	}
 }
 
-// The option clamps at configuration time: the render path gates on
-// quantizeColors > 0, so an unclamped non-positive value would silently
-// disable quantization instead of honoring the documented 2..256 contract.
+// The option clamps a count of colours at configuration time to 2..256,
+// and refuses one of zero or less, which is no count: the render path gates
+// on quantizeColors > 0, so a non-positive value would silently disable
+// quantization, and clamping it to two colours replaced it silently.
 func TestQuantizeOptionClamps(t *testing.T) {
 	cases := []struct{ in, want int }{
-		{-5, 2},
-		{0, 2},
 		{1, 2},
 		{2, 2},
 		{128, 128},
@@ -300,8 +347,22 @@ func TestQuantizeOptionClamps(t *testing.T) {
 	for _, tc := range cases {
 		cfg := defaultPNGConfig()
 		WithQuantizePNG(tc.in).applyPNG(cfg)
-		if cfg.quantizeColors != tc.want {
-			t.Errorf("WithQuantizePNG(%d): quantizeColors = %d, want %d", tc.in, cfg.quantizeColors, tc.want)
+		if cfg.quantizeColors != tc.want || cfg.quantizeErr != nil {
+			t.Errorf("WithQuantizePNG(%d): quantizeColors = %d (err %v), want %d", tc.in, cfg.quantizeColors, cfg.quantizeErr, tc.want)
 		}
+	}
+	c, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	svg := `<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"><rect width="2" height="4" fill="red"/></svg>`
+	for _, n := range []int{0, -5} {
+		if _, err := c.SVGToPNG(svg, WithQuantizePNG(n)); err == nil || !strings.Contains(err.Error(), "WithQuantizePNG") {
+			t.Errorf("WithQuantizePNG(%d): err = %v, want the option refused", n, err)
+		}
+	}
+	if _, err := c.SVGToPNG(svg, WithQuantizePNG(0), WithQuantizePNG(16)); err != nil {
+		t.Errorf("a later valid WithQuantizePNG replaces an invalid one: %v", err)
 	}
 }

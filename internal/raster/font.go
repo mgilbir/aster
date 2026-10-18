@@ -72,6 +72,54 @@ type textShaper struct {
 	m     *text.Measurer
 	known map[string]bool // lower-case family names that exist
 	faces *faceCache      // shared with the shaper's bound views
+	// fams is the font-family list of the last request, as the CSS it
+	// becomes: a <text> shapes each run with its element's list, which
+	// is the document's to make long (C23's class).
+	fams struct {
+		sync.Mutex
+		list []string // the request's (immutable once parsed: st.families)
+		css  string
+	}
+}
+
+// maxShapeFamilies is how many families of a list the CSS a run is shaped
+// with names: the text package considers no more (text.maxFamilies), so
+// the rest change nothing but the work, done again for every run.
+const maxShapeFamilies = 32
+
+// familiesCSS is the font-family part of the CSS that shapes a run in
+// families: the families quoted, the first maxShapeFamilies of them, or
+// serif when none of the whole list names a registered family (resvg's
+// fallback). A list naming a registered family only past those keeps one
+// such family, so it does not fall back to serif: the text package, which
+// considers the first ones, falls back as it did when given all of them.
+func (s *textShaper) familiesCSS(families []string) string {
+	s.fams.Lock()
+	defer s.fams.Unlock()
+	if len(families) > 0 && len(families) == len(s.fams.list) && &families[0] == &s.fams.list[0] {
+		return s.fams.css
+	}
+	fams := make([]string, 0, min(len(families), maxShapeFamilies+1))
+	found := false
+	for _, f := range families {
+		f = familyUnquote.Replace(f)
+		if f = strings.TrimSpace(f); f == "" {
+			continue
+		}
+		known := s.known == nil || s.known[strings.ToLower(f)]
+		if len(fams) < maxShapeFamilies || (known && !found) {
+			fams = append(fams, "'"+f+"'")
+		}
+		found = found || known
+		if found && len(fams) >= maxShapeFamilies {
+			break
+		}
+	}
+	if !found {
+		fams = []string{"serif"}
+	}
+	s.fams.list, s.fams.css = families, strings.Join(fams, ",")
+	return s.fams.css
 }
 
 // faceCache maps the measurer's faces to the Face each is drawn through.
@@ -164,21 +212,7 @@ func (s *textShaper) Shape(txt string, req FontRequest, size float64) []ShapedGl
 	if size <= 0 || txt == "" {
 		return nil
 	}
-	fams := make([]string, 0, len(req.Families))
-	found := false
-	for _, f := range req.Families {
-		f = familyUnquote.Replace(f)
-		if f = strings.TrimSpace(f); f == "" {
-			continue
-		}
-		fams = append(fams, "'"+f+"'")
-		if s.known == nil || s.known[strings.ToLower(f)] {
-			found = true
-		}
-	}
-	if !found {
-		fams = []string{"serif"}
-	}
+	families := s.familiesCSS(req.Families)
 	w := (req.Weight + 50) / 100 * 100
 	if w < 100 {
 		w = 100
@@ -189,7 +223,7 @@ func (s *textShaper) Shape(txt string, req FontRequest, size float64) []ShapedGl
 	if req.Italic {
 		css = "italic "
 	}
-	css += strconv.Itoa(w) + " " + strconv.FormatFloat(size, 'f', -1, 64) + "px " + strings.Join(fams, ",")
+	css += strconv.Itoa(w) + " " + strconv.FormatFloat(size, 'f', -1, 64) + "px " + families
 	runs, _ := s.m.ShapeText(txt, css)
 	n := 0
 	for _, r := range runs {

@@ -168,6 +168,11 @@ func LimitsForTest(n uint64) map[string]int64 {
 		"rasterizer pixels per canvas (PNG)":                                  int64(r.MaxPixels),
 		"rasterizer path points held at once (PNG)":                           int64(r.MaxPathSegments),
 		"pixels of one image (SVG, PNG and PDF output)":                       int64((&Converter{lim: c}).imagePixels()),
+		"SVG input to `SVGToPNG`, bytes":                                      int64(r.MaxInputBytes),
+		"SVG input to `SVGToPNG`, elements (a run of text is one)":            int64(r.MaxElements),
+		"style sheets of SVG input to `SVGToPNG`, bytes":                      int64(r.MaxStyleBytes),
+		"style sheets of SVG input to `SVGToPNG`, rules":                      int64(r.MaxCSSRules),
+		"pixels of one filter region (PNG)":                                   int64(r.MaxFilterPixels),
 		"memory charged to the call's ledger":                                 c.ledger.MaxBytes,
 		"Vega-Lite views":                                                     int64(c.vlViews),
 	}

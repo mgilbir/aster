@@ -115,6 +115,14 @@ func deriveLimits(n, ops uint64) callLimits {
 	}
 	// The canvas, layers and masks alive at once, and the pixels of one.
 	canvas := min(max(n, 4<<20), 1<<30)
+	// The SVG input a PNG is drawn from, which an attacker may write
+	// (SVGToPNG): its size, as large as the SVG a render may write; its
+	// elements, a tree node of 100 to 200 bytes each; its style sheets,
+	// whose rules hold about twenty times their text; and the pixels of one
+	// filter region, as many as a canvas. Each is bounded by the ledger as
+	// it is built too (the tree, the rules, text layout); these fail first,
+	// naming the bound. The defaults are their ceilings.
+	rd := raster.Limits{}.WithDefaults()
 	// The path geometry a render holds at once, in 16-byte points, and the
 	// pixels of one image it decodes (about 16 bytes each with its decoded
 	// form and halvings): each a sixteenth of the limit.
@@ -123,6 +131,11 @@ func deriveLimits(n, ops uint64) callLimits {
 		MaxPixels:       int(canvas / 8),
 		MaxPathSegments: toInt(max(n/16, 64<<10)),
 		MaxImagePixels:  int(min(max(n/16, 64<<10), 64<<20)),
+		MaxInputBytes:   int(min(max(n/4, 1<<20), uint64(rd.MaxInputBytes))),
+		MaxElements:     int(min(max(n/128, 16384), uint64(rd.MaxElements))),
+		MaxStyleBytes:   int(min(max(n/64, 64<<10), uint64(rd.MaxStyleBytes))),
+		MaxCSSRules:     int(min(max(n/1024, 1000), uint64(rd.MaxCSSRules))),
+		MaxFilterPixels: int(min(max(n/8, 512<<10), uint64(rd.MaxFilterPixels))),
 	}
 	// The label transform's bitmaps hold their pixels as a PNG does.
 	l.vega.RasterCanvasBytes = l.raster.MaxCanvasBytes

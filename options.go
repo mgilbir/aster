@@ -432,7 +432,10 @@ type pngConfig struct {
 	scale          float64
 	recode         bool
 	quantizeColors int
-	render         renderConfig
+	// quantizeErr refuses a WithQuantizePNG whose count is no number of
+	// colours: the call fails with it.
+	quantizeErr error
+	render      renderConfig
 }
 
 func defaultPNGConfig() *pngConfig {
@@ -480,9 +483,15 @@ func WithRecodePNG() PNGOption {
 // output within the quality guard or cannot keep the encoded size in check,
 // and, without trying, for an image of more than 65,536 distinct colors
 // (photographic or dense-gradient content, which a palette cannot keep
-// within the guard): the output is then lossless.
+// within the guard): the output is then lossless. A count of zero or less
+// is no number of colours: the call fails with an error, rather than
+// quantize to two colours (or to none) in its place.
 func WithQuantizePNG(maxColors int) PNGOption {
 	return pngOption(func(c *pngConfig) {
-		c.quantizeColors = min(max(maxColors, 2), 256)
+		if maxColors <= 0 {
+			c.quantizeColors, c.quantizeErr = 0, fmt.Errorf("aster: invalid WithQuantizePNG(%d) (must be a positive number of colours)", maxColors)
+			return
+		}
+		c.quantizeColors, c.quantizeErr = min(max(maxColors, 2), 256), nil
 	})
 }

@@ -89,9 +89,8 @@ func TestFixedLimitsDocMatchesCode(t *testing.T) {
 			{c("github.com/mgilbir/goecma262/vm", "DefaultMaxSteps")}, {c("github.com/mgilbir/goecma262/vm", "DefaultStepsPerByte")},
 			{c("github.com/mgilbir/goecma262/vm", "DefaultMaxMemory")}, {c("github.com/mgilbir/goecma262/vm", "DefaultMemoryPerByte")},
 		},
-		"SVG input to `SVGToPNG`":                 {{int64(rl.MaxInputBytes)}, {int64(rl.MaxElements)}, {int64(rl.MaxDepth)}},
-		"style sheets of SVG input to `SVGToPNG`": {{int64(rl.MaxStyleBytes)}, {int64(rl.MaxCSSRules)}, {int64(rl.MaxCSSWork)}},
-		"one filter region (PNG)":                 {{int64(rl.MaxFilterPixels)}},
+		"SVG input to `SVGToPNG`":                 {{int64(rl.MaxDepth)}},
+		"style sheets of SVG input to `SVGToPNG`": {{int64(rl.MaxCSSWork)}},
 		"filter primitives (PNG)":                 {{c("raster", "maxConvolveTaps")}, {c("raster", "maxTurbulenceOctaves")}, {int64(rl.MaxLayerDepth)}},
 		"pixel work of one PNG render": {
 			{root["pixelOps"], c("raster", "defaultMaxPixelOps")}, {root["pixelOpsPerPixel"], c("raster", "defaultPixelOpsPer")},
