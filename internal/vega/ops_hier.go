@@ -52,7 +52,7 @@ func init() {
 					common.Field = hierarchy.Accessor(f.Get)
 				}
 				if cs := p.compareSpec("sort"); cs != nil {
-					common.Sort = nodeCompare(cs)
+					common.Sort = nodeCompare(n.g.view.walk, cs)
 				}
 				if err := run(n, p, pulse.tree, common); err != nil {
 					failErr(err)
@@ -129,7 +129,7 @@ func optNum(p *opParams, name string) *float64 {
 
 // nodeCompare applies a compare parameter to hierarchy nodes: its field paths
 // are read from the node ("value", "data.name").
-func nodeCompare(cs *compareSpec) hierarchy.Compare {
+func nodeCompare(w jsval.Walker, cs *compareSpec) hierarchy.Compare {
 	type key struct {
 		get hierarchy.NodeField
 		ord int
@@ -144,7 +144,7 @@ func nodeCompare(cs *compareSpec) hierarchy.Compare {
 	}
 	return func(a, b *hierarchy.Node) int {
 		for _, k := range keys {
-			if c := transforms.Ascending(k.get(a), k.get(b)); c != 0 {
+			if c := transforms.Ascending(w, k.get(a), k.get(b)); c != 0 {
 				return c * k.ord
 			}
 		}

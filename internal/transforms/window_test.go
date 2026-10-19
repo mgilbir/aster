@@ -18,7 +18,7 @@ func sortFromSpec(spec jsval.Value) Comparator {
 	if !spec.IsObj() {
 		return nil
 	}
-	return CompareBy(fieldList(spec.Get("field")), strList(spec.Get("order")))
+	return CompareBy(jsval.Walker{}, fieldList(spec.Get("field")), strList(spec.Get("order")))
 }
 
 func windowParamsFromSpec(spec jsval.Value) WindowParams {
@@ -206,7 +206,7 @@ func TestWindowNoPanicOnEdgeFrames(t *testing.T) {
 	data := []jsval.Value{obj("v", jsval.Num(1)), obj("v", jsval.Num(2)), obj("v", jsval.Num(3))}
 	for _, fr := range [][]FrameBound{{{Offset: 3}, {Offset: 1}}, {{Offset: 5}, {Offset: 9}}, {{Offset: -9}, {Offset: -5}}} {
 		_, err := Window(context.Background(), cloneTuples(data), WindowParams{
-			Sort: CompareBy(FieldsOf("v"), nil), SortField: "v", Frame: fr,
+			Sort: CompareBy(jsval.Walker{}, FieldsOf("v"), nil), SortField: "v", Frame: fr,
 			Ops: []WindowOpSpec{{Op: "sum", Field: FieldOf("v")}, {Op: "first_value", Field: FieldOf("v")}, {Op: "last_value", Field: FieldOf("v")}, {Op: "median", Field: FieldOf("v")}},
 		})
 		// A range frame that starts past the last row or ends before the
@@ -244,7 +244,7 @@ func windowBenchData(n int) []jsval.Value {
 func BenchmarkWindowSumRank100k(b *testing.B) {
 	base := windowBenchData(100_000)
 	p := WindowParams{
-		Sort: CompareBy(FieldsOf("t"), nil), GroupBy: FieldsOf("g"),
+		Sort: CompareBy(jsval.Walker{}, FieldsOf("t"), nil), GroupBy: FieldsOf("g"),
 		Frame: []FrameBound{{Offset: -5}, {Offset: 0}},
 		Ops:   []WindowOpSpec{{Op: "sum", Field: FieldOf("x")}, {Op: "rank"}, {Op: "mean", Field: FieldOf("x")}},
 	}

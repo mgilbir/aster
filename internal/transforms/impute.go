@@ -23,7 +23,7 @@ type ImputeParams struct {
 }
 
 // imputeReduce is the d3-array reducer of a method over a group's values.
-func imputeReduce(method string, vals []jsval.Value) jsval.Value {
+func imputeReduce(w jsval.Walker, method string, vals []jsval.Value) jsval.Value {
 	switch method {
 	case "mean":
 		sum, n := 0.0, 0
@@ -54,12 +54,12 @@ func imputeReduce(method string, vals []jsval.Value) jsval.Value {
 				continue
 			}
 			if best.IsUndefined() {
-				if GreaterEq(v, v) {
+				if GreaterEq(w, v, v) {
 					best = v
 				}
 				continue
 			}
-			if (method == "min" && Greater(best, v)) || (method == "max" && Less(best, v)) {
+			if (method == "min" && Greater(w, best, v)) || (method == "max" && Less(w, best, v)) {
 				best = v
 			}
 		}
@@ -95,11 +95,11 @@ func Impute(ctx context.Context, data []jsval.Value, p ImputeParams) ([]jsval.Va
 		values  []jsval.Value
 		present int // number of key positions with a tuple
 	}
-	zone := zoneOf(ctx)
+	keys := keysOf(ctx)
 	domain := append([]jsval.Value(nil), p.KeyVals...)
 	kMap := make(map[string]int, len(domain))
 	for i, k := range domain {
-		kMap[keyString(k, zone)] = i + 1
+		kMap[keys.String(k)] = i + 1
 	}
 	var groups []*group
 	cells := 0
@@ -110,7 +110,7 @@ func Impute(ctx context.Context, data []jsval.Value, p ImputeParams) ([]jsval.Va
 			return nil, err
 		}
 		k := p.Key.Apply(t)
-		ks := keyString(k, zone)
+		ks := keys.String(k)
 		j := kMap[ks]
 		if j == 0 {
 			domain = append(domain, k)
@@ -123,7 +123,7 @@ func Impute(ctx context.Context, data []jsval.Value, p ImputeParams) ([]jsval.Va
 				sb.WriteByte(',')
 			}
 			if v := f.Get(t); !v.IsNullish() {
-				sb.WriteString(keyString(v, zone))
+				sb.WriteString(keys.String(v))
 			}
 		}
 		g := gMap[sb.String()]
@@ -184,7 +184,7 @@ func Impute(ctx context.Context, data []jsval.Value, p ImputeParams) ([]jsval.Va
 							present = append(present, p.Field.Get(tv))
 						}
 					}
-					value = imputeReduce(method, present)
+					value = imputeReduce(keys.w, method, present)
 				}
 			}
 			t.Set(p.Field.Key(), value)

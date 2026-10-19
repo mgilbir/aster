@@ -143,9 +143,18 @@ type measureSet struct {
 	// ctx is polled by the statistics that cost a pass over the data each
 	// (bootstrap intervals); err records its cancellation for the caller.
 	ctx context.Context
+	// w walks the values the measures compare (min, max, argmin, argmax
+	// of arrays compare their String): the call's Walker.
+	w   jsval.Walker
 	err error
 	// names lists output field names in the order they were requested.
 	names []string
+}
+
+// setContext sets the call the measures run in.
+func (s *measureSet) setContext(ctx context.Context) {
+	s.ctx = ctx
+	s.w = jsval.WalkerFor(ctx)
 }
 
 // newMeasureSet compiles measures. Upstream groups the measures of one field
@@ -255,7 +264,7 @@ func (s *measureSet) add(c *cell, t jsval.Value) {
 		return
 	}
 	for i, g := range s.groups {
-		g.add(&c.aggs[i], g.field.Get(t), t)
+		g.add(s.w, &c.aggs[i], g.field.Get(t), t)
 	}
 }
 
@@ -266,13 +275,13 @@ func (s *measureSet) rem(c *cell, t jsval.Value) {
 		return
 	}
 	for i, g := range s.groups {
-		g.rem(&c.aggs[i], g.field.Get(t))
+		g.rem(s.w, &c.aggs[i], g.field.Get(t))
 	}
 }
 
 func isEmptyString(v jsval.Value) bool { return v.IsStr() && v.StrValue() == "" }
 
-func (g *measureGroup) add(m *mstate, v, t jsval.Value) {
+func (g *measureGroup) add(w jsval.Walker, m *mstate, v, t jsval.Value) {
 	if v.IsNullish() || isEmptyString(v) {
 		m.missing++
 		return
@@ -304,21 +313,21 @@ func (g *measureGroup) add(m *mstate, v, t jsval.Value) {
 	// argmin/argmax run before min/max, so they compare against the previous
 	// extremum; the first value therefore never sets them and the extent of the
 	// stored tuples is used instead (see write).
-	if g.argmin && Less(v, m.min) {
+	if g.argmin && Less(w, v, m.min) {
 		m.argmin = t
 	}
-	if g.argmax && Greater(v, m.max) {
+	if g.argmax && Greater(w, v, m.max) {
 		m.argmax = t
 	}
-	if g.wantMin && (m.min.IsUndefined() || Less(v, m.min)) {
+	if g.wantMin && (m.min.IsUndefined() || Less(w, v, m.min)) {
 		m.min = v
 	}
-	if g.wantMax && (m.max.IsUndefined() || Greater(v, m.max)) {
+	if g.wantMax && (m.max.IsUndefined() || Greater(w, v, m.max)) {
 		m.max = v
 	}
 }
 
-func (g *measureGroup) rem(m *mstate, v jsval.Value) {
+func (g *measureGroup) rem(w jsval.Walker, m *mstate, v jsval.Value) {
 	if v.IsNullish() || isEmptyString(v) {
 		m.missing--
 		return
@@ -352,16 +361,16 @@ func (g *measureGroup) rem(m *mstate, v jsval.Value) {
 		m.dev -= float64(m.meanD * (x - m.mean))
 	}
 	// A removed extremum invalidates the running one (NaN marks "recompute").
-	if g.argmin && LessEq(v, m.min) {
+	if g.argmin && LessEq(w, v, m.min) {
 		m.argmin = jsval.Undefined
 	}
-	if g.argmax && GreaterEq(v, m.max) {
+	if g.argmax && GreaterEq(w, v, m.max) {
 		m.argmax = jsval.Undefined
 	}
-	if g.wantMin && LessEq(v, m.min) {
+	if g.wantMin && LessEq(w, v, m.min) {
 		m.min = jsval.Num(math.NaN())
 	}
-	if g.wantMax && GreaterEq(v, m.max) {
+	if g.wantMax && GreaterEq(w, v, m.max) {
 		m.max = jsval.Num(math.NaN())
 	}
 }
@@ -418,7 +427,7 @@ func (g *measureGroup) write(s *measureSet, id int, m *mstate, c *cell, t *jsval
 			return [2]jsval.Value{}
 		}
 		if memo.owner != id || !memo.extOK {
-			lo, hi := ExtentIndex(len(data), func(i int) jsval.Value { return get(data[i]) })
+			lo, hi := ExtentIndex(s.w, len(data), func(i int) jsval.Value { return get(data[i]) })
 			memo.ext = [2]jsval.Value{elemAt(data, lo), elemAt(data, hi)}
 			memo.extOK, memo.owner = true, id
 		}
@@ -493,7 +502,7 @@ func (g *measureGroup) write(s *measureSet, id int, m *mstate, c *cell, t *jsval
 			}
 			seen := make(map[string]struct{}, 16)
 			for i := len(data) - 1; i >= 0; i-- {
-				seen[keyString(get(data[i]), zoneOf(s.ctx))] = struct{}{}
+				seen[keysOf(s.ctx).String(get(data[i]))] = struct{}{}
 			}
 			v = jsval.Int(len(seen))
 		case opCI0, opCI1:

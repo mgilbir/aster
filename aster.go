@@ -383,6 +383,9 @@ func (c *Converter) renderSVG(ctx context.Context, spec jsval.Value) (out string
 		opts.TextMeasurer = canvas
 		opts.WordcloudText = wordcloud.NewCanvasRenderer(m)
 	}
+	if c.cfg.wordcloudBoxForTest {
+		opts.WordcloudText = wordcloud.BoxRenderer{}
+	}
 	if st := stagesFrom(ctx); st != nil {
 		opts.Stages = st
 		if m != nil {
@@ -591,7 +594,7 @@ func (c *Converter) VegaLiteToVega(spec []byte, opts ...RenderOption) ([]byte, e
 		if err != nil {
 			return nil, err
 		}
-		return jsval.AppendJSON(nil, vg), nil
+		return jsval.WalkerFor(ctx).AppendJSON(nil, vg), nil
 	})
 }
 

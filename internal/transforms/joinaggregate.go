@@ -39,12 +39,12 @@ func JoinAggregate(ctx context.Context, data []jsval.Value, p JoinAggregateParam
 	if err != nil {
 		return nil, err
 	}
-	ms.ctx = ctx
-	zone := zoneOf(ctx)
-	cellKey := KeyOf(zone, p.GroupBy...)
+	ms.setContext(ctx)
+	kf := keysOf(ctx)
+	cellKey := KeyOf(kf, p.GroupBy...)
 	if !p.Key.IsNil() {
 		g := p.Key.Get
-		cellKey = func(t jsval.Value) string { return keyString(g(t), zone) }
+		cellKey = func(t jsval.Value) string { return kf.String(g(t)) }
 	}
 	type joinCell struct {
 		c     *cell

@@ -54,7 +54,7 @@ func TestSortItemsByKeysMatchesViews(t *testing.T) {
 		{[]any{"datum"}, nil},
 		{[]any{"nope.deeper"}, nil},
 	} {
-		cs := compareFrom(c.fields, c.orders)
+		cs := compareFrom(jsval.Walker{}, c.fields, c.orders)
 		if cs == nil || cs.roots == nil {
 			t.Fatalf("%v: want a comparator over paths", c.fields)
 		}

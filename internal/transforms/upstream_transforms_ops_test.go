@@ -116,7 +116,7 @@ func comparatorFrom(v any) (Comparator, bool) {
 		}
 		ords = append(ords, o)
 	}
-	return CompareBy(fields, ords), true
+	return CompareBy(jsval.Walker{}, fields, ords), true
 }
 
 // stringsFrom decodes an array of strings, in which null is the empty string.

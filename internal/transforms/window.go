@@ -286,7 +286,7 @@ func Window(ctx context.Context, data []jsval.Value, p WindowParams) ([]jsval.Va
 		if ms, err = newMeasureSet(aggs, p.Rand); err != nil {
 			return nil, err
 		}
-		ms.ctx = ctx
+		ms.setContext(ctx)
 	}
 	frame := []FrameBound{{Unbounded: true}, {Offset: 0}}
 	if len(p.Frame) == 2 {
@@ -312,7 +312,7 @@ func Window(ctx context.Context, data []jsval.Value, p WindowParams) ([]jsval.Va
 
 	m := budget.NewMeter(ctx)
 	led := budget.LedgerFrom(ctx)
-	for _, g := range GroupByKey(data, KeyOf(zoneOf(ctx), p.GroupBy...)) {
+	for _, g := range GroupByKey(data, KeyOf(keysOf(ctx), p.GroupBy...)) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}

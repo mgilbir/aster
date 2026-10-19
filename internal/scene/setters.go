@@ -27,7 +27,7 @@ func SetterFor(name string) Setter {
 	}
 	if f, ok := strFields[name]; ok {
 		return func(it *Item, val jsval.Value) error {
-			*f(it) = strOf(val)
+			*f(it) = strOf(it.Walker(), val)
 			return nil
 		}
 	}
@@ -51,22 +51,22 @@ func SetterFor(name string) Setter {
 	switch name {
 	case "fill":
 		return func(it *Item, val jsval.Value) error {
-			it.Fill = (*jsonLoader)(nil).paint(val)
+			it.Fill = (*jsonLoader)(nil).paint(it.Walker(), val)
 			return nil
 		}
 	case "stroke":
 		return func(it *Item, val jsval.Value) error {
-			it.Stroke = (*jsonLoader)(nil).paint(val)
+			it.Stroke = (*jsonLoader)(nil).paint(it.Walker(), val)
 			return nil
 		}
 	case "interpolate":
 		return func(it *Item, val jsval.Value) error {
-			it.lineW().Interpolate = strOfTruthy(val)
+			it.lineW().Interpolate = strOfTruthy(it.Walker(), val)
 			return nil
 		}
 	case "orient":
 		return func(it *Item, val jsval.Value) error {
-			it.lineW().Orient = strOfTruthy(val)
+			it.lineW().Orient = strOfTruthy(it.Walker(), val)
 			return nil
 		}
 	}

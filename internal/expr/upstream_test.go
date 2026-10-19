@@ -50,7 +50,7 @@ func TestUpstreamD3Ease(t *testing.T) {
 		}
 		r.Check(c, upstream.FromValue(res), threw)
 	}
-	r.Done(300)
+	r.Done(362)
 }
 
 func TestUpstreamVegaFunctions(t *testing.T) {
@@ -79,5 +79,5 @@ func TestUpstreamVegaFunctions(t *testing.T) {
 		}
 		r.Check(c, upstream.FromValue(res), threw)
 	}
-	r.Done(30)
+	r.Done(42)
 }

@@ -170,7 +170,7 @@ func (q *Quantile) Quantiles() []float64 { return append([]float64(nil), q.thres
 
 // Copy is d3's quantile copy.
 func (q *Quantile) Copy() Scale {
-	n := &Quantile{meta: meta{typ: q.typ}, domain: append([]float64(nil), q.domain...),
+	n := &Quantile{meta: meta{typ: q.typ, walk: q.walk}, domain: append([]float64(nil), q.domain...),
 		rng: cloneValues(q.rng), unknown: q.unknown}
 	n.rescale()
 	return n
@@ -278,7 +278,7 @@ func (q *Quantize) HasTickFormat() bool { return true }
 
 // Copy is d3's quantize copy.
 func (q *Quantize) Copy() Scale {
-	n := &Quantize{meta: meta{typ: q.typ}, x0: q.x0, x1: q.x1, n: q.n,
+	n := &Quantize{meta: meta{typ: q.typ, walk: q.walk}, x0: q.x0, x1: q.x1, n: q.n,
 		rng: cloneValues(q.rng), unknown: q.unknown}
 	n.rescale()
 	return n
@@ -311,10 +311,10 @@ func (t *Threshold) resize() { t.n = min(len(t.domain), len(t.rng)-1) }
 // Apply is scale(x).
 func (t *Threshold) Apply(x jsval.Value) jsval.Value {
 	if t.dnum == nil {
-		if c, ok := jsval.Relate(x, x); x.IsNullish() || !ok || c != 0 {
+		if c, ok := t.walk.Relate(x, x); x.IsNullish() || !ok || c != 0 {
 			return t.unknown
 		}
-		return rangeAt(t.rng, bisectRightValues(t.domain, x, 0, max(t.n, 0)))
+		return rangeAt(t.rng, bisectRightValues(t.walk, t.domain, x, 0, max(t.n, 0)))
 	}
 	f, ok := selfComparable(x)
 	if !ok {
@@ -357,10 +357,10 @@ func allNumeric(v []jsval.Value) bool {
 // bisectRightValues is d3.bisectRight over values in [lo, hi), comparing them
 // with x as d3.ascending does: by JavaScript's relational operators, with
 // null or undefined comparable to nothing.
-func bisectRightValues(a []jsval.Value, x jsval.Value, lo, hi int) int {
+func bisectRightValues(w jsval.Walker, a []jsval.Value, x jsval.Value, lo, hi int) int {
 	for lo < hi {
 		mid := int(uint(lo+hi) >> 1)
-		if c, ok := jsval.Relate(a[mid], x); ok && c <= 0 && !a[mid].IsNullish() {
+		if c, ok := w.Relate(a[mid], x); ok && c <= 0 && !a[mid].IsNullish() {
 			lo = mid + 1
 		} else {
 			hi = mid
@@ -385,6 +385,7 @@ func (t *Threshold) SetUnknown(v jsval.Value) { t.unknown = v }
 func (t *Threshold) Copy() Scale {
 	n := NewThreshold()
 	n.typ = t.typ
+	n.walk = t.walk
 	n.SetDomain(t.domain)
 	n.rng = cloneValues(t.rng)
 	n.resize()
@@ -441,7 +442,7 @@ func (b *BinOrdinal) HasTickFormat() bool { return true }
 
 // Copy is bin-ordinal's copy.
 func (b *BinOrdinal) Copy() Scale {
-	n := &BinOrdinal{meta: meta{typ: b.typ}, domain: append([]float64(nil), b.domain...), rng: cloneValues(b.rng)}
+	n := &BinOrdinal{meta: meta{typ: b.typ, walk: b.walk}, domain: append([]float64(nil), b.domain...), rng: cloneValues(b.rng)}
 	return n
 }
 
@@ -518,7 +519,7 @@ func (s *Identity) HasTickFormat() bool { return true }
 
 // Copy is identity's copy.
 func (s *Identity) Copy() Scale {
-	return &Identity{meta: meta{typ: s.typ}, domain: append([]float64(nil), s.domain...), unknown: s.unknown}
+	return &Identity{meta: meta{typ: s.typ, walk: s.walk}, domain: append([]float64(nil), s.domain...), unknown: s.unknown}
 }
 
 var (

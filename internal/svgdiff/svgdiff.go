@@ -6,6 +6,16 @@
 // other attribute, and all text, is compared exactly: a label "0.25" is not
 // "0.5", nor "1e+3" "1000", nor an opacity of 0.2 one of 0.6.
 //
+// The tolerance is in pixels, so it applies only to numbers that are pixels.
+// A geometry number in another unit is compared within the relative
+// tolerance alone (scaled by at least 1, so numbers near zero compare too):
+// the coordinates of a gradient or pattern in bounding-box units (0.4 is 40%
+// of the shape), a pattern's content under its viewBox, and in a transform
+// the angle of rotate and skew and the factors of scale and of matrix's
+// first four entries (see unitOf). Half a pixel of tolerance on such a
+// number would hide a gradient running to 60% instead of 100%, or a label
+// turned by half a degree (C52, audit 2026-10-18).
+//
 // It exists to measure how close the pure-Go engine's output is to upstream
 // Vega's, so it reports the first difference with enough context to find it.
 package svgdiff
@@ -75,7 +85,7 @@ func Compare(got, want []byte, opts Options) (Result, error) {
 	for _, a := range opts.IgnoreAttrs {
 		c.ignore[a] = true
 	}
-	c.node(g, w, "")
+	c.node(g, w, "", false)
 	return Result{Equal: c.count == 0, Diff: c.first, Elements: c.elements, DiffCount: c.count}, nil
 }
 
@@ -165,7 +175,9 @@ func (c *comparer) report(path, format string, args ...any) {
 	}
 }
 
-func (c *comparer) node(g, w *node, path string) {
+// node compares the element g with w. unit says w lies in a pattern's
+// content in units other than pixels (see unitBoxElement).
+func (c *comparer) node(g, w *node, path string, unit bool) {
 	c.elements++
 	here := path + "/" + w.name
 	if cls := w.attrs["class"]; cls != "" {
@@ -196,7 +208,7 @@ func (c *comparer) node(g, w *node, path string) {
 			c.report(here, "missing attribute %s=%q", k, elide(wv))
 		case !wok:
 			c.report(here, "unexpected attribute %s=%q", k, elide(gv))
-		case !c.attrEqual(k, gv, wv):
+		case !c.attrEqual(k, gv, wv, unit || unitAttr(w, k)):
 			c.report(here, "attribute %s=%q, want %q", k, elide(gv), elide(wv))
 		}
 	}
@@ -204,8 +216,9 @@ func (c *comparer) node(g, w *node, path string) {
 		c.report(here, "text %q, want %q", g.text, w.text)
 	}
 	n := min(len(g.children), len(w.children))
+	childUnit := unit || unitContent(w)
 	for i := 0; i < n; i++ {
-		c.node(g.children[i], w.children[i], fmt.Sprintf("%s[%d]", here, i))
+		c.node(g.children[i], w.children[i], fmt.Sprintf("%s[%d]", here, i), childUnit)
 	}
 	if len(g.children) != len(w.children) {
 		c.report(here, "%d children, want %d", len(g.children), len(w.children))
@@ -240,10 +253,64 @@ func IsGeometry(name string) bool { return geometry[name] }
 
 const pngDataPrefix = "data:image/png;base64,"
 
+// unitAttr reports whether the numbers of the attribute name of element e are
+// in other units than pixels as a whole: a gradient's coordinates and
+// transform in bounding-box units (the default gradientUnits), a pattern's
+// tile in bounding-box units (the default patternUnits), and a pattern's
+// viewBox, which scales its content.
+func unitAttr(e *node, name string) bool {
+	switch e.name {
+	case "linearGradient", "radialGradient":
+		return e.attrs["gradientUnits"] != "userSpaceOnUse"
+	case "pattern":
+		switch name {
+		case "viewBox":
+			return true
+		case "x", "y", "width", "height":
+			return e.attrs["patternUnits"] != "userSpaceOnUse"
+		}
+	}
+	return false
+}
+
+// unitContent reports whether the content of element e is drawn in other
+// units than pixels: a pattern's, when it has a viewBox or its content units
+// are the bounding box's.
+func unitContent(e *node) bool {
+	if e.name != "pattern" {
+		return false
+	}
+	_, vb := e.attrs["viewBox"]
+	return vb || e.attrs["patternContentUnits"] == "objectBoundingBox"
+}
+
+// unitOf reports whether argument i of the transform function fn (the
+// function name, as written) is not a pixel quantity: rotate's angle (its
+// centre is in pixels), skewX's and skewY's angle, scale's factors, and the
+// linear part (a, b, c, d) of matrix.
+func unitOf(fn string, i int) bool {
+	switch fn {
+	case "rotate", "skewX", "skewY":
+		return i == 0
+	case "scale":
+		return true
+	case "matrix":
+		return i < 4
+	}
+	return false
+}
+
+// isTransform reports whether the attribute name holds a transform list.
+func isTransform(name string) bool {
+	return name == "transform" || name == "gradientTransform" || name == "patternTransform"
+}
+
 // attrEqual compares two values of the attribute name: a geometry attribute
 // token by token, numbers within tolerance and the rest exactly; any other
-// exactly. Two embedded PNG images compare by their pixels (see samePNG).
-func (c *comparer) attrEqual(name, a, b string) bool {
+// exactly. Two embedded PNG images compare by their pixels (see samePNG). unit
+// says the attribute's numbers are not pixels (see unitAttr); in a transform
+// the unit of each number is its function's (unitOf).
+func (c *comparer) attrEqual(name, a, b string, unit bool) bool {
 	if a == b {
 		return true
 	}
@@ -257,10 +324,13 @@ func (c *comparer) attrEqual(name, a, b string) bool {
 	if len(ta) != len(tb) {
 		return false
 	}
+	fn, arg := "", 0 // the transform function a number is an argument of
 	for i := range ta {
 		x, y := ta[i], tb[i]
 		if x.num && y.num {
-			if !c.close(x.val, y.val) {
+			u := unit || isTransform(name) && unitOf(fn, arg)
+			arg++
+			if !c.close(x.val, y.val, u) {
 				return false
 			}
 			continue
@@ -268,15 +338,38 @@ func (c *comparer) attrEqual(name, a, b string) bool {
 		if x.num != y.num || x.text != y.text {
 			return false
 		}
+		if f, ok := transformFunction(x.text); ok {
+			fn, arg = f, 0
+		}
 	}
 	return true
 }
 
-func (c *comparer) close(a, b float64) bool {
+// transformFunction reads the function a transform's text token opens: the
+// name before the last "(", as in "rotate(" or ") translate(".
+func transformFunction(text string) (string, bool) {
+	i := strings.LastIndexByte(text, '(')
+	if i < 0 {
+		return "", false
+	}
+	f := strings.TrimSpace(text[:i])
+	if j := strings.LastIndexAny(f, " ,)"); j >= 0 {
+		f = f[j+1:]
+	}
+	return f, true
+}
+
+// close compares two numbers: pixels within the absolute or the relative
+// tolerance, and a number in another unit (unit) within the relative one
+// alone, relative to at least 1.
+func (c *comparer) close(a, b float64, unit bool) bool {
 	if a == b {
 		return true
 	}
 	d := math.Abs(a - b)
+	if unit {
+		return d <= c.opts.Rel*math.Max(1, math.Max(math.Abs(a), math.Abs(b)))
+	}
 	return d <= c.opts.Abs || d <= c.opts.Rel*math.Max(math.Abs(a), math.Abs(b))
 }
 

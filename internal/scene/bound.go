@@ -482,13 +482,14 @@ func (it *Item) hasRawPos() bool {
 // read here as the numbers they convert to.
 func (bd *Bounder) textBoundsRaw(b *Bounds, it *Item, mode int, dx, dy, w, h float64) {
 	ax, ay := it.PosValue("x"), it.PosValue("y")
+	wk := it.Walker()
 	if r := it.Radius().Zero(); r != 0 {
 		t := it.Theta().Zero() - halfPi
-		ax = jsPlus(ax, jsval.Num(float64(r*jsmath.Cos(t))))
-		ay = jsPlus(ay, jsval.Num(float64(r*jsmath.Sin(t))))
+		ax = jsPlus(wk, ax, jsval.Num(float64(r*jsmath.Cos(t))))
+		ay = jsPlus(wk, ay, jsval.Num(float64(r*jsmath.Sin(t))))
 	}
-	x1, y1 := jsPlus(jsval.Num(dx), ax), jsPlus(jsval.Num(dy), ay)
-	x2, y2 := jsPlus(x1, jsval.Num(w)), jsPlus(y1, jsval.Num(h))
+	x1, y1 := jsPlus(wk, jsval.Num(dx), ax), jsPlus(wk, jsval.Num(dy), ay)
+	x2, y2 := jsPlus(wk, x1, jsval.Num(w)), jsPlus(wk, y1, jsval.Num(h))
 	if jsLess(x2, x1) {
 		x1, x2 = x2, x1
 	}
@@ -502,11 +503,12 @@ func (bd *Bounder) textBoundsRaw(b *Bounds, it *Item, mode int, dx, dy, w, h flo
 }
 
 // jsPlus is the + operator on the values a numeric property can hold: a
-// string, array or object makes it a concatenation, anything else a sum.
-func jsPlus(a, b jsval.Value) jsval.Value {
+// string, array or object makes it a concatenation (of their String, taken
+// with the call's Walker w), anything else a sum.
+func jsPlus(w jsval.Walker, a, b jsval.Value) jsval.Value {
 	concat := func(v jsval.Value) bool { return v.IsStr() || v.IsArr() || v.IsObj() }
 	if concat(a) || concat(b) {
-		return jsval.Str(a.AsString() + b.AsString())
+		return jsval.Str(w.String(a) + w.String(b))
 	}
 	return jsval.Num(jsval.ToNumber(a) + jsval.ToNumber(b))
 }

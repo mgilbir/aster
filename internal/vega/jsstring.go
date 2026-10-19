@@ -12,5 +12,5 @@ func (v *runView) jsString(x jsval.Value) string {
 	if x.IsTimestamp() {
 		return format.DateToString(x.NumValue(), v.zone)
 	}
-	return x.AsString()
+	return v.walk.String(x)
 }

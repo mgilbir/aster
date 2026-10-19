@@ -65,6 +65,8 @@ var stopPulse = &flowPulse{stamp: -1}
 type opParams struct {
 	vals smallMap[any]
 	mod  []bool // parallel to vals
+	// walk is the call's Walker, with which a parameter is read as text.
+	walk jsval.Walker
 }
 
 func newParams() *opParams { return &opParams{} }
@@ -247,6 +249,7 @@ func (n *opNode) setValue(v any) bool {
 func (n *opNode) parameters(raw *smallMap[any], react bool, initonly bool) []*opNode {
 	if n.argval == nil {
 		n.argval = newParams()
+		n.argval.walk = n.g.walk
 		n.argval.vals.grow(raw.len())
 		n.argval.mod = make([]bool, 0, raw.len())
 	}
@@ -311,6 +314,7 @@ func (n *opNode) parameters(raw *smallMap[any], react bool, initonly bool) []*op
 func (n *opNode) marshall(stamp int) *opParams {
 	if n.argval == nil {
 		n.argval = newParams()
+		n.argval.walk = n.g.walk
 	}
 	for _, a := range n.argops {
 		mod := a.op.modified && a.op.stamp == stamp
@@ -535,10 +539,13 @@ type flowGraph struct {
 	// from its specification, ranking it, ingesting a data set's rows) to
 	// the call's ledger, which polls the call's context (ADR 0010).
 	meter budget.Meter
+	// walk is the call's Walker, which the operators' walks of values (a
+	// parameter read as text) go through (ADR 0018).
+	walk jsval.Walker
 }
 
 func newGraph(ctx context.Context) *flowGraph {
-	return &flowGraph{ctx: ctx, touchSet: map[*opNode]struct{}{}, input: map[*opNode]*flowPulse{}, meter: budget.NewMeter(ctx)}
+	return &flowGraph{ctx: ctx, touchSet: map[*opNode]struct{}{}, input: map[*opNode]*flowPulse{}, meter: budget.NewMeter(ctx), walk: jsval.WalkerFor(ctx)}
 }
 
 // work charges n steps to the graph's meter, ending the render, through the

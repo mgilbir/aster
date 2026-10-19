@@ -23,18 +23,22 @@ type tupleMod struct {
 }
 
 // propsMatch is vega's removePredicate: every property of props equals that of
-// the tuple.
-func propsMatch(props jsval.Value) func(jsval.Value) bool {
-	return func(t jsval.Value) bool { return equalObjects(props, t, 0) }
+// the tuple. The comparison walks the values, with the call's Walker w.
+func propsMatch(w jsval.Walker, props jsval.Value) func(jsval.Value) bool {
+	return func(t jsval.Value) bool {
+		m := w.Meter()
+		eq := equalObjects(w, &m, props, t, 0)
+		m.Done()
+		return eq
+	}
 }
 
-// looseEqualDepth is looseEqual for values nested depth levels deep. A value
-// built at run time can nest deeper than any parsed document, so the descent
-// stops (reporting unequal) at jsval.MaxValueDepth.
-func looseEqualDepth(a, b jsval.Value, depth int) bool {
-	if depth > jsval.MaxValueDepth {
-		return false
-	}
+// looseEqualDepth is looseEqual for values nested depth levels deep: a step
+// of the walk m meters, which ends the call past jsval.MaxValueDepth (a value
+// built at run time can nest deeper than any parsed document) or past the
+// call's bounds.
+func looseEqualDepth(w jsval.Walker, m *jsval.WalkMeter, a, b jsval.Value, depth int) bool {
+	m.Step(depth)
 	if a.Kind() == b.Kind() {
 		switch a.Kind() {
 		case jsval.KindArr:
@@ -42,26 +46,26 @@ func looseEqualDepth(a, b jsval.Value, depth int) bool {
 				return false
 			}
 			for i, x := range a.Items() {
-				if !looseEqualDepth(x, b.Index(i), depth+1) {
+				if !looseEqualDepth(w, m, x, b.Index(i), depth+1) {
 					return false
 				}
 			}
 			return true
 		case jsval.KindObj:
-			return equalObjects(a, b, depth)
+			return equalObjects(w, m, a, b, depth)
 		}
-		return jsval.Equal(a, b)
+		return w.Equal(a, b)
 	}
 	return false
 }
 
-func equalObjects(a, b jsval.Value, depth int) bool {
+func equalObjects(w jsval.Walker, m *jsval.WalkMeter, a, b jsval.Value, depth int) bool {
 	o := a.ObjValue()
 	if o == nil {
 		return false
 	}
 	for i := 0; i < o.Len(); i++ {
-		if !looseEqualDepth(o.ValueAt(i), b.Get(o.KeyAt(i)), depth+1) {
+		if !looseEqualDepth(w, m, o.ValueAt(i), b.Get(o.KeyAt(i)), depth+1) {
 			return false
 		}
 	}
@@ -116,7 +120,7 @@ func (c *rtContext) Modify(name string, insert, remove, toggle, modify, values j
 				if x.Key() == t.Key() {
 					return true
 				}
-				return propsMatch(remove)(x)
+				return propsMatch(c.g.walk, remove)(x)
 			})
 		}
 	}
@@ -124,7 +128,7 @@ func (c *rtContext) Modify(name string, insert, remove, toggle, modify, values j
 		pc.inserts = append(pc.inserts, arrayOf(insert)...)
 	}
 	if toggle.IsTruthy() {
-		pred := propsMatch(toggle)
+		pred := propsMatch(c.g.walk, toggle)
 		found := false
 		for _, t := range cur {
 			if pred(t) {

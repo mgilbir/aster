@@ -1,13 +1,12 @@
 package vega
 
 import (
-	"github.com/mgilbir/aster/internal/jsmath"
 	"math"
-	"strings"
 
 	"github.com/mgilbir/aster/internal/expr"
 	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/geo"
+	"github.com/mgilbir/aster/internal/jsmath"
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/scale"
 	"github.com/mgilbir/aster/internal/transforms"
@@ -86,14 +85,14 @@ func domainList(x any, typ string) ([]jsval.Value, bool) {
 }
 
 func scaleKey(p *opParams) string {
-	t := p.Value("type").AsString()
+	t := p.walk.String(p.Value("type"))
 	if t == scale.TypeSequential {
 		return scale.TypeSequential + "-" + scale.TypeLinear
 	}
 	d := ""
 	if isContinuousColor(p) {
 		n := 0
-		if dom, ok := domainList(p.Get("domain"), p.Value("type").AsString()); ok {
+		if dom, ok := domainList(p.Get("domain"), t); ok {
 			n = len(dom)
 			if !p.Value("domainMid").IsNullish() {
 				n++
@@ -109,11 +108,11 @@ func scaleKey(p *opParams) string {
 	if d+t == "" {
 		return scale.TypeLinear
 	}
-	return strings.ToLower(d + t)
+	return jsval.JSLower(d + t)
 }
 
 func isContinuousColor(p *opParams) bool {
-	t := p.Value("type").AsString()
+	t := p.walk.String(p.Value("type"))
 	if !scale.IsContinuous(t) || t == scale.TypeTime || t == scale.TypeUTC {
 		return false
 	}
@@ -146,6 +145,11 @@ func facScale(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 			if !ok {
 				fail("unrecognized scale type: %s", key)
 			}
+			// The scale reads values as text and interpolates them
+			// element by element: walks the call bounds (ADR 0018).
+			if w, ok := ns.(interface{ SetWalker(jsval.Walker) }); ok {
+				w.SetWalker(g.view.walk)
+			}
 			// The loops of an ordinal, band or point scale over its domain
 			// (indexing each value, placing each band) charge the graph:
 			// two steps a value.
@@ -169,7 +173,7 @@ func facScale(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 		}
 		count := configureDomain(s, p, g)
 		count = configureBins(s, p, count)
-		configureRange(s, p, count)
+		configureRange(g.view.walk, s, p, count)
 		return barePulse(pulse)
 	}), nil
 }
@@ -210,10 +214,10 @@ func configureDomain(s scale.Scale, p *opParams, g *flowGraph) int {
 			domain[i] = v
 		}
 		if zero {
-			if transforms.Greater(at(0), jsval.Num(0)) {
+			if transforms.Greater(g.view.walk, at(0), jsval.Num(0)) {
 				setAt(0, jsval.Num(0))
 			}
-			if transforms.Less(at(n), jsval.Num(0)) {
+			if transforms.Less(g.view.walk, at(n), jsval.Num(0)) {
 				setAt(n, jsval.Num(0))
 			}
 		}
@@ -225,9 +229,9 @@ func configureDomain(s scale.Scale, p *opParams, g *flowGraph) int {
 		}
 		if !dmid.IsNullish() {
 			i := n
-			if transforms.Greater(dmid, at(n)) {
+			if transforms.Greater(g.view.walk, dmid, at(n)) {
 				i = n + 1
-			} else if transforms.Less(dmid, at(0)) {
+			} else if transforms.Less(g.view.walk, dmid, at(0)) {
 				i = 0
 			}
 			if i != n {
@@ -244,7 +248,7 @@ func configureDomain(s scale.Scale, p *opParams, g *flowGraph) int {
 			domain[i] = dmid
 		}
 	}
-	if includePad(typ) && p.Value("padding").IsTruthy() && len(domain) > 0 && !jsval.Equal(domain[0], domain[len(domain)-1]) {
+	if includePad(typ) && p.Value("padding").IsTruthy() && len(domain) > 0 && !g.walk.Equal(domain[0], domain[len(domain)-1]) {
 		domain = padDomain(typ, domain, p)
 	}
 	domainCheck(typ, domain, g)
@@ -385,7 +389,10 @@ func domainCheck(typ string, domain []jsval.Value, g *flowGraph) {
 		s = -s
 	}
 	if s != len(domain) {
-		g.warn("Log scale domain includes zero: " + jsval.Arr(domain).String())
+		// 'Log scale domain includes zero: ' + stringValue(domain), of which
+		// the report keeps MaxWarningText bytes: only those are made (C151).
+		msg := []byte("Log scale domain includes zero: ")
+		g.warn(string(g.walk.AppendStringValuePrefix(msg, jsval.Arr(domain), MaxWarningText)))
 	}
 }
 
@@ -510,7 +517,7 @@ type rangeSpec struct {
 	interp scale.UnitInterpolator
 }
 
-func configureRange(s scale.Scale, p *opParams, count int) {
+func configureRange(w jsval.Walker, s scale.Scale, p *opParams, count int) {
 	g := s
 	typ := g.Type()
 	round := p.Value("round").IsTruthy()
@@ -524,7 +531,7 @@ func configureRange(s scale.Scale, p *opParams, count int) {
 	if v := p.Value("rangeStep"); !v.IsNullish() && p.Has("rangeStep") {
 		rng, haveRange = configureRangeStep(typ, p, count), true
 	} else if sch := p.Get("scheme"); sch != nil && !isFalsyParam(sch) {
-		rng = configureScheme(typ, p, count)
+		rng = configureScheme(w, typ, p, count)
 		haveRange = true
 		if rng.interp != nil {
 			if in, ok := s.(interface{ SetInterpolator(scale.UnitInterpolator) }); ok {
@@ -555,18 +562,19 @@ func configureRange(s scale.Scale, p *opParams, count int) {
 		colors = flip(rng.values, reverse)
 		name := ""
 		if interpName.IsTruthy() {
-			name = interpName.AsString()
+			name = w.String(interpName)
 		}
-		in.SetInterpolator(scale.InterpolateColors(colors, name, gamma, hasGamma))
+		in.SetInterpolator(scale.InterpolateColors(w, colors, name, gamma, hasGamma))
 		return
 	}
 
 	ip, isInterp := s.(scale.Interpolating)
 	switch {
 	case haveRange && interpName.IsTruthy() && isInterp:
-		fn, ok := scale.Interpolate(interpName.AsString(), gamma, hasGamma)
+		name := w.String(interpName)
+		fn, ok := scale.Interpolate(name, gamma, hasGamma)
 		if !ok {
-			fail("unrecognized interpolator: %s", interpName.AsString())
+			fail("unrecognized interpolator: %s", name)
 		}
 		ip.SetInterpolate(fn)
 	default:
@@ -574,7 +582,7 @@ func configureRange(s scale.Scale, p *opParams, count int) {
 			b.SetRound(round)
 		} else if isInterp {
 			if round {
-				ip.SetInterpolate(scale.InterpolateRound)
+				ip.SetInterpolate(scale.InterpolateRoundI)
 			} else {
 				ip.SetInterpolate(scale.InterpolateValue)
 			}
@@ -625,7 +633,7 @@ func numOr0f(f float64) float64 {
 	return f
 }
 
-func configureScheme(typ string, p *opParams, count int) rangeSpec {
+func configureScheme(w jsval.Walker, typ string, p *opParams, count int) rangeSpec {
 	extent, hasExtent := valueList(p.Get("schemeExtent"))
 	reverse := p.Value("reverse").IsTruthy()
 	var interp scale.UnitInterpolator
@@ -639,16 +647,16 @@ func configureScheme(typ string, p *opParams, count int) rangeSpec {
 	}
 	iname := ""
 	if iv := p.Value("interpolate"); iv.IsTruthy() {
-		iname = iv.AsString()
+		iname = w.String(iv)
 	}
 
 	if arr, ok := valueList(p.Get("scheme")); ok {
-		interp = scale.InterpolateColors(arr, iname, gamma, hasGamma)
+		interp = scale.InterpolateColors(w, arr, iname, gamma, hasGamma)
 	} else {
-		name := strings.ToLower(p.Value("scheme").AsString())
-		sch, ok := scale.LookupScheme(name)
+		text := w.String(p.Value("scheme"))
+		sch, ok := scale.LookupScheme(jsval.JSLower(text)) // _.scheme.toLowerCase()
 		if !ok {
-			fail("Unrecognized scheme name: %s", p.Value("scheme").AsString())
+			fail("Unrecognized scheme name: %s", text)
 		}
 		if sch.IsDiscrete() {
 			discrete = true
@@ -835,7 +843,7 @@ func (c *rtContext) hasScaleRef(ref jsval.Value) bool {
 // such scale that is a call of undefined.
 func (c *rtContext) encScale(ref, v jsval.Value) jsval.Value {
 	if !c.hasScaleRef(ref) {
-		fail("_.%%%s is not a function", ref.AsString())
+		fail("_.%%%s is not a function", jsval.StringPrefix(ref, jsval.MessageBytes))
 	}
 	return c.applyScale(ref, v)
 }

@@ -43,7 +43,7 @@ func init() {
 				for k, t := range b.data {
 					v := fields[d].Apply(t)
 					// values inside [lo, hi) keep the bit clear
-					if !(transforms.GreaterEq(v, lo) && transforms.Less(v, hi)) {
+					if !(transforms.GreaterEq(n.g.view.walk, v, lo) && transforms.Less(n.g.view.walk, v, hi)) {
 						b.curr[k] |= 1 << uint(d)
 					}
 				}
@@ -116,7 +116,13 @@ func resolvePasses(curr []uint32, ignore uint32, index jsval.Value) bool {
 
 // resolveIndex is resolvePasses with the index it passes.
 func resolveIndex(curr []uint32, ignore uint32, index jsval.Value) (int, bool) {
-	k, ok := parseArrayIndex(index.AsString())
+	// index is a tuple's _index or a key of the index map: an array index
+	// (at most ten digits) or nothing.
+	key, ok := index.PropertyKey(16)
+	if !ok {
+		return 0, false
+	}
+	k, ok := parseArrayIndex(key)
 	return k, ok && k < len(curr) && curr[k]&ignore == 0
 }
 

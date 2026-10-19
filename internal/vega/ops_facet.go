@@ -198,7 +198,7 @@ func facPreFacet(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNod
 				// no forEach
 				switch {
 				case arr.IsNullish():
-					fail("TypeError: Cannot read properties of %s (reading 'forEach')", arr.AsString())
+					fail("TypeError: Cannot read properties of %s (reading 'forEach')", jsval.StringPrefix(arr, jsval.MessageBytes))
 				case !arr.IsArr():
 					fail("TypeError: field(...).forEach is not a function")
 				}

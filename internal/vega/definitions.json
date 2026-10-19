@@ -2062,6 +2062,7 @@
      "quarter",
      "month",
      "week",
+     "isoweek",
      "date",
      "day",
      "dayofyear",

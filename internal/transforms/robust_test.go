@@ -36,11 +36,11 @@ func TestNoPanicOnHostileInput(t *testing.T) {
 				{Op: "distinct", Field: g}, {Op: "exponential", Field: x, Param: 0.5}, {Op: "values", Field: x}}})
 		},
 		"window": func(d []jsval.Value) {
-			Window(ctx, d, WindowParams{Sort: CompareBy([]Field{x}, nil), GroupBy: []Field{g}, Frame: []FrameBound{{Offset: -1}, {Offset: 2}},
+			Window(ctx, d, WindowParams{Sort: CompareBy(jsval.Walker{}, []Field{x}, nil), GroupBy: []Field{g}, Frame: []FrameBound{{Offset: -1}, {Offset: 2}},
 				Ops: []WindowOpSpec{{Op: "sum", Field: y}, {Op: "rank"}, {Op: "lag", Field: x, Param: math.NaN()}, {Op: "median", Field: x},
 					{Op: "next_value", Field: y, Param: math.NaN()}, {Op: "nth_value", Field: x, Param: 2}, {Op: "percent_rank"}}})
 		},
-		"collect": func(d []jsval.Value) { Collect(ctx, d, CompareBy([]Field{x, y}, []string{Desc})) },
+		"collect": func(d []jsval.Value) { Collect(ctx, d, CompareBy(jsval.Walker{}, []Field{x, y}, []string{Desc})) },
 		"joinagg": func(d []jsval.Value) {
 			JoinAggregate(ctx, d, JoinAggregateParams{GroupBy: []Field{g}, Measures: []Measure{{Op: "mean", Field: x}, {Op: "max", Field: y}}})
 		},

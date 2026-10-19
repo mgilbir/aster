@@ -325,3 +325,67 @@ func TestParseJSONReadsLongIntegerLiteralExactly(t *testing.T) {
 		}
 	}
 }
+
+// longMidpointLiterals are the literals of
+// TestParseJSONReadsLongIntegerLiteralExactly, which strconv.ParseFloat
+// misreads, and whose exact value rounds to 1e-323.
+func longMidpointLiterals() []string {
+	x := new(big.Float).SetPrec(5000).SetMantExp(new(big.Float).SetPrec(5000).SetInt64(3), -1075)
+	x.Add(x, new(big.Float).SetPrec(5000).SetMantExp(new(big.Float).SetPrec(5000).SetInt64(1), -2100))
+	s := strings.TrimRight(x.Text('f', 2200), "0")
+	_, fp, _ := strings.Cut(s, ".")
+	digits := strings.TrimLeft(fp, "0")
+	return []string{
+		digits + "e-" + strconv.Itoa(len(fp)),
+		digits[:1000] + "." + digits[1000:] + "e" + strconv.Itoa(len(digits)-1000-len(fp)),
+		"0." + fp,
+	}
+}
+
+// C99 (audit 2026-10-18): every conversion of decimal text to a number is the
+// one exact routine JSON.parse uses (ParseDecimal): Number() of a string
+// (StringToNumber), and through it the CSV and expression coercions, read
+// the long literal that ParseFloat misreads as V8 does. The expression
+// evaluator's literal, parseFloat and parseInt are checked in its package.
+func TestEveryDecimalConversionIsExact(t *testing.T) {
+	for _, lit := range longMidpointLiterals() {
+		want, ok := exactNumber(lit)
+		if !ok || want != 1e-323 {
+			t.Fatalf("the literal's exact value rounds to %v, want 1e-323", want)
+		}
+		for name, got := range map[string]float64{
+			"ParseDecimal":            must(ParseDecimal(lit)),
+			"ParseDecimal +":          must(ParseDecimal("+" + lit)),
+			"StringToNumber":          StringToNumber(" \u2028" + lit + "\ufeff"),
+			"ToNumber of [lit]":       ToNumber(ArrOf(Str(lit))),
+			"AsDouble":                Str(lit).AsDouble(),
+			"-StringToNumber of -lit": -StringToNumber("-" + lit),
+		} {
+			if math.Float64bits(got) != math.Float64bits(want) {
+				t.Errorf("%s of the %d-byte literal = %v, want %v", name, len(lit), got, want)
+			}
+		}
+	}
+	for _, c := range []struct {
+		lit  string
+		want float64
+		ok   bool
+	}{
+		{"1", 1, true}, {"-0", math.Copysign(0, -1), true}, {".5", 0.5, true}, {"5.", 5, true},
+		{"1e400", math.Inf(1), true}, {"-1e400", math.Inf(-1), true}, {"1e-400", 0, true},
+		{"+12.5e1", 125, true}, {"", math.NaN(), false}, {".", math.NaN(), false}, {"1e", math.NaN(), false},
+		{"Infinity", math.NaN(), false}, {"0x10", math.NaN(), false}, {"1_0", math.NaN(), false},
+	} {
+		got, ok := ParseDecimal(c.lit)
+		if ok != c.ok || math.Float64bits(got) != math.Float64bits(c.want) && !(math.IsNaN(got) && math.IsNaN(c.want)) {
+			t.Errorf("ParseDecimal(%q) = %v, %v; want %v, %v", c.lit, got, ok, c.want, c.ok)
+		}
+	}
+}
+
+func must(f float64, ok bool) float64 {
+	if !ok {
+		return math.NaN()
+	}
+	return f
+}

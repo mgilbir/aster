@@ -2,7 +2,6 @@ package vega
 
 import (
 	_ "embed"
-	"strings"
 	"sync"
 
 	"github.com/mgilbir/aster/internal/jsval"
@@ -90,7 +89,7 @@ func definitions() map[string]*transformDef {
 
 // parseTransform parses one data transform specification into an entry.
 func parseTransform(spec jsval.Value, scope *Scope) *entry {
-	typ := strings.ToLower(spec.Get("type").AsString())
+	typ := jsval.JSLower(spec.Get("type").AsString()) // def.type.toLowerCase()
 	def := definitions()[typ]
 	if def == nil {
 		perr("Unrecognized transform type: %s", quote(spec.Get("type")))

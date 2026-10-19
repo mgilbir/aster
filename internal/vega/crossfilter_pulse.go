@@ -144,7 +144,7 @@ func checkWritesAdds(g *flowGraph, typ string, p *opParams, in []jsval.Value) {
 		default:
 			continue
 		}
-		fail("TypeError: Cannot create property '%s' on %s '%s'", name(p), kind, t.AsString())
+		fail("TypeError: Cannot create property '%s' on %s '%s'", name(p), kind, jsval.StringPrefix(t, jsval.MessageBytes))
 	}
 }
 

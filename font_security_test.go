@@ -146,11 +146,11 @@ func TestHostileFonts(t *testing.T) {
 				return
 			}
 			defer c.Close()
-			if _, err := c.VegaToSVG([]byte(spec)); err != nil && strings.Contains(err.Error(), "internal error") {
+			if _, err := c.VegaToSVG([]byte(spec)); isEngineBug(err) {
 				done <- "internal: " + err.Error()
 				return
 			}
-			if _, err := c.SVGToPNG(svgIn); err != nil && strings.Contains(err.Error(), "internal error") {
+			if _, err := c.SVGToPNG(svgIn); isEngineBug(err) {
 				done <- "internal: " + err.Error()
 				return
 			}

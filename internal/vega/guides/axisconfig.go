@@ -53,12 +53,8 @@ func axisFallback(prop string, cfg, axisCfg, style Value) Value {
 	return jsval.Null
 }
 
-func lowerFirst(s string) string {
-	if s == "" {
-		return s
-	}
-	return strings.ToLower(s[:1]) + s[1:]
-}
+// lowerFirst is prop[5].toLowerCase() + prop.slice(6) after the prefix.
+func lowerFirst(s string) string { return jsval.LowerFirst(s) }
 
 // keyUnion collects the property names of the given objects.
 func keyUnion(sc Scope, objects ...Value) []string {
@@ -125,7 +121,7 @@ func axisConfig(spec Value, sc Scope) (Value, error) {
 		} else {
 			xy = cfg.Get("axisY")
 		}
-		or = cfg.Get("axis" + strings.ToUpper(o[:1]) + o[1:])
+		or = cfg.Get("axis" + jsval.UpperFirst(o)) // orient[0].toUpperCase() + orient.slice(1)
 	}
 
 	if xy.IsTruthy() || or.IsTruthy() || band.IsTruthy() {

@@ -40,7 +40,15 @@ type meta struct {
 	// work is what SetWork installed: it is told the steps of the scale's
 	// loops over its domain, a batch at a time.
 	work func(steps int)
+	// walk is what SetWalker installed: the call's Walker, which walks the
+	// values the scale reads as text or interpolates element by element.
+	walk jsval.Walker
 }
+
+// SetWalker installs the Walker of the call the scale belongs to (ADR 0018).
+// A copy of the scale keeps it. Without one the scale walks with the
+// detached Walker.
+func (m *meta) SetWalker(w jsval.Walker) { m.walk = w }
 
 // workBatch is how many domain values a scale's loops go between two reports
 // of their work.

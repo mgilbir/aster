@@ -1,8 +1,7 @@
 package svg
 
 import (
-	"strings"
-
+	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/scene"
 )
 
@@ -65,7 +64,7 @@ func (r *renderer) markAria(m *scene.Mark) {
 			label = m.Items[0].Description
 		}
 		if label == "" {
-			label = prefix + titleCaption(m.Items[0]) + "'"
+			label = prefix + titleCaption(w.walk, m.Items[0]) + "'"
 		}
 	default:
 		t := m.Type
@@ -93,24 +92,15 @@ func (r *renderer) markAria(m *scene.Mark) {
 }
 
 // titleCaption is `array(item.text).join(' ')`.
-func titleCaption(it *scene.Item) string {
+func titleCaption(w jsval.Walker, it *scene.Item) string {
 	t := it.Text()
 	if t.IsNullish() {
 		return ""
 	}
 	if !t.IsArr() {
-		return t.AsString()
+		return w.String(t)
 	}
-	items := t.Items()
-	parts := make([]string, len(items))
-	for i, v := range items {
-		if v.IsNullish() {
-			parts[i] = ""
-		} else {
-			parts[i] = v.AsString()
-		}
-	}
-	return strings.Join(parts, " ")
+	return w.Join(t.Items(), " ")
 }
 
 // itemAria writes the aria attributes of an item element.

@@ -29,7 +29,7 @@ func compareSpec(v jsval.Value) Comparator {
 	} else {
 		orders = strList(ov)
 	}
-	return CompareBy(FieldsOf(paths...), orders)
+	return CompareBy(jsval.Walker{}, FieldsOf(paths...), orders)
 }
 
 func asPair(v jsval.Value) [2]string {

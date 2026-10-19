@@ -339,30 +339,6 @@ type linkForce struct {
 	bias                 []float64
 }
 
-type idKey struct {
-	kind jsval.Kind
-	n    float64
-	s    string
-	o    *jsval.Object
-}
-
-// keyOf approximates JavaScript's Map key equality (SameValueZero).
-func keyOf(v jsval.Value) idKey {
-	k := idKey{kind: v.Kind()}
-	switch v.Kind() {
-	case jsval.KindNum, jsval.KindTimestamp, jsval.KindBool:
-		k.n = v.NumValue()
-		if math.IsNaN(k.n) {
-			k.n, k.s = 0, "NaN"
-		}
-	case jsval.KindStr:
-		k.s = v.StrValue()
-	case jsval.KindObj:
-		k.o = v.ObjValue()
-	}
-	return k
-}
-
 func (f *linkForce) initialize(s *sim) error {
 	var err error
 	if f.iters, err = forceIterations("link", f.cfg.Iterations); err != nil {
@@ -371,7 +347,9 @@ func (f *linkForce) initialize(s *sim) error {
 	f.s = s
 	links := f.cfg.Links
 	n, m := len(s.nodes), len(links)
-	byID := make(map[idKey]int32, n)
+	// d3's nodeById, a Map: ids are SameValueZero keys, an array or object
+	// by reference.
+	byID := make(map[jsval.InternKey]int32, n)
 	for i := range s.nodes {
 		var id jsval.Value
 		if f.cfg.ID != nil {
@@ -379,7 +357,7 @@ func (f *linkForce) initialize(s *sim) error {
 		} else {
 			id = jsval.Int(i)
 		}
-		byID[keyOf(id)] = int32(i)
+		byID[id.MapKey()] = int32(i)
 	}
 	byObj := map[*jsval.Object]int32{}
 	resolve := func(v jsval.Value) (int32, bool) {
@@ -392,7 +370,7 @@ func (f *linkForce) initialize(s *sim) error {
 			i, ok := byObj[v.ObjValue()]
 			return i, ok
 		}
-		i, ok := byID[keyOf(v)]
+		i, ok := byID[v.MapKey()]
 		return i, ok
 	}
 	f.src, f.tgt = make([]int32, m), make([]int32, m)
@@ -411,7 +389,7 @@ func (f *linkForce) initialize(s *sim) error {
 			idx, ok := resolve(v)
 			if !ok {
 				// Same message as d3's `find`.
-				return fmt.Errorf("node not found: %s", v.AsString())
+				return fmt.Errorf("node not found: %s", jsval.StringPrefix(v, jsval.MessageBytes))
 			}
 			*end.dst = idx
 			if !v.IsObj() {

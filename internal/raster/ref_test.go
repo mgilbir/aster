@@ -36,21 +36,22 @@ func refPNG(t testing.TB, svg []byte, scale float64) *image.NRGBA {
 }
 
 // corpusSVG is upstream's SVG for a Vega-Lite example, rendered by the node
-// oracle: the input the corpus tests and benchmarks rasterize.
-func corpusSVG(t testing.TB, name string) []byte {
+// oracle: the input the corpus tests and benchmarks rasterize. upstreamErr is
+// upstream's error for an example it does not render (svg is then nil).
+func corpusSVG(t testing.TB, name string) (svg []byte, upstreamErr string) {
 	t.Helper()
 	spec, err := os.ReadFile(filepath.Join(corpusDir, name+".vl.json"))
 	if err != nil {
-		t.Skipf("corpus not found: %v", err)
+		t.Fatalf("corpus spec: %v", err)
 	}
 	res, err := oracle.For(t, oracle.VL6).SVG(true, spec)
 	if err != nil {
 		t.Fatalf("oracle: %v", err)
 	}
 	if res.Err != "" {
-		t.Skipf("%s: upstream: %s", name, res.Err)
+		return nil, res.Err
 	}
-	return []byte(res.SVG)
+	return []byte(res.SVG), ""
 }
 
 func toNRGBA(img image.Image) *image.NRGBA {

@@ -25,18 +25,18 @@ func init() {
 			px.colorDep = pixelDependent(c)
 			hp.ColorFn = func(datum jsval.Value, pix contour.Pixel) (contour.RGB, error) {
 				if px.colorDep {
-					return parseColor(c.Apply(px.at(datum, pix))), nil
+					return parseColor(p.walk, c.Apply(px.at(datum, pix))), nil
 				}
 				if !px.colorOK || px.colorFor != datum.ObjValue() {
 					px.colorFor, px.colorOK = datum.ObjValue(), true
-					px.color = parseColor(c.Apply(px.fresh(datum, pix)))
+					px.color = parseColor(p.walk, c.Apply(px.fresh(datum, pix)))
 				}
 				return px.color, nil
 			}
 		default:
 			// `rgb(color || '#888')`: a falsy constant selects the default.
 			if v := p.Value("color"); v.IsTruthy() {
-				hp.Color, hp.ColorSet = parseColor(v), true
+				hp.Color, hp.ColorSet = parseColor(p.walk, v), true
 			}
 		}
 		switch o := p.Get("opacity").(type) {
@@ -81,10 +81,11 @@ func canvasValue(img *contour.Image) jsval.Value {
 	return jsval.Obj(o)
 }
 
-// parseColor is `rgb(v)`: d3-color reads the string form of its argument, and
-// a color it cannot parse has NaN channels (which paint as 0).
-func parseColor(v jsval.Value) contour.RGB {
-	c := color.ParseRGB(v.AsString())
+// parseColor is `rgb(v)`: d3-color reads the string form of its argument
+// (taken with the call's Walker w), and a color it cannot parse has NaN
+// channels (which paint as 0).
+func parseColor(w jsval.Walker, v jsval.Value) contour.RGB {
+	c := color.ParseRGB(w.String(v))
 	return contour.RGB{R: c.R, G: c.G, B: c.B}
 }
 

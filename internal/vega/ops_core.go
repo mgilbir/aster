@@ -3,7 +3,6 @@ package vega
 import (
 	"math"
 
-	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/scene"
 	"github.com/mgilbir/aster/internal/transforms"
@@ -95,25 +94,25 @@ func facField(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 			return n.value
 		}
 		name := p.Value("name")
-		as, _ := asString(p.Get("as"))
+		as, _ := paramText(p.walk, p.Get("as"))
 		if name.IsArr() {
 			out := make([]transforms.Field, 0, name.Len())
 			for _, f := range name.Items() {
-				out = append(out, fieldAccessor(f.AsString(), ""))
+				out = append(out, fieldAccessor(p.walk.String(f), ""))
 			}
 			return out
 		}
-		return fieldAccessor(name.AsString(), as)
+		return fieldAccessor(p.walk.String(name), as)
 	}
 }
 
-func asString(x any) (string, bool) {
+func paramText(w jsval.Walker, x any) (string, bool) {
 	switch v := x.(type) {
 	case jsval.Value:
 		if v.IsNullish() {
 			return "", false
 		}
-		return v.AsString(), true
+		return w.String(v), true
 	case string:
 		return v, true
 	}
@@ -128,19 +127,19 @@ func facKey(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *o
 		var fields []string
 		if arr, ok := p.Get("fields").([]any); ok {
 			for _, f := range arr {
-				if s, ok := asString(f); ok {
+				if s, ok := paramText(p.walk, f); ok {
 					fields = append(fields, s)
 				}
 			}
 		}
-		return makeKeyFn(c.view.zone, fields, p.Value("flat").IsTruthy())
+		return makeKeyFn(c.view.keys, fields, p.Value("flat").IsTruthy())
 	}
 }
 
 // makeKeyFn is vega-util's key(fields, flat): the string forms of the field
 // values joined with '|' (a date as in the view's zone z). With flat, the names
 // are literal property names.
-func makeKeyFn(z format.Zone, fields []string, flat bool) transforms.KeyFunc {
+func makeKeyFn(k transforms.Keys, fields []string, flat bool) transforms.KeyFunc {
 	fs := make([]transforms.Field, len(fields))
 	for i, f := range fields {
 		if flat {
@@ -159,7 +158,7 @@ func makeKeyFn(z format.Zone, fields []string, flat bool) transforms.KeyFunc {
 			fs[i] = transforms.FieldOf(f)
 		}
 	}
-	return transforms.KeyOf(z, fs...)
+	return transforms.KeyOf(k, fs...)
 }
 
 // flatField reads a property by literal name (backslash escapes removed).
@@ -179,10 +178,10 @@ func (c *rtContext) keyFn(k pKey) transforms.KeyFunc {
 	var fields []string
 	for _, f := range k.fields {
 		if v, ok := f.(jsval.Value); ok {
-			fields = append(fields, v.AsString())
+			fields = append(fields, c.g.walk.String(v))
 		}
 	}
-	return makeKeyFn(c.view.zone, fields, k.flat)
+	return makeKeyFn(c.view.keys, fields, k.flat)
 }
 
 // compareSpec is a resolved comparator: the function over tuples, and the field
@@ -203,7 +202,7 @@ type compareSpec struct {
 
 // compareFrom builds a comparator from field specs (paths or accessors) and
 // order strings; nil when no field remains.
-func compareFrom(fields []any, orders []any) *compareSpec {
+func compareFrom(w jsval.Walker, fields []any, orders []any) *compareSpec {
 	fs := make([]transforms.Field, 0, len(fields))
 	ord := make([]string, 0, len(fields))
 	names := make([]string, 0, len(fields))
@@ -217,8 +216,9 @@ func compareFrom(fields []any, orders []any) *compareSpec {
 			if v.IsNullish() {
 				continue
 			}
-			fld = transforms.FieldOf(v.AsString())
-			rootsOK = appendRoot(&roots, &rest, v.AsString()) && rootsOK
+			name := w.String(v)
+			fld = transforms.FieldOf(name)
+			rootsOK = appendRoot(&roots, &rest, name) && rootsOK
 		case transforms.Field:
 			fld = v
 			rootsOK = false
@@ -230,11 +230,11 @@ func compareFrom(fields []any, orders []any) *compareSpec {
 		}
 		o := ""
 		if i < len(orders) {
-			o, _ = asString(orders[i])
+			o, _ = paramText(w, orders[i])
 		}
 		fs, ord, names = append(fs, fld), append(ord, o), append(names, fld.Name)
 	}
-	cmp := transforms.CompareBy(fs, ord)
+	cmp := transforms.CompareBy(w, fs, ord)
 	if cmp == nil {
 		return nil
 	}
@@ -268,7 +268,7 @@ func (c *rtContext) compareFn(cmp pCompare) *compareSpec {
 	for i, o := range cmp.orders {
 		orders[i] = o
 	}
-	return compareFrom(fields, orders)
+	return compareFrom(c.view.walk, fields, orders)
 }
 
 func facCompare(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *opParams) any) {
@@ -296,7 +296,7 @@ func facCompare(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode
 			}
 			return []any{x}
 		}
-		if cs := compareFrom(asList(p.Get("fields")), asList(p.Get("orders"))); cs != nil {
+		if cs := compareFrom(c.view.walk, asList(p.Get("fields")), asList(p.Get("orders"))); cs != nil {
 			return cs
 		}
 		// upstream returns null (no ordering): keep a non-nil marker so the
@@ -521,10 +521,10 @@ func facMultiExtent(c *rtContext, n *opNode, e *entry) (any, transform, func(*op
 			for i, x := range exts {
 				n.g.rows(i, len(exts), 1)
 				ev, _ := x.(jsval.Value)
-				if transforms.Less(ev.Index(0), lo) {
+				if transforms.Less(n.g.view.walk, ev.Index(0), lo) {
 					lo = ev.Index(0)
 				}
-				if transforms.Greater(ev.Index(1), hi) {
+				if transforms.Greater(n.g.view.walk, ev.Index(1), hi) {
 					hi = ev.Index(1)
 				}
 			}
@@ -572,7 +572,7 @@ func facTupleIndex(c *rtContext, n *opNode, e *entry) (any, transform, func(*opN
 		idx := &tupleIndex{lookup: lookup, m: make(map[string]jsval.Value, len(tuples))}
 		for i, t := range tuples {
 			n.g.rows(i, len(tuples), 2)
-			idx.m[f.Apply(t).AsString()] = t
+			idx.m[n.g.walk.String(f.Apply(t))] = t
 		}
 		n.value = idx
 		n.modified = true

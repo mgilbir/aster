@@ -65,7 +65,7 @@ func (r *renderer) style(m *scene.Mark, it *scene.Item, tag string, fill, stroke
 	}
 	if !it.StrokeDash().IsNullish() {
 		// String(value): an array joins with commas, an empty one gives "".
-		w.attr("stroke-dasharray", it.StrokeDash().AsString())
+		w.attr("stroke-dasharray", w.walk.String(it.StrokeDash()))
 	}
 	r.itemNumAttr(it, "strokeDashOffset", "stroke-dashoffset", it.StrokeDashOffset())
 	r.itemNumAttr(it, "strokeMiterLimit", "stroke-miterlimit", it.StrokeMiterLimit())
@@ -95,7 +95,7 @@ func (r *renderer) style(m *scene.Mark, it *scene.Item, tag string, fill, stroke
 // the property was given as String(value), as upstream's renderer does.
 func (r *renderer) itemNumAttr(it *scene.Item, prop string, name lit, n scene.Num) {
 	if v, ok := it.RawValue(prop); ok {
-		r.w.attr(name, v.AsString())
+		r.w.attr(name, r.w.walk.String(v))
 		return
 	}
 	r.numAttr(name, n)

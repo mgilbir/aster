@@ -3,7 +3,8 @@ package geo
 import (
 	"fmt"
 	"sort"
-	"strings"
+
+	"github.com/mgilbir/aster/internal/jsval"
 )
 
 // The registered projections are constructed with the same chain of setter
@@ -105,7 +106,7 @@ func NewProjection(typ string) (Projection, error) {
 	if typ == "" {
 		typ = "mercator"
 	}
-	ctor := registry[strings.ToLower(typ)]
+	ctor := registry[jsval.JSLower(typ)] // type.toLowerCase()
 	if ctor == nil {
 		return nil, fmt.Errorf("unrecognized projection type: %s", typ)
 	}

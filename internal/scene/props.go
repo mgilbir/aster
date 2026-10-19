@@ -21,6 +21,7 @@ func (it *Item) Set(key string, val jsval.Value) (known bool, err error) {
 }
 
 func (it *Item) setProp(l *jsonLoader, k string, val jsval.Value) (bool, error) {
+	w := it.Walker()
 	if rawNumeric(k) {
 		it.setRaw(k, val)
 	}
@@ -38,13 +39,13 @@ func (it *Item) setProp(l *jsonLoader, k string, val jsval.Value) (bool, error) 
 	case "height":
 		it.Height = numOf(val)
 	case "align":
-		it.Align = strOf(val)
+		it.Align = strOf(w, val)
 	case "baseline":
-		it.Baseline = strOf(val)
+		it.Baseline = strOf(w, val)
 	case "fill":
-		it.Fill = l.paint(val)
+		it.Fill = l.paint(w, val)
 	case "stroke":
-		it.Stroke = l.paint(val)
+		it.Stroke = l.paint(w, val)
 	case "opacity":
 		it.Opacity = numOf(val)
 	case "fillOpacity":
@@ -54,9 +55,9 @@ func (it *Item) setProp(l *jsonLoader, k string, val jsval.Value) (bool, error) 
 	case "strokeWidth":
 		it.StrokeWidth = numOf(val)
 	case "strokeCap":
-		it.strokeW().StrokeCap = strOf(val)
+		it.strokeW().StrokeCap = strOf(w, val)
 	case "strokeJoin":
-		it.strokeW().StrokeJoin = strOf(val)
+		it.strokeW().StrokeJoin = strOf(w, val)
 	case "strokeMiterLimit":
 		it.strokeW().StrokeMiterLimit = numOf(val)
 	case "strokeDash":
@@ -69,7 +70,7 @@ func (it *Item) setProp(l *jsonLoader, k string, val jsval.Value) (bool, error) 
 	case "strokeOffset":
 		it.strokeW().StrokeOffset = numOf(val)
 	case "blend":
-		it.strokeW().Blend = strOf(val)
+		it.strokeW().Blend = strOf(w, val)
 	case "cornerRadius":
 		it.geomW().CornerRadius = numOf(val)
 	case "cornerRadiusTopLeft":
@@ -92,13 +93,13 @@ func (it *Item) setProp(l *jsonLoader, k string, val jsval.Value) (bool, error) 
 		it.geomW().OuterRadius = numOf(val)
 	case "shape":
 		if val.IsObj() {
-			fn, err := pathFuncFromValue(val)
+			fn, err := pathFuncFromValue(w, val)
 			if err != nil {
 				return true, err
 			}
 			it.Shape.Func = func(ctx PathContext, _ *Item) string { return fn(ctx) }
 		} else {
-			it.Shape.Name = strOf(val)
+			it.Shape.Name = strOf(w, val)
 		}
 	case "size":
 		it.Size = numOf(val)
@@ -109,25 +110,25 @@ func (it *Item) setProp(l *jsonLoader, k string, val jsval.Value) (bool, error) 
 		if val.IsNullish() {
 			it.SetPath(Path{})
 		} else {
-			it.SetPath(P(strOf(val)))
+			it.SetPath(P(strOf(w, val)))
 		}
 	case "scaleX":
 		it.pathW().ScaleX = numOf(val)
 	case "scaleY":
 		it.pathW().ScaleY = numOf(val)
 	case "interpolate":
-		it.lineW().Interpolate = strOfTruthy(val)
+		it.lineW().Interpolate = strOfTruthy(w, val)
 	case "tension":
 		it.lineW().Tension = numOf(val)
 	case "orient":
-		it.lineW().Orient = strOfTruthy(val)
+		it.lineW().Orient = strOfTruthy(w, val)
 	case "defined":
 		it.Defined = FalseOf(val)
 		it.setRawTri(k, val)
 	case "text":
 		it.textW().Text = val
 	case "font":
-		it.textW().Font = strOf(val)
+		it.textW().Font = strOf(w, val)
 		// An array (Vega-Lite writes [] for a null title font) is truthy: the
 		// attribute is its text, with no sans-serif default.
 		delete(it.Raw, "font")
@@ -137,11 +138,11 @@ func (it *Item) setProp(l *jsonLoader, k string, val jsval.Value) (bool, error) 
 	case "fontSize":
 		it.textW().FontSize = numOf(val)
 	case "fontWeight":
-		it.textW().FontWeight = strOf(val)
+		it.textW().FontWeight = strOf(w, val)
 	case "fontStyle":
-		it.textW().FontStyle = strOf(val)
+		it.textW().FontStyle = strOf(w, val)
 	case "fontVariant":
-		it.textW().FontVariant = strOf(val)
+		it.textW().FontVariant = strOf(w, val)
 	case "dx":
 		it.textW().Dx = numOf(val)
 	case "dy":
@@ -155,15 +156,15 @@ func (it *Item) setProp(l *jsonLoader, k string, val jsval.Value) (bool, error) 
 	case "limit":
 		it.textW().Limit = numOf(val)
 	case "lineBreak":
-		it.textW().LineBreak = strOf(val)
+		it.textW().LineBreak = strOf(w, val)
 	case "lineHeight":
 		it.textW().LineHeight = numOf(val)
 	case "ellipsis":
-		it.textW().Ellipsis = strOf(val)
+		it.textW().Ellipsis = strOf(w, val)
 	case "dir":
-		it.textW().Dir = strOf(val)
+		it.textW().Dir = strOf(w, val)
 	case "url":
-		it.imageW().URL = strOf(val)
+		it.imageW().URL = strOf(w, val)
 	case "aspect":
 		it.imageW().Aspect = FalseOf(val)
 		it.setRawTri(k, val)
@@ -171,7 +172,7 @@ func (it *Item) setProp(l *jsonLoader, k string, val jsval.Value) (bool, error) 
 		it.imageW().Smooth = FalseOf(val)
 		it.setRawTri(k, val)
 	case "cursor":
-		it.linkW().Cursor = strOf(val)
+		it.linkW().Cursor = strOf(w, val)
 	case "href":
 		// The renderer sanitizes the href with vega-loader, whose first step
 		// is uri.replace(...): only a string can be a link, any other value
@@ -183,21 +184,21 @@ func (it *Item) setProp(l *jsonLoader, k string, val jsval.Value) (bool, error) 
 	case "tooltip":
 		it.linkW().Tooltip = val
 	case "description":
-		it.Description = strOf(val)
+		it.Description = strOf(w, val)
 	case "aria":
 		it.Aria = FalseOf(val)
 		it.setRawTri(k, val)
 	case "ariaRole":
-		it.AriaRole = strOf(val)
+		it.AriaRole = strOf(w, val)
 	case "ariaRoleDescription":
-		it.AriaRoleDescription = strOf(val)
+		it.AriaRoleDescription = strOf(w, val)
 	case "zindex":
 		it.Zindex = numOf(val)
 	case "datum":
 		it.Datum = val
 	case "clip":
 		if val.IsObj() {
-			fn, err := pathFuncFromValue(val)
+			fn, err := pathFuncFromValue(w, val)
 			if err != nil {
 				return true, err
 			}

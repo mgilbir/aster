@@ -129,7 +129,7 @@ func (c *rtContext) PathShape(path jsval.Value) jsval.Value {
 	if !path.IsStr() {
 		return c.view.newShape(func(ctx scene.PathContext, _ *scene.Item) string {
 			if ctx == nil {
-				return path.AsString()
+				return c.g.walk.String(path)
 			}
 			if path.IsNullish() {
 				of := "undefined"
@@ -141,7 +141,7 @@ func (c *rtContext) PathShape(path jsval.Value) jsval.Value {
 			panic(&jsval.Thrown{Name: "TypeError", Msg: "path.match is not a function"})
 		})
 	}
-	fn, err := scene.PathFuncFromString(path.AsString())
+	fn, err := scene.PathFuncFromString(path.StrValue())
 	if err != nil {
 		panic(&budget.Stop{Err: err}) // a bound: Program.Eval returns it
 	}
