@@ -1,0 +1,112 @@
+[
+ {
+  "t": 0,
+  "string": "Thu Jan 01 1970 00:00:00 GMT+0000 (Coordinated Universal Time),1,,Thu Jan 01 1970 00:00:00 GMT+0000 (Coordinated Universal Time)",
+  "join": "Thu Jan 01 1970 00:00:00 GMT+0000 (Coordinated Universal Time)|x|",
+  "plus": "Thu Jan 01 1970 00:00:00 GMT+0000 (Coordinated Universal Time)",
+  "json": "[\"1970-01-01T00:00:00.000Z\",{\"d\":\"1970-01-01T00:00:00.000Z\"}]",
+  "jsonTop": "\"1970-01-01T00:00:00.000Z\"",
+  "stringValue": "[\"1970-01-01T00:00:00.000Z\",[\"1970-01-01T00:00:00.000Z\"]]",
+  "stringValueTop": "\"1970-01-01T00:00:00.000Z\"",
+  "less": false
+ },
+ {
+  "t": -1,
+  "string": "Wed Dec 31 1969 23:59:59 GMT+0000 (Coordinated Universal Time),1,,Wed Dec 31 1969 23:59:59 GMT+0000 (Coordinated Universal Time)",
+  "join": "Wed Dec 31 1969 23:59:59 GMT+0000 (Coordinated Universal Time)|x|",
+  "plus": "Wed Dec 31 1969 23:59:59 GMT+0000 (Coordinated Universal Time)",
+  "json": "[\"1969-12-31T23:59:59.999Z\",{\"d\":\"1969-12-31T23:59:59.999Z\"}]",
+  "jsonTop": "\"1969-12-31T23:59:59.999Z\"",
+  "stringValue": "[\"1969-12-31T23:59:59.999Z\",[\"1969-12-31T23:59:59.999Z\"]]",
+  "stringValueTop": "\"1969-12-31T23:59:59.999Z\"",
+  "less": false
+ },
+ {
+  "t": 1000000000000,
+  "string": "Sun Sep 09 2001 01:46:40 GMT+0000 (Coordinated Universal Time),1,,Sun Sep 09 2001 01:46:40 GMT+0000 (Coordinated Universal Time)",
+  "join": "Sun Sep 09 2001 01:46:40 GMT+0000 (Coordinated Universal Time)|x|",
+  "plus": "Sun Sep 09 2001 01:46:40 GMT+0000 (Coordinated Universal Time)",
+  "json": "[\"2001-09-09T01:46:40.000Z\",{\"d\":\"2001-09-09T01:46:40.000Z\"}]",
+  "jsonTop": "\"2001-09-09T01:46:40.000Z\"",
+  "stringValue": "[\"2001-09-09T01:46:40.000Z\",[\"2001-09-09T01:46:40.000Z\"]]",
+  "stringValueTop": "\"2001-09-09T01:46:40.000Z\"",
+  "less": true
+ },
+ {
+  "t": 1500000000000.5,
+  "string": "Fri Jul 14 2017 02:40:00 GMT+0000 (Coordinated Universal Time),1,,Fri Jul 14 2017 02:40:00 GMT+0000 (Coordinated Universal Time)",
+  "join": "Fri Jul 14 2017 02:40:00 GMT+0000 (Coordinated Universal Time)|x|",
+  "plus": "Fri Jul 14 2017 02:40:00 GMT+0000 (Coordinated Universal Time)",
+  "json": "[\"2017-07-14T02:40:00.000Z\",{\"d\":\"2017-07-14T02:40:00.000Z\"}]",
+  "jsonTop": "\"2017-07-14T02:40:00.000Z\"",
+  "stringValue": "[\"2017-07-14T02:40:00.000Z\",[\"2017-07-14T02:40:00.000Z\"]]",
+  "stringValueTop": "\"2017-07-14T02:40:00.000Z\"",
+  "less": true
+ },
+ {
+  "t": 8640000000000000,
+  "string": "Sat Sep 13 275760 00:00:00 GMT+0000 (Coordinated Universal Time),1,,Sat Sep 13 275760 00:00:00 GMT+0000 (Coordinated Universal Time)",
+  "join": "Sat Sep 13 275760 00:00:00 GMT+0000 (Coordinated Universal Time)|x|",
+  "plus": "Sat Sep 13 275760 00:00:00 GMT+0000 (Coordinated Universal Time)",
+  "json": "[\"+275760-09-13T00:00:00.000Z\",{\"d\":\"+275760-09-13T00:00:00.000Z\"}]",
+  "jsonTop": "\"+275760-09-13T00:00:00.000Z\"",
+  "stringValue": "[\"+275760-09-13T00:00:00.000Z\",[\"+275760-09-13T00:00:00.000Z\"]]",
+  "stringValueTop": "\"+275760-09-13T00:00:00.000Z\"",
+  "less": true
+ },
+ {
+  "t": -8640000000000000,
+  "string": "Tue Apr 20 -271821 00:00:00 GMT+0000 (Coordinated Universal Time),1,,Tue Apr 20 -271821 00:00:00 GMT+0000 (Coordinated Universal Time)",
+  "join": "Tue Apr 20 -271821 00:00:00 GMT+0000 (Coordinated Universal Time)|x|",
+  "plus": "Tue Apr 20 -271821 00:00:00 GMT+0000 (Coordinated Universal Time)",
+  "json": "[\"-271821-04-20T00:00:00.000Z\",{\"d\":\"-271821-04-20T00:00:00.000Z\"}]",
+  "jsonTop": "\"-271821-04-20T00:00:00.000Z\"",
+  "stringValue": "[\"-271821-04-20T00:00:00.000Z\",[\"-271821-04-20T00:00:00.000Z\"]]",
+  "stringValueTop": "\"-271821-04-20T00:00:00.000Z\"",
+  "less": false
+ },
+ {
+  "t": -62198755200000,
+  "string": "Fri Jan 01 -0001 00:00:00 GMT+0000 (Coordinated Universal Time),1,,Fri Jan 01 -0001 00:00:00 GMT+0000 (Coordinated Universal Time)",
+  "join": "Fri Jan 01 -0001 00:00:00 GMT+0000 (Coordinated Universal Time)|x|",
+  "plus": "Fri Jan 01 -0001 00:00:00 GMT+0000 (Coordinated Universal Time)",
+  "json": "[\"-000001-01-01T00:00:00.000Z\",{\"d\":\"-000001-01-01T00:00:00.000Z\"}]",
+  "jsonTop": "\"-000001-01-01T00:00:00.000Z\"",
+  "stringValue": "[\"-000001-01-01T00:00:00.000Z\",[\"-000001-01-01T00:00:00.000Z\"]]",
+  "stringValueTop": "\"-000001-01-01T00:00:00.000Z\"",
+  "less": true
+ },
+ {
+  "t": 253402300800000,
+  "string": "Sat Jan 01 10000 00:00:00 GMT+0000 (Coordinated Universal Time),1,,Sat Jan 01 10000 00:00:00 GMT+0000 (Coordinated Universal Time)",
+  "join": "Sat Jan 01 10000 00:00:00 GMT+0000 (Coordinated Universal Time)|x|",
+  "plus": "Sat Jan 01 10000 00:00:00 GMT+0000 (Coordinated Universal Time)",
+  "json": "[\"+010000-01-01T00:00:00.000Z\",{\"d\":\"+010000-01-01T00:00:00.000Z\"}]",
+  "jsonTop": "\"+010000-01-01T00:00:00.000Z\"",
+  "stringValue": "[\"+010000-01-01T00:00:00.000Z\",[\"+010000-01-01T00:00:00.000Z\"]]",
+  "stringValueTop": "\"+010000-01-01T00:00:00.000Z\"",
+  "less": true
+ },
+ {
+  "t": -62135596800001,
+  "string": "Sun Dec 31 0000 23:59:59 GMT+0000 (Coordinated Universal Time),1,,Sun Dec 31 0000 23:59:59 GMT+0000 (Coordinated Universal Time)",
+  "join": "Sun Dec 31 0000 23:59:59 GMT+0000 (Coordinated Universal Time)|x|",
+  "plus": "Sun Dec 31 0000 23:59:59 GMT+0000 (Coordinated Universal Time)",
+  "json": "[\"0000-12-31T23:59:59.999Z\",{\"d\":\"0000-12-31T23:59:59.999Z\"}]",
+  "jsonTop": "\"0000-12-31T23:59:59.999Z\"",
+  "stringValue": "[\"0000-12-31T23:59:59.999Z\",[\"0000-12-31T23:59:59.999Z\"]]",
+  "stringValueTop": "\"0000-12-31T23:59:59.999Z\"",
+  "less": true
+ },
+ {
+  "t": "NaN",
+  "string": "Invalid Date,1,,Invalid Date",
+  "join": "Invalid Date|x|",
+  "plus": "Invalid Date",
+  "json": "[null,{\"d\":null}]",
+  "jsonTop": "null",
+  "stringValue": "[null,[null]]",
+  "stringValueTop": "null",
+  "less": true
+ }
+]
