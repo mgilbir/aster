@@ -303,6 +303,34 @@ func runNode(t testing.TB, v *vecFunc, args []float64) []float64 {
 	return bytesToFloats(out.Bytes())
 }
 
+// checkRecordingPlatform refuses to record a function's vectors on a node
+// whose answers are not the ones the engine follows: V8's own functions as
+// V8 computes them on arm64 (jsmath follows clang's fused multiply-adds
+// there; x86-64 rounds some results differently in the last bit), the C
+// library's (libm) as glibc computes them, so on Linux. Recording on another
+// platform would silently replace the vectors' truth with that platform's.
+func checkRecordingPlatform(t *testing.T, v *vecFunc) {
+	t.Helper()
+	var cmd *exec.Cmd
+	if d := os.Getenv("JSMATH_NODE_DOCKER"); d != "" {
+		cmd = exec.Command("docker", append(append([]string{"run", "--rm"}, strings.Fields(d)...), "node", "-p", "process.platform + '-' + process.arch")...)
+	} else {
+		cmd = exec.Command("node", "-p", "process.platform + '-' + process.arch")
+		cmd.Dir = filepath.Join("..", "..", "testdata", "oracle-node")
+	}
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("node: %v", err)
+	}
+	platform := strings.TrimSpace(string(out))
+	switch {
+	case v.libm && !strings.HasPrefix(platform, "linux-"):
+		t.Fatalf("%s comes from the C library: record it with node on Linux (glibc), not %s", v.name, platform)
+	case !v.libm && !strings.HasSuffix(platform, "-arm64"):
+		t.Fatalf("%s is V8's: record it with node on arm64, which jsmath follows, not %s", v.name, platform)
+	}
+}
+
 // skipLibm skips a comparison with node for a function that V8 leaves to the C
 // library when node runs on macOS, whose libm is not the one ported.
 func skipLibm(t *testing.T, v *vecFunc) {
@@ -344,6 +372,7 @@ func TestV8Vectors(t *testing.T) {
 		t.Run(v.name, func(t *testing.T) {
 			if *update {
 				skipLibm(t, v)
+				checkRecordingPlatform(t, v)
 				args := genArgs(v, 0, recordedCount)
 				res := runNode(t, v, args)
 				var buf bytes.Buffer

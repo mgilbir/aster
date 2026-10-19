@@ -105,7 +105,7 @@ Each package imports only packages of lower layers, so there are no cycles and t
 4: vega/guides
 5: vega
 6: aster
-tools: cmd/enginebench cmd/recursionaudit cmd/testsummary fuzzutil oracle svgcheck svgdiff testutil upstream
+tools: cmd/enginebench cmd/recursionaudit cmd/testsummary cmd/vectors fuzzutil oracle svgcheck svgdiff testutil upstream vectors
 ```
 <!-- layers:end -->
 

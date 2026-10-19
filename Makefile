@@ -1,4 +1,4 @@
-.PHONY: vendor-datasets build test test-all check lint fmacheck fuzz clean bench benchgate
+.PHONY: vendor-datasets build test test-all check lint fmacheck fuzz clean bench benchgate vectors
 
 vendor-datasets:
 	go run ./cmd/vendor-datasets
@@ -40,6 +40,11 @@ bench:
 # origin/main), minutes. See scripts/benchgate.sh.
 benchgate:
 	scripts/benchgate.sh $(BASE)
+
+# Regenerate every committed vector file (testdata/vectors.txt) with the
+# pinned node and fail on any difference; `make vectors WRITE=1` re-records.
+vectors:
+	go run ./internal/cmd/vectors $(if $(WRITE),-write,-repeat 2)
 
 # Remove compiled test binaries. The oracle cache (testdata/oracle-cache) is
 # recreated on demand; delete it by hand to force fresh answers.

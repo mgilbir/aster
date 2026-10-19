@@ -99,6 +99,7 @@ else
 	fi
 	gate "oracle install" sh -c '(cd testdata/oracle-node && npm ci --silent) && (cd testdata/oracle-node-vl5 && npm ci --silent) && (cd testdata/mermaid && npm ci --silent)'
 	gate "upstream vectors" scripts/record-upstream-vectors.sh
+	gate "committed vector files regenerate unchanged" go run ./internal/cmd/vectors -repeat 2
 	gate "corpora fetch" scripts/fetch-corpora.sh
 	gate "full suite (oracle required)" env ASTER_ORACLE=require go test -timeout 90m ./...
 fi
