@@ -250,6 +250,28 @@ func (e Entry) InputFiles(root string) ([]string, error) {
 	return out, nil
 }
 
+// clonesDir holds the upstream repositories scripts/record-upstream-vectors.sh
+// clones at the tag of the oracle's vega: a git-ignored cache that a clean
+// checkout does not have.
+const clonesDir = "testdata/upstream-clones/"
+
+// fingerprintedInputs are the input files a fingerprint hashes: every input
+// but those in the upstream clones. Those are fixed by the version the module
+// set's lockfile pins, which the fingerprint hashes, and naming them in the
+// entry's text, which it hashes too, says which are read; so the fingerprint
+// is checked on a checkout without the clones. The runner, which regenerates
+// the outputs, still needs them.
+func (e Entry) fingerprintedInputs(root string) ([]string, error) {
+	tracked := e
+	tracked.Inputs = nil
+	for _, g := range e.Inputs {
+		if !strings.HasPrefix(g, clonesDir) {
+			tracked.Inputs = append(tracked.Inputs, g)
+		}
+	}
+	return tracked.InputFiles(root)
+}
+
 // PinnedNode is the node version the oracle's module set pins (volta.node).
 func PinnedNode(root string) (string, error) {
 	b, err := os.ReadFile(filepath.Join(root, "testdata/oracle-node/package.json"))
@@ -294,7 +316,7 @@ func Fingerprint(root string, e Entry, node string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	inputs, err := e.InputFiles(root)
+	inputs, err := e.fingerprintedInputs(root)
 	if err != nil {
 		return "", err
 	}
