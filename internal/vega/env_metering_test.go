@@ -8,8 +8,10 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mgilbir/aster/internal/budget"
+	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/testutil"
 )
 
@@ -168,4 +170,88 @@ func sortedKeys[V any](m map[string]V) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// viewItems is how many items the cases of TestViewsHandedToExpressionsAreCharged draw.
+const viewItems = 4000
+
+// viewCase renders a mark m of viewItems symbols whose size reads size, then
+// a text mark whose text reads text (encoded after m's items exist); it
+// returns what the heap retains after a collection, and what the ledger
+// holds, once the dataflow has run (the view, and every copy it keeps for
+// the run, still alive).
+func viewCase(t *testing.T, size, text string) envProbe {
+	t.Helper()
+	spec := fmt.Sprintf(`{"width":100,"height":100,
+	"data":[{"name":"d","transform":[{"type":"sequence","start":0,"stop":%d,"as":"a"}]}],
+	"marks":[{"type":"symbol","name":"m","from":{"data":"d"},"encode":{"enter":{"x":{"field":"a"},"size":{"signal":%q}}}},
+		{"type":"text","encode":{"enter":{"text":{"signal":%q}}}}]}`, viewItems, size, text)
+	led := budget.NewLedger(context.Background(), budget.LedgerLimits{})
+	var p envProbe
+	_, err := Render(budget.WithLedger(context.Background(), led), vegaSpec(t, spec), Options{Stages: func(name string, _ time.Duration) {
+		if name == "dataflow" {
+			runtime.GC()
+			var ms runtime.MemStats
+			runtime.ReadMemStats(&ms)
+			p = envProbe{heap: int64(ms.HeapAlloc), charged: led.Bytes(), seen: true}
+		}
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.seen {
+		t.Fatal("the probe did not run")
+	}
+	return p
+}
+
+// What the view copies out of its state to hand an expression, and keeps
+// for the run, is charged to the call's ledger: an item's tuple view
+// (`data()` of a mark, `item.mark.items`) and the array of a mark's items.
+// Each case renders the same chart with and without the expression that
+// reads them; what the heap retains more must be charged (at most twice the
+// extra charge, and a MiB of slack).
+func TestViewsHandedToExpressionsAreCharged(t *testing.T) {
+	if testutil.RaceEnabled {
+		t.Skip("the heap the race detector keeps is not the render's")
+	}
+	for _, c := range []struct{ name, size, expr string }{
+		{"data of a mark", "4", "length(data('m'))"},
+		{"mark.items", "length(item.mark.items) * 0 + 4", "'1'"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			base := viewCase(t, "4", "'1'")
+			got := viewCase(t, c.size, c.expr)
+			retained, charged := got.heap-base.heap, got.charged-base.charged
+			t.Logf("%s: retains %d KiB more, charged %d KiB more", c.name, retained>>10, charged>>10)
+			if retained > 2*charged+1<<20 {
+				t.Errorf("%s retains %d KiB but charges %d KiB", c.name, retained>>10, charged>>10)
+			}
+		})
+	}
+}
+
+// An operator's value that is a list of values reaches an expression as an
+// array copied out of it, charged as the evaluator's arrays are; a list of
+// tuples (a collect's, through its signal) is shared, as upstream's is.
+func TestOperatorValuesHandedToExpressionsAreCharged(t *testing.T) {
+	led := budget.NewLedger(context.Background(), budget.LedgerLimits{})
+	v := newView(budget.WithLedger(context.Background(), led), Options{}, jsval.Undefined)
+	v.g = newGraph(v.ctx)
+	list := make([]any, 10_000)
+	for i := range list {
+		list[i] = jsval.Int(i)
+	}
+	before := led.Bytes()
+	if got := v.exprValue(list); got.Len() != len(list) {
+		t.Fatalf("a list of %d values reads as %d", len(list), got.Len())
+	}
+	if charged, want := led.Bytes()-before, int64(len(list))*envItem; charged < want {
+		t.Errorf("a list of %d values copied for an expression charged %d bytes; want %d", len(list), charged, want)
+	}
+	tuples := []jsval.Value{jsval.Int(1), jsval.Int(2)}
+	before = led.Bytes()
+	if got := v.exprValue(tuples); &got.Items()[0] != &tuples[0] || led.Bytes() != before {
+		t.Errorf("a list of tuples was copied or charged; upstream shares it")
+	}
 }

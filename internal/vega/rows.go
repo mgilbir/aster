@@ -194,6 +194,14 @@ func (v *runView) chargeRun(n int64) {
 	v.runBytes += n
 }
 
+// releaseRun gives back n bytes chargeRun charged, for state dropped before
+// the run is over (a sort's temporary item views, a replaced cache entry).
+func (v *runView) releaseRun(n int64) {
+	v.led.Free(n)
+	v.lists -= n
+	v.runBytes -= n
+}
+
 // envItem is what an element of an array the expression environment hands an
 // expression holds, as expr's perItem: the Value and the slack of what it
 // refers to.

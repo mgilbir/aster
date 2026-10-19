@@ -339,7 +339,30 @@ func (c *rtContext) Signal(name string) (jsval.Value, bool) {
 	if n == nil {
 		return jsval.Undefined, false
 	}
-	return toValue(n.value), true
+	return c.view.exprValue(n.value), true
+}
+
+// exprValue is an operator's value as an expression reads it, a transform's
+// through its `signal`: shared where upstream shares it (a value, a collect's
+// tuple list, which upstream's signal holds by reference), and a list of
+// values copied into an array charged as the evaluator charges its own.
+func (v *runView) exprValue(x any) jsval.Value {
+	switch x := x.(type) {
+	case jsval.Value:
+		return x
+	case []jsval.Value:
+		return jsval.Arr(x)
+	case []any:
+		v.chargeItems(len(x))
+		out := make([]jsval.Value, len(x))
+		for i, e := range x {
+			// an element is a value, or a parameter's list as the
+			// specification wrote it (toValue)
+			out[i] = toValue(e)
+		}
+		return jsval.Arr(out)
+	}
+	return jsval.Undefined
 }
 
 // toValue views an operator value as a jsval.Value when it is one.

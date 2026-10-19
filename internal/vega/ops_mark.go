@@ -667,6 +667,12 @@ func (v *runView) markAsValue(m *scene.Mark, withGroup bool) jsval.Value {
 // each of the item's properties.
 const itemTupleCost = 4
 
+// itemViewBytes is what an item's tuple view holds: an object of the item's
+// properties (16 slots, more as Extra grows) and its bounds, an object of
+// four (measured at about 950 bytes a view by
+// TestViewsHandedToExpressionsAreCharged).
+var itemViewBytes = jsval.ObjectCost(16) + jsval.ObjectCost(4)
+
 // itemTuple is an item as a tuple, for marks and transforms fed from another
 // mark's items. The tuple object is stable per item and refreshed on each call.
 func (v *runView) itemTuple(it *scene.Item) jsval.Value {
@@ -675,6 +681,9 @@ func (v *runView) itemTuple(it *scene.Item) jsval.Value {
 	}
 	o := v.itemTupleCache[it]
 	if o == nil {
+		// The view is kept for the run (expressions read it again, and
+		// it is how a value finds its item): charged as it is made.
+		v.chargeRun(itemViewBytes)
 		o = jsval.NewObject(16)
 		v.itemTupleCache[it] = o
 		if v.viewItem == nil {
@@ -701,8 +710,16 @@ func (v *runView) markItemsValue(m *scene.Mark) jsval.Value {
 	if len(m.Items) > 0 {
 		first = m.Items[0]
 	}
-	if c, ok := v.markItemsCache[m]; ok && c.n == len(m.Items) && c.first == first {
+	c, ok := v.markItemsCache[m]
+	if ok && c.n == len(m.Items) && c.first == first {
 		return c.val
+	}
+	// The array replaces the one cached for the mark before, and is kept
+	// for the run: charged as it is made, the one it replaces given back.
+	bytes := int64(len(m.Items)) * valueBytes
+	v.chargeRun(bytes)
+	if ok {
+		v.releaseRun(c.bytes)
 	}
 	items := make([]jsval.Value, len(m.Items))
 	for i, it := range m.Items {
@@ -718,7 +735,7 @@ func (v *runView) markItemsValue(m *scene.Mark) jsval.Value {
 		items[i] = jsval.Obj(o)
 	}
 	val := jsval.Arr(items)
-	v.markItemsCache[m] = markItems{n: len(m.Items), first: first, val: val}
+	v.markItemsCache[m] = markItems{n: len(m.Items), first: first, val: val, bytes: bytes}
 	return val
 }
 
@@ -726,6 +743,7 @@ type markItems struct {
 	n     int
 	first *scene.Item
 	val   jsval.Value
+	bytes int64 // what the array was charged
 }
 
 // derivedTuples lists the tuples of the items a derived mark is joined to.
@@ -787,6 +805,7 @@ func (v *runView) sortItemsByViews(items []*scene.Item, cmp transforms.Comparato
 			v.g.rows(i, len(temp), 1)
 			delete(v.viewItem, v.itemTupleCache[it])
 			delete(v.itemTupleCache, it)
+			v.releaseRun(itemViewBytes)
 		}
 	}()
 	// stableCompare: ties go by tuple id, the order the items were created.
