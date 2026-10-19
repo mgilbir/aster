@@ -107,6 +107,10 @@ func TestFontFaceParity(t *testing.T) {
 	families := []string{
 		`W`, `'W'`, `"W", serif`, `NoSuch, W`, `sans-serif, W`, `NoSuch, sans-serif, 'Liberation Serif'`,
 		`'Liberation Serif, W'`, `W, 'Liberation Mono'`, `serif`, `monospace, W`, `system-ui, W`, `ui-serif, W`,
+		// No font-family at all: SVG input, which Vega never writes. The
+		// initial value is one, the text package's, for both writers;
+		// layout has no say (Vega always names a family).
+		``,
 	}
 	mismatches := 0
 	for _, family := range families {
@@ -119,7 +123,10 @@ func TestFontFaceParity(t *testing.T) {
 				label := fmt.Sprintf("t%d", i)
 				// What vega-scenegraph writes for a text item (svg/style.js),
 				// and the font string it measures it with (util/text.js).
-				fmt.Fprintf(&b, `<text transform="translate(0,%d)" font-family=%q font-size="12px" font-weight=%q`, 12*i+10, strings.ReplaceAll(family, `"`, "&quot;"), w)
+				fmt.Fprintf(&b, `<text transform="translate(0,%d)" font-size="12px" font-weight=%q`, 12*i+10, w)
+				if family != "" {
+					fmt.Fprintf(&b, ` font-family=%q`, strings.ReplaceAll(family, `"`, "&quot;"))
+				}
 				css := w + " 12px " + family
 				if style != "" {
 					fmt.Fprintf(&b, ` font-style=%q`, style)
@@ -143,6 +150,9 @@ func TestFontFaceParity(t *testing.T) {
 			for i, w := range weights {
 				label := fmt.Sprintf("t%d", i)
 				lf, pf, gf := layout[label], pdfFaces[label], rec.faces[label]
+				if family == "" {
+					lf = pf // PNG and PDF must agree; layout measured no such text
+				}
 				if lf != pf || lf != gf {
 					if mismatches++; shown < 2 {
 						shown++

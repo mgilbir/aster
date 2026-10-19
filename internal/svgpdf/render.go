@@ -63,8 +63,8 @@ func rootState(vw, vh float64) gstate {
 		fillOpacity:   1,
 		strokeOpacity: 1,
 		smooth:        true,
-		fontFamily:    []string{"sans-serif"},
-		fontSize:      16, // SVG default; Vega always sets it explicitly
+		fontFamily:    text.InitialFontFamily(), // as the PNG writer's
+		fontSize:      16,                       // SVG default; Vega always sets it explicitly
 		fontWeight:    400,
 		textAnchor:    "start",
 		vw:            vw,
@@ -309,12 +309,12 @@ func (r *renderer) drawRoot(root *element, st gstate) error {
 	if err != nil || ep.hidden {
 		return err
 	}
-	return r.composited(root, st, ep, func(st gstate) error {
-		if ep.clip == "" {
+	return r.composited(root, st, ep, Identity(), ep.clip, func(st gstate, _ Matrix, clip string) error {
+		if clip == "" {
 			return r.children(root, st)
 		}
 		r.w.save()
-		if err := r.applyClip(ep.clip); err != nil {
+		if err := r.applyClip(clip); err != nil {
 			return err
 		}
 		if err := r.children(root, st); err != nil {
@@ -394,7 +394,7 @@ func (r *renderer) element(e *element, st gstate) error {
 			transform = m
 		}
 	}
-	return r.composited(e, st, ep, func(st gstate) error { return r.place(e, st, transform, ep.clip) })
+	return r.composited(e, st, ep, transform, ep.clip, r.placeIn(e))
 }
 
 // composited draws an element, by draw, composited onto what is behind it
@@ -411,17 +411,39 @@ func (r *renderer) element(e *element, st gstate) error {
 //   - An element with a blend mode is a group under it, as CSS composites
 //     one (Compositing and Blending 1, 3.2): at its container opacity, or
 //     at 1 around the leaf, whose alphas are inside.
-func (r *renderer) composited(e *element, st gstate, ep elementProps, draw func(gstate) error) error {
+//
+// draw draws the element in its transform and clip, which a leaf's group
+// is drawn in rather than holding them: then the group of every mark of one
+// shape, size and paint is the same form, written once, however many such
+// marks there are.
+func (r *renderer) composited(e *element, st gstate, ep elementProps, transform Matrix, clip string, draw func(st gstate, transform Matrix, clip string) error) error {
 	alpha := 1.0
 	if container(e.name) && ep.opacity > 0 && ep.opacity < 1 {
 		alpha = ep.opacity
 	}
-	inner := func() error { return draw(st) }
+	inner := func() error { return draw(st, transform, clip) }
 	if st.opacity > 0 && st.opacity < 1 && !container(e.name) && r.paintsTwice(e, st) {
 		leaf := st
 		leaf.opacity = 1
 		inner = func() error {
-			return r.group(r.w.keepStroke(st.opacity), func() error { return draw(leaf) })
+			wrap := !transform.IsIdentity() || clip != ""
+			if wrap {
+				r.w.save()
+				if !transform.IsIdentity() {
+					r.w.concat(transform)
+				}
+				if clip != "" {
+					if err := r.applyClip(clip); err != nil {
+						return err
+					}
+				}
+			}
+			box := [4]float64{-big, -big, big, big}
+			err := r.groupIn(r.w.keepStroke(st.opacity), &box, func() error { return draw(leaf, Identity(), "") })
+			if err == nil && wrap {
+				r.w.restore()
+			}
+			return err
 		}
 	}
 	if alpha < 1 || ep.blend != "" {
@@ -456,6 +478,11 @@ func (r *renderer) paintsTwice(e *element, st gstate) bool {
 		}
 	}
 	return false
+}
+
+// placeIn is place for e, as composited draws it.
+func (r *renderer) placeIn(e *element) func(gstate, Matrix, string) error {
+	return func(st gstate, transform Matrix, clip string) error { return r.place(e, st, transform, clip) }
 }
 
 // place draws an element under its transform and clip.
@@ -507,6 +534,12 @@ func (r *renderer) place(e *element, st gstate, transform Matrix, clip string) e
 // the page, mapped into the current user space; in a space that collapses
 // nothing shows.
 func (r *renderer) group(c composite, draw func() error) error {
+	return r.groupIn(c, nil, draw)
+}
+
+// groupIn is group with the form's box, in the current user space: box,
+// or the page's when it is nil.
+func (r *renderer) groupIn(c composite, box *[4]float64, draw func() error) error {
 	inv, ok := invert(r.w.cur.ctm)
 	if !ok {
 		return nil
@@ -517,7 +550,11 @@ func (r *renderer) group(c composite, draw func() error) error {
 	if err != nil || len(content) == 0 {
 		return err
 	}
-	res := r.form(content, mapBox(inv, [4]float64{0, 0, r.pageW, r.pageH}))
+	bbox := mapBox(inv, [4]float64{0, 0, r.pageW, r.pageH})
+	if box != nil {
+		bbox = *box
+	}
+	res := r.form(content, bbox)
 	r.w.save()
 	r.w.paintXObject(res, c)
 	r.w.restore()

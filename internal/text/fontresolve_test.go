@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strings"
 	"testing"
 	"weak"
 
@@ -228,5 +229,82 @@ func TestInstanceWeightAndStyle(t *testing.T) {
 	runs, _ := m.ShapeText("A", "12px V")
 	if f := runs[0].Face; f.Family != "V" || f.Weight != 100 {
 		t.Errorf("instance at wght 50 of a 100..900 font answers to weight %d, drawn at 100", f.Weight)
+	}
+}
+
+// TestPaletteByEveryFamilyName is C45's class for WithFontPalette (audit
+// 2026-10-18): a system face takes the palette named for any family name it
+// is indexed under, whichever name a spec reaches it by.
+func TestPaletteByEveryFamilyName(t *testing.T) {
+	recs := []testutil.NameRecord{
+		{Platform: 3, Encoding: 1, Language: 0x409, ID: 16, Value: "Acme"},
+		{Platform: 3, Encoding: 1, Language: 0x404, ID: 16, Value: "微軟正黑體"},
+		{Platform: 3, Encoding: 1, Language: 0x409, ID: 1, Value: "Acme Light"},
+	}
+	p := filepath.Join(t.TempDir(), "acme.ttf")
+	if err := os.WriteFile(p, testutil.FontWithNames(liberation.SansRegular, recs), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, named := range []string{"微軟正黑體", "Acme Light", "Acme"} {
+		m, err := New(WithFontPalette(named, 2))
+		if err != nil {
+			t.Fatal(err)
+		}
+		idx := &systemIndex{byFam: map[string][]sysFont{}}
+		idx.add(readSysFonts(p))
+		m.system = idx
+		for _, reach := range []string{"Acme", "微軟正黑體", "Acme Light"} {
+			runs, _ := m.ShapeText("A", "12px '"+reach+"'")
+			if f := runs[0].Face; !f.mapped || f.palette != 2 {
+				t.Errorf("palette named for %q, face reached as %q: palette %d", named, reach, f.palette)
+			}
+		}
+	}
+}
+
+// TestEvictionKeepsOtherLists is C113's time cost (audit 2026-10-18):
+// dropping a system face past the bound forgets what the Measurer knows of
+// that face only, not every font list it has: a spec that cycles more than
+// 64 data-driven system families no longer rebuilds every list (and
+// re-resolves every rune) on each eviction. The lists of other fonts stay
+// cached, and only the lists that could hold the dropped face forget it.
+func TestEvictionKeepsOtherLists(t *testing.T) {
+	m, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := maxSystemFaces + 20
+	m.system = sysCollection(t, t.TempDir(), n, func(i int) string { return fmt.Sprintf("Evict %d", i) })
+	// Lists of the embedded fonts, resolved once.
+	var others []listKey
+	for _, fam := range []string{"Liberation Serif", "Liberation Mono", "Liberation Sans"} {
+		for w := 100; w <= 900; w += 100 {
+			f := fmt.Sprintf("%d 12px '%s'", w, fam)
+			m.ShapeText("Hello", f)
+			css := ParseCSSFont(f)
+			others = append(others, listKey{strings.Join(css.Family, "\x00"), css.Weight, css.Italic})
+		}
+	}
+	for i := range n {
+		m.ShapeText("Hi", fmt.Sprintf("12px 'Evict %d'", i))
+	}
+	kept := 0
+	for _, k := range others {
+		if _, ok := m.listCache.Get(k); ok {
+			kept++
+		}
+	}
+	if kept != len(others) {
+		t.Errorf("%d of %d lists of other fonts survived %d evictions", kept, len(others), n-maxSystemFaces)
+	}
+	if got, want := m.listResets, n-maxSystemFaces; got != want {
+		t.Errorf("%d lists forgot a face over %d evictions, each of which one list holds", got, want)
+	}
+	// What the lists say is what fresh ones say.
+	for i := range n {
+		runs, _ := m.ShapeText("Hi", fmt.Sprintf("12px 'Evict %d'", i))
+		if runs[0].Face.Family != fmt.Sprintf("Evict %d", i) {
+			t.Fatalf("family %d drawn in %s", i, runs[0].Face.Family)
+		}
 	}
 }

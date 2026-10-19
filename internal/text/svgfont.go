@@ -19,6 +19,13 @@ import (
 // every run of text.
 const MaxFamilies = 32
 
+// InitialFontFamily is the font-family of SVG text that states none, for
+// both writers: CSS leaves the initial value to the user agent, which is a
+// serif in browsers, and usvg's default ("Times New Roman", Options::
+// font_family), which the PNG output follows. A new slice each call: a
+// writer's state may hold it.
+func InitialFontFamily() []string { return []string{"serif"} }
+
 // ParseFontFamily reads a font-family value as layout reads the family list
 // of a canvas font: split at commas, each name trimmed of white space and of
 // surrounding quotes. A quoted name with a comma in it is two names, as

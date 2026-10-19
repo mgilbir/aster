@@ -19,7 +19,7 @@ c, err := aster.New(
 | `WithFont(family, data)` | none | register a TrueType, OpenType or WOFF font under `family`; a collection (`.ttc`/`.otc`) registers every face |
 | `WithFontFace(family, ttc, index)` | none | register one face of a collection |
 | `WithFontInstance(family, data, axes)` | none | register a variable font at one point of its design space (`{"wght": 650}`); register several under one family to let `font-weight` choose. The instance answers to the weight it is drawn at (an axis value outside the font's range is drawn, and matched, at the range's end), and a `slnt` other than zero makes it oblique |
-| `WithFontPalette(family, index)` | palette 0 | draw the family's colour glyphs with another CPAL palette (a dark-mode one, say) |
+| `WithFontPalette(family, index)` | palette 0 | draw the family's colour glyphs with another CPAL palette (a dark-mode one, say); a system font takes it under any family name it states |
 | `WithDefaultFontFamily(name)` | `Liberation Sans` | the family generic `sans-serif` resolves to |
 | `WithDefaultSerifFamily(name)` | `Liberation Serif` | the family `serif` resolves to |
 | `WithDefaultMonospaceFamily(name)` | `Liberation Mono` | the family `monospace` resolves to |

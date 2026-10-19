@@ -3,6 +3,7 @@ package text
 import (
 	"strings"
 	"unsafe"
+	"weak"
 )
 
 // entry is a registered font: a loaded face, or a system font not yet read.
@@ -13,10 +14,34 @@ type entry struct {
 	italic bool
 
 	face   *Face
-	path   string // system font file, when face is nil
-	index  int    // the face's index in path, a collection
-	dead   bool   // loading path failed; never retry
-	custom bool   // given with WithFont
+	names  []string // every family name of a system face (see familyNames)
+	path   string   // system font file, when face is nil
+	index  int      // the face's index in path, a collection
+	dead   bool     // loading path failed; never retry
+	custom bool     // given with WithFont
+	// lists are the font lists a system entry is a candidate of, which may
+	// remember its face (see keepSystemFace); weak, so that a list the
+	// cache drops goes. swept is their number after the last sweep.
+	lists []weak.Pointer[faceList]
+	swept int
+}
+
+// listed records that list l has e among its candidates. The weak pointers
+// of lists gone are swept out as they double, so they stay within twice
+// the lists alive.
+func (e *entry) listed(l *faceList) {
+	e.lists = append(e.lists, weak.Make(l))
+	if len(e.lists) <= 2*max(e.swept, 8) {
+		return
+	}
+	alive := e.lists[:0]
+	for _, w := range e.lists {
+		if w.Value() != nil {
+			alive = append(alive, w)
+		}
+	}
+	clear(e.lists[len(alive):])
+	e.lists, e.swept = alive, len(alive)
 }
 
 // load returns the entry's face, reading a system font on first use.
@@ -29,7 +54,7 @@ func (e *entry) load(m *Measurer) *Face {
 		e.dead = true
 		return nil
 	}
-	m.applyPalette(f)
+	m.applyPalette(f, e.names...)
 	e.face = f
 	m.keepSystemFace(e)
 	return f
@@ -43,9 +68,11 @@ func (e *entry) load(m *Measurer) *Face {
 const maxSystemFaces = 64
 
 // keepSystemFace records that e's system face was loaded, dropping the
-// oldest loaded one past maxSystemFaces. The font lists and the last font
-// resolved, which remember faces by rune, are cleared with it, so that
-// nothing the Measurer keeps holds a dropped face. m.mu is held.
+// oldest loaded one past maxSystemFaces. The font lists it is a candidate
+// of, the only ones that can remember its face by rune, forget what they
+// resolved, so that nothing the Measurer keeps holds a dropped face; the
+// other lists stay as they are (C113: clearing them all rebuilt every list
+// on every eviction). m.mu is held.
 func (m *Measurer) keepSystemFace(e *entry) {
 	m.sysLoaded = append(m.sysLoaded, e)
 	if len(m.sysLoaded) <= maxSystemFaces {
@@ -54,9 +81,19 @@ func (m *Measurer) keepSystemFace(e *entry) {
 	old := m.sysLoaded[0]
 	m.sysLoaded = append(m.sysLoaded[:0], m.sysLoaded[1:]...)
 	old.face = nil
-	m.listCache.Clear()
-	m.last.font, m.last.list = "", nil
-	m.lastParts.list = nil
+	for _, w := range old.lists {
+		if l := w.Value(); l != nil {
+			l.forget()
+			m.listResets++
+		}
+	}
+	old.lists, old.swept = nil, 0
+}
+
+// forget drops what the list resolved runes to.
+func (l *faceList) forget() {
+	l.ascii, l.seen = [128]*Face{}, [128]bool{}
+	clear(l.runes)
 }
 
 // bestMatch picks, among candidates, the entries closest to the requested
@@ -258,6 +295,11 @@ func (m *Measurer) faces(css CSSFont) *faceList {
 		push(m.fallback)
 	}
 
+	for _, e := range l.cands {
+		if e.path != "" {
+			e.listed(l)
+		}
+	}
 	m.listCache.Put(key, l, l.size())
 	return l
 }

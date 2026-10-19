@@ -339,7 +339,7 @@ func (m *Measurer) systemEntries(sys []sysFont) []*entry {
 		key := sysKey{sf.path, sf.index}
 		e, ok := m.sysEntries[key]
 		if !ok {
-			e = &entry{family: sf.family, norm: normFamily(sf.family), weight: sf.weight, italic: sf.italic, path: sf.path, index: sf.index}
+			e = &entry{family: sf.family, norm: normFamily(sf.family), names: sf.names, weight: sf.weight, italic: sf.italic, path: sf.path, index: sf.index}
 			if m.sysEntries == nil {
 				m.sysEntries = make(map[sysKey]*entry)
 			}

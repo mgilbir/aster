@@ -86,7 +86,7 @@ func initialState(vw, vh float64) state {
 		visible:       true,
 		filterLinear:  true,
 		paintOrder:    [3]uint8{0, 1, 2},
-		families:      []string{"serif"},
+		families:      text.InitialFontFamily(), // as the PDF writer's
 		// CSS's initial font-size, medium, which browsers (for which Vega
 		// writes its SVG), the keyword table below and the PDF writer take
 		// as 16px. resvg takes 12 (usvg's Options::font_size, a tool

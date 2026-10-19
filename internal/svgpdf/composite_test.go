@@ -405,3 +405,30 @@ func TestPaintedOnlyThroughComposite(t *testing.T) {
 		}
 	}
 }
+
+// TestLeafGroupsShared: the group of a translucent mark that fills and
+// strokes holds the mark in its own space, its position outside it, so the
+// marks of one shape and paint share one form: a chart of many such marks
+// is not a form per mark (C115's cost).
+func TestLeafGroupsShared(t *testing.T) {
+	var b strings.Builder
+	b.WriteString(`<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1000">`)
+	for i := range 500 {
+		fmt.Fprintf(&b, `<path transform="translate(%d,%d)" d="M5,0A5,5,0,1,1,-5,0A5,5,0,1,1,5,0" fill="#4c78a8" stroke="black" opacity="0.8"/>`, i%31*30, i/31*30)
+	}
+	b.WriteString(`</svg>`)
+	pdf, err := Convert(b.String(), nil, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var does, forms int
+	for _, p := range paintedObjects(t, pdf) {
+		if p.op == "Do" {
+			does++
+		}
+	}
+	forms = bytes.Count(pdf, []byte("/Subtype /Form"))
+	if does != 500 || forms != 1 {
+		t.Errorf("500 marks painted %d groups from %d forms, want 500 from 1", does, forms)
+	}
+}
