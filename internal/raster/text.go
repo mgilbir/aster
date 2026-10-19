@@ -146,7 +146,7 @@ func (r *renderer) parseNumberList(st *state, s string, axis, limit int) []float
 // add appends a character, charging a larger list before it is made.
 func (tc *textCollector) add(c tchar) {
 	if len(tc.chars) == cap(tc.chars) {
-		n := min(maxTextChars, max(64, 2*cap(tc.chars)))
+		n := min(maxTextChars, max(8, 2*cap(tc.chars)))
 		tc.r.textTake(int64(n) * tcharBytes)
 		tc.chars = append(make([]tchar, 0, n), tc.chars...)
 	}

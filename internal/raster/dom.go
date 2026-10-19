@@ -385,7 +385,7 @@ type document struct {
 // the defaults below.
 type Limits struct {
 	MaxInputBytes  int // SVG source size
-	MaxElements    int // parsed elements
+	MaxElements    int // parsed elements, a run of character data one
 	MaxDepth       int // element nesting
 	MaxPixels      int // output width*height after scaling
 	MaxDimension   int // output width or height
@@ -403,7 +403,7 @@ type Limits struct {
 	MaxPathSegments int
 	MaxStyleBytes   int // total size of <style> sheets
 	MaxCSSRules     int // rules across all style sheets
-	MaxCSSWork      int // selector-matching steps while applying style sheets
+	MaxCSSWork      int // units of selector-matching work while applying style sheets (see cssApplier.step)
 	// (past MaxStyleBytes, MaxCSSRules or MaxCSSWork the render fails)
 	MaxFilterPixels int // pixels of one filter region; a larger one fails the render
 	MaxEffectPixels int // pixels processed by filters and pattern tiles in one render

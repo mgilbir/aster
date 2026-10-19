@@ -28,7 +28,7 @@ The attacker controls the Vega or Vega-Lite specification, the data a Loader ret
 ## Known residual risks
 
 - A filter's result and scratch buffers (up to 256 MiB for a blur of the largest region) are allocated and zeroed between two deadline checks; every pass over them checks it every 65,536 pixels.
-- One token of SVG input (a comment, a run of text, an attribute value) is scanned for its end without a deadline check: a scan of up to the input bound (256 MiB, `n/4` with `WithMemoryLimit`), which takes milliseconds.
+- One token of SVG input (a comment, a run of text, an attribute value) is scanned for its end without a deadline check: a scan of up to the input bound (256 MiB, `n/4` with `WithMemoryLimit`), which takes tens of milliseconds at most.
 - Decoding an image is interrupted only between reads of its bytes: about every quarter of a million pixels for a PNG, and for a JPEG or GIF in stretches bounded only by the per-image byte and pixel bounds ([limits.md](limits.md#withtimeout)).
 - There is no per-item memory model. Very long strings on one item are bounded only by the string budget and the SVG size cap; parsed path data is charged to the call's ledger.
 - A Loader you write is trusted: aster charges what it returns to the budget only after `Load` returns it, so bound what your Loader reads.
