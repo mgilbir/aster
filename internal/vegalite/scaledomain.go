@@ -93,7 +93,7 @@ func domainsTieBreaker(cc *compileCtx, v1, v2 withExplicit, property, propertyOf
 
 // canUseUnaggregatedDomain is upstream's: whether domain "unaggregated"
 // applies, and the warning why not.
-func canUseUnaggregatedDomain(cc *compileCtx, fd Value, scaleType string) (bool, string) {
+func canUseUnaggregatedDomain(cc *compileCtx, fd Value, scaleType Value) (bool, string) {
 	aggregate := fd.Get("aggregate")
 	if !aggregate.IsTruthy() {
 		return false, msgUnaggregateDomainHasNoEffectForRawField(cc, fd)
@@ -101,13 +101,13 @@ func canUseUnaggregatedDomain(cc *compileCtx, fd Value, scaleType string) (bool,
 	if aggregate.IsStr() && !sharedDomainOps[aggregate.StrValue()] {
 		return false, msgUnaggregateDomainWithNonSharedDomainOp(aggregate)
 	}
-	if channelDefType(fd) == "quantitative" && scaleType == "log" {
+	if channelDefType(fd) == "quantitative" && strIs(scaleType, "log") {
 		return false, msgUnaggregatedDomainWithLogScale(cc, fd)
 	}
 	return true, ""
 }
 
-func normalizeUnaggregatedDomain(cc *compileCtx, domain Value, fd Value, scaleType string, scaleConfig Value) Value {
+func normalizeUnaggregatedDomain(cc *compileCtx, domain Value, fd Value, scaleType Value, scaleConfig Value) Value {
 	if domain.IsStr() && domain.StrValue() == "unaggregated" {
 		if ok, reason := canUseUnaggregatedDomain(cc, fd, scaleType); !ok {
 			cc.warn(reason)
@@ -150,8 +150,8 @@ func parseDomainForChannel(u *unitModel, channel string) withExplicit {
 
 func mapDomainToDataSignal(cc *compileCtx, domain Value, typ string, timeUnit Value) Value {
 	return mapList(cc, domain, "domain", func(v Value) Value {
-		data, _ := valueExpr(cc, v, timeUnit, typ, false, false)
-		return mkv("signal", "{data: "+data+"}")
+		data := valueExpr(cc, v, timeUnit, typ, false, false)
+		return mkv("signal", "{data: "+tmpl(data)+"}")
 	})
 }
 
@@ -163,7 +163,7 @@ func convertDomainIfItIsDateTime(cc *compileCtx, domain Value, typ string, timeU
 	return []Value{domain}
 }
 
-func parseSingleChannelDomain(scaleType string, domain Value, u *unitModel, channel string) withExplicit {
+func parseSingleChannelDomain(scaleType Value, domain Value, u *unitModel, channel string) withExplicit {
 	cc := u.b().ctx
 
 	encoding, markDef, mark, config, stack := u.encoding, u.markDef, u.mark(), u.config, u.stack
@@ -172,7 +172,7 @@ func parseSingleChannelDomain(scaleType string, domain Value, u *unitModel, chan
 	timeUnit := fod.Get("timeUnit")
 	dsType := dsMain
 	if !cc.v5 {
-		dsType = getScaleDataSourceForHandlingInvalidValues(getMarkConfig("invalid", markDef, config, ""), isPathMarkName(mark))
+		dsType = getScaleDataSourceForHandlingInvalidValues(getMarkConfig("invalid", markDef, config, ""), isPathMark(mark))
 	}
 	switch {
 	case isDomainUnionWith(cc, domain):
@@ -211,7 +211,7 @@ func parseSingleChannelDomain(scaleType string, domain Value, u *unitModel, chan
 		))
 	case isBinning(fd.Get("bin")):
 		if hasDiscreteDomain(scaleType) {
-			if scaleType == "bin-ordinal" {
+			if strIs(scaleType, "bin-ordinal") {
 				return makeImplicit(jsval.Arr(nil))
 			}
 			var data string
@@ -241,7 +241,7 @@ func parseSingleChannelDomain(scaleType string, domain Value, u *unitModel, chan
 			})))
 		}
 		return makeImplicit(arr(mkv("data", u.requestDataName(dsType), "field", u.vgField(channel, fieldRefOption{}))))
-	case fd.Get("timeUnit").IsTruthy() && (scaleType == "time" || scaleType == "utc"):
+	case fd.Get("timeUnit").IsTruthy() && (strIs(scaleType, "time") || strIs(scaleType, "utc")):
 		fd2 := encoding.Get(getSecondaryRangeChannel(channel))
 		if hasBandEnd(cc, fd, fd2, markDef, config) {
 			data := u.requestDataName(dsType)
@@ -315,7 +315,7 @@ func coalesceTruthy(a, b Value) Value {
 }
 
 // domainSort returns the sort of a discrete scale's domain: a bool, a sort object, or undefined.
-func domainSort(u *unitModel, channel, scaleType string) Value {
+func domainSort(u *unitModel, channel string, scaleType Value) Value {
 	cc := u.b().ctx
 
 	if !hasDiscreteDomain(scaleType) {
@@ -327,17 +327,24 @@ func domainSort(u *unitModel, channel, scaleType string) Value {
 		return mkv("op", "min", "field", sortArrayIndexField(cc, fd, channel, fieldRefOption{}), "order", "ascending")
 	}
 	stack := u.stack
-	var stackDimensions *sset
+	// new Set([...stack.groupbyFields, ...stack.stackBy.map((s) =>
+	// s.fieldDef.field)]), asked with has: the fields as given, so a sort
+	// field of ["a"] is in it only as that array.
+	var stackDimensions map[jsval.InternKey]bool
 	if stack != nil {
-		stackDimensions = stack.groupbyFields.clone()
+		stackDimensions = map[jsval.InternKey]bool{}
+		for _, f := range stack.groupbyFields.list() {
+			cc.work(1)
+			stackDimensions[stack.groupbyFields.value(f).MapKey()] = true
+		}
 		for _, s := range stack.stackBy {
 			cc.work(1)
-			stackDimensions.add(s.fieldDef.Get("field").AsString())
+			stackDimensions[s.fieldDef.Get("field").MapKey()] = true
 		}
 	}
 	switch {
 	case isSortField(cc, sort):
-		isStacked := stack != nil && !stackDimensions.has(sort.Get("field").AsString())
+		isStacked := stack != nil && !stackDimensions[sort.Get("field").MapKey()]
 		return normalizeSortField(sort, isStacked)
 	case isSortByEncoding(cc, sort):
 		encoding, order := sort.Get("encoding"), sort.Get("order")
@@ -347,7 +354,7 @@ func domainSort(u *unitModel, channel, scaleType string) Value {
 			throw("Cannot destructure property 'aggregate' of 'fieldDefToSortBy' as it is %s.", nullishName(fieldDefToSortBy))
 		}
 		aggregate, field := fieldDefToSortBy.Get("aggregate"), fieldDefToSortBy.Get("field")
-		isStacked := stack != nil && !stackDimensions.has(field.AsString())
+		isStacked := stack != nil && !stackDimensions[field.MapKey()]
 		if isArgminDef(cc, aggregate) || isArgmaxDef(cc, aggregate) {
 			return normalizeSortField(mkv("field", vgField(cc, fieldDefToSortBy, fieldRefOption{}), "order", order), isStacked)
 		} else if isAggregateOp(cc, aggregate) || !aggregate.IsTruthy() {

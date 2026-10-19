@@ -89,20 +89,31 @@ func TestJSKeyOrder(t *testing.T) {
 }
 
 func TestStringValue(t *testing.T) {
+	sep := string(rune(0x2028)) + string(rune(0x2029))
 	for _, c := range []struct {
-		in   jsval.Value
-		want string
+		in     jsval.Value
+		want   string
+		want58 string // vega-util 1.17's, where it differs
 	}{
-		{jsval.Str("a\"b"), `"a\"b"`},
-		{arr("a", 1, jsval.Null), `["a",1,null]`},
-		{jsval.Num(0.5), "0.5"},
-		{jsval.True, "true"},
-		{jsval.Undefined, "undefined"},
-		{mkv("k", "v"), `{"k":"v"}`},
-		{jsval.Str(string(rune(0x2028))), `"` + `\` + `u2028"`},
+		{in: jsval.Str("a\"b"), want: `"a\"b"`},
+		{in: arr("a", 1, jsval.Null), want: `["a",1,null]`, want58: `["a",1,]`},
+		{in: arr(arr(jsval.Null), jsval.Undefined), want: `[[null],]`, want58: `[[],]`},
+		{in: jsval.Num(0.5), want: "0.5"},
+		{in: jsval.True, want: "true"},
+		{in: jsval.Undefined, want: "undefined"},
+		{in: mkv("k", "v"), want: `{"k":"v"}`},
+		{in: jsval.Str(string(rune(0x2028))), want: `"` + `\` + `u2028"`},
+		// 1.17 escapes only the first of each separator.
+		{in: jsval.Str(sep + sep), want: `"\u2028\u2029\u2028\u2029"`, want58: `"\u2028\u2029` + sep + `"`},
 	} {
-		if got := stringValue(c.in); got != c.want {
-			t.Errorf("stringValue(%s) = %s, want %s", c.in, got, c.want)
+		for _, v5 := range []bool{false, true} {
+			want := c.want
+			if v5 && c.want58 != "" {
+				want = c.want58
+			}
+			if got := stringValue(&compileCtx{v5: v5}, c.in); got != want {
+				t.Errorf("stringValue(%s) (5.8: %v) = %s, want %s", c.in, v5, got, want)
+			}
 		}
 	}
 }

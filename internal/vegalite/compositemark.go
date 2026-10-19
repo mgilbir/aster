@@ -16,7 +16,7 @@ type compositeNormalizer struct {
 }
 
 func (c compositeNormalizer) hasMatchingType(spec Value, p *normParams) bool {
-	return isUnitSpec(p.cc, spec) && getMarkType(p.cc, spec.Get("mark")) == c.name
+	return isUnitSpec(p.cc, spec) && strIs(getMarkType(p.cc, spec.Get("mark")), c.name) // getMarkType(spec.mark) === this.name
 }
 
 func (c compositeNormalizer) run(spec Value, p *normParams, _ func(Value, *normParams) Value) Value {
@@ -58,7 +58,7 @@ func filterTooltipWithAggregatedField(cc *compileCtx, oldEncoding Value) (custom
 	if tooltip.IsArr() {
 		for _, t := range tooltip.Items() {
 			cc.work(1)
-			if t.Get("aggregate").IsTruthy() {
+			if jsGet(t, "aggregate").IsTruthy() { // t.aggregate: a TypeError of a null element
 				haveWith = true
 				with = append(with, t)
 			} else {
@@ -192,10 +192,10 @@ type continuousAxisInfo struct {
 	axis                           string
 }
 
-func compositeMarkContinuousAxis(cc *compileCtx, spec Value, orient, compositeMark string) continuousAxisInfo {
+func compositeMarkContinuousAxis(cc *compileCtx, spec Value, orient Value, compositeMark string) continuousAxisInfo {
 	encoding := spec.Get("encoding")
 	axis := chY
-	if orient != "vertical" {
+	if !strIs(orient, "vertical") {
 		axis = chX
 	}
 	return continuousAxisInfo{
@@ -207,46 +207,45 @@ func compositeMarkContinuousAxis(cc *compileCtx, spec Value, orient, compositeMa
 	}
 }
 
-func compositeMarkOrient(cc *compileCtx, spec Value, compositeMark string) string {
+// compositeMarkOrient is the mark's orient as given (a truthy one), or the
+// orient the encoding implies; callers compare it strictly.
+func compositeMarkOrient(cc *compileCtx, spec Value, compositeMark string) Value {
 	mark, encoding := spec.Get("mark"), spec.Get("encoding")
 	x, y := encoding.Get("x"), encoding.Get("y")
 	if isMarkDef(cc, mark) && mark.Get("orient").IsTruthy() {
-		return mark.Get("orient").AsString()
+		return mark.Get("orient")
 	}
+	vertical, horizontal := jsval.Str("vertical"), jsval.Str("horizontal")
 	if isContinuousFieldOrDatumDef(cc, x) {
 		if isContinuousFieldOrDatumDef(cc, y) {
-			xAgg, yAgg := "", ""
+			// isFieldDef(x) && x.aggregate, compared with === and tested
+			// for truth.
+			xAgg, yAgg := jsval.False, jsval.False
 			if isFieldDef(cc, x) {
-				xAgg = x.Get("aggregate").AsString()
+				xAgg = x.Get("aggregate")
 			}
 			if isFieldDef(cc, y) {
-				yAgg = y.Get("aggregate").AsString()
-			}
-			if x.Get("aggregate").IsUndefined() {
-				xAgg = ""
-			}
-			if y.Get("aggregate").IsUndefined() {
-				yAgg = ""
+				yAgg = y.Get("aggregate")
 			}
 			switch {
-			case xAgg == "" && yAgg == compositeMark:
-				return "vertical"
-			case yAgg == "" && xAgg == compositeMark:
-				return "horizontal"
-			case xAgg == compositeMark && yAgg == compositeMark:
+			case !xAgg.IsTruthy() && strIs(yAgg, compositeMark):
+				return vertical
+			case !yAgg.IsTruthy() && strIs(xAgg, compositeMark):
+				return horizontal
+			case strIs(xAgg, compositeMark) && strIs(yAgg, compositeMark):
 				throw("Both x and y cannot have aggregate")
 			}
 			if isFieldOrDatumDefForTimeFormat(cc, y) && !isFieldOrDatumDefForTimeFormat(cc, x) {
-				return "horizontal"
+				return horizontal
 			}
-			return "vertical"
+			return vertical
 		}
-		return "horizontal"
+		return horizontal
 	} else if isContinuousFieldOrDatumDef(cc, y) {
-		return "vertical"
+		return vertical
 	}
 	throw("Need a valid continuous axis for %ss", compositeMark)
-	return ""
+	return undef
 }
 
 // ---- boxplot ----
@@ -348,7 +347,7 @@ func normalizeBoxPlot(cc *compileCtx, spec Value, config Value) Value {
 	if sizeValue.IsTruthy() {
 		boxMark.Set("size", sizeValue)
 	}
-	boxMark.Set("orient", jsval.Str(bp.boxOrient))
+	boxMark.Set("orient", bp.boxOrient)
 	boxMark.Set("invalid", invalid)
 	boxMark.Set("ariaRoleDescription", jsval.Str("box"))
 	boxLayers = append(boxLayers, makeBox("box", jsval.Obj(boxMark), "lower_box", "upper_box", fiveSummary)...)
@@ -443,7 +442,8 @@ type boxParamsResult struct {
 	continuousAxisChannelDef                       Value
 	continuousAxis                                 string
 	encodingWithoutContinuousAxis                  Value
-	ticksOrient, boxOrient                         string
+	ticksOrient                                    string
+	boxOrient                                      Value
 	customTooltipWithoutAggregatedField            Value
 }
 
@@ -483,7 +483,7 @@ func boxParams(cc *compileCtx, spec Value, extent Value, config Value) boxParams
 	customTooltip, filteredEncoding := filterTooltipWithAggregatedField(cc, jsval.Obj(oldEncodingWithout))
 	ex := extractTransformsFromEncoding(cc, jsval.Obj(filteredEncoding), config)
 	ticksOrient := "vertical"
-	if orient == "vertical" {
+	if strIs(orient, "vertical") {
 		ticksOrient = "horizontal"
 	}
 	transform := append(append([]Value{}, ex.bins...), ex.timeUnits...)
@@ -501,7 +501,7 @@ func boxParams(cc *compileCtx, spec Value, extent Value, config Value) boxParams
 
 func isFOD(cc *compileCtx, v Value) bool { return isFieldOrDatumDef(cc, v) }
 
-func errorBarOrientAndInputType(cc *compileCtx, spec Value, compositeMark string) (orient, inputType string) {
+func errorBarOrientAndInputType(cc *compileCtx, spec Value, compositeMark string) (orient Value, inputType string) {
 	encoding := spec.Get("encoding")
 	if (isFOD(cc, encoding.Get("x")) || isFOD(cc, encoding.Get("y"))) && !isFOD(cc, encoding.Get("x2")) && !isFOD(cc, encoding.Get("y2")) &&
 		!isFOD(cc, encoding.Get("xError")) && !isFOD(cc, encoding.Get("xError2")) && !isFOD(cc, encoding.Get("yError")) && !isFOD(cc, encoding.Get("yError2")) {
@@ -520,12 +520,12 @@ func errorBarOrientAndInputType(cc *compileCtx, spec Value, compositeMark string
 			throw("%s cannot have both x2 and y2", compositeMark)
 		case isFOD(cc, x2):
 			if isContinuousFieldOrDatumDef(cc, x) {
-				return "horizontal", "aggregated-upper-lower"
+				return jsval.Str("horizontal"), "aggregated-upper-lower"
 			}
 			throw("Both x and x2 have to be quantitative in %s", compositeMark)
 		case isFOD(cc, y2):
 			if isContinuousFieldOrDatumDef(cc, y) {
-				return "vertical", "aggregated-upper-lower"
+				return jsval.Str("vertical"), "aggregated-upper-lower"
 			}
 			throw("Both y and y2 have to be quantitative in %s", compositeMark)
 		}
@@ -543,17 +543,17 @@ func errorBarOrientAndInputType(cc *compileCtx, spec Value, compositeMark string
 		throw("%s cannot have both xError and yError with both are quantiative", compositeMark)
 	case isFOD(cc, xError):
 		if isContinuousFieldOrDatumDef(cc, x) {
-			return "horizontal", "aggregated-error"
+			return jsval.Str("horizontal"), "aggregated-error"
 		}
 		throw("All x, xError, and xError2 (if exist) have to be quantitative")
 	case isFOD(cc, yError):
 		if isContinuousFieldOrDatumDef(cc, y) {
-			return "vertical", "aggregated-error"
+			return jsval.Str("vertical"), "aggregated-error"
 		}
 		throw("All y, yError, and yError2 (if exist) have to be quantitative")
 	}
 	throw("No ranged axis")
-	return "", ""
+	return undef, ""
 }
 
 type errorBarParamsResult struct {
@@ -599,7 +599,7 @@ func errorBarParams(cc *compileCtx, spec Value, compositeMark string, config Val
 	}
 	transform = append(transform, post...)
 	ticksOrient := "vertical"
-	if orient == "vertical" {
+	if strIs(orient, "vertical") {
 		ticksOrient = "horizontal"
 	}
 	return errorBarParamsResult{
@@ -609,8 +609,8 @@ func errorBarParams(cc *compileCtx, spec Value, compositeMark string, config Val
 	}
 }
 
-func getTitlePrefix(center, extent, op string) string {
-	return titleCase(center) + " " + op + " " + extent
+func getTitlePrefix(center, extent Value, op string) string {
+	return titleCaseV(center) + " " + op + " " + tmpl(extent)
 }
 
 func errorBarAggregationAndCalculation(cc *compileCtx, markDef, def, def2, defError, defError2 Value, inputType, compositeMark string, config Value) (agg, post []Value, tooltipSummary []tooltipSummaryItem, tooltipTitleWithFieldName bool) {
@@ -619,32 +619,34 @@ func errorBarAggregationAndCalculation(cc *compileCtx, markDef, def, def2, defEr
 	acc := func(s string) string { return cmAccess(cc, s) }
 	accV := func(v Value) string { return cmAccessV(cc, v) }
 	if inputType == "raw" {
-		var center string
+		// center and extent as given: compared with ===, written into the
+		// aggregate's op and the titles' templates.
+		var center Value
 		switch {
 		case markDef.Get("center").IsTruthy():
-			center = markDef.Get("center").AsString()
+			center = markDef.Get("center")
 		case markDef.Get("extent").IsTruthy():
-			if markDef.Get("extent").AsString() == "iqr" {
-				center = "median"
+			if strIs(markDef.Get("extent"), "iqr") {
+				center = jsval.Str("median")
 			} else {
-				center = "mean"
+				center = jsval.Str("mean")
 			}
 		default:
-			center = config.Get("errorbar").Get("center").AsString()
+			center = config.Get("errorbar").Get("center")
 		}
-		var extent string
+		var extent Value
 		switch {
 		case markDef.Get("extent").IsTruthy():
-			extent = markDef.Get("extent").AsString()
-		case center == "mean":
-			extent = "stderr"
+			extent = markDef.Get("extent")
+		case strIs(center, "mean"):
+			extent = jsval.Str("stderr")
 		default:
-			extent = "iqr"
+			extent = jsval.Str("iqr")
 		}
-		if (center == "median") != (extent == "iqr") {
-			cc.warn(msgErrorBarCenterIsUsedWithWrongExtent(jsval.Str(center), jsval.Str(extent), compositeMark))
+		if strIs(center, "median") != strIs(extent, "iqr") {
+			cc.warn(msgErrorBarCenterIsUsedWithWrongExtent(center, extent, compositeMark))
 		}
-		if extent == "stderr" || extent == "stdev" {
+		if strIn(extent, "stderr", "stdev") {
 			agg = []Value{
 				mkv("op", extent, "field", contFieldV, "as", "extent_"+contField),
 				mkv("op", center, "field", contFieldV, "as", "center_"+contField),
@@ -654,14 +656,14 @@ func errorBarAggregationAndCalculation(cc *compileCtx, markDef, def, def2, defEr
 				mkv("calculate", acc("center_"+contField)+" - "+acc("extent_"+contField), "as", "lower_"+contField),
 			}
 			tooltipSummary = []tooltipSummaryItem{
-				{"center_", jsval.Str(titleCase(center))},
+				{"center_", jsval.Str(titleCaseV(center))},
 				{"upper_", jsval.Str(getTitlePrefix(center, extent, "+"))},
 				{"lower_", jsval.Str(getTitlePrefix(center, extent, "-"))},
 			}
 			tooltipTitleWithFieldName = true
 		} else {
 			var centerOp, lowerOp, upperOp string
-			if extent == "ci" {
+			if strIs(extent, "ci") {
 				centerOp, lowerOp, upperOp = "mean", "ci0", "ci1"
 			} else {
 				centerOp, lowerOp, upperOp = "median", "q1", "q3"

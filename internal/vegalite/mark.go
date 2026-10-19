@@ -181,7 +181,7 @@ func definedEncode(m *unitModel) Value {
 			return
 		}
 		scaleType := m.getScaleType(channel)
-		if scaleType == "" {
+		if !scaleType.IsTruthy() {
 			return
 		}
 		mode := getScaleInvalidDataMode(m.markDef, m.config, channel, scaleType, isCountingAggregateOp(fd.Get("aggregate")))
@@ -214,11 +214,11 @@ func parseMarkGroups(m *unitModel) []Value {
 	cc := m.b().ctx
 
 	mark := m.mark()
-	if mark == "line" || mark == "area" || mark == "trail" {
+	if isPathMark(mark) {
 		if details := pathGroupingFields(cc, mark, m.encoding); len(details) > 0 {
 			return getPathGroups(m, details)
 		}
-	} else if mark == "bar" {
+	} else if strIs(mark, "bar") {
 		hasCornerRadius := false
 		for _, p := range vgCornerRadiusChannels {
 			if getMarkPropOrConfigSimple(p, m.markDef, m.config).IsTruthy() {
@@ -351,7 +351,7 @@ func getSort(m *unitModel) Value {
 	} else if (order.IsArr() || isFieldDef(cc, order)) && stack == nil {
 		f, o := sortParams(cc, order, fieldRefOption{expr: "datum"})
 		return mkv("field", jsval.Arr(f), "order", jsval.Arr(o))
-	} else if isPathMarkName(mark) {
+	} else if isPathMark(mark) {
 		dim := chX
 		if markDefOrient(markDef) == "horizontal" {
 			dim = chY
@@ -379,7 +379,7 @@ func getMarkGroup(m *unitModel, fromPrefix string) []Value {
 		for _, name := range m.comp.selection.keyList() {
 			cc.work(1)
 			s := m.comp.selection.lookup(name)
-			if s.typ == "point" && !s.props.Lookup("bind").IsTruthy() && s.props.Lookup("on").AsString() != "pointerover" {
+			if s.typ == "point" && !s.props.Lookup("bind").IsTruthy() && !strIs(s.props.Lookup("on"), "pointerover") {
 				if m.markDef.Get("cursor").IsNullish() {
 					m.markDef.ObjValue().Set("cursor", jsval.Str("pointer"))
 				}
@@ -388,7 +388,7 @@ func getMarkGroup(m *unitModel, fromPrefix string) []Value {
 		}
 	}
 	aria := getMarkPropOrConfigSimple("aria", markDef, config)
-	mc := markCompilers[mark]
+	mc := markCompilers[propKey(mark)]
 	var post Value
 	if mc.postEncodingTransform != nil {
 		post = mc.postEncodingTransform(m)
@@ -455,7 +455,7 @@ func interactiveFlag(m *unitModel) Value {
 		parent = parent.b().parent
 	}
 	if parentCount > 0 {
-		return mkv("interactive", unitCount > 0 || m.mark() == "geoshape" || m.encoding.Get("tooltip").IsTruthy() || (!cc.v5 && m.markDef.Get("tooltip").IsTruthy()))
+		return mkv("interactive", unitCount > 0 || strIs(m.mark(), "geoshape") || m.encoding.Get("tooltip").IsTruthy() || (!cc.v5 && m.markDef.Get("tooltip").IsTruthy()))
 	}
 	return jsval.Null
 }

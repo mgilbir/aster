@@ -150,9 +150,9 @@ func binSizeExpr(cc *compileCtx, scaleName string, fd Value) string {
 func midPoint(cc *compileCtx, p midPointParams) Value {
 	if p.channelDef.IsTruthy() {
 		if isFieldOrDatumDef(cc, p.channelDef) {
-			scaleType := ""
+			scaleType := undef
 			if p.scale != nil {
-				scaleType = p.scale.get("type").AsString()
+				scaleType = p.scale.get("type")
 			}
 			bandPosition := p.bandPosition
 			if isTypedFieldDefOf(cc, p.channelDef) {
@@ -189,7 +189,7 @@ func midPoint(cc *compileCtx, p midPointParams) Value {
 				opt.binSuffix = "range"
 			}
 			band := undef
-			if scaleType == "band" {
+			if strIs(scaleType, "band") {
 				band = coalesce(bandPosition, p.channelDef.Get("bandPosition"), jsval.Num(0.5))
 			}
 			return valueRefForFieldOrDatumDef(cc, p.channelDef, p.scaleName, opt, refOffsetBand{offset: p.offset, band: band})
@@ -233,9 +233,9 @@ func widthHeightValueOrSignalRef(cc *compileCtx, channel string, value Value) Va
 // ---- invalid data value refs ----
 
 func getConditionalValueRefForIncludingInvalidValue(cc *compileCtx, scaleChannel string, channelDef Value, scale *scaleComponent, scaleName string, markDef, config Value) Value {
-	scaleType := ""
+	scaleType := undef
 	if scale != nil {
-		scaleType = scale.get("type").AsString()
+		scaleType = scale.get("type")
 	}
 	fd := getFieldDef(cc, channelDef)
 	isCount := fd.IsTruthy() && isCountingAggregateOp(fd.Get("aggregate"))

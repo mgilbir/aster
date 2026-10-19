@@ -157,7 +157,7 @@ func binToString(cc *compileCtx, bin Value) string {
 			// `${entries(x)}` stringifies [[k, v], ...] with commas.
 			var parts []string
 			for _, k := range keysOf(x) {
-				parts = append(parts, k, x.Get(k).AsString())
+				parts = append(parts, k, joinItem(x.Get(k))) // [k, v].join(","): null and undefined as ""
 			}
 			b.WriteString(varName("_" + p + "_" + strings.Join(parts, ",")))
 		} else {

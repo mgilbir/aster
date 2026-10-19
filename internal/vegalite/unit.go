@@ -33,22 +33,23 @@ func newUnitModel(cc *compileCtx, spec Value, parent Model, parentGivenName stri
 	} else {
 		markDef = mk("type", spec.Get("mark"))
 	}
-	if t := markDef.Lookup("type"); !t.IsStr() || markCompilers[t.StrValue()].encodeEntry == nil {
+	if t := markDef.Lookup("type"); markCompilers[propKey(t)].encodeEntry == nil {
 		// Upstream has no such check: a type that names no mark reads
 		// config[type], undefined, first for defaultFilled (unless filled
 		// is given) and then for initMarkdef's orient; a member of
 		// Object.prototype reads as a function there and fails only at
 		// markCompiler[mark].encodeEntry(...). The engine stops here, with
-		// the error upstream reaches.
+		// the error upstream reaches. The type is read as a key there, so
+		// ["bar"] is a bar to these tables (and to no === after them).
 		switch {
-		case t.IsStr() && isInheritedKey(t.StrValue()):
+		case isInheritedKey(propKey(t)):
 			throw("markCompiler[mark].encodeEntry is not a function")
 		case markDef.Lookup("filled").IsUndefined():
 			throw("Cannot read properties of undefined (reading 'filled')")
 		}
 		throw("Cannot read properties of undefined (reading 'orient')")
 	}
-	mark := markDef.Lookup("type").AsString()
+	mark := markDef.Lookup("type")
 	if markDef.Lookup("filled").IsUndefined() {
 		if cc.v5 && spec.Get("data").IsTruthy() {
 			jsIn(spec.Get("data"), "graticule") // 5.8's isGraticuleGenerator
@@ -105,12 +106,17 @@ func coalesceObj(v Value) Value {
 }
 
 func (u *unitModel) children() []Model { return nil }
-func (u *unitModel) mark() string      { return u.markDef.Get("type").AsString() }
+
+// mark is the mark's type as the specification gives it: upstream compares
+// it strictly (mark === 'bar') and reads tables with it as a key
+// (config[mark], markCompiler[mark]), so ["bar"] is a bar for the second
+// and no mark for the first.
+func (u *unitModel) mark() Value { return u.markDef.Get("type") }
 
 func (u *unitModel) hasProjection() bool {
 	cc := u.b().ctx
 
-	if u.mark() == "geoshape" {
+	if strIs(u.mark(), "geoshape") {
 		return true
 	}
 	for _, ch := range geoPositionChannels {
@@ -250,7 +256,7 @@ func (u *unitModel) alignStackOrderWithColorDomain() {
 			if u.stack == nil {
 				return
 			}
-			orderExpression := "indexof(" + stringValue(domain) + ", datum['" + field.StrValue() + "'])"
+			orderExpression := "indexof(" + stringValue(cc, domain) + ", datum['" + field.StrValue() + "'])"
 			sort := "descending"
 			if markDefOrient(u.markDef) == "horizontal" {
 				sort = "ascending"
@@ -386,21 +392,28 @@ func defaultFilled(markDef Value, config Value, graticule bool) Value {
 		return jsval.False
 	}
 	filledConfig := getMarkConfig("filled", markDef, config, "")
-	mark := markDef.Get("type").AsString()
-	return firstDefined(filledConfig, jsval.Bool(mark != "point" && mark != "line" && mark != "rule"))
+	mark := markDef.Get("type")
+	return firstDefined(filledConfig, jsval.Bool(!strIs(mark, "point") && !strIs(mark, "line") && !strIs(mark, "rule")))
+}
+
+// barCornerRadiusEndIndex is upstream's BAR_CORNER_RADIUS_END_INDEX, read
+// with the orient as its key.
+var barCornerRadiusEndIndex = map[string][]string{
+	"horizontal": {"cornerRadiusTopRight", "cornerRadiusBottomRight"},
+	"vertical":   {"cornerRadiusTopLeft", "cornerRadiusTopRight"},
 }
 
 func initMarkdef(cc *compileCtx, original Value, encoding Value, config Value) Value {
 	mdv := replaceExprRef(cc, original, 0)
 	md := mdv.ObjValue()
 	specifiedOrient := getMarkPropOrConfigSimple("orient", mdv, config)
-	md.Set("orient", markOrient(cc, md.Lookup("type").AsString(), encoding, specifiedOrient))
+	md.Set("orient", markOrient(cc, md.Lookup("type"), encoding, specifiedOrient))
 	orient := md.Lookup("orient")
 	if !specifiedOrient.IsUndefined() && !strictEq(specifiedOrient, orient) {
 		// Upstream passes the computed orient as the "specified" one.
 		cc.warn(msgOrientOverridden(orient, specifiedOrient))
 	}
-	if md.Lookup("type").AsString() == "bar" && orient.IsTruthy() {
+	if strIs(md.Lookup("type"), "bar") && orient.IsTruthy() {
 		if cre := getMarkPropOrConfigSimple("cornerRadiusEnd", mdv, config); !cre.IsUndefined() {
 			var newProps []string
 			if (strIs(orient, "horizontal") && encoding.Get("x2").IsTruthy()) || (strIs(orient, "vertical") && encoding.Get("y2").IsTruthy()) {
@@ -409,12 +422,8 @@ func initMarkdef(cc *compileCtx, original Value, encoding Value, config Value) V
 				// BAR_CORNER_RADIUS_INDEX[markDef.orient]: an orient that
 				// names neither entry reads undefined (or a member of
 				// Object.prototype), and for…of over it throws.
-				switch orient.AsString() {
-				case "horizontal":
-					newProps = []string{"cornerRadiusTopRight", "cornerRadiusBottomRight"}
-				case "vertical":
-					newProps = []string{"cornerRadiusTopLeft", "cornerRadiusTopRight"}
-				default:
+				var ok bool
+				if newProps, ok = barCornerRadiusEndIndex[propKey(orient)]; !ok {
 					throw("newProps is not iterable")
 				}
 			}
@@ -429,7 +438,7 @@ func initMarkdef(cc *compileCtx, original Value, encoding Value, config Value) V
 	so := getMarkPropOrConfigSimple("opacity", mdv, config)
 	sfo := getMarkPropOrConfigSimple("fillOpacity", mdv, config)
 	if so.IsUndefined() && (cc.v5 || sfo.IsUndefined()) {
-		md.Set("opacity", markOpacity(cc, md.Lookup("type").AsString(), encoding))
+		md.Set("opacity", markOpacity(cc, md.Lookup("type"), encoding))
 	}
 	if getMarkPropOrConfigSimple("cursor", mdv, config).IsUndefined() {
 		md.Set("cursor", markCursor(mdv, encoding, config))
@@ -446,14 +455,15 @@ func markCursor(markDef, encoding, config Value) Value {
 
 const defaultReducedOpacity = 0.7
 
-func markOpacity(cc *compileCtx, mark string, encoding Value) Value {
-	if (mark == "point" || mark == "tick" || mark == "circle" || mark == "square") && !encodingIsAggregate(cc, encoding) {
+func markOpacity(cc *compileCtx, mark Value, encoding Value) Value {
+	if (strIs(mark, "point") || strIs(mark, "tick") || strIs(mark, "circle") || strIs(mark, "square")) && !encodingIsAggregate(cc, encoding) {
 		return jsval.Num(defaultReducedOpacity)
 	}
 	return undef
 }
 
-func markOrient(cc *compileCtx, mark string, encoding Value, specifiedOrient Value) Value {
+func markOrient(cc *compileCtx, markType Value, encoding Value, specifiedOrient Value) Value {
+	mark, _ := markType.Strict() // switch (mark)
 	switch mark {
 	case "point", "circle", "square", "rect", "image":
 		return undef

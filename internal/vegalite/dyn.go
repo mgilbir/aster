@@ -129,11 +129,15 @@ func isExprRef(cc *compileCtx, v Value) bool {
 }
 
 // cloneObj is `{...o}`.
+// cloneObj is {...o}: o's own keys in a new plain object (whose prototype
+// is Object.prototype, whatever o's is).
 func cloneObj(o *Object) *Object {
 	if o == nil {
 		return jsval.NewObject(0)
 	}
-	return o.Clone()
+	c := o.Clone()
+	c.SetPrototype(undef)
+	return c
 }
 
 // spread copies the keys of src (an object; anything else is ignored) into dst,
@@ -312,9 +316,48 @@ func or(vs ...Value) Value {
 
 // deepEqual is upstream's deepEqual (key order is irrelevant). Lazy signals
 // compare by their current expression.
-func deepEqual(a, b Value) bool {
+//
+// Each value visited is a step of cc's work, so a comparison of large values
+// polls the deadline. The values may share their parts (the compiler reuses
+// a config's or a definition's objects), and a walk of a shared part is
+// repeated wherever it is reached, exponentially in the depth of sharing:
+// past deepEqualMemoAfter containers, a pair of containers found equal is
+// remembered and not walked again, which bounds the walk by the number of
+// distinct pairs. The answer is the same.
+func deepEqual(cc *compileCtx, a, b Value) bool {
+	d := deepEqualWalk{cc: cc}
+	return d.eq(a, b)
+}
+
+// deepEqualMemoAfter is how many containers a comparison visits before it
+// remembers the pairs it found equal: a small value is compared without
+// allocating.
+const deepEqualMemoAfter = 64
+
+type deepEqualWalk struct {
+	cc    *compileCtx
+	seen  int
+	equal map[[2]jsval.InternKey]bool
+}
+
+func (d *deepEqualWalk) eq(a, b Value) bool {
+	d.cc.work(1)
 	if a.Kind() != b.Kind() {
 		return false
+	}
+	var key [2]jsval.InternKey
+	switch a.Kind() {
+	case jsval.KindArr, jsval.KindObj:
+		if jsval.SameRef(a, b) {
+			return true
+		}
+		d.seen++
+		if d.seen > deepEqualMemoAfter {
+			key = [2]jsval.InternKey{a.MapKey(), b.MapKey()}
+			if d.equal[key] {
+				return true
+			}
+		}
 	}
 	switch a.Kind() {
 	case jsval.KindArr:
@@ -323,16 +366,12 @@ func deepEqual(a, b Value) bool {
 			return false
 		}
 		for i := range x {
-			if !deepEqual(x[i], y[i]) {
+			if !d.eq(x[i], y[i]) {
 				return false
 			}
 		}
-		return true
 	case jsval.KindObj:
 		x, y := a.ObjValue(), b.ObjValue()
-		if x == y {
-			return true
-		}
 		if fx, ok := lazyFn(x); ok {
 			a = mkv("signal", fx())
 			x = a.ObjValue()
@@ -346,13 +385,20 @@ func deepEqual(a, b Value) bool {
 		}
 		for i := 0; i < x.Len(); i++ {
 			bv, ok := y.Get(x.KeyAt(i))
-			if !ok || !deepEqual(x.ValueAt(i), bv) {
+			if !ok || !d.eq(x.ValueAt(i), bv) {
 				return false
 			}
 		}
-		return true
+	default:
+		return jsval.Equal(a, b)
 	}
-	return jsval.Equal(a, b)
+	if d.seen > deepEqualMemoAfter {
+		if d.equal == nil {
+			d.equal = map[[2]jsval.InternKey]bool{}
+		}
+		d.equal[key] = true
+	}
+	return true
 }
 
 // deepClone is structuredClone for JSON-like values. The clone's keys are in
@@ -429,6 +475,9 @@ func stringifyTo(cc *compileCtx, b *strings.Builder, v Value) bool {
 		}
 		b.WriteByte(']')
 	case jsval.KindObj:
+		if jsval.IsFunction(v) {
+			return false // typeof 'function': JSON.stringify gives undefined
+		}
 		o := v.ObjValue()
 		if fn, ok := lazyFn(o); ok {
 			b.WriteString(`{"signal":` + string(jsval.AppendJSON(nil, jsval.Str(fn()))) + "}")
@@ -463,10 +512,51 @@ func stringifyTo(cc *compileCtx, b *strings.Builder, v Value) bool {
 }
 
 // stringValue is vega-util's stringValue: a JS literal for use in
-// expressions (see jsval.StringValue).
-func stringValue(v Value) string { return jsval.StringValue(v) }
+// expressions (see jsval.StringValue). Vega-Lite 5.8 is built on vega-util
+// 1.17, whose stringValue differs (stringValue117).
+func stringValue(cc *compileCtx, v Value) string {
+	if cc != nil && cc.v5 {
+		var b strings.Builder
+		stringValue117(cc, &b, v, 0)
+		return b.String()
+	}
+	return jsval.StringValue(v)
+}
 
-func jsonString(s string) string { return stringValue(jsval.Str(s)) }
+func jsonString(cc *compileCtx, s string) string { return stringValue(cc, jsval.Str(s)) }
+
+// stringValue117 is vega-util 1.17's stringValue, as Vega-Lite 5.8 calls it
+// (C83 of the 2026-10-18 audit): `'[' + x.map($) + ']'`, so a null or
+// undefined element is written as nothing where 2.x writes null, and
+// JSON.stringify(x).replace('\u2028', ...).replace('\u2029', ...), which
+// escapes only the first of each separator; anything else as its String.
+func stringValue117(cc *compileCtx, b *strings.Builder, v Value, depth int) {
+	cc.work(1)
+	switch v.Kind() {
+	case jsval.KindArr:
+		if depth > jsval.MaxValueDepth {
+			throw("Maximum call stack size exceeded")
+		}
+		b.WriteByte('[')
+		for i, it := range v.Items() {
+			if i > 0 {
+				b.WriteByte(',')
+			}
+			if !it.IsNullish() {
+				stringValue117(cc, b, it, depth+1)
+			}
+		}
+		b.WriteByte(']')
+	case jsval.KindStr, jsval.KindObj:
+		js := string(jsval.AppendJSON(nil, v))
+		cc.work(int64(len(js)) / 16)
+		js = strings.Replace(js, "\u2028", "\\u2028", 1)
+		js = strings.Replace(js, "\u2029", "\\u2029", 1)
+		b.WriteString(js)
+	default:
+		b.WriteString(v.AsString())
+	}
+}
 
 // hash is upstream's hash(): short strings are their own hash.
 func hashOf(cc *compileCtx, v Value) string {
@@ -844,6 +934,53 @@ func jsGreater(a, b Value) bool {
 
 // strIs reports whether v is the string s.
 func strIs(v Value, s string) bool { return v.IsStr() && v.StrValue() == s }
+
+// setHas is set.has(v) of a Set of names: v must be one of them, compared
+// strictly (a Set never coerces).
+func setHas(set map[string]bool, v Value) bool {
+	s, ok := v.Strict()
+	return ok && set[s]
+}
+
+// looseEq is v == s, JavaScript's loose equality with a string literal (the
+// few sites upstream writes == rather than ===): a string equals s, a number
+// or boolean equals Number(s), an array or object compares its String
+// (ToPrimitive), and null and undefined equal no string.
+func looseEq(v Value, s string) bool {
+	switch v.Kind() {
+	case jsval.KindStr:
+		return v.StrValue() == s
+	case jsval.KindNum, jsval.KindBool:
+		return jsval.ToNumber(v) == jsval.ToNumber(jsval.Str(s))
+	case jsval.KindArr, jsval.KindObj:
+		return v.StringIs(s)
+	}
+	return false
+}
+
+// undefinedKey is the property key upstream reads with an undefined name
+// (obj[undefined] is obj["undefined"]).
+const undefinedKey = "undefined"
+
+// propKey is v read as a property key (obj[v], `v in obj`): String(v), so
+// ["bar"] names "bar" and undefined "undefined". A key compared with a name
+// is a property lookup; a keyword compared with one is strIs.
+func propKey(v Value) string { return v.AsString() }
+
+// strIn is contains(names, v) (indexOf, includes, Set.has): v is one of
+// names, compared strictly, as strIs does.
+func strIn(v Value, names ...string) bool {
+	if !v.IsStr() {
+		return false
+	}
+	s := v.StrValue()
+	for _, n := range names {
+		if s == n {
+			return true
+		}
+	}
+	return false
+}
 
 // jsIndexOrGet is v[key] for an object or an array (whose keys are indices).
 func jsIndexOrGet(v Value, key string) Value {

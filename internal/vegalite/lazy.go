@@ -102,6 +102,25 @@ func (c *compileCtx) flushWork() {
 	}
 }
 
+// ctxErr is the caller's context's error, nil while it runs.
+func (c *compileCtx) ctxErr() error {
+	if c == nil || c.ctx == nil {
+		return nil
+	}
+	return c.ctx.Err()
+}
+
+// walker is the call's jsval.Walker (its ledger and deadline), with which
+// the compiler takes the String of a specification's value it builds text
+// from (a joined title): the walk is metered and its text charged as the
+// engine's walks are (ADR 0018).
+func (c *compileCtx) walker() jsval.Walker {
+	if c == nil {
+		return jsval.Walker{}
+	}
+	return jsval.WalkerFor(c.ctx)
+}
+
 // warn logs a warning as upstream's log.warn does: the caller's Options.Warn
 // decides whether the compilation goes on.
 func (c *compileCtx) warn(msg string) {
@@ -156,21 +175,39 @@ func signalOf(v Value) string {
 }
 
 // resolveLazy replaces every lazy signal in v with its evaluated expression.
+// The compiled specification shares objects (a config's or a definition's,
+// reused by every mark that reads them), so it is a graph, not a tree: each
+// array and object is visited once, which bounds the walk by the objects
+// the compilation made rather than by the paths to them, exponential in the
+// depth of sharing.
 func resolveLazy(cc *compileCtx, v Value) {
-	cc.work(1)
-	switch v.Kind() {
-	case jsval.KindArr:
-		for _, it := range v.Items() {
-			resolveLazy(cc, it)
+	seen := map[jsval.InternKey]struct{}{}
+	var walk func(v Value)
+	walk = func(v Value) {
+		cc.work(1)
+		switch v.Kind() {
+		case jsval.KindArr, jsval.KindObj:
+			k := v.MapKey()
+			if _, ok := seen[k]; ok {
+				return
+			}
+			seen[k] = struct{}{}
 		}
-	case jsval.KindObj:
-		o := v.ObjValue()
-		if fn, ok := lazyFn(o); ok {
-			o.Set("signal", jsval.Str(fn()))
-			o.SetStringer(nil)
-		}
-		for i := 0; i < o.Len(); i++ {
-			resolveLazy(cc, o.ValueAt(i))
+		switch v.Kind() {
+		case jsval.KindArr:
+			for _, it := range v.Items() {
+				walk(it)
+			}
+		case jsval.KindObj:
+			o := v.ObjValue()
+			if fn, ok := lazyFn(o); ok {
+				o.Set("signal", jsval.Str(fn()))
+				o.SetStringer(nil)
+			}
+			for i := 0; i < o.Len(); i++ {
+				walk(o.ValueAt(i))
+			}
 		}
 	}
+	walk(v)
 }

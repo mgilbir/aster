@@ -376,7 +376,10 @@ func mergeAggregatesFn() func(root dfNode) bool {
 			for _, c := range node.base().children() {
 				cc.work(1)
 				if agg, ok := c.(*aggregateNode); ok {
-					k := setToHashString(node.base().cc, agg.groupBy())
+					// hash(agg.groupBy): stringify of the Set is its toJSON
+					// text, JSON-quoted, which past 250 code units is the
+					// 32-bit hash (C87 of the 2026-10-18 audit).
+					k := hashOf(cc, jsval.Str(string(jsval.AppendJSON(nil, jsval.Str(setToHashString(cc, agg.groupBy()))))))
 					list, _ := groups.get(k)
 					groups.set(k, append(list, agg))
 				}

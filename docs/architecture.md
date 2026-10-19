@@ -101,15 +101,15 @@ Each package imports only packages of lower layers, so there are no cycles and t
 0: bcache budget csscolor fonts/dejavu fonts/liberation fonts/notoemoji fontsubset jsmath jssort textcut
 1: imageref jsval loader pngopt text
 2: format geo raster scale/color scene transforms/contour transforms/force transforms/hierarchy transforms/label transforms/voronoi transforms/wordcloud
-3: expr geo/geoscene scale svg svgpdf transforms vega/layout vegalite
-4: vega/guides
+3: expr geo/geoscene scale svg svgpdf transforms vega/layout
+4: vega/guides vegalite
 5: vega
 6: aster
-tools: cmd/enginebench cmd/recursionaudit fuzzutil oracle svgcheck svgdiff testutil upstream
+tools: cmd/enginebench cmd/recursionaudit fuzzutil fuzzutil/confusion oracle svgcheck svgdiff testutil upstream
 ```
 <!-- layers:end -->
 
-`tools` are not part of the engine: the commands and the test harness (`oracle` drives upstream in node, `svgcheck` checks the structure of the engine's SVG, `svgdiff` compares SVG, `upstream` replays upstream's test suites, `fuzzutil` serves the fuzz targets, `testutil` holds the race slowdown that keeps time-based tests independent of the machine). `internal/fonts/dejavu` is imported by tests only.
+`tools` are not part of the engine: the commands and the test harness (`oracle` drives upstream in node, `svgcheck` checks the structure of the engine's SVG, `svgdiff` compares SVG, `upstream` replays upstream's test suites, `fuzzutil` serves the fuzz targets and `fuzzutil/confusion` the type-confusion differentials, `testutil` holds the race slowdown that keeps time-based tests independent of the machine). `internal/fonts/dejavu` is imported by tests only.
 
 <!-- deps:begin (checked by TestDependencyStatement) -->
 Beyond the standard library, a program that imports aster builds these modules, and no others:

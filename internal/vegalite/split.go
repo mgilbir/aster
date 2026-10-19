@@ -425,7 +425,7 @@ func mergeValuesWithExplicit(cc *compileCtx, v1 *withExplicit, v2 withExplicit, 
 		return *v1
 	case v2.explicit && !v1.explicit:
 		return v2
-	case deepEqual(v1.value, v2.value):
+	case deepEqual(cc, v1.value, v2.value):
 		return *v1
 	}
 	return tb(cc, *v1, v2, property, propertyOf)

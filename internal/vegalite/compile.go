@@ -5,7 +5,9 @@
 // upstream's JSON.stringify output, so it can be compared byte for byte.
 //
 // Options.Version also selects Vega-Lite 5.8.0, which the package compiles to
-// exactly what vega-lite@5.8.0's compile() produces (Vega schema v5 included).
+// exactly what vega-lite@5.8.0's compile() produces (Vega schema v5 included),
+// with the vega-util 1.17 it is built on (its stringValue, mergeNamed and
+// writeConfig differ from 2.x's).
 // Only the compiler changes: the Vega specification it emits is still run by
 // the engine's Vega 6.4 runtime, not by Vega 5.25, so the rendered output of a 5.8
 // specification follows Vega 6.4's behaviour. The 5.8 code paths live behind
@@ -72,6 +74,10 @@ func Compile(spec jsval.Value, opts Options) (out jsval.Value, err error) {
 				err = e
 			case exprSyntaxError:
 				err = e.err()
+			case *budget.Stop:
+				// A walk of a value (jsval's) past the call's budget or
+				// deadline, or past the detached walk's caps.
+				err = e.Err
 			default:
 				if panicHook != nil {
 					panicHook(debug.Stack())
@@ -170,7 +176,7 @@ func getTopLevelProperties(inputSpec jsval.Value, autosize jsval.Value, config j
 	}
 	out := jsval.NewObject(6)
 	if as.Len() == 1 && as.Lookup("type").IsTruthy() {
-		if as.Lookup("type").AsString() != "pad" {
+		if !strIs(as.Lookup("type"), "pad") {
 			out.Set("autosize", as.Lookup("type"))
 		}
 	} else {

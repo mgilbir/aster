@@ -56,16 +56,12 @@ func predicateValueExpr(cc *compileCtx, v Value, timeUnit string) string {
 	if timeUnit != "" {
 		tu = jsval.Str(timeUnit)
 	}
-	s, _ := valueExpr(cc, v, tu, "", true, false)
-	return s
+	return tmpl(valueExpr(cc, v, tu, "", true, false)) // in a template literal
 }
 
 func fieldFilterExpression(cc *compileCtx, p Value, useInRange bool) string {
 	nt := normalizeTimeUnit(cc, p.Get("timeUnit"))
-	unit := ""
-	if u := nt.Get("unit"); u.IsTruthy() {
-		unit = u.AsString()
-	}
+	unit := nt.Get("unit").StrValue() // a string, or normalizeTimeUnit throws
 	binned := !cc.v5 && nt.Get("binned").IsTruthy()
 	rawFieldExpr := vgField(cc, p, fieldRefOption{expr: "datum"})
 	fieldExpr := rawFieldExpr

@@ -12,62 +12,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mgilbir/aster/internal/fuzzutil/confusion"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
-// confusedValues are values of the wrong type for almost every slot of a
-// specification.
-var confusedValues = []string{
-	"null", "true", "false", `""`, `"x"`, `"1e999"`, `"NaN"`, `"__proto__"`, `"constructor"`, `"datum.x"`,
-	"0", "-1", "1e308", "[]", "{}", "[1,2]", `["a","b"]`, `{"a":1}`, "[[1]]", "[{}]",
-	`{"signal":"1/0"}`, `{"signal":"datum"}`, `{"field":"nofield"}`, `{"value":null}`, `{"type":{}}`,
-}
-
-// nodePaths lists the path of every value in v (containers and scalars).
-func nodePaths(v jsval.Value) [][]string {
-	var out [][]string
-	var walk func(v jsval.Value, path []string)
-	walk = func(v jsval.Value, path []string) {
-		if len(path) > 0 {
-			out = append(out, path)
-		}
-		switch {
-		case v.IsObj():
-			o := v.ObjValue()
-			for i := 0; i < o.Len(); i++ {
-				walk(o.ValueAt(i), append(append([]string(nil), path...), o.KeyAt(i)))
-			}
-		case v.IsArr():
-			for i := 0; i < v.Len(); i++ {
-				walk(v.Index(i), append(append([]string(nil), path...), strconv.Itoa(i)))
-			}
-		}
-	}
-	walk(v, nil)
-	return out
-}
-
-func setAtPath(root jsval.Value, path []string, nv jsval.Value) {
-	v := root
-	for _, p := range path[:len(path)-1] {
-		if v.IsObj() {
-			v = v.ObjValue().Lookup(p)
-		} else {
-			i, _ := strconv.Atoi(p)
-			v = v.Index(i)
-		}
-	}
-	last := path[len(path)-1]
-	if v.IsObj() {
-		v.ObjValue().Set(last, nv)
-	} else {
-		i, _ := strconv.Atoi(last)
-		v.Items()[i] = nv
-	}
-}
-
 // TestTypeConfusion replaces, one at a time, values of corpus specifications
-// (every key, array element and container) by values of another type and checks
+// (every key, array element and container) by values of another type, or by
+// values derived from them, or renames a key (confusion.Confuse), and checks
 // that the compiler returns an error or a result but never panics: a panic
 // surfaces from Compile as an "internal error" (its recover), which this test
 // rejects. Whether it fails exactly where upstream throws is checked against
@@ -106,13 +57,11 @@ func TestTypeConfusion(t *testing.T) {
 		if err != nil {
 			continue
 		}
-		paths := nodePaths(spec)
-		if len(paths) == 0 {
+		slot, val, ok := confusion.Confuse(rng, spec)
+		if !ok {
 			continue
 		}
-		path := paths[rng.Intn(len(paths))]
-		val := confusedValues[rng.Intn(len(confusedValues))]
-		setAtPath(spec, path, mustParse(t, val))
+		path := slot.Path
 		version := Version64
 		if k%2 == 1 {
 			version = Version58

@@ -103,10 +103,17 @@ func (n *binNode) producedFields() *sset {
 
 func (n *binNode) dependentFields() *sset {
 	cc := n.cc
+	// new Set(vals(this.bins).map((c) => c.field)): the fields as given, so
+	// a field of ["a"] is read as an access path the way upstream reads it
+	// (fieldIntersection), not as its text.
 	s := newSset()
 	for _, k := range n.bins.keysView() {
 		cc.work(1)
-		s.add(n.bins.m[k].field)
+		if b := n.bins.m[k]; !b.fieldV.IsUndefined() {
+			s.addValue(b.fieldV)
+		} else {
+			s.add(b.field)
+		}
 	}
 	return s
 }
@@ -316,7 +323,7 @@ func (n *timeUnitNode) clone() dfNode {
 	return initNode(&timeUnitNode{timeUnits: c}, nil)
 }
 
-func isTimeUnitTransformComponent(c *Object) bool { return !c.Lookup("as").IsUndefined() }
+func isTimeUnitTransformComponent(c *Object) bool { return !jsval.Obj(c).Get("as").IsUndefined() }
 
 func (n *timeUnitNode) producedFields() *sset {
 	cc := n.cc
@@ -527,7 +534,10 @@ func (n *timeUnitNode) assemble() []Value {
 		f := n.timeUnits.m[k]
 		rect := f.Lookup("rectBandPosition")
 		nt := normalizeTimeUnit(cc, f.Lookup("timeUnit"))
-		if isTimeUnitTransformComponent(f) {
+		// 5.8 assembles every component as a timeunit transform, `as`
+		// undefined included ([as, `${as}_end`]); 6.x makes the formula of
+		// one without an `as`.
+		if cc.v5 || isTimeUnitTransformComponent(f) {
 			// const {unit, utc, ...params} = normalizeTimeUnit(timeUnit)
 			if nt.IsNullish() {
 				if cc.v5 {
@@ -844,7 +854,7 @@ func makeAggregateFromTransform(cc *compileCtx, parent dfNode, t Value) *aggrega
 	var raw map[string]Value
 	for _, s := range groupby {
 		cc.work(1)
-		dims.add(s.AsString())
+		dims.addValue(s)
 		if !s.IsStr() {
 			if raw == nil {
 				raw = map[string]Value{}

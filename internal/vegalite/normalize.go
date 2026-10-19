@@ -25,7 +25,9 @@ type normParams struct {
 	parentProjection Value
 	repeater         Value
 	repeaterPrefix   string
-	path             []string
+	// path is the names of the specs above, as given (concat spreads an
+	// array name; an unnamed unit adds undefined).
+	path []Value
 
 	emptySelections     map[string]bool
 	selectionPredicates map[string][]*Object
@@ -169,7 +171,7 @@ func normalizeAutoSize(cc *compileCtx, spec Value, sizeInfo Value, config Value)
 	isFitCompatible := isUnitSpec(cc, spec) || isLayerSpec(cc, spec)
 	autosizeDefault := jsval.NewObject(2)
 	// width == 'container' (loose: an array prints as its items joined).
-	isContainer := func(v Value) bool { return (v.IsStr() || v.IsArr()) && v.AsString() == "container" }
+	isContainer := func(v Value) bool { return looseEq(v, "container") }
 	if !isFitCompatible {
 		// A container width/height is discarded for specs that cannot fit.
 		if isContainer(width) {
@@ -204,13 +206,15 @@ func normalizeAutoSize(cc *compileCtx, spec Value, sizeInfo Value, config Value)
 		cc.warn(msgFitNonSingle)
 		autosize.Set("type", jsval.Str("pad"))
 	}
-	if isContainer(width) && !(typeIs("fit") || typeIs("fit-x")) {
+	// autosize.type == 'fit' (loose, as upstream writes it here).
+	typeLoose := func(t string) bool { return looseEq(autosize.Lookup("type"), t) }
+	if isContainer(width) && !(typeLoose("fit") || typeLoose("fit-x")) {
 		cc.warn(msgContainerSizeNotCompatibleWithAutosize("width"))
 	}
-	if isContainer(height) && !(typeIs("fit") || typeIs("fit-y")) {
+	if isContainer(height) && !(typeLoose("fit") || typeLoose("fit-y")) {
 		cc.warn(msgContainerSizeNotCompatibleWithAutosize("height"))
 	}
-	if deepEqual(jsval.Obj(autosize), mkv("type", "pad")) {
+	if deepEqual(cc, jsval.Obj(autosize), mkv("type", "pad")) {
 		return undef
 	}
 	return jsval.Obj(autosize)
@@ -242,6 +246,8 @@ func (n *selectionCompatNormalizer) mapLayerOrUnit(spec Value, p *normParams) Va
 	spec = normalizeTransforms(spec, p)
 	if enc := spec.Get("encoding"); enc.IsTruthy() {
 		// entries(spec.encoding): a string's entries are its characters.
+		// encoding[channel] = ...: an assignment, so a channel named
+		// "__proto__" sets the new object's prototype and is no key of it.
 		out := jsval.NewObject(enc.Len())
 		if enc.IsStr() {
 			for i, u := range utf16Len(enc.StrValue()) {
@@ -251,7 +257,7 @@ func (n *selectionCompatNormalizer) mapLayerOrUnit(spec Value, p *normParams) Va
 		}
 		for _, ch := range keysOf(enc) {
 			cc.work(1)
-			out.Set(ch, normalizeChannelDefCompat(jsIndexOrGet(enc, ch), p))
+			jsAssign(cc.realm(), out, ch, normalizeChannelDefCompat(jsIndexOrGet(enc, ch), p))
 		}
 		o := cloneObj(spec.ObjValue())
 		o.Set("encoding", jsval.Obj(out))
@@ -342,10 +348,13 @@ func normalizeChannelDefCompat(obj Value, p *normParams) Value {
 	if cc.v5 && obj.IsTruthy() {
 		jsIn(obj, "scale") // 5.8's isScaleFieldDef: a TypeError on a primitive
 	}
-	if !obj.IsObj() {
-		return obj
-	}
+	// const enc = duplicate(obj), whatever obj is: an array of channel
+	// definitions (a tooltip list) is copied too, and 5.8's copy leaves out
+	// the keys Object.prototype holds (skipsInClone58).
 	enc := duplicate(cc, obj)
+	if !enc.IsObj() {
+		return enc
+	}
 	eo := enc.ObjValue()
 	if isFieldDef(cc, enc) && isObject(enc.Get("bin")) {
 		eo.Set("bin", normalizeBinExtent(enc.Get("bin")))
@@ -408,7 +417,14 @@ func normalizeBinExtent(bin Value) Value {
 func normalizePredicateCompat(op Value, p *normParams) Value {
 	normSel := func(o Value) Value {
 		return normalizeLogicalComposition(p.cc, o, func(param Value) Value {
-			name := param.AsString()
+			name := propKey(param)
+			// selectionPredicates is a plain object: for a name every
+			// object inherits, selectionPredicates[param] ??= [] keeps the
+			// inherited member, and its push is no function (C81 of the
+			// 2026-10-18 audit).
+			if isInheritedKey(name) {
+				throw("normParams.selectionPredicates[param].push is not a function")
+			}
 			empty, ok := p.emptySelections[name]
 			if !ok {
 				empty = true
@@ -450,7 +466,7 @@ func newTopLevelSelectionsNormalizer() *topLevelSelectionsNormalizer {
 func addSpecNameToParams(spec Value, p *normParams) *normParams {
 	if spec.Get("name").IsTruthy() {
 		c := p.clone()
-		c.path = append(append([]string(nil), p.path...), spec.Get("name").AsString())
+		c.path = concatValue(p.path, spec.Get("name"))
 		return c
 	}
 	return p
@@ -479,9 +495,13 @@ func (n *topLevelSelectionsNormalizer) mapUnit(spec Value, p *normParams) Value 
 	if len(selections) == 0 {
 		return spec
 	}
-	path := append(append([]string(nil), p.path...), spec.Get("name").AsString())
-	var params []Value
+	// (normParams.path ?? []).concat(spec.name): the names as given,
+	// compared with includes and indexOf (strictly), so a view "undefined"
+	// does not match an unnamed unit, nor [1] a unit named "1" (C79 of the
+	// 2026-10-18 audit).
 	specName := spec.Get("name")
+	path := concatValue(p.path, specName)
+	var params []Value
 	for _, sel := range selections {
 		cc.work(1)
 		// !selection.views || !selection.views.length, then for…of: a
@@ -495,7 +515,7 @@ func (n *topLevelSelectionsNormalizer) mapUnit(spec Value, p *normParams) Value 
 			cc.work(1)
 			switch {
 			case view.IsStr():
-				if (specName.IsStr() && view.StrValue() == specName.StrValue()) || contains(path, view.StrValue()) {
+				if strictEq(view, specName) || valueIncludes(cc, path, view) {
 					params = append(params, sel)
 				}
 			case view.IsArr():
@@ -503,7 +523,7 @@ func (n *topLevelSelectionsNormalizer) mapUnit(spec Value, p *normParams) Value 
 				ok := true
 				for i, v := range view.Items() {
 					cc.work(1)
-					idx := indexOfStr(path, v.AsString())
+					idx := valueIndexOf(cc, path, v)
 					if idx == -1 || (i > 0 && idx <= prev) {
 						ok = false
 						break
@@ -522,13 +542,35 @@ func (n *topLevelSelectionsNormalizer) mapUnit(spec Value, p *normParams) Value 
 	return spec
 }
 
-func indexOfStr(l []string, s string) int {
-	for i, x := range l {
-		if x == s {
+// concatValue is list.concat(v): an array's elements, else v itself.
+func concatValue(list []Value, v Value) []Value {
+	out := append([]Value(nil), list...)
+	if v.IsArr() {
+		return append(out, v.Items()...)
+	}
+	return append(out, v)
+}
+
+// valueIndexOf is list.indexOf(v): the first element === v.
+func valueIndexOf(cc *compileCtx, list []Value, v Value) int {
+	for i, x := range list {
+		cc.work(1)
+		if strictEq(x, v) {
 			return i
 		}
 	}
 	return -1
+}
+
+// valueIncludes is list.includes(v) (SameValueZero: NaN matches NaN).
+func valueIncludes(cc *compileCtx, list []Value, v Value) bool {
+	for _, x := range list {
+		cc.work(1)
+		if x.MapKey() == v.MapKey() {
+			return true
+		}
+	}
+	return false
 }
 
 func (n *topLevelSelectionsNormalizer) mapFacet(spec Value, p *normParams) Value {
@@ -1037,11 +1079,12 @@ func isMarkDef(cc *compileCtx, mark Value) bool {
 	return hasProperty(mark, "type")
 }
 
-func getMarkType(cc *compileCtx, m Value) string {
+// getMarkType is isMarkDef(m) ? m.type : m, as given.
+func getMarkType(cc *compileCtx, m Value) Value {
 	if isMarkDef(cc, m) {
-		return m.Get("type").AsString()
+		return m.Get("type")
 	}
-	return m.AsString()
+	return m
 }
 
 func (pathOverlayNormalizer) hasMatchingType(spec Value, p *normParams) bool {
@@ -1050,7 +1093,7 @@ func (pathOverlayNormalizer) hasMatchingType(spec Value, p *normParams) bool {
 		return false
 	}
 	markDef := markDefOf(p.cc, spec.Get("mark"))
-	typ := markDef.Get("type").AsString()
+	typ, _ := markDef.Get("type").Strict() // switch (markDef.type)
 	switch typ {
 	case "line", "rule", "trail":
 		_, ok := getPointOverlay(markDef, config.Get(typ), spec.Get("encoding"))
@@ -1083,9 +1126,10 @@ func (pathOverlayNormalizer) run(spec Value, p *normParams, normalize func(Value
 	outerSpec := omit(spec, "params", "projection", "mark", "name", "encoding")
 	encoding := normalizeEncoding(cc, e, config)
 	markDef := markDefOf(cc, mark)
-	pointOverlay, hasPoint := getPointOverlay(markDef, config.Get(markDef.Get("type").AsString()), encoding)
+	// Run only for a string type (hasMatchingType's switch is strict).
+	pointOverlay, hasPoint := getPointOverlay(markDef, config.Get(propKey(markDef.Get("type"))), encoding)
 	lineOverlay, hasLine := undef, false
-	if markDef.Get("type").AsString() == "area" {
+	if strIs(markDef.Get("type"), "area") {
 		lineOverlay, hasLine = getLineOverlay(markDef, config.Get("area"))
 	}
 	first := jsval.NewObject(4)
@@ -1099,7 +1143,7 @@ func (pathOverlayNormalizer) run(spec Value, p *normParams, normalize func(Value
 		// 5.8 looks at the mark definition only, not at the config.
 		areaOpacity = markDef.Get("opacity").IsUndefined() && markDef.Get("fillOpacity").IsUndefined()
 	}
-	if markDef.Get("type").AsString() == "area" && areaOpacity {
+	if strIs(markDef.Get("type"), "area") && areaOpacity {
 		m.Set("opacity", jsval.Num(0.7))
 	}
 	spread(m, markDef)
@@ -1165,7 +1209,7 @@ func (ruleForRangedLineNormalizer) hasMatchingType(spec Value, p *normParams) bo
 		return false
 	}
 	mark, encoding := spec.Get("mark"), spec.Get("encoding")
-	if mark.IsStr() && mark.StrValue() == "line" || (isMarkDef(cc, mark) && mark.Get("type").AsString() == "line") {
+	if strIs(mark, "line") || (isMarkDef(cc, mark) && strIs(mark.Get("type"), "line")) {
 		for _, channel := range secondaryRangeChannels {
 			// encoding[mainChannel]: a line without an encoding object
 			// (null, or none) fails here.

@@ -26,7 +26,9 @@ type formatSignalOpts struct {
 func formatSignalRef(cc *compileCtx, o formatSignalOpts) Value {
 	fod, format, formatType, expr, config := o.fieldOrDatumDef, o.format, o.formatType, o.expr, o.config
 	if isCustomFormatType(formatType) {
-		return formatCustomType(cc, fod, format, formatType, expr, o.normalizeStack, config, "")
+		// Upstream passes no normalizeStack here (C85 of the 2026-10-18
+		// audit): a custom format of a normalized stack formats the field.
+		return formatCustomType(cc, fod, format, formatType, expr, false, config, "")
 	}
 	field := fieldToFormat(cc, fod, expr, o.normalizeStack)
 	typ := channelDefType(fod)
@@ -47,15 +49,13 @@ func formatSignalRef(cc *compileCtx, o formatSignalOpts) Value {
 		unit, utc := "", false
 		if isFieldDef(cc, fod) {
 			tu := normalizeTimeUnit(cc, fod.Get("timeUnit"))
-			if tu.Get("unit").IsTruthy() {
-				unit = tu.Get("unit").AsString()
-			}
+			unit = tu.Get("unit").StrValue() // a string: normalizeTimeUnit throws otherwise
 			utc = tu.Get("utc").IsTruthy()
 		}
-		isUTCScale := utc || (isScaleFieldDef(fod) && fod.Get("scale").Get("type").AsString() == "utc")
+		isUTCScale := utc || (isScaleFieldDef(fod) && strIs(fod.Get("scale").Get("type"), "utc"))
 		if cc.v5 {
 			// 5.8 ignores utc time units here.
-			isUTCScale = isScaleFieldDef(fod) && fod.Get("scale").Get("type").AsString() == "utc"
+			isUTCScale = isScaleFieldDef(fod) && strIs(fod.Get("scale").Get("type"), "utc")
 		}
 		s := timeFormatExpression(cc, field, unit, format, config.Get("timeFormatType"), config.Get("timeFormat"), isUTCScale)
 		if s != "" {
@@ -101,7 +101,7 @@ func guideFormat(cc *compileCtx, fod Value, typ string, format, formatType Value
 		return undef
 	} else if format.IsUndefined() && formatType.IsUndefined() && config.Get("customFormatTypes").IsTruthy() {
 		if channelDefType(fod) == "quantitative" {
-			if config.Get("normalizedNumberFormatType").IsTruthy() && isPositionFieldOrDatumDef(fod) && fod.Get("stack").AsString() == "normalize" && fod.Get("stack").IsStr() {
+			if config.Get("normalizedNumberFormatType").IsTruthy() && isPositionFieldOrDatumDef(fod) && strIs(fod.Get("stack"), "normalize") {
 				return undef
 			}
 			if config.Get("numberFormatType").IsTruthy() {
@@ -113,25 +113,25 @@ func guideFormat(cc *compileCtx, fod Value, typ string, format, formatType Value
 		return numberFormat("quantitative", undef, config, true)
 	}
 	if isFieldOrDatumDefForTimeFormat(cc, fod) {
-		tu := ""
+		// normalizeTimeUnit(...)?.unit: undefined, or a string (it throws
+		// otherwise), which may be "" ({unit: ""}), and is no undefined.
+		tu := undef
 		if isFieldDef(cc, fod) {
-			if u := normalizeTimeUnit(cc, fod.Get("timeUnit")).Get("unit"); u.IsTruthy() {
-				tu = u.AsString()
-			}
+			tu = normalizeTimeUnit(cc, fod.Get("timeUnit")).Get("unit")
 		}
-		if tu == "" && config.Get("customFormatTypes").IsTruthy() && config.Get("timeFormatType").IsTruthy() {
+		if tu.IsUndefined() && config.Get("customFormatTypes").IsTruthy() && config.Get("timeFormatType").IsTruthy() {
 			return undef
 		}
-		return timeFormat(format, tu, config, omitTimeFormatConfig)
+		return timeFormat(format, tu.StrValue(), config, omitTimeFormatConfig)
 	}
 	return numberFormat(typ, format, config, false)
 }
 
-func guideFormatType(cc *compileCtx, formatType Value, fod Value, scaleType string) Value {
+func guideFormatType(cc *compileCtx, formatType Value, fod Value, scaleType Value) Value {
 	if formatType.IsTruthy() && (isSignalRef(cc, formatType) || (formatType.IsStr() && (formatType.StrValue() == "number" || formatType.StrValue() == "time"))) {
 		return formatType
 	}
-	if isFieldOrDatumDefForTimeFormat(cc, fod) && scaleType != "time" && scaleType != "utc" {
+	if isFieldOrDatumDefForTimeFormat(cc, fod) && !strIs(scaleType, "time") && !strIs(scaleType, "utc") {
 		if isFieldDef(cc, fod) && normalizeTimeUnit(cc, fod.Get("timeUnit")).Get("utc").IsTruthy() {
 			return jsval.Str("utc")
 		}

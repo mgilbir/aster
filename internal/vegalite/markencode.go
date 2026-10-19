@@ -120,7 +120,14 @@ func markDefProperties(cc *compileCtx, mark Value, ignore encodeIgnore) Value {
 		if prop == "aria" || prop == "width" || prop == "height" {
 			continue
 		}
-		if hasProperty(mark, prop) && ignore[prop] != "ignore" {
+		// hasProperty(mark, prop) in 6.4; 5.8 tests mark[prop] !== undefined,
+		// which reads through the mark's prototype (one its copy's
+		// "__proto__" set).
+		has := hasProperty(mark, prop)
+		if cc.v5 {
+			has = !mark.Get(prop).IsUndefined()
+		}
+		if has && ignore[prop] != "ignore" {
 			m.Set(prop, signalOrValueRef(cc, mark.Get(prop)))
 		}
 	}
@@ -131,26 +138,26 @@ func markDefProperties(cc *compileCtx, mark Value, ignore encodeIgnore) Value {
 
 func colorEncode(m *unitModel, filledOpt Value) Value {
 	markDef, encoding, config := m.markDef, m.encoding, m.config
-	markType := markDef.Get("type").AsString()
+	markType := markDef.Get("type")
 	filled := filledOpt
 	if filled.IsNullish() {
 		filled = getMarkPropOrConfigSimple("filled", markDef, config)
 	}
 	transparentIfNeeded := undef
-	if contains([]string{"bar", "point", "circle", "square", "geoshape"}, markType) {
+	if strIn(markType, "bar", "point", "circle", "square", "geoshape") {
 		transparentIfNeeded = jsval.Str("transparent")
 	}
 	filledTrue := filled.IsBool() && filled.BoolValue()
 	filledFalse := filled.IsBool() && !filled.BoolValue()
-	fillChannel := ""
-	if filledTrue {
-		fillChannel = "color"
-	}
+	// getMarkPropOrConfig(filled === true ? 'color' : undefined, ...): an
+	// undefined channel is read as the key "undefined" (mark[undefined],
+	// config[type][undefined], a style's), not "" (C89 of the 2026-10-18
+	// audit).
 	var defaultFill Value
-	if fillChannel != "" {
+	if filledTrue {
 		defaultFill = getMarkPropOrConfig("color", markDef, config, "fill", false)
 	} else {
-		defaultFill = getMarkPropOrConfig("", markDef, config, "fill", false)
+		defaultFill = getMarkPropOrConfig(undefinedKey, markDef, config, "fill", false)
 	}
 	if defaultFill.IsNullish() {
 		var cm Value
@@ -165,7 +172,7 @@ func colorEncode(m *unitModel, filledOpt Value) Value {
 	if filledFalse {
 		defaultStroke = getMarkPropOrConfig("color", markDef, config, "stroke", false)
 	} else {
-		defaultStroke = getMarkPropOrConfig("", markDef, config, "stroke", false)
+		defaultStroke = getMarkPropOrConfig(undefinedKey, markDef, config, "stroke", false)
 	}
 	if defaultStroke.IsNullish() {
 		if filledFalse {
@@ -283,7 +290,7 @@ func zindexEncode(m *unitModel) Value {
 	cc := m.b().ctx
 
 	order := m.encoding.Get("order")
-	if !isPathMarkName(m.mark()) && isValueDef(order) {
+	if !isPathMark(m.mark()) && isValueDef(order) {
 		return wrapCondition(cc, wrapConditionOpts{
 			model: m, channelDef: order, vgChannel: "zindex",
 			mainRefFn: func(cd Value) Value { return signalOrValueRef(m.ctx, cd.Get("value")) },
@@ -314,7 +321,7 @@ func ariaRoleDescription(m *unitModel) Value {
 	if !desc.IsNullish() {
 		return mkv("ariaRoleDescription", mkv("value", desc))
 	}
-	if vgMarkIndex[m.mark()] {
+	if vgMarkIndex[propKey(m.mark())] {
 		return mkv()
 	}
 	return mkv("ariaRoleDescription", mkv("value", m.mark()))

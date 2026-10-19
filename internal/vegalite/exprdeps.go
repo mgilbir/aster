@@ -1,19 +1,21 @@
 package vegalite
 
 import (
-	"strconv"
+	"context"
+	"errors"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 
+	"github.com/mgilbir/aster/internal/expr"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
-// A small parser for the Vega expression language, used only to find which
-// datum fields an expression reads (upstream's getDependentFields). It accepts
-// the expression grammar of vega-expression — literals, identifiers, member
-// and call expressions, unary/binary/logical/conditional operators, array and
-// object literals — and reports a syntax error where upstream's parser throws.
+// A parser for the Vega expression language, used only to find which datum
+// fields an expression reads (upstream's getDependentFields, which parses
+// with vega-expression). Its tokens are internal/expr's, vega-expression's
+// tokenizer (C47 of the 2026-10-18 audit: a lexer of its own had drifted
+// from it); its grammar is vega-expression's, accepting and refusing what
+// internal/expr's Parse does (TestExprDepsAcceptsAsParse), except that chains
+// of binary operators and of conditionals are taken at any length (C10).
 
 type exprNode struct {
 	kind     string // Identifier, Literal, Member, Call, Binary, Unary, Conditional, Array, Object, Property
@@ -28,11 +30,8 @@ type exprNode struct {
 type exprParser struct {
 	// cc is charged a step per token, so a long expression stops at the deadline.
 	cc    *compileCtx
-	src   string
-	pos   int
-	tok   string
-	kind  string // "num","str","id","punct","eof","regex"
-	val   string
+	s     *expr.Scanner
+	t     expr.Token // the lookahead
 	depth int
 }
 
@@ -85,243 +84,70 @@ func (e exprSyntaxError) err() error {
 	return compileError{"Invalid expression: " + e.msg}
 }
 
-func (p *exprParser) skipSpace() {
-	cc := p.cc
-	for p.pos < len(p.src) {
-		cc.work(1)
-		r, w := utf8.DecodeRuneInString(p.src[p.pos:])
-		if r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == '\v' || r == '\f' || r == 0xA0 || r == 0xFEFF || r == 0x2028 || r == 0x2029 || unicode.Is(unicode.Zs, r) {
-			p.pos += w
-			continue
-		}
-		break
-	}
+// next reads the next token (internal/expr's tokenizer, vega-expression's).
+func (p *exprParser) next() {
+	p.t = p.s.Next()
+	p.cc.work(1 + int64(p.t.End-p.t.Start)/16)
 }
 
-var puncts3 = []string{">>>", "===", "!=="}
-var puncts2 = []string{"==", "!=", "<=", ">=", "&&", "||", "<<", ">>"}
+func (p *exprParser) isP(v string) bool { return p.t.Kind == expr.TokPunct && p.t.Text == v }
 
-func isIDStart(r rune) bool { return r == '$' || r == '_' || unicode.IsLetter(r) }
-func isIDPart(r rune) bool {
-	return isIDStart(r) || unicode.IsDigit(r) || unicode.Is(unicode.Mn, r) || unicode.Is(unicode.Mc, r)
+// unexpected fails at token t with vega-expression's message.
+func (p *exprParser) unexpected() {
+	switch p.t.Kind {
+	case expr.TokEOF:
+		p.fail("Unexpected end of input")
+	case expr.TokNum:
+		p.fail("Unexpected number")
+	case expr.TokString:
+		p.fail("Unexpected string")
+	case expr.TokIdent:
+		p.fail("Unexpected identifier")
+	case expr.TokKeyword:
+		p.fail("Unexpected reserved word")
+	}
+	p.fail("Unexpected token " + p.t.Text)
 }
 
-// next advances to the next token. regexOK says a '/' starts a regex literal.
-func (p *exprParser) next(regexOK bool) {
-	cc := p.cc
-	cc.work(1)
-	p.skipSpace()
-	if p.pos >= len(p.src) {
-		p.kind, p.tok, p.val = "eof", "", ""
-		return
+func (p *exprParser) expect(v string) {
+	if !p.isP(v) {
+		p.unexpected()
 	}
-	c, w := utf8.DecodeRuneInString(p.src[p.pos:])
-	switch {
-	case isIDStart(c) || c == '\\':
-		start := p.pos
-		p.pos += w
-		for p.pos < len(p.src) {
-			cc.work(1)
-			r, w2 := utf8.DecodeRuneInString(p.src[p.pos:])
-			if !isIDPart(r) {
-				break
-			}
-			p.pos += w2
-		}
-		p.kind, p.val = "id", p.src[start:p.pos]
-		p.tok = p.val
-	case c >= '0' && c <= '9' || (c == '.' && p.pos+1 < len(p.src) && p.src[p.pos+1] >= '0' && p.src[p.pos+1] <= '9'):
-		start := p.pos
-		if c == '0' && p.pos+1 < len(p.src) && (p.src[p.pos+1] == 'x' || p.src[p.pos+1] == 'X') {
-			p.pos += 2
-			for p.pos < len(p.src) && strings.ContainsRune("0123456789abcdefABCDEF", rune(p.src[p.pos])) {
-				cc.work(1)
-				p.pos++
-			}
-		} else {
-			for p.pos < len(p.src) && p.src[p.pos] >= '0' && p.src[p.pos] <= '9' {
-				cc.work(1)
-				p.pos++
-			}
-			if p.pos < len(p.src) && p.src[p.pos] == '.' {
-				p.pos++
-				for p.pos < len(p.src) && p.src[p.pos] >= '0' && p.src[p.pos] <= '9' {
-					cc.work(1)
-					p.pos++
-				}
-			}
-			if p.pos < len(p.src) && (p.src[p.pos] == 'e' || p.src[p.pos] == 'E') {
-				q := p.pos + 1
-				if q < len(p.src) && (p.src[q] == '+' || p.src[q] == '-') {
-					q++
-				}
-				if q < len(p.src) && p.src[q] >= '0' && p.src[q] <= '9' {
-					for q < len(p.src) && p.src[q] >= '0' && p.src[q] <= '9' {
-						cc.work(1)
-						q++
-					}
-					p.pos = q
-				} else {
-					p.fail("Unexpected token ILLEGAL")
-				}
-			}
-		}
-		if p.pos < len(p.src) {
-			if r, _ := utf8.DecodeRuneInString(p.src[p.pos:]); isIDStart(r) {
-				p.fail("Unexpected token ILLEGAL")
-			}
-		}
-		p.kind, p.val = "num", p.src[start:p.pos]
-		p.tok = p.val
-	case c == '\'' || c == '"':
-		p.pos += w
-		var sb strings.Builder
-		for {
-			cc.work(1)
-			if p.pos >= len(p.src) {
-				p.fail("Unexpected token ILLEGAL")
-			}
-			r, w2 := utf8.DecodeRuneInString(p.src[p.pos:])
-			p.pos += w2
-			if r == c {
-				break
-			}
-			if r == '\n' || r == '\r' {
-				p.fail("Unexpected token ILLEGAL")
-			}
-			if r == '\\' {
-				if p.pos >= len(p.src) {
-					p.fail("Unexpected token ILLEGAL")
-				}
-				e, w3 := utf8.DecodeRuneInString(p.src[p.pos:])
-				p.pos += w3
-				switch e {
-				case 'n':
-					sb.WriteByte('\n')
-				case 't':
-					sb.WriteByte('\t')
-				case 'r':
-					sb.WriteByte('\r')
-				case 'b':
-					sb.WriteByte('\b')
-				case 'f':
-					sb.WriteByte('\f')
-				case 'v':
-					sb.WriteByte('\v')
-				case 'x':
-					if p.pos+2 <= len(p.src) {
-						if n, err := strconv.ParseUint(p.src[p.pos:p.pos+2], 16, 32); err == nil {
-							sb.WriteRune(rune(n))
-							p.pos += 2
-						}
-					}
-				case 'u':
-					if p.pos+4 <= len(p.src) {
-						if n, err := strconv.ParseUint(p.src[p.pos:p.pos+4], 16, 32); err == nil {
-							sb.WriteRune(rune(n))
-							p.pos += 4
-						}
-					}
-				case '\n', '\r':
-				default:
-					sb.WriteRune(e)
-				}
-				continue
-			}
-			sb.WriteRune(r)
-		}
-		p.kind, p.val = "str", sb.String()
-		p.tok = "'"
-	case c == '/' && regexOK:
-		start := p.pos
-		p.pos++
-		inClass := false
-		for {
-			cc.work(1)
-			if p.pos >= len(p.src) {
-				p.fail("Invalid regular expression: missing /")
-			}
-			r := p.src[p.pos]
-			p.pos++
-			if r == '\\' {
-				p.pos++
-				continue
-			}
-			if r == '[' {
-				inClass = true
-			} else if r == ']' {
-				inClass = false
-			} else if r == '/' && !inClass {
-				break
-			}
-		}
-		for p.pos < len(p.src) {
-			cc.work(1)
-			r, w2 := utf8.DecodeRuneInString(p.src[p.pos:])
-			if !isIDPart(r) {
-				break
-			}
-			p.pos += w2
-		}
-		p.kind, p.val = "regex", p.src[start:p.pos]
-		p.tok = p.val
-	default:
-		rest := p.src[p.pos:]
-		for _, t := range puncts3 {
-			if strings.HasPrefix(rest, t) {
-				p.kind, p.tok, p.val = "punct", t, t
-				p.pos += 3
-				return
-			}
-		}
-		for _, t := range puncts2 {
-			if strings.HasPrefix(rest, t) {
-				p.kind, p.tok, p.val = "punct", t, t
-				p.pos += 2
-				return
-			}
-		}
-		if strings.ContainsRune("(){}[],.;:?+-*/%!~<>=&|^", c) {
-			p.kind, p.tok, p.val = "punct", string(c), string(c)
-			p.pos += w
-			return
-		}
-		p.fail("Unexpected token ILLEGAL")
-	}
+	p.next()
 }
-
-func (p *exprParser) isP(t string) bool { return p.kind == "punct" && p.tok == t }
-
-func (p *exprParser) expect(t string) {
-	if !p.isP(t) {
-		p.fail("Unexpected token " + p.tok)
-	}
-	p.next(true)
-}
-
-// reserved words the expression language does not allow as identifiers.
-var exprDisabled = strSet([]string{
-	"do", "in", "var", "for", "new", "try", "let", "this", "else", "case", "void", "with", "enum", "while",
-	"break", "catch", "throw", "const", "yield", "class", "super", "return", "typeof", "delete", "switch",
-	"export", "import", "public", "static", "default", "finally", "extends", "package", "private", "function",
-	"continue", "debugger", "interface", "protected", "instanceof", "implements",
-})
 
 func parseExprAST(cc *compileCtx, src string) (root *exprNode, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			if se, ok := r.(exprSyntaxError); ok {
+			switch se := r.(type) {
+			case exprSyntaxError:
 				root, err = nil, se.err()
+				return
+			case *expr.SyntaxError:
+				// The tokenizer's: an illegal token, a regular expression
+				// literal that does not compile, or the call's deadline or
+				// memory reached compiling one.
+				if cerr := cc.ctxErr(); cerr != nil && errors.Is(se, cerr) {
+					panic(cancelError{cerr})
+				}
+				root, err = nil, exprSyntaxError{msg: se.Msg, limit: se.Limit}.err()
 				return
 			}
 			panic(r)
 		}
 	}()
-	p := &exprParser{cc: cc, src: src}
-	p.next(true)
+	var ctx context.Context
+	if cc != nil {
+		ctx = cc.ctx
+	}
+	p := &exprParser{cc: cc, s: expr.NewScanner(ctx, src)}
+	p.next()
 	root = p.parseConditional()
-	if p.kind != "eof" {
-		p.fail("Unexpected token " + p.tok)
+	if p.isP(",") {
+		p.fail("Disabled.") // no sequence expressions
+	}
+	if p.t.Kind != expr.TokEOF {
+		p.fail("Unexpect token after expression.")
 	}
 	return root, nil
 }
@@ -341,7 +167,7 @@ func (p *exprParser) parseConditional() *exprNode {
 	kids := []*exprNode{test}
 	for p.isP("?") {
 		p.cc.work(1)
-		p.next(true)
+		p.next()
 		kids = append(kids, p.parseConditional())
 		p.expect(":")
 		kids = append(kids, p.parseBinary())
@@ -349,12 +175,19 @@ func (p *exprParser) parseConditional() *exprNode {
 	return p.mk(&exprNode{kind: "Conditional", kids: kids})
 }
 
-var binPrec = map[string]int{
-	"||": 1, "&&": 2, "|": 3, "^": 4, "&": 5,
-	"==": 6, "!=": 6, "===": 6, "!==": 6,
-	"<": 7, ">": 7, "<=": 7, ">=": 7,
-	"<<": 8, ">>": 8, ">>>": 8,
-	"+": 9, "-": 9, "*": 10, "/": 10, "%": 10,
+// isBinaryOperator is vega-expression's binaryPrecedence(token) > 0: the
+// operators of ECMAScript's binary expressions, the keywords in and
+// instanceof included.
+func isBinaryOperator(t expr.Token) bool {
+	if t.Kind != expr.TokPunct && t.Kind != expr.TokKeyword {
+		return false
+	}
+	switch t.Text {
+	case "||", "&&", "|", "^", "&", "==", "!=", "===", "!==", "<", ">", "<=", ">=", "instanceof", "in",
+		"<<", ">>", ">>>", "+", "-", "*", "/", "%":
+		return true
+	}
+	return false
 }
 
 // parseBinary parses operands joined by binary operators into one node of
@@ -362,19 +195,13 @@ var binPrec = map[string]int{
 // meets them, and every operator sequence the precedence grammar accepts.
 func (p *exprParser) parseBinary() *exprNode {
 	first := p.parseUnary()
-	if p.kind != "punct" {
-		return first
-	}
-	if _, ok := binPrec[p.tok]; !ok {
+	if !isBinaryOperator(p.t) {
 		return first
 	}
 	kids := []*exprNode{first}
-	for p.kind == "punct" {
-		if _, ok := binPrec[p.tok]; !ok {
-			break
-		}
+	for isBinaryOperator(p.t) {
 		p.cc.work(1)
-		p.next(true)
+		p.next()
 		kids = append(kids, p.parseUnary())
 	}
 	return p.mk(&exprNode{kind: "Binary", kids: kids})
@@ -386,154 +213,164 @@ func (p *exprParser) parseUnary() *exprNode {
 		p.failLimit("expression too deeply nested")
 	}
 	defer func() { p.depth-- }()
-	if p.kind == "punct" && (p.tok == "+" || p.tok == "-" || p.tok == "!" || p.tok == "~") {
-		p.next(true)
+	switch {
+	case p.isP("++") || p.isP("--"):
+		p.fail("Disabled.")
+	case p.isP("+") || p.isP("-") || p.isP("~") || p.isP("!"):
+		p.next()
 		arg := p.parseUnary()
 		return p.mk(&exprNode{kind: "Unary", kids: []*exprNode{arg}})
+	case p.t.Kind == expr.TokKeyword && (p.t.Text == "delete" || p.t.Text == "void" || p.t.Text == "typeof"):
+		p.fail("Disabled.")
 	}
 	return p.parsePostfix()
 }
 
 func (p *exprParser) parsePostfix() *exprNode {
-	expr := p.parsePrimary()
+	e := p.parseLeftHandSide()
+	if p.isP("++") || p.isP("--") {
+		p.fail("Disabled.")
+	}
+	return e
+}
+
+func (p *exprParser) parseLeftHandSide() *exprNode {
+	e := p.parsePrimary()
 	for {
 		switch {
 		case p.isP("."):
-			p.next(false)
-			if p.kind != "id" {
-				p.fail("Unexpected token " + p.tok)
+			p.next()
+			switch p.t.Kind {
+			case expr.TokIdent, expr.TokKeyword, expr.TokBool, expr.TokNull:
+			default:
+				p.unexpected()
 			}
-			prop := &exprNode{kind: "Identifier", name: p.val}
-			p.next(false)
-			expr = p.mk(&exprNode{kind: "Member", object: expr, property: prop})
+			prop := &exprNode{kind: "Identifier", name: p.t.Text}
+			p.next()
+			e = p.mk(&exprNode{kind: "Member", object: e, property: prop})
 		case p.isP("["):
-			p.next(true)
+			p.next()
 			prop := p.parseConditional()
-			if p.isP("]") {
-				p.next(false)
-			} else {
-				p.fail("Unexpected token " + p.tok)
+			if p.isP(",") {
+				p.fail("Disabled.")
 			}
-			expr = p.mk(&exprNode{kind: "Member", object: expr, property: prop})
+			p.expect("]")
+			e = p.mk(&exprNode{kind: "Member", object: e, property: prop})
 		case p.isP("("):
-			p.next(true)
-			kids := []*exprNode{expr}
+			p.next()
+			kids := []*exprNode{e}
 			if !p.isP(")") {
 				for {
 					kids = append(kids, p.parseConditional())
-					if p.isP(",") {
-						p.next(true)
-						continue
+					if p.isP(")") {
+						break
 					}
-					break
+					p.expect(",")
 				}
 			}
-			if !p.isP(")") {
-				p.fail("Unexpected token " + p.tok)
-			}
-			p.next(false)
-			expr = p.mk(&exprNode{kind: "Call", kids: kids})
+			p.expect(")")
+			e = p.mk(&exprNode{kind: "Call", kids: kids})
 		default:
-			return expr
+			return e
 		}
 	}
 }
 
 func (p *exprParser) parsePrimary() *exprNode {
-	switch p.kind {
-	case "num":
-		n := &exprNode{kind: "Literal", lit: numLiteralString(p.val)}
-		p.next(false)
-		return n
-	case "str":
-		n := &exprNode{kind: "Literal", lit: p.val}
-		p.next(false)
-		return n
-	case "regex":
-		n := &exprNode{kind: "Literal", lit: p.val}
-		p.next(false)
-		return n
-	case "id":
-		name := p.val
-		if exprDisabled[name] {
-			p.fail("Unexpected reserved word")
+	t := p.t
+	switch {
+	case p.isP("("):
+		p.next()
+		e := p.parseConditional()
+		if p.isP(",") {
+			p.fail("Disabled.")
 		}
-		p.next(false)
-		switch name {
-		case "true", "false", "null":
-			return &exprNode{kind: "Literal", lit: name}
-		}
-		return &exprNode{kind: "Identifier", name: name}
-	case "punct":
-		switch p.tok {
-		case "(":
-			p.next(true)
-			e := p.parseConditional()
-			if !p.isP(")") {
-				p.fail("Unexpected token " + p.tok)
+		p.expect(")")
+		return e
+	case p.isP("["):
+		p.next()
+		n := &exprNode{kind: "Array"}
+		for !p.isP("]") {
+			if p.isP(",") {
+				p.fail("Unexpected token ,") // an elision
 			}
-			p.next(false)
-			return e
-		case "[":
-			p.next(true)
-			n := &exprNode{kind: "Array"}
-			for !p.isP("]") {
-				n.kids = append(n.kids, p.parseConditional())
-				if p.isP(",") {
-					p.next(true)
-					continue
-				}
-				break
-			}
+			n.kids = append(n.kids, p.parseConditional())
 			if !p.isP("]") {
-				p.fail("Unexpected token " + p.tok)
+				p.expect(",")
 			}
-			p.next(false)
-			return p.mk(n)
-		case "{":
-			p.next(true)
-			n := &exprNode{kind: "Object"}
-			for !p.isP("}") {
-				var key *exprNode
-				switch p.kind {
-				case "id":
-					key = &exprNode{kind: "Identifier", name: p.val}
-				case "str", "num":
-					key = &exprNode{kind: "Literal", lit: p.val}
-				default:
-					p.fail("Unexpected token " + p.tok)
-				}
-				p.next(false)
-				p.expect(":")
-				val := p.parseConditional()
-				n.kids = append(n.kids, p.mk(&exprNode{kind: "Property", kids: []*exprNode{key, val}}))
-				if p.isP(",") {
-					p.next(true)
-					continue
-				}
-				break
-			}
-			if !p.isP("}") {
-				p.fail("Unexpected token " + p.tok)
-			}
-			p.next(false)
-			return p.mk(n)
 		}
-	case "eof":
-		p.fail("Unexpected end of input")
+		p.next()
+		return p.mk(n)
+	case p.isP("{"):
+		return p.parseObject()
+	case expr.IsPrimaryIdentifier(t):
+		p.next()
+		return &exprNode{kind: "Identifier", name: t.Text}
+	case t.Kind == expr.TokString || t.Kind == expr.TokNum:
+		if t.Octal {
+			p.fail("Octal literals are not allowed in strict mode.")
+		}
+		p.next()
+		return &exprNode{kind: "Literal", lit: literalText(t)}
+	case t.Kind == expr.TokKeyword:
+		p.fail("Disabled.")
+	case t.Kind == expr.TokBool || t.Kind == expr.TokNull:
+		p.next()
+		return &exprNode{kind: "Literal", lit: t.Text}
+	case p.isP("/") || p.isP("/="):
+		raw := p.s.RegExp(t.Start)
+		p.next()
+		return &exprNode{kind: "Literal", lit: raw}
 	}
-	p.fail("Unexpected token " + p.tok)
+	p.unexpected()
 	return nil
 }
 
-func numLiteralString(s string) string {
-	if strings.HasPrefix(s, "0x") || strings.HasPrefix(s, "0X") {
-		if n, err := strconv.ParseUint(s[2:], 16, 64); err == nil {
-			return jsval.JSNumberString(float64(n))
+// parseObject is an object literal: keys are identifiers, keywords,
+// literals; a key given twice fails (strict mode).
+func (p *exprParser) parseObject() *exprNode {
+	p.next()
+	n := &exprNode{kind: "Object"}
+	seen := map[string]bool{}
+	for !p.isP("}") {
+		t := p.t
+		if t.Kind == expr.TokEOF || t.Kind == expr.TokPunct {
+			p.unexpected()
+		}
+		var key *exprNode
+		name := t.Text
+		if t.Kind == expr.TokString || t.Kind == expr.TokNum {
+			if t.Octal {
+				p.fail("Octal literals are not allowed in strict mode.")
+			}
+			name = literalText(t)
+			key = &exprNode{kind: "Literal", lit: name}
+		} else {
+			key = &exprNode{kind: "Identifier", name: name}
+		}
+		p.next()
+		p.expect(":")
+		val := p.parseConditional()
+		if seen[name] {
+			p.fail("Duplicate data property in object literal not allowed in strict mode")
+		}
+		seen[name] = true
+		n.kids = append(n.kids, p.mk(&exprNode{kind: "Property", kids: []*exprNode{key, val}}))
+		if !p.isP("}") {
+			p.expect(",")
 		}
 	}
-	f := jsval.StringToNumber(s)
-	return jsval.JSNumberString(f)
+	p.expect("}")
+	return p.mk(n)
+}
+
+// literalText is a literal's value as getName's join writes it: a string
+// as itself, a number as JavaScript prints it.
+func literalText(t expr.Token) string {
+	if t.Kind == expr.TokNum {
+		return jsval.JSNumberString(t.Num)
+	}
+	return t.Text
 }
 
 func (n *exprNode) children() []*exprNode {

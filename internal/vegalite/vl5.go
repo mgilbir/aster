@@ -52,7 +52,7 @@ func allFieldsInvalidPredicate58(m *unitModel, invalid bool, channels []string, 
 				opt.binSuffix = "mid"
 			}
 			field := m.vgField(channel, opt)
-			if field != "" && hasContinuousDomain(sc.get("type").AsString()) {
+			if field != "" && hasContinuousDomain(sc.get("type")) {
 				filterIndex.add(field)
 			}
 		}
@@ -75,7 +75,7 @@ func allFieldsInvalidPredicate58(m *unitModel, invalid bool, channels []string, 
 // wrapAllFieldsInvalid58 hides marks whose scaled fields are all invalid when
 // the mark's `invalid` is "hide".
 func wrapAllFieldsInvalid58(m *unitModel, channel string, valueRef Value) Value {
-	if inv := getMarkPropOrConfigSimple("invalid", m.markDef, m.config); inv.IsStr() && inv.StrValue() == "hide" && valueRef.IsTruthy() && !isPathMarkName(m.mark()) {
+	if inv := getMarkPropOrConfigSimple("invalid", m.markDef, m.config); inv.IsStr() && inv.StrValue() == "hide" && valueRef.IsTruthy() && !isPathMark(m.mark()) {
 		if test := allFieldsInvalidPredicate58(m, true, scaleChannels, false); test != "" {
 			refs := []Value{mkv("test", test, "value", jsval.Null)}
 			refs = append(refs, arrayOf(valueRef)...)
@@ -102,8 +102,8 @@ func definedEncode58(m *unitModel) Value {
 // values when `invalid` is null.
 func midPointRefWithPositionInvalidTest58(cc *compileCtx, p midPointParams) Value {
 	ref := midPoint(cc, p)
-	if isFieldDef(cc, p.channelDef) && !isCountingAggregateOp(p.channelDef.Get("aggregate")) && p.scale != nil && isContinuousToContinuous(p.scale.get("type").AsString()) {
-		if isPathMarkName(p.markDef.Get("type").AsString()) {
+	if isFieldDef(cc, p.channelDef) && !isCountingAggregateOp(p.channelDef.Get("aggregate")) && p.scale != nil && isContinuousToContinuous(p.scale.get("type")) {
+		if isPathMark(p.markDef.Get("type")) {
 			return ref
 		}
 		if getMarkPropOrConfigSimple("invalid", p.markDef, p.config).IsNull() {
@@ -174,8 +174,7 @@ func pointPositionDefaultRef58(m *unitModel, defaultPos, channel, scaleName stri
 	switch defaultPos {
 	case "zeroOrMin", "zeroOrMax":
 		if scaleName != "" {
-			scaleType := scale.get("type").AsString()
-			if !(scaleType == "log" || scaleType == "time" || scaleType == "utc") && scale.domainDefinitelyIncludesZero58(m.ctx) {
+			if !strIn(scale.get("type"), "log", "time", "utc") && scale.domainDefinitelyIncludesZero58(m.ctx) {
 				return mkv("scale", scaleName, "value", 0)
 			}
 		}
@@ -205,18 +204,18 @@ func rectPosition58(m *unitModel, channel string) Value {
 	cc := m.b().ctx
 
 	config, encoding, markDef := m.config, m.encoding, m.markDef
-	mark := markDef.Get("type").AsString()
+	mark := markDef.Get("type")
 	channel2 := getSecondaryRangeChannel(channel)
 	sizeChannel := getSizeChannel(channel)
 	channelDef, channelDef2 := encoding.Get(channel), encoding.Get(channel2)
 	scale := m.getScaleComponent(channel)
-	scaleType := ""
+	scaleType := undef
 	if scale != nil {
-		scaleType = scale.get("type").AsString()
+		scaleType = scale.get("type")
 	}
 	orient := markDefOrient(markDef)
-	hasSizeDef := coalesce(encoding.Get(sizeChannel), encoding.Get("size"), getMarkPropOrConfig("size", markDef, config, sizeChannel, false))
-	isBarBand := mark == "bar" && ((channel == chX && orient == "vertical") || (channel != chX && orient == "horizontal"))
+	hasSizeDef := coalesce(encoding.Get(jsKey(sizeChannel)), encoding.Get("size"), getMarkPropOrConfig("size", markDef, config, sizeChannel, false))
+	isBarBand := strIs(mark, "bar") && ((channel == chX && orient == "vertical") || (channel != chX && orient == "horizontal"))
 	if isFieldDef(cc, channelDef) &&
 		(isBinning(channelDef.Get("bin")) || isBinned(channelDef.Get("bin")) || (channelDef.Get("timeUnit").IsTruthy() && !channelDef2.IsTruthy())) &&
 		!(hasSizeDef.IsTruthy() && !isRelativeBandSize(cc, hasSizeDef)) &&
@@ -232,8 +231,8 @@ func defaultSizeRef58(cc *compileCtx, sizeChannel, scaleName string, scale *scal
 	switch {
 	case isRelativeBandSize(cc, bandSize):
 		if scale != nil {
-			scaleType := scale.get("type").AsString()
-			if scaleType == "band" {
+			scaleType := scale.get("type")
+			if strIs(scaleType, "band") {
 				bandWidth := "bandwidth('" + jsName(scaleName) + "')"
 				if !(bandSize.Get("band").IsNum() && bandSize.Get("band").NumValue() == 1) {
 					bandWidth = bandSize.Get("band").AsString() + " * " + bandWidth
@@ -243,7 +242,7 @@ func defaultSizeRef58(cc *compileCtx, sizeChannel, scaleName string, scale *scal
 				cc.warn(msgCannotUseRelativeBandSizeWithNonBandScale(scaleType))
 			}
 		} else {
-			return mkv("mult", bandSize.Get("band"), "field", mkv("group", sizeChannel))
+			return mkv("mult", bandSize.Get("band"), "field", mkv("group", strOrUndef(sizeChannel)))
 		}
 	case isSignalRef(cc, bandSize):
 		return bandSize
@@ -274,13 +273,13 @@ func positionAndSize58(fd Value, channel string, m *unitModel) Value {
 		if useVlSizeChannel {
 			sizeMixins = nonPosition("size", m, nonPositionOpts{vgChannel: vgSizeChannel, defaultRef: signalOrValueRef(m.ctx, markDef.Get("size"))})
 		} else {
-			m.ctx.warn(msgCannotApplySizeToNonOrientedMark(markDef.Get("type").AsString()))
+			m.ctx.warn(msgCannotApplySizeToNonOrientedMark(markDef.Get("type")))
 		}
 	}
 	hasSizeFromMarkOrEncoding := sizeMixins.IsTruthy()
-	scType := ""
+	scType := undef
 	if scale != nil {
-		scType = scale.get("type").AsString()
+		scType = scale.get("type")
 	}
 	bandSize := getBandSize(cc, channel, fd, undef, markDef, config, scType, useVlSizeChannel)
 	if !sizeMixins.IsTruthy() {
@@ -291,7 +290,7 @@ func positionAndSize58(fd Value, channel string, m *unitModel) Value {
 		sizeMixins = mkv(vgSizeChannel, defaultSizeRef58(m.ctx, vgSizeChannel, name, scale, config, bandSize))
 	}
 	defaultBandAlign := "middle"
-	if scType == "band" && isRelativeBandSize(cc, bandSize) && !hasSizeFromMarkOrEncoding {
+	if strIs(scType, "band") && isRelativeBandSize(cc, bandSize) && !hasSizeFromMarkOrEncoding {
 		defaultBandAlign = "top"
 	}
 	vgChannel := vgAlignedPositionChannel(m.ctx, channel, markDef, config, defaultBandAlign)
@@ -394,7 +393,7 @@ func rectBinPosition58(fd, fd2 Value, channel string, m *unitModel) Value {
 	scale := m.getScaleComponent(channel)
 	scaleName := m.scaleName(channel, false)
 	reverse := mustScale(scale).get("reverse")
-	scaleType := scale.get("type").AsString()
+	scaleType := scale.get("type")
 	bandSize := getBandSize(cc, channel, fd, undef, markDef, config, scaleType, false)
 	var axis *axisComponent
 	if axes, ok := m.comp.axes.get(channel); ok && len(axes) > 0 {
@@ -506,7 +505,7 @@ func mouseMoveEvent(cc *compileCtx) string {
 
 // sizeRangeMin58 is 5.8's size range minimum, which starts at 0 for a scale
 // that includes zero.
-func sizeRangeMin58(cc *compileCtx, mark string, zero Value, config Value) Value {
+func sizeRangeMin58(cc *compileCtx, mark Value, zero Value, config Value) Value {
 	if zero.IsTruthy() {
 		if isSignalRef(cc, zero) {
 			return sig(signalOf(zero) + " ? 0 : " + signalOrStringValue(cc, sizeRangeMin(mark, config)).AsString())

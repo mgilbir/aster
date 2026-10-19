@@ -316,12 +316,18 @@ func (v Value) PatternOf() *Pattern {
 }
 
 // Get reads a property of an object, answering Undefined when v is not an
-// object or has no such key.
+// object or has no such key. An object with a prototype (SetPrototype)
+// answers through it for a key it does not hold.
 func (v Value) Get(key string) Value {
 	if v.Kind() != KindObj {
 		return Undefined
 	}
-	return v.obj().Lookup(key)
+	o := v.obj()
+	if val, ok := o.Get(key); ok || o.host == nil {
+		return val
+	}
+	val, _ := o.protoGet(key)
+	return val
 }
 
 // Index reads an array element, answering Undefined out of range.

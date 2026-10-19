@@ -110,18 +110,10 @@ func jsIn(v Value, key string) bool {
 		if n, ok := arrayIndex(key); ok {
 			return int64(n) < int64(v.Len())
 		}
-		return key == "length" || arrayProtoMembers[key]
+		return key == "length" || jsval.ArrayPrototypeMember(key)
 	}
-	return v.ObjValue().Has(key)
+	return v.ObjValue().PropIn(key) // an own key, or one its prototype chain holds
 }
-
-// arrayProtoMembers are the names Array.prototype holds.
-var arrayProtoMembers = strSet([]string{
-	"at", "concat", "copyWithin", "entries", "every", "fill", "filter", "find", "findIndex", "findLast",
-	"findLastIndex", "flat", "flatMap", "forEach", "includes", "indexOf", "join", "keys", "lastIndexOf",
-	"map", "pop", "push", "reduce", "reduceRight", "reverse", "shift", "slice", "some", "sort", "splice",
-	"toReversed", "toSorted", "toSpliced", "unshift", "values", "with",
-})
 
 // varNameOf is varName of a value upstream passes as it is: varName calls
 // s.replace, a TypeError on anything but a string.

@@ -65,7 +65,7 @@ func parseUnitLegend(u *unitModel) *omap[*legendComponent] {
 
 func getLegendDefWithScale(m *unitModel, channel string) *Object {
 	scale := strOrUndef(m.scaleName(channel, false))
-	if m.mark() == "trail" {
+	if strIs(m.mark(), "trail") {
 		if channel == chColor {
 			return mk("stroke", scale)
 		} else if channel == chSize {
@@ -102,7 +102,8 @@ type legendRuleParams struct {
 	legend, markDef, encoding, fod, legendConfig, config Value
 	channel                                              string
 	model                                                *unitModel
-	scaleType, orient, legendType                        string
+	orient, legendType                                   string
+	scaleType                                            Value
 	// legendTypeV is the legend type as upstream holds it (a legend's
 	// `type` of any type); legendType is it when it is a string.
 	legendTypeV Value
@@ -132,11 +133,9 @@ func parseLegendForChannel(m *unitModel, channel string) *legendComponent {
 	}
 	scaleType := m.scaleTypeOf(channel)
 	fod := getFieldOrDatumDef(cc, encoding.Get(channel))
-	timeUnit := ""
+	timeUnit := undef
 	if isFieldDef(cc, fod) {
-		if u := normalizeTimeUnit(cc, fod.Get("timeUnit")).Get("unit"); u.IsTruthy() {
-			timeUnit = u.AsString()
-		}
+		timeUnit = normalizeTimeUnit(cc, fod.Get("timeUnit")).Get("unit")
 	}
 	// legend.orient || config.legend.orient || 'right', compared with ===:
 	// an orient that is not a string (a truthy [] or {}) is no named one.
@@ -189,7 +188,7 @@ func parseLegendForChannel(m *unitModel, channel string) *legendComponent {
 		if !value.IsUndefined() && !isEmptyObj(value) {
 			o := jsval.NewObject(4)
 			if hasSel && isFieldDef(cc, fod) {
-				o.Set("name", jsval.Str(varName(fod.Get("field").AsString())+"_legend_"+part))
+				o.Set("name", jsval.Str(varNameOf(fod.Get("field"))+"_legend_"+part))
 			}
 			if hasSel {
 				o.Set("interactive", jsval.True)
@@ -331,7 +330,7 @@ var legendRules = map[string]func(p legendRuleParams) Value{
 		if v := p.legendConfig.Get("labelOverlap"); !v.IsNullish() {
 			return v
 		}
-		if contains([]string{"quantile", "threshold", "log", "symlog"}, p.scaleType) {
+		if strIn(p.scaleType, "quantile", "threshold", "log", "symlog") {
 			return jsval.Str("greedy")
 		}
 		return undef
@@ -340,7 +339,7 @@ var legendRules = map[string]func(p legendRuleParams) Value{
 		if v := p.legend.Get("symbolType"); !v.IsNullish() {
 			return v
 		}
-		return defaultSymbolType(p.model.ctx, p.markDef.Get("type").AsString(), p.channel, p.encoding.Get("shape"), p.markDef.Get("shape"))
+		return defaultSymbolType(p.model.ctx, p.markDef.Get("type"), p.channel, p.encoding.Get("shape"), p.markDef.Get("shape"))
 	},
 	"title": func(p legendRuleParams) Value { return fieldTitle(p.model.ctx, p.fod, p.config, true, true) },
 	"type": func(p legendRuleParams) Value {
@@ -356,14 +355,14 @@ var legendRules = map[string]func(p legendRuleParams) Value{
 	"values": func(p legendRuleParams) Value { return guideValues(p.model.ctx, p.legend, p.fod) },
 }
 
-func defaultSymbolType(cc *compileCtx, mark, channel string, shapeChannelDef, markShape Value) Value {
+func defaultSymbolType(cc *compileCtx, mark Value, channel string, shapeChannelDef, markShape Value) Value {
 	if channel != chShape {
 		shape := firstDefined(getFirstConditionValue(cc, shapeChannelDef), markShape)
 		if shape.IsTruthy() {
 			return shape
 		}
 	}
-	switch mark {
+	switch s, _ := mark.Strict(); s {
 	case "bar", "rect", "image", "square":
 		return jsval.Str("square")
 	case "line", "trail", "rule":
@@ -376,12 +375,12 @@ func defaultSymbolType(cc *compileCtx, mark, channel string, shapeChannelDef, ma
 
 // getLegendType is getFirstDefined(legend.type, defaultType(...)): the
 // legend's type as given, of whatever type.
-func getLegendType(legend Value, channel, timeUnit, scaleType string) Value {
+func getLegendType(legend Value, channel string, timeUnit, scaleType Value) Value {
 	if t := legend.Get("type"); !t.IsUndefined() {
 		return t
 	}
 	if isColorChannel(channel) {
-		if timeUnit == "quarter" || timeUnit == "month" || timeUnit == "day" {
+		if strIn(timeUnit, "quarter", "month", "day") {
 			return jsval.Str("symbol")
 		}
 		if isContinuousToContinuous(scaleType) {
@@ -481,12 +480,12 @@ func selectedCondition(m *unitModel, cmpt *legendComponent, fd Value) string {
 	if !selections.IsArr() || selections.Len() == 0 {
 		return ""
 	}
-	field := stringValue(fd.Get("field"))
+	field := stringValue(cc, fd.Get("field"))
 	var parts []string
 	for _, n := range selections.Items() {
 		cc.work(1)
 		name := n.AsString()
-		store := stringValue(jsval.Str(varName(name) + storeSuffix))
+		store := stringValue(cc, jsval.Str(varName(name)+storeSuffix))
 		parts = append(parts, "(!length(data("+store+")) || ("+name+"["+field+"] && indexof("+name+"["+field+"], datum.value) >= 0))")
 	}
 	return strings.Join(parts, " || ")
@@ -499,7 +498,7 @@ func legendSymbolsEncode(symbolsSpec Value, fod Value, m *unitModel, channel str
 		return undef
 	}
 	markDef, encoding, config, mark := m.markDef, m.encoding, m.config, m.mark()
-	filled := markDef.Get("filled").IsTruthy() && mark != "trail"
+	filled := markDef.Get("filled").IsTruthy() && !strIs(mark, "trail")
 	out := jsval.NewObject(8)
 	spreadV(out, applyMarkConfig(mkv(), m, fillStrokeConfig))
 	spreadV(out, colorEncode(m, jsval.Bool(filled)))
@@ -708,7 +707,7 @@ func legendsAreMergeCompatible(m Model, a, b string) bool {
 		return true
 	}
 	ta, tb := m.b().getScaleType(a), m.b().getScaleType(b)
-	if ta == "" || tb == "" {
+	if !ta.IsTruthy() || !tb.IsTruthy() {
 		return false
 	}
 	return hasDiscreteDomain(ta) == hasDiscreteDomain(tb)
@@ -842,7 +841,7 @@ func assembleLegends(m Model) []Value {
 			}
 			if mm := mergeLegendComponent(cc, existing.cmpt, lc); mm != nil {
 				ta, tb := m.b().getScaleType(existing.channel), m.b().getScaleType(channel)
-				if ta != "" && tb != "" && hasDiscreteDomain(ta) && hasDiscreteDomain(tb) {
+				if ta.IsTruthy() && tb.IsTruthy() && hasDiscreteDomain(ta) && hasDiscreteDomain(tb) {
 					if domainsExplicitAndEqual(m, existing.channel, channel) {
 						setImplicitLegendValues(cc, existing.cmpt, getDiscreteValuesForChannel(m, existing.channel), "")
 					} else {

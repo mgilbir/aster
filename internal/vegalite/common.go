@@ -1,8 +1,6 @@
 package vegalite
 
 import (
-	"strings"
-
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -58,14 +56,14 @@ func exprFromSignalRefOrValue(cc *compileCtx, ref Value) string {
 	if isSignalRef(cc, ref) {
 		return signalOf(ref)
 	}
-	return stringValue(ref)
+	return stringValue(cc, ref)
 }
 
 func exprFromValueRefOrSignalRef(cc *compileCtx, ref Value) string {
 	if isSignalRef(cc, ref) {
 		return signalOf(ref)
 	}
-	return stringValue(ref.Get("value"))
+	return stringValue(cc, ref.Get("value"))
 }
 
 func signalOrStringValue(cc *compileCtx, v Value) Value {
@@ -80,7 +78,7 @@ func signalOrStringValue(cc *compileCtx, v Value) Value {
 		// so a 0 or false is falsy where the expression is tested.
 		return v
 	}
-	return jsval.Str(stringValue(v))
+	return jsval.Str(stringValue(cc, v))
 }
 
 // getStyles is [].concat(mark.type, mark.style ?? []).
@@ -103,7 +101,7 @@ func getStyles(mark Value) []Value {
 func getStyleConfig(p string, styles []Value, styleIndex Value) Value {
 	v := undef
 	for _, s := range styles {
-		sc := jsGet(styleIndex, s.AsString()) // styleConfigIndex[style]: a TypeError without one
+		sc := jsGet(styleIndex, propKey(s)) // styleConfigIndex[style]: a TypeError without one
 		if hasProperty(sc, p) {
 			v = sc.Get(p)
 		}
@@ -124,7 +122,7 @@ func getMarkConfig(channel string, mark Value, config Value, vgChannel string) V
 	// unguarded (all of getFirstDefined's arguments are evaluated): a mark
 	// config set to a falsy value is absent from the config, and reading it
 	// is a TypeError.
-	mt := config.Get(mark.Get("type").AsString())
+	mt := config.Get(propKey(mark.Get("type")))
 	if vgChannel != "" {
 		return firstDefined(cfg, cfg, jsGet(mt, vgChannel), jsGet(mt, channel), jsGet(config.Get("mark"), vgChannel))
 	}
@@ -200,7 +198,7 @@ func mergeTitleFieldDefs(cc *compileCtx, f1, f2 []Value) []Value {
 			cc.work(1)
 			for _, m := range merged {
 				cc.work(1)
-				if deepEqual(m, fd) {
+				if deepEqual(cc, m, fd) {
 					continue direct
 				}
 			}
@@ -221,7 +219,7 @@ outer:
 		k := stringify(cc, fd)
 		for _, i := range tm.byKey[k] {
 			cc.work(1)
-			if deepEqual(tm.items[i], fd) {
+			if deepEqual(cc, tm.items[i], fd) {
 				continue outer
 			}
 		}
@@ -251,17 +249,16 @@ type titleMerge struct {
 // grows with each, as upstream's does.
 func mergeTitle(cc *compileCtx, t1, t2 Value) Value {
 	cc.work(1 + int64(len(t1.AsString())+len(t2.AsString()))/16)
-	if deepEqual(t1, t2) || !t2.IsTruthy() {
+	if deepEqual(cc, t1, t2) || !t2.IsTruthy() {
 		return t1
 	} else if !t1.IsTruthy() {
 		return t2
 	}
-	var parts []string
-	for _, x := range append(append([]Value(nil), arrayOf(t1)...), arrayOf(t2)...) {
-		cc.work(1)
-		parts = append(parts, x.AsString())
-	}
-	return jsval.Str(strings.Join(parts, ", "))
+	// [...array(title1), ...array(title2)].join(', '): null and undefined
+	// elements are written as "" (C86 of the 2026-10-18 audit).
+	items := append(append([]Value(nil), arrayOf(t1)...), arrayOf(t2)...)
+	cc.work(int64(len(items)))
+	return jsval.Str(cc.walker().Join(items, ", "))
 }
 
 // mergeTitleComponent merges two title components (text or field-def lists).

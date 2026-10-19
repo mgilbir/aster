@@ -76,14 +76,14 @@ func gatherFitData(u *unitModel) []Value {
 	return data
 }
 
-func mergeProjectionIfNoConflict(first, second *projectionComponent) *projectionComponent {
+func mergeProjectionIfNoConflict(cc *compileCtx, first, second *projectionComponent) *projectionComponent {
 	allShared := true
 	for _, prop := range projectionProperties {
 		fe, se := first.explicit.Has(prop), second.explicit.Has(prop)
 		if !fe && !se {
 			continue
 		}
-		if fe && se && deepEqual(first.get(prop), second.get(prop)) {
+		if fe && se && deepEqual(cc, first.get(prop), second.get(prop)) {
 			continue
 		}
 		allShared = false
@@ -92,7 +92,7 @@ func mergeProjectionIfNoConflict(first, second *projectionComponent) *projection
 	sizeEq := len(first.size) == len(second.size)
 	if sizeEq {
 		for i := range first.size {
-			if !deepEqual(first.size[i], second.size[i]) {
+			if !deepEqual(cc, first.size[i], second.size[i]) {
 				sizeEq = false
 			}
 		}
@@ -131,7 +131,7 @@ func parseNonUnitProjections(m Model) *projectionComponent {
 			nonUnit = p
 			continue
 		}
-		mg := mergeProjectionIfNoConflict(nonUnit, p)
+		mg := mergeProjectionIfNoConflict(cc, nonUnit, p)
 		if mg != nil {
 			nonUnit = mg
 		} else {

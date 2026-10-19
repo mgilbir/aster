@@ -125,8 +125,8 @@ func replacePathInFieldV(v Value) string {
 
 func removePathFromFieldV(v Value) string { return strings.Join(splitAccessPathV(v), ".") }
 
-func flatAccessWithDatumV(v Value, datum string) string {
-	return datum + "[" + jsonString(strings.Join(splitAccessPathV(v), ".")) + "]"
+func flatAccessWithDatumV(cc *compileCtx, v Value, datum string) string {
+	return datum + "[" + jsonString(cc, strings.Join(splitAccessPathV(v), ".")) + "]"
 }
 
 // accessPathDepthV is accessPathDepth of a spec value: 0 for a falsy one.
@@ -187,7 +187,7 @@ func accessPathWithDatumPieces(cc *compileCtx, pieces []string, datum string) st
 	qs := make([]string, len(pieces))
 	for i, p := range pieces {
 		cc.work(1)
-		qs[i] = jsonString(p)
+		qs[i] = jsonString(cc, p)
 	}
 	// The size is known: made at once, the buffer is not copied as it grows.
 	size, prefix := 0, len(datum)+1 // datum[
@@ -219,8 +219,8 @@ func accessPathWithDatumPieces(cc *compileCtx, pieces []string, datum string) st
 }
 
 // flatAccessWithDatum accesses a flattened field: datum["a.b"].
-func flatAccessWithDatum(path, datum string) string {
-	return datum + "[" + jsonString(strings.Join(splitAccessPath(path), ".")) + "]"
+func flatAccessWithDatum(cc *compileCtx, path, datum string) string {
+	return datum + "[" + jsonString(cc, strings.Join(splitAccessPath(path), ".")) + "]"
 }
 
 func accessWithDatumToUnescapedPath(p string) string {

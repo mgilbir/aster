@@ -1,0 +1,1 @@
+{"data":{"values":[{"a":"x"}]},"mark":"point","transform":[{"calculate":"replace(datum.a, /(/, \"b\")","as":"y"}],"encoding":{"x":{"field":"y","type":"nominal"}}}

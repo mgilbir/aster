@@ -1,0 +1,28 @@
+# 0026: A specification's values are read as upstream's code reads them: strictly, or as keys
+
+**Status:** accepted, 2026-10-19.
+
+## Context
+
+Upstream's compiler takes a specification's value and decides, at each place it uses it, how to read it: `mark === 'bar'`, a `switch`, `Set.has` and `includes` compare it strictly; `config[mark]`, `markCompiler[mark]`, `SCALE_CATEGORY_INDEX[type]` read a table with it, which coerces it to its text; a template literal writes its text; `Array.prototype.join` writes `null` as nothing; a few sites use `==`. Aster's compiler read most such values once, as text (`Value.AsString()`), and compared the text. So a value whose text is a name was that name everywhere: `"scale": {"type": ["log"]}` drew a log scale where upstream warns and draws a linear one; `"mark": ["bar"]` failed where upstream draws a bar (for its tables) that is no bar (for its comparisons); a title `["a", null]` merged as `"a, null"`; an undefined channel name read the key `""` where upstream reads `"undefined"`; a selection named `constructor` compiled where upstream's plain object throws (C40, C41, C79–C91 of the 2026-10-18 audit). Each nightly fix of the type-confusion differential (ADR 0013) closed the instance its fixed vocabulary of wrong values could reach, because no value in that vocabulary had a meaningful text (C54). The owner reversed the 2026-10-14 decision to leave one-element-array keywords alone: the class is in scope, `mark: ["bar"]` included.
+
+## Decision
+
+- **A keyword stays a `Value` from the specification to the comparison.** The mark type, the scale type, orients, a selection's type and resolve, `config.fieldTitle`, an error bar's center and extent, a stack's offset, a step's `for`, a projection's channel and field are carried as given. Each site says which reading upstream makes there: `strIs`, `strIn`, `setHas` or `Value.Strict` for `===`, `switch`, `includes`/`indexOf` and `Set.has`; `propKey` (String, a property key) for a table read with it; `tmpl` for a template literal; `looseEq` for upstream's `==`; `Walker.Join` for `Array.prototype.join`; `MapKey` for a Set or Map of values.
+- **`undefined` is the key `"undefined"`.** Where upstream reads an object with an undefined name (a channel with no size channel, `getMarkPropOrConfig(undefined, …)`), the compiler reads the key `"undefined"` (`undefinedKey`, `jsKey`), never `""`.
+- **Plain objects read through their prototype.** Upstream assigns a specification's keys to objects in places (`encoding[channel] = …`, `replaceExprRef`, vega-lite 5.8's clone package), and assigning `"__proto__"` replaces the object's prototype. `jsval.Object.SetPrototype` records it, and `Value.Get`, `Object.Prop` and `PropIn` read through it (an array prototype answers its elements, its length and `Array.prototype`'s methods); a spread (`cloneObj`) drops it, as `{...o}` does. Only the compiler sets one; every other object's reads are unchanged.
+- **The version's own vega-util.** Vega-Lite 5.8 is built on vega-util 1.17, whose `stringValue` escapes only the first U+2028 and U+2029 and writes `null` array elements as nothing, whose `mergeNamed` calls `forEach` on a null config list, and whose `writeConfig` refuses only `"__proto__"`; the compiler follows each in 5.8 mode (C82, C83).
+- **One expression tokenizer.** The compiler finds an expression's fields with a grammar of its own, which takes chains of operators at any length (C10), over `internal/expr`'s tokenizer (`expr.Scanner`), vega-expression's; `TestExprDepsAcceptsAsParse` and its fuzz target hold the two front-ends to the same acceptance and the same fields (C47).
+- **The guard.** `TestKeywordsAreNotComparedAsText` parses `internal/vegalite` and fails on a value's text (`AsString()`, directly, through a local, or through a function returning it) used as an operand of `==`/`!=`, a `switch` tag, or an argument of a function that compares its string parameter (found to a fixpoint). The sites where upstream does compare text are listed in `internal/vegalite/testdata/keyword-text.allow` with why; parameters that are property keys are listed in the test.
+- **The differential's vocabulary is derived from the value it replaces.** `internal/fuzzutil/confusion` is the one mutator of `TestVegaLiteTypeConfusionMatchesNode` and `TestTypeConfusion`: half its mutants replace a value with one of the fixed wrong values, half with `[v]`, `[[v]]`, `String(v)`, `Number(v)`, `[...v, null]`, a case-mapped or dotted-İ/ı/Kelvin/ſ spelling, or rename a key to `"undefined"`, `""`, `"__proto__"` or `"constructor"`.
+
+## Why
+
+The reading is a property of the site, not of the value, so the value has to reach the site: a text read early cannot be un-read into a strict comparison. Carrying `Value`s makes a `==` against a name a compile error, and the guard catches the text that still flows into one. Deriving mutations from the value is what lets the differential reach these classes at all; the fixed vocabulary never produced a value whose text is a keyword.
+
+## Consequences
+
+- Charts are unchanged (the baseline harness and the corpus): only schema-invalid input compiles differently, to upstream's output or upstream's error.
+- A new site that reads a specification's keyword picks its reading, or lists itself in the allowlist with upstream's reason.
+- The prototype emulation covers the reads the compiler makes through `Value.Get`, `Prop` and `in`; a for…in over an object with a replaced prototype is modelled where upstream copies with the clone package, and a `null` prototype is not modelled.
+- The 2026-10-14 parking of one-element-array keywords is withdrawn.

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/mgilbir/aster"
+	"github.com/mgilbir/aster/internal/fuzzutil/confusion"
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/oracle"
 )
@@ -30,18 +31,11 @@ var (
 	typeConfusionBudget = flag.Duration("typeconfusion.budget", 0, "stop after this long (0: no limit)")
 )
 
-// vlConfusedValues are values of the wrong type for almost every slot of a
-// specification (internal/vegalite's TestTypeConfusion uses the same).
-var vlConfusedValues = []string{
-	"null", "true", "false", `""`, `"x"`, `"1e999"`, `"NaN"`, `"__proto__"`, `"constructor"`, `"datum.x"`,
-	"0", "-1", "1e308", "[]", "{}", "[1,2]", `["a","b"]`, `{"a":1}`, "[[1]]", "[{}]",
-	`{"signal":"1/0"}`, `{"signal":"datum"}`, `{"field":"nofield"}`, `{"value":null}`, `{"type":{}}`,
-}
-
 // TestVegaLiteTypeConfusionMatchesNode is the differential form of
 // internal/vegalite's TestTypeConfusion: it replaces one value of a corpus
-// specification by a value of another type and compiles the mutant here and
-// in node, with Vega-Lite 6.4.3 and 5.8.0. Where node throws the engine must
+// specification by a value of another type, or by one derived from it ([v],
+// String(v), a case-mapped spelling), or renames a key (confusion.Confuse,
+// the vocabulary both tests share), and compiles the mutant here and in node, with Vega-Lite 6.4.3 and 5.8.0. Where node throws the engine must
 // return an error, where node compiles the engine must compile (ADR 0013), and
 // where both compile the compiler's warnings must be node's, in order and
 // count (C38), and the compiled Vega must be node's, exactly. The oracle
@@ -85,14 +79,10 @@ func TestVegaLiteTypeConfusionMatchesNode(t *testing.T) {
 		if err != nil {
 			continue
 		}
-		slots := collect(spec)
-		if len(slots) == 0 {
+		s, val, ok := confusion.Confuse(rng, spec)
+		if !ok {
 			continue
 		}
-		s := slots[rng.Intn(len(slots))]
-		val := vlConfusedValues[rng.Intn(len(vlConfusedValues))]
-		nv, _ := jsval.ParseJSONString(val)
-		s.set(nv)
 		version := "6.4"
 		if k%2 == 1 {
 			version = "5.8"
@@ -103,7 +93,7 @@ func TestVegaLiteTypeConfusionMatchesNode(t *testing.T) {
 			t.Fatalf("oracle: %v", err)
 		}
 		compared++
-		pathKey := digits.ReplaceAllString("/"+s.pathString(), "/N")
+		pathKey := digits.ReplaceAllString("/"+strings.Join(s.Path, "/"), "/N")
 		diff := mutantDiffers(t, conv[version], want, mutant)
 		if diff == "" {
 			continue

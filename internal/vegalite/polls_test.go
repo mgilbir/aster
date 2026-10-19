@@ -183,7 +183,7 @@ func TestAccessPathWithDatumUnchanged(t *testing.T) {
 		for i := 1; i <= len(pieces); i++ {
 			qs := make([]string, i)
 			for j := 0; j < i; j++ {
-				qs[j] = jsonString(pieces[j])
+				qs[j] = jsonString(nil, pieces[j])
 			}
 			prefixes = append(prefixes, datum+"["+strings.Join(qs, "][")+"]")
 		}

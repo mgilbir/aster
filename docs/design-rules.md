@@ -58,6 +58,15 @@ regular expression is `KindPattern` compiled with `github.com/mgilbir/goecma262`
   `Walker.Join` for `Array.prototype.join`; `PlainMap` for upstream's `{}`
   used as a map; `v.InternKey()` (d3's InternMap) or `v.MapKey()` (a `Map`)
   to key values by identity, never their text.
+- In the Vega-Lite compiler a specification's keyword (a mark or scale
+  type, an orient, a selection's type) stays a `Value` up to the site that
+  reads it, and the site reads it as upstream does there: `strIs`, `strIn`,
+  `setHas` for `===`, `switch`, `includes` and `Set.has`; `propKey` for
+  `obj[v]`; `tmpl` for a template literal; `looseEq` for `==`. An
+  undefined name is the key `"undefined"`, never `""`. Never compare a
+  value's text with a name: `TestKeywordsAreNotComparedAsText` fails on it
+  unless `internal/vegalite/testdata/keyword-text.allow` says why upstream
+  compares the text there ([ADR 0026](adr/0026-keywords-read-as-upstream-reads-them.md)).
 - A walk of a value (its String, JSON, stringValue, a deep or relational
   comparison, an elementwise interpolation) is made with the call's
   `jsval.Walker`, which the run's state carries (the view, its operators'

@@ -21,3 +21,4 @@ Decisions whose reason is not visible in the code. Each says what was decided, w
 | [0015](0015-filters-follow-the-specification.md) | PNG filters follow the Filter Effects spec where resvg departs from it | accepted, 2026-10-14 |
 | [0016](0016-custom-projections.md) | Custom projections are a raw projection and its parameters, per Converter | accepted, 2026-10-14 |
 | [0018](0018-value-walks-bounded-by-the-call.md) | Walks of a value (its text, JSON, comparisons) are bounded by the call that makes them, with the call's jsval.Walker; identity is a key, not a walk | accepted, 2026-10-19 |
+| [0026](0026-keywords-read-as-upstream-reads-them.md) | A specification's values are read as upstream's code reads them, strictly or as keys; the type-confusion vocabulary is derived from the value it replaces | accepted, 2026-10-19 |
