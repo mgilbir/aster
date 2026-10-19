@@ -8,7 +8,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-const require = createRequire(path.join(process.env.NODE_PATH, 'x.js'));
+const require = createRequire(path.resolve(process.env.NODE_PATH, 'x.js'));
 const vl = await import(require.resolve('vega-lite'));
 const here = path.dirname(fileURLToPath(import.meta.url));
 const themes = JSON.parse(fs.readFileSync(path.join(here, 'themes.json'), 'utf8'));

@@ -3,7 +3,7 @@
 // vega-parser uses.
 import { createRequire } from 'node:module';
 import path from 'node:path';
-const require = createRequire(path.join(process.env.NODE_PATH, 'x.js'));
+const require = createRequire(path.resolve(process.env.NODE_PATH, 'x.js'));
 const vega = await import(require.resolve('vega'));
 const out = {};
 for (const name of Object.keys(vega.transforms).sort()) {

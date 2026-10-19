@@ -5,7 +5,7 @@
 //     node testdata/gen_voronoi.mjs > testdata/voronoi.json
 import { createRequire } from 'node:module';
 import path from 'node:path';
-const require = createRequire(path.join(process.env.NODE_PATH, 'x.js'));
+const require = createRequire(path.resolve(process.env.NODE_PATH, 'x.js'));
 const vega = await import(require.resolve('vega'));
 const { Delaunay } = await import(require.resolve('d3-delaunay'));
 

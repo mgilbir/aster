@@ -12,7 +12,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
 
-const require = createRequire(path.join(process.env.NODE_PATH, 'x.js'));
+const require = createRequire(path.resolve(process.env.NODE_PATH, 'x.js'));
 const wcDir = path.join(process.env.NODE_PATH, 'vega-wordcloud');
 let src = fs.readFileSync(path.join(wcDir, 'src/CloudLayout.js'), 'utf8');
 src = src.replace("import {canvas} from 'vega-canvas';", "import {canvas} from './shim.mjs';");

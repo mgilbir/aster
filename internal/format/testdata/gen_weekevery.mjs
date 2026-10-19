@@ -5,7 +5,7 @@
 // Regenerate with testdata/gen.sh.
 import { createRequire } from 'node:module';
 import path from 'node:path';
-const require = createRequire(path.join(process.env.NODE_PATH, 'x.js'));
+const require = createRequire(path.resolve(process.env.NODE_PATH, 'x.js'));
 const d3 = await import(require.resolve('d3-time'));
 const week = 7 * 864e5;
 const ks = [65, 70, 1000, 65537, 100000, 1000000];

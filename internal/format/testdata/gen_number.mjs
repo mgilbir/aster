@@ -2,7 +2,7 @@
 //   NODE_PATH=testdata/oracle-node/node_modules node testdata/gen_number.mjs | gzip -9 > testdata/number.json.gz
 import { createRequire } from 'node:module';
 import path from 'node:path';
-const require = createRequire(path.join(process.env.NODE_PATH, 'x.js'));
+const require = createRequire(path.resolve(process.env.NODE_PATH, 'x.js'));
 const d3 = await import(require.resolve('d3-format'));
 
 const enc = (v) => (Object.is(v, -0) ? '-0' : String(v));
