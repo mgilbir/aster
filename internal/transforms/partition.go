@@ -1,8 +1,10 @@
 package transforms
 
 import (
+	"context"
 	"strings"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -28,7 +30,13 @@ func Partition(k Keys, data []jsval.Value, groupby []Field) []Group {
 	var groups []Group
 	index := make(map[string]int)
 	var sb strings.Builder
-	for _, t := range data {
+	for i, t := range data {
+		// A batch of rows is charged at a time, a step a field of each,
+		// polling the call's context (ADR 0010): a field can be an
+		// expression.
+		if i&(partitionBatch-1) == 0 {
+			k.w.Work(int64(min(partitionBatch, len(data)-i) * (len(groupby) + 1)))
+		}
 		sb.Reset()
 		for i, f := range groupby {
 			if i > 0 {
@@ -54,13 +62,24 @@ func Partition(k Keys, data []jsval.Value, groupby []Field) []Group {
 	return groups
 }
 
+// partitionBatch is how many rows Partition and GroupByKey go between two
+// charges of their work.
+const partitionBatch = 256
+
 // GroupByKey partitions data by a key function, groups in order of first
 // appearance. It is the partitioning the facet transform needs: one subflow per
-// distinct key.
-func GroupByKey(data []jsval.Value, key KeyFunc) []KeyedGroup {
+// distinct key. Each row is a step of work charged to ctx's ledger, a batch
+// at a time, which polls ctx: the key can be an expression.
+func GroupByKey(ctx context.Context, data []jsval.Value, key KeyFunc) ([]KeyedGroup, error) {
 	var groups []KeyedGroup
 	index := make(map[string]int)
-	for _, t := range data {
+	m := budget.NewMeter(ctx)
+	for i, t := range data {
+		if i&(partitionBatch-1) == 0 {
+			if err := m.Work(int64(min(partitionBatch, len(data)-i))); err != nil {
+				return nil, err
+			}
+		}
 		k := key(t)
 		gi, ok := index[k]
 		if !ok {
@@ -70,7 +89,7 @@ func GroupByKey(data []jsval.Value, key KeyFunc) []KeyedGroup {
 		}
 		groups[gi].Tuples = append(groups[gi].Tuples, t)
 	}
-	return groups
+	return groups, nil
 }
 
 // KeyedGroup is a set of tuples sharing one key.

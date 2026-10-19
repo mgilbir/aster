@@ -52,7 +52,6 @@ internal/vega.domainFieldRef	1	# spec: a literal of the specification, read as t
 internal/vega.fieldPathText	1	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)
 internal/vega.getDataRef	1	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)
 internal/vega.initScale	2	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)
-internal/vega.jsAdd	2	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)
 internal/vega.markRole	2	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)
 internal/vega.mergeNamed	1	# spec: the configuration, merged as the view is parsed
 internal/vega.numericMultipleDomain	1	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)

@@ -15,7 +15,7 @@ func init() {
 			for _, f := range p.fields("keys") {
 				keys = append(keys, hierarchy.Accessor(f.Get))
 			}
-			tree, gen, err := hierarchy.Nest(pulse.tuples, keys, transforms.KeyStringer(n.g.ctx), p.bool("generate"))
+			tree, gen, err := hierarchy.Nest(n.g.ctx, pulse.tuples, keys, transforms.KeyStringer(n.g.ctx), p.bool("generate"))
 			if err != nil {
 				failErr(err)
 			}
@@ -29,7 +29,7 @@ func init() {
 
 	tf["stratify"] = func(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *opParams) any) {
 		return nil, trFunc(func(n *opNode, p *opParams, pulse *flowPulse) *flowPulse {
-			tree, err := hierarchy.Stratify(pulse.tuples,
+			tree, err := hierarchy.Stratify(n.g.ctx, pulse.tuples,
 				hierarchy.Accessor(p.field("key").Get), hierarchy.Accessor(p.field("parentKey").Get),
 				transforms.KeyStringer(n.g.ctx))
 			if err != nil {
@@ -97,14 +97,20 @@ func init() {
 			if pulse.tree == nil {
 				fail("TreeLinks transform requires a tree data source.")
 			}
-			valid := make(map[*jsval.Object]struct{}, len(pulse.tuples))
-			for _, t := range pulse.tuples {
-				if o := t.ObjValue(); o != nil {
-					valid[o] = struct{}{}
+			// `lut[tupleid(t)] = 1` over the pulse's tuples: a node is
+			// valid when its tuple's id is among them.
+			valid := make(map[uint64]struct{}, len(pulse.tuples))
+			for i, t := range pulse.tuples {
+				n.g.rows(i, len(pulse.tuples), 2)
+				if id := n.g.view.tupleKey(t); id != 0 {
+					valid[id] = struct{}{}
 				}
 			}
-			links, err := hierarchy.TreeLinks(pulse.tree, func(t jsval.Value) bool {
-				_, ok := valid[t.ObjValue()]
+			links, err := hierarchy.TreeLinks(n.g.ctx, pulse.tree, func(t jsval.Value) bool {
+				if t.IsNullish() {
+					return false
+				}
+				_, ok := valid[n.g.view.tupleKey(t)]
 				return ok
 			})
 			if err != nil {

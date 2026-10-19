@@ -332,7 +332,7 @@ func init() {
 			if !ok {
 				kf = transforms.KeyOf(n.g.view.keys, ap.GroupBy...)
 			}
-			n.value = &aggCells{in: in, out: out, key: kf}
+			n.value = &aggCells{in: in, out: out, key: kf, ctx: n.g.ctx}
 			return changedPulse(pulse, out)
 		}), nil
 	}
@@ -567,8 +567,11 @@ func pairAs(s []string) [2]string {
 }
 
 // firstKeys lists the keys of the groups in order of first appearance.
-func firstKeys(data []jsval.Value, key transforms.KeyFunc) []string {
-	groups := transforms.GroupByKey(data, key)
+func firstKeys(ctx context.Context, data []jsval.Value, key transforms.KeyFunc) []string {
+	groups, err := transforms.GroupByKey(ctx, data, key)
+	if err != nil {
+		failErr(err)
+	}
 	out := make([]string, len(groups))
 	for i, g := range groups {
 		out[i] = g.Key

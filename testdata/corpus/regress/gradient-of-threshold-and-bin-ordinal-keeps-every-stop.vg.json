@@ -1,0 +1,3 @@
+{"scales":[{"name":"t","type":"threshold","domain":[0,10,20],"range":["red","green","blue","black"]},
+ {"name":"o","type":"bin-ordinal","domain":[0,10,20,30],"range":["red","green","blue"]}],
+ "marks":[{"type":"text","encode":{"enter":{"text":{"signal":"pluck(gradient('t',[0,0],[1,0]).stops,'color') + '|' + pluck(gradient('t',[0,0],[1,0]).stops,'offset') + '|' + pluck(gradient('o',[0,0],[1,0]).stops,'color')"}}}}]}

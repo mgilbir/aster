@@ -108,7 +108,7 @@ func (c *rtContext) GeoShape(projection, geojson, group jsval.Value) jsval.Value
 	p, _ := c.projectionOf(projection)
 	shp := geo.NewShape(p, func(jsval.Value) jsval.Value { return geojson }, geo.PointRadius{})
 	shp.Bind(c.view.ctx)
-	return c.view.newShape(func(ctx scene.PathContext, _ *scene.Item) string {
+	return c.newShape(geoShapeSource, func(ctx scene.PathContext, _ *scene.Item) string {
 		if p == nil {
 			return ""
 		}
@@ -127,7 +127,7 @@ func (c *rtContext) GeoShape(projection, geojson, group jsval.Value) jsval.Value
 // the shape's bounds or its drawing that throws.
 func (c *rtContext) PathShape(path jsval.Value) jsval.Value {
 	if !path.IsStr() {
-		return c.view.newShape(func(ctx scene.PathContext, _ *scene.Item) string {
+		return c.newShape(pathShapeSource, func(ctx scene.PathContext, _ *scene.Item) string {
 			if ctx == nil {
 				return c.g.walk.String(path)
 			}
@@ -145,32 +145,39 @@ func (c *rtContext) PathShape(path jsval.Value) jsval.Value {
 	if err != nil {
 		panic(&budget.Stop{Err: err}) // a bound: Program.Eval returns it
 	}
-	return c.view.newShape(func(ctx scene.PathContext, _ *scene.Item) string { return fn(ctx) })
+	return c.newShape(pathShapeSource, func(ctx scene.PathContext, _ *scene.Item) string { return fn(ctx) })
 }
 
-// newShape registers a shape generator and returns the opaque value that
-// stands for it in expressions.
-func (v *runView) newShape(f scene.ShapeFunc) jsval.Value {
-	v.shapes = append(v.shapes, f)
-	return obj("$shape", jsval.Int(len(v.shapes)-1))
+// geoShapeSource and pathShapeSource are the source text of the functions
+// geoShape() and pathShape() return upstream (vega-functions shape.js), what
+// String() of one gives.
+const (
+	geoShapeSource  = "function (context) {\n    return p ? p.path.context(context)(geojson) : '';\n  }"
+	pathShapeSource = "function (context) {\n    return context ? pathRender(context, p = p || pathParse(path)) : path;\n  }"
+)
+
+// shapeHandleBytes is what a shape handle is charged: the function object,
+// its generator's closure and, for geoShape, the geo.Shape it draws with.
+// Measured as what the handles kept alive when the view held them all
+// (TestEveryEnvMethodIsMetered on the code before C4): 247 bytes a geoShape
+// handle, 101 a pathShape one; twice the larger, rounded up.
+const shapeHandleBytes = 512
+
+// newShape returns the function value that stands for a shape generator in
+// expressions: the generator itself rides on the value (C4, C92), so it is
+// garbage once nothing refers to it, and no data or specification can spell
+// one. Each is charged to the call's ledger as it is made, as an expression
+// charges what it builds: a formula can hold any number of them in its rows.
+func (c *rtContext) newShape(src string, f scene.ShapeFunc) jsval.Value {
+	c.view.chargeRun(shapeHandleBytes)
+	return jsval.HostFunction(src, f)
 }
 
-// shapeOf resolves a shape handle.
-func (v *runView) shapeOf(h jsval.Value) scene.ShapeFunc {
-	if !h.IsObj() {
-		return nil
-	}
-	id := h.Get("$shape")
-	if !id.IsNum() {
-		return nil
-	}
-	// Range-checked as a float: converting NaN or a huge number to int is
-	// platform-dependent.
-	f := id.NumValue()
-	if !(f >= 0 && f < float64(len(v.shapes))) {
-		return nil
-	}
-	return v.shapes[int(f)]
+// shapeOf is the generator a shape value stands for, nil for any other value.
+func shapeOf(h jsval.Value) scene.ShapeFunc {
+	impl, _ := jsval.FunctionImpl(h)
+	f, _ := impl.(scene.ShapeFunc)
+	return f
 }
 
 // TreePath implements expr.TreeProvider.
@@ -186,6 +193,7 @@ func (c *rtContext) TreePath(name string, source, target jsval.Value) jsval.Valu
 		return jsval.Undefined
 	}
 	path := s.Path(d)
+	c.view.chargeItems(len(path))
 	out := make([]jsval.Value, len(path))
 	for i, n := range path {
 		out[i] = n.Data
@@ -203,6 +211,7 @@ func (c *rtContext) TreeAncestors(name string, node jsval.Value) jsval.Value {
 		return jsval.Undefined
 	}
 	anc := n.Ancestors()
+	c.view.chargeItems(len(anc))
 	out := make([]jsval.Value, len(anc))
 	for i, a := range anc {
 		out[i] = a.Data

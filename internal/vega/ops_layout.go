@@ -91,6 +91,7 @@ func facOverlap(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode
 		op := layout.OverlapParams{
 			Method:     p.Value("method"),
 			Separation: jsval.ToNumber(p.Value("separation")),
+			Rows:       n.g.rows,
 		}
 		if o := p.Value("order"); o.IsStr() {
 			op.Order = o.StrValue()

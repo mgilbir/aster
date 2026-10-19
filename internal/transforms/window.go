@@ -312,7 +312,11 @@ func Window(ctx context.Context, data []jsval.Value, p WindowParams) ([]jsval.Va
 
 	m := budget.NewMeter(ctx)
 	led := budget.LedgerFrom(ctx)
-	for _, g := range GroupByKey(data, KeyOf(keysOf(ctx), p.GroupBy...)) {
+	groups, err := GroupByKey(ctx, data, KeyOf(keysOf(ctx), p.GroupBy...))
+	if err != nil {
+		return nil, err
+	}
+	for _, g := range groups {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}

@@ -302,7 +302,7 @@ func applyMarkFlags(mark *scene.Mark, p *opParams, view *runView) {
 	switch v := p.Get("clip").(type) {
 	case jsval.Value:
 		mark.Clip = v.IsTruthy()
-		if fn := view.shapeOf(v); fn != nil {
+		if fn := shapeOf(v); fn != nil {
 			mark.ClipPath = func(ctx scene.PathContext) string { return fn(ctx, nil) }
 		}
 	case bool:
@@ -333,13 +333,19 @@ func (b *boundSet) run(it *scene.Item, track bool) bool {
 	for i := range set.channels {
 		ch := &set.channels[i]
 		val := ch.fn(ev)
-		if ch.name == "shape" {
-			// a shape generator (geoShape/pathShape) is a function, not a value
-			if fn := b.ctx.view.shapeOf(val); fn != nil {
-				it.Shape = scene.Shape{Func: fn}
-				mod = true
-				continue
-			}
+		if ch.name == "shape" && set.marktype == "shape" && shapeOf(val) != nil {
+			// A shape mark draws `(item.mark.shape || item.shape)
+			// .context(context)(item)`: geoShape() and pathShape() return
+			// plain functions, which have no context method, so upstream
+			// throws where such an item is drawn or bounded (unless the
+			// mark has a generator of its own): the item has no generator,
+			// which is that TypeError (scene.ErrNoShapeGenerator, whose
+			// text names the context of undefined rather than of a
+			// function). The functions are for a mark's clip. Any other
+			// mark keeps the function as a value.
+			it.Shape = scene.Shape{}
+			mod = true
+			continue
 		}
 		if !track {
 			if err := ch.set(it, val); err != nil {

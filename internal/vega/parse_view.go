@@ -349,7 +349,7 @@ func parseSignalUpdates(sig jsval.Value, scope *Scope) {
 // streams never do, so those handlers are dropped.
 func parseUpdate(spec jsval.Value, scope *Scope, target *entry) {
 	events := spec.Get("events")
-	if events.IsUndefined() || events.IsNull() {
+	if !events.IsTruthy() { // `if (!events)`
 		perr("Signal update missing events specification.")
 	}
 	var sources []jsval.Value

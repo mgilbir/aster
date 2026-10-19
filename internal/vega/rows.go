@@ -194,6 +194,24 @@ func (v *runView) chargeRun(n int64) {
 	v.runBytes += n
 }
 
+// envItem is what an element of an array the expression environment hands an
+// expression holds, as expr's perItem: the Value and the slack of what it
+// refers to.
+const envItem = 24
+
+// chargeItems charges what an expression-environment method (domain(),
+// range(), gradient(), data() of a mark, …) is about to hand an expression:
+// a step per 16 elements made, and, past 256 elements (an array that size
+// is free in an expression too), the elements' bytes for the rest of the
+// run, as the evaluator charges an array it builds. A formula can keep what
+// it is handed in every row, and an encoder can call it for every item.
+func (v *runView) chargeItems(n int) {
+	v.g.work(n/16 + 1)
+	if n > 256 {
+		v.chargeRun(int64(n) * envItem)
+	}
+}
+
 // releaseLists gives the ledger back the tuple lists charged: once the
 // render is over they are garbage, the scenegraph keeping the tuples only.
 func (v *runView) releaseLists() {

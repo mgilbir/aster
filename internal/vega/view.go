@@ -272,8 +272,7 @@ type runView struct {
 
 	itemTupleCache map[*scene.Item]*jsval.Object
 	viewItem       map[*jsval.Object]*scene.Item
-	shapes         []scene.ShapeFunc
-	pending        map[*opNode]*pendingChange
+	pending        map[*opNode]*changeSet
 	markItemsCache map[*scene.Mark]markItems
 	itemIDs        map[*scene.Item]int
 	itemByID       []*scene.Item

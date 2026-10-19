@@ -24,8 +24,9 @@ type markDef struct {
 }
 
 func markRole(spec jsval.Value) string {
+	// `spec.role || ''`: a falsy role (false, 0, "") is none.
 	role := spec.Get("role").AsString()
-	if spec.Get("role").IsNullish() {
+	if !spec.Get("role").IsTruthy() {
 		role = ""
 	}
 	if strings.HasPrefix(role, "axis") || strings.HasPrefix(role, "legend") || strings.HasPrefix(role, "title") {
@@ -107,22 +108,35 @@ type facetInput struct {
 	parent P
 }
 
-// getDataRef resolves the data reference of a `from` or facet specification: an
-// opaque operator handle, or the output of a named data set.
+// getDataRef resolves the data reference of a `from` or facet specification:
+// an operator a guide plan refers to (opRef), or the output of a named data
+// set. Upstream reads any truthy `$ref` there as an operator id (`from.$ref ?
+// from : from.data && from.data.$ref ? from.data : …`), which the runtime
+// then fails to find ("Operator not defined"); the ids are upstream's own
+// numbering, which a specification cannot know, so one a specification
+// spells is that error here.
 func getDataRef(from jsval.Value, scope *Scope) P {
-	if h := from.Get("$ref"); h.IsStr() {
-		return scope.resolveHandle(h.StrValue())
+	if e, ok := opRefOf(from); ok {
+		return e
 	}
-	if d := from.Get("data"); d.IsObj() && d.Get("$ref").IsStr() {
-		return scope.resolveHandle(d.Get("$ref").StrValue())
+	if r := from.Get("$ref"); r.IsTruthy() {
+		perr("Operator not defined: %s", jsval.StringPrefix(r, jsval.MessageBytes))
 	}
-	return scope.getData(from.Get("data").AsString()).output
+	d := from.Get("data")
+	if e, ok := opRefOf(d); ok {
+		return e
+	}
+	if r := d.Get("$ref"); d.IsTruthy() && r.IsTruthy() {
+		perr("Operator not defined: %s", jsval.StringPrefix(r, jsval.MessageBytes))
+	}
+	return scope.getData(d.AsString()).output
 }
 
 func parseMarkData(from jsval.Value, group bool, scope *Scope) facetInput {
 	var in facetInput
 	var dataRef P
-	if from.IsNullish() {
+	// `if (!from)`: a falsy from (false, "", 0) is the singleton too.
+	if !from.IsTruthy() {
 		e := scope.add(mk("collect"))
 		e.literal = []jsval.Value{jsval.Obj(jsval.NewObject(0))}
 		dataRef = e
@@ -134,7 +148,8 @@ func parseMarkData(from jsval.Value, group bool, scope *Scope) facetInput {
 			dataRef = getDataRef(facet, scope)
 			in.parent = dataRef
 		} else {
-			if from.Get("data").IsNullish() || from.Get("data").IsUndefined() {
+			// `if (!from.data)`: truthiness, so "" aggregates facet.data
+			if !from.Get("data").IsTruthy() {
 				spec := jsval.NewObject(4)
 				spec.Set("type", sv("aggregate"))
 				spec.Set("groupby", jsval.Arr(arrayOf(facet.Get("groupby"))))
@@ -277,7 +292,8 @@ func parseMark(spec jsval.Value, scope *Scope) {
 	sieve := scope.add(mk("sieve", "pulse", render))
 	sieve.parent = entryOf(scope.parent())
 
-	if name := spec.Get("name"); !name.IsNullish() && name.IsTruthy() {
+	// `if (spec.name != null)`: a name of 0 or "" names a data set too.
+	if name := spec.Get("name"); !name.IsNullish() {
 		scope.addData(name.AsString(), newDataScope(scope, store, render, sieve, nil))
 		for _, on := range arrayOf(spec.Get("on")) {
 			scope.work(1)

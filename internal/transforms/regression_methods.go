@@ -43,6 +43,17 @@ func FitRegression(method string, data []jsval.Value, x, y Accessor, order float
 // FitRegressionCtx is FitRegression that stops with the context's error when
 // ctx is cancelled (a high-order polynomial fit costs order^2 passes).
 func FitRegressionCtx(ctx context.Context, method string, data []jsval.Value, x, y Accessor, order float64) (RegressionModel, error) {
+	// Each fit reads every point, some several times: x is read for every
+	// point, so polling there polls throughout.
+	x, cancelled := polledAccessor(ctx, x)
+	m, err := fitRegression(ctx, method, data, x, y, order)
+	if cerr := cancelled(); cerr != nil {
+		return RegressionModel{}, cerr
+	}
+	return m, err
+}
+
+func fitRegression(ctx context.Context, method string, data []jsval.Value, x, y Accessor, order float64) (RegressionModel, error) {
 	switch method {
 	case "constant":
 		return FitConstant(data, x, y), nil

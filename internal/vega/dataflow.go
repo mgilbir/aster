@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/scale"
+	"math/bits"
 	"sort"
 
 	"github.com/mgilbir/aster/internal/expr"
@@ -369,6 +370,9 @@ func (n *opNode) run(p *flowPulse) *flowPulse {
 }
 
 func (n *opNode) evaluate(p *flowPulse) *flowPulse {
+	if n.g.trace != nil {
+		defer n.g.trace(n.name)()
+	}
 	if n.tr != nil {
 		params := n.marshall(p.stamp)
 		out := n.transform(params, p)
@@ -542,10 +546,21 @@ type flowGraph struct {
 	// walk is the call's Walker, which the operators' walks of values (a
 	// parameter read as text) go through (ADR 0018).
 	walk jsval.Walker
+	// trace, which only the tests set (opTraceKey), is told the type of
+	// each operator as it is evaluated, and the returned function when the
+	// evaluation is over.
+	trace func(typ string) func()
 }
 
+// opTraceKey carries a graph's trace in the call's context (the tests'
+// dataflow_polls_test.go, which attributes the polls of the call's context
+// to the operator that makes them).
+type opTraceKey struct{}
+
 func newGraph(ctx context.Context) *flowGraph {
-	return &flowGraph{ctx: ctx, touchSet: map[*opNode]struct{}{}, input: map[*opNode]*flowPulse{}, meter: budget.NewMeter(ctx), walk: jsval.WalkerFor(ctx)}
+	g := &flowGraph{ctx: ctx, touchSet: map[*opNode]struct{}{}, input: map[*opNode]*flowPulse{}, meter: budget.NewMeter(ctx), walk: jsval.WalkerFor(ctx)}
+	g.trace, _ = ctx.Value(opTraceKey{}).(func(string) func())
+	return g
 }
 
 // work charges n steps to the graph's meter, ending the render, through the
@@ -562,10 +577,21 @@ const rowBatch = 256
 // rows that starts there, cost steps a row: a per-row loop pays an AND and a
 // branch a row, and polls the call's context between batches (ADR 0010).
 func (g *flowGraph) rows(i, n, cost int) {
-	if i&(rowBatch-1) == 0 {
-		g.work(min(rowBatch, n-i) * cost)
+	b := rowBatch
+	if cost > maxBatchWork/rowBatch {
+		// Rows of many steps (an item of many encoded channels) go in
+		// smaller batches, so that no charge is more than maxBatchWork:
+		// the largest power of two that keeps it there.
+		b = max(1, 1<<bits.Len(uint(maxBatchWork/cost))>>1)
+	}
+	if i&(b-1) == 0 {
+		g.work(min(b, n-i) * cost)
 	}
 }
+
+// maxBatchWork is the most work one charge of rows makes: four of the
+// meter's polls.
+const maxBatchWork = 4096
 
 // copyChunk is how many values of a tuple or item list appendRows copies
 // between two charges: 256 KiB, a step per 16 values (what a copy costs

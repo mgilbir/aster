@@ -176,14 +176,24 @@ func (e *Env) LegendEntries(in LegendEntriesInput) ([]jsval.Value, error) {
 	return discreteEntries(s, label, set)
 }
 
-// chargedLabels is format with each label's text charged to the ledger.
+// chargedLabels is format with each label's text charged to the ledger, and
+// each label a few steps of work, polling the call's context: a guide lists
+// up to scale.MaxTicks entries, each formatted and built in turn (ADR 0010).
 func (e *Env) chargedLabels(format scale.LabelFormatter) func(v jsval.Value, i int, l scale.Labels) (jsval.Value, error) {
 	meter := e.labelMeter()
+	work := budget.NewMeter(e.ctx())
 	return func(v jsval.Value, i int, l scale.Labels) (jsval.Value, error) {
+		if err := work.Work(entrySteps); err != nil {
+			return jsval.Undefined, err
+		}
 		label := format(v, i, l)
 		return label, meter.charge(label)
 	}
 }
+
+// entrySteps is the work of one guide entry: its label, and the object of a
+// few members built around it.
+const entrySteps = 4
 
 type labelFunc = func(v jsval.Value, i int, l scale.Labels) (jsval.Value, error)
 
@@ -213,7 +223,11 @@ func (e *Env) symbolEntries(in LegendEntriesInput, s scale.Scale, format labelFu
 			}
 		}
 		// compute the size offset for legend entries
+		work := budget.NewMeter(e.ctx())
 		for _, v := range items.Values {
+			if err := work.Work(entrySteps); err != nil {
+				return nil, err
+			}
 			offset = jsMax(offset, jsval.ToNumber(size(v)))
 		}
 	} else {

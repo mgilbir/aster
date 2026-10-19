@@ -271,7 +271,7 @@ func (t term) fn() valueFn {
 		return t.a
 	}
 	a, b := t.a, t.b
-	return func(ev *encEval) jsval.Value { return jsAdd(a(ev), b(ev)) }
+	return func(ev *encEval) jsval.Value { return ev.ctx.view.jsAdd(a(ev), b(ev)) }
 }
 
 func (c *encCompiler) entry(enc jsval.Value) valueFn {
@@ -398,14 +398,15 @@ func (c *encCompiler) scaleTerm(enc jsval.Value, value valueFn, haveValue bool) 
 		f := jsval.ToNumber(r)
 		return term{a: func(ev *encEval) jsval.Value {
 			rng := ev.ctx.encScaleRange(scale(ev))
-			return lerp(rng, f)
+			return lerp(ev.ctx.view, rng, f)
 		}}
 	}
 	var cur term
 	if haveValue {
 		cur = term{a: func(ev *encEval) jsval.Value { return ev.ctx.encScale(scale(ev), value(ev)) }}
 	}
-	if band := enc.Get("band"); !band.IsNullish() {
+	// `if (enc.band)`: a band of 0 adds no bandwidth term (C94).
+	if band := enc.Get("band"); band.IsTruthy() {
 		bw := func(ev *encEval) jsval.Value { return jsval.Num(ev.ctx.scaleBandwidth(scale(ev))) }
 		b := bw
 		if jsval.ToNumber(band) != 1 {
@@ -681,11 +682,24 @@ func utf16Len(s string) int {
 
 // -- JavaScript arithmetic ---------------------------------------------------
 
-// jsAdd is the `+` operator: string concatenation when either side is a
-// string, numeric addition otherwise.
-func jsAdd(a, b jsval.Value) jsval.Value {
-	if a.IsStr() || b.IsStr() || a.IsArr() || b.IsArr() || a.IsObj() || b.IsObj() {
-		return jsval.Str(a.AsString() + b.AsString())
+// jsAdd is the `+` operator of the generated encoder source: string
+// concatenation when either side's primitive is a string (a string, an
+// array, an object, and a date, whose default primitive is its text), with
+// String() as the view writes it (the call's Walker, its zone); numeric
+// addition otherwise.
+func (v *runView) jsAdd(a, b jsval.Value) jsval.Value {
+	if a.IsNum() && b.IsNum() {
+		return jsval.Num(a.NumValue() + b.NumValue())
+	}
+	concat := func(x jsval.Value) bool {
+		switch x.Kind() {
+		case jsval.KindStr, jsval.KindArr, jsval.KindObj, jsval.KindTimestamp, jsval.KindPattern:
+			return true
+		}
+		return false
+	}
+	if concat(a) || concat(b) {
+		return jsval.Str(v.jsString(a) + v.jsString(b))
 	}
 	return jsval.Num(jsval.ToNumber(a) + jsval.ToNumber(b))
 }
@@ -717,8 +731,10 @@ func jsPow(x, y float64) float64 {
 	return jsmath.Pow(x, y)
 }
 
-// lerp is vega-util's lerp over a range value.
-func lerp(rng jsval.Value, frac float64) jsval.Value {
+// lerp is the generated `lerp(_range(scale), +enc.range)`, vega-util's lerp:
+// `lo + f * (hi - lo)`, whose `+` concatenates a string range's first value
+// (C93: "red" and NaN make "redNaN"), as v.jsAdd does.
+func lerp(v *runView, rng jsval.Value, frac float64) jsval.Value {
 	items := rng.Items()
 	if len(items) == 0 {
 		return jsval.Undefined
@@ -735,7 +751,7 @@ func lerp(rng jsval.Value, frac float64) jsval.Value {
 		return hi
 	}
 	l, h := jsval.ToNumber(lo), jsval.ToNumber(hi)
-	return jsval.Num(l + float64(frac*(h-l)))
+	return v.jsAdd(lo, jsval.Num(float64(frac*(h-l))))
 }
 
 // -- defaults ----------------------------------------------------------------

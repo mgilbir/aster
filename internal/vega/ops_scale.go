@@ -861,7 +861,10 @@ func (c *rtContext) scaleRange(ref jsval.Value) jsval.Value {
 	if s == nil {
 		return jsval.Arr(nil)
 	}
-	return jsval.Arr(s.Range())
+	// A copy, as d3's range() is, charged as domain()'s is.
+	r := s.Range()
+	c.view.chargeItems(len(r))
+	return jsval.Arr(r)
 }
 
 func (c *rtContext) scaleBandwidth(ref jsval.Value) float64 {
@@ -894,6 +897,7 @@ func (c *rtContext) Invert(ref, v, group jsval.Value) jsval.Value {
 		if !ok {
 			return jsval.Undefined
 		}
+		c.view.chargeItems(r.Len())
 		return r
 	}
 	if inv, ok := s.(scale.Inverter); ok {
@@ -911,7 +915,11 @@ func (c *rtContext) Domain(ref, group jsval.Value) jsval.Value {
 	if s == nil {
 		return jsval.Arr(nil)
 	}
-	return jsval.Arr(s.Domain())
+	// A copy, as d3's domain() is: charged once made (the scale holds as
+	// much, so the charge comes one copy late at most).
+	d := s.Domain()
+	c.view.chargeItems(len(d))
+	return jsval.Arr(d)
 }
 
 func (c *rtContext) Range(ref, group jsval.Value) jsval.Value { return c.scaleRange(ref) }
@@ -931,5 +939,5 @@ func (c *rtContext) Gradient(ref, p0, p1, count, group jsval.Value) jsval.Value 
 	if s == nil {
 		return jsval.Undefined
 	}
-	return scaleGradient(c.view.ctx, s, p0, p1, count)
+	return scaleGradient(c.view, s, p0, p1, count)
 }

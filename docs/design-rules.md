@@ -69,8 +69,13 @@ regular expression is `KindPattern` compiled with `github.com/mgilbir/goecma262`
 
 ### Tuples
 
-A datum is a `jsval.Value` of kind object. Identity is the
-`*jsval.Object` pointer. Transforms that derive new tuples create new objects;
+A datum is a `jsval.Value` of kind object. Its identity is its tuple id
+(`Object.TupleID`), given when it is ingested, as vega-dataflow's `tupleid`:
+where upstream keys tuples by id (a `modify()` or `setdata()` change set,
+`treelinks`, `isTuple`), so does the engine, never by the equality of fields.
+Ingest copies an object from outside the run and the copy keeps its id, so
+within one operator's flow the `*jsval.Object` pointer stands for the same
+tuple. Transforms that derive new tuples create new objects;
 transforms that annotate (formula, stack, window, …) write fields into the
 object they were given, as upstream does, so do not share one object between two
 unrelated datasets without copying.
@@ -129,6 +134,20 @@ Specifications and data are untrusted.
   they allocate; `TestEveryBuiltinIsMetered` holds every function of the table
   to it. The rasterizer's
   canvas and pixel budgets, the shaping budget, the SVG size.
+- The expression environment (the methods of `internal/vega`'s `rtContext`
+  that `expr`'s interfaces name) is held to the same
+  ([ADR 0025](adr/0025-expression-environment-state-bounded-by-the-call.md)): a method that keeps
+  state for the call charges the ledger for it as it records it (a `modify()`
+  change set, given back once applied), an array it hands an expression past
+  256 elements is charged as the evaluator charges its own (`domain()`,
+  `gradient()`), and a value that stands for engine state (a shape generator,
+  a guide's operator reference) is a Go value on its object
+  (`jsval.HostFunction`, `Object.SetHost`): garbage once nothing refers to it,
+  and no JSON a specification or its data spell can stand for one.
+  `TestEveryEnvMethodIsMetered` enumerates the methods and calls each
+  repeatedly. Every dataflow operator polls through the rows it visits:
+  `TestEveryOperatorPollsThroughout` enumerates the operator registry, so a
+  new operator needs a case or a reason it visits no rows.
 - Every bound is derived from `WithMemoryLimit` in one function,
   `deriveLimits` (limits.go), and documented in [limits.md](limits.md), which
   `TestLimitsDocMatchesCode` checks.

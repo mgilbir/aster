@@ -404,9 +404,7 @@ type Scope struct {
 	lookups  []P
 	markpath *[]int
 
-	// handles resolve the opaque operator references guide plans carry;
 	// fieldRefs numbers the anonymous data sets of multi-domain scales.
-	handles   map[string]*entry
 	fieldRefs int
 
 	// depth bounds group nesting.

@@ -70,7 +70,11 @@ func Quantile(ctx context.Context, source []jsval.Value, p QuantileParams) ([]js
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		q := Quantiles(g.Tuples, probs, p.Field.Get)
+		get, cancelled := polledAccessor(ctx, p.Field.Get)
+		q := Quantiles(g.Tuples, probs, get)
+		if err := cancelled(); err != nil {
+			return nil, err
+		}
 		for i, pr := range probs {
 			o := jsval.NewObject(len(names) + 2)
 			for j, n := range names {

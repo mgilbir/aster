@@ -28,8 +28,9 @@ func init() {
 			if m > 30 {
 				fail("crossfilter supports at most 30 dimensions")
 			}
-			b := &bitmaps{data: append([]jsval.Value(nil), pulse.tuples...), curr: make([]uint32, len(pulse.tuples))}
+			b := &bitmaps{data: copyRows(n.g, pulse.tuples), curr: make([]uint32, len(pulse.tuples))}
 			for i, t := range b.data {
+				n.g.rows(i, len(b.data), 2)
 				if o := t.ObjValue(); o != nil {
 					o.Set("_index", jsval.Int(i))
 				}
@@ -41,6 +42,9 @@ func init() {
 				q := toValue(query[d])
 				lo, hi := q.Index(0), q.Index(1)
 				for k, t := range b.data {
+					// an accessor (perhaps an expression) and two
+					// comparisons a row and dimension
+					n.g.rows(k, len(b.data), 4)
 					v := fields[d].Apply(t)
 					// values inside [lo, hi) keep the bit clear
 					if !(transforms.GreaterEq(n.g.view.walk, v, lo) && transforms.Less(n.g.view.walk, v, hi)) {
@@ -58,6 +62,7 @@ func init() {
 			all := uint32(0xff)
 			idx := make([]jsval.Value, 0, len(b.data))
 			for k := range b.data {
+				n.g.rows(k, len(b.data), 1)
 				if b.curr[k] != all {
 					idx = append(idx, jsval.Int(k))
 				}
@@ -81,7 +86,8 @@ func init() {
 			// ignore) ? data[k] : null`. The source is kept, filtered lazily
 			// by the tuples' _index (output.filter(SOURCE, ...)).
 			out := make([]jsval.Value, 0, len(pulse.tuples))
-			for _, k := range pulse.tuples {
+			for j, k := range pulse.tuples {
+				n.g.rows(j, len(pulse.tuples), 2)
 				if i, ok := resolveIndex(b.curr, ignore, k); ok && i < len(b.data) {
 					out = append(out, b.data[i])
 				}

@@ -1,6 +1,8 @@
 package vega
 
 import (
+	"context"
+
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/transforms"
 )
@@ -36,13 +38,14 @@ type aggCells struct {
 	// Cells are indexed on first use: most aggregates never parent a facet.
 	in, out []jsval.Value
 	key     transforms.KeyFunc
+	ctx     context.Context // the call's, which the indexing is charged to
 }
 
 // get returns the output tuple of the group with the given key.
 func (a *aggCells) get(k string) jsval.Value {
 	if a.byKey == nil {
 		a.byKey = make(map[string]jsval.Value, len(a.out))
-		for i, k := range firstKeys(a.in, a.key) {
+		for i, k := range firstKeys(a.ctx, a.in, a.key) {
 			if i < len(a.out) {
 				a.byKey[k] = a.out[i]
 			}
@@ -109,9 +112,13 @@ func facFacet(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 		cells, _ := p.Get("group").(*aggCells)
 		st.active = st.active[:0]
 
-		groups := transforms.GroupByKey(pulse.tuples, keyFn)
+		groups, err := transforms.GroupByKey(n.g.ctx, pulse.tuples, keyFn)
+		if err != nil {
+			failErr(err)
+		}
 		seen := make(map[any]struct{}, len(groups))
-		for _, g := range groups {
+		for i, g := range groups {
+			n.g.rows(i, len(groups), 4)
 			var parent jsval.Value
 			if cells != nil {
 				parent = cells.get(g.Key)
@@ -122,7 +129,8 @@ func facFacet(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 			seen[g.Key] = struct{}{}
 		}
 		// Cells whose tuples are all gone still run, to retire their items.
-		for _, k := range st.order {
+		for i, k := range st.order {
+			n.g.rows(i, len(st.order), 1)
 			if _, ok := seen[k]; ok {
 				continue
 			}
@@ -144,11 +152,12 @@ const prefacetLastBytes = 48
 // whose field now holds another value than the cell was filled from:
 // upstream's pulse then carries it as modified, with its field among the
 // modified fields. A first run has nothing to compare, and costs nothing.
-func prefacetFieldModified(st *facetState, last map[*cell]jsval.Value, tuples []jsval.Value, field transforms.Field) bool {
+func prefacetFieldModified(g *flowGraph, st *facetState, last map[*cell]jsval.Value, tuples []jsval.Value, field transforms.Field) bool {
 	if len(last) == 0 {
 		return false
 	}
-	for _, t := range tuples {
+	for i, t := range tuples {
+		g.rows(i, len(tuples), 2)
 		cl := st.flows[t.Key()]
 		if cl == nil {
 			continue
@@ -180,7 +189,7 @@ func facPreFacet(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNod
 		// pulse.modified(accessorFields(field)))`: the parameter changed (a
 		// signal's, on the first run too), or a tuple the facet had before
 		// comes back with its field rewritten (a formula that ran again).
-		if p.Modified("field") || hasField && prefacetFieldModified(st, last, pulse.tuples, field) {
+		if p.Modified("field") || hasField && prefacetFieldModified(n.g, st, last, pulse.tuples, field) {
 			fail("PreFacet does not support field modification.")
 		}
 		st.active = st.active[:0]
@@ -190,7 +199,8 @@ func facPreFacet(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNod
 		v := n.g.view
 		var rows, excess int64
 		v.holdHeld(n, 0, 0)
-		for _, t := range pulse.tuples {
+		for i, t := range pulse.tuples {
+			n.g.rows(i, len(pulse.tuples), 2)
 			cl := st.subflow(n, t.Key(), flow, "", t, pulse)
 			if hasField {
 				arr := field.Apply(t)
@@ -223,7 +233,8 @@ func facPreFacet(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNod
 			st.activate(cl)
 			seen[t.Key()] = struct{}{}
 		}
-		for _, k := range st.order {
+		for i, k := range st.order {
+			n.g.rows(i, len(st.order), 1)
 			if _, ok := seen[k]; ok {
 				continue
 			}

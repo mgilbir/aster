@@ -373,6 +373,7 @@ func (c *rtContext) Data(name string) (jsval.Value, bool) {
 	case []jsval.Value:
 		return jsval.Arr(v), true
 	case []*scene.Item:
+		c.view.chargeItems(len(v))
 		return jsval.Arr(c.view.itemTuples(v)), true
 	}
 	return jsval.Arr(nil), true
@@ -401,8 +402,14 @@ func (c *rtContext) InData(name, field string, value jsval.Value) (int, bool) {
 	return clampInt(jsval.ToNumber(cnt)), true
 }
 
-// IsTuple implements expr.TupleChecker.
-func (c *rtContext) IsTuple(v jsval.Value) bool { return v.IsObj() }
+// IsTuple implements expr.TupleChecker: vega-dataflow's isTuple, a value
+// that has a tuple id. A data tuple has one once ingested, and a scenegraph
+// item is a tuple upstream; an object an expression or a specification made
+// is not one, nor is a function.
+func (c *rtContext) IsTuple(v jsval.Value) bool {
+	o := v.ObjValue()
+	return o != nil && (o.TupleID() != 0 || c.view.itemOf(v) != nil)
+}
 
 // Log implements expr.Logger: warn() is a warning, as upstream's logs it
 // with the view's logger ("EXPRESSION" and the arguments). info() and debug()

@@ -24,6 +24,11 @@ type OverlapParams struct {
 	// Sort, if set, orders the items instead (the `sort` comparator
 	// parameter the parser attaches for an overlap `order`).
 	Sort func(a, b *scene.Item) int
+	// Rows, when set, is told of each row (an item, a comparison) as row i
+	// of a loop of n, cost steps each: the caller's meter, which polls the
+	// call's context (ADR 0010). The labels of an axis can number
+	// scale.MaxTicks.
+	Rows func(i, n, cost int)
 	// Bound, when set, hides items whose bounds leave the range of the scale
 	// along the orientation of an axis (top/bottom bound x, others y), give
 	// or take Tolerance pixels (0 means 1, as upstream's `tolerance || 1`).
@@ -42,8 +47,9 @@ func intersect(a, b *scene.Bounds, sep float64) bool {
 	return sep > math.Max(math.Max(b.X1-a.X2, a.X1-b.X2), math.Max(b.Y1-a.Y2, a.Y1-b.Y2))
 }
 
-func hasOverlap(items []*scene.Item, pad float64) bool {
+func hasOverlap(rows func(i, n, cost int), items []*scene.Item, pad float64) bool {
 	for i := 1; i < len(items); i++ {
+		rows(i, len(items), 1)
 		if intersect(&items[i-1].Bounds, &items[i].Bounds, pad) {
 			return true
 		}
@@ -61,9 +67,10 @@ func setOpacity(it *scene.Item, v float64) { it.Opacity = scene.N(v) }
 func visible(it *scene.Item) bool { return it.Opacity.Truthy() }
 
 // reduceParity hides every odd-indexed item and returns the even ones.
-func reduceParity(items []*scene.Item) []*scene.Item {
+func reduceParity(rows func(i, n, cost int), items []*scene.Item) []*scene.Item {
 	out := make([]*scene.Item, 0, (len(items)+1)/2)
 	for i, it := range items {
+		rows(i, len(items), 1)
 		if i%2 != 0 {
 			setOpacity(it, 0)
 		} else {
@@ -74,10 +81,11 @@ func reduceParity(items []*scene.Item) []*scene.Item {
 }
 
 // reduceGreedy scans in order, hiding items that overlap the last kept one.
-func reduceGreedy(items []*scene.Item, sep float64) []*scene.Item {
+func reduceGreedy(rows func(i, n, cost int), items []*scene.Item, sep float64) []*scene.Item {
 	out := make([]*scene.Item, 0, len(items))
 	var a *scene.Item
 	for i, b := range items {
+		rows(i, len(items), 1)
 		if i == 0 || !intersect(&a.Bounds, &b.Bounds, sep) {
 			a = b
 			out = append(out, b)
@@ -147,6 +155,10 @@ func Overlap(mark *scene.Mark, p OverlapParams) {
 		// has just been changed; a stateless call has nothing to undo
 		return
 	}
+	rows := p.Rows
+	if rows == nil {
+		rows = func(int, int, int) {}
+	}
 	greedy := p.Method.IsStr() && p.Method.StrValue() == "greedy"
 	sep := p.Separation
 	if math.IsNaN(sep) {
@@ -155,7 +167,8 @@ func Overlap(mark *scene.Mark, p OverlapParams) {
 
 	// skip labels with no content
 	source := make([]*scene.Item, 0, len(mark.Items))
-	for _, it := range mark.Items {
+	for i, it := range mark.Items {
+		rows(i, len(mark.Items), 1)
 		if hasBounds(it) {
 			source = append(source, it)
 		}
@@ -170,24 +183,32 @@ func Overlap(mark *scene.Mark, p OverlapParams) {
 		}
 		sorted := make([]*scene.Item, len(source))
 		copy(sorted, source)
-		jssort.Sort(sorted, cmp)
+		compared := 0
+		jssort.Sort(sorted, func(a, b *scene.Item) int {
+			if compared&255 == 0 {
+				rows(0, 256, 1) // a batch of comparisons
+			}
+			compared++
+			return cmp(a, b)
+		})
 		source = sorted
 	}
 
 	// reset all items to be fully opaque
-	for _, it := range source {
+	for i, it := range source {
+		rows(i, len(source), 1)
 		setOpacity(it, 1)
 	}
 	items := source
 
-	if len(items) >= 3 && hasOverlap(items, sep) {
+	if len(items) >= 3 && hasOverlap(rows, items, sep) {
 		for {
 			if greedy {
-				items = reduceGreedy(items, sep)
+				items = reduceGreedy(rows, items, sep)
 			} else {
-				items = reduceParity(items)
+				items = reduceParity(rows, items)
 			}
-			if !(len(items) >= 3 && hasOverlap(items, sep)) {
+			if !(len(items) >= 3 && hasOverlap(rows, items, sep)) {
 				break
 			}
 		}
@@ -212,7 +233,8 @@ func Overlap(mark *scene.Mark, p OverlapParams) {
 			box.Set(math.Inf(-1), b.Range[0], math.Inf(1), b.Range[1])
 		}
 		box.Expand(tol)
-		for _, it := range source {
+		for i, it := range source {
+			rows(i, len(source), 1)
 			if !box.Encloses(&it.Bounds) {
 				setOpacity(it, 0)
 			}
@@ -221,7 +243,8 @@ func Overlap(mark *scene.Mark, p OverlapParams) {
 
 	// re-calculate mark bounds
 	mark.Bounds.Clear()
-	for _, it := range source {
+	for i, it := range source {
+		rows(i, len(source), 1)
 		if visible(it) {
 			mark.Bounds.Union(&it.Bounds)
 		}

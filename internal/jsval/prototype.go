@@ -42,15 +42,42 @@ func NativeFunction(name string) Value {
 	return Obj(&Object{host: nativeFunction{}, str: func(*Object) string { return src }})
 }
 
-// IsFunction reports whether v is one of the functions Inherited answers.
-// JSON has no functions: JSON.stringify leaves such a member out of an object
-// and writes null for it in an array.
+// hostFunction marks an object that stands for a function the embedding
+// program made at run time (a shape generator): impl is the Go value that
+// does what the function does.
+type hostFunction struct{ impl any }
+
+// HostFunction is a new function value whose behaviour is impl, a Go value
+// only the program that made it can read back (FunctionImpl): no JSON a
+// specification or its data spell can stand for it. It prints as src, the
+// source text of the function upstream returns, and like any function JSON
+// leaves it out. It is garbage once nothing refers to it.
+func HostFunction(src string, impl any) Value {
+	return Obj(&Object{host: hostFunction{impl: impl}, str: func(*Object) string { return src }})
+}
+
+// FunctionImpl is the impl of a HostFunction value, and false for any other
+// value.
+func FunctionImpl(v Value) (any, bool) {
+	if v.Kind() != KindObj {
+		return nil, false
+	}
+	f, ok := v.ObjValue().host.(hostFunction)
+	return f.impl, ok
+}
+
+// IsFunction reports whether v is one of the functions Inherited answers, or
+// a HostFunction. JSON has no functions: JSON.stringify leaves such a member
+// out of an object and writes null for it in an array.
 func IsFunction(v Value) bool {
 	if v.Kind() != KindObj {
 		return false
 	}
-	_, ok := v.ObjValue().host.(nativeFunction)
-	return ok
+	switch v.ObjValue().host.(type) {
+	case nativeFunction, hostFunction:
+		return true
+	}
+	return false
 }
 
 // Inherited answers the member of Object.prototype named key (the same value

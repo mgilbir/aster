@@ -167,3 +167,32 @@ func TestGeoshapeBoundsFollowProjectionRefit(t *testing.T) {
 		t.Errorf("bounds %v are not those of a shape fit to the %v x %v view", b, root.Width.Val(), root.Height.Val())
 	}
 }
+
+// setdata() is upstream's `changeset().remove(truthy).insert(tuples)`, by
+// tuple id: a tuple the data set holds that the list names again stays where
+// it is, once, however often it is named; the others are appended in the
+// list's order (C33, audit 2026-10-18). The texts are node's: vega 6.4.0
+// rendering this specification with view.signal('go', …) and runAsync after
+// each write.
+func TestSetDataKeepsTheTuplesItHolds(t *testing.T) {
+	spec := `{"data":[{"name":"g","values":[{"a":1},{"a":2},{"a":3}]}],
+	 "signals":[{"name":"go","value":0},{"name":"s","value":0,"on":[{"events":{"signal":"go"},
+	   "update":"setdata('g', [data('g')[2], data('g')[0], data('g')[2], {a: 7}])"}]}],
+	 "marks":[{"type":"text","from":{"data":"g"},"encode":{"enter":{"text":{"field":"a"}}}}]}`
+	for _, c := range []struct {
+		writes []SignalWrite
+		want   []float64
+	}{
+		{[]SignalWrite{{Name: "go", Value: jsval.Num(1)}}, []float64{1, 3, 7}},
+		{[]SignalWrite{{Name: "go", Value: jsval.Num(1)}, {Name: "go", Value: jsval.Num(2)}}, []float64{1, 7, 7}},
+	} {
+		res := renderSpec(t, spec, c.writes...)
+		var got []float64
+		for _, it := range marks(res)[0].Items {
+			got = append(got, it.Text().NumValue())
+		}
+		if !equalFloats(got, c.want) {
+			t.Errorf("after %d writes: %v, want %v", len(c.writes), got, c.want)
+		}
+	}
+}

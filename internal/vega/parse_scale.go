@@ -439,31 +439,28 @@ func (g guideScope) ScaleType(name string) string {
 	return ""
 }
 
-// handle returns an opaque reference to an entry that guide plans copy into the
+// opRef is what a guide plan's `from` carries for an operator of the view (its
+// data, its ticks or legend entries): a Go value on an object of no members,
+// so that no JSON a specification or its data spell stands for one (C92).
+// Upstream's is {$ref: id}, an operator id the specification cannot know.
+type opRef struct{ e *entry }
+
+// handle returns the reference to an entry that guide plans copy into the
 // `from` of the marks they generate.
 func (s *Scope) handle(e *entry) jsval.Value {
-	root := s
-	for root.parentScope != nil {
-		root = root.parentScope
-	}
-	if root.handles == nil {
-		root.handles = map[string]*entry{}
-	}
-	id := "$h" + strconv.Itoa(len(root.handles))
-	root.handles[id] = e
-	return obj("$ref", sv(id))
+	o := jsval.NewObject(0)
+	o.SetHost(opRef{e})
+	return jsval.Obj(o)
 }
 
-func (s *Scope) resolveHandle(id string) *entry {
-	root := s
-	for root.parentScope != nil {
-		root = root.parentScope
+// opRefOf is the entry a handle refers to.
+func opRefOf(v jsval.Value) (*entry, bool) {
+	o := v.ObjValue()
+	if o == nil {
+		return nil, false
 	}
-	e := root.handles[id]
-	if e == nil {
-		perr("Unknown operator reference: %s", id)
-	}
-	return e
+	r, ok := o.Host().(opRef)
+	return r.e, ok
 }
 
 func parseAxis(spec jsval.Value, scope *Scope) {

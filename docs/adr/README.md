@@ -21,3 +21,4 @@ Decisions whose reason is not visible in the code. Each says what was decided, w
 | [0015](0015-filters-follow-the-specification.md) | PNG filters follow the Filter Effects spec where resvg departs from it | accepted, 2026-10-14 |
 | [0016](0016-custom-projections.md) | Custom projections are a raw projection and its parameters, per Converter | accepted, 2026-10-14 |
 | [0018](0018-value-walks-bounded-by-the-call.md) | Walks of a value (its text, JSON, comparisons) are bounded by the call that makes them, with the call's jsval.Walker; identity is a key, not a walk | accepted, 2026-10-19 |
+| [0025](0025-expression-environment-state-bounded-by-the-call.md) | The expression environment's state is bounded by the call; engine handles are Go values; tuples are identified by id | accepted, 2026-10-19 |
