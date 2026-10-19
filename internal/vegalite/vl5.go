@@ -57,7 +57,7 @@ func allFieldsInvalidPredicate58(m *unitModel, invalid bool, channels []string, 
 			}
 		}
 	}
-	fields := filterIndex.list()
+	fields := filterIndex.values()
 	if len(fields) == 0 {
 		return ""
 	}
@@ -67,7 +67,7 @@ func allFieldsInvalidPredicate58(m *unitModel, invalid bool, channels []string, 
 	}
 	parts := make([]string, len(fields))
 	for i, f := range fields {
-		parts[i] = fieldValidPredicate(f, !invalid)
+		parts[i] = fieldValidPredicate(f.StrValue(), !invalid)
 	}
 	return joinStrings(parts, op)
 }
@@ -214,7 +214,7 @@ func rectPosition58(m *unitModel, channel string) Value {
 		scaleType = scale.get("type")
 	}
 	orient := markDefOrient(markDef)
-	hasSizeDef := coalesce(encoding.Get(jsKey(sizeChannel)), encoding.Get("size"), getMarkPropOrConfig("size", markDef, config, sizeChannel, false))
+	hasSizeDef := coalesce(encoding.Get(jsKey(sizeChannel)), encoding.Get("size"), getMarkPropOrConfig(cc, "size", markDef, config, sizeChannel, false))
 	isBarBand := strIs(mark, "bar") && ((channel == chX && orient == "vertical") || (channel != chX && orient == "horizontal"))
 	if isFieldDef(cc, channelDef) &&
 		(isBinning(channelDef.Get("bin")) || isBinned(channelDef.Get("bin")) || (channelDef.Get("timeUnit").IsTruthy() && !channelDef2.IsTruthy())) &&
@@ -482,7 +482,7 @@ func tickDefaultSize58(m *unitModel) Value {
 	scale := m.getScaleComponent(axis)
 	// getMarkPropOrConfig(...) ?? config.tick.bandSize, then `!== undefined`:
 	// a null bandSize is the default size, so the tick draws no size channel.
-	v := coalesce(getMarkPropOrConfig("size", markDef, config, vgSizeChannel, false), config.Get("tick").Get("bandSize"))
+	v := coalesce(getMarkPropOrConfig(m.ctx, "size", markDef, config, vgSizeChannel, false), config.Get("tick").Get("bandSize"))
 	if !v.IsUndefined() {
 		return v
 	}

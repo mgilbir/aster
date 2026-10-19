@@ -4,6 +4,7 @@ package confusion
 import (
 	"math"
 	"math/rand"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -25,10 +26,20 @@ import (
 //   - String(orig), and Number(orig) for a numeric text or a boolean;
 //   - [...orig, null] (and [orig, null]): Array.prototype.join writes null as "";
 //   - a key renamed to "undefined" (the key upstream reads for an undefined
-//     name), "", "__proto__" or "constructor" (Object.prototype's members);
+//     name), "", or one of Object.prototype's members: "__proto__",
+//     "constructor", and "toString" and "valueOf", which an object holding
+//     them as data cannot be converted to text by;
 //   - case-mapped spellings: upper and lower case, and the characters whose
 //     JavaScript and Go case mappings differ (dotted İ, dotless ı, the Kelvin
-//     sign, long ſ).
+//     sign, long ſ);
+//   - another string of the specification, as it is or as [text], and
+//     [...orig, [orig[i]]]: an array and its text where upstream gathers
+//     both into one Set, which keeps them apart (SameValueZero), as a
+//     string-keyed set would not;
+//   - a "__proto__" member of null, {} or an object holding another member
+//     of the specification, added to an object: JSON.parse makes it an own
+//     member, and upstream's assignments of it replace a prototype (null
+//     leaves none), its for…in walks the prototype's members.
 
 // ConfusedValues are values of the wrong type for almost every slot of a
 // specification.
@@ -39,7 +50,7 @@ var ConfusedValues = []string{
 }
 
 // renamedKeys are the names a key is renamed to.
-var renamedKeys = []string{"undefined", "", "__proto__", "constructor"}
+var renamedKeys = []string{"undefined", "", "__proto__", "constructor", "toString", "valueOf"}
 
 // ConfusionSlot is a settable position in a parsed specification: a member
 // of an object (Obj, Key) or an element of an array (Arr, Index).
@@ -140,7 +151,7 @@ func Confuse(rng *rand.Rand, root jsval.Value) (slot ConfusionSlot, label string
 	}
 	orig := slot.Get()
 	for {
-		switch rng.Intn(9) {
+		switch rng.Intn(12) {
 		case 0:
 			slot.Set(jsval.ArrOf(orig))
 			return slot, "[orig]", true
@@ -188,6 +199,27 @@ func Confuse(rng *rand.Rand, root jsval.Value) (slot ConfusionSlot, label string
 				slot.Set(jsval.Str(s))
 				return slot, form, true
 			}
+		case 9:
+			if other, ok := anotherString(rng, slots, slot); ok {
+				if rng.Intn(2) == 0 {
+					slot.Set(jsval.ArrOf(other))
+					return slot, "[another]", true
+				}
+				slot.Set(other)
+				return slot, "another", true
+			}
+		case 10:
+			if !orig.IsArr() || orig.Len() == 0 {
+				continue
+			}
+			items := append([]jsval.Value(nil), orig.Items()...)
+			e := items[rng.Intn(len(items))]
+			slot.Set(jsval.Arr(append(items, jsval.ArrOf(e))))
+			return slot, "[...orig, [orig[i]]]", true
+		case 11:
+			if label, ok := addProto(rng, slots, slot); ok {
+				return slot, label, true
+			}
 		}
 		// The form drawn does not apply to this slot: fall back to the
 		// array wrappings, which always do.
@@ -195,6 +227,88 @@ func Confuse(rng *rand.Rand, root jsval.Value) (slot ConfusionSlot, label string
 			slot.Set(jsval.ArrOf(orig))
 			return slot, "[orig]", true
 		}
+	}
+}
+
+// anotherString is a string value of another slot, drawn with rng.
+func anotherString(rng *rand.Rand, slots []ConfusionSlot, not ConfusionSlot) (jsval.Value, bool) {
+	var strs []jsval.Value
+	for _, s := range slots {
+		if v := s.Get(); v.IsStr() && !slices.Equal(s.Path, not.Path) {
+			strs = append(strs, v)
+		}
+	}
+	if len(strs) == 0 {
+		return jsval.Value{}, false
+	}
+	return strs[rng.Intn(len(strs))], true
+}
+
+// addProto adds a "__proto__" member to the object the slot's value is, or
+// else to the object holding the slot, at a position drawn with rng. Its
+// value is null, {}, or an object of one member of the specification (a
+// key and value of another slot), which upstream's reads find through the
+// prototype once an assignment made it one.
+func addProto(rng *rand.Rand, slots []ConfusionSlot, slot ConfusionSlot) (string, bool) {
+	var o *jsval.Object
+	switch v := slot.Get(); {
+	case v.IsObj() && (slot.Obj == nil || rng.Intn(2) == 0):
+		o = v.ObjValue()
+	case slot.Obj != nil:
+		o = slot.Obj
+	default:
+		return "", false
+	}
+	if o.Has("__proto__") {
+		return "", false
+	}
+	var val jsval.Value
+	var label string
+	switch rng.Intn(3) {
+	case 0:
+		val, label = jsval.Null, "__proto__:null"
+	case 1:
+		val, label = jsval.Obj(jsval.NewObject(0)), "__proto__:{}"
+	default:
+		var named []ConfusionSlot
+		for _, s := range slots {
+			if s.Obj != nil {
+				named = append(named, s)
+			}
+		}
+		if len(named) == 0 {
+			return "", false
+		}
+		from := named[rng.Intn(len(named))]
+		// A copy: the member may hold o itself.
+		cp, err := jsval.ParseJSON(jsval.AppendJSON(nil, from.Get()))
+		if err != nil {
+			panic("confusion: a parsed value does not round-trip: " + err.Error())
+		}
+		p := jsval.NewObject(1)
+		p.Set(from.Key, cp)
+		val, label = jsval.Obj(p), "__proto__:{k}"
+	}
+	insertAt(o, rng.Intn(o.Len()+1), "__proto__", val)
+	return label, true
+}
+
+// insertAt puts the member k: v at position at of o, which lacks k.
+func insertAt(o *jsval.Object, at int, k string, v jsval.Value) {
+	keys := append([]string(nil), o.Keys()...)
+	vals := make([]jsval.Value, len(keys))
+	for i := range keys {
+		vals[i] = o.ValueAt(i)
+	}
+	o.DeleteFunc(func(string, jsval.Value) bool { return true })
+	for i := range keys {
+		if i == at {
+			o.Set(k, v)
+		}
+		o.Set(keys[i], vals[i])
+	}
+	if at == len(keys) {
+		o.Set(k, v)
 	}
 }
 

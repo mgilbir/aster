@@ -486,9 +486,24 @@ func (v Value) primString() string {
 	return ""
 }
 
+// plainHost says whether o is a plain object of Object.prototype: no host
+// payload, or only a conversion scope (SetConversionScope).
+func plainHost(o *Object) bool {
+	if o.host == nil {
+		return true
+	}
+	ph, ok := o.host.(protoHost)
+	return ok && ph.proto.IsUndefined()
+}
+
 func objectString(o *Object) string {
 	if o != nil && o.str != nil {
 		return o.str(o)
+	}
+	if o != nil {
+		if ph, ok := o.host.(protoHost); ok && ph.scope != nil && !ph.scope.ended {
+			return protoString(o, ph.scope)
+		}
 	}
 	return "[object Object]"
 }
@@ -836,7 +851,7 @@ func (k *walk) equal(a, b Value, depth int) bool {
 		if x == y {
 			return true
 		}
-		if x.host != nil || y.host != nil {
+		if !plainHost(x) || !plainHost(y) {
 			return false
 		}
 		if x.Len() != y.Len() {

@@ -274,9 +274,9 @@ func isInternalField(name string) bool { return strings.HasPrefix(name, "__") }
 // a, a[b], a[b][c].
 func prefixGenerator(cc *compileCtx, a *sset) map[string]bool {
 	out := make(map[string]bool)
-	for _, x := range a.list() {
+	for _, x := range a.values() {
 		cc.work(1)
-		split := splitAccessPathV(a.value(x))
+		split := splitAccessPathV(x)
 		wrapped := make([]string, len(split))
 		for i, y := range split {
 			cc.work(1)

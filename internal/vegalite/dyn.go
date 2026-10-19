@@ -136,7 +136,11 @@ func cloneObj(o *Object) *Object {
 		return jsval.NewObject(0)
 	}
 	c := o.Clone()
-	c.SetPrototype(undef)
+	scope := o.ConversionScope()
+	c.SetPrototype(undef, nil)
+	if scope != nil && c.Has("toString") {
+		c.SetConversionScope(scope) // the copy holds o's toString too
+	}
 	return c
 }
 
@@ -361,17 +365,25 @@ func (d *deepEqualWalk) eq(a, b Value) bool {
 	}
 	switch a.Kind() {
 	case jsval.KindArr:
+		// Upstream compares the elements from the last.
 		x, y := a.Items(), b.Items()
 		if len(x) != len(y) {
 			return false
 		}
-		for i := range x {
+		for i := len(x) - 1; i >= 0; i-- {
 			if !d.eq(x[i], y[i]) {
 				return false
 			}
 		}
 	case jsval.KindObj:
 		x, y := a.ObjValue(), b.ObjValue()
+		_, lx := lazyFn(x)
+		_, ly := lazyFn(y)
+		if !lx && !ly {
+			if same, decided := d.objectMethods(a, b); decided {
+				return same
+			}
+		}
 		if fx, ok := lazyFn(x); ok {
 			a = mkv("signal", fx())
 			x = a.ObjValue()
@@ -383,9 +395,15 @@ func (d *deepEqualWalk) eq(a, b Value) bool {
 		if x.Len() != y.Len() {
 			return false
 		}
+		// Every key of a in b, then the values from the last key, as
+		// upstream's loops go.
 		for i := 0; i < x.Len(); i++ {
-			bv, ok := y.Get(x.KeyAt(i))
-			if !ok || !d.eq(x.ValueAt(i), bv) {
+			if !y.Has(x.KeyAt(i)) {
+				return false
+			}
+		}
+		for i := x.Len() - 1; i >= 0; i-- {
+			if !d.eq(x.ValueAt(i), y.Lookup(x.KeyAt(i))) {
 				return false
 			}
 		}
@@ -399,6 +417,62 @@ func (d *deepEqualWalk) eq(a, b Value) bool {
 		d.equal[key] = true
 	}
 	return true
+}
+
+// objectMethods is what upstream's deepEqual (fast-deep-equal's, adapted in
+// 6.4) decides from two objects' methods before their keys: their
+// constructors (6.4 compares their names, reading a.constructor.name, so a
+// constructor of null or undefined, as a null prototype leaves, is a
+// TypeError; 5.8 compares them with ===), then a valueOf or a toString that
+// is not Object.prototype's, which it calls: held as data (or missing, under
+// a null prototype) it is no function, a TypeError. decided is false when
+// the comparison goes on to the keys.
+func (d *deepEqualWalk) objectMethods(a, b Value) (same, decided bool) {
+	if plainMethods(a.ObjValue()) && plainMethods(b.ObjValue()) {
+		return false, false // Object.prototype's: the keys decide
+	}
+	ca, cb := jsProp(a, "constructor"), jsProp(b, "constructor")
+	if d.cc != nil && d.cc.v5 {
+		if !strictEq(ca, cb) {
+			return false, true
+		}
+	} else if !strictEq(constructorName(ca), constructorName(cb)) {
+		return false, true
+	}
+	for _, m := range [...]string{"valueOf", "toString"} {
+		f := jsProp(a, m)
+		if own, _ := jsval.Inherited(m); jsval.SameRef(f, own) {
+			continue
+		}
+		if !jsval.IsFunction(f) {
+			throw("a.%s is not a function", m)
+		}
+		// Another of Object.prototype's functions under that name (a
+		// value no specification holds): upstream would call it; the
+		// keys decide here.
+		return false, false
+	}
+	return false, false
+}
+
+// plainMethods says whether o's constructor, valueOf and toString are
+// Object.prototype's: no prototype of its own, and none of them held.
+func plainMethods(o *Object) bool {
+	return o.Prototype().IsUndefined() && !o.Has("constructor") && !o.Has("valueOf") && !o.Has("toString")
+}
+
+// constructorName is c.name for a constructor read from an object.
+func constructorName(c Value) Value {
+	if c.IsNullish() {
+		throw("Cannot read properties of %s (reading 'name')", nullishName(c))
+	}
+	if jsval.IsFunction(c) {
+		s := c.AsString() // "function Object() { [native code] }"
+		if i := strings.IndexByte(s, '('); strings.HasPrefix(s, "function ") && i > 0 {
+			return jsval.Str(s[len("function "):i])
+		}
+	}
+	return jsProp(c, "name")
 }
 
 // deepClone is structuredClone for JSON-like values. The clone's keys are in
@@ -425,6 +499,11 @@ func deepClone(cc *compileCtx, v Value) Value {
 		}
 		if digit {
 			jsOrderKeys(cc, c)
+		}
+		if cc != nil && c.Has("toString") {
+			// String of it is a TypeError in JavaScript: its toString is
+			// no function.
+			c.SetConversionScope(cc.conv)
 		}
 		return jsval.Obj(c)
 	}

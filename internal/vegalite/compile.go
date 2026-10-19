@@ -74,6 +74,10 @@ func Compile(spec jsval.Value, opts Options) (out jsval.Value, err error) {
 				err = e
 			case exprSyntaxError:
 				err = e.err()
+			case jsval.TypeError:
+				// String of an object without a conversion to text (a
+				// prototype chain ending in null), as JavaScript throws it.
+				err = compileError{e.Msg}
 			case *budget.Stop:
 				// A walk of a value (jsval's) past the call's budget or
 				// deadline, or past the detached walk's caps.
@@ -90,7 +94,9 @@ func Compile(spec jsval.Value, opts Options) (out jsval.Value, err error) {
 	if err != nil {
 		return jsval.Undefined, err
 	}
-	cc := &compileCtx{v5: v5, loc: opts.Location, ctx: opts.Context, meter: budget.NewMeter(opts.Context), maxViews: opts.MaxViews, warnFn: opts.Warn}
+	cc := &compileCtx{v5: v5, loc: opts.Location, ctx: opts.Context, meter: budget.NewMeter(opts.Context), maxViews: opts.MaxViews, warnFn: opts.Warn,
+		conv: &jsval.ConversionScope{}}
+	defer cc.conv.End()
 	if cc.maxViews <= 0 {
 		cc.maxViews = DefaultMaxViews
 	}

@@ -197,8 +197,8 @@ func definedEncode(m *unitModel) Value {
 	})
 	if fields.size() > 0 {
 		var parts []string
-		for _, f := range fields.list() {
-			parts = append(parts, fieldValidPredicate(f, true))
+		for _, f := range fields.values() {
+			parts = append(parts, fieldValidPredicate(f.StrValue(), true))
 		}
 		return mkv("defined", mkv("signal", joinStrings(parts, " && ")))
 	}

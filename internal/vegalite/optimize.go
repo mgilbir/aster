@@ -289,9 +289,9 @@ func removeDuplicateTimeUnitsFn() func(root dfNode) bool {
 			}
 			for _, child := range append([]dfNode(nil), node.base().children()...) {
 				next := timeUnitFields.clone()
-				for _, f := range produced.list() {
+				for _, f := range produced.values() {
 					cc.work(1)
-					next.add(f)
+					next.addValue(f)
 				}
 				run(child, next)
 			}
@@ -329,9 +329,9 @@ func mergeParseFn() func(root dfNode) bool {
 						}
 					}
 				}
-				for _, f := range conflicting.list() {
+				for _, f := range conflicting.values() {
 					cc.work(1)
-					common.del(f)
+					common.del(f.StrValue())
 				}
 				if common.len() > 0 {
 					o.setModified()

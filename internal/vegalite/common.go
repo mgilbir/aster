@@ -129,9 +129,12 @@ func getMarkConfig(channel string, mark Value, config Value, vgChannel string) V
 	return firstDefined(undef, cfg, undef, jsGet(mt, channel), jsGet(config.Get("mark"), channel))
 }
 
-// getMarkPropOrConfig reads the mark property, falling back to config.
-func getMarkPropOrConfig(channel string, mark Value, config Value, vgChannel string, ignoreVgConfig bool) Value {
-	if vgChannel != "" && hasProperty(mark, vgChannel) {
+// getMarkPropOrConfig reads the mark property, falling back to config. The
+// Vega channel is the mark's own defined property in 6.4 (hasProperty), and
+// any defined read of it in 5.8 (`mark[vgChannel] !== undefined`, which
+// reads through a prototype a "__proto__" assignment gave the mark).
+func getMarkPropOrConfig(cc *compileCtx, channel string, mark Value, config Value, vgChannel string, ignoreVgConfig bool) Value {
+	if vgChannel != "" && (hasProperty(mark, vgChannel) || (cc != nil && cc.v5 && !mark.Get(vgChannel).IsUndefined())) {
 		return mark.Get(vgChannel)
 	} else if v := mark.Get(channel); !v.IsUndefined() {
 		return v
@@ -142,7 +145,7 @@ func getMarkPropOrConfig(channel string, mark Value, config Value, vgChannel str
 }
 
 func getMarkPropOrConfigSimple(channel string, mark, config Value) Value {
-	return getMarkPropOrConfig(channel, mark, config, "", false)
+	return getMarkPropOrConfig(nil, channel, mark, config, "", false)
 }
 
 // sortParams builds the field/order arrays of a Vega compare.

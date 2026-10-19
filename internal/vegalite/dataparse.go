@@ -259,9 +259,11 @@ func parseTransformArray(head dfNode, m Model, ap *ancestorParse) dfNode {
 		}
 		adoptCC(head, cc)
 		if transformNode != nil && derivedType != "" {
-			for _, field := range transformNode.producedFields().list() {
+			// ancestorParse.set(field, ...): each member as a property key,
+			// so "a" and ["a"] set the one key.
+			for _, field := range transformNode.producedFields().values() {
 				cc.work(1)
-				ap.set(field, jsval.Str(derivedType), false)
+				ap.set(propKey(field), jsval.Str(derivedType), false)
 			}
 		}
 	}

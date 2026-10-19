@@ -718,7 +718,7 @@ func getBandSize(cc *compileCtx, channel string, fd, fd2 Value, markDef, config 
 	if useVlSizeChannel {
 		sizeProp = "size"
 	}
-	if size := getMarkPropOrConfig(sizeProp, markDef, config, sizeChannel, false); !size.IsUndefined() {
+	if size := getMarkPropOrConfig(cc, sizeProp, markDef, config, sizeChannel, false); !size.IsUndefined() {
 		return size
 	}
 	if isFieldDef(cc, fd) {

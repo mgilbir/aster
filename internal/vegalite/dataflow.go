@@ -325,9 +325,9 @@ func setToHashString(cc *compileCtx, s *sset) string {
 	// A member added as a value other than a string (a group-by of ["a"])
 	// is that value's stringify, as the Set holds it.
 	parts := make([]string, 0, s.size())
-	for _, x := range s.list() {
+	for _, x := range s.values() {
 		cc.work(1)
-		parts = append(parts, stringify(cc, s.value(x)))
+		parts = append(parts, stringify(cc, x))
 	}
 	return "Set(" + strings.Join(parts, ",") + ")"
 }

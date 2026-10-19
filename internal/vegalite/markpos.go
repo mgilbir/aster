@@ -150,7 +150,7 @@ func pointPositionDefaultRef(m *unitModel, defaultPos, channel, scaleName string
 	return func() Value {
 		if cc.v5 {
 			vgChannel := getVgPositionChannel(channel)
-			if def := getMarkPropOrConfig(channel, markDef, config, vgChannel, false); !def.IsUndefined() {
+			if def := getMarkPropOrConfig(cc, channel, markDef, config, vgChannel, false); !def.IsUndefined() {
 				return widthHeightValueOrSignalRef(cc, channel, def)
 			}
 			if defaultPos == "mid" {
@@ -166,7 +166,7 @@ func pointPositionDefaultRef(m *unitModel, defaultPos, channel, scaleName string
 		}
 		mainChannel := getMainRangeChannel(channel)
 		vgChannel := getVgPositionChannel(channel)
-		def := getMarkPropOrConfig(channel, markDef, config, vgChannel, false)
+		def := getMarkPropOrConfig(cc, channel, markDef, config, vgChannel, false)
 		if !def.IsUndefined() {
 			return widthHeightValueOrSignalRef(cc, channel, def)
 		}
@@ -351,7 +351,7 @@ func rectPosition(m *unitModel, channel string) Value {
 	// encoding[sizeChannel] (the key "undefined" for a polar channel) ??
 	// encoding.size ?? getMarkPropOrConfig('size', ..., {vgChannel}), where
 	// an undefined vgChannel is none.
-	hasSizeDef := coalesce(encoding.Get(jsKey(sizeChannel)), encoding.Get("size"), getMarkPropOrConfig("size", markDef, config, sizeChannel, false))
+	hasSizeDef := coalesce(encoding.Get(jsKey(sizeChannel)), encoding.Get("size"), getMarkPropOrConfig(cc, "size", markDef, config, sizeChannel, false))
 	offsetScaleChannel := getOffsetChannel(channel)
 	isBarOrTickBand := (strIs(mark, "bar") && ((channel == chX && orient == "vertical") || (channel != chX && orient == "horizontal"))) ||
 		(strIs(mark, "tick") && ((channel == chY && orient == "vertical") || (channel != chY && orient == "horizontal")))

@@ -1,0 +1,1 @@
+{"data":{"values":[{"a":1,"b":2,"date":"2020-01-01"}]},"transform":[{"aggregate":[{"op":"sum","field":"b","as":"s"},{"op":"sum","field":"b","as":["s"]}],"groupby":["a"]}],"mark":"point","encoding":{"x":{"field":"a","type":"ordinal"},"y":{"field":"s","type":"quantitative"}}}

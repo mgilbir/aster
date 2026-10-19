@@ -103,7 +103,7 @@ func jsIn(v Value, key string) bool {
 	if !isObject(v) {
 		throw("Cannot use 'in' operator to search for '%s' in %s", key, v.AsString())
 	}
-	if isInheritedKey(key) {
+	if isInheritedKey(key) && (v.IsArr() || v.ObjValue().InheritsObjectPrototype()) {
 		return true
 	}
 	if v.IsArr() {
@@ -209,10 +209,22 @@ func jsProp(v Value, key string) Value {
 		}
 		return undef
 	case v.IsObj():
-		if key == "__proto__" && !v.ObjValue().Has(key) {
+		o := v.ObjValue()
+		if key == "__proto__" {
+			// Object.prototype's getter, unless o or a prototype holds the
+			// key as data, or the chain ends in null (no getter).
+			if x, ok := o.ChainGet(key); ok {
+				return x
+			}
+			if !o.InheritsObjectPrototype() {
+				return undef
+			}
+			if p := o.Prototype(); !p.IsUndefined() {
+				return p
+			}
 			return jsval.Obj(jsval.NewObject(0)) // Object.prototype, as JSON prints it
 		}
-		return v.ObjValue().Prop(key)
+		return o.Prop(key)
 	}
 	return undef
 }

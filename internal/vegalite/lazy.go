@@ -48,6 +48,10 @@ type compileCtx struct {
 	titleMerges map[*Value]*titleMerge
 	// jsr is the compilation's JavaScript realm (see jsRealm).
 	jsr *jsRealm
+	// conv is the compilation's conversion scope (jsval.ConversionScope):
+	// the objects it gives a prototype convert to text as JavaScript's do
+	// until Compile returns.
+	conv *jsval.ConversionScope
 	// pending is the work counted and not yet charged (see work).
 	pending int64
 }

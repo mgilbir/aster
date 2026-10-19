@@ -69,7 +69,7 @@ func depsByParse(n *expr.Node) []string {
 		}
 		return false
 	})
-	return deps.list()
+	return ssetTexts(deps)
 }
 
 // exprParity reports how the compiler's reading of src differs from Parse's
@@ -90,7 +90,7 @@ func exprParity(src string) string {
 				panic(r)
 			}
 		}()
-		return getDependentFields(nil, src).list(), nil
+		return ssetTexts(getDependentFields(nil, src)), nil
 	}()
 	switch {
 	case perr != nil && err == nil:

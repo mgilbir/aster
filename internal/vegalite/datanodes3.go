@@ -655,15 +655,6 @@ func (n *stackNode) clone() dfNode {
 
 func (n *stackNode) addDimensions(fields []string) { n.st.facetby = append(n.st.facetby, fields...) }
 
-func (n *stackNode) getGroupbyFields() []string {
-	vs := n.getGroupbyFieldsV()
-	out := make([]string, len(vs))
-	for i, v := range vs {
-		out[i] = v.AsString()
-	}
-	return out
-}
-
 // getGroupbyFieldsV is getGroupbyFields with a transform's group-by entries
 // as given (a null stays null in the output).
 func (n *stackNode) getGroupbyFieldsV() []Value {
@@ -704,16 +695,18 @@ func (n *stackNode) dependentFields() *sset {
 	cc := n.cc
 	out := newSset()
 	out.addValue(n.st.stackFieldValue())
-	for _, f := range n.getGroupbyFields() {
+	// The group-by and sort fields as given: a transform's ["a"] is not
+	// its text.
+	for _, f := range n.getGroupbyFieldsV() {
 		cc.work(1)
-		out.add(f)
+		out.addValue(f)
 	}
 	for _, f := range n.st.facetby {
 		out.add(f)
 	}
-	for _, f := range strItems(n.cc, n.st.sort.Get("field")) {
+	for _, f := range n.st.sort.Get("field").Items() {
 		cc.work(1)
-		out.add(f)
+		out.addValue(f)
 	}
 	return out
 }
@@ -1106,7 +1099,7 @@ func (n *facetNode) dependentFields() *sset {
 	for _, ch := range facetChannels {
 		if info := n.channels[ch]; info != nil {
 			if info.sortField.IsTruthy() {
-				dep.add(info.sortField.Get("field").AsString())
+				dep.addValue(info.sortField.Get("field"))
 			}
 			if info.sortIndexField != "" {
 				dep.add(info.sortIndexField)

@@ -333,9 +333,9 @@ func domainSort(u *unitModel, channel string, scaleType Value) Value {
 	var stackDimensions map[jsval.InternKey]bool
 	if stack != nil {
 		stackDimensions = map[jsval.InternKey]bool{}
-		for _, f := range stack.groupbyFields.list() {
+		for _, f := range stack.groupbyFields.values() {
 			cc.work(1)
-			stackDimensions[stack.groupbyFields.value(f).MapKey()] = true
+			stackDimensions[f.MapKey()] = true
 		}
 		for _, s := range stack.stackBy {
 			cc.work(1)

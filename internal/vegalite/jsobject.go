@@ -29,6 +29,8 @@ type jsRealm struct {
 	hosts map[string]*jsHost // "" is Object.prototype; else the member of that name
 	// protos are the prototypes assigned to jsval objects used as maps.
 	protos map[*Object]jsProto
+	// scope is the compilation's conversion scope (compileCtx.conv).
+	scope *jsval.ConversionScope
 }
 
 // jsHost is a built-in object a plain object reaches through its prototype:
@@ -57,7 +59,7 @@ type jsRef struct {
 
 func (c *compileCtx) realm() *jsRealm {
 	if c.jsr == nil {
-		c.jsr = &jsRealm{}
+		c.jsr = &jsRealm{scope: c.conv}
 	}
 	return c.jsr
 }
@@ -149,8 +151,12 @@ func (r *jsRealm) inherited(p jsProto, key string) jsRef {
 		switch v := p.obj.(type) {
 		case Value:
 			if v.IsObj() {
-				if x, ok := v.ObjValue().Get(key); ok {
+				// The assigned object's own chain, which may end in null.
+				if x, ok := v.ObjValue().ChainGet(key); ok {
 					return jsRef{found: true, val: x}
+				}
+				if !v.ObjValue().InheritsObjectPrototype() {
+					return jsRef{}
 				}
 			}
 			if v.IsArr() {
@@ -240,17 +246,47 @@ func jsRead(r *jsRealm, o *Object, key string) Value {
 // jsAssign is o[key] = v on a jsval object upstream uses as a plain object.
 // An own "__proto__" (JSON.parse makes one) is an ordinary property.
 func jsAssign(r *jsRealm, o *Object, key string, v Value) {
-	if key == "__proto__" && !o.Has(key) {
-		if r.protos == nil {
-			r.protos = map[*Object]jsProto{}
-		}
-		r.protos[o] = protoAssigned(r.protos[o], v)
-		if v.IsObj() || v.IsArr() {
-			o.SetPrototype(v) // read through by Value.Get
+	if key == "__proto__" && protoSetterApplies(o) {
+		if v.IsObj() || v.IsArr() || v.IsNull() {
+			if v.IsObj() && onChain(v.ObjValue(), o) {
+				throw("Cyclic __proto__ value")
+			}
+			if r.protos == nil {
+				r.protos = map[*Object]jsProto{}
+			}
+			r.protos[o] = protoAssigned(r.protos[o], v)
+			o.SetPrototype(v, r.scope) // read through by Value.Get
 		}
 		return
 	}
 	o.Set(key, v)
+}
+
+// protoSetterApplies says whether o.__proto__ = x reaches Object.prototype's
+// setter, which replaces the prototype: not when o holds "__proto__" itself
+// or a prototype on its chain holds it as data (the assignment then makes
+// o's own property), nor when the chain ends in null (no setter: likewise).
+func protoSetterApplies(o *Object) bool {
+	if _, ok := o.ChainGet("__proto__"); ok {
+		return false
+	}
+	return o.InheritsObjectPrototype()
+}
+
+// onChain says whether o is p or on p's prototype chain (a prototype that
+// would make the chain a cycle).
+func onChain(p, o *Object) bool {
+	for depth := 0; depth <= jsval.MaxValueDepth; depth++ {
+		if p == o {
+			return true
+		}
+		q := p.Prototype()
+		if !q.IsObj() {
+			return false
+		}
+		p = q.ObjValue()
+	}
+	return false
 }
 
 // jsHasKey is `key in o` on a jsval object upstream uses as a plain object.
@@ -506,17 +542,21 @@ func duplicate(cc *compileCtx, v Value) Value {
 		}
 		// The clone package: child = Object.create(getPrototypeOf(parent)),
 		// then `for (i in parent)` child[i] = clone(parent[i]), skipping a
-		// key the prototype holds as a data property. An assignment of
-		// "__proto__" goes through Object.prototype's setter, so an object
-		// value becomes the copy's prototype rather than its key.
+		// key the prototype holds as a data property (none when the
+		// prototype is null). An assignment of "__proto__" goes through
+		// Object.prototype's setter, so an object, an array or null becomes
+		// the copy's prototype rather than its key (unless the copy's chain
+		// holds "__proto__" as data or ends in null: then it is a key).
 		o := v.ObjValue()
 		proto := o.Prototype()
 		c := jsval.NewObject(o.Len())
-		c.SetPrototype(proto)
+		c.SetPrototype(proto, cc.conv)
 		skip := func(k string) bool {
 			switch {
 			case proto.IsUndefined():
 				return k != "__proto__" && skipsInClone58(cc, k)
+			case proto.IsNull():
+				return false
 			case proto.IsObj():
 				return proto.ObjValue().Has(k)
 			}
@@ -533,9 +573,12 @@ func duplicate(cc *compileCtx, v Value) Value {
 				return
 			}
 			x := duplicate(cc, val)
-			if k == "__proto__" {
-				if x.IsObj() || x.IsArr() {
-					c.SetPrototype(x)
+			if k == "__proto__" && protoSetterApplies(c) {
+				if x.IsObj() && onChain(x.ObjValue(), c) {
+					throw("Cyclic __proto__ value")
+				}
+				if x.IsObj() || x.IsArr() || x.IsNull() {
+					c.SetPrototype(x, cc.conv)
 				}
 				return
 			}
@@ -547,9 +590,13 @@ func duplicate(cc *compileCtx, v Value) Value {
 		}
 		// for…in goes on to the prototype chain's keys the object does not
 		// shadow: the first prototype's are skipped (it holds them), a
-		// deeper one's are copied, as read through the chain.
+		// deeper one's are copied, as read through the chain; then, on a
+		// chain that reaches Object.prototype through a prototype of the
+		// object's own, the members upstream wrote on Object.prototype in
+		// this compilation (enumerable, and not held by that prototype).
 		seen := map[string]bool{}
-		for q, depth := proto, 0; depth <= jsval.MaxValueDepth; depth++ {
+		q, objectProto := proto, false
+		for depth := 0; depth <= jsval.MaxValueDepth; depth++ {
 			var keys []string
 			switch {
 			case q.IsObj():
@@ -567,9 +614,25 @@ func duplicate(cc *compileCtx, v Value) Value {
 				copyKey(k, v.Get(k))
 			}
 			if !q.IsObj() {
+				objectProto = q.IsArr()
 				break
 			}
 			q = q.ObjValue().Prototype()
+			if q.IsUndefined() {
+				objectProto = true
+				break
+			}
+		}
+		if objectProto && cc.jsr != nil {
+			if h := cc.jsr.hosts[""]; h != nil {
+				for _, k := range h.props.keyList() {
+					if o.Has(k) || seen[k] {
+						continue
+					}
+					seen[k] = true
+					copyKey(k, cc.jsr.inherited(jsProto{}, k).value())
+				}
+			}
 		}
 		if digit {
 			jsOrderKeys(cc, c)

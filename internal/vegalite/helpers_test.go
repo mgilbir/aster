@@ -35,7 +35,7 @@ func TestParseSelectorMatchesUpstream(t *testing.T) {
 func TestDependentFieldsMatchUpstream(t *testing.T) {
 	for _, c := range loadHelperVectors(t).Get("expressions").Items() {
 		in := c.Get("input").StrValue()
-		got := getDependentFields(nil, in).list()
+		got := ssetTexts(getDependentFields(nil, in))
 		var want []string
 		for _, d := range c.Get("deps").Items() {
 			want = append(want, d.AsString())
@@ -163,4 +163,13 @@ func TestCompileDoesNotMutateInput(t *testing.T) {
 	if after := string(jsval.AppendJSON(nil, spec)); after != before {
 		t.Errorf("input mutated:\n%s\n%s", before, after)
 	}
+}
+
+// ssetTexts are the members of a set of strings.
+func ssetTexts(s *sset) []string {
+	var out []string
+	for _, v := range s.values() {
+		out = append(out, v.StrValue())
+	}
+	return out
 }

@@ -137,6 +137,7 @@ func markDefProperties(cc *compileCtx, mark Value, ignore encodeIgnore) Value {
 // ---- color ----
 
 func colorEncode(m *unitModel, filledOpt Value) Value {
+	cc := m.ctx
 	markDef, encoding, config := m.markDef, m.encoding, m.config
 	markType := markDef.Get("type")
 	filled := filledOpt
@@ -155,9 +156,9 @@ func colorEncode(m *unitModel, filledOpt Value) Value {
 	// audit).
 	var defaultFill Value
 	if filledTrue {
-		defaultFill = getMarkPropOrConfig("color", markDef, config, "fill", false)
+		defaultFill = getMarkPropOrConfig(cc, "color", markDef, config, "fill", false)
 	} else {
-		defaultFill = getMarkPropOrConfig(undefinedKey, markDef, config, "fill", false)
+		defaultFill = getMarkPropOrConfig(cc, undefinedKey, markDef, config, "fill", false)
 	}
 	if defaultFill.IsNullish() {
 		var cm Value
@@ -170,9 +171,9 @@ func colorEncode(m *unitModel, filledOpt Value) Value {
 	}
 	var defaultStroke Value
 	if filledFalse {
-		defaultStroke = getMarkPropOrConfig("color", markDef, config, "stroke", false)
+		defaultStroke = getMarkPropOrConfig(cc, "color", markDef, config, "stroke", false)
 	} else {
-		defaultStroke = getMarkPropOrConfig(undefinedKey, markDef, config, "stroke", false)
+		defaultStroke = getMarkPropOrConfig(cc, undefinedKey, markDef, config, "stroke", false)
 	}
 	if defaultStroke.IsNullish() {
 		if filledFalse {
@@ -235,7 +236,7 @@ func nonPosition(channel string, m *unitModel, opt nonPositionOpts) Value {
 	defaultRef, defaultValue := opt.defaultRef, opt.defaultValue
 	if defaultRef.IsUndefined() {
 		if defaultValue.IsNullish() {
-			defaultValue = getMarkPropOrConfig(channel, markDef, config, opt.vgChannel, cc.v5 || !isConditionalDef(channelDef))
+			defaultValue = getMarkPropOrConfig(cc, channel, markDef, config, opt.vgChannel, cc.v5 || !isConditionalDef(channelDef))
 		}
 		if !defaultValue.IsUndefined() {
 			defaultRef = signalOrValueRef(m.ctx, defaultValue)

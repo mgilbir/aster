@@ -442,13 +442,15 @@ func (n *timeUnitNode) removeFormulas(fields *sset) {
 	for _, k := range n.timeUnits.keysView() {
 		cc.work(1)
 		c := n.timeUnits.m[k]
-		var fieldAs string
+		// fields.has(fieldAs): a transform's `as` as given, so ["a"] is not
+		// the member "a".
+		var fieldAs Value
 		if isTimeUnitTransformComponent(c) {
-			fieldAs = c.Lookup("as").AsString()
+			fieldAs = c.Lookup("as")
 		} else {
-			fieldAs = c.Lookup("field").AsString() + "_end"
+			fieldAs = jsval.Str(c.Lookup("field").AsString() + "_end")
 		}
-		if !fields.has(fieldAs) {
+		if !fields.hasValue(fieldAs) {
 			nf.set(k, c)
 		}
 	}
@@ -578,10 +580,6 @@ type aggregateNode struct {
 	dfBase
 	dimensions *sset
 	measures   *omap[*omap[*sset]] // field -> op -> output names
-	// rawDims are the group-by entries a transform gave that are not
-	// strings, by their text: upstream's set holds the values themselves,
-	// and assembling reads them as access paths.
-	rawDims map[string]Value
 	// protoOp says 5.8 assigned meas[field]['__proto__'], which sets the
 	// object's prototype to a Set instead of adding an op: the op is not
 	// output, and stringifying the measures (the node's hash) or cloning
@@ -621,7 +619,7 @@ func (n *aggregateNode) clone() dfNode {
 		// whose prototype is a Set for a Set and calls its forEach.
 		throw("Method Set.prototype.forEach called on incompatible receiver #<Set>")
 	}
-	return initNode(&aggregateNode{dimensions: n.dimensions.clone(), measures: cloneMeasures(n.cc, n.measures), rawDims: n.rawDims, protoOp: n.protoOp}, nil)
+	return initNode(&aggregateNode{dimensions: n.dimensions.clone(), measures: cloneMeasures(n.cc, n.measures), protoOp: n.protoOp}, nil)
 }
 
 func (n *aggregateNode) groupBy() *sset { return n.dimensions }
@@ -740,14 +738,14 @@ func mergeMeasures(cc *compileCtx, parent, child *omap[*omap[*sset]]) {
 					if !ok {
 						throw("(parentMeasures[field][op] ?? []) is not iterable")
 					}
-					for _, x := range es.list() {
+					for _, x := range es.values() {
 						cc.work(1)
-						merged.addValue(es.value(x))
+						merged.addValue(x)
 					}
 				}
-				for _, x := range ops.m[op].list() {
+				for _, x := range ops.m[op].values() {
 					cc.work(1)
-					merged.addValue(ops.m[op].value(x))
+					merged.addValue(x)
 				}
 				t.set(cc, op, merged)
 			} else {
@@ -851,22 +849,14 @@ func makeAggregateFromTransform(cc *compileCtx, parent dfNode, t Value) *aggrega
 	if g := t.Get("groupby"); !g.IsNullish() {
 		groupby = iterate(g, "t.groupby ?? []")
 	}
-	var raw map[string]Value
 	for _, s := range groupby {
 		cc.work(1)
 		dims.addValue(s)
-		if !s.IsStr() {
-			if raw == nil {
-				raw = map[string]Value{}
-			}
-			raw[s.AsString()] = s
-		}
 	}
 	if dims.size()+meas.len() == 0 {
 		return nil
 	}
 	n := newAggregateNode(parent, dims, meas)
-	n.rawDims = raw
 	n.protoOp = protoOp
 	return n
 }
@@ -907,9 +897,9 @@ func (n *aggregateNode) producedFields() *sset {
 			if m.size() == 0 {
 				out.add(op + "_" + field)
 			} else {
-				for _, x := range m.list() {
+				for _, x := range m.values() {
 					cc.work(1)
-					out.addValue(m.value(x))
+					out.addValue(x)
 				}
 			}
 		}
@@ -943,9 +933,9 @@ func (n *aggregateNode) assemble() Value {
 		for _, op := range n.measures.m[field].keysView() {
 			cc.work(1)
 			set := n.measures.m[field].m[op]
-			for _, alias := range set.list() {
+			for _, alias := range set.values() {
 				cc.work(1)
-				as = append(as, set.value(alias))
+				as = append(as, alias)
 				ops = append(ops, jsval.Str(op))
 				if field == "*" {
 					fields = append(fields, jsval.Null)
@@ -956,12 +946,14 @@ func (n *aggregateNode) assemble() Value {
 		}
 	}
 	var groupby []Value
-	for _, d := range n.dimensions.list() {
+	for _, d := range n.dimensions.values() {
 		cc.work(1)
-		if r, ok := n.rawDims[d]; ok {
-			groupby = append(groupby, jsval.Str(replacePathInFieldV(r)))
+		// A group-by the transform gave as other than a string (["a"]) is
+		// read as an access path the way upstream reads the value.
+		if d.IsStr() {
+			groupby = append(groupby, jsval.Str(replacePathInField(d.StrValue())))
 		} else {
-			groupby = append(groupby, jsval.Str(replacePathInField(d)))
+			groupby = append(groupby, jsval.Str(replacePathInFieldV(d)))
 		}
 	}
 	return mkv("type", "aggregate", "groupby", jsval.Arr(groupby), "ops", jsval.Arr(ops), "fields", jsval.Arr(fields), "as", jsval.Arr(as))

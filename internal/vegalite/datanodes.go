@@ -103,7 +103,7 @@ func parseNodeWithAncestors(parent dfNode, explicit, implicit *Object, ap *ances
 		parsedAs := ap.getWithExplicit(field)
 		if !parsedAs.value.IsUndefined() {
 			iv := implicit.Lookup(field)
-			if parsedAs.explicit || jsval.Equal(parsedAs.value, iv) || (parsedAs.value.IsStr() && parsedAs.value.StrValue() == "derived") ||
+			if parsedAs.explicit || strictEq(parsedAs.value, iv) || (parsedAs.value.IsStr() && parsedAs.value.StrValue() == "derived") ||
 				(iv.IsStr() && iv.StrValue() == "flatten") {
 				mark(field)
 			} else {
@@ -120,7 +120,7 @@ func parseNodeWithAncestors(parent dfNode, explicit, implicit *Object, ap *ances
 		cc.work(1)
 		parsedAs := ap.get(field)
 		if !parsedAs.IsUndefined() {
-			if jsval.Equal(parsedAs, explicit.Lookup(field)) {
+			if strictEq(parsedAs, explicit.Lookup(field)) {
 				mark(field)
 			} else {
 				cc.warn(msgDifferentParse(field, explicit.Lookup(field), parsedAs))
@@ -265,8 +265,9 @@ func newSequenceNode(parent dfNode, params Value) *sequenceNode {
 func (n *sequenceNode) clone() dfNode          { return initNode(&sequenceNode{params: n.params}, nil) }
 func (n *sequenceNode) dependentFields() *sset { return newSset() }
 func (n *sequenceNode) producedFields() *sset {
-	if as := n.params.Get("as"); as.IsTruthy() {
-		return newSset(as.AsString())
+	// new Set([this.params.as ?? 'data']): the name as given.
+	if as := n.params.Get("as"); !as.IsNullish() {
+		return ssetOfValues([]Value{as})
 	}
 	return newSset("data")
 }

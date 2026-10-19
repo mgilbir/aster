@@ -7,37 +7,18 @@ import (
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
-// sset is an insertion-ordered set of strings (JavaScript's Set<string>).
-// A nil *sset stands for `undefined`, which upstream uses for "unknown".
+// sset is an insertion-ordered set of values: JavaScript's Set, whose
+// members upstream's types call strings but which holds whatever the spec
+// gave (a transform's `as` of ["a"], a group-by of null). Members are told
+// apart as a Set tells them apart, by SameValueZero (jsval.MapKey): "a" and
+// ["a"] are two members, as are two arrays of the same text, and each is
+// kept as it was added. A nil *sset stands for `undefined`, which upstream
+// uses for "unknown".
 type sset struct {
-	items []string
+	items []Value
 	// index is made once the set is past ssetScan members; below that a
 	// scan of items is cheaper than a map, and most sets stay there.
-	index map[string]struct{}
-	// raw holds, by their text, the members that were added as values other
-	// than strings (a transform's `as` of null): upstream's set holds the
-	// values, and reading one as an access path differs from its text.
-	raw map[string]Value
-}
-
-// addValue adds v, keeping it as it is when it is not a string.
-func (s *sset) addValue(v Value) {
-	k := v.AsString()
-	if !v.IsStr() && !s.has(k) {
-		if s.raw == nil {
-			s.raw = map[string]Value{}
-		}
-		s.raw[k] = v
-	}
-	s.add(k)
-}
-
-// value is the member x as it was added.
-func (s *sset) value(x string) Value {
-	if v, ok := s.raw[x]; ok {
-		return v
-	}
-	return jsval.Str(x)
+	index map[jsval.InternKey]struct{}
 }
 
 // ssetOfValues is new Set(values): each member kept as it is given.
@@ -51,10 +32,11 @@ func ssetOfValues(values []Value) *sset {
 
 const ssetScan = 8
 
+// newSset is new Set(items) of strings.
 func newSset(items ...string) *sset {
 	s := &sset{}
 	if len(items) > 0 {
-		s.items = make([]string, 0, len(items))
+		s.items = make([]Value, 0, len(items))
 	}
 	for _, i := range items {
 		s.add(i)
@@ -62,32 +44,41 @@ func newSset(items ...string) *sset {
 	return s
 }
 
-func (s *sset) add(x string) {
-	if s.has(x) {
+// add is set.add(x) of a string.
+func (s *sset) add(x string) { s.addValue(jsval.Str(x)) }
+
+// addValue is set.add(v).
+func (s *sset) addValue(v Value) {
+	if s.hasValue(v) {
 		return
 	}
-	s.items = append(s.items, x)
+	s.items = append(s.items, v)
 	switch {
 	case s.index != nil:
-		s.index[x] = struct{}{}
+		s.index[v.MapKey()] = struct{}{}
 	case len(s.items) > ssetScan:
-		s.index = make(map[string]struct{}, 2*len(s.items))
+		s.index = make(map[jsval.InternKey]struct{}, 2*len(s.items))
 		for _, i := range s.items {
-			s.index[i] = struct{}{}
+			s.index[i.MapKey()] = struct{}{}
 		}
 	}
 }
 
-func (s *sset) has(x string) bool {
+// has is set.has(x) of a string: only a member that is that string.
+func (s *sset) has(x string) bool { return s.hasValue(jsval.Str(x)) }
+
+// hasValue is set.has(v).
+func (s *sset) hasValue(v Value) bool {
 	if s == nil {
 		return false
 	}
+	k := v.MapKey()
 	if s.index != nil {
-		_, ok := s.index[x]
+		_, ok := s.index[k]
 		return ok
 	}
 	for _, i := range s.items {
-		if i == x {
+		if i.MapKey() == k {
 			return true
 		}
 	}
@@ -101,7 +92,9 @@ func (s *sset) size() int {
 	return len(s.items)
 }
 
-func (s *sset) list() []string {
+// values are the members in insertion order, as they were added; the
+// caller must not modify the slice.
+func (s *sset) values() []Value {
 	if s == nil {
 		return nil
 	}
@@ -111,14 +104,8 @@ func (s *sset) list() []string {
 func (s *sset) clone() *sset {
 	c := newSset()
 	if s != nil {
-		for _, i := range s.items {
-			c.add(i)
-		}
-		for k, v := range s.raw {
-			if c.raw == nil {
-				c.raw = map[string]Value{}
-			}
-			c.raw[k] = v
+		for _, v := range s.items {
+			c.addValue(v)
 		}
 	}
 	return c
@@ -128,8 +115,8 @@ func setEqual(a, b *sset) bool {
 	if a.size() != b.size() {
 		return false
 	}
-	for _, x := range a.list() {
-		if !b.has(x) {
+	for _, x := range a.values() {
+		if !b.hasValue(x) {
 			return false
 		}
 	}
@@ -137,8 +124,8 @@ func setEqual(a, b *sset) bool {
 }
 
 func hasIntersection(a, b *sset) bool {
-	for _, x := range a.list() {
-		if b.has(x) {
+	for _, x := range a.values() {
+		if b.hasValue(x) {
 			return true
 		}
 	}
