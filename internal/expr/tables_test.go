@@ -3,6 +3,7 @@ package expr
 import (
 	"encoding/json"
 	"os"
+	"slices"
 	"testing"
 )
 
@@ -15,10 +16,11 @@ func TestFunctionTable(t *testing.T) {
 		t.Fatal(err)
 	}
 	var want struct {
-		Functions  []string            `json:"functions"`
-		Constants  []string            `json:"constants"`
-		Prototypes map[string][]string `json:"prototypes"`
-		Disallowed []string            `json:"disallowedProperties"`
+		Functions   []string                      `json:"functions"`
+		Constants   []string                      `json:"constants"`
+		Prototypes  map[string]map[string]*string `json:"prototypes"`
+		ColourForIn map[string][]string           `json:"colourForIn"`
+		Disallowed  []string                      `json:"disallowedProperties"`
 	}
 	if err := json.Unmarshal(raw, &want); err != nil {
 		t.Fatal(err)
@@ -55,9 +57,34 @@ func TestFunctionTable(t *testing.T) {
 			}
 		}
 	}
-	sameSet("Object.prototype", objectProtoMembers, want.Prototypes["object"])
-	sameSet("Array.prototype", arrayProtoMembers, want.Prototypes["array"])
-	sameSet("RegExp.prototype", regexpProtoMembers, want.Prototypes["regexp"])
-	sameSet("Date.prototype", dateProtoMembers, want.Prototypes["date"])
+	sameTable := func(name string, got protoTable, want map[string]*string) {
+		if len(got) != len(want) {
+			t.Errorf("%s: %d members, upstream %d", name, len(got), len(want))
+		}
+		for k, w := range want {
+			fn := ""
+			if w != nil {
+				fn = *w
+			}
+			if g, ok := got[k]; !ok || g != fn {
+				t.Errorf("%s.%s: %q (present %v), upstream %q", name, k, g, ok, fn)
+			}
+		}
+	}
+	for kind, table := range map[string]protoTable{
+		"object": objectProto, "array": arrayProto, "string": stringProto, "number": numberProto,
+		"boolean": booleanProto, "regexp": regexpProto, "date": dateProto, "Color": colorProto,
+		"Rgb": rgbProto, "Hsl": hslProto, "Lab": labProto, "Hcl": hclProto,
+	} {
+		sameTable(kind, table, want.Prototypes[kind])
+	}
+	if len(want.Prototypes) != 12 {
+		t.Errorf("upstream records %d prototypes; the engine models 12", len(want.Prototypes))
+	}
+	for class, names := range want.ColourForIn {
+		if !slices.Equal(colourForIn[class], names) {
+			t.Errorf("for-in over a %s colour: %v, upstream %v", class, colourForIn[class], names)
+		}
+	}
 	sameSet("DisallowedObjectProperties", disallowedProperties, want.Disallowed)
 }

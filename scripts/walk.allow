@@ -17,6 +17,7 @@ internal/expr.(*Scope).strDepth	1	# primitive: the String of a value that is not
 internal/expr.(*compiler).object	2	# primitive: an object literal's key, an expression literal (string, number, boolean, null, regexp)
 internal/expr.(*parser).parseObject	1	# primitive: an object literal's key, an expression literal
 internal/expr.init	1	# primitive: null or undefined, named in the TypeError
+internal/expr.indataVisitor	1	# primitive: an expression literal argument (indata's field), named in the error
 internal/expr.literalArg	1	# primitive: an expression literal argument
 internal/expr.scaleVisitor	1	# primitive: an expression literal argument
 internal/expr.selectionTuples	1	# primitive: an index number

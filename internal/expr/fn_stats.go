@@ -180,16 +180,16 @@ func (s *Scope) quantileNormal(p float64, mean jsval.Value, stdev float64) jsval
 
 // uniformRange maps the (min, max) arguments of the uniform distribution
 // functions: with max omitted the range is [0, min] (or [0, 1] when both are
-// omitted). lo stays a Value because `min + ...` concatenates for strings.
-func (s *Scope) uniformRange(minV, maxV jsval.Value) (lo jsval.Value, hi float64) {
+// omitted). Both stay Values: upstream compares them as given, and
+// `min + ...` concatenates for a string.
+func (s *Scope) uniformRange(minV, maxV jsval.Value) (lo, hi jsval.Value) {
 	if maxV.IsNullish() {
-		hi = 1
-		if !minV.IsNullish() {
-			hi = s.num(minV)
+		if minV.IsNullish() {
+			return jsval.Num(0), jsval.Num(1)
 		}
-		return jsval.Num(0), hi
+		return jsval.Num(0), minV
 	}
-	return minV, s.num(maxV)
+	return minV, maxV
 }
 
 func init() {
@@ -232,34 +232,35 @@ func init() {
 		if s.Rand == nil {
 			s.Rand = &Random{}
 		}
-		return s.add(lo, jsval.Num(float64((hi-s.num(lo))*s.Rand.next())))
+		return s.add(lo, jsval.Num(float64((s.num(hi)-s.num(lo))*s.Rand.next())))
 	})
+	// The uniform distributions compare value with min and max as given,
+	// strings as strings, and convert them only for the arithmetic (C101).
 	fn("densityUniform", func(s *Scope, args []jsval.Value) jsval.Value {
-		loV, hi := s.uniformRange(arg(args, 1), arg(args, 2))
-		lo := s.num(loV)
-		v := s.num(arg(args, 0))
-		if v >= lo && v <= hi {
-			return jsval.Num(1 / (hi - lo))
+		lo, hi := s.uniformRange(arg(args, 1), arg(args, 2))
+		v := arg(args, 0)
+		if s.ge(v, lo) && s.le(v, hi) {
+			return jsval.Num(1 / (s.num(hi) - s.num(lo)))
 		}
 		return jsval.Num(0)
 	})
 	fn("cumulativeUniform", func(s *Scope, args []jsval.Value) jsval.Value {
-		loV, hi := s.uniformRange(arg(args, 1), arg(args, 2))
-		lo := s.num(loV)
-		v := s.num(arg(args, 0))
+		lo, hi := s.uniformRange(arg(args, 1), arg(args, 2))
+		v := arg(args, 0)
 		switch {
-		case v < lo:
+		case s.lt(v, lo):
 			return jsval.Num(0)
-		case v > hi:
+		case s.gt(v, hi):
 			return jsval.Num(1)
 		}
-		return jsval.Num((v - lo) / (hi - lo))
+		l := s.num(lo)
+		return jsval.Num((s.num(v) - l) / (s.num(hi) - l))
 	})
 	fn("quantileUniform", func(s *Scope, args []jsval.Value) jsval.Value {
-		loV, hi := s.uniformRange(arg(args, 1), arg(args, 2))
+		lo, hi := s.uniformRange(arg(args, 1), arg(args, 2))
 		p := s.num(arg(args, 0))
 		if p >= 0 && p <= 1 {
-			return s.add(loV, jsval.Num(float64(p*(hi-s.num(loV)))))
+			return s.add(lo, jsval.Num(float64(p*(s.num(hi)-s.num(lo)))))
 		}
 		return jsval.Num(math.NaN())
 	})

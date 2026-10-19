@@ -355,7 +355,11 @@ func (l *Locale) multiPicker(w jsval.Walker, spec jsval.Value, utc bool) (func(t
 	if spec.IsNullish() || !spec.IsTruthy() {
 		spec = jsval.Obj(nil)
 	}
-	if !spec.IsObj() && !spec.IsArr() {
+	switch spec.Kind() {
+	case jsval.KindObj, jsval.KindArr, jsval.KindTimestamp, jsval.KindPattern:
+		// vega-util's isObject: any object, a Date or a RegExp included,
+		// whose unit names it does not hold read as the defaults.
+	default:
 		return nil, fmt.Errorf("Invalid time multi-format specifier: %s", jsval.StringPrefix(spec, jsval.MessageBytes))
 	}
 	z := l.Local

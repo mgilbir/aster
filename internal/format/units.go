@@ -210,6 +210,16 @@ func SequenceUnit(ctx context.Context, z Zone, unit string, start, stop, step fl
 	return out, true, err
 }
 
+// SequenceUnitEach is SequenceUnit calling each with every date in turn
+// instead of collecting them (Interval.RangeEach).
+func SequenceUnitEach(ctx context.Context, z Zone, unit string, start, stop, step float64, each func(t float64)) (bool, error) {
+	iv, ok := IntervalFor(z, unit)
+	if !ok {
+		return false, nil
+	}
+	return true, iv.RangeEach(ctx, start, stop, step, each)
+}
+
 // ---- dayofyear / week ----
 
 // jan1Days is the day number of 1 January of year y. In UTC, Date.UTC maps a

@@ -82,12 +82,18 @@ Each package that needs upstream's answers keeps a generator beside its tests: `
 NODE_PATH=testdata/oracle-node/node_modules node internal/scale/testdata/gen_ticks.mjs | gzip -9 > internal/scale/testdata/ticks.json.gz
 ```
 
+The expression language's builtins differential is one of them: `internal/expr/testdata/gen_builtins.mjs` evaluates about 14,000 expressions with upstream's View (each alone, in a formula over one datum, in a child process with a bounded heap, so that one upstream cannot finish is recorded as such), and records each result, error and the warnings `warn()` logs. Every function of the table is called with nominal arguments, with each argument replaced by one of 35 edge values (strings, null, undefined, NaN, arrays, objects, a date, a pattern, a colour), and with each argument wrapped in `warn()`, which records the order upstream evaluates them in. It also reads every member each kind of value inherits, and records which UTF-16 code units the parser takes in an identifier. `TestBuiltinsDifferential` and `TestIdentifierCharacters` replay it exactly (results within two units in the last place for the functions that go through `Math`'s transcendental functions), and `TestBuiltinsDifferentialCoversEveryFunction` requires every function to be in it. Regenerate it with `TZ=UTC` (about a minute):
+
+```bash
+NODE_PATH=testdata/oracle-node/node_modules TZ=UTC node internal/expr/testdata/gen_builtins.mjs | gzip -9n > internal/expr/testdata/builtins.json.gz
+```
+
 Vega 6 modules are ESM, which ignores `NODE_PATH`, so generators resolve modules explicitly:
 
 ```js
 import { createRequire } from 'node:module';
 import path from 'node:path';
-const require = createRequire(path.join(process.env.NODE_PATH, 'x.js'));
+const require = createRequire(path.resolve(process.env.NODE_PATH, 'x.js')); // resolve: a relative NODE_PATH is not a path node 24 takes
 const vega = await import(require.resolve('vega'));
 ```
 

@@ -12,65 +12,139 @@ import (
 // JavaScript's abstract operations on jsval.Value. They are methods of Scope
 // because turning a Date into a string needs the local time zone.
 
-// asColor recognises the objects rgb(), hsl(), lab() and hcl() return: d3
-// colours, whose toString is "rgb(r, g, b)". They are represented as plain
-// objects with the d3 channel names, and are recognised by that exact shape.
-func asColor(v jsval.Value) (color.Color, bool) {
+// colourTag marks the objects rgb(), hsl(), lab() and hcl() return: d3
+// colours, which are plain objects with d3's channel names ({r, g, b,
+// opacity}, {h, s, l, opacity}, ...) that print as d3's "rgb(r, g, b)" and
+// inherit the members of their class (C156). An object of the same shape that
+// a colour function did not make is a plain object, as upstream's is.
+type colourTag struct {
+	class string    // d3's class: Rgb, Hsl, Lab or Hcl
+	names [3]string // the channels, then opacity
+	proto *proto
+}
+
+var colourTags = map[string]*colourTag{
+	"Rgb": {"Rgb", [3]string{"r", "g", "b"}, colourPs["Rgb"]},
+	"Hsl": {"Hsl", [3]string{"h", "s", "l"}, colourPs["Hsl"]},
+	"Lab": {"Lab", [3]string{"l", "a", "b"}, colourPs["Lab"]},
+	"Hcl": {"Hcl", [3]string{"h", "c", "l"}, colourPs["Hcl"]},
+}
+
+// colourOf is the tag of a colour value, nil for anything else.
+func colourOf(v jsval.Value) *colourTag {
 	o := v.ObjValue()
-	if o == nil || o.Len() != 4 || o.KeyAt(3) != "opacity" {
+	if o == nil {
+		return nil
+	}
+	t, _ := o.Host().(*colourTag)
+	return t
+}
+
+// asColor is the colour a colour value holds.
+func asColor(v jsval.Value) (color.Color, bool) {
+	t := colourOf(v)
+	if t == nil {
 		return nil, false
 	}
+	o := v.ObjValue()
 	var ch [4]float64
-	for i := range ch {
-		x := o.ValueAt(i)
+	for i, name := range [4]string{t.names[0], t.names[1], t.names[2], "opacity"} {
+		x, _ := o.Get(name)
 		if !x.IsNum() {
 			return nil, false
 		}
 		ch[i] = x.NumValue()
 	}
-	switch o.KeyAt(0) + o.KeyAt(1) + o.KeyAt(2) {
-	case "rgb":
-		return color.RGB{R: ch[0], G: ch[1], B: ch[2], Opacity: ch[3]}, true
-	case "hsl":
-		return color.HSL{H: ch[0], S: ch[1], L: ch[2], Opacity: ch[3]}, true
-	case "lab":
-		return color.Lab{L: ch[0], A: ch[1], B: ch[2], Opacity: ch[3]}, true
-	case "hcl":
-		return color.HCL{H: ch[0], C: ch[1], L: ch[2], Opacity: ch[3]}, true
+	return t.colour(ch), true
+}
+
+// colour is the colour of the class with channels ch (the last opacity).
+func (t *colourTag) colour(ch [4]float64) color.Color {
+	switch t.class {
+	case "Rgb":
+		return color.RGB{R: ch[0], G: ch[1], B: ch[2], Opacity: ch[3]}
+	case "Hsl":
+		return color.HSL{H: ch[0], S: ch[1], L: ch[2], Opacity: ch[3]}
+	case "Lab":
+		return color.Lab{L: ch[0], A: ch[1], B: ch[2], Opacity: ch[3]}
 	}
-	return nil, false
+	return color.HCL{H: ch[0], C: ch[1], L: ch[2], Opacity: ch[3]}
 }
 
 // colorValue makes the object form of a colour.
 func colorValue(c color.Color) jsval.Value {
-	var names [3]string
+	var class string
 	var ch [4]float64
 	switch c := c.(type) {
 	case color.RGB:
-		names, ch = [3]string{"r", "g", "b"}, [4]float64{c.R, c.G, c.B, c.Opacity}
+		class, ch = "Rgb", [4]float64{c.R, c.G, c.B, c.Opacity}
 	case color.HSL:
-		names, ch = [3]string{"h", "s", "l"}, [4]float64{c.H, c.S, c.L, c.Opacity}
+		class, ch = "Hsl", [4]float64{c.H, c.S, c.L, c.Opacity}
 	case color.Lab:
-		names, ch = [3]string{"l", "a", "b"}, [4]float64{c.L, c.A, c.B, c.Opacity}
+		class, ch = "Lab", [4]float64{c.L, c.A, c.B, c.Opacity}
 	case color.HCL:
-		names, ch = [3]string{"h", "c", "l"}, [4]float64{c.H, c.C, c.L, c.Opacity}
+		class, ch = "Hcl", [4]float64{c.H, c.C, c.L, c.Opacity}
 	default:
 		rgb := c.RGB()
-		names, ch = [3]string{"r", "g", "b"}, [4]float64{rgb.R, rgb.G, rgb.B, rgb.Opacity}
+		class, ch = "Rgb", [4]float64{rgb.R, rgb.G, rgb.B, rgb.Opacity}
 	}
+	t := colourTags[class]
 	o := jsval.NewObject(4)
-	for i, n := range names {
+	for i, n := range t.names {
 		o.Set(n, jsval.Num(ch[i]))
 	}
 	o.Set("opacity", jsval.Num(ch[3]))
+	o.SetHost(t)
 	// Every d3 colour prints as its rgb() form.
-	o.SetStringer(func(o *jsval.Object) string {
-		if c, ok := asColor(jsval.Obj(o)); ok {
-			return c.RGB().FormatRgb()
-		}
-		return "[object Object]"
-	})
+	o.SetStringer(colourString)
 	return jsval.Obj(o)
+}
+
+// colourMethods gives o, a plain object that holds a d3 colour's methods as
+// its own (merge copies them), the String they make: JavaScript's String(o)
+// calls o.toString, which formats o's own channels. Rgb's toString reads r,
+// g and b; Color's (the other classes') formats o.rgb(), which reads the
+// channels of the class whose rgb method o holds.
+func colourMethods(o *jsval.Object) {
+	ts, ok := o.Get("toString")
+	if !ok || !jsval.IsFunction(ts) {
+		return
+	}
+	var t *colourTag
+	if jsval.SameRef(ts, colourPs["Rgb"].get("toString")) {
+		t = colourTags["Rgb"]
+	} else if jsval.SameRef(ts, colorP.get("toString")) {
+		rgb, _ := o.Get("rgb")
+		for _, class := range [...]string{"Rgb", "Hsl", "Lab", "Hcl"} {
+			if jsval.SameRef(rgb, colourPs[class].get("rgb")) {
+				t = colourTags[class]
+			}
+		}
+	}
+	if t == nil {
+		return
+	}
+	o.SetStringer(func(o *jsval.Object) string {
+		var ch [4]float64
+		for i, name := range [4]string{t.names[0], t.names[1], t.names[2], "opacity"} {
+			// A channel that is an array or an object (which merge can put
+			// there) is NaN here: its number is its text, a walk this
+			// stringer has no call to charge.
+			if x := o.Lookup(name); isObjectLike(x) {
+				ch[i] = math.NaN()
+			} else {
+				ch[i] = jsval.ToNumber(x)
+			}
+		}
+		return t.colour(ch).RGB().FormatRgb()
+	})
+}
+
+func colourString(o *jsval.Object) string {
+	if c, ok := asColor(jsval.Obj(o)); ok {
+		return c.RGB().FormatRgb()
+	}
+	return "[object Object]"
 }
 
 // isObjectLike is true for the values JavaScript treats as objects.

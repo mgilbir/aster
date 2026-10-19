@@ -51,6 +51,10 @@ func (s *Scope) dateFromFields(args []jsval.Value, utc bool) float64 {
 	return s.zone().DatetimeArgs(f[:len(args)]...)
 }
 
+// dateFn defines a date getter: upstream generates `new Date(a).getMonth()`
+// from the first argument alone, so the others are never evaluated.
+func dateFn(name string, f builtinFn) { def(name, &funcDef{min: 1, argc: 1, fn: f}) }
+
 func init() {
 	getters := map[string]func(f format.Fields) int{
 		"date":         func(f format.Fields) int { return f.Day },
@@ -70,11 +74,11 @@ func init() {
 			}
 			return jsval.Int(get(z.Fields(t)))
 		}
-		fnMin(name, 1, func(s *Scope, args []jsval.Value) jsval.Value { return field(s.zone(), s.dateOf(args[0])) })
-		fnMin("utc"+name, 1, func(s *Scope, args []jsval.Value) jsval.Value { return field(format.UTC, s.dateOf(args[0])) })
+		dateFn(name, func(s *Scope, args []jsval.Value) jsval.Value { return field(s.zone(), s.dateOf(args[0])) })
+		dateFn("utc"+name, func(s *Scope, args []jsval.Value) jsval.Value { return field(format.UTC, s.dateOf(args[0])) })
 	}
-	fnMin("time", 1, func(s *Scope, args []jsval.Value) jsval.Value { return jsval.Num(s.dateOf(args[0])) })
-	fnMin("timezoneoffset", 1, func(s *Scope, args []jsval.Value) jsval.Value {
+	dateFn("time", func(s *Scope, args []jsval.Value) jsval.Value { return jsval.Num(s.dateOf(args[0])) })
+	dateFn("timezoneoffset", func(s *Scope, args []jsval.Value) jsval.Value {
 		return jsval.Num(s.zone().TimezoneOffset(s.dateOf(args[0])))
 	})
 	fn("now", func(s *Scope, args []jsval.Value) jsval.Value { return jsval.Num(s.nowMs()) })
@@ -171,7 +175,12 @@ func init() {
 			if ctx == nil {
 				ctx = backgroundContext
 			}
-			ts, ok, err := format.SequenceUnit(ctx, z, s.str(arg(args, 0)), s.num(arg(args, 1)), s.num(arg(args, 2)), step)
+			// Each date is charged as the array grows, before the next is
+			// made (C106): a sequence the string budget cannot hold stops
+			// there rather than after millions of dates are built.
+			b := itemBuilder{s: s}
+			ok, err := format.SequenceUnitEach(ctx, z, s.str(arg(args, 0)), s.num(arg(args, 1)), s.num(arg(args, 2)), step,
+				func(t float64) { b.push(jsval.Timestamp(t)) })
 			switch {
 			case errors.Is(err, budget.ErrLimit):
 				// MaxRangeLen is the engine's bound: it ends the render (C43).
@@ -181,11 +190,7 @@ func init() {
 			case !ok:
 				return jsval.Undefined
 			}
-			out := s.makeItems(len(ts))
-			for i, t := range ts {
-				out[i] = jsval.Timestamp(t)
-			}
-			return jsval.Arr(out)
+			return jsval.Arr(b.items)
 		}
 	}
 	fn("timeSequence", sequence(false))

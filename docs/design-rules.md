@@ -66,6 +66,17 @@ regular expression is `KindPattern` compiled with `github.com/mgilbir/goecma262`
   The detached forms (`AsString`, `jsval.Equal`, …) are for a
   specification's literals; `TestEngineWalksUseTheCallsWalker` holds every
   other use to a reviewed entry in `scripts/walk.allow`.
+- An expression function evaluates its arguments when and in the order
+  upstream's generated code does (vega-expression's code generators: `clamp`
+  evaluates lo, hi, then v; the date getters, `upper`, `lower`, `trim` and
+  `length` read only their first argument; `split`, `substring` and `test`
+  convert the first before they evaluate the rest; the event functions read
+  `event` first), compares its arguments as given where upstream does, and
+  answers for every kind of argument what upstream's answers. The builtins
+  differential (`internal/expr/testdata/gen_builtins.mjs`) checks each function
+  against upstream with nominal and edge arguments and with each argument
+  wrapped in `warn()`; a function without such cases fails
+  `TestBuiltinsDifferentialCoversEveryFunction`.
 
 ### Tuples
 

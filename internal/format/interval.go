@@ -458,6 +458,21 @@ func (iv Interval) Range(ctx context.Context, start, stop, step float64) ([]floa
 
 // rangeN is Range bounded by max dates (at most MaxRangeLen).
 func (iv Interval) rangeN(ctx context.Context, start, stop, step float64, max int) ([]float64, error) {
+	var out []float64
+	if err := iv.rangeEach(ctx, start, stop, step, max, func(t float64) { out = append(out, t) }); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// RangeEach is Range calling each with every date in turn instead of
+// collecting them, so that a caller can charge what it keeps of each before
+// the next is made.
+func (iv Interval) RangeEach(ctx context.Context, start, stop, step float64, each func(t float64)) error {
+	return iv.rangeEach(ctx, start, stop, step, MaxRangeLen, each)
+}
+
+func (iv Interval) rangeEach(ctx context.Context, start, stop, step float64, max int, each func(t float64)) error {
 	max = min(max, MaxRangeLen)
 	tooMany := ErrRangeTooLarge
 	if max < MaxRangeLen {
@@ -466,39 +481,38 @@ func (iv Interval) rangeN(ctx context.Context, start, stop, step float64, max in
 	step = math.Floor(step)
 	cur := iv.Ceil(start)
 	if !(cur < stop) || !(step > 0) { // also handles Invalid Date
-		return nil, nil
+		return nil
 	}
 	if iv.certainlyTooLong(stop-cur, step, max) {
-		return nil, tooMany
+		return tooMany
 	}
 	m := budget.NewMeter(ctx)
-	var out []float64
-	for {
+	for n := 1; ; n++ {
 		prev := cur
-		out = append(out, prev)
-		if len(out) > max {
-			return nil, tooMany
+		if n > max {
+			return tooMany
 		}
+		each(prev)
 		if err := m.Work(1); err != nil {
-			return nil, err
+			return err
 		}
 		if iv.weekSearch() {
 			// floor(offset(cur, step)): the step-th boundary after cur
-			for n := step; n > 0 && Valid(cur); n-- {
+			for k := step; k > 0 && Valid(cur); k-- {
 				cur = iv.weekNext(cur)
 				if err := m.Work(64); err != nil {
-					return nil, err
+					return err
 				}
 			}
 		} else {
 			next, err := iv.offsetWith(&m, cur, step)
 			if err != nil {
-				return nil, err
+				return err
 			}
 			cur = iv.Floor(next)
 		}
 		if !(prev < cur && cur < stop) {
-			return out, nil
+			return nil
 		}
 	}
 }
