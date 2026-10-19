@@ -324,7 +324,7 @@ func normalizeEncoding(cc *compileCtx, encoding Value, config Value) Value {
 	read := propReader(encoding)
 	for _, channel := range jsKeysCC(cc, encoding) {
 		cc.work(1)
-		out.Set(channel, initChannelDef(cc, read.get(channel), channel, config, true))
+		jsSet(cc, out, channel, initChannelDef(cc, read.get(channel), channel, config, true))
 	}
 	return jsval.Obj(out)
 }

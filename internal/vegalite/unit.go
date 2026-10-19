@@ -195,9 +195,9 @@ func (u *unitModel) initAxis(axis Value) Value {
 		cc.work(1)
 		val := axis.Get(prop)
 		if isConditionalAxisValue(val) {
-			out.Set(prop, signalOrValueRefWithCondition(u.ctx, val))
+			jsSet(cc, out, prop, signalOrValueRefWithCondition(u.ctx, val))
 		} else {
-			out.Set(prop, signalRefOrValue(cc, val))
+			jsSet(cc, out, prop, signalRefOrValue(cc, val))
 		}
 	}
 	return jsval.Obj(out)
