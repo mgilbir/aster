@@ -6,6 +6,13 @@ package textcut
 
 import "unicode/utf8"
 
+// MaxWarning is the most bytes of a warning's text the engine reports (Cut
+// to it): Vega's bound, which the public API applies to every warning
+// (docs/limits.md, "warnings"). It lives here, below every package that
+// reports or compares warnings, so the engine and the differentials that
+// compare its warnings with upstream's (internal/oracle) share one value.
+const MaxWarning = 1024
+
 // Prefix is the longest prefix of s of at most n bytes that ends at a
 // character boundary: s itself when it is that short.
 func Prefix(s string, n int) string {

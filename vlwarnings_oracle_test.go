@@ -5,7 +5,6 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -74,10 +73,10 @@ func TestVegaLiteWarningsMatchNode(t *testing.T) {
 			if len(want.Warnings) > 0 {
 				withWarnings++
 			}
-			if !slices.Equal(got, want.Warnings) {
+			if !oracle.WarningsMatch(got, want.Warnings) {
 				differ++
 				if differ <= 40 || *warningsVerbose {
-					t.Errorf("%s (VL %s): warnings differ\n  engine: %s\n  node:   %s", f, v.version, strings.Join(got, " | "), strings.Join(want.Warnings, " | "))
+					t.Errorf("%s (VL %s): warnings differ\n  engine: %s\n  node:   %s", f, v.version, strings.Join(got, " | "), strings.Join(oracle.CutWarnings(want.Warnings), " | "))
 				}
 			}
 		}
@@ -177,8 +176,8 @@ func TestVegaLiteWarningSitesMatchNode(t *testing.T) {
 				t.Errorf("%s (VL %s): engine error %v, node error %q", spec, v.version, gerr, want.Err)
 				continue
 			}
-			if !slices.Equal(got, want.Warnings) {
-				t.Errorf("%s (VL %s): warnings differ\n  engine: %s\n  node:   %s", spec, v.version, strings.Join(got, " | "), strings.Join(want.Warnings, " | "))
+			if !oracle.WarningsMatch(got, want.Warnings) {
+				t.Errorf("%s (VL %s): warnings differ\n  engine: %s\n  node:   %s", spec, v.version, strings.Join(got, " | "), strings.Join(oracle.CutWarnings(want.Warnings), " | "))
 			}
 		}
 	}

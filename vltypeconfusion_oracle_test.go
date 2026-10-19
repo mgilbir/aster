@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -139,8 +138,8 @@ func mutantDiffers(t *testing.T, conv *aster.Converter, want oracle.Result, muta
 		return fmt.Sprintf("node errors (%q), the engine compiles", firstLine(want.Err))
 	case want.Err != "":
 		return ""
-	case !slices.Equal(gotWarn, want.Warnings):
-		return fmt.Sprintf("warnings differ\n  engine: %s\n  node:   %s", strings.Join(gotWarn, " | "), strings.Join(want.Warnings, " | "))
+	case !oracle.WarningsMatch(gotWarn, want.Warnings):
+		return fmt.Sprintf("warnings differ\n  engine: %s\n  node:   %s", strings.Join(gotWarn, " | "), strings.Join(oracle.CutWarnings(want.Warnings), " | "))
 	}
 	g, err1 := jsval.ParseJSON(got)
 	w, err2 := jsval.ParseJSON(want.Vega)
