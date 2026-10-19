@@ -53,6 +53,11 @@ func parseNonUnitScaleDomain(m Model) {
 	for _, channel := range local.keyList() {
 		var domains *withExplicit
 		var selectionExtent Value
+		// The union of the children's domains grows by one child at a
+		// time: upstream copies it whole each time ([...v1, ...v2]),
+		// quadratic in the children. The union this loop made last (and
+		// only it) is extended in place instead, with the same items.
+		var union union
 		for _, c := range m.children() {
 			cc.work(modelStep)
 			cs, ok := c.b().comp.scales.get(channel)
@@ -64,7 +69,7 @@ func parseNonUnitScaleDomain(m Model) {
 				d := cd
 				domains = &d
 			} else {
-				mv := mergeValuesWithExplicit(cc, domains, cd, "domains", "scale", domainsTieBreaker)
+				mv := mergeValuesWithExplicit(cc, domains, cd, "domains", "scale", union.tieBreaker)
 				domains = &mv
 			}
 			se := cs.get("selectionExtent")
@@ -89,6 +94,36 @@ func domainsTieBreaker(cc *compileCtx, v1, v2 withExplicit, property, propertyOf
 	}
 	items := append(append([]Value{}, v1.value.Items()...), v2.value.Items()...)
 	return withExplicit{v1.explicit, jsval.Arr(items)}
+}
+
+// union is domainsTieBreaker for a loop that merges many domains into one:
+// when v1 is the union it returned last, which nothing else holds, v2's
+// items are appended to it in place (amortised in v2's length) rather than
+// both copied. The array returned is capped at its length, so an append by
+// anyone else copies it.
+type union struct {
+	items []Value // the last union's items, with room to grow
+	last  Value   // the last union returned
+}
+
+func (u *union) tieBreaker(cc *compileCtx, v1, v2 withExplicit, property, propertyOf string) withExplicit {
+	if u.last.IsUndefined() || !jsval.SameRef(v1.value, u.last) {
+		return u.keep(domainsTieBreaker(cc, v1, v2, property, propertyOf))
+	}
+	if v1.explicit && v2.explicit {
+		cc.warn(msgMergeConflictingDomainProperty(cc, property, propertyOf, v1.value, v2.value))
+	}
+	cc.alloc(int64(v2.value.Len()) * valueBytes)
+	u.items = append(u.items, v2.value.Items()...)
+	u.last = jsval.Arr(u.items[:len(u.items):len(u.items)])
+	return withExplicit{v1.explicit, u.last}
+}
+
+// keep records w's array as the union to extend.
+func (u *union) keep(w withExplicit) withExplicit {
+	u.items = w.value.Items()
+	u.last = w.value
+	return w
 }
 
 // canUseUnaggregatedDomain is upstream's: whether domain "unaggregated"

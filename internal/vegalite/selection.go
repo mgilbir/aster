@@ -157,12 +157,12 @@ func getFacetModelOf(m Model) *facetModel {
 func unitName(m Model, escape bool) string {
 	name := m.b().name
 	if escape {
-		name = stringValue(m.b().nameV) // stringValue(model.name), as given
+		name = stringValue(m.b().ctx, m.b().nameV) // stringValue(cc, model.name), as given
 	}
 	if f := getFacetModelOf(m); f != nil {
 		for _, channel := range facetChannels {
 			if fd := f.facet.Lookup(channel); fd.IsTruthy() {
-				name += " + '__facet_" + channel + "_' + (facet[" + stringValue(jsval.Str(f.vgField(channel, fieldRefOption{}))) + "])"
+				name += " + '__facet_" + channel + "_' + (facet[" + stringValue(m.b().ctx, jsval.Str(f.vgField(channel, fieldRefOption{}))) + "])"
 			}
 		}
 	}
@@ -266,7 +266,7 @@ func parseSelectionPredicate(m Model, pred Value, dfnode dfNode, datum string) s
 	} else {
 		vname = varNameOf(pred.Get("param"))
 	}
-	store := stringValue(jsval.Str(vname + storeSuffix))
+	store := stringValue(m.b().ctx, jsval.Str(vname+storeSuffix))
 	var sel *selectionComponent
 	if m != nil {
 		var junk bool
@@ -297,7 +297,7 @@ func parseSelectionPredicate(m Model, pred Value, dfnode dfNode, datum string) s
 	}
 	resolve := ")"
 	if sel.resolve() != "global" {
-		resolve = ", " + stringValue(sel.props.Lookup("resolve")) + ")"
+		resolve = ", " + stringValue(m.b().ctx, sel.props.Lookup("resolve")) + ")"
 	}
 	test := fn + store + ", " + datum + resolve
 	length := "length(data(" + store + "))"
@@ -325,7 +325,7 @@ func parseSelectionExtent(m Model, param Value, extent Value) string {
 				fname = "Object"
 			}
 		}
-		return fname + "[" + stringValue(jsval.Str(replacePathInField(field.AsString()))) + "]"
+		return fname + "[" + stringValue(cc, jsval.Str(replacePathInField(field.AsString()))) + "]"
 	}
 	if sel == nil {
 		return vname
@@ -340,7 +340,7 @@ func parseSelectionExtent(m Model, param Value, extent Value) string {
 	if !encoding.IsTruthy() && !field.IsTruthy() {
 		field = firstField()
 		if len(sel.project.items) > 1 {
-			cc.warn(msgSelectionAsScaleDomainWithoutField(field.StrValue()))
+			cc.warn(msgSelectionAsScaleDomainWithoutField(cc, field.StrValue()))
 		}
 	} else if encoding.IsTruthy() && !field.IsTruthy() {
 		var encs []*selProjItem
@@ -352,12 +352,12 @@ func parseSelectionExtent(m Model, param Value, extent Value) string {
 		}
 		if len(encs) != 1 {
 			field = firstField()
-			cc.warn(msgSelectionAsScaleDomainWrongEncodings(len(encs), encoding, extent.Get("param"), field.StrValue()))
+			cc.warn(msgSelectionAsScaleDomainWrongEncodings(cc, len(encs), encoding, extent.Get("param"), field.StrValue()))
 		} else {
 			field = jsval.Str(encs[0].field)
 		}
 	}
-	return sel.name + "[" + stringValue(jsval.Str(replacePathInField(field.AsString()))) + "]"
+	return sel.name + "[" + stringValue(cc, jsval.Str(replacePathInField(field.AsString()))) + "]"
 }
 
 func materializeSelections(m *unitModel, main *outputNode) {
@@ -493,11 +493,11 @@ func assembleInitExprOK(cc *compileCtx, init Value, wrap func(string) string) (s
 			cc.work(1)
 			parts[i] = assembleInitExpr(cc, v, wrap)
 		}
-		return "[" + strings.Join(parts, ", ") + "]", true
+		return "[" + joinCC(cc, parts, ", ") + "]", true
 	} else if isDateTime(init) {
 		return applyWrap(wrap, dateTimeToExpr(cc, init)), true
 	}
-	var b strings.Builder
+	b := newSbuf(cc)
 	if !stringifyTo(cc, &b, init) {
 		if wrap == nil {
 			return "", false
@@ -579,7 +579,7 @@ func assembleUnitSelectionSignals(m *unitModel, signals []Value) []Value {
 		}
 		signals = append(signals, mkv(
 			"name", sel.name+modifySuffix,
-			"on", arr(mkv("events", mkv("signal", sel.name+tupleSuffix), "update", "modify("+stringValue(jsval.Str(sel.name+storeSuffix))+", "+modifyExpr+")")),
+			"on", arr(mkv("events", mkv("signal", sel.name+tupleSuffix), "update", "modify("+stringValue(cc, jsval.Str(sel.name+storeSuffix))+", "+modifyExpr+")")),
 		))
 	}
 	return cleanupEmptyOnArray(cc, signals)
@@ -589,7 +589,7 @@ func assembleFacetSignals(m *facetModel, signals []Value) []Value {
 	cc := m.b().ctx
 
 	if m.comp.selection != nil && m.comp.selection.len() > 0 {
-		name := stringValue(jsval.Str(m.getName("cell")))
+		name := stringValue(cc, jsval.Str(m.getName("cell")))
 		sg := mkv("name", "facet", "value", mkv(), "on", arr(mkv(
 			"events", jsval.Arr(parseSelector(cc, mouseMoveEvent(cc), "scope")),
 			"update", "isTuple(facet) ? facet : group("+name+").datum")))
@@ -610,7 +610,7 @@ func assembleTopLevelSignals(m Model, signals []Value) []Value {
 		for _, name := range sel.keyList() {
 			cc.work(modelStep)
 			s := sel.m[name]
-			store := stringValue(jsval.Str(s.name + storeSuffix))
+			store := stringValue(cc, jsval.Str(s.name+storeSuffix))
 			if findSignal(cc, signals, s.name) == nil {
 				resolveV := s.props.Lookup("resolve")
 				if s.resolve() == "global" {
@@ -620,7 +620,7 @@ func assembleTopLevelSignals(m Model, signals []Value) []Value {
 				if s.typ == "point" {
 					isPoint = ", true, true)"
 				}
-				signals = append(signals, mkv("name", s.name, "update", vlSelectionResolve+"("+store+", "+stringValue(resolveV)+isPoint))
+				signals = append(signals, mkv("name", s.name, "update", vlSelectionResolve+"("+store+", "+stringValue(cc, resolveV)+isPoint))
 			}
 			hasSelections = true
 			for _, c := range selectionCompilers {
@@ -1185,12 +1185,12 @@ var pointCompiler = selectionCompiler{
 		brushes := pointBrushTests(m)
 		test := "datum && item().mark.marktype !== 'group' && indexof(item().mark.role, 'legend') < 0"
 		if len(brushes) > 0 {
-			test += " && " + strings.Join(brushes, " && ")
+			test += " && " + joinCC(cc, brushes, " && ")
 		}
 		update := "unit: " + unitName(m, true) + ", "
 		switch {
 		case project.hasSelectionID:
-			update += selectionID + ": " + datum + "[" + stringValue(jsval.Str(selectionID)) + "]"
+			update += selectionID + ": " + datum + "[" + stringValue(cc, jsval.Str(selectionID)) + "]"
 		case isTimerSelection(sel.cc, sel):
 			update += "fields: " + fieldsSg + ", values: [" + animValue + " ? " + animValue + " : " + minExtent + "]"
 		default:
@@ -1199,13 +1199,13 @@ var pointCompiler = selectionCompiler{
 				cc.work(1)
 				fd := m.fieldDef(p.channel)
 				if fd.Get("bin").IsTruthy() {
-					vals = append(vals, "["+datum+"["+stringValue(jsval.Str(m.vgField(p.channel, fieldRefOption{})))+"], "+
-						datum+"["+stringValue(jsval.Str(m.vgField(p.channel, fieldRefOption{binSuffix: "end"})))+"]]")
+					vals = append(vals, "["+datum+"["+stringValue(cc, jsval.Str(m.vgField(p.channel, fieldRefOption{})))+"], "+
+						datum+"["+stringValue(cc, jsval.Str(m.vgField(p.channel, fieldRefOption{binSuffix: "end"})))+"]]")
 				} else {
-					vals = append(vals, datum+"["+stringValue(p.fieldValue())+"]")
+					vals = append(vals, datum+"["+stringValue(cc, p.fieldValue())+"]")
 				}
 			}
-			update += "fields: " + fieldsSg + ", values: [" + strings.Join(vals, ", ") + "]"
+			update += "fields: " + fieldsSg + ", values: [" + joinCC(cc, vals, ", ") + "]"
 		}
 		if isTimerSelection(sel.cc, sel) {
 			out := append(signals, animationSignals(sel.name, m.scaleName(chTime, false))...)
@@ -1271,7 +1271,7 @@ var intervalCompiler = selectionCompiler{
 			selDef.ObjValue().Set("select", jsval.Obj(o))
 		}
 		if sel.props.Lookup("translate").IsTruthy() && !scalesCompiler.defined(sel) {
-			filterExpr := "!event.item || event.item.mark.name !== " + stringValue(jsval.Str(sel.name+brushSuffix))
+			filterExpr := "!event.item || event.item.mark.name !== " + stringValue(cc, jsval.Str(sel.name+brushSuffix))
 			for _, evt := range sel.events().Items() {
 				cc.work(1)
 				between := jsProp(evt, "between")
@@ -1332,7 +1332,7 @@ var intervalCompiler = selectionCompiler{
 				triggerSg := name + scaleTrigger
 				var scaleTriggers []string
 				for _, p := range channels {
-					scaleName := stringValue(strOrUndef(m.scaleName(p.channel, false)))
+					scaleName := stringValue(m.ctx, strOrUndef(m.scaleName(p.channel, false)))
 					scaleType := m.scaleTypeOf(p.channel)
 					toNum := ""
 					if hasContinuousDomain(scaleType) {
@@ -1348,7 +1348,7 @@ var intervalCompiler = selectionCompiler{
 						evs = append(evs, mkv("scale", m.scaleName(p.channel, false)))
 					}
 					signals = append(signals, mkv("name", triggerSg, "value", mkv(), "on", arr(mkv(
-						"events", jsval.Arr(evs), "update", strings.Join(scaleTriggers, " && ")+" ? "+triggerSg+" : {}"))))
+						"events", jsval.Arr(evs), "update", joinCC(m.ctx, scaleTriggers, " && ")+" ? "+triggerSg+" : {}"))))
 				}
 			}
 			var dataSignals []string
@@ -1362,12 +1362,12 @@ var intervalCompiler = selectionCompiler{
 			}
 			if len(dataSignals) > 0 {
 				o.Set("on", arr(mkv(
-					"events", arr(mkv("signal", strings.Join(dataSignals, " || "))),
-					"update", strings.Join(dataSignals, " && ")+" ? {"+update+": ["+strings.Join(dataSignals, ",")+"]} : null")))
+					"events", arr(mkv("signal", joinCC(m.ctx, dataSignals, " || "))),
+					"update", joinCC(m.ctx, dataSignals, " && ")+" ? {"+update+": ["+joinCC(m.ctx, dataSignals, ",")+"]} : null")))
 			}
 			return append(signals, jsval.Obj(o))
 		}
-		projection := stringValue(jsval.Str(m.projectionName(false)))
+		projection := stringValue(m.ctx, jsval.Str(m.projectionName(false)))
 		centerSg := m.projectionName(false) + centerSuffix
 		x, _ := sel.project.hasChannel.get("x")
 		y, _ := sel.project.hasChannel.get("y")
@@ -1423,7 +1423,7 @@ var intervalCompiler = selectionCompiler{
 				}
 			}
 		}
-		intersect := "intersect(" + bbox + ", {markname: " + stringValue(jsval.Str(m.getName("marks"))) + "}, unit.mark)"
+		intersect := "intersect(" + bbox + ", {markname: " + stringValue(m.ctx, jsval.Str(m.getName("marks"))) + "}, unit.mark)"
 		base := "{unit: " + unitName(m, true) + "}"
 		update := "vlSelectionTuples(" + intersect + ", " + base + ")"
 		var visualSignals []string
@@ -1432,7 +1432,7 @@ var intervalCompiler = selectionCompiler{
 		}
 		var evs []Value
 		if len(visualSignals) > 0 {
-			evs = append(evs, mkv("signal", strings.Join(visualSignals, " || ")))
+			evs = append(evs, mkv("signal", joinCC(m.ctx, visualSignals, " || ")))
 		}
 		if hasInit {
 			evs = append(evs, mkv("signal", geoInitTick))
@@ -1460,7 +1460,7 @@ var intervalCompiler = selectionCompiler{
 		if y != nil {
 			yvname = y.visSignal
 		}
-		store := "data(" + stringValue(jsval.Str(sel.name+storeSuffix)) + ")"
+		store := "data(" + stringValue(cc, jsval.Str(sel.name+storeSuffix)) + ")"
 		if scalesCompiler.defined(sel) || (x == nil && y == nil) {
 			return marks
 		}
@@ -1493,7 +1493,7 @@ var intervalCompiler = selectionCompiler{
 			if y != nil {
 				tests = append(tests, yvname+"[0] !== "+yvname+"[1]")
 			}
-			vgStroke.Set(k, arr(mkv("test", strings.Join(tests, " && "), "value", stroke.Lookup(k)), mkv("value", jsval.Null)))
+			vgStroke.Set(k, arr(mkv("test", joinCC(cc, tests, " && "), "value", stroke.Lookup(k)), mkv("value", jsval.Null)))
 		}
 		var vgCursor Value
 		switch {
@@ -1527,9 +1527,9 @@ func intervalChannelSignals(m *unitModel, sel *selectionComponent, proj *selProj
 	vname := proj.visSignal
 	var scaleName string
 	if scaledInterval {
-		scaleName = stringValue(strOrUndef(m.scaleName(channel, false)))
+		scaleName = stringValue(cc, strOrUndef(m.scaleName(channel, false)))
 	} else {
-		scaleName = stringValue(jsval.Str(m.projectionName(false)))
+		scaleName = stringValue(cc, jsval.Str(m.projectionName(false)))
 	}
 	scaled := func(s string) string { return "scale(" + scaleName + ", " + s + ")" }
 	sizeType := "height"
@@ -1654,7 +1654,7 @@ var inputsCompiler = selectionCompiler{
 					o.Set("value", jsval.Null)
 				}
 				if ev := sel.events(); ev.IsTruthy() {
-					o.Set("on", arr(mkv("events", ev, "update", "datum && item().mark.marktype !== 'group' ? "+datum+"["+stringValue(p.fieldValue())+"] : null")))
+					o.Set("on", arr(mkv("events", ev, "update", "datum && item().mark.marktype !== 'group' ? "+datum+"["+stringValue(cc, p.fieldValue())+"] : null")))
 				} else {
 					o.Set("on", jsval.Arr(nil))
 				}
@@ -1681,7 +1681,7 @@ var inputsCompiler = selectionCompiler{
 			valid = append(valid, v+" !== null")
 		}
 		if len(values) > 0 && signal != nil {
-			signal.Set("update", jsval.Str(strings.Join(valid, " && ")+" ? {fields: "+fields+", values: ["+strings.Join(values, ", ")+"]} : null"))
+			signal.Set("update", jsval.Str(joinCC(cc, valid, " && ")+" ? {fields: "+fields+", values: ["+joinCC(cc, values, ", ")+"]} : null"))
 		}
 		if signal != nil {
 			signal.Delete("value")
@@ -1706,7 +1706,7 @@ func isTopLevelLayer(m Model) bool {
 }
 
 func selDomain(m *unitModel, channel string) string {
-	return "domain(" + stringValue(strOrUndef(m.scaleName(channel, false))) + ")"
+	return "domain(" + stringValue(m.ctx, strOrUndef(m.scaleName(channel, false))) + ")"
 }
 
 var scalesCompiler = selectionCompiler{
@@ -1754,12 +1754,12 @@ var scalesCompiler = selectionCompiler{
 		if strings.Contains(update, vlSelectionResolve) {
 			var parts []string
 			for _, proj := range bound {
-				parts = append(parts, stringValue(jsval.Str(replacePathInField(proj.field)))+": "+proj.dataSignal)
+				parts = append(parts, stringValue(sel.cc, jsval.Str(replacePathInField(proj.field)))+": "+proj.dataSignal)
 			}
-			namedSg.Set("update", jsval.Str("{"+strings.Join(parts, ", ")+"}"))
+			namedSg.Set("update", jsval.Str("{"+joinCC(sel.cc, parts, ", ")+"}"))
 		} else {
 			for _, proj := range bound {
-				mapping := stringValue(jsval.Str(replacePathInField(proj.field))) + ": " + proj.dataSignal
+				mapping := stringValue(sel.cc, jsval.Str(replacePathInField(proj.field))) + ": " + proj.dataSignal
 				if !strings.Contains(update, mapping) {
 					update = update[:len(update)-1] + ", " + mapping + "}"
 				}
@@ -1908,7 +1908,7 @@ var legendsCompiler = selectionCompiler{
 			cc.work(1)
 			valid = append(valid, v+" !== null")
 		}
-		update := strings.Join(valid, " && ") + " ? {fields: " + fields + ", values: [" + strings.Join(values, ", ") + "]} : null"
+		update := joinCC(cc, valid, " && ") + " ? {fields: " + fields + ", values: [" + joinCC(cc, values, ", ") + "]} : null"
 		if sel.events().IsTruthy() && len(values) > 0 {
 			var evs []Value
 			for _, v := range values {
@@ -2143,10 +2143,10 @@ var zoomCompiler = selectionCompiler{
 		y, _ := sel.project.hasChannel.get("y")
 		sx, sy := "", ""
 		if n := m.scaleName(chX, false); n != "" {
-			sx = stringValue(jsval.Str(n))
+			sx = stringValue(cc, jsval.Str(n))
 		}
 		if n := m.scaleName(chY, false); n != "" {
-			sy = stringValue(jsval.Str(n))
+			sy = stringValue(cc, jsval.Str(n))
 		}
 		events := parseSelectorOf(m.ctx, sel.props.Lookup("zoom"), "scope")
 		if !boundScales {
@@ -2166,7 +2166,7 @@ var zoomCompiler = selectionCompiler{
 			if sy != "" {
 				parts = append(parts, "y: invert("+sy+", y(unit))")
 			}
-			update = "{" + strings.Join(parts, ", ") + "}"
+			update = "{" + joinCC(cc, parts, ", ") + "}"
 		}
 		signals = append(signals,
 			mkv("name", name+zoomAnchor, "on", arr(mkv("events", jsval.Arr(events), "update", update))),

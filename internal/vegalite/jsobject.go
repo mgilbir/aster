@@ -468,6 +468,7 @@ func duplicate(cc *compileCtx, v Value) Value {
 	switch v.Kind() {
 	case jsval.KindArr:
 		items := v.Items()
+		cc.alloc(arrayBytes(len(items)))
 		out := make([]Value, len(items))
 		for i, it := range items {
 			out[i] = duplicate(cc, it)
@@ -478,6 +479,7 @@ func duplicate(cc *compileCtx, v Value) Value {
 			return v
 		}
 		o := v.ObjValue()
+		cc.alloc(objectBytes(o.Len()))
 		c := jsval.NewObject(o.Len())
 		digit := false // a key that may be an array index
 		for i := 0; i < o.Len(); i++ {

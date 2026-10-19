@@ -82,6 +82,7 @@ func TestFixedLimitsDocMatchesCode(t *testing.T) {
 		"HTTP response body":              {{c("loader", "defaultMaxResponseBytes")}},
 		"file":                            {{c("loader", "defaultMaxResponseBytes")}},
 		"JSON nesting":                    {{c("jsval", "MaxJSONDepth")}, {c("jsval", "MaxValueDepth")}},
+		"Vega-Lite view weight":           {{c("vegalite", "viewWeightBytes")}},
 		"expression nesting":              {{c("expr", "MaxDepth"), c("vegalite", "MaxExprDepth")}},
 		"one string an expression builds": {{c("expr", "MaxStringLength")}, {c("expr", "v8MaxStringLength")}},
 		"a regular expression compiled from a string": {{c("expr", "MaxPatternLength")}, {c("github.com/mgilbir/goecma262/compiler", "MaxProgramSize")}},

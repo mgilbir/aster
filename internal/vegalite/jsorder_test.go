@@ -238,7 +238,7 @@ func TestJSReplaceAll(t *testing.T) {
 		{"p datum.labelq", "datum.label", "[$`|$']", "p [p |q]q"},
 		{"no match", "datum.label", "$&", "no match"},
 	} {
-		if got := jsReplaceAll(c[0], c[1], c[2]); got != c[3] {
+		if got := jsReplaceAll(nil, c[0], c[1], c[2]); got != c[3] {
 			t.Errorf("jsReplaceAll(%q, %q, %q) = %q, want %q", c[0], c[1], c[2], got, c[3])
 		}
 	}
