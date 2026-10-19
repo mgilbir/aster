@@ -4,6 +4,7 @@ import (
 	"math"
 	"strings"
 
+	"github.com/mgilbir/aster/internal/text"
 	pdf0 "github.com/mgilbir/pdf0"
 )
 
@@ -44,7 +45,7 @@ func linkURI(href string) string {
 			return ""
 		}
 	}
-	if !linkSchemes[strings.ToLower(scheme)] {
+	if !linkSchemes[text.ASCIILower(scheme)] {
 		return ""
 	}
 	var b strings.Builder

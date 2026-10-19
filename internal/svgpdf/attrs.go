@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/mgilbir/aster/internal/text"
 	"github.com/mgilbir/aster/internal/textcut"
 )
 
@@ -139,7 +140,7 @@ func parseLength(s string, c lengthCtx) (float64, bool) {
 		return 0, false
 	}
 	var px float64
-	switch unit := strings.ToLower(s[n:]); unit {
+	switch unit := text.ASCIILower(s[n:]); unit {
 	case "em":
 		px = v * c.fontSize
 	case "ex":
@@ -264,7 +265,7 @@ func declarations(e *element, buf []decl) ([]decl, error) {
 	}
 	for d := range strings.SplitSeq(style, ";") {
 		name, value, ok := strings.Cut(d, ":")
-		name = strings.ToLower(strings.TrimSpace(name))
+		name = text.ASCIILower(strings.TrimSpace(name))
 		if !ok {
 			continue // empty, or no colon: a malformed declaration
 		}

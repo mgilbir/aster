@@ -123,3 +123,25 @@ func testMeasurer(t *testing.T) *text.Measurer {
 	}
 	return m
 }
+
+// TestCSSNamesFoldASCIIOnly: a style property's name, a unit and a link's
+// scheme are ASCII case-insensitive, as CSS and URLs say: U+0130 is no i.
+func TestCSSNamesFoldASCIIOnly(t *testing.T) {
+	if v, ok := parseLength("1IN", lengthCtx{16, 100}); !ok || v != 96 {
+		t.Errorf("1IN = %v %v, want 96", v, ok)
+	}
+	if _, ok := parseLength("1İN", lengthCtx{16, 100}); ok {
+		t.Error("1İN read as inches")
+	}
+	svg := `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="5" height="5" style="FILL: red"/></svg>`
+	if _, err := Convert(svg, nil, Options{}); err != nil {
+		t.Errorf("FILL: %v", err)
+	}
+	svg = `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="5" height="5" style="fİll: red"/></svg>`
+	if _, err := Convert(svg, nil, Options{}); err == nil {
+		t.Error("fİll read as fill")
+	}
+	if linkURI("MAILTO:a@b.c") == "" || linkURI("maİlto:a@b.c") != "" {
+		t.Error("link schemes fold beyond ASCII, or not ASCII")
+	}
+}

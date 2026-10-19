@@ -404,7 +404,27 @@ func styleOfFace(sf *shape.Face) (weight int, italic bool) {
 // and tabs removed, so "Liberation Sans" and "liberationsans" are one family.
 var familyReplacer = strings.NewReplacer(" ", "", "\t", "")
 
-func normFamily(s string) string { return familyReplacer.Replace(strings.ToLower(s)) }
+func normFamily(s string) string { return familyReplacer.Replace(ASCIILower(s)) }
+
+// ASCIILower is s with A-Z lowered and nothing else changed: CSS compares
+// font-family names and keywords ASCII case-insensitively (CSS Fonts 4,
+// 5.1), where Unicode case mapping would make U+0130 an i and the Kelvin
+// sign a k. (csscolor.ASCIILower, of PR 13 of the audit of 2026-10-18, is
+// the same; one of the two can go once both are in.)
+func ASCIILower(s string) string {
+	for i := 0; i < len(s); i++ {
+		if c := s[i]; 'A' <= c && c <= 'Z' {
+			b := []byte(s)
+			for j := i; j < len(b); j++ {
+				if c := b[j]; 'A' <= c && c <= 'Z' {
+					b[j] = c + 'a' - 'A'
+				}
+			}
+			return string(b)
+		}
+	}
+	return s
+}
 
 // sourceKey is f.source, or its ID for a face that is never loaded again.
 func (f *Face) sourceKey() string {

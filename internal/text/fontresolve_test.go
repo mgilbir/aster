@@ -308,3 +308,36 @@ func TestEvictionKeepsOtherLists(t *testing.T) {
 		}
 	}
 }
+
+// TestFamilyNamesFoldASCIIOnly: CSS matches font-family names ASCII
+// case-insensitively (CSS Fonts 4, 5.1; CSS Syntax's "ASCII
+// case-insensitive"): a name differing by an ASCII letter's case is the same
+// family, and one with U+0130 (İ) or U+212A (the Kelvin sign), which
+// Unicode case mapping folds to i and k, is another.
+func TestFamilyNamesFoldASCIIOnly(t *testing.T) {
+	m, err := New(WithFont("Kite", liberation.SerifRegular), WithFont("Wide", liberation.MonoRegular))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for font, want := range map[string]string{
+		"12px KITE":       "Kite",
+		"12px kItE":       "Kite",
+		"12px WIDE":       "Wide",
+		"12px Kite":       "Liberation Sans", // Kelvin sign: not Kite
+		"12px WİDE":       "Liberation Sans", // dotted capital I: not Wide
+		"12px SANS-SERIF": "Liberation Sans",
+		"12px MONOSPACE":  "Liberation Mono",
+		"12px Kursive":    "Liberation Sans",
+	} {
+		runs, _ := m.ShapeText("Hi", font)
+		if got := runs[0].Face.Family; got != want {
+			t.Errorf("%q drawn in %q, want %q", font, got, want)
+		}
+	}
+	if w, ok := ParseFontWeight("BOLD", 400); !ok || w != 700 {
+		t.Error("BOLD is not bold")
+	}
+	if _, ok := ParseFontStyle("İTALIC"); ok {
+		t.Error("İTALIC read as italic")
+	}
+}

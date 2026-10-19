@@ -309,7 +309,7 @@ func (m *Measurer) faces(css CSSFont) *faceList {
 // interface fonts, which here are the configured ones; cursive and fantasy
 // have no bundled face and draw in the sans-serif default.
 func (m *Measurer) generic(fam string) string {
-	switch strings.ToLower(fam) {
+	switch ASCIILower(fam) {
 	case "serif", "ui-serif":
 		return m.serifFamily
 	case "monospace", "ui-monospace":

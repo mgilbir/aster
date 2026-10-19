@@ -114,7 +114,7 @@ func NewShaper(fonts ...FontData) (Shaper, error) {
 			return nil, fmt.Errorf("raster: font with empty family or data")
 		}
 		opts = append(opts, text.WithFont(f.Family, f.Data))
-		known[strings.ToLower(f.Family)] = true
+		known[text.ASCIILower(f.Family)] = true
 	}
 	m, err := text.New(opts...)
 	if err != nil {
@@ -214,7 +214,7 @@ func (s *textShaper) findKnown(families []string) bool {
 		if i == text.MaxFamilies {
 			break
 		}
-		if s.known[strings.ToLower(strings.TrimSpace(f))] {
+		if s.known[text.ASCIILower(strings.TrimSpace(f))] {
 			return true
 		}
 	}

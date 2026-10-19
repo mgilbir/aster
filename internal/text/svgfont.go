@@ -47,7 +47,7 @@ func ParseFontFamily(v string) (families []string, ok bool) {
 // which the element then does not take.
 func ParseFontWeight(v string, inherited int) (weight int, ok bool) {
 	v = strings.TrimSpace(v)
-	switch strings.ToLower(v) {
+	switch ASCIILower(v) {
 	case "normal":
 		return weightNormal, true
 	case "bold":
@@ -126,7 +126,7 @@ func cssNumber(s string) (float64, bool) {
 // angle or not) are italic, the one style here; normal is not. ok is false
 // for any other value, which the element then does not take.
 func ParseFontStyle(v string) (italic, ok bool) {
-	v = strings.ToLower(strings.TrimSpace(v))
+	v = ASCIILower(strings.TrimSpace(v))
 	switch {
 	case v == "normal":
 		return false, true
