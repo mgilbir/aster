@@ -328,7 +328,7 @@ func zoomLinear(d0, d1, k float64) [2]float64 {
 }
 
 func zoomLog(lo, hi, k float64) [2]float64 {
-	sign := jsSign(lo)
+	sign := jsmath.Sign(lo)
 	lift := func(x float64) float64 { return jsmath.Log(sign * x) }
 	ground := func(x float64) float64 { return sign * jsmath.Exp(x) }
 	d0, d1 := lift(lo), lift(hi)
@@ -353,21 +353,11 @@ func zoomPow(lo, hi, k, exponent float64) [2]float64 {
 }
 
 func zoomSymlog(lo, hi, k, c float64) [2]float64 {
-	lift := func(x float64) float64 { return jsSign(x) * jsmath.Log1p(math.Abs(x/c)) }
-	ground := func(x float64) float64 { return float64(jsSign(x)*jsmath.Expm1(math.Abs(x))) * c }
+	lift := func(x float64) float64 { return jsmath.Sign(x) * jsmath.Log1p(math.Abs(x/c)) }
+	ground := func(x float64) float64 { return float64(jsmath.Sign(x)*jsmath.Expm1(math.Abs(x))) * c }
 	d0, d1 := lift(lo), lift(hi)
 	da := (d0 + d1) / 2
 	return [2]float64{ground(da + float64((d0-da)*k)), ground(da + float64((d1-da)*k))}
-}
-
-func jsSign(x float64) float64 {
-	switch {
-	case x > 0:
-		return 1
-	case x < 0:
-		return -1
-	}
-	return x
 }
 
 func domainCheck(typ string, domain []jsval.Value, g *flowGraph) {
@@ -574,6 +564,9 @@ func configureRange(w jsval.Walker, s scale.Scale, p *opParams, count int) {
 		name := w.String(interpName)
 		fn, ok := scale.Interpolate(name, gamma, hasGamma)
 		if !ok {
+			if why, ok := scale.UnsupportedInterpolator(name); ok {
+				fail("unsupported interpolator %s: %s", name, why)
+			}
 			fail("unrecognized interpolator: %s", name)
 		}
 		ip.SetInterpolate(fn)

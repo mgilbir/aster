@@ -8,6 +8,7 @@ import (
 
 	"github.com/mgilbir/forme/shape"
 
+	"github.com/mgilbir/aster/internal/csscolor"
 	"github.com/mgilbir/aster/internal/text"
 )
 
@@ -112,7 +113,7 @@ func NewShaper(fonts ...FontData) (Shaper, error) {
 			return nil, fmt.Errorf("raster: font with empty family or data")
 		}
 		opts = append(opts, text.WithFont(f.Family, f.Data))
-		known[strings.ToLower(f.Family)] = true
+		known[csscolor.ASCIILower(f.Family)] = true // CSS matches family names ASCII case-insensitively
 	}
 	m, err := text.New(opts...)
 	if err != nil {
@@ -172,7 +173,7 @@ func (s *textShaper) Shape(txt string, req FontRequest, size float64) []ShapedGl
 			continue
 		}
 		fams = append(fams, "'"+f+"'")
-		if s.known == nil || s.known[strings.ToLower(f)] {
+		if s.known == nil || s.known[csscolor.ASCIILower(f)] {
 			found = true
 		}
 	}

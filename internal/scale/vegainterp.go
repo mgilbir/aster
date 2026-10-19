@@ -21,12 +21,15 @@ func InterpolateRange(interpolator UnitInterpolator, rng []float64) UnitInterpol
 	return func(i float64) jsval.Value { return interpolator(start + float64(i*span)) }
 }
 
-// Interpolate is vega-scale's interpolate(type, gamma): it looks up a d3
-// two-argument interpolator by its vega name ("rgb", "hsl", "hcl-long",
-// "cubehelix", "lab", "number", "round", "string", "array", "object", "date",
-// "hue", "value"). gamma applies only to "rgb" and "cubehelix" (which carry a
-// gamma variant upstream) and is ignored by the others, as upstream does. ok is
-// false for a name with no matching d3 interpolator of this shape.
+// Interpolate is vega-scale's interpolate(type, gamma): it looks up the d3
+// interpolator d3['interpolate' + CamelCase(type)], a function of a range's
+// two ends: "rgb", "hsl", "hsl-long", "lab", "hcl", "hcl-long",
+// "cubehelix", "cubehelix-long", "number", "round", "string", "array",
+// "number-array", "object", "date", "hue" and "zoom". gamma applies only to
+// "rgb" and the cubehelix pair (which carry a gamma variant upstream) and is
+// ignored by the others, as upstream does. ok is false for any other name:
+// one d3 does not export (upstream's interpolator is then undefined, and the
+// scale throws when used), and the names UnsupportedInterpolator explains.
 func Interpolate(typ string, gamma float64, hasGamma bool) (Interpolator, bool) {
 	switch jsval.JSLower(typ) { // 'interpolate' + type.toLowerCase()…
 	case "rgb":
@@ -68,10 +71,115 @@ func Interpolate(typ string, gamma float64, hasGamma bool) (Interpolator, bool) 
 		return InterpolateDateI, true
 	case "hue":
 		return InterpolateHue, true
+	case "number-array":
+		return InterpolateNumberArray, true
+	case "zoom":
+		return InterpolateZoom, true
 	case "":
 		return InterpolateValue, true // d3's `interpolate` itself
 	}
 	return nil, false
+}
+
+// UnsupportedInterpolator explains why a name d3 exports is not a scale's
+// interpolator here: transform-css and transform-svg parse their ends with
+// the browser's DOMMatrix and an SVG element, which node (where headless
+// Vega runs) does not have either, so upstream throws as the scale is used;
+// basis, basis-closed, discrete, rgb-basis and rgb-basis-closed take one
+// list of values, not a range's two ends, so a scale built with them yields
+// NaN. ok is false for every other name.
+func UnsupportedInterpolator(typ string) (reason string, ok bool) {
+	switch jsval.JSLower(typ) {
+	case "transform-css", "transform-svg":
+		return "it needs a browser's DOMMatrix or SVG DOM, which node and this engine do not have", true
+	case "basis", "basis-closed", "discrete", "rgb-basis", "rgb-basis-closed":
+		return "it interpolates a list of values, not a range's two ends", true
+	}
+	return "", false
+}
+
+// InterpolateNumberArray is d3.interpolateNumberArray: the first
+// min(a.length, b.length) elements are numbers between a's and b's
+// (a[i] * (1 - t) + b[i] * t), the rest of b as it is. A falsy b is []. Each
+// call returns a fresh array, where upstream mutates one (as for
+// InterpolateArray). A b that is not an array is upstream's TypeError
+// (b.slice is not a function, or a string's units, read-only, assigned to);
+// one with nothing to assign is returned as it is.
+func InterpolateNumberArray(w jsval.Walker, a, b jsval.Value) func(float64) jsval.Value {
+	if !b.IsTruthy() {
+		b = jsval.Arr(nil)
+	}
+	al, aok := jsval.ToArrayLike(a)
+	n := 0
+	if aok && a.IsTruthy() {
+		if bl, ok := jsval.ToArrayLike(b); ok {
+			n = int(min(al.Len(), bl.Len()))
+		}
+	}
+	switch {
+	case b.IsStr() && n == 0:
+		return func(float64) jsval.Value { return b }
+	case !b.IsArr():
+		panic(&Thrown{Name: "TypeError", Msg: "interpolateNumberArray: the end of the range is not an array"})
+	}
+	bi := b.Items()
+	x0, x1 := make([]float64, n), make([]float64, n)
+	w.Work(int64(n))
+	for i := range n {
+		x0[i], x1[i] = jsval.ToNumber(al.At(int64(i))), jsval.ToNumber(bi[i])
+	}
+	return func(t float64) jsval.Value {
+		w.Work(int64(len(bi)))
+		w.Keep(int64(len(bi)) * valueBytes)
+		c := make([]jsval.Value, len(bi))
+		copy(c, bi)
+		for i := range n {
+			c[i] = jsval.Num(float64(x0[i]*(1-t)) + float64(x1[i]*t))
+		}
+		return jsval.Arr(c)
+	}
+}
+
+// InterpolateZoom is d3.interpolateZoom of two views [ux, uy, w]: their
+// members read as `p0[0]` reads them (a view that is null or undefined is
+// upstream's TypeError), and the view written [ux0 + ox, uy0 + oy, w] with
+// JavaScript's +, which joins a start that is a string, an array or an
+// object as text.
+func InterpolateZoom(w jsval.Walker, a, b jsval.Value) func(float64) jsval.Value {
+	if a.IsNullish() || b.IsNullish() {
+		panic(&Thrown{Name: "TypeError", Msg: "interpolateZoom: a view is null or undefined"})
+	}
+	var p0, p1 [3]float64
+	var u0 [2]jsval.Value
+	for i := range 3 {
+		v0, v1 := viewMember(a, i), viewMember(b, i)
+		p0[i], p1[i] = jsval.ToNumber(v0), jsval.ToNumber(v1)
+		if i < 2 {
+			u0[i] = v0
+		}
+	}
+	move, _ := zoomRho(math.Sqrt2, 2, 4)(p0, p1)
+	plus := func(start jsval.Value, x0, d float64) jsval.Value {
+		switch start.Kind() {
+		case jsval.KindNum, jsval.KindBool, jsval.KindNull, jsval.KindUndefined:
+			return jsval.Num(x0 + d)
+		}
+		return jsval.Str(w.String(start) + jsval.JSNumberString(d)) // ToPrimitive gives a string
+	}
+	return func(t float64) jsval.Value {
+		m := move(t)
+		w.Keep(3 * valueBytes)
+		return jsval.ArrOf(plus(u0[0], p0[0], m[0]), plus(u0[1], p0[1], m[1]), jsval.Num(m[2]))
+	}
+}
+
+// viewMember is v[i] for a value that is not null or undefined.
+func viewMember(v jsval.Value, i int) jsval.Value {
+	if v.IsObj() {
+		return v.ObjValue().Lookup(jsval.JSNumberString(float64(i)))
+	}
+	a, _ := jsval.ToArrayLike(v)
+	return a.At(int64(i))
 }
 
 // InterpolateColors is vega-scale's interpolateColors: a piecewise

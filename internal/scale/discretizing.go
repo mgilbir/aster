@@ -545,12 +545,16 @@ func InvertRangeExtent(s interface {
 	ExtentInverter
 }, loV, hiV jsval.Value) (jsval.Value, bool) {
 	rng := s.Range()
-	if jsGreater(loV, hiV) {
+	var w jsval.Walker
+	if m, ok := s.(interface{ walker() jsval.Walker }); ok {
+		w = m.walker()
+	}
+	if jsGreater(w, loV, hiV) {
 		loV, hiV = hiV, loV
 	}
 	mn, mx := -1, 0
 	for i, r := range rng {
-		if jsGreaterEq(r, loV) && jsGreaterEq(hiV, r) {
+		if jsGreaterEq(w, r, loV) && jsGreaterEq(w, hiV, r) {
 			if mn < 0 {
 				mn = i
 			}
@@ -572,32 +576,15 @@ func InvertRangeExtent(s interface {
 	return jsval.ArrOf(a, b), true
 }
 
-// jsCompare implements the abstract relational comparison for the value kinds
-// scales see: two strings compare lexically, anything else numerically. ok is
-// false when either side is NaN (every relation is then false).
-func jsCompare(a, b jsval.Value) (c int, ok bool) {
-	if a.IsStr() && b.IsStr() {
-		x, y := a.StrValue(), b.StrValue()
-		switch {
-		case x < y:
-			return -1, true
-		case x > y:
-			return 1, true
-		}
-		return 0, true
-	}
-	x, y := jsval.ToNumber(a), jsval.ToNumber(b)
-	if x != x || y != y {
-		return 0, false
-	}
-	switch {
-	case x < y:
-		return -1, true
-	case x > y:
-		return 1, true
-	}
-	return 0, true
+// jsGreater and jsGreaterEq are > and >= of JavaScript: its abstract
+// relational comparison (strings by UTF-16 code unit, arrays and objects by
+// their text), a walk w bounds.
+func jsGreater(w jsval.Walker, a, b jsval.Value) bool {
+	c, ok := w.Relate(a, b)
+	return ok && c > 0
 }
 
-func jsGreater(a, b jsval.Value) bool   { c, ok := jsCompare(a, b); return ok && c > 0 }
-func jsGreaterEq(a, b jsval.Value) bool { c, ok := jsCompare(a, b); return ok && c >= 0 }
+func jsGreaterEq(w jsval.Walker, a, b jsval.Value) bool {
+	c, ok := w.Relate(a, b)
+	return ok && c >= 0
+}

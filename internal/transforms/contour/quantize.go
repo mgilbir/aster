@@ -93,8 +93,8 @@ func tickSpec(start, stop, count float64) (i1, i2, inc float64) {
 	}
 	if power < 0 {
 		inc = jsmath.Pow(10, -power) / factor
-		i1 = jsRound(float64(start * inc))
-		i2 = jsRound(float64(stop * inc))
+		i1 = jsmath.Round(float64(start * inc))
+		i2 = jsmath.Round(float64(stop * inc))
 		if i1/inc < start {
 			i1++
 		}
@@ -104,8 +104,8 @@ func tickSpec(start, stop, count float64) (i1, i2, inc float64) {
 		inc = -inc
 	} else {
 		inc = jsmath.Pow(10, power) * factor
-		i1 = jsRound(start / inc)
-		i2 = jsRound(stop / inc)
+		i1 = jsmath.Round(start / inc)
+		i2 = jsmath.Round(stop / inc)
 		if i1*inc < start {
 			i1++
 		}

@@ -1,9 +1,10 @@
 package vega
 
 import (
-	"github.com/mgilbir/aster/internal/jsmath"
 	"math"
 	"strings"
+
+	"github.com/mgilbir/aster/internal/jsmath"
 
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/expr"
@@ -310,7 +311,7 @@ func (c *encCompiler) entry(enc jsval.Value) valueFn {
 	if !enc.Get("exponent").IsNullish() {
 		inner, exp := cur.fn(), c.property(enc.Get("exponent"))
 		cur = term{a: func(ev *encEval) jsval.Value {
-			return jsval.Num(jsPow(jsval.ToNumber(inner(ev)), jsval.ToNumber(exp(ev))))
+			return jsval.Num(jsmath.Pow(jsval.ToNumber(inner(ev)), jsval.ToNumber(exp(ev))))
 		}}
 	}
 	if !enc.Get("mult").IsNullish() {
@@ -334,7 +335,7 @@ func (c *encCompiler) entry(enc jsval.Value) valueFn {
 	if enc.Get("round").IsTruthy() {
 		inner := fn
 		fn = func(ev *encEval) jsval.Value {
-			return jsval.Num(jsRound(jsval.ToNumber(inner(ev))))
+			return jsval.Num(jsmath.Round(jsval.ToNumber(inner(ev))))
 		}
 	}
 	return fn
@@ -688,33 +689,6 @@ func jsAdd(a, b jsval.Value) jsval.Value {
 		return jsval.Str(a.AsString() + b.AsString())
 	}
 	return jsval.Num(jsval.ToNumber(a) + jsval.ToNumber(b))
-}
-
-func jsRound(x float64) float64 {
-	if math.IsNaN(x) || math.IsInf(x, 0) {
-		return x
-	}
-	r := math.Floor(x)
-	if x-r >= 0.5 {
-		r++
-	}
-	if r == 0 && (x < 0 || math.Signbit(x)) {
-		return math.Copysign(0, -1)
-	}
-	return r
-}
-
-func jsPow(x, y float64) float64 {
-	if math.IsNaN(y) {
-		return math.NaN()
-	}
-	if y == 0 {
-		return 1
-	}
-	if (x == 1 || x == -1) && math.IsInf(y, 0) {
-		return math.NaN()
-	}
-	return jsmath.Pow(x, y)
 }
 
 // lerp is vega-util's lerp over a range value.

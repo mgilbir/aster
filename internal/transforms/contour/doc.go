@@ -19,7 +19,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsmath"
@@ -54,18 +53,6 @@ func checkCtx(ctx context.Context) error {
 		return nil
 	}
 	return ctx.Err()
-}
-
-// jsRound is Math.round: halves round toward +Infinity.
-func jsRound(x float64) float64 {
-	if math.IsNaN(x) || math.IsInf(x, 0) {
-		return x
-	}
-	r := math.Floor(x)
-	if x-r >= 0.5 {
-		r++
-	}
-	return r
 }
 
 // toInt32 is JavaScript's ToInt32 applied to a double (used by |0 and >>).

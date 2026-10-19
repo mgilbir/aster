@@ -115,7 +115,7 @@ func (p *StringPath) SetDigits(d int) {
 
 func (p *StringPath) num(f float64) {
 	if p.k != 0 {
-		n := jsRound(float64(f * p.k))
+		n := jsmath.Round(float64(f * p.k))
 		if p.d <= 6 && n > -1e15 && n < 1e15 {
 			p.buf = appendScaled(p.buf, int64(n), p.d)
 			return
@@ -123,19 +123,6 @@ func (p *StringPath) num(f float64) {
 		f = n / p.k
 	}
 	p.buf = AppendNumber(p.buf, f)
-}
-
-// jsRound is JavaScript's Math.round: halves round toward +Infinity.
-func jsRound(x float64) float64 {
-	x = float64(x) // round a caller's product first (no FMA)
-	if math.Abs(x) >= 1<<52 || x != x {
-		return x
-	}
-	f := math.Floor(x)
-	if x-f >= 0.5 {
-		return f + 1
-	}
-	return f
 }
 
 func (p *StringPath) pt(c byte, x, y float64) {

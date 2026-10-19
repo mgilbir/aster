@@ -55,7 +55,11 @@ func init() {
 			if in.IsStr() {
 				s.workBytes(len(in.StrValue())) // a pass over the input
 			}
-			return s.locale().TimeParseValue(s.walker(), in, s.specifier(jsval.Str(s.str(arg(args, 1)))), utc)
+			out, err := s.locale().TimeParseValue(s.walker(), in, s.specifier(jsval.Str(s.str(arg(args, 1)))), utc)
+			if err != nil {
+				failFormat(err)
+			}
+			return out
 		}
 	}
 	fn("timeParse", parse(false))

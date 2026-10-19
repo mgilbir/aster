@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	pdf0 "github.com/mgilbir/pdf0"
+
+	"github.com/mgilbir/aster/internal/csscolor"
 )
 
 // Links. Vega wraps a mark with an href in <a xlink:href="…">. Its contents
@@ -44,7 +46,7 @@ func linkURI(href string) string {
 			return ""
 		}
 	}
-	if !linkSchemes[strings.ToLower(scheme)] {
+	if !linkSchemes[csscolor.ASCIILower(scheme)] { // the scheme is ASCII (checked above)
 		return ""
 	}
 	var b strings.Builder

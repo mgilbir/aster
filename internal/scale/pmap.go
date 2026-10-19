@@ -3,6 +3,7 @@ package scale
 import (
 	"math"
 
+	"github.com/mgilbir/aster/internal/jsmath"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -197,7 +198,7 @@ func (m *pmap) value(x float64) jsval.Value {
 		p := m.nr[i]
 		v := lerp(p.a, p.b, t)
 		if m.round {
-			v = jsRound(v)
+			v = jsmath.Round(v)
 		}
 		return jsval.Num(v)
 	}
@@ -213,7 +214,7 @@ func (m *pmap) number(x float64) float64 {
 		p := m.nr[i]
 		v := lerp(p.a, p.b, t)
 		if m.round {
-			v = jsRound(v)
+			v = jsmath.Round(v)
 		}
 		return v
 	}

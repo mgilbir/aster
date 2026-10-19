@@ -121,3 +121,70 @@ func TestNoGoCaseOrSpaceInTheEngine(t *testing.T) {
 		t.Errorf("goCaseOrSpaceAllowed: %s is no longer used; remove it", k)
 	}
 }
+
+// TestCSSFoldsASCIIOnly: CSS reads its keywords, function and property
+// names, units and font family names ASCII case-insensitively, so the
+// packages that read SVG's CSS fold with csscolor.ASCIILower and
+// ASCIIEqualFold, never with Go's Unicode case mapping, under which "whİte"
+// is a colour and "stroKe" (a Kelvin sign) a property (routed from the
+// PR02 review of the 2026-10-18 audit).
+func TestCSSFoldsASCIIOnly(t *testing.T) {
+	forbidden := map[string]map[string]bool{
+		"strings": {"ToLower": true, "ToUpper": true, "ToTitle": true, "EqualFold": true},
+		"bytes":   {"ToLower": true, "ToUpper": true, "ToTitle": true, "EqualFold": true},
+		"unicode": {"ToLower": true, "ToUpper": true, "ToTitle": true, "SimpleFold": true},
+	}
+	scanned := 0
+	fset := token.NewFileSet()
+	for _, dir := range []string{"internal/csscolor", "internal/raster", "internal/svgpdf"} {
+		err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() {
+				if d.Name() == "testdata" {
+					return fs.SkipDir
+				}
+				return nil
+			}
+			if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return nil
+			}
+			f, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+			if err != nil {
+				return err
+			}
+			scanned++
+			names := map[string]string{}
+			for _, imp := range f.Imports {
+				p, _ := strconv.Unquote(imp.Path.Value)
+				if forbidden[p] != nil {
+					n := p
+					if imp.Name != nil {
+						n = imp.Name.Name
+					}
+					names[n] = p
+				}
+			}
+			ast.Inspect(f, func(n ast.Node) bool {
+				sel, ok := n.(*ast.SelectorExpr)
+				if !ok {
+					return true
+				}
+				if id, ok := sel.X.(*ast.Ident); ok {
+					if p, ok := names[id.Name]; ok && forbidden[p][sel.Sel.Name] {
+						t.Errorf("%s: %s.%s folds Unicode case; CSS folds ASCII only: use csscolor.ASCIILower or ASCIIEqualFold", fset.Position(sel.Pos()), p, sel.Sel.Name)
+					}
+				}
+				return true
+			})
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if scanned < 40 {
+		t.Fatalf("only %d files scanned: the scan is broken", scanned)
+	}
+}

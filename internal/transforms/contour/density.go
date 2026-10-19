@@ -204,7 +204,7 @@ func radius(bw float64, data []jsval.Value, f Accessor) float64 {
 	if !(bw >= 0) {
 		v = bandwidthNRD(data, f)
 	}
-	return jsRound((math.Sqrt(float64(4*v*v)+1) - 1) / 2)
+	return jsmath.Round((math.Sqrt(float64(4*v*v)+1) - 1) / 2)
 }
 
 // bandwidthNRD is Scott's normal reference rule (vega-statistics bandwidth).

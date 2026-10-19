@@ -3,6 +3,7 @@ package layout
 import (
 	"math"
 
+	"github.com/mgilbir/aster/internal/jsmath"
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/scene"
 )
@@ -233,7 +234,7 @@ func legendGroupLayout(item, entry *scene.Item) {
 	}
 
 	// translate the legend if the title pushes into negative coordinates
-	if d := jsRound(title.Bounds.X1 - pad); d < 0 {
+	if d := jsmath.Round(title.Bounds.X1 - pad); d < 0 {
 		translate(entry, -d, 0)
 		translate(title, -d, 0)
 	}
@@ -271,11 +272,11 @@ func legendTitleOffset(item, entry, title *scene.Item, anchor string, y int, lr,
 	}
 	switch anchor {
 	case start:
-		return jsRound(u)
+		return jsmath.Round(u)
 	case end:
-		return jsRound(v - o)
+		return jsmath.Round(v - o)
 	}
-	return jsRound(0.5 * (s - o))
+	return jsmath.Round(0.5 * (s - o))
 }
 
 // translate moves an item, its bounds and its mark's bounds.

@@ -79,8 +79,8 @@ func (cc *clipCircle) intersect(a, b cpoint, two bool) (q, q1 cpoint, ok bool) {
 	n1n2 := n2[0] // cartesianDot(n1, n2)
 	determinant := n2n2 - float64(n1n2*n1n2)
 
-	// Two polar points.
-	if determinant == 0 {
+	// Two polar points (d3: `if (!determinant)`, which a NaN passes too).
+	if !truthy(determinant) {
 		if !two {
 			return a, cpoint{}, true
 		}

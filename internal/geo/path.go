@@ -3,6 +3,8 @@ package geo
 import (
 	"context"
 
+	"github.com/mgilbir/aster/internal/budget"
+
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -24,7 +26,8 @@ type Path struct {
 	// bctx and wb bound the walks (see Bind).
 	bctx context.Context
 	wb   *walkBound
-	lim  *pointCharge // reused wrapper around str or cs for an unprojected path
+	led  *budget.Ledger // the bound call's, charged for the path text as it is built
+	lim  *pointCharge   // reused wrapper around str or cs for an unprojected path
 	cs   *pathContextStream
 
 	// walking is set while a string walk is in progress; still set at the next
@@ -45,6 +48,7 @@ func (p *Path) Bind(ctx context.Context) {
 	}
 	p.bctx = ctx
 	p.wb = newWalkBound(ctx)
+	p.led = budget.LedgerFrom(ctx)
 	p.lim = nil
 }
 
@@ -130,6 +134,7 @@ func (p *Path) String(object jsval.Value) (string, bool) {
 	if p.str == nil {
 		p.str = newPathString(p.digits)
 	}
+	p.str.led = p.led
 	if object.IsTruthy() {
 		r := p.radius
 		if p.radiusFn != nil {

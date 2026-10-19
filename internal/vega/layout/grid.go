@@ -4,6 +4,7 @@ import (
 	"errors"
 	"math"
 
+	"github.com/mgilbir/aster/internal/jsmath"
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/scene"
 )
@@ -378,8 +379,8 @@ func gridLayout(groups []*scene.Item, opt *gridOptions) scene.Bounds {
 	case middle:
 		ay -= bounds.Height() / 2
 	}
-	ax = jsRound(ax)
-	ay = jsRound(ay)
+	ax = jsmath.Round(ax)
+	ay = jsmath.Round(ay)
 
 	// update mark positions and bounds
 	bounds.Clear()

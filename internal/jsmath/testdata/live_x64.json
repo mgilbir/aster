@@ -1,0 +1,11 @@
+{
+  "node": "v24.21.0",
+  "arch": "x64",
+  "n": 100000,
+  "seed": 1,
+  "count": {
+    "pow": 0, "exp": 39, "expm1": 52, "log": 306, "log1p": 85, "log2": 0, "log10": 307, "cbrt": 0,
+    "sinh": 58, "cosh": 25, "tanh": 19, "asinh": 117, "acosh": 28, "atanh": 40,
+    "sin": 491, "cos": 444, "atan": 82, "asin": 171, "acos": 76, "tan": 753
+  }
+}

@@ -72,6 +72,8 @@ To turn a found divergence into a regression case:
 
 ## Upstream's own test suites
 
+`internal/jsmath` replays `Math`'s results recorded from node on arm64, whose V8 the package follows. `go test ./internal/jsmath -run TestV8Live -args -live=N` compares fresh arguments with the node on `PATH`: exactly on arm64; on x86-64, where V8 rounds 17 of the 20 functions differently in the last bit for 0.02% to 0.75% of arguments, the differences are reported, and for the recorded run (`-live=100000`, node 24.21.0) their count per function must equal `internal/jsmath/testdata/live_x64.json`'s.
+
 `scripts/record-upstream-vectors.sh` runs the test files of the Vega and d3 packages it lists (30; 29 record calls), at the installed versions and from their git tags, and records every call they make with upstream's answer in `testdata/upstream-vectors-cache` (git-ignored). The 34 `TestUpstream*` tests in `internal/` replay the vectors of 25 of those packages against the engine and require exact equality, with floors totalling 21,523 calls. They skip without the vectors (and fail with `ASTER_ORACLE=require`). Known divergences are listed with their cause in `testdata/upstream-vectors/known-divergences.txt`, some only for the architecture node recorded them on, and are asserted both ways. Each pins a hash of both answers, upstream's and the engine's, so it accepts that divergence and no other; a long signature ends in a hash of the whole call; a line that names no recorded vector fails. CI's oracle job runs on x86-64 Linux, so the lines for other architectures, and the macOS alternatives of the expectation files, are checked only where someone runs the oracle there.
 
 ## Unit tests without node

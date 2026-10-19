@@ -323,6 +323,11 @@ func WithHarfBuzzTextMetrics() Option {
 // accepted; New returns an error for an unknown one, and for "Local": the
 // host's zone would make the output depend on the machine that renders it,
 // so name the zone instead.
+//
+// String(date) in an expression or a label prints V8's name of the zone,
+// "Eastern Standard Time" for America/New_York, from a table of ICU's names
+// recorded from node (tzdata 2026c); a zone name the table lacks prints its
+// tzdata abbreviation instead.
 func WithTimezone(tz string) Option {
 	return func(c *config) {
 		c.timezone = tz

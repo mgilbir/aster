@@ -46,6 +46,10 @@ func failFormat(err error) {
 	if errors.Is(err, budget.ErrLimit) {
 		panic(&limitPanic{err})
 	}
+	var th *jsval.Thrown
+	if errors.As(err, &th) {
+		throw(th.Name, "%s", th.Msg) // the exception d3 throws, as it throws it
+	}
 	throw("Error", "%v", err)
 }
 

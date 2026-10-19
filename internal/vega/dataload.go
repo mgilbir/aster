@@ -568,6 +568,7 @@ func (v *runView) applyParse(data []jsval.Value, columns []string, types jsval.V
 		return nil
 	}
 	parsers := make([]func(jsval.Value) jsval.Value, len(order))
+	var parseErr error
 	for i, field := range order {
 		v.work(1)
 		t := typeOf[field]
@@ -588,7 +589,12 @@ func (v *runView) applyParse(data []jsval.Value, columns []string, types jsval.V
 				if x.IsNullish() {
 					s = "null"
 				}
-				if ms, ok := tp.Parse(s); ok {
+				ms, ok, err := tp.ParseErr(s)
+				if err != nil {
+					parseErr = err // d3 throws: the load fails, as upstream's read does
+					return jsval.Null
+				}
+				if ok {
 					return jsval.Timestamp(ms)
 				}
 				return jsval.Null
@@ -609,6 +615,9 @@ func (v *runView) applyParse(data []jsval.Value, columns []string, types jsval.V
 		}
 		for j, field := range order {
 			o.Set(field, parsers[j](o.Lookup(field)))
+			if parseErr != nil {
+				return parseErr
+			}
 		}
 	}
 	return nil

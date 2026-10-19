@@ -335,7 +335,7 @@ func tickLog(ctx context.Context, s Scale, count TickCount, values bool) (test f
 	logb := jsmath.Log(base)
 	k := math.Max(1, float64(base*count.number())/float64(len(ticks)))
 	test = func(d float64) bool {
-		i := d / jsPow(base, jsRound(jsmath.Log(d)/logb))
+		i := d / jsmath.Pow(base, jsmath.Round(jsmath.Log(d)/logb))
 		if float64(i*base) < base-0.5 {
 			i *= base
 		}

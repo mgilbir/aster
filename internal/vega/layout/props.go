@@ -95,18 +95,6 @@ func setNum(n *scene.Num, v float64) bool {
 func xOf(it *scene.Item) float64 { return it.X.Val() }
 func yOf(it *scene.Item) float64 { return it.Y.Val() }
 
-// jsRound is Math.round: halves round toward +Infinity.
-func jsRound(x float64) float64 {
-	if math.IsNaN(x) || math.IsInf(x, 0) {
-		return x
-	}
-	r := math.Floor(x)
-	if x-r >= 0.5 {
-		r++
-	}
-	return r
-}
-
 // jsMax and jsMin are Math.max/Math.min; NaN wins.
 func jsMax(a, b float64) float64 {
 	if math.IsNaN(a) || math.IsNaN(b) {

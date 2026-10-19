@@ -1033,3 +1033,15 @@ func (w Walker) Keep(n int64) {
 		w.l.MustAlloc(n)
 	}
 }
+
+// Room is how many bytes the call can still hold: its ledger's room
+// (math.MaxInt64 without a limit), or for the detached Walker the text a
+// detached walk may build. A builder that is no walk but must stop before it
+// outgrows the call (a time label, whose specifier and locale choose its
+// length) writes at most this much, then stops with budget.ErrLimit.
+func (w Walker) Room() int64 {
+	if w.ctx == nil {
+		return maxDetachedBytes
+	}
+	return w.l.Room()
+}

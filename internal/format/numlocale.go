@@ -4,13 +4,15 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
-	"github.com/mgilbir/aster/internal/budget"
-	"github.com/mgilbir/aster/internal/jsmath"
 	"math"
 	"math/big"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/mgilbir/aster/internal/budget"
+	"github.com/mgilbir/aster/internal/jsmath"
 
 	"github.com/mgilbir/aster/internal/jsval"
 )
@@ -30,7 +32,7 @@ var prefixes = [17]string{"y", "z", "a", "f", "p", "n", "µ", "m", "", "k", "M",
 type NumberLocaleDef struct {
 	Decimal   *string
 	Thousands *string
-	Grouping  []float64 // nil: absent. Non-nil but empty groups to the empty string (as d3 does).
+	Grouping  []float64 // nil: absent. Non-nil but empty groups to the empty string (as d3 does). Sizes are Number(size): fractions, NaN and infinities are d3's.
 	Currency  *[2]string
 	Numerals  []string // nil: absent; digits missing from a short list format as "undefined"
 	Percent   *string
@@ -45,10 +47,17 @@ type NumberLocale struct {
 	currencyPrefix, currencySfx  string
 	decimal, percent, minus, nan string
 	numerals                     []string // nil: identity
+	halves                       bool     // a member holds a lone surrogate (its WTF-8 bytes begin with 0xED)
 }
 
 type grouper struct {
-	sizes     []int
+	// sizes are the group sizes as numbers, as d3 keeps them: a fraction
+	// moves the cut by a fraction, which substring truncates.
+	sizes []float64
+	// ints are the sizes as ints when every one is a whole number from 1
+	// to 2^30 (any real locale's): grouping then runs on ints, the same
+	// arithmetic exactly, without substring's conversions.
+	ints      []int
 	thousands string
 }
 
@@ -109,25 +118,37 @@ func DefaultNumberLocale() *NumberLocale { return defaultNumberLocale }
 
 // NewNumberLocale is d3.formatLocale. It fails, with an error wrapping
 // budget.ErrLimit, for a member longer than MaxLocaleSymbol or
-// MaxLocaleText.
+// MaxLocaleText, and for a group size below one digit that grouping reaches
+// (d3's grouping loop steps back by the size: one of 0.5 writes a separator
+// per half digit, one of 1e-300 never ends).
 func NewNumberLocale(def NumberLocaleDef) (*NumberLocale, error) {
 	if err := def.check(); err != nil {
 		return nil, err
 	}
 	l := &NumberLocale{decimal: ".", percent: "%", minus: "−", nan: "NaN"}
 	if def.Grouping != nil && def.Thousands != nil {
-		sizes := make([]int, len(def.Grouping))
-		for i, g := range def.Grouping {
-			switch {
-			case math.IsNaN(g) || g <= 0:
-				sizes[i] = 0
-			case g > 1<<30:
-				sizes[i] = 1 << 30
-			default:
-				sizes[i] = int(g)
+		// The sizes grouping reaches: the loop ends at a size that is not
+		// positive, and once the sizes so far cover the longest digits.
+		total := 0.0
+		for _, g := range def.Grouping {
+			if !(g > 0) || total >= maxGroupSizes {
+				break
 			}
+			if g < 1 {
+				return nil, fmt.Errorf("%w: number locale group size %v is below one digit", budget.ErrLimit, g)
+			}
+			total += g
 		}
-		l.grouper = &grouper{sizes: sizes, thousands: *def.Thousands}
+		l.grouper = &grouper{sizes: slices.Clone(def.Grouping), thousands: *def.Thousands}
+		ints := make([]int, len(def.Grouping))
+		for i, g := range def.Grouping {
+			if !(g >= 1 && g <= 1<<30 && g == math.Trunc(g)) {
+				ints = nil
+				break
+			}
+			ints[i] = int(g)
+		}
+		l.grouper.ints = ints
 	}
 	if def.Currency != nil {
 		l.currencyPrefix, l.currencySfx = def.Currency[0], def.Currency[1]
@@ -147,11 +168,32 @@ func NewNumberLocale(def NumberLocaleDef) (*NumberLocale, error) {
 	if def.NaN != nil {
 		l.nan = *def.NaN
 	}
+	for _, m := range append([]string{l.currencyPrefix, l.currencySfx, l.decimal, l.percent, l.minus, l.nan, ""}, l.numerals...) {
+		l.halves = l.halves || strings.IndexByte(m, 0xED) >= 0
+	}
+	if l.grouper != nil {
+		l.halves = l.halves || strings.IndexByte(l.grouper.thousands, 0xED) >= 0
+	}
 	return l, nil
 }
 
+// maxGroupSizes is how many group sizes grouping can use: each step of
+// d3's loop takes at least one digit, and the digits grouped are at most a
+// field's width (MaxWidth) of zero padding and a number's digits (1,024 of
+// a binary 2^1024). Sizes past it are never reached, so they are not read:
+// an array-like's length is not a bound on the work ({length: 1e9} is one).
+const maxGroupSizes = MaxWidth + 2048
+
+// maxArrayLikeLength is the longest array Array.prototype.map can make:
+// past it ArraySpeciesCreate throws a RangeError (Invalid array length).
+const maxArrayLikeLength = 1<<32 - 1
+
 // NumberLocaleFromValue reads a locale definition object as found in a Vega
-// configuration, coercing members with String()/Number() as d3 does.
+// configuration, as d3-format reads it: grouping and numerals through
+// Array.prototype.map.call (any array-like: a string's UTF-16 units, an
+// object's length and indexes), the currency as currency[0] and
+// currency[1], the rest with String(). It fails where d3 throws (a null
+// grouping, numerals or currency).
 func NumberLocaleFromValue(v jsval.Value) (*NumberLocale, error) {
 	if !v.IsObj() {
 		return nil, errors.New("number locale must be an object")
@@ -166,22 +208,56 @@ func NumberLocaleFromValue(v jsval.Value) (*NumberLocale, error) {
 	}
 	def.Decimal, def.Thousands, def.Percent = str("decimal"), str("thousands"), str("percent")
 	def.Minus, def.NaN = str("minus"), str("nan")
-	if g := v.Get("grouping"); !g.IsUndefined() {
+	// mapped is Array.prototype.map.call(m, f) of its first n elements.
+	mapped := func(key string, n int64, f func(jsval.Value)) error {
+		a, ok := jsval.ToArrayLike(v.Get(key))
+		if !ok {
+			return fmt.Errorf("TypeError: number locale %s: Array.prototype.map called on null or undefined", key)
+		}
+		if a.Len() > maxArrayLikeLength {
+			return fmt.Errorf("RangeError: number locale %s: Invalid array length", key)
+		}
+		for i := range min(a.Len(), n) {
+			f(a.At(i))
+		}
+		return nil
+	}
+	// d3 maps the grouping only when there is a thousands separator.
+	if !v.Get("grouping").IsUndefined() && def.Thousands != nil {
 		def.Grouping = []float64{}
-		for _, it := range g.Items() {
+		if err := mapped("grouping", maxGroupSizes, func(it jsval.Value) {
 			def.Grouping = append(def.Grouping, jsval.ToNumber(it))
+		}); err != nil {
+			return nil, err
 		}
 	}
 	if c := v.Get("currency"); !c.IsUndefined() {
-		def.Currency = &[2]string{c.Index(0).AsString(), c.Index(1).AsString()}
+		if c.IsNull() {
+			return nil, errors.New("TypeError: number locale currency: Cannot read properties of null (reading '0')")
+		}
+		def.Currency = &[2]string{member(c, 0).AsString(), member(c, 1).AsString()}
 	}
-	if n := v.Get("numerals"); !n.IsUndefined() {
+	if !v.Get("numerals").IsUndefined() {
 		def.Numerals = []string{}
-		for _, it := range n.Items() {
+		// Only the digits 0 to 9 index the numerals.
+		if err := mapped("numerals", 10, func(it jsval.Value) {
 			def.Numerals = append(def.Numerals, it.AsString())
+		}); err != nil {
+			return nil, err
 		}
 	}
 	return NewNumberLocale(def)
+}
+
+// member is v[i] for a value that is not null or undefined: a string's i-th
+// UTF-16 unit, an array's element, an object's member "i" (whatever its
+// length), and undefined for the rest.
+func member(v jsval.Value, i int64) jsval.Value {
+	if v.IsObj() {
+		return v.ObjValue().Lookup(strconv.FormatInt(i, 10))
+	}
+	a, _ := jsval.ToArrayLike(v)
+	return a.At(i)
 }
 
 // NumberFormat is a compiled format function. Immutable; safe for concurrent
@@ -202,6 +278,9 @@ type NumberFormat struct {
 	prefix    string
 	suffix    string
 	maybeSufx bool
+	// halves: a locale symbol or the fill holds a lone surrogate, which may
+	// pair with its neighbour once joined.
+	halves bool
 	// simpleG: the format is a trimmed "g" with no prefix, suffix, sign,
 	// width, grouping or numerals, the shape of the default specifier, whose
 	// output appendSimpleG writes without the general machinery.
@@ -278,6 +357,7 @@ func (l *NumberLocale) newFormat(s Specifier, extraPrefix, extraSuffix string) (
 	default:
 		f.width = int(w)
 	}
+	f.halves = l.halves || strings.IndexByte(f.fill, 0xED) >= 0
 	f.simpleG = f.typ == 'g' && f.trim && f.prefix == "" && f.suffix == "" && f.sign == '-' &&
 		f.width == 0 && !f.comma && f.precision <= 14 && l.numerals == nil
 	return f, nil
@@ -360,6 +440,17 @@ func (f *NumberFormat) AppendFormat(dst []byte, x float64) []byte {
 }
 
 func (f *NumberFormat) appendFormat(dst []byte, x float64, cText string) []byte {
+	start := len(dst)
+	out := f.appendParts(dst, x, cText)
+	if f.halves || (f.typ == 'c' && strings.IndexByte(cText, 0xED) >= 0) {
+		// Pieces that end and begin with half a character (a locale's
+		// symbols, a string) join into one, as JavaScript's + joins them.
+		out = jsval.PairSurrogates(out, start)
+	}
+	return out
+}
+
+func (f *NumberFormat) appendParts(dst []byte, x float64, cText string) []byte {
 	if f.simpleG {
 		if out, ok := f.appendSimpleG(dst, x); ok {
 			return out
@@ -422,7 +513,7 @@ func (f *NumberFormat) appendFormat(dst []byte, x float64, cText string) []byte 
 
 	// With a fill other than "0", grouping is applied before padding.
 	if f.comma && !f.zero {
-		body = loc.group(body, math.MaxInt)
+		body = loc.group(body, math.Inf(1))
 	}
 	length := jsLen(valuePrefix) + jsLen(body) + jsLen(valueSuffix)
 	padN := 0
@@ -430,9 +521,9 @@ func (f *NumberFormat) appendFormat(dst []byte, x float64, cText string) []byte 
 		padN = f.width - length
 	}
 	if f.comma && f.zero {
-		w := math.MaxInt
+		w := math.Inf(1)
 		if padN > 0 {
-			w = f.width - jsLen(valueSuffix)
+			w = float64(f.width - jsLen(valueSuffix))
 		}
 		body = loc.group(strings.Repeat("0", padN)+body, w)
 		padN = 0
@@ -487,37 +578,61 @@ func (l *NumberLocale) applyNumerals(dst []byte, start int) []byte {
 // group is d3's formatGroup: insert the thousands separator into the digits
 // of value, right to left, in the locale's group sizes (the last size
 // repeating). width limits the grouped text to that many UTF-16 units, which
-// is how zero padding is made to fill a field.
-func (l *NumberLocale) group(value string, width int) string {
+// is how zero padding is made to fill a field (+Inf: no limit).
+//
+// The arithmetic is d3's, in numbers: `t.push(value.substring(i -= g, i +
+// g))` with a fractional size moves the cut by a fraction that substring
+// truncates, a huge one loses the digits to rounding, an infinite one cuts
+// nothing, and NaN or a size of 0 ends the loop. NewNumberLocale refuses the
+// sizes below 1 the loop reaches, so each step takes at least one unit.
+func (l *NumberLocale) group(value string, width float64) string {
 	if l.grouper == nil {
 		return value
 	}
 	sizes := l.grouper.sizes
 	// The digits are ASCII except when a locale's NaN text is grouped by a
-	// type that never splits off a suffix; index by characters then.
-	var runes []rune
+	// type that never splits off a suffix; index by UTF-16 units then.
+	var units []uint16
 	n := len(value)
-	for k := 0; k < len(value); k++ {
-		if value[k] >= utf8.RuneSelf {
-			runes = []rune(value)
-			n = len(runes)
-			break
-		}
+	if !isASCIIString(value) {
+		units = jsval.UTF16Units(value)
+		n = len(units)
 	}
-	i := n
-	var cutBuf [16]int
-	cuts := cutBuf[:0] // start offsets of the pieces, collected right to left
-	j, length := 0, 0
-	g := 0
+	var pieceBuf [16][2]int
+	pieces := pieceBuf[:0] // [start, end) of each piece, collected right to left
+	if ints := l.grouper.ints; len(ints) > 0 {
+		w := math.MaxInt
+		if width < float64(math.MaxInt>>1) {
+			w = int(width) // a field width: a whole number
+		}
+		i, length, j, g := n, 0, 0, ints[0]
+		for i > 0 && g > 0 {
+			if length+g+1 > w {
+				g = max(1, w-length)
+			}
+			pieces = append(pieces, [2]int{max(0, i-g), i})
+			i -= g
+			length += g + 1
+			if length > w {
+				break
+			}
+			j = (j + 1) % len(ints)
+			g = ints[j]
+		}
+		return l.joinPieces(value, units, pieces)
+	}
+	i, length := float64(n), 0.0
+	j := 0
+	g := math.NaN() // grouping[0] of an empty grouping is undefined
 	if len(sizes) > 0 {
 		g = sizes[0]
 	}
 	for i > 0 && g > 0 {
 		if length+g+1 > width {
-			g = max(1, width-length)
+			g = math.Max(1, width-length)
 		}
-		i = max(0, i-g)
-		cuts = append(cuts, i)
+		i -= g
+		pieces = append(pieces, substringBounds(i, i+g, n))
 		length += g + 1
 		if length > width {
 			break
@@ -525,27 +640,58 @@ func (l *NumberLocale) group(value string, width int) string {
 		j = (j + 1) % len(sizes)
 		g = sizes[j]
 	}
-	if len(cuts) == 0 {
+	return l.joinPieces(value, units, pieces)
+}
+
+// joinPieces is t.reverse().join(thousands) of the pieces of value (of its
+// UTF-16 units when it is not ASCII).
+func (l *NumberLocale) joinPieces(value string, units []uint16, pieces [][2]int) string {
+	if len(pieces) == 0 {
 		return ""
 	}
-	// Reassemble left to right: piece k spans cuts[k] up to the previous cut.
 	var b strings.Builder
-	b.Grow(len(value) + len(cuts)*len(l.grouper.thousands))
-	for k := len(cuts) - 1; k >= 0; k-- {
-		end := n
-		if k > 0 {
-			end = cuts[k-1]
-		}
-		if runes != nil {
-			b.WriteString(string(runes[cuts[k]:end]))
+	b.Grow(len(value) + len(pieces)*len(l.grouper.thousands))
+	for k := len(pieces) - 1; k >= 0; k-- {
+		p := pieces[k]
+		if units != nil {
+			b.WriteString(jsval.FromUTF16(units[p[0]:p[1]]))
 		} else {
-			b.WriteString(value[cuts[k]:end])
+			b.WriteString(value[p[0]:p[1]])
 		}
 		if k > 0 {
 			b.WriteString(l.grouper.thousands)
 		}
 	}
 	return b.String()
+}
+
+// substringBounds is the range String.prototype.substring(a, b) takes of a
+// string of n units: each end ToIntegerOrInfinity (NaN is 0) clamped to
+// [0, n], in order.
+func substringBounds(a, b float64, n int) [2]int {
+	clamp := func(x float64) int {
+		switch {
+		case math.IsNaN(x) || x <= 0:
+			return 0
+		case x >= float64(n):
+			return n
+		}
+		return int(x) // truncation toward zero; x is positive here
+	}
+	s, e := clamp(a), clamp(b)
+	if s > e {
+		s, e = e, s
+	}
+	return [2]int{s, e}
+}
+
+func isASCIIString(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= utf8.RuneSelf {
+			return false
+		}
+	}
+	return true
 }
 
 // jsLen is String.prototype.length: UTF-16 code units.
@@ -599,19 +745,10 @@ func formatBody(typ byte, x float64, p int) (s string, pexp int, hasPexp bool) {
 	return toPrecision(x, p), 0, false // unreachable: aliased to "g"
 }
 
-// jsRound is Math.round: halves round toward +Infinity.
-func jsRound(x float64) float64 {
-	r := math.Floor(x)
-	if x-r >= 0.5 {
-		r++
-	}
-	return r
-}
-
 // roundedInt is Math.round(x).toString(radix) for a power-of-two radix.
 func roundedInt(x float64, radix int, upper bool) string {
 	var s string
-	r := jsRound(x)
+	r := jsmath.Round(x)
 	if math.IsInf(x, 0) {
 		s = "Infinity"
 	} else if r < 1<<63 {
@@ -634,7 +771,7 @@ func formatDecimalInt(x float64) string {
 	if math.IsInf(x, 0) {
 		return "∞"
 	}
-	r := jsRound(x)
+	r := jsmath.Round(x)
 	if r < 1e21 {
 		return jsval.JSNumberString(r)
 	}

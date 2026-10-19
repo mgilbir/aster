@@ -3,6 +3,9 @@ package geo
 import (
 	"math"
 
+	"github.com/mgilbir/aster/internal/budget"
+	"github.com/mgilbir/aster/internal/jsmath"
+
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -13,10 +16,17 @@ import (
 // prints as 0). digits < 0 disables rounding, and more than 15 digits also
 // means no rounding, as upstream.
 type pathString struct {
-	buf    []byte
-	radius float64
-	k      float64 // 10^digits, or 0 when not rounding
-	d      int     // digits when rounding
+	buf []byte
+	// led is the call's ledger: the text is charged to it as it grows,
+	// before it is written (the points are bounded, but a point can write
+	// a few hundred bytes: a circle of a long radius), and the string a
+	// walk returns is charged as the caller keeps it. charged is what buf
+	// has been charged for.
+	led     *budget.Ledger
+	charged int
+	radius  float64
+	k       float64 // 10^digits, or 0 when not rounding
+	d       int     // digits when rounding
 
 	line  float64 // 0 inside a polygon (rings close), NaN otherwise
 	point int     // 0: next point starts a line, 1: continues, 2: isolated point
@@ -44,13 +54,28 @@ func (s *pathString) setDigits(digits int) {
 
 func (s *pathString) pointRadius(r float64) { s.radius = r }
 
+// room charges the ledger for n more bytes of text before they are written,
+// a chunk at a time so the charge is amortised O(1) per byte.
+func (s *pathString) room(n int) {
+	if s.led == nil || len(s.buf)+n <= s.charged {
+		return
+	}
+	grow := max(len(s.buf)+n-s.charged, s.charged, 4096)
+	s.led.MustAlloc(int64(grow)) // a *budget.Stop past the call's memory
+	s.charged += grow
+}
+
+// maxXY is the most bytes xy writes: a command, two numbers of at most 25
+// bytes each (JavaScript's longest, "-1.2345678901234567e-308"), a comma.
+const maxXY = 1 + 2*25 + 1
+
 // num appends one coordinate.
 func (s *pathString) num(v float64) {
 	if s.k == 0 {
 		s.buf = jsval.AppendJSNumber(s.buf, v)
 		return
 	}
-	n := jsRound(v * s.k)
+	n := jsmath.Round(v * s.k)
 	if s.d <= 6 && n > -1e15 && n < 1e15 {
 		s.buf = appendScaled(s.buf, int64(n), s.d)
 		return
@@ -92,6 +117,7 @@ func appendScaled(dst []byte, n int64, d int) []byte {
 }
 
 func (s *pathString) xy(cmd byte, x, y float64) {
+	s.room(maxXY)
 	s.buf = append(s.buf, cmd)
 	s.num(x)
 	s.buf = append(s.buf, ',')
@@ -103,6 +129,7 @@ func (s *pathString) PolygonEnd()   { s.line = nan }
 func (s *pathString) LineStart()    { s.point = 0 }
 func (s *pathString) LineEnd() {
 	if s.line == 0 {
+		s.room(1)
 		s.buf = append(s.buf, 'Z')
 	}
 	s.point = 2
@@ -142,6 +169,7 @@ func (s *pathString) Point(x, y float64) {
 			s.circleValid = true
 			s.buf = saved
 		}
+		s.room(len(s.circle))
 		s.buf = append(s.buf, s.circle...)
 	}
 }
@@ -151,6 +179,9 @@ func (s *pathString) Point(x, y float64) {
 func (s *pathString) result() (string, bool) {
 	if len(s.buf) == 0 {
 		return "", false
+	}
+	if s.led != nil {
+		s.led.MustAlloc(int64(len(s.buf))) // the copy the caller keeps
 	}
 	r := string(s.buf)
 	s.buf = s.buf[:0]

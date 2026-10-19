@@ -1,9 +1,12 @@
 package jsval
 
 import (
+	"bytes"
 	"strings"
 	"sync"
+	"unicode/utf16"
 	"unicode/utf8"
+	"unsafe"
 
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
@@ -300,4 +303,53 @@ func canonicalize(r rune) rune {
 		return r
 	}
 	return ur
+}
+
+// UTF16Units is s's UTF-16 code units, as JavaScript indexes them: a lone
+// surrogate's WTF-8 bytes are that surrogate.
+func UTF16Units(s string) []uint16 { return utf16Units16(s) }
+
+// FromUTF16 is the string of the code units u, each lone surrogate kept as
+// its WTF-8 bytes (the inverse of UTF16Units).
+func FromUTF16(u []uint16) string {
+	b := make([]byte, 0, len(u))
+	for i := 0; i < len(u); i++ {
+		r := rune(u[i])
+		switch {
+		case utf16.IsSurrogate(r) && r < 0xDC00 && i+1 < len(u) && u[i+1] >= 0xDC00 && u[i+1] <= 0xDFFF:
+			b = utf8.AppendRune(b, utf16.DecodeRune(r, rune(u[i+1])))
+			i++
+		case utf16.IsSurrogate(r):
+			b = AppendSurrogate(b, r)
+		default:
+			b = utf8.AppendRune(b, r)
+		}
+	}
+	return string(b)
+}
+
+// PairSurrogates makes b[from:] canonical in place, as JavaScript reads a
+// string built of pieces: a lone high surrogate's WTF-8 bytes followed by a
+// lone low surrogate's are one character, its four-byte UTF-8. A builder
+// that joins pieces which may end or begin with half a character (a
+// locale's symbols, a string cut by code units) calls it on what it built.
+func PairSurrogates(b []byte, from int) []byte {
+	i := from + bytes.IndexByte(b[from:], 0xED)
+	if i < from {
+		return b
+	}
+	w := i
+	for i < len(b) {
+		if hi, ok := surrogateAt(unsafe.String(unsafe.SliceData(b), len(b)), i); ok && hi < 0xDC00 {
+			if lo, ok := surrogateAt(unsafe.String(unsafe.SliceData(b), len(b)), i+3); ok && lo >= 0xDC00 {
+				w += utf8.EncodeRune(b[w:], utf16.DecodeRune(hi, lo))
+				i += 6
+				continue
+			}
+		}
+		b[w] = b[i]
+		w++
+		i++
+	}
+	return b[:w]
 }

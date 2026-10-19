@@ -185,6 +185,8 @@ func applyOps(t testing.TB, c goldenCase, local format.Zone) (Scale, bool) {
 			}
 			it, ok := Interpolate(items[0].StrValue(), gamma, hasGamma)
 			if !ok {
+				// vega-scale resolved it (C138, audit 2026-10-18)
+				t.Errorf("%s: interpolator %q is not supported", c.Name, items[0].StrValue())
 				return s, false
 			}
 			ip, ok := s.(Interpolating)
@@ -320,6 +322,10 @@ func runGolden(t *testing.T, file string, local format.Zone) {
 			}()
 			if threw {
 				continue
+			}
+			if isThrow(want) && ran {
+				t.Errorf("%s: %v answered %v; upstream throws", c.Name, q[:2], got)
+				fail++
 			}
 			if isThrow(want) || !ran {
 				continue

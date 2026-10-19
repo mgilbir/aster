@@ -5,6 +5,7 @@ import (
 	"math"
 
 	"github.com/mgilbir/aster/internal/format"
+	"github.com/mgilbir/aster/internal/jsmath"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -26,9 +27,9 @@ func NewRadial() *Radial {
 	return r
 }
 
-func square(x float64) float64 { return jsSign(x) * x * x }
+func square(x float64) float64 { return jsmath.Sign(x) * x * x }
 
-func unsquare(x float64) float64 { return jsSign(x) * math.Sqrt(math.Abs(x)) }
+func unsquare(x float64) float64 { return jsmath.Sign(x) * math.Sqrt(math.Abs(x)) }
 
 func (r *Radial) setSquaredRange() {
 	sq := make([]jsval.Value, len(r.rng))
@@ -45,7 +46,7 @@ func (r *Radial) Apply(x jsval.Value) jsval.Value {
 		return r.unknown
 	}
 	if r.round {
-		y = jsRound(y)
+		y = jsmath.Round(y)
 	}
 	return jsval.Num(y)
 }

@@ -252,12 +252,24 @@ func (d decoder) line(arcs jsval.Value) (jsval.Value, error) {
 			return jsval.Undefined, err
 		}
 	}
-	return jsval.Arr(d.padTo(points, 2)), nil
+	// `if (points.length < 2) points.push(points[0])`, once: a line of one
+	// point repeats it, an empty line is [undefined].
+	if len(points) < 2 {
+		points = append(points, firstOr(points))
+	}
+	return jsval.Arr(points), nil
+}
+
+func firstOr(points []jsval.Value) jsval.Value {
+	if len(points) > 0 {
+		return points[0]
+	}
+	return jsval.Undefined
 }
 
 // padTo repeats the first point until there are n of them, as topojson-client
-// does for degenerate lines and rings ("should never happen per the
-// specification"); an empty line repeats undefined.
+// does for degenerate rings ("may happen if an arc has only two points"); an
+// empty ring repeats undefined.
 func (d decoder) padTo(points []jsval.Value, n int) []jsval.Value {
 	var first jsval.Value
 	if len(points) > 0 {
@@ -311,6 +323,11 @@ func (d decoder) point(p jsval.Value) (jsval.Value, error) {
 func (d decoder) geometry(o jsval.Value, depth int) (jsval.Value, error) {
 	if depth > maxTopoDepth {
 		return jsval.Undefined, fmt.Errorf("%w: geometry nesting too deep: %w", errTopology, budget.ErrLimit)
+	}
+	if o.IsNullish() {
+		// topojson-client reads o.type: a TypeError; any other value that
+		// is not a geometry object has no type, and is a null geometry.
+		return jsval.Undefined, fmt.Errorf("%w: a geometry is %v", errTopology, o)
 	}
 	typ := o.Get("type")
 	name := ""
@@ -433,8 +450,11 @@ func topoFeature(t *topology, o jsval.Value) (jsval.Value, error) {
 		gs := o.Get("geometries").Items()
 		feats := make([]jsval.Value, len(gs))
 		for i, g := range gs {
-			if !g.IsObj() {
-				return jsval.Undefined, fmt.Errorf("%w: geometry %d is not an object", errTopology, i)
+			// A member that is not an object is a Feature with a null
+			// geometry (it has no id, properties or type), as
+			// topojson-client makes it; a null one throws.
+			if g.IsNullish() {
+				return jsval.Undefined, fmt.Errorf("%w: geometry %d is %v", errTopology, i, g)
 			}
 			f, err := d.feature(g, 0)
 			if err != nil {

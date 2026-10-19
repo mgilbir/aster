@@ -54,7 +54,7 @@ func (c channel) at(t float64) float64 {
 	case chLinear:
 		return c.a + float64(t*c.d)
 	case chExp:
-		return jsPow(c.a+float64(t*c.d), c.y)
+		return jsmath.Pow(c.a+float64(t*c.d), c.y)
 	}
 	return c.a
 }
@@ -80,7 +80,7 @@ func hueChannel(a, b float64) channel {
 	d := b - a
 	if d != 0 && !math.IsNaN(d) {
 		if d > 180 || d < -180 {
-			d -= float64(360 * jsRound(d/360))
+			d -= float64(360 * jsmath.Round(d/360))
 		}
 		return channel{kind: chLinear, a: a, d: d}
 	}
@@ -93,8 +93,8 @@ func gammaChannel(y, a, b float64) channel {
 		return linearChannel(a, b)
 	}
 	if d := b - a; d != 0 && !math.IsNaN(d) {
-		pa := jsPow(a, y)
-		return channel{kind: chExp, a: pa, d: jsPow(b, y) - pa, y: 1 / y}
+		pa := jsmath.Pow(a, y)
+		return channel{kind: chExp, a: pa, d: jsmath.Pow(b, y) - pa, y: 1 / y}
 	}
 	return constantChannel(a, b)
 }
@@ -111,7 +111,7 @@ func lerp(a, b, t float64) float64 { return float64(a*(1-t)) + float64(b*t) }
 // InterpolateRound is d3.interpolateRound.
 func InterpolateRound(a, b jsval.Value) func(float64) jsval.Value {
 	x, y := jsval.ToNumber(a), jsval.ToNumber(b)
-	return func(t float64) jsval.Value { return jsval.Num(jsRound(lerp(x, y, t))) }
+	return func(t float64) jsval.Value { return jsval.Num(jsmath.Round(lerp(x, y, t))) }
 }
 
 // InterpolateDate is d3.interpolateDate. Like Date.prototype.setTime it applies
@@ -237,7 +237,7 @@ func CubehelixGamma(y float64, long bool) Interpolator {
 		l := linearChannel(start.L, end.L)
 		o := linearChannel(start.Opacity, end.Opacity)
 		return func(t float64) jsval.Value {
-			return jsval.Str(color.Cubehelix{H: h.at(t), S: s.at(t), L: l.at(jsPow(t, y)), Opacity: o.at(t)}.String())
+			return jsval.Str(color.Cubehelix{H: h.at(t), S: s.at(t), L: l.at(jsmath.Pow(t, y)), Opacity: o.at(t)}.String())
 		}
 	}
 }
@@ -639,16 +639,32 @@ func Piecewise(w jsval.Walker, interpolate Interpolator, values []jsval.Value) f
 func Zoom(rho float64) func(p0, p1 [3]float64) (interp func(t float64) [3]float64, duration float64) {
 	rho = math.Max(1e-3, rho)
 	rho2 := rho * rho
-	return zoomRho(rho, rho2, rho2*rho2)
+	return absolute(zoomRho(rho, rho2, rho2*rho2))
 }
 
 // DefaultZoom is d3.interpolateZoom itself. It is not Zoom(math.Sqrt2): upstream builds it with the
 // exact squares 2 and 4, where rho(Math.SQRT2) squares the rounded root (2.0000000000000004).
 func DefaultZoom() func(p0, p1 [3]float64) (interp func(t float64) [3]float64, duration float64) {
-	return zoomRho(math.Sqrt2, 2, 4)
+	return absolute(zoomRho(math.Sqrt2, 2, 4))
 }
 
-func zoomRho(rho, rho2, rho4 float64) func(p0, p1 [3]float64) (interp func(t float64) [3]float64, duration float64) {
+// zoomFunc returns, for t, the move from the start view [ox, oy] and the
+// width: d3 writes the view as [ux0 + ox, uy0 + oy, w], and the + is
+// JavaScript's (InterpolateZoom keeps it for starts that are not numbers).
+type zoomFunc func(p0, p1 [3]float64) (move func(t float64) [3]float64, duration float64)
+
+// absolute adds the start back as numbers.
+func absolute(z zoomFunc) func(p0, p1 [3]float64) (func(float64) [3]float64, float64) {
+	return func(p0, p1 [3]float64) (func(float64) [3]float64, float64) {
+		f, d := z(p0, p1)
+		return func(t float64) [3]float64 {
+			m := f(t)
+			return [3]float64{p0[0] + m[0], p0[1] + m[1], m[2]}
+		}, d
+	}
+}
+
+func zoomRho(rho, rho2, rho4 float64) zoomFunc {
 	const epsilon2 = 1e-12
 	cosh := func(x float64) float64 { x = jsmath.Exp(x); return (x + 1/x) / 2 }
 	sinh := func(x float64) float64 { x = jsmath.Exp(x); return (x - 1/x) / 2 }
@@ -663,7 +679,7 @@ func zoomRho(rho, rho2, rho4 float64) func(p0, p1 [3]float64) (interp func(t flo
 		if d2 < epsilon2 {
 			S = jsmath.Log(w1/w0) / rho
 			f = func(t float64) [3]float64 {
-				return [3]float64{ux0 + float64(t*dx), uy0 + float64(t*dy), w0 * jsmath.Exp(float64(rho*t)*S)}
+				return [3]float64{float64(t * dx), float64(t * dy), w0 * jsmath.Exp(float64(rho*t)*S)}
 			}
 		} else {
 			d1 := math.Sqrt(d2)
@@ -676,7 +692,7 @@ func zoomRho(rho, rho2, rho4 float64) func(p0, p1 [3]float64) (interp func(t flo
 				s := t * S
 				coshr0 := cosh(r0)
 				u := w0 / (rho2 * d1) * (float64(coshr0*tanh(float64(rho*s)+r0)) - sinh(r0))
-				return [3]float64{ux0 + float64(u*dx), uy0 + float64(u*dy), w0 * coshr0 / cosh(float64(rho*s)+r0)}
+				return [3]float64{float64(u * dx), float64(u * dy), w0 * coshr0 / cosh(float64(rho*s)+r0)}
 			}
 		}
 		return f, S * 1000 * rho / math.Sqrt2

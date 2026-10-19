@@ -362,9 +362,9 @@ func init() {
 	}
 	symlogT := func(c float64) transform {
 		return transform{
-			lift: func(x float64) float64 { return jsSign(x) * jsmath.Log1p(math.Abs(x/c)) },
+			lift: func(x float64) float64 { return jsmath.Sign(x) * jsmath.Log1p(math.Abs(x/c)) },
 			ground: func(x float64) float64 {
-				return float64(jsSign(x)*jsmath.Expm1(math.Abs(x))) * c
+				return float64(jsmath.Sign(x)*jsmath.Expm1(math.Abs(x))) * c
 			},
 		}
 	}
@@ -396,7 +396,7 @@ func init() {
 	}
 	pan("panLinear", func(*Scope, jsval.Value, []jsval.Value) transform { return linear })
 	zoom("zoomLinear", func(*Scope, jsval.Value, []jsval.Value) transform { return linear })
-	signOf := func(s *Scope, d jsval.Value) float64 { return jsSign(s.num(d.Index(0))) }
+	signOf := func(s *Scope, d jsval.Value) float64 { return jsmath.Sign(s.num(d.Index(0))) }
 	pan("panLog", func(s *Scope, d jsval.Value, _ []jsval.Value) transform { return logT(signOf(s, d)) })
 	zoom("zoomLog", func(s *Scope, d jsval.Value, _ []jsval.Value) transform { return logT(signOf(s, d)) })
 	pan("panPow", func(s *Scope, _ jsval.Value, a []jsval.Value) transform { return powT(s.num(arg(a, 2))) })
@@ -412,16 +412,6 @@ func (s *Scope) domainItems(d jsval.Value) jsval.Value {
 		throw("Error", "Domain array must not be empty")
 	}
 	return d
-}
-
-func jsSign(x float64) float64 {
-	switch {
-	case x > 0:
-		return 1
-	case x < 0:
-		return -1
-	}
-	return x // 0, -0 or NaN
 }
 
 // touches reads event.touches[0] and event.touches[1].

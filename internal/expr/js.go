@@ -274,18 +274,3 @@ func (s *Scope) add(a, b jsval.Value) jsval.Value {
 func jsMod(a, b float64) float64 {
 	return math.Mod(a, b)
 }
-
-// jsRound is Math.round: halves round toward +Infinity, and -0 is preserved.
-func jsRound(x float64) float64 {
-	if math.IsNaN(x) || math.IsInf(x, 0) || x == math.Trunc(x) {
-		return x
-	}
-	f := math.Floor(x)
-	if x-f >= 0.5 {
-		f++
-	}
-	if f == 0 && x < 0 {
-		return math.Copysign(0, -1)
-	}
-	return f
-}

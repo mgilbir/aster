@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/mgilbir/aster/internal/csscolor"
 )
 
 // This file implements the CSS subset SVG documents use, following resvg's
@@ -80,7 +82,7 @@ func forEachDecl(s string, fn func(name, val string, imp bool)) {
 		name := strings.TrimSpace(decl[:colon])
 		val := strings.TrimSpace(decl[colon+1:])
 		imp := false
-		if b := strings.LastIndexByte(val, '!'); b >= 0 && strings.EqualFold(strings.TrimSpace(val[b+1:]), "important") {
+		if b := strings.LastIndexByte(val, '!'); b >= 0 && csscolor.ASCIIEqualFold(strings.TrimSpace(val[b+1:]), "important") {
 			imp = true
 			val = strings.TrimSpace(val[:b])
 		}
@@ -88,7 +90,7 @@ func forEachDecl(s string, fn func(name, val string, imp bool)) {
 			continue
 		}
 		if _, ok := attrNames[name]; !ok && name != "marker" {
-			name = strings.ToLower(name)
+			name = csscolor.ASCIILower(name)
 		}
 		fn(name, val, imp)
 	}

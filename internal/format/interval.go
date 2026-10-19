@@ -298,6 +298,7 @@ func (iv Interval) passes(t float64) bool {
 
 // Floor is interval.floor(t): the latest boundary at or before t.
 func (iv Interval) Floor(t float64) float64 {
+	t = timeClip(t) // new Date(+date)
 	if iv.filter == 0 {
 		return iv.baseFloor(t)
 	}
@@ -333,10 +334,10 @@ func (iv Interval) Floor(t float64) float64 {
 
 // Ceil is interval.ceil(t): the earliest boundary at or after t.
 func (iv Interval) Ceil(t float64) float64 {
-	if !Valid(t) {
+	d := iv.Floor(t - 1) // floori(date = new Date(date - 1)): t - 1 is clipped, not t
+	if !Valid(d) {
 		return math.NaN()
 	}
-	d := iv.Floor(t - 1)
 	if iv.weekSearch() {
 		return iv.weekNext(d)
 	}
@@ -359,6 +360,7 @@ func (iv Interval) Round(t float64) float64 {
 // moves one boundary at a time, as d3 does, so the work grows with the step;
 // it is charged to the ledger in ctx, and stops with ctx's error.
 func (iv Interval) Offset(ctx context.Context, t, step float64) (float64, error) {
+	t = timeClip(t) // new Date(+date)
 	if iv.filter == 0 {
 		return iv.baseOffset(t, math.Floor(step)), nil
 	}
@@ -546,6 +548,7 @@ func (iv Interval) Count(start, end float64) (n float64, ok bool) {
 	if iv.filter > 0 || (iv.kind == kYear && iv.k > 0) {
 		return math.NaN(), false
 	}
+	start, end = timeClip(start), timeClip(end) // t0.setTime(+start), t1.setTime(+end)
 	return math.Floor(iv.baseCount(iv.baseFloor(start), iv.baseFloor(end))), true
 }
 

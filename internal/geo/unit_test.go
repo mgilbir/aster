@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mgilbir/aster/internal/jsmath"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -37,7 +38,7 @@ func TestPathNumberFormat(t *testing.T) {
 				want = jsval.JSNumberString(v)
 			} else {
 				k := math.Pow10(digits)
-				want = jsval.JSNumberString(jsRound(v*k) / k)
+				want = jsval.JSNumberString(jsmath.Round(v*k) / k)
 			}
 			if string(s.buf) != want {
 				t.Fatalf("digits %d v=%v: %s want %s", digits, v, s.buf, want)
@@ -48,7 +49,7 @@ func TestPathNumberFormat(t *testing.T) {
 	for _, v := range []float64{math.NaN(), math.Inf(1), math.Inf(-1), math.Copysign(0, -1), -0.0004, 1e21, 1e-7, 123456789012345678} {
 		s.buf = s.buf[:0]
 		s.num(v)
-		want := jsval.JSNumberString(jsRound(v*1000) / 1000)
+		want := jsval.JSNumberString(jsmath.Round(v*1000) / 1000)
 		if string(s.buf) != want {
 			t.Errorf("v=%v: %s want %s", v, s.buf, want)
 		}
@@ -57,11 +58,11 @@ func TestPathNumberFormat(t *testing.T) {
 
 func TestJSRound(t *testing.T) {
 	for _, c := range []struct{ in, want float64 }{{2.5, 3}, {-2.5, -2}, {0.49999999999999994, 0}, {-0.2, math.Copysign(0, -1)}, {1e300, 1e300}, {-1.5, -1}, {1.5, 2}} {
-		if got := jsRound(c.in); got != c.want || math.Signbit(got) != math.Signbit(c.want) {
+		if got := jsmath.Round(c.in); got != c.want || math.Signbit(got) != math.Signbit(c.want) {
 			t.Errorf("round(%v) = %v want %v", c.in, got, c.want)
 		}
 	}
-	if !math.IsNaN(jsRound(math.NaN())) || !math.IsInf(jsRound(math.Inf(1)), 1) {
+	if !math.IsNaN(jsmath.Round(math.NaN())) || !math.IsInf(jsmath.Round(math.Inf(1)), 1) {
 		t.Error("non-finite")
 	}
 }

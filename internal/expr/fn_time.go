@@ -17,21 +17,13 @@ func (s *Scope) dateOf(v jsval.Value) float64 {
 	case jsval.KindTimestamp:
 		return v.NumValue()
 	case jsval.KindNum:
-		return clipTime(v.NumValue())
+		return format.TimeClip(v.NumValue())
 	}
 	p := s.primitive(v, false)
 	if p.IsStr() {
 		return format.ParseDate(p.StrValue(), s.zone())
 	}
-	return clipTime(s.num(p))
-}
-
-// clipTime is TimeClip.
-func clipTime(t float64) float64 {
-	if !format.Valid(t) {
-		return math.NaN()
-	}
-	return math.Trunc(t) + 0
+	return format.TimeClip(s.num(p))
 }
 
 // dateFromFields is `new Date(y, m, ...)` and Date.UTC(y, m, ...): the fields
@@ -84,7 +76,7 @@ func init() {
 	fn("datetime", func(s *Scope, args []jsval.Value) jsval.Value {
 		switch len(args) {
 		case 0:
-			return jsval.Timestamp(clipTime(s.nowMs()))
+			return jsval.Timestamp(format.TimeClip(s.nowMs()))
 		case 1:
 			return jsval.Timestamp(s.dateOf(args[0]))
 		}

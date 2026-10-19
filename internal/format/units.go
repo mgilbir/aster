@@ -143,18 +143,7 @@ func TimeUnitSpecifier(units []string, specifiers UnitSpecifiers) (string, error
 			break // upstream would loop forever when a unit's specifier is null
 		}
 	}
-	return trimJS(b.String()), nil
-}
-
-// trimJS is String.prototype.trim.
-func trimJS(s string) string { return strings.TrimFunc(s, isJSSpaceRune) }
-
-func isJSSpaceRune(r rune) bool {
-	switch r {
-	case '\t', '\n', '\v', '\f', '\r', ' ', 0xA0, 0x1680, 0x2028, 0x2029, 0x202F, 0x205F, 0x3000, 0xFEFF:
-		return true
-	}
-	return r >= 0x2000 && r <= 0x200A
+	return jsval.JSTrim(b.String()), nil
 }
 
 // IntervalFor is vega-time's timeInterval(unit) / utcInterval(unit): the
@@ -212,48 +201,103 @@ func SequenceUnit(ctx context.Context, z Zone, unit string, start, stop, step fl
 
 // ---- dayofyear / week ----
 
-// jan1Days is the day number of 1 January of year y. In UTC, Date.UTC maps a
-// year from 0 to 99 to 1900+y, which vega-time inherits for its UTC helpers;
-// local time uses setFullYear, which does not.
-func (z Zone) jan1Days(y int) int64 {
-	if z.IsUTC() && y >= 0 && y <= 99 {
-		y += 1900
+// The day and week numbers of vega-time's util.js, on the zone's d3
+// intervals, as vega-time computes them: through interval counts, which
+// correct a span by the change in the zone's offset truncated to whole
+// minutes (C120 of the 2026-10-18 audit), and from the start of the year as
+// vega-time finds it. Every 0-99 year quirk of vega-time is reproduced
+// (C161): its UTC helpers find a year's start with Date.UTC(y, 0, 1), which
+// reads a year from 0 to 99 as 1900 plus it; its local helpers use
+// setFullYear, which does not; and its UTC date builder makes an Invalid
+// Date for those years (Floorer.Floor).
+
+// vtYearStart is localYear(y), local midnight of 1 January with the year
+// taken literally (setFullYear), or in UTC Date.UTC(y, 0, 1).
+func (z Zone) vtYearStart(y float64) float64 {
+	if z.IsUTC() {
+		return UTC.Date(y, 0, 1, 0, 0, 0, 0)
 	}
-	return daysFromCivil(int64(y), 1)
+	return z.make(y, 0, 1, 0, 0, 0, 0)
 }
 
-func (z Zone) dayInfo(f Fields) dayInfo {
-	return dayInfo{
-		days:    daysFromCivil(int64(f.Year), f.Month+1) + int64(f.Day) - 1,
-		jan1:    z.jan1Days(f.Year),
-		weekday: f.Weekday,
+// vtDayOffset is timeDay.offset(t, n) / utcDay.offset(t, n).
+func (z Zone) vtDayOffset(t, n float64) float64 {
+	return z.Day().baseOffset(timeClip(t), n)
+}
+
+// vtDayOfYear is localDayOfYear / utcDayOfYear: day.count(yearStart - 1, d).
+func (z Zone) vtDayOfYear(t float64, fl Fields) float64 {
+	return z.count(kDay, 0, z.vtYearStart(float64(fl.Year))-1, t)
+}
+
+// vtWeekNum is localWeekNum / utcWeekNum: sunday.count(yearStart - 1, d).
+func (z Zone) vtWeekNum(t float64, fl Fields) float64 {
+	return z.count(kWeek, 0, z.vtYearStart(float64(fl.Year))-1, t)
+}
+
+// vtISOWeekYear is localISOWeekYear / utcISOWeekYear: the year of the
+// Thursday of the date's Monday-based week.
+func (z Zone) vtISOWeekYear(t float64) float64 {
+	return z.yearOf(z.vtDayOffset(z.Week(1).Floor(t), 3))
+}
+
+// vtISOWeekOne is localISOWeekOne / utcISOWeekOne: the Monday on which week
+// 1 of the week-numbering year y begins.
+func (z Zone) vtISOWeekOne(y float64) float64 {
+	return z.Week(1).Floor(z.vtDayOffset(z.vtYearStart(y), 3))
+}
+
+// vtISOWeekNum is localISOWeekNum / utcISOWeekNum.
+func (z Zone) vtISOWeekNum(t float64) float64 {
+	return 1 + z.count(kWeek, 1, z.vtISOWeekOne(z.vtISOWeekYear(t)), t)
+}
+
+// vtISOWeekOneDate is localISOWeekOneDate / utcISOWeekOneDate: the day of
+// January on which week 1 of year y begins; zero or less is in December.
+func (z Zone) vtISOWeekOneDate(y float64) float64 {
+	d := z.vtISOWeekOne(y)
+	if !Valid(d) {
+		return math.NaN()
 	}
+	f := z.Fields(d)
+	if f.Month != 0 {
+		return float64(f.Day - 31)
+	}
+	return float64(f.Day)
+}
+
+// vtFirst is localFirst / utcFirst: the weekday of the start of year y.
+func (z Zone) vtFirst(y float64) float64 {
+	t := z.vtYearStart(y)
+	if !Valid(t) {
+		return math.NaN()
+	}
+	return float64(z.Fields(t).Weekday)
 }
 
 // DayOfYear is vega-time's dayofyear / utcdayofyear: 1 on 1 January.
 func (z Zone) DayOfYear(t float64) float64 {
-	if !Valid(t) {
+	if t = timeClip(t); !Valid(t) {
 		return math.NaN()
 	}
-	di := z.dayInfo(z.Fields(t))
-	return float64(di.days - di.jan1 + 1)
+	return z.vtDayOfYear(t, z.Fields(t))
 }
 
 // WeekOfYear is vega-time's week / utcweek: the number of Sunday-based week
 // boundaries since the year began (0 before the first Sunday).
 func (z Zone) WeekOfYear(t float64) float64 {
-	if !Valid(t) {
+	if t = timeClip(t); !Valid(t) {
 		return math.NaN()
 	}
-	return float64(weekNumber(z.dayInfo(z.Fields(t)), 0))
+	return z.vtWeekNum(t, z.Fields(t))
 }
 
 // ISOWeekOfYear is vega-time's isoweek / utcisoweek: the ISO 8601 week number.
 func (z Zone) ISOWeekOfYear(t float64) float64 {
-	if !Valid(t) {
+	if t = timeClip(t); !Valid(t) {
 		return math.NaN()
 	}
-	return float64(isoWeek(z.dayInfo(z.Fields(t))))
+	return z.vtISOWeekNum(t)
 }
 
 // ---- floor ----
@@ -381,13 +425,13 @@ func NewFloor(z Zone, units []string, step float64) *Floorer {
 
 // floorState carries the per-call date decomposition.
 type floorState struct {
-	z  Zone
-	f  Fields
-	di dayInfo
+	z Zone
+	t float64
+	f Fields
 }
 
 func (st *floorState) get(k getKind, year float64) float64 {
-	f := st.f
+	f, z := st.f, st.z
 	switch k {
 	case gYear:
 		return float64(f.Year)
@@ -406,19 +450,19 @@ func (st *floorState) get(k getKind, year float64) float64 {
 	case gMilliseconds:
 		return float64(f.Millisecond)
 	case gDayOfYear:
-		return float64(st.di.days - st.di.jan1 + 1)
+		return z.vtDayOfYear(st.t, f)
 	case gWeek:
-		return float64(weekNumber(st.di, 0))
+		return z.vtWeekNum(st.t, f)
 	case gWeekDay:
-		return weekdayOfYear(float64(weekNumber(st.di, 0)), float64(f.Weekday), st.first(year))
+		return weekdayOfYear(z.vtWeekNum(st.t, f), float64(f.Weekday), z.vtFirst(year))
 	case gDay:
-		return weekdayOfYear(1, float64(f.Weekday), st.first(year))
+		return weekdayOfYear(1, float64(f.Weekday), z.vtFirst(year))
 	case gISOWeek:
-		return float64(isoWeek(st.di))
+		return z.vtISOWeekNum(st.t)
 	case gISOWeekYear:
-		return float64(isoYear(st.di))
+		return z.vtISOWeekYear(st.t)
 	case gISOWeekDay:
-		return isoWeekday(st.isoWeekOne(year), float64(isoWeek(st.di)), float64((f.Weekday+6)%7))
+		return isoWeekday(z.vtISOWeekOneDate(year), z.vtISOWeekNum(st.t), float64((f.Weekday+6)%7))
 	}
 	return math.NaN()
 }
@@ -429,32 +473,10 @@ func isoWeekday(weekOneDate, week, day float64) float64 {
 	return weekOneDate + float64((week-1)*7) + day
 }
 
-// isoWeekOne is localISOWeekOneDate / utcISOWeekOneDate: the day of January on which week 1 of the
-// week-numbering year y begins; zero or less refers to the preceding December. NaN when y is not a
-// number.
-func (st *floorState) isoWeekOne(y float64) float64 {
-	if math.IsNaN(y) || math.IsInf(y, 0) || math.Abs(y) > 1e7 {
-		return math.NaN()
-	}
-	jan1 := st.z.jan1Days(int(math.Trunc(y)))
-	monday := floorToWeekday(jan1+3, 1)
-	return float64(monday - jan1 + 1)
-}
-
 // weekdayOfYear is vega-time's weekday(): the day of the year, counting from
 // the first weekday of the year, for a week number and day of week.
 func weekdayOfYear(week, day, firstDay float64) float64 {
 	return day + float64(week*7) - math.Mod(firstDay+6, 7)
-}
-
-// first is localFirst / utcFirst: the weekday of 1 January of year y, NaN when
-// y is not a number.
-func (st *floorState) first(y float64) float64 {
-	if math.IsNaN(y) || math.IsInf(y, 0) || math.Abs(y) > 1e7 {
-		return math.NaN()
-	}
-	yi := int(math.Trunc(y))
-	return float64(weekdayOfDay(st.z.jan1Days(yi)))
 }
 
 func (p floorPart) eval(st *floorState, year float64) float64 {
@@ -480,9 +502,9 @@ func (p floorPart) eval(st *floorState, year float64) float64 {
 	case invQuarter:
 		v *= 3
 	case invWeek:
-		v = weekdayOfYear(v, 0, st.first(year))
+		v = weekdayOfYear(v, 0, st.z.vtFirst(year))
 	case invISOWeek:
-		v = isoWeekday(st.isoWeekOne(year), v, 0)
+		v = isoWeekday(st.z.vtISOWeekOneDate(year), v, 0)
 	}
 	return v
 }
@@ -492,11 +514,10 @@ func (p floorPart) eval(st *floorState, year float64) float64 {
 // builder for such years reads a field of the wrong variable and produces an
 // Invalid Date; the local builder is correct.
 func (f *Floorer) Floor(t float64) float64 {
-	if !Valid(t) {
+	if t = timeClip(t); !Valid(t) { // t.setTime(+v)
 		return math.NaN()
 	}
-	st := floorState{z: f.z, f: f.z.Fields(t)}
-	st.di = f.z.dayInfo(st.f)
+	st := floorState{z: f.z, t: t, f: f.z.Fields(t)}
 	year := f.y.eval(&st, 0)
 	m := f.m.eval(&st, year)
 	d := f.d.eval(&st, year)

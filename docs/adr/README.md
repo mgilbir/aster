@@ -21,3 +21,4 @@ Decisions whose reason is not visible in the code. Each says what was decided, w
 | [0015](0015-filters-follow-the-specification.md) | PNG filters follow the Filter Effects spec where resvg departs from it | accepted, 2026-10-14 |
 | [0016](0016-custom-projections.md) | Custom projections are a raw projection and its parameters, per Converter | accepted, 2026-10-14 |
 | [0018](0018-value-walks-bounded-by-the-call.md) | Walks of a value (its text, JSON, comparisons) are bounded by the call that makes them, with the call's jsval.Walker; identity is a key, not a walk | accepted, 2026-10-19 |
+| [0029](0029-calendar-follows-d3-intervals.md) | Dates are what `new Date(+v)` makes, counted with d3's intervals, vega-time's 0-99 quirks included; String(date) prints V8's zone names | accepted, 2026-10-19 |

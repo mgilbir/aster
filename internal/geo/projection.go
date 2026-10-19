@@ -606,10 +606,11 @@ func (p *standard) copyFrom(src *standard) {
 	p.SetPrecision(src.Precision())
 	p.SetReflectX(src.sx < 0)
 	p.SetReflectY(src.sy < 0)
-	// The extended properties, after the standard ones, and only those
-	// whose value is truthy: copy() runs `if (p[prop]) c[prop](p[prop]())`.
+	// The extended properties the type takes, after the standard ones:
+	// copy() runs `if (p[prop]) c[prop](p[prop]())`, whose test is that the
+	// projection has the method, so a 0 or NaN is copied too.
 	for _, k := range ExtendedProperties {
-		if v, ok := src.params[k]; ok && v != 0 && !math.IsNaN(v) {
+		if v, ok := src.params[k]; ok {
 			_ = p.setParam(k, jsval.Num(v)) // src's Raw took the value
 		}
 	}

@@ -3,12 +3,13 @@ package format
 import (
 	"context"
 	"errors"
-	"github.com/mgilbir/aster/internal/budget"
-	"github.com/mgilbir/aster/internal/testutil"
 	"math"
 	"math/rand"
 	"testing"
 	"time"
+
+	"github.com/mgilbir/aster/internal/budget"
+	"github.com/mgilbir/aster/internal/testutil"
 
 	"github.com/mgilbir/aster/internal/jsval"
 )
@@ -20,10 +21,15 @@ func TestCyclicTimeLocaleTerminates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// d3 recurses through the cycle until its stack overflows when it
+	// formats; a parse stops once the input is used up.
 	for _, spec := range []string{"%c", "%x", "%X"} {
-		_ = l.Format(spec, UTC).Format(0)
-		if _, ok := l.Parse(spec, UTC).Parse("a"); ok {
-			t.Errorf("cyclic parse %q succeeded", spec)
+		var th *jsval.Thrown
+		if _, err := l.Format(spec, UTC).AppendFormatErr(nil, 0); !errors.As(err, &th) || th.Name != "RangeError" {
+			t.Errorf("cyclic format %q: %v; want RangeError", spec, err)
+		}
+		if _, ok, err := l.Parse(spec, UTC).ParseErr("a"); ok || err != nil {
+			t.Errorf("cyclic parse %q = %v, %v; want null", spec, ok, err)
 		}
 	}
 }
@@ -197,10 +203,10 @@ func TestLocaleExpressionHelpers(t *testing.T) {
 	if s, _ := l.TimeFormatValue(jsval.Walker{}, jsval.Timestamp(0), jsval.Str("%Y-%m-%d"), true); s != "1970-01-01" {
 		t.Errorf("timeFormat = %q", s)
 	}
-	if v := l.TimeParseValue(jsval.Walker{}, jsval.Str("2020-02-03"), jsval.Str("%Y-%m-%d"), true); !v.IsTimestamp() || v.NumValue() != 1580688000000 {
+	if v, _ := l.TimeParseValue(jsval.Walker{}, jsval.Str("2020-02-03"), jsval.Str("%Y-%m-%d"), true); !v.IsTimestamp() || v.NumValue() != 1580688000000 {
 		t.Errorf("timeParse = %v", v)
 	}
-	if v := l.TimeParseValue(jsval.Walker{}, jsval.Str("nope"), jsval.Str("%Y-%m-%d"), true); !v.IsNull() {
+	if v, _ := l.TimeParseValue(jsval.Walker{}, jsval.Str("nope"), jsval.Str("%Y-%m-%d"), true); !v.IsNull() {
 		t.Errorf("failed parse = %v", v)
 	}
 }

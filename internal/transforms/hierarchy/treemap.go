@@ -1,6 +1,10 @@
 package hierarchy
 
-import "math"
+import (
+	"math"
+
+	"github.com/mgilbir/aster/internal/jsmath"
+)
 
 // phi is the golden ratio, the default squarify aspect ratio.
 var phi = (1 + math.Sqrt(5)) / 2
@@ -8,20 +12,8 @@ var phi = (1 + math.Sqrt(5)) / 2
 // tileFunc positions parent's children inside the rectangle.
 type tileFunc func(parent *Node, x0, y0, x1, y1 float64)
 
-// jsRound is Math.round: halves round toward +Infinity.
-func jsRound(x float64) float64 {
-	if math.IsNaN(x) || math.IsInf(x, 0) {
-		return x
-	}
-	f := math.Floor(x)
-	if x-f >= 0.5 {
-		f++
-	}
-	return f
-}
-
 func roundNode(n *Node) {
-	n.X0, n.Y0, n.X1, n.Y1 = jsRound(n.X0), jsRound(n.Y0), jsRound(n.X1), jsRound(n.Y1)
+	n.X0, n.Y0, n.X1, n.Y1 = jsmath.Round(n.X0), jsmath.Round(n.Y0), jsmath.Round(n.X1), jsmath.Round(n.Y1)
 }
 
 // valueScale is d3's `parent.value && (x1 - x0) / parent.value`: a falsy value

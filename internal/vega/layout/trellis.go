@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/mgilbir/aster/internal/jsmath"
 	"github.com/mgilbir/aster/internal/scene"
 )
 
@@ -209,7 +210,7 @@ func layoutHeaders(headers, groups []*scene.Item, ncols, limit int, offset float
 				if band == nil {
 					x = xOf(g)
 				} else {
-					x = jsRound(g.Bounds.X1 + float64(*band*g.Bounds.Width()))
+					x = jsmath.Round(g.Bounds.X1 + float64(*band*g.Bounds.Width()))
 				}
 				y = init
 			} else {
@@ -217,7 +218,7 @@ func layoutHeaders(headers, groups []*scene.Item, ncols, limit int, offset float
 				if band == nil {
 					y = yOf(g)
 				} else {
-					y = jsRound(g.Bounds.Y1 + float64(*band*g.Bounds.Height()))
+					y = jsmath.Round(g.Bounds.Y1 + float64(*band*g.Bounds.Height()))
 				}
 			}
 			hb := &h.Bounds
@@ -257,9 +258,9 @@ func boundFull2(b *scene.Bounds, field byte) float64 {
 func layoutTitle(g *scene.Item, offset float64, isX bool, bounds *scene.Bounds, band float64) {
 	x, y := offset, offset
 	if isX {
-		x = jsRound(bounds.X1 + float64(band*bounds.Width()))
+		x = jsmath.Round(bounds.X1 + float64(band*bounds.Width()))
 	} else {
-		y = jsRound(bounds.Y1 + float64(band*bounds.Height()))
+		y = jsmath.Round(bounds.Y1 + float64(band*bounds.Height()))
 	}
 	g.Bounds.Translate(x-orZero(xOf(g)), y-orZero(yOf(g)))
 	if g.Mark != nil {

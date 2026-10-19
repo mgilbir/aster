@@ -40,7 +40,7 @@ flowchart LR
 | text measurement and shaping | `text` (forme) | node-canvas / the browser's canvas |
 | SVG → PNG | `raster`, `pngopt` | resvg (the reference it is tested against) |
 | SVG → PDF | `svgpdf`, `fontsubset` | none |
-| JavaScript's numbers, `Math` and sort | `jsval`, `jsmath`, `jssort` | V8, bit for bit |
+| JavaScript's numbers, `Math` and sort | `jsval`, `jsmath`, `jssort` | V8, bit for bit (`Math` as arm64 V8 computes it; node on x86-64 differs in the last bit for 0.02–0.75% of arguments of 17 functions, see `jsmath`) |
 | resource budgets, the per-call ledger, byte-bounded caches | `budget`, `bcache` | none (aster's own bounds) |
 | loaders | `loader` | vega-loader's policy |
 | image references, CSS colours, embedded fonts | `imageref`, `csscolor`, `fonts/liberation`, `fonts/notoemoji` | none |

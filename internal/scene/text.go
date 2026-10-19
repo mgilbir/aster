@@ -86,15 +86,15 @@ func BaselineOffset(it *Item) float64 {
 	h := FontSize(it)
 	switch it.Baseline {
 	case "top":
-		return jsRound(0.79 * h)
+		return jsmath.Round(0.79 * h)
 	case "middle":
-		return jsRound(0.30 * h)
+		return jsmath.Round(0.30 * h)
 	case "bottom":
-		return jsRound(-0.21 * h)
+		return jsmath.Round(-0.21 * h)
 	case "line-top":
-		return jsRound(float64(0.29*h) + float64(0.5*LineHeight(it)))
+		return jsmath.Round(float64(0.29*h) + float64(0.5*LineHeight(it)))
 	case "line-bottom":
-		return jsRound(float64(0.29*h) - float64(0.5*LineHeight(it)))
+		return jsmath.Round(float64(0.29*h) - float64(0.5*LineHeight(it)))
 	}
 	return 0
 }

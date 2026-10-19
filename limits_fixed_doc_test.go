@@ -125,7 +125,10 @@ func TestFixedLimitsDocMatchesCode(t *testing.T) {
 		"`config.locale.number`":                        {{c("format", "MaxLocaleSymbol")}, {c("format", "MaxLocaleText")}},
 		"`config.locale.time`": {
 			{c("format", "MaxLocalePattern")}, {c("format", "MaxLocaleExpansion")}, {c("format", "MaxLocaleName")}, {c("format", "MaxLocaleNames")},
+			{c("format", "maxParseNesting")},
 		},
+		"time labels": nil, // the call's ledger room: no fixed number
+		"`graticule`": {{c("geo", "maxGraticulePoints")}},
 		"format memos of one call (`format`, `timeFormat`, `timeParse` and labels)": {{c("format", "formatMemoBytes")}, {c("format", "formatMemoMaxEntry")}},
 	}
 	seen := map[string]bool{}

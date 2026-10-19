@@ -433,7 +433,7 @@ func (bd *Bounder) textBounds(b *Bounds, it *Item, mode int) {
 	h := bd.Height(it)
 	x, y := AnchorPoint(it)
 	dx := it.Dx().Zero()
-	dy := it.Dy().Zero() + BaselineOffset(it) - jsRound(float64(0.8*h)) // use 4/5 offset
+	dy := it.Dy().Zero() + BaselineOffset(it) - jsmath.Round(float64(0.8*h)) // use 4/5 offset
 	line, lines := TextLine(it)
 
 	var w float64

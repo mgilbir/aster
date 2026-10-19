@@ -3,112 +3,126 @@ package format
 import (
 	"math"
 	"strconv"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
-// fmtOp is one step of a compiled format: literal text, or a directive with
-// its padding modifier.
+// fmtOp is one step of a format: literal text, or a directive with its
+// padding modifier. A %c, %x or %X is a directive that formats the locale's
+// pattern (ref).
 type fmtOp struct {
 	dir byte   // directive letter, or 0 for a literal
 	pad byte   // fill for numeric directives: '0', ' ' or 0 (no padding)
 	lit string // literal text (dir == 0)
 }
 
-// TimeFormat is a compiled d3 time format function (timeFormat or utcFormat).
+func (op fmtOp) ref() bool { return op.dir == 'c' || op.dir == 'x' || op.dir == 'X' }
+
+// TimeFormat is a d3 time format function (timeFormat or utcFormat). It
+// keeps its specifier and reads it step by step each time it formats, as
+// d3's newFormat does: a specifier of a million directives costs its own
+// bytes, not a compiled copy many times their size, and a %c refers to the
+// locale's pattern rather than copying it.
 type TimeFormat struct {
 	loc  *TimeLocale
 	zone Zone
 	spec string
-	ops  []fmtOp
+	ops  []fmtOp // the compiled steps; nil for a specifier past maxCompiledSpec
+	// maxOut bounds the bytes one date formats to; thrown is the exception
+	// every call throws (a %c, %x or %X whose pattern d3 cannot format).
+	maxOut int
+	thrown *jsval.Thrown
 }
 
 // Format is d3.timeFormat(specifier) in the given zone (UTC for utcFormat).
 func (l *TimeLocale) Format(specifier string, z Zone) *TimeFormat {
 	f := &TimeFormat{loc: l, zone: z, spec: specifier}
-	f.ops = l.compileFormat(nil, specifier, 0, new(int))
+	for i := 0; i < len(specifier); {
+		var op fmtOp
+		op, i = nextFmtOp(specifier, i)
+		if op.ref() && f.thrown == nil {
+			f.thrown = l.pat[patternIndex(op.dir)].thrown
+		}
+	}
+	f.maxOut = l.maxOutput(specifier)
+	if len(specifier) <= maxCompiledSpec {
+		f.ops = compileFormat(specifier)
+	}
 	return f
 }
 
-// compileFormat translates a specifier into ops, expanding %c, %x and %X
-// in place (they ignore padding modifiers).
-func (l *TimeLocale) compileFormat(ops []fmtOp, spec string, depth int, work *int) []fmtOp {
-	lit := 0 // start of pending literal
-	flush := func(end int) {
-		if end > lit {
-			ops = append(ops, fmtOp{lit: spec[lit:end]})
-		}
-	}
+// compileFormat is the steps of spec, read once.
+func compileFormat(spec string) []fmtOp {
+	ops := make([]fmtOp, 0, 2*strings.Count(spec, "%")+1)
 	for i := 0; i < len(spec); {
-		if spec[i] != '%' {
+		var op fmtOp
+		op, i = nextFmtOp(spec, i)
+		ops = append(ops, op)
+	}
+	return ops
+}
+
+// nextFmtOp reads the step of spec that starts at i (i < len(spec)) and
+// returns where the next starts. A literal runs to the next "%"; %c, %x and
+// %X ignore padding modifiers.
+func nextFmtOp(spec string, i int) (fmtOp, int) {
+	if spec[i] != '%' {
+		j := strings.IndexByte(spec[i:], '%')
+		if j < 0 {
+			return fmtOp{lit: spec[i:]}, len(spec)
+		}
+		return fmtOp{lit: spec[i : i+j]}, i + j
+	}
+	i++
+	var pad byte
+	havePad := false
+	if i < len(spec) {
+		switch spec[i] {
+		case '-':
+			pad, havePad = 0, true
 			i++
-			continue
-		}
-		flush(i)
-		i++
-		var pad byte
-		havePad := false
-		if i < len(spec) {
-			switch spec[i] {
-			case '-':
-				pad, havePad = 0, true
-				i++
-			case '_':
-				pad, havePad = ' ', true
-				i++
-			case '0':
-				pad, havePad = '0', true
-				i++
-			}
-		}
-		if i >= len(spec) { // a trailing "%" or "%-" prints nothing
-			lit = i
-			break
-		}
-		r, w := utf8.DecodeRuneInString(spec[i:])
-		c := spec[i]
-		i += w
-		lit = i
-		if w > 1 || r == utf8.RuneError {
-			ops = append(ops, fmtOp{lit: spec[i-w : i]}) // unknown directive: just the character
-			continue
-		}
-		if !havePad {
-			pad = '0'
-			if c == 'e' {
-				pad = ' '
-			}
-		}
-		switch c {
-		case 'c', 'x', 'X':
-			if *work++; depth < maxLocaleNesting && *work <= maxLocaleExpansions {
-				sub := l.def.DateTime
-				if c == 'x' {
-					sub = l.def.Date
-				} else if c == 'X' {
-					sub = l.def.Time
-				}
-				ops = l.compileFormat(ops, sub, depth+1, work)
-			}
-		case 'a', 'A', 'b', 'B', 'd', 'e', 'f', 'g', 'G', 'H', 'I', 'j', 'L', 'm', 'M', 'p', 'q', 'Q', 's', 'S',
-			'u', 'U', 'V', 'w', 'W', 'y', 'Y', 'Z':
-			ops = append(ops, fmtOp{dir: c, pad: pad})
-		case '%':
-			ops = append(ops, fmtOp{lit: "%"})
-		default:
-			ops = append(ops, fmtOp{lit: string(rune(c))}) // unknown directive: the letter without "%"
+		case '_':
+			pad, havePad = ' ', true
+			i++
+		case '0':
+			pad, havePad = '0', true
+			i++
 		}
 	}
-	flush(len(spec))
-	return ops
+	if i >= len(spec) { // a trailing "%" or "%-" prints nothing
+		return fmtOp{}, i
+	}
+	r, w := utf8.DecodeRuneInString(spec[i:])
+	c := spec[i]
+	i += w
+	if w > 1 || r == utf8.RuneError {
+		return fmtOp{lit: spec[i-w : i]}, i // unknown directive: just the character
+	}
+	if !havePad {
+		pad = '0'
+		if c == 'e' {
+			pad = ' '
+		}
+	}
+	switch c {
+	case 'a', 'A', 'b', 'B', 'c', 'd', 'e', 'f', 'g', 'G', 'H', 'I', 'j', 'L', 'm', 'M', 'p', 'q', 'Q', 's', 'S',
+		'u', 'U', 'V', 'w', 'W', 'x', 'X', 'y', 'Y', 'Z':
+		return fmtOp{dir: c, pad: pad}, i
+	case '%':
+		return fmtOp{lit: "%"}, i
+	}
+	return fmtOp{lit: spec[i-1 : i]}, i // unknown directive: the letter without "%"
 }
 
 // String is the specifier text.
 func (f *TimeFormat) String() string { return f.spec }
 
 // Format formats the instant t. An Invalid Date formats as d3 does (numeric
-// directives print "NaN", names print nothing).
+// directives print "NaN", names print nothing). It panics with the
+// *jsval.Thrown d3 throws for a format that uses a locale pattern d3 cannot
+// format (see Err); AppendFormatErr returns it instead.
 func (f *TimeFormat) Format(t float64) string {
 	var buf [64]byte
 	return string(f.AppendFormat(buf[:0], t))
@@ -118,53 +132,125 @@ func (f *TimeFormat) Format(t float64) string {
 // anything that is not a Date is converted with +value first.
 func (f *TimeFormat) FormatValue(v jsval.Value) string { return f.Format(jsval.ToNumber(v)) }
 
-// dayInfo caches the calendar arithmetic several directives share.
-type dayInfo struct {
-	days    int64 // local day number (days since 1970-01-01)
-	jan1    int64 // day number of 1 January of the year
-	weekday int
-}
-
-func weekdayOfDay(days int64) int { return int((days%7 + 11) % 7) }
-
-// floorToWeekday is the latest day at or before days that falls on weekday.
-func floorToWeekday(days int64, weekday int) int64 {
-	return days - int64((weekdayOfDay(days)+7-weekday)%7)
-}
-
-// AppendFormat appends the formatted instant to dst.
+// AppendFormat appends the formatted instant to dst; it panics as Format
+// does.
 func (f *TimeFormat) AppendFormat(dst []byte, t float64) []byte {
-	dst, _ = f.appendMax(dst, t, math.MaxInt)
-	return dst
+	out, err := f.AppendFormatErr(dst, t)
+	if err != nil {
+		panic(err)
+	}
+	return out
 }
 
-// appendMax is AppendFormat that stops, with ok false, once dst passes max
-// bytes: before a literal (of the specifier, as long as it is) would, or
+// AppendFormatErr appends the formatted instant to dst, or returns the
+// exception d3 throws (Err).
+func (f *TimeFormat) AppendFormatErr(dst []byte, t float64) ([]byte, error) {
+	out, _, err := f.appendMax(dst, t, math.MaxInt)
+	return out, err
+}
+
+// Err is the *jsval.Thrown d3 throws whenever the format is called: it uses
+// a %c, %x or %X whose locale pattern is not one d3 can format (missing, not
+// a string, or using itself in a cycle). Nil for every other format.
+func (f *TimeFormat) Err() error {
+	if f.thrown != nil {
+		return f.thrown
+	}
+	return nil
+}
+
+// MaxOutput bounds the bytes the format writes for any date.
+func (f *TimeFormat) MaxOutput() int { return f.maxOut }
+
+// fmtDate is the date a format writes: TimeClip'd, as d3's
+// `new Date(+date)` makes it, and its calendar fields in the zone.
+type fmtDate struct {
+	t     float64
+	valid bool
+	fl    Fields
+	// iso is dISO(date), the Thursday of its ISO week, which %g, %G and
+	// %V each use, computed by the first of them (hasISO).
+	iso    float64
+	hasISO bool
+}
+
+func (d *fmtDate) isoThursday(z Zone) float64 {
+	if !d.hasISO {
+		d.iso, d.hasISO = z.isoThursday(d.t, d.fl.Weekday), true
+	}
+	return d.iso
+}
+
+// appendMax is AppendFormatErr that stops, with ok false, once dst passes
+// max bytes: before a literal (of the specifier, as long as it is) would, or
 // after a directive did (one writes a name of at most MaxLocaleName bytes,
 // or a number).
-func (f *TimeFormat) appendMax(dst []byte, t float64, max int) (out []byte, ok bool) {
-	valid := Valid(t)
-	var fl Fields
-	var di dayInfo
-	if valid {
-		fl = f.zone.Fields(t)
-		di.days = daysFromCivil(int64(fl.Year), fl.Month+1) + int64(fl.Day) - 1
-		di.jan1 = daysFromCivil(int64(fl.Year), 1)
-		di.weekday = fl.Weekday
+func (f *TimeFormat) appendMax(dst []byte, t float64, max int) (out []byte, ok bool, err error) {
+	if f.thrown != nil {
+		return dst, false, f.thrown
 	}
+	d := fmtDate{t: timeClip(t)}
+	if d.valid = Valid(d.t); d.valid {
+		d.fl = f.zone.Fields(d.t)
+	}
+	start := len(dst)
+	dst, ok = f.appendOps(dst, f.spec, f.ops, &d, max)
+	if f.loc.halves {
+		// Names that end and begin with half a character join into one,
+		// as Array.prototype.join joins them.
+		dst = jsval.PairSurrogates(dst, start)
+	}
+	return dst, ok, nil
+}
+
+// appendOps writes the steps of spec; a %c, %x or %X writes its locale
+// pattern's. That recursion is at most three deep: a pattern that refers to
+// itself, through the others or not, throws (TimeLocale.compilePatterns),
+// and a format that uses one never runs. A specifier of up to
+// maxCompiledSpec bytes, and every locale pattern, is read from its compiled
+// steps (ops); a longer one is read step by step from its text, so it costs
+// no compiled copy many times its size.
+func (f *TimeFormat) appendOps(dst []byte, spec string, ops []fmtOp, d *fmtDate, max int) ([]byte, bool) {
+	ok := true
+	if ops != nil || spec == "" {
+		for _, op := range ops {
+			if dst, ok = f.appendOp(dst, op, d, max); !ok {
+				break
+			}
+		}
+		return dst, ok
+	}
+	for i := 0; i < len(spec) && ok; {
+		var op fmtOp
+		op, i = nextFmtOp(spec, i)
+		dst, ok = f.appendOp(dst, op, d, max)
+	}
+	return dst, ok
+}
+
+// maxCompiledSpec is the longest specifier compiled to steps: they take
+// fmtOpBytes each, up to one for each byte, so a longer one, which only a
+// specification written to be long has, is read from its text instead.
+const maxCompiledSpec = 1024
+
+// appendOp writes one step.
+func (f *TimeFormat) appendOp(dst []byte, op fmtOp, d *fmtDate, max int) ([]byte, bool) {
 	l := f.loc
-	for _, op := range f.ops {
-		if len(dst)+len(op.lit) > max || len(dst) > max {
-			return dst, false // a directive writes a name or a number: dst is at most that past max
-		}
-		if op.dir == 0 {
-			dst = append(dst, op.lit...)
-			continue
-		}
-		if !valid {
-			dst = f.appendInvalid(dst, op)
-			continue
-		}
+	fl := &d.fl
+	if len(dst)+len(op.lit) > max || len(dst) > max {
+		return dst, false // a directive writes a name or a number: dst is at most that past max
+	}
+	if op.dir == 0 {
+		return append(dst, op.lit...), true
+	}
+	if op.ref() {
+		p := &l.pat[patternIndex(op.dir)]
+		return f.appendOps(dst, p.text, p.fmt, d, max)
+	}
+	if !d.valid {
+		return f.appendInvalid(dst, op), true
+	}
+	{
 		switch op.dir {
 		case 'a':
 			dst = append(dst, nameAt(l.def.ShortDays, fl.Weekday)...)
@@ -179,21 +265,10 @@ func (f *TimeFormat) appendMax(dst []byte, t float64, max int) (out []byte, ok b
 		case 'f':
 			dst = appendPad(dst, fl.Millisecond, op.pad, 3)
 			dst = append(dst, "000"...)
-		case 'g', 'G':
-			if !isoValid(di) {
-				width := 4
-				if op.dir == 'g' {
-					width = 2
-				}
-				dst = appendNaN(dst, op.pad, width)
-				break
-			}
-			y := isoYear(di)
-			if op.dir == 'g' {
-				dst = appendPad(dst, y%100, op.pad, 2)
-			} else {
-				dst = appendPad(dst, y%10000, op.pad, 4)
-			}
+		case 'g':
+			dst = appendPadNum(dst, jsRem(f.zone.yearOf(d.isoThursday(f.zone)), 100), op.pad, 2)
+		case 'G':
+			dst = appendPadNum(dst, jsRem(f.zone.yearOf(d.isoThursday(f.zone)), 10000), op.pad, 4)
 		case 'H':
 			dst = appendPad(dst, fl.Hour, op.pad, 2)
 		case 'I':
@@ -203,11 +278,7 @@ func (f *TimeFormat) appendMax(dst []byte, t float64, max int) (out []byte, ok b
 			}
 			dst = appendPad(dst, h, op.pad, 2)
 		case 'j':
-			if !yearStartValid(di.jan1) {
-				dst = appendNaN(dst, op.pad, 3)
-				break
-			}
-			dst = appendPad(dst, int(di.days-di.jan1)+1, op.pad, 3)
+			dst = appendPadNum(dst, 1+f.zone.count(kDay, 0, f.zone.Year().Floor(d.t), d.t), op.pad, 3)
 		case 'L':
 			dst = appendPad(dst, fl.Millisecond, op.pad, 3)
 		case 'm':
@@ -223,9 +294,9 @@ func (f *TimeFormat) appendMax(dst []byte, t float64, max int) (out []byte, ok b
 		case 'q':
 			dst = strconv.AppendInt(dst, int64(1+fl.Month/3), 10)
 		case 'Q':
-			dst = jsval.AppendJSNumber(dst, t)
+			dst = jsval.AppendJSNumber(dst, d.t)
 		case 's':
-			dst = jsval.AppendJSNumber(dst, math.Floor(t/1000))
+			dst = jsval.AppendJSNumber(dst, math.Floor(d.t/1000))
 		case 'S':
 			dst = appendPad(dst, fl.Second, op.pad, 2)
 		case 'u':
@@ -235,81 +306,78 @@ func (f *TimeFormat) appendMax(dst []byte, t float64, max int) (out []byte, ok b
 			}
 			dst = strconv.AppendInt(dst, int64(wd), 10)
 		case 'U':
-			if !yearStartValid(di.jan1) {
-				dst = appendNaN(dst, op.pad, 2)
-				break
-			}
-			dst = appendPad(dst, weekNumber(di, 0), op.pad, 2)
+			dst = appendPadNum(dst, f.zone.count(kWeek, 0, f.zone.Year().Floor(d.t)-1, d.t), op.pad, 2)
 		case 'V':
-			if !isoValid(di) {
-				dst = appendNaN(dst, op.pad, 2)
-				break
-			}
-			dst = appendPad(dst, isoWeek(di), op.pad, 2)
+			dst = appendPadNum(dst, f.zone.isoWeekNumber(d.isoThursday(f.zone)), op.pad, 2)
 		case 'w':
 			dst = strconv.AppendInt(dst, int64(fl.Weekday), 10)
 		case 'W':
-			if !yearStartValid(di.jan1) {
-				dst = appendNaN(dst, op.pad, 2)
-				break
-			}
-			dst = appendPad(dst, weekNumber(di, 1), op.pad, 2)
+			dst = appendPadNum(dst, f.zone.count(kWeek, 1, f.zone.Year().Floor(d.t)-1, d.t), op.pad, 2)
 		case 'y':
 			dst = appendPad(dst, fl.Year%100, op.pad, 2)
 		case 'Y':
 			dst = appendPad(dst, fl.Year%10000, op.pad, 4)
 		case 'Z':
-			dst = f.appendZone(dst, t)
+			dst = f.appendZone(dst, d.t)
 		}
 	}
 	return dst, len(dst) <= max
 }
 
-// weekNumber is %U (weekStart 0, Sunday) or %W (1, Monday): the number of
-// week boundaries between the day before 1 January and the date.
-func weekNumber(di dayInfo, weekStart int) int {
-	return int((floorToWeekday(di.days, weekStart) - floorToWeekday(di.jan1-1, weekStart)) / 7)
+// The day and week numbers are d3's, through the same intervals d3 counts
+// with (C120 of the 2026-10-18 audit): an interval's count corrects a span
+// by the change of the zone's offset truncated to whole minutes, as
+// getTimezoneOffset is, so in a year whose offset changed by seconds (a zone
+// leaving local mean time) a count is one less than the civil difference,
+// in d3 and here alike.
+
+// count is the d3 interval of kind (a day, or a week starting on weekday)
+// counted from a to b.
+func (z Zone) count(kind unitKind, weekday int, a, b float64) float64 {
+	iv := Interval{z: z, kind: kind, weekday: weekday}
+	n, _ := iv.Count(a, b)
+	return n
 }
 
-// isoThursday is the Thursday of the date's ISO week as d3 computes it:
-// floor to Thursday from Thursday to Sunday, ceil to Thursday from Monday
-// to Wednesday.
-func isoThursday(di dayInfo) int64 {
-	wd := di.weekday
-	if wd >= 4 || wd == 0 {
-		return floorToWeekday(di.days, 4)
+// isoThursday is d3-time-format's dISO(d): the Thursday of the date's ISO
+// week, timeThursday(d) from Thursday to Sunday, timeThursday.ceil(d) from
+// Monday to Wednesday.
+func (z Zone) isoThursday(t float64, weekday int) float64 {
+	th := z.Week(4)
+	if weekday >= 4 || weekday == 0 {
+		return th.Floor(t)
 	}
-	return floorToWeekday(di.days, 4) + 7
+	return th.Ceil(t)
 }
 
-func isoYear(di dayInfo) int {
-	y, _, _ := civilFromDays(isoThursday(di))
-	return int(y)
-}
-
-func isoWeek(di dayInfo) int {
-	th := isoThursday(di)
-	y, _, _ := civilFromDays(th)
-	jan1 := daysFromCivil(y, 1)
-	n := (th - floorToWeekday(jan1, 4)) / 7
-	if weekdayOfDay(jan1) == 4 {
+// isoWeekNumber is %V: timeThursday.count(timeYear(d), d) +
+// (timeYear(d).getDay() === 4) of d = dISO(date).
+func (z Zone) isoWeekNumber(d float64) float64 {
+	y := z.Year().Floor(d)
+	n := z.count(kWeek, 4, y, d)
+	if Valid(y) && z.Fields(y).Weekday == 4 {
 		n++
 	}
-	return int(n)
+	return n
 }
 
-// Near the ends of the Date range, the start of the year (or the ISO week's
-// Thursday) that %j, %U, %W, %V, %g and %G floor to can fall outside it; d3
-// then computes with an Invalid Date and prints NaN.
-func yearStartValid(jan1 int64) bool { return jan1 >= -100000000 }
-
-func isoValid(di dayInfo) bool {
-	th := isoThursday(di)
-	if th < -100000000 || th > 100000000 {
-		return false
+// yearOf is getFullYear: NaN for an Invalid Date.
+func (z Zone) yearOf(t float64) float64 {
+	if !Valid(t) {
+		return math.NaN()
 	}
-	y, _, _ := civilFromDays(th)
-	return yearStartValid(daysFromCivil(y, 1))
+	return float64(z.Fields(t).Year)
+}
+
+// jsRem is JavaScript's %: the sign of the dividend, NaN for NaN.
+func jsRem(a, b float64) float64 { return math.Mod(a, b) }
+
+// appendPadNum is d3's pad(value, fill, width) for a count that may be NaN.
+func appendPadNum(dst []byte, v float64, fill byte, width int) []byte {
+	if math.IsNaN(v) {
+		return appendNaN(dst, fill, width)
+	}
+	return appendPad(dst, int(v), fill, width)
 }
 
 func appendNaN(dst []byte, fill byte, width int) []byte {
@@ -401,7 +469,7 @@ func appendPadFloat(dst []byte, v float64, fill byte, width int) []byte {
 // a signed six-digit year outside 0..9999. ok is false for an Invalid Date
 // (where JavaScript throws a RangeError).
 func ISOFormat(t float64) (s string, ok bool) {
-	if !Valid(t) {
+	if t = timeClip(t); !Valid(t) {
 		return "", false
 	}
 	fl := UTC.Fields(t)

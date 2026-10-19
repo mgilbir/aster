@@ -50,6 +50,9 @@ type meta struct {
 // detached Walker.
 func (m *meta) SetWalker(w jsval.Walker) { m.walk = w }
 
+// walker is the Walker SetWalker installed.
+func (m *meta) walker() jsval.Walker { return m.walk }
+
 // workBatch is how many domain values a scale's loops go between two reports
 // of their work.
 const workBatch = 256

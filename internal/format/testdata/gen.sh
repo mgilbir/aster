@@ -12,3 +12,14 @@ done
 for tz in America/New_York America/Sao_Paulo Australia/Lord_Howe Pacific/Apia Europe/London America/St_Johns Asia/Kolkata; do
   TZ=$tz node testdata/gen_weekevery.mjs
 done | gzip -9 > testdata/weekevery.jsonl.gz
+node testdata/gen_duck.mjs | gzip -n -9 > testdata/duck.json.gz
+for tz in UTC America/New_York Africa/Monrovia; do
+  TZ=$tz node testdata/gen_calendar.mjs
+done | gzip -n -9 > testdata/calendar.jsonl.gz
+for tz in UTC America/New_York; do
+  TZ=$tz node testdata/gen_dateparse.mjs
+done | gzip -n -9 > testdata/dateparse.jsonl.gz
+# V8's zone names for String(date), from a host whose zoneinfo is node's tzdata release:
+node testdata/gen_zonenames.mjs /usr/share/zoneinfo/tzdata.zi vectors | gzip -n -9 > testdata/zonenames.json.gz
+node testdata/gen_zonenames.mjs /usr/share/zoneinfo/tzdata.zi samples > /tmp/zonenames-samples.json
+go run zonenames_gen.go /tmp/zonenames-samples.json
