@@ -1,7 +1,7 @@
 // Shared helpers of the scale generators: value encoding and the case runner.
 import { createRequire } from 'node:module';
 import path from 'node:path';
-const require = createRequire(path.join(process.env.NODE_PATH, 'x.js'));
+const require = createRequire(path.resolve(process.env.NODE_PATH, 'x.js'));
 const vs_ = await import(require.resolve('vega-scale'));
 
 // ---- value encoding -------------------------------------------------------

@@ -2,7 +2,7 @@
 // Run: NODE_PATH=<node_modules> node gen_interp.mjs | gzip -9 > interp.json.gz
 import { createRequire } from 'node:module';
 import path from 'node:path';
-const require = createRequire(path.join(process.env.NODE_PATH, 'x.js'));
+const require = createRequire(path.resolve(process.env.NODE_PATH, 'x.js'));
 const vs = await import(require.resolve('vega-scale'));
 const di = await import(require.resolve('d3-interpolate'));
 const pal = await import(path.join(process.env.NODE_PATH, 'vega-scale/src/palettes.js'));

@@ -8,7 +8,7 @@
 import { createRequire } from 'node:module';
 import path from 'node:path';
 
-const require = createRequire(path.join(process.env.NODE_PATH, 'x.js'));
+const require = createRequire(path.resolve(process.env.NODE_PATH, 'x.js'));
 const { Dataflow, Parameters, Pulse } = await import(require.resolve('vega-dataflow'));
 const { axisticks: AxisTicks, legendentries: LegendEntries } = await import(require.resolve('vega-encode'));
 const { scale: vscale } = await import(require.resolve('vega-scale'));

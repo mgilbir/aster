@@ -5,7 +5,7 @@
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { build, enc, dec, NaNv, U, D } from './gen_common.mjs';
-const require = createRequire(path.join(process.env.NODE_PATH, 'x.js'));
+const require = createRequire(path.resolve(process.env.NODE_PATH, 'x.js'));
 const vs = await import(require.resolve('vega-scale'));
 const vf = await import(require.resolve('vega-format'));
 const loc = vf.locale();

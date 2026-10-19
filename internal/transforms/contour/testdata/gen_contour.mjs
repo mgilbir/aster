@@ -2,7 +2,7 @@
 // Run: NODE_PATH=<node_modules with vega> node testdata/gen_contour.mjs > testdata/contour.json
 import { createRequire } from 'node:module';
 import path from 'node:path';
-const require = createRequire(path.join(process.env.NODE_PATH, 'x.js'));
+const require = createRequire(path.resolve(process.env.NODE_PATH, 'x.js'));
 const vega = await import(require.resolve('vega'));
 
 // Deterministic pseudo-random points (LCG) so the data is reproducible.
