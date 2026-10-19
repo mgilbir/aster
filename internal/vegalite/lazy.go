@@ -175,12 +175,19 @@ func signalOf(v Value) string {
 }
 
 // resolveLazy replaces every lazy signal in v with its evaluated expression.
-// The compiled specification shares objects (a config's or a definition's,
-// reused by every mark that reads them), so it is a graph, not a tree: each
-// array and object is visited once, which bounds the walk by the objects
-// the compilation made rather than by the paths to them, exponential in the
-// depth of sharing.
+// The compiled specification may share objects (a config's or a
+// definition's, reused by every mark that reads them), so it is a graph, not
+// a tree, and a walk of the tree it stands for is exponential in the depth
+// of sharing. The walk is made as a tree walk up to resolveLazyTreeVisits
+// values, which an output's usual size stays far below and which costs no
+// allocation; past them it starts again with a visited set, so each array and
+// object is visited once. Resolving is idempotent (a resolved signal is no
+// longer lazy), so the second walk only finishes the first.
 func resolveLazy(cc *compileCtx, v Value) {
+	left := resolveLazyTreeVisits
+	if resolveLazyTree(cc, v, &left) {
+		return
+	}
 	seen := map[jsval.InternKey]struct{}{}
 	var walk func(v Value)
 	walk = func(v Value) {
@@ -199,15 +206,50 @@ func resolveLazy(cc *compileCtx, v Value) {
 				walk(it)
 			}
 		case jsval.KindObj:
+			resolveLazyObject(v.ObjValue())
 			o := v.ObjValue()
-			if fn, ok := lazyFn(o); ok {
-				o.Set("signal", jsval.Str(fn()))
-				o.SetStringer(nil)
-			}
 			for i := 0; i < o.Len(); i++ {
 				walk(o.ValueAt(i))
 			}
 		}
 	}
 	walk(v)
+}
+
+// resolveLazyTreeVisits bounds resolveLazy's tree walk (see resolveLazy).
+const resolveLazyTreeVisits = 1 << 20
+
+// resolveLazyTree walks v as a tree, resolving lazy signals, and reports
+// false once it has visited *left values without finishing.
+func resolveLazyTree(cc *compileCtx, v Value, left *int) bool {
+	if *left <= 0 {
+		return false
+	}
+	*left--
+	cc.work(1)
+	switch v.Kind() {
+	case jsval.KindArr:
+		for _, it := range v.Items() {
+			if !resolveLazyTree(cc, it, left) {
+				return false
+			}
+		}
+	case jsval.KindObj:
+		o := v.ObjValue()
+		resolveLazyObject(o)
+		for i := 0; i < o.Len(); i++ {
+			if !resolveLazyTree(cc, o.ValueAt(i), left) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// resolveLazyObject evaluates o's expression when it is a lazy signal.
+func resolveLazyObject(o *Object) {
+	if fn, ok := lazyFn(o); ok {
+		o.Set("signal", jsval.Str(fn()))
+		o.SetStringer(nil)
+	}
 }

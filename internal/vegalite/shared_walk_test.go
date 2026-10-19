@@ -62,6 +62,12 @@ func TestSharedValueWalksAreLinear(t *testing.T) {
 		// a thousand units at a time).
 		n1 := walkWork(t, func(cc *compileCtx) { c.walk(cc, 500) })
 		n2 := walkWork(t, func(cc *compileCtx) { c.walk(cc, 1000) })
+		// resolveLazy's tree walk gives up after resolveLazyTreeVisits
+		// values and walks the graph instead: at most that many steps more.
+		if c.name == "resolveLazy" {
+			n1 -= resolveLazyTreeVisits
+			n2 -= resolveLazyTreeVisits
+		}
 		if n1 <= 0 || n2 <= 0 || n2 > 4*n1 {
 			t.Errorf("%s: work %d at depth 500, %d at depth 1000 (-1: past a 10 s deadline): not linear in the values", c.name, n1, n2)
 		}
