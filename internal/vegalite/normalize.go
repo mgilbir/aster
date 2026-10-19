@@ -369,7 +369,7 @@ func normalizeChannelDefCompat(obj Value, p *normParams) Value {
 		}
 		enc.Get("scale").ObjValue().Set("domain", jsval.Obj(d))
 	}
-	if isConditionalDef(enc) {
+	if isConditionalDef(cc, enc) {
 		cond := enc.Get("condition")
 		if cond.IsArr() {
 			eo.Set("condition", mapVals(cc, cond, func(c Value) Value {
@@ -1341,7 +1341,7 @@ func replaceRepeaterInChannelDef(cc *compileCtx, cd, repeater Value) Value {
 	if isFieldOrDatumDef(cc, cd) {
 		if fd := replaceRepeaterInFieldOrDatumDef(cc, cd, repeater); fd.IsTruthy() {
 			return fd
-		} else if isConditionalDef(cd) {
+		} else if isConditionalDef(cc, cd) {
 			return mkv("condition", cd.Get("condition"))
 		}
 		return undef

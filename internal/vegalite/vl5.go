@@ -14,7 +14,7 @@ func wrapCondition58(o wrapConditionOpts) Value {
 	cc := o.model.ctx
 	main := o.mainRefFn(o.channelDef)
 	cond := o.channelDef.Get("condition")
-	if isConditionalDef(o.channelDef) && cond.IsTruthy() {
+	if isConditionalDef(cc, o.channelDef) && cond.IsTruthy() {
 		var refs []Value
 		for _, c := range arrayOf(cond) {
 			cc.work(1)

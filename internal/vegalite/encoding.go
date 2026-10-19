@@ -308,7 +308,7 @@ func initEncoding(cc *compileCtx, encoding Value, mark Value, filled bool, confi
 		} else {
 			if channel == chTooltip && channelDef.IsNull() {
 				normalized.Set(channel, jsval.Null)
-			} else if !isFieldDef(cc, channelDef) && !isDatumDefOf(cc, channelDef) && !isValueDef(channelDef) && !isConditionalDef(channelDef) && !isSignalRef(cc, channelDef) {
+			} else if !isFieldDef(cc, channelDef) && !isDatumDefOf(cc, channelDef) && !isValueDef(channelDef) && !isConditionalDef(cc, channelDef) && !isSignalRef(cc, channelDef) {
 				cc.warn(msgEmptyFieldDef(cc, channelDef, channel))
 				continue
 			} else {

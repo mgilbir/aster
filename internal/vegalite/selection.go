@@ -224,15 +224,19 @@ func parseUnitSelection(m *unitModel, selDefs []Value) *omap[*selectionComponent
 			defaults = mk("type", typV)
 		}
 		cfg := selectionConfig.Get(propKey(typV))
+		// defaults[key] is a property read: under 5.8 the clone may have
+		// given defaults a prototype ("__proto__" in the selection), which
+		// answers too.
+		dval := jsval.Obj(defaults)
 		for _, key := range keysOf(cfg) {
 			cc.work(1)
 			if key == "fields" || key == "encodings" {
 				continue
 			}
 			if key == "mark" {
-				defaults.Set("mark", jsval.Obj(merged(cfg.Get("mark"), defaults.Lookup("mark"))))
+				defaults.Set("mark", jsval.Obj(merged(cfg.Get("mark"), dval.Get("mark"))))
 			}
-			dv := defaults.Lookup(key)
+			dv := dval.Get(key)
 			if dv.IsUndefined() || (dv.IsBool() && dv.BoolValue()) {
 				defaults.Set(key, duplicate(cc, coalesce(cfg.Get(key), dv)))
 			}
@@ -242,7 +246,7 @@ func parseUnitSelection(m *unitModel, selDefs []Value) *omap[*selectionComponent
 		props.Set("type", typV)
 		props.Set("init", def.Get("value"))
 		props.Set("bind", def.Get("bind"))
-		if on := defaults.Lookup("on"); on.IsStr() {
+		if on := dval.Get("on"); on.IsStr() {
 			props.Set("events", jsval.Arr(parseSelector(cc, on.StrValue(), "scope")))
 		} else {
 			props.Set("events", jsval.Arr(arrayOf(duplicate(cc, on))))
@@ -1532,7 +1536,9 @@ var intervalCompiler = selectionCompiler{
 			if y != nil {
 				tests = append(tests, yvname+"[0] !== "+yvname+"[1]")
 			}
-			vgStroke.Set(k, arr(mkv("test", strings.Join(tests, " && "), "value", stroke.Lookup(k)), mkv("value", jsval.Null)))
+			// def[k] = [...]: a key "__proto__" sets def's prototype, which
+			// the spread into the update leaves behind.
+			jsAssign(cc.realm(), vgStroke, k, arr(mkv("test", strings.Join(tests, " && "), "value", stroke.Lookup(k)), mkv("value", jsval.Null)))
 		}
 		var vgCursor Value
 		switch {

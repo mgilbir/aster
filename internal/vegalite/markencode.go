@@ -47,7 +47,7 @@ func wrapCondition(cc *compileCtx, o wrapConditionOpts) Value {
 		return wrapCondition58(o)
 	}
 	var valueRefs []Value
-	if cond := o.channelDef.Get("condition"); isConditionalDef(o.channelDef) && cond.IsTruthy() {
+	if cond := o.channelDef.Get("condition"); isConditionalDef(cc, o.channelDef) && cond.IsTruthy() {
 		for _, c := range arrayOf(cond) {
 			cc.work(1)
 			cvr := o.mainRefFn(c)
@@ -236,7 +236,7 @@ func nonPosition(channel string, m *unitModel, opt nonPositionOpts) Value {
 	defaultRef, defaultValue := opt.defaultRef, opt.defaultValue
 	if defaultRef.IsUndefined() {
 		if defaultValue.IsNullish() {
-			defaultValue = getMarkPropOrConfig(cc, channel, markDef, config, opt.vgChannel, cc.v5 || !isConditionalDef(channelDef))
+			defaultValue = getMarkPropOrConfig(cc, channel, markDef, config, opt.vgChannel, cc.v5 || !isConditionalDef(cc, channelDef))
 		}
 		if !defaultValue.IsUndefined() {
 			defaultRef = signalOrValueRef(m.ctx, defaultValue)

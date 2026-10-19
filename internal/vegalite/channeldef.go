@@ -91,7 +91,14 @@ func isOrderOnlyDef(cc *compileCtx, cd Value) bool {
 	return !cc.v5 && hasProperty(cd, "sort") && !hasProperty(cd, "field")
 }
 
-func isConditionalDef(cd Value) bool { return hasProperty(cd, "condition") }
+// isConditionalDef is hasProperty(cd, 'condition') in 6.4; 5.8 asks
+// `'condition' in cd`, which a prototype the clone gave cd answers too.
+func isConditionalDef(cc *compileCtx, cd Value) bool {
+	if cc != nil && cc.v5 && isObject(cd) {
+		return jsIn(cd, "condition")
+	}
+	return hasProperty(cd, "condition")
+}
 
 func hasConditionalFieldDef(cc *compileCtx, cd Value) bool {
 	c := cd.Get("condition")
