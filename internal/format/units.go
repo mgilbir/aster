@@ -93,7 +93,7 @@ type UnitSpecifiers map[string]*string
 
 // UnitSpecifiersFromValue reads an object of specifiers; non-string members
 // other than null are converted with String().
-func UnitSpecifiersFromValue(v jsval.Value) UnitSpecifiers {
+func UnitSpecifiersFromValue(w jsval.Walker, v jsval.Value) UnitSpecifiers {
 	o := v.ObjValue()
 	if o == nil {
 		return nil
@@ -105,7 +105,7 @@ func UnitSpecifiersFromValue(v jsval.Value) UnitSpecifiers {
 		case val.IsNullish():
 			out[o.KeyAt(i)] = nil
 		default:
-			out[o.KeyAt(i)] = ptr(val.AsString())
+			out[o.KeyAt(i)] = ptr(w.String(val))
 		}
 	}
 	return out

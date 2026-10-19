@@ -41,7 +41,7 @@ func (v *runView) seedCollect(c *rtContext, n *opNode, e *entry) {
 			// dataflow is made (Dataflow.preload): the TypeError rejects that
 			// promise rather than throwing out of the View, so it is the
 			// load that failed, reported like one. The data set is empty.
-			if err := v.g.report(&LoadError{URL: e.ingest.url.AsString(), Parse: true, Err: errNullRow}); err != nil {
+			if err := v.g.report(&LoadError{URL: v.walk.String(e.ingest.url), Parse: true, Err: errNullRow}); err != nil {
 				failErr(err)
 			}
 			data = nil
@@ -188,7 +188,7 @@ func textOf(ctx context.Context, b []byte) (string, error) {
 func (v *runView) read(value jsval.Value, raw []byte, schema jsval.Value) ([]jsval.Value, error) {
 	typ := "json"
 	if t := schema.Get("type"); t.IsTruthy() {
-		typ = t.AsString()
+		typ = v.walk.String(t)
 	}
 	var data []jsval.Value
 	var columns []string
@@ -202,7 +202,7 @@ func (v *runView) read(value jsval.Value, raw []byte, schema jsval.Value) ([]jsv
 		case "tsv":
 			delim = "\t"
 		case "dsv":
-			delim = schema.Get("delimiter").AsString()
+			delim = v.walk.String(schema.Get("delimiter"))
 			if delim == "" {
 				return nil, fmt.Errorf("dsv format requires a delimiter")
 			}
@@ -212,13 +212,13 @@ func (v *runView) read(value jsval.Value, raw []byte, schema jsval.Value) ([]jsv
 			failErr(err)
 		}
 		if !value.IsUndefined() {
-			text = value.AsString()
+			text = v.walk.String(value)
 		}
 		if hdr := schema.Get("header"); hdr.IsArr() {
 			// joined with the whole delimiter, as vega-loader does
 			parts := make([]string, 0, hdr.Len())
 			for _, h := range hdr.Items() {
-				parts = append(parts, stringValue(h))
+				parts = append(parts, v.walk.StringValue(h))
 			}
 			text = strings.Join(parts, delim) + "\n" + text
 		}
@@ -239,11 +239,11 @@ func (v *runView) read(value jsval.Value, raw []byte, schema jsval.Value) ([]jsv
 		// truthiness: an absent one is not the object named "undefined".
 		name := func(k string) string {
 			if p := schema.Get(k); p.IsTruthy() {
-				return p.AsString()
+				return v.walk.String(p)
 			}
 			return ""
 		}
-		data, err = geo.TopologyFeatures(v.ctx, doc, name("feature"), name("mesh"), schema.Get("filter").AsString())
+		data, err = geo.TopologyFeatures(v.ctx, doc, name("feature"), name("mesh"), v.walk.String(schema.Get("filter")))
 	default:
 		return nil, fmt.Errorf("Unknown data format type: %s", typ)
 	}
@@ -300,7 +300,7 @@ func jsonDocument(ctx context.Context, value jsval.Value, raw []byte, schema jsv
 		doc = value
 	}
 	if prop := schema.Get("property"); prop.IsTruthy() {
-		doc = walkFieldPath(doc, prop.AsString())
+		doc = walkFieldPath(doc, jsval.WalkerFor(ctx).String(prop))
 	}
 	return doc, nil
 }
@@ -556,12 +556,12 @@ func (v *runView) applyParse(data []jsval.Value, columns []string, types jsval.V
 		// Upstream's inferTypes assigns types[field] for each field in
 		// turn, and the parse goes over Object.keys(types).
 		order = v.typeKeys(fields)
-		typeOf = inferTypes(&v.g.meter, data, order)
+		typeOf = inferTypes(&v.g.meter, v.walk, data, order)
 	} else if o := types.ObjValue(); o != nil {
 		typeOf = make(map[string]string, o.Len())
 		for i := 0; i < o.Len(); i++ {
 			v.work(1)
-			typeOf[o.KeyAt(i)] = o.ValueAt(i).AsString()
+			typeOf[o.KeyAt(i)] = v.walk.String(o.ValueAt(i))
 		}
 		order = v.jsKeyOrder(o.Keys())
 	} else {
@@ -584,7 +584,7 @@ func (v *runView) applyParse(data []jsval.Value, columns []string, types jsval.V
 				tp = v.locale.TimeParse(pattern)
 			}
 			parsers[i] = func(x jsval.Value) jsval.Value {
-				s := x.AsString()
+				s := v.walk.String(x)
 				if x.IsNullish() {
 					s = "null"
 				}
@@ -658,14 +658,14 @@ func (v *runView) typeParser(t string) func(jsval.Value) jsval.Value {
 			if x.IsNum() || x.IsTimestamp() {
 				return x
 			}
-			return jsval.Num(format.ParseDate(x.AsString(), v.zone))
+			return jsval.Num(format.ParseDate(v.walk.String(x), v.zone))
 		}
 	case "string":
 		return func(x jsval.Value) jsval.Value {
 			if x.IsNullish() || (x.IsStr() && x.StrValue() == "") {
 				return jsval.Null
 			}
-			return jsval.Str(x.AsString())
+			return jsval.Str(v.walk.String(x))
 		}
 	case "unknown":
 		return func(x jsval.Value) jsval.Value { return x }
@@ -694,10 +694,10 @@ func toNumberValue(x jsval.Value) jsval.Value {
 
 // -- inference -----------------------------------------------------------------
 
-func inferTypes(m *budget.Meter, data []jsval.Value, fields []string) map[string]string {
+func inferTypes(m *budget.Meter, w jsval.Walker, data []jsval.Value, fields []string) map[string]string {
 	out := make(map[string]string, len(fields))
 	for _, f := range fields {
-		out[f] = inferType(m, data, f)
+		out[f] = inferType(m, w, data, f)
 	}
 	return out
 }
@@ -706,29 +706,29 @@ func validValue(x jsval.Value) bool {
 	return !x.IsNullish() && !(x.IsNum() && math.IsNaN(x.NumValue()))
 }
 
-func testBoolean(x jsval.Value) bool {
+func testBoolean(_ jsval.Walker, x jsval.Value) bool {
 	if x.IsBool() {
 		return true
 	}
 	return x.IsStr() && (x.StrValue() == "true" || x.StrValue() == "false")
 }
 
-func testNumber(x jsval.Value) bool {
+func testNumber(_ jsval.Walker, x jsval.Value) bool {
 	if x.IsTimestamp() {
 		return false
 	}
 	return !math.IsNaN(jsval.ToNumber(x))
 }
 
-func testInteger(x jsval.Value) bool {
-	if !testNumber(x) {
+func testInteger(w jsval.Walker, x jsval.Value) bool {
+	if !testNumber(w, x) {
 		return false
 	}
 	f := jsval.ToNumber(x)
 	return !math.IsInf(f, 0) && f == math.Trunc(f)
 }
 
-func testDate(x jsval.Value) bool {
+func testDate(w jsval.Walker, x jsval.Value) bool {
 	if x.IsTimestamp() {
 		return !math.IsNaN(x.NumValue())
 	}
@@ -736,15 +736,15 @@ func testDate(x jsval.Value) bool {
 	if x.IsStr() {
 		s = x.StrValue()
 	} else {
-		s = x.AsString()
+		s = w.String(x)
 	}
 	return !math.IsNaN(format.ParseDate(s, format.UTC))
 }
 
-var typeTests = [...]func(jsval.Value) bool{testBoolean, testInteger, testNumber, testDate}
+var typeTests = [...]func(jsval.Walker, jsval.Value) bool{testBoolean, testInteger, testNumber, testDate}
 var typeList = [...]string{"boolean", "integer", "number", "date"}
 
-func inferType(m *budget.Meter, data []jsval.Value, field string) string {
+func inferType(m *budget.Meter, w jsval.Walker, data []jsval.Value, field string) string {
 	if len(data) == 0 {
 		return "unknown"
 	}
@@ -754,7 +754,7 @@ func inferType(m *budget.Meter, data []jsval.Value, field string) string {
 		charge(m, 1)
 		x := d.Get(field)
 		for j := range typeTests {
-			if a[j] != 0 && validValue(x) && !typeTests[j](x) {
+			if a[j] != 0 && validValue(x) && !typeTests[j](w, x) {
 				a[j] = 0
 				t++
 				if t == len(typeTests) {

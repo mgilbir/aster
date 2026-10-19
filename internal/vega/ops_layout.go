@@ -106,7 +106,7 @@ func facOverlap(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode
 			if len(rng) > 0 {
 				op.Bound = &layout.OverlapBound{
 					Range:     [2]float64{jsval.ToNumber(rng[0]), jsval.ToNumber(rng[len(rng)-1])},
-					Orient:    p.Value("boundOrient").AsString(),
+					Orient:    p.walk.String(p.Value("boundOrient")),
 					Tolerance: jsval.ToNumber(p.Value("boundTolerance")),
 				}
 			}
@@ -138,7 +138,7 @@ func facAxisTicks(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNo
 			Count:           p.Value("count"),
 			Values:          p.Value("values"),
 			MinStep:         p.Value("minstep"),
-			FormatType:      strParam(p.Value("formatType")),
+			FormatType:      strParam(p.walk, p.Value("formatType")),
 			FormatSpecifier: p.Value("formatSpecifier"),
 		}
 		ticks, err := n.g.view.guidesEnv().AxisTicks(in)
@@ -151,11 +151,11 @@ func facAxisTicks(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNo
 	}), nil
 }
 
-func strParam(v jsval.Value) string {
+func strParam(w jsval.Walker, v jsval.Value) string {
 	if v.IsNullish() {
 		return ""
 	}
-	return v.AsString()
+	return w.String(v)
 }
 
 func facLegendEntries(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *opParams) any) {
@@ -165,13 +165,13 @@ func facLegendEntries(c *rtContext, n *opNode, e *entry) (any, transform, func(*
 		}
 		sc, _ := p.Get("scale").(scale.Scale)
 		in := guides.LegendEntriesInput{
-			Type:            strParam(p.Value("type")),
+			Type:            strParam(p.walk, p.Value("type")),
 			Scale:           sc,
 			Count:           p.Value("count"),
 			Limit:           p.Value("limit"),
 			Values:          p.Value("values"),
 			MinStep:         p.Value("minstep"),
-			FormatType:      strParam(p.Value("formatType")),
+			FormatType:      strParam(p.walk, p.Value("formatType")),
 			FormatSpecifier: p.Value("formatSpecifier"),
 		}
 		if b, ok := p.Get("size").(*boundExpr); ok {

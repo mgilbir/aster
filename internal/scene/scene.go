@@ -74,6 +74,18 @@ type ShapeFunc func(ctx PathContext, item *Item) string
 // "root") holding a single group item; the mark hierarchy hangs below it.
 type Scenegraph struct {
 	Root *Mark
+	// walk is the Walker of the call that builds the scene (SetWalker),
+	// which its marks carry to their items.
+	walk jsval.Walker
+}
+
+// SetWalker sets the Walker of the call that builds the scene: the String of
+// an item's property value (a font, a text line, a colour) is a walk of it
+// when it is an array, bounded by the call (ADR 0018). A scene made without
+// one walks with the detached Walker.
+func (s *Scenegraph) SetWalker(w jsval.Walker) {
+	s.walk = w
+	s.Root.walk = w
 }
 
 // New creates the empty scenegraph vega's `new Scenegraph()` builds.
@@ -117,6 +129,7 @@ func (s *Scenegraph) AddMark(def MarkDef, group *Item, index int) *Mark {
 		Description:    def.Description,
 		Group:          group,
 		Bounds:         NewBounds(),
+		walk:           s.walk,
 	}
 	if index < 0 || index >= len(group.Items) {
 		group.Items = append(group.Items, m)
@@ -158,6 +171,8 @@ type Mark struct {
 	Shape ShapeFunc
 	// attrs are the slabs the items' property groups come from.
 	attrs *attrSlabs
+	// walk is the Walker of the call that built the mark (SetWalker).
+	walk jsval.Walker
 
 	// GuideCaption is the aria-label text for axis and legend marks that have
 	// no explicit description; the runtime computes it from the guide's scale
@@ -298,4 +313,13 @@ func (it *Item) parsedPath(l *budget.Ledger) ([]PathCmd, error) {
 	}
 	p.parsed, p.parsedD, p.parsedOK = cmds, p.D, true
 	return cmds, nil
+}
+
+// Walker is the Walker of the call that built the item's mark, with which
+// the String of its property values is taken.
+func (it *Item) Walker() jsval.Walker {
+	if it == nil || it.Mark == nil {
+		return jsval.Walker{}
+	}
+	return it.Mark.walk
 }

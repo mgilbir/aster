@@ -65,7 +65,7 @@ func TimeUnit(ctx context.Context, data []jsval.Value, p TimeUnitParams) ([]jsva
 			if !ok || !format.Valid(f) {
 				// Upstream builds new Date(v) from strings too; parsing them is
 				// the caller's business, so anything else is invalid here.
-				return data, info, fmt.Errorf("Invalid date: %s", v.AsString())
+				return data, info, fmt.Errorf("Invalid date: %s", jsval.StringPrefix(v, jsval.MessageBytes))
 			}
 			dates[i] = f
 		}
@@ -84,7 +84,7 @@ func TimeUnit(ctx context.Context, data []jsval.Value, p TimeUnitParams) ([]jsva
 		if p.Extent != nil {
 			lo, hi = p.Extent[0], p.Extent[1]
 		} else {
-			a, b, ok, err := ExtentOf(data, p.Field)
+			a, b, ok, err := ExtentOf(jsval.WalkerFor(ctx), data, p.Field)
 			if err != nil {
 				return data, info, err
 			}

@@ -3,10 +3,8 @@ package format
 import (
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/mgilbir/aster/internal/budget"
-
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -153,7 +151,7 @@ func (l *TimeLocale) maxOutput(ops []fmtOp) int {
 func lookupOf(names []string) map[string]int {
 	m := make(map[string]int, len(names))
 	for i, n := range names {
-		m[strings.ToLower(n)] = i
+		m[jsval.JSLower(n)] = i
 	}
 	return m
 }

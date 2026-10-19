@@ -16,9 +16,9 @@ import (
 // interpolators maps d3-interpolate's exports of the form `(a, b) => t => value`.
 var interpolators = map[string]Interpolator{
 	"interpolate":              InterpolateValue,
-	"interpolateNumber":        InterpolateNumber,
-	"interpolateRound":         InterpolateRound,
-	"interpolateDate":          InterpolateDate,
+	"interpolateNumber":        InterpolateNumberI,
+	"interpolateRound":         InterpolateRoundI,
+	"interpolateDate":          InterpolateDateI,
 	"interpolateString":        InterpolateString,
 	"interpolateObject":        InterpolateObject,
 	"interpolateArray":         InterpolateArray,
@@ -115,7 +115,7 @@ func TestUpstreamD3Interpolate(t *testing.T) {
 				r.Skip("piecewise with an interpolator the recording cannot identify")
 				continue
 			}
-			unit = Piecewise(interp, upstream.ToValue(args[1]).Items())
+			unit = Piecewise(jsval.Walker{}, interp, upstream.ToValue(args[1]).Items())
 		case strings.HasSuffix(base, ".gamma"):
 			// interpolateRgb.gamma(g)(a, b)(t)
 			interp, ok := interpolatorFromCall(base, args)
@@ -123,7 +123,7 @@ func TestUpstreamD3Interpolate(t *testing.T) {
 				r.Skip("gamma interpolators not asked through (a, b)(t)")
 				continue
 			}
-			unit = interp(upstream.ToValue(via[0].Args[0]), upstream.ToValue(via[0].Args[1]))
+			unit = interp(jsval.Walker{}, upstream.ToValue(via[0].Args[0]), upstream.ToValue(via[0].Args[1]))
 			via = nil
 		case base == "interpolateZoom.rho":
 			if len(via) != 1 || via[0].Method != "" || len(via[0].Args) != 2 {
@@ -154,7 +154,7 @@ func TestUpstreamD3Interpolate(t *testing.T) {
 				r.Skip("unmapped " + fn)
 				continue
 			}
-			unit = f(upstream.ToValue(args[0]), upstream.ToValue(args[1]))
+			unit = f(jsval.Walker{}, upstream.ToValue(args[0]), upstream.ToValue(args[1]))
 		}
 		if len(via) > 0 || len(c.Args) != 1 || c.Method != "" {
 			r.Skip("not a plain call of the returned function")

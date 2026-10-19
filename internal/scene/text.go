@@ -45,7 +45,7 @@ func LineHeight(it *Item) float64 {
 // quoted attribute).
 func FontFamily(it *Item, quote bool) string {
 	if v, ok := it.Raw["font"]; ok && !quote && v.IsTruthy() {
-		return v.AsString() // `font || 'sans-serif'` keeps a truthy array
+		return it.Walker().String(v) // `font || 'sans-serif'` keeps a truthy array
 	}
 	f := it.Font()
 	if f == "" {
@@ -102,7 +102,12 @@ func BaselineOffset(it *Item) float64 {
 // TextLines returns the lines of an item's text. multi is true when the text is
 // an array of two or more lines (or a string split on lineBreak); otherwise
 // lines holds one entry. Null entries become "" and other values are
-// stringified, as textValue does with `line + ”`.
+// stringified, as textValue does with `line + ”`, with the item's Walker.
+//
+// A line leaves JavaScript as UTF-8 (to the canvas that measures it, in the
+// SVG document), which writes each lone surrogate as U+FFFD: the lines are
+// well formed, one U+FFFD a surrogate, which is also one code unit, so
+// truncation counts the same.
 func TextLines(it *Item) (lines []string, multi bool) {
 	t := it.Text()
 	switch {
@@ -111,33 +116,33 @@ func TextLines(it *Item) (lines []string, multi bool) {
 		if len(items) > 1 {
 			out := make([]string, len(items))
 			for i, v := range items {
-				out[i] = lineString(v)
+				out[i] = lineString(it, v)
 			}
 			return out, true
 		}
 		if len(items) == 1 {
-			return []string{lineString(items[0])}, false
+			return []string{lineString(it, items[0])}, false
 		}
 		return []string{""}, false
 	case it.LineBreak() != "" && t.IsTruthy():
-		parts := strings.Split(t.AsString(), it.LineBreak())
+		parts := strings.Split(lineString(it, t), it.LineBreak())
 		if len(parts) > 1 {
 			return parts, true
 		}
 		return parts, false
 	}
-	return []string{lineString(t)}, false
+	return []string{lineString(it, t)}, false
 }
 
-// lineString is `line == null ? ” : line + ”` without the trim.
-func lineString(v jsval.Value) string {
+// lineString is `line == null ? ” : line + ”` without the trim, well formed.
+func lineString(it *Item, v jsval.Value) string {
 	if v.IsNullish() {
 		return ""
 	}
 	if v.IsStr() {
-		return v.StrValue()
+		return jsval.ToWellFormed(v.StrValue())
 	}
-	return v.AsString()
+	return jsval.ToWellFormed(it.Walker().String(v))
 }
 
 // TextLine returns the item's text as a single line when it is not multi-line
@@ -146,7 +151,7 @@ func lineString(v jsval.Value) string {
 func TextLine(it *Item) (line string, lines []string) {
 	t := it.Text()
 	if !t.IsArr() && (it.LineBreak() == "" || !t.IsTruthy()) {
-		return lineString(t), nil
+		return lineString(it, t), nil
 	}
 	l, multi := TextLines(it)
 	if multi {

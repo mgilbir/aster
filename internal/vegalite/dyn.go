@@ -1,15 +1,10 @@
 package vegalite
 
 import (
-	"errors"
 	"math"
 	"sort"
 	"strconv"
 	"strings"
-	"unicode/utf8"
-
-	"golang.org/x/text/cases"
-	"golang.org/x/text/language"
 
 	"github.com/mgilbir/aster/internal/jsval"
 )
@@ -579,13 +574,7 @@ func varName(s string) string {
 // the first UTF-16 unit, upper-cased with JavaScript's full case mapping
 // (ß becomes SS). A first character outside the BMP is a lone surrogate to
 // charAt, which has no upper case, so the string is unchanged.
-func titleCase(s string) string {
-	r, n := utf8.DecodeRuneInString(s)
-	if n == 0 || r >= 0x10000 {
-		return s
-	}
-	return jsUpperCase(s[:n]) + s[n:]
-}
+func titleCase(s string) string { return jsval.UpperFirst(s) }
 
 // titleCaseV is titleCase of a spec value, which calls s.charAt.
 func titleCaseV(v Value) string {
@@ -597,16 +586,6 @@ func titleCaseV(v Value) string {
 	}
 	throw("s.charAt is not a function")
 	return ""
-}
-
-// jsUpperCase is String.prototype.toUpperCase: full Unicode case mapping.
-func jsUpperCase(s string) string {
-	for i := 0; i < len(s); i++ {
-		if s[i] >= utf8.RuneSelf {
-			return cases.Upper(language.Und).String(s)
-		}
-	}
-	return strings.ToUpper(s)
 }
 
 // appendVals is Array.prototype.concat over Value slices.
@@ -639,7 +618,7 @@ func isNumericV(v Value) bool {
 }
 
 func parseFloatPrefix(s string) float64 {
-	s = strings.TrimSpace(s)
+	s = jsval.JSTrimStart(s)
 	end := 0
 	seenDot, seenDigit := false, false
 	for i, c := range s {
@@ -679,12 +658,7 @@ done:
 		}
 		return math.NaN()
 	}
-	// Out of range, ParseFloat answers ±Inf (or 0) with an error; parseFloat
-	// answers the same values ("1e999" is Infinity).
-	f, err := strconv.ParseFloat(s[:end], 64)
-	if err != nil && !errors.Is(err, strconv.ErrRange) {
-		return math.NaN()
-	}
+	f, _ := jsval.ParseDecimal(s[:end])
 	return f
 }
 

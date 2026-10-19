@@ -93,7 +93,7 @@ func (p *opParams) str(name string) string {
 	if v.IsNullish() {
 		return ""
 	}
-	return v.AsString()
+	return p.walk.String(v)
 }
 
 func (p *opParams) strs(name string) []string {
@@ -103,7 +103,7 @@ func (p *opParams) strs(name string) []string {
 	}
 	out := make([]string, len(l))
 	for i, e := range l {
-		if s, ok := asString(e); ok {
+		if s, ok := paramText(p.walk, e); ok {
 			out[i] = s
 		}
 	}
@@ -330,7 +330,7 @@ func init() {
 			// groups (an explicit key, else the group-by values).
 			kf, ok := p.Get("key").(transforms.KeyFunc)
 			if !ok {
-				kf = transforms.KeyOf(n.g.view.zone, ap.GroupBy...)
+				kf = transforms.KeyOf(n.g.view.keys, ap.GroupBy...)
 			}
 			n.value = &aggCells{in: in, out: out, key: kf}
 			return changedPulse(pulse, out)
@@ -600,7 +600,7 @@ func measures(p *opParams) []transforms.Measure {
 			m.Field = fields[i]
 		}
 		if i < len(as) {
-			if s, ok := asString(as[i]); ok {
+			if s, ok := paramText(p.walk, as[i]); ok {
 				m.As = s
 			}
 		}
@@ -630,7 +630,7 @@ func windowParams(p *opParams) transforms.WindowParams {
 			s.Field = fields[i]
 		}
 		if i < len(as) {
-			if a, ok := asString(as[i]); ok {
+			if a, ok := paramText(p.walk, as[i]); ok {
 				s.As = a
 			}
 		}

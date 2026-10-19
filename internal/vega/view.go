@@ -211,7 +211,12 @@ type Result struct {
 
 // runView is a running instance of a specification (vega-view's View).
 type runView struct {
-	ctx    context.Context
+	ctx context.Context
+	// walk walks the values of the run: their String, JSON and deep
+	// comparisons are bounded by the call (jsval.Walker, ADR 0018).
+	walk jsval.Walker
+	// keys turns values into the keys the transforms group by.
+	keys   transforms.Keys
 	g      *flowGraph
 	sg     *scene.Scenegraph
 	loader Loader
@@ -393,6 +398,9 @@ func newView(ctx context.Context, opts Options, locale jsval.Value) *runView {
 	// Transforms that key on text write a date in the view's zone.
 	ctx = transforms.WithZone(ctx, v.zone)
 	v.ctx = ctx
+	v.walk = jsval.WalkerFor(ctx)
+	v.keys = transforms.NewKeys(v.zone, v.walk)
+	v.sg.SetWalker(v.walk)
 	switch {
 	case opts.Locale != nil:
 		v.locale = opts.Locale
@@ -468,7 +476,7 @@ func (v *runView) autosizeContains() string {
 	if v.autosizeSig == nil {
 		return ""
 	}
-	return v.autosizeSig.sig().Get("contains").AsString()
+	return v.walk.String(v.autosizeSig.sig().Get("contains"))
 }
 
 // padding reads the padding signal as vega-view's padding() does.
@@ -646,11 +654,11 @@ func (v *runView) result(scope *Scope) *Result {
 	if bg := v.backgroundSig; bg != nil {
 		val := bg.sig()
 		if val.IsTruthy() {
-			res.Background, res.HasBackground = val.AsString(), true
+			res.Background, res.HasBackground = v.walk.String(val), true
 		}
 	}
 	if d := scope.description; d.IsTruthy() {
-		res.Description, res.HasDescription = d.AsString(), true
+		res.Description, res.HasDescription = v.walk.String(d), true
 	}
 	return res
 }
@@ -703,6 +711,7 @@ func (v *runView) addSignalListener(c *rtContext, src, tgt *opNode, u *updateSpe
 	}
 	src.addTarget(l)
 	l.argval = newParams()
+	l.argval.walk = g.walk
 	l.addTarget(tgt)
 	g.connect(tgt, []*opNode{l})
 }

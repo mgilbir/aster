@@ -412,52 +412,22 @@ func (c *rtContext) Log(level expr.LogLevel, args []jsval.Value) {
 	if level != expr.LogWarn {
 		return
 	}
-	c.g.warn(string(logText(args, MaxWarningText)))
+	c.g.warn(string(logText(c.g.walk, args, MaxWarningText)))
 }
 
 // logText is "EXPRESSION" and each argument as String() gives it, separated
 // by spaces, as the console prints a warning's strings; it stops once it is
 // longer than limit, which report cuts it to, so a warning that names a
-// large array costs no more than one that does not.
-func logText(args []jsval.Value, limit int) []byte {
+// large array costs no more than one that does not (w, the call's Walker,
+// writes only the start of each value's text).
+func logText(w jsval.Walker, args []jsval.Value, limit int) []byte {
 	b := []byte("EXPRESSION")
-	// String(array) joins its elements with commas, nested arrays the same
-	// way and null or undefined as nothing; the walk keeps its own stack.
-	type frame struct {
-		items []jsval.Value
-		i     int
-	}
-	var stack []frame
 	for _, a := range args {
-		b = append(b, ' ')
-		if !a.IsArr() {
-			b = append(b, a.AsString()...)
-			continue
-		}
-		stack = append(stack[:0], frame{items: a.Items()})
-		for len(stack) > 0 && len(b) <= limit {
-			f := &stack[len(stack)-1]
-			if f.i == len(f.items) {
-				stack = stack[:len(stack)-1]
-				continue
-			}
-			if f.i > 0 {
-				b = append(b, ',')
-			}
-			x := f.items[f.i]
-			f.i++
-			switch {
-			case x.IsArr():
-				if len(stack) < jsval.MaxValueDepth {
-					stack = append(stack, frame{items: x.Items()})
-				}
-			case !x.IsNullish():
-				b = append(b, x.AsString()...)
-			}
-		}
 		if len(b) > limit {
 			break
 		}
+		b = append(b, ' ')
+		b = w.AppendStringPrefix(b, a, limit-len(b)+1)
 	}
 	return b
 }

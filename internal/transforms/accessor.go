@@ -207,110 +207,82 @@ func MeasureName(op, field, as string) string {
 // KeyFunc maps a tuple to a group key string.
 type KeyFunc func(jsval.Value) string
 
-// appendKeyValue appends String(v) to dst without allocating for the common
-// string and number cases. A date is written as Date.prototype.toString does in
-// the zone z, so dates within one second share a key.
-func appendKeyValue(dst []byte, v jsval.Value, z format.Zone) []byte {
+// Keys turns values into the keys the transforms group, pivot and look up
+// by: String(v), with a date written as Date.prototype.toString writes it in
+// the view's zone (to the second), also inside an array, which String
+// joins. The String of an array is a walk of it, made with the call's
+// Walker, so a key's cost is bounded by the call however its value shares
+// its parts (ADR 0018). It is the one way the transforms, and the transform
+// packages through KeyStringer, turn a value into a key.
+type Keys struct {
+	z format.Zone
+	w jsval.Walker
+}
+
+// NewKeys is the Keys of a call that runs with the Walker w in the zone z.
+func NewKeys(z format.Zone, w jsval.Walker) Keys {
+	return Keys{z: z, w: w.WithDateText(func(dst []byte, ms float64) []byte {
+		return append(dst, format.DateToString(ms, z)...)
+	})}
+}
+
+// keysOf is the Keys of the call ctx belongs to.
+func keysOf(ctx context.Context) Keys { return NewKeys(zoneOf(ctx), jsval.WalkerFor(ctx)) }
+
+// String is the key of v.
+func (k Keys) String(v jsval.Value) string {
+	switch v.Kind() {
+	case jsval.KindStr:
+		return v.StrValue()
+	case jsval.KindTimestamp:
+		return format.DateToString(v.NumValue(), k.z)
+	}
+	return k.w.String(v)
+}
+
+// Append appends the key of v to dst without allocating for the common string
+// and number cases.
+func (k Keys) Append(dst []byte, v jsval.Value) []byte {
 	switch v.Kind() {
 	case jsval.KindStr:
 		return append(dst, v.StrValue()...)
 	case jsval.KindNum:
 		return jsval.AppendJSNumber(dst, v.NumValue())
 	case jsval.KindTimestamp:
-		return append(dst, format.DateToString(v.NumValue(), z)...)
+		return append(dst, format.DateToString(v.NumValue(), k.z)...)
 	}
-	return append(dst, keyString(v, z)...)
+	return k.w.AppendString(dst, v)
 }
 
-// keyString is String(v) with a date in the zone z, as Date.prototype.
-// toString writes it (to the second, in the view's local zone), also inside
-// an array, which String joins. It is the one way the transforms, and the
-// transform packages through KeyStringer, turn a value into a group key, a
-// column name or a lookup key.
-func keyString(v jsval.Value, z format.Zone) string {
-	switch v.Kind() {
-	case jsval.KindTimestamp:
-		return format.DateToString(v.NumValue(), z)
-	case jsval.KindArr:
-		if hasDate(v, 0) {
-			return string(appendJoined(nil, v, z, 0))
-		}
-	}
-	return v.AsString()
-}
-
-// hasDate reports a date anywhere in array v (nested arrays included, to
-// jsval.MaxValueDepth, past which String gives up as AsString does).
-func hasDate(v jsval.Value, depth int) bool {
-	if depth > jsval.MaxValueDepth {
-		return false
-	}
-	for _, it := range v.Items() {
-		switch it.Kind() {
-		case jsval.KindTimestamp:
-			return true
-		case jsval.KindArr:
-			if hasDate(it, depth+1) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// appendJoined is Array.prototype.join(",") with keyString for the items:
-// null and undefined write nothing.
-func appendJoined(dst []byte, v jsval.Value, z format.Zone, depth int) []byte {
-	if depth > jsval.MaxValueDepth {
-		return dst
-	}
-	for i, it := range v.Items() {
-		if i > 0 {
-			dst = append(dst, ',')
-		}
-		switch it.Kind() {
-		case jsval.KindNull, jsval.KindUndefined:
-		case jsval.KindArr:
-			dst = appendJoined(dst, it, z, depth+1)
-		default:
-			dst = append(dst, keyString(it, z)...)
-		}
-	}
-	return dst
-}
-
-// KeyStringer is String(v) with dates in the zone of ctx's view (keyString),
-// for the transform packages, which key on values (nest, stratify, kde2d
-// groups, wordcloud text) and cannot import this one.
-func KeyStringer(ctx context.Context) func(jsval.Value) string {
-	z := zoneOf(ctx)
-	return func(v jsval.Value) string { return keyString(v, z) }
-}
+// KeyStringer is Keys.String for the call of ctx, for the transform
+// packages, which key on values (nest, stratify, kde2d groups, wordcloud
+// text) and cannot import this one.
+func KeyStringer(ctx context.Context) func(jsval.Value) string { return keysOf(ctx).String }
 
 // keyAppender is KeyOf in append form: it writes the key of t onto dst, so a
 // caller can look the key up in a map (m[string(b)]) without allocating.
-func keyAppender(fields []Field, z format.Zone) func(dst []byte, t jsval.Value) []byte {
+func keyAppender(fields []Field, k Keys) func(dst []byte, t jsval.Value) []byte {
 	switch len(fields) {
 	case 0:
 		return func(dst []byte, _ jsval.Value) []byte { return dst }
 	case 1:
 		g := fields[0].Get
-		return func(dst []byte, t jsval.Value) []byte { return appendKeyValue(dst, g(t), z) }
+		return func(dst []byte, t jsval.Value) []byte { return k.Append(dst, g(t)) }
 	}
 	return func(dst []byte, t jsval.Value) []byte {
 		for i, f := range fields {
 			if i > 0 {
 				dst = append(dst, '|')
 			}
-			dst = appendKeyValue(dst, f.Get(t), z)
+			dst = k.Append(dst, f.Get(t))
 		}
 		return dst
 	}
 }
 
-// KeyOf is vega-util's key(fields): the values' string forms joined with '|',
-// a date in the zone z. No fields give the constant key "".
-func KeyOf(z format.Zone, fields ...Field) KeyFunc {
+// KeyOf is vega-util's key(fields): the values' keys joined with '|'. No
+// fields give the constant key "".
+func KeyOf(k Keys, fields ...Field) KeyFunc {
 	if len(fields) == 0 {
 		return func(jsval.Value) string { return "" }
 	}
@@ -321,11 +293,11 @@ func KeyOf(z format.Zone, fields ...Field) KeyFunc {
 				return v.StrValue()
 			} else {
 				var buf [32]byte
-				return string(appendKeyValue(buf[:0], v, z))
+				return string(k.Append(buf[:0], v))
 			}
 		}
 	}
-	app := keyAppender(fields, z)
+	app := keyAppender(fields, k)
 	return func(t jsval.Value) string {
 		var buf [64]byte
 		return string(app(buf[:0], t))
@@ -333,4 +305,4 @@ func KeyOf(z format.Zone, fields ...Field) KeyFunc {
 }
 
 // KeyOfPaths is KeyOf over field paths, the form the `key` helper takes.
-func KeyOfPaths(z format.Zone, paths ...string) KeyFunc { return KeyOf(z, FieldsOf(paths...)...) }
+func KeyOfPaths(k Keys, paths ...string) KeyFunc { return KeyOf(k, FieldsOf(paths...)...) }

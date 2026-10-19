@@ -4,7 +4,20 @@ What changed between versions, for users of the library and the CLI. Breaking ch
 
 ## Unreleased
 
+### Security
+
+- Every walk of a value is bounded by the call that makes it: its text (a text mark, label, aria description, group key, sort key or format of an array), its JSON (a stack's group key, `VegaLiteToVega`'s output), a deep or relational comparison, an elementwise interpolation (C1, C13). A value whose arrays share their parts (a few expressions make one standing for 10^8 elements) was walked whole, unmetered: a 2 KB specification was OOM-killed under `WithMemoryLimit(256 MiB)`, and a scale domain of two such arrays ran 20 s past a 2 s timeout. Each value visited is now a step of the call's work and the text built is charged to its memory, so the render ends with `ErrLimit` or the deadline. Comparing an array with itself is no longer a walk at all. ([ADR 0018](docs/adr/0018-value-walks-bounded-by-the-call.md))
+- An ordinal, band or point scale finds a domain value that is an array or an object in constant time, by identity, as d3's InternMap does; 64,000 such values took 14 s (C25).
+- `vlSelectionResolve` keys its ids as d3's InternSet does, by identity, and never makes their text (C102).
+
 ### Fidelity
+
+- **breaking (fewer successes):** a value nested past 1,024 levels fails with `ErrLimit` wherever it is printed, compared or interpolated, as it already did in an expression's string (C103). It printed as `""` in a text mark, compared unequal, and interpolated to its end value.
+- A parsed JSON object (a specification, loaded data) and every object the engine builds list their keys in JavaScript's order, array indexes first and ascending (C154): `{"b":1,"1":2}` is written `{"1":2,"b":1}` by `aster compile` and `VegaLiteToVega`, as `JSON.stringify(JSON.parse(…))` writes it.
+- A lone surrogate escape in JSON (`"\ud83d"`) is kept as the code unit JSON.parse keeps, as an expression's string holds one, and written as its `\ud83d` escape in JSON output, as `JSON.stringify` writes it; text output (SVG, and with it PNG and PDF) and text measurement read each lone surrogate as one U+FFFD, as JavaScript's UTF-8 does: an expression's lone surrogate printed as three (C155).
+- Decimal text converts to the number JSON.parse gives in every reading: `Number()`, an expression's literal, `parseFloat`, `parseInt` in radix 10, CSV fields, path data, colours and time parsing. A literal of more than 800 digits could read as 0 (C99).
+- Text is lower- and upper-cased as JavaScript does (C90): `"type": "quantİtative"`, the scheme `"vİridis"` and the colour `"Whİte"` are no longer recognised, as upstream does not recognise them; the same for interpolator, projection and transform names, time-locale names, and the capitalised legend caption and axis configuration key. A month or day name in time parsing matches case-insensitively as a JavaScript regular expression does (not the Kelvin sign for `k`).
+- A JSON syntax error names the character found (decoded), or the byte in hex when the text is not UTF-8 there: a byte-order mark was reported as `'ï'`.
 
 - **breaking (fewer successes):** more Vega-Lite input that upstream's compiler rejects fails as upstream's does, with its message ([ADR 0013](docs/adr/0013-invalid-input-fails-where-upstream-throws.md)), found by the nightly type-confusion differential (seeds 20741 and 20742):
   - a scale `domain` naming a member of `Object.prototype` (`"constructor"`, `"toString"`, `"__proto__"`, …), which upstream's deduplication reads as already seen, so hashing the empty domain fails;

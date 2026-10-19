@@ -1,8 +1,6 @@
 package vegalite
 
 import (
-	"strings"
-
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -252,7 +250,7 @@ func (m *modelBase) getName(text string) string {
 }
 
 func (m *modelBase) getDataName(t dataSourceType) string {
-	return m.getName(strings.ToLower(t.String()))
+	return m.getName(jsval.JSLower(t.String()))
 }
 
 func (m *modelBase) requestDataName(t dataSourceType) string {

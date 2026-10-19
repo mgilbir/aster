@@ -56,7 +56,10 @@ func typeOf(v jsval.Value) string {
 	if t.IsUndefined() {
 		return ""
 	}
-	return t.AsString()
+	// streamGeometryType.hasOwnProperty(type): the property key, and no
+	// geometry type is longer than 32 bytes.
+	key, _ := t.PropertyKey(32)
+	return key
 }
 
 func streamGeometry(g jsval.Value, s Stream, depth int) {

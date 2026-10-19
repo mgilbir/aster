@@ -9,7 +9,6 @@ package jsval
 
 import (
 	"math"
-	"strings"
 	"unsafe"
 )
 
@@ -356,7 +355,7 @@ func (v Value) AsDouble() float64 {
 	case KindBool:
 		return v.n()
 	case KindStr:
-		return parseLooseDouble(strings.TrimSpace(v.s()))
+		return parseLooseDouble(JSTrim(v.s()))
 	case KindArr:
 		// A chain of one-element arrays is followed in a loop, not by
 		// recursion, whatever its depth.
@@ -402,54 +401,30 @@ func (v Value) AsBoolean() bool {
 // except that a Timestamp is written as its epoch number (callers that need
 // Date.prototype.toString format it themselves). Array elements that are
 // nullish are written as "" (Array.prototype.join).
-func (v Value) AsString() string { return v.asString(0) }
-
-func (v Value) asString(depth int) string {
-	if depth > MaxValueDepth {
-		return ""
-	}
+//
+// The String of an array is a walk of it, and this is the detached walk (see
+// Walker): the String of a value an expression or a transform built is taken
+// with the call's Walker (Walker.String), which the call's budgets bound.
+func (v Value) AsString() string {
 	switch v.Kind() {
-	case KindStr:
-		return v.s()
-	case KindNum, KindTimestamp:
-		return JSNumberString(v.n())
-	case KindBool:
-		if v.n() != 0 {
-			return "true"
-		}
-		return "false"
-	case KindNull:
-		return "null"
-	case KindUndefined:
-		return "undefined"
 	case KindArr:
-		var b strings.Builder
-		for i, it := range v.Items() {
-			if i > 0 {
-				b.WriteByte(',')
-			}
-			if !it.IsNullish() {
-				b.WriteString(it.asString(depth + 1))
-			}
-		}
-		return b.String()
+		return Walker{}.String(v)
 	case KindObj:
-		if o := v.ObjValue(); o != nil && o.str != nil {
-			return o.str(o)
-		}
-		return "[object Object]"
-	case KindPattern:
-		return v.PatternOf().String()
+		return objectString(v.obj())
 	}
-	return ""
+	return v.primString()
 }
 
-// String implements fmt.Stringer for debugging; it writes compact JSON-like
-// text and is not a JavaScript conversion.
+// String implements fmt.Stringer for messages and debugging: compact
+// JSON-like text, not a JavaScript conversion. It shows at most the first
+// previewBytes bytes of the value's text, followed by "…" when there is more,
+// so a message about a value costs no more than its preview.
 func (v Value) String() string {
 	switch v.Kind() {
 	case KindStr:
-		return quoteJSON(v.s())
+		if len(v.s()) <= previewBytes {
+			return quoteJSON(v.s())
+		}
 	case KindUndefined:
 		return "undefined"
 	case KindTimestamp:
@@ -457,59 +432,36 @@ func (v Value) String() string {
 	case KindPattern:
 		return v.PatternOf().String()
 	}
-	return string(AppendJSON(nil, v))
+	b := Walker{}.appendJSONPrefix(nil, v, previewBytes)
+	if len(b) > previewBytes {
+		b = append(cutUTF8(b, previewBytes), "…"...)
+	}
+	return string(b)
 }
 
-// Equal is deep structural equality (not JavaScript ===). NaN equals NaN.
-func Equal(a, b Value) bool { return equal(a, b, 0) }
+// previewBytes is how much of a value's text String shows.
+const previewBytes = 1 << 10
 
-func equal(a, b Value, depth int) bool {
-	if a.Kind() != b.Kind() || depth > MaxValueDepth {
-		return false
+// cutUTF8 is b cut to at most n bytes at a character boundary.
+func cutUTF8(b []byte, n int) []byte {
+	if len(b) <= n {
+		return b
 	}
-	switch a.Kind() {
-	case KindUndefined, KindNull:
-		return true
-	case KindBool:
-		return a.n() == b.n()
-	case KindNum, KindTimestamp:
+	for n > 0 && b[n]&0xC0 == 0x80 {
+		n--
+	}
+	return b[:n]
+}
+
+// Equal is deep structural equality (not JavaScript ===). NaN equals NaN;
+// an array or object equals itself without a walk. It is the detached walk
+// (see Walker): values an expression or a transform built are compared with
+// the call's Walker (Walker.Equal).
+func Equal(a, b Value) bool {
+	if a.Kind() == KindNum && b.Kind() == KindNum {
 		return a.n() == b.n() || (math.IsNaN(a.n()) && math.IsNaN(b.n()))
-	case KindStr:
-		return a.s() == b.s()
-	case KindArr:
-		x, y := a.Items(), b.Items()
-		if len(x) != len(y) {
-			return false
-		}
-		for i := range x {
-			if !equal(x[i], y[i], depth+1) {
-				return false
-			}
-		}
-		return true
-	case KindObj:
-		x, y := a.ObjValue(), b.ObjValue()
-		if x == y {
-			return true
-		}
-		if x.host != nil || y.host != nil {
-			return false
-		}
-		if x.Len() != y.Len() {
-			return false
-		}
-		for i := 0; i < x.Len(); i++ {
-			bv, ok := y.Get(x.KeyAt(i))
-			if !ok || !equal(x.ValueAt(i), bv, depth+1) {
-				return false
-			}
-		}
-		return true
-	case KindPattern:
-		p, q := a.PatternOf(), b.PatternOf()
-		return p.Source == q.Source && p.Flags == q.Flags
 	}
-	return false
+	return Walker{}.Equal(a, b)
 }
 
 // SameRef reports whether two arrays/objects/patterns are the same reference
@@ -595,4 +547,57 @@ func (v Value) Key() Key {
 	default:
 		return Key{k: k}
 	}
+}
+
+// InternKey is a comparable form of a Value as d3's InternMap and InternSet
+// file it, for map keys: the value's valueOf() (a Date is its time value,
+// an array, object or pattern itself), compared as a JavaScript Map compares
+// keys (SameValueZero: NaN matches NaN, -0 matches 0, strings by content,
+// objects by reference). So a Date and its number are one key, two arrays of
+// the same elements are two, and an array is the same key however it is
+// reached, which no walk of it decides: a value of any size is a key in
+// O(1). Key differs only where JavaScript's === does: NaN, and dates.
+type InternKey struct {
+	k    Kind
+	bits uint64
+	s    string
+	r    unsafe.Pointer
+}
+
+// InternKey returns v's InternKey.
+func (v Value) InternKey() InternKey {
+	switch k := v.Kind(); k {
+	case KindNum, KindTimestamp:
+		f := v.n()
+		switch {
+		case f != f:
+			return InternKey{k: KindNum, bits: canonicalNaN}
+		case f == 0:
+			return InternKey{k: KindNum} // -0 and 0
+		}
+		return InternKey{k: KindNum, bits: math.Float64bits(f)}
+	case KindBool:
+		return InternKey{k: k, bits: v.x}
+	case KindStr:
+		return InternKey{k: k, s: v.s()}
+	case KindArr, KindObj, KindPattern:
+		return InternKey{k: k, r: v.p}
+	default:
+		return InternKey{k: k}
+	}
+}
+
+// canonicalNaN stands for every NaN in an InternKey.
+var canonicalNaN = math.Float64bits(math.NaN())
+
+// MapKey is the InternKey of v as a JavaScript Map keys it, without
+// InternMap's valueOf(): SameValueZero, so a Date is not its number. A date
+// is held here by its time value, not as an object of its own, so two
+// Dates of the same time are one key (in JavaScript they are two).
+func (v Value) MapKey() InternKey {
+	k := v.InternKey()
+	if v.Kind() == KindTimestamp {
+		k.k = KindTimestamp
+	}
+	return k
 }

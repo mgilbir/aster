@@ -412,7 +412,7 @@ func ConfigureProjection(ctx context.Context, reg Registry, current Projection, 
 		typ := get("type")
 		name := ""
 		if typ.IsTruthy() {
-			name = typ.AsString()
+			name = jsval.WalkerFor(ctx).String(typ)
 		}
 		var err error
 		if proj, err = reg.NewProjection(name); err != nil {

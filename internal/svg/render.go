@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/mgilbir/aster/internal/budget"
+	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/scene"
 )
 
@@ -104,6 +105,7 @@ func AppendSVG(ctx context.Context, dst []byte, sg *scene.Scenegraph, opt Option
 	}
 	r.w.reset(dst)
 	r.w.skel = opt.skeleton
+	r.w.walk = jsval.WalkerFor(ctx)
 	if r.opt.Href == nil {
 		r.opt.Href = DefaultHref(URLOptions{})
 	}

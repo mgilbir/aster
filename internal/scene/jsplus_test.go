@@ -19,7 +19,7 @@ func TestJSPlusAndLess(t *testing.T) {
 		{jsval.Str(""), jsval.Num(0.5), "0.5"},
 	}
 	for _, c := range cases {
-		if got := jsPlus(c.a, c.b); got.AsString() != c.want {
+		if got := jsPlus(jsval.Walker{}, c.a, c.b); got.AsString() != c.want {
 			t.Errorf("%v + %v = %q, want %q", c.a, c.b, got.AsString(), c.want)
 		}
 	}

@@ -43,7 +43,29 @@ regular expression is `KindPattern` compiled with `github.com/mgilbir/goecma262`
   JavaScript's `Number(v)` coercion (null/""/[] → 0). Use the one upstream uses:
   `+x` in upstream is `ToNumber`.
 - `v.IsTruthy()` is JavaScript truthiness. `v.AsString()` is `String(v)`.
-- `jsval.JSNumberString` is `Number.prototype.toString`.
+- `jsval.JSNumberString` is `Number.prototype.toString`; `jsval.ParseDecimal`
+  is the one conversion of decimal text to a number (JSON.parse's, exact for
+  literals of any length): never `strconv.ParseFloat` on a value's text.
+- Read a value as upstream does, with jsval's views, not Go's nearest
+  convenience: `JSLower`, `JSUpper`, `JSTrim` and `IsJSSpace` (never
+  `strings.ToLower`, `TrimSpace` or `unicode.IsSpace`, which differ on İ, ß,
+  U+0085 and U+FEFF; `TestNoGoCaseOrSpaceInTheEngine` checks); `UpperFirst`
+  for `s[0].toUpperCase() + s.slice(1)`; `RegExpFoldEqual` for a
+  case-insensitive regular expression; `v.Strict()` where upstream compares
+  with `===`, a `switch` or `Set.has`, `v.PropertyKey(n)` where it reads
+  `obj[v]` or `v in obj`, `v.StringIs(s)` for `String(v) === s`;
+  `ToArrayLike` where an `Array.prototype` method takes any array-like;
+  `Walker.Join` for `Array.prototype.join`; `PlainMap` for upstream's `{}`
+  used as a map; `v.InternKey()` (d3's InternMap) or `v.MapKey()` (a `Map`)
+  to key values by identity, never their text.
+- A walk of a value (its String, JSON, stringValue, a deep or relational
+  comparison, an elementwise interpolation) is made with the call's
+  `jsval.Walker`, which the run's state carries (the view, its operators'
+  parameters, the scenegraph, the scales, the expression scope), so its
+  steps and its text are charged to the call ([ADR 0018](adr/0018-value-walks-bounded-by-the-call.md)).
+  The detached forms (`AsString`, `jsval.Equal`, …) are for a
+  specification's literals; `TestEngineWalksUseTheCallsWalker` holds every
+  other use to a reviewed entry in `scripts/walk.allow`.
 
 ### Tuples
 

@@ -13,9 +13,9 @@ import (
 // en-US locale). Vega itself formats labels through TickFormat (which is
 // locale-aware and also handles time); these methods exist for callers that
 // want d3's own behaviour, including its log-scale label thinning.
-func d3TickFormat(loc *format.Locale, t *tspec, domain []float64, ticks func(context.Context, TickCount) ([]float64, error), count TickCount, specifier jsval.Value) (func(float64) string, error) {
+func d3TickFormat(w jsval.Walker, loc *format.Locale, t *tspec, domain []float64, ticks func(context.Context, TickCount) ([]float64, error), count TickCount, specifier jsval.Value) (func(float64) string, error) {
 	if t.kind != kindLog {
-		return d3LinearTickFormat(loc, domain, count.countOrDefault(), specifier)
+		return d3LinearTickFormat(w, loc, domain, count.countOrDefault(), specifier)
 	}
 	n := count.countOrDefault()
 	// d3 log: the default specifier is "s" for base 10 and "," otherwise, and
@@ -26,7 +26,7 @@ func d3TickFormat(loc *format.Locale, t *tspec, domain []float64, ticks func(con
 	}
 	if !specifier.IsNullish() {
 		var err error
-		if spec, err = numberSpecifier(specifier); err != nil {
+		if spec, err = numberSpecifier(w, specifier); err != nil {
 			return nil, err
 		}
 	}
@@ -60,43 +60,43 @@ func d3TickFormat(loc *format.Locale, t *tspec, domain []float64, ticks func(con
 
 // TickFormat is scale.tickFormat(count, specifier) with d3's semantics.
 func (c *Continuous) TickFormat(loc *format.Locale, count TickCount, specifier jsval.Value) (func(float64) string, error) {
-	return d3TickFormat(loc, &c.tspec, c.domain, c.Ticks, count, specifier)
+	return d3TickFormat(c.walk, loc, &c.tspec, c.domain, c.Ticks, count, specifier)
 }
 
 // TickFormat is scale.tickFormat(count, specifier) with d3's semantics.
 func (s *Sequential) TickFormat(loc *format.Locale, count TickCount, specifier jsval.Value) (func(float64) string, error) {
-	return d3TickFormat(loc, &s.tspec, []float64{s.x0, s.x1}, s.Ticks, count, specifier)
+	return d3TickFormat(s.walk, loc, &s.tspec, []float64{s.x0, s.x1}, s.Ticks, count, specifier)
 }
 
 // TickFormat is scale.tickFormat(count, specifier) with d3's semantics.
 func (d *Diverging) TickFormat(loc *format.Locale, count TickCount, specifier jsval.Value) (func(float64) string, error) {
-	return d3TickFormat(loc, &d.tspec, []float64{d.x0, d.x1, d.x2}, d.Ticks, count, specifier)
+	return d3TickFormat(d.walk, loc, &d.tspec, []float64{d.x0, d.x1, d.x2}, d.Ticks, count, specifier)
 }
 
 // TickFormat is scale.tickFormat(count, specifier) with d3's semantics.
 func (q *Quantize) TickFormat(loc *format.Locale, count TickCount, specifier jsval.Value) (func(float64) string, error) {
 	t := newTspec(kindLinear)
-	return d3TickFormat(loc, &t, []float64{q.x0, q.x1}, q.Ticks, count, specifier)
+	return d3TickFormat(q.walk, loc, &t, []float64{q.x0, q.x1}, q.Ticks, count, specifier)
 }
 
 // TickFormat is scale.tickFormat(count, specifier) with d3's semantics.
 func (s *Identity) TickFormat(loc *format.Locale, count TickCount, specifier jsval.Value) (func(float64) string, error) {
 	t := newTspec(kindLinear)
-	return d3TickFormat(loc, &t, s.domain, s.Ticks, count, specifier)
+	return d3TickFormat(s.walk, loc, &t, s.domain, s.Ticks, count, specifier)
 }
 
 // TickFormat is bin-ordinal's tickFormat: d3's linear tickFormat over its
 // first and last domain values.
 func (b *BinOrdinal) TickFormat(loc *format.Locale, count TickCount, specifier jsval.Value) (func(float64) string, error) {
 	t := newTspec(kindLinear)
-	return d3TickFormat(loc, &t, b.domain, func(context.Context, TickCount) ([]float64, error) { return nil, nil }, count, specifier)
+	return d3TickFormat(b.walk, loc, &t, b.domain, func(context.Context, TickCount) ([]float64, error) { return nil, nil }, count, specifier)
 }
 
 // TickFormat is the time scale's tickFormat: with no specifier, d3's multi-scale
 // format (each tick labelled with the coarsest unit it starts); otherwise the
 // format for the specifier.
 func (s *Time) TickFormat(loc *format.Locale, count TickCount, specifier jsval.Value) (func(float64) string, error) {
-	f, err := loc.TimeFormatSpec(specifier, s.zone.IsUTC())
+	f, err := loc.TimeFormatSpec(s.walk, specifier, s.zone.IsUTC())
 	return f, err
 }
 
@@ -105,8 +105,8 @@ func (s *Time) TickFormat(loc *format.Locale, count TickCount, specifier jsval.V
 // formatSpan, an "s" specifier is always turned into a fixed-point format
 // scaled by the SI prefix of the larger end point, even when a precision is
 // given.
-func d3LinearTickFormat(loc *format.Locale, domain []float64, count float64, specifier jsval.Value) (func(float64) string, error) {
-	s, err := format.ParseSpecifier(spanSpecifier(specifier))
+func d3LinearTickFormat(w jsval.Walker, loc *format.Locale, domain []float64, count float64, specifier jsval.Value) (func(float64) string, error) {
+	s, err := format.ParseSpecifier(spanSpecifier(w, specifier))
 	if err != nil {
 		return nil, err
 	}
@@ -156,9 +156,9 @@ func d3LinearTickFormat(loc *format.Locale, domain []float64, count float64, spe
 // expression's exec, which converts it to a string first, so a number such as
 // 42 is the specifier "42" (a width); whether that text is a legal specifier
 // is up to the parser.
-func numberSpecifier(v jsval.Value) (string, error) {
+func numberSpecifier(w jsval.Walker, v jsval.Value) (string, error) {
 	if v.IsNullish() {
 		return "", nil
 	}
-	return v.AsString(), nil
+	return w.String(v), nil
 }

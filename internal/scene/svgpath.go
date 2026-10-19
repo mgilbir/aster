@@ -4,12 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"strconv"
 	"unicode/utf8"
 	"unsafe"
 
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsmath"
+	"github.com/mgilbir/aster/internal/jsval"
 )
 
 // PathCmd is one parsed SVG path command with its parameters. Cmd keeps the
@@ -246,7 +246,7 @@ func parseParams(lower byte, pc int, seg string) ([]float64, error) {
 				if !ok {
 					return nil, errPathParamType
 				}
-				f, _ := strconv.ParseFloat(seg[idx:end], 64) // range errors give ±Inf, as JS does
+				f, _ := jsval.ParseDecimal(seg[idx:end]) // +text: out of range is ±Inf or 0, as JS rounds it
 				params = append(params, f)
 				idx = end
 			}

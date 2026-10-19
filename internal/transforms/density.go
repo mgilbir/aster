@@ -134,7 +134,7 @@ func Density(ctx context.Context, source []jsval.Value, p DensityParams) ([]jsva
 		if !ok {
 			return nil, fmt.Errorf("Missing density extent parameter.")
 		}
-		domain, valid = valuesExtent(k.Data())
+		domain, valid = valuesExtent(jsval.WalkerFor(ctx), k.Data())
 	}
 	// The samples are new tuples: reserve them before they are drawn.
 	if err := reserveRows(ctx, maxSamples(minsteps, maxsteps)); err != nil {
@@ -164,8 +164,8 @@ func maxSamples(minsteps, maxsteps float64) int {
 // [undefined, undefined] and the curve's end points carry an undefined x.
 // (When the extreme values are strings upstream also leaks them, unconverted,
 // as the x of the end points; here they are numbers.)
-func valuesExtent(vs []jsval.Value) (e [2]float64, valid bool) {
-	lo, hi, ok := Extent(len(vs), func(i int) jsval.Value { return vs[i] })
+func valuesExtent(w jsval.Walker, vs []jsval.Value) (e [2]float64, valid bool) {
+	lo, hi, ok := Extent(w, len(vs), func(i int) jsval.Value { return vs[i] })
 	if !ok || lo.IsUndefined() {
 		return [2]float64{math.NaN(), math.NaN()}, false
 	}

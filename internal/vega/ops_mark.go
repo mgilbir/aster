@@ -881,7 +881,7 @@ func (v *runView) sortItemsByKeys(items []*scene.Item, cs *compareSpec) {
 	}
 	jssort.Sort(recs, meteredCompare(v.g, func(a, b sortRec) int {
 		for j := 0; j < nf; j++ {
-			if c := transforms.Ascending(keys[a.off+j], keys[b.off+j]); c != 0 {
+			if c := transforms.Ascending(v.walk, keys[a.off+j], keys[b.off+j]); c != 0 {
 				return c * order[j]
 			}
 		}

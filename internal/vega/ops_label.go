@@ -77,7 +77,7 @@ func facLabel(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 			l.FontSize = t.FontSize().Val()
 			l.X, l.Y = t.X.Val(), t.Y.Val()
 			if !t.Text().IsNullish() {
-				l.Text = t.Text().AsString()
+				l.Text = t.Walker().String(t.Text())
 			}
 			l.Base = labelBase(v, t, opts.MarkIndex)
 		}

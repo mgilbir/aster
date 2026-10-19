@@ -58,7 +58,7 @@ func Aggregate(ctx context.Context, data []jsval.Value, p AggregateParams) (res 
 	if err != nil {
 		return nil, err
 	}
-	ms.ctx = ctx
+	ms.setContext(ctx)
 	tick := budget.NewTicker(ctx)
 	nm := len(ms.names)
 	dims := p.GroupBy
@@ -68,11 +68,11 @@ func Aggregate(ctx context.Context, data []jsval.Value, p AggregateParams) (res 
 	}
 	// The default key is built in a reusable buffer so that finding an
 	// existing cell does not allocate; a custom Key field is used as is.
-	zone := zoneOf(ctx)
-	keyApp := keyAppender(dims, zone)
+	keys := keysOf(ctx)
+	keyApp := keyAppender(dims, keys)
 	if !p.Key.IsNil() {
 		g := p.Key.Get
-		keyApp = func(dst []byte, t jsval.Value) []byte { return appendKeyValue(dst, g(t), zone) }
+		keyApp = func(dst []byte, t jsval.Value) []byte { return keys.Append(dst, g(t)) }
 	}
 	var keyBuf []byte
 
@@ -157,6 +157,7 @@ func Aggregate(ctx context.Context, data []jsval.Value, p AggregateParams) (res 
 // rest in first-seen order.
 func crossCells(ctx context.Context, dims []Field, dnames []string, cells map[string]*aggCell,
 	order []*aggCell, newCell func(string, jsval.Value) *aggCell) error {
+	keys := keysOf(ctx)
 	n := len(dims)
 	if n > MaxGroupDims {
 		return limitErr("aggregate cross group-by fields", float64(n), MaxGroupDims)
@@ -173,7 +174,7 @@ func crossCells(ctx context.Context, dims []Field, dnames []string, cells map[st
 	for _, ac := range order {
 		for i := 0; i < n; i++ {
 			v := ac.tuple.Lookup(dnames[i])
-			k := keyString(v, zoneOf(ctx))
+			k := keys.String(v)
 			if _, ok := doms[i].vals[k]; !ok {
 				doms[i].keys = append(doms[i].keys, k)
 			}

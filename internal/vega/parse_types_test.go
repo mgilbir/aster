@@ -29,8 +29,9 @@ func TestTypeKeysAreObjectKeys(t *testing.T) {
 
 // The parsers run in that order, so it is the field a missing one is added
 // in and the field an illegal pattern names (upstream, with node 24:
-// "Illegal format pattern: 2:bad2", and the second row's keys 2, c, b,
-// which jsval, keeping insertion order, holds as c, 2, b).
+// "Illegal format pattern: 2:bad2", and the rows below, whose array-index
+// key "2" comes first, as a JavaScript object lists its keys: C154, audit
+// 2026-10-18).
 func TestParseRunsInObjectKeysOrder(t *testing.T) {
 	v := newView(context.Background(), Options{}, jsval.Undefined)
 	read := func(values, schema string) ([]jsval.Value, error) {
@@ -51,7 +52,7 @@ func TestParseRunsInObjectKeysOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := string(jsval.AppendJSON(nil, jsval.Arr(rows))), `[{"b":1,"2":"x","__proto__":"1"},{"c":1,"2":null,"b":null}]`; got != want {
+	if got, want := string(jsval.AppendJSON(nil, jsval.Arr(rows))), `[{"2":"x","b":1,"__proto__":"1"},{"2":null,"c":1,"b":null}]`; got != want {
 		t.Errorf("rows %s; want %s", got, want)
 	}
 }

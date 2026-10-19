@@ -44,7 +44,7 @@ func KDE(ctx context.Context, source []jsval.Value, p KDEParams) ([]jsval.Value,
 	get := p.Field.Get
 	if p.Resolve == "shared" {
 		if domain == nil {
-			lo, hi, ok, err := ExtentOf(source, p.Field)
+			lo, hi, ok, err := ExtentOf(jsval.WalkerFor(ctx), source, p.Field)
 			if err != nil {
 				return nil, err
 			}
@@ -64,7 +64,7 @@ func KDE(ctx context.Context, source []jsval.Value, p KDEParams) ([]jsval.Value,
 		names[i] = g.Key()
 	}
 	var out []jsval.Value
-	for _, g := range Partition(zoneOf(ctx), source, p.GroupBy) {
+	for _, g := range Partition(keysOf(ctx), source, p.GroupBy) {
 		vals := make([]jsval.Value, len(g.Tuples))
 		for i, t := range g.Tuples {
 			vals[i] = get(t)
@@ -83,7 +83,7 @@ func KDE(ctx context.Context, source []jsval.Value, p KDEParams) ([]jsval.Value,
 		if domain != nil {
 			local = *domain
 		} else {
-			local, valid = valuesExtent(vals)
+			local, valid = valuesExtent(jsval.WalkerFor(ctx), vals)
 		}
 		if err := reserveRows(ctx, len(out)+maxSamples(minsteps, maxsteps)); err != nil {
 			return nil, err

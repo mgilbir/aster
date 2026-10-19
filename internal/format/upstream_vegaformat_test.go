@@ -27,7 +27,7 @@ func localeFor(fn string, def []any, local Zone) (*Locale, error) {
 func vegaLocaleMethod(l *Locale, method string, args []any, x any, haveX bool) (got any, threw, ok bool) {
 	if method == "timeFormat" || method == "utcFormat" {
 		// a string is an ordinary format, anything else a time multi-format object (or the default one)
-		f, err := l.TimeFormatSpec(upstream.ToValue(argAtCall(args, 0)), method == "utcFormat")
+		f, err := l.TimeFormatSpec(jsval.Walker{}, upstream.ToValue(argAtCall(args, 0)), method == "utcFormat")
 		if err != nil {
 			return nil, true, true
 		}
@@ -59,7 +59,7 @@ func vegaLocaleMethod(l *Locale, method string, args []any, x any, haveX bool) (
 		if !haveX {
 			return made()
 		}
-		return f.FormatValue(upstream.ToValue(x)), false, true
+		return f.FormatValue(jsval.Walker{}, upstream.ToValue(x)), false, true
 	case "formatFloat":
 		f, err := l.FormatFloat(spec)
 		if err != nil {

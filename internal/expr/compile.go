@@ -939,7 +939,7 @@ func (c *compiler) concatChain(n *Node) (node, error) {
 			}
 			ops[i] = operand{v0: v0, v1: v1, f: func(s *Scope) jsval.Value {
 				x, spec := v0(s), v1(s)
-				out, err := s.locale().FormatValue(x, spec)
+				out, err := s.locale().FormatValue(s.walker(), x, spec)
 				if err != nil {
 					failFormat(err)
 				}
@@ -973,7 +973,7 @@ func (c *compiler) concatChain(n *Node) (node, error) {
 				x, spec := op.v0(s), op.v1(s)
 				start := len(buf)
 				var err error
-				if buf, err = s.locale().AppendFormatValue(buf, x, spec); err != nil {
+				if buf, err = s.locale().AppendFormatValue(s.walker(), buf, x, spec); err != nil {
 					failFormat(err)
 				}
 				c.appended(s, buf, start)

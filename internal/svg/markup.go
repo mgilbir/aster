@@ -30,6 +30,8 @@ type writer struct {
 	// skel, when set, records the structure written (see svgcheck.Skeleton),
 	// for tests that check the output parses back to exactly that.
 	skel *[]string
+	// walk is the call's Walker, with which a value is written as text.
+	walk jsval.Walker
 }
 
 // reset makes the writer append to dst.
@@ -102,7 +104,7 @@ func (w *writer) valJS(v jsval.Value) {
 		w.valNum(v.NumValue())
 		return
 	}
-	w.valStr(v.AsString())
+	w.valStr(w.walk.String(v))
 }
 
 // attr writes name="value" with attribute escaping.
@@ -162,8 +164,10 @@ func appendEscapedBytes(dst, s []byte) []byte {
 //
 // Deliberate divergence from upstream, which escapes nothing else: characters
 // XML 1.0 forbids (C0 controls other than tab, LF and CR, U+FFFE, U+FFFF) are
-// dropped and invalid UTF-8 (including lone surrogates) becomes U+FFFD, so the
-// output is always well-formed XML whatever the data holds.
+// dropped and invalid UTF-8 becomes U+FFFD, a byte at a time, so the output
+// is always well-formed XML whatever the data holds. A lone surrogate, which
+// a string holds as three WTF-8 bytes, becomes one U+FFFD, as JavaScript's
+// UTF-8 encoding of the document writes it.
 func appendEscaped(dst []byte, s string, attr bool) []byte {
 	start := 0
 	for i := 0; i < len(s); {
@@ -211,6 +215,9 @@ func appendEscaped(dst []byte, s string, attr bool) []byte {
 			switch {
 			case r == utf8.RuneError && size == 1:
 				rep = "\uFFFD"
+				if c == 0xED && i+2 < len(s) && s[i+1] >= 0xA0 && s[i+1] <= 0xBF && s[i+2]&0xC0 == 0x80 {
+					n = 3 // a lone surrogate
+				}
 			case r == 0xFFFE || r == 0xFFFF:
 				rep = ""
 				n = size

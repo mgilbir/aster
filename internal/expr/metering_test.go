@@ -35,6 +35,37 @@ type hostileEnv map[string]jsval.Value
 
 func (e hostileEnv) Signal(name string) (jsval.Value, bool) { v, ok := e[name]; return v, ok }
 
+// Data serves the data set "ids" as the store of _vgsid_ ids, and every
+// other as the hostile store "store" (the selection functions take the
+// store's name as a string literal, so the argument lists include 'ids' and
+// 'store' as literals): the data-backed
+// functions (data, indata's reads, the vlSelection* family) see rows whose
+// ids, units and values are the hostile values, shared-reference arrays
+// among them.
+func (e hostileEnv) Data(name string) (jsval.Value, bool) {
+	if v, ok := e[name]; ok && name == "ids" {
+		return v, true
+	}
+	v, ok := e["store"]
+	return v, ok
+}
+
+// dagOf is b_levels of b0 = [leaf], b_i = [b_{i-1} × fan]: a few arrays in
+// memory that stand for fan^levels values, the shape expressions build for
+// free and every walk of a value must be bounded on (C1, C13, audit
+// 2026-10-18).
+func dagOf(levels, fan int, leaf jsval.Value) jsval.Value {
+	v := jsval.ArrOf(leaf)
+	for range levels {
+		items := make([]jsval.Value, fan)
+		for i := range items {
+			items[i] = v
+		}
+		v = jsval.Arr(items)
+	}
+	return v
+}
+
 // hostileValues are the arguments, by signal name: each holds more than
 // room, the string budget the calls run under, by a factor k (1.5 by default;
 // ASTER_METERING_FULL runs a 1 MiB budget with arguments four times larger
@@ -51,7 +82,39 @@ func hostileValues(room int, k float64) hostileEnv {
 	}
 	arrayLike := jsval.NewObject(1)
 	arrayLike.Set("length", jsval.Num(3e9))
+	// Two shared-reference arrays of 10^8 values that share nothing with
+	// each other (a comparison of the two walks them), and an object whose
+	// members are one of them.
+	dag, dag2 := dagOf(4, 100, jsval.Num(1)), dagOf(4, 100, jsval.Num(1))
+	dagObj := jsval.NewObject(4)
+	for _, k := range []string{"a", "b", "c", "d"} {
+		dagObj.Set(k, dag)
+	}
+	// Two selection stores: one of _vgsid_ ids, one of fields and values
+	// (point and interval), whose ids, units and values are the
+	// shared-reference arrays, in two units.
+	ids := make([]jsval.Value, 0, 4)
+	rows := make([]jsval.Value, 0, 4)
+	for i, unit := range []jsval.Value{jsval.Str("u"), dag, jsval.Str("v"), dag2} {
+		id := jsval.NewObject(2)
+		id.Set("unit", jsval.Str([]string{"u", "u", "v", "v"}[i])) // the ids reach the walks
+		id.Set("_vgsid_", []jsval.Value{dag, dag2}[i%2])
+		ids = append(ids, jsval.Obj(id))
+		f := jsval.NewObject(3)
+		f.Set("field", jsval.Str("x"))
+		f.Set("type", jsval.Str([]string{"E", "R"}[i%2]))
+		row := jsval.NewObject(3)
+		row.Set("unit", unit)
+		row.Set("fields", jsval.ArrOf(jsval.Obj(f)))
+		row.Set("values", jsval.ArrOf([]jsval.Value{dag, dag2}[i%2]))
+		rows = append(rows, jsval.Obj(row))
+	}
 	return hostileEnv{
+		"dag":    dag,
+		"dag2":   dag2,
+		"dagobj": jsval.Obj(dagObj),
+		"store":  jsval.Arr(rows),
+		"ids":    jsval.Arr(ids),
 		"ascii":  jsval.Str(strings.Repeat("a", b)),
 		"latin":  jsval.Str(strings.Repeat("é", b/2)),
 		"emoji":  jsval.Str(strings.Repeat("\U0001F600", b/4)),
@@ -73,11 +136,11 @@ func hostileValues(room int, k float64) hostileEnv {
 
 // hostileCalls are the argument lists every function is called with.
 func hostileCalls(short bool) [][]string {
-	first := []string{"ascii", "latin", "emoji", "nums", "strs", "alike", "huge", "one", "unit"}
-	second := []string{"ascii", "emoji", "nums", "alike", "huge", "big", "one", "needle", "wide", "pcts"}
+	first := []string{"ascii", "latin", "emoji", "nums", "strs", "alike", "huge", "one", "unit", "dag", "dagobj", "'ids'", "'store'"}
+	second := []string{"ascii", "emoji", "nums", "alike", "huge", "big", "one", "needle", "wide", "pcts", "dag2", "dagobj"}
 	third := []string{"huge", "one", "ascii"}
 	if short {
-		second = []string{"ascii", "nums", "huge", "needle", "wide", "pcts"}
+		second = []string{"ascii", "nums", "huge", "needle", "wide", "pcts", "dag2"}
 		third = []string{"huge"}
 	}
 	var calls [][]string
@@ -87,7 +150,7 @@ func hostileCalls(short bool) [][]string {
 			calls = append(calls, []string{a, b})
 		}
 	}
-	for _, a := range []string{"ascii", "nums", "unit"} {
+	for _, a := range []string{"ascii", "nums", "unit", "dag"} {
 		for _, b := range second {
 			for _, c := range third {
 				calls = append(calls, []string{a, b, c}, []string{a, "huge", b, c})

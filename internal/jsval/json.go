@@ -61,8 +61,12 @@ const (
 )
 
 // ParseJSON parses text with JSON.parse semantics: strict RFC 8259 grammar,
-// object keys kept in document order, a repeated key overwriting the value at
-// its first position. Invalid UTF-8 and lone surrogate escapes become U+FFFD.
+// object keys in JavaScript's order (array-index keys first, ascending, then
+// the rest in document order; see Object), a repeated key overwriting the
+// value at its first position. A lone surrogate escape ("\ud83d") is kept as
+// the code unit it is, in WTF-8, as JSON.parse keeps it and as the
+// expression evaluator holds one; a byte of invalid UTF-8 in the text reads
+// as U+FFFD, as decoding the text does.
 func ParseJSON(text []byte) (Value, error) { return ParseJSONLimit(text, 0) }
 
 // ParseJSONLimit is ParseJSON that stops with ErrJSONSize once the values built
@@ -306,8 +310,19 @@ func (p *parser) value(depth int) (Value, error) {
 		if c == '-' || (c >= '0' && c <= '9') {
 			return p.number()
 		}
-		return Undefined, p.errf("unexpected character %q", c)
+		return Undefined, p.unexpected()
 	}
+}
+
+// unexpected is the error of a character no value starts with: the
+// character as the text holds it, or its first byte, in hex, when the text
+// is not valid UTF-8 there (a byte is not a character of its own).
+func (p *parser) unexpected() error {
+	r, n := utf8.DecodeRune(p.s[p.i:])
+	if r == utf8.RuneError && n <= 1 {
+		return p.errf("unexpected byte 0x%02X", p.s[p.i])
+	}
+	return p.errf("unexpected character %q", r)
 }
 
 func (p *parser) literal(word string, v Value) (Value, error) {
@@ -410,17 +425,36 @@ func (p *parser) digits() int {
 // polled (shortNumber); a shorter one has too few digits to be misread.
 const numberDigits = 800
 
-// shortNumber is the validated JSON number literal lit cut to its first
+// shortNumber is shortDecimal for the parser: its pass over a long literal
+// charges the bytes it reads as the scan does, and stops with the context's
+// error.
+func (p *parser) shortNumber(lit []byte) ([]byte, error) {
+	if p.meter == nil {
+		return shortDecimal(lit, len(lit), nil)
+	}
+	return shortDecimal(lit, p.every, func() error {
+		if err := p.meter.Work(int64(p.every) / jsonBytesPerStep); err != nil {
+			p.stop = err
+			return err
+		}
+		return nil
+	})
+}
+
+// shortDecimal is the validated decimal literal lit cut to its first
 // numberDigits significant digits, a sticky digit and its decimal exponent,
 // in the form [-]0.ddd…e±x: the literal ParseFloat rounds to the float64 lit
 // rounds to (numberDigits), and at most numberDigits+30 bytes, so that the
-// conversion is bounded and the literal is not copied. The pass over lit
-// charges its bytes as the scan does, and stops with the context's error.
-func (p *parser) shortNumber(lit []byte) ([]byte, error) {
+// conversion is bounded and the literal is not copied. It reads lit chunk
+// bytes at a time, calling charge (when not nil) between two chunks.
+func shortDecimal(lit []byte, chunk int, charge func() error) ([]byte, error) {
 	out := make([]byte, 0, numberDigits+32)
 	i := 0
-	if lit[0] == '-' {
+	switch lit[0] {
+	case '-':
 		out = append(out, '-')
+		i = 1
+	case '+':
 		i = 1
 	}
 	out = append(out, '0', '.')
@@ -429,12 +463,8 @@ func (p *parser) shortNumber(lit []byte) ([]byte, error) {
 	// rounds to 0 or Infinity.
 	var point, exp int64
 	sig, sticky, frac, inExp, expNeg := 0, false, false, false, false
-	chunk := len(lit)
-	if p.meter != nil {
-		chunk = p.every
-	}
 	for i < len(lit) {
-		end := min(len(lit), i+chunk)
+		end := min(len(lit), i+max(chunk, 1))
 		for ; i < end; i++ {
 			c := lit[i]
 			switch {
@@ -466,9 +496,8 @@ func (p *parser) shortNumber(lit []byte) ([]byte, error) {
 				sig++
 			}
 		}
-		if p.meter != nil && end < len(lit) {
-			if err := p.meter.Work(int64(chunk) / jsonBytesPerStep); err != nil {
-				p.stop = err
+		if charge != nil && end < len(lit) {
+			if err := charge(); err != nil {
 				return nil, err
 			}
 		}
@@ -487,6 +516,43 @@ func (p *parser) shortNumber(lit []byte) ([]byte, error) {
 	point = min(max(point+exp, -1000), 1000)
 	out = append(out, 'e')
 	return strconv.AppendInt(out, point, 10), nil
+}
+
+// ParseDecimal is the float64 a decimal literal denotes, rounded once, as
+// JavaScript rounds it: the conversion of JSON.parse, Number(), parseFloat,
+// parseInt in radix 10 and an expression's numeric literal alike. lit is
+// [+-]digits[.digits][(e|E)[+-]digits], where either side of the point may be
+// empty but not both; ok is false for anything else. A literal past
+// numberDigits bytes is cut to the digits that decide its rounding first
+// (shortDecimal): strconv.ParseFloat alone misreads one of more than 800
+// digits.
+func ParseDecimal(lit string) (f float64, ok bool) {
+	body := lit
+	if body != "" && (body[0] == '+' || body[0] == '-') {
+		body = body[1:]
+	}
+	if !isDecimalLiteral(body) {
+		return math.NaN(), false
+	}
+	b := readOnlyBytes(lit)
+	if lit[0] != '+' {
+		if f, ok := fastNumber(b); ok {
+			return f, true
+		}
+	}
+	if len(lit) > numberDigits {
+		b, _ = shortDecimal(b, len(b), nil)
+	}
+	f, err := strconv.ParseFloat(string(b), 64)
+	if err != nil {
+		// Out-of-range literals round to ±Infinity or 0, which ParseFloat
+		// reports alongside ErrRange.
+		var ne *strconv.NumError
+		if !errors.As(err, &ne) || ne.Err != strconv.ErrRange {
+			return math.NaN(), false
+		}
+	}
+	return f, true
 }
 
 var pow10tab = [...]float64{1e0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12, 1e13, 1e14, 1e15}
@@ -562,7 +628,7 @@ fast:
 			return "", err
 		}
 	}
-	buf := append([]byte(nil), p.s[start:p.i]...)
+	buf := appendDecoded(nil, p.s[start:p.i])
 	for p.i < len(p.s) {
 		if p.due() {
 			if err := p.poll(); err != nil {
@@ -574,9 +640,6 @@ fast:
 		switch {
 		case c == '"':
 			p.i++
-			if !utf8.Valid(buf) {
-				return string([]rune(string(buf))), nil
-			}
 			return string(buf), nil
 		case c < 0x20:
 			return "", p.errf("control character in string")
@@ -611,25 +674,55 @@ fast:
 						p.i += 2
 						r2, err := p.hex4()
 						if err == nil && r2 >= 0xDC00 && r2 <= 0xDFFF {
-							r = utf16.DecodeRune(r, r2)
-						} else {
-							p.i = save
-							r = utf8.RuneError
+							buf = utf8.AppendRune(buf, utf16.DecodeRune(r, r2))
+							continue
 						}
-					} else {
-						r = utf8.RuneError
+						p.i = save
 					}
+					// A surrogate with no partner is a code unit of its
+					// own, written as WTF-8.
+					buf = AppendSurrogate(buf, r)
+					continue
 				}
 				buf = utf8.AppendRune(buf, r)
 			default:
 				return "", p.errf("invalid escape \\%c", e)
 			}
-		default:
+		case c < utf8.RuneSelf:
 			buf = append(buf, c)
 			p.i++
+		default:
+			// A character of the text: invalid UTF-8 reads as U+FFFD, a
+			// byte at a time, so the bytes of a surrogate the text holds
+			// raw are not taken for the code unit an escape makes.
+			r, w := utf8.DecodeRune(p.s[p.i:])
+			if r == utf8.RuneError && w == 1 {
+				buf = utf8.AppendRune(buf, r)
+			} else {
+				buf = append(buf, p.s[p.i:p.i+w]...)
+			}
+			p.i += w
 		}
 	}
 	return "", p.errf("unterminated string")
+}
+
+// appendDecoded appends text to b with each byte of invalid UTF-8 read as
+// U+FFFD.
+func appendDecoded(b, text []byte) []byte {
+	if utf8.Valid(text) {
+		return append(b, text...)
+	}
+	for len(text) > 0 {
+		r, w := utf8.DecodeRune(text)
+		if r == utf8.RuneError && w == 1 {
+			b = utf8.AppendRune(b, r)
+		} else {
+			b = append(b, text[:w]...)
+		}
+		text = text[w:]
+	}
+	return b
 }
 
 func (p *parser) hex4() (rune, error) {
@@ -705,8 +798,9 @@ func (p *parser) object(depth int) (Value, error) {
 			o := p.newObject(n)
 			vbase := len(p.vstk) - n
 			for i := 0; i < n; i++ {
-				o.Set(p.kstk[base+i], p.vstk[vbase+i])
+				o.setUnordered(p.kstk[base+i], p.vstk[vbase+i])
 			}
+			o.order()
 			clear(p.vstk[vbase:])
 			p.kstk = p.kstk[:base]
 			p.vstk = p.vstk[:vbase]
@@ -799,14 +893,14 @@ func (p *parser) array(depth int) (Value, error) {
 // AppendJSON appends JSON.stringify(v) (compact) to dst. Undefined object
 // members are omitted and undefined array elements written as null; non-finite
 // numbers are null; a Timestamp is written as its epoch number and a Pattern
-// as {} (it has no enumerable properties).
-func AppendJSON(dst []byte, v Value) []byte {
-	return appendJSON(dst, v, "", "", 0)
-}
+// as {} (it has no enumerable properties); a lone surrogate is escaped, as
+// JSON.stringify escapes it. It is a detached walk (see Walker): a value an
+// expression or a transform built is written with the call's Walker.
+func AppendJSON(dst []byte, v Value) []byte { return Walker{}.AppendJSON(dst, v) }
 
-// AppendJSONIndent is JSON.stringify(v, null, indent).
+// AppendJSONIndent is JSON.stringify(v, null, indent); see AppendJSON.
 func AppendJSONIndent(dst []byte, v Value, indent string) []byte {
-	return appendJSON(dst, v, indent, "\n", 0)
+	return Walker{}.AppendJSONIndent(dst, v, indent)
 }
 
 // MarshalJSON writes compact JSON.stringify output.
@@ -817,94 +911,38 @@ func (v Value) MarshalJSON() ([]byte, error) {
 	return AppendJSON(nil, v), nil
 }
 
-func appendJSON(dst []byte, v Value, indent, prefix string, depth int) []byte {
-	if depth > MaxValueDepth {
-		return append(dst, "null"...)
-	}
-	if IsFunction(v) {
-		return append(dst, "null"...) // as in an array; a member is left out
-	}
-	switch v.Kind() {
-	case KindUndefined, KindNull:
-		return append(dst, "null"...)
-	case KindBool:
-		if v.n() != 0 {
-			return append(dst, "true"...)
-		}
-		return append(dst, "false"...)
-	case KindNum, KindTimestamp:
-		if math.IsNaN(v.n()) || math.IsInf(v.n(), 0) {
-			return append(dst, "null"...)
-		}
-		return AppendJSNumber(dst, v.n())
-	case KindStr:
-		return appendQuoted(dst, v.s())
-	case KindPattern:
-		return append(dst, "{}"...)
-	case KindArr:
-		items := v.Items()
-		if len(items) == 0 {
-			return append(dst, "[]"...)
-		}
-		inner := prefix + indent
-		dst = append(dst, '[')
-		for i, it := range items {
-			if i > 0 {
-				dst = append(dst, ',')
-			}
-			if indent != "" {
-				dst = append(dst, inner...)
-			}
-			dst = appendJSON(dst, it, indent, inner, depth+1)
-		}
-		if indent != "" {
-			dst = append(dst, prefix...)
-		}
-		return append(dst, ']')
-	case KindObj:
-		o := v.ObjValue()
-		inner := prefix + indent
-		dst = append(dst, '{')
-		n := 0
-		for i := 0; i < o.Len(); i++ {
-			val := o.ValueAt(i)
-			if val.Kind() == KindUndefined || IsFunction(val) {
-				continue
-			}
-			if n > 0 {
-				dst = append(dst, ',')
-			}
-			n++
-			if indent != "" {
-				dst = append(dst, inner...)
-			}
-			dst = appendQuoted(dst, o.KeyAt(i))
-			dst = append(dst, ':')
-			if indent != "" {
-				dst = append(dst, ' ')
-			}
-			dst = appendJSON(dst, val, indent, inner, depth+1)
-		}
-		if n > 0 && indent != "" {
-			dst = append(dst, prefix...)
-		}
-		return append(dst, '}')
-	}
-	return dst
-}
-
 func quoteJSON(s string) string { return string(appendQuoted(nil, s)) }
 
 const hexDigits = "0123456789abcdef"
 
 // appendQuoted writes s as JSON.stringify does: only ", \ and control
-// characters are escaped (never <, > or &, unlike encoding/json).
+// characters are escaped (never <, > or &, unlike encoding/json), and a lone
+// surrogate, which a string an expression made holds as three WTF-8 bytes
+// (ED A0..BF xx), as its \uXXXX escape (JSON.stringify is well formed since
+// ES2019). A high surrogate's bytes followed by a low one's are the
+// character they pair into.
 func appendQuoted(dst []byte, s string) []byte {
 	dst = append(dst, '"')
 	start := 0
 	for i := 0; i < len(s); i++ {
 		c := s[i]
-		if c >= 0x20 && c != '"' && c != '\\' {
+		if c >= 0x20 && c != '"' && c != '\\' && c != 0xED {
+			continue
+		}
+		if c == 0xED {
+			u, ok := surrogateAt(s, i)
+			if !ok {
+				continue // U+D000..U+D7FF
+			}
+			dst = append(dst, s[start:i]...)
+			if lo, ok := surrogateAt(s, i+3); ok && u < 0xDC00 && lo >= 0xDC00 {
+				dst = utf8.AppendRune(dst, utf16.DecodeRune(u, lo))
+				i += 5
+			} else {
+				dst = append(dst, '\\', 'u', hexDigits[u>>12], hexDigits[u>>8&0xF], hexDigits[u>>4&0xF], hexDigits[u&0xF])
+				i += 2
+			}
+			start = i + 1
 			continue
 		}
 		dst = append(dst, s[start:i]...)
@@ -930,6 +968,41 @@ func appendQuoted(dst []byte, s string) []byte {
 	}
 	dst = append(dst, s[start:]...)
 	return append(dst, '"')
+}
+
+// quotedLen is the length appendQuoted gives s.
+func quotedLen(s string) int {
+	n := len(s) + 2
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c == 0xED:
+			u, ok := surrogateAt(s, i)
+			if !ok {
+				continue
+			}
+			if lo, ok := surrogateAt(s, i+3); ok && u < 0xDC00 && lo >= 0xDC00 {
+				n -= 2 // six bytes become four
+				i += 5
+			} else {
+				n += 3 // three bytes become six
+				i += 2
+			}
+		case c == '"' || c == '\\' || c == '\n' || c == '\r' || c == '\t' || c == '\b' || c == '\f':
+			n++
+		case c < 0x20:
+			n += 5
+		}
+	}
+	return n
+}
+
+// surrogateAt is the surrogate whose WTF-8 bytes start s[i:], if they do.
+func surrogateAt(s string, i int) (rune, bool) {
+	if i+2 < len(s) && s[i] == 0xED && s[i+1] >= 0xA0 && s[i+1] <= 0xBF && s[i+2]&0xC0 == 0x80 {
+		return 0xD000 | rune(s[i+1]&0x3F)<<6 | rune(s[i+2]&0x3F), true
+	}
+	return 0, false
 }
 
 // slab hands out elements from chunks, one allocation per chunk.
@@ -1031,4 +1104,19 @@ func (p *parser) newObject(n int) *Object {
 		return &x.Object
 	}
 	return NewObject(n)
+}
+
+// AppendQuoted appends s as JSON.stringify writes a string (see
+// appendQuoted). It is no walk: the text is s's, escaped.
+func AppendQuoted(dst []byte, s string) []byte { return appendQuoted(dst, s) }
+
+// plainJSON reports whether s is its own JSON text inside the quotes: no
+// byte appendQuoted escapes.
+func plainJSON(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if c := s[i]; c < 0x20 || c == '"' || c == '\\' || c == 0xED {
+			return false
+		}
+	}
+	return true
 }

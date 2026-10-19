@@ -591,7 +591,7 @@ func (c *Converter) VegaLiteToVega(spec []byte, opts ...RenderOption) ([]byte, e
 		if err != nil {
 			return nil, err
 		}
-		return jsval.AppendJSON(nil, vg), nil
+		return jsval.WalkerFor(ctx).AppendJSON(nil, vg), nil
 	})
 }
 

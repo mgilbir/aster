@@ -20,3 +20,4 @@ Decisions whose reason is not visible in the code. Each says what was decided, w
 | [0014](0014-library-memory-bounded-by-ledger-room.md) | Memory a library allocates as it works, unsized beforehand, is bounded by the ledger's room rather than charged | accepted, 2026-10-13 |
 | [0015](0015-filters-follow-the-specification.md) | PNG filters follow the Filter Effects spec where resvg departs from it | accepted, 2026-10-14 |
 | [0016](0016-custom-projections.md) | Custom projections are a raw projection and its parameters, per Converter | accepted, 2026-10-14 |
+| [0018](0018-value-walks-bounded-by-the-call.md) | Walks of a value (its text, JSON, comparisons) are bounded by the call that makes them, with the call's jsval.Walker; identity is a key, not a walk | accepted, 2026-10-19 |

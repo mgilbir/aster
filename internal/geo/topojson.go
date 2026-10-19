@@ -48,6 +48,9 @@ type topology struct {
 	led   *budget.Ledger
 	m     budget.Meter
 	bytes int64 // charged to led for the decoded arcs
+	// walk is the call's Walker: a position's coordinates are read as
+	// text where topojson-client's arithmetic concatenates them.
+	walk jsval.Walker
 }
 
 // topoArc is one arc: its positions, the input's own arrays, which
@@ -96,7 +99,7 @@ func decodeTopology(ctx context.Context, t jsval.Value) (*topology, error) {
 	if !t.IsObj() {
 		return nil, errTopology
 	}
-	top := &topology{led: budget.LedgerFrom(ctx), m: budget.NewMeter(ctx)}
+	top := &topology{led: budget.LedgerFrom(ctx), m: budget.NewMeter(ctx), walk: jsval.WalkerFor(ctx)}
 	if tr := t.Get("transform"); !tr.IsNullish() {
 		s, tl := tr.Get("scale"), tr.Get("translate")
 		if !s.IsArr() || !tl.IsArr() {
@@ -723,7 +726,7 @@ func stitch(t *topology, arcs []int) ([][]int, error) {
 	// JavaScript objects, so String(array).
 	ends := func(i int) (string, string, error) {
 		a, _ := t.arc(i)
-		p0 := a.pts[0].AsString()
+		p0 := t.walk.String(a.pts[0])
 		var p1 string
 		if t.transform != nil {
 			var x, y jsSum
@@ -739,7 +742,7 @@ func stitch(t *topology, arcs []int) ([][]int, error) {
 			}
 			p1 = x.String() + "," + y.String()
 		} else {
-			p1 = a.pts[len(a.pts)-1].AsString()
+			p1 = t.walk.String(a.pts[len(a.pts)-1])
 		}
 		if i < 0 {
 			return p1, p0, nil
