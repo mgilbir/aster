@@ -185,7 +185,7 @@ func TestUpstreamVegaTransforms(t *testing.T) {
 			r.Skip(c.Op + ", which is " + plumbing[c.Op])
 		}
 	}
-	r.Done(280)
+	r.Done(298)
 }
 
 func dateOrNumber(v any) float64 {

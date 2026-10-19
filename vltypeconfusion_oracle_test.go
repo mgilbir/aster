@@ -142,13 +142,17 @@ func mutantDiffers(t *testing.T, conv *aster.Converter, want oracle.Result, muta
 		}
 		return err
 	}))
-	switch {
-	case want.Err == "" && gerr != nil:
+	switch errorOutcome(gerr, want.Err) {
+	case statusInternalError:
+		return fmt.Sprintf("the engine panics (%q)", firstLine(gerr.Error()))
+	case "engine-error":
 		return fmt.Sprintf("the engine errors (%q), node compiles", firstLine(gerr.Error()))
-	case want.Err != "" && gerr == nil:
+	case "node-error":
 		return fmt.Sprintf("node errors (%q), the engine compiles", firstLine(want.Err))
-	case want.Err != "":
+	case "both-error":
 		return ""
+	}
+	switch {
 	case !slices.Equal(gotWarn, want.Warnings):
 		return fmt.Sprintf("warnings differ\n  engine: %s\n  node:   %s", strings.Join(gotWarn, " | "), strings.Join(want.Warnings, " | "))
 	}
