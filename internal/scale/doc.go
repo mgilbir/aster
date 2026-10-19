@@ -44,10 +44,8 @@
 // A few exported pieces have no caller in the engine, because Vega never
 // reaches them: the radial scale (Radial), the d3-scale tickFormat methods
 // of the scales (vega formats ticks through TickFormat in vegaticks.go), and
-// the interpolators of a list of values (Basis, BasisClosed, RGBBasis,
-// RGBBasisClosed, Discrete) and the zoom interpolator's numeric form (Zoom,
-// DefaultZoom; Vega's "zoom" interpolate is InterpolateZoom, on the same
-// code). They are kept as the targets of the d3-scale and d3-interpolate
-// vector replays (upstream_test.go), which hold them to upstream, so that
-// the code the engine does run shares their verification.
+// interpolateZoom.rho (Zoom). They are kept as the targets of the d3-scale
+// and d3-interpolate vector replays (upstream_test.go), which hold them to
+// upstream; the code they share with what the engine runs is verified
+// through them.
 package scale

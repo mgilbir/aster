@@ -2,6 +2,7 @@ package scale
 
 import (
 	"math"
+	"strconv"
 	"unsafe"
 
 	"github.com/mgilbir/aster/internal/jsmath"
@@ -275,26 +276,103 @@ func InterpolateArray(w jsval.Walker, a, b jsval.Value) func(float64) jsval.Valu
 // holds, and upstream rebuilds them all on every call.
 
 func interpolateArray(w jsval.Walker, m *jsval.WalkMeter, a, b jsval.Value, depth int) func(float64) jsval.Value {
-	bi := b.Items()
-	nb := len(bi)
-	na := 0
-	if a.IsArr() {
-		na = min(nb, a.Len())
+	// d3's genericArray: nb = b ? b.length : 0, na = a ? Math.min(nb,
+	// a.length) : 0, x = new Array(na), c = new Array(nb); the ends are read
+	// as JavaScript reads them, a string by its characters, an object by its
+	// length and indexes, a number as having no length.
+	nb := jsval.Num(0)
+	if b.IsTruthy() {
+		nb = lengthValue(b)
 	}
-	x := make([]func(float64) jsval.Value, na)
-	for i := 0; i < na; i++ {
-		x[i] = interpolateValue(w, m, a.Index(i), bi[i], depth+1)
+	na := 0.0
+	if a.IsTruthy() {
+		x, y := jsval.ToNumber(nb), jsval.ToNumber(lengthValue(a))
+		if x != x || y != y {
+			na = math.NaN()
+		} else {
+			na = math.Min(x, y)
+		}
 	}
+	if !validArrayLength(na) {
+		panic(&Thrown{Name: "RangeError", Msg: "Invalid array length"})
+	}
+	// new Array(nb): a number is a length, anything else the one element.
+	var c0 []jsval.Value
+	if nb.IsNum() {
+		if !validArrayLength(nb.NumValue()) {
+			panic(&Thrown{Name: "RangeError", Msg: "Invalid array length"})
+		}
+		w.Work(int64(nb.NumValue()))
+		w.Keep(int64(nb.NumValue()) * valueBytes)
+		c0 = make([]jsval.Value, int(nb.NumValue()))
+	} else {
+		c0 = []jsval.Value{nb}
+	}
+	n := int(na)
+	x := make([]func(float64) jsval.Value, n)
+	for i := 0; i < n; i++ {
+		x[i] = interpolateValue(w, m, member(a, i), member(b, i), depth+1)
+	}
+	// for (; i < nb; ++i) c[i] = b[i]
+	if hi := jsval.ToNumber(nb); hi > float64(n) {
+		if top := math.Min(math.Ceil(hi), 1<<32-1); top > float64(len(c0)) {
+			// c grows to hold b's elements: charged before it does
+			w.Work(int64(top))
+			w.Keep(int64(top) * valueBytes)
+			c0 = setAt(c0, int(top)-1, jsval.Undefined)
+		}
+		for i := n; float64(i) < hi && i < len(c0); i++ {
+			c0[i] = member(b, i)
+		}
+	}
+	nc := int64(max(len(c0), n))
 	return func(t float64) jsval.Value {
-		w.Work(int64(nb))
-		w.Keep(int64(nb) * valueBytes)
-		c := make([]jsval.Value, nb)
-		copy(c, bi)
-		for i := 0; i < na; i++ {
-			c[i] = x[i](t)
+		w.Work(nc)
+		w.Keep(nc * valueBytes)
+		c := make([]jsval.Value, len(c0), nc)
+		copy(c, c0)
+		for i := 0; i < n; i++ {
+			c = setAt(c, i, x[i](t))
 		}
 		return jsval.Arr(c)
 	}
+}
+
+// lengthValue is v.length as JavaScript reads it: a string's UTF-16 units,
+// an array's length, an object's member "length" (any value), and undefined
+// for the rest.
+func lengthValue(v jsval.Value) jsval.Value {
+	switch {
+	case v.IsStr():
+		return jsval.Num(float64(jsval.UTF16Len(v.StrValue())))
+	case v.IsArr():
+		return jsval.Num(float64(v.Len()))
+	case v.IsObj():
+		return v.ObjValue().Lookup("length")
+	}
+	return jsval.Undefined
+}
+
+// member is v[i]: an array's element, a string's i-th UTF-16 unit, an
+// object's member "i", undefined for the rest.
+func member(v jsval.Value, i int) jsval.Value {
+	if v.IsObj() {
+		return v.ObjValue().Lookup(strconv.Itoa(i))
+	}
+	al, _ := jsval.ToArrayLike(v)
+	return al.At(int64(i))
+}
+
+// validArrayLength is whether new Array(n) accepts the number n.
+func validArrayLength(n float64) bool { return n >= 0 && n <= 1<<32-1 && n == math.Trunc(n) }
+
+// setAt is c[i] = v, growing c with holes (undefined) as JavaScript does.
+func setAt(c []jsval.Value, i int, v jsval.Value) []jsval.Value {
+	for len(c) <= i {
+		c = append(c, jsval.Undefined)
+	}
+	c[i] = v
+	return c
 }
 
 // valueBytes is what an element of an array holds.
@@ -310,21 +388,49 @@ func InterpolateObject(w jsval.Walker, a, b jsval.Value) func(float64) jsval.Val
 }
 
 func interpolateObject(w jsval.Walker, m *jsval.WalkMeter, a, b jsval.Value, depth int) func(float64) jsval.Value {
-	ao, bo := a.ObjValue(), b.ObjValue()
+	// d3: an end that is null or not an object is {}; for (k in b) the
+	// members found in a are interpolated, the rest copied. An array is an
+	// object of its indexes.
 	type entry struct {
 		key string
 		f   func(float64) jsval.Value
 	}
 	var interp []entry
 	consts := jsval.NewObject(0)
-	if bo != nil {
-		for i := 0; i < bo.Len(); i++ {
-			k := bo.KeyAt(i)
-			if ao != nil && ao.Has(k) {
-				interp = append(interp, entry{k, interpolateValue(w, m, ao.Lookup(k), bo.ValueAt(i), depth+1)})
-			} else {
-				consts.Set(k, bo.ValueAt(i))
+	keysOf := func(v jsval.Value) (keys []string, get func(string) jsval.Value, has func(string) bool) {
+		switch {
+		case v.IsObj():
+			o := v.ObjValue()
+			return o.Keys(), o.Lookup, o.Has
+		case v.IsArr():
+			items := v.Items()
+			keys = make([]string, len(items))
+			for i := range items {
+				keys[i] = strconv.Itoa(i)
 			}
+			idx := func(k string) (int, bool) {
+				n, ok := jsval.ArrayIndex(k)
+				return int(n), ok && int(n) < len(items)
+			}
+			return keys, func(k string) jsval.Value {
+					if i, ok := idx(k); ok {
+						return items[i]
+					}
+					return jsval.Undefined
+				}, func(k string) bool {
+					_, ok := idx(k)
+					return ok
+				}
+		}
+		return nil, func(string) jsval.Value { return jsval.Undefined }, func(string) bool { return false }
+	}
+	bk, bget, _ := keysOf(b)
+	_, aget, ahas := keysOf(a)
+	for _, k := range bk {
+		if ahas(k) {
+			interp = append(interp, entry{k, interpolateValue(w, m, aget(k), bget(k), depth+1)})
+		} else {
+			consts.Set(k, bget(k))
 		}
 	}
 	n := int64(consts.Len() + len(interp))
@@ -491,29 +597,35 @@ func InterpolateString(w jsval.Walker, a, b jsval.Value) func(float64) jsval.Val
 
 // Basis is d3.interpolateBasis: a uniform cubic B-spline through values.
 func Basis(values []float64) func(t float64) float64 {
-	n := len(values) - 1
+	return basisOver(int64(len(values)), func(i int64) float64 { return valueAt(values, int(i)) })
+}
+
+// basisOver is d3.interpolateBasis over n values that at reads (NaN for an
+// index outside them, as an undefined element is NaN to d3's arithmetic).
+func basisOver(n1 int64, at func(int64) float64) func(t float64) float64 {
+	n := n1 - 1
 	return func(t float64) float64 {
 		if t != t || n < 0 {
 			return math.NaN()
 		}
-		var i int
+		var i int64
 		switch {
 		case t <= 0:
 			t, i = 0, 0
 		case t >= 1:
 			t, i = 1, n-1
 		default:
-			i = int(math.Floor(t * float64(n)))
+			i = int64(math.Floor(t * float64(n)))
 		}
-		v1 := valueAt(values, i)
-		v2 := valueAt(values, i+1)
+		v1 := at(i)
+		v2 := at(i + 1)
 		v0 := 2*v1 - v2
 		if i > 0 {
-			v0 = valueAt(values, i-1)
+			v0 = at(i - 1)
 		}
 		v3 := 2*v2 - v1
 		if i < n-1 {
-			v3 = valueAt(values, i+2)
+			v3 = at(i + 2)
 		}
 		return basisSegment((t-float64(i)/float64(n))*float64(n), v0, v1, v2, v3)
 	}
@@ -539,7 +651,11 @@ func basisSegment(t1, v0, v1, v2, v3 float64) float64 {
 
 // BasisClosed is d3.interpolateBasisClosed: a periodic cubic B-spline.
 func BasisClosed(values []float64) func(t float64) float64 {
-	n := len(values)
+	return basisClosedOver(int64(len(values)), func(i int64) float64 { return values[i] })
+}
+
+// basisClosedOver is d3.interpolateBasisClosed over n values that at reads.
+func basisClosedOver(n int64, at func(int64) float64) func(t float64) float64 {
 	return func(t float64) float64 {
 		if n == 0 || t != t || math.IsInf(t, 0) {
 			return math.NaN()
@@ -548,11 +664,11 @@ func BasisClosed(values []float64) func(t float64) float64 {
 		if t < 0 {
 			t++
 		}
-		i := int(math.Floor(t * float64(n)))
-		v0 := values[(i+n-1)%n]
-		v1 := values[i%n]
-		v2 := values[(i+1)%n]
-		v3 := values[(i+2)%n]
+		i := int64(math.Floor(t * float64(n)))
+		v0 := at((i + n - 1) % n)
+		v1 := at(i % n)
+		v2 := at((i + 1) % n)
+		v3 := at((i + 2) % n)
 		return basisSegment((t-float64(i)/float64(n))*float64(n), v0, v1, v2, v3)
 	}
 }
@@ -586,9 +702,8 @@ var (
 	RGBBasisClosed = rgbSpline(BasisClosed)
 )
 
-// Discrete is d3.interpolateDiscrete: t in [0,1) picks one of the values.
-func Discrete(values []jsval.Value) func(t float64) jsval.Value {
-	n := len(values)
+// discreteOver is d3.interpolateDiscrete over n values that at reads.
+func discreteOver(n int64, at func(int64) jsval.Value) func(t float64) jsval.Value {
 	return func(t float64) jsval.Value {
 		if n == 0 {
 			return jsval.Undefined
@@ -597,8 +712,7 @@ func Discrete(values []jsval.Value) func(t float64) jsval.Value {
 		if f != f {
 			return jsval.Undefined // range[NaN]
 		}
-		i := int(math.Max(0, math.Min(float64(n-1), f)))
-		return values[i]
+		return at(int64(math.Max(0, math.Min(float64(n-1), f))))
 	}
 }
 
@@ -640,12 +754,6 @@ func Zoom(rho float64) func(p0, p1 [3]float64) (interp func(t float64) [3]float6
 	rho = math.Max(1e-3, rho)
 	rho2 := rho * rho
 	return absolute(zoomRho(rho, rho2, rho2*rho2))
-}
-
-// DefaultZoom is d3.interpolateZoom itself. It is not Zoom(math.Sqrt2): upstream builds it with the
-// exact squares 2 and 4, where rho(Math.SQRT2) squares the rounded root (2.0000000000000004).
-func DefaultZoom() func(p0, p1 [3]float64) (interp func(t float64) [3]float64, duration float64) {
-	return absolute(zoomRho(math.Sqrt2, 2, 4))
 }
 
 // zoomFunc returns, for t, the move from the start view [ox, oy] and the

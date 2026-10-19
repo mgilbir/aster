@@ -25,11 +25,13 @@ func InterpolateRange(interpolator UnitInterpolator, rng []float64) UnitInterpol
 // interpolator d3['interpolate' + CamelCase(type)], a function of a range's
 // two ends: "rgb", "hsl", "hsl-long", "lab", "hcl", "hcl-long",
 // "cubehelix", "cubehelix-long", "number", "round", "string", "array",
-// "number-array", "object", "date", "hue" and "zoom". gamma applies only to
-// "rgb" and the cubehelix pair (which carry a gamma variant upstream) and is
-// ignored by the others, as upstream does. ok is false for any other name:
-// one d3 does not export (upstream's interpolator is then undefined, and the
-// scale throws when used), and the names UnsupportedInterpolator explains.
+// "number-array", "object", "date", "hue", "zoom", the list interpolators
+// "basis", "basis-closed", "discrete", "rgb-basis" and "rgb-basis-closed",
+// and "transform-css" and "transform-svg" as node runs them. gamma applies
+// only to "rgb" and the cubehelix pair (which carry a gamma variant
+// upstream) and is ignored by the others, as upstream does. ok is false for
+// a name d3 does not export (upstream's interpolator is then undefined, and
+// the scale throws when used).
 func Interpolate(typ string, gamma float64, hasGamma bool) (Interpolator, bool) {
 	switch jsval.JSLower(typ) { // 'interpolate' + type.toLowerCase()…
 	case "rgb":
@@ -75,27 +77,113 @@ func Interpolate(typ string, gamma float64, hasGamma bool) (Interpolator, bool) 
 		return InterpolateNumberArray, true
 	case "zoom":
 		return InterpolateZoom, true
+	case "basis":
+		return InterpolateBasis, true
+	case "basis-closed":
+		return InterpolateBasisClosed, true
+	case "discrete":
+		return InterpolateDiscrete, true
+	case "rgb-basis":
+		return InterpolateRGBBasis, true
+	case "rgb-basis-closed":
+		return InterpolateRGBBasisClosed, true
+	case "transform-css":
+		return InterpolateTransformCSS, true
+	case "transform-svg":
+		return InterpolateTransformSVG, true
 	case "":
 		return InterpolateValue, true // d3's `interpolate` itself
 	}
 	return nil, false
 }
 
-// UnsupportedInterpolator explains why a name d3 exports is not a scale's
-// interpolator here: transform-css and transform-svg parse their ends with
-// the browser's DOMMatrix and an SVG element, which node (where headless
-// Vega runs) does not have either, so upstream throws as the scale is used;
-// basis, basis-closed, discrete, rgb-basis and rgb-basis-closed take one
-// list of values, not a range's two ends, so a scale built with them yields
-// NaN. ok is false for every other name.
-func UnsupportedInterpolator(typ string) (reason string, ok bool) {
-	switch jsval.JSLower(typ) {
-	case "transform-css", "transform-svg":
-		return "it needs a browser's DOMMatrix or SVG DOM, which node and this engine do not have", true
-	case "basis", "basis-closed", "discrete", "rgb-basis", "rgb-basis-closed":
-		return "it interpolates a list of values, not a range's two ends", true
+// The interpolators of a list of values (basis, basis-closed, discrete,
+// rgb-basis, rgb-basis-closed) take one argument, the list; d3-scale calls
+// them as interpolate(r0, r1), so they interpolate along r0 and ignore r1.
+// A range end that is a number, or a string read as its characters, gives
+// what d3 gives (NaN, undefined, a colour of NaN channels); null or
+// undefined is upstream's TypeError (values.length).
+
+func lengthOf(v jsval.Value) jsval.ArrayLike {
+	a, ok := jsval.ToArrayLike(v)
+	if !ok {
+		panic(&Thrown{Name: "TypeError", Msg: "Cannot read properties of " + nullName(v) + " (reading 'length')"})
 	}
-	return "", false
+	return a
+}
+
+func nullName(v jsval.Value) string {
+	if v.IsNull() {
+		return "null"
+	}
+	return "undefined"
+}
+
+// InterpolateBasis is d3.interpolateBasis(a), the B-spline through a's
+// elements read as numbers.
+func InterpolateBasis(_ jsval.Walker, a, _ jsval.Value) func(float64) jsval.Value {
+	al := lengthOf(a)
+	f := basisOver(al.Len(), func(i int64) float64 { return jsval.ToNumber(al.At(i)) })
+	return func(t float64) jsval.Value { return jsval.Num(f(t)) }
+}
+
+// InterpolateBasisClosed is d3.interpolateBasisClosed(a).
+func InterpolateBasisClosed(_ jsval.Walker, a, _ jsval.Value) func(float64) jsval.Value {
+	al := lengthOf(a)
+	f := basisClosedOver(al.Len(), func(i int64) float64 { return jsval.ToNumber(al.At(i)) })
+	return func(t float64) jsval.Value { return jsval.Num(f(t)) }
+}
+
+// InterpolateDiscrete is d3.interpolateDiscrete(a): one of a's elements.
+func InterpolateDiscrete(_ jsval.Walker, a, _ jsval.Value) func(float64) jsval.Value {
+	al := lengthOf(a)
+	return discreteOver(al.Len(), al.At)
+}
+
+// InterpolateRGBBasis and InterpolateRGBBasisClosed are
+// d3.interpolateRgbBasis(a) and interpolateRgbBasisClosed(a): a spline per
+// channel of the colours a lists. d3 reads every colour as it is made, so
+// the work and the channels are charged to w; an empty list leaves d3's
+// colour undefined, which its `color.opacity = 1` throws on.
+var (
+	InterpolateRGBBasis       = rgbSplineOf(RGBBasis)
+	InterpolateRGBBasisClosed = rgbSplineOf(RGBBasisClosed)
+)
+
+func rgbSplineOf(spline func(jsval.Walker, []jsval.Value) func(float64) jsval.Value) Interpolator {
+	return func(w jsval.Walker, a, _ jsval.Value) func(float64) jsval.Value {
+		al := lengthOf(a)
+		n := al.Len()
+		if n == 0 {
+			panic(&Thrown{Name: "TypeError", Msg: "Cannot set properties of undefined (setting 'opacity')"})
+		}
+		w.Work(n)
+		w.Keep(n * (valueBytes + 3*8))
+		colors := make([]jsval.Value, n)
+		for i := range colors {
+			colors[i] = al.At(int64(i))
+		}
+		return spline(w, colors)
+	}
+}
+
+// InterpolateTransformCSS is d3.interpolateTransformCss as node runs it:
+// it parses each end with the browser's DOMMatrix (or WebKitCSSMatrix),
+// which node does not have, so it throws whatever the ends.
+func InterpolateTransformCSS(_ jsval.Walker, _, _ jsval.Value) func(float64) jsval.Value {
+	panic(&Thrown{Name: "ReferenceError", Msg: "WebKitCSSMatrix is not defined"})
+}
+
+// InterpolateTransformSVG is d3.interpolateTransformSvg as node runs it:
+// an end that is null or undefined is the identity, any other is parsed
+// with an SVG element made from `document`, which node does not have. Two
+// identities interpolate to "".
+func InterpolateTransformSVG(_ jsval.Walker, a, b jsval.Value) func(float64) jsval.Value {
+	if !a.IsNullish() || !b.IsNullish() {
+		panic(&Thrown{Name: "ReferenceError", Msg: "document is not defined"})
+	}
+	empty := jsval.Str("")
+	return func(float64) jsval.Value { return empty }
 }
 
 // InterpolateNumberArray is d3.interpolateNumberArray: the first

@@ -97,19 +97,36 @@ func TestLocaleArrayLikeLengthIsNoWork(t *testing.T) {
 	}
 }
 
-// A group size below one digit that grouping reaches would make d3 write a
-// separator per fraction of a digit, or loop forever (1e-300): it is a limit.
-// One past a size that ends the loop is never used and is accepted.
-func TestGroupSizeBelowOneIsALimit(t *testing.T) {
-	for _, g := range [][]float64{{0.5}, {3, 1e-300}, {2, 3, 0.999}} {
-		_, err := NewNumberLocale(NumberLocaleDef{Thousands: ptr(","), Grouping: g})
-		if !errors.Is(err, budget.ErrLimit) {
+// A group size below one digit takes more steps than digits: d3 renders
+// what that writes (testdata/duck.json.gz holds 0.5, 0.25, 0.7), and one too
+// small to move the index (1e-300) never ends, so past MaxGroupSteps the
+// call stops with budget.ErrLimit. Sizes of 0, a negative or NaN end
+// grouping at once, as in d3.
+func TestGroupStepsBounded(t *testing.T) {
+	format := func(g []float64) (out string, err error) {
+		defer func() {
+			if s, ok := recover().(*budget.Stop); ok {
+				err = s.Err
+			}
+		}()
+		l, err := NewNumberLocale(NumberLocaleDef{Thousands: ptr(","), Grouping: g})
+		if err != nil {
+			return "", err
+		}
+		f, err := l.Format(",")
+		if err != nil {
+			return "", err
+		}
+		return f.Format(1234567), nil
+	}
+	for _, g := range [][]float64{{1e-300}, {1e-6}} {
+		if _, err := format(g); !errors.Is(err, budget.ErrLimit) {
 			t.Errorf("grouping %v: %v; want a limit error", g, err)
 		}
 	}
-	for _, g := range [][]float64{{3, 0, 0.5}, {3, math.NaN(), 0.5}, {1}, {math.Inf(1), 0.5}} {
-		if _, err := NewNumberLocale(NumberLocaleDef{Thousands: ptr(","), Grouping: g}); err != nil {
-			t.Errorf("grouping %v: %v", g, err)
+	for g, want := range map[float64]string{0: "", -1: "", math.NaN(): "", 0.5: ",1,,2,,3,,4,,5,,6,,7"} { // node 24.21.0 (and [3, 1e-300] ends: its sizes alternate)
+		if got, err := format([]float64{g}); err != nil || got != want {
+			t.Errorf("grouping [%v] = %q, %v; d3 %q", g, got, err, want)
 		}
 	}
 }

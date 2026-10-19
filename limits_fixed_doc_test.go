@@ -122,7 +122,7 @@ func TestFixedLimitsDocMatchesCode(t *testing.T) {
 		"ticks, labels and legend entries of one guide": {{c("scale", "MaxTicks")}},
 		"values a scale's `ticks` lists":                {{c("scale", "maxTickValues")}, {c("scale", "maxLogIter")}, {c("format", "MaxRangeLen")}},
 		"colours sampled from a scheme (`schemeCount`)": {{c("scale", "MaxSchemeSamples")}},
-		"`config.locale.number`":                        {{c("format", "MaxLocaleSymbol")}, {c("format", "MaxLocaleText")}},
+		"`config.locale.number`":                        {{c("format", "MaxLocaleSymbol")}, {c("format", "MaxLocaleText")}, {c("format", "MaxGroupSteps")}},
 		"`config.locale.time`": {
 			{c("format", "MaxLocalePattern")}, {c("format", "MaxLocaleExpansion")}, {c("format", "MaxLocaleName")}, {c("format", "MaxLocaleNames")},
 			{c("format", "maxParseNesting")},

@@ -93,7 +93,7 @@ Fixed bounds, the same whatever `WithMemoryLimit` says:
 | ticks, labels and legend entries of one guide | 100,000, refused before they are listed (a `tickCount` with `tickMinStep` included) |
 | values a scale's `ticks` lists | 1,048,576 (log ticks: 4,194,304 steps); calendar ticks and `timeSequence` 4,194,304 dates |
 | colours sampled from a scheme (`schemeCount`) | 1,048,576 |
-| `config.locale.number` | decimal, thousands separator, minus sign and each numeral 16 bytes; each currency part, percent sign and NaN text 64 bytes; a group size below one digit that grouping reaches is refused (d3 would write a separator per fraction of a digit, or never stop) |
+| `config.locale.number` | decimal, thousands separator, minus sign and each numeral 16 bytes; each currency part, percent sign and NaN text 64 bytes; grouping one number takes at most 131,072 steps, past which the call fails (a group size of a fraction of a digit, which d3 takes, writes a separator a step; one too small to move d3's index never ends) |
 | `config.locale.time` | `dateTime`, `date`, `time` 256 bytes, expanding into each other to 4 KiB at most; each name 128 bytes, 64 names per list; a parse recursing through a pattern that refers to itself ends after 1,024 levels with a `RangeError`, as d3 does when V8's stack overflows (a few thousand levels on), see `maxParseNesting` |
 | time labels | a time format writes a label as long as its specifier and the locale ask, up to the room the call's ledger has left (`ErrLimit` past it, before the rest is made) |
 | `graticule` | 4,194,304 lines and points |

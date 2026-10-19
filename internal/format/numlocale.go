@@ -118,27 +118,13 @@ func DefaultNumberLocale() *NumberLocale { return defaultNumberLocale }
 
 // NewNumberLocale is d3.formatLocale. It fails, with an error wrapping
 // budget.ErrLimit, for a member longer than MaxLocaleSymbol or
-// MaxLocaleText, and for a group size below one digit that grouping reaches
-// (d3's grouping loop steps back by the size: one of 0.5 writes a separator
-// per half digit, one of 1e-300 never ends).
+// MaxLocaleText.
 func NewNumberLocale(def NumberLocaleDef) (*NumberLocale, error) {
 	if err := def.check(); err != nil {
 		return nil, err
 	}
 	l := &NumberLocale{decimal: ".", percent: "%", minus: "−", nan: "NaN"}
 	if def.Grouping != nil && def.Thousands != nil {
-		// The sizes grouping reaches: the loop ends at a size that is not
-		// positive, and once the sizes so far cover the longest digits.
-		total := 0.0
-		for _, g := range def.Grouping {
-			if !(g > 0) || total >= maxGroupSizes {
-				break
-			}
-			if g < 1 {
-				return nil, fmt.Errorf("%w: number locale group size %v is below one digit", budget.ErrLimit, g)
-			}
-			total += g
-		}
 		l.grouper = &grouper{sizes: slices.Clone(def.Grouping), thousands: *def.Thousands}
 		ints := make([]int, len(def.Grouping))
 		for i, g := range def.Grouping {
@@ -177,12 +163,19 @@ func NewNumberLocale(def NumberLocaleDef) (*NumberLocale, error) {
 	return l, nil
 }
 
-// maxGroupSizes is how many group sizes grouping can use: each step of
-// d3's loop takes at least one digit, and the digits grouped are at most a
-// field's width (MaxWidth) of zero padding and a number's digits (1,024 of
-// a binary 2^1024). Sizes past it are never reached, so they are not read:
-// an array-like's length is not a bound on the work ({length: 1e9} is one).
-const maxGroupSizes = MaxWidth + 2048
+// MaxGroupSteps bounds the steps of grouping one number, each of which
+// writes a piece and a separator. Whole group sizes take at most one step a
+// digit (a field's width, MaxWidth, and a number's digits); d3 also takes a
+// size that is a fraction of a digit, stepping back by it, so 0.5 writes a
+// separator every half digit, and one too small to move the index (1e-300)
+// never ends. Grouping renders what d3 renders up to this many steps and
+// stops the call with budget.ErrLimit past it.
+const MaxGroupSteps = 1 << 17
+
+// maxGroupSizes is how many group sizes are read: grouping cannot use more
+// than its steps, so sizes past them are never reached (and an array-like's
+// length is no measure of the work: {length: 1e9} is one).
+const maxGroupSizes = MaxGroupSteps
 
 // maxArrayLikeLength is the longest array Array.prototype.map can make:
 // past it ArraySpeciesCreate throws a RangeError (Invalid array length).
@@ -583,8 +576,9 @@ func (l *NumberLocale) applyNumerals(dst []byte, start int) []byte {
 // The arithmetic is d3's, in numbers: `t.push(value.substring(i -= g, i +
 // g))` with a fractional size moves the cut by a fraction that substring
 // truncates, a huge one loses the digits to rounding, an infinite one cuts
-// nothing, and NaN or a size of 0 ends the loop. NewNumberLocale refuses the
-// sizes below 1 the loop reaches, so each step takes at least one unit.
+// nothing, and NaN or a size of 0 ends the loop. A size below 1 takes more
+// steps than digits, up to MaxGroupSteps, past which the call stops with
+// budget.ErrLimit (a *budget.Stop panic, as a walk's bound stops a call).
 func (l *NumberLocale) group(value string, width float64) string {
 	if l.grouper == nil {
 		return value
@@ -628,6 +622,9 @@ func (l *NumberLocale) group(value string, width float64) string {
 		g = sizes[0]
 	}
 	for i > 0 && g > 0 {
+		if len(pieces) == MaxGroupSteps {
+			panic(&budget.Stop{Err: errGroupSteps})
+		}
 		if length+g+1 > width {
 			g = math.Max(1, width-length)
 		}
@@ -642,6 +639,8 @@ func (l *NumberLocale) group(value string, width float64) string {
 	}
 	return l.joinPieces(value, units, pieces)
 }
+
+var errGroupSteps = fmt.Errorf("%w: grouping a number took more than %d steps (a group size of a fraction of a digit)", budget.ErrLimit, MaxGroupSteps)
 
 // joinPieces is t.reverse().join(thousands) of the pieces of value (of its
 // UTF-16 units when it is not ASCII).

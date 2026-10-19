@@ -130,7 +130,7 @@ func TestHelpersGolden(t *testing.T) {
 		case "rgbBasisClosed":
 			check(c.F, c.Args, c.Ts, c.R, RGBBasisClosed(jsval.Walker{}, toVals(c.Args)))
 		case "discrete":
-			check(c.F, c.Args, c.Ts, c.R, Discrete(toVals(c.Args)))
+			check(c.F, c.Args, c.Ts, c.R, InterpolateDiscrete(jsval.Walker{}, jsval.Arr(toVals(c.Args)), jsval.Undefined))
 		case "piecewise":
 			check(c.F, c.Args, c.Ts, c.R, Piecewise(jsval.Walker{}, nil, toVals(c.Args)))
 		case "quantize":

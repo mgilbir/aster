@@ -564,9 +564,6 @@ func configureRange(w jsval.Walker, s scale.Scale, p *opParams, count int) {
 		name := w.String(interpName)
 		fn, ok := scale.Interpolate(name, gamma, hasGamma)
 		if !ok {
-			if why, ok := scale.UnsupportedInterpolator(name); ok {
-				fail("unsupported interpolator %s: %s", name, why)
-			}
 			fail("unrecognized interpolator: %s", name)
 		}
 		ip.SetInterpolate(fn)

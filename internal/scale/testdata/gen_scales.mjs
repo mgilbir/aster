@@ -51,6 +51,16 @@ for (const r of [[[0, 0, 1], [10, 20, 2]], [[0, 0, 1], [0, 0, 4]], [['5', 1, 1],
   [[1, 'x', 3], [2, 4, 6]], ['12', [5, 6, 7]], [null, [1, 2]], [[1, 2, 3], null], [[1, 2], '34'], [5, [1, 2]], [[1, 2], 7]])
   for (const it of [['number-array'], ['Number-Array'], ['zoom']])
     C(`interp ${JSON.stringify(it)} r=${JSON.stringify(r)}`, 'linear', [['domain', [0, 1]], ['range', r], ['interpolate', it]], A([-1, 0, 0.25, 0.5, 1, 2, NaNv]));
+// every name vega-scale resolves through d3['interpolate' + CamelCase(name)],
+// over ranges of each kind of value (the PR 13 review of the 2026-10-18 audit)
+for (const it of ['number', 'round', 'string', 'array', 'object', 'date', 'hue', 'number-array', 'zoom', 'basis', 'basis-closed',
+  'discrete', 'rgb-basis', 'rgb-basis-closed', 'transform-css', 'transform-svg', 'rgb', 'hsl', 'hsl-long', 'lab', 'hcl', 'hcl-long',
+  'cubehelix', 'cubehelix-long', 'Basis-Closed'])
+  for (const [d, r] of [[[0, 1], [0, 100]], [[0, 1], ['red', 'blue']], [[0, 1], [[0, 10, 30, 20], [5, 5]]], [[0, 0.5, 1], ['#f00', '#0f0', '#00f']],
+    [[0, 1], [null, null]], [[0, 1], [null, 'translate(1,2)']], [[0, 1], ['translate(1,2)', 'translate(3,4)']], [[0, 1], ['abc', 'def']],
+    [[0, 1], [[], [1]]], [[0, 1], [['red', 'green', 'blue'], 'x']], [[0, 1], [O({ length: 3, 0: 1, 1: 5, 2: 2 }), 0]], [[0, 1], [U, 3]]])
+    C(`interpall ${it} d=${JSON.stringify(d)} r=${JSON.stringify(r)}`, 'linear', [['domain', d], ['range', r], ['interpolate', [it]]],
+      A([-0.5, 0, 0.1, 0.25, 0.5, 0.75, 0.9, 1, 1.5, NaNv]));
 C('linear string interp 3', 'linear', [['domain', [0, 1, 2]], ['range', ['0px 0px', '10px 5px', '20px 50px']]], A([-1, 0, 0.5, 1, 1.5, 2, 3]));
 
 // ---- log -------------------------------------------------------------------

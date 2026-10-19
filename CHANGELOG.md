@@ -11,7 +11,7 @@ What changed between versions, for users of the library and the CLI. Breaking ch
 - `vlSelectionResolve` keys its ids as d3's InternSet does, by identity, and never makes their text (C102).
 - A time label is built within the room the call's ledger has left and refused there with `ErrLimit` (C124): a guide label of a long specifier with long month names (64 times the specifier) was made whole, 457 MB of allocation under a 4 MiB ledger, before it was charged. A specifier past 1 KiB is read from its text rather than compiled.
 - A geoshape's path data is charged to the call's ledger as it is built: a path of many points of a long radius was 40 MB of text that only the point budget bounded.
-- A `config.locale.number` group size below one digit that grouping reaches fails with `ErrLimit`: d3 writes a separator per fraction of a digit, or never stops.
+- Grouping a number takes at most 131,072 steps: a `config.locale.number` group size of a fraction of a digit renders what d3 renders (0.5 writes a separator every half digit), and one too small to move d3's index, which never ends upstream, fails with `ErrLimit`.
 
 ### Fidelity
 
@@ -26,7 +26,7 @@ What changed between versions, for users of the library and the CLI. Breaking ch
 - `String(date)` in a zone other than UTC names the zone as V8 does, "Eastern Standard Time" rather than "EST" (C121).
 - Date strings: U+2028, U+2029 and U+0085 are not white space to `Date.parse`, and a NUL ends the text, as in V8 (C123).
 - Projections: circle clipping (`clipAngle`), rectangle clipping (`clipExtent`) and the area and centroid sums treat a NaN as JavaScript's truthiness does, so a coordinate that is not a number draws as d3 draws it (C122); a projection's copy keeps a parameter of 0 (C163); TopoJSON's empty lines and non-object collection members decode as topojson-client decodes them (C165).
-- Scales: `interpolate` accepts `"number-array"` and `"zoom"` (C138); `"transform-css"`, `"transform-svg"` and the list interpolators (`"basis"`, `"discrete"`, …) fail with a message saying why. An `invertRange` over string range values orders them by UTF-16 code unit, as JavaScript does (C169).
+- Scales: `interpolate` accepts every name vega-scale resolves through d3-interpolate (C138), with upstream's results: `"number-array"`, `"zoom"`, and the list interpolators `"basis"`, `"basis-closed"`, `"discrete"`, `"rgb-basis"` and `"rgb-basis-closed"`, which interpolate along a range end's elements as d3-scale's `interpolate(r0, r1)` does (NaN where the end is a number); `"transform-css"` and `"transform-svg"` throw as they do in node, which has neither DOMMatrix nor `document` (`"transform-svg"` between two null ends is ""). `"array"` and `"object"` read ends that are strings, numbers or array-like objects as d3 does. An `invertRange` over string range values orders them by UTF-16 code unit, as JavaScript does (C169).
 - CSS colour names, functions, property names, units and font family names in SVG input are matched ASCII case-insensitively, as CSS specifies: `"WHİTE"` is no colour.
 
 - **breaking (fewer successes):** more Vega-Lite input that upstream's compiler rejects fails as upstream's does, with its message ([ADR 0013](docs/adr/0013-invalid-input-fails-where-upstream-throws.md)), found by the nightly type-confusion differential (seeds 20741 and 20742):

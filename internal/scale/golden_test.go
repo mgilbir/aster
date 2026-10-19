@@ -333,7 +333,7 @@ func runGolden(t *testing.T, file string, local format.Zone) {
 			nq++
 			if !valuesMatch(got, decVal(want), &st) {
 				fail++
-				if fail <= 40 {
+				if fail <= 4000 {
 					t.Errorf("%s: %v = %v, want %v", c.Name, q[:2], got, decVal(want))
 				}
 			}
