@@ -191,8 +191,8 @@ func (l *faceList) size() int64 {
 // faces builds (or recalls) the candidate list for a parsed CSS font.
 //
 // Order, mirroring the reference resolver: one best-matching face per
-// requested family (with "serif", "monospace", "cursive" and "fantasy"
-// first redirected to their configured concrete families), the configured
+// requested family (a generic family such as "sans-serif" or "serif" first
+// redirected, where it stands, to its configured concrete family), the configured
 // default family, then metric-compatible aliases of everything requested,
 // then the fallback chain. By default that is every registered face that
 // fits the weight and style, and then every registered face at all; of
@@ -207,14 +207,11 @@ func (m *Measurer) faces(css CSSFont) *faceList {
 	}
 	families := make([]string, 0, len(css.Family)+4)
 	for _, fam := range css.Family {
-		switch strings.ToLower(fam) {
-		case "serif":
-			families = append(families, m.serifFamily)
-		case "monospace":
-			families = append(families, m.monospaceFamily)
-		case "cursive", "fantasy":
-			// No bundled face; both map to the sans-serif default.
-			families = append(families, m.fallbackFamily)
+		// A generic family always matches, where it stands in the list
+		// (CSS Fonts 4, 5.1): the families after it draw only what its
+		// font lacks (C112).
+		if g := m.generic(fam); g != "" {
+			families = append(families, g)
 		}
 		families = append(families, fam)
 	}
@@ -263,6 +260,22 @@ func (m *Measurer) faces(css CSSFont) *faceList {
 
 	m.listCache.Put(key, l, l.size())
 	return l
+}
+
+// generic is the configured family a CSS generic family names, or "" for a
+// family that is not one. system-ui and the ui- families are the platform's
+// interface fonts, which here are the configured ones; cursive and fantasy
+// have no bundled face and draw in the sans-serif default.
+func (m *Measurer) generic(fam string) string {
+	switch strings.ToLower(fam) {
+	case "serif", "ui-serif":
+		return m.serifFamily
+	case "monospace", "ui-monospace":
+		return m.monospaceFamily
+	case "sans-serif", "system-ui", "ui-sans-serif", "cursive", "fantasy":
+		return m.fallbackFamily
+	}
+	return ""
 }
 
 // familyEntries returns the faces of a normalised family: those given with

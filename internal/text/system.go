@@ -8,9 +8,12 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"unicode/utf16"
+
+	"golang.org/x/text/encoding/charmap"
 )
 
 // System fonts (WithSystemFonts).
@@ -40,6 +43,7 @@ const (
 
 type sysFont struct {
 	family string
+	names  []string // every family name the face states (family among them)
 	weight int
 	italic bool
 	path   string
@@ -64,7 +68,14 @@ func loadSystemIndex() *systemIndex {
 			scanFontDir(dir, 0, &files, idx)
 		}
 		for _, list := range idx.byFam {
-			sort.Slice(list, func(i, j int) bool { return list[i].path < list[j].path })
+			// By file, then face: the order a family's equally good faces
+			// are chosen in does not depend on the scan's.
+			sort.Slice(list, func(i, j int) bool {
+				if list[i].path != list[j].path {
+					return list[i].path < list[j].path
+				}
+				return list[i].index < list[j].index
+			})
 		}
 		systemIndexV = idx
 	})
@@ -120,8 +131,15 @@ func scanFontDir(dir string, depth int, files *int, idx *systemIndex) {
 			continue
 		}
 		*files++
-		for _, sf := range readSysFonts(path) {
-			n := normFamily(sf.family)
+		idx.add(readSysFonts(path))
+	}
+}
+
+// add indexes faces under each of their family names.
+func (idx *systemIndex) add(faces []sysFont) {
+	for _, sf := range faces {
+		for _, name := range sf.names {
+			n := normFamily(name)
 			idx.byFam[n] = append(idx.byFam[n], sf)
 		}
 	}
@@ -200,15 +218,11 @@ func readSysFace(f *os.File, path string, index int, base int64) (sf sysFont, ok
 		return nil
 	}
 
-	name := table("name", maxNameTable)
-	family := nameString(name, 16)
-	if family == "" {
-		family = nameString(name, 1)
-	}
+	names, family := familyNames(table("name", maxNameTable))
 	if family == "" {
 		return sf, false
 	}
-	sf = sysFont{family: family, weight: weightNormal, path: path, index: index}
+	sf = sysFont{family: family, names: names, weight: weightNormal, path: path, index: index}
 	if os2 := table("OS/2", 64); len(os2) >= 64 {
 		if w := int(binary.BigEndian.Uint16(os2[4:6])); w >= 1 && w <= 1000 {
 			sf.weight = w
@@ -225,42 +239,95 @@ func readSysFace(f *os.File, path string, index int, base int64) (sf sysFont, ok
 	return sf, true
 }
 
-// nameString reads a name record, preferring Windows (UTF-16BE) and falling
-// back to Macintosh Roman treated as ASCII.
-func nameString(t []byte, id uint16) string {
+// maxFamilyNames bounds the family names one face is indexed under: a font
+// states a few, one per language it is localised in.
+const maxFamilyNames = 32
+
+// familyNames reads the family names a face states in its name table: its
+// family (name ID 1, which for a face beyond the four of a style-linked
+// family names the face itself, "Calibri Light"), its typographic family
+// (16, "Calibri") and its WWS family (21), in every language, as fontconfig
+// and browsers match a family by any of them (C45). display is the one the
+// face is known by: the English (United States) typographic family, else
+// its family, else any.
+//
+// A Windows record is UTF-16 when its encoding is Unicode (1, 10) or symbol
+// (0), a Unicode platform record always; a Macintosh one is read when it is
+// Mac Roman. Others (Windows code pages, Mac Japanese, ...) are skipped
+// rather than misread.
+func familyNames(t []byte) (names []string, display string) {
 	if len(t) < 6 {
-		return ""
+		return nil, ""
 	}
 	count := int(binary.BigEndian.Uint16(t[2:4]))
 	strOff := int(binary.BigEndian.Uint16(t[4:6]))
-	best := ""
+	best := -1
+	seen := map[string]bool{}
 	for i := 0; i < count; i++ {
 		r := 6 + 12*i
 		if r+12 > len(t) {
 			break
 		}
 		plat := binary.BigEndian.Uint16(t[r:])
+		enc := binary.BigEndian.Uint16(t[r+2:])
+		lang := binary.BigEndian.Uint16(t[r+4:])
 		nid := binary.BigEndian.Uint16(t[r+6:])
 		l := int(binary.BigEndian.Uint16(t[r+8:]))
 		o := strOff + int(binary.BigEndian.Uint16(t[r+10:]))
-		if nid != id || o+l > len(t) {
+		if (nid != 1 && nid != 16 && nid != 21) || o+l > len(t) {
 			continue
 		}
 		raw := t[o : o+l]
-		switch plat {
-		case 3, 0:
+		var name string
+		switch {
+		case plat == 0, plat == 3 && (enc == 0 || enc == 1 || enc == 10):
 			u := make([]uint16, len(raw)/2)
 			for j := range u {
 				u[j] = binary.BigEndian.Uint16(raw[2*j:])
 			}
-			return string(utf16.Decode(u))
+			name = string(utf16.Decode(u))
+		case plat == 1 && enc == 0:
+			name = macRoman(raw)
+		default:
+			continue
+		}
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if n := normFamily(name); !seen[n] && len(names) < maxFamilyNames {
+			seen[n] = true
+			names = append(names, name)
+		}
+		// The display family: typographic before legacy (21 last), Windows
+		// or Unicode before Macintosh, en-US first among them.
+		score := 0
+		switch nid {
+		case 16:
+			score = 4
 		case 1:
-			if best == "" {
-				best = string(raw)
-			}
+			score = 2
+		}
+		if plat != 1 {
+			score += 8
+		}
+		if plat == 3 && lang == 0x409 {
+			score += 16
+		}
+		if score > best {
+			best, display = score, name
 		}
 	}
-	return best
+	return names, display
+}
+
+// macRoman decodes Mac OS Roman text.
+func macRoman(b []byte) string {
+	s, err := charmap.Macintosh.NewDecoder().Bytes(b)
+	if err != nil {
+		return ""
+	}
+	return string(s)
 }
 
 // systemEntries adapts indexed system fonts to this Measurer's entries,
@@ -297,5 +364,10 @@ func loadSystemFace(m *Measurer, e *entry) (*Face, error) {
 	}
 	m.nextID++
 	id := fmt.Sprintf("system-%d-%s-%d", m.nextID, filepath.Base(e.path), e.index)
-	return newFaceAt(id, e.family, e.weight, e.italic, data, e.index, true)
+	f, err := newFaceAt(id, e.family, e.weight, e.italic, data, e.index, true)
+	if err != nil {
+		return nil, err
+	}
+	f.source = "system\x00" + e.path + "\x00" + strconv.Itoa(e.index)
+	return f, nil
 }

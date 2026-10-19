@@ -4,6 +4,8 @@ import (
 	"math"
 	"strconv"
 	"strings"
+
+	"github.com/mgilbir/aster/internal/text"
 )
 
 type paintKind uint8
@@ -237,68 +239,6 @@ func parseURLRef(s string) (string, bool) {
 	return ref[1:], true
 }
 
-func parseFontFamilies(s string) []string {
-	var out []string
-	for len(s) > 0 {
-		s = strings.TrimLeft(s, " \t\n,")
-		if s == "" {
-			break
-		}
-		var name string
-		if s[0] == '"' || s[0] == '\'' {
-			q := s[0]
-			end := strings.IndexByte(s[1:], q)
-			if end < 0 {
-				name = s[1:]
-				s = ""
-			} else {
-				name = s[1 : 1+end]
-				s = s[end+2:]
-			}
-		} else {
-			end := strings.IndexByte(s, ',')
-			if end < 0 {
-				name, s = s, ""
-			} else {
-				name, s = s[:end], s[end+1:]
-			}
-			name = strings.TrimSpace(name)
-		}
-		if name != "" {
-			out = append(out, name)
-		}
-	}
-	return out
-}
-
-func parseFontWeight(s string, cur int) int {
-	switch strings.TrimSpace(s) {
-	case "normal":
-		return 400
-	case "bold":
-		return 700
-	case "bolder":
-		if cur < 400 {
-			return 400
-		} else if cur < 600 {
-			return 700
-		}
-		return 900
-	case "lighter":
-		if cur > 700 {
-			return 700
-		} else if cur > 500 {
-			return 400
-		}
-		return 100
-	}
-	v, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
-	if err != nil || v < 1 || v > 1000 {
-		return cur
-	}
-	return int(v)
-}
-
 func parseDashArray(st *state, s string) []float64 {
 	s = strings.TrimSpace(s)
 	if s == "" || s == "none" {
@@ -424,7 +364,10 @@ func (st *state) applyProp(id attrID, val string) {
 			st.visible = false
 		}
 	case aFontFamily:
-		if f := parseFontFamilies(val); len(f) > 0 {
+		// font-family, font-weight and font-style are read by the text
+		// package, as the PDF writer reads them, so the two draw the face
+		// layout measured (C31).
+		if f, ok := text.ParseFontFamily(val); ok {
 			st.families = f
 		}
 	case aFontSize:
@@ -452,13 +395,12 @@ func (st *state) applyProp(id attrID, val string) {
 			}
 		}
 	case aFontWeight:
-		st.fontWeight = parseFontWeight(val, st.fontWeight)
+		if w, ok := text.ParseFontWeight(val, st.fontWeight); ok {
+			st.fontWeight = w
+		}
 	case aFontStyle:
-		switch strings.TrimSpace(val) {
-		case "italic", "oblique":
-			st.italic = true
-		case "normal":
-			st.italic = false
+		if italic, ok := text.ParseFontStyle(val); ok {
+			st.italic = italic
 		}
 	case aTextAnchor:
 		switch strings.TrimSpace(val) {

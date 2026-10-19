@@ -1,6 +1,7 @@
 package text
 
 import (
+	"encoding/binary"
 	"fmt"
 	"math"
 	"runtime/debug"
@@ -36,6 +37,11 @@ type Face struct {
 	src    []byte // the font file the face was loaded from
 	index  int    // which face of src, a collection, it is; 0 for a single font
 	mapped bool   // src is a system font file mapped into memory (see guard)
+	// source names what the face is loaded from, the same each time it is
+	// loaded: a system face's file and index (it is dropped and loaded
+	// again, a new Face, past maxSystemFaces), any other face's ID. What is
+	// cached of a face across its loads is keyed by it (C113).
+	source string
 	// palette is the CPAL palette its colour glyphs are painted with
 	// (WithFontPalette).
 	palette int
@@ -50,6 +56,9 @@ type Face struct {
 	clones sync.Pool // of *shape.Face, clones of shape
 
 	outlines outlineCache
+
+	annexMu sync.Mutex
+	annex   map[any]any // see Annex
 }
 
 // Program returns the font program (an sfnt, with any WOFF wrapper removed)
@@ -203,13 +212,66 @@ func newFaceInstance(id, family string, data []byte, index int, axes map[string]
 	}
 	// The instance's weight and style are where it is on the axes that say
 	// them, as CSS font-weight and font-style choose among a family's faces.
-	if w, ok := axes["wght"]; ok && w >= 1 && w <= 1000 {
-		f.Weight = int(math.Round(w))
-	}
-	if i, ok := axes["ital"]; ok {
-		f.Italic = i >= 0.5
-	}
+	f.Weight, f.Italic = instanceStyle(axes, fontAxes(data, index), f.Weight, f.Italic)
 	return f, nil
+}
+
+// instanceStyle is the CSS weight and style of a variable font's instance
+// at req on axes, the instance's own (its OS/2's) being weight and italic:
+// where it is drawn, on the axes that say them. A value outside an axis's
+// range is drawn at the range's end, and answers to that (C160): an
+// instance asked for at wght 50 of a 100..900 font is drawn at 100 and is
+// weight 100. A slant (slnt) other than zero is an oblique style, which is
+// italic here; ital is italic from half way.
+func instanceStyle(req map[string]float64, axes []shape.Axis, weight int, italic bool) (int, bool) {
+	at := func(tag string) (float64, bool) {
+		v, ok := req[tag]
+		if !ok {
+			return 0, false
+		}
+		for _, a := range axes {
+			if a.Tag == tag {
+				v = min(max(v, a.Min), a.Max)
+			}
+		}
+		return v, true
+	}
+	if w, ok := at("wght"); ok && w >= 1 && w <= 1000 {
+		weight = int(math.Round(w))
+	}
+	slnt, hasSlnt := at("slnt")
+	ital, hasItal := at("ital")
+	if hasSlnt || hasItal {
+		italic = hasSlnt && slnt != 0 || hasItal && ital >= 0.5
+	}
+	return weight, italic
+}
+
+// fontAxes are the variation axes of face index of font file data, read
+// from its fvar table; nil when it has none, or when data is not a plain
+// sfnt (a WOFF), whose instance then answers to the values as asked.
+func fontAxes(data []byte, index int) (axes []shape.Axis) {
+	defer func() {
+		if recover() != nil {
+			axes = nil
+		}
+	}()
+	t := sfntTable(data, index, "fvar")
+	if len(t) < 16 {
+		return nil
+	}
+	off := int(binary.BigEndian.Uint16(t[4:]))
+	n := int(binary.BigEndian.Uint16(t[8:]))
+	size := int(binary.BigEndian.Uint16(t[10:]))
+	fixed := func(b []byte) float64 { return float64(int32(binary.BigEndian.Uint32(b))) / 65536 }
+	for i := range n {
+		r := off + i*size
+		if size < 20 || r+20 > len(t) {
+			break
+		}
+		axes = append(axes, shape.Axis{Tag: string(t[r : r+4]), Min: fixed(t[r+4:]), Default: fixed(t[r+8:]), Max: fixed(t[r+12:])})
+	}
+	return axes
 }
 
 // embeddedParses are the embedded fonts as forme parsed them, once per
@@ -343,3 +405,88 @@ func styleOfFace(sf *shape.Face) (weight int, italic bool) {
 var familyReplacer = strings.NewReplacer(" ", "", "\t", "")
 
 func normFamily(s string) string { return familyReplacer.Replace(strings.ToLower(s)) }
+
+// sourceKey is f.source, or its ID for a face that is never loaded again.
+func (f *Face) sourceKey() string {
+	if f.source != "" {
+		return f.source
+	}
+	return f.ID
+}
+
+// Annex returns the value kept with f under key, made by mk on the first
+// call. What a drawer of the face derives from it once (the rasterizer's
+// metrics and outlines of it, say) is kept here rather than in a cache of
+// its own keyed by the face: it lives exactly as long as the face, so a face
+// the Measurer drops (a system face past maxSystemFaces) takes it along,
+// where a cache would keep both (C27).
+func (f *Face) Annex(key any, mk func() any) any {
+	f.annexMu.Lock()
+	defer f.annexMu.Unlock()
+	if v, ok := f.annex[key]; ok {
+		return v
+	}
+	v := mk()
+	if f.annex == nil {
+		f.annex = map[any]any{}
+	}
+	f.annex[key] = v
+	return v
+}
+
+// GlyphCode is the number a PDF's CIDFont addresses glyph gid of f by: its
+// CID for a CID-keyed CFF font, whose charset maps the CID to the glyph,
+// and gid itself for every other font.
+func (f *Face) GlyphCode(gid int) (code int) {
+	defer func() {
+		if recover() != nil {
+			code = gid
+		}
+	}()
+	defer f.guard()()
+	return f.shape.GlyphCode(gid)
+}
+
+// CharacterCollection is the registry, ordering and supplement of a
+// CID-keyed CFF font, which its CIDFont states; ok is false for any other.
+func (f *Face) CharacterCollection() (registry, ordering string, supplement int, ok bool) {
+	defer func() {
+		if recover() != nil {
+			ok = false
+		}
+	}()
+	defer f.guard()()
+	return f.shape.CharacterCollection()
+}
+
+// SubsetProgram is a font program of f with the outlines of gids, .notdef
+// and what they need (composite components, seac accents) and no others:
+// forme's subsetter, which subsets CFF outlines too. kept are the glyphs it
+// keeps (see shape.Face.SubsetGlyphs: a CID-keyed CFF's are renumbered, and
+// addressed by GlyphCode, which the subset keeps). It never panics: a font
+// that trips the subsetter is an error.
+func (f *Face) SubsetProgram(gids []int) (program []byte, kept []int, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			program, kept, err = nil, nil, fmt.Errorf("text: subsetting font %q: %v", f.Family, r)
+		}
+	}()
+	defer f.guard()()
+	// A clone of the face as loaded, which nothing has shaped through, so
+	// that it has used no glyph but these.
+	c := f.shape.Clone()
+	c.Use(gids...)
+	return c.SubsetGlyphs()
+}
+
+// IsCIDKeyed reports whether f's outlines are a CID-keyed CFF font, whose
+// glyphs a PDF addresses by CID (GlyphCode).
+func (f *Face) IsCIDKeyed() (ok bool) {
+	defer func() {
+		if recover() != nil {
+			ok = false
+		}
+	}()
+	defer f.guard()()
+	return f.shape.IsCIDKeyed()
+}

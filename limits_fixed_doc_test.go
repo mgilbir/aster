@@ -100,9 +100,8 @@ func TestFixedLimitsDocMatchesCode(t *testing.T) {
 			{c("raster", "maxGradCacheBytes")}, {c("raster", "maxGradCacheEntries")}, {c("raster", "maxOutlineCacheBytes")},
 			{c("raster", "maxOutlineEntries")}, {c("raster", "maxSVGGlyphBytes")}, {c("raster", "maxSVGGlyphDocs")},
 		},
-		"SVG input to `SVGToPDF`": {
-			{c("svgpdf", "defaultMaxInputBytes")}, {c("svgpdf", "defaultMaxElements")}, {c("svgpdf", "defaultMaxSegments")},
-			{c("svgpdf", "defaultMaxTextBytes")}, {c("svgpdf", "maxGlyphCacheBytes")}, {c("svgpdf", "maxPaintedBytes")}, {c("svgpdf", "maxDashes")},
+		"PDF output": {
+			{c("svgpdf", "maxGlyphCacheBytes")}, {c("svgpdf", "maxPaintedBytes")}, {c("svgpdf", "maxDashes")},
 		},
 		"fonts":        {{c("text", "maxFontBytes")}, {c("text", "maxSystemFontBytes")}, {c("text", "maxSystemFaces")}, {c("text", "programCacheBytes")}, {c("text", "programCacheMaxEntry")}},
 		"text shaping": nil, // "about sixty times": DefaultShapingWork's comment derives it

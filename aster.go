@@ -800,7 +800,7 @@ func (c *Converter) toPDF(opts []PDFOption, usage bool, svg func(ctx context.Con
 		if err != nil {
 			return pdfOut{}, err
 		}
-		pdf, uses, err := c.svgToPDF(ctx, s, opts, usage)
+		pdf, uses, err := c.svgToPDF(ctx, s, opts, usage, true)
 		return pdfOut{pdf, uses}, err
 	})
 }
@@ -823,7 +823,7 @@ func (c *Converter) SVGToPDF(svg string, opts ...PDFOption) ([]byte, error) {
 // svgPDF is one call converting SVG input to PDF.
 func (c *Converter) svgPDF(svg string, opts []PDFOption, usage bool) (pdfOut, error) {
 	return call(c, svgInput(pdfRenderOptions(opts)), func(ctx context.Context) (pdfOut, error) {
-		pdf, uses, err := c.svgToPDF(ctx, svg, opts, usage)
+		pdf, uses, err := c.svgToPDF(ctx, svg, opts, usage, false)
 		return pdfOut{pdf, uses}, err
 	})
 }
@@ -837,8 +837,10 @@ func (c *Converter) SVGToPDFUsage(svg string, opts ...PDFOption) ([]byte, []Font
 }
 
 // svgToPDF converts svg, reporting its font usage when usage is set: usage
-// copies the font programs it reports.
-func (c *Converter) svgToPDF(ctx context.Context, svg string, opts []PDFOption, usage bool) (pdf []byte, uses []FontUsage, err error) {
+// copies the font programs it reports. chart is set for the SVG of a chart
+// the caller gave as a specification, which is bounded as the SVG writer
+// bounded it rather than as SVG input (C44).
+func (c *Converter) svgToPDF(ctx context.Context, svg string, opts []PDFOption, usage, chart bool) (pdf []byte, uses []FontUsage, err error) {
 	defer func() {
 		if err != nil {
 			pdf, uses = nil, nil
@@ -869,7 +871,9 @@ func (c *Converter) svgToPDF(ctx context.Context, svg string, opts []PDFOption, 
 	}
 	m = m.Bounded(text.ShapingBudgetFrom(ctx))
 	t0 := time.Now()
-	popts := svgpdf.Options{Text: mode, Context: ctx, Images: imagesFrom(ctx).load, ImageError: imagesFrom(ctx).imageError(ctx), Limits: svgpdf.Limits{MaxImagePixels: c.imagePixels(), MaxPixelOps: c.lim.pixelOps}}
+	lim := c.lim.pdfLimits(chart)
+	lim.MaxImagePixels, lim.MaxPixelOps = c.imagePixels(), c.lim.pixelOps
+	popts := svgpdf.Options{Text: mode, Context: ctx, Images: imagesFrom(ctx).load, ImageError: imagesFrom(ctx).imageError(ctx), Limits: lim}
 	if usage {
 		pdf, uses, err = svgpdf.ConvertWithUsage(svg, m, popts)
 	} else {

@@ -55,7 +55,7 @@ import (
 const (
 	maxTextBytes  = 1 << 20 // longer text is measured up to this many bytes
 	maxSizePx     = 1 << 16 // larger CSS sizes are clamped
-	maxFamilies   = 32      // font-family entries considered per query
+	maxFamilies   = MaxFamilies
 	maxCacheItems = 1 << 14 // runes memoised per face list (see faceList)
 )
 
@@ -304,7 +304,7 @@ type measurerState struct {
 	// mu (plan), the metrics' width cache without it.
 	cssCache  *bcache.Cache[string, CSSFont]
 	listCache *bcache.Cache[listKey, *faceList]
-	programs  *bcache.Cache[*Face, []byte]
+	programs  *bcache.Cache[string, []byte] // by Face.sourceKey
 	// exactOnce makes exactView, the view Exact returns.
 	exactOnce sync.Once
 	exactView *metrics
@@ -339,7 +339,7 @@ func New(opts ...Option) (*Measurer, error) {
 		byFam:           make(map[string][]*entry),
 		cssCache:        bcache.New[string, CSSFont](cssCacheBytes, cssCacheMaxEntry),
 		listCache:       bcache.New[listKey, *faceList](listCacheBytes, listCacheMaxEntry),
-		programs:        bcache.New[*Face, []byte](programCacheBytes, programCacheMaxEntry),
+		programs:        bcache.New[string, []byte](programCacheBytes, programCacheMaxEntry),
 		fallbackFamily:  orDefault(cfg.fallbackFamily, "Liberation Sans"),
 		serifFamily:     orDefault(cfg.serifFamily, "Liberation Serif"),
 		monospaceFamily: orDefault(cfg.monospaceFamily, "Liberation Mono"),
@@ -623,7 +623,11 @@ func (m *Measurer) FontData(ctx context.Context, f *Face) ([]byte, error) {
 	if !f.mapped && f.index == 0 && !(len(f.src) >= 4 && string(f.src[:4]) == "ttcf") && f.Size() <= maxFontBytes {
 		return f.Program(), nil
 	}
-	if p, ok := m.programs.Get(f); ok {
+	// Keyed by what the face is loaded from, not by the Face: a system face
+	// dropped and loaded again finds its program, and the cache holds no
+	// dropped face (C113).
+	key := f.sourceKey()
+	if p, ok := m.programs.Get(key); ok {
 		return p, nil
 	}
 	n := f.outlineSize()
@@ -639,7 +643,7 @@ func (m *Measurer) FontData(ctx context.Context, f *Face) ([]byte, error) {
 	}
 	p := f.OutlineProgram()
 	if p != nil {
-		m.programs.Put(f, p, int64(len(p)))
+		m.programs.Put(key, p, int64(len(p)+len(key)))
 	}
 	return p, nil
 }

@@ -13,6 +13,22 @@ What changed between versions, for users of the library and the CLI. Breaking ch
   - views whose shared scale merges a `range` of `null` with another range, whose `step` upstream reads.
 - Where upstream compiles such input, the output now matches it: under 5.8 a tick with `config.tick.bandSize: null` has no size channel; a binned position on a channel with `scale: null` names no scale; an empty expression in a tooltip built from the encoding is written empty, not as `undefined`; and a scale `type` that a `datum` encoding keeps without checking it (`{}`, `[]`, a number, a boolean) is written as given, not as its text (`"[object Object]"`, `"1"`).
 
+### PDF and fonts
+
+- **breaking (output):** PNG and PDF draw a label in the face layout measured it in. The PNG writer rounded a weight to a multiple of 100 (549 over faces at 300 and 900 drew the Light face where layout and PDF used the Black one) and read a quoted family with a comma as one family; both writers now read `font-family`, `font-weight` and `font-style` with one reader and shape through the same font resolution as layout ([ADR 0024](docs/adr/0024-one-reader-one-painter.md)). Charts whose weights are multiples of 100 draw as before.
+- **breaking (output):** a generic family in the middle of a family list (`sans-serif, 'Liberation Serif'`) matches where it stands, as CSS says; `system-ui`, `ui-sans-serif`, `ui-serif` and `ui-monospace` are generic families too. Before, the families after it were tried first.
+- **breaking (output):** PDF composites as SVG does. An element with `mix-blend-mode` is composited at its own alpha, not at the one its previous sibling left set (an opaque mark after one at 20% was drawn at 20%, after one at opacity 0 not at all); a translucent `<g>`, and a translucent mark that both fills and strokes, are drawn once as a group rather than piece by piece, so the stroke no longer shows the fill through it (larger PDFs for charts of many such marks). Text with a stroke is stroked, after its fill; a text mark's stroke was left out.
+- PDF text in a CFF (OpenType `OTTO`) font is embedded, as a subset of its CFF program, and is selectable and searchable in the default `PDFTextEmbed`; it was drawn as outlines with no text. A font with a glyph that cannot be subset no longer fails the PDF: that text is drawn as outlines over invisible text in the font by name.
+- A PDF's CIDSet lists every glyph the embedded subset holds, the components of accented letters included (PDF/A). A PDF that uses `ActualText` says it is PDF 1.5.
+- `SVGToPDF` refuses what it read and did not draw (a `vector-effect` other than `non-scaling-stroke`, a clip path's `clipPathUnits="objectBoundingBox"`, a clip path or shape in one with a `clip-path`, a style or an unknown attribute, several clip shapes with `clip-rule` evenodd, a `transform` on `<svg>`, a gradient on text or on a non-scaling stroke), and draws what it now reads: a clip path's `transform` and its one shape's `clip-rule`, a clip shape with `display="none"`, and the `<svg>` element's presentation properties and opacity.
+- With `WithSystemFonts`, a font is found under every family name it states: "Calibri Light" as well as "Calibri", "Microsoft JhengHei" as well as "微軟正黑體". A face of a variable font registered with `WithFontInstance` answers to the weight it is drawn at (clamped to the font's range), and a `slnt` other than zero makes it oblique.
+
+### Bounds
+
+- `VegaToPDF` and `VegaLiteToPDF` take whatever SVG the chart makes: their bounds on it follow the SVG output budget and `WithMemoryLimit` (128 MiB by default), where a fixed 64 MiB refused a 260,000-point chart that SVG and PNG drew. `SVGToPDF`'s bounds on SVG input are lowered by a small `WithMemoryLimit`. Each error names the SVG it bounded ([limits.md](docs/limits.md)).
+- The element tree of the SVG a PDF is drawn from, and the images of bitmap colour glyphs, are charged to the call's ledger before they are made.
+- The 64 system faces a converter keeps loaded are a bound for PNG and PDF output too: the PNG writer's per-face state and the PDF writer's font programs no longer keep a dropped face (and its tables) for the converter's life. A font-family of megabytes is no longer read again for every run of its text in the PNG writer.
+
 ## v0.2.0 (2026-10-14)
 
 ### Security

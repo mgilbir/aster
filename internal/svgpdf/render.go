@@ -15,9 +15,10 @@ import (
 
 // gstate carries the inherited graphics state down the element tree.
 // Presentation attributes (fill, stroke, stroke-width, font-*, ...) inherit
-// per the SVG spec; opacity is not inherited but multiplies down the tree,
-// which matches how Vega uses it (per-leaf alpha, no overlapping translucent
-// groups).
+// per the SVG spec. opacity does not inherit: a translucent container is a
+// group, composited once at its opacity (see composited), and a leaf's
+// opacity is its own (with a <text>'s <tspan>s, which multiply theirs into
+// it).
 type gstate struct {
 	// fill and stroke are the paints as resolved where the state is;
 	// fillSpec and strokeSpec as stated, which for currentColor is resolved
@@ -32,7 +33,7 @@ type gstate struct {
 	lineCap              int // PDF J: 0 butt, 1 round, 2 square
 	lineJoin             int // PDF j: 0 miter, 1 round, 2 bevel
 	miterLimit           float64
-	opacity              float64 // multiplied product of ancestor opacity attrs
+	opacity              float64 // the leaf's opacity (see composited)
 	fillOpacity          float64
 	strokeOpacity        float64
 	evenOdd              bool // fill-rule: evenodd
@@ -141,7 +142,7 @@ func checkAttr(e *element, geo map[string]bool, name string) error {
 // renderer walks the element tree and emits content stream operators.
 type renderer struct {
 	w      *contentWriter
-	clips  map[string]*element
+	clips  map[string]*clipDef
 	shaper TextShaper
 	fonts  *fontCatalog // nil in TextOutlines mode: all text drawn as paths
 	images *imageCatalog
@@ -217,7 +218,8 @@ func (r *renderer) alloc(n int64) { r.ledger.MustAlloc(n) }
 func (r *renderer) parsePath(d string) ([]PathSeg, error) {
 	segs, err := parsePathDataInto(r.segBuf, d, r.lim.MaxPathSegments-r.segsTotal)
 	if err != nil {
-		return nil, err
+		// The bound is on all the paths of what Limits.Input names.
+		return nil, fmt.Errorf("%s: %w", r.lim.Input, err)
 	}
 	r.segBuf = segs // the caller draws the segments before the next parse
 	r.segsTotal += len(segs)
@@ -251,7 +253,7 @@ func render(root *element, shaper TextShaper, fetched map[string][]byte, opts Op
 		return nil, nil, nil, nil, paintDefs{}, 0, 0, err
 	}
 
-	r := &renderer{clips: clips, gradients: gradients, shaper: shaper, ctx: opts.Context, lim: opts.Limits.withDefaults()}
+	r := &renderer{clips: clips, gradients: gradients, shaper: shaper, ctx: opts.Context, lim: opts.Limits.WithDefaults()}
 	r.sliced, r.badPatterns = collectPatterns(patterns, gradients)
 	if opts.Context != nil {
 		r.ledger = budget.LedgerFrom(opts.Context)
@@ -289,10 +291,38 @@ func render(root *element, shaper TextShaper, fetched map[string][]byte, opts Op
 	}
 	r.vw, r.vh = vw, vh
 
-	if err := r.children(root, rootState(vw, vh)); err != nil {
+	if err := r.drawRoot(root, rootState(vw, vh)); err != nil {
 		return nil, nil, nil, nil, paintDefs{}, 0, 0, err
 	}
 	return r.finish(width, height)
+}
+
+// drawRoot draws the <svg> element: its presentation properties apply to
+// its children as a <g>'s do, and its opacity and blend mode make it a
+// group as a <g>'s do (they were read and left undrawn). A transform on it
+// (SVG 2's, applied around its viewBox) is not supported.
+func (r *renderer) drawRoot(root *element, st gstate) error {
+	if _, ok := root.attr("transform"); ok {
+		return fmt.Errorf("svgpdf: unsupported attribute %s on <svg>", quoted("transform"))
+	}
+	st, ep, err := r.applyPresentation(root, st)
+	if err != nil || ep.hidden {
+		return err
+	}
+	return r.composited(root, st, ep, func(st gstate) error {
+		if ep.clip == "" {
+			return r.children(root, st)
+		}
+		r.w.save()
+		if err := r.applyClip(ep.clip); err != nil {
+			return err
+		}
+		if err := r.children(root, st); err != nil {
+			return err
+		}
+		r.w.restore()
+		return nil
+	})
 }
 
 // finish is what render returns once the tree is drawn.
@@ -300,7 +330,7 @@ func (r *renderer) finish(width, height float64) (content [][]byte, gsList []gsE
 	if err := r.w.err; err != nil {
 		return nil, nil, nil, nil, paintDefs{}, 0, 0, err
 	}
-	return r.w.stream(), r.w.gsNames, r.fonts, r.images, paintDefs{r.shadings, r.patterns, r.forms, r.links}, width, height, nil
+	return r.w.stream(), r.w.gsNames, r.fonts, r.images, paintDefs{r.shadings, r.patterns, r.forms, r.links, r.w.actualText}, width, height, nil
 }
 
 // viewBoxMatrix maps a viewBox (min-x, min-y, width, height, the sizes
@@ -323,10 +353,15 @@ func (r *renderer) children(e *element, st gstate) error {
 
 // elementProps are an element's properties that do not inherit.
 type elementProps struct {
-	hidden bool   // display: none
-	clip   string // the id clip-path refers to, or ""
-	blend  string // mix-blend-mode as a PDF blend mode, or "" for normal
+	hidden  bool    // display: none
+	clip    string  // the id clip-path refers to, or ""
+	blend   string  // mix-blend-mode as a PDF blend mode, or "" for normal
+	opacity float64 // opacity, 1 when the element states none
 }
+
+// container reports whether an element is a container, whose opacity and
+// blend mode apply to its children composited together, as one group.
+func container(name string) bool { return name == "g" || name == "a" || name == "svg" }
 
 func (r *renderer) element(e *element, st gstate) error {
 	defer r.w.spill()
@@ -336,8 +371,12 @@ func (r *renderer) element(e *element, st gstate) error {
 		}
 	}
 	switch e.name {
-	case "defs", "clipPath", "linearGradient", "radialGradient", "pattern":
-		return nil // definitions are referenced, not drawn
+	case "defs":
+		// Drawn nothing, but what it states inherits into the definitions
+		// in it: a clip-rule, say, which nothing here reads (C42's class).
+		return checkAttrs(e)
+	case "clipPath", "linearGradient", "radialGradient", "pattern":
+		return nil // definitions are referenced, not drawn (and read where collected)
 	}
 	st, ep, err := r.applyPresentation(e, st)
 	if err != nil {
@@ -355,10 +394,68 @@ func (r *renderer) element(e *element, st gstate) error {
 			transform = m
 		}
 	}
-	if ep.blend != "" {
-		return r.blended(ep.blend, func() error { return r.place(e, st, transform, ep.clip) })
+	return r.composited(e, st, ep, func(st gstate) error { return r.place(e, st, transform, ep.clip) })
+}
+
+// composited draws an element, by draw, composited onto what is behind it
+// as SVG composites it: once, as a group, wherever painting it piece by
+// piece would show one piece through another.
+//
+//   - A container at an opacity is a group at that opacity (C115): its
+//     children, overlapping, are not seen through one another. One at
+//     opacity 0 draws nothing, as its children at alpha 0 draw nothing.
+//   - A leaf that both fills and strokes at an opacity is a group at that
+//     opacity, its paints opaque inside it: its stroke does not show its
+//     fill through, as in the PNG. A leaf that paints once is painted at
+//     its alpha, which is the same.
+//   - An element with a blend mode is a group under it, as CSS composites
+//     one (Compositing and Blending 1, 3.2): at its container opacity, or
+//     at 1 around the leaf, whose alphas are inside.
+func (r *renderer) composited(e *element, st gstate, ep elementProps, draw func(gstate) error) error {
+	alpha := 1.0
+	if container(e.name) && ep.opacity > 0 && ep.opacity < 1 {
+		alpha = ep.opacity
 	}
-	return r.place(e, st, transform, ep.clip)
+	inner := func() error { return draw(st) }
+	if st.opacity > 0 && st.opacity < 1 && !container(e.name) && r.paintsTwice(e, st) {
+		leaf := st
+		leaf.opacity = 1
+		inner = func() error {
+			return r.group(r.w.keepStroke(st.opacity), func() error { return draw(leaf) })
+		}
+	}
+	if alpha < 1 || ep.blend != "" {
+		c := r.w.keepStroke(alpha)
+		c.bm = ep.blend
+		return r.group(c, inner)
+	}
+	return inner()
+}
+
+// paintsTwice reports whether a leaf paints twice where it paints at all:
+// a fill and a stroke both showing, or a <text> whose <tspan>s may.
+func (r *renderer) paintsTwice(e *element, st gstate) bool {
+	shows := func(p Paint, alpha float64) bool { return !p.None && alpha*p.alpha() > 0 }
+	fill := shows(st.fill, st.fillOpacity)
+	stroke := shows(st.stroke, st.strokeOpacity) && st.strokeWidth > 0
+	switch e.name {
+	case "rect", "path":
+		return fill && stroke
+	case "text":
+		if fill && stroke {
+			return true
+		}
+		// A <tspan> may paint otherwise than its <text>: then it is a
+		// group, which draws it exactly whatever the tspans state.
+		for _, c := range e.children {
+			for _, a := range c.attrs {
+				if p := props[a.name]; p != propNone || a.name == "style" {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // place draws an element under its transform and clip.
@@ -405,12 +502,11 @@ func (r *renderer) place(e *element, st gstate, transform Matrix, clip string) e
 	return nil
 }
 
-// blended draws an element whose mix-blend-mode is bm: as a group, a form
-// XObject of what draw writes, painted under the blend mode, as CSS
-// composites an element with a blend mode as a group of its own onto what
-// is behind it. The group covers the page, mapped into the current user
-// space; in a space that collapses nothing shows.
-func (r *renderer) blended(bm string, draw func() error) error {
+// group draws what draw writes as a group: a form XObject, an isolated
+// transparency group, painted as c says (see composited). The group covers
+// the page, mapped into the current user space; in a space that collapses
+// nothing shows.
+func (r *renderer) group(c composite, draw func() error) error {
 	inv, ok := invert(r.w.cur.ctm)
 	if !ok {
 		return nil
@@ -423,8 +519,7 @@ func (r *renderer) blended(bm string, draw func() error) error {
 	}
 	res := r.form(content, mapBox(inv, [4]float64{0, 0, r.pageW, r.pageH}))
 	r.w.save()
-	r.w.stateGS("bm:"+bm, gsEntry{bm: bm})
-	r.w.drawXObject(res)
+	r.w.paintXObject(res, c)
 	r.w.restore()
 	return nil
 }
@@ -434,7 +529,7 @@ func (r *renderer) blended(bm string, draw func() error) error {
 // does not parse is ignored (see attrs.go); the only error is a style
 // property the renderer does not know.
 func (r *renderer) applyPresentation(e *element, st gstate) (gstate, elementProps, error) {
-	var ep elementProps
+	ep := elementProps{opacity: 1}
 	ds, err := declarations(e, r.declBuf)
 	if err != nil {
 		return st, ep, err
@@ -443,6 +538,7 @@ func (r *renderer) applyPresentation(e *element, st gstate) (gstate, elementProp
 	if len(ds) == 0 {
 		return st, ep, nil
 	}
+
 	// font-size first: an em length of the element is of its own size.
 	parentSize := st.fontSize
 	for _, d := range ds {
@@ -457,7 +553,9 @@ func (r *renderer) applyPresentation(e *element, st gstate) (gstate, elementProp
 			// A chart's labels name one family list each: the last one read
 			// is kept, and shared (the list is never written to).
 			if d.value != r.famSrc || r.fam == nil {
-				f, ok := parseFontFamilies(strings.TrimSpace(d.value))
+				// Read by the text package, as the PNG writer reads it, so
+				// that both draw the face layout measured (C31).
+				f, ok := text.ParseFontFamily(d.value)
 				if !ok {
 					continue
 				}
@@ -469,6 +567,12 @@ func (r *renderer) applyPresentation(e *element, st gstate) (gstate, elementProp
 		}
 	}
 	st.fill, st.stroke = st.resolve(st.fillSpec), st.resolve(st.strokeSpec)
+	// A leaf's opacity is its own (a <tspan>'s multiplies its <text>'s); a
+	// container's is its group's, and its children start opaque, but at 0,
+	// where it has no group, they draw nothing.
+	if !container(e.name) || ep.opacity == 0 {
+		st.opacity *= ep.opacity
+	}
 	return st, ep, nil
 }
 
@@ -561,7 +665,7 @@ func (st *gstate) apply(d decl, ep *elementProps) {
 		}
 	case propOpacity:
 		if o, ok := parseOpacity(v); ok {
-			st.opacity *= o // multiplies down the tree, see gstate doc
+			ep.opacity = o // see composited
 		}
 	case propFillOpacity:
 		if o, ok := parseOpacity(v); ok {
@@ -587,15 +691,12 @@ func (st *gstate) apply(d decl, ep *elementProps) {
 	case propDisplay:
 		ep.hidden = v == "none"
 	case propFontWeight:
-		if w, ok := parseFontWeight(v, st.fontWeight); ok {
+		if w, ok := text.ParseFontWeight(v, st.fontWeight); ok {
 			st.fontWeight = w
 		}
 	case propFontStyle:
-		switch {
-		case v == "normal":
-			st.italic = false
-		case v == "italic", v == "oblique", strings.HasPrefix(v, "oblique "):
-			st.italic = true
+		if italic, ok := text.ParseFontStyle(v); ok {
+			st.italic = italic
 		}
 	case propFontVariant:
 		// Drawn as normal, as the PNG writer draws it: small capitals are
@@ -646,14 +747,29 @@ func (r *renderer) applyClip(id string) error {
 	r.w.links = nil
 	defer func() { r.w.links = links }()
 	// Every reference re-emits the clip geometry; charge it to the path budget.
-	if r.segsTotal += len(clip.children); r.segsTotal > r.lim.MaxPathSegments {
-		return limitErr("clip paths emitted more than %d segments", r.lim.MaxPathSegments)
+	if r.segsTotal += len(clip.shapes); r.segsTotal > r.lim.MaxPathSegments {
+		return limitErr("%s: clip paths emitted more than %d segments", r.lim.Input, r.lim.MaxPathSegments)
+	}
+	if len(clip.shapes) == 0 {
+		// A clip of nothing: nothing shows.
+		r.w.rect(0, 0, 0, 0)
+		r.w.clip()
+		return nil
+	}
+	// The shapes in the clip path's own transform, which the clip then
+	// keeps for what it clips: the rest of the element is drawn in a space
+	// saved before it (place's q), so it is undone here.
+	inv, ok := invert(clip.transform)
+	if !ok {
+		r.w.rect(0, 0, 0, 0)
+		r.w.clip()
+		return nil
+	}
+	if !clip.transform.IsIdentity() {
+		r.w.concat(clip.transform)
 	}
 	st := rootState(r.vw, r.vh)
-	for _, c := range clip.children {
-		if _, hasT := c.attr("transform"); hasT {
-			return fmt.Errorf("svgpdf: transform on <clipPath> children is not supported")
-		}
+	for _, c := range clip.shapes {
 		switch c.name {
 		case "rect":
 			x, y, w, h := rectGeometry(c, &st)
@@ -664,11 +780,12 @@ func (r *renderer) applyClip(id string) error {
 				return err
 			}
 			r.w.pathSegs(segs)
-		default:
-			return fmt.Errorf("svgpdf: unsupported element <%s> inside <clipPath>", c.name)
 		}
 	}
-	r.w.clip()
+	r.w.clipRule(clip.evenOdd)
+	if !clip.transform.IsIdentity() {
+		r.w.concat(inv)
+	}
 	return nil
 }
 
@@ -737,6 +854,16 @@ func (r *renderer) drawRect(e *element, st gstate) error {
 }
 
 func (r *renderer) drawPath(e *element, st gstate) error {
+	// vector-effect: Vega writes non-scaling-stroke; SVG 2's others are
+	// not drawn here, and refused rather than left out.
+	var nonScaling bool
+	switch v := strings.TrimSpace(e.attrVal("vector-effect")); v {
+	case "", "none":
+	case "non-scaling-stroke":
+		nonScaling = true
+	default:
+		return fmt.Errorf("svgpdf: unsupported vector-effect %s", quoted(v))
+	}
 	d := e.attrVal("d")
 	if strings.TrimSpace(d) == "" {
 		return nil // Vega emits empty d for placeholder foreground paths
@@ -749,10 +876,13 @@ func (r *renderer) drawPath(e *element, st gstate) error {
 		return nil
 	}
 	if st.fill.Gradient != "" || st.stroke.Gradient != "" {
+		if nonScaling && !st.stroke.None {
+			return fmt.Errorf("svgpdf: vector-effect non-scaling-stroke with a gradient paint is not supported")
+		}
 		box, ok := segsBox(segs)
 		return r.paintShape(st, func() { r.w.pathSegs(segs) }, box, ok)
 	}
-	if strings.TrimSpace(e.attrVal("vector-effect")) == "non-scaling-stroke" && !st.stroke.None {
+	if nonScaling && !st.stroke.None {
 		return r.drawNonScaling(segs, st)
 	}
 	fill, stroke := r.setPaintState(st)

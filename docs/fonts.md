@@ -1,6 +1,6 @@
 # Fonts
 
-Text is measured for layout and drawn in PNG and PDF from the same fonts, so a label never overflows the space the layout gave it. Out of the box, aster has Liberation Sans, Serif and Mono (metrically compatible with Arial, Times New Roman and Courier New, as vl-convert uses) and monochrome Noto Emoji. Every font option below applies to layout, PNG and PDF alike. SVG output names the fonts and leaves drawing to the viewer.
+Text is measured for layout and drawn in PNG and PDF in the same face: the PNG and PDF writers read an element's `font-family`, `font-weight` and `font-style` with one reader, which agrees with how layout reads the font Vega measures with, and resolve it to a face as layout does. So a label is drawn in the font it was laid out in, whatever its weight (450 or 549 as well as 400). Out of the box, aster has Liberation Sans, Serif and Mono (metrically compatible with Arial, Times New Roman and Courier New, as vl-convert uses) and monochrome Noto Emoji. Every font option below applies to layout, PNG and PDF alike. SVG output names the fonts and leaves drawing to the viewer.
 
 ```go
 regular, _ := os.ReadFile("Inter-Regular.ttf")
@@ -18,7 +18,7 @@ c, err := aster.New(
 |---|---|---|
 | `WithFont(family, data)` | none | register a TrueType, OpenType or WOFF font under `family`; a collection (`.ttc`/`.otc`) registers every face |
 | `WithFontFace(family, ttc, index)` | none | register one face of a collection |
-| `WithFontInstance(family, data, axes)` | none | register a variable font at one point of its design space (`{"wght": 650}`); register several under one family to let `font-weight` choose |
+| `WithFontInstance(family, data, axes)` | none | register a variable font at one point of its design space (`{"wght": 650}`); register several under one family to let `font-weight` choose. The instance answers to the weight it is drawn at (an axis value outside the font's range is drawn, and matched, at the range's end), and a `slnt` other than zero makes it oblique |
 | `WithFontPalette(family, index)` | palette 0 | draw the family's colour glyphs with another CPAL palette (a dark-mode one, say) |
 | `WithDefaultFontFamily(name)` | `Liberation Sans` | the family generic `sans-serif` resolves to |
 | `WithDefaultSerifFamily(name)` | `Liberation Serif` | the family `serif` resolves to |
@@ -32,7 +32,7 @@ c, err := aster.New(
 
 ## Which font draws a character
 
-1. **The family the spec names** (`"font": "Inter"`, or a generic family mapped above). A family you register faces for **is made of your faces alone**, as a CSS `@font-face` family is: an embedded or system font of the same name is no longer that family. So `WithFont("Liberation Sans", data)` replaces the embedded Liberation Sans, and `WithFont("Arial", data)` replaces the embedded Liberation Sans that stands in for Arial. Among the family's faces, CSS `font-weight` and `font-style` pick the best fit; of faces that fit equally, **the one registered last wins**. A family you don't register is the embedded faces of that name, then system fonts (with `WithSystemFonts`).
+1. **The family the spec names** (`"font": "Inter"`, or a generic family mapped above). A generic family (`sans-serif`, `serif`, `monospace`, `system-ui`, `ui-sans-serif`, `ui-serif`, `ui-monospace`, `cursive`, `fantasy`) always matches where it stands in the list, as CSS says: in `sans-serif, 'Liberation Serif'` the serif family draws only what the sans-serif one lacks. A family you register faces for **is made of your faces alone**, as a CSS `@font-face` family is: an embedded or system font of the same name is no longer that family. So `WithFont("Liberation Sans", data)` replaces the embedded Liberation Sans, and `WithFont("Arial", data)` replaces the embedded Liberation Sans that stands in for Arial. Among the family's faces, CSS `font-weight` and `font-style` pick the best fit; of faces that fit equally, **the one registered last wins**. A family you don't register is the embedded faces of that name, then system fonts (with `WithSystemFonts`).
 2. **The default family** (`WithDefaultFontFamily`, Liberation Sans unless you change it), as the generic sans-serif.
 3. **The fallback chain, for characters those lack** (emoji, other scripts). By default this is your registered fonts, the most recently registered first, then the embedded ones, with Noto Emoji last. `WithFontFallback` replaces the chain with the families you list, in order, each one's best fit for the weight and style first:
 
@@ -58,7 +58,7 @@ Monochrome Noto Emoji is the fallback for emoji, so they always measure and draw
 
 `WithSystemFonts` indexes the machine's fonts (each face of a collection, too) and maps files into memory rather than reading them, so Apple Color Emoji (190 MB) costs only what is drawn from it. In PDF, emoji from such a font are also written as invisible text, in a subset cut from its outline tables alone, so they stay searchable and add about 100 KB, not the font's bitmaps.
 
-A system font is used **only when a spec names its family** (`"font": "Apple Color Emoji"`), or when you list it in `WithFontFallback`; never as a fallback by default. This is for licences: some system fonts may not be drawn into documents you distribute (Apple Color Emoji's licence forbids it). It also keeps what a spec can make aster read to what the host enabled. Check a font's licence before distributing what it draws. A converter keeps at most 64 system faces loaded (about a megabyte of parsed tables each); past that the one loaded longest ago is dropped, and loaded again if a later spec names it. In PDF, a system font is embedded from its outline tables, cut out of the file, never from a copy of the whole file.
+A system font is used **only when a spec names its family** (`"font": "Apple Color Emoji"`), or when you list it in `WithFontFallback`; never as a fallback by default. This is for licences: some system fonts may not be drawn into documents you distribute (Apple Color Emoji's licence forbids it). It also keeps what a spec can make aster read to what the host enabled. Check a font's licence before distributing what it draws. A system font is found under every family name it states, as fontconfig and browsers find it: its family ("Calibri Light"), its typographic family ("Calibri") and its WWS family, in every language its name table has ("Microsoft JhengHei" and "微軟正黑體"). A converter keeps at most 64 system faces loaded (the parsed tables of each, from about 100 KB); past that the one loaded longest ago is dropped, with what PNG and PDF output kept of it, and loaded again if a later spec names it. In PDF, a system font is embedded from its outline tables, cut out of the file, never from a copy of the whole file.
 
 ## PDF text
 

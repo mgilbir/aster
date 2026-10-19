@@ -39,6 +39,9 @@ type contentWriter struct {
 	links  []*rect
 	origin Matrix
 
+	// actualText is set once ActualText marked content is written.
+	actualText bool
+
 	// cur mirrors the graphics-state parameters this writer emits
 	// conditionally; stack snapshots it across q/Q. See streamState.
 	cur   streamState
@@ -65,6 +68,11 @@ type streamState struct {
 	dashOffset  float64
 	fillAlpha   float64
 	strokeAlpha float64
+	// bm is the blend mode a gs has set ("" for Normal), and mask the key
+	// of the soft mask one has set ("" for none): what PDF composites a
+	// Do or a sh with besides the alpha (see paintObject).
+	bm   string
+	mask string
 
 	// ctm is the transform cm has set, from user space to the page: what a
 	// pattern, which is drawn in page space, is placed by.
@@ -104,6 +112,8 @@ type gsEntry struct {
 	// maskLuminosity makes the soft mask the group's luminosity rather than
 	// its alpha.
 	maskLuminosity bool
+	// maskNone sets no soft mask (SMask None), and nothing else.
+	maskNone bool
 }
 
 func newContentWriter(ledger *budget.Ledger) *contentWriter {
@@ -285,11 +295,66 @@ func (w *contentWriter) restore() {
 	}
 }
 
-// drawXObject paints the XObject named res (Do).
-func (w *contentWriter) drawXObject(res string) {
+// composite is how a group (a form XObject), an image or a shading is
+// painted onto what is behind it. PDF composites a Do or a sh as a whole
+// with the graphics state's constant alpha (ca, the nonstroking one), blend
+// mode and soft mask (ISO 32000-1, 11.6.4), which svgpdf leaves set from
+// one leaf to the next; so each is set to what the caller means before the
+// object is painted, never left as a sibling left it (C30).
+type composite struct {
+	alpha float64 // ca
+	// strokeAlpha is the CA left set, which nothing painted here uses:
+	// keepStroke leaves the stream's.
+	strokeAlpha float64
+	bm          string // a PDF blend mode; "" is Normal
+	// mask is the key of the soft mask the caller has set with stateGS, in
+	// the space that mask is read in; "" is none.
+	mask string
+}
+
+// keepStroke is c with the stroke alpha the stream holds.
+func (w *contentWriter) keepStroke(alpha float64) composite {
+	return composite{alpha: alpha, strokeAlpha: w.cur.strokeAlpha}
+}
+
+// paintXObject paints the XObject named res (Do) as c says.
+func (w *contentWriter) paintXObject(res string, c composite) { w.paintObject(res, " Do\n", c) }
+
+// paintShading paints the shading named res over the clip (sh) as c says.
+func (w *contentWriter) paintShading(res string, c composite) { w.paintObject(res, " sh\n", c) }
+
+// paintObject writes op, painting res, after setting the alpha, the blend
+// mode and the soft mask to c's. With paintXObject and paintShading it is
+// the only writer of either operator (TestPaintedOnlyThroughComposite).
+func (w *contentWriter) paintObject(res, op string, c composite) {
+	w.setAlpha(c.alpha, c.strokeAlpha)
+	if w.cur.bm != c.bm {
+		if c.bm == "" {
+			w.stateGS("bm:Normal", gsEntry{bm: "Normal"})
+		} else {
+			w.stateGS("bm:"+c.bm, gsEntry{bm: c.bm})
+		}
+	}
+	if w.cur.mask != c.mask {
+		if c.mask != "" {
+			// A mask is read in the space it is set in, so only its
+			// caller can set it; one it has not set is a bug here.
+			panic(fmt.Sprintf("svgpdf: soft mask %s is not set where %s is painted", c.mask, res))
+		}
+		w.stateGS("mask:None", gsEntry{maskNone: true})
+	}
 	w.buf = append(w.buf, '/')
 	w.buf = append(w.buf, res...)
-	w.buf = append(w.buf, " Do\n"...)
+	w.buf = append(w.buf, op...)
+}
+
+// formShading is the content of a form that paints the shading named res
+// and nothing else: its first operator, at the state every transparency
+// group starts from (alpha 1, no blend mode, no soft mask; 11.6.6).
+func formShading(prefix []byte, res string) []byte {
+	out := append(prefix, '/')
+	out = append(out, res...)
+	return append(out, " sh\n"...)
 }
 
 func (w *contentWriter) concat(m Matrix) {
@@ -407,6 +472,16 @@ func (w *contentWriter) stateGS(key string, e gsEntry) {
 		w.gsKeyed[key] = name
 		e.name = name
 		w.gsNames = append(w.gsNames, e)
+	}
+	switch {
+	case e.bm == "Normal":
+		w.cur.bm = ""
+	case e.bm != "":
+		w.cur.bm = e.bm
+	case e.maskNone:
+		w.cur.mask = ""
+	case e.mask != "":
+		w.cur.mask = key
 	}
 	w.buf = append(w.buf, '/')
 	w.buf = append(w.buf, name...)
@@ -533,13 +608,6 @@ func (w *contentWriter) strokePattern(res string) {
 	w.buf = append(w.buf, " SCN\n"...)
 }
 
-// shade paints the shading named res over the clip (sh).
-func (w *contentWriter) shade(res string) {
-	w.buf = append(w.buf, '/')
-	w.buf = append(w.buf, res...)
-	w.buf = append(w.buf, " sh\n"...)
-}
-
 func (w *contentWriter) clip() {
 	w.op("W")
 	w.op("n")
@@ -592,6 +660,7 @@ func (w *contentWriter) beginCapture() capture {
 	w.buf, w.chunks, w.stack = nil, nil, nil
 	w.cur = c.cur.clone()
 	w.cur.fillAlpha, w.cur.strokeAlpha = 1, 1
+	w.cur.bm, w.cur.mask = "", ""
 	w.cur.ctm = Identity()
 	return c
 }

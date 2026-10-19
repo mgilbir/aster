@@ -24,17 +24,25 @@ type formDef struct {
 	bbox    [4]float64
 }
 
-// stream is the form's XObject, drawing with resources.
-func (f *formDef) stream(resources pdf0.Object) (*pdf0.Stream, error) {
-	data, err := compress(f.content)
-	if err != nil {
-		return nil, fmt.Errorf("svgpdf: compressing a form: %w", err)
-	}
+// transparencyGroup is the group attributes dictionary of every form: an
+// isolated transparency group in DeviceRGB. The document writes it once,
+// which every form refers to: a chart may have a form per mark.
+func transparencyGroup() *pdf0.Dictionary {
 	group := &pdf0.Dictionary{}
 	group.Set("Type", pdf0.Name("Group"))
 	group.Set("S", pdf0.Name("Transparency"))
 	group.Set("CS", pdf0.Name("DeviceRGB"))
 	group.Set("I", pdf0.Boolean(true))
+	return group
+}
+
+// stream is the form's XObject, drawing with resources, a transparency
+// group of group's attributes.
+func (f *formDef) stream(resources, group pdf0.Object) (*pdf0.Stream, error) {
+	data, err := compress(f.content)
+	if err != nil {
+		return nil, fmt.Errorf("svgpdf: compressing a form: %w", err)
+	}
 	s := &pdf0.Stream{Data: data}
 	s.Dict.Set("Type", pdf0.Name("XObject"))
 	s.Dict.Set("Subtype", pdf0.Name("Form"))
@@ -162,8 +170,9 @@ func (p *pdfPainter) PopGroup(mode shape.CompositeMode) {
 		fs := p.pageForm(src, box)
 		w.save()
 		p.toForm()
-		w.stateGS("bm:"+bm, gsEntry{bm: bm})
-		w.drawXObject(fs)
+		// The group holds its own alphas: it is composited at 1, whatever
+		// a layer before it left set (C30).
+		w.paintXObject(fs, composite{alpha: 1, strokeAlpha: w.cur.strokeAlpha, bm: bm})
 		w.restore()
 		return
 	}
@@ -184,14 +193,16 @@ func (p *pdfPainter) PopGroup(mode shape.CompositeMode) {
 		saved := w.buf
 		w.buf = nil
 		w.save()
+		var key string
 		if invert {
-			p.setInvertedMask(p.invertedMaskForm(mask, p.formMatrix()))
+			key = p.setInvertedMask(p.invertedMaskForm(mask, p.formMatrix()))
 		} else {
 			fm := p.pageForm(mask, box)
 			p.toForm()
-			w.stateGS(fmt.Sprintf("mask:%s:false", fm), gsEntry{mask: fm})
+			key = fmt.Sprintf("mask:%s:false", fm)
+			w.stateGS(key, gsEntry{mask: fm})
 		}
-		w.drawXObject(fb)
+		w.paintXObject(fb, composite{alpha: 1, strokeAlpha: w.cur.strokeAlpha, mask: key})
 		w.restore()
 		out := w.buf
 		w.buf = saved
@@ -270,15 +281,18 @@ func (p *pdfPainter) invertedMaskForm(content []byte, m Matrix) string {
 }
 
 // setInvertedMask sets the inverted soft mask of form fm, and leaves the
-// transform at the glyph's page space, where its forms are drawn. The caller
-// saves and restores the graphics state around it.
-func (p *pdfPainter) setInvertedMask(fm string) {
+// transform at the glyph's page space, where its forms are drawn, and
+// returns the mask's key (see composite). The caller saves and restores the
+// graphics state around it.
+func (p *pdfPainter) setInvertedMask(fm string) (key string) {
 	w := p.r.w
 	if inv, ok := invert(w.cur.ctm); ok {
 		w.concat(inv)
 	}
-	w.stateGS(fmt.Sprintf("mask:%s:true", fm), gsEntry{mask: fm, maskInvert: true})
+	key = fmt.Sprintf("mask:%s:true", fm)
+	w.stateGS(key, gsEntry{mask: fm, maskInvert: true})
 	w.concat(Matrix{A: 1, D: 1, E: p.origin[0], F: p.origin[1]})
+	return key
 }
 
 // formMatrix maps the current user space into the glyph's page space.
@@ -383,13 +397,14 @@ func (p *pdfPainter) compositeOpen(mode shape.CompositeMode, src []byte, k int) 
 	w.cur = defaultStreamState()
 	draw := func(f string) {
 		w.save()
-		w.drawXObject(f)
+		w.paintXObject(f, composite{alpha: 1, strokeAlpha: w.cur.strokeAlpha})
 		w.restore()
 	}
 	masked := func(f, mask string, invert bool) {
 		w.save()
-		w.stateGS(fmt.Sprintf("mask:%s:%v", mask, invert), gsEntry{mask: mask, maskInvert: invert})
-		w.drawXObject(f)
+		key := fmt.Sprintf("mask:%s:%v", mask, invert)
+		w.stateGS(key, gsEntry{mask: mask, maskInvert: invert})
+		w.paintXObject(f, composite{alpha: 1, strokeAlpha: w.cur.strokeAlpha, mask: key})
 		w.restore()
 	}
 	switch mode {
@@ -426,15 +441,16 @@ func (p *pdfPainter) compositeOpen(mode shape.CompositeMode, src []byte, k int) 
 		}
 	}
 	w.save()
-	p.setInvertedMask(fci)
-	w.drawXObject(fd)
+	key := p.setInvertedMask(fci)
+	w.paintXObject(fd, composite{alpha: 1, strokeAlpha: w.cur.strokeAlpha, mask: key})
 	w.restore()
 	if len(result) > 0 {
 		fr := p.formAt(result, Identity(), bp)
 		w.save()
 		toPage()
-		w.stateGS(fmt.Sprintf("mask:%s:false", fc), gsEntry{mask: fc})
-		w.drawXObject(fr)
+		key := fmt.Sprintf("mask:%s:false", fc)
+		w.stateGS(key, gsEntry{mask: fc})
+		w.paintXObject(fr, composite{alpha: 1, strokeAlpha: w.cur.strokeAlpha, mask: key})
 		w.restore()
 	}
 	w.buf = append(w.buf, prefix...)
