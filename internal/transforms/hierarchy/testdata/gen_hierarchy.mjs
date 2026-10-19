@@ -2,7 +2,7 @@
 //   NODE_PATH=testdata/oracle-node/node_modules node gen_hierarchy.mjs > hierarchy.json
 import { createRequire } from 'node:module';
 import path from 'node:path';
-const require = createRequire(path.join(process.env.NODE_PATH, 'x.js'));
+const require = createRequire(path.resolve(process.env.NODE_PATH, 'x.js'));
 const vega = await import(require.resolve('vega'));
 
 // Deterministic pseudo-random data (own LCG; independent of upstream RNGs).

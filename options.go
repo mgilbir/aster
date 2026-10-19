@@ -49,6 +49,7 @@ type config struct {
 	pangoText              int              // 0: unrounded advances; 1 and 2: Pango's (see WithPangoTextForTest)
 	now                    func() time.Time // the clock for now(); nil is the system clock (tests pin it)
 	fontFailForTest        bool             // the tests' WithFontSetFailureForTest
+	wordcloudBoxForTest    bool             // the tests' WithWordcloudBoxForTest
 	projections            geo.Registry     // WithProjection's types, by lower-case name
 	// errs are the options' own mistakes, which New reports.
 	errs []error

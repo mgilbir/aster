@@ -133,7 +133,7 @@ func TestUpstreamVegaScale(t *testing.T) {
 			r.Skip("unmapped " + c.Fn)
 		}
 	}
-	r.Done(60)
+	r.Done(84)
 }
 
 // stepsOfChain reads an origin's recorded chain: a list of [method, args].

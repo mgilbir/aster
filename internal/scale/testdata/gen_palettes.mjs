@@ -5,7 +5,7 @@
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import fs from 'node:fs';
-const require = createRequire(path.join(process.env.NODE_PATH, 'x.js'));
+const require = createRequire(path.resolve(process.env.NODE_PATH, 'x.js'));
 const chroma = await import(require.resolve('d3-scale-chromatic'));
 const vsDir = path.join(process.env.NODE_PATH, 'vega-scale');
 const pal = await import(path.join(vsDir, 'src/palettes.js'));

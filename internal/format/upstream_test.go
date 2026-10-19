@@ -212,7 +212,7 @@ func TestUpstreamD3Format(t *testing.T) {
 		}
 	}
 	_ = enUS
-	r.Done(900)
+	r.Done(1016)
 }
 
 // intervalOf resolves an exported d3-time interval name (timeDay, utcMonday, unixDay, ...).
@@ -400,7 +400,7 @@ func TestUpstreamD3Time(t *testing.T) {
 			r.Skip("unmapped method " + method)
 		}
 	}
-	r.Done(900)
+	r.Done(1104)
 }
 
 func dates(ts []float64) []any {
@@ -545,7 +545,7 @@ func TestUpstreamD3TimeFormat(t *testing.T) {
 			r.Skip("unmapped " + c.Fn)
 		}
 	}
-	r.Done(550)
+	r.Done(642)
 }
 
 func parsedDate(t float64, ok bool) any {

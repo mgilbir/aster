@@ -396,6 +396,12 @@ func newView(ctx context.Context, opts Options, locale jsval.Value) *runView {
 	v.zone = format.Local(v.loc)
 	// Transforms that key on text write a date in the view's zone.
 	ctx = transforms.WithZone(ctx, v.zone)
+	// String of a date, in an array too, is Date.prototype.toString in the
+	// view's zone, for every walk of the call.
+	zone := v.zone
+	ctx = jsval.ContextWithDateText(ctx, func(dst []byte, ms float64) []byte {
+		return append(dst, format.DateToString(ms, zone)...)
+	})
 	v.ctx = ctx
 	v.walk = jsval.WalkerFor(ctx)
 	v.keys = transforms.NewKeys(v.zone, v.walk)

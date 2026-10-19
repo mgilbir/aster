@@ -21,7 +21,7 @@ func TestCorpusSVG(t *testing.T) {
 	specs := specFiles()
 	only := os.Getenv("VEGA_ONLY")
 	pass, total := 0, 0
-	var failed []string
+	var failed, ran []string
 	for _, spec := range specs {
 		name := strings.TrimSuffix(filepath.Base(spec), ".vg.json")
 		if only != "" && !strings.Contains(name, only) {
@@ -32,6 +32,7 @@ func TestCorpusSVG(t *testing.T) {
 			continue
 		}
 		total++
+		ran = append(ran, name)
 		b, _ := os.ReadFile(spec)
 		v, err := jsval.ParseJSON(b)
 		if err != nil {
@@ -69,5 +70,13 @@ func TestCorpusSVG(t *testing.T) {
 	t.Logf("svg scoreboard: %d/%d specs match", pass, total)
 	if only == "" && len(failed) > 0 {
 		t.Logf("failing: %s", strings.Join(failed, " "))
+	}
+	if only == "" {
+		// Two specs have no recording: toSVG fails on them upstream
+		// (contour-plot, density-heatmaps).
+		if total < 268 {
+			t.Errorf("compared %d specs, want all 268 recorded", total)
+		}
+		checkKnownMismatches(t, "testdata/svg", ran, failed, knownSVGMismatches)
 	}
 }

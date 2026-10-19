@@ -10,8 +10,14 @@
 //
 //   request:  {"id": 1, "op": "svg" | "compile", "lite": true, "spec": "<JSON text>"}
 //             {"id": 2, "op": "png", "svg": "<svg ...>", "scale": 2}
+//             {"id": 3, "op": "svg", "spec": "...", "wordcloud": "box"}
 //   response: {"id": 1, "svg": "...", "vega": {...}, "png": "<base64>", "err": "...",
-//              "warnings": ["..."], "tainted": "Object.prototype.mean"}
+//              "warnings": ["..."], "tainted": "Object.prototype.mean", "oracleErr": "..."}
+//
+// "err" is upstream's answer: the error it throws for the input. "oracleErr"
+// is the oracle failing to answer (a request it cannot parse, an unknown op,
+// a generator that throws, resvg-napi missing): it is not an answer, and the
+// Go side never caches it and fails the test that asked.
 //
 // "svg" renders (compiling first when lite) and also returns the compiled
 // Vega for Vega-Lite; "compile" only compiles, and lists the compiler's
@@ -31,6 +37,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
+import { boxContext } from './wordcloud-box.mjs';
 
 // node must not outlive the Go process that drives it. An input can keep the
 // main thread busy for good (upstream looping on it), so it cannot watch for
@@ -231,6 +238,7 @@ process.chdir(roots[0]);
 // plan, the embedded Liberation faces plus Noto Emoji and no system fonts.
 let resvg = null;
 let rasterFonts = null;
+let resvgError = '';
 try {
   resvg = require('resvg-napi');
   rasterFonts = new resvg.FontDatabase();
@@ -245,11 +253,14 @@ try {
   rasterFonts.setMonospaceFamily('Liberation Mono');
   rasterFonts.setCursiveFamily('Liberation Sans');
   rasterFonts.setFantasyFamily('Liberation Sans');
-} catch {
+} catch (e) {
   resvg = null;
+  resvgError = String((e && e.message) || e).split('\n')[0];
 }
+// OracleError is a failure of the oracle, not upstream's answer.
+class OracleError extends Error {}
 function rasterize(svg, scale) {
-  if (!resvg) throw new Error('resvg-napi is not installed in this module set');
+  if (!resvg) throw new OracleError('resvg-napi did not load in this module set: ' + resvgError);
   const doc = new resvg.Resvg(svg, { fontFamily: 'Liberation Sans' }, rasterFonts);
   return doc.renderPng({ scale: scale || 1 }).toString('base64');
 }
@@ -321,9 +332,29 @@ async function renderAfter(vg, writes) {
 // returns { cases, skips }; ctx carries the modules, since a generator cannot
 // import them by name (NODE_PATH does not apply to ES modules).
 async function generate(name) {
-  if (!/^[a-z0-9-]+$/.test(name)) throw new Error('bad sweep name: ' + name);
-  const mod = await import(path.join(repo, 'testdata/oracle-node/sweeps', name + '.mjs'));
-  return mod.generate({ vega, vl, require, repo });
+  if (!/^[a-z0-9-]+$/.test(name)) throw new OracleError('bad sweep name: ' + name);
+  try {
+    const mod = await import(path.join(repo, 'testdata/oracle-node/sweeps', name + '.mjs'));
+    return await mod.generate({ vega, vl, require, repo });
+  } catch (e) {
+    // A generator is the oracle's own code: its failure (a corpus not
+    // fetched, a bug) is not an answer of upstream's.
+    throw new OracleError(`generator ${name}: ` + String((e && e.message) || e).split('\n')[0]);
+  }
+}
+
+// The "box" wordcloud: while a request asks for it, a canvas context made
+// for the wordcloud layout (the only canvas a render creates: text is
+// measured on the context vega-scenegraph made at import) is the
+// deterministic one of wordcloud-box.mjs, which the engine's
+// wordcloud.BoxRenderer reproduces, so the transform is compared without the
+// platform's glyph rasterization.
+let boxWordcloud = false;
+{
+  const getContext = canvas.Canvas.prototype.getContext;
+  canvas.Canvas.prototype.getContext = function (...args) {
+    return boxWordcloud ? boxContext(this.width, this.height) : getContext.apply(this, args);
+  };
 }
 
 async function render(vg) {
@@ -350,8 +381,9 @@ write({
   ready: true,
   version:
     `vega ${vega.version} / vega-lite ${vl.version} / node ${process.version} / canvas ${require('canvas/package.json').version}` +
-    (resvg ? ` / resvg-napi ${require('resvg-napi/package.json').version}` : '') +
+    (resvg ? ` / resvg-napi ${require('resvg-napi/package.json').version}` : ' / resvg-napi none') +
     ` / pango ${canvas.pangoVersion} / cairo ${canvas.cairoVersion} / probe ${probeWidth}` +
+    ` / platform ${process.platform}-${process.arch}` +
     (process.env.TZ === 'UTC' ? '' : ` / TZ ${process.env.TZ}`),
 });
 
@@ -433,10 +465,15 @@ for await (const line of rl) {
   try {
     req = JSON.parse(line);
   } catch (e) {
-    answer({ id: null, err: 'oracle: bad request: ' + e.message });
+    answer({ id: null, oracleErr: 'bad request: ' + e.message });
     continue;
   }
   const res = { id: req.id };
+  if (!['svg', 'compile', 'png', 'signals', 'generate'].includes(req.op) || (req.wordcloud && req.wordcloud !== 'box')) {
+    answer({ id: req.id, oracleErr: `bad request: op ${req.op}, wordcloud ${req.wordcloud}` });
+    continue;
+  }
+  boxWordcloud = req.wordcloud === 'box';
   try {
     if (req.op === 'generate') {
       res.data = await generate(req.sweep);
@@ -468,7 +505,11 @@ for await (const line of rl) {
     if (req.lite) res.vega = JSON.parse(JSON.stringify(vg));
     if (req.op === 'svg') res.svg = await render(vg);
   } catch (e) {
-    res.err = String((e && e.message) || e).split('\n')[0];
+    const msg = String((e && e.message) || e).split('\n')[0];
+    if (e instanceof OracleError) res.oracleErr = msg;
+    else res.err = msg;
+  } finally {
+    boxWordcloud = false;
   }
   answer(res);
 }

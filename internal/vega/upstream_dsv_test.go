@@ -48,5 +48,5 @@ func TestUpstreamD3DsvParse(t *testing.T) {
 		}
 		r.Check(c, got, false)
 	}
-	r.Done(50)
+	r.Done(60)
 }

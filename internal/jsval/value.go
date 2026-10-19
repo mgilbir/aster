@@ -398,9 +398,10 @@ func (v Value) AsBoolean() bool {
 }
 
 // AsString is JavaScript's String(x) for the variants this model holds,
-// except that a Timestamp is written as its epoch number (callers that need
-// Date.prototype.toString format it themselves). Array elements that are
-// nullish are written as "" (Array.prototype.join).
+// except that a Timestamp is written as its epoch number: this detached form
+// has no time zone. The call's Walker writes a date, in an array too, as
+// Date.prototype.toString in the view's zone (ContextWithDateText). Array
+// elements that are nullish are written as "" (Array.prototype.join).
 //
 // The String of an array is a walk of it, and this is the detached walk (see
 // Walker): the String of a value an expression or a transform built is taken

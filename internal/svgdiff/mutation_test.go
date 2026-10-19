@@ -161,16 +161,79 @@ func firstNumber(s string) (start, end int, v float64, ok bool) {
 	return 0, 0, 0, false
 }
 
+// notPixelAttr reports whether the numbers of attribute name of an element
+// tag are not pixels in what the engine writes (SVG 1.1 §13.2, §13.3): a
+// gradient's coordinates are in bounding-box units, and so is everything in
+// the content of a pattern Vega draws under viewBox="0,0,1,1"
+// (inPatternContent). Written here independently of svgdiff's own rule, so
+// the mutation test checks it rather than repeats it.
+func notPixelAttr(tag, name string, inPatternContent bool) bool {
+	if inPatternContent {
+		return svgdiff.IsGeometry(name)
+	}
+	switch tag {
+	case "linearGradient":
+		return name == "x1" || name == "x2" || name == "y1" || name == "y2"
+	case "radialGradient":
+		return name == "cx" || name == "cy" || name == "r" || name == "fx" || name == "fy"
+	case "pattern":
+		return name == "viewBox"
+	}
+	return false
+}
+
+// transformArg finds argument i of the first call of fn in a transform list,
+// as firstNumber does a number.
+func transformArg(s, fn string, i int) (start, end int, v float64, ok bool) {
+	k := strings.Index(s, fn+"(")
+	if k < 0 {
+		return 0, 0, 0, false
+	}
+	at := k + len(fn) + 1
+	for n := 0; ; n++ {
+		st, en, val, found := firstNumber(s[at:])
+		if !found || strings.Contains(s[at:at+st], ")") {
+			return 0, 0, 0, false
+		}
+		if n == i {
+			return at + st, at + en, val, true
+		}
+		at += en
+	}
+}
+
 // mutationsOf lists the single changes to the element at path that must be
 // reported: every attribute changed and removed, its text changed, an
 // attribute added, the element removed and duplicated, and two differing
-// siblings swapped.
-func mutationsOf(e *elem, path []int, parent *elem) []mutation {
+// siblings swapped. inPatternContent says the element is drawn in a
+// pattern's unit-box content.
+func mutationsOf(e *elem, path []int, parent *elem, inPatternContent bool) []mutation {
 	var ms []mutation
 	tag := qn(e.name)
 	for ai, a := range e.attrs {
 		an := tag + "@" + qn(a.Name)
 		ai := ai
+		// A number that is not a pixel must not differ by what the pixel
+		// tolerance allows (C52): a gradient running to 60% instead of
+		// 100%, a label turned by a quarter of a degree.
+		if notPixelAttr(tag, qn(a.Name), inPatternContent) {
+			if s, en, v, ok := firstNumber(a.Value); ok {
+				nudged := a.Value[:s] + strconv.FormatFloat(v+0.25, 'g', -1, 64) + a.Value[en:]
+				ms = append(ms, mutation{an + " not a pixel: number+0.25", func(r *elem) { r.at(path).attrs[ai].Value = nudged }})
+			}
+		}
+		if qn(a.Name) == "transform" {
+			for _, arg := range []struct {
+				fn   string
+				i    int
+				what string
+			}{{"rotate", 0, "angle"}, {"scale", 0, "x factor"}, {"scale", 1, "y factor"}} {
+				if s, en, v, ok := transformArg(a.Value, arg.fn, arg.i); ok {
+					nudged := a.Value[:s] + strconv.FormatFloat(v+0.25, 'g', -1, 64) + a.Value[en:]
+					ms = append(ms, mutation{an + " " + arg.fn + " " + arg.what + "+0.25", func(r *elem) { r.at(path).attrs[ai].Value = nudged }})
+				}
+			}
+		}
 		if s, en, v, ok := firstNumber(a.Value); ok {
 			bumped := a.Value[:s] + strconv.FormatFloat(v+1, 'g', -1, 64) + a.Value[en:]
 			ms = append(ms, mutation{an + " number+1", func(r *elem) { r.at(path).attrs[ai].Value = bumped }})
@@ -284,7 +347,13 @@ func TestMutationsAreReported(t *testing.T) {
 			if len(path) > 0 {
 				parent = root.at(path[:len(path)-1])
 			}
-			for _, m := range mutationsOf(e, path, parent) {
+			inPattern := false
+			for k := range path {
+				if qn(root.at(path[:k]).name) == "pattern" {
+					inPattern = true
+				}
+			}
+			for _, m := range mutationsOf(e, path, parent, inPattern) {
 				if tried[m.kind] >= perKind {
 					continue
 				}
@@ -313,7 +382,7 @@ func TestMutationsAreReported(t *testing.T) {
 		}
 	}
 	// The floor keeps the corpus from silently losing the kinds it exercises.
-	const floor = 365
+	const floor = 375
 	if len(kinds) < floor {
 		t.Errorf("only %d mutation kinds exercised, fewer than %d", len(kinds), floor)
 	}
@@ -327,6 +396,7 @@ func TestEquivalences(t *testing.T) {
 	doc := func(attr, text string) string {
 		return `<svg xmlns="http://www.w3.org/2000/svg"><path d="` + attr + `"/><text>` + text + `</text></svg>`
 	}
+	defs := func(d string) string { return `<svg xmlns="http://www.w3.org/2000/svg"><defs>` + d + `</defs></svg>` }
 	cases := []struct {
 		name      string
 		got, want string
@@ -359,6 +429,26 @@ func TestEquivalences(t *testing.T) {
 		{"an absent attribute is not an empty one", `<svg xmlns="http://www.w3.org/2000/svg"><rect x=""/></svg>`, `<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>`, false},
 		{"element order", `<svg xmlns="http://www.w3.org/2000/svg"><rect/><circle/></svg>`, `<svg xmlns="http://www.w3.org/2000/svg"><circle/><rect/></svg>`, false},
 		{"infinity spelled out is text", doc("MInfinity,0", "a"), doc("M1e400,0", "a"), false},
+		// Numbers that are not pixels (C52): compared within the relative
+		// tolerance alone, so last-digit noise is equal and a visible change
+		// is not.
+		{"a bounding-box gradient coordinate", defs(`<linearGradient id="g" x1="0" x2="0.6" y1="0" y2="0"/>`), defs(`<linearGradient id="g" x1="0" x2="1" y1="0" y2="0"/>`), false},
+		{"a bounding-box gradient direction", defs(`<linearGradient id="g" x1="0" x2="1" y1="0" y2="0.45"/>`), defs(`<linearGradient id="g" x1="0" x2="1" y1="0" y2="0"/>`), false},
+		{"a bounding-box gradient radius", defs(`<radialGradient id="g" fx="0.5" fy="0.5" fr="0" cx="0.5" cy="0.5" r="0.125"/>`), defs(`<radialGradient id="g" fx="0.5" fy="0.5" fr="0" cx="0.5" cy="0.5" r="0.5"/>`), false},
+		{"a bounding-box gradient centre", defs(`<radialGradient id="g" fx="0.1" fy="0.9" fr="0" cx="0.1" cy="0.9" r="0.5"/>`), defs(`<radialGradient id="g" fx="0.5" fy="0.5" fr="0" cx="0.5" cy="0.5" r="0.5"/>`), false},
+		{"a bounding-box gradient coordinate's last digit", defs(`<linearGradient id="g" x1="0" x2="0.30000000000000004" y1="0" y2="0"/>`), defs(`<linearGradient id="g" x1="0" x2="0.3" y1="0" y2="0"/>`), true},
+		{"a bounding-box coordinate near zero", defs(`<linearGradient id="g" x1="0.00001" x2="1" y1="0" y2="0"/>`), defs(`<linearGradient id="g" x1="0" x2="1" y1="0" y2="0"/>`), false},
+		{"a user-space gradient is in pixels", defs(`<linearGradient id="g" gradientUnits="userSpaceOnUse" x1="0" x2="100.3" y1="0" y2="0"/>`), defs(`<linearGradient id="g" gradientUnits="userSpaceOnUse" x1="0" x2="100" y1="0" y2="0"/>`), true},
+		{"a pattern's content under its unit viewBox", defs(`<pattern id="p" viewBox="0,0,1,1" width="100%" height="100%"><rect width="0.6" height="1"/></pattern>`), defs(`<pattern id="p" viewBox="0,0,1,1" width="100%" height="100%"><rect width="1" height="1"/></pattern>`), false},
+		{"a pattern's bounding-box tile", defs(`<pattern id="p" x="0.3" width="1" height="1"/>`), defs(`<pattern id="p" x="0" width="1" height="1"/>`), false},
+		{"an angle of rotate", `<svg xmlns="http://www.w3.org/2000/svg"><g transform="translate(1,1) rotate(-44.55)"/></svg>`, `<svg xmlns="http://www.w3.org/2000/svg"><g transform="translate(1,1) rotate(-45)"/></svg>`, false},
+		{"an angle of rotate's last digit", `<svg xmlns="http://www.w3.org/2000/svg"><g transform="translate(1,1) rotate(-45.00000000000001)"/></svg>`, `<svg xmlns="http://www.w3.org/2000/svg"><g transform="translate(1,1) rotate(-45)"/></svg>`, true},
+		{"rotate's centre is in pixels", `<svg xmlns="http://www.w3.org/2000/svg"><g transform="rotate(30 10.3 20)"/></svg>`, `<svg xmlns="http://www.w3.org/2000/svg"><g transform="rotate(30,10,20)"/></svg>`, true},
+		{"a translate after a rotate is in pixels", `<svg xmlns="http://www.w3.org/2000/svg"><g transform="rotate(30) translate(1.3,2)"/></svg>`, `<svg xmlns="http://www.w3.org/2000/svg"><g transform="rotate(30) translate(1,2)"/></svg>`, true},
+		{"a scale factor", `<svg xmlns="http://www.w3.org/2000/svg"><path transform="translate(1,1) scale(1.4,1)"/></svg>`, `<svg xmlns="http://www.w3.org/2000/svg"><path transform="translate(1,1) scale(1,1)"/></svg>`, false},
+		{"a skew angle", `<svg xmlns="http://www.w3.org/2000/svg"><g transform="skewX(10.4)"/></svg>`, `<svg xmlns="http://www.w3.org/2000/svg"><g transform="skewX(10)"/></svg>`, false},
+		{"a matrix's linear part", `<svg xmlns="http://www.w3.org/2000/svg"><g transform="matrix(1.3,0,0,1,5,5)"/></svg>`, `<svg xmlns="http://www.w3.org/2000/svg"><g transform="matrix(1,0,0,1,5,5)"/></svg>`, false},
+		{"a matrix's translation is in pixels", `<svg xmlns="http://www.w3.org/2000/svg"><g transform="matrix(1,0,0,1,5.3,5)"/></svg>`, `<svg xmlns="http://www.w3.org/2000/svg"><g transform="matrix(1,0,0,1,5,5)"/></svg>`, true},
 	}
 	for _, c := range cases {
 		r, err := svgdiff.Compare([]byte(c.got), []byte(c.want), tolerance)

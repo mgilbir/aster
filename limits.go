@@ -71,8 +71,9 @@ const bytesPerRow, bytesPerItem, bytesPerCell, bytesPerOp = 512, 1536, 16384, 15
 
 // bytesPerView turns a byte limit into the Vega-Lite views a compilation may
 // create: a plain unit view's compiled Vega retains about 24 KiB and the
-// compilation allocates ten times that as it goes.
-const bytesPerView = 32768
+// compilation allocates ten times that as it goes. The compiler weighs a
+// view by the same measure (a view that compiles more text weighs more).
+const bytesPerView = vegalite.ViewBytes
 
 // specBytesDivisor sets the specification a memory limit admits: a sixteenth of
 // the limit in bytes. The rows and items budgets charge what a specification

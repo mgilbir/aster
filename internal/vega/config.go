@@ -8,7 +8,7 @@ import (
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
-// defaultConfigJSON is vega-parser's config.js defaults. Every default matters:
+// defaultConfigJSON is vega-parser's config.js defaults (gen_config.mjs). Every default matters:
 // mark colours, axis and legend metrics and the named scale ranges all come
 // from here.
 //

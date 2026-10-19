@@ -8,6 +8,7 @@ import (
 	"math/bits"
 	"strings"
 	"unicode/utf8"
+	"unsafe"
 
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/format"
@@ -164,6 +165,29 @@ func textOf(ctx context.Context, b []byte) (string, error) {
 	// The copy is memory the load budget, which counted the bytes, does not:
 	// it is charged to the call's ledger first, and stays charged, since the
 	// text (or the substrings DSV fields take of it) lives as long as the data.
+	if !utf8.Valid(b) {
+		// Text is decoded as Response.text() and TextDecoder decode it
+		// (WHATWG UTF-8): one U+FFFD each maximal subpart of an invalid
+		// sequence, which can make the text up to three times longer.
+		n := jsval.DecodedLen(b)
+		if err := budget.LedgerFrom(ctx).Alloc(int64(n)); err != nil {
+			return "", err
+		}
+		d := make([]byte, 0, n)
+		for len(b) > 0 {
+			if err := ctx.Err(); err != nil {
+				return "", err
+			}
+			// A chunk ends at a character: a sequence is decoded whole.
+			end := min(len(b), textChunk)
+			for end < len(b) && !utf8.RuneStart(b[end]) && end-min(len(b), textChunk) < utf8.UTFMax {
+				end++
+			}
+			d = jsval.AppendDecoded(d, b[:end])
+			b = b[end:]
+		}
+		return unsafe.String(unsafe.SliceData(d), len(d)), nil
+	}
 	if err := budget.LedgerFrom(ctx).Alloc(int64(len(b))); err != nil {
 		return "", err
 	}

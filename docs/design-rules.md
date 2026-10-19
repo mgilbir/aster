@@ -173,6 +173,23 @@ Specifications and data are untrusted.
   `TestParsePollsThroughout`. JSON an input supplies (a specification, a
   `values` string, a loaded file) is parsed with `jsval.ParseJSONContext`,
   which polls as it reads.
+- The Vega-Lite compiler charges its memory to the call's ledger as well as
+  its work ([ADR 0019](adr/0019-vega-lite-compiler-byte-meter.md)). In
+  `internal/vegalite` a string whose length the specification controls is
+  built only through `sbuf` (a metered `strings.Builder`), `joinCC`,
+  `cc.cat` or `jsReplaceAll`, each charged before it allocates; no other
+  function holds a `strings.Builder`, joins or repeats a list, replaces with
+  a replacement that is not a constant, appends to a string in a loop or
+  dedupes a list by a scan in a loop, unless `TestNoUnmeteredBuilders`
+  allows it with why it is linear in one input. A copy or merge per child,
+  per node or per frame (an ancestor parse, a field set, a parse merged
+  into its parent, a union of domains) is made linear (shared until
+  written, merged in place on the larger side, extended in place) and
+  charged with `cc.alloc`; a new family of such copies gets a spec in
+  `complexitySpecs` and `TestCompileAllocGrowsLinearly`. What a view
+  compiles once per view it is copied into (the config, a layer's shared
+  encoding, the selections pushed into it) is weighed in `countViews`
+  before any view is built.
 - An input that once exhausted a bound goes into the bounded-input corpus
   (`testdata/security/bounded`, run by `TestBoundedInputs` in every test run;
   see [testing.md](testing.md#robustness)).

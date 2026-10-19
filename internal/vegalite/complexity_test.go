@@ -98,6 +98,54 @@ func complexitySpecs() map[string]func(n int) Value {
 					"params", arr(mkv("name", fmt.Sprintf("s%d", i), "select", "point")))
 			}))
 		},
+		// C9: a filter per field, each with its implicit parse, which
+		// MoveParseUp bubbles up and merges into one.
+		"filter-parse-chain": func(n int) Value {
+			return mkv("data", data(), "mark", "point", "encoding", enc(),
+				"transform", list(n, func(i int) Value { return mkv("filter", mkv("field", fmt.Sprintf("f%d", i), "equal", i)) }))
+		},
+		// C9: a chain of time units, each a field of its own, which
+		// RemoveDuplicateTimeUnits walks with the fields above each.
+		"timeunit-chain": func(n int) Value {
+			return mkv("data", data(), "mark", "point", "encoding", enc(),
+				"transform", list(n, func(i int) Value { return mkv("timeUnit", "year", "field", "a", "as", fmt.Sprintf("t%d", i)) }))
+		},
+		// C9: a parent deriving n fields (its ancestor parse) over n layers,
+		// each of which copied it.
+		"ap-layers": func(n int) Value {
+			return mkv("data", data(), "transform", list(n, func(i int) Value { return mkv("calculate", "1", "as", fmt.Sprintf("c%d", i)) }),
+				"layer", list(n, func(int) Value { return mkv("mark", "point") }))
+		},
+		// C26: a time unit per layer on a field of its own: the time-unit
+		// nodes become siblings, are merged one at a time, and each branch
+		// is walked with all their fields.
+		"layer-timeunits": func(n int) Value {
+			return mkv("data", data(), "layer", list(n, func(i int) Value {
+				return mkv("mark", "point", "encoding", mkv("x", mkv("field", fmt.Sprintf("t%d", i), "type", "temporal", "timeUnit", "month"),
+					"y", mkv("field", "b", "type", "quantitative")))
+			}))
+		},
+		// C11: a calculate whose `as` is a path of n pieces, then a filter
+		// whose implicit date parse moves up past it (fieldIntersection).
+		"dotted-as": func(n int) Value {
+			return mkv("data", data(), "mark", "point", "encoding", enc(), "transform", arr(
+				mkv("calculate", "1", "as", strings.TrimSuffix(strings.Repeat("a.", n), ".")),
+				mkv("filter", mkv("field", "b", "equal", mkv("year", 2000)))))
+		},
+		// A layer per field on a shared x scale: the domains of the layers
+		// are merged one at a time (domainsTieBreaker).
+		"layer-domains": func(n int) Value {
+			return mkv("data", data(), "layer", list(n, func(i int) Value {
+				return mkv("mark", "point", "encoding", mkv("x", mkv("field", fmt.Sprintf("x%d", i), "type", "quantitative")))
+			}))
+		},
+		// A layer per axis title on a shared axis: the titles are merged one
+		// at a time (mergeTitle).
+		"layer-axis-titles": func(n int) Value {
+			return mkv("data", data(), "layer", list(n, func(i int) Value {
+				return mkv("mark", "point", "encoding", mkv("x", mkv("field", "a", "type", "quantitative", "axis", mkv("title", fmt.Sprintf("a title of forty bytes or so, no. %06d", i)))))
+			}))
+		},
 	}
 }
 
@@ -160,6 +208,13 @@ func TestCompileWorkGrowsLinearly(t *testing.T) {
 		"selection-signal-names": {500, 0.25},
 		"layer-titles":           {500, 0.25},
 		"concat-selection-data":  {500, 0.6},
+		// C9, C26 (audit 2026-10-18): planted back, 1.50 (parse merges
+		// and intersections), 1.00 (ancestor parse copies), 1.51 (sibling
+		// time units) and 1.31 (merged titles).
+		"filter-parse-chain": {500, 0.25},
+		"ap-layers":          {500, 0.25},
+		"layer-timeunits":    {500, 0.25},
+		"layer-axis-titles":  {500, 0.25},
 	} {
 		t.Run(name, func(t *testing.T) {
 			w1, w2 := compileWork(t, specs[name](c.n)), compileWork(t, specs[name](2*c.n))
@@ -173,6 +228,11 @@ func TestCompileWorkGrowsLinearly(t *testing.T) {
 }
 
 // TestCompileAllocGrowsLinearly bounds the bytes allocated, for the
+// optimizer's and the parser's copies per node, child or frame (C9, C11,
+// C26, audit 2026-10-18: a chain of filters' parse merges, a chain of time
+// units, the ancestor parse per layer, sibling time units, a dotted field's
+// prefixes, the union of layer domains, merged axis titles; planted back,
+// they measure 8.9 to 377 bytes per n², the prefixes 1.5), and for the
 // families whose quadratic algorithm (C4) was ordering that charges nothing
 // (spread, a split and an omap order their keys without a compilation to
 // charge) but allocates its entries each time: `{...markDef.box}` of a
@@ -187,15 +247,24 @@ func TestCompileAllocGrowsLinearly(t *testing.T) {
 	if testutil.RaceEnabled {
 		t.Skip("allocation varies under the race detector")
 	}
-	const maxQuad = 5.0
 	specs := complexitySpecs()
-	for name, n := range map[string]int{"spread-string": 2000, "split-index-keys": 1000, "split-flip": 1000, "omap-index-keys": 1000} {
+	for name, c := range map[string]struct {
+		n       int
+		maxQuad float64
+	}{
+		"spread-string": {2000, 5}, "split-index-keys": {1000, 5}, "split-flip": {1000, 5}, "omap-index-keys": {1000, 5},
+		"filter-parse-chain": {500, 5}, "timeunit-chain": {500, 5}, "ap-layers": {500, 5}, "layer-timeunits": {250, 5},
+		"layer-domains": {500, 5}, "layer-axis-titles": {500, 5},
+		// A path's prefixes are 1.5 bytes per piece², whose square is n².
+		"dotted-as": {2000, 0.5},
+	} {
+		n, maxQuad := c.n, c.maxQuad
 		t.Run(name, func(t *testing.T) {
 			a1, a2 := compileAlloc(t, specs[name](n)), compileAlloc(t, specs[name](2*n))
 			quad := float64(a2-2*a1) / float64(2*n*n)
 			t.Logf("n=%d: %d bytes, 2n: %d; quadratic part %.3f bytes per n²", n, a1, a2, quad)
 			if quad > maxQuad {
-				t.Errorf("%s: the bytes allocated have a quadratic part of %.3f per n² (limit %.0f): super-linear", name, quad, maxQuad)
+				t.Errorf("%s: the bytes allocated have a quadratic part of %.3f per n² (limit %.1f): super-linear", name, quad, maxQuad)
 			}
 		})
 	}
@@ -234,5 +303,23 @@ func TestViewBudget(t *testing.T) {
 	}
 	if _, err := Compile(nested(2, 30), Options{MaxViews: 900}); !errors.Is(err, budget.ErrLimit) {
 		t.Errorf("930 views under a limit of 900: err = %v, want ErrLimit", err)
+	}
+	// C10 (audit 2026-10-18): every top-level selection is copied into
+	// every unit, which then weighs one more for each (and for its text):
+	// 30 repeated views and 40 selections weigh 31 + 30·40 and a little.
+	selections := func(n int) Value {
+		s := nested(1, 30)
+		params := make([]Value, n)
+		for i := range params {
+			params[i] = mkv("name", fmt.Sprintf("s%d", i), "select", "point")
+		}
+		s.ObjValue().Set("params", jsval.Arr(params))
+		return s
+	}
+	if _, err := Compile(selections(40), Options{MaxViews: 1000}); !errors.Is(err, budget.ErrLimit) || !strings.Contains(err.Error(), "weighing 12") {
+		t.Errorf("30 views and 40 selections under a limit of 1000: err = %v, want ErrLimit at a weight above 1231", err)
+	}
+	if _, err := Compile(selections(25), Options{MaxViews: 1000}); err != nil {
+		t.Errorf("30 views and 25 selections (781 and a little) under a limit of 1000: %v", err)
 	}
 }
