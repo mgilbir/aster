@@ -1,8 +1,6 @@
 package svg
 
 import (
-	"strings"
-
 	"github.com/mgilbir/aster/internal/scene"
 )
 
@@ -65,7 +63,14 @@ func (r *renderer) markAria(m *scene.Mark) {
 			label = m.Items[0].Description
 		}
 		if label == "" {
-			label = prefix + titleCaption(m.Items[0]) + "'"
+			w.attr("role", role)
+			w.attr("aria-roledescription", desc)
+			w.attrOpen("aria-label")
+			w.valStr(prefix)
+			w.titleCaption(m.Items[0])
+			w.valLit("'")
+			w.attrClose()
+			return
 		}
 	default:
 		t := m.Type
@@ -92,25 +97,24 @@ func (r *renderer) markAria(m *scene.Mark) {
 	}
 }
 
-// titleCaption is `array(item.text).join(' ')`.
-func titleCaption(it *scene.Item) string {
+// titleCaption writes `array(item.text).join(' ')`, an entry at a time (see
+// writer.valJS).
+func (w *writer) titleCaption(it *scene.Item) {
 	t := it.Text()
-	if t.IsNullish() {
-		return ""
-	}
 	if !t.IsArr() {
-		return t.AsString()
+		if !t.IsNullish() {
+			w.valJS(t)
+		}
+		return
 	}
-	items := t.Items()
-	parts := make([]string, len(items))
-	for i, v := range items {
-		if v.IsNullish() {
-			parts[i] = ""
-		} else {
-			parts[i] = v.AsString()
+	for i, v := range t.Items() {
+		if i > 0 {
+			w.valLit(" ")
+		}
+		if !v.IsNullish() {
+			w.valJS(v)
 		}
 	}
-	return strings.Join(parts, " ")
 }
 
 // itemAria writes the aria attributes of an item element.

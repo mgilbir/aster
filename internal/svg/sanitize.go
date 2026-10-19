@@ -110,7 +110,10 @@ func uriAllowed(uri string) bool {
 	if s == "" {
 		return false
 	}
-	lower := strings.ToLower(s)
+	// The regular expression has the i flag and not the u flag, so only
+	// ASCII letters fold: a character outside ASCII is never in [a-z], even
+	// one whose case mapping is an ASCII letter (KELVIN SIGN, U+0130).
+	lower := asciiLower(s)
 	for _, scheme := range []string{"http:", "https:", "ftp:", "ftps:", "mailto:", "tel:", "callto:", "cid:", "xmpp:", "file:", "data:"} {
 		if strings.HasPrefix(lower, scheme) {
 			return true
@@ -130,4 +133,20 @@ func uriAllowed(uri string) bool {
 	// A multi-byte character after the run is "not in the class".
 	r, _ := utf8.DecodeRuneInString(lower[i:])
 	return r != ':'
+}
+
+// asciiLower lowercases the ASCII letters of s only.
+func asciiLower(s string) string {
+	for i := 0; i < len(s); i++ {
+		if c := s[i]; c >= 'A' && c <= 'Z' {
+			b := []byte(s)
+			for j := i; j < len(b); j++ {
+				if c := b[j]; c >= 'A' && c <= 'Z' {
+					b[j] = c + ('a' - 'A')
+				}
+			}
+			return string(b)
+		}
+	}
+	return s
 }

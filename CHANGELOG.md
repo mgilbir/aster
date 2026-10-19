@@ -4,7 +4,17 @@ What changed between versions, for users of the library and the CLI. Breaking ch
 
 ## Unreleased
 
+### Security
+
+- **breaking (fewer successes):** the SVG size bound (`WithMemoryLimit(n)` gives n/4, 128 MiB by default) holds inside one item: the writer checks the size where it writes, so a text of many line breaks (each a `<tspan>`), a long path, a custom symbol drawn into its numbers, an escaped value, the `<defs>` and marks without items fail with `ErrLimit` as the document passes it. Before, it was checked only between items: a 4 MB specification of one text item returned a 46 MB document under a 16 MiB bound with no error, and peaked at 210 MiB (C7, audit 2026-10-18). The writer also polls the call's deadline as it writes and for each mark, and orders a group's marks by `zindex` in O(n log n): 62,000 marks without items ran 3.5 s past `WithTimeout` (C24). A text's lines are read in place instead of being split into a list three times, and a large document is returned without a copy.
+- **breaking (fewer successes):** an axis with explicit `values` and a `tickCount` that does not thin them (0, negative, NaN, a calendar interval) is refused with `ErrLimit` past 100,000 values in range, as computed ticks and legend entries are, instead of listing them all (C97).
+
 ### Fidelity
+
+- A value a specification computes is read as upstream reads it, never through the encodings of the test fixtures (C95): an object `{"$num": "Infinity"}` given as a size or position is an object (NaN, printed `[object Object]`), not infinity, which made the document `width="Infinity"` and PNG and PDF fail; a group's `clip` that is an object clips to the group's box; a `shape` that is an object is not a path generator.
+- A text whose `x` or `y` is an array or an object joins it as text with `dx`/`dy`, as upstream's `x + dx` does (`[5]` and 1 give `translate(51,…)`, not 6), also with a `radius`, and a `true` position prints `true` beside an angle; the bounds of a symbol, arc, shape or group positioned by a string, an array or an object concatenate the same way (C96).
+- A symbol `shape` that is falsy (0, `false`, `NaN`) is a circle, as `item.shape || 'circle'` makes it upstream, and an array naming a built-in symbol draws it; any other value that is not a string (a number, an object) fails as upstream's `path.match is not a function` does, where it was drawn as a path.
+- A link or image URL whose scheme has a character outside ASCII that lowercases to an ASCII letter (KELVIN SIGN, U+0130) is allowed as vega-loader allows it: its pattern folds ASCII letters only (C152). This only ever refused more than upstream.
 
 - **breaking (fewer successes):** more Vega-Lite input that upstream's compiler rejects fails as upstream's does, with its message ([ADR 0013](docs/adr/0013-invalid-input-fails-where-upstream-throws.md)), found by the nightly type-confusion differential (seeds 20741 and 20742):
   - a scale `domain` naming a member of `Object.prototype` (`"constructor"`, `"toString"`, `"__proto__"`, …), which upstream's deduplication reads as already seen, so hashing the empty domain fails;

@@ -23,14 +23,13 @@ func (r *renderer) textItem(m *scene.Mark, it *scene.Item) {
 	w := &r.w
 	dx := it.Dx().Zero()
 	dy := it.Dy().Zero() + scene.BaselineOffset(it)
-	x, y := scene.AnchorPoint(it)
 
 	w.attrLit("text-anchor", textAnchor(it.Align))
 	w.attrOpen("transform")
-	if xv, yv := it.PosValue("x"), it.PosValue("y"); (xv.IsStr() || yv.IsStr()) && it.Radius().Zero() == 0 {
-		w.wordTransform(it, xv, yv, dx, dy)
+	if x, y := scene.AnchorValues(it); !x.IsNum() || !y.IsNum() {
+		w.wordTransform(it, x, y, dx, dy)
 	} else if it.AngleTruthy() {
-		w.translate(x, y)
+		w.translate(x.NumValue(), y.NumValue())
 		w.valLit(" ")
 		w.rotate(it)
 		if dx != 0 || dy != 0 {
@@ -38,18 +37,22 @@ func (r *renderer) textItem(m *scene.Mark, it *scene.Item) {
 			w.translate(dx, dy)
 		}
 	} else {
-		w.translate(x+dx, y+dy)
+		w.translate(x.NumValue()+dx, y.NumValue()+dy)
 	}
 	w.attrClose()
 	r.style(m, it, "text", it.Fill, it.Stroke)
 
-	line, lines := scene.TextLine(it)
-	if lines == nil {
-		w.text(r.metrics.TextValue(it, line))
+	lines := scene.TextLines(it)
+	if !lines.Multi {
+		w.text(r.metrics.TextValue(it, lines.Line()))
 		return
 	}
 	lh := scene.LineHeight(it)
-	for i, l := range lines {
+	for i := 0; w.err == nil; i++ {
+		l, ok := lines.Next()
+		if !ok {
+			break
+		}
 		w.start("tspan")
 		if i > 0 {
 			w.attrLit("x", "0")
@@ -61,31 +64,17 @@ func (r *renderer) textItem(m *scene.Mark, it *scene.Item) {
 }
 
 // wordTransform is the text transform of attr() in vega-scenegraph's
-// marks/text.js when x or y is a string, where `x + dx` joins the strings
-// instead of adding. The words are spec or data text, written escaped.
+// marks/text.js when the anchor x or y is not a number (a position given a
+// string, an array, an object or a boolean): `translate(x + dx, y + dy)`, where
+// + joins the text of a string, array or object with the number instead of
+// adding, or `translate(x, y) rotate(angle)` printing each as String(value).
+// The words are spec or data text, written escaped.
 func (w *writer) wordTransform(it *scene.Item, xv, yv jsval.Value, dx, dy float64) {
-	// join is `a + b`: a string followed by the number, or the sum.
-	join := func(a jsval.Value, b float64) {
-		if a.IsStr() {
-			w.valStr(a.StrValue())
-			w.valNum(b)
-			return
-		}
-		w.valNum(jsval.ToNumber(a) + b)
-	}
-	// text is the anchor coordinate as translate() prints it.
-	text := func(v jsval.Value) {
-		if v.IsStr() {
-			w.valStr(v.StrValue())
-			return
-		}
-		w.valNum(jsval.ToNumber(v))
-	}
 	w.valLit("translate(")
 	if it.AngleTruthy() {
-		text(xv)
+		w.valJS(xv)
 		w.valLit(",")
-		text(yv)
+		w.valJS(yv)
 		w.valLit(") ")
 		w.rotate(it)
 		if dx != 0 || dy != 0 {
@@ -94,10 +83,21 @@ func (w *writer) wordTransform(it *scene.Item, xv, yv jsval.Value, dx, dy float6
 		}
 		return
 	}
-	join(xv, dx)
+	w.plus(xv, dx)
 	w.valLit(",")
-	join(yv, dy)
+	w.plus(yv, dy)
 	w.valLit(")")
+}
+
+// plus writes String(a + b) for a coordinate a and a number b (scene.Plus),
+// a concatenation written as its two parts.
+func (w *writer) plus(a jsval.Value, b float64) {
+	if a.IsStr() || a.IsArr() || a.IsObj() {
+		w.valJS(a)
+		w.valNum(b)
+		return
+	}
+	w.valJS(scene.Plus(a, b))
 }
 
 // imageItem writes an <image>: source, placement (alignment offsets from the

@@ -44,6 +44,17 @@ func (bd *Bounder) ledger() *budget.Ledger {
 	return bd.ctx.ledger
 }
 
+// poll is called for each item, and for each line of a text: it polls the
+// Context every so many calls.
+func (bd *Bounder) poll() error {
+	if bd.Context != nil {
+		if bd.n++; bd.n&127 == 0 {
+			return bd.Context.Err()
+		}
+	}
+	return nil
+}
+
 // NewBounder returns a Bounder using measurer for text widths (nil selects
 // vega's width estimate).
 func NewBounder(measurer TextMeasurer) *Bounder {
@@ -104,12 +115,8 @@ func (bd *Bounder) BoundMark(m *Mark) error {
 	} else {
 		m.Bounds.Clear()
 		for _, it := range m.Items {
-			if bd.Context != nil {
-				if bd.n++; bd.n&127 == 0 {
-					if err := bd.Context.Err(); err != nil {
-						return err
-					}
-				}
+			if err := bd.poll(); err != nil {
+				return err
 			}
 			it.Bounds.Clear()
 			if err := bd.itemBounds(m.Type, &it.Bounds, it); err != nil {
@@ -210,7 +217,7 @@ func (bd *Bounder) itemBounds(t MarkType, b *Bounds, it *Item) error {
 		if err != nil {
 			return err
 		}
-		BoundStroke(b, it, true).Translate(it.OrZero("x"), it.OrZero("y"))
+		BoundStroke(b, it, true).translateItem(it)
 	case MarkRect:
 		x, y := it.OrZero("x"), it.OrZero("y")
 		// (x + width) || 0: NaN sums collapse to 0, but a sum with a word is
@@ -233,7 +240,7 @@ func (bd *Bounder) itemBounds(t MarkType, b *Bounds, it *Item) error {
 	case MarkImage:
 		bd.imageBounds(b, it)
 	case MarkText:
-		bd.textBounds(b, it, 0)
+		return bd.textBounds(b, it, 0)
 	case MarkPath:
 		return bd.pathBounds(b, it)
 	case MarkGroup:
@@ -288,7 +295,7 @@ func (bd *Bounder) groupBounds(b *Bounds, g *Item) error {
 		b.Add(0, 0).Add(g.Width.Zero(), g.Height.Zero())
 	}
 	BoundStroke(b, g, false)
-	b.Translate(g.OrZero("x"), g.OrZero("y"))
+	b.translateItem(g)
 	return nil
 }
 
@@ -427,23 +434,70 @@ func AnchorPoint(it *Item) (x, y float64) {
 	return
 }
 
+// AnchorValues is AnchorPoint as the JavaScript values upstream computes:
+// `item.x || 0` is the value the position was given, a word included, and
+// adding the polar offset to a string, array or object concatenates (see
+// jsPlus). Both are numbers unless a position was given something else.
+func AnchorValues(it *Item) (x, y jsval.Value) {
+	if !it.hasRawPos() {
+		ax, ay := AnchorPoint(it)
+		return jsval.Num(ax), jsval.Num(ay)
+	}
+	x, y = it.PosValue("x"), it.PosValue("y")
+	if r := it.Radius().Zero(); r != 0 {
+		t := it.Theta().Zero() - halfPi
+		x = jsPlus(x, jsval.Num(float64(r*jsmath.Cos(t))))
+		y = jsPlus(y, jsval.Num(float64(r*jsmath.Sin(t))))
+	}
+	return x, y
+}
+
+// translateItem is upstream's `bounds.translate(item.x || 0, item.y || 0)`,
+// which is `this.x1 += dx` on each side: a position given a string, an array
+// or an object turns each side into the concatenation of its number and that
+// text (-4 + "5" is "-45"). The sides are read as the numbers those strings
+// convert to, as textBoundsRaw does; upstream keeps the strings, which only
+// a comparison of two of them (as text) in a later union tells apart.
+func (b *Bounds) translateItem(it *Item) {
+	if !it.hasRawPos() {
+		b.Translate(it.OrZero("x"), it.OrZero("y"))
+		return
+	}
+	x, y := it.PosValue("x"), it.PosValue("y")
+	side := func(s *float64, d jsval.Value) { *s = jsval.ToNumber(jsPlus(jsval.Num(*s), d)) }
+	side(&b.X1, x)
+	side(&b.X2, x)
+	side(&b.Y1, y)
+	side(&b.Y2, y)
+}
+
+// Plus is JavaScript's `a + b` for a coordinate a (as AnchorValues gives it)
+// and a number: a string, array or object followed by the number's text,
+// otherwise the sum.
+func Plus(a jsval.Value, b float64) jsval.Value { return jsPlus(a, jsval.Num(b)) }
+
 // textBounds sets b to the text's box. mode 0 rotates the box about the anchor
 // when the item has an angle; mode 1 leaves it unrotated (for hit tests).
-func (bd *Bounder) textBounds(b *Bounds, it *Item, mode int) {
+// Each line is measured, so the Context is polled as lines are, not only
+// between items: one item can hold any number of lines.
+func (bd *Bounder) textBounds(b *Bounds, it *Item, mode int) error {
 	h := bd.Height(it)
 	x, y := AnchorPoint(it)
 	dx := it.Dx().Zero()
 	dy := it.Dy().Zero() + BaselineOffset(it) - jsRound(float64(0.8*h)) // use 4/5 offset
-	line, lines := TextLine(it)
+	lines := TextLines(it)
 
 	var w float64
-	if lines != nil {
-		h += float64(LineHeight(it) * float64(len(lines)-1))
-		for _, l := range lines {
+	if lines.Multi {
+		h += float64(LineHeight(it) * float64(lines.N-1))
+		for l, ok := lines.Next(); ok; l, ok = lines.Next() {
+			if err := bd.poll(); err != nil {
+				return err
+			}
 			w = math.Max(w, bd.Width(it, l))
 		}
 	} else {
-		w = bd.Width(it, line)
+		w = bd.Width(it, lines.Line())
 	}
 
 	switch it.Align {
@@ -455,7 +509,7 @@ func (bd *Bounder) textBounds(b *Bounds, it *Item, mode int) {
 
 	if it.hasRawPos() {
 		bd.textBoundsRaw(b, it, mode, dx, dy, w, h)
-		return
+		return nil
 	}
 	dx += x
 	dy += y
@@ -463,6 +517,7 @@ func (bd *Bounder) textBounds(b *Bounds, it *Item, mode int) {
 	if it.AngleTruthy() && mode == 0 {
 		b.Rotate(it.Angle.Val()*degToRad, x, y)
 	}
+	return nil
 }
 
 // hasRawPos reports a text position that was given as something other than a
@@ -481,12 +536,7 @@ func (it *Item) hasRawPos() bool {
 // corners as numbers; an unrotated box keeps the strings upstream, and is
 // read here as the numbers they convert to.
 func (bd *Bounder) textBoundsRaw(b *Bounds, it *Item, mode int, dx, dy, w, h float64) {
-	ax, ay := it.PosValue("x"), it.PosValue("y")
-	if r := it.Radius().Zero(); r != 0 {
-		t := it.Theta().Zero() - halfPi
-		ax = jsPlus(ax, jsval.Num(float64(r*jsmath.Cos(t))))
-		ay = jsPlus(ay, jsval.Num(float64(r*jsmath.Sin(t))))
-	}
+	ax, ay := AnchorValues(it)
 	x1, y1 := jsPlus(jsval.Num(dx), ax), jsPlus(jsval.Num(dy), ay)
 	x2, y2 := jsPlus(x1, jsval.Num(w)), jsPlus(y1, jsval.Num(h))
 	if jsLess(x2, x1) {

@@ -44,6 +44,9 @@ func renderStructure(t *testing.T, sg *scene.Scenegraph, label string) string {
 		}
 		return ""
 	}
+	if len(out) > opt.MaxBytes {
+		t.Errorf("%s: a %d-byte document returned under MaxBytes %d", label, len(out), opt.MaxBytes)
+	}
 	if err := svgcheck.Check(out); err != nil {
 		t.Errorf("%s: %v\n%s", label, err, out)
 		return out

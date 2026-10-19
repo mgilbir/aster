@@ -99,34 +99,67 @@ func BaselineOffset(it *Item) float64 {
 	return 0
 }
 
-// TextLines returns the lines of an item's text. multi is true when the text is
-// an array of two or more lines (or a string split on lineBreak); otherwise
-// lines holds one entry. Null entries become "" and other values are
-// stringified, as textValue does with `line + ”`.
-func TextLines(it *Item) (lines []string, multi bool) {
+// Lines are the lines of an item's text, upstream's textLines(item): the
+// entries of an array of two or more, or the text split on lineBreak, else
+// the text as one line. They are read in place, one at a time, never made
+// into a list: a text of a million line breaks is a million lines, and the
+// bounds, the layout and the writer each go through them (C7, audit
+// 2026-10-18). Null entries are "" and other values are stringified, as
+// textValue does with `line + ”`.
+type Lines struct {
+	// N is the number of lines; Multi is true for an array of two or more
+	// lines or a text split in two or more (drawn as one <tspan> a line).
+	N     int
+	Multi bool
+
+	arr  []jsval.Value // the lines of an array
+	s    string        // the text left to split, or the one line
+	sep  string        // the lineBreak s splits on, "" for one line
+	next int           // the index of the next line
+}
+
+// TextLines returns the lines of an item's text, ready to read with Next.
+func TextLines(it *Item) Lines {
 	t := it.Text()
 	switch {
 	case t.IsArr():
 		items := t.Items()
-		if len(items) > 1 {
-			out := make([]string, len(items))
-			for i, v := range items {
-				out[i] = lineString(v)
-			}
-			return out, true
+		switch len(items) {
+		case 0:
+			return Lines{N: 1}
+		case 1:
+			return Lines{N: 1, s: lineString(items[0])}
 		}
-		if len(items) == 1 {
-			return []string{lineString(items[0])}, false
-		}
-		return []string{""}, false
+		return Lines{N: len(items), Multi: true, arr: items}
 	case it.LineBreak() != "" && t.IsTruthy():
-		parts := strings.Split(t.AsString(), it.LineBreak())
-		if len(parts) > 1 {
-			return parts, true
+		text, sep := t.AsString(), it.LineBreak()
+		// text.split(lineBreak) has one more part than it has separators.
+		if n := strings.Count(text, sep) + 1; n > 1 {
+			return Lines{N: n, Multi: true, s: text, sep: sep}
 		}
-		return parts, false
+		return Lines{N: 1, s: text}
 	}
-	return []string{lineString(t)}, false
+	return Lines{N: 1, s: lineString(t)}
+}
+
+// Line is the text of a single line (when not Multi).
+func (l *Lines) Line() string { return l.s }
+
+// Next returns the next line, and false once every line has been read.
+func (l *Lines) Next() (line string, ok bool) {
+	if l.next >= l.N {
+		return "", false
+	}
+	l.next++
+	switch {
+	case l.arr != nil:
+		return lineString(l.arr[l.next-1]), true
+	case l.sep != "" && l.next < l.N:
+		i := strings.Index(l.s, l.sep)
+		line, l.s = l.s[:i], l.s[i+len(l.sep):]
+		return line, true
+	}
+	return l.s, true
 }
 
 // lineString is `line == null ? ” : line + ”` without the trim.
@@ -140,26 +173,10 @@ func lineString(v jsval.Value) string {
 	return v.AsString()
 }
 
-// TextLine returns the item's text as a single line when it is not multi-line
-// (lines is nil), or the lines otherwise (line is empty). It avoids the slice
-// TextLines allocates for the common single-line case.
-func TextLine(it *Item) (line string, lines []string) {
-	t := it.Text()
-	if !t.IsArr() && (it.LineBreak() == "" || !t.IsTruthy()) {
-		return lineString(t), nil
-	}
-	l, multi := TextLines(it)
-	if multi {
-		return "", l
-	}
-	return l[0], nil
-}
-
 // MultiLineOffset is the extra height of a multi-line text block.
 func MultiLineOffset(it *Item) float64 {
-	lines, multi := TextLines(it)
-	if multi {
-		return float64(len(lines)-1) * LineHeight(it)
+	if l := TextLines(it); l.Multi {
+		return float64(l.N-1) * LineHeight(it)
 	}
 	return 0
 }

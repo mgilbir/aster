@@ -51,12 +51,12 @@ func SetterFor(name string) Setter {
 	switch name {
 	case "fill":
 		return func(it *Item, val jsval.Value) error {
-			it.Fill = (*jsonLoader)(nil).paint(val)
+			it.Fill = paintOf(val)
 			return nil
 		}
 	case "stroke":
 		return func(it *Item, val jsval.Value) error {
-			it.Stroke = (*jsonLoader)(nil).paint(val)
+			it.Stroke = paintOf(val)
 			return nil
 		}
 	case "interpolate":

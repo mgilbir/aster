@@ -68,6 +68,13 @@ func (e *Env) AxisTicks(in AxisTicksInput) ([]jsval.Value, error) {
 	}
 	if hasValues {
 		values = scale.ValidTicks(in.Scale, values, count)
+		// The values in range are the ticks unless a positive count thinned
+		// them: refused past the bound, as computed ticks and legend
+		// entries are, before a datum or a label is made (C97, audit
+		// 2026-10-18).
+		if len(values) > scale.MaxTicks {
+			return nil, fmt.Errorf("%w: axis of %d explicit values exceeds the limit of %d ticks", budget.ErrLimit, len(values), scale.MaxTicks)
+		}
 	} else if values, err = scale.TickValues(e.ctx(), in.Scale, count); err != nil {
 		return nil, err
 	}

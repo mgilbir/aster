@@ -25,6 +25,14 @@ var ErrUnknownOrient = errors.New("scene: unknown orient for the monotone interp
 // the mark's nor the item's); upstream calls `.context` on undefined.
 var ErrNoShapeGenerator = errors.New("Cannot read properties of undefined (reading 'context')")
 
+// ErrSymbolShapeNotString reports a symbol whose shape is a value other than
+// a string (a number, an array, an object) that names no built-in symbol:
+// upstream parses it as a path, and its path.match throws. Upstream's parse
+// cache is keyed by String(shape) and lives as long as the process, so there
+// a value whose text an earlier string shape parsed draws that path; a render
+// here depends on its own input only.
+var ErrSymbolShapeNotString = errors.New("TypeError: path.match is not a function")
+
 // ErrCurveNoArea reports an area drawn with the bundle interpolation, which d3
 // implements only for lines; upstream fails with a TypeError.
 var ErrCurveNoArea = errors.New("scene: bundle interpolation cannot draw areas")
@@ -466,6 +474,11 @@ func Symbol(ctx PathContext, it *Item) error {
 	if drawBuiltinSymbol(ctx, name, size) {
 		return ctxErr(ctx)
 	}
+	if _, ok := it.Raw["shape"]; ok {
+		// symbols(_) looks a built-in up by String(_), and parses anything
+		// else as a path with path.match, which only a string has.
+		return ErrSymbolShapeNotString
+	}
 	cmds, err := customSymbol(ledgerOf(ctx), name)
 	if err != nil {
 		return err
@@ -623,6 +636,9 @@ func ItemPathData(sp *StringPath, mark MarkType, it *Item) (d []byte, ok bool, e
 		}
 		// `path.context(null)(item)`: the generator formats its own string.
 		s := fn(nil, it)
+		if sp.limited && len(s) > sp.lim {
+			return nil, false, sp.limErr
+		}
 		sp.buf = append(sp.buf[:0], s...)
 		return sp.buf, s != "", nil
 	case MarkArc:

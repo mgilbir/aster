@@ -44,6 +44,12 @@ regular expression is `KindPattern` compiled with `github.com/mgilbir/goecma262`
   `+x` in upstream is `ToNumber`.
 - `v.IsTruthy()` is JavaScript truthiness. `v.AsString()` is `String(v)`.
 - `jsval.JSNumberString` is `Number.prototype.toString`.
+- A test fixture's encoding of what JSON cannot carry (the serialized
+  scenegraph's `{"$num": "Infinity"}`, `$gid`/`$gref` gradient identity and
+  recorded `{"path", "ops"}` generators) is read by its loader only
+  (`scene.FromJSON`), never where a live value is read: `Item.Set` reads a
+  value as JavaScript does, whatever keys an object a spec computes has
+  (`TestRecordingConventionsStayInTheLoader`).
 
 ### Tuples
 
@@ -143,7 +149,11 @@ Specifications and data are untrusted.
   raw markup (names, constant values) is of type `lit`, which a string variable
   cannot become without a conversion `TestNoRawMarkup` rejects. A value that is
   a word where a number is expected (`x: "wide"`) is spec text too: upstream
-  prints it, and it is escaped like any other.
+  prints it, and it is escaped like any other. The writer owns the size bound
+  and the deadline the same way: each method that appends checks the size
+  where it writes (and polls the context every 64 KiB of output), the error is
+  sticky and later writes are no-ops, so no caller checks the size and one
+  item cannot grow the document past it.
 - No reflection-based evaluation, no access to the host from expressions:
   the expression language can only call the whitelisted function table.
 - Data loading and image/link URLs only through the configured `Loader`.

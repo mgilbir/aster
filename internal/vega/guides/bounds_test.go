@@ -3,6 +3,7 @@ package guides
 import (
 	"context"
 	"errors"
+	"math"
 	"strings"
 	"testing"
 
@@ -117,5 +118,53 @@ func TestLabelsChargedToTheLedger(t *testing.T) {
 	_, err = env.LegendEntries(LegendEntriesInput{Scale: lin, Count: jsval.Num(5), Type: "gradient", FormatSpecifier: jsval.Str(">300000")})
 	if !errors.Is(err, budget.ErrLimit) {
 		t.Errorf("legend labels: %v; want a limit error", err)
+	}
+}
+
+// TestExplicitValuesPastTheTickBoundFail is C97 (audit 2026-10-18): explicit
+// axis values are the ticks the axis lists unless a positive count thins
+// them, so more than scale.MaxTicks of them are refused as legend entries
+// are, whatever the count says (zero, negative, NaN, a calendar interval),
+// instead of becoming datums, labels and marks.
+func TestExplicitValuesPastTheTickBoundFail(t *testing.T) {
+	lin, _ := scale.New(scale.TypeLinear)
+	lin.SetDomain([]jsval.Value{jsval.Num(0), jsval.Num(1)})
+	lin.SetRange([]jsval.Value{jsval.Num(0), jsval.Num(100)})
+	values := func(n int) jsval.Value {
+		vs := make([]jsval.Value, n)
+		for i := range vs {
+			vs[i] = jsval.Num(float64(i) / float64(n))
+		}
+		return jsval.Arr(vs)
+	}
+	env := &Env{Locale: format.DefaultLocale()}
+	utc := utcScale(t, 0, 1)
+	for _, c := range []struct {
+		name  string
+		s     scale.Scale
+		count jsval.Value
+	}{
+		{"0", lin, jsval.Num(0)}, {"-1", lin, jsval.Num(-1)}, {"NaN", lin, jsval.Num(math.NaN())}, {"false", lin, jsval.False},
+		{"interval", utc, jsval.Str("day")}, {"{interval}", utc, objOf("interval", jsval.Str("day"))},
+	} {
+		if _, err := env.AxisTicks(AxisTicksInput{Scale: c.s, Count: c.count, Values: values(scale.MaxTicks + 1)}); !errors.Is(err, budget.ErrLimit) {
+			t.Errorf("count %s, %d values: %v; want a limit error", c.name, scale.MaxTicks+1, err)
+		}
+		// fewer are listed
+		if got, err := env.AxisTicks(AxisTicksInput{Scale: c.s, Count: c.count, Values: values(1000)}); err != nil || len(got) != 1000 {
+			t.Errorf("count %s, 1000 values: %d ticks, %v", c.name, len(got), err)
+		}
+	}
+	if got, err := env.AxisTicks(AxisTicksInput{Scale: lin, Count: jsval.Num(10), Values: values(scale.MaxTicks + 1)}); err != nil || len(got) > 10 {
+		t.Errorf("count 10 over %d values: %d ticks, %v; want them thinned to at most 10", scale.MaxTicks+1, len(got), err)
+	}
+	// values outside the range are not listed, so they do not count
+	out := values(scale.MaxTicks + 1).Items()
+	out = append(out, jsval.Num(0.5))
+	for i := range out[:len(out)-1] {
+		out[i] = jsval.Num(2 + float64(i))
+	}
+	if got, err := env.AxisTicks(AxisTicksInput{Scale: lin, Count: jsval.Num(0), Values: jsval.Arr(out)}); err != nil || len(got) != 1 {
+		t.Errorf("one of %d values in range: %d ticks, %v", len(out), len(got), err)
 	}
 }

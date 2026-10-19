@@ -6,8 +6,10 @@ import (
 
 // Set assigns an item property by its Vega name from a dynamic value, coercing
 // it to the field's type the way the renderer would read it (`+x` for numbers,
-// `String(x)` for text, null/undefined for "unset"). It is how encode results
-// (name to value maps) become items. Names this package does not model go into
+// `String(x)` for text, null/undefined for "unset"): JavaScript's reading of
+// the value, whatever keys an object has (the encodings of serialized
+// scenegraphs are FromJSON's alone). It is how encode results (name to value
+// maps) become items. Names this package does not model go into
 // Extra and Set reports false for them; the structural keys (items, bounds,
 // mark, group) are ignored. Function-valued properties (clip paths, shape
 // generators) cannot be expressed as values: set ClipPath and Shape.Func
@@ -17,10 +19,10 @@ import (
 // "radial"), optional coordinates and `stops`; each Set creates a new
 // gradient identity, as each encode evaluation creates a new object.
 func (it *Item) Set(key string, val jsval.Value) (known bool, err error) {
-	return it.setProp(nil, key, val)
+	return it.setProp(key, val)
 }
 
-func (it *Item) setProp(l *jsonLoader, k string, val jsval.Value) (bool, error) {
+func (it *Item) setProp(k string, val jsval.Value) (bool, error) {
 	if rawNumeric(k) {
 		it.setRaw(k, val)
 	}
@@ -42,9 +44,9 @@ func (it *Item) setProp(l *jsonLoader, k string, val jsval.Value) (bool, error) 
 	case "baseline":
 		it.Baseline = strOf(val)
 	case "fill":
-		it.Fill = l.paint(val)
+		it.Fill = paintOf(val)
 	case "stroke":
-		it.Stroke = l.paint(val)
+		it.Stroke = paintOf(val)
 	case "opacity":
 		it.Opacity = numOf(val)
 	case "fillOpacity":
@@ -91,14 +93,25 @@ func (it *Item) setProp(l *jsonLoader, k string, val jsval.Value) (bool, error) 
 	case "outerRadius":
 		it.geomW().OuterRadius = numOf(val)
 	case "shape":
-		if val.IsObj() {
-			fn, err := pathFuncFromValue(val)
-			if err != nil {
-				return true, err
+		// A symbol's shape is `symbols(item.shape || 'circle')`: a falsy
+		// value is a circle, a string a built-in name or a path, and any
+		// other value is kept as given (see Symbol). A generator is a
+		// function, which no value is: geoShape and pathShape handles are
+		// resolved by the encoder before Set.
+		it.Shape.Name = ""
+		delete(it.Raw, k)
+		switch {
+		case val.IsStr():
+			it.Shape.Name = val.StrValue()
+		case val.IsNullish():
+		default:
+			if it.Raw == nil {
+				it.Raw = make(map[string]jsval.Value, 1)
 			}
-			it.Shape.Func = func(ctx PathContext, _ *Item) string { return fn(ctx) }
-		} else {
-			it.Shape.Name = strOf(val)
+			it.Raw[k] = val
+			if val.IsTruthy() {
+				it.Shape.Name = val.AsString()
+			}
 		}
 	case "size":
 		it.Size = numOf(val)
@@ -196,15 +209,9 @@ func (it *Item) setProp(l *jsonLoader, k string, val jsval.Value) (bool, error) 
 	case "datum":
 		it.Datum = val
 	case "clip":
-		if val.IsObj() {
-			fn, err := pathFuncFromValue(val)
-			if err != nil {
-				return true, err
-			}
-			it.Clip, it.ClipPath = Yes, fn
-		} else {
-			it.Clip = triOf(val)
-		}
+		// `if (item.clip)`, and a clip path only when it is a function
+		// (vega-scenegraph's util/svg/clip.js): a value clips to the box.
+		it.Clip = triOf(val)
 	case "noBound":
 		it.NoBound = val.IsTruthy()
 	case "bounds", "rbounds", "mark", "group", "exit":
@@ -479,14 +486,7 @@ func (it *Item) orZeroProp(prop string, n Num, fallbackProp string, fallback Num
 
 func (it *Item) setRaw(k string, val jsval.Value) {
 	switch val.Kind() {
-	case jsval.KindObj:
-		if val.Get("$num").IsStr() {
-			// a non-finite number as a recording carries it (see numOf)
-			delete(it.Raw, k)
-			return
-		}
-		fallthrough
-	case jsval.KindStr, jsval.KindBool, jsval.KindArr:
+	case jsval.KindObj, jsval.KindStr, jsval.KindBool, jsval.KindArr:
 		if it.Raw == nil {
 			it.Raw = make(map[string]jsval.Value, 1)
 		}
@@ -573,4 +573,90 @@ func (it *Item) isWord(prop string) bool {
 	}
 	f := jsval.ToNumber(v)
 	return f != f
+}
+
+func strOf(v jsval.Value) string {
+	if v.IsNullish() {
+		return ""
+	}
+	if v.IsStr() {
+		return v.StrValue()
+	}
+	return v.AsString()
+}
+
+// strOfTruthy is strOf for properties that upstream reads as `value || default`
+// (interpolate, orient): every falsy value (0, NaN, false, null) is unset.
+func strOfTruthy(v jsval.Value) string {
+	if !v.IsTruthy() {
+		return ""
+	}
+	return strOf(v)
+}
+
+// numOf is `+value` for a numeric property, nullish being unset.
+func numOf(v jsval.Value) Num {
+	if v.IsNullish() {
+		return Num{}
+	}
+	return N(jsval.ToNumber(v))
+}
+
+// triOf is a boolean property upstream reads for its truthiness
+// (`if (item.clip)`, `item.strokeForeground && item.stroke`).
+func triOf(v jsval.Value) Tri {
+	if v.IsNullish() {
+		return Unset
+	}
+	return B(v.IsTruthy())
+}
+
+// FalseOf is a boolean property upstream reads as `value === false`
+// (defined, aspect, smooth and aria, of marks and of items): only the
+// boolean false is No, and every other value set (0, "", NaN, "false") is
+// Yes.
+func FalseOf(v jsval.Value) Tri {
+	if v.IsNullish() {
+		return Unset
+	}
+	return B(!(v.IsBool() && !v.BoolValue()))
+}
+
+// paintOf is a fill or stroke value: undefined is unset, null is none, an
+// object with a truthy `gradient` a gradient (a new identity per value, as
+// each encode evaluation makes a new object), anything else the colour
+// String(value).
+func paintOf(v jsval.Value) Paint {
+	switch {
+	case v.IsUndefined():
+		return Paint{}
+	case v.IsNull():
+		return NullPaint()
+	case v.IsObj():
+		if v.Get("gradient").IsTruthy() {
+			return GradientPaint(gradientOf(v, numOf))
+		}
+		return Color(v.AsString())
+	case v.IsStr():
+		return Color(v.StrValue())
+	}
+	return Color(v.AsString())
+}
+
+// gradientOf builds a gradient from its object, reading coordinates with num.
+func gradientOf(v jsval.Value, num func(jsval.Value) Num) *Gradient {
+	g := &Gradient{
+		Radial: v.Get("gradient").AsString() == "radial",
+		ID:     strOf(v.Get("id")),
+		X1:     num(v.Get("x1")), Y1: num(v.Get("y1")),
+		X2: num(v.Get("x2")), Y2: num(v.Get("y2")),
+		R1: num(v.Get("r1")), R2: num(v.Get("r2")),
+	}
+	for _, s := range v.Get("stops").Items() {
+		g.Stops = append(g.Stops, GradientStop{
+			Offset: jsval.ToNumber(s.Get("offset")),
+			Color:  strOf(s.Get("color")),
+		})
+	}
+	return g
 }

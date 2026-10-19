@@ -7,7 +7,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
+	"unsafe"
 
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/scene"
@@ -75,12 +77,23 @@ func Render(ctx context.Context, sg *scene.Scenegraph, opt Options) (string, err
 		bp = new([]byte)
 	}
 	b, err := AppendSVG(ctx, (*bp)[:0], sg, opt)
-	out := string(b)
-	if cap(b) <= maxPooledSVG {
+	if err != nil {
 		*bp = b[:0]
-		svgBufs.Put(bp)
+		if cap(b) <= maxPooledSVG {
+			svgBufs.Put(bp)
+		}
+		return "", err
 	}
-	return out, err
+	if cap(b) > maxPooledSVG {
+		// A buffer too large to keep becomes the document itself: copying
+		// it would hold the document twice at the peak, the largest
+		// allocation of the call. Nothing writes to it again.
+		return unsafe.String(unsafe.SliceData(b), len(b)), nil
+	}
+	out := string(b)
+	*bp = b[:0]
+	svgBufs.Put(bp)
+	return out, nil
 }
 
 // maxPooledSVG bounds the buffers kept for reuse, so one huge chart does not
@@ -91,26 +104,33 @@ var svgBufs sync.Pool // of *[]byte
 
 // AppendSVG is Render appending to dst.
 func AppendSVG(ctx context.Context, dst []byte, sg *scene.Scenegraph, opt Options) ([]byte, error) {
-	if sg == nil || sg.Root == nil {
-		return dst, errNilScene
+	r, err := render(ctx, dst, sg, opt)
+	if err != nil {
+		return dst, err
 	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
+	return r.w.bytes(), nil
+}
+
+// render writes the document for sg after dst, returning the renderer (its
+// buffers) whatever the outcome.
+func render(ctx context.Context, dst []byte, sg *scene.Scenegraph, opt Options) (*renderer, error) {
 	r := &renderer{
 		ctx:     ctx,
 		opt:     opt,
 		metrics: scene.Metrics{Measurer: opt.Measurer},
 	}
-	r.w.reset(dst)
+	if sg == nil || sg.Root == nil {
+		return r, errNilScene
+	}
+	if r.ctx == nil {
+		r.ctx = context.Background()
+	}
+	r.w.reset(r.ctx, dst, opt.MaxBytes)
 	r.w.skel = opt.skeleton
 	if r.opt.Href == nil {
 		r.opt.Href = DefaultHref(URLOptions{})
 	}
-	if err := r.root(sg.Root); err != nil {
-		return dst, err
-	}
-	return r.w.bytes(), nil
+	return r, r.root(sg.Root)
 }
 
 type renderer struct {
@@ -175,19 +195,34 @@ func (r *renderer) root(scn *scene.Mark) error {
 
 	r.defs()
 	w.end() // </svg>
+	return w.err
+}
+
+// tick is called for every mark and every item: it returns the writer's
+// error (the size bound, or the context, which the writer polls as the output
+// grows), and polls the context every so many calls, so that marks and items
+// that write little (marks without items) are bounded in time as well.
+func (r *renderer) tick() error {
+	if r.w.err != nil {
+		return r.w.err
+	}
+	r.count++
+	if r.count&1023 == 0 {
+		if err := r.ctx.Err(); err != nil {
+			r.w.fail(err)
+			return err
+		}
+	}
 	return nil
 }
 
-// tick reports cancellation every so many rendered items.
-func (r *renderer) tick() error {
-	r.count++
-	if r.opt.MaxBytes > 0 && r.w.size() > r.opt.MaxBytes {
-		return ErrTooLarge
-	}
-	if r.count&1023 == 0 {
-		return r.ctx.Err()
-	}
-	return nil
+// path is the scratch the path generators draw into, bounded by the room
+// left in the document: path data is written as it is (it holds nothing to
+// escape), so a path longer than that room makes the document too large, and
+// its generator is stopped there rather than after drawing all of it.
+func (r *renderer) path() *scene.StringPath {
+	r.sp.Limit(r.w.room(), ErrTooLarge)
+	return &r.sp
 }
 
 // tagOf is the SVG element a mark type renders to.
@@ -206,9 +241,29 @@ func tagOf(t scene.MarkType) lit {
 }
 
 // orderedMarks is scene.Mark.Ordered for the child marks of a group: marks
-// without a z-index first, then the others sorted by z-index. The marks are
-// all present (see errMarkHole).
-func orderedMarks(ms []*scene.Mark) []*scene.Mark {
+// without a z-index first, then the others sorted by z-index, ties in
+// document order. Upstream sorts with Array.prototype.sort, which is stable
+// (vega-scenegraph's zorder compares zindex, then index); the sort here is
+// too, in O(n log n) (C24, audit 2026-10-18). The marks are all present (see
+// errMarkHole).
+func orderedMarks(ms []*scene.Mark) []*scene.Mark { return orderedMarksBy(ms, compareZindex) }
+
+// compareZindex orders marks by z-index. A mark's z-index is never NaN
+// (vega's parser keeps only a non-zero number), so this is a total order;
+// two infinities of a sign are a tie, as `a.zindex - b.zindex` (NaN, falsy)
+// makes them upstream.
+func compareZindex(a, b *scene.Mark) int {
+	switch {
+	case a.Zindex < b.Zindex:
+		return -1
+	case a.Zindex > b.Zindex:
+		return 1
+	}
+	return 0
+}
+
+// orderedMarksBy is orderedMarks with the order given.
+func orderedMarksBy(ms []*scene.Mark, cmp func(a, b *scene.Mark) int) []*scene.Mark {
 	anyZ := false
 	for _, m := range ms {
 		if m.Zindex != 0 {
@@ -228,12 +283,7 @@ func orderedMarks(ms []*scene.Mark) []*scene.Mark {
 			out = append(out, m)
 		}
 	}
-	// Stable insertion sort by z-index keeps document order for ties.
-	for i := 1; i < len(z); i++ {
-		for j := i; j > 0 && z[j-1].Zindex > z[j].Zindex; j-- {
-			z[j-1], z[j] = z[j], z[j-1]
-		}
-	}
+	slices.SortStableFunc(z, cmp)
 	return append(out, z...)
 }
 
@@ -257,6 +307,9 @@ func cssClass(w *writer, m *scene.Mark) {
 func (r *renderer) mark(m *scene.Mark, depth int) error {
 	if depth > scene.MaxDepth {
 		return scene.ErrTooDeep
+	}
+	if err := r.tick(); err != nil {
+		return err
 	}
 	w := &r.w
 	tag := tagOf(m.Type)
@@ -292,7 +345,7 @@ func (r *renderer) mark(m *scene.Mark, depth int) error {
 		}
 	}
 	w.end() // </g>
-	return nil
+	return w.err
 }
 
 // item renders one item, wrapped in <a> when it has an href.
@@ -336,7 +389,7 @@ func (r *renderer) item(m *scene.Mark, it *scene.Item, tag lit, depth int) error
 		w.attrNum("y2", y2)
 		r.style(m, it, "line", it.Fill, it.Stroke)
 	case scene.MarkRect:
-		w.attrBytes("d", scene.RectPathData(&r.sp, it, false, 0, 0))
+		w.attrBytes("d", scene.RectPathData(r.path(), it, false, 0, 0))
 		r.style(m, it, "path", it.Fill, it.Stroke)
 	case scene.MarkPath:
 		sx, sy := scaleOne(it.ScaleX()), scaleOne(it.ScaleY())
@@ -369,7 +422,7 @@ func (r *renderer) item(m *scene.Mark, it *scene.Item, tag lit, depth int) error
 			w.rotate(it)
 		}
 		w.attrClose()
-		d, ok, perr := scene.ItemPathData(&r.sp, m.Type, it)
+		d, ok, perr := scene.ItemPathData(r.path(), m.Type, it)
 		if perr != nil {
 			return perr
 		}
@@ -378,7 +431,7 @@ func (r *renderer) item(m *scene.Mark, it *scene.Item, tag lit, depth int) error
 		}
 		r.style(m, it, "path", it.Fill, it.Stroke)
 	case scene.MarkArea, scene.MarkLine, scene.MarkTrail:
-		d, ok, perr := scene.MultiPathData(&r.sp, m.Type, m.Items)
+		d, ok, perr := scene.MultiPathData(r.path(), m.Type, m.Items)
 		if perr != nil {
 			return perr
 		}
@@ -394,7 +447,7 @@ func (r *renderer) item(m *scene.Mark, it *scene.Item, tag lit, depth int) error
 	if link {
 		w.end() // </a>
 	}
-	return nil
+	return w.err
 }
 
 func scaleOne(n scene.Num) float64 {
@@ -494,7 +547,7 @@ func (r *renderer) group(m *scene.Mark, it *scene.Item, depth int) error {
 	w.start("path")
 	w.attrLit("class", "background")
 	w.attrLit("aria-hidden", "true")
-	w.attrBytes("d", scene.RectPathData(&r.sp, it, true, off, off))
+	w.attrBytes("d", scene.RectPathData(r.path(), it, true, off, off))
 	r.style(m, it, "bgrect", fill, bgStroke)
 	w.end()
 
@@ -528,7 +581,7 @@ func (r *renderer) group(m *scene.Mark, it *scene.Item, depth int) error {
 		w.start("path")
 		w.attrLit("class", "foreground")
 		w.attrLit("aria-hidden", "true")
-		w.attrBytes("d", scene.RectPathData(&r.sp, it, true, off, off))
+		w.attrBytes("d", scene.RectPathData(r.path(), it, true, off, off))
 		r.style(m, it, "bgrect", fgFill, stroke)
 		w.end()
 	} else {
@@ -536,12 +589,12 @@ func (r *renderer) group(m *scene.Mark, it *scene.Item, depth int) error {
 		w.attrLit("class", "foreground")
 		w.attrLit("aria-hidden", "true")
 		if fore {
-			w.attrBytes("d", scene.RectPathData(&r.sp, it, true, off, off))
+			w.attrBytes("d", scene.RectPathData(r.path(), it, true, off, off))
 		} else {
 			w.attrLit("d", "")
 		}
 		r.style(m, it, "bgfore", fill, stroke)
 		w.end()
 	}
-	return nil
+	return w.err
 }

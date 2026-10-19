@@ -100,7 +100,7 @@ func (r *renderer) clipRef(owner any, clip bool, fn scene.PathFunc, size *scene.
 	case fn != nil:
 		def.path = fn(nil) // clip(null): the generator's own path string
 	case size != nil && size.HasCornerRadius():
-		def.path = string(scene.RectPathData(&r.sp, size, true, 0, 0))
+		def.path = string(scene.RectPathData(r.path(), size, true, 0, 0))
 	default:
 		def.hasSize = true
 		if size != nil {
