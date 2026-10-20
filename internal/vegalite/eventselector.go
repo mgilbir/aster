@@ -43,7 +43,7 @@ func parseSelector(cc *compileCtx, selector, source string) []Value {
 		source = "view"
 	}
 	p := &eventParser{cc: cc, defaultSource: source}
-	parts := p.parseMerge(strings.TrimSpace(selector))
+	parts := p.parseMerge(jsval.JSTrim(selector))
 	out := make([]Value, len(parts))
 	for i, s := range parts {
 		out[i] = p.parseOne(s)
@@ -74,7 +74,7 @@ func (p *eventParser) parseMerge(s string) []string {
 	for i < n {
 		i = evFind(s, i, ',', "[{", "]}")
 		p.cc.work(1 + int64(i-start)/16)
-		out = append(out, strings.TrimSpace(s[start:i]))
+		out = append(out, jsval.JSTrim(s[start:i]))
 		i++
 		start = i
 	}
@@ -108,12 +108,12 @@ func (p *eventParser) parseBetween(s string) Value {
 	if len(b) != 2 {
 		throw("Between selector must have two elements: %s", s)
 	}
-	s = strings.TrimSpace(s[i+1:])
+	s = jsval.JSTrim(s[i+1:])
 	if len(s) == 0 || s[0] != '>' {
 		throw("Expected '>' after between selector: %s", s)
 	}
 	between := arr(p.parseOne(b[0]), p.parseOne(b[1]))
-	stream := p.parseOne(strings.TrimSpace(s[1:]))
+	stream := p.parseOne(jsval.JSTrim(s[1:]))
 	if stream.Get("between").IsTruthy() {
 		return mkv("between", between, "stream", stream)
 	}
@@ -139,7 +139,7 @@ func (p *eventParser) parseStream(s string) Value {
 				throw("Invalid throttle specification: %s", s)
 			}
 			throttle = t
-			s = strings.TrimSpace(s[:i])
+			s = jsval.JSTrim(s[:i])
 			n = len(s)
 		} else {
 			throw("Unmatched right brace: %s", s)
@@ -155,15 +155,15 @@ func (p *eventParser) parseStream(s string) Value {
 	}
 	j := evFind(s, i, ':', "", "")
 	if j < n {
-		source = append(source, strings.TrimSpace(s[start:j]))
+		source = append(source, jsval.JSTrim(s[start:j]))
 		j++
 		start, i = j, j
 	}
 	i = evFind(s, i, '[', "", "")
 	if i == n {
-		source = append(source, strings.TrimSpace(s[start:n]))
+		source = append(source, jsval.JSTrim(s[start:n]))
 	} else {
-		source = append(source, strings.TrimSpace(s[start:i]))
+		source = append(source, jsval.JSTrim(s[start:i]))
 		haveFilter = true
 		i++
 		start = i
@@ -176,7 +176,7 @@ func (p *eventParser) parseStream(s string) Value {
 		if i == n {
 			throw("Unmatched left bracket: %s", s)
 		}
-		filter = append(filter, jsval.Str(strings.TrimSpace(s[start:i])))
+		filter = append(filter, jsval.Str(jsval.JSTrim(s[start:i])))
 		if i < n-1 {
 			i++
 			if s[i] != '[' {

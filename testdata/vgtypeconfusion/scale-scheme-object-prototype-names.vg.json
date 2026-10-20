@@ -1,0 +1,1 @@
+{"width":100,"height":40,"scales":[{"name":"c","type":"ordinal","domain":["a","b"],"range":{"scheme":"constructor","count":3}},{"name":"p","type":"ordinal","domain":["a","b"],"range":{"scheme":"__proto__"}}],"marks":[{"type":"text","encode":{"enter":{"y":{"value":10},"text":{"signal":"[range('c'), range('p').length]"}}}}]}

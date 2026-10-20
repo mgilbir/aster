@@ -111,7 +111,7 @@ Projections that replace d3's clipping stream cannot be described: interrupted a
 | `WithErrorHandler(h)` | `ErrorHandlerOption` (render, PNG, PDF) | none: errors fail the call | see [errors.md](errors.md) |
 | `WithScale(f)` | `PNGOption` | 1 | PNG size factor; must be positive and finite |
 | `WithRecodePNG()` | `PNGOption` | off | losslessly re-encode into the cheapest equivalent PNG (indexed or truecolor); same pixels, typically several times smaller |
-| `WithQuantizePNG(maxColors)` | `PNGOption` | off | lossily quantize to at most `maxColors` colours (clamped to 2–256), 8-bit indexed with dithering and a quality guard; falls back to `WithRecodePNG` when the guard trips, and without trying for an image of more than 65,536 distinct colours; wins over `WithRecodePNG` |
+| `WithQuantizePNG(maxColors)` | `PNGOption` | off | lossily quantize to at most `maxColors` colours (clamped to 2–256; zero or less fails the call), 8-bit indexed with dithering and a quality guard; falls back to `WithRecodePNG` when the guard trips, and without trying for an image of more than 65,536 distinct colours; wins over `WithRecodePNG` |
 | `WithPDFText(mode PDFTextMode)` | `PDFOption` | `PDFTextEmbed` | `PDFTextEmbed`, `PDFTextNamed`, `PDFTextOutlines`; [pdf.md](pdf.md) |
 
 ## Errors and diagnostics

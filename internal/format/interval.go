@@ -298,6 +298,7 @@ func (iv Interval) passes(t float64) bool {
 
 // Floor is interval.floor(t): the latest boundary at or before t.
 func (iv Interval) Floor(t float64) float64 {
+	t = timeClip(t) // floori(date = new Date(+date)): a fractional time is cut toward zero
 	if iv.filter == 0 {
 		return iv.baseFloor(t)
 	}

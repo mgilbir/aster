@@ -1,0 +1,1 @@
+{"width":100,"height":60,"data":[{"name":"t","values":[{"a":"toString","y":10},{"a":"__proto__","y":20},{"a":"constructor","y":30},{"a":"center","y":40}]}],"marks":[{"type":"text","from":{"data":"t"},"encode":{"enter":{"text":{"value":"x"},"align":{"field":"a"},"x":{"value":50},"y":{"field":"y"}}}}]}

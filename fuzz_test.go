@@ -1,11 +1,11 @@
 package aster_test
 
 import (
+	"errors"
 	"fmt"
 	"math/rand"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -35,7 +35,12 @@ import (
 //	node-only      only upstream fails
 //	differ         both render, SVG differs
 //	panic          the engine hit an internal error (a Go panic)
+//	panic-vegalite the Vega-Lite compiler recovered a panic
 //	slow           the engine needed more than the budget or timed out
+//	oracle-failure node did not answer the mutant in time
+//	oracle-broken  the oracle failed for a reason of its own
+//
+// A panic of either kind, or a broken oracle, fails the run.
 //
 // Other variables: ASTER_FUZZ_START (first mutant number, to shard runs),
 // ASTER_FUZZ_WORKERS, ASTER_FUZZ_ORACLE=0 (skip the oracle: crash and time
@@ -158,8 +163,13 @@ func TestFuzzDifferential(t *testing.T) {
 	}
 	fmt.Fprintf(&sum, "  slowest render: %v\n", slowest.Round(time.Millisecond))
 	t.Log(sum.String())
-	if counts["panic"] > 0 {
-		t.Errorf("%d mutants panicked the engine", counts["panic"])
+	// A panic the Vega-Lite compiler recovers is a panic all the same
+	// (C73, audit 2026-10-18).
+	if n := counts["panic"] + counts["panic-vegalite"]; n > 0 {
+		t.Errorf("%d mutants panicked the engine (%d of them in the Vega-Lite compiler)", n, counts["panic-vegalite"])
+	}
+	if n := counts["oracle-broken"]; n > 0 {
+		t.Errorf("the oracle failed to answer %d mutants for a reason of its own (see index.tsv)", n)
 	}
 }
 
@@ -188,8 +198,6 @@ type baseSpec struct {
 	spec jsval.Value
 }
 
-var panicRE = regexp.MustCompile(`internal error|runtime error|goroutine \d+|nil pointer|index out of range|slice bounds`)
-
 // fuzzOne mutates, renders and classifies mutant number n.
 func fuzzOne(pg *aster.Converter, o *oracle.Oracle, pool []baseSpec, seed, n int, budget time.Duration) fuzzResult {
 	rng := rand.New(rand.NewSource(int64(seed)*1_000_003 + int64(n)))
@@ -210,10 +218,11 @@ func fuzzOne(pg *aster.Converter, o *oracle.Oracle, pool []baseSpec, seed, n int
 	t0 := time.Now()
 	got, gerr := renderGuarded(func() (string, error) { return render(pg) })
 	r.dur = time.Since(t0)
-	if gerr != nil && panicRE.MatchString(gerr.Error()) {
+	if isEngineBug(gerr) {
 		r.class, r.detail = "panic", firstLine(gerr.Error())
 		if strings.Contains(gerr.Error(), "vegalite: internal error") {
-			// Compile recovers its own panics; still a bug, tallied apart.
+			// Compile recovers its own panics; still a bug (it fails the
+			// run as a panic does), tallied apart to say where it is.
 			r.class = "panic-vegalite"
 		}
 		return r
@@ -236,15 +245,20 @@ func fuzzOne(pg *aster.Converter, o *oracle.Oracle, pool []baseSpec, seed, n int
 	}
 	want, err := o.SVG(b.lite, spec)
 	if err != nil {
+		// node not answering one mutant in time is the mutant's; the oracle
+		// failing for a reason of its own is the run's, and fails it.
 		r.class, r.detail = "oracle-failure", err.Error()
+		if errors.Is(err, oracle.ErrFailed) {
+			r.class = "oracle-broken"
+		}
 		return r
 	}
-	switch {
-	case gerr != nil && want.Err != "":
+	switch errorOutcome(gerr, want.Err) {
+	case "both-error":
 		r.class, r.detail = "both-error", "engine: "+firstLine(gerr.Error())+" | node: "+firstLine(want.Err)
-	case gerr != nil:
+	case "engine-error":
 		r.class, r.detail = "engine-only", firstLine(gerr.Error())
-	case want.Err != "":
+	case "node-error":
 		r.class, r.detail = "node-only", firstLine(want.Err)
 	default:
 		d, err := svgdiff.Compare([]byte(got), []byte(want.SVG), svgTolerance)
@@ -257,8 +271,16 @@ func fuzzOne(pg *aster.Converter, o *oracle.Oracle, pool []baseSpec, seed, n int
 			r.class, r.detail = "differ", fmt.Sprintf("%d diffs; first: %s", d.DiffCount, firstLine(d.Diff))
 		}
 	}
-	if b.lite && len(want.Vega) > 0 && gerr == nil {
-		if vg, err := pg.VegaLiteToVega(spec); err == nil {
+	// Upstream compiled the mutant: so must the engine, to the same Vega,
+	// even where both then fail (C74).
+	if b.lite && len(want.Vega) > 0 {
+		vg, err := pg.VegaLiteToVega(spec)
+		switch {
+		case isEngineBug(err):
+			r.class, r.detail = "panic-vegalite", firstLine(err.Error())
+		case err != nil:
+			r.vegaDiffers = true
+		default:
 			g, e1 := jsval.ParseJSON(vg)
 			w, e2 := jsval.ParseJSON(want.Vega)
 			r.vegaDiffers = e1 == nil && e2 == nil && !jsval.Equal(g, w)

@@ -14,6 +14,10 @@ type FoldParams struct {
 	// As is the [key, value] output pair; empty entries default to "key" and
 	// "value".
 	As [2]string
+	// AsExact reports that As are the names as the runtime resolved them
+	// (`_.as || defaults`, then each entry's text): an empty one is the
+	// empty name, not the default.
+	AsExact bool
 }
 
 // Fold turns each tuple into one tuple per field: a copy of the tuple with the
@@ -21,10 +25,10 @@ type FoldParams struct {
 // input tuple, in field order.
 func Fold(ctx context.Context, data []jsval.Value, p FoldParams) ([]jsval.Value, error) {
 	k, v := p.As[0], p.As[1]
-	if k == "" {
+	if k == "" && !p.AsExact {
 		k = "key"
 	}
-	if v == "" {
+	if v == "" && !p.AsExact {
 		v = "value"
 	}
 	if err := reserveRows(ctx, int(min(budget.Mul(int64(len(data)), int64(len(p.Fields))), math.MaxInt32))); err != nil {

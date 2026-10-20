@@ -1,0 +1,1 @@
+{"width": 40, "height": 20, "data": [{"name": "d", "values": [{"a": 1}], "transform": [{"type": "aggregate", "fields": [[{}]], "ops": ["sum"]}]}]}

@@ -1,0 +1,1 @@
+{"data":[{"name":"t","values":[{"v":6},{"c":"c"}]}],"layout":{"padding":{"column":[]}},"marks":[{"type":"group","from":{"facet":{"data":"t","name":"cell","groupby":["c"]}},"marks":[{"type":"rect","from":{"data":"cell"},"encode":{"enter":{"width":{"signal":"8 * datum.v"}}}}]}]}

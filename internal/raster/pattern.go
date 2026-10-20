@@ -175,12 +175,16 @@ func (r *renderer) patternPaint(pn *node, opacity float64, st *state, bbox func(
 		return paintSrc{}, false, true
 	}
 	sx, sy := tsScale(st.ctm.mul(ptm))
-	pw := int(math.Round(float64(float32(tile.w()) * float32(sx))))
-	ph := int(math.Round(float64(float32(tile.h()) * float32(sy))))
-	if pw < 1 || ph < 1 {
+	// Bounded as floats before they become ints: a scale that overflows
+	// float32 is an infinity, and one past an int's range (32 bits on some
+	// platforms) converts to an implementation-defined int (C108's class).
+	fw := math.Round(float64(float32(tile.w()) * float32(sx)))
+	fh := math.Round(float64(float32(tile.h()) * float32(sy)))
+	if !(fw >= 1) || !(fh >= 1) || fw > float64(r.lim.MaxDimension) || fh > float64(r.lim.MaxDimension) {
 		return paintSrc{}, false, true
 	}
-	if pw > r.lim.MaxDimension || ph > r.lim.MaxDimension || budget.MulInt(pw, ph) > r.lim.MaxPixels {
+	pw, ph := int(fw), int(fh)
+	if budget.MulInt(pw, ph) > r.lim.MaxPixels {
 		return paintSrc{}, false, true
 	}
 	key := patternKey{pn, pw, ph, sx, sy, content, bb.w(), bb.h()}
@@ -269,18 +273,15 @@ func (s *patternShader) shadeRow(y, x0 int, dst []uint8) {
 					c[3] += float32(p[3]) * wgt
 				}
 			}
+			// tiny-skia clamps the sum to [0, 1] (Clamp0, ClampA); the
+			// alpha first, then each colour to it, so the pixel stays
+			// premultiplied and every value is in a byte's range before it
+			// is converted: Mitchell's weights overshoot, and converting a
+			// float past 255 to uint8 is implementation-defined (it wraps
+			// on amd64 and saturates on arm64; C108, audit 2026-10-18).
+			c[3] = min(max(c[3], 0), 255)
 			for k := 0; k < 3; k++ {
-				if c[k] > c[3] {
-					c[k] = c[3]
-				}
-				if c[k] < 0 {
-					c[k] = 0
-				}
-			}
-			if c[3] < 0 {
-				c[3] = 0
-			} else if c[3] > 255 {
-				c[3] = 255
+				c[k] = min(max(c[k], 0), c[3])
 			}
 		}
 		for k := 0; k < 4; k++ {

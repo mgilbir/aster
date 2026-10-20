@@ -29,6 +29,7 @@ import (
 
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/fontsubset"
+	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/loader"
 	"github.com/mgilbir/aster/internal/pngopt"
@@ -329,6 +330,9 @@ func pngOptions(opts []PNGOption) (*pngConfig, error) {
 	if !(cfg.scale > 0) || math.IsInf(cfg.scale, 1) {
 		return nil, fmt.Errorf("aster: invalid PNG scale %v (must be a positive, finite number)", cfg.scale)
 	}
+	if cfg.quantizeErr != nil {
+		return nil, cfg.quantizeErr
+	}
 	return cfg, nil
 }
 
@@ -419,6 +423,9 @@ func (c *Converter) renderSVG(ctx context.Context, spec jsval.Value) (out string
 		opts.TextMeasurer = canvas
 		opts.WordcloudText = wordcloud.NewCanvasRenderer(m)
 	}
+	if c.cfg.wordcloudBoxForTest {
+		opts.WordcloudText = wordcloud.BoxRenderer{}
+	}
 	if st := stagesFrom(ctx); st != nil {
 		opts.Stages = st
 		if m != nil {
@@ -444,9 +451,12 @@ func (c *Converter) renderSVG(ctx context.Context, spec jsval.Value) (out string
 		Origin: res.Origin,
 		// An SVG past this size is not a chart anybody can use.
 		MaxBytes: c.lim.svgBytes,
+		DateText: func(dst []byte, ms float64) []byte {
+			return append(dst, format.DateToString(ms, format.Local(c.location))...)
+		},
 	}
 	if res.HasBackground {
-		so.Background = res.Background
+		so.Background, so.DrawBackground = res.Background, true
 	}
 	if canvas != nil {
 		so.Measurer = canvas
@@ -521,7 +531,21 @@ func (c *Converter) renderSVG(ctx context.Context, spec jsval.Value) (out string
 		}
 		return info
 	}
-	out, err = timed(ctx, "svg", func() (string, error) { return svg.Render(ctx, res.Scenegraph, so) })
+	out, err = timed(ctx, "svg", func() (out string, err error) {
+		// The scene's shape and clip generators are vega's: an expression
+		// they evaluate can throw, which ends the render as it does
+		// upstream's.
+		defer func() {
+			if r := recover(); r != nil {
+				thrown, ok := vega.ThrownAtRender(r)
+				if !ok {
+					panic(r)
+				}
+				out, err = "", thrown
+			}
+		}()
+		return svg.Render(ctx, res.Scenegraph, so)
+	})
 	if err == nil {
 		err = hookErr
 	}
@@ -628,7 +652,7 @@ func (c *Converter) VegaLiteToVega(spec []byte, opts ...RenderOption) ([]byte, e
 		if err != nil {
 			return nil, err
 		}
-		return jsval.AppendJSON(nil, vg), nil
+		return jsval.WalkerFor(ctx).AppendJSON(nil, vg), nil
 	})
 }
 
@@ -731,8 +755,19 @@ func (c *Converter) rasterize(ctx context.Context, svg string, scale float64) (*
 	sh = raster.BoundShaper(sh, text.ShapingBudgetFrom(ctx))
 	var img *image.NRGBA
 	out, err := timed(ctx, "png", func() ([]byte, error) {
+		lim := c.lim.rasterAt(scale)
+		// The copy of the input Render takes is charged first, and an input
+		// past the bound is refused before it is made (C8).
+		if m := lim.WithDefaults().MaxInputBytes; len(svg) > m {
+			return nil, fmt.Errorf("raster: SVG input is %d bytes, limit is %d: %w", len(svg), m, ErrLimit)
+		}
+		l := budget.LedgerFrom(ctx)
+		if err := l.Alloc(int64(len(svg))); err != nil {
+			return nil, err
+		}
+		defer l.Free(int64(len(svg)))
 		var err error
-		img, err = raster.Render([]byte(svg), raster.Options{Scale: scale, Shaper: sh, Context: ctx, Limits: c.lim.rasterAt(scale), Images: imagesFrom(ctx).load, ImageError: imagesFrom(ctx).imageError(ctx)})
+		img, err = raster.Render([]byte(svg), raster.Options{Scale: scale, Shaper: sh, Context: ctx, Limits: lim, Images: imagesFrom(ctx).load, ImageError: imagesFrom(ctx).imageError(ctx)})
 		if err != nil {
 			return nil, err
 		}

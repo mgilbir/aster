@@ -637,7 +637,7 @@ func testVegaFormat(t *testing.T, g *timeGolden, zoneName string) {
 			}
 			spec = v
 		}
-		f, err := loc.TimeFormatSpec(spec, c.UTC)
+		f, err := loc.TimeFormatSpec(jsval.Walker{}, spec, c.UTC)
 		if err != nil {
 			t.Fatal(err)
 		}

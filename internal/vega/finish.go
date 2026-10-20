@@ -27,7 +27,7 @@ func (v *runView) setGuideCaptions() error {
 		if ctx == nil {
 			continue
 		}
-		if (m.Role == "axis" || m.Role == "legend") && len(m.Items[0].Items) == 0 && m.Items[0].Description == "" {
+		if (m.Role == "axis" || m.Role == "legend") && len(m.Items[0].Items) == 0 && !m.Items[0].StrTruthy("description", m.Items[0].Description) {
 			// A guide with nothing to draw (no domain, ticks, labels, grid or
 			// title) has no child marks to bind its context; see
 			// scene.Mark.NoGuideCaption.
@@ -79,33 +79,29 @@ func extractTitle(item *scene.Item) string {
 	if last == nil || len(last.Items) == 0 || last.Items[0] == nil {
 		return ""
 	}
-	return joinText(last.Items[0].Text())
+	return joinText(last.Items[0].Walker(), last.Items[0].Text())
 }
 
-func joinText(t jsval.Value) string {
+// joinText is `array(text).join(' ')`, the walk of an array with w.
+func joinText(w jsval.Walker, t jsval.Value) string {
 	if t.IsArr() {
-		parts := make([]string, 0, t.Len())
-		for _, e := range t.Items() {
-			if e.IsNullish() {
-				parts = append(parts, "")
-			} else {
-				parts = append(parts, e.AsString())
-			}
-		}
-		return strings.Join(parts, " ")
+		return w.Join(t.Items(), " ")
 	}
 	if t.IsNullish() {
 		return ""
 	}
-	return t.AsString()
+	return w.String(t)
 }
 
 func (v *runView) captionOptions(item *scene.Item) scale.CaptionOptions {
 	o := scale.CaptionOptions{}
 	if item.Extra != nil {
 		o.Format = item.Extra.Lookup("format")
-		if ft := item.Extra.Lookup("formatType"); ft.IsStr() {
+		switch ft := item.Extra.Lookup("formatType"); {
+		case ft.IsStr():
 			o.FormatType = ft.StrValue()
+		case ft.IsTruthy():
+			o.FormatTypeOther = true
 		}
 	}
 	return o
@@ -115,7 +111,7 @@ func (v *runView) captionOptions(item *scene.Item) scale.CaptionOptions {
 // throws (no such scale, a domain it cannot caption).
 func (v *runView) axisCaption(c *rtContext, item *scene.Item) (caption string, ok bool, err error) {
 	datum := item.Datum
-	name := datum.Get("scale").AsString()
+	name := v.walk.String(datum.Get("scale"))
 	n := c.scaleNode(name)
 	if n == nil {
 		return "", false, nil
@@ -130,8 +126,9 @@ func (v *runView) axisCaption(c *rtContext, item *scene.Item) (caption string, o
 		title = extractTitle(item)
 		hasTitle = title != ""
 	}
+	// (orient === 'left' || orient === 'right'): ["left"] is neither
 	xy := "X"
-	if item.Orient() == "left" || item.Orient() == "right" {
+	if o, _ := item.OrientValue().Strict(); o == "left" || o == "right" {
 		xy = "Y"
 	}
 	typ := s.Type()
@@ -158,7 +155,7 @@ func (v *runView) legendCaption(c *rtContext, item *scene.Item) (caption string,
 		return "", false, nil
 	}
 	props := append([]string(nil), scales.Keys()...)
-	n := c.scaleNode(scales.ValueAt(0).AsString())
+	n := c.scaleNode(v.walk.String(scales.ValueAt(0)))
 	if n == nil {
 		return "", false, nil
 	}
@@ -170,10 +167,12 @@ func (v *runView) legendCaption(c *rtContext, item *scene.Item) (caption string,
 	if datum.Get("title").IsTruthy() {
 		title = extractTitle(item)
 	}
-	typ := strings.TrimSpace(datum.Get("type").AsString() + " legend")
-	if typ != "" {
-		typ = strings.ToUpper(typ[:1]) + typ[1:]
+	// capitalize(`${datum.type || ''} legend`.trim())
+	t := ""
+	if dt := datum.Get("type"); dt.IsTruthy() {
+		t = v.walk.String(dt)
 	}
+	typ := jsval.UpperFirst(jsval.JSTrim(t + " legend"))
 	dc, ok, err := v.domainCaption(s, item)
 	if !ok {
 		return "", false, err

@@ -2,8 +2,9 @@ package format
 
 import (
 	"math"
-	"unicode"
 	"unicode/utf8"
+
+	"github.com/mgilbir/aster/internal/jsval"
 )
 
 // ParseDate is Date.parse (and new Date(string)) as V8 implements it, with z
@@ -270,7 +271,7 @@ func (sc *dateScanner) skipSymbol(c rune) bool {
 	return false
 }
 
-func isDateSpace(r rune) bool { return unicode.IsSpace(r) || r == 0xFEFF }
+func isDateSpace(r rune) bool { return jsval.IsJSSpace(r) }
 
 func (sc *dateScanner) scan() dateToken {
 	s := sc.s

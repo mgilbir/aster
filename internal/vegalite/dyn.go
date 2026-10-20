@@ -1,15 +1,10 @@
 package vegalite
 
 import (
-	"errors"
 	"math"
 	"sort"
 	"strconv"
 	"strings"
-	"unicode/utf8"
-
-	"golang.org/x/text/cases"
-	"golang.org/x/text/language"
 
 	"github.com/mgilbir/aster/internal/jsval"
 )
@@ -206,6 +201,7 @@ func mergedCC(cc *compileCtx, srcs ...Value) *Object {
 	for _, s := range srcs {
 		n += s.Len()
 	}
+	cc.alloc(objectBytes(n))
 	return spreadCC(cc, jsval.NewObject(n), srcs...)
 }
 
@@ -235,15 +231,6 @@ func omit(v Value, keys ...string) *Object {
 		}
 	}
 	return c
-}
-
-// stringifyJS is util.stringify as a template literal renders it: undefined
-// prints as "undefined".
-func stringifyJS(v Value) string {
-	if v.IsUndefined() {
-		return "undefined"
-	}
-	return stringify(nil, v)
 }
 
 // pick is upstream's pick: only the own defined-or-not keys listed.
@@ -368,6 +355,7 @@ func deepClone(cc *compileCtx, v Value) Value {
 	switch v.Kind() {
 	case jsval.KindArr:
 		items := v.Items()
+		cc.alloc(arrayBytes(len(items)))
 		out := make([]Value, len(items))
 		for i, it := range items {
 			out[i] = deepClone(cc, it)
@@ -375,6 +363,7 @@ func deepClone(cc *compileCtx, v Value) Value {
 		return jsval.Arr(out)
 	case jsval.KindObj:
 		o := v.ObjValue()
+		cc.alloc(objectBytes(o.Len()))
 		c := jsval.NewObject(o.Len())
 		digit := false // a key that may be an array index
 		for i := 0; i < o.Len(); i++ {
@@ -393,7 +382,7 @@ func deepClone(cc *compileCtx, v Value) Value {
 // stringify is upstream's util.stringify: JSON with sorted keys, used as a
 // hash key for structural comparison.
 func stringify(cc *compileCtx, v Value) string {
-	var b strings.Builder
+	b := newSbuf(cc)
 	stringifyTo(cc, &b, v)
 	return b.String()
 }
@@ -401,14 +390,14 @@ func stringify(cc *compileCtx, v Value) string {
 // stringifyText is `${stringify(v)}`: stringify's text, or "undefined"
 // for a value JSON has no text for.
 func stringifyText(cc *compileCtx, v Value) string {
-	var b strings.Builder
+	b := newSbuf(cc)
 	if !stringifyTo(cc, &b, v) {
 		return "undefined"
 	}
 	return b.String()
 }
 
-func stringifyTo(cc *compileCtx, b *strings.Builder, v Value) bool {
+func stringifyTo(cc *compileCtx, b *sbuf, v Value) bool {
 	cc.work(1)
 	switch v.Kind() {
 	case jsval.KindUndefined:
@@ -423,16 +412,16 @@ func stringifyTo(cc *compileCtx, b *strings.Builder, v Value) bool {
 			b.WriteString(jsval.JSNumberString(f))
 		}
 	case jsval.KindArr:
-		b.WriteByte('[')
+		b.PutByte('[')
 		for i, it := range v.Items() {
 			if i > 0 {
-				b.WriteByte(',')
+				b.PutByte(',')
 			}
 			if !stringifyTo(cc, b, it) {
 				b.WriteString("null")
 			}
 		}
-		b.WriteByte(']')
+		b.PutByte(']')
 	case jsval.KindObj:
 		o := v.ObjValue()
 		if fn, ok := lazyFn(o); ok {
@@ -442,7 +431,7 @@ func stringifyTo(cc *compileCtx, b *strings.Builder, v Value) bool {
 		ks := append([]string(nil), o.Keys()...)
 		cc.work(int64(len(ks))) // the sort, past a step a key
 		sort.Strings(ks)
-		b.WriteByte('{')
+		b.PutByte('{')
 		first := true
 		for _, k := range ks {
 			x := o.Lookup(k)
@@ -450,28 +439,42 @@ func stringifyTo(cc *compileCtx, b *strings.Builder, v Value) bool {
 				continue
 			}
 			if !first {
-				b.WriteByte(',')
+				b.PutByte(',')
 			}
 			first = false
-			b.Write(jsval.AppendJSON(nil, jsval.Str(k)))
-			b.WriteByte(':')
+			b.PutBytes(jsval.AppendJSON(nil, jsval.Str(k)))
+			b.PutByte(':')
 			stringifyTo(cc, b, x)
 		}
-		b.WriteByte('}')
+		b.PutByte('}')
 	default:
 		if v.IsStr() {
 			cc.work(int64(len(v.StrValue())) / 16) // a string is escaped a byte at a time
 		}
-		b.Write(jsval.AppendJSON(nil, v))
+		b.PutBytes(jsval.AppendJSON(nil, v))
 	}
 	return true
 }
 
 // stringValue is vega-util's stringValue: a JS literal for use in
 // expressions (see jsval.StringValue).
-func stringValue(v Value) string { return jsval.StringValue(v) }
+func stringValue(cc *compileCtx, v Value) string {
+	if v.IsStr() {
+		// A string's literal is its text quoted, and escaped where it must
+		// be: charged for the quoted text before it is made, and for the
+		// escapes once it is (an escape is at most six bytes).
+		n := int64(len(v.StrValue()) + 2)
+		cc.alloc(n)
+		s := jsval.StringValue(v)
+		cc.alloc(int64(len(s)) - n)
+		return s
+	}
+	s := jsval.StringValue(v)
+	cc.alloc(int64(len(s)))
+	return s
+}
 
-func jsonString(s string) string { return stringValue(jsval.Str(s)) }
+func jsonString(cc *compileCtx, s string) string { return stringValue(cc, jsval.Str(s)) }
 
 // hash is upstream's hash(): short strings are their own hash.
 func hashOf(cc *compileCtx, v Value) string {
@@ -485,16 +488,22 @@ func hashOf(cc *compileCtx, v Value) string {
 		return jsval.JSNumberString(v.NumValue())
 	}
 	s := ""
+	var b sbuf
 	if v.IsStr() {
 		s = v.StrValue()
 	} else {
-		s = stringify(cc, v)
+		b = newSbuf(cc)
+		stringifyTo(cc, &b, v)
+		s = b.String()
 	}
 	// The code units are walked in place (as utf16Len would produce them),
 	// so a long key costs no copy and the walk is charged.
 	if len(s) < 250 || utf16Count(cc, s) < 250 {
 		return s
 	}
+	// A long text is only hashed: what its making was charged is given
+	// back (a node is hashed once per pass of the optimizer).
+	defer b.release()
 	var h int32
 	for _, r := range s {
 		cc.work(1)
@@ -579,13 +588,7 @@ func varName(s string) string {
 // the first UTF-16 unit, upper-cased with JavaScript's full case mapping
 // (ß becomes SS). A first character outside the BMP is a lone surrogate to
 // charAt, which has no upper case, so the string is unchanged.
-func titleCase(s string) string {
-	r, n := utf8.DecodeRuneInString(s)
-	if n == 0 || r >= 0x10000 {
-		return s
-	}
-	return jsUpperCase(s[:n]) + s[n:]
-}
+func titleCase(s string) string { return jsval.UpperFirst(s) }
 
 // titleCaseV is titleCase of a spec value, which calls s.charAt.
 func titleCaseV(v Value) string {
@@ -597,16 +600,6 @@ func titleCaseV(v Value) string {
 	}
 	throw("s.charAt is not a function")
 	return ""
-}
-
-// jsUpperCase is String.prototype.toUpperCase: full Unicode case mapping.
-func jsUpperCase(s string) string {
-	for i := 0; i < len(s); i++ {
-		if s[i] >= utf8.RuneSelf {
-			return cases.Upper(language.Und).String(s)
-		}
-	}
-	return strings.ToUpper(s)
 }
 
 // appendVals is Array.prototype.concat over Value slices.
@@ -639,7 +632,7 @@ func isNumericV(v Value) bool {
 }
 
 func parseFloatPrefix(s string) float64 {
-	s = strings.TrimSpace(s)
+	s = jsval.JSTrimStart(s)
 	end := 0
 	seenDot, seenDigit := false, false
 	for i, c := range s {
@@ -679,12 +672,7 @@ done:
 		}
 		return math.NaN()
 	}
-	// Out of range, ParseFloat answers ±Inf (or 0) with an error; parseFloat
-	// answers the same values ("1e999" is Infinity).
-	f, err := strconv.ParseFloat(s[:end], 64)
-	if err != nil && !errors.Is(err, strconv.ErrRange) {
-		return math.NaN()
-	}
+	f, _ := jsval.ParseDecimal(s[:end])
 	return f
 }
 
@@ -887,45 +875,93 @@ func jsIndexOrGet(v Value, key string) Value {
 // regular expression of find taken literally, so the replacement's $
 // patterns apply: $$ is "$", $& the match, $` the text before it and $' the
 // text after it (there are no groups, so $1 and $<name> stay as they are).
-func jsReplaceAll(s, find, repl string) string {
+//
+// The result can be quadratic in the input ($` and $' copy up to the whole
+// string once per match, C6: audit 2026-10-18), as upstream's is: its length
+// is worked out first, a step per match, and charged to cc before it is
+// built, and each match charges its bytes as work, so the compilation
+// fails at the call's budget or deadline instead of building it unseen.
+func jsReplaceAll(cc *compileCtx, s, find, repl string) string {
 	if find == "" || !strings.Contains(s, find) {
 		return s
 	}
-	if !strings.Contains(repl, "$") {
-		return strings.ReplaceAll(s, find, repl)
+	// The replacement's pieces, once: literal text, or a pattern.
+	type piece struct {
+		lit  string
+		kind byte // 0: lit; '&', '`', '\'': the match, the text before, after
 	}
-	var b strings.Builder
-	rest := 0
-	for {
+	var pieces []piece
+	lit := 0 // where the current literal run starts
+	for j := 0; j < len(repl); j++ {
+		if repl[j] != '$' || j+1 == len(repl) {
+			continue
+		}
+		switch c := repl[j+1]; c {
+		case '$', '&', '`', '\'':
+			pieces = append(pieces, piece{lit: repl[lit:j]})
+			if c == '$' {
+				pieces = append(pieces, piece{lit: "$"})
+			} else {
+				pieces = append(pieces, piece{kind: c})
+			}
+			j++
+			lit = j + 1
+		}
+	}
+	pieces = append(pieces, piece{lit: repl[lit:]})
+	// The length of the result: each match's replacement depends on where
+	// the match is ($` and $' copy what is before and after it).
+	size := 0
+	for rest := 0; ; {
+		cc.work(1)
 		i := strings.Index(s[rest:], find)
 		if i < 0 {
+			size += len(s) - rest
 			break
 		}
 		start := rest + i
 		end := start + len(find)
-		b.WriteString(s[rest:start])
-		for j := 0; j < len(repl); j++ {
-			if repl[j] != '$' || j+1 == len(repl) {
-				b.WriteByte(repl[j])
-				continue
+		size += start - rest
+		for _, p := range pieces {
+			switch p.kind {
+			case 0:
+				size += len(p.lit)
+			case '&':
+				size += len(find)
+			case '`':
+				size += start
+			case '\'':
+				size += len(s) - end
 			}
-			switch repl[j+1] {
-			case '$':
-				b.WriteByte('$')
+		}
+		rest = end
+	}
+	b := newSbuf(cc)
+	b.Grow(size)
+	for rest := 0; ; {
+		i := strings.Index(s[rest:], find)
+		if i < 0 {
+			b.WriteString(s[rest:])
+			break
+		}
+		start := rest + i
+		end := start + len(find)
+		n := b.Len()
+		b.WriteString(s[rest:start])
+		for _, p := range pieces {
+			switch p.kind {
+			case 0:
+				b.WriteString(p.lit)
 			case '&':
 				b.WriteString(find)
 			case '`':
 				b.WriteString(s[:start])
 			case '\'':
 				b.WriteString(s[end:])
-			default:
-				b.WriteByte('$')
-				continue
 			}
-			j++
 		}
+		cc.work(1 + int64(b.Len()-n)>>10)
 		rest = end
 	}
-	b.WriteString(s[rest:])
 	return b.String()
 }

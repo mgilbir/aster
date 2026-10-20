@@ -37,5 +37,5 @@ func TestUpstreamVegaEventSelector(t *testing.T) {
 		}()
 		r.Check(c, out, threw)
 	}
-	r.Done(15)
+	r.Done(18)
 }

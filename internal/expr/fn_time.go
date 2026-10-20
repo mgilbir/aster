@@ -198,7 +198,7 @@ func init() {
 		for _, u := range units.Items() {
 			names = append(names, s.str(u))
 		}
-		spec, err := format.TimeUnitSpecifier(names, format.UnitSpecifiersFromValue(arg(args, 1)))
+		spec, err := format.TimeUnitSpecifier(names, format.UnitSpecifiersFromValue(s.walker(), arg(args, 1)))
 		if err != nil {
 			failFormat(err)
 		}

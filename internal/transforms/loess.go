@@ -13,16 +13,20 @@ import (
 type LoessParams struct {
 	X, Y    Field
 	GroupBy []Field
-	// Bandwidth is the fraction of points in each local fit; 0 (unset) means 0.3.
+	// Bandwidth is the fraction of points in each local fit; 0 (unset) means
+	// 0.3, NaN stays NaN (the caller applies `_.bandwidth || 0.3`).
 	Bandwidth float64
-	As        []string
+	// BandwidthExact reports a Bandwidth the caller resolved (a truthy
+	// value that is 0 as a number stays 0).
+	BandwidthExact bool
+	As             []string
 }
 
 // Loess emits the locally weighted regression curve of each group: one point
 // per distinct x (points sharing an x are averaged), in ascending x.
 func Loess(ctx context.Context, data []jsval.Value, p LoessParams) ([]jsval.Value, error) {
 	bw := p.Bandwidth
-	if bw == 0 || math.IsNaN(bw) {
+	if bw == 0 && !p.BandwidthExact {
 		bw = 0.3
 	}
 	names := make([]string, len(p.GroupBy))
@@ -37,7 +41,7 @@ func Loess(ctx context.Context, data []jsval.Value, p LoessParams) ([]jsval.Valu
 		as1 = p.As[1]
 	}
 	var out []jsval.Value
-	for _, g := range regressionGroups(zoneOf(ctx), data, p.GroupBy) {
+	for _, g := range regressionGroups(keysOf(ctx), data, p.GroupBy) {
 		pts, err := LoessFit(ctx, g.Tuples, p.X.Get, p.Y.Get, bw)
 		if err != nil {
 			return nil, err

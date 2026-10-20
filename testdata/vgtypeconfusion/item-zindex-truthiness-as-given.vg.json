@@ -1,0 +1,2 @@
+{"width": 140, "height": 60, "data": [{"name": "t", "values": [{"i": 0, "z": [0], "c": "#4c78a8"}, {"i": 1, "z": 5, "c": "#e45756"}, {"i": 2, "z": 0, "c": "#54a24b"}]}],
+ "marks": [{"type": "rect", "from": {"data": "t"}, "encode": {"update": {"x": {"signal": "datum.i * 30"}, "width": {"value": 70}, "y": {"value": 10}, "height": {"value": 40}, "fill": {"field": "c"}, "zindex": {"field": "z"}}}}]}

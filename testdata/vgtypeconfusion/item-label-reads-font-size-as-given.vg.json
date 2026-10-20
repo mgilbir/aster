@@ -1,0 +1,4 @@
+{"width": 100, "height": 60, "data": [{"name": "t", "values": [{"x": 20, "y": 30, "n": "a"}, {"x": 60, "y": 30, "n": "b"}]}],
+ "marks": [{"type": "symbol", "name": "pts", "from": {"data": "t"}, "encode": {"enter": {"x": {"field": "x"}, "y": {"field": "y"}, "size": {"value": 100}}}},
+  {"type": "text", "from": {"data": "pts"}, "encode": {"enter": {"text": {"field": "datum.n"}, "fontSize": 0}},
+   "transform": [{"type": "label", "size": [100, 60]}]}]}

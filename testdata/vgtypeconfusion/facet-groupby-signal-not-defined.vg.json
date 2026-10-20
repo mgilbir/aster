@@ -1,0 +1,1 @@
+{"width": 40, "height": 20, "data": [{"name": "t", "values": [{"a": 1}]}], "marks": [{"type": "group", "from": {"facet": {"name": "f", "data": "t", "groupby": {"signal": "datum"}}}}]}

@@ -134,10 +134,10 @@ func (s *Sequential) Range() []jsval.Value {
 func (s *Sequential) SetRange(r []jsval.Value) { s.setRange(r, InterpolateValue) }
 
 // SetRangeRound is scale.rangeRound([r0, r1]).
-func (s *Sequential) SetRangeRound(r []jsval.Value) { s.setRange(r, InterpolateRound) }
+func (s *Sequential) SetRangeRound(r []jsval.Value) { s.setRange(r, InterpolateRoundI) }
 
 func (s *Sequential) setRange(r []jsval.Value, f Interpolator) {
-	f01 := f(valAt(r, 0), valAt(r, 1))
+	f01 := f(s.walk, valAt(r, 0), valAt(r, 1))
 	s.interp = f01
 }
 
@@ -227,7 +227,7 @@ func (s *Sequential) HasTickFormat() bool { return true }
 // family parameter.
 func (s *Sequential) Copy() Scale {
 	n := *s
-	n.meta = meta{typ: s.typ}
+	n.meta = meta{typ: s.typ, walk: s.walk}
 	return &n
 }
 
@@ -356,11 +356,11 @@ func (d *Diverging) Range() []jsval.Value {
 func (d *Diverging) SetRange(r []jsval.Value) { d.setRange(r, InterpolateValue) }
 
 // SetRangeRound is scale.rangeRound([r0, r1, r2]).
-func (d *Diverging) SetRangeRound(r []jsval.Value) { d.setRange(r, InterpolateRound) }
+func (d *Diverging) SetRangeRound(r []jsval.Value) { d.setRange(r, InterpolateRoundI) }
 
 func (d *Diverging) setRange(r []jsval.Value, f Interpolator) {
 	vals := []jsval.Value{valAt(r, 0), valAt(r, 1), valAt(r, 2)}
-	d.interp = Piecewise(f, vals)
+	d.interp = Piecewise(d.walk, f, vals)
 }
 
 // Interpolator returns the interpolator (nil means the identity).
@@ -448,7 +448,7 @@ func (d *Diverging) HasTickFormat() bool { return true }
 // Copy is d3's sequential copy applied to a diverging scale.
 func (d *Diverging) Copy() Scale {
 	n := *d
-	n.meta = meta{typ: d.typ}
+	n.meta = meta{typ: d.typ, walk: d.walk}
 	return &n
 }
 

@@ -32,17 +32,21 @@ func strFormat(f func(float64) string) Format {
 	return func(v jsval.Value) jsval.Value { return jsval.Str(f(jsval.ToNumber(v))) }
 }
 
-// defaultFormatter is vega-scale's `String(value)`, mapping over arrays.
-func defaultFormatter(v jsval.Value) jsval.Value {
-	if v.IsArr() {
-		items := v.Items()
-		out := make([]jsval.Value, len(items))
-		for i, it := range items {
-			out[i] = jsval.Str(it.AsString())
+// defaultFormatter is vega-scale's `String(value)`, mapping over arrays,
+// with the call's Walker w.
+func defaultFormatter(w jsval.Walker) Format {
+	return func(v jsval.Value) jsval.Value {
+		if v.IsArr() {
+			items := v.Items()
+			w.Work(int64(len(items)))
+			out := make([]jsval.Value, len(items))
+			for i, it := range items {
+				out[i] = jsval.Str(w.String(it))
+			}
+			return jsval.Arr(out)
 		}
-		return jsval.Arr(out)
+		return jsval.Str(w.String(v))
 	}
-	return jsval.Str(v.AsString())
 }
 
 // TickCountFor is vega-scale's tickCount(scale, count, minStep): it resolves a
@@ -89,7 +93,20 @@ func TickCountFor(s Scale, count, minStep jsval.Value) (TickCount, error) {
 		default:
 			return TickCount{}, ErrIntervalString
 		}
-		iv, ok := format.IntervalFor(z, count.StrValue())
+		name := count.StrValue()
+		if _, inherited := jsval.Inherited(name); inherited || name == "__proto__" {
+			// vega-time's interval table is a plain object: the name of a
+			// member of Object.prototype finds that member, which is no
+			// interval. d3's ticks read it as a count of NaN (no ticks);
+			// count.every(step) is a TypeError.
+			if step.IsTruthy() {
+				return TickCount{}, errors.New("count.every is not a function")
+			}
+			c := Count(math.NaN())
+			c.Opaque = true
+			return c, nil
+		}
+		iv, ok := format.IntervalFor(z, name)
 		if !step.IsTruthy() {
 			if !ok {
 				// vega-time answers undefined for an unknown unit: the
@@ -120,6 +137,12 @@ func TickCountFor(s Scale, count, minStep jsval.Value) (TickCount, error) {
 		return Count(jsval.ToNumber(count)), nil
 	case count.IsNull():
 		return TickCount{Null: true}, nil // {interval: null}
+	case count.IsObj() || count.IsArr():
+		// an interval that is an object or an array reaches d3's ticks as
+		// the count, which reads it as a number: [5] is 5, {} is NaN
+		c := Count(jsval.ToNumber(count))
+		c.Opaque = true
+		return c, nil
 	}
 	return TickCount{}, nil
 }
@@ -356,15 +379,16 @@ func tickLog(ctx context.Context, s Scale, count TickCount, values bool) (test f
 // the scale is binned; finding them lists the ticks, which ctx bounds.
 func TickFormat(ctx context.Context, loc *format.Locale, s Scale, count TickCount, specifier jsval.Value, formatType string, noSkip bool) (Format, error) {
 	typ := s.Type()
+	w := jsval.WalkerFor(ctx)
 	switch {
 	case typ == TypeTime || formatType == TypeTime:
-		return timeFormatOf(loc, specifier, false)
+		return timeFormatOf(w, loc, specifier, false)
 	case typ == TypeUTC || formatType == TypeUTC:
-		return timeFormatOf(loc, specifier, true)
+		return timeFormatOf(w, loc, specifier, true)
 	case IsLogarithmic(typ):
 		spec := "" // formatFloat(spec || ',')
 		if specifier.IsTruthy() {
-			spec = specifier.AsString()
+			spec = w.String(specifier)
 		}
 		varfmt, err := loc.FormatFloat(spec)
 		if err != nil {
@@ -392,21 +416,21 @@ func TickFormat(ctx context.Context, loc *format.Locale, s Scale, count TickCoun
 		if len(d) > 0 {
 			d0, dn = jsval.ToNumber(d[0]), jsval.ToNumber(d[len(d)-1])
 		}
-		f, err := loc.FormatSpan(d0, dn, n, spanSpecifier(specifier))
+		f, err := loc.FormatSpan(d0, dn, n, spanSpecifier(w, specifier))
 		if err != nil {
 			return nil, err
 		}
 		return strFormat(f), nil
 	}
 	if specifier.IsTruthy() {
-		nf, err := loc.NumberFormat(specifier.AsString())
+		nf, err := loc.NumberFormat(w.String(specifier))
 		if err != nil {
 			return nil, err
 		}
 		// d3's format reads +value, except "c", which prints the value.
-		return func(v jsval.Value) jsval.Value { return jsval.Str(nf.FormatValue(v)) }, nil
+		return func(v jsval.Value) jsval.Value { return jsval.Str(nf.FormatValue(w, v)) }, nil
 	}
-	return defaultFormatter, nil
+	return defaultFormatter(w), nil
 }
 
 // spanSpecifier is the specifier of locale.formatSpan, which substitutes ",f"
@@ -414,19 +438,21 @@ func TickFormat(ctx context.Context, loc *format.Locale, s Scale, count TickCoun
 // d3's formatSpecifier matches the specifier with a regular expression's
 // exec, which converts it to a string first, so a number such as 42 is the
 // specifier "42" (a width).
-func spanSpecifier(v jsval.Value) string {
+func spanSpecifier(w jsval.Walker, v jsval.Value) string {
 	if v.IsNullish() {
 		return ",f"
 	}
-	return v.AsString()
+	return w.String(v)
 }
 
-func timeFormatOf(loc *format.Locale, specifier jsval.Value, utc bool) (Format, error) {
-	f, err := loc.TimeFormatSpec(specifier, utc)
+func timeFormatOf(w jsval.Walker, loc *format.Locale, specifier jsval.Value, utc bool) (Format, error) {
+	f, err := loc.TimeFormatSpec(w, specifier, utc)
 	if err != nil {
 		return nil, err
 	}
+	// The formatter takes the value as it is (a time multi-format compares
+	// it unclipped); a format makes `new Date(+date)` of it itself.
 	return func(v jsval.Value) jsval.Value {
-		return jsval.Str(f(dateNumber(v)))
+		return jsval.Str(f(jsval.ToNumber(v)))
 	}, nil
 }

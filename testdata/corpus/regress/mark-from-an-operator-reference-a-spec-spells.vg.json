@@ -1,0 +1,4 @@
+{"scales":[{"name":"x","type":"linear","domain":[0,10],"range":[0,100]}],
+ "axes":[{"scale":"x","orient":"bottom"}],
+ "marks":[{"type":"text","from":{"$ref":"$h1"},"encode":{"enter":{"text":{"signal":"datum.label"}}}},
+  {"type":"group","from":{"facet":{"data":{"$ref":"$h1"},"name":"f","groupby":"value"}},"marks":[{"type":"text","from":{"data":"f"},"encode":{"enter":{"text":{"field":"label"}}}}]}]}

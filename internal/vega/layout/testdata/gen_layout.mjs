@@ -13,7 +13,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-const require = createRequire(path.join(process.env.NODE_PATH, 'x.js'));
+const require = createRequire(path.resolve(process.env.NODE_PATH, 'x.js'));
 const vega = await import(require.resolve('vega'));
 const vt = await import(require.resolve('vega-view-transforms'));
 vega.textMetrics.canvas(false); // deterministic width estimate
@@ -21,7 +21,18 @@ vega.textMetrics.canvas(false); // deterministic width estimate
 const here = path.dirname(fileURLToPath(import.meta.url));
 const corpusDir = process.env.CORPUS || path.join(here, '../../../../testdata/corpus/vega');
 const dataDir = process.env.DATA || path.join(here, '../../../../testdata/data');
-const loader = vega.loader({ mode: 'file', baseURL: dataDir });
+// Data is read synchronously and handed over as a settled promise: with the
+// file loader's asynchronous read, whether a spec's data arrived before or
+// after the first layout pass depended on the machine's load, and so did the
+// records (the layout runs before the data, then again with it).
+const fileLoader = vega.loader({ mode: 'file', baseURL: dataDir });
+const loader = {
+  ...fileLoader,
+  load: async (uri, options) => {
+    const { href } = await fileLoader.sanitize(uri, options);
+    return fs.readFileSync(href.replace(/^file:\/\//, ''), 'utf8');
+  },
+};
 
 const num = v => (typeof v === 'number' && !Number.isFinite(v) ? { $num: String(v) } : v);
 const dumpBounds = b => (b ? [b.x1, b.y1, b.x2, b.y2].map(num) : undefined);

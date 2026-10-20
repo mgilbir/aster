@@ -1,0 +1,2 @@
+{"width":200,"height":100,"signals":[{"name":"v","value":["ab","c","ab"]}],"data":[{"name":"t","values":{"signal":"v"},"transform":[{"type":"aggregate","groupby":["length"]}]}],
+"marks":[{"type":"text","from":{"data":"t"},"encode":{"enter":{"text":{"signal":"''+datum.length+':'+datum.count"}}}}]}

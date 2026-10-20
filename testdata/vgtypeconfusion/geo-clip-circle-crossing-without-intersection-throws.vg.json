@@ -1,0 +1,3 @@
+{"width":600,"height":600,"projections":[{"name":"p","type":"azimuthalEquidistant","clipAngle":120,"rotate":[10,60,20]}],
+"data":[{"name":"g","transform":[{"type":"graticule","step":[30,30]}]}],
+"marks":[{"type":"shape","from":{"data":"g"},"encode":{"enter":{"stroke":{"value":"black"}}},"transform":[{"type":"geoshape","projection":"p"}]}]}

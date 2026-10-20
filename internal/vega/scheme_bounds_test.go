@@ -22,17 +22,18 @@ func TestSchemeSamplesPastTheBoundFail(t *testing.T) {
 	if _, err := renderJSON(t, context.Background(), spec("2e6")); !errors.Is(err, budget.ErrLimit) {
 		t.Errorf("schemeCount 2e6: %v; want a limit error", err)
 	}
-	if _, err := renderJSON(t, context.Background(), spec("1e300")); !errors.Is(err, budget.ErrLimit) {
-		t.Errorf("schemeCount 1e300: %v; want a limit error", err)
-	}
-	var reported error
-	v, err := jsval.ParseJSONString(spec("2.5"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = Render(context.Background(), v, Options{Report: func(e error) error { reported = e; return e }})
-	if err == nil || reported == nil || errors.Is(err, budget.ErrLimit) {
-		t.Errorf("schemeCount 2.5: %v (reported %v); want upstream's Invalid array length", err, reported)
+	// A count past 2^32 - 1, like a fractional one, is upstream's
+	// RangeError (new Array(1e300)), not the engine's bound.
+	for _, count := range []string{"2.5", "1e300"} {
+		var reported error
+		v, err := jsval.ParseJSONString(spec(count))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = Render(context.Background(), v, Options{Report: func(e error) error { reported = e; return e }})
+		if err == nil || reported == nil || errors.Is(err, budget.ErrLimit) {
+			t.Errorf("schemeCount %s: %v (reported %v); want upstream's Invalid array length", count, err, reported)
+		}
 	}
 	if _, err := renderJSON(t, context.Background(), spec("7")); err != nil {
 		t.Errorf("schemeCount 7: %v", err)

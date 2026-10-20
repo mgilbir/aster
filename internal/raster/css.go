@@ -2,9 +2,14 @@ package raster
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"sort"
+	"math/bits"
+	"slices"
 	"strings"
+	"unsafe"
+
+	"github.com/mgilbir/aster/internal/budget"
 )
 
 // This file implements the CSS subset SVG documents use, following resvg's
@@ -149,20 +154,75 @@ func stripComments(s string) string {
 // parseStyleSheet appends the rules of one sheet to rules (at most maxRules in
 // total).
 func parseStyleSheet(src string, rules []cssRule, maxRules int) []cssRule {
+	rules, _ = parseSheet(src, rules, maxRules, nil)
+	return rules
+}
+
+// sheetCharge is what parsing a style sheet charges: the structures it
+// builds, before it keeps them (to the document's reservation), and the
+// bytes it reads (to the call's meter, which polls the context). A nil one
+// charges nothing.
+type sheetCharge struct {
+	rs *reservation
+	m  *budget.Meter
+}
+
+// Sizes of the structures a style sheet parses to.
+const (
+	cssRuleBytes   = int64(unsafe.Sizeof(cssRule{}))
+	selectorBytes  = int64(unsafe.Sizeof(selector{}))
+	simpleSelBytes = int64(unsafe.Sizeof(simpleSel{}))
+	subSelBytes    = int64(unsafe.Sizeof(subSel{}))
+	cssDeclBytes   = int64(unsafe.Sizeof(cssDecl{}))
+)
+
+// selectorSize is what a parsed selector holds.
+func selectorSize(sel *selector) int64 {
+	n := selectorBytes + int64(cap(sel.comps))*simpleSelBytes + int64(cap(sel.comb))
+	for _, c := range sel.comps {
+		n += int64(cap(c.subs)) * subSelBytes
+	}
+	return n
+}
+
+// parseSheet is parseStyleSheet charging cc (nil: nothing): a sheet is at
+// most MaxStyleBytes, and its rules hold about twenty times its bytes. A
+// selector is charged once parsed (its size is its own, bounded by
+// maxSelectorBytes), before the rule is kept; the declarations of a rule
+// before each is appended.
+func parseSheet(src string, rules []cssRule, maxRules int, cc *sheetCharge) ([]cssRule, error) {
+	take := func(n int64) error {
+		if cc == nil {
+			return nil
+		}
+		return cc.rs.take(n)
+	}
+	if strings.Contains(src, "/*") {
+		if err := take(int64(len(src))); err != nil {
+			return rules, err
+		}
+	}
 	s := stripComments(src)
+	last := len(src) // the sheet left at the last charge
 	for {
+		if cc != nil {
+			if err := cc.m.Work(1 + int64(last-len(s))>>4); err != nil {
+				return rules, err
+			}
+			last = len(s)
+		}
 		s = strings.TrimLeft(s, " \t\r\n\f")
 		s = strings.TrimPrefix(s, "<!--")
 		s = strings.TrimPrefix(s, "-->")
 		s = strings.TrimLeft(s, " \t\r\n\f")
 		if s == "" || len(rules) >= maxRules {
-			return rules
+			return rules, nil
 		}
 		if s[0] == '@' {
 			// At-rule: skip to ';' or over the {...} block.
 			i := scanToAny(s, ";{")
 			if i >= len(s) {
-				return rules
+				return rules, nil
 			}
 			if s[i] == ';' {
 				s = s[i+1:]
@@ -174,7 +234,7 @@ func parseStyleSheet(src string, rules []cssRule, maxRules int) []cssRule {
 		}
 		open := scanTo(s, '{')
 		if open >= len(s) {
-			return rules
+			return rules, nil
 		}
 		prelude := s[:open]
 		body := s[open:]
@@ -185,9 +245,18 @@ func parseStyleSheet(src string, rules []cssRule, maxRules int) []cssRule {
 		}
 		s = body[n:]
 		var decls []cssDecl
+		var err error
 		forEachDecl(inner, func(name, val string, imp bool) {
-			decls = append(decls, cssDecl{name, val, imp})
+			// The list doubles, and a name not in the table is lowered.
+			if err == nil {
+				if err = take(2*cssDeclBytes + int64(len(name))); err == nil {
+					decls = append(decls, cssDecl{name, val, imp})
+				}
+			}
 		})
+		if err != nil {
+			return rules, err
+		}
 		if len(decls) == 0 {
 			continue
 		}
@@ -200,6 +269,10 @@ func parseStyleSheet(src string, rules []cssRule, maxRules int) []cssRule {
 				prelude = ""
 			}
 			if sel := parseSelector(part); sel != nil {
+				// The rule in a list that doubles.
+				if err := take(selectorSize(sel) + 2*cssRuleBytes); err != nil {
+					return rules, err
+				}
 				rules = append(rules, cssRule{sel: sel, decls: decls, order: len(rules)})
 			}
 		}
@@ -441,16 +514,64 @@ func parseAttrSel(s string) (subSel, bool) {
 
 // ---- matching ---------------------------------------------------------------
 
-func (n *node) rawAttr(name string) (string, bool) {
-	if n.css == nil {
+// An element is indexed once before it is matched against any rule (C12,
+// audit 2026-10-18): its attributes sorted by name, the first of a name
+// kept (a lookup is a binary search, not a scan of every attribute), and
+// its class tokens as a sorted set (".a" is a binary search too, and a class
+// listed k times is listed once). Matching charges every step by what it
+// does: a lookup the depth of its search, a comparison of values a unit per
+// 16 bytes; the steps count against MaxCSSWork and go to the call's meter,
+// which polls the context every thousand or so.
+
+// cssIndexed is an element's index for selector matching.
+type cssIndexed struct {
+	classes []string // the class attribute's tokens, sorted, each once
+	indexed bool
+}
+
+// indexNode sorts n's attributes by name, keeping the first of each name as
+// rawAttr did, and collects its class tokens, charging both.
+func (a *cssApplier) indexNode(n *node) bool {
+	c := n.css
+	if c == nil || c.ix.indexed {
+		return true
+	}
+	c.ix.indexed = true
+	raw := c.raw
+	if !a.step(int64(len(raw)) * int64(1+bits.Len(uint(len(raw))))) {
+		return false
+	}
+	slices.SortStableFunc(raw, func(x, y rawAttr) int { return strings.Compare(x.name, y.name) })
+	raw = slices.CompactFunc(raw, func(x, y rawAttr) bool { return x.name == y.name })
+	c.raw = raw
+	cl, ok := c.find("class")
+	if !ok {
+		return true
+	}
+	k := 0
+	for f := range strings.FieldsSeq(cl) {
+		_ = f
+		k++
+	}
+	if !a.step(1+int64(len(cl))>>4+int64(k)*int64(1+bits.Len(uint(k)))) || !a.take(int64(k)*16) {
+		return false
+	}
+	toks := make([]string, 0, k)
+	for f := range strings.FieldsSeq(cl) {
+		toks = append(toks, f)
+	}
+	slices.Sort(toks)
+	c.ix.classes = slices.Compact(toks)
+	return true
+}
+
+// find is the value of the attribute named name, from the sorted index.
+func (c *cssNode) find(name string) (string, bool) {
+	i, ok := slices.BinarySearchFunc(c.raw, name, func(x rawAttr, name string) int { return strings.Compare(x.name, name) })
+	if !ok {
 		return "", false
 	}
-	for i := range n.css.raw {
-		if n.css.raw[i].name == name {
-			return n.css.raw[i].val, true
-		}
-	}
-	return "", false
+	return c.raw[i].val, true
 }
 
 func (n *node) prevEl() *node {
@@ -460,12 +581,37 @@ func (n *node) prevEl() *node {
 	return n.css.prev
 }
 
-func (sub *subSel) matches(n *node) bool {
+// lookupCost is the work of a binary search among n items.
+func lookupCost(n int) int64 { return 1 + int64(bits.Len(uint(n))) }
+
+func (a *cssApplier) subMatches(sub *subSel, n *node) bool {
 	if sub.kind == subFirstChild {
 		return n.prevEl() == nil
 	}
-	v, ok := n.rawAttr(sub.name)
+	c := n.css
+	if c == nil {
+		return false
+	}
+	if sub.kind == subAttrIncludes && sub.name == "class" {
+		// Tokens never hold white space, so a value with any is none
+		// of them, as strings.Fields made it.
+		if !a.step(lookupCost(len(c.raw)) + lookupCost(len(c.ix.classes))) {
+			return false
+		}
+		if _, ok := c.find("class"); !ok {
+			return false
+		}
+		_, ok := slices.BinarySearch(c.ix.classes, sub.val)
+		return ok
+	}
+	if !a.step(lookupCost(len(c.raw))) {
+		return false
+	}
+	v, ok := c.find(sub.name)
 	if !ok {
+		return false
+	}
+	if sub.kind != subAttrExists && !a.step(int64(len(v)+len(sub.val))>>4) {
 		return false
 	}
 	switch sub.kind {
@@ -474,7 +620,7 @@ func (sub *subSel) matches(n *node) bool {
 	case subAttrEq:
 		return v == sub.val
 	case subAttrIncludes:
-		for _, f := range strings.Fields(v) {
+		for f := range strings.FieldsSeq(v) {
 			if f == sub.val {
 				return true
 			}
@@ -492,26 +638,22 @@ func (sub *subSel) matches(n *node) bool {
 	return false
 }
 
-func (c *simpleSel) matches(n *node) bool {
+func (a *cssApplier) compoundMatches(c *simpleSel, n *node) bool {
 	if c.tag != "" && (n.css == nil || n.css.name != c.tag) {
 		return false
 	}
 	for i := range c.subs {
-		if !c.subs[i].matches(n) {
+		if !a.subMatches(&c.subs[i], n) {
 			return false
 		}
 	}
 	return true
 }
 
-// matchAt reports whether n matches comps[..idx]; budget is decremented per
-// step and matching fails once it is exhausted.
-func (s *selector) matchAt(idx int, n *node, budget *int) bool {
-	*budget--
-	if *budget < 0 {
-		return false
-	}
-	if !s.comps[idx].matches(n) {
+// matchAt reports whether n matches s.comps[..idx]. Each call is a step;
+// matching fails once the steps or the context are spent (a.err).
+func (a *cssApplier) matchAt(s *selector, idx int, n *node) bool {
+	if !a.step(1) || !a.compoundMatches(&s.comps[idx], n) {
 		return false
 	}
 	if idx == 0 {
@@ -519,31 +661,36 @@ func (s *selector) matchAt(idx int, n *node, budget *int) bool {
 	}
 	switch s.comb[idx] {
 	case ' ':
-		for p := n.parent; p != nil; p = p.parent {
-			if s.matchAt(idx-1, p, budget) {
+		for p := n.parent; p != nil && a.err == nil; p = p.parent {
+			if a.matchAt(s, idx-1, p) {
 				return true
-			}
-			if *budget < 0 {
-				return false
 			}
 		}
 		return false
 	case '>':
-		return n.parent != nil && s.matchAt(idx-1, n.parent, budget)
+		return n.parent != nil && a.matchAt(s, idx-1, n.parent)
 	case '+':
-		return n.prevEl() != nil && s.matchAt(idx-1, n.prevEl(), budget)
+		return n.prevEl() != nil && a.matchAt(s, idx-1, n.prevEl())
 	}
 	return false
 }
 
 // ---- application ------------------------------------------------------------
 
+// cssIndex lists each rule once, under the id, else the first class, else
+// the type its last compound requires, else among the others: the lists
+// are disjoint, so an element's candidates (the lists of its id, of each of
+// its distinct classes, of its type, and the others) list no rule twice.
 type cssIndex struct {
 	byID    map[string][]int
 	byClass map[string][]int
 	byTag   map[string][]int
 	other   []int
 }
+
+// indexEntryBytes is about what a rule costs the index: its number in a
+// list, and a map entry, its share of the buckets included.
+const indexEntryBytes = 8 + 64
 
 func buildIndex(rules []cssRule) *cssIndex {
 	ix := &cssIndex{byID: map[string][]int{}, byClass: map[string][]int{}, byTag: map[string][]int{}}
@@ -580,20 +727,58 @@ func buildIndex(rules []cssRule) *cssIndex {
 type cssApplier struct {
 	rules  []cssRule
 	ix     *cssIndex
-	budget int
+	budget int // steps left of MaxCSSWork
 	cand   []int
 	tmp    []attr
-	ctx    context.Context
-	visits int
+	m      budget.Meter
+	rs     *reservation
 	err    error
 }
+
+// step charges n units of matching work: against MaxCSSWork, and to the
+// call's meter, which polls the context. It reports whether matching may go
+// on; once it may not, a.err says why.
+func (a *cssApplier) step(n int64) bool {
+	if a.err != nil {
+		return false
+	}
+	if n > int64(a.budget) {
+		a.budget = -1
+		a.err = errCSSWork
+		return false
+	}
+	a.budget -= int(n)
+	if err := a.m.Work(n); err != nil {
+		a.err = err
+		return false
+	}
+	return true
+}
+
+// take charges n bytes matching is about to allocate.
+func (a *cssApplier) take(n int64) bool {
+	if a.err != nil {
+		return false
+	}
+	if err := a.rs.take(n); err != nil {
+		a.err = overLedger("applying the SVG's style sheets", err)
+		return false
+	}
+	return true
+}
+
+// errCSSWork marks matching past MaxCSSWork; applyCSS names the bound.
+var errCSSWork = fmt.Errorf("css work: %w", errLimit)
 
 // applyCSS parses the document's style sheets and folds the matching
 // declarations into every element's style list. A sheet past MaxStyleBytes,
 // rules past MaxCSSRules or matching past MaxCSSWork fail the render: a
 // document styled by part of its sheets, or with its later elements left
-// unstyled, would be drawn wrong without a word (C103).
+// unstyled, would be drawn wrong without a word (C103). What it builds is
+// charged to the document's reservation and its work to the call's meter.
 func (doc *document) applyCSS(ctx context.Context, lim Limits) error {
+	a := &cssApplier{budget: lim.MaxCSSWork, m: budget.NewMeter(ctx), rs: &doc.res}
+	cc := &sheetCharge{rs: &doc.res, m: &a.m}
 	var rules []cssRule
 	total := 0
 	for _, src := range doc.css {
@@ -601,7 +786,14 @@ func (doc *document) applyCSS(ctx context.Context, lim Limits) error {
 		if total > lim.MaxStyleBytes {
 			return fmt.Errorf("raster: style sheets of more than %d bytes: %w", lim.MaxStyleBytes, errLimit)
 		}
-		if rules = parseStyleSheet(src, rules, lim.MaxCSSRules+1); len(rules) > lim.MaxCSSRules {
+		var err error
+		if rules, err = parseSheet(src, rules, lim.MaxCSSRules+1, cc); err != nil {
+			if errors.Is(err, budget.ErrLimit) {
+				return overLedger("parsing the SVG's style sheets", err)
+			}
+			return err
+		}
+		if len(rules) > lim.MaxCSSRules {
 			return fmt.Errorf("raster: style sheets of more than %d rules: %w", lim.MaxCSSRules, errLimit)
 		}
 	}
@@ -609,26 +801,33 @@ func (doc *document) applyCSS(ctx context.Context, lim Limits) error {
 	if len(rules) == 0 {
 		return nil
 	}
-	a := &cssApplier{rules: rules, ix: buildIndex(rules), budget: lim.MaxCSSWork, ctx: ctx}
-	a.visit(doc.root)
-	if a.err != nil {
-		return a.err
+	if err := doc.res.take(int64(len(rules)) * indexEntryBytes); err != nil {
+		return overLedger("applying the SVG's style sheets", err)
 	}
-	if a.budget < 0 {
+	a.rules, a.ix = rules, buildIndex(rules)
+	a.visit(doc.root)
+	switch {
+	case a.err == errCSSWork:
 		return fmt.Errorf("raster: matching style sheets takes more than %d steps (raise Limits.MaxCSSWork): %w", lim.MaxCSSWork, errLimit)
+	case a.err != nil:
+		return a.err
 	}
 	return nil
 }
 
+// visit applies the style sheets to n and its descendants, in document
+// order: an element's ancestors and previous siblings, which its selectors
+// may look at, are indexed before it.
 func (a *cssApplier) visit(n *node) {
-	if a.budget >= 0 && a.err == nil {
-		if a.visits++; a.ctx != nil && a.visits&255 == 0 {
-			a.err = a.ctx.Err()
-		}
-		a.apply(n)
+	if !a.indexNode(n) {
+		return
 	}
+	a.apply(n)
 	var prev *node
 	for _, k := range n.kids {
+		if a.err != nil {
+			return
+		}
 		if k.tag == tagChars {
 			continue
 		}
@@ -640,57 +839,77 @@ func (a *cssApplier) visit(n *node) {
 	}
 }
 
+// addCandidates appends a rule list to the element's candidates, charging
+// it first.
+func (a *cssApplier) addCandidates(list []int) bool {
+	if len(list) == 0 {
+		return true
+	}
+	if !a.step(int64(len(list))) {
+		return false
+	}
+	if len(a.cand)+len(list) > cap(a.cand) {
+		c := max(2*cap(a.cand), len(a.cand)+len(list))
+		if !a.take(int64(c) * 8) {
+			return false
+		}
+		a.cand = append(make([]int, 0, c), a.cand...)
+	}
+	a.cand = append(a.cand, list...)
+	return true
+}
+
 func (a *cssApplier) apply(n *node) {
 	a.cand = a.cand[:0]
-	if id, ok := n.rawAttr("id"); ok {
-		a.cand = append(a.cand, a.ix.byID[id]...)
-	}
-	if cl, ok := n.rawAttr("class"); ok {
-		for _, f := range strings.Fields(cl) {
-			a.cand = append(a.cand, a.ix.byClass[f]...)
+	if c := n.css; c != nil {
+		if id, ok := c.find("id"); ok && !a.addCandidates(a.ix.byID[id]) {
+			return
+		}
+		for _, cl := range c.ix.classes {
+			if !a.step(1) || !a.addCandidates(a.ix.byClass[cl]) {
+				return
+			}
+		}
+		if !a.addCandidates(a.ix.byTag[c.name]) {
+			return
 		}
 	}
-	if n.css != nil {
-		a.cand = append(a.cand, a.ix.byTag[n.css.name]...)
-	}
-	a.cand = append(a.cand, a.ix.other...)
-	if len(a.cand) == 0 {
+	if !a.addCandidates(a.ix.other) || len(a.cand) == 0 {
 		return
 	}
-	a.budget -= len(a.cand)
-	// Different class tokens may list one rule twice.
-	matched := a.cand[:0:0]
-	seen := map[int]bool(nil)
+	matched := a.cand[:0] // in place: a candidate is read before it is overwritten
 	for _, ri := range a.cand {
 		r := &a.rules[ri]
-		if a.budget < 0 {
-			break
+		if a.matchAt(r.sel, len(r.sel.comps)-1, n) {
+			matched = append(matched, ri)
 		}
-		if !r.sel.matchAt(len(r.sel.comps)-1, n, &a.budget) {
-			continue
+		if a.err != nil {
+			return
 		}
-		if seen == nil {
-			seen = map[int]bool{}
-		}
-		if seen[ri] {
-			continue
-		}
-		seen[ri] = true
-		matched = append(matched, ri)
 	}
 	if len(matched) == 0 {
 		return
 	}
-	sort.SliceStable(matched, func(i, j int) bool {
-		x, y := a.rules[matched[i]], a.rules[matched[j]]
-		if x.sel.spec != y.sel.spec {
-			return lessSpec(x.sel.spec, y.sel.spec)
+	if !a.step(int64(len(matched)) * lookupCost(len(matched))) {
+		return
+	}
+	slices.SortFunc(matched, func(x, y int) int {
+		sx, sy := a.rules[x].sel.spec, a.rules[y].sel.spec
+		if sx != sy {
+			if lessSpec(sx, sy) {
+				return -1
+			}
+			return 1
 		}
-		return x.order < y.order
+		return a.rules[x].order - a.rules[y].order
 	})
 	tmp := a.tmp[:0]
 	for _, ri := range matched {
-		for _, d := range a.rules[ri].decls {
+		ds := a.rules[ri].decls
+		if !a.step(int64(len(ds))) {
+			return
+		}
+		for _, d := range ds {
 			tmp = appendDecl(tmp, d.name, d.val, d.imp, true)
 		}
 	}
@@ -698,6 +917,9 @@ func (a *cssApplier) apply(n *node) {
 		tmp = putDecl(tmp, s.id, s.val, s.imp, true)
 	}
 	a.tmp = tmp
+	if !a.take(int64(len(tmp)) * attrBytes) {
+		return
+	}
 	n.style = append([]attr(nil), tmp...)
 }
 

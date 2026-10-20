@@ -11,22 +11,25 @@ import (
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
+// The relational operators of upstream's code over values. An array compares
+// as its String, a walk of it, which w (the call's Walker) bounds.
+
 // Less is `a < b`.
-func Less(a, b jsval.Value) bool { c, ok := jsval.Relate(a, b); return ok && c < 0 }
+func Less(w jsval.Walker, a, b jsval.Value) bool { c, ok := w.Relate(a, b); return ok && c < 0 }
 
 // Greater is `a > b`.
-func Greater(a, b jsval.Value) bool { c, ok := jsval.Relate(a, b); return ok && c > 0 }
+func Greater(w jsval.Walker, a, b jsval.Value) bool { c, ok := w.Relate(a, b); return ok && c > 0 }
 
 // GreaterEq is `a >= b`; it is false when either side is NaN.
-func GreaterEq(a, b jsval.Value) bool { c, ok := jsval.Relate(a, b); return ok && c >= 0 }
+func GreaterEq(w jsval.Walker, a, b jsval.Value) bool { c, ok := w.Relate(a, b); return ok && c >= 0 }
 
 // LessEq is `a <= b`.
-func LessEq(a, b jsval.Value) bool { c, ok := jsval.Relate(a, b); return ok && c <= 0 }
+func LessEq(w jsval.Walker, a, b jsval.Value) bool { c, ok := w.Relate(a, b); return ok && c <= 0 }
 
 // Ascending is vega-util's ascending comparator. null and undefined sort
 // before everything, NaN (and an Invalid Date) sort after them and before
 // every valid value, and mixed types fall back to JavaScript's `<`/`>`.
-func Ascending(u, v jsval.Value) int {
+func Ascending(w jsval.Walker, u, v jsval.Value) int {
 	// Fast paths for the two overwhelmingly common same-kind comparisons.
 	switch {
 	case u.Kind() == jsval.KindNum && v.Kind() == jsval.KindNum:
@@ -48,7 +51,7 @@ func Ascending(u, v jsval.Value) int {
 		return jsval.CompareUTF16(u.StrValue(), v.StrValue())
 	}
 	un, vn := u.IsNullish(), v.IsNullish()
-	if c, ok := jsval.Relate(u, v); ok {
+	if c, ok := w.Relate(u, v); ok {
 		if c < 0 && !vn {
 			return -1
 		}
@@ -91,7 +94,7 @@ const (
 // field in turn with Ascending, reversed for the fields whose order is
 // "descending" (any other order string means ascending). Null fields are
 // skipped along with their order. It returns nil when no field remains.
-func CompareBy(fields []Field, orders []string) Comparator {
+func CompareBy(w jsval.Walker, fields []Field, orders []string) Comparator {
 	get := make([]Accessor, 0, len(fields))
 	ord := make([]int, 0, len(fields))
 	for i, f := range fields {
@@ -110,11 +113,11 @@ func CompareBy(fields []Field, orders []string) Comparator {
 		return nil
 	case 1:
 		g, o := get[0], ord[0]
-		return func(a, b jsval.Value) int { return Ascending(g(a), g(b)) * o }
+		return func(a, b jsval.Value) int { return Ascending(w, g(a), g(b)) * o }
 	}
 	return func(a, b jsval.Value) int {
 		for i, g := range get {
-			if c := Ascending(g(a), g(b)); c != 0 {
+			if c := Ascending(w, g(a), g(b)); c != 0 {
 				return c * ord[i]
 			}
 		}
@@ -141,10 +144,10 @@ func StableComparator(cmp Comparator) Comparator {
 // id 0).
 func TupleIDOrder(a, b jsval.Value) int {
 	var ia, ib uint32
-	if o := a.ObjValue(); o != nil {
+	if o := jsval.Fields(a); o != nil {
 		ia = o.TupleID()
 	}
-	if o := b.ObjValue(); o != nil {
+	if o := jsval.Fields(b); o != nil {
 		ib = o.TupleID()
 	}
 	switch {
@@ -183,12 +186,12 @@ func SortTuples(data []jsval.Value, cmp Comparator) {
 // ExtentIndex is vega-util's extentIndex over the values f yields: the
 // indices of the first minimum and first maximum, ignoring null, undefined and
 // NaN; [-1,-1] when nothing is valid.
-func ExtentIndex(n int, f func(i int) jsval.Value) (lo, hi int) {
+func ExtentIndex(w jsval.Walker, n int, f func(i int) jsval.Value) (lo, hi int) {
 	i := 0
 	var a, c jsval.Value
 	for ; i < n; i++ {
 		b := f(i)
-		if !b.IsNullish() && GreaterEq(b, b) {
+		if !b.IsNullish() && GreaterEq(w, b, b) {
 			a, c = b, b
 			break
 		}
@@ -202,10 +205,10 @@ func ExtentIndex(n int, f func(i int) jsval.Value) (lo, hi int) {
 		if b.IsNullish() {
 			continue
 		}
-		if Greater(a, b) {
+		if Greater(w, a, b) {
 			a, lo = b, i
 		}
-		if Less(c, b) {
+		if Less(w, c, b) {
 			c, hi = b, i
 		}
 	}
@@ -216,7 +219,7 @@ func ExtentIndex(n int, f func(i int) jsval.Value) (lo, hi int) {
 // maximum ignoring null, undefined and NaN. ok is false for empty input;
 // with only invalid values upstream answers [NaN|null|undefined, same], and
 // this returns that first invalid value with ok=true.
-func Extent(n int, f func(i int) jsval.Value) (lo, hi jsval.Value, ok bool) {
+func Extent(w jsval.Walker, n int, f func(i int) jsval.Value) (lo, hi jsval.Value, ok bool) {
 	if n == 0 {
 		return jsval.Undefined, jsval.Undefined, false
 	}
@@ -238,10 +241,10 @@ func Extent(n int, f func(i int) jsval.Value) (lo, hi jsval.Value, ok bool) {
 		if v.IsNullish() {
 			continue
 		}
-		if Less(v, lo) {
+		if Less(w, v, lo) {
 			lo = v
 		}
-		if Greater(v, hi) {
+		if Greater(w, v, hi) {
 			hi = v
 		}
 	}
@@ -254,8 +257,8 @@ func Extent(n int, f func(i int) jsval.Value) (lo, hi jsval.Value, ok bool) {
 // undefined, and an accessor that reads a property of its argument (every
 // field and expression accessor does) throws a TypeError. The null field has
 // no accessor and reads undefined.
-func ExtentOf(tuples []jsval.Value, f Field) (lo, hi jsval.Value, ok bool, err error) {
-	lo, hi, ok = Extent(len(tuples), func(i int) jsval.Value { return f.Apply(tuples[i]) })
+func ExtentOf(w jsval.Walker, tuples []jsval.Value, f Field) (lo, hi jsval.Value, ok bool, err error) {
+	lo, hi, ok = Extent(w, len(tuples), func(i int) jsval.Value { return f.Apply(tuples[i]) })
 	if ok && lo.IsUndefined() {
 		return lo, hi, ok, ReadsUndefined(f)
 	}
@@ -268,7 +271,10 @@ func ExtentOf(tuples []jsval.Value, f Field) (lo, hi jsval.Value, ok bool, err e
 // property of its argument and throws. The null field has no accessor and
 // yields nil.
 func ReadsUndefined(f Field) error {
-	if f.IsNil() {
+	if f.Uncallable {
+		return &jsval.Thrown{Name: "TypeError", Msg: "f is not a function"}
+	}
+	if f.IsNil() || f.Identity {
 		return nil
 	}
 	prop := f.Name

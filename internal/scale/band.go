@@ -258,6 +258,7 @@ func (b *Band) Invert(y jsval.Value) jsval.Value {
 func (b *Band) Copy() Scale {
 	n := NewBand()
 	n.typ = b.typ
+	n.walk = b.walk
 	n.point = b.point
 	n.ord.SetDomain(b.ord.domain)
 	n.r0, n.r1 = b.r0, b.r1

@@ -1,0 +1,1 @@
+{"width": 40, "height": 20, "marks": [{"type": "rect", "encode": {"enter": {"x": {"value": 1, "offset": "toString"}, "width": {"value": 5}, "height": {"value": 5}}}}]}

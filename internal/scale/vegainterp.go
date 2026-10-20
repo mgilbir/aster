@@ -28,7 +28,7 @@ func InterpolateRange(interpolator UnitInterpolator, rng []float64) UnitInterpol
 // gamma variant upstream) and is ignored by the others, as upstream does. ok is
 // false for a name with no matching d3 interpolator of this shape.
 func Interpolate(typ string, gamma float64, hasGamma bool) (Interpolator, bool) {
-	switch strings.ToLower(typ) {
+	switch jsval.JSLower(typ) { // 'interpolate' + type.toLowerCase()…
 	case "rgb":
 		if hasGamma {
 			return RGBGamma(gamma), true
@@ -55,9 +55,9 @@ func Interpolate(typ string, gamma float64, hasGamma bool) (Interpolator, bool) 
 	case "hcl-long":
 		return InterpolateHCLLong, true
 	case "number":
-		return InterpolateNumber, true
+		return InterpolateNumberI, true
 	case "round":
-		return InterpolateRound, true
+		return InterpolateRoundI, true
 	case "string":
 		return InterpolateString, true
 	case "array":
@@ -65,7 +65,7 @@ func Interpolate(typ string, gamma float64, hasGamma bool) (Interpolator, bool) 
 	case "object":
 		return InterpolateObject, true
 	case "date":
-		return InterpolateDate, true
+		return InterpolateDateI, true
 	case "hue":
 		return InterpolateHue, true
 	case "":
@@ -76,8 +76,8 @@ func Interpolate(typ string, gamma float64, hasGamma bool) (Interpolator, bool) 
 
 // InterpolateColors is vega-scale's interpolateColors: a piecewise
 // interpolator through the colours using the named interpolation space
-// ("rgb" when typ is empty).
-func InterpolateColors(colors []jsval.Value, typ string, gamma float64, hasGamma bool) UnitInterpolator {
+// ("rgb" when typ is empty). w walks the colours (the call's Walker).
+func InterpolateColors(w jsval.Walker, colors []jsval.Value, typ string, gamma float64, hasGamma bool) UnitInterpolator {
 	if typ == "" {
 		typ = "rgb"
 	}
@@ -85,7 +85,7 @@ func InterpolateColors(colors []jsval.Value, typ string, gamma float64, hasGamma
 	if !ok {
 		interp = nil // d3's piecewise would call an undefined interpolator; use the default
 	}
-	return Piecewise(interp, colors)
+	return Piecewise(w, interp, colors)
 }
 
 // MaxSchemeSamples bounds the colours quantizeInterpolator samples from a

@@ -32,7 +32,7 @@ func TestOverlapAgainstUpstream(t *testing.T) {
 				params := rec.Get("params")
 				p := OverlapParams{
 					Method:     params.Get("method"),
-					Separation: jsval.ToNumber(params.Get("separation")),
+					Separation: Separation(params.Get("separation")),
 				}
 				if o := params.Get("order"); o.IsStr() {
 					p.Order = o.StrValue()
@@ -40,7 +40,7 @@ func TestOverlapAgainstUpstream(t *testing.T) {
 				if b := params.Get("bound"); b.IsObj() {
 					p.Bound = &OverlapBound{
 						Range:     [2]float64{jnum(b.Get("range").Index(0)), jnum(b.Get("range").Index(1))},
-						Orient:    b.Get("orient").StrValue(),
+						Orient:    b.Get("orient"),
 						Tolerance: jnum(b.Get("tolerance")),
 					}
 				}
@@ -135,7 +135,7 @@ func TestOverlapMethods(t *testing.T) {
 
 	// bounds: items leaving the range are hidden
 	m = labels(4, 10, 5)
-	Overlap(m, OverlapParams{Method: jsval.True, Bound: &OverlapBound{Range: [2]float64{0, 40}, Orient: "bottom", Tolerance: 1}})
+	Overlap(m, OverlapParams{Method: jsval.True, Bound: &OverlapBound{Range: [2]float64{0, 40}, Orient: jsval.Str("bottom"), Tolerance: 1}})
 	if got := opacities(m); fmt.Sprint(got) != "[1 1 1 0]" {
 		t.Fatalf("bound: %v", got)
 	}

@@ -1,6 +1,7 @@
 package hierarchy
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sort"
@@ -27,7 +28,10 @@ const maxNestKeys = 256
 // date writes to the second in the view's zone, so two dates within one
 // second share a group. nil means jsval's AsString, dates as epoch
 // milliseconds.
-func Nest(tuples []jsval.Value, keys []Accessor, str func(jsval.Value) string, generate bool) (*Tree, []jsval.Value, error) {
+//
+// Each tuple read at each level is a step of work charged to ctx's ledger,
+// which polls ctx (ADR 0010): a key accessor can be an expression.
+func Nest(ctx context.Context, tuples []jsval.Value, keys []Accessor, str func(jsval.Value) string, generate bool) (*Tree, []jsval.Value, error) {
 	if str == nil {
 		str = jsval.Value.AsString
 	}
@@ -37,28 +41,45 @@ func Nest(tuples []jsval.Value, keys []Accessor, str func(jsval.Value) string, g
 	if len(tuples) > MaxNodes {
 		return nil, nil, ErrTooLarge
 	}
+	m := budget.NewMeter(ctx)
 	rootNode := &Node{}
-	rootNode.Children, rootNode.Data = nestLevel(tuples, keys, str, 0, jsval.Undefined, false)
-	if err := finish(rootNode); err != nil {
+	var err error
+	rootNode.Children, rootNode.Data, err = nestLevel(&m, tuples, keys, str, 0, jsval.Undefined, false)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := finish(&m, rootNode); err != nil {
 		return nil, nil, err
 	}
 	t := &Tree{Root: rootNode}
 	var gen []jsval.Value
 	if generate {
 		rootNode.each(func(n *Node) {
+			if err == nil {
+				err = m.Work(1)
+			}
 			if len(n.Children) > 0 {
 				gen = append(gen, n.Data)
 			}
 		})
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 	return t, gen, nil
 }
 
 // nestLevel builds the children of one group and the group's own datum.
-func nestLevel(items []jsval.Value, keys []Accessor, str func(jsval.Value) string, depth int, key jsval.Value, hasKey bool) ([]*Node, jsval.Value) {
+func nestLevel(m *budget.Meter, items []jsval.Value, keys []Accessor, str func(jsval.Value) string, depth int, key jsval.Value, hasKey bool) ([]*Node, jsval.Value, error) {
 	var nodes []*Node
 	var values []jsval.Value
+	if err := m.Work(1); err != nil {
+		return nil, jsval.Undefined, err
+	}
 	if depth >= len(keys) {
+		if err := m.Work(int64(len(items))); err != nil {
+			return nil, jsval.Undefined, err
+		}
 		nodes = make([]*Node, len(items))
 		for i, it := range items {
 			nodes[i] = &Node{Data: it}
@@ -70,9 +91,17 @@ func nestLevel(items []jsval.Value, keys []Accessor, str func(jsval.Value) strin
 		var groups [][]jsval.Value
 		var names []string
 		for _, it := range items {
+			if err := m.Work(1); err != nil {
+				return nil, jsval.Undefined, err
+			}
 			k := str(get(it))
 			gi, ok := index[k]
 			if !ok {
+				if jsval.ObjectPrototypeHas(k) {
+					// valuesByKey[keyValue] of a plain object is the member
+					// Object.prototype has under the name: no array.
+					panic(&jsval.Thrown{Name: "TypeError", Msg: "values.push is not a function"})
+				}
 				gi = len(groups)
 				index[k] = gi
 				groups = append(groups, nil)
@@ -81,7 +110,10 @@ func nestLevel(items []jsval.Value, keys []Accessor, str func(jsval.Value) strin
 			groups[gi] = append(groups[gi], it)
 		}
 		for _, gi := range jsKeyOrder(names) {
-			kids, data := nestLevel(groups[gi], keys, str, depth+1, jsval.Str(names[gi]), true)
+			kids, data, err := nestLevel(m, groups[gi], keys, str, depth+1, jsval.Str(names[gi]), true)
+			if err != nil {
+				return nil, jsval.Undefined, err
+			}
 			nodes = append(nodes, &Node{Data: data, Children: kids})
 			values = append(values, data)
 		}
@@ -91,7 +123,7 @@ func nestLevel(items []jsval.Value, keys []Accessor, str func(jsval.Value) strin
 		o.Set("key", key)
 	}
 	o.Set("values", jsval.Arr(values))
-	return nodes, jsval.Obj(o)
+	return nodes, jsval.Obj(o), nil
 }
 
 // jsKeyOrder returns indices into names in the order a JavaScript for-in loop
@@ -160,7 +192,10 @@ var (
 //
 // str is String(v), which ids and lookups go through (d3's `id += ""`,
 // vega's lookup object); nil means jsval's AsString (see Nest).
-func Stratify(tuples []jsval.Value, key, parentKey Accessor, str func(jsval.Value) string) (*Tree, error) {
+//
+// Each tuple read and each node linked is a step of work charged to ctx's
+// ledger, which polls ctx (ADR 0010).
+func Stratify(ctx context.Context, tuples []jsval.Value, key, parentKey Accessor, str func(jsval.Value) string) (*Tree, error) {
 	if str == nil {
 		str = jsval.Value.AsString
 	}
@@ -173,12 +208,16 @@ func Stratify(tuples []jsval.Value, key, parentKey Accessor, str func(jsval.Valu
 	if len(tuples) > MaxNodes {
 		return nil, ErrTooLarge
 	}
+	m := budget.NewMeter(ctx)
 	n := len(tuples)
 	nodes := make([]*Node, n)
 	parentID := make([]string, n)
 	byKey := make(map[string]*Node, n)
 	ambiguous := make(map[string]bool)
 	for i, d := range tuples {
+		if err := m.Work(2); err != nil {
+			return nil, err
+		}
 		node := &Node{Data: d}
 		nodes[i] = node
 		if v := key(d); !v.IsNullish() {
@@ -197,6 +236,9 @@ func Stratify(tuples []jsval.Value, key, parentKey Accessor, str func(jsval.Valu
 	}
 	var root *Node
 	for i, node := range nodes {
+		if err := m.Work(1); err != nil {
+			return nil, err
+		}
 		if pid := parentID[i]; pid != "" {
 			parent := byKey[pid]
 			if parent == nil {
@@ -220,8 +262,12 @@ func Stratify(tuples []jsval.Value, key, parentKey Accessor, str func(jsval.Valu
 	// Nodes unreachable from the root are part of a cycle.
 	reached := 0
 	tooDeep := false
+	var err error
 	root.Depth = 0
 	root.eachBefore(func(nd *Node) {
+		if err == nil {
+			err = m.Work(1)
+		}
 		reached++
 		if nd.Depth > MaxDepth {
 			tooDeep = true
@@ -234,13 +280,26 @@ func Stratify(tuples []jsval.Value, key, parentKey Accessor, str func(jsval.Valu
 	if tooDeep {
 		return nil, ErrTooLarge
 	}
+	if err != nil {
+		return nil, err
+	}
 	if reached < n {
 		return nil, ErrCycle
 	}
-	computeHeights(root)
+	if err := computeHeights(&m, root); err != nil {
+		return nil, err
+	}
 	t := &Tree{Root: root, byKey: make(map[string]*Node, n)}
 	// vega registers every node under String(key(tuple)) (so a missing key
 	// becomes "undefined"); on duplicates the last one visited wins.
-	root.each(func(nd *Node) { t.byKey[str(key(nd.Data))] = nd })
+	root.each(func(nd *Node) {
+		if err == nil {
+			err = m.Work(2)
+		}
+		t.byKey[str(key(nd.Data))] = nd
+	})
+	if err != nil {
+		return nil, err
+	}
 	return t, nil
 }

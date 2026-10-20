@@ -481,15 +481,15 @@ func selectedCondition(m *unitModel, cmpt *legendComponent, fd Value) string {
 	if !selections.IsArr() || selections.Len() == 0 {
 		return ""
 	}
-	field := stringValue(fd.Get("field"))
+	field := stringValue(cc, fd.Get("field"))
 	var parts []string
 	for _, n := range selections.Items() {
 		cc.work(1)
 		name := n.AsString()
-		store := stringValue(jsval.Str(varName(name) + storeSuffix))
-		parts = append(parts, "(!length(data("+store+")) || ("+name+"["+field+"] && indexof("+name+"["+field+"], datum.value) >= 0))")
+		store := stringValue(cc, jsval.Str(varName(name)+storeSuffix))
+		parts = append(parts, cc.cat("(!length(data(", store, ")) || (", name, "[", field, "] && indexof(", name, "[", field, "], datum.value) >= 0))"))
 	}
-	return strings.Join(parts, " || ")
+	return joinCC(cc, parts, " || ")
 }
 
 func legendSymbolsEncode(symbolsSpec Value, fod Value, m *unitModel, channel string, cmpt *legendComponent, legendType string) Value {
@@ -900,7 +900,7 @@ func assembleLegend(cc *compileCtx, cmpt *legendComponent, config Value) Value {
 			if !labelExpr.IsStr() {
 				throw("string.replace is not a function")
 			}
-			expr = jsval.Str(jsReplaceAll(labelExpr.StrValue(), "datum.label", signalOf(lu.Get("text"))))
+			expr = jsval.Str(jsReplaceAll(cc, labelExpr.StrValue(), "datum.label", signalOf(lu.Get("text"))))
 		}
 		legendSetEncode(legend, "labels", "text", mkv("signal", expr))
 	}

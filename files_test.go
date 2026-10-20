@@ -53,12 +53,14 @@ func TestCompareFiles(t *testing.T) {
 			}
 			return firstLine(err.Error())
 		}
-		switch {
-		case gerr != nil && want.Err != "":
+		switch errorOutcome(gerr, want.Err) {
+		case statusInternalError:
+			t.Errorf("%s: the engine panics: %s", f, msg(gerr))
+		case "both-error":
 			t.Logf("%s: both error\n engine: %s\n node: %s", f, msg(gerr), firstLine(want.Err))
-		case gerr != nil:
+		case "engine-error":
 			t.Logf("%s: only the engine errors: %s", f, msg(gerr))
-		case want.Err != "":
+		case "node-error":
 			t.Logf("%s: only node errors: %s", f, firstLine(want.Err))
 		default:
 			d, err := svgdiff.Compare([]byte(got), []byte(want.SVG), svgTolerance)

@@ -168,7 +168,7 @@ func TestViewLayoutAgainstUpstream(t *testing.T) {
 				vw := rec.Get("view")
 				pad := vw.Get("padding")
 				view := &View{
-					Width: jnum(vw.Get("width")), Height: jnum(vw.Get("height")),
+					Width: vw.Get("width"), Height: vw.Get("height"),
 					Padding:        Padding{Left: jnum(pad.Get("left")), Right: jnum(pad.Get("right")), Top: jnum(pad.Get("top")), Bottom: jnum(pad.Get("bottom"))},
 					AutosizeActive: jnum(vw.Get("autosize")) >= 1,
 				}
@@ -183,7 +183,7 @@ func TestViewLayoutAgainstUpstream(t *testing.T) {
 				}
 				for i, s := range sizes {
 					w := want.Index(i)
-					got := []float64{s.ViewWidth, s.ViewHeight, s.Width, s.Height, s.Origin[0], s.Origin[1]}
+					got := []float64{jnum(s.ViewWidth), jnum(s.ViewHeight), jnum(s.Width), jnum(s.Height), s.Origin[0], s.Origin[1]}
 					exp := []float64{jnum(w.Index(0)), jnum(w.Index(1)), jnum(w.Index(2)), jnum(w.Index(3)), jnum(w.Index(4).Index(0)), jnum(w.Index(4).Index(1))}
 					for k := range got {
 						if !sameNum(got[k], exp[k]) {

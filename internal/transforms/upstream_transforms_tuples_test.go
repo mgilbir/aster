@@ -1,6 +1,7 @@
 package transforms
 
 import (
+	"context"
 	"math"
 
 	"github.com/mgilbir/aster/internal/jsval"
@@ -33,7 +34,7 @@ func (o *opCall) bin() {
 	if math.IsNaN(p.Config.Step) {
 		p.Config.Step = 0
 	}
-	b, err := NewBinner(p)
+	b, err := NewBinner(context.Background(), p)
 	if err != nil {
 		o.CheckAgainst(o.c, nil, nil, true)
 		return

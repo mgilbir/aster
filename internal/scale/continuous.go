@@ -98,7 +98,7 @@ func (c *Continuous) output() *pmap {
 				d[i] = c.tr.fwd(x)
 			}
 		}
-		c.out = newValueMap(d, c.rng, c.interp, c.round)
+		c.out = newValueMap(c.walk, d, c.rng, c.interp, c.round)
 	}
 	return c.out
 }
@@ -218,7 +218,7 @@ func (c *Continuous) SetClamp(b bool) {
 // Interpolate returns the range interpolator (d3.interpolate by default).
 func (c *Continuous) Interpolate() Interpolator {
 	if c.round {
-		return InterpolateRound
+		return InterpolateRoundI
 	}
 	if c.interp == nil {
 		return InterpolateValue
@@ -306,7 +306,7 @@ func (c *Continuous) Copy() Scale { return c.copyContinuous() }
 
 func (c *Continuous) copyContinuous() *Continuous {
 	n := &Continuous{
-		meta:    meta{typ: c.typ},
+		meta:    meta{typ: c.typ, walk: c.walk},
 		tspec:   c.tspec,
 		domain:  append([]float64(nil), c.domain...),
 		rng:     cloneValues(c.rng),

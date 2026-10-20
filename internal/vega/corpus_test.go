@@ -19,7 +19,7 @@ func TestCorpus(t *testing.T) {
 	specs := specFiles()
 	only := os.Getenv("VEGA_ONLY")
 	pass, total, skipped := 0, 0, 0
-	var failed []string
+	var failed, ran []string
 	for _, spec := range specs {
 		name := strings.TrimSuffix(filepath.Base(spec), ".vg.json")
 		if only != "" && !strings.Contains(name, only) {
@@ -36,6 +36,7 @@ func TestCorpus(t *testing.T) {
 			t.Fatalf("%s: %v", gp, err)
 		}
 		total++
+		ran = append(ran, name)
 		start := time.Now()
 		res, got, rerr := renderSpecFile(t, spec)
 		var diffs []string
@@ -73,6 +74,14 @@ func TestCorpus(t *testing.T) {
 	t.Logf("scoreboard: %d/%d specs match (%d without a recording)", pass, total, skipped)
 	if only == "" && len(failed) > 0 {
 		t.Logf("failing: %s", strings.Join(failed, " "))
+	}
+	if only == "" {
+		// Every spec is recorded: a recording that went missing compares
+		// nothing.
+		if skipped > 0 || total < 270 {
+			t.Errorf("compared %d specs (%d without a recording), want all 270", total, skipped)
+		}
+		checkKnownMismatches(t, "testdata/scene", ran, failed, knownSceneMismatches)
 	}
 	_ = fmt.Sprint
 }

@@ -1,6 +1,10 @@
 package scene
 
-import "math"
+import (
+	"math"
+
+	"github.com/mgilbir/aster/internal/jsval"
+)
 
 // Num is a float64 that remembers whether it was ever assigned.
 //
@@ -90,8 +94,13 @@ func (t Tri) IsTrue() bool { return t == Yes }
 // non-value states.
 type Paint struct {
 	kind paintKind
-	s    string
-	g    *Gradient
+	// raw tells a colour given as a string (0) from one given as another
+	// value, whose String is s: truthy (1) or falsy (2) as that value is
+	// (0 and NaN are falsy, an empty array is truthy). It sits beside kind
+	// so that it fits in its padding: an item holds two paints.
+	raw uint8
+	s   string
+	g   *Gradient
 }
 
 type paintKind uint8
@@ -106,6 +115,16 @@ const (
 // Color makes a colour paint. The empty string is an explicit empty colour,
 // which upstream still emits as an attribute but treats as falsy.
 func Color(s string) Paint { return Paint{kind: paintColor, s: s} }
+
+// ValueColor makes a colour paint of a value that is not a string (a number,
+// a boolean, an array or an object without a gradient): its String, with the
+// value's truthiness.
+func ValueColor(s string, truthy bool) Paint {
+	if truthy {
+		return Paint{kind: paintColor, s: s, raw: 1}
+	}
+	return Paint{kind: paintColor, s: s, raw: 2}
+}
 
 // GradientPaint makes a gradient paint; identity of g matters, since gradient
 // definitions are keyed by object.
@@ -127,8 +146,15 @@ func (p Paint) Present() bool { return p.kind >= paintColor }
 
 // Truthy is JavaScript truthiness: a non-empty colour or any gradient.
 func (p Paint) Truthy() bool {
+	if p.raw != 0 {
+		return p.raw == 1
+	}
 	return p.kind == paintGradient || (p.kind == paintColor && p.s != "")
 }
+
+// IsString reports a colour given as a string (`value === 'transparent'`
+// holds for no other value).
+func (p Paint) IsString() bool { return p.kind == paintColor && p.raw == 0 }
 
 // Str returns the colour string ("" for gradients and absent values).
 func (p Paint) Str() string { return p.s }
@@ -150,10 +176,21 @@ type Gradient struct {
 	// R1, R2 are the radial inner and outer radii.
 	R1, R2 Num
 	Stops  []GradientStop
+	// Values, when set, are the coordinates as the gradient object gives
+	// them (x1, y1, x2, y2, r1, r2), which the SVG renderer writes as they
+	// are: String(value), and no attribute for null or undefined.
+	Values *[6]jsval.Value
+	// StopsErr is the TypeError the renderer raises reading the stops (a
+	// gradient whose stops are null or undefined, or hold one).
+	StopsErr error
 }
 
 // GradientStop is one colour stop.
 type GradientStop struct {
 	Offset float64
 	Color  string
+	// Given reports that OffsetValue and ColorValue are the stop's offset
+	// and color as given, which the renderer writes as they are.
+	Given                   bool
+	OffsetValue, ColorValue jsval.Value
 }

@@ -34,8 +34,8 @@ func TestParseCSSFontCanvasGrammar(t *testing.T) {
 		{"1200 12px Arial", false, 400, 11, "sans-serif"},
 		{"bold 12px/1.5 Arial", false, 400, 11, "sans-serif"},
 		// A size of zero or less leaves the default size.
-		{"-20px Arial", false, 400, 11, "Arial"},
-		{"0px Arial", false, 400, 11, "Arial"},
+		{"-20px Arial", false, 400, 16, "Arial"},
+		{"0px Arial", false, 400, 16, "Arial"},
 	} {
 		got := ParseCSSFont(tt.in)
 		if got.Italic != tt.italic || got.Weight != tt.weight || got.Size != tt.size || strings.Join(got.Family, "|") != tt.family {

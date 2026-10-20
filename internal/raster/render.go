@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"unsafe"
 
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/imageref"
@@ -51,14 +52,26 @@ type renderer struct {
 	inSVGGlyph  bool                                   // drawing one, whose text draws no other
 	grads       renderCache[gradKey, *gradient]
 
-	patterns     map[patternKey]*patternTile
-	patternBytes int
-	rootState    state
-	docStates    map[*node]*state
-	active       map[*node]bool // paint servers, masks, filters, markers being expanded
-	useLoops     map[*node]bool // clip-path <use> elements whose chain of uses loops (see useLoops)
-	inText       bool           // drawing glyphs (text-rendering selects anti-aliasing)
-	effectPx     int            // pixels charged to filters and pattern tiles so far
+	patterns      map[patternKey]*patternTile
+	patternBytes  int
+	rootState     state
+	docStates     map[*node]*state
+	docStateBytes int64             // of memoBytes, what docStates is charged
+	active        map[*node]bool    // paint servers, masks, filters, markers being expanded
+	useLoops      map[*node]bool    // clip-path <use> elements whose chain of uses loops (see useLoops)
+	uses          []*node           // the <use> elements being expanded, innermost last (see useTarget)
+	useHolds      map[*node]bool    // whether a use's target holds a use of it (see holdsUseOf)
+	stops         map[*node][]gstop // each gradient's own colour stops (see gradientStops)
+	stopsBytes    int64             // what stops is charged to the ledger
+	memoBytes     int64             // what docStates, useLoops and useHolds are charged (see memo)
+	// fams is the font-family list last parsed (see fontFamilies).
+	fams struct {
+		src   string
+		list  []string
+		bytes int64
+	}
+	inText   bool // drawing glyphs (text-rendering selects anti-aliasing)
+	effectPx int  // pixels charged to filters and pattern tiles so far
 
 	ctx         context.Context // nil = never cancelled
 	ledger      *budget.Ledger  // the call's, from ctx; holds the pattern tiles kept
@@ -68,6 +81,9 @@ type renderer struct {
 	// livePts is the path geometry held for the elements being drawn, in
 	// points (see holdPoints and Limits.MaxPathSegments).
 	livePts int
+	// textBytes is what the text layouts of the elements being drawn or
+	// measured hold, charged to the ledger (see textTake).
+	textBytes int64
 	// host maps the host coordinate space (the root viewport's, before its
 	// viewBox) to the device: the output scale.
 	host matrix
@@ -431,7 +447,14 @@ func (r *renderer) renderChildren(n *node, st *state) {
 }
 
 func (r *renderer) budget() bool {
-	if !r.poll(false) {
+	return r.budgetFor(nil)
+}
+
+// budgetFor is budget for drawing or measuring n, whose attributes are read
+// for its state (each lookup a scan of them): an element of many polls the
+// context at once, not every sixteenth visit.
+func (r *renderer) budgetFor(n *node) bool {
+	if !r.poll(n != nil && len(n.attrs)+len(n.style) > 256) {
 		return false
 	}
 	r.visited++
@@ -524,17 +547,17 @@ func (r *renderer) renderElement(n *node, parent *state) {
 	default:
 		return
 	}
-	if !r.budget() {
+	if !r.budgetFor(n) {
 		return
 	}
 	r.nest++
-	held, masks := r.livePts, r.maskBytes
+	held, masks, text := r.livePts, r.maskBytes, r.textBytes
 	defer func() {
 		// What the element built for itself is dropped with it.
 		r.nest--
 		r.livePts = held
-		r.canvasBytes -= r.maskBytes - masks
-		r.maskBytes = masks
+		r.releaseMasks(masks)
+		r.releaseText(text)
 	}()
 	if r.nest > r.lim.MaxDepth*2 {
 		r.fail(fmt.Errorf("raster: element nesting too deep: %w", errLimit))
@@ -623,7 +646,7 @@ func switchAccepts(n *node) bool {
 	if !ok {
 		return true
 	}
-	for _, l := range strings.Split(v, ",") {
+	for l := range strings.SplitSeq(v, ",") {
 		l = strings.TrimSpace(l)
 		if l == "en" || strings.HasPrefix(l, "en-") {
 			return true
@@ -655,7 +678,15 @@ func parseViewBox(s string) (rect, bool) {
 // viewBoxTransform maps a viewBox onto a w x h viewport at the origin
 // following preserveAspectRatio.
 func viewBoxTransform(vb rect, w, h float64, par string) matrix {
-	fields := strings.Fields(par)
+	// The first three fields are all it reads: the attribute, which the
+	// document may make long, is not split whole.
+	var buf [3]string
+	fields := buf[:0]
+	for f := range strings.FieldsSeq(par) {
+		if fields = append(fields, f); len(fields) == len(buf) {
+			break
+		}
+	}
 	if len(fields) > 0 && fields[0] == "defer" {
 		fields = fields[1:]
 	}
@@ -749,21 +780,114 @@ func (r *renderer) useOffset(n *node, st *state) (x, y float64, ok bool) {
 	return st.length(n.str(aX), 0, 0), st.length(n.str(aY), 1, 0), true
 }
 
-func (r *renderer) renderUse(n *node, st *state) {
+// useTarget is the element the <use> n draws, nil when it draws none: an
+// external reference (never fetched), a missing one, or a use usvg skips as
+// recursive (svgtree/parse.rs, parse_svg_use_element): one whose element is
+// the use itself or an ancestor of it, or the use being expanded around it
+// (its origin; the root outside any), or holds a use of either. A cycle
+// those rules let through, which usvg refuses whole as nested past its
+// limit, fails the render naming it (C111, audit 2026-10-18). While the
+// target is drawn or measured, n is on r.uses (see enterUse).
+func (r *renderer) useTarget(n *node) *node {
 	href := n.str(aHref)
-	if !strings.HasPrefix(href, "#") {
-		return // external references are never fetched
+	if len(href) < 2 || href[0] != '#' {
+		return nil
 	}
 	target := r.doc.ids[href[1:]]
 	if target == nil {
-		return
+		return nil
 	}
-	// A use must not reference its own ancestor (or itself).
 	for p := n; p != nil; p = p.parent {
 		if p == target {
-			return
+			return nil
 		}
 	}
+	if len(r.uses) > 0 && target == r.uses[len(r.uses)-1] {
+		return nil
+	}
+	if r.holdsUseOf(n, target) {
+		return nil
+	}
+	for _, u := range r.uses {
+		if u == n {
+			r.fail(fmt.Errorf("raster: a <use> element draws itself through a cycle of references: %w", errLimit))
+			return nil
+		}
+	}
+	return target
+}
+
+// enterUse puts n on the stack of uses being expanded; the caller pops it
+// with exitUse once its target is drawn or measured.
+func (r *renderer) enterUse(n *node) { r.uses = append(r.uses, n) }
+
+func (r *renderer) exitUse() { r.uses = r.uses[:len(r.uses)-1] }
+
+// holdsUseOf reports whether target holds, below itself, a <use> of the use
+// n or of target: usvg's test of a recursive use. It is decided once per
+// use, the walk counted as visits against MaxRenderNodes (the expansion
+// would visit the same elements).
+func (r *renderer) holdsUseOf(n, target *node) bool {
+	if v, ok := r.useHolds[n]; ok {
+		return v
+	}
+	holds := false
+	// The walk's stack, as deep as the subtree is wide, is charged as it
+	// grows.
+	rs := reservation{l: r.ledger}
+	defer rs.release()
+	var stack []*node
+	push := func(kids []*node) bool {
+		if len(stack)+len(kids) > cap(stack) {
+			c := max(2*cap(stack), len(stack)+len(kids))
+			if err := rs.take(int64(c) * 8); err != nil {
+				r.fail(overLedger("expanding a <use>", err))
+				return false
+			}
+			stack = append(make([]*node, 0, c), stack...)
+		}
+		stack = append(stack, kids...)
+		return true
+	}
+	if !push(target.kids) {
+		return true
+	}
+	for len(stack) > 0 && !holds {
+		k := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if k.tag == tagChars {
+			continue
+		}
+		if !r.budget() {
+			return true // the render has failed: draw nothing more
+		}
+		if k.tag == tagUse {
+			if h := k.str(aHref); len(h) > 1 && h[0] == '#' {
+				if t := r.doc.ids[h[1:]]; t != nil && (t == n || t == target) {
+					holds = true
+				}
+			}
+		}
+		if !push(k.kids) {
+			return true
+		}
+	}
+	if r.memo(memoEntryBytes) {
+		if r.useHolds == nil {
+			r.useHolds = map[*node]bool{}
+		}
+		r.useHolds[n] = holds
+	}
+	return holds
+}
+
+func (r *renderer) renderUse(n *node, st *state) {
+	target := r.useTarget(n)
+	if target == nil {
+		return
+	}
+	r.enterUse(n)
+	defer r.exitUse()
 	x := st.length(n.str(aX), 0, 0)
 	y := st.length(n.str(aY), 1, 0)
 	switch target.tag {
@@ -869,6 +993,14 @@ func (r *renderer) newMaskCoverage(region irect) []uint8 {
 	return make([]uint8, n)
 }
 
+// releaseMasks gives back the clip coverage made since maskBytes was held:
+// the scope that made it (an element, a marker drawn at one vertex, a clip
+// of a colour glyph) is over, and its masks with it (C110).
+func (r *renderer) releaseMasks(held int) {
+	r.canvasBytes -= r.maskBytes - held
+	r.maskBytes = held
+}
+
 // intersectMasks multiplies two coverage maps (nil means unrestricted).
 func (r *renderer) intersectMasks(a, b *mask) *mask {
 	if a == nil {
@@ -962,6 +1094,9 @@ func (r *renderer) useLoop(u *node) bool {
 		n = t
 	}
 	for _, n := range chain {
+		if !r.memo(memoEntryBytes) {
+			break
+		}
 		r.useLoops[n] = loops
 	}
 	return loops
@@ -1336,8 +1471,8 @@ func (r *renderer) drawPath(p *path, st *state, opacity float64, blend blendMode
 		}
 		if may {
 			// The paint is the element's, in its user space.
-			if ps, ok := r.resolvePaint(st.stroke, so, st, needBBox); ok {
-				r.strokePath(sp, sst, ps)
+			if ps, scaled, ok := r.strokePaint(st.stroke, so, st, sst, needBBox); ok {
+				r.strokePath(sp, sst, ps, scaled)
 			}
 		}
 	}
@@ -1353,7 +1488,39 @@ func (r *renderer) drawPath(p *path, st *state, opacity float64, blend blendMode
 	}
 }
 
-func (r *renderer) strokePath(p *path, st *state, ps paintSrc) {
+// hairline reports whether a stroke of st is thinner than a device pixel,
+// which tiny-skia draws as a one-pixel hairline (treat_as_hairline), and the
+// coverage that scales its paint.
+func hairline(st *state) (cov float64, hair bool) {
+	l1 := math.Hypot(st.ctm.a, st.ctm.b) * st.strokeWidth
+	l2 := math.Hypot(st.ctm.c, st.ctm.d) * st.strokeWidth
+	return (l1 + l2) / 2, l1 <= 1 && l2 <= 1
+}
+
+// strokePaint resolves the paint of a stroke of sst (the state the stroke is
+// built in; st the element's, whose user space the paint is in). A paint
+// server's opacity is scaled by a hairline's coverage as tiny-skia scales
+// the shader (Pixmap::stroke_path: new_alpha = 255 * (coverage * 256 as
+// i32) >> 8, then paint.shader.apply_opacity(new_alpha / 255), which
+// multiplies a gradient's stop alphas and a pattern's opacity): scaled
+// says so, and strokePath scales a colour by the coverage itself (C46,
+// audit 2026-10-18).
+func (r *renderer) strokePaint(p paint, opacity float64, st, sst *state, bbox func() (rect, bool)) (ps paintSrc, scaled, ok bool) {
+	if p.kind == pURL {
+		if cov, hair := hairline(sst); hair && cov > 0 {
+			if a := 255 * int32(float32(cov)*256) >> 8; a < 255 {
+				opacity *= float64(float32(a) / 255)
+				scaled = true
+			}
+		}
+	}
+	ps, ok = r.resolvePaint(p, opacity, st, bbox)
+	return ps, scaled, ok
+}
+
+// strokePath strokes p with ps; scaled says ps is already scaled by a
+// hairline's coverage (strokePaint).
+func (r *renderer) strokePath(p *path, st *state, ps paintSrc, scaled bool) {
 	ms := st.ctm.maxScale()
 	if ms <= 0 {
 		return
@@ -1366,16 +1533,13 @@ func (r *renderer) strokePath(p *path, st *state, ps paintSrc) {
 	width := st.strokeWidth
 	// Strokes thinner than a device pixel are drawn by tiny-skia as 1px-wide
 	// hairlines whose opacity is scaled by the real width; do the same.
-	l1 := math.Hypot(st.ctm.a, st.ctm.b) * width
-	l2 := math.Hypot(st.ctm.c, st.ctm.d) * width
-	hair := l1 <= 1 && l2 <= 1
+	cov, hair := hairline(st)
 	if hair {
-		cov := (l1 + l2) / 2
 		if cov <= 0 {
 			return
 		}
 		width /= cov
-		if ps.solid {
+		if ps.solid && !scaled {
 			for i := range ps.col {
 				ps.col[i] = uint8(mul255(uint32(ps.col[i]), uint32(math.Round(cov*255))))
 			}
@@ -1605,18 +1769,15 @@ func (r *renderer) gradAttr(n *node, id attrID) (string, bool) {
 	return "", false
 }
 
-func (r *renderer) gradStops(n *node) []*node {
+// gradStops is the colour stops of gradient n: those of the first gradient
+// on its href chain that has stop children (eight links at most), parsed
+// once per gradient for the render (gradientStops).
+func (r *renderer) gradStops(n *node) []gstop {
 	for i := 0; n != nil && i < 8; i++ {
 		if !isGradient(n) {
 			return nil
 		}
-		var stops []*node
-		for _, k := range n.kids {
-			if k.tag == tagStop {
-				stops = append(stops, k)
-			}
-		}
-		if len(stops) > 0 {
+		if stops := r.gradientStops(n); len(stops) > 0 {
 			return stops
 		}
 		n = r.hrefTarget(n)
@@ -1624,26 +1785,46 @@ func (r *renderer) gradStops(n *node) []*node {
 	return nil
 }
 
-// serverPaint resolves url(#id). handled is false when the reference is broken,
-// in which case the fallback colour applies.
-func (r *renderer) serverPaint(p paint, opacity float64, st *state, bbox func() (rect, bool)) (src paintSrc, ok, handled bool) {
-	n := r.doc.ids[p.id]
-	if n != nil && n.tag == tagPattern {
-		return r.patternPaint(n, opacity, st, bbox)
+// stopsEntryBytes is about what an entry of the stop lists' map holds, its
+// share of the buckets included.
+const stopsEntryBytes = 64
+
+// gradientStops is the colour stops of n's own stop children, at most
+// 4096, parsed once for the render and kept, charged to the ledger: the
+// stops are the gradient's alone (a stop's currentColor is its own), and a
+// gradient painted by every element of a document was parsed again for
+// each, its children walked each time.
+func (r *renderer) gradientStops(n *node) []gstop {
+	if stops, ok := r.stops[n]; ok {
+		return stops
 	}
-	if !isGradient(n) {
-		return paintSrc{}, false, false
+	count := 0
+	for _, k := range n.kids {
+		if k.tag == tagStop {
+			count++
+		}
 	}
-	stopNodes := r.gradStops(n)
-	if len(stopNodes) == 0 {
-		return paintSrc{}, false, true
+	count = min(count, 4096)
+	if !r.chargeOps(len(n.kids)) {
+		return nil
 	}
-	if len(stopNodes) > 4096 {
-		stopNodes = stopNodes[:4096]
+	if err := r.ledger.Alloc(stopsEntryBytes + int64(count)*int64(unsafe.Sizeof(gstop{}))); err != nil {
+		r.fail(overLedger("reading a gradient's stops", err))
+		return nil
 	}
-	stops := make([]gstop, 0, len(stopNodes))
+	r.stopsBytes += stopsEntryBytes + int64(count)*int64(unsafe.Sizeof(gstop{}))
+	var stops []gstop
+	if count > 0 {
+		stops = make([]gstop, 0, count)
+	}
 	prev := 0.0
-	for _, sn := range stopNodes {
+	for _, sn := range n.kids {
+		if sn.tag != tagStop {
+			continue
+		}
+		if len(stops) == count {
+			break
+		}
 		off := 0.0
 		if v := sn.str(aOffset); v != "" {
 			if f, u, good := parseLength(v); good {
@@ -1658,13 +1839,15 @@ func (r *renderer) serverPaint(p paint, opacity float64, st *state, bbox func() 
 			off = prev
 		}
 		prev = off
-		var sst state
-		sst.color = st.color
 		c := black
 		if v, has := sn.get(aStopColor); has {
 			v = strings.TrimSpace(v)
 			if v == "currentColor" {
-				c = st.color
+				// The stop's own color property, inherited through its
+				// ancestors (usvg: stop.find_attribute(AId::Color), black
+				// when none), not the painted element's: the colours are
+				// the gradient's, as its caches assume (C109).
+				c = r.inheritedState(sn).color
 			} else if cc, good := parseColor(v); good {
 				c = cc
 			}
@@ -1675,6 +1858,27 @@ func (r *renderer) serverPaint(p paint, opacity float64, st *state, bbox func() 
 			}
 		}
 		stops = append(stops, gstop{off, c})
+	}
+	if r.stops == nil {
+		r.stops = map[*node][]gstop{}
+	}
+	r.stops[n] = stops
+	return stops
+}
+
+// serverPaint resolves url(#id). handled is false when the reference is broken,
+// in which case the fallback colour applies.
+func (r *renderer) serverPaint(p paint, opacity float64, st *state, bbox func() (rect, bool)) (src paintSrc, ok, handled bool) {
+	n := r.doc.ids[p.id]
+	if n != nil && n.tag == tagPattern {
+		return r.patternPaint(n, opacity, st, bbox)
+	}
+	if !isGradient(n) {
+		return paintSrc{}, false, false
+	}
+	stops := r.gradStops(n)
+	if len(stops) == 0 {
+		return paintSrc{}, false, true
 	}
 	if len(stops) == 1 {
 		return solidPaint(stops[0].c, opacity), true, true

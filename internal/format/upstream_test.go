@@ -91,7 +91,7 @@ func TestUpstreamD3Format(t *testing.T) {
 						r.Check(c, nil, true)
 						continue
 					}
-					r.Check(c, nf.FormatValue(upstream.ToValue(c.Args[0])), false)
+					r.Check(c, nf.FormatValue(jsval.Walker{}, upstream.ToValue(c.Args[0])), false)
 				} else if via[0].Method == "formatPrefix" && len(via[0].Args) == 2 {
 					pf, err := l.FormatPrefix(spec, upstream.Number(via[0].Args[1]))
 					if err != nil {
@@ -151,7 +151,7 @@ func TestUpstreamD3Format(t *testing.T) {
 					r.Skip("format rejected (checked at construction)")
 					continue
 				}
-				f = nf.FormatValue
+				f = func(v jsval.Value) string { return nf.FormatValue(jsval.Walker{}, v) }
 			} else {
 				v, _ := upstream.Num(c.ConstructedWith[1])
 				pf, err := loc.FormatPrefix(spec, v)
@@ -212,7 +212,7 @@ func TestUpstreamD3Format(t *testing.T) {
 		}
 	}
 	_ = enUS
-	r.Done(900)
+	r.Done(1016)
 }
 
 // intervalOf resolves an exported d3-time interval name (timeDay, utcMonday, unixDay, ...).
@@ -400,7 +400,7 @@ func TestUpstreamD3Time(t *testing.T) {
 			r.Skip("unmapped method " + method)
 		}
 	}
-	r.Done(900)
+	r.Done(1104)
 }
 
 func dates(ts []float64) []any {
@@ -545,7 +545,7 @@ func TestUpstreamD3TimeFormat(t *testing.T) {
 			r.Skip("unmapped " + c.Fn)
 		}
 	}
-	r.Done(550)
+	r.Done(642)
 }
 
 func parsedDate(t float64, ok bool) any {

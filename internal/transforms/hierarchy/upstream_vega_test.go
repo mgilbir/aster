@@ -1,6 +1,7 @@
 package hierarchy
 
 import (
+	"context"
 	"testing"
 
 	"github.com/mgilbir/aster/internal/jsval"
@@ -59,7 +60,7 @@ func TestUpstreamVegaHierarchy(t *testing.T) {
 				r.Skip("nest keys that are not field accessors")
 				continue
 			}
-			tree, _, err = Nest(data, keys, nil, false)
+			tree, _, err = Nest(context.Background(), data, keys, nil, false)
 		case "stratify":
 			key, okKey := field(params["key"])
 			parentKey, okParent := field(params["parentKey"])
@@ -67,7 +68,7 @@ func TestUpstreamVegaHierarchy(t *testing.T) {
 				r.Skip("stratify keys that are not field accessors")
 				continue
 			}
-			tree, err = Stratify(data, key, parentKey, nil)
+			tree, err = Stratify(context.Background(), data, key, parentKey, nil)
 		}
 		if err != nil {
 			r.CheckAgainst(c, vegaHierTree(c.Value), nil, true)

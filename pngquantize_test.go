@@ -8,6 +8,7 @@ import (
 	"image/draw"
 	"image/png"
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/mgilbir/aster/internal/pngopt"
@@ -331,13 +332,12 @@ func TestQuantizeRejectsPhotographicContent(t *testing.T) {
 	}
 }
 
-// The option clamps at configuration time: the render path gates on
-// quantizeColors > 0, so an unclamped non-positive value would silently
-// disable quantization instead of honoring the documented 2..256 contract.
+// The option clamps a count of colours at configuration time to 2..256,
+// and refuses one of zero or less, which is no count: the render path gates
+// on quantizeColors > 0, so a non-positive value would silently disable
+// quantization, and clamping it to two colours replaced it silently.
 func TestQuantizeOptionClamps(t *testing.T) {
 	cases := []struct{ in, want int }{
-		{-5, 2},
-		{0, 2},
 		{1, 2},
 		{2, 2},
 		{128, 128},
@@ -347,8 +347,22 @@ func TestQuantizeOptionClamps(t *testing.T) {
 	for _, tc := range cases {
 		cfg := defaultPNGConfig()
 		WithQuantizePNG(tc.in).applyPNG(cfg)
-		if cfg.quantizeColors != tc.want {
-			t.Errorf("WithQuantizePNG(%d): quantizeColors = %d, want %d", tc.in, cfg.quantizeColors, tc.want)
+		if cfg.quantizeColors != tc.want || cfg.quantizeErr != nil {
+			t.Errorf("WithQuantizePNG(%d): quantizeColors = %d (err %v), want %d", tc.in, cfg.quantizeColors, cfg.quantizeErr, tc.want)
 		}
+	}
+	c, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	svg := `<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"><rect width="2" height="4" fill="red"/></svg>`
+	for _, n := range []int{0, -5} {
+		if _, err := c.SVGToPNG(svg, WithQuantizePNG(n)); err == nil || !strings.Contains(err.Error(), "WithQuantizePNG") {
+			t.Errorf("WithQuantizePNG(%d): err = %v, want the option refused", n, err)
+		}
+	}
+	if _, err := c.SVGToPNG(svg, WithQuantizePNG(0), WithQuantizePNG(16)); err != nil {
+		t.Errorf("a later valid WithQuantizePNG replaces an invalid one: %v", err)
 	}
 }
