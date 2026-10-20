@@ -208,3 +208,32 @@ func TestBareImportsAreSources(t *testing.T) {
 		}
 	}
 }
+
+// TestManifestPlatforms: a platform is any, unreproducible or an os-arch
+// (the entries whose recording is spliced from several platforms say so,
+// instead of claiming one that regenerating them contradicts); anything else
+// is refused.
+func TestManifestPlatforms(t *testing.T) {
+	read := func(platform string) ([]Entry, error) {
+		root := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(root, "testdata"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		line := "internal/x | - | gen.mjs | > out.json | - | " + platform + "\n"
+		if err := os.WriteFile(filepath.Join(root, ManifestFile), []byte(line), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return Manifest(root)
+	}
+	for _, ok := range []string{"any", "linux-x64", "darwin-arm64", Unreproducible} {
+		es, err := read(ok)
+		if err != nil || len(es) != 1 || es[0].Platform != ok {
+			t.Errorf("platform %q: %v, %v", ok, es, err)
+		}
+	}
+	for _, bad := range []string{"linux", "spliced", "Any", "linux_x64"} {
+		if _, err := read(bad); err == nil {
+			t.Errorf("platform %q was accepted", bad)
+		}
+	}
+}

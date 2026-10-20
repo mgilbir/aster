@@ -38,6 +38,9 @@ import (
 	"strings"
 )
 
+// Unreproducible is the platform of an entry no node regenerates.
+const Unreproducible = "unreproducible"
+
 // ManifestFile and LockFile are relative to the repository root.
 const (
 	ManifestFile = "testdata/vectors.txt"
@@ -66,7 +69,9 @@ const (
 // the local modules it imports are found by Imports. platform is "any", or
 // the platform the recording must come from, as node names it
 // (darwin-arm64, linux-x64): the outputs depend on it, and are checked only
-// there.
+// there. Unreproducible says that the committed file is a splice of
+// recordings from more than one platform, so that no node regenerates it:
+// the lock vouches for it, and the runner reports it as not checked.
 type Entry struct {
 	Line     int
 	Dir      string
@@ -144,8 +149,8 @@ func Manifest(root string) ([]Entry, error) {
 		default:
 			return nil, fmt.Errorf("%s:%d: outputs must start with >, files or outdir", ManifestFile, n)
 		}
-		if e.Platform != "any" && !regexp.MustCompile(`^[a-z0-9]+-[a-z0-9]+$`).MatchString(e.Platform) {
-			return nil, fmt.Errorf("%s:%d: platform %q is not any or os-arch", ManifestFile, n, e.Platform)
+		if e.Platform != "any" && e.Platform != Unreproducible && !regexp.MustCompile(`^[a-z0-9]+-[a-z0-9]+$`).MatchString(e.Platform) {
+			return nil, fmt.Errorf("%s:%d: platform %q is not any, unreproducible or os-arch", ManifestFile, n, e.Platform)
 		}
 		if p, dup := seen[e.Key()]; dup {
 			return nil, fmt.Errorf("%s:%d: %s is also the output of line %d", ManifestFile, n, e.Key(), p)

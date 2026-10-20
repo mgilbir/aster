@@ -7,10 +7,10 @@
 //	go run ./internal/cmd/vectors -run expr    only the entries whose first output matches "expr"
 //	go run ./internal/cmd/vectors -repeat 2    run each generator twice: a generator whose output varies fails
 //
-// An entry pinned to another platform than node's is reported as not checked
-// here, never as passing. node must be the version testdata/oracle-node pins
-// (ASTER_ORACLE_ANY_NODE=1 runs another, and its recordings then fail the
-// fingerprint check).
+// An entry pinned to another platform than node's, or unreproducible, is
+// reported as not checked here, never as passing. node must be the version
+// testdata/oracle-node pins (ASTER_ORACLE_ANY_NODE=1 runs another, and its
+// recordings then fail the fingerprint check).
 package main
 
 import (
@@ -254,6 +254,9 @@ func runEntry(root, work string, e vectors.Entry, platform string) result {
 	if e.Platform != "any" && e.Platform != platform && !(*anyPlat && !*write) {
 		r.status = "skipped"
 		r.details = []string{fmt.Sprintf("recorded on %s; not checkable on %s", e.Platform, platform)}
+		if e.Platform == vectors.Unreproducible {
+			r.details = []string{"spliced from more than one platform (see the manifest); no node regenerates it, only the lock vouches for it"}
+		}
 		return r
 	}
 	// Read before generating: a generator that writes its files itself

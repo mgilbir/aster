@@ -10,7 +10,9 @@
 //     a few instants a name, inside and outside 1970-2037, with V8's text
 //     and offset, which TestDateToStringZoneNames replays.
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 const [, self, zi, mode] = process.argv;
 if (process.env.ZONENAMES_ZONE) { // the child: one name's samples, run with TZ set to it
   const ts = [];
@@ -28,8 +30,22 @@ if (process.env.ZONENAMES_ZONE) { // the child: one name's samples, run with TZ 
   const names = readFileSync(zi, 'utf8').split('\n').flatMap((l) => (l.startsWith('Z ') ? [l.split(' ')[1]]
     : l.startsWith('L ') ? [l.split(' ')[2]] : []));
   const out = { node: process.version, tz: process.versions.tz, zones: {} };
-  for (const z of names.sort()) {
-    out.zones[z] = JSON.parse(execFileSync(process.execPath, [self, zi, mode], { env: { ...process.env, TZ: z, ZONENAMES_ZONE: z } }).toString());
+  const emptyZoneinfo = mkdtempSync(join(tmpdir(), 'zonenames-'));
+  try {
+    for (const z of names.sort()) {
+      // Only what the answer may depend on: not the host's TZDIR, ICU_DATA,
+      // NODE_OPTIONS, LANG, HOME and the like.
+      const env = { TZ: z, TZDIR: emptyZoneinfo, LC_ALL: 'C', ZONENAMES_ZONE: z };
+      out.zones[z] = JSON.parse(execFileSync(process.execPath, [self, zi, mode], { env }).toString());
+    }
+  } finally {
+    rmSync(emptyZoneinfo, { recursive: true });
+  }
+  // CET is one of the names ICU does not resolve and every host with tzdata
+  // has a file of: with the zoneinfo hidden its offsets are all 0. Any other
+  // answer is the host's file talking, and the recording would be the host's.
+  for (const c of out.zones.CET ?? []) {
+    if (c[2] !== 0) throw new Error(`TZ=CET gave offset ${c[2]} at ${c[0]} with an empty TZDIR: this libc reads the host's zoneinfo whatever TZDIR says; the recording would depend on the host`);
   }
   process.stdout.write(JSON.stringify(out));
 }

@@ -78,12 +78,23 @@ func TestDateToStringZoneNames(t *testing.T) {
 }
 
 // unresolvedTZ are the names node does not resolve from TZ, recorded with
-// the host's offset and no DST flag though named as their link target: ICU
-// canonicalises them, V8 reads the offset elsewhere. Their recorded instants
-// say nothing of the release; they print their target's names.
+// offset 0 and no DST flag though named as their link target: ICU
+// canonicalises them, V8 reads the offset elsewhere, from the C library and
+// the host's zoneinfo file of that name, which the recorder hides (TZDIR names
+// an empty directory, see testdata/gen_zonenames.mjs), so what is recorded is
+// what node answers on a host without it. On a host with the file node
+// answers by the file, whatever the host's release says, and an engine cannot
+// follow that. Their recorded instants say nothing of the release; they print
+// their target's names.
 var unresolvedTZ = map[string]string{
+	"CET":  "Europe/Brussels",
 	"Cuba": "America/Havana",
+	"EET":  "Europe/Athens",
+	"EST":  "America/Panama",
+	"HST":  "Pacific/Honolulu",
 	"Iran": "Asia/Tehran",
+	"MET":  "Europe/Brussels",
+	"MST":  "America/Phoenix",
 	"PRC":  "Asia/Shanghai",
 	"ROC":  "Asia/Taipei",
 	"ROK":  "Asia/Seoul",
