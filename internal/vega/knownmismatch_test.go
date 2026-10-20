@@ -21,7 +21,6 @@ var knownSceneMismatches = map[string]string{
 	"density-heatmaps":   "recording: as contour-plot, the heatmap image needs node-canvas",
 	"dorling-cartogram":  "divergence: upstream's items carry noBound (false), which the runtime's scene items lack",
 	"legend-clip-height": "divergence: upstream's legend items carry noBound (false), which the runtime's scene items lack",
-	"platformer":         "divergence: upstream keeps a colour object (d3.hsl) as an item's fill, where the runtime writes the colour's string (the SVG matches)",
 }
 
 // knownSVGMismatches are the specs of testdata/svg whose SVG the runtime and
