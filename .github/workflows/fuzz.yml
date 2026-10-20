@@ -100,7 +100,11 @@ jobs:
     # reused, so every one is a fresh upstream compilation). A difference
     # fails the job and the first mutant of each is uploaded; docs/testing.md
     # describes how one becomes a regression case.
-    runs-on: ubuntu-latest
+    # arm64 (Apple silicon): the engine's Math (internal/jsmath) is V8's on
+    # arm64 bit for bit, which x86-64 V8 is not in the last place of a few
+    # transcendental results, enough for force and beeswarm layouts, trail
+    # arcs and graticules to differ there (docs/testing.md).
+    runs-on: macos-latest
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
@@ -144,7 +148,11 @@ jobs:
     # with a cold oracle cache. A difference fails the job and the first
     # mutant of each is uploaded; docs/testing.md describes how one becomes
     # a regression case.
-    runs-on: ubuntu-latest
+    # arm64 (Apple silicon): the engine's Math (internal/jsmath) is V8's on
+    # arm64 bit for bit, which x86-64 V8 is not in the last place of a few
+    # transcendental results, enough for force and beeswarm layouts, trail
+    # arcs and graticules to differ there (docs/testing.md).
+    runs-on: macos-latest
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
