@@ -27,7 +27,7 @@ func TestParseTreeCharged(t *testing.T) {
 				t.Errorf("a tree of 20,000 elements built under a %d byte ledger: %v", len(svg), err)
 			}
 			free := budget.NewLedger(context.Background(), budget.LedgerLimits{})
-			if _, err := parseSVG(budget.WithLedger(context.Background(), free), svg, Limits{}.WithDefaults()); err != nil || free.Bytes() < 20000*64 {
+			if _, err := parseSVG(budget.WithLedger(context.Background(), free), svg, Limits{}.WithDefaults()); err != nil || free.Bytes() < 20000*elementBytes { // what an element holds, 32 or 64 bits
 				t.Errorf("tree charged %d bytes (err %v)", free.Bytes(), err)
 			}
 		})
