@@ -205,7 +205,7 @@ func extractTransformsFromEncoding(cc *compileCtx, oldEncoding Value, config Val
 // markChannelCompatible reads getSupportedMark(channel)[mark], the mark type
 // as a key.
 func markChannelCompatible(cc *compileCtx, enc Value, channel string, mark Value) bool {
-	switch supportMark(channel, propKey(mark)) {
+	switch supportMark(channel, propKey(cc, mark)) {
 	case "":
 		return false
 	case "binned":

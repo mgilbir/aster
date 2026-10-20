@@ -33,7 +33,7 @@ func newUnitModel(cc *compileCtx, spec Value, parent Model, parentGivenName stri
 	} else {
 		markDef = mk("type", spec.Get("mark"))
 	}
-	if t := markDef.Lookup("type"); markCompilers[propKey(t)].encodeEntry == nil {
+	if t := markDef.Lookup("type"); markCompilers[propKey(cc, t)].encodeEntry == nil {
 		// Upstream has no such check: a type that names no mark reads
 		// config[type], undefined, first for defaultFilled (unless filled
 		// is given) and then for initMarkdef's orient; a member of
@@ -42,7 +42,7 @@ func newUnitModel(cc *compileCtx, spec Value, parent Model, parentGivenName stri
 		// the error upstream reaches. The type is read as a key there, so
 		// ["bar"] is a bar to these tables (and to no === after them).
 		switch {
-		case isInheritedKey(propKey(t)):
+		case isInheritedKey(propKey(cc, t)):
 			throw("markCompiler[mark].encodeEntry is not a function")
 		case markDef.Lookup("filled").IsUndefined():
 			throw("Cannot read properties of undefined (reading 'filled')")
@@ -55,7 +55,7 @@ func newUnitModel(cc *compileCtx, spec Value, parent Model, parentGivenName stri
 			jsIn(spec.Get("data"), "graticule") // 5.8's isGraticuleGenerator
 		}
 		graticule := spec.Get("data").IsTruthy() && isGraticuleGenerator(spec.Get("data"))
-		markDef.Set("filled", defaultFilled(jsval.Obj(markDef), config, graticule))
+		markDef.Set("filled", defaultFilled(cc, jsval.Obj(markDef), config, graticule))
 	}
 	filled := markDef.Lookup("filled").IsTruthy()
 	u.encoding = initEncoding(cc, coalesceObj(spec.Get("encoding")), mark, filled, config)
@@ -387,11 +387,11 @@ func (u *unitModel) forEachFieldDef(f func(fd Value, channel string)) {
 
 // ---- mark definition init (compile/mark/init.ts) ----
 
-func defaultFilled(markDef Value, config Value, graticule bool) Value {
+func defaultFilled(cc *compileCtx, markDef Value, config Value, graticule bool) Value {
 	if graticule {
 		return jsval.False
 	}
-	filledConfig := getMarkConfig("filled", markDef, config, "")
+	filledConfig := getMarkConfig(cc, "filled", markDef, config, "")
 	mark := markDef.Get("type")
 	return firstDefined(filledConfig, jsval.Bool(!strIs(mark, "point") && !strIs(mark, "line") && !strIs(mark, "rule")))
 }
@@ -406,7 +406,7 @@ var barCornerRadiusEndIndex = map[string][]string{
 func initMarkdef(cc *compileCtx, original Value, encoding Value, config Value) Value {
 	mdv := replaceExprRef(cc, original, 0)
 	md := mdv.ObjValue()
-	specifiedOrient := getMarkPropOrConfigSimple("orient", mdv, config)
+	specifiedOrient := getMarkPropOrConfigSimple(cc, "orient", mdv, config)
 	md.Set("orient", markOrient(cc, md.Lookup("type"), encoding, specifiedOrient))
 	orient := md.Lookup("orient")
 	if !specifiedOrient.IsUndefined() && !strictEq(specifiedOrient, orient) {
@@ -414,7 +414,7 @@ func initMarkdef(cc *compileCtx, original Value, encoding Value, config Value) V
 		cc.warn(msgOrientOverridden(orient, specifiedOrient))
 	}
 	if strIs(md.Lookup("type"), "bar") && orient.IsTruthy() {
-		if cre := getMarkPropOrConfigSimple("cornerRadiusEnd", mdv, config); !cre.IsUndefined() {
+		if cre := getMarkPropOrConfigSimple(cc, "cornerRadiusEnd", mdv, config); !cre.IsUndefined() {
 			var newProps []string
 			if (strIs(orient, "horizontal") && encoding.Get("x2").IsTruthy()) || (strIs(orient, "vertical") && encoding.Get("y2").IsTruthy()) {
 				newProps = []string{"cornerRadius"}
@@ -423,7 +423,7 @@ func initMarkdef(cc *compileCtx, original Value, encoding Value, config Value) V
 				// names neither entry reads undefined (or a member of
 				// Object.prototype), and for…of over it throws.
 				var ok bool
-				if newProps, ok = barCornerRadiusEndIndex[propKey(orient)]; !ok {
+				if newProps, ok = barCornerRadiusEndIndex[propKey(cc, orient)]; !ok {
 					throw("newProps is not iterable")
 				}
 			}
@@ -435,19 +435,19 @@ func initMarkdef(cc *compileCtx, original Value, encoding Value, config Value) V
 			}
 		}
 	}
-	so := getMarkPropOrConfigSimple("opacity", mdv, config)
-	sfo := getMarkPropOrConfigSimple("fillOpacity", mdv, config)
+	so := getMarkPropOrConfigSimple(cc, "opacity", mdv, config)
+	sfo := getMarkPropOrConfigSimple(cc, "fillOpacity", mdv, config)
 	if so.IsUndefined() && (cc.v5 || sfo.IsUndefined()) {
 		md.Set("opacity", markOpacity(cc, md.Lookup("type"), encoding))
 	}
-	if getMarkPropOrConfigSimple("cursor", mdv, config).IsUndefined() {
-		md.Set("cursor", markCursor(mdv, encoding, config))
+	if getMarkPropOrConfigSimple(cc, "cursor", mdv, config).IsUndefined() {
+		md.Set("cursor", markCursor(cc, mdv, encoding, config))
 	}
 	return mdv
 }
 
-func markCursor(markDef, encoding, config Value) Value {
-	if encoding.Get("href").IsTruthy() || markDef.Get("href").IsTruthy() || getMarkPropOrConfigSimple("href", markDef, config).IsTruthy() {
+func markCursor(cc *compileCtx, markDef, encoding, config Value) Value {
+	if encoding.Get("href").IsTruthy() || markDef.Get("href").IsTruthy() || getMarkPropOrConfigSimple(cc, "href", markDef, config).IsTruthy() {
 		return jsval.Str("pointer")
 	}
 	return markDef.Get("cursor")

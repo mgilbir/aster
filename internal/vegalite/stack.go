@@ -179,7 +179,7 @@ func stackOf(cc *compileCtx, m Value, encoding Value) *stackProperties {
 	if !offsetV.IsTruthy() {
 		return nil
 	}
-	if key := propKey(offsetV); !stackOffsetIndex[key] && !(cc.v5 && isInheritedKey(key)) {
+	if key := propKey(cc, offsetV); !stackOffsetIndex[key] && !(cc.v5 && isInheritedKey(key)) {
 		return nil
 	}
 	offset := ""

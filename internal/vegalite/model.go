@@ -493,7 +493,7 @@ func (m *modelBase) assembleLayout() Value {
 	}
 	spacing := m.layout.Lookup("spacing")
 	layout := omit(jsval.Obj(m.layout), "spacing")
-	titleBand := assembleLayoutTitleBand(m.comp.layoutHeaders, m.config)
+	titleBand := assembleLayoutTitleBand(m.ctx, m.comp.layoutHeaders, m.config)
 	out := jsval.NewObject(8)
 	out.Set("padding", spacing)
 	spread(out, jsval.Obj(m.self.assembleDefaultLayout()))

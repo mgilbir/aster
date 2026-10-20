@@ -663,7 +663,7 @@ func applyMarkConfig(e Value, m *unitModel, props []string) Value {
 	cc := m.ctx
 	o := e.ObjValue()
 	for _, p := range props {
-		if v := getMarkConfig(p, m.markDef, m.config, ""); !v.IsUndefined() {
+		if v := getMarkConfig(cc, p, m.markDef, m.config, ""); !v.IsUndefined() {
 			o.Set(p, signalOrValueRef(cc, v))
 		}
 	}

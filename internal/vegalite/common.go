@@ -100,10 +100,10 @@ func getStyles(mark Value) []Value {
 	return out
 }
 
-func getStyleConfig(p string, styles []Value, styleIndex Value) Value {
+func getStyleConfig(cc *compileCtx, p string, styles []Value, styleIndex Value) Value {
 	v := undef
 	for _, s := range styles {
-		sc := jsGet(styleIndex, propKey(s)) // styleConfigIndex[style]: a TypeError without one
+		sc := jsGet(styleIndex, propKey(cc, s)) // styleConfigIndex[style]: a TypeError without one
 		if hasProperty(sc, p) {
 			v = sc.Get(p)
 		}
@@ -111,20 +111,20 @@ func getStyleConfig(p string, styles []Value, styleIndex Value) Value {
 	return v
 }
 
-func getMarkStyleConfig(prop string, mark Value, styleIndex Value) Value {
-	return getStyleConfig(prop, getStyles(mark), styleIndex)
+func getMarkStyleConfig(cc *compileCtx, prop string, mark Value, styleIndex Value) Value {
+	return getStyleConfig(cc, prop, getStyles(mark), styleIndex)
 }
 
 // getMarkConfig looks a property up in style configs, then the mark-type
 // config, then the general mark config. With vgChannel the Vega channel name is
 // tried first at each level.
-func getMarkConfig(channel string, mark Value, config Value, vgChannel string) Value {
-	cfg := getMarkStyleConfig(channel, mark, config.Get("style"))
+func getMarkConfig(cc *compileCtx, channel string, mark Value, config Value, vgChannel string) Value {
+	cfg := getMarkStyleConfig(cc, channel, mark, config.Get("style"))
 	// config[mark.type][channel] and config.mark[channel] are read
 	// unguarded (all of getFirstDefined's arguments are evaluated): a mark
 	// config set to a falsy value is absent from the config, and reading it
 	// is a TypeError.
-	mt := config.Get(propKey(mark.Get("type")))
+	mt := config.Get(propKey(cc, mark.Get("type")))
 	if vgChannel != "" {
 		return firstDefined(cfg, cfg, jsGet(mt, vgChannel), jsGet(mt, channel), jsGet(config.Get("mark"), vgChannel))
 	}
@@ -143,11 +143,11 @@ func getMarkPropOrConfig(cc *compileCtx, channel string, mark Value, config Valu
 	} else if ignoreVgConfig && (vgChannel == "" || vgChannel == channel) {
 		return undef
 	}
-	return getMarkConfig(channel, mark, config, vgChannel)
+	return getMarkConfig(cc, channel, mark, config, vgChannel)
 }
 
-func getMarkPropOrConfigSimple(channel string, mark, config Value) Value {
-	return getMarkPropOrConfig(nil, channel, mark, config, "", false)
+func getMarkPropOrConfigSimple(cc *compileCtx, channel string, mark, config Value) Value {
+	return getMarkPropOrConfig(cc, channel, mark, config, "", false)
 }
 
 // sortParams builds the field/order arrays of a Vega compare.

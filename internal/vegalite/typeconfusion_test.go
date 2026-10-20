@@ -121,3 +121,32 @@ func TestInvalidSpecsReturnErrors(t *testing.T) {
 		}
 	}
 }
+
+// TestConversionTypeErrorMessage: String() of an object with no conversion
+// to text is reported as every TypeError the compiler mirrors is (throw):
+// JavaScript's message alone, whichever of the two paths raises it (an own
+// toString of a plain object, a null-prototype object in the compile's
+// conversion scope).
+func TestConversionTypeErrorMessage(t *testing.T) {
+	const want = "Cannot convert object to primitive value"
+	for _, c := range []struct{ name, version, spec string }{
+		{"own toString, field", "6.4", `{"data":{"values":[{"a":1}]},"mark":"point","encoding":{"x":{"field":{"toString":"x"},"type":"quantitative"}}}`},
+		{"own toString, title", "6.4", `{"data":{"values":[{"a":1}]},"mark":"point","encoding":{"x":{"field":"a","type":"quantitative","title":{"toString":1}}}}`},
+		{"null prototype, title", "5.8", `{"data":{"values":[{"a":1}]},"mark":"point","encoding":{"x":{"field":"a","type":"quantitative","title":{"__proto__":null}}}}`},
+	} {
+		_, err := Compile(mustParse(t, c.spec), Options{Version: c.version})
+		if err == nil || err.Error() != want {
+			t.Errorf("%s: err = %v, want exactly %q", c.name, err, want)
+		}
+	}
+	// The path of an object outside the compile's conversion scope (its
+	// own toString) raises a *jsval.Thrown, reported the same way.
+	func() {
+		defer func() {
+			if got := panicError(recover()); got.Error() != want {
+				t.Errorf("unscoped object with a toString of its own: err = %q, want exactly %q", got, want)
+			}
+		}()
+		_ = mkv("toString", 1).AsString()
+	}()
+}

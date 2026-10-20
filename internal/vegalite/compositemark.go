@@ -271,7 +271,7 @@ func normalizeBoxPlot(cc *compileCtx, spec Value, config Value) Value {
 	outerSpec := omit(spec, "mark", "encoding", "params", "projection")
 	markDef := markDefOf(cc, mark)
 	extent := coalesce(markDef.Get("extent"), config.Get("boxplot").Get("extent"))
-	sizeValue := getMarkPropOrConfigSimple("size", markDef, config)
+	sizeValue := getMarkPropOrConfigSimple(cc, "size", markDef, config)
 	invalid := markDef.Get("invalid")
 	boxPlotType := extent
 	if extent.IsNum() {

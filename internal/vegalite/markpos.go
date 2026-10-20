@@ -41,7 +41,7 @@ func vgAlignedPositionChannel(cc *compileCtx, channel string, markDef, config Va
 	if channel == chX {
 		alignChannel = "align"
 	}
-	align := getMarkPropOrConfigSimple(alignChannel, markDef, config)
+	align := getMarkPropOrConfigSimple(cc, alignChannel, markDef, config)
 	alignExcl := undef
 	if isSignalRef(cc, align) {
 		cc.warn(msgRangeMarkAlignmentCannotBeExpression(alignChannel))
@@ -285,11 +285,11 @@ func pointPosition2OrSize(m *unitModel, defaultPos, channel string) Value {
 	}
 	// {[channel]: ..., [sizeChannel]: ...}: a polar channel has no size
 	// channel, whose undefined is the key "undefined" here.
-	styleObj := mkv(channel, getMarkStyleConfig(channel, markDef, config.Get("style")), jsKey(sizeChannel), getMarkStyleConfig(jsKey(sizeChannel), markDef, config.Get("style")))
+	styleObj := mkv(channel, getMarkStyleConfig(m.ctx, channel, markDef, config.Get("style")), jsKey(sizeChannel), getMarkStyleConfig(m.ctx, jsKey(sizeChannel), markDef, config.Get("style")))
 	if r := position2orSize(m.ctx, channel, styleObj); !r.IsUndefined() {
 		return r
 	}
-	if r := position2orSize(m.ctx, channel, config.Get(propKey(m.mark()))); !r.IsUndefined() {
+	if r := position2orSize(m.ctx, channel, config.Get(propKey(cc, m.mark()))); !r.IsUndefined() {
 		return r
 	}
 	if r := position2orSize(m.ctx, channel, config.Get("mark")); !r.IsUndefined() {
@@ -377,7 +377,7 @@ func defaultSizeRef(cc *compileCtx, sizeChannel, scaleName string, scale *scaleC
 				if !(bandSize.Get("band").IsNum() && bandSize.Get("band").NumValue() == 1) {
 					bandWidth = bandSize.Get("band").AsString() + " * " + bandWidth
 				}
-				minBandSize := getMarkConfig("minBandSize", mkv("type", mark), config, "")
+				minBandSize := getMarkConfig(cc, "minBandSize", mkv("type", mark), config, "")
 				if minBandSize.IsTruthy() {
 					return sig("max(" + signalOrStringValue(cc, minBandSize).AsString() + ", " + bandWidth + ")")
 				}
@@ -599,13 +599,13 @@ func rectBinPosition(fd, fd2 Value, channel string, m *unitModel) Value {
 	}
 	spacing := 0.0
 	if isXorY(channel) {
-		if b := getMarkPropOrConfigSimple("binSpacing", markDef, config); !b.IsNullish() {
+		if b := getMarkPropOrConfigSimple(cc, "binSpacing", markDef, config); !b.IsNullish() {
 			spacing = jsval.ToNumber(b) // spacing / 2 converts it as JavaScript does
 		}
 	}
 	channel2 := getSecondaryRangeChannel(channel)
 	vgChannel, vgChannel2 := getVgPositionChannel(channel), getVgPositionChannel(channel2)
-	minBandSize := getMarkConfig("minBandSize", markDef, config, "")
+	minBandSize := getMarkConfig(cc, "minBandSize", markDef, config, "")
 	po := positionOffset(channel, markDef, encoding, m, jsval.Int(0))
 	po2 := positionOffset(channel2, markDef, encoding, m, jsval.Int(0))
 	bandSizeExprS := binSizeExpr(cc, scaleName, fd)

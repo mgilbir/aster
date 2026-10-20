@@ -35,6 +35,9 @@ type compileCtx struct {
 	meter budget.Meter
 	// lazySeq numbers the lazy signals; outputSeq the output nodes' hash keys.
 	lazySeq, outputSeq int64
+	// lazies are the lazy signal objects the compilation made and the
+	// copies made of them (see lazySignal), resolved when it ends.
+	lazies []*Object
 	// sigIdx speeds up signal lookups by name (see signalIndex).
 	sigIdx signalIndex
 	// transforms counts the data transforms parsed so far (see maxTransforms).
@@ -155,11 +158,35 @@ const modelStep = 32
 type cancelError struct{ err error }
 
 // lazySignal makes a signal reference whose expression is computed on demand.
+// Every one is recorded, with every copy made of it, so that the end of the
+// compilation resolves exactly those (resolveLazy) rather than walking the
+// compiled specification to find them.
 func lazySignal(c *compileCtx, fn func() string) Value {
 	c.lazySeq++
 	o := mk("signal", lazyMarker+strconv.FormatInt(c.lazySeq, 10))
 	o.SetStringer(func(*Object) string { return lazyMarker + fn() })
+	h := lazyHost{c}
+	o.SetHost(h)
+	h.record(o)
 	return jsval.Obj(o)
+}
+
+// lazyHost is the host payload of a lazy signal object: it follows the
+// object through the copies the engine makes of it (jsval.CopyHook), each of
+// which carries the same stringer and so is as lazy as the original.
+type lazyHost struct{ cc *compileCtx }
+
+// lazyEntryBytes is what a recorded lazy signal costs: its slot.
+const lazyEntryBytes = 16
+
+func (h lazyHost) record(o *Object) {
+	h.cc.alloc(lazyEntryBytes)
+	h.cc.lazies = append(h.cc.lazies, o)
+}
+
+func (h lazyHost) Copied(dst *Object) any {
+	h.record(dst)
+	return h
 }
 
 func lazyFn(o *Object) (func() string, bool) {
@@ -187,20 +214,43 @@ func signalOf(v Value) string {
 	return v.Get("signal").AsString()
 }
 
-// resolveLazy replaces every lazy signal in v with its evaluated expression.
-// The compiled specification may share objects (a config's or a
-// definition's, reused by every mark that reads them), so it is a graph, not
-// a tree, and a walk of the tree it stands for is exponential in the depth
-// of sharing. The walk is made as a tree walk up to resolveLazyTreeVisits
-// values, which an output's usual size stays far below and which costs no
-// allocation; past them it starts again with a visited set, so each array and
-// object is visited once. Resolving is idempotent (a resolved signal is no
-// longer lazy), so the second walk only finishes the first.
+// resolveLazy replaces every lazy signal of the compiled specification v with
+// its evaluated expression. The compiler made each of them (lazySignal), and
+// every copy made of one is recorded too, so exactly those are resolved,
+// whatever the size of the output and however much of it is shared: no walk
+// of v. A recorded signal that is not in v (its owner was dropped) is
+// resolved too, harmlessly: its expression reads names and spec values and
+// changes nothing. Should one raise an error, whether it is in v is not
+// known, and v is walked (resolveLazyWalk), which raises the error only for
+// one that is.
 func resolveLazy(cc *compileCtx, v Value) {
-	left := resolveLazyTreeVisits
-	if resolveLazyTree(cc, v, &left) {
+	if resolveRecorded(cc) {
 		return
 	}
+	resolveLazyWalk(cc, v)
+}
+
+// resolveRecorded resolves the recorded lazy signals, and reports false
+// when resolving one failed.
+func resolveRecorded(cc *compileCtx) (ok bool) {
+	defer func() {
+		if recover() != nil {
+			ok = false
+		}
+	}()
+	for _, o := range cc.lazies {
+		cc.work(1)
+		resolveLazyObject(o)
+	}
+	return true
+}
+
+// resolveLazyWalk resolves the lazy signals in v by walking it. The compiled
+// specification may share objects (a config's or a definition's, reused by
+// every mark that reads them), so it is a graph, not a tree, and a walk of
+// the tree it stands for is exponential in the depth of sharing: each array
+// and object is visited once, the visited set charged to the call's ledger.
+func resolveLazyWalk(cc *compileCtx, v Value) {
 	seen := map[jsval.InternKey]struct{}{}
 	var charged int64
 	var walk func(v Value)
@@ -233,40 +283,11 @@ func resolveLazy(cc *compileCtx, v Value) {
 	walk(v)
 }
 
-// resolveLazyTreeVisits bounds resolveLazy's tree walk (see resolveLazy).
-const resolveLazyTreeVisits = 1 << 20
-
-// resolveLazyTree walks v as a tree, resolving lazy signals, and reports
-// false once it has visited *left values without finishing.
-func resolveLazyTree(cc *compileCtx, v Value, left *int) bool {
-	if *left <= 0 {
-		return false
-	}
-	*left--
-	cc.work(1)
-	switch v.Kind() {
-	case jsval.KindArr:
-		for _, it := range v.Items() {
-			if !resolveLazyTree(cc, it, left) {
-				return false
-			}
-		}
-	case jsval.KindObj:
-		o := v.ObjValue()
-		resolveLazyObject(o)
-		for i := 0; i < o.Len(); i++ {
-			if !resolveLazyTree(cc, o.ValueAt(i), left) {
-				return false
-			}
-		}
-	}
-	return true
-}
-
 // resolveLazyObject evaluates o's expression when it is a lazy signal.
 func resolveLazyObject(o *Object) {
 	if fn, ok := lazyFn(o); ok {
 		o.Set("signal", jsval.Str(fn()))
 		o.SetStringer(nil)
+		o.SetHost(nil)
 	}
 }

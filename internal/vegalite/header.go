@@ -369,8 +369,8 @@ func assembleHeaderGroup(m Model, channel, headerType string, lh *layoutHeaderCo
 // getLayoutTitleBand is LAYOUT_TITLE_BAND[headerChannel][titleAnchor]: the
 // anchor is looked up by its text, and a name every object inherits finds
 // that member (Object.prototype for "__proto__", which prints as {}).
-func getLayoutTitleBand(titleAnchor Value, headerChannel string) Value {
-	a := propKey(titleAnchor)
+func getLayoutTitleBand(cc *compileCtx, titleAnchor Value, headerChannel string) Value {
+	a := propKey(cc, titleAnchor)
 	if v, ok := inheritedValue(a); ok {
 		return v
 	}
@@ -386,14 +386,14 @@ var layoutTitleBand = map[string]map[string]int{
 	"row":    {"start": 1, "end": 0},
 }
 
-func assembleLayoutTitleBand(headers map[string]*layoutHeaderComponent, config Value) Value {
+func assembleLayoutTitleBand(cc *compileCtx, headers map[string]*layoutHeaderComponent, config Value) Value {
 	titleBand := jsval.NewObject(2)
 	for _, channel := range facetChannels {
 		hc := headers[channel]
 		if hc != nil && hc.facetFieldDef.IsTruthy() {
 			props := getHeaderProperties([]string{"titleAnchor", "titleOrient"}, hc.facetFieldDef.Get("header"), config, channel)
 			headerChannel := getHeaderChannel(channel, props.Lookup("titleOrient"))
-			if band := getLayoutTitleBand(props.Lookup("titleAnchor"), headerChannel); !band.IsUndefined() {
+			if band := getLayoutTitleBand(cc, props.Lookup("titleAnchor"), headerChannel); !band.IsUndefined() {
 				titleBand.Set(headerChannel, band)
 			}
 		}

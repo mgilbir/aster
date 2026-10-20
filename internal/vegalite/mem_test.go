@@ -496,12 +496,11 @@ func TestCopiesAreUsed(t *testing.T) {
 	}
 }
 
-// TestScratchMapsAreCharged: the visited set resolveLazy builds once an
-// output outgrows its tree walk, and the memo of deepEqual, hold an entry
+// TestScratchMapsAreCharged: the visited set resolveLazyWalk builds, and the memo of deepEqual, hold an entry
 // for every container the specification makes them visit; they are charged
 // to the call's ledger as they grow, and given back when the walk ends.
 func TestScratchMapsAreCharged(t *testing.T) {
-	const n = resolveLazyTreeVisits + 1000
+	const n = 1<<20 + 1000
 	items := make([]Value, n)
 	for i := range items {
 		items[i] = jsval.Obj(jsval.NewObject(0))
@@ -526,11 +525,11 @@ func TestScratchMapsAreCharged(t *testing.T) {
 		f(cc)
 		return nil
 	}
-	if err := run(1<<40, func(cc *compileCtx) { resolveLazy(cc, big) }); err != nil {
-		t.Fatalf("resolveLazy under a large ledger: %v", err)
+	if err := run(1<<40, func(cc *compileCtx) { resolveLazyWalk(cc, big) }); err != nil {
+		t.Fatalf("resolveLazyWalk under a large ledger: %v", err)
 	}
-	if err := run(8<<20, func(cc *compileCtx) { resolveLazy(cc, big) }); !errors.Is(err, budget.ErrLimit) {
-		t.Errorf("resolveLazy of %d containers under 8 MiB: err=%v, want ErrLimit", n, err)
+	if err := run(8<<20, func(cc *compileCtx) { resolveLazyWalk(cc, big) }); !errors.Is(err, budget.ErrLimit) {
+		t.Errorf("resolveLazyWalk of %d containers under 8 MiB: err=%v, want ErrLimit", n, err)
 	}
 	other := make([]Value, n)
 	for i := range other {
@@ -539,4 +538,32 @@ func TestScratchMapsAreCharged(t *testing.T) {
 	if err := run(8<<20, func(cc *compileCtx) { deepEqual(cc, big, jsval.ArrOf(other...)) }); !errors.Is(err, budget.ErrLimit) {
 		t.Errorf("deepEqual of two arrays of %d containers under 8 MiB: err=%v, want ErrLimit", n, err)
 	}
+}
+
+// TestPropKeyIsCharged: the text of an array or object read as a property
+// key is built on the compilation's walker, which charges the call's
+// ledger. Read again and again (every lookup of a mark's config does), a
+// key of half a megabyte stops the call under a small ledger; built
+// uncharged, it would cost a half megabyte per read for ever.
+func TestPropKeyIsCharged(t *testing.T) {
+	parts := make([]Value, 1<<10)
+	for i := range parts {
+		parts[i] = jsval.Str(strings.Repeat("k", 512))
+	}
+	key := jsval.ArrOf(parts...) // 512 KiB of text
+	l := budget.NewLedger(context.Background(), budget.LedgerLimits{MaxBytes: 8 << 20})
+	cc := &compileCtx{ctx: budget.WithLedger(context.Background(), l), ledger: l}
+	defer func() {
+		r := recover()
+		stop, ok := r.(*budget.Stop)
+		if !ok || !errors.Is(stop.Err, budget.ErrLimit) {
+			t.Fatalf("recovered %v, want a *budget.Stop wrapping ErrLimit", r)
+		}
+	}()
+	for range 1000 {
+		if got := propKey(cc, key); len(got) < 512<<10 {
+			t.Fatalf("propKey = %d bytes", len(got))
+		}
+	}
+	t.Fatal("1000 reads of a half-megabyte key were not stopped by an 8 MiB ledger")
 }

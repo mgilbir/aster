@@ -223,7 +223,7 @@ func parseUnitSelection(m *unitModel, selDefs []Value) *omap[*selectionComponent
 		} else {
 			defaults = mk("type", typV)
 		}
-		cfg := selectionConfig.Get(propKey(typV))
+		cfg := selectionConfig.Get(propKey(cc, typV))
 		// defaults[key] is a property read: under 5.8 the clone may have
 		// given defaults a prototype ("__proto__" in the selection), which
 		// answers too.
@@ -251,7 +251,7 @@ func parseUnitSelection(m *unitModel, selDefs []Value) *omap[*selectionComponent
 		} else {
 			props.Set("events", jsval.Arr(arrayOf(duplicate(cc, on))))
 		}
-		sc := &selectionComponent{cc: cc, name: name, typ: typ, typKey: propKey(typV), props: props, project: &selProjection{
+		sc := &selectionComponent{cc: cc, name: name, typ: typ, typKey: propKey(cc, typV), props: props, project: &selProjection{
 			hasChannel: newOmap[*selProjItem](), hasField: newLookupOmap[*selProjItem](),
 		}}
 		selCmpts.assign(name, sc) // selCmpts[name] = …: a plain object (see jsRealm)
@@ -1062,7 +1062,7 @@ var projectCompiler = selectionCompiler{
 			// The channel as a key (model.fieldDef(channel), the channel
 			// tables, the signal's name); getPositionChannelFromLatLong
 			// switches on it strictly.
-			channel := propKey(ch)
+			channel := propKey(cc, ch)
 			fd := m.fieldDef(channel)
 			if fd.IsTruthy() {
 				field := fd.Get("field")
@@ -1076,7 +1076,7 @@ var projectCompiler = selectionCompiler{
 				// The field as a key (parsed[field]); compared with
 				// SELECTION_ID strictly, and kept as given for the
 				// projection's literals.
-				fieldV, f := field, propKey(field)
+				fieldV, f := field, propKey(cc, field)
 				if fd.Get("timeUnit").IsTruthy() && !isBinnedTimeUnit(m.ctx, fd.Get("timeUnit")) {
 					f = m.vgField(channel, fieldRefOption{})
 					fieldV = jsval.Str(f)
@@ -1145,7 +1145,7 @@ var projectCompiler = selectionCompiler{
 					cc.work(1)
 					if isObject(v) {
 						// v[p.geoChannel || p.channel], else v[p.field]
-						k := propKey(p.channelV)
+						k := propKey(cc, p.channelV)
 						if p.geoChannelV.IsTruthy() {
 							k = p.geoChannel
 						}
@@ -1703,7 +1703,7 @@ var inputsCompiler = selectionCompiler{
 				} else {
 					o.Set("on", jsval.Arr(nil))
 				}
-				b := coalesce(bind.Get(p.field), bind.Get(propKey(p.channelV)), bind)
+				b := coalesce(bind.Get(p.field), bind.Get(propKey(cc, p.channelV)), bind)
 				o.Set("bind", b)
 				signals = append([]Value{jsval.Obj(o)}, signals...)
 			}

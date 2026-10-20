@@ -64,6 +64,44 @@ type Options struct {
 // stack of every panic Compile turns into an "internal error".
 var panicHook func(stack []byte)
 
+// panicError is the error Compile returns for the value r a compilation
+// panicked with.
+func panicError(r any) error {
+	switch e := r.(type) {
+	case cancelError:
+		return e.err
+	case compileError:
+		return e
+	case limitError:
+		return e
+	case exprSyntaxError:
+		return e.err()
+	case jsval.TypeError:
+		// String of an object without a conversion to text (a
+		// prototype chain ending in null), as JavaScript throws it.
+		return compileError{e.Msg}
+	case *budget.Stop:
+		// A walk of a value (jsval's) past the call's budget or
+		// deadline, or past the detached walk's caps.
+		return e.Err
+	case *jsval.Thrown:
+		// a JavaScript exception of a value the compiler converts,
+		// as upstream's raises it (String() of an object holding a
+		// toString of its own)
+		if e.Name == "TypeError" {
+			// reported as every TypeError the compiler mirrors is
+			// (throw): JavaScript's message, with no class name
+			return compileError{e.Msg}
+		}
+		return e
+	default:
+		if panicHook != nil {
+			panicHook(debug.Stack())
+		}
+		return fmt.Errorf("vegalite: internal error: %v", r)
+	}
+}
+
 // Compile turns a Vega-Lite specification into a Vega specification. The input
 // is not modified. Errors are returned for invalid specifications; Compile does
 // not panic.
@@ -71,34 +109,7 @@ func Compile(spec jsval.Value, opts Options) (out jsval.Value, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			out = jsval.Undefined
-			switch e := r.(type) {
-			case cancelError:
-				err = e.err
-			case compileError:
-				err = e
-			case limitError:
-				err = e
-			case exprSyntaxError:
-				err = e.err()
-			case jsval.TypeError:
-				// String of an object without a conversion to text (a
-				// prototype chain ending in null), as JavaScript throws it.
-				err = compileError{e.Msg}
-			case *budget.Stop:
-				// A walk of a value (jsval's) past the call's budget or
-				// deadline, or past the detached walk's caps.
-				err = e.Err
-			case *jsval.Thrown:
-				// a JavaScript exception of a value the compiler converts,
-				// as upstream's raises it (String() of an object holding a
-				// toString of its own)
-				err = e
-			default:
-				if panicHook != nil {
-					panicHook(debug.Stack())
-				}
-				err = fmt.Errorf("vegalite: internal error: %v", r)
-			}
+			err = panicError(r)
 		}
 	}()
 	v5, err := isVersion58(opts.Version)
