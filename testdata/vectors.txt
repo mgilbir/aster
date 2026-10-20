@@ -34,6 +34,7 @@ internal/jsval | - | testdata/gen_numbers.js | > testdata/numbers.json | - | any
 internal/jsval | - | testdata/gen_dates.mjs | > testdata/dates.json | - | any
 internal/jsval | - | testdata/gen_protonames.mjs | > testdata/protonames.json | - | any
 internal/jsval | - | testdata/gen_strings.mjs | > testdata/strings.json.gz | - | any
+internal/jsval | - | testdata/gen_casetables.mjs | > casetables.go | - | any
 internal/jsval | - | testdata/gen_utf8.mjs | > testdata/utf8.json | - | any
 internal/loader | - | testdata/gen_sanitize.mjs | > testdata/sanitize.json.gz | - | any
 
