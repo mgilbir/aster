@@ -495,3 +495,48 @@ func TestCopiesAreUsed(t *testing.T) {
 		})
 	}
 }
+
+// TestScratchMapsAreCharged: the visited set resolveLazy builds once an
+// output outgrows its tree walk, and the memo of deepEqual, hold an entry
+// for every container the specification makes them visit; they are charged
+// to the call's ledger as they grow, and given back when the walk ends.
+func TestScratchMapsAreCharged(t *testing.T) {
+	const n = resolveLazyTreeVisits + 1000
+	items := make([]Value, n)
+	for i := range items {
+		items[i] = jsval.Obj(jsval.NewObject(0))
+	}
+	big := jsval.ArrOf(items...)
+	run := func(limit int64, f func(cc *compileCtx)) (err error) {
+		l := budget.NewLedger(context.Background(), budget.LedgerLimits{MaxBytes: limit})
+		cc := &compileCtx{ctx: budget.WithLedger(context.Background(), l), ledger: l}
+		defer func() {
+			if r := recover(); r != nil {
+				le, ok := r.(limitError)
+				if !ok {
+					panic(r)
+				}
+				err = le
+			}
+			cc.releaseAhead()
+			if got := l.PeakBytes(); err == nil && got < n {
+				t.Errorf("peak %d bytes charged: the scratch map was not charged", got)
+			}
+		}()
+		f(cc)
+		return nil
+	}
+	if err := run(1<<40, func(cc *compileCtx) { resolveLazy(cc, big) }); err != nil {
+		t.Fatalf("resolveLazy under a large ledger: %v", err)
+	}
+	if err := run(8<<20, func(cc *compileCtx) { resolveLazy(cc, big) }); !errors.Is(err, budget.ErrLimit) {
+		t.Errorf("resolveLazy of %d containers under 8 MiB: err=%v, want ErrLimit", n, err)
+	}
+	other := make([]Value, n)
+	for i := range other {
+		other[i] = jsval.Obj(jsval.NewObject(0))
+	}
+	if err := run(8<<20, func(cc *compileCtx) { deepEqual(cc, big, jsval.ArrOf(other...)) }); !errors.Is(err, budget.ErrLimit) {
+		t.Errorf("deepEqual of two arrays of %d containers under 8 MiB: err=%v, want ErrLimit", n, err)
+	}
+}

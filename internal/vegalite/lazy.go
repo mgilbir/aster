@@ -202,6 +202,7 @@ func resolveLazy(cc *compileCtx, v Value) {
 		return
 	}
 	seen := map[jsval.InternKey]struct{}{}
+	var charged int64
 	var walk func(v Value)
 	walk = func(v Value) {
 		cc.work(1)
@@ -211,6 +212,8 @@ func resolveLazy(cc *compileCtx, v Value) {
 			if _, ok := seen[k]; ok {
 				return
 			}
+			cc.alloc(scratchEntryBytes)
+			charged += scratchEntryBytes
 			seen[k] = struct{}{}
 		}
 		switch v.Kind() {
@@ -226,6 +229,7 @@ func resolveLazy(cc *compileCtx, v Value) {
 			}
 		}
 	}
+	defer func() { cc.free(charged) }() // the visited set is scratch
 	walk(v)
 }
 

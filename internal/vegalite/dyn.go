@@ -323,6 +323,7 @@ func or(vs ...Value) Value {
 // distinct pairs. The answer is the same.
 func deepEqual(cc *compileCtx, a, b Value) bool {
 	d := deepEqualWalk{cc: cc}
+	defer func() { cc.free(d.charged) }() // the memo is scratch
 	return d.eq(a, b)
 }
 
@@ -335,7 +336,15 @@ type deepEqualWalk struct {
 	cc    *compileCtx
 	seen  int
 	equal map[[2]jsval.InternKey]bool
+	// charged is what the memo's entries were charged (deepEqual gives it
+	// back).
+	charged int64
 }
+
+// scratchEntryBytes is what one entry of a scratch map keyed by a value's
+// identity costs: its key (two for a pair), its value and the map's share
+// of a bucket.
+const scratchEntryBytes = 48
 
 func (d *deepEqualWalk) eq(a, b Value) bool {
 	d.cc.work(1)
@@ -407,6 +416,8 @@ func (d *deepEqualWalk) eq(a, b Value) bool {
 		if d.equal == nil {
 			d.equal = map[[2]jsval.InternKey]bool{}
 		}
+		d.cc.alloc(2 * scratchEntryBytes)
+		d.charged += 2 * scratchEntryBytes
 		d.equal[key] = true
 	}
 	return true
