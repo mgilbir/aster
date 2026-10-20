@@ -26,8 +26,15 @@ import (
 // AllowedDomains restricts which hostnames may be accessed. If empty, all
 // domains are permitted. Names are compared case-insensitively, ignoring one
 // trailing dot, and only ASCII names are accepted: write an internationalized
-// name in its punycode form. BaseURL enables resolution of relative URIs; if
-// empty, only absolute HTTP(S) URLs are accepted.
+// name in its punycode form. BaseURL is put before a relative URI as
+// vega-loader's baseURL is; without an absolute one only absolute HTTP(S) URLs
+// can be fetched.
+//
+// Sanitize returns the string vega-loader's sanitize makes of a URI (see
+// SanitizeURI), the link or image URL Vega writes and then loads. Load
+// requests the URL that fetch makes of that string, the URL Standard's parse,
+// and the policy below is checked on that URL, so that what is checked is what
+// is requested.
 //
 // The same scheme/userinfo/AllowedDomains policy is enforced on every HTTP
 // redirect hop, so an allowed host cannot redirect the request to a
@@ -90,7 +97,7 @@ import (
 type HTTPLoader struct {
 	Client           *http.Client
 	AllowedDomains   []string      // if non-empty, only these hostnames are permitted
-	BaseURL          string        // if set, relative URIs are resolved against this URL
+	BaseURL          string        // if set, put before relative URIs (vega-loader's baseURL); absolute to fetch them
 	MaxResponseBytes int64         // response body cap; 0 = 64 MiB default, negative = unlimited
 	Timeout          time.Duration // per-request limit; 0 = 60 s default, negative = none
 
@@ -188,10 +195,19 @@ func (l *HTTPLoader) Load(ctx context.Context, uri string) ([]byte, error) {
 		ctx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, uri, nil)
+	// The URL requested is the one fetch would request for this string (the
+	// URL Standard's parse), and the policy is checked on that URL, so that
+	// what is checked is what is fetched. Load is safe when called directly,
+	// without Sanitize in front of it.
+	target, canonical, err := l.target(uri)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, canonical, nil)
 	if err != nil {
 		return nil, fmt.Errorf("aster: failed to create request for %q: %w", uri, err)
 	}
+	req.URL, req.Host = target, target.Host
 
 	// The client is a shallow copy, so the policy-enforcing CheckRedirect
 	// below does not mutate a caller-supplied client. Every redirect target is
@@ -199,11 +215,6 @@ func (l *HTTPLoader) Load(ctx context.Context, uri string) ([]byte, error) {
 	// then through the caller's own CheckRedirect (if any), so a stricter
 	// caller-supplied redirect policy still applies.
 	client := l.client()
-	// Re-validate the initial URL independently of Sanitize so Load is safe
-	// even when called directly.
-	if err := l.checkURL(req.URL); err != nil {
-		return nil, err
-	}
 	callerCheck := client.CheckRedirect
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		if len(via) >= maxRedirects {
@@ -260,35 +271,61 @@ func (l *HTTPLoader) Load(ctx context.Context, uri string) ([]byte, error) {
 	return data, nil
 }
 
+// Sanitize returns the string vega-loader's sanitize makes of uri with the
+// loader's BaseURL (SanitizeURI): the link or image URL Vega writes, and the
+// string it then hands to Load. A URI the allow-list refuses is an error.
+//
+// A result that fetch would request, an absolute http or https URL, is also
+// held to the access policy (no userinfo, AllowedDomains, no private address),
+// on the URL Load would request, and refused when it fails it or cannot be
+// parsed as one. Any other result, a relative reference (BaseURL empty or
+// itself relative), mailto:, tel: and the like, is returned as it is: it is a
+// valid link, and Load refuses it, since it cannot be fetched.
+//
+// Sanitize does not resolve names: it also vets the links of a chart, so a
+// specification could otherwise make the server look up any number of hosts.
+// Names are checked where a connection is made (see Load).
 func (l *HTTPLoader) Sanitize(_ context.Context, uri string) (string, error) {
 	if l == nil {
 		return "", errNilLoader("*HTTPLoader")
 	}
-	parsed, err := url.Parse(uri)
+	href, err := SanitizeURI(uri, URIOptions{BaseURL: l.BaseURL})
 	if err != nil {
-		return "", fmt.Errorf("aster: invalid URI %q: %w", uri, err)
-	}
-
-	// Resolve relative URIs against BaseURL if configured.
-	if parsed.Scheme == "" {
-		if l.BaseURL == "" {
-			return "", fmt.Errorf("aster: relative URI %q not allowed (no BaseURL configured)", uri)
-		}
-		base, err := url.Parse(l.BaseURL)
-		if err != nil {
-			return "", fmt.Errorf("aster: invalid BaseURL %q: %w", l.BaseURL, err)
-		}
-		parsed = base.ResolveReference(parsed)
-	}
-
-	// Sanitize also vets the links of a chart, so it does not resolve names: a
-	// specification could otherwise make the server look up any number of
-	// hosts. Names are checked where a connection is made (see Load).
-	if err := l.checkURL(parsed); err != nil {
 		return "", err
 	}
+	if _, _, err := l.target(href); err != nil && !errors.Is(err, errNotRequest) {
+		return "", err
+	}
+	return href, nil
+}
 
-	return parsed.String(), nil
+// target is the URL fetch would request for s and the string it is requested
+// by (its serialization), or an error when s is not an absolute http or https
+// URL (errNotRequest), cannot be parsed as one, or fails the access policy.
+// The policy is checked on the URL net/http will use, parsed from the
+// serialization; its scheme and host must be what the URL Standard's parse
+// found, so that no parser disagreement can make one name checked and
+// another connected to.
+func (l *HTTPLoader) target(s string) (*url.URL, string, error) {
+	ru, err := parseRequestURL(s)
+	if err != nil {
+		if errors.Is(err, errNotRequest) {
+			return nil, "", fmt.Errorf("%w: it cannot be fetched (is BaseURL set, and absolute?)", err)
+		}
+		return nil, "", err
+	}
+	canonical := ru.String()
+	u, err := url.Parse(canonical)
+	if err != nil {
+		return nil, "", fmt.Errorf("aster: not a URL net/http can request: %w", errBadURL)
+	}
+	if u.Scheme != ru.scheme || u.Host != ru.hostport() || u.User != nil || u.Opaque != "" {
+		return nil, "", fmt.Errorf("aster: not a URL net/http can request: %w", errBadURL)
+	}
+	if err := l.checkURL(u); err != nil {
+		return nil, "", err
+	}
+	return u, canonical, nil
 }
 
 // checkURL enforces the HTTPLoader access policy on a fully-resolved URL, as

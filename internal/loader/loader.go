@@ -101,14 +101,33 @@ func (l *FileLoader) initRoot() {
 	})
 }
 
-// Sanitize accepts a relative path inside the base directory. The URI is a
-// file path, not a URL: a name with a colon in its first segment (22:48) is a
-// file name, as it is to the reference implementation, and only an actual
-// scheme (file:, http:, mailto:) is refused. Nothing is decoded, so %2e%2e is
-// a file name too.
+// Sanitize accepts a relative path inside the base directory and returns it
+// as it is given: the string vega-loader's sanitize makes of a URI without a
+// BaseURL (SanitizeURI), which Vega writes into a link or an image as it is.
+// Load reads the cleaned path (./data/../a.csv is a.csv), so a path that is
+// written one way and read the other still names the same file.
+//
+// The URI is a file path, not a URL: a name with a colon in its first segment
+// (22:48) is a file name, as it is to the reference implementation, and only
+// an actual scheme (file:, http:, mailto:) is refused, since this loader
+// serves files and nothing else. Nothing is decoded, so %2e%2e is a file name
+// too.
 func (l *FileLoader) Sanitize(_ context.Context, uri string) (string, error) {
 	if l == nil {
 		return "", errNilLoader("*FileLoader")
+	}
+	if _, err := filePath(uri); err != nil {
+		return "", err
+	}
+	return uri, nil
+}
+
+// filePath is the path of the file a URI names, cleaned, relative to the base
+// directory and inside it; an error when it is not, or when vega-loader's
+// allow-list refuses the URI.
+func filePath(uri string) (string, error) {
+	if !uriAllowed(uri) {
+		return "", fmt.Errorf("aster: invalid URI %q: %w", uri, ErrURINotAllowed)
 	}
 	if hasScheme(uri) {
 		return "", fmt.Errorf("aster: FileLoader only accepts relative paths, got a scheme in %q", uri)
@@ -129,7 +148,6 @@ func (l *FileLoader) Sanitize(_ context.Context, uri string) (string, error) {
 	if cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("aster: FileLoader rejects path traversal in %q", uri)
 	}
-
 	return cleaned, nil
 }
 
@@ -154,6 +172,10 @@ func (l *FileLoader) Load(ctx context.Context, uri string) ([]byte, error) {
 		return nil, errNilLoader("*FileLoader")
 	}
 	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	uri, err := filePath(uri)
+	if err != nil {
 		return nil, err
 	}
 	l.initRoot()

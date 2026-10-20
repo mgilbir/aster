@@ -57,8 +57,9 @@ type (
 	//   - AllowedDomains []string: if non-empty, only these host names
 	//     (case-insensitive, one trailing dot ignored, ASCII only: write an
 	//     internationalized name in punycode).
-	//   - BaseURL string: relative URIs are resolved against it; without it
-	//     only absolute http(s) URLs are accepted.
+	//   - BaseURL string: put before a relative URI as vega-loader's baseURL
+	//     is (a string join, with a "/" between when neither side has one);
+	//     without it only absolute http(s) URLs can be fetched.
 	//   - MaxResponseBytes int64: the body cap after decoding; 0 is 64 MiB,
 	//     negative none. A larger body fails with ErrLimit.
 	//   - Timeout time.Duration: one request, redirects and body included; 0
@@ -67,8 +68,14 @@ type (
 	//     metadata), private, shared, multicast and unspecified addresses.
 	//   - BlockPrivateNetworks bool: deprecated and ignored.
 	//
-	// It refuses other schemes, URLs with userinfo, and hosts outside
-	// AllowedDomains, on every redirect hop (at most 10). The private-network
+	// Sanitize returns the string vega-loader's sanitize makes of the URI
+	// (what Vega writes into a link or an image, and then loads). Load
+	// requests the URL fetch would make of that string (the URL Standard's
+	// parse: backslashes, tabs, dot segments, %2e, IPv4 spellings), and the
+	// policy is checked on that URL. It fetches only http(s), refuses URLs
+	// with userinfo, and hosts outside AllowedDomains, on every redirect hop
+	// (at most 10); Sanitize refuses an http(s) URL Load would refuse, and
+	// returns anything else (a relative reference, mailto:) as a link only. The private-network
 	// check is made on the addresses a name resolves to before anything is
 	// sent to them, and on the address actually connected to, so names that
 	// resolve inward, DNS rebinding and redirects do not get around it; it
