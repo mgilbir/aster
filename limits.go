@@ -5,6 +5,7 @@ import (
 
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/raster"
+	"github.com/mgilbir/aster/internal/svgpdf"
 	"github.com/mgilbir/aster/internal/text"
 	"github.com/mgilbir/aster/internal/vega"
 	"github.com/mgilbir/aster/internal/vegalite"
@@ -29,6 +30,11 @@ type callLimits struct {
 	// vlViews bounds the views a Vega-Lite compilation creates (repeats
 	// multiply them).
 	vlViews int
+	// pdfChart bounds the SVG a chart's PDF is drawn from: what the SVG
+	// writer may make (svgBytes), so that every chart SVG and PNG output
+	// draw is drawn in PDF too (C44); pdfInput bounds SVG input to
+	// SVGToPDF, which an attacker may write.
+	pdfChart, pdfInput svgpdf.Limits
 	// ledger bounds the memory charged to the call's ledger: what the
 	// specification makes the engine allocate that no other bound counts.
 	ledger budget.LedgerLimits
@@ -71,8 +77,9 @@ const bytesPerRow, bytesPerItem, bytesPerCell, bytesPerOp = 512, 1536, 16384, 15
 
 // bytesPerView turns a byte limit into the Vega-Lite views a compilation may
 // create: a plain unit view's compiled Vega retains about 24 KiB and the
-// compilation allocates ten times that as it goes.
-const bytesPerView = 32768
+// compilation allocates ten times that as it goes. The compiler weighs a
+// view by the same measure (a view that compiles more text weighs more).
+const bytesPerView = vegalite.ViewBytes
 
 // specBytesDivisor sets the specification a memory limit admits: a sixteenth of
 // the limit in bytes. The rows and items budgets charge what a specification
@@ -96,6 +103,8 @@ func deriveLimits(n, ops uint64) callLimits {
 	}
 	// The label transform's bitmaps have it too, at scale 1.
 	l.vega.RasterPixelOps = l.pixelOps
+	l.pdfChart = pdfBounds(l.svgBytes, "the chart's SVG")
+	l.pdfInput = svgpdf.Limits{}.WithDefaults()
 	if n == 0 {
 		return l
 	}
@@ -115,6 +124,14 @@ func deriveLimits(n, ops uint64) callLimits {
 	}
 	// The canvas, layers and masks alive at once, and the pixels of one.
 	canvas := min(max(n, 4<<20), 1<<30)
+	// The SVG input a PNG is drawn from, which an attacker may write
+	// (SVGToPNG): its size, as large as the SVG a render may write; its
+	// elements, a tree node of 100 to 200 bytes each; its style sheets,
+	// whose rules hold about twenty times their text; and the pixels of one
+	// filter region, as many as a canvas. Each is bounded by the ledger as
+	// it is built too (the tree, the rules, text layout); these fail first,
+	// naming the bound. The defaults are their ceilings.
+	rd := raster.Limits{}.WithDefaults()
 	// The path geometry a render holds at once, in 16-byte points, and the
 	// pixels of one image it decodes (about 16 bytes each with its decoded
 	// form and halvings): each a sixteenth of the limit.
@@ -123,12 +140,24 @@ func deriveLimits(n, ops uint64) callLimits {
 		MaxPixels:       int(canvas / 8),
 		MaxPathSegments: toInt(max(n/16, 64<<10)),
 		MaxImagePixels:  int(min(max(n/16, 64<<10), 64<<20)),
+		MaxInputBytes:   int(min(max(n/4, 1<<20), uint64(rd.MaxInputBytes))),
+		MaxElements:     int(min(max(n/128, 16384), uint64(rd.MaxElements))),
+		MaxStyleBytes:   int(min(max(n/64, 64<<10), uint64(rd.MaxStyleBytes))),
+		MaxCSSRules:     int(min(max(n/1024, 1000), uint64(rd.MaxCSSRules))),
+		MaxFilterPixels: int(min(max(n/8, 512<<10), uint64(rd.MaxFilterPixels))),
 	}
 	// The label transform's bitmaps hold their pixels as a PNG does.
 	l.vega.RasterCanvasBytes = l.raster.MaxCanvasBytes
 	// The glyphs of one run of text, and the SVG, each a quarter of the limit.
 	l.shaping = text.ShapingLimits{RunBytes: int64(min(max(n/4, 1<<20), 1<<40))}
 	l.svgBytes = toInt(min(max(n/4, 1<<20), 1<<40))
+	l.pdfChart = pdfBounds(l.svgBytes, "the chart's SVG")
+	// SVG input in the same ratios, the defaults its ceilings.
+	pd := l.pdfInput
+	l.pdfInput.MaxInputBytes = toInt(min(max(n/4, 1<<20), uint64(pd.MaxInputBytes)))
+	l.pdfInput.MaxElements = toInt(min(max(n/256, 16384), uint64(pd.MaxElements)))
+	l.pdfInput.MaxPathSegments = toInt(min(max(n/32, 128<<10), uint64(pd.MaxPathSegments)))
+	l.pdfInput.MaxTextBytes = toInt(min(max(n/16, 64<<10), uint64(pd.MaxTextBytes)))
 	l.specBytes = max(n/specBytesDivisor, 1<<20)
 	l.ledger.MaxBytes = toInt64(max(n, 1<<20))
 	l.vlViews = toInt(max(n/bytesPerView, 64))
@@ -152,3 +181,19 @@ func toInt(n uint64) int { return int(min(n, math.MaxInt)) }
 
 // toInt64 is toInt for an int64 bound.
 func toInt64(n uint64) int64 { return int64(min(n, math.MaxInt64)) }
+
+// pdfLimits are the PDF writer's bounds: on the SVG of a chart (chart), or
+// on SVG input to SVGToPDF.
+func (l callLimits) pdfLimits(chart bool) svgpdf.Limits {
+	if chart {
+		return l.pdfChart
+	}
+	return l.pdfInput
+}
+
+// pdfBounds are the PDF writer's bounds on SVG of size bytes: an element of
+// it in 64 bytes, a path segment in 8 and its text in a quarter of it, the
+// ratios of the bounds on SVG input, which a chart's SVG keeps (C44).
+func pdfBounds(bytes int, input string) svgpdf.Limits {
+	return svgpdf.Limits{Input: input, MaxInputBytes: bytes, MaxElements: bytes / 64, MaxPathSegments: bytes / 8, MaxTextBytes: bytes / 4}
+}

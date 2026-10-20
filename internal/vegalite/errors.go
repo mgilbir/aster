@@ -103,25 +103,17 @@ func jsIn(v Value, key string) bool {
 	if !isObject(v) {
 		throw("Cannot use 'in' operator to search for '%s' in %s", key, v.AsString())
 	}
-	if isInheritedKey(key) {
+	if isInheritedKey(key) && (v.IsArr() || v.ObjValue().InheritsObjectPrototype()) {
 		return true
 	}
 	if v.IsArr() {
 		if n, ok := arrayIndex(key); ok {
 			return int64(n) < int64(v.Len())
 		}
-		return key == "length" || arrayProtoMembers[key]
+		return key == "length" || jsval.ArrayPrototypeMember(key)
 	}
-	return v.ObjValue().Has(key)
+	return v.ObjValue().PropIn(key) // an own key, or one its prototype chain holds
 }
-
-// arrayProtoMembers are the names Array.prototype holds.
-var arrayProtoMembers = strSet([]string{
-	"at", "concat", "copyWithin", "entries", "every", "fill", "filter", "find", "findIndex", "findLast",
-	"findLastIndex", "flat", "flatMap", "forEach", "includes", "indexOf", "join", "keys", "lastIndexOf",
-	"map", "pop", "push", "reduce", "reduceRight", "reverse", "shift", "slice", "some", "sort", "splice",
-	"toReversed", "toSorted", "toSpliced", "unshift", "values", "with",
-})
 
 // varNameOf is varName of a value upstream passes as it is: varName calls
 // s.replace, a TypeError on anything but a string.
@@ -217,10 +209,22 @@ func jsProp(v Value, key string) Value {
 		}
 		return undef
 	case v.IsObj():
-		if key == "__proto__" && !v.ObjValue().Has(key) {
+		o := v.ObjValue()
+		if key == "__proto__" {
+			// Object.prototype's getter, unless o or a prototype holds the
+			// key as data, or the chain ends in null (no getter).
+			if x, ok := o.ChainGet(key); ok {
+				return x
+			}
+			if !o.InheritsObjectPrototype() {
+				return undef
+			}
+			if p := o.Prototype(); !p.IsUndefined() {
+				return p
+			}
 			return jsval.Obj(jsval.NewObject(0)) // Object.prototype, as JSON prints it
 		}
-		return v.ObjValue().Prop(key)
+		return o.Prop(key)
 	}
 	return undef
 }

@@ -29,7 +29,9 @@ func facViewLayout(c *rtContext, n *opNode, e *entry) (any, transform, func(*opN
 			return nil
 		}
 		lp := layout.Params{Legends: p.Value("legends")}
-		if lay := p.Value("layout"); lay.IsObj() {
+		// `if (_.layout) trellisLayout(...)`: any truthy layout, a text or a
+		// number too (read as an empty one)
+		if lay := p.Value("layout"); lay.IsTruthy() {
 			lp.Grid = layout.ParseGridSpec(lay)
 		}
 		if p.Has("autosize") {
@@ -90,7 +92,8 @@ func facOverlap(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode
 		}
 		op := layout.OverlapParams{
 			Method:     p.Value("method"),
-			Separation: jsval.ToNumber(p.Value("separation")),
+			Separation: layout.Separation(p.Value("separation")),
+			Rows:       n.g.rows,
 		}
 		if o := p.Value("order"); o.IsStr() {
 			op.Order = o.StrValue()
@@ -106,12 +109,14 @@ func facOverlap(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode
 			if len(rng) > 0 {
 				op.Bound = &layout.OverlapBound{
 					Range:     [2]float64{jsval.ToNumber(rng[0]), jsval.ToNumber(rng[len(rng)-1])},
-					Orient:    p.walk.String(p.Value("boundOrient")),
+					Orient:    p.Value("boundOrient"),
 					Tolerance: jsval.ToNumber(p.Value("boundTolerance")),
 				}
 			}
 		}
-		layout.Overlap(mark, op)
+		if err := layout.Overlap(mark, op); err != nil {
+			failErr(err)
+		}
 		return nil
 	}), nil
 }
@@ -138,7 +143,7 @@ func facAxisTicks(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNo
 			Count:           p.Value("count"),
 			Values:          p.Value("values"),
 			MinStep:         p.Value("minstep"),
-			FormatType:      strParam(p.walk, p.Value("formatType")),
+			FormatType:      strictParam(p.Value("formatType")),
 			FormatSpecifier: p.Value("formatSpecifier"),
 		}
 		ticks, err := n.g.view.guidesEnv().AxisTicks(in)
@@ -151,11 +156,12 @@ func facAxisTicks(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNo
 	}), nil
 }
 
-func strParam(w jsval.Walker, v jsval.Value) string {
-	if v.IsNullish() {
-		return ""
-	}
-	return w.String(v)
+// strictParam is a parameter upstream compares with === ('time', 'utc',
+// 'symbol'): the string it holds, and "" (which equals none of the names)
+// for any other value, so ["time"] names nothing.
+func strictParam(v jsval.Value) string {
+	s, _ := v.Strict()
+	return s
 }
 
 func facLegendEntries(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *opParams) any) {
@@ -165,13 +171,13 @@ func facLegendEntries(c *rtContext, n *opNode, e *entry) (any, transform, func(*
 		}
 		sc, _ := p.Get("scale").(scale.Scale)
 		in := guides.LegendEntriesInput{
-			Type:            strParam(p.walk, p.Value("type")),
+			Type:            p.Value("type"),
 			Scale:           sc,
 			Count:           p.Value("count"),
 			Limit:           p.Value("limit"),
 			Values:          p.Value("values"),
 			MinStep:         p.Value("minstep"),
-			FormatType:      strParam(p.walk, p.Value("formatType")),
+			FormatType:      strictParam(p.Value("formatType")),
 			FormatSpecifier: p.Value("formatSpecifier"),
 		}
 		if b, ok := p.Get("size").(*boundExpr); ok {

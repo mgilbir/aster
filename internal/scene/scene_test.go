@@ -212,10 +212,10 @@ func TestBoundsBasics(t *testing.T) {
 		t.Fatal("fresh bounds are empty")
 	}
 	b.Add(1, 2).Add(-3, 4)
-	if b != (Bounds{-3, 2, 1, 4}) {
+	if b != (Bounds{X1: -3, Y1: 2, X2: 1, Y2: 4}) {
 		t.Fatalf("%v", b)
 	}
-	c := Bounds{0, 0, 2, 2}
+	c := Bounds{X1: 0, Y1: 0, X2: 2, Y2: 2}
 	if !b.Intersects(&c) || b.Encloses(&c) || !b.Contains(0, 3) || b.Contains(2, 3) {
 		t.Fatal("predicates")
 	}
@@ -361,7 +361,7 @@ func TestBoundClipFunc(t *testing.T) {
 	if err := NewBounder(nil).BoundTree(sg.Root); err != nil {
 		t.Fatal(err)
 	}
-	if m.Bounds != (Bounds{0, 0, 100, 50}) {
+	if m.Bounds != (Bounds{X1: 0, Y1: 0, X2: 100, Y2: 50}) {
 		t.Fatalf("clipped bounds %v", m.Bounds)
 	}
 	m.ClipPath = func(ctx PathContext) string {
@@ -373,7 +373,7 @@ func TestBoundClipFunc(t *testing.T) {
 	if err := NewBounder(nil).BoundMark(m); err != nil {
 		t.Fatal(err)
 	}
-	if m.Bounds != (Bounds{10, 10, 30, 30}) {
+	if m.Bounds != (Bounds{X1: 10, Y1: 10, X2: 30, Y2: 30}) {
 		t.Fatalf("clip path bounds %v", m.Bounds)
 	}
 }
@@ -479,7 +479,9 @@ func TestItemSetGet(t *testing.T) {
 	if v := it.Get("x"); !v.IsStr() || v.StrValue() != "12.5" {
 		t.Errorf("Get x = %v", v)
 	}
-	if !it.Get("y").IsUndefined() || !it.Get("stroke").IsNull() || it.Get("madeUp").NumValue() != 1 {
+	// null is unset (!= null) but reads back as null, which arithmetic
+	// reads as 0.
+	if !it.Get("y").IsNull() || !it.Get("stroke").IsNull() || it.Get("madeUp").NumValue() != 1 {
 		t.Error("Get semantics")
 	}
 	if d := it.Get("strokeDash"); d.Len() != 2 {

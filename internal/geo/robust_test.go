@@ -154,33 +154,34 @@ func TestNoPanicOnGarbage(t *testing.T) {
 		n = 60
 	}
 	start := time.Now()
+	js := jsThrows
 	for i := 0; i < n; i++ {
 		g := randGeometry(r, 0)
 		for _, p := range projs {
 			path := NewPath(p)
-			path.String(g)
-			path.Area(g)
-			path.Measure(g)
-			path.Bounds(g)
-			path.Centroid(g)
+			js(func() { path.String(g) })
+			js(func() { path.Area(g) })
+			js(func() { path.Measure(g) })
+			js(func() { path.Bounds(g) })
+			js(func() { path.Centroid(g) })
 			if p != nil {
 				p.Forward(coord(weird(r)), coord(weird(r)))
 				p.Invert(coord(weird(r)), coord(weird(r)))
 				c := p.Copy()
-				c.Path().String(g)
+				js(func() { c.Path().String(g) })
 				fit, _ := NewProjection(p.Type())
-				fit.FitSize(bg, 300, 200, g)
-				fit.FitWidth(bg, 300, g)
-				fit.FitHeight(bg, 200, g)
-				fit.FitExtent(bg, 1, 2, 300, 200, g)
+				js(func() { fit.FitSize(bg, 300, 200, g) })
+				js(func() { fit.FitWidth(bg, 300, g) })
+				js(func() { fit.FitHeight(bg, 200, g) })
+				js(func() { fit.FitExtent(bg, 1, 2, 300, 200, g) })
 			}
 		}
-		areaOf(g)
-		boundsOf(g)
-		centroidOf(g)
-		GeoLength(g)
-		GeoContains(g, [2]float64{coord(weird(r)), coord(weird(r))})
-		CollectGeoJSON(jsval.ArrOf(g, g))
+		js(func() { areaOf(g) })
+		js(func() { boundsOf(g) })
+		js(func() { centroidOf(g) })
+		js(func() { GeoLength(g) })
+		js(func() { GeoContains(g, [2]float64{coord(weird(r)), coord(weird(r))}) })
+		js(func() { CollectGeoJSON(jsval.ArrOf(g, g)) })
 	}
 	// Calibrated, although the site is named a hang guard: it asserts after the
 	// fact that the fixed-seed loop took no longer than expected, which is a
@@ -193,6 +194,20 @@ func TestNoPanicOnGarbage(t *testing.T) {
 	if d > testutil.Scaled(15*time.Second) {
 		t.Errorf("garbage took %v", d)
 	}
+}
+
+// jsThrows runs f, recovering the JavaScript exception upstream throws (a
+// member read of null), which is a *jsval.Thrown panic the dataflow
+// recovers: not a crash. Any other panic is.
+func jsThrows(f func()) {
+	defer func() {
+		if r := recover(); r != nil {
+			if _, ok := r.(*jsval.Thrown); !ok {
+				panic(r)
+			}
+		}
+	}()
+	f()
 }
 
 func TestNoPanicOnGarbageParams(t *testing.T) {
@@ -219,11 +234,13 @@ func TestNoPanicOnGarbageParams(t *testing.T) {
 				o.Set(k, v)
 			}
 		}
-		p, err := ConfigureProjection(bg, nil, nil, o, nil)
-		if err != nil {
+		var p Projection
+		var err error
+		jsThrows(func() { p, err = ConfigureProjection(bg, nil, nil, o, nil) })
+		if err != nil || p == nil {
 			continue
 		}
-		p.Path().String(randGeometry(r, 0))
+		jsThrows(func() { p.Path().String(randGeometry(r, 0)) })
 		p.Forward(1, 2)
 	}
 }
@@ -291,14 +308,14 @@ func FuzzPath(f *testing.F) {
 			defer close(done)
 			for _, p := range projs {
 				path := p.Path()
-				path.String(g)
-				path.Area(g)
-				path.Bounds(g)
-				path.Centroid(g)
+				jsThrows(func() { path.String(g) })
+				jsThrows(func() { path.Area(g) })
+				jsThrows(func() { path.Bounds(g) })
+				jsThrows(func() { path.Centroid(g) })
 			}
-			areaOf(g)
-			boundsOf(g)
-			centroidOf(g)
+			jsThrows(func() { areaOf(g) })
+			jsThrows(func() { boundsOf(g) })
+			jsThrows(func() { centroidOf(g) })
 		}()
 		waitStart := time.Now()
 		select {

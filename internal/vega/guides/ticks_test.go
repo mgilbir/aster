@@ -151,7 +151,7 @@ func TestTickOperatorsAgainstUpstream(t *testing.T) {
 				})
 			default:
 				in := LegendEntriesInput{
-					Type:            p("type").StrValue(),
+					Type:            p("type"),
 					Scale:           s,
 					Count:           p("count"),
 					Limit:           p("limit"),

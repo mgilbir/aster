@@ -1,0 +1,3 @@
+{"width":100,"height":100,"signals":[{"name":"r","value":[0,5]}],
+"data":[{"name":"src","values":[{"a":1,"toString":2},{"a":3,"toString":4}],"transform":[{"type":"crossfilter","signal":"xf","fields":["toString"],"query":[{"signal":"r"}]}]}],
+"marks":[{"type":"text","from":{"data":"src"},"encode":{"update":{"text":{"signal":"datum.a"},"y":{"value":10}}}}]}

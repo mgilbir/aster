@@ -1,0 +1,3 @@
+{"width":100,"height":50,"data":[{"name":"picked","values":[{"c":"alpha"},{"c":"beta"}]},{"name":"grown","values":[{"c":"alpha"}]},{"name":"t","values":[{"c":"alpha"}]}],
+"signals":[{"name":"changed","update":"modify('picked', {c: 'gamma'}, {c: 'alpha'})"}],
+"marks":[{"type":"text","from":{"data":"t"},"encode":{"enter":{"y":{"value":10}},"update":{"text":{"signal":"indata('picked', 'c', datum.c) + ',' + indata('grown', 'c', datum.c) + ',' + length(data('grown'))"}}}}]}

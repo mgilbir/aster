@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/scale"
+	"math/bits"
 	"sort"
 
 	"github.com/mgilbir/aster/internal/expr"
@@ -46,6 +47,13 @@ type flowPulse struct {
 	// indices back, filtering the source lazily (Pulse.filter). Nil means
 	// the source is tuples, as it is everywhere else (crossfilter_pulse.go).
 	src *pulseSource
+	// noSource: upstream's pulse.source is undefined here, not an empty
+	// list: the operator's source operator has produced no pulse (or
+	// stopped), so the pulse is a bare fork (Dataflow.getPulse's
+	// singlePulse), or the pulse is a fork(NO_SOURCE) (barePulse, a Sieve's
+	// output). tuples is nil then; a source that is an empty array is not
+	// noSource.
+	noSource bool
 	// tree is the hierarchy a tree data set carries (`source.root`).
 	tree *hierarchy.Tree
 	// multi holds the per-source tuple lists of an operator with several
@@ -75,9 +83,11 @@ func newParams() *opParams { return &opParams{} }
 func (p *opParams) Get(name string) any { return p.vals.at(name) }
 
 // Value returns the parameter as a jsval.Value (Undefined when absent or of
-// another type).
+// another type). A constant the parse wrote as a Go value (scope.go's P: the
+// "key" a counts aggregate names its group-by field) is the value it stands
+// for, as the runtime reads a literal parameter.
 func (p *opParams) Value(name string) jsval.Value {
-	if v, ok := p.vals.at(name).(jsval.Value); ok {
+	if v, ok := native(p.vals.at(name)).(jsval.Value); ok {
 		return v
 	}
 	return jsval.Undefined
@@ -113,12 +123,28 @@ func (p *opParams) store(name string, v any) (int, bool) {
 	return i, added
 }
 
+// set is Parameters.set: `if (o[name] !== value || force) o[name] = value`.
+// An absent parameter reads undefined, so an operator's undefined value
+// (a signal with none) does not add the parameter unless forced: the
+// operators that list their parameters (the Scale transform's
+// `for (key in _)`) do not see it.
 func (p *opParams) set(name string, v any, force bool) {
 	i := p.vals.find(name)
+	if i < 0 && !force && isUndefinedParam(v) {
+		return
+	}
 	if i < 0 || force || !sameValue(p.vals.valAt(i), v) {
 		i, _ = p.store(name, v)
 		p.mod[i] = true
 	}
+}
+
+// isUndefinedParam reports a parameter value that is undefined.
+func isUndefinedParam(v any) bool {
+	if x, ok := v.(jsval.Value); ok {
+		return x.IsUndefined()
+	}
+	return v == nil
 }
 
 // put records a constant parameter.
@@ -285,7 +311,12 @@ func (n *opNode) parameters(raw *smallMap[any], react bool, initonly bool) []*op
 			case []any:
 				n.source = nil
 				for _, e := range ps {
-					if op, ok := e.(*opNode); ok && op != n {
+					if _, ok := e.(*opNode); !ok {
+						// Operator.parameters: every element of a pulse
+						// parameter must be an operator
+						fail("Pulse parameters must be operator instances.")
+					}
+					if op := e.(*opNode); op != n {
 						op.addTarget(n)
 						deps = append(deps, op)
 						n.source = append(n.source, op)
@@ -369,6 +400,9 @@ func (n *opNode) run(p *flowPulse) *flowPulse {
 }
 
 func (n *opNode) evaluate(p *flowPulse) *flowPulse {
+	if n.g.trace != nil {
+		defer n.g.trace(n.name)()
+	}
 	if n.tr != nil {
 		params := n.marshall(p.stamp)
 		out := n.transform(params, p)
@@ -542,10 +576,21 @@ type flowGraph struct {
 	// walk is the call's Walker, which the operators' walks of values (a
 	// parameter read as text) go through (ADR 0018).
 	walk jsval.Walker
+	// trace, which only the tests set (opTraceKey), is told the type of
+	// each operator as it is evaluated, and the returned function when the
+	// evaluation is over.
+	trace func(typ string) func()
 }
 
+// opTraceKey carries a graph's trace in the call's context (the tests'
+// dataflow_polls_test.go, which attributes the polls of the call's context
+// to the operator that makes them).
+type opTraceKey struct{}
+
 func newGraph(ctx context.Context) *flowGraph {
-	return &flowGraph{ctx: ctx, touchSet: map[*opNode]struct{}{}, input: map[*opNode]*flowPulse{}, meter: budget.NewMeter(ctx), walk: jsval.WalkerFor(ctx)}
+	g := &flowGraph{ctx: ctx, touchSet: map[*opNode]struct{}{}, input: map[*opNode]*flowPulse{}, meter: budget.NewMeter(ctx), walk: jsval.WalkerFor(ctx)}
+	g.trace, _ = ctx.Value(opTraceKey{}).(func(string) func())
+	return g
 }
 
 // work charges n steps to the graph's meter, ending the render, through the
@@ -562,10 +607,21 @@ const rowBatch = 256
 // rows that starts there, cost steps a row: a per-row loop pays an AND and a
 // branch a row, and polls the call's context between batches (ADR 0010).
 func (g *flowGraph) rows(i, n, cost int) {
-	if i&(rowBatch-1) == 0 {
-		g.work(min(rowBatch, n-i) * cost)
+	b := rowBatch
+	if cost > maxBatchWork/rowBatch {
+		// Rows of many steps (an item of many encoded channels) go in
+		// smaller batches, so that no charge is more than maxBatchWork:
+		// the largest power of two that keeps it there.
+		b = max(1, 1<<bits.Len(uint(maxBatchWork/cost))>>1)
+	}
+	if i&(b-1) == 0 {
+		g.work(min(b, n-i) * cost)
 	}
 }
+
+// maxBatchWork is the most work one charge of rows makes: four of the
+// meter's polls.
+const maxBatchWork = 4096
 
 // copyChunk is how many values of a tuple or item list appendRows copies
 // between two charges: 256 KiB, a step per 16 values (what a copy costs
@@ -741,6 +797,11 @@ func (g *flowGraph) singlePulse(s *opNode) *flowPulse {
 		p.src = s.pulse.src
 		p.items = s.pulse.items
 		p.tree = s.pulse.tree
+		p.noSource = s.pulse.noSource
+	} else {
+		// `if (s && s !== StopPropagation) p.source = s.source`: the
+		// source operator has no pulse, or stopped, so there is no source.
+		p.noSource = true
 	}
 	return p
 }

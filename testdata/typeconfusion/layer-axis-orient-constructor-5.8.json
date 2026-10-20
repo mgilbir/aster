@@ -1,0 +1,1 @@
+{"data":{"values":[{"a":1,"b":2,"c":3}]},"config":{"axisY":{"orient":"constructor"}},"layer":[{"mark":"line","encoding":{"x":{"field":"a","type":"quantitative"},"y":{"field":"b","type":"quantitative"}}},{"mark":"line","encoding":{"x":{"field":"a","type":"quantitative"},"y":{"field":"c","type":"quantitative"}}}],"resolve":{"scale":{"y":"independent"}}}

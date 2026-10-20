@@ -144,10 +144,10 @@ func StableComparator(cmp Comparator) Comparator {
 // id 0).
 func TupleIDOrder(a, b jsval.Value) int {
 	var ia, ib uint32
-	if o := a.ObjValue(); o != nil {
+	if o := jsval.Fields(a); o != nil {
 		ia = o.TupleID()
 	}
-	if o := b.ObjValue(); o != nil {
+	if o := jsval.Fields(b); o != nil {
 		ib = o.TupleID()
 	}
 	switch {
@@ -271,7 +271,10 @@ func ExtentOf(w jsval.Walker, tuples []jsval.Value, f Field) (lo, hi jsval.Value
 // property of its argument and throws. The null field has no accessor and
 // yields nil.
 func ReadsUndefined(f Field) error {
-	if f.IsNil() {
+	if f.Uncallable {
+		return &jsval.Thrown{Name: "TypeError", Msg: "f is not a function"}
+	}
+	if f.IsNil() || f.Identity {
 		return nil
 	}
 	prop := f.Name

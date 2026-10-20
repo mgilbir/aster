@@ -7,8 +7,7 @@
 //
 // Record with the pinned node (see docs/testing.md) and the oracle's modules:
 //
-//   NODE_PATH=testdata/oracle-node/node_modules TZ=UTC \
-//     node internal/expr/testdata/gen_builtins.mjs | gzip -9n > internal/expr/testdata/builtins.json.gz
+//   go run ./internal/cmd/vectors -write -run builtins
 //
 // Every case is evaluated alone, in a formula transform over one datum, by
 // upstream's View; the warnings it logs from warn(), info() and debug() are

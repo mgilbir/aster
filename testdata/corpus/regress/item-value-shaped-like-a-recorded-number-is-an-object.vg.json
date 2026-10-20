@@ -1,0 +1,5 @@
+{"width":100,"height":100,"marks":[
+{"type":"symbol","encode":{"update":{"x":{"signal":"{'$num':'Infinity'}"},"y":{"value":10},"size":{"signal":"{'$num':'Infinity'}"},"fill":{"value":"red"}}}},
+{"type":"rect","encode":{"update":{"x":{"value":10},"y":{"value":10},"width":{"signal":"{'$num':'Infinity'}"},"height":{"value":5},"strokeWidth":{"signal":"{'$num':'Infinity'}"},"fill":{"value":"red"}}}},
+{"type":"text","encode":{"update":{"x":{"value":10},"y":{"value":10},"text":{"value":"a"},"fontSize":{"signal":"{'$num':'Infinity'}"},"angle":{"signal":"{'$num':'NaN'}"}}}}
+]}

@@ -1,0 +1,11 @@
+{"width":100,"height":100,"marks":[
+{"type":"text","encode":{"update":{"x":{"signal":"[5]"},"y":{"value":10},"dx":{"value":1},"text":{"value":"a"}}}},
+{"type":"text","encode":{"update":{"x":{"signal":"{a:1}"},"y":{"signal":"[7,8]"},"text":{"value":"b"}}}},
+{"type":"text","encode":{"update":{"x":{"signal":"[5]"},"y":{"value":10},"angle":{"value":30},"dx":{"value":2},"text":{"value":"c"}}}},
+{"type":"text","encode":{"update":{"x":{"signal":"[3,4]"},"y":{"value":20},"radius":{"value":10},"theta":{"value":1},"text":{"value":"d"}}}},
+{"type":"text","encode":{"update":{"x":{"value":"12"},"y":{"value":30},"radius":{"value":5},"dy":{"value":2},"text":{"value":"e"}}}},
+{"type":"text","encode":{"update":{"x":{"signal":"true"},"y":{"value":40},"angle":{"value":15},"dx":{"value":3},"text":{"value":"f"}}}},
+{"type":"text","encode":{"update":{"x":{"signal":"true"},"y":{"value":50},"dx":{"value":3},"text":{"value":"g"}}}},
+{"type":"text","encode":{"update":{"x":{"value":20},"y":{"signal":"[[1,[2]],null,'<&>']"},"text":{"value":"h"}}}},
+{"type":"symbol","encode":{"update":{"x":{"signal":"[5]"},"y":{"signal":"{}"}}}}
+]}

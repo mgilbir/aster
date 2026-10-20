@@ -1,0 +1,2 @@
+{"width": 60, "height": 40, "marks": [{"type": "group", "encode": {"enter": {"width": {"value": 30}, "height": {"value": "x"}, "clip": {"value": true}}}, "marks": [{"type": "rect", "encode": {"enter": {"width": {"value": 5}, "height": {"value": 5}}}}]},
+ {"type": "group", "encode": {"enter": {"width": {"value": {"a": 1}}, "height": {"value": 0}, "clip": {"value": true}}}}]}

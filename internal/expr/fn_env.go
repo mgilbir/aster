@@ -34,13 +34,15 @@ func indataVisitor(c *compiler, n *Node) error {
 	if err != nil {
 		return err
 	}
+	// Upstream's indataVisitor adds the index parameter only, not the data
+	// set's tuples: an expression that reads indata() is re-evaluated when
+	// the index changes, not the data set.
 	// vega-parser makes the index with scope.fieldRef(field), which takes a
 	// string and fails on any other literal.
 	if f := n.Elems[1].Value; !f.IsStr() {
 		return cerr("Unsupported field reference: %s", f.AsString())
 	}
 	c.addIndex(IndexDep{Data: name, Field: field})
-	c.addData(name)
 	c.require(name)
 	return nil
 }
@@ -166,10 +168,23 @@ func init() {
 	funcTable["gradient"].fn = wrapGradient(funcTable["gradient"].fn)
 	// The internal helpers mark encoders call resolve their scale directly.
 	scaleFn("_scale", func(sp ScaleProvider, a []jsval.Value) jsval.Value {
+		if ep, ok := sp.(EncodeScaleProvider); ok {
+			return ep.EncodeScale(a[0], arg(a, 1))
+		}
 		return sp.Scale(a[0], arg(a, 1), jsval.Undefined)
 	}, jsval.Undefined)
-	scaleFn("_range", func(sp ScaleProvider, a []jsval.Value) jsval.Value { return sp.Range(a[0], jsval.Undefined) }, jsval.Arr(nil))
-	scaleFn("_bandwidth", func(sp ScaleProvider, a []jsval.Value) jsval.Value { return sp.Bandwidth(a[0], jsval.Undefined) }, jsval.Num(0))
+	scaleFn("_range", func(sp ScaleProvider, a []jsval.Value) jsval.Value {
+		if ep, ok := sp.(EncodeScaleProvider); ok {
+			return ep.EncodeRange(a[0])
+		}
+		return sp.Range(a[0], jsval.Undefined)
+	}, jsval.Arr(nil))
+	scaleFn("_bandwidth", func(sp ScaleProvider, a []jsval.Value) jsval.Value {
+		if ep, ok := sp.(EncodeScaleProvider); ok {
+			return ep.EncodeBandwidth(a[0])
+		}
+		return sp.Bandwidth(a[0], jsval.Undefined)
+	}, jsval.Num(0))
 	// Their code is `_[scale](v)`, `_[scale].range()` and
 	// `this.__bandwidth(_[scale])`: the arguments past those are not
 	// generated, and _scale without its value is a code generation error.

@@ -91,7 +91,14 @@ func isOrderOnlyDef(cc *compileCtx, cd Value) bool {
 	return !cc.v5 && hasProperty(cd, "sort") && !hasProperty(cd, "field")
 }
 
-func isConditionalDef(cd Value) bool { return hasProperty(cd, "condition") }
+// isConditionalDef is hasProperty(cd, 'condition') in 6.4; 5.8 asks
+// `'condition' in cd`, which a prototype the clone gave cd answers too.
+func isConditionalDef(cc *compileCtx, cd Value) bool {
+	if cc != nil && cc.v5 && isObject(cd) {
+		return jsIn(cd, "condition")
+	}
+	return hasProperty(cd, "condition")
+}
 
 func hasConditionalFieldDef(cc *compileCtx, cd Value) bool {
 	c := cd.Get("condition")
@@ -259,7 +266,7 @@ func vgField(cc *compileCtx, fd Value, opt fieldRefOption) string {
 		case opt.forAs:
 			return removePathFromFieldV(rawField)
 		case opt.expr != "":
-			return flatAccessWithDatumV(rawField, opt.expr) + argAccessor
+			return flatAccessWithDatumV(cc, rawField, opt.expr) + argAccessor
 		}
 		return replacePathInFieldV(rawField) + argAccessor
 	}
@@ -267,7 +274,7 @@ func vgField(cc *compileCtx, fd Value, opt fieldRefOption) string {
 	case opt.forAs:
 		return removePathFromField(field)
 	case opt.expr != "":
-		return flatAccessWithDatum(field, opt.expr) + argAccessor
+		return flatAccessWithDatum(cc, field, opt.expr) + argAccessor
 	}
 	return replacePathInField(field) + argAccessor
 }
@@ -308,29 +315,46 @@ func functionalTitleFormatter(cc *compileCtx, fd Value) Value {
 	if timeUnit.IsTruthy() && !isBinnedTimeUnit(cc, timeUnit) {
 		tup = normalizeTimeUnit(cc, timeUnit)
 	}
-	fn := ""
+	// aggregate || unit || (maxbins && 'timeunit') || (isBinning(bin) &&
+	// 'bin'), then fn.toUpperCase(): the aggregate as given, which only a
+	// string can upper-case.
+	var fn Value
 	switch {
 	case aggregate.IsTruthy():
-		fn = aggregate.AsString()
+		fn = aggregate
 	case tup.Get("unit").IsTruthy():
-		fn = tup.Get("unit").AsString()
+		fn = tup.Get("unit")
 	case tup.Get("maxbins").IsTruthy():
-		fn = "timeunit"
+		fn = jsval.Str("timeunit")
 	case isBinning(bin):
-		fn = "bin"
+		fn = jsval.Str("bin")
 	}
-	if fn != "" {
-		return jsval.Str(upper(fn) + "(" + field.AsString() + ")")
+	if fn.IsTruthy() {
+		if !fn.IsStr() {
+			throw("fn.toUpperCase is not a function")
+		}
+		return jsval.Str(upper(fn.StrValue()) + "(" + field.AsString() + ")")
 	}
 	return field
 }
 
 func defaultTitle(cc *compileCtx, fd Value, config Value) Value {
-	switch config.Get("fieldTitle").AsString() {
+	// switch (config.fieldTitle): strict, so ["plain"] is the default (C91
+	// of the 2026-10-18 audit).
+	switch s, _ := config.Get("fieldTitle").Strict(); s {
 	case "plain":
-		return fd.Get("field")
+		return jsGet(fd, "field")
 	case "functional":
+		if fd.IsNullish() {
+			throw("Cannot destructure property 'aggregate' of 'fieldDef' as it is %s.", nullishName(fd))
+		}
 		return functionalTitleFormatter(cc, fd)
+	}
+	if fd.IsNullish() {
+		// const {field, bin, timeUnit, aggregate} = fieldDef: a title list
+		// with a null in it reaches here (C86's class: an array title
+		// read element by element).
+		throw("Cannot destructure property 'field' of 'fieldDef' as it is %s.", nullishName(fd))
 	}
 	return verbalTitleFormatter(cc, fd, config)
 }
@@ -394,8 +418,10 @@ func defaultType(cc *compileCtx, fd Value, channel string) string {
 		return "quantitative"
 	}
 	if isScaleFieldDef(fd) {
-		if st := fd.Get("scale").Get("type"); st.IsStr() {
-			switch scaleCategory[st.StrValue()] {
+		// SCALE_CATEGORY_INDEX[fieldDef.scale.type]: the type as a key, so
+		// ["log"] is numeric here (and no log scale after).
+		if st := fd.Get("scale").Get("type"); st.IsTruthy() {
+			switch scaleCategory[propKey(st)] {
 			case "numeric", "discretizing":
 				return "quantitative"
 			case "time":
@@ -596,48 +622,51 @@ func isTemporalFieldDef(cc *compileCtx, def Value) bool {
 		(isFieldDef(cc, def) && def.Get("timeUnit").IsTruthy()))
 }
 
-// valueExpr renders a value (possibly a date or signal) as an expression.
-// undefinedIfExprNotRequired makes plain values answer ok=false.
-func valueExpr(cc *compileCtx, v Value, timeUnit Value, typ string, wrapTime, undefinedIfExprNotRequired bool) (string, bool) {
+// valueExpr renders a value (possibly a date or signal) as an expression:
+// an expression or signal reference's own expr or signal as given (upstream
+// tests it for truth and returns it, so {signal: ["a"]} gives ["a"] and
+// {expr: 0} the value's stringify), a date's expression, or stringify(v);
+// undefined when undefinedIfExprNotRequired and v needs no expression, or
+// when v has no JSON text.
+func valueExpr(cc *compileCtx, v Value, timeUnit Value, typ string, wrapTime, undefinedIfExprNotRequired bool) Value {
 	unit := ""
 	if timeUnit.IsTruthy() {
-		unit = normalizeTimeUnit(cc, timeUnit).Get("unit").AsString()
-		if !normalizeTimeUnit(cc, timeUnit).Get("unit").IsTruthy() {
-			unit = ""
-		}
+		unit = normalizeTimeUnit(cc, timeUnit).Get("unit").StrValue() // a string, or normalizeTimeUnit throws
 	}
 	isTime := unit != "" || typ == "temporal"
-	expr := ""
-	have := false
+	expr := undef
 	switch {
 	case isExprRef(cc, v):
-		expr, have = v.Get("expr").AsString(), true
+		expr = v.Get("expr")
 	case isSignalRef(cc, v):
-		expr, have = v.Get("signal").AsString(), true
+		expr = v.Get("signal")
 	case isDateTime(v):
 		isTime = true
-		expr, have = dateTimeToExpr(cc, v), true
+		expr = jsval.Str(dateTimeToExpr(cc, v))
 	case v.IsStr() || v.IsNum():
 		if isTime {
-			expr, have = "datetime("+stringify(cc, v)+")", true
+			expr = jsval.Str("datetime(" + stringify(cc, v) + ")")
 			if isLocalSingleTimeUnit(cc, unit) {
 				// For a single timeUnit, dateTimeToExpr matches the number/string to the unit.
 				if (v.IsNum() && v.NumValue() < 10000) || (v.IsStr() && dateParseNaN(v.StrValue())) {
-					expr = dateTimeToExpr(cc, mkv(unit, v))
+					expr = jsval.Str(dateTimeToExpr(cc, mkv(unit, v)))
 				}
 			}
 		}
 	}
-	if have && expr != "" {
+	if expr.IsTruthy() {
 		if wrapTime && isTime {
-			return "time(" + expr + ")", true
+			return jsval.Str("time(" + tmpl(expr) + ")")
 		}
-		return expr, true
+		return expr
 	}
 	if undefinedIfExprNotRequired {
-		return "", false
+		return undef
 	}
-	return stringify(cc, v), true
+	if v.IsUndefined() {
+		return undef // stringify(undefined)
+	}
+	return jsval.Str(stringify(cc, v))
 }
 
 // valueArray maps values to signals when they need an expression.
@@ -650,8 +679,8 @@ func valueArray(cc *compileCtx, fod Value, values []Value) []Value {
 		if isFieldDef(cc, fod) && !isBinnedTimeUnit(cc, fod.Get("timeUnit")) {
 			tu = fod.Get("timeUnit")
 		}
-		if e, ok := valueExpr(cc, v, tu, typ, false, true); ok {
-			out[i] = sig(e)
+		if e := valueExpr(cc, v, tu, typ, false, true); !e.IsUndefined() {
+			out[i] = mkv("signal", e)
 		} else {
 			out[i] = v
 		}
@@ -675,7 +704,7 @@ func getBandPosition(cc *compileCtx, fd, fd2 Value, markDef, config Value) Value
 	if isFieldDef(cc, fd) {
 		timeUnit, bin := fd.Get("timeUnit"), fd.Get("bin")
 		if timeUnit.IsTruthy() && !fd2.IsTruthy() {
-			if cc.v5 && isRectBasedMark(cc, markDef.Get("type").AsString()) {
+			if cc.v5 && isRectBasedMark(cc, markDef.Get("type")) {
 				return jsval.Int(0)
 			}
 			return getMarkConfig("timeUnitBandPosition", markDef, config, "")
@@ -687,13 +716,16 @@ func getBandPosition(cc *compileCtx, fd, fd2 Value, markDef, config Value) Value
 }
 
 // getBandSize is upstream's getBandSize: a number, {band}, a signal or undefined.
-func getBandSize(cc *compileCtx, channel string, fd, fd2 Value, markDef, config Value, scaleType string, useVlSizeChannel bool) Value {
+func getBandSize(cc *compileCtx, channel string, fd, fd2 Value, markDef, config Value, scaleType Value, useVlSizeChannel bool) Value {
 	sizeChannel := getSizeChannel(channel)
-	sizeProp := sizeChannel
+	// getMarkPropOrConfig(useVlSizeChannel ? 'size' : sizeChannel, mark,
+	// config, {vgChannel: sizeChannel}): the property is read with the key
+	// "undefined" for a polar channel, whose undefined vgChannel is none.
+	sizeProp := jsKey(sizeChannel)
 	if useVlSizeChannel {
 		sizeProp = "size"
 	}
-	if size := getMarkPropOrConfig(sizeProp, markDef, config, sizeChannel, false); !size.IsUndefined() {
+	if size := getMarkPropOrConfig(cc, sizeProp, markDef, config, sizeChannel, false); !size.IsUndefined() {
 		return size
 	}
 	if isFieldDef(cc, fd) {
@@ -704,10 +736,10 @@ func getBandSize(cc *compileCtx, channel string, fd, fd2 Value, markDef, config 
 			return mkv("band", 1)
 		}
 	}
-	markType := markDef.Get("type").AsString()
+	markType := markDef.Get("type")
 	if isRectBasedMark(cc, markType) {
-		mc := config.Get(markType)
-		if scaleType != "" {
+		mc := config.Get(markType.StrValue()) // a string: isRectBasedMark is strict
+		if scaleType.IsTruthy() {
 			if hasDiscreteDomain(scaleType) {
 				if d := mc.Get("discreteBandSize"); d.IsTruthy() {
 					return d
@@ -753,7 +785,7 @@ func channelCompatibilityWarning(cc *compileCtx, fd Value, channel string) strin
 			return "Channel " + channel + " should not be used with an unsorted discrete field."
 		}
 	case chShape, chStrokeDash:
-		if !isDiscreteDef(cc, fd) && !(isScaleFieldDef(fd) && isContinuousToDiscrete(fd.Get("scale").Get("type").AsString())) {
+		if !isDiscreteDef(cc, fd) && !(isScaleFieldDef(fd) && isContinuousToDiscrete(fd.Get("scale").Get("type"))) {
 			return msgChannelShouldBeDiscreteOrDiscretizing(channel)
 		}
 	case chOrder:

@@ -38,6 +38,30 @@ type rtContext struct {
 
 	exprScope *expr.Scope
 	depth     int
+
+	// fn is vega-runtime's ctx.fn: the accessors, keys and comparators the
+	// parameters of this context's operators built, by their cache key; a
+	// subcontext reads its parents' (Object.create(ctx.fn)).
+	fn map[string]any
+}
+
+// cachedFn is ctx.fn[key] through the context chain.
+func (c *rtContext) cachedFn(key string) (any, bool) {
+	for x := c; x != nil; x = x.parent {
+		if v, ok := x.fn[key]; ok {
+			return v, true
+		}
+	}
+	return nil, false
+}
+
+// cacheFn sets ctx.fn[key] on this context.
+func (c *rtContext) cacheFn(key string, v any) {
+	if c.fn == nil {
+		c.fn = map[string]any{}
+	}
+	c.g.work(1)
+	c.fn[key] = v
 }
 
 func newContext(v *runView) *rtContext {
@@ -255,6 +279,14 @@ func (c *rtContext) parseParameter(p P, b *paramBuilder) any {
 		if v.path == "" {
 			return transforms.Field{}
 		}
+		if v.key != "" {
+			if f, ok := c.cachedFn(v.key); ok {
+				return f
+			}
+			f := c.parseParameter(pField{path: v.path, name: v.name}, b)
+			c.cacheFn(v.key, f)
+			return f
+		}
 		segs, err := jsval.SplitFieldPath(v.path)
 		if err != nil {
 			fail("%s", err.Error())
@@ -266,8 +298,24 @@ func (c *rtContext) parseParameter(p P, b *paramBuilder) any {
 		}
 		return fieldAccessor(v.path, v.name)
 	case pCompare:
+		if v.key != "" {
+			if f, ok := c.cachedFn(v.key); ok {
+				return f
+			}
+			f := c.compareFn(v)
+			c.cacheFn(v.key, f)
+			return f
+		}
 		return c.compareFn(v)
 	case pKey:
+		if v.key != "" {
+			if f, ok := c.cachedFn(v.key); ok {
+				return f
+			}
+			f := c.keyFn(v)
+			c.cacheFn(v.key, f)
+			return f
+		}
 		return c.keyFn(v)
 	case pExpr:
 		for _, d := range v.fn.deps {
@@ -301,6 +349,54 @@ func fieldAccessor(path, name string) transforms.Field {
 	f := transforms.FieldOfStrict(path)
 	if name != "" {
 		f.Name = name
+	}
+	return f
+}
+
+// valueField is vega-util's field(v, as) of a field given as a value of any
+// type, as a signal or an operator hands it to the runtime: a string is the
+// path; any other value is split as splitAccessPath splits it
+// (jsval.SplitAccessPathOf), and the accessor is named after String(v) when
+// the path has other than one segment. codegen is the runtime's accessor
+// code generation (vega-runtime builds parameters', keys' and comparators'
+// accessors as `return _[...]`), which refuses a path of no segment; the
+// plain getter (a Field operator's) reads the value itself then. null and
+// undefined have no length, which splitAccessPath reads.
+func valueField(w jsval.Walker, v jsval.Value, as string, codegen bool) transforms.Field {
+	if s, ok := v.Strict(); ok {
+		segs, err := jsval.SplitFieldPath(s)
+		if err != nil {
+			fail("%s", err.Error())
+		}
+		if len(segs) == 0 && codegen {
+			fail("Unexpected token ']'")
+		}
+		return fieldAccessor(s, as)
+	}
+	if v.IsNullish() {
+		fail("TypeError: Cannot read properties of %s (reading 'length')", nullishName(v))
+	}
+	text := w.String(v)
+	segs, err := jsval.SplitAccessPathOf(v, text)
+	if err != nil {
+		fail("%s", err.Error())
+	}
+	name := as
+	if name == "" && len(segs) != 1 {
+		name = text
+	}
+	if len(segs) == 0 {
+		if codegen {
+			fail("Unexpected token ']'")
+		}
+		f := transforms.NamedField(name, []string{name}, func(t jsval.Value) jsval.Value { return t })
+		f.Identity = true
+		f.RawName, f.HasRawName = v, as == ""
+		return f
+	}
+	f := fieldAccessor(jsval.FieldPathText(segs), name)
+	if as == "" && len(segs) != 1 {
+		f.RawName, f.HasRawName = v, true // `path.length === 1 ? path[0] : field`
 	}
 	return f
 }
@@ -339,7 +435,34 @@ func (c *rtContext) Signal(name string) (jsval.Value, bool) {
 	if n == nil {
 		return jsval.Undefined, false
 	}
-	return toValue(n.value), true
+	return c.view.exprValue(n.value), true
+}
+
+// exprValue is an operator's value as an expression reads it, a transform's
+// through its `signal`: shared where upstream shares it (a value, a collect's
+// tuple list, which upstream's signal holds by reference), and a list of
+// values copied into an array charged as the evaluator charges its own.
+func (v *runView) exprValue(x any) jsval.Value {
+	switch x := x.(type) {
+	case jsval.Value:
+		return x
+	case []jsval.Value:
+		return jsval.Arr(x)
+	case interface{ exprValue() jsval.Value }:
+		// an operator value an expression reads as an object of its own
+		// (a crossfilter's bitmaps)
+		return x.exprValue()
+	case []any:
+		v.chargeItems(len(x))
+		out := make([]jsval.Value, len(x))
+		for i, e := range x {
+			// an element is a value, or a parameter's list as the
+			// specification wrote it (toValue)
+			out[i] = toValue(e)
+		}
+		return jsval.Arr(out)
+	}
+	return jsval.Undefined
 }
 
 // toValue views an operator value as a jsval.Value when it is one.
@@ -373,6 +496,7 @@ func (c *rtContext) Data(name string) (jsval.Value, bool) {
 	case []jsval.Value:
 		return jsval.Arr(v), true
 	case []*scene.Item:
+		c.view.chargeItems(len(v))
 		return jsval.Arr(c.view.itemTuples(v)), true
 	}
 	return jsval.Arr(nil), true
@@ -401,8 +525,14 @@ func (c *rtContext) InData(name, field string, value jsval.Value) (int, bool) {
 	return clampInt(jsval.ToNumber(cnt)), true
 }
 
-// IsTuple implements expr.TupleChecker.
-func (c *rtContext) IsTuple(v jsval.Value) bool { return v.IsObj() }
+// IsTuple implements expr.TupleChecker: vega-dataflow's isTuple, a value
+// that has a tuple id. A data tuple has one once ingested, and a scenegraph
+// item is a tuple upstream; an object an expression or a specification made
+// is not one, nor is a function.
+func (c *rtContext) IsTuple(v jsval.Value) bool {
+	o := jsval.Tuple(v)
+	return o != nil && (o.TupleID() != 0 || c.view.itemOf(v) != nil)
+}
 
 // Log implements expr.Logger: warn() is a warning, as upstream's logs it
 // with the view's logger ("EXPRESSION" and the arguments). info() and debug()
@@ -508,6 +638,17 @@ func (b *boundExpr) accessor() transforms.Field {
 // parseExpression compiles an expression and resolves its dependencies against
 // the scope, as vega-functions' parseExpression does. Unknown signal names are
 // an error, as upstream.
+// parseExpressionValue is vega-functions' parseExpression(expr) of a
+// specification value: a string is the source, any other value its
+// stringValue (an array or object as a literal of it, null as "null",
+// undefined as "undefined").
+func (s *Scope) parseExpressionValue(v jsval.Value) *exprFn {
+	if v.IsStr() {
+		return s.parseExpression(v.StrValue())
+	}
+	return s.parseExpression(specStringValue(v).String())
+}
+
 func (s *Scope) parseExpression(code string) *exprFn {
 	// The compile, a hit's hash and the walks below are linear in the
 	// source, which expr.MaxLength bounds: a compile costs microseconds,
@@ -545,10 +686,21 @@ func (s *Scope) parseExpression(code string) *exprFn {
 			}
 		}
 	}
+	// '@' + field names one parameter whatever the data set: the last
+	// indata() of a field wins it (expr.Deps lists them in order of last
+	// use), so the expression is re-evaluated when that data set's index
+	// changes, not another's.
+	idx := map[string]int{}
 	for _, ix := range d.Indexes {
 		ds := s.getData(ix.Data)
 		if e, ok := ds.indataRef(s, jsval.Str(ix.Field)).(*entry); ok {
-			add("@"+ix.Field, e)
+			name := "@" + ix.Field
+			if i, seen := idx[name]; seen {
+				f.deps[i].e = e
+				continue
+			}
+			idx[name] = len(f.deps)
+			add(name, e)
 		}
 	}
 	addScale := func(name string) {

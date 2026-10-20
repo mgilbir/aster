@@ -63,7 +63,7 @@ func twoColourPNG(t *testing.T, side int) []byte {
 func TestImageDecodePolls(t *testing.T) {
 	const side = 2048
 	data := twoColourPNG(t, side)
-	lim := Limits{}.withDefaults()
+	lim := Limits{}.WithDefaults()
 	dec := &pollCtx{Context: context.Background()}
 	if _, err := imageref.Decode(dec, data, lim.imageLimits()); err != nil {
 		t.Fatal(err)
@@ -147,7 +147,7 @@ func TestCompressPolled(t *testing.T) {
 func TestGlyphBitmapsPoll(t *testing.T) {
 	const side = 1024
 	data := twoColourPNG(t, side)
-	lim := Limits{}.withDefaults()
+	lim := Limits{}.WithDefaults()
 	dec := &pollCtx{Context: context.Background()}
 	if _, err := imageref.Decode(dec, data, lim.imageLimits()); err != nil {
 		t.Fatal(err)

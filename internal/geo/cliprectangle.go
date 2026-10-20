@@ -115,7 +115,7 @@ func (r *rectClip) stream(sink Stream) Stream {
 	return s
 }
 
-func (s *rectStream) Sphere() {}
+func (s *rectStream) Sphere() { sphereUnsupported() }
 
 func (s *rectStream) Point(x, y float64) {
 	if s.inLine {

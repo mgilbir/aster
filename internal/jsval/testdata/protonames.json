@@ -1,0 +1,707 @@
+{
+ "object": {
+  "__defineGetter__": {
+   "name": "__defineGetter__",
+   "length": 2
+  },
+  "__defineSetter__": {
+   "name": "__defineSetter__",
+   "length": 2
+  },
+  "__lookupGetter__": {
+   "name": "__lookupGetter__",
+   "length": 1
+  },
+  "__lookupSetter__": {
+   "name": "__lookupSetter__",
+   "length": 1
+  },
+  "__proto__": null,
+  "constructor": {
+   "name": "Object",
+   "length": 1
+  },
+  "hasOwnProperty": {
+   "name": "hasOwnProperty",
+   "length": 1
+  },
+  "isPrototypeOf": {
+   "name": "isPrototypeOf",
+   "length": 1
+  },
+  "propertyIsEnumerable": {
+   "name": "propertyIsEnumerable",
+   "length": 1
+  },
+  "toLocaleString": {
+   "name": "toLocaleString",
+   "length": 0
+  },
+  "toString": {
+   "name": "toString",
+   "length": 0
+  },
+  "valueOf": {
+   "name": "valueOf",
+   "length": 0
+  }
+ },
+ "array": {
+  "at": {
+   "name": "at",
+   "length": 1
+  },
+  "concat": {
+   "name": "concat",
+   "length": 1
+  },
+  "constructor": {
+   "name": "Array",
+   "length": 1
+  },
+  "copyWithin": {
+   "name": "copyWithin",
+   "length": 2
+  },
+  "entries": {
+   "name": "entries",
+   "length": 0
+  },
+  "every": {
+   "name": "every",
+   "length": 1
+  },
+  "fill": {
+   "name": "fill",
+   "length": 1
+  },
+  "filter": {
+   "name": "filter",
+   "length": 1
+  },
+  "find": {
+   "name": "find",
+   "length": 1
+  },
+  "findIndex": {
+   "name": "findIndex",
+   "length": 1
+  },
+  "findLast": {
+   "name": "findLast",
+   "length": 1
+  },
+  "findLastIndex": {
+   "name": "findLastIndex",
+   "length": 1
+  },
+  "flat": {
+   "name": "flat",
+   "length": 0
+  },
+  "flatMap": {
+   "name": "flatMap",
+   "length": 1
+  },
+  "forEach": {
+   "name": "forEach",
+   "length": 1
+  },
+  "includes": {
+   "name": "includes",
+   "length": 1
+  },
+  "indexOf": {
+   "name": "indexOf",
+   "length": 1
+  },
+  "join": {
+   "name": "join",
+   "length": 1
+  },
+  "keys": {
+   "name": "keys",
+   "length": 0
+  },
+  "lastIndexOf": {
+   "name": "lastIndexOf",
+   "length": 1
+  },
+  "length": null,
+  "map": {
+   "name": "map",
+   "length": 1
+  },
+  "pop": {
+   "name": "pop",
+   "length": 0
+  },
+  "push": {
+   "name": "push",
+   "length": 1
+  },
+  "reduce": {
+   "name": "reduce",
+   "length": 1
+  },
+  "reduceRight": {
+   "name": "reduceRight",
+   "length": 1
+  },
+  "reverse": {
+   "name": "reverse",
+   "length": 0
+  },
+  "shift": {
+   "name": "shift",
+   "length": 0
+  },
+  "slice": {
+   "name": "slice",
+   "length": 2
+  },
+  "some": {
+   "name": "some",
+   "length": 1
+  },
+  "sort": {
+   "name": "sort",
+   "length": 1
+  },
+  "splice": {
+   "name": "splice",
+   "length": 2
+  },
+  "toLocaleString": {
+   "name": "toLocaleString",
+   "length": 0
+  },
+  "toReversed": {
+   "name": "toReversed",
+   "length": 0
+  },
+  "toSorted": {
+   "name": "toSorted",
+   "length": 1
+  },
+  "toSpliced": {
+   "name": "toSpliced",
+   "length": 2
+  },
+  "toString": {
+   "name": "toString",
+   "length": 0
+  },
+  "unshift": {
+   "name": "unshift",
+   "length": 1
+  },
+  "values": {
+   "name": "values",
+   "length": 0
+  },
+  "with": {
+   "name": "with",
+   "length": 2
+  }
+ },
+ "string": {
+  "anchor": {
+   "name": "anchor",
+   "length": 1
+  },
+  "at": {
+   "name": "at",
+   "length": 1
+  },
+  "big": {
+   "name": "big",
+   "length": 0
+  },
+  "blink": {
+   "name": "blink",
+   "length": 0
+  },
+  "bold": {
+   "name": "bold",
+   "length": 0
+  },
+  "charAt": {
+   "name": "charAt",
+   "length": 1
+  },
+  "charCodeAt": {
+   "name": "charCodeAt",
+   "length": 1
+  },
+  "codePointAt": {
+   "name": "codePointAt",
+   "length": 1
+  },
+  "concat": {
+   "name": "concat",
+   "length": 1
+  },
+  "constructor": {
+   "name": "String",
+   "length": 1
+  },
+  "endsWith": {
+   "name": "endsWith",
+   "length": 1
+  },
+  "fixed": {
+   "name": "fixed",
+   "length": 0
+  },
+  "fontcolor": {
+   "name": "fontcolor",
+   "length": 1
+  },
+  "fontsize": {
+   "name": "fontsize",
+   "length": 1
+  },
+  "includes": {
+   "name": "includes",
+   "length": 1
+  },
+  "indexOf": {
+   "name": "indexOf",
+   "length": 1
+  },
+  "isWellFormed": {
+   "name": "isWellFormed",
+   "length": 0
+  },
+  "italics": {
+   "name": "italics",
+   "length": 0
+  },
+  "lastIndexOf": {
+   "name": "lastIndexOf",
+   "length": 1
+  },
+  "length": null,
+  "link": {
+   "name": "link",
+   "length": 1
+  },
+  "localeCompare": {
+   "name": "localeCompare",
+   "length": 1
+  },
+  "match": {
+   "name": "match",
+   "length": 1
+  },
+  "matchAll": {
+   "name": "matchAll",
+   "length": 1
+  },
+  "normalize": {
+   "name": "normalize",
+   "length": 0
+  },
+  "padEnd": {
+   "name": "padEnd",
+   "length": 1
+  },
+  "padStart": {
+   "name": "padStart",
+   "length": 1
+  },
+  "repeat": {
+   "name": "repeat",
+   "length": 1
+  },
+  "replace": {
+   "name": "replace",
+   "length": 2
+  },
+  "replaceAll": {
+   "name": "replaceAll",
+   "length": 2
+  },
+  "search": {
+   "name": "search",
+   "length": 1
+  },
+  "slice": {
+   "name": "slice",
+   "length": 2
+  },
+  "small": {
+   "name": "small",
+   "length": 0
+  },
+  "split": {
+   "name": "split",
+   "length": 2
+  },
+  "startsWith": {
+   "name": "startsWith",
+   "length": 1
+  },
+  "strike": {
+   "name": "strike",
+   "length": 0
+  },
+  "sub": {
+   "name": "sub",
+   "length": 0
+  },
+  "substr": {
+   "name": "substr",
+   "length": 2
+  },
+  "substring": {
+   "name": "substring",
+   "length": 2
+  },
+  "sup": {
+   "name": "sup",
+   "length": 0
+  },
+  "toLocaleLowerCase": {
+   "name": "toLocaleLowerCase",
+   "length": 0
+  },
+  "toLocaleUpperCase": {
+   "name": "toLocaleUpperCase",
+   "length": 0
+  },
+  "toLowerCase": {
+   "name": "toLowerCase",
+   "length": 0
+  },
+  "toString": {
+   "name": "toString",
+   "length": 0
+  },
+  "toUpperCase": {
+   "name": "toUpperCase",
+   "length": 0
+  },
+  "toWellFormed": {
+   "name": "toWellFormed",
+   "length": 0
+  },
+  "trim": {
+   "name": "trim",
+   "length": 0
+  },
+  "trimEnd": {
+   "name": "trimEnd",
+   "length": 0
+  },
+  "trimLeft": {
+   "name": "trimStart",
+   "length": 0
+  },
+  "trimRight": {
+   "name": "trimEnd",
+   "length": 0
+  },
+  "trimStart": {
+   "name": "trimStart",
+   "length": 0
+  },
+  "valueOf": {
+   "name": "valueOf",
+   "length": 0
+  }
+ },
+ "number": {
+  "constructor": {
+   "name": "Number",
+   "length": 1
+  },
+  "toExponential": {
+   "name": "toExponential",
+   "length": 1
+  },
+  "toFixed": {
+   "name": "toFixed",
+   "length": 1
+  },
+  "toLocaleString": {
+   "name": "toLocaleString",
+   "length": 0
+  },
+  "toPrecision": {
+   "name": "toPrecision",
+   "length": 1
+  },
+  "toString": {
+   "name": "toString",
+   "length": 1
+  },
+  "valueOf": {
+   "name": "valueOf",
+   "length": 0
+  }
+ },
+ "boolean": {
+  "constructor": {
+   "name": "Boolean",
+   "length": 1
+  },
+  "toString": {
+   "name": "toString",
+   "length": 0
+  },
+  "valueOf": {
+   "name": "valueOf",
+   "length": 0
+  }
+ },
+ "function": {
+  "apply": {
+   "name": "apply",
+   "length": 2
+  },
+  "arguments": null,
+  "bind": {
+   "name": "bind",
+   "length": 1
+  },
+  "call": {
+   "name": "call",
+   "length": 1
+  },
+  "caller": null,
+  "constructor": {
+   "name": "Function",
+   "length": 1
+  },
+  "length": null,
+  "name": null,
+  "toString": {
+   "name": "toString",
+   "length": 0
+  }
+ },
+ "regexp": {
+  "compile": {
+   "name": "compile",
+   "length": 2
+  },
+  "constructor": {
+   "name": "RegExp",
+   "length": 2
+  },
+  "dotAll": null,
+  "exec": {
+   "name": "exec",
+   "length": 1
+  },
+  "flags": null,
+  "global": null,
+  "hasIndices": null,
+  "ignoreCase": null,
+  "multiline": null,
+  "source": null,
+  "sticky": null,
+  "test": {
+   "name": "test",
+   "length": 1
+  },
+  "toString": {
+   "name": "toString",
+   "length": 0
+  },
+  "unicode": null,
+  "unicodeSets": null
+ },
+ "date": {
+  "constructor": {
+   "name": "Date",
+   "length": 7
+  },
+  "getDate": {
+   "name": "getDate",
+   "length": 0
+  },
+  "getDay": {
+   "name": "getDay",
+   "length": 0
+  },
+  "getFullYear": {
+   "name": "getFullYear",
+   "length": 0
+  },
+  "getHours": {
+   "name": "getHours",
+   "length": 0
+  },
+  "getMilliseconds": {
+   "name": "getMilliseconds",
+   "length": 0
+  },
+  "getMinutes": {
+   "name": "getMinutes",
+   "length": 0
+  },
+  "getMonth": {
+   "name": "getMonth",
+   "length": 0
+  },
+  "getSeconds": {
+   "name": "getSeconds",
+   "length": 0
+  },
+  "getTime": {
+   "name": "getTime",
+   "length": 0
+  },
+  "getTimezoneOffset": {
+   "name": "getTimezoneOffset",
+   "length": 0
+  },
+  "getUTCDate": {
+   "name": "getUTCDate",
+   "length": 0
+  },
+  "getUTCDay": {
+   "name": "getUTCDay",
+   "length": 0
+  },
+  "getUTCFullYear": {
+   "name": "getUTCFullYear",
+   "length": 0
+  },
+  "getUTCHours": {
+   "name": "getUTCHours",
+   "length": 0
+  },
+  "getUTCMilliseconds": {
+   "name": "getUTCMilliseconds",
+   "length": 0
+  },
+  "getUTCMinutes": {
+   "name": "getUTCMinutes",
+   "length": 0
+  },
+  "getUTCMonth": {
+   "name": "getUTCMonth",
+   "length": 0
+  },
+  "getUTCSeconds": {
+   "name": "getUTCSeconds",
+   "length": 0
+  },
+  "getYear": {
+   "name": "getYear",
+   "length": 0
+  },
+  "setDate": {
+   "name": "setDate",
+   "length": 1
+  },
+  "setFullYear": {
+   "name": "setFullYear",
+   "length": 3
+  },
+  "setHours": {
+   "name": "setHours",
+   "length": 4
+  },
+  "setMilliseconds": {
+   "name": "setMilliseconds",
+   "length": 1
+  },
+  "setMinutes": {
+   "name": "setMinutes",
+   "length": 3
+  },
+  "setMonth": {
+   "name": "setMonth",
+   "length": 2
+  },
+  "setSeconds": {
+   "name": "setSeconds",
+   "length": 2
+  },
+  "setTime": {
+   "name": "setTime",
+   "length": 1
+  },
+  "setUTCDate": {
+   "name": "setUTCDate",
+   "length": 1
+  },
+  "setUTCFullYear": {
+   "name": "setUTCFullYear",
+   "length": 3
+  },
+  "setUTCHours": {
+   "name": "setUTCHours",
+   "length": 4
+  },
+  "setUTCMilliseconds": {
+   "name": "setUTCMilliseconds",
+   "length": 1
+  },
+  "setUTCMinutes": {
+   "name": "setUTCMinutes",
+   "length": 3
+  },
+  "setUTCMonth": {
+   "name": "setUTCMonth",
+   "length": 2
+  },
+  "setUTCSeconds": {
+   "name": "setUTCSeconds",
+   "length": 2
+  },
+  "setYear": {
+   "name": "setYear",
+   "length": 1
+  },
+  "toDateString": {
+   "name": "toDateString",
+   "length": 0
+  },
+  "toGMTString": {
+   "name": "toUTCString",
+   "length": 0
+  },
+  "toISOString": {
+   "name": "toISOString",
+   "length": 0
+  },
+  "toJSON": {
+   "name": "toJSON",
+   "length": 1
+  },
+  "toLocaleDateString": {
+   "name": "toLocaleDateString",
+   "length": 0
+  },
+  "toLocaleString": {
+   "name": "toLocaleString",
+   "length": 0
+  },
+  "toLocaleTimeString": {
+   "name": "toLocaleTimeString",
+   "length": 0
+  },
+  "toString": {
+   "name": "toString",
+   "length": 0
+  },
+  "toTimeString": {
+   "name": "toTimeString",
+   "length": 0
+  },
+  "toUTCString": {
+   "name": "toUTCString",
+   "length": 0
+  },
+  "valueOf": {
+   "name": "valueOf",
+   "length": 0
+  }
+ }
+}

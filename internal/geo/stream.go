@@ -1,6 +1,10 @@
 package geo
 
-import "github.com/mgilbir/aster/internal/jsval"
+import (
+	"strconv"
+
+	"github.com/mgilbir/aster/internal/jsval"
+)
 
 // Stream is d3-geo's stream protocol: geometry is delivered as a sequence of
 // points bracketed by line and polygon markers. A polygon is a PolygonStart,
@@ -29,70 +33,115 @@ type pointMStream interface {
 const maxGeometryDepth = 256
 
 // StreamObject streams a GeoJSON object (Feature, FeatureCollection, a bare
-// geometry, or {type: "Sphere"}) into s, as d3.geoStream does. Anything else is
-// silently ignored, as upstream does, and so is malformed structure (missing
-// coordinates, non-array collections) where upstream would throw.
+// geometry, or {type: "Sphere"}) into s, as d3.geoStream does, with its
+// JavaScript semantics for an object of any shape: an object whose type
+// names no geometry is ignored, a position is read as `p[0], p[1]` of
+// whatever value it is (a string's characters, an object's members: NaN
+// unless they convert to numbers), a list's length bounds its loop, and a
+// member read of null or undefined throws the TypeError it throws upstream,
+// raised as a *jsval.Thrown panic, which the dataflow, an expression and a
+// render recover as upstream's exception.
 func StreamObject(object jsval.Value, s Stream) {
-	if !object.IsObj() {
-		return
-	}
-	switch typeOf(object) {
-	case "Feature":
-		streamGeometry(object.Get("geometry"), s, 0)
-	case "FeatureCollection":
-		for _, f := range object.Get("features").Items() {
-			streamGeometry(f.Get("geometry"), s, 0)
+	if object.IsTruthy() {
+		switch typeOf(streamMember(object, "type")) {
+		case "Feature":
+			streamGeometry(streamMember(object, "geometry"), s, 0)
+			return
+		case "FeatureCollection":
+			features := streamMember(object, "features")
+			n := streamLength(features)
+			for i := 0; float64(i) < n; i++ {
+				f := streamAt(features, i)
+				streamGeometry(streamMember(f, "geometry"), s, 0)
+			}
+			return
 		}
-	default:
-		streamGeometry(object, s, 0)
 	}
+	streamGeometry(object, s, 0)
 }
 
-func typeOf(v jsval.Value) string {
-	t := v.Get("type")
+// streamMember is `v[key]`, with the TypeError of null or undefined.
+func streamMember(v jsval.Value, key string) jsval.Value {
+	if v.IsNullish() {
+		of := "undefined"
+		if v.IsNull() {
+			of = "null"
+		}
+		panic(&jsval.Thrown{Name: "TypeError", Msg: "Cannot read properties of " + of + " (reading '" + key + "')"})
+	}
+	return jsval.Member(v, key)
+}
+
+// streamAt is `v[i]`: an array's element without making its key, the
+// common case, else streamMember.
+func streamAt(v jsval.Value, i int) jsval.Value {
+	if v.IsArr() {
+		return v.Index(i)
+	}
+	return streamMember(v, strconv.Itoa(i))
+}
+
+// streamLength is `v.length` as a loop bound (`++i < n`).
+func streamLength(v jsval.Value) float64 {
+	if v.IsArr() {
+		return float64(v.Len())
+	}
+	return jsval.ToNumber(streamMember(v, "length"))
+}
+
+// typeOf is the key `streamGeometryType.hasOwnProperty(type)` looks up: the
+// type's property key, "" for undefined (which names no geometry).
+func typeOf(t jsval.Value) string {
 	if t.IsStr() {
 		return t.StrValue()
 	}
 	if t.IsUndefined() {
 		return ""
 	}
-	// streamGeometryType.hasOwnProperty(type): the property key, and no
-	// geometry type is longer than 32 bytes.
+	// No geometry type is longer than 32 bytes.
 	key, _ := t.PropertyKey(32)
 	return key
 }
 
 func streamGeometry(g jsval.Value, s Stream, depth int) {
-	if !g.IsObj() {
+	if !g.IsTruthy() {
 		return
 	}
-	switch typeOf(g) {
+	switch typeOf(streamMember(g, "type")) {
 	case "Sphere":
 		s.Sphere()
 	case "Point":
-		streamPoint(g.Get("coordinates"), s)
+		streamPoint(streamMember(g, "coordinates"), s)
 	case "MultiPoint":
-		for _, c := range g.Get("coordinates").Items() {
-			streamPoint(c, s)
+		coords := streamMember(g, "coordinates")
+		n := streamLength(coords)
+		for i := 0; float64(i) < n; i++ {
+			streamPoint(streamAt(coords, i), s)
 		}
 	case "LineString":
-		streamLine(g.Get("coordinates"), s, 0)
+		streamLine(streamMember(g, "coordinates"), s, 0)
 	case "MultiLineString":
-		for _, l := range g.Get("coordinates").Items() {
-			streamLine(l, s, 0)
+		coords := streamMember(g, "coordinates")
+		n := streamLength(coords)
+		for i := 0; float64(i) < n; i++ {
+			streamLine(streamAt(coords, i), s, 0)
 		}
 	case "Polygon":
-		streamPolygon(g.Get("coordinates"), s)
+		streamPolygon(streamMember(g, "coordinates"), s)
 	case "MultiPolygon":
-		for _, p := range g.Get("coordinates").Items() {
-			streamPolygon(p, s)
+		coords := streamMember(g, "coordinates")
+		n := streamLength(coords)
+		for i := 0; float64(i) < n; i++ {
+			streamPolygon(streamAt(coords, i), s)
 		}
 	case "GeometryCollection":
+		geoms := streamMember(g, "geometries")
+		n := streamLength(geoms)
 		if depth >= maxGeometryDepth {
 			return
 		}
-		for _, sub := range g.Get("geometries").Items() {
-			streamGeometry(sub, s, depth+1)
+		for i := 0; float64(i) < n; i++ {
+			streamGeometry(streamAt(geoms, i), s, depth+1)
 		}
 	}
 }
@@ -106,37 +155,50 @@ func coord(v jsval.Value) float64 {
 	return jsval.ToNumber(v)
 }
 
+// streamPoint is `stream.point(c[0], c[1], c[2])`: the coordinates read as
+// members of any value (NaN where they are no numbers), the TypeError of
+// null or undefined.
 func streamPoint(c jsval.Value, s Stream) {
-	if !c.IsArr() {
+	if items := c.Items(); c.IsArr() {
+		var x, y float64
+		switch {
+		case len(items) >= 2:
+			x, y = coord(items[0]), coord(items[1])
+		case len(items) == 1:
+			x, y = coord(items[0]), nan
+		default:
+			x, y = nan, nan
+		}
+		s.Point(x, y)
 		return
 	}
-	items := c.Items()
-	var x, y float64
-	switch {
-	case len(items) >= 2:
-		x, y = coord(items[0]), coord(items[1])
-	case len(items) == 1:
-		x, y = coord(items[0]), nan
-	default:
-		x, y = nan, nan
-	}
-	s.Point(x, y)
+	s.Point(coord(streamMember(c, "0")), coord(streamMember(c, "1")))
 }
 
+// streamLine is streamLine(coordinates, stream, closed): `n =
+// coordinates.length - closed` points, each `coordinates[i]`.
 func streamLine(coords jsval.Value, s Stream, closed int) {
-	items := coords.Items()
-	n := len(items) - closed
+	n := streamLength(coords) - float64(closed)
 	s.LineStart()
-	for i := 0; i < n; i++ {
-		streamPoint(items[i], s)
+	for i := 0; float64(i) < n; i++ {
+		streamPoint(streamAt(coords, i), s)
 	}
 	s.LineEnd()
 }
 
 func streamPolygon(coords jsval.Value, s Stream) {
+	n := streamLength(coords)
 	s.PolygonStart()
-	for _, ring := range coords.Items() {
-		streamLine(ring, s, 1)
+	for i := 0; float64(i) < n; i++ {
+		streamLine(streamAt(coords, i), s, 1)
 	}
 	s.PolygonEnd()
+}
+
+// sphereUnsupported is the Sphere of a stage d3-geo gives no sphere method:
+// the planar path sinks and the rectangle clip. A projection's clipping turns
+// a sphere into a polygon before them; without one (geoIdentity), upstream's
+// stream.sphere() is a TypeError.
+func sphereUnsupported() {
+	panic(&jsval.Thrown{Name: "TypeError", Msg: "this.stream.sphere is not a function"})
 }

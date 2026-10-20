@@ -3,7 +3,7 @@
 // as ranges of UTF-16 code units. TestIdentifierCharacters checks the tables
 // against what upstream's parser accepts.
 //
-//   NODE_PATH=testdata/oracle-node/node_modules node internal/expr/testdata/gen_idtables.mjs > internal/expr/idtables.go && gofmt -w internal/expr/idtables.go
+//   go run ./internal/cmd/vectors -write -run idtables   (the output is gofmt-clean as written)
 import path from 'node:path';
 import fs from 'node:fs';
 const src = fs.readFileSync(path.resolve(process.env.NODE_PATH, 'vega-expression/src/parser.js'), 'utf8');

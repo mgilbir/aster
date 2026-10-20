@@ -1,6 +1,7 @@
 package vegalite
 
 import (
+	"math"
 	"strconv"
 	"strings"
 
@@ -25,7 +26,9 @@ type normParams struct {
 	parentProjection Value
 	repeater         Value
 	repeaterPrefix   string
-	path             []string
+	// path is the names of the specs above, as given (concat spreads an
+	// array name; an unnamed unit adds undefined).
+	path []Value
 
 	emptySelections     map[string]bool
 	selectionPredicates map[string][]*Object
@@ -39,16 +42,21 @@ func (p *normParams) clone() *normParams {
 }
 
 func (p *normParams) deeper() *normParams {
-	cc := p.cc
-	// Every view the normalizer maps goes one level deeper: the step charged
-	// for it bounds the normalization of a spec with many views.
-	cc.work(modelStep)
+	p.checkDeeper()
 	c := *p
 	c.depth++
-	if c.depth > maxDepth {
+	return &c
+}
+
+// checkDeeper charges the step of mapping a view one level below p and
+// refuses it past maxDepth, without making the deeper parameters.
+func (p *normParams) checkDeeper() {
+	// Every view the normalizer maps goes one level deeper: the step charged
+	// for it bounds the normalization of a spec with many views.
+	p.cc.work(modelStep)
+	if p.depth+1 > maxDepth {
 		exceeded(depthMsg)
 	}
-	return &c
 }
 
 // mapperImpl is the virtual interface of upstream's SpecMapper.
@@ -139,8 +147,9 @@ func normalize(cc *compileCtx, spec Value, config Value) Value {
 	// repeats of 30 fields are 810,000 views from a 1 KB specification (C15).
 	// The views the specification describes are counted before any is built,
 	// against one budget for the whole compilation.
-	if n, limit := countViews(cc, spec, 0), cc.maxViews; n > float64(limit) {
-		exceeded("specification would create %s views (limit %d)", jsval.JSNumberString(n), limit)
+	if n, limit := countViews(cc, spec, cc.configBytes), cc.maxViews; n > float64(limit) {
+		exceeded("specification would create views weighing %s (limit %d views; a view weighs one, plus one per selection it receives and per %d bytes of specification and config it compiles)",
+			jsval.JSNumberString(math.Ceil(n)), limit, viewWeightBytes)
 	}
 	p := &normParams{cc: cc, config: config, sel: &selectionState{}}
 	compat := newSelectionCompatNormalizer()
@@ -169,7 +178,7 @@ func normalizeAutoSize(cc *compileCtx, spec Value, sizeInfo Value, config Value)
 	isFitCompatible := isUnitSpec(cc, spec) || isLayerSpec(cc, spec)
 	autosizeDefault := jsval.NewObject(2)
 	// width == 'container' (loose: an array prints as its items joined).
-	isContainer := func(v Value) bool { return (v.IsStr() || v.IsArr()) && v.AsString() == "container" }
+	isContainer := func(v Value) bool { return looseEq(v, "container") }
 	if !isFitCompatible {
 		// A container width/height is discarded for specs that cannot fit.
 		if isContainer(width) {
@@ -204,13 +213,15 @@ func normalizeAutoSize(cc *compileCtx, spec Value, sizeInfo Value, config Value)
 		cc.warn(msgFitNonSingle)
 		autosize.Set("type", jsval.Str("pad"))
 	}
-	if isContainer(width) && !(typeIs("fit") || typeIs("fit-x")) {
+	// autosize.type == 'fit' (loose, as upstream writes it here).
+	typeLoose := func(t string) bool { return looseEq(autosize.Lookup("type"), t) }
+	if isContainer(width) && !(typeLoose("fit") || typeLoose("fit-x")) {
 		cc.warn(msgContainerSizeNotCompatibleWithAutosize("width"))
 	}
-	if isContainer(height) && !(typeIs("fit") || typeIs("fit-y")) {
+	if isContainer(height) && !(typeLoose("fit") || typeLoose("fit-y")) {
 		cc.warn(msgContainerSizeNotCompatibleWithAutosize("height"))
 	}
-	if deepEqual(jsval.Obj(autosize), mkv("type", "pad")) {
+	if deepEqual(cc, jsval.Obj(autosize), mkv("type", "pad")) {
 		return undef
 	}
 	return jsval.Obj(autosize)
@@ -242,6 +253,8 @@ func (n *selectionCompatNormalizer) mapLayerOrUnit(spec Value, p *normParams) Va
 	spec = normalizeTransforms(spec, p)
 	if enc := spec.Get("encoding"); enc.IsTruthy() {
 		// entries(spec.encoding): a string's entries are its characters.
+		// encoding[channel] = ...: an assignment, so a channel named
+		// "__proto__" sets the new object's prototype and is no key of it.
 		out := jsval.NewObject(enc.Len())
 		if enc.IsStr() {
 			for i, u := range utf16Len(enc.StrValue()) {
@@ -251,7 +264,7 @@ func (n *selectionCompatNormalizer) mapLayerOrUnit(spec Value, p *normParams) Va
 		}
 		for _, ch := range keysOf(enc) {
 			cc.work(1)
-			out.Set(ch, normalizeChannelDefCompat(jsIndexOrGet(enc, ch), p))
+			jsAssign(cc.realm(), out, ch, normalizeChannelDefCompat(jsIndexOrGet(enc, ch), p))
 		}
 		o := cloneObj(spec.ObjValue())
 		o.Set("encoding", jsval.Obj(out))
@@ -342,10 +355,13 @@ func normalizeChannelDefCompat(obj Value, p *normParams) Value {
 	if cc.v5 && obj.IsTruthy() {
 		jsIn(obj, "scale") // 5.8's isScaleFieldDef: a TypeError on a primitive
 	}
-	if !obj.IsObj() {
-		return obj
-	}
+	// const enc = duplicate(obj), whatever obj is: an array of channel
+	// definitions (a tooltip list) is copied too, and 5.8's copy leaves out
+	// the keys Object.prototype holds (skipsInClone58).
 	enc := duplicate(cc, obj)
+	if !enc.IsObj() {
+		return enc
+	}
 	eo := enc.ObjValue()
 	if isFieldDef(cc, enc) && isObject(enc.Get("bin")) {
 		eo.Set("bin", normalizeBinExtent(enc.Get("bin")))
@@ -360,7 +376,7 @@ func normalizeChannelDefCompat(obj Value, p *normParams) Value {
 		}
 		enc.Get("scale").ObjValue().Set("domain", jsval.Obj(d))
 	}
-	if isConditionalDef(enc) {
+	if isConditionalDef(cc, enc) {
 		cond := enc.Get("condition")
 		if cond.IsArr() {
 			eo.Set("condition", mapVals(cc, cond, func(c Value) Value {
@@ -408,7 +424,14 @@ func normalizeBinExtent(bin Value) Value {
 func normalizePredicateCompat(op Value, p *normParams) Value {
 	normSel := func(o Value) Value {
 		return normalizeLogicalComposition(p.cc, o, func(param Value) Value {
-			name := param.AsString()
+			name := propKey(param)
+			// selectionPredicates is a plain object: for a name every
+			// object inherits, selectionPredicates[param] ??= [] keeps the
+			// inherited member, and its push is no function (C81 of the
+			// 2026-10-18 audit).
+			if isInheritedKey(name) {
+				throw("normParams.selectionPredicates[param].push is not a function")
+			}
 			empty, ok := p.emptySelections[name]
 			if !ok {
 				empty = true
@@ -450,7 +473,7 @@ func newTopLevelSelectionsNormalizer() *topLevelSelectionsNormalizer {
 func addSpecNameToParams(spec Value, p *normParams) *normParams {
 	if spec.Get("name").IsTruthy() {
 		c := p.clone()
-		c.path = append(append([]string(nil), p.path...), spec.Get("name").AsString())
+		c.path = concatValue(p.path, spec.Get("name"))
 		return c
 	}
 	return p
@@ -479,9 +502,13 @@ func (n *topLevelSelectionsNormalizer) mapUnit(spec Value, p *normParams) Value 
 	if len(selections) == 0 {
 		return spec
 	}
-	path := append(append([]string(nil), p.path...), spec.Get("name").AsString())
-	var params []Value
+	// (normParams.path ?? []).concat(spec.name): the names as given,
+	// compared with includes and indexOf (strictly), so a view "undefined"
+	// does not match an unnamed unit, nor [1] a unit named "1" (C79 of the
+	// 2026-10-18 audit).
 	specName := spec.Get("name")
+	path := concatValue(p.path, specName)
+	var params []Value
 	for _, sel := range selections {
 		cc.work(1)
 		// !selection.views || !selection.views.length, then for…of: a
@@ -495,7 +522,7 @@ func (n *topLevelSelectionsNormalizer) mapUnit(spec Value, p *normParams) Value 
 			cc.work(1)
 			switch {
 			case view.IsStr():
-				if (specName.IsStr() && view.StrValue() == specName.StrValue()) || contains(path, view.StrValue()) {
+				if strictEq(view, specName) || valueIncludes(cc, path, view) {
 					params = append(params, sel)
 				}
 			case view.IsArr():
@@ -503,7 +530,7 @@ func (n *topLevelSelectionsNormalizer) mapUnit(spec Value, p *normParams) Value 
 				ok := true
 				for i, v := range view.Items() {
 					cc.work(1)
-					idx := indexOfStr(path, v.AsString())
+					idx := valueIndexOf(cc, path, v)
 					if idx == -1 || (i > 0 && idx <= prev) {
 						ok = false
 						break
@@ -522,13 +549,35 @@ func (n *topLevelSelectionsNormalizer) mapUnit(spec Value, p *normParams) Value 
 	return spec
 }
 
-func indexOfStr(l []string, s string) int {
-	for i, x := range l {
-		if x == s {
+// concatValue is list.concat(v): an array's elements, else v itself.
+func concatValue(list []Value, v Value) []Value {
+	out := append([]Value(nil), list...)
+	if v.IsArr() {
+		return append(out, v.Items()...)
+	}
+	return append(out, v)
+}
+
+// valueIndexOf is list.indexOf(v): the first element === v.
+func valueIndexOf(cc *compileCtx, list []Value, v Value) int {
+	for i, x := range list {
+		cc.work(1)
+		if strictEq(x, v) {
 			return i
 		}
 	}
 	return -1
+}
+
+// valueIncludes is list.includes(v) (SameValueZero: NaN matches NaN).
+func valueIncludes(cc *compileCtx, list []Value, v Value) bool {
+	for _, x := range list {
+		cc.work(1)
+		if x.MapKey() == v.MapKey() {
+			return true
+		}
+	}
+	return false
 }
 
 func (n *topLevelSelectionsNormalizer) mapFacet(spec Value, p *normParams) Value {
@@ -713,12 +762,14 @@ func (n *coreNormalizer) mapNonLayerRepeat(spec Value, p *normParams) Value {
 				if repeat.IsArr() {
 					suffix = varNameOf(repeatValue)
 				} else {
+					var row, column string
 					if repeat.Get("row").IsTruthy() {
-						suffix += "row_" + varNameOf(rowValue)
+						row = "row_" + varNameOf(rowValue)
 					}
 					if repeat.Get("column").IsTruthy() {
-						suffix += "column_" + varNameOf(columnValue)
+						column = "column_" + varNameOf(columnValue)
 					}
+					suffix = row + column
 				}
 				childName := pre + p.repeaterPrefix + "child__" + suffix
 				cp := p.deeper()
@@ -877,7 +928,12 @@ func (n *coreNormalizer) mapLayer(spec Value, p *normParams) Value {
 	cp := p.clone()
 	cp.parentEncoding = mergeEncoding(cc, p.parentEncoding, encoding, true)
 	cp.parentProjection = mergeProjection(p.cc, p.parentProjection, projection)
-	cp.deeper()
+	// The layer is a view one level below p: its step is charged and its
+	// depth checked here (an empty layer at the limit is refused too); its
+	// children are each mapped one level deeper still, by baseMapper.mapLayer
+	// (C149: audit 2026-10-18; the result was discarded, which read as if
+	// it deepened cp).
+	cp.checkDeeper()
 	if spec.Get("name").IsTruthy() {
 		rest.Set("name", jsval.Str(joinNonEmpty(cp.repeaterPrefix, spec.Get("name").AsString())))
 	}
@@ -1037,11 +1093,12 @@ func isMarkDef(cc *compileCtx, mark Value) bool {
 	return hasProperty(mark, "type")
 }
 
-func getMarkType(cc *compileCtx, m Value) string {
+// getMarkType is isMarkDef(m) ? m.type : m, as given.
+func getMarkType(cc *compileCtx, m Value) Value {
 	if isMarkDef(cc, m) {
-		return m.Get("type").AsString()
+		return m.Get("type")
 	}
-	return m.AsString()
+	return m
 }
 
 func (pathOverlayNormalizer) hasMatchingType(spec Value, p *normParams) bool {
@@ -1050,7 +1107,7 @@ func (pathOverlayNormalizer) hasMatchingType(spec Value, p *normParams) bool {
 		return false
 	}
 	markDef := markDefOf(p.cc, spec.Get("mark"))
-	typ := markDef.Get("type").AsString()
+	typ, _ := markDef.Get("type").Strict() // switch (markDef.type)
 	switch typ {
 	case "line", "rule", "trail":
 		_, ok := getPointOverlay(markDef, config.Get(typ), spec.Get("encoding"))
@@ -1083,9 +1140,10 @@ func (pathOverlayNormalizer) run(spec Value, p *normParams, normalize func(Value
 	outerSpec := omit(spec, "params", "projection", "mark", "name", "encoding")
 	encoding := normalizeEncoding(cc, e, config)
 	markDef := markDefOf(cc, mark)
-	pointOverlay, hasPoint := getPointOverlay(markDef, config.Get(markDef.Get("type").AsString()), encoding)
+	// Run only for a string type (hasMatchingType's switch is strict).
+	pointOverlay, hasPoint := getPointOverlay(markDef, config.Get(propKey(markDef.Get("type"))), encoding)
 	lineOverlay, hasLine := undef, false
-	if markDef.Get("type").AsString() == "area" {
+	if strIs(markDef.Get("type"), "area") {
 		lineOverlay, hasLine = getLineOverlay(markDef, config.Get("area"))
 	}
 	first := jsval.NewObject(4)
@@ -1099,7 +1157,7 @@ func (pathOverlayNormalizer) run(spec Value, p *normParams, normalize func(Value
 		// 5.8 looks at the mark definition only, not at the config.
 		areaOpacity = markDef.Get("opacity").IsUndefined() && markDef.Get("fillOpacity").IsUndefined()
 	}
-	if markDef.Get("type").AsString() == "area" && areaOpacity {
+	if strIs(markDef.Get("type"), "area") && areaOpacity {
 		m.Set("opacity", jsval.Num(0.7))
 	}
 	spread(m, markDef)
@@ -1165,7 +1223,7 @@ func (ruleForRangedLineNormalizer) hasMatchingType(spec Value, p *normParams) bo
 		return false
 	}
 	mark, encoding := spec.Get("mark"), spec.Get("encoding")
-	if mark.IsStr() && mark.StrValue() == "line" || (isMarkDef(cc, mark) && mark.Get("type").AsString() == "line") {
+	if strIs(mark, "line") || (isMarkDef(cc, mark) && strIs(mark.Get("type"), "line")) {
 		for _, channel := range secondaryRangeChannels {
 			// encoding[mainChannel]: a line without an encoding object
 			// (null, or none) fails here.
@@ -1297,7 +1355,7 @@ func replaceRepeaterInChannelDef(cc *compileCtx, cd, repeater Value) Value {
 	if isFieldOrDatumDef(cc, cd) {
 		if fd := replaceRepeaterInFieldOrDatumDef(cc, cd, repeater); fd.IsTruthy() {
 			return fd
-		} else if isConditionalDef(cd) {
+		} else if isConditionalDef(cc, cd) {
 			return mkv("condition", cd.Get("condition"))
 		}
 		return undef
@@ -1337,21 +1395,52 @@ func replaceRepeaterInMapping(cc *compileCtx, mapping, repeater Value) Value {
 	return jsval.Obj(out)
 }
 
-// countViews is the number of views the normalization makes of spec: one per
-// view it maps, a repeat's spec once per combination of its row, column,
-// layer and repeat values. Composite marks and path overlays add a few
-// layers per unit on top, a small constant factor. The count saturates (it
-// is a float), and a spec nested past maxDepth counts as one view: the
-// normalizer rejects it.
-func countViews(cc *compileCtx, spec Value, depth int) float64 {
+// countViews weighs the views the normalization makes of spec, before any
+// is built (C15): one per view it maps, a repeat's spec once per
+// combination of its row, column, layer and repeat values. Composite marks
+// and path overlays add a few layers per unit on top, a small constant
+// factor. The count saturates (it is a float), and a spec nested past
+// maxDepth counts as one view: the normalizer rejects it.
+//
+// What a unit view compiles is not the same for every view: each copies
+// the selections its composite parents declare (every one is pushed into
+// every unit, C10: audit 2026-10-18), and compiles the text it inherits as
+// well as its own: the config (and theme) every view reads, a layer's
+// shared encoding, a repeated spec once per repetition. Expressions made of
+// those copy them, so a unit weighs one, plus one per selection it receives,
+// plus one per viewWeightBytes of specification it compiles; inline data
+// (data and datasets) is passed through, not compiled, and does not count.
+func countViews(cc *compileCtx, spec Value, config float64) float64 {
+	sel, selBytes := countSelections(cc, spec, 0)
+	perUnit := sel + (config+selBytes)/viewWeightBytes
+	return countViewsAt(cc, spec, 0, perUnit)
+}
+
+// viewCopies is how many times a view's output copies, at most and in
+// all, the text it compiles (a config's number format is written into the
+// label expressions of every axis, the tooltip and the description), and
+// viewWeightBytes the bytes of that text that weigh one view.
+const (
+	viewCopies      = 8
+	viewWeightBytes = ViewBytes / viewCopies
+)
+
+// ViewBytes is the memory a view's weight stands for: a plain unit view's
+// compiled Vega retains about 24 KiB and its compilation allocates ten
+// times that as it goes. The memory limit admits ViewBytes of it a view.
+const ViewBytes = 32768
+
+// countViewsAt weighs the views of spec at depth, each unit view also
+// weighing perUnit for what it inherits.
+func countViewsAt(cc *compileCtx, spec Value, depth int, perUnit float64) float64 {
 	cc.work(1)
 	if !spec.IsObj() || depth > maxDepth {
 		return 1
 	}
-	sum := func(list Value) float64 {
+	sum := func(list Value, perUnit float64) float64 {
 		n := 1.0
 		for _, s := range list.Items() {
-			n += countViews(cc, s, depth+1)
+			n += countViewsAt(cc, s, depth+1, perUnit)
 		}
 		return n
 	}
@@ -1367,10 +1456,10 @@ func countViews(cc *compileCtx, spec Value, depth int) float64 {
 	}
 	switch {
 	case isFacetSpec(nil, spec):
-		return 1 + countViews(cc, spec.Get("spec"), depth+1)
+		return 1 + countViewsAt(cc, spec.Get("spec"), depth+1, perUnit)
 	case isRepeatSpec(nil, spec):
 		repeat := spec.Get("repeat")
-		child := countViews(cc, spec.Get("spec"), depth+1)
+		child := countViewsAt(cc, spec.Get("spec"), depth+1, perUnit)
 		if repeat.IsArr() {
 			return 1 + float64(float64(repeat.Len())*child)
 		}
@@ -1380,13 +1469,87 @@ func countViews(cc *compileCtx, spec Value, depth int) float64 {
 		}
 		return 1 + float64(n*child)
 	case isHConcatSpec(nil, spec):
-		return sum(spec.Get("hconcat"))
+		return sum(spec.Get("hconcat"), perUnit)
 	case isVConcatSpec(nil, spec):
-		return sum(spec.Get("vconcat"))
+		return sum(spec.Get("vconcat"), perUnit)
 	case isConcatSpec(nil, spec):
-		return sum(spec.Get("concat"))
+		return sum(spec.Get("concat"), perUnit)
 	case isLayerSpec(nil, spec):
-		return sum(spec.Get("layer"))
+		// Every child inherits the layer's encoding and projection.
+		shared := specBytes(cc, spec.Get("encoding"), 0) + specBytes(cc, spec.Get("projection"), 0)
+		return sum(spec.Get("layer"), perUnit+shared/viewWeightBytes)
 	}
-	return 1
+	own := 0.0
+	o := spec.ObjValue()
+	for i := 0; i < o.Len(); i++ {
+		if k := o.KeyAt(i); k != "data" && k != "datasets" {
+			own += float64(len(k)) + specBytes(cc, o.ValueAt(i), 0)
+		}
+	}
+	return 1 + perUnit + own/viewWeightBytes
+}
+
+// specBytesDepth bounds specBytes's recursion: past the 256 levels JSON may
+// nest, and the 1,024 values may at run time.
+const specBytesDepth = 1024
+
+// countSelections counts the selection parameters of the composite views
+// of spec, which the normalizer pushes into the units below them, and their
+// bytes.
+func countSelections(cc *compileCtx, spec Value, depth int) (n, bytes float64) {
+	cc.work(1)
+	if !spec.IsObj() || depth > maxDepth || isUnitSpec(nil, spec) {
+		return 0, 0
+	}
+	if params := spec.Get("params"); params.IsArr() {
+		for _, p := range params.Items() {
+			if isSelectionParameter(p) {
+				n++
+				bytes += specBytes(cc, p, 0)
+			}
+		}
+	}
+	for _, k := range []string{"spec", "layer", "hconcat", "vconcat", "concat"} {
+		c := spec.Get(k)
+		if c.IsArr() {
+			for _, x := range c.Items() {
+				dn, db := countSelections(cc, x, depth+1)
+				n, bytes = n+dn, bytes+db
+			}
+		} else if c.IsObj() {
+			dn, db := countSelections(cc, c, depth+1)
+			n, bytes = n+dn, bytes+db
+		}
+	}
+	return n, bytes
+}
+
+// specBytes is about the size of v as JSON: its strings and keys by their
+// bytes, every other value a few. A value nested past specBytesDepth counts
+// as one of a few bytes (the parse bounds nesting far below that).
+func specBytes(cc *compileCtx, v Value, depth int) float64 {
+	cc.work(1)
+	switch {
+	case v.IsUndefined():
+		return 0
+	case v.IsStr():
+		cc.work(int64(len(v.StrValue())) >> 10)
+		return float64(len(v.StrValue())) + 2
+	case depth > specBytesDepth:
+		return 8
+	case v.IsArr():
+		n := 2.0
+		for _, x := range v.Items() {
+			n += 1 + specBytes(cc, x, depth+1)
+		}
+		return n
+	case v.IsObj():
+		o := v.ObjValue()
+		n := 2.0
+		for i := 0; i < o.Len(); i++ {
+			n += float64(len(o.KeyAt(i))) + 4 + specBytes(cc, o.ValueAt(i), depth+1)
+		}
+		return n
+	}
+	return 8
 }

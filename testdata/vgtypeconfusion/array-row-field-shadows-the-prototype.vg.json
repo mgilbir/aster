@@ -1,0 +1,2 @@
+{"width":200,"height":100,"data":[{"name":"t","values":[[1,2],[3,4],["a"]],"transform":[{"type":"formula","as":"map","expr":"7"}]}],
+"marks":[{"type":"text","from":{"data":"t"},"encode":{"enter":{"text":{"signal":"''+datum.map"},"y":{"signal":"datum.y||0"}}}}]}

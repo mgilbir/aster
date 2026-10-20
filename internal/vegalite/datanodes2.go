@@ -103,10 +103,17 @@ func (n *binNode) producedFields() *sset {
 
 func (n *binNode) dependentFields() *sset {
 	cc := n.cc
+	// new Set(vals(this.bins).map((c) => c.field)): the fields as given, so
+	// a field of ["a"] is read as an access path the way upstream reads it
+	// (fieldIntersection), not as its text.
 	s := newSset()
 	for _, k := range n.bins.keysView() {
 		cc.work(1)
-		s.add(n.bins.m[k].field)
+		if b := n.bins.m[k]; !b.fieldV.IsUndefined() {
+			s.addValue(b.fieldV)
+		} else {
+			s.add(b.field)
+		}
 	}
 	return s
 }
@@ -176,7 +183,7 @@ func rangeFormula(m fieldDefModel, fd Value, channel string, config Value) (form
 		}
 		startField := vgField(cc, fd, fieldRefOption{expr: "datum"})
 		endField := vgField(cc, fd, fieldRefOption{expr: "datum", binSuffix: "end"})
-		return vgField(cc, fd, fieldRefOption{binSuffix: "range", forAs: true}), binFormatExpression(startField, endField, guide.Get("format"), guide.Get("formatType"), config)
+		return vgField(cc, fd, fieldRefOption{binSuffix: "range", forAs: true}), binFormatExpression(cc, startField, endField, guide.Get("format"), guide.Get("formatType"), config)
 	}
 	return "", ""
 }
@@ -316,7 +323,7 @@ func (n *timeUnitNode) clone() dfNode {
 	return initNode(&timeUnitNode{timeUnits: c}, nil)
 }
 
-func isTimeUnitTransformComponent(c *Object) bool { return !c.Lookup("as").IsUndefined() }
+func isTimeUnitTransformComponent(c *Object) bool { return !jsval.Obj(c).Get("as").IsUndefined() }
 
 func (n *timeUnitNode) producedFields() *sset {
 	cc := n.cc
@@ -411,14 +418,16 @@ func makeTimeUnitFromTransform(cc *compileCtx, parent dfNode, t Value) *timeUnit
 	return newTimeUnitNode(parent, tu)
 }
 
+// merge is upstream's TimeUnitNode.merge: `this.timeUnits =
+// {...this.timeUnits}`, then other's components it lacks. The copy only
+// keeps an object others may hold from changing, and the node owns its map
+// (every maker makes it new, and clone copies it), so other's components
+// are added in place, with the same keys in the same order: copied per
+// merge, siblings merged one at a time were quadratic (C26: audit
+// 2026-10-18).
 func (n *timeUnitNode) merge(other *timeUnitNode) {
 	cc := n.cc
-	c := newOmap[*Object]()
-	for _, k := range n.timeUnits.keysView() {
-		cc.work(1)
-		c.set(k, n.timeUnits.m[k])
-	}
-	n.timeUnits = c
+	cc.alloc(int64(other.timeUnits.len()) * prefixEntryBytes)
 	for _, k := range other.timeUnits.keysView() {
 		cc.work(1)
 		if !n.timeUnits.has(k) {
@@ -429,19 +438,22 @@ func (n *timeUnitNode) merge(other *timeUnitNode) {
 	other.remove()
 }
 
-func (n *timeUnitNode) removeFormulas(fields *sset) {
+// removeFormulas drops the formulas whose field is one of fields.
+func (n *timeUnitNode) removeFormulas(fields func(Value) bool) {
 	cc := n.cc
 	nf := newOmap[*Object]()
 	for _, k := range n.timeUnits.keysView() {
 		cc.work(1)
 		c := n.timeUnits.m[k]
-		var fieldAs string
+		// fields.has(fieldAs): a transform's `as` as given, so ["a"] is not
+		// the member "a".
+		var fieldAs Value
 		if isTimeUnitTransformComponent(c) {
-			fieldAs = c.Lookup("as").AsString()
+			fieldAs = c.Lookup("as")
 		} else {
-			fieldAs = c.Lookup("field").AsString() + "_end"
+			fieldAs = jsval.Str(c.Lookup("field").AsString() + "_end")
 		}
-		if !fields.has(fieldAs) {
+		if !fields(fieldAs) {
 			nf.set(k, c)
 		}
 	}
@@ -527,7 +539,10 @@ func (n *timeUnitNode) assemble() []Value {
 		f := n.timeUnits.m[k]
 		rect := f.Lookup("rectBandPosition")
 		nt := normalizeTimeUnit(cc, f.Lookup("timeUnit"))
-		if isTimeUnitTransformComponent(f) {
+		// 5.8 assembles every component as a timeunit transform, `as`
+		// undefined included ([as, `${as}_end`]); 6.x makes the formula of
+		// one without an `as`.
+		if cc.v5 || isTimeUnitTransformComponent(f) {
 			// const {unit, utc, ...params} = normalizeTimeUnit(timeUnit)
 			if nt.IsNullish() {
 				if cc.v5 {
@@ -568,10 +583,6 @@ type aggregateNode struct {
 	dfBase
 	dimensions *sset
 	measures   *omap[*omap[*sset]] // field -> op -> output names
-	// rawDims are the group-by entries a transform gave that are not
-	// strings, by their text: upstream's set holds the values themselves,
-	// and assembling reads them as access paths.
-	rawDims map[string]Value
 	// protoOp says 5.8 assigned meas[field]['__proto__'], which sets the
 	// object's prototype to a Set instead of adding an op: the op is not
 	// output, and stringifying the measures (the node's hash) or cloning
@@ -611,7 +622,7 @@ func (n *aggregateNode) clone() dfNode {
 		// whose prototype is a Set for a Set and calls its forEach.
 		throw("Method Set.prototype.forEach called on incompatible receiver #<Set>")
 	}
-	return initNode(&aggregateNode{dimensions: n.dimensions.clone(), measures: cloneMeasures(n.cc, n.measures), rawDims: n.rawDims, protoOp: n.protoOp}, nil)
+	return initNode(&aggregateNode{dimensions: n.dimensions.clone(), measures: cloneMeasures(n.cc, n.measures), protoOp: n.protoOp}, nil)
 }
 
 func (n *aggregateNode) groupBy() *sset { return n.dimensions }
@@ -730,14 +741,14 @@ func mergeMeasures(cc *compileCtx, parent, child *omap[*omap[*sset]]) {
 					if !ok {
 						throw("(parentMeasures[field][op] ?? []) is not iterable")
 					}
-					for _, x := range es.list() {
+					for _, x := range es.values() {
 						cc.work(1)
-						merged.addValue(es.value(x))
+						merged.addValue(x)
 					}
 				}
-				for _, x := range ops.m[op].list() {
+				for _, x := range ops.m[op].values() {
 					cc.work(1)
-					merged.addValue(ops.m[op].value(x))
+					merged.addValue(x)
 				}
 				t.set(cc, op, merged)
 			} else {
@@ -841,22 +852,14 @@ func makeAggregateFromTransform(cc *compileCtx, parent dfNode, t Value) *aggrega
 	if g := t.Get("groupby"); !g.IsNullish() {
 		groupby = iterate(g, "t.groupby ?? []")
 	}
-	var raw map[string]Value
 	for _, s := range groupby {
 		cc.work(1)
-		dims.add(s.AsString())
-		if !s.IsStr() {
-			if raw == nil {
-				raw = map[string]Value{}
-			}
-			raw[s.AsString()] = s
-		}
+		dims.addValue(s)
 	}
 	if dims.size()+meas.len() == 0 {
 		return nil
 	}
 	n := newAggregateNode(parent, dims, meas)
-	n.rawDims = raw
 	n.protoOp = protoOp
 	return n
 }
@@ -897,9 +900,9 @@ func (n *aggregateNode) producedFields() *sset {
 			if m.size() == 0 {
 				out.add(op + "_" + field)
 			} else {
-				for _, x := range m.list() {
+				for _, x := range m.values() {
 					cc.work(1)
-					out.addValue(m.value(x))
+					out.addValue(x)
 				}
 			}
 		}
@@ -933,9 +936,9 @@ func (n *aggregateNode) assemble() Value {
 		for _, op := range n.measures.m[field].keysView() {
 			cc.work(1)
 			set := n.measures.m[field].m[op]
-			for _, alias := range set.list() {
+			for _, alias := range set.values() {
 				cc.work(1)
-				as = append(as, set.value(alias))
+				as = append(as, alias)
 				ops = append(ops, jsval.Str(op))
 				if field == "*" {
 					fields = append(fields, jsval.Null)
@@ -946,12 +949,14 @@ func (n *aggregateNode) assemble() Value {
 		}
 	}
 	var groupby []Value
-	for _, d := range n.dimensions.list() {
+	for _, d := range n.dimensions.values() {
 		cc.work(1)
-		if r, ok := n.rawDims[d]; ok {
-			groupby = append(groupby, jsval.Str(replacePathInFieldV(r)))
+		// A group-by the transform gave as other than a string (["a"]) is
+		// read as an access path the way upstream reads the value.
+		if d.IsStr() {
+			groupby = append(groupby, jsval.Str(replacePathInField(d.StrValue())))
 		} else {
-			groupby = append(groupby, jsval.Str(replacePathInField(d)))
+			groupby = append(groupby, jsval.Str(replacePathInFieldV(d)))
 		}
 	}
 	return mkv("type", "aggregate", "groupby", jsval.Arr(groupby), "ops", jsval.Arr(ops), "fields", jsval.Arr(fields), "as", jsval.Arr(as))

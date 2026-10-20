@@ -1,6 +1,7 @@
 package vega
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -8,10 +9,9 @@ import (
 	"math/bits"
 	"strings"
 	"unicode/utf8"
+	"unsafe"
 
 	"github.com/mgilbir/aster/internal/budget"
-	"github.com/mgilbir/aster/internal/format"
-	"github.com/mgilbir/aster/internal/geo"
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/transforms"
 )
@@ -56,7 +56,9 @@ func (v *runView) seedCollect(c *rtContext, n *opNode, e *entry) {
 		v.holdSrcRows(n, data)
 		v.ingestRows(data)
 	}
-	n.value = data
+	// The tuples reach the Collect as a pending pulse (Dataflow.ingest): its
+	// value stays empty until it runs, so code that reads it earlier in the
+	// first run (a trigger's modify() of the data set) finds no tuple yet.
 	v.g.pulseInput(n, &flowPulse{tuples: data, changed: true})
 }
 
@@ -86,15 +88,32 @@ func (v *runView) ingestRows(data []jsval.Value) {
 	}
 }
 
-// parseValues is Dataflow.parse: read inline values with a format. Unlike a
-// url's body, which Dataflow.request catches, a failure here is thrown: out of
-// the runtime when the data set is made, or out of the Load transform.
+// parseValues is Dataflow.parse of inline values, the rows a change set
+// inserts (array() of what read returns). Unlike a url's body, which
+// Dataflow.request catches, a failure here is thrown out of the runtime when
+// the data set is made.
 func (v *runView) parseValues(values, fmtSpec jsval.Value) []jsval.Value {
-	data, err := v.read(values, nil, fmtSpec)
+	data, err := v.readRows(values, nil, fmtSpec)
 	if err != nil {
 		fail("%s", err.Error())
 	}
 	return data
+}
+
+// loadValues is the Load transform's `df.parse(_.values, _.format)`, whose
+// result it iterates with forEach: what read returns must be an array.
+func (v *runView) loadValues(values, fmtSpec jsval.Value) []jsval.Value {
+	data, err := v.read(values, nil, fmtSpec)
+	if err != nil {
+		fail("%s", err.Error())
+	}
+	if !data.IsArr() {
+		if data.IsNullish() {
+			fail("Cannot read properties of %s (reading 'forEach')", nullishName(data))
+		}
+		fail("data.forEach is not a function")
+	}
+	return insertRows(data)
 }
 
 // request is Dataflow.request: load a url, then parse it. A failed load is
@@ -138,11 +157,16 @@ func (v *runView) request(url, fmtSpec jsval.Value) []jsval.Value {
 	if err := v.bud.Load(int64(len(body))); err != nil {
 		failErr(err)
 	}
-	data, err := v.read(jsval.Undefined, body, fmtSpec)
+	body = stripBOM(body)
+	data, err := v.readRows(jsval.Undefined, body, fmtSpec)
 	if err != nil {
 		failed(uri, true, err)
-		// The data stays what was loaded, and the data set is that one value:
-		// the text, which a tuple wraps as {data: text}.
+		// The data stays what was loaded, and the data set is that one value
+		// (`res.data || []`): the text, which a tuple wraps as {data: text},
+		// and nothing for an empty body.
+		if len(body) == 0 {
+			return nil
+		}
 		text, err := textOf(v.ctx, body)
 		if err != nil {
 			failErr(err)
@@ -150,6 +174,21 @@ func (v *runView) request(url, fmtSpec jsval.Value) []jsval.Value {
 		return []jsval.Value{jsval.Str(text)}
 	}
 	return data
+}
+
+// utf8BOM is the UTF-8 encoding of U+FEFF, which a text file exported by
+// many Windows tools starts with.
+var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
+
+// stripBOM is a loaded body without the one UTF-8 byte order mark it may
+// start with (C39). Upstream reads a URL's body with fetch's
+// Response.text(), whose UTF-8 decode drops it, so that JSON.parse reads the
+// document and a CSV's first header is the column's name. vega-loader's
+// file path (fs.readFile) keeps it, and then fails to parse what its HTTP
+// path reads; the Loader here says nothing of the transport, so every
+// loaded body is read as the HTTP path reads it.
+func stripBOM(b []byte) []byte {
+	return bytes.TrimPrefix(b, utf8BOM)
 }
 
 // textChunk is how much of a loaded body textOf copies between two polls of
@@ -164,6 +203,29 @@ func textOf(ctx context.Context, b []byte) (string, error) {
 	// The copy is memory the load budget, which counted the bytes, does not:
 	// it is charged to the call's ledger first, and stays charged, since the
 	// text (or the substrings DSV fields take of it) lives as long as the data.
+	if !utf8.Valid(b) {
+		// Text is decoded as Response.text() and TextDecoder decode it
+		// (WHATWG UTF-8): one U+FFFD each maximal subpart of an invalid
+		// sequence, which can make the text up to three times longer.
+		n := jsval.DecodedLen(b)
+		if err := budget.LedgerFrom(ctx).Alloc(int64(n)); err != nil {
+			return "", err
+		}
+		d := make([]byte, 0, n)
+		for len(b) > 0 {
+			if err := ctx.Err(); err != nil {
+				return "", err
+			}
+			// A chunk ends at a character: a sequence is decoded whole.
+			end := min(len(b), textChunk)
+			for end < len(b) && !utf8.RuneStart(b[end]) && end-min(len(b), textChunk) < utf8.UTFMax {
+				end++
+			}
+			d = jsval.AppendDecoded(d, b[:end])
+			b = b[end:]
+		}
+		return unsafe.String(unsafe.SliceData(d), len(d)), nil
+	}
 	if err := budget.LedgerFrom(ctx).Alloc(int64(len(b))); err != nil {
 		return "", err
 	}
@@ -181,151 +243,6 @@ func textOf(ctx context.Context, b []byte) (string, error) {
 		b = b[n:]
 	}
 	return sb.String(), nil
-}
-
-// read is vega-loader's read: decode with the format reader, then apply `parse`.
-// Exactly one of value (already decoded JSON) and raw (text) is used.
-func (v *runView) read(value jsval.Value, raw []byte, schema jsval.Value) ([]jsval.Value, error) {
-	typ := "json"
-	if t := schema.Get("type"); t.IsTruthy() {
-		typ = v.walk.String(t)
-	}
-	var data []jsval.Value
-	var columns []string
-	var err error
-	switch typ {
-	case "json":
-		data, err = readJSON(v.ctx, value, raw, schema, v.limits.MaxParseBytes)
-	case "csv", "tsv", "dsv":
-		delim := ","
-		switch typ {
-		case "tsv":
-			delim = "\t"
-		case "dsv":
-			delim = v.walk.String(schema.Get("delimiter"))
-			if delim == "" {
-				return nil, fmt.Errorf("dsv format requires a delimiter")
-			}
-		}
-		text, err := textOf(v.ctx, raw)
-		if err != nil {
-			failErr(err)
-		}
-		if !value.IsUndefined() {
-			text = v.walk.String(value)
-		}
-		if hdr := schema.Get("header"); hdr.IsArr() {
-			// joined with the whole delimiter, as vega-loader does
-			parts := make([]string, 0, hdr.Len())
-			for _, h := range hdr.Items() {
-				parts = append(parts, v.walk.StringValue(h))
-			}
-			text = strings.Join(parts, delim) + "\n" + text
-		}
-		data, columns, err = parseDSVLimit(v.ctx, text, delim, v.bud)
-		if err != nil {
-			if cerr := v.ctx.Err(); cerr != nil {
-				failErr(cerr)
-			}
-			failErr(err)
-		}
-	case "topojson":
-		var doc jsval.Value
-		doc, err = jsonDocument(v.ctx, value, raw, schema, v.limits.MaxParseBytes)
-		if err != nil {
-			break
-		}
-		// vega-loader tests `format.feature`, then `format.mesh`, for
-		// truthiness: an absent one is not the object named "undefined".
-		name := func(k string) string {
-			if p := schema.Get(k); p.IsTruthy() {
-				return v.walk.String(p)
-			}
-			return ""
-		}
-		data, err = geo.TopologyFeatures(v.ctx, doc, name("feature"), name("mesh"), v.walk.String(schema.Get("filter")))
-	default:
-		return nil, fmt.Errorf("Unknown data format type: %s", typ)
-	}
-	if err != nil {
-		// A document past a resource limit ends the render, as the end of
-		// the call does while a document is parsed: neither is a body that
-		// failed to parse.
-		if errors.Is(err, budget.ErrLimit) {
-			failErr(err)
-		}
-		if cerr := v.ctx.Err(); cerr != nil {
-			failErr(cerr)
-		}
-		return nil, err
-	}
-	if p := schema.Get("parse"); !p.IsNullish() && p.IsTruthy() {
-		if typ == "json" && !value.IsUndefined() && !value.IsStr() {
-			// The rows are the caller's objects (the specification's inline
-			// values, or a signal's value), which upstream's parse writes
-			// into. A render does not write into its input: it parses
-			// copies, which ingest would make anyway.
-			var cl jsval.Cloner
-			for i, t := range data {
-				v.work(1)
-				if o := t.ObjValue(); o != nil {
-					data[i] = jsval.Obj(cl.Clone(o))
-				}
-			}
-		}
-		if err := v.applyParse(data, columns, p); err != nil {
-			return nil, err
-		}
-	}
-	return data, nil
-}
-
-// jsonDocument decodes a JSON payload (or takes an already decoded value) and
-// selects the `property` path. The decoding polls ctx, the call's.
-func jsonDocument(ctx context.Context, value jsval.Value, raw []byte, schema jsval.Value, limit int64) (jsval.Value, error) {
-	var doc jsval.Value
-	if value.IsUndefined() {
-		d, err := jsval.ParseJSONContext(ctx, raw, limit)
-		if err != nil {
-			return jsval.Undefined, err
-		}
-		doc = d
-	} else if value.IsStr() {
-		d, err := jsval.ParseJSONStringContext(ctx, value.StrValue(), limit)
-		if err != nil {
-			return jsval.Undefined, err
-		}
-		doc = d
-	} else {
-		doc = value
-	}
-	if prop := schema.Get("property"); prop.IsTruthy() {
-		doc = walkFieldPath(doc, jsval.WalkerFor(ctx).String(prop))
-	}
-	return doc, nil
-}
-
-func walkFieldPath(v jsval.Value, path string) jsval.Value {
-	for _, seg := range jsval.ParseFieldPath(path) {
-		v = propOf(v, jsval.Str(seg))
-	}
-	return v
-}
-
-func readJSON(ctx context.Context, value jsval.Value, raw []byte, schema jsval.Value, limit int64) ([]jsval.Value, error) {
-	doc, err := jsonDocument(ctx, value, raw, schema, limit)
-	if err != nil {
-		return nil, err
-	}
-	switch doc.Kind() {
-	case jsval.KindArr:
-		return append([]jsval.Value(nil), doc.Items()...), nil
-	case jsval.KindUndefined, jsval.KindNull:
-		return nil, nil
-	}
-	// A single value is one tuple: the changeset that inserts it wraps it in
-	// an array (vega-util's array()).
-	return []jsval.Value{doc}, nil
 }
 
 // parseDSV is d3-dsv's parse: the first row names the columns, later rows
@@ -540,80 +457,6 @@ func parseDSVLimit(ctx context.Context, text, delim string, bud *budget.Budget) 
 
 // -- parse types ---------------------------------------------------------------
 
-func (v *runView) applyParse(data []jsval.Value, columns []string, types jsval.Value) error {
-	if len(data) == 0 {
-		return nil
-	}
-	fields := columns
-	if fields == nil {
-		if o := data[0].ObjValue(); o != nil {
-			fields = o.Keys() // read, not kept: typeKeys copies it
-		}
-	}
-	var typeOf map[string]string
-	var order []string
-	if types.IsStr() && types.StrValue() == "auto" {
-		// Upstream's inferTypes assigns types[field] for each field in
-		// turn, and the parse goes over Object.keys(types).
-		order = v.typeKeys(fields)
-		typeOf = inferTypes(&v.g.meter, v.walk, data, order)
-	} else if o := types.ObjValue(); o != nil {
-		typeOf = make(map[string]string, o.Len())
-		for i := 0; i < o.Len(); i++ {
-			v.work(1)
-			typeOf[o.KeyAt(i)] = v.walk.String(o.ValueAt(i))
-		}
-		order = v.jsKeyOrder(o.Keys())
-	} else {
-		return nil
-	}
-	parsers := make([]func(jsval.Value) jsval.Value, len(order))
-	for i, field := range order {
-		v.work(1)
-		t := typeOf[field]
-		if strings.HasPrefix(t, "date:") || strings.HasPrefix(t, "utc:") {
-			utc := strings.HasPrefix(t, "utc:")
-			pattern := t[strings.IndexByte(t, ':')+1:]
-			if n := len(pattern); n >= 2 && ((pattern[0] == '\'' && pattern[n-1] == '\'') || (pattern[0] == '"' && pattern[n-1] == '"')) {
-				pattern = pattern[1 : n-1]
-			}
-			var tp *format.TimeParser
-			if utc {
-				tp = v.locale.UTCParse(pattern)
-			} else {
-				tp = v.locale.TimeParse(pattern)
-			}
-			parsers[i] = func(x jsval.Value) jsval.Value {
-				s := v.walk.String(x)
-				if x.IsNullish() {
-					s = "null"
-				}
-				if ms, ok := tp.Parse(s); ok {
-					return jsval.Timestamp(ms)
-				}
-				return jsval.Null
-			}
-			continue
-		}
-		p := v.typeParser(t)
-		if p == nil {
-			return fmt.Errorf("Illegal format pattern: %s:%s", field, t)
-		}
-		parsers[i] = p
-	}
-	for _, d := range data {
-		v.work(1 + len(order))
-		o := d.ObjValue()
-		if o == nil {
-			continue
-		}
-		for j, field := range order {
-			o.Set(field, parsers[j](o.Lookup(field)))
-		}
-	}
-	return nil
-}
-
 // typeKeys is Object.keys of the object upstream's inferTypes builds over
 // fields: each field once, where it first appears (a CSV header may repeat a
 // column), but not __proto__, whose assignment of a string sets nothing, in
@@ -644,35 +487,6 @@ func (v *runView) jsKeyOrder(keys []string) []string {
 	return transforms.OrderedKeys(keys)
 }
 
-func (v *runView) typeParser(t string) func(jsval.Value) jsval.Value {
-	switch t {
-	case "boolean":
-		return toBooleanValue
-	case "integer", "number":
-		return toNumberValue
-	case "date":
-		return func(x jsval.Value) jsval.Value {
-			if x.IsNullish() || (x.IsStr() && x.StrValue() == "") {
-				return jsval.Null
-			}
-			if x.IsNum() || x.IsTimestamp() {
-				return x
-			}
-			return jsval.Num(format.ParseDate(v.walk.String(x), v.zone))
-		}
-	case "string":
-		return func(x jsval.Value) jsval.Value {
-			if x.IsNullish() || (x.IsStr() && x.StrValue() == "") {
-				return jsval.Null
-			}
-			return jsval.Str(v.walk.String(x))
-		}
-	case "unknown":
-		return func(x jsval.Value) jsval.Value { return x }
-	}
-	return nil
-}
-
 // toBooleanValue is vega-util's toBoolean.
 func toBooleanValue(x jsval.Value) jsval.Value {
 	if x.IsNullish() || (x.IsStr() && x.StrValue() == "") {
@@ -690,87 +504,4 @@ func toNumberValue(x jsval.Value) jsval.Value {
 		return jsval.Null
 	}
 	return jsval.Num(jsval.ToNumber(x))
-}
-
-// -- inference -----------------------------------------------------------------
-
-func inferTypes(m *budget.Meter, w jsval.Walker, data []jsval.Value, fields []string) map[string]string {
-	out := make(map[string]string, len(fields))
-	for _, f := range fields {
-		out[f] = inferType(m, w, data, f)
-	}
-	return out
-}
-
-func validValue(x jsval.Value) bool {
-	return !x.IsNullish() && !(x.IsNum() && math.IsNaN(x.NumValue()))
-}
-
-func testBoolean(_ jsval.Walker, x jsval.Value) bool {
-	if x.IsBool() {
-		return true
-	}
-	return x.IsStr() && (x.StrValue() == "true" || x.StrValue() == "false")
-}
-
-func testNumber(_ jsval.Walker, x jsval.Value) bool {
-	if x.IsTimestamp() {
-		return false
-	}
-	return !math.IsNaN(jsval.ToNumber(x))
-}
-
-func testInteger(w jsval.Walker, x jsval.Value) bool {
-	if !testNumber(w, x) {
-		return false
-	}
-	f := jsval.ToNumber(x)
-	return !math.IsInf(f, 0) && f == math.Trunc(f)
-}
-
-func testDate(w jsval.Walker, x jsval.Value) bool {
-	if x.IsTimestamp() {
-		return !math.IsNaN(x.NumValue())
-	}
-	var s string
-	if x.IsStr() {
-		s = x.StrValue()
-	} else {
-		s = w.String(x)
-	}
-	return !math.IsNaN(format.ParseDate(s, format.UTC))
-}
-
-var typeTests = [...]func(jsval.Walker, jsval.Value) bool{testBoolean, testInteger, testNumber, testDate}
-var typeList = [...]string{"boolean", "integer", "number", "date"}
-
-func inferType(m *budget.Meter, w jsval.Walker, data []jsval.Value, field string) string {
-	if len(data) == 0 {
-		return "unknown"
-	}
-	a := [4]int{1, 2, 3, 4}
-	t := 0
-	for _, d := range data {
-		charge(m, 1)
-		x := d.Get(field)
-		for j := range typeTests {
-			if a[j] != 0 && validValue(x) && !typeTests[j](w, x) {
-				a[j] = 0
-				t++
-				if t == len(typeTests) {
-					return "string"
-				}
-			}
-		}
-	}
-	u := 0
-	for _, x := range a {
-		if u == 0 {
-			u = x
-		}
-	}
-	if u-1 < 0 {
-		return "string"
-	}
-	return typeList[u-1]
 }

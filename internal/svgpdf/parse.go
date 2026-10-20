@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"unsafe"
+
+	"github.com/mgilbir/aster/internal/budget"
 )
 
 // element is a parsed SVG element. Only the Vega SVG-renderer output subset
@@ -20,6 +23,12 @@ type element struct {
 }
 
 type attribute struct{ name, value string }
+
+// elementBytes and attributeBytes are what one of each holds in the tree.
+const (
+	elementBytes   = int64(unsafe.Sizeof(element{}))
+	attributeBytes = int64(unsafe.Sizeof(attribute{}))
+)
 
 // attr returns the attribute value and whether it was present.
 func (e *element) attr(name string) (string, bool) {
@@ -70,7 +79,7 @@ const maxNestingDepth = 512
 // outside the supported subset.
 func parseSVG(ctx context.Context, svg string, lim Limits) (*element, error) {
 	if len(svg) > lim.MaxInputBytes {
-		return nil, limitErr("SVG input is %d bytes, limit is %d", len(svg), lim.MaxInputBytes)
+		return nil, limitErr("%s is %d bytes, limit is %d", lim.Input, len(svg), lim.MaxInputBytes)
 	}
 	if root, ok, err := parseSVGFast(ctx, svg, lim); err != nil {
 		return nil, err
@@ -84,6 +93,7 @@ func parseSVG(ctx context.Context, svg string, lim Limits) (*element, error) {
 // parses to and the source of every parse error.
 func parseSVGXML(ctx context.Context, svg string, lim Limits) (*element, error) {
 	dec := xml.NewDecoder(strings.NewReader(svg))
+	led := budget.LedgerFrom(ctx)
 	var root *element
 	var stack []*element
 	elements, tokens := 0, 0
@@ -113,7 +123,17 @@ func parseSVGXML(ctx context.Context, svg string, lim Limits) (*element, error) 
 				return nil, fmt.Errorf("svgpdf: unsupported SVG element <%s>", name)
 			}
 			if elements++; elements > lim.MaxElements {
-				return nil, limitErr("more than %d elements", lim.MaxElements)
+				return nil, limitErr("%s has more than %d elements", lim.Input, lim.MaxElements)
+			}
+			// The element, its attributes and their values (encoding/xml
+			// copies them), and its place in its parent's list: the tree
+			// is the input's to size (ADR 0010).
+			n := elementBytes + 8 + attributeBytes*int64(len(t.Attr))
+			for _, a := range t.Attr {
+				n += int64(len(a.Value))
+			}
+			if err := led.Alloc(n); err != nil {
+				return nil, err
 			}
 			el := &element{name: name, attrs: make([]attribute, 0, len(t.Attr))}
 			for _, a := range t.Attr {
@@ -169,9 +189,18 @@ func parseSVGXML(ctx context.Context, svg string, lim Limits) (*element, error) 
 	return root, nil
 }
 
-// collectClipPaths walks the tree and indexes <clipPath> definitions by id.
-func collectClipPaths(root *element) (map[string]*element, error) {
-	clips := make(map[string]*element)
+// clipDef is a <clipPath>, read: the shapes it is the union of, the
+// transform it states, and whether its one shape's clip-rule is evenodd.
+type clipDef struct {
+	shapes    []*element
+	transform Matrix
+	evenOdd   bool
+}
+
+// collectClipPaths walks the tree and indexes <clipPath> definitions by id,
+// each read by readClip.
+func collectClipPaths(root *element) (map[string]*clipDef, error) {
+	clips := make(map[string]*clipDef)
 	var walk func(e *element) error
 	walk = func(e *element) error {
 		if e.name == "clipPath" {
@@ -179,7 +208,11 @@ func collectClipPaths(root *element) (map[string]*element, error) {
 			if !ok {
 				return fmt.Errorf("svgpdf: <clipPath> without id")
 			}
-			clips[id] = e
+			c, err := readClip(e)
+			if err != nil {
+				return err
+			}
+			clips[id] = c
 			return nil
 		}
 		for _, c := range e.children {
@@ -193,4 +226,84 @@ func collectClipPaths(root *element) (map[string]*element, error) {
 		return nil, err
 	}
 	return clips, nil
+}
+
+// clipShapeAttrs are the attributes of a <clipPath>'s shapes that make
+// their geometry.
+var clipShapeAttrs = map[string]map[string]bool{
+	"rect": {"x": true, "y": true, "width": true, "height": true},
+	"path": {"d": true},
+}
+
+// readClip reads a <clipPath>: every attribute of it and of its shapes is
+// one the clip draws, one with no effect on a clip (a fill, an opacity), or
+// an error. Its transform is applied; clipPathUnits other than user space,
+// a clip-path on it or on a shape, a style, and a clip-rule other than
+// nonzero but on its one shape are refused. A shape not displayed adds
+// nothing.
+func readClip(e *element) (*clipDef, error) {
+	c := &clipDef{transform: Identity()}
+	evenOdd := false
+	read := func(el *element, own map[string]bool) (displayed bool, err error) {
+		displayed = true
+		for _, a := range el.attrs {
+			v := strings.TrimSpace(a.value)
+			switch {
+			case own[a.name], a.name == "id" && el == e, isIgnorableAttr(a.name):
+			case a.name == "clipPathUnits" && el == e:
+				if v != "userSpaceOnUse" {
+					return false, fmt.Errorf("svgpdf: unsupported clipPathUnits %s on <clipPath>", quoted(v))
+				}
+			case a.name == "transform":
+				if el != e {
+					return false, fmt.Errorf("svgpdf: transform on <clipPath> children is not supported")
+				}
+				if m, ok := parseTransform(v); ok {
+					c.transform = m
+				}
+			case a.name == "clip-rule":
+				switch v {
+				case "evenodd":
+					evenOdd = true
+				case "nonzero":
+					evenOdd = false
+				}
+			case a.name == "display" && el != e:
+				displayed = v != "none"
+			case a.name == "clip-path", a.name == "style":
+				return false, fmt.Errorf("svgpdf: unsupported attribute %s on <%s> in a <clipPath>", quoted(a.name), el.name)
+			case props[a.name] != propNone:
+				// A paint, an opacity, a font: no effect on a clip.
+			default:
+				return false, fmt.Errorf("svgpdf: unsupported attribute %s on <%s> in a <clipPath>", quoted(a.name), el.name)
+			}
+		}
+		return displayed, nil
+	}
+	if _, err := read(e, nil); err != nil {
+		return nil, err
+	}
+	inherited := evenOdd
+	for _, ch := range e.children {
+		own, ok := clipShapeAttrs[ch.name]
+		if !ok {
+			return nil, fmt.Errorf("svgpdf: unsupported element <%s> inside <clipPath>", ch.name)
+		}
+		evenOdd = inherited
+		displayed, err := read(ch, own)
+		if err != nil {
+			return nil, err
+		}
+		if !displayed {
+			continue
+		}
+		c.shapes = append(c.shapes, ch)
+		c.evenOdd = c.evenOdd || evenOdd
+	}
+	// The shapes are one path clipped by one rule: their union only under
+	// nonzero, unless there is one.
+	if c.evenOdd && len(c.shapes) > 1 {
+		return nil, fmt.Errorf("svgpdf: a <clipPath> of several shapes with clip-rule evenodd is not supported")
+	}
+	return c, nil
 }

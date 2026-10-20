@@ -24,7 +24,7 @@ func FuzzColourPainter(f *testing.F) {
 			var check colourCheck
 			fuzzutil.PlayPaint(ops, &check)
 			_ = check.vector()
-			r := &renderer{w: newContentWriter(nil), images: newImageCatalog(nil, Limits{}.withDefaults(), nil), lim: Limits{}.withDefaults()}
+			r := &renderer{w: newContentWriter(nil), images: newImageCatalog(nil, Limits{}.WithDefaults(), nil), lim: Limits{}.WithDefaults()}
 			p := &pdfPainter{r: r, upem: 1000, box: shape.Rect{XMax: 1000, YMax: 1000}, m: []Matrix{Identity()}}
 			p.beginGroup()
 			fuzzutil.PlayPaint(ops, p)
@@ -100,7 +100,7 @@ func FuzzColourPaintTree(f *testing.F) {
 			if want := !m.used[shape.CompositeXor] && !m.used[shape.CompositePlus]; m.vector() != want {
 				t.Fatalf("drawn as vectors: %v, want %v for modes %v", m.vector(), want, m.used)
 			}
-			r := &renderer{w: newContentWriter(nil), images: newImageCatalog(nil, Limits{}.withDefaults(), nil), lim: Limits{}.withDefaults(), pageW: 100, pageH: 100}
+			r := &renderer{w: newContentWriter(nil), images: newImageCatalog(nil, Limits{}.WithDefaults(), nil), lim: Limits{}.WithDefaults(), pageW: 100, pageH: 100}
 			p := &pdfPainter{r: r, upem: 1000, box: shape.Rect{XMax: 1000, YMax: 1000}, m: []Matrix{Identity()}}
 			p.beginGroup()
 			fuzzutil.PlayTree(ops, p)

@@ -272,6 +272,37 @@ jobs:
           path: ${{ runner.temp }}/timings.tsv
           if-no-files-found: warn
 
+  vectors:
+    # Every committed vector file (testdata/vectors.txt) regenerated with the
+    # pinned node and compared with what is committed: a generator edited
+    # without re-recording, a package changed, a recording made on another
+    # platform or a generator whose output varies fails. Linux x86-64 checks
+    # the platform-independent recordings, macOS arm64 those pinned to it.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: testdata/oracle-node/package.json
+      - name: install the oracle's modules
+        run: |
+          (cd testdata/oracle-node && npm ci)
+          (cd testdata/oracle-node-vl5 && npm ci)
+      - name: clone upstream Vega at the installed tag (the scene corpus reads its example data)
+        run: |
+          v=$(node -p "require('./testdata/oracle-node/node_modules/vega/package.json').version")
+          git clone --quiet --depth 1 --branch "v$v" https://github.com/vega/vega.git testdata/upstream-clones/vega
+      - name: regenerate every vector file and compare
+        run: go run ./internal/cmd/vectors -repeat 2
+
   benchgate:
     # The benchmarks must not get measurably slower or hungrier than the base:
     # on a push, the commit before it; by hand, the given ref. The thresholds

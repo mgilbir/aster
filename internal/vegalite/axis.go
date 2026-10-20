@@ -2,7 +2,6 @@ package vegalite
 
 import (
 	"math"
-	"strings"
 
 	"github.com/mgilbir/aster/internal/jsval"
 )
@@ -152,14 +151,23 @@ func parseLayerAxes(m *layerModel) {
 					if isSignalRef(cc, we.value) {
 						continue
 					}
-					orient := we.value.AsString()
-					if axisCount[orient] > 0 && !we.explicit {
+					// axisCount[orient], a plain object of the four orients:
+					// the orient is read as a key (so ["top"] counts as
+					// "top"), and any other key reads undefined or a member
+					// of Object.prototype, whose ++ makes NaN, never > 0 (a
+					// Go map's missing zero would count it: C88 of the
+					// 2026-10-18 audit).
+					orient := propKey(we.value)
+					count, isOrient := axisCount[orient]
+					if isOrient && count > 0 && !we.explicit {
 						opposite := oppositeOrient[orient]
-						if axisCount[orient] > axisCount[opposite] {
+						if count > axisCount[opposite] {
 							ac.set("orient", jsval.Str(opposite), false)
 						}
 					}
-					axisCount[orient]++
+					if isOrient {
+						axisCount[orient]++
+					}
 				}
 			}
 			child.b().comp.axes.del(channel)
@@ -270,12 +278,12 @@ type axisRuleParams struct {
 	axis       Value
 	channel    string
 	model      *unitModel
-	scaleType  string
+	scaleType  Value
 	orient     Value
 	labelAngle Value
 	format     Value
 	formatType Value
-	mark       string
+	mark       Value
 	config     Value
 }
 
@@ -479,7 +487,7 @@ func guideValues(cc *compileCtx, guide Value, fod Value) Value {
 	return undef
 }
 
-func defaultGrid(cc *compileCtx, scaleType string, fd Value) bool {
+func defaultGrid(cc *compileCtx, scaleType Value, fd Value) bool {
 	return !hasDiscreteDomain(scaleType) && isFieldDef(cc, fd) && !isBinning(fd.Get("bin")) && !isBinned(fd.Get("bin"))
 }
 
@@ -653,9 +661,9 @@ func defaultLabelFlush(typ, channel string) Value {
 	return undef
 }
 
-func defaultLabelOverlapAxis(typ, scaleType string, hasTimeUnit bool, sort Value) Value {
+func defaultLabelOverlapAxis(typ string, scaleType Value, hasTimeUnit bool, sort Value) Value {
 	if (hasTimeUnit && !isObject(sort)) || (typ != "nominal" && typ != "ordinal") {
-		if scaleType == "log" || scaleType == "symlog" {
+		if strIs(scaleType, "log") || strIs(scaleType, "symlog") {
 			return jsval.Str("greedy")
 		}
 		return jsval.True
@@ -663,8 +671,8 @@ func defaultLabelOverlapAxis(typ, scaleType string, hasTimeUnit bool, sort Value
 	return undef
 }
 
-func defaultTickCount(cc *compileCtx, fod Value, scaleType string, size Value, values Value) Value {
-	if !values.IsTruthy() && !hasDiscreteDomain(scaleType) && scaleType != "log" {
+func defaultTickCount(cc *compileCtx, fod Value, scaleType Value, size Value, values Value) Value {
+	if !values.IsTruthy() && !hasDiscreteDomain(scaleType) && !strIs(scaleType, "log") {
 		if isFieldDef(cc, fod) {
 			if isBinning(fod.Get("bin")) {
 				return sig("ceil(" + signalOf(size) + "/10)")
@@ -722,8 +730,8 @@ func getFieldDefTitle(m *unitModel, channel string) Value {
 	return undef
 }
 
-func defaultZindex(cc *compileCtx, mark string, fd Value) int {
-	if mark == "rect" && isDiscreteDef(cc, fd) {
+func defaultZindex(cc *compileCtx, mark Value, fd Value) int {
+	if strIs(mark, "rect") && isDiscreteDef(cc, fd) {
 		return 1
 	}
 	return 0
@@ -761,16 +769,16 @@ func getAxisConfigFromConfigTypes(cc *compileCtx, configTypes []string, config V
 	return jsval.Obj(out)
 }
 
-func getAxisConfigs(cc *compileCtx, channel, scaleType string, orient Value, config Value) axisConfigSet {
+func getAxisConfigs(cc *compileCtx, channel string, scaleType Value, orient Value, config Value) axisConfigSet {
 	var typeBased []string
 	switch {
-	case scaleType == "band":
+	case strIs(scaleType, "band"):
 		typeBased = []string{"axisDiscrete", "axisBand"}
-	case scaleType == "point":
+	case strIs(scaleType, "point"):
 		typeBased = []string{"axisDiscrete", "axisPoint"}
 	case isQuantitativeScale(scaleType):
 		typeBased = []string{"axisQuantitative"}
-	case scaleType == "time" || scaleType == "utc":
+	case strIs(scaleType, "time") || strIs(scaleType, "utc"):
 		typeBased = []string{"axisTemporal"}
 	}
 	axisChannel := "axisY"
@@ -870,7 +878,7 @@ func assembleAxisTitle(cc *compileCtx, title Value, config Value) Value {
 			cc.work(1)
 			parts = append(parts, joinItem(defaultTitle(cc, fd, config)))
 		}
-		return jsval.Str(strings.Join(parts, ", "))
+		return jsval.Str(joinCC(cc, parts, ", "))
 	}
 	return title
 }
@@ -934,10 +942,13 @@ func assembleAxis(cc *compileCtx, a *axisComponent, kind string, config Value, h
 				setAxisEncode(axis, pi.part, pi.vgProp, jsval.Arr(vgRef))
 				dropAt(i)
 			} else if ok && pi.isNull {
-				var sb strings.Builder
+				sb := newSbuf(cc)
 				for _, c := range conditions {
 					cc.work(1)
-					sb.WriteString(expression(cc, nil, c.Get("test"), nil) + " ? " + exprFromValueRefOrSignalRef(cc, jsval.Obj(omit(c, "test"))) + " : ")
+					sb.WriteString(expression(cc, nil, c.Get("test"), nil))
+					sb.WriteString(" ? ")
+					sb.WriteString(exprFromValueRefOrSignalRef(cc, jsval.Obj(omit(c, "test"))))
+					sb.WriteString(" : ")
 				}
 				sb.WriteString(exprFromValueRefOrSignalRef(cc, valueOrSignalRef))
 				axis.Set(prop, mkv("signal", sb.String()))
@@ -992,7 +1003,7 @@ func assembleAxis(cc *compileCtx, a *axisComponent, kind string, config Value, h
 			if !labelExpr.IsStr() {
 				throw("string.replace is not a function")
 			}
-			expr = jsval.Str(jsReplaceAll(labelExpr.StrValue(), "datum.label", signalOf(text)))
+			expr = jsval.Str(jsReplaceAll(cc, labelExpr.StrValue(), "datum.label", signalOf(text)))
 		}
 		setAxisEncode(axis, "labels", "text", mkv("signal", expr))
 	}

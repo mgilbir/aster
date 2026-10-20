@@ -1,0 +1,1 @@
+{"width":100,"height":100,"scales":[{"name":"s","type":"linear","domain":[0,10],"range":[0,100]},{"name":"o","type":"ordinal","domain":["a"],"range":["red"]}],"marks":[{"type":"text","encode":{"enter":{"text":{"signal":"copy('s') + '|' + isObject(copy('s')) + '|' + isDefined(copy('s')) + '|' + length(copy('s')) + '|' + copy('o') + '|' + scale(copy('s'), 5)"}}}}]}

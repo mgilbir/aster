@@ -145,7 +145,7 @@ func binToString(cc *compileCtx, bin Value) string {
 	if bin.IsBool() {
 		bin = normalizeBin(bin, "")
 	}
-	var b strings.Builder
+	b := newSbuf(cc)
 	b.WriteString("bin")
 	// keys(bin) and bin[p]: a string's characters and an array's elements
 	// by index.
@@ -157,9 +157,9 @@ func binToString(cc *compileCtx, bin Value) string {
 			// `${entries(x)}` stringifies [[k, v], ...] with commas.
 			var parts []string
 			for _, k := range keysOf(x) {
-				parts = append(parts, k, x.Get(k).AsString())
+				parts = append(parts, k, joinItem(x.Get(k))) // [k, v].join(","): null and undefined as ""
 			}
-			b.WriteString(varName("_" + p + "_" + strings.Join(parts, ",")))
+			b.WriteString(varName("_" + p + "_" + joinCC(cc, parts, ",")))
 		} else {
 			b.WriteString(varName("_" + p + "_" + x.AsString()))
 		}
@@ -315,7 +315,7 @@ func timeUnitToString(cc *compileCtx, tu Value) string {
 	if utc {
 		pfx = "utc"
 	}
-	var b strings.Builder
+	b := newSbuf(cc)
 	if rest.Lookup("unit").IsTruthy() {
 		b.WriteString(pfx)
 		for _, p := range rest.Keys() {

@@ -272,6 +272,39 @@ func parseParams(lower byte, pc int, seg string) ([]float64, error) {
 // (segments of at most a quarter turn). It follows vega's renderer including
 // its handling of smooth curve reflections.
 func RenderPath(ctx PathContext, path []PathCmd, l, t, sx, sy float64) error {
+	return renderPath(ctx, path, pathOffset{l: l, t: t}, sx, sy)
+}
+
+// pathOffset is the offset pathRender adds to every point (`x + l`): a
+// number, or a string the point's text is joined to, which the bound context
+// then reads as a number (`ma * x`).
+type pathOffset struct {
+	l, t       float64
+	ls, ts     string
+	lstr, tstr bool
+}
+
+func (o *pathOffset) x(v float64) float64 {
+	if o.lstr {
+		return jsval.StringToNumber(jsval.JSNumberString(v) + o.ls)
+	}
+	return v + o.l
+}
+
+func (o *pathOffset) y(v float64) float64 {
+	if o.tstr {
+		return jsval.StringToNumber(jsval.JSNumberString(v) + o.ts)
+	}
+	return v + o.t
+}
+
+// pathOffsetOf is the offset of item values (`item.x || 0`).
+func pathOffsetOf(w jsval.Walker, l, t jsval.Value) pathOffset {
+	cl, ct := coordOf(w, l), coordOf(w, t)
+	return pathOffset{l: cl.f, t: ct.f, ls: cl.s, ts: ct.s, lstr: cl.str, tstr: ct.str}
+}
+
+func renderPath(ctx PathContext, path []PathCmd, o pathOffset, sx, sy float64) error {
 	var (
 		x, y, controlX, controlY   float64
 		tempX, tempY               float64
@@ -294,48 +327,48 @@ func RenderPath(ctx PathContext, path []PathCmd, l, t, sx, sy float64) error {
 		case 'l':
 			x += p[0]
 			y += p[1]
-			ctx.LineTo(x+l, y+t)
+			ctx.LineTo(o.x(x), o.y(y))
 		case 'L':
 			x, y = p[0], p[1]
-			ctx.LineTo(x+l, y+t)
+			ctx.LineTo(o.x(x), o.y(y))
 		case 'h':
 			x += p[0]
-			ctx.LineTo(x+l, y+t)
+			ctx.LineTo(o.x(x), o.y(y))
 		case 'H':
 			x = p[0]
-			ctx.LineTo(x+l, y+t)
+			ctx.LineTo(o.x(x), o.y(y))
 		case 'v':
 			y += p[0]
-			ctx.LineTo(x+l, y+t)
+			ctx.LineTo(o.x(x), o.y(y))
 		case 'V':
 			y = p[0]
-			ctx.LineTo(x+l, y+t)
+			ctx.LineTo(o.x(x), o.y(y))
 		case 'm':
 			x += p[0]
 			y += p[1]
 			anchorX, anchorY = x, y
-			ctx.MoveTo(x+l, y+t)
+			ctx.MoveTo(o.x(x), o.y(y))
 		case 'M':
 			x, y = p[0], p[1]
 			anchorX, anchorY = x, y
-			ctx.MoveTo(x+l, y+t)
+			ctx.MoveTo(o.x(x), o.y(y))
 		case 'c':
 			tempX = x + p[4]
 			tempY = y + p[5]
 			controlX = x + p[2]
 			controlY = y + p[3]
-			ctx.BezierCurveTo(x+p[0]+l, y+p[1]+t, controlX+l, controlY+t, tempX+l, tempY+t)
+			ctx.BezierCurveTo(o.x(x+p[0]), o.y(y+p[1]), o.x(controlX), o.y(controlY), o.x(tempX), o.y(tempY))
 			x, y = tempX, tempY
 		case 'C':
 			x, y = p[4], p[5]
 			controlX, controlY = p[2], p[3]
-			ctx.BezierCurveTo(p[0]+l, p[1]+t, controlX+l, controlY+t, x+l, y+t)
+			ctx.BezierCurveTo(o.x(p[0]), o.y(p[1]), o.x(controlX), o.y(controlY), o.x(x), o.y(y))
 		case 's':
 			tempX = x + p[2]
 			tempY = y + p[3]
 			controlX = 2*x - controlX
 			controlY = 2*y - controlY
-			ctx.BezierCurveTo(controlX+l, controlY+t, x+p[0]+l, y+p[1]+t, tempX+l, tempY+t)
+			ctx.BezierCurveTo(o.x(controlX), o.y(controlY), o.x(x+p[0]), o.y(y+p[1]), o.x(tempX), o.y(tempY))
 			controlX = x + p[0]
 			controlY = y + p[1]
 			x, y = tempX, tempY
@@ -343,7 +376,7 @@ func RenderPath(ctx PathContext, path []PathCmd, l, t, sx, sy float64) error {
 			tempX, tempY = p[2], p[3]
 			controlX = 2*x - controlX
 			controlY = 2*y - controlY
-			ctx.BezierCurveTo(controlX+l, controlY+t, p[0]+l, p[1]+t, tempX+l, tempY+t)
+			ctx.BezierCurveTo(o.x(controlX), o.y(controlY), o.x(p[0]), o.y(p[1]), o.x(tempX), o.y(tempY))
 			x, y = tempX, tempY
 			controlX, controlY = p[0], p[1]
 		case 'q':
@@ -351,11 +384,11 @@ func RenderPath(ctx PathContext, path []PathCmd, l, t, sx, sy float64) error {
 			tempY = y + p[3]
 			controlX = x + p[0]
 			controlY = y + p[1]
-			ctx.QuadraticCurveTo(controlX+l, controlY+t, tempX+l, tempY+t)
+			ctx.QuadraticCurveTo(o.x(controlX), o.y(controlY), o.x(tempX), o.y(tempY))
 			x, y = tempX, tempY
 		case 'Q':
 			tempX, tempY = p[2], p[3]
-			ctx.QuadraticCurveTo(p[0]+l, p[1]+t, tempX+l, tempY+t)
+			ctx.QuadraticCurveTo(o.x(p[0]), o.y(p[1]), o.x(tempX), o.y(tempY))
 			x, y = tempX, tempY
 			controlX, controlY = p[0], p[1]
 		case 't':
@@ -385,7 +418,7 @@ func RenderPath(ctx PathContext, path []PathCmd, l, t, sx, sy float64) error {
 				controlX, controlY = x, y
 			}
 			tempControlX, tempControlY = controlX, controlY
-			ctx.QuadraticCurveTo(controlX+l, controlY+t, tempX+l, tempY+t)
+			ctx.QuadraticCurveTo(o.x(controlX), o.y(controlY), o.x(tempX), o.y(tempY))
 			x, y = tempX, tempY
 			controlX = x + p[0]
 			controlY = y + p[1]
@@ -393,14 +426,14 @@ func RenderPath(ctx PathContext, path []PathCmd, l, t, sx, sy float64) error {
 			tempX, tempY = p[0], p[1]
 			controlX = 2*x - controlX
 			controlY = 2*y - controlY
-			ctx.QuadraticCurveTo(controlX+l, controlY+t, tempX+l, tempY+t)
+			ctx.QuadraticCurveTo(o.x(controlX), o.y(controlY), o.x(tempX), o.y(tempY))
 			x, y = tempX, tempY
 		case 'a':
-			drawArc(ctx, x+l, y+t, p[0], p[1], p[2], p[3], p[4], p[5]+x+l, p[6]+y+t)
+			drawArc(ctx, o.x(x), o.y(y), p[0], p[1], p[2], p[3], p[4], o.x(p[5]+x), o.y(p[6]+y))
 			x += p[5]
 			y += p[6]
 		case 'A':
-			drawArc(ctx, x+l, y+t, p[0], p[1], p[2], p[3], p[4], p[5]+l, p[6]+t)
+			drawArc(ctx, o.x(x), o.y(y), p[0], p[1], p[2], p[3], p[4], o.x(p[5]), o.y(p[6]))
 			x, y = p[5], p[6]
 		case 'z', 'Z':
 			x, y = anchorX, anchorY

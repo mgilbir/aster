@@ -1,0 +1,5 @@
+{"width": 60, "height": 40, "marks": [
+ {"type": "rect", "encode": {"enter": {"x": {"value": 5}, "x2": 0, "y": {"value": 30}, "y2": {"signal": "null"}, "fill": {"value": "red"}}}},
+ {"type": "rect", "encode": {"enter": {"x": {"value": "9"}, "x2": {"value": "10"}, "y": {"value": 1}, "height": {"value": 4}, "fill": {"value": "blue"}}}},
+ {"type": "text", "encode": {"enter": {"x": {"value": 1}, "y": {"value": 20}, "text": {"signal": "'w'"}}, "update": {"x2": {"signal": "null"}}}}
+]}

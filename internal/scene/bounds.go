@@ -9,7 +9,13 @@ import (
 // Bounds is an axis-aligned bounding box. The empty box has X1 > X2 (both
 // sentinels at ±MaxFloat64), so Union/Add on it behave as on a fresh JavaScript
 // Bounds. The zero value is NOT empty: use NewBounds or Clear.
-type Bounds struct{ X1, Y1, X2, Y2 float64 }
+//
+// A coordinate can be a string, as upstream's can (see boundStrs); the
+// field then holds the number the string converts to.
+type Bounds struct {
+	X1, Y1, X2, Y2 float64
+	s              *boundStrs
+}
 
 // NewBounds returns an empty box.
 func NewBounds() Bounds {
@@ -22,17 +28,29 @@ func NewBounds() Bounds {
 func (b *Bounds) Clear() *Bounds {
 	b.X1, b.Y1 = math.MaxFloat64, math.MaxFloat64
 	b.X2, b.Y2 = -math.MaxFloat64, -math.MaxFloat64
+	b.s = nil
 	return b
+}
+
+// Clone is upstream's `new Bounds(b)`: a cleared box that b is united into.
+// That is not a copy: a coordinate of b that no comparison orders (a NaN
+// extent, as a size given as text makes) is lost, and the clone keeps the
+// cleared box's sentinel in its place.
+func (b *Bounds) Clone() Bounds {
+	c := NewBounds()
+	c.Union(b)
+	return c
 }
 
 // Empty reports whether b is the cleared box.
 func (b *Bounds) Empty() bool {
-	return b.X1 == math.MaxFloat64 && b.Y1 == math.MaxFloat64 &&
+	return b.s == nil && b.X1 == math.MaxFloat64 && b.Y1 == math.MaxFloat64 &&
 		b.X2 == -math.MaxFloat64 && b.Y2 == -math.MaxFloat64
 }
 
 // Set assigns the box, ordering the corners.
 func (b *Bounds) Set(x1, y1, x2, y2 float64) *Bounds {
+	b.s = nil
 	if x2 < x1 {
 		b.X2, b.X1 = x1, x2
 	} else {
@@ -49,6 +67,10 @@ func (b *Bounds) Set(x1, y1, x2, y2 float64) *Bounds {
 // Add grows b to include the point. NaN coordinates are ignored, as the
 // comparisons in upstream are all false for NaN.
 func (b *Bounds) Add(x, y float64) *Bounds {
+	if b.s != nil {
+		b.addSlow(x, y)
+		return b
+	}
 	if x < b.X1 {
 		b.X1 = x
 	}
@@ -66,6 +88,10 @@ func (b *Bounds) Add(x, y float64) *Bounds {
 
 // Expand grows every side by d.
 func (b *Bounds) Expand(d float64) *Bounds {
+	if b.s != nil {
+		b.expandSlow(d)
+		return b
+	}
 	b.X1 -= d
 	b.Y1 -= d
 	b.X2 += d
@@ -75,6 +101,7 @@ func (b *Bounds) Expand(d float64) *Bounds {
 
 // Round snaps outward to integers.
 func (b *Bounds) Round() *Bounds {
+	b.s = nil
 	b.X1, b.Y1 = math.Floor(b.X1), math.Floor(b.Y1)
 	b.X2, b.Y2 = math.Ceil(b.X2), math.Ceil(b.Y2)
 	return b
@@ -82,6 +109,7 @@ func (b *Bounds) Round() *Bounds {
 
 // Scale multiplies all coordinates.
 func (b *Bounds) Scale(s float64) *Bounds {
+	b.s = nil
 	b.X1 *= s
 	b.Y1 *= s
 	b.X2 *= s
@@ -91,6 +119,10 @@ func (b *Bounds) Scale(s float64) *Bounds {
 
 // Translate shifts the box.
 func (b *Bounds) Translate(dx, dy float64) *Bounds {
+	if b.s != nil {
+		b.translateSlow(dx, dy)
+		return b
+	}
 	b.X1 += dx
 	b.X2 += dx
 	b.Y1 += dy
@@ -123,6 +155,10 @@ func (b *Bounds) Rotate(angle, x, y float64) *Bounds {
 
 // Union grows b to enclose o.
 func (b *Bounds) Union(o *Bounds) *Bounds {
+	if b.s != nil || o.s != nil {
+		b.unionSlow(o)
+		return b
+	}
 	if o.X1 < b.X1 {
 		b.X1 = o.X1
 	}
@@ -140,6 +176,10 @@ func (b *Bounds) Union(o *Bounds) *Bounds {
 
 // Intersect shrinks b to its overlap with o.
 func (b *Bounds) Intersect(o *Bounds) *Bounds {
+	if b.s != nil || o.s != nil {
+		b.intersectSlow(o)
+		return b
+	}
 	if o.X1 > b.X1 {
 		b.X1 = o.X1
 	}
@@ -157,16 +197,25 @@ func (b *Bounds) Intersect(o *Bounds) *Bounds {
 
 // Encloses reports whether b contains o.
 func (b *Bounds) Encloses(o *Bounds) bool {
+	if b.s != nil || o.s != nil {
+		return b.enclosesSlow(o)
+	}
 	return b.X1 <= o.X1 && b.X2 >= o.X2 && b.Y1 <= o.Y1 && b.Y2 >= o.Y2
 }
 
 // AlignsWith reports whether any side of b coincides with the same side of o.
 func (b *Bounds) AlignsWith(o *Bounds) bool {
+	if b.s != nil || o.s != nil {
+		return b.alignsWithSlow(o)
+	}
 	return b.X1 == o.X1 || b.X2 == o.X2 || b.Y1 == o.Y1 || b.Y2 == o.Y2
 }
 
 // Intersects reports whether the boxes overlap (touching counts).
 func (b *Bounds) Intersects(o *Bounds) bool {
+	if b.s != nil || o.s != nil {
+		return b.intersectsSlow(o)
+	}
 	return !(b.X2 < o.X1 || b.X1 > o.X2 || b.Y2 < o.Y1 || b.Y1 > o.Y2)
 }
 

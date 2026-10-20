@@ -191,16 +191,19 @@ func (r *renderer) drawTextLine(str string, st gstate, x, y float64) (float64, e
 	if r.shaper == nil {
 		return x, fmt.Errorf("svgpdf: text rendering requires a shaper (text measurer)")
 	}
-	// Text is painted with the fill color only; Vega does not stroke text.
-	if st.fill.None {
+	// Text is filled, then stroked, as vega-scenegraph's text mark does
+	// (fillText, then strokeText) and a browser draws SVG text (C42).
+	fill := !st.fill.None
+	stroke := !st.stroke.None && st.strokeWidth > 0
+	if !fill && !stroke {
 		return x, nil
 	}
-	if st.fill.Gradient != "" {
-		return x, fmt.Errorf("svgpdf: a gradient fill on text is not supported")
+	if fill && st.fill.Gradient != "" || stroke && st.stroke.Gradient != "" {
+		return x, fmt.Errorf("svgpdf: a gradient paint on text is not supported")
 	}
 
 	if r.textTotal += len(str); r.textTotal > r.lim.MaxTextBytes {
-		return x, limitErr("text content exceeds %d bytes", r.lim.MaxTextBytes)
+		return x, limitErr("%s: text content exceeds %d bytes", r.lim.Input, r.lim.MaxTextBytes)
 	}
 	if err := ctxErr(r.ctx); err != nil {
 		return x, err
@@ -239,11 +242,26 @@ func (r *renderer) drawTextLine(str string, st gstate, x, y float64) (float64, e
 		defer func() { r.w.links = links }()
 	}
 
-	r.w.fillColor(st.fill.Color)
-	// Reconcile the alpha (text is fill-only, so fill and stroke alpha match).
 	fillAlpha := st.opacity * st.fillOpacity * st.fill.alpha()
-	r.w.setAlpha(fillAlpha, fillAlpha)
+	strokeAlpha := st.opacity * st.strokeOpacity * st.stroke.alpha()
+	if !stroke {
+		strokeAlpha = fillAlpha
+	} else if !fill {
+		fillAlpha = strokeAlpha
+	}
+	if fill {
+		r.w.fillColor(st.fill.Color)
+	}
+	if stroke {
+		r.setStroke(st)
+	}
+	r.w.setAlpha(fillAlpha, strokeAlpha)
 
+	// A run's text is written once, for extraction: as the text the fill
+	// draws, or, with no fill, as the text the stroke draws (text
+	// rendering mode 1) where the run is in a font, and invisible (3)
+	// around its stroked outlines where it is not.
+	start := penX
 	for _, run := range runs {
 		var f *pdfFont
 		if r.fonts != nil {
@@ -251,25 +269,98 @@ func (r *renderer) drawTextLine(str string, st gstate, x, y float64) (float64, e
 			if f, err = r.fonts.fontFor(run.Face); err != nil {
 				return x, err
 			}
-		}
-		if hasColour(run) {
-			var err error
-			if penX, err = r.drawTextRunColour(run, f, penX, str, st); err != nil {
-				return x, err
-			}
-			continue
+			f = r.fonts.forRun(f, run)
 		}
 		var err error
-		if f != nil {
+		switch {
+		case f != nil && f.outlined:
+			penX, err = r.drawTextRunHidden(f, run, penX, str, st, fill)
+		case !fill:
+			penX, err = r.strokeTextRun(f, run, penX, str)
+		case hasColour(run):
+			penX, err = r.drawTextRunColour(run, f, penX, str, st)
+		case f != nil:
 			penX, err = r.drawTextRunFont(f, run, penX, str)
-		} else {
-			penX, err = r.drawTextRunOutline(run, penX)
+		default:
+			penX, err = r.drawTextRunUnwritten(run, penX, str, true, false)
 		}
 		if err != nil {
 			return x, err
 		}
 	}
+	if fill && stroke {
+		// The stroke over every fill of the line, as one strokeText over
+		// one fillText: as outlines, the text being written already.
+		penX = start
+		for _, run := range runs {
+			penX, _ = r.drawTextRunOutline(run, penX, false, true)
+		}
+	}
 	return end, nil
+}
+
+// setStroke writes the stroke state of a stroked shape: its colour, width,
+// joins, caps and dashes, each only where it differs from the stream's.
+func (r *renderer) setStroke(st gstate) {
+	r.w.strokeColor(st.stroke.Color)
+	r.w.lineWidth(st.strokeWidth)
+	r.w.setMiterLimit(st.miterLimit)
+	r.w.setLineCap(st.lineCap)
+	r.w.setLineJoin(st.lineJoin)
+	r.w.setDash(st.dashPattern, st.dashOffset)
+}
+
+// strokeTextRun draws a run of text that is stroked and not filled: in its
+// font, in text rendering mode 1, which strokes the glyphs; otherwise as
+// stroked outlines, and the run as invisible text in its font where it has
+// one (a colour run's), so that it is found and copied as text. Colour
+// glyphs are not stroked: their outline is not what they draw.
+func (r *renderer) strokeTextRun(f *pdfFont, run text.Run, penX float64, str string) (float64, error) {
+	if f == nil {
+		return r.drawTextRunUnwritten(run, penX, str, false, true)
+	}
+	if !hasColour(run) {
+		r.w.textRender(1)
+		end, err := r.drawTextRunFont(f, run, penX, str)
+		r.w.textRender(0)
+		return end, err
+	}
+	return r.drawTextRunHidden(f, run, penX, str, gstate{}, false)
+}
+
+// drawTextRunHidden draws a run as outlines, filled or (with fill false)
+// stroked, and writes it as invisible text (rendering mode 3) in font f,
+// so that it is found and copied as text: a run f cannot draw (see
+// fontFor), or a colour run's text. A colour run, filled, is drawn with its
+// colour glyphs, which writes the invisible text itself.
+func (r *renderer) drawTextRunHidden(f *pdfFont, run text.Run, penX float64, str string, st gstate, fill bool) (float64, error) {
+	if fill && hasColour(run) {
+		return r.drawTextRunColour(run, f, penX, str, st)
+	}
+	r.w.textRender(3)
+	_, err := r.drawTextRunFont(f, run, penX, str)
+	r.w.textRender(0)
+	if err != nil {
+		return penX, err
+	}
+	return r.drawTextRunOutline(run, penX, fill, !fill)
+}
+
+// drawTextRunUnwritten draws a run in a face that has no font to write it in
+// (no font program can be had of it, or it does not parse) as outlines. In
+// the modes that write text, its source text is the ActualText of what it
+// draws, as a colour run's is when it has no font (C43's class): a reader
+// that reads ActualText around paths finds it; poppler and PDFium do not.
+func (r *renderer) drawTextRunUnwritten(run text.Run, penX float64, str string, fill, stroke bool) (float64, error) {
+	actual := r.fonts != nil && run.Start >= 0 && run.Start < run.End && run.End <= len(str)
+	if actual {
+		r.w.beginActualText(str[run.Start:run.End])
+	}
+	end, err := r.drawTextRunOutline(run, penX, fill, stroke)
+	if actual {
+		r.w.endMarkedContent()
+	}
+	return end, err
 }
 
 // drawTextRunFont emits one shaped run as a PDF text object: a TJ array of
@@ -320,6 +411,7 @@ func (r *renderer) drawTextRunFont(f *pdfFont, run text.Run, penX float64, str s
 	for _, g := range run.Glyphs {
 		gid := uint16(g.GID)
 		f.used[gid] = true
+		code := f.code(gid)
 
 		// Vertical offset (mark positioning): PDF text rise. Shaping y is
 		// up; under the doubly-flipped text matrix a positive rise moves the
@@ -340,7 +432,7 @@ func (r *renderer) drawTextRunFont(f *pdfFont, run text.Run, penX float64, str s
 			penText -= num * size / 1000
 		}
 
-		r.gidBuf = append(r.gidBuf, gid)
+		r.gidBuf = append(r.gidBuf, code)
 		penText += float64(f.parsed.Advance(gid)) / upem * size
 		penX += g.Advance
 	}
@@ -409,11 +501,16 @@ func (r *renderer) mapRun(f *pdfFont, run text.Run, str string) (conflict bool) 
 	return conflict
 }
 
-// drawTextRunOutline emits one shaped run as filled glyph outlines (the
-// font-free representation).
-func (r *renderer) drawTextRunOutline(run text.Run, penX float64) (float64, error) {
+// drawTextRunOutline emits one shaped run as glyph outlines (the font-free
+// representation), filled or stroked. Stroked, a colour glyph is left out,
+// as its outline is not what it draws.
+func (r *renderer) drawTextRunOutline(run text.Run, penX float64, fill, stroke bool) (float64, error) {
 	emitted := false
 	for _, g := range run.Glyphs {
+		if stroke && colourGlyph(run.Face, g.GID) {
+			penX += g.Advance
+			continue
+		}
 		outline, ok := r.glyphOutline(run.Face, g.GID, run.Size)
 		if !ok {
 			// A glyph whose outline cannot be read (malformed, or a format
@@ -433,7 +530,7 @@ func (r *renderer) drawTextRunOutline(run text.Run, penX float64) (float64, erro
 	if emitted {
 		// Glyph contours use the nonzero winding rule (TrueType/CFF
 		// convention: counters wind opposite to outer contours).
-		r.w.paint(true, false, false)
+		r.w.paint(fill, stroke, false)
 	}
 	return penX, nil
 }

@@ -136,7 +136,7 @@ func (f *facetModel) getHeaderLayoutMixins() *Object {
 			if lh.facetFieldDef.IsTruthy() {
 				titleOrient := getHeaderProperty("titleOrient", lh.facetFieldDef.Get("header"), f.config, channel)
 				if titleOrient.IsStr() && (titleOrient.StrValue() == "right" || titleOrient.StrValue() == "bottom") {
-					headerChannel := getHeaderChannel(channel, titleOrient.StrValue())
+					headerChannel := getHeaderChannel(channel, titleOrient)
 					ta := layout.Lookup("titleAnchor")
 					if ta.IsNullish() {
 						ta = mkv()
@@ -249,7 +249,7 @@ func (f *facetModel) getCardinalityAggregateForChild() cardinalityAggregate {
 		for _, channel := range positionScaleChannels {
 			cs, ok := f.child.b().comp.scales.get(channel)
 			if ok && cs != nil && !cs.merged {
-				typ, rng := cs.get("type").AsString(), cs.get("range")
+				typ, rng := cs.get("type"), cs.get("range")
 				if hasDiscreteDomain(typ) && isVgRangeStep(f.b().ctx, rng) {
 					domain := assembleDomain(f.child, channel)
 					if field := getFieldFromDomain(cc, domain); field != "" {

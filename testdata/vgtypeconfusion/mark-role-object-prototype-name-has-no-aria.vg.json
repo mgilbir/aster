@@ -1,0 +1,1 @@
+{"width":50,"height":50,"marks":[{"type":"rect","role":"constructor","encode":{"enter":{"x":{"value":1},"y":{"value":1},"width":{"value":10},"height":{"value":10},"description":{"value":"d"}}}},{"type":"text","role":"toString","encode":{"enter":{"x":{"value":1},"y":{"value":30},"text":{"value":"t"}}}}]}

@@ -36,10 +36,10 @@ func potentialStackedChannel(cc *compileCtx, encoding Value, x string, markDef V
 	if x == chX {
 		y = chY
 	}
-	mark, orient := markDef.Get("type").AsString(), markDefOrient(markDef)
-	isCartesianBarOrArea := x == chX && (mark == "bar" || mark == "area")
+	mark, orient := markDef.Get("type"), markDefOrient(markDef)
+	isCartesianBarOrArea := x == chX && strIn(mark, "bar", "area")
 	if cc.v5 {
-		isCartesianBarOrArea = x == chX && mark == "bar"
+		isCartesianBarOrArea = x == chX && strIs(mark, "bar")
 	}
 	xDef, yDef := encoding.Get(x), encoding.Get(y)
 	if isFieldDef(cc, xDef) && isFieldDef(cc, yDef) {
@@ -102,8 +102,8 @@ func stackOf(cc *compileCtx, m Value, encoding Value) *stackProperties {
 	if !isMarkDef(cc, m) {
 		markDef = mkv("type", m)
 	}
-	mark := markDef.Get("type").AsString()
-	if !stackableMarks[mark] {
+	mark := markDef.Get("type")
+	if !setHas(stackableMarks, mark) {
 		return nil
 	}
 	fieldChannel := potentialStackedChannel(cc, encoding, chX, markDef)
@@ -170,7 +170,7 @@ func stackOf(cc *compileCtx, m Value, encoding Value) *stackProperties {
 		} else {
 			offsetV = s
 		}
-	} else if stackByDefaultMarks[mark] {
+	} else if setHas(stackByDefaultMarks, mark) {
 		offsetV = jsval.Str("zero")
 	}
 	// isStackOffset: `s in STACK_OFFSET_INDEX` in 5.8, which a name every
@@ -179,10 +179,7 @@ func stackOf(cc *compileCtx, m Value, encoding Value) *stackProperties {
 	if !offsetV.IsTruthy() {
 		return nil
 	}
-	switch key := offsetV.AsString(); {
-	case key == "zero" || key == "center" || key == "normalize":
-	case cc.v5 && isInheritedKey(key):
-	default:
+	if key := propKey(offsetV); !stackOffsetIndex[key] && !(cc.v5 && isInheritedKey(key)) {
 		return nil
 	}
 	offset := ""
@@ -209,7 +206,7 @@ func stackOf(cc *compileCtx, m Value, encoding Value) *stackProperties {
 	if agg := stackedFieldDef.Get("aggregate"); isFieldDef(cc, stackedFieldDef) && agg.IsTruthy() && !(agg.IsStr() && sumOps[agg.StrValue()]) {
 		cc.warn(msgStackNonSummativeAggregate(agg))
 	}
-	impute := isPathMarkName(mark)
+	impute := isPathMark(mark)
 	if stackedFieldDef.Get("impute").IsNull() {
 		impute = false
 	}
@@ -219,13 +216,20 @@ func stackOf(cc *compileCtx, m Value, encoding Value) *stackProperties {
 	}
 }
 
+// stackOffsetIndex is upstream's STACK_OFFSET_INDEX, read with an offset as
+// its key.
+var stackOffsetIndex = strSet([]string{"zero", "center", "normalize"})
+
 // sumOps is upstream's SUM_OPS: the aggregates a stack sums meaningfully.
 var sumOps = strSet([]string{"count", "sum", "distinct", "valid", "missing"})
 
-func isPathMarkName(m string) bool { return m == "line" || m == "area" || m == "trail" }
+// isPathMark is ['line', 'area', 'trail'].includes(m): the mark type as
+// given, which an array never matches.
+func isPathMark(m Value) bool { return strIs(m, "line") || strIs(m, "area") || strIs(m, "trail") }
 
-func isRectBasedMark(cc *compileCtx, m string) bool {
-	switch m {
+// isRectBasedMark is [...].includes(m), as isPathMark.
+func isRectBasedMark(cc *compileCtx, m Value) bool {
+	switch s, _ := m.Strict(); s {
 	case "rect", "bar", "image", "arc":
 		return true
 	case "tick":

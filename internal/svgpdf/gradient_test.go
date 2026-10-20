@@ -17,7 +17,7 @@ const twoStops = `<stop offset="0" stop-color="white"/><stop offset="1" stop-col
 // gradContent is the uncompressed content stream and the shadings of svg.
 func gradContent(t *testing.T, svg string) (string, []*gradient, error) {
 	t.Helper()
-	root, err := parseSVG(context.Background(), svg, Limits{}.withDefaults())
+	root, err := parseSVG(context.Background(), svg, Limits{}.WithDefaults())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -410,7 +410,7 @@ func init() {
 					s.chargeMembers(len(names))
 					for _, k := range names {
 						if !a.ObjValue().Has(k) {
-							out.Set(k, t.proto.get(k))
+							out.Set(k, t.proto.Get(k))
 						}
 					}
 				}

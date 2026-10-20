@@ -1,7 +1,7 @@
 // Records the Vega that upstream vega-lite compile() emits for every spec under
 // specs/<group>/*.vl.json, one minified JSON object per line:
 //   {"name":"group/file","vega":{...}}   (or {"name":..,"error":"..."})
-// Usage: NODE_PATH=<node_modules with vega-lite@6.4.3> node gen_reference.mjs | gzip -9 > reference.jsonl.gz
+// Usage: TZ=Europe/Amsterdam NODE_PATH=<node_modules with vega-lite@6.4.3> node gen_reference.mjs | gzip -9 > reference.jsonl.gz
 // For the Vega-Lite 5.8 references, point NODE_PATH at testdata/oracle-node-vl5/node_modules and write reference_vl5.jsonl.gz.
 import { createRequire } from 'node:module';
 import path from 'node:path';

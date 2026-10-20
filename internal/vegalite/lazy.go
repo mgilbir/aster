@@ -39,17 +39,30 @@ type compileCtx struct {
 	sigIdx signalIndex
 	// transforms counts the data transforms parsed so far (see maxTransforms).
 	transforms int
-	// maxViews is Options.MaxViews (see countViews).
-	maxViews int
+	// maxViews is Options.MaxViews (see countViews); configBytes the size
+	// of the config and theme every view compiles.
+	maxViews    int
+	configBytes float64
 	// warnFn is Options.Warn.
 	warnFn func(string) error
 	// titleMerges are the title field-def lists merged so far, by their
-	// first element (see mergeTitleFieldDefs).
+	// first element (see mergeTitleFieldDefs); titleAcc the buffers of the
+	// titles mergeTitle made, by the title each made last.
 	titleMerges map[*Value]*titleMerge
+	titleAcc    map[titleKey]*sbuf
 	// jsr is the compilation's JavaScript realm (see jsRealm).
 	jsr *jsRealm
+	// conv is the compilation's conversion scope (jsval.ConversionScope):
+	// the objects it gives a prototype convert to text as JavaScript's do
+	// until Compile returns.
+	conv *jsval.ConversionScope
 	// pending is the work counted and not yet charged (see work).
 	pending int64
+	// ledger is the call's ledger (nil: unlimited), which alloc charges
+	// for the compilation's memory; memAhead is what alloc took from it and
+	// has not used yet, memUsed what it charged in all (see mem.go).
+	ledger            *budget.Ledger
+	memAhead, memUsed int64
 }
 
 // check panics with the context's error once the caller's context is done.
@@ -100,6 +113,25 @@ func (c *compileCtx) flushWork() {
 	if err := c.meter.Work(n); err != nil {
 		panic(cancelError{err})
 	}
+}
+
+// ctxErr is the caller's context's error, nil while it runs.
+func (c *compileCtx) ctxErr() error {
+	if c == nil || c.ctx == nil {
+		return nil
+	}
+	return c.ctx.Err()
+}
+
+// walker is the call's jsval.Walker (its ledger and deadline), with which
+// the compiler takes the String of a specification's value it builds text
+// from (a joined title): the walk is metered and its text charged as the
+// engine's walks are (ADR 0018).
+func (c *compileCtx) walker() jsval.Walker {
+	if c == nil {
+		return jsval.Walker{}
+	}
+	return jsval.WalkerFor(c.ctx)
 }
 
 // warn logs a warning as upstream's log.warn does: the caller's Options.Warn
@@ -156,21 +188,85 @@ func signalOf(v Value) string {
 }
 
 // resolveLazy replaces every lazy signal in v with its evaluated expression.
+// The compiled specification may share objects (a config's or a
+// definition's, reused by every mark that reads them), so it is a graph, not
+// a tree, and a walk of the tree it stands for is exponential in the depth
+// of sharing. The walk is made as a tree walk up to resolveLazyTreeVisits
+// values, which an output's usual size stays far below and which costs no
+// allocation; past them it starts again with a visited set, so each array and
+// object is visited once. Resolving is idempotent (a resolved signal is no
+// longer lazy), so the second walk only finishes the first.
 func resolveLazy(cc *compileCtx, v Value) {
+	left := resolveLazyTreeVisits
+	if resolveLazyTree(cc, v, &left) {
+		return
+	}
+	seen := map[jsval.InternKey]struct{}{}
+	var charged int64
+	var walk func(v Value)
+	walk = func(v Value) {
+		cc.work(1)
+		switch v.Kind() {
+		case jsval.KindArr, jsval.KindObj:
+			k := v.MapKey()
+			if _, ok := seen[k]; ok {
+				return
+			}
+			cc.alloc(scratchEntryBytes)
+			charged += scratchEntryBytes
+			seen[k] = struct{}{}
+		}
+		switch v.Kind() {
+		case jsval.KindArr:
+			for _, it := range v.Items() {
+				walk(it)
+			}
+		case jsval.KindObj:
+			resolveLazyObject(v.ObjValue())
+			o := v.ObjValue()
+			for i := 0; i < o.Len(); i++ {
+				walk(o.ValueAt(i))
+			}
+		}
+	}
+	defer func() { cc.free(charged) }() // the visited set is scratch
+	walk(v)
+}
+
+// resolveLazyTreeVisits bounds resolveLazy's tree walk (see resolveLazy).
+const resolveLazyTreeVisits = 1 << 20
+
+// resolveLazyTree walks v as a tree, resolving lazy signals, and reports
+// false once it has visited *left values without finishing.
+func resolveLazyTree(cc *compileCtx, v Value, left *int) bool {
+	if *left <= 0 {
+		return false
+	}
+	*left--
 	cc.work(1)
 	switch v.Kind() {
 	case jsval.KindArr:
 		for _, it := range v.Items() {
-			resolveLazy(cc, it)
+			if !resolveLazyTree(cc, it, left) {
+				return false
+			}
 		}
 	case jsval.KindObj:
 		o := v.ObjValue()
-		if fn, ok := lazyFn(o); ok {
-			o.Set("signal", jsval.Str(fn()))
-			o.SetStringer(nil)
-		}
+		resolveLazyObject(o)
 		for i := 0; i < o.Len(); i++ {
-			resolveLazy(cc, o.ValueAt(i))
+			if !resolveLazyTree(cc, o.ValueAt(i), left) {
+				return false
+			}
 		}
+	}
+	return true
+}
+
+// resolveLazyObject evaluates o's expression when it is a lazy signal.
+func resolveLazyObject(o *Object) {
+	if fn, ok := lazyFn(o); ok {
+		o.Set("signal", jsval.Str(fn()))
+		o.SetStringer(nil)
 	}
 }

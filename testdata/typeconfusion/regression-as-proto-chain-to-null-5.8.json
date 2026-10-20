@@ -1,0 +1,1 @@
+{"data":{"values":[{"a":1,"b":2,"date":"2020-01-01"}]},"transform":[{"regression":"b","on":"a","as":[{"__proto__":{"__proto__":null}},"y"]}],"mark":"point","encoding":{"x":{"field":"date","type":"temporal"},"y":{"field":"b","type":"quantitative"}}}

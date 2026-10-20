@@ -1,0 +1,1 @@
+{"scales":[{"name":"byMonth","type":"utc"},{"name":"byQuarter"},{"name":"count20"}],"axes":[{"scale":"byMonth","orient":"bottom","tickCount":"constructor"},{"scale":"byQuarter","orient":"top","tickCount":3},{"scale":"count20","orient":"left"}]}

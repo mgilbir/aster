@@ -1,0 +1,1 @@
+{"width":100,"height":50,"scales":[{"name":"sz","type":"linear","domain":[0,10],"range":[10,100]}],"legends":[{"size":"sz","title":"each","orient":"right","columns":"1e999"}]}

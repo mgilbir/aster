@@ -94,6 +94,9 @@ func DefaultLocale() *Locale {
 // NumberFormat is locale.format(spec): the d3 format for a specifier,
 // memoised.
 func (l *Locale) NumberFormat(spec string) (*NumberFormat, error) {
+	if objectPrototypeMember(spec) {
+		return &NumberFormat{member: spec}, nil
+	}
 	if e := l.lastNum.Load(); e != nil && e.key == spec {
 		return e.val, nil
 	}
@@ -264,6 +267,13 @@ func (l *Locale) TimeFormat(spec string) *TimeFormat { return l.timeFormat(spec,
 func (l *Locale) UTCFormat(spec string) *TimeFormat { return l.timeFormat(spec, true) }
 
 func (l *Locale) timeFormat(spec string, utc bool) *TimeFormat {
+	if objectPrototypeMember(spec) {
+		z := l.Local
+		if utc {
+			z = UTC
+		}
+		return &TimeFormat{loc: l.Time, zone: z, spec: spec, member: spec}
+	}
 	key := timeKey{spec, utc}
 	if e := l.lastTime.Load(); e != nil && e.key == key {
 		return e.val
@@ -386,25 +396,30 @@ func (l *Locale) multiPicker(w jsval.Walker, spec jsval.Value, utc bool) (func(t
 	fm := pick([]string{"month"}, "%B")
 	fq := pick([]string{"quarter"}, "%B")
 	fy := pick([]string{"year"}, "%Y")
+	// The picker takes the raw value: `second(date) < date` floors a Date
+	// (the interval function makes `new Date(+date)`, which truncates to a
+	// whole millisecond) and compares it with the value as it was given, so
+	// an instant of 0.2 is after the second its millisecond 0 starts.
 	return func(t float64) *TimeFormat {
 		var f *TimeFormat
+		d := timeClip(t)
 		switch {
-		case second.Floor(t) < t:
+		case second.Floor(d) < t:
 			f = fL
-		case minute.Floor(t) < t:
+		case minute.Floor(d) < t:
 			f = fS
-		case hour.Floor(t) < t:
+		case hour.Floor(d) < t:
 			f = fM
-		case day.Floor(t) < t:
+		case day.Floor(d) < t:
 			f = fH
-		case month.Floor(t) < t:
-			if week.Floor(t) < t {
+		case month.Floor(d) < t:
+			if week.Floor(d) < t {
 				f = fd
 			} else {
 				f = fw
 			}
-		case year.Floor(t) < t:
-			if quarter.Floor(t) < t {
+		case year.Floor(d) < t:
+			if quarter.Floor(d) < t {
 				f = fm
 			} else {
 				f = fq

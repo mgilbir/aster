@@ -274,11 +274,21 @@ func (c *compiler) require(n string) {
 	c.reqList = append(c.reqList, n)
 }
 
+// addIndex records an indata() index. The list is in the order of each
+// index's last use: upstream's indataVisitor assigns params['@' + field] at
+// every call (its hasOwnProperty guard has its arguments swapped, so it
+// never holds), and the last data set to index a field wins the parameter.
 func (c *compiler) addIndex(d IndexDep) {
-	if _, ok := c.indexes[d]; !ok {
-		c.indexes[d] = struct{}{}
-		c.idxList = append(c.idxList, d)
+	if _, ok := c.indexes[d]; ok {
+		for i, x := range c.idxList {
+			if x == d {
+				c.idxList = append(c.idxList[:i], c.idxList[i+1:]...)
+				break
+			}
+		}
 	}
+	c.indexes[d] = struct{}{}
+	c.idxList = append(c.idxList, d)
 }
 
 func (c *compiler) addScale(n string) {
@@ -776,18 +786,18 @@ func (s *Scope) hasProperty(o, k jsval.Value) bool {
 			return true
 		}
 		if t := colourOf(o); t != nil {
-			return t.proto.has(key)
+			return t.proto.Has(key)
 		}
-		return objectP.has(key)
+		return objectProtoMember(key)
 	case jsval.KindArr:
 		if i, ok := arrayIndex(key); ok && i < o.Len() {
 			return true
 		}
-		return arrayP.has(key)
+		return jsval.ArrayProto.Has(key)
 	case jsval.KindPattern:
-		return key == "lastIndex" || regexpP.has(key)
+		return key == "lastIndex" || jsval.RegExpProto.Has(key)
 	case jsval.KindTimestamp:
-		return dateP.has(key)
+		return jsval.DateProto.Has(key)
 	}
 	return false
 }
@@ -824,7 +834,7 @@ func (s *Scope) getProp(obj jsval.Value, key string) jsval.Value {
 		if i, ok := arrayIndex(key); ok {
 			return obj.Index(i)
 		}
-		return arrayP.get(key)
+		return jsval.Member(obj, key) // a method of Array.prototype (or Object.prototype): a function
 	case jsval.KindStr:
 		str := obj.StrValue()
 		if key == "length" {
@@ -834,18 +844,16 @@ func (s *Scope) getProp(obj jsval.Value, key string) jsval.Value {
 		if i, ok := arrayIndex(key); ok {
 			return s.charAt(str, i)
 		}
-		return stringP.get(key)
-	case jsval.KindNum:
-		return numberP.get(key)
-	case jsval.KindBool:
-		return booleanP.get(key)
+		return jsval.Member(obj, key)
+	case jsval.KindNum, jsval.KindBool:
+		return jsval.Member(obj, key)
 	case jsval.KindPattern:
 		if v := patternProp(obj.PatternOf(), key); !v.IsUndefined() {
 			return v
 		}
-		return regexpP.get(key)
+		return jsval.Member(obj, key)
 	case jsval.KindTimestamp:
-		return dateP.get(key)
+		return jsval.Member(obj, key)
 	case jsval.KindUndefined, jsval.KindNull:
 		typeError("Cannot read properties of %s (reading '%s')", obj.AsString(), key)
 	}
@@ -853,11 +861,15 @@ func (s *Scope) getProp(obj jsval.Value, key string) jsval.Value {
 }
 
 // inheritedProp is the member key an object without such an own property
-// inherits: from its d3 colour class for a colour, else from
-// Object.prototype.
+// inherits: from its d3 colour class for a colour; for a function or an
+// object with a prototype of its own, what Prop answers (a function's length,
+// name and methods); else from Object.prototype.
 func inheritedProp(o *jsval.Object, key string) jsval.Value {
 	if t, ok := o.Host().(*colourTag); ok {
-		return t.proto.get(key)
+		return t.proto.Get(key)
+	}
+	if o.Host() != nil {
+		return o.Prop(key)
 	}
 	v, _ := jsval.Inherited(key)
 	return v

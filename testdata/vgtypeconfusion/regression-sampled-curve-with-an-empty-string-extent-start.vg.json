@@ -1,0 +1,1 @@
+{"width":120,"height":40,"data":[{"name":"p","values":[{"u":"","v":2},{"u":2,"v":5},{"u":3,"v":11},{"u":4,"v":21},{"u":5,"v":34}]},{"name":"q","source":"p","transform":[{"type":"regression","x":"u","y":"v","method":"quad"}]}],"marks":[{"type":"text","from":{"data":"q"},"encode":{"enter":{"text":{"signal":"datum.u+':'+format(datum.v,'.2f')"},"y":{"signal":"datum.v/4"}}}}]}

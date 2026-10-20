@@ -1,0 +1,2 @@
+{"width": 60, "height": 40, "autosize": "pad", "marks": [{"type": "image", "encode": {"enter": {"x": {"value": 5}, "y": {"value": 5}, "url": {"value": 0}, "width": {"value": "20"}, "height": {"value": 7}, "align": {"value": ["right"]}}}},
+ {"type": "image", "encode": {"enter": {"x": {"value": "abc"}, "y": {"value": 5}, "url": {"value": ["data:image/png;base64,AA"]}, "width": {"value": 4}, "height": {"value": 4}}}}]}

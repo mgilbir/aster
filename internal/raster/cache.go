@@ -72,4 +72,23 @@ func (r *renderer) dropCaches() {
 	r.grads.drop(r.ledger)
 	r.outlines.drop(r.ledger)
 	r.svgGlyphs.drop(r.ledger)
+	r.ledger.Free(r.stopsBytes + r.memoBytes + r.fams.bytes)
+	r.stopsBytes, r.memoBytes, r.fams.bytes = 0, 0, 0
+}
+
+// memoEntryBytes is about what an entry of the render's memos by element
+// holds (docStates its state besides), its share of the buckets included.
+const memoEntryBytes = 64
+
+// memo charges n bytes for an entry the render is about to keep in a memo
+// by element (an element's inherited state, whether a <use> loops): one per
+// element, as many as the document makes. It reports false when the ledger
+// cannot hold them, and the entry is not kept: a memo saves work, which is
+// metered where it is done again.
+func (r *renderer) memo(n int64) bool {
+	if r.ledger.Alloc(n) != nil {
+		return false
+	}
+	r.memoBytes += n
+	return true
 }

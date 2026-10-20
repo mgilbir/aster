@@ -49,6 +49,29 @@ func poll(ctx context.Context, i int) error {
 	return nil
 }
 
+// polledAccessor is f polling ctx every 4096 calls, for a helper that reads
+// every row through f and takes no context (a statistic, a fit). Once ctx
+// is done f is no longer called and the rows read as undefined, which every
+// such helper skips quickly; err reports the context's error, to return
+// when the helper is over.
+func polledAccessor(ctx context.Context, f Accessor) (get Accessor, err func() error) {
+	calls := 0
+	var done error
+	get = func(v jsval.Value) jsval.Value {
+		if done != nil {
+			return jsval.Undefined
+		}
+		if calls&ctxCheckMask == 0 {
+			if done = ctx.Err(); done != nil {
+				return jsval.Undefined
+			}
+		}
+		calls++
+		return f(v)
+	}
+	return get, func() error { return done }
+}
+
 // dimValues reads the group-by values of t.
 func dimValues(fields []Field, t jsval.Value) []jsval.Value {
 	out := make([]jsval.Value, len(fields))

@@ -85,49 +85,41 @@ func (c *encCompiler) scaleDeps(literal jsval.Value, isLiteral bool) {
 }
 
 // parseEncode builds the parameters of an Encode operator from a mark's encode
-// block: config defaults and styles are applied first.
-func parseEncode(encode jsval.Value, typ, role string, style jsval.Value, scope *Scope, params *paramList) *paramList {
+// block: config defaults and styles are applied first. Every key `for (key in
+// encode)` enumerates is an encoding set, a string's or an array's indexes
+// too.
+func parseEncode(encode jsval.Value, typ string, typIsString bool, role string, style jsval.Value, scope *Scope, params *paramList) *paramList {
 	if params == nil {
 		params = newParamList()
 	}
-	encode = applyEncodeDefaults(scope.meter(), encode, typ, role, style, scope.config)
+	encode = applyEncodeDefaults(scope.meter(), encode, typ, typIsString, role, style, scope.config)
 	pe := pEncode{sets: map[string]*encodeSet{}}
 	c := &encCompiler{scope: scope, params: params}
-	if o := encode.ObjValue(); o != nil {
-		for i := 0; i < o.Len(); i++ {
-			scope.work(1)
-			name := o.KeyAt(i)
-			pe.sets[name] = c.parseBlock(o.ValueAt(i), typ)
-			pe.order = append(pe.order, name)
-		}
-	}
+	forInEach(scope.meter(), encode, func(name string, block jsval.Value) {
+		pe.sets[name] = c.parseBlock(block, typ)
+		pe.order = append(pe.order, name)
+	})
 	params.set("encoders", pe)
 	return params
 }
 
+// parseBlock is encode.js's parseBlock: a channel for each key `for (name
+// in block)` enumerates whose value is not null, and the outputs
+// Object.keys(block) lists.
 func (c *encCompiler) parseBlock(block jsval.Value, typ string) *encodeSet {
 	set := &encodeSet{marktype: typ}
-	if block.IsNullish() {
-		// the loop over its names does nothing, but listing the outputs does not
-		perr("Cannot convert undefined or null to object")
+	if block.IsObj() {
+		set.channels = make([]channel, 0, block.Len())
 	}
-	o := block.ObjValue()
-	if o == nil {
-		return set
-	}
-	for i := 0; i < o.Len(); i++ {
-		c.scope.work(1)
-		name := o.KeyAt(i)
-		set.output = append(set.output, name)
-		enc := o.ValueAt(i)
+	forInEach(c.scope.meter(), block, func(name string, enc jsval.Value) {
 		if enc.IsNullish() {
-			continue
+			return
 		}
-		var fn valueFn
-		if enc.IsArr() {
-			fn = c.rule(enc)
-		} else {
-			fn = c.entry(enc)
+		fn := c.compile(enc) // compiled (its fields and parameters count) whatever it is stored as
+		if name == "__proto__" {
+			// `channels["__proto__"] = code` sets the object's prototype to a
+			// string, which sets nothing: there is no such channel
+			return
 		}
 		set.channels = append(set.channels, channel{name: name, fn: fn, set: scene.SetterFor(name)})
 		switch name {
@@ -144,45 +136,123 @@ func (c *encCompiler) parseBlock(block jsval.Value, typ string) *encodeSet {
 		case "yc":
 			set.yc = true
 		}
-	}
+	})
+	set.output = objectKeys(c.scope.meter(), block)
 	return set
 }
 
-// rule compiles a production rule list: the first entry whose test passes wins,
-// an entry without a test ends the list, and no match is null.
-func (c *encCompiler) rule(rules jsval.Value) valueFn {
+// compile compiles one channel's value reference (a production rule list or
+// an entry). Its source, which upstream compiles, is parsed whatever the
+// reference, so the reference fails where upstream's does; a reference of
+// the documented shape is then evaluated by closures (canonicalEntry), any
+// other by that source.
+func (c *encCompiler) compile(enc jsval.Value) valueFn {
+	if literalReference(enc) {
+		return c.entry(enc)
+	}
+	var src string
+	var rules []jsval.Value
+	if enc.IsArr() {
+		rules = enc.Items()
+		src = ruleSource(c.scope.work, rules)
+	} else {
+		src = entrySource(enc).String()
+	}
+	// A reference that is only a string value has the string's literal for
+	// its source, which parses whatever its length (the parser's length
+	// bound is for programs): a path mark's path data given inline can be
+	// longer, and is charged where it is parsed into a path.
+	if !enc.IsArr() && len(src) > expr.MaxLength && canonicalEntry(enc, 0) && enc.IsObj() {
+		if v := enc.Get("value"); v.IsStr() && src == specStringValue(v).String() {
+			return c.entry(enc)
+		}
+	}
+	f := c.scope.parseExpression(src)
+	if enc.IsArr() && canonicalRules(rules) {
+		return c.rule(rules)
+	}
+	if !enc.IsArr() && canonicalEntry(enc, 0) {
+		return c.entry(enc)
+	}
+	c.depExpr(f)
+	return func(ev *encEval) jsval.Value { return f.evalEnc(ev) }
+}
+
+// literalReference reports a reference made only of members whose types
+// make its source parse: a literal value or a field named by a plain
+// identifier, a scale named by a string, numbers for band, offset, mult and
+// exponent, and round. Its source (`5`, `_scale("x", datum.a)+3`) cannot fail
+// to parse and depends on nothing but what canonicalEntry registers, so
+// parsing it would only repeat what the types already prove. It is most of a
+// chart's references.
+func literalReference(enc jsval.Value) bool {
+	if !enc.IsObj() {
+		return false
+	}
+	o := enc.ObjValue()
+	n := 0 // value or field
+	for i := 0; i < o.Len(); i++ {
+		v := o.ValueAt(i)
+		switch o.KeyAt(i) {
+		case "value":
+			switch v.Kind() {
+			case jsval.KindNum, jsval.KindBool, jsval.KindNull, jsval.KindStr:
+			default:
+				return false
+			}
+			n++
+		case "field":
+			if !v.IsStr() || v.StrValue() == "" {
+				return false
+			}
+			for _, r := range v.StrValue() {
+				if !(r == '_' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9') {
+					return false
+				}
+			}
+			n++
+		case "scale":
+			if !v.IsStr() {
+				return false
+			}
+		case "band":
+			if !v.IsNum() && !v.IsBool() {
+				return false
+			}
+		case "offset", "mult", "exponent":
+			if !v.IsNum() {
+				return false
+			}
+		case "round":
+			if !v.IsBool() {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return n <= 1 && canonicalEntry(enc, 0)
+}
+
+// rule compiles a production rule list whose rules canonicalRules accepts:
+// the first entry whose test passes wins, the last may have none, and no
+// match is null.
+func (c *encCompiler) rule(items []jsval.Value) valueFn {
 	type branch struct {
 		test *exprFn
 		val  valueFn
 	}
-	var bs []branch
-	items := rules.Items()
-	if len(items) == 0 {
-		// The generated source is empty, which does not parse.
-		perr("Expression parse error: ")
-	}
-	for i, r := range items {
-		c.scope.work(1)
-		if !r.Get("test").IsTruthy() && i < len(items)-1 {
-			// Upstream concatenates the source of every rule, with no stop at
-			// the unconditional one: what follows it is appended to its value
-			// ("a""b" is not an expression).
-			if fn, ok := c.concatenatedRules(items); ok {
-				return fn
-			}
-		}
-	}
+	bs := make([]branch, 0, len(items))
 	for _, r := range items {
 		c.scope.work(1)
 		val := c.entry(r)
 		if t := r.Get("test"); t.IsTruthy() {
-			f := c.scope.parseExpression(t.AsString())
+			f := c.scope.parseExpression(t.StrValue())
 			c.depExpr(f)
 			bs = append(bs, branch{test: f, val: val})
 			continue
 		}
 		bs = append(bs, branch{val: val})
-		break
 	}
 	return func(ev *encEval) jsval.Value {
 		for _, b := range bs {
@@ -194,57 +264,105 @@ func (c *encCompiler) rule(rules jsval.Value) valueFn {
 	}
 }
 
-// concatenatedRules builds rule.js's source for rules that follow an
-// unconditional one and evaluates it as an expression. Only rules made of a
-// constant, a signal or a field path can be rendered as source here; for any
-// other it reports false and the caller keeps the rules up to the first
-// unconditional one.
-func (c *encCompiler) concatenatedRules(items []jsval.Value) (valueFn, bool) {
-	var code strings.Builder
-	for _, r := range items {
-		c.scope.work(1)
-		var src string
-		switch {
-		case !r.IsObj() || !r.Get("gradient").IsNullish() || !r.Get("scale").IsNullish() || !r.Get("exponent").IsNullish() ||
-			!r.Get("mult").IsNullish() || !r.Get("offset").IsNullish() || r.Get("round").IsTruthy() || r.Get("color").IsTruthy():
-			return nil, false
-		case r.Get("signal").IsTruthy():
-			src = "(" + r.Get("signal").AsString() + ")"
-		case !r.Get("field").IsNullish():
-			f := r.Get("field")
-			if !f.IsStr() {
-				return nil, false
-			}
-			// Built in one buffer: concatenating per segment is
-			// quadratic in the path's length.
-			var b strings.Builder
-			b.WriteString("datum")
-			for _, seg := range jsval.ParseFieldPath(f.StrValue()) {
-				c.scope.work(1)
-				b.WriteString("[" + stringValue(jsval.Str(seg)) + "]")
-			}
-			src = b.String()
-		case !r.Get("value").IsUndefined():
-			v := r.Get("value")
-			if v.IsObj() || v.IsArr() {
-				return nil, false
-			}
-			src = stringValue(v)
+// canonicalRules reports whether rule.js's source for rules evaluates as
+// rule() does: every rule a canonical entry tested by an expression string,
+// and only the last untested (rule.js concatenates every rule's source, so
+// what follows an untested rule is appended to its value).
+func canonicalRules(rules []jsval.Value) bool {
+	if len(rules) == 0 {
+		return false
+	}
+	for i, r := range rules {
+		if !canonicalEntry(r, 0) {
+			return false
+		}
+		switch t := r.Get("test"); {
+		case t.IsStr() && t.StrValue() != "":
+		case !t.IsTruthy() && i == len(rules)-1:
 		default:
-			src = "null"
+			return false
 		}
-		if t := r.Get("test"); t.IsTruthy() {
-			src = "(" + t.AsString() + ")?" + src + ":"
+	}
+	return true
+}
+
+// canonicalEntry reports whether enc is a value reference whose members
+// have the types upstream documents, which entry() compiles to closures that
+// evaluate as entry.js's source does. depth bounds the nesting of the
+// references a property holds.
+func canonicalEntry(enc jsval.Value, depth int) bool {
+	if !enc.IsObj() || depth > 8 {
+		return false
+	}
+	if !enc.Get("gradient").IsNullish() || enc.Get("color").IsTruthy() {
+		return false
+	}
+	switch {
+	case enc.Get("signal").IsTruthy():
+		if !enc.Get("signal").IsStr() {
+			return false
 		}
-		code.WriteString(src)
+	case !enc.Get("field").IsNullish():
+		if !canonicalField(enc.Get("field")) {
+			return false
+		}
+	case !enc.Get("value").IsUndefined():
+		switch enc.Get("value").Kind() {
+		case jsval.KindStr, jsval.KindNum, jsval.KindBool, jsval.KindNull:
+		default:
+			return false
+		}
 	}
-	text := code.String()
-	if strings.HasSuffix(text, ":") {
-		text += "null"
+	if s := enc.Get("scale"); !s.IsNullish() {
+		if !(s.IsStr() || s.IsObj() && s.Get("signal").IsStr() && s.Get("signal").IsTruthy()) {
+			return false
+		}
+		if r := enc.Get("range"); !r.IsNullish() && !r.IsNum() {
+			return false
+		}
+		if b := enc.Get("band"); b.IsTruthy() && !b.IsNum() && !b.IsBool() && !canonicalEntry(b, depth+1) {
+			return false
+		}
 	}
-	f := c.scope.parseExpression(text)
-	c.depExpr(f)
-	return func(ev *encEval) jsval.Value { return f.evalEnc(ev) }, true
+	for _, k := range [...]string{"exponent", "mult", "offset"} {
+		p := enc.Get(k)
+		switch {
+		case p.IsNullish(), p.IsNum(), p.IsBool():
+		case p.IsObj():
+			if !canonicalEntry(p, depth+1) {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// canonicalField reports whether a field reference is a path or a single
+// level of signal, datum, group or parent reference to a path, which
+// fieldObj compiles as entry.js's source reads it.
+func canonicalField(f jsval.Value) bool {
+	if f.IsStr() {
+		return f.StrValue() != ""
+	}
+	if !f.IsObj() {
+		return false
+	}
+	switch {
+	case f.Get("signal").IsTruthy():
+		return f.Get("signal").IsStr()
+	case f.Get("group").IsTruthy() || f.Get("parent").IsTruthy():
+		k := f.Get("parent")
+		if !k.IsTruthy() {
+			k = f.Get("group")
+		}
+		l := f.Get("level")
+		return k.IsStr() && (l.IsUndefined() || l.IsNum())
+	case f.Get("datum").IsTruthy():
+		return f.Get("datum").IsStr()
+	}
+	return false
 }
 
 // evalEnc evaluates an expression with the encoder's datum and item.
@@ -271,7 +389,7 @@ func (t term) fn() valueFn {
 		return t.a
 	}
 	a, b := t.a, t.b
-	return func(ev *encEval) jsval.Value { return jsAdd(a(ev), b(ev)) }
+	return func(ev *encEval) jsval.Value { return ev.ctx.view.jsAdd(a(ev), b(ev)) }
 }
 
 func (c *encCompiler) entry(enc jsval.Value) valueFn {
@@ -385,7 +503,16 @@ func (c *encCompiler) scaleRefFn(s jsval.Value) valueFn {
 	case s.IsObj() && s.Get("signal").IsTruthy():
 		f := c.scope.parseExpression(s.Get("signal").AsString())
 		c.depExpr(f)
-		c.scaleDeps(jsval.Undefined, false)
+		// The reference is the source `(signal)` as the first argument of
+		// _scale(...): parentheses leave no node, so a signal that is a
+		// literal (`null`, `'x'`, `2`) is the Literal scaleVisitor registers
+		// by name, a scale named String(value) (none for null), not the
+		// indirect lookup that depends on every scale.
+		if ast := f.prog.AST(); ast != nil && ast.Kind == expr.KindLiteral && ast.Regex == nil {
+			c.scaleDeps(ast.Value, true)
+		} else {
+			c.scaleDeps(jsval.Undefined, false)
+		}
 		return func(ev *encEval) jsval.Value { return f.evalEnc(ev) }
 	}
 	c.scaleDeps(jsval.Undefined, false)
@@ -398,15 +525,16 @@ func (c *encCompiler) scaleTerm(enc jsval.Value, value valueFn, haveValue bool) 
 		f := jsval.ToNumber(r)
 		return term{a: func(ev *encEval) jsval.Value {
 			rng := ev.ctx.encScaleRange(scale(ev))
-			return lerp(rng, f)
+			return lerp(ev.ctx.view, rng, f)
 		}}
 	}
 	var cur term
 	if haveValue {
 		cur = term{a: func(ev *encEval) jsval.Value { return ev.ctx.encScale(scale(ev), value(ev)) }}
 	}
-	if band := enc.Get("band"); !band.IsNullish() {
-		bw := func(ev *encEval) jsval.Value { return jsval.Num(ev.ctx.scaleBandwidth(scale(ev))) }
+	// `if (enc.band)`: a band of 0 adds no bandwidth term (C94).
+	if band := enc.Get("band"); band.IsTruthy() {
+		bw := func(ev *encEval) jsval.Value { return jsval.Num(ev.ctx.scaleBandwidth(ev.ctx.encName(scale(ev)))) }
 		b := bw
 		if jsval.ToNumber(band) != 1 {
 			factor := c.property(band)
@@ -520,7 +648,11 @@ func (c *encCompiler) fieldObj(ref jsval.Value) valueFn {
 		f := c.scope.parseExpression(ref.Get("signal").AsString())
 		c.depExpr(f)
 		return func(ev *encEval) jsval.Value {
-			return propOf(ev.datum, f.evalEnc(ev))
+			d := ev.datum
+			if d.IsNullish() {
+				perrThrow("Cannot read properties of " + nullishName(d) + " (reading '" + ev.ctx.view.walk.String(f.evalEnc(ev)) + "')")
+			}
+			return propOf(ev.ctx.view.walk, d, f.evalEnc(ev))
 		}
 	case ref.Get("group").IsTruthy() || ref.Get("parent").IsTruthy():
 		level := 1
@@ -536,27 +668,36 @@ func (c *encCompiler) fieldObj(ref jsval.Value) valueFn {
 		}
 		path := c.fieldPath(key)
 		return func(ev *encEval) jsval.Value {
+			// item.mark.group.mark.group…: past the root group, whose mark
+			// has no group, the next read is of undefined
 			g := ev.item
-			for i := 0; i < level && g != nil; i++ {
+			for i := 0; i < level; i++ {
+				if g == nil {
+					perrThrow("Cannot read properties of undefined (reading 'mark')")
+				}
 				if g.Mark == nil {
 					g = nil
-					break
+					continue
 				}
 				g = g.Mark.Group
 			}
-			if g == nil {
-				return jsval.Undefined
-			}
 			p := path(ev)
+			if g == nil {
+				read := "datum"
+				if !parent && len(p) > 0 {
+					read = ev.ctx.view.jsString(p[0])
+				}
+				perrThrow("Cannot read properties of undefined (reading '" + read + "')")
+			}
 			if parent {
-				return walkPath(g.Datum, p)
+				return walkPath(ev.ctx.view.walk, g.Datum, p)
 			}
 			if len(p) == 1 {
 				if k := p[0].AsString(); k != "mark" && k != "items" {
 					return getItemProp(g, k)
 				}
 			}
-			return walkPath(ev.ctx.view.itemAsValue(g), p)
+			return walkPath(ev.ctx.view.walk, ev.ctx.view.itemAsValue(g), p)
 		}
 	case ref.Get("datum").IsTruthy():
 		// A constant path is the common case: compile it once.
@@ -565,12 +706,14 @@ func (c *encCompiler) fieldObj(ref jsval.Value) valueFn {
 				perr("%s", err.Error())
 			}
 			if !hasQuirkySegment(d.StrValue()) {
-				get := transforms.FieldOf(d.StrValue()).Get
+				// datum["a"]["b"]: a missing step is a TypeError, as the
+				// generated source's member chain raises
+				get := transforms.FieldOfStrict(d.StrValue()).Get
 				return func(ev *encEval) jsval.Value { return get(ev.datum) }
 			}
 		}
 		path := c.fieldPath(ref.Get("datum"))
-		return func(ev *encEval) jsval.Value { return walkPath(ev.datum, path(ev)) }
+		return func(ev *encEval) jsval.Value { return walkPath(ev.ctx.view.walk, ev.datum, path(ev)) }
 	}
 	perr("Invalid field reference: %s", quote(ref))
 	return nil
@@ -615,42 +758,51 @@ func (c *encCompiler) fieldPath(key jsval.Value) func(ev *encEval) []jsval.Value
 	return func(ev *encEval) []jsval.Value { return []jsval.Value{inner(ev)} }
 }
 
-// walkPath reads a chain of keys from a value; a missing step reads undefined.
-func walkPath(v jsval.Value, path []jsval.Value) jsval.Value {
+// walkPath reads a chain of keys from a value as the generated member chain
+// `v["a"]["b"]` does: a step of null or undefined is a TypeError.
+func walkPath(w jsval.Walker, v jsval.Value, path []jsval.Value) jsval.Value {
 	for _, k := range path {
-		v = propOf(v, k)
+		if v.IsNullish() {
+			perrThrow("Cannot read properties of " + nullishName(v) + " (reading '" + w.String(k) + "')")
+		}
+		v = propOf(w, v, k)
 	}
 	return v
 }
 
-// propOf is `v[key]`.
-func propOf(v, key jsval.Value) jsval.Value {
-	switch v.Kind() {
-	case jsval.KindObj:
-		return v.ObjValue().Lookup(key.AsString())
-	case jsval.KindArr:
-		if key.IsNum() {
-			// in range as a float: converting a huge index or Infinity to
-			// an int is platform-dependent
-			f := key.NumValue()
-			if f >= 0 && f == math.Trunc(f) && f < float64(v.Len()) {
-				return v.Index(int(f))
-			}
-			return jsval.Undefined
-		}
-		s := key.AsString()
-		if s == "length" {
-			return jsval.Int(v.Len())
-		}
-		if i, ok := parseArrayIndex(s); ok {
-			return v.Index(i)
-		}
-	case jsval.KindStr:
-		if key.AsString() == "length" {
-			return jsval.Int(utf16Len(v.StrValue()))
+// perrThrow raises a TypeError of the evaluated encoder, as the generated
+// source's throws: the run's error, which upstream's dataflow logs.
+func perrThrow(msg string) { panic(&jsval.Thrown{Name: "TypeError", Msg: msg}) }
+
+// propOf is `v[key]` of a value that is not null or undefined
+// (jsval.Member: an object's own or inherited member, an array's or a
+// string's length and elements, the prototype methods of any value), the
+// key's String() made with the call's Walker w.
+func propOf(w jsval.Walker, v, key jsval.Value) jsval.Value {
+	if v.IsNullish() {
+		return jsval.Undefined
+	}
+	if v.IsArr() && key.IsNum() {
+		// in range as a float: converting a huge index or Infinity to an
+		// int is platform-dependent
+		f := key.NumValue()
+		if f >= 0 && f == math.Trunc(f) && f < float64(v.Len()) {
+			return v.Index(int(f))
 		}
 	}
-	return jsval.Undefined
+	k, ok := key.Strict()
+	if !ok {
+		k = w.String(key)
+	}
+	return jsval.Member(v, k)
+}
+
+// propOfString is propOf for a key that is a string.
+func propOfString(v jsval.Value, key string) jsval.Value {
+	if v.IsNullish() {
+		return jsval.Undefined
+	}
+	return jsval.Member(v, key)
 }
 
 func parseArrayIndex(s string) (int, bool) {
@@ -667,25 +819,26 @@ func parseArrayIndex(s string) (int, bool) {
 	return n, true
 }
 
-func utf16Len(s string) int {
-	n := 0
-	for _, r := range s {
-		if r >= 0x10000 {
-			n += 2
-		} else {
-			n++
-		}
-	}
-	return n
-}
-
 // -- JavaScript arithmetic ---------------------------------------------------
 
-// jsAdd is the `+` operator: string concatenation when either side is a
-// string, numeric addition otherwise.
-func jsAdd(a, b jsval.Value) jsval.Value {
-	if a.IsStr() || b.IsStr() || a.IsArr() || b.IsArr() || a.IsObj() || b.IsObj() {
-		return jsval.Str(a.AsString() + b.AsString())
+// jsAdd is the `+` operator of the generated encoder source: string
+// concatenation when either side's primitive is a string (a string, an
+// array, an object, and a date, whose default primitive is its text), with
+// String() as the view writes it (the call's Walker, its zone); numeric
+// addition otherwise.
+func (v *runView) jsAdd(a, b jsval.Value) jsval.Value {
+	if a.IsNum() && b.IsNum() {
+		return jsval.Num(a.NumValue() + b.NumValue())
+	}
+	concat := func(x jsval.Value) bool {
+		switch x.Kind() {
+		case jsval.KindStr, jsval.KindArr, jsval.KindObj, jsval.KindTimestamp, jsval.KindPattern:
+			return true
+		}
+		return false
+	}
+	if concat(a) || concat(b) {
+		return jsval.Str(v.jsString(a) + v.jsString(b))
 	}
 	return jsval.Num(jsval.ToNumber(a) + jsval.ToNumber(b))
 }
@@ -717,8 +870,10 @@ func jsPow(x, y float64) float64 {
 	return jsmath.Pow(x, y)
 }
 
-// lerp is vega-util's lerp over a range value.
-func lerp(rng jsval.Value, frac float64) jsval.Value {
+// lerp is the generated `lerp(_range(scale), +enc.range)`, vega-util's lerp:
+// `lo + f * (hi - lo)`, whose `+` concatenates a string range's first value
+// (C93: "red" and NaN make "redNaN"), as v.jsAdd does.
+func lerp(v *runView, rng jsval.Value, frac float64) jsval.Value {
 	items := rng.Items()
 	if len(items) == 0 {
 		return jsval.Undefined
@@ -735,85 +890,87 @@ func lerp(rng jsval.Value, frac float64) jsval.Value {
 		return hi
 	}
 	l, h := jsval.ToNumber(lo), jsval.ToNumber(hi)
-	return jsval.Num(l + float64(frac*(h-l)))
+	return v.jsAdd(lo, jsval.Num(float64(frac*(h-l))))
 }
 
 // -- defaults ----------------------------------------------------------------
 
+// hasEncodeKey is util.js's has(key, encode): `encode && ((encode.enter &&
+// encode.enter[key]) || (encode.update && encode.update[key]))`.
 func hasEncodeKey(key string, encode jsval.Value) bool {
-	if !encode.IsObj() {
+	if !encode.IsTruthy() {
 		return false
 	}
-	return encode.Get("enter").Get(key).IsTruthy() || encode.Get("update").Get(key).IsTruthy()
+	for _, set := range [...]string{"enter", "update"} {
+		if b := specIndex(encode, set); b.IsTruthy() && specIndex(b, key).IsTruthy() {
+			return true
+		}
+	}
+	return false
 }
 
-// applyEncodeDefaults adds config-derived defaults to an encode block: the
-// group config for the root frame, mark config and per-type config for plain
-// marks, and the config.style entries named by the mark's `style`, in that
-// order of increasing precedence. A default that is a signal goes to `update`
-// (it may change), everything else to `enter`.
-func applyEncodeDefaults(m *budget.Meter, encode jsval.Value, typ, role string, style jsval.Value, config jsval.Value) jsval.Value {
+// applyEncodeDefaults is encode/defaults.js: it adds config-derived defaults
+// to an encode block: the group config for the root frame, mark config and
+// per-type config for plain marks, and the config.style entries named by
+// the mark's `style`, in that order of increasing precedence. A default that
+// is a signal goes to `update` (it may change), everything else to `enter`.
+// The result is a copy of encode (`extend({}, encode)`, which enumerates a
+// string's or an array's indexes) with those sets extended.
+func applyEncodeDefaults(m *budget.Meter, encode jsval.Value, typ string, typIsString bool, role string, style jsval.Value, config jsval.Value) jsval.Value {
 	defaults := jsval.NewObject(8)
 	setDefault := func(key string, v jsval.Value) {
-		if isSignalObj(v) {
-			defaults.Set(key, obj("signal", v.Get("signal")))
+		if v.IsTruthy() && specIndex(v, "signal").IsTruthy() {
+			defaults.Set(key, obj("signal", specIndex(v, "signal")))
 		} else {
 			defaults.Set(key, obj("value", v))
 		}
 	}
 
-	if typ == "text" && !config.Get("lineBreak").IsNullish() && !hasEncodeKey("lineBreak", encode) {
-		setDefault("lineBreak", config.Get("lineBreak"))
+	if typIsString && typ == "text" && !specIndex(config, "lineBreak").IsNullish() && !hasEncodeKey("lineBreak", encode) {
+		setDefault("lineBreak", specIndex(config, "lineBreak"))
 	}
 
-	if role == "legend" || (len(role) >= 4 && role[:4] == "axis") {
+	if role == "legend" || strings.HasPrefix(role, "axis") {
 		role = ""
 	}
 
 	var props jsval.Value
 	switch role {
 	case "frame":
-		props = config.Get("group")
+		props = specIndex(config, "group")
 	case "mark":
 		merged := jsval.NewObject(8)
-		extendObj(m, merged, config.Get("mark"))
-		extendObj(m, merged, config.Get(typ))
+		extendObj(m, merged, specIndex(config, "mark"))
+		extendObj(m, merged, specIndex(config, typ))
 		props = jsval.Obj(merged)
 	}
-	if po := props.ObjValue(); po != nil {
-		for i := 0; i < po.Len(); i++ {
-			charge(m, 1)
-			key := po.KeyAt(i)
-			skip := hasEncodeKey(key, encode) ||
-				((key == "fill" || key == "stroke") && (hasEncodeKey("fill", encode) || hasEncodeKey("stroke", encode)))
-			if !skip {
-				setDefault(key, po.ValueAt(i))
-			}
+	forInEach(m, props, func(key string, v jsval.Value) {
+		skip := hasEncodeKey(key, encode) ||
+			((key == "fill" || key == "stroke") && (hasEncodeKey("fill", encode) || hasEncodeKey("stroke", encode)))
+		if !skip {
+			setDefault(key, v)
 		}
-	}
+	})
 
+	styles := specIndex(config, "style")
 	for _, name := range arrayOf(style) {
 		charge(m, 1)
-		if !config.Get("style").IsObj() {
-			break
-		}
-		sp := config.Get("style").Get(name.AsString()).ObjValue()
-		if sp == nil {
+		if !styles.IsTruthy() {
 			continue
 		}
-		for i := 0; i < sp.Len(); i++ {
-			charge(m, 1)
-			key := sp.KeyAt(i)
-			if !hasEncodeKey(key, encode) {
-				setDefault(key, sp.ValueAt(i))
-			}
+		key, ok := name.PropertyKey(jsval.MaxStringLength)
+		if !ok {
+			continue
 		}
+		forInEach(m, specIndex(styles, key), func(key string, v jsval.Value) {
+			if !hasEncodeKey(key, encode) {
+				setDefault(key, v)
+			}
+		})
 	}
 
 	out := jsval.NewObject(4)
-	if encode.IsObj() {
-		extendObj(m, out, encode)
-	}
+	extendObj(m, out, encode)
 	enter := jsval.NewObject(defaults.Len())
 	var update *jsval.Object
 	for i := 0; i < defaults.Len(); i++ {
@@ -829,13 +986,22 @@ func applyEncodeDefaults(m *budget.Meter, encode jsval.Value, typ, role string, 
 			enter.Set(key, p)
 		}
 	}
-	extendObj(m, enter, encode.Get("enter"))
+	extendObj(m, enter, out.Lookup("enter"))
 	out.Set("enter", jsval.Obj(enter))
 	if update != nil {
-		extendObj(m, update, encode.Get("update"))
+		extendObj(m, update, out.Lookup("update"))
 		out.Set("update", jsval.Obj(update))
 	}
 	return jsval.Obj(out)
+}
+
+// specIndex is `v[key]` of a specification value v that is not null or
+// undefined (jsval.Member), and undefined for those.
+func specIndex(v jsval.Value, key string) jsval.Value {
+	if v.IsNullish() {
+		return jsval.Undefined
+	}
+	return jsval.Member(v, key)
 }
 
 func hasQuirkySegment(path string) bool {

@@ -47,7 +47,9 @@ func Pivot(ctx context.Context, data []jsval.Value, p PivotParams) ([]jsval.Valu
 			return nil, err
 		}
 		k := p.Field.Apply(t)
-		if s := kf.String(k); !seen[s] {
+		// pivotKeys tests `!map[k]` on a plain object: a name every object
+		// inherits finds that member, truthy, and is never collected.
+		if s := kf.String(k); !seen[s] && !jsval.ObjectPrototypeHas(s) {
 			seen[s] = true
 			keys = append(keys, k)
 		}
@@ -100,7 +102,7 @@ func Pivot(ctx context.Context, data []jsval.Value, p PivotParams) ([]jsval.Valu
 				return jsval.Num(math.NaN())
 			}
 		}
-		measures[i] = Measure{Op: mop, Field: NamedField(name, nil, get), As: name}
+		measures[i] = Measure{Op: mop, Field: NamedField(name, nil, get), As: name, Param: math.NaN()}
 	}
 	out, err := Aggregate(ctx, data, AggregateParams{GroupBy: p.GroupBy, Measures: measures, Key: p.Key, Rand: p.Rand})
 	if err != nil {

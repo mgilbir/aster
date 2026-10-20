@@ -1,0 +1,2 @@
+{"width":100,"height":100,"data":[{"name":"src","values":[{"x":2,"y":"b"},{"x":1,"y":"a"},{"x":3,"y":"c"}],"transform":[{"type":"collect","sort":{"field":"datum.x","order":["ascending","descending"]}},{"type":"identifier","as":"seq"}]}],
+"marks":[{"type":"text","from":{"data":"src"},"encode":{"update":{"text":{"signal":"datum.y + datum.seq"},"y":{"signal":"datum.seq*10"}}}}]}

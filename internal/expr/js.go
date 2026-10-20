@@ -20,7 +20,7 @@ import (
 type colourTag struct {
 	class string    // d3's class: Rgb, Hsl, Lab or Hcl
 	names [3]string // the channels, then opacity
-	proto *proto
+	proto *jsval.Proto
 }
 
 var colourTags = map[string]*colourTag{
@@ -111,12 +111,12 @@ func colourMethods(o *jsval.Object) {
 		return
 	}
 	var t *colourTag
-	if jsval.SameRef(ts, colourPs["Rgb"].get("toString")) {
+	if jsval.SameRef(ts, colourPs["Rgb"].Get("toString")) {
 		t = colourTags["Rgb"]
-	} else if jsval.SameRef(ts, colorP.get("toString")) {
+	} else if jsval.SameRef(ts, colorP.Get("toString")) {
 		rgb, _ := o.Get("rgb")
 		for _, class := range [...]string{"Rgb", "Hsl", "Lab", "Hcl"} {
-			if jsval.SameRef(rgb, colourPs[class].get("rgb")) {
+			if jsval.SameRef(rgb, colourPs[class].Get("rgb")) {
 				t = colourTags[class]
 			}
 		}

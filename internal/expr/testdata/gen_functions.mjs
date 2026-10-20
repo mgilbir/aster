@@ -9,15 +9,16 @@ const gen = vega.codegenExpression(vega.codegenParams);
 const extra = ['view', 'item', 'group', 'xy', 'x', 'y', '_bandwidth', '_range', '_scale'];
 const names = new Set([...Object.keys(gen.functions), ...Object.keys(vf.functionContext), ...extra]);
 names.delete('__bandwidth'); // helper added to the function context by the scale code generator
-// The string-named members of each prototype a value of the expression
-// language inherits from (the `in` operator finds them, and a read answers
-// them): for each, the name of the function it holds, or null for a member
-// that is not a function (an accessor such as RegExp.prototype.source). The
-// d3 colours inherit from their class's prototype, then d3's Color.prototype.
+// The string-named members of the prototypes of d3's colours, which the `in`
+// operator finds and a property read answers: for each, the name and the
+// length of the function it holds, or null for a member that is not a
+// function. The d3 colours inherit from their class's prototype, then d3's
+// Color.prototype. The built-in prototypes (Object's, Array's, ...) are
+// recorded once, in internal/jsval/testdata/gen_protonames.mjs.
 const util = await import(require.resolve('vega-util'));
 const members = o => Object.fromEntries(Object.getOwnPropertyNames(o).sort().map(k => {
   const d = Object.getOwnPropertyDescriptor(o, k);
-  return [k, 'value' in d && typeof d.value === 'function' ? d.value.name : null];
+  return [k, 'value' in d && typeof d.value === 'function' ? { name: d.value.name, length: d.value.length } : null];
 }));
 const rgb = vf.functionContext.rgb('red');
 const colour = {
@@ -25,9 +26,6 @@ const colour = {
   Lab: Object.getPrototypeOf(vf.functionContext.lab('red')), Hcl: Object.getPrototypeOf(vf.functionContext.hcl('red')),
 };
 const prototypes = {
-  object: members(Object.prototype), array: members(Array.prototype), string: members(String.prototype),
-  number: members(Number.prototype), boolean: members(Boolean.prototype),
-  regexp: members(RegExp.prototype), date: members(Date.prototype),
   Color: members(Object.getPrototypeOf(colour.Rgb)),
   ...Object.fromEntries(Object.entries(colour).map(([k, p]) => [k, members(p)])),
 };

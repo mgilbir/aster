@@ -89,18 +89,18 @@ func msgColumnsNotSupportByRowCol(typ string) string {
 	return `The "columns" property cannot be used when "` + typ + `" has nested row/column.`
 }
 
-func msgSelectionAsScaleDomainWithoutField(field string) string {
+func msgSelectionAsScaleDomainWithoutField(cc *compileCtx, field string) string {
 	return `A "field" or "encoding" must be specified when using a selection as a scale domain. ` +
-		`Using "field": ` + jsonString(field) + "."
+		`Using "field": ` + jsonString(cc, field) + "."
 }
 
-func msgSelectionAsScaleDomainWrongEncodings(n int, encoding, param Value, field string) string {
+func msgSelectionAsScaleDomainWrongEncodings(cc *compileCtx, n int, encoding, param Value, field string) string {
 	which := "Multiple "
 	if n == 0 {
 		which = "No "
 	}
-	return which + "matching " + stringValue(encoding) + " encoding found for selection " + stringValue(param) + ". " +
-		`Using "field": ` + jsonString(field) + "."
+	return which + "matching " + stringValue(cc, encoding) + " encoding found for selection " + stringValue(cc, param) + ". " +
+		`Using "field": ` + jsonString(cc, field) + "."
 }
 
 func msgUnrecognizedParse(p string) string { return `Unrecognized parse "` + p + `".` }
@@ -223,8 +223,8 @@ func msgCannotUseScalePropertyWithNonColor(prop string) string {
 	return `Cannot use the scale property "` + prop + `" with non-color channel.`
 }
 
-func msgCannotUseRelativeBandSizeWithNonBandScale(scaleType string) string {
-	return "Cannot use the relative band size with " + scaleType + " scale."
+func msgCannotUseRelativeBandSizeWithNonBandScale(scaleType Value) string {
+	return "Cannot use the relative band size with " + tmpl(scaleType) + " scale."
 }
 
 func msgUnaggregateDomainHasNoEffectForRawField(cc *compileCtx, fd Value) string {
@@ -239,29 +239,20 @@ func msgUnaggregatedDomainWithLogScale(cc *compileCtx, fd Value) string {
 	return "Unaggregated domain is currently unsupported for log scale (" + stringifyJSCC(cc, fd) + ")."
 }
 
-func msgCannotApplySizeToNonOrientedMark(mark string) string {
-	return `Cannot apply size to non-oriented mark "` + mark + `".`
+func msgCannotApplySizeToNonOrientedMark(mark Value) string {
+	return `Cannot apply size to non-oriented mark "` + tmpl(mark) + `".`
 }
 
-func undefinedIfEmpty(s string) string {
-	if s == "" {
-		return "undefined"
-	}
-	return s
+func msgScaleTypeNotWorkWithChannel(channel string, scaleType Value, def Value) string {
+	return `Channel "` + channel + `" does not work with "` + tmpl(scaleType) + `" scale. We are using "` + tmpl(def) + `" scale instead.`
 }
 
-func msgScaleTypeNotWorkWithChannel(channel string, scaleType Value, def string) string {
-	def = undefinedIfEmpty(def)
-	return `Channel "` + channel + `" does not work with "` + tmpl(scaleType) + `" scale. We are using "` + def + `" scale instead.`
+func msgScaleTypeNotWorkWithFieldDef(scaleType Value, def Value) string {
+	return `FieldDef does not work with "` + tmpl(scaleType) + `" scale. We are using "` + tmpl(def) + `" scale instead.`
 }
 
-func msgScaleTypeNotWorkWithFieldDef(scaleType Value, def string) string {
-	def = undefinedIfEmpty(def)
-	return `FieldDef does not work with "` + tmpl(scaleType) + `" scale. We are using "` + def + `" scale instead.`
-}
-
-func msgScalePropertyNotWorkWithScaleType(scaleType, prop, channel string) string {
-	return channel + `-scale's "` + prop + `" is dropped as it does not work with ` + scaleType + " scale."
+func msgScalePropertyNotWorkWithScaleType(scaleType Value, prop, channel string) string {
+	return channel + `-scale's "` + prop + `" is dropped as it does not work with ` + tmpl(scaleType) + " scale."
 }
 
 func msgStepDropped(channel string) string {
@@ -363,12 +354,7 @@ func msgDomainRequiredForThresholdScale(channel string) string {
 
 // stringifyJSCC is upstream's stringify as a template literal renders it
 // (undefined prints as "undefined").
-func stringifyJSCC(cc *compileCtx, v Value) string {
-	if v.IsUndefined() {
-		return "undefined"
-	}
-	return stringify(cc, v)
-}
+func stringifyJSCC(cc *compileCtx, v Value) string { return stringifyText(cc, v) }
 
 func msgInvalidSpec(cc *compileCtx, spec Value) string {
 	return "Invalid specification " + stringifyText(cc, spec) + `. Make sure the specification includes at least one of the following properties: "mark", "layer", "facet", "hconcat", "vconcat", "concat", or "repeat".`

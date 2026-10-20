@@ -1,0 +1,1 @@
+{"data":{"values":[{"a":1,"b":2,"date":"2020-01-01"}]},"transform":[{"timeUnit":"month","field":"date","as":"m"},{"timeUnit":"year","field":"date","as":["m"]}],"mark":"point","encoding":{"x":{"field":"m","type":"ordinal"}}}

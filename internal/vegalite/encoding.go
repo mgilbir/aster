@@ -14,7 +14,7 @@ func channelHasField(cc *compileCtx, enc Value, channel string) bool {
 		if cd.IsArr() {
 			for _, fd := range cd.Items() {
 				cc.work(1)
-				if fd.Get("field").IsTruthy() {
+				if jsGet(fd, "field").IsTruthy() { // !!fieldDef.field: a TypeError of a null element
 					return true
 				}
 			}
@@ -31,7 +31,7 @@ func channelHasFieldOrDatum(cc *compileCtx, enc Value, channel string) bool {
 		if cd.IsArr() {
 			for _, fd := range cd.Items() {
 				cc.work(1)
-				if fd.Get("field").IsTruthy() {
+				if jsGet(fd, "field").IsTruthy() { // !!fieldDef.field: a TypeError of a null element
 					return true
 				}
 			}
@@ -60,7 +60,7 @@ func encodingIsAggregate(cc *compileCtx, enc Value) bool {
 			if cd.IsArr() {
 				for _, fd := range cd.Items() {
 					cc.work(1)
-					if fd.Get("aggregate").IsTruthy() {
+					if jsGet(fd, "aggregate").IsTruthy() { // !!fieldDef.aggregate: a TypeError of a null element
 						return true
 					}
 				}
@@ -202,8 +202,10 @@ func extractTransformsFromEncoding(cc *compileCtx, oldEncoding Value, config Val
 	return r
 }
 
-func markChannelCompatible(cc *compileCtx, enc Value, channel, mark string) bool {
-	switch supportMark(channel, mark) {
+// markChannelCompatible reads getSupportedMark(channel)[mark], the mark type
+// as a key.
+func markChannelCompatible(cc *compileCtx, enc Value, channel string, mark Value) bool {
+	switch supportMark(channel, propKey(mark)) {
 	case "":
 		return false
 	case "binned":
@@ -219,7 +221,7 @@ func markChannelCompatible(cc *compileCtx, enc Value, channel, mark string) bool
 
 // initEncoding normalizes a unit spec's encoding: drops channels the mark does
 // not support or that conflict, and initializes each channel def.
-func initEncoding(cc *compileCtx, encoding Value, mark string, filled bool, config Value) Value {
+func initEncoding(cc *compileCtx, encoding Value, mark Value, filled bool, config Value) Value {
 	normalized := jsval.NewObject(8)
 	for _, key := range keysOf(encoding) {
 		cc.work(1)
@@ -227,12 +229,21 @@ func initEncoding(cc *compileCtx, encoding Value, mark string, filled bool, conf
 			cc.warn(msgInvalidEncodingChannel(key))
 		}
 	}
+	// encoding[channel]: a plain object, whose prototype a channel named
+	// "__proto__" may have replaced (see jsRealm), so a channel can read
+	// what the prototype holds (an array's fill).
+	read := func(channel string) Value {
+		if encoding.IsObj() {
+			return jsRead(cc.realm(), encoding.ObjValue(), channel)
+		}
+		return encoding.Get(channel)
+	}
 	for _, ch := range unitChannels {
 		channel := ch
-		if !encoding.Get(channel).IsTruthy() {
+		if !read(channel).IsTruthy() {
 			continue
 		}
-		channelDef := encoding.Get(channel)
+		channelDef := read(channel)
 		if cc.v5 && channel == chTime {
 			continue // the time channel is a 6.x feature
 		}
@@ -250,30 +261,27 @@ func initEncoding(cc *compileCtx, encoding Value, mark string, filled bool, conf
 				cc.warn(msgReplaceOffsetWithMainChannel(mainChannel))
 			}
 		}
-		if channel == chAngle && mark == "arc" && !encoding.Get("theta").IsTruthy() {
+		if channel == chAngle && strIs(mark, "arc") && !encoding.Get("theta").IsTruthy() {
 			cc.warn(msgReplaceAngleWithTheta)
 			channel = chTheta
 		}
 		if !markChannelCompatible(cc, encoding, channel, mark) {
-			cc.warn(msgIncompatibleChannel(channel, mark, ""))
+			cc.warn(msgIncompatibleChannel(channel, tmpl(mark), ""))
 			continue
 		}
-		if channel == chSize && mark == "line" {
+		if channel == chSize && strIs(mark, "line") {
 			if fd := getFieldDef(cc, encoding.Get(channel)); fd.Get("aggregate").IsTruthy() {
 				cc.warn(msgLineWithVaryingSize)
 				continue
 			}
 		}
 		if channel == chColor {
+			// 'fill' in encoding: the in operator, which sees what a
+			// replaced prototype holds (an array's fill method).
 			eo := encoding.ObjValue()
-			has := false
-			if filled {
-				has = eo.Has("fill")
-			} else {
-				has = eo.Has("stroke")
-			}
-			if has {
-				cc.warn(msgDroppingColor("encoding", eo.Has("fill"), eo.Has("stroke")))
+			hasFill, hasStroke := eo.PropIn("fill"), eo.PropIn("stroke")
+			if (filled && hasFill) || (!filled && hasStroke) {
+				cc.warn(msgDroppingColor("encoding", hasFill, hasStroke))
 				continue
 			}
 		}
@@ -300,7 +308,7 @@ func initEncoding(cc *compileCtx, encoding Value, mark string, filled bool, conf
 		} else {
 			if channel == chTooltip && channelDef.IsNull() {
 				normalized.Set(channel, jsval.Null)
-			} else if !isFieldDef(cc, channelDef) && !isDatumDefOf(cc, channelDef) && !isValueDef(channelDef) && !isConditionalDef(channelDef) && !isSignalRef(cc, channelDef) {
+			} else if !isFieldDef(cc, channelDef) && !isDatumDefOf(cc, channelDef) && !isValueDef(channelDef) && !isConditionalDef(cc, channelDef) && !isSignalRef(cc, channelDef) {
 				cc.warn(msgEmptyFieldDef(cc, channelDef, channel))
 				continue
 			} else {
@@ -316,21 +324,21 @@ func normalizeEncoding(cc *compileCtx, encoding Value, config Value) Value {
 	read := propReader(encoding)
 	for _, channel := range jsKeysCC(cc, encoding) {
 		cc.work(1)
-		out.Set(channel, initChannelDef(cc, read.get(channel), channel, config, true))
+		jsSet(cc, out, channel, initChannelDef(cc, read.get(channel), channel, config, true))
 	}
 	return jsval.Obj(out)
 }
 
 // pathGroupingFields lists the fields that split a line/area/trail into
 // separate paths.
-func pathGroupingFields(cc *compileCtx, mark string, encoding Value) []string {
+func pathGroupingFields(cc *compileCtx, mark Value, encoding Value) []string {
 	var details []string
 	for _, channel := range keysOf(encoding) {
 		cc.work(1)
 		switch channel {
 		case chX, chY, chHref, chDescription, chURL, chX2, chY2:
 		case chXOffset, chYOffset:
-			if !cc.v5 && (mark == "line" || mark == "area" || mark == "trail") {
+			if !cc.v5 && isPathMark(mark) {
 				offsetDef := encoding.Get(channel)
 				if isFieldDef(cc, offsetDef) {
 					mainChannel := chX
@@ -350,20 +358,20 @@ func pathGroupingFields(cc *compileCtx, mark string, encoding Value) []string {
 		case chTheta, chTheta2, chRadius, chRadius2, chTime, chLatitude, chLongitude, chLatitude2, chLongitude2,
 			chText, chShape, chAngle, chTooltip:
 		case chOrder, chDetail, chKey:
-			if channel == chOrder && (mark == "line" || mark == "trail") {
+			if channel == chOrder && (strIs(mark, "line") || strIs(mark, "trail")) {
 				continue
 			}
 			cd := encoding.Get(channel)
 			if cd.IsArr() || isFieldDef(cc, cd) {
 				for _, fd := range arrayOf(cd) {
 					cc.work(1)
-					if !fd.Get("aggregate").IsTruthy() {
+					if !jsGet(fd, "aggregate").IsTruthy() { // !fieldDef.aggregate: a TypeError of a null element
 						details = append(details, vgField(cc, fd, fieldRefOption{}))
 					}
 				}
 			}
 		case chSize, chColor, chFill, chStroke, chOpacity, chFillOpacity, chStrokeOpacity, chStrokeDash, chStrokeWidth:
-			if channel == chSize && mark == "trail" {
+			if channel == chSize && strIs(mark, "trail") {
 				continue
 			}
 			fd := getFieldDef(cc, encoding.Get(channel))

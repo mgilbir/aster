@@ -156,5 +156,5 @@ func TestUpstreamVegaFormat(t *testing.T) {
 			r.Skip("locale methods of another shape")
 		}
 	}
-	r.Done(120)
+	r.Done(158)
 }

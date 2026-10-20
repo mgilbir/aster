@@ -5,7 +5,9 @@
 // upstream's JSON.stringify output, so it can be compared byte for byte.
 //
 // Options.Version also selects Vega-Lite 5.8.0, which the package compiles to
-// exactly what vega-lite@5.8.0's compile() produces (Vega schema v5 included).
+// exactly what vega-lite@5.8.0's compile() produces (Vega schema v5 included),
+// with the vega-util 1.17 it is built on (its stringValue, mergeNamed and
+// writeConfig differ from 2.x's).
 // Only the compiler changes: the Vega specification it emits is still run by
 // the engine's Vega 6.4 runtime, not by Vega 5.25, so the rendered output of a 5.8
 // specification follows Vega 6.4's behaviour. The 5.8 code paths live behind
@@ -38,13 +40,19 @@ type Options struct {
 	// Context, when set, bounds the compilation: every loop the
 	// specification sizes charges its work to the ledger in it
 	// (budget.LedgerFrom), or polls it when there is none, and Compile
-	// returns the context's error once it is done. Nil means no bound.
+	// returns the context's error once it is done. The memory the
+	// specification makes the compiler allocate (its strings, its copies) is
+	// charged to that ledger before it is allocated, and past the ledger's
+	// bound Compile returns an error wrapping budget.ErrLimit (see mem.go).
+	// Nil means no bound.
 	Context context.Context
-	// MaxViews bounds the views the compilation creates, counted before
+	// MaxViews bounds the views the compilation creates, weighed before
 	// normalization builds them: every view of the specification, a
 	// repeat's spec once per repeated value (and per combination of row,
-	// column and layer values). Past it Compile returns an error wrapping
-	// budget.ErrLimit. Zero means DefaultMaxViews.
+	// column and layer values), a unit view weighing more for the
+	// selections it receives and the text it compiles (see countViews).
+	// Past it Compile returns an error wrapping budget.ErrLimit. Zero means
+	// DefaultMaxViews.
 	MaxViews int
 	// Warn, when set, is told each warning the compiler logs, with upstream
 	// Vega-Lite's text, where upstream's compiler calls log.warn. An error it
@@ -72,6 +80,19 @@ func Compile(spec jsval.Value, opts Options) (out jsval.Value, err error) {
 				err = e
 			case exprSyntaxError:
 				err = e.err()
+			case jsval.TypeError:
+				// String of an object without a conversion to text (a
+				// prototype chain ending in null), as JavaScript throws it.
+				err = compileError{e.Msg}
+			case *budget.Stop:
+				// A walk of a value (jsval's) past the call's budget or
+				// deadline, or past the detached walk's caps.
+				err = e.Err
+			case *jsval.Thrown:
+				// a JavaScript exception of a value the compiler converts,
+				// as upstream's raises it (String() of an object holding a
+				// toString of its own)
+				err = e
 			default:
 				if panicHook != nil {
 					panicHook(debug.Stack())
@@ -84,7 +105,13 @@ func Compile(spec jsval.Value, opts Options) (out jsval.Value, err error) {
 	if err != nil {
 		return jsval.Undefined, err
 	}
-	cc := &compileCtx{v5: v5, loc: opts.Location, ctx: opts.Context, meter: budget.NewMeter(opts.Context), maxViews: opts.MaxViews, warnFn: opts.Warn}
+	cc := &compileCtx{v5: v5, loc: opts.Location, ctx: opts.Context, meter: budget.NewMeter(opts.Context), maxViews: opts.MaxViews, warnFn: opts.Warn,
+		conv: &jsval.ConversionScope{}}
+	if opts.Context != nil {
+		cc.ledger = budget.LedgerFrom(opts.Context)
+	}
+	defer cc.releaseAhead()
+	defer cc.conv.End()
 	if cc.maxViews <= 0 {
 		cc.maxViews = DefaultMaxViews
 	}
@@ -106,6 +133,7 @@ func Compile(spec jsval.Value, opts Options) (out jsval.Value, err error) {
 }
 
 func compileSpec(cc *compileCtx, inputSpec jsval.Value, opts Options) jsval.Value {
+	cc.configBytes = specBytes(cc, opts.Config, 0) + specBytes(cc, inputSpec.Get("config"), 0)
 	config := initConfig(cc, jsval.Obj(mergeConfig(cc, opts.Config, inputSpec.Get("config"))))
 	spec := normalize(cc, inputSpec, config)
 	model := buildModel(cc, spec, nil, "", jsval.NewObject(0), config, 0)
@@ -170,7 +198,7 @@ func getTopLevelProperties(inputSpec jsval.Value, autosize jsval.Value, config j
 	}
 	out := jsval.NewObject(6)
 	if as.Len() == 1 && as.Lookup("type").IsTruthy() {
-		if as.Lookup("type").AsString() != "pad" {
+		if !strIs(as.Lookup("type"), "pad") {
 			out.Set("autosize", as.Lookup("type"))
 		}
 	} else {

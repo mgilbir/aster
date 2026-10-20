@@ -126,7 +126,7 @@ func TestTextTspanLines(t *testing.T) {
 	}
 	svg := `<svg width="100" height="60"><text text-anchor="middle" transform="translate(50,20)" font-family="sans-serif" font-size="10px">` +
 		`<tspan>Hop</tspan><tspan x="0" dy="14">Hopping</tspan></text></svg>`
-	root, err := parseSVG(context.Background(), svg, Limits{}.withDefaults())
+	root, err := parseSVG(context.Background(), svg, Limits{}.WithDefaults())
 	if err != nil {
 		t.Fatal(err)
 	}

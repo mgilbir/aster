@@ -2,7 +2,7 @@ package guides
 
 import "github.com/mgilbir/aster/internal/jsval"
 
-func legendGradient(spec Value, scale string, l lookup, userEncode Value) Value {
+func legendGradient(scale Value, l lookup, userEncode Value) Value {
 	vertical := l.isVertical(false)
 	thickness := l.gradientThickness()
 	length := l.gradientLength()
@@ -40,7 +40,7 @@ func legendGradient(spec Value, scale string, l lookup, userEncode Value) Value 
 	return guideMark(l, obj("type", "rect", "role", "legend-gradient", "encode", encode), userEncode)
 }
 
-func legendGradientDiscrete(spec Value, scale string, l lookup, userEncode, dataRef Value) Value {
+func legendGradientDiscrete(scale Value, l lookup, userEncode, dataRef Value) Value {
 	vertical := l.isVertical(false)
 	thickness := l.gradientThickness()
 	length := l.gradientLength()
@@ -80,7 +80,7 @@ const (
 	gradBaselineExpr = `datum.perc<=0?"bottom":datum.perc>=1?"top":"middle"`
 )
 
-func legendGradientLabels(spec Value, l lookup, userEncode, dataRef Value) Value {
+func legendGradientLabels(l lookup, userEncode, dataRef Value) Value {
 	vertical := l.isVertical(false)
 	thickness := encoder(l.gradientThickness())
 	length := l.gradientLength()
@@ -97,7 +97,7 @@ func legendGradientLabels(spec Value, l lookup, userEncode, dataRef Value) Value
 		{"fontSize", l.get("labelFontSize")},
 		{"fontStyle", l.get("labelFontStyle")},
 		{"fontWeight", l.get("labelFontWeight")},
-		{"limit", value(spec.Get("labelLimit"), l.config.Get("gradientLabelLimit"))},
+		{"limit", value(l.sp("labelLimit"), l.cfg("gradientLabelLimit"))},
 	}, nil)
 
 	var u, v, adjust string
@@ -122,7 +122,7 @@ func legendGradientLabels(spec Value, l lookup, userEncode, dataRef Value) Value
 	th := jsval.Obj(thickness)
 	set(enter, v, th)
 	set(update, v, th)
-	set(thickness, "offset", or(value(spec.Get("labelOffset"), l.config.Get("gradientLabelOffset")), jsval.Int(0)))
+	set(thickness, "offset", or(value(l.sp("labelOffset"), l.cfg("gradientLabelOffset")), jsval.Int(0)))
 
 	var ov Value
 	if overlap.IsTruthy() {
@@ -141,11 +141,15 @@ func legendGradientLabels(spec Value, l lookup, userEncode, dataRef Value) Value
 }
 
 // legendSymbolGroups builds the entry groups of a symbol legend. userEncode is
-// the whole `encode` block of the legend (entries, symbols, labels).
-func legendSymbolGroups(spec Value, l lookup, config, userEncode, dataRef, columns Value) Value {
-	entries := userEncode.Get("entries")
-	interactive := entries.Get("interactive").IsTruthy()
-	name := entries.Get("name")
+// the whole `encode` block of the legend (entries, symbols, labels). The
+// groups' facet reads the entries' data, which the caller sets (from.facet.data).
+func legendSymbolGroups(l lookup, config, userEncode, columns Value) Value {
+	entries := member(userEncode, "entries")
+	interactive := entries.IsTruthy() && member(entries, "interactive").IsTruthy()
+	name := jsval.Undefined
+	if entries.IsTruthy() {
+		name = member(entries, "name")
+	}
 	height := l.get("clipHeight")
 	symbolOffset := l.get("symbolOffset")
 	valueRef := objv("data", "value")
@@ -172,9 +176,9 @@ func legendSymbolGroups(spec Value, l lookup, config, userEncode, dataRef, colum
 	encode := obj("enter", enter, "update", update, "exit", objv("opacity", zero()))
 
 	baseFill, baseStroke := jsval.Null, jsval.Null
-	if !spec.Get("fill").IsTruthy() {
-		baseFill = config.Get("symbolBaseFillColor")
-		baseStroke = config.Get("symbolBaseStrokeColor")
+	if !l.sp("fill").IsTruthy() {
+		baseFill = member(config, "symbolBaseFillColor")
+		baseStroke = member(config, "symbolBaseStrokeColor")
 	}
 	addEncoders(encode, []kv{
 		{"fill", l.getOr("symbolFillColor", baseFill)},
@@ -188,7 +192,7 @@ func legendSymbolGroups(spec Value, l lookup, config, userEncode, dataRef, colum
 		{"opacity", l.get("symbolOpacity")},
 	})
 	for _, sc := range legendScales {
-		if s := spec.Get(sc); s.IsTruthy() {
+		if s := l.sp(sc); s.IsTruthy() {
 			ref := objv("scale", s, "field", fValue)
 			set(update, sc, ref)
 			set(enter, sc, ref)
@@ -205,7 +209,7 @@ func legendSymbolGroups(spec Value, l lookup, config, userEncode, dataRef, colum
 		"from", valueRef,
 		"clip", clip,
 		"encode", encode,
-	), userEncode.Get("symbols"))
+	), member(userEncode, "symbols"))
 
 	// -- LEGEND LABELS --
 	labelOffset := encoder(symbolOffset)
@@ -241,7 +245,7 @@ func legendSymbolGroups(spec Value, l lookup, config, userEncode, dataRef, colum
 		"key", fValue,
 		"from", valueRef,
 		"encode", encode,
-	), userEncode.Get("labels"))
+	), member(userEncode, "labels"))
 
 	// -- LEGEND ENTRY GROUPS --
 	var h Value
@@ -277,7 +281,7 @@ func legendSymbolGroups(spec Value, l lookup, config, userEncode, dataRef, colum
 	upd.Set("column", objv("signal", colExpr))
 
 	// facet legend entries into sub-groups
-	facet := objv("facet", objv("data", dataRef, "name", "value", "groupby", fIndex))
+	facet := objv("facet", objv("data", jsval.Null, "name", "value", "groupby", fIndex))
 
 	return guideGroup(obj(
 		"role", "scope",
@@ -318,7 +322,7 @@ func legendTitle(spec Value, l lookup, userEncode, dataRef Value) Value {
 		{"angle", objv("signal", exprAngle)},
 		{"align", objv("signal", exprAlign)},
 		{"baseline", objv("signal", exprBaseline)},
-		{"text", spec.Get("title")},
+		{"text", l.sp("title")},
 		{"fill", l.get("titleColor")},
 		{"fillOpacity", l.get("titleOpacity")},
 		{"font", l.get("titleFont")},

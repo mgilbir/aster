@@ -151,3 +151,30 @@ func TestTickerPollsContext(t *testing.T) {
 		t.Fatal("cancelled context must surface")
 	}
 }
+
+// A shared allowance is charged only with what is left of it, and bounds the
+// LoadLeft of every Budget sharing it, which then says it was the bound.
+func TestSharedAllowance(t *testing.T) {
+	a := NewAllowance(100)
+	b := &Budget{MaxLoadBytes: 1000, Shared: a}
+	if got := b.LoadLeft(); got != 100 || !b.SharedBound() {
+		t.Errorf("LoadLeft %d (shared bound %v), want 100 from the allowance", got, b.SharedBound())
+	}
+	if err := b.Stream(60); err != nil || b.Streamed() != 60 || a.Left() != 40 {
+		t.Fatalf("Stream(60): %v; streamed %d, left %d", err, b.Streamed(), a.Left())
+	}
+	if err := b.Stream(41); !errors.Is(err, ErrLimit) || a.Left() != 40 {
+		t.Errorf("Stream past it: %v, left %d", err, a.Left())
+	}
+	a.Force(50)
+	if a.Left() != 0 || a.Take(1) {
+		t.Errorf("forced past it: left %d", a.Left())
+	}
+	c := &Budget{MaxLoadBytes: 10, Shared: NewAllowance(100)}
+	if c.LoadLeft() != 10 || c.SharedBound() {
+		t.Error("the Budget's own bound, when smaller, is not the shared one")
+	}
+	if (&Budget{}).Stream(5) != nil || (*Budget)(nil).Streams() {
+		t.Error("without a shared allowance, Stream does nothing")
+	}
+}

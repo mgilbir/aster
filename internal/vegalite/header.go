@@ -1,8 +1,6 @@
 package vegalite
 
 import (
-	"strings"
-
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -47,8 +45,10 @@ func (l *layoutHeaderComponent) get(t string) []*headerComponent {
 	return l.footer
 }
 
-func getHeaderChannel(channel, orient string) string {
-	switch orient {
+// getHeaderChannel compares the orient with contains (strictly): an orient
+// that is not one of the four names leaves the channel's own.
+func getHeaderChannel(channel string, orientV Value) string {
+	switch orient, _ := orientV.Strict(); orient {
 	case "top", "bottom":
 		return "column"
 	case "left", "right":
@@ -116,18 +116,18 @@ func parseFacetHeader(m *facetModel, channel string) {
 	title := fieldTitle(cc, fd, m.config, true, titleConfig.IsUndefined() || titleConfig.IsTruthy())
 	childLH := m.child.b().comp.layoutHeaders[channel]
 	if childLH.title.IsTruthy() {
-		var t string
+		// isArray(title) ? title.join(', ') : title, then `${title} /
+		// ${child.title}`: Array.prototype.join writes null and undefined
+		// elements as "" (C86 of the 2026-10-18 audit).
+		w := cc.walker()
+		t := ""
 		if title.IsArr() {
-			var parts []string
-			for _, x := range title.Items() {
-				cc.work(1)
-				parts = append(parts, x.AsString())
-			}
-			t = strings.Join(parts, ", ")
+			cc.work(int64(title.Len()))
+			t = w.Join(title.Items(), ", ")
 		} else {
-			t = title.AsString()
+			t = w.String(title)
 		}
-		title = jsval.Str(t + " / " + childLH.title.AsString())
+		title = jsval.Str(t + " / " + w.String(childLH.title))
 		childLH.title = jsval.Null
 	}
 	labelOrient := getHeaderProperty("labelOrient", fd.Get("header"), m.config, channel)
@@ -220,7 +220,7 @@ func assembleTitleGroup(m Model, channel string) Value {
 	facetFieldDef := b.comp.layoutHeaders[channel].facetFieldDef
 	props := getHeaderProperties([]string{"titleAnchor", "titleAngle", "titleOrient"}, facetFieldDef.Get("header"), config, channel)
 	titleOrient := props.Lookup("titleOrient")
-	headerChannel := getHeaderChannel(channel, titleOrient.AsString())
+	headerChannel := getHeaderChannel(channel, titleOrient)
 	titleAngle := normalizeAngle(props.Lookup("titleAngle"))
 	t := mk("text", title)
 	if channel == "row" {
@@ -297,13 +297,13 @@ func assembleLabelTitle(cc *compileCtx, fd Value, channel string, config Value) 
 		fieldOrDatumDef: fd, format: props.Lookup("format"), formatType: props.Lookup("formatType"), expr: "parent", config: config,
 	}))
 	labelOrient := props.Lookup("labelOrient")
-	headerChannel := getHeaderChannel(channel, labelOrient.AsString())
+	headerChannel := getHeaderChannel(channel, labelOrient)
 	var text string
 	if labelExpr := props.Lookup("labelExpr"); labelExpr.IsTruthy() {
 		if !labelExpr.IsStr() {
 			throw("string.replace is not a function") // util.replaceAll(labelExpr, ...)
 		}
-		text = jsReplaceAll(jsReplaceAll(labelExpr.StrValue(), "datum.label", titleTextExpr), "datum.value", vgField(cc, fd, fieldRefOption{expr: "parent"}))
+		text = jsReplaceAll(cc, jsReplaceAll(cc, labelExpr.StrValue(), "datum.label", titleTextExpr), "datum.value", vgField(cc, fd, fieldRefOption{expr: "parent"}))
 	} else {
 		text = titleTextExpr
 	}
@@ -332,8 +332,7 @@ func assembleHeaderGroup(m Model, channel, headerType string, lh *layoutHeaderCo
 	config := b.config
 	if fd.IsTruthy() && hc.labels.IsTruthy() {
 		labelOrient := getHeaderProperty("labelOrient", fd.Get("header"), config, channel)
-		lo := labelOrient.AsString()
-		if (channel == "row" && lo != "top" && lo != "bottom") || (channel == "column" && lo != "left" && lo != "right") {
+		if (channel == "row" && !strIn(labelOrient, "top", "bottom")) || (channel == "column" && !strIn(labelOrient, "left", "right")) {
 			title = assembleLabelTitle(cc, fd, channel, config)
 		}
 	}
@@ -371,25 +370,20 @@ func assembleHeaderGroup(m Model, channel, headerType string, lh *layoutHeaderCo
 // anchor is looked up by its text, and a name every object inherits finds
 // that member (Object.prototype for "__proto__", which prints as {}).
 func getLayoutTitleBand(titleAnchor Value, headerChannel string) Value {
-	a := titleAnchor.AsString()
+	a := propKey(titleAnchor)
 	if v, ok := inheritedValue(a); ok {
 		return v
 	}
-	switch headerChannel {
-	case "column":
-		if a == "start" {
-			return jsval.Int(0)
-		} else if a == "end" {
-			return jsval.Int(1)
-		}
-	case "row":
-		if a == "start" {
-			return jsval.Int(1)
-		} else if a == "end" {
-			return jsval.Int(0)
-		}
+	if band, ok := layoutTitleBand[headerChannel][a]; ok {
+		return jsval.Int(band)
 	}
 	return undef
+}
+
+// layoutTitleBand is upstream's LAYOUT_TITLE_BAND.
+var layoutTitleBand = map[string]map[string]int{
+	"column": {"start": 0, "end": 1},
+	"row":    {"start": 1, "end": 0},
 }
 
 func assembleLayoutTitleBand(headers map[string]*layoutHeaderComponent, config Value) Value {
@@ -398,7 +392,7 @@ func assembleLayoutTitleBand(headers map[string]*layoutHeaderComponent, config V
 		hc := headers[channel]
 		if hc != nil && hc.facetFieldDef.IsTruthy() {
 			props := getHeaderProperties([]string{"titleAnchor", "titleOrient"}, hc.facetFieldDef.Get("header"), config, channel)
-			headerChannel := getHeaderChannel(channel, props.Lookup("titleOrient").AsString())
+			headerChannel := getHeaderChannel(channel, props.Lookup("titleOrient"))
 			if band := getLayoutTitleBand(props.Lookup("titleAnchor"), headerChannel); !band.IsUndefined() {
 				titleBand.Set(headerChannel, band)
 			}

@@ -9,7 +9,6 @@ import (
 	"github.com/mgilbir/aster/internal/jsmath"
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/scale"
-	"github.com/mgilbir/aster/internal/transforms"
 )
 
 func init() {
@@ -58,82 +57,6 @@ func valueList(x any) ([]jsval.Value, bool) {
 	return nil, false
 }
 
-// domainList reads a domain parameter. Scales iterate the value they are given
-// (`for (const v of domain)`, `Array.from(domain)`), so a string is a domain of
-// its characters (code points); a non-iterable value is an error for the
-// ordinal family and an empty domain for the rest.
-func domainList(x any, typ string) ([]jsval.Value, bool) {
-	if l, ok := valueList(x); ok {
-		return l, true
-	}
-	v, ok := x.(jsval.Value)
-	if !ok || !v.IsTruthy() {
-		return nil, false
-	}
-	if v.IsStr() {
-		var out []jsval.Value
-		for _, r := range v.StrValue() {
-			out = append(out, jsval.Str(string(r)))
-		}
-		return out, true
-	}
-	switch typ {
-	case scale.TypeOrdinal, scale.TypeBand, scale.TypePoint, scale.TypeQuantile:
-		fail("TypeError: %s is not iterable", v.String())
-	}
-	return nil, false
-}
-
-func scaleKey(p *opParams) string {
-	t := p.walk.String(p.Value("type"))
-	if t == scale.TypeSequential {
-		return scale.TypeSequential + "-" + scale.TypeLinear
-	}
-	d := ""
-	if isContinuousColor(p) {
-		n := 0
-		if dom, ok := domainList(p.Get("domain"), t); ok {
-			n = len(dom)
-			if !p.Value("domainMid").IsNullish() {
-				n++
-			}
-		}
-		switch n {
-		case 2:
-			d = scale.TypeSequential + "-"
-		case 3:
-			d = scale.TypeDiverging + "-"
-		}
-	}
-	if d+t == "" {
-		return scale.TypeLinear
-	}
-	return jsval.JSLower(d + t)
-}
-
-func isContinuousColor(p *opParams) bool {
-	t := p.walk.String(p.Value("type"))
-	if !scale.IsContinuous(t) || t == scale.TypeTime || t == scale.TypeUTC {
-		return false
-	}
-	if p.Value("scheme").IsTruthy() || p.Has("scheme") && p.Get("scheme") != nil {
-		if s := p.Get("scheme"); s != nil {
-			if v, ok := s.(jsval.Value); !ok || v.IsTruthy() {
-				return true
-			}
-		}
-	}
-	if rng, ok := valueList(p.Get("range")); ok && len(rng) > 0 {
-		for _, r := range rng {
-			if !r.IsStr() {
-				return false
-			}
-		}
-		return true
-	}
-	return false
-}
-
 func facScale(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *opParams) any) {
 	n.modified = true // always treated as modified
 	return nil, trFunc(func(n *opNode, p *opParams, pulse *flowPulse) *flowPulse {
@@ -161,165 +84,21 @@ func facScale(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 		}
 		for i := 0; i < p.count(); i++ {
 			name := p.nameAt(i)
-			if scaleSkip[name] {
+			if scaleSkipped(name) {
 				continue
 			}
 			if name == "padding" && includePad(s.Type()) {
 				continue
 			}
-			if !scale.Set(s, name, toValue(p.Get(name))) {
+			if !scaleProperty(g, s, name, scaleArg(p, name)) {
 				g.warn("Unsupported scale property: " + name)
 			}
 		}
 		count := configureDomain(s, p, g)
-		count = configureBins(s, p, count)
-		configureRange(g.view.walk, s, p, count)
+		count = configureBins(s, p, count, g)
+		configureRange(g, s, p, count)
 		return barePulse(pulse)
 	}), nil
-}
-
-func configureDomain(s scale.Scale, p *opParams, g *flowGraph) int {
-	typ := s.Type()
-	if raw, ok := valueList(p.Get("domainRaw")); ok {
-		domainCheck(typ, raw, g)
-		s.SetDomain(raw)
-		return len(raw)
-	}
-	domain, ok := domainList(p.Get("domain"), typ)
-	if !ok {
-		return 0
-	}
-	zv := p.Value("zero")
-	zero := zv.IsTruthy() || (zv.IsUndefined() && includeZero(s))
-	dmin, dmax, dmid := p.Value("domainMin"), p.Value("domainMax"), p.Value("domainMid")
-	if zero || !dmin.IsNullish() || !dmax.IsNullish() || !dmid.IsNullish() {
-		domain = append([]jsval.Value(nil), domain...)
-		n := len(domain) - 1
-		if n == 0 {
-			n = 1 // `(length - 1) || 1`
-		}
-		at := func(i int) jsval.Value {
-			if i >= 0 && i < len(domain) {
-				return domain[i]
-			}
-			return jsval.Undefined
-		}
-		setAt := func(i int, v jsval.Value) {
-			if i < 0 {
-				return
-			}
-			for len(domain) <= i {
-				domain = append(domain, jsval.Undefined)
-			}
-			domain[i] = v
-		}
-		if zero {
-			if transforms.Greater(g.view.walk, at(0), jsval.Num(0)) {
-				setAt(0, jsval.Num(0))
-			}
-			if transforms.Less(g.view.walk, at(n), jsval.Num(0)) {
-				setAt(n, jsval.Num(0))
-			}
-		}
-		if !dmin.IsNullish() {
-			setAt(0, dmin)
-		}
-		if !dmax.IsNullish() {
-			setAt(n, dmax)
-		}
-		if !dmid.IsNullish() {
-			i := n
-			if transforms.Greater(g.view.walk, dmid, at(n)) {
-				i = n + 1
-			} else if transforms.Less(g.view.walk, dmid, at(0)) {
-				i = 0
-			}
-			if i != n {
-				g.warn("Scale domainMid exceeds domain min or max.")
-			}
-			if i < 0 {
-				i = 0
-			}
-			if i > len(domain) {
-				i = len(domain)
-			}
-			domain = append(domain, jsval.Undefined)
-			copy(domain[i+1:], domain[i:])
-			domain[i] = dmid
-		}
-	}
-	if includePad(typ) && p.Value("padding").IsTruthy() && len(domain) > 0 && !g.walk.Equal(domain[0], domain[len(domain)-1]) {
-		domain = padDomain(typ, domain, p)
-	}
-	domainCheck(typ, domain, g)
-	s.SetDomain(domain)
-
-	if typ == scale.TypeOrdinal {
-		if o, ok := s.(*scale.Ordinal); ok {
-			if p.Value("domainImplicit").IsTruthy() {
-				o.SetImplicit()
-			} else {
-				o.SetUnknown(jsval.Undefined)
-			}
-		}
-	}
-	if nice := p.Value("nice"); nice.IsTruthy() {
-		if nc, ok := s.(scale.Niceable); ok {
-			var tc scale.TickCount
-			if !(nice.IsBool() && nice.BoolValue()) {
-				var err error
-				tc, err = scale.TickCountFor(s, nice, jsval.Undefined)
-				if err != nil {
-					failErr(err)
-				}
-			}
-			nc.Nice(tc)
-		}
-	}
-	return len(domain)
-}
-
-func isFalsyParam(x any) bool {
-	if v, ok := x.(jsval.Value); ok {
-		return !v.IsTruthy()
-	}
-	return x == nil
-}
-
-func padDomain(typ string, domain []jsval.Value, p *opParams) []jsval.Value {
-	rng, _ := valueList(p.Get("range"))
-	if len(rng) == 0 {
-		return domain
-	}
-	span := math.Abs(jsval.ToNumber(rng[len(rng)-1]) - jsval.ToNumber(rng[0]))
-	pad := jsval.ToNumber(p.Value("padding"))
-	frac := span / (span - 2*pad)
-	lo, hi := jsval.ToNumber(domain[0]), jsval.ToNumber(domain[len(domain)-1])
-	exp := jsval.ToNumber(p.Value("exponent"))
-	if exp == 0 || math.IsNaN(exp) {
-		exp = 1
-	}
-	constant := jsval.ToNumber(p.Value("constant"))
-	if constant == 0 || math.IsNaN(constant) {
-		constant = 1
-	}
-	var d [2]float64
-	switch typ {
-	case scale.TypeLog:
-		d = zoomLog(lo, hi, frac)
-	case scale.TypeSqrt:
-		d = zoomPow(lo, hi, frac, 0.5)
-	case scale.TypePow:
-		d = zoomPow(lo, hi, frac, exp)
-	case scale.TypeSymlog:
-		d = zoomSymlog(lo, hi, frac, constant)
-	default:
-		d = zoomLinear(lo, hi, frac)
-	}
-	out := append([]jsval.Value(nil), domain...)
-	out[0] = jsval.Num(d[0])
-	out[len(out)-1] = jsval.Num(d[1])
-	return out
 }
 
 func zoomLinear(d0, d1, k float64) [2]float64 {
@@ -370,69 +149,6 @@ func jsSign(x float64) float64 {
 	return x
 }
 
-func domainCheck(typ string, domain []jsval.Value, g *flowGraph) {
-	if !scale.IsLogarithmic(typ) {
-		return
-	}
-	s := 0
-	for i, v := range domain {
-		g.rows(i, len(domain), 1)
-		f := jsval.ToNumber(v)
-		switch {
-		case f < 0:
-			s--
-		case f > 0:
-			s++
-		}
-	}
-	if s < 0 {
-		s = -s
-	}
-	if s != len(domain) {
-		// 'Log scale domain includes zero: ' + stringValue(domain), of which
-		// the report keeps MaxWarningText bytes: only those are made (C151).
-		msg := []byte("Log scale domain includes zero: ")
-		g.warn(string(g.walk.AppendStringValuePrefix(msg, jsval.Arr(domain), MaxWarningText)))
-	}
-}
-
-func configureBins(s scale.Scale, p *opParams, count int) int {
-	typed, _ := s.(scale.Typed)
-	var bins []float64
-	have := false
-	switch b := p.Get("bins").(type) {
-	case jsval.Value:
-		switch {
-		case b.IsArr():
-			bins, have = numbers(b.Items()), true
-		case b.IsObj():
-			bins, have = binsFromObject(s, b), true
-		}
-	case []any:
-		bins = make([]float64, len(b))
-		for i, x := range b {
-			bins[i] = jsval.ToNumber(toValue(x))
-		}
-		have = true
-	}
-	if typed != nil {
-		if have {
-			typed.SetBins(bins)
-		} else {
-			typed.SetBins(nil)
-		}
-	}
-	if s.Type() == scale.TypeBinOrdinal && typed != nil {
-		if !have {
-			typed.SetBins(numbers(s.Domain()))
-		} else if !p.Value("domain").IsTruthy() && p.Get("domain") == nil && !p.Value("domainRaw").IsTruthy() {
-			s.SetDomain(numsToValues(bins))
-			count = len(bins)
-		}
-	}
-	return count
-}
-
 func numbers(v []jsval.Value) []float64 {
 	out := make([]float64, len(v))
 	for i, x := range v {
@@ -447,33 +163,6 @@ func numsToValues(f []float64) []jsval.Value {
 		out[i] = jsval.Num(x)
 	}
 	return out
-}
-
-func binsFromObject(s scale.Scale, b jsval.Value) []float64 {
-	// lo and hi are undefined (NaN) for an empty domain; an explicit start or
-	// stop does not need them.
-	lo, hi := math.NaN(), math.NaN()
-	if domain := s.Domain(); len(domain) > 0 {
-		lo, hi = jsval.ToNumber(domain[0]), jsval.ToNumber(domain[len(domain)-1])
-	}
-	step := jsval.ToNumber(b.Get("step"))
-	if step == 0 || math.IsNaN(step) {
-		fail("Scale bins parameter missing step property.")
-	}
-	start, stop := lo, hi
-	if v := b.Get("start"); !v.IsNullish() {
-		start = jsval.ToNumber(v)
-	}
-	if v := b.Get("stop"); !v.IsNullish() {
-		stop = jsval.ToNumber(v)
-	}
-	if start < lo {
-		start = step * math.Ceil(lo/step)
-	}
-	if stop > hi {
-		stop = step * math.Floor(hi/step)
-	}
-	return d3Range(start, stop+step/2, step)
 }
 
 // maxBinValues bounds the bin boundaries a scale may generate; real charts
@@ -510,245 +199,24 @@ func flip(a []jsval.Value, reverse bool) []jsval.Value {
 	return out
 }
 
-// rangeSpec is the range as configureRange builds it: a list of values or, for
-// colour schemes, an interpolator of [0, 1].
-type rangeSpec struct {
-	values []jsval.Value
-	interp scale.UnitInterpolator
-}
-
-func configureRange(w jsval.Walker, s scale.Scale, p *opParams, count int) {
-	g := s
-	typ := g.Type()
-	round := p.Value("round").IsTruthy()
-	reverse := p.Value("reverse").IsTruthy()
-	var rng rangeSpec
-	haveRange := false
-	if r, ok := valueList(p.Get("range")); ok {
-		rng, haveRange = rangeSpec{values: r}, true
-	}
-
-	if v := p.Value("rangeStep"); !v.IsNullish() && p.Has("rangeStep") {
-		rng, haveRange = configureRangeStep(typ, p, count), true
-	} else if sch := p.Get("scheme"); sch != nil && !isFalsyParam(sch) {
-		rng = configureScheme(w, typ, p, count)
-		haveRange = true
-		if rng.interp != nil {
-			if in, ok := s.(interface{ SetInterpolator(scale.UnitInterpolator) }); ok {
-				in.SetInterpolator(rng.interp)
-				return
-			}
-			fail("Scale type %s does not support interpolating color schemes.", typ)
-		}
-	}
-
-	gamma, hasGamma := 0.0, false
-	if gv := p.Value("interpolateGamma"); !gv.IsNullish() {
-		gamma, hasGamma = jsval.ToNumber(gv), true
-	}
-	interpName := p.Value("interpolate")
-
-	if haveRange && scale.IsInterpolating(typ) {
-		in, ok := s.(interface{ SetInterpolator(scale.UnitInterpolator) })
-		if !ok {
-			fail("Scale type %s does not support interpolating color schemes.", typ)
-		}
-		var colors []jsval.Value
-		if rng.interp != nil {
-			// a function range on an interpolating scale is applied above
-			in.SetInterpolator(rng.interp)
-			return
-		}
-		colors = flip(rng.values, reverse)
-		name := ""
-		if interpName.IsTruthy() {
-			name = w.String(interpName)
-		}
-		in.SetInterpolator(scale.InterpolateColors(w, colors, name, gamma, hasGamma))
-		return
-	}
-
-	ip, isInterp := s.(scale.Interpolating)
-	switch {
-	case haveRange && interpName.IsTruthy() && isInterp:
-		name := w.String(interpName)
-		fn, ok := scale.Interpolate(name, gamma, hasGamma)
-		if !ok {
-			fail("unrecognized interpolator: %s", name)
-		}
-		ip.SetInterpolate(fn)
-	default:
-		if b, ok := s.(scale.Bander); ok {
-			b.SetRound(round)
-		} else if isInterp {
-			if round {
-				ip.SetInterpolate(scale.InterpolateRoundI)
-			} else {
-				ip.SetInterpolate(scale.InterpolateValue)
-			}
-		}
-	}
-	if haveRange {
-		if rng.values == nil {
-			rng.values = []jsval.Value{}
-		}
-		s.SetRange(flip(rng.values, reverse))
-	}
-}
-
-func configureRangeStep(typ string, p *opParams, count int) rangeSpec {
-	if typ != scale.TypeBand && typ != scale.TypePoint {
-		fail("Only band and point scales support rangeStep.")
-	}
-	padding := jsval.ToNumber(orZeroV(p.Value("padding")))
-	var outer float64
-	if v := p.Value("paddingOuter"); !v.IsNullish() {
-		outer = jsval.ToNumber(orZeroV(v))
-	} else {
-		outer = numOr0f(padding)
-	}
-	inner := 1.0
-	if typ != scale.TypePoint {
-		if v := p.Value("paddingInner"); !v.IsNullish() {
-			inner = numOr0f(jsval.ToNumber(v))
-		} else {
-			inner = numOr0f(padding)
-		}
-	}
-	step := jsval.ToNumber(p.Value("rangeStep"))
-	return rangeSpec{values: []jsval.Value{jsval.Num(0), jsval.Num(step * scale.BandSpace(float64(count), inner, numOr0f(outer)))}}
-}
-
-func orZeroV(v jsval.Value) jsval.Value {
-	if v.IsTruthy() {
-		return v
-	}
-	return jsval.Num(0)
-}
-
-func numOr0f(f float64) float64 {
-	if f == 0 || math.IsNaN(f) {
-		return 0
-	}
-	return f
-}
-
-func configureScheme(w jsval.Walker, typ string, p *opParams, count int) rangeSpec {
-	extent, hasExtent := valueList(p.Get("schemeExtent"))
-	reverse := p.Value("reverse").IsTruthy()
-	var interp scale.UnitInterpolator
-	var colors []jsval.Value
-	var discrete bool
-	var countFrac bool // the scheme count is not an integer
-
-	gamma, hasGamma := 0.0, false
-	if gv := p.Value("interpolateGamma"); !gv.IsNullish() {
-		gamma, hasGamma = jsval.ToNumber(gv), true
-	}
-	iname := ""
-	if iv := p.Value("interpolate"); iv.IsTruthy() {
-		iname = w.String(iv)
-	}
-
-	if arr, ok := valueList(p.Get("scheme")); ok {
-		interp = scale.InterpolateColors(w, arr, iname, gamma, hasGamma)
-	} else {
-		text := w.String(p.Value("scheme"))
-		sch, ok := scale.LookupScheme(jsval.JSLower(text)) // _.scheme.toLowerCase()
-		if !ok {
-			fail("Unrecognized scheme name: %s", text)
-		}
-		if sch.IsDiscrete() {
-			discrete = true
-			colors = make([]jsval.Value, len(sch.Colors))
-			for i, c := range sch.Colors {
-				colors[i] = jsval.Str(c)
-			}
-		} else {
-			interp = sch.Interpolator
-		}
-	}
-
-	switch typ {
-	case scale.TypeThreshold:
-		count++
-	case scale.TypeBinOrdinal:
-		count--
-	case scale.TypeOrdinal:
-		// (+_.schemeCount || count || DEFAULT_COUNT): the count of an
-		// interpolating scheme's samples; a discrete scheme is used whole.
-		if c := jsval.ToNumber(p.Value("schemeCount")); c != 0 && !math.IsNaN(c) {
-			count = schemeCountInt(c)
-			countFrac = c != math.Trunc(c)
-		} else if count == 0 {
-			count = 5
-		}
-	case scale.TypeQuantile, scale.TypeQuantize:
-		c := jsval.ToNumber(p.Value("schemeCount"))
-		if c == 0 || math.IsNaN(c) {
-			c = 5
-		}
-		count = schemeCountInt(c)
-		countFrac = c != math.Trunc(c)
-	}
-
-	adjust := func(f scale.UnitInterpolator, withReverse bool) scale.UnitInterpolator {
-		rv := withReverse && reverse
-		if f != nil && (hasExtent || rv) {
-			ext := []jsval.Value{jsval.Num(0), jsval.Num(1)}
-			if hasExtent {
-				ext = extent
-			}
-			return scale.InterpolateRange(f, numbers(flip(ext, rv)))
-		}
-		return f
-	}
-
-	if scale.IsInterpolating(typ) {
-		if discrete {
-			return rangeSpec{values: colors}
-		}
-		return rangeSpec{interp: adjust(interp, true)}
-	}
-	if !discrete && interp != nil {
-		// quantizeInterpolator builds new Array(count): a negative count (a
-		// bin-ordinal scale over an empty domain) or a fractional one (a
-		// fractional schemeCount) is a RangeError, which ends the scale
-		// operator's evaluation.
-		if count < 0 || countFrac {
-			fail("Invalid array length")
-		}
-		samples, err := scale.QuantizeInterpolator(adjust(interp, false), count)
-		if err != nil {
-			failErr(err)
-		}
-		return rangeSpec{values: samples}
-	}
-	if typ == scale.TypeOrdinal {
-		return rangeSpec{values: colors}
-	}
-	// scheme.slice(0, count): a negative end counts from the end.
-	if count < 0 {
-		count = max(len(colors)+count, 0)
-	}
-	if count > len(colors) {
-		count = len(colors)
-	}
-	return rangeSpec{values: colors[:count]}
-}
-
-// schemeCountInt truncates a scheme count for use as an int. A count past
-// what an int32 holds converts the same on every platform and stays past
-// every bound it meets (scale.MaxSchemeSamples, a scheme's length).
-func schemeCountInt(c float64) int {
-	return int(math.Max(math.Min(math.Trunc(c), math.MaxInt32), math.MinInt32))
-}
-
 // -- projection ----------------------------------------------------------------
 
 func facProjection(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *opParams) any) {
 	n.modified = true
 	return nil, trFunc(func(n *opNode, p *opParams, pulse *flowPulse) *flowPulse {
+		// projections['constructor'] is Object, and Object() makes a plain
+		// object: no projection (not a registered scale, no path), which only a
+		// pointRadius or a fit with a size or extent can fault on.
+		if tv, _ := paramValueOf(p.Get("type")); tv.IsStr() && jsval.JSLower(tv.StrValue()) == "constructor" {
+			if r := p.Value("pointRadius"); !r.IsNullish() {
+				fail("TypeError: Cannot read properties of undefined (reading 'pointRadius')")
+			}
+			if p.Value("fit").IsTruthy() && (p.Value("extent").IsTruthy() || p.Value("size").IsTruthy()) {
+				fail("TypeError: proj.fitExtent is not a function")
+			}
+			n.value = nil
+			return barePulse(pulse)
+		}
 		params := jsval.NewObject(p.vals.len())
 		for i := 0; i < p.count(); i++ {
 			name := p.nameAt(i)
@@ -839,9 +307,21 @@ func (c *rtContext) hasScaleRef(ref jsval.Value) bool {
 	return ok
 }
 
+// encName is the key `_["%" + ref]` looks a scale up by (scales.js writes the
+// reference as that concatenation): the text of any value, not only a
+// string's. A scale is found by it whatever the type of the reference (a scale
+// named "1" by the number 1).
+func (c *rtContext) encName(ref jsval.Value) jsval.Value {
+	if ref.IsStr() {
+		return ref
+	}
+	return jsval.Str(c.view.jsString(ref))
+}
+
 // encScale is the encoders' _scale(name, value), `_["%name"](value)`: with no
 // such scale that is a call of undefined.
 func (c *rtContext) encScale(ref, v jsval.Value) jsval.Value {
+	ref = c.encName(ref)
 	if !c.hasScaleRef(ref) {
 		fail("_.%%%s is not a function", jsval.StringPrefix(ref, jsval.MessageBytes))
 	}
@@ -850,10 +330,25 @@ func (c *rtContext) encScale(ref, v jsval.Value) jsval.Value {
 
 // encScaleRange is the encoders' _range(name), `_["%name"].range()`.
 func (c *rtContext) encScaleRange(ref jsval.Value) jsval.Value {
+	ref = c.encName(ref)
 	if !c.hasScaleRef(ref) {
 		fail("Cannot read properties of undefined (reading 'range')")
 	}
+	if c.scaleOf(ref) == nil {
+		// a projection, which has no range method
+		fail("TypeError: _.%%%s.range is not a function", jsval.StringPrefix(ref, jsval.MessageBytes))
+	}
 	return c.scaleRange(ref)
+}
+
+// EncodeScale and EncodeRange implement expr.EncodeScaleProvider: the encoders'
+// helpers as an expression compiled from a value reference calls them.
+func (c *rtContext) EncodeScale(ref, v jsval.Value) jsval.Value { return c.encScale(ref, v) }
+
+func (c *rtContext) EncodeRange(ref jsval.Value) jsval.Value { return c.encScaleRange(ref) }
+
+func (c *rtContext) EncodeBandwidth(ref jsval.Value) jsval.Value {
+	return jsval.Num(c.scaleBandwidth(c.encName(ref)))
 }
 
 func (c *rtContext) scaleRange(ref jsval.Value) jsval.Value {
@@ -861,7 +356,10 @@ func (c *rtContext) scaleRange(ref jsval.Value) jsval.Value {
 	if s == nil {
 		return jsval.Arr(nil)
 	}
-	return jsval.Arr(s.Range())
+	// A copy, as d3's range() is, charged as domain()'s is.
+	r := s.Range()
+	c.view.chargeItems(len(r))
+	return jsval.Arr(r)
 }
 
 func (c *rtContext) scaleBandwidth(ref jsval.Value) float64 {
@@ -889,12 +387,24 @@ func (c *rtContext) Invert(ref, v, group jsval.Value) jsval.Value {
 		}
 		return jsval.Undefined
 	}
+	// `isArray(range) ? (s.invertRange || s.invert)(range)
+	// : (s.invert || s.invertExtent)(range)`: a scale with neither (a
+	// sequential, diverging, ordinal or bin-ordinal one) is a call of
+	// undefined.
+	typ := s.Type()
 	if v.IsArr() {
+		if !scaleHasMethod(typ, "invertRange") && !scaleHasMethod(typ, "invert") {
+			panic(&expr.Error{Name: "TypeError", Msg: "(s.invertRange || s.invert) is not a function"})
+		}
 		r, ok := scale.InvertRange(s, v.Index(0), v.Index(1))
 		if !ok {
 			return jsval.Undefined
 		}
+		c.view.chargeItems(r.Len())
 		return r
+	}
+	if !scaleHasMethod(typ, "invert") && !scaleHasMethod(typ, "invertExtent") {
+		panic(&expr.Error{Name: "TypeError", Msg: "(s.invert || s.invertExtent) is not a function"})
 	}
 	if inv, ok := s.(scale.Inverter); ok {
 		return inv.Invert(v)
@@ -909,9 +419,17 @@ func (c *rtContext) Invert(ref, v, group jsval.Value) jsval.Value {
 func (c *rtContext) Domain(ref, group jsval.Value) jsval.Value {
 	s := c.scaleOf(ref)
 	if s == nil {
+		// A projection is a scale to getScale, without a domain.
+		if _, ok := c.projectionOf(ref); ok {
+			panic(&expr.Error{Name: "TypeError", Msg: "s.domain is not a function"})
+		}
 		return jsval.Arr(nil)
 	}
-	return jsval.Arr(s.Domain())
+	// A copy, as d3's domain() is: charged once made (the scale holds as
+	// much, so the charge comes one copy late at most).
+	d := s.Domain()
+	c.view.chargeItems(len(d))
+	return jsval.Arr(d)
 }
 
 func (c *rtContext) Range(ref, group jsval.Value) jsval.Value { return c.scaleRange(ref) }
@@ -920,7 +438,52 @@ func (c *rtContext) Bandwidth(ref, group jsval.Value) jsval.Value {
 	return jsval.Num(c.scaleBandwidth(ref))
 }
 
-func (c *rtContext) Copy(ref, group jsval.Value) jsval.Value { return jsval.Undefined }
+// copiedScale is the scale a copy() function stands for.
+type copiedScale struct{ s scale.Scale }
+
+// Copy is copy(name): `s ? s.copy() : undefined`, a function. It prints as
+// the source of d3's scale function of that family of scales (what V8's
+// Function.prototype.toString answers for the pinned d3 build); vega-scale's
+// isRegisteredScale is false for it, so no scale function accepts it.
+func (c *rtContext) Copy(ref, group jsval.Value) jsval.Value {
+	s := c.scaleOf(ref)
+	if s == nil {
+		return jsval.Undefined
+	}
+	// the copy has the domain and the range of the scale: charged as
+	// domain() and range() charge theirs
+	c.view.chargeItems(len(s.Domain()) + len(s.Range()))
+	typ := s.Type()
+	switch s.(type) {
+	case *scale.Sequential: // sequential-linear, -log...: Type() is the transform's
+		typ = scale.TypeSequential
+	case *scale.Diverging:
+		typ = scale.TypeDiverging
+	}
+	return jsval.HostFunction(scaleFunctionSource(typ), copiedScale{s.Copy()})
+}
+
+func scaleFunctionSource(typ string) string {
+	const nl = "\n    "
+	const end = "\n  }"
+	switch typ {
+	case scale.TypeIdentity:
+		return "function scale(x) {" + nl + "return x == null || isNaN(x = +x) ? unknown : x;" + end
+	case scale.TypeSequential:
+		return "function scale(x) {" + nl + "return x == null || isNaN(x = +x) ? unknown : interpolator(k10 === 0 ? 0.5 : (x = (transform(x) - t0) * k10, clamp ? Math.max(0, Math.min(1, x)) : x));" + end
+	case scale.TypeDiverging:
+		return "function scale(x) {" + nl + "return isNaN(x = +x) ? unknown : (x = 0.5 + ((x = +transform(x)) - t1) * (s * x < s * t1 ? k10 : k21), interpolator(clamp ? Math.max(0, Math.min(1, x)) : x));" + end
+	case scale.TypeOrdinal, scale.TypeBand, scale.TypePoint:
+		return "function scale(d) {\n    let i = index.get(d);\n    if (i === undefined) {\n      if (unknown !== implicit) return unknown;\n      index.set(d, i = domain.push(d) - 1);\n    }\n    return range[i % range.length];" + end
+	case scale.TypeQuantile:
+		return "function scale(x) {" + nl + "return x == null || isNaN(x = +x) ? unknown : range[bisect(thresholds, x)];" + end
+	case scale.TypeQuantize, scale.TypeThreshold:
+		return "function scale(x) {" + nl + "return x != null && x <= x ? range[bisect(domain, x, 0, n)] : unknown;" + end
+	case scale.TypeBinOrdinal:
+		return "function scale(x) {" + nl + "return x == null || x !== x ? undefined : range[(bisect(domain, x) - 1) % range.length];" + end
+	}
+	return "function scale(x) {" + nl + "return x == null || isNaN(x = +x) ? unknown : (output || (output = piecewise(domain.map(transform), range, interpolate)))(transform(clamp(x)));" + end
+}
 
 var _ = format.UTC
 
@@ -929,7 +492,28 @@ var _ = format.UTC
 func (c *rtContext) Gradient(ref, p0, p1, count, group jsval.Value) jsval.Value {
 	s := c.scaleOf(ref)
 	if s == nil {
-		return jsval.Undefined
+		// `scale.domain()` of what getScale answers: a projection has no
+		// domain, and an unknown name is undefined.
+		if _, ok := c.projectionOf(ref); ok {
+			panic(&expr.Error{Name: "TypeError", Msg: "scale.domain is not a function"})
+		}
+		panic(&expr.Error{Name: "TypeError", Msg: "Cannot read properties of undefined (reading 'domain')"})
 	}
-	return scaleGradient(c.view.ctx, s, p0, p1, count)
+	return scaleGradient(c.view, s, p0, p1, count)
+}
+
+// orZeroV is `v || 0`.
+func orZeroV(v jsval.Value) jsval.Value {
+	if v.IsTruthy() {
+		return v
+	}
+	return jsval.Num(0)
+}
+
+// numOr0f is `x || 0` of a number.
+func numOr0f(f float64) float64 {
+	if f == 0 || math.IsNaN(f) {
+		return 0
+	}
+	return f
 }

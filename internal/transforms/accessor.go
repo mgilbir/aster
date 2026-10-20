@@ -22,6 +22,18 @@ type Field struct {
 	// then "".
 	Name    string
 	Unnamed bool
+	// RawName, when HasRawName, is the accessor's name as upstream holds it
+	// where field(f) was given something that is no one-segment path: the
+	// value f itself (a number, an array of several segments), not its text.
+	RawName    jsval.Value
+	HasRawName bool
+	// Identity: the access path has no segment, so the accessor returns its
+	// argument as it is (and reads no property of undefined).
+	Identity bool
+	// Uncallable: the value stands where an accessor is expected but is a
+	// list of them (a Field operator given an array makes one), truthy and no
+	// function: calling it is a TypeError, reading its name gives undefined.
+	Uncallable bool
 	// Fields are the tuple fields the accessor reads (accessorFields).
 	Fields []string
 }
@@ -35,11 +47,24 @@ func (f Field) Key() string {
 	return f.Name
 }
 
+// UncallableField is a truthy value that is no function in a field's place.
+func UncallableField() Field {
+	return Field{
+		Get: func(jsval.Value) jsval.Value {
+			panic(&jsval.Thrown{Name: "TypeError", Msg: "f is not a function"})
+		},
+		Unnamed: true, Uncallable: true,
+	}
+}
+
 // NameValue is accessorName(f) as a value: undefined for an unnamed
 // accessor.
 func (f Field) NameValue() jsval.Value {
 	if f.Unnamed {
 		return jsval.Undefined
+	}
+	if f.HasRawName {
+		return f.RawName
 	}
 	return jsval.Str(f.Name)
 }
@@ -64,7 +89,7 @@ func FieldOf(path string) Field {
 	if len(segs) == 1 {
 		name = segs[0]
 	}
-	return Field{Get: getter(segs), Name: name, Fields: []string{name}}
+	return Field{Get: getter(segs), Name: name, Fields: []string{name}, Identity: len(segs) == 0}
 }
 
 // FieldOfStrict is FieldOf with the accessor's JavaScript semantics for a
@@ -91,9 +116,9 @@ func NamedField(name string, fields []string, get Accessor) Field {
 	return Field{Get: get, Name: name, Fields: fields}
 }
 
-// PathAccessor reads the path from a tuple as a field accessor does; the
-// empty path is the tuple itself.
-func PathAccessor(path []string) Accessor { return getter(path) }
+// PathAccessorStrict is PathAccessor with a member chain's semantics for a
+// missing step (see strictGetter): a TypeError, raised as a panic.
+func PathAccessorStrict(path []string) Accessor { return strictGetter(path) }
 
 // getter is vega-util's getter: plain property reads along the path. Unlike a
 // JavaScript member chain it answers Undefined instead of throwing when an
@@ -146,7 +171,9 @@ func propOrThrow(v jsval.Value, key string) jsval.Value {
 	return prop(v, key)
 }
 
-// prop is JavaScript's v[key] for the values datum fields hold.
+// prop is JavaScript's v[key] for the values datum fields hold: an
+// object's member (own or inherited), an array's or a string's length and
+// elements, and the prototype methods any value has (jsval.Member).
 func prop(v jsval.Value, key string) jsval.Value {
 	switch v.Kind() {
 	case jsval.KindObj:
@@ -158,12 +185,10 @@ func prop(v jsval.Value, key string) jsval.Value {
 		if i, ok := arrayIndex(key); ok {
 			return v.Index(i)
 		}
-	case jsval.KindStr:
-		if key == "length" {
-			return jsval.Int(utf16Len(v.StrValue()))
-		}
+	case jsval.KindUndefined, jsval.KindNull:
+		return jsval.Undefined
 	}
-	return jsval.Undefined
+	return jsval.Member(v, key)
 }
 
 func arrayIndex(s string) (int, bool) {
@@ -178,18 +203,6 @@ func arrayIndex(s string) (int, bool) {
 		n = n*10 + int(s[i]-'0')
 	}
 	return n, true
-}
-
-func utf16Len(s string) int {
-	n := 0
-	for _, r := range s {
-		if r >= 0x10000 {
-			n += 2
-		} else {
-			n++
-		}
-	}
-	return n
 }
 
 // MeasureName is upstream's output naming rule for an aggregate-like measure:

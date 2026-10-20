@@ -196,7 +196,10 @@ func (p *eventParser) parseStream(s string) Value {
 		switch {
 		case markname != 0:
 			stream.Set("markname", jsval.Str(source[0][1:]))
-		case defaultEventMarks[source[0]]:
+		case defaultEventMarks[source[0]] || isInheritedKey(source[0]):
+			// MARKS[type], a plain object: a name every object inherits
+			// ("constructor", "__proto__") is truthy there too (C80 of the
+			// 2026-10-18 audit).
 			stream.Set("marktype", jsval.Str(source[0]))
 		default:
 			stream.Set("source", jsval.Str(source[0]))

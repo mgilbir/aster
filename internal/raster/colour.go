@@ -107,6 +107,9 @@ func (r *renderer) paintColourWith(f ColourFace, gid uint32, m matrix, sp *state
 	if prev == nil {
 		return true // the render has failed
 	}
+	// The clips the painting makes are the glyph's (C110).
+	masks := r.maskBytes
+	defer r.releaseMasks(masks)
 	cs := *sp
 	p := &colourPainter{r: r, face: f, st: &cs, gid: gid, fg: fg, fgPaint: fgPaint}
 	p.m = []matrix{m}
@@ -142,6 +145,7 @@ type colourPainter struct {
 
 	m      []matrix // font units (y up) to device, innermost last
 	clips  []*mask  // the clip in effect, innermost last; nil is none
+	held   []int    // the clip coverage held before each pushed clip
 	groups []*canvas
 	// flat is the groups that were painted straight into the canvas under
 	// them because the layer budget had none to spare, by depth.
@@ -169,32 +173,39 @@ func (p *colourPainter) region() irect {
 	return reg
 }
 
-func (p *colourPainter) pushClip(m *mask) {
+// pushClip makes m the painting's clip until the PopClip that matches,
+// which gives back the coverage made since held, m's included (C110).
+func (p *colourPainter) pushClip(m *mask, held int) {
 	p.clips = append(p.clips, m)
+	p.held = append(p.held, held)
 	p.st.clip = m
 }
 
 func (p *colourPainter) PushClipGlyph(gid int) {
+	held := p.r.maskBytes
 	o := p.r.glyphOutline(p.face, uint32(gid))
 	if o == nil {
-		p.pushClip(&mask{r: irect{}})
+		p.pushClip(&mask{r: irect{}}, held)
 		return
 	}
 	// The outline is y down; the painting y up.
 	m := p.top().mul(scaleM(1, -1))
 	reg := p.region().intersect(deviceBounds(o, m))
 	mk := p.r.pathsMask([]*path{o}, []matrix{m}, []bool{false}, reg)
-	p.pushClip(p.r.intersectMasks(mk, p.st.clip))
+	p.pushClip(p.r.intersectMasks(mk, p.st.clip), held)
 }
 
 func (p *colourPainter) PushClipRect(rc shape.Rect) {
-	p.pushClip(p.r.rectClip(p.st, p.top(), rect{rc.XMin, rc.YMin, rc.XMax, rc.YMax}))
+	held := p.r.maskBytes
+	p.pushClip(p.r.rectClip(p.st, p.top(), rect{rc.XMin, rc.YMin, rc.XMax, rc.YMax}), held)
 }
 
 func (p *colourPainter) PopClip() {
 	if len(p.clips) > 1 {
 		p.clips = p.clips[:len(p.clips)-1]
 		p.st.clip = p.clips[len(p.clips)-1]
+		p.r.releaseMasks(p.held[len(p.held)-1])
+		p.held = p.held[:len(p.held)-1]
 	}
 }
 
@@ -411,6 +422,8 @@ func (p *colourPainter) Image(img shape.Image) {
 		return
 	}
 	lvl, linv, area := sampledLevel(p.r, ri, inv)
+	masks := p.r.maskBytes
+	defer p.r.releaseMasks(masks) // the image's clip is its own
 	clip := p.r.rectClip(p.st, p.top(), rect{b.XMin, b.YMin, b.XMax, b.YMax})
 	if clip.r.empty() {
 		return
@@ -661,7 +674,10 @@ func (p *colourPainter) svgGlyph(data []byte) {
 	if len(data) == 0 {
 		return
 	}
-	doc := r.svgGlyphDoc(data)
+	doc, release := r.svgGlyphDoc(data)
+	if release != nil {
+		defer release()
+	}
 	if doc == nil {
 		return
 	}
@@ -685,33 +701,96 @@ func (p *colourPainter) svgGlyph(data []byte) {
 }
 
 // svgGlyphDoc parses an SVG glyph document, gzipped or not, once per
-// render. One that does not parse is nil.
-func (r *renderer) svgGlyphDoc(data []byte) *document {
+// render. One that does not parse is nil. The font is untrusted (WithFont):
+// what the document is inflated to, its text and its tree are charged to
+// the call's ledger before they are made, the parse polls the render's
+// context, and one past a limit fails the render. The document is kept for
+// the render if the cache can hold it, its charge handed to the cache;
+// otherwise release, non-nil, gives the charge back once it is drawn.
+func (r *renderer) svgGlyphDoc(data []byte) (doc *document, release func()) {
 	k := colourImageKey{&data[0], len(data)}
 	if doc, ok := r.svgGlyphs.get(k); ok {
-		return doc
+		return doc, nil
 	}
 	src := data
 	if len(src) >= 2 && src[0] == 0x1f && src[1] == 0x8b {
-		src = nil
-		if zr, err := gzip.NewReader(bytes.NewReader(data)); err == nil {
-			// No more than the limit on an SVG's size, and one byte more,
-			// which parseDocument then refuses.
-			src, _ = io.ReadAll(io.LimitReader(zr, int64(r.lim.MaxInputBytes)+1))
+		var err error
+		if src, err = r.inflate(data); err != nil {
+			r.fail(err)
+			return nil, nil
+		}
+		defer r.ledger.Free(int64(cap(src)))
+	}
+	text := int64(0) // the document's text, its strings point into
+	if len(src) > 0 {
+		// The context paints are the text's, which the glyph's state
+		// carries as its colour; replacing them makes a copy, which grows
+		// by at most a few bytes a replacement.
+		text = 2 * int64(len(src))
+		if err := r.ledger.Alloc(text); err != nil {
+			r.fail(overLedger("reading an SVG glyph", err))
+			return nil, nil
+		}
+		s := strings.NewReplacer("context-fill", "currentColor", "context-stroke", "currentColor").Replace(string(src))
+		var err error
+		if doc, err = parseDoc(r.ctx, r.ledger, s, r.lim); err != nil && (errors.Is(err, budget.ErrLimit) || (r.ctx != nil && r.ctx.Err() != nil)) {
+			r.ledger.Free(text)
+			r.fail(err)
+			return nil, nil
 		}
 	}
-	var doc *document
-	if len(src) > 0 {
-		// The context paints are the text's, which the glyph's state carries
-		// as its colour.
-		s := strings.NewReplacer("context-fill", "currentColor", "context-stroke", "currentColor").Replace(string(src))
-		doc, _ = parseDocument(s, r.lim)
-	}
 	// What a parsed document holds: its text and its elements.
-	n := int64(len(src)) + 64
+	n := text + 64
 	if doc != nil {
-		n += int64(doc.count) * 256
+		n += doc.res.held
 	}
-	r.svgGlyphs.put(r.ledger, k, doc, n)
-	return doc
+	r.ledger.Free(text)
+	doc.release()
+	if n <= maxSVGGlyphBytes {
+		r.svgGlyphs.put(r.ledger, k, doc, n)
+		if _, kept := r.svgGlyphs.get(k); kept {
+			return doc, nil
+		}
+	}
+	// Not kept: held while it is drawn.
+	if err := r.ledger.Alloc(n); err != nil {
+		r.fail(overLedger("reading an SVG glyph", err))
+		return nil, nil
+	}
+	return doc, func() { r.ledger.Free(n) }
+}
+
+// inflate is the gzipped SVG glyph document data, read a chunk at a time,
+// each charged to the ledger before it is read (the caller frees cap of
+// what it returns): no more than an SVG's size limit, and one byte more,
+// which the parse then refuses.
+func (r *renderer) inflate(data []byte) ([]byte, error) {
+	zr, err := gzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return nil, nil
+	}
+	lr := io.LimitReader(zr, int64(r.lim.MaxInputBytes)+1)
+	var buf []byte
+	for {
+		if len(buf) == cap(buf) {
+			c := max(64<<10, 2*cap(buf))
+			if err := r.ledger.Alloc(int64(c)); err != nil {
+				r.ledger.Free(int64(cap(buf)))
+				return nil, overLedger("inflating an SVG glyph", err)
+			}
+			nb := make([]byte, len(buf), c)
+			copy(nb, buf)
+			r.ledger.Free(int64(cap(buf))) // the old one is garbage
+			buf = nb
+		}
+		if !r.poll(true) {
+			r.ledger.Free(int64(cap(buf)))
+			return nil, r.err
+		}
+		n, err := lr.Read(buf[len(buf):cap(buf)])
+		buf = buf[:len(buf)+n]
+		if err != nil {
+			return buf, nil // the end, or a corrupt stream: what was inflated
+		}
+	}
 }
