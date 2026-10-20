@@ -3,13 +3,9 @@ package jsval
 import (
 	"bytes"
 	"strings"
-	"sync"
 	"unicode/utf16"
 	"unicode/utf8"
 	"unsafe"
-
-	"golang.org/x/text/cases"
-	"golang.org/x/text/language"
 )
 
 // JavaScript's string operations, for every package that reads a value as
@@ -25,20 +21,14 @@ import (
 // WTF-8 bytes (ED A0..BF xx); these functions keep such a surrogate as it is,
 // as JavaScript's do.
 
-var (
-	upperCaser = cases.Upper(language.Und)
-	lowerCaser = cases.Lower(language.Und)
-	caseMu     sync.Mutex
-)
-
 // JSLower is String.prototype.toLowerCase: the full, locale-independent
-// Unicode case mapping (İ -> "i̇", Σ -> ς at the end of a word). An ASCII
-// string takes a fast path; a cases.Caser is stateful, hence the lock.
+// Unicode case mapping (İ -> "i̇", Σ -> ς at the end of a word), by the pinned
+// node's tables (jscase.go). An ASCII string takes a fast path.
 func JSLower(s string) string {
 	if isASCII(s) {
 		return asciiLower(s)
 	}
-	return caseMap(s, lowerCaser)
+	return mapCase(s, true)
 }
 
 // JSUpper is String.prototype.toUpperCase (ß -> "SS", ŉ -> "ʼN").
@@ -46,36 +36,7 @@ func JSUpper(s string) string {
 	if isASCII(s) {
 		return asciiUpper(s)
 	}
-	return caseMap(s, upperCaser)
-}
-
-// caseMap maps s with c, leaving the lone surrogates it holds as they are:
-// the caser would read their WTF-8 bytes as invalid UTF-8. A lone surrogate
-// is neither cased nor case-ignorable, so it ends a word for the final
-// sigma's context as it does in JavaScript, and mapping the text between them
-// piece by piece gives the same result.
-func caseMap(s string, c cases.Caser) string {
-	caseMu.Lock()
-	defer caseMu.Unlock()
-	if !strings.Contains(s, "\xed") {
-		c.Reset()
-		return c.String(s)
-	}
-	var b strings.Builder
-	for len(s) > 0 {
-		i := lonePos(s)
-		if i < 0 {
-			i = len(s)
-		}
-		c.Reset()
-		b.WriteString(c.String(s[:i]))
-		if i == len(s) {
-			break
-		}
-		b.WriteString(s[i : i+3])
-		s = s[i+3:]
-	}
-	return b.String()
+	return mapCase(s, false)
 }
 
 // lonePos is the position of the first lone surrogate's WTF-8 bytes in s, or
