@@ -184,7 +184,7 @@ func TestCompareWithNode(t *testing.T) {
 	scoreboard(t, results)
 	// A floor at the corpus's size, so a corpus directory that moved or
 	// emptied fails instead of comparing less; raise it as specs are added.
-	const corpusFloor = 1438
+	const corpusFloor = 1464
 	complete := *compareSets == compareSetsDefault && *compareFilter == ""
 	if complete && len(results) < corpusFloor {
 		t.Errorf("compared %d specs, fewer than the corpus floor of %d", len(results), corpusFloor)
