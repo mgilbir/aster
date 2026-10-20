@@ -7,11 +7,11 @@ require (
 	github.com/mgilbir/goecma262 v0.3.2
 	github.com/mgilbir/pdf0 v0.5.0
 	golang.org/x/image v0.47.0
+	golang.org/x/text v0.43.0
 )
 
 require (
 	github.com/mgilbir/formalis v0.3.1 // indirect
 	github.com/mgilbir/golittlecms v0.0.0-20260727161601-f6af7cfe1556 // indirect
 	github.com/mgilbir/gopenjpeg v0.1.1 // indirect
-	golang.org/x/text v0.43.0 // indirect
 )
