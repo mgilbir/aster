@@ -36,7 +36,7 @@ func (s *pathContextStream) pointRadius(r float64) { s.radius = r }
 func (s *pathContextStream) PolygonStart()         { s.line = 0 }
 func (s *pathContextStream) PolygonEnd()           { s.line = nan }
 func (s *pathContextStream) LineStart()            { s.point = 0 }
-func (s *pathContextStream) Sphere()               {}
+func (s *pathContextStream) Sphere()               { sphereUnsupported() }
 func (s *pathContextStream) LineEnd() {
 	if s.line == 0 {
 		s.ctx.ClosePath()
@@ -66,7 +66,7 @@ type areaSink struct {
 	x0, y0       float64
 }
 
-func (s *areaSink) Sphere()       {}
+func (s *areaSink) Sphere()       { sphereUnsupported() }
 func (s *areaSink) PolygonStart() { s.inPolygon = true }
 func (s *areaSink) PolygonEnd() {
 	s.inPolygon = false
@@ -106,7 +106,7 @@ type boundsSink struct{ x0, y0, x1, y1 float64 }
 func newBoundsSink() *boundsSink {
 	return &boundsSink{math.Inf(1), math.Inf(1), math.Inf(-1), math.Inf(-1)}
 }
-func (s *boundsSink) Sphere()       {}
+func (s *boundsSink) Sphere()       { sphereUnsupported() }
 func (s *boundsSink) LineStart()    {}
 func (s *boundsSink) LineEnd()      {}
 func (s *boundsSink) PolygonStart() {}
@@ -147,7 +147,7 @@ const (
 	cRing
 )
 
-func (s *centroidSink) Sphere() {}
+func (s *centroidSink) Sphere() { sphereUnsupported() }
 func (s *centroidSink) centroidPoint(x, y float64) {
 	s.X0 += x
 	s.Y0 += y
@@ -234,7 +234,7 @@ type measureSink struct {
 	x0, y0   float64
 }
 
-func (s *measureSink) Sphere()       {}
+func (s *measureSink) Sphere()       { sphereUnsupported() }
 func (s *measureSink) PolygonStart() { s.ring = true }
 func (s *measureSink) PolygonEnd()   { s.ring = false }
 func (s *measureSink) LineStart()    { s.mode = 1 }

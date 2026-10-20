@@ -773,13 +773,10 @@ func (p *pdfPainter) Image(img shape.Image) {
 	case shape.ImagePNG:
 		// The font's own bytes, which forme hands out without copying.
 		key = fmt.Sprintf("glyphpng:%p:%d", &img.Data[0], len(img.Data))
-		// What the decoder allocates, and the NRGBA image made of it.
-		// (imageref.DecodeBytes, of PR 07 of the audit of 2026-10-18,
-		// counts a decoder's allocation more closely; use it once both are
-		// in.)
-		if cfg, _, err := imageref.Config(img.Data, p.r.lim.imageLimits()); err == nil {
-			px := int64(cfg.Width) * int64(cfg.Height)
-			need = px*decodedBytes(cfg.ColorModel) + 4*px
+		// What the decoder allocates (imageref.DecodeBytes, as the PNG
+		// writer charges it), and the NRGBA image made of it.
+		if cfg, format, err := imageref.Config(img.Data, p.r.lim.imageLimits()); err == nil {
+			need = imageref.DecodeBytes(img.Data, cfg, format) + 4*int64(cfg.Width)*int64(cfg.Height)
 		}
 		make = func() (*image.NRGBA, error) { return decodeNRGBA(p.r.ctx, img.Data, p.r.lim) }
 	case shape.ImageMask:

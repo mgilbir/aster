@@ -556,6 +556,9 @@ func TestNewRejectsInvalidOptions(t *testing.T) {
 		"typed nil HTTPLoader":            aster.WithLoader((*aster.HTTPLoader)(nil)),
 		"Local timezone":                  aster.WithTimezone("Local"),
 		"Vega-Lite 6.4.0":                 aster.WithVegaLiteVersion("6.4.0"),
+		"WithFontPalette typo":            aster.WithFontPalette("Typo", 0),
+		"WithFontPalette negative":        aster.WithFontPalette("Liberation Sans", -1),
+		"FallbackLoader nil child":        aster.WithLoader(aster.NewFallbackLoader(aster.DenyLoader{}, (*aster.FileLoader)(nil))),
 	} {
 		if _, err := aster.New(opt); err == nil {
 			t.Errorf("%s: New succeeded", name) // not closed: a typed nil Loader panics there
@@ -576,6 +579,8 @@ func TestNewRejectsInvalidOptions(t *testing.T) {
 		"registered default family": {aster.WithFont("D", font), aster.WithDefaultFontFamily("D")},
 		"embedded default families": {aster.WithDefaultFontFamily("Liberation Serif"), aster.WithDefaultSerifFamily("Liberation Sans"), aster.WithDefaultMonospaceFamily("Liberation Mono")},
 		"untyped nil Loader":        {aster.WithLoader(nil)},
+		"embedded palette family":   {aster.WithFontPalette("Liberation Sans", 1)},
+		"registered palette family": {aster.WithFont("D", font), aster.WithFontPalette("d", 2)},
 		"IANA zone":                 {aster.WithTimezone("Europe/Madrid")},
 	} {
 		c, err := aster.New(opts...)

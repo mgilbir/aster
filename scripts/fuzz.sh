@@ -19,7 +19,14 @@
 # go test -fuzz can fail with only "context deadline exceeded" when -fuzztime
 # runs out while it is still minimizing a new input (most likely on a cold
 # corpus): nothing crashed and no input is written. Such a run counts as a
-# pass.
+# pass, but only when nothing failed: a failing seed-corpus entry (a
+# committed crasher under testdata/fuzz, or an f.Add seed) writes no new
+# input either, and aster's own timeout errors say "context deadline
+# exceeded" too. So a run that failed an input fails before the deadline is
+# considered: a seed-corpus failure ("failure while testing seed corpus
+# entry", and the input's own "--- FAIL:" nested under the target's), a panic,
+# or a failing input written (C63, audit 2026-10-18). Only the target's own
+# top-level "--- FAIL:" is left, which the deadline prints too.
 set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -44,7 +51,11 @@ fuzz_one() { # pkg target fuzztime
 		rm -f "$out"
 		return 0
 	fi
-	if grep -q 'context deadline exceeded' "$out" && ! grep -q -e '^panic' -e 'Failing input written' "$out" &&
+	if grep -q -e 'failure while testing seed corpus entry' -e '^[[:space:]][[:space:]]*--- FAIL:' -e '^panic' -e 'Failing input written' "$out"; then
+		rm -f "$out"
+		return 1
+	fi
+	if grep -q 'context deadline exceeded' "$out" &&
 		[ -z "$(git ls-files --others --exclude-standard -- "$1/testdata/fuzz/$2")" ]; then
 		echo "fuzz: $1 $2: the fuzz time ran out while minimizing; no failing input, counted as a pass"
 		rm -f "$out"

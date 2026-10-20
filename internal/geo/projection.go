@@ -466,7 +466,11 @@ func (p *standard) SetCenter(lon, lat float64) {
 // SetRotate takes two or three angles in degrees (a third defaults to 0).
 // Transverse Mercator adds its 90 degree gamma. Like d3, rotating does not
 // recompute the Mercator clip extent.
-func (p *standard) SetRotate(angles []float64) {
+func (p *standard) SetRotate(angles []float64) { p.setRotate(angles, false) }
+
+// setRotate is SetRotate; gammaAdded says a third angle already has its 90
+// (JavaScript's `_[2] + 90` of an entry that is no number concatenates).
+func (p *standard) setRotate(angles []float64, gammaAdded bool) {
 	get := func(i int) float64 {
 		if i < len(angles) {
 			return angles[i]
@@ -481,7 +485,9 @@ func (p *standard) SetRotate(angles []float64) {
 	}
 	if p.transverse {
 		if hasG {
-			g += 90
+			if !gammaAdded {
+				g += 90
+			}
 		} else {
 			g = 90
 		}

@@ -19,10 +19,13 @@ type CSSFont struct {
 // Default CSS font values, applied to whatever a shorthand does not state (or
 // entirely, when it cannot be parsed).
 const (
-	defaultSize   = 11
-	weightNormal  = 400
-	weightBold    = 700
-	weightLighter = 100 // node-canvas's FontParser: lighter and bolder are 100 and 700
+	defaultSize = 11
+	// zeroSizeCanvas is the size node-canvas measures at for a font whose size is
+	// zero or less.
+	zeroSizeCanvas = 16
+	weightNormal   = 400
+	weightBold     = 700
+	weightLighter  = 100 // node-canvas's FontParser: lighter and bolder are 100 and 700
 )
 
 // ParseCSSFont parses a CSS font shorthand such as
@@ -35,7 +38,7 @@ const (
 //
 // A string the grammar rejects yields the defaults: normal, 400, 11px,
 // sans-serif. A size of zero or less, which node-canvas parses but does not
-// apply, leaves the default size.
+// apply, measures at 16px.
 func ParseCSSFont(s string) CSSFont {
 	f, ok := parseCanvasFont(s)
 	if !ok {
@@ -60,8 +63,13 @@ func parseCanvasFont(s string) (CSSFont, bool) {
 		return CSSFont{}, false
 	}
 	f := CSSFont{Italic: p.italic, Weight: p.weight, Size: p.size}
-	if !(f.Size > 0) || math.IsInf(f.Size, 0) {
+	switch {
+	case math.IsInf(f.Size, 0):
 		f.Size = defaultSize
+	case !(f.Size > 0):
+		// A size of zero or less is accepted and not applied: the context
+		// measures at 16px (Pango's default), not at the size it held.
+		f.Size = zeroSizeCanvas
 	}
 	switch {
 	case hasFam:
@@ -75,18 +83,32 @@ func parseCanvasFont(s string) (CSSFont, bool) {
 }
 
 func parseFamilies(s string) []string {
-	parts := strings.Split(s, ",")
-	families := make([]string, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		p = strings.Trim(p, `"'`) // surrounding quotes
-		p = strings.TrimSpace(p)
-		if p != "" {
-			families = append(families, p)
-		}
-	}
+	var families []string
+	EachFontFamily(s, func(name string) bool {
+		families = append(families, name)
+		return true
+	})
 	if len(families) == 0 {
 		return []string{"sans-serif"}
 	}
 	return families
+}
+
+// EachFontFamily calls f with each family name of a font-family list in
+// order, until f returns false: the list split at commas, each name trimmed
+// of white space and of surrounding quotes, empty names left out. It is the
+// one reader of a family list (ParseFontFamily and the CSS font reader are
+// built on it), and reads no further than f asks, so a caller that wants the
+// first few names does not split a list the document made long.
+func EachFontFamily(s string, f func(name string) bool) {
+	for len(s) > 0 {
+		var p string
+		p, s, _ = strings.Cut(s, ",")
+		p = strings.TrimSpace(p)
+		p = strings.Trim(p, `"'`) // surrounding quotes
+		p = strings.TrimSpace(p)
+		if p != "" && !f(p) {
+			return
+		}
+	}
 }

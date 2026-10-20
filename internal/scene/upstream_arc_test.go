@@ -93,5 +93,5 @@ func TestUpstreamD3ShapeArc(t *testing.T) {
 		}
 		r.Check(c, sp.String(), false)
 	}
-	r.Done(80)
+	r.Done(102)
 }

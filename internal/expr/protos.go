@@ -46,7 +46,7 @@ var dateProtoMembers = map[string]bool{
 	"setUTCHours": true, "setUTCMilliseconds": true, "setUTCMinutes": true, "setUTCMonth": true,
 	"setUTCSeconds": true, "setYear": true, "toDateString": true, "toGMTString": true,
 	"toISOString": true, "toJSON": true, "toLocaleDateString": true, "toLocaleString": true,
-	"toLocaleTimeString": true, "toString": true, "toTemporalInstant": true, "toTimeString": true,
+	"toLocaleTimeString": true, "toString": true, "toTimeString": true,
 	"toUTCString": true, "valueOf": true,
 }
 

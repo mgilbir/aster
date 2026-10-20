@@ -1,0 +1,1 @@
+{"autosize":"fit-x","scales":[{"name":"color"}],"legends":[{"title":"Annual Precipitation (mm)","fill":"color","orient":"bottom","titlePadding":"datum.x","titleOrient":"left"}],"config":{"legend":{"layout":{"anchor":"middle"}}}}

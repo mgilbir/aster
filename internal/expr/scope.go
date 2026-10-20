@@ -133,6 +133,11 @@ type Scope struct {
 	pending int64
 	// re is the copy of reOf that matcher last made.
 	re, reOf *ecma262.Regexp
+	// walk is the Walker of Context, which walks values the evaluator hands
+	// to other packages (formats, scales); wctx is the Context it was made
+	// for.
+	walk jsval.Walker
+	wctx context.Context
 	// searchSteps counts the comparison steps of the Knuth-Morris-Pratt
 	// searches (searchFirst, searchLast and their tables). Nothing reads it
 	// but the tests, which check that a search is linear by counting its
@@ -160,6 +165,14 @@ func (s *Scope) SetEnv(env Env) {
 	s.view, _ = env.(ViewProvider)
 	s.logger, _ = env.(Logger)
 	s.tuples, _ = env.(TupleChecker)
+}
+
+// walker is the Walker of the evaluation's call (ADR 0018).
+func (s *Scope) walker() jsval.Walker {
+	if s.wctx != s.Context {
+		s.wctx, s.walk = s.Context, jsval.WalkerFor(s.Context)
+	}
+	return s.walk
 }
 
 // Env returns the bound environment.

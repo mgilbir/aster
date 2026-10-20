@@ -33,10 +33,16 @@ func InitialFontFamily() []string { return []string{"serif"} }
 // has such a name, and the two then agree. ok is false for a value that
 // names no family, which the element then does not take.
 func ParseFontFamily(v string) (families []string, ok bool) {
-	if strings.Trim(v, " \t\n\r\f,'\"") == "" {
+	if !NamesFontFamily(v) {
 		return nil, false
 	}
 	return parseFamilies(v), true
+}
+
+// NamesFontFamily reports whether a font-family value names a family, which
+// is what ParseFontFamily's ok says, without making the list.
+func NamesFontFamily(v string) bool {
+	return strings.Trim(v, " \t\n\r\f,'\"") != ""
 }
 
 // ParseFontWeight reads a font-weight value, the element's parent's weight

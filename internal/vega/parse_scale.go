@@ -15,44 +15,50 @@ import (
 // multi-field ordinal domain.
 var multiDomainSortOps = map[string]string{"min": "min", "max": "max", "count": "sum"}
 
+// initScale is scale.js's initScale: `type = spec.type || 'linear'`, which
+// vega-scale's isValidScaleType looks up in a Map, so only a string names a
+// scale type.
 func initScale(spec jsval.Value, scope *Scope) {
+	t := specGet(spec, "type")
 	typ := "linear"
-	if t := spec.Get("type"); t.IsTruthy() {
-		typ = t.AsString()
-	}
-	if !scale.IsValidScaleType(typ) {
+	if t.IsTruthy() {
+		s, ok := t.Strict()
+		if !ok || !scale.IsValidScaleType(s) {
+			perr("Unrecognized scale type: %s", stringValue(t))
+		}
+		typ = s
+	} else if !scale.IsValidScaleType(typ) {
 		perr("Unrecognized scale type: %s", quote(sv(typ)))
 	}
 	e := newEntry("scale", nil, plist("type", jsval.Str(typ), "domain", jsval.Undefined))
-	scope.addScaleProj(spec.Get("name").AsString(), e)
+	scope.addScaleProj(specText(specGet(spec, "name")), e)
 }
 
+// parseScale is scale.js's parseScale. The members it does not parse
+// itself are each `for (key in spec)` enumerates, a string's or an array's
+// indexes too, read as literals.
 func parseScale(spec jsval.Value, scope *Scope) {
-	params := scope.getScale(spec.Get("name").AsString()).params
-	params.set("domain", parseScaleDomain(spec.Get("domain"), spec, scope))
+	params := scope.getScale(specText(specGet(spec, "name"))).params
+	params.set("domain", parseScaleDomain(specGet(spec, "domain"), spec, scope))
 
-	if !spec.Get("range").IsNullish() {
+	if !specGet(spec, "range").IsNullish() {
 		params.set("range", parseScaleRange(spec, scope, params))
 	}
-	if !spec.Get("interpolate").IsNullish() {
-		parseScaleInterpolate(spec.Get("interpolate"), params)
+	if !specGet(spec, "interpolate").IsNullish() {
+		parseScaleInterpolate(specGet(spec, "interpolate"), params)
 	}
-	if !spec.Get("nice").IsNullish() {
-		params.set("nice", parseScaleNice(spec.Get("nice"), scope))
+	if !specGet(spec, "nice").IsNullish() {
+		params.set("nice", parseScaleNice(specGet(spec, "nice"), scope))
 	}
-	if !spec.Get("bins").IsNullish() {
-		params.set("bins", parseScaleBins(spec.Get("bins"), scope))
+	if !specGet(spec, "bins").IsNullish() {
+		params.set("bins", parseScaleBins(specGet(spec, "bins"), scope))
 	}
-	if o := spec.ObjValue(); o != nil {
-		for i := 0; i < o.Len(); i++ {
-			scope.work(1)
-			key := o.KeyAt(i)
-			if params.has(key) || key == "name" {
-				continue
-			}
-			params.set(key, parseLiteral(o.ValueAt(i), scope))
+	forInEach(scope.meter(), spec, func(key string, v jsval.Value) {
+		if params.has(key) || key == "name" {
+			return
 		}
-	}
+		params.set(key, parseLiteral(v, scope))
+	})
 }
 
 func parseLiteral(v jsval.Value, scope *Scope) P {
@@ -66,11 +72,13 @@ func parseLiteral(v jsval.Value, scope *Scope) P {
 	return nil
 }
 
+// parseArray is scale.js's parseArray: `v.signal ? signalRef : v.map(...)`,
+// a TypeError for any other value than an array.
 func parseArray(v jsval.Value, scope *Scope) P {
-	if v.IsObj() && v.Get("signal").IsTruthy() {
+	if isSignalObj(v) {
 		return scope.signalRef(v.Get("signal").AsString())
 	}
-	items := v.Items()
+	items := listOf(v, "v", "map")
 	out := make([]P, len(items))
 	for i, it := range items {
 		scope.work(1)
@@ -79,13 +87,11 @@ func parseArray(v jsval.Value, scope *Scope) P {
 	return out
 }
 
-func dataLookupError(name jsval.Value) { perr("Can not find data set: %s", quote(name)) }
-
 // -- domain --------------------------------------------------------------------
 
 func parseScaleDomain(domain jsval.Value, spec jsval.Value, scope *Scope) P {
 	if !domain.IsTruthy() {
-		if !spec.Get("domainMin").IsNullish() || !spec.Get("domainMax").IsNullish() {
+		if !specGet(spec, "domainMin").IsNullish() || !specGet(spec, "domainMax").IsNullish() {
 			perr("No scale domain defined for domainMin/domainMax to override.")
 		}
 		return nil
@@ -95,7 +101,7 @@ func parseScaleDomain(domain jsval.Value, spec jsval.Value, scope *Scope) P {
 		return scope.signalRef(domain.Get("signal").AsString())
 	case domain.IsArr():
 		return explicitDomain(domain, scope)
-	case domain.Get("fields").IsTruthy():
+	case specGet(domain, "fields").IsTruthy():
 		return multipleDomain(domain, spec, scope)
 	}
 	return singularDomain(domain, spec, scope)
@@ -110,18 +116,18 @@ func explicitDomain(domain jsval.Value, scope *Scope) P {
 	return out
 }
 
+// scaleTypeOf is spec.type as vega-scale's isDiscrete and isQuantile read
+// it (a Map lookup): the string, and "" for any other value, which is no
+// type; initScale has already refused a type that is not one.
 func scaleTypeOf(spec jsval.Value) string {
-	if t := spec.Get("type"); t.IsTruthy() {
-		return t.AsString()
+	if s, ok := spec.Get("type").Strict(); ok {
+		return s
 	}
-	return "linear"
+	return ""
 }
 
 func singularDomain(domain, spec jsval.Value, scope *Scope) P {
-	data := scope.findData(domain.Get("data").AsString())
-	if data == nil {
-		dataLookupError(domain.Get("data"))
-	}
+	data := scope.getDataNamed(specGet(domain, "data"))
 	typ := scaleTypeOf(spec)
 	switch {
 	case scale.IsDiscrete(typ):
@@ -135,12 +141,12 @@ func singularDomain(domain, spec jsval.Value, scope *Scope) P {
 func multipleDomain(domain, spec jsval.Value, scope *Scope) P {
 	data := domain.Get("data")
 	var fields []jsval.Value
-	for _, d := range domain.Get("fields").Items() {
+	for _, d := range listOf(domain.Get("fields"), "domain.fields", "reduce") {
 		scope.work(1)
 		switch {
 		case d.IsStr():
 			fields = append(fields, obj("data", data, "field", d))
-		case d.IsArr() || isSignalObj(d):
+		case d.IsArr() || specGet(d, "signal").IsTruthy():
 			fields = append(fields, domainFieldRef(d, scope))
 		default:
 			fields = append(fields, d)
@@ -183,10 +189,7 @@ func ordinalMultipleDomain(domain jsval.Value, scope *Scope, fields []jsval.Valu
 	var counts []P
 	for _, f := range fields {
 		scope.work(1)
-		data := scope.findData(f.Get("data").AsString())
-		if data == nil {
-			dataLookupError(f.Get("data"))
-		}
+		data := scope.getDataNamed(specGet(f, "data"))
 		counts = append(counts, data.countsRef(scope, f.Get("field"), sort))
 	}
 	p := plist("groupby", keyFieldRef, "pulse", counts)
@@ -238,10 +241,7 @@ func quantileMultipleDomain(scope *Scope, fields []jsval.Value) P {
 	var values []P
 	for _, f := range fields {
 		scope.work(1)
-		data := scope.findData(f.Get("data").AsString())
-		if data == nil {
-			dataLookupError(f.Get("data"))
-		}
+		data := scope.getDataNamed(specGet(f, "data"))
 		values = append(values, data.domainRef(scope, f.Get("field")))
 	}
 	return scope.add(mk("multivalues", "values", values))
@@ -251,10 +251,7 @@ func numericMultipleDomain(scope *Scope, fields []jsval.Value) P {
 	var extents []P
 	for _, f := range fields {
 		scope.work(1)
-		data := scope.findData(f.Get("data").AsString())
-		if data == nil {
-			dataLookupError(f.Get("data"))
-		}
+		data := scope.getDataNamed(specGet(f, "data"))
 		extents = append(extents, data.extentRef(scope, f.Get("field")))
 	}
 	return scope.add(mk("multiextent", "extents", extents))
@@ -269,29 +266,44 @@ func parseScaleBins(v jsval.Value, scope *Scope) P {
 	return scope.objectProperty(v)
 }
 
+// parseScaleNice is scale.js's parseScaleNice. Upstream reads an object's
+// interval and step with parseLiteral and no scope, so a signal there is a
+// TypeError and any other object an unsupported one; an array is an object
+// too, with neither member.
 func parseScaleNice(nice jsval.Value, scope *Scope) P {
 	if isSignalObj(nice) {
 		return scope.signalRef(nice.Get("signal").AsString())
 	}
-	if nice.IsObj() {
-		// upstream calls parseLiteral(nice.interval) without a scope, which
-		// only works for plain values.
-		return obj("interval", nice.Get("interval"), "step", nice.Get("step"))
+	if nice.IsObj() || nice.IsArr() {
+		return obj("interval", parseLiteralNoScope(specGet(nice, "interval")), "step", parseLiteralNoScope(specGet(nice, "step")))
 	}
 	return parseLiteral(nice, scope)
 }
 
+// parseLiteralNoScope is scale.js's parseLiteral(v) called without a scope,
+// as parseScaleNice and parseScaleInterpolate call it: a plain value is
+// itself, a signal reference reads signalRef of undefined.
+func parseLiteralNoScope(v jsval.Value) jsval.Value {
+	switch {
+	case !v.IsObj() && !v.IsArr():
+		return v
+	case specGet(v, "signal").IsTruthy():
+		perr("Cannot read properties of undefined (reading 'signalRef')")
+	}
+	perr("Unsupported object: %s", stringValue(v))
+	return jsval.Undefined
+}
+
+// parseScaleInterpolate is scale.js's parseScaleInterpolate:
+// parseLiteral(interpolate.type || interpolate), without a scope.
 func parseScaleInterpolate(interpolate jsval.Value, params *paramList) {
-	t := interpolate.Get("type")
-	var lit jsval.Value
-	if t.IsTruthy() {
-		lit = t
-	} else {
+	lit := specGet(interpolate, "type")
+	if !lit.IsTruthy() {
 		lit = interpolate
 	}
-	params.set("interpolate", lit)
-	if g := interpolate.Get("gamma"); !g.IsNullish() {
-		params.set("interpolateGamma", g)
+	params.set("interpolate", parseLiteralNoScope(lit))
+	if g := specGet(interpolate, "gamma"); !g.IsNullish() {
+		params.set("interpolateGamma", parseLiteralNoScope(g))
 	}
 }
 
@@ -311,6 +323,11 @@ func parseScaleRangeAlias(spec jsval.Value, scope *Scope, params *paramList, dep
 	rng := spec.Get("range")
 	typ := scaleTypeOf(spec)
 
+	if rng.IsNullish() {
+		// a config.range entry of null, reached through the alias lookup:
+		// `range.signal` reads a member of it
+		perr("Cannot read properties of %s (reading 'signal')", nullishName(rng))
+	}
 	switch {
 	case isSignalObj(rng):
 		return scope.signalRef(rng.Get("signal").AsString())
@@ -362,7 +379,16 @@ func parseScaleRangeAlias(spec jsval.Value, scope *Scope, params *paramList, dep
 	for i, v := range items {
 		scope.work(1)
 		if v.IsArr() {
-			out[i] = parseArray(v, scope)
+			// vega-runtime resolves the references of a parameter's array
+			// one level deep: a signal inside an array that is itself an
+			// element reaches the scale as its reference object ({$ref:
+			// id}), an inert object here (as projectionParameter has it).
+			inner := parseArray(v, scope).([]P)
+			vals := make([]jsval.Value, len(inner))
+			for j, o := range inner {
+				vals[j] = projectionInert(o, scope)
+			}
+			out[i] = jsval.Arr(vals)
 		} else {
 			out[i] = parseLiteral(v, scope)
 		}
@@ -375,26 +401,21 @@ func parseScaleRangeAlias(spec jsval.Value, scope *Scope, params *paramList, dep
 func parseProjection(proj jsval.Value, scope *Scope) {
 	config := scope.config.Get("projection")
 	params := newParamList()
-	if o := proj.ObjValue(); o != nil {
-		for i := 0; i < o.Len(); i++ {
-			scope.work(1)
-			name := o.KeyAt(i)
-			if name == "name" {
-				continue
-			}
-			params.set(name, parseProjectionParameter(o.ValueAt(i), name, scope))
+	// `for (const name in proj)`: an object's members, a string's or an
+	// array's indexes (each a parameter), nothing for null.
+	forInEach(scope.meter(), proj, func(name string, v jsval.Value) {
+		if name == "name" {
+			return
 		}
-	}
-	if co := config.ObjValue(); co != nil {
-		for i := 0; i < co.Len(); i++ {
-			scope.work(1)
-			name := co.KeyAt(i)
-			if cur := params.get(name); cur == nil || isNullP(cur) {
-				params.set(name, parseProjectionParameter(co.ValueAt(i), name, scope))
-			}
+		params.set(name, parseProjectionParameter(v, name, scope))
+	})
+	forInEach(scope.meter(), config, func(name string, v jsval.Value) {
+		if cur := params.get(name); cur == nil || isNullP(cur) {
+			params.set(name, parseProjectionParameter(v, name, scope))
 		}
-	}
-	scope.addScaleProj(proj.Get("name").AsString(), newEntry("projection", nil, params))
+	})
+	// `scope.addProjection(proj.name, params)`, a TypeError for null.
+	scope.addScaleProj(specText(specGet(proj, "name")), newEntry("projection", nil, params))
 }
 
 func isNullP(p P) bool {
@@ -403,24 +424,57 @@ func isNullP(p P) bool {
 }
 
 func parseProjectionParameter(v jsval.Value, name string, scope *Scope) P {
+	return projectionParameter(v, name, scope, false)
+}
+
+// projectionParameter is projection.js's parseParameter. nested is an
+// element of an array within an array: vega-runtime's parseParameters
+// resolves the references of a parameter and of its array's elements, one
+// level deep, so a signal deeper than that reaches the operator as its
+// reference object ({$ref: id}, no number and no geometry), an inert object
+// here.
+func projectionParameter(v jsval.Value, name string, scope *Scope, nested bool) P {
 	switch {
 	case v.IsArr():
 		items := v.Items()
 		out := make([]P, len(items))
 		for i, it := range items {
 			scope.work(1)
-			out[i] = parseProjectionParameter(it, name, scope)
+			out[i] = projectionParameter(it, name, scope, it.IsArr() || nested)
+		}
+		if nested {
+			vals := make([]jsval.Value, len(out))
+			for i, o := range out {
+				vals[i] = projectionInert(o, scope)
+			}
+			return jsval.Arr(vals)
 		}
 		return out
 	case !v.IsObj():
 		return v
 	case v.Get("signal").IsTruthy():
-		return scope.signalRef(v.Get("signal").AsString())
+		ref := scope.signalRef(v.Get("signal").AsString())
+		if nested {
+			return projectionInert(ref, scope)
+		}
+		return ref
 	case name == "fit":
 		return v
 	}
 	perr("Unsupported parameter object: %s", quote(v))
 	return nil
+}
+
+// projectionInert is a parameter value as an operator receives it without
+// resolving it: a reference is an object of no members.
+func projectionInert(p P, scope *Scope) jsval.Value {
+	switch x := p.(type) {
+	case jsval.Value:
+		return x
+	case *entry:
+		return scope.handle(x)
+	}
+	return jsval.Undefined
 }
 
 func (s *Scope) projectionRef(name string) P { return s.scaleRef(name) }
@@ -439,31 +493,28 @@ func (g guideScope) ScaleType(name string) string {
 	return ""
 }
 
-// handle returns an opaque reference to an entry that guide plans copy into the
+// opRef is what a guide plan's `from` carries for an operator of the view (its
+// data, its ticks or legend entries): a Go value on an object of no members,
+// so that no JSON a specification or its data spell stands for one (C92).
+// Upstream's is {$ref: id}, an operator id the specification cannot know.
+type opRef struct{ e *entry }
+
+// handle returns the reference to an entry that guide plans copy into the
 // `from` of the marks they generate.
 func (s *Scope) handle(e *entry) jsval.Value {
-	root := s
-	for root.parentScope != nil {
-		root = root.parentScope
-	}
-	if root.handles == nil {
-		root.handles = map[string]*entry{}
-	}
-	id := "$h" + strconv.Itoa(len(root.handles))
-	root.handles[id] = e
-	return obj("$ref", sv(id))
+	o := jsval.NewObject(0)
+	o.SetHost(opRef{e})
+	return jsval.Obj(o)
 }
 
-func (s *Scope) resolveHandle(id string) *entry {
-	root := s
-	for root.parentScope != nil {
-		root = root.parentScope
+// opRefOf is the entry a handle refers to.
+func opRefOf(v jsval.Value) (*entry, bool) {
+	o := v.ObjValue()
+	if o == nil {
+		return nil, false
 	}
-	e := root.handles[id]
-	if e == nil {
-		perr("Unknown operator reference: %s", id)
-	}
-	return e
+	r, ok := o.Host().(opRef)
+	return r.e, ok
 }
 
 func parseAxis(spec jsval.Value, scope *Scope) {
@@ -483,7 +534,11 @@ func parseAxis(spec jsval.Value, scope *Scope) {
 		"formatType", scope.property(t.FormatType),
 		"formatSpecifier", scope.property(t.Format),
 	))
-	parseMark(plan.Mark(scope.handle(data), scope.handle(ticks)), scope)
+	m, err := plan.Mark(scope.handle(data), scope.handle(ticks))
+	if err != nil {
+		perr("%s", err.Error())
+	}
+	parseMark(m, scope)
 }
 
 func parseTitle(spec jsval.Value, scope *Scope) {
@@ -493,7 +548,11 @@ func parseTitle(spec jsval.Value, scope *Scope) {
 	}
 	data := scope.add(mk("collect"))
 	data.literal = []jsval.Value{plan.Datum}
-	parseMark(plan.Mark(scope.handle(data)), scope)
+	m, err := plan.Mark(scope.handle(data))
+	if err != nil {
+		perr("%s", err.Error())
+	}
+	parseMark(m, scope)
 }
 
 func parseLegend(spec jsval.Value, scope *Scope) {
@@ -505,7 +564,7 @@ func parseLegend(spec jsval.Value, scope *Scope) {
 	data.literal = []jsval.Value{plan.Datum}
 	en := plan.Entries
 	params := plist(
-		"type", jsval.Str(en.Type),
+		"type", en.Type,
 		"scale", scope.scaleRef(en.Scale),
 		"count", scope.objectProperty(en.Count),
 		"limit", scope.property(en.Limit),
@@ -527,7 +586,11 @@ func parseLegend(spec jsval.Value, scope *Scope) {
 		fn := scope.parseExpression(en.SizeExpr)
 		params.set("size", pExpr{fn: fn})
 	}
-	parseMark(plan.Mark(scope.handle(data), scope.handle(entries)), scope)
+	m, err := plan.Mark(scope.handle(data), scope.handle(entries))
+	if err != nil {
+		perr("%s", err.Error())
+	}
+	parseMark(m, scope)
 }
 
 // pTruthy is JavaScript truthiness of a parameter (references are truthy).

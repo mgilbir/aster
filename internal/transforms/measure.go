@@ -88,11 +88,20 @@ func (k opKind) index() int {
 type Measure struct {
 	Op    string
 	Field Field // the null Field is only valid for "count"
-	// Param is aggregate_params[i]; 0 means unset (upstream turns a falsy
-	// parameter into null).
+	// Param is aggregate_params[i]; NaN means null (upstream turns a falsy
+	// parameter into null, and an exponential without one decays by
+	// undefined: NaN).
 	Param float64
 	// As is the output field; empty means the derived default (MeasureName).
 	As string
+	// AsExact: As is the final name, empty included (`as[i]` that is truthy
+	// but converts to ""), not a request for the default.
+	AsExact bool
+	// CountMeasure marks a count named by an op that is not the string
+	// "count" (["count"]): upstream's `op === 'count'` fails for it, so it
+	// is not one of the count fields but a measure of its field, whose value
+	// is the cell's count all the same.
+	CountMeasure bool
 }
 
 type measureOut struct {
@@ -143,9 +152,18 @@ type measureSet struct {
 	// ctx is polled by the statistics that cost a pass over the data each
 	// (bootstrap intervals); err records its cancellation for the caller.
 	ctx context.Context
+	// w walks the values the measures compare (min, max, argmin, argmax
+	// of arrays compare their String): the call's Walker.
+	w   jsval.Walker
 	err error
 	// names lists output field names in the order they were requested.
 	names []string
+}
+
+// setContext sets the call the measures run in.
+func (s *measureSet) setContext(ctx context.Context) {
+	s.ctx = ctx
+	s.w = jsval.WalkerFor(ctx)
 }
 
 // newMeasureSet compiles measures. Upstream groups the measures of one field
@@ -161,12 +179,12 @@ func newMeasureSet(ms []Measure, rnd Rand) (*measureSet, error) {
 		if !ok {
 			return nil, fmt.Errorf("unknown aggregate op %q", m.Op)
 		}
-		if m.Field.IsNil() && m.Op != "count" {
-			return nil, fmt.Errorf("null aggregate field specified")
+		if m.Field.IsNil() && (m.Op != "count" || m.CountMeasure) {
+			return nil, fmt.Errorf("Null aggregate field specified.")
 		}
-		name := MeasureName(m.Op, m.Field.Name, m.As)
+		name := m.Name()
 		s.names = append(s.names, name)
-		if kind == opCount {
+		if kind == opCount && !m.CountMeasure {
 			s.counts = append(s.counts, name)
 			continue
 		}
@@ -178,9 +196,10 @@ func newMeasureSet(ms []Measure, rnd Rand) (*measureSet, error) {
 			s.groups = append(s.groups, g)
 		}
 		g.outs = append(g.outs, measureOut{name: name, kind: kind, idx: kind.index()})
-		if kind == opExponential && m.Param != 0 {
-			// Every exponential output of the field shares the last parameter
-			// (upstream keys its operator table by op name).
+		if kind == opExponential {
+			// Every exponential output of the field shares the last one's
+			// parameter, null included (upstream keys its operator table by
+			// op name).
 			g.expR = m.Param
 		}
 	}
@@ -255,7 +274,7 @@ func (s *measureSet) add(c *cell, t jsval.Value) {
 		return
 	}
 	for i, g := range s.groups {
-		g.add(&c.aggs[i], g.field.Get(t), t)
+		g.add(s.w, &c.aggs[i], g.field.Get(t), t)
 	}
 }
 
@@ -266,13 +285,13 @@ func (s *measureSet) rem(c *cell, t jsval.Value) {
 		return
 	}
 	for i, g := range s.groups {
-		g.rem(&c.aggs[i], g.field.Get(t))
+		g.rem(s.w, &c.aggs[i], g.field.Get(t))
 	}
 }
 
 func isEmptyString(v jsval.Value) bool { return v.IsStr() && v.StrValue() == "" }
 
-func (g *measureGroup) add(m *mstate, v, t jsval.Value) {
+func (g *measureGroup) add(w jsval.Walker, m *mstate, v, t jsval.Value) {
 	if v.IsNullish() || isEmptyString(v) {
 		m.missing++
 		return
@@ -296,7 +315,14 @@ func (g *measureGroup) add(m *mstate, v, t jsval.Value) {
 		m.mean += m.meanD / float64(m.valid)
 	}
 	if g.exp {
-		m.exp = float64(g.expR*m.exp) + x
+		// m.exp = m.exp_r * m.exp + v: a value that adds as text (a
+		// string, an array, an object, a date) makes the sum a string,
+		// which the next product and the output read back as a number.
+		if r := float64(g.expR * m.exp); addsText(v) {
+			m.exp = jsval.StringToNumber(jsval.JSNumberString(r) + w.String(v))
+		} else {
+			m.exp = r + x
+		}
 	}
 	if g.variance {
 		m.dev += float64(m.meanD * (x - m.mean))
@@ -304,21 +330,21 @@ func (g *measureGroup) add(m *mstate, v, t jsval.Value) {
 	// argmin/argmax run before min/max, so they compare against the previous
 	// extremum; the first value therefore never sets them and the extent of the
 	// stored tuples is used instead (see write).
-	if g.argmin && Less(v, m.min) {
+	if g.argmin && Less(w, v, m.min) {
 		m.argmin = t
 	}
-	if g.argmax && Greater(v, m.max) {
+	if g.argmax && Greater(w, v, m.max) {
 		m.argmax = t
 	}
-	if g.wantMin && (m.min.IsUndefined() || Less(v, m.min)) {
+	if g.wantMin && (m.min.IsUndefined() || Less(w, v, m.min)) {
 		m.min = v
 	}
-	if g.wantMax && (m.max.IsUndefined() || Greater(v, m.max)) {
+	if g.wantMax && (m.max.IsUndefined() || Greater(w, v, m.max)) {
 		m.max = v
 	}
 }
 
-func (g *measureGroup) rem(m *mstate, v jsval.Value) {
+func (g *measureGroup) rem(w jsval.Walker, m *mstate, v jsval.Value) {
 	if v.IsNullish() || isEmptyString(v) {
 		m.missing--
 		return
@@ -352,16 +378,16 @@ func (g *measureGroup) rem(m *mstate, v jsval.Value) {
 		m.dev -= float64(m.meanD * (x - m.mean))
 	}
 	// A removed extremum invalidates the running one (NaN marks "recompute").
-	if g.argmin && LessEq(v, m.min) {
+	if g.argmin && LessEq(w, v, m.min) {
 		m.argmin = jsval.Undefined
 	}
-	if g.argmax && GreaterEq(v, m.max) {
+	if g.argmax && GreaterEq(w, v, m.max) {
 		m.argmax = jsval.Undefined
 	}
-	if g.wantMin && LessEq(v, m.min) {
+	if g.wantMin && LessEq(w, v, m.min) {
 		m.min = jsval.Num(math.NaN())
 	}
-	if g.wantMax && GreaterEq(v, m.max) {
+	if g.wantMax && GreaterEq(w, v, m.max) {
 		m.max = jsval.Num(math.NaN())
 	}
 }
@@ -418,7 +444,7 @@ func (g *measureGroup) write(s *measureSet, id int, m *mstate, c *cell, t *jsval
 			return [2]jsval.Value{}
 		}
 		if memo.owner != id || !memo.extOK {
-			lo, hi := ExtentIndex(len(data), func(i int) jsval.Value { return get(data[i]) })
+			lo, hi := ExtentIndex(s.w, len(data), func(i int) jsval.Value { return get(data[i]) })
 			memo.ext = [2]jsval.Value{elemAt(data, lo), elemAt(data, hi)}
 			memo.extOK, memo.owner = true, id
 		}
@@ -457,6 +483,8 @@ func (g *measureGroup) write(s *measureSet, id int, m *mstate, c *cell, t *jsval
 			} else {
 				v = jsval.Arr(slices.Clone(data))
 			}
+		case opCount:
+			v = jsval.Int(c.num)
 		case opMissing:
 			v = jsval.Int(m.missing)
 		case opValid:
@@ -492,10 +520,18 @@ func (g *measureGroup) write(s *measureSet, id int, m *mstate, c *cell, t *jsval
 				break
 			}
 			seen := make(map[string]struct{}, 16)
+			protos := 0
 			for i := len(data) - 1; i >= 0; i-- {
-				seen[keyString(get(data[i]), zoneOf(s.ctx))] = struct{}{}
+				// TupleStore.distinct tests hasOwnProperty(map, s) on a plain
+				// object: `map['__proto__'] = 1` sets no property, so every
+				// "__proto__" value counts as a new one.
+				if k := keysOf(s.ctx).String(get(data[i])); k == ProtoKey {
+					protos++
+				} else {
+					seen[k] = struct{}{}
+				}
 			}
-			v = jsval.Int(len(seen))
+			v = jsval.Int(len(seen) + protos)
 		case opCI0, opCI1:
 			if r, ok := ci(); ok {
 				v = jsval.Num(r[o.kind-opCI0])
@@ -571,4 +607,12 @@ func validOr(m *mstate, v jsval.Value) jsval.Value {
 		return jsval.Undefined
 	}
 	return v
+}
+
+// Name is the output field: measureName(op, accessorName(field), as).
+func (m Measure) Name() string {
+	if m.AsExact {
+		return m.As
+	}
+	return MeasureName(m.Op, m.Field.Name, m.As)
 }

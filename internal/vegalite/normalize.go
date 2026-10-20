@@ -1,6 +1,7 @@
 package vegalite
 
 import (
+	"math"
 	"strconv"
 	"strings"
 
@@ -39,16 +40,21 @@ func (p *normParams) clone() *normParams {
 }
 
 func (p *normParams) deeper() *normParams {
-	cc := p.cc
-	// Every view the normalizer maps goes one level deeper: the step charged
-	// for it bounds the normalization of a spec with many views.
-	cc.work(modelStep)
+	p.checkDeeper()
 	c := *p
 	c.depth++
-	if c.depth > maxDepth {
+	return &c
+}
+
+// checkDeeper charges the step of mapping a view one level below p and
+// refuses it past maxDepth, without making the deeper parameters.
+func (p *normParams) checkDeeper() {
+	// Every view the normalizer maps goes one level deeper: the step charged
+	// for it bounds the normalization of a spec with many views.
+	p.cc.work(modelStep)
+	if p.depth+1 > maxDepth {
 		exceeded(depthMsg)
 	}
-	return &c
 }
 
 // mapperImpl is the virtual interface of upstream's SpecMapper.
@@ -139,8 +145,9 @@ func normalize(cc *compileCtx, spec Value, config Value) Value {
 	// repeats of 30 fields are 810,000 views from a 1 KB specification (C15).
 	// The views the specification describes are counted before any is built,
 	// against one budget for the whole compilation.
-	if n, limit := countViews(cc, spec, 0), cc.maxViews; n > float64(limit) {
-		exceeded("specification would create %s views (limit %d)", jsval.JSNumberString(n), limit)
+	if n, limit := countViews(cc, spec, cc.configBytes), cc.maxViews; n > float64(limit) {
+		exceeded("specification would create views weighing %s (limit %d views; a view weighs one, plus one per selection it receives and per %d bytes of specification and config it compiles)",
+			jsval.JSNumberString(math.Ceil(n)), limit, viewWeightBytes)
 	}
 	p := &normParams{cc: cc, config: config, sel: &selectionState{}}
 	compat := newSelectionCompatNormalizer()
@@ -713,12 +720,14 @@ func (n *coreNormalizer) mapNonLayerRepeat(spec Value, p *normParams) Value {
 				if repeat.IsArr() {
 					suffix = varNameOf(repeatValue)
 				} else {
+					var row, column string
 					if repeat.Get("row").IsTruthy() {
-						suffix += "row_" + varNameOf(rowValue)
+						row = "row_" + varNameOf(rowValue)
 					}
 					if repeat.Get("column").IsTruthy() {
-						suffix += "column_" + varNameOf(columnValue)
+						column = "column_" + varNameOf(columnValue)
 					}
+					suffix = row + column
 				}
 				childName := pre + p.repeaterPrefix + "child__" + suffix
 				cp := p.deeper()
@@ -877,7 +886,12 @@ func (n *coreNormalizer) mapLayer(spec Value, p *normParams) Value {
 	cp := p.clone()
 	cp.parentEncoding = mergeEncoding(cc, p.parentEncoding, encoding, true)
 	cp.parentProjection = mergeProjection(p.cc, p.parentProjection, projection)
-	cp.deeper()
+	// The layer is a view one level below p: its step is charged and its
+	// depth checked here (an empty layer at the limit is refused too); its
+	// children are each mapped one level deeper still, by baseMapper.mapLayer
+	// (C149: audit 2026-10-18; the result was discarded, which read as if
+	// it deepened cp).
+	cp.checkDeeper()
 	if spec.Get("name").IsTruthy() {
 		rest.Set("name", jsval.Str(joinNonEmpty(cp.repeaterPrefix, spec.Get("name").AsString())))
 	}
@@ -1337,21 +1351,52 @@ func replaceRepeaterInMapping(cc *compileCtx, mapping, repeater Value) Value {
 	return jsval.Obj(out)
 }
 
-// countViews is the number of views the normalization makes of spec: one per
-// view it maps, a repeat's spec once per combination of its row, column,
-// layer and repeat values. Composite marks and path overlays add a few
-// layers per unit on top, a small constant factor. The count saturates (it
-// is a float), and a spec nested past maxDepth counts as one view: the
-// normalizer rejects it.
-func countViews(cc *compileCtx, spec Value, depth int) float64 {
+// countViews weighs the views the normalization makes of spec, before any
+// is built (C15): one per view it maps, a repeat's spec once per
+// combination of its row, column, layer and repeat values. Composite marks
+// and path overlays add a few layers per unit on top, a small constant
+// factor. The count saturates (it is a float), and a spec nested past
+// maxDepth counts as one view: the normalizer rejects it.
+//
+// What a unit view compiles is not the same for every view: each copies
+// the selections its composite parents declare (every one is pushed into
+// every unit, C10: audit 2026-10-18), and compiles the text it inherits as
+// well as its own: the config (and theme) every view reads, a layer's
+// shared encoding, a repeated spec once per repetition. Expressions made of
+// those copy them, so a unit weighs one, plus one per selection it receives,
+// plus one per viewWeightBytes of specification it compiles; inline data
+// (data and datasets) is passed through, not compiled, and does not count.
+func countViews(cc *compileCtx, spec Value, config float64) float64 {
+	sel, selBytes := countSelections(cc, spec, 0)
+	perUnit := sel + (config+selBytes)/viewWeightBytes
+	return countViewsAt(cc, spec, 0, perUnit)
+}
+
+// viewCopies is how many times a view's output copies, at most and in
+// all, the text it compiles (a config's number format is written into the
+// label expressions of every axis, the tooltip and the description), and
+// viewWeightBytes the bytes of that text that weigh one view.
+const (
+	viewCopies      = 8
+	viewWeightBytes = ViewBytes / viewCopies
+)
+
+// ViewBytes is the memory a view's weight stands for: a plain unit view's
+// compiled Vega retains about 24 KiB and its compilation allocates ten
+// times that as it goes. The memory limit admits ViewBytes of it a view.
+const ViewBytes = 32768
+
+// countViewsAt weighs the views of spec at depth, each unit view also
+// weighing perUnit for what it inherits.
+func countViewsAt(cc *compileCtx, spec Value, depth int, perUnit float64) float64 {
 	cc.work(1)
 	if !spec.IsObj() || depth > maxDepth {
 		return 1
 	}
-	sum := func(list Value) float64 {
+	sum := func(list Value, perUnit float64) float64 {
 		n := 1.0
 		for _, s := range list.Items() {
-			n += countViews(cc, s, depth+1)
+			n += countViewsAt(cc, s, depth+1, perUnit)
 		}
 		return n
 	}
@@ -1367,10 +1412,10 @@ func countViews(cc *compileCtx, spec Value, depth int) float64 {
 	}
 	switch {
 	case isFacetSpec(nil, spec):
-		return 1 + countViews(cc, spec.Get("spec"), depth+1)
+		return 1 + countViewsAt(cc, spec.Get("spec"), depth+1, perUnit)
 	case isRepeatSpec(nil, spec):
 		repeat := spec.Get("repeat")
-		child := countViews(cc, spec.Get("spec"), depth+1)
+		child := countViewsAt(cc, spec.Get("spec"), depth+1, perUnit)
 		if repeat.IsArr() {
 			return 1 + float64(float64(repeat.Len())*child)
 		}
@@ -1380,13 +1425,87 @@ func countViews(cc *compileCtx, spec Value, depth int) float64 {
 		}
 		return 1 + float64(n*child)
 	case isHConcatSpec(nil, spec):
-		return sum(spec.Get("hconcat"))
+		return sum(spec.Get("hconcat"), perUnit)
 	case isVConcatSpec(nil, spec):
-		return sum(spec.Get("vconcat"))
+		return sum(spec.Get("vconcat"), perUnit)
 	case isConcatSpec(nil, spec):
-		return sum(spec.Get("concat"))
+		return sum(spec.Get("concat"), perUnit)
 	case isLayerSpec(nil, spec):
-		return sum(spec.Get("layer"))
+		// Every child inherits the layer's encoding and projection.
+		shared := specBytes(cc, spec.Get("encoding"), 0) + specBytes(cc, spec.Get("projection"), 0)
+		return sum(spec.Get("layer"), perUnit+shared/viewWeightBytes)
 	}
-	return 1
+	own := 0.0
+	o := spec.ObjValue()
+	for i := 0; i < o.Len(); i++ {
+		if k := o.KeyAt(i); k != "data" && k != "datasets" {
+			own += float64(len(k)) + specBytes(cc, o.ValueAt(i), 0)
+		}
+	}
+	return 1 + perUnit + own/viewWeightBytes
+}
+
+// specBytesDepth bounds specBytes's recursion: past the 256 levels JSON may
+// nest, and the 1,024 values may at run time.
+const specBytesDepth = 1024
+
+// countSelections counts the selection parameters of the composite views
+// of spec, which the normalizer pushes into the units below them, and their
+// bytes.
+func countSelections(cc *compileCtx, spec Value, depth int) (n, bytes float64) {
+	cc.work(1)
+	if !spec.IsObj() || depth > maxDepth || isUnitSpec(nil, spec) {
+		return 0, 0
+	}
+	if params := spec.Get("params"); params.IsArr() {
+		for _, p := range params.Items() {
+			if isSelectionParameter(p) {
+				n++
+				bytes += specBytes(cc, p, 0)
+			}
+		}
+	}
+	for _, k := range []string{"spec", "layer", "hconcat", "vconcat", "concat"} {
+		c := spec.Get(k)
+		if c.IsArr() {
+			for _, x := range c.Items() {
+				dn, db := countSelections(cc, x, depth+1)
+				n, bytes = n+dn, bytes+db
+			}
+		} else if c.IsObj() {
+			dn, db := countSelections(cc, c, depth+1)
+			n, bytes = n+dn, bytes+db
+		}
+	}
+	return n, bytes
+}
+
+// specBytes is about the size of v as JSON: its strings and keys by their
+// bytes, every other value a few. A value nested past specBytesDepth counts
+// as one of a few bytes (the parse bounds nesting far below that).
+func specBytes(cc *compileCtx, v Value, depth int) float64 {
+	cc.work(1)
+	switch {
+	case v.IsUndefined():
+		return 0
+	case v.IsStr():
+		cc.work(int64(len(v.StrValue())) >> 10)
+		return float64(len(v.StrValue())) + 2
+	case depth > specBytesDepth:
+		return 8
+	case v.IsArr():
+		n := 2.0
+		for _, x := range v.Items() {
+			n += 1 + specBytes(cc, x, depth+1)
+		}
+		return n
+	case v.IsObj():
+		o := v.ObjValue()
+		n := 2.0
+		for i := 0; i < o.Len(); i++ {
+			n += float64(len(o.KeyAt(i))) + 4 + specBytes(cc, o.ValueAt(i), depth+1)
+		}
+		return n
+	}
+	return 8
 }

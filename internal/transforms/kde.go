@@ -2,7 +2,6 @@ package transforms
 
 import (
 	"context"
-	"math"
 
 	"github.com/mgilbir/aster/internal/jsval"
 )
@@ -22,54 +21,72 @@ type KDEParams struct {
 	Extent *[2]float64
 	// Resolve is "independent" (default) or "shared". Shared densities use one
 	// domain and exactly MaxSteps (or Steps) uniform samples so they can stack.
-	Resolve  string
-	Steps    float64
-	MinSteps float64 // default 25
-	MaxSteps float64 // default 200
+	Resolve string
+	// ExtentValues, StepsValues: see DensityParams. BandwidthGiven reports a
+	// truthy bandwidth, kept as it is (NaN for one that is no number).
+	ExtentValues   *[2]jsval.Value
+	StepsValues    *StepsSpec
+	BandwidthGiven bool
+	Steps          float64
+	MinSteps       float64 // default 25
+	MaxSteps       float64 // default 200
 	// As are the output fields; empty strings mean "value" and "density".
 	As [2]string
+	// AsExact is DensityParams.AsExact.
+	AsExact bool
 }
 
 // KDE computes kernel density estimates per group. Output tuples are new and
 // hold the group-by fields (under their accessor names), then value and
 // density.
 func KDE(ctx context.Context, source []jsval.Value, p KDEParams) ([]jsval.Value, error) {
-	minsteps, maxsteps := stepBounds(p.Steps, p.MinSteps, p.MaxSteps)
-	domainValid := true
-	var domain *[2]float64
-	if p.Extent != nil {
-		d := *p.Extent
+	if p.GroupBy == nil && p.Field.Uncallable { // partition: data.map(field)
+		return nil, &jsval.Thrown{Name: "TypeError", Msg: "object is not a function"}
+	}
+	w := jsval.WalkerFor(ctx)
+	steps := stepsSpecOf(p.Steps, p.MinSteps, p.MaxSteps)
+	if p.StepsValues != nil {
+		steps = *p.StepsValues
+	}
+	var domain *[2]jsval.Value
+	switch {
+	case p.ExtentValues != nil:
+		d := *p.ExtentValues
 		domain = &d
+	case p.Extent != nil:
+		domain = &[2]jsval.Value{jsval.Num(p.Extent[0]), jsval.Num(p.Extent[1])}
 	}
 	get := p.Field.Get
 	if p.Resolve == "shared" {
 		if domain == nil {
-			lo, hi, ok, err := ExtentOf(source, p.Field)
+			// extent(source, _.field): the field's least and greatest
+			// values as they are
+			lo, hi, ok, err := ExtentOf(w, source, p.Field)
 			if err != nil {
 				return nil, err
 			}
-			d := [2]float64{math.NaN(), math.NaN()}
-			if ok && !lo.IsUndefined() {
-				d = [2]float64{jsval.ToNumber(lo), jsval.ToNumber(hi)}
-			} else {
-				domainValid = false
+			if !ok {
+				lo, hi = jsval.Undefined, jsval.Undefined
 			}
-			domain = &d
+			domain = &[2]jsval.Value{lo, hi}
 		}
 		// minsteps = maxsteps = _.steps || maxsteps
-		minsteps = maxsteps
+		steps.Min = steps.Max
 	}
 	names := make([]string, len(p.GroupBy))
 	for i, g := range p.GroupBy {
 		names[i] = g.Key()
 	}
 	var out []jsval.Value
-	for _, g := range Partition(zoneOf(ctx), source, p.GroupBy) {
+	for _, g := range Partition(keysOf(ctx), source, p.GroupBy) {
 		vals := make([]jsval.Value, len(g.Tuples))
 		for i, t := range g.Tuples {
 			vals[i] = get(t)
 		}
 		kde := NewKernelDensity(vals, p.Bandwidth)
+		if p.BandwidthGiven {
+			kde.Bandwidth = p.Bandwidth // a truthy bandwidth is kept, NaN or not
+		}
 		f := kde.PDF
 		if p.Cumulative {
 			f = kde.CDF
@@ -78,17 +95,16 @@ func KDE(ctx context.Context, source []jsval.Value, p KDEParams) ([]jsval.Value,
 		if p.Counts {
 			scale = float64(len(vals))
 		}
-		var local [2]float64
-		valid := domainValid
+		var lo, hi jsval.Value
 		if domain != nil {
-			local = *domain
+			lo, hi = domain[0], domain[1]
 		} else {
-			local, valid = valuesExtent(vals)
+			lo, hi = rawExtent(w, vals)
 		}
-		if err := reserveRows(ctx, len(out)+maxSamples(minsteps, maxsteps)); err != nil {
+		if err := reserveRows(ctx, len(out)+maxSamplesOf(steps)); err != nil {
 			return nil, err
 		}
-		pts, err := sampleTuples(ctx, f, local, valid, minsteps, maxsteps, names, g.Dims, p.As, scale)
+		pts, err := sampleTuples(ctx, f, lo, hi, steps, names, g.Dims, p.As, p.AsExact, scale)
 		if err != nil {
 			return nil, err
 		}

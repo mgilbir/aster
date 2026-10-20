@@ -10,7 +10,7 @@ import os from 'node:os';
 import { pathToFileURL } from 'node:url';
 
 const nm = process.env.NODE_PATH;
-const require = createRequire(path.join(nm, 'x.js'));
+const require = createRequire(path.resolve(nm, 'x.js'));
 const parserSrc = path.join(nm, 'vega-parser', 'src');
 
 // stage a patched copy of vega-parser's sources

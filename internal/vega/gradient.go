@@ -1,32 +1,41 @@
 package vega
 
 import (
-	"context"
-
 	"github.com/mgilbir/aster/internal/budget"
+	"github.com/mgilbir/aster/internal/expr"
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/scale"
 )
 
 // scaleGradient is vega-functions' gradient(scale, p0, p1, count): a linear
 // gradient whose stops sample the scale at its ticks (plus the domain ends).
-func scaleGradient(ctx context.Context, s scale.Scale, p0, p1, count jsval.Value) jsval.Value {
+func scaleGradient(v *runView, s scale.Scale, p0, p1, count jsval.Value) jsval.Value {
+	ctx := v.ctx
 	pt := func(p jsval.Value, i int, def float64) jsval.Value {
 		if p.IsTruthy() {
 			return p.Index(i)
 		}
 		return jsval.Num(def)
 	}
-	domain := s.Domain()
-	if len(domain) == 0 {
-		return jsval.Undefined
+	// `stops = scale.domain()`: every domain value is a stop unless the
+	// scale has ticks (C32): a threshold, quantile or bin-ordinal scale
+	// keeps its interior stops. The domain is a copy, charged as it is
+	// handed to the expression.
+	stops := s.Domain()
+	v.chargeItems(len(stops))
+	min, max := jsval.Undefined, jsval.Undefined
+	if len(stops) > 0 {
+		min, max = stops[0], stops[len(stops)-1]
 	}
-	min, max := domain[0], domain[len(domain)-1]
 	fraction := func(v jsval.Value) jsval.Value { return v }
 
 	span := jsval.ToNumber(max) - jsval.ToNumber(min)
 	if span == 0 || span != span {
-		// A zero-span domain is expanded so the gradient still shows the ramp.
+		// A zero-span domain is expanded so the gradient still shows the
+		// ramp: `scale.interpolator ? sequential().interpolator(…) :
+		// linear().interpolate(scale.interpolate()).range(scale.range())`.
+		// A scale with neither (an ordinal, band or discretizing scale)
+		// throws there upstream.
 		var ns scale.Scale
 		if in, ok := s.(interface {
 			Interpolator() scale.UnitInterpolator
@@ -35,10 +44,12 @@ func scaleGradient(ctx context.Context, s scale.Scale, p0, p1, count jsval.Value
 			seq.SetInterpolator(in.Interpolator())
 			ns = seq
 		} else {
-			lin := scale.NewLinear()
-			if ip, ok := s.(scale.Interpolating); ok {
-				lin.SetInterpolate(ip.Interpolate())
+			ip, ok := s.(scale.Interpolating)
+			if !ok {
+				panic(&expr.Error{Name: "TypeError", Msg: "scale.interpolate is not a function"})
 			}
+			lin := scale.NewLinear()
+			lin.SetInterpolate(ip.Interpolate())
 			lin.SetRange(s.Range())
 			ns = lin
 		}
@@ -49,7 +60,6 @@ func scaleGradient(ctx context.Context, s scale.Scale, p0, p1, count jsval.Value
 		fraction = scale.ScaleFraction(s, jsval.ToNumber(min), jsval.ToNumber(max))
 	}
 
-	stops := []jsval.Value{min, max}
 	if t, ok := s.(scale.Ticker); ok {
 		n := jsval.ToNumber(count)
 		if n == 0 || n != n {
@@ -61,6 +71,7 @@ func scaleGradient(ctx context.Context, s scale.Scale, p0, p1, count jsval.Value
 			// expression that called gradient()
 			panic(&budget.Stop{Err: err})
 		}
+		v.chargeItems(len(ticks) + 2)
 		stops = make([]jsval.Value, 0, len(ticks)+2)
 		for _, f := range ticks {
 			if min.IsTimestamp() {
@@ -77,9 +88,11 @@ func scaleGradient(ctx context.Context, s scale.Scale, p0, p1, count jsval.Value
 			stops = append(stops, max)
 		}
 	}
+	// Each stop is an object of two members.
+	v.chargeItems(4 * len(stops))
 	out := make([]jsval.Value, len(stops))
-	for i, v := range stops {
-		out[i] = obj("offset", fraction(v), "color", s.Apply(v))
+	for i, x := range stops {
+		out[i] = obj("offset", fraction(x), "color", s.Apply(x))
 	}
 	return obj(
 		"gradient", sv("linear"),

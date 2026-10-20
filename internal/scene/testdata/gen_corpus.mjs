@@ -6,21 +6,27 @@
 //
 //   {"corpus": [{"name", "view": {...}, "scene": <root mark>, "svg": "..."}]}
 //
-// Usage (see docs/testing.md):
-//   NODE_PATH=testdata/oracle-node/node_modules \
-//   FIXTURES=<dir with vega spec files *.vg.json and data/> \
+// Usage (testdata/vectors.txt records it; see docs/testing.md):
+//   TZ=Europe/Amsterdam NODE_PATH=testdata/oracle-node/node_modules \
+//   FIXTURES=<data roots, colon-separated> CORPUS=<dir of *.vg.json> \
 //   node gen_corpus.mjs [name-regexp] > corpus.json
 //
 // Specifications come from ./specs/*.vg.json (checked in) and, when FIXTURES is
 // set, <FIXTURES>/specs/*.vg.json. Text is measured with vega's estimate
 // (no canvas), which the Go tests mirror.
-import { createRequire } from 'node:module';
+import { createRequire, register } from 'node:module';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-const require = createRequire(path.join(process.env.NODE_PATH, 'x.js'));
+// Recorded without node-canvas (see no-canvas-hook.mjs): text measured with
+// vega's estimate, image URLs kept, on every platform alike.
+register('../../../testdata/oracle-node/no-canvas-hook.mjs', import.meta.url);
+const require = createRequire(path.resolve(process.env.NODE_PATH, 'x.js'));
 const vega = await import(require.resolve('vega'));
+// The width estimate, not node-canvas: what the Go tests mirror, and the same
+// on every platform (canvas measures with the platform's Pango and fonts).
+vega.textMetrics.canvas(false);
 const aria = await import(path.join(process.env.NODE_PATH, 'vega-scenegraph/src/util/aria.js'));
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -35,9 +41,15 @@ function addDir(dir) {
   }
 }
 addDir(path.join(here, 'specs'));
-if (process.env.FIXTURES) addDir(path.join(process.env.FIXTURES, 'specs'));
+// CORPUS names the directory of those specifications when it is not
+// <FIXTURES>/specs, and FIXTURES may list several data roots, colon-separated
+// (testdata/vectors.txt records the repository's testdata/corpus/vega with
+// the data of testdata/vega-datasets and testdata/data).
+const fixtures = (process.env.FIXTURES || '').split(':').filter(Boolean);
+const corpusDir = process.env.CORPUS || (fixtures.length ? path.join(fixtures[0], 'specs') : '');
+if (corpusDir) addDir(corpusDir);
 roots.push(path.join(here, 'specs'));
-if (process.env.FIXTURES) roots.push(process.env.FIXTURES, path.join(process.env.FIXTURES, 'specs'));
+if (fixtures.length) roots.push(...fixtures, corpusDir);
 
 const loaders = roots.map((root) => vega.loader({ mode: 'file', baseURL: root }));
 // Image and href URLs are sanitized with the spec's own loader options

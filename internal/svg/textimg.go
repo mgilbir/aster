@@ -15,21 +15,77 @@ func textAnchor(align string) lit {
 	return "start"
 }
 
+// inheritedAnchor is textAlign[item.align] on a plain object for a name every
+// object inherits: that member, whose text is the attribute.
+func inheritedAnchor(align string) (string, bool) {
+	switch align {
+	case "left", "center", "right":
+		return "", false
+	}
+	return jsval.InheritedText(align)
+}
+
 // textItem writes the attributes and content of a <text> element: the anchor
 // and transform (rotation about the anchor point, then the dx/dy offset, with
 // baseline adjustment done here rather than by the SVG alignment-baseline
 // property), the font styling, and the text as one run or one <tspan> per line.
-func (r *renderer) textItem(m *scene.Mark, it *scene.Item) {
+func (r *renderer) textItem(m *scene.Mark, it *scene.Item) error {
 	w := &r.w
+	if s, ok := inheritedAnchor(it.Align); ok {
+		w.attr("text-anchor", s)
+	} else {
+		w.attrLit("text-anchor", textAnchor(it.Align))
+	}
+	w.attrOpen("transform")
+	if it.Raw != nil {
+		w.textTransformJS(it)
+	} else {
+		w.textTransform(it)
+	}
+	w.attrClose()
+	r.style(m, it, "text", it.Fill, it.Stroke)
+
+	// The lines are read in place, one tspan at a time, so the writer's
+	// bound stops a text of many lines as it grows.
+	lines, err := scene.TextLinesErr(it)
+	if err != nil {
+		return err
+	}
+	if !lines.Multi {
+		w.text(r.metrics.TextValue(it, lines.Line()))
+		return nil
+	}
+	lh, lhGiven := it.RawValue("lineHeight")
+	lhGiven = lhGiven && !lh.IsNullish()
+	lhNum := scene.LineHeight(it)
+	for i := 0; w.err == nil; i++ {
+		l, ok := lines.Next()
+		if !ok {
+			break
+		}
+		w.start("tspan")
+		if i > 0 {
+			w.attrLit("x", "0")
+			// lineHeight(item): the value as given, else fontSize + 2.
+			if lhGiven {
+				w.attrJS("dy", lh)
+			} else {
+				w.attrNum("dy", lhNum)
+			}
+		}
+		w.text(r.metrics.TextValue(it, l))
+		w.end()
+	}
+	return nil
+}
+
+// textTransform is the transform of attr() in vega-scenegraph's
+// marks/text.js for an item whose properties are all of their types.
+func (w *writer) textTransform(it *scene.Item) {
 	dx := it.Dx().Zero()
 	dy := it.Dy().Zero() + scene.BaselineOffset(it)
 	x, y := scene.AnchorPoint(it)
-
-	w.attrLit("text-anchor", textAnchor(it.Align))
-	w.attrOpen("transform")
-	if xv, yv := it.PosValue("x"), it.PosValue("y"); (xv.IsStr() || yv.IsStr()) && it.Radius().Zero() == 0 {
-		w.wordTransform(it, xv, yv, dx, dy)
-	} else if it.AngleTruthy() {
+	if it.AngleTruthy() {
 		w.translate(x, y)
 		w.valLit(" ")
 		w.rotate(it)
@@ -40,63 +96,50 @@ func (r *renderer) textItem(m *scene.Mark, it *scene.Item) {
 	} else {
 		w.translate(x+dx, y+dy)
 	}
-	w.attrClose()
-	r.style(m, it, "text", it.Fill, it.Stroke)
-
-	line, lines := scene.TextLine(it)
-	if lines == nil {
-		w.text(r.metrics.TextValue(it, line))
-		return
-	}
-	lh := scene.LineHeight(it)
-	for i, l := range lines {
-		w.start("tspan")
-		if i > 0 {
-			w.attrLit("x", "0")
-			w.attrNum("dy", lh)
-		}
-		w.text(r.metrics.TextValue(it, l))
-		w.end()
-	}
 }
 
-// wordTransform is the text transform of attr() in vega-scenegraph's
-// marks/text.js when x or y is a string, where `x + dx` joins the strings
-// instead of adding. The words are spec or data text, written escaped.
-func (w *writer) wordTransform(it *scene.Item, xv, yv jsval.Value, dx, dy float64) {
-	// join is `a + b`: a string followed by the number, or the sum.
-	join := func(a jsval.Value, b float64) {
-		if a.IsStr() {
-			w.valStr(a.StrValue())
-			w.valNum(b)
-			return
-		}
-		w.valNum(jsval.ToNumber(a) + b)
-	}
-	// text is the anchor coordinate as translate() prints it.
-	text := func(v jsval.Value) {
-		if v.IsStr() {
-			w.valStr(v.StrValue())
-			return
-		}
-		w.valNum(jsval.ToNumber(v))
-	}
-	w.valLit("translate(")
+// textTransformJS is the text transform with the values as given: `x + dx`
+// joins a string instead of adding, and the words are spec or data text,
+// written escaped.
+func (w *writer) textTransformJS(it *scene.Item) {
+	dx, dy := scene.TextOffsetsJS(it)
+	x, y := scene.AnchorPointJS(it)
 	if it.AngleTruthy() {
-		text(xv)
-		w.valLit(",")
-		text(yv)
-		w.valLit(") ")
+		w.translateJS(x, y)
+		w.valLit(" ")
 		w.rotate(it)
-		if dx != 0 || dy != 0 {
+		if dx.IsTruthy() || dy.IsTruthy() {
 			w.valLit(" ")
-			w.translate(dx, dy)
+			w.translateJS(dx, dy)
 		}
 		return
 	}
-	join(xv, dx)
+	w.valLit("translate(")
+	w.plusJS(x, dx)
 	w.valLit(",")
-	join(yv, dy)
+	w.plusJS(y, dy)
+	w.valLit(")")
+}
+
+// plusJS writes String(a + b): the text of a and of b one after the other when
+// either is a string, array, object or date (a concatenation, each written
+// as it is, so a large array is bounded as it grows), else their sum.
+func (w *writer) plusJS(a, b jsval.Value) {
+	concat := func(v jsval.Value) bool { return v.IsStr() || v.IsArr() || v.IsObj() || v.IsTimestamp() }
+	if concat(a) || concat(b) {
+		w.valJS(a)
+		w.valJS(b)
+		return
+	}
+	w.valNum(jsval.ToNumber(a) + jsval.ToNumber(b))
+}
+
+// translateJS is 'translate(' + x + ',' + y + ')' for values.
+func (w *writer) translateJS(x, y jsval.Value) {
+	w.valLit("translate(")
+	w.valJS(x)
+	w.valLit(",")
+	w.valJS(y)
 	w.valLit(")")
 }
 
@@ -111,15 +154,31 @@ func (r *renderer) imageItem(m *scene.Mark, it *scene.Item) {
 		bw, bh := b.Size()
 		info = ImageInfo{Src: b.DataURL(), Width: float64(bw), Height: float64(bh)}
 	} else {
-		info = r.image(it.URL(), !it.Width.Set() || !it.Height.Set())
+		// vega-loader's sanitize rejects a URL that is not a string.
+		url := it.URL()
+		if v, ok := it.RawValue("url"); ok && !v.IsStr() {
+			url = ""
+		}
+		info = r.image(url, !it.Width.Set() || !it.Height.Set())
 	}
 	x, y, iw, ih := scene.ImageGeometry(it, info.Width, info.Height)
 	w.attr("xlink:href", info.Src)
 	w.attrOpen("transform")
 	w.translate(x, y)
 	w.attrClose()
-	w.attrNum("width", iw)
-	w.attrNum("height", ih)
+	if it.Raw != nil {
+		// emit('width', w): the size as given.
+		wv, hv := scene.ImageSizeJS(it, info.Width, info.Height)
+		w.attrOpen("width")
+		w.valJS(wv)
+		w.attrClose()
+		w.attrOpen("height")
+		w.valJS(hv)
+		w.attrClose()
+	} else {
+		w.attrNum("width", iw)
+		w.attrNum("height", ih)
+	}
 	if it.Aspect().IsFalse() {
 		w.attrLit("preserveAspectRatio", "none")
 	} else {

@@ -101,7 +101,7 @@ func (r Registry) NewProjection(typ string) (Projection, error) {
 	if typ == "" {
 		typ = "mercator"
 	}
-	name := strings.ToLower(typ)
+	name := jsval.JSLower(typ) // type.toLowerCase()
 	if c := r[name]; c != nil {
 		return newCustom(name, c)
 	}

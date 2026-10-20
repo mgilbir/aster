@@ -1,6 +1,7 @@
 package svg
 
 import (
+	"context"
 	"encoding/xml"
 	"strings"
 	"testing"
@@ -22,7 +23,10 @@ func TestEscapedOutputIsWellFormedXML(t *testing.T) {
 			t.Errorf("forbidden characters survived: %q", out)
 		}
 	}
-	if got := string(appendEscapedBytes(nil, []byte("a\x02<"))); got != "a&lt;" {
+	var w writer
+	w.reset(context.Background(), nil, 0)
+	w.attrBytes("d", []byte("a\x02<"))
+	if got := string(w.bytes()); got != ` d="a&lt;"` {
 		t.Errorf("bytes variant: %q", got)
 	}
 	if got := string(appendEscaped(nil, "plain é text", false)); got != "plain é text" {
@@ -30,15 +34,19 @@ func TestEscapedOutputIsWellFormedXML(t *testing.T) {
 	}
 }
 
-func TestBlendIsAllowListed(t *testing.T) {
-	for _, m := range []string{"multiply", "color-dodge", "luminosity"} {
-		if string(blendMode(m)) != m {
-			t.Errorf("%s must be allowed", m)
+// A blend value is written as upstream writes it unless it could be more
+// than one CSS value in the style attribute.
+func TestBlendIsCSSSafe(t *testing.T) {
+	for _, m := range []string{"multiply", "color-dodge", "1e+308", "[object Object]", "a,b", "", "Multiply"} {
+		if !cssValueSafe(m) {
+			t.Errorf("%q must be written", m)
 		}
 	}
-	for _, m := range []string{"normal;background:url(http://x)", "", "Multiply", "url(x)"} {
-		if m != "" && blendMode(m) != "" {
+	for _, m := range []string{"normal;background:url(http://x)", "a;b", "url(x)", "u\\72l(x)", "a}b", "x{", "a:b", "'x'", "\"x\"", "a/*b*/", "a\nb"} {
+		if cssValueSafe(m) {
 			t.Errorf("%q must be rejected", m)
 		}
 	}
 }
+
+// TestURISchemeLettersAreASCII is C152 (audit 2026-10-18): vega-loader's

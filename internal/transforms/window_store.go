@@ -1,7 +1,6 @@
 package transforms
 
 import (
-	"math"
 	"slices"
 
 	"github.com/mgilbir/aster/internal/budget"
@@ -105,6 +104,25 @@ func windowMoveRegular(ms *measureSet, c *cell, st *windowStore, rows []jsval.Va
 	return nil
 }
 
+// framePos is a frame end as upstream holds it: a number x, or the string s
+// (when not "") that reads as x.
+type framePos struct {
+	x float64
+	s string
+}
+
+// less is `j < end` of upstream's loops over a frame's rows: two strings
+// compare as text, anything else as numbers.
+func (j framePos) less(end framePos) bool {
+	if j.s != "" && end.s != "" {
+		return jsval.CompareUTF16(j.s, end.s) < 0
+	}
+	return j.x < end.x
+}
+
+// next is ++j: a number, whatever j held.
+func (j framePos) next() framePos { return framePos{x: j.x + 1} }
+
 // errArrayLength is the RangeError of new Array(n) with n < 0.
 var errArrayLength = &jsval.Thrown{Name: "RangeError", Msg: "Invalid array length"}
 
@@ -113,18 +131,13 @@ var errArrayLength = &jsval.Thrown{Name: "RangeError", Msg: "Invalid array lengt
 // included), a row past the partition or between two rows is undefined,
 // which a measure reading a field of it throws on, and the store is run as
 // upstream runs it.
-func windowMoveSlow(ms *measureSet, c *cell, st *windowStore, rows []jsval.Value, p0, p1, i0, i1 float64, m *budget.Meter) error {
-	at := func(j float64) (jsval.Value, bool) {
-		if j >= 0 && j < float64(len(rows)) && j == math.Trunc(j) {
-			return rows[int(j)], true
-		}
-		return jsval.Undefined, false
-	}
-	for j := p0; j < i0; j++ {
+func windowMoveSlow(ms *measureSet, c *cell, st *windowStore, rows []jsval.Value, p0, p1, i0, i1 framePos, m *budget.Meter) error {
+	w := windowFrame{data: rows}
+	for j := p0; j.less(i0); j = j.next() {
 		if err := m.Work(1); err != nil {
 			return err
 		}
-		t, ok := at(j)
+		t, ok := w.rowAt(j.x, j.s)
 		if !ok {
 			c.num--
 			if ms.countOnly {
@@ -137,11 +150,11 @@ func windowMoveSlow(ms *measureSet, c *cell, st *windowStore, rows []jsval.Value
 			st.rem = append(st.rem, t)
 		}
 	}
-	for j := p1; j < i1; j++ {
+	for j := p1; j.less(i1); j = j.next() {
 		if err := m.Work(1); err != nil {
 			return err
 		}
-		t, ok := at(j)
+		t, ok := w.rowAt(j.x, j.s)
 		if !ok {
 			c.num++
 			if ms.countOnly {
@@ -174,11 +187,11 @@ func (st *windowStore) values(c *cell, m *budget.Meter) error {
 		}
 		removed := make(map[*jsval.Object]bool, k)
 		for _, r := range st.rem {
-			removed[r.ObjValue()] = true
+			removed[jsval.Fields(r)] = true
 		}
 		x := make([]jsval.Value, 0, n-k)
 		for _, v := range st.add {
-			if o := v.ObjValue(); removed[o] {
+			if o := jsval.Fields(v); removed[o] {
 				removed[o] = false
 			} else {
 				x = append(x, v)

@@ -66,14 +66,25 @@ func (s *normalSampler) sample(r Rand, mean, stdev float64) float64 {
 
 // DensityNormal is the normal probability density function.
 func DensityNormal(value, mean, stdev float64) float64 {
-	z := (value - distOrZero(mean)) / stdev
+	return densityNormal(value, distOrZero(mean), stdev)
+}
+
+// densityNormal is DensityNormal of a mean already `mean || 0`: a
+// distribution's, which a truthy value that is no number makes NaN.
+func densityNormal(value, mean, stdev float64) float64 {
+	z := (value - mean) / stdev
 	return jsmath.Exp(-0.5*z*z) / (stdev * distSQRT2PI)
 }
 
 // CumulativeNormal is the normal CDF using the approximation of West (2009),
 // "Better Approximations to Cumulative Normal Functions".
 func CumulativeNormal(value, mean, stdev float64) float64 {
-	z := (value - distOrZero(mean)) / stdev
+	return cumulativeNormal(value, distOrZero(mean), stdev)
+}
+
+// cumulativeNormal is CumulativeNormal of a mean already `mean || 0`.
+func cumulativeNormal(value, mean, stdev float64) float64 {
+	z := (value - mean) / stdev
 	Z := math.Abs(z)
 	var cd float64
 	if Z > 37 {
@@ -115,10 +126,15 @@ func CumulativeNormal(value, mean, stdev float64) float64 {
 // QuantileNormal is the normal quantile function (probit) via the inverse
 // error function; NaN outside [0, 1].
 func QuantileNormal(p, mean, stdev float64) float64 {
+	return quantileNormal(p, distOrZero(mean), stdev)
+}
+
+// quantileNormal is QuantileNormal of a mean already `mean || 0`.
+func quantileNormal(p, mean, stdev float64) float64 {
 	if p < 0 || p > 1 {
 		return math.NaN()
 	}
-	return distOrZero(mean) + float64(float64(stdev*distSQRT2)*distErfinv(2*p-1))
+	return mean + float64(float64(stdev*distSQRT2)*distErfinv(2*p-1))
 }
 
 // distErfinv approximates the inverse error function (Giles, "Approximating
@@ -184,10 +200,10 @@ func NewNormal(mean, stdev float64) *Normal {
 	return &Normal{Mean: distOrZero(mean), Stdev: stdev, s: normalSampler{next: math.NaN()}}
 }
 
-func (d *Normal) PDF(x float64) float64 { return DensityNormal(x, d.Mean, d.Stdev) }
-func (d *Normal) CDF(x float64) float64 { return CumulativeNormal(x, d.Mean, d.Stdev) }
+func (d *Normal) PDF(x float64) float64 { return densityNormal(x, d.Mean, d.Stdev) }
+func (d *Normal) CDF(x float64) float64 { return cumulativeNormal(x, d.Mean, d.Stdev) }
 func (d *Normal) ICDF(p float64) (float64, error) {
-	return QuantileNormal(p, d.Mean, d.Stdev), nil
+	return quantileNormal(p, d.Mean, d.Stdev), nil
 }
 func (d *Normal) Sample(r Rand) float64 { return d.s.sample(r, d.Mean, d.Stdev) }
 
@@ -210,10 +226,10 @@ func (d *LogNormal) PDF(value float64) float64 {
 	return jsmath.Exp(-0.5*z*z) / (d.Stdev * distSQRT2PI * value)
 }
 func (d *LogNormal) CDF(value float64) float64 {
-	return CumulativeNormal(jsmath.Log(value), d.Mean, d.Stdev)
+	return cumulativeNormal(jsmath.Log(value), d.Mean, d.Stdev)
 }
 func (d *LogNormal) ICDF(p float64) (float64, error) {
-	return jsmath.Exp(QuantileNormal(p, d.Mean, d.Stdev)), nil
+	return jsmath.Exp(quantileNormal(p, d.Mean, d.Stdev)), nil
 }
 func (d *LogNormal) Sample(r Rand) float64 {
 	return jsmath.Exp(d.Mean + float64(d.s.sample(r, 0, 1)*d.Stdev))

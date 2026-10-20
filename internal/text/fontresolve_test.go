@@ -246,10 +246,16 @@ func TestPaletteByEveryFamilyName(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, named := range []string{"微軟正黑體", "Acme Light", "Acme"} {
-		m, err := New(WithFontPalette(named, 2))
+		// New refuses a palette for a family with no font (C57), and the
+		// system index here is attached after it: the option's own
+		// palettes are put on the Measurer with it.
+		m, err := New()
 		if err != nil {
 			t.Fatal(err)
 		}
+		var cfg config
+		WithFontPalette(named, 2)(&cfg)
+		m.palettes = cfg.palettes
 		idx := &systemIndex{byFam: map[string][]sysFont{}}
 		idx.add(readSysFonts(p))
 		m.system = idx

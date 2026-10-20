@@ -1,0 +1,1 @@
+{"width":100,"height":40,"signals":[{"name":"d","value":true}],"scales":[{"name":"n","type":"linear","domain":{"signal":"d"},"range":[0,100]}],"marks":[{"type":"text","encode":{"enter":{"y":{"value":10},"text":{"signal":"range('n')"}}}}]}

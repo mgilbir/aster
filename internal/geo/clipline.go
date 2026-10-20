@@ -1,5 +1,7 @@
 package geo
 
+import "math"
+
 // clipSegment is Liang–Barsky clipping of the segment a-b against the box,
 // moving a and b onto the box in place. It reports whether any part of the
 // segment is visible.
@@ -10,7 +12,7 @@ func clipSegment(a, b *[2]float64, x0, y0, x1, y1 float64) bool {
 	dx, dy := bx-ax, by-ay
 
 	r := x0 - ax
-	if dx == 0 && r > 0 {
+	if (dx == 0 || math.IsNaN(dx)) && r > 0 {
 		return false
 	}
 	r /= dx
@@ -31,7 +33,7 @@ func clipSegment(a, b *[2]float64, x0, y0, x1, y1 float64) bool {
 	}
 
 	r = x1 - ax
-	if dx == 0 && r < 0 {
+	if (dx == 0 || math.IsNaN(dx)) && r < 0 {
 		return false
 	}
 	r /= dx
@@ -52,7 +54,7 @@ func clipSegment(a, b *[2]float64, x0, y0, x1, y1 float64) bool {
 	}
 
 	r = y0 - ay
-	if dy == 0 && r > 0 {
+	if (dy == 0 || math.IsNaN(dy)) && r > 0 {
 		return false
 	}
 	r /= dy
@@ -73,7 +75,7 @@ func clipSegment(a, b *[2]float64, x0, y0, x1, y1 float64) bool {
 	}
 
 	r = y1 - ay
-	if dy == 0 && r < 0 {
+	if (dy == 0 || math.IsNaN(dy)) && r < 0 {
 		return false
 	}
 	r /= dy

@@ -321,7 +321,7 @@ func TestNumberSpecifierConvertsToString(t *testing.T) {
 		in   jsval.Value
 		want string
 	}{{jsval.Num(42), "42"}, {jsval.Str(".2f"), ".2f"}, {jsval.Null, ""}} {
-		got, err := numberSpecifier(c.in)
+		got, err := numberSpecifier(jsval.Walker{}, c.in)
 		if err != nil || got != c.want {
 			t.Errorf("numberSpecifier(%v) = %q, %v; want %q", c.in, got, err, c.want)
 		}

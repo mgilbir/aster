@@ -172,11 +172,9 @@ func GeoPath(ctx context.Context, tuples []jsval.Value, p GeoPathParams) (err er
 				return err
 			}
 		}
-		o := t.ObjValue()
-		if o == nil {
-			continue
-		}
-		if s, ok := path.String(field(t)); ok {
+		s, ok := path.String(field(t))
+		o := jsval.FieldsFor(t, as)
+		if ok {
 			o.Set(as, jsval.Str(s))
 		} else {
 			o.Set(as, jsval.Null)
@@ -190,6 +188,10 @@ type GeoPointParams struct {
 	Projection Projection // required
 	Lon, Lat   Accessor   // required
 	As         [2]string  // output fields, default {"x", "y"}
+	// AsExact reports that As are the names as the runtime resolved them
+	// (`_.as || defaults`, then each entry's text): an empty one is the
+	// empty name, not the default.
+	AsExact bool
 }
 
 // GeoPoint is vega-geo's GeoPoint transform: it geo-codes each tuple's
@@ -209,10 +211,10 @@ func GeoPoint(ctx context.Context, tuples []jsval.Value, p GeoPointParams) error
 		}
 	}
 	xf, yf := p.As[0], p.As[1]
-	if xf == "" {
+	if xf == "" && !p.AsExact {
 		xf = "x"
 	}
-	if yf == "" {
+	if yf == "" && !p.AsExact {
 		yf = "y"
 	}
 	for i, t := range tuples {
@@ -221,11 +223,8 @@ func GeoPoint(ctx context.Context, tuples []jsval.Value, p GeoPointParams) error
 				return err
 			}
 		}
-		o := t.ObjValue()
-		if o == nil {
-			continue
-		}
 		x, y, ok := p.Projection.Forward(jsval.ToNumber(p.Lon(t)), jsval.ToNumber(p.Lat(t)))
+		o := jsval.FieldsFor(t, xf)
 		if ok {
 			o.Set(xf, jsval.Num(x))
 			o.Set(yf, jsval.Num(y))
@@ -369,7 +368,7 @@ func CollectGeoJSON(data jsval.Value) (jsval.Value, error) {
 		if f.IsNullish() {
 			return jsval.Undefined, errors.New("geo: cannot read properties of null (reading 'type') in projection fit")
 		}
-		if f.IsObj() && typeOf(f) == "FeatureCollection" {
+		if f.IsObj() && typeOf(f.Get("type")) == "FeatureCollection" {
 			features = append(features, f.Get("features").Items()...)
 			continue
 		}
@@ -383,7 +382,7 @@ func CollectGeoJSON(data jsval.Value) (jsval.Value, error) {
 			if d.IsNullish() {
 				continue
 			}
-			if d.IsObj() && typeOf(d) == "Feature" {
+			if d.IsObj() && typeOf(d.Get("type")) == "Feature" {
 				features = append(features, d)
 			} else {
 				features = append(features, jsval.Obj(jsval.ObjectOf("type", jsval.Str("Feature"), "geometry", d)))
@@ -409,10 +408,15 @@ func ConfigureProjection(ctx context.Context, reg Registry, current Projection, 
 	get := func(name string) jsval.Value { return params.Lookup(name) }
 	proj := current
 	if proj == nil || (modified != nil && modified("type")) {
+		// `(type || 'mercator').toLowerCase()`: a truthy type that is no
+		// string has no toLowerCase.
 		typ := get("type")
 		name := ""
 		if typ.IsTruthy() {
-			name = typ.AsString()
+			if !typ.IsStr() {
+				return nil, &jsval.Thrown{Name: "TypeError", Msg: `(type || "mercator").toLowerCase is not a function`}
+			}
+			name = typ.StrValue()
 		}
 		var err error
 		if proj, err = reg.NewProjection(name); err != nil {
@@ -435,9 +439,24 @@ func ConfigureProjection(ctx context.Context, reg Registry, current Projection, 
 		}
 	}
 	if v := get("pointRadius"); !v.IsNullish() {
+		if IsBare(proj) {
+			return nil, &jsval.Thrown{Name: "TypeError", Msg: "Cannot read properties of undefined (reading 'pointRadius')"}
+		}
 		proj.Path().SetPointRadius(jsval.ToNumber(v))
 	}
 	if fitv := get("fit"); fitv.IsTruthy() {
+		if IsBare(proj) {
+			if _, err := CollectGeoJSON(fitv); err != nil {
+				return nil, err
+			}
+			switch {
+			case get("extent").IsTruthy():
+				return nil, &jsval.Thrown{Name: "TypeError", Msg: "proj.fitExtent is not a function"}
+			case get("size").IsTruthy():
+				return nil, &jsval.Thrown{Name: "TypeError", Msg: "proj.fitSize is not a function"}
+			}
+			return proj, nil
+		}
 		if err := fitProjection(ctx, proj, fitv, get("extent"), get("size")); err != nil {
 			return nil, err
 		}

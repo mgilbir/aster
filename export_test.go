@@ -83,10 +83,10 @@ func (c *Converter) StagesForTest(spec []byte, lite bool) (map[string]time.Durat
 	if err != nil {
 		return nil, err
 	}
-	if _, err := c.svgToPNG(ctx, svg, nil); err != nil {
+	if _, err := c.svgToPNG(ctx, svg, defaultPNGConfig()); err != nil {
 		return nil, err
 	}
-	if _, _, err := c.svgToPDF(ctx, svg, nil, false, true); err != nil {
+	if _, _, err := c.svgToPDF(ctx, svg, svgpdf.TextEmbed, false, true); err != nil {
 		return nil, err
 	}
 	return stages, nil
@@ -123,7 +123,8 @@ func (c *Converter) RenderPreparedForTest(spec []byte, lite bool) (func() error,
 		defer release()
 		ctx, cancel := c.opContext(context.Background())
 		defer cancel()
-		defer recoverInto(&err)
+		stage := "rendering Vega"
+		defer c.recoverStage(ctx, &stage, &err)
 		opts := vega.Options{
 			Loader:   c.cfg.loader,
 			Location: c.location,
@@ -141,6 +142,9 @@ func (c *Converter) RenderPreparedForTest(spec []byte, lite bool) (func() error,
 		return err
 	}, nil
 }
+
+// IsEngineBugForTest is isEngineBug, for the external tests' gates.
+var IsEngineBugForTest = isEngineBug
 
 // RaceSlowdownForTest is raceSlowdown, for the external tests' time limits.
 const RaceSlowdownForTest = raceSlowdown
@@ -169,6 +173,11 @@ func LimitsForTest(n uint64) map[string]int64 {
 		"rasterizer pixels per canvas (PNG)":                                    int64(r.MaxPixels),
 		"rasterizer path points held at once (PNG)":                             int64(r.MaxPathSegments),
 		"pixels of one image (SVG, PNG and PDF output)":                         int64((&Converter{lim: c}).imagePixels()),
+		"SVG input to `SVGToPNG`, bytes":                                        int64(r.MaxInputBytes),
+		"SVG input to `SVGToPNG`, elements (a run of text is one)":              int64(r.MaxElements),
+		"style sheets of SVG input to `SVGToPNG`, bytes":                        int64(r.MaxStyleBytes),
+		"style sheets of SVG input to `SVGToPNG`, rules":                        int64(r.MaxCSSRules),
+		"pixels of one filter region (PNG)":                                     int64(r.MaxFilterPixels),
 		"memory charged to the call's ledger":                                   c.ledger.MaxBytes,
 		"Vega-Lite views":                                                       int64(c.vlViews),
 		"SVG a chart's PDF is drawn from (`VegaToPDF`, `VegaLiteToPDF`), bytes": int64(c.pdfChart.MaxInputBytes),
@@ -180,6 +189,15 @@ func LimitsForTest(n uint64) map[string]int64 {
 		"SVG input to `SVGToPDF`, path segments":                                int64(c.pdfInput.MaxPathSegments),
 		"SVG input to `SVGToPDF`, text bytes":                                   int64(c.pdfInput.MaxTextBytes),
 	}
+}
+
+// WithWordcloudBoxForTest lays out the wordcloud transform's words with
+// wordcloud.BoxRenderer (every rune 0.6 em, every word a box) instead of the
+// canvas renderer: the model of the oracle's deterministic wordcloud canvas
+// (Oracle.WordcloudBoxSVG), which does not depend on how a platform's
+// node-canvas rasterizes glyphs.
+func WithWordcloudBoxForTest() Option {
+	return func(c *config) { c.wordcloudBoxForTest = true }
 }
 
 // WithFontSetFailureForTest makes the Converter's fonts fail to load.

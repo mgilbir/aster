@@ -1,0 +1,1 @@
+{"width": 300, "height": 50, "padding": 5, "signals": [{"name": "s", "update": "timeFormat(-1000.5, {}) + '|' + utcFormat(-1000.5, {}) + '|' + timeFormat(-1000.5, '%L %Y') + '|' + utcFormat(-1000.5, '%Y-%m-%d %L')"}], "marks": [{"type": "text", "encode": {"update": {"text": {"signal": "s"}}}}]}

@@ -1,0 +1,4 @@
+{"width":100,"height":60,"padding":4,"data":[{"name":"flat","values":[{"g":"a","v":3},[{"g":"a","v":5}],{"g":"b","v":4}],
+"transform":[{"type":"nest","keys":["g"],"generate":true},{"type":"treemap","field":"v","size":[100,60]}]},
+{"name":"leaves","source":"flat","transform":[{"type":"filter","expr":"!datum.children"}]}],
+"marks":[{"type":"rect","from":{"data":"leaves"},"encode":{"enter":{"x":{"field":"x0"},"x2":{"field":"x1"},"y":{"field":"y0"},"y2":{"field":"y1"}}}}]}

@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/mgilbir/aster/internal/jsval"
 )
 
 // parseOp is one step of a compiled parse: a literal byte to match, or a
@@ -260,7 +262,7 @@ func number(s string, i, width int) (v float64, next int, ok bool) {
 		}
 		return float64(n), k, true
 	}
-	f, _ := strconv.ParseFloat(s[start:k], 64)
+	f, _ := jsval.ParseDecimal(s[start:k])
 	return f, k, true
 }
 
@@ -398,8 +400,8 @@ func matchName(d *parseState, names []string, lookup map[string]int, s string, i
 		if cnt < n {
 			continue
 		}
-		if strings.EqualFold(rest[:end], name) {
-			if idx, ok := lookup[strings.ToLower(rest[:end])]; ok {
+		if jsval.RegExpFoldEqual(rest[:end], name) {
+			if idx, ok := lookup[jsval.JSLower(rest[:end])]; ok {
 				*dst = float64(idx)
 			} else {
 				*dst = math.NaN()

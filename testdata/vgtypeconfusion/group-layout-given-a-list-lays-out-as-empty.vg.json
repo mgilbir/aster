@@ -1,0 +1,1 @@
+{"data":[{"name":"sp500","url":"data/sp500-2000.csv","format":{"type":"csv"},"transform":[{"type":"formula","expr":"year(datum.date)","as":"year"}]}],"layout":[],"marks":[{"type":"group","from":{"facet":{"data":"sp500","name":"values","groupby":"year"}},"marks":[{"type":"rect","encode":{"enter":{"width":{"offset":-1}}}}]}]}

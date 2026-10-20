@@ -1,0 +1,1 @@
+{"data":[{"name":"t","values":[{}]}],"scales":[{"name":"colour","type":"ordinal","domain":{"data":"t","field":"g"}},{"name":"area"}],"legends":[{"size":"area","clipHeight":8},{"fill":"colour","clipHeight":"0"},{"fill":"colour","clipHeight":-4}]}

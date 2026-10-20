@@ -250,7 +250,7 @@ func (u *unitModel) alignStackOrderWithColorDomain() {
 			if u.stack == nil {
 				return
 			}
-			orderExpression := "indexof(" + stringValue(domain) + ", datum['" + field.StrValue() + "'])"
+			orderExpression := "indexof(" + stringValue(cc, domain) + ", datum['" + field.StrValue() + "'])"
 			sort := "descending"
 			if markDefOrient(u.markDef) == "horizontal" {
 				sort = "ascending"

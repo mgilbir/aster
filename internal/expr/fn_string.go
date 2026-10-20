@@ -4,27 +4,14 @@ import (
 	"encoding/base64"
 	"math"
 	"math/big"
-	"strconv"
 	"strings"
-	"sync"
 	"unicode/utf8"
 	"unsafe"
-
-	"golang.org/x/text/cases"
-	"golang.org/x/text/language"
 
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
-func isJSSpace(r rune) bool {
-	switch r {
-	case '\t', '\n', '\v', '\f', '\r', ' ', 0xA0, 0x1680, 0x2028, 0x2029, 0x202F, 0x205F, 0x3000, 0xFEFF:
-		return true
-	}
-	return r >= 0x2000 && r <= 0x200A
-}
-
-func trimJSSpace(s string) string { return strings.TrimFunc(s, isJSSpace) }
+func trimJSSpace(s string) string { return jsval.JSTrim(s) }
 
 // sliceIndex resolves a relative index argument of slice/substring style
 // methods against length n (negative counts from the end).
@@ -89,39 +76,16 @@ func (s *Scope) padded(c string, left float64, str string, right float64) string
 	return b.String()
 }
 
-var (
-	upperCaser = cases.Upper(language.Und)
-	lowerCaser = cases.Lower(language.Und)
-	caseMu     sync.Mutex
-)
+// jsUpper and jsLower are toUpperCase / toLowerCase (jsval.JSUpper,
+// jsval.JSLower).
+func jsUpper(s string) string { return jsval.JSUpper(s) }
 
-// jsUpper and jsLower are toUpperCase / toLowerCase: full Unicode case mapping
-// (ß -> SS, final sigma, İ). cases.Caser is stateful, hence the lock; ASCII
-// strings never reach it.
-func jsUpper(s string) string {
-	if isASCII(s) {
-		return strings.ToUpper(s)
-	}
-	caseMu.Lock()
-	defer caseMu.Unlock()
-	upperCaser.Reset()
-	return upperCaser.String(s)
-}
-
-func jsLower(s string) string {
-	if isASCII(s) {
-		return strings.ToLower(s)
-	}
-	caseMu.Lock()
-	defer caseMu.Unlock()
-	lowerCaser.Reset()
-	return lowerCaser.String(s)
-}
+func jsLower(s string) string { return jsval.JSLower(s) }
 
 // jsParseFloat is the global parseFloat: the longest prefix that is a decimal
 // literal (or Infinity), after leading whitespace.
 func jsParseFloat(str string) float64 {
-	str = strings.TrimLeftFunc(str, isJSSpace)
+	str = jsval.JSTrimStart(str)
 	i := 0
 	if i < len(str) && (str[i] == '+' || str[i] == '-') {
 		i++
@@ -165,18 +129,13 @@ func jsParseFloat(str string) float64 {
 			i = k
 		}
 	}
-	f, err := strconv.ParseFloat(str[:i], 64)
-	if err != nil {
-		if ne, ok := err.(*strconv.NumError); !ok || ne.Err != strconv.ErrRange {
-			return math.NaN()
-		}
-	}
+	f, _ := jsval.ParseDecimal(str[:i])
 	return f
 }
 
 // jsParseInt is the global parseInt(string, radix).
 func jsParseInt(str string, radix int32) float64 {
-	str = strings.TrimLeftFunc(str, isJSSpace)
+	str = jsval.JSTrimStart(str)
 	sign := 1.0
 	if str != "" && (str[0] == '+' || str[0] == '-') {
 		if str[0] == '-' {
@@ -213,7 +172,8 @@ func jsParseInt(str string, radix int32) float64 {
 	}
 	digits := str[:end]
 	if r == 10 {
-		f, _ := strconv.ParseFloat(digits, 64)
+		// V8 reads a decimal prefix as a numeric literal, rounded once.
+		f, _ := jsval.ParseDecimal(digits)
 		return sign * f
 	}
 	// big.Int parses in time quadratic in the digits. Past 1100 significant

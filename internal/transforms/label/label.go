@@ -10,7 +10,6 @@ package label
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"github.com/mgilbir/aster/internal/jssort"
 	"math"
@@ -102,11 +101,18 @@ type Rasterizer interface {
 
 // Options are the transform parameters.
 type Options struct {
-	Size    [2]float64 // layout width and height (required)
-	Sort    func(a, b *Label) float64
-	Anchor  []string  // default: DefaultAnchors
-	Offset  []float64 // default: [1]
-	Padding float64
+	Size [2]float64 // layout width and height (required)
+	// SizeText holds, for a width or height that was given as something other
+	// than a number (a text, a list), its String: the layout's arithmetic
+	// concatenates it (see newScaler), and a canvas made from it has no size.
+	SizeText [2]*string
+	Sort     func(a, b *Label) float64
+	Anchor   []string  // default: DefaultAnchors
+	Offset   []float64 // default: [1]
+	// OffsetSlots, when set, are the offsets as the layout holds them (`_[i]
+	// || 0` stored in a Float64Array); Offset then serves Math.max alone.
+	OffsetSlots []float64
+	Padding     float64
 	// UnboundedPadding (upstream: null padding) or an infinite Padding lets
 	// labels leave the layout area without limit.
 	UnboundedPadding bool
@@ -153,10 +159,6 @@ var anchorCode = map[string]int8{
 // applied), except for group-area labels with the naive method, which keep
 // input order as upstream does.
 func Layout(ctx context.Context, labels []Label, o Options) ([]Placement, error) {
-	if math.IsNaN(o.Size[0]) || math.IsNaN(o.Size[1]) || o.Size[0] < 0 || o.Size[1] < 0 ||
-		math.IsInf(o.Size[0], 0) || math.IsInf(o.Size[1], 0) {
-		return nil, errors.New("label: size must be a finite non-negative [width, height]")
-	}
 	if len(labels) == 0 {
 		return nil, nil
 	}
@@ -188,6 +190,9 @@ func Layout(ctx context.Context, labels []Label, o Options) ([]Placement, error)
 			offsets[i] = offset[i] // upstream: `_[i] || 0` (NaN -> 0)
 			if math.IsNaN(offsets[i]) {
 				offsets[i] = 0
+			}
+			if len(o.OffsetSlots) == len(offset) {
+				offsets[i] = o.OffsetSlots[i]
 			}
 		case len(offset) > 0:
 			offsets[i] = offsets[len(offset)-1]
@@ -238,7 +243,7 @@ func Layout(ctx context.Context, labels []Label, o Options) ([]Placement, error)
 		}
 		padding = jsMax(maxTextWidth, maxTextHeight) + maxOff
 	}
-	sc, err := newScaler(ctx, o.Size[0], o.Size[1], padding)
+	sc, err := newScaler(ctx, o.Size[0], o.Size[1], padding, o.SizeText)
 	if err != nil {
 		return nil, err
 	}

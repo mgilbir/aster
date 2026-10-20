@@ -1,0 +1,1 @@
+{"width": 40, "height": 20, "data": [{"name": "d", "values": [{"a": 1}, {"a": 2}]}], "marks": [{"type": "group", "from": {"facet": {"name": "f", "data": "d", "groupby": [["a"]]}}, "marks": [{"type": "text", "from": {"data": "f"}, "encode": {"enter": {"text": {"field": "a"}}}}]}]}

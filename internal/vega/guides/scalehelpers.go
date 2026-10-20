@@ -66,9 +66,12 @@ func (e *Env) tickCount(s scale.Scale, count, minStep jsval.Value) (scale.TickCo
 // scale.MaxTicks of them; they live as long as the scene.
 type labelMeter struct {
 	l *budget.Ledger
+	w jsval.Walker
 }
 
-func (e *Env) labelMeter() labelMeter { return labelMeter{budget.LedgerFrom(e.ctx())} }
+func (e *Env) labelMeter() labelMeter {
+	return labelMeter{budget.LedgerFrom(e.ctx()), jsval.WalkerFor(e.ctx())}
+}
 
 // charge charges the bytes of label, a string or an array of lines.
 func (m labelMeter) charge(label jsval.Value) error {
@@ -80,8 +83,14 @@ func (m labelMeter) charge(label jsval.Value) error {
 	case label.IsStr():
 		n = len(label.StrValue())
 	case label.IsArr():
+		var buf []byte
 		for _, it := range label.Items() {
-			n += len(it.AsString())
+			if it.IsStr() {
+				n += len(it.StrValue())
+				continue
+			}
+			buf = m.w.AppendString(buf[:0], it)
+			n += len(buf)
 		}
 	}
 	return m.l.Alloc(int64(n))

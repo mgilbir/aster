@@ -386,19 +386,33 @@ func TestPaintedOnlyThroughComposite(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		// Every top-level declaration, not only functions: a package-level
+		// var or constant (or a function literal held by one) writes
+		// content as well as a function does.
 		for _, d := range f.Decls {
-			fn, ok := d.(*ast.FuncDecl)
-			if !ok || allowed[fn.Name.Name] {
-				continue
+			owner := "package-level declaration"
+			switch d := d.(type) {
+			case *ast.FuncDecl:
+				if allowed[d.Name.Name] {
+					continue
+				}
+				owner = d.Name.Name
+			case *ast.GenDecl:
+				for _, sp := range d.Specs {
+					if vs, ok := sp.(*ast.ValueSpec); ok && len(vs.Names) > 0 {
+						owner = vs.Names[0].Name
+						break
+					}
+				}
 			}
-			ast.Inspect(fn, func(n ast.Node) bool {
+			ast.Inspect(d, func(n ast.Node) bool {
 				lit, ok := n.(*ast.BasicLit)
 				if !ok || lit.Kind != token.STRING {
 					return true
 				}
 				s, err := strconv.Unquote(lit.Value)
 				if err == nil && paintOp.MatchString(s) {
-					t.Errorf("%s: %s writes %q itself: paint through contentWriter.paintObject", fset.Position(lit.Pos()), fn.Name.Name, s)
+					t.Errorf("%s: %s writes %q itself: paint through contentWriter.paintObject", fset.Position(lit.Pos()), owner, s)
 				}
 				return true
 			})

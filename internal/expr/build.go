@@ -15,7 +15,7 @@ import (
 // as JavaScript measures them. It is an engine limit, far below V8's (see
 // v8MaxStringLength): a string past it ends the render with an error wrapping
 // budget.ErrLimit, which no expression can catch.
-const MaxStringLength = 1 << 24
+const MaxStringLength = jsval.MaxStringLength
 
 // v8MaxStringLength is V8's String::kMaxLength on 64-bit platforms. A string
 // longer than this is the RangeError "Invalid string length" upstream throws

@@ -1,8 +1,6 @@
 package vegalite
 
 import (
-	"strings"
-
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -189,8 +187,12 @@ func assembleProjectionForModel(m Model) []Value {
 	for _, r := range comp.size {
 		sizes = append(sizes, signalOf(r))
 	}
-	size := mkv("signal", "["+strings.Join(sizes, ", ")+"]")
+	size := mkv("signal", "["+joinCC(cc, sizes, ", ")+"]")
+	// Upstream dedupes the sources with fit.includes, a scan of those so
+	// far (quadratic over a projection fitted to many layers, C150: audit
+	// 2026-10-18); a set of them keeps the same first-seen order.
 	var fits []string
+	seen := make(map[string]bool, len(comp.data))
 	for _, d := range comp.data {
 		cc.work(1)
 		var source string
@@ -199,7 +201,8 @@ func assembleProjectionForModel(m Model) []Value {
 		} else {
 			source = "data('" + m.b().lookupDataSource(d.AsString()).AsString() + "')"
 		}
-		if !contains(fits, source) {
+		if !seen[source] {
+			seen[source] = true
 			fits = append(fits, source)
 		}
 	}
@@ -208,7 +211,7 @@ func assembleProjectionForModel(m Model) []Value {
 	}
 	fit := fits[0]
 	if len(fits) > 1 {
-		fit = "[" + strings.Join(fits, ", ") + "]"
+		fit = "[" + joinCC(cc, fits, ", ") + "]"
 	}
 	o := mk("name", name, "size", size, "fit", mkv("signal", fit))
 	spread(o, jsval.Obj(projection))
