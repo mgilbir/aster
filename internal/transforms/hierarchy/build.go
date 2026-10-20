@@ -97,6 +97,11 @@ func nestLevel(m *budget.Meter, items []jsval.Value, keys []Accessor, str func(j
 			k := str(get(it))
 			gi, ok := index[k]
 			if !ok {
+				if jsval.ObjectPrototypeHas(k) {
+					// valuesByKey[keyValue] of a plain object is the member
+					// Object.prototype has under the name: no array.
+					panic(&jsval.Thrown{Name: "TypeError", Msg: "values.push is not a function"})
+				}
 				gi = len(groups)
 				index[k] = gi
 				groups = append(groups, nil)

@@ -104,8 +104,10 @@ func (e *Env) AxisTicks(in AxisTicksInput) ([]jsval.Value, error) {
 // LegendEntriesInput are the resolved parameters of vega-encode's
 // LegendEntries operator.
 type LegendEntriesInput struct {
-	// Type is "symbol" (default), "gradient" or "discrete".
-	Type  string
+	// Type is "symbol" (the default for a falsy one), "gradient" or
+	// "discrete", compared with === as upstream does: any other value,
+	// ["symbol"] too, makes a discrete legend's entries.
+	Type  jsval.Value
 	Scale scale.Scale
 	// Count is the approximate number of entries (default 5).
 	Count jsval.Value
@@ -132,9 +134,9 @@ func (e *Env) LegendEntries(in LegendEntriesInput) ([]jsval.Value, error) {
 	if in.Scale == nil {
 		return nil, errors.New("LegendEntries: missing scale")
 	}
-	typ := in.Type
-	if typ == "" {
-		typ = symbolLegend
+	typ := symbolLegend
+	if in.Type.IsTruthy() {
+		typ, _ = in.Type.Strict() // "" for a value that is no string: no type
 	}
 	s := in.Scale
 	limit := jsval.ToNumber(in.Limit)

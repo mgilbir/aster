@@ -23,10 +23,11 @@ func TestJSPlusAndLess(t *testing.T) {
 			t.Errorf("%v + %v = %q, want %q", c.a, c.b, got.AsString(), c.want)
 		}
 	}
-	if !jsLess(jsval.Str("-11"), jsval.Str("0")) || jsLess(jsval.Str("9"), jsval.Str("10")) {
+	less := func(a, b jsval.Value) bool { return coordLess(coordOf(jsval.Walker{}, a), coordOf(jsval.Walker{}, b)) }
+	if !less(jsval.Str("-11"), jsval.Str("0")) || less(jsval.Str("9"), jsval.Str("10")) {
 		t.Error("two strings compare as text")
 	}
-	if !jsLess(jsval.Str("9"), jsval.Num(10)) || jsLess(jsval.Str("x"), jsval.Num(10)) {
+	if !less(jsval.Str("9"), jsval.Num(10)) || less(jsval.Str("x"), jsval.Num(10)) {
 		t.Error("a string and a number compare as numbers")
 	}
 }

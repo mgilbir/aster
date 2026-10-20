@@ -14,63 +14,70 @@ func init() {
 	// field (default "image") of the tuple or mark item, where an image mark
 	// picks it up. The canvas is a jsval object (width, height) carrying the
 	// painted bitmap as its host payload.
-	transformFactories["heatmap"] = tupleTransform(func(n *opNode, p *opParams, in []jsval.Value) ([]jsval.Value, error) {
-		hp := contour.HeatmapParams{Shared: p.str("resolve") == "shared"}
-		if f := p.field("field"); !f.IsNil() {
-			hp.Field = contour.Accessor(f.Get)
-		}
-		px := &pixelDatum{}
-		switch c := p.Get("color").(type) {
-		case transforms.Field:
-			px.colorDep = pixelDependent(c)
-			hp.ColorFn = func(datum jsval.Value, pix contour.Pixel) (contour.RGB, error) {
-				if px.colorDep {
-					return parseColor(p.walk, c.Apply(px.at(datum, pix))), nil
+	transformFactories["heatmap"] = statefulTransform(func() txFn {
+		ran := false
+		return func(n *opNode, p *opParams, in []jsval.Value) ([]jsval.Value, error) {
+			// `if (!pulse.changed() && !_.modified()) return StopPropagation`:
+			// a pulse that adds nothing the first time (the engine's tuple
+			// pulses carry no removals, and are marked changed whatever they hold)
+			if len(in) == 0 && !ran && !p.Modified() {
+				return nil, errStopPulse
+			}
+			ran = true
+			hp := contour.HeatmapParams{Shared: strictIs(p.Value("resolve"), "shared")}
+			if f := p.field("field"); !f.IsNil() {
+				hp.Field = contour.Accessor(f.Get)
+			}
+			px := &pixelDatum{}
+			switch c := p.Get("color").(type) {
+			case transforms.Field:
+				px.colorDep = pixelDependent(c)
+				hp.ColorFn = func(datum jsval.Value, pix contour.Pixel) (contour.RGB, error) {
+					if px.colorDep {
+						return parseColor(p.walk, c.Apply(px.at(datum, pix))), nil
+					}
+					if !px.colorOK || px.colorFor != datum.ObjValue() {
+						px.colorFor, px.colorOK = datum.ObjValue(), true
+						px.color = parseColor(p.walk, c.Apply(px.fresh(datum, pix)))
+					}
+					return px.color, nil
 				}
-				if !px.colorOK || px.colorFor != datum.ObjValue() {
-					px.colorFor, px.colorOK = datum.ObjValue(), true
-					px.color = parseColor(p.walk, c.Apply(px.fresh(datum, pix)))
+			default:
+				// `rgb(color || '#888')`: a falsy constant selects the default.
+				if v := p.Value("color"); v.IsTruthy() {
+					hp.Color, hp.ColorSet = parseColor(p.walk, v), true
 				}
-				return px.color, nil
 			}
-		default:
-			// `rgb(color || '#888')`: a falsy constant selects the default.
-			if v := p.Value("color"); v.IsTruthy() {
-				hp.Color, hp.ColorSet = parseColor(p.walk, v), true
-			}
-		}
-		switch o := p.Get("opacity").(type) {
-		case transforms.Field:
-			px.opacityDep = pixelDependent(o)
-			hp.OpacityFn = func(datum jsval.Value, pix contour.Pixel) (float64, error) {
-				if px.opacityDep {
-					return jsval.ToNumber(o.Apply(px.at(datum, pix))), nil
+			switch o := p.Get("opacity").(type) {
+			case transforms.Field:
+				px.opacityDep = pixelDependent(o)
+				hp.OpacityFn = func(datum jsval.Value, pix contour.Pixel) (float64, error) {
+					if px.opacityDep {
+						return jsval.ToNumber(o.Apply(px.at(datum, pix))), nil
+					}
+					if !px.opacityOK || px.opacityFor != datum.ObjValue() {
+						px.opacityFor, px.opacityOK = datum.ObjValue(), true
+						px.opacity = jsval.ToNumber(o.Apply(px.fresh(datum, pix)))
+					}
+					return px.opacity, nil
 				}
-				if !px.opacityOK || px.opacityFor != datum.ObjValue() {
-					px.opacityFor, px.opacityOK = datum.ObjValue(), true
-					px.opacity = jsval.ToNumber(o.Apply(px.fresh(datum, pix)))
+			default:
+				if v := p.Value("opacity"); v.IsTruthy() {
+					hp.Opacity, hp.OpacitySet = jsval.ToNumber(v), true // constant(opacity)
 				}
-				return px.opacity, nil
 			}
-		default:
-			if v := p.Value("opacity"); v.IsTruthy() {
-				hp.Opacity = jsval.ToNumber(v)
+			as := p.textOr("as", "image")
+			imgs, err := contour.Heatmap(n.g.ctx, in, hp)
+			if err != nil {
+				return nil, err
 			}
-		}
-		as := p.str("as")
-		if as == "" {
-			as = "image"
-		}
-		imgs, err := contour.Heatmap(n.g.ctx, in, hp)
-		if err != nil {
-			return nil, err
-		}
-		for i, t := range in {
-			if o := t.ObjValue(); o != nil {
-				o.Set(as, canvasValue(imgs[i]))
+			for i, t := range in {
+				if o := jsval.Fields(t); o != nil {
+					o.Set(as, canvasValue(imgs[i]))
+				}
 			}
+			return in, nil
 		}
-		return in, nil
 	})
 }
 

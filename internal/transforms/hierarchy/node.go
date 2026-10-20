@@ -60,18 +60,18 @@ func (t *Tree) NodeByKey(key string) *Node { return t.byKey[key] }
 // NodeOf returns the node for a tuple, or nil. Tuple identity is the object
 // pointer, as everywhere in this engine.
 func (t *Tree) NodeOf(tuple jsval.Value) *Node {
-	if !tuple.IsObj() {
+	if !tuple.IsObjectLike() {
 		return nil
 	}
 	if t.byObj == nil {
 		t.byObj = make(map[*jsval.Object]*Node)
 		t.Root.eachBefore(func(n *Node) {
-			if n.Data.IsObj() {
-				t.byObj[n.Data.ObjValue()] = n
+			if n.Data.IsObjectLike() {
+				t.byObj[jsval.Fields(n.Data)] = n
 			}
 		})
 	}
-	return t.byObj[tuple.ObjValue()]
+	return t.byObj[jsval.Fields(tuple)]
 }
 
 // Ancestors returns the node followed by its ancestors up to the root.

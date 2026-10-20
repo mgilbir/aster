@@ -1,9 +1,11 @@
 package layout
 
 import (
-	"github.com/mgilbir/aster/internal/jssort"
+	"fmt"
 	"math"
 	"strings"
+
+	"github.com/mgilbir/aster/internal/jssort"
 
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/scene"
@@ -37,8 +39,9 @@ type OverlapParams struct {
 
 // OverlapBound describes the scale range items must stay inside.
 type OverlapBound struct {
-	Range     [2]float64
-	Orient    string
+	Range [2]float64
+	// Orient is compared with === "top" / "bottom".
+	Orient    jsval.Value
 	Tolerance float64
 }
 
@@ -62,9 +65,10 @@ func hasBounds(it *scene.Item) bool {
 	return it.Bounds.Width() > 1 && it.Bounds.Height() > 1
 }
 
-func setOpacity(it *scene.Item, v float64) { it.Opacity = scene.N(v) }
+func setOpacity(it *scene.Item, v float64) { assign(it, "opacity", &it.Opacity, v) }
 
-func visible(it *scene.Item) bool { return it.Opacity.Truthy() }
+// visible is `item.opacity`, the value as given.
+func visible(it *scene.Item) bool { return it.Truthy("opacity", it.Opacity) }
 
 // reduceParity hides every odd-indexed item and returns the even ones.
 func reduceParity(rows func(i, n, cost int), items []*scene.Item) []*scene.Item {
@@ -145,25 +149,46 @@ func compareValues(u, v jsval.Value) int {
 	return 0
 }
 
+// overlapMethod is `methods[_.method] || methods.parity`: the method the
+// value names as a property key (["greedy"] is greedy). A name of
+// Object.prototype's (constructor, toString, __proto__...) finds that
+// member, which is no reduction: upstream fails calling it (constructor
+// returns the items unchanged and loops for ever), and so does the engine
+// (errMethod).
+func overlapMethod(method jsval.Value) (greedy bool, err error) {
+	key, ok := method.PropertyKey(32)
+	if !ok {
+		return false, nil
+	}
+	switch key {
+	case "greedy":
+		return true, nil
+	case "parity":
+		return false, nil
+	}
+	if f, inherited := jsval.Inherited(key); key == "__proto__" || inherited && f.IsTruthy() {
+		return false, fmt.Errorf("reduce is not a function (overlap method %q names a member of Object.prototype)", key)
+	}
+	return false, nil
+}
+
 // Overlap hides overlapping labels by setting the opacity of the items of a
 // mark to 0. It preserves at least two items (the first and the last) when
 // overlap persists, and afterwards recomputes the mark bounds from the visible
-// items. The work is bounded: every round removes at least one item.
-func Overlap(mark *scene.Mark, p OverlapParams) {
+// items. The work is bounded: every round removes at least one item. The
+// error is upstream's exception: a method that is no reduction, called.
+func Overlap(mark *scene.Mark, p OverlapParams) error {
 	if len(mark.Items) == 0 || !p.Method.IsTruthy() {
 		// with a falsy method upstream only resets opacity when the method
 		// has just been changed; a stateless call has nothing to undo
-		return
+		return nil
 	}
 	rows := p.Rows
 	if rows == nil {
 		rows = func(int, int, int) {}
 	}
-	greedy := p.Method.IsStr() && p.Method.StrValue() == "greedy"
+	greedy, errMethod := overlapMethod(p.Method)
 	sep := p.Separation
-	if math.IsNaN(sep) {
-		sep = 0
-	}
 
 	// skip labels with no content
 	source := make([]*scene.Item, 0, len(mark.Items))
@@ -174,7 +199,7 @@ func Overlap(mark *scene.Mark, p OverlapParams) {
 		}
 	}
 	if len(source) == 0 {
-		return
+		return nil
 	}
 	if p.Order != "" || p.Sort != nil {
 		cmp := p.Sort
@@ -202,6 +227,9 @@ func Overlap(mark *scene.Mark, p OverlapParams) {
 	items := source
 
 	if len(items) >= 3 && hasOverlap(rows, items, sep) {
+		if errMethod != nil {
+			return errMethod
+		}
 		for {
 			if greedy {
 				items = reduceGreedy(rows, items, sep)
@@ -227,7 +255,7 @@ func Overlap(mark *scene.Mark, p OverlapParams) {
 			tol = 1
 		}
 		var box scene.Bounds
-		if b.Orient == top || b.Orient == bottom {
+		if orientIs(b.Orient, top) || orientIs(b.Orient, bottom) {
 			box.Set(b.Range[0], math.Inf(-1), b.Range[1], math.Inf(1))
 		} else {
 			box.Set(math.Inf(-1), b.Range[0], math.Inf(1), b.Range[1])
@@ -249,6 +277,17 @@ func Overlap(mark *scene.Mark, p OverlapParams) {
 			mark.Bounds.Union(&it.Bounds)
 		}
 	}
+	return nil
+}
+
+// Separation is `_.separation || 0` read as the comparison
+// `sep > Math.max(...)` reads it: a falsy one is 0, a text that is no
+// number NaN, against which nothing intersects.
+func Separation(v jsval.Value) float64 {
+	if !v.IsTruthy() {
+		return 0
+	}
+	return jsval.ToNumber(v)
 }
 
 // ParseOverlap converts the `overlap` property of a guide or text mark
@@ -257,13 +296,13 @@ func Overlap(mark *scene.Mark, p OverlapParams) {
 // parseOverlap does. scaleRange returns the range of the named scale; a bound
 // on an unknown scale is dropped, like a bound without a scale upstream.
 func ParseOverlap(spec jsval.Value, scaleRange func(name string) ([2]float64, bool)) OverlapParams {
-	p := OverlapParams{Method: spec.Get("method"), Separation: jsval.ToNumber(spec.Get("separation"))}
+	p := OverlapParams{Method: spec.Get("method"), Separation: Separation(spec.Get("separation"))}
 	if o := spec.Get("order"); o.IsStr() {
 		p.Order = o.StrValue()
 	}
 	if b := spec.Get("bound"); b.IsTruthy() && scaleRange != nil {
 		if r, ok := scaleRange(b.Get("scale").AsString()); ok {
-			p.Bound = &OverlapBound{Range: r, Orient: strOf(b.Get("orient")), Tolerance: jsval.ToNumber(b.Get("tolerance"))}
+			p.Bound = &OverlapBound{Range: r, Orient: b.Get("orient"), Tolerance: jsval.ToNumber(b.Get("tolerance"))}
 		}
 	}
 	return p

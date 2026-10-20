@@ -71,6 +71,10 @@ type Result struct {
 	Err  string          `json:"err,omitempty"`
 	// Warnings are what the Vega-Lite compiler logged (Compile only).
 	Warnings []string `json:"warnings,omitempty"`
+
+	// fontRejected: the answer involved a font string the canvas refused
+	// (oracle.mjs), so it depends on what the process measured before.
+	fontRejected bool
 }
 
 // Oracle serves a module set from a small pool of node processes, so callers
@@ -257,7 +261,20 @@ func (o *Oracle) node(req map[string]any) (Result, error) {
 			return Result{}, err
 		}
 	}
-	return p.ask(req)
+	res, err := p.ask(req)
+	if err == nil && res.fontRejected && p.nextID > 1 {
+		// The canvas kept the font it held when it refused one, and the
+		// process held what earlier requests left: the answer is a fresh
+		// process's only if this process was fresh. Ask a fresh one.
+		p.stop()
+		var np *proc
+		if np, err = o.start(); err != nil {
+			return Result{}, err
+		}
+		p = np
+		res, err = p.ask(req)
+	}
+	return res, err
 }
 
 // cachePath is where the answer to req is cached: its key covers the
@@ -302,12 +319,14 @@ func (p *proc) ask(req map[string]any) (Result, error) {
 			// (oracle.mjs): the answer stands, but a later one from this
 			// process would not be a fresh process's, so it is replaced.
 			Tainted string `json:"tainted"`
+			// FontRejected: see Result.
+			FontRejected bool `json:"fontRejected"`
 		}
 		if err := json.Unmarshal(out, &got); err != nil || got.ID != p.nextID {
 			p.stop()
 			return res, fmt.Errorf("oracle: bad response %.200q", out)
 		}
-		res = Result{SVG: got.SVG, Vega: got.Veg, Data: got.Data, Err: got.Err, Warnings: got.Warn}
+		res = Result{SVG: got.SVG, Vega: got.Veg, Data: got.Data, Err: got.Err, Warnings: got.Warn, fontRejected: got.FontRejected}
 		if got.Tainted != "" {
 			p.stop()
 		}

@@ -27,7 +27,7 @@ func (v *runView) setGuideCaptions() error {
 		if ctx == nil {
 			continue
 		}
-		if (m.Role == "axis" || m.Role == "legend") && len(m.Items[0].Items) == 0 && m.Items[0].Description == "" {
+		if (m.Role == "axis" || m.Role == "legend") && len(m.Items[0].Items) == 0 && !m.Items[0].StrTruthy("description", m.Items[0].Description) {
 			// A guide with nothing to draw (no domain, ticks, labels, grid or
 			// title) has no child marks to bind its context; see
 			// scene.Mark.NoGuideCaption.
@@ -97,8 +97,11 @@ func (v *runView) captionOptions(item *scene.Item) scale.CaptionOptions {
 	o := scale.CaptionOptions{}
 	if item.Extra != nil {
 		o.Format = item.Extra.Lookup("format")
-		if ft := item.Extra.Lookup("formatType"); ft.IsStr() {
+		switch ft := item.Extra.Lookup("formatType"); {
+		case ft.IsStr():
 			o.FormatType = ft.StrValue()
+		case ft.IsTruthy():
+			o.FormatTypeOther = true
 		}
 	}
 	return o
@@ -123,8 +126,9 @@ func (v *runView) axisCaption(c *rtContext, item *scene.Item) (caption string, o
 		title = extractTitle(item)
 		hasTitle = title != ""
 	}
+	// (orient === 'left' || orient === 'right'): ["left"] is neither
 	xy := "X"
-	if item.Orient() == "left" || item.Orient() == "right" {
+	if o, _ := item.OrientValue().Strict(); o == "left" || o == "right" {
 		xy = "Y"
 	}
 	typ := s.Type()

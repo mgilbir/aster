@@ -72,6 +72,7 @@ func TestFixedLimitsDocMatchesCode(t *testing.T) {
 		"geographic path points":         {{int64(vl.MaxPoints)}},
 		"projection `clipAngle`":         {{c("geo", "maxClipRadians")}},
 		"dataflow evaluations":           {{int64(vl.MaxVisits)}},
+		"layout loops stepped by text":   {{c("vega/layout", "gridLoopPerCell")}, {c("vega/layout", "gridLoopBase")}, {c("vega/layout", "trellisLoopPerItem")}, {c("vega/layout", "trellisLoopBase")}},
 		"re-evaluations":                 {{int64(vl.MaxReruns)}, {int64(vl.MaxReruns)}, {c("vega", "maxRunDepth")}},
 		"delimited data (CSV, TSV, DSV)": {{c("vega", "maxDSVColumns")}, {c("vega", "dsvCellsPerRow")}},
 		"warnings":                       {{c("vega", "MaxWarningText")}, {c("vega", "maxWarnings")}},

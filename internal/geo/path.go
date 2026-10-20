@@ -127,7 +127,9 @@ func (p *Path) String(object jsval.Value) (string, bool) {
 		p.Draw(object)
 		return "", false
 	}
-	if p.str == nil {
+	if p.str == nil || p.walking {
+		// A walk that threw (upstream's exception, which fails the render)
+		// left its text in the buffer: start anew.
 		p.str = newPathString(p.digits)
 	}
 	if object.IsTruthy() {

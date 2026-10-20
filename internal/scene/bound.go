@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"unicode/utf16"
 
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsmath"
@@ -55,19 +54,32 @@ func NewBounder(measurer TextMeasurer) *Bounder {
 // miter tip can extend that far past a vertex. Nothing is added for items with
 // no stroke or zero opacity.
 func BoundStroke(b *Bounds, it *Item, miter bool) *Bounds {
-	if it.Stroke.Truthy() && it.Opacity.Val() != 0 && it.StrokeOpacity.Val() != 0 {
+	// item.opacity !== 0 and item.strokeCap === 'square' are strict: "0" is
+	// not 0, ['square'] is not 'square'.
+	if it.Stroke.Truthy() && !it.StrictNum("opacity", it.Opacity, 0) && !it.StrictNum("strokeOpacity", it.StrokeOpacity, 0) {
 		sw := it.StrokeWidth.Or(1)
 		k := 1.0
-		if it.StrokeCap() == "square" {
+		if it.StrictStr("strokeCap", it.StrokeCap()) == "square" {
 			k = math.Sqrt2
 		}
 		e := k * sw / 2
-		if miter && (it.StrokeJoin() == "" || it.StrokeJoin() == "miter") {
+		if miter && it.miterJoin() {
 			e = jsMax(e, it.StrokeMiterLimit().Or(4)*sw/2)
 		}
 		b.Expand(e)
 	}
 	return b
+}
+
+// miterJoin is `!item.strokeJoin || item.strokeJoin === 'miter'`.
+func (it *Item) miterJoin() bool {
+	if it.Raw != nil {
+		if v, ok := it.Raw["strokeJoin"]; ok {
+			return !v.IsTruthy()
+		}
+	}
+	j := it.StrokeJoin()
+	return j == "" || j == "miter"
 }
 
 // jsMax is Math.max for two values (NaN wins).
@@ -153,13 +165,15 @@ func (bd *Bounder) boundClip(m *Mark) {
 		bd.ctx.reset(&bd.clip, false, 0)
 		_ = m.ClipPath(&bd.ctx)
 	case m.Clip:
-		var w, h float64
-		if m.Group != nil {
-			w, h = m.Group.Width.Val(), m.Group.Height.Val()
-		} else {
-			w, h = math.NaN(), math.NaN() // group undefined upstream would throw
+		switch {
+		case m.Group == nil:
+			// group undefined upstream would throw
+			bd.clip.Set(0, 0, math.NaN(), math.NaN())
+		case m.Group.Raw != nil:
+			m.Group.clipBoxJS(&bd.clip)
+		default:
+			bd.clip.Set(0, 0, m.Group.Width.Val(), m.Group.Height.Val())
 		}
-		bd.clip.Set(0, 0, w, h)
 	default:
 		return
 	}
@@ -210,8 +224,13 @@ func (bd *Bounder) itemBounds(t MarkType, b *Bounds, it *Item) error {
 		if err != nil {
 			return err
 		}
-		BoundStroke(b, it, true).Translate(it.OrZero("x"), it.OrZero("y"))
+		it.translateBounds(BoundStroke(b, it, true))
 	case MarkRect:
+		if it.Raw != nil {
+			it.rectBoundsJS(b)
+			BoundStroke(b, it, false)
+			return nil
+		}
 		x, y := it.OrZero("x"), it.OrZero("y")
 		// (x + width) || 0: NaN sums collapse to 0, but a sum with a word is
 		// a string, which no comparison treats as a number: it stays NaN.
@@ -220,6 +239,11 @@ func (bd *Bounder) itemBounds(t MarkType, b *Bounds, it *Item) error {
 		b.Set(x, y, x2, y2)
 		BoundStroke(b, it, false)
 	case MarkRule:
+		if it.Raw != nil {
+			it.ruleBoundsJS(b)
+			BoundStroke(b, it, false)
+			return nil
+		}
 		x1, y1 := it.OrZero("x"), it.OrZero("y")
 		x2, y2 := x1, y1
 		if it.X2.Set() {
@@ -233,7 +257,7 @@ func (bd *Bounder) itemBounds(t MarkType, b *Bounds, it *Item) error {
 	case MarkImage:
 		bd.imageBounds(b, it)
 	case MarkText:
-		bd.textBounds(b, it, 0)
+		return bd.textBounds(b, it, 0)
 	case MarkPath:
 		return bd.pathBounds(b, it)
 	case MarkGroup:
@@ -261,6 +285,9 @@ func (bd *Bounder) pathBounds(b *Bounds, it *Item) error {
 		b.Set(0, 0, 0, 0)
 		return nil
 	}
+	if v, ok := it.RawValue("path"); ok && !v.IsStr() {
+		return ErrPathMatch // pathParse(path): path.match
+	}
 	cmds, err := it.parsedPath(bd.ledger())
 	if err != nil {
 		return err
@@ -268,8 +295,13 @@ func (bd *Bounder) pathBounds(b *Bounds, it *Item) error {
 	// The rotation is applied by the context about the origin, after the item
 	// offset, exactly as upstream does for path bounds.
 	bd.ctx.reset(b, it.AngleTruthy(), it.Angle.Val())
-	sx, sy := scaleOf(it.ScaleX()), scaleOf(it.ScaleY())
-	if err := RenderPath(&bd.ctx, cmds, it.OrZero("x"), it.OrZero("y"), sx, sy); err != nil {
+	sx, sy := it.numOr1("scaleX", it.ScaleX()), it.numOr1("scaleY", it.ScaleY())
+	off := pathOffset{l: it.X.Zero(), t: it.Y.Zero()}
+	if it.Raw != nil {
+		// pathRender's `x + l` joins a string offset to each point's text.
+		off = pathOffsetOf(it.Walker(), it.Or0("x"), it.Or0("y"))
+	}
+	if err := renderPath(&bd.ctx, cmds, off, sx, sy); err != nil {
 		return err
 	}
 	BoundStroke(b, it, true)
@@ -284,11 +316,15 @@ func (bd *Bounder) groupBounds(b *Bounds, g *Item) error {
 			}
 		}
 	}
-	if (g.Clip.IsTrue() || g.ClipPath != nil || g.Width.Truthy() || g.Height.Truthy()) && !g.NoBound {
-		b.Add(0, 0).Add(g.Width.Zero(), g.Height.Zero())
+	if (g.Clip.IsTrue() || g.ClipPath != nil || g.truthyProp("width", g.Width) || g.truthyProp("height", g.Height)) && !g.NoBound {
+		if g.Raw != nil {
+			g.groupBoxJS(b)
+		} else {
+			b.Add(0, 0).Add(g.Width.Zero(), g.Height.Zero())
+		}
 	}
 	BoundStroke(b, g, false)
-	b.Translate(g.OrZero("x"), g.OrZero("y"))
+	g.translateBounds(b)
 	return nil
 }
 
@@ -301,7 +337,7 @@ func imageWidth(it *Item, nw, nh float64) float64 {
 	switch {
 	case nw == 0 || nw != nw:
 		return 0
-	case !it.Aspect().IsFalse() && it.Height.Truthy():
+	case !it.Aspect().IsFalse() && it.truthyProp("height", it.Height):
 		return it.Height.Val() * nw / nh
 	}
 	return nw
@@ -314,7 +350,7 @@ func imageHeight(it *Item, nw, nh float64) float64 {
 	switch {
 	case nh == 0 || nh != nh:
 		return 0
-	case !it.Aspect().IsFalse() && it.Width.Truthy():
+	case !it.Aspect().IsFalse() && it.truthyProp("width", it.Width):
 		return it.Width.Val() * nh / nw
 	}
 	return nh
@@ -345,16 +381,23 @@ func imageYOffset(baseline string, h float64) float64 {
 func ImageGeometry(it *Item, naturalW, naturalH float64) (x, y, w, h float64) {
 	nw, nh := it.naturalSizeOr(naturalW, naturalH)
 	w, h = imageWidth(it, nw, nh), imageHeight(it, nw, nh)
-	x = it.X.Zero() - imageXOffset(it.Align, w)
-	y = it.Y.Zero() - imageYOffset(it.Baseline, h)
+	x, y = it.imageOrigin(w, h)
 	return
 }
 
 func (bd *Bounder) imageBounds(b *Bounds, it *Item) {
 	nw, nh := it.naturalSize()
+	if it.Raw != nil {
+		// bounds.set(x, y, x + w, y + h) with the size as given: a string
+		// width concatenates.
+		wv, hv := ImageSizeJS(it, nw, nh)
+		x, y := it.imageOrigin(jsval.ToNumber(wv), jsval.ToNumber(hv))
+		wk := it.Walker()
+		b.SetJS(wk, jsval.Num(x), jsval.Num(y), jsPlus(wk, jsval.Num(x), wv), jsPlus(wk, jsval.Num(y), hv))
+		return
+	}
 	w, h := imageWidth(it, nw, nh), imageHeight(it, nw, nh)
-	x := it.X.Zero() - imageXOffset(it.Align, w)
-	y := it.Y.Zero() - imageYOffset(it.Baseline, h)
+	x, y := it.imageOrigin(w, h)
 	b.Set(x, y, x+w, y+h)
 }
 
@@ -372,7 +415,7 @@ type Bitmap interface {
 // URL ignores it: the mark loads the URL when it differs from the image's own
 // (which a canvas does not have).
 func (it *Item) Bitmap() (Bitmap, bool) {
-	if it.URL() != "" || it.Extra == nil {
+	if it.TruthyStr("url", it.URL()) != "" || it.Extra == nil {
 		return nil, false
 	}
 	o := it.Extra.Lookup("image").ObjValue()
@@ -406,6 +449,19 @@ func (it *Item) SetImageSize(w, h float64) {
 	img.imgW, img.imgH = w, h
 }
 
+// numOr1 is `+(item[prop] || 1)` (a path's scale, a trail's size).
+func (it *Item) numOr1(prop string, n Num) float64 {
+	if it.Raw != nil {
+		if v, ok := it.Raw[prop]; ok {
+			if !v.IsTruthy() {
+				return 1
+			}
+			return jsval.ToNumber(v)
+		}
+	}
+	return scaleOf(n)
+}
+
 func scaleOf(n Num) float64 {
 	v := n.Zero()
 	if v == 0 {
@@ -429,12 +485,18 @@ func AnchorPoint(it *Item) (x, y float64) {
 
 // textBounds sets b to the text's box. mode 0 rotates the box about the anchor
 // when the item has an angle; mode 1 leaves it unrotated (for hit tests).
-func (bd *Bounder) textBounds(b *Bounds, it *Item, mode int) {
+func (bd *Bounder) textBounds(b *Bounds, it *Item, mode int) error {
+	if it.Raw != nil {
+		return bd.textBoundsJS(b, it, mode)
+	}
 	h := bd.Height(it)
 	x, y := AnchorPoint(it)
 	dx := it.Dx().Zero()
 	dy := it.Dy().Zero() + BaselineOffset(it) - jsRound(float64(0.8*h)) // use 4/5 offset
-	line, lines := TextLine(it)
+	line, lines, err := TextLineErr(it)
+	if err != nil {
+		return err
+	}
 
 	var w float64
 	if lines != nil {
@@ -453,82 +515,22 @@ func (bd *Bounder) textBounds(b *Bounds, it *Item, mode int) {
 		dx -= w
 	}
 
-	if it.hasRawPos() {
-		bd.textBoundsRaw(b, it, mode, dx, dy, w, h)
-		return
-	}
 	dx += x
 	dy += y
 	b.Set(dx, dy, dx+w, dy+h)
 	if it.AngleTruthy() && mode == 0 {
 		b.Rotate(it.Angle.Val()*degToRad, x, y)
 	}
-}
-
-// hasRawPos reports a text position that was given as something other than a
-// number (a word, a numeric string).
-func (it *Item) hasRawPos() bool {
-	_, rx := it.Raw["x"]
-	_, ry := it.Raw["y"]
-	return rx || ry
-}
-
-// textBoundsRaw is textBounds for an anchor that is not a number. Upstream
-// adds the offsets to the anchor itself, `bounds.set(dx += x, dy += y, dx + w,
-// dy + h)`, so a string anchor turns each of those into a concatenation
-// ("-11" + "0" is "-110") that Bounds.set then orders as text when both ends
-// are strings. The result is exact when the text is rotated, which reads the
-// corners as numbers; an unrotated box keeps the strings upstream, and is
-// read here as the numbers they convert to.
-func (bd *Bounder) textBoundsRaw(b *Bounds, it *Item, mode int, dx, dy, w, h float64) {
-	ax, ay := it.PosValue("x"), it.PosValue("y")
-	wk := it.Walker()
-	if r := it.Radius().Zero(); r != 0 {
-		t := it.Theta().Zero() - halfPi
-		ax = jsPlus(wk, ax, jsval.Num(float64(r*jsmath.Cos(t))))
-		ay = jsPlus(wk, ay, jsval.Num(float64(r*jsmath.Sin(t))))
-	}
-	x1, y1 := jsPlus(wk, jsval.Num(dx), ax), jsPlus(wk, jsval.Num(dy), ay)
-	x2, y2 := jsPlus(wk, x1, jsval.Num(w)), jsPlus(wk, y1, jsval.Num(h))
-	if jsLess(x2, x1) {
-		x1, x2 = x2, x1
-	}
-	if jsLess(y2, y1) {
-		y1, y2 = y2, y1
-	}
-	b.X1, b.Y1, b.X2, b.Y2 = jsval.ToNumber(x1), jsval.ToNumber(y1), jsval.ToNumber(x2), jsval.ToNumber(y2)
-	if it.AngleTruthy() && mode == 0 {
-		b.Rotate(it.Angle.Val()*degToRad, jsval.ToNumber(ax), jsval.ToNumber(ay))
-	}
+	return nil
 }
 
 // jsPlus is the + operator on the values a numeric property can hold: a
 // string, array or object makes it a concatenation (of their String, taken
 // with the call's Walker w), anything else a sum.
 func jsPlus(w jsval.Walker, a, b jsval.Value) jsval.Value {
-	concat := func(v jsval.Value) bool { return v.IsStr() || v.IsArr() || v.IsObj() }
+	concat := func(v jsval.Value) bool { return v.IsStr() || v.IsArr() || v.IsObj() || v.IsTimestamp() }
 	if concat(a) || concat(b) {
 		return jsval.Str(w.String(a) + w.String(b))
 	}
 	return jsval.Num(jsval.ToNumber(a) + jsval.ToNumber(b))
-}
-
-// jsLess is a < b for the results of jsPlus: two strings compare as text (by
-// UTF-16 code unit), anything else as numbers, false for NaN.
-func jsLess(a, b jsval.Value) bool {
-	if a.IsStr() && b.IsStr() {
-		return utf16Less(a.StrValue(), b.StrValue())
-	}
-	return jsval.ToNumber(a) < jsval.ToNumber(b)
-}
-
-// utf16Less orders two strings by UTF-16 code unit.
-func utf16Less(a, b string) bool {
-	ua, ub := utf16.Encode([]rune(a)), utf16.Encode([]rune(b))
-	for i := 0; i < len(ua) && i < len(ub); i++ {
-		if ua[i] != ub[i] {
-			return ua[i] < ub[i]
-		}
-	}
-	return len(ua) < len(ub)
 }

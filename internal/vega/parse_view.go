@@ -1,6 +1,7 @@
 package vega
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/mgilbir/aster/internal/budget"
@@ -27,15 +28,31 @@ func arrayOf(v jsval.Value) []jsval.Value {
 	return []jsval.Value{v}
 }
 
-// extendObj copies src's entries onto dst (vega-util extend), charging each
-// to m (nil: no meter).
+// extendObj copies src's entries onto dst (vega-util extend: `for (k in
+// src) dst[k] = src[k]`, so a string's or an array's indexes too), charging
+// each to m (nil: no meter).
+//
+// An own "__proto__" member (JSON.parse makes one) is assigned as
+// `dst.__proto__ = v`: an object (or null) becomes dst's prototype, whose
+// members later reads and for-in find after dst's own; they are added as
+// members here (no reader of these objects tells own from inherited), and
+// any other value is ignored, as the assignment ignores it.
 func extendObj(m *budget.Meter, dst *jsval.Object, src jsval.Value) *jsval.Object {
-	if o := src.ObjValue(); o != nil {
-		for i := 0; i < o.Len(); i++ {
-			charge(m, 1)
-			dst.Set(o.KeyAt(i), o.ValueAt(i))
+	var proto jsval.Value
+	forInEach(m, src, func(k string, v jsval.Value) {
+		if k == "__proto__" {
+			if v.IsObj() || v.IsArr() || v.IsNull() {
+				proto = v
+			}
+			return
 		}
-	}
+		dst.Set(k, v)
+	})
+	forInEach(m, proto, func(k string, v jsval.Value) {
+		if !dst.Has(k) {
+			dst.Set(k, v)
+		}
+	})
 	return dst
 }
 
@@ -70,30 +87,57 @@ func rootEncode(m *budget.Meter, specEncode jsval.Value) jsval.Value {
 	return extendEncode(m, base, specEncode, nil)
 }
 
-// extendEncode merges the encode sets of extra into encode (util.extendEncode).
+// extendEncode merges the encode sets of extra into encode (util.extendEncode:
+// `for (name in extra) encode[name] = extend(encode[name] || {}, extra[name])`).
 func extendEncode(m *budget.Meter, encode, extra jsval.Value, skip map[string]bool) jsval.Value {
 	eo := encode.ObjValue()
-	xo := extra.ObjValue()
-	if xo == nil {
-		return encode
-	}
-	for i := 0; i < xo.Len(); i++ {
-		charge(m, 1)
-		name := xo.KeyAt(i)
+	forInEach(m, extra, func(name string, set jsval.Value) {
 		if skip != nil && skip[name] {
-			continue
+			return
 		}
 		cur := eo.Lookup(name)
 		var dst *jsval.Object
-		if cur.IsObj() && !cur.IsNullish() {
+		switch {
+		case cur.IsObj():
 			charge(m, cur.ObjValue().Len())
 			dst = cur.ObjValue().Clone()
-		} else {
+		case cur.IsTruthy():
+			// extend() assigns to a primitive, which strict code refuses.
+			if k, ok := firstForInKey(set); ok {
+				perr("Cannot create property '%s' on %s", k, primitiveDesc(cur))
+			}
+			return
+		default:
 			dst = jsval.NewObject(4)
 		}
-		eo.Set(name, jsval.Obj(extendObj(m, dst, xo.ValueAt(i))))
-	}
+		eo.Set(name, jsval.Obj(extendObj(m, dst, set)))
+	})
 	return encode
+}
+
+// firstForInKey is the first key for-in enumerates of v, if any.
+func firstForInKey(v jsval.Value) (string, bool) {
+	key, found := "", false
+	forInEach(nil, v, func(k string, _ jsval.Value) {
+		if !found {
+			key, found = k, true
+		}
+	})
+	return key, found
+}
+
+// primitiveDesc describes a primitive as V8's "Cannot create property"
+// TypeError does: its type and its text.
+func primitiveDesc(v jsval.Value) string {
+	switch v.Kind() {
+	case jsval.KindStr:
+		return "string '" + v.StrValue() + "'"
+	case jsval.KindNum:
+		return "number '" + jsval.JSNumberString(v.NumValue()) + "'"
+	case jsval.KindBool:
+		return "boolean '" + strconv.FormatBool(v.BoolValue()) + "'"
+	}
+	return "'" + specText(v) + "'"
 }
 
 func parseAutosize(v jsval.Value) jsval.Value {
@@ -201,15 +245,19 @@ func parseView(spec jsval.Value, scope *Scope) {
 		desc = config.Get("description")
 	}
 	scope.description = desc
-	if lay := config.Get("legend").Get("layout"); config.Get("legend").IsObj() {
-		scope.legends = scope.objectProperty(lay)
+	// `scope.legends = scope.objectProperty(config.legend && config.legend.layout)`:
+	// a falsy legend config is itself the layout parameter
+	if lv := config.Get("legend"); lv.IsTruthy() {
+		scope.legends = scope.objectProperty(jsval.Member(lv, "layout"))
+	} else {
+		scope.legends = scope.objectProperty(lv)
 	}
 	scope.locale = config.Get("locale")
 
 	input := scope.add(mk("itemstore"))
 
 	enc := scope.add(newEntry("encode", nil, parseEncode(
-		rootEncode(scope.meter(), spec.Get("encode")), "group", "frame", spec.Get("style"), scope,
+		rootEncode(scope.meter(), spec.Get("encode")), "group", true, "frame", spec.Get("style"), scope,
 		plist("pulse", input),
 	)))
 
@@ -292,24 +340,32 @@ func parseScopeSpec(spec jsval.Value, scope *Scope, preprocessed []jsval.Value) 
 	scope.parseLambdas()
 }
 
+// parseSignal is signal.js: a signal definition, or an "outer" push of a
+// signal an enclosing scope defines. Its name is any value, read as the
+// property key String(name).
 func parseSignal(sig jsval.Value, scope *Scope) {
-	name := sig.Get("name").AsString()
-	if sig.Get("push").IsStr() && sig.Get("push").StrValue() == "outer" {
-		if scope.findSignal(name) == nil {
-			perr("No prior signal definition for \"outer\" push: %s", quote(sv(name)))
+	nameV := specGet(sig, "name")
+	name := specText(nameV)
+	if strictIs(specGet(sig, "push"), "outer") {
+		if !scope.hasSignalOrInherited(name) {
+			perr("No prior signal definition for \"outer\" push: %s", stringValue(nameV))
 		}
 		for _, prop := range []string{"value", "update", "init", "react", "bind"} {
-			if !sig.Get(prop).IsUndefined() {
-				perr("Invalid property  for \"outer\" push: %s", quote(sv(prop)))
+			if !specGet(sig, prop).IsUndefined() {
+				perr("Invalid property  for \"outer\" push: %s", stringValue(sv(prop)))
 			}
 		}
 		return
 	}
-	op := scope.addSignal(name, sig.Get("value"))
-	if r := sig.Get("react"); r.IsBool() && !r.BoolValue() {
+	op := scope.addSignal(name, specGet(sig, "value"))
+	if r := specGet(sig, "react"); r.IsBool() && !r.BoolValue() {
 		op.noReact = true
 	}
-	// bind is a UI concern and is ignored for static rendering.
+	// A binding is a UI concern, ignored by a static render; a nested scope
+	// has no binding list, which upstream's addBinding refuses.
+	if specGet(sig, "bind").IsTruthy() && scope.parentScope != nil {
+		perr("Nested signals do not support binding: %s", stringValue(nameV))
+	}
 }
 
 // setExprUpdate installs a compiled update expression and its dependencies on
@@ -324,73 +380,93 @@ func setExprUpdate(e *entry, f *exprFn) {
 	}
 }
 
+// parseSignalUpdates is signal-updates.js: a signal's update (or init)
+// expression and its event handlers.
 func parseSignalUpdates(sig jsval.Value, scope *Scope) {
-	name := sig.Get("name").AsString()
-	op := scope.getSignal(name)
-	expr := sig.Get("update")
-	if init := sig.Get("init"); init.IsTruthy() {
+	nameV := specGet(sig, "name")
+	op := scope.getSignalNamed(nameV)
+	expr := specGet(sig, "update")
+	if init := specGet(sig, "init"); init.IsTruthy() {
 		if expr.IsTruthy() {
 			perr("Signals can not include both init and update expressions.")
 		}
 		expr = init
-		op.initonly = true
+		if op != nil {
+			op.initonly = true
+		}
 	}
 	if expr.IsTruthy() {
-		setExprUpdate(op, scope.parseExpression(expr.AsString()))
+		f := scope.parseExpressionValue(expr)
+		if op != nil {
+			setExprUpdate(op, f)
+		}
 	}
-	for _, on := range arrayOf(sig.Get("on")) {
-		scope.work(1)
-		parseUpdate(on, scope, op)
+	if on := specGet(sig, "on"); on.IsTruthy() {
+		for _, u := range listOf(on, "signal.on", "forEach") {
+			scope.work(1)
+			parseUpdate(u, scope, op)
+		}
 	}
 }
 
-// parseUpdate handles an `on` handler of a signal. Only internal event sources
-// (another signal or a scale changing) fire in a static render; DOM event
-// streams never do, so those handlers are dropped.
+// parseUpdate is update.js: an `on` handler of a signal. Only internal event
+// sources (another signal or a scale changing) fire in a static render; the
+// DOM and timer streams never do, but every handler is parsed as upstream
+// parses it (its event selector, its streams and filters, its update), so a
+// handler upstream refuses fails here too. A nil target is a signal whose
+// name upstream resolves to an Object.prototype member: no operator to
+// update.
 func parseUpdate(spec jsval.Value, scope *Scope, target *entry) {
-	events := spec.Get("events")
+	encode := specGet(spec, "encode")
+	events := specGet(spec, "events")
+	update := specGet(spec, "update")
 	if !events.IsTruthy() { // `if (!events)`
 		perr("Signal update missing events specification.")
 	}
-	var sources []jsval.Value
-	if !events.IsStr() {
-		for _, s := range arrayOf(events) {
-			scope.work(1)
-			if s.IsObj() && (s.Get("signal").IsTruthy() || s.Get("scale").IsTruthy()) {
-				sources = append(sources, s)
-			}
+	if events.IsStr() {
+		source := "view"
+		if scope.parentScope != nil {
+			source = "scope"
+		}
+		events = jsval.Arr(parseEventSelector(scope, events.StrValue(), source))
+	}
+	var sources, streams []jsval.Value
+	for _, s := range arrayOf(events) {
+		scope.work(1)
+		if specGet(s, "signal").IsTruthy() || specGet(s, "scale").IsTruthy() {
+			sources = append(sources, s)
+		} else {
+			streams = append(streams, s)
 		}
 	}
-	if len(sources) == 0 {
-		return
-	}
-	if enc := spec.Get("encode"); !enc.IsNullish() {
-		if spec.Get("update").IsTruthy() {
+	if !encode.IsNullish() {
+		if update.IsTruthy() {
 			perr("Signal encode and update are mutually exclusive.")
 		}
-		return // encode(item(), ...) needs a DOM event
+		update = sv("encode(item()," + stringValue(encode) + ")")
 	}
 	upd := &updateSpec{target: target}
-	update := spec.Get("update")
 	switch {
 	case update.IsStr():
 		upd.update = scope.parseExpression(update.StrValue())
-	case update.IsObj() && !update.Get("expr").IsNullish():
-		upd.update = scope.parseExpression(update.Get("expr").AsString())
-	case update.IsObj() && !update.Get("value").IsNullish():
-		upd.value, upd.hasVal = update.Get("value"), true
-	case update.IsObj() && !update.Get("signal").IsNullish():
-		upd.viaSignal = scope.signalRef(update.Get("signal").AsString()).(*entry)
+	case !specGet(update, "expr").IsNullish():
+		upd.update = scope.parseExpressionValue(specGet(update, "expr"))
+	case !specGet(update, "value").IsNullish():
+		upd.value, upd.hasVal = specGet(update, "value"), true
+	case !specGet(update, "signal").IsNullish():
+		upd.viaSignal = entryOf(scope.signalRef(specText(specGet(update, "signal"))))
 	default:
 		perr("Invalid signal update specification.")
 	}
-	if spec.Get("force").IsTruthy() {
+	if specGet(spec, "force").IsTruthy() {
 		upd.force = true
 	}
-	var source P
+	var internal P
 	if len(sources) > 1 {
-		// Built in one buffer: concatenating per source is quadratic in
-		// the number of sources.
+		// mergeSources: '[' + sources.map(s => s.scale ? 'scale("' + s.scale
+		// + '")' : s.signal) + ']', the array joined with commas (null and
+		// undefined as nothing). Built in one buffer: concatenating per
+		// source is quadratic in the number of sources.
 		var code strings.Builder
 		code.WriteByte('[')
 		for i, s := range sources {
@@ -398,23 +474,36 @@ func parseUpdate(spec jsval.Value, scope *Scope, target *entry) {
 			if i > 0 {
 				code.WriteByte(',')
 			}
-			if sc := s.Get("scale"); sc.IsTruthy() {
-				code.WriteString(`scale("` + sc.AsString() + `")`)
+			if sc := specGet(s, "scale"); sc.IsTruthy() {
+				code.WriteString(`scale("` + specText(sc) + `")`)
 			} else {
-				code.WriteString(s.Get("signal").AsString())
+				code.WriteString(specText(specGet(s, "signal")))
 			}
 		}
 		code.WriteByte(']')
-		source = scope.signalRef(code.String())
-	} else {
+		internal = scope.signalRef(code.String())
+	} else if len(sources) == 1 {
 		s := sources[0]
-		if s.Get("signal").IsTruthy() {
-			source = scope.signalRef(s.Get("signal").AsString())
+		if sig := specGet(s, "signal"); sig.IsTruthy() {
+			internal = scope.signalRef(specText(sig))
 		} else {
-			source = scope.scaleRef(s.Get("scale").AsString())
+			internal = scope.scaleRef(specText(specGet(s, "scale")))
 		}
 	}
+	// The DOM and timer streams: parsed, never fired.
+	if len(streams) > 1 {
+		parseEventStream(obj("merge", jsval.Arr(streams)), scope, 0)
+	} else if len(streams) == 1 {
+		parseEventStream(streams[0], scope, 0)
+	}
+	if internal == nil || target == nil {
+		return
+	}
+	src, ok := internal.(*entry)
+	if !ok {
+		return
+	}
 	u := *upd
-	u.source = source.(*entry)
+	u.source = src
 	scope.addUpdate(&u)
 }

@@ -42,14 +42,14 @@ func windowParamsFromSpec(spec jsval.Value) WindowParams {
 	aparams := numListOpt(spec.Get("aggregate_params"))
 	as := spec.Get("as")
 	for i, op := range ops {
-		s := WindowOpSpec{Op: op, Param: math.NaN()}
+		s := WindowOpSpec{Op: op, Param: math.NaN(), AggParam: math.NaN()}
 		if f := fields.Index(i); f.IsStr() {
 			s.Field = FieldOf(f.StrValue())
 		}
 		if i < len(params) {
 			s.Param = params[i]
 		}
-		if i < len(aparams) && aparams[i] == aparams[i] {
+		if i < len(aparams) && aparams[i] == aparams[i] && aparams[i] != 0 {
 			s.AggParam = aparams[i]
 		}
 		if a := as.Index(i); a.IsStr() {

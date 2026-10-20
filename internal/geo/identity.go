@@ -168,3 +168,27 @@ func (p *identityProj) Copy() Projection {
 	c.Path().radiusFn = p.Path().radiusFn
 	return c
 }
+
+// bareProj is what upstream's Projection operator makes of the type
+// "constructor": vega-projection looks the type up with `projections[type]`
+// on a plain object, which finds Object, and `Object()` is an empty object.
+// It has no projection function and no path (geoshape draws with the
+// default, unprojected path), and no property to set: only its identity
+// stream, and the errors of calling what it lacks.
+type bareProj struct{ *identityProj }
+
+func newBare() *bareProj { return &bareProj{newIdentity("constructor")} }
+
+// Bare marks the projection as the empty object.
+func (b *bareProj) Bare() bool { return true }
+
+// Set is `if (isFunction(proj[key])) proj[key](value)`: the object has no
+// such function.
+func (b *bareProj) Set(string, jsval.Value) error { return nil }
+
+// IsBare reports whether proj is the empty object a projection of the type
+// "constructor" is.
+func IsBare(proj Projection) bool {
+	b, ok := proj.(interface{ Bare() bool })
+	return ok && b.Bare()
+}

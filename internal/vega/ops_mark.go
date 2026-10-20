@@ -35,7 +35,15 @@ type joinEntry struct {
 	key  *jsval.Object // the tuple, when the key is its identity
 	exit bool
 	seen int // run in which a tuple last mapped to this entry
+	// proto marks the entry of a tuple whose key is "__proto__": upstream's
+	// fastmap stores entries as properties of a plain object, where
+	// `obj['__proto__'] = item` sets its prototype and creates no property,
+	// so the entry is counted (size) but no lookup finds it (hasOwnProperty).
+	proto bool
 }
+
+// protoKey is the join key no property of a plain object holds.
+const protoKey = "__proto__"
 
 // joinMap is the DataJoin state: key -> item. Keys are tuple identity by
 // default, or the string a key accessor returns.
@@ -44,20 +52,27 @@ type joinMap struct {
 	// objs indexes the entries keyed by a tuple, made when a lookup first
 	// needs it: a first run (usually the only one) tells new tuples apart
 	// without it.
-	objs  map[*jsval.Object]*joinEntry
-	vals  map[jsval.Key]*joinEntry
-	strs  map[string]*joinEntry
-	order []*joinEntry
-	run   int
+	objs map[*jsval.Object]*joinEntry
+	vals map[jsval.Key]*joinEntry
+	strs map[string]*joinEntry
+	// protos finds the entry of a tuple joined under the key "__proto__": a
+	// later pulse does not add that tuple again (see joinEntry.proto).
+	protos map[*jsval.Object]*joinEntry
+	order  []*joinEntry
+	run    int
 }
 
 func (m *joinMap) size() int { return len(m.order) }
 
 func (m *joinMap) find(g *flowGraph, t jsval.Value) *joinEntry {
 	if m.keyFn != nil {
-		return m.strs[m.keyFn(t)]
+		k := m.keyFn(t)
+		if k == protoKey {
+			return nil
+		}
+		return m.strs[k]
 	}
-	if o := t.ObjValue(); o != nil {
+	if o := jsval.Tuple(t); o != nil {
 		if m.objs == nil {
 			m.index(g)
 		}
@@ -92,9 +107,21 @@ func (m *joinMap) index(g *flowGraph) {
 func (m *joinMap) put(t jsval.Value, e *joinEntry) {
 	switch {
 	case m.keyFn != nil:
-		m.strs[m.keyFn(t)] = e
-	case t.ObjValue() != nil:
-		e.key = t.ObjValue()
+		if k := m.keyFn(t); k == protoKey {
+			e.proto = true
+		} else {
+			m.strs[k] = e
+		}
+		if e.proto {
+			if o := jsval.Tuple(t); o != nil {
+				if m.protos == nil {
+					m.protos = map[*jsval.Object]*joinEntry{}
+				}
+				m.protos[o] = e
+			}
+		}
+	case jsval.Tuple(t) != nil:
+		e.key = jsval.Tuple(t)
 		if m.objs != nil {
 			m.objs[e.key] = e
 		}
@@ -151,8 +178,19 @@ func facDataJoin(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNod
 		for i, t := range tuples {
 			n.g.rows(i, len(tuples), 2)
 			var x *joinEntry
-			if o := t.ObjValue(); !fresh || o == nil || jm.objs != nil || !ids.add(o) {
+			if t.IsNullish() && jm.keyFn == nil {
+				// The default key is tupleid(t), a TypeError for a null
+				// datum (a Load transform's rows are not wrapped).
+				fail("Cannot read properties of %s (reading 'Symbol(vega_id)')", nullishName(t))
+			}
+			if o := jsval.Tuple(t); !fresh || o == nil || jm.objs != nil || !ids.add(o) {
 				x = jm.find(n.g, t)
+			}
+			if x == nil && len(jm.protos) > 0 {
+				if o := jsval.Tuple(t); o != nil && jm.protos[o] != nil {
+					jm.protos[o].seen = jm.run
+					continue
+				}
 			}
 			if x != nil {
 				if x.exit {
@@ -187,6 +225,11 @@ func facDataJoin(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNod
 		for i, x := range jm.order {
 			n.g.rows(i, len(jm.order), 1)
 			if x.seen != jm.run && !x.exit {
+				if x.proto {
+					// REM: `x = map.get(k)` finds nothing for this key, and
+					// `t === x.datum` reads a property of undefined.
+					fail("Cannot read properties of undefined (reading 'datum')")
+				}
 				rem = append(rem, x.item)
 				x.exit = true
 			}
@@ -251,26 +294,26 @@ func facMark(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *
 				group.Items = append(group.Items, nil)
 			}
 			mark = c.view.sg.AddMark(scene.MarkDef{
-				Type: def.typ, Name: def.name, Role: def.role,
+				Type: def.typ, LooseType: def.looseType, Name: def.name, Named: def.named, Described: def.described, Role: def.role,
 				Zindex: def.zindex, Aria: def.aria, Description: def.description,
 			}, group, idx)
 			if ctx.group == nil {
 				ctx.group = mark.Group
 			}
 			n.value = mark
-			applyMarkFlags(mark, p, c.view)
+			applyMarkFlags(mark, p, c.view, false)
 			c.view.registerMark(mark, ctx)
 		}
 		for i, it := range pulse.add {
 			n.g.rows(i, len(pulse.add), 1)
 			it.Mark = mark
-			if mark.Type == scene.MarkGroup && it.Items == nil {
+			if mark.IsGroup() && it.Items == nil {
 				it.Items = []*scene.Mark{}
 			}
 		}
 		out := pulse
 		if p.Modified("clip") || p.Modified("interactive") {
-			applyMarkFlags(mark, p, c.view)
+			applyMarkFlags(mark, p, c.view, true)
 			out = &flowPulse{}
 			*out = *pulse
 			out.reflow = true
@@ -288,6 +331,11 @@ func lookupGroup(fg *flowGraph, p *opParams) *scene.Item {
 		return nil
 	}
 	if g.size() == 1 {
+		// g.get(Object.keys(g.object)[0]): a lone "__proto__" entry is no
+		// property, the key list is empty and get(undefined) finds nothing.
+		if g.order[0].proto {
+			return nil
+		}
 		return g.order[0].item
 	}
 	parent := p.Value("parent")
@@ -297,7 +345,11 @@ func lookupGroup(fg *flowGraph, p *opParams) *scene.Item {
 	return g.lookup(fg, parent)
 }
 
-func applyMarkFlags(mark *scene.Mark, p *opParams, view *runView) {
+// applyMarkFlags sets a mark's clip and interactive flags (vega-view-
+// transforms' Mark): a new mark keeps `_.interactive` as it is, which the
+// renderer compares with `=== false`; a modified one takes
+// `!!_.interactive`.
+func applyMarkFlags(mark *scene.Mark, p *opParams, view *runView, modified bool) {
 	mark.ClipPath = nil
 	switch v := p.Get("clip").(type) {
 	case jsval.Value:
@@ -309,7 +361,11 @@ func applyMarkFlags(mark *scene.Mark, p *opParams, view *runView) {
 		mark.Clip = v
 	}
 	if v, ok := p.Get("interactive").(jsval.Value); ok {
-		mark.NonInteractive = !v.IsTruthy()
+		if modified {
+			mark.NonInteractive = !v.IsTruthy()
+		} else {
+			mark.NonInteractive = v.IsBool() && !v.BoolValue()
+		}
 	}
 }
 
@@ -390,7 +446,7 @@ func adjustSpatial(it *scene.Item, set *encodeSet, track bool) bool {
 	}
 	if set.x2 {
 		if set.x {
-			if swap && jsval.ToNumber(getItemProp(it, "x")) > jsval.ToNumber(getItemProp(it, "x2")) {
+			if swap && jsGreater(it, getItemProp(it, "x"), getItemProp(it, "x2")) {
 				x, x2 := getItemProp(it, "x"), getItemProp(it, "x2")
 				setItemProp(it, "x", x2)
 				setItemProp(it, "x2", x)
@@ -408,7 +464,7 @@ func adjustSpatial(it *scene.Item, set *encodeSet, track bool) bool {
 	}
 	if set.y2 {
 		if set.y {
-			if swap && jsval.ToNumber(getItemProp(it, "y")) > jsval.ToNumber(getItemProp(it, "y2")) {
+			if swap && jsGreater(it, getItemProp(it, "y"), getItemProp(it, "y2")) {
 				y, y2 := getItemProp(it, "y"), getItemProp(it, "y2")
 				setItemProp(it, "y", y2)
 				setItemProp(it, "y2", y)
@@ -425,6 +481,16 @@ func adjustSpatial(it *scene.Item, set *encodeSet, track bool) bool {
 		setNum("y", spatialSetterY, ycOf(it)-h/2)
 	}
 	return mod
+}
+
+// jsGreater is `a > b` on two item properties: two strings compare as text,
+// anything else as numbers (false when either is NaN).
+func jsGreater(it *scene.Item, a, b jsval.Value) bool {
+	if a.IsNum() && b.IsNum() {
+		return a.NumValue() > b.NumValue()
+	}
+	c, ok := it.Walker().Relate(a, b)
+	return ok && c > 0
 }
 
 // jsToNumOr0 is `(o.width||0)`.
@@ -600,7 +666,11 @@ func facBound(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 		if mark == nil {
 			return nil
 		}
-		changed := pulse.changed || p.Modified() || mark.Type == scene.MarkGroup || mark.Type.Nested()
+		if mark.Type == scene.MarkInvalid {
+			// Marks[mark.marktype] of a type vega-scenegraph does not know
+			fail("TypeError: Cannot read properties of undefined (reading 'bound')")
+		}
+		changed := pulse.changed || p.Modified() || mark.IsGroup() || mark.Type.Nested()
 		if changed {
 			if err := n.g.view.bounder.BoundMark(mark); err != nil {
 				failErr(err)
@@ -609,7 +679,7 @@ func facBound(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 		// A group's bounds are recomputed on every run (and any mark's when its
 		// parameters were modified); for axes, legends and titles the pulse
 		// is reflowed to carry the layout change to the enclosing layout.
-		if (mark.Type == scene.MarkGroup || p.Modified()) && !mark.Type.Nested() {
+		if (mark.IsGroup() || p.Modified()) && !mark.Type.Nested() {
 			switch mark.Role {
 			case "axis", "legend", "title":
 				return reflowPulse(pulse)
@@ -855,6 +925,24 @@ func itemSortKeys(it *scene.Item, cs *compareSpec, keys []jsval.Value) bool {
 	return true
 }
 
+// readSortKeys runs read; where the sort would never call the comparator
+// (strict false) a TypeError of a missing path step is dropped, and the key
+// stays undefined.
+func readSortKeys(strict bool, read func() bool) (ok bool) {
+	if strict {
+		return read()
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			if _, thrown := r.(*jsval.Thrown); !thrown {
+				panic(r)
+			}
+			ok = true
+		}
+	}()
+	return read()
+}
+
 // sortItemsByKeys is sortItemsByViews for a comparator over plain field paths:
 // the keys are read once per item, from a view holding only the properties the
 // paths start with, and the sort compares the keys. The result is the same
@@ -871,7 +959,9 @@ func (v *runView) sortItemsByKeys(items []*scene.Item, cs *compareSpec) {
 			v.itemTuple(it)
 		}
 		recs[i] = sortRec{it, i * nf}
-		if itemSortKeys(it, cs, keys[i*nf:(i+1)*nf]) {
+		// A comparator that throws on a missing step of a path is never
+		// called for fewer than two items.
+		if readSortKeys(len(items) >= 2, func() bool { return itemSortKeys(it, cs, keys[i*nf:(i+1)*nf]) }) {
 			continue
 		}
 		// A root the item does not hold may still be a property every object
@@ -893,9 +983,12 @@ func (v *runView) sortItemsByKeys(items []*scene.Item, cs *compareSpec) {
 		b := it.Bounds
 		scratch.Set("bounds", obj("x1", jsval.Num(b.X1), "y1", jsval.Num(b.Y1), "x2", jsval.Num(b.X2), "y2", jsval.Num(b.Y2)))
 		view := jsval.Obj(scratch)
-		for j, k := range cs.keys {
-			keys[i*nf+j] = k.Get(view)
-		}
+		readSortKeys(len(items) >= 2, func() bool {
+			for j, k := range cs.keys {
+				keys[i*nf+j] = k.Get(view)
+			}
+			return true
+		})
 	}
 	order := make([]int, nf)
 	for j, o := range cs.orders {

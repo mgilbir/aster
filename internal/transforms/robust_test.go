@@ -74,13 +74,21 @@ func TestNoPanicOnHostileInput(t *testing.T) {
 	}
 	for name, fn := range steps {
 		t.Run(name, func(t *testing.T) {
-			defer func() {
-				if r := recover(); r != nil {
-					t.Fatalf("panic: %v", r)
-				}
-			}()
-			fn(cloneTuples(hostileTuples()))
-			fn(nil)
+			call := func(d []jsval.Value) {
+				defer func() {
+					// A write into a primitive or null tuple throws
+					// upstream's TypeError (jsval.FieldsFor), a *jsval.Thrown
+					// the dataflow logs; any other panic is a crash.
+					if r := recover(); r != nil {
+						if _, js := r.(*jsval.Thrown); !js {
+							t.Fatalf("panic: %v", r)
+						}
+					}
+				}()
+				fn(d)
+			}
+			call(cloneTuples(hostileTuples()))
+			call(nil)
 		})
 	}
 }

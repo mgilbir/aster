@@ -47,6 +47,13 @@ type flowPulse struct {
 	// indices back, filtering the source lazily (Pulse.filter). Nil means
 	// the source is tuples, as it is everywhere else (crossfilter_pulse.go).
 	src *pulseSource
+	// noSource: upstream's pulse.source is undefined here, not an empty
+	// list: the operator's source operator has produced no pulse (or
+	// stopped), so the pulse is a bare fork (Dataflow.getPulse's
+	// singlePulse), or the pulse is a fork(NO_SOURCE) (barePulse, a Sieve's
+	// output). tuples is nil then; a source that is an empty array is not
+	// noSource.
+	noSource bool
 	// tree is the hierarchy a tree data set carries (`source.root`).
 	tree *hierarchy.Tree
 	// multi holds the per-source tuple lists of an operator with several
@@ -76,9 +83,11 @@ func newParams() *opParams { return &opParams{} }
 func (p *opParams) Get(name string) any { return p.vals.at(name) }
 
 // Value returns the parameter as a jsval.Value (Undefined when absent or of
-// another type).
+// another type). A constant the parse wrote as a Go value (scope.go's P: the
+// "key" a counts aggregate names its group-by field) is the value it stands
+// for, as the runtime reads a literal parameter.
 func (p *opParams) Value(name string) jsval.Value {
-	if v, ok := p.vals.at(name).(jsval.Value); ok {
+	if v, ok := native(p.vals.at(name)).(jsval.Value); ok {
 		return v
 	}
 	return jsval.Undefined
@@ -114,12 +123,28 @@ func (p *opParams) store(name string, v any) (int, bool) {
 	return i, added
 }
 
+// set is Parameters.set: `if (o[name] !== value || force) o[name] = value`.
+// An absent parameter reads undefined, so an operator's undefined value
+// (a signal with none) does not add the parameter unless forced: the
+// operators that list their parameters (the Scale transform's
+// `for (key in _)`) do not see it.
 func (p *opParams) set(name string, v any, force bool) {
 	i := p.vals.find(name)
+	if i < 0 && !force && isUndefinedParam(v) {
+		return
+	}
 	if i < 0 || force || !sameValue(p.vals.valAt(i), v) {
 		i, _ = p.store(name, v)
 		p.mod[i] = true
 	}
+}
+
+// isUndefinedParam reports a parameter value that is undefined.
+func isUndefinedParam(v any) bool {
+	if x, ok := v.(jsval.Value); ok {
+		return x.IsUndefined()
+	}
+	return v == nil
 }
 
 // put records a constant parameter.
@@ -286,7 +311,12 @@ func (n *opNode) parameters(raw *smallMap[any], react bool, initonly bool) []*op
 			case []any:
 				n.source = nil
 				for _, e := range ps {
-					if op, ok := e.(*opNode); ok && op != n {
+					if _, ok := e.(*opNode); !ok {
+						// Operator.parameters: every element of a pulse
+						// parameter must be an operator
+						fail("Pulse parameters must be operator instances.")
+					}
+					if op := e.(*opNode); op != n {
 						op.addTarget(n)
 						deps = append(deps, op)
 						n.source = append(n.source, op)
@@ -767,6 +797,11 @@ func (g *flowGraph) singlePulse(s *opNode) *flowPulse {
 		p.src = s.pulse.src
 		p.items = s.pulse.items
 		p.tree = s.pulse.tree
+		p.noSource = s.pulse.noSource
+	} else {
+		// `if (s && s !== StopPropagation) p.source = s.source`: the
+		// source operator has no pulse, or stopped, so there is no source.
+		p.noSource = true
 	}
 	return p
 }

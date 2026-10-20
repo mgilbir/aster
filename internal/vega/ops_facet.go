@@ -67,29 +67,57 @@ type facetState struct {
 	flows  map[any]*cell
 	order  []any
 	active []*opNode
+	// solo holds the tuples a "__proto__" subflow was opened for (see
+	// soloSubflow), so a later run opens none for them again.
+	solo map[*jsval.Object]struct{}
 }
 
 func (s *facetState) subflow(n *opNode, k any, make subflowMaker, key string, parent jsval.Value, pulse *flowPulse) *cell {
 	c := s.flows[k]
 	if c == nil {
-		g := n.g
-		g.view.cells++
-		if lim := g.view.limits.MaxSubflows; lim >= 0 && g.view.cells > lim {
-			failLimit("more than %d facet cells", g.view.limits.MaxSubflows)
-		}
-		sf := g.add("subflow", nil)
-		sf.ctx = n.ctx
-		c = &cell{src: sf}
-		sfc := c
-		sf.tr = trFunc(func(_ *opNode, _ *opParams, in *flowPulse) *flowPulse {
-			return &flowPulse{stamp: in.stamp, encode: in.encode, changed: true, tuples: sfc.tuples}
-		})
-		root := make(key, parent)
-		root.source = []*opNode{sf}
-		sf.addTarget(root)
+		c = s.newCell(n, make, key, parent)
 		s.flows[k] = c
 		s.order = append(s.order, k)
 	}
+	return c
+}
+
+// soloSubflow is the subflow of a tuple whose facet key is "__proto__".
+// Upstream's Facet keeps its subflows in a plain object: `hasOwnProperty(flows,
+// '__proto__')` is false and `flows['__proto__'] = sf` sets the object's
+// prototype, so no later tuple finds the subflow and each opens one of its
+// own, which the facet does not keep. It reports nil for a tuple that already
+// has its subflow: Facet adds only the tuples a pulse adds.
+func (s *facetState) soloSubflow(n *opNode, make subflowMaker, key string, parent jsval.Value, t jsval.Value) *cell {
+	if o := jsval.Tuple(t); o != nil {
+		if _, dup := s.solo[o]; dup {
+			return nil
+		}
+		if s.solo == nil {
+			s.solo = map[*jsval.Object]struct{}{}
+		}
+		s.solo[o] = struct{}{}
+	}
+	return s.newCell(n, make, key, parent)
+}
+
+// newCell instantiates a subflow: its source operator and the operators of
+// the sub-scope.
+func (s *facetState) newCell(n *opNode, make subflowMaker, key string, parent jsval.Value) *cell {
+	g := n.g
+	g.view.cells++
+	if lim := g.view.limits.MaxSubflows; lim >= 0 && g.view.cells > lim {
+		failLimit("more than %d facet cells", g.view.limits.MaxSubflows)
+	}
+	sf := g.add("subflow", nil)
+	sf.ctx = n.ctx
+	c := &cell{src: sf}
+	sf.tr = trFunc(func(_ *opNode, _ *opParams, in *flowPulse) *flowPulse {
+		return &flowPulse{stamp: in.stamp, encode: in.encode, changed: true, tuples: c.tuples}
+	})
+	root := make(key, parent)
+	root.source = []*opNode{sf}
+	sf.addTarget(root)
 	return c
 }
 
@@ -112,7 +140,7 @@ func facFacet(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 		cells, _ := p.Get("group").(*aggCells)
 		st.active = st.active[:0]
 
-		groups, err := transforms.GroupByKey(n.g.ctx, pulse.tuples, keyFn)
+		groups, err := transforms.GroupByKeyFacet(n.g.ctx, pulse.tuples, keyFn)
 		if err != nil {
 			failErr(err)
 		}
@@ -122,6 +150,14 @@ func facFacet(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 			var parent jsval.Value
 			if cells != nil {
 				parent = cells.get(g.Key)
+			}
+			if g.Key == "__proto__" {
+				cl := st.soloSubflow(n, flow, g.Key, parent, g.Tuples[0])
+				if cl != nil {
+					cl.tuples = g.Tuples
+					st.activate(cl)
+				}
+				continue
 			}
 			cl := st.subflow(n, g.Key, flow, g.Key, parent, pulse)
 			cl.tuples = g.Tuples

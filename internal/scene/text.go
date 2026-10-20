@@ -44,8 +44,15 @@ func LineHeight(it *Item) float64 {
 // quotes inside the family are swapped for single quotes (for embedding in a
 // quoted attribute).
 func FontFamily(it *Item, quote bool) string {
-	if v, ok := it.Raw["font"]; ok && !quote && v.IsTruthy() {
-		return it.Walker().String(v) // `font || 'sans-serif'` keeps a truthy array
+	if v, ok := it.Raw["font"]; ok {
+		// `font || 'sans-serif'` keeps a truthy array or number, and a falsy
+		// value of any kind (0, false, "") falls back.
+		if !v.IsTruthy() {
+			return "sans-serif"
+		}
+		if !quote {
+			return it.Walker().String(v)
+		}
 	}
 	f := it.Font()
 	if f == "" {
@@ -61,16 +68,17 @@ func FontFamily(it *Item, quote bool) string {
 // and weight, the size in px, then the family.
 func CSSFont(it *Item, quote bool) string {
 	var b strings.Builder
-	if it.FontStyle() != "" {
-		b.WriteString(it.FontStyle())
+	// (item.fontStyle ? item.fontStyle + ' ' : ''), ...: truthiness.
+	if s := it.TruthyStr("fontStyle", it.FontStyle()); s != "" {
+		b.WriteString(s)
 		b.WriteByte(' ')
 	}
-	if it.FontVariant() != "" {
-		b.WriteString(it.FontVariant())
+	if s := it.TruthyStr("fontVariant", it.FontVariant()); s != "" {
+		b.WriteString(s)
 		b.WriteByte(' ')
 	}
-	if it.FontWeight() != "" {
-		b.WriteString(it.FontWeight())
+	if s := it.TruthyStr("fontWeight", it.FontWeight()); s != "" {
+		b.WriteString(s)
 		b.WriteByte(' ')
 	}
 	var nb [32]byte
@@ -84,7 +92,8 @@ func CSSFont(it *Item, quote bool) string {
 // by hand because SVG's alignment-baseline is not consistently supported.
 func BaselineOffset(it *Item) float64 {
 	h := FontSize(it)
-	switch it.Baseline {
+	// baseline === 'top' ...: strict, so ['top'] is no baseline.
+	switch it.StrictStr("baseline", it.Baseline) {
 	case "top":
 		return jsRound(0.79 * h)
 	case "middle":
@@ -109,7 +118,35 @@ func BaselineOffset(it *Item) float64 {
 // well formed, one U+FFFD a surrogate, which is also one code unit, so
 // truncation counts the same.
 func TextLines(it *Item) (lines []string, multi bool) {
+	lines, multi, _ = textLines(it)
+	return lines, multi
+}
+
+// lineBreak is the item's line break when it is truthy (`item.lineBreak &&
+// ...`), else "".
+func (it *Item) lineBreak() string {
+	if it.Raw != nil {
+		if v, ok := it.Raw["lineBreak"]; ok && v.IsTruthy() {
+			return it.LineBreak()
+		}
+	}
+	if it.Raw != nil {
+		if v, ok := it.Raw["lineBreak"]; ok && !v.IsTruthy() {
+			return ""
+		}
+	}
+	return it.LineBreak()
+}
+
+// hasLineBreak is the truthiness of `item.lineBreak`: a break that prints
+// empty (an empty array) is truthy, and splits the text between characters.
+func (it *Item) hasLineBreak() bool { return it.StrTruthy("lineBreak", it.LineBreak()) }
+
+// textLines is TextLines with the error upstream's textLines raises: a
+// truthy text that is neither a string nor an array has no split method.
+func textLines(it *Item) (lines []string, multi bool, err error) {
 	t := it.Text()
+	lb := it.lineBreak()
 	switch {
 	case t.IsArr():
 		items := t.Items()
@@ -118,20 +155,33 @@ func TextLines(it *Item) (lines []string, multi bool) {
 			for i, v := range items {
 				out[i] = lineString(it, v)
 			}
-			return out, true
+			return out, true, nil
 		}
 		if len(items) == 1 {
-			return []string{lineString(it, items[0])}, false
+			// lineArray: a one-element array is its element, and when that
+			// is an array it is the list of lines, however long.
+			if inner := items[0]; inner.IsArr() {
+				in := inner.Items()
+				out := make([]string, len(in))
+				for i, v := range in {
+					out[i] = lineString(it, v)
+				}
+				return out, true, nil
+			}
+			return []string{lineString(it, items[0])}, false, nil
 		}
-		return []string{""}, false
-	case it.LineBreak() != "" && t.IsTruthy():
-		parts := strings.Split(lineString(it, t), it.LineBreak())
+		return []string{""}, false, nil
+	case it.hasLineBreak() && t.IsTruthy():
+		if !t.IsStr() {
+			return []string{lineString(it, t)}, false, ErrTextSplit
+		}
+		parts := strings.Split(lineString(it, t), lb) // split("") cuts between characters, as Go's does
 		if len(parts) > 1 {
-			return parts, true
+			return parts, true, nil
 		}
-		return parts, false
+		return parts, false, nil
 	}
-	return []string{lineString(it, t)}, false
+	return []string{lineString(it, t)}, false, nil
 }
 
 // lineString is `line == null ? ” : line + ”` without the trim, well formed.
@@ -149,15 +199,22 @@ func lineString(it *Item, v jsval.Value) string {
 // (lines is nil), or the lines otherwise (line is empty). It avoids the slice
 // TextLines allocates for the common single-line case.
 func TextLine(it *Item) (line string, lines []string) {
+	line, lines, _ = TextLineErr(it)
+	return line, lines
+}
+
+// TextLineErr is TextLine with the error upstream's textLines raises (see
+// textLines).
+func TextLineErr(it *Item) (line string, lines []string, err error) {
 	t := it.Text()
-	if !t.IsArr() && (it.LineBreak() == "" || !t.IsTruthy()) {
-		return lineString(it, t), nil
+	if !t.IsArr() && (!it.hasLineBreak() || !t.IsTruthy()) {
+		return lineString(it, t), nil, nil
 	}
-	l, multi := TextLines(it)
+	l, multi, err := textLines(it)
 	if multi {
-		return "", l
+		return "", l, err // a list, possibly of no line
 	}
-	return l[0], nil
+	return l[0], nil, err
 }
 
 // MultiLineOffset is the extra height of a multi-line text block.
@@ -244,11 +301,13 @@ func (m Metrics) truncate(it *Item, text string) string {
 		return text
 	}
 
+	// item.ellipsis || '\u2026', and the strict item.dir === 'rtl'.
+	// a truthy value that prints empty ([null]) is the ellipsis, an empty one
 	ellipsis := it.Ellipsis()
-	if ellipsis == "" {
+	if !it.StrTruthy("ellipsis", ellipsis) {
 		ellipsis = "…"
 	}
-	rtl := it.Dir() == "rtl"
+	rtl := it.StrictStr("dir", it.Dir()) == "rtl"
 	limit -= width(ellipsis)
 
 	var slice func(lo, hi int) string

@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/mgilbir/aster/internal/budget"
+	"github.com/mgilbir/aster/internal/expr"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -24,16 +26,25 @@ import (
 type P any
 
 // pField is a field accessor reference; name is the output name override.
-type pField struct{ path, name string }
+// key is vega-runtime's cache key of the accessor ('f:' + $field + '_' +
+// $name): the runtime builds one accessor per key and context (inherited
+// by subcontexts), so two fields that print the same, "a" and ["a"], share
+// the first one built.
+type pField struct{ path, name, key string }
 
 // pCompare is a comparator reference. Elements are field paths (string) or
-// operators carrying an accessor or an order.
-type pCompare struct{ fields, orders []P }
+// operators carrying an accessor or an order. key is the runtime's cache key
+// ('c:' + $compare + '_' + $order), "" for none.
+type pCompare struct {
+	fields, orders []P
+	key            string
+}
 
 // pKey is a key-function reference over field paths.
 type pKey struct {
 	fields []P
 	flat   bool
+	key    string // the runtime's cache key ('k:' + $key + '_' + !!$flat)
 }
 
 // pExpr wraps an expression used as a parameter (an accessor over a datum).
@@ -158,7 +169,11 @@ type dataScope struct {
 	output    *entry
 	values    *entry
 	aggregate *entry
-	index     map[string]*entry
+	// aggrNull: no aggregate because the pipeline had none (DataScope.fromEntries
+	// starts aggr at null); otherwise the scope was built without one, and
+	// upstream's field is undefined.
+	aggrNull bool
+	index    map[string]*entry
 
 	extent, domain, vals, lookup, indata map[string]P
 	counts                               map[string]*countsRef
@@ -195,7 +210,9 @@ func dataScopeFromEntries(s *Scope, entries []*entry) *dataScope {
 			aggr = entries[i]
 		}
 	}
-	return newDataScope(s, input, output, values, aggr)
+	d := newDataScope(s, input, output, values, aggr)
+	d.aggrNull = aggr == nil
+	return d
 }
 
 var reNonWord = regexp.MustCompile(`\W+`)
@@ -218,12 +235,16 @@ func aggrField(op, field jsval.Value) string {
 		b.WriteByte('_')
 	}
 	if hasField {
-		if field.IsObj() && field.Get("signal").IsTruthy() {
+		switch {
+		case field.IsObj() && field.Get("signal").IsTruthy():
 			b.WriteString("$" + field.Get("signal").AsString())
-		} else if field.IsStr() {
+		case field.IsStr():
 			s := reNonWord.ReplaceAllString(field.StrValue(), "_")
 			s = strings.Trim(s, "_")
 			b.WriteString(s)
+		default:
+			// field?.replace(...) of a value that has no replace method
+			perr("field?.replace is not a function")
 		}
 	}
 	return b.String()
@@ -259,6 +280,13 @@ func (d *dataScope) cache(m *map[string]P, scope *Scope, optype string, field js
 		if v, ok := (*m)[key]; ok {
 			return v
 		}
+		// upstream's caches are plain objects: a field named like a member
+		// of Object.prototype finds that member, truthy, and it is the ref
+		if sk == "" {
+			if v, ok := protoCacheHit(key); ok {
+				return v
+			}
+		}
 	}
 	var params *paramList
 	if useCounts && counts.IsObj() || (useCounts && counts.Kind() == jsval.KindBool && counts.BoolValue()) {
@@ -283,7 +311,16 @@ func (d *dataScope) cache(m *map[string]P, scope *Scope, optype string, field js
 	return op
 }
 
-var keyFieldRef = pField{path: "key"}
+// protoCacheHit is what reading a plain object's cache by key finds when the
+// key is the name of a member Object.prototype gives it: that member.
+func protoCacheHit(key string) (P, bool) {
+	if key == "__proto__" {
+		return jsval.Obj(jsval.NewObject(0)), true
+	}
+	return jsval.Inherited(key)
+}
+
+var keyFieldRef = pField{path: "key", key: "f:key_undefined"}
 
 func (d *dataScope) countsRef(scope *Scope, field jsval.Value, sort jsval.Value) P {
 	if d.counts == nil {
@@ -299,6 +336,13 @@ func (d *dataScope) countsRef(scope *Scope, field jsval.Value, sort jsval.Value)
 				addSortField(scope, v.agg.params, sort)
 			}
 			return v.ref
+		}
+		if _, ok := protoCacheHit(key); ok {
+			// cache[k] is the inherited member: it has no agg and no ref
+			if sort.IsObj() && sort.Get("field").IsTruthy() {
+				perr("Cannot read properties of undefined (reading 'params')")
+			}
+			return nil
 		}
 	}
 	p := newParamList()
@@ -479,6 +523,27 @@ func (s *Scope) toRuntime() *flowSpec {
 func (s *Scope) finish() {
 	if s.root != nil {
 		s.root.root = true
+	}
+	// Upstream's registries are plain objects. A signal or scale named
+	// "__proto__" set the object's prototype to its operator, whose own
+	// members `for (name in this.signals)` then enumerates, the operator's
+	// id first: `this.signals['id'].signal = 'id'` on a number. A data set
+	// named after a member of Object.prototype finds that member where
+	// finish() keeps the roles of its operators (`list.push`), and one named
+	// "__proto__" replaced the registry's prototype.
+	if _, ok := s.signals["__proto__"]; ok {
+		perr("Cannot create property 'signal' on number '%d'", len(s.operators))
+	}
+	if _, ok := s.scales["__proto__"]; ok {
+		perr("Cannot create property 'scale' on number '%d'", len(s.operators))
+	}
+	for name := range s.data {
+		switch {
+		case name == "__proto__":
+			perr("Cannot read properties of null (reading 'input')")
+		case expr.IsObjectPrototypeName(name):
+			perr("list.push is not a function")
+		}
 	}
 	for name, e := range s.signals {
 		s.work(1)
@@ -678,7 +743,7 @@ func hasSignal(m *budget.Meter, v jsval.Value) bool {
 
 func (s *Scope) fieldRef(field jsval.Value, name string) P {
 	if field.IsStr() {
-		return pField{path: field.StrValue(), name: name}
+		return pField{path: field.StrValue(), name: name, key: fieldCacheKey(field.StrValue(), name)}
 	}
 	if !isSignalObj(field) {
 		perr("Unsupported field reference: %s", quote(field))
@@ -706,30 +771,24 @@ func (s *Scope) compareRef(cmp jsval.Value) P {
 		}
 		if isExprObj(v) {
 			signal = true
-			return s.exprRef(v.Get("expr").AsString(), "")
+			return s.exprRef(v.Get("expr"), "")
 		}
 		return v
 	}
-	arr := func(v jsval.Value) []P {
+	arr := func(v jsval.Value) []P { // array(v).map(check)
 		var out []P
-		if v.IsUndefined() {
-			return out
+		for _, it := range arrayOf(v) {
+			s.work(1)
+			out = append(out, check(it))
 		}
-		if v.IsArr() {
-			for _, it := range v.Items() {
-				s.work(1)
-				out = append(out, check(it))
-			}
-			return out
-		}
-		return append(out, check(v))
+		return out
 	}
-	fields := arr(cmp.Get("field"))
-	orders := arr(cmp.Get("order"))
+	fields := arr(specGet(cmp, "field"))
+	orders := arr(specGet(cmp, "order"))
 	if signal {
 		return s.add(mk("compare", "fields", fields, "orders", orders))
 	}
-	return pCompare{fields: fields, orders: orders}
+	return pCompare{fields: fields, orders: orders, key: "c:" + listText(fields) + "_" + listText(orders)}
 }
 
 func (s *Scope) keyRef(fields jsval.Value, flat bool) P {
@@ -738,19 +797,26 @@ func (s *Scope) keyRef(fields jsval.Value, flat bool) P {
 	add := func(v jsval.Value) {
 		if isSignalObj(v) {
 			signal = true
-			e := s.findSignal(v.Get("signal").AsString())
-			out = append(out, e)
+			// ref(sig[_.signal]): the signals object read directly, no
+			// lambda; a name it does not hold is ref(undefined), whose id
+			// is a TypeError, and an Object.prototype member's has none
+			name := specText(v.Get("signal"))
+			e := s.findSignal(name)
+			switch {
+			case e != nil:
+				out = append(out, e)
+			case expr.IsObjectPrototypeName(name):
+				out = append(out, undefinedRef)
+			default:
+				perr("Cannot read properties of undefined (reading 'id')")
+			}
 			return
 		}
 		out = append(out, v)
 	}
-	if fields.IsArr() {
-		for _, it := range fields.Items() {
-			s.work(1)
-			add(it)
-		}
-	} else if !fields.IsUndefined() {
-		add(fields)
+	for _, it := range arrayOf(fields) { // array(fields)
+		s.work(1)
+		add(it)
 	}
 	if signal {
 		e := mk("key", "fields", out)
@@ -759,7 +825,7 @@ func (s *Scope) keyRef(fields jsval.Value, flat bool) P {
 		}
 		return s.add(e)
 	}
-	return pKey{fields: out, flat: flat}
+	return pKey{fields: out, flat: flat, key: "k:" + listText(out) + "_" + strconv.FormatBool(flat)}
 }
 
 func (s *Scope) sortRef(sort jsval.Value) P {
@@ -774,7 +840,14 @@ func (s *Scope) sortRef(sort jsval.Value) P {
 	if isSignalObj(o) {
 		return s.add(mk("compare", "fields", []P{jsval.Str(a)}, "orders", s.signalRef(o.Get("signal").AsString())))
 	}
-	return pCompare{fields: []P{jsval.Str(a)}, orders: []P{o}}
+	// compare(fields, $order) reads array($order): an order given as an
+	// array is the list of orders itself, not one order that is an array.
+	var orders []P
+	for _, ov := range arrayOf(o) {
+		s.work(1)
+		orders = append(orders, ov)
+	}
+	return pCompare{fields: []P{jsval.Str(a)}, orders: orders, key: "c:" + listText([]P{jsval.Str(a)}) + "_" + listText(orders)}
 }
 
 // -- signals -----------------------------------------------------------------
@@ -803,6 +876,29 @@ func (s *Scope) getSignal(name string) *entry {
 	return e
 }
 
+// hasSignalOrInherited is upstream's `scope.signals[name]` truthiness: a
+// signal of the scope chain, or a member of Object.prototype, which the
+// plain object of signals inherits.
+func (s *Scope) hasSignalOrInherited(name string) bool {
+	return s.findSignal(name) != nil || expr.IsObjectPrototypeName(name)
+}
+
+// getSignalNamed is Scope.getSignal(name) for a name given as any value
+// (the property key String(name)): the signal's operator, or nil where
+// upstream finds a member of Object.prototype instead (truthy, so no error,
+// and no operator either).
+func (s *Scope) getSignalNamed(nameV jsval.Value) *entry {
+	name := specText(nameV)
+	if e := s.findSignal(name); e != nil {
+		return e
+	}
+	if expr.IsObjectPrototypeName(name) {
+		return nil
+	}
+	perr("Unrecognized signal name: %s", stringValue(nameV))
+	return nil
+}
+
 // signalRef references a signal by name, or, when the text is not a signal name,
 // an anonymous operator (a "lambda") that evaluates it as an expression once
 // the whole scope is parsed.
@@ -816,7 +912,7 @@ func (s *Scope) signalRef(name string) P {
 		}
 		return e
 	}
-	e := s.add(operatorEntry(nil))
+	e := s.add(operatorEntry(jsval.Null)) // operator(null): a lambda starts as null
 	s.lambdas[name] = e
 	return e
 }
@@ -850,8 +946,8 @@ func (s *Scope) objectProperty(spec jsval.Value) P {
 // exprRef is Scope.exprRef. The name an `as` gives is recorded upstream as
 // the parameter's $name, which the runtime never reads: the accessor stays
 // unnamed (boundExpr.accessor).
-func (s *Scope) exprRef(code string, _ string) P {
-	fn := s.parseExpression(code)
+func (s *Scope) exprRef(code jsval.Value, _ string) P {
+	fn := s.parseExpressionValue(code)
 	return s.add(mk("expression", "expr", pExpr{fn: fn}))
 }
 
@@ -901,6 +997,16 @@ func (s *Scope) getData(name string) *dataScope {
 	d := s.findData(name)
 	if d == nil {
 		perr("Undefined data set name: %s", quote(jsval.Str(name)))
+	}
+	return d
+}
+
+// getDataNamed is Scope.getData(name) for a name given as any value (the
+// property key String(name)), with upstream's message.
+func (s *Scope) getDataNamed(nameV jsval.Value) *dataScope {
+	d := s.findData(specText(nameV))
+	if d == nil {
+		perr("Undefined data set name: %s", stringValue(nameV))
 	}
 	return d
 }
@@ -957,3 +1063,29 @@ func propertyLambda(m *budget.Meter, spec jsval.Value) string {
 
 // stringValue is vega-util's stringValue (see jsval.StringValue).
 func stringValue(v jsval.Value) string { return jsval.StringValue(v) }
+
+// fieldCacheKey is vega-runtime's getField cache key, 'f:' + $field + '_' +
+// $name, for a field written as text (name "" stands for no name).
+func fieldCacheKey(text, name string) string {
+	if name == "" {
+		name = "undefined"
+	}
+	return "f:" + text + "_" + name
+}
+
+// listText is String(array) of a parameter list of specification values: the
+// elements' texts joined with commas, null and undefined as nothing.
+func listText(l []P) string {
+	vals := make([]jsval.Value, len(l))
+	for i, p := range l {
+		switch v := p.(type) {
+		case jsval.Value:
+			vals[i] = v
+		case string:
+			vals[i] = jsval.Str(v)
+		default:
+			vals[i] = jsval.Obj(jsval.NewObject(0)) // an operator reference: an object
+		}
+	}
+	return specText(jsval.Arr(vals))
+}

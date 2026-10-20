@@ -30,6 +30,14 @@ type Grid struct {
 	// ScaleXY is a data grid's scale given as an array, [sx, sy] (missing or
 	// non-numeric entries are NaN, which the transform reads as 1).
 	ScaleXY []float64
+	// TranslateText holds the text of a translate entry that is a non-empty
+	// string (TranslateIsText marks which): `coordinate * s + t` then
+	// concatenates, and the coordinate is that text.
+	// ValuesNullish is "undefined" or "null" when the grid object has no
+	// values array (nullish): the contour reads values[0] of it.
+	ValuesNullish   string
+	TranslateText   [2]string
+	TranslateIsText [2]bool
 }
 
 // DensityParams configures 2-D kernel density estimation.

@@ -72,6 +72,11 @@ func Compile(spec jsval.Value, opts Options) (out jsval.Value, err error) {
 				err = e
 			case exprSyntaxError:
 				err = e.err()
+			case *jsval.Thrown:
+				// a JavaScript exception of a value the compiler converts,
+				// as upstream's raises it (String() of an object holding a
+				// toString of its own)
+				err = e
 			default:
 				if panicHook != nil {
 					panicHook(debug.Stack())

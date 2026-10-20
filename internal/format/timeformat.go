@@ -22,6 +22,9 @@ type TimeFormat struct {
 	zone Zone
 	spec string
 	ops  []fmtOp
+	// member is the Object.prototype member the memo returns for this
+	// specifier (see callMember), or empty.
+	member string
 }
 
 // Format is d3.timeFormat(specifier) in the given zone (UTC for utcFormat).
@@ -143,6 +146,10 @@ func (f *TimeFormat) AppendFormat(dst []byte, t float64) []byte {
 // after a directive did (one writes a name of at most MaxLocaleName bytes,
 // or a number).
 func (f *TimeFormat) appendMax(dst []byte, t float64, max int) (out []byte, ok bool) {
+	if f.member != "" {
+		return callMember(dst, f.member, DateToString(t, f.zone), true), true
+	}
+	t = timeClip(t) // d3's format makes `new Date(+date)`: whole milliseconds
 	valid := Valid(t)
 	var fl Fields
 	var di dayInfo

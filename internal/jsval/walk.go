@@ -436,7 +436,7 @@ func (k *walk) str(v Value, depth int) {
 	k.step()
 	switch v.Kind() {
 	case KindArr:
-		for i, it := range v.arr().items {
+		for i, it := range v.arr().list() {
 			if k.done {
 				return
 			}
@@ -490,7 +490,22 @@ func objectString(o *Object) string {
 	if o != nil && o.str != nil {
 		return o.str(o)
 	}
+	checkToPrimitive(o)
 	return "[object Object]"
+}
+
+// errNoPrimitive is the TypeError OrdinaryToPrimitive raises.
+var errNoPrimitive = &Thrown{Name: "TypeError", Msg: "Cannot convert object to primitive value"}
+
+// checkToPrimitive raises the TypeError of String(o) or Number(o) for a
+// plain object that holds a toString member of its own: no JSON value is a
+// function, so neither its toString nor the valueOf it inherits (which
+// answers the object itself) gives a primitive. ({"toString": "x"} + "" is
+// a TypeError in JavaScript.)
+func checkToPrimitive(o *Object) {
+	if o != nil && o.host == nil && o.Has("toString") {
+		panic(errNoPrimitive)
+	}
 }
 
 // StringValue is vega-util's stringValue: see the package function.
@@ -526,7 +541,7 @@ func (k *walk) sval(v Value, depth int) {
 		}
 		k.step()
 		k.writeByte('[')
-		for i, it := range v.arr().items {
+		for i, it := range v.arr().list() {
 			if k.done {
 				return
 			}
@@ -640,7 +655,7 @@ func (k *walk) json(v Value, indent, prefix string, depth int) {
 	case KindPattern:
 		k.write("{}")
 	case KindArr:
-		items := v.arr().items
+		items := v.arr().list()
 		if len(items) == 0 {
 			k.write("[]")
 			return
@@ -758,7 +773,7 @@ func equalSmall(a, b Value, budget *int) (eq, done bool) {
 		if a.p == b.p {
 			return true, true
 		}
-		x, y := a.arr().items, b.arr().items
+		x, y := a.arr().list(), b.arr().list()
 		if len(x) != len(y) {
 			return false, true
 		}
@@ -818,7 +833,7 @@ func (k *walk) equal(a, b Value, depth int) bool {
 			// The same array: equal, however large, without a walk.
 			return true
 		}
-		x, y := a.arr().items, b.arr().items
+		x, y := a.arr().list(), b.arr().list()
 		if len(x) != len(y) {
 			return false
 		}

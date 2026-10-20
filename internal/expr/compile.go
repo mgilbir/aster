@@ -274,11 +274,21 @@ func (c *compiler) require(n string) {
 	c.reqList = append(c.reqList, n)
 }
 
+// addIndex records an indata() index. The list is in the order of each
+// index's last use: upstream's indataVisitor assigns params['@' + field] at
+// every call (its hasOwnProperty guard has its arguments swapped, so it
+// never holds), and the last data set to index a field wins the parameter.
 func (c *compiler) addIndex(d IndexDep) {
-	if _, ok := c.indexes[d]; !ok {
-		c.indexes[d] = struct{}{}
-		c.idxList = append(c.idxList, d)
+	if _, ok := c.indexes[d]; ok {
+		for i, x := range c.idxList {
+			if x == d {
+				c.idxList = append(c.idxList[:i], c.idxList[i+1:]...)
+				break
+			}
+		}
 	}
+	c.indexes[d] = struct{}{}
+	c.idxList = append(c.idxList, d)
 }
 
 func (c *compiler) addScale(n string) {
@@ -815,6 +825,8 @@ func (s *Scope) getProp(obj jsval.Value, key string) jsval.Value {
 		if i, ok := arrayIndex(key); ok {
 			return obj.Index(i)
 		}
+		// a method of Array.prototype (or Object.prototype): a function
+		return jsval.Member(obj, key)
 	case jsval.KindStr:
 		str := obj.StrValue()
 		if key == "length" {
@@ -824,6 +836,9 @@ func (s *Scope) getProp(obj jsval.Value, key string) jsval.Value {
 		if i, ok := arrayIndex(key); ok {
 			return s.charAt(str, i)
 		}
+		return jsval.Member(obj, key)
+	case jsval.KindNum, jsval.KindBool:
+		return jsval.Member(obj, key)
 	case jsval.KindPattern:
 		return patternProp(obj.PatternOf(), key)
 	case jsval.KindUndefined, jsval.KindNull:
@@ -896,6 +911,9 @@ func (h *slotHint) get(o *jsval.Object, key string) jsval.Value {
 	}
 	v, ok := o.Get(key)
 	if !ok {
+		if o.Host() != nil {
+			return o.Prop(key) // a function's length, name and methods
+		}
 		v, _ = jsval.Inherited(key)
 		return v
 	}

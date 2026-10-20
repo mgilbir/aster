@@ -30,6 +30,7 @@ import (
 
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/fontsubset"
+	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/pngopt"
 	"github.com/mgilbir/aster/internal/raster"
@@ -407,9 +408,12 @@ func (c *Converter) renderSVG(ctx context.Context, spec jsval.Value) (out string
 		Origin: res.Origin,
 		// An SVG past this size is not a chart anybody can use.
 		MaxBytes: c.lim.svgBytes,
+		DateText: func(dst []byte, ms float64) []byte {
+			return append(dst, format.DateToString(ms, format.Local(c.location))...)
+		},
 	}
 	if res.HasBackground {
-		so.Background = res.Background
+		so.Background, so.DrawBackground = res.Background, true
 	}
 	if canvas != nil {
 		so.Measurer = canvas
@@ -484,7 +488,21 @@ func (c *Converter) renderSVG(ctx context.Context, spec jsval.Value) (out string
 		}
 		return info
 	}
-	out, err = timed(ctx, "svg", func() (string, error) { return svg.Render(ctx, res.Scenegraph, so) })
+	out, err = timed(ctx, "svg", func() (out string, err error) {
+		// The scene's shape and clip generators are vega's: an expression
+		// they evaluate can throw, which ends the render as it does
+		// upstream's.
+		defer func() {
+			if r := recover(); r != nil {
+				thrown, ok := vega.ThrownAtRender(r)
+				if !ok {
+					panic(r)
+				}
+				out, err = "", thrown
+			}
+		}()
+		return svg.Render(ctx, res.Scenegraph, so)
+	})
 	if err == nil {
 		err = hookErr
 	}

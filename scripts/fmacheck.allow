@@ -72,16 +72,15 @@ internal/transforms/voronoi/diagram.go	transforms/voronoi.(*diagram).init	x = (x
 internal/transforms/voronoi/diagram.go	transforms/voronoi.(*diagram).init	y = (y1+y3)/2 + float64(a*ex)	# the fused product is x*0.5 (division by 2, a power of two): exact
 internal/transforms/wordcloud/layout.go	transforms/wordcloud.(*layout).spiralFn.func1	switch toInt32(math.Sqrt(1+4*sign*float64(t))-sign) & 3 {	# the fused product is (4*sign)*t with sign=+-1, so a power-of-two factor: exact
 internal/transforms/wordcloud/render.go	transforms/wordcloud.BoxRenderer.Draw	x0, x1 := -half-grow, half+grow	# the fused product is x*0.5 (division by 2, a power of two): exact
-internal/vega/layout/axis.go	vega/layout.axisTitleLayout	dx = orZero(xOf(title)) - v	# the fused product is sign*(...) with sign=+-1: exact
-internal/vega/layout/axis.go	vega/layout.axisTitleLayout	dy = orZero(yOf(title)) - v	# the fused product is sign*(...) with sign=+-1: exact
 internal/vega/layout/grid.go	vega/layout.gridLayout	ax -= bounds.Width() / 2	# the fused product is x*0.5 (division by 2, a power of two): exact
 internal/vega/layout/grid.go	vega/layout.gridLayout	ay -= bounds.Height() / 2	# the fused product is x*0.5 (division by 2, a power of two): exact
 internal/vega/layout/grid.go	vega/layout.gridLayout	dx[i] += x / 2	# the fused product is x*0.5 (division by 2, a power of two): exact
 internal/vega/layout/grid.go	vega/layout.gridLayout	dy[i] += y / 2	# the fused product is x*0.5 (division by 2, a power of two): exact
+internal/vega/layout/grid_exact.go	vega/layout.gridLayoutExact	dx[i] += x / 2	# the fused product is x*0.5 (division by 2, a power of two): exact
+internal/vega/layout/grid_exact.go	vega/layout.gridLayoutExact	dy[i] += y / 2	# the fused product is x*0.5 (division by 2, a power of two): exact
 internal/vega/layout/props.go	vega/layout.legendTitleOffset	if x-r >= 0.5 {	# the fused product is x*0.5 (division by 2, a power of two): exact
 internal/vega/ops_mark.go	vega.adjustSpatial	setNum("x", spatialSetterX, xcOf(it)-w/2)	# the fused product is x*0.5 (division by 2, a power of two): exact
 internal/vega/ops_mark.go	vega.adjustSpatial	setNum("y", spatialSetterY, ycOf(it)-h/2)	# the fused product is x*0.5 (division by 2, a power of two): exact
-internal/vega/ops_scale.go	vega.binsFromObject	return d3Range(start, stop+step/2, step)	# the fused product is x*0.5 (division by 2, a power of two): exact
 internal/vega/ops_scale.go	vega.padDomain	return [2]float64{da + float64((d0-da)*k), da + float64((d1-da)*k)}	# the fused product is x*0.5 (division by 2, a power of two): exact
 internal/vega/ops_scale.go	vega.zoomLinear	return [2]float64{da + float64((d0-da)*k), da + float64((d1-da)*k)}	# the fused product is x*0.5 (division by 2, a power of two): exact
 internal/vega/ops_scale.go	vega.zoomLog	return [2]float64{ground(da + float64((d0-da)*k)), ground(da + float64((d1-da)*k))}	# the fused product is x*0.5 (division by 2, a power of two): exact

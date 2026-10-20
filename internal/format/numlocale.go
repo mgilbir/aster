@@ -187,6 +187,9 @@ func NumberLocaleFromValue(v jsval.Value) (*NumberLocale, error) {
 // NumberFormat is a compiled format function. Immutable; safe for concurrent
 // use.
 type NumberFormat struct {
+	// member is the Object.prototype member the memo returns for this
+	// specifier (see callMember), or empty.
+	member    string
 	loc       *NumberLocale
 	spec      Specifier
 	fill      string
@@ -360,6 +363,9 @@ func (f *NumberFormat) AppendFormat(dst []byte, x float64) []byte {
 }
 
 func (f *NumberFormat) appendFormat(dst []byte, x float64, cText string) []byte {
+	if f.member != "" {
+		return callMember(dst, f.member, jsval.JSNumberString(x), false)
+	}
 	if f.simpleG {
 		if out, ok := f.appendSimpleG(dst, x); ok {
 			return out

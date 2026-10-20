@@ -1032,20 +1032,24 @@ func (p *parser) makeArr(n int) (Value, []Value) {
 	switch n {
 	case 1:
 		x := slabNext(&p.sl.pa1, 64)
-		x.items, b = x.buf[:], &x.arrayBox
+		x.set(x.buf[:])
+		b = &x.arrayBox
 	case 2:
 		x := slabNext(&p.sl.pa2, 64)
-		x.items, b = x.buf[:], &x.arrayBox
+		x.set(x.buf[:])
+		b = &x.arrayBox
 	case 3:
 		x := slabNext(&p.sl.pa3, 32)
-		x.items, b = x.buf[:], &x.arrayBox
+		x.set(x.buf[:])
+		b = &x.arrayBox
 	case 4:
 		x := slabNext(&p.sl.pa4, 32)
-		x.items, b = x.buf[:], &x.arrayBox
+		x.set(x.buf[:])
+		b = &x.arrayBox
 	default:
 		return MakeArr(n)
 	}
-	return ref(KindArr, unsafe.Pointer(b)), b.items
+	return ref(KindArr, unsafe.Pointer(b)), b.list()
 }
 
 // newObject is NewObject drawing small objects from the parser's chunks.

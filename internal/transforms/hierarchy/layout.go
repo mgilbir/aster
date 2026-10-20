@@ -31,6 +31,10 @@ type Common struct {
 	// vega breaks comparator ties by ascending tuple id; without it ties keep
 	// their current order, which is the same for data in ingestion order.
 	TupleID func(jsval.Value) float64
+	// AsExact reports that As holds every output slot's name as upstream
+	// resolves them (`_.as || fields`, each as[i] the key it names): an
+	// empty one is the empty name.
+	AsExact bool
 	// As overrides the output field names, one per output slot (see each
 	// layout). Missing trailing entries fall back to the defaults.
 	As []string
@@ -138,23 +142,23 @@ func (p prop) get(n *Node) jsval.Value {
 // writeFields copies the layout result of every node into its tuple: the
 // slot i property goes to as[i]; the last slot is always the child count.
 // Each node written is a step of work per field, charged to m.
-func writeFields(m *budget.Meter, root *Node, props []prop, defaults, as []string) error {
+func writeFields(m *budget.Meter, root *Node, props []prop, defaults, as []string, exact bool) error {
 	names := make([]string, len(props))
 	for i := range names {
 		names[i] = defaults[i]
-		if i < len(as) && as[i] != "" {
+		if i < len(as) && (as[i] != "" || exact) {
 			names[i] = as[i]
 		}
 	}
 	var err error
 	root.each(func(n *Node) {
-		if err != nil || !n.Data.IsObj() {
+		if err != nil || !n.Data.IsObjectLike() {
 			return
 		}
 		if err = m.Work(int64(len(props))); err != nil {
 			return
 		}
-		o := n.Data.ObjValue()
+		o := jsval.Fields(n.Data)
 		for i, p := range props {
 			o.Set(names[i], p.get(n))
 		}
@@ -231,7 +235,7 @@ func LayoutTree(ctx context.Context, t *Tree, p TreeParams) error {
 	} else {
 		cluster(t.Root, sep, sz)
 	}
-	return writeFields(&m, t.Root, treeProps, treeNames, p.As)
+	return writeFields(&m, t.Root, treeProps, treeNames, p.As, p.AsExact)
 }
 
 // PackParams configures [LayoutPack].
@@ -269,7 +273,7 @@ func LayoutPack(ctx context.Context, t *Tree, p PackParams) error {
 	if err := pack(ctx, t.Root, radius, dx, dy, pad); err != nil {
 		return err
 	}
-	return writeFields(&m, t.Root, packProps, packNames, p.As)
+	return writeFields(&m, t.Root, packProps, packNames, p.As, p.AsExact)
 }
 
 // PartitionParams configures [LayoutPartition].
@@ -299,7 +303,7 @@ func LayoutPartition(ctx context.Context, t *Tree, p PartitionParams) error {
 		pad = *p.Padding
 	}
 	partition(t.Root, dx, dy, pad, p.Round)
-	return writeFields(&m, t.Root, rectProps, rectNames, p.As)
+	return writeFields(&m, t.Root, rectProps, rectNames, p.As, p.AsExact)
 }
 
 // TreemapParams configures [LayoutTreemap]. Padding parameters are applied in
@@ -387,7 +391,7 @@ func LayoutTreemap(ctx context.Context, t *Tree, p TreemapParams) error {
 		return err
 	}
 	cfg.layout(t.Root)
-	return writeFields(&m, t.Root, rectProps, rectNames, p.As)
+	return writeFields(&m, t.Root, rectProps, rectNames, p.As, p.AsExact)
 }
 
 // NodeFieldPath builds a NodeField from a dotted path resolved against the
@@ -424,9 +428,20 @@ func NodeFieldPath(path string) NodeField {
 		case "y1":
 			v = jsval.Num(n.Y1)
 		default:
-			return jsval.Undefined
+			// a name the node has no property of: undefined, and a step
+			// past it reads undefined
+			v = jsval.Undefined
 		}
+		// The comparator reads the path as a member chain (vega-util's
+		// getter): a step into null or undefined is a TypeError.
 		for _, k := range parts[1:] {
+			if v.IsNullish() {
+				nm := "undefined"
+				if v.IsNull() {
+					nm = "null"
+				}
+				panic(&jsval.Thrown{Name: "TypeError", Msg: "Cannot read properties of " + nm + " (reading '" + k + "')"})
+			}
 			v = v.Get(k)
 		}
 		return v

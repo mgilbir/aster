@@ -233,25 +233,47 @@ func (l *jsonLoader) paint(w jsval.Walker, v jsval.Value) Paint {
 			}
 			return GradientPaint(g)
 		}
-		return Color(w.String(v))
+		return ValueColor(w.String(v), true)
 	case v.IsStr():
 		return Color(v.StrValue())
 	}
-	return Color(w.String(v))
+	return ValueColor(w.String(v), v.IsTruthy())
 }
 
 func gradientOf(w jsval.Walker, v jsval.Value) *Gradient {
+	vals := [6]jsval.Value{v.Get("x1"), v.Get("y1"), v.Get("x2"), v.Get("y2"), v.Get("r1"), v.Get("r2")}
+	// g.gradient === 'radial' is strict; if (!g.id) assigns an id to a
+	// gradient whose id is falsy, and a truthy one names it by its String.
 	g := &Gradient{
-		Radial: v.Get("gradient").StringIs("radial"),
-		ID:     strOf(w, v.Get("id")),
-		X1:     numOf(v.Get("x1")), Y1: numOf(v.Get("y1")),
-		X2: numOf(v.Get("x2")), Y2: numOf(v.Get("y2")),
-		R1: numOf(v.Get("r1")), R2: numOf(v.Get("r2")),
+		Radial: v.Get("gradient").IsStr() && v.Get("gradient").StrValue() == "radial",
+		X1:     numOf(vals[0]), Y1: numOf(vals[1]),
+		X2: numOf(vals[2]), Y2: numOf(vals[3]),
+		R1: numOf(vals[4]), R2: numOf(vals[5]),
+		Values: &vals,
 	}
-	for _, s := range v.Get("stops").Items() {
+	if id := v.Get("id"); id.IsTruthy() {
+		g.ID = strOf(w, id)
+	}
+	// for (i < stops.length) stops[i].offset, stops[i].color: any value
+	// with a length is a list, a missing one has none, and a null or
+	// undefined list or stop is a TypeError.
+	stops := v.Get("stops")
+	if stops.IsNullish() {
+		g.StopsErr = ErrGradientStops
+		return g
+	}
+	list, _ := jsval.ToArrayLike(stops)
+	for i := int64(0); i < list.Len(); i++ {
+		s := list.At(i)
+		if s.IsNullish() {
+			g.StopsErr = ErrGradientStop
+			return g
+		}
+		off, col := jsval.Member(s, "offset"), jsval.Member(s, "color")
 		g.Stops = append(g.Stops, GradientStop{
-			Offset: jsval.ToNumber(s.Get("offset")),
-			Color:  strOf(w, s.Get("color")),
+			Offset: jsval.ToNumber(off),
+			Color:  strOf(w, col),
+			Given:  true, OffsetValue: off, ColorValue: col,
 		})
 	}
 	return g
@@ -275,6 +297,7 @@ func (l *jsonLoader) item(v jsval.Value, m *Mark, depth int) (*Item, error) {
 		}
 	}
 	if m.Type == MarkGroup {
+		it.Items = make([]*Mark, 0, childMarks.Len()) // a group item always has its items array
 		for _, cv := range childMarks.Items() {
 			child, err := l.mark(cv, it, depth+1)
 			if err != nil {

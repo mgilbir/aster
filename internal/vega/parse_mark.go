@@ -16,23 +16,46 @@ import (
 // from (upstream's markdef object).
 type markDef struct {
 	typ         scene.MarkType
+	looseType   bool
 	name        string
+	named       bool
+	described   bool
 	role        string
 	zindex      float64
 	aria        scene.Tri
 	description string
 }
 
+// markType is how upstream reads a mark's type: vega-scenegraph looks its
+// renderer up by the property key String(type), so ["rect"] draws as a
+// rect (loose: no `=== 'rect'` holds for it) and a type it has no renderer
+// for fails as the mark is bounded and drawn (scene.MarkInvalid), not as
+// it is parsed.
+func markType(t jsval.Value) (typ scene.MarkType, loose bool) {
+	s, ok := t.Strict()
+	if !ok {
+		s, loose = specText(t), true
+	}
+	typ, _ = scene.ParseMarkType(s)
+	return typ, loose
+}
+
+// markRole is marks/role.js: `role = spec.role || ”`, then
+// role.startsWith(...), which a truthy role that is no string makes a
+// TypeError.
 func markRole(spec jsval.Value) string {
-	// `spec.role || ''`: a falsy role (false, 0, "") is none.
-	role := spec.Get("role").AsString()
-	if !spec.Get("role").IsTruthy() {
-		role = ""
+	var role string
+	if r := specGet(spec, "role"); r.IsTruthy() {
+		s, ok := r.Strict()
+		if !ok {
+			perr("role.startsWith is not a function")
+		}
+		role = s
 	}
 	if strings.HasPrefix(role, "axis") || strings.HasPrefix(role, "legend") || strings.HasPrefix(role, "title") {
 		return role
 	}
-	if spec.Get("type").AsString() == "group" {
+	if strictIs(specGet(spec, "type"), "group") {
 		return "scope"
 	}
 	if role == "" {
@@ -41,28 +64,27 @@ func markRole(spec jsval.Value) string {
 	return role
 }
 
+// definition is marks/definition.js: `name: spec.name || undefined`,
+// `role: spec.role || role(spec)`, `zindex: +spec.zindex || undefined`.
 func definition(spec jsval.Value) *markDef {
-	t, ok := scene.ParseMarkType(spec.Get("type").AsString())
-	if !ok {
-		perr("Unrecognized mark type: %s", quote(spec.Get("type")))
+	d := &markDef{}
+	d.typ, d.looseType = markType(specGet(spec, "type"))
+	if n := specGet(spec, "name"); n.IsTruthy() {
+		d.name, d.named = specText(n), true
 	}
-	d := &markDef{typ: t}
-	if n := spec.Get("name"); n.IsTruthy() {
-		d.name = n.AsString()
-	}
-	if r := spec.Get("role"); r.IsTruthy() {
-		d.role = r.AsString()
+	if r := specGet(spec, "role"); r.IsTruthy() {
+		d.role = specText(r)
 	} else {
 		d.role = markRole(spec)
 	}
-	if z := jsval.ToNumber(spec.Get("zindex")); z != 0 && z == z {
+	if z := jsval.ToNumber(specGet(spec, "zindex")); z != 0 && z == z {
 		d.zindex = z
 	}
 	// The mark keeps the value as given; the renderer tests `mark.aria ===
 	// false`, so only false hides it.
-	d.aria = scene.FalseOf(spec.Get("aria"))
-	if desc := spec.Get("description"); desc.IsTruthy() {
-		d.description = desc.AsString()
+	d.aria = scene.FalseOf(specGet(spec, "aria"))
+	if desc := specGet(spec, "description"); desc.IsTruthy() {
+		d.description, d.described = specText(desc), true
 	}
 	return d
 }
@@ -79,6 +101,7 @@ func parseInteractive(spec jsval.Value, scope *Scope) P {
 
 func parseClip(clip jsval.Value, scope *Scope) P {
 	var code string
+	have := false // `expr` is a truthy string; the signal's text may be empty ([])
 	if clip.IsObj() {
 		param := func(v jsval.Value) string {
 			if isSignalObj(v) {
@@ -88,14 +111,14 @@ func parseClip(clip jsval.Value, scope *Scope) P {
 		}
 		switch {
 		case clip.Get("signal").IsTruthy():
-			code = clip.Get("signal").AsString()
+			code, have = clip.Get("signal").AsString(), true
 		case clip.Get("path").IsTruthy():
-			code = "pathShape(" + param(clip.Get("path")) + ")"
+			code, have = "pathShape("+param(clip.Get("path"))+")", true
 		case clip.Get("sphere").IsTruthy():
-			code = "geoShape(" + param(clip.Get("sphere")) + ", {type: \"Sphere\"})"
+			code, have = "geoShape("+param(clip.Get("sphere"))+", {type: \"Sphere\"})", true
 		}
 	}
-	if code != "" {
+	if have {
 		return scope.signalRef(code)
 	}
 	return jsval.Bool(clip.IsTruthy())
@@ -160,7 +183,17 @@ func parseMarkData(from jsval.Value, group bool, scope *Scope) facetInput {
 				dataRef = scope.add(op)
 				in.parent = dataRef
 			} else {
-				in.parent = scope.getData(from.Get("data").AsString()).aggregate
+				// ref(scope.getData(from.data).aggregate) reads .id of the
+				// data set's last aggregate, which a plain data set lacks.
+				ds := scope.getData(from.Get("data").AsString())
+				if ds.aggregate == nil {
+					nm := "undefined"
+					if ds.aggrNull {
+						nm = "null"
+					}
+					perrThrow("Cannot read properties of " + nm + " (reading 'id')")
+				}
+				in.parent = ds.aggregate
 			}
 			in.key = scope.keyRef(facet.Get("groupby"), true)
 		}
@@ -174,20 +207,24 @@ func parseMarkData(from jsval.Value, group bool, scope *Scope) facetInput {
 
 func parseMark(spec jsval.Value, scope *Scope) {
 	role := markRole(spec)
-	typ := spec.Get("type").AsString()
-	group := typ == "group"
-	facet := spec.Get("from").Get("facet")
+	typeV := specGet(spec, "type")
+	typ := specText(typeV) // the key config[type] and the encoders read
+	group := strictIs(typeV, "group")
+	var facet jsval.Value
+	if from := specGet(spec, "from"); from.IsTruthy() {
+		facet = specGet(from, "facet")
+	}
 	hasFacet := facet.IsTruthy()
-	overlap := spec.Get("overlap")
+	overlap := specGet(spec, "overlap")
 
-	layout := spec.Get("layout").IsTruthy() || role == "scope" || role == "frame"
+	layout := specGet(spec, "layout").IsTruthy() || role == "scope" || role == "frame"
 	nested := role == "mark" || layout || hasFacet
 
 	input := parseMarkData(spec.Get("from"), group, scope)
 
 	key := input.key
-	if key == nil && spec.Get("key").IsTruthy() {
-		key = pField{path: spec.Get("key").AsString()}
+	if key == nil && specGet(spec, "key").IsTruthy() {
+		key = specFieldRef(specGet(spec, "key"), "")
 	}
 	join := scope.add(mk("datajoin", "key", key, "pulse", input.pulse, "clean", jsval.Bool(!group)))
 	store := scope.add(mk("itemstore", "pulse", join))
@@ -209,13 +246,17 @@ func parseMark(spec jsval.Value, scope *Scope) {
 	))
 
 	enc := scope.add(newEntry("encode", nil, parseEncode(
-		spec.Get("encode"), typ, role, spec.Get("style"), scope,
+		specGet(spec, "encode"), typ, typeV.IsStr(), role, specGet(spec, "style"), scope,
 		plist("mod", jsval.False, "pulse", markOp),
 	)))
 	enc.params.set("parent", scope.encode())
 
 	op := enc
-	for _, t := range arrayOf(spec.Get("transform")) {
+	var transforms []jsval.Value
+	if tx := specGet(spec, "transform"); tx.IsTruthy() {
+		transforms = listOf(tx, "spec.transform", "forEach")
+	}
+	for _, t := range transforms {
 		scope.work(1)
 		tx := parseTransform(t, scope)
 		if tx.meta.generates || tx.meta.changes {
@@ -295,12 +336,16 @@ func parseMark(spec jsval.Value, scope *Scope) {
 	// `if (spec.name != null)`: a name of 0 or "" names a data set too.
 	if name := spec.Get("name"); !name.IsNullish() {
 		scope.addData(name.AsString(), newDataScope(scope, store, render, sieve, nil))
-		for _, on := range arrayOf(spec.Get("on")) {
+		var triggers []jsval.Value
+		if on := specGet(spec, "on"); on.IsTruthy() {
+			triggers = listOf(on, "spec.on", "forEach")
+		}
+		for _, on := range triggers {
 			scope.work(1)
-			if on.Get("insert").IsTruthy() || on.Get("remove").IsTruthy() || on.Get("toggle").IsTruthy() {
+			if specGet(on, "insert").IsTruthy() || specGet(on, "remove").IsTruthy() || specGet(on, "toggle").IsTruthy() {
 				perr("Marks only support modify triggers.")
 			}
-			parseTrigger(on, scope, name.AsString())
+			parseTrigger(on, scope, name)
 		}
 	}
 }

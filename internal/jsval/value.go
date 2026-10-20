@@ -98,7 +98,41 @@ func (v Value) arr() *arrayBox { return (*arrayBox)(v.p) }
 func (v Value) obj() *Object   { return (*Object)(v.p) }
 func (v Value) pat() *Pattern  { return (*Pattern)(v.p) }
 
-type arrayBox struct{ items []Value }
+// arrayBox is an array: its elements, and props, the object that holds the
+// named own properties JavaScript lets an array have and its tuple id, nil
+// until a tuple's field is written into it (Fields). Upstream ingests an
+// array row as a tuple like any object: it gets an id, and transforms write
+// their fields into it (a pie's angles, a formula's value). Named
+// properties are what a member read finds before Array.prototype's, and
+// what JSON.stringify, String() and the array's length ignore.
+//
+// The elements are a pointer and a length rather than a slice: nothing grows
+// an array in place, so the capacity word is dropped to make room for props
+// within the 24 bytes the box had. (A box in a parser slab is not rounded up
+// to a size class, so a word more is paid for by every array of a document.)
+type arrayBox struct {
+	ptr   *Value
+	n     int
+	props *Object
+}
+
+// list is the elements, a slice of exactly n of them.
+func (b *arrayBox) list() []Value {
+	if b.ptr == nil {
+		return nil
+	}
+	return unsafe.Slice(b.ptr, b.n)
+}
+
+// set makes items the elements.
+func (b *arrayBox) set(items []Value) {
+	b.n = len(items)
+	if len(items) == 0 {
+		b.ptr = nil
+		return
+	}
+	b.ptr = &items[0]
+}
 
 // Small arrays are allocated together with their elements: one allocation
 // instead of two, which matters for the coordinate pairs of a map.
@@ -146,32 +180,41 @@ func MakeArr(n int) (Value, []Value) {
 		b = &arrayBox{}
 	case n == 1:
 		x := &arrayBox1{}
-		x.items, b = x.buf[:], &x.arrayBox
+		x.set(x.buf[:])
+		b = &x.arrayBox
 	case n == 2:
 		x := &arrayBox2{}
-		x.items, b = x.buf[:], &x.arrayBox
+		x.set(x.buf[:])
+		b = &x.arrayBox
 	case n == 3:
 		x := &arrayBox3{}
-		x.items, b = x.buf[:], &x.arrayBox
+		x.set(x.buf[:])
+		b = &x.arrayBox
 	case n == 4:
 		x := &arrayBox4{}
-		x.items, b = x.buf[:], &x.arrayBox
+		x.set(x.buf[:])
+		b = &x.arrayBox
 	case n == 5:
 		x := &arrayBox5{}
-		x.items, b = x.buf[:], &x.arrayBox
+		x.set(x.buf[:])
+		b = &x.arrayBox
 	case n == 6:
 		x := &arrayBox6{}
-		x.items, b = x.buf[:], &x.arrayBox
+		x.set(x.buf[:])
+		b = &x.arrayBox
 	case n == 7:
 		x := &arrayBox7{}
-		x.items, b = x.buf[:], &x.arrayBox
+		x.set(x.buf[:])
+		b = &x.arrayBox
 	case n == 8:
 		x := &arrayBox8{}
-		x.items, b = x.buf[:], &x.arrayBox
+		x.set(x.buf[:])
+		b = &x.arrayBox
 	default:
-		b = &arrayBox{items: make([]Value, n)}
+		b = &arrayBox{}
+		b.set(make([]Value, n))
 	}
-	return ref(KindArr, unsafe.Pointer(b)), b.items
+	return ref(KindArr, unsafe.Pointer(b)), b.list()
 }
 
 var (
@@ -206,7 +249,11 @@ func Timestamp(epochMillis float64) Value {
 }
 
 // Arr makes an array that takes ownership of items.
-func Arr(items []Value) Value { return ref(KindArr, unsafe.Pointer(&arrayBox{items: items})) }
+func Arr(items []Value) Value {
+	b := &arrayBox{}
+	b.set(items)
+	return ref(KindArr, unsafe.Pointer(b))
+}
 
 // ArrOf makes an array from the given values.
 func ArrOf(items ...Value) Value { return Arr(items) }
@@ -285,14 +332,14 @@ func (v Value) Items() []Value {
 	if v.Kind() != KindArr {
 		return nil
 	}
-	return v.arr().items
+	return v.arr().list()
 }
 
 // Len is the length of an array or the number of keys of an object.
 func (v Value) Len() int {
 	switch v.Kind() {
 	case KindArr:
-		return len(v.arr().items)
+		return len(v.arr().list())
 	case KindObj:
 		return v.obj().Len()
 	}
@@ -315,13 +362,94 @@ func (v Value) PatternOf() *Pattern {
 	return v.pat()
 }
 
-// Get reads a property of an object, answering Undefined when v is not an
-// object or has no such key.
+// Get reads a property of an object (or a named own property of an array),
+// answering Undefined when v is neither or has no such key.
 func (v Value) Get(key string) Value {
-	if v.Kind() != KindObj {
-		return Undefined
+	switch v.Kind() {
+	case KindObj:
+		return v.obj().Lookup(key)
+	case KindArr:
+		if pr := v.arr().props; pr != nil {
+			return pr.Lookup(key)
+		}
 	}
-	return v.obj().Lookup(key)
+	return Undefined
+}
+
+// ArrayProps is the object holding an array's named own properties and its
+// tuple id, nil for an array that has none and for any other value.
+func (v Value) ArrayProps() *Object {
+	if v.Kind() != KindArr {
+		return nil
+	}
+	return v.arr().props
+}
+
+// Fields is the object a tuple's fields are written into, and its tuple id
+// kept in: an object itself, an array's named-property object (made on first
+// use), nil for any other value (a primitive, into which upstream's strict
+// assignment throws).
+func Fields(v Value) *Object {
+	switch v.Kind() {
+	case KindObj:
+		return v.obj()
+	case KindArr:
+		b := v.arr()
+		if b.props == nil {
+			b.props = NewObject(0)
+		}
+		return b.props
+	}
+	return nil
+}
+
+// FieldsFor is Fields for upstream's `t[key] = value` into a tuple: a
+// primitive tuple (a Load transform's rows are not wrapped) throws the
+// TypeError of that strict-mode assignment, raised as a *Thrown panic, which
+// the dataflow logs as the operator's error.
+func FieldsFor(t Value, key string) *Object {
+	if o := Fields(t); o != nil {
+		return o
+	}
+	switch t.Kind() {
+	case KindNull, KindUndefined:
+		of := "undefined"
+		if t.IsNull() {
+			of = "null"
+		}
+		panic(&Thrown{Name: "TypeError", Msg: "Cannot set properties of " + of + " (setting '" + key + "')"})
+	case KindStr, KindNum, KindBool:
+		kind := map[Kind]string{KindStr: "string", KindNum: "number", KindBool: "boolean"}[t.Kind()]
+		panic(&Thrown{Name: "TypeError", Msg: "Cannot create property '" + key + "' on " + kind + " '" + StringPrefix(t, MessageBytes) + "'"})
+	}
+	// A date or a pattern: an object upstream, whose fields jsval does not
+	// hold. The write is lost.
+	return NewObject(0)
+}
+
+// Tuple is the object of a tuple, for reading its fields and its id: an
+// object itself, an array's named-property object (nil while it has none),
+// nil for any other value. Fields is its form for writing.
+func Tuple(v Value) *Object {
+	switch v.Kind() {
+	case KindObj:
+		return v.obj()
+	case KindArr:
+		return v.arr().props
+	}
+	return nil
+}
+
+// CopyArray is a shallow copy of an array: its elements and its named own
+// properties (a copy of them, with the tuple id).
+func CopyArray(v Value) Value {
+	b := v.arr()
+	nv, items := MakeArr(len(b.list()))
+	copy(items, b.list())
+	if b.props != nil {
+		nv.arr().props = b.props.Clone()
+	}
+	return nv
 }
 
 // Index reads an array element, answering Undefined out of range.
@@ -329,7 +457,7 @@ func (v Value) Index(i int) Value {
 	if v.Kind() != KindArr {
 		return Undefined
 	}
-	items := v.arr().items
+	items := v.arr().list()
 	if i < 0 || i >= len(items) {
 		return Undefined
 	}

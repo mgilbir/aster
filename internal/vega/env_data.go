@@ -189,14 +189,29 @@ func modifyProp(b jsval.Value, key string) jsval.Value {
 	return jsval.Undefined
 }
 
+// dataInput is `this.context.data[name].input` of modify() and setdata(),
+// which read it with no check that the data set exists: an unknown name is
+// the TypeError of reading 'input' of undefined (a name only Object.prototype
+// has reads a function, whose input is undefined: the next read fails).
+func (c *rtContext) dataInput(name string) *opNode {
+	roles := c.dataRoles(name)
+	if roles == nil {
+		if jsval.ObjectPrototypeHas(name) {
+			fail("TypeError: Cannot read properties of undefined (reading 'value')")
+		}
+		fail("TypeError: Cannot read properties of undefined (reading 'input')")
+	}
+	input := roles["input"]
+	if input == nil {
+		fail("TypeError: Cannot read properties of undefined (reading 'value')")
+	}
+	return input
+}
+
 // Modify implements expr.DataWriter: vega-functions' modify(name, insert,
 // remove, toggle, modify, values).
 func (c *rtContext) Modify(name string, insert, remove, toggle, modify, values jsval.Value) jsval.Value {
-	roles := c.dataRoles(name)
-	input := roles["input"]
-	if input == nil {
-		return jsval.Num(0)
-	}
+	input := c.dataInput(name)
 	cur, _ := input.value.([]jsval.Value)
 	if !(len(cur) > 0 || insert.IsTruthy() || toggle.IsTruthy()) {
 		return jsval.Num(0)
@@ -301,7 +316,7 @@ func (v *runView) tupleKey(t jsval.Value) uint64 {
 		}
 		fail("TypeError: Cannot read properties of %s (reading 'Symbol(vega_id)')", of)
 	}
-	o := t.ObjValue()
+	o := jsval.Tuple(t)
 	if o == nil {
 		return 0
 	}
@@ -364,7 +379,7 @@ func (v *runView) changeTuples(input *opNode, tuples []jsval.Value, cs *changeSe
 		if cur[v.tupleKey(m.tuple)] <= 0 {
 			continue
 		}
-		o := m.tuple.ObjValue()
+		o := jsval.Fields(m.tuple)
 		if o == nil {
 			// `t[f] = v` on a primitive, in a module's strict code
 			kind := "number"
@@ -418,10 +433,7 @@ func (v *runView) applyChanges(input *opNode, cs *changeSet) {
 // .insert(tuples)`: a tuple the data set holds and the list names again
 // stays where it is, once; the others are appended in the list's order.
 func (c *rtContext) SetData(name string, tuples jsval.Value) jsval.Value {
-	input := c.dataRoles(name)["input"]
-	if input == nil {
-		return jsval.Num(0)
-	}
+	input := c.dataInput(name)
 	cur, _ := input.value.([]jsval.Value)
 	cs := &changeSet{remp: []func(jsval.Value) bool{truthyPredicate}, add: arrayOf(tuples)}
 	out := c.view.changeTuples(input, cur, cs)

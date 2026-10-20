@@ -1,7 +1,6 @@
 package guides
 
 import (
-	"errors"
 	"strings"
 
 	"github.com/mgilbir/aster/internal/jsval"
@@ -25,11 +24,11 @@ type Scope interface {
 // then fall back to the guide styles, which is what a static orient gets via
 // the guide mark's own style lookup.
 func axisFallback(prop string, cfg, axisCfg, style Value) Value {
-	if hasKey(cfg, prop) {
-		return cfg.Get(prop)
+	if cfg.IsTruthy() && hasKey(cfg, prop) {
+		return member(cfg, prop)
 	}
 	if hasKey(axisCfg, prop) {
-		return axisCfg.Get(prop)
+		return member(axisCfg, prop)
 	}
 	var styleProp string
 	switch {
@@ -40,7 +39,7 @@ func axisFallback(prop string, cfg, axisCfg, style Value) Value {
 		case "titleFont", "titleFontSize", "titleFontWeight":
 			styleProp = lowerFirst(prop[5:])
 		}
-		return style.Get(guideTitleStyle).Get(styleProp)
+		return styleProp1(style, guideTitleStyle, styleProp)
 	case strings.HasPrefix(prop, "label"):
 		switch prop {
 		case "labelColor":
@@ -48,29 +47,36 @@ func axisFallback(prop string, cfg, axisCfg, style Value) Value {
 		case "labelFont", "labelFontSize":
 			styleProp = lowerFirst(prop[5:])
 		}
-		return style.Get(guideLabelStyle).Get(styleProp)
+		return styleProp1(style, guideLabelStyle, styleProp)
 	}
 	return jsval.Null
+}
+
+// styleProp1 is style[name][prop]; a prop of no style is undefined, the
+// key `${undefined}`.
+func styleProp1(style Value, name, prop string) Value {
+	if prop == "" {
+		prop = "undefined"
+	}
+	return member(member(style, name), prop)
 }
 
 // lowerFirst is prop[5].toLowerCase() + prop.slice(6) after the prefix.
 func lowerFirst(s string) string { return jsval.LowerFirst(s) }
 
-// keyUnion collects the property names of the given objects.
+// keyUnion is axis-config's keys(): the names `for (key in obj)` enumerates
+// over the truthy objects given, each once, in the order Object.keys lists a
+// plain object's: integer keys ascending first, then the others as first
+// seen.
 func keyUnion(sc Scope, objects ...Value) []string {
-	var keys []string
-	seen := map[string]bool{}
+	m := jsval.NewObject(0)
 	for _, o := range objects {
-		ob := o.ObjValue()
-		for i := 0; i < ob.Len(); i++ {
-			work(sc, 1)
-			if k := ob.KeyAt(i); !seen[k] {
-				seen[k] = true
-				keys = append(keys, k)
-			}
+		if !o.IsTruthy() {
+			continue
 		}
+		forIn(sc, o, func(k string, _ Value) { m.Set(k, jsval.Int(1)) })
 	}
-	return keys
+	return m.Keys()
 }
 
 // axisConfig merges the axis config blocks that apply to one axis, in
@@ -78,19 +84,19 @@ func keyUnion(sc Scope, objects ...Value) []string {
 // axisTop/Bottom/Left/Right, then axisBand for band scales. When the orient is
 // a signal the x/y and orient variants are folded into conditional signal
 // expressions instead.
-func axisConfig(spec Value, sc Scope) (Value, error) {
+func axisConfig(spec Value, sc Scope) Value {
 	cfg := sc.Config()
-	style := cfg.Get("style")
-	axis := cfg.Get("axis")
+	style := member(cfg, "style")
+	axis := member(cfg, "axis")
 	band := jsval.False
-	if sc.ScaleType(spec.Get("scale").AsString()) == "band" {
-		band = cfg.Get("axisBand")
+	if sc.ScaleType(scaleKey(member(spec, "scale"))) == "band" {
+		band = member(cfg, "axisBand")
 	}
-	orient := spec.Get("orient")
+	orient := member(spec, "orient")
 
 	var xy, or Value
 	if isSignal(orient) {
-		axisX, axisY := cfg.Get("axisX"), cfg.Get("axisY")
+		axisX, axisY := member(cfg, "axisX"), member(cfg, "axisY")
 		xyObj := jsval.NewObject(0)
 		// A key builds conditional expressions of its fallbacks: 4 steps.
 		for _, key := range keyUnion(sc, axisX, axisY) {
@@ -99,8 +105,8 @@ func axisConfig(spec Value, sc Scope) (Value, error) {
 		}
 		xy = jsval.Obj(xyObj)
 
-		axisTop, axisBottom := cfg.Get("axisTop"), cfg.Get("axisBottom")
-		axisLeft, axisRight := cfg.Get("axisLeft"), cfg.Get("axisRight")
+		axisTop, axisBottom := member(cfg, "axisTop"), member(cfg, "axisBottom")
+		axisLeft, axisRight := member(cfg, "axisLeft"), member(cfg, "axisRight")
 		orObj := jsval.NewObject(0)
 		for _, key := range keyUnion(sc, axisTop, axisBottom, axisLeft, axisRight) {
 			work(sc, 4)
@@ -112,22 +118,55 @@ func axisConfig(spec Value, sc Scope) (Value, error) {
 		}
 		or = jsval.Obj(orObj)
 	} else {
-		if !orient.IsStr() || orient.StrValue() == "" {
-			return jsval.Undefined, errors.New("axis: missing or invalid orient")
-		}
-		o := orient.StrValue()
 		if isXOrient(orient) {
-			xy = cfg.Get("axisX")
+			xy = member(cfg, "axisX")
 		} else {
-			xy = cfg.Get("axisY")
+			xy = member(cfg, "axisY")
 		}
-		or = cfg.Get("axis" + jsval.UpperFirst(o)) // orient[0].toUpperCase() + orient.slice(1)
+		or = member(cfg, "axis"+orientName(orient))
 	}
 
 	if xy.IsTruthy() || or.IsTruthy() || band.IsTruthy() {
 		// Once per axis, over the whole axis config: the copies of a large
 		// config for many axes are charged key by key.
-		return jsval.Obj(extendWork(sc, jsval.NewObject(0), axis, xy, or, band)), nil
+		return jsval.Obj(extendWork(sc, jsval.NewObject(0), axis, xy, or, band))
 	}
-	return axis, nil
+	return axis
+}
+
+// orientName is `orient[0].toUpperCase() + orient.slice(1)`, the suffix of
+// the config block of a static orient: "bottom" names axisBottom, and as
+// upstream reads any value so, ["bottom"] names axisBOTTOM and ["a", "b"]
+// axisAb. A value with no first element that is a string (a number, "",
+// [], {}, [1]) is upstream's TypeError.
+func orientName(orient Value) string {
+	if orient.IsNullish() {
+		member(orient, "0")
+	}
+	first := member(orient, "0")
+	if first.IsNullish() {
+		throw("Cannot read properties of %s (reading 'toUpperCase')", first.Kind())
+	}
+	if !first.IsStr() {
+		throw("orient[0].toUpperCase is not a function")
+	}
+	switch orient.Kind() {
+	case jsval.KindStr:
+		return jsval.UpperFirst(orient.StrValue())
+	case jsval.KindArr:
+		// String(orient.slice(1)): the rest joined by commas
+		return jsval.JSUpper(first.StrValue()) + jsval.Arr(orient.Items()[1:]).AsString()
+	}
+	throw("orient.slice is not a function")
+	return ""
+}
+
+// scaleKey is the name `scales[spec.scale]` looks up: the property key of
+// the value (["x"] names x).
+func scaleKey(v Value) string {
+	k, ok := v.PropertyKey(jsval.MaxStringLength)
+	if !ok {
+		throw("guide: scale name longer than %d bytes", jsval.MaxStringLength)
+	}
+	return k
 }

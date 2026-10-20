@@ -1,6 +1,9 @@
 package vega
 
 import (
+	"errors"
+	"strings"
+
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/geo"
 	"github.com/mgilbir/aster/internal/jsval"
@@ -39,7 +42,7 @@ func (c *rtContext) GeoArea(projection, geojson, group jsval.Value) jsval.Value 
 		}
 		return jsval.Num(p.Path().Area(geojson))
 	}
-	a, err := geo.GeoArea(c.view.ctx, geojson)
+	a, err := geo.GeoAreaWith(c.view.ctx, c.view.geoState(), geojson)
 	if err != nil {
 		panic(&budget.Stop{Err: err}) // a bound: Program.Eval returns it
 	}
@@ -61,8 +64,12 @@ func (c *rtContext) GeoBounds(projection, geojson, group jsval.Value) jsval.Valu
 		}
 		return boundsValue(p.Path().Bounds(geojson))
 	}
-	b, err := geo.GeoBounds(c.view.ctx, geojson)
+	b, err := geo.GeoBoundsWith(c.view.ctx, c.view.geoState(), geojson)
 	if err != nil {
+		var th *jsval.Thrown
+		if errors.As(err, &th) {
+			panic(th) // an exception of d3-geo's bounds
+		}
 		panic(&budget.Stop{Err: err}) // a bound: Program.Eval returns it
 	}
 	return boundsValue(b)
@@ -77,7 +84,7 @@ func (c *rtContext) GeoCentroid(projection, geojson, group jsval.Value) jsval.Va
 		}
 		return pt(p.Path().Centroid(geojson))
 	}
-	cen, err := geo.GeoCentroid(c.view.ctx, geojson)
+	cen, err := geo.GeoCentroidWith(c.view.ctx, c.view.geoState(), geojson)
 	if err != nil {
 		panic(&budget.Stop{Err: err}) // a bound: Program.Eval returns it
 	}
@@ -129,7 +136,15 @@ func (c *rtContext) PathShape(path jsval.Value) jsval.Value {
 	if !path.IsStr() {
 		return c.newShape(pathShapeSource, func(ctx scene.PathContext, _ *scene.Item) string {
 			if ctx == nil {
-				return c.g.walk.String(path)
+				// `context ? ... : path`: the value itself, which the clip
+				// writer tests for truthiness and writes as its String()
+				if !path.IsTruthy() {
+					return ""
+				}
+				if s := c.g.walk.String(path); s != "" {
+					return s
+				}
+				return scene.TruthyEmptyPath
 			}
 			if path.IsNullish() {
 				of := "undefined"
@@ -141,11 +156,28 @@ func (c *rtContext) PathShape(path jsval.Value) jsval.Value {
 			panic(&jsval.Thrown{Name: "TypeError", Msg: "path.match is not a function"})
 		})
 	}
-	fn, err := scene.PathFuncFromString(path.StrValue())
-	if err != nil {
-		panic(&budget.Stop{Err: err}) // a bound: Program.Eval returns it
-	}
-	return c.newShape(pathShapeSource, func(ctx scene.PathContext, _ *scene.Item) string { return fn(ctx) })
+	// `p = p || pathParse(path)` on the first draw: a path pathParse rejects
+	// throws then, and again at every draw (p stays unset).
+	d := path.StrValue()
+	var cmds []scene.PathCmd
+	parsed := false
+	return c.newShape(pathShapeSource, func(ctx scene.PathContext, _ *scene.Item) string {
+		if ctx == nil {
+			return d
+		}
+		if !parsed {
+			var err error
+			if cmds, err = scene.ParsePath(d); err != nil {
+				if errors.Is(err, budget.ErrLimit) {
+					panic(&budget.Stop{Err: err})
+				}
+				panic(&jsval.Thrown{Name: "Error", Msg: strings.TrimPrefix(err.Error(), "scene: ")})
+			}
+			parsed = true
+		}
+		_ = scene.RenderPath(ctx, cmds, 0, 0, 1, 1)
+		return ""
+	})
 }
 
 // geoShapeSource and pathShapeSource are the source text of the functions
@@ -182,15 +214,26 @@ func shapeOf(h jsval.Value) scene.ShapeFunc {
 
 // TreePath implements expr.TreeProvider.
 func (c *rtContext) TreePath(name string, source, target jsval.Value) jsval.Value {
-	t := c.treeOf(name)
-	if t == nil {
+	t, ok := c.treeLookup(name)
+	if !ok {
 		return jsval.Undefined
 	}
 	// The tree's lookup object is keyed by String(key), dates in the view's
 	// zone (hierarchy.Stratify).
-	s, d := t.NodeByKey(c.view.jsString(source)), t.NodeByKey(c.view.jsString(target))
-	if s == nil || d == nil {
+	ks, kd := c.view.jsString(source), c.view.jsString(target)
+	s, d := t.nodeByKey(ks), t.nodeByKey(kd)
+	// `nodes[source]` of a name every plain object inherits is that member:
+	// truthy, and no node.
+	sInherited := s == nil && jsval.ObjectPrototypeHas(ks)
+	dInherited := d == nil && jsval.ObjectPrototypeHas(kd)
+	if s == nil && !sInherited || d == nil && !dInherited {
 		return jsval.Undefined
+	}
+	if sInherited {
+		panic(&jsval.Thrown{Name: "TypeError", Msg: "s.path is not a function"})
+	}
+	if dInherited {
+		panic(&jsval.Thrown{Name: "TypeError", Msg: "b.ancestors is not a function"})
 	}
 	path := s.Path(d)
 	c.view.chargeItems(len(path))
@@ -202,12 +245,16 @@ func (c *rtContext) TreePath(name string, source, target jsval.Value) jsval.Valu
 }
 
 func (c *rtContext) TreeAncestors(name string, node jsval.Value) jsval.Value {
-	t := c.treeOf(name)
-	if t == nil {
+	t, ok := c.treeLookup(name)
+	if !ok {
 		return jsval.Undefined
 	}
-	n := t.NodeByKey(c.view.jsString(node))
+	k := c.view.jsString(node)
+	n := t.nodeByKey(k)
 	if n == nil {
+		if jsval.ObjectPrototypeHas(k) {
+			panic(&jsval.Thrown{Name: "TypeError", Msg: "n.ancestors is not a function"})
+		}
 		return jsval.Undefined
 	}
 	anc := n.Ancestors()
@@ -219,10 +266,32 @@ func (c *rtContext) TreeAncestors(name string, node jsval.Value) jsval.Value {
 	return jsval.Arr(out)
 }
 
-func (c *rtContext) treeOf(name string) *hierarchy.Tree {
+// treeLookup is the lookup table of a dataset's tree (`tree.root.lookup ||
+// {}`): ok is false for a dataset the context does not have, and the table
+// of a dataset with no tree is empty.
+func (c *rtContext) treeLookup(name string) (treeTable, bool) {
 	n := c.dataNode(name, "values")
 	if n == nil {
+		return treeTable{}, false
+	}
+	return treeTable{n.tree}, true
+}
+
+// treeTable is a tree's lookup object; the zero value is `{}`.
+type treeTable struct{ tree *hierarchy.Tree }
+
+func (t treeTable) nodeByKey(k string) *hierarchy.Node {
+	if t.tree == nil {
 		return nil
 	}
-	return n.tree
+	return t.tree.NodeByKey(k)
+}
+
+// geoState is the module state of d3-geo's area, bounds and centroid for this
+// render: upstream keeps it in module variables shared by every call.
+func (v *runView) geoState() *geo.MeasureState {
+	if v.measure == nil {
+		v.measure = geo.NewMeasureState()
+	}
+	return v.measure
 }

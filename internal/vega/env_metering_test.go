@@ -34,6 +34,8 @@ type envCall struct {
 	decls string
 	call  string
 	k     int // the calls a row of the first render; 16 when 0
+	// unreachable says why a render cannot call the method: nothing to meter.
+	unreachable string
 }
 
 // envSpec has a data set d of envRows rows, a projection p, scales x (band,
@@ -62,39 +64,42 @@ func envSpec(c envCall, k int) string {
 // envCalls has a case for every method of the expression environment
 // (rtContext): each calls the method as hostile repetition would.
 var envCalls = map[string]envCall{
-	"Signal":         {call: "s"},
-	"Data":           {call: "data('d')"},
-	"InData":         {call: "indata('d', 'a', 1)"},
-	"IsTuple":        {call: "isTuple(datum)"},
-	"Log":            {call: "warn('w')"},
-	"EventFunction":  {call: "x()"},
-	"ContainerSize":  {call: "containerSize()"},
-	"Screen":         {call: "screen()"},
-	"WindowSize":     {call: "windowSize()"},
-	"Encode":         {call: "encode(datum, 'update', 1)"},
-	"InScope":        {call: "inScope(datum)"},
-	"Intersect":      {call: "intersect([0,0,1,1])"},
-	"IntersectLasso": {call: "intersectLasso('m', [])"},
-	"GeoArea":        {call: "geoArea('p', {type: 'Sphere'})"},
-	"GeoBounds":      {call: "geoBounds('p', {type: 'Sphere'})"},
-	"GeoCentroid":    {call: "geoCentroid('p', {type: 'Sphere'})"},
-	"GeoScale":       {call: "geoScale('p')"},
-	"GeoTranslate":   {call: "geoTranslate('p')"},
-	"GeoShape":       {call: "geoShape('p', {type: 'Sphere'})", k: 64},
-	"PathShape":      {call: "pathShape('M0,0L1,1')", k: 64},
-	"TreePath":       {call: "treePath('tr', 5, 400)"},
-	"TreeAncestors":  {call: "treeAncestors('tr', 400)"},
-	"Scale":          {call: "scale('x', datum.a)"},
-	"Invert":         {call: "invert('x', [0, 100])"},
-	"Domain":         {call: "domain('x')"},
-	"Range":          {call: "range('x')"},
-	"Bandwidth":      {call: "bandwidth('x')"},
-	"Copy":           {call: "copy('x')"},
-	"Gradient":       {call: "gradient('c', [0,0], [1,0], 300)", k: 4},
-	"Modify":         {decls: `,{"name":"m","values":[{"a":1}]}`, call: "modify('m', null, data('d'))", k: 4},
-	"SetData":        {decls: `,{"name":"m","values":[{"a":1}]}`, call: "setdata('m', data('d'))", k: 4},
-	"UnitCounts":     {call: "vlSelectionTest('st', datum, 'intersect')"},
-	"Modify/values":  {decls: `,{"name":"m","values":[{"a":1}]}`, call: "modify('m', null, null, null, datum, {a: 2, b: 3})"},
+	"Signal":          {call: "s"},
+	"Data":            {call: "data('d')"},
+	"InData":          {call: "indata('d', 'a', 1)"},
+	"IsTuple":         {call: "isTuple(datum)"},
+	"Log":             {call: "warn('w')"},
+	"EventFunction":   {call: "x()", unreachable: "a headless event never has the vega extension: x() and the rest throw before the method"},
+	"ContainerSize":   {call: "containerSize()"},
+	"Screen":          {call: "screen()"},
+	"WindowSize":      {call: "windowSize()"},
+	"Encode":          {call: "encode(datum, 'update', 1)"},
+	"InScope":         {call: "inScope(datum)"},
+	"Intersect":       {call: "intersect([0,0,1,1])"},
+	"IntersectLasso":  {call: "intersectLasso('m', [])"},
+	"GeoArea":         {call: "geoArea('p', {type: 'Sphere'})"},
+	"GeoBounds":       {call: "geoBounds('p', {type: 'Sphere'})"},
+	"GeoCentroid":     {call: "geoCentroid('p', {type: 'Sphere'})"},
+	"GeoScale":        {call: "geoScale('p')"},
+	"GeoTranslate":    {call: "geoTranslate('p')"},
+	"GeoShape":        {call: "geoShape('p', {type: 'Sphere'})", k: 64},
+	"PathShape":       {call: "pathShape('M0,0L1,1')", k: 64},
+	"TreePath":        {call: "treePath('tr', 5, 400)"},
+	"TreeAncestors":   {call: "treeAncestors('tr', 400)"},
+	"Scale":           {call: "scale('x', datum.a)"},
+	"Invert":          {call: "invert('x', [0, 100])"},
+	"Domain":          {call: "domain('x')"},
+	"Range":           {call: "range('x')"},
+	"Bandwidth":       {call: "bandwidth('x')"},
+	"Copy":            {call: "copy('x')"},
+	"EncodeScale":     {call: "_scale('x', datum.a)"},
+	"EncodeRange":     {call: "_range('x')"},
+	"EncodeBandwidth": {call: "_bandwidth('x')"},
+	"Gradient":        {call: "gradient('c', [0,0], [1,0], 300)", k: 4},
+	"Modify":          {decls: `,{"name":"m","values":[{"a":1}]}`, call: "modify('m', null, data('d'))", k: 4},
+	"SetData":         {decls: `,{"name":"m","values":[{"a":1}]}`, call: "setdata('m', data('d'))", k: 4},
+	"UnitCounts":      {call: "vlSelectionTest('st', datum, 'intersect')"},
+	"Modify/values":   {decls: `,{"name":"m","values":[{"a":1}]}`, call: "modify('m', null, null, null, datum, {a: 2, b: 3})"},
 }
 
 // probeRender renders the case with k calls a row and probes it.
@@ -148,6 +153,9 @@ func TestEveryEnvMethodIsMetered(t *testing.T) {
 	}
 	for _, name := range sortedKeys(envCalls) {
 		c := envCalls[name]
+		if c.unreachable != "" {
+			continue
+		}
 		k := c.k
 		if k == 0 {
 			k = 16

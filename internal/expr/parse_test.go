@@ -292,17 +292,20 @@ func TestCompileErrors(t *testing.T) {
 func TestDeps(t *testing.T) {
 	type deps = Deps
 	for src, want := range map[string]deps{
-		"a + b * a":                                {Signals: []string{"a", "b"}},
-		"datum.x + datum['y z'] + datum.o.p":       {Fields: []string{"x", "y z", "o"}},
-		"datum[k]":                                 {Signals: []string{"k"}},
-		"datum[0] + datum[\"q\"]":                  {Fields: []string{"0", "q"}},
-		"PI * NaN + E":                             {},
-		"{a: b, 'c': d}":                           {Signals: []string{"b", "d"}},
-		"abs(1)":                                   {},
-		"abs(x) + max(y, z.w)":                     {Signals: []string{"x", "y", "z"}},
-		"data('t')":                                {Data: []string{"t"}},
-		"length(data('t')) + length(data('u'))":    {Data: []string{"t", "u"}},
-		"indata('t', 'f', datum.v)":                {Data: []string{"t"}, RequiredData: []string{"t"}, Indexes: []IndexDep{{"t", "f"}}, Fields: []string{"v"}},
+		"a + b * a":                             {Signals: []string{"a", "b"}},
+		"datum.x + datum['y z'] + datum.o.p":    {Fields: []string{"x", "y z", "o"}},
+		"datum[k]":                              {Signals: []string{"k"}},
+		"datum[0] + datum[\"q\"]":               {Fields: []string{"0", "q"}},
+		"PI * NaN + E":                          {},
+		"{a: b, 'c': d}":                        {Signals: []string{"b", "d"}},
+		"abs(1)":                                {},
+		"abs(x) + max(y, z.w)":                  {Signals: []string{"x", "y", "z"}},
+		"data('t')":                             {Data: []string{"t"}},
+		"length(data('t')) + length(data('u'))": {Data: []string{"t", "u"}},
+		"indata('t', 'f', datum.v)":             {RequiredData: []string{"t"}, Indexes: []IndexDep{{"t", "f"}}, Fields: []string{"v"}},
+		// in the order of each index's last use: the last indata() of a
+		// field names upstream's '@f' parameter
+		"indata('a', 'f', 1) + indata('b', 'f', 1) + indata('a', 'f', 1)": {RequiredData: []string{"a", "b"}, Indexes: []IndexDep{{"b", "f"}, {"a", "f"}}},
 		"scale('x', datum.v)":                      {Scales: []string{"x"}, Fields: []string{"v"}},
 		"scale(name, 1)":                           {Signals: []string{"name"}, AllScales: true},
 		"bandwidth('x') + range('y')[0]":           {Scales: []string{"x", "y"}},

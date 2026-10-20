@@ -118,7 +118,7 @@ func (v *runView) holdCreated(n *opNode, before int64, out []jsval.Value) {
 	var created, createdEx, passedEx int64
 	for i, t := range out {
 		v.g.rows(i, len(out), 1)
-		o := t.ObjValue()
+		o := jsval.Tuple(t)
 		if o == nil {
 			continue
 		}
@@ -245,7 +245,7 @@ func aliases(out []jsval.Value, in *flowPulse) bool {
 // unheld reports a tuple of out that no operator holds (see checkHeld).
 func unheld(out []jsval.Value) bool {
 	for _, t := range out {
-		if o := t.ObjValue(); o != nil && o.TupleID() == 0 {
+		if o := jsval.Tuple(t); o != nil && o.TupleID() == 0 {
 			return true
 		}
 	}

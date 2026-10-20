@@ -314,6 +314,13 @@ func NewFloor(z Zone, units []string, step float64) *Floorer {
 	if s == 0 || math.IsNaN(s) {
 		s = 1
 	}
+	return NewFloorExact(z, units, s)
+}
+
+// NewFloorExact is NewFloor for a step the caller has already taken through
+// `step || 1`: a step that is NaN or 0 stays so (a truthy array or string
+// whose number is NaN floors to NaN, one whose number is 0 does not step).
+func NewFloorExact(z Zone, units []string, s float64) *Floorer {
 	var b string
 	if len(units) > 0 {
 		b = units[len(units)-1]
@@ -556,6 +563,13 @@ func Bin(lo, hi, maxbins float64) BinResult {
 	if max == 0 || math.IsNaN(max) {
 		max = 40
 	}
+	return BinExact(lo, hi, max)
+}
+
+// BinExact is Bin for a maxbins the caller has already taken through
+// `maxbins || 40`: a NaN or 0 that is left (a truthy array, object or string)
+// is used as it is.
+func BinExact(lo, hi, max float64) BinResult {
 	span := hi - lo
 	if math.IsNaN(span) {
 		span = 0 // vega-util span(): NaN || 0

@@ -24,6 +24,8 @@ func (it *Item) setProp(l *jsonLoader, k string, val jsval.Value) (bool, error) 
 	w := it.Walker()
 	if rawNumeric(k) {
 		it.setRaw(k, val)
+	} else if rawString(k) {
+		it.setRawStr(k, val)
 	}
 	switch k {
 	case "x":
@@ -92,18 +94,25 @@ func (it *Item) setProp(l *jsonLoader, k string, val jsval.Value) (bool, error) 
 	case "outerRadius":
 		it.geomW().OuterRadius = numOf(val)
 	case "shape":
-		if val.IsObj() {
+		switch {
+		case l != nil && val.IsObj():
+			// A recorded scene carries a shape generator as an object.
 			fn, err := pathFuncFromValue(w, val)
 			if err != nil {
 				return true, err
 			}
 			it.Shape.Func = func(ctx PathContext, _ *Item) string { return fn(ctx) }
-		} else {
+		case shapeFuncOf(val) != nil:
+			it.Shape.Func = shapeFuncOf(val)
+		default:
+			// Any other value is a symbol name or path, as given (see Raw);
+			// a shape mark has no generator in it.
 			it.Shape.Name = strOf(w, val)
 		}
 	case "size":
 		it.Size = numOf(val)
 	case "path":
+		it.setRawStr(k, val)
 		// item.path = value: a nullish path clears an earlier one (the
 		// voronoi transform sets a degenerate cell's path to null on a later
 		// run), and the SVG writer then emits no d attribute.
@@ -122,19 +131,16 @@ func (it *Item) setProp(l *jsonLoader, k string, val jsval.Value) (bool, error) 
 		it.lineW().Tension = numOf(val)
 	case "orient":
 		it.lineW().Orient = strOfTruthy(w, val)
+		it.keepRawOrient(val)
 	case "defined":
 		it.Defined = FalseOf(val)
 		it.setRawTri(k, val)
 	case "text":
 		it.textW().Text = val
 	case "font":
-		it.textW().Font = strOf(w, val)
 		// An array (Vega-Lite writes [] for a null title font) is truthy: the
-		// attribute is its text, with no sans-serif default.
-		delete(it.Raw, "font")
-		if val.IsArr() || val.IsObj() {
-			it.setRaw("font", val)
-		}
+		// attribute is its text, with no sans-serif default (see Raw).
+		it.textW().Font = strOf(w, val)
 	case "fontSize":
 		it.textW().FontSize = numOf(val)
 	case "fontWeight":
@@ -177,6 +183,7 @@ func (it *Item) setProp(l *jsonLoader, k string, val jsval.Value) (bool, error) 
 		// The renderer sanitizes the href with vega-loader, whose first step
 		// is uri.replace(...): only a string can be a link, any other value
 		// (a number, a date) rejects and renders none.
+		it.setRawStr(k, val)
 		it.linkW().Href = ""
 		if val.IsStr() {
 			it.linkW().Href = val.StrValue()
@@ -197,14 +204,21 @@ func (it *Item) setProp(l *jsonLoader, k string, val jsval.Value) (bool, error) 
 	case "datum":
 		it.Datum = val
 	case "clip":
-		if val.IsObj() {
+		switch {
+		case l != nil && val.IsObj():
+			// A recorded scene carries a clip path generator as an object.
 			fn, err := pathFuncFromValue(w, val)
 			if err != nil {
 				return true, err
 			}
 			it.Clip, it.ClipPath = Yes, fn
-		} else {
-			it.Clip = triOf(val)
+		case shapeFuncOf(val) != nil:
+			// isFunction(clip): the path is clip(null).
+			fn := shapeFuncOf(val)
+			it.Clip, it.ClipPath = Yes, func(ctx PathContext) string { return fn(ctx, nil) }
+		default:
+			// Any other value clips to the group's box when truthy.
+			it.Clip, it.ClipPath = triOf(val), nil
 		}
 	case "noBound":
 		it.NoBound = val.IsTruthy()
@@ -441,17 +455,121 @@ func gradientValue(g *Gradient) jsval.Value {
 	return jsval.Obj(o)
 }
 
-// rawNumeric lists the numeric properties whose non-numeric values upstream
-// can observe: through a truthiness guard (angle) or by writing String(value)
-// to the SVG (positions in transforms, the style attributes).
+// shapeFuncOf is the shape generator a function value carries (a geoShape
+// or pathShape result), or nil.
+func shapeFuncOf(v jsval.Value) ShapeFunc {
+	impl, _ := jsval.FunctionImpl(v)
+	f, _ := impl.(ShapeFunc)
+	return f
+}
+
+// rawNumeric lists the numeric properties: every one keeps the value it was
+// given when that is not a number (see Item.Raw), since upstream stores it as
+// given and every reader (a template string, `+`, a comparison, `!= null`,
+// an expression's item.x) sees that value.
 func rawNumeric(k string) bool {
 	switch k {
-	case "angle", "strokeWidth", "strokeOpacity", "fillOpacity", "opacity", "strokeDashOffset",
-		"strokeMiterLimit", "x", "y", "width", "height", "cornerRadius", "cornerRadiusTopLeft",
-		"cornerRadiusTopRight", "cornerRadiusBottomRight", "cornerRadiusBottomLeft":
+	case "x", "y", "x2", "y2", "width", "height", "opacity", "fillOpacity", "strokeOpacity",
+		"strokeWidth", "strokeMiterLimit", "strokeDashOffset", "strokeOffset", "cornerRadius",
+		"cornerRadiusTopLeft", "cornerRadiusTopRight", "cornerRadiusBottomLeft",
+		"cornerRadiusBottomRight", "startAngle", "endAngle", "padAngle", "innerRadius",
+		"outerRadius", "size", "scaleX", "scaleY", "tension", "fontSize", "dx", "dy", "angle",
+		"radius", "theta", "limit", "lineHeight", "zindex":
 		return true
 	}
 	return false
+}
+
+// rawString lists the string properties: every one keeps the value it was
+// given when that is not a non-empty string (see Item.Raw). Upstream compares
+// some strictly (`baseline === 'top'` fails for ['top']), writes any value but
+// null and undefined to the SVG (an empty font-weight is an attribute), and
+// expressions read them back as given.
+func rawString(k string) bool {
+	switch k {
+	case "fill", "stroke", "align", "baseline", "strokeCap", "strokeJoin", "blend", "shape", "interpolate", "orient",
+		"font", "fontWeight", "fontStyle", "fontVariant", "lineBreak", "ellipsis", "dir", "url",
+		"cursor", "description", "ariaRole", "ariaRoleDescription":
+		return true
+	}
+	return false
+}
+
+// setRawStr records the value of a string property when it is not a
+// non-empty string, and forgets an earlier one when it is.
+func (it *Item) setRawStr(k string, val jsval.Value) {
+	if val.IsStr() && val.StrValue() != "" {
+		if it.Raw != nil {
+			delete(it.Raw, k)
+		}
+		return
+	}
+	if val.IsUndefined() {
+		delete(it.Raw, k)
+		return
+	}
+	if it.Raw == nil {
+		it.Raw = make(map[string]jsval.Value, 1)
+	}
+	it.Raw[k] = val
+}
+
+// StrictStr is the value of a string property for a strict comparison
+// (`item.baseline === 'top'`): the string, or "" when the property holds
+// anything but a non-empty string, which equals none of the words upstream
+// compares with.
+func (it *Item) StrictStr(prop, s string) string {
+	if it.Raw != nil {
+		if _, ok := it.Raw[prop]; ok {
+			return ""
+		}
+	}
+	return s
+}
+
+// TruthyStr is a string property read for its truthiness (`item.ellipsis ||
+// ...`, `item.fontStyle ? ... : ”`): its String when truthy, else "".
+func (it *Item) TruthyStr(prop, s string) string {
+	if it.Raw != nil {
+		if v, ok := it.Raw[prop]; ok && !v.IsTruthy() {
+			return ""
+		}
+	}
+	return s
+}
+
+// StrTruthy is the truthiness of a string property as it was given: a value
+// that prints empty ([]) is truthy where its text is not.
+func (it *Item) StrTruthy(prop, s string) bool {
+	if it.Raw != nil {
+		if v, ok := it.Raw[prop]; ok {
+			return v.IsTruthy()
+		}
+	}
+	return s != ""
+}
+
+// StyleStr is a string property as the SVG renderer writes it (`if (value
+// != null) s[name] = value`): its String, and false only for null and
+// undefined, so an empty string is written.
+func (it *Item) StyleStr(prop, s string) (string, bool) {
+	if it.Raw != nil {
+		if v, ok := it.Raw[prop]; ok {
+			return s, !v.IsNullish()
+		}
+	}
+	return s, s != ""
+}
+
+// StrictNum reports `item[prop] === x` for a numeric property: false when it
+// holds anything but a number.
+func (it *Item) StrictNum(prop string, n Num, x float64) bool {
+	if it.Raw != nil {
+		if _, ok := it.Raw[prop]; ok {
+			return false
+		}
+	}
+	return n.Set() && n.Val() == x
 }
 
 // truthyProp is the truthiness of a numeric property as it was given: a word
@@ -487,13 +605,17 @@ func (it *Item) setRaw(k string, val jsval.Value) {
 			return
 		}
 		fallthrough
-	case jsval.KindStr, jsval.KindBool, jsval.KindArr:
+	case jsval.KindStr, jsval.KindBool, jsval.KindArr, jsval.KindNull, jsval.KindTimestamp:
+		// a Date keeps its object (+ concatenates its String); null too: it is unset like undefined for `!= null`, but
+		// arithmetic and comparisons read it as 0 (`o.y2 - o.y`).
 		if it.Raw == nil {
 			it.Raw = make(map[string]jsval.Value, 1)
 		}
 		it.Raw[k] = val
 	default:
-		delete(it.Raw, k)
+		if it.Raw != nil {
+			delete(it.Raw, k)
+		}
 	}
 }
 
@@ -510,6 +632,14 @@ func (it *Item) setRawTri(k string, val jsval.Value) {
 		it.Raw = make(map[string]jsval.Value, 1)
 	}
 	it.Raw[k] = val
+}
+
+// ForgetRaw drops the value a property was given, for a caller that assigns
+// the typed field itself (the layout's item.x = v), which replaces it.
+func (it *Item) ForgetRaw(prop string) {
+	if it.Raw != nil {
+		delete(it.Raw, prop)
+	}
 }
 
 // RawValue returns the non-numeric value a numeric property was given, if any

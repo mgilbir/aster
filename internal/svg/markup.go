@@ -234,17 +234,22 @@ func appendEscaped(dst []byte, s string, attr bool) []byte {
 	return append(dst, s[start:]...)
 }
 
-// blendModes are the CSS mix-blend-mode keywords; any other blend value is
-// dropped rather than written into the style attribute.
-var blendModes = map[string]lit{
-	"normal": "normal", "multiply": "multiply", "screen": "screen", "overlay": "overlay",
-	"darken": "darken", "lighten": "lighten", "color-dodge": "color-dodge", "color-burn": "color-burn",
-	"hard-light": "hard-light", "soft-light": "soft-light", "difference": "difference",
-	"exclusion": "exclusion", "hue": "hue", "saturation": "saturation", "color": "color",
-	"luminosity": "luminosity",
+// cssValueSafe reports a value that can be written into a CSS declaration
+// (the style attribute's mix-blend-mode) as upstream writes it without
+// becoming more than that one value: no character that ends the declaration
+// or the block (; { }), starts a function such as url() or another property
+// (( ) :), escapes another character (\) or opens a string or a comment
+// (" ' /), and no control character. The attribute escaping guards the
+// markup; this guards the CSS. A value that fails is dropped, as no keyword
+// would be: upstream writes it, and the engine does not.
+func cssValueSafe(s string) bool {
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case c < 0x20 || c == 0x7f:
+			return false
+		case c == ';' || c == '{' || c == '}' || c == '(' || c == ')' || c == ':' || c == '\\' || c == '"' || c == '\'' || c == '/':
+			return false
+		}
+	}
+	return true
 }
-
-// blendMode is the CSS keyword for a blend value, "" for one that is not a
-// keyword. The style attribute is CSS, so the keyword written is the table's
-// own constant, never the spec's text.
-func blendMode(blend string) lit { return blendModes[blend] }
