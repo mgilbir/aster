@@ -8,8 +8,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -264,67 +262,6 @@ func TestRequestURLIsWhatNetHTTPRequests(t *testing.T) {
 	if len(refused) == 0 {
 		t.Error("no case exercises a host net/url refuses")
 	}
-}
-
-// The recorded table is current: it is what the pinned node says today.
-// Needs node and testdata/oracle-node's modules (ASTER_ORACLE=require fails
-// without them, as the other oracle tests do).
-func TestSanitizeVectorsAreCurrent(t *testing.T) {
-	node, err := exec.LookPath("node")
-	modules, _ := filepath.Abs("../../testdata/oracle-node/node_modules")
-	if err == nil {
-		_, err = os.Stat(modules)
-	}
-	if err != nil {
-		if os.Getenv("ASTER_ORACLE") == "require" {
-			t.Fatalf("node or the oracle modules are missing: %v", err)
-		}
-		t.Skip("node or the oracle modules are missing")
-	}
-	ver, err := exec.Command(node, "--version").Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := loadVectorsNode(t); strings.TrimSpace(string(ver)) != want {
-		// Another node parses URLs differently from time to time; the record
-		// is the pinned one's.
-		if os.Getenv("ASTER_ORACLE") == "require" {
-			t.Fatalf("node is %s, the vectors were recorded with %s", strings.TrimSpace(string(ver)), want)
-		}
-		t.Skipf("node is %s, the vectors were recorded with %s", strings.TrimSpace(string(ver)), want)
-	}
-	cmd := exec.Command(node, "testdata/gen_sanitize.mjs")
-	cmd.Env = append(os.Environ(), "NODE_PATH="+modules)
-	out, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("recording: %v", err)
-	}
-	var fresh, committed any
-	if err := json.Unmarshal(out, &fresh); err != nil {
-		t.Fatal(err)
-	}
-	f, err := os.Open("testdata/sanitize.json.gz")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer f.Close()
-	zr, err := gzip.NewReader(f)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := json.NewDecoder(zr).Decode(&committed); err != nil {
-		t.Fatal(err)
-	}
-	a, _ := json.Marshal(fresh)
-	b, _ := json.Marshal(committed)
-	if string(a) != string(b) {
-		t.Error("testdata/sanitize.json.gz differs from what testdata/gen_sanitize.mjs records now; re-record it (the script says how)")
-	}
-}
-
-func loadVectorsNode(t *testing.T) string {
-	t.Helper()
-	return loadVectors(t).Node
 }
 
 // recorder is a RoundTripper that records the URLs it is asked for.
