@@ -42,6 +42,10 @@ type writer struct {
 	// for tests that check the output parses back to exactly that.
 	skel *[]string
 
+	// walk is the call's Walker, with which a value is written as text
+	// (a date in the call's zone, a value nested too deep ends the call).
+	walk jsval.Walker
+
 	ctx  context.Context
 	max  int   // the bound on len(buf), 0 for none
 	poll int   // the size past which ctx is polled next
@@ -242,15 +246,16 @@ func (w *writer) valJS(v jsval.Value) {
 	case v.IsArr():
 		w.valArray(v, 0)
 	default:
-		w.valStr(v.AsString())
+		w.valStr(w.walk.String(v))
 	}
 }
 
 // valArray is valJS of an array at the given nesting depth: what
-// jsval.Value.AsString gives, Array.prototype.join's text with nullish
-// elements empty and nothing past jsval.MaxValueDepth.
+// Walker.String gives, Array.prototype.join's text with nullish elements
+// empty, and a value past jsval.MaxValueDepth ends the call as it does there.
 func (w *writer) valArray(v jsval.Value, depth int) {
 	if depth > jsval.MaxValueDepth {
+		w.walk.DepthExceeded()
 		return
 	}
 	for i, it := range v.Items() {
@@ -265,10 +270,11 @@ func (w *writer) valArray(v jsval.Value, depth int) {
 		case it.IsArr():
 			w.valArray(it, depth+1)
 		case depth+1 > jsval.MaxValueDepth:
+			w.walk.DepthExceeded()
 		case it.IsNum():
 			w.valNum(it.NumValue())
 		default:
-			w.valStr(it.AsString())
+			w.valStr(w.walk.String(it))
 		}
 	}
 }
@@ -331,8 +337,10 @@ func (w *writer) text(s string) {
 //
 // Deliberate divergence from upstream, which escapes nothing else: characters
 // XML 1.0 forbids (C0 controls other than tab, LF and CR, U+FFFE, U+FFFF) are
-// dropped and invalid UTF-8 (including lone surrogates) becomes U+FFFD, so the
-// output is always well-formed XML whatever the data holds.
+// dropped and invalid UTF-8 becomes U+FFFD, a byte at a time, so the output
+// is always well-formed XML whatever the data holds. A lone surrogate, which
+// a string holds as three WTF-8 bytes, becomes one U+FFFD, as JavaScript's
+// UTF-8 encoding of the document writes it.
 func appendEscaped(dst []byte, s string, attr bool) []byte {
 	start := 0
 	for i := 0; i < len(s); {
@@ -380,6 +388,9 @@ func appendEscaped(dst []byte, s string, attr bool) []byte {
 			switch {
 			case r == utf8.RuneError && size == 1:
 				rep = "\uFFFD"
+				if c == 0xED && i+2 < len(s) && s[i+1] >= 0xA0 && s[i+1] <= 0xBF && s[i+2]&0xC0 == 0x80 {
+					n = 3 // a lone surrogate
+				}
 			case r == 0xFFFE || r == 0xFFFF:
 				rep = ""
 				n = size
@@ -396,17 +407,22 @@ func appendEscaped(dst []byte, s string, attr bool) []byte {
 	return append(dst, s[start:]...)
 }
 
-// blendModes are the CSS mix-blend-mode keywords; any other blend value is
-// dropped rather than written into the style attribute.
-var blendModes = map[string]lit{
-	"normal": "normal", "multiply": "multiply", "screen": "screen", "overlay": "overlay",
-	"darken": "darken", "lighten": "lighten", "color-dodge": "color-dodge", "color-burn": "color-burn",
-	"hard-light": "hard-light", "soft-light": "soft-light", "difference": "difference",
-	"exclusion": "exclusion", "hue": "hue", "saturation": "saturation", "color": "color",
-	"luminosity": "luminosity",
+// cssValueSafe reports a value that can be written into a CSS declaration
+// (the style attribute's mix-blend-mode) as upstream writes it without
+// becoming more than that one value: no character that ends the declaration
+// or the block (; { }), starts a function such as url() or another property
+// (( ) :), escapes another character (\) or opens a string or a comment
+// (" ' /), and no control character. The attribute escaping guards the
+// markup; this guards the CSS. A value that fails is dropped, as no keyword
+// would be: upstream writes it, and the engine does not.
+func cssValueSafe(s string) bool {
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case c < 0x20 || c == 0x7f:
+			return false
+		case c == ';' || c == '{' || c == '}' || c == '(' || c == ')' || c == ':' || c == '\\' || c == '"' || c == '\'' || c == '/':
+			return false
+		}
+	}
+	return true
 }
-
-// blendMode is the CSS keyword for a blend value, "" for one that is not a
-// keyword. The style attribute is CSS, so the keyword written is the table's
-// own constant, never the spec's text.
-func blendMode(blend string) lit { return blendModes[blend] }

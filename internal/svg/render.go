@@ -12,6 +12,7 @@ import (
 	"unsafe"
 
 	"github.com/mgilbir/aster/internal/budget"
+	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/scene"
 )
 
@@ -33,6 +34,14 @@ type Options struct {
 	Scale         float64
 	// Background paints a full-size rect unless empty, "transparent" or "none".
 	Background string
+	// DrawBackground paints Background whatever its text: upstream tests the
+	// value (`bg && bg !== 'transparent' && bg !== 'none'`), so a truthy
+	// value that prints empty or as "none" (an array) is still painted.
+	DrawBackground bool
+
+	// DateText writes a Date an item holds in a property as String(date)
+	// does; nil leaves the epoch number.
+	DateText func(dst []byte, ms float64) []byte
 
 	// Measurer measures text for truncation to `limit`; nil uses vega's
 	// width estimate.
@@ -127,6 +136,10 @@ func render(ctx context.Context, dst []byte, sg *scene.Scenegraph, opt Options) 
 	}
 	r.w.reset(r.ctx, dst, opt.MaxBytes)
 	r.w.skel = opt.skeleton
+	r.w.walk = jsval.WalkerFor(ctx)
+	if opt.DateText != nil {
+		r.w.walk = r.w.walk.WithDateText(opt.DateText)
+	}
 	if r.opt.Href == nil {
 		r.opt.Href = DefaultHref(URLOptions{})
 	}
@@ -144,6 +157,11 @@ type renderer struct {
 	// Definitions collected while rendering; gradient and clip ids are
 	// assigned on first use, in document order, like vega's global counters
 	// (which the caller resets between documents).
+	// scn is the root mark; hrefs are the string hrefs of its items, found
+	// on the first item whose href is another value (see itemHref).
+	scn   *scene.Mark
+	hrefs map[string]bool
+
 	gradients   []*gradDef
 	gradientIDs map[*scene.Gradient]string
 	gradByID    map[string]int
@@ -155,6 +173,7 @@ type renderer struct {
 }
 
 func (r *renderer) root(scn *scene.Mark) error {
+	r.scn = scn
 	w := &r.w
 	scale := r.opt.Scale
 	if scale == 0 {
@@ -174,7 +193,7 @@ func (r *renderer) root(scn *scene.Mark) error {
 	w.valNum(r.opt.Height)
 	w.attrClose()
 
-	if bg := r.opt.Background; bg != "" && bg != "transparent" && bg != "none" {
+	if bg := r.opt.Background; r.opt.DrawBackground || bg != "" && bg != "transparent" && bg != "none" {
 		w.start("rect")
 		w.attrNum("width", r.opt.Width)
 		w.attrNum("height", r.opt.Height)
@@ -193,7 +212,9 @@ func (r *renderer) root(scn *scene.Mark) error {
 	}
 	w.end() // </g>
 
-	r.defs()
+	if err := r.defs(); err != nil {
+		return err
+	}
 	w.end() // </svg>
 	return w.err
 }
@@ -296,12 +317,16 @@ func cssClass(w *writer, m *scene.Mark) {
 		w.valLit(" role-")
 		w.valStr(m.Role)
 	}
-	if m.Name != "" {
+	if m.Named || m.Name != "" {
 		w.valLit(" ")
 		w.valStr(m.Name)
 	}
 	w.attrClose()
 }
+
+// errNoMarkRenderer is the TypeError vega-scenegraph's SVG renderer raises
+// for a mark of a type it has no renderer for.
+var errNoMarkRenderer = errors.New("TypeError: Cannot read properties of undefined (reading 'tag')")
 
 // mark renders one mark: a <g> container with its items.
 func (r *renderer) mark(m *scene.Mark, depth int) error {
@@ -312,6 +337,11 @@ func (r *renderer) mark(m *scene.Mark, depth int) error {
 		return err
 	}
 	w := &r.w
+	if m.Type == scene.MarkInvalid {
+		// Marks[scene.marktype] of a type vega-scenegraph has no renderer
+		// for is undefined, and the SVG renderer reads its tag.
+		return errNoMarkRenderer
+	}
 	tag := tagOf(m.Type)
 
 	w.start("g")
@@ -352,8 +382,8 @@ func (r *renderer) mark(m *scene.Mark, depth int) error {
 func (r *renderer) item(m *scene.Mark, it *scene.Item, tag lit, depth int) error {
 	w := &r.w
 	var link bool
-	if it.Href() != "" {
-		if attrs, ok := r.opt.Href(it.Href()); ok {
+	if href := r.itemHref(it); href != "" {
+		if attrs, ok := r.opt.Href(href); ok {
 			link = true
 			w.start("a")
 			for _, a := range attrs {
@@ -371,7 +401,7 @@ func (r *renderer) item(m *scene.Mark, it *scene.Item, tag lit, depth int) error
 	case scene.MarkGroup:
 		err = r.group(m, it, depth)
 	case scene.MarkText:
-		r.textItem(m, it)
+		err = r.textItem(m, it)
 	case scene.MarkImage:
 		r.imageItem(m, it)
 	case scene.MarkRule:
@@ -392,6 +422,14 @@ func (r *renderer) item(m *scene.Mark, it *scene.Item, tag lit, depth int) error
 		w.attrBytes("d", scene.RectPathData(r.path(), it, false, 0, 0))
 		r.style(m, it, "path", it.Fill, it.Stroke)
 	case scene.MarkPath:
+		if it.Raw != nil {
+			w.pathTransformJS(it)
+			if it.Path().Set {
+				w.attr("d", it.Path().D)
+			}
+			r.style(m, it, "path", it.Fill, it.Stroke)
+			break
+		}
 		sx, sy := scaleOne(it.ScaleX()), scaleOne(it.ScaleY())
 		if sx != 1 || sy != 1 {
 			w.attrLit("vector-effect", "non-scaling-stroke")
@@ -448,6 +486,85 @@ func (r *renderer) item(m *scene.Mark, it *scene.Item, tag lit, depth int) error
 		w.end() // </a>
 	}
 	return w.err
+}
+
+// pathTransformJS is the path mark's vector-effect and transformItem with
+// the values as given: `sx !== 1` is strict (the string "1" is not 1), and
+// scale() prints the scales as they are.
+func (w *writer) pathTransformJS(it *scene.Item) {
+	or1 := func(prop string) jsval.Value {
+		if v := it.Get(prop); v.IsTruthy() {
+			return v
+		}
+		return jsval.Num(1)
+	}
+	sx, sy := or1("scaleX"), or1("scaleY")
+	one := func(v jsval.Value) bool { return v.IsNum() && v.NumValue() == 1 }
+	if !one(sx) || !one(sy) {
+		w.attrLit("vector-effect", "non-scaling-stroke")
+	}
+	w.attrOpen("transform")
+	w.translateItem(it)
+	if it.AngleTruthy() {
+		w.valLit(" ")
+		w.rotate(it)
+	}
+	if it.Get("scaleX").IsTruthy() || it.Get("scaleY").IsTruthy() {
+		w.valLit(" scale(")
+		w.valJS(sx)
+		w.valLit(",")
+		w.valJS(sy)
+		w.valLit(")")
+	}
+	w.attrClose()
+}
+
+// itemHref is the URL whose link an item gets. The renderer looks the link
+// up in the cache of sanitized URLs by property key (`this._hrefs[href]`)
+// and fills it from the sanitized strings, so an href that is not a string
+// (which the sanitizer rejects) gets the link of a string href of the view
+// with the same String, if there is one, and no link otherwise.
+func (r *renderer) itemHref(it *scene.Item) string {
+	if h := it.Href(); h != "" {
+		return h
+	}
+	v, ok := it.RawValue("href")
+	if !ok || !v.IsTruthy() {
+		return ""
+	}
+	if r.hrefs == nil {
+		r.hrefs = stringHrefs(r.scn)
+	}
+	key := r.w.walk.String(v)
+	if r.hrefs[key] {
+		return key
+	}
+	return ""
+}
+
+// stringHrefs collects the string hrefs of the items below m, with an
+// explicit stack (the scene is nested at most scene.MaxDepth deep).
+func stringHrefs(m *scene.Mark) map[string]bool {
+	out := map[string]bool{}
+	stack := []*scene.Mark{m}
+	for len(stack) > 0 {
+		m := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if m == nil {
+			continue
+		}
+		items := m.Items
+		if m.Type.Nested() && len(items) > 1 {
+			items = items[:1] // a nested mark renders its first item only
+		}
+		for _, it := range items {
+			if h := it.Href(); h != "" {
+				out[h] = true
+			}
+			stack = append(stack, it.Items...)
+		}
+	}
+	return out
 }
 
 func scaleOne(n scene.Num) float64 {

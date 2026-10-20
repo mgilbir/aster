@@ -1,0 +1,1 @@
+{"width": 100, "height": 100, "data": [{"name": "t", "values": [{"c": "a", "v": 1}, {"c": "b", "v": 2}]}], "scales": [{"name": "s", "type": "ordinal", "domain": {"data": "t", "fields": ["constructor", "c"]}, "range": [0, 1]}], "marks": [{"type": "text", "encode": {"enter": {"text": {"signal": "join(domain('s'),',')"}}}}]}

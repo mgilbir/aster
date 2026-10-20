@@ -28,7 +28,7 @@ func (s *jsSum) add(v jsval.Value, t *topology) error {
 			return nil
 		}
 	}
-	tail := v.AsString()
+	tail := t.walk.String(v)
 	if !s.isStr {
 		s.str, s.isStr = jsval.AppendJSNumber(nil, s.num), true
 	}
@@ -83,7 +83,7 @@ func jsScaleAdd(sum *jsSum, k float64, d jsval.Value, t *topology) (jsval.Value,
 	prod := float64(x * k)
 	switch d.Kind() {
 	case jsval.KindStr, jsval.KindArr, jsval.KindObj:
-		str := jsval.JSNumberString(prod) + d.AsString()
+		str := jsval.JSNumberString(prod) + t.walk.String(d)
 		if err := t.charge(int64(len(str)), 1); err != nil {
 			return jsval.Undefined, err
 		}

@@ -80,8 +80,13 @@
 # A benchmark package that does not compile on the head side fails the gate
 # (exit 2), as does one that compiled on the base side and not on the head;
 # so does a -bench regex that matches no benchmark of the head: a gate that
-# measures nothing must not pass. A package new in the change (absent from
-# the base) is left out, there is nothing to compare it with.
+# measures nothing must not pass. So does a benchmark the base measured that
+# the head did not, unit by unit: a renamed or removed benchmark or
+# sub-benchmark (BenchmarkMeasureUncached, the scene bars-100) leaves benchstat
+# no row to compare, and the gate would say "no regression" about what it no
+# longer measures (C64, audit 2026-10-18); rename the benchmarks list with the
+# benchmark. A package new in the change (absent from the base) is left out,
+# there is nothing to compare it with, as is a benchmark new on the head.
 #
 # For an intended trade-off, BENCHGATE_ALLOW=true reports the regression and
 # exits 0 (CI sets it from the allow_regression input of the Heavy gates
@@ -324,6 +329,22 @@ while [ "$round" -lt "$count" ]; do
 		fi
 	done <"$entries"
 done
+
+# Every (benchmark, unit) row of the base's timed pass must be in the head's.
+lost=$(awk '
+$1 ~ /^Benchmark/ {
+	for (i = 3; i < NF; i += 2) {
+		key = $1 " " $(i + 1)
+		if (FILENAME ~ /base\.txt$/) base[key] = 1
+		else head[key] = 1
+	}
+}
+END { for (k in base) if (!(k in head)) print k }' "$work/base.txt" "$work/head.txt" | sort)
+if [ -n "$lost" ]; then
+	echo "benchgate: the base measured these (benchmark, unit) rows and the head did not: renamed or removed? Update the benchmarks list with them:" >&2
+	printf '%s\n' "$lost" | sed 's/^/  /' >&2
+	exit 2
+fi
 
 # The time tables come from the timed pass, the memory tables from the
 # two-point one.

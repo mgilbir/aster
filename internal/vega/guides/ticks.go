@@ -111,8 +111,10 @@ func (e *Env) AxisTicks(in AxisTicksInput) ([]jsval.Value, error) {
 // LegendEntriesInput are the resolved parameters of vega-encode's
 // LegendEntries operator.
 type LegendEntriesInput struct {
-	// Type is "symbol" (default), "gradient" or "discrete".
-	Type  string
+	// Type is "symbol" (the default for a falsy one), "gradient" or
+	// "discrete", compared with === as upstream does: any other value,
+	// ["symbol"] too, makes a discrete legend's entries.
+	Type  jsval.Value
 	Scale scale.Scale
 	// Count is the approximate number of entries (default 5).
 	Count jsval.Value
@@ -139,9 +141,9 @@ func (e *Env) LegendEntries(in LegendEntriesInput) ([]jsval.Value, error) {
 	if in.Scale == nil {
 		return nil, errors.New("LegendEntries: missing scale")
 	}
-	typ := in.Type
-	if typ == "" {
-		typ = symbolLegend
+	typ := symbolLegend
+	if in.Type.IsTruthy() {
+		typ, _ = in.Type.Strict() // "" for a value that is no string: no type
 	}
 	s := in.Scale
 	limit := jsval.ToNumber(in.Limit)
@@ -183,14 +185,24 @@ func (e *Env) LegendEntries(in LegendEntriesInput) ([]jsval.Value, error) {
 	return discreteEntries(s, label, set)
 }
 
-// chargedLabels is format with each label's text charged to the ledger.
+// chargedLabels is format with each label's text charged to the ledger, and
+// each label a few steps of work, polling the call's context: a guide lists
+// up to scale.MaxTicks entries, each formatted and built in turn (ADR 0010).
 func (e *Env) chargedLabels(format scale.LabelFormatter) func(v jsval.Value, i int, l scale.Labels) (jsval.Value, error) {
 	meter := e.labelMeter()
+	work := budget.NewMeter(e.ctx())
 	return func(v jsval.Value, i int, l scale.Labels) (jsval.Value, error) {
+		if err := work.Work(entrySteps); err != nil {
+			return jsval.Undefined, err
+		}
 		label := format(v, i, l)
 		return label, meter.charge(label)
 	}
 }
+
+// entrySteps is the work of one guide entry: its label, and the object of a
+// few members built around it.
+const entrySteps = 4
 
 type labelFunc = func(v jsval.Value, i int, l scale.Labels) (jsval.Value, error)
 
@@ -220,7 +232,11 @@ func (e *Env) symbolEntries(in LegendEntriesInput, s scale.Scale, format labelFu
 			}
 		}
 		// compute the size offset for legend entries
+		work := budget.NewMeter(e.ctx())
 		for _, v := range items.Values {
+			if err := work.Work(entrySteps); err != nil {
+				return nil, err
+			}
 			offset = jsMax(offset, jsval.ToNumber(size(v)))
 		}
 	} else {

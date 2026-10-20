@@ -2,7 +2,6 @@ package vega
 
 import (
 	"github.com/mgilbir/aster/internal/jsval"
-	"github.com/mgilbir/aster/internal/transforms"
 )
 
 // Upstream's crossfilter hands on a pulse whose added "tuples" are the
@@ -97,31 +96,35 @@ var (
 		"loess": true, "regression": true, "pivot": true,
 	}
 	keepsSource = map[string]bool{"filter": true, "impute": true}
+	// keepsTree are the transforms whose output pulse still has the
+	// source it came with (pulse.reflow, pulse.modifies, or a fork that
+	// keeps the source: filter, impute), so `pulse.source.root` is still
+	// the tree whatever tuples they add, and however few: an empty
+	// source is the same array with its root.
+	keepsTree = map[string]bool{
+		"filter": true, "formula": true, "identifier": true, "bin": true, "timeunit": true,
+		"window": true, "joinaggregate": true, "lookup": true, "impute": true, "dotbin": true,
+		"geopoint": true, "geopath": true, "geoshape": true, "linkpath": true, "pie": true,
+		"stack": true, "voronoi": true, "force": true, "heatmap": true, "wordcloud": true,
+	}
 )
 
 // writesAdds are the transforms that write a field into each tuple the pulse
 // adds (formula, bin, timeunit, identifier, window on a first run), by the
 // name of the first field each writes: on a crossfilter's index, a number,
 // that is upstream's TypeError.
-var writesAdds = map[string]func(p *opParams) string{
-	"formula":    func(p *opParams) string { return p.str("as") },
-	"identifier": func(p *opParams) string { return p.str("as") },
-	"bin":        func(p *opParams) string { return firstAs(p, "bin0") },
-	"timeunit":   func(p *opParams) string { return firstAs(p, "unit0") },
-	"window": func(p *opParams) string {
-		if ops := windowParams(p).Ops; len(ops) > 0 {
+var writesAdds = map[string]func(g *flowGraph, p *opParams) string{
+	"formula":    func(_ *flowGraph, p *opParams) string { return p.keyOf("as") },
+	"identifier": func(_ *flowGraph, p *opParams) string { return p.keyOf("as") },
+	"bin":        func(_ *flowGraph, p *opParams) string { return p.asPair("bin0", "bin1")[0] },
+	"timeunit":   func(_ *flowGraph, p *opParams) string { return p.asPair("unit0", "unit1")[0] },
+	"window": func(g *flowGraph, p *opParams) string {
+		if ops := windowParams(g, p).Ops; len(ops) > 0 {
 			o := ops[0]
-			return transforms.MeasureName(o.Op, o.Field.Name, o.As)
+			return o.Name()
 		}
 		return ""
 	},
-}
-
-func firstAs(p *opParams, def string) string {
-	if as := p.strs("as"); len(as) > 0 && as[0] != "" {
-		return as[0]
-	}
-	return def
 }
 
 // checkWritesAdds raises the TypeError a transform of type typ meets writing
@@ -144,7 +147,7 @@ func checkWritesAdds(g *flowGraph, typ string, p *opParams, in []jsval.Value) {
 		default:
 			continue
 		}
-		fail("TypeError: Cannot create property '%s' on %s '%s'", name(p), kind, t.AsString())
+		fail("TypeError: Cannot create property '%s' on %s '%s'", name(g, p), kind, jsval.StringPrefix(t, jsval.MessageBytes))
 	}
 }
 

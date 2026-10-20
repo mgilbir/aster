@@ -1,0 +1,3 @@
+{"width":60,"height":40,"padding":5,"background":"white","data":[{"name":"t","values":[{"v":1}]}],
+"signals":[{"name":"n","update":"modify('nope', null, null)"},{"name":"m","update":"setdata('nope', [])"}],
+"marks":[{"type":"text","encode":{"update":{"text":{"signal":"n + ',' + m"}}}}]}

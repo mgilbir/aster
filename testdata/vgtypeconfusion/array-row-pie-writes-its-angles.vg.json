@@ -1,0 +1,2 @@
+{"width":200,"height":200,"data":[{"name":"t","values":[[1],[2],[3]],"transform":[{"type":"pie","field":"0"}]}],
+"marks":[{"type":"arc","from":{"data":"t"},"encode":{"enter":{"x":{"value":100},"y":{"value":100},"startAngle":{"field":"startAngle"},"endAngle":{"field":"endAngle"},"outerRadius":{"value":50},"fill":{"value":"red"}}}}]}

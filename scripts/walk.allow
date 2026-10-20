@@ -1,0 +1,87 @@
+# Detached walks of a value in the engine's run-time packages (see
+# walks_guard_test.go and docs/adr/0018-value-walks-bounded-by-the-call.md).
+#
+# A walk (String of an array, JSON, stringValue, a deep or relational
+# comparison) made without the call's jsval.Walker is bounded only by fixed
+# caps. Each function below makes the number of such walks given, and the
+# reason says why the value cannot be one a run built:
+#   spec:      a literal of the specification read at parse time: a tree as
+#              large as the specification, which its parse already bounds;
+#   primitive: a value that is never an array there, whose String is no walk;
+#   fallback / trusted input / no walk: as stated.
+# function<TAB>count<TAB># reason
+internal/expr.(*Scope).getIndex	1	# primitive: null or undefined, named in the TypeError
+internal/expr.(*Scope).getProp	1	# primitive: null or undefined, named in the TypeError
+internal/expr.(*Scope).indexOfStrict	1	# primitive: null or undefined, named in the TypeError
+internal/expr.(*Scope).strDepth	1	# primitive: the String of a value that is not an array (arrays are built with the evaluator's own bounded builder above)
+internal/expr.(*compiler).object	2	# primitive: an object literal's key, an expression literal (string, number, boolean, null, regexp)
+internal/expr.(*parser).parseObject	1	# primitive: an object literal's key, an expression literal
+internal/expr.init	1	# primitive: null or undefined, named in the TypeError
+internal/expr.literalArg	1	# primitive: an expression literal argument
+internal/expr.scaleVisitor	1	# primitive: an expression literal argument
+internal/expr.selectionTuples	1	# primitive: an index number
+internal/format.NumberLocaleFromValue	4	# spec: config.locale.number, read once as the view is made
+internal/scale.init	1	# no walk: the built-in palettes are colour strings, shared by every call
+internal/scene.(*Item).Walker	1	# fallback: an item outside a scene (the package's tests); every mark vega makes carries the call's Walker (Scenegraph.SetWalker)
+internal/scene.FromJSON	1	# trusted input: serialized scenes the tests and fuzz targets load; no public API or render path calls it
+internal/transforms/contour.KDE2D	1	# fallback: no key function given (the package's tests); vega passes the call's transforms.KeyStringer
+internal/transforms/hierarchy.Nest	1	# fallback: no key function given (the package's tests); vega passes the call's transforms.KeyStringer
+internal/transforms/hierarchy.Stratify	1	# fallback: no key function given (the package's tests); vega passes the call's transforms.KeyStringer
+internal/transforms/wordcloud.Transform	1	# fallback: no text function given (the package's tests); vega passes the call's transforms.KeyStringer
+internal/vega.(*Scope).compareRef	1	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)
+internal/vega.(*Scope).fieldRef	1	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)
+internal/vega.(*Scope).objectProperty	1	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)
+internal/vega.(*Scope).property	1	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)
+internal/vega.(*Scope).scaleType	1	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)
+internal/vega.(*Scope).sortRef	1	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)
+internal/vega.(*dataScope).cache	1	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)
+internal/vega.(*encCompiler).entry	1	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)
+internal/vega.(*encCompiler).fieldObj	2	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)
+internal/vega.(*encCompiler).scaleDeps	2	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)
+internal/vega.(*encCompiler).scaleRefFn	1	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)
+internal/vega.addSortField	2	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)
+internal/vega.aggrField	3	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)
+internal/vega.analyzeData	1	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)
+internal/vega.collectSignals	2	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)
+internal/vega.domainFieldRef	1	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)
+internal/vega.getDataRef	1	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)
+internal/vega.mergeNamed	1	# spec: the configuration, merged as the view is parsed
+internal/vega.ordinalMultipleDomain	1	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)
+internal/vega.parameterValue	1	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)
+internal/vega.parseArray	1	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)
+internal/vega.parseClip	2	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)
+internal/vega.parseFacet	1	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)
+internal/vega.parseInteractive	1	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)
+internal/vega.parseLiteral	1	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)
+internal/vega.parseMark	1	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)
+internal/vega.parseMarkData	1	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)
+internal/vega.parseOverlap	3	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)
+internal/vega.parseParameter	1	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)
+internal/vega.projectionParameter	1	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)
+internal/vega.parseScaleDomain	1	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)
+internal/vega.parseScaleNice	1	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)
+internal/vega.parseScaleRangeAlias	1	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)
+internal/vega.parseSort	3	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)
+internal/vega.propertyLambda	1	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)
+internal/vega.quote	1	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)
+internal/vega.scaleSource	1	# primitive: String() of a number (+enc.range)
+internal/vega.specText	1	# spec: String() of a literal of the specification as the parser reads it (template literals, property keys), read as the view is parsed; every caller passes a specification value
+internal/vega.stringValue	1	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)
+internal/vega/guides.(*AxisPlan).axisEncode	1	# spec: the axis or legend specification and its config, read as the guide's own specification is built at parse
+internal/vega/guides.NewLegend	1	# spec: the axis or legend specification and its config, read as the guide's own specification is built at parse
+internal/vega/guides.axisLabels	2	# spec: the axis or legend specification and its config, read as the guide's own specification is built at parse
+internal/vega/guides.axisTitle	1	# spec: the axis or legend specification and its config, read as the guide's own specification is built at parse
+internal/vega/guides.flushExpr	2	# spec: the axis or legend specification and its config, read as the guide's own specification is built at parse
+internal/vega/guides.getChannel	1	# spec: the axis or legend specification and its config, read as the guide's own specification is built at parse
+internal/vega/guides.jsOr	1	# spec: the axis or legend specification and its config, read as the guide's own specification is built at parse
+internal/vega/guides.legendSymbolGroups	1	# spec: the axis or legend specification and its config, read as the guide's own specification is built at parse
+internal/vega/guides.member	1	# no walk: the source text of a built-in function a member read found (a NativeFunction prints as a constant)
+internal/vega/guides.offsetValue	1	# spec: the axis or legend specification and its config, read as the guide's own specification is built at parse
+internal/vega/guides.orientName	1	# spec: the rest of an axis orient given as a list (orient.slice(1)), a literal of the specification read at parse
+internal/vega/guides.patch	1	# spec: the axis or legend specification and its config, read as the guide's own specification is built at parse
+internal/vega/guides.signalOf	1	# spec: the axis or legend specification and its config, read as the guide's own specification is built at parse
+internal/vega/guides.simpleExpr	1	# spec: the axis or legend specification and its config, read as the guide's own specification is built at parse
+internal/vega/guides.sizeExpression	3	# spec: the axis or legend specification and its config, read as the guide's own specification is built at parse
+internal/vega/guides.stringValue	1	# spec: the axis or legend specification and its config, read as the guide's own specification is built at parse
+internal/vega/guides.tickBand	1	# spec: the axis or legend specification and its config, read as the guide's own specification is built at parse
+internal/vega/layout.ParseOverlap	1	# spec: the legend layout and label overlap settings of the specification and its config

@@ -1,0 +1,2 @@
+{"width":200,"height":100,"signals":[{"name":"v","value":["ab","c",3]}],"data":[{"name":"t","values":{"signal":"v"},"transform":[{"type":"filter","expr":"datum.length>1"}]}],
+"marks":[{"type":"text","from":{"data":"t"},"encode":{"enter":{"text":{"signal":"''+datum"}}}}]}

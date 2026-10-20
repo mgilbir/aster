@@ -2,7 +2,7 @@
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { encode } from './lib.mjs';
-const require = createRequire(path.join(process.env.NODE_PATH, 'x.js'));
+const require = createRequire(path.resolve(process.env.NODE_PATH, 'x.js'));
 const vega = await import(require.resolve('vega'));
 
 const values = [null, undefined, NaN, new Date(NaN), new Date(0), new Date(86400000), 0, -1, 2.5, 10, 9, Infinity,

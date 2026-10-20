@@ -181,7 +181,7 @@ func TestUndefinedCountHidesLogLabels(t *testing.T) {
 // TestRangeLabelOfNoFiniteValue is C101: formatRange reads "≥ null" when
 // neither end is a finite number (guides had it right, scale did not).
 func TestRangeLabelOfNoFiniteValue(t *testing.T) {
-	f := formatRange(defaultFormatter)
+	f := formatRange(jsval.Walker{}, defaultFormatter(jsval.Walker{}))
 	if got := f(jsval.Num(math.Inf(-1)), 0, Labels{Values: []jsval.Value{jsval.Num(math.Inf(-1))}, Max: math.Inf(1), HasMax: true}).AsString(); got != "≥ null" {
 		t.Errorf("label = %q, want ≥ null", got)
 	}

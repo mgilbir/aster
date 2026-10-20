@@ -3,6 +3,7 @@ package scene
 import (
 	"strings"
 	"unicode/utf16"
+	"unicode/utf8"
 
 	"github.com/mgilbir/aster/internal/jsmath"
 	"github.com/mgilbir/aster/internal/jsval"
@@ -44,8 +45,15 @@ func LineHeight(it *Item) float64 {
 // quotes inside the family are swapped for single quotes (for embedding in a
 // quoted attribute).
 func FontFamily(it *Item, quote bool) string {
-	if v, ok := it.Raw["font"]; ok && !quote && v.IsTruthy() {
-		return v.AsString() // `font || 'sans-serif'` keeps a truthy array
+	if v, ok := it.Raw["font"]; ok {
+		// `font || 'sans-serif'` keeps a truthy array or number, and a falsy
+		// value of any kind (0, false, "") falls back.
+		if !v.IsTruthy() {
+			return "sans-serif"
+		}
+		if !quote {
+			return it.Walker().String(v)
+		}
 	}
 	f := it.Font()
 	if f == "" {
@@ -61,16 +69,17 @@ func FontFamily(it *Item, quote bool) string {
 // and weight, the size in px, then the family.
 func CSSFont(it *Item, quote bool) string {
 	var b strings.Builder
-	if it.FontStyle() != "" {
-		b.WriteString(it.FontStyle())
+	// (item.fontStyle ? item.fontStyle + ' ' : ''), ...: truthiness.
+	if s := it.TruthyStr("fontStyle", it.FontStyle()); s != "" {
+		b.WriteString(s)
 		b.WriteByte(' ')
 	}
-	if it.FontVariant() != "" {
-		b.WriteString(it.FontVariant())
+	if s := it.TruthyStr("fontVariant", it.FontVariant()); s != "" {
+		b.WriteString(s)
 		b.WriteByte(' ')
 	}
-	if it.FontWeight() != "" {
-		b.WriteString(it.FontWeight())
+	if s := it.TruthyStr("fontWeight", it.FontWeight()); s != "" {
+		b.WriteString(s)
 		b.WriteByte(' ')
 	}
 	var nb [32]byte
@@ -84,7 +93,8 @@ func CSSFont(it *Item, quote bool) string {
 // by hand because SVG's alignment-baseline is not consistently supported.
 func BaselineOffset(it *Item) float64 {
 	h := FontSize(it)
-	switch it.Baseline {
+	// baseline === 'top' ...: strict, so ['top'] is no baseline.
+	switch it.StrictStr("baseline", it.Baseline) {
 	case "top":
 		return jsRound(0.79 * h)
 	case "middle":
@@ -100,46 +110,96 @@ func BaselineOffset(it *Item) float64 {
 }
 
 // Lines are the lines of an item's text, upstream's textLines(item): the
-// entries of an array of two or more, or the text split on lineBreak, else
-// the text as one line. They are read in place, one at a time, never made
-// into a list: a text of a million line breaks is a million lines, and the
-// bounds, the layout and the writer each go through them (C7, audit
-// 2026-10-18). Null entries are "" and other values are stringified, as
-// textValue does with `line + ”`.
+// entries of an array of two or more (or of the one array an array holds),
+// or the text split on lineBreak, else the text as one line. They are read in
+// place, one at a time, never made into a list: a text of a million line
+// breaks is a million lines, and the bounds, the layout and the writer each
+// go through them (C7, audit 2026-10-18). Null entries are "" and other
+// values are stringified, as textValue does with `line + ”`, with the item's
+// Walker.
+//
+// A line leaves JavaScript as UTF-8 (to the canvas that measures it, in the
+// SVG document), which writes each lone surrogate as U+FFFD: the lines are
+// well formed, one U+FFFD a surrogate, which is also one code unit, so
+// truncation counts the same.
 type Lines struct {
-	// N is the number of lines; Multi is true for an array of two or more
-	// lines or a text split in two or more (drawn as one <tspan> a line).
+	// N is the number of lines (an array of lines can hold none); Multi is
+	// true for an array of two or more lines, the lines of an array an array
+	// holds, or a text split in two or more (drawn as one <tspan> a line).
 	N     int
 	Multi bool
 
-	arr  []jsval.Value // the lines of an array
-	s    string        // the text left to split, or the one line
-	sep  string        // the lineBreak s splits on, "" for one line
-	next int           // the index of the next line
+	it    *Item
+	arr   []jsval.Value // the lines of an array
+	s     string        // the text left to split, or the one line
+	sep   string        // the lineBreak s splits on (empty: between characters)
+	split bool          // s is split on sep
+	next  int           // the index of the next line
 }
+
+// lineBreak is the item's line break when it is truthy (`item.lineBreak &&
+// ...`), else "".
+func (it *Item) lineBreak() string {
+	if it.Raw != nil {
+		if v, ok := it.Raw["lineBreak"]; ok && v.IsTruthy() {
+			return it.LineBreak()
+		}
+	}
+	if it.Raw != nil {
+		if v, ok := it.Raw["lineBreak"]; ok && !v.IsTruthy() {
+			return ""
+		}
+	}
+	return it.LineBreak()
+}
+
+// hasLineBreak is the truthiness of `item.lineBreak`: a break that prints
+// empty (an empty array) is truthy, and splits the text between characters.
+func (it *Item) hasLineBreak() bool { return it.StrTruthy("lineBreak", it.LineBreak()) }
 
 // TextLines returns the lines of an item's text, ready to read with Next.
 func TextLines(it *Item) Lines {
+	l, _ := TextLinesErr(it)
+	return l
+}
+
+// TextLinesErr is TextLines with the error upstream's textLines raises: a
+// truthy text that is neither a string nor an array has no split method.
+func TextLinesErr(it *Item) (Lines, error) {
 	t := it.Text()
 	switch {
 	case t.IsArr():
 		items := t.Items()
 		switch len(items) {
 		case 0:
-			return Lines{N: 1}
+			return Lines{N: 1}, nil
 		case 1:
-			return Lines{N: 1, s: lineString(items[0])}
+			// lineArray: a one-element array is its element, and when that
+			// is an array it is the list of lines, however long.
+			if inner := items[0]; inner.IsArr() {
+				in := inner.Items()
+				return Lines{N: len(in), Multi: true, it: it, arr: in}, nil
+			}
+			return Lines{N: 1, s: lineString(it, items[0])}, nil
 		}
-		return Lines{N: len(items), Multi: true, arr: items}
-	case it.LineBreak() != "" && t.IsTruthy():
-		text, sep := t.AsString(), it.LineBreak()
-		// text.split(lineBreak) has one more part than it has separators.
-		if n := strings.Count(text, sep) + 1; n > 1 {
-			return Lines{N: n, Multi: true, s: text, sep: sep}
+		return Lines{N: len(items), Multi: true, it: it, arr: items}, nil
+	case it.hasLineBreak() && t.IsTruthy():
+		if !t.IsStr() {
+			return Lines{N: 1, s: lineString(it, t)}, ErrTextSplit
 		}
-		return Lines{N: 1, s: text}
+		text, sep := lineString(it, t), it.lineBreak()
+		// text.split(lineBreak) has one more part than it has separators;
+		// split("") cuts between characters.
+		n := utf8.RuneCountInString(text)
+		if sep != "" {
+			n = strings.Count(text, sep) + 1
+		}
+		if n > 1 {
+			return Lines{N: n, Multi: true, s: text, sep: sep, split: true}, nil
+		}
+		return Lines{N: 1, s: text}, nil
 	}
-	return Lines{N: 1, s: lineString(t)}
+	return Lines{N: 1, s: lineString(it, t)}, nil
 }
 
 // Line is the text of a single line (when not Multi).
@@ -153,24 +213,27 @@ func (l *Lines) Next() (line string, ok bool) {
 	l.next++
 	switch {
 	case l.arr != nil:
-		return lineString(l.arr[l.next-1]), true
-	case l.sep != "" && l.next < l.N:
+		return lineString(l.it, l.arr[l.next-1]), true
+	case l.split && l.next < l.N:
 		i := strings.Index(l.s, l.sep)
+		if l.sep == "" { // between characters
+			_, i = utf8.DecodeRuneInString(l.s)
+		}
 		line, l.s = l.s[:i], l.s[i+len(l.sep):]
 		return line, true
 	}
 	return l.s, true
 }
 
-// lineString is `line == null ? ” : line + ”` without the trim.
-func lineString(v jsval.Value) string {
+// lineString is `line == null ? ” : line + ”` without the trim, well formed.
+func lineString(it *Item, v jsval.Value) string {
 	if v.IsNullish() {
 		return ""
 	}
 	if v.IsStr() {
-		return v.StrValue()
+		return jsval.ToWellFormed(v.StrValue())
 	}
-	return v.AsString()
+	return jsval.ToWellFormed(it.Walker().String(v))
 }
 
 // MultiLineOffset is the extra height of a multi-line text block.
@@ -256,11 +319,13 @@ func (m Metrics) truncate(it *Item, text string) string {
 		return text
 	}
 
+	// item.ellipsis || '\u2026', and the strict item.dir === 'rtl'.
+	// a truthy value that prints empty ([null]) is the ellipsis, an empty one
 	ellipsis := it.Ellipsis()
-	if ellipsis == "" {
+	if !it.StrTruthy("ellipsis", ellipsis) {
 		ellipsis = "…"
 	}
-	rtl := it.Dir() == "rtl"
+	rtl := it.StrictStr("dir", it.Dir()) == "rtl"
 	limit -= width(ellipsis)
 
 	var slice func(lo, hi int) string

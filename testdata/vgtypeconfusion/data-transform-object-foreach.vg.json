@@ -1,0 +1,2 @@
+{"data":[{"name":"d","values":[{"a":1}],"transform":{"type":"formula","expr":"'x'+datum.a","as":"b"}}],
+ "marks":[{"type":"text","from":{"data":"d"},"encode":{"enter":{"text":{"field":"b"}}}}]}

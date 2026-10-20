@@ -166,6 +166,18 @@ func deadlineSpecs() map[string]func() Value {
 			return mkv("data", data(), "mark", "point", "encoding", mkv("x", mkv("field", "a", "type", "quantitative"),
 				"color", mkv("value", "black", "condition", list(100000, func(i int) Value { return mkv("test", fmt.Sprintf("datum.a > %d", i), "value", "red") }))))
 		},
+		// C9, C26 and C11 (audit 2026-10-18): the optimizer's chains and
+		// sibling merges, and a dotted `as` whose prefixes it compares.
+		"filter-parse-chain": func() Value { return complexitySpecs()["filter-parse-chain"](9000) },
+		"timeunit-chain":     func() Value { return complexitySpecs()["timeunit-chain"](9000) },
+		"ap-layers":          func() Value { return complexitySpecs()["ap-layers"](4000) },
+		"layer-timeunits":    func() Value { return complexitySpecs()["layer-timeunits"](4000) },
+		"dotted-as":          func() Value { return complexitySpecs()["dotted-as"](30000) },
+		// C3, C6 and C10: output quadratic in the specification (as
+		// upstream's), built with no ledger to stop it.
+		"parse-dotted-key":   byteBoundSpecs()["parse-dotted-key"],
+		"labelexpr-backtick": byteBoundSpecs()["labelexpr-backtick"],
+		"selections-views":   byteBoundSpecs()["selections-views"],
 		"nested-repeat": func() Value {
 			fields := list(6, func(i int) Value { return jsval.Str(fmt.Sprintf("f%d", i)) })
 			inner := mkv("mark", "point", "encoding", mkv(
@@ -256,4 +268,5 @@ func TestDeadlineSweep(t *testing.T) {
 var deadlineSpecNames = []string{
 	"params", "layers", "transforms", "transforms-over-limit", "concat", "nested-repeat", "tooltip", "values",
 	"selection-fields", "concat-params", "vars", "domains", "filters", "transform-lists", "selection-init", "datasets", "layer-repeat", "conditions",
+	"filter-parse-chain", "timeunit-chain", "ap-layers", "layer-timeunits", "dotted-as", "parse-dotted-key", "labelexpr-backtick", "selections-views",
 }

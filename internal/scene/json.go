@@ -27,7 +27,9 @@ func FromJSON(data []byte) (*Scenegraph, error) {
 	if err != nil {
 		return nil, err
 	}
-	l := &jsonLoader{}
+	// A serialized scene is trusted input (see above) and has no call: its
+	// values are walked with the detached Walker.
+	l := &jsonLoader{w: jsval.Walker{}}
 	root, err := l.mark(v, nil, 0)
 	if err != nil {
 		return nil, err
@@ -61,8 +63,8 @@ func PathFuncFromString(d string) (PathFunc, error) {
 // ops, when present, are the canvas calls the generator made (`["M",x,y]`,
 // `["L",x,y]`, `["Q",..]`, `["C",..]`, `["A",x,y,r,a0,a1,ccw]`, `["R",x,y,w,h]`,
 // `["Z"]`) and are replayed for context drawing at full precision.
-func pathFuncFromValue(v jsval.Value) (PathFunc, error) {
-	d := strOf(v.Get("path"))
+func pathFuncFromValue(w jsval.Walker, v jsval.Value) (PathFunc, error) {
+	d := strOf(w, v.Get("path"))
 	ops := v.Get("ops")
 	if !ops.IsArr() {
 		return PathFuncFromString(d)
@@ -78,7 +80,8 @@ func pathFuncFromValue(v jsval.Value) (PathFunc, error) {
 				continue
 			}
 			n := func(i int) float64 { return numOf(decodeRecorded(op.Index(i))).Val() } // an operand left out is undefined
-			switch a[0].AsString() {
+			name, _ := a[0].PropertyKey(1)
+			switch name {
 			case "M":
 				ctx.MoveTo(n(1), n(2))
 			case "L":
@@ -107,6 +110,7 @@ func pathFuncFromValue(v jsval.Value) (PathFunc, error) {
 // `{"path", "ops"}` it was recorded drawing.
 type jsonLoader struct {
 	grads map[int]*Gradient
+	w     jsval.Walker
 }
 
 func (l *jsonLoader) mark(v jsval.Value, group *Item, depth int) (*Mark, error) {
@@ -118,21 +122,22 @@ func (l *jsonLoader) mark(v jsval.Value, group *Item, depth int) (*Mark, error) 
 		return nil, fmt.Errorf("scene: mark must be an object")
 	}
 	m := &Mark{Group: group, Bounds: NewBounds()}
-	mt, ok := ParseMarkType(o.Lookup("marktype").AsString())
+	name, _ := o.Lookup("marktype").PropertyKey(16)
+	mt, ok := ParseMarkType(name)
 	if !ok {
-		return nil, fmt.Errorf("scene: unknown marktype %q", o.Lookup("marktype").AsString())
+		return nil, fmt.Errorf("scene: unknown marktype %q", jsval.StringPrefix(o.Lookup("marktype"), jsval.MessageBytes))
 	}
 	m.Type = mt
-	m.Name = strOf(o.Lookup("name"))
-	m.Role = strOf(o.Lookup("role"))
-	m.Description = strOf(o.Lookup("description"))
+	m.Name = strOf(l.w, o.Lookup("name"))
+	m.Role = strOf(l.w, o.Lookup("role"))
+	m.Description = strOf(l.w, o.Lookup("description"))
 	m.Aria = FalseOf(o.Lookup("aria"))
 	m.NonInteractive = o.Lookup("interactive").Kind() == jsval.KindBool && !o.Lookup("interactive").BoolValue()
 	m.Zindex = numOf(decodeRecorded(o.Lookup("zindex"))).Zero()
-	m.GuideCaption = strOf(o.Lookup("guideCaption"))
+	m.GuideCaption = strOf(l.w, o.Lookup("guideCaption"))
 	switch c := o.Lookup("clip"); {
 	case c.IsObj():
-		fn, err := pathFuncFromValue(c)
+		fn, err := pathFuncFromValue(l.w, c)
 		if err != nil {
 			return nil, err
 		}
@@ -153,14 +158,14 @@ func (l *jsonLoader) mark(v jsval.Value, group *Item, depth int) (*Mark, error) 
 
 // paint is paintOf with the loader's gradient encoding: a gradient recorded
 // with `$gid` is made once, and `{"$gref": id}` is that same object again
-// (upstream's gradient ids are per object); a coordinate may be {$num}.
+// (upstream's gradient ids are per object); its coordinates may be {$num}.
 func (l *jsonLoader) paint(v jsval.Value) Paint {
 	if v.IsObj() {
 		if ref := v.Get("$gref"); !ref.IsUndefined() {
 			return GradientPaint(l.grads[int(ref.NumValue())])
 		}
 		if v.Get("gradient").IsTruthy() {
-			g := gradientOf(v, func(v jsval.Value) Num { return numOf(decodeRecorded(v)) })
+			g := gradientOf(l.w, v, decodeRecorded)
 			if id := v.Get("$gid"); id.IsNum() {
 				if l.grads == nil {
 					l.grads = map[int]*Gradient{}
@@ -170,14 +175,15 @@ func (l *jsonLoader) paint(v jsval.Value) Paint {
 			return GradientPaint(g)
 		}
 	}
-	return paintOf(v)
+	return paintOf(l.w, v)
 }
 
 // decodeRecorded reads the loader's encoding of a number JSON cannot hold,
 // {"$num": "NaN"|"Infinity"|"-Infinity"}; any other value is returned as is.
 func decodeRecorded(v jsval.Value) jsval.Value {
 	if v.IsObj() {
-		switch v.Get("$num").AsString() {
+		name, _ := v.Get("$num").PropertyKey(16)
+		switch name {
 		case "NaN":
 			return jsval.Num(math.NaN())
 		case "Infinity":
@@ -205,17 +211,20 @@ func (l *jsonLoader) item(v jsval.Value, m *Mark, depth int) (*Item, error) {
 		val = decodeRecorded(val)
 		switch {
 		case k == "fill":
+			it.setRawStr(k, val)
 			it.Fill = l.paint(val)
 		case k == "stroke":
+			it.setRawStr(k, val)
 			it.Stroke = l.paint(val)
 		case k == "shape" && val.IsObj():
-			fn, err := pathFuncFromValue(val)
+			it.setRawStr(k, val)
+			fn, err := pathFuncFromValue(l.w, val)
 			if err != nil {
 				return nil, err
 			}
 			it.Shape.Func = func(ctx PathContext, _ *Item) string { return fn(ctx) }
 		case k == "clip" && val.IsObj():
-			fn, err := pathFuncFromValue(val)
+			fn, err := pathFuncFromValue(l.w, val)
 			if err != nil {
 				return nil, err
 			}
@@ -227,6 +236,7 @@ func (l *jsonLoader) item(v jsval.Value, m *Mark, depth int) (*Item, error) {
 		}
 	}
 	if m.Type == MarkGroup {
+		it.Items = make([]*Mark, 0, childMarks.Len()) // a group item always has its items array
 		for _, cv := range childMarks.Items() {
 			child, err := l.mark(cv, it, depth+1)
 			if err != nil {

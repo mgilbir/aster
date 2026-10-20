@@ -64,7 +64,7 @@ func reshapeSortSpec(spec jsval.Value) Comparator {
 	for _, o := range toList(s.Get("order")) {
 		os = append(os, o.StrValue())
 	}
-	return CompareBy(fs, os)
+	return CompareBy(jsval.Walker{}, fs, os)
 }
 
 func TestCollectGolden(t *testing.T) {
@@ -78,7 +78,7 @@ func TestCollectGolden(t *testing.T) {
 
 func TestFilterFormulaGolden(t *testing.T) {
 	preds := map[string]func(jsval.Value) bool{
-		"datum.x > 2": func(d jsval.Value) bool { x := d.Get("x"); return Greater(x, jsval.Num(2)) },
+		"datum.x > 2": func(d jsval.Value) bool { x := d.Get("x"); return Greater(jsval.Walker{}, x, jsval.Num(2)) },
 		"false":       func(jsval.Value) bool { return false },
 	}
 	exprs := map[string]Accessor{
@@ -325,7 +325,9 @@ func rawField(t *testing.T, name, field string) jsval.Value {
 	t.Helper()
 	for _, c := range loadRaw(t, "reshape.json").Items() {
 		if c.Get("name").StrValue() == name {
-			return c.Get(field)
+			// In lib.mjs's dialect: undefined is {"$":"undef"}, which an
+			// older lib.mjs wrote as null.
+			return decodeDialect(c.Get(field))
 		}
 	}
 	t.Fatal("no case " + name)
@@ -350,7 +352,7 @@ func BenchmarkCollect(b *testing.B) {
 	for i := range data {
 		data[i] = obj("x", jsval.Num(float64((i*7919)%100003)))
 	}
-	cmp := CompareBy(FieldsOf("x"), nil)
+	cmp := CompareBy(jsval.Walker{}, FieldsOf("x"), nil)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		Collect(context.Background(), data, cmp)

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/scene"
 )
@@ -264,7 +265,8 @@ func TestChunkedEscapingIsWhole(t *testing.T) {
 }
 
 // TestArrayValuesWriteAsStringDoes: an array written element by element is
-// String(array), nesting, nullish elements and the depth bound included.
+// String(array), nesting and nullish elements included; one nested past the
+// depth bound ends the call as the Walker's String does (C103).
 func TestArrayValuesWriteAsStringDoes(t *testing.T) {
 	deep := jsval.ArrOf(jsval.Num(1))
 	for i := 0; i < jsval.MaxValueDepth+3; i++ {
@@ -274,7 +276,6 @@ func TestArrayValuesWriteAsStringDoes(t *testing.T) {
 		jsval.ArrOf(), jsval.ArrOf(jsval.Null), jsval.ArrOf(jsval.Undefined, jsval.Num(1.5), jsval.Str("a&b")),
 		jsval.ArrOf(jsval.ArrOf(jsval.Num(1), jsval.ArrOf(jsval.Num(2), jsval.Null)), jsval.True, jsval.Obj(jsval.NewObject(0))),
 		jsval.ArrOf(jsval.Num(math.NaN()), jsval.Num(math.Inf(-1)), jsval.Num(math.Copysign(0, -1)), jsval.Num(1e21)),
-		deep,
 	} {
 		var w writer
 		w.reset(context.Background(), nil, 0)
@@ -282,5 +283,28 @@ func TestArrayValuesWriteAsStringDoes(t *testing.T) {
 		if want := appendEscaped(nil, v.AsString(), true); string(w.bytes()) != string(want) {
 			t.Errorf("valJS(%.80v) = %.80q; want %.80q", v, w.bytes(), want)
 		}
+	}
+	stopped := func(f func()) (err error) {
+		defer func() {
+			if r := recover(); r != nil {
+				st, ok := r.(*budget.Stop)
+				if !ok {
+					panic(r)
+				}
+				err = st.Err
+			}
+		}()
+		f()
+		return nil
+	}
+	var w writer
+	w.reset(context.Background(), nil, 0)
+	got := stopped(func() { w.valJS(deep) })
+	want := stopped(func() { _ = jsval.Walker{}.String(deep) })
+	if want == nil || !errors.Is(want, budget.ErrLimit) {
+		t.Fatalf("the Walker's String of a value nested past the bound: %v; want ErrLimit", want)
+	}
+	if got == nil || got.Error() != want.Error() {
+		t.Errorf("valJS of a value nested past the bound: %v; want the Walker's %v", got, want)
 	}
 }

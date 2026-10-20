@@ -118,7 +118,7 @@ func TestVegaLiteScenes(t *testing.T) {
 	sort.Strings(files)
 	only := os.Getenv("VEGA_ONLY")
 	pass, total := 0, 0
-	var failed []string
+	var failed, ran []string
 	for _, f := range files {
 		name := strings.TrimSuffix(strings.TrimSuffix(filepath.Base(f), ".gz"), ".json")
 		if only != "" && !strings.Contains(name, only) {
@@ -142,6 +142,7 @@ func TestVegaLiteScenes(t *testing.T) {
 			continue
 		}
 		total++
+		ran = append(ran, name)
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		res, rerr := Render(ctx, rec.Get("vega"), Options{
 			Loader: newTestLoader(),
@@ -177,5 +178,11 @@ func TestVegaLiteScenes(t *testing.T) {
 	t.Logf("vega-lite scoreboard: %d/%d recorded scenes match", pass, total)
 	if only == "" && len(failed) > 0 && os.Getenv("VEGA_SUMMARY") == "" {
 		t.Logf("failing: %s", strings.Join(failed, " "))
+	}
+	if only == "" && dir == "" {
+		if total < 299 {
+			t.Errorf("compared %d recordings, want all 299", total)
+		}
+		checkKnownMismatches(t, "testdata/vl", ran, failed, knownVegaLiteSceneMismatches)
 	}
 }

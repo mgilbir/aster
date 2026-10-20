@@ -1,7 +1,6 @@
 package scale
 
 import (
-	"strings"
 	"sync"
 
 	"github.com/mgilbir/aster/internal/jsval"
@@ -61,16 +60,18 @@ func init() {
 			for i, c := range colors {
 				vals[i] = jsval.Str(c)
 			}
-			return Scheme{Interpolator: InterpolateColors(vals, "", 0, false)}
+			// Colour strings of a built-in palette: there is no walk, and
+			// no call (the scheme is shared by every call).
+			return Scheme{Interpolator: InterpolateColors(jsval.Walker{}, vals, "", 0, false)}
 		}}
 	}
 }
 
-// LookupScheme is vega-scale's scheme(name): the scheme registered under name
-// (case-insensitively), if any.
+// LookupScheme is vega-scale's scheme(name): the scheme registered under
+// name.toLowerCase(), if any.
 func LookupScheme(name string) (Scheme, bool) {
 	schemeMu.RLock()
-	e, ok := schemes[strings.ToLower(name)]
+	e, ok := schemes[jsval.JSLower(name)]
 	schemeMu.RUnlock()
 	if !ok {
 		return Scheme{}, false
@@ -84,7 +85,7 @@ func RegisterScheme(name string, s Scheme) {
 	e := &schemeEntry{scheme: s}
 	e.once.Do(func() {})
 	schemeMu.Lock()
-	schemes[strings.ToLower(name)] = e
+	schemes[jsval.JSLower(name)] = e
 	schemeMu.Unlock()
 }
 

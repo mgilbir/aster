@@ -1,0 +1,1 @@
+{"width":120,"height":60,"data":[{"name":"t","values":[],"transform":[{"type":"contour","size":[3,3],"values":[0,1,0,1,null,1,0,1,0],"thresholds":[0.5]},{"type":"identifier","as":"k_"}]}],"marks":[{"type":"text","from":{"data":"t"},"encode":{"enter":{"y":{"signal":"12*datum.k_"},"text":{"signal":"datum.value + '|' + length(datum.coordinates)"}}}}]}

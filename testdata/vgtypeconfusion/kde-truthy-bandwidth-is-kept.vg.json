@@ -1,0 +1,1 @@
+{"width":120,"height":60,"data":[{"name":"t","values":[{"g":"a","v":1},{"g":"b","v":5},{"g":"a","v":3}],"transform":[{"type":"kde","field":"v","bandwidth":"x","steps":2},{"type":"identifier","as":"k_"}]}],"marks":[{"type":"text","from":{"data":"t"},"encode":{"enter":{"y":{"signal":"12*datum.k_"},"text":{"signal":"datum.value + '|' + datum.density"}}}}]}

@@ -187,6 +187,9 @@ func NumberLocaleFromValue(v jsval.Value) (*NumberLocale, error) {
 // NumberFormat is a compiled format function. Immutable; safe for concurrent
 // use.
 type NumberFormat struct {
+	// member is the Object.prototype member the memo returns for this
+	// specifier (see callMember), or empty.
+	member    string
 	loc       *NumberLocale
 	spec      Specifier
 	fill      string
@@ -247,7 +250,7 @@ func (l *NumberLocale) newFormat(s Specifier, extraPrefix, extraSuffix string) (
 	case s.Symbol == "$":
 		f.prefix += l.currencyPrefix
 	case s.Symbol == "#" && strings.IndexByte("boxX", f.typ) >= 0:
-		f.prefix += "0" + strings.ToLower(typ)
+		f.prefix += "0" + jsval.JSLower(typ)
 	}
 	switch {
 	case s.Symbol == "$":
@@ -335,18 +338,18 @@ func (f *NumberFormat) Format(x float64) string {
 
 // FormatValue formats a dynamic value: the "c" type writes String(v), every
 // other type formats Number(v).
-func (f *NumberFormat) FormatValue(v jsval.Value) string {
+func (f *NumberFormat) FormatValue(w jsval.Walker, v jsval.Value) string {
 	if f.typ == 'c' {
 		var buf [64]byte
-		return string(f.appendFormat(buf[:0], 0, v.AsString()))
+		return string(f.appendFormat(buf[:0], 0, w.String(v)))
 	}
 	return f.Format(jsval.ToNumber(v))
 }
 
 // AppendFormatValue appends what FormatValue returns to dst.
-func (f *NumberFormat) AppendFormatValue(dst []byte, v jsval.Value) []byte {
+func (f *NumberFormat) AppendFormatValue(w jsval.Walker, dst []byte, v jsval.Value) []byte {
 	if f.typ == 'c' {
-		return f.appendFormat(dst, 0, v.AsString())
+		return f.appendFormat(dst, 0, w.String(v))
 	}
 	return f.AppendFormat(dst, jsval.ToNumber(v))
 }
@@ -360,6 +363,9 @@ func (f *NumberFormat) AppendFormat(dst []byte, x float64) []byte {
 }
 
 func (f *NumberFormat) appendFormat(dst []byte, x float64, cText string) []byte {
+	if f.member != "" {
+		return callMember(dst, f.member, jsval.JSNumberString(x), false)
+	}
 	if f.simpleG {
 		if out, ok := f.appendSimpleG(dst, x); ok {
 			return out
@@ -621,7 +627,7 @@ func roundedInt(x float64, radix int, upper bool) string {
 		s = bi.Text(radix)
 	}
 	if upper {
-		s = strings.ToUpper(s)
+		s = jsval.JSUpper(s)
 	}
 	return s
 }

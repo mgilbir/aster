@@ -322,9 +322,9 @@ func setToHashString(cc *compileCtx, s *sset) string {
 	parts := make([]string, 0, s.size())
 	for _, x := range s.list() {
 		cc.work(1)
-		parts = append(parts, jsonString(x))
+		parts = append(parts, jsonString(cc, x))
 	}
-	return "Set(" + strings.Join(parts, ",") + ")"
+	return "Set(" + joinCC(cc, parts, ",") + ")"
 }
 
 // moveChildrenLive reparents b's children to dst the way upstream does:

@@ -101,7 +101,7 @@ func TestStringValue(t *testing.T) {
 		{mkv("k", "v"), `{"k":"v"}`},
 		{jsval.Str(string(rune(0x2028))), `"` + `\` + `u2028"`},
 	} {
-		if got := stringValue(c.in); got != c.want {
+		if got := stringValue(nil, c.in); got != c.want {
 			t.Errorf("stringValue(%s) = %s, want %s", c.in, got, c.want)
 		}
 	}

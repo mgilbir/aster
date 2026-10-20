@@ -163,7 +163,7 @@ func checkBounded(t *testing.T, res secResult, killed bool) {
 	if res.Err != "" && !res.Limit && !res.Deadline {
 		t.Errorf("an error that is neither ErrLimit nor the deadline: %s", res.Err)
 	}
-	if strings.Contains(res.Err, "internal error") {
+	if engineBugRE.MatchString(res.Err) {
 		t.Errorf("internal error: %s", res.Err)
 	}
 	if rep := repeatedPart(res.Err); rep != "" {

@@ -2,28 +2,18 @@ package jsval
 
 import "unicode/utf8"
 
-// primitive is ToPrimitive with hint "number" as the relational operators use
-// it: dates read as their epoch, arrays and objects as their string form.
-func primitive(v Value) Value {
-	switch v.Kind() {
-	case KindTimestamp:
-		return Num(v.NumValue())
-	case KindArr, KindObj, KindPattern:
-		return Str(v.AsString())
-	}
-	return v
-}
-
 // Relate is JavaScript's abstract relational comparison of a and b: it
 // returns -1, 0 or +1, and ok=false when either side coerces to NaN (every
 // operator then answers false). Two strings compare by UTF-16 code units;
-// anything else compares as numbers.
+// anything else compares as numbers. An array compares as its String, which
+// is a walk: this is the detached one (see Walker); values an expression or
+// a transform built are compared with the call's Walker (Walker.Relate).
 func Relate(a, b Value) (c int, ok bool) {
 	// Fast path: the overwhelmingly common same-kind cases.
 	if a.Kind() == KindNum && b.Kind() == KindNum {
 		return cmpFloat(a.NumValue(), b.NumValue())
 	}
-	return RelatePrimitives(primitive(a), primitive(b))
+	return Walker{}.Relate(a, b)
 }
 
 // RelatePrimitives is Relate after ToPrimitive, for a caller that converts

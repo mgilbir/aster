@@ -1,0 +1,1 @@
+{"width":50,"height":50,"data":[{"name":"t","values":[{"a":1},{"a":2}],"transform":[{"type":"collect","sort":null}]}],"marks":[{"type":"rect","from":{"data":"t"},"encode":{"update":{"x":{"signal":"15*(datum.a||0)"},"width":{"value":10},"height":{"value":10}}}}]}

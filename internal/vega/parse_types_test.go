@@ -29,8 +29,9 @@ func TestTypeKeysAreObjectKeys(t *testing.T) {
 
 // The parsers run in that order, so it is the field a missing one is added
 // in and the field an illegal pattern names (upstream, with node 24:
-// "Illegal format pattern: 2:bad2", and the second row's keys 2, c, b,
-// which jsval, keeping insertion order, holds as c, 2, b).
+// "Illegal format pattern: 2:bad2", and the rows below, whose array-index
+// key "2" comes first, as a JavaScript object lists its keys: C154, audit
+// 2026-10-18).
 func TestParseRunsInObjectKeysOrder(t *testing.T) {
 	v := newView(context.Background(), Options{}, jsval.Undefined)
 	read := func(values, schema string) ([]jsval.Value, error) {
@@ -42,7 +43,7 @@ func TestParseRunsInObjectKeysOrder(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return v.read(d, nil, s)
+		return v.readRows(d, nil, s)
 	}
 	if _, err := read(`"[{\"b\":\"1\"}]"`, `{"type":"json","parse":{"b":"bad","2":"bad2"}}`); err == nil || err.Error() != "Illegal format pattern: 2:bad2" {
 		t.Errorf("error %v; want Illegal format pattern: 2:bad2", err)
@@ -51,7 +52,7 @@ func TestParseRunsInObjectKeysOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := string(jsval.AppendJSON(nil, jsval.Arr(rows))), `[{"b":1,"2":"x","__proto__":"1"},{"c":1,"2":null,"b":null}]`; got != want {
+	if got, want := string(jsval.AppendJSON(nil, jsval.Arr(rows))), `[{"2":"x","b":1,"__proto__":"1"},{"2":null,"c":1,"b":null}]`; got != want {
 		t.Errorf("rows %s; want %s", got, want)
 	}
 }
@@ -101,15 +102,11 @@ func TestJSONStringValuesAreNotCopied(t *testing.T) {
 		t.Skip("-race changes what is allocated")
 	}
 	doc := jsval.Str("[" + strings.Repeat(" ", 1<<20) + "1]")
-	schema := vegaSpec(t, `{"type":"json"}`)
-	if _, err := jsonDocument(context.Background(), doc, nil, schema, 0); err != nil {
-		t.Fatal(err)
-	}
+	v := newView(context.Background(), Options{}, jsval.Undefined)
+	v.parseJSONText(doc, nil)
 	runtime.GC()
 	before := totalAlloc()
-	if _, err := jsonDocument(context.Background(), doc, nil, schema, 0); err != nil {
-		t.Fatal(err)
-	}
+	v.parseJSONText(doc, nil)
 	if got := totalAlloc() - before; got > 64<<10 {
 		t.Errorf("parsing a %d-byte JSON string allocated %d bytes; want under 64 KiB", len(doc.StrValue()), got)
 	}

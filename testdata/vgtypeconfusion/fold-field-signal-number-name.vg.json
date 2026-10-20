@@ -1,0 +1,3 @@
+{"width":100,"height":100,
+"data":[{"name":"src","values":[{"a":1,"b":2},{"a":3,"b":4}]},{"name":"out","source":"src","transform":[{"type":"fold","fields":["a",{"signal":"1/0"}]},{"type":"collect","sort":{"field":"key"}}]}],
+"marks":[{"type":"text","encode":{"update":{"text":{"signal":"length(data('out')) + ' ' + toString(pluck(data('out'),'key')) + '|' + toString(pluck(data('out'),'value'))"},"y":{"value":10}}}}]}

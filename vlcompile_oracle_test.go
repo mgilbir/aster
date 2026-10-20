@@ -30,12 +30,14 @@ func compileAgainstNode(t *testing.T, name, spec string) {
 		}
 		got, gerr := c.VegaLiteToVega([]byte(spec))
 		c.Close()
-		switch {
-		case gerr != nil && want.Err != "":
+		switch errorOutcome(gerr, want.Err) {
+		case "both-error":
 			continue
-		case gerr != nil:
+		case statusInternalError:
+			t.Errorf("%s (VL %s): the engine panics: %v", name, v.version, gerr)
+		case "engine-error":
 			t.Errorf("%s (VL %s): engine error %v; node compiles", name, v.version, gerr)
-		case want.Err != "":
+		case "node-error":
 			t.Errorf("%s (VL %s): node errors (%s); engine compiles", name, v.version, firstLine(want.Err))
 		default:
 			w, err := jsval.ParseJSON(want.Vega)

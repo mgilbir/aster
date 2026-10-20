@@ -1,0 +1,4 @@
+{"width":100,"height":100,
+"data":[{"name":"src","values":[{"c":"a"},{"c":"b"},{"c":"a"}]},{"name":"d","source":"src","transform":[{"type":"aggregate","groupby":["c"],"as":[[]]}]}],
+"scales":[{"name":"k","type":"linear","domain":{"data":"d","field":"count"},"range":[0,1]}],
+"marks":[{"type":"text","encode":{"update":{"text":{"signal":"toString(domain('k')) + ' | ' + toString(pluck(data('d'),'count')) + ' ' + toString(pluck(data('d'),''))"},"y":{"value":10}}}}]}

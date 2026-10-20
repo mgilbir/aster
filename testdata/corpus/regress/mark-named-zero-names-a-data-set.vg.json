@@ -1,0 +1,3 @@
+{"width":60,"height":40,
+ "marks":[{"type":"rect","name":0,"encode":{"enter":{"x":{"value":5},"y":{"value":5},"width":{"value":10},"height":{"value":10},"fill":{"value":"red"}}}},
+  {"type":"text","from":{"data":"0"},"encode":{"enter":{"text":{"signal":"'w' + datum.width"}}}}]}

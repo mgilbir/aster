@@ -28,6 +28,10 @@ type StackParams struct {
 	Offset string
 	// As names the two output fields; empty entries default to y0 and y1.
 	As [2]string
+	// AsExact reports that As are the names as the runtime resolved them
+	// (`_.as || defaults`, then each entry's text): an empty one is the
+	// empty name, not the default.
+	AsExact bool
 }
 
 // errCircular is the TypeError JSON.stringify throws on a value that
@@ -35,8 +39,9 @@ type StackParams struct {
 var errCircular = errors.New("TypeError: Converting circular structure to JSON")
 
 // appendStackKey appends upstream's stack group key,
-// JSON.stringify(groupby.map(get)), to dst.
-func appendStackKey(dst []byte, fields []Field, t jsval.Value, path *[]*jsval.Object) ([]byte, error) {
+// JSON.stringify(groupby.map(get)), to dst. Its walk of the values is
+// metered by m and its text charged while it is built (ADR 0018).
+func appendStackKey(dst []byte, fields []Field, t jsval.Value, j *stringifier) ([]byte, error) {
 	dst = append(dst, '[')
 	for i, f := range fields {
 		if i > 0 {
@@ -44,33 +49,59 @@ func appendStackKey(dst []byte, fields []Field, t jsval.Value, path *[]*jsval.Ob
 		}
 		var err error
 		// In an array, undefined is written as null.
-		if dst, err = appendStringify(dst, f.Get(t), path, 0); err != nil {
+		if dst, err = j.append(dst, f.Get(t), 0); err != nil {
 			return dst, err
 		}
 	}
 	return append(dst, ']'), nil
 }
 
-// appendStringify is JSON.stringify(v) for a value in an array, or an object
-// member that is not undefined: null, undefined and non-finite numbers are
-// null; a date is its toJSON, the ISO string (null for an Invalid Date); an
-// object's members are in JavaScript's key order (integer keys ascending,
-// then the rest as inserted), undefined ones omitted; a value holding itself
-// is the TypeError upstream throws. path holds the objects being written.
-func appendStringify(dst []byte, v jsval.Value, path *[]*jsval.Object, depth int) ([]byte, error) {
+// stringifier writes JSON.stringify of the values of one call: w walks them
+// and m meters the walk of the arrays and objects (on, once the key being
+// written has one); path holds the objects being written. A key of strings
+// and numbers, the common one, is no walk.
+type stringifier struct {
+	w    jsval.Walker
+	m    jsval.WalkMeter
+	on   bool
+	path []*jsval.Object
+}
+
+// append is JSON.stringify(v) for a value in an array, or an object member
+// that is not undefined: null, undefined and non-finite numbers are null; a
+// date is its toJSON, the ISO string (null for an Invalid Date); an object's
+// members are in its key order (JavaScript's), undefined ones omitted; a
+// value holding itself is the TypeError upstream throws.
+func (j *stringifier) append(dst []byte, v jsval.Value, depth int) ([]byte, error) {
 	switch v.Kind() {
+	case jsval.KindStr:
+		dst = jsval.AppendQuoted(dst, v.StrValue())
+		j.text(dst)
+		return dst, nil
+	case jsval.KindNum:
+		if f := v.NumValue(); math.IsNaN(f) || math.IsInf(f, 0) {
+			return append(dst, "null"...), nil
+		}
+		dst = jsval.AppendJSNumber(dst, v.NumValue())
+		j.text(dst)
+		return dst, nil
 	case jsval.KindTimestamp:
 		iso, ok := format.ISOFormat(v.NumValue())
 		if !ok {
 			return append(dst, "null"...), nil
 		}
-		return jsval.AppendJSON(dst, jsval.Str(iso)), nil
+		dst = jsval.AppendQuoted(dst, iso)
+		j.text(dst)
+		return dst, nil
 	case jsval.KindArr, jsval.KindObj:
-		if depth > jsval.MaxValueDepth {
-			return dst, errors.New("RangeError: Maximum call stack size exceeded")
+		if !j.on {
+			j.m, j.on = j.w.Meter(), true
 		}
+		j.m.Step(depth)
 	default:
-		return jsval.AppendJSON(dst, v), nil
+		dst = j.w.AppendJSON(dst, v)
+		j.text(dst)
+		return dst, nil
 	}
 	if v.IsArr() {
 		dst = append(dst, '[')
@@ -79,26 +110,22 @@ func appendStringify(dst []byte, v jsval.Value, path *[]*jsval.Object, depth int
 				dst = append(dst, ',')
 			}
 			var err error
-			if dst, err = appendStringify(dst, it, path, depth+1); err != nil {
+			if dst, err = j.append(dst, it, depth+1); err != nil {
 				return dst, err
 			}
 		}
 		return append(dst, ']'), nil
 	}
 	o := v.ObjValue()
-	if slices.Contains(*path, o) {
+	if slices.Contains(j.path, o) {
 		return dst, errCircular
 	}
-	*path = append(*path, o)
-	defer func() { *path = (*path)[:len(*path)-1] }()
-	keys := make([]string, 0, o.Len())
-	for i := 0; i < o.Len(); i++ {
-		keys = append(keys, o.KeyAt(i))
-	}
+	j.path = append(j.path, o)
+	defer func() { j.path = j.path[:len(j.path)-1] }()
 	dst = append(dst, '{')
 	n := 0
-	for _, k := range OrderedKeys(keys) {
-		val := o.Lookup(k)
+	for i := 0; i < o.Len(); i++ {
+		val := o.ValueAt(i)
 		if val.IsUndefined() {
 			continue
 		}
@@ -106,10 +133,10 @@ func appendStringify(dst []byte, v jsval.Value, path *[]*jsval.Object, depth int
 			dst = append(dst, ',')
 		}
 		n++
-		dst = jsval.AppendJSON(dst, jsval.Str(k))
+		dst = jsval.AppendQuoted(dst, o.KeyAt(i))
 		dst = append(dst, ':')
 		var err error
-		if dst, err = appendStringify(dst, val, path, depth+1); err != nil {
+		if dst, err = j.append(dst, val, depth+1); err != nil {
 			return dst, err
 		}
 	}
@@ -124,10 +151,10 @@ func appendStringify(dst []byte, v jsval.Value, path *[]*jsval.Object, depth int
 // Math.abs, so NaN poisons a whole stack exactly as upstream.
 func Stack(ctx context.Context, data []jsval.Value, p StackParams) ([]jsval.Value, error) {
 	y0, y1 := p.As[0], p.As[1]
-	if y0 == "" {
+	if y0 == "" && !p.AsExact {
 		y0 = "y0"
 	}
-	if y1 == "" {
+	if y1 == "" && !p.AsExact {
 		y1 = "y1"
 	}
 	get := func(t jsval.Value) float64 { return 1 }
@@ -142,13 +169,18 @@ func Stack(ctx context.Context, data []jsval.Value, p StackParams) ([]jsval.Valu
 	} else {
 		idx := map[string]int{}
 		var buf []byte
-		var path []*jsval.Object
+		j := &stringifier{w: jsval.WalkerFor(ctx)}
 		for i, t := range data {
 			if err := poll(ctx, i); err != nil {
 				return nil, err
 			}
 			var err error
-			if buf, err = appendStackKey(buf[:0], p.GroupBy, t, &path); err != nil {
+			buf, err = appendStackKey(buf[:0], p.GroupBy, t, j)
+			if j.on {
+				j.m.Done()
+				j.on = false
+			}
+			if err != nil {
 				return nil, err
 			}
 			gi, ok := idx[string(buf)]
@@ -175,7 +207,7 @@ func Stack(ctx context.Context, data []jsval.Value, p StackParams) ([]jsval.Valu
 	}
 
 	set := func(t jsval.Value, a, b float64) {
-		if o := t.ObjValue(); o != nil {
+		if o := jsval.FieldsFor(t, y0); o != nil {
 			o.Set(y0, jsval.Num(a))
 			o.Set(y1, jsval.Num(b))
 		}
@@ -218,4 +250,12 @@ func Stack(ctx context.Context, data []jsval.Value, p StackParams) ([]jsval.Valu
 		}
 	}
 	return data, nil
+}
+
+// text charges the key's text, once a walk of an array or object is under
+// way (before, the key is a few values the data holds).
+func (j *stringifier) text(dst []byte) {
+	if j.on {
+		j.m.Text(len(dst))
+	}
 }

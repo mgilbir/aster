@@ -60,18 +60,18 @@ func (t *Tree) NodeByKey(key string) *Node { return t.byKey[key] }
 // NodeOf returns the node for a tuple, or nil. Tuple identity is the object
 // pointer, as everywhere in this engine.
 func (t *Tree) NodeOf(tuple jsval.Value) *Node {
-	if !tuple.IsObj() {
+	if !tuple.IsObjectLike() {
 		return nil
 	}
 	if t.byObj == nil {
 		t.byObj = make(map[*jsval.Object]*Node)
 		t.Root.eachBefore(func(n *Node) {
-			if n.Data.IsObj() {
-				t.byObj[n.Data.ObjValue()] = n
+			if n.Data.IsObjectLike() {
+				t.byObj[jsval.Fields(n.Data)] = n
 			}
 		})
 	}
-	return t.byObj[tuple.ObjValue()]
+	return t.byObj[jsval.Fields(tuple)]
 }
 
 // Ancestors returns the node followed by its ancestors up to the root.
@@ -213,9 +213,10 @@ func (n *Node) sortChildren(cmp func(a, b *Node) int) {
 
 // finish fills Parent, Depth and Height from the Children lists, enforcing
 // the size limits. Root's Parent is left as it is found (nil).
-func finish(root *Node) error {
+func finish(m *budget.Meter, root *Node) error {
 	count := 0
 	var overflow bool
+	var err error
 	root.Depth = 0
 	root.Parent = nil
 	root.eachBefore(func(n *Node) {
@@ -223,6 +224,9 @@ func finish(root *Node) error {
 		if count > MaxNodes || n.Depth > MaxDepth {
 			overflow = true
 			return
+		}
+		if err == nil {
+			err = m.Work(1)
 		}
 		for _, c := range n.Children {
 			c.Parent = n
@@ -232,17 +236,34 @@ func finish(root *Node) error {
 	if overflow {
 		return ErrTooLarge
 	}
-	computeHeights(root)
-	return nil
+	if err != nil {
+		return err
+	}
+	return computeHeights(m, root)
 }
 
-func computeHeights(root *Node) {
-	root.eachBefore(func(n *Node) { n.Height = 0 })
+// computeHeights sets each node's height, a step of work charged to m per
+// node and pass.
+func computeHeights(m *budget.Meter, root *Node) error {
+	var err error
+	root.eachBefore(func(n *Node) {
+		if err == nil {
+			err = m.Work(1)
+		}
+		n.Height = 0
+	})
+	if err != nil {
+		return err
+	}
 	for _, n := range root.postOrder() {
+		if err := m.Work(1); err != nil {
+			return err
+		}
 		if p := n.Parent; p != nil && p.Height < n.Height+1 {
 			p.Height = n.Height + 1
 		}
 	}
+	return nil
 }
 
 func ctxErr(ctx context.Context, i int) error {

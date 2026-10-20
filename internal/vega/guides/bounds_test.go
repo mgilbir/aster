@@ -115,7 +115,7 @@ func TestLabelsChargedToTheLedger(t *testing.T) {
 	if b := l.Bytes(); b != int64(len(strings.Join([]string{"0", "10", "20", "30", "40", "50", "60", "70", "80", "90", "100"}, ""))) {
 		t.Errorf("ledger charged %d bytes for the labels 0..100", b)
 	}
-	_, err = env.LegendEntries(LegendEntriesInput{Scale: lin, Count: jsval.Num(5), Type: "gradient", FormatSpecifier: jsval.Str(">300000")})
+	_, err = env.LegendEntries(LegendEntriesInput{Scale: lin, Count: jsval.Num(5), Type: jsval.Str("gradient"), FormatSpecifier: jsval.Str(">300000")})
 	if !errors.Is(err, budget.ErrLimit) {
 		t.Errorf("legend labels: %v; want a limit error", err)
 	}

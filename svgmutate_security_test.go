@@ -101,7 +101,7 @@ func TestSVGMutations(t *testing.T) {
 				} else {
 					_, err = c.SVGToPDF(mutated)
 				}
-				if err != nil && strings.Contains(err.Error(), "internal error") {
+				if isEngineBug(err) {
 					done <- "INTERNAL " + err.Error()
 					return
 				}

@@ -2,6 +2,7 @@ package expr
 
 import (
 	"math"
+	"unsafe"
 
 	"github.com/mgilbir/aster/internal/jsval"
 )
@@ -420,50 +421,84 @@ func idx(v []jsval.Value, i int) jsval.Value {
 	return jsval.Undefined
 }
 
-// internKey identifies a value the way d3's InternSet does: primitives by
-// value.
-// The keys are held in a set while it is built, so each is charged.
-func (s *Scope) internKey(v jsval.Value) string {
-	k := v.Kind().String() + ":" + v.AsString()
-	s.workBytes(len(k))
-	s.chargeBytes(len(k) + 48)
-	return k
+// internSet is d3's InternSet: distinct values in the order first added,
+// each identified by its jsval.InternKey (a Date by its time value, -0 as 0,
+// NaN as NaN, an array or object by reference), which no walk of the value
+// decides. Its entries are charged as the set grows.
+type internSet struct {
+	s       *Scope
+	keys    map[jsval.InternKey]struct{}
+	vals    []jsval.Value
+	charged int // entries paid for
 }
 
+// internEntryBytes is what an entry of an internSet holds: its key in the
+// map, with the map's per-entry overhead, and its value in the list.
+const internEntryBytes = int(unsafe.Sizeof(jsval.InternKey{})+unsafe.Sizeof(jsval.Value{})) + 16
+
+func newInternSet(s *Scope) *internSet {
+	return &internSet{s: s, keys: map[jsval.InternKey]struct{}{}}
+}
+
+func (z *internSet) has(v jsval.Value) bool {
+	z.s.work(1)
+	_, ok := z.keys[v.InternKey()]
+	return ok
+}
+
+// add adds v unless the set has it, and reports whether it did.
+func (z *internSet) add(v jsval.Value) bool {
+	z.s.work(1)
+	k := v.InternKey()
+	if _, ok := z.keys[k]; ok {
+		return false
+	}
+	if len(z.vals) == z.charged {
+		// Pay for the entries the set grows by, doubling, before they
+		// are made: a set is as large as the selection store.
+		n := max(8, 2*z.charged)
+		if z.charged*internEntryBytes > smallString {
+			z.s.chargeRaw(int64((n - z.charged) * internEntryBytes))
+		} else {
+			z.s.chargeBytes(n * internEntryBytes)
+		}
+		z.charged = n
+	}
+	z.keys[k] = struct{}{}
+	z.vals = append(z.vals, v)
+	return true
+}
+
+// internUnion is d3's union: the distinct values of the lists.
 func (s *Scope) internUnion(lists ...[]jsval.Value) []jsval.Value {
-	seen := map[string]struct{}{}
-	var out []jsval.Value
+	z := newInternSet(s)
 	for _, l := range lists {
 		for _, v := range l {
-			k := s.internKey(v)
-			if _, ok := seen[k]; !ok {
-				seen[k] = struct{}{}
-				out = append(out, v)
-			}
+			z.add(v)
 		}
 	}
-	return out
+	return z.vals
 }
 
+// internIntersection is d3's intersection: the distinct values of first that
+// every other list has.
 func (s *Scope) internIntersection(first []jsval.Value, others ...[]jsval.Value) []jsval.Value {
-	sets := make([]map[string]struct{}, len(others))
+	sets := make([]*internSet, len(others))
 	for i, o := range others {
-		sets[i] = map[string]struct{}{}
+		sets[i] = newInternSet(s)
 		for _, v := range o {
-			sets[i][s.internKey(v)] = struct{}{}
+			sets[i].add(v)
 		}
 	}
+	seen := newInternSet(s)
 	var out []jsval.Value
-	seen := map[string]struct{}{}
 next:
 	for _, v := range first {
-		k := s.internKey(v)
-		if _, dup := seen[k]; dup {
+		if !seen.add(v) {
 			continue
 		}
-		seen[k] = struct{}{}
 		for _, st := range sets {
-			if _, ok := st[k]; !ok {
+			if !st.has(v) {
 				continue next
 			}
 		}
@@ -561,7 +596,7 @@ func selectionResolve(s *Scope, args []jsval.Value) jsval.Value {
 			}
 			set = s.internIntersection(lists[0], lists[1:]...)
 		default:
-			typeError("ops[`_vgsid__%s`] is not a function", op)
+			typeError("ops[`_vgsid__%s`] is not a function", jsval.StringPrefix(jsval.Str(op), jsval.MessageBytes))
 		}
 		for _, f := range fieldOrder {
 			if f == selectionID {
@@ -593,7 +628,7 @@ func selectionResolve(s *Scope, args []jsval.Value) jsval.Value {
 				case "intersect":
 					acc = ops.intersect(types[f], acc, cur)
 				default:
-					typeError("ops[`%c_%s`] is not a function", types[f], op)
+					typeError("ops[`%c_%s`] is not a function", types[f], jsval.StringPrefix(jsval.Str(op), jsval.MessageBytes))
 				}
 			}
 			out.Set(f, jsval.Arr(acc))

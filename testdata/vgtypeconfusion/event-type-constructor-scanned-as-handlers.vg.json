@@ -1,0 +1,1 @@
+{"width":40,"height":20,"signals":[{"name":"s","value":1,"on":[{"events":"constructor","update":"2"}]}],"marks":[{"type":"text","encode":{"enter":{"text":{"signal":"s"},"y":{"value":10}}}}]}

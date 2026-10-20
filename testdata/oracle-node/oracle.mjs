@@ -10,8 +10,14 @@
 //
 //   request:  {"id": 1, "op": "svg" | "compile", "lite": true, "spec": "<JSON text>"}
 //             {"id": 2, "op": "png", "svg": "<svg ...>", "scale": 2}
+//             {"id": 3, "op": "svg", "spec": "...", "wordcloud": "box"}
 //   response: {"id": 1, "svg": "...", "vega": {...}, "png": "<base64>", "err": "...",
-//              "warnings": ["..."], "tainted": "Object.prototype.mean"}
+//              "warnings": ["..."], "tainted": "Object.prototype.mean", "oracleErr": "..."}
+//
+// "err" is upstream's answer: the error it throws for the input. "oracleErr"
+// is the oracle failing to answer (a request it cannot parse, an unknown op,
+// a generator that throws, resvg-napi missing): it is not an answer, and the
+// Go side never caches it and fails the test that asked.
 //
 // "svg" renders (compiling first when lite) and also returns the compiled
 // Vega for Vega-Lite; "compile" only compiles, and lists the compiler's
@@ -31,6 +37,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
+import { boxContext } from './wordcloud-box.mjs';
 
 // node must not outlive the Go process that drives it. An input can keep the
 // main thread busy for good (upstream looping on it), so it cannot watch for
@@ -173,10 +180,27 @@ function mapFonts(font) {
 }
 const proto = canvas.CanvasRenderingContext2D.prototype;
 const fontProp = Object.getOwnPropertyDescriptor(proto, 'font');
+// A canvas context keeps its font when it is given a string it cannot parse
+// (node-canvas, as the HTML specification says), and vega-scenegraph measures
+// with one context and a width cache that live as long as the process. An
+// answer that depends on an unparseable font then depends on the fonts the
+// process measured before: it is a fresh process's only if the process was
+// fresh. So a rejected assignment is noted (the context's font did not change
+// and this string never changed it), and the answer carries it (fontRejected),
+// for the Go side to ask again of a fresh process. A valid string that changes
+// nothing (the font already held, in a spelling not seen before) is taken for
+// a rejected one: the cost is a repeated answer, never a wrong one.
+let fontRejected = false;
+const fontAccepted = new Map();
 Object.defineProperty(proto, 'font', {
   ...fontProp,
   set(v) {
-    fontProp.set.call(this, mapFonts(String(v)));
+    const mapped = mapFonts(String(v));
+    const before = fontProp.get.call(this);
+    fontProp.set.call(this, mapped);
+    const after = fontProp.get.call(this);
+    if (after === before && fontAccepted.get(mapped) !== after) fontRejected = true;
+    else fontAccepted.set(mapped, after);
   },
 });
 
@@ -231,6 +255,7 @@ process.chdir(roots[0]);
 // plan, the embedded Liberation faces plus Noto Emoji and no system fonts.
 let resvg = null;
 let rasterFonts = null;
+let resvgError = '';
 try {
   resvg = require('resvg-napi');
   rasterFonts = new resvg.FontDatabase();
@@ -245,11 +270,14 @@ try {
   rasterFonts.setMonospaceFamily('Liberation Mono');
   rasterFonts.setCursiveFamily('Liberation Sans');
   rasterFonts.setFantasyFamily('Liberation Sans');
-} catch {
+} catch (e) {
   resvg = null;
+  resvgError = String((e && e.message) || e).split('\n')[0];
 }
+// OracleError is a failure of the oracle, not upstream's answer.
+class OracleError extends Error {}
 function rasterize(svg, scale) {
-  if (!resvg) throw new Error('resvg-napi is not installed in this module set');
+  if (!resvg) throw new OracleError('resvg-napi did not load in this module set: ' + resvgError);
   const doc = new resvg.Resvg(svg, { fontFamily: 'Liberation Sans' }, rasterFonts);
   return doc.renderPng({ scale: scale || 1 }).toString('base64');
 }
@@ -321,9 +349,29 @@ async function renderAfter(vg, writes) {
 // returns { cases, skips }; ctx carries the modules, since a generator cannot
 // import them by name (NODE_PATH does not apply to ES modules).
 async function generate(name) {
-  if (!/^[a-z0-9-]+$/.test(name)) throw new Error('bad sweep name: ' + name);
-  const mod = await import(path.join(repo, 'testdata/oracle-node/sweeps', name + '.mjs'));
-  return mod.generate({ vega, vl, require, repo });
+  if (!/^[a-z0-9-]+$/.test(name)) throw new OracleError('bad sweep name: ' + name);
+  try {
+    const mod = await import(path.join(repo, 'testdata/oracle-node/sweeps', name + '.mjs'));
+    return await mod.generate({ vega, vl, require, repo });
+  } catch (e) {
+    // A generator is the oracle's own code: its failure (a corpus not
+    // fetched, a bug) is not an answer of upstream's.
+    throw new OracleError(`generator ${name}: ` + String((e && e.message) || e).split('\n')[0]);
+  }
+}
+
+// The "box" wordcloud: while a request asks for it, a canvas context made
+// for the wordcloud layout (the only canvas a render creates: text is
+// measured on the context vega-scenegraph made at import) is the
+// deterministic one of wordcloud-box.mjs, which the engine's
+// wordcloud.BoxRenderer reproduces, so the transform is compared without the
+// platform's glyph rasterization.
+let boxWordcloud = false;
+{
+  const getContext = canvas.Canvas.prototype.getContext;
+  canvas.Canvas.prototype.getContext = function (...args) {
+    return boxWordcloud ? boxContext(this.width, this.height) : getContext.apply(this, args);
+  };
 }
 
 async function render(vg) {
@@ -350,8 +398,9 @@ write({
   ready: true,
   version:
     `vega ${vega.version} / vega-lite ${vl.version} / node ${process.version} / canvas ${require('canvas/package.json').version}` +
-    (resvg ? ` / resvg-napi ${require('resvg-napi/package.json').version}` : '') +
+    (resvg ? ` / resvg-napi ${require('resvg-napi/package.json').version}` : ' / resvg-napi none') +
     ` / pango ${canvas.pangoVersion} / cairo ${canvas.cairoVersion} / probe ${probeWidth}` +
+    ` / platform ${process.platform}-${process.arch}` +
     (process.env.TZ === 'UTC' ? '' : ` / TZ ${process.env.TZ}`),
 });
 
@@ -417,7 +466,71 @@ const changedBuiltin = () => {
   }
   return '';
 };
-const answer = (res) => {
+// Module state upstream keeps between renders (registries, caches) can be
+// changed by an input in ways the built-ins snapshot cannot see. A canary
+// specification exercising the parser, the scales, the guides and the text
+// metrics is rendered at the start and after every request; an answer that
+// differs from the first means a request changed something, and the process
+// is replaced (the answer itself, computed before, stands).
+const canarySpec = {
+  width: 120, height: 60, padding: 5,
+  signals: [{ name: 'active', value: 1 }, { name: 'k', update: 'width / 4' }],
+  data: [{ name: 't', values: [{ c: 'a', v: 1 }, { c: 'b', v: 3 }] }],
+  scales: [
+    { name: 'x', type: 'band', domain: { data: 't', field: 'c' }, range: 'width' },
+    { name: 'y', type: 'linear', domain: { data: 't', field: 'v' }, range: 'height', nice: true },
+    { name: 'col', type: 'ordinal', domain: { data: 't', field: 'c' }, range: 'category' },
+  ],
+  axes: [{ orient: 'bottom', scale: 'x', title: 'X' }, { orient: 'left', scale: 'y', title: 'Y', grid: true }],
+  legends: [{ fill: 'col', title: 'L' }],
+  title: { text: 'T', subtitle: 'S' },
+  marks: [
+    {
+      type: 'rect', from: { data: 't' },
+      encode: {
+        enter: { x: { scale: 'x', field: 'c' }, width: { scale: 'x', band: 1 }, y: { scale: 'y', field: 'v' }, y2: { scale: 'y', value: 0 }, fill: { scale: 'col', field: 'c' } },
+        update: { opacity: { signal: 'active' } },
+      },
+    },
+    { type: 'text', encode: { enter: { x: { signal: 'k' }, y: { value: 5 }, text: { value: 'canary' }, limit: { value: 30 } } } },
+  ],
+};
+// Rendered with estimated text widths: the canary must not touch the canvas
+// context or the width cache, whose state is part of what an answer depends on.
+const renderCanary = async () => {
+  vega.textMetrics.canvas(false);
+  try {
+    return await render(JSON.parse(JSON.stringify(canarySpec)));
+  } finally {
+    vega.textMetrics.canvas(true);
+  }
+};
+const canaryBefore = await renderCanary();
+fontRejected = false;
+const canaryChanged = async () => {
+  try {
+    return (await renderCanary()) !== canaryBefore;
+  } catch {
+    return true;
+  }
+};
+let currentRequest = '';
+const answer = async (res) => {
+  // a request that names __proto__ can reach the prototype of any object it
+  // is stored in: the process is not trusted after it
+  if (currentRequest.includes('__proto__')) res.tainted = res.tainted || '__proto__';
+  // d3-geo's measuring streams keep module-level variables (the first point of
+  // the last ring ...) that a ring without points reads: a request that calls
+  // them leaves state for the next one, and an answer is a fresh process's
+  if (/geo(Area|Bounds|Centroid|Length)/.test(currentRequest)) res.tainted = res.tainted || 'd3-geo state';
+  if (!res.tainted && (await canaryChanged())) {
+    res.tainted = 'canary';
+    console.error('oracle: the canary render changed; this process is replaced');
+  }
+  if (fontRejected) {
+    res.fontRejected = true;
+    fontRejected = false;
+  }
   const changed = changedBuiltin();
   if (changed) {
     res.tainted = changed;
@@ -429,28 +542,34 @@ const answer = (res) => {
 const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
 for await (const line of rl) {
   if (!line.trim()) continue;
+  currentRequest = line;
   let req;
   try {
     req = JSON.parse(line);
   } catch (e) {
-    answer({ id: null, err: 'oracle: bad request: ' + e.message });
+    await answer({ id: null, oracleErr: 'bad request: ' + e.message });
     continue;
   }
   const res = { id: req.id };
+  if (!['svg', 'compile', 'png', 'signals', 'generate'].includes(req.op) || (req.wordcloud && req.wordcloud !== 'box')) {
+    await answer({ id: req.id, oracleErr: `bad request: op ${req.op}, wordcloud ${req.wordcloud}` });
+    continue;
+  }
+  boxWordcloud = req.wordcloud === 'box';
   try {
     if (req.op === 'generate') {
       res.data = await generate(req.sweep);
-      answer(res);
+      await answer(res);
       continue;
     }
     if (req.op === 'signals') {
       res.svg = await renderAfter(JSON.parse(req.spec), req.writes || []);
-      answer(res);
+      await answer(res);
       continue;
     }
     if (req.op === 'png') {
       res.png = rasterize(req.svg, req.scale);
-      answer(res);
+      await answer(res);
       continue;
     }
     const spec = JSON.parse(req.spec);
@@ -468,9 +587,13 @@ for await (const line of rl) {
     if (req.lite) res.vega = JSON.parse(JSON.stringify(vg));
     if (req.op === 'svg') res.svg = await render(vg);
   } catch (e) {
-    res.err = String((e && e.message) || e).split('\n')[0];
+    const msg = String((e && e.message) || e).split('\n')[0];
+    if (e instanceof OracleError) res.oracleErr = msg;
+    else res.err = msg;
+  } finally {
+    boxWordcloud = false;
   }
-  answer(res);
+  await answer(res);
 }
 // stdin closed: the Go side is done with this process.
 process.exit(0);

@@ -9,12 +9,20 @@
 // VEGA_DATA_DIRS (colon separated).
 // The Go oracle has no time zone database, so recordings use UTC as the local zone.
 process.env.TZ = 'UTC';
-import { createRequire } from 'node:module';
+import { createRequire, register } from 'node:module';
 import path from 'node:path';
 import fs from 'node:fs';
 
-const require = createRequire(path.join(process.env.NODE_PATH, 'x.js'));
+// Recorded without node-canvas (see no-canvas-hook.mjs): text measured with
+// vega's estimate, image URLs kept, on every platform alike.
+register('../../testdata/oracle-node/no-canvas-hook.mjs', import.meta.url);
+const require = createRequire(path.resolve(process.env.NODE_PATH, 'x.js'));
 const vega = await import(require.resolve('vega'));
+// A static render is the chart's first frame: timer event streams never fire,
+// as in the runtime (no event loop) and the oracle. In node they fire by
+// wall-clock time while a render awaits, so what was recorded depended on how
+// fast the machine was.
+vega.View.prototype.timer = function () {};
 
 // Freeze the clock and seed the random generator so recordings are repeatable.
 const FIXED_NOW = 1700000000000;
@@ -131,3 +139,6 @@ for (const f of files) {
   }
   fs.writeFileSync(path.join(outdir, name + '.json'), JSON.stringify(out));
 }
+// A chart's timers (a clock, an animation) keep node's event loop alive
+// after the last spec; every recording is written, so end here.
+process.exit(0);

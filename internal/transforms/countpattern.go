@@ -29,6 +29,10 @@ type CountPatternParams struct {
 	// As is the [text, count] output pair; empty entries default to "text" and
 	// "count".
 	As [2]string
+	// AsExact reports that As are the names as the runtime resolved them
+	// (`_.as || defaults`, then each entry's text): an empty one is the
+	// empty name, not the default.
+	AsExact bool
 }
 
 // CountPattern tokenizes a text field with a regular expression and counts the
@@ -59,10 +63,10 @@ func CountPattern(ctx context.Context, data []jsval.Value, p CountPatternParams)
 	// (FindAll searches the whole text).
 	matchRe, stopRe := match.Re.WithContext(ctx), stop.Re.WithContext(ctx)
 	textName, countName := p.As[0], p.As[1]
-	if textName == "" {
+	if textName == "" && !p.AsExact {
 		textName = "text"
 	}
-	if countName == "" {
+	if countName == "" && !p.AsExact {
 		countName = "count"
 	}
 	var conv func(string) string
@@ -99,6 +103,13 @@ func CountPattern(ctx context.Context, data []jsval.Value, p CountPatternParams)
 				return nil, searchFailed(err)
 			}
 			if isStop {
+				continue
+			}
+			// counts and tuples are plain objects: counts[tok] of a name every
+			// object inherits is that member, truthy, so the count becomes
+			// a string ("1function Object() ..."), and tuples[tok] is the
+			// member as well, so no row is ever added for the token.
+			if jsval.ObjectPrototypeHas(tok) {
 				continue
 			}
 			if _, ok := counts[tok]; !ok {

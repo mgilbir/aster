@@ -2,18 +2,35 @@ package scale
 
 import (
 	"math"
+	"strconv"
+	"unsafe"
 
 	"github.com/mgilbir/aster/internal/jsmath"
-
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/scale/color"
+)
+
+// numeric adapts an interpolator of numbers or dates, which walks nothing,
+// to the Interpolator shape.
+func numeric(f func(a, b jsval.Value) func(float64) jsval.Value) Interpolator {
+	return func(_ jsval.Walker, a, b jsval.Value) func(float64) jsval.Value { return f(a, b) }
+}
+
+// The interpolators of numbers and dates as Interpolators.
+var (
+	InterpolateNumberI = numeric(InterpolateNumber)
+	InterpolateRoundI  = numeric(InterpolateRound)
+	InterpolateDateI   = numeric(InterpolateDate)
 )
 
 // Interpolator is d3's `interpolate(a, b)` shape: given a start and end value
 // it returns a function of t (normally in [0, 1]) that yields the value in
 // between. Colour interpolators produce colour strings ("rgb(...)"), exactly
-// as d3 does, because that is what reaches the scenegraph.
-type Interpolator func(a, b jsval.Value) func(t float64) jsval.Value
+// as d3 does, because that is what reaches the scenegraph. w is the call's
+// Walker: a colour read from an array is its String, and d3.interpolate of
+// arrays and objects goes element by element, walks of values a run can
+// have built, which w bounds (ADR 0018).
+type Interpolator func(w jsval.Walker, a, b jsval.Value) func(t float64) jsval.Value
 
 // channelKind selects how one colour channel is blended.
 type channelKind uint8
@@ -112,19 +129,20 @@ func timeClip(x float64) float64 {
 	return math.Trunc(x) + 0 // +0 turns -0 into +0
 }
 
-func colorString(v jsval.Value) string {
+// colorString is the text d3.color reads a value as: `format + ""`.
+func colorString(w jsval.Walker, v jsval.Value) string {
 	if v.IsStr() {
 		return v.StrValue()
 	}
-	return v.AsString()
+	return w.String(v)
 }
 
 // RGBGamma returns d3.interpolateRgb.gamma(y): rgb interpolation with a gamma
 // correction applied to the colour channels (never to opacity).
 func RGBGamma(y float64) Interpolator {
-	return func(a, b jsval.Value) func(float64) jsval.Value {
-		start := color.ParseRGB(colorString(a))
-		end := color.ParseRGB(colorString(b))
+	return func(w jsval.Walker, a, b jsval.Value) func(float64) jsval.Value {
+		start := color.ParseRGB(colorString(w, a))
+		end := color.ParseRGB(colorString(w, b))
 		r := gammaChannel(y, start.R, end.R)
 		g := gammaChannel(y, start.G, end.G)
 		bl := gammaChannel(y, start.B, end.B)
@@ -136,12 +154,14 @@ func RGBGamma(y float64) Interpolator {
 }
 
 // InterpolateRGB is d3.interpolateRgb.
-func InterpolateRGB(a, b jsval.Value) func(float64) jsval.Value { return RGBGamma(1)(a, b) }
+func InterpolateRGB(w jsval.Walker, a, b jsval.Value) func(float64) jsval.Value {
+	return RGBGamma(1)(w, a, b)
+}
 
 func hslInterp(long bool) Interpolator {
-	return func(a, b jsval.Value) func(float64) jsval.Value {
-		start := color.ParseHSL(colorString(a))
-		end := color.ParseHSL(colorString(b))
+	return func(w jsval.Walker, a, b jsval.Value) func(float64) jsval.Value {
+		start := color.ParseHSL(colorString(w, a))
+		end := color.ParseHSL(colorString(w, b))
 		var h channel
 		if long {
 			h = linearChannel(start.H, end.H)
@@ -165,9 +185,9 @@ var (
 )
 
 // InterpolateLab is d3.interpolateLab.
-func InterpolateLab(a, b jsval.Value) func(float64) jsval.Value {
-	start := color.ParseLab(colorString(a))
-	end := color.ParseLab(colorString(b))
+func InterpolateLab(w jsval.Walker, a, b jsval.Value) func(float64) jsval.Value {
+	start := color.ParseLab(colorString(w, a))
+	end := color.ParseLab(colorString(w, b))
 	l := linearChannel(start.L, end.L)
 	ca := linearChannel(start.A, end.A)
 	cb := linearChannel(start.B, end.B)
@@ -178,9 +198,9 @@ func InterpolateLab(a, b jsval.Value) func(float64) jsval.Value {
 }
 
 func hclInterp(long bool) Interpolator {
-	return func(a, b jsval.Value) func(float64) jsval.Value {
-		start := color.ParseHCL(colorString(a))
-		end := color.ParseHCL(colorString(b))
+	return func(w jsval.Walker, a, b jsval.Value) func(float64) jsval.Value {
+		start := color.ParseHCL(colorString(w, a))
+		end := color.ParseHCL(colorString(w, b))
 		var h channel
 		if long {
 			h = linearChannel(start.H, end.H)
@@ -205,9 +225,9 @@ var (
 // CubehelixGamma returns d3.interpolateCubehelix.gamma(y) (or the Long variant):
 // the gamma bends only the lightness channel.
 func CubehelixGamma(y float64, long bool) Interpolator {
-	return func(a, b jsval.Value) func(float64) jsval.Value {
-		start := color.ParseCubehelix(colorString(a))
-		end := color.ParseCubehelix(colorString(b))
+	return func(w jsval.Walker, a, b jsval.Value) func(float64) jsval.Value {
+		start := color.ParseCubehelix(colorString(w, a))
+		end := color.ParseCubehelix(colorString(w, b))
 		var h channel
 		if long {
 			h = linearChannel(start.H, end.H)
@@ -231,7 +251,7 @@ var (
 )
 
 // InterpolateHue is d3.interpolateHue: the hue in [0, 360).
-func InterpolateHue(a, b jsval.Value) func(float64) jsval.Value {
+func InterpolateHue(_ jsval.Walker, a, b jsval.Value) func(float64) jsval.Value {
 	c := hueChannel(jsval.ToNumber(a), jsval.ToNumber(b))
 	return func(t float64) jsval.Value {
 		x := c.at(t)
@@ -239,83 +259,188 @@ func InterpolateHue(a, b jsval.Value) func(float64) jsval.Value {
 	}
 }
 
-// InterpolateArray is d3.interpolateArray for generic arrays: pairs of elements
-// are interpolated with InterpolateValue, and extra elements of b are copied.
-// Unlike upstream, each call returns a fresh array instead of a shared,
-// mutated one.
-func InterpolateArray(a, b jsval.Value) func(float64) jsval.Value {
-	return interpolateArray(a, b, 0)
+// InterpolateArray is d3.interpolateArray for generic arrays (genericArray):
+// pairs of elements are interpolated with InterpolateValue, and the elements
+// of b past a's are copied. Like upstream, every call answers the same array,
+// updated in place: values taken from the scale earlier change with it.
+func InterpolateArray(w jsval.Walker, a, b jsval.Value) func(float64) jsval.Value {
+	m := w.Meter()
+	defer m.Done()
+	return interpolateArray(w, &m, a, b, 0)
 }
 
-func interpolateArray(a, b jsval.Value, depth int) func(float64) jsval.Value {
+// The elementwise interpolators are built by a walk of the end values, a
+// step a value (m), and each evaluation updates the array or object a level
+// at a time, charging its steps to w: a range whose arrays share their parts
+// stands for far more elements than it holds, and upstream updates them all
+// on every call. What the result holds is charged once, when it is made.
+
+// errArrayLength is the RangeError of new Array(n) for an n that is not a
+// length.
+func errArrayLength() *Thrown { return &Thrown{Name: "RangeError", Msg: "Invalid array length"} }
+
+func interpolateArray(w jsval.Walker, m *jsval.WalkMeter, a, b jsval.Value, depth int) func(float64) jsval.Value {
 	bi := b.Items()
 	nb := len(bi)
+	// `na = a ? Math.min(nb, a.length) : 0`, then new Array(na): a start
+	// that is not array-like (a number, an object without a length) makes
+	// the length NaN, a RangeError.
 	na := 0
-	if a.IsArr() {
-		na = min(nb, a.Len())
+	if a.IsTruthy() {
+		f := math.Min(float64(nb), jsval.ToNumber(jsval.Member(a, "length")))
+		if f != f || f < 0 || f != math.Trunc(f) {
+			panic(errArrayLength())
+		}
+		na = int(f)
 	}
 	x := make([]func(float64) jsval.Value, na)
 	for i := 0; i < na; i++ {
-		x[i] = interpolateValue(a.Index(i), bi[i], depth+1)
+		x[i] = interpolateValue(w, m, elementAt(a, i), bi[i], depth+1)
 	}
+	w.Keep(int64(nb) * valueBytes)
+	c := make([]jsval.Value, nb)
+	copy(c[na:], bi[na:])
+	cv := jsval.Arr(c)
 	return func(t float64) jsval.Value {
-		c := make([]jsval.Value, nb)
-		copy(c, bi)
+		w.Work(int64(nb))
 		for i := 0; i < na; i++ {
 			c[i] = x[i](t)
 		}
-		return jsval.Arr(c)
+		return cv
 	}
 }
 
-// InterpolateObject is d3.interpolateObject. Keys of b absent from a keep b's
-// value and come first in the result, followed by the interpolated keys (the
-// order d3 builds its result object in).
-func InterpolateObject(a, b jsval.Value) func(float64) jsval.Value {
-	return interpolateObject(a, b, 0)
+// elementAt is a[i] of an array-like start value: an array's element, a
+// string's UTF-16 code unit, an object's member "i".
+func elementAt(a jsval.Value, i int) jsval.Value {
+	if a.IsArr() {
+		return a.Index(i)
+	}
+	return jsval.Member(a, strconv.Itoa(i))
 }
 
-func interpolateObject(a, b jsval.Value, depth int) func(float64) jsval.Value {
-	ao, bo := a.ObjValue(), b.ObjValue()
+// valueBytes is what an element of an array holds.
+const valueBytes = int64(unsafe.Sizeof(jsval.Value{}))
+
+// InterpolateObject is d3.interpolateObject. Keys of b that a does not have
+// (as `k in a` reads it: its own and its inherited members) keep b's value
+// and come first in the result, followed by the interpolated keys (the order
+// d3 builds its result object in). Like upstream, every call answers the
+// same object, updated in place.
+func InterpolateObject(w jsval.Walker, a, b jsval.Value) func(float64) jsval.Value {
+	m := w.Meter()
+	defer m.Done()
+	return interpolateObject(w, &m, a, b, 0)
+}
+
+// objectPrototype stands for Object.prototype where a member read answers
+// it (`a.__proto__`): an object of no keys of its own.
+var objectPrototype = jsval.Obj(jsval.NewObject(0))
+
+func interpolateObject(w jsval.Walker, m *jsval.WalkMeter, a, b jsval.Value, depth int) func(float64) jsval.Value {
+	// `if (a === null || typeof a !== "object") a = {}`: a function is not
+	// an object either.
+	if !isObjectValue(a) {
+		a = jsval.Undefined
+	}
+	bo := b.ObjValue()
 	type entry struct {
 		key string
 		f   func(float64) jsval.Value
 	}
 	var interp []entry
-	consts := jsval.NewObject(0)
+	c := jsval.NewObject(0)
 	if bo != nil {
 		for i := 0; i < bo.Len(); i++ {
 			k := bo.KeyAt(i)
-			if ao != nil && ao.Has(k) {
-				interp = append(interp, entry{k, interpolateValue(ao.Lookup(k), bo.ValueAt(i), depth+1)})
-			} else {
-				consts.Set(k, bo.ValueAt(i))
+			if !inObject(a, k) {
+				c.Set(k, bo.ValueAt(i))
+				continue
+			}
+			f := interpolateValue(w, m, memberOf(a, k), bo.ValueAt(i), depth+1)
+			// `i.__proto__ = f` sets i's prototype rather than a key, so
+			// no __proto__ reaches the result.
+			if k != "__proto__" {
+				interp = append(interp, entry{k, f})
 			}
 		}
 	}
+	n := int64(c.Len() + len(interp))
+	w.Keep(n * memberBytes)
+	cv := jsval.Obj(c)
 	return func(t float64) jsval.Value {
-		c := consts.Clone()
+		w.Work(n)
 		for _, e := range interp {
 			c.Set(e.key, e.f(t))
 		}
-		return jsval.Obj(c)
+		return cv
 	}
 }
 
+// isObjectValue is `v !== null && typeof v === "object"`.
+func isObjectValue(v jsval.Value) bool {
+	switch v.Kind() {
+	case jsval.KindArr, jsval.KindTimestamp, jsval.KindPattern:
+		return true
+	case jsval.KindObj:
+		return !jsval.IsFunction(v)
+	}
+	return false
+}
+
+// inObject is `k in a` for an object a, or for {} when a is undefined: its
+// own keys, an array's indexes and length, and what it inherits (the
+// prototype's methods, __proto__).
+func inObject(a jsval.Value, k string) bool {
+	if k == "__proto__" {
+		return true
+	}
+	switch a.Kind() {
+	case jsval.KindObj:
+		if a.ObjValue().Has(k) {
+			return true
+		}
+	case jsval.KindArr:
+		if i, ok := jsval.ArrayIndex(k); ok {
+			return int64(i) < int64(a.Len())
+		}
+		return !jsval.Member(a, k).IsUndefined()
+	case jsval.KindUndefined:
+		_, ok := jsval.Inherited(k)
+		return ok
+	}
+	return !jsval.Member(a, k).IsUndefined()
+}
+
+// memberOf is a[k] for inObject's a.
+func memberOf(a jsval.Value, k string) jsval.Value {
+	if k == "__proto__" {
+		return objectPrototype
+	}
+	if a.IsUndefined() {
+		v, _ := jsval.Inherited(k)
+		return v
+	}
+	return jsval.Member(a, k)
+}
+
+// memberBytes is what a member of an object holds: its key and its value.
+const memberBytes = int64(unsafe.Sizeof("")) + valueBytes
+
 // InterpolateValue is d3.interpolate: it picks an interpolator from the type of
 // the end value b.
-func InterpolateValue(a, b jsval.Value) func(float64) jsval.Value {
-	return interpolateValue(a, b, 0)
+func InterpolateValue(w jsval.Walker, a, b jsval.Value) func(float64) jsval.Value {
+	m := w.Meter()
+	defer m.Done()
+	return interpolateValue(w, &m, a, b, 0)
 }
 
 // interpolateValue is InterpolateValue for values nested depth levels deep. A
 // range can come from a signal whose value was built at run time, nested as
-// deep as the specification is long, so past jsval.MaxValueDepth the end
-// value is returned as it is.
-func interpolateValue(a, b jsval.Value, depth int) func(float64) jsval.Value {
-	if depth > jsval.MaxValueDepth {
-		return func(float64) jsval.Value { return b }
-	}
+// deep as the specification is long: past jsval.MaxValueDepth the walk, and
+// the call, stop with ErrLimit, as every walk of a value does.
+func interpolateValue(w jsval.Walker, m *jsval.WalkMeter, a, b jsval.Value, depth int) func(float64) jsval.Value {
+	m.Step(depth)
 	switch b.Kind() {
 	case jsval.KindNull, jsval.KindUndefined, jsval.KindBool:
 		return func(float64) jsval.Value { return b }
@@ -323,15 +448,24 @@ func interpolateValue(a, b jsval.Value, depth int) func(float64) jsval.Value {
 		return InterpolateNumber(a, b)
 	case jsval.KindStr:
 		if _, ok := color.Parse(b.StrValue()); ok {
-			return InterpolateRGB(a, b)
+			return InterpolateRGB(w, a, b)
 		}
-		return InterpolateString(a, b)
+		return InterpolateString(w, a, b)
 	case jsval.KindTimestamp:
 		return InterpolateDate(a, b)
 	case jsval.KindArr:
-		return interpolateArray(a, b, depth)
+		return interpolateArray(w, m, a, b, depth)
+	case jsval.KindObj:
+		// `typeof b.valueOf !== "function" && typeof b.toString !==
+		// "function" || isNaN(b)`: isNaN reads b as a number, which takes
+		// its toString when its valueOf answers an object, and an own
+		// toString that is not a function cannot.
+		if o := b.ObjValue(); o.Has("toString") && !jsval.IsFunction(o.Lookup("toString")) &&
+			(!o.Has("valueOf") || jsval.IsFunction(o.Lookup("valueOf"))) {
+			panic(&Thrown{Name: "TypeError", Msg: "Cannot convert object to primitive value"})
+		}
 	}
-	return interpolateObject(a, b, depth)
+	return interpolateObject(w, m, a, b, depth)
 }
 
 // numberAt finds the leftmost match of d3-interpolate's number regexp
@@ -382,8 +516,8 @@ func numberAt(s string, from int) (start, end int, ok bool) {
 // InterpolateString is d3.interpolateString: numbers embedded in b are
 // interpolated with the numbers found at the same positions in a; the
 // non-numeric text comes from b.
-func InterpolateString(a, b jsval.Value) func(float64) jsval.Value {
-	as, bs := a.AsString(), b.AsString()
+func InterpolateString(w jsval.Walker, a, b jsval.Value) func(float64) jsval.Value {
+	as, bs := colorString(w, a), colorString(w, b) // a + "", b + ""
 	type slot struct{ x, y float64 }
 	var (
 		parts []string // constants; "" placeholder for interpolated slots
@@ -517,12 +651,12 @@ func BasisClosed(values []float64) func(t float64) float64 {
 	}
 }
 
-func rgbSpline(spline func([]float64) func(float64) float64) func(colors []jsval.Value) func(float64) jsval.Value {
-	return func(colors []jsval.Value) func(float64) jsval.Value {
+func rgbSpline(spline func([]float64) func(float64) float64) func(w jsval.Walker, colors []jsval.Value) func(float64) jsval.Value {
+	return func(w jsval.Walker, colors []jsval.Value) func(float64) jsval.Value {
 		n := len(colors)
 		r, g, b := make([]float64, n), make([]float64, n), make([]float64, n)
 		for i, c := range colors {
-			p := color.ParseRGB(colorString(c))
+			p := color.ParseRGB(colorString(w, c))
 			r[i], g[i], b[i] = nz(p.R), nz(p.G), nz(p.B)
 		}
 		fr, fg, fb := spline(r), spline(g), spline(b)
@@ -568,7 +702,7 @@ type Thrown = jsval.Thrown
 
 // Piecewise is d3.piecewise: interpolates through the values with one
 // interpolator per consecutive pair. A nil interpolate means InterpolateValue.
-func Piecewise(interpolate Interpolator, values []jsval.Value) func(t float64) jsval.Value {
+func Piecewise(w jsval.Walker, interpolate Interpolator, values []jsval.Value) func(t float64) jsval.Value {
 	if interpolate == nil {
 		interpolate = InterpolateValue
 	}
@@ -578,7 +712,7 @@ func Piecewise(interpolate Interpolator, values []jsval.Value) func(t float64) j
 	}
 	segs := make([]func(float64) jsval.Value, n)
 	for i := 0; i < n; i++ {
-		segs[i] = interpolate(values[i], values[i+1])
+		segs[i] = interpolate(w, values[i], values[i+1])
 	}
 	return func(t float64) jsval.Value {
 		// `I[Math.max(0, Math.min(n - 1, Math.floor(t *= n)))](t - i)`: a NaN
