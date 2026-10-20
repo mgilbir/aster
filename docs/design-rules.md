@@ -239,5 +239,5 @@ Unit tests use golden vectors recorded from upstream with node: each package tha
 ## Dependencies
 
 Do not add module dependencies beyond the standard library, `golang.org/x/image`,
-`golang.org/x/text`, `github.com/mgilbir/goecma262`, `github.com/mgilbir/forme`,
+`github.com/mgilbir/goecma262`, `github.com/mgilbir/forme`,
 `github.com/mgilbir/pdf0` (PDF output) and the module's own packages.
