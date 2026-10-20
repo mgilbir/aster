@@ -5,9 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	"golang.org/x/text/cases"
-	"golang.org/x/text/language"
-
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
 	ecma262 "github.com/mgilbir/goecma262"
@@ -72,9 +69,9 @@ func CountPattern(ctx context.Context, data []jsval.Value, p CountPatternParams)
 	var conv func(string) string
 	switch p.Case {
 	case "upper":
-		conv = cases.Upper(language.Und).String
+		conv = jsval.JSUpper
 	case "lower":
-		conv = cases.Lower(language.Und).String
+		conv = jsval.JSLower
 	}
 	counts := map[string]int{}
 	var order []string
