@@ -27,18 +27,15 @@ var defaultMarkTypes = map[string]bool{
 // stream definitions an event selector string stands for. source is the
 // default event source ("view", or "scope" in a nested scope).
 func parseEventSelector(scope *Scope, selector, source string) []jsval.Value {
-	parts := parseSelectorMerge(scope, jsval.JSTrim(selector))
-	out := make([]jsval.Value, len(parts))
-	for i, p := range parts {
-		out[i] = parseSelectorOne(scope, p, source, 0)
-	}
-	return out
+	return newSelectorParser(scope, selector, source).parse()
 }
 
 // selectorFind is event-selector's find: the index of endChar in s from i
 // at nesting level zero (pushChar and popChar open and close a level), or
 // len(s). The characters it looks for are ASCII, so bytes stand for UTF-16
-// units here.
+// units here. The between and merge parsers do not call it on the selector
+// (selectorParser.findComma and findClose answer the same question from an
+// index); the stream parser does, on one stream's text.
 func selectorFind(s string, i int, endChar byte, pushChars, popChars string) int {
 	count := 0
 	for ; i < len(s); i++ {
@@ -55,18 +52,96 @@ func selectorFind(s string, i int, endChar byte, pushChars, popChars string) int
 	return i
 }
 
-func parseSelectorMerge(scope *Scope, s string) []string {
-	var out []string
-	start, i := 0, 0
-	for i < len(s) {
-		scope.work(1)
-		i = selectorFind(s, i, ',', "[{", "]}")
-		out = append(out, jsval.JSTrim(s[start:i]))
+// span is the part root[lo:hi] of the selector being parsed: the parsers
+// pass spans, not substrings, so that a position in a span is a position in
+// the whole selector, which the index of selectorParser is keyed by.
+type span struct{ lo, hi int }
+
+// selectorParser parses one selector. Upstream's between selector parser
+// rescans its whole remainder at every level of nesting for the bracket that
+// closes the level (find), and its merge parser rescans the same text for
+// the comma that ends a part, so that a selector of n brackets costs n
+// squared; here that is bounded only by maxSelectorNesting, which still
+// leaves 256 scans of a selector as long as the specification allows before
+// the refusal. So both questions are answered from an index built in one
+// pass over the selector, and a selector costs the same however it nests.
+type selectorParser struct {
+	scope  *Scope
+	source string
+	root   string
+
+	// nextComma[i] is the index of the first ',' at or after i that is at the
+	// same nesting level of "[{" and "]}" as i, and len(root) if there is none:
+	// selectorFind(root, i, ',', "[{", "]}") without the scan. nextClose is the
+	// same for ']' and the level of "[" and "]". Both have len(root)+1 entries.
+	nextComma, nextClose []int32
+
+	// scanned counts the bytes the parser looked at to answer those
+	// questions, for the complexity guard: a count of work, which a time of
+	// it would not be.
+	scanned int
+}
+
+func newSelectorParser(scope *Scope, selector, source string) *selectorParser {
+	p := &selectorParser{scope: scope, source: source, root: jsval.JSTrim(selector)}
+	p.buildIndex()
+	return p
+}
+
+func (p *selectorParser) parse() []jsval.Value {
+	parts := p.merge(span{0, len(p.root)})
+	out := make([]jsval.Value, len(parts))
+	for i, sp := range parts {
+		out[i] = p.one(sp, 0)
+	}
+	return out
+}
+
+// buildIndex fills nextComma and nextClose, a pass over the selector each.
+func (p *selectorParser) buildIndex() {
+	s := p.root
+	if len(s) >= jsval.MaxLevelText {
+		perrLimit("event selector too long")
+	}
+	p.scanned += 2 * len(s)
+	p.nextComma = jsval.NextAtLevel(s, ',', "[{", "]}")
+	p.nextClose = jsval.NextAtLevel(s, ']', "[", "]")
+}
+
+// text is the text of sp.
+func (p *selectorParser) text(sp span) string { return p.root[sp.lo:sp.hi] }
+
+// trim is jsval.JSTrim of sp's text, as a span.
+func (p *selectorParser) trim(sp span) span {
+	t := p.text(sp)
+	lead := len(t) - len(jsval.JSTrimStart(t))
+	t = jsval.JSTrim(t)
+	return span{sp.lo + lead, sp.lo + lead + len(t)}
+}
+
+// findComma is selectorFind(text(sp), from-sp.lo, ',', "[{", "]}") for a
+// from in sp, as a position in the selector: sp.hi where there is none.
+func (p *selectorParser) findComma(sp span, from int) int {
+	return min(int(p.nextComma[from]), sp.hi)
+}
+
+// findClose is selectorFind(text(sp), from-sp.lo, ']', "[", "]"), as findComma.
+func (p *selectorParser) findClose(sp span, from int) int {
+	return min(int(p.nextClose[from]), sp.hi)
+}
+
+func (p *selectorParser) merge(sp span) []span {
+	var out []span
+	start, i := sp.lo, sp.lo
+	for i < sp.hi {
+		p.scope.work(1)
+		i = p.findComma(sp, i)
+		out = append(out, p.trim(span{start, i}))
 		i++
 		start = i
 	}
 	if len(out) == 0 {
-		selectorError("Empty event selector: " + s)
+		selectorError("Empty event selector: " + p.text(sp))
 	}
 	return out
 }
@@ -75,32 +150,32 @@ func parseSelectorMerge(scope *Scope, s string) []string {
 // selector's length bounds too.
 const maxSelectorNesting = 256
 
-func parseSelectorOne(scope *Scope, s, source string, depth int) jsval.Value {
+func (p *selectorParser) one(sp span, depth int) jsval.Value {
 	if depth > maxSelectorNesting {
 		perrLimit("event selector nested too deep")
 	}
-	scope.work(1)
-	if strings.HasPrefix(s, "[") {
-		return parseSelectorBetween(scope, s, source, depth)
+	p.scope.work(1)
+	if sp.lo < sp.hi && p.root[sp.lo] == '[' {
+		return p.between(sp, depth)
 	}
-	return parseSelectorStream(s, source)
+	return parseSelectorStream(p.text(sp), p.source)
 }
 
-func parseSelectorBetween(scope *Scope, s, source string, depth int) jsval.Value {
-	i := selectorFind(s, 1, ']', "[", "]")
-	if i == len(s) {
-		selectorError("Empty between selector: " + s)
+func (p *selectorParser) between(sp span, depth int) jsval.Value {
+	i := p.findClose(sp, sp.lo+1)
+	if i == sp.hi {
+		selectorError("Empty between selector: " + p.text(sp))
 	}
-	b := parseSelectorMerge(scope, s[1:i])
+	b := p.merge(span{sp.lo + 1, i})
 	if len(b) != 2 {
-		selectorError("Between selector must have two elements: " + s)
+		selectorError("Between selector must have two elements: " + p.text(sp))
 	}
-	s = jsval.JSTrim(s[i+1:])
-	if !strings.HasPrefix(s, ">") {
-		selectorError("Expected '>' after between selector: " + s)
+	rest := p.trim(span{i + 1, sp.hi})
+	if rest.lo == rest.hi || p.root[rest.lo] != '>' {
+		selectorError("Expected '>' after between selector: " + p.text(rest))
 	}
-	between := jsval.ArrOf(parseSelectorOne(scope, b[0], source, depth+1), parseSelectorOne(scope, b[1], source, depth+1))
-	stream := parseSelectorOne(scope, jsval.JSTrim(s[1:]), source, depth+1)
+	between := jsval.ArrOf(p.one(b[0], depth+1), p.one(b[1], depth+1))
+	stream := p.one(p.trim(span{rest.lo + 1, rest.hi}), depth+1)
 	if stream.Get("between").IsTruthy() {
 		return obj("between", between, "stream", stream)
 	}
