@@ -182,10 +182,14 @@ func (e Entry) OutputFiles(root string) ([]string, error) {
 	return out, nil
 }
 
-// localImport matches what a generator loads from beside itself: an import,
-// a dynamic import, a module hook registered by path, a URL made relative to
-// the module.
-var localImport = regexp.MustCompile(`(?:from|import\(|register\(|new URL\()\s*'(\.\.?/[^']+)'`)
+// localImport matches what a generator loads from beside itself: an import
+// (with bindings, after from, or bare, for its side effects), a dynamic
+// import, a module hook registered by path, a URL made relative to the
+// module; the specifier in single or double quotes. It reads the source as
+// text, so import-like text in a comment or string matches too: a path that
+// is no file is skipped by Imports, and one that is a file is hashed, which
+// can only make the fingerprint stricter.
+var localImport = regexp.MustCompile(`(?:from|import|import\(|register\(|new URL\()\s*(?:'(\.\.?/[^']+)'|"(\.\.?/[^"]+)")`)
 
 // inNodeModules reports whether a root-relative path lies in a node_modules
 // directory.
@@ -218,7 +222,11 @@ func (e Entry) Imports(root string) ([]string, error) {
 		}
 		seen[rel] = true
 		for _, m := range localImport.FindAllSubmatch(b, -1) {
-			dep := path.Join(path.Dir(rel), string(m[1]))
+			spec := m[1]
+			if spec == nil {
+				spec = m[2]
+			}
+			dep := path.Join(path.Dir(rel), string(spec))
 			if inNodeModules(dep) {
 				// A module of the set, not a source of ours: the lockfile,
 				// which the fingerprint hashes, pins it, and whether it is
