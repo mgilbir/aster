@@ -114,9 +114,10 @@ tools: cmd/enginebench cmd/recursionaudit cmd/testsummary cmd/vectors fuzzutil o
 <!-- deps:begin (checked by TestDependencyStatement) -->
 Beyond the standard library, a program that imports aster builds these modules, and no others:
 
-- `golang.org/x/text`;
 - `github.com/mgilbir/forme` (text shaping), `github.com/mgilbir/goecma262` (regular expressions) and `github.com/mgilbir/pdf0` (PDF writing), the owner's;
-- through pdf0, also the owner's: `github.com/mgilbir/golittlecms` (colour management), `github.com/mgilbir/gopenjpeg` (JPEG 2000) and `github.com/mgilbir/formalis` (electronic invoices).
+- through pdf0, also `golang.org/x/text` (pdf0 normalises a PDF password with it) and the owner's: `github.com/mgilbir/golittlecms` (colour management), `github.com/mgilbir/gopenjpeg` (JPEG 2000) and `github.com/mgilbir/formalis` (electronic invoices).
+
+The engine's own packages import none of x/text: JavaScript's case mapping is jsval's tables, recorded from node, not x/text's, whose tables follow the Go toolchain's Unicode version (`TestNoXTextInTheEngine`).
 <!-- deps:end -->
 
 `golang.org/x/image` is required by tests only.

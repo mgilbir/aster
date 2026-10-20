@@ -64,6 +64,44 @@ func TestJSStringFunctionsMatchV8(t *testing.T) {
 			t.Errorf("%+q.toUpperCase() = %+q, V8 gives %+q", s, got, want)
 		}
 	}
+	// The final sigma, beside every code point: before a sigma, after one,
+	// and between one and a cased letter (the Cased and Case_Ignorable
+	// tables decide them, and Go's unicode package has a Unicode version of
+	// its own).
+	rangeSet := func(list Value) []bool {
+		if list.Len() < 50 {
+			t.Fatal("too few sigma vectors")
+		}
+		in := make([]bool, 0x110000)
+		for _, r := range list.Items() {
+			for cp := int(r.Items()[0].NumValue()); cp <= int(r.Items()[1].NumValue()); cp++ {
+				in[cp] = true
+			}
+		}
+		return in
+	}
+	before, after, mid := rangeSet(doc.Get("sigma").Get("before")), rangeSet(doc.Get("sigma").Get("after")), rangeSet(doc.Get("sigma").Get("mid"))
+	sigmaBad := 0
+	for cp := rune(0); cp <= 0x10FFFF && sigmaBad < 20; cp++ {
+		if cp >= 0xD800 && cp <= 0xDFFF {
+			continue
+		}
+		s := string(cp)
+		for _, c := range []struct {
+			name string
+			got  bool
+			want bool
+		}{
+			{`"A" c "Σ"`, strings.HasSuffix(JSLower("A"+s+"Σ"), "ς"), before[cp]},
+			{`"AΣ" c`, strings.HasPrefix(JSLower("AΣ" + s)[1:], "ς"), after[cp]},
+			{`"AΣ" c "A"`, strings.HasPrefix(JSLower("AΣ" + s + "A")[1:], "ς"), mid[cp]},
+		} {
+			if c.got != c.want {
+				sigmaBad++
+				t.Errorf("U+%04X in %s: final sigma %v, V8 gives %v", cp, c.name, c.got, c.want)
+			}
+		}
+	}
 	space := map[rune]bool{}
 	for _, v := range doc.Get("space").Items() {
 		space[rune(v.NumValue())] = true
