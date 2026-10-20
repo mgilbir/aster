@@ -25,6 +25,7 @@ internal/geo/testdata | - | gen_pipeline.mjs | files pipeline.json.gz | testdata
 internal/jssort | - | testdata/gen_sort.mjs | > testdata/sort.json.gz | - | any
 internal/jsval | - | testdata/gen_numbers.js | > testdata/numbers.json | - | any
 internal/jsval | - | testdata/gen_dates.mjs | > testdata/dates.json | - | any
+internal/jsval | - | testdata/gen_protonames.mjs | > testdata/protonames.json | - | any
 internal/jsval | - | testdata/gen_strings.mjs | > testdata/strings.json.gz | - | any
 internal/jsval | - | testdata/gen_utf8.mjs | > testdata/utf8.json | - | any
 
