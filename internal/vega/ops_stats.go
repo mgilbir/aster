@@ -25,9 +25,12 @@ func init() {
 			Method: densityMethod(p.Value("method")), ExtentValues: p.extentValues("extent"),
 			StepsValues: &steps, As: p.asPair("value", "density"), AsExact: true,
 		}
-		if sub, ok := p.Get("distribution").(*opParams); ok {
-			dp.Distribution = distSpec(sub)
+		sub, ok := p.Get("distribution").(*opParams)
+		if !ok {
+			// parse(_.distribution, ...) reads def.function of undefined
+			fail("TypeError: Cannot read properties of undefined (reading 'function')")
 		}
+		dp.Distribution = distSpec(sub)
 		return transforms.Density(ctxOf(n), in, dp)
 	})
 
@@ -328,7 +331,10 @@ func distSpec(p *opParams) transforms.DistSpec {
 	return d
 }
 
-// forceParam reads a number-or-expression force parameter.
+// forceParam reads a number-or-expression force parameter: an accessor, or
+// the constant d3's setter makes of anything else (`constant(+_)`: null is
+// 0), def when absent (Force.js's getForce only sets the members the
+// parameters hold).
 func forceParam(p *opParams, name string, def float64) force.Param {
 	switch v := p.vals.at(name).(type) {
 	case transforms.Field:
@@ -376,6 +382,10 @@ func forceOf(p *opParams) force.Force {
 		l.Fault = fault
 		if f := p.field("id"); !f.IsNil() {
 			l.ID = force.Accessor(f.Get)
+		} else if p.has("id") {
+			// link.id(null): the id is no function, which d3 calls on the
+			// first node
+			l.IDNull = true
 		}
 		l.Distance = forceParam(p, "distance", 30)
 		if _, ok := p.given("strength"); ok {

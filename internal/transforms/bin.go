@@ -39,8 +39,11 @@ type BinResult struct {
 	Start, Stop, Step float64
 }
 
-// maxStepSearch bounds the `while too many bins, step *= base` search, which
-// does not terminate for a base of 1 or a zero step.
+// maxStepSearch bounds the `while too many bins, step *= base` search. With
+// a base above 1 and a step above 0 the search ends after a few rounds (the
+// first step is within a factor base² of span/maxbins), so the bound is a
+// backstop no input upstream finishes reaches; with a base below 1 or a
+// step of 0 it never ends upstream, and is refused at once.
 const maxStepSearch = 4096
 
 // binJSRound is Math.round: halves round toward +Infinity.
@@ -66,12 +69,10 @@ func Bin(c BinConfig) (BinResult, error) {
 	if base == 0 || math.IsNaN(base) {
 		base = 10
 	}
-	if base <= 1 || math.IsInf(base, 1) {
-		// Upstream computes a NaN step here (log(1) is 0) and bins everything
-		// into NaN, or, for a base below one, shrinks the step forever while
-		// searching. Neither is a chart; refuse it.
-		return BinResult{}, errBinBase(base)
-	}
+	// Any base is binned with as upstream bins with it: a base of 1, or
+	// one below 0, gives a NaN step (every value bins to NaN), Infinity a
+	// step of 1, and a base between 0 and 1 a step found as for any other
+	// unless its search for fewer bins would never end (ADR 0011).
 	logb := jsmath.Log(base)
 	div := c.Divide
 	if div == nil {
@@ -110,7 +111,9 @@ func Bin(c BinConfig) (BinResult, error) {
 		minstep := c.MinStep
 		step = math.Max(minstep, jsmath.Pow(base, binJSRound(jsmath.Log(span)/logb)-level))
 		for n := 0; math.Ceil(span/step) > maxb; n++ {
-			if n > maxStepSearch || base <= 1 || step == 0 {
+			// step *= base never lowers the bin count for a base of 1 or
+			// less, nor from a step of 0: upstream loops forever.
+			if n > maxStepSearch || !(base > 1) || step == 0 {
 				return BinResult{}, errBinSearch(maxb, base)
 			}
 			step *= base
@@ -145,12 +148,11 @@ func Bin(c BinConfig) (BinResult, error) {
 	return BinResult{Start: lo, Stop: stop, Step: step}, nil
 }
 
-func errBinBase(base float64) error {
-	return fmt.Errorf("bin: base must be greater than 1, got %g", base)
-}
-
+// errBinSearch is the step search upstream never ends: step *= base never
+// lowers the bin count for a base of 1 or less, nor from a step of 0.
 func errBinSearch(maxb, base float64) error {
-	return fmt.Errorf("bin: no step size satisfies maxbins %g with base %g", maxb, base)
+	return fmt.Errorf("bin: %w: no step size gives at most %s bins with base %s: the search for one does not end",
+		ErrLimit, jsval.JSNumberString(maxb), jsval.JSNumberString(base))
 }
 
 // binEpsilon offsets floating point error in bin assignment (vega#1737).

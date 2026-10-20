@@ -77,13 +77,20 @@ func KDE(ctx context.Context, source []jsval.Value, p KDEParams) ([]jsval.Value,
 	for i, g := range p.GroupBy {
 		names[i] = g.Key()
 	}
+	groups, err := Partition(keysOf(ctx), source, p.GroupBy)
+	if err != nil {
+		return nil, err
+	}
 	var out []jsval.Value
-	for _, g := range Partition(keysOf(ctx), source, p.GroupBy) {
+	for _, g := range groups {
 		vals := make([]jsval.Value, len(g.Tuples))
 		for i, t := range g.Tuples {
 			vals[i] = get(t)
 		}
-		kde := NewKernelDensity(vals, p.Bandwidth)
+		kde, err := NewKernelDensity(ctx, vals, p.Bandwidth)
+		if err != nil {
+			return nil, err
+		}
 		if p.BandwidthGiven {
 			kde.Bandwidth = p.Bandwidth // a truthy bandwidth is kept, NaN or not
 		}
@@ -101,10 +108,7 @@ func KDE(ctx context.Context, source []jsval.Value, p KDEParams) ([]jsval.Value,
 		} else {
 			lo, hi = rawExtent(w, vals)
 		}
-		if err := reserveRows(ctx, len(out)+maxSamplesOf(steps)); err != nil {
-			return nil, err
-		}
-		pts, err := sampleTuples(ctx, f, lo, hi, steps, names, g.Dims, p.As, p.AsExact, scale)
+		pts, err := sampleTuples(ctx, f, lo, hi, steps, names, g.Dims, p.As, p.AsExact, scale, len(out))
 		if err != nil {
 			return nil, err
 		}

@@ -1,6 +1,10 @@
 package hierarchy
 
-import "math"
+import (
+	"math"
+
+	"github.com/mgilbir/aster/internal/budget"
+)
 
 // phi is the golden ratio, the default squarify aspect ratio.
 var phi = (1 + math.Sqrt(5)) / 2
@@ -249,12 +253,21 @@ type treemapConfig struct {
 	paddingTop, paddingRight, paddingBottom, paddingLeft float64
 }
 
-func (c *treemapConfig) layout(root *Node) {
+// layout is d3's treemap(root). Each node placed, and each child a tiling
+// places, is a step of work charged to m.
+func (c *treemapConfig) layout(m *budget.Meter, root *Node) error {
 	root.X0, root.Y0 = 0, 0
 	root.X1, root.Y1 = c.dx, c.dy
 	// paddingStack[d] is the inner padding applied to nodes of depth d.
 	stack := []float64{0}
+	var err error
 	root.eachBefore(func(n *Node) {
+		if err != nil {
+			return
+		}
+		if err = m.Work(int64(1 + len(n.Children))); err != nil {
+			return
+		}
 		p := stack[n.Depth]
 		x0, y0, x1, y1 := n.X0+p, n.Y0+p, n.X1-p, n.Y1-p
 		if x1 < x0 {
@@ -287,18 +300,43 @@ func (c *treemapConfig) layout(root *Node) {
 			c.tile(n, x0, y0, x1, y1)
 		}
 	})
-	if c.round {
-		root.eachBefore(roundNode)
+	if err != nil {
+		return err
 	}
+	if c.round {
+		return roundNodes(m, root)
+	}
+	return nil
 }
 
-// partition is d3.partition(): an adjacency diagram (icicle) layout.
-func partition(root *Node, dx, dy, padding float64, round bool) {
+// roundNodes rounds every node's box, a step of work each.
+func roundNodes(m *budget.Meter, root *Node) error {
+	var err error
+	root.eachBefore(func(n *Node) {
+		if err == nil {
+			if err = m.Work(1); err == nil {
+				roundNode(n)
+			}
+		}
+	})
+	return err
+}
+
+// partition is d3.partition(): an adjacency diagram (icicle) layout. Each
+// node is a step of work charged to m.
+func partition(m *budget.Meter, root *Node, dx, dy, padding float64, round bool) error {
 	n := float64(root.Height + 1)
 	root.X0, root.Y0 = padding, padding
 	root.X1 = dx
 	root.Y1 = dy / n
+	var err error
 	root.eachBefore(func(node *Node) {
+		if err != nil {
+			return
+		}
+		if err = m.Work(int64(1 + len(node.Children))); err != nil {
+			return
+		}
 		if len(node.Children) > 0 {
 			d := float64(node.Depth)
 			tileDice(node, node.X0, dy*(d+1)/n, node.X1, dy*(d+2)/n)
@@ -315,7 +353,11 @@ func partition(root *Node, dx, dy, padding float64, round bool) {
 		}
 		node.X0, node.Y0, node.X1, node.Y1 = x0, y0, x1, y1
 	})
-	if round {
-		root.eachBefore(roundNode)
+	if err != nil {
+		return err
 	}
+	if round {
+		return roundNodes(m, root)
+	}
+	return nil
 }

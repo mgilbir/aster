@@ -155,7 +155,11 @@ func (f *collideForce) apply(float64) {
 			f.xs[i] = nodes[i].x + nodes[i].vx
 			f.ys[i] = nodes[i].y + nodes[i].vy
 		}
-		f.tree.build(f.xs, f.ys)
+		f.tree.led = budget.LedgerFrom(f.s.ctx)
+		if err := f.tree.build(f.xs, f.ys); err != nil {
+			f.s.err = err
+			return
+		}
 		f.tree.visitAfter(prepare)
 		for i := range nodes {
 			if f.s.halt(i) {
@@ -220,7 +224,11 @@ func (f *nbodyForce) apply(alpha float64) {
 	for i := range nodes {
 		f.xs[i], f.ys[i] = nodes[i].x, nodes[i].y
 	}
-	tree.build(f.xs, f.ys)
+	tree.led = budget.LedgerFrom(f.s.ctx)
+	if err := tree.build(f.xs, f.ys); err != nil {
+		f.s.err = err
+		return
+	}
 	tree.visitAfter(func(q int32) {
 		nd := &tree.nodes[q]
 		var strength float64
@@ -316,8 +324,11 @@ func (f *nbodyForce) apply(alpha float64) {
 
 // Link is the spring force between linked nodes.
 type Link struct {
-	Links      []jsval.Value // tuples with source and target
-	ID         Accessor      // node id; nil means the node's index
+	Links []jsval.Value // tuples with source and target
+	ID    Accessor      // node id; nil means the node's index
+	// IDNull is link.id(null): d3 calls the id on the first node, a
+	// TypeError.
+	IDNull     bool
 	Distance   Param
 	Strength   *Param  // nil: 1 / min(degree(source), degree(target))
 	Iterations float64 // as Collide's
@@ -353,6 +364,9 @@ func (f *linkForce) initialize(s *sim) error {
 	f.s = s
 	links := f.cfg.Links
 	n, m := len(s.nodes), len(links)
+	if f.cfg.IDNull && n > 0 {
+		return &jsval.Thrown{Name: "TypeError", Msg: "id is not a function"}
+	}
 	// d3's nodeById, a Map: ids are SameValueZero keys, an array or object
 	// by reference.
 	byID := make(map[jsval.InternKey]int32, n)

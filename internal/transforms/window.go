@@ -3,7 +3,6 @@ package transforms
 import (
 	"context"
 	"errors"
-	"fmt"
 	"github.com/mgilbir/aster/internal/budget"
 	"math"
 	"slices"
@@ -140,6 +139,9 @@ func canonicalRowIndex(s string) (int, bool) {
 // fieldAt is field(w.data[k]) for a frame end k (rowAt), the TypeError of
 // reading a field of undefined recorded in w.err.
 func (w *windowFrame) fieldAt(get Accessor, name string, x float64, s string) jsval.Value {
+	if get == nil {
+		return w.field(nil, name, x)
+	}
 	if t, ok := w.rowAt(x, s); ok {
 		return get(t)
 	}
@@ -167,18 +169,15 @@ func (f windowFn) init() {
 }
 func (f windowFn) next(w *windowFrame) jsval.Value { return f.nextFn(w) }
 
-var errNoWindowField = errors.New("window operation requires a field")
-
 // newWindowOp builds the state machine for a window operation, mirroring
 // vega-transforms' WindowOps. ok is false when op is not a window operation.
 func newWindowOp(spec WindowOpSpec) (op windowOp, ok bool, err error) {
-	needField := func() error {
-		if spec.Field.IsNil() {
-			return fmt.Errorf("%s: %w", spec.Op, errNoWindowField)
-		}
-		return nil
-	}
+	// A null field is upstream's `field(...)` of null: the TypeError when
+	// the operation first reads one (w.field), not when it is made.
 	get := spec.Field.Get
+	if spec.Field.IsNil() {
+		get = nil
+	}
 	switch spec.Op {
 	case "row_number":
 		return windowFn{nextFn: func(w *windowFrame) jsval.Value { return jsval.Int(w.index + 1) }}, true, nil
@@ -222,15 +221,12 @@ func newWindowOp(spec WindowOpSpec) (op windowOp, ok bool, err error) {
 		}
 		num := spec.Param
 		if !(num > 0) {
-			return nil, true, errors.New("ntile num must be greater than zero")
+			return nil, true, errors.New("ntile num must be greater than zero.")
 		}
 		return windowFn{func() { cume = 0 }, func(w *windowFrame) jsval.Value {
 			return jsval.Num(math.Ceil(float64(num * next(w))))
 		}}, true, nil
 	case "lag", "lead":
-		if err := needField(); err != nil {
-			return nil, true, err
-		}
 		// offset = +offset || 1: NaN and 0 fall back to 1. Any other number
 		// is used as it is, so a huge one reads past the partition (null).
 		off := spec.Param
@@ -256,24 +252,15 @@ func newWindowOp(spec WindowOpSpec) (op windowOp, ok bool, err error) {
 			return jsval.Null
 		}}, true, nil
 	case "first_value":
-		if err := needField(); err != nil {
-			return nil, true, err
-		}
 		name := spec.Field.Name
 		return windowFn{nextFn: func(w *windowFrame) jsval.Value { return w.fieldAt(get, name, w.x0, w.s0) }}, true, nil
 	case "last_value":
-		if err := needField(); err != nil {
-			return nil, true, err
-		}
 		name := spec.Field.Name
 		return windowFn{nextFn: func(w *windowFrame) jsval.Value { return w.field(get, name, w.x1-1) }}, true, nil
 	case "nth_value":
-		if err := needField(); err != nil {
-			return nil, true, err
-		}
 		nth := spec.Param
 		if !(nth > 0) {
-			return nil, true, errors.New("nth_value nth must be greater than zero")
+			return nil, true, errors.New("nth_value nth must be greater than zero.")
 		}
 		name := spec.Field.Name
 		return windowFn{nextFn: func(w *windowFrame) jsval.Value {
@@ -295,35 +282,34 @@ func newWindowOp(spec WindowOpSpec) (op windowOp, ok bool, err error) {
 			return jsval.Null
 		}}, true, nil
 	case "prev_value":
-		if err := needField(); err != nil {
-			return nil, true, err
-		}
 		prev := jsval.Null
+		name := spec.Field.Name
 		return windowFn{func() { prev = jsval.Null }, func(w *windowFrame) jsval.Value {
-			if v := get(w.data[w.index]); !v.IsNullish() {
+			if v := w.field(get, name, float64(w.index)); !v.IsNullish() {
 				prev = v
 			}
 			return prev
 		}}, true, nil
 	case "next_value":
-		if err := needField(); err != nil {
-			return nil, true, err
-		}
 		v, at := jsval.Null, -1
+		name := spec.Field.Name
 		return windowFn{func() { v, at = jsval.Null, -1 }, func(w *windowFrame) jsval.Value {
 			if w.index <= at {
 				return v
 			}
 			d := w.data
 			j := w.index
-			for j < len(d) && get(d[j]).IsNullish() {
+			for j < len(d) && w.field(get, name, float64(j)).IsNullish() {
+				if w.err != nil {
+					return jsval.Undefined
+				}
 				j++
 			}
 			if j >= len(d) {
 				at, v = len(d), jsval.Null
 				return v
 			}
-			at, v = j, get(d[j])
+			at, v = j, w.field(get, name, float64(j))
 			return v
 		}}, true, nil
 	}
@@ -335,6 +321,12 @@ func newWindowOp(spec WindowOpSpec) (op windowOp, ok bool, err error) {
 // field of it is the TypeError upstream throws, recorded in w.err for Window
 // to return through the operator's error, as upstream's dataflow catches it.
 func (w *windowFrame) field(get Accessor, name string, i float64) jsval.Value {
+	if get == nil {
+		if w.err == nil {
+			w.err = &jsval.Thrown{Name: "TypeError", Msg: "field is not a function"}
+		}
+		return jsval.Undefined
+	}
 	if i >= 0 && i < float64(len(w.data)) && i == math.Trunc(i) {
 		return get(w.data[int(i)])
 	}
@@ -355,6 +347,9 @@ func Window(ctx context.Context, data []jsval.Value, p WindowParams) ([]jsval.Va
 		wins []windowOp
 		outs []string
 	)
+	// WindowState's constructor, in the order of the ops: a window
+	// operation's parameter is checked as it is made, an aggregate's field
+	// as it is read
 	for _, spec := range p.Ops {
 		name := spec.Name()
 		op, isWin, err := newWindowOp(spec)
@@ -365,6 +360,9 @@ func Window(ctx context.Context, data []jsval.Value, p WindowParams) ([]jsval.Va
 			wins = append(wins, op)
 			outs = append(outs, name)
 			continue
+		}
+		if spec.Field.IsNil() && (spec.Op != "count" || spec.CountMeasure) {
+			return nil, errNullAggregateField
 		}
 		aggs = append(aggs, Measure{Op: spec.Op, Field: spec.Field, Param: spec.AggParam, As: spec.As, CountMeasure: spec.CountMeasure})
 	}
@@ -406,9 +404,9 @@ func Window(ctx context.Context, data []jsval.Value, p WindowParams) ([]jsval.Va
 	}
 	for _, g := range groups {
 		if jsval.ObjectPrototypeHas(g.Key) {
-			// this.value[key] of a plain object is the member Object.prototype
-			// has under the name, which has no add().
-			panic(&jsval.Thrown{Name: "TypeError", Msg: "group(...).add is not a function"})
+			// `this.value[key]` of a plain object finds Object.prototype's
+			// member of that name, which has no add
+			return nil, &jsval.Thrown{Name: "TypeError", Msg: "group(...).add is not a function"}
 		}
 	}
 	for _, g := range groups {

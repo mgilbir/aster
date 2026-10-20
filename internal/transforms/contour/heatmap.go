@@ -64,6 +64,12 @@ func Heatmap(ctx context.Context, source []jsval.Value, p HeatmapParams) ([]*Ima
 	hasValues := make([]bool, len(source))
 	for i, t := range source {
 		fv := field(t)
+		// d3's max iterates the grid's values: `max(field(t).values)` when
+		// shared, `max(v.values || [])` otherwise, a TypeError for a value
+		// that is not iterable
+		if vs := fv.Get("values"); !(vs.IsArr() || vs.IsStr()) && (p.Shared || vs.IsTruthy()) {
+			return nil, &jsval.Thrown{Name: "TypeError", Msg: "values is not iterable"}
+		}
 		g, err := GridFromValue(ctx, fv)
 		if err != nil {
 			return nil, err

@@ -417,7 +417,7 @@ func facCollect(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode
 			}
 		}
 		if cmp != nil && mod {
-			transforms.SortTuples(list, meteredCompare(n.g, transforms.StableComparator(cmp)))
+			transforms.SortTuples(list, transforms.StableComparator(meteredCompare(n.g, cmp)))
 		}
 		n.value = list
 		n.modified = mod
@@ -547,7 +547,7 @@ func facValues(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode,
 			f, _ := p.Get("field").(transforms.Field)
 			if cmp := p.comparator("sort"); cmp != nil {
 				src = copyRows(n.g, src)
-				transforms.SortTuples(src, meteredCompare(n.g, transforms.StableComparator(cmp)))
+				transforms.SortTuples(src, transforms.StableComparator(meteredCompare(n.g, cmp)))
 			}
 			out := make([]jsval.Value, len(src))
 			for i, t := range src {

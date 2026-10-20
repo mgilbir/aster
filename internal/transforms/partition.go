@@ -23,9 +23,14 @@ type Group struct {
 // 1 and "1" are one group.
 // With no group-by fields everything is one group with nil Dims, even when data
 // is empty.
-func Partition(k Keys, data []jsval.Value, groupby []Field) []Group {
+//
+// The groups are kept in a plain object upstream (`g = map[k]; if (!g) ...`),
+// so a key Object.prototype answers for ("toString", "constructor",
+// "__proto__") finds that member instead of a group, and pushing to it is
+// the TypeError Partition returns.
+func Partition(k Keys, data []jsval.Value, groupby []Field) ([]Group, error) {
 	if len(groupby) == 0 {
-		return []Group{{Tuples: data}}
+		return []Group{{Tuples: data}}, nil
 	}
 	var groups []Group
 	index := make(map[string]int)
@@ -53,7 +58,7 @@ func Partition(k Keys, data []jsval.Value, groupby []Field) []Group {
 				// util.partition's `map[k]` of a plain object finds the
 				// member Object.prototype has under that name, which is no
 				// array: `g.push(t)` is a TypeError.
-				panic(&jsval.Thrown{Name: "TypeError", Msg: "g.push is not a function"})
+				return nil, errPushNotFunction
 			}
 			gi = len(groups)
 			index[k] = gi
@@ -65,8 +70,11 @@ func Partition(k Keys, data []jsval.Value, groupby []Field) []Group {
 		}
 		groups[gi].Tuples = append(groups[gi].Tuples, t)
 	}
-	return groups
+	return groups, nil
 }
+
+// errPushNotFunction is `g.push(...)` where g is a member of Object.prototype.
+var errPushNotFunction = &jsval.Thrown{Name: "TypeError", Msg: "g.push is not a function"}
 
 // partitionBatch is how many rows Partition and GroupByKey go between two
 // charges of their work.

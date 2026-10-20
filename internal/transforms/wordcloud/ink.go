@@ -334,18 +334,8 @@ func (r *inkRaster) scan(m *Mask) {
 			// The order of crossings at equal x does not matter: the spans
 			// between them are empty, and the winding on either side of them
 			// is their sum.
-			if added > sortBatch {
-				slices.SortFunc(r.cross, func(a, b crossing) int {
-					switch {
-					case a.x < b.x:
-						return -1
-					case a.x > b.x:
-						return 1
-					}
-					return 0
-				})
-			} else {
-				insertionSort(r.cross)
+			if added > sortBatch || !insertionSort(r.cross) {
+				sortCrossings(r.cross)
 			}
 			wind := 0
 			for i := 0; i+1 < len(r.cross); i++ {
@@ -365,8 +355,13 @@ func (r *inkRaster) scan(m *Mask) {
 }
 
 // insertionSort orders cs by x, in time linear in its length plus the
-// number of pairs out of order.
-func insertionSort(cs []crossing) {
+// number of pairs out of order, as long as those are few: past a few moves a
+// crossing (outlines whose edges cross each other everywhere, as a hostile
+// font's can) it stops, leaving cs a permutation of itself, and reports
+// false, and the caller sorts in O(n log n). Either sort gives the same
+// coverage: crossings at equal x bound empty spans.
+func insertionSort(cs []crossing) bool {
+	budget := 8 * len(cs)
 	for i := 1; i < len(cs); i++ {
 		c := cs[i]
 		j := i
@@ -374,7 +369,23 @@ func insertionSort(cs []crossing) {
 			cs[j] = cs[j-1]
 		}
 		cs[j] = c
+		if budget -= i - j; budget < 0 {
+			return false
+		}
 	}
+	return true
+}
+
+func sortCrossings(cs []crossing) {
+	slices.SortFunc(cs, func(a, b crossing) int {
+		switch {
+		case a.x < b.x:
+			return -1
+		case a.x > b.x:
+			return 1
+		}
+		return 0
+	})
 }
 
 // addSpan adds the horizontal coverage of [xa, xb) to the pixels of row, each

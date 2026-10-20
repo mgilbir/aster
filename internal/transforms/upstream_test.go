@@ -1,6 +1,7 @@
 package transforms
 
 import (
+	"context"
 	"encoding/json"
 	"math"
 	"testing"
@@ -93,7 +94,10 @@ func newDistributionFor(fn string, args []any) *instance {
 		if !nullish(at(1)) {
 			bandwidth = upstream.Number(at(1))
 		}
-		k := NewKernelDensity(valuesOfArg(at(0)), bandwidth)
+		k, err := NewKernelDensity(context.Background(), valuesOfArg(at(0)), bandwidth)
+		if err != nil {
+			panic(err)
+		}
 		return &instance{dist: k, kde: k}
 	}
 	return nil
@@ -231,21 +235,22 @@ func TestUpstreamVegaStatistics(t *testing.T) {
 				continue
 			}
 			p := numbersOfArg(c.Arg(1))
-			r.Check(c, upstream.Floats(Quantiles(valuesOfArg(c.Arg(0)), p, identity)), false)
+			q, _ := Quantiles(context.Background(), valuesOfArg(c.Arg(0)), p, identity)
+			r.Check(c, upstream.Floats(quantileFloats(q)), false)
 		case "quartiles":
 			if upstream.Contains(c.Args, "function") {
 				r.Skip("quantiles of a field (the accessor is the test's own function)")
 				continue
 			}
-			q := Quartiles(valuesOfArg(c.Arg(0)), identity)
-			r.Check(c, upstream.Floats(q[:]), false)
+			q, _ := Quartiles(context.Background(), valuesOfArg(c.Arg(0)), identity)
+			r.Check(c, upstream.Floats(quantileFloats(q[:])), false)
 		case "bootstrapCI":
 			data := valuesOfArg(c.Arg(0))
 			if len(data) != 0 {
 				r.Skip("bootstrapCI on data (it draws from Math.random)")
 				continue
 			}
-			_, _, ok := BootstrapCI(data, int(n(1)), n(2), identity, nil)
+			_, _, ok, _ := BootstrapCI(context.Background(), data, int(n(1)), n(2), identity, nil)
 			if ok {
 				r.Check(c, nil, true)
 				continue
@@ -447,7 +452,7 @@ func replayRegression(r *upstream.Replay, c *upstream.Call) {
 		order = upstream.Number(argAt(args, 3))
 	}
 	names := map[string]string{"Constant": "constant", "Linear": "linear", "Log": "log", "Exp": "exp", "Pow": "pow", "Quad": "quad", "Poly": "poly"}
-	model, err := FitRegression(names[method], valuesOfArg(argAt(args, 0)), x, y, order)
+	model, err := FitRegression(context.Background(), names[method], valuesOfArg(argAt(args, 0)), x, y, order)
 	if err != nil {
 		r.Check(c, nil, true)
 		return
@@ -516,7 +521,8 @@ func TestUpstreamD3ArrayQuantile(t *testing.T) {
 				r.Check(c, upstream.Undefined(), false)
 				continue
 			}
-			q := Quantiles(vals, []float64{p}, identity)[0]
+			qv, _ := Quantiles(context.Background(), vals, []float64{p}, identity)
+			q := jsval.ToNumber(qv[0])
 			if math.IsNaN(q) {
 				r.Check(c, upstream.Undefined(), false)
 				continue
@@ -540,4 +546,13 @@ func numbersOnly(v any) bool {
 		}
 	}
 	return true
+}
+
+// quantileFloats reads quantiles as numbers, undefined as NaN.
+func quantileFloats(q []jsval.Value) []float64 {
+	out := make([]float64, len(q))
+	for i, v := range q {
+		out[i] = jsval.ToNumber(v)
+	}
+	return out
 }

@@ -3,7 +3,8 @@ package transforms
 import (
 	"context"
 	"math"
-	"slices"
+
+	"github.com/mgilbir/aster/internal/jssort"
 
 	"github.com/mgilbir/aster/internal/jsval"
 )
@@ -103,57 +104,18 @@ func Pie(ctx context.Context, data []jsval.Value, p PieParams) ([]jsval.Value, e
 	return data, nil
 }
 
-// pieSortIndex sorts index by values[a]-values[b] the way V8's Array.sort
-// does. Values can be NaN (a missing field), which makes the comparator
-// inconsistent, so the result depends on the algorithm: below 64 elements V8
-// finds the leading run and finishes with a binary insertion sort, which is
-// reproduced here; longer inputs use an ordinary stable sort (identical
-// whenever the comparator is consistent).
+// pieSortIndex sorts index by values[a]-values[b] as V8's Array.sort does:
+// a missing value is NaN, which makes the comparator inconsistent, so the
+// order depends on which pairs the algorithm compares (jssort is V8's).
 func pieSortIndex(index []int, values []float64) {
-	n := len(index)
-	if n >= 64 {
-		slices.SortStableFunc(index, func(a, b int) int {
-			d := values[a] - values[b]
-			switch {
-			case d < 0:
-				return -1
-			case d > 0:
-				return 1
-			}
-			return 0
-		})
-		return
-	}
-	if n < 2 {
-		return
-	}
-	less := func(a, b int) bool { return values[a]-values[b] < 0 }
-	// CountAndMakeRun
-	run := 2
-	desc := less(index[1], index[0])
-	for i := 2; i < n; i++ {
-		l := less(index[i], index[i-1])
-		if desc && !l || !desc && l {
-			break
+	jssort.Sort(index, func(a, b int) int {
+		d := values[a] - values[b]
+		switch {
+		case d < 0:
+			return -1
+		case d > 0:
+			return 1
 		}
-		run++
-	}
-	if desc {
-		slices.Reverse(index[:run])
-	}
-	// BinaryInsertionSort of the rest.
-	for start := run; start < n; start++ {
-		left, right := 0, start
-		pivot := index[start]
-		for left < right {
-			mid := left + (right-left)>>1
-			if less(pivot, index[mid]) {
-				right = mid
-			} else {
-				left = mid + 1
-			}
-		}
-		copy(index[left+1:start+1], index[left:start])
-		index[left] = pivot
-	}
+		return 0 // equal, or NaN, which V8 reads as not less
+	})
 }

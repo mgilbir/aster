@@ -115,6 +115,22 @@ transforms that annotate (formula, stack, window, …) write fields into the
 object they were given, as upstream does, so do not share one object between two
 unrelated datasets without copying.
 
+Tuples are sorted with `transforms.SortTuples`, which takes only an
+`IDStable` comparator (`StableComparator`, vega-dataflow's `stableCompare`):
+ties go by tuple id, the order of ingestion, as every sort of tuples upstream
+breaks them.
+
+### Transform parameters
+
+A transform reads its parameters as its upstream code reads them, never from
+the definition's defaults, which vega-parser does not apply: an absent
+parameter is `undefined`, and `_.x || d`, `_.x != null`, `_.x !== false`
+each read null, 0 and "" differently ([ADR 0028](adr/0028-transforms-read-their-parameters-as-upstreams-code.md)).
+`TestTransformsMatchNode` sweeps every parameter of every transform absent,
+null and falsy against node. Where upstream keeps a map keyed by data in a
+plain object, a key Object.prototype has finds its member there
+(`jsval.PlainMap`, the `inheritedKey` helpers): reproduce what that does.
+
 ### Errors, not panics
 
 Anything reachable from a specification returns an

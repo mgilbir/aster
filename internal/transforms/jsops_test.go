@@ -1,6 +1,7 @@
 package transforms
 
 import (
+	"context"
 	"testing"
 
 	"github.com/mgilbir/aster/internal/format"
@@ -116,8 +117,8 @@ func TestQuantilesAndLCG(t *testing.T) {
 	for _, f := range []float64{5, 1, 3, 2, 4} {
 		data = append(data, jsval.Obj(jsval.ObjectOf("v", jsval.Num(f))))
 	}
-	q := Quartiles(data, FieldOf("v").Get)
-	if q != [3]float64{2, 3, 4} {
+	q, err := Quartiles(context.Background(), data, FieldOf("v").Get)
+	if err != nil || q[0].NumValue() != 2 || q[1].NumValue() != 3 || q[2].NumValue() != 4 {
 		t.Errorf("Quartiles = %v", q)
 	}
 }

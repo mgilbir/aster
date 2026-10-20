@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -39,13 +40,13 @@ type DistSpec struct {
 // maxMixtureDepth bounds nested mixtures in an untrusted specification.
 const maxMixtureDepth = 32
 
-// NewDistribution instantiates spec. source supplies the input tuples for
-// kde distributions without an explicit From.
-func NewDistribution(spec DistSpec, source []jsval.Value) (Distribution, error) {
-	return newDistribution(spec, source, 0)
+// NewDistribution instantiates spec for the call ctx belongs to. source
+// supplies the input tuples for kde distributions without an explicit From.
+func NewDistribution(ctx context.Context, spec DistSpec, source []jsval.Value) (Distribution, error) {
+	return newDistribution(ctx, spec, source, 0)
 }
 
-func newDistribution(spec DistSpec, source []jsval.Value, depth int) (Distribution, error) {
+func newDistribution(ctx context.Context, spec DistSpec, source []jsval.Value, depth int) (Distribution, error) {
 	if depth > maxMixtureDepth {
 		return nil, fmt.Errorf("%w: distribution nesting exceeds %d", ErrLimit, maxMixtureDepth)
 	}
@@ -71,7 +72,14 @@ func newDistribution(spec DistSpec, source []jsval.Value, depth int) (Distributi
 			// d.data((def.from || data()).map(def.field)) of a null field
 			return nil, &jsval.Thrown{Name: "TypeError", Msg: "null is not a function"}
 		}
-		k := NewKernelDensity(kdeSupport(spec, source), spec.Bandwidth)
+		support, err := kdeSupport(ctx, spec, source)
+		if err != nil {
+			return nil, err
+		}
+		k, err := NewKernelDensity(ctx, support, spec.Bandwidth)
+		if err != nil {
+			return nil, err
+		}
 		if spec.BandwidthGiven {
 			// bandwidth(_): a truthy value is kept, NaN or not
 			k.Bandwidth = spec.Bandwidth
@@ -80,7 +88,7 @@ func newDistribution(spec DistSpec, source []jsval.Value, depth int) (Distributi
 	case "mixture":
 		ds := make([]Distribution, len(spec.Distributions))
 		for i, s := range spec.Distributions {
-			d, err := newDistribution(s, source, depth+1)
+			d, err := newDistribution(ctx, s, source, depth+1)
 			if err != nil {
 				return nil, err
 			}
@@ -91,19 +99,25 @@ func newDistribution(spec DistSpec, source []jsval.Value, depth int) (Distributi
 	return nil, fmt.Errorf("Unknown distribution function: %s", spec.Kind)
 }
 
-func kdeSupport(spec DistSpec, source []jsval.Value) []jsval.Value {
+// kdeSupport is `(def.from || data()).map(def.field)`, a step of work a
+// tuple charged to ctx's ledger.
+func kdeSupport(ctx context.Context, spec DistSpec, source []jsval.Value) ([]jsval.Value, error) {
 	if spec.Field.IsNil() {
-		return nil
+		return nil, nil
 	}
 	src := spec.From
 	if src == nil {
 		src = source
 	}
+	m := budget.NewMeter(ctx)
 	out := make([]jsval.Value, len(src))
 	for i, t := range src {
+		if err := m.Work(1); err != nil {
+			return nil, err
+		}
 		out[i] = spec.Field.Get(t)
 	}
-	return out
+	return out, nil
 }
 
 // DensityParams configures Density.
@@ -136,7 +150,7 @@ type DensityParams struct {
 // adaptively refined where the curve bends (SampleCurve). source supplies
 // input tuples for a kde without explicit data. The output tuples are new.
 func Density(ctx context.Context, source []jsval.Value, p DensityParams) ([]jsval.Value, error) {
-	dist, err := NewDistribution(p.Distribution, source)
+	dist, err := NewDistribution(ctx, p.Distribution, source)
 	if err != nil {
 		return nil, err
 	}
@@ -172,17 +186,16 @@ func Density(ctx context.Context, source []jsval.Value, p DensityParams) ([]jsva
 		// they are
 		lo, hi = rawExtent(jsval.WalkerFor(ctx), k.Data())
 	}
-	// The samples are new tuples: reserve them before they are drawn.
-	if err := reserveRows(ctx, maxSamplesOf(steps)); err != nil {
-		return nil, err
-	}
-	return sampleTuples(ctx, f, lo, hi, steps, nil, nil, p.As, p.AsExact, 1)
+	// The samples are new tuples, reserved as they are drawn (SampleCurve).
+	return sampleTuples(ctx, f, lo, hi, steps, nil, nil, p.As, p.AsExact, 1, 0)
 }
 
-// maxSamples is the most points SampleCurve returns for these step bounds:
-// it only halves an interval at least twice its resolution (span /
-// maxsteps) wide, so no interval is narrower and there are at most maxsteps
-// of them; past MaxSteps it fails. The bounds are spec numbers, compared in
+// maxSamples is the most points SampleCurve returns for these step bounds
+// over a forward extent: it only halves an interval at least twice its
+// resolution (span / maxsteps) wide, so no interval is narrower and there
+// are at most maxsteps of them; past MaxSteps it fails. A reversed extent's
+// resolution is negative and bounds nothing, so SampleCurve reserves the
+// points past this as they come. The bounds are spec numbers, compared in
 // floating point before they become an int.
 func maxSamples(minsteps, maxsteps float64) int {
 	n := math.Max(minsteps, maxsteps)
@@ -197,8 +210,9 @@ func maxSamples(minsteps, maxsteps float64) int {
 
 // sampleTuples runs sampleCurveJS over [lo, hi] and builds tuples: group-by
 // names first, then the value and density fields (density scaled by scale).
+// base is the rows the caller made before these (see SampleCurve).
 func sampleTuples(ctx context.Context, f func(float64) float64, lo, hi jsval.Value, steps StepsSpec,
-	names []string, dims []jsval.Value, as [2]string, exact bool, scale float64) ([]jsval.Value, error) {
+	names []string, dims []jsval.Value, as [2]string, exact bool, scale float64, base int) ([]jsval.Value, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -216,7 +230,7 @@ func sampleTuples(ctx context.Context, f func(float64) float64, lo, hi jsval.Val
 		}
 		return pf(x)
 	}
-	pts, err := sampleCurveJS(jsval.WalkerFor(ctx), f, lo, hi, steps)
+	pts, err := sampleCurveJS(ctx, f, lo, hi, steps, base)
 	if cerr != nil {
 		return nil, cerr
 	}

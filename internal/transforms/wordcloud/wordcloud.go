@@ -24,9 +24,6 @@ type Accessor func(jsval.Value) jsval.Value
 // Const returns an accessor that ignores its tuple.
 func Const(v jsval.Value) Accessor { return func(jsval.Value) jsval.Value { return v } }
 
-// DefaultFontSizeRange is the transform's fontSizeRange default.
-var DefaultFontSizeRange = []float64{10, 50}
-
 // Params mirrors the Wordcloud transform's parameters. Nil accessors take the
 // upstream defaults. Upstream applies `value || default` to constant
 // parameters, so a caller holding a constant padding of 0 must pass 1.
@@ -39,7 +36,8 @@ type Params struct {
 	FontSize   Accessor // default constant 14
 	// FontSizeIsField reports that FontSize varies per tuple (a field or
 	// expression upstream); only then is FontSizeRange applied, through a
-	// sqrt scale over the data extent. A nil FontSizeRange disables scaling.
+	// sqrt scale over the data extent. A nil FontSizeRange disables scaling;
+	// one of fewer than two sizes makes every size 0, as d3's scale does.
 	FontSizeIsField bool
 	FontSizeRange   []float64
 	Rotate          Accessor // degrees, default 0
@@ -104,8 +102,17 @@ func Transform(ctx context.Context, data []jsval.Value, p Params) error {
 	rotate := orDefault(p.Rotate, jsval.Num(0))
 	padding := orDefault(p.Padding, jsval.Num(1))
 	fontSize := orDefault(p.FontSize, jsval.Num(14))
-	if p.FontSizeIsField && p.FontSizeRange != nil && len(p.FontSizeRange) >= 2 {
-		fontSize = sqrtScaled(data, fontSize, p.FontSizeRange[0], p.FontSizeRange[1])
+	if p.FontSizeIsField && p.FontSizeRange != nil {
+		if len(p.FontSizeRange) < 2 {
+			// d3's scale interpolates toward range[1], undefined: every
+			// size is undefined, which the layout's ~~ makes 0
+			fontSize = Const(jsval.Undefined)
+		} else {
+			var err error
+			if fontSize, err = sqrtScaled(ctx, data, fontSize, p.FontSizeRange[0], p.FontSizeRange[1]); err != nil {
+				return err
+			}
+		}
 	}
 	spiral := p.Spiral
 	if spiral != Rectangular {
@@ -172,27 +179,39 @@ func orDefault(a Accessor, def jsval.Value) Accessor {
 }
 
 // sqrtScaled builds `d3.scaleSqrt().domain(extent(data, f)).range([r0, r1])`
-// composed with f. The extent skips null/NaN values as vega-util's does.
-func sqrtScaled(data []jsval.Value, f Accessor, r0, r1 float64) Accessor {
-	lo, hi := math.Inf(1), math.Inf(-1)
+// composed with f. The extent is vega-util's: the first value that is not
+// null, undefined or NaN, then the least and greatest of the rest by
+// JavaScript's < and > (strings by their text: "12" is less than "9"), and
+// the scale converts its ends to numbers. Each value read is a step of the
+// call's work, and the comparisons are made with its Walker.
+func sqrtScaled(ctx context.Context, data []jsval.Value, f Accessor, r0, r1 float64) (Accessor, error) {
+	w := jsval.WalkerFor(ctx)
+	m := budget.NewMeter(ctx)
+	var loV, hiV jsval.Value
 	found := false
 	for _, d := range data {
+		if err := m.Work(1); err != nil {
+			return nil, err
+		}
 		v := f(d)
+		if !found {
+			if v.IsNullish() || (v.IsNum() && math.IsNaN(v.NumValue())) {
+				continue
+			}
+			loV, hiV, found = v, v, true
+			continue
+		}
 		if v.IsNullish() {
 			continue
 		}
-		n := jsval.ToNumber(v)
-		if !(n >= n) {
-			continue
+		if c, ok := w.Relate(v, loV); ok && c < 0 {
+			loV = v
 		}
-		if !found || n < lo {
-			lo = n
+		if c, ok := w.Relate(v, hiV); ok && c > 0 {
+			hiV = v
 		}
-		if !found || n > hi {
-			hi = n
-		}
-		found = true
 	}
+	lo, hi := jsval.ToNumber(loV), jsval.ToNumber(hiV)
 	sq := func(x float64) float64 {
 		if x < 0 {
 			return -math.Sqrt(-x)
@@ -203,7 +222,7 @@ func sqrtScaled(data []jsval.Value, f Accessor, r0, r1 float64) Accessor {
 	span := b - a
 	return func(d jsval.Value) jsval.Value {
 		x := jsval.ToNumber(f(d))
-		if math.IsNaN(x) || !found {
+		if math.IsNaN(x) || !found || math.IsNaN(lo) || math.IsNaN(hi) {
 			return jsval.Num(math.NaN())
 		}
 		// d3 normalize: a degenerate domain maps everything to 0.5.
@@ -212,5 +231,5 @@ func sqrtScaled(data []jsval.Value, f Accessor, r0, r1 float64) Accessor {
 			u = (sq(x) - a) / span
 		}
 		return jsval.Num(float64(r0*(1-u)) + float64(r1*u))
-	}
+	}, nil
 }

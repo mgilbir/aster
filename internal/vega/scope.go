@@ -763,6 +763,9 @@ func (s *Scope) fieldRef(field jsval.Value, name string) P {
 }
 
 func (s *Scope) compareRef(cmp jsval.Value) P {
+	if cmp.IsNullish() {
+		perr("Cannot read properties of %s (reading 'field')", cmp.Kind())
+	}
 	signal := false
 	check := func(v jsval.Value) P {
 		if isSignalObj(v) {

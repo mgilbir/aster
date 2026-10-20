@@ -7,6 +7,7 @@ import (
 	"math"
 	"slices"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsmath"
 
 	"github.com/mgilbir/aster/internal/jsval"
@@ -38,18 +39,14 @@ var regressionMethods = map[string]bool{
 }
 
 // FitRegression fits the named method (constant, linear, log, exp, pow, quad,
-// poly) to the tuples. Points whose x or y is null or not a number are ignored.
-// order only applies to poly.
-func FitRegression(method string, data []jsval.Value, x, y Accessor, order float64) (RegressionModel, error) {
-	return FitRegressionCtx(context.Background(), method, data, x, y, order)
-}
-
-// FitRegressionCtx is FitRegression that stops with the context's error when
-// ctx is cancelled (a high-order polynomial fit costs order^2 passes).
-func FitRegressionCtx(ctx context.Context, method string, data []jsval.Value, x, y Accessor, order float64) (RegressionModel, error) {
-	// Each fit reads every point, some several times: x is read for every
-	// point, so polling there polls throughout.
-	x, cancelled := polledAccessor(ctx, x)
+// poly) to the tuples. Points whose x or y is null or not a number are
+// ignored. order only applies to poly. Every point a pass reads is a step of
+// work charged to ctx's ledger, which polls ctx, so a fit stops with the
+// context's error when ctx is done (a high-order polynomial fit costs
+// order^2 passes).
+func FitRegression(ctx context.Context, method string, data []jsval.Value, x, y Accessor, order float64) (RegressionModel, error) {
+	// Each fit reads x for every point of every pass over them.
+	x, cancelled := meteredAccessor(ctx, x)
 	m, err := fitRegression(ctx, method, data, x, y, order)
 	if cerr := cancelled(); cerr != nil {
 		return RegressionModel{}, cerr
@@ -60,17 +57,17 @@ func FitRegressionCtx(ctx context.Context, method string, data []jsval.Value, x,
 func fitRegression(ctx context.Context, method string, data []jsval.Value, x, y Accessor, order float64) (RegressionModel, error) {
 	switch method {
 	case "constant":
-		return FitConstant(data, x, y), nil
+		return fitConstant(data, x, y), nil
 	case "linear":
-		return FitLinear(data, x, y), nil
+		return fitLinear(data, x, y), nil
 	case "log":
-		return FitLog(data, x, y), nil
+		return fitLog(data, x, y), nil
 	case "exp":
-		return FitExp(data, x, y), nil
+		return fitExp(data, x, y), nil
 	case "pow":
-		return FitPow(data, x, y), nil
+		return fitPow(data, x, y), nil
 	case "quad":
-		return FitQuad(data, x, y), nil
+		return fitQuad(data, x, y), nil
 	case "poly":
 		return fitPoly(ctx, data, x, y, order)
 	}
@@ -167,8 +164,8 @@ func regressionRSquared(data []jsval.Value, x, y Accessor, uY float64, predict f
 	return 1 - sse/sst
 }
 
-// FitConstant is the mean of y (rSquared is 0 by definition).
-func FitConstant(data []jsval.Value, x, y Accessor) RegressionModel {
+// fitConstant is the mean of y (rSquared is 0 by definition).
+func fitConstant(data []jsval.Value, x, y Accessor) RegressionModel {
 	mean, n := 0.0, 0
 	for _, d := range data {
 		v := y(d)
@@ -187,8 +184,8 @@ func FitConstant(data []jsval.Value, x, y Accessor) RegressionModel {
 	return RegressionModel{Coef: []float64{mean}, RSquared: 0, Predict: func(float64) float64 { return mean }}
 }
 
-// FitLinear is least-squares line fitting; Coef is [intercept, slope].
-func FitLinear(data []jsval.Value, x, y Accessor) RegressionModel {
+// fitLinear is least-squares line fitting; Coef is [intercept, slope].
+func fitLinear(data []jsval.Value, x, y Accessor) RegressionModel {
 	var X, Y, XY, X2 float64
 	n := 0
 	regressionVisit(data, x, y, func(dx, dy float64) {
@@ -204,8 +201,8 @@ func FitLinear(data []jsval.Value, x, y Accessor) RegressionModel {
 	return RegressionModel{Coef: []float64{a, b}, Predict: predict, RSquared: regressionRSquared(data, x, y, Y, predict)}
 }
 
-// FitLog fits y = a + b*ln(x); Coef is [a, b].
-func FitLog(data []jsval.Value, x, y Accessor) RegressionModel {
+// fitLog fits y = a + b*ln(x); Coef is [a, b].
+func fitLog(data []jsval.Value, x, y Accessor) RegressionModel {
 	var X, Y, XY, X2 float64
 	n := 0
 	regressionVisit(data, x, y, func(dx, dy float64) {
@@ -222,9 +219,9 @@ func FitLog(data []jsval.Value, x, y Accessor) RegressionModel {
 	return RegressionModel{Coef: []float64{a, b}, Predict: predict, RSquared: regressionRSquared(data, x, y, Y, predict)}
 }
 
-// FitExp fits y = a*exp(b*x) by the weighted log-linear least squares of
+// fitExp fits y = a*exp(b*x) by the weighted log-linear least squares of
 // d3-regression; Coef is [a, b].
-func FitExp(data []jsval.Value, x, y Accessor) RegressionModel {
+func fitExp(data []jsval.Value, x, y Accessor) RegressionModel {
 	ps := regressionPoints(data, x, y, false)
 	var YL, XY, XYL, X2Y float64
 	n := 0
@@ -250,8 +247,8 @@ func FitExp(data []jsval.Value, x, y Accessor) RegressionModel {
 	}
 }
 
-// FitPow fits y = a*x^b in log space; Coef is [a, b].
-func FitPow(data []jsval.Value, x, y Accessor) RegressionModel {
+// fitPow fits y = a*x^b in log space; Coef is [a, b].
+func fitPow(data []jsval.Value, x, y Accessor) RegressionModel {
 	var X, Y, XY, X2, YS float64
 	n := 0
 	regressionVisit(data, x, y, func(dx, dy float64) {
@@ -276,8 +273,8 @@ func FitPow(data []jsval.Value, x, y Accessor) RegressionModel {
 	}
 }
 
-// FitQuad fits a parabola on mean-centred data; Coef is [c, b, a] for a*x^2+b*x+c.
-func FitQuad(data []jsval.Value, x, y Accessor) RegressionModel {
+// fitQuad fits a parabola on mean-centred data; Coef is [c, b, a] for a*x^2+b*x+c.
+func fitQuad(data []jsval.Value, x, y Accessor) RegressionModel {
 	ps := regressionPoints(data, x, y, false)
 	var X2, X3, X4, XY, X2Y float64
 	for i := range ps.x {
@@ -316,11 +313,11 @@ func fitPoly(ctx context.Context, data []jsval.Value, x, y Accessor, order float
 	if !general {
 		switch order {
 		case 0:
-			return FitConstant(data, x, y), nil
+			return fitConstant(data, x, y), nil
 		case 1:
-			return FitLinear(data, x, y), nil
+			return fitLinear(data, x, y), nil
 		case 2:
-			return FitQuad(data, x, y), nil
+			return fitQuad(data, x, y), nil
 		}
 	}
 	// k = order + 1 (JavaScript's +): text where the order is a string, an
@@ -363,8 +360,9 @@ func fitPoly(ctx context.Context, data []jsval.Value, x, y Accessor, order float
 	}
 	matrix := make([][]float64, 0, rows+1)
 	lhs := make([]float64, 0, rows)
+	work := budget.NewMeter(ctx)
 	for i := 0; i < rows; i++ {
-		if err := ctx.Err(); err != nil {
+		if err := work.Work(int64(n + 1)); err != nil {
 			return RegressionModel{}, err
 		}
 		v := 0.0
@@ -374,8 +372,8 @@ func fitPoly(ctx context.Context, data []jsval.Value, x, y Accessor, order float
 		lhs = append(lhs, v)
 		c := make([]float64, width)
 		for j := 0; j < rows; j++ {
-			// One pass over the data per (i, j) pair: poll per pass.
-			if err := ctx.Err(); err != nil {
+			// One pass over the data per (i, j) pair.
+			if err := work.Work(int64(n + 1)); err != nil {
 				return RegressionModel{}, err
 			}
 			v = 0

@@ -203,7 +203,7 @@ func Stack(ctx context.Context, data []jsval.Value, p StackParams) ([]jsval.Valu
 		if s > maxSum {
 			maxSum = s
 		}
-		SortTuples(g, p.Sort)
+		SortTuples(g, StableComparator(p.Sort)) // stableCompare(_.sort)
 	}
 
 	set := func(t jsval.Value, a, b float64) {

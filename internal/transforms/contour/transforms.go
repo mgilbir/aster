@@ -206,6 +206,24 @@ func Isocontour(ctx context.Context, source []jsval.Value, p IsocontourParams) (
 	if field == nil {
 		field = func(v jsval.Value) jsval.Value { return v }
 	}
+	// Upstream's order of failures: the shared levels first take d3's max
+	// of every grid's values, a TypeError for values that are not iterable;
+	// then each grid's size is d3-contour's, whose width and height must be
+	// numbers of at least 0 (a tuple that is no grid has neither).
+	if p.Thresholds == nil && p.Shared {
+		for _, t := range source {
+			if vs := field(t).Get("values"); !vs.IsArr() && !vs.IsStr() {
+				return nil, &jsval.Thrown{Name: "TypeError", Msg: "values is not iterable"}
+			}
+		}
+	}
+	for _, t := range source {
+		fv := field(t)
+		w, h := math.Floor(jsval.ToNumber(fv.Get("width"))), math.Floor(jsval.ToNumber(fv.Get("height")))
+		if !(w >= 0 && h >= 0) {
+			return nil, errInvalidSize
+		}
+	}
 	grids := make([]Grid, len(source))
 	defer func() {
 		for _, g := range grids {
@@ -452,6 +470,11 @@ func KDE2D(ctx context.Context, source []jsval.Value, p KDE2DParams) ([]jsval.Va
 			}
 			key := sb.String()
 			g := index[key]
+			if g == nil && jsval.ObjectPrototypeHas(key) {
+				// `g = map[k]` of a plain object finds Object.prototype's
+				// member of that name, which has no push
+				return nil, &jsval.Thrown{Name: "TypeError", Msg: "g.push is not a function"}
+			}
 			if g == nil {
 				g = &group{dims: dims}
 				index[key] = g

@@ -49,24 +49,22 @@ func poll(ctx context.Context, i int) error {
 	return nil
 }
 
-// polledAccessor is f polling ctx every 4096 calls, for a helper that reads
-// every row through f and takes no context (a statistic, a fit). Once ctx
-// is done f is no longer called and the rows read as undefined, which every
-// such helper skips quickly; err reports the context's error, to return
-// when the helper is over.
-func polledAccessor(ctx context.Context, f Accessor) (get Accessor, err func() error) {
-	calls := 0
+// meteredAccessor is f with each call a step of work charged to ctx's
+// ledger, which polls ctx: for a helper that reads every row through f and
+// meters nothing itself (a fit's passes over its points). Once ctx is done
+// f is no longer called and the rows read as undefined, which every such
+// helper skips quickly; err reports the context's error, to return when the
+// helper is over.
+func meteredAccessor(ctx context.Context, f Accessor) (get Accessor, err func() error) {
+	m := budget.NewMeter(ctx)
 	var done error
 	get = func(v jsval.Value) jsval.Value {
 		if done != nil {
 			return jsval.Undefined
 		}
-		if calls&ctxCheckMask == 0 {
-			if done = ctx.Err(); done != nil {
-				return jsval.Undefined
-			}
+		if done = m.Work(1); done != nil {
+			return jsval.Undefined
 		}
-		calls++
 		return f(v)
 	}
 	return get, func() error { return done }

@@ -540,6 +540,9 @@ func imputeMethod(p *opParams) (method string, notStrict bool, proto string) {
 // the aggregate op its text names.
 func pivotOp(p *opParams) string {
 	v := p.orValue(jsval.Str("sum"), "op")
+	if strictIs(v, "count") { // (_.op === 'count' ? '__count__' : _.op)
+		return "__count__"
+	}
 	k, _ := v.PropertyKey(64)
 	return k
 }

@@ -433,6 +433,27 @@ func FieldsFor(t Value, key string) *Object {
 	return NewObject(0)
 }
 
+// TupleIDOrder orders two tuples by tuple id: `tupleid(a) - tupleid(b)`, the
+// tie-break of upstream's stableCompare. A tie (NaN) when either is no tuple.
+func TupleIDOrder(a, b Value) int {
+	var ia, ib uint32
+	if o := Tuple(a); o != nil {
+		ia = o.TupleID()
+	}
+	if o := Tuple(b); o != nil {
+		ib = o.TupleID()
+	}
+	switch {
+	case ia == 0 || ib == 0:
+		return 0
+	case ia < ib:
+		return -1
+	case ia > ib:
+		return 1
+	}
+	return 0
+}
+
 // Tuple is the object of a tuple, for reading its fields and its id: an
 // object itself, an array's named-property object (nil while it has none),
 // nil for any other value. Fields is its form for writing.

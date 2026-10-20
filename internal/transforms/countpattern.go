@@ -38,8 +38,9 @@ type CountPatternParams struct {
 // CountPattern tokenizes a text field with a regular expression and counts the
 // tokens, generating one {text, count} tuple per distinct token. Order follows
 // JavaScript object key order (integer-like tokens ascending first, then first
-// appearance), because upstream iterates a plain object. Like upstream it
-// fails on values that are not strings.
+// appearance), because upstream iterates a plain object, and a token that
+// names a member of Object.prototype makes no row. Like upstream it fails on
+// values that are not strings.
 func CountPattern(ctx context.Context, data []jsval.Value, p CountPatternParams) ([]jsval.Value, error) {
 	pattern := p.Pattern
 	if pattern == "" {
@@ -84,7 +85,7 @@ func CountPattern(ctx context.Context, data []jsval.Value, p CountPatternParams)
 		}
 		v := p.Field.Apply(t)
 		if !v.IsStr() {
-			return nil, fmt.Errorf("countpattern: value of %q is %s, not a string", p.Field.Name, v.Kind())
+			return nil, tokenizeTypeError(v, p.Case)
 		}
 		text := v.StrValue()
 		if conv != nil {
@@ -133,6 +134,26 @@ func CountPattern(ctx context.Context, data []jsval.Value, p CountPatternParams)
 		out = append(out, jsval.Obj(o))
 	}
 	return out, nil
+}
+
+// tokenizeTypeError is the TypeError of upstream's tokenize for a value that
+// is no string: the case conversion it calls first, else text.match.
+func tokenizeTypeError(v jsval.Value, tcase string) error {
+	method := "match"
+	switch tcase {
+	case "upper":
+		method = "toUpperCase"
+	case "lower":
+		method = "toLowerCase"
+	}
+	if v.IsNullish() {
+		of := "undefined"
+		if v.IsNull() {
+			of = "null"
+		}
+		return &jsval.Thrown{Name: "TypeError", Msg: "Cannot read properties of " + of + " (reading '" + method + "')"}
+	}
+	return &jsval.Thrown{Name: "TypeError", Msg: "text." + method + " is not a function"}
 }
 
 // newCountPattern compiles one of the operator's patterns under ctx, paid

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"unicode/utf8"
 
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
@@ -46,6 +47,9 @@ func Nest(ctx context.Context, tuples []jsval.Value, keys []Accessor, str func(j
 	var err error
 	rootNode.Children, rootNode.Data, err = nestLevel(&m, tuples, keys, str, 0, jsval.Undefined, false)
 	if err != nil {
+		return nil, nil, err
+	}
+	if err := valuesChildren(&m, rootNode); err != nil {
 		return nil, nil, err
 	}
 	if err := finish(&m, rootNode); err != nil {
@@ -96,6 +100,11 @@ func nestLevel(m *budget.Meter, items []jsval.Value, keys []Accessor, str func(j
 			}
 			k := str(get(it))
 			gi, ok := index[k]
+			if !ok && jsval.ObjectPrototypeHas(k) {
+				// `values = valuesByKey[keyValue]` of a plain object finds
+				// Object.prototype's member of that name
+				return nil, jsval.Undefined, &jsval.Thrown{Name: "TypeError", Msg: "values.push is not a function"}
+			}
 			if !ok {
 				if jsval.ObjectPrototypeHas(k) {
 					// valuesByKey[keyValue] of a plain object is the member
@@ -124,6 +133,112 @@ func nestLevel(m *budget.Meter, items []jsval.Value, keys []Accessor, str func(j
 	}
 	o.Set("values", jsval.Arr(values))
 	return nodes, jsval.Obj(o), nil
+}
+
+// valuesChildren gives the leaves of a nest the children d3-hierarchy finds
+// in them: vega builds the tree with hierarchy(root, n => n.values), which
+// reads `values` of every node's datum, an input tuple's too. A tuple with
+// a `values` member has the elements of Array.from(values) as children (a
+// string's code points, an array-like's members), each read the same way
+// in turn; a datum that is null or undefined is the TypeError of reading
+// its `values`. Each node made is a step of work, and the tree stays within
+// MaxNodes as it is built: shared arrays in the data cannot make it grow
+// past the bound.
+func valuesChildren(m *budget.Meter, root *Node) error {
+	count := 0
+	var err error
+	root.eachBefore(func(n *Node) {
+		count++
+		if err != nil {
+			return
+		}
+		if count > MaxNodes {
+			err = ErrTooLarge
+			return
+		}
+		if n.Children != nil {
+			return // an internal node the nest made: its values are its children
+		}
+		d := n.Data
+		if d.IsNullish() {
+			err = &jsval.Thrown{Name: "TypeError", Msg: "Cannot read properties of " + d.Kind().String() + " (reading 'values')"}
+			return
+		}
+		v := jsval.Undefined
+		if o := d.ObjValue(); o != nil {
+			v = o.Prop("values")
+		}
+		if !v.IsTruthy() {
+			return
+		}
+		kids, e := arrayFrom(v, MaxNodes-count)
+		if e != nil {
+			err = e
+			return
+		}
+		if e := m.Work(int64(1 + len(kids))); e != nil {
+			err = e
+			return
+		}
+		if len(kids) == 0 {
+			return
+		}
+		n.Children = make([]*Node, len(kids))
+		for i, k := range kids {
+			n.Children[i] = &Node{Data: k}
+		}
+	})
+	return err
+}
+
+// arrayFrom is Array.from(v) of a truthy v: an array's elements, a string's
+// code points (a lone surrogate on its own), an object's array-like members,
+// and nothing for a number, boolean or date. More than room elements is
+// ErrTooLarge, before any is read.
+func arrayFrom(v jsval.Value, room int) ([]jsval.Value, error) {
+	switch v.Kind() {
+	case jsval.KindArr:
+		if v.Len() > room {
+			return nil, ErrTooLarge
+		}
+		return v.Items(), nil
+	case jsval.KindStr:
+		s := v.StrValue()
+		if len(s) > room { // at least one byte a code point
+			n := utf8.RuneCountInString(s)
+			if n > room {
+				return nil, ErrTooLarge
+			}
+		}
+		var out []jsval.Value
+		for len(s) > 0 {
+			n := wtf8Len(s)
+			out = append(out, jsval.Str(s[:n]))
+			s = s[n:]
+		}
+		return out, nil
+	case jsval.KindObj:
+		a, _ := jsval.ToArrayLike(v)
+		if a.Len() > int64(room) {
+			return nil, ErrTooLarge
+		}
+		out := make([]jsval.Value, a.Len())
+		for i := range out {
+			out[i] = a.At(int64(i))
+		}
+		return out, nil
+	}
+	return nil, nil
+}
+
+// wtf8Len is the length in bytes of the code point s starts with: a UTF-8
+// sequence, or the three bytes of a lone surrogate, or one invalid byte.
+func wtf8Len(s string) int {
+	if len(s) >= 3 && s[0] == 0xED && s[1] >= 0xA0 && s[1] <= 0xBF && s[2] >= 0x80 && s[2] <= 0xBF {
+		return 3
+	}
+	_, n := utf8.DecodeRuneInString(s)
+	return n
 }
 
 // jsKeyOrder returns indices into names in the order a JavaScript for-in loop

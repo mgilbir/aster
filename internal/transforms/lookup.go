@@ -12,7 +12,8 @@ func errUnknownOp(op string) error { return fmt.Errorf("unknown aggregate op %q"
 
 // LookupIndex maps string-coerced key values to tuples of a secondary
 // dataset (vega-transforms' TupleIndex). When several tuples share a key the
-// last one wins.
+// last one wins. A key "__proto__" is never found: upstream's fastmap sets
+// its object's prototype with it and looks keys up as own properties.
 type LookupIndex struct {
 	m    map[string]jsval.Value
 	keys Keys
@@ -50,12 +51,14 @@ type LookupParams struct {
 	Index *LookupIndex
 	// Fields read the lookup key from each primary tuple.
 	Fields []Field
-	// Values, when non-empty, copy those fields of the matched tuple; otherwise
-	// the whole matched tuple is stored.
+	// Values, when not nil, copy those fields of the matched tuple (none for
+	// an empty list, which upstream's `if (values)` takes as given);
+	// otherwise the whole matched tuple is stored.
 	Values []Field
 	// As names the outputs: one per Field without Values, Fields*Values with
 	// them (for each field, all values). With Values and a single field it
-	// defaults to the value accessors' names.
+	// defaults to the value accessors' names. Nil is absent; an empty list
+	// is given (and names nothing: a field past its end is "undefined").
 	As []string
 	// Default is stored on a miss (upstream: null when unset).
 	Default jsval.Value
@@ -138,20 +141,20 @@ func Lookup(ctx context.Context, data []jsval.Value, p LookupParams) ([]jsval.Va
 	if p.Exact {
 		return lookupExact(ctx, data, p)
 	}
-	if m > 0 {
-		if n > 1 && len(as) == 0 {
+	if p.Values != nil {
+		if n > 1 && as == nil {
 			return nil, errors.New("Multi-field lookup requires explicit \"as\" parameter.")
 		}
-		if len(as) > 0 && len(as) != n*m {
+		if as != nil && len(as) != n*m {
 			return nil, errors.New("The \"as\" parameter has too few output field names.")
 		}
-		if len(as) == 0 {
+		if as == nil {
 			as = make([]string, m)
 			for j, v := range p.Values {
 				as[j] = v.Key()
 			}
 		}
-	} else if len(as) == 0 {
+	} else if as == nil {
 		return nil, errors.New("Missing output field names.")
 	}
 	for ti, t := range data {
@@ -169,13 +172,15 @@ func Lookup(ctx context.Context, data []jsval.Value, p LookupParams) ([]jsval.Va
 		k := 0
 		for i := 0; i < n; i++ {
 			v, ok := p.Index.Get(p.Fields[i].Apply(t))
-			if m == 0 {
+			if p.Values == nil {
 				if !ok {
 					v = def
 				}
+				name := "undefined" // t[as[i]] past the end of as
 				if i < len(as) {
-					o.Set(as[i], v)
+					name = as[i]
 				}
+				o.Set(name, v)
 				continue
 			}
 			for j := 0; j < m; j++ {

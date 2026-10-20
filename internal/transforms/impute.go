@@ -50,7 +50,17 @@ func imputeReduce(w jsval.Walker, method string, vals []jsval.Value) jsval.Value
 		}
 		return jsval.Num(sum / float64(n))
 	case "median":
-		nums := numbersOf(len(vals), func(i int) jsval.Value { return vals[i] })
+		// d3-array's numbers: an empty string is 0 here, where
+		// vega-statistics' numbers skips it
+		nums := make([]float64, 0, len(vals))
+		for _, v := range vals {
+			if v.IsNullish() {
+				continue
+			}
+			if x := jsval.ToNumber(v); x >= x {
+				nums = append(nums, x)
+			}
+		}
 		slices.Sort(nums)
 		if q, ok := QuantileSorted(nums, 0.5); ok {
 			return jsval.Num(q)
@@ -84,6 +94,14 @@ func imputeReduce(w jsval.Walker, method string, vals []jsval.Value) jsval.Value
 // tuple wins for the "present" test and for the statistics. Imputed tuples
 // have fields _impute, the group-by values, the key and the field, in that
 // order. Statistics are computed once per group and reused for its gaps.
+//
+// Upstream keeps the key positions and the groups in plain objects keyed by
+// their text (`kMap[k] || ...`, `gMap[gKey]`), and Impute reproduces what
+// that does with a name Object.prototype has: a key so named finds that
+// member, no position, and its tuple is in no cell; a group so named finds
+// the member and writes its tuples into it, so it is never imputed, and for
+// "__proto__" the member is Object.prototype itself, whose index properties
+// every other group's empty cells then read.
 func Impute(ctx context.Context, data []jsval.Value, p ImputeParams) ([]jsval.Value, error) {
 	method := p.Method
 	if method == "" {
@@ -118,6 +136,9 @@ func Impute(ctx context.Context, data []jsval.Value, p ImputeParams) ([]jsval.Va
 			kMap[ks] = i + 1
 		}
 	}
+	// proto holds what the tuples of a group named "__proto__" wrote onto
+	// Object.prototype, by key position: the value an empty cell reads.
+	var proto map[int]jsval.Value
 	var groups []*group
 	cells := 0
 	gMap := map[string]*group{}
@@ -128,16 +149,14 @@ func Impute(ctx context.Context, data []jsval.Value, p ImputeParams) ([]jsval.Va
 		}
 		k := p.Key.Apply(t)
 		ks := keys.String(k)
-		j := kMap[ks]
-		// `kMap[k] || (kMap[k] = domain.push(k))`: a name every object
-		// inherits that kMap holds no entry for reads as that member, truthy,
-		// so the key joins no domain and group[j-1] is group['NaN'], no cell.
-		noCell := j == 0 && jsval.ObjectPrototypeHas(ks)
-		if j == 0 && !noCell {
+		j, own := kMap[ks]
+		if !own && !jsval.ObjectPrototypeHas(ks) {
 			domain = append(domain, k)
 			j = len(domain)
 			kMap[ks] = j
 		}
+		// j is 0 for a key Object.prototype has: `group[NaN] = t` below
+		// puts the tuple in no cell
 		sb.Reset()
 		for gi, f := range p.GroupBy {
 			if gi > 0 {
@@ -147,18 +166,23 @@ func Impute(ctx context.Context, data []jsval.Value, p ImputeParams) ([]jsval.Va
 				sb.WriteString(keys.String(v))
 			}
 		}
-		if jsval.ObjectPrototypeHas(sb.String()) {
-			// gMap[gKey] finds the inherited member, a truthy "group" that
-			// the tuple is written into: no group of ours holds it.
-			continue
-		}
-		g := gMap[sb.String()]
+		gKey := sb.String()
+		g := gMap[gKey]
 		if g == nil {
+			if jsval.ObjectPrototypeHas(gKey) {
+				if gKey == "__proto__" && j > 0 {
+					if proto == nil {
+						proto = map[int]jsval.Value{}
+					}
+					proto[j-1] = t
+				}
+				continue
+			}
 			g = &group{values: dimValues(p.GroupBy, t)}
-			gMap[sb.String()] = g
+			gMap[gKey] = g
 			groups = append(groups, g)
 		}
-		if noCell {
+		if j == 0 {
 			continue
 		}
 		if grow := j - len(g.vals); grow > 0 {
@@ -178,6 +202,14 @@ func Impute(ctx context.Context, data []jsval.Value, p ImputeParams) ([]jsval.Va
 		}
 		g.vals[j-1] = t
 	}
+	// cell is group[j]: its own element, or for a hole what Object.prototype
+	// holds at that index.
+	cell := func(g *group, j int) jsval.Value {
+		if j < len(g.vals) && !g.vals[j].IsUndefined() {
+			return g.vals[j]
+		}
+		return proto[j]
+	}
 
 	missing := 0
 	for _, g := range groups {
@@ -191,7 +223,7 @@ func Impute(ctx context.Context, data []jsval.Value, p ImputeParams) ([]jsval.Va
 	for _, g := range groups {
 		value := jsval.Num(math.NaN())
 		for j, kVal := range domain {
-			if j < len(g.vals) && !g.vals[j].IsUndefined() {
+			if !cell(g, j).IsNullish() {
 				continue
 			}
 			if err := poll(ctx, len(out)); err != nil {
@@ -221,9 +253,11 @@ func Impute(ctx context.Context, data []jsval.Value, p ImputeParams) ([]jsval.Va
 						return nil, errors.New("TypeError: Cannot convert undefined or null to object")
 					}
 				} else {
+					// d3's reducers iterate the group as an array, so its
+					// holes read through to Object.prototype too
 					present := make([]jsval.Value, 0, len(g.vals))
-					for _, tv := range g.vals {
-						if !tv.IsUndefined() {
+					for j := range g.vals {
+						if tv := cell(g, j); !tv.IsUndefined() {
 							present = append(present, p.Field.Get(tv))
 						}
 					}

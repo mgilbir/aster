@@ -25,12 +25,11 @@ type Common struct {
 	// Field sizes nodes: values are summed up the tree. When nil the leaves
 	// are counted instead.
 	Field Accessor
-	// Sort orders siblings, after Field has been applied.
+	// Sort orders siblings, after Field has been applied. Ties go by the
+	// tuple ids of the nodes' data (`stableCompare(_.sort, d => d.data)`),
+	// which is the order they were ingested in, whatever order a sort
+	// upstream of the layout left them in.
 	Sort Compare
-	// TupleID, if set, returns a tuple's dataflow id (NaN when it has none).
-	// vega breaks comparator ties by ascending tuple id; without it ties keep
-	// their current order, which is the same for data in ingestion order.
-	TupleID func(jsval.Value) float64
 	// AsExact reports that As holds every output slot's name as upstream
 	// resolves them (`_.as || fields`, each as[i] the key it names): an
 	// empty one is the empty name.
@@ -73,7 +72,7 @@ func prepare(m *budget.Meter, root *Node, c Common) error {
 		return err
 	}
 	if c.Sort != nil {
-		cmp, id := c.Sort, c.TupleID
+		cmp := c.Sort
 		root.sortChildren(func(a, b *Node) int {
 			if err != nil {
 				return 0 // the sort is abandoned with the call
@@ -84,14 +83,7 @@ func prepare(m *budget.Meter, root *Node, c Common) error {
 			if r := cmp(a, b); r != 0 {
 				return r
 			}
-			if id != nil {
-				if d := id(a.Data) - id(b.Data); d < 0 {
-					return -1
-				} else if d > 0 {
-					return 1
-				}
-			}
-			return 0
+			return jsval.TupleIDOrder(a.Data, b.Data)
 		})
 	}
 	return err
@@ -152,18 +144,43 @@ func writeFields(m *budget.Meter, root *Node, props []prop, defaults, as []strin
 	}
 	var err error
 	root.each(func(n *Node) {
-		if err != nil || !n.Data.IsObjectLike() {
+		if err != nil {
 			return
 		}
 		if err = m.Work(int64(len(props))); err != nil {
 			return
 		}
 		o := jsval.Fields(n.Data)
+		if o == nil {
+			// `t[as[i]] = ...` where the datum is no object (a nest leaf's
+			// values can be anything): a primitive is a TypeError; a date
+			// or a pattern takes the property, which nothing reads
+			err = setOnPrimitive(n.Data, names[0])
+			return
+		}
 		for i, p := range props {
 			o.Set(names[i], p.get(n))
 		}
 	})
 	return err
+}
+
+// setOnPrimitive is the TypeError of setting the property name on v in
+// strict mode (jsval.FieldsFor's), nil for a value that is an object in
+// JavaScript.
+func setOnPrimitive(v jsval.Value, name string) error {
+	switch v.Kind() {
+	case jsval.KindNull, jsval.KindUndefined:
+		of := "undefined"
+		if v.IsNull() {
+			of = "null"
+		}
+		return &jsval.Thrown{Name: "TypeError", Msg: "Cannot set properties of " + of + " (setting '" + name + "')"}
+	case jsval.KindStr, jsval.KindNum, jsval.KindBool:
+		kind := map[jsval.Kind]string{jsval.KindStr: "string", jsval.KindNum: "number", jsval.KindBool: "boolean"}[v.Kind()]
+		return &jsval.Thrown{Name: "TypeError", Msg: "Cannot create property '" + name + "' on " + kind + " '" + jsval.StringPrefix(v, jsval.MessageBytes) + "'"}
+	}
+	return nil
 }
 
 func size(dx, dy float64, s []float64) (float64, float64) {
@@ -230,10 +247,14 @@ func LayoutTree(ctx context.Context, t *Tree, p TreeParams) error {
 	if p.UniformSeparation {
 		sep = sepFuncs[1]
 	}
+	var err error
 	if method == "tidy" {
-		tidy(t.Root, sep, sz)
+		err = tidy(&m, t.Root, sep, sz)
 	} else {
-		cluster(t.Root, sep, sz)
+		err = cluster(&m, t.Root, sep, sz)
+	}
+	if err != nil {
+		return err
 	}
 	return writeFields(&m, t.Root, treeProps, treeNames, p.As, p.AsExact)
 }
@@ -302,7 +323,9 @@ func LayoutPartition(ctx context.Context, t *Tree, p PartitionParams) error {
 	if p.Padding != nil {
 		pad = *p.Padding
 	}
-	partition(t.Root, dx, dy, pad, p.Round)
+	if err := partition(&m, t.Root, dx, dy, pad, p.Round); err != nil {
+		return err
+	}
 	return writeFields(&m, t.Root, rectProps, rectNames, p.As, p.AsExact)
 }
 
@@ -390,7 +413,9 @@ func LayoutTreemap(ctx context.Context, t *Tree, p TreemapParams) error {
 	if err := prepare(&m, t.Root, p.Common); err != nil {
 		return err
 	}
-	cfg.layout(t.Root)
+	if err := cfg.layout(&m, t.Root); err != nil {
+		return err
+	}
 	return writeFields(&m, t.Root, rectProps, rectNames, p.As, p.AsExact)
 }
 

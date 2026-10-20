@@ -1,7 +1,10 @@
 package transforms
 
 import (
+	"context"
 	"math"
+
+	"github.com/mgilbir/aster/internal/budget"
 
 	"github.com/mgilbir/aster/internal/jsval"
 )
@@ -32,21 +35,11 @@ type curvePoint struct {
 	y  float64
 }
 
-// maxSamplesOf is maxSamples of step bounds of any type.
-func maxSamplesOf(s StepsSpec) int {
-	minS, maxS := s.Min, s.Max
-	if !minS.IsTruthy() {
-		minS = jsval.Num(25)
-	}
-	if !maxS.IsTruthy() {
-		maxS = jsval.Num(200)
-	}
-	return maxSamples(jsval.ToNumber(minS), jsval.ToNumber(maxS))
-}
-
 // sampleCurveJS is sampleCurve(f, [lo, hi], s.Min, s.Max) with JavaScript's
-// operators; numbers take SampleCurve.
-func sampleCurveJS(w jsval.Walker, f func(float64) float64, lo, hi jsval.Value, s StepsSpec) ([]curvePoint, error) {
+// operators; numbers take SampleCurve. Its points are rows after base others,
+// reserved and charged as SampleCurve's are.
+func sampleCurveJS(ctx context.Context, f func(float64) float64, lo, hi jsval.Value, s StepsSpec, base int) ([]curvePoint, error) {
+	w := jsval.WalkerFor(ctx)
 	minS := s.Min
 	if !minS.IsTruthy() {
 		minS = jsval.Num(25)
@@ -56,7 +49,7 @@ func sampleCurveJS(w jsval.Walker, f func(float64) float64, lo, hi jsval.Value, 
 		maxS = jsval.Num(200)
 	}
 	if lo.IsNum() && hi.IsNum() && minS.IsNum() && maxS.IsNum() {
-		pts, err := SampleCurve(f, [2]float64{lo.NumValue(), hi.NumValue()}, minS.NumValue(), maxS.NumValue())
+		pts, err := SampleCurve(ctx, f, [2]float64{lo.NumValue(), hi.NumValue()}, minS.NumValue(), maxS.NumValue(), base)
 		if err != nil {
 			return nil, err
 		}
@@ -70,6 +63,11 @@ func sampleCurveJS(w jsval.Walker, f func(float64) float64, lo, hi jsval.Value, 
 	maxN := math.Max(minN, jsval.ToNumber(maxS))
 	if maxN > MaxSteps {
 		return nil, limitErr("steps", maxN, MaxSteps)
+	}
+	rows := newCurveRows(ctx, base, maxSamples(minN, maxN))
+	defer rows.release()
+	if err := rows.start(); err != nil {
+		return nil, err
 	}
 	point := func(x jsval.Value) curvePoint {
 		xn := jsval.ToNumber(x)
@@ -98,10 +96,14 @@ func sampleCurveJS(w jsval.Walker, f func(float64) float64, lo, hi jsval.Value, 
 		ys[i] = [2]float64{p.xn, p.y}
 	}
 	sy := curveScaleY(p0.y, ys)
-	budget := 8 * MaxSteps
+	m := budget.NewMeter(ctx)
+	left := 8 * MaxSteps
 	for len(next) > 0 {
-		if budget--; budget < 0 {
+		if left--; left < 0 {
 			return nil, limitErr("curve samples", 8*MaxSteps+1, 8*MaxSteps)
+		}
+		if err := m.Work(1); err != nil {
+			return nil, err
 		}
 		p1 := next[len(next)-1]
 		pm := point(jsval.Num(jsval.ToNumber(jsAdd(w, p0.x, p1.x)) / 2))
@@ -112,6 +114,9 @@ func sampleCurveJS(w jsval.Walker, f func(float64) float64, lo, hi jsval.Value, 
 			p0 = p1
 			prev = append(prev, p1)
 			next = next[:len(next)-1]
+		}
+		if err := rows.hold(len(prev), len(next)); err != nil {
+			return nil, err
 		}
 	}
 	return prev, nil

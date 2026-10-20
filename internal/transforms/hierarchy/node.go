@@ -174,12 +174,14 @@ func (n *Node) Descendants() []*Node {
 	return out
 }
 
-// sum sets Value to value(node) plus the values of the children.
+// sum sets Value to value(node) plus the values of the children, added last
+// to first as d3's node.sum adds them (`while (--i >= 0)`): the order shows
+// in the last bits of fractional values.
 func (n *Node) sum(value func(*Node) float64) {
 	n.eachAfter(func(node *Node) {
 		s := value(node)
-		for _, c := range node.Children {
-			s += c.Value
+		for i := len(node.Children) - 1; i >= 0; i-- {
+			s += node.Children[i].Value
 		}
 		node.Value = s
 	})

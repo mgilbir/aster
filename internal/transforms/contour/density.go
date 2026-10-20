@@ -75,12 +75,12 @@ func Density(ctx context.Context, data []jsval.Value, p DensityParams, counts bo
 		dx, dy = p.Size[0], p.Size[1]
 	}
 	if !(dx >= 0 && dy >= 0) {
-		return Grid{}, errors.New("contour: invalid size")
+		return Grid{}, errInvalidSize
 	}
 	k := 2
 	if p.CellSize != 0 {
 		if !(p.CellSize >= 1) {
-			return Grid{}, errors.New("contour: invalid cell size")
+			return Grid{}, errors.New("invalid cell size")
 		}
 		kf := math.Floor(jsmath.Log(p.CellSize) / math.Ln2)
 		if kf > 30 {
@@ -96,7 +96,7 @@ func Density(ctx context.Context, data []jsval.Value, p DensityParams, counts bo
 	case 2:
 		bw = [2]float64{p.Bandwidth[0], p.Bandwidth[1]}
 	default:
-		return Grid{}, errors.New("contour: invalid bandwidth")
+		return Grid{}, errors.New("invalid bandwidth")
 	}
 
 	rx := int(toInt32(radius(bw[0], data, x))) >> k // blur x-radius

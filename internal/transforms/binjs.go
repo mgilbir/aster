@@ -56,8 +56,8 @@ func num(v jsval.Value) float64 { return jsval.ToNumber(v) }
 // BinJS is bin(_) for parameters of any type (see BinSpec): the start, stop
 // and step it returns, numbers unless the specification's values are kept
 // (a step, a step of steps, the extent with nice off). The bounds Bin
-// enforces hold here too: a maxbins above MaxBins and a base of at most 1
-// are refused, and the step search is bounded.
+// enforces hold here too: a maxbins above MaxBins is refused, and so is a
+// step search upstream never ends.
 func BinJS(w jsval.Walker, s BinSpec) (start, stop, step jsval.Value, err error) {
 	maxb := s.MaxBins
 	if !maxb.IsTruthy() {
@@ -99,10 +99,7 @@ func BinJS(w jsval.Walker, s BinSpec) (start, stop, step jsval.Value, err error)
 			step = s.Steps[k]
 		}
 	default:
-		if !(baseN > 1) || math.IsInf(baseN, 1) {
-			// See Bin: upstream computes NaN or searches forever.
-			return jsval.Undefined, jsval.Undefined, jsval.Undefined, errBinBase(baseN)
-		}
+		// Any base is binned with as upstream bins with it (see Bin).
 		level := math.Ceil(jsmath.Log(maxbN) / logb)
 		minstep := 0.0
 		if s.MinStep.IsTruthy() {
@@ -110,7 +107,7 @@ func BinJS(w jsval.Walker, s BinSpec) (start, stop, step jsval.Value, err error)
 		}
 		st := math.Max(minstep, jsmath.Pow(baseN, binJSRound(jsmath.Log(spanN)/logb)-level))
 		for n := 0; math.Ceil(spanN/st) > maxbN; n++ {
-			if n > maxStepSearch || st == 0 {
+			if n > maxStepSearch || !(baseN > 1) || st == 0 {
 				return jsval.Undefined, jsval.Undefined, jsval.Undefined, errBinSearch(maxbN, baseN)
 			}
 			st *= baseN

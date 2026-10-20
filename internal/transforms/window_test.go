@@ -223,13 +223,18 @@ func TestWindowErrors(t *testing.T) {
 	for _, ops := range [][]WindowOpSpec{
 		{{Op: "ntile", Param: 0}},
 		{{Op: "nth_value", Field: FieldOf("v"), Param: math.NaN()}},
-		{{Op: "lag"}},
+		{{Op: "first_value"}}, // field(...) of a null field
 		{{Op: "sum"}},
 		{{Op: "bogus", Field: FieldOf("v")}},
 	} {
 		if _, err := Window(context.Background(), data, WindowParams{Ops: ops}); err == nil {
 			t.Errorf("%v: want error", ops[0].Op)
 		}
+	}
+	// A null field fails where the operation reads it, as upstream's
+	// field(...) does: lag reads none on the first row.
+	if _, err := Window(context.Background(), data, WindowParams{Ops: []WindowOpSpec{{Op: "lag"}}}); err != nil {
+		t.Errorf("lag of one row: %v", err)
 	}
 }
 

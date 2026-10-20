@@ -2,6 +2,7 @@ package transforms
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"slices"
@@ -40,6 +41,9 @@ const (
 	opArgmax
 	opExponential
 	opExponentialB
+	// opCountValues is upstream's internal __count__ (pivot's count): the
+	// missing and valid values, so a NaN is not counted.
+	opCountValues
 )
 
 var opKinds = map[string]opKind{
@@ -50,6 +54,8 @@ var opKinds = map[string]opKind{
 	"ci0": opCI0, "ci1": opCI1, "median": opMedian, "q1": opQ1, "q3": opQ3,
 	"min": opMin, "max": opMax, "argmin": opArgmin, "argmax": opArgmax,
 	"exponential": opExponential, "exponentialb": opExponentialB,
+	// not one of ValidAggregateOps, but in upstream's table all the same
+	"__count__": opCountValues,
 }
 
 // ValidAggregateOps lists the operation names aggregate, joinaggregate and
@@ -82,6 +88,9 @@ func (k opKind) index() int {
 	}
 	return 0
 }
+
+// errNullAggregateField is upstream's error for a measure with no field.
+var errNullAggregateField = errors.New("Null aggregate field specified.")
 
 // Measure is one aggregation: an operation over a field with an optional
 // parameter (the decay of exponential) and output name.
@@ -154,8 +163,10 @@ type measureSet struct {
 	ctx context.Context
 	// w walks the values the measures compare (min, max, argmin, argmax
 	// of arrays compare their String): the call's Walker.
-	w   jsval.Walker
-	err error
+	w jsval.Walker
+	// keys is String(v) of the call.
+	keys Keys
+	err  error
 	// names lists output field names in the order they were requested.
 	names []string
 }
@@ -164,6 +175,7 @@ type measureSet struct {
 func (s *measureSet) setContext(ctx context.Context) {
 	s.ctx = ctx
 	s.w = jsval.WalkerFor(ctx)
+	s.keys = keysOf(ctx)
 }
 
 // newMeasureSet compiles measures. Upstream groups the measures of one field
@@ -172,15 +184,17 @@ func newMeasureSet(ms []Measure, rnd Rand) (*measureSet, error) {
 	if rnd == nil {
 		rnd = DefaultRand
 	}
-	s := &measureSet{countOnly: true, rand: rnd, ctx: context.Background()}
+	s := &measureSet{countOnly: true, rand: rnd}
+	s.setContext(context.Background())
 	byName := map[string]*measureGroup{}
 	for _, m := range ms {
 		kind, ok := opKinds[m.Op]
+		// Aggregate.init checks the field before it looks the op up
+		if m.Field.IsNil() && (m.Op != "count" || m.CountMeasure) {
+			return nil, errNullAggregateField
+		}
 		if !ok {
 			return nil, fmt.Errorf("unknown aggregate op %q", m.Op)
-		}
-		if m.Field.IsNil() && (m.Op != "count" || m.CountMeasure) {
-			return nil, fmt.Errorf("Null aggregate field specified.")
 		}
 		name := m.Name()
 		s.names = append(s.names, name)
@@ -274,7 +288,7 @@ func (s *measureSet) add(c *cell, t jsval.Value) {
 		return
 	}
 	for i, g := range s.groups {
-		g.add(s.w, &c.aggs[i], g.field.Get(t), t)
+		g.add(s, &c.aggs[i], g.field.Get(t), t)
 	}
 }
 
@@ -291,7 +305,8 @@ func (s *measureSet) rem(c *cell, t jsval.Value) {
 
 func isEmptyString(v jsval.Value) bool { return v.IsStr() && v.StrValue() == "" }
 
-func (g *measureGroup) add(w jsval.Walker, m *mstate, v, t jsval.Value) {
+func (g *measureGroup) add(s *measureSet, m *mstate, v, t jsval.Value) {
+	w := s.w
 	if v.IsNullish() || isEmptyString(v) {
 		m.missing++
 		return
@@ -413,7 +428,8 @@ func (s *measureSet) write(c *cell, t *jsval.Object) {
 // It is reproduced faithfully, including a quirk that is visible in output:
 // the extent, quartile and interval caches share ONE "current accessor" slot
 // (owner) and none of them is invalidated when tuples come and go. Only
-// values(), called before each output is written, clears the owner. So when
+// values() clears the owner: called before a cell's outputs are written, and
+// by the values and distinct outputs. So when
 // median/q1/q3/ci run before min/max/argmin/argmax for the same field, the
 // latter find the owner already set and reuse an extent computed for an earlier
 // row (window frames) or an earlier field (aggregate cells).
@@ -421,7 +437,7 @@ type storeMemo struct {
 	owner  int // 1-based measureGroup index of the accessor last memoised, 0 for none
 	ext    [2]jsval.Value
 	extOK  bool
-	q      [3]float64
+	q      [3]jsval.Value
 	qOK    bool
 	ci     [2]float64
 	ciOK   bool // the interval has been computed at least once
@@ -450,12 +466,16 @@ func (g *measureGroup) write(s *measureSet, id int, m *mstate, c *cell, t *jsval
 		}
 		return memo.ext
 	}
-	quart := func() [3]float64 {
+	quart := func() [3]jsval.Value {
 		if readsHoles() {
-			return [3]float64{math.NaN(), math.NaN(), math.NaN()}
+			return [3]jsval.Value{}
 		}
 		if memo.owner != id || !memo.qOK {
-			memo.q = Quartiles(data, get)
+			q, err := Quartiles(s.ctx, data, get)
+			if err != nil {
+				s.err = err
+			}
+			memo.q = q
 			memo.qOK, memo.owner = true, id
 		}
 		return memo.q
@@ -465,7 +485,7 @@ func (g *measureGroup) write(s *measureSet, id int, m *mstate, c *cell, t *jsval
 			return [2]float64{}, false
 		}
 		if memo.owner != id || !memo.ciOK {
-			lo, hi, ok, err := BootstrapCICtx(s.ctx, data, 1000, 0.05, get, s.rand)
+			lo, hi, ok, err := BootstrapCI(s.ctx, data, 1000, 0.05, get, s.rand)
 			if err != nil {
 				s.err = err
 			}
@@ -478,6 +498,8 @@ func (g *measureGroup) write(s *measureSet, id int, m *mstate, c *cell, t *jsval
 		var v jsval.Value
 		switch o.kind {
 		case opValues:
+			// TupleStore.values() forgets the memo's accessor
+			memo.owner = 0
 			if s.store != nil {
 				v = s.store.share(t, o.name)
 			} else {
@@ -487,6 +509,8 @@ func (g *measureGroup) write(s *measureSet, id int, m *mstate, c *cell, t *jsval
 			v = jsval.Int(c.num)
 		case opMissing:
 			v = jsval.Int(m.missing)
+		case opCountValues:
+			v = jsval.Int(m.missing + m.valid)
 		case opValid:
 			v = jsval.Int(m.valid)
 		case opSum:
@@ -516,16 +540,23 @@ func (g *measureGroup) write(s *measureSet, id int, m *mstate, c *cell, t *jsval
 				v = jsval.Num(math.Sqrt(math.Max(0, m.dev) / (valid * (valid - 1))))
 			}
 		case opDistinct:
+			// TupleStore.distinct reads values(), which forgets the memo's
+			// accessor: a later min, max, arg or quartile of another field
+			// computes its own.
+			memo.owner = 0
 			if readsHoles() {
 				break
 			}
+			// `if (!hasOwnProperty(map, s)) { map[s] = 1; ++count }` over
+			// a plain object: "__proto__" is never an own key, so every
+			// occurrence of it counts
 			seen := make(map[string]struct{}, 16)
 			protos := 0
 			for i := len(data) - 1; i >= 0; i-- {
 				// TupleStore.distinct tests hasOwnProperty(map, s) on a plain
 				// object: `map['__proto__'] = 1` sets no property, so every
 				// "__proto__" value counts as a new one.
-				if k := keysOf(s.ctx).String(get(data[i])); k == ProtoKey {
+				if k := s.keys.String(get(data[i])); k == ProtoKey {
 					protos++
 				} else {
 					seen[k] = struct{}{}
@@ -545,9 +576,7 @@ func (g *measureGroup) write(s *measureSet, id int, m *mstate, c *cell, t *jsval
 			case opQ3:
 				idx = 2
 			}
-			if f := q[idx]; !math.IsNaN(f) {
-				v = jsval.Num(f)
-			}
+			v = q[idx] // undefined for no values, NaN as d3 computes it
 		case opMin:
 			if m.min.IsNum() && math.IsNaN(m.min.NumValue()) {
 				m.min = jsval.Undefined

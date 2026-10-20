@@ -5,6 +5,7 @@ import (
 	"math"
 	"slices"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsmath"
 	"github.com/mgilbir/aster/internal/jsval"
 )
@@ -40,8 +41,12 @@ func Loess(ctx context.Context, data []jsval.Value, p LoessParams) ([]jsval.Valu
 	if len(p.As) > 1 {
 		as1 = p.As[1]
 	}
+	groups, err := regressionGroups(keysOf(ctx), data, p.GroupBy)
+	if err != nil {
+		return nil, err
+	}
 	var out []jsval.Value
-	for _, g := range regressionGroups(keysOf(ctx), data, p.GroupBy) {
+	for _, g := range groups {
 		pts, err := LoessFit(ctx, g.Tuples, p.X.Get, p.Y.Get, bw)
 		if err != nil {
 			return nil, err
@@ -72,7 +77,11 @@ func loessToInt32(f float64) int { return int(jsmath.ToInt32(f)) }
 // with two robustness iterations. Where the neighbourhood runs past the data
 // (bandwidth above 1), upstream reads undefined and the fit is NaN; so here.
 func LoessFit(ctx context.Context, data []jsval.Value, x, y Accessor, bandwidth float64) ([][2]float64, error) {
+	x, cancelled := meteredAccessor(ctx, x)
 	ps := regressionPoints(data, x, y, true)
+	if err := cancelled(); err != nil {
+		return nil, err
+	}
 	xv, yv, ux, uy := ps.x, ps.y, ps.ux, ps.uy
 	n := len(xv)
 	bw := max(2, loessToInt32(bandwidth*float64(n)))
@@ -88,10 +97,12 @@ func LoessFit(ctx context.Context, data []jsval.Value, x, y Accessor, bandwidth 
 		}
 		return a[i]
 	}
+	m := budget.NewMeter(ctx)
 	for iter := 0; iter <= loessMaxIters; iter++ {
 		i0, i1 := 0, bw-1
 		for i := 0; i < n; i++ {
-			if err := poll(ctx, i); err != nil {
+			// each point weighs its whole neighbourhood: bw steps
+			if err := m.Work(int64(i1 - i0 + 2)); err != nil {
 				return nil, err
 			}
 			dx := xv[i]

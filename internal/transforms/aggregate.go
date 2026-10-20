@@ -15,8 +15,8 @@ type AggregateParams struct {
 	// their accessor names.
 	GroupBy []Field
 	// Measures are the aggregations (upstream's fields/ops/aggregate_params/as
-	// arrays zipped). Nil means a single count, empty none at all (fields
-	// and ops given as empty lists).
+	// arrays zipped). Nil means a single count, as upstream's absent fields
+	// and ops do; an empty list means none.
 	Measures []Measure
 	// Cross generates the full cross product of the group-by values,
 	// including empty cells (ignored for fewer than two dimensions). Upstream's
@@ -155,7 +155,8 @@ func Aggregate(ctx context.Context, data []jsval.Value, p AggregateParams) (res 
 // crossCells adds an empty cell for every combination of the group-by values
 // seen that has no cell yet (upstream Aggregate.cross). Domain values are kept
 // in JavaScript object-key order: integer-like strings ascending, then the
-// rest in first-seen order.
+// rest in first-seen order; upstream keeps them in a plain object, where
+// "__proto__" is no key.
 func crossCells(ctx context.Context, dims []Field, dnames []string, cells map[string]*aggCell,
 	order []*aggCell, newCell func(string, jsval.Value) *aggCell) error {
 	keys := keysOf(ctx)

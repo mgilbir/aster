@@ -477,7 +477,16 @@ func projectionInert(p P, scope *Scope) jsval.Value {
 	return jsval.Undefined
 }
 
-func (s *Scope) projectionRef(name string) P { return s.scaleRef(name) }
+// projectionRefOf is scope.projectionRef(value) of a transform's projection
+// parameter, whatever its type: `scales[name]` by the name's text, and one
+// not found named as stringValue names it (null unquoted).
+func (s *Scope) projectionRefOf(v jsval.Value) P {
+	if e := s.findScale(specText(v)); e != nil {
+		return e
+	}
+	perr("Unrecognized scale name: %s", stringValue(v))
+	return nil
+}
 
 // -- guides --------------------------------------------------------------------
 

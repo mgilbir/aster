@@ -136,7 +136,7 @@ func parseParameter(def *paramDef, spec jsval.Value, scope *Scope) P {
 	case def.typ == "param":
 		return parseSubParameters(def, spec, scope)
 	case def.typ == "projection":
-		return scope.projectionRef(value.AsString())
+		return scope.projectionRefOf(value)
 	}
 	if def.array && !isSignalObj(value) {
 		items := listOf(value, "value", "map")
@@ -247,6 +247,11 @@ func parseSubParameters(def *paramDef, spec jsval.Value, scope *Scope) P {
 }
 
 func parseSubParameter(def *paramDef, value jsval.Value, scope *Scope) P {
+	if value.IsNullish() && len(def.params) > 0 && def.params[0].key != nil && def.params[0].key.Len() > 0 {
+		// `pdef.key[k] !== value[k]`: the first key read of null is a
+		// TypeError
+		perr("Cannot read properties of %s (reading '%s')", value.Kind(), def.params[0].key.KeyAt(0))
+	}
 	var match *paramDef
 	for _, pdef := range def.params {
 		ok := true

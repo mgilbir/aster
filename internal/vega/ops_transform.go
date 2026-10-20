@@ -136,6 +136,26 @@ func (p *opParams) num(name string, def float64) float64 {
 
 func (p *opParams) bool(name string) bool { return p.Value(name).IsTruthy() }
 
+// isFalse is `_[name] === false`.
+func (p *opParams) isFalse(name string) bool {
+	v := p.Value(name)
+	return v.IsBool() && !v.BoolValue()
+}
+
+// truthy is `_[name]` read as a condition (`_.x || default`): a parameter
+// that is present and, if a value, truthy. A list (a resolved array, a
+// field list) is an array, which is truthy even when empty.
+func (p *opParams) truthy(name string) bool {
+	x, ok := p.vals.lookup(name)
+	if !ok || x == nil {
+		return false
+	}
+	if v, ok := x.(jsval.Value); ok {
+		return v.IsTruthy()
+	}
+	return true
+}
+
 // nums reads a list of numbers; null entries are NaN.
 func (p *opParams) nums(name string) []float64 {
 	l := p.list(name)
@@ -485,7 +505,11 @@ func init() {
 		}
 		pp := transforms.PivotParams{
 			GroupBy: p.fields("groupby"), Field: p.field("field"), Value: p.field("value"),
-			Op: pivotOp(p), Limit: clampInt(p.orNumber("limit", 0)), Rand: n.g.view.randSource(),
+			Op: pivotOp(p), Rand: n.g.view.randSource(),
+		}
+		if l := p.orValue(jsval.Num(0), "limit"); l.IsTruthy() { // `limit ? list.slice(0, limit) : list`
+			n := jsval.ToNumber(l)
+			pp.Limit = &n
 		}
 		if kf := p.field("key"); !kf.IsNil() {
 			pp.Key = kf
@@ -527,7 +551,7 @@ func init() {
 		x, y := p.field("x"), p.field("y")
 		rp := transforms.RegressionParams{
 			X: x, Y: y, GroupBy: p.fields("groupby"),
-			Params: p.bool("params"), Strict: true,
+			Params: p.bool("params"), Strict: true, Warn: n.g.warn,
 		}
 		as := p.asPair(x.Key(), y.Key())
 		rp.As = as[:]
@@ -606,11 +630,14 @@ func init() {
 			zone = n.g.view.zone
 		}
 		tp := transforms.TimeUnitParams{
-			Field: p.field("field"), NoInterval: !p.Value("interval").IsTruthy() && p.has("interval"),
+			Field: p.field("field"), NoInterval: p.isFalse("interval"),
 			Units: timeUnitUnits(p), UnitsStrict: timeUnitStrict(p), UnitsGiven: paramTruthy(p.Get("units")), // `_.units ? ... : timeBin(...)`
 			StepRaw: p.Value("step"), StepRawGiven: true, MaxBins: timeUnitMaxBins(p), MaxBinsExact: true,
 			Extent: p.pair2("extent"), InferUnits: p.bool("inferUnits"), Zone: zone,
 			As: p.asPair("unit0", "unit1"), AsExact: true,
+		}
+		if tp.InferUnits && (p.truthy("units") || !p.Value("step").IsNullish() || !p.Value("maxbins").IsNullish() || p.truthy("extent")) {
+			n.g.warn("TimeUnit inferUnits overrides units, step, maxbins and extent.")
 		}
 		out, info, err := transforms.TimeUnit(n.g.ctx, in, tp)
 		n.value = timeUnitValue(info)
@@ -618,7 +645,7 @@ func init() {
 	})
 	tf["bin"] = tupleTransform(func(n *opNode, p *opParams, in []jsval.Value) ([]jsval.Value, error) {
 		bp := transforms.BinParams{
-			Field: p.field("field"), NoInterval: p.has("interval") && !p.bool("interval"),
+			Field: p.field("field"), NoInterval: p.isFalse("interval"),
 			Name: p.textOr("name", ""), As: p.asPair("bin0", "bin1"), AsExact: true,
 		}
 		// bin(_) reads every parameter as it is (transforms.BinJS).

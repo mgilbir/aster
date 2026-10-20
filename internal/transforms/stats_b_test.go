@@ -2,6 +2,7 @@ package transforms
 
 import (
 	"context"
+	"errors"
 	"math"
 	"os"
 	"path/filepath"
@@ -89,8 +90,18 @@ func TestBinLimits(t *testing.T) {
 	if _, err := Bin(BinConfig{Extent: [2]float64{0, 1}, MaxBins: 1e9}); err == nil {
 		t.Error("expected maxbins limit error")
 	}
-	if _, err := Bin(BinConfig{Extent: [2]float64{0, 100}, Base: 1, MaxBins: 3}); err == nil {
-		t.Error("expected error for base 1")
+	// a base upstream bins with is binned with (vega.bin: base 1 is a NaN
+	// step, 0.5 a step of 0.5); one whose search for fewer bins never ends
+	// upstream (node runs vega.bin({extent: [0, 3], maxbins: 10, base: 0.1})
+	// until it is killed) is refused with ErrLimit (ADR 0011)
+	if got, err := Bin(BinConfig{Extent: [2]float64{0, 3}, Base: 1, MaxBins: 10}); err != nil || !math.IsNaN(got.Step) {
+		t.Errorf("base 1: %v, %v; want a NaN step", got, err)
+	}
+	if got, err := Bin(BinConfig{Extent: [2]float64{0, 3}, Base: 0.5, MaxBins: 10}); err != nil || got != (BinResult{Start: 0.5, Stop: 3, Step: 0.5}) {
+		t.Errorf("base 0.5: %v, %v; want {0.5 3 0.5}", got, err)
+	}
+	if _, err := Bin(BinConfig{Extent: [2]float64{0, 3}, Base: 0.1, MaxBins: 10}); !errors.Is(err, ErrLimit) {
+		t.Errorf("base 0.1: %v; want ErrLimit", err)
 	}
 	// never panics on hostile numbers
 	for _, e := range [][2]float64{{math.NaN(), 1}, {math.Inf(-1), math.Inf(1)}, {1, math.NaN()}} {
@@ -110,7 +121,7 @@ func bSpecDist(t *testing.T, s jsval.Value) Distribution {
 	}
 	switch s.Get("kind").StrValue() {
 	case "normal", "lognormal", "uniform":
-		d, err := NewDistribution(DistSpec{Kind: s.Get("kind").StrValue(), Mean: num("mean"), Stdev: num("stdev"), Min: num("min"), Max: num("max")}, nil)
+		d, err := NewDistribution(context.Background(), DistSpec{Kind: s.Get("kind").StrValue(), Mean: num("mean"), Stdev: num("stdev"), Min: num("min"), Max: num("max")}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -120,7 +131,11 @@ func bSpecDist(t *testing.T, s jsval.Value) Distribution {
 	case "kde":
 		var vals []jsval.Value
 		vals = append(vals, s.Get("data").Items()...)
-		return NewKernelDensity(vals, s.Get("bandwidth").NumValue())
+		k, err := NewKernelDensity(context.Background(), vals, s.Get("bandwidth").NumValue())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return k
 	case "mixture":
 		var ds []Distribution
 		for _, p := range s.Get("parts").Items() {
@@ -178,7 +193,10 @@ func TestDistributionsGolden(t *testing.T) {
 func TestBandwidthGolden(t *testing.T) {
 	root := bLoadJSONFile(t, "bin_stats.json")
 	for _, c := range root.Get("bandwidth").Items() {
-		got := EstimateBandwidth(c.Get("data").Items())
+		got, err := EstimateBandwidth(context.Background(), c.Get("data").Items())
+		if err != nil {
+			t.Fatal(err)
+		}
 		if want := c.Get("bw").NumValue(); !bCloseTo(got, want) {
 			t.Errorf("%v: got %v want %v", c.Get("data"), got, want)
 		}
@@ -198,7 +216,7 @@ func TestSampleCurveGolden(t *testing.T) {
 			f = NewNormal(0, 1).PDF
 		}
 		e := bFloats(c.Get("extent"))
-		got, err := SampleCurve(f, [2]float64{e[0], e[1]}, bOptNum(c.Get("min")), bOptNum(c.Get("max")))
+		got, err := SampleCurve(context.Background(), f, [2]float64{e[0], e[1]}, bOptNum(c.Get("min")), bOptNum(c.Get("max")), 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -238,12 +256,12 @@ func TestSamplingGolden(t *testing.T) {
 }
 
 func TestSampleCurveLimit(t *testing.T) {
-	if _, err := SampleCurve(math.Sin, [2]float64{0, 1}, 25, 1e12); err == nil {
+	if _, err := SampleCurve(context.Background(), math.Sin, [2]float64{0, 1}, 25, 1e12, 0); err == nil {
 		t.Error("expected limit error")
 	}
 	// pathological extents must terminate
 	for _, e := range [][2]float64{{1, 0}, {math.NaN(), 1}, {0, math.Inf(1)}} {
-		_, _ = SampleCurve(func(x float64) float64 { return math.Sin(1e3 * x) }, e, 25, 200)
+		_, _ = SampleCurve(context.Background(), func(x float64) float64 { return math.Sin(1e3 * x) }, e, 25, 200, 0)
 	}
 }
 

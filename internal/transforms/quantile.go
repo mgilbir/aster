@@ -78,7 +78,10 @@ func Quantile(ctx context.Context, source []jsval.Value, p QuantileParams) ([]js
 	for i, g := range p.GroupBy {
 		names[i] = g.Key()
 	}
-	groups := Partition(keysOf(ctx), source, p.GroupBy)
+	groups, err := Partition(keysOf(ctx), source, p.GroupBy)
+	if err != nil {
+		return nil, err
+	}
 	if err := reserveRows(ctx, int(min(budget.Mul(int64(len(groups)), int64(len(probs))), math.MaxInt32))); err != nil {
 		return nil, err
 	}
@@ -90,9 +93,8 @@ func Quantile(ctx context.Context, source []jsval.Value, p QuantileParams) ([]js
 		if p.ProbsNotArray {
 			return nil, &jsval.Thrown{Name: "TypeError", Msg: "p.map is not a function"}
 		}
-		get, cancelled := polledAccessor(ctx, p.Field.Get)
-		q := Quantiles(g.Tuples, probs, get)
-		if err := cancelled(); err != nil {
+		q, err := Quantiles(ctx, g.Tuples, probs, p.Field.Get)
+		if err != nil {
 			return nil, err
 		}
 		for i, pr := range probs {
@@ -105,11 +107,7 @@ func Quantile(ctx context.Context, source []jsval.Value, p QuantileParams) ([]js
 			} else {
 				o.Set(as0, jsval.Num(pr))
 			}
-			if math.IsNaN(q[i]) {
-				o.Set(as1, jsval.Undefined)
-			} else {
-				o.Set(as1, jsval.Num(q[i]))
-			}
+			o.Set(as1, q[i]) // undefined for no values, NaN as d3 computes it
 			out = append(out, jsval.Obj(o))
 		}
 	}

@@ -48,6 +48,9 @@ type RegressionParams struct {
 	Params bool
 	// As names the output x and y fields; nil or short means the accessor names.
 	As []string
+	// Warn is told what upstream warns of (pulse.dataflow.warn): a log
+	// regression's extent ignored, a group skipped. Nil drops them.
+	Warn func(string)
 }
 
 // DefaultRegressionOrder is upstream's default polynomial order.
@@ -88,9 +91,14 @@ func Regression(ctx context.Context, data []jsval.Value, p RegressionParams) ([]
 			domain[i] = jsval.Num(d)
 		}
 	}
+	warn := p.Warn
+	if warn == nil {
+		warn = func(string) {}
+	}
 	// method === 'log' && domain[0] <= 0
 	if domain != nil && is("log") && LessEq(jsval.WalkerFor(ctx), firstOf(domain), jsval.Num(0)) {
-		domain = nil // upstream warns and ignores it
+		warn("Ignoring extent with values <= 0 for log regression.")
+		domain = nil
 	}
 	fitCtx := ctx
 	if p.Strict && !p.OrderIsNumber {
@@ -107,20 +115,24 @@ func Regression(ctx context.Context, data []jsval.Value, p RegressionParams) ([]
 	if len(p.As) > 1 {
 		as1 = p.As[1]
 	}
-	groups := regressionGroups(keysOf(ctx), data, p.GroupBy)
+	groups, err := regressionGroups(keysOf(ctx), data, p.GroupBy)
+	if err != nil {
+		return nil, err
+	}
 	var out []jsval.Value
 	for _, g := range groups {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		if float64(len(g.Tuples)) <= dof {
+			warn("Skipping regression with more parameters than data points.")
 			continue
 		}
-		// A fitted curve is at most 200 points (two for a line).
-		if err := reserveRows(ctx, len(out)+201); err != nil {
+		// A line is two points; a curve is reserved as it is sampled.
+		if err := reserveRows(ctx, len(out)+2); err != nil {
 			return nil, err
 		}
-		model, err := FitRegressionCtx(fitCtx, method, g.Tuples, p.X.Get, p.Y.Get, p.Order)
+		model, err := FitRegression(fitCtx, method, g.Tuples, p.X.Get, p.Y.Get, p.Order)
 		if err != nil {
 			return nil, err
 		}
@@ -177,7 +189,7 @@ func Regression(ctx context.Context, data []jsval.Value, p RegressionParams) ([]
 			if len(dom) > 1 {
 				d1 = dom[1]
 			}
-			pts, err := sampleCurveJS(jsval.WalkerFor(ctx), model.Predict, d0, d1, StepsSpec{Min: jsval.Num(25), Max: jsval.Num(200)})
+			pts, err := sampleCurveJS(ctx, model.Predict, d0, d1, StepsSpec{Min: jsval.Num(25), Max: jsval.Num(200)}, len(out))
 			if err != nil {
 				return nil, err
 			}
@@ -192,12 +204,12 @@ func Regression(ctx context.Context, data []jsval.Value, p RegressionParams) ([]
 // regressionGroups is upstream's partition: no group-by (nil) is one group of
 // everything; an explicitly empty list is one empty-dims group when there is
 // data and none otherwise.
-func regressionGroups(k Keys, data []jsval.Value, groupby []Field) []Group {
+func regressionGroups(k Keys, data []jsval.Value, groupby []Field) ([]Group, error) {
 	if groupby != nil && len(groupby) == 0 {
 		if len(data) == 0 {
-			return nil
+			return nil, nil
 		}
-		return []Group{{Dims: []jsval.Value{}, Tuples: data}}
+		return []Group{{Dims: []jsval.Value{}, Tuples: data}}, nil
 	}
 	return Partition(k, data, groupby)
 }
