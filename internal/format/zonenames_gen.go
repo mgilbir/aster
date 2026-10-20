@@ -15,9 +15,11 @@
 // from November 2026, which CLDR still files under its old metazone): such a
 // run, to the end of the samples, is recorded as daylightFrom. A name whose
 // offsets in node are not the release's is one node did not resolve from TZ
-// (it takes the host's offset, and never sets the DST flag, for TZ=Cuba,
-// Iran, PRC, ROC, ROK and W-SU, though it names them): it is a link, and
-// takes its target's names. Any other disagreement stops the generator.
+// (the recorder hides the host's zoneinfo, and without a file of that name
+// node gives offset 0 and never sets the DST flag, for TZ=CET, Cuba, EET,
+// EST, HST, Iran, MET, MST, PRC, ROC, ROK and W-SU, though it names them): it
+// is a link, and takes its target's names. Any other disagreement stops the
+// generator.
 package main
 
 import (
