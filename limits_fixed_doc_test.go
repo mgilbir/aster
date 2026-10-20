@@ -2,7 +2,6 @@ package aster_test
 
 import (
 	"go/constant"
-	"go/importer"
 	"go/token"
 	"go/types"
 	"os"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/mgilbir/aster"
 	"github.com/mgilbir/aster/internal/raster"
+	"github.com/mgilbir/aster/internal/testutil"
 	"github.com/mgilbir/aster/internal/vega"
 )
 
@@ -36,7 +36,7 @@ func TestFixedLimitsDocMatchesCode(t *testing.T) {
 		t.Fatal("docs/limits.md has no fixed:begin/end block")
 	}
 
-	imp := importer.ForCompiler(token.NewFileSet(), "source", nil)
+	imp := testutil.SourceImporter(token.NewFileSet())
 	pkgs := map[string]*types.Package{}
 	// c is the value of the constant pkg.name, exported or not.
 	c := func(path, name string) int64 {
