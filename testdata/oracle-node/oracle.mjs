@@ -99,7 +99,9 @@ const require = createRequire(path.join(path.resolve(process.env.NODE_PATH), 'x.
 // runner resolved the registered faces differently. Set before node-canvas
 // loads, since fontconfig reads its configuration once.
 {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aster-oracle-fonts-'));
+  // The Go side makes the directory and removes it when it stops this
+  // process (a killed process runs no exit handler); run by hand, make one.
+  const dir = process.env.ASTER_ORACLE_FONTDIR || fs.mkdtempSync(path.join(os.tmpdir(), 'aster-oracle-fonts-'));
   const conf = path.join(dir, 'fonts.conf');
   fs.writeFileSync(
     conf,

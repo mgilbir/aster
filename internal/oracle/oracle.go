@@ -112,6 +112,10 @@ type proc struct {
 	stdin  io.WriteCloser
 	lines  chan []byte // stdout, one response per line; closed when node exits
 	nextID int
+	// fontDir is the process's fontconfig directory (oracle.mjs): made here
+	// and removed when the process is stopped, since a process killed in a
+	// replacement or a timeout runs no exit handler of its own.
+	fontDir string
 }
 
 var oracles sync.Map // set → *Oracle
@@ -473,21 +477,28 @@ func (p *proc) ask(req map[string]any) (Result, error) {
 func (o *Oracle) start() (*proc, error) {
 	// Run in the module set's directory, so a node version manager (volta)
 	// applies the version pinned in its package.json; CI installs the same.
+	fontDir, err := os.MkdirTemp("", "aster-oracle-fonts-")
+	if err != nil {
+		return nil, err
+	}
 	cmd := exec.Command("node", filepath.Join(o.root, script))
 	cmd.Dir = filepath.Join(o.root, o.set)
 	cmd.Env = append(os.Environ(), "TZ="+o.zone, "NODE_PATH="+filepath.Join(o.root, o.set, "node_modules"),
-		"ASTER_ORACLE_PARENT="+strconv.Itoa(os.Getpid()))
+		"ASTER_ORACLE_PARENT="+strconv.Itoa(os.Getpid()), "ASTER_ORACLE_FONTDIR="+fontDir)
 	cmd.Stderr = os.Stderr
 	ownGroup(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
+		_ = os.RemoveAll(fontDir)
 		return nil, err
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		_ = os.RemoveAll(fontDir)
 		return nil, err
 	}
 	if err := cmd.Start(); err != nil {
+		_ = os.RemoveAll(fontDir)
 		return nil, err
 	}
 	lines := make(chan []byte, 1)
@@ -499,7 +510,7 @@ func (o *Oracle) start() (*proc, error) {
 			lines <- append([]byte(nil), sc.Bytes()...)
 		}
 	}()
-	p := &proc{o: o, cmd: cmd, stdin: stdin, lines: lines}
+	p := &proc{o: o, cmd: cmd, stdin: stdin, lines: lines, fontDir: fontDir}
 	select {
 	case line, ok := <-lines:
 		var ready struct {
@@ -532,6 +543,7 @@ func (p *proc) stop() {
 	killGroup(p.cmd)
 	_ = p.cmd.Wait() // killed: the error says so
 	p.cmd = nil
+	_ = os.RemoveAll(p.fontDir)
 }
 
 // repoRoot finds the module root from the working directory (a test runs in
