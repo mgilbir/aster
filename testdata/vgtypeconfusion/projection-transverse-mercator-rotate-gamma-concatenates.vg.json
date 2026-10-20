@@ -1,0 +1,1 @@
+{"width": 100, "height": 100, "projections": [{"name": "p", "type": "transverseMercator", "rotate": [[1], [2], [3]]}], "marks": [{"type": "text", "encode": {"update": {"text": {"signal": "toString(scale('p',[10,20]))+'|'+toString(scale('p',[-100,40]))+'|'+toString(geoScale('p'))+'|'+toString(geoTranslate('p'))"}, "y": {"value": 10}}}}]}

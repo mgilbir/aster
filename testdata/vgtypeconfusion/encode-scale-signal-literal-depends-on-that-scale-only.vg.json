@@ -1,0 +1,1 @@
+{"width":100,"height":50,"data":[{"name":"t","values":[{"a":1},{"a":2}]}],"scales":[{"name":"s","type":"linear","domain":{"data":"t","field":"a"},"range":[0,50]}],"axes":[{"orient":"bottom","scale":"s"}],"marks":[{"type":"rect","from":{"data":"t"},"encode":{"enter":{"x":{"scale":{"signal":"null"},"field":"a"},"width":{"value":6},"y":{"value":14},"height":{"value":3}}}}]}

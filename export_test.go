@@ -141,6 +141,9 @@ func (c *Converter) RenderPreparedForTest(spec []byte, lite bool) (func() error,
 	}, nil
 }
 
+// IsEngineBugForTest is isEngineBug, for the external tests' gates.
+var IsEngineBugForTest = isEngineBug
+
 // RaceSlowdownForTest is raceSlowdown, for the external tests' time limits.
 const RaceSlowdownForTest = raceSlowdown
 

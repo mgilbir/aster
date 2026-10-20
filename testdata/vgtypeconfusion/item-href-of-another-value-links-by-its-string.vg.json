@@ -1,0 +1,2 @@
+{"width": 60, "height": 20, "data": [{"name": "t", "values": [{"u": "https://example.com/a"}, {"u": [["https://example.com/a"]]}, {"u": [["https://example.com/b"]]}, {"u": 0}]}],
+ "marks": [{"type": "rect", "from": {"data": "t"}, "encode": {"enter": {"x": {"signal": "datum.u ? 10 : 0"}, "width": {"value": 5}, "height": {"value": 5}, "href": {"field": "u"}}}}]}

@@ -1,0 +1,2 @@
+{"width": 60, "height": 60, "data": [{"name": "t", "values": [{"v": [[70]]}, {"v": [["a", "b"]]}, {"v": [[]]}]}],
+ "marks": [{"type": "text", "from": {"data": "t"}, "encode": {"enter": {"y": {"signal": "datum.v.length * 20"}, "text": {"field": "v"}}}}]}

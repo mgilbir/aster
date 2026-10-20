@@ -1,0 +1,1 @@
+{"width":100,"height":50,"padding":5,"scales":[{"name":"x","type":"band","domain":[0.5,1000.5],"range":"width"}],"axes":[{"scale":"x","orient":"bottom","formatType":"time"}]}

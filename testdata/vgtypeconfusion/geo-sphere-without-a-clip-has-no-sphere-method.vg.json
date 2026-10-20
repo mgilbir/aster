@@ -1,0 +1,3 @@
+{"width":200,"height":200,"projections":[{"name":"p","type":"identity"}],
+"data":[{"name":"d","values":[{"type":"Sphere"}]}],
+"marks":[{"type":"shape","from":{"data":"d"},"encode":{"enter":{"stroke":{"value":"black"}}},"transform":[{"type":"geoshape","projection":"p"}]}]}

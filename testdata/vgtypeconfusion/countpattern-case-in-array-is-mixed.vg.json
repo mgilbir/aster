@@ -1,0 +1,1 @@
+{"width":120,"height":60,"data":[{"name":"t","values":[{"g":"Ab ab"}],"transform":[{"type":"countpattern","field":"g","case":["upper"]},{"type":"identifier","as":"k_"}]}],"marks":[{"type":"text","from":{"data":"t"},"encode":{"enter":{"y":{"signal":"12*datum.k_"},"text":{"signal":"datum.text + '|' + datum.count"}}}}]}

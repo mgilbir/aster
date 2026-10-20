@@ -1,0 +1,2 @@
+{"width":60,"height":40,"padding":5,"background":"white","data":[{"name":"A","values":[]}],
+"marks":[{"type":"image","from":{"data":"A"},"transform":[{"type":"pie","field":"b"}]},{"type":"text","encode":{"update":{"text":{"value":"t"}}}}]}

@@ -1,0 +1,1 @@
+{"width": 200, "height": 100, "data": [{"name": "t", "values": [{"v": 1}]}], "scales": [{"name": "y", "type": "linear", "domain": [0, 1], "range": "height"}], "axes": [{"scale": "y", "orient": "left", "title": "stacked/title", "encode": {"title": {"update": {"lineBreak": {"value": []}}}}}]}

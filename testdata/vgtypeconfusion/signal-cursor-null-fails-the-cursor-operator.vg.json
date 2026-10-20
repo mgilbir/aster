@@ -1,0 +1,1 @@
+{"width":100,"height":100,"padding":5,"signals":[{"name":"cursor","value":null}],"marks":[{"type":"rect","encode":{"enter":{"width":{"value":20},"height":{"value":20}}}},{"type":"text","encode":{"enter":{"text":{"value":"t"}}}}]}

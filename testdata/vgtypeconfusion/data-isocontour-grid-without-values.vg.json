@@ -1,0 +1,1 @@
+{"width": 100, "height": 50, "padding": 5, "data": [{"name": "grid", "values": [{"width": 4, "height": 3}]}, {"name": "c", "source": "grid", "transform": [{"type": "isocontour", "thresholds": [1, 2]}]}], "signals": [{"name": "s", "update": "length(data('c'))"}], "marks": [{"type": "text", "encode": {"update": {"text": {"signal": "s"}}}}]}
