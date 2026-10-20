@@ -1,0 +1,1 @@
+{"width":100,"height":100,"scales":[{"name":"s","type":"time","domain":[0,1234567890],"range":[0,1],"nice":{"interval":"constructor"}}],"marks":[{"type":"text","encode":{"enter":{"text":{"signal":"scale('s',300000000)"}}}}]}

@@ -170,7 +170,7 @@ func (q *Quantile) Quantiles() []float64 { return append([]float64(nil), q.thres
 
 // Copy is d3's quantile copy.
 func (q *Quantile) Copy() Scale {
-	n := &Quantile{meta: meta{typ: q.typ}, domain: append([]float64(nil), q.domain...),
+	n := &Quantile{meta: meta{typ: q.typ, walk: q.walk}, domain: append([]float64(nil), q.domain...),
 		rng: cloneValues(q.rng), unknown: q.unknown}
 	n.rescale()
 	return n
@@ -197,7 +197,9 @@ func NewQuantize() *Quantize {
 func (q *Quantize) rescale() {
 	n := q.n
 	if n < 0 {
-		n = 0 // d3 throws (new Array(-1)) for an empty range
+		// new Array(-1) for an empty range: the RangeError leaves the
+		// thresholds as they were.
+		panic(errArrayLength())
 	}
 	q.domain = make([]float64, n)
 	for i := 0; i < n; i++ {
@@ -278,7 +280,7 @@ func (q *Quantize) HasTickFormat() bool { return true }
 
 // Copy is d3's quantize copy.
 func (q *Quantize) Copy() Scale {
-	n := &Quantize{meta: meta{typ: q.typ}, x0: q.x0, x1: q.x1, n: q.n,
+	n := &Quantize{meta: meta{typ: q.typ, walk: q.walk}, x0: q.x0, x1: q.x1, n: q.n,
 		rng: cloneValues(q.rng), unknown: q.unknown}
 	n.rescale()
 	return n
@@ -311,10 +313,10 @@ func (t *Threshold) resize() { t.n = min(len(t.domain), len(t.rng)-1) }
 // Apply is scale(x).
 func (t *Threshold) Apply(x jsval.Value) jsval.Value {
 	if t.dnum == nil {
-		if c, ok := jsval.Relate(x, x); x.IsNullish() || !ok || c != 0 {
+		if c, ok := t.walk.Relate(x, x); x.IsNullish() || !ok || c != 0 {
 			return t.unknown
 		}
-		return rangeAt(t.rng, bisectRightValues(t.domain, x, 0, max(t.n, 0)))
+		return rangeAt(t.rng, bisectRightValues(t.walk, t.domain, x, 0, max(t.n, 0)))
 	}
 	f, ok := selfComparable(x)
 	if !ok {
@@ -357,10 +359,10 @@ func allNumeric(v []jsval.Value) bool {
 // bisectRightValues is d3.bisectRight over values in [lo, hi), comparing them
 // with x as d3.ascending does: by JavaScript's relational operators, with
 // null or undefined comparable to nothing.
-func bisectRightValues(a []jsval.Value, x jsval.Value, lo, hi int) int {
+func bisectRightValues(w jsval.Walker, a []jsval.Value, x jsval.Value, lo, hi int) int {
 	for lo < hi {
 		mid := int(uint(lo+hi) >> 1)
-		if c, ok := jsval.Relate(a[mid], x); ok && c <= 0 && !a[mid].IsNullish() {
+		if c, ok := w.Relate(a[mid], x); ok && c <= 0 && !a[mid].IsNullish() {
 			lo = mid + 1
 		} else {
 			hi = mid
@@ -385,6 +387,7 @@ func (t *Threshold) SetUnknown(v jsval.Value) { t.unknown = v }
 func (t *Threshold) Copy() Scale {
 	n := NewThreshold()
 	n.typ = t.typ
+	n.walk = t.walk
 	n.SetDomain(t.domain)
 	n.rng = cloneValues(t.rng)
 	n.resize()
@@ -396,7 +399,10 @@ func (t *Threshold) Copy() Scale {
 // entry of the bin containing it (cycling through the range).
 type BinOrdinal struct {
 	meta
+	// domain is the bin edges as numbers; null marks the edges vega-util's
+	// toNumber left null (a null or empty one), which compare with nothing.
 	domain []float64
+	null   []bool
 	rng    []jsval.Value
 }
 
@@ -413,7 +419,11 @@ func (b *BinOrdinal) Apply(x jsval.Value) jsval.Value {
 	var pos int
 	switch {
 	case f == f:
-		pos = bisectRight(b.domain, f, 0, len(b.domain))
+		if b.null == nil {
+			pos = bisectRight(b.domain, f, 0, len(b.domain))
+		} else {
+			pos = b.bisectNull(f)
+		}
 	case x.IsNum():
 		return jsval.Undefined // x !== x
 	case x.IsTimestamp():
@@ -424,11 +434,47 @@ func (b *BinOrdinal) Apply(x jsval.Value) jsval.Value {
 	return rangeAt(b.rng, (pos-1)%len(b.rng))
 }
 
-// Domain returns the bin edges.
-func (b *BinOrdinal) Domain() []jsval.Value { return numsToValues(b.domain) }
+// bisectNull is d3's bisectRight over edges some of which are null:
+// ascending(null, x) is NaN, which sends the search left.
+func (b *BinOrdinal) bisectNull(x float64) int {
+	lo, hi := 0, len(b.domain)
+	for lo < hi {
+		mid := int(uint(lo+hi) >> 1)
+		if !b.null[mid] && b.domain[mid] <= x {
+			lo = mid + 1
+		} else {
+			hi = mid
+		}
+	}
+	return lo
+}
 
-// SetDomain is scale.domain(d): every entry goes through toNumber.
-func (b *BinOrdinal) SetDomain(d []jsval.Value) { b.domain = valuesToNums(d) }
+// Domain returns the bin edges.
+func (b *BinOrdinal) Domain() []jsval.Value {
+	out := numsToValues(b.domain)
+	for i, n := range b.null {
+		if n {
+			out[i] = jsval.Null
+		}
+	}
+	return out
+}
+
+// SetDomain is scale.domain(d): every entry goes through vega-util's
+// toNumber, which keeps null (and makes the empty string null).
+func (b *BinOrdinal) SetDomain(d []jsval.Value) {
+	b.domain = valuesToNums(d)
+	b.null = nil
+	for i, v := range d {
+		if v.IsNullish() || (v.IsStr() && v.StrValue() == "") {
+			if b.null == nil {
+				b.null = make([]bool, len(d))
+			}
+			b.null[i] = true
+			b.domain[i] = 0
+		}
+	}
+}
 
 // Range returns a copy of the range.
 func (b *BinOrdinal) Range() []jsval.Value { return cloneValues(b.rng) }
@@ -441,7 +487,10 @@ func (b *BinOrdinal) HasTickFormat() bool { return true }
 
 // Copy is bin-ordinal's copy.
 func (b *BinOrdinal) Copy() Scale {
-	n := &BinOrdinal{meta: meta{typ: b.typ}, domain: append([]float64(nil), b.domain...), rng: cloneValues(b.rng)}
+	n := &BinOrdinal{meta: meta{typ: b.typ, walk: b.walk}, domain: append([]float64(nil), b.domain...), rng: cloneValues(b.rng)}
+	if b.null != nil {
+		n.null = append([]bool(nil), b.null...)
+	}
 	return n
 }
 
@@ -518,7 +567,7 @@ func (s *Identity) HasTickFormat() bool { return true }
 
 // Copy is identity's copy.
 func (s *Identity) Copy() Scale {
-	return &Identity{meta: meta{typ: s.typ}, domain: append([]float64(nil), s.domain...), unknown: s.unknown}
+	return &Identity{meta: meta{typ: s.typ, walk: s.walk}, domain: append([]float64(nil), s.domain...), unknown: s.unknown}
 }
 
 var (
@@ -544,12 +593,16 @@ func InvertRangeExtent(s interface {
 	ExtentInverter
 }, loV, hiV jsval.Value) (jsval.Value, bool) {
 	rng := s.Range()
-	if jsGreater(loV, hiV) {
+	var w jsval.Walker
+	if m, ok := s.(interface{ walker() jsval.Walker }); ok {
+		w = m.walker()
+	}
+	if jsGreater(w, loV, hiV) {
 		loV, hiV = hiV, loV
 	}
 	mn, mx := -1, 0
 	for i, r := range rng {
-		if jsGreaterEq(r, loV) && jsGreaterEq(hiV, r) {
+		if jsGreaterEq(w, r, loV) && jsGreaterEq(w, hiV, r) {
 			if mn < 0 {
 				mn = i
 			}
@@ -571,32 +624,15 @@ func InvertRangeExtent(s interface {
 	return jsval.ArrOf(a, b), true
 }
 
-// jsCompare implements the abstract relational comparison for the value kinds
-// scales see: two strings compare lexically, anything else numerically. ok is
-// false when either side is NaN (every relation is then false).
-func jsCompare(a, b jsval.Value) (c int, ok bool) {
-	if a.IsStr() && b.IsStr() {
-		x, y := a.StrValue(), b.StrValue()
-		switch {
-		case x < y:
-			return -1, true
-		case x > y:
-			return 1, true
-		}
-		return 0, true
-	}
-	x, y := jsval.ToNumber(a), jsval.ToNumber(b)
-	if x != x || y != y {
-		return 0, false
-	}
-	switch {
-	case x < y:
-		return -1, true
-	case x > y:
-		return 1, true
-	}
-	return 0, true
+// jsGreater and jsGreaterEq are > and >= of JavaScript: its abstract
+// relational comparison (strings by UTF-16 code unit, arrays and objects by
+// their text), a walk w bounds.
+func jsGreater(w jsval.Walker, a, b jsval.Value) bool {
+	c, ok := w.Relate(a, b)
+	return ok && c > 0
 }
 
-func jsGreater(a, b jsval.Value) bool   { c, ok := jsCompare(a, b); return ok && c > 0 }
-func jsGreaterEq(a, b jsval.Value) bool { c, ok := jsCompare(a, b); return ok && c >= 0 }
+func jsGreaterEq(w jsval.Walker, a, b jsval.Value) bool {
+	c, ok := w.Relate(a, b)
+	return ok && c >= 0
+}

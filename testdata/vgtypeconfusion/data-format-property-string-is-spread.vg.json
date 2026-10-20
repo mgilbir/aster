@@ -1,0 +1,2 @@
+{"width":100,"height":100,"data":[{"name":"t","values":{"x":"ab"},"format":{"property":"x"}}],
+"marks":[{"type":"text","from":{"data":"t"},"encode":{"enter":{"text":{"signal":"''+datum.a+'/'+datum.data+'/'+datum[0]"}}}}]}

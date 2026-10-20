@@ -38,10 +38,18 @@ const (
 // heavy row from.
 func RowCost(t Value) int64 {
 	o := t.ObjValue()
-	if o == nil {
+	var n int64
+	if t.Kind() == KindArr {
+		// An array row: its elements, and the fields written into it.
+		n = rowArray + rowElem*int64(t.Len())
+		if o = t.ArrayProps(); o == nil {
+			return n
+		}
+		n -= RowBase
+	} else if o == nil {
 		return RowBase
 	}
-	n := ObjectCost(o.Len())
+	n += ObjectCost(o.Len())
 	for i, k := 0, o.Len(); i < k; i++ {
 		switch f := o.ValueAt(i); f.Kind() {
 		case KindStr:

@@ -1,0 +1,3 @@
+{"width":100,"height":60,"padding":4,"data":[{"name":"p","values":[{"u":1,"v":2},{"u":2,"v":5},{"u":3,"v":11},{"u":[],"v":21},{"u":5,"v":34},{"u":8,"v":99}]},
+{"name":"q","source":"p","transform":[{"type":"regression","x":"u","y":"v","method":"quad"}]}],
+"marks":[{"type":"line","from":{"data":"q"},"encode":{"enter":{"x":{"field":"u"},"y":{"field":"v"}}}}]}

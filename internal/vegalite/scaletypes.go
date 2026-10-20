@@ -11,15 +11,26 @@ var scaleCategory = map[string]string{
 	"quantile": "discretizing", "quantize": "discretizing", "threshold": "discretizing",
 }
 
+// The scale type predicates take the type as the specification gives it:
+// upstream's are Set.has, ===, a switch or contains (indexOf), which only the
+// string matches, so ["log"] is no log scale there (C40 of the 2026-10-18
+// audit). Only scaleCompatible and scaleTypePrecedence read a table with it
+// (SCALE_CATEGORY_INDEX[type], SCALE_PRECEDENCE_INDEX[type]) and so take its
+// text, as a property key.
+
 // scaleCompatible compares SCALE_CATEGORY_INDEX[a] and [b]: a type every
 // object inherits reads as that member, equal only to itself.
-func scaleCompatible(a, b string) bool {
-	cat := func(t string) string {
-		if c, ok := scaleCategory[t]; ok {
+func scaleCompatible(a, b Value) bool {
+	cat := func(t Value) string {
+		k, ok := t.PropertyKey(maxNameKey)
+		if !ok {
+			return ""
+		}
+		if c, ok := scaleCategory[k]; ok {
 			return c
 		}
-		if isInheritedKey(t) {
-			return "\x00" + t
+		if isInheritedKey(k) {
+			return "\x00" + k
 		}
 		return ""
 	}
@@ -27,8 +38,12 @@ func scaleCompatible(a, b string) bool {
 	return c1 == c2 || (c1 == "ordinal-position" && c2 == "time") || (c2 == "ordinal-position" && c1 == "time")
 }
 
-func scaleTypePrecedence(t string) int {
-	switch t {
+// scaleTypePrecedence is SCALE_PRECEDENCE_INDEX[t], 0 for a type it does not
+// hold (whose undefined makes upstream's difference NaN, which its tie-breaker
+// reads as 0 does).
+func scaleTypePrecedence(t Value) int {
+	k, _ := t.PropertyKey(maxNameKey)
+	switch k {
 	case "log", "pow", "sqrt", "symlog", "identity", "sequential":
 		return 1
 	case "point":
@@ -39,28 +54,32 @@ func scaleTypePrecedence(t string) int {
 	return 0
 }
 
-func isQuantitativeScale(t string) bool {
-	switch t {
+// maxNameKey bounds the text of a value read as the key of one of
+// upstream's name tables: no name is longer, so a longer key names nothing.
+const maxNameKey = 64
+
+func isQuantitativeScale(t Value) bool {
+	switch s, _ := t.Strict(); s {
 	case "linear", "log", "pow", "sqrt", "symlog":
 		return true
 	}
 	return false
 }
 
-func isContinuousToContinuous(t string) bool {
-	return isQuantitativeScale(t) || t == "time" || t == "utc"
+func isContinuousToContinuous(t Value) bool {
+	return isQuantitativeScale(t) || strIs(t, "time") || strIs(t, "utc")
 }
 
-func isContinuousToDiscrete(t string) bool {
-	return t == "quantile" || t == "quantize" || t == "threshold"
+func isContinuousToDiscrete(t Value) bool {
+	return strIs(t, "quantile") || strIs(t, "quantize") || strIs(t, "threshold")
 }
 
-func hasContinuousDomain(t string) bool {
-	return isContinuousToContinuous(t) || isContinuousToDiscrete(t) || t == "sequential" || t == "identity"
+func hasContinuousDomain(t Value) bool {
+	return isContinuousToContinuous(t) || isContinuousToDiscrete(t) || strIs(t, "sequential") || strIs(t, "identity")
 }
 
-func hasDiscreteDomain(t string) bool {
-	switch t {
+func hasDiscreteDomain(t Value) bool {
+	switch s, _ := t.Strict(); s {
 	case "ordinal", "bin-ordinal", "point", "band":
 		return true
 	}
@@ -147,34 +166,42 @@ var nonTypeDomainRangeVegaScaleProperties = []string{
 	"paddingInner", "paddingOuter",
 }
 
-func scaleTypeSupportProperty(scaleType, prop string) bool {
+func scaleTypeSupportProperty(scaleType Value, prop string) bool {
+	is := func(names ...string) bool {
+		for _, n := range names {
+			if strIs(scaleType, n) {
+				return true
+			}
+		}
+		return false
+	}
 	switch prop {
 	case "type", "domain", "reverse", "range":
 		return true
 	case "scheme", "interpolate":
-		return !contains([]string{"point", "band", "identity"}, scaleType)
+		return !is("point", "band", "identity")
 	case "bins":
-		return !contains([]string{"point", "band", "identity", "ordinal"}, scaleType)
+		return !is("point", "band", "identity", "ordinal")
 	case "round":
-		return isContinuousToContinuous(scaleType) || scaleType == "band" || scaleType == "point"
+		return isContinuousToContinuous(scaleType) || is("band", "point")
 	case "padding", "rangeMin", "rangeMax":
-		return isContinuousToContinuous(scaleType) || scaleType == "point" || scaleType == "band"
+		return isContinuousToContinuous(scaleType) || is("point", "band")
 	case "paddingOuter", "align":
-		return scaleType == "point" || scaleType == "band"
+		return is("point", "band")
 	case "paddingInner":
-		return scaleType == "band"
+		return is("band")
 	case "domainMax", "domainMid", "domainMin", "domainRaw", "clamp":
 		return isContinuousToContinuous(scaleType)
 	case "nice":
-		return isContinuousToContinuous(scaleType) || scaleType == "quantize" || scaleType == "threshold"
+		return isContinuousToContinuous(scaleType) || is("quantize", "threshold")
 	case "exponent":
-		return scaleType == "pow"
+		return is("pow")
 	case "base":
-		return scaleType == "log"
+		return is("log")
 	case "constant":
-		return scaleType == "symlog"
+		return is("symlog")
 	case "zero":
-		return hasContinuousDomain(scaleType) && !contains([]string{"log", "time", "utc", "threshold", "quantile"}, scaleType)
+		return hasContinuousDomain(scaleType) && !is("log", "time", "utc", "threshold", "quantile")
 	}
 	return false
 }
@@ -189,19 +216,21 @@ func channelScalePropertyIncompatible(channel, prop string) bool {
 	return false
 }
 
-func scaleTypeSupportDataType(specified, fieldDefType string) bool {
+// scaleTypeSupportDataType: specified is undefined when the
+// specification gives no type.
+func scaleTypeSupportDataType(specified Value, fieldDefType string) bool {
 	switch fieldDefType {
 	case "ordinal", "nominal":
-		return specified == "" || hasDiscreteDomain(specified)
+		return specified.IsUndefined() || hasDiscreteDomain(specified)
 	case "temporal":
-		return specified == "time" || specified == "utc" || specified == ""
+		return strIs(specified, "time") || strIs(specified, "utc") || specified.IsUndefined()
 	case "quantitative":
-		return isQuantitativeScale(specified) || isContinuousToDiscrete(specified) || specified == ""
+		return isQuantitativeScale(specified) || isContinuousToDiscrete(specified) || specified.IsUndefined()
 	}
 	return true
 }
 
-func channelSupportScaleType(cc *compileCtx, channel, scaleType string, hasNestedOffsetScale bool) bool {
+func channelSupportScaleType(cc *compileCtx, channel string, scaleType Value, hasNestedOffsetScale bool) bool {
 	if !isScaleChannel(cc, channel) {
 		return false
 	}
@@ -209,21 +238,21 @@ func channelSupportScaleType(cc *compileCtx, channel, scaleType string, hasNeste
 	case chX, chY, chXOffset, chYOffset, chTheta, chRadius:
 		if isContinuousToContinuous(scaleType) {
 			return true
-		} else if scaleType == "band" {
+		} else if strIs(scaleType, "band") {
 			return true
-		} else if scaleType == "point" {
+		} else if strIs(scaleType, "point") {
 			return !hasNestedOffsetScale
 		}
 		return false
 	case chTime:
-		return scaleType == "linear" || scaleType == "band"
+		return strIs(scaleType, "linear") || strIs(scaleType, "band")
 	case chSize, chStrokeWidth, chOpacity, chFillOpacity, chStrokeOpacity, chAngle:
 		return isContinuousToContinuous(scaleType) || isContinuousToDiscrete(scaleType) ||
-			scaleType == "band" || scaleType == "point" || scaleType == "ordinal"
+			strIs(scaleType, "band") || strIs(scaleType, "point") || strIs(scaleType, "ordinal")
 	case chColor, chFill, chStroke:
-		return scaleType != "band"
+		return !strIs(scaleType, "band")
 	case chStrokeDash, chShape:
-		return scaleType == "ordinal" || isContinuousToDiscrete(scaleType)
+		return strIs(scaleType, "ordinal") || isContinuousToDiscrete(scaleType)
 	}
 	return false
 }

@@ -1,0 +1,1 @@
+{"width":100,"height":40,"scales":[{"name":"r","type":"linear","domain":[0,10],"range":[20,["a","b"]]}],"marks":[{"type":"text","encode":{"enter":{"y":{"value":10},"text":{"signal":"scale('r', 5)"}}}}]}

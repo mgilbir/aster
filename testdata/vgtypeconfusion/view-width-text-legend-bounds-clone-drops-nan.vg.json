@@ -1,0 +1,1 @@
+{"width":"foo","height":50,"padding":5,"scales":[{"name":"c","type":"ordinal","domain":["a","b"],"range":["red","blue"]}],"legends":[{"fill":"c","orient":"right"}],"marks":[{"type":"rect","encode":{"enter":{"x":{"value":1},"y":{"value":1},"width":{"value":10},"height":{"value":10}}}}]}

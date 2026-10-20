@@ -1,0 +1,1 @@
+{"width":100,"height":100,"data":[{"name":"t","values":[{"c":"a","v":1},{"c":"b","v":3},{"c":"c","v":2}]}],"scales":[{"name":"s","type":"ordinal","range":"width","domain":{"data":"t","field":"c","sort":{"field":"v","op":"max","order":["descending"]}}}],"marks":[{"type":"text","encode":{"enter":{"text":{"signal":"join(domain('s'), ',')"}}}}]}

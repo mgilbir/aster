@@ -27,6 +27,7 @@ func TestNoUnreviewedFusedMultiplyAdd(t *testing.T) {
 	if _, err := exec.LookPath("sh"); err != nil {
 		t.Skip("sh not available")
 	}
+	subprocessInputs(t, "scripts/fmacheck.sh", "scripts/fmacheck.allow")
 	out, err := exec.Command("sh", "scripts/fmacheck.sh").CombinedOutput()
 	if err != nil {
 		t.Fatalf("fmacheck.sh: %v\n%s", err, out)

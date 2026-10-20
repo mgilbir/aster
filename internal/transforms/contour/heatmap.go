@@ -2,6 +2,7 @@ package contour
 
 import (
 	"context"
+	"errors"
 	"math"
 
 	"github.com/mgilbir/aster/internal/budget"
@@ -38,9 +39,12 @@ type HeatmapParams struct {
 	ColorFn func(datum jsval.Value, px Pixel) (RGB, error)
 	// Opacity is a constant opacity; zero (falsy upstream) selects the
 	// default [0, max] gradient value/max. OpacityFn takes precedence.
-	Opacity   float64
-	OpacityFn func(datum jsval.Value, px Pixel) (float64, error)
-	Shared    bool // resolve: "shared" (one global maximum)
+	Opacity float64
+	// OpacitySet reports a truthy constant opacity, used as it is (NaN for
+	// one that is no number, which paints transparent).
+	OpacitySet bool
+	OpacityFn  func(datum jsval.Value, px Pixel) (float64, error)
+	Shared     bool // resolve: "shared" (one global maximum)
 }
 
 // Heatmap renders each source tuple's grid to an RGBA image, one per tuple in
@@ -60,12 +64,25 @@ func Heatmap(ctx context.Context, source []jsval.Value, p HeatmapParams) ([]*Ima
 	hasValues := make([]bool, len(source))
 	for i, t := range source {
 		fv := field(t)
+		// d3's max iterates the grid's values: `max(field(t).values)` when
+		// shared, `max(v.values || [])` otherwise, a TypeError for a value
+		// that is not iterable
+		if vs := fv.Get("values"); !(vs.IsArr() || vs.IsStr()) && (p.Shared || vs.IsTruthy()) {
+			return nil, &jsval.Thrown{Name: "TypeError", Msg: "values is not iterable"}
+		}
 		g, err := GridFromValue(ctx, fv)
 		if err != nil {
 			return nil, err
 		}
 		grids[i] = g
-		hasValues[i] = fv.Get("values").IsArr()
+		vals := fv.Get("values")
+		hasValues[i] = vals.IsArr()
+		// d3's max(values) iterates them: shared reads every grid's
+		// values, otherwise `max(v.values || [])`; a value that is no
+		// array or string is not iterable.
+		if (p.Shared || vals.IsTruthy()) && !vals.IsArr() && !vals.IsStr() {
+			return nil, &jsval.Thrown{Name: "TypeError", Msg: "values is not iterable"}
+		}
 	}
 	globalMax := math.NaN()
 	if p.Shared {
@@ -104,7 +121,7 @@ func (p *HeatmapParams) pixelOpacity(datum jsval.Value, px Pixel) (float64, erro
 	switch {
 	case p.OpacityFn != nil:
 		return p.OpacityFn(datum, px)
-	case p.Opacity != 0 && !math.IsNaN(p.Opacity):
+	case p.OpacitySet || p.Opacity != 0 && !math.IsNaN(p.Opacity):
 		return p.Opacity, nil
 	}
 	o := px.Value / px.Max
@@ -134,6 +151,14 @@ func (p *HeatmapParams) render(ctx context.Context, g Grid, hasValues bool, datu
 	x1, y1 := int(g.X1), int(g.Y1)
 	x2, y2 := int(fx2), int(fy2)
 	w, h := x2-x1, y2-y1
+	// ctx.getImageData(0, 0, w, h) of an empty region throws
+	// (node-canvas's IndexSizeError, as a browser's does).
+	switch {
+	case w == 0:
+		return nil, errors.New("IndexSizeError: The source width is 0.")
+	case h == 0:
+		return nil, errors.New("IndexSizeError: The source height is 0.")
+	}
 	if err := budget.From(ctx).Canvas(4 * int64(w) * int64(h)); err != nil {
 		return nil, err
 	}

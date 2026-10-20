@@ -155,7 +155,7 @@ func runSweep(t *testing.T, sw sweep) {
 
 	sweepScoreboard(t, sw, cases, results, out.Skips)
 	if *sweepRun == "" || *sweepUpdate {
-		checkExpectations(t, filepath.Join("testdata", "sweeps", sw.name+".txt"), *sweepUpdate, results)
+		checkExpectations(t, filepath.Join("testdata", "sweeps", sw.name+".txt"), *sweepUpdate, *sweepRun == "", platformKeys(t, o.Version()), results)
 	}
 }
 
@@ -173,9 +173,19 @@ func runSweepCase(t *testing.T, o *oracle.Oracle, c *aster.Converter, mode sweep
 		if r.status == "oracle-failure" {
 			return r
 		}
-		// As compareOne does: the compiled Vega counts only when upstream
-		// compiled the case and the engine did too.
-		if v := compareCompiled(t, o, c, sc); v.status == "vega-differ" {
+		// As compareOne does: the compiled Vega counts when upstream
+		// compiled the case; an engine that does not compile it differs
+		// (C74), and one that panics compiling it fails.
+		v := compareCompiled(t, o, c, sc)
+		switch v.status {
+		case "oracle-failure":
+			return v
+		case statusInternalError:
+			if !strings.Contains(r.status, statusInternalError) {
+				r.status = statusInternalError
+			}
+			r.detail += vegaDetailMarker + v.detail
+		case "vega-differ", "engine-error":
 			if r.status == "ok" {
 				r.status, r.detail = "vega-differ", ""
 			} else {
@@ -204,13 +214,13 @@ func runSweepCase(t *testing.T, o *oracle.Oracle, c *aster.Converter, mode sweep
 		r.status = "oracle-failure"
 		return r
 	}
-	switch {
-	case gerr != nil && want.Err != "":
-		r.status, r.svg = "ok", "both-error" // agreement: upstream refuses it too
-	case gerr != nil:
-		r.status, r.svg, r.detail = "engine-error", "engine-error", firstLine(gerr.Error())
-	case want.Err != "":
-		r.status, r.svg, r.detail = "node-error", "node-error", firstLine(want.Err)
+	switch out := errorOutcome(gerr, want.Err); out {
+	case "both-error":
+		r.status, r.svg = "ok", out // agreement: upstream refuses it too
+	case statusInternalError, "engine-error":
+		r.status, r.svg, r.detail = out, out, firstLine(gerr.Error())
+	case "node-error":
+		r.status, r.svg, r.detail = out, out, firstLine(want.Err)
 	default:
 		d, err := svgdiff.Compare([]byte(got), []byte(want.SVG), svgTolerance)
 		switch {
@@ -238,13 +248,13 @@ func compareCompiled(t *testing.T, o *oracle.Oracle, c *aster.Converter, sc swee
 		return r
 	}
 	got, gerr := c.VegaLiteToVega(sc.Spec)
-	switch {
-	case gerr != nil && want.Err != "":
-		r.status, r.svg = "ok", "both-error"
-	case gerr != nil:
-		r.status, r.svg, r.detail = "engine-error", "engine-error", firstLine(gerr.Error())
-	case want.Err != "":
-		r.status, r.svg, r.detail = "node-error", "node-error", firstLine(want.Err)
+	switch out := errorOutcome(gerr, want.Err); out {
+	case "both-error":
+		r.status, r.svg = "ok", out
+	case statusInternalError, "engine-error":
+		r.status, r.svg, r.detail = out, out, firstLine(gerr.Error())
+	case "node-error":
+		r.status, r.svg, r.detail = out, out, firstLine(want.Err)
 	default:
 		g, err1 := jsval.ParseJSON(got)
 		w, err2 := jsval.ParseJSON(want.Vega)

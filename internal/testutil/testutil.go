@@ -1,5 +1,6 @@
 // Package testutil holds what tests share to stay independent of the machine
-// they run on: a wall-clock limit exists to signal unbounded or quadratic
+// they run on (and the synthetic fonts of sfnt.go, which tests build rather
+// than read from the machine's): a wall-clock limit exists to signal unbounded or quadratic
 // behaviour, not to measure speed, so it is calibrated and never a guess.
 //
 //   - A limit is 2x the time CI measured (ASTER_TIMINGS, see Timing), floor

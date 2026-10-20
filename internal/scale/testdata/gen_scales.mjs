@@ -45,6 +45,22 @@ for (const r of colorRanges) for (const it of interps) for (const d of [[0, 1], 
 // other value types in ranges
 for (const r of [['0px', '100px'], ['M0,0L1,1', 'M10,20L30,40'], ['a', 'b'], [true, false], [null, 5], [O({ a: 0 }), O({ a: 10, b: 1 })], [[0, 0], [10, 20]], [[0, 0], [10, 20, 30]], [D(0), D(1e12)], ['10', '20'], ['1e3', '2e3'], ['translate(0,0)', 'translate(10,20)']])
   C(`value range ${JSON.stringify(r)}`, 'linear', [['domain', [0, 1]], ['range', r]], A(cq));
+// interpolators vega-scale resolves beyond the colour spaces (C138 of the
+// 2026-10-18 audit): number-array and zoom, over well-formed and odd ranges
+for (const r of [[[0, 0, 1], [10, 20, 2]], [[0, 0, 1], [0, 0, 4]], [['5', 1, 1], [10, 2, 3]], [[1, 2], [3, 4, 5, 6]],
+  [[1, 'x', 3], [2, 4, 6]], ['12', [5, 6, 7]], [null, [1, 2]], [[1, 2, 3], null], [[1, 2], '34'], [5, [1, 2]], [[1, 2], 7]])
+  for (const it of [['number-array'], ['Number-Array'], ['zoom']])
+    C(`interp ${JSON.stringify(it)} r=${JSON.stringify(r)}`, 'linear', [['domain', [0, 1]], ['range', r], ['interpolate', it]], A([-1, 0, 0.25, 0.5, 1, 2, NaNv]));
+// every name vega-scale resolves through d3['interpolate' + CamelCase(name)],
+// over ranges of each kind of value (the PR 13 review of the 2026-10-18 audit)
+for (const it of ['number', 'round', 'string', 'array', 'object', 'date', 'hue', 'number-array', 'zoom', 'basis', 'basis-closed',
+  'discrete', 'rgb-basis', 'rgb-basis-closed', 'transform-css', 'transform-svg', 'rgb', 'hsl', 'hsl-long', 'lab', 'hcl', 'hcl-long',
+  'cubehelix', 'cubehelix-long', 'Basis-Closed'])
+  for (const [d, r] of [[[0, 1], [0, 100]], [[0, 1], ['red', 'blue']], [[0, 1], [[0, 10, 30, 20], [5, 5]]], [[0, 0.5, 1], ['#f00', '#0f0', '#00f']],
+    [[0, 1], [null, null]], [[0, 1], [null, 'translate(1,2)']], [[0, 1], ['translate(1,2)', 'translate(3,4)']], [[0, 1], ['abc', 'def']],
+    [[0, 1], [[], [1]]], [[0, 1], [['red', 'green', 'blue'], 'x']], [[0, 1], [O({ length: 3, 0: 1, 1: 5, 2: 2 }), 0]], [[0, 1], [U, 3]]])
+    C(`interpall ${it} d=${JSON.stringify(d)} r=${JSON.stringify(r)}`, 'linear', [['domain', d], ['range', r], ['interpolate', [it]]],
+      A([-0.5, 0, 0.1, 0.25, 0.5, 0.75, 0.9, 1, 1.5, NaNv]));
 C('linear string interp 3', 'linear', [['domain', [0, 1, 2]], ['range', ['0px 0px', '10px 5px', '20px 50px']]], A([-1, 0, 0.5, 1, 1.5, 2, 3]));
 
 // ---- log -------------------------------------------------------------------

@@ -1,0 +1,1 @@
+{"width":100,"height":40,"scales":[{"name":"o","type":"bin-ordinal","domain":[0,10,{"signal":"null"},30],"range":["red","green","blue"]}],"marks":[{"type":"text","encode":{"enter":{"y":{"value":10},"text":{"signal":"[domain('o'), scale('o', 0), scale('o', 5), scale('o', 15), scale('o', 40)]"}}}}]}

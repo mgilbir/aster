@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"os"
 	"testing"
-	"time"
 )
 
 // TestWeekEveryMatchesD3 is X15: week.every(k) in zones with daylight
@@ -38,12 +37,8 @@ func TestWeekEveryMatchesD3(t *testing.T) {
 		if err := json.Unmarshal(sc.Bytes(), &rec); err != nil {
 			t.Fatal(err)
 		}
-		loc, err := time.LoadLocation(rec.Zone)
-		if err != nil {
-			t.Fatal(err)
-		}
 		zones++
-		z := Local(loc)
+		z := Local(mustLoc(t, rec.Zone))
 		for _, c := range rec.Recs {
 			iv, _ := z.Week(0).Every(c.K)
 			if got := iv.Floor(c.T); got != c.Floor {
@@ -75,11 +70,7 @@ func TestWeekEveryMatchesD3(t *testing.T) {
 // up to k of them.
 func TestWeekSearchWorkIsLogarithmic(t *testing.T) {
 	for _, zone := range []string{"America/New_York", "Pacific/Apia", "Australia/Lord_Howe"} {
-		loc, err := time.LoadLocation(zone)
-		if err != nil {
-			t.Fatal(err)
-		}
-		z := Local(loc)
+		z := Local(mustLoc(t, zone))
 		for _, k := range []float64{65, 1000, 65537, 1e6} {
 			iv, _ := z.Week(0).Every(k)
 			if !iv.weekSearch() {

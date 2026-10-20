@@ -1,0 +1,1 @@
+{"data": [{"name": "t", "values": [{"k": "__proto__", "v": 1}]}], "marks": [{"type": "group", "from": {"data": "t"}, "key": "k", "marks": [{"type": "text", "encode": {"enter": {"text": {"signal": "datum.k+datum.v"}, "y": {"signal": "datum.v*10"}}}, "from": {"data": "t"}}]}], "width": 100, "height": 100}

@@ -47,8 +47,8 @@ func TestLayoutMalformedScenes(t *testing.T) {
 		empty,
 	)
 	root := mark("frame", scene.MarkGroup, g)
-	auto := ParseAutosize(jsval.Str("fit"))
-	view := &View{Width: 100, Height: 100, AutosizeActive: true}
+	auto := ParseAutosize(jsval.Obj(jsval.ObjectOf("type", jsval.Str("fit"))))
+	view := &View{Width: jsval.Int(100), Height: jsval.Int(100), AutosizeActive: true}
 
 	specs := []jsval.Value{
 		jsval.Undefined,

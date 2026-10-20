@@ -23,9 +23,10 @@ func Formula(ctx context.Context, data []jsval.Value, p FormulaParams) ([]jsval.
 		if err := poll(ctx, i); err != nil {
 			return nil, err
 		}
-		if o := t.ObjValue(); o != nil {
-			o.Set(p.As, p.Expr(t))
-		}
+		// `t[as] = expr(t)`: the value first, then the write, which
+		// throws into a primitive tuple.
+		v := p.Expr(t)
+		jsval.FieldsFor(t, p.As).Set(p.As, v)
 	}
 	return data, nil
 }

@@ -1,0 +1,1 @@
+{"data":{"values":[{"a":1}]},"mark":"point","selection":{"constructor":{"type":"single"}},"encoding":{"x":{"field":"a","type":"quantitative"},"color":{"condition":{"selection":"constructor","value":"red"},"value":"blue"}}}

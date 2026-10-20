@@ -1,0 +1,1 @@
+{"width": 100, "height": 100, "data": [{"name": "src", "values": [{"a": 1}, {"a": 2}]}], "marks": [{"type": "rect", "from": {"data": "src"}, "encode": {"update": {"x": {"signal": "datum.a*5"}, "width": {"value": 3}, "height": {"value": 3}}}, "sort": {"field": "x.y"}}]}

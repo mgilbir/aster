@@ -5,7 +5,6 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -49,7 +48,14 @@ func TestVegaLiteWarningsMatchNode(t *testing.T) {
 	if len(files) < 1000 {
 		t.Fatalf("only %d specs", len(files))
 	}
-	for _, v := range []struct{ set, version string }{{oracle.VL6, "6.4"}, {oracle.VL5, "5.8"}} {
+	// floor is how many specs each version compiles on both sides today:
+	// warnings are compared only for those, so an engine that stopped
+	// compiling them would otherwise compare none and pass (C72, audit
+	// 2026-10-18). Raise it as specs are added.
+	for _, v := range []struct {
+		set, version string
+		floor        int
+	}{{oracle.VL6, "6.4", 2924}, {oracle.VL5, "5.8", 2926}} {
 		o := oracle.For(t, v.set)
 		c, err := aster.New(aster.WithVegaLiteVersion(v.version))
 		if err != nil {
@@ -67,6 +73,10 @@ func TestVegaLiteWarningsMatchNode(t *testing.T) {
 				t.Fatalf("oracle: %v", err)
 			}
 			got, gerr := compileWarnings(c, spec)
+			if isEngineBug(gerr) {
+				t.Errorf("%s (VL %s): the engine panics: %v", f, v.version, gerr)
+				continue
+			}
 			if want.Err != "" || gerr != nil {
 				continue // errors are compared elsewhere
 			}
@@ -74,14 +84,17 @@ func TestVegaLiteWarningsMatchNode(t *testing.T) {
 			if len(want.Warnings) > 0 {
 				withWarnings++
 			}
-			if !slices.Equal(got, want.Warnings) {
+			if !oracle.WarningsMatch(got, want.Warnings) {
 				differ++
 				if differ <= 40 || *warningsVerbose {
-					t.Errorf("%s (VL %s): warnings differ\n  engine: %s\n  node:   %s", f, v.version, strings.Join(got, " | "), strings.Join(want.Warnings, " | "))
+					t.Errorf("%s (VL %s): warnings differ\n  engine: %s\n  node:   %s", f, v.version, strings.Join(got, " | "), strings.Join(oracle.CutWarnings(want.Warnings), " | "))
 				}
 			}
 		}
 		t.Logf("VL %s: %d specs compiled, %d with warnings upstream, %d differ", v.version, specs, withWarnings, differ)
+		if specs < v.floor {
+			t.Errorf("VL %s: compared the warnings of %d specs, fewer than the floor of %d", v.version, specs, v.floor)
+		}
 	}
 }
 
@@ -173,12 +186,12 @@ func TestVegaLiteWarningSitesMatchNode(t *testing.T) {
 				t.Fatalf("oracle: %v", err)
 			}
 			got, gerr := compileWarnings(c, []byte(spec))
-			if (want.Err != "") != (gerr != nil) {
-				t.Errorf("%s (VL %s): engine error %v, node error %q", spec, v.version, gerr, want.Err)
+			if out := errorOutcome(gerr, want.Err); out != "" && out != "both-error" {
+				t.Errorf("%s (VL %s): %s: engine error %v, node error %q", spec, v.version, out, gerr, want.Err)
 				continue
 			}
-			if !slices.Equal(got, want.Warnings) {
-				t.Errorf("%s (VL %s): warnings differ\n  engine: %s\n  node:   %s", spec, v.version, strings.Join(got, " | "), strings.Join(want.Warnings, " | "))
+			if !oracle.WarningsMatch(got, want.Warnings) {
+				t.Errorf("%s (VL %s): warnings differ\n  engine: %s\n  node:   %s", spec, v.version, strings.Join(got, " | "), strings.Join(oracle.CutWarnings(want.Warnings), " | "))
 			}
 		}
 	}

@@ -93,7 +93,7 @@ func Transform(ctx context.Context, data []jsval.Value, p Params) error {
 		if err := m.Work(1); err != nil {
 			return err
 		}
-		o := d.ObjValue()
+		o := jsval.Fields(d)
 		if o == nil {
 			continue
 		}

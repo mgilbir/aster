@@ -3,9 +3,12 @@
 // masks, filters, markers, group opacity, text from glyph outlines and PNG
 // output. It targets the SVG that Vega's SVG renderer emits plus general-purpose
 // SVG (paths, basic shapes, use/symbol/nested svg, clipPath, mask, pattern,
-// marker, the common filter primitives, <style> sheets, data: images and
-// text/tspan) and matches resvg 0.45's output to within anti-aliasing noise;
-// the tests compare both on a corpus and on synthetic documents.
+// marker, the filter primitives, <style> sheets, data: images and
+// text/tspan) and matches resvg 0.45's output to within anti-aliasing noise,
+// except where resvg's filters depart from the Filter Effects specification,
+// which the filters follow instead (ADR 0015, each departure listed in
+// docs/api.md); the tests compare both on a corpus and on synthetic
+// documents.
 //
 // Supported beyond the basics:
 //
@@ -17,10 +20,15 @@
 //     style sheets and style attributes.
 //   - mask (luminance and alpha, maskUnits, maskContentUnits, nested masks),
 //     clipPath with clipPathUnits=objectBoundingBox and <text> children.
-//   - filter: feGaussianBlur, feOffset, feFlood, feColorMatrix, feComposite
-//     (all operators), feMerge, feBlend, feDropShadow, feComponentTransfer,
-//     filterUnits, primitiveUnits, primitive sub-regions, result/in chaining,
-//     color-interpolation-filters. Other primitives yield transparent black.
+//   - filter: every primitive of Filter Effects 1 (feGaussianBlur,
+//     feOffset, feFlood, feColorMatrix, feComposite with all operators,
+//     feMerge, feBlend, feDropShadow, feComponentTransfer, feTile,
+//     feMorphology, feConvolveMatrix, feDisplacementMap, feTurbulence,
+//     feDiffuseLighting and feSpecularLighting with their light sources,
+//     feImage), filterUnits, primitiveUnits, primitive sub-regions,
+//     result/in chaining, color-interpolation-filters. A lighting with no
+//     light source, an feImage with nothing to draw and a primitive whose
+//     sub-region is empty give transparent black.
 //   - pattern fills and strokes (patternUnits, patternContentUnits,
 //     patternTransform, viewBox, href inheritance) and markers (start, mid,
 //     end, orient auto / auto-start-reverse / angle, markerUnits, refX/refY,
@@ -40,9 +48,11 @@
 // expansion, layer depth, embedded image size, style sheet size and matching
 // work, filter region size, the pixels spent on filters and pattern tiles,
 // the path geometry held and computed, and every pixel buffer (layers, clip
-// coverage, filter intermediates) are all bounded (see Limits); decoded
-// images and the render's caches are charged to the call's ledger before
-// they are allocated; nothing is fetched from the network or the
+// coverage, filter intermediates) are all bounded (see Limits); the parsed
+// tree, the style sheets' rules and what they apply, text as it is laid
+// out, decoded images and the render's caches are charged to the call's
+// ledger before they are allocated, and parsing and style matching poll
+// the context as they go; nothing is fetched from the network or the
 // filesystem; malformed input yields an error or is skipped, never a panic.
 package raster
 
@@ -208,10 +218,23 @@ func renderDocInto(svg []byte, opts Options, target renderTarget, finish func(*r
 	if len(svg) > lim.MaxInputBytes {
 		return fmt.Errorf("raster: SVG input is %d bytes, limit is %d: %w", len(svg), lim.MaxInputBytes, errLimit)
 	}
-	doc, err := parseDocumentCtx(opts.Context, string(svg), lim)
+	// The render's memory is charged to the call's ledger, from the parse
+	// on; called on its own (not through the public API), a render still
+	// has its memory bounded: by a ledger of its own.
+	ledger := budget.LedgerFrom(opts.Context)
+	if ledger == nil {
+		ledger = budget.NewLedger(opts.Context, budget.LedgerLimits{MaxBytes: defaultLedgerBytes})
+	}
+	// The source the tree's strings point into.
+	if err := ledger.Alloc(int64(len(svg))); err != nil {
+		return overLedger("reading the SVG", err)
+	}
+	defer ledger.Free(int64(len(svg)))
+	doc, err := parseDoc(opts.Context, ledger, string(svg), lim)
 	if err != nil {
 		return err
 	}
+	defer doc.release()
 	root := doc.root
 
 	// Document size (usvg semantics: width/height default to the viewBox size).
@@ -271,7 +294,7 @@ func renderDocInto(svg []byte, opts Options, target renderTarget, finish func(*r
 			return err
 		}
 	}
-	fetched, err := fetchImages(opts.Context, doc, opts.Images, lim)
+	fetched, err := fetchImages(opts.Context, ledger, doc, opts.Images, lim)
 	if err != nil {
 		return err
 	}
@@ -279,12 +302,7 @@ func renderDocInto(svg []byte, opts Options, target renderTarget, finish func(*r
 		doc: doc, lim: lim, shaper: shaper,
 		rast: newRasterizer(), cw: cw, ch: ch, active: map[*node]bool{},
 		ctx: opts.Context, fetched: fetched, imageErr: opts.ImageError,
-		ledger: budget.LedgerFrom(opts.Context), wholeLayers: opts.wholeLayers,
-	}
-	if r.ledger == nil {
-		// Called on its own (not through the public API), a render still
-		// has its memory bounded: by a ledger of its own.
-		r.ledger = budget.NewLedger(opts.Context, budget.LedgerLimits{MaxBytes: defaultLedgerBytes})
+		ledger: ledger, wholeLayers: opts.wholeLayers,
 	}
 	// The kept tiles, bitmaps and images go with the render.
 	defer r.dropColourImages()
@@ -292,6 +310,7 @@ func renderDocInto(svg []byte, opts Options, target renderTarget, finish func(*r
 	defer r.dropImages()
 	r.initCaches()
 	defer r.dropCaches()
+	defer r.releaseText(0) // a layout measured outside any element: a clip on the root
 	r.rast.ctx = opts.Context
 	r.fl.r = r
 	// The work budget follows the scale and the canvas (see PixelOps), from

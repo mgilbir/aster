@@ -11,7 +11,7 @@ func GeoContains(object jsval.Value, point [2]float64) bool {
 	if !object.IsObj() {
 		return false
 	}
-	switch typeOf(object) {
+	switch typeOf(object.Get("type")) {
 	case "Feature":
 		return containsGeometry(object.Get("geometry"), point, 0)
 	case "FeatureCollection":
@@ -34,7 +34,7 @@ func containsGeometry(g jsval.Value, point [2]float64, depth int) bool {
 		return false
 	}
 	coords := g.Get("coordinates")
-	switch typeOf(g) {
+	switch typeOf(g.Get("type")) {
 	case "Sphere":
 		return true
 	case "Point":

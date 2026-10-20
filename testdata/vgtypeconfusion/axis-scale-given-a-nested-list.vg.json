@@ -1,0 +1,1 @@
+{"config":{"axis":{"domain":false}},"scales":[{"name":"x"},{"name":"y"}],"axes":[{"orient":"top","scale":"x"},{"orient":"bottom","scale":"x"},{"orient":"left","scale":"y"},{"orient":"right","scale":[["y"]],"ticks":false,"labels":false}]}

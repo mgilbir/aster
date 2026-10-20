@@ -7,6 +7,7 @@ import (
 	"math"
 	"slices"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsmath"
 
 	"github.com/mgilbir/aster/internal/jsval"
@@ -20,9 +21,13 @@ import (
 type RegressionModel struct {
 	// Coef are the coefficients in the method's own convention (intercept
 	// first for linear/quad/poly; [a, b] of a*x^b for pow, and of a*e^(b*x) for exp).
-	Coef     []float64
-	RSquared float64
-	Predict  func(x float64) float64
+	Coef []float64
+	// CoefValues, when not nil, are the coefficients as upstream's array holds
+	// them where one is not a number (a polynomial whose order made k a string
+	// leaves `k + y` text); it then replaces Coef in the params output.
+	CoefValues []jsval.Value
+	RSquared   float64
+	Predict    func(x float64) float64
 }
 
 // MaxPolyOrder bounds the order of the poly method.
@@ -34,33 +39,47 @@ var regressionMethods = map[string]bool{
 }
 
 // FitRegression fits the named method (constant, linear, log, exp, pow, quad,
-// poly) to the tuples. Points whose x or y is null or not a number are ignored.
-// order only applies to poly.
-func FitRegression(method string, data []jsval.Value, x, y Accessor, order float64) (RegressionModel, error) {
-	return FitRegressionCtx(context.Background(), method, data, x, y, order)
+// poly) to the tuples. Points whose x or y is null or not a number are
+// ignored. order only applies to poly. Every point a pass reads is a step of
+// work charged to ctx's ledger, which polls ctx, so a fit stops with the
+// context's error when ctx is done (a high-order polynomial fit costs
+// order^2 passes).
+func FitRegression(ctx context.Context, method string, data []jsval.Value, x, y Accessor, order float64) (RegressionModel, error) {
+	// Each fit reads x for every point of every pass over them.
+	x, cancelled := meteredAccessor(ctx, x)
+	m, err := fitRegression(ctx, method, data, x, y, order)
+	if cerr := cancelled(); cerr != nil {
+		return RegressionModel{}, cerr
+	}
+	return m, err
 }
 
-// FitRegressionCtx is FitRegression that stops with the context's error when
-// ctx is cancelled (a high-order polynomial fit costs order^2 passes).
-func FitRegressionCtx(ctx context.Context, method string, data []jsval.Value, x, y Accessor, order float64) (RegressionModel, error) {
+func fitRegression(ctx context.Context, method string, data []jsval.Value, x, y Accessor, order float64) (RegressionModel, error) {
 	switch method {
 	case "constant":
-		return FitConstant(data, x, y), nil
+		return fitConstant(data, x, y), nil
 	case "linear":
-		return FitLinear(data, x, y), nil
+		return fitLinear(data, x, y), nil
 	case "log":
-		return FitLog(data, x, y), nil
+		return fitLog(data, x, y), nil
 	case "exp":
-		return FitExp(data, x, y), nil
+		return fitExp(data, x, y), nil
 	case "pow":
-		return FitPow(data, x, y), nil
+		return fitPow(data, x, y), nil
 	case "quad":
-		return FitQuad(data, x, y), nil
+		return fitQuad(data, x, y), nil
 	case "poly":
 		return fitPoly(ctx, data, x, y, order)
 	}
 	return RegressionModel{}, fmt.Errorf("Invalid regression method: %s", method)
 }
+
+// polyGeneral is the context key of an order that is no number (see
+// RegressionParams.OrderIsNumber), its value the order as given:
+// regressionPoly's `order === 0`, 1 and 2 shortcuts fail for it, and its
+// k = order + 1 is what JavaScript's + makes (text for a string, an array or
+// an object).
+type polyGeneral struct{}
 
 // regressionNum is `(u = +u) >= u`: the number, and whether it is not NaN
 // (null and undefined are rejected first).
@@ -145,8 +164,8 @@ func regressionRSquared(data []jsval.Value, x, y Accessor, uY float64, predict f
 	return 1 - sse/sst
 }
 
-// FitConstant is the mean of y (rSquared is 0 by definition).
-func FitConstant(data []jsval.Value, x, y Accessor) RegressionModel {
+// fitConstant is the mean of y (rSquared is 0 by definition).
+func fitConstant(data []jsval.Value, x, y Accessor) RegressionModel {
 	mean, n := 0.0, 0
 	for _, d := range data {
 		v := y(d)
@@ -165,8 +184,8 @@ func FitConstant(data []jsval.Value, x, y Accessor) RegressionModel {
 	return RegressionModel{Coef: []float64{mean}, RSquared: 0, Predict: func(float64) float64 { return mean }}
 }
 
-// FitLinear is least-squares line fitting; Coef is [intercept, slope].
-func FitLinear(data []jsval.Value, x, y Accessor) RegressionModel {
+// fitLinear is least-squares line fitting; Coef is [intercept, slope].
+func fitLinear(data []jsval.Value, x, y Accessor) RegressionModel {
 	var X, Y, XY, X2 float64
 	n := 0
 	regressionVisit(data, x, y, func(dx, dy float64) {
@@ -182,8 +201,8 @@ func FitLinear(data []jsval.Value, x, y Accessor) RegressionModel {
 	return RegressionModel{Coef: []float64{a, b}, Predict: predict, RSquared: regressionRSquared(data, x, y, Y, predict)}
 }
 
-// FitLog fits y = a + b*ln(x); Coef is [a, b].
-func FitLog(data []jsval.Value, x, y Accessor) RegressionModel {
+// fitLog fits y = a + b*ln(x); Coef is [a, b].
+func fitLog(data []jsval.Value, x, y Accessor) RegressionModel {
 	var X, Y, XY, X2 float64
 	n := 0
 	regressionVisit(data, x, y, func(dx, dy float64) {
@@ -200,9 +219,9 @@ func FitLog(data []jsval.Value, x, y Accessor) RegressionModel {
 	return RegressionModel{Coef: []float64{a, b}, Predict: predict, RSquared: regressionRSquared(data, x, y, Y, predict)}
 }
 
-// FitExp fits y = a*exp(b*x) by the weighted log-linear least squares of
+// fitExp fits y = a*exp(b*x) by the weighted log-linear least squares of
 // d3-regression; Coef is [a, b].
-func FitExp(data []jsval.Value, x, y Accessor) RegressionModel {
+func fitExp(data []jsval.Value, x, y Accessor) RegressionModel {
 	ps := regressionPoints(data, x, y, false)
 	var YL, XY, XYL, X2Y float64
 	n := 0
@@ -228,8 +247,8 @@ func FitExp(data []jsval.Value, x, y Accessor) RegressionModel {
 	}
 }
 
-// FitPow fits y = a*x^b in log space; Coef is [a, b].
-func FitPow(data []jsval.Value, x, y Accessor) RegressionModel {
+// fitPow fits y = a*x^b in log space; Coef is [a, b].
+func fitPow(data []jsval.Value, x, y Accessor) RegressionModel {
 	var X, Y, XY, X2, YS float64
 	n := 0
 	regressionVisit(data, x, y, func(dx, dy float64) {
@@ -254,8 +273,8 @@ func FitPow(data []jsval.Value, x, y Accessor) RegressionModel {
 	}
 }
 
-// FitQuad fits a parabola on mean-centred data; Coef is [c, b, a] for a*x^2+b*x+c.
-func FitQuad(data []jsval.Value, x, y Accessor) RegressionModel {
+// fitQuad fits a parabola on mean-centred data; Coef is [c, b, a] for a*x^2+b*x+c.
+func fitQuad(data []jsval.Value, x, y Accessor) RegressionModel {
 	ps := regressionPoints(data, x, y, false)
 	var X2, X3, X4, XY, X2Y float64
 	for i := range ps.x {
@@ -290,33 +309,60 @@ func FitQuad(data []jsval.Value, x, y Accessor) RegressionModel {
 }
 
 func fitPoly(ctx context.Context, data []jsval.Value, x, y Accessor, order float64) (RegressionModel, error) {
-	switch order {
-	case 0:
-		return FitConstant(data, x, y), nil
-	case 1:
-		return FitLinear(data, x, y), nil
-	case 2:
-		return FitQuad(data, x, y), nil
+	raw, general := ctx.Value(polyGeneral{}).(jsval.Value)
+	if !general {
+		switch order {
+		case 0:
+			return fitConstant(data, x, y), nil
+		case 1:
+			return fitLinear(data, x, y), nil
+		case 2:
+			return fitQuad(data, x, y), nil
+		}
+	}
+	// k = order + 1 (JavaScript's +): text where the order is a string, an
+	// array or an object, a number otherwise.
+	kText, kIsText := "", false
+	loop := order + 1 // what `i < k` compares: the number k reads as
+	if general {
+		w := jsval.WalkerFor(ctx)
+		switch raw.Kind() {
+		case jsval.KindStr, jsval.KindArr, jsval.KindObj, jsval.KindTimestamp, jsval.KindPattern:
+			kText, kIsText = w.String(raw)+"1", true
+			loop = jsval.StringToNumber(kText)
+		default:
+			loop = jsval.ToNumber(raw) + 1
+		}
 	}
 	// Upstream takes any number for the order, k = order + 1 coefficients; once
 	// the normal equations are solved it allocates Array(k) for the expanded
 	// polynomial, which throws unless k is an integer that is a valid array
 	// length. A fractional, NaN or negative-below-minus-one order therefore ends
 	// in that RangeError (the system it would have solved first has no effect),
-	// and an order of -1 fits nothing: its coefficients are NaN.
-	if k := order + 1; k != math.Trunc(k) || k < 0 || k > math.MaxUint32 {
-		return RegressionModel{}, errors.New("RangeError: Invalid array length")
+	// and an order of -1 fits nothing: its coefficients are NaN. Text k never
+	// throws: Array("21") is the one-element array ["21"].
+	if !kIsText {
+		if k := loop; k != math.Trunc(k) || k < 0 || k > math.MaxUint32 {
+			return RegressionModel{}, errors.New("RangeError: Invalid array length")
+		}
 	}
-	if order > MaxPolyOrder {
-		return RegressionModel{}, fmt.Errorf("regression: poly order %g out of range [-1,%d]", order, MaxPolyOrder)
+	if loop-1 > MaxPolyOrder {
+		return RegressionModel{}, fmt.Errorf("regression: poly order %g out of range [-1,%d]", loop-1, MaxPolyOrder)
 	}
 	ps := regressionPoints(data, x, y, false)
 	n := len(ps.x)
-	k := int(order) + 1
-	matrix := make([][]float64, 0, k+1)
-	lhs := make([]float64, 0, k)
-	for i := 0; i < k; i++ {
-		if err := ctx.Err(); err != nil {
+	// rows is how often `for (i=0; i<k; ++i)` runs; width is the length of
+	// the Float64Array(k) each row is (ToIndex truncates; a fraction below 1,
+	// NaN or a negative k never reaches the loop).
+	rows, width := 0, 0
+	if loop > 0 {
+		rows, width = int(math.Ceil(loop)), int(loop)
+	}
+	matrix := make([][]float64, 0, rows+1)
+	lhs := make([]float64, 0, rows)
+	work := budget.NewMeter(ctx)
+	for i := 0; i < rows; i++ {
+		if err := work.Work(int64(n + 1)); err != nil {
 			return RegressionModel{}, err
 		}
 		v := 0.0
@@ -324,22 +370,29 @@ func fitPoly(ctx context.Context, data []jsval.Value, x, y Accessor, order float
 			v += float64(jsmath.Pow(ps.x[l], float64(i)) * ps.y[l])
 		}
 		lhs = append(lhs, v)
-		c := make([]float64, k)
-		for j := 0; j < k; j++ {
-			// One pass over the data per (i, j) pair: poll per pass.
-			if err := ctx.Err(); err != nil {
+		c := make([]float64, width)
+		for j := 0; j < rows; j++ {
+			// One pass over the data per (i, j) pair.
+			if err := work.Work(int64(n + 1)); err != nil {
 				return RegressionModel{}, err
 			}
 			v = 0
 			for l := 0; l < n; l++ {
 				v += jsmath.Pow(ps.x[l], float64(i+j))
 			}
-			c[j] = v
+			if j < width { // a write past a typed array's end is dropped
+				c[j] = v
+			}
 		}
 		matrix = append(matrix, c)
 	}
 	matrix = append(matrix, lhs)
-	coef := regressionGauss(matrix)
+	var coef []float64
+	if width == rows {
+		coef = regressionGauss(matrix)
+	} else {
+		coef = regressionGaussTyped(matrix)
+	}
 	ux, uy := ps.ux, ps.uy
 	predict := func(x float64) float64 {
 		x -= ux
@@ -351,16 +404,75 @@ func fitPoly(ctx context.Context, data []jsval.Value, x, y Accessor, order float
 			return math.NaN()
 		}
 		y := uy + at(0) + float64(at(1)*x) + float64(float64(at(2)*x)*x)
-		for i := 3; i < k; i++ {
-			y += float64(coef[i] * jsmath.Pow(x, float64(i)))
+		for i := 3; float64(i) < loop; i++ {
+			y += float64(at(i) * jsmath.Pow(x, float64(i)))
 		}
 		return y
 	}
-	return RegressionModel{
-		Coef:     regressionUncenter(k, coef, -ux, uy),
-		Predict:  predict,
-		RSquared: regressionRSquared(data, x, y, uy, predict),
-	}, nil
+	m := RegressionModel{Predict: predict, RSquared: regressionRSquared(data, x, y, uy, predict)}
+	switch {
+	case !kIsText:
+		m.Coef = regressionUncenter(rows, coef, -ux, uy)
+	case loop <= 0 || loop != loop:
+		// Array(k) holds the text; the loops that would replace it never run,
+		// and `z[0] += y` concatenates.
+		m.Coef = []float64{math.NaN()}
+		m.CoefValues = []jsval.Value{jsval.Str(kText + jsval.WalkerFor(ctx).String(jsval.Num(uy)))}
+	case loop != math.Trunc(loop):
+		// i = k - 1 is fractional: every z[i] it touches is a property, not
+		// an element, so only the zero fill and the bias term remain.
+		m.Coef = make([]float64, rows)
+		m.Coef[0] = uy
+	default:
+		m.Coef = regressionUncenter(rows, coef, -ux, uy)
+	}
+	return m, nil
+}
+
+// regressionGaussTyped is regressionGauss for rows that are Float64Arrays
+// shorter than the system: a read past the end is undefined (NaN in any
+// arithmetic) and a write past it is dropped. The last row (the right-hand
+// side) is a plain array of full length.
+func regressionGaussTyped(matrix [][]float64) []float64 {
+	n := len(matrix) - 1
+	get := func(r, c int) float64 {
+		if c < len(matrix[r]) {
+			return matrix[r][c]
+		}
+		return math.NaN()
+	}
+	set := func(r, c int, v float64) {
+		if c < len(matrix[r]) {
+			matrix[r][c] = v
+		}
+	}
+	coef := make([]float64, n)
+	for i := 0; i < n; i++ {
+		r := i
+		for j := i + 1; j < n; j++ {
+			if math.Abs(get(i, j)) > math.Abs(get(i, r)) {
+				r = j
+			}
+		}
+		for k := i; k < n+1; k++ {
+			t := get(k, i)
+			set(k, i, get(k, r))
+			set(k, r, t)
+		}
+		for j := i + 1; j < n; j++ {
+			for k := n; k >= i; k-- {
+				set(k, j, get(k, j)-float64(get(k, i)*get(i, j))/get(i, i))
+			}
+		}
+	}
+	for j := n - 1; j >= 0; j-- {
+		t := 0.0
+		for k := j + 1; k < n; k++ {
+			t += float64(get(k, j) * coef[k])
+		}
+		coef[j] = (get(n, j) - t) / get(j, j)
+	}
+	return coef
 }
 
 // regressionUncenter expands the polynomial back out of mean-centred space.

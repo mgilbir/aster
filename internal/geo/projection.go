@@ -466,7 +466,11 @@ func (p *standard) SetCenter(lon, lat float64) {
 // SetRotate takes two or three angles in degrees (a third defaults to 0).
 // Transverse Mercator adds its 90 degree gamma. Like d3, rotating does not
 // recompute the Mercator clip extent.
-func (p *standard) SetRotate(angles []float64) {
+func (p *standard) SetRotate(angles []float64) { p.setRotate(angles, false) }
+
+// setRotate is SetRotate; gammaAdded says a third angle already has its 90
+// (JavaScript's `_[2] + 90` of an entry that is no number concatenates).
+func (p *standard) setRotate(angles []float64, gammaAdded bool) {
 	get := func(i int) float64 {
 		if i < len(angles) {
 			return angles[i]
@@ -481,7 +485,9 @@ func (p *standard) SetRotate(angles []float64) {
 	}
 	if p.transverse {
 		if hasG {
-			g += 90
+			if !gammaAdded {
+				g += 90
+			}
 		} else {
 			g = 90
 		}
@@ -606,10 +612,11 @@ func (p *standard) copyFrom(src *standard) {
 	p.SetPrecision(src.Precision())
 	p.SetReflectX(src.sx < 0)
 	p.SetReflectY(src.sy < 0)
-	// The extended properties, after the standard ones, and only those
-	// whose value is truthy: copy() runs `if (p[prop]) c[prop](p[prop]())`.
+	// The extended properties the type takes, after the standard ones:
+	// copy() runs `if (p[prop]) c[prop](p[prop]())`, whose test is that the
+	// projection has the method, so a 0 or NaN is copied too.
 	for _, k := range ExtendedProperties {
-		if v, ok := src.params[k]; ok && v != 0 && !math.IsNaN(v) {
+		if v, ok := src.params[k]; ok {
 			_ = p.setParam(k, jsval.Num(v)) // src's Raw took the value
 		}
 	}

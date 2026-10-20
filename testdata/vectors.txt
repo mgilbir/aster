@@ -1,0 +1,87 @@
+# The committed vector files and how each is recorded (see internal/vectors).
+# Regenerate and compare: go run ./internal/cmd/vectors   (re-record: -write)
+#
+# dir | env | command (node's arguments) | outputs | inputs (globs from the root) | platform
+#
+# TZ is UTC unless env sets it; NODE_PATH is testdata/oracle-node's node_modules,
+# or testdata/oracle-node-vl5's with MODULES=vl5.
+
+internal/expr | - | testdata/gen_expr.mjs | > testdata/expr_utc.json.gz | - | any
+internal/expr | TZ=America/New_York | testdata/gen_expr.mjs dates | > testdata/expr_ny.json.gz | - | any
+internal/expr | - | testdata/gen_functions.mjs | > testdata/functions.json | - | any
+internal/expr | - | testdata/gen_builtins.mjs | > testdata/builtins.json.gz | internal/expr/testdata/functions.json | any
+internal/expr | - | testdata/gen_idtables.mjs | > idtables.go | - | any
+internal/expr | - | testdata/gen_math.mjs | > testdata/math_bits.json.gz | - | darwin-arm64
+
+internal/format | - | testdata/gen_number.mjs | > testdata/number.json.gz | - | any
+internal/format | TZ=UTC | testdata/gen_time.mjs | > testdata/time_UTC.json.gz | - | any
+internal/format | TZ=America/New_York | testdata/gen_time.mjs | > testdata/time_America_New_York.json.gz | - | any
+internal/format | TZ=Europe/Amsterdam | testdata/gen_time.mjs | > testdata/time_Europe_Amsterdam.json.gz | - | any
+internal/format | TZ=America/Sao_Paulo | testdata/gen_time.mjs | > testdata/time_America_Sao_Paulo.json.gz | - | any
+internal/format | TZ=Asia/Kolkata | testdata/gen_time.mjs | > testdata/time_Asia_Kolkata.json.gz | - | any
+internal/format | TZ=Australia/Lord_Howe | testdata/gen_time.mjs | > testdata/time_Australia_Lord_Howe.json.gz | - | any
+internal/format | - | testdata/gen_duck.mjs | > testdata/duck.json.gz | - | any
+internal/format | TZLIST=UTC,America/New_York,Africa/Monrovia | testdata/gen_calendar.mjs | > testdata/calendar.jsonl.gz | - | any
+internal/format | TZLIST=UTC,America/New_York | testdata/gen_dateparse.mjs | > testdata/dateparse.jsonl.gz | - | any
+internal/format | - | testdata/gen_zonenames.mjs ../nodetz/tzdata.zi vectors | > testdata/zonenames.json.gz | internal/nodetz/tzdata.zi | any
+
+internal/geo/testdata | - | gen_geo.mjs | files points.json.gz paths.json.gz fit.json.gz measures.json graticule.json.gz topo.json.gz digits.json angle.json geoms.json.gz random.json.gz | testdata/vega-datasets/data/* | darwin-arm64
+internal/geo/testdata | - | gen_nan.mjs | > nan.json | - | any
+internal/geo/testdata | - | gen_pipeline.mjs | files pipeline.json.gz | testdata/vega-datasets/data/* | any
+
+internal/jssort | - | testdata/gen_sort.mjs | > testdata/sort.json.gz | - | any
+internal/jsval | - | testdata/gen_numbers.js | > testdata/numbers.json | - | any
+internal/jsval | - | testdata/gen_dates.mjs | > testdata/dates.json | - | any
+internal/jsval | - | testdata/gen_protonames.mjs | > testdata/protonames.json | - | any
+internal/jsval | - | testdata/gen_strings.mjs | > testdata/strings.json.gz | - | any
+internal/jsval | - | testdata/gen_utf8.mjs | > testdata/utf8.json | - | any
+internal/loader | - | testdata/gen_sanitize.mjs | > testdata/sanitize.json.gz | - | any
+
+internal/scale/color | - | testdata/gen_color.mjs | > testdata/color.json | - | any
+internal/scale/testdata | - | gen_interp.mjs | > interp.json.gz | - | any
+internal/scale/testdata | - | gen_palettes.mjs | > ../palettes.go | - | any
+internal/scale/testdata | - | gen_scales.mjs | > scales.json.gz | - | any
+internal/scale/testdata | - | gen_ticks.mjs | > ticks.json.gz | - | any
+internal/scale/testdata | TZ=America/New_York | gen_time.mjs | > time.json.gz | - | any
+internal/scale/testdata | - | gen_vega.mjs | > vega.json.gz | - | any
+
+internal/scene/testdata | TZ=Europe/Amsterdam FIXTURES=../../../testdata/vega-datasets:../../../testdata/data:../../../testdata/upstream-clones/vega/docs CORPUS=../../../testdata/corpus/vega | gen_corpus.mjs | > corpus.json.gz | internal/scene/testdata/specs/* testdata/corpus/vega/* testdata/vega-datasets/data/* testdata/data/data/* testdata/upstream-clones/vega/docs/data/flights-200k.json | darwin-arm64
+
+internal/transforms/contour | - | testdata/gen_contour.mjs | > testdata/contour.json | - | any
+internal/transforms/force | - | testdata/gen_force.mjs | > testdata/force.json | - | any
+internal/transforms/hierarchy/testdata | - | gen_hierarchy.mjs | > hierarchy.json | - | any
+internal/transforms/label/testdata | - | gen_label.mjs | > label.json | - | any
+internal/transforms/voronoi | - | testdata/gen_voronoi.mjs | > testdata/voronoi.json | - | any
+internal/transforms/voronoi | - | testdata/gen_voronoi_hostile.mjs | > testdata/voronoi_hostile.json | - | any
+internal/transforms/wordcloud | - | testdata/gen_wordcloud.mjs | > testdata/wordcloud.json | - | any
+internal/transforms/testdata | - | gen_aggregate.mjs | > aggregate.json | - | any
+internal/transforms/testdata | - | gen_compare.mjs | > compare.json | - | any
+internal/transforms/testdata | - | gen_impute_joinagg.mjs | > impute_joinagg.json | - | any
+internal/transforms/testdata | - | gen_regression.mjs | > regression.json | - | any
+internal/transforms/testdata | - | gen_reshape.mjs | > reshape.json | - | any
+internal/transforms/testdata | - | gen_stack_keys.mjs | > stack_keys.json | - | any
+internal/transforms/testdata | - | gen_stack_pie.mjs | > stack_pie.json | - | any
+internal/transforms/testdata | - | gen_stats_b.mjs | files bin_stats.json bin_transforms.json | - | any
+internal/transforms/testdata | TZ=America/New_York | gen_timeunit.mjs | > timeunit.json | - | any
+internal/transforms/testdata | - | gen_window.mjs | > window.json | - | any
+internal/transforms/testdata | - | gen_window_frames.mjs | > window_frames.json | - | any
+
+internal/vega | - | gen_definitions.mjs | > definitions.json | - | any
+internal/vega | VEGA_DATA_DIRS=../../testdata/vega-datasets/data:../../testdata/data/data | gen_scenegraph.mjs $OUT glob:../../testdata/corpus/vega/*.vg.json glob:testdata/specs/*.vg.json | outdir testdata/scene json | testdata/corpus/vega/* internal/vega/testdata/specs/* testdata/vega-datasets/data/* testdata/data/data/* | any
+internal/vega | WITH_SVG=1 VEGA_DATA_DIRS=../../testdata/vega-datasets/data:../../testdata/data/data | gen_scenegraph.mjs $OUT glob:../../testdata/corpus/vega/*.vg.json glob:testdata/specs/*.vg.json | outdir testdata/svg svg | testdata/corpus/vega/* internal/vega/testdata/specs/* testdata/vega-datasets/data/* testdata/data/data/* | any
+internal/vega | VEGA_DATA_DIRS=../../testdata/vega-datasets/data:../../testdata/data/data | gen_vl_scenegraph.mjs $OUT each:../../testdata/vega-lite/v6.4.3/specs/{}.vl.json | outdir testdata/vl json | testdata/vega-lite/v6.4.3/specs/* testdata/vega-datasets/data/* testdata/data/data/* | any
+internal/vega/guides/testdata | - | gen_guides.mjs | > guides.json | - | any
+internal/vega/guides/testdata | - | gen_ticks.mjs | > ticks.json | - | any
+internal/vega/layout/testdata | - | gen_layout.mjs | > layout.json.gz | testdata/corpus/vega/* testdata/data/* internal/vega/layout/testdata/specs/* | any
+
+internal/vegalite/testdata | - | gen_helpers.mjs | > helpers.json | - | any
+internal/vegalite/testdata | TZ=Europe/Amsterdam | gen_reference.mjs | > reference.jsonl.gz | internal/vegalite/testdata/specs/*/* | any
+internal/vegalite/testdata | TZ=Europe/Amsterdam MODULES=vl5 | gen_reference.mjs | > reference_vl5.jsonl.gz | internal/vegalite/testdata/specs/*/* | any
+internal/vegalite/testdata | TZ=Europe/Amsterdam | gen_reference_themes.mjs | > reference_themes.jsonl.gz | internal/vegalite/testdata/specs/*/* internal/vegalite/testdata/themes.json | any
+internal/vegalite/testdata | TZ=Europe/Amsterdam MODULES=vl5 | gen_reference_themes.mjs | > reference_themes_vl5.jsonl.gz | internal/vegalite/testdata/specs/*/* internal/vegalite/testdata/themes.json | any
+internal/format | TZLIST=America/New_York,America/Sao_Paulo,Australia/Lord_Howe,Pacific/Apia,Europe/London,America/St_Johns,Asia/Kolkata | testdata/gen_weekevery.mjs | > testdata/weekevery.jsonl.gz | - | any
+internal/vega | - | gen_node_records.mjs crossfilter | > testdata/crossfilter.node.json | internal/vega/testdata/crossfilter/* | any
+internal/vega | - | gen_node_records.mjs prefacet | > testdata/prefacet.node.json | internal/vega/testdata/prefacet/* | any
+internal/vega | - | gen_node_records.mjs accessors | > testdata/expr-accessor-names.node.json | internal/vega/testdata/expr-accessor-names.vg.json | any
+internal/vega | - | testdata/gen_transforms.mjs | > testdata/transforms.node.json | internal/fonts/dejavu/DejaVuSans*.ttf | linux-x64
+internal/vega | - | gen_config.mjs | > config_default.json | - | any

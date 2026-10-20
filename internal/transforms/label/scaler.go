@@ -7,6 +7,7 @@ import (
 
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsmath"
+	"github.com/mgilbir/aster/internal/jsval"
 )
 
 // scaler maps layout coordinates to bitmap cells. Large layouts are
@@ -15,7 +16,8 @@ type scaler struct {
 	width, height float64
 	padding       float64
 	ratio         float64
-	w, h          int // bitmap dimensions
+	w, h          int        // bitmap dimensions
+	text          [2]*string // a size given as text (Options.SizeText)
 
 	// The layout's bitmaps, masks and flood-fill stacks are charged to the
 	// call's ledger before they are made, and given back (release) when the
@@ -39,18 +41,18 @@ func (s *scaler) release() {
 	s.charged = 0
 }
 
-func newScaler(ctx context.Context, width, height, padding float64) (*scaler, error) {
+func newScaler(ctx context.Context, width, height, padding float64, text [2]*string) (*scaler, error) {
 	ratio := math.Max(1, math.Sqrt(width*height/1e6))
-	w := toInt32((width + 2*padding + ratio) / ratio)
-	h := toInt32((height + 2*padding + ratio) / ratio)
-	if w < 0 || h < 0 {
+	w := toInt32(sizeSum(width, text[0], padding, ratio) / ratio)
+	h := toInt32(sizeSum(height, text[1], padding, ratio) / ratio)
+	if n := toInt32(float64(w*h+32) / 32); n < 0 {
 		// new Uint32Array of a negative length
-		return nil, fmt.Errorf("RangeError: Invalid typed array length: %d", (w*h+31)>>5)
+		return nil, fmt.Errorf("RangeError: Invalid typed array length: %d", n)
 	}
 	if budget.MulInt(w, h) > maxBitmapBits {
 		return nil, fmt.Errorf("%w: label: layout bitmap %dx%d is too large (check size and padding)", budget.ErrLimit, w, h)
 	}
-	return &scaler{width: width, height: height, padding: padding, ratio: ratio, w: w, h: h, ledger: budget.LedgerFrom(ctx)}, nil
+	return &scaler{width: width, height: height, padding: padding, ratio: ratio, w: w, h: h, text: text, ledger: budget.LedgerFrom(ctx)}, nil
 }
 
 func (s *scaler) scale(v float64) int  { return toInt32((v + s.padding) / s.ratio) }
@@ -64,6 +66,15 @@ func (s *scaler) bitmap() (*bitmap, error) {
 	return newBitmap(s.w, s.h), nil
 }
 
+// sizeSum is `size + 2 * padding + ratio`: a size that is text makes the sum
+// a concatenation, which the division then reads as a number.
+func sizeSum(size float64, text *string, padding, ratio float64) float64 {
+	if text == nil {
+		return size + 2*padding + ratio
+	}
+	return jsval.StringToNumber(*text + jsval.JSNumberString(2*padding) + jsval.JSNumberString(ratio))
+}
+
 // toInt32 is JavaScript's `~~x`.
 func toInt32(f float64) int { return int(jsmath.ToInt32(f)) }
 
@@ -71,11 +82,32 @@ func toInt32(f float64) int { return int(jsmath.ToInt32(f)) }
 // interior layer (marks to keep clear of) and, when labels may sit inside
 // their mark or on an area, the border layer.
 func markBitmaps(ctx context.Context, sc *scaler, r Rasterizer, baseMark []any, avoidMarks [][]any, labelInside, isGroupArea bool) ([2]*bitmap, error) {
+	// canvas(width, height) is node-canvas's: a side past 32767 (a negative
+	// one is read as unsigned) is refused by the constructor, and getImageData
+	// refuses a side that truncates to less than one pixel (NaN, infinity,
+	// zero, a fraction)
+	for i, name := range [2]string{"width", "height"} {
+		if v := [2]float64{sc.width, sc.height}[i]; v < 0 || v > 32767 {
+			return [2]*bitmap{}, &jsval.Thrown{Name: "Error", Msg: "Canvas " + name + " cannot exceed 32767"}
+		}
+	}
+	for i, name := range [2]string{"width", "height"} {
+		if v := [2]float64{sc.width, sc.height}[i]; !(v >= 1) || math.IsInf(v, 0) {
+			return [2]*bitmap{}, &jsval.Thrown{Name: "IndexSizeError", Msg: "The source " + name + " is 0."}
+		}
+	}
 	// Each side within the limit before it is an int, and their product
 	// saturating, where int is 32 bits.
 	width, height := int(min(sc.width, maxMaskPixels+1)), int(min(sc.height, maxMaskPixels+1))
 	if budget.MulInt(width, height) > maxMaskPixels || width > maxMaskPixels || height > maxMaskPixels {
 		return [2]*bitmap{}, fmt.Errorf("%w: label: layout %dx%d is too large to rasterize", budget.ErrLimit, width, height)
+	}
+	// canvas(width, height) of a size that is no number has the size 0
+	// (node-canvas reads numbers only), which getImageData refuses
+	for i, name := range [2]string{"width", "height"} {
+		if sc.text[i] != nil {
+			return [2]*bitmap{}, &jsval.Thrown{Name: "TypeError", Msg: "Canvas " + name + " is 0"}
+		}
 	}
 	border := labelInside || isGroupArea
 	// The canvas masks are as large as the layout, one bit a pixel.

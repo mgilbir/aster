@@ -93,9 +93,26 @@ func (c *imageCatalog) stopped(err error) bool {
 // put returns the image drawn from the pixels make returns, under key, made
 // once: what is drawn that is not an <image>, such as a colour glyph. It is
 // nil when make returns no image.
-func (c *imageCatalog) put(key string, make func() (*image.NRGBA, error)) (*pdfImage, error) {
+//
+// need is what make allocates (a decoder's pixels and the NRGBA image), and
+// is charged to the call's ledger before it runs, as an <image>'s decoding
+// is (decode); so are the planes and streams encodeNRGBA makes of them, and
+// the streams the document keeps (C20's class).
+func (c *imageCatalog) put(key string, need int64, make func() (*image.NRGBA, error)) (*pdfImage, error) {
 	if img, ok := c.byHref[key]; ok {
 		return img, nil
+	}
+	var held int64
+	charge := func(n int64) error {
+		if err := c.ledger.Alloc(n); err != nil {
+			return err
+		}
+		held += n
+		return nil
+	}
+	defer func() { c.ledger.Free(held) }()
+	if err := charge(need); err != nil {
+		return nil, err
 	}
 	px, err := make()
 	if err != nil {
@@ -103,7 +120,13 @@ func (c *imageCatalog) put(key string, make func() (*image.NRGBA, error)) (*pdfI
 	}
 	var img *pdfImage
 	if px != nil && px.Rect.Dx() > 0 && px.Rect.Dy() > 0 {
+		if err := charge(8 * int64(px.Rect.Dx()) * int64(px.Rect.Dy())); err != nil {
+			return nil, err
+		}
 		if img, err = encodeNRGBA(c.ctx, px); err != nil {
+			return nil, err
+		}
+		if err := c.ledger.Alloc(int64(len(img.data) + len(img.smask))); err != nil {
 			return nil, err
 		}
 		img.cat = c
@@ -152,25 +175,6 @@ func (c *imageCatalog) load(href string) (*pdfImage, error) {
 	return img, nil
 }
 
-// decodedBytes is about what decoding an image of the colour model takes, a
-// pixel.
-func decodedBytes(m color.Model) int64 {
-	switch m {
-	case color.GrayModel, color.AlphaModel:
-		return 1
-	case color.Gray16Model, color.Alpha16Model:
-		return 2
-	case color.YCbCrModel:
-		return 3
-	case color.RGBA64Model, color.NRGBA64Model:
-		return 8
-	}
-	if _, ok := m.(color.Palette); ok {
-		return 1
-	}
-	return 4
-}
-
 // decode is the image XObject of an image's bytes. What it makes is
 // charged to the call's ledger before it is made (C7's class): the decoded
 // pixels, their NRGBA copy where the decoder made another kind, the colour
@@ -201,7 +205,9 @@ func (c *imageCatalog) decode(data []byte) (img *pdfImage, err error) {
 		return nil
 	}
 	defer func() { c.ledger.Free(held) }()
-	if err := charge(px * decodedBytes(cfg.ColorModel)); err != nil {
+	// What the decoder allocates, a progressive JPEG's coefficients and a
+	// CMYK one's conversion included (C20).
+	if err := charge(imageref.DecodeBytes(data, cfg, format)); err != nil {
 		return nil, err
 	}
 	src, err := imageref.Decode(c.ctx, data, c.lim)
@@ -356,7 +362,7 @@ func (r *renderer) drawImage(e *element, st gstate) error {
 	// The image fills the unit square, its first row at the top: in this
 	// y-down space, the square's top edge goes to oy.
 	r.w.concat(Matrix{A: dw, D: -dh, E: ox, F: oy + dh})
-	r.w.drawXObject(img.res(st.smooth))
+	r.w.paintXObject(img.res(st.smooth), composite{alpha: st.opacity, strokeAlpha: st.opacity})
 	r.w.restore()
 	return nil
 }

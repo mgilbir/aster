@@ -1,6 +1,11 @@
 package jsval
 
-import "strings"
+import (
+	"math"
+	"strings"
+	"unicode/utf16"
+	"unicode/utf8"
+)
 
 // ParseFieldPath splits a Vega field reference into its path segments, as
 // vega-util's splitAccessPath does: "a.b" is [a b], "a[0]" is [a 0],
@@ -120,4 +125,153 @@ func SplitFieldPath(path string) ([]string, error) {
 		push(end)
 	}
 	return segments, err
+}
+
+// SplitAccessPathOf is vega-util's splitAccessPath(p) of any value, as the
+// runtime calls it on a field a specification gives (a string is
+// SplitFieldPath's): the loop runs while j < p.length, which an array has
+// (its elements' count), an object may have (its length member) and a
+// number or boolean has not (no segment at all), over the characters of
+// String(p); the last segment is cut one character past the loop's end. So
+// ["a", "b"] splits to the one segment "a,b" and [null] to "". text is
+// String(v), which the caller makes (with its call's Walker: v can be a
+// value a run built).
+func SplitAccessPathOf(v Value, text string) ([]string, error) {
+	if v.Kind() == KindStr {
+		return SplitFieldPath(v.s())
+	}
+	var n float64
+	switch v.Kind() {
+	case KindArr:
+		n = float64(len(v.arr().list()))
+	case KindObj:
+		n = ToNumber(Member(v, "length"))
+	}
+	p := text
+	units := utf16Units16(p)
+	at := func(j int) int { // p[j], -1 past the end (undefined)
+		if j < len(units) {
+			return int(units[j])
+		}
+		return -1
+	}
+	sub := func(i, j int) string { // p.substring(i, j)
+		if i > j {
+			i, j = j, i
+		}
+		i, j = max(min(i, len(units)), 0), max(min(j, len(units)), 0)
+		return unitsString(units[i:j])
+	}
+	var (
+		path []string
+		q    = -1
+		b    = 0
+		s    string
+		i, j int
+	)
+	push := func() {
+		path = append(path, s+sub(i, j))
+		s = ""
+		i = j + 1
+	}
+	// j < n: n may be fractional or NaN; past len(units) every character
+	// is undefined and matches nothing, so the loop can stop there.
+	for ; float64(j) < n; j++ {
+		if j > len(units) {
+			j = int(math.Ceil(n))
+			break
+		}
+		c := at(j)
+		switch {
+		case c == '\\':
+			s += sub(i, j)
+			j++
+			i = j
+		case c == q && q >= 0:
+			push()
+			q = -1
+			b = -1
+		case q >= 0:
+			continue
+		case i == b && (c == '"' || c == '\''):
+			i = j + 1
+			q = c
+		case c == '.' && b == 0:
+			if j > i {
+				push()
+			} else {
+				i = j + 1
+			}
+		case c == '[':
+			if j > i {
+				push()
+			}
+			b = j + 1
+			i = b
+		case c == ']':
+			if b == 0 {
+				return path, &PathError{"Access path missing open bracket: " + p}
+			}
+			if b > 0 {
+				push()
+			}
+			b = 0
+			i = j + 1
+		}
+	}
+	if b != 0 {
+		return path, &PathError{"Access path missing closing bracket: " + p}
+	}
+	if q >= 0 {
+		return path, &PathError{"Access path missing closing quote: " + p}
+	}
+	if j > i {
+		j++
+		push()
+	}
+	return path, nil
+}
+
+// unitsString is UTF-16 code units as a string: pairs as their character,
+// a lone surrogate as its WTF-8 bytes.
+func unitsString(u []uint16) string {
+	var b []byte
+	for k := 0; k < len(u); k++ {
+		r := rune(u[k])
+		switch {
+		case utf16.IsSurrogate(r) && r < 0xDC00 && k+1 < len(u) && u[k+1] >= 0xDC00 && u[k+1] <= 0xDFFF:
+			b = utf8.AppendRune(b, utf16.DecodeRune(r, rune(u[k+1])))
+			k++
+		case utf16.IsSurrogate(r):
+			b = AppendSurrogate(b, r)
+		default:
+			b = utf8.AppendRune(b, r)
+		}
+	}
+	return string(b)
+}
+
+// FieldPathText is a field path whose SplitFieldPath is segs: each segment
+// that a path could not spell plainly is written as a quoted bracket
+// segment, with its quotes and backslashes escaped.
+func FieldPathText(segs []string) string {
+	var b strings.Builder
+	for k, s := range segs {
+		if s != "" && !strings.ContainsAny(s, ".[]\"'\\") {
+			if k > 0 {
+				b.WriteByte('.')
+			}
+			b.WriteString(s)
+			continue
+		}
+		b.WriteString(`["`)
+		for i := 0; i < len(s); i++ {
+			if s[i] == '"' || s[i] == '\\' {
+				b.WriteByte('\\')
+			}
+			b.WriteByte(s[i])
+		}
+		b.WriteString(`"]`)
+	}
+	return b.String()
 }

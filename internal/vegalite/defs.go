@@ -12,9 +12,10 @@ import (
 func isContinuousType(t string) bool { return t == "quantitative" || t == "temporal" }
 func isDiscreteType(t string) bool   { return t == "ordinal" || t == "nominal" }
 
-// getFullName expands 'q'/'t'/'o'/'n' and lower-cases; "" is undefined.
+// getFullName expands 'q'/'t'/'o'/'n' and lower-cases (toLowerCase, so
+// "quantİtative" is no type, as upstream finds none); "" is undefined.
 func getFullName(t string) string {
-	switch strings.ToLower(t) {
+	switch jsval.JSLower(t) {
 	case "q", "quantitative":
 		return "quantitative"
 	case "t", "temporal":
@@ -144,7 +145,7 @@ func binToString(cc *compileCtx, bin Value) string {
 	if bin.IsBool() {
 		bin = normalizeBin(bin, "")
 	}
-	var b strings.Builder
+	b := newSbuf(cc)
 	b.WriteString("bin")
 	// keys(bin) and bin[p]: a string's characters and an array's elements
 	// by index.
@@ -156,9 +157,9 @@ func binToString(cc *compileCtx, bin Value) string {
 			// `${entries(x)}` stringifies [[k, v], ...] with commas.
 			var parts []string
 			for _, k := range keysOf(x) {
-				parts = append(parts, k, x.Get(k).AsString())
+				parts = append(parts, k, joinItem(x.Get(k))) // [k, v].join(","): null and undefined as ""
 			}
-			b.WriteString(varName("_" + p + "_" + strings.Join(parts, ",")))
+			b.WriteString(varName("_" + p + "_" + joinCC(cc, parts, ",")))
 		} else {
 			b.WriteString(varName("_" + p + "_" + x.AsString()))
 		}
@@ -314,7 +315,7 @@ func timeUnitToString(cc *compileCtx, tu Value) string {
 	if utc {
 		pfx = "utc"
 	}
-	var b strings.Builder
+	b := newSbuf(cc)
 	if rest.Lookup("unit").IsTruthy() {
 		b.WriteString(pfx)
 		for _, p := range rest.Keys() {
@@ -486,16 +487,13 @@ func normalizeNamed(v Value, names []string, what string) float64 {
 		// m.toLowerCase() (d for a day) of a value that is not a string.
 		throw("%s.toLowerCase is not a function", what[:1])
 	}
-	lower := strings.ToLower(v.StrValue())
+	lower := jsval.JSLower(v.StrValue())
 	for i, n := range names {
 		if n == lower {
 			return float64(i)
 		}
 	}
-	short := lower
-	if r := []rune(short); len(r) > 3 {
-		short = string(r[:3])
-	}
+	short := jsval.UTF16Prefix(lower, 3) // lower.substr(0, 3)
 	for i, n := range names {
 		if n[:3] == short {
 			return float64(i)
@@ -660,4 +658,4 @@ func isText(v Value) bool {
 }
 
 func joinStrings(ss []string, sep string) string { return strings.Join(ss, sep) }
-func upper(s string) string                      { return jsUpperCase(s) }
+func upper(s string) string                      { return jsval.JSUpper(s) }

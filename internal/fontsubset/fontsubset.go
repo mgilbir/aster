@@ -375,17 +375,26 @@ func (f *Font) closure(gids map[uint16]bool) (map[uint16]bool, error) {
 // array, not hmtx), and cmap is replaced by a minimal valid stub (glyphs are
 // addressed by ID via Identity CID mapping, never through character codes).
 func (f *Font) Subset(gids map[uint16]bool) (out []byte, err error) {
+	out, _, err = f.SubsetKept(gids)
+	return out, err
+}
+
+// SubsetKept is Subset, also returning the glyphs the subset keeps: gids,
+// .notdef and the components of the composite glyphs among them, which is
+// what a PDF's CIDSet must list (ISO 19005-1, 6.3.5: every CID the font
+// program holds; C114).
+func (f *Font) SubsetKept(gids map[uint16]bool) (out []byte, kept map[uint16]bool, err error) {
 	defer func() {
 		if p := recover(); p != nil {
-			out, err = nil, fmt.Errorf("fontsubset: malformed font: %v", p)
+			out, kept, err = nil, nil, fmt.Errorf("fontsubset: malformed font: %v", p)
 		}
 	}()
 	if f.subsetErr != nil {
-		return nil, f.subsetErr
+		return nil, nil, f.subsetErr
 	}
 	keep, err := f.closure(gids)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	maxKept := uint16(0)
 	for g := range keep {
@@ -405,16 +414,16 @@ func (f *Font) Subset(gids map[uint16]bool) (out []byte, err error) {
 		if keep[uint16(g)] {
 			data, err := f.glyphData(uint16(g))
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			// The kept glyphs lie apart in glyf (checkGlyphData), so
 			// together they are no more than it.
 			if copied += len(data); copied > len(f.glyf) {
-				return nil, errors.New("fontsubset: the font's glyphs overlap in glyf (a malformed loca)")
+				return nil, nil, errors.New("fontsubset: the font's glyphs overlap in glyf (a malformed loca)")
 			}
 			stripped, err := stripInstructions(data)
 			if err != nil {
-				return nil, fmt.Errorf("fontsubset: glyph %d: %w", g, err)
+				return nil, nil, fmt.Errorf("fontsubset: glyph %d: %w", g, err)
 			}
 			glyf.Write(stripped)
 			for glyf.Len()%4 != 0 {
@@ -470,7 +479,84 @@ func (f *Font) Subset(gids map[uint16]bool) (out []byte, err error) {
 	}
 	sort.Slice(tables, func(i, j int) bool { return tables[i].tag < tables[j].tag })
 
-	return assembleSfnt(tables)
+	out, err = assembleSfnt(tables)
+	if err != nil {
+		return nil, nil, err
+	}
+	return out, keep, nil
+}
+
+// CheckGlyph reports why glyph gid cannot be kept in a subset (it, or a
+// component it needs, is malformed: an instruction length past its record,
+// a truncated composite), or nil when it can: what Subset would refuse,
+// asked of one glyph before it is drawn in the font, so that a writer can
+// draw that glyph another way rather than fail at the end (C116). .notdef,
+// which every subset keeps, is checked with it.
+func (f *Font) CheckGlyph(gid uint16) (err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			err = fmt.Errorf("fontsubset: malformed font: %v", p)
+		}
+	}()
+	if f.subsetErr != nil {
+		return f.subsetErr
+	}
+	// A simple glyph, most of them, is checked where it is, with no copy:
+	// it needs no component, and .notdef was checked when the font was.
+	if gid != 0 {
+		data, err := f.glyphData(gid)
+		if err != nil {
+			return err
+		}
+		if len(data) == 0 || int16(binary.BigEndian.Uint16(data)) >= 0 {
+			if err := checkSimple(data); err != nil {
+				return fmt.Errorf("fontsubset: glyph %d: %w", gid, err)
+			}
+			return nil
+		}
+	}
+	keep, err := f.closure(map[uint16]bool{gid: true})
+	if err != nil {
+		return err
+	}
+	for g := range keep {
+		data, err := f.glyphData(g)
+		if err != nil {
+			return err
+		}
+		if _, err := stripInstructions(data); err != nil {
+			return fmt.Errorf("fontsubset: glyph %d: %w", g, err)
+		}
+	}
+	return nil
+}
+
+// checkSimple is why stripInstructions refuses simple glyph data, or nil:
+// the same checks, without the copy.
+func checkSimple(data []byte) error {
+	if len(data) == 0 {
+		return nil
+	}
+	if len(data) < 10 {
+		return fmt.Errorf("truncated glyph header")
+	}
+	instrLenOff := 10 + int(int16(binary.BigEndian.Uint16(data)))*2
+	if instrLenOff+2 > len(data) {
+		return fmt.Errorf("truncated simple glyph")
+	}
+	if n := int(binary.BigEndian.Uint16(data[instrLenOff:])); instrLenOff+2+n > len(data) {
+		return fmt.Errorf("glyph instructions overrun")
+	}
+	return nil
+}
+
+// Table returns table tag of sfnt font program b, or nil.
+func Table(b []byte, tag string) []byte {
+	s, err := readSfnt(b)
+	if err != nil {
+		return nil
+	}
+	return s.tables[tag]
 }
 
 // lsb returns a glyph's left side bearing from the original hmtx layout.

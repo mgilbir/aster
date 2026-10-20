@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/mgilbir/aster/internal/jsmath"
+	"github.com/mgilbir/aster/internal/jsval"
 )
 
 // Specifier is a parsed d3-format specifier:
@@ -111,11 +112,9 @@ func digitRun(s string) int {
 	return i
 }
 
+// parseDigits is +s of a run of decimal digits.
 func parseDigits(s string) float64 {
-	f, err := strconv.ParseFloat(s, 64)
-	if err != nil && !math.IsInf(f, 0) {
-		return math.NaN()
-	}
+	f, _ := jsval.ParseDecimal(s)
 	return f
 }
 

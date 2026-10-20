@@ -52,10 +52,10 @@ func loadInterp(t testing.TB) *interpGolden {
 }
 
 var twoArg = map[string]Interpolator{
-	"number": InterpolateNumber, "round": InterpolateRound, "rgb": InterpolateRGB, "hsl": InterpolateHSL,
+	"number": InterpolateNumberI, "round": InterpolateRoundI, "rgb": InterpolateRGB, "hsl": InterpolateHSL,
 	"hslLong": InterpolateHSLLong, "lab": InterpolateLab, "hcl": InterpolateHCL, "hclLong": InterpolateHCLLong,
 	"cubehelix": InterpolateCubehelix, "cubehelixLong": InterpolateCubehelixLong, "string": InterpolateString,
-	"array": InterpolateArray, "object": InterpolateObject, "date": InterpolateDate, "hue": InterpolateHue,
+	"array": InterpolateArray, "object": InterpolateObject, "date": InterpolateDateI, "hue": InterpolateHue,
 	"value": InterpolateValue, "rgb2": RGBGamma(2.2), "cubehelix2": CubehelixGamma(2, false),
 	"cubehelixLong3": CubehelixGamma(0.5, true),
 }
@@ -72,7 +72,7 @@ func TestInterpolatorsGolden(t *testing.T) {
 		if !ok {
 			t.Fatalf("no interpolator %s", c.F)
 		}
-		i := f(decVal(c.A), decVal(c.B))
+		i := f(jsval.Walker{}, decVal(c.A), decVal(c.B))
 		want := c.R.([]any)
 		for k, tv := range c.Ts {
 			got := i(decVal(tv).NumValue())
@@ -126,20 +126,20 @@ func TestHelpersGolden(t *testing.T) {
 			f := BasisClosed(toNums(c.Args))
 			check(c.F, c.Args, c.Ts, c.R, func(t float64) jsval.Value { return jsval.Num(f(t)) })
 		case "rgbBasis":
-			check(c.F, c.Args, c.Ts, c.R, RGBBasis(toVals(c.Args)))
+			check(c.F, c.Args, c.Ts, c.R, RGBBasis(jsval.Walker{}, toVals(c.Args)))
 		case "rgbBasisClosed":
-			check(c.F, c.Args, c.Ts, c.R, RGBBasisClosed(toVals(c.Args)))
+			check(c.F, c.Args, c.Ts, c.R, RGBBasisClosed(jsval.Walker{}, toVals(c.Args)))
 		case "discrete":
-			check(c.F, c.Args, c.Ts, c.R, Discrete(toVals(c.Args)))
+			check(c.F, c.Args, c.Ts, c.R, InterpolateDiscrete(jsval.Walker{}, jsval.Arr(toVals(c.Args)), jsval.Undefined))
 		case "piecewise":
-			check(c.F, c.Args, c.Ts, c.R, Piecewise(nil, toVals(c.Args)))
+			check(c.F, c.Args, c.Ts, c.R, Piecewise(jsval.Walker{}, nil, toVals(c.Args)))
 		case "quantize":
 			// d3.quantize: recorded with the rest, but nothing in Vega calls it
 		case "quantizeInterpolator":
 			n := int(decVal(c.Args.([]any)[0]).NumValue())
 			var f UnitInterpolator
 			if n == 3 {
-				f = InterpolateRGB(jsval.Str("red"), jsval.Str("blue"))
+				f = InterpolateRGB(jsval.Walker{}, jsval.Str("red"), jsval.Str("blue"))
 			} else {
 				f = InterpolateNumber(jsval.Num(0), jsval.Num(1))
 			}
@@ -193,7 +193,7 @@ func TestHelpersGolden(t *testing.T) {
 			if a[2] != nil {
 				gamma, hasGamma = a[2].(float64), true
 			}
-			check(c.F, c.Args, c.Ts, c.R, InterpolateColors(toVals(a[0]), typ, gamma, hasGamma))
+			check(c.F, c.Args, c.Ts, c.R, InterpolateColors(jsval.Walker{}, toVals(a[0]), typ, gamma, hasGamma))
 		case "interpolateRange":
 			rng := toNums(c.Args.([]any)[0])
 			f := InterpolateRange(func(t float64) jsval.Value { return InterpolateNumber(jsval.Num(0), jsval.Num(100))(t) }, rng)
@@ -263,14 +263,14 @@ func TestPiecewiseThrows(t *testing.T) {
 		f(x)
 		return false
 	}
-	two := Piecewise(nil, []jsval.Value{jsval.Num(0), jsval.Num(10)})
+	two := Piecewise(jsval.Walker{}, nil, []jsval.Value{jsval.Num(0), jsval.Num(10)})
 	if throws(two, 0.5) || throws(two, -3) || throws(two, 7) {
 		t.Error("finite positions must not throw, whatever their range")
 	}
 	if !throws(two, math.NaN()) {
 		t.Error("a NaN position must throw")
 	}
-	if !throws(Piecewise(nil, []jsval.Value{jsval.Num(1)}), 0.5) || !throws(Piecewise(nil, nil), 0.5) {
+	if !throws(Piecewise(jsval.Walker{}, nil, []jsval.Value{jsval.Num(1)}), 0.5) || !throws(Piecewise(jsval.Walker{}, nil, nil), 0.5) {
 		t.Error("a piecewise through fewer than two values must throw")
 	}
 	if throws(two, math.Inf(1)) || throws(two, math.Inf(-1)) {

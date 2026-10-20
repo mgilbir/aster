@@ -3,6 +3,7 @@ package scale
 import (
 	"math"
 
+	"github.com/mgilbir/aster/internal/jsmath"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -10,7 +11,7 @@ import (
 // its range into.
 func BandSpace(count, paddingInner, paddingOuter float64) float64 {
 	space := count - paddingInner + paddingOuter*2
-	if count != 0 {
+	if count != 0 && count == count { // `count ? ... : 0`: NaN is false
 		if space > 0 {
 			return space
 		}
@@ -70,7 +71,7 @@ func (b *Band) rescale() {
 		start, stop = b.r1, b.r0
 	}
 	space := BandSpace(n, b.paddingInner, b.paddingOuter)
-	if space == 0 {
+	if !(space != 0 && space == space) {
 		space = 1 // `space || 1`
 	}
 	step := (stop - start) / space
@@ -80,8 +81,8 @@ func (b *Band) rescale() {
 	start += float64(((stop - start) - float64(step*(n-b.paddingInner))) * b.align)
 	bandwidth := step * (1 - b.paddingInner)
 	if b.round {
-		start = jsRound(start)
-		bandwidth = jsRound(bandwidth)
+		start = jsmath.Round(start)
+		bandwidth = jsmath.Round(bandwidth)
 	}
 	b.step, b.bandwidth = step, bandwidth
 	count := len(b.ord.domain)
@@ -258,6 +259,7 @@ func (b *Band) Invert(y jsval.Value) jsval.Value {
 func (b *Band) Copy() Scale {
 	n := NewBand()
 	n.typ = b.typ
+	n.walk = b.walk
 	n.point = b.point
 	n.ord.SetDomain(b.ord.domain)
 	n.r0, n.r1 = b.r0, b.r1

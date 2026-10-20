@@ -1,6 +1,8 @@
 package jsval
 
 import (
+	"slices"
+	"sort"
 	"sync/atomic"
 )
 
@@ -8,9 +10,11 @@ import (
 // a linear scan over the keys is faster than hashing.
 const indexThreshold = 32
 
-// Object is an insertion-ordered string-keyed map, the shape of a JavaScript
-// object literal. Setting an existing key overwrites it in place and keeps
-// its position, as JavaScript does.
+// Object is a string-keyed map in JavaScript's property order, the shape of a
+// JavaScript object: the keys that are array indexes ("0" to "4294967294",
+// written canonically) first, in ascending order, then the others in the
+// order they were added (OrdinaryOwnPropertyKeys). Setting an existing key
+// overwrites it in place and keeps its position, as JavaScript does.
 //
 // An Object is not safe for concurrent mutation.
 type Object struct {
@@ -27,6 +31,8 @@ type Object struct {
 	// tid is the tuple id (vega-dataflow's tupleid): 0 until the object is
 	// ingested as a data tuple.
 	tid uint32
+	// nidx is how many of the keys, the leading ones, are array indexes.
+	nidx uint32
 }
 
 // tupleCounter is vega-dataflow's TUPLE_ID: ids grow in ingestion order.
@@ -46,6 +52,14 @@ func (o *Object) EnsureTupleID() uint32 {
 
 // SetTupleID sets the tuple id.
 func (o *Object) SetTupleID(id uint32) { o.tid = id }
+
+// A CopyHook is a host payload that is told when its object is copied
+// (Clone, a Cloner's copy), and answers the payload of the copy: the
+// embedding program's way to follow an object it tracks through the copies
+// the engine makes of it.
+type CopyHook interface {
+	Copied(dst *Object) any
+}
 
 // SetHost attaches an opaque host payload to the object.
 func (o *Object) SetHost(h any) { o.host = h }
@@ -259,6 +273,10 @@ func (o *Object) Set(key string, v Value) {
 	if o.keys == nil {
 		o.keys, o.vals = make([]string, 0, 4), make([]Value, 0, 4)
 	}
+	if n, ok := ArrayIndex(key); ok {
+		o.insertIndex(key, n, v)
+		return
+	}
 	o.keys = append(o.keys, key)
 	o.vals = append(o.vals, v)
 	if o.index != nil {
@@ -266,6 +284,104 @@ func (o *Object) Set(key string, v Value) {
 	} else if len(o.keys) > indexThreshold {
 		o.reindex()
 	}
+}
+
+// insertIndex adds the array-index key key (of value n) among the leading
+// index keys, in ascending order.
+func (o *Object) insertIndex(key string, n uint32, v Value) {
+	i := sort.Search(int(o.nidx), func(i int) bool {
+		m, _ := ArrayIndex(o.keys[i])
+		return m > n
+	})
+	o.keys = slices.Insert(o.keys, i, key)
+	o.vals = slices.Insert(o.vals, i, v)
+	o.nidx++
+	switch {
+	case o.index != nil:
+		// The keys from i on moved one place: only those are updated, so
+		// keys added in JavaScript's order cost O(1) each.
+		for j := i; j < len(o.keys); j++ {
+			o.index[o.keys[j]] = j
+		}
+	case len(o.keys) > indexThreshold:
+		o.reindex()
+	}
+}
+
+// setUnordered is Set without the key order, for a builder that orders the
+// object once it is complete (Order): keys added one at a time in any order
+// cost O(1) each, where Set moves the keys after an array index it adds.
+func (o *Object) setUnordered(key string, v Value) {
+	if i := o.find(key); i >= 0 {
+		o.vals[i] = v
+		return
+	}
+	o.keys = append(o.keys, key)
+	o.vals = append(o.vals, v)
+	if o.index != nil {
+		o.index[key] = len(o.keys) - 1
+	} else if len(o.keys) > indexThreshold {
+		o.reindex()
+	}
+}
+
+// order puts the keys of an object built with setUnordered in JavaScript's
+// order: the array indexes first, ascending, then the rest as they were
+// added. It is O(n) when there is no array index, else O(n log n).
+func (o *Object) order() {
+	type kv struct {
+		n uint32
+		k string
+		v Value
+	}
+	var idx []kv
+	for i, k := range o.keys {
+		if n, ok := ArrayIndex(k); ok {
+			idx = append(idx, kv{n, k, o.vals[i]})
+		}
+	}
+	if len(idx) == 0 {
+		o.nidx = 0
+		return
+	}
+	sort.Slice(idx, func(a, b int) bool { return idx[a].n < idx[b].n })
+	j := len(o.keys)
+	// The other keys keep their order, behind the indexes: move them from
+	// the end back.
+	for i := len(o.keys) - 1; i >= 0; i-- {
+		if _, ok := ArrayIndex(o.keys[i]); !ok {
+			j--
+			o.keys[j], o.vals[j] = o.keys[i], o.vals[i]
+		}
+	}
+	for i, e := range idx {
+		o.keys[i], o.vals[i] = e.k, e.v
+	}
+	o.nidx = uint32(len(idx))
+	if o.index != nil {
+		o.reindex()
+	}
+}
+
+// ArrayIndex reports whether key is an array index as JavaScript orders an
+// object's keys by: the canonical decimal text (no sign, no leading zero) of
+// an integer from 0 to 2^32 - 2, and its value.
+func ArrayIndex(key string) (uint32, bool) {
+	if key == "" || len(key) > 10 || key[0] < '0' || key[0] > '9' || key[0] == '0' && len(key) > 1 {
+		return 0, false
+	}
+	var n uint64
+	for i := 0; i < len(key); i++ {
+		c := key[i]
+		if c < '0' || c > '9' {
+			return 0, false
+		}
+		n = n*10 + uint64(c-'0')
+	}
+	if n >= 1<<32-1 {
+		return 0, false
+	}
+	return uint32(n), true
 }
 
 func (o *Object) reindex() {
@@ -283,10 +399,13 @@ func (o *Object) DeleteFunc(del func(key string, v Value) bool) {
 	if o == nil {
 		return
 	}
-	j := 0
+	j, nidx := 0, uint32(0)
 	for i := range o.keys {
 		if del(o.keys[i], o.vals[i]) {
 			continue
+		}
+		if i < int(o.nidx) {
+			nidx++
 		}
 		o.keys[j], o.vals[j] = o.keys[i], o.vals[i]
 		j++
@@ -294,6 +413,7 @@ func (o *Object) DeleteFunc(del func(key string, v Value) bool) {
 	if j == len(o.keys) {
 		return
 	}
+	o.nidx = nidx
 	clear(o.keys[j:])
 	clear(o.vals[j:])
 	o.keys, o.vals = o.keys[:j], o.vals[:j]
@@ -314,6 +434,9 @@ func (o *Object) Delete(key string) {
 	}
 	o.keys = append(o.keys[:i], o.keys[i+1:]...)
 	o.vals = append(o.vals[:i], o.vals[i+1:]...)
+	if i < int(o.nidx) {
+		o.nidx--
+	}
 	if o.index == nil {
 		return
 	}
@@ -366,7 +489,11 @@ func (o *Object) Clone() *Object {
 		c.vals = append(c.vals, o.vals...)
 		c.str = o.str
 		c.host = o.host
+		if h, ok := c.host.(CopyHook); ok {
+			c.host = h.Copied(c)
+		}
 		c.tid = o.tid
+		c.nidx = o.nidx
 	}
 	if len(c.keys) > indexThreshold {
 		c.reindex()

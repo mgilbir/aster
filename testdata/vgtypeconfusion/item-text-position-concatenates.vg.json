@@ -1,0 +1,2 @@
+{"width": 80, "height": 60, "data": [{"name": "t", "values": [{"x": "7", "dx": 2, "y": 10}, {"x": 20, "dy": "NaN", "y": 30, "a": 30}, {"x": {"k": 1}, "y": [40], "r": 10, "th": 1}, {"x": [1, 2], "dy": {"a": 1}, "y": 50}]}],
+ "marks": [{"type": "text", "from": {"data": "t"}, "encode": {"enter": {"x": {"field": "x"}, "y": {"field": "y"}, "dx": {"field": "dx"}, "dy": {"field": "dy"}, "angle": {"field": "a"}, "radius": {"field": "r"}, "theta": {"field": "th"}, "text": {"value": "t"}, "baseline": {"value": "middle"}}}}]}

@@ -3,6 +3,7 @@ package scale
 import (
 	"math"
 
+	"github.com/mgilbir/aster/internal/jsmath"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -109,7 +110,7 @@ func reversedCopy(s []float64) []float64 {
 // nil the default d3.interpolate applies, and if every segment's end value is a
 // number the numeric flavour is used (interpolateNumber is what d3.interpolate
 // chooses for those).
-func newValueMap(domain []float64, rng []jsval.Value, interp Interpolator, round bool) *pmap {
+func newValueMap(w jsval.Walker, domain []float64, rng []jsval.Value, interp Interpolator, round bool) *pmap {
 	n := min(len(domain), len(rng))
 	var pairs [][2]jsval.Value
 	var doms []float64
@@ -166,9 +167,9 @@ func newValueMap(domain []float64, rng []jsval.Value, interp Interpolator, round
 	m.gr = make([]func(float64) jsval.Value, len(pairs))
 	for i, p := range pairs {
 		if interp == nil {
-			m.gr[i] = InterpolateValue(p[0], p[1])
+			m.gr[i] = InterpolateValue(w, p[0], p[1])
 		} else {
-			m.gr[i] = interp(p[0], p[1])
+			m.gr[i] = interp(w, p[0], p[1])
 		}
 	}
 	return m
@@ -197,7 +198,7 @@ func (m *pmap) value(x float64) jsval.Value {
 		p := m.nr[i]
 		v := lerp(p.a, p.b, t)
 		if m.round {
-			v = jsRound(v)
+			v = jsmath.Round(v)
 		}
 		return jsval.Num(v)
 	}
@@ -213,7 +214,7 @@ func (m *pmap) number(x float64) float64 {
 		p := m.nr[i]
 		v := lerp(p.a, p.b, t)
 		if m.round {
-			v = jsRound(v)
+			v = jsmath.Round(v)
 		}
 		return v
 	}

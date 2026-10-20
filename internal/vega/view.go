@@ -25,6 +25,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"runtime/debug"
 	"time"
 
@@ -211,7 +212,14 @@ type Result struct {
 
 // runView is a running instance of a specification (vega-view's View).
 type runView struct {
-	ctx    context.Context
+	// measure is the module state of d3-geo's measures (see geoState).
+	measure *geo.MeasureState
+	ctx     context.Context
+	// walk walks the values of the run: their String, JSON and deep
+	// comparisons are bounded by the call (jsval.Walker, ADR 0018).
+	walk jsval.Walker
+	// keys turns values into the keys the transforms group by.
+	keys   transforms.Keys
 	g      *flowGraph
 	sg     *scene.Scenegraph
 	loader Loader
@@ -247,8 +255,12 @@ type runView struct {
 
 	// Size state (vega-view): width and height are the signal values, the view
 	// sizes include neither padding nor origin.
-	width, height         float64
-	viewWidth, viewHeight float64
+	// width and height are view._width and _height, the width and height
+	// signals' values as they are; viewWidth and viewHeight are
+	// view._viewWidth and _viewHeight, numbers until an autosize "none"
+	// hands the signals' values back (see layout.Size).
+	width, height         jsval.Value
+	viewWidth, viewHeight jsval.Value
 	origin                [2]float64
 	resize, autosize      int
 	resizeWidth           *opNode
@@ -267,8 +279,7 @@ type runView struct {
 
 	itemTupleCache map[*scene.Item]*jsval.Object
 	viewItem       map[*jsval.Object]*scene.Item
-	shapes         []scene.ShapeFunc
-	pending        map[*opNode]*pendingChange
+	pending        map[*opNode]*changeSet
 	markItemsCache map[*scene.Mark]markItems
 	itemIDs        map[*scene.Item]int
 	itemByID       []*scene.Item
@@ -392,7 +403,20 @@ func newView(ctx context.Context, opts Options, locale jsval.Value) *runView {
 	v.zone = format.Local(v.loc)
 	// Transforms that key on text write a date in the view's zone.
 	ctx = transforms.WithZone(ctx, v.zone)
+	// String of a date, in an array too, is Date.prototype.toString in the
+	// view's zone, for every walk of the call.
+	zone := v.zone
+	ctx = jsval.ContextWithDateText(ctx, func(dst []byte, ms float64) []byte {
+		return append(dst, format.DateToString(ms, zone)...)
+	})
 	v.ctx = ctx
+	v.walk = jsval.WalkerFor(ctx)
+	v.keys = transforms.NewKeys(v.zone, v.walk)
+	// An item's property that is a Date prints as Date.prototype.toString
+	// does in the view's zone (the + of a bound function concatenates it).
+	v.sg.SetWalker(v.walk.WithDateText(func(dst []byte, ms float64) []byte {
+		return append(dst, format.DateToString(ms, v.zone)...)
+	}))
 	switch {
 	case opts.Locale != nil:
 		v.locale = opts.Locale
@@ -447,28 +471,58 @@ func (v *runView) build(flow *flowSpec) {
 	v.backgroundSig = c.signal("background")
 	v.autosizeSig = c.signal("autosize")
 
-	v.width = numOf(v.widthSig)
-	v.height = numOf(v.heightSig)
+	v.width = sigValue(v.widthSig)
+	v.height = sigValue(v.heightSig)
 	v.viewWidth = v.viewSize(v.width, true)
 	v.viewHeight = v.viewSize(v.height, false)
 	v.resize = 0
 	v.autosize = 1
 	v.initResize()
 	v.initBackground()
+	v.initCursor(c)
 }
 
-func numOf(n *opNode) float64 {
-	if n == nil {
-		return 0
+// initCursor is vega-view's cursor(view) for a specification that declares a
+// cursor signal: an operator that follows it and reads `user.item` of any
+// value that is no string, which fails for null and undefined. (A headless
+// view has no element to set the cursor on, and no pointer events.)
+func (v *runView) initCursor(c *rtContext) {
+	cs := c.signal("cursor")
+	if cs == nil {
+		return
 	}
-	return jsval.ToNumber(n.sig())
+	n := v.g.add("cursor", nil)
+	n.ctx = c
+	n.update = func(n *opNode, p *opParams) any {
+		if cur := cs.sig(); !cur.IsStr() && cur.IsNullish() {
+			fail("TypeError: Cannot read properties of %s (reading 'item')", nullishName(cur))
+		}
+		return nil
+	}
+	cs.addTarget(n)
+	v.g.connect(n, []*opNode{cs})
 }
 
+// sigValue is a signal's value, undefined for a missing signal.
+func sigValue(n *opNode) jsval.Value {
+	if n == nil {
+		return jsval.Undefined
+	}
+	return n.sig()
+}
+
+// autosizeContains is `a && a.contains` of the autosize signal's value, for
+// the comparison with "padding" (===).
 func (v *runView) autosizeContains() string {
 	if v.autosizeSig == nil {
 		return ""
 	}
-	return v.autosizeSig.sig().Get("contains").AsString()
+	a := v.autosizeSig.sig()
+	if !a.IsTruthy() {
+		return ""
+	}
+	s, _ := jsval.Member(a, "contains").Strict()
+	return s
 }
 
 // padding reads the padding signal as vega-view's padding() does.
@@ -477,25 +531,27 @@ func (v *runView) padding() (left, right, top, bottom float64) {
 		return
 	}
 	p := v.paddingSig.sig()
-	if p.IsObj() {
-		return numOr0f(jsval.ToNumber(p.Get("left"))), numOr0f(jsval.ToNumber(p.Get("right"))),
-			numOr0f(jsval.ToNumber(p.Get("top"))), numOr0f(jsval.ToNumber(p.Get("bottom")))
+	if p.IsObj() || p.IsArr() { // isObject: a list too, whose members are undefined
+		m := func(k string) float64 { return numOr0f(jsval.ToNumber(jsval.Member(p, k))) }
+		return m("left"), m("right"), m("top"), m("bottom")
 	}
 	n := numOr0f(jsval.ToNumber(p))
 	return n, n, n, n
 }
 
-// viewSize is viewWidth/viewHeight: the size minus the padding when autosize
-// is measured including it.
-func (v *runView) viewSize(size float64, horizontal bool) float64 {
+// viewSize is vega-view's viewWidth/viewHeight: `size - (padding ? p.left +
+// p.right : 0)`, a number whatever the size's value.
+func (v *runView) viewSize(size jsval.Value, horizontal bool) jsval.Value {
+	pad := 0.0
 	if v.autosizeContains() == "padding" {
 		l, r, t, b := v.padding()
 		if horizontal {
-			return size - (l + r)
+			pad = l + r
+		} else {
+			pad = t + b
 		}
-		return size - (t + b)
 	}
-	return size
+	return jsval.Num(jsval.ToNumber(size) - pad)
 }
 
 func (v *runView) initResize() {
@@ -506,7 +562,7 @@ func (v *runView) initResize() {
 		n := g.add("resize-width", nil)
 		n.ctx = v.root
 		n.update = func(n *opNode, p *opParams) any {
-			v.width = jsval.ToNumber(toValue(p.Get("size")))
+			v.width = toValue(p.Get("size"))
 			v.viewWidth = v.viewSize(v.width, true)
 			resetSize()
 			return nil
@@ -519,7 +575,7 @@ func (v *runView) initResize() {
 		n := g.add("resize-height", nil)
 		n.ctx = v.root
 		n.update = func(n *opNode, p *opParams) any {
-			v.height = jsval.ToNumber(toValue(p.Get("size")))
+			v.height = toValue(p.Get("size"))
 			v.viewHeight = v.viewSize(v.height, false)
 			resetSize()
 			return nil
@@ -584,29 +640,30 @@ func (v *runView) rerun(encode string) {
 // It runs after the current propagation: it stores the new size in the width
 // and height signals, skipping their update expressions, and re-runs the
 // dataflow with the `enter` encode set when either changed.
-func (v *runView) resizeView(viewWidth, viewHeight, width, height float64, origin [2]float64, auto bool) {
+func (v *runView) resizeView(viewWidth, viewHeight, width, height jsval.Value, origin [2]float64, auto bool) {
 	v.g.runAfter(func(g *flowGraph) {
 		rerun := false
 		v.autosize = 0
-		if v.widthSig != nil && numOf(v.widthSig) != width {
+		// view.width() !== width: the signal's value, compared with ===
+		if v.widthSig != nil && !jsval.StrictEqual(v.widthSig.sig(), width) {
 			rerun = true
-			g.update(v.widthSig, jsval.Num(width), false, true)
+			g.update(v.widthSig, width, false, true)
 			if v.resizeWidth != nil {
 				v.resizeWidth.skip = true
 			}
 		}
-		if v.heightSig != nil && numOf(v.heightSig) != height {
+		if v.heightSig != nil && !jsval.StrictEqual(v.heightSig.sig(), height) {
 			rerun = true
-			g.update(v.heightSig, jsval.Num(height), false, true)
+			g.update(v.heightSig, height, false, true)
 			if v.resizeHeight != nil {
 				v.resizeHeight.skip = true
 			}
 		}
-		if v.viewWidth != viewWidth {
+		if !jsval.StrictEqual(v.viewWidth, viewWidth) {
 			v.resize = 1
 			v.viewWidth = viewWidth
 		}
-		if v.viewHeight != viewHeight {
+		if !jsval.StrictEqual(v.viewHeight, viewHeight) {
 			v.resize = 1
 			v.viewHeight = viewHeight
 		}
@@ -629,14 +686,11 @@ func (v *runView) resizeView(viewWidth, viewHeight, width, height float64, origi
 
 func (v *runView) result(scope *Scope) *Result {
 	l, r, t, b := v.padding()
-	w := v.viewWidth + l + r
-	h := v.viewHeight + t + b
-	if w < 0 {
-		w = 0
-	}
-	if h < 0 {
-		h = 0
-	}
+	// Math.max(0, view._viewWidth + padding.left + padding.right): the
+	// additions concatenate a view size that is a string, an array or an
+	// object; NaN stays NaN.
+	w := jsMathMax0(v.jsAdd(v.jsAdd(v.viewWidth, jsval.Num(l)), jsval.Num(r)))
+	h := jsMathMax0(v.jsAdd(v.jsAdd(v.viewHeight, jsval.Num(t)), jsval.Num(b)))
 	res := &Result{
 		Scenegraph: v.sg,
 		Width:      w, Height: h,
@@ -644,13 +698,15 @@ func (v *runView) result(scope *Scope) *Result {
 		LoadedBytes: v.bud.Loaded(),
 	}
 	if bg := v.backgroundSig; bg != nil {
+		// `bg && bg !== 'transparent' && bg !== 'none'`, then the value
+		// written as the fill
 		val := bg.sig()
-		if val.IsTruthy() {
-			res.Background, res.HasBackground = val.AsString(), true
+		if val.IsTruthy() && !strictIs(val, "transparent") && !strictIs(val, "none") {
+			res.Background, res.HasBackground = v.walk.String(val), true
 		}
 	}
 	if d := scope.description; d.IsTruthy() {
-		res.Description, res.HasDescription = d.AsString(), true
+		res.Description, res.HasDescription = v.walk.String(d), true
 	}
 	return res
 }
@@ -703,6 +759,7 @@ func (v *runView) addSignalListener(c *rtContext, src, tgt *opNode, u *updateSpe
 	}
 	src.addTarget(l)
 	l.argval = newParams()
+	l.argval.walk = g.walk
 	l.addTarget(tgt)
 	g.connect(tgt, []*opNode{l})
 }
@@ -712,4 +769,35 @@ func single(name string, v any) *smallMap[any] {
 	m := &smallMap[any]{}
 	m.set(name, v)
 	return m
+}
+
+// ThrownAtRender is the error of a panic raised by code of this package that
+// the scene calls while it is drawn (a shape or clip path generator, which
+// evaluates expressions and fails as they do): upstream calls its generators
+// while it renders, so their exceptions fail the render. ok is false for any
+// other panic, which the caller re-raises.
+func ThrownAtRender(r any) (err error, ok bool) {
+	switch e := r.(type) {
+	case *parseError:
+		return e, true
+	case *opError:
+		return e.err, true
+	case *jsval.Thrown:
+		return e, true
+	case *expr.Error:
+		return e, true
+	}
+	return nil, false
+}
+
+// jsMathMax0 is Math.max(0, x): NaN for a value that is no number.
+func jsMathMax0(x jsval.Value) float64 {
+	f := jsval.ToNumber(x)
+	if f != f || f > 0 {
+		return f
+	}
+	if f == 0 && !math.Signbit(f) {
+		return f
+	}
+	return 0
 }

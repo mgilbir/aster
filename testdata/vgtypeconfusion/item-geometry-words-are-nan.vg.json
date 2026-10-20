@@ -1,0 +1,3 @@
+{"width": 60, "height": 40, "marks": [{"type": "arc", "encode": {"enter": {"x": {"value": 20}, "y": {"value": 20}, "innerRadius": {"value": "abc"}, "outerRadius": {"value": 10}, "startAngle": {"value": 0}, "endAngle": {"value": 1}, "fill": {"value": "red"}}}},
+ {"type": "area", "encode": {"enter": {"x": {"value": "1"}, "y": {"value": 30}, "width": {"value": 2}, "orient": {"value": "horizontal"}, "fill": {"value": "blue"}}}},
+ {"type": "trail", "encode": {"enter": {"x": {"value": 3}, "y": {"value": 3}, "size": {"value": "abc"}, "fill": {"value": "blue"}}}}]}

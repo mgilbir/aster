@@ -222,7 +222,7 @@ func TestUpstreamD3ShapeStack(t *testing.T) {
 		}
 		p := StackParams{Field: FieldOf("v"), GroupBy: FieldsOf("row"), Offset: StackZero}
 		if order == "stackOrderReverse" {
-			p.Sort = CompareBy(FieldsOf("key"), []string{Desc})
+			p.Sort = CompareBy(jsval.Walker{}, FieldsOf("key"), []string{Desc})
 		}
 		if _, err := Stack(ctx, tuples, p); err != nil {
 			r.Check(c, nil, true)

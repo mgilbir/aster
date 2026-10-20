@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"math/bits"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -13,18 +12,45 @@ import (
 	"github.com/mgilbir/aster/internal/budget"
 )
 
-// opPollCtx counts, after the parse stage, the polls of its Err made inside
-// each of the dataflow's own operators (by the operator factory's closure on
-// the stack), and records the ledger's work at each poll: what is counted
-// is where the polls fall and the work between them, both as deterministic
-// as the code.
+// opPollCtx counts, after the parse stage, the polls of its Err made while
+// each type of operator is evaluated (the dataflow's trace, opTraceKey), and
+// records the ledger's work at each poll: what is counted is where the polls
+// fall and the work between them, both as deterministic as the code.
 type opPollCtx struct {
 	context.Context
 	mu   sync.Mutex
 	led  *budget.Ledger
 	on   bool
 	work []int64
+	at   []string // the operator each poll was made in
 	in   map[string]int
+	ran  map[string]bool
+	cur  []string
+}
+
+func newOpPollCtx() *opPollCtx {
+	c := &opPollCtx{Context: context.Background(), in: map[string]int{}, ran: map[string]bool{}}
+	c.led = budget.NewLedger(c, budget.LedgerLimits{})
+	return c
+}
+
+func (c *opPollCtx) Value(key any) any {
+	if _, ok := key.(opTraceKey); ok {
+		return c.trace
+	}
+	return c.Context.Value(key)
+}
+
+func (c *opPollCtx) trace(typ string) func() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.cur = append(c.cur, typ)
+	c.ran[typ] = true
+	return func() {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		c.cur = c.cur[:len(c.cur)-1]
+	}
 }
 
 func (c *opPollCtx) Err() error {
@@ -34,20 +60,42 @@ func (c *opPollCtx) Err() error {
 		return nil
 	}
 	c.work = append(c.work, c.led.WorkDone())
-	pc := make([]uintptr, 32)
-	frames := runtime.CallersFrames(pc[:runtime.Callers(2, pc)])
-	for {
-		f, more := frames.Next()
-		if i := strings.Index(f.Function, "vega.fac"); i >= 0 {
-			name, _, _ := strings.Cut(f.Function[i+len("vega."):], ".")
-			c.in[name]++
-			break
-		}
-		if !more {
-			break
+	op := ""
+	if len(c.cur) > 0 {
+		op = c.cur[len(c.cur)-1]
+		c.in[op]++
+	}
+	c.at = append(c.at, op)
+	return nil
+}
+
+// render renders spec with c, counting from the end of the parse.
+func (c *opPollCtx) render(t *testing.T, spec string, opts Options) {
+	t.Helper()
+	opts.Stages = func(name string, _ time.Duration) {
+		if name == "parse" {
+			c.mu.Lock()
+			c.on = true
+			c.work = append(c.work, c.led.WorkDone())
+			c.at = append(c.at, "parse")
+			c.mu.Unlock()
 		}
 	}
-	return nil
+	if _, err := Render(budget.WithLedger(c, c.led), vegaSpec(t, spec), opts); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// worstGap is the most work charged between two polls, and the operators the
+// two were made in.
+func (c *opPollCtx) worstGap() (int64, string) {
+	worst, at := int64(0), ""
+	for i := 1; i < len(c.work); i++ {
+		if d := c.work[i] - c.work[i-1]; d > worst {
+			worst, at = d, c.at[i-1]+" and "+c.at[i]
+		}
+	}
+	return worst, at
 }
 
 // shuffledRows is n rows of rowsText's two fields and a third, h, which
@@ -97,28 +145,16 @@ func dataflowSpec(t *testing.T) string {
 // more than maxWorkBetweenPolls steps of work apart. A sort polls through
 // its comparisons.
 func TestDataflowOperatorsPollThroughout(t *testing.T) {
-	spec := vegaSpec(t, dataflowSpec(t))
-	ctx := &opPollCtx{Context: context.Background(), in: map[string]int{}}
-	ctx.led = budget.NewLedger(ctx, budget.LedgerLimits{})
-	_, err := Render(budget.WithLedger(ctx, ctx.led), spec, Options{Stages: func(name string, _ time.Duration) {
-		if name == "parse" {
-			ctx.mu.Lock()
-			ctx.on = true
-			ctx.work = append(ctx.work, ctx.led.WorkDone())
-			ctx.mu.Unlock()
-		}
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	ctx := newOpPollCtx()
+	ctx.render(t, dataflowSpec(t), Options{})
 	t.Logf("polls by operator: %v", ctx.in)
-	for _, op := range []string{"facCollect", "facRelay", "facValues", "facTupleIndex", "facDataJoin", "facItemStore", "facMark", "facEncode", "facSortItems", "facScale"} {
+	for _, op := range []string{"collect", "relay", "values", "tupleindex", "datajoin", "itemstore", "mark", "encode", "sortitems", "scale"} {
 		min := dataflowRows / 2048
 		switch op {
-		case "facItemStore":
+		case "itemstore":
 			// A first run only copies its items, a chunk at a time.
 			min = dataflowRows / copyChunk
-		case "facCollect", "facValues", "facSortItems":
+		case "collect", "values", "sortitems":
 			// A sort compares n log n times, a quarter of that at least
 			// (TimSort finds no runs here); a step a comparison.
 			min = dataflowRows * bits.Len(dataflowRows) / 4 / 1024
@@ -127,10 +163,7 @@ func TestDataflowOperatorsPollThroughout(t *testing.T) {
 			t.Errorf("%s polled %d times over %d rows; want at least %d", op, ctx.in[op], dataflowRows, min)
 		}
 	}
-	worst := int64(0)
-	for i := 1; i < len(ctx.work); i++ {
-		worst = max(worst, ctx.work[i]-ctx.work[i-1])
-	}
+	worst, _ := ctx.worstGap()
 	t.Logf("%d polls after the parse, at most %d steps apart", len(ctx.work)-1, worst)
 	if worst > maxWorkBetweenPolls {
 		t.Errorf("%d steps of work between two polls; want at most %d", worst, maxWorkBetweenPolls)

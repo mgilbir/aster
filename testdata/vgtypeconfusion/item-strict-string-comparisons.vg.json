@@ -1,0 +1,6 @@
+{"width": 80, "height": 60, "autosize": "pad", "marks": [
+ {"type": "text", "encode": {"enter": {"x": {"value": 10}, "y": {"value": 10}, "text": {"value": "abc"}, "baseline": {"value": ["top"]}, "align": {"value": ["center"]}}}},
+ {"type": "text", "encode": {"enter": {"x": {"value": 10}, "y": {"value": 30}, "text": {"value": "abcdefghij"}, "limit": {"value": 20}, "dir": {"value": ["rtl"]}, "ellipsis": {"value": 0}}}},
+ {"type": "rect", "encode": {"enter": {"x": {"value": 50}, "y": {"value": 5}, "width": {"value": 5}, "height": {"value": 5}, "stroke": {"value": "red"}, "strokeWidth": {"value": 4}, "strokeCap": {"value": ["square"]}, "opacity": {"value": "0"}}}},
+ {"type": "area", "encode": {"enter": {"x": {"value": 5}, "y": {"value": 40}, "width": {"value": 6}, "height": {"value": 3}, "orient": {"value": ["horizontal"]}, "fill": {"value": "blue"}}}}
+]}

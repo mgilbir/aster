@@ -143,3 +143,23 @@ func TestFallbackLoaderReportsEveryChild(t *testing.T) {
 		t.Errorf("a single child: %v, want its error unchanged", err)
 	}
 }
+
+// Closing a FileLoader that was never used does not open its directory to
+// close it (C141), and a Load after the Close fails as closed, without
+// opening it either.
+func TestFileLoaderCloseUnusedOpensNothing(t *testing.T) {
+	// A directory that does not exist: opening it would leave its error.
+	l := &FileLoader{BaseDir: filepath.Join(t.TempDir(), "missing")}
+	if err := l.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if l.root != nil || l.err != nil {
+		t.Errorf("Close opened the directory (root %v, err %v)", l.root, l.err)
+	}
+	if _, err := l.Load(context.Background(), "a.json"); err == nil || !strings.Contains(err.Error(), "closed") {
+		t.Errorf("Load after Close: %v", err)
+	}
+	if l.root != nil {
+		t.Error("Load after Close opened the directory")
+	}
+}

@@ -54,7 +54,13 @@ const (
 	maxTime = 8.64e15 // largest magnitude of a valid Date
 )
 
-// timeClip is ECMAScript TimeClip.
+// TimeClip is ECMAScript TimeClip, what `new Date(+v)` makes of a number:
+// NaN past ±8.64e15, else the integer toward zero (+0 for -0). Every entry
+// point of this package that takes an instant applies it, as d3 and
+// vega-time do with `new Date(+date)`, so a fraction or a -0.5 is the date
+// JavaScript would make of it (C119 of the 2026-10-18 audit).
+func TimeClip(t float64) float64 { return timeClip(t) }
+
 func timeClip(t float64) float64 {
 	if math.IsNaN(t) || math.Abs(t) > maxTime {
 		return math.NaN()
@@ -66,6 +72,19 @@ func timeClip(t float64) float64 {
 func Valid(t float64) bool { return !math.IsNaN(t) && math.Abs(t) <= maxTime }
 
 func floorMod(a, b float64) float64 {
+	// A time value and the units it is divided by are integers below 2^53:
+	// integer division gives math.Mod's result (exact for them) at a
+	// fraction of its cost, zero signed as the dividend as fmod signs it.
+	if a == math.Trunc(a) && math.Abs(a) < 1<<53 && b == math.Trunc(b) && b > 0 && b < 1<<53 {
+		m := int64(a) % int64(b)
+		if m < 0 {
+			m += int64(b)
+		}
+		if m == 0 {
+			return math.Copysign(0, a)
+		}
+		return float64(m)
+	}
 	m := math.Mod(a, b)
 	if m < 0 {
 		m += b
@@ -143,15 +162,16 @@ func (z Zone) offsetMillis(t float64) float64 {
 // the offset to whole minutes here even where the zone's own offset has
 // seconds (pre-1900 local mean time), while the calendar fields keep them.
 func (z Zone) TimezoneOffset(t float64) float64 {
-	if !Valid(t) {
+	if t = timeClip(t); !Valid(t) {
 		return math.NaN()
 	}
 	return math.Trunc(-z.offsetMillis(t)/msPerMinute) + 0
 }
 
-// Fields decomposes the valid time value t. For an invalid t every field is 0.
+// Fields decomposes the valid time value t, TimeClip'd as a Date holds it.
+// For an invalid t every field is 0.
 func (z Zone) Fields(t float64) Fields {
-	if !Valid(t) {
+	if t = timeClip(t); !Valid(t) {
 		return Fields{}
 	}
 	local := t + z.offsetMillis(t)

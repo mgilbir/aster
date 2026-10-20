@@ -177,7 +177,10 @@ const (
 // the bytes by href. Each fetch's context carries a budget.Budget whose
 // MaxLoadBytes is lim.MaxBytes, which the loaders read only up to. A fetch
 // that fails leaves its href out, to be drawn as a broken image is: not at
-// all. A fetch that fails over a limit fails them all, as does ctx ending.
+// all. A fetch that fails over a limit fails them all, as does ctx ending,
+// and so does one that panics: load runs on goroutines of Fetch's own, where
+// a panic would end the process rather than reach the caller's recover
+// (C15), so each recovers it and Fetch returns it as an error.
 func Fetch(ctx context.Context, hrefs []string, load Loader, lim Limits) (map[string][]byte, error) {
 	if load == nil || len(hrefs) == 0 {
 		return nil, nil
@@ -195,26 +198,34 @@ func Fetch(ctx context.Context, hrefs []string, load Loader, lim Limits) (map[st
 	var (
 		wg       sync.WaitGroup
 		mu       sync.Mutex
-		limitErr error
+		limitErr error // a limit's, or a panic's: it ends every fetch
 	)
+	fatal := func(err error) {
+		mu.Lock()
+		if limitErr == nil {
+			limitErr = err
+			cancel()
+		}
+		mu.Unlock()
+	}
 	sem := make(chan struct{}, fetchParallelism)
 	for i, href := range hrefs {
 		wg.Add(1)
 		sem <- struct{}{}
 		go func() {
 			defer func() { <-sem; wg.Done() }()
+			defer func() {
+				if r := recover(); r != nil {
+					fatal(fmt.Errorf("imageref: internal error fetching %q: %v", href, r))
+				}
+			}()
 			b, err := load(budget.With(ctx, &budget.Budget{MaxLoadBytes: int64(lim.MaxBytes)}), href)
 			if err == nil && len(b) > lim.MaxBytes {
 				err = lim.over("image %q is over %d bytes", href, lim.MaxBytes)
 			}
 			if err != nil {
 				if errors.Is(err, budget.ErrLimit) {
-					mu.Lock()
-					if limitErr == nil {
-						limitErr = err
-						cancel()
-					}
-					mu.Unlock()
+					fatal(err)
 				}
 				return
 			}

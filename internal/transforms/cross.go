@@ -15,6 +15,10 @@ type CrossParams struct {
 	Filter func(jsval.Value) bool
 	// As names the left and right fields; empty entries default to "a", "b".
 	As [2]string
+	// AsExact reports that As are the names as the runtime resolved them
+	// (`_.as || defaults`, then each entry's text): an empty one is the
+	// empty name, not the default.
+	AsExact bool
 }
 
 // Cross is the self cross-product: every ordered pair (left, right) of input
@@ -23,10 +27,10 @@ type CrossParams struct {
 // output tuples is an error.
 func Cross(ctx context.Context, data []jsval.Value, p CrossParams) ([]jsval.Value, error) {
 	a, b := p.As[0], p.As[1]
-	if a == "" {
+	if a == "" && !p.AsExact {
 		a = "a"
 	}
-	if b == "" {
+	if b == "" && !p.AsExact {
 		b = "b"
 	}
 	if p.Filter == nil && len(data) > 0 && len(data) > MaxGroupCells/len(data) {

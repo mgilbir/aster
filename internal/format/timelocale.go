@@ -6,27 +6,81 @@ import (
 	"strings"
 
 	"github.com/mgilbir/aster/internal/budget"
-
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
 // TimeLocaleDef is a d3-time-format locale definition (Vega's
-// config.locale.time). Every member is required, as in d3.
+// config.locale.time). The lists of names are required, as in d3, which
+// maps over them when the locale is made; the patterns of %c, %x and %X are
+// used only when those directives format or parse, as d3 uses them
+// (PatternKinds).
 type TimeLocaleDef struct {
-	DateTime    string   // format of %c
-	Date        string   // format of %x
-	Time        string   // format of %X
-	Periods     []string // AM, PM
-	Days        []string // Sunday first
-	ShortDays   []string
-	Months      []string
-	ShortMonths []string
+	DateTime string // format of %c
+	Date     string // format of %x
+	Time     string // format of %X
+	// PatternKinds says what DateTime, Date and Time (in this order) hold;
+	// the zero value is a string.
+	PatternKinds [3]PatternKind
+	Periods      []string // AM, PM
+	Days         []string // Sunday first
+	ShortDays    []string
+	Months       []string
+	ShortMonths  []string
+}
+
+// PatternKind is what a time locale's dateTime, date or time member holds,
+// as d3's newFormat and parseSpecifier use it: they read its length, and
+// charCodeAt and slice of it, only when %c, %x or %X formats or parses.
+type PatternKind uint8
+
+const (
+	// PatternString is a string: the pattern.
+	PatternString PatternKind = iota
+	// PatternEmpty is an empty array: a format writes "" (slice and join
+	// work on it), a parse matches nothing.
+	PatternEmpty
+	// PatternNoLength has no positive length (a number, a boolean, an
+	// object whose length is missing or not above 0): a format throws (it
+	// has no slice), a parse matches nothing.
+	PatternNoLength
+	// PatternThrows is null or undefined, an array with elements, or an
+	// object whose length is above 0: a format and a parse that reach it
+	// throw.
+	PatternThrows
+)
+
+// patternKindOf is the kind of a locale member read as d3 reads it.
+func patternKindOf(v jsval.Value) PatternKind {
+	switch {
+	case v.IsStr():
+		return PatternString
+	case v.IsNullish():
+		return PatternThrows
+	case v.IsArr():
+		if v.Len() == 0 {
+			return PatternEmpty
+		}
+		return PatternThrows
+	case v.IsObj():
+		// `i < n` with n = specifier.length: the relational comparison
+		// converts the length to a number.
+		if jsval.ToNumber(v.Get("length")) > 0 {
+			return PatternThrows
+		}
+	}
+	return PatternNoLength
 }
 
 // TimeLocale compiles time format and parse specifiers for one locale. It is
 // immutable and safe for concurrent use.
 type TimeLocale struct {
 	def TimeLocaleDef
+	// pat are the patterns of %c, %x and %X, compiled once: a specifier
+	// refers to them, as d3's formats.c refers to its own function.
+	pat [3]localePattern
+	// halves: a name or pattern holds a lone surrogate, which may pair with
+	// its neighbour in a formatted date.
+	halves bool
 	// Lower-cased name -> index of the LAST equal name, as d3's
 	// new Map(names.map((n, i) => [n.toLowerCase(), i])) builds it.
 	periodLookup, weekdayLookup, shortWeekdayLookup, monthLookup, shortMonthLookup map[string]int
@@ -87,9 +141,15 @@ func NewTimeLocale(def TimeLocaleDef) (*TimeLocale, error) {
 	l.shortWeekdayLookup = lookupOf(def.ShortDays)
 	l.monthLookup = lookupOf(def.Months)
 	l.shortMonthLookup = lookupOf(def.ShortMonths)
-	for _, d := range [...]string{"%c", "%x", "%X"} {
-		if n := l.maxOutput(l.compileFormat(nil, d, 0, new(int))); n > MaxLocaleExpansion {
-			return nil, fmt.Errorf("%w: time locale %s expands to up to %d bytes, more than %d", budget.ErrLimit, d, n, MaxLocaleExpansion)
+	l.compilePatterns()
+	for _, names := range [][]string{{def.DateTime, def.Date, def.Time}, def.Periods, def.Days, def.ShortDays, def.Months, def.ShortMonths} {
+		for _, n := range names {
+			l.halves = l.halves || strings.IndexByte(n, 0xED) >= 0
+		}
+	}
+	for k, d := range [...]string{"%c", "%x", "%X"} {
+		if p := &l.pat[k]; p.thrown == nil && p.maxOut > MaxLocaleExpansion {
+			return nil, fmt.Errorf("%w: time locale %s expands to up to %d bytes, more than %d", budget.ErrLimit, d, p.maxOut, MaxLocaleExpansion)
 		}
 	}
 	return l, nil
@@ -119,8 +179,8 @@ func (d TimeLocaleDef) check() error {
 	return nil
 }
 
-// maxOutput bounds the bytes a compiled format writes for any date.
-func (l *TimeLocale) maxOutput(ops []fmtOp) int {
+// maxOutput bounds the bytes a specifier formats any date to.
+func (l *TimeLocale) maxOutput(spec string) int {
 	longest := func(names []string) int {
 		m := 0
 		for _, n := range names {
@@ -129,7 +189,9 @@ func (l *TimeLocale) maxOutput(ops []fmtOp) int {
 		return m
 	}
 	n := 0
-	for _, op := range ops {
+	for i := 0; i < len(spec); {
+		var op fmtOp
+		op, i = nextFmtOp(spec, i)
 		switch op.dir {
 		case 0:
 			n += len(op.lit)
@@ -143,6 +205,8 @@ func (l *TimeLocale) maxOutput(ops []fmtOp) int {
 			n += longest(l.def.Months)
 		case 'p':
 			n += longest(l.def.Periods)
+		case 'c', 'x', 'X':
+			n += l.pat[patternIndex(op.dir)].maxOut
 		default:
 			n += 24 // a number: at most a sign and 17 digits, or "NaN000"
 		}
@@ -153,25 +217,29 @@ func (l *TimeLocale) maxOutput(ops []fmtOp) int {
 func lookupOf(names []string) map[string]int {
 	m := make(map[string]int, len(names))
 	for i, n := range names {
-		m[strings.ToLower(n)] = i
+		m[jsval.JSLower(n)] = i
 	}
 	return m
 }
 
 // TimeLocaleFromValue reads a locale definition object as found in a Vega
-// configuration.
+// configuration, as d3-time-format reads it: the lists of names must be
+// arrays of strings (d3 maps over them with String.prototype.replace and
+// toLowerCase, which throw otherwise), the patterns may be anything, and are
+// read when they are used (PatternKind).
 func TimeLocaleFromValue(v jsval.Value) (*TimeLocale, error) {
 	if !v.IsObj() {
 		return nil, errors.New("time locale must be an object")
 	}
 	var def TimeLocaleDef
-	str := func(key string, dst *string) error {
-		m := v.Get(key)
-		if !m.IsStr() {
-			return fmt.Errorf("time locale %q must be a string", key)
+	for k, p := range [...]struct {
+		key string
+		dst *string
+	}{{"dateTime", &def.DateTime}, {"date", &def.Date}, {"time", &def.Time}} {
+		m := v.Get(p.key)
+		if def.PatternKinds[k] = patternKindOf(m); def.PatternKinds[k] == PatternString {
+			*p.dst = m.StrValue()
 		}
-		*dst = m.StrValue()
-		return nil
 	}
 	list := func(key string, dst *[]string) error {
 		m := v.Get(key)
@@ -189,7 +257,6 @@ func TimeLocaleFromValue(v jsval.Value) (*TimeLocale, error) {
 		return nil
 	}
 	for _, e := range []error{
-		str("dateTime", &def.DateTime), str("date", &def.Date), str("time", &def.Time),
 		list("periods", &def.Periods), list("days", &def.Days), list("shortDays", &def.ShortDays),
 		list("months", &def.Months), list("shortMonths", &def.ShortMonths),
 	} {
@@ -207,12 +274,90 @@ func nameAt(names []string, i int) string {
 	return names[i]
 }
 
-// maxLocaleNesting bounds how deep %c, %x and %X may expand into each other.
-// d3 recurses without limit (a cyclic locale overflows the stack); beyond
-// this depth the directive expands to nothing.
-const maxLocaleNesting = 8
+// localePattern is one of %c, %x and %X compiled: its steps (a %c, %x or
+// %X in it refers to that pattern), the most bytes it writes, and the
+// exception d3 throws when it formats, if it does: one of PatternNoLength
+// or PatternThrows, a pattern that uses %c, %x or %X in a cycle (d3
+// recurses until its stack overflows), or one that uses a pattern that
+// throws.
+type localePattern struct {
+	kind   PatternKind
+	text   string  // the pattern
+	fmt    []fmtOp // its compiled steps (a pattern is at most MaxLocalePattern bytes)
+	parse  []parseOp
+	maxOut int
+	thrown *jsval.Thrown
+	state  uint8 // compilePatterns' walk: 0 not seen, 1 in progress, 2 done
+}
 
-// maxLocaleExpansions bounds how many %c, %x and %X one specifier expands in
-// all. The nesting bound alone leaves b^8 work for a locale whose dateTime
-// holds b copies of %c, which a specification can supply (config.locale).
-const maxLocaleExpansions = 1 << 12
+var patternNames = [3]string{"dateTime", "date", "time"}
+
+// patternIndex is the pattern of directive c ('c', 'x' or 'X').
+func patternIndex(c byte) int {
+	switch c {
+	case 'x':
+		return 1
+	case 'X':
+		return 2
+	}
+	return 0
+}
+
+func errStackOverflow() *jsval.Thrown {
+	return &jsval.Thrown{Name: "RangeError", Msg: "Maximum call stack size exceeded"}
+}
+
+// compilePatterns compiles the three patterns and resolves, depth first,
+// what each writes at most and whether formatting it throws. Each pattern
+// is visited once, so the work is linear in the patterns' length however
+// they refer to each other.
+func (l *TimeLocale) compilePatterns() {
+	texts := [3]string{l.def.DateTime, l.def.Date, l.def.Time}
+	for k := range l.pat {
+		p := &l.pat[k]
+		p.kind = l.def.PatternKinds[k]
+		if p.kind == PatternString {
+			p.text = texts[k]
+			p.fmt = compileFormat(texts[k])
+			p.parse = compileParse(nil, texts[k])
+		}
+	}
+	for k := range l.pat {
+		l.resolve(k)
+	}
+}
+
+func (l *TimeLocale) resolve(k int) {
+	p := &l.pat[k]
+	if p.state == 2 {
+		return
+	}
+	p.state = 1
+	switch p.kind {
+	case PatternNoLength:
+		p.thrown = &jsval.Thrown{Name: "TypeError", Msg: "the time locale's " + patternNames[k] + " has no slice method (it is not a string)"}
+	case PatternThrows:
+		p.thrown = &jsval.Thrown{Name: "TypeError", Msg: "the time locale's " + patternNames[k] + " is not a string"}
+	}
+	for i := 0; i < len(p.text); {
+		var op fmtOp
+		op, i = nextFmtOp(p.text, i)
+		if !op.ref() {
+			continue
+		}
+		sub := &l.pat[patternIndex(op.dir)]
+		switch sub.state {
+		case 1:
+			p.thrown = errStackOverflow()
+		case 0:
+			l.resolve(patternIndex(op.dir))
+		}
+		if p.thrown == nil && sub.thrown != nil {
+			p.thrown = sub.thrown
+		}
+	}
+	if p.thrown == nil {
+		p.maxOut = l.maxOutput(p.text)
+	}
+	p.state = 2
+}

@@ -1,0 +1,4 @@
+{"width": 60, "height": 20, "marks": [
+ {"type": "rect", "encode": {"enter": {"x": {"value": 0}, "width": {"value": 10}, "height": {"value": 10}, "fill": {"value": {"gradient": ["radial"], "y1": ["a", "b"], "y2": true, "stops": [{"offset": 0, "color": "red"}, {"color": "blue"}, {"offset": "1", "color": [1]}, "ab"]}}}}},
+ {"type": "rect", "encode": {"enter": {"x": {"value": 20}, "width": {"value": 10}, "height": {"value": 10}, "fill": {"value": {"gradient": "linear", "id": 0, "x1": {}, "stops": [{"offset": 1, "color": "green"}]}}}}}
+]}

@@ -1,0 +1,3 @@
+{"width":100,"height":100,"signals":[{"name":"r","value":[0,5]}],
+"data":[{"name":"src","values":[{"a":1},{"a":3},{"a":7}],"transform":[{"type":"crossfilter","signal":"xf","fields":["a"],"query":{"signal":"'ab'"}},{"type":"resolvefilter","filter":{"signal":"xf"},"ignore":0}]}],
+"marks":[{"type":"text","from":{"data":"src"},"encode":{"update":{"text":{"signal":"datum.a + '' + length(data('src'))"},"y":{"signal":"datum.a"}}}}]}

@@ -277,40 +277,42 @@ func init() {
 		return jsval.Bool(s.inRange(arg(args, 0), arg(args, 1),
 			left.IsUndefined() || left.IsTruthy(), right.IsUndefined() || right.IsTruthy()))
 	})
+	// clampRange and flush compare the range's ends as given, strings as
+	// strings, and convert them only for the arithmetic (C101).
 	fn("clampRange", func(s *Scope, args []jsval.Value) jsval.Value {
 		rng := arg(args, 0)
-		lo, hi := s.num(s.getIndex(rng, jsval.Num(0))), s.num(s.getIndex(rng, jsval.Num(1)))
-		mn, mx := s.num(arg(args, 1)), s.num(arg(args, 2))
-		if hi < lo {
+		lo, hi := s.getIndex(rng, jsval.Num(0)), s.getIndex(rng, jsval.Num(1))
+		mn, mx := arg(args, 1), arg(args, 2)
+		if s.lt(hi, lo) {
 			lo, hi = hi, lo
 		}
-		span := hi - lo
-		if span >= mx-mn {
-			return jsval.ArrOf(jsval.Num(mn), jsval.Num(mx))
+		span := s.num(hi) - s.num(lo)
+		if span >= s.num(mx)-s.num(mn) {
+			return jsval.ArrOf(mn, mx) // [min, max], as given
 		}
-		lo = jsMin2(jsMax2(lo, mn), mx-span)
-		return jsval.ArrOf(jsval.Num(lo), jsval.Num(lo+span))
+		l := jsMin2(jsMax2(s.num(lo), s.num(mn)), s.num(mx)-span)
+		return jsval.ArrOf(jsval.Num(l), jsval.Num(l+span))
 	})
 	// flush(range, value, threshold, left, right, center): pick left, right or
 	// center depending on how close value lies to an end of the range.
 	fn("flush", func(s *Scope, args []jsval.Value) jsval.Value {
-		rng, value, threshold := arg(args, 0), s.num(arg(args, 1)), arg(args, 2)
+		rng, value, threshold := arg(args, 0), arg(args, 1), arg(args, 2)
 		left, right, center := arg(args, 3), arg(args, 4), arg(args, 5)
 		if !threshold.IsTruthy() && !(threshold.IsNum() && threshold.NumValue() == 0) {
 			return center
 		}
 		t := s.num(threshold)
-		a := s.num(s.getIndex(rng, jsval.Num(0)))
-		bv := s.lastOf(rng)
-		if bv.IsUndefined() {
+		a := s.getIndex(rng, jsval.Num(0))
+		b := s.lastOf(rng)
+		if b.IsUndefined() {
 			return center
 		}
-		b := s.num(bv)
-		if b < a {
+		if s.lt(b, a) {
 			a, b = b, a
 		}
-		l := math.Abs(value - a)
-		r := math.Abs(b - value)
+		v := s.num(value)
+		l := math.Abs(v - s.num(a))
+		r := math.Abs(s.num(b) - v)
 		switch {
 		case l < r && l <= t:
 			return left
@@ -350,15 +352,29 @@ func init() {
 	})
 	fn("pluck", func(s *Scope, args []jsval.Value) jsval.Value {
 		data := arg(args, 0)
-		// field(name) splits the name as an access path: undefined and null
-		// have no length (TypeError), and other non-strings yield an empty
-		// path, which reads the item itself.
+		// field(name) splits the name as an access path, as vega-util's
+		// splitAccessPath does: it reads name.length (a TypeError for
+		// undefined and null), then that many code units of String(name),
+		// so a value without a length (a number) is the empty path, which
+		// reads the item itself, and ['a', 'b'] the path "a,". A path it
+		// cannot split is the Error it throws.
 		var path []string
-		switch name := arg(args, 1); {
-		case name.IsNullish():
+		name := arg(args, 1)
+		if name.IsNullish() {
 			typeError("Cannot read properties of %s (reading 'length')", name.AsString())
-		case name.IsStr() || name.IsArr():
-			path = jsval.ParseFieldPath(s.str(name))
+		}
+		if n := s.num(s.getProp(name, "length")); n > 0 {
+			text := s.str(name)
+			s.workBytes(len(text))
+			var err error
+			if units := utf16Len(text); float64(units) > n {
+				path, err = splitAccessPathN(toUTF16(text), int(math.Ceil(n)))
+			} else {
+				path, err = jsval.SplitFieldPath(text)
+			}
+			if err != nil {
+				throw("Error", "%v", err)
+			}
 		}
 		get := func(o jsval.Value) jsval.Value {
 			for _, seg := range path {
@@ -387,6 +403,17 @@ func init() {
 				for k, v := range a.ObjValue().All() {
 					out.Set(k, v)
 				}
+				// for-in visits the enumerable members a d3 colour inherits
+				// (its methods) after its own.
+				if t := colourOf(a); t != nil {
+					names := colourForIn[t.class]
+					s.chargeMembers(len(names))
+					for _, k := range names {
+						if !a.ObjValue().Has(k) {
+							out.Set(k, t.proto.Get(k))
+						}
+					}
+				}
 			case jsval.KindArr:
 				s.chargeMembers(a.Len())
 				for i, v := range a.Items() {
@@ -407,7 +434,9 @@ func init() {
 				}
 			}
 		}
-		return jsval.Obj(s.jsOrder(out))
+		res := s.jsOrder(out)
+		colourMethods(res)
+		return jsval.Obj(res)
 	})
 }
 
@@ -600,4 +629,79 @@ func indexKey(k string) (uint64, bool) {
 		n = n*10 + uint64(k[i]-'0')
 	}
 	return n, n <= 1<<53
+}
+
+// splitAccessPathN is vega-util's splitAccessPath for a value whose length n
+// is shorter than its String p (an array of several strings, an object with
+// a length): the loop reads the first n code units, and the last segment runs
+// one past them (its j++). For a string, n is its length and
+// jsval.SplitFieldPath is the same split.
+func splitAccessPathN(p []uint16, n int) ([]string, error) {
+	var path []string
+	var q uint16 // the open quote, 0 for none
+	b, i, j := 0, 0, 0
+	s := ""
+	sub := func(from, to int) string {
+		from, to = min(from, len(p)), min(to, len(p))
+		if from >= to {
+			return ""
+		}
+		return fromUTF16(p[from:to])
+	}
+	push := func() {
+		path = append(path, s+sub(i, j))
+		s = ""
+		i = j + 1
+	}
+	for ; j < n; j++ {
+		c := uint16(0xFFFF) // past the end: undefined, no character
+		if j < len(p) {
+			c = p[j]
+		}
+		switch {
+		case c == '\\':
+			s += sub(i, j)
+			j++
+			i = j
+		case q != 0 && c == q:
+			push()
+			q = 0
+			b = -1
+		case q != 0:
+		case i == b && (c == '"' || c == '\''):
+			i = j + 1
+			q = c
+		case c == '.' && b == 0:
+			if j > i {
+				push()
+			} else {
+				i = j + 1
+			}
+		case c == '[':
+			if j > i {
+				push()
+			}
+			b, i = j+1, j+1
+		case c == ']':
+			if b == 0 {
+				return path, &jsval.PathError{Msg: "Access path missing open bracket: " + fromUTF16(p)}
+			}
+			if b > 0 {
+				push()
+			}
+			b = 0
+			i = j + 1
+		}
+	}
+	if b != 0 {
+		return path, &jsval.PathError{Msg: "Access path missing closing bracket: " + fromUTF16(p)}
+	}
+	if q != 0 {
+		return path, &jsval.PathError{Msg: "Access path missing closing quote: " + fromUTF16(p)}
+	}
+	if j > i {
+		j++
+		push()
+	}
+	return path, nil
 }

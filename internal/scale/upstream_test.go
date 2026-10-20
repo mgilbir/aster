@@ -2,12 +2,13 @@ package scale
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/jsval"
+	"github.com/mgilbir/aster/internal/nodetz"
 	"github.com/mgilbir/aster/internal/upstream"
 )
 
@@ -16,13 +17,13 @@ import (
 // interpolators maps d3-interpolate's exports of the form `(a, b) => t => value`.
 var interpolators = map[string]Interpolator{
 	"interpolate":              InterpolateValue,
-	"interpolateNumber":        InterpolateNumber,
-	"interpolateRound":         InterpolateRound,
-	"interpolateDate":          InterpolateDate,
+	"interpolateNumber":        InterpolateNumberI,
+	"interpolateRound":         InterpolateRoundI,
+	"interpolateDate":          InterpolateDateI,
 	"interpolateString":        InterpolateString,
 	"interpolateObject":        InterpolateObject,
 	"interpolateArray":         InterpolateArray,
-	"interpolateNumberArray":   InterpolateArray,
+	"interpolateNumberArray":   InterpolateNumberArray,
 	"interpolateLab":           InterpolateLab,
 	"interpolateHcl":           InterpolateHCL,
 	"interpolateHclLong":       InterpolateHCLLong,
@@ -81,12 +82,13 @@ func TestUpstreamD3Interpolate(t *testing.T) {
 			r.Skip("colour instances as endpoints (the engine interpolates colour strings, as Vega passes them)")
 			continue
 		}
-		if strings.HasPrefix(fn, "interpolateArray") && c.ArgsContain("object") {
-			r.Skip("array-likes that are not arrays")
-			continue
-		}
 		if c.ArgsContain("typed") || (!strings.HasPrefix(fn, "piecewise") && c.ArgsContain("function")) {
 			r.Skip("typed arrays or functions as arguments (no such values in a specification)")
+			continue
+		}
+		if strings.HasPrefix(fn, "interpolateArray") && c.ArgsContain("object") {
+			// an `arguments` object, whose length the recording cannot keep
+			r.Skip("array-likes that are not arrays")
 			continue
 		}
 		// A vector of the form `<export>()` asks the function the export returned.
@@ -99,23 +101,19 @@ func TestUpstreamD3Interpolate(t *testing.T) {
 		var unit func(float64) jsval.Value
 		via := c.ViaSteps()
 		switch {
-		case base == "interpolateBasis" || base == "interpolateBasisClosed":
-			xs := floatsOf(args[0])
-			f := Basis
-			if base == "interpolateBasisClosed" {
-				f = BasisClosed
-			}
-			basis := f(xs)
-			unit = func(t float64) jsval.Value { return jsval.Num(basis(t)) }
-		case base == "interpolateDiscrete":
-			unit = Discrete(upstream.ToValue(args[0]).Items())
+		case base == "interpolateBasis" || base == "interpolateBasisClosed" || base == "interpolateDiscrete":
+			// the interpolators a scale's "basis", "basis-closed" and
+			// "discrete" use, given the list as a scale gives its range end
+			f := map[string]Interpolator{"interpolateBasis": InterpolateBasis, "interpolateBasisClosed": InterpolateBasisClosed,
+				"interpolateDiscrete": InterpolateDiscrete}[base]
+			unit = f(jsval.Walker{}, upstream.ToValue(args[0]), jsval.Undefined)
 		case base == "piecewise":
 			interp, ok := interpolatorOf(args[0])
 			if !ok {
 				r.Skip("piecewise with an interpolator the recording cannot identify")
 				continue
 			}
-			unit = Piecewise(interp, upstream.ToValue(args[1]).Items())
+			unit = Piecewise(jsval.Walker{}, interp, upstream.ToValue(args[1]).Items())
 		case strings.HasSuffix(base, ".gamma"):
 			// interpolateRgb.gamma(g)(a, b)(t)
 			interp, ok := interpolatorFromCall(base, args)
@@ -123,7 +121,7 @@ func TestUpstreamD3Interpolate(t *testing.T) {
 				r.Skip("gamma interpolators not asked through (a, b)(t)")
 				continue
 			}
-			unit = interp(upstream.ToValue(via[0].Args[0]), upstream.ToValue(via[0].Args[1]))
+			unit = interp(jsval.Walker{}, upstream.ToValue(via[0].Args[0]), upstream.ToValue(via[0].Args[1]))
 			via = nil
 		case base == "interpolateZoom.rho":
 			if len(via) != 1 || via[0].Method != "" || len(via[0].Args) != 2 {
@@ -140,21 +138,15 @@ func TestUpstreamD3Interpolate(t *testing.T) {
 			unit = zoomValue(interp)
 			via = nil
 		case base == "interpolateZoom":
-			p0, ok0 := triple(args[0])
-			p1, ok1 := triple(args[1])
-			if !ok0 || !ok1 {
-				r.Skip("zoom with a different shape")
-				continue
-			}
-			interp, _ := DefaultZoom()(p0, p1)
-			unit = zoomValue(interp)
+			// the interpolator a scale's "zoom" uses
+			unit = InterpolateZoom(jsval.Walker{}, upstream.ToValue(args[0]), upstream.ToValue(args[1]))
 		default:
 			f, ok := interpolators[base]
 			if !ok || len(args) != 2 {
 				r.Skip("unmapped " + fn)
 				continue
 			}
-			unit = f(upstream.ToValue(args[0]), upstream.ToValue(args[1]))
+			unit = f(jsval.Walker{}, upstream.ToValue(args[0]), upstream.ToValue(args[1]))
 		}
 		if len(via) > 0 || len(c.Args) != 1 || c.Method != "" {
 			r.Skip("not a plain call of the returned function")
@@ -162,16 +154,7 @@ func TestUpstreamD3Interpolate(t *testing.T) {
 		}
 		r.Check(c, upstream.FromValue(unit(upstream.Number(c.Args[0]))), false)
 	}
-	r.Done(200)
-}
-
-func floatsOf(v any) []float64 {
-	items, _ := v.([]any)
-	out := make([]float64, len(items))
-	for i, x := range items {
-		out[i] = upstream.Number(x)
-	}
-	return out
+	r.Done(242)
 }
 
 func triple(v any) (p [3]float64, ok bool) {
@@ -342,11 +325,7 @@ func configure(s Scale, step upstream.Step, local format.Zone) bool {
 
 func TestUpstreamD3Scale(t *testing.T) {
 	r := upstream.Start(t, "d3-scale")
-	loc, err := time.LoadLocation(r.File.TimeZone)
-	if err != nil {
-		t.Fatal(err)
-	}
-	local := format.Local(loc)
+	local := format.Local(nodetz.MustLoad(t, r.File.TimeZone))
 	locale, err := format.NewLocale(jsval.Undefined, jsval.Undefined, local)
 	if err != nil {
 		t.Fatal(err)
@@ -524,11 +503,30 @@ func TestUpstreamD3Scale(t *testing.T) {
 			r.Check(c, upstream.FromValue(v), false)
 		case "tickFormat":
 			r.Skip("tickFormat results (a function is the answer)")
+		case "interpolate":
+			// the getter: the interpolator the scale uses, by its d3 export
+			ip, ok := s.(Interpolating)
+			origin, isFn := upstream.IsFunction(c.Result)
+			if !ok || len(c.Args) != 0 || !isFn || origin == nil {
+				r.Skip("unmapped method " + c.Method)
+				continue
+			}
+			got := ""
+			for name, f := range interpolators {
+				if reflect.ValueOf(f).Pointer() == reflect.ValueOf(ip.Interpolate()).Pointer() {
+					got = name
+				}
+			}
+			if got == origin["export"] {
+				r.Check(c, c.Result, false)
+			} else {
+				r.Check(c, map[string]any{"$": "function", "export": got}, false)
+			}
 		default:
 			r.Skip("unmapped method " + c.Method)
 		}
 	}
-	r.Done(836)
+	r.Done(1809)
 }
 
 func argOf(args []any, i int) any {
@@ -598,5 +596,5 @@ func TestUpstreamD3ArrayTicks(t *testing.T) {
 			r.Skip("d3.nice is not used")
 		}
 	}
-	r.Done(220) // 223 since the unbounded, unused d3.nice was removed (29 vectors)
+	r.Done(223) // the 29 d3.nice vectors are not replayed: the unbounded, unused d3.nice was removed
 }

@@ -1,6 +1,8 @@
 package vega
 
 import (
+	"context"
+
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/transforms"
 )
@@ -36,13 +38,14 @@ type aggCells struct {
 	// Cells are indexed on first use: most aggregates never parent a facet.
 	in, out []jsval.Value
 	key     transforms.KeyFunc
+	ctx     context.Context // the call's, which the indexing is charged to
 }
 
 // get returns the output tuple of the group with the given key.
 func (a *aggCells) get(k string) jsval.Value {
 	if a.byKey == nil {
 		a.byKey = make(map[string]jsval.Value, len(a.out))
-		for i, k := range firstKeys(a.in, a.key) {
+		for i, k := range firstKeys(a.ctx, a.in, a.key) {
 			if i < len(a.out) {
 				a.byKey[k] = a.out[i]
 			}
@@ -64,29 +67,57 @@ type facetState struct {
 	flows  map[any]*cell
 	order  []any
 	active []*opNode
+	// solo holds the tuples a "__proto__" subflow was opened for (see
+	// soloSubflow), so a later run opens none for them again.
+	solo map[*jsval.Object]struct{}
 }
 
 func (s *facetState) subflow(n *opNode, k any, make subflowMaker, key string, parent jsval.Value, pulse *flowPulse) *cell {
 	c := s.flows[k]
 	if c == nil {
-		g := n.g
-		g.view.cells++
-		if lim := g.view.limits.MaxSubflows; lim >= 0 && g.view.cells > lim {
-			failLimit("more than %d facet cells", g.view.limits.MaxSubflows)
-		}
-		sf := g.add("subflow", nil)
-		sf.ctx = n.ctx
-		c = &cell{src: sf}
-		sfc := c
-		sf.tr = trFunc(func(_ *opNode, _ *opParams, in *flowPulse) *flowPulse {
-			return &flowPulse{stamp: in.stamp, encode: in.encode, changed: true, tuples: sfc.tuples}
-		})
-		root := make(key, parent)
-		root.source = []*opNode{sf}
-		sf.addTarget(root)
+		c = s.newCell(n, make, key, parent)
 		s.flows[k] = c
 		s.order = append(s.order, k)
 	}
+	return c
+}
+
+// soloSubflow is the subflow of a tuple whose facet key is "__proto__".
+// Upstream's Facet keeps its subflows in a plain object: `hasOwnProperty(flows,
+// '__proto__')` is false and `flows['__proto__'] = sf` sets the object's
+// prototype, so no later tuple finds the subflow and each opens one of its
+// own, which the facet does not keep. It reports nil for a tuple that already
+// has its subflow: Facet adds only the tuples a pulse adds.
+func (s *facetState) soloSubflow(n *opNode, make subflowMaker, key string, parent jsval.Value, t jsval.Value) *cell {
+	if o := jsval.Tuple(t); o != nil {
+		if _, dup := s.solo[o]; dup {
+			return nil
+		}
+		if s.solo == nil {
+			s.solo = map[*jsval.Object]struct{}{}
+		}
+		s.solo[o] = struct{}{}
+	}
+	return s.newCell(n, make, key, parent)
+}
+
+// newCell instantiates a subflow: its source operator and the operators of
+// the sub-scope.
+func (s *facetState) newCell(n *opNode, make subflowMaker, key string, parent jsval.Value) *cell {
+	g := n.g
+	g.view.cells++
+	if lim := g.view.limits.MaxSubflows; lim >= 0 && g.view.cells > lim {
+		failLimit("more than %d facet cells", g.view.limits.MaxSubflows)
+	}
+	sf := g.add("subflow", nil)
+	sf.ctx = n.ctx
+	c := &cell{src: sf}
+	sf.tr = trFunc(func(_ *opNode, _ *opParams, in *flowPulse) *flowPulse {
+		return &flowPulse{stamp: in.stamp, encode: in.encode, changed: true, tuples: c.tuples}
+	})
+	root := make(key, parent)
+	root.source = []*opNode{sf}
+	sf.addTarget(root)
 	return c
 }
 
@@ -109,12 +140,24 @@ func facFacet(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 		cells, _ := p.Get("group").(*aggCells)
 		st.active = st.active[:0]
 
-		groups := transforms.GroupByKey(pulse.tuples, keyFn)
+		groups, err := transforms.GroupByKeyFacet(n.g.ctx, pulse.tuples, keyFn)
+		if err != nil {
+			failErr(err)
+		}
 		seen := make(map[any]struct{}, len(groups))
-		for _, g := range groups {
+		for i, g := range groups {
+			n.g.rows(i, len(groups), 4)
 			var parent jsval.Value
 			if cells != nil {
 				parent = cells.get(g.Key)
+			}
+			if g.Key == "__proto__" {
+				cl := st.soloSubflow(n, flow, g.Key, parent, g.Tuples[0])
+				if cl != nil {
+					cl.tuples = g.Tuples
+					st.activate(cl)
+				}
+				continue
 			}
 			cl := st.subflow(n, g.Key, flow, g.Key, parent, pulse)
 			cl.tuples = g.Tuples
@@ -122,7 +165,8 @@ func facFacet(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 			seen[g.Key] = struct{}{}
 		}
 		// Cells whose tuples are all gone still run, to retire their items.
-		for _, k := range st.order {
+		for i, k := range st.order {
+			n.g.rows(i, len(st.order), 1)
 			if _, ok := seen[k]; ok {
 				continue
 			}
@@ -144,11 +188,12 @@ const prefacetLastBytes = 48
 // whose field now holds another value than the cell was filled from:
 // upstream's pulse then carries it as modified, with its field among the
 // modified fields. A first run has nothing to compare, and costs nothing.
-func prefacetFieldModified(st *facetState, last map[*cell]jsval.Value, tuples []jsval.Value, field transforms.Field) bool {
+func prefacetFieldModified(g *flowGraph, st *facetState, last map[*cell]jsval.Value, tuples []jsval.Value, field transforms.Field) bool {
 	if len(last) == 0 {
 		return false
 	}
-	for _, t := range tuples {
+	for i, t := range tuples {
+		g.rows(i, len(tuples), 2)
 		cl := st.flows[t.Key()]
 		if cl == nil {
 			continue
@@ -180,7 +225,7 @@ func facPreFacet(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNod
 		// pulse.modified(accessorFields(field)))`: the parameter changed (a
 		// signal's, on the first run too), or a tuple the facet had before
 		// comes back with its field rewritten (a formula that ran again).
-		if p.Modified("field") || hasField && prefacetFieldModified(st, last, pulse.tuples, field) {
+		if p.Modified("field") || hasField && prefacetFieldModified(n.g, st, last, pulse.tuples, field) {
 			fail("PreFacet does not support field modification.")
 		}
 		st.active = st.active[:0]
@@ -190,7 +235,8 @@ func facPreFacet(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNod
 		v := n.g.view
 		var rows, excess int64
 		v.holdHeld(n, 0, 0)
-		for _, t := range pulse.tuples {
+		for i, t := range pulse.tuples {
+			n.g.rows(i, len(pulse.tuples), 2)
 			cl := st.subflow(n, t.Key(), flow, "", t, pulse)
 			if hasField {
 				arr := field.Apply(t)
@@ -198,7 +244,7 @@ func facPreFacet(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNod
 				// no forEach
 				switch {
 				case arr.IsNullish():
-					fail("TypeError: Cannot read properties of %s (reading 'forEach')", arr.AsString())
+					fail("TypeError: Cannot read properties of %s (reading 'forEach')", jsval.StringPrefix(arr, jsval.MessageBytes))
 				case !arr.IsArr():
 					fail("TypeError: field(...).forEach is not a function")
 				}
@@ -223,7 +269,8 @@ func facPreFacet(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNod
 			st.activate(cl)
 			seen[t.Key()] = struct{}{}
 		}
-		for _, k := range st.order {
+		for i, k := range st.order {
+			n.g.rows(i, len(st.order), 1)
 			if _, ok := seen[k]; ok {
 				continue
 			}

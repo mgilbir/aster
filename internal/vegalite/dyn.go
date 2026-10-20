@@ -1,15 +1,11 @@
 package vegalite
 
 import (
-	"errors"
+	"bytes"
 	"math"
 	"sort"
 	"strconv"
 	"strings"
-	"unicode/utf8"
-
-	"golang.org/x/text/cases"
-	"golang.org/x/text/language"
 
 	"github.com/mgilbir/aster/internal/jsval"
 )
@@ -134,11 +130,19 @@ func isExprRef(cc *compileCtx, v Value) bool {
 }
 
 // cloneObj is `{...o}`.
+// cloneObj is {...o}: o's own keys in a new plain object (whose prototype
+// is Object.prototype, whatever o's is).
 func cloneObj(o *Object) *Object {
 	if o == nil {
 		return jsval.NewObject(0)
 	}
-	return o.Clone()
+	c := o.Clone()
+	scope := o.ConversionScope()
+	c.SetPrototype(undef, nil)
+	if scope != nil && c.Has("toString") {
+		c.SetConversionScope(scope) // the copy holds o's toString too
+	}
+	return c
 }
 
 // spread copies the keys of src (an object; anything else is ignored) into dst,
@@ -206,6 +210,7 @@ func mergedCC(cc *compileCtx, srcs ...Value) *Object {
 	for _, s := range srcs {
 		n += s.Len()
 	}
+	cc.alloc(objectBytes(n))
 	return spreadCC(cc, jsval.NewObject(n), srcs...)
 }
 
@@ -235,15 +240,6 @@ func omit(v Value, keys ...string) *Object {
 		}
 	}
 	return c
-}
-
-// stringifyJS is util.stringify as a template literal renders it: undefined
-// prints as "undefined".
-func stringifyJS(v Value) string {
-	if v.IsUndefined() {
-		return "undefined"
-	}
-	return stringify(nil, v)
 }
 
 // pick is upstream's pick: only the own defined-or-not keys listed.
@@ -317,26 +313,78 @@ func or(vs ...Value) Value {
 
 // deepEqual is upstream's deepEqual (key order is irrelevant). Lazy signals
 // compare by their current expression.
-func deepEqual(a, b Value) bool {
+//
+// Each value visited is a step of cc's work, so a comparison of large values
+// polls the deadline. The values may share their parts (the compiler reuses
+// a config's or a definition's objects), and a walk of a shared part is
+// repeated wherever it is reached, exponentially in the depth of sharing:
+// past deepEqualMemoAfter containers, a pair of containers found equal is
+// remembered and not walked again, which bounds the walk by the number of
+// distinct pairs. The answer is the same.
+func deepEqual(cc *compileCtx, a, b Value) bool {
+	d := deepEqualWalk{cc: cc}
+	defer func() { cc.free(d.charged) }() // the memo is scratch
+	return d.eq(a, b)
+}
+
+// deepEqualMemoAfter is how many containers a comparison visits before it
+// remembers the pairs it found equal: a small value is compared without
+// allocating.
+const deepEqualMemoAfter = 64
+
+type deepEqualWalk struct {
+	cc    *compileCtx
+	seen  int
+	equal map[[2]jsval.InternKey]bool
+	// charged is what the memo's entries were charged (deepEqual gives it
+	// back).
+	charged int64
+}
+
+// scratchEntryBytes is what one entry of a scratch map keyed by a value's
+// identity costs: its key (two for a pair), its value and the map's share
+// of a bucket.
+const scratchEntryBytes = 48
+
+func (d *deepEqualWalk) eq(a, b Value) bool {
+	d.cc.work(1)
 	if a.Kind() != b.Kind() {
 		return false
 	}
+	var key [2]jsval.InternKey
+	switch a.Kind() {
+	case jsval.KindArr, jsval.KindObj:
+		if jsval.SameRef(a, b) {
+			return true
+		}
+		d.seen++
+		if d.seen > deepEqualMemoAfter {
+			key = [2]jsval.InternKey{a.MapKey(), b.MapKey()}
+			if d.equal[key] {
+				return true
+			}
+		}
+	}
 	switch a.Kind() {
 	case jsval.KindArr:
+		// Upstream compares the elements from the last.
 		x, y := a.Items(), b.Items()
 		if len(x) != len(y) {
 			return false
 		}
-		for i := range x {
-			if !deepEqual(x[i], y[i]) {
+		for i := len(x) - 1; i >= 0; i-- {
+			if !d.eq(x[i], y[i]) {
 				return false
 			}
 		}
-		return true
 	case jsval.KindObj:
 		x, y := a.ObjValue(), b.ObjValue()
-		if x == y {
-			return true
+		_, lx := lazyFn(x)
+		_, ly := lazyFn(y)
+		if !lx && !ly {
+			if same, decided := d.objectMethods(a, b); decided {
+				return same
+			}
 		}
 		if fx, ok := lazyFn(x); ok {
 			a = mkv("signal", fx())
@@ -349,15 +397,86 @@ func deepEqual(a, b Value) bool {
 		if x.Len() != y.Len() {
 			return false
 		}
+		// Every key of a in b, then the values from the last key, as
+		// upstream's loops go.
 		for i := 0; i < x.Len(); i++ {
-			bv, ok := y.Get(x.KeyAt(i))
-			if !ok || !deepEqual(x.ValueAt(i), bv) {
+			if !y.Has(x.KeyAt(i)) {
 				return false
 			}
 		}
-		return true
+		for i := x.Len() - 1; i >= 0; i-- {
+			if !d.eq(x.ValueAt(i), y.Lookup(x.KeyAt(i))) {
+				return false
+			}
+		}
+	default:
+		return jsval.Equal(a, b)
 	}
-	return jsval.Equal(a, b)
+	if d.seen > deepEqualMemoAfter {
+		if d.equal == nil {
+			d.equal = map[[2]jsval.InternKey]bool{}
+		}
+		d.cc.alloc(2 * scratchEntryBytes)
+		d.charged += 2 * scratchEntryBytes
+		d.equal[key] = true
+	}
+	return true
+}
+
+// objectMethods is what upstream's deepEqual (fast-deep-equal's, adapted in
+// 6.4) decides from two objects' methods before their keys: their
+// constructors (6.4 compares their names, reading a.constructor.name, so a
+// constructor of null or undefined, as a null prototype leaves, is a
+// TypeError; 5.8 compares them with ===), then a valueOf or a toString that
+// is not Object.prototype's, which it calls: held as data (or missing, under
+// a null prototype) it is no function, a TypeError. decided is false when
+// the comparison goes on to the keys.
+func (d *deepEqualWalk) objectMethods(a, b Value) (same, decided bool) {
+	if plainMethods(a.ObjValue()) && plainMethods(b.ObjValue()) {
+		return false, false // Object.prototype's: the keys decide
+	}
+	ca, cb := jsProp(a, "constructor"), jsProp(b, "constructor")
+	if d.cc != nil && d.cc.v5 {
+		if !strictEq(ca, cb) {
+			return false, true
+		}
+	} else if !strictEq(constructorName(ca), constructorName(cb)) {
+		return false, true
+	}
+	for _, m := range [...]string{"valueOf", "toString"} {
+		f := jsProp(a, m)
+		if own, _ := jsval.Inherited(m); jsval.SameRef(f, own) {
+			continue
+		}
+		if !jsval.IsFunction(f) {
+			throw("a.%s is not a function", m)
+		}
+		// Another of Object.prototype's functions under that name (a
+		// value no specification holds): upstream would call it; the
+		// keys decide here.
+		return false, false
+	}
+	return false, false
+}
+
+// plainMethods says whether o's constructor, valueOf and toString are
+// Object.prototype's: no prototype of its own, and none of them held.
+func plainMethods(o *Object) bool {
+	return o.Prototype().IsUndefined() && !o.Has("constructor") && !o.Has("valueOf") && !o.Has("toString")
+}
+
+// constructorName is c.name for a constructor read from an object.
+func constructorName(c Value) Value {
+	if c.IsNullish() {
+		throw("Cannot read properties of %s (reading 'name')", nullishName(c))
+	}
+	if jsval.IsFunction(c) {
+		s := c.AsString() // "function Object() { [native code] }"
+		if i := strings.IndexByte(s, '('); strings.HasPrefix(s, "function ") && i > 0 {
+			return jsval.Str(s[len("function "):i])
+		}
+	}
+	return jsProp(c, "name")
 }
 
 // deepClone is structuredClone for JSON-like values. The clone's keys are in
@@ -368,6 +487,7 @@ func deepClone(cc *compileCtx, v Value) Value {
 	switch v.Kind() {
 	case jsval.KindArr:
 		items := v.Items()
+		cc.alloc(arrayBytes(len(items)))
 		out := make([]Value, len(items))
 		for i, it := range items {
 			out[i] = deepClone(cc, it)
@@ -375,6 +495,7 @@ func deepClone(cc *compileCtx, v Value) Value {
 		return jsval.Arr(out)
 	case jsval.KindObj:
 		o := v.ObjValue()
+		cc.alloc(objectBytes(o.Len()))
 		c := jsval.NewObject(o.Len())
 		digit := false // a key that may be an array index
 		for i := 0; i < o.Len(); i++ {
@@ -385,6 +506,11 @@ func deepClone(cc *compileCtx, v Value) Value {
 		if digit {
 			jsOrderKeys(cc, c)
 		}
+		if cc != nil && c.Has("toString") {
+			// String of it is a TypeError in JavaScript: its toString is
+			// no function.
+			c.SetConversionScope(cc.conv)
+		}
 		return jsval.Obj(c)
 	}
 	return v
@@ -393,7 +519,7 @@ func deepClone(cc *compileCtx, v Value) Value {
 // stringify is upstream's util.stringify: JSON with sorted keys, used as a
 // hash key for structural comparison.
 func stringify(cc *compileCtx, v Value) string {
-	var b strings.Builder
+	b := newSbuf(cc)
 	stringifyTo(cc, &b, v)
 	return b.String()
 }
@@ -401,14 +527,14 @@ func stringify(cc *compileCtx, v Value) string {
 // stringifyText is `${stringify(v)}`: stringify's text, or "undefined"
 // for a value JSON has no text for.
 func stringifyText(cc *compileCtx, v Value) string {
-	var b strings.Builder
+	b := newSbuf(cc)
 	if !stringifyTo(cc, &b, v) {
 		return "undefined"
 	}
 	return b.String()
 }
 
-func stringifyTo(cc *compileCtx, b *strings.Builder, v Value) bool {
+func stringifyTo(cc *compileCtx, b *sbuf, v Value) bool {
 	cc.work(1)
 	switch v.Kind() {
 	case jsval.KindUndefined:
@@ -423,17 +549,20 @@ func stringifyTo(cc *compileCtx, b *strings.Builder, v Value) bool {
 			b.WriteString(jsval.JSNumberString(f))
 		}
 	case jsval.KindArr:
-		b.WriteByte('[')
+		b.PutByte('[')
 		for i, it := range v.Items() {
 			if i > 0 {
-				b.WriteByte(',')
+				b.PutByte(',')
 			}
 			if !stringifyTo(cc, b, it) {
 				b.WriteString("null")
 			}
 		}
-		b.WriteByte(']')
+		b.PutByte(']')
 	case jsval.KindObj:
+		if jsval.IsFunction(v) {
+			return false // typeof 'function': JSON.stringify gives undefined
+		}
 		o := v.ObjValue()
 		if fn, ok := lazyFn(o); ok {
 			b.WriteString(`{"signal":` + string(jsval.AppendJSON(nil, jsval.Str(fn()))) + "}")
@@ -442,7 +571,7 @@ func stringifyTo(cc *compileCtx, b *strings.Builder, v Value) bool {
 		ks := append([]string(nil), o.Keys()...)
 		cc.work(int64(len(ks))) // the sort, past a step a key
 		sort.Strings(ks)
-		b.WriteByte('{')
+		b.PutByte('{')
 		first := true
 		for _, k := range ks {
 			x := o.Lookup(k)
@@ -450,28 +579,110 @@ func stringifyTo(cc *compileCtx, b *strings.Builder, v Value) bool {
 				continue
 			}
 			if !first {
-				b.WriteByte(',')
+				b.PutByte(',')
 			}
 			first = false
-			b.Write(jsval.AppendJSON(nil, jsval.Str(k)))
-			b.WriteByte(':')
+			b.PutBytes(jsval.AppendJSON(nil, jsval.Str(k)))
+			b.PutByte(':')
 			stringifyTo(cc, b, x)
 		}
-		b.WriteByte('}')
+		b.PutByte('}')
 	default:
 		if v.IsStr() {
 			cc.work(int64(len(v.StrValue())) / 16) // a string is escaped a byte at a time
 		}
-		b.Write(jsval.AppendJSON(nil, v))
+		b.PutBytes(jsval.AppendJSON(nil, v))
 	}
 	return true
 }
 
 // stringValue is vega-util's stringValue: a JS literal for use in
-// expressions (see jsval.StringValue).
-func stringValue(v Value) string { return jsval.StringValue(v) }
+// expressions (see jsval.StringValue). Vega-Lite 5.8 is built on vega-util
+// 1.17, whose stringValue differs (stringValue117).
+func stringValue(cc *compileCtx, v Value) string {
+	if cc != nil && cc.v5 {
+		b := newSbuf(cc)
+		stringValue117(cc, &b, v, 0)
+		return b.String()
+	}
+	if v.IsStr() {
+		// A string's literal is its text quoted, and escaped where it must
+		// be: charged for the quoted text before it is made, and for the
+		// escapes once it is (an escape is at most six bytes).
+		n := int64(len(v.StrValue()) + 2)
+		cc.alloc(n)
+		s := jsval.StringValue(v)
+		cc.alloc(int64(len(s)) - n)
+		return s
+	}
+	s := jsval.StringValue(v)
+	cc.alloc(int64(len(s)))
+	return s
+}
 
-func jsonString(s string) string { return stringValue(jsval.Str(s)) }
+func jsonString(cc *compileCtx, s string) string { return stringValue(cc, jsval.Str(s)) }
+
+// stringValue117 is vega-util 1.17's stringValue, as Vega-Lite 5.8 calls it
+// (C83 of the 2026-10-18 audit): `'[' + x.map($) + ']'`, so a null or
+// undefined element is written as nothing where 2.x writes null, and
+// JSON.stringify(x).replace('\u2028', ...).replace('\u2029', ...), which
+// escapes only the first of each separator; anything else as its String.
+// The text is written through b, which charges the call's ledger.
+func stringValue117(cc *compileCtx, b *sbuf, v Value, depth int) {
+	cc.work(1)
+	switch v.Kind() {
+	case jsval.KindArr:
+		if depth > jsval.MaxValueDepth {
+			throw("Maximum call stack size exceeded")
+		}
+		b.PutByte('[')
+		for i, it := range v.Items() {
+			if i > 0 {
+				b.PutByte(',')
+			}
+			if !it.IsNullish() {
+				stringValue117(cc, b, it, depth+1)
+			}
+		}
+		b.PutByte(']')
+	case jsval.KindStr, jsval.KindObj:
+		js := cc.walker().AppendJSON(nil, v)
+		// The JSON text is held while it is copied into b.
+		cc.alloc(int64(len(js)))
+		cc.work(int64(len(js)) / 16)
+		putFirstSeparatorsEscaped(b, js)
+	default:
+		b.WriteString(v.AsString())
+	}
+}
+
+// putFirstSeparatorsEscaped writes js to b with the first U+2028 and the
+// first U+2029 escaped, as the two single-replacement calls of vega-util
+// 1.17 leave it.
+func putFirstSeparatorsEscaped(b *sbuf, js []byte) {
+	i := bytes.Index(js, []byte("\u2028"))
+	j := bytes.Index(js, []byte("\u2029"))
+	b.Grow(len(js) + 12)
+	if i < 0 && j < 0 {
+		b.PutBytes(js)
+		return
+	}
+	if j >= 0 && (i < 0 || j < i) {
+		i, j = j, i
+	}
+	// i is the first separator found, j the other (or -1).
+	put := func(at int) {
+		b.PutBytes(js[:at])
+		b.WriteString("\\u202")
+		b.PutByte(js[at+2] - 0xA8 + '8')
+		js = js[at+3:]
+	}
+	put(i)
+	if j >= 0 {
+		put(j - (i + 3))
+	}
+	b.PutBytes(js)
+}
 
 // hash is upstream's hash(): short strings are their own hash.
 func hashOf(cc *compileCtx, v Value) string {
@@ -485,16 +696,22 @@ func hashOf(cc *compileCtx, v Value) string {
 		return jsval.JSNumberString(v.NumValue())
 	}
 	s := ""
+	var b sbuf
 	if v.IsStr() {
 		s = v.StrValue()
 	} else {
-		s = stringify(cc, v)
+		b = newSbuf(cc)
+		stringifyTo(cc, &b, v)
+		s = b.String()
 	}
 	// The code units are walked in place (as utf16Len would produce them),
 	// so a long key costs no copy and the walk is charged.
 	if len(s) < 250 || utf16Count(cc, s) < 250 {
 		return s
 	}
+	// A long text is only hashed: what its making was charged is given
+	// back (a node is hashed once per pass of the optimizer).
+	defer b.release()
 	var h int32
 	for _, r := range s {
 		cc.work(1)
@@ -579,13 +796,7 @@ func varName(s string) string {
 // the first UTF-16 unit, upper-cased with JavaScript's full case mapping
 // (ß becomes SS). A first character outside the BMP is a lone surrogate to
 // charAt, which has no upper case, so the string is unchanged.
-func titleCase(s string) string {
-	r, n := utf8.DecodeRuneInString(s)
-	if n == 0 || r >= 0x10000 {
-		return s
-	}
-	return jsUpperCase(s[:n]) + s[n:]
-}
+func titleCase(s string) string { return jsval.UpperFirst(s) }
 
 // titleCaseV is titleCase of a spec value, which calls s.charAt.
 func titleCaseV(v Value) string {
@@ -597,16 +808,6 @@ func titleCaseV(v Value) string {
 	}
 	throw("s.charAt is not a function")
 	return ""
-}
-
-// jsUpperCase is String.prototype.toUpperCase: full Unicode case mapping.
-func jsUpperCase(s string) string {
-	for i := 0; i < len(s); i++ {
-		if s[i] >= utf8.RuneSelf {
-			return cases.Upper(language.Und).String(s)
-		}
-	}
-	return strings.ToUpper(s)
 }
 
 // appendVals is Array.prototype.concat over Value slices.
@@ -639,7 +840,7 @@ func isNumericV(v Value) bool {
 }
 
 func parseFloatPrefix(s string) float64 {
-	s = strings.TrimSpace(s)
+	s = jsval.JSTrimStart(s)
 	end := 0
 	seenDot, seenDigit := false, false
 	for i, c := range s {
@@ -679,12 +880,7 @@ done:
 		}
 		return math.NaN()
 	}
-	// Out of range, ParseFloat answers ±Inf (or 0) with an error; parseFloat
-	// answers the same values ("1e999" is Infinity).
-	f, err := strconv.ParseFloat(s[:end], 64)
-	if err != nil && !errors.Is(err, strconv.ErrRange) {
-		return math.NaN()
-	}
+	f, _ := jsval.ParseDecimal(s[:end])
 	return f
 }
 
@@ -871,6 +1067,59 @@ func jsGreater(a, b Value) bool {
 // strIs reports whether v is the string s.
 func strIs(v Value, s string) bool { return v.IsStr() && v.StrValue() == s }
 
+// setHas is set.has(v) of a Set of names: v must be one of them, compared
+// strictly (a Set never coerces).
+func setHas(set map[string]bool, v Value) bool {
+	s, ok := v.Strict()
+	return ok && set[s]
+}
+
+// looseEq is v == s, JavaScript's loose equality with a string literal (the
+// few sites upstream writes == rather than ===): a string equals s, a number
+// or boolean equals Number(s), an array or object compares its String
+// (ToPrimitive), and null and undefined equal no string.
+func looseEq(v Value, s string) bool {
+	switch v.Kind() {
+	case jsval.KindStr:
+		return v.StrValue() == s
+	case jsval.KindNum, jsval.KindBool:
+		return jsval.ToNumber(v) == jsval.ToNumber(jsval.Str(s))
+	case jsval.KindArr, jsval.KindObj:
+		return v.StringIs(s)
+	}
+	return false
+}
+
+// undefinedKey is the property key upstream reads with an undefined name
+// (obj[undefined] is obj["undefined"]).
+const undefinedKey = "undefined"
+
+// propKey is v read as a property key (obj[v], `v in obj`): String(v), so
+// ["bar"] names "bar" and undefined "undefined". The text of an array or
+// object is built on the compilation's walker, which charges its ledger. A key compared with a name
+// is a property lookup; a keyword compared with one is strIs.
+func propKey(cc *compileCtx, v Value) string {
+	if v.IsStr() {
+		return v.StrValue()
+	}
+	return cc.walker().String(v)
+}
+
+// strIn is contains(names, v) (indexOf, includes, Set.has): v is one of
+// names, compared strictly, as strIs does.
+func strIn(v Value, names ...string) bool {
+	if !v.IsStr() {
+		return false
+	}
+	s := v.StrValue()
+	for _, n := range names {
+		if s == n {
+			return true
+		}
+	}
+	return false
+}
+
 // jsIndexOrGet is v[key] for an object or an array (whose keys are indices).
 func jsIndexOrGet(v Value, key string) Value {
 	if v.IsArr() {
@@ -887,45 +1136,93 @@ func jsIndexOrGet(v Value, key string) Value {
 // regular expression of find taken literally, so the replacement's $
 // patterns apply: $$ is "$", $& the match, $` the text before it and $' the
 // text after it (there are no groups, so $1 and $<name> stay as they are).
-func jsReplaceAll(s, find, repl string) string {
+//
+// The result can be quadratic in the input ($` and $' copy up to the whole
+// string once per match, C6: audit 2026-10-18), as upstream's is: its length
+// is worked out first, a step per match, and charged to cc before it is
+// built, and each match charges its bytes as work, so the compilation
+// fails at the call's budget or deadline instead of building it unseen.
+func jsReplaceAll(cc *compileCtx, s, find, repl string) string {
 	if find == "" || !strings.Contains(s, find) {
 		return s
 	}
-	if !strings.Contains(repl, "$") {
-		return strings.ReplaceAll(s, find, repl)
+	// The replacement's pieces, once: literal text, or a pattern.
+	type piece struct {
+		lit  string
+		kind byte // 0: lit; '&', '`', '\'': the match, the text before, after
 	}
-	var b strings.Builder
-	rest := 0
-	for {
+	var pieces []piece
+	lit := 0 // where the current literal run starts
+	for j := 0; j < len(repl); j++ {
+		if repl[j] != '$' || j+1 == len(repl) {
+			continue
+		}
+		switch c := repl[j+1]; c {
+		case '$', '&', '`', '\'':
+			pieces = append(pieces, piece{lit: repl[lit:j]})
+			if c == '$' {
+				pieces = append(pieces, piece{lit: "$"})
+			} else {
+				pieces = append(pieces, piece{kind: c})
+			}
+			j++
+			lit = j + 1
+		}
+	}
+	pieces = append(pieces, piece{lit: repl[lit:]})
+	// The length of the result: each match's replacement depends on where
+	// the match is ($` and $' copy what is before and after it).
+	size := 0
+	for rest := 0; ; {
+		cc.work(1)
 		i := strings.Index(s[rest:], find)
 		if i < 0 {
+			size += len(s) - rest
 			break
 		}
 		start := rest + i
 		end := start + len(find)
-		b.WriteString(s[rest:start])
-		for j := 0; j < len(repl); j++ {
-			if repl[j] != '$' || j+1 == len(repl) {
-				b.WriteByte(repl[j])
-				continue
+		size += start - rest
+		for _, p := range pieces {
+			switch p.kind {
+			case 0:
+				size += len(p.lit)
+			case '&':
+				size += len(find)
+			case '`':
+				size += start
+			case '\'':
+				size += len(s) - end
 			}
-			switch repl[j+1] {
-			case '$':
-				b.WriteByte('$')
+		}
+		rest = end
+	}
+	b := newSbuf(cc)
+	b.Grow(size)
+	for rest := 0; ; {
+		i := strings.Index(s[rest:], find)
+		if i < 0 {
+			b.WriteString(s[rest:])
+			break
+		}
+		start := rest + i
+		end := start + len(find)
+		n := b.Len()
+		b.WriteString(s[rest:start])
+		for _, p := range pieces {
+			switch p.kind {
+			case 0:
+				b.WriteString(p.lit)
 			case '&':
 				b.WriteString(find)
 			case '`':
 				b.WriteString(s[:start])
 			case '\'':
 				b.WriteString(s[end:])
-			default:
-				b.WriteByte('$')
-				continue
 			}
-			j++
 		}
+		cc.work(1 + int64(b.Len()-n)>>10)
 		rest = end
 	}
-	b.WriteString(s[rest:])
 	return b.String()
 }

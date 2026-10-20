@@ -39,9 +39,13 @@ func TestCorpusVL58(t *testing.T) {
 		got, cerr := Compile(spec, Options{Location: goldenZone, Version: Version58})
 		switch {
 		case r.errMsg != "":
-			if cerr == nil {
+			switch {
+			case cerr == nil:
 				fails = append(fails, fail{r.name, "expected error: " + r.errMsg})
-			} else {
+			case strings.Contains(cerr.Error(), "internal error"):
+				// upstream throws; a panic of the compiler is not that (C50)
+				fails = append(fails, fail{r.name, "panics where upstream throws: " + cerr.Error()})
+			default:
 				exact++
 			}
 		case cerr != nil:
@@ -92,9 +96,12 @@ func TestThemesVL58(t *testing.T) {
 		got, cerr := Compile(spec, Options{Config: themes.Get(r.theme), Location: goldenZone, Version: Version58})
 		switch {
 		case r.errMsg != "":
-			if cerr == nil {
+			switch {
+			case cerr == nil:
 				t.Errorf("%s (%s): expected an error", r.name, r.theme)
-			} else {
+			case strings.Contains(cerr.Error(), "internal error"):
+				t.Errorf("%s (%s): panics where upstream throws: %v", r.name, r.theme, cerr)
+			default:
 				exact++
 			}
 		case cerr != nil:

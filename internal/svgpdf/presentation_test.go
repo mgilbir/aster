@@ -259,7 +259,7 @@ func TestCDATALinear(t *testing.T) {
 	b.WriteString(`</text></svg>`)
 	var before, after runtime.MemStats
 	runtime.ReadMemStats(&before)
-	root, err := parseSVG(context.Background(), b.String(), Limits{}.withDefaults())
+	root, err := parseSVG(context.Background(), b.String(), Limits{}.WithDefaults())
 	runtime.ReadMemStats(&after)
 	if err != nil {
 		t.Fatal(err)

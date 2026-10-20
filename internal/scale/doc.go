@@ -33,94 +33,19 @@
 // Results are meant to match V8 bit for bit where the arithmetic is plain
 // IEEE-754. Products that upstream rounds before adding are written
 // float64(x*y)+z so the compiler cannot fuse them into an FMA (arm64 does).
-// Transcendental functions (Pow, Exp) come from Go's math package and can
-// differ from V8 in the last few bits.
+// Math's functions (Pow, Exp, Log10, Round, ...) are jsmath's, which follows
+// V8 on arm64; node on x86-64 differs from it in the last bit for a small
+// share of arguments (see package jsmath), and so can a scale's tick or
+// position by an ulp. Values are compared with jsval's relational
+// comparison (strings by UTF-16 code unit), as JavaScript's < compares them.
+//
+// # Replay-only API
+//
+// A few exported pieces have no caller in the engine, because Vega never
+// reaches them: the radial scale (Radial), the d3-scale tickFormat methods
+// of the scales (vega formats ticks through TickFormat in vegaticks.go), and
+// interpolateZoom.rho (Zoom). They are kept as the targets of the d3-scale
+// and d3-interpolate vector replays (upstream_test.go), which hold them to
+// upstream; the code they share with what the engine runs is verified
+// through them.
 package scale
-
-import (
-	"math"
-
-	"github.com/mgilbir/aster/internal/jsmath"
-)
-
-// jsRound is JavaScript's Math.round: halves round toward +Infinity, and the
-// result keeps the sign of a negative zero. math.Round differs (away from zero)
-// and floor(x+0.5) is wrong for 0.49999999999999994.
-func jsRound(x float64) float64 {
-	if math.IsNaN(x) || math.IsInf(x, 0) {
-		return x
-	}
-	r := math.Floor(x)
-	if x-r >= 0.5 {
-		r++
-	}
-	if r == 0 && (x < 0 || math.Signbit(x)) {
-		return math.Copysign(0, -1)
-	}
-	return r
-}
-
-// jsSign is Math.sign.
-func jsSign(x float64) float64 {
-	switch {
-	case x > 0:
-		return 1
-	case x < 0:
-		return -1
-	}
-	return x // 0, -0 or NaN
-}
-
-// log10 reproduces V8's Math.log10 (fdlibm's e_log10.c). Go's math.Log10 is
-// computed as log2(x)*(ln2/ln10), which is not exact for powers of ten
-// (log10(1000) comes out as 2.9999999999999996), and tick generation depends on
-// Math.floor(Math.log10(step)) being exact there.
-func log10(x float64) float64 {
-	const (
-		two54   = 1.80143985094819840000e+16
-		ivln10  = 4.34294481903251816668e-01
-		log102h = 3.01029995663611771306e-01
-		log102l = 3.69423907715893078616e-13
-	)
-	bits := math.Float64bits(x)
-	hx := int32(bits >> 32)
-	lx := uint32(bits)
-	k := int32(0)
-	if hx < 0x00100000 { // x < 2**-1022
-		if (hx&0x7fffffff)|int32(lx) == 0 {
-			return math.Inf(-1)
-		}
-		if hx < 0 {
-			return math.NaN()
-		}
-		k -= 54
-		x *= two54
-		bits = math.Float64bits(x)
-		hx = int32(bits >> 32)
-	}
-	if hx >= 0x7ff00000 {
-		return x + x
-	}
-	k += (hx >> 20) - 1023
-	i := int32(uint32(k) >> 31)
-	hx = (hx & 0x000fffff) | ((0x3ff - i) << 20)
-	y := float64(k + i)
-	bits = uint64(uint32(hx))<<32 | (math.Float64bits(x) & 0xffffffff)
-	x = math.Float64frombits(bits)
-	z := float64(y*log102l) + float64(ivln10*jsmath.Log(x))
-	return z + float64(y*log102h)
-}
-
-// log2 mirrors Math.log2 closely enough for exact powers of two, which is the
-// only place d3 relies on it (base 2 log scales).
-func log2(x float64) float64 { return jsmath.Log2(x) }
-
-// jsPow is Math.pow. It differs from Go's math.Pow in two places: any power
-// with a NaN exponent is NaN (Go returns 1 for base 1), and a base of +-1 with
-// an infinite exponent is NaN (Go returns 1).
-func jsPow(x, y float64) float64 {
-	if math.IsNaN(y) || (math.IsInf(y, 0) && (x == 1 || x == -1)) {
-		return math.NaN()
-	}
-	return jsmath.Pow(x, y)
-}

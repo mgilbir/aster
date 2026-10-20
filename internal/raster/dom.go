@@ -8,6 +8,9 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+	"unsafe"
+
+	"github.com/mgilbir/aster/internal/budget"
 )
 
 type tagID uint8
@@ -341,8 +344,9 @@ type node struct {
 // cssNode is what selector matching needs to know about an element.
 type cssNode struct {
 	name string
-	raw  []rawAttr
-	prev *node // previous sibling element
+	raw  []rawAttr // sorted by name once indexed (cssApplier.indexNode)
+	prev *node     // previous sibling element
+	ix   cssIndexed
 }
 
 // get returns the value of a non-inherited attribute, honouring style-attribute
@@ -372,13 +376,16 @@ type document struct {
 	ids   map[string]*node
 	count int
 	css   []string // style sheet sources in document order
+	// res is what the document is charged to the call's ledger: its tree,
+	// its style sheets and what they gave its elements (see parseDoc).
+	res reservation
 }
 
 // Limits bounds the resources an untrusted SVG may consume. Zero fields select
 // the defaults below.
 type Limits struct {
 	MaxInputBytes  int // SVG source size
-	MaxElements    int // parsed elements
+	MaxElements    int // parsed elements, a run of character data one
 	MaxDepth       int // element nesting
 	MaxPixels      int // output width*height after scaling
 	MaxDimension   int // output width or height
@@ -396,7 +403,7 @@ type Limits struct {
 	MaxPathSegments int
 	MaxStyleBytes   int // total size of <style> sheets
 	MaxCSSRules     int // rules across all style sheets
-	MaxCSSWork      int // selector-matching steps while applying style sheets
+	MaxCSSWork      int // units of selector-matching work while applying style sheets (see cssApplier.step)
 	// (past MaxStyleBytes, MaxCSSRules or MaxCSSWork the render fails)
 	MaxFilterPixels int // pixels of one filter region; a larger one fails the render
 	MaxEffectPixels int // pixels processed by filters and pattern tiles in one render
@@ -511,36 +518,86 @@ func (l Limits) withDefaults() Limits {
 var errSyntax = errors.New("malformed XML")
 
 // arena allocates nodes and attributes in chunks to keep the parser fast.
+// Each chunk is charged to the parse's reservation before it is allocated.
 type arena struct {
 	nodes []node
 	attrs []attr
+	rs    *reservation
 }
 
-func (a *arena) newNode() *node {
+const (
+	nodeBytes    = int64(unsafe.Sizeof(node{}))
+	attrBytes    = int64(unsafe.Sizeof(attr{}))
+	rawAttrBytes = int64(unsafe.Sizeof(rawAttr{}))
+	cssNodeBytes = int64(unsafe.Sizeof(cssNode{}))
+	// idEntryBytes is about what an entry of the document's id map holds,
+	// its share of the buckets included.
+	idEntryBytes = 64
+	nodeChunk    = 512
+)
+
+func (a *arena) newNode() (*node, error) {
 	if len(a.nodes) == cap(a.nodes) {
-		a.nodes = make([]node, 0, 512)
+		if err := a.rs.take(nodeChunk * nodeBytes); err != nil {
+			return nil, err
+		}
+		a.nodes = make([]node, 0, nodeChunk)
 	}
 	a.nodes = a.nodes[:len(a.nodes)+1]
-	return &a.nodes[len(a.nodes)-1]
+	return &a.nodes[len(a.nodes)-1], nil
 }
 
 // takeAttrs returns a slice of n attrs with cap==len so appends by the caller
 // cannot spill into neighbours.
-func (a *arena) takeAttrs(buf []attr) []attr {
+func (a *arena) takeAttrs(buf []attr) ([]attr, error) {
 	n := len(buf)
 	if n == 0 {
-		return nil
+		return nil, nil
 	}
 	if cap(a.attrs)-len(a.attrs) < n {
-		c := 4096
-		if n > c {
-			c = n
+		c := max(4096, n)
+		if err := a.rs.take(int64(c) * attrBytes); err != nil {
+			return nil, err
 		}
 		a.attrs = make([]attr, 0, c)
 	}
 	start := len(a.attrs)
 	a.attrs = append(a.attrs, buf...)
-	return a.attrs[start : start+n : start+n]
+	return a.attrs[start : start+n : start+n], nil
+}
+
+// addKid appends k to p's children, charging a larger backing array before
+// it is made (the old one stays charged: it is garbage only once the
+// collector finds it).
+func addKid(rs *reservation, p, k *node) error {
+	if len(p.kids) == cap(p.kids) {
+		c := max(4, 2*cap(p.kids))
+		if err := rs.take(int64(c) * 8); err != nil {
+			return err
+		}
+		kids := make([]*node, len(p.kids), c)
+		copy(kids, p.kids)
+		p.kids = kids
+	}
+	p.kids = append(p.kids, k)
+	k.parent = p
+	return nil
+}
+
+// grow returns buf with room for one more element, charging a larger
+// backing array of elements of size bytes before it is made: the parse's
+// scratch buffers grow with the attributes of the largest element.
+func grow[T any](rs *reservation, buf []T, size int64) ([]T, error) {
+	if len(buf) < cap(buf) {
+		return buf, nil
+	}
+	c := max(16, 2*cap(buf))
+	if err := rs.take(int64(c) * size); err != nil {
+		return nil, err
+	}
+	nb := make([]T, len(buf), c)
+	copy(nb, buf)
+	return nb, nil
 }
 
 // parseDocument parses SVG markup into a node tree. It is a small,
@@ -551,14 +608,37 @@ func parseDocument(src string, lim Limits) (*document, error) {
 	return parseDocumentCtx(context.Background(), src, lim)
 }
 
-// parseDocumentCtx is parseDocument polling ctx while it
-// applies style sheets, the part whose work the input multiplies.
+// parseDocumentCtx is parseDocument under ctx: it charges what it builds to
+// the ledger ctx carries and polls ctx as it reads (see parseDoc).
 func parseDocumentCtx(ctx context.Context, src string, lim Limits) (*document, error) {
+	return parseDoc(ctx, budget.LedgerFrom(ctx), src, lim)
+}
+
+// parseDoc is parseDocument under ctx (nil: never done), charging l. The
+// input is untrusted and the tree is many times its size (a node of about
+// a hundred bytes for every few bytes of markup), so everything the parse
+// builds is charged to l before it is built: nodes, attributes, the
+// attributes kept for selector matching, children lists, the id map,
+// decoded entities and style sheet text, then what applying the style
+// sheets builds (C8, audit 2026-10-18). Runs of character data count
+// against MaxElements as elements do. The input is metered as it is read,
+// about a work unit every 16 bytes, which polls ctx about every 16 KiB
+// (C22). What the document holds stays charged until release.
+func parseDoc(ctx context.Context, l *budget.Ledger, src string, lim Limits) (doc *document, err error) {
 	if len(src) > lim.MaxInputBytes {
 		return nil, fmt.Errorf("raster: SVG input is %d bytes, limit is %d: %w", len(src), lim.MaxInputBytes, errLimit)
 	}
-	doc := &document{ids: map[string]*node{}}
-	var ar arena
+	doc = &document{ids: map[string]*node{}}
+	doc.res.l = l
+	defer func() {
+		if err != nil {
+			doc.release()
+			doc = nil
+		}
+	}()
+	rs := &doc.res
+	m := budget.NewMeter(ctx)
+	ar := arena{rs: rs}
 	var stack []*node
 	var abuf []attr
 	var sbuf []attr
@@ -566,6 +646,7 @@ func parseDocumentCtx(ctx context.Context, src string, lim Limits) (*document, e
 	var skip int // depth inside an unknown element whose subtree is ignored
 	wantCSS := strings.Contains(src, "<style")
 	var styleBuf strings.Builder // text of the <style> element being read
+	styleBytes := 0              // of every sheet, against MaxStyleBytes
 	inStyle := false
 	i := 0
 	n := len(src)
@@ -574,8 +655,51 @@ func parseDocumentCtx(ctx context.Context, src string, lim Limits) (*document, e
 		i = 3
 	}
 	inText := 0 // depth of <text> ancestors
+	read := i   // the input metered so far
+	// addStyle appends s to the style sheet being read, its bytes charged
+	// (twice: the builder doubles) and bounded as they come.
+	addStyle := func(s string) error {
+		if styleBytes += len(s); styleBytes > lim.MaxStyleBytes {
+			return fmt.Errorf("raster: style sheets of more than %d bytes: %w", lim.MaxStyleBytes, errLimit)
+		}
+		if err := rs.take(2 * int64(len(s))); err != nil {
+			return overLedger("parsing the SVG's style sheets", err)
+		}
+		styleBuf.WriteString(s)
+		return nil
+	}
+	// addChars makes a run of character data a node of the <text> being
+	// read: an element, as far as MaxElements is concerned.
+	addChars := func(text string) error {
+		top := stack[len(stack)-1]
+		if doc.count++; doc.count > lim.MaxElements {
+			return fmt.Errorf("raster: SVG has more than %d elements: %w", lim.MaxElements, errLimit)
+		}
+		c, err := ar.newNode()
+		if err != nil {
+			return err
+		}
+		c.tag = tagChars
+		c.text = text
+		return addKid(rs, top, c)
+	}
+	// decode is decodeEntities with what it makes charged first: at most
+	// the bytes it decodes.
+	decode := func(s string) (string, error) {
+		if strings.IndexByte(s, '&') < 0 {
+			return s, nil
+		}
+		if err := rs.take(int64(len(s))); err != nil {
+			return "", err
+		}
+		return decodeEntities(s), nil
+	}
 
 	for i < n {
+		if err := m.Work(1 + int64(i-read)>>4); err != nil {
+			return nil, err
+		}
+		read = i
 		if src[i] != '<' {
 			j := strings.IndexByte(src[i:], '<')
 			var chunk string
@@ -587,14 +711,21 @@ func parseDocumentCtx(ctx context.Context, src string, lim Limits) (*document, e
 				i += j
 			}
 			if inStyle && skip == 0 {
-				styleBuf.WriteString(decodeEntities(chunk))
+				s, err := decode(chunk)
+				if err != nil {
+					return nil, overLedger("parsing the SVG", err)
+				}
+				if err := addStyle(s); err != nil {
+					return nil, err
+				}
 			} else if inText > 0 && skip == 0 && len(stack) > 0 {
-				top := stack[len(stack)-1]
-				c := ar.newNode()
-				c.tag = tagChars
-				c.text = decodeEntities(chunk)
-				c.parent = top
-				top.kids = append(top.kids, c)
+				s, err := decode(chunk)
+				if err == nil {
+					err = addChars(s)
+				}
+				if err != nil {
+					return nil, overLedger("parsing the SVG", err)
+				}
 			}
 			continue
 		}
@@ -615,14 +746,13 @@ func parseDocumentCtx(ctx context.Context, src string, lim Limits) (*document, e
 				return nil, errSyntax
 			}
 			if inStyle && skip == 0 {
-				styleBuf.WriteString(src[i+9 : i+9+j])
+				if err := addStyle(src[i+9 : i+9+j]); err != nil {
+					return nil, err
+				}
 			} else if inText > 0 && skip == 0 && len(stack) > 0 {
-				top := stack[len(stack)-1]
-				c := ar.newNode()
-				c.tag = tagChars
-				c.text = src[i+9 : i+9+j]
-				c.parent = top
-				top.kids = append(top.kids, c)
+				if err := addChars(src[i+9 : i+9+j]); err != nil {
+					return nil, overLedger("parsing the SVG", err)
+				}
 			}
 			i += 9 + j + 3
 		case src[i+1] == '?':
@@ -676,7 +806,7 @@ func parseDocumentCtx(ctx context.Context, src string, lim Limits) (*document, e
 				inStyle = false
 				if styleBuf.Len() > 0 {
 					doc.css = append(doc.css, styleBuf.String())
-					styleBuf.Reset()
+					styleBuf = strings.Builder{}
 				}
 			}
 			stack = stack[:len(stack)-1]
@@ -696,6 +826,10 @@ func parseDocumentCtx(ctx context.Context, src string, lim Limits) (*document, e
 			styleType := ""
 			selfClose := false
 			for {
+				if err := m.Work(1 + int64(j-read)>>4); err != nil {
+					return nil, err
+				}
+				read = j
 				for j < n && isSpaceByte(src[j]) {
 					j++
 				}
@@ -751,7 +885,14 @@ func parseDocumentCtx(ctx context.Context, src string, lim Limits) (*document, e
 						an = local
 					case "xml":
 						if local == "space" {
-							abuf = append(abuf, attr{id: aSpace, val: decodeEntities(val)})
+							v, err := decode(val)
+							if err == nil {
+								abuf, err = grow(rs, abuf, attrBytes)
+							}
+							if err != nil {
+								return nil, overLedger("parsing the SVG", err)
+							}
+							abuf = append(abuf, attr{id: aSpace, val: v})
 						}
 						continue
 					default:
@@ -761,10 +902,14 @@ func parseDocumentCtx(ctx context.Context, src string, lim Limits) (*document, e
 				if an == "xmlns" {
 					continue
 				}
-				if strings.IndexByte(val, '&') >= 0 {
-					val = decodeEntities(val)
+				val, err := decode(val)
+				if err != nil {
+					return nil, overLedger("parsing the SVG", err)
 				}
 				if wantCSS && an != "style" {
+					if rbuf, err = grow(rs, rbuf, rawAttrBytes); err != nil {
+						return nil, overLedger("parsing the SVG", err)
+					}
 					rbuf = append(rbuf, rawAttr{an, val})
 				}
 				if an == "type" {
@@ -775,6 +920,9 @@ func parseDocumentCtx(ctx context.Context, src string, lim Limits) (*document, e
 					continue
 				}
 				if id == aStyle {
+					// At most one declaration a presentation attribute
+					// (parseStyleDecls merges them): a bounded scratch
+					// buffer, charged when the arena keeps it.
 					sbuf = parseStyleDecls(val, sbuf)
 					continue
 				}
@@ -787,6 +935,9 @@ func parseDocumentCtx(ctx context.Context, src string, lim Limits) (*document, e
 					case "smooth", "high-quality", "crisp-edges", "pixelated":
 						continue
 					}
+				}
+				if abuf, err = grow(rs, abuf, attrBytes); err != nil {
+					return nil, overLedger("parsing the SVG", err)
 				}
 				abuf = append(abuf, attr{id: id, val: val})
 			}
@@ -803,16 +954,24 @@ func parseDocumentCtx(ctx context.Context, src string, lim Limits) (*document, e
 			if doc.count > lim.MaxElements {
 				return nil, fmt.Errorf("raster: SVG has more than %d elements: %w", lim.MaxElements, errLimit)
 			}
-			nd := ar.newNode()
-			nd.tag = tag
-			nd.attrs = ar.takeAttrs(abuf)
-			nd.style = ar.takeAttrs(sbuf)
-			if wantCSS {
+			nd, err := ar.newNode()
+			if err == nil {
+				nd.attrs, err = ar.takeAttrs(abuf)
+			}
+			if err == nil {
+				nd.style, err = ar.takeAttrs(sbuf)
+			}
+			if err == nil && wantCSS {
+				err = rs.take(cssNodeBytes + int64(len(rbuf))*rawAttrBytes)
 				nd.css = &cssNode{name: name}
 				if len(rbuf) > 0 {
 					nd.css.raw = append([]rawAttr(nil), rbuf...)
 				}
 			}
+			if err != nil {
+				return nil, overLedger("parsing the SVG", err)
+			}
+			nd.tag = tag
 			if len(stack) == 0 {
 				if doc.root != nil {
 					return nil, errors.New("raster: multiple root elements")
@@ -821,13 +980,14 @@ func parseDocumentCtx(ctx context.Context, src string, lim Limits) (*document, e
 					return nil, errors.New("raster: root element is not <svg>")
 				}
 				doc.root = nd
-			} else {
-				p := stack[len(stack)-1]
-				nd.parent = p
-				p.kids = append(p.kids, nd)
+			} else if err := addKid(rs, stack[len(stack)-1], nd); err != nil {
+				return nil, overLedger("parsing the SVG", err)
 			}
 			if id, ok := nd.get(aID); ok && id != "" {
 				if _, dup := doc.ids[id]; !dup {
+					if err := rs.take(idEntryBytes); err != nil {
+						return nil, overLedger("parsing the SVG", err)
+					}
 					doc.ids[id] = nd
 				}
 			}
@@ -841,7 +1001,7 @@ func parseDocumentCtx(ctx context.Context, src string, lim Limits) (*document, e
 				}
 				if tag == tagStyle && (styleType == "" || styleType == "text/css") {
 					inStyle = true
-					styleBuf.Reset()
+					styleBuf = strings.Builder{}
 				}
 			}
 		}
@@ -857,7 +1017,15 @@ func parseDocumentCtx(ctx context.Context, src string, lim Limits) (*document, e
 			return nil, err
 		}
 	}
+	rs.trim()
 	return doc, nil
+}
+
+// release gives back what the document is charged: it is no longer used.
+func (doc *document) release() {
+	if doc != nil {
+		doc.res.release()
+	}
 }
 
 func isSpaceByte(c byte) bool { return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' }

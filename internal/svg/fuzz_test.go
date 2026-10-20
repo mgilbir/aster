@@ -58,4 +58,5 @@ func FuzzRender(f *testing.F) {
 }
 
 // sceneErrors are what a scene that upstream cannot draw gives.
-var sceneErrors = []error{scene.ErrUnknownInterpolate, scene.ErrUnknownOrient, scene.ErrNoShapeGenerator, scene.ErrCurveNoArea, scene.ErrInvalidPath}
+var sceneErrors = []error{scene.ErrUnknownInterpolate, scene.ErrUnknownOrient, scene.ErrNoShapeGenerator, scene.ErrCurveNoArea, scene.ErrInvalidPath,
+	scene.ErrTextSplit, scene.ErrPathMatch, scene.ErrGradientStops, scene.ErrGradientStop}

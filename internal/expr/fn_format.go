@@ -22,7 +22,7 @@ func init() {
 		// made.
 		spec := s.specifier(jsval.Str(s.str(arg(args, 1))))
 		var buf [64]byte // a label fits: the string is made once, at its length
-		out, err := s.locale().AppendFormatValue(buf[:0], arg(args, 0), spec)
+		out, err := s.locale().AppendFormatValue(s.walker(), buf[:0], arg(args, 0), spec)
 		if err != nil {
 			failFormat(err)
 		}
@@ -40,7 +40,7 @@ func init() {
 			// a locale pattern), so it stops at the room the string budget
 			// has left.
 			var buf [64]byte
-			out, ok, err := s.locale().AppendTimeFormatValue(buf[:0], v, s.specifier(arg(args, 1)), utc, s.formatRoom())
+			out, ok, err := s.locale().AppendTimeFormatValue(s.walker(), buf[:0], v, s.specifier(arg(args, 1)), utc, s.formatRoom())
 			if err != nil {
 				failFormat(err)
 			}
@@ -55,7 +55,11 @@ func init() {
 			if in.IsStr() {
 				s.workBytes(len(in.StrValue())) // a pass over the input
 			}
-			return s.locale().TimeParseValue(in, s.specifier(jsval.Str(s.str(arg(args, 1)))), utc)
+			out, err := s.locale().TimeParseValue(s.walker(), in, s.specifier(jsval.Str(s.str(arg(args, 1)))), utc)
+			if err != nil {
+				failFormat(err)
+			}
+			return out
 		}
 	}
 	fn("timeParse", parse(false))

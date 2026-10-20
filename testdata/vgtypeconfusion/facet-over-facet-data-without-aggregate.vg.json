@@ -1,0 +1,1 @@
+{"width":100,"height":100,"data":[{"name":"tuples","values":[{"a":0,"c":1},{"a":1,"c":3}]}],"marks":[{"type":"group","from":{"facet":{"name":"ft","data":"tuples","groupby":"a"}},"marks":[{"type":"group","from":{"data":"ft","facet":{"name":"fu","data":"ft","groupby":"c"}},"marks":[{"type":"rect","from":{"data":"fu"}}]}]}]}

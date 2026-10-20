@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -75,6 +76,14 @@ func NewFileLoader(dir string) (*FileLoader, error) {
 	return &FileLoader{BaseDir: dir, root: root}, nil
 }
 
+// errNilLoader is what the methods of a nil loader of this package return: a
+// (*FileLoader)(nil) from a NewFileLoader whose error was dropped, say, which
+// the root package's New refuses, but which can still be used directly or
+// inside a composite of the caller's own (C16).
+func errNilLoader(kind string) error {
+	return fmt.Errorf("aster: a nil %s (its constructor's error was dropped?)", kind)
+}
+
 func (l *FileLoader) initRoot() {
 	l.once.Do(func() {
 		if l.root != nil {
@@ -92,12 +101,34 @@ func (l *FileLoader) initRoot() {
 	})
 }
 
-// Sanitize accepts a relative path inside the base directory. The URI is a
-// file path, not a URL: a name with a colon in its first segment (22:48) is a
-// file name, as it is to the reference implementation, and only an actual
-// scheme (file:, http:, mailto:) is refused. Nothing is decoded, so %2e%2e is
-// a file name too.
+// Sanitize accepts a relative path inside the base directory and returns it
+// as it is given: the string vega-loader's sanitize makes of a URI without a
+// BaseURL (SanitizeURI), which Vega writes into a link or an image as it is.
+// Load reads the cleaned path (./data/../a.csv is a.csv), so a path that is
+// written one way and read the other still names the same file.
+//
+// The URI is a file path, not a URL: a name with a colon in its first segment
+// (22:48) is a file name, as it is to the reference implementation, and only
+// an actual scheme (file:, http:, mailto:) is refused, since this loader
+// serves files and nothing else. Nothing is decoded, so %2e%2e is a file name
+// too.
 func (l *FileLoader) Sanitize(_ context.Context, uri string) (string, error) {
+	if l == nil {
+		return "", errNilLoader("*FileLoader")
+	}
+	if _, err := filePath(uri); err != nil {
+		return "", err
+	}
+	return uri, nil
+}
+
+// filePath is the path of the file a URI names, cleaned, relative to the base
+// directory and inside it; an error when it is not, or when vega-loader's
+// allow-list refuses the URI.
+func filePath(uri string) (string, error) {
+	if !uriAllowed(uri) {
+		return "", fmt.Errorf("aster: invalid URI %q: %w", uri, ErrURINotAllowed)
+	}
 	if hasScheme(uri) {
 		return "", fmt.Errorf("aster: FileLoader only accepts relative paths, got a scheme in %q", uri)
 	}
@@ -117,7 +148,6 @@ func (l *FileLoader) Sanitize(_ context.Context, uri string) (string, error) {
 	if cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("aster: FileLoader rejects path traversal in %q", uri)
 	}
-
 	return cleaned, nil
 }
 
@@ -138,7 +168,14 @@ func hasScheme(s string) bool {
 }
 
 func (l *FileLoader) Load(ctx context.Context, uri string) ([]byte, error) {
+	if l == nil {
+		return nil, errNilLoader("*FileLoader")
+	}
 	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	uri, err := filePath(uri)
+	if err != nil {
 		return nil, err
 	}
 	l.initRoot()
@@ -182,7 +219,7 @@ func (l *FileLoader) Load(ctx context.Context, uri string) ([]byte, error) {
 		// The file may grow after the stat; read one byte past the cap.
 		r = io.LimitReader(f, max+1)
 	}
-	data, err := io.ReadAll(r)
+	data, err := readBody(ctx, r)
 	if err != nil {
 		return nil, &readError{uri: uri, err: err}
 	}
@@ -217,7 +254,12 @@ func (e *readError) Unwrap() error { return e.err }
 
 // Close releases the OS-level directory handle. Safe to call multiple times.
 func (l *FileLoader) Close() error {
-	l.initRoot() // a Close before any Load must not let a later Load reopen
+	if l == nil {
+		return errNilLoader("*FileLoader")
+	}
+	// A Close before any Load must not let a later Load reopen the directory,
+	// nor open it only to close it (C141): the first use is spent here.
+	l.once.Do(func() {})
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.closed = true
@@ -236,10 +278,16 @@ type StaticLoader struct {
 }
 
 func (l *StaticLoader) Sanitize(_ context.Context, uri string) (string, error) {
+	if l == nil {
+		return "", errNilLoader("*StaticLoader")
+	}
 	return uri, nil
 }
 
 func (l *StaticLoader) Load(_ context.Context, _ string) ([]byte, error) {
+	if l == nil {
+		return nil, errNilLoader("*StaticLoader")
+	}
 	data, err := json.Marshal(l.Value)
 	if err != nil {
 		return nil, fmt.Errorf("aster: StaticLoader failed to marshal value: %w", err)
@@ -249,6 +297,11 @@ func (l *StaticLoader) Load(_ context.Context, _ string) ([]byte, error) {
 
 // FallbackLoader routes requests to multiple child loaders in order.
 // The first child whose Sanitize accepts the URI handles the request.
+//
+// A FallbackLoader with a nil child (a nil interface, or a nil pointer such
+// as the *FileLoader of a NewFileLoader whose error was dropped) refuses
+// every URI with an error, and the root package's New refuses one, at any
+// depth (see NilChild).
 //
 // Sanitize returns what that child's Sanitize made of the URI, so a link or
 // an image is written as the child resolved it (an HTTPLoader's BaseURL, a
@@ -275,6 +328,9 @@ func NewFallbackLoader(loaders ...Loader) *FallbackLoader {
 }
 
 func (l *FallbackLoader) Sanitize(ctx context.Context, uri string) (string, error) {
+	if err := l.check(); err != nil {
+		return "", err
+	}
 	var errs []error
 	for _, child := range l.Loaders {
 		s, err := child.Sanitize(ctx, uri)
@@ -287,6 +343,9 @@ func (l *FallbackLoader) Sanitize(ctx context.Context, uri string) (string, erro
 }
 
 func (l *FallbackLoader) Load(ctx context.Context, uri string) ([]byte, error) {
+	if err := l.check(); err != nil {
+		return nil, err
+	}
 	var errs []error
 	for _, child := range l.Loaders {
 		sanitized, err := child.Sanitize(ctx, uri)
@@ -344,6 +403,9 @@ func (e *fallbackError) Unwrap() []error { return e.errs }
 
 // Close closes any children that implement io.Closer.
 func (l *FallbackLoader) Close() error {
+	if l == nil {
+		return errNilLoader("*FallbackLoader")
+	}
 	var firstErr error
 	for _, child := range l.Loaders {
 		if closer, ok := child.(io.Closer); ok {
@@ -353,4 +415,66 @@ func (l *FallbackLoader) Close() error {
 		}
 	}
 	return firstErr
+}
+
+// check refuses a nil FallbackLoader, and one with a nil child: it refuses
+// every URI rather than call a nil child, or skip it and answer as if it
+// were not there.
+func (l *FallbackLoader) check() error {
+	if l == nil {
+		return errNilLoader("*FallbackLoader")
+	}
+	for i, child := range l.Loaders {
+		if IsNil(child) {
+			return fmt.Errorf("aster: FallbackLoader child %d is a nil Loader", i)
+		}
+	}
+	return nil
+}
+
+// IsNil reports whether l is nil or a typed nil: an interface holding a nil
+// pointer, map, slice, channel or function, whose methods would dereference
+// it (C76).
+func IsNil(l Loader) bool {
+	if l == nil {
+		return true
+	}
+	v := reflect.ValueOf(l)
+	switch v.Kind() {
+	case reflect.Pointer, reflect.Map, reflect.Slice, reflect.Chan, reflect.Func, reflect.Interface:
+		return v.IsNil()
+	}
+	return false
+}
+
+// NilChild describes the first nil Loader in l: l itself, or a child of a
+// FallbackLoader, at any depth. "" when there is none. The walk is
+// iterative and visits each FallbackLoader once, so a FallbackLoader that
+// holds itself neither recurses nor loops.
+func NilChild(l Loader) string {
+	type item struct {
+		l    Loader
+		path string
+	}
+	stack := []item{{l, ""}}
+	seen := map[*FallbackLoader]bool{}
+	for len(stack) > 0 {
+		it := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		if IsNil(it.l) {
+			if it.l == nil {
+				return it.path + "a nil Loader"
+			}
+			return fmt.Sprintf("%sa nil %T", it.path, it.l)
+		}
+		f, ok := it.l.(*FallbackLoader)
+		if !ok || seen[f] {
+			continue
+		}
+		seen[f] = true
+		for i := len(f.Loaders) - 1; i >= 0; i-- {
+			stack = append(stack, item{f.Loaders[i], fmt.Sprintf("%sFallbackLoader child %d: ", it.path, i)})
+		}
+	}
+	return ""
 }

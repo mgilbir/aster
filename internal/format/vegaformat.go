@@ -10,6 +10,7 @@ import (
 	"unsafe"
 
 	"github.com/mgilbir/aster/internal/bcache"
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -94,6 +95,9 @@ func DefaultLocale() *Locale {
 // NumberFormat is locale.format(spec): the d3 format for a specifier,
 // memoised.
 func (l *Locale) NumberFormat(spec string) (*NumberFormat, error) {
+	if objectPrototypeMember(spec) {
+		return &NumberFormat{member: spec}, nil
+	}
 	if e := l.lastNum.Load(); e != nil && e.key == spec {
 		return e.val, nil
 	}
@@ -264,6 +268,13 @@ func (l *Locale) TimeFormat(spec string) *TimeFormat { return l.timeFormat(spec,
 func (l *Locale) UTCFormat(spec string) *TimeFormat { return l.timeFormat(spec, true) }
 
 func (l *Locale) timeFormat(spec string, utc bool) *TimeFormat {
+	if objectPrototypeMember(spec) {
+		z := l.Local
+		if utc {
+			z = UTC
+		}
+		return &TimeFormat{loc: l.Time, zone: z, spec: spec, member: spec}
+	}
 	key := timeKey{spec, utc}
 	if e := l.lastTime.Load(); e != nil && e.key == key {
 		return e.val
@@ -277,8 +288,8 @@ func (l *Locale) timeFormat(spec string, utc bool) *TimeFormat {
 		z = UTC
 	}
 	f := l.Time.Format(spec, z)
-	// The key and the compiled steps (their literals are slices of the
-	// specifier or of the locale's patterns).
+	// The key and the format's compiled steps (their literals are slices of
+	// the specifier).
 	if m.Put(key, f, int64(len(spec))+int64(cap(f.ops))*fmtOpBytes+timeFormatBytes) {
 		l.lastTime.Store(&memoEntry[timeKey, *TimeFormat]{key, f})
 	}
@@ -318,22 +329,55 @@ type TimeFormatter func(t float64) string
 
 // TimeFormatSpec is locale.timeFormat(spec) / locale.utcFormat(spec) for a
 // dynamic specifier: a string is an ordinary format; anything else must be a
-// time multi-format object (see TimeMultiFormat).
-func (l *Locale) TimeFormatSpec(spec jsval.Value, utc bool) (TimeFormatter, error) {
-	pick, err := l.timePicker(spec, utc)
+// time multi-format object (see TimeMultiFormat). w is the call's Walker,
+// with which the multi-format's specifiers are read as text.
+//
+// The formatter it returns writes a label as long as its specifier and the
+// locale ask (each %B a month name of up to MaxLocaleName bytes, each %c up
+// to MaxLocaleExpansion), but no more than the call has room for
+// (Walker.Room): past it the label is not made, and the formatter panics
+// with a *budget.Stop wrapping budget.ErrLimit. A format d3 cannot run (a
+// locale pattern that is not a string) panics with the *jsval.Thrown d3
+// throws. The dataflow recovers both, as it does a scale's.
+func (l *Locale) TimeFormatSpec(w jsval.Walker, spec jsval.Value, utc bool) (TimeFormatter, error) {
+	pick, err := l.timePicker(w, spec, utc)
 	if err != nil {
 		return nil, err
 	}
-	return func(t float64) string { return pick(t).Format(t) }, nil
+	return boundedFormatter(w, pick), nil
+}
+
+// boundedFormatter formats each instant with the format pick chooses, within
+// the room w leaves.
+func boundedFormatter(w jsval.Walker, pick func(float64) *TimeFormat) TimeFormatter {
+	return func(t float64) string {
+		var buf [64]byte
+		room := int(min(w.Room(), 3*jsval.MaxStringLength))
+		f := pick(t)
+		dst := buf[:0]
+		if f.maxOut > len(buf) {
+			// One allocation, of what the label can take: no growth past
+			// the room by doubling.
+			dst = make([]byte, 0, min(f.maxOut, room+MaxLocaleExpansion))
+		}
+		out, ok, err := f.appendMax(dst, t, room)
+		if err != nil {
+			panic(err)
+		}
+		if !ok {
+			panic(&budget.Stop{Err: fmt.Errorf("%w: a time label of more than %d bytes exceeds the room the call has left", budget.ErrLimit, room)})
+		}
+		return string(out)
+	}
 }
 
 // timePicker is TimeFormatSpec as the format each instant uses.
-func (l *Locale) timePicker(spec jsval.Value, utc bool) (func(t float64) *TimeFormat, error) {
+func (l *Locale) timePicker(w jsval.Walker, spec jsval.Value, utc bool) (func(t float64) *TimeFormat, error) {
 	if spec.IsStr() {
 		f := l.timeFormat(spec.StrValue(), utc)
 		return func(float64) *TimeFormat { return f }, nil
 	}
-	return l.multiPicker(spec, utc)
+	return l.multiPicker(w, spec, utc)
 }
 
 // TimeMultiFormat is vega-format's timeMultiFormat: the default d3 "multi
@@ -342,20 +386,26 @@ func (l *Locale) timePicker(spec jsval.Value, utc bool) (func(t float64) *TimeFo
 // override the format of each unit ("milliseconds", "seconds", "minutes",
 // "hours", "date", "day", "week", "month", "quarter", "year"); null or
 // undefined mean the defaults, other non-objects are an error.
-func (l *Locale) TimeMultiFormat(spec jsval.Value, utc bool) (TimeFormatter, error) {
-	pick, err := l.multiPicker(spec, utc)
+//
+// Its formatter is bounded as TimeFormatSpec's is.
+func (l *Locale) TimeMultiFormat(w jsval.Walker, spec jsval.Value, utc bool) (TimeFormatter, error) {
+	pick, err := l.multiPicker(w, spec, utc)
 	if err != nil {
 		return nil, err
 	}
-	return func(t float64) string { return pick(t).Format(t) }, nil
+	return boundedFormatter(w, pick), nil
 }
 
-func (l *Locale) multiPicker(spec jsval.Value, utc bool) (func(t float64) *TimeFormat, error) {
+func (l *Locale) multiPicker(w jsval.Walker, spec jsval.Value, utc bool) (func(t float64) *TimeFormat, error) {
 	if spec.IsNullish() || !spec.IsTruthy() {
 		spec = jsval.Obj(nil)
 	}
-	if !spec.IsObj() && !spec.IsArr() {
-		return nil, fmt.Errorf("Invalid time multi-format specifier: %s", spec.AsString())
+	switch spec.Kind() {
+	case jsval.KindObj, jsval.KindArr, jsval.KindTimestamp, jsval.KindPattern:
+		// vega-util's isObject: any object, a Date or a RegExp included,
+		// whose unit names it does not hold read as the defaults.
+	default:
+		return nil, fmt.Errorf("Invalid time multi-format specifier: %s", jsval.StringPrefix(spec, jsval.MessageBytes))
 	}
 	z := l.Local
 	if utc {
@@ -364,7 +414,7 @@ func (l *Locale) multiPicker(spec jsval.Value, utc bool) (func(t float64) *TimeF
 	pick := func(keys []string, def string) *TimeFormat {
 		for _, k := range keys {
 			if v := spec.Get(k); v.IsTruthy() {
-				return l.timeFormat(v.AsString(), utc)
+				return l.timeFormat(w.String(v), utc)
 			}
 		}
 		return l.timeFormat(def, utc)
@@ -381,25 +431,30 @@ func (l *Locale) multiPicker(spec jsval.Value, utc bool) (func(t float64) *TimeF
 	fm := pick([]string{"month"}, "%B")
 	fq := pick([]string{"quarter"}, "%B")
 	fy := pick([]string{"year"}, "%Y")
+	// The picker takes the raw value: `second(date) < date` floors a Date
+	// (the interval function makes `new Date(+date)`, which truncates to a
+	// whole millisecond) and compares it with the value as it was given, so
+	// an instant of 0.2 is after the second its millisecond 0 starts.
 	return func(t float64) *TimeFormat {
 		var f *TimeFormat
+		d := timeClip(t)
 		switch {
-		case second.Floor(t) < t:
+		case second.Floor(d) < t:
 			f = fL
-		case minute.Floor(t) < t:
+		case minute.Floor(d) < t:
 			f = fS
-		case hour.Floor(t) < t:
+		case hour.Floor(d) < t:
 			f = fM
-		case day.Floor(t) < t:
+		case day.Floor(d) < t:
 			f = fH
-		case month.Floor(t) < t:
-			if week.Floor(t) < t {
+		case month.Floor(d) < t:
+			if week.Floor(d) < t {
 				f = fd
 			} else {
 				f = fw
 			}
-		case year.Floor(t) < t:
-			if quarter.Floor(t) < t {
+		case year.Floor(d) < t:
+			if quarter.Floor(d) < t {
 				f = fm
 			} else {
 				f = fq
@@ -413,71 +468,77 @@ func (l *Locale) multiPicker(spec jsval.Value, utc bool) (func(t float64) *TimeF
 
 // FormatValue is the `format(value, spec)` expression function: "null" for
 // null, else the number format applied to +value.
-func (l *Locale) FormatValue(v, spec jsval.Value) (string, error) {
+func (l *Locale) FormatValue(w jsval.Walker, v, spec jsval.Value) (string, error) {
 	if v.Kind() == jsval.KindNull {
 		return "null", nil
 	}
-	f, err := l.NumberFormat(spec.AsString())
+	f, err := l.NumberFormat(w.String(spec))
 	if err != nil {
 		return "", err
 	}
-	return f.FormatValue(v), nil
+	return f.FormatValue(w, v), nil
 }
 
 // AppendFormatValue appends what FormatValue returns to dst.
-func (l *Locale) AppendFormatValue(dst []byte, v, spec jsval.Value) ([]byte, error) {
+func (l *Locale) AppendFormatValue(w jsval.Walker, dst []byte, v, spec jsval.Value) ([]byte, error) {
 	if v.Kind() == jsval.KindNull {
 		return append(dst, "null"...), nil
 	}
-	f, err := l.NumberFormat(spec.AsString())
+	f, err := l.NumberFormat(w.String(spec))
 	if err != nil {
 		return dst, err
 	}
-	return f.AppendFormatValue(dst, v), nil
+	return f.AppendFormatValue(w, dst, v), nil
 }
 
 // TimeFormatValue is the `timeFormat(value, spec)` / `utcFormat(value, spec)`
 // expression functions: "null" for null, else the time format of the date
-// (a non-date is first converted with +value).
-func (l *Locale) TimeFormatValue(v, spec jsval.Value, utc bool) (string, error) {
-	if v.Kind() == jsval.KindNull {
-		return "null", nil
-	}
-	f, err := l.TimeFormatSpec(spec, utc)
+// (a non-date is first converted with +value). It fails with the exception
+// d3 throws (a *jsval.Thrown), or with budget.ErrLimit past the room w
+// leaves.
+func (l *Locale) TimeFormatValue(w jsval.Walker, v, spec jsval.Value, utc bool) (string, error) {
+	room := int(min(w.Room(), 3*jsval.MaxStringLength))
+	out, ok, err := l.AppendTimeFormatValue(w, nil, v, spec, utc, room)
 	if err != nil {
 		return "", err
 	}
-	return f(jsval.ToNumber(v)), nil
+	if !ok {
+		return "", fmt.Errorf("%w: a time label of more than %d bytes exceeds the room the call has left", budget.ErrLimit, room)
+	}
+	return string(out), nil
 }
 
 // AppendTimeFormatValue appends what TimeFormatValue returns to dst, but
 // stops once dst holds more than max bytes, with ok false: a specifier
 // chooses the length (each %c of a locale writes up to MaxLocaleExpansion
 // bytes), so a caller with a bound learns it is reached before the text is
-// all made.
-func (l *Locale) AppendTimeFormatValue(dst []byte, v, spec jsval.Value, utc bool, max int) (out []byte, ok bool, err error) {
+// all made. err is the exception d3 throws (a *jsval.Thrown).
+func (l *Locale) AppendTimeFormatValue(w jsval.Walker, dst []byte, v, spec jsval.Value, utc bool, max int) (out []byte, ok bool, err error) {
 	if v.Kind() == jsval.KindNull {
 		return append(dst, "null"...), true, nil
 	}
-	pick, err := l.timePicker(spec, utc)
+	pick, err := l.timePicker(w, spec, utc)
 	if err != nil {
 		return dst, false, err
 	}
 	t := jsval.ToNumber(v)
-	out, ok = pick(t).appendMax(dst, t, max)
-	return out, ok, nil
+	return pick(t).appendMax(dst, t, max)
 }
 
 // TimeParseValue is the `timeParse(string, spec)` / `utcParse(string, spec)`
 // expression functions: the parsed date as a Timestamp, or Null where d3
 // returns null. A null input gives the string "null" as in Vega's wrapper.
-func (l *Locale) TimeParseValue(v, spec jsval.Value, utc bool) jsval.Value {
+// err is the exception d3 throws (a *jsval.Thrown).
+func (l *Locale) TimeParseValue(w jsval.Walker, v, spec jsval.Value, utc bool) (jsval.Value, error) {
 	if v.Kind() == jsval.KindNull {
-		return jsval.Str("null")
+		return jsval.Str("null"), nil
 	}
-	t, ok := l.timeParser(spec.AsString(), utc).Parse(v.AsString())
+	t, ok, err := l.timeParser(w.String(spec), utc).ParseErr(w.String(v))
+	if err != nil {
+		return jsval.Undefined, err
+	}
 	if !ok {
-		return jsval.Null
+		return jsval.Null, nil
 	}
-	return jsval.Timestamp(t)
+	return jsval.Timestamp(t), nil
 }

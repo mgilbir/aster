@@ -4,6 +4,7 @@ import (
 	"math"
 
 	"github.com/mgilbir/aster/internal/jsmath"
+	"github.com/mgilbir/aster/internal/jsval"
 )
 
 // newClipCircle is small-circle clipping: geometry outside the circle of
@@ -79,8 +80,8 @@ func (cc *clipCircle) intersect(a, b cpoint, two bool) (q, q1 cpoint, ok bool) {
 	n1n2 := n2[0] // cartesianDot(n1, n2)
 	determinant := n2n2 - float64(n1n2*n1n2)
 
-	// Two polar points.
-	if determinant == 0 {
+	// Two polar points (d3: `if (!determinant)`, which a NaN passes too).
+	if !truthy(determinant) {
 		if !two {
 			return a, cpoint{}, true
 		}
@@ -218,12 +219,18 @@ func (l *circleLine) Point(lambda, phi float64) {
 		if v {
 			// outside going in
 			l.stream.LineStart()
-			q, _, _ := cc.intersect(point1, l.point0, false)
+			q, _, ok := cc.intersect(point1, l.point0, false)
+			if !ok {
+				throwNoIntersection()
+			}
 			l.stream.Point(q.x, q.y)
 			l.point0 = q
 		} else {
 			// inside going out
-			q, _, _ := cc.intersect(l.point0, point1, false)
+			q, _, ok := cc.intersect(l.point0, point1, false)
+			if !ok {
+				throwNoIntersection()
+			}
 			l.emit(q.x, q.y, 2)
 			l.stream.LineEnd()
 			l.point0 = q
@@ -271,4 +278,11 @@ func (l *circleLine) clean() int {
 		c |= 2
 	}
 	return c
+}
+
+// throwNoIntersection is upstream's `point2[0]` of the undefined intersect
+// returns where a segment that changes visibility does not cross the circle
+// (rounding at its edge): a TypeError the render, or the operator, fails with.
+func throwNoIntersection() {
+	panic(&jsval.Thrown{Name: "TypeError", Msg: "Cannot read properties of undefined (reading '0')"})
 }

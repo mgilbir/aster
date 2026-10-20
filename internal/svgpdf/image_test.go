@@ -110,7 +110,7 @@ func TestImageJPEGIsEmbeddedAsIs(t *testing.T) {
 // renderContent is the uncompressed content stream of svg.
 func renderContent(t *testing.T, svg string) (string, error) {
 	t.Helper()
-	root, err := parseSVG(context.Background(), svg, Limits{}.withDefaults())
+	root, err := parseSVG(context.Background(), svg, Limits{}.WithDefaults())
 	if err != nil {
 		t.Fatal(err)
 	}

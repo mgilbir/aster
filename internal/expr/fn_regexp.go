@@ -9,6 +9,7 @@ import (
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
 	ecma262 "github.com/mgilbir/goecma262"
+	"github.com/mgilbir/goecma262/vm"
 )
 
 // patternCache memoises patterns compiled from strings (test('a+', x) in a
@@ -268,11 +269,15 @@ func (s *Scope) findAll(p *jsval.Pattern, str string, limit int) ([][]int, error
 	return m, nil
 }
 
-// regexpSplit is String.prototype.split with a RegExp separator: capture
-// groups are spliced into the result (undefined for a group that did not
-// participate), as ECMA-262 specifies. split matches with a copy of the
-// separator that has the y flag and not g, at every position in turn, so the
-// separator's own g and y flags make no difference.
+// regexpSplit is String.prototype.split with a RegExp separator
+// (RegExp.prototype[@@split]): capture groups are spliced into the result
+// (undefined for a group that did not participate), and the result stops at
+// limit pieces, captures included (C38). split matches with a copy of the
+// separator that has the y flag and not g, at every position q from the end
+// of the last piece in turn, skipping an empty match where the piece begins;
+// the leftmost match from q is the first position at or after q where that
+// sticky match succeeds, so the search runs from q instead of position by
+// position. The separator's own g and y flags make no difference.
 func (s *Scope) regexpSplit(p *jsval.Pattern, str string, limit uint32) []jsval.Value {
 	if strings.ContainsAny(p.Flags, "gy") {
 		p = s.compileEscaped(p.Source, strings.Map(func(r rune) rune {
@@ -282,8 +287,9 @@ func (s *Scope) regexpSplit(p *jsval.Pattern, str string, limit uint32) []jsval.
 			return r
 		}, p.Flags))
 	}
+	re := s.matcher(p, len(str))
 	if str == "" {
-		ok, err := s.matcher(p, 0).MatchStringErr(str)
+		ok, err := re.MatchStringErr(str)
 		if err != nil {
 			s.regexpFailed(err)
 		}
@@ -292,38 +298,44 @@ func (s *Scope) regexpSplit(p *jsval.Pattern, str string, limit uint32) []jsval.
 		}
 		return []jsval.Value{jsval.Str("")}
 	}
-	n := -1
-	if limit < math.MaxInt32 {
-		n = int(limit)
-	}
-	matches, err := s.findAll(p, str, n)
-	if err != nil {
-		s.regexpFailed(err)
-	}
+	s.workBytes(len(str))
+	unicode := strings.ContainsAny(p.Flags, "uv")
 	b := itemBuilder{s: s}
-	pos := 0
-	for _, m := range matches {
-		start, end := m[0], m[1]
-		if start >= len(str) {
+	full := func() bool { return uint64(len(b.items)) >= uint64(limit) }
+	pos := 0 // where the current piece begins (p)
+	for q := 0; q < len(str); {
+		m, err := re.FindStringSubmatchPositionsFromErr(str, q)
+		if err != nil {
+			s.regexpFailed(err)
+		}
+		if m == nil || m[0] >= len(str) {
 			break
 		}
+		start, end := m[0], m[1]
+		s.work(1 + (start-q)>>6)
 		if end == pos {
-			continue // an empty match where the current piece began
+			// An empty match where the piece begins: try from the next
+			// character (a code unit without the u flag).
+			q = vm.NextPosition(str, start, unicode)
+			continue
 		}
 		b.push(jsval.Str(slicePos(str, pos, start)))
+		if full() {
+			return b.items
+		}
 		for g := 2; g+1 < len(m); g += 2 {
 			if m[g] < 0 {
 				b.push(jsval.Undefined)
 			} else {
 				b.push(jsval.Str(slicePos(str, m[g], m[g+1])))
 			}
+			if full() {
+				return b.items
+			}
 		}
-		pos = end
+		pos, q = end, end
 	}
 	b.push(jsval.Str(slicePos(str, pos, len(str))))
-	if uint64(len(b.items)) > uint64(limit) {
-		return b.items[:limit]
-	}
 	return b.items
 }
 

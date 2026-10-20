@@ -55,7 +55,7 @@ import (
 const (
 	maxTextBytes  = 1 << 20 // longer text is measured up to this many bytes
 	maxSizePx     = 1 << 16 // larger CSS sizes are clamped
-	maxFamilies   = 32      // font-family entries considered per query
+	maxFamilies   = MaxFamilies
 	maxCacheItems = 1 << 14 // runes memoised per face list (see faceList)
 )
 
@@ -90,6 +90,7 @@ type config struct {
 	pango           pangoMode
 	fonts           []customFont
 	palettes        map[string]int // by normalised family, WithFontPalette
+	paletteFamilies []string       // WithFontPalette's families, as given, for New's check
 	fallbackFamily  string
 	serifFamily     string
 	monospaceFamily string
@@ -154,6 +155,7 @@ func WithFontPalette(family string, index int) Option {
 			c.palettes = map[string]int{}
 		}
 		c.palettes[normFamily(family)] = max(0, index)
+		c.paletteFamilies = append(c.paletteFamilies, family)
 	}
 }
 
@@ -298,13 +300,14 @@ type measurerState struct {
 	system          *systemIndex // nil unless WithSystemFonts
 	sysEntries      map[sysKey]*entry
 	sysLoaded       []*entry       // the system faces loaded, oldest first (see keepSystemFace)
+	listResets      int            // font lists that forgot a dropped face (see keepSystemFace)
 	palettes        map[string]int // WithFontPalette's, by normalised family
 
 	// The caches; see widthCacheBytes. cssCache and listCache are used under
 	// mu (plan), the metrics' width cache without it.
 	cssCache  *bcache.Cache[string, CSSFont]
 	listCache *bcache.Cache[listKey, *faceList]
-	programs  *bcache.Cache[*Face, []byte]
+	programs  *bcache.Cache[string, []byte] // by Face.sourceKey
 	// exactOnce makes exactView, the view Exact returns.
 	exactOnce sync.Once
 	exactView *metrics
@@ -339,7 +342,7 @@ func New(opts ...Option) (*Measurer, error) {
 		byFam:           make(map[string][]*entry),
 		cssCache:        bcache.New[string, CSSFont](cssCacheBytes, cssCacheMaxEntry),
 		listCache:       bcache.New[listKey, *faceList](listCacheBytes, listCacheMaxEntry),
-		programs:        bcache.New[*Face, []byte](programCacheBytes, programCacheMaxEntry),
+		programs:        bcache.New[string, []byte](programCacheBytes, programCacheMaxEntry),
 		fallbackFamily:  orDefault(cfg.fallbackFamily, "Liberation Sans"),
 		serifFamily:     orDefault(cfg.serifFamily, "Liberation Serif"),
 		monospaceFamily: orDefault(cfg.monospaceFamily, "Liberation Mono"),
@@ -425,6 +428,13 @@ func New(opts ...Option) (*Measurer, error) {
 			m.fallbackOrder = append(m.fallbackOrder, es)
 		}
 	}
+	// A palette for a family with no font would silently do nothing: a
+	// mistake to report, as a default family with no font is (C57).
+	for _, fam := range cfg.paletteFamilies {
+		if !m.hasFamily(normFamily(fam)) {
+			return nil, fmt.Errorf("text: WithFontPalette: family %q has no font (register it, or enable system fonts for a system one)", fam)
+		}
+	}
 	// A generic family set to one with no font would silently resolve to
 	// the first face; it is a mistake to report, as a fallback family is.
 	for _, d := range []struct{ opt, family string }{
@@ -455,11 +465,22 @@ func (m *Measurer) Exact() *Measurer {
 	return &Measurer{measurerState: m.measurerState, metrics: m.exactView, budget: m.budget}
 }
 
-// applyPalette sets the palette WithFontPalette names for f's family.
-func (m *Measurer) applyPalette(f *Face) {
-	if f != nil {
-		f.palette = m.palettes[normFamily(f.Family)]
+// applyPalette sets the palette WithFontPalette names for f's family, or
+// for any of names, the other family names a system face is indexed under
+// (C45's class): the face takes it whichever name a spec reaches it by.
+func (m *Measurer) applyPalette(f *Face, names ...string) {
+	if f == nil {
+		return
 	}
+	// The face's own family's first, then its other names' in the order
+	// the font states them.
+	for _, n := range append([]string{f.Family}, names...) {
+		if p, ok := m.palettes[normFamily(n)]; ok {
+			f.palette = p
+			return
+		}
+	}
+	f.palette = 0
 }
 
 func orDefault(s, d string) string {
@@ -623,7 +644,11 @@ func (m *Measurer) FontData(ctx context.Context, f *Face) ([]byte, error) {
 	if !f.mapped && f.index == 0 && !(len(f.src) >= 4 && string(f.src[:4]) == "ttcf") && f.Size() <= maxFontBytes {
 		return f.Program(), nil
 	}
-	if p, ok := m.programs.Get(f); ok {
+	// Keyed by what the face is loaded from, not by the Face: a system face
+	// dropped and loaded again finds its program, and the cache holds no
+	// dropped face (C113).
+	key := f.sourceKey()
+	if p, ok := m.programs.Get(key); ok {
 		return p, nil
 	}
 	n := f.outlineSize()
@@ -639,7 +664,7 @@ func (m *Measurer) FontData(ctx context.Context, f *Face) ([]byte, error) {
 	}
 	p := f.OutlineProgram()
 	if p != nil {
-		m.programs.Put(f, p, int64(len(p)))
+		m.programs.Put(key, p, int64(len(p)+len(key)))
 	}
 	return p, nil
 }

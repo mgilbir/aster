@@ -60,22 +60,6 @@ func sign(x float64) float64 {
 	return x
 }
 
-// jsRound is Math.round: halves round toward +Infinity, and the sign of zero
-// is preserved for values in [-0.5, -0].
-func jsRound(x float64) float64 {
-	if math.IsNaN(x) || math.IsInf(x, 0) {
-		return x
-	}
-	r := math.Floor(x)
-	if x-r >= 0.5 {
-		r++
-	}
-	if r == 0 && (x < 0 || math.Signbit(x)) {
-		return math.Copysign(0, -1)
-	}
-	return r
-}
-
 // jsMod is the JavaScript % operator (result takes the dividend's sign).
 func jsMod(a, b float64) float64 { return math.Mod(a, b) }
 
@@ -103,7 +87,7 @@ func (a *adder) add(x float64) {
 		} else {
 			lo = y - (hi - x)
 		}
-		if lo != 0 {
+		if truthy(lo) { // d3: `if (lo)`
 			a.p[i] = lo
 			i++
 		}
@@ -131,7 +115,7 @@ func (a *adder) value() float64 {
 			y = a.p[n]
 			hi = x + y
 			lo = y - (hi - x)
-			if lo != 0 {
+			if truthy(lo) {
 				break
 			}
 		}

@@ -121,10 +121,10 @@ var markCompilers = map[string]markCompiler{
 	}},
 	"text": {vgMark: "text", encodeEntry: func(m *unitModel) Value {
 		align, baseline := undef, undef
-		if getMarkPropOrConfigSimple("align", m.markDef, m.config).IsUndefined() {
+		if getMarkPropOrConfigSimple(m.ctx, "align", m.markDef, m.config).IsUndefined() {
 			align = jsval.Str("center")
 		}
-		if getMarkPropOrConfigSimple("baseline", m.markDef, m.config).IsUndefined() {
+		if getMarkPropOrConfigSimple(m.ctx, "baseline", m.markDef, m.config).IsUndefined() {
 			baseline = jsval.Str("middle")
 		}
 		return withBase(m, mkIgnore("include", "include", "include", "ignore", "ignore", "include"),
@@ -153,7 +153,7 @@ var markCompilers = map[string]markCompiler{
 			vgc = "yc"
 		}
 		thick := jsval.NewObject(1)
-		thick.Set(vgThicknessChannel, signalOrValueRef(m.ctx, getMarkPropOrConfigSimple("thickness", m.markDef, m.config)))
+		thick.Set(vgThicknessChannel, signalOrValueRef(m.ctx, getMarkPropOrConfigSimple(m.ctx, "thickness", m.markDef, m.config)))
 		return withBase(m, mkIgnore("ignore", "ignore", "include", "ignore", "ignore", "ignore"),
 			rectPosition(m, vgSizeAxis),
 			pointPosition(vgThicknessAxis, m, pointPositionOpts{defaultPos: "mid", vgChannel: vgc}),
@@ -181,10 +181,10 @@ func definedEncode(m *unitModel) Value {
 			return
 		}
 		scaleType := m.getScaleType(channel)
-		if scaleType == "" {
+		if !scaleType.IsTruthy() {
 			return
 		}
-		mode := getScaleInvalidDataMode(m.markDef, m.config, channel, scaleType, isCountingAggregateOp(fd.Get("aggregate")))
+		mode := getScaleInvalidDataMode(m.ctx, m.markDef, m.config, channel, scaleType, isCountingAggregateOp(fd.Get("aggregate")))
 		if shouldBreakPath(mode) {
 			opt := fieldRefOption{expr: "datum"}
 			if m.stack != nil && m.stack.impute {
@@ -197,8 +197,8 @@ func definedEncode(m *unitModel) Value {
 	})
 	if fields.size() > 0 {
 		var parts []string
-		for _, f := range fields.list() {
-			parts = append(parts, fieldValidPredicate(f, true))
+		for _, f := range fields.values() {
+			parts = append(parts, fieldValidPredicate(f.StrValue(), true))
 		}
 		return mkv("defined", mkv("signal", joinStrings(parts, " && ")))
 	}
@@ -214,14 +214,14 @@ func parseMarkGroups(m *unitModel) []Value {
 	cc := m.b().ctx
 
 	mark := m.mark()
-	if mark == "line" || mark == "area" || mark == "trail" {
+	if isPathMark(mark) {
 		if details := pathGroupingFields(cc, mark, m.encoding); len(details) > 0 {
 			return getPathGroups(m, details)
 		}
-	} else if mark == "bar" {
+	} else if strIs(mark, "bar") {
 		hasCornerRadius := false
 		for _, p := range vgCornerRadiusChannels {
-			if getMarkPropOrConfigSimple(p, m.markDef, m.config).IsTruthy() {
+			if getMarkPropOrConfigSimple(m.ctx, p, m.markDef, m.config).IsTruthy() {
 				hasCornerRadius = true
 			}
 		}
@@ -288,7 +288,7 @@ func getGroupsForStackedBarWithCornerRadius(m *unitModel) []Value {
 	}
 	uo := update.ObjValue()
 	for _, key := range vgCornerRadiusChannels {
-		configValue := getMarkConfig(key, m.markDef, m.config, "")
+		configValue := getMarkConfig(cc, key, m.markDef, m.config, "")
 		if uo.Lookup(key).IsTruthy() {
 			groupUpdate.Set(key, uo.Lookup(key))
 			uo.Delete(key)
@@ -312,7 +312,7 @@ func getGroupsForStackedBarWithCornerRadius(m *unitModel) []Value {
 	for _, prop := range []string{"stroke", "strokeWidth", "strokeJoin", "strokeCap", "strokeDash", "strokeDashOffset", "strokeMiterLimit", "strokeOpacity"} {
 		if v := uo.Lookup(prop); v.IsTruthy() {
 			groupUpdate.Set(prop, v)
-		} else if cv := getMarkConfig(prop, m.markDef, m.config, ""); !cv.IsUndefined() {
+		} else if cv := getMarkConfig(cc, prop, m.markDef, m.config, ""); !cv.IsUndefined() {
 			groupUpdate.Set(prop, signalOrValueRef(m.ctx, cv))
 		}
 	}
@@ -346,12 +346,12 @@ func getSort(m *unitModel) Value {
 	order := encoding.Get("order")
 	isNullOrFalse := func(v Value) bool { return v.IsNull() || (v.IsBool() && !v.BoolValue()) }
 	if (!order.IsArr() && isValueDef(order) && isNullOrFalse(order.Get("value"))) ||
-		(!order.IsTruthy() && isNullOrFalse(getMarkPropOrConfigSimple("order", markDef, config))) {
+		(!order.IsTruthy() && isNullOrFalse(getMarkPropOrConfigSimple(cc, "order", markDef, config))) {
 		return undef
 	} else if (order.IsArr() || isFieldDef(cc, order)) && stack == nil {
 		f, o := sortParams(cc, order, fieldRefOption{expr: "datum"})
 		return mkv("field", jsval.Arr(f), "order", jsval.Arr(o))
-	} else if isPathMarkName(mark) {
+	} else if isPathMark(mark) {
 		dim := chX
 		if markDefOrient(markDef) == "horizontal" {
 			dim = chY
@@ -379,7 +379,7 @@ func getMarkGroup(m *unitModel, fromPrefix string) []Value {
 		for _, name := range m.comp.selection.keyList() {
 			cc.work(1)
 			s := m.comp.selection.lookup(name)
-			if s.typ == "point" && !s.props.Lookup("bind").IsTruthy() && s.props.Lookup("on").AsString() != "pointerover" {
+			if s.typ == "point" && !s.props.Lookup("bind").IsTruthy() && !strIs(s.props.Lookup("on"), "pointerover") {
 				if m.markDef.Get("cursor").IsNullish() {
 					m.markDef.ObjValue().Set("cursor", jsval.Str("pointer"))
 				}
@@ -387,8 +387,8 @@ func getMarkGroup(m *unitModel, fromPrefix string) []Value {
 			}
 		}
 	}
-	aria := getMarkPropOrConfigSimple("aria", markDef, config)
-	mc := markCompilers[mark]
+	aria := getMarkPropOrConfigSimple(cc, "aria", markDef, config)
+	mc := markCompilers[propKey(cc, mark)]
 	var post Value
 	if mc.postEncodingTransform != nil {
 		post = mc.postEncodingTransform(m)
@@ -455,7 +455,7 @@ func interactiveFlag(m *unitModel) Value {
 		parent = parent.b().parent
 	}
 	if parentCount > 0 {
-		return mkv("interactive", unitCount > 0 || m.mark() == "geoshape" || m.encoding.Get("tooltip").IsTruthy() || (!cc.v5 && m.markDef.Get("tooltip").IsTruthy()))
+		return mkv("interactive", unitCount > 0 || strIs(m.mark(), "geoshape") || m.encoding.Get("tooltip").IsTruthy() || (!cc.v5 && m.markDef.Get("tooltip").IsTruthy()))
 	}
 	return jsval.Null
 }

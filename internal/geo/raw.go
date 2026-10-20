@@ -16,15 +16,6 @@ type raw struct {
 	mercator bool
 }
 
-// jsPow is Math.pow: unlike jsmath.Pow, 1 raised to an infinite or NaN power is
-// NaN.
-func jsPow(x, y float64) float64 {
-	if math.IsNaN(y) || (math.IsInf(y, 0) && abs(x) == 1) {
-		return nan
-	}
-	return jsmath.Pow(x, y)
-}
-
 func azimuthalRaw(scale func(cxcy float64) float64) func(x, y float64) (float64, float64) {
 	return func(x, y float64) (float64, float64) {
 		cx := jsmath.Cos(x)
@@ -158,7 +149,7 @@ func conicConformalRaw(y0, y1 float64) *raw {
 	} else {
 		n = jsmath.Log(cy0/jsmath.Cos(y1)) / jsmath.Log(tany(y1)/tany(y0))
 	}
-	f := float64(cy0*jsPow(tany(y0), n)) / n
+	f := float64(cy0*jsmath.Pow(tany(y0), n)) / n
 
 	if !truthy(n) {
 		return mercatorRaw
@@ -173,7 +164,7 @@ func conicConformalRaw(y0, y1 float64) *raw {
 			} else if y > halfPi-epsilon {
 				y = halfPi - epsilon
 			}
-			r := f / jsPow(tany(y), n)
+			r := f / jsmath.Pow(tany(y), n)
 			nx := float64(n * x)
 			return float64(r * jsmath.Sin(nx)), f - float64(r*jsmath.Cos(nx))
 		},
@@ -184,7 +175,7 @@ func conicConformalRaw(y0, y1 float64) *raw {
 			if fy*n < 0 {
 				l -= float64(float64(pi*sign(x)) * sign(fy))
 			}
-			return l / n, 2*jsmath.Atan(jsPow(f/r, 1/n)) - halfPi
+			return l / n, 2*jsmath.Atan(jsmath.Pow(f/r, 1/n)) - halfPi
 		},
 	}
 }

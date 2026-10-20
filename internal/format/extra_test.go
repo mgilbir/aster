@@ -3,12 +3,13 @@ package format
 import (
 	"context"
 	"errors"
-	"github.com/mgilbir/aster/internal/budget"
-	"github.com/mgilbir/aster/internal/testutil"
 	"math"
 	"math/rand"
 	"testing"
 	"time"
+
+	"github.com/mgilbir/aster/internal/budget"
+	"github.com/mgilbir/aster/internal/testutil"
 
 	"github.com/mgilbir/aster/internal/jsval"
 )
@@ -20,10 +21,15 @@ func TestCyclicTimeLocaleTerminates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// d3 recurses through the cycle until its stack overflows when it
+	// formats; a parse stops once the input is used up.
 	for _, spec := range []string{"%c", "%x", "%X"} {
-		_ = l.Format(spec, UTC).Format(0)
-		if _, ok := l.Parse(spec, UTC).Parse("a"); ok {
-			t.Errorf("cyclic parse %q succeeded", spec)
+		var th *jsval.Thrown
+		if _, err := l.Format(spec, UTC).AppendFormatErr(nil, 0); !errors.As(err, &th) || th.Name != "RangeError" {
+			t.Errorf("cyclic format %q: %v; want RangeError", spec, err)
+		}
+		if _, ok, err := l.Parse(spec, UTC).ParseErr("a"); ok || err != nil {
+			t.Errorf("cyclic parse %q = %v, %v; want null", spec, ok, err)
 		}
 	}
 }
@@ -49,20 +55,20 @@ func TestFormatValueCType(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := f.FormatValue(jsval.Str("héllo")); got != "héllo" {
+	if got := f.FormatValue(jsval.Walker{}, jsval.Str("héllo")); got != "héllo" {
 		t.Errorf("c format of string = %q", got)
 	}
-	if got := f.FormatValue(jsval.Num(1.5)); got != "1.5" {
+	if got := f.FormatValue(jsval.Walker{}, jsval.Num(1.5)); got != "1.5" {
 		t.Errorf("c format of number = %q", got)
 	}
 	g, _ := DefaultNumberLocale().Format(",.1f")
-	if got := g.FormatValue(jsval.Str(" 1234.56 ")); got != "1,234.6" {
+	if got := g.FormatValue(jsval.Walker{}, jsval.Str(" 1234.56 ")); got != "1,234.6" {
 		t.Errorf("string coerced with Number(): %q", got)
 	}
-	if got := g.FormatValue(jsval.Null); got != "0.0" {
+	if got := g.FormatValue(jsval.Walker{}, jsval.Null); got != "0.0" {
 		t.Errorf("null coerced to 0: %q", got)
 	}
-	if got := g.FormatValue(jsval.Undefined); got != "NaN" {
+	if got := g.FormatValue(jsval.Walker{}, jsval.Undefined); got != "NaN" {
 		t.Errorf("undefined: %q", got)
 	}
 }
@@ -168,10 +174,10 @@ func TestNormalizeUnitsErrors(t *testing.T) {
 
 func TestMultiFormatErrors(t *testing.T) {
 	l := DefaultLocale()
-	if _, err := l.TimeMultiFormat(jsval.Num(5), true); err == nil {
+	if _, err := l.TimeMultiFormat(jsval.Walker{}, jsval.Num(5), true); err == nil {
 		t.Error("numeric multi-format spec accepted")
 	}
-	f, err := l.TimeMultiFormat(jsval.Undefined, true)
+	f, err := l.TimeMultiFormat(jsval.Walker{}, jsval.Undefined, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,22 +191,22 @@ func TestMultiFormatErrors(t *testing.T) {
 
 func TestLocaleExpressionHelpers(t *testing.T) {
 	l := DefaultLocale()
-	if s, _ := l.FormatValue(jsval.Null, jsval.Str(",")); s != "null" {
+	if s, _ := l.FormatValue(jsval.Walker{}, jsval.Null, jsval.Str(",")); s != "null" {
 		t.Errorf("format(null) = %q", s)
 	}
-	if s, err := l.FormatValue(jsval.Num(1234.5), jsval.Str("$,.2f")); err != nil || s != "$1,234.50" {
+	if s, err := l.FormatValue(jsval.Walker{}, jsval.Num(1234.5), jsval.Str("$,.2f")); err != nil || s != "$1,234.50" {
 		t.Errorf("format = %q %v", s, err)
 	}
-	if _, err := l.FormatValue(jsval.Num(1), jsval.Undefined); err == nil {
+	if _, err := l.FormatValue(jsval.Walker{}, jsval.Num(1), jsval.Undefined); err == nil {
 		t.Error("format with undefined specifier accepted")
 	}
-	if s, _ := l.TimeFormatValue(jsval.Timestamp(0), jsval.Str("%Y-%m-%d"), true); s != "1970-01-01" {
+	if s, _ := l.TimeFormatValue(jsval.Walker{}, jsval.Timestamp(0), jsval.Str("%Y-%m-%d"), true); s != "1970-01-01" {
 		t.Errorf("timeFormat = %q", s)
 	}
-	if v := l.TimeParseValue(jsval.Str("2020-02-03"), jsval.Str("%Y-%m-%d"), true); !v.IsTimestamp() || v.NumValue() != 1580688000000 {
+	if v, _ := l.TimeParseValue(jsval.Walker{}, jsval.Str("2020-02-03"), jsval.Str("%Y-%m-%d"), true); !v.IsTimestamp() || v.NumValue() != 1580688000000 {
 		t.Errorf("timeParse = %v", v)
 	}
-	if v := l.TimeParseValue(jsval.Str("nope"), jsval.Str("%Y-%m-%d"), true); !v.IsNull() {
+	if v, _ := l.TimeParseValue(jsval.Walker{}, jsval.Str("nope"), jsval.Str("%Y-%m-%d"), true); !v.IsNull() {
 		t.Errorf("failed parse = %v", v)
 	}
 }
@@ -388,7 +394,7 @@ func BenchmarkFloorAndInterval(b *testing.B) {
 }
 
 func BenchmarkMultiFormat(b *testing.B) {
-	f, _ := DefaultLocale().TimeMultiFormat(jsval.Undefined, true)
+	f, _ := DefaultLocale().TimeMultiFormat(jsval.Walker{}, jsval.Undefined, true)
 	b.ReportAllocs()
 	for i := 0; b.Loop(); i++ {
 		f(1.6e12 + float64(i%1000)*86400000)

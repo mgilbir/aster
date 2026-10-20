@@ -1,9 +1,11 @@
 package transforms
 
 import (
+	"context"
 	"errors"
 	"math"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsmath"
 
 	"github.com/mgilbir/aster/internal/jsval"
@@ -66,14 +68,25 @@ func (s *normalSampler) sample(r Rand, mean, stdev float64) float64 {
 
 // DensityNormal is the normal probability density function.
 func DensityNormal(value, mean, stdev float64) float64 {
-	z := (value - distOrZero(mean)) / stdev
+	return densityNormal(value, distOrZero(mean), stdev)
+}
+
+// densityNormal is DensityNormal of a mean already `mean || 0`: a
+// distribution's, which a truthy value that is no number makes NaN.
+func densityNormal(value, mean, stdev float64) float64 {
+	z := (value - mean) / stdev
 	return jsmath.Exp(-0.5*z*z) / (stdev * distSQRT2PI)
 }
 
 // CumulativeNormal is the normal CDF using the approximation of West (2009),
 // "Better Approximations to Cumulative Normal Functions".
 func CumulativeNormal(value, mean, stdev float64) float64 {
-	z := (value - distOrZero(mean)) / stdev
+	return cumulativeNormal(value, distOrZero(mean), stdev)
+}
+
+// cumulativeNormal is CumulativeNormal of a mean already `mean || 0`.
+func cumulativeNormal(value, mean, stdev float64) float64 {
+	z := (value - mean) / stdev
 	Z := math.Abs(z)
 	var cd float64
 	if Z > 37 {
@@ -115,10 +128,15 @@ func CumulativeNormal(value, mean, stdev float64) float64 {
 // QuantileNormal is the normal quantile function (probit) via the inverse
 // error function; NaN outside [0, 1].
 func QuantileNormal(p, mean, stdev float64) float64 {
+	return quantileNormal(p, distOrZero(mean), stdev)
+}
+
+// quantileNormal is QuantileNormal of a mean already `mean || 0`.
+func quantileNormal(p, mean, stdev float64) float64 {
 	if p < 0 || p > 1 {
 		return math.NaN()
 	}
-	return distOrZero(mean) + float64(float64(stdev*distSQRT2)*distErfinv(2*p-1))
+	return mean + float64(float64(stdev*distSQRT2)*distErfinv(2*p-1))
 }
 
 // distErfinv approximates the inverse error function (Giles, "Approximating
@@ -184,10 +202,10 @@ func NewNormal(mean, stdev float64) *Normal {
 	return &Normal{Mean: distOrZero(mean), Stdev: stdev, s: normalSampler{next: math.NaN()}}
 }
 
-func (d *Normal) PDF(x float64) float64 { return DensityNormal(x, d.Mean, d.Stdev) }
-func (d *Normal) CDF(x float64) float64 { return CumulativeNormal(x, d.Mean, d.Stdev) }
+func (d *Normal) PDF(x float64) float64 { return densityNormal(x, d.Mean, d.Stdev) }
+func (d *Normal) CDF(x float64) float64 { return cumulativeNormal(x, d.Mean, d.Stdev) }
 func (d *Normal) ICDF(p float64) (float64, error) {
-	return QuantileNormal(p, d.Mean, d.Stdev), nil
+	return quantileNormal(p, d.Mean, d.Stdev), nil
 }
 func (d *Normal) Sample(r Rand) float64 { return d.s.sample(r, d.Mean, d.Stdev) }
 
@@ -210,10 +228,10 @@ func (d *LogNormal) PDF(value float64) float64 {
 	return jsmath.Exp(-0.5*z*z) / (d.Stdev * distSQRT2PI * value)
 }
 func (d *LogNormal) CDF(value float64) float64 {
-	return CumulativeNormal(jsmath.Log(value), d.Mean, d.Stdev)
+	return cumulativeNormal(jsmath.Log(value), d.Mean, d.Stdev)
 }
 func (d *LogNormal) ICDF(p float64) (float64, error) {
-	return jsmath.Exp(QuantileNormal(p, d.Mean, d.Stdev)), nil
+	return jsmath.Exp(quantileNormal(p, d.Mean, d.Stdev)), nil
 }
 func (d *LogNormal) Sample(r Rand) float64 {
 	return jsmath.Exp(d.Mean + float64(d.s.sample(r, 0, 1)*d.Stdev))
@@ -340,42 +358,85 @@ func (d *Mixture) Sample(r Rand) float64 {
 }
 
 // KernelDensity is a Gaussian kernel density estimate over sample points.
+// Its pdf and cdf cost a pass over the points each: every point is a step of
+// work charged to the call it was made for, which polls the call's context;
+// once that is over they answer NaN and Err reports why.
 type KernelDensity struct {
 	support   []jsval.Value
 	nums      []float64
 	Bandwidth float64
 	kernel    normalSampler
+	m         budget.Meter
+	err       error
 }
 
-// NewKernelDensity builds a KDE over raw values (coerced with arithmetic semantics).
-// A zero or NaN bandwidth is estimated with EstimateBandwidth.
-func NewKernelDensity(support []jsval.Value, bandwidth float64) *KernelDensity {
-	d := &KernelDensity{support: support, kernel: normalSampler{next: math.NaN()}}
+// NewKernelDensity builds a KDE over raw values (coerced with arithmetic
+// semantics) for the call ctx belongs to. A zero or NaN bandwidth is
+// estimated with EstimateBandwidth.
+func NewKernelDensity(ctx context.Context, support []jsval.Value, bandwidth float64) (*KernelDensity, error) {
+	d := &KernelDensity{support: support, kernel: normalSampler{next: math.NaN()}, m: budget.NewMeter(ctx)}
 	d.nums = make([]float64, len(support))
 	for i, v := range support {
+		if err := d.m.Work(1); err != nil {
+			return nil, err
+		}
 		d.nums[i] = jsval.ToNumber(v)
 	}
 	d.Bandwidth = bandwidth
 	if bandwidth == 0 || math.IsNaN(bandwidth) {
-		d.Bandwidth = EstimateBandwidth(support)
+		bw, err := EstimateBandwidth(ctx, support)
+		if err != nil {
+			return nil, err
+		}
+		d.Bandwidth = bw
 	}
-	return d
+	return d, nil
 }
 
 // Data returns the sample points (upstream's dist.data()).
 func (d *KernelDensity) Data() []jsval.Value { return d.support }
 
+// Err is the error that ended the call while the density was evaluated.
+func (d *KernelDensity) Err() error { return d.err }
+
+// kdeChunk is how many points a pass charges at a time.
+const kdeChunk = 1024
+
+// sum is the sum of k((x - s) / bandwidth) over the points, charged a
+// chunk at a time; ok is false once the call is over.
+func (d *KernelDensity) sum(x float64, cdf bool) (y float64, ok bool) {
+	if d.err != nil {
+		return 0, false
+	}
+	for lo := 0; lo < len(d.nums); lo += kdeChunk {
+		chunk := d.nums[lo:min(lo+kdeChunk, len(d.nums))]
+		if d.err = d.m.Work(int64(len(chunk))); d.err != nil {
+			return 0, false
+		}
+		if cdf {
+			for _, s := range chunk {
+				y += CumulativeNormal((x-s)/d.Bandwidth, 0, 1)
+			}
+		} else {
+			for _, s := range chunk {
+				y += DensityNormal((x-s)/d.Bandwidth, 0, 1)
+			}
+		}
+	}
+	return y, true
+}
+
 func (d *KernelDensity) PDF(x float64) float64 {
-	y := 0.0
-	for _, s := range d.nums {
-		y += DensityNormal((x-s)/d.Bandwidth, 0, 1)
+	y, ok := d.sum(x, false)
+	if !ok {
+		return math.NaN()
 	}
 	return y / d.Bandwidth / float64(len(d.nums))
 }
 func (d *KernelDensity) CDF(x float64) float64 {
-	y := 0.0
-	for _, s := range d.nums {
-		y += CumulativeNormal((x-s)/d.Bandwidth, 0, 1)
+	y, ok := d.sum(x, true)
+	if !ok {
+		return math.NaN()
 	}
 	return y / float64(len(d.nums))
 }
@@ -392,11 +453,20 @@ func (d *KernelDensity) Sample(r Rand) float64 {
 // EstimateBandwidth is Scott's rule of thumb (1992, Multivariate Density
 // Estimation) as vega-statistics' estimateBandwidth computes it, over raw
 // values: 1.06 * min(stdev, IQR/1.34) * n^-0.2, falling back to the stdev, then
-// |q1|, then 1 when the preferred scale is zero or undefined.
-func EstimateBandwidth(values []jsval.Value) float64 {
+// |q1|, then 1 when the preferred scale is zero or undefined. Each value read
+// is a step of work charged to ctx's ledger, which polls ctx.
+func EstimateBandwidth(ctx context.Context, values []jsval.Value) (float64, error) {
 	n := len(values)
-	d := bandwidthDeviation(values)
-	q := Quartiles(values, func(v jsval.Value) jsval.Value { return v })
+	d, err := bandwidthDeviation(ctx, values)
+	if err != nil {
+		return 0, err
+	}
+	qv, err := Quartiles(ctx, values, func(v jsval.Value) jsval.Value { return v })
+	if err != nil {
+		return 0, err
+	}
+	// arithmetic on undefined (no values) is NaN
+	q := [3]float64{jsval.ToNumber(qv[0]), jsval.ToNumber(qv[1]), jsval.ToNumber(qv[2])}
 	h := (q[2] - q[0]) / 1.34
 	v := math.Min(d, h)
 	if v == 0 || math.IsNaN(v) {
@@ -408,16 +478,20 @@ func EstimateBandwidth(values []jsval.Value) float64 {
 			}
 		}
 	}
-	return 1.06 * v * jsmath.Pow(float64(n), -0.2)
+	return 1.06 * v * jsmath.Pow(float64(n), -0.2), nil
 }
 
 // bandwidthDeviation is d3.deviation: the sample standard deviation of the
 // values that are not null and coerce to a number; NaN (upstream undefined)
 // when fewer than two, and 0 stays 0.
-func bandwidthDeviation(values []jsval.Value) float64 {
+func bandwidthDeviation(ctx context.Context, values []jsval.Value) (float64, error) {
+	m := budget.NewMeter(ctx)
 	count := 0
 	mean, sum := 0.0, 0.0
 	for _, raw := range values {
+		if err := m.Work(1); err != nil {
+			return 0, err
+		}
 		if raw.IsNullish() {
 			continue
 		}
@@ -431,13 +505,13 @@ func bandwidthDeviation(values []jsval.Value) float64 {
 		sum += float64(delta * (v - mean))
 	}
 	if count <= 1 {
-		return math.NaN()
+		return math.NaN(), nil
 	}
 	variance := sum / float64(count-1)
 	if variance == 0 {
-		return 0
+		return 0, nil
 	}
-	return math.Sqrt(variance)
+	return math.Sqrt(variance), nil
 }
 
 // SampleCurve adaptively samples f over extent: minSteps points on a uniform
@@ -445,7 +519,14 @@ func bandwidthDeviation(values []jsval.Value) float64 {
 // than half a degree, up to maxSteps (0 means 200, never below minSteps). When
 // minSteps equals maxSteps the grid is used as is. The number of steps is
 // bounded by MaxSteps.
-func SampleCurve(f func(float64) float64, extent [2]float64, minSteps, maxSteps float64) ([][2]float64, error) {
+//
+// The points are the caller's new rows: base rows made before them and these
+// are reserved as the curve grows (curveRows), since a reversed extent keeps
+// subdividing intervals no wider than its (negative) resolution and makes
+// more points than maxSteps. The points held while sampling are charged to
+// ctx's ledger, and each refinement is a step of its work. Past 8*MaxSteps
+// refinements, a curve no chart draws, it fails with ErrLimit.
+func SampleCurve(ctx context.Context, f func(float64) float64, extent [2]float64, minSteps, maxSteps float64, base int) ([][2]float64, error) {
 	if minSteps == 0 || math.IsNaN(minSteps) {
 		minSteps = 25
 	}
@@ -455,6 +536,11 @@ func SampleCurve(f func(float64) float64, extent [2]float64, minSteps, maxSteps 
 	maxSteps = math.Max(minSteps, maxSteps)
 	if maxSteps > MaxSteps {
 		return nil, limitErr("steps", maxSteps, MaxSteps)
+	}
+	rows := newCurveRows(ctx, base, maxSamples(minSteps, maxSteps))
+	defer rows.release()
+	if err := rows.start(); err != nil {
+		return nil, err
 	}
 	point := func(x float64) [2]float64 { return [2]float64{x, f(x)} }
 	minX, maxX := extent[0], extent[1]
@@ -480,10 +566,14 @@ func SampleCurve(f func(float64) float64, extent [2]float64, minSteps, maxSteps 
 	p0 := prev[0]
 	sx := 1 / span
 	sy := curveScaleY(p0[1], next)
-	budget := 8 * MaxSteps
+	m := budget.NewMeter(ctx)
+	left := 8 * MaxSteps
 	for len(next) > 0 {
-		if budget--; budget < 0 {
+		if left--; left < 0 {
 			return nil, limitErr("curve samples", 8*MaxSteps+1, 8*MaxSteps)
+		}
+		if err := m.Work(1); err != nil {
+			return nil, err
 		}
 		p1 := next[len(next)-1]
 		// midpoint for potential curve subdivision
@@ -499,9 +589,54 @@ func SampleCurve(f func(float64) float64, extent [2]float64, minSteps, maxSteps 
 			prev = append(prev, p1)
 			next = next[:len(next)-1]
 		}
+		if err := rows.hold(len(prev), len(next)); err != nil {
+			return nil, err
+		}
 	}
 	return prev, nil
 }
+
+// curveRows reserves the rows an adaptive curve makes as it grows, after a
+// first reservation of what a forward extent makes at most, and charges the
+// points it holds while sampling (its two lists) to the ledger, given back
+// when it is over.
+type curveRows struct {
+	ctx       context.Context
+	led       *budget.Ledger
+	base      int // the caller's rows before this curve
+	reserved  int // points reserved as rows
+	held      int // points charged to the ledger
+	heldBytes int64
+}
+
+const curvePointBytes = 16
+
+func newCurveRows(ctx context.Context, base, first int) curveRows {
+	return curveRows{ctx: ctx, led: budget.LedgerFrom(ctx), base: base, reserved: first}
+}
+
+func (r *curveRows) start() error { return reserveRows(r.ctx, r.base+r.reserved) }
+
+// hold is called with the lengths of the two lists after each step.
+func (r *curveRows) hold(prev, next int) error {
+	if prev > r.reserved {
+		r.reserved = max(prev, 2*r.reserved)
+		if err := reserveRows(r.ctx, r.base+r.reserved); err != nil {
+			return err
+		}
+	}
+	if n := prev + next; n > r.held {
+		grow := max(n, 2*r.held) - r.held
+		if err := r.led.Alloc(int64(grow) * curvePointBytes); err != nil {
+			return err
+		}
+		r.held += grow
+		r.heldBytes += int64(grow) * curvePointBytes
+	}
+	return nil
+}
+
+func (r *curveRows) release() { r.led.Free(r.heldBytes) }
 
 // minRadians is 0.5 degrees, the subdivision accuracy.
 const minRadians = 0.5 * math.Pi / 180

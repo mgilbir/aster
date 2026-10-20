@@ -147,7 +147,7 @@ func TestLimitMessagesNameTheNumber(t *testing.T) {
 	check("bin", err, "maxbins 1e+300 exceeds")
 	_, err = Quantile(ctx, nil, QuantileParams{Field: FieldOf("x"), Step: 1e-300})
 	check("quantile", err, "quantile probabilities 9.9999999999999e+299 exceeds")
-	_, err = SampleCurve(func(float64) float64 { return 0 }, [2]float64{0, 1}, 1e300, 1e300)
+	_, err = SampleCurve(ctx, func(float64) float64 { return 0 }, [2]float64{0, 1}, 1e300, 1e300, 0)
 	check("density steps", err, "steps 1e+300 exceeds")
 }
 
@@ -161,5 +161,35 @@ func TestCountPatternReservesRows(t *testing.T) {
 	data := []jsval.Value{obj("t", jsval.Str(sb.String()))}
 	if _, err := CountPattern(budgetCtx(1000), data, CountPatternParams{Field: FieldOf("t")}); !errors.Is(err, ErrLimit) {
 		t.Fatalf("5,000 distinct tokens under 1,000 rows: %v", err)
+	}
+}
+
+// TestReversedCurveReservesAsItGrows: a curve over a reversed extent keeps
+// subdividing (its resolution is negative), so it makes more points than
+// maxsteps (node: 244 for a normal pdf over [10, -10] at 25/40 steps). The
+// points are rows, reserved as the curve grows: under a budget of 100 rows
+// the sampling stops at the first reservation past it, long before the
+// curve is drawn, and fails with ErrLimit; with room it is drawn whole.
+func TestReversedCurveReservesAsItGrows(t *testing.T) {
+	calls := 0
+	pdf := func(x float64) float64 { calls++; return DensityNormal(x, 0, 1) }
+	pts, err := SampleCurve(budgetCtx(1000), pdf, [2]float64{10, -10}, 25, 40, 0)
+	if err != nil || len(pts) != 244 {
+		t.Fatalf("whole curve: %d points, %v; want 244 (node)", len(pts), err)
+	}
+	full := calls
+	calls = 0
+	_, err = SampleCurve(budgetCtx(100), pdf, [2]float64{10, -10}, 25, 40, 0)
+	if !errors.Is(err, ErrLimit) {
+		t.Fatalf("under 100 rows: %v, want ErrLimit", err)
+	}
+	if calls*2 > full {
+		t.Errorf("under 100 rows the curve was sampled %d times of %d: not reserved as it grew", calls, full)
+	}
+	// regression's curve, the same way
+	calls = 0
+	quad := func(x float64) float64 { calls++; return math.Sin(3 * x) }
+	if _, err := sampleCurveJS(budgetCtx(30), quad, jsval.Num(9), jsval.Num(-9), StepsSpec{Min: jsval.Num(25), Max: jsval.Num(200)}, 0); !errors.Is(err, ErrLimit) {
+		t.Fatalf("regression under 30 rows: %v, want ErrLimit", err)
 	}
 }

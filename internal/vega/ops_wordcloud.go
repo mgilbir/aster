@@ -12,8 +12,14 @@ func init() {
 		if v.wcText == nil {
 			fail("the wordcloud transform needs a canvas and is not supported")
 		}
+		// cloud.text(_.text) makes a function of anything (d3's functor): an
+		// absent text is undefined for every word, a null one null
+		text := wordcloud.Accessor(p.field("text").Apply)
+		if _, given := p.vals.lookup("text"); given && p.field("text").IsNil() {
+			text = wordcloud.Const(jsval.Null)
+		}
 		wp := wordcloud.Params{
-			Text:     wordcloud.Accessor(p.field("text").Apply),
+			Text:     text,
 			Spiral:   wordcloud.Spiral(p.str("spiral")),
 			Random:   v.randSource(),
 			Renderer: v.wcText,
@@ -51,14 +57,11 @@ func init() {
 		wp.Rotate, _ = acc("rotate", jsval.Num(0))
 		wp.Padding, _ = acc("padding", jsval.Num(1))
 		wp.FontSize, wp.FontSizeIsField = acc("fontSize", jsval.Num(14))
-		switch x := p.Get("fontSizeRange").(type) {
-		case nil:
-			wp.FontSizeRange = wordcloud.DefaultFontSizeRange
-		case jsval.Value:
-			if !x.IsNullish() {
-				wp.FontSizeRange = p.nums("fontSizeRange")
-			}
-		default:
+		// `range = _.fontSizeRange; if (range) ...`: no range unless one is
+		// given. The definition's [10, 50] is documentation; vega-parser
+		// applies no default, so an absent range leaves the sizes as the
+		// field gives them.
+		if p.truthy("fontSizeRange") {
 			wp.FontSizeRange = p.nums("fontSizeRange")
 		}
 		return in, wordcloud.Transform(n.g.ctx, in, wp)

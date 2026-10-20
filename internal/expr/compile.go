@@ -274,11 +274,21 @@ func (c *compiler) require(n string) {
 	c.reqList = append(c.reqList, n)
 }
 
+// addIndex records an indata() index. The list is in the order of each
+// index's last use: upstream's indataVisitor assigns params['@' + field] at
+// every call (its hasOwnProperty guard has its arguments swapped, so it
+// never holds), and the last data set to index a field wins the parameter.
 func (c *compiler) addIndex(d IndexDep) {
-	if _, ok := c.indexes[d]; !ok {
-		c.indexes[d] = struct{}{}
-		c.idxList = append(c.idxList, d)
+	if _, ok := c.indexes[d]; ok {
+		for i, x := range c.idxList {
+			if x == d {
+				c.idxList = append(c.idxList[:i], c.idxList[i+1:]...)
+				break
+			}
+		}
 	}
+	c.indexes[d] = struct{}{}
+	c.idxList = append(c.idxList, d)
 }
 
 func (c *compiler) addScale(n string) {
@@ -426,7 +436,7 @@ func (c *compiler) array(n *Node) (node, error) {
 // object inherits (constructor, toString, __proto__, ...). Upstream keeps its
 // signals, scales and data in plain objects, so a lookup by such a name finds
 // the inherited property instead of nothing.
-func IsObjectPrototypeName(name string) bool { return objectProtoMembers[name] }
+func IsObjectPrototypeName(name string) bool { return objectProtoMember(name) }
 
 func (c *compiler) object(n *Node) (node, error) {
 	type prop struct {
@@ -763,27 +773,31 @@ func (c *compiler) member(n *Node) (node, error) {
 
 // hasProperty is the `in` operator: an own property, or a member the value's
 // prototype chain gives it (Object.prototype's for every object, and
-// Array.prototype's, RegExp.prototype's or Date.prototype's for those).
+// Array.prototype's, RegExp.prototype's, Date.prototype's or a d3 colour
+// class's for those).
 func (s *Scope) hasProperty(o, k jsval.Value) bool {
 	if !isObjectLike(o) {
 		typeError("Cannot use 'in' operator to search for '%s' in %s", s.str(k), s.str(o))
 	}
 	key := s.str(k)
-	if objectProtoMembers[key] {
-		return true
-	}
 	switch o.Kind() {
 	case jsval.KindObj:
-		return o.ObjValue().Has(key)
-	case jsval.KindArr:
-		if i, ok := arrayIndex(key); ok {
-			return i < o.Len()
+		if o.ObjValue().Has(key) {
+			return true
 		}
-		return arrayProtoMembers[key]
+		if t := colourOf(o); t != nil {
+			return t.proto.Has(key)
+		}
+		return objectProtoMember(key)
+	case jsval.KindArr:
+		if i, ok := arrayIndex(key); ok && i < o.Len() {
+			return true
+		}
+		return jsval.ArrayProto.Has(key)
 	case jsval.KindPattern:
-		return key == "lastIndex" || regexpProtoMembers[key]
+		return key == "lastIndex" || jsval.RegExpProto.Has(key)
 	case jsval.KindTimestamp:
-		return dateProtoMembers[key]
+		return jsval.DateProto.Has(key)
 	}
 	return false
 }
@@ -803,11 +817,16 @@ func arrayIndex(key string) (int, bool) {
 	return n, true
 }
 
-// getProp reads obj[key] for a string key.
+// getProp reads obj[key] for a string key: an own property, else the member
+// the value's prototype chain gives it (C156).
 func (s *Scope) getProp(obj jsval.Value, key string) jsval.Value {
 	switch obj.Kind() {
 	case jsval.KindObj:
-		return obj.ObjValue().Prop(key)
+		o := obj.ObjValue()
+		if v, ok := o.Get(key); ok {
+			return v
+		}
+		return inheritedProp(o, key)
 	case jsval.KindArr:
 		if key == "length" {
 			return jsval.Int(obj.Len())
@@ -815,6 +834,7 @@ func (s *Scope) getProp(obj jsval.Value, key string) jsval.Value {
 		if i, ok := arrayIndex(key); ok {
 			return obj.Index(i)
 		}
+		return jsval.Member(obj, key) // a method of Array.prototype (or Object.prototype): a function
 	case jsval.KindStr:
 		str := obj.StrValue()
 		if key == "length" {
@@ -824,12 +844,35 @@ func (s *Scope) getProp(obj jsval.Value, key string) jsval.Value {
 		if i, ok := arrayIndex(key); ok {
 			return s.charAt(str, i)
 		}
+		return jsval.Member(obj, key)
+	case jsval.KindNum, jsval.KindBool:
+		return jsval.Member(obj, key)
 	case jsval.KindPattern:
-		return patternProp(obj.PatternOf(), key)
+		if v := patternProp(obj.PatternOf(), key); !v.IsUndefined() {
+			return v
+		}
+		return jsval.Member(obj, key)
+	case jsval.KindTimestamp:
+		return jsval.Member(obj, key)
 	case jsval.KindUndefined, jsval.KindNull:
 		typeError("Cannot read properties of %s (reading '%s')", obj.AsString(), key)
 	}
 	return jsval.Undefined
+}
+
+// inheritedProp is the member key an object without such an own property
+// inherits: from its d3 colour class for a colour; for a function or an
+// object with a prototype of its own, what Prop answers (a function's length,
+// name and methods); else from Object.prototype.
+func inheritedProp(o *jsval.Object, key string) jsval.Value {
+	if t, ok := o.Host().(*colourTag); ok {
+		return t.proto.Get(key)
+	}
+	if o.Host() != nil {
+		return o.Prop(key)
+	}
+	v, _ := jsval.Inherited(key)
+	return v
 }
 
 // getIndex reads obj[k] for a computed key.
@@ -877,6 +920,10 @@ func patternProp(p *jsval.Pattern, key string) jsval.Value {
 		return jsval.Bool(strings.Contains(p.Flags, "y"))
 	case "dotAll":
 		return jsval.Bool(strings.Contains(p.Flags, "s"))
+	case "hasIndices":
+		return jsval.Bool(strings.Contains(p.Flags, "d"))
+	case "unicodeSets":
+		return jsval.Bool(strings.Contains(p.Flags, "v"))
 	case "lastIndex":
 		return jsval.Int(p.Re.LastIndex())
 	}
@@ -896,8 +943,7 @@ func (h *slotHint) get(o *jsval.Object, key string) jsval.Value {
 	}
 	v, ok := o.Get(key)
 	if !ok {
-		v, _ = jsval.Inherited(key)
-		return v
+		return inheritedProp(o, key)
 	}
 	for i, k := range o.Keys() {
 		if k == key {
@@ -939,7 +985,7 @@ func (c *compiler) concatChain(n *Node) (node, error) {
 			}
 			ops[i] = operand{v0: v0, v1: v1, f: func(s *Scope) jsval.Value {
 				x, spec := v0(s), v1(s)
-				out, err := s.locale().FormatValue(x, spec)
+				out, err := s.locale().FormatValue(s.walker(), x, spec)
 				if err != nil {
 					failFormat(err)
 				}
@@ -973,7 +1019,7 @@ func (c *compiler) concatChain(n *Node) (node, error) {
 				x, spec := op.v0(s), op.v1(s)
 				start := len(buf)
 				var err error
-				if buf, err = s.locale().AppendFormatValue(buf, x, spec); err != nil {
+				if buf, err = s.locale().AppendFormatValue(s.walker(), buf, x, spec); err != nil {
 					failFormat(err)
 				}
 				c.appended(s, buf, start)

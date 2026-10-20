@@ -1,6 +1,7 @@
 package transforms
 
 import (
+	"context"
 	"testing"
 
 	"github.com/mgilbir/aster/internal/format"
@@ -14,7 +15,7 @@ func TestAscendingGolden(t *testing.T) {
 	for i, u := range values {
 		for j, v := range values {
 			want := int(table[i].Index(j).NumValue())
-			if got := Ascending(u, v); got != want {
+			if got := Ascending(jsval.Walker{}, u, v); got != want {
 				t.Errorf("Ascending(%v, %v) = %d, want %d", u, v, got, want)
 			}
 		}
@@ -25,7 +26,7 @@ func TestCompareByGolden(t *testing.T) {
 	b := readGoldenFile(t, "compare.json")
 	rows := decodeDialect(b.Get("rows")).Items()
 	for k, spec := range b.Get("compares").Items() {
-		cmp := CompareBy(fieldList(spec.Get("fields")), strList(spec.Get("orders")))
+		cmp := CompareBy(jsval.Walker{}, fieldList(spec.Get("fields")), strList(spec.Get("orders")))
 		res := spec.Get("result")
 		for i, x := range rows {
 			for j, y := range rows {
@@ -40,18 +41,18 @@ func TestCompareByGolden(t *testing.T) {
 }
 
 func TestCompareByNoFields(t *testing.T) {
-	if CompareBy(nil, nil) != nil || CompareBy([]Field{{}}, nil) != nil {
+	if CompareBy(jsval.Walker{}, nil, nil) != nil || CompareBy(jsval.Walker{}, []Field{{}}, nil) != nil {
 		t.Fatal("no fields must give a nil comparator")
 	}
 }
 
 func TestExtentIgnoresInvalid(t *testing.T) {
 	vals := []jsval.Value{jsval.Null, jsval.Num(3), jsval.Num(2), jsval.Str("x"), jsval.Undefined, jsval.Num(9)}
-	lo, hi := ExtentIndex(len(vals), func(i int) jsval.Value { return vals[i] })
+	lo, hi := ExtentIndex(jsval.Walker{}, len(vals), func(i int) jsval.Value { return vals[i] })
 	if lo != 2 || hi != 5 {
 		t.Errorf("ExtentIndex = %d,%d", lo, hi)
 	}
-	if lo, hi := ExtentIndex(2, func(int) jsval.Value { return jsval.Null }); lo != -1 || hi != -1 {
+	if lo, hi := ExtentIndex(jsval.Walker{}, 2, func(int) jsval.Value { return jsval.Null }); lo != -1 || hi != -1 {
 		t.Error("all-null extent index must be -1,-1")
 	}
 }
@@ -95,10 +96,10 @@ func TestMeasureName(t *testing.T) {
 
 func TestKeyOf(t *testing.T) {
 	row := jsval.Obj(jsval.ObjectOf("a", jsval.Num(1), "b", jsval.Null, "c", jsval.Str("z")))
-	if k := KeyOfPaths(format.Zone{}, "a", "b", "c", "d")(row); k != "1|null|z|undefined" {
+	if k := KeyOfPaths(NewKeys(format.Zone{}, jsval.Walker{}), "a", "b", "c", "d")(row); k != "1|null|z|undefined" {
 		t.Errorf("key = %q", k)
 	}
-	if KeyOfPaths(format.Zone{})(row) != "" {
+	if KeyOfPaths(NewKeys(format.Zone{}, jsval.Walker{}))(row) != "" {
 		t.Error("empty key")
 	}
 }
@@ -116,8 +117,8 @@ func TestQuantilesAndLCG(t *testing.T) {
 	for _, f := range []float64{5, 1, 3, 2, 4} {
 		data = append(data, jsval.Obj(jsval.ObjectOf("v", jsval.Num(f))))
 	}
-	q := Quartiles(data, FieldOf("v").Get)
-	if q != [3]float64{2, 3, 4} {
+	q, err := Quartiles(context.Background(), data, FieldOf("v").Get)
+	if err != nil || q[0].NumValue() != 2 || q[1].NumValue() != 3 || q[2].NumValue() != 4 {
 		t.Errorf("Quartiles = %v", q)
 	}
 }

@@ -39,8 +39,11 @@ type BinResult struct {
 	Start, Stop, Step float64
 }
 
-// maxStepSearch bounds the `while too many bins, step *= base` search, which
-// does not terminate for a base of 1 or a zero step.
+// maxStepSearch bounds the `while too many bins, step *= base` search. With
+// a base above 1 and a step above 0 the search ends after a few rounds (the
+// first step is within a factor base² of span/maxbins), so the bound is a
+// backstop no input upstream finishes reaches; with a base below 1 or a
+// step of 0 it never ends upstream, and is refused at once.
 const maxStepSearch = 4096
 
 // binJSRound is Math.round: halves round toward +Infinity.
@@ -66,12 +69,10 @@ func Bin(c BinConfig) (BinResult, error) {
 	if base == 0 || math.IsNaN(base) {
 		base = 10
 	}
-	if base <= 1 || math.IsInf(base, 1) {
-		// Upstream computes a NaN step here (log(1) is 0) and bins everything
-		// into NaN, or, for a base below one, shrinks the step forever while
-		// searching. Neither is a chart; refuse it.
-		return BinResult{}, fmt.Errorf("bin: base must be greater than 1, got %g", base)
-	}
+	// Any base is binned with as upstream bins with it: a base of 1, or
+	// one below 0, gives a NaN step (every value bins to NaN), Infinity a
+	// step of 1, and a base between 0 and 1 a step found as for any other
+	// unless its search for fewer bins would never end (ADR 0011).
 	logb := jsmath.Log(base)
 	div := c.Divide
 	if div == nil {
@@ -110,8 +111,10 @@ func Bin(c BinConfig) (BinResult, error) {
 		minstep := c.MinStep
 		step = math.Max(minstep, jsmath.Pow(base, binJSRound(jsmath.Log(span)/logb)-level))
 		for n := 0; math.Ceil(span/step) > maxb; n++ {
-			if n > maxStepSearch || base <= 1 || step == 0 {
-				return BinResult{}, fmt.Errorf("bin: no step size satisfies maxbins %g with base %g", maxb, base)
+			// step *= base never lowers the bin count for a base of 1 or
+			// less, nor from a step of 0: upstream loops forever.
+			if n > maxStepSearch || !(base > 1) || step == 0 {
+				return BinResult{}, errBinSearch(maxb, base)
 			}
 			step *= base
 		}
@@ -145,6 +148,13 @@ func Bin(c BinConfig) (BinResult, error) {
 	return BinResult{Start: lo, Stop: stop, Step: step}, nil
 }
 
+// errBinSearch is the step search upstream never ends: step *= base never
+// lowers the bin count for a base of 1 or less, nor from a step of 0.
+func errBinSearch(maxb, base float64) error {
+	return fmt.Errorf("bin: %w: no step size gives at most %s bins with base %s: the search for one does not end",
+		ErrLimit, jsval.JSNumberString(maxb), jsval.JSNumberString(base))
+}
+
 // binEpsilon offsets floating point error in bin assignment (vega#1737).
 const binEpsilon = 1e-14
 
@@ -154,6 +164,10 @@ type BinParams struct {
 	// Config carries extent (required), maxbins, base, divide, span, step,
 	// steps, minstep and nice.
 	Config BinConfig
+	// Spec, when not nil, replaces Config and Anchor: the parameters as the
+	// specification gave them, computed with as JavaScript does (BinJS).
+	Spec        *BinSpec
+	AnchorValue *jsval.Value
 	// NoInterval writes only the lower bound, not the upper one.
 	NoInterval bool
 	// Anchor shifts the bin boundaries so that one falls on it; nil for none.
@@ -162,19 +176,82 @@ type BinParams struct {
 	Name string
 	// As are the output fields; empty strings mean "bin0" and "bin1".
 	As [2]string
+	// AsExact reports that As are the names as the runtime resolved them
+	// (`_.as || defaults`, then each entry's text): an empty one is the
+	// empty name, not the default.
+	AsExact bool
 }
 
 // Binner maps values to the lower bound of their bin. Start, Stop and Step
-// are the runtime's `bins` signal.
+// are the runtime's `bins` signal, as numbers; StartV, StopV and StepV are
+// them as upstream holds them, which are other values (strings) only when
+// the specification's own are kept (see BinJS), and then the bins are
+// computed with JavaScript's operators. Those values live behind a pointer,
+// nil for the numeric Binner of every real chart, so that one costs what it
+// did before them.
 type Binner struct {
 	Start, Stop, Step float64
+	js                *binValues
+	asExact           bool // BinParams.AsExact
 	// Name is the accessor name ("bin_x" unless overridden).
 	Name  string
 	field Field
 }
 
+// binValues is a Binner's boundaries as values, and the walker its
+// JavaScript operators use.
+type binValues struct {
+	start, stop, step jsval.Value
+	w                 jsval.Walker
+}
+
+// StartV is the bins' start as upstream holds it.
+func (b *Binner) StartV() jsval.Value {
+	if b.js != nil {
+		return b.js.start
+	}
+	return jsval.Num(b.Start)
+}
+
+// StopV is the bins' stop as upstream holds it.
+func (b *Binner) StopV() jsval.Value {
+	if b.js != nil {
+		return b.js.stop
+	}
+	return jsval.Num(b.Stop)
+}
+
+// StepV is the bins' step as upstream holds it.
+func (b *Binner) StepV() jsval.Value {
+	if b.js != nil {
+		return b.js.step
+	}
+	return jsval.Num(b.Step)
+}
+
 // NewBinner resolves the bin boundaries for p.
-func NewBinner(p BinParams) (*Binner, error) {
+func NewBinner(ctx context.Context, p BinParams) (*Binner, error) {
+	return newBinner(jsval.WalkerFor(ctx), p)
+}
+
+func newBinner(w jsval.Walker, p BinParams) (*Binner, error) {
+	name := p.Name
+	if name == "" {
+		name = "bin_" + p.Field.Key()
+	}
+	if p.Spec != nil {
+		start, stop, step, err := BinJS(w, *p.Spec)
+		if err != nil {
+			return nil, err
+		}
+		start, stop = binBounds(w, start, stop, step, p.AnchorValue)
+		b := &Binner{Name: name, field: p.Field}
+		b.Start, b.Stop, b.Step = num(start), num(stop), num(step)
+		if !(start.IsNum() && stop.IsNum() && step.IsNum()) {
+			b.js = &binValues{start: start, stop: stop, step: step, w: w}
+		}
+		return b, nil
+	}
 	bins, err := Bin(p.Config)
 	if err != nil {
 		return nil, err
@@ -187,10 +264,6 @@ func NewBinner(p BinParams) (*Binner, error) {
 		d := a - (start + float64(step*math.Floor((a-start)/step)))
 		start += d
 		stop += d
-	}
-	name := p.Name
-	if name == "" {
-		name = "bin_" + p.Field.Key()
 	}
 	return &Binner{Start: start, Stop: stop, Step: step, Name: name, field: p.Field}, nil
 }
@@ -216,37 +289,61 @@ func (b *Binner) Value(t jsval.Value) jsval.Value {
 	if x.IsNullish() || (x.IsStr() && x.StrValue() == "") {
 		return jsval.Null
 	}
-	return jsval.Num(b.Of(jsval.ToNumber(x)))
+	if b.js == nil {
+		return jsval.Num(b.Of(jsval.ToNumber(x)))
+	}
+	// v < start ? -Infinity : v > stop ? +Infinity : (v = Math.max(start,
+	// Math.min(v, stop - step)), start + step * Math.floor(EPSILON + (v -
+	// start) / step))
+	v := jsval.Num(jsval.ToNumber(x))
+	switch {
+	case Less(b.js.w, v, b.js.start):
+		return jsval.Num(math.Inf(-1))
+	case Greater(b.js.w, v, b.js.stop):
+		return jsval.Num(math.Inf(1))
+	}
+	f := math.Max(b.Start, math.Min(v.NumValue(), b.Stop-b.Step))
+	return jsAdd(b.js.w, b.js.start, jsval.Num(b.Step*math.Floor(binEpsilon+(f-b.Start)/b.Step)))
+}
+
+// upper is `start + step * (1 + (v - start) / step)`, the bin's upper bound.
+func (b *Binner) upper(v jsval.Value) jsval.Value {
+	if b.js == nil && v.IsNum() {
+		f := v.NumValue()
+		return jsval.Num(b.Start + float64(b.Step*(1+(f-b.Start)/b.Step)))
+	}
+	if b.js == nil {
+		return jsval.Num(b.Start + float64(b.Step*(1+(num(v)-b.Start)/b.Step)))
+	}
+	return jsAdd(b.js.w, b.js.start, jsval.Num(b.Step*(1+(num(v)-b.Start)/b.Step)))
 }
 
 // BinTuples assigns each tuple its bin bounds (fields As[0], As[1], default bin0 and
 // bin1) in place and returns the Binner.
 func BinTuples(ctx context.Context, data []jsval.Value, p BinParams) (*Binner, error) {
-	b, err := NewBinner(p)
+	b, err := newBinner(jsval.WalkerFor(ctx), p)
 	if err != nil {
 		return nil, err
 	}
+	b.asExact = p.AsExact
 	return b, b.Apply(ctx, data, p.NoInterval, p.As)
 }
 
 // Apply writes bin bounds into the tuples.
 func (b *Binner) Apply(ctx context.Context, data []jsval.Value, noInterval bool, as [2]string) error {
 	b0, b1 := as[0], as[1]
-	if b0 == "" {
+	if b0 == "" && !b.asExact {
 		b0 = "bin0"
 	}
-	if b1 == "" {
+	if b1 == "" && !b.asExact {
 		b1 = "bin1"
 	}
 	for i, t := range data {
 		if err := poll(ctx, i); err != nil {
 			return err
 		}
-		o := t.ObjValue()
-		if o == nil {
-			continue
-		}
 		v := b.Value(t)
+		o := jsval.FieldsFor(t, b0)
 		o.Set(b0, v)
 		if noInterval {
 			continue
@@ -257,8 +354,7 @@ func (b *Binner) Apply(ctx context.Context, data []jsval.Value, noInterval bool,
 		}
 		// The convoluted form agrees better with upstream in floating point
 		// (vega#830); infinite values propagate through it (vega#2227).
-		f := v.NumValue()
-		o.Set(b1, jsval.Num(b.Start+float64(b.Step*(1+(f-b.Start)/b.Step))))
+		o.Set(b1, b.upper(v))
 	}
 	return nil
 }

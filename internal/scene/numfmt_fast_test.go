@@ -5,6 +5,8 @@ import (
 	"math/rand"
 	"strconv"
 	"testing"
+
+	"github.com/mgilbir/aster/internal/jsmath"
 )
 
 // The scaled-integer fast path of StringPath.num must print what the generic
@@ -27,7 +29,7 @@ func TestStringPathFastNumbersMatchGeneric(t *testing.T) {
 			default:
 				f = (rng.Float64() - 0.5) * 1e13
 			}
-			want := string(AppendNumber(nil, jsRound(float64(f*k))/k))
+			want := string(AppendNumber(nil, jsmath.Round(float64(f*k))/k))
 			p.Reset()
 			p.num(f)
 			if got := string(p.Bytes()); got != want {

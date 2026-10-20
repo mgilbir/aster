@@ -1,7 +1,9 @@
 package geo
 
 import (
+	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/mgilbir/aster/internal/jsval"
 )
@@ -15,12 +17,17 @@ func setErr(typ, prop string, v jsval.Value) error {
 	return fmt.Errorf("geo: cannot set projection %s of %q to %s: cannot read properties of %s", prop, typ, v.String(), v.Kind())
 }
 
-// elem reads v[i] where upstream would throw if v is null or undefined.
+// elem reads v[i] where upstream would throw if v is null or undefined: an
+// array's element, a string's character, an object's member (d3's setters
+// index whatever value they are given).
 func elem(v jsval.Value, i int) (jsval.Value, bool) {
-	if v.IsNullish() {
+	switch {
+	case v.IsNullish():
 		return jsval.Undefined, false
+	case v.IsArr():
+		return v.Index(i), true
 	}
-	return v.Index(i), true
+	return jsval.Member(v, strconv.Itoa(i)), true
 }
 
 func pairOf(v jsval.Value) (a, b float64, ok bool) {
@@ -48,17 +55,18 @@ func extentOf(v jsval.Value) (ext [4]float64, ok bool) {
 	return [4]float64{jsval.ToNumber(a), jsval.ToNumber(b), jsval.ToNumber(c), jsval.ToNumber(d)}, true
 }
 
+// anglesOf is what d3's rotate reads: `_[0]`, `_[1]`, and `_[2]` when
+// `_.length > 2` (a string's characters, an object's members too).
 func anglesOf(v jsval.Value) ([]float64, bool) {
 	if v.IsNullish() {
 		return nil, false
 	}
-	items := v.Items()
-	out := make([]float64, 0, 3)
-	for i := 0; i < len(items) && i < 3; i++ {
-		out = append(out, jsval.ToNumber(items[i]))
-	}
-	for len(out) < 2 {
-		out = append(out, nan)
+	a, _ := elem(v, 0)
+	b, _ := elem(v, 1)
+	out := []float64{jsval.ToNumber(a), jsval.ToNumber(b)}
+	if jsval.ToNumber(jsval.Member(v, "length")) > 2 {
+		c, _ := elem(v, 2)
+		out = append(out, jsval.ToNumber(c))
 	}
 	return out, true
 }
@@ -95,6 +103,18 @@ func (p *standard) Set(prop string, v jsval.Value) error {
 		a, ok := anglesOf(v)
 		if !ok {
 			return setErr(p.typ, prop, v)
+		}
+		if p.transverse && len(a) > 2 {
+			// _[2] + 90: an entry that is no number concatenates its text
+			c, _ := elem(v, 2)
+			switch c.Kind() {
+			case jsval.KindStr, jsval.KindArr, jsval.KindObj, jsval.KindTimestamp, jsval.KindPattern:
+				a[2] = jsval.StringToNumber(jsval.WalkerFor(context.Background()).String(c) + "90")
+			default:
+				a[2] = jsval.ToNumber(c) + 90
+			}
+			p.setRotate(a, true)
+			return nil
 		}
 		p.SetRotate(a)
 	case "parallels":

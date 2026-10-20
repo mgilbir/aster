@@ -49,9 +49,9 @@ func colorPaint(c Color, alpha float64) Paint {
 func parsePaint(s string) (Paint, bool) {
 	s = strings.TrimSpace(s)
 	switch {
-	case strings.EqualFold(s, "none"):
+	case csscolor.ASCIIEqualFold(s, "none"):
 		return Paint{None: true}, true
-	case strings.EqualFold(s, "currentColor"):
+	case csscolor.ASCIIEqualFold(s, "currentColor"):
 		return Paint{Current: true}, true
 	case strings.HasPrefix(s, "url("):
 		end := strings.IndexByte(s, ')')

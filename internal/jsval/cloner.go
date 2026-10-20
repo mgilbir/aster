@@ -65,6 +65,11 @@ func (c *Cloner) Clone(o *Object) *Object {
 		x, kb, vb = &s.Object, s.kbuf[:0], s.vbuf[:0]
 	}
 	x.keys, x.vals = append(kb, o.keys...), append(vb, o.vals...)
-	x.str, x.host, x.tid = o.str, o.host, o.tid
+	x.str, x.host, x.tid, x.nidx = o.str, o.host, o.tid, o.nidx
+	if x.host != nil {
+		if h, ok := x.host.(CopyHook); ok {
+			x.host = h.Copied(x)
+		}
+	}
 	return x
 }

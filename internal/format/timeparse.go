@@ -5,14 +5,20 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/mgilbir/aster/internal/jsval"
 )
 
 // parseOp is one step of a compiled parse: a literal byte to match, or a
-// directive.
+// directive. A %c, %x or %X parses the locale's pattern (TimeLocale.pat);
+// dirBad is a directive d3 has no parser for, which fails the parse when it
+// is reached.
 type parseOp struct {
 	dir byte // directive letter, or 0 for a literal byte
 	lit byte
 }
+
+const dirBad = 1
 
 // TimeParser is a compiled d3 time parse function (timeParse or utcParse).
 type TimeParser struct {
@@ -20,19 +26,19 @@ type TimeParser struct {
 	zone Zone
 	spec string
 	ops  []parseOp
-	bad  bool // the specifier holds a directive d3 cannot parse: every parse fails
 }
 
 // Parse is d3.timeParse(specifier) in the given zone (UTC for utcParse).
 func (l *TimeLocale) Parse(specifier string, z Zone) *TimeParser {
-	p := &TimeParser{loc: l, zone: z, spec: specifier}
-	p.ops, p.bad = l.compileParse(nil, specifier, 0, new(int))
-	return p
+	return &TimeParser{loc: l, zone: z, spec: specifier, ops: compileParse(nil, specifier)}
 }
 
 const parseDirectives = "aAbBcdefgGHIjLmMpqQsSuUVwWxXyYZ%"
 
-func (l *TimeLocale) compileParse(ops []parseOp, spec string, depth int, work *int) ([]parseOp, bool) {
+// compileParse translates a specifier into ops, as d3's parseSpecifier reads
+// it: a padding modifier is skipped, and a "%" with no directive after it
+// looks up parses[""] (none).
+func compileParse(ops []parseOp, spec string) []parseOp {
 	for i := 0; i < len(spec); {
 		c := spec[i]
 		i++
@@ -41,41 +47,33 @@ func (l *TimeLocale) compileParse(ops []parseOp, spec string, depth int, work *i
 			continue
 		}
 		if i >= len(spec) { // "%" at the end: parses[""] is missing
-			return ops, true
+			return append(ops, parseOp{dir: dirBad})
 		}
 		c = spec[i]
 		i++
 		if c == '-' || c == '_' || c == '0' { // padding modifiers are ignored
 			if i >= len(spec) {
-				return ops, true
+				return append(ops, parseOp{dir: dirBad})
 			}
 			c = spec[i]
 			i++
 		}
 		if strings.IndexByte(parseDirectives, c) < 0 {
-			return ops, true
+			ops = append(ops, parseOp{dir: dirBad})
+			continue
 		}
-		switch c {
-		case 'c', 'x', 'X':
-			if *work++; depth >= maxLocaleNesting || *work > maxLocaleExpansions {
-				return ops, true
-			}
-			sub := l.def.DateTime
-			if c == 'x' {
-				sub = l.def.Date
-			} else if c == 'X' {
-				sub = l.def.Time
-			}
-			var bad bool
-			if ops, bad = l.compileParse(ops, sub, depth+1, work); bad {
-				return ops, true
-			}
-		default:
-			ops = append(ops, parseOp{dir: c})
-		}
+		ops = append(ops, parseOp{dir: c})
 	}
-	return ops, false
+	return ops
 }
+
+// maxParseNesting bounds how deep a parse recurses into the locale's
+// patterns. A pattern that refers to itself recurses once per character it
+// matches (dateTime "a%c" parsing "aaa…"), as d3 does until V8's stack
+// overflows, at about 3,900 levels for node 24; here the RangeError comes
+// at this depth. Patterns that do not refer to themselves nest at most
+// three deep.
+const maxParseNesting = 1024
 
 // String is the specifier text.
 func (p *TimeParser) String() string { return p.spec }
@@ -96,6 +94,7 @@ const (
 )
 
 type parseState struct {
+	thrown              *jsval.Thrown // the exception that ended the parse
 	flags               uint
 	y, m, d, H, M, S, L float64
 	p, q, Q, s, Z       float64
@@ -105,16 +104,31 @@ type parseState struct {
 // Parse parses s. ok is false where d3 returns null (the string does not
 // match). The result may still be NaN (an Invalid Date), for example for a
 // month number that is out of range in an unusual combination.
+//
+// It panics with the *jsval.Thrown d3 throws for a %c, %x or %X whose locale
+// pattern it reaches and cannot parse; ParseErr returns it instead.
 func (p *TimeParser) Parse(s string) (t float64, ok bool) {
-	if p.bad {
-		return math.NaN(), false
+	t, ok, err := p.ParseErr(s)
+	if err != nil {
+		panic(err)
 	}
+	return t, ok
+}
+
+// ParseErr is Parse, with the exception d3 throws returned (a
+// *jsval.Thrown): a %c, %x or %X reached whose locale pattern is missing or
+// not a string, or that refers to itself past maxParseNesting.
+func (p *TimeParser) ParseErr(s string) (t float64, ok bool, err error) {
 	st := parseState{y: 1900, d: 1}
-	i := p.loc.run(&st, p.ops, s, 0)
-	if i != len(s) {
-		return math.NaN(), false
+	i := p.loc.run(&st, p.ops, s, 0, 0)
+	if st.thrown != nil {
+		return math.NaN(), false, st.thrown
 	}
-	return p.build(&st)
+	if i != len(s) {
+		return math.NaN(), false, nil
+	}
+	t, ok = p.build(&st)
+	return t, ok, nil
 }
 
 func (p *TimeParser) build(d *parseState) (float64, bool) {
@@ -211,16 +225,39 @@ func (p *TimeParser) build(d *parseState) (float64, bool) {
 }
 
 // run matches ops against s from index j and returns the new index, or -1.
-func (l *TimeLocale) run(d *parseState, ops []parseOp, s string, j int) int {
+// A %c, %x or %X parses the locale's pattern from j, as d3's
+// parseLocaleDateTime calls parseSpecifier, depth levels in.
+func (l *TimeLocale) run(d *parseState, ops []parseOp, s string, j, depth int) int {
 	for _, op := range ops {
 		if j >= len(s) {
 			return -1
 		}
-		if op.dir == 0 {
+		switch op.dir {
+		case 0:
 			if s[j] != op.lit {
 				return -1
 			}
 			j++
+			continue
+		case dirBad:
+			return -1
+		case 'c', 'x', 'X':
+			k := patternIndex(op.dir)
+			switch p := &l.pat[k]; p.kind {
+			case PatternEmpty, PatternNoLength:
+				continue // `i < n` is false at once: nothing is matched
+			case PatternThrows:
+				d.thrown = &jsval.Thrown{Name: "TypeError", Msg: "the time locale's " + patternNames[k] + " is not a string"}
+				return -1
+			default:
+				if depth >= maxParseNesting {
+					d.thrown = errStackOverflow()
+					return -1
+				}
+				if j = l.run(d, p.parse, s, j, depth+1); j < 0 {
+					return -1
+				}
+			}
 			continue
 		}
 		if j = l.parseDirective(d, op.dir, s, j); j < 0 {
@@ -239,7 +276,7 @@ func number(s string, i, width int) (v float64, next int, ok bool) {
 	k, units := i, 0
 	for k < len(s) && (width <= 0 || units < width) {
 		r, w := utf8.DecodeRuneInString(s[k:])
-		if !isJSSpaceRune(r) { // every JavaScript space is one UTF-16 unit
+		if !jsval.IsJSSpace(r) { // every JavaScript space is one UTF-16 unit
 			break
 		}
 		k += w
@@ -260,7 +297,7 @@ func number(s string, i, width int) (v float64, next int, ok bool) {
 		}
 		return float64(n), k, true
 	}
-	f, _ := strconv.ParseFloat(s[start:k], 64)
+	f, _ := jsval.ParseDecimal(s[start:k])
 	return f, k, true
 }
 
@@ -398,8 +435,8 @@ func matchName(d *parseState, names []string, lookup map[string]int, s string, i
 		if cnt < n {
 			continue
 		}
-		if strings.EqualFold(rest[:end], name) {
-			if idx, ok := lookup[strings.ToLower(rest[:end])]; ok {
+		if jsval.RegExpFoldEqual(rest[:end], name) {
+			if idx, ok := lookup[jsval.JSLower(rest[:end])]; ok {
 				*dst = float64(idx)
 			} else {
 				*dst = math.NaN()

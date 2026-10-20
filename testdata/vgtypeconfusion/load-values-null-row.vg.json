@@ -1,0 +1,2 @@
+{"width":200,"height":100,"signals":[{"name":"v","value":[null,{"a":1}]}],"data":[{"name":"t","values":{"signal":"v"}}],
+"marks":[{"type":"text","from":{"data":"t"},"encode":{"enter":{"text":{"signal":"''+datum.a"}}}}]}

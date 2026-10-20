@@ -80,7 +80,7 @@ func LabelValues(ctx context.Context, s Scale, count TickCount) (Labels, error) 
 
 // thresholdFormat is vega-scale's thresholdFormat: a number format sized to the
 // smallest gap between a quantile/quantize scale's break points.
-func thresholdFormat(loc *format.Locale, s Scale, specifier jsval.Value) (Format, error) {
+func thresholdFormat(w jsval.Walker, loc *format.Locale, s Scale, specifier jsval.Value) (Format, error) {
 	var vals []float64
 	switch x := s.(type) {
 	case *Quantile:
@@ -102,7 +102,7 @@ func thresholdFormat(loc *format.Locale, s Scale, specifier jsval.Value) (Format
 		d = math.Min(d, vals[i]-vals[i-1])
 	}
 	// tickCount = 3 ticks times 10 for increased resolution
-	f, err := loc.FormatSpan(0, d, 3*10, spanSpecifier(specifier))
+	f, err := loc.FormatSpan(0, d, 3*10, spanSpecifier(w, specifier))
 	if err != nil {
 		return nil, err
 	}
@@ -122,7 +122,7 @@ func LabelFormat(ctx context.Context, loc *format.Locale, s Scale, count TickCou
 	var f Format
 	var err error
 	if (s.Type() == TypeQuantile || s.Type() == TypeQuantize) && formatType != TypeTime && formatType != TypeUTC {
-		f, err = thresholdFormat(loc, s, specifier)
+		f, err = thresholdFormat(jsval.WalkerFor(ctx), loc, s, specifier)
 	} else {
 		f, err = TickFormat(ctx, loc, s, count, specifier, formatType, noSkip)
 	}
@@ -132,7 +132,7 @@ func LabelFormat(ctx context.Context, loc *format.Locale, s Scale, count TickCou
 	isRange := hasSymbols(s.Type()) || binsOf(s) != nil
 	switch {
 	case legendType == SymbolLegend && isRange:
-		return formatRange(f), nil
+		return formatRange(jsval.WalkerFor(ctx), f), nil
 	case legendType == DiscreteLegend:
 		return func(v jsval.Value, i int, _ Labels) jsval.Value {
 			if i == 0 {
@@ -151,7 +151,7 @@ func LabelFormat(ctx context.Context, loc *format.Locale, s Scale, count TickCou
 //
 // where lo and hi are null for a value that is not a finite number, so a bin
 // with neither reads "≥ null".
-func formatRange(f Format) LabelFormatter {
+func formatRange(w jsval.Walker, f Format) LabelFormatter {
 	return func(value jsval.Value, index int, labels Labels) jsval.Value {
 		var limit jsval.Value
 		switch {
@@ -165,11 +165,11 @@ func formatRange(f Format) LabelFormatter {
 		lo, hi := formatFinite(value, f), formatFinite(limit, f)
 		switch {
 		case lo.IsTruthy() && hi.IsTruthy():
-			return jsval.Str(lo.AsString() + " – " + hi.AsString())
+			return jsval.Str(w.String(lo) + " – " + w.String(hi))
 		case hi.IsTruthy():
-			return jsval.Str("< " + hi.AsString())
+			return jsval.Str("< " + w.String(hi))
 		}
-		return jsval.Str("≥ " + lo.AsString())
+		return jsval.Str("≥ " + w.String(lo))
 	}
 }
 
@@ -208,19 +208,25 @@ func LabelFraction(s Scale) func(value float64) float64 {
 // scale's domain in text. Abbreviated time specifiers are spelled out
 // (%a -> %A, %b -> %B) to read better for screen readers, and time scales with
 // no specifier get a full date-time format.
-func captionFormat(ctx context.Context, loc *format.Locale, s Scale, specifier jsval.Value, formatType string) (Format, error) {
+func captionFormat(ctx context.Context, loc *format.Locale, s Scale, specifier jsval.Value, formatType string, otherType bool) (Format, error) {
+	// type = formatType || scale.type; a formatType that is no string is
+	// the type, and names none (vega-scale's types are a Map: isTemporal
+	// finds no array or object; === matches none)
 	typ := formatType
 	if typ == "" {
 		typ = s.Type()
+	}
+	if otherType {
+		typ = ""
 	}
 	if specifier.IsStr() && IsTemporal(typ) {
 		specifier = jsval.Str(strings.ReplaceAll(strings.ReplaceAll(specifier.StrValue(), "%a", "%A"), "%b", "%B"))
 	}
 	switch {
 	case !specifier.IsTruthy() && typ == TypeTime:
-		return timeFormatOf(loc, jsval.Str("%A, %d %B %Y, %X"), false)
+		return timeFormatOf(jsval.WalkerFor(ctx), loc, jsval.Str("%A, %d %B %Y, %X"), false)
 	case !specifier.IsTruthy() && typ == TypeUTC:
-		return timeFormatOf(loc, jsval.Str("%A, %d %B %Y, %X UTC"), true)
+		return timeFormatOf(jsval.WalkerFor(ctx), loc, jsval.Str("%A, %d %B %Y, %X UTC"), true)
 	}
 	lf, err := LabelFormat(ctx, loc, s, Count(5), "", specifier, formatType, true)
 	if err != nil {
@@ -238,6 +244,10 @@ type CaptionOptions struct {
 	Format jsval.Value
 	// FormatType forces "time", "utc" or "number" formatting (optional).
 	FormatType string
+	// FormatTypeOther reports a truthy formatType that is not a string
+	// (["utc"]): it replaces the scale's type and names none (FormatType
+	// is then "").
+	FormatTypeOther bool
 }
 
 // DomainCaption is vega-scale's domainCaption: a one-sentence description of a
@@ -249,11 +259,12 @@ func DomainCaption(ctx context.Context, loc *format.Locale, s Scale, opt Caption
 		maxlen = opt.MaxLen
 	}
 	maxlen = math.Max(3, maxlen)
-	fmtv, err := captionFormat(ctx, loc, s, opt.Format, opt.FormatType)
+	fmtv, err := captionFormat(ctx, loc, s, opt.Format, opt.FormatType, opt.FormatTypeOther)
 	if err != nil {
 		return "", err
 	}
-	str := func(v jsval.Value) string { return fmtv(v).AsString() }
+	w := jsval.WalkerFor(ctx)
+	str := func(v jsval.Value) string { return w.String(fmtv(v)) }
 	join := func(vals []jsval.Value) string {
 		parts := make([]string, len(vals))
 		for i, v := range vals {
