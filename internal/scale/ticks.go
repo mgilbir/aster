@@ -15,6 +15,21 @@ var (
 	e2  = math.Sqrt(2)
 )
 
+// floorLog10 is math.Floor(Math.log10(x)) as V8 computes it. Only the integer
+// part is wanted, and it differs between implementations solely where log10 is
+// within rounding error of an integer, so the cheap math.Log10 settles every
+// step that is clearly between two powers of ten and the exact jsmath.Log10 is
+// kept for the rest (and for subnormal, zero, negative, infinite and NaN steps).
+func floorLog10(x float64) float64 {
+	if x >= 0x1p-1022 && x < math.MaxFloat64 {
+		l := math.Log10(x)
+		if f := l - math.Floor(l); f > 1e-9 && f < 1-1e-9 {
+			return math.Floor(l)
+		}
+	}
+	return math.Floor(jsmath.Log10(x))
+}
+
 // tickSpec is d3-array's tickSpec: the integer index range [i1, i2] of ticks
 // and the increment. A negative inc means the step is 1/-inc (used so that
 // fractional ticks are computed as i/inc, which is the more accurate way to
@@ -22,7 +37,7 @@ var (
 func tickSpec(start, stop, count float64) (i1, i2, inc float64) {
 	for {
 		step := (stop - start) / math.Max(0, count)
-		power := math.Floor(jsmath.Log10(step))
+		power := floorLog10(step)
 		err := step / pow10n(power)
 		factor := 1.0
 		switch {
