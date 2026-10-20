@@ -2,7 +2,7 @@
 // Run: NODE_PATH=<node_modules with d3-array> node gen_ticks.mjs | gzip -9 > ticks.json.gz
 import { createRequire } from 'node:module';
 import path from 'node:path';
-const require = createRequire(path.join(process.env.NODE_PATH, 'x.js'));
+const require = createRequire(path.resolve(process.env.NODE_PATH, 'x.js'));
 const d3 = await import(require.resolve('d3-array'));
 
 function mulberry32(a) {

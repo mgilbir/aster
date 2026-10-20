@@ -93,7 +93,20 @@ func TickCountFor(s Scale, count, minStep jsval.Value) (TickCount, error) {
 		default:
 			return TickCount{}, ErrIntervalString
 		}
-		iv, ok := format.IntervalFor(z, count.StrValue())
+		name := count.StrValue()
+		if _, inherited := jsval.Inherited(name); inherited || name == "__proto__" {
+			// vega-time's interval table is a plain object: the name of a
+			// member of Object.prototype finds that member, which is no
+			// interval. d3's ticks read it as a count of NaN (no ticks);
+			// count.every(step) is a TypeError.
+			if step.IsTruthy() {
+				return TickCount{}, errors.New("count.every is not a function")
+			}
+			c := Count(math.NaN())
+			c.Opaque = true
+			return c, nil
+		}
+		iv, ok := format.IntervalFor(z, name)
 		if !step.IsTruthy() {
 			if !ok {
 				// vega-time answers undefined for an unknown unit: the
@@ -124,6 +137,12 @@ func TickCountFor(s Scale, count, minStep jsval.Value) (TickCount, error) {
 		return Count(jsval.ToNumber(count)), nil
 	case count.IsNull():
 		return TickCount{Null: true}, nil // {interval: null}
+	case count.IsObj() || count.IsArr():
+		// an interval that is an object or an array reaches d3's ticks as
+		// the count, which reads it as a number: [5] is 5, {} is NaN
+		c := Count(jsval.ToNumber(count))
+		c.Opaque = true
+		return c, nil
 	}
 	return TickCount{}, nil
 }
@@ -431,7 +450,9 @@ func timeFormatOf(w jsval.Walker, loc *format.Locale, specifier jsval.Value, utc
 	if err != nil {
 		return nil, err
 	}
+	// The formatter takes the value as it is (a time multi-format compares
+	// it unclipped); a format makes `new Date(+date)` of it itself.
 	return func(v jsval.Value) jsval.Value {
-		return jsval.Str(f(dateNumber(v)))
+		return jsval.Str(f(jsval.ToNumber(v)))
 	}, nil
 }

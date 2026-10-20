@@ -96,10 +96,10 @@ func simpleExpr(enc Value) string {
 	if enc.IsNullish() {
 		return "null"
 	}
-	if s := enc.Get("signal"); s.IsTruthy() {
+	if s := member(enc, "signal"); s.IsTruthy() {
 		return s.AsString()
 	}
-	v := enc.Get("value")
+	v := member(enc, "value")
 	if v.IsUndefined() {
 		return "undefined"
 	}
@@ -154,11 +154,18 @@ func mult(sign Value, v float64) Value {
 }
 
 // patch completes an ifOrient chain whose tail is `(null)` with the signal of
-// base; anything else is returned unchanged.
+// base; anything else is returned unchanged. A signal that is not a string
+// has no endsWith: upstream's TypeError.
 func patch(v, base Value) Value {
-	s := v.Get("signal")
-	if s.IsStr() && strings.HasSuffix(s.StrValue(), "(null)") {
-		return objv("signal", s.StrValue()[:len(s.StrValue())-6]+base.Get("signal").AsString())
+	s := member(v, "signal")
+	if !s.IsTruthy() {
+		return v
+	}
+	if !s.IsStr() {
+		throw("s.endsWith is not a function")
+	}
+	if t := s.StrValue(); strings.HasSuffix(t, "(null)") {
+		return objv("signal", t[:len(t)-6]+member(base, "signal").AsString())
 	}
 	return v
 }

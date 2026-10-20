@@ -6,7 +6,6 @@ package aster
 // more of the same family: go test . -run TestTypeConfusion -args -sec.n=6000 -sec.seed=12
 
 import (
-	"strings"
 	"testing"
 )
 
@@ -31,7 +30,7 @@ func TestVegaLiteInvalidSpecsDoNotPanic(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := c.VegaLiteToVega([]byte(spec))
-			if err != nil && strings.Contains(err.Error(), "internal error") {
+			if isEngineBug(err) {
 				t.Errorf("panic inside the compiler: %v", err)
 			}
 		})

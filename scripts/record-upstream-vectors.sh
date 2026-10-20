@@ -12,7 +12,14 @@
 # ASTER_ORACLE=require, as in CI.
 #
 # The recording is skipped when the vectors in the output directory were made from the same lockfile,
-# recorder and script (a fingerprint is kept beside them); RECORD_FORCE=1 records again.
+# recorder and script, by the same node version on the same architecture (a fingerprint is kept beside
+# them); RECORD_FORCE=1 records again. The fingerprint is written only when every package was recorded:
+# a package skipped (not installed, or its tag not cloned) fails the run, so the next run records again
+# rather than calling a partial recording up to date.
+#
+# node must be the version testdata/oracle-node/package.json pins (volta.node): another V8 answers some
+# Math functions differently in the last bit, and vectors recorded under it would fail the replays under
+# the pinned node. Another version is refused unless ASTER_ORACLE_ANY_NODE=1.
 #
 # Usage: scripts/record-upstream-vectors.sh
 set -euo pipefail
@@ -23,7 +30,20 @@ NODE_DIR="$ROOT/testdata/oracle-node"
 OUT="$ROOT/testdata/upstream-vectors-cache"
 CLONES="$ROOT/testdata/upstream-clones"
 
-fingerprint="$(cat "$NODE_DIR/package-lock.json" "$NODE_DIR/record-upstream-tests.mjs" "$NODE_DIR/record-upstream-hooks.mjs" "$ROOT/scripts/record-upstream-vectors.sh" | shasum -a 256 | cut -d' ' -f1)"
+pin="$(sed -n '/"volta"/,/}/s/.*"node": *"\([^"]*\)".*/\1/p' "$NODE_DIR/package.json")"
+have="$(node -p 'process.versions.node')"
+arch="$(node -p 'process.arch')"
+if [ -z "$pin" ]; then
+  echo "error: $NODE_DIR/package.json pins no node version (volta.node)" >&2
+  exit 1
+fi
+if [ "$have" != "$pin" ] && [ "${ASTER_ORACLE_ANY_NODE:-}" != 1 ]; then
+  echo "error: node $have is not the pinned node $pin (volta.node in $NODE_DIR/package.json): another V8 records" >&2
+  echo "       different last bits; put node $pin first on PATH, or set ASTER_ORACLE_ANY_NODE=1 to record anyway" >&2
+  exit 1
+fi
+
+fingerprint="$( { cat "$NODE_DIR/package-lock.json" "$NODE_DIR/record-upstream-tests.mjs" "$NODE_DIR/record-upstream-hooks.mjs" "$ROOT/scripts/record-upstream-vectors.sh"; echo "node $have $arch"; } | shasum -a 256 | cut -d' ' -f1)"
 if [ -z "${RECORD_FORCE:-}" ] && [ -f "$OUT/.fingerprint" ] && [ "$(cat "$OUT/.fingerprint")" = "$fingerprint" ]; then
   echo "==> upstream vectors are up to date ($OUT)"
   exit 0
@@ -33,8 +53,10 @@ if [ ! -d "$NODE_DIR/node_modules" ]; then
   (cd "$NODE_DIR" && npm ci --silent)
 fi
 mkdir -p "$OUT" "$CLONES"
-# One recording per run: a stale file for a package that now records nothing must not survive.
-rm -f "$OUT"/*.json
+# One recording per run: a stale file for a package that now records nothing must not survive, and the
+# old fingerprint must not vouch for a recording this run leaves unfinished.
+rm -f "$OUT/.fingerprint" "$OUT"/*.json
+skipped=""
 
 VERSION="$(node -p "require('$NODE_DIR/node_modules/vega/package.json').version")"
 echo "==> Vega $VERSION (from the installed package)"
@@ -82,11 +104,13 @@ for package in "${D3_PACKAGES[@]}"; do
   version="$(node -p "require('$NODE_DIR/node_modules/$package/package.json').version" 2>/dev/null || true)"
   if [ -z "$version" ]; then
     echo "    $package is not installed; skipping"
+    skipped="$skipped $package"
     continue
   fi
   clone="$CLONES/$package"
   if ! clone_tag "$clone" "https://github.com/d3/$package.git" "v$version"; then
-    echo "    $package: no tag v$version upstream; skipping"
+    echo "    $package: no tag v$version upstream (or the clone failed); skipping"
+    skipped="$skipped $package"
     continue
   fi
   zone="$(node -p "((require('$clone/package.json').scripts||{}).test||'').match(/TZ=([\w\/]+)/)?.[1] || '$VEGA_ZONE'")"
@@ -101,5 +125,9 @@ for file in "$OUT"/*.json; do
     echo "    removed $(basename "$file") (recorded nothing)"
   fi
 done
-echo "$fingerprint" > "$OUT/.fingerprint"
 echo "==> recorded: $(ls "$OUT"/*.json | wc -l | tr -d ' ') packages in $OUT"
+if [ -n "$skipped" ]; then
+  echo "error: not recorded:$skipped; the vectors are incomplete, and the next run records again" >&2
+  exit 1
+fi
+echo "$fingerprint" > "$OUT/.fingerprint"

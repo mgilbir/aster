@@ -23,12 +23,15 @@ var itemPropNames = []string{
 }
 
 // setItemProp assigns an encoded property and reports whether the stored value
-// changed (upstream's `o[name] !== value`). Names the item type does not model
-// are kept in Extra by Item.Set, so later reads (`item.name`) still see them.
+// changed: the generated encoder's `if (o[name] !== $) o[name] = $, m = 1`, a
+// strict comparison, so an array or object an encoder builds anew is a change
+// however equal its contents, and NaN always is (jsval.SameRef). Names the
+// item type does not model are kept in Extra by Item.Set, so later reads
+// (`item.name`) still see them.
 func setItemProp(it *scene.Item, name string, v jsval.Value) bool {
 	old := it.Get(name)
 	assignItemProp(it, name, v)
-	return !it.Walker().Equal(old, it.Get(name))
+	return !jsval.SameRef(old, it.Get(name))
 }
 
 // setItemPropWith is setItemProp for a property whose Setter is at hand.
@@ -37,7 +40,7 @@ func setItemPropWith(it *scene.Item, name string, set scene.Setter, v jsval.Valu
 	if err := set(it, v); err != nil {
 		failErr(err)
 	}
-	return !it.Walker().Equal(old, it.Get(name))
+	return !jsval.SameRef(old, it.Get(name))
 }
 
 // assignItemProp is setItemProp for a caller that does not ask whether the

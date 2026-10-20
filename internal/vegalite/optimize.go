@@ -205,7 +205,7 @@ func moveParseUpFn() func(root dfNode) bool {
 						o.setModified()
 						np.merge(pc)
 					} else {
-						if fieldIntersection(node.base().cc, node.producedFields(), child.dependentFields()) {
+						if fieldIntersectsParse(node.base().cc, node.producedFields(), pc) {
 							continue
 						}
 						o.setModified()
@@ -269,34 +269,60 @@ func mergeBinsFn(m Model) func(root dfNode) bool {
 	}
 }
 
+// removeDuplicateTimeUnitsFn is upstream's RemoveDuplicateTimeUnits, which
+// passes each child a new Set of the time-unit fields above it: one copy per
+// node of every field above, quadratic in a chain of time units (C9: audit
+// 2026-10-18). Here one count per field is shared by the whole walk: a
+// node's fields are counted before its children are walked and uncounted
+// after, so each child sees exactly the fields upstream's copy holds.
 func removeDuplicateTimeUnitsFn() func(root dfNode) bool {
 	o := &optimizerFlag{}
 	return func(root dfNode) bool {
 		cc := root.base().cc
-		var run func(node dfNode, fields *sset)
-		run = func(node dfNode, timeUnitFields *sset) {
+		// The time-unit fields above the node, counted; told apart as a Set
+		// tells its members apart (a transform's `as` of ["a"] is not "a").
+		above := map[jsval.InternKey]int{}
+		has := func(f Value) bool { return above[f.MapKey()] > 0 }
+		var run func(node dfNode)
+		run = func(node dfNode) {
 			cc.work(1)
-			produced := newSset()
+			var produced []Value
 			if tu, ok := node.(*timeUnitNode); ok {
-				produced = tu.producedFields()
-				if hasIntersection(produced, timeUnitFields) {
-					o.setModified()
-					tu.removeFormulas(timeUnitFields)
-					// upstream tests `node.producedFields.length === 0`, the arity of a
-					// method, which is always 0: the node is always removed here.
-					tu.remove()
-				}
-			}
-			for _, child := range append([]dfNode(nil), node.base().children()...) {
-				next := timeUnitFields.clone()
-				for _, f := range produced.values() {
+				produced = tu.producedFields().values()
+				for _, f := range produced {
 					cc.work(1)
-					next.addValue(f)
+					if has(f) {
+						o.setModified()
+						tu.removeFormulas(has)
+						// upstream tests `node.producedFields.length === 0`, the arity of a
+						// method, which is always 0: the node is always removed here.
+						tu.remove()
+						break
+					}
 				}
-				run(child, next)
 			}
+			children := append([]dfNode(nil), node.base().children()...)
+			if len(children) == 0 {
+				return
+			}
+			cc.alloc(int64(len(produced)) * prefixEntryBytes)
+			for _, f := range produced {
+				cc.work(1)
+				above[f.MapKey()]++
+			}
+			for _, child := range children {
+				run(child)
+			}
+			for _, f := range produced {
+				cc.work(1)
+				k := f.MapKey()
+				if above[k]--; above[k] == 0 {
+					delete(above, k)
+				}
+			}
+			cc.free(int64(len(produced)) * prefixEntryBytes)
 		}
-		run(root, newSset())
+		run(root)
 		return o.modified
 	}
 }
@@ -319,9 +345,10 @@ func mergeParseFn() func(root dfNode) bool {
 				conflicting := newSset()
 				for _, pn := range parseChildren {
 					cc.work(1)
-					for _, k := range pn.parse.Keys() {
+					parse := pn.parse()
+					for _, k := range parse.Keys() {
 						cc.work(1)
-						v := pn.parse.Lookup(k)
+						v := parse.Lookup(k)
 						if cv, ok := common.get(k); !ok {
 							common.set(k, v)
 						} else if !strictEq(cv, v) {
@@ -340,15 +367,14 @@ func mergeParseFn() func(root dfNode) bool {
 					for _, child := range original {
 						cc.work(1)
 						if pn, ok := child.(*parseNode); ok {
-							cc.work(int64(pn.parse.Len()))
-							pn.parse.DeleteFunc(func(k string, _ Value) bool {
+							pn.pm.deleteFunc(cc, func(k string) bool {
 								_, in := common.get(k)
 								return in
 							})
 						}
 						node.base().removeChild(child)
 						child.base().setParent(mergedParse)
-						if pn, ok := child.(*parseNode); ok && pn.parse.Len() == 0 {
+						if pn, ok := child.(*parseNode); ok && pn.pm.len() == 0 {
 							pn.remove()
 						}
 					}

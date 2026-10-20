@@ -23,10 +23,22 @@ type TimeUnitParams struct {
 	// array: `_.units ? ... : timeBin(...)` takes an empty list as given, and
 	// timeUnits then rejects it.
 	UnitsGiven bool
+	// UnitsStrict, when set, reports for each of Units whether it is the
+	// string itself: `unit === peek(units)` in vega-time's floor fails for
+	// a unit that is any other value naming one (["month"]), and then the
+	// step applies to no part.
+	UnitsStrict []bool
 	// Step is the multiple of the last unit to floor to; 0 means 1. It only
 	// applies together with Units.
-	Step    float64
-	MaxBins float64 // 0 means 40
+	Step float64
+	// StepRaw, with StepRawGiven, is the step as given: `_.step || 1` keeps a
+	// truthy value of any type (["x"], an object) whose number may be NaN or 0,
+	// and shows it as it is in the operator's value.
+	StepRaw      jsval.Value
+	StepRawGiven bool
+	MaxBins      float64 // 0 means 40
+	// MaxBinsExact: MaxBins is already `maxbins || 40` (see format.BinExact).
+	MaxBinsExact bool
 	// Extent optionally gives the [min, max] epoch milliseconds timeBin uses.
 	Extent *[2]float64
 	// InferUnits detects the coarsest units every date is aligned to, and
@@ -36,6 +48,10 @@ type TimeUnitParams struct {
 	Zone format.Zone
 	// As names the output fields; empty entries default to unit0 and unit1.
 	As [2]string
+	// AsExact reports that As are the names as the runtime resolved them
+	// (`_.as || defaults`, then each entry's text): an empty one is the
+	// empty name, not the default.
+	AsExact bool
 }
 
 // TimeUnitInfo describes the floor a TimeUnit run used.
@@ -43,6 +59,8 @@ type TimeUnitInfo struct {
 	Units []string // normalised, coarsest first
 	Unit  string   // the finest unit, the one Step applies to and offsets use
 	Step  float64
+	// StepValue, when set (not undefined), is the step as upstream holds it.
+	StepValue jsval.Value
 	// Start and Stop bound every output value (unit0 and unit1); they are
 	// +Inf and -Inf when no date was processed.
 	Start, Stop float64
@@ -56,6 +74,8 @@ func TimeUnit(ctx context.Context, data []jsval.Value, p TimeUnitParams) ([]jsva
 	var info TimeUnitInfo
 	var units []string
 	var step float64
+	var stepValue jsval.Value
+	stepExact := false
 	switch {
 	case p.InferUnits:
 		dates := make([]float64, len(data))
@@ -76,7 +96,14 @@ func TimeUnit(ctx context.Context, data []jsval.Value, p TimeUnitParams) ([]jsva
 		units, step = bin.Units, bin.Step
 	case p.UnitsGiven || len(p.Units) > 0:
 		units, step = p.Units, p.Step
-		if step == 0 || math.IsNaN(step) {
+		if p.StepRawGiven {
+			stepExact = true
+			if p.StepRaw.IsTruthy() {
+				stepValue, step = p.StepRaw, jsval.ToNumber(p.StepRaw)
+			} else {
+				stepValue, step = jsval.Num(1), 1
+			}
+		} else if step == 0 || math.IsNaN(step) {
 			step = 1
 		}
 	default:
@@ -95,7 +122,12 @@ func TimeUnit(ctx context.Context, data []jsval.Value, p TimeUnitParams) ([]jsva
 				}
 			}
 		}
-		bin := format.Bin(lo, hi, p.MaxBins)
+		var bin format.BinResult
+		if p.MaxBinsExact {
+			bin = format.BinExact(lo, hi, p.MaxBins)
+		} else {
+			bin = format.Bin(lo, hi, p.MaxBins)
+		}
 		units, step = bin.Units, bin.Step
 	}
 	tunits, err := format.NormalizeUnits(units)
@@ -104,13 +136,27 @@ func TimeUnit(ctx context.Context, data []jsval.Value, p TimeUnitParams) ([]jsva
 	}
 	unit := tunits[len(tunits)-1]
 	floor := format.NewFloor(p.Zone, tunits, step)
-	info = TimeUnitInfo{Units: tunits, Unit: unit, Step: step, Start: math.Inf(1), Stop: math.Inf(-1)}
+	if stepExact {
+		floorStep := step
+		if len(p.UnitsStrict) == len(p.Units) {
+			for i := len(p.Units) - 1; i >= 0; i-- {
+				if p.Units[i] == unit {
+					if !p.UnitsStrict[i] {
+						floorStep = 1 // `unit === b && s` is false
+					}
+					break
+				}
+			}
+		}
+		floor = format.NewFloorExact(p.Zone, tunits, floorStep)
+	}
+	info = TimeUnitInfo{Units: tunits, Unit: unit, Step: step, StepValue: stepValue, Start: math.Inf(1), Stop: math.Inf(-1)}
 
 	u0, u1 := p.As[0], p.As[1]
-	if u0 == "" {
+	if u0 == "" && !p.AsExact {
 		u0 = "unit0"
 	}
-	if u1 == "" {
+	if u1 == "" && !p.AsExact {
 		u1 = "unit1"
 	}
 	band := !p.NoInterval
@@ -118,11 +164,8 @@ func TimeUnit(ctx context.Context, data []jsval.Value, p TimeUnitParams) ([]jsva
 		if err := poll(ctx, i); err != nil {
 			return data, info, err
 		}
-		o := t.ObjValue()
-		if o == nil {
-			continue
-		}
 		v := p.Field.Apply(t)
+		o := jsval.FieldsFor(t, u0)
 		if v.IsNullish() {
 			o.Set(u0, jsval.Null)
 			if band {

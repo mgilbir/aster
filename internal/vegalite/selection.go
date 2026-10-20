@@ -509,11 +509,11 @@ func assembleInitExprOK(cc *compileCtx, init Value, wrap func(string) string) (s
 			cc.work(1)
 			parts[i] = assembleInitExpr(cc, v, wrap)
 		}
-		return "[" + strings.Join(parts, ", ") + "]", true
+		return "[" + joinCC(cc, parts, ", ") + "]", true
 	} else if isDateTime(init) {
 		return applyWrap(wrap, dateTimeToExpr(cc, init)), true
 	}
-	var b strings.Builder
+	b := newSbuf(cc)
 	if !stringifyTo(cc, &b, init) {
 		if wrap == nil {
 			return "", false
@@ -1228,7 +1228,7 @@ var pointCompiler = selectionCompiler{
 		brushes := pointBrushTests(m)
 		test := "datum && item().mark.marktype !== 'group' && indexof(item().mark.role, 'legend') < 0"
 		if len(brushes) > 0 {
-			test += " && " + strings.Join(brushes, " && ")
+			test += " && " + joinCC(cc, brushes, " && ")
 		}
 		update := "unit: " + unitName(m, true) + ", "
 		switch {
@@ -1248,7 +1248,7 @@ var pointCompiler = selectionCompiler{
 					vals = append(vals, datum+"["+stringValue(cc, p.fieldValue())+"]")
 				}
 			}
-			update += "fields: " + fieldsSg + ", values: [" + strings.Join(vals, ", ") + "]"
+			update += "fields: " + fieldsSg + ", values: [" + joinCC(cc, vals, ", ") + "]"
 		}
 		if isTimerSelection(sel.cc, sel) {
 			out := append(signals, animationSignals(sel.name, m.scaleName(chTime, false))...)
@@ -1391,7 +1391,7 @@ var intervalCompiler = selectionCompiler{
 						evs = append(evs, mkv("scale", m.scaleName(p.channel, false)))
 					}
 					signals = append(signals, mkv("name", triggerSg, "value", mkv(), "on", arr(mkv(
-						"events", jsval.Arr(evs), "update", strings.Join(scaleTriggers, " && ")+" ? "+triggerSg+" : {}"))))
+						"events", jsval.Arr(evs), "update", joinCC(m.ctx, scaleTriggers, " && ")+" ? "+triggerSg+" : {}"))))
 				}
 			}
 			var dataSignals []string
@@ -1405,8 +1405,8 @@ var intervalCompiler = selectionCompiler{
 			}
 			if len(dataSignals) > 0 {
 				o.Set("on", arr(mkv(
-					"events", arr(mkv("signal", strings.Join(dataSignals, " || "))),
-					"update", strings.Join(dataSignals, " && ")+" ? {"+update+": ["+strings.Join(dataSignals, ",")+"]} : null")))
+					"events", arr(mkv("signal", joinCC(m.ctx, dataSignals, " || "))),
+					"update", joinCC(m.ctx, dataSignals, " && ")+" ? {"+update+": ["+joinCC(m.ctx, dataSignals, ",")+"]} : null")))
 			}
 			return append(signals, jsval.Obj(o))
 		}
@@ -1475,7 +1475,7 @@ var intervalCompiler = selectionCompiler{
 		}
 		var evs []Value
 		if len(visualSignals) > 0 {
-			evs = append(evs, mkv("signal", strings.Join(visualSignals, " || ")))
+			evs = append(evs, mkv("signal", joinCC(m.ctx, visualSignals, " || ")))
 		}
 		if hasInit {
 			evs = append(evs, mkv("signal", geoInitTick))
@@ -1538,7 +1538,7 @@ var intervalCompiler = selectionCompiler{
 			}
 			// def[k] = [...]: a key "__proto__" sets def's prototype, which
 			// the spread into the update leaves behind.
-			jsAssign(cc.realm(), vgStroke, k, arr(mkv("test", strings.Join(tests, " && "), "value", stroke.Lookup(k)), mkv("value", jsval.Null)))
+			jsAssign(cc.realm(), vgStroke, k, arr(mkv("test", joinCC(cc, tests, " && "), "value", stroke.Lookup(k)), mkv("value", jsval.Null)))
 		}
 		var vgCursor Value
 		switch {
@@ -1726,7 +1726,7 @@ var inputsCompiler = selectionCompiler{
 			valid = append(valid, v+" !== null")
 		}
 		if len(values) > 0 && signal != nil {
-			signal.Set("update", jsval.Str(strings.Join(valid, " && ")+" ? {fields: "+fields+", values: ["+strings.Join(values, ", ")+"]} : null"))
+			signal.Set("update", jsval.Str(joinCC(cc, valid, " && ")+" ? {fields: "+fields+", values: ["+joinCC(cc, values, ", ")+"]} : null"))
 		}
 		if signal != nil {
 			signal.Delete("value")
@@ -1801,7 +1801,7 @@ var scalesCompiler = selectionCompiler{
 			for _, proj := range bound {
 				parts = append(parts, stringValue(sel.cc, jsval.Str(replacePathInField(proj.field)))+": "+proj.dataSignal)
 			}
-			namedSg.Set("update", jsval.Str("{"+strings.Join(parts, ", ")+"}"))
+			namedSg.Set("update", jsval.Str("{"+joinCC(sel.cc, parts, ", ")+"}"))
 		} else {
 			for _, proj := range bound {
 				mapping := stringValue(sel.cc, jsval.Str(replacePathInField(proj.field))) + ": " + proj.dataSignal
@@ -1953,7 +1953,7 @@ var legendsCompiler = selectionCompiler{
 			cc.work(1)
 			valid = append(valid, v+" !== null")
 		}
-		update := strings.Join(valid, " && ") + " ? {fields: " + fields + ", values: [" + strings.Join(values, ", ") + "]} : null"
+		update := joinCC(cc, valid, " && ") + " ? {fields: " + fields + ", values: [" + joinCC(cc, values, ", ") + "]} : null"
 		if sel.events().IsTruthy() && len(values) > 0 {
 			var evs []Value
 			for _, v := range values {
@@ -2214,7 +2214,7 @@ var zoomCompiler = selectionCompiler{
 			if sy != "" {
 				parts = append(parts, "y: invert("+sy+", y(unit))")
 			}
-			update = "{" + strings.Join(parts, ", ") + "}"
+			update = "{" + joinCC(cc, parts, ", ") + "}"
 		}
 		signals = append(signals,
 			mkv("name", name+zoomAnchor, "on", arr(mkv("events", jsval.Arr(events), "update", update))),

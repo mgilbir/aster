@@ -9,7 +9,7 @@ import "sort"
 func (m *Mark) Ordered() []*Item {
 	anyZ := false
 	for _, it := range m.Items {
-		if it.Zindex.Truthy() {
+		if it.truthyProp("zindex", it.Zindex) { // if (item.zindex): as given
 			anyZ = true
 			break
 		}
@@ -24,16 +24,17 @@ func (m *Mark) Ordered() []*Item {
 	}
 	var z []zItem
 	for i, it := range m.Items {
-		if it.Zindex.Truthy() {
+		if it.truthyProp("zindex", it.Zindex) {
 			z = append(z, zItem{it, i})
 		} else {
 			out = append(out, it)
 		}
 	}
 	sort.SliceStable(z, func(a, b int) bool {
-		za, zb := z[a].it.Zindex.Val(), z[b].it.Zindex.Val()
-		if za != zb {
-			return za < zb
+		// a.zindex - b.zindex || a.index - b.index: a NaN difference
+		// falls back to the order, as a zero one does.
+		if d := z[a].it.Zindex.Val() - z[b].it.Zindex.Val(); d != 0 && d == d {
+			return d < 0
 		}
 		return z[a].idx < z[b].idx
 	})

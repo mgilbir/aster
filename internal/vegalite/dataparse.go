@@ -196,7 +196,7 @@ func parseTransformArray(head dfNode, m Model, ap *ancestorParse) dfNode {
 			field := t.Get("field").AsString()
 			if ap.getWithExplicit(field).value.IsUndefined() {
 				head = newParseNode(head, mk(field, derivedType))
-				ap.set(field, jsval.Str(derivedType), false)
+				ap.set(cc, field, jsval.Str(derivedType), false)
 			}
 			n := makeTimeUnitFromTransform(cc, head, t)
 			head, transformNode = n, n
@@ -263,7 +263,7 @@ func parseTransformArray(head dfNode, m Model, ap *ancestorParse) dfNode {
 			// so "a" and ["a"] set the one key.
 			for _, field := range transformNode.producedFields().values() {
 				cc.work(1)
-				ap.set(propKey(field), jsval.Str(derivedType), false)
+				ap.set(cc, propKey(field), jsval.Str(derivedType), false)
 			}
 		}
 	}

@@ -1,0 +1,6 @@
+{"width": 60, "height": 40, "autosize": "pad", "marks": [
+ {"type": "group", "encode": {"enter": {"x": {"value": "5"}, "y": {"value": 3}, "width": {"value": 10}, "height": {"value": 10}}},
+  "marks": [{"type": "rect", "encode": {"enter": {"x": {"value": 0}, "y": {"value": "4"}, "width": {"value": "20"}, "height": {"value": 2}, "fill": {"value": "red"}}}}]},
+ {"type": "rule", "encode": {"enter": {"x": {"value": 1}, "y": {"value": 1}, "x2": {"value": [30]}, "stroke": {"value": "black"}}}},
+ {"type": "symbol", "encode": {"enter": {"x": {"value": "2"}, "y": {"value": 5}, "fill": {"value": "green"}}}}
+]}

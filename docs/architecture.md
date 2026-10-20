@@ -105,11 +105,11 @@ Each package imports only packages of lower layers, so there are no cycles and t
 4: vega/guides vegalite
 5: vega
 6: aster
-tools: cmd/enginebench cmd/recursionaudit fuzzutil fuzzutil/confusion oracle svgcheck svgdiff testutil upstream
+tools: cmd/enginebench cmd/recursionaudit cmd/testsummary cmd/vectors fuzzutil fuzzutil/confusion oracle svgcheck svgdiff testutil upstream vectors
 ```
 <!-- layers:end -->
 
-`tools` are not part of the engine: the commands and the test harness (`oracle` drives upstream in node, `svgcheck` checks the structure of the engine's SVG, `svgdiff` compares SVG, `upstream` replays upstream's test suites, `fuzzutil` serves the fuzz targets and `fuzzutil/confusion` the type-confusion differentials, `testutil` holds the race slowdown that keeps time-based tests independent of the machine). `internal/fonts/dejavu` is imported by tests only.
+`tools` are not part of the engine: the commands and the test harness (`oracle` drives upstream in node, `svgcheck` checks the structure of the engine's SVG, `svgdiff` compares SVG, `upstream` replays upstream's test suites, `fuzzutil` serves the fuzz targets and `fuzzutil/confusion` the type-confusion differentials, `testutil` holds the race slowdown that keeps time-based tests independent of the machine, and builds synthetic fonts for tests). `internal/fonts/dejavu` is imported by tests only.
 
 <!-- deps:begin (checked by TestDependencyStatement) -->
 Beyond the standard library, a program that imports aster builds these modules, and no others:

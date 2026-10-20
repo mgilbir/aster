@@ -141,7 +141,7 @@ func (r *renderer) drawColourGlyph(face *text.Face, gid int, size, x, y float64,
 	fm := p.pageForm(g.content, p.bbox())
 	r.w.setAlpha(alpha, alpha)
 	p.toForm()
-	r.w.drawXObject(fm)
+	r.w.paintXObject(fm, composite{alpha: alpha, strokeAlpha: alpha})
 	return nil
 }
 
@@ -211,7 +211,8 @@ func (p *pdfPainter) setOrigin() {
 func (r *renderer) drawGlyphImage(face *text.Face, gid int, fg shape.Color, alpha float64, ppem int) error {
 	var box shape.Rect
 	key := fmt.Sprintf("glyph:%p:%d:%d,%d,%d:%d", face, gid, fg.R, fg.G, fg.B, ppem)
-	img, err := r.images.put(key, func() (*image.NRGBA, error) {
+	// The image is about an em square at ppem.
+	img, err := r.images.put(key, 4*int64(ppem)*int64(ppem), func() (*image.NRGBA, error) {
 		px, b, err := raster.ColourGlyphImage(r.ctx, face, gid, fg, ppem, r.lim.MaxPixelOps)
 		box = b
 		return px, err
@@ -236,7 +237,7 @@ func (r *renderer) drawImageIn(img *pdfImage, box shape.Rect, alpha float64) {
 	r.w.save()
 	r.w.setAlpha(alpha, alpha)
 	r.w.concat(Matrix{A: box.XMax - box.XMin, D: box.YMax - box.YMin, E: box.XMin, F: box.YMin})
-	r.w.drawXObject(img.res(true))
+	r.w.paintXObject(img.res(true), composite{alpha: alpha, strokeAlpha: alpha})
 	r.w.restore()
 }
 
@@ -461,19 +462,20 @@ func (p *pdfPainter) paint(g, a *gradient) {
 	w := p.r.w
 	if a == nil {
 		w.setAlpha(1, 1)
-		w.shade(p.r.shadingOf(p.shared(g)))
+		w.paintShading(p.r.shadingOf(p.shared(g)), composite{alpha: 1, strokeAlpha: 1})
 		return
 	}
-	mask := p.pageForm([]byte("/"+p.r.shadingOf(p.shared(a))+" sh\n"), p.bbox())
+	mask := p.pageForm(formShading(nil, p.r.shadingOf(p.shared(a))), p.bbox())
 	// The mask is set in the glyph's page space, then the gradient painted
 	// back in the current one.
 	k := p.formMatrix()
 	w.save()
 	p.toForm()
-	w.stateGS("lum:"+mask, gsEntry{mask: mask, maskLuminosity: true})
+	key := "lum:" + mask
+	w.stateGS(key, gsEntry{mask: mask, maskLuminosity: true})
 	w.concat(k)
 	w.setAlpha(1, 1)
-	w.shade(p.r.shadingOf(p.shared(g)))
+	w.paintShading(p.r.shadingOf(p.shared(g)), composite{alpha: 1, strokeAlpha: 1, mask: key})
 	w.restore()
 }
 
@@ -765,11 +767,17 @@ func (p *pdfPainter) Image(img shape.Image) {
 		return
 	}
 	var key string
+	var need int64
 	var make func() (*image.NRGBA, error)
 	switch img.Format {
 	case shape.ImagePNG:
 		// The font's own bytes, which forme hands out without copying.
 		key = fmt.Sprintf("glyphpng:%p:%d", &img.Data[0], len(img.Data))
+		// What the decoder allocates (imageref.DecodeBytes, as the PNG
+		// writer charges it), and the NRGBA image made of it.
+		if cfg, format, err := imageref.Config(img.Data, p.r.lim.imageLimits()); err == nil {
+			need = imageref.DecodeBytes(img.Data, cfg, format) + 4*int64(cfg.Width)*int64(cfg.Height)
+		}
 		make = func() (*image.NRGBA, error) { return decodeNRGBA(p.r.ctx, img.Data, p.r.lim) }
 	case shape.ImageMask:
 		// Made for the call, so known by what it holds.
@@ -777,11 +785,12 @@ func (p *pdfPainter) Image(img shape.Image) {
 		h := fnv.New64a()
 		h.Write(img.Data)
 		key = fmt.Sprintf("glyphmask:%x:%dx%d:%d,%d,%d,%d", h.Sum64(), img.Width, img.Height, c.R, c.G, c.B, c.A)
+		need = 4 * int64(max(img.Width, 0)) * int64(max(img.Height, 0))
 		make = func() (*image.NRGBA, error) { return maskNRGBA(p.r.ctx, img) }
 	default:
 		return
 	}
-	pi, err := p.r.images.put(key, make)
+	pi, err := p.r.images.put(key, need, make)
 	if err != nil {
 		p.err = err
 		return
@@ -836,6 +845,7 @@ func maskNRGBA(ctx context.Context, img shape.Image) (*image.NRGBA, error) {
 // beginActualText starts marked content whose text, for search, selection and
 // copying, is s rather than what it draws.
 func (w *contentWriter) beginActualText(s string) {
+	w.actualText = true
 	w.buf = append(w.buf, "/Span <</ActualText <FEFF"...)
 	for _, u := range utf16.Encode([]rune(s)) {
 		w.buf = fmt.Appendf(w.buf, "%04X", u)

@@ -119,6 +119,23 @@ func pollFamilies() map[string]func() Value {
 			return mkv("data", mkv("values", arr(mkv("a", 1)), "format", mkv("parse", keys(20000, func(int) Value { return jsval.Str("number") }))),
 				"layer", list(4, func(int) Value { return mkv("mark", "point", "encoding", enc()) }))
 		},
+		// C3, C6, C9, C11, C26 (audit 2026-10-18): a quadratic expression
+		// written at once, a $` replacement, and the optimizer's chains.
+		"parse-dotted-key": func() Value {
+			parse := jsval.NewObject(1)
+			parse.Set(strings.TrimSuffix(strings.Repeat("a.", 2000), "."), jsval.Str("number"))
+			return mkv("data", mkv("values", arr(mkv("b", 1)), "format", mkv("parse", jsval.Obj(parse))), "mark", "point", "encoding", enc())
+		},
+		"labelexpr-backtick": func() Value {
+			return mkv("data", data(), "mark", "point", "encoding", mkv("x", mkv("field", "a", "type", "quantitative"),
+				"row", mkv("field", "b", "type", "quantitative", "header", mkv("format", "$`",
+					"labelExpr", strings.TrimSuffix(strings.Repeat("datum.label+", 1500), "+")))))
+		},
+		"filter-parse-chain": func() Value { return complexitySpecs()["filter-parse-chain"](4000) },
+		"timeunit-chain":     func() Value { return complexitySpecs()["timeunit-chain"](4000) },
+		"ap-layers":          func() Value { return complexitySpecs()["ap-layers"](2000) },
+		"layer-timeunits":    func() Value { return complexitySpecs()["layer-timeunits"](1000) },
+		"dotted-as":          func() Value { return complexitySpecs()["dotted-as"](20000) },
 		"domains": func() Value {
 			vals := func() Value { return list(200000, func(i int) Value { return jsval.Int(i) }) }
 			return mkv("data", data(), "mark", "point", "encoding", mkv(

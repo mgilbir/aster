@@ -39,7 +39,7 @@ func TestPathDigitsAndRadius(t *testing.T) {
 			} else {
 				path.SetDigits(int(*d.Digits))
 			}
-			s, ok := path.String(geoms[k])
+			s, ok := stringOf(path, geoms[k])
 			label := "digits/" + k
 			if d.Digits != nil {
 				label += "/" + jsval.JSNumberString(*d.Digits)
@@ -62,9 +62,9 @@ func TestPathDigitsAndRadius(t *testing.T) {
 				return 3
 			})
 		}
-		s, ok := path.String(geoms["point"])
+		s, ok := stringOf(path, geoms["point"])
 		checkPath(t, "radius point", s, ok, r.Point)
-		s, ok = path.String(geoms["multipoint"])
+		s, ok = stringOf(path, geoms["multipoint"])
 		checkPath(t, "radius multipoint", s, ok, r.Multipoint)
 	}
 }
@@ -123,7 +123,7 @@ func TestFit(t *testing.T) {
 				t.Errorf("%s: probe %v = [%v %v] want [%v %v]", label, pt, x, y, wx, wy)
 			}
 		}
-		s, ok := p.Path().String(obj)
+		s, ok := stringOf(p.Path(), obj)
 		checkPath(t, label, s, ok, c.Path)
 	}
 }

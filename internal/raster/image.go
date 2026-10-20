@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"image"
-	"image/color"
 	"math"
 	"strings"
 
@@ -91,12 +90,14 @@ func (lim Limits) imageLimits() imageref.Limits {
 // conversion is charged to MaxPixelOps; once either stops, the render has
 // failed (r.err) and the error is its.
 func (r *renderer) decodeImage(data []byte) (img *rasterImage, kept int64, err error) {
-	cfg, _, err := imageref.Config(data, r.lim.imageLimits())
+	cfg, format, err := imageref.Config(data, r.lim.imageLimits())
 	if err != nil {
 		return nil, 0, err
 	}
 	w, h := cfg.Width, cfg.Height
-	decoded := budget.Mul(budget.Mul(int64(w), int64(h)), decodedPixelBytes(cfg.ColorModel))
+	// What the decoder allocates, a progressive JPEG's coefficients and an
+	// interlaced PNG's passes included (C20).
+	decoded := imageref.DecodeBytes(data, cfg, format)
 	kept = imageBytes(w, h)
 	if err := r.ledger.Alloc(decoded + kept); err != nil {
 		return nil, 0, fmt.Errorf("raster: decoding a %dx%d image: %w", w, h, err)
@@ -123,27 +124,6 @@ func (r *renderer) decodeImage(data []byte) (img *rasterImage, kept int64, err e
 	}
 	r.ledger.Free(decoded)
 	return &rasterImage{w: b.Dx(), h: b.Dy(), pix: dst.Pix}, kept, nil
-}
-
-// decodedPixelBytes is what the standard decoders hold a pixel of an image
-// in colour model m in: a byte for a palette or grey, three for JPEG's
-// YCbCr (with its chroma planes), eight for 16-bit colour, four otherwise.
-func decodedPixelBytes(m color.Model) int64 {
-	switch m.(type) {
-	case color.Palette:
-		return 1
-	}
-	switch m {
-	case color.GrayModel:
-		return 1
-	case color.Gray16Model:
-		return 2
-	case color.YCbCrModel:
-		return 3
-	case color.RGBA64Model, color.NRGBA64Model:
-		return 8
-	}
-	return 4
 }
 
 // imageBytes is the premultiplied RGBA of a w x h image and of every

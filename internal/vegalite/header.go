@@ -303,7 +303,7 @@ func assembleLabelTitle(cc *compileCtx, fd Value, channel string, config Value) 
 		if !labelExpr.IsStr() {
 			throw("string.replace is not a function") // util.replaceAll(labelExpr, ...)
 		}
-		text = jsReplaceAll(jsReplaceAll(labelExpr.StrValue(), "datum.label", titleTextExpr), "datum.value", vgField(cc, fd, fieldRefOption{expr: "parent"}))
+		text = jsReplaceAll(cc, jsReplaceAll(cc, labelExpr.StrValue(), "datum.label", titleTextExpr), "datum.value", vgField(cc, fd, fieldRefOption{expr: "parent"}))
 	} else {
 		text = titleTextExpr
 	}

@@ -1,0 +1,1 @@
+{"width":100,"height":50,"scales":[{"name":"s","type":"linear","domain":[0,1],"range":[0,50]}],"marks":[{"type":"rect","encode":{"enter":{"x":{"value":3},"y":{"scale":{"datum":"data"},"value":1},"width":{"value":3},"height":{"value":3},"fill":{"value":"steelblue"}}}}]}

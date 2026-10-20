@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"strconv"
 
 	"github.com/mgilbir/aster/internal/budget"
 
@@ -25,9 +26,13 @@ func (g Geometry) ToValue() jsval.Value {
 		}
 		polys[i] = jsval.Arr(rings)
 	}
+	value := jsval.Num(g.Value)
+	if g.HasRaw {
+		value = g.Raw
+	}
 	return jsval.Obj(jsval.ObjectOf(
 		"type", jsval.Str("MultiPolygon"),
-		"value", jsval.Num(g.Value),
+		"value", value,
 		"coordinates", jsval.Arr(polys),
 	))
 }
@@ -77,14 +82,9 @@ func GridFromValue(ctx context.Context, v jsval.Value) (Grid, error) {
 	if !v.IsObj() {
 		return Grid{}, errors.New("contour: field is not a raster grid")
 	}
-	w, h := v.Get("width").AsDouble(), v.Get("height").AsDouble()
-	if math.IsNaN(w) {
-		w = 0
-	}
-	if math.IsNaN(h) {
-		h = 0
-	}
-	w, h = math.Floor(w), math.Floor(h)
+	// contour.size([grid.width, grid.height]): Math.floor of each, which
+	// must be at least 0 (an undefined one is NaN: 'invalid size').
+	w, h := math.Floor(jsval.ToNumber(v.Get("width"))), math.Floor(jsval.ToNumber(v.Get("height")))
 	if !(w >= 0 && h >= 0) {
 		return Grid{}, errInvalidSize
 	}
@@ -111,6 +111,12 @@ func GridFromValue(ctx context.Context, v jsval.Value) (Grid, error) {
 		}
 		return 0
 	}
+	if vv := v.Get("values"); vv.IsNullish() {
+		g.ValuesNullish = "undefined"
+		if vv.IsNull() {
+			g.ValuesNullish = "null"
+		}
+	}
 	g.Scale, g.X1, g.Y1, g.X2, g.Y2 = num("scale"), num("x1"), num("y1"), num("x2"), num("y2")
 	if sc := v.Get("scale"); sc.IsArr() {
 		g.Scale = 0
@@ -119,8 +125,19 @@ func GridFromValue(ctx context.Context, v jsval.Value) (Grid, error) {
 			g.ScaleXY[i] = jsval.ToNumber(sc.Index(i))
 		}
 	}
-	if t := v.Get("translate"); t.IsArr() {
-		g.Translate = []float64{jsval.ToNumber(t.Index(0)), jsval.ToNumber(t.Index(1))}
+	if t := v.Get("translate"); t.IsTruthy() && !t.IsNum() && !t.IsBool() {
+		// `t && t[0] || 0`: the elements of an array, a string's characters or
+		// an object's members 0 and 1.
+		g.Translate = make([]float64, 2)
+		for i := range g.Translate {
+			e := jsval.Member(t, strconv.Itoa(i))
+			g.Translate[i] = jsval.ToNumber(e)
+			// t[0] || 0: a string is truthy unless empty, an array or an
+			// object always; either joins the sum as its text
+			if e.IsStr() && e.StrValue() != "" || e.IsArr() || e.IsObj() {
+				g.TranslateText[i], g.TranslateIsText[i] = jsval.WalkerFor(ctx).String(e), true
+			}
+		}
 	}
 	return g, nil
 }

@@ -19,6 +19,11 @@ func ariaIgnored(role string) bool {
 		"legend-title", "legend-symbol", "title":
 		return true
 	}
+	// AriaIgnore is a plain object: a role named after one of
+	// Object.prototype's members reads that member, which is truthy
+	if f, inherited := jsval.Inherited(role); role == "__proto__" || inherited && f.IsTruthy() {
+		return true
+	}
 	return false
 }
 
@@ -33,17 +38,19 @@ func (r *renderer) markAria(m *scene.Mark) {
 		return
 	}
 	var role, desc, label string
+	var described bool
 	switch m.Role {
 	case "axis", "legend":
 		if len(m.Items) == 0 {
 			return // upstream throws reading items[0] and emits nothing
 		}
 		role, desc = graphicsSymbol, m.Role
-		label = m.Description
-		if label == "" {
+		label, described = m.Description, m.Described || m.Description != ""
+		if !described {
 			label = m.Items[0].Description
+			described = m.Items[0].StrTruthy("description", label)
 		}
-		if label == "" {
+		if !described {
 			if m.NoGuideCaption {
 				return // upstream's caption throws; see scene.Mark.NoGuideCaption
 			}
@@ -59,19 +66,27 @@ func (r *renderer) markAria(m *scene.Mark) {
 			kind, prefix = "subtitle", "Subtitle text '"
 		}
 		desc = kind
-		label = m.Description
-		if label == "" {
+		label, described = m.Description, m.Described || m.Description != ""
+		if !described {
 			label = m.Items[0].Description
+			described = m.Items[0].StrTruthy("description", label)
 		}
-		if label == "" {
-			label = prefix + titleCaption(w.walk, m.Items[0]) + "'"
+		if !described {
+			w.attr("role", role)
+			w.attr("aria-roledescription", desc)
+			w.attrOpen("aria-label")
+			w.valStr(prefix)
+			w.titleCaption(m.Items[0])
+			w.valLit("'")
+			w.attrClose()
+			return
 		}
 	default:
 		t := m.Type
-		recurse := t == scene.MarkGroup || t == scene.MarkText
+		recurse := m.IsGroup() || m.IsText()
 		if !recurse {
 			for _, it := range m.Items {
-				if it.Description != "" && !it.Aria.IsFalse() {
+				if _, set := it.StyleStr("description", it.Description); set && !it.Aria.IsFalse() {
 					recurse = true
 					break
 				}
@@ -82,25 +97,35 @@ func (r *renderer) markAria(m *scene.Mark) {
 			role = graphicsObject
 		}
 		desc = t.String() + " mark container"
-		label = m.Description
+		label, described = m.Description, m.Described || m.Description != ""
 	}
 	w.attr("role", role)
 	w.attr("aria-roledescription", desc)
-	if label != "" {
+	// `label || undefined`: a description given as a truthy value that
+	// prints empty ([]) still labels the mark
+	if described || label != "" {
 		w.attr("aria-label", label)
 	}
 }
 
-// titleCaption is `array(item.text).join(' ')`.
-func titleCaption(w jsval.Walker, it *scene.Item) string {
+// titleCaption writes `array(item.text).join(' ')`, an entry at a time (see
+// writer.valJS), each taken with the call's Walker.
+func (w *writer) titleCaption(it *scene.Item) {
 	t := it.Text()
-	if t.IsNullish() {
-		return ""
-	}
 	if !t.IsArr() {
-		return w.String(t)
+		if !t.IsNullish() {
+			w.valJS(t)
+		}
+		return
 	}
-	return w.Join(t.Items(), " ")
+	for i, v := range t.Items() {
+		if i > 0 {
+			w.valLit(" ")
+		}
+		if !v.IsNullish() {
+			w.valJS(v)
+		}
+	}
 }
 
 // itemAria writes the aria attributes of an item element.
@@ -110,14 +135,17 @@ func (r *renderer) itemAria(m *scene.Mark, it *scene.Item) {
 		w.attrLit("aria-hidden", "true")
 		return
 	}
-	if it.Description == "" {
+	// `item.description == null` hides the three; an empty string is a
+	// description, and a role given as a truthy value that prints empty
+	// ([]) still replaces the default
+	if _, set := it.StyleStr("description", it.Description); !set {
 		return
 	}
 	typ := m.Type
 	w.attr("aria-label", it.Description)
 	role := it.AriaRole
-	if role == "" {
-		if typ == scene.MarkGroup {
+	if !it.StrTruthy("ariaRole", role) {
+		if m.IsGroup() {
 			role = graphicsObject
 		} else {
 			role = graphicsSymbol
@@ -125,7 +153,7 @@ func (r *renderer) itemAria(m *scene.Mark, it *scene.Item) {
 	}
 	w.attr("role", role)
 	rd := it.AriaRoleDescription
-	if rd == "" {
+	if !it.StrTruthy("ariaRoleDescription", rd) {
 		rd = typ.String() + " mark"
 	}
 	w.attr("aria-roledescription", rd)

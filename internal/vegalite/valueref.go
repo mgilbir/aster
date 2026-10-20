@@ -11,7 +11,7 @@ func datumDefToExpr(cc *compileCtx, dd Value) string {
 	if isDateTime(datum) {
 		return dateTimeToExpr(cc, datum)
 	}
-	return stringifyText(nil, datum) // `${stringify(datum)}`
+	return stringifyText(cc, datum) // `${stringify(datum)}`
 }
 
 type midPointParams struct {

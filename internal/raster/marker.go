@@ -265,7 +265,7 @@ func (r *renderer) hasMarkers(n *node, st *state) bool {
 // drawMarkers draws the marker-start/mid/end symbols of path p (local
 // coordinates of the shape whose state is st).
 func (r *renderer) drawMarkers(p *path, st *state) {
-	r.holdPoints(4 * len(p.verbs)) // a segment is four points' bytes
+	r.holdPoints(5 * len(p.verbs)) // a segment is five points' bytes (four and its kind)
 	mp := &markerPath{segs: pathSegments(p)}
 	if len(mp.segs) == 0 {
 		return
@@ -349,6 +349,10 @@ func (r *renderer) drawMarker(mn *node, mp *markerPath, kind int, st *state) {
 		if !cs.ctm.isFinite() || !cs.ctm.invertible() {
 			return r.err == nil
 		}
+		// The marker's viewport clip is the vertex's: given back when it is
+		// drawn, not when the path is (C110).
+		masks := r.maskBytes
+		defer r.releaseMasks(masks)
 		if clipped {
 			cs.clip = r.rectClip(&state{clip: st.clip}, cs.ctm, clipRect)
 			if cs.clip.r.empty() {

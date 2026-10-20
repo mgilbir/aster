@@ -325,7 +325,9 @@ func rawField(t *testing.T, name, field string) jsval.Value {
 	t.Helper()
 	for _, c := range loadRaw(t, "reshape.json").Items() {
 		if c.Get("name").StrValue() == name {
-			return c.Get(field)
+			// In lib.mjs's dialect: undefined is {"$":"undef"}, which an
+			// older lib.mjs wrote as null.
+			return decodeDialect(c.Get(field))
 		}
 	}
 	t.Fatal("no case " + name)

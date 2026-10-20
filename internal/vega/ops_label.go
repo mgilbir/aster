@@ -1,6 +1,7 @@
 package vega
 
 import (
+	"maps"
 	"math"
 
 	"github.com/mgilbir/aster/internal/budget"
@@ -38,17 +39,37 @@ func facLabel(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 			}
 		}
 
+		var sizeText [2]*string
+		for i, e := range p.list("size") {
+			if sv, _ := e.(jsval.Value); !sv.IsNullish() && !sv.IsNum() {
+				t := v.jsString(sv)
+				sizeText[i] = &t
+			}
+		}
 		opts := label.Options{
 			Size:       [2]float64{size[0], size[1]},
+			SizeText:   sizeText,
 			LineAnchor: p.str("lineAnchor"),
 			MarkIndex:  markIndex(p.num("markIndex", 0)),
 			Method:     p.str("method"),
 		}
-		if p.has("anchor") {
+		if paramTruthy(p.Get("anchor")) { // array(_.anchor || Anchors)
 			opts.Anchor = p.strs("anchor")
 		}
 		if p.has("offset") {
-			opts.Offset = p.nums("offset")
+			// Math.max(...offset) converts each entry; the slots are
+			// `_[i] || 0`, a Float64Array's number of a truthy entry
+			if l := p.list("offset"); l != nil {
+				opts.Offset = make([]float64, len(l))
+				opts.OffsetSlots = make([]float64, len(l))
+				for i, e := range l {
+					v, _ := paramValueOf(e)
+					opts.Offset[i] = jsval.ToNumber(v)
+					if v.IsTruthy() {
+						opts.OffsetSlots[i] = opts.Offset[i]
+					}
+				}
+			}
 		}
 		switch pad := p.Value("padding"); {
 		case pad.IsUndefined():
@@ -60,7 +81,11 @@ func facLabel(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 		// `_.avoidBaseMark !== false`
 		av := p.Value("avoidBaseMark")
 		opts.NoAvoidBaseMark = av.IsBool() && !av.IsTruthy()
+		avoidUndefined := false
 		for _, m := range p.list("avoidMarks") {
+			if m == nil {
+				avoidUndefined = true // the mark's items: undefined, a mark that never ran
+			}
 			if items, _ := m.([]*scene.Item); len(items) > 0 {
 				ai := make([]any, len(items))
 				for i, it := range items {
@@ -74,12 +99,18 @@ func facLabel(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 		for i, t := range pulse.items {
 			l := &labels[i]
 			l.Ref = t
-			l.FontSize = t.FontSize().Val()
-			l.X, l.Y = t.X.Val(), t.Y.Val()
+			// d.fontSize, d.x, d.y as given, read by arithmetic: null is 0.
+			l.FontSize = jsval.ToNumber(t.Get("fontSize"))
+			l.X, l.Y = jsval.ToNumber(t.Get("x")), jsval.ToNumber(t.Get("y"))
 			if !t.Text().IsNullish() {
 				l.Text = t.Walker().String(t.Text())
 			}
 			l.Base = labelBase(v, t, opts.MarkIndex)
+		}
+		if avoidUndefined && len(labels) > 0 && !naiveGroupArea(labels[0].Base, opts.MarkIndex, opts.Method) {
+			// markBitmaps: avoidMarks.forEach(items => draw(context, items)),
+			// and draw reads items.length first.
+			fail("TypeError: Cannot read properties of undefined (reading 'length')")
 		}
 		if cmp != nil {
 			views := make(map[*scene.Item]jsval.Value, len(pulse.items))
@@ -135,15 +166,15 @@ func labelBase(v *runView, t *scene.Item, markIndex int) *label.Base {
 		return nil
 	}
 	base := &label.Base{
-		MarkType: b.Mark.Type.String(),
+		MarkType: strictTypeName(b.Mark),
 		X:        b.X.Val(), Y: b.Y.Val(),
 		Bounds: label.Box{X1: b.Bounds.X1, Y1: b.Bounds.Y1, X2: b.Bounds.X2, Y2: b.Bounds.Y2},
 		Ref:    b,
 	}
-	if b.Mark.Type == scene.MarkGroup {
+	if b.Mark.IsGroup() {
 		base.Marks = make([]label.SubMark, len(b.Items))
 		for i, m := range b.Items {
-			base.Marks[i].MarkType = m.Type.String()
+			base.Marks[i].MarkType = strictTypeName(m)
 			if i != markIndex {
 				continue // only the labelled mark's points are read
 			}
@@ -197,7 +228,7 @@ func (lp *labelPainter) draw(m *label.Mask, items []*scene.Item, outline bool, d
 		return
 	}
 	typ := items[0].Mark.Type
-	if typ != scene.MarkGroup {
+	if !items[0].Mark.IsGroup() {
 		lp.paint(m, typ, items, outline)
 		return
 	}
@@ -229,6 +260,7 @@ func (lp *labelPainter) paint(m *label.Mask, typ scene.MarkType, items []*scene.
 	for i, src := range items {
 		c := *src
 		c.Mark = mark
+		canvasOpacities(&c)
 		if outline {
 			outlineItem(&c)
 		}
@@ -280,16 +312,60 @@ func (lp *labelPainter) paint(m *label.Mask, typ scene.MarkType, items []*scene.
 	}
 }
 
+// canvasOpacities gives the copy of an item the opacities upstream's canvas
+// draws it with: `opacity *= item.fillOpacity` multiplies a value given as
+// a string or an array as the number it converts to ("" is 0, which draws
+// nothing), where the SVG document the bitmap is drawn from would leave an
+// attribute it cannot parse at its default.
+func canvasOpacities(it *scene.Item) {
+	// A NaN opacity draws nothing on a canvas (NaN > 0 is false), which an
+	// SVG attribute "NaN" does not say: it is written as 0.
+	for _, n := range [...]*scene.Num{&it.Opacity, &it.FillOpacity, &it.StrokeOpacity} {
+		if n.Set() && n.Val() != n.Val() {
+			*n = scene.N(0)
+		}
+	}
+	if it.Raw == nil {
+		return
+	}
+	cloned := false
+	for _, p := range [...]struct {
+		name string
+		n    *scene.Num
+	}{{"opacity", &it.Opacity}, {"fillOpacity", &it.FillOpacity}, {"strokeOpacity", &it.StrokeOpacity}} {
+		v, ok := it.Raw[p.name]
+		if !ok || v.IsNullish() {
+			continue
+		}
+		if !cloned {
+			// it is a copy of the item, whose Raw it shares.
+			it.Raw, cloned = maps.Clone(it.Raw), true
+		}
+		f := jsval.ToNumber(v)
+		if f != f {
+			f = 0
+		}
+		*p.n = scene.N(f)
+		delete(it.Raw, p.name)
+	}
+}
+
 // outlineItem is markBitmaps' prepare(): an item with a stroke or a fill that
 // is not fully transparent is redrawn as an opaque black stroke (keeping its
 // own stroke width and dash) with no fill; other items are drawn as they are.
 func outlineItem(it *scene.Item) {
-	strokes := it.Stroke.Truthy() && it.StrokeOpacity.Val() != 0
-	fills := it.Fill.Truthy() && it.FillOpacity.Val() != 0
+	// item.strokeOpacity !== 0: strict, so "0" is not 0.
+	strokes := it.Stroke.Truthy() && !it.StrictNum("strokeOpacity", it.StrokeOpacity, 0)
+	fills := it.Fill.Truthy() && !it.StrictNum("fillOpacity", it.FillOpacity, 0)
 	if strokes || fills {
+		// it is a copy of the item, whose Raw it shares until it changes it.
+		it.Raw = maps.Clone(it.Raw)
 		it.StrokeOpacity = scene.N(1)
+		it.ForgetRaw("strokeOpacity")
 		it.Stroke = scene.Color("#000")
+		it.ForgetRaw("stroke")
 		it.FillOpacity = scene.N(0)
+		it.ForgetRaw("fillOpacity")
 	}
 }
 
@@ -304,4 +380,24 @@ func markIndex(f float64) int {
 		return -1
 	}
 	return int(f)
+}
+
+// strictTypeName is a mark's type as code that compares it with ===
+// reads it: its name, and for a type given as another value than a string
+// (scene.Mark.LooseType) a text that equals no type name, though it is
+// truthy as that value is.
+func strictTypeName(m *scene.Mark) string {
+	if m.LooseType {
+		return "\x00" + m.Type.String()
+	}
+	return m.Type.String()
+}
+
+// naiveGroupArea is labelLayout's isNaiveGroupArea: labels of a group of
+// areas placed by the naive method, which does not draw the marks to avoid.
+func naiveGroupArea(b *label.Base, markIndex int, method string) bool {
+	if b == nil || b.MarkType != "group" || markIndex < 0 || markIndex >= len(b.Marks) {
+		return false
+	}
+	return b.Marks[markIndex].MarkType == "area" && (method == "" || method == "naive")
 }

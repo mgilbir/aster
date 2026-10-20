@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/mgilbir/aster/internal/fuzzutil"
+	"github.com/mgilbir/aster/internal/text"
 )
 
 // fuzzLimits keep each input's work small, so the fuzzer spends its time on
@@ -81,7 +82,8 @@ func FuzzColorAndTransform(f *testing.F) {
 		parseColor(c)
 		parseTransform(tf)
 		parsePaint(c)
-		parseFontFamilies(c)
+		text.ParseFontFamily(c)
+		text.ParseFontWeight(c, 400)
 	})
 }
 

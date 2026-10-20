@@ -7,5 +7,4 @@ datanodes2.go:makeAggregateFromEncoding 1  # the aggregate op as a property key 
 datanodes2.go:makeAggregateFromTransform 1  # likewise, the op of an aggregate transform as meas[field][op]'s key
 markpos.go:positionAndSize 2  # vgChannel is read from ALIGNED_X/Y_CHANNEL with the alignment as a key: one of the table's names or undefined (""), compared with 'xc'/'yc' as upstream does
 vl5.go:positionAndSize58 2  # likewise, in 5.8's positionAndSize
-projection.go:assembleProjectionForModel 1  # the fit sources are signal expressions and data('...') texts the compiler made, compared by contains
 selection.go:nearestCompiler 1  # mark names the compiler made (strings)

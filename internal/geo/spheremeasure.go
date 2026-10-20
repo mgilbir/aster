@@ -48,10 +48,9 @@ type sphereCentroidStream struct {
 	W0, W1                 float64
 	X0, Y0, Z0, X1, Y1, Z1 float64
 	X2, Y2, Z2             adder
-	lambda00, phi00        float64
-	x0, y0, z0             float64
-	inPolygon              bool
-	mode                   int
+	*centroidModule
+	inPolygon bool
+	mode      int
 }
 
 func (s *sphereCentroidStream) Sphere() {}
@@ -164,7 +163,12 @@ func (s *sphereCentroidStream) ringPoint(lambda, phi float64) {
 // (NaN, NaN if undefined). The walk meters its work into the ledger in ctx
 // and stops with ctx's error.
 func GeoCentroid(ctx context.Context, object jsval.Value) ([2]float64, error) {
-	s := &sphereCentroidStream{}
+	return GeoCentroidWith(ctx, NewMeasureState(), object)
+}
+
+// GeoCentroidWith is GeoCentroid over the module state of a render.
+func GeoCentroidWith(ctx context.Context, ms *MeasureState, object jsval.Value) ([2]float64, error) {
+	s := &sphereCentroidStream{centroidModule: &ms.cen}
 	if err := streamBounded(ctx, object, func(b *walkBound) Stream { return meterInput(s, b) }); err != nil {
 		return [2]float64{nan, nan}, err
 	}

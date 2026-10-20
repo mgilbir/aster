@@ -531,6 +531,7 @@ func duplicate(cc *compileCtx, v Value) Value {
 	switch v.Kind() {
 	case jsval.KindArr:
 		items := v.Items()
+		cc.alloc(arrayBytes(len(items)))
 		out := make([]Value, len(items))
 		for i, it := range items {
 			out[i] = duplicate(cc, it)
@@ -548,6 +549,7 @@ func duplicate(cc *compileCtx, v Value) Value {
 		// the copy's prototype rather than its key (unless the copy's chain
 		// holds "__proto__" as data or ends in null: then it is a key).
 		o := v.ObjValue()
+		cc.alloc(objectBytes(o.Len()))
 		proto := o.Prototype()
 		c := jsval.NewObject(o.Len())
 		c.SetPrototype(proto, cc.conv)

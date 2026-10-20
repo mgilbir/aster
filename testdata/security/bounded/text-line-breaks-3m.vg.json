@@ -1,0 +1,2 @@
+{"width":50,"height":50,
+"marks":[{"type":"text","encode":{"update":{"text":{"signal":"pad('', 3000000, '\\n')"},"lineBreak":{"value":"\n"}}}}]}

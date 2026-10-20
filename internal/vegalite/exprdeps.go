@@ -3,7 +3,6 @@ package vegalite
 import (
 	"context"
 	"errors"
-	"strings"
 
 	"github.com/mgilbir/aster/internal/expr"
 	"github.com/mgilbir/aster/internal/jsval"
@@ -418,7 +417,7 @@ func getDependentFields(cc *compileCtx, expression string) *sset {
 		if n.kind == "Member" && startsWithDatum(n) {
 			names := exprNames(n)
 			if len(names) > 0 {
-				deps.add(strings.Join(names[1:], "."))
+				deps.add(joinCC(cc, names[1:], "."))
 			}
 		}
 	})

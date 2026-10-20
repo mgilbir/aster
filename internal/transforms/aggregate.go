@@ -15,7 +15,8 @@ type AggregateParams struct {
 	// their accessor names.
 	GroupBy []Field
 	// Measures are the aggregations (upstream's fields/ops/aggregate_params/as
-	// arrays zipped). Empty means a single count.
+	// arrays zipped). Nil means a single count, empty none at all (fields
+	// and ops given as empty lists).
 	Measures []Measure
 	// Cross generates the full cross product of the group-by values,
 	// including empty cells (ignored for fewer than two dimensions). Upstream's
@@ -51,7 +52,7 @@ func Aggregate(ctx context.Context, data []jsval.Value, p AggregateParams) (res 
 		}
 	}()
 	measures := p.Measures
-	if len(measures) == 0 {
+	if measures == nil {
 		measures = []Measure{{Op: "count"}}
 	}
 	ms, err := newMeasureSet(measures, p.Rand)
@@ -175,6 +176,13 @@ func crossCells(ctx context.Context, dims []Field, dnames []string, cells map[st
 		for i := 0; i < n; i++ {
 			v := ac.tuple.Lookup(dnames[i])
 			k := keys.String(v)
+			if k == ProtoKey {
+				// vals[i][v] = v on a plain object: a string assigned to
+				// __proto__ is ignored, so the value never joins the domain.
+				// (An array whose text is "__proto__" would become the
+				// prototype, and its indexes enumerate: not modelled.)
+				continue
+			}
 			if _, ok := doms[i].vals[k]; !ok {
 				doms[i].keys = append(doms[i].keys, k)
 			}

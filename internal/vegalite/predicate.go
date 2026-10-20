@@ -1,8 +1,6 @@
 package vegalite
 
 import (
-	"strings"
-
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -94,7 +92,7 @@ func fieldFilterExpression(cc *compileCtx, p Value, useInRange bool) string {
 			cc.work(1)
 			parts = append(parts, predicateValueExpr(cc, v, unit))
 		}
-		return "indexof([" + strings.Join(parts, ",") + "], " + fieldExpr + ") !== -1"
+		return "indexof([" + joinCC(cc, parts, ",") + "], " + fieldExpr + ") !== -1"
 	case isFieldValidPredicate(p):
 		valid := true
 		if v := p.Get("valid"); !v.IsUndefined() {
@@ -125,7 +123,7 @@ func fieldFilterExpression(cc *compileCtx, p Value, useInRange bool) string {
 			exprs = append(exprs, fieldExpr+" <= "+predicateValueExpr(cc, upper, unit))
 		}
 		if len(exprs) > 0 {
-			return strings.Join(exprs, " && ")
+			return joinCC(cc, exprs, " && ")
 		}
 		return "true"
 	}
@@ -242,14 +240,14 @@ func logicalExpr(cc *compileCtx, op Value, cb func(Value) string, depth int) str
 			cc.work(1)
 			parts = append(parts, logicalExpr(cc, a, cb, depth+1))
 		}
-		return "(" + strings.Join(parts, ") && (") + ")"
+		return "(" + joinCC(cc, parts, ") && (") + ")"
 	case isLogicalOr(cc, op):
 		var parts []string
 		for _, a := range listOf(op.Get("or"), "op.or", "map") {
 			cc.work(1)
 			parts = append(parts, logicalExpr(cc, a, cb, depth+1))
 		}
-		return "(" + strings.Join(parts, ") || (") + ")"
+		return "(" + joinCC(cc, parts, ") || (") + ")"
 	}
 	return cb(op)
 }

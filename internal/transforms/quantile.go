@@ -15,10 +15,24 @@ type QuantileParams struct {
 	// Probs are the probabilities to sample; nil means every step starting at
 	// Step/2 and below 1.
 	Probs []float64
-	// Step is the probability step (default 0.01), used when Probs is nil.
+	// ProbValues, when not nil, are the probabilities as given, which the
+	// output carries (Probs are them as numbers); ProbsNotArray reports
+	// truthy probabilities that are no array, whose p.map is a TypeError
+	// for the first group.
+	ProbValues    []jsval.Value
+	ProbsNotArray bool
+	// Step is the probability step (0: 0.01; NaN stays NaN, no
+	// probability), used when Probs is nil.
 	Step float64
+	// StepExact reports a Step the caller resolved (`_.step || 0.01` of a
+	// truthy value that is 0 as a number stays 0).
+	StepExact bool
 	// As are the output fields; empty strings mean "prob" and "value".
 	As [2]string
+	// AsExact reports that As are the names as the runtime resolved them
+	// (`_.as || defaults`, then each entry's text): an empty one is the
+	// empty name, not the default.
+	AsExact bool
 }
 
 // quantileEpsilon keeps the last generated probability strictly below 1.
@@ -28,17 +42,20 @@ const quantileEpsilon = 1e-14
 // group-by fields, then probability and value. A group without valid numbers
 // gets an undefined value.
 func Quantile(ctx context.Context, source []jsval.Value, p QuantileParams) ([]jsval.Value, error) {
+	if p.GroupBy == nil && p.Field.Uncallable { // partition: data.map(field)
+		return nil, &jsval.Thrown{Name: "TypeError", Msg: "object is not a function"}
+	}
 	as0, as1 := p.As[0], p.As[1]
-	if as0 == "" {
+	if as0 == "" && !p.AsExact {
 		as0 = "prob"
 	}
-	if as1 == "" {
+	if as1 == "" && !p.AsExact {
 		as1 = "value"
 	}
 	probs := p.Probs
 	if probs == nil {
 		step := p.Step
-		if step == 0 || math.IsNaN(step) {
+		if step == 0 && !p.StepExact {
 			step = 0.01
 		}
 		// d3.range(step/2, 1 - EPSILON, step)
@@ -46,7 +63,7 @@ func Quantile(ctx context.Context, source []jsval.Value, p QuantileParams) ([]js
 		// d3.range: n = Math.max(0, Math.ceil((stop - start) / step)) | 0,
 		// so NaN is no probability at all. Past MaxSteps is refused.
 		n := math.Max(0, math.Ceil((stop-start)/step))
-		if math.IsNaN(n) {
+		if math.IsNaN(n) || math.IsInf(n, 0) { // NaN | 0 and Infinity | 0 are 0
 			n = 0
 		}
 		if n > MaxSteps {
@@ -70,13 +87,24 @@ func Quantile(ctx context.Context, source []jsval.Value, p QuantileParams) ([]js
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		q := Quantiles(g.Tuples, probs, p.Field.Get)
+		if p.ProbsNotArray {
+			return nil, &jsval.Thrown{Name: "TypeError", Msg: "p.map is not a function"}
+		}
+		get, cancelled := polledAccessor(ctx, p.Field.Get)
+		q := Quantiles(g.Tuples, probs, get)
+		if err := cancelled(); err != nil {
+			return nil, err
+		}
 		for i, pr := range probs {
 			o := jsval.NewObject(len(names) + 2)
 			for j, n := range names {
 				o.Set(n, g.Dims[j])
 			}
-			o.Set(as0, jsval.Num(pr))
+			if p.ProbValues != nil {
+				o.Set(as0, p.ProbValues[i])
+			} else {
+				o.Set(as0, jsval.Num(pr))
+			}
 			if math.IsNaN(q[i]) {
 				o.Set(as1, jsval.Undefined)
 			} else {

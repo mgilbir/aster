@@ -123,15 +123,6 @@ func setEqual(a, b *sset) bool {
 	return true
 }
 
-func hasIntersection(a, b *sset) bool {
-	for _, x := range a.values() {
-		if b.hasValue(x) {
-			return true
-		}
-	}
-	return false
-}
-
 // omap is an insertion-ordered string-keyed map with JavaScript's key order:
 // array-index keys first, ascending, then the rest in insertion order.
 //

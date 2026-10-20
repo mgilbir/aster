@@ -438,6 +438,9 @@ type paintDefs struct {
 	patterns []patternUse
 	forms    []*formDef
 	links    []linkAnnot // the page's link annotations
+	// actualText is set when the content has ActualText marked content,
+	// a PDF 1.5 feature (see buildPDF).
+	actualText bool
 }
 
 // patternUse is a gradient stroke: the shading pattern of a gradient placed
@@ -482,22 +485,23 @@ func (r *renderer) resolveGradients(st gstate) (gstate, error) {
 // softMask sets, as the soft mask, the luminosity of the grey gradient a
 // (a gradient's alpha), painted as the gradient is: over the box when its
 // units are the box's. The mask is a form drawn in the current user space,
-// covering the page there.
-func (r *renderer) softMask(a *gradient, boxM Matrix) {
+// covering the page there. key is the mask's, for paintObject; "" when none
+// is set, in a space that collapses.
+func (r *renderer) softMask(a *gradient, boxM Matrix) (key string) {
 	inv, ok := invert(r.w.cur.ctm)
 	if !ok {
-		return
+		return ""
 	}
 	var content []byte
 	if !a.user {
 		content = r.w.appendMatrix(content, boxM)
 		content = append(content, " cm\n"...)
 	}
-	content = append(content, '/')
-	content = append(content, r.shadingOf(a)...)
-	content = append(content, " sh\n"...)
+	content = formShading(content, r.shadingOf(a))
 	fm := r.form(content, mapBox(inv, [4]float64{0, 0, r.pageW, r.pageH}))
-	r.w.stateGS("lum:"+fm, gsEntry{mask: fm, maskLuminosity: true})
+	key = "lum:" + fm
+	r.w.stateGS(key, gsEntry{mask: fm, maskLuminosity: true})
+	return key
 }
 
 // paintShape paints the path that addPath draws, of bounding box box, with
@@ -547,16 +551,18 @@ func (r *renderer) paintShape(st gstate, addPath func(), box rect, haveBox bool)
 			case g.user || boxed:
 				res := r.shadingOf(g)
 				r.w.save()
-				r.w.setAlpha(st.opacity*st.fillOpacity, r.w.cur.strokeAlpha)
+				alpha := st.opacity * st.fillOpacity
+				r.w.setAlpha(alpha, r.w.cur.strokeAlpha)
+				mask := ""
 				if a := g.alphaGradient(); a != nil {
-					r.softMask(a, boxM)
+					mask = r.softMask(a, boxM)
 				}
 				addPath()
 				r.w.clipRule(st.evenOdd)
 				if !g.user {
 					r.w.concat(boxM)
 				}
-				r.w.shade(res)
+				r.w.paintShading(res, composite{alpha: alpha, strokeAlpha: r.w.cur.strokeAlpha, mask: mask})
 				r.w.restore()
 			}
 		}

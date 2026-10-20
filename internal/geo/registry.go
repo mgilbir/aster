@@ -106,7 +106,12 @@ func NewProjection(typ string) (Projection, error) {
 	if typ == "" {
 		typ = "mercator"
 	}
-	ctor := registry[jsval.JSLower(typ)] // type.toLowerCase()
+	name := jsval.JSLower(typ) // type.toLowerCase()
+	if name == "constructor" {
+		// projections[type] on a plain object finds Object, which makes {}.
+		return newBare(), nil
+	}
+	ctor := registry[name]
 	if ctor == nil {
 		return nil, fmt.Errorf("unrecognized projection type: %s", typ)
 	}

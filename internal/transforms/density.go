@@ -23,6 +23,12 @@ type DistSpec struct {
 	Field     Field
 	From      []jsval.Value
 	Bandwidth float64
+	// BandwidthGiven reports a truthy bandwidth, used as it is (NaN for a
+	// value that is no number) rather than estimated.
+	BandwidthGiven bool
+	// FieldNull reports a kde whose field is null (a falsy field), which
+	// upstream maps the sample data with: a TypeError.
+	FieldNull bool
 
 	// Distributions and Weights configure a mixture. A NaN weight counts as
 	// 1, like a missing one.
@@ -50,14 +56,27 @@ func newDistribution(spec DistSpec, source []jsval.Value, depth int) (Distributi
 		return *p
 	}
 	switch spec.Kind {
+	// The parameters are as the distribution's setters keep them (mean
+	// and min `_ || 0`, stdev and max `_ == null ? 1 : _`, applied by the
+	// caller to the specification's values): a truthy value that is no
+	// number stays NaN.
 	case "normal":
-		return NewNormal(val(spec.Mean, 0), val(spec.Stdev, 1)), nil
+		return &Normal{Mean: val(spec.Mean, 0), Stdev: val(spec.Stdev, 1), s: normalSampler{next: math.NaN()}}, nil
 	case "lognormal":
-		return NewLogNormal(val(spec.Mean, 0), val(spec.Stdev, 1)), nil
+		return &LogNormal{Mean: val(spec.Mean, 0), Stdev: val(spec.Stdev, 1), s: normalSampler{next: math.NaN()}}, nil
 	case "uniform":
-		return NewUniform(val(spec.Min, 0), val(spec.Max, 1)), nil
+		return &Uniform{Min: val(spec.Min, 0), Max: val(spec.Max, 1)}, nil
 	case "kde":
-		return NewKernelDensity(kdeSupport(spec, source), spec.Bandwidth), nil
+		if spec.FieldNull {
+			// d.data((def.from || data()).map(def.field)) of a null field
+			return nil, &jsval.Thrown{Name: "TypeError", Msg: "null is not a function"}
+		}
+		k := NewKernelDensity(kdeSupport(spec, source), spec.Bandwidth)
+		if spec.BandwidthGiven {
+			// bandwidth(_): a truthy value is kept, NaN or not
+			k.Bandwidth = spec.Bandwidth
+		}
+		return k, nil
 	case "mixture":
 		ds := make([]Distribution, len(spec.Distributions))
 		for i, s := range spec.Distributions {
@@ -95,12 +114,22 @@ type DensityParams struct {
 	// Extent is the sampling domain; nil is allowed only for a kde, whose
 	// data extent is used.
 	Extent *[2]float64
+	// ExtentValues, when not nil, is `_.extent` (when truthy) read as
+	// extent[0] and extent[1], which replaces Extent; StepsValues, when not
+	// nil, the step bounds as values, which replace Steps, MinSteps and
+	// MaxSteps (sampleCurveJS).
+	ExtentValues *[2]jsval.Value
+	StepsValues  *StepsSpec
 	// Steps overrides both MinSteps and MaxSteps when non-zero.
 	Steps    float64
 	MinSteps float64 // default 25
 	MaxSteps float64 // default 200
 	// As are the output fields; empty strings mean "value" and "density".
 	As [2]string
+	// AsExact reports that As are the names as the runtime resolved them
+	// (`_.as || defaults`, then each entry's text): an empty one is the
+	// empty name, not the default.
+	AsExact bool
 }
 
 // Density samples a distribution's pdf or cdf into (value, density) tuples,
@@ -111,7 +140,10 @@ func Density(ctx context.Context, source []jsval.Value, p DensityParams) ([]jsva
 	if err != nil {
 		return nil, err
 	}
-	minsteps, maxsteps := stepBounds(p.Steps, p.MinSteps, p.MaxSteps)
+	steps := stepsSpecOf(p.Steps, p.MinSteps, p.MaxSteps)
+	if p.StepsValues != nil {
+		steps = *p.StepsValues
+	}
 	method := p.Method
 	if method == "" {
 		method = "pdf"
@@ -125,22 +157,26 @@ func Density(ctx context.Context, source []jsval.Value, p DensityParams) ([]jsva
 	default:
 		return nil, fmt.Errorf("Invalid density method: %s", method)
 	}
-	var domain [2]float64
-	valid := true
-	if p.Extent != nil {
-		domain = *p.Extent
-	} else {
+	var lo, hi jsval.Value
+	switch {
+	case p.ExtentValues != nil:
+		lo, hi = p.ExtentValues[0], p.ExtentValues[1]
+	case p.Extent != nil:
+		lo, hi = jsval.Num(p.Extent[0]), jsval.Num(p.Extent[1])
+	default:
 		k, ok := dist.(*KernelDensity)
 		if !ok {
 			return nil, fmt.Errorf("Missing density extent parameter.")
 		}
-		domain, valid = valuesExtent(jsval.WalkerFor(ctx), k.Data())
+		// extent(dist.data()): the data's least and greatest values as
+		// they are
+		lo, hi = rawExtent(jsval.WalkerFor(ctx), k.Data())
 	}
 	// The samples are new tuples: reserve them before they are drawn.
-	if err := reserveRows(ctx, maxSamples(minsteps, maxsteps)); err != nil {
+	if err := reserveRows(ctx, maxSamplesOf(steps)); err != nil {
 		return nil, err
 	}
-	return sampleTuples(ctx, f, domain, valid, minsteps, maxsteps, nil, nil, p.As, 1)
+	return sampleTuples(ctx, f, lo, hi, steps, nil, nil, p.As, p.AsExact, 1)
 }
 
 // maxSamples is the most points SampleCurve returns for these step bounds:
@@ -159,23 +195,10 @@ func maxSamples(minsteps, maxsteps float64) int {
 	return int(math.Ceil(n)) + 1
 }
 
-// valuesExtent is vega-util's extent over raw values, read as numbers.
-// valid is false when there is no valid value: upstream's extent is then
-// [undefined, undefined] and the curve's end points carry an undefined x.
-// (When the extreme values are strings upstream also leaks them, unconverted,
-// as the x of the end points; here they are numbers.)
-func valuesExtent(w jsval.Walker, vs []jsval.Value) (e [2]float64, valid bool) {
-	lo, hi, ok := Extent(w, len(vs), func(i int) jsval.Value { return vs[i] })
-	if !ok || lo.IsUndefined() {
-		return [2]float64{math.NaN(), math.NaN()}, false
-	}
-	return [2]float64{jsval.ToNumber(lo), jsval.ToNumber(hi)}, true
-}
-
-// sampleTuples runs SampleCurve and builds tuples: group-by names first, then
-// the value and density fields (density scaled by scale).
-func sampleTuples(ctx context.Context, f func(float64) float64, domain [2]float64, validDomain bool, minsteps, maxsteps float64,
-	names []string, dims []jsval.Value, as [2]string, scale float64) ([]jsval.Value, error) {
+// sampleTuples runs sampleCurveJS over [lo, hi] and builds tuples: group-by
+// names first, then the value and density fields (density scaled by scale).
+func sampleTuples(ctx context.Context, f func(float64) float64, lo, hi jsval.Value, steps StepsSpec,
+	names []string, dims []jsval.Value, as [2]string, exact bool, scale float64) ([]jsval.Value, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -193,7 +216,7 @@ func sampleTuples(ctx context.Context, f func(float64) float64, domain [2]float6
 		}
 		return pf(x)
 	}
-	pts, err := SampleCurve(f, domain, minsteps, maxsteps)
+	pts, err := sampleCurveJS(jsval.WalkerFor(ctx), f, lo, hi, steps)
 	if cerr != nil {
 		return nil, cerr
 	}
@@ -201,10 +224,10 @@ func sampleTuples(ctx context.Context, f func(float64) float64, domain [2]float6
 		return nil, err
 	}
 	a0, a1 := as[0], as[1]
-	if a0 == "" {
+	if a0 == "" && !exact {
 		a0 = "value"
 	}
-	if a1 == "" {
+	if a1 == "" && !exact {
 		a1 = "density"
 	}
 	out := make([]jsval.Value, len(pts))
@@ -213,12 +236,8 @@ func sampleTuples(ctx context.Context, f func(float64) float64, domain [2]float6
 		for j, n := range names {
 			o.Set(n, dims[j])
 		}
-		if !validDomain && (i == 0 || i == len(pts)-1) {
-			o.Set(a0, jsval.Undefined)
-		} else {
-			o.Set(a0, jsval.Num(pt[0]))
-		}
-		o.Set(a1, jsval.Num(pt[1]*scale))
+		o.Set(a0, pt.x)
+		o.Set(a1, jsval.Num(pt.y*scale))
 		out[i] = jsval.Obj(o)
 	}
 	return out, nil

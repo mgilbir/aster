@@ -2,7 +2,6 @@ package vegalite
 
 import (
 	"math"
-	"strings"
 
 	"github.com/mgilbir/aster/internal/jsval"
 )
@@ -879,7 +878,7 @@ func assembleAxisTitle(cc *compileCtx, title Value, config Value) Value {
 			cc.work(1)
 			parts = append(parts, joinItem(defaultTitle(cc, fd, config)))
 		}
-		return jsval.Str(strings.Join(parts, ", "))
+		return jsval.Str(joinCC(cc, parts, ", "))
 	}
 	return title
 }
@@ -943,10 +942,13 @@ func assembleAxis(cc *compileCtx, a *axisComponent, kind string, config Value, h
 				setAxisEncode(axis, pi.part, pi.vgProp, jsval.Arr(vgRef))
 				dropAt(i)
 			} else if ok && pi.isNull {
-				var sb strings.Builder
+				sb := newSbuf(cc)
 				for _, c := range conditions {
 					cc.work(1)
-					sb.WriteString(expression(cc, nil, c.Get("test"), nil) + " ? " + exprFromValueRefOrSignalRef(cc, jsval.Obj(omit(c, "test"))) + " : ")
+					sb.WriteString(expression(cc, nil, c.Get("test"), nil))
+					sb.WriteString(" ? ")
+					sb.WriteString(exprFromValueRefOrSignalRef(cc, jsval.Obj(omit(c, "test"))))
+					sb.WriteString(" : ")
 				}
 				sb.WriteString(exprFromValueRefOrSignalRef(cc, valueOrSignalRef))
 				axis.Set(prop, mkv("signal", sb.String()))
@@ -1001,7 +1003,7 @@ func assembleAxis(cc *compileCtx, a *axisComponent, kind string, config Value, h
 			if !labelExpr.IsStr() {
 				throw("string.replace is not a function")
 			}
-			expr = jsval.Str(jsReplaceAll(labelExpr.StrValue(), "datum.label", signalOf(text)))
+			expr = jsval.Str(jsReplaceAll(cc, labelExpr.StrValue(), "datum.label", signalOf(text)))
 		}
 		setAxisEncode(axis, "labels", "text", mkv("signal", expr))
 	}

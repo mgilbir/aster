@@ -36,17 +36,29 @@ const (
 // read up to the per-image limit, and the data and images of one call
 // together up to its loaded-bytes allowance (C80). A link (an item's href)
 // is resolved once per URL too, in a table of its own.
+//
+// The allowance is charged as the bytes are read, not after the fact (C19):
+// PNG and PDF output fetch several images at once (imageref.Fetch), and each
+// read up to what was left when it started, so eight of them read together
+// several times the allowance. Each Load's budget now shares the call's
+// allowance (budget.Allowance), which the package's loaders charge a chunk
+// at a time as they read, so the fetches together stop where it ends, all of
+// them in flight at once; what a Loader of the caller's own returns, unread
+// by any charge, is charged once it returns, before it is decoded. Bytes
+// charged are kept, even those of a load that then fails, so a call goes
+// past the allowance only when the bytes its loads read do, whatever order
+// they ran in.
 type callImages struct {
 	c *Converter
 
 	mu sync.Mutex
-	// allowance is what the call may load, data and images together; used is
-	// what it has (see chargeData).
-	allowance, used int64
-	byURL           map[string]*resource // by the URL the input names
-	byHref          map[string]*resource // by the href the SVG stage wrote
-	links           map[string]linkResolution
-	fetched         map[string]*fetch // by sanitized URL
+	// allowance is what the call may load, data and images together (see
+	// chargeData), charged as it is read.
+	allowance *budget.Allowance
+	byURL     map[string]*resource // by the URL the input names
+	byHref    map[string]*resource // by the href the SVG stage wrote
+	links     map[string]linkResolution
+	fetched   map[string]*fetch // by sanitized URL
 }
 
 // resource is one image URL of the call, resolved.
@@ -71,7 +83,7 @@ type linkResolution struct {
 type callImagesKey struct{}
 
 func (c *Converter) newCallImages() *callImages {
-	return &callImages{c: c, allowance: c.lim.vega.MaxLoadBytes,
+	return &callImages{c: c, allowance: budget.NewAllowance(c.lim.vega.MaxLoadBytes),
 		byURL: map[string]*resource{}, byHref: map[string]*resource{}, links: map[string]linkResolution{}, fetched: map[string]*fetch{}}
 }
 
@@ -84,9 +96,8 @@ func imagesFrom(ctx context.Context) *callImages {
 // chargeData counts the n bytes the call's data loaded against the
 // allowance images draw from, once the Vega run that loaded them is over.
 func (ci *callImages) chargeData(n int64) {
-	ci.mu.Lock()
-	ci.used += n
-	ci.mu.Unlock()
+	// Within the allowance already: the Vega run's own budget bounded it.
+	ci.allowance.Force(n)
 }
 
 // entryBytes is what one table entry is charged to the call's ledger: its
@@ -212,10 +223,9 @@ func (ci *callImages) fetch(ctx context.Context, r *resource) ([]byte, error) {
 		f = &fetch{done: make(chan struct{})}
 		ci.fetched[r.u] = f
 	}
-	left := ci.allowance - ci.used
 	ci.mu.Unlock()
 	if !ok {
-		f.data, f.err = ci.loadBytes(ctx, r, left)
+		f.data, f.err = ci.loadBytes(ctx, r)
 		close(f.done)
 	} else {
 		select {
@@ -231,15 +241,15 @@ func (ci *callImages) fetch(ctx context.Context, r *resource) ([]byte, error) {
 }
 
 // loadBytes is one Load of r, the first for its sanitized URL in the call,
-// with left of the allowance to read from.
-func (ci *callImages) loadBytes(ctx context.Context, r *resource, left int64) ([]byte, error) {
-	if left <= 0 {
+// charged to the call's allowance as it reads (see callImages).
+func (ci *callImages) loadBytes(ctx context.Context, r *resource) ([]byte, error) {
+	if ci.allowance.Left() <= 0 {
 		return nil, ci.overAllowance(r)
 	}
-	limit := min(left, maxImageBytes)
-	b, err := ci.c.loader.Load(budget.With(ctx, &budget.Budget{MaxLoadBytes: limit}), r.u)
+	bud := &budget.Budget{MaxLoadBytes: maxImageBytes, Shared: ci.allowance}
+	b, err := ci.c.loader.Load(budget.With(ctx, bud), r.u)
 	if err != nil {
-		if errors.Is(err, budget.ErrLimit) && limit == maxImageBytes {
+		if errors.Is(err, budget.ErrLimit) && !bud.SharedBound() {
 			// The Loader read up to what it was given, which was the
 			// per-image limit, not what its message says (C88).
 			return nil, fmt.Errorf("aster: image %q is over %d bytes, the limit of one image: %w", r.url, maxImageBytes, ErrLimit)
@@ -249,16 +259,16 @@ func (ci *callImages) loadBytes(ctx context.Context, r *resource, left int64) ([
 	if int64(len(b)) > maxImageBytes {
 		return nil, fmt.Errorf("aster: image %q is over %d bytes, the limit of one image: %w", r.url, maxImageBytes, ErrLimit)
 	}
-	ci.mu.Lock()
-	defer ci.mu.Unlock()
-	if ci.used += int64(len(b)); ci.used > ci.allowance {
+	// What the Loader returned beyond what it charged as it read: all of it
+	// for a Loader of the caller's own, which does not read the budget.
+	if extra := int64(len(b)) - bud.Streamed(); extra > 0 && !ci.allowance.Take(extra) {
 		return nil, ci.overAllowance(r)
 	}
 	return b, nil
 }
 
 func (ci *callImages) overAllowance(r *resource) error {
-	return fmt.Errorf("aster: image %q: %w: the data and images of the call are over %d bytes (loaded bytes; WithMemoryLimit raises it)", r.url, ErrLimit, ci.allowance)
+	return fmt.Errorf("aster: image %q: %w: the data and images of the call are over %d bytes (loaded bytes; WithMemoryLimit raises it)", r.url, ErrLimit, ci.allowance.Max())
 }
 
 // limits are the bounds of one image, as every stage applies them.

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/upstream"
 )
@@ -143,7 +144,7 @@ func TestUpstreamD3HierarchyStratify(t *testing.T) {
 			r.Skip("rows whose fields are functions (toString)")
 			continue
 		}
-		tree, err := Stratify(tuples, key, parentKey, nil)
+		tree, err := Stratify(context.Background(), tuples, key, parentKey, nil)
 		if err != nil {
 			r.Check(c, nil, true)
 			continue
@@ -184,7 +185,8 @@ func d3HierTree(rec map[string]any) *Tree {
 		return n
 	}
 	root := build(rec)
-	if finish(root) != nil {
+	m := budget.NewMeter(context.Background())
+	if finish(&m, root) != nil {
 		return nil
 	}
 	return &Tree{Root: root}

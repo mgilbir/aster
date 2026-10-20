@@ -329,7 +329,7 @@ func setToHashString(cc *compileCtx, s *sset) string {
 		cc.work(1)
 		parts = append(parts, stringify(cc, x))
 	}
-	return "Set(" + strings.Join(parts, ",") + ")"
+	return "Set(" + joinCC(cc, parts, ",") + ")"
 }
 
 // moveChildrenLive reparents b's children to dst the way upstream does:

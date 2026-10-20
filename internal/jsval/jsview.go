@@ -35,7 +35,7 @@ func ToArrayLike(v Value) (a ArrayLike, ok bool) {
 	case KindNull, KindUndefined:
 		return a, false
 	case KindArr:
-		a.n = int64(len(v.arr().items))
+		a.n = int64(len(v.arr().list()))
 	case KindStr:
 		s := v.s()
 		if isASCII(s) {
@@ -45,7 +45,7 @@ func ToArrayLike(v Value) (a ArrayLike, ok bool) {
 			a.n = int64(len(a.units))
 		}
 	case KindObj:
-		f := ToNumber(v.obj().Lookup("length"))
+		f := ToNumber(v.obj().Prop("length")) // a function's length is its arity
 		switch {
 		case math.IsNaN(f) || f <= 0:
 			a.n = 0
@@ -68,7 +68,7 @@ func (a ArrayLike) At(i int64) Value {
 	}
 	switch a.v.Kind() {
 	case KindArr:
-		return a.v.arr().items[i]
+		return a.v.arr().list()[i]
 	case KindStr:
 		if a.units == nil {
 			return Str(a.v.s()[i : i+1])

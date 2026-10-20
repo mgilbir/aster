@@ -614,7 +614,7 @@ fast:
 				if utf8.Valid(raw) {
 					return string(raw), nil
 				}
-				return string([]rune(string(raw))), nil
+				return string(AppendDecoded(nil, raw)), nil
 			}
 			if c == '\\' || c < 0x20 {
 				break fast
@@ -692,12 +692,13 @@ fast:
 			buf = append(buf, c)
 			p.i++
 		default:
-			// A character of the text: invalid UTF-8 reads as U+FFFD, a
-			// byte at a time, so the bytes of a surrogate the text holds
-			// raw are not taken for the code unit an escape makes.
-			r, w := utf8.DecodeRune(p.s[p.i:])
-			if r == utf8.RuneError && w == 1 {
-				buf = utf8.AppendRune(buf, r)
+			// A character of the text: invalid UTF-8 reads as U+FFFD, one
+			// for each maximal subpart as the WHATWG decoder reads it, so
+			// the bytes of a surrogate the text holds raw are not taken for
+			// the code unit an escape makes.
+			r, w := DecodeRune(p.s[p.i:])
+			if r == utf8.RuneError {
+				buf = append(buf, "\uFFFD"...)
 			} else {
 				buf = append(buf, p.s[p.i:p.i+w]...)
 			}
@@ -707,22 +708,10 @@ fast:
 	return "", p.errf("unterminated string")
 }
 
-// appendDecoded appends text to b with each byte of invalid UTF-8 read as
-// U+FFFD.
+// appendDecoded appends text to b as the WHATWG decoder reads it
+// (AppendDecoded).
 func appendDecoded(b, text []byte) []byte {
-	if utf8.Valid(text) {
-		return append(b, text...)
-	}
-	for len(text) > 0 {
-		r, w := utf8.DecodeRune(text)
-		if r == utf8.RuneError && w == 1 {
-			b = utf8.AppendRune(b, r)
-		} else {
-			b = append(b, text[:w]...)
-		}
-		text = text[w:]
-	}
-	return b
+	return AppendDecoded(b, text)
 }
 
 func (p *parser) hex4() (rune, error) {
@@ -892,8 +881,9 @@ func (p *parser) array(depth int) (Value, error) {
 
 // AppendJSON appends JSON.stringify(v) (compact) to dst. Undefined object
 // members are omitted and undefined array elements written as null; non-finite
-// numbers are null; a Timestamp is written as its epoch number and a Pattern
-// as {} (it has no enumerable properties); a lone surrogate is escaped, as
+// numbers are null; a Timestamp is written as its toJSON, the ISO string
+// (null for an Invalid Date), and a Pattern as {} (it has no enumerable
+// properties); a lone surrogate is escaped, as
 // JSON.stringify escapes it. It is a detached walk (see Walker): a value an
 // expression or a transform built is written with the call's Walker.
 func AppendJSON(dst []byte, v Value) []byte { return Walker{}.AppendJSON(dst, v) }
@@ -1032,20 +1022,24 @@ func (p *parser) makeArr(n int) (Value, []Value) {
 	switch n {
 	case 1:
 		x := slabNext(&p.sl.pa1, 64)
-		x.items, b = x.buf[:], &x.arrayBox
+		x.set(x.buf[:])
+		b = &x.arrayBox
 	case 2:
 		x := slabNext(&p.sl.pa2, 64)
-		x.items, b = x.buf[:], &x.arrayBox
+		x.set(x.buf[:])
+		b = &x.arrayBox
 	case 3:
 		x := slabNext(&p.sl.pa3, 32)
-		x.items, b = x.buf[:], &x.arrayBox
+		x.set(x.buf[:])
+		b = &x.arrayBox
 	case 4:
 		x := slabNext(&p.sl.pa4, 32)
-		x.items, b = x.buf[:], &x.arrayBox
+		x.set(x.buf[:])
+		b = &x.arrayBox
 	default:
 		return MakeArr(n)
 	}
-	return ref(KindArr, unsafe.Pointer(b)), b.items
+	return ref(KindArr, unsafe.Pointer(b)), b.list()
 }
 
 // newObject is NewObject drawing small objects from the parser's chunks.

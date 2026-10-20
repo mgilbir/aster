@@ -1,6 +1,8 @@
 package vegalite
 
 import (
+	"unsafe"
+
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -248,10 +250,13 @@ type titleMerge struct {
 	byKey map[string][]int
 }
 
-// mergeTitle charges cc by the titles' text: merged across views, a title
-// grows with each, as upstream's does.
+// mergeTitle is upstream's mergeTitle, [...array(t1), ...array(t2)]
+// .join(', '). Merged across views, a title grows with each, and upstream
+// copies the whole of it at each view: quadratic in the views. A title this
+// function made, and still the whole of its buffer, is extended in place
+// instead (titleAcc): the text is the same, and each view costs its own
+// title.
 func mergeTitle(cc *compileCtx, t1, t2 Value) Value {
-	cc.work(1 + int64(len(t1.AsString())+len(t2.AsString()))/16)
 	if deepEqual(cc, t1, t2) || !t2.IsTruthy() {
 		return t1
 	} else if !t1.IsTruthy() {
@@ -259,10 +264,55 @@ func mergeTitle(cc *compileCtx, t1, t2 Value) Value {
 	}
 	// [...array(title1), ...array(title2)].join(', '): null and undefined
 	// elements are written as "" (C86 of the 2026-10-18 audit).
-	items := append(append([]Value(nil), arrayOf(t1)...), arrayOf(t2)...)
-	cc.work(int64(len(items)))
-	return jsval.Str(cc.walker().Join(items, ", "))
+	var b *sbuf
+	if t1.IsStr() && cc != nil {
+		b = cc.titleAcc[titleKeyOf(t1.StrValue())]
+	}
+	if b == nil {
+		nb := newSbuf(cc)
+		b = &nb
+		for i, x := range arrayOf(t1) {
+			cc.work(1)
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			b.WriteString(titleElemText(cc, x))
+		}
+	} else {
+		delete(cc.titleAcc, titleKeyOf(t1.StrValue()))
+	}
+	for _, x := range arrayOf(t2) {
+		cc.work(1)
+		b.WriteString(", ")
+		b.WriteString(titleElemText(cc, x))
+	}
+	out := b.String()
+	if cc != nil {
+		if cc.titleAcc == nil {
+			cc.titleAcc = map[titleKey]*sbuf{}
+		}
+		cc.titleAcc[titleKeyOf(out)] = b
+	}
+	return jsval.Str(out)
 }
+
+// titleElemText is an element of a merged title as Array.prototype.join
+// writes it: "" for null and undefined, else its String.
+func titleElemText(cc *compileCtx, x Value) string {
+	if x.IsNullish() {
+		return ""
+	}
+	return cc.walker().String(x)
+}
+
+// titleKey is where a string's bytes are and how many: the string a buffer
+// made last (and only it) has its buffer's key.
+type titleKey struct {
+	p *byte
+	n int
+}
+
+func titleKeyOf(s string) titleKey { return titleKey{unsafe.StringData(s), len(s)} }
 
 // mergeTitleComponent merges two title components (text or field-def lists).
 func mergeTitleComponent(cc *compileCtx, v1, v2 withExplicit) withExplicit {

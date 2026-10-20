@@ -279,7 +279,7 @@ func TestUpstreamVegaStatistics(t *testing.T) {
 			r.Skip("unmapped " + c.Fn)
 		}
 	}
-	r.Done(11000)
+	r.Done(12333)
 }
 
 // sharedNormalCache is upstream's module-level `nextSample`.
@@ -524,7 +524,7 @@ func TestUpstreamD3ArrayQuantile(t *testing.T) {
 			r.Check(c, upstream.Enc(q), false)
 		}
 	}
-	r.Done(30)
+	r.Done(40)
 }
 
 // numbersOnly reports whether v is an array of finite-or-not numbers, with no NaN or other value d3

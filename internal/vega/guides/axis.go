@@ -1,8 +1,6 @@
 package guides
 
 import (
-	"errors"
-
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -33,71 +31,75 @@ type AxisPlan struct {
 }
 
 // NewAxis resolves the axis config precedence and prepares an axis. It fails
-// only for a specification that upstream would reject with an exception (a
-// missing scale or orient).
-func NewAxis(spec Value, sc Scope) (*AxisPlan, error) {
+// where upstream's parse throws: a specification that is not an object, an
+// orient with no config block name (see orientName), a config that is null.
+// The scale is read as upstream reads it, by its property key (["x"] is the
+// scale x); one that does not exist fails where the operator is made.
+func NewAxis(spec Value, sc Scope) (p *AxisPlan, err error) {
+	defer catch(&err)
 	if !spec.IsObj() {
-		return nil, errors.New("axis: specification must be an object")
+		// spec.orient of a primitive or an array is undefined: the
+		// TypeError of orient[0] (null is spec.scale's)
+		return nil, &Thrown{msg: "Cannot read properties of undefined (reading '0')"}
 	}
-	if !spec.Get("scale").IsStr() {
-		return nil, errors.New("axis: missing scale")
-	}
-	config, err := axisConfig(spec, sc)
-	if err != nil {
-		return nil, err
-	}
+	config := axisConfig(spec, sc)
 	l := lookup{spec: spec, config: config, sc: sc}
 	band := tickBand(l)
-	p := &AxisPlan{spec: spec, config: config, l: l, band: band}
+	p = &AxisPlan{spec: spec, config: config, l: l, band: band}
+	scale := l.sp("scale")
 	p.Datum = objv(
-		"scale", spec.Get("scale"),
+		"scale", scale,
 		"ticks", jsval.Bool(l.get("ticks").IsTruthy()),
 		"labels", jsval.Bool(l.get("labels").IsTruthy()),
 		"grid", jsval.Bool(l.get("grid").IsTruthy()),
 		"domain", jsval.Bool(l.get("domain").IsTruthy()),
-		"title", jsval.Bool(!spec.Get("title").IsNullish()),
+		"title", jsval.Bool(!l.sp("title").IsNullish()),
 	)
 	p.Ticks = AxisTicksParams{
-		Scale:      spec.Get("scale").StrValue(),
+		Scale:      scaleKey(scale),
 		Extra:      band.extra,
-		Count:      spec.Get("tickCount"),
-		Values:     spec.Get("values"),
-		MinStep:    spec.Get("tickMinStep"),
-		FormatType: spec.Get("formatType"),
-		Format:     spec.Get("format"),
+		Count:      l.sp("tickCount"),
+		Values:     l.sp("values"),
+		MinStep:    l.sp("tickMinStep"),
+		FormatType: l.sp("formatType"),
+		Format:     l.sp("format"),
 	}
 	return p, nil
 }
 
 // Mark returns the axis group definition. dataRef feeds the group (one
 // datum, see Datum) and ticksRef feeds grid, tick and label marks.
-func (p *AxisPlan) Mark(dataRef, ticksRef Value) Value {
-	spec, _ := p.spec, p.config
+func (p *AxisPlan) Mark(dataRef, ticksRef Value) (mark Value, err error) {
+	defer catch(&err)
+	spec := p.spec
 	l := p.l
-	encode := spec.Get("encode")
-	axisEncode := encode.Get("axis")
+	encode := or(l.sp("encode"), objv())
+	axisEncode := or(member(encode, "axis"), objv())
 	datum := p.Datum
 
 	var children []Value
 	var size Value
+	name := or(member(axisEncode, "name"), jsval.Undefined)
+	interactive := member(axisEncode, "interactive")
+	style := member(axisEncode, "style")
 	if datum.Get("grid").BoolValue() {
-		children = append(children, axisGrid(spec, l, encode.Get("grid"), ticksRef, p.band))
+		children = append(children, axisGrid(spec, l, member(encode, "grid"), ticksRef, p.band))
 	}
 	if datum.Get("ticks").BoolValue() {
 		size = l.get("tickSize")
-		children = append(children, axisTicks(spec, l, encode.Get("ticks"), ticksRef, size, p.band))
+		children = append(children, axisTicks(spec, l, member(encode, "ticks"), ticksRef, size, p.band))
 	}
 	if datum.Get("labels").BoolValue() {
 		if !datum.Get("ticks").BoolValue() {
 			size = jsval.Num(0)
 		}
-		children = append(children, axisLabels(spec, l, encode.Get("labels"), ticksRef, size, p.band))
+		children = append(children, axisLabels(spec, l, member(encode, "labels"), ticksRef, size, p.band))
 	}
 	if datum.Get("domain").BoolValue() {
-		children = append(children, axisDomain(spec, l, encode.Get("domain"), dataRef))
+		children = append(children, axisDomain(spec, l, member(encode, "domain"), dataRef))
 	}
 	if datum.Get("title").BoolValue() {
-		children = append(children, axisTitle(spec, l, encode.Get("title"), dataRef))
+		children = append(children, axisTitle(spec, l, member(encode, "title"), dataRef))
 	}
 
 	m := obj(
@@ -108,28 +110,28 @@ func (p *AxisPlan) Mark(dataRef, ticksRef Value) Value {
 		"aria", l.get("aria"),
 		"description", l.get("description"),
 		"zindex", l.get("zindex"),
-		"name", or(axisEncode.Get("name"), jsval.Undefined),
-		"interactive", axisEncode.Get("interactive"),
-		"style", axisEncode.Get("style"),
+		"name", name,
+		"interactive", interactive,
+		"style", style,
 	)
-	return guideGroup(m)
+	return guideGroup(m), nil
 }
 
 func (p *AxisPlan) axisEncode() *Object {
 	encode := obj("enter", objv(), "update", objv())
-	spec, l := p.spec, p.l
+	l := p.l
 	addEncoders(encode, []kv{
 		{"orient", l.get("orient")},
 		{"offset", or(l.get("offset"), jsval.Int(0))},
-		{"position", value(spec.Get("position"), jsval.Int(0))},
+		{"position", value(l.sp("position"), jsval.Int(0))},
 		{"titlePadding", l.get("titlePadding")},
 		{"minExtent", l.get("minExtent")},
 		{"maxExtent", l.get("maxExtent")},
-		{"range", objv("signal", `abs(span(range("`+spec.Get("scale").StrValue()+`")))`)},
+		{"range", objv("signal", `abs(span(range("`+l.sp("scale").AsString()+`")))`)},
 		{"translate", l.get("translate")},
 		// accessibility support
-		{"format", spec.Get("format")},
-		{"formatType", spec.Get("formatType")},
+		{"format", l.sp("format")},
+		{"formatType", l.sp("formatType")},
 	}, nil)
 	return encode
 }
@@ -327,7 +329,8 @@ func axisTicks(spec Value, l lookup, userEncode, dataRef, size Value, band tickB
 	return guideMark(l, obj("type", "rule", "role", "axis-tick", "key", fValue, "from", dataRef, "encode", encode), userEncode)
 }
 
-func flushExpr(scale string, threshold Value, a, b, c string) Value {
+func flushExpr(scaleV, threshold Value, a, b, c string) Value {
+	scale := scaleV.AsString()
 	return objv("signal", `flush(range("`+scale+`"), `+
 		`scale("`+scale+`", datum.value), `+
 		threshold.AsString()+","+a+","+b+","+c+")")
@@ -335,7 +338,7 @@ func flushExpr(scale string, threshold Value, a, b, c string) Value {
 
 func axisLabels(spec Value, l lookup, userEncode, dataRef, size Value, band tickBandInfo) Value {
 	orient := spec.Get("orient")
-	scale := spec.Get("scale").StrValue()
+	scale := spec.Get("scale")
 	sign := getSign(orient, -1, 1)
 	flush := deref(l.get("labelFlush"))
 	flushOffset := deref(l.get("labelFlushOffset"))
@@ -470,7 +473,7 @@ func axisTitle(spec Value, l lookup, userEncode, dataRef Value) Value {
 	set(update, "text", jsval.Obj(encoder(spec.Get("title"))))
 	encode := obj("enter", enter, "update", update, "exit", objv("opacity", zero()))
 
-	titlePos := objv("signal", `lerp(range("`+spec.Get("scale").StrValue()+`"), `+anchorExpr("0", "1", "0.5")+")")
+	titlePos := objv("signal", `lerp(range("`+spec.Get("scale").AsString()+`"), `+anchorExpr("0", "1", "0.5")+")")
 	set(update, "x", ifX(orient, titlePos, jsval.Undefined))
 	set(update, "y", ifY(orient, titlePos, jsval.Undefined))
 	set(enter, "angle", ifX(orient, zero(), mult(sign, 90)))

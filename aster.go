@@ -23,14 +23,15 @@ import (
 	"fmt"
 	"image"
 	"math"
-	"reflect"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/fontsubset"
+	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/jsval"
+	"github.com/mgilbir/aster/internal/loader"
 	"github.com/mgilbir/aster/internal/pngopt"
 	"github.com/mgilbir/aster/internal/raster"
 	"github.com/mgilbir/aster/internal/scene"
@@ -118,16 +119,23 @@ func AvailableVersions() ([]VersionInfo, error) {
 // New creates a Converter with the given options. It fails for an option
 // that is not valid: an unknown Vega-Lite version (WithVegaLiteVersion), an
 // unknown time zone or "Local" (WithTimezone), a theme that is not a JSON
-// object (WithTheme), a nil pointer as the Loader (WithLoader), a negative
-// face index (WithFontFace), a zero WithPixelWorkLimit, a font that does
-// not load (WithFont, WithFontFace, WithFontInstance), and a family with no
-// font given to WithFontFallback or WithDefault*Family. The fonts are loaded here when any
-// font option is given; with the embedded fonts alone, New loads nothing and
-// they load on first use.
+// object (WithTheme), a nil pointer as the Loader or as a child of a
+// FallbackLoader (WithLoader), a negative face or palette index
+// (WithFontFace, WithFontPalette), a zero WithPixelWorkLimit, a projection
+// that is not usable (WithProjection), a font that does not load (WithFont,
+// WithFontFace, WithFontInstance), and a family with no font given to
+// WithFontFallback, WithFontPalette or WithDefault*Family. A nil Option is
+// no option. The fonts are loaded here when any font option is given; with
+// the embedded fonts alone, New loads nothing and they load on first use.
+//
+// The methods of a Converter that New did not make (its zero value, a nil
+// pointer) return an error, and its Close does nothing.
 func New(opts ...Option) (*Converter, error) {
 	cfg := defaultConfig()
 	for _, opt := range opts {
-		opt(cfg)
+		if opt != nil { // a nil Option is no option: var o Option; if … { o = … }
+			opt(cfg)
+		}
 	}
 	if err := errors.Join(cfg.errs...); err != nil {
 		return nil, err
@@ -152,8 +160,11 @@ func New(opts ...Option) (*Converter, error) {
 	}
 	if cfg.loader == nil {
 		cfg.loader = DenyLoader{}
-	} else if isNilPointer(cfg.loader) {
+	} else if loader.IsNil(cfg.loader) {
 		return nil, fmt.Errorf("aster: WithLoader: a nil %T (pass nil for the default, DenyLoader)", cfg.loader)
+	} else if what := loader.NilChild(cfg.loader); what != "" {
+		// A composite's children are the Loader too (C16).
+		return nil, fmt.Errorf("aster: WithLoader: %s", what)
 	}
 	c := &Converter{cfg: cfg, lim: deriveLimits(cfg.memoryLimit, cfg.pixelWork), location: loc, vl: vlVersion}
 	c.loader = trackedLoader{c, cfg.loader}
@@ -196,35 +207,35 @@ func compilerFor(v string) (string, error) {
 	return "", fmt.Errorf("aster: unknown Vega-Lite version %q (available: %s)", v, strings.Join(names, ", "))
 }
 
-// isNilPointer reports whether l is a typed nil: an interface holding a nil
-// pointer, map, slice, channel or function, which is not the nil that
-// selects the default and panics at first use (C76).
-func isNilPointer(l Loader) bool {
-	v := reflect.ValueOf(l)
-	switch v.Kind() {
-	case reflect.Pointer, reflect.Map, reflect.Slice, reflect.Chan, reflect.Func, reflect.Interface:
-		return v.IsNil()
+// recoverStage, deferred, turns a panic in the stage *stage names into the
+// stage's error. Every layer returns errors for bad input, so a panic is a
+// bug — but it must not take the host process down.
+//
+// A budget that stops work deep inside a stage (the geographic path walk,
+// text shaping) panics with its error: that is a limit or the end of the
+// call's context, not a bug, and it is the stage's error as one returned
+// would be, through stageErr, so that its message names the stage and the
+// timeout as errors.md says (C58).
+func (c *Converter) recoverStage(ctx context.Context, stage *string, err *error) {
+	r := recover()
+	if r == nil {
+		return
 	}
-	return false
-}
-
-// recoverInto turns a panic into an error. Every layer returns errors for bad
-// input, so a panic is a bug — but it must not take the host process down.
-func recoverInto(err *error) {
-	if r := recover(); r != nil {
-		// A budget that stops work deep inside a stage (the geographic path
-		// walk, text shaping) panics with its error: it is a limit or the
-		// call's context, not a bug.
-		if s, ok := r.(*budget.Stop); ok {
-			*err = fmt.Errorf("aster: %w", s.Err)
-			return
-		}
-		if e, ok := r.(error); ok && errors.Is(e, ErrLimit) {
-			*err = fmt.Errorf("aster: %w", e)
-			return
-		}
-		*err = fmt.Errorf("aster: internal error: %v", r)
+	if s, ok := r.(*budget.Stop); ok {
+		*err = c.stageErr(ctx, *stage, s.Err)
+		return
 	}
+	// An exception an expression raises inside a scene's shape or clip
+	// generator, which runs while the SVG is written, as upstream's does.
+	if thrown, ok := vega.ThrownAtRender(r); ok {
+		*err = c.stageErr(ctx, *stage, thrown)
+		return
+	}
+	if e, ok := r.(error); ok && errors.Is(e, ErrLimit) {
+		*err = c.stageErr(ctx, *stage, e)
+		return
+	}
+	*err = fmt.Errorf("aster: %s: internal error: %v", *stage, r)
 }
 
 // stagesKey carries a stage timer in a call's context; only the tests set it
@@ -273,7 +284,7 @@ func signalWritesFrom(ctx context.Context) []vega.SignalWrite {
 // withRender returns ctx carrying the writes of the signals rc sets, their
 // values turned into the JSON values they encode to, and installs rc's error
 // handler in the call's report.
-func withRender(ctx context.Context, rc renderConfig) (context.Context, error) {
+func (c *Converter) withRender(ctx context.Context, rc renderConfig) (context.Context, error) {
 	if rc.handler != nil {
 		reportFrom(ctx).handler = rc.handler
 	}
@@ -282,7 +293,11 @@ func withRender(ctx context.Context, rc renderConfig) (context.Context, error) {
 	}
 	ws := make([]vega.SignalWrite, len(rc.signals))
 	for i, s := range rc.signals {
-		b, err := json.Marshal(s.value)
+		var b []byte
+		err := c.callback("encoding its value", func() (err error) {
+			b, err = json.Marshal(s.value) // a value's MarshalJSON is the caller's code
+			return err
+		})
 		if err != nil {
 			return nil, fmt.Errorf("aster: signal %q: %w", s.name, err)
 		}
@@ -295,28 +310,58 @@ func withRender(ctx context.Context, rc renderConfig) (context.Context, error) {
 	return context.WithValue(ctx, signalWritesKey{}, ws), nil
 }
 
+// The per-call options are read, and checked, by the public method before the
+// call starts (C56): a call with an option that is not valid fails at once,
+// before its Loader traffic and its render. A nil option is no option, as a
+// nil Option is to New (C55).
+
 func renderOptions(opts []RenderOption) renderConfig {
 	var rc renderConfig
 	for _, o := range opts {
-		o.applyRender(&rc)
+		if o != nil {
+			o.applyRender(&rc)
+		}
 	}
 	return rc
 }
 
-func pngRenderOptions(opts []PNGOption) renderConfig {
+// pngOptions are a PNG call's options, checked.
+func pngOptions(opts []PNGOption) (*pngConfig, error) {
 	cfg := defaultPNGConfig()
 	for _, o := range opts {
-		o.applyPNG(cfg)
+		if o != nil {
+			o.applyPNG(cfg)
+		}
 	}
-	return cfg.render
+	if !(cfg.scale > 0) || math.IsInf(cfg.scale, 1) {
+		return nil, fmt.Errorf("aster: invalid PNG scale %v (must be a positive, finite number)", cfg.scale)
+	}
+	if cfg.quantizeErr != nil {
+		return nil, cfg.quantizeErr
+	}
+	return cfg, nil
 }
 
-func pdfRenderOptions(opts []PDFOption) renderConfig {
-	var cfg pdfConfig
+// pdfOptions are a PDF call's options, checked, and the text mode they select.
+func pdfOptions(opts []PDFOption) (*pdfConfig, svgpdf.TextMode, error) {
+	cfg := &pdfConfig{text: PDFTextEmbed}
 	for _, o := range opts {
-		o.applyPDF(&cfg)
+		if o != nil {
+			o.applyPDF(cfg)
+		}
 	}
-	return cfg.render
+	var mode svgpdf.TextMode
+	switch cfg.text {
+	case PDFTextEmbed:
+		mode = svgpdf.TextEmbed
+	case PDFTextNamed:
+		mode = svgpdf.TextNamed
+	case PDFTextOutlines:
+		mode = svgpdf.TextOutlines
+	default:
+		return nil, 0, fmt.Errorf("aster: unknown PDF text mode %d", cfg.text)
+	}
+	return cfg, mode, nil
 }
 
 // VegaToSVG renders a Vega spec (JSON) to an SVG string.
@@ -350,7 +395,8 @@ func (c *Converter) vegaLiteSVG(ctx context.Context, spec []byte) (string, error
 
 // renderSVG runs a Vega spec and serializes the resulting scenegraph.
 func (c *Converter) renderSVG(ctx context.Context, spec jsval.Value) (out string, err error) {
-	defer recoverInto(&err)
+	stage := "rendering Vega"
+	defer c.recoverStage(ctx, &stage, &err)
 	fonts, shaper, err := c.fontSet()
 	if err != nil {
 		return "", err
@@ -366,7 +412,7 @@ func (c *Converter) renderSVG(ctx context.Context, spec jsval.Value) (out string
 		Location:    c.location,
 		Projections: c.cfg.projections,
 		Now:         c.cfg.now,
-		// Set only by the tests' signal sweep (export_test.go).
+		// The call's WithSignal writes (see withRender).
 		SignalWrites: signalWritesFrom(ctx),
 		Config:       c.theme,
 		Limits:       c.lim.vega,
@@ -383,6 +429,9 @@ func (c *Converter) renderSVG(ctx context.Context, spec jsval.Value) (out string
 		opts.TextMeasurer = canvas
 		opts.WordcloudText = wordcloud.NewCanvasRenderer(m)
 	}
+	if c.cfg.wordcloudBoxForTest {
+		opts.WordcloudText = wordcloud.BoxRenderer{}
+	}
 	if st := stagesFrom(ctx); st != nil {
 		opts.Stages = st
 		if m != nil {
@@ -398,6 +447,7 @@ func (c *Converter) renderSVG(ctx context.Context, spec jsval.Value) (out string
 	if err != nil {
 		return "", c.stageErr(ctx, "rendering Vega", err)
 	}
+	stage = "writing SVG"
 	images := imagesFrom(ctx)
 	// The images draw from what the data left of the call's allowance.
 	images.chargeData(res.LoadedBytes)
@@ -407,9 +457,12 @@ func (c *Converter) renderSVG(ctx context.Context, spec jsval.Value) (out string
 		Origin: res.Origin,
 		// An SVG past this size is not a chart anybody can use.
 		MaxBytes: c.lim.svgBytes,
+		DateText: func(dst []byte, ms float64) []byte {
+			return append(dst, format.DateToString(ms, format.Local(c.location))...)
+		},
 	}
 	if res.HasBackground {
-		so.Background = res.Background
+		so.Background, so.DrawBackground = res.Background, true
 	}
 	if canvas != nil {
 		so.Measurer = canvas
@@ -484,6 +537,9 @@ func (c *Converter) renderSVG(ctx context.Context, spec jsval.Value) (out string
 		}
 		return info
 	}
+	// The scene's shape and clip generators are vega's: an expression they
+	// evaluate can throw while the SVG is written, which ends the render as
+	// it does upstream's (recoverStage turns it into the stage's error).
 	out, err = timed(ctx, "svg", func() (string, error) { return svg.Render(ctx, res.Scenegraph, so) })
 	if err == nil {
 		err = hookErr
@@ -622,45 +678,49 @@ func (c *Converter) compileVegaLite(ctx context.Context, spec []byte) (jsval.Val
 
 // VegaToPNG renders a Vega spec (JSON) to a PNG image.
 func (c *Converter) VegaToPNG(spec []byte, opts ...PNGOption) ([]byte, error) {
-	return call(c, pngRenderOptions(opts), func(ctx context.Context) ([]byte, error) {
+	cfg, err := pngOptions(opts)
+	if err != nil {
+		return nil, err
+	}
+	return call(c, cfg.render, func(ctx context.Context) ([]byte, error) {
 		svg, err := c.vegaSVG(ctx, spec)
 		if err != nil {
 			return nil, err
 		}
-		return c.svgToPNG(ctx, svg, opts)
+		return c.svgToPNG(ctx, svg, cfg)
 	})
 }
 
 // VegaLiteToPNG renders a Vega-Lite spec (JSON) to a PNG image.
 func (c *Converter) VegaLiteToPNG(spec []byte, opts ...PNGOption) ([]byte, error) {
-	return call(c, pngRenderOptions(opts), func(ctx context.Context) ([]byte, error) {
+	cfg, err := pngOptions(opts)
+	if err != nil {
+		return nil, err
+	}
+	return call(c, cfg.render, func(ctx context.Context) ([]byte, error) {
 		svg, err := c.vegaLiteSVG(ctx, spec)
 		if err != nil {
 			return nil, err
 		}
-		return c.svgToPNG(ctx, svg, opts)
+		return c.svgToPNG(ctx, svg, cfg)
 	})
 }
 
 // SVGToPNG rasterizes an SVG string to a PNG image.
 func (c *Converter) SVGToPNG(svg string, opts ...PNGOption) ([]byte, error) {
-	return call(c, svgInput(pngRenderOptions(opts)), func(ctx context.Context) ([]byte, error) {
-		return c.svgToPNG(ctx, svg, opts)
+	cfg, err := pngOptions(opts)
+	if err != nil {
+		return nil, err
+	}
+	return call(c, svgInput(cfg.render), func(ctx context.Context) ([]byte, error) {
+		return c.svgToPNG(ctx, svg, cfg)
 	})
 }
 
-func (c *Converter) svgToPNG(ctx context.Context, svg string, opts []PNGOption) (out []byte, err error) {
-	defer recoverInto(&err)
-	cfg := defaultPNGConfig()
-	for _, opt := range opts {
-		opt.applyPNG(cfg)
-	}
-	if cfg.render.handler != nil {
-		reportFrom(ctx).handler = cfg.render.handler
-	}
-	if !(cfg.scale > 0) || math.IsInf(cfg.scale, 1) {
-		return nil, fmt.Errorf("aster: invalid PNG scale %v (must be a positive, finite number)", cfg.scale)
-	}
+// svgToPNG rasterizes svg as cfg, checked by pngOptions, says.
+func (c *Converter) svgToPNG(ctx context.Context, svg string, cfg *pngConfig) (out []byte, err error) {
+	stage := "rendering PNG"
+	defer c.recoverStage(ctx, &stage, &err)
 	img, out, err := c.rasterize(ctx, svg, cfg.scale)
 	if err != nil {
 		return nil, err
@@ -668,6 +728,7 @@ func (c *Converter) svgToPNG(ctx context.Context, svg string, opts []PNGOption) 
 	// Post-processing works on the image the rasterizer drew, not on its
 	// PNG decoded again, under the call's context and ledger like every
 	// stage (C29).
+	stage = "optimizing PNG"
 	switch {
 	case cfg.quantizeColors > 0:
 		out, err = pngopt.QuantizeOrRecodeImage(ctx, img, out, cfg.quantizeColors)
@@ -689,8 +750,19 @@ func (c *Converter) rasterize(ctx context.Context, svg string, scale float64) (*
 	sh = raster.BoundShaper(sh, text.ShapingBudgetFrom(ctx))
 	var img *image.NRGBA
 	out, err := timed(ctx, "png", func() ([]byte, error) {
+		lim := c.lim.rasterAt(scale)
+		// The copy of the input Render takes is charged first, and an input
+		// past the bound is refused before it is made (C8).
+		if m := lim.WithDefaults().MaxInputBytes; len(svg) > m {
+			return nil, fmt.Errorf("raster: SVG input is %d bytes, limit is %d: %w", len(svg), m, ErrLimit)
+		}
+		l := budget.LedgerFrom(ctx)
+		if err := l.Alloc(int64(len(svg))); err != nil {
+			return nil, err
+		}
+		defer l.Free(int64(len(svg)))
 		var err error
-		img, err = raster.Render([]byte(svg), raster.Options{Scale: scale, Shaper: sh, Context: ctx, Limits: c.lim.rasterAt(scale), Images: imagesFrom(ctx).load, ImageError: imagesFrom(ctx).imageError(ctx)})
+		img, err = raster.Render([]byte(svg), raster.Options{Scale: scale, Shaper: sh, Context: ctx, Limits: lim, Images: imagesFrom(ctx).load, ImageError: imagesFrom(ctx).imageError(ctx)})
 		if err != nil {
 			return nil, err
 		}
@@ -753,7 +825,8 @@ type pdfConfig struct {
 }
 
 // WithPDFText selects how text is represented in the PDF; see the
-// PDFTextMode constants. The default is PDFTextEmbed.
+// PDFTextMode constants. The default is PDFTextEmbed. A mode that is not one
+// of them fails the call before it starts.
 func WithPDFText(mode PDFTextMode) PDFOption {
 	return pdfOption(func(c *pdfConfig) {
 		c.text = mode
@@ -795,12 +868,16 @@ type pdfOut struct {
 // toPDF is one PDF call: the SVG svg makes (from a specification, or given),
 // converted.
 func (c *Converter) toPDF(opts []PDFOption, usage bool, svg func(ctx context.Context) (string, error)) (pdfOut, error) {
-	return call(c, pdfRenderOptions(opts), func(ctx context.Context) (pdfOut, error) {
+	cfg, mode, err := pdfOptions(opts)
+	if err != nil {
+		return pdfOut{}, err
+	}
+	return call(c, cfg.render, func(ctx context.Context) (pdfOut, error) {
 		s, err := svg(ctx)
 		if err != nil {
 			return pdfOut{}, err
 		}
-		pdf, uses, err := c.svgToPDF(ctx, s, opts, usage)
+		pdf, uses, err := c.svgToPDF(ctx, s, mode, usage, true)
 		return pdfOut{pdf, uses}, err
 	})
 }
@@ -822,8 +899,12 @@ func (c *Converter) SVGToPDF(svg string, opts ...PDFOption) ([]byte, error) {
 
 // svgPDF is one call converting SVG input to PDF.
 func (c *Converter) svgPDF(svg string, opts []PDFOption, usage bool) (pdfOut, error) {
-	return call(c, svgInput(pdfRenderOptions(opts)), func(ctx context.Context) (pdfOut, error) {
-		pdf, uses, err := c.svgToPDF(ctx, svg, opts, usage)
+	cfg, mode, err := pdfOptions(opts)
+	if err != nil {
+		return pdfOut{}, err
+	}
+	return call(c, svgInput(cfg.render), func(ctx context.Context) (pdfOut, error) {
+		pdf, uses, err := c.svgToPDF(ctx, svg, mode, usage, false)
 		return pdfOut{pdf, uses}, err
 	})
 }
@@ -836,40 +917,27 @@ func (c *Converter) SVGToPDFUsage(svg string, opts ...PDFOption) ([]byte, []Font
 	return out.pdf, out.uses, err
 }
 
-// svgToPDF converts svg, reporting its font usage when usage is set: usage
-// copies the font programs it reports.
-func (c *Converter) svgToPDF(ctx context.Context, svg string, opts []PDFOption, usage bool) (pdf []byte, uses []FontUsage, err error) {
+// svgToPDF converts svg with text mode, reporting its font usage when usage
+// is set: usage copies the font programs it reports. chart is set for the SVG
+// of a chart the caller gave as a specification, which is bounded as the SVG
+// writer bounded it rather than as SVG input (C44).
+func (c *Converter) svgToPDF(ctx context.Context, svg string, mode svgpdf.TextMode, usage, chart bool) (pdf []byte, uses []FontUsage, err error) {
 	defer func() {
 		if err != nil {
 			pdf, uses = nil, nil
 		}
 	}()
-	defer recoverInto(&err)
-	cfg := &pdfConfig{text: PDFTextEmbed}
-	for _, opt := range opts {
-		opt.applyPDF(cfg)
-	}
-	if cfg.render.handler != nil {
-		reportFrom(ctx).handler = cfg.render.handler
-	}
-	var mode svgpdf.TextMode
-	switch cfg.text {
-	case PDFTextEmbed:
-		mode = svgpdf.TextEmbed
-	case PDFTextNamed:
-		mode = svgpdf.TextNamed
-	case PDFTextOutlines:
-		mode = svgpdf.TextOutlines
-	default:
-		return nil, nil, fmt.Errorf("aster: unknown PDF text mode %d", cfg.text)
-	}
+	stage := "rendering PDF"
+	defer c.recoverStage(ctx, &stage, &err)
 	m, _, err := c.fontSet()
 	if err != nil {
 		return nil, nil, err
 	}
 	m = m.Bounded(text.ShapingBudgetFrom(ctx))
 	t0 := time.Now()
-	popts := svgpdf.Options{Text: mode, Context: ctx, Images: imagesFrom(ctx).load, ImageError: imagesFrom(ctx).imageError(ctx), Limits: svgpdf.Limits{MaxImagePixels: c.imagePixels(), MaxPixelOps: c.lim.pixelOps}}
+	lim := c.lim.pdfLimits(chart)
+	lim.MaxImagePixels, lim.MaxPixelOps = c.imagePixels(), c.lim.pixelOps
+	popts := svgpdf.Options{Text: mode, Context: ctx, Images: imagesFrom(ctx).load, ImageError: imagesFrom(ctx).imageError(ctx), Limits: lim}
 	if usage {
 		pdf, uses, err = svgpdf.ConvertWithUsage(svg, m, popts)
 	} else {

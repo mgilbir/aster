@@ -73,16 +73,20 @@ func (c *Converter) release() {
 	last := l.closed && l.n == 0
 	l.mu.Unlock()
 	if last {
+		// idle is closed whatever the Loader's Close does, so that no Close
+		// waits for it forever (C17).
+		defer close(l.idle)
 		c.closeLoader()
-		close(l.idle)
 	}
 }
 
-// closeLoader closes the Loader, once, if it is an io.Closer.
+// closeLoader closes the Loader, once, if it is an io.Closer: as a callback,
+// so that a panic in it is its error and a Close it calls does not wait for
+// itself.
 func (c *Converter) closeLoader() {
 	c.life.loaderOnce.Do(func() {
 		if closer, ok := c.cfg.loader.(io.Closer); ok {
-			c.life.loaderErr = closer.Close()
+			c.life.loaderErr = c.callback("the Loader's Close", closer.Close)
 		}
 	})
 }
@@ -99,6 +103,9 @@ func (c *Converter) closeLoader() {
 // when the last call in flight ends, and a later Close from outside the calls
 // waits for that and returns its error.
 func (c *Converter) Close() error {
+	if c == nil || c.cfg == nil {
+		return nil // not made by New: it holds nothing
+	}
 	l := &c.life
 	g := goid()
 	l.mu.Lock()
@@ -115,8 +122,10 @@ func (c *Converter) Close() error {
 		c.cancelAll()
 	}
 	if none {
-		c.closeLoader()
-		close(idle)
+		func() {
+			defer close(idle)
+			c.closeLoader()
+		}()
 	}
 	if inside {
 		return nil
@@ -131,9 +140,34 @@ func (c *Converter) Close() error {
 	return l.loaderErr
 }
 
-// callback runs f, a callback of a call (the error handler, a Loader method),
-// with the goroutine marked as inside one, for Close.
-func (c *Converter) callback(f func()) {
+// callback runs f, a call into the caller's code: a Loader method (Sanitize,
+// Load, Close), the error handler, a WithSignal value's MarshalJSON. It is the
+// one boundary every such call goes through, whatever goroutine the engine
+// runs it on (the image fetches of PNG and PDF output have their own), and it
+// gives them one contract:
+//
+//   - the goroutine is marked as inside a callback, so that a Close f makes
+//     does not wait for the call it is part of (see lifecycle);
+//   - a panic in f is recovered and is f's error, a *callbackPanic naming
+//     what panicked (C15, C17): a bug in the caller's code fails what it was
+//     asked for, as an error it returned would, and never the process.
+//
+// A custom projection's functions run on the calling goroutine, which call
+// marks for the whole call, under the render's own recover: they are too hot
+// to go through this one by one.
+func (c *Converter) callback(what string, f func() error) (err error) {
+	defer c.markInside()()
+	defer func() {
+		if r := recover(); r != nil {
+			err = &callbackPanic{what: what, value: r}
+		}
+	}()
+	return f()
+}
+
+// markInside marks the running goroutine as running a callback of a call,
+// for Close, until the function it returns is called.
+func (c *Converter) markInside() (unmark func()) {
 	l := &c.life
 	g := goid()
 	l.mu.Lock()
@@ -142,14 +176,27 @@ func (c *Converter) callback(f func()) {
 	}
 	l.inside[g]++
 	l.mu.Unlock()
-	defer func() {
+	return func() {
 		l.mu.Lock()
 		if l.inside[g]--; l.inside[g] == 0 {
 			delete(l.inside, g)
 		}
 		l.mu.Unlock()
-	}()
-	f()
+	}
+}
+
+// callbackPanic is the error a callback's panic becomes (see callback).
+type callbackPanic struct {
+	what  string // "the Loader's Load"
+	value any    // what it panicked with
+}
+
+func (e *callbackPanic) Error() string { return fmt.Sprintf("aster: %s panicked: %v", e.what, e.value) }
+
+// Unwrap is the value the callback panicked with, when it is an error.
+func (e *callbackPanic) Unwrap() error {
+	err, _ := e.value.(error)
+	return err
 }
 
 // goid is the running goroutine's id, read from its stack trace's header
@@ -180,14 +227,24 @@ type trackedLoader struct {
 }
 
 func (t trackedLoader) Sanitize(ctx context.Context, uri string) (s string, err error) {
-	t.c.callback(func() { s, err = t.l.Sanitize(ctx, uri) })
+	err = t.c.callback("the Loader's Sanitize", func() (err error) {
+		s, err = t.l.Sanitize(ctx, uri)
+		return err
+	})
 	return s, err
 }
 
 func (t trackedLoader) Load(ctx context.Context, uri string) (b []byte, err error) {
-	t.c.callback(func() { b, err = t.l.Load(ctx, uri) })
+	err = t.c.callback("the Loader's Load", func() (err error) {
+		b, err = t.l.Load(ctx, uri)
+		return err
+	})
 	return b, err
 }
+
+// errNotNew is what the methods of a Converter that New did not make return:
+// its zero value, or a nil pointer.
+var errNotNew = errors.New("aster: the Converter was not made by New")
 
 // errTimeout is the cause of a call's context when WithTimeout ends it, which
 // tells it from the deadline of a context the caller gave (WithContext).
@@ -267,14 +324,21 @@ func (e *ctxError) Unwrap() []error { return []error{e.err, e.cause} }
 // regardless.
 func call[T any](c *Converter, rc renderConfig, f func(ctx context.Context) (T, error)) (T, error) {
 	var zero T
+	if c == nil || c.cfg == nil {
+		return zero, errNotNew
+	}
 	release, ok := c.enter()
 	if !ok {
 		return zero, ErrClosed
 	}
 	defer release()
+	// The call's own goroutine runs only the engine and the callbacks it
+	// makes (the error handler, a projection's functions, the Loader): a
+	// Close from it is from inside the call, and must not wait for it.
+	defer c.markInside()()
 	ctx, cancel := c.opContext(rc.ctx)
 	defer cancel()
-	ctx, err := withRender(ctx, rc)
+	ctx, err := c.withRender(ctx, rc)
 	if err != nil {
 		return zero, err
 	}

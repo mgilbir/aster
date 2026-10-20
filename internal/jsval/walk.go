@@ -95,13 +95,27 @@ func WalkerFor(ctx context.Context) Walker {
 	if ctx == nil {
 		return Walker{}
 	}
-	return Walker{ctx: ctx, l: budget.LedgerFrom(ctx)}
+	f, _ := ctx.Value(dateTextKey{}).(func(dst []byte, ms float64) []byte)
+	return Walker{ctx: ctx, l: budget.LedgerFrom(ctx), date: f}
+}
+
+type dateTextKey struct{}
+
+// ContextWithDateText returns ctx carrying f, the call's
+// Date.prototype.toString (in the view's time zone, which jsval cannot
+// know): the Walkers of the call (WalkerFor) write a date with it wherever
+// JavaScript's String writes one, inside an array too (String([d]),
+// [d].join(), ” + [d], a relational comparison of arrays). JSON writes a
+// date as its toJSON whatever the zone.
+func ContextWithDateText(ctx context.Context, f func(dst []byte, ms float64) []byte) context.Context {
+	return context.WithValue(ctx, dateTextKey{}, f)
 }
 
 // WithDateText is w with String writing a date, at any depth, as f does
 // (Date.prototype.toString in a time zone, which jsval cannot know): the
 // String of a value as the expression evaluator and the transforms' keys
-// write it. Without it a date's String is its epoch number.
+// write it. Without it (and without ContextWithDateText in the call's
+// context) a date's String is its epoch number.
 func (w Walker) WithDateText(f func(dst []byte, ms float64) []byte) Walker {
 	w.date = f
 	return w
@@ -110,6 +124,12 @@ func (w Walker) WithDateText(f func(dst []byte, ms float64) []byte) Walker {
 // Detached reports whether w is the zero Walker, bounded by MaxDetachedWalk
 // rather than by a call.
 func (w Walker) Detached() bool { return w.ctx == nil }
+
+// DepthExceeded ends the call with the error of a value nested past
+// MaxValueDepth, as String does. It is for a caller that visits the arrays of
+// a value itself, to write their text as it goes (the SVG writer's bounded
+// output), and has met one nested deeper.
+func (w Walker) DepthExceeded() { stop(errWalkDepth) }
 
 // walk is the state of one walk.
 type walk struct {
@@ -436,7 +456,7 @@ func (k *walk) str(v Value, depth int) {
 	k.step()
 	switch v.Kind() {
 	case KindArr:
-		for i, it := range v.arr().items {
+		for i, it := range v.arr().list() {
 			if k.done {
 				return
 			}
@@ -505,13 +525,28 @@ func objectString(o *Object) string {
 			return protoString(o, ph.scope)
 		}
 	}
+	checkToPrimitive(o)
 	return "[object Object]"
+}
+
+// errNoPrimitive is the TypeError OrdinaryToPrimitive raises.
+var errNoPrimitive = &Thrown{Name: "TypeError", Msg: "Cannot convert object to primitive value"}
+
+// checkToPrimitive raises the TypeError of String(o) or Number(o) for a
+// plain object that holds a toString member of its own: no JSON value is a
+// function, so neither its toString nor the valueOf it inherits (which
+// answers the object itself) gives a primitive. ({"toString": "x"} + "" is
+// a TypeError in JavaScript.)
+func checkToPrimitive(o *Object) {
+	if o != nil && plainHost(o) && o.Has("toString") {
+		panic(errNoPrimitive)
+	}
 }
 
 // StringValue is vega-util's stringValue: see the package function.
 func (w Walker) StringValue(v Value) string {
 	switch v.Kind() {
-	case KindArr, KindStr, KindObj:
+	case KindArr, KindStr, KindObj, KindTimestamp:
 	default:
 		return v.primString()
 	}
@@ -541,7 +576,7 @@ func (k *walk) sval(v Value, depth int) {
 		}
 		k.step()
 		k.writeByte('[')
-		for i, it := range v.arr().items {
+		for i, it := range v.arr().list() {
 			if k.done {
 				return
 			}
@@ -556,9 +591,10 @@ func (k *walk) sval(v Value, depth int) {
 			}
 		}
 		k.writeByte(']')
-	case KindStr, KindObj:
-		// JSON, with U+2028 and U+2029 escaped: the expression parser
-		// takes them for line terminators.
+	case KindStr, KindObj, KindTimestamp:
+		// JSON (a Date, an object to stringValue, is its toJSON), with
+		// U+2028 and U+2029 escaped: the expression parser takes them for
+		// line terminators.
 		at := len(k.buf)
 		k.json(v, "", "", depth)
 		k.escapeSeparators(at)
@@ -644,18 +680,30 @@ func (k *walk) json(v Value, indent, prefix string, depth int) {
 		} else {
 			k.write("false")
 		}
-	case KindNum, KindTimestamp:
+	case KindNum:
 		if math.IsNaN(v.n()) || math.IsInf(v.n(), 0) {
 			k.write("null")
 		} else {
 			k.number(v.n())
+		}
+	case KindTimestamp:
+		// Date.prototype.toJSON: the ISO string, null for an Invalid Date.
+		var b [32]byte
+		if iso, ok := AppendISODate(b[:0], v.n()); ok {
+			k.room(len(iso) + 2)
+			k.buf = append(k.buf, '"')
+			k.buf = append(k.buf, iso...)
+			k.buf = append(k.buf, '"')
+			k.over()
+		} else {
+			k.write("null")
 		}
 	case KindStr:
 		k.quoted(v.s())
 	case KindPattern:
 		k.write("{}")
 	case KindArr:
-		items := v.arr().items
+		items := v.arr().list()
 		if len(items) == 0 {
 			k.write("[]")
 			return
@@ -773,7 +821,7 @@ func equalSmall(a, b Value, budget *int) (eq, done bool) {
 		if a.p == b.p {
 			return true, true
 		}
-		x, y := a.arr().items, b.arr().items
+		x, y := a.arr().list(), b.arr().list()
 		if len(x) != len(y) {
 			return false, true
 		}
@@ -833,7 +881,7 @@ func (k *walk) equal(a, b Value, depth int) bool {
 			// The same array: equal, however large, without a walk.
 			return true
 		}
-		x, y := a.arr().items, b.arr().items
+		x, y := a.arr().list(), b.arr().list()
 		if len(x) != len(y) {
 			return false
 		}

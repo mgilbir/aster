@@ -109,10 +109,17 @@ func TestNullPrototype(t *testing.T) {
 	if s, err := stringOf(Obj(o)); err != nil || s != "[object Object]" {
 		t.Errorf("after End: %q, %v; want [object Object]", s, err)
 	}
-	// A plain object (no scope) is unchanged.
-	if s, err := stringOf(mustParse(t, `{"toString":1}`)); err != nil || s != "[object Object]" {
-		t.Errorf("unscoped object with a toString of its own: %q, %v", s, err)
-	}
+	// A plain object (no scope) holding a toString of its own: String of it
+	// is the TypeError of upstream's OrdinaryToPrimitive (a *Thrown), as
+	// before there was any scope.
+	func() {
+		defer func() {
+			if r := recover(); r != errNoPrimitive {
+				t.Errorf("unscoped object with a toString of its own: recovered %v, want the TypeError", r)
+			}
+		}()
+		_ = mustParse(t, `{"toString":1}`).AsString()
+	}()
 }
 
 // TestPrototypeChainConversion: String of an object follows its chain to the

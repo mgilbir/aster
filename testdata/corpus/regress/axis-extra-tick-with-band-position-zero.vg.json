@@ -1,0 +1,5 @@
+{"width":200,"height":40,"padding":5,
+ "data":[{"name":"d","values":[{"k":"alpha"},{"k":"beta"},{"k":"gamma"}]}],
+ "scales":[{"name":"x","type":"band","domain":{"data":"d","field":"k"},"range":"width","padding":0.1}],
+ "axes":[{"orient":"bottom","scale":"x","tickExtra":true,"bandPosition":0},{"orient":"top","scale":"x","tickExtra":true,"bandPosition":0.5}],
+ "marks":[{"type":"rect","from":{"data":"d"},"encode":{"enter":{"x":{"scale":"x","field":"k","band":0},"width":{"scale":"x","band":1},"y":{"value":10},"height":{"value":20},"fill":{"value":"steelblue"}}}}]}

@@ -1,0 +1,1 @@
+{"width":100,"height":100,"data":[{"name":"w","values":[{"type":"Feature","geometry":{"type":"Point","coordinates":[10,20]}}]}],"projections":[{"name":"p","type":"constructor"}],"marks":[{"type":"shape","from":{"data":"w"},"encode":{"enter":{"fill":{"value":"red"}}},"transform":[{"type":"geoshape","projection":"p"}]}]}

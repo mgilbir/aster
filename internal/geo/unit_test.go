@@ -336,7 +336,7 @@ func TestAngle(t *testing.T) {
 		if c.Name == "identity" {
 			key = "polyHole"
 		}
-		s, ok := p.Path().String(geoms[key])
+		s, ok := stringOf(p.Path(), geoms[key])
 		checkPath(t, label+" path", s, ok, c.Path)
 	}
 }

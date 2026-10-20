@@ -55,7 +55,16 @@ jobs:
         with:
           go-version-file: go.mod
       - name: go test -short
-        run: go test -short -timeout 30m ./...
+        # testsummary prints what go test would, then the tests that skipped
+        # and why (every oracle comparison does under -short); bash with
+        # pipefail, so go test's own failure fails the step too.
+        shell: bash
+        run: go test -short -json -timeout 30m ./... | go run ./internal/cmd/testsummary
+      - name: fixed bounds match docs/limits.md
+        # Skipped under -short (it type-checks the engine from source, about
+        # 7 s) but needs no node: run here, so a bound changed without its
+        # doc fails the pull request, not the next push to main.
+        run: go test -count=1 -run '^TestFixedLimitsDocMatchesCode$' .
 
   build-32bit:
     # int is 32 bits on 386 and arm: what does not compile there, or what

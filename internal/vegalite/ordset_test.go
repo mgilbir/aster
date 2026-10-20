@@ -33,11 +33,21 @@ func TestSsetIsAJavaScriptSet(t *testing.T) {
 			t.Errorf(`n=%d: has("a")=%v, has(new ["a"])=%v, has(a2)=%v`, n, s.has("a"), s.hasValue(jsval.ArrOf(jsval.Str("a"))), s.hasValue(a2))
 		}
 		t2 := ssetOfValues([]Value{a1})
-		if hasIntersection(newSset("a"), t2) || !hasIntersection(s, t2) || setEqual(newSset("a"), t2) {
+		if intersects(newSset("a"), t2) || !intersects(s, t2) || setEqual(newSset("a"), t2) {
 			t.Errorf("n=%d: \"a\" and [\"a\"] intersect or are equal sets", n)
 		}
 		if c := s.clone(); !setEqual(c, s) || !jsval.SameRef(c.values()[n+1], a1) {
 			t.Errorf("n=%d: clone differs", n)
 		}
 	}
+}
+
+// intersects says whether the two sets share a member (SameValueZero).
+func intersects(a, b *sset) bool {
+	for _, x := range a.values() {
+		if b.hasValue(x) {
+			return true
+		}
+	}
+	return false
 }

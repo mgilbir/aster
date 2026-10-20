@@ -1,0 +1,1 @@
+{"width": 40, "height": 20, "data": [{"name": "d", "values": [{"a": 1}], "transform": ""}], "marks": [{"type": "text", "from": {"data": "d"}, "encode": {"enter": {"text": {"field": "a"}, "y": {"value": 10}}}}]}
