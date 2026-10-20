@@ -225,6 +225,12 @@ func (c *Converter) recoverStage(ctx context.Context, stage *string, err *error)
 		*err = c.stageErr(ctx, *stage, s.Err)
 		return
 	}
+	// An exception an expression raises inside a scene's shape or clip
+	// generator, which runs while the SVG is written, as upstream's does.
+	if thrown, ok := vega.ThrownAtRender(r); ok {
+		*err = c.stageErr(ctx, *stage, thrown)
+		return
+	}
 	if e, ok := r.(error); ok && errors.Is(e, ErrLimit) {
 		*err = c.stageErr(ctx, *stage, e)
 		return
@@ -531,21 +537,10 @@ func (c *Converter) renderSVG(ctx context.Context, spec jsval.Value) (out string
 		}
 		return info
 	}
-	out, err = timed(ctx, "svg", func() (out string, err error) {
-		// The scene's shape and clip generators are vega's: an expression
-		// they evaluate can throw, which ends the render as it does
-		// upstream's.
-		defer func() {
-			if r := recover(); r != nil {
-				thrown, ok := vega.ThrownAtRender(r)
-				if !ok {
-					panic(r)
-				}
-				out, err = "", thrown
-			}
-		}()
-		return svg.Render(ctx, res.Scenegraph, so)
-	})
+	// The scene's shape and clip generators are vega's: an expression they
+	// evaluate can throw while the SVG is written, which ends the render as
+	// it does upstream's (recoverStage turns it into the stage's error).
+	out, err = timed(ctx, "svg", func() (string, error) { return svg.Render(ctx, res.Scenegraph, so) })
 	if err == nil {
 		err = hookErr
 	}
