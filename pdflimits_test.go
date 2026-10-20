@@ -24,7 +24,7 @@ func TestPDFBoundsFollowTheSVGBudget(t *testing.T) {
 		if chart.MaxElements < svgBytes/64 || chart.MaxPathSegments < svgBytes/8 || chart.MaxTextBytes < svgBytes/16 {
 			t.Errorf("WithMemoryLimit(%d): bounds %+v for %d bytes of SVG", n, chart, svgBytes)
 		}
-		if input.MaxInputBytes > 64<<20 || (n > 0 && input.MaxInputBytes > max(int(n/4), 1<<20)) {
+		if input.MaxInputBytes > 64<<20 || (n > 0 && uint64(input.MaxInputBytes) > max(n/4, 1<<20)) { // in uint64: n/4 wraps a 32-bit int
 			t.Errorf("WithMemoryLimit(%d): SVG input of %d bytes taken", n, input.MaxInputBytes)
 		}
 	}
