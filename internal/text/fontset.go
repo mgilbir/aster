@@ -4,6 +4,8 @@ import (
 	"strings"
 	"unsafe"
 	"weak"
+
+	"github.com/mgilbir/aster/internal/csscolor"
 )
 
 // entry is a registered font: a loaded face, or a system font not yet read.
@@ -309,7 +311,7 @@ func (m *Measurer) faces(css CSSFont) *faceList {
 // interface fonts, which here are the configured ones; cursive and fantasy
 // have no bundled face and draw in the sans-serif default.
 func (m *Measurer) generic(fam string) string {
-	switch ASCIILower(fam) {
+	switch csscolor.ASCIILower(fam) {
 	case "serif", "ui-serif":
 		return m.serifFamily
 	case "monospace", "ui-monospace":

@@ -3,6 +3,8 @@ package text
 import (
 	"strconv"
 	"strings"
+
+	"github.com/mgilbir/aster/internal/csscolor"
 )
 
 // The font properties of an SVG element, read once, here, for both the PNG
@@ -53,7 +55,7 @@ func NamesFontFamily(v string) bool {
 // which the element then does not take.
 func ParseFontWeight(v string, inherited int) (weight int, ok bool) {
 	v = strings.TrimSpace(v)
-	switch ASCIILower(v) {
+	switch csscolor.ASCIILower(v) {
 	case "normal":
 		return weightNormal, true
 	case "bold":
@@ -132,7 +134,7 @@ func cssNumber(s string) (float64, bool) {
 // angle or not) are italic, the one style here; normal is not. ok is false
 // for any other value, which the element then does not take.
 func ParseFontStyle(v string) (italic, ok bool) {
-	v = ASCIILower(strings.TrimSpace(v))
+	v = csscolor.ASCIILower(strings.TrimSpace(v))
 	switch {
 	case v == "normal":
 		return false, true

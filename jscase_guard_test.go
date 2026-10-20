@@ -129,7 +129,8 @@ func TestNoGoCaseOrSpaceInTheEngine(t *testing.T) {
 // packages that read SVG's CSS fold with csscolor.ASCIILower and
 // ASCIIEqualFold, never with Go's Unicode case mapping, under which "whİte"
 // is a colour and "stroKe" (a Kelvin sign) a property (routed from the
-// PR02 review of the 2026-10-18 audit).
+// PR02 review of the 2026-10-18 audit). internal/csscolor holds the one
+// fold, which internal/text, the font reader of both outputs, shares.
 func TestCSSFoldsASCIIOnly(t *testing.T) {
 	forbidden := map[string]map[string]bool{
 		"strings": {"ToLower": true, "ToUpper": true, "ToTitle": true, "EqualFold": true},
@@ -138,7 +139,7 @@ func TestCSSFoldsASCIIOnly(t *testing.T) {
 	}
 	scanned := 0
 	fset := token.NewFileSet()
-	for _, dir := range []string{"internal/csscolor", "internal/raster", "internal/svgpdf"} {
+	for _, dir := range []string{"internal/csscolor", "internal/raster", "internal/svgpdf", "internal/text"} {
 		err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return err

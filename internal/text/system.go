@@ -14,6 +14,8 @@ import (
 	"unicode/utf16"
 
 	"golang.org/x/text/encoding/charmap"
+
+	"github.com/mgilbir/aster/internal/csscolor"
 )
 
 // System fonts (WithSystemFonts).
@@ -122,7 +124,7 @@ func scanFontDir(dir string, depth int, files *int, idx *systemIndex) {
 			scanFontDir(path, depth+1, files, idx)
 			continue
 		}
-		switch strings.ToLower(filepath.Ext(de.Name())) {
+		switch csscolor.ASCIILower(filepath.Ext(de.Name())) { // the font extensions are ASCII
 		case ".ttf", ".otf", ".ttc", ".otc":
 		default:
 			continue
