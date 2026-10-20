@@ -115,3 +115,96 @@ func TestEveryGeneratorIsInTheManifest(t *testing.T) {
 		}
 	}
 }
+
+// A generator's relative import into a node_modules directory is a module the
+// lockfile pins, not a source: the fingerprint is the same whether or not the
+// modules are installed, and nothing in them is followed.
+func TestImportsIntoNodeModulesAreNotSources(t *testing.T) {
+	root := t.TempDir()
+	write := func(name, content string) {
+		t.Helper()
+		p := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const mod = "testdata/oracle-node/node_modules/pkg/index.js"
+	write("testdata/oracle-node/package-lock.json", "{}")
+	write("pkg/testdata/gen.mjs", "import {x} from './helper.mjs';\nimport * as m from '../../testdata/oracle-node/node_modules/pkg/index.js';\n")
+	write("pkg/testdata/helper.mjs", "export {};\n")
+	write("pkg/testdata/out.json", "[]\n")
+	e := Entry{Dir: "pkg", Command: []string{"testdata/gen.mjs"}, Mode: ">", Outputs: []string{"testdata/out.json"}, Text: "entry"}
+
+	absent, err := Fingerprint(root, e, "24.0.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Installed, and itself importing a file that exists nowhere.
+	write(mod, "import {y} from './missing.js';\n")
+	present, err := Fingerprint(root, e, "24.0.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if absent != present {
+		t.Error("the fingerprint depends on whether node_modules is installed")
+	}
+	write(mod, "export const changed = 1;\n")
+	if changed, _ := Fingerprint(root, e, "24.0.0"); changed != absent {
+		t.Error("the fingerprint depends on the content of an installed module")
+	}
+	imports, err := e.Imports(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.Join(imports, " "), "pkg/testdata/gen.mjs pkg/testdata/helper.mjs"; got != want {
+		t.Errorf("Imports = %q, want %q (local imports only)", got, want)
+	}
+	// A genuinely local import still counts.
+	write("pkg/testdata/helper.mjs", "export const x = 1;\n")
+	if local, _ := Fingerprint(root, e, "24.0.0"); local == absent {
+		t.Error("the fingerprint ignores a change to a local import")
+	}
+}
+
+// A helper loaded by a bare (side-effect) import, in either quote style, is a
+// source: changing it changes the fingerprint.
+func TestBareImportsAreSources(t *testing.T) {
+	for _, gen := range []string{
+		"import './helper.mjs';\n",
+		"import \"./helper.mjs\";\n",
+		"import'./helper.mjs'\n",
+		"import {x} from \"./helper.mjs\";\n",
+	} {
+		root := t.TempDir()
+		write := func(name, content string) {
+			t.Helper()
+			p := filepath.Join(root, name)
+			if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		write("testdata/oracle-node/package-lock.json", "{}")
+		write("pkg/gen.mjs", gen)
+		write("pkg/helper.mjs", "export {};\n")
+		write("pkg/out.json", "[]\n")
+		e := Entry{Dir: "pkg", Command: []string{"gen.mjs"}, Mode: ">", Outputs: []string{"out.json"}, Text: "entry"}
+		before, err := Fingerprint(root, e, "24.0.0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		write("pkg/helper.mjs", "globalThis.x = 1;\n")
+		after, err := Fingerprint(root, e, "24.0.0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if before == after {
+			t.Errorf("a change to the helper imported by %q does not change the fingerprint", gen)
+		}
+	}
+}
