@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"go/ast"
-	"go/importer"
 	"go/parser"
 	"go/token"
 	"go/types"
@@ -92,7 +91,7 @@ func TestNoUnmeteredBuilders(t *testing.T) {
 		names[f] = name
 	}
 	info := &types.Info{Types: map[ast.Expr]types.TypeAndValue{}, Uses: map[*ast.Ident]types.Object{}, Defs: map[*ast.Ident]types.Object{}}
-	conf := types.Config{Importer: importer.ForCompiler(fset, "source", nil)}
+	conf := types.Config{Importer: testutil.SourceImporter(fset)}
 	if _, err := conf.Check("github.com/mgilbir/aster/internal/vegalite", fset, parsed, info); err != nil {
 		t.Fatal(err)
 	}
