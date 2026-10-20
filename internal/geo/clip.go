@@ -1,5 +1,7 @@
 package geo
 
+import "github.com/mgilbir/aster/internal/jsval"
+
 // lineClipper cuts a stream of lines into visible segments. clean reports, once
 // a ring has been streamed through it, a bit set: bit 0 set means there were no
 // intersections, bit 1 set means there were intersections and the first and
@@ -167,12 +169,9 @@ func (s *clipStream) ringEnd() {
 	}
 	start := s.ringStarts[len(s.ringStarts)-1]
 	if !s.hasRing || len(s.polyPts) == start {
-		// A ring with no points: upstream indexes ring[0] and would throw.
-		s.ringSink.LineEnd()
-		s.ringBuffer.result()
-		s.ringBuffer.next()
-		s.hasRing = false
-		return
+		// A ring with no points: upstream's ringEnd reads ring[0][0], a
+		// TypeError the render, or the operator, fails with.
+		panic(&jsval.Thrown{Name: "TypeError", Msg: "Cannot read properties of undefined (reading '0')"})
 	}
 	head := s.polyPts[start]
 	s.pointRing(head.x, head.y)

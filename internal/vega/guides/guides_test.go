@@ -101,30 +101,37 @@ func TestGuidesAgainstUpstream(t *testing.T) {
 			ref1, ref2 := objv("$ref", 1), objv("$ref", 2)
 			var got Value
 			var datum Value
+			var err error
 			switch kind {
 			case "axis":
-				p, err := NewAxis(spec, sc)
-				if err != nil {
+				p, err2 := NewAxis(spec, sc)
+				if err = err2; err != nil {
 					t.Fatalf("NewAxis: %v (want error %q)", err, want.Get("error"))
 				}
 				datum = p.Datum
-				got = p.Mark(ref1, ref2)
+				if got, err = p.Mark(ref1, ref2); err != nil {
+					t.Fatal(err)
+				}
 				checkAxisTicks(t, p, want)
 			case "legend":
-				p, err := NewLegend(spec, sc)
-				if err != nil {
+				p, err2 := NewLegend(spec, sc)
+				if err = err2; err != nil {
 					t.Fatalf("NewLegend: %v", err)
 				}
 				datum = p.Datum
-				got = p.Mark(ref1, ref2)
+				if got, err = p.Mark(ref1, ref2); err != nil {
+					t.Fatal(err)
+				}
 				checkLegendEntries(t, p, want)
 			default:
-				p, err := NewTitle(spec, sc)
-				if err != nil {
+				p, err2 := NewTitle(spec, sc)
+				if err = err2; err != nil {
 					t.Fatalf("NewTitle: %v", err)
 				}
 				datum = p.Datum
-				got = p.Mark(ref1)
+				if got, err = p.Mark(ref1); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if d := diff("mark", got, want.Get("mark")); d != "" {
 				t.Fatal(d)
@@ -218,15 +225,15 @@ func TestGuidesNeverPanic(t *testing.T) {
 					switch kind {
 					case "axis":
 						if p, err := NewAxis(jsval.Obj(m), sc); err == nil {
-							p.Mark(ref, ref)
+							_, _ = p.Mark(ref, ref)
 						}
 					case "legend":
 						if p, err := NewLegend(jsval.Obj(m), sc); err == nil {
-							p.Mark(ref, ref)
+							_, _ = p.Mark(ref, ref)
 						}
 					default:
 						if p, err := NewTitle(jsval.Obj(m), sc); err == nil {
-							p.Mark(ref)
+							_, _ = p.Mark(ref)
 						}
 					}
 				}()

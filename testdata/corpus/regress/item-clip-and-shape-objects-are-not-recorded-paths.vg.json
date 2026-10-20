@@ -1,0 +1,7 @@
+{"width":100,"height":80,"padding":5,
+"marks":[
+{"type":"group","encode":{"update":{"x":{"value":5},"y":{"value":5},"width":{"value":40},"height":{"value":30},"clip":{"signal":"{path:'M0,0L10,0L10,10Z'}"},"fill":{"value":"#eee"}}},
+ "marks":[{"type":"rect","encode":{"update":{"x":{"value":-5},"y":{"value":-5},"width":{"value":60},"height":{"value":50},"fill":{"value":"steelblue"}}}}]},
+{"type":"group","encode":{"update":{"x":{"value":50},"y":{"value":5},"width":{"value":40},"height":{"value":30},"cornerRadius":{"value":4},"clip":{"signal":"{path:'M0,0L10,0L10,10Z', ops:[['R',0,0,5,5]]}"}}},
+ "marks":[{"type":"rect","encode":{"update":{"width":{"value":60},"height":{"value":50},"fill":{"value":"orange"}}}}]}
+]}

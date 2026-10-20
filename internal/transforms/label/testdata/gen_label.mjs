@@ -7,7 +7,7 @@
 import { register, createRequire } from 'node:module';
 import path from 'node:path';
 register('./canvas_hooks.mjs', import.meta.url);
-const require = createRequire(path.join(process.env.NODE_PATH, 'x.js'));
+const require = createRequire(path.resolve(process.env.NODE_PATH, 'x.js'));
 const vega = await import(require.resolve('vega'));
 const {label: Label} = await import(require.resolve('vega-label'));
 const {Bounds, Marks} = vega;

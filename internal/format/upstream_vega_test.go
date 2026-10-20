@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/upstream"
 )
 
@@ -147,7 +148,7 @@ func TestUpstreamVegaTime(t *testing.T) {
 				r.Skip("units of another shape")
 				continue
 			}
-			spec, err := TimeUnitSpecifier(units, UnitSpecifiersFromValue(upstream.ToValue(c.Arg(1))))
+			spec, err := TimeUnitSpecifier(units, UnitSpecifiersFromValue(jsval.Walker{}, upstream.ToValue(c.Arg(1))))
 			if err != nil {
 				r.Check(c, nil, true)
 				continue
@@ -210,5 +211,5 @@ func TestUpstreamVegaTime(t *testing.T) {
 			r.Skip("unmapped " + c.Fn)
 		}
 	}
-	r.Done(450)
+	r.Done(707)
 }

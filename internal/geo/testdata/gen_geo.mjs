@@ -17,7 +17,7 @@ import zlib from 'node:zlib';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const require = createRequire(path.join(process.env.NODE_PATH, 'x.js'));
+const require = createRequire(path.resolve(process.env.NODE_PATH, 'x.js'));
 const d3 = await import(require.resolve('d3-geo'));
 const vp = await import(require.resolve('vega-projection'));
 const topo = await import(require.resolve('topojson-client'));

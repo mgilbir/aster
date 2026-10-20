@@ -108,16 +108,38 @@ func ToNumber(v Value) float64 {
 	case KindStr:
 		return StringToNumber(v.s())
 	case KindArr:
-		items := v.Items()
-		switch len(items) {
-		case 0:
-			return 0
-		case 1:
-			// [null] and [undefined] join to "", which is 0.
-			if items[0].IsNullish() {
+		// Number(String(v)) without the string: an empty array, or one
+		// whose only element is null or undefined, joins to "", which is 0;
+		// one of two or more elements joins with a comma, which no numeric
+		// literal holds; one of one element is Number(String(element)),
+		// followed in a loop through nested arrays.
+		for {
+			items := v.Items()
+			switch len(items) {
+			case 0:
 				return 0
+			case 1:
+				v = items[0]
+				switch v.Kind() {
+				case KindArr:
+					continue
+				case KindNull, KindUndefined:
+					return 0
+				case KindNum, KindTimestamp:
+					// The number's own text reads back as the number, but
+					// -0 prints as "0".
+					if f := v.n(); f != 0 {
+						return f
+					}
+					return 0
+				}
+				return StringToNumber(v.AsString())
 			}
-			return StringToNumber(items[0].AsString())
+			return math.NaN()
+		}
+	case KindObj:
+		if o := v.obj(); o.str == nil {
+			checkToPrimitive(o)
 		}
 	}
 	return math.NaN()
@@ -127,7 +149,7 @@ func ToNumber(v Value) float64 {
 // literals (including "Infinity", ".5", "5."), 0x/0o/0b integers, and "" as 0.
 // Anything else is NaN.
 func StringToNumber(s string) float64 {
-	s = strings.TrimFunc(s, isJSWhitespace)
+	s = JSTrim(s)
 	if s == "" {
 		return 0
 	}
@@ -172,18 +194,7 @@ func parseTrimmedNumber(s string) float64 {
 		}
 		return math.Inf(1)
 	}
-	if !isDecimalLiteral(body) {
-		return math.NaN()
-	}
-	f, err := strconv.ParseFloat(s, 64)
-	if err != nil {
-		// Out-of-range literals round to ±Infinity or 0, which ParseFloat
-		// reports alongside ErrRange.
-		if ne, ok := err.(*strconv.NumError); ok && ne.Err == strconv.ErrRange {
-			return f
-		}
-		return math.NaN()
-	}
+	f, _ := ParseDecimal(s)
 	return f
 }
 
@@ -223,14 +234,6 @@ func isDecimalLiteral(s string) bool {
 		}
 	}
 	return i == n
-}
-
-func isJSWhitespace(r rune) bool {
-	switch r {
-	case '\t', '\n', '\v', '\f', '\r', ' ', 0xA0, 0x1680, 0x2028, 0x2029, 0x202F, 0x205F, 0x3000, 0xFEFF:
-		return true
-	}
-	return r >= 0x2000 && r <= 0x200A
 }
 
 // exactDecimal returns the exact decimal expansion of a positive finite f as

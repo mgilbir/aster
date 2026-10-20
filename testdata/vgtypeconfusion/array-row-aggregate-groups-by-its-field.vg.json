@@ -1,0 +1,2 @@
+{"width":200,"height":100,"data":[{"name":"t","values":[[1,2],[3,4],["a"]],"transform":[{"type":"formula","as":"k","expr":"datum[0]>2?1:0"},{"type":"aggregate","groupby":["k"]}]}],
+"marks":[{"type":"text","from":{"data":"t"},"encode":{"enter":{"text":{"signal":"datum.k+'|'+datum.count"},"y":{"signal":"datum.y||0"}}}}]}

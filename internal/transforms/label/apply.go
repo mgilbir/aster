@@ -11,7 +11,7 @@ var DefaultOutput = [5]string{"x", "y", "opacity", "align", "baseline"}
 func Apply(ps []Placement, as [5]string) {
 	for i := range ps {
 		p := &ps[i]
-		obj := p.Label.Tuple.ObjValue()
+		obj := jsval.Fields(p.Label.Tuple)
 		if obj == nil {
 			continue
 		}

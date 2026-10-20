@@ -58,7 +58,7 @@ func (c *boundContext) LineTo(x, y float64) { c.addpL(x, y) }
 func (c *boundContext) ClosePath()          {}
 
 func (c *boundContext) Rect(x, y, w, h float64) {
-	if c.rot != 0 {
+	if c.rot != 0 && c.rot == c.rot { // if (rot): a NaN rotation is falsy
 		c.addp(x+w, y)
 		c.addp(x+w, y+h)
 		c.addp(x, y+h)

@@ -141,6 +141,9 @@ func (c *Converter) RenderPreparedForTest(spec []byte, lite bool) (func() error,
 	}, nil
 }
 
+// IsEngineBugForTest is isEngineBug, for the external tests' gates.
+var IsEngineBugForTest = isEngineBug
+
 // RaceSlowdownForTest is raceSlowdown, for the external tests' time limits.
 const RaceSlowdownForTest = raceSlowdown
 
@@ -176,6 +179,15 @@ func LimitsForTest(n uint64) map[string]int64 {
 		"memory charged to the call's ledger":                                 c.ledger.MaxBytes,
 		"Vega-Lite views":                                                     int64(c.vlViews),
 	}
+}
+
+// WithWordcloudBoxForTest lays out the wordcloud transform's words with
+// wordcloud.BoxRenderer (every rune 0.6 em, every word a box) instead of the
+// canvas renderer: the model of the oracle's deterministic wordcloud canvas
+// (Oracle.WordcloudBoxSVG), which does not depend on how a platform's
+// node-canvas rasterizes glyphs.
+func WithWordcloudBoxForTest() Option {
+	return func(c *config) { c.wordcloudBoxForTest = true }
 }
 
 // WithFontSetFailureForTest makes the Converter's fonts fail to load.

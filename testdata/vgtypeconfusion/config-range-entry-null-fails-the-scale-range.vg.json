@@ -1,0 +1,1 @@
+{"width":100,"height":100,"config":{"range":{"category":null}},"data":[{"name":"t","values":[{"c":"a"},{"c":"b"}]}],"scales":[{"name":"colour","type":"ordinal","domain":{"data":"t","field":"c"},"range":"category"}],"marks":[{"type":"symbol","from":{"data":"t"},"encode":{"enter":{"fill":{"scale":"colour","field":"c"}}}}]}

@@ -1,0 +1,3 @@
+{"width":120,"height":40,"padding":5,
+"data":[{"name":"t","values":[{"i":0,"s":0},{"i":1,"s":false},{"i":2,"s":null},{"i":3,"s":""},{"i":4,"s":["square"]},{"i":5,"s":["diamond"]}]}],
+"marks":[{"type":"symbol","from":{"data":"t"},"encode":{"update":{"x":{"signal":"10 + datum.i * 20"},"y":{"value":20},"size":{"value":100},"shape":{"field":"s"},"fill":{"value":"steelblue"}}}}]}

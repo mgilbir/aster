@@ -1,0 +1,1 @@
+{"width":100,"height":30,"data":[{"name":"t","values":[{"shape":{"type":"LineString","coordinates":[]}},{"shape":{"type":"LineString","coordinates":{"type":{}}}}]}],"marks":[{"type":"text","from":{"data":"t"},"encode":{"enter":{"text":{"signal":"geoBounds(null, datum.shape)[0][0]"},"y":{"signal":"15*indexof(data('t'),datum)"}}}}]}

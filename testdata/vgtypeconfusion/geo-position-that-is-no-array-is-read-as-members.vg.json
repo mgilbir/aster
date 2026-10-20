@@ -1,0 +1,3 @@
+{"width":400,"height":300,"projections":[{"name":"p","type":"mercator","scale":100,"translate":[200,150]}],
+"data":[{"name":"d","values":[{"type":"LineString","coordinates":[[0,0],[10,10],-1,[20,0]]},{"type":"Polygon","coordinates":[[[0,0],[10,10],-1,[20,0],[0,0]]]},{"type":"Polygon","coordinates":[[[0,0],true,[10,10],[20,0],[0,0]]]}]}],
+"marks":[{"type":"shape","from":{"data":"d"},"encode":{"enter":{"stroke":{"value":"black"}}},"transform":[{"type":"geoshape","projection":"p"}]}]}

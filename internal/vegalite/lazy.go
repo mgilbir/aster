@@ -39,17 +39,26 @@ type compileCtx struct {
 	sigIdx signalIndex
 	// transforms counts the data transforms parsed so far (see maxTransforms).
 	transforms int
-	// maxViews is Options.MaxViews (see countViews).
-	maxViews int
+	// maxViews is Options.MaxViews (see countViews); configBytes the size
+	// of the config and theme every view compiles.
+	maxViews    int
+	configBytes float64
 	// warnFn is Options.Warn.
 	warnFn func(string) error
 	// titleMerges are the title field-def lists merged so far, by their
-	// first element (see mergeTitleFieldDefs).
+	// first element (see mergeTitleFieldDefs); titleAcc the buffers of the
+	// titles mergeTitle made, by the title each made last.
 	titleMerges map[*Value]*titleMerge
+	titleAcc    map[titleKey]*sbuf
 	// jsr is the compilation's JavaScript realm (see jsRealm).
 	jsr *jsRealm
 	// pending is the work counted and not yet charged (see work).
 	pending int64
+	// ledger is the call's ledger (nil: unlimited), which alloc charges
+	// for the compilation's memory; memAhead is what alloc took from it and
+	// has not used yet, memUsed what it charged in all (see mem.go).
+	ledger            *budget.Ledger
+	memAhead, memUsed int64
 }
 
 // check panics with the context's error once the caller's context is done.

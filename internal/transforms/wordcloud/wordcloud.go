@@ -93,7 +93,7 @@ func Transform(ctx context.Context, data []jsval.Value, p Params) error {
 		as = DefaultOutput
 	}
 	for _, t := range data {
-		if !t.IsObj() {
+		if !t.IsObjectLike() {
 			return errors.New("wordcloud: tuples must be objects")
 		}
 	}
@@ -121,7 +121,7 @@ func Transform(ctx context.Context, data []jsval.Value, p Params) error {
 	}
 
 	for _, t := range data {
-		o := t.ObjValue()
+		o := jsval.Fields(t)
 		o.Set(as[0], jsval.Num(math.NaN()))
 		o.Set(as[1], jsval.Num(math.NaN()))
 		o.Set(as[3], jsval.Num(0))
@@ -152,7 +152,7 @@ func Transform(ctx context.Context, data []jsval.Value, p Params) error {
 	}
 	dx, dy := toInt32(size[0])>>1, toInt32(size[1])>>1
 	for _, w := range tags {
-		o := w.datum.ObjValue()
+		o := jsval.Fields(w.datum)
 		o.Set(as[0], jsval.Num(float64(w.x+dx)))
 		o.Set(as[1], jsval.Num(float64(w.y+dy)))
 		o.Set(as[2], w.font)

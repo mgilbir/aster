@@ -1,5 +1,7 @@
 package geo
 
+import "github.com/mgilbir/aster/internal/jssort"
+
 // intersection is a node of the two circular lists (subject polygon and clip
 // edge) the Greiner–Hormann style rejoin walks.
 type intersection struct {
@@ -134,54 +136,21 @@ func clipRejoin(segments [][]cpoint, compare func(a, b *intersection) float64, s
 	}
 }
 
-// sortIntersections is a stable sort by the clip comparison: JavaScript's
-// Array.prototype.sort is stable, and ties (coincident intersections) must keep
-// their order for the rejoin to match upstream.
+// sortIntersections is Array.prototype.sort by the clip comparison, as V8
+// sorts (jssort): ties (coincident intersections) keep their order, and a
+// comparison that is NaN (a position that is no number) counts as 0, as the
+// specification's SortCompare makes it, so the order is V8's for an
+// inconsistent comparison too.
 func sortIntersections(a []*intersection, compare func(a, b *intersection) float64) {
-	// insertion sort for short lists, merge sort otherwise
-	if len(a) < 12 {
-		for i := 1; i < len(a); i++ {
-			for j := i; j > 0 && compare(a[j-1], a[j]) > 0; j-- {
-				a[j-1], a[j] = a[j], a[j-1]
-			}
+	jssort.Sort(a, func(x, y *intersection) int {
+		switch c := compare(x, y); {
+		case c < 0:
+			return -1
+		case c > 0:
+			return 1
 		}
-		return
-	}
-	tmp := make([]*intersection, len(a))
-	mergeSort(a, tmp, compare)
-}
-
-func mergeSort(a, tmp []*intersection, compare func(a, b *intersection) float64) {
-	n := len(a)
-	if n < 12 {
-		sortIntersections(a, compare)
-		return
-	}
-	mid := n / 2
-	mergeSort(a[:mid], tmp[:mid], compare)
-	mergeSort(a[mid:], tmp[mid:], compare)
-	copy(tmp, a)
-	i, j, k := 0, mid, 0
-	for i < mid && j < n {
-		if compare(tmp[j], tmp[i]) < 0 {
-			a[k] = tmp[j]
-			j++
-		} else {
-			a[k] = tmp[i]
-			i++
-		}
-		k++
-	}
-	for i < mid {
-		a[k] = tmp[i]
-		i++
-		k++
-	}
-	for j < n {
-		a[k] = tmp[j]
-		j++
-		k++
-	}
+		return 0
+	})
 }
 
 func pointEqual(ax, ay, bx, by float64) bool {

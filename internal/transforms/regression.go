@@ -4,10 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
-
-	"github.com/mgilbir/aster/internal/format"
-	"github.com/mgilbir/aster/internal/jsmath"
 
 	"github.com/mgilbir/aster/internal/jsval"
 )
@@ -24,10 +20,30 @@ type RegressionParams struct {
 	Order float64
 	// Extent is the x domain of the drawn curve; nil computes it per group.
 	Extent []float64
+	// ExtentValues, when not nil, is the extent as given, which replaces
+	// Extent: a linear or constant fit draws each of its elements as is
+	// (null stays null), a curve samples between its first two.
+	ExtentValues []jsval.Value
 	// ExtentNotArray is set when the extent was given as something other than
 	// an array (a signal answering a string, say): upstream draws a linear or
 	// constant fit with dom.forEach, which only an array has.
 	ExtentNotArray bool
+	// Strict, when set, reports the method as upstream compares it:
+	// MethodIsString is false for a method that is no string (["poly"] fits
+	// the polynomial its text names, but no `method === 'poly'` holds: one
+	// degree of freedom, a sampled curve, no log extent check). An Order
+	// that is no number (OrderIsNumber false) skips the polynomial's order
+	// shortcuts, with OrderValue the number the degrees of freedom compare.
+	Strict         bool
+	MethodIsString bool
+	OrderIsNumber  bool
+	// OrderValue is the order as a number (Order is then k - 1); with
+	// OrderIsNumber false the degrees of freedom are converted from OrderRaw
+	// where they are compared.
+	OrderValue float64
+	// OrderRaw is the order as given, read when OrderIsNumber is false:
+	// regressionPoly's `order + 1` concatenates for a string, array or object.
+	OrderRaw jsval.Value
 	// Params outputs one coefficient tuple per group instead of curve points.
 	Params bool
 	// As names the output x and y fields; nil or short means the accessor names.
@@ -37,35 +53,48 @@ type RegressionParams struct {
 // DefaultRegressionOrder is upstream's default polynomial order.
 const DefaultRegressionOrder = 3
 
-// regressionDOF is the number of fitted parameters a group must exceed.
-func regressionDOF(method string, order float64) float64 {
-	switch method {
-	case "poly":
-		return order
-	case "quad":
-		return 2
-	}
-	return 1
-}
-
 // Regression fits each group and emits either the trend line or the fit
 // parameters. Groups with no more points than parameters are skipped.
 // Linear and constant fits emit only the two extent end points; other methods
 // emit an adaptively sampled curve (25 to 200 points).
 func Regression(ctx context.Context, data []jsval.Value, p RegressionParams) ([]jsval.Value, error) {
 	method := p.Method
-	if method == "" {
+	if method == "" && !p.Strict { // Strict: the caller applied `|| 'linear'`
 		method = "linear"
 	}
 	if !regressionMethods[method] {
 		return nil, fmt.Errorf("Invalid regression method: %s", method)
 	}
+	// is reports `method === m`.
+	is := func(m string) bool { return method == m && (!p.Strict || p.MethodIsString) }
 	// An order beyond the limit is only an error for a group that has enough
 	// points to fit it (FitRegression checks); smaller groups are skipped.
-	dof := regressionDOF(method, p.Order)
-	domain := p.Extent
-	if domain != nil && method == "log" && len(domain) > 0 && domain[0] <= 0 {
+	dof := 1.0
+	switch {
+	case is("poly"):
+		dof = p.Order
+		if p.Strict && !p.OrderIsNumber {
+			dof = jsval.ToNumber(p.OrderRaw) // `n <= order`
+		}
+	case is("quad"):
+		dof = 2
+	}
+	var domain []jsval.Value
+	if p.ExtentValues != nil {
+		domain = p.ExtentValues
+	} else if p.Extent != nil {
+		domain = make([]jsval.Value, len(p.Extent))
+		for i, d := range p.Extent {
+			domain[i] = jsval.Num(d)
+		}
+	}
+	// method === 'log' && domain[0] <= 0
+	if domain != nil && is("log") && LessEq(jsval.WalkerFor(ctx), firstOf(domain), jsval.Num(0)) {
 		domain = nil // upstream warns and ignores it
+	}
+	fitCtx := ctx
+	if p.Strict && !p.OrderIsNumber {
+		fitCtx = context.WithValue(ctx, polyGeneral{}, p.OrderRaw)
 	}
 	names := make([]string, len(p.GroupBy))
 	for i, g := range p.GroupBy {
@@ -78,7 +107,7 @@ func Regression(ctx context.Context, data []jsval.Value, p RegressionParams) ([]
 	if len(p.As) > 1 {
 		as1 = p.As[1]
 	}
-	groups := regressionGroups(zoneOf(ctx), data, p.GroupBy)
+	groups := regressionGroups(keysOf(ctx), data, p.GroupBy)
 	var out []jsval.Value
 	for _, g := range groups {
 		if err := ctx.Err(); err != nil {
@@ -91,7 +120,7 @@ func Regression(ctx context.Context, data []jsval.Value, p RegressionParams) ([]
 		if err := reserveRows(ctx, len(out)+201); err != nil {
 			return nil, err
 		}
-		model, err := FitRegressionCtx(ctx, method, g.Tuples, p.X.Get, p.Y.Get, p.Order)
+		model, err := FitRegressionCtx(fitCtx, method, g.Tuples, p.X.Get, p.Y.Get, p.Order)
 		if err != nil {
 			return nil, err
 		}
@@ -100,9 +129,12 @@ func Regression(ctx context.Context, data []jsval.Value, p RegressionParams) ([]
 			if g.Dims != nil {
 				o.Set("keys", jsval.Arr(g.Dims))
 			}
-			coef := make([]jsval.Value, len(model.Coef))
-			for i, c := range model.Coef {
-				coef[i] = jsval.Num(c)
+			coef := model.CoefValues
+			if coef == nil {
+				coef = make([]jsval.Value, len(model.Coef))
+				for i, c := range model.Coef {
+					coef[i] = jsval.Num(c)
+				}
 			}
 			o.Set("coef", jsval.Arr(coef))
 			o.Set("rSquared", jsval.Num(model.RSquared))
@@ -110,15 +142,13 @@ func Regression(ctx context.Context, data []jsval.Value, p RegressionParams) ([]
 			continue
 		}
 		var dom []jsval.Value
-		if p.ExtentNotArray && (method == "linear" || method == "constant") {
+		if p.ExtentNotArray && (is("linear") || is("constant")) {
 			return nil, errors.New("TypeError: dom.forEach is not a function")
 		}
 		if domain != nil {
-			for _, d := range domain {
-				dom = append(dom, jsval.Num(d))
-			}
+			dom = domain
 		} else {
-			lo, hi, _, err := ExtentOf(g.Tuples, p.X)
+			lo, hi, _, err := ExtentOf(jsval.WalkerFor(ctx), g.Tuples, p.X)
 			if err != nil {
 				return nil, err
 			}
@@ -133,29 +163,26 @@ func Regression(ctx context.Context, data []jsval.Value, p RegressionParams) ([]
 			t.Set(as1, jsval.Num(y))
 			out = append(out, jsval.Obj(t))
 		}
-		if method == "linear" || method == "constant" {
+		if is("linear") || is("constant") {
 			for _, x := range dom {
 				add(x, model.Predict(jsval.ToNumber(x)))
 			}
 		} else {
-			d0, d1 := math.NaN(), math.NaN()
+			// sampleCurve(model.predict, dom, 25, 200) with the extent as it
+			// is: an end that is a date, a string or an array adds as text.
+			d0, d1 := jsval.Undefined, jsval.Undefined
 			if len(dom) > 0 {
-				d0 = jsval.ToNumber(dom[0])
+				d0 = dom[0]
 			}
 			if len(dom) > 1 {
-				d1 = jsval.ToNumber(dom[1])
+				d1 = dom[1]
 			}
-			pts := regressionSampleCurve(model.Predict, d0, d1, 25, 200,
-				len(dom) > 0 && dom[0].IsTimestamp(), len(dom) > 1 && dom[1].IsTimestamp())
-			for i, pt := range pts {
-				x := jsval.Num(pt[0])
-				// The end points are the extent values themselves (a date stays a date).
-				if i == 0 && len(dom) > 0 {
-					x = dom[0]
-				} else if i == len(pts)-1 && len(dom) > 1 {
-					x = dom[1]
-				}
-				add(x, pt[1])
+			pts, err := sampleCurveJS(jsval.WalkerFor(ctx), model.Predict, d0, d1, StepsSpec{Min: jsval.Num(25), Max: jsval.Num(200)})
+			if err != nil {
+				return nil, err
+			}
+			for _, pt := range pts {
+				add(pt.x, pt.y)
 			}
 		}
 	}
@@ -165,92 +192,20 @@ func Regression(ctx context.Context, data []jsval.Value, p RegressionParams) ([]
 // regressionGroups is upstream's partition: no group-by (nil) is one group of
 // everything; an explicitly empty list is one empty-dims group when there is
 // data and none otherwise.
-func regressionGroups(z format.Zone, data []jsval.Value, groupby []Field) []Group {
+func regressionGroups(k Keys, data []jsval.Value, groupby []Field) []Group {
 	if groupby != nil && len(groupby) == 0 {
 		if len(data) == 0 {
 			return nil
 		}
 		return []Group{{Dims: []jsval.Value{}, Tuples: data}}
 	}
-	return Partition(z, data, groupby)
+	return Partition(k, data, groupby)
 }
 
-const regressionMinRadians = 0.5 * math.Pi / 180
-
-// regressionSampleCurve is vega-statistics' sampleCurve: adaptive sampling of f
-// over [minX, maxX], subdividing where the curve bends by more than half a
-// degree, between minSteps and maxSteps points. Work is capped so a reversed or
-// non-finite extent cannot run away.
-func regressionSampleCurve(f func(float64) float64, minX, maxX float64, minSteps, maxSteps int, dateMin, dateMax bool) [][2]float64 {
-	if minSteps == 0 {
-		minSteps = 25
+// firstOf is a list's first element, undefined for none.
+func firstOf(l []jsval.Value) jsval.Value {
+	if len(l) == 0 {
+		return jsval.Undefined
 	}
-	if maxSteps < minSteps {
-		maxSteps = minSteps
-	}
-	// A date extent end is a Date object upstream: `(a + b) / 2` with a Date
-	// operand concatenates strings and yields NaN, so a segment that ends at
-	// such a point is never subdivided. The flag reproduces that.
-	type pt struct {
-		x, y float64
-		date bool
-	}
-	point := func(x float64, date bool) pt { return pt{x, f(x), date} }
-	span := maxX - minX
-	stop := span / float64(maxSteps)
-	prev := []pt{point(minX, dateMin)}
-	toArr := func(ps []pt) [][2]float64 {
-		out := make([][2]float64, len(ps))
-		for i, p := range ps {
-			out[i] = [2]float64{p.x, p.y}
-		}
-		return out
-	}
-	if minSteps == maxSteps {
-		for i := 1; i < maxSteps; i++ {
-			prev = append(prev, point(minX+float64(float64(i)/float64(minSteps)*span), false))
-		}
-		return toArr(append(prev, point(maxX, dateMax)))
-	}
-	next := []pt{point(maxX, dateMax)}
-	for i := minSteps - 1; i > 0; i-- {
-		next = append(next, point(minX+float64(float64(i)/float64(minSteps)*span), false))
-	}
-	p0 := prev[0]
-	sx := 1 / span
-	ymin, ymax := p0.y, p0.y
-	for _, q := range next {
-		if q.y < ymin {
-			ymin = q.y
-		}
-		if q.y > ymax {
-			ymax = q.y
-		}
-	}
-	sy := 1 / (ymax - ymin)
-	budget := 64 * MaxSteps / 1000 // generous iteration cap
-	for len(next) > 0 && budget > 0 {
-		budget--
-		p1 := next[len(next)-1]
-		mx := (p0.x + p1.x) / 2
-		if p0.date || p1.date {
-			mx = math.NaN()
-		}
-		pm := point(mx, false)
-		dx := pm.x-p0.x >= stop
-		if dx && regressionAngleDelta([2]float64{p0.x, p0.y}, [2]float64{pm.x, pm.y}, [2]float64{p1.x, p1.y}, sx, sy) > regressionMinRadians && len(prev)+len(next) < MaxSteps {
-			next = append(next, pm)
-		} else {
-			p0 = p1
-			prev = append(prev, p1)
-			next = next[:len(next)-1]
-		}
-	}
-	return toArr(prev)
-}
-
-func regressionAngleDelta(p, q, r [2]float64, sx, sy float64) float64 {
-	a0 := jsmath.Atan2(sy*(r[1]-p[1]), sx*(r[0]-p[0]))
-	a1 := jsmath.Atan2(sy*(q[1]-p[1]), sx*(q[0]-p[0]))
-	return math.Abs(a0 - a1)
+	return l[0]
 }

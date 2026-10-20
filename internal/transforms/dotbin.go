@@ -81,14 +81,22 @@ type DotBinParams struct {
 	Field   Field
 	GroupBy []Field
 	// Step is the stack width; 0 means one thirtieth of the field's extent.
-	Step   float64
-	Smooth bool
+	Step float64
+	// StepValue, when truthy, is `_.step` as the specification gave it,
+	// which replaces Step: upstream adds it to the values with JavaScript's
+	// + (a string concatenates).
+	StepValue jsval.Value
+	Smooth    bool
 	// As is the output field; empty means "bin".
 	As string
 }
 
-// DotBinResult reports the range of the assigned bins and the step used.
-type DotBinResult struct{ Start, Stop, Step float64 }
+// DotBinResult reports the range of the assigned bins and the step used
+// (StepValue: as upstream keeps it, a value of any type).
+type DotBinResult struct {
+	Start, Stop, Step float64
+	StepValue         jsval.Value
+}
 
 // DotBinTuples assigns each tuple its dot-plot bin in place. Within each group
 // tuples are ordered by field value (stably; NaN comparisons keep source
@@ -99,9 +107,13 @@ func DotBinTuples(ctx context.Context, data []jsval.Value, p DotBinParams) (DotB
 		as = "bin"
 	}
 	get := p.Field.Get
+	w := jsval.WalkerFor(ctx)
 	step := p.Step
-	if step == 0 || math.IsNaN(step) {
-		lo, hi, ok, err := ExtentOf(data, p.Field)
+	stepV := p.StepValue
+	if stepV.IsTruthy() {
+		step = jsval.ToNumber(stepV)
+	} else if step == 0 || math.IsNaN(step) {
+		lo, hi, ok, err := ExtentOf(jsval.WalkerFor(ctx), data, p.Field)
 		if err != nil {
 			return DotBinResult{}, err
 		}
@@ -114,8 +126,11 @@ func DotBinTuples(ctx context.Context, data []jsval.Value, p DotBinParams) (DotB
 		}
 		step /= 30
 	}
-	res := DotBinResult{Start: math.Inf(1), Stop: math.Inf(-1), Step: step}
-	for _, g := range Partition(zoneOf(ctx), data, p.GroupBy) {
+	if !stepV.IsTruthy() {
+		stepV = jsval.Num(step)
+	}
+	res := DotBinResult{Start: math.Inf(1), Stop: math.Inf(-1), Step: step, StepValue: stepV}
+	for _, g := range Partition(keysOf(ctx), data, p.GroupBy) {
 		if err := ctx.Err(); err != nil {
 			return res, err
 		}
@@ -128,7 +143,7 @@ func DotBinTuples(ctx context.Context, data []jsval.Value, p DotBinParams) (DotB
 		tuples := append([]jsval.Value(nil), g.Tuples...)
 		keys := make(map[*jsval.Object]float64, len(tuples))
 		num := func(t jsval.Value) float64 {
-			o := t.ObjValue()
+			o := jsval.Fields(t)
 			if f, ok := keys[o]; ok {
 				return f
 			}
@@ -146,20 +161,68 @@ func DotBinTuples(ctx context.Context, data []jsval.Value, p DotBinParams) (DotB
 			return 0
 		}))
 		vals := make([]float64, len(tuples))
+		numeric := !addsText(stepV)
 		for i, t := range tuples {
 			vals[i] = num(t)
+			numeric = numeric && !addsText(get(t))
 		}
-		for i, v := range DotBin(vals, step, p.Smooth) {
+		var bins []float64
+		if numeric {
+			bins = DotBin(vals, step, p.Smooth)
+		} else {
+			raw := make([]jsval.Value, len(tuples))
+			for i, t := range tuples {
+				raw[i] = get(t)
+			}
+			bins = dotBinJS(w, raw, stepV, p.Smooth)
+		}
+		for i, v := range bins {
 			if v < res.Start {
 				res.Start = v
 			}
 			if v > res.Stop {
 				res.Stop = v
 			}
-			if o := tuples[i].ObjValue(); o != nil {
+			if o := jsval.FieldsFor(tuples[i], as); o != nil {
 				o.Set(as, jsval.Num(v))
 			}
 		}
 	}
 	return res, nil
+}
+
+// dotBinJS is DotBin over the field's values as they are, with a step of any
+// type: `a + step`, `(a + b) / 2` and `step + step / 4` are JavaScript's +
+// (a string concatenates), `x >= w` its comparison, and the stack positions
+// are numbers (a Float64Array).
+func dotBinJS(w jsval.Walker, vals []jsval.Value, step jsval.Value, smooth bool) []float64 {
+	n := len(vals)
+	v := make([]float64, n)
+	if n == 0 {
+		return v
+	}
+	i, j := 0, 1
+	a := vals[0]
+	b := a
+	end := jsAdd(w, a, step)
+	for ; j < n; j++ {
+		x := vals[j]
+		if GreaterEq(w, x, end) {
+			mid := jsval.ToNumber(jsAdd(w, a, b)) / 2
+			for ; i < j; i++ {
+				v[i] = mid
+			}
+			end = jsAdd(w, x, step)
+			a = x
+		}
+		b = x
+	}
+	mid := jsval.ToNumber(jsAdd(w, a, b)) / 2
+	for ; i < j; i++ {
+		v[i] = mid
+	}
+	if smooth {
+		dotbinSmoothing(v, jsval.ToNumber(jsAdd(w, step, jsval.Num(jsval.ToNumber(step)/4))))
+	}
+	return v
 }

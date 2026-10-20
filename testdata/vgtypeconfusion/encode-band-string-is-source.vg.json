@@ -1,0 +1,1 @@
+{"width": 40, "height": 20, "scales": [{"name": "x", "type": "band", "domain": ["a", "b"], "range": "width"}], "marks": [{"type": "rect", "encode": {"enter": {"x": {"scale": "x", "value": "a"}, "width": {"scale": "x", "band": "nosuchsignal"}, "height": {"value": 5}}}}]}

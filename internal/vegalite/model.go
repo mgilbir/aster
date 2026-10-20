@@ -1,8 +1,6 @@
 package vegalite
 
 import (
-	"strings"
-
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -248,11 +246,16 @@ func (m *modelBase) getName(text string) string {
 	if m.nameV.IsTruthy() {
 		prefix = m.name + "_"
 	}
+	// Every name a view generates copies the view's name (twice: joined,
+	// then made a variable name), as many times as the view has scales,
+	// data sets, selections: charged, so a long name cannot be copied
+	// unseen once per selection.
+	m.ctx.alloc(2 * int64(len(prefix)+len(text)))
 	return varName(prefix + text)
 }
 
 func (m *modelBase) getDataName(t dataSourceType) string {
-	return m.getName(strings.ToLower(t.String()))
+	return m.getName(jsval.JSLower(t.String()))
 }
 
 func (m *modelBase) requestDataName(t dataSourceType) string {

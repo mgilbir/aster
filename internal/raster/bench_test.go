@@ -8,7 +8,13 @@ import (
 
 var benchFiles = []string{"bar_1d", "scatter_image", "area_gradient", "geo_sphere", "interactive_geo_earthquakes", "repeat_splom", "text_format", "trellis_line_quarter"}
 
-func benchSVG(b *testing.B, name string) []byte { return corpusSVG(b, name) }
+func benchSVG(b *testing.B, name string) []byte {
+	svg, upstreamErr := corpusSVG(b, name)
+	if upstreamErr != "" {
+		b.Skipf("%s: upstream: %s", name, upstreamErr)
+	}
+	return svg
+}
 
 // BenchmarkRender measures rasterization only (SVG bytes to pixels);
 // BenchmarkRenderPNG includes PNG encoding. The inputs are upstream's SVGs

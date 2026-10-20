@@ -1,0 +1,4 @@
+{"width": 100, "height": 60, "data": [{"name": "t", "values": [{"x": 20, "y": 30, "n": "a"}, {"x": 26, "y": 30, "n": "b"}]}],
+ "marks": [{"type": "symbol", "name": "pts", "from": {"data": "t"}, "encode": {"enter": {"x": {"field": "x"}, "y": {"field": "y"}, "size": {"value": 400}, "fill": {"value": "red"}, "fillOpacity": {"value": ""}}}},
+  {"type": "text", "from": {"data": "pts"}, "encode": {"enter": {"text": {"field": "datum.n"}, "fontSize": {"value": 10}}},
+   "transform": [{"type": "label", "size": [100, 60], "avoidBaseMark": true}]}]}

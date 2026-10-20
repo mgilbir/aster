@@ -180,7 +180,7 @@ func TestUpstreamD3Geo(t *testing.T) {
 			r.Skip("unmapped " + c.Fn)
 		}
 	}
-	r.Done(600)
+	r.Done(708)
 }
 
 func nullish(v any) bool { return v == nil || upstream.IsUndefined(v) }

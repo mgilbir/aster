@@ -18,36 +18,31 @@ func linkPath(p *opParams, in []jsval.Value, str func(jsval.Value) string) error
 		if f := p.field(name); !f.IsNil() {
 			return f
 		}
-		return transforms.FieldOf(dflt)
+		// `t => t.source.x`: reading x of a missing source is a TypeError
+		return transforms.FieldOfStrict(dflt)
 	}
 	sx, sy := field("sourceX", "source.x"), field("sourceY", "source.y")
 	tx, ty := field("targetX", "target.x"), field("targetY", "target.y")
-	as := p.str("as")
-	if as == "" {
-		as = "path"
-	}
-	orient := p.str("orient")
-	if orient == "" {
-		orient = "vertical"
-	}
-	shape := p.str("shape")
-	if shape == "" {
-		shape = "line"
-	}
+	// `_.x || default`, each used by its text
+	as := p.textOr("as", "path")
+	orient := p.textOr("orient", "vertical")
+	shape := p.textOr("shape", "line")
 	lp := linkPaths[shape+"-"+orient]
 	if lp == nil {
 		lp = linkPaths[shape]
 	}
 	if lp == nil {
-		fail("LinkPath unsupported type: %s%s", shape, "-"+orient)
+		// 'LinkPath unsupported type: ' + _.shape + (_.orient ? '-' + _.orient : '')
+		msg := "LinkPath unsupported type: " + p.walk.String(paramJS(p.Get("shape")))
+		if o := p.Get("orient"); paramTruthy(o) {
+			msg += "-" + p.walk.String(paramJS(o))
+		}
+		fail("%s", msg)
 	}
 	js := linkJS{str}
 	for _, t := range in {
-		o := t.ObjValue()
-		if o == nil {
-			continue
-		}
-		o.Set(as, jsval.Str(lp(js, sx.Apply(t), sy.Apply(t), tx.Apply(t), ty.Apply(t))))
+		v := jsval.Str(lp(js, sx.Apply(t), sy.Apply(t), tx.Apply(t), ty.Apply(t)))
+		jsval.FieldsFor(t, as).Set(as, v)
 	}
 	return nil
 }

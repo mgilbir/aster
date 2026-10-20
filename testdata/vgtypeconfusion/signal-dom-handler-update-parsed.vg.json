@@ -1,0 +1,2 @@
+{"signals":[{"name":"s","value":1,"on":[{"events":"click","update":"nosuch + 1"}]}],
+ "marks":[{"type":"text","encode":{"enter":{"text":{"signal":"s"}}}}]}

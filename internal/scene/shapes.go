@@ -7,6 +7,7 @@ import (
 	"github.com/mgilbir/aster/internal/bcache"
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsmath"
+	"github.com/mgilbir/aster/internal/jsval"
 )
 
 // This file holds vega-scenegraph's path/shapes.js: the generators that turn an
@@ -25,6 +26,14 @@ var ErrUnknownOrient = errors.New("scene: unknown orient for the monotone interp
 // the mark's nor the item's); upstream calls `.context` on undefined.
 var ErrNoShapeGenerator = errors.New("Cannot read properties of undefined (reading 'context')")
 
+// ErrSymbolShapeNotString reports a symbol whose shape is a value other than
+// a string (a number, an array, an object) that names no built-in symbol:
+// upstream parses it as a path, and its path.match throws. Upstream's parse
+// cache is keyed by String(shape) and lives as long as the process, so there
+// a value whose text an earlier string shape parsed draws that path; a render
+// here depends on its own input only.
+var ErrSymbolShapeNotString = ErrPathMatch
+
 // ErrCurveNoArea reports an area drawn with the bundle interpolation, which d3
 // implements only for lines; upstream fails with a TypeError.
 var ErrCurveNoArea = errors.New("scene: bundle interpolation cannot draw areas")
@@ -42,9 +51,24 @@ func (it *Item) HasCornerRadius() bool {
 func lineCurve(first *Item) (curveSpec, error) {
 	interp := first.Interpolate()
 	if interp == "" {
+		// item.interpolate || 'linear': a truthy value whose key is ""
+		// ([null], []) is a curve name no entry has.
+		if first.emptyKeyTruthy("interpolate") {
+			return curveSpec{}, ErrUnknownInterpolate
+		}
 		interp = "linear"
 	}
+	if interp == "monotone" && first.Orient() == "" && first.emptyKeyTruthy("orient") {
+		return curveSpec{}, ErrUnknownOrient // entry[orient || 'vertical'] with the key ""
+	}
 	return lookupCurve(interp, first.Orient(), first.Tension())
+}
+
+// emptyKeyTruthy reports a property given a truthy value whose String, the
+// key it looks up, is empty.
+func (it *Item) emptyKeyTruthy(prop string) bool {
+	v, ok := it.RawValue(prop)
+	return ok && v.IsTruthy() && it.Walker().String(v) == ""
 }
 
 // Line draws the polyline through items (a line mark). Interpolation, orient and
@@ -93,7 +117,7 @@ func Area(ctx PathContext, items []*Item) error {
 		// d3's bundle curve has no areaStart/areaEnd, so upstream throws.
 		return ErrCurveNoArea
 	}
-	horizontal := first.Orient() == "horizontal"
+	horizontal := first.StrictStr("orient", first.Orient()) == "horizontal"
 	out := spec.new(ctx)
 	n := len(items)
 	bx := make([]float64, n)
@@ -121,10 +145,18 @@ func Area(ctx PathContext, items []*Item) error {
 		if defined0 {
 			it := items[i]
 			x, y := it.OrZero("x"), it.OrZero("y")
-			if horizontal {
+			switch {
+			case it.Raw != nil:
+				// +((item.x || 0) + (item.width || 0)): a string joins.
+				if horizontal {
+					bx[i], by[i] = jsval.ToNumber(it.JSPlus(it.Or0("x"), it.Or0("width"))), y
+				} else {
+					bx[i], by[i] = x, jsval.ToNumber(it.JSPlus(it.Or0("y"), it.Or0("height")))
+				}
+			case horizontal:
 				// area().y(y).x1(x).x0(xw): baseline at x+width, same y.
 				bx[i], by[i] = x+it.Width.Zero(), y
-			} else {
+			default:
 				// area().x(x).y1(y).y0(yh): baseline at y+height, same x.
 				bx[i], by[i] = x, y+it.Height.Zero()
 			}
@@ -145,7 +177,8 @@ func Trail(ctx PathContext, items []*Item) error {
 		r2 := w2 / 2
 		if ready {
 			ux, uy := y1-y2, x2-x1
-			if ux != 0 || uy != 0 {
+			// `if (ux || uy)`: a NaN is falsy, the segment is a circle
+			if (ux != 0 && ux == ux) || (uy != 0 && uy == uy) {
 				ud := jsmath.Hypot(ux, uy)
 				ux /= ud
 				uy /= ud
@@ -177,10 +210,7 @@ func Trail(ctx PathContext, items []*Item) error {
 		}
 		if defined0 {
 			it := items[i]
-			size := it.Size.Zero()
-			if size == 0 {
-				size = 1
-			}
+			size := it.numOr1("size", it.Size) // +(item.size || 1)
 			point(it.OrZero("x"), it.OrZero("y"), size)
 		}
 	}
@@ -238,10 +268,12 @@ func rectangle(ctx PathContext, it *Item, x1, y1 float64) {
 // Arc draws a pie/donut sector as d3-shape's arc generator does, including
 // pad angle and corner rounding.
 func Arc(ctx PathContext, it *Item) error {
-	r0 := it.InnerRadius().Zero()
-	r1 := it.OuterRadius().Zero()
-	a0 := it.StartAngle().Zero() - halfPi
-	a1 := it.EndAngle().Zero() - halfPi
+	// The accessors are item.innerRadius || 0 and so on, coerced: a truthy
+	// word is NaN.
+	r0 := it.NumOr0("innerRadius", it.InnerRadius())
+	r1 := it.NumOr0("outerRadius", it.OuterRadius())
+	a0 := it.NumOr0("startAngle", it.StartAngle()) - halfPi
+	a1 := it.NumOr0("endAngle", it.EndAngle()) - halfPi
 	da := math.Abs(a1 - a0)
 	cw := a1 > a0
 
@@ -271,12 +303,12 @@ func arcSector(ctx PathContext, it *Item, r0, r1, a0, a1, da float64, cw bool) {
 	const eps = epsilon12
 	a01, a11, a00, a10 := a0, a1, a0, a1
 	da0, da1 := da, da
-	ap := it.PadAngle().Zero() / 2
+	ap := it.NumOr0("padAngle", it.PadAngle()) / 2
 	var rp float64
 	if ap > eps {
 		rp = math.Sqrt(float64(r0*r0) + float64(r1*r1))
 	}
-	rc := math.Min(math.Abs(r1-r0)/2, it.CornerRadius().Zero())
+	rc := math.Min(math.Abs(r1-r0)/2, it.NumOr0("cornerRadius", it.CornerRadius()))
 	rc0, rc1 := rc, rc
 
 	// Apply padding? Note that since r1 >= r0, da1 >= da0.
@@ -460,11 +492,18 @@ func cornerTangents(x0, y0, x1, y1, r1, rc float64, cw bool) cornerTan {
 func Symbol(ctx PathContext, it *Item) error {
 	size := it.Size.Or(64)
 	name := it.Shape.Name
-	if name == "" {
-		name = "circle"
+	raw, isRaw := it.RawValue("shape")
+	if isRaw && !raw.IsTruthy() || !isRaw && name == "" {
+		name = "circle" // item.shape || 'circle'
 	}
 	if drawBuiltinSymbol(ctx, name, size) {
 		return ctxErr(ctx)
+	}
+	if isRaw && raw.IsTruthy() {
+		// symbols(_) looks a built-in up by String(_) (['circle'] is the
+		// circle), and parses anything else as a path with path.match, which
+		// only a string has.
+		return ErrSymbolShapeNotString
 	}
 	cmds, err := customSymbol(ledgerOf(ctx), name)
 	if err != nil {
@@ -623,8 +662,15 @@ func ItemPathData(sp *StringPath, mark MarkType, it *Item) (d []byte, ok bool, e
 		}
 		// `path.context(null)(item)`: the generator formats its own string.
 		s := fn(nil, it)
+		truthy := s != ""
+		if s == TruthyEmptyPath {
+			s = ""
+		}
+		if sp.limited && len(s) > sp.lim {
+			return nil, false, sp.limErr
+		}
 		sp.buf = append(sp.buf[:0], s...)
-		return sp.buf, s != "", nil
+		return sp.buf, truthy, nil
 	case MarkArc:
 		err = Arc(sp, it)
 	case MarkSymbol:

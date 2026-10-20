@@ -1,0 +1,2 @@
+{"scales":[{"name":"o","type":"ordinal","domain":["a","b","c"],"range":["red","green","blue"]}],
+ "marks":[{"type":"text","encode":{"enter":{"text":{"signal":"pluck(gradient('o',[0,0],[1,0]).stops,'color')"}}}}]}

@@ -72,22 +72,24 @@ internal/transforms/voronoi/diagram.go	transforms/voronoi.(*diagram).init	x = (x
 internal/transforms/voronoi/diagram.go	transforms/voronoi.(*diagram).init	y = (y1+y3)/2 + float64(a*ex)	# the fused product is x*0.5 (division by 2, a power of two): exact
 internal/transforms/wordcloud/layout.go	transforms/wordcloud.(*layout).spiralFn.func1	switch toInt32(math.Sqrt(1+4*sign*float64(t))-sign) & 3 {	# the fused product is (4*sign)*t with sign=+-1, so a power-of-two factor: exact
 internal/transforms/wordcloud/render.go	transforms/wordcloud.BoxRenderer.Draw	x0, x1 := -half-grow, half+grow	# the fused product is x*0.5 (division by 2, a power of two): exact
-internal/vega/layout/axis.go	vega/layout.axisTitleLayout	dx = orZero(xOf(title)) - v	# the fused product is sign*(...) with sign=+-1: exact
-internal/vega/layout/axis.go	vega/layout.axisTitleLayout	dy = orZero(yOf(title)) - v	# the fused product is sign*(...) with sign=+-1: exact
 internal/vega/layout/grid.go	vega/layout.gridLayout	ax -= bounds.Width() / 2	# the fused product is x*0.5 (division by 2, a power of two): exact
 internal/vega/layout/grid.go	vega/layout.gridLayout	ay -= bounds.Height() / 2	# the fused product is x*0.5 (division by 2, a power of two): exact
 internal/vega/layout/grid.go	vega/layout.gridLayout	dx[i] += x / 2	# the fused product is x*0.5 (division by 2, a power of two): exact
 internal/vega/layout/grid.go	vega/layout.gridLayout	dy[i] += y / 2	# the fused product is x*0.5 (division by 2, a power of two): exact
+internal/vega/layout/grid_exact.go	vega/layout.gridLayoutExact	dx[i] += x / 2	# the fused product is x*0.5 (division by 2, a power of two): exact
+internal/vega/layout/grid_exact.go	vega/layout.gridLayoutExact	dy[i] += y / 2	# the fused product is x*0.5 (division by 2, a power of two): exact
 internal/vega/layout/props.go	vega/layout.legendTitleOffset	if x-r >= 0.5 {	# the fused product is x*0.5 (division by 2, a power of two): exact
 internal/vega/ops_mark.go	vega.adjustSpatial	setNum("x", spatialSetterX, xcOf(it)-w/2)	# the fused product is x*0.5 (division by 2, a power of two): exact
 internal/vega/ops_mark.go	vega.adjustSpatial	setNum("y", spatialSetterY, ycOf(it)-h/2)	# the fused product is x*0.5 (division by 2, a power of two): exact
-internal/vega/ops_scale.go	vega.binsFromObject	return d3Range(start, stop+step/2, step)	# the fused product is x*0.5 (division by 2, a power of two): exact
 internal/vega/ops_scale.go	vega.padDomain	return [2]float64{da + float64((d0-da)*k), da + float64((d1-da)*k)}	# the fused product is x*0.5 (division by 2, a power of two): exact
 internal/vega/ops_scale.go	vega.zoomLinear	return [2]float64{da + float64((d0-da)*k), da + float64((d1-da)*k)}	# the fused product is x*0.5 (division by 2, a power of two): exact
 internal/vega/ops_scale.go	vega.zoomLog	return [2]float64{ground(da + float64((d0-da)*k)), ground(da + float64((d1-da)*k))}	# the fused product is x*0.5 (division by 2, a power of two): exact
 internal/vega/ops_scale.go	vega.zoomPow	return [2]float64{ground(da + float64((d0-da)*k)), ground(da + float64((d1-da)*k))}	# the fused product is x*0.5 (division by 2, a power of two): exact
 internal/vega/ops_scale.go	vega.zoomSymlog	da := (d0 + d1) / 2	# the fused product is x*0.5 (division by 2, a power of two): exact
 internal/vega/ops_scale.go	vega.zoomSymlog	return [2]float64{ground(da + float64((d0-da)*k)), ground(da + float64((d1-da)*k))}	# the fused product is x*0.5 (division by 2, a power of two): exact
+internal/vegalite/normalize.go	vegalite.countViews	perUnit := sel + (config+selBytes)/viewWeightBytes	# viewWeightBytes is 4096 (ViewBytes/viewCopies = 32768/8): the division is a product by 2^-12, exact
+internal/vegalite/normalize.go	vegalite.countViewsAt	return 1 + perUnit + own/viewWeightBytes	# viewWeightBytes is 4096 (ViewBytes/viewCopies = 32768/8): the division is a product by 2^-12, exact
+internal/vegalite/normalize.go	vegalite.countViewsAt	return sum(spec.Get("layer"), perUnit+shared/viewWeightBytes)	# viewWeightBytes is 4096 (ViewBytes/viewCopies = 32768/8): the division is a product by 2^-12, exact
 internal/vegalite/scalerange.go	vegalite.getOffsetRange	endRatio = jsval.JSNumberString(1 - p/2 + bandPositionOffset)	# the fused product is x*0.5 (division by 2, a power of two): exact
 internal/vegalite/scalerange.go	vegalite.getOffsetRange	startRatio = jsval.JSNumberString(p/2 + bandPositionOffset)	# the fused product is x*0.5 (division by 2, a power of two): exact
 internal/transforms/wordcloud/ink.go	transforms/wordcloud.(*inkRaster).addGlyph	c1 := pt{fx(cur.x + float64(2.0/3*(q1.x-cur.x))), fx(cur.y + float64(2.0/3*(q1.y-cur.y)))}	# the fused product is the fixed-point division by 256 (a multiply by 2^-8, a power of two): exact

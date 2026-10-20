@@ -89,18 +89,18 @@ func msgColumnsNotSupportByRowCol(typ string) string {
 	return `The "columns" property cannot be used when "` + typ + `" has nested row/column.`
 }
 
-func msgSelectionAsScaleDomainWithoutField(field string) string {
+func msgSelectionAsScaleDomainWithoutField(cc *compileCtx, field string) string {
 	return `A "field" or "encoding" must be specified when using a selection as a scale domain. ` +
-		`Using "field": ` + jsonString(field) + "."
+		`Using "field": ` + jsonString(cc, field) + "."
 }
 
-func msgSelectionAsScaleDomainWrongEncodings(n int, encoding, param Value, field string) string {
+func msgSelectionAsScaleDomainWrongEncodings(cc *compileCtx, n int, encoding, param Value, field string) string {
 	which := "Multiple "
 	if n == 0 {
 		which = "No "
 	}
-	return which + "matching " + stringValue(encoding) + " encoding found for selection " + stringValue(param) + ". " +
-		`Using "field": ` + jsonString(field) + "."
+	return which + "matching " + stringValue(cc, encoding) + " encoding found for selection " + stringValue(cc, param) + ". " +
+		`Using "field": ` + jsonString(cc, field) + "."
 }
 
 func msgUnrecognizedParse(p string) string { return `Unrecognized parse "` + p + `".` }

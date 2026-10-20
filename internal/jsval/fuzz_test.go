@@ -21,7 +21,9 @@ func toAny(v Value) any {
 	case KindNum:
 		return v.NumValue()
 	case KindStr:
-		return v.StrValue()
+		// encoding/json reads a lone surrogate escape as U+FFFD, which
+		// ParseJSON keeps as the code unit (WTF-8).
+		return ToWellFormed(v.StrValue())
 	case KindArr:
 		a := make([]any, 0, v.Len())
 		for _, it := range v.Items() {
@@ -31,7 +33,7 @@ func toAny(v Value) any {
 	case KindObj:
 		o, m := v.ObjValue(), map[string]any{}
 		for i := 0; i < o.Len(); i++ {
-			m[o.KeyAt(i)] = toAny(o.ValueAt(i))
+			m[ToWellFormed(o.KeyAt(i))] = toAny(o.ValueAt(i))
 		}
 		return m
 	}
@@ -41,10 +43,11 @@ func toAny(v Value) any {
 // FuzzParseJSON holds ParseJSON to encoding/json and to its own output. The
 // two accept the same documents, except where ParseJSON refuses one that
 // nests past MaxJSONDepth (encoding/json's bound is 10000). Both read a
-// repeated key as the last value, replace invalid UTF-8 and lone surrogate
-// escapes with U+FFFD, and read a number outside float64 as +-Inf (which
-// json.Unmarshal reports as an error, so those documents are not compared
-// as values). What ParseJSON accepts, AppendJSON writes as valid JSON that
+// repeated key as the last value and replace invalid UTF-8 with U+FFFD;
+// a lone surrogate escape, which encoding/json replaces too, ParseJSON keeps
+// as JSON.parse does (the values are compared after ToWellFormed); both read
+// a number outside float64 as +-Inf (which json.Unmarshal reports as an
+// error, so those documents are not compared as values). What ParseJSON accepts, AppendJSON writes as valid JSON that
 // parses again and writes the same bytes: non-finite numbers become null,
 // so the second round is the one compared.
 func FuzzParseJSON(f *testing.F) {

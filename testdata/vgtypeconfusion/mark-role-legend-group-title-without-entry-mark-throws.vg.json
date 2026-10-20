@@ -1,0 +1,1 @@
+{"width":50,"height":50,"data":[{"name":"t","values":[{"title":"x"}]},{"name":"e","values":[{"x":3}]}],"marks":[{"type":"group","role":"legend","from":{"data":"t"},"encode":{"enter":{"x":{"value":1},"y":{"value":1}}},"marks":[{"type":"rect","from":{"data":"e"}},{"type":"rect","from":{"data":"e"}}]}]}

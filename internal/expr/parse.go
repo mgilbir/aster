@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -430,11 +429,11 @@ func (p *parser) scanNumber() token {
 	if r, _ := p.runeAt(p.idx); p.idx < len(p.src) && isIdentifierStart(r) {
 		p.illegal()
 	}
-	v, err := strconv.ParseFloat(p.src[start:p.idx], 64)
-	if err != nil {
-		if ne, ok := err.(*strconv.NumError); !ok || ne.Err != strconv.ErrRange {
-			p.illegal()
-		}
+	// The literal's double, rounded once as V8 rounds it (a literal of
+	// hundreds of digits included).
+	v, ok := jsval.ParseDecimal(p.src[start:p.idx])
+	if !ok {
+		p.illegal()
 	}
 	return token{kind: tNum, num: v, start: start, end: p.idx}
 }

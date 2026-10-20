@@ -258,6 +258,17 @@ func init() {
 	for _, name := range [...]string{"view", "item", "group", "xy", "x", "y"} {
 		name := name
 		fn(name, func(s *Scope, args []jsval.Value) jsval.Value {
+			// Generated as `event.vega.<name>(...)`: an expression with no
+			// event parameter has no `event`, and an event that carries no
+			// vega extension (an update by a scale or signal passes a Pulse; a
+			// headless run has no pointer event) has no `event.vega`. An
+			// embedding that sets no event at all keeps the provider's answer.
+			if s.NoEvent {
+				throw("ReferenceError", "event is not defined")
+			}
+			if !s.Event.IsNullish() && s.Event.Get("vega").IsNullish() {
+				typeError("Cannot read properties of undefined (reading '%s')", name)
+			}
 			if s.view == nil {
 				return jsval.Undefined
 			}

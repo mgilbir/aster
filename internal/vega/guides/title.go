@@ -1,8 +1,6 @@
 package guides
 
 import (
-	"errors"
-
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -18,31 +16,34 @@ type TitlePlan struct {
 }
 
 // NewTitle prepares a title; a bare string is shorthand for {text: string}.
-func NewTitle(spec Value, sc Scope) (*TitlePlan, error) {
+// Any other value is read as upstream reads it: a number or an array has no
+// text and makes an empty title.
+func NewTitle(spec Value, sc Scope) (p *TitlePlan, err error) {
+	defer catch(&err)
 	if spec.IsStr() {
 		spec = objv("text", spec)
-	}
-	if !spec.IsObj() {
-		return nil, errors.New("title: specification must be a string or an object")
 	}
 	return &TitlePlan{
 		Datum: objv(),
 		spec:  spec,
-		l:     lookup{spec: spec, config: sc.Config().Get("title"), sc: sc},
+		l:     lookup{spec: spec, config: member(sc.Config(), "title"), sc: sc},
 	}, nil
 }
 
 // Mark returns the title group definition; dataRef feeds the group and its
 // text marks.
-func (p *TitlePlan) Mark(dataRef Value) Value {
-	spec, l := p.spec, p.l
-	encode := spec.Get("encode")
-	userEncode := encode.Get("group")
-	name := userEncode.Get("name")
+func (p *TitlePlan) Mark(dataRef Value) (mark Value, err error) {
+	defer catch(&err)
+	l := p.l
+	encode := or(l.sp("encode"), objv())
+	userEncode := or(member(encode, "group"), objv())
+	name := or(member(userEncode, "name"), jsval.Undefined)
+	interactive := member(userEncode, "interactive")
+	style := member(userEncode, "style")
 
-	children := []Value{buildTitle(spec, l, titleEncode(l.sc, spec), dataRef)}
-	if spec.Get("subtitle").IsTruthy() {
-		children = append(children, buildSubtitle(spec, l, encode.Get("subtitle"), dataRef))
+	children := []Value{buildTitle(l, titleEncode(l), dataRef)}
+	if l.sp("subtitle").IsTruthy() {
+		children = append(children, buildSubtitle(l, member(encode, "subtitle"), dataRef))
 	}
 
 	m := obj(
@@ -53,23 +54,25 @@ func (p *TitlePlan) Mark(dataRef Value) Value {
 		"aria", l.get("aria"),
 		"description", l.get("description"),
 		"zindex", l.get("zindex"),
-		"name", or(name, jsval.Undefined),
-		"interactive", userEncode.Get("interactive"),
-		"style", userEncode.Get("style"),
+		"name", name,
+		"interactive", interactive,
+		"style", style,
 	)
-	return guideGroup(m)
+	return guideGroup(m), nil
 }
 
 // titleEncode provides backwards compatibility for the deprecated top-level
 // title encode block: unless encode.title exists, the whole encode block
 // (plus name, interactive and style of the title) customizes the text mark.
-func titleEncode(sc Scope, spec Value) Value {
-	encode := spec.Get("encode")
-	if t := encode.Get("title"); t.IsTruthy() {
-		return t
+func titleEncode(l lookup) Value {
+	encode := l.sp("encode")
+	if encode.IsTruthy() {
+		if t := member(encode, "title"); t.IsTruthy() {
+			return t
+		}
 	}
-	o := obj("name", spec.Get("name"), "interactive", spec.Get("interactive"), "style", spec.Get("style"))
-	return jsval.Obj(extendWork(sc, o, encode))
+	o := obj("name", l.sp("name"), "interactive", l.sp("interactive"), "style", l.sp("style"))
+	return jsval.Obj(extendWork(l.sc, o, encode))
 }
 
 func titleGroupEncode(l lookup, userEncode Value) *Object {
@@ -111,8 +114,8 @@ func titleText(text Value, l lookup, userEncode, dataRef Value, role, style stri
 	return guideMark(l, obj("type", "text", "role", role, "style", style, "from", dataRef, "encode", encode), userEncode)
 }
 
-func buildTitle(spec Value, l lookup, userEncode, dataRef Value) Value {
-	return titleText(spec.Get("text"), l, userEncode, dataRef, "title-text", groupTitleStyle, []kv{
+func buildTitle(l lookup, userEncode, dataRef Value) Value {
+	return titleText(l.sp("text"), l, userEncode, dataRef, "title-text", groupTitleStyle, []kv{
 		{"fill", l.get("color")},
 		{"font", l.get("font")},
 		{"fontSize", l.get("fontSize")},
@@ -122,8 +125,8 @@ func buildTitle(spec Value, l lookup, userEncode, dataRef Value) Value {
 	})
 }
 
-func buildSubtitle(spec Value, l lookup, userEncode, dataRef Value) Value {
-	return titleText(spec.Get("subtitle"), l, userEncode, dataRef, "title-subtitle", groupSubtitleStyle, []kv{
+func buildSubtitle(l lookup, userEncode, dataRef Value) Value {
+	return titleText(l.sp("subtitle"), l, userEncode, dataRef, "title-subtitle", groupSubtitleStyle, []kv{
 		{"fill", l.get("subtitleColor")},
 		{"font", l.get("subtitleFont")},
 		{"fontSize", l.get("subtitleFontSize")},
