@@ -1,0 +1,2 @@
+{"data":{"values":[{"a":1}]},"params":[{"name":"s","select":"point","views":["undefined"]}],
+ "hconcat":[{"mark":"point","encoding":{"x":{"field":"a","type":"quantitative"}}},{"name":"foo","mark":"point","encoding":{"x":{"field":"a","type":"quantitative"}}}]}

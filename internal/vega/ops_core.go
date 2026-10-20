@@ -2,6 +2,7 @@ package vega
 
 import (
 	"math"
+	"strconv"
 
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/scene"
@@ -45,7 +46,7 @@ func changedPulse(in *flowPulse, tuples []jsval.Value) *flowPulse {
 
 // barePulse is a pulse without source data (Pulse.fork(NO_SOURCE)).
 func barePulse(in *flowPulse) *flowPulse {
-	return &flowPulse{stamp: in.stamp, encode: in.encode, changed: true}
+	return &flowPulse{stamp: in.stamp, encode: in.encode, changed: true, noSource: true}
 }
 
 // ingestTuple is vega-dataflow's ingest: objects are tuples, anything else is
@@ -68,7 +69,13 @@ func ingestTupleWith(cl *jsval.Cloner, v jsval.Value) jsval.Value {
 		o.SetTupleID(src.TupleID()) // ingest keeps the id a tuple already has
 		o.EnsureTupleID()
 		return jsval.Obj(o)
-	case jsval.KindArr, jsval.KindTimestamp:
+	case jsval.KindArr:
+		// An array is an object to ingest: a tuple, given an id, into which
+		// transforms write their fields (jsval.Fields).
+		nv := jsval.CopyArray(v)
+		jsval.Fields(nv).EnsureTupleID()
+		return nv
+	case jsval.KindTimestamp:
 		return v
 	}
 	o := jsval.ObjectOf("data", v)
@@ -88,21 +95,28 @@ func facProxy(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 	}), nil
 }
 
+// facField is vega-transforms' Field: `isArray(_.name) ?
+// array(_.name).map(f => field(f)) : field(_.name, _.as)`, with vega-util's
+// plain getter.
 func facField(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *opParams) any) {
 	return nil, nil, func(n *opNode, p *opParams) any {
 		if n.value != nil && !p.Modified() {
 			return n.value
 		}
 		name := p.Value("name")
-		as, _ := paramText(p.walk, p.Get("as"))
+		as := ""
+		if a := p.Value("as"); a.IsTruthy() {
+			as = p.walk.String(a)
+		}
 		if name.IsArr() {
 			out := make([]transforms.Field, 0, name.Len())
 			for _, f := range name.Items() {
-				out = append(out, fieldAccessor(p.walk.String(f), ""))
+				c.g.work(1)
+				out = append(out, valueField(p.walk, f, "", false))
 			}
 			return out
 		}
-		return fieldAccessor(p.walk.String(name), as)
+		return valueField(p.walk, name, as, false)
 	}
 }
 
@@ -124,38 +138,52 @@ func facKey(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *o
 		if n.value != nil && !p.Modified() {
 			return n.value
 		}
-		var fields []string
+		var fields []jsval.Value
 		if arr, ok := p.Get("fields").([]any); ok {
-			for _, f := range arr {
-				if s, ok := paramText(p.walk, f); ok {
-					fields = append(fields, s)
+			for _, x := range arr {
+				switch v := x.(type) {
+				case jsval.Value:
+					fields = append(fields, v)
+				case string:
+					fields = append(fields, jsval.Str(v))
+				default:
+					fields = append(fields, jsval.Undefined)
 				}
 			}
 		}
-		return makeKeyFn(c.view.keys, fields, p.Value("flat").IsTruthy())
+		return makeKeyFn(p.walk, c.view.keys, fields, p.Value("flat").IsTruthy())
 	}
 }
 
-// makeKeyFn is vega-util's key(fields, flat): the string forms of the field
-// values joined with '|' (a date as in the view's zone z). With flat, the names
-// are literal property names.
-func makeKeyFn(k transforms.Keys, fields []string, flat bool) transforms.KeyFunc {
+// makeKeyFn is vega-util's key(fields, flat) with the runtime's code
+// generation: the string forms of the field values joined with '|' (a date
+// as in the view's zone z). With flat, each field is a literal property
+// name, read with String.prototype.replace, which a field that is no string
+// does not have; otherwise each is split as splitAccessPath splits any
+// value, and a path of no segment compiles to `return _[];`, which does not
+// parse (unlike a field parameter, a key has no guard for an empty name).
+func makeKeyFn(w jsval.Walker, k transforms.Keys, fields []jsval.Value, flat bool) transforms.KeyFunc {
 	fs := make([]transforms.Field, len(fields))
 	for i, f := range fields {
-		if flat {
-			fs[i] = flatField(f)
-		} else {
-			segs, err := jsval.SplitFieldPath(f)
+		s, isStr := f.Strict()
+		switch {
+		case flat && f.IsNullish():
+			fail("TypeError: Cannot read properties of %s (reading 'replace')", nullishName(f))
+		case flat && !isStr:
+			fail("TypeError: f.replace is not a function")
+		case flat:
+			fs[i] = flatField(s)
+		case isStr:
+			segs, err := jsval.SplitFieldPath(s)
 			if err != nil {
 				fail("%s", err.Error())
 			}
 			if len(segs) == 0 {
-				// The runtime compiles the accessor of a path with no step to
-				// `return _[];`, which does not parse. Unlike a field
-				// parameter, a key has no guard for the empty name.
 				fail("Unexpected token ']'")
 			}
-			fs[i] = transforms.FieldOf(f)
+			fs[i] = transforms.FieldOf(s)
+		default:
+			fs[i] = valueField(w, f, "", true)
 		}
 	}
 	return transforms.KeyOf(k, fs...)
@@ -171,17 +199,16 @@ func flatField(name string) transforms.Field {
 		b = append(b, name[i])
 	}
 	n := string(b)
-	return transforms.NamedField(n, []string{n}, func(t jsval.Value) jsval.Value { return propOf(t, jsval.Str(n)) })
+	return transforms.NamedField(n, []string{n}, func(t jsval.Value) jsval.Value { return propOfString(t, n) })
 }
 
 func (c *rtContext) keyFn(k pKey) transforms.KeyFunc {
-	var fields []string
+	fields := make([]jsval.Value, 0, len(k.fields))
 	for _, f := range k.fields {
-		if v, ok := f.(jsval.Value); ok {
-			fields = append(fields, c.g.walk.String(v))
-		}
+		v, _ := f.(jsval.Value)
+		fields = append(fields, v)
 	}
-	return makeKeyFn(c.view.keys, fields, k.flat)
+	return makeKeyFn(c.view.walk, c.view.keys, fields, k.flat)
 }
 
 // compareSpec is a resolved comparator: the function over tuples, and the field
@@ -198,17 +225,28 @@ type compareSpec struct {
 	roots []string
 	// rest reads what follows the root of each path.
 	rest []transforms.Accessor
+	// whole reports that the first field's accessor reads no property: a
+	// path of no segment, whose plain getter is the tuple itself, so the
+	// comparator handed undefined compares it rather than throwing.
+	whole bool
 }
 
 // compareFrom builds a comparator from field specs (paths or accessors) and
-// order strings; nil when no field remains.
-func compareFrom(w jsval.Walker, fields []any, orders []any) *compareSpec {
+// orders, as vega-util's compare(fields, orders, opt) does; nil when no field
+// remains. An order is descending only when it is the string "descending"
+// (`orders[i] === 'descending'`). codegen is the runtime's code generation
+// of a field's accessor (a $compare reference: getCompare passes
+// ctx.expr.codegen), which refuses a path of no segment; the Compare
+// operator calls compare(_.fields, _.orders) with no options, whose plain
+// getter of no segment reads the tuple itself.
+func compareFrom(w jsval.Walker, fields []any, orders []any, codegen bool) *compareSpec {
 	fs := make([]transforms.Field, 0, len(fields))
 	ord := make([]string, 0, len(fields))
 	names := make([]string, 0, len(fields))
 	roots := make([]string, 0, len(fields))
 	rest := make([]transforms.Accessor, 0, len(fields))
 	rootsOK := true
+	whole := false
 	for i, f := range fields {
 		var fld transforms.Field
 		switch v := f.(type) {
@@ -216,21 +254,41 @@ func compareFrom(w jsval.Walker, fields []any, orders []any) *compareSpec {
 			if v.IsNullish() {
 				continue
 			}
-			name := w.String(v)
-			fld = transforms.FieldOf(name)
-			rootsOK = appendRoot(&roots, &rest, name) && rootsOK
+			if s, ok := v.Strict(); ok {
+				if codegen {
+					codegenPath(s)
+				}
+				fld = transforms.FieldOfStrict(s) // the compare function's a.x.y throws
+				rootsOK = appendRoot(&roots, &rest, s) && rootsOK
+				if len(fs) == 0 && !codegen {
+					whole = len(jsval.ParseFieldPath(s)) == 0
+				}
+			} else {
+				// a field that is no string: split as splitAccessPath
+				// splits it, read through its accessor
+				fld = valueField(w, v, "", codegen)
+				rootsOK = false
+				if segs, err := jsval.SplitAccessPathOf(v, w.String(v)); err == nil && len(fs) == 0 {
+					whole = len(segs) == 0
+				}
+			}
 		case transforms.Field:
 			fld = v
 			rootsOK = false
 		case string:
-			fld = transforms.FieldOf(v)
+			if codegen {
+				codegenPath(v)
+			}
+			fld = transforms.FieldOfStrict(v)
 			rootsOK = appendRoot(&roots, &rest, v) && rootsOK
 		default:
 			continue
 		}
 		o := ""
 		if i < len(orders) {
-			o, _ = paramText(w, orders[i])
+			if ov, _ := paramValueOf(orders[i]); strictIs(ov, transforms.Desc) {
+				o = transforms.Desc
+			}
 		}
 		fs, ord, names = append(fs, fld), append(ord, o), append(names, fld.Name)
 	}
@@ -238,11 +296,24 @@ func compareFrom(w jsval.Walker, fields []any, orders []any) *compareSpec {
 	if cmp == nil {
 		return nil
 	}
-	cs := &compareSpec{cmp: cmp, fields: names, orders: ord}
+	cs := &compareSpec{cmp: cmp, fields: names, orders: ord, whole: whole}
 	if rootsOK {
 		cs.keys, cs.roots, cs.rest = fs, roots, rest
 	}
 	return cs
+}
+
+// codegenPath fails as the runtime's generated accessor does for a field path
+// the code generation cannot build: one that does not split, or has no
+// segment (`return _[]`).
+func codegenPath(s string) {
+	segs, err := jsval.SplitFieldPath(s)
+	if err != nil {
+		fail("%s", err.Error())
+	}
+	if len(segs) == 0 {
+		fail("Unexpected token ']'")
+	}
 }
 
 // appendRoot adds the first segment of a field path to roots, and an accessor
@@ -255,7 +326,7 @@ func appendRoot(roots *[]string, rest *[]transforms.Accessor, path string) bool 
 		return false
 	}
 	*roots = append(*roots, segs[0])
-	*rest = append(*rest, transforms.PathAccessor(segs[1:]))
+	*rest = append(*rest, transforms.PathAccessorStrict(segs[1:]))
 	return true
 }
 
@@ -268,7 +339,7 @@ func (c *rtContext) compareFn(cmp pCompare) *compareSpec {
 	for i, o := range cmp.orders {
 		orders[i] = o
 	}
-	return compareFrom(c.view.walk, fields, orders)
+	return compareFrom(c.view.walk, fields, orders, true)
 }
 
 func facCompare(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *opParams) any) {
@@ -296,7 +367,7 @@ func facCompare(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode
 			}
 			return []any{x}
 		}
-		if cs := compareFrom(c.view.walk, asList(p.Get("fields")), asList(p.Get("orders"))); cs != nil {
+		if cs := compareFrom(c.view.walk, asList(p.Get("fields")), asList(p.Get("orders")), false); cs != nil {
 			return cs
 		}
 		// upstream returns null (no ordering): keep a non-nil marker so the
@@ -346,7 +417,7 @@ func facCollect(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode
 			}
 		}
 		if cmp != nil && mod {
-			transforms.SortTuples(list, meteredCompare(n.g, transforms.StableComparator(cmp)))
+			transforms.SortTuples(list, transforms.StableComparator(meteredCompare(n.g, cmp)))
 		}
 		n.value = list
 		n.modified = mod
@@ -448,6 +519,8 @@ func facSieve(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 	return nil, trFunc(func(n *opNode, p *opParams, pulse *flowPulse) *flowPulse {
 		if pulse.items != nil {
 			n.value = pulse.items
+		} else if pulse.noSource {
+			n.value = nil // this.value = pulse.source: undefined
 		} else {
 			n.value = pulse.rawSource() // Sieve keeps pulse.source, unfiltered
 		}
@@ -462,11 +535,19 @@ func facSieve(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 func facValues(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *opParams) any) {
 	return nil, trFunc(func(n *opNode, p *opParams, pulse *flowPulse) *flowPulse {
 		if n.value == nil || p.Modified("field", "sort") || pulse.changed {
+			if len(n.source) == 0 {
+				// no pulse parameter (a counts ref the cache answered with
+				// an inherited member): pulse.source is undefined
+				if p.comparator("sort") != nil {
+					fail("TypeError: Cannot read properties of undefined (reading 'slice')")
+				}
+				fail("TypeError: Cannot read properties of undefined (reading 'map')")
+			}
 			src := pulse.rawSource() // Values reads pulse.source
 			f, _ := p.Get("field").(transforms.Field)
 			if cmp := p.comparator("sort"); cmp != nil {
 				src = copyRows(n.g, src)
-				transforms.SortTuples(src, meteredCompare(n.g, transforms.StableComparator(cmp)))
+				transforms.SortTuples(src, transforms.StableComparator(meteredCompare(n.g, cmp)))
 			}
 			out := make([]jsval.Value, len(src))
 			for i, t := range src {
@@ -481,7 +562,22 @@ func facValues(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode,
 
 func facExtent(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *opParams) any) {
 	return jsval.ArrOf(jsval.Undefined, jsval.Undefined), trFunc(func(n *opNode, p *opParams, pulse *flowPulse) *flowPulse {
+		if _, list := p.Get("field").([]transforms.Field); list {
+			// The Field operator made a list of accessors (its name was an
+			// array): `field.fields` is undefined, and calling the list on
+			// a tuple is a TypeError, which only a tuple to visit raises.
+			if len(pulse.sourceView(n.g)) > 0 {
+				fail("TypeError: field is not a function")
+			}
+			n.value = jsval.ArrOf(jsval.Undefined, jsval.Undefined)
+			return nil
+		}
 		f, _ := p.Get("field").(transforms.Field)
+		if f.IsNil() {
+			// `pulse.modified(field.fields)` of a null accessor (a falsy
+			// field), before any tuple is visited
+			fail("TypeError: Cannot read properties of null (reading 'fields')")
+		}
 		// a changed pulse is visited whole: its source
 		lo, hi, ok, err := transforms.FieldExtent(n.g.ctx, pulse.sourceView(n.g), f)
 		if err != nil {
@@ -559,7 +655,7 @@ type tupleIndex struct {
 
 func facTupleIndex(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *opParams) any) {
 	return (*tupleIndex)(nil), trFunc(func(n *opNode, p *opParams, pulse *flowPulse) *flowPulse {
-		f, _ := p.Get("field").(transforms.Field)
+		f := asField(p.Get("field"))
 		tuples := pulse.sourceView(n.g) // a first run visits the source
 		if pulse.items != nil {
 			// A named mark's data are its items ("reactive geometry").
@@ -572,7 +668,9 @@ func facTupleIndex(c *rtContext, n *opNode, e *entry) (any, transform, func(*opN
 		idx := &tupleIndex{lookup: lookup, m: make(map[string]jsval.Value, len(tuples))}
 		for i, t := range tuples {
 			n.g.rows(i, len(tuples), 2)
-			idx.m[n.g.walk.String(f.Apply(t))] = t
+			if k := n.g.walk.String(f.Apply(t)); k != transforms.ProtoKey {
+				idx.m[k] = t
+			}
 		}
 		n.value = idx
 		n.modified = true
@@ -597,6 +695,7 @@ func facRelay(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 			res := &flowPulse{stamp: pulse.stamp, encode: pulse.encode, changed: true, tuples: src, tree: pulse.tree}
 			if len(pulse.multi) == 0 {
 				res.src = pulse.src
+				res.noSource = pulse.noSource
 			}
 			return res
 		}
@@ -618,7 +717,13 @@ func facRelay(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 		for i, t := range src {
 			// A copy, or an update of one, sets each of the tuple's fields.
 			n.g.rows(i, len(src), 4)
-			o := t.ObjValue()
+			o, key := t.ObjValue(), t.ObjValue()
+			if t.IsArr() {
+				// An array tuple's for-in finds its indexes and the fields
+				// written into it: the copy is a plain object of them.
+				key = jsval.Fields(t)
+				o = arrayForIn(n.g, t)
+			}
 			if o == nil {
 				// derive(t) copies the properties a for-in loop finds: a
 				// number (a crossfilter's index) has none, and its copy is
@@ -628,7 +733,7 @@ func facRelay(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 				out[i] = jsval.Obj(e)
 				continue
 			}
-			if lut == nil && !ids.add(o) {
+			if lut == nil && !ids.add(key) {
 				// Perhaps a tuple this pulse has had already.
 				lut = make(map[*jsval.Object]*jsval.Object, len(src))
 				for j, c := range copies {
@@ -638,7 +743,7 @@ func facRelay(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 			}
 			var d *jsval.Object
 			if lut != nil {
-				d = lut[o]
+				d = lut[key]
 			}
 			if d == nil {
 				// derive(t) is rederive(t, ingest({})): the copy is a tuple
@@ -647,19 +752,39 @@ func facRelay(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 				d.SetTupleID(0)
 				d.EnsureTupleID()
 				if lut != nil {
-					lut[o] = d
+					lut[key] = d
 				}
 			} else {
 				for j := 0; j < o.Len(); j++ {
 					d.Set(o.KeyAt(j), o.ValueAt(j))
 				}
 			}
-			copies = append(copies, relayCopy{o, d})
+			copies = append(copies, relayCopy{key, d})
 			out[i] = jsval.Obj(d)
 		}
 		last = copies
 		return &flowPulse{stamp: pulse.stamp, encode: pulse.encode, changed: true, tuples: out}
 	}), nil
+}
+
+// arrayForIn is the members `for (k in t)` finds on an array tuple: its
+// indexes, then its named own properties (the tuple's fields), as an object.
+func arrayForIn(g *flowGraph, t jsval.Value) *jsval.Object {
+	items := t.Items()
+	props := t.ArrayProps()
+	np := 0
+	if props != nil {
+		np = props.Len()
+	}
+	g.work(len(items) + np)
+	o := jsval.NewObject(len(items) + np)
+	for i, x := range items {
+		o.Set(strconv.Itoa(i), x)
+	}
+	for i := 0; i < np; i++ {
+		o.Set(props.KeyAt(i), props.ValueAt(i))
+	}
+	return o
 }
 
 // relayCopy is a source tuple and the copy a derived relay made of it.
@@ -679,7 +804,7 @@ func (s *tidSet) init(g *flowGraph, tuples []jsval.Value) bool {
 	lo, hi, n := uint32(math.MaxUint32), uint32(0), 0
 	for i, t := range tuples {
 		g.rows(i, len(tuples), 1)
-		o := t.ObjValue()
+		o := jsval.Tuple(t)
 		if o == nil {
 			continue
 		}
@@ -716,6 +841,10 @@ func (s *tidSet) add(o *jsval.Object) bool {
 }
 
 func facLoad(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *opParams) any) {
+	// A load without a format is a scale's domain data fed from a signal,
+	// which upstream sets with setdata(name, value): a change set inserting
+	// array(value), with no reader.
+	setdata := e.params == nil || !e.params.has("format")
 	return []jsval.Value(nil), trFunc(func(n *opNode, p *opParams, pulse *flowPulse) *flowPulse {
 		format := p.Value("format")
 		data := func() []jsval.Value {
@@ -723,19 +852,32 @@ func facLoad(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, *
 			// to the parse that makes the new ones.
 			bud := c.view.bud
 			defer bud.Replacing(bud.Replacing(n.srcRecord()))
+			if setdata {
+				rows := insertRows(p.Value("values"))
+				if c.view.nullRow(rows) >= 0 {
+					failErr(errNullRow)
+				}
+				return rows
+			}
 			// `if (_.values)`: a falsy value loads the url.
 			if v := p.Value("values"); v.IsTruthy() {
-				return c.view.parseValues(v, format)
+				return c.view.loadValues(v, format)
 			}
 			return c.view.request(p.Value("url"), format)
 		}()
-		// The Load transform's ingest wraps a null row as {data: null}; only
-		// a change set reads its id (see seedCollect).
+		// The Load transform's `data.forEach(ingest)` ignores what ingest
+		// returns: an object or an array becomes a tuple in place, and a
+		// primitive (null, the text of a body that failed to parse) stays
+		// the primitive it is in the pulse, a datum with no fields (a write
+		// into it throws, jsval.FieldsFor). setdata's change set inserts
+		// what ingest returns, a primitive wrapped as {data: value}.
 		c.view.holdSrcRows(n, data)
 		var cl jsval.Cloner
 		for i := range data {
 			c.view.work(1)
-			data[i] = ingestTupleWith(&cl, data[i])
+			if setdata || data[i].IsObj() || data[i].IsArr() {
+				data[i] = ingestTupleWith(&cl, data[i])
+			}
 		}
 		n.value = data
 		return changedPulse(pulse, data)

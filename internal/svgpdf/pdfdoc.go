@@ -11,8 +11,11 @@ import (
 // stream. pdf0 has no plain-document constructor (only NewPDFADocument), so
 // the Catalog/Pages/Page skeleton is built directly with the object model.
 //
-// The declared version is 1.4: nothing beyond transparency (ExtGState CA/ca,
-// a 1.4 feature) and Type0/CIDFontType2 fonts (1.3) is used, and a low
+// The declared version is the lowest that has every feature used: 1.4
+// (transparency, ExtGState CA/ca, soft masks and blend modes, are 1.4;
+// Type0 fonts, CIDFontType0C and CIDFontType2 programs 1.3), or 1.5 for a
+// document with ActualText marked content (ISO 32000-1, 14.9.4: a glyph
+// standing for two texts, a run whose font cannot be written; C159). A low
 // version keeps strict embedders like xdvipdfmx (LaTeX \includegraphics)
 // from warning about downlevel output.
 //
@@ -51,6 +54,8 @@ func buildPDF(content [][]byte, gsList []gsEntry, fonts *fontCatalog, images *im
 			switch {
 			case gs.bm != "":
 				d.Set("BM", pdf0.Name(gs.bm))
+			case gs.maskNone:
+				d.Set("SMask", pdf0.Name("None"))
 			case gs.mask != "":
 				masks = append(masks, pendingMask{d, gs.mask, gs.maskInvert, gs.maskLuminosity})
 			default:
@@ -134,8 +139,11 @@ func buildPDF(content [][]byte, gsList []gsEntry, fonts *fontCatalog, images *im
 		fontObjects[resNum] = &pdf0.IndirectObject{Number: resNum, Value: resources}
 		pageResources = pdf0.IndirectRef{Number: resNum}
 		formNum := map[string]int{}
+		groupNum := next
+		next++
+		fontObjects[groupNum] = &pdf0.IndirectObject{Number: groupNum, Value: transparencyGroup()}
 		for _, f := range paints.forms {
-			s, err := f.stream(pdf0.IndirectRef{Number: resNum})
+			s, err := f.stream(pdf0.IndirectRef{Number: resNum}, pdf0.IndirectRef{Number: groupNum})
 			if err != nil {
 				return nil, err
 			}
@@ -199,8 +207,12 @@ func buildPDF(content [][]byte, gsList []gsEntry, fonts *fontCatalog, images *im
 		objects[n] = obj
 	}
 
+	version := "1.4"
+	if paints.actualText {
+		version = "1.5"
+	}
 	doc := &pdf0.Document{
-		Version: "1.4",
+		Version: version,
 		Objects: objects,
 	}
 	doc.Trailer.Set("Root", pdf0.IndirectRef{Number: 1})

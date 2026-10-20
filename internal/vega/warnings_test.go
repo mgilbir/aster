@@ -102,3 +102,20 @@ func hasWarning(msgs []string, sub string) bool {
 	}
 	return false
 }
+
+// Scale's domainMid warning carries the value after the text, as upstream's
+// df.warn('Scale domainMid exceeds domain min or max.', mid) logs it.
+func TestDomainMidWarningCarriesTheValue(t *testing.T) {
+	for _, mid := range []string{"5", "-3", "2.5", `"7"`} {
+		got := collect(t, `{"scales":[{"name":"x","type":"linear","domain":[0,1],"domainMid":`+mid+`,"range":[0,1]}],
+		  "marks":[{"type":"rect"}]}`)
+		var w Warning
+		if len(got) != 1 || !errors.As(got[0], &w) {
+			t.Fatalf("mid %s: reported %v, want one warning", mid, got)
+		}
+		want := "Scale domainMid exceeds domain min or max. " + strings.Trim(mid, `"`)
+		if string(w) != want {
+			t.Errorf("mid %s: warning %q, want %q", mid, w, want)
+		}
+	}
+}

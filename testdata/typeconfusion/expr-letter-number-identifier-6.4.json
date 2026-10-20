@@ -1,0 +1,1 @@
+{"data":{"values":[{"a":1}]},"transform":[{"calculate":"datum.a + 1","as":"Ⅻ"},{"calculate":"datum.Ⅻ * 2","as":"b"}],"mark":"point","encoding":{"x":{"field":"b","type":"quantitative"}}}

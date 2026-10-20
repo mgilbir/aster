@@ -67,7 +67,9 @@ const pathEps = 1e-6
 // separated, no rounding.
 //
 // The zero value is ready to use. Errors that d3-path raises (negative arc
-// radius) are recorded and reported by Err instead of panicking.
+// radius) are recorded and reported by Err instead of panicking; so is the
+// path passing the length Limit sets. After an error the path draws nothing
+// more (d3 has thrown by then).
 type StringPath struct {
 	buf     []byte
 	x0, y0  float64
@@ -77,6 +79,28 @@ type StringPath struct {
 	k       float64 // rounding factor 10^digits, 0 for none
 	d       int     // digits, when k != 0
 	err     error
+
+	limited bool  // lim bounds len(buf)
+	lim     int   // the most bytes of path data
+	limErr  error // the error past lim
+}
+
+// Limit bounds the path data to n bytes (n < 0: no bound) until the next
+// Limit: a command that takes it past n records err, and the path draws
+// nothing more. A generator's output is as long as the input it draws (a
+// line's items, a custom symbol's commands) and a number is printed in up to
+// 24 bytes, so a writer that can hold only so many bytes bounds the path
+// with it rather than finding out after the whole of it is drawn. Reset keeps
+// the bound.
+func (p *StringPath) Limit(n int, err error) {
+	p.limited, p.lim, p.limErr = n >= 0, n, err
+}
+
+// over is the check after a command: one comparison while within the bound.
+func (p *StringPath) over() {
+	if p.limited && len(p.buf) > p.lim && p.err == nil {
+		p.err = p.limErr
+	}
 }
 
 // Reset clears the path for reuse, keeping the allocation.
@@ -134,29 +158,44 @@ func (p *StringPath) pt(c byte, x, y float64) {
 
 // MoveTo starts a subpath.
 func (p *StringPath) MoveTo(x, y float64) {
+	if p.err != nil {
+		return
+	}
 	p.x0, p.x1, p.y0, p.y1 = x, x, y, y
 	p.started, p.has0 = true, true
 	p.pt('M', x, y)
+	p.over()
 }
 
 // ClosePath closes the current subpath (a no-op on an empty path).
 func (p *StringPath) ClosePath() {
+	if p.err != nil {
+		return
+	}
 	if p.started {
 		p.x1, p.y1 = p.x0, p.y0
 		p.started = p.has0
 		p.buf = append(p.buf, 'Z')
 	}
+	p.over()
 }
 
 // LineTo draws a line.
 func (p *StringPath) LineTo(x, y float64) {
+	if p.err != nil {
+		return
+	}
 	p.x1, p.y1 = x, y
 	p.started = true
 	p.pt('L', x, y)
+	p.over()
 }
 
 // QuadraticCurveTo draws a quadratic Bézier.
 func (p *StringPath) QuadraticCurveTo(x1, y1, x, y float64) {
+	if p.err != nil {
+		return
+	}
 	p.pt('Q', x1, y1)
 	p.buf = append(p.buf, ',')
 	p.num(x)
@@ -164,10 +203,14 @@ func (p *StringPath) QuadraticCurveTo(x1, y1, x, y float64) {
 	p.num(y)
 	p.x1, p.y1 = x, y
 	p.started = true
+	p.over()
 }
 
 // BezierCurveTo draws a cubic Bézier.
 func (p *StringPath) BezierCurveTo(x1, y1, x2, y2, x, y float64) {
+	if p.err != nil {
+		return
+	}
 	p.pt('C', x1, y1)
 	p.buf = append(p.buf, ',')
 	p.num(x2)
@@ -179,10 +222,14 @@ func (p *StringPath) BezierCurveTo(x1, y1, x2, y2, x, y float64) {
 	p.num(y)
 	p.x1, p.y1 = x, y
 	p.started = true
+	p.over()
 }
 
 // Rect adds a closed rectangle as `M x,y h w v h h -w Z`.
 func (p *StringPath) Rect(x, y, w, h float64) {
+	if p.err != nil {
+		return
+	}
 	p.x0, p.x1, p.y0, p.y1 = x, x, y, y
 	p.started, p.has0 = true, true
 	p.pt('M', x, y)
@@ -193,12 +240,21 @@ func (p *StringPath) Rect(x, y, w, h float64) {
 	p.buf = append(p.buf, 'h')
 	p.num(-w)
 	p.buf = append(p.buf, 'Z')
+	p.over()
 }
 
 // Arc draws a circular arc following d3-path: it first joins the current point
 // to the arc start with a line, splits full circles into two SVG arcs, and
 // flips angles that run the wrong way.
 func (p *StringPath) Arc(x, y, r, a0, a1 float64, ccw bool) {
+	if p.err != nil {
+		return
+	}
+	p.arc(x, y, r, a0, a1, ccw)
+	p.over()
+}
+
+func (p *StringPath) arc(x, y, r, a0, a1 float64, ccw bool) {
 	if r < 0 {
 		if p.err == nil {
 			p.err = errNegativeRadius

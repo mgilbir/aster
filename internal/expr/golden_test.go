@@ -234,9 +234,11 @@ func (e *testEnv) InData(name, field string, v jsval.Value) (int, bool) {
 	if !ok {
 		return 0, false
 	}
+	// The runtime's index, like upstream's fastmap, keys values by their
+	// String.
 	n := 0
 	for _, row := range t.Items() {
-		if sameValueZero(row.Get(field), v) {
+		if row.Get(field).AsString() == v.AsString() {
 			n++
 		}
 	}

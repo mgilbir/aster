@@ -3,6 +3,10 @@ package raster
 import (
 	"math"
 	"strings"
+	"unsafe"
+
+	"github.com/mgilbir/aster/internal/budget"
+	"github.com/mgilbir/aster/internal/text"
 )
 
 const (
@@ -60,6 +64,58 @@ func (g *glyphPos) matrix() matrix {
 
 const maxTextChars = 1 << 20
 
+// What text layout holds, a character, a glyph, a style, charged to the
+// call's ledger (textTake) before it is made: one <text> of a million
+// characters, each positioned on its own, holds a few hundred megabytes
+// (C23, audit 2026-10-18).
+var (
+	tcharBytes    = int64(unsafe.Sizeof(tchar{}))
+	glyphPosBytes = int64(unsafe.Sizeof(glyphPos{}))
+	spanStateSize = int64(unsafe.Sizeof(state{}) + unsafe.Sizeof(spanInfo{}))
+)
+
+// fontFamilies is the names of the font-family list s, parsed once for the
+// runs that share it (the last list parsed is kept, charged to the ledger):
+// the shaper keys what it makes of a list by the slice it is given. Only the
+// first text.MaxFamilies names are read, which is all the text package
+// considers, so a list the document made long is not split whole.
+func (r *renderer) fontFamilies(s string) []string {
+	if len(s) == len(r.fams.src) && unsafe.StringData(s) == unsafe.StringData(r.fams.src) {
+		return r.fams.list
+	}
+	bytes := int64(text.MaxFamilies) * int64(unsafe.Sizeof(""))
+	if err := r.ledger.Alloc(bytes); err != nil {
+		r.fail(overLedger("laying out text", err))
+		panic(&budget.Stop{Err: r.err})
+	}
+	r.ledger.Free(r.fams.bytes)
+	list := make([]string, 0, text.MaxFamilies)
+	text.EachFontFamily(s, func(name string) bool {
+		list = append(list, name)
+		return len(list) < text.MaxFamilies
+	})
+	r.fams.src, r.fams.list, r.fams.bytes = s, list, bytes
+	return list
+}
+
+// textTake charges n bytes text layout is about to hold, given back when
+// the element being drawn (or measured) is done, as its geometry is (see
+// renderElement). Past the ledger the render stops with budget.Stop, as
+// holdPoints does: layout has no error to return.
+func (r *renderer) textTake(n int64) {
+	if err := r.ledger.Alloc(n); err != nil {
+		r.fail(overLedger("laying out text", err))
+		panic(&budget.Stop{Err: r.err})
+	}
+	r.textBytes += n
+}
+
+// releaseText gives back what text layout charged since held.
+func (r *renderer) releaseText(held int64) {
+	r.ledger.Free(r.textBytes - held)
+	r.textBytes = held
+}
+
 type textCollector struct {
 	r        *renderer
 	chars    []tchar
@@ -68,20 +124,37 @@ type textCollector struct {
 	adjust   string // lengthAdjust in effect
 }
 
-func parseNumberList(st *state, s string, axis int) []float64 {
+// parseNumberList parses at most limit lengths of s, the most a list of
+// positions can apply to.
+func (r *renderer) parseNumberList(st *state, s string, axis, limit int) []float64 {
 	var out []float64
-	for _, f := range strings.FieldsFunc(s, func(r rune) bool { return r == ',' || r == ' ' || r == '\t' || r == '\n' || r == '\r' }) {
+	for f := range strings.FieldsFuncSeq(s, func(r rune) bool { return r == ',' || r == ' ' || r == '\t' || r == '\n' || r == '\r' }) {
+		if len(out) >= limit {
+			break
+		}
+		if len(out) == cap(out) {
+			c := min(limit, 2*cap(out)+8)
+			r.textTake(int64(c) * 8)
+			out = append(make([]float64, 0, c), out...)
+		}
 		v, u, ok := parseLength(f)
 		if !ok {
 			v = 0
 			u = ""
 		}
 		out = append(out, st.toPx(v, u, axis))
-		if len(out) > maxTextChars {
-			break
-		}
 	}
 	return out
+}
+
+// add appends a character, charging a larger list before it is made.
+func (tc *textCollector) add(c tchar) {
+	if len(tc.chars) == cap(tc.chars) {
+		n := min(maxTextChars, max(8, 2*cap(tc.chars)))
+		tc.r.textTake(int64(n) * tcharBytes)
+		tc.chars = append(make([]tchar, 0, n), tc.chars...)
+	}
+	tc.chars = append(tc.chars, c)
 }
 
 func (tc *textCollector) addText(s string, sp *state, span *spanInfo) {
@@ -93,7 +166,7 @@ func (tc *textCollector) addText(s string, sp *state, span *spanInfo) {
 			if c == '\n' || c == '\r' || c == '\t' {
 				c = ' '
 			}
-			tc.chars = append(tc.chars, tchar{r: c, sp: sp, span: span})
+			tc.add(tchar{r: c, sp: sp, span: span})
 			continue
 		}
 		switch c {
@@ -110,7 +183,7 @@ func (tc *textCollector) addText(s string, sp *state, span *spanInfo) {
 		} else {
 			tc.prevSpc = false
 		}
-		tc.chars = append(tc.chars, tchar{r: c, sp: sp, span: span})
+		tc.add(tchar{r: c, sp: sp, span: span})
 	}
 }
 
@@ -139,6 +212,7 @@ func (tc *textCollector) walk(n *node, st *state) {
 			if isDisplayNone(k) {
 				continue
 			}
+			tc.r.textTake(spanStateSize)
 			ks := new(state)
 			*ks = *st
 			ks.applyProps(k)
@@ -171,7 +245,7 @@ func (tc *textCollector) walk(n *node, st *state) {
 		if !ok {
 			return
 		}
-		list := parseNumberList(st, v, axis)
+		list := tc.r.parseNumberList(st, v, axis, end-base)
 		for j, val := range list {
 			if base+j >= end {
 				break
@@ -191,6 +265,7 @@ func (tc *textCollector) walk(n *node, st *state) {
 
 // layoutTextNode collects and lays out the characters of a <text> element.
 func (r *renderer) layoutTextNode(n *node, st *state) []glyphPos {
+	r.textTake(spanStateSize)
 	tc := &textCollector{r: r, prevSpc: true}
 	root := new(state)
 	*root = *st
@@ -247,6 +322,7 @@ func (r *renderer) renderText(n *node, st *state, opacity float64, blend blendMo
 
 // layoutText places glyphs in text-chunk order and applies text-anchor.
 func (r *renderer) layoutText(chars []tchar) []glyphPos {
+	r.textTake(int64(len(chars)) * glyphPosBytes)
 	out := make([]glyphPos, 0, len(chars)) // one glyph per character is the common case
 	cx, cy := 0.0, 0.0
 	chunk := 0
@@ -314,10 +390,15 @@ func (r *renderer) layoutText(chars []tchar) []glyphPos {
 		}
 		text := sb.String()
 		sp := c.sp
-		req := FontRequest{Families: sp.families, Weight: sp.fontWeight, Italic: sp.italic}
+		req := FontRequest{Families: r.fontFamilies(sp.families), Weight: sp.fontWeight, Italic: sp.italic}
 		shaped := r.shaper.Shape(text, req, sp.fontSize)
 		by := cy + r.baselineOffset(sp, shaped)
 		runes := []rune(text)
+		if len(out)+len(shaped) > cap(out) {
+			c := max(2*cap(out), len(out)+len(shaped))
+			r.textTake(int64(c) * glyphPosBytes)
+			out = append(make([]glyphPos, 0, c), out...)
+		}
 		for gi, g := range shaped {
 			out = append(out, glyphPos{g: g, x: cx + g.XOffset, y: by - g.YOffset, size: sp.fontSize, sp: sp, chunk: chunk, rot: c.rot, shifted: shifted && gi == 0, span: c.span})
 			cx += g.Advance + sp.letterSpacing
@@ -589,7 +670,7 @@ func (r *renderer) drawGlyphs(gs []glyphPos, sp *state, opacity float64, layered
 		if !stroke {
 			return
 		}
-		if ps, ok := r.resolvePaint(sp.stroke, so, sp, bboxFn); ok {
+		if ps, scaled, ok := r.strokePaint(sp.stroke, so, sp, sp, bboxFn); ok {
 			var gp path
 			region, reach := r.clipRegion(sp), strokeReach(sp)
 			for i := range gs {
@@ -618,7 +699,7 @@ func (r *renderer) drawGlyphs(gs []glyphPos, sp *state, opacity float64, layered
 				}
 			}
 			if len(gp.verbs) > 0 {
-				r.strokePath(&gp, sp, ps)
+				r.strokePath(&gp, sp, ps, scaled)
 			}
 		}
 	}

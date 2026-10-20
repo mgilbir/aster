@@ -208,10 +208,16 @@ func LabelFraction(s Scale) func(value float64) float64 {
 // scale's domain in text. Abbreviated time specifiers are spelled out
 // (%a -> %A, %b -> %B) to read better for screen readers, and time scales with
 // no specifier get a full date-time format.
-func captionFormat(ctx context.Context, loc *format.Locale, s Scale, specifier jsval.Value, formatType string) (Format, error) {
+func captionFormat(ctx context.Context, loc *format.Locale, s Scale, specifier jsval.Value, formatType string, otherType bool) (Format, error) {
+	// type = formatType || scale.type; a formatType that is no string is
+	// the type, and names none (vega-scale's types are a Map: isTemporal
+	// finds no array or object; === matches none)
 	typ := formatType
 	if typ == "" {
 		typ = s.Type()
+	}
+	if otherType {
+		typ = ""
 	}
 	if specifier.IsStr() && IsTemporal(typ) {
 		specifier = jsval.Str(strings.ReplaceAll(strings.ReplaceAll(specifier.StrValue(), "%a", "%A"), "%b", "%B"))
@@ -238,6 +244,10 @@ type CaptionOptions struct {
 	Format jsval.Value
 	// FormatType forces "time", "utc" or "number" formatting (optional).
 	FormatType string
+	// FormatTypeOther reports a truthy formatType that is not a string
+	// (["utc"]): it replaces the scale's type and names none (FormatType
+	// is then "").
+	FormatTypeOther bool
 }
 
 // DomainCaption is vega-scale's domainCaption: a one-sentence description of a
@@ -249,7 +259,7 @@ func DomainCaption(ctx context.Context, loc *format.Locale, s Scale, opt Caption
 		maxlen = opt.MaxLen
 	}
 	maxlen = math.Max(3, maxlen)
-	fmtv, err := captionFormat(ctx, loc, s, opt.Format, opt.FormatType)
+	fmtv, err := captionFormat(ctx, loc, s, opt.Format, opt.FormatType, opt.FormatTypeOther)
 	if err != nil {
 		return "", err
 	}

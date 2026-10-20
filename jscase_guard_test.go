@@ -5,6 +5,7 @@ import (
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -22,20 +23,18 @@ import (
 // CSS, fonts and URLs, whose grammars have rules of their own, are not
 // scanned, and the uses below are listed with why they stay.
 var goCaseOrSpaceAllowed = map[string]string{
-	// uriAllowed lowercases a URL scheme with Unicode rules where
-	// vega-loader's regular expression is ASCII-case-insensitive: C152 of
-	// the audit, the SVG writer's (PR 06).
-	"internal/svg/sanitize.go:uriAllowed:strings.ToLower": "C152 (PR 06)",
 	// The wordcloud's font is node-canvas's parse of a CSS font (C, not
 	// JavaScript).
 	"internal/transforms/wordcloud/canvas.go:canvasFont:strings.TrimSpace": "node-canvas's font parser",
 }
 
 func TestNoGoCaseOrSpaceInTheEngine(t *testing.T) {
+	// The engine packages that read SVG, CSS, fonts and URLs, and every
+	// tool, which docs/architecture.md's layer list names (so a new tool
+	// cannot be missed here).
 	notJS := []string{"internal/raster", "internal/svgpdf", "internal/text", "internal/csscolor", "internal/imageref",
-		"internal/loader", "internal/fontsubset", "internal/pngopt", "internal/fonts", "internal/textcut",
-		"internal/cmd", "internal/oracle", "internal/upstream", "internal/svgdiff", "internal/svgcheck",
-		"internal/fuzzutil", "internal/testutil"}
+		"internal/loader", "internal/fontsubset", "internal/pngopt", "internal/fonts", "internal/textcut"}
+	notJS = append(notJS, toolPackages(t)...)
 	forbidden := map[string]map[string]bool{
 		"strings": {"ToLower": true, "ToUpper": true, "ToTitle": true, "TrimSpace": true, "Fields": true, "EqualFold": true},
 		"bytes":   {"ToLower": true, "ToUpper": true, "TrimSpace": true, "Fields": true, "EqualFold": true},
@@ -79,11 +78,14 @@ func TestNoGoCaseOrSpaceInTheEngine(t *testing.T) {
 			}
 		}
 		for _, decl := range f.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok {
-				continue
+			// A package-level declaration (a var's initializer, a function
+			// literal assigned at package level) is scanned as well, under
+			// the name "init".
+			where := "init"
+			if fn, ok := decl.(*ast.FuncDecl); ok {
+				where = fn.Name.Name
 			}
-			ast.Inspect(fn, func(n ast.Node) bool {
+			ast.Inspect(decl, func(n ast.Node) bool {
 				sel, ok := n.(*ast.SelectorExpr)
 				if !ok {
 					return true
@@ -93,7 +95,7 @@ func TestNoGoCaseOrSpaceInTheEngine(t *testing.T) {
 					return true
 				}
 				if p, ok := names[id.Name]; ok && forbidden[p][sel.Sel.Name] {
-					key := filepath.ToSlash(path) + ":" + fn.Name.Name + ":" + p + "." + sel.Sel.Name
+					key := filepath.ToSlash(path) + ":" + where + ":" + p + "." + sel.Sel.Name
 					if _, ok := goCaseOrSpaceAllowed[key]; !ok {
 						t.Errorf("%s: %s.%s reads text as Go does, not JavaScript: use jsval.JSLower, JSUpper, JSTrim or IsJSSpace (or list it, with why, in goCaseOrSpaceAllowed)", fset.Position(sel.Pos()), p, sel.Sel.Name)
 					}
@@ -187,4 +189,31 @@ func TestCSSFoldsASCIIOnly(t *testing.T) {
 	if scanned < 40 {
 		t.Fatalf("only %d files scanned: the scan is broken", scanned)
 	}
+}
+
+// toolPackages are the packages docs/architecture.md's layer list puts in
+// its tools line, as paths: the commands and the test harness, which read no
+// specification.
+func toolPackages(t *testing.T) []string {
+	t.Helper()
+	b, err := os.ReadFile("docs/architecture.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := string(b)
+	i, j := strings.Index(doc, "<!-- layers:begin"), strings.Index(doc, "<!-- layers:end")
+	if i < 0 || j < i {
+		t.Fatal("docs/architecture.md has no layers:begin/end block")
+	}
+	for _, line := range strings.Split(doc[i:j], "\n") {
+		if pkgs, ok := strings.CutPrefix(line, "tools:"); ok {
+			var out []string
+			for _, p := range strings.Fields(pkgs) {
+				out = append(out, "internal/"+p)
+			}
+			return out
+		}
+	}
+	t.Fatal("docs/architecture.md's layer list has no tools line")
+	return nil
 }

@@ -52,9 +52,8 @@ func TestSortItemsByKeysMatchesViews(t *testing.T) {
 		{[]any{"bounds.x1", "datum.b"}, nil},
 		{[]any{"toString", "x"}, nil},
 		{[]any{"datum"}, nil},
-		{[]any{"nope.deeper"}, nil},
 	} {
-		cs := compareFrom(jsval.Walker{}, c.fields, c.orders)
+		cs := compareFrom(jsval.Walker{}, c.fields, c.orders, true)
 		if cs == nil || cs.roots == nil {
 			t.Fatalf("%v: want a comparator over paths", c.fields)
 		}
@@ -70,5 +69,43 @@ func TestSortItemsByKeysMatchesViews(t *testing.T) {
 				t.Fatalf("%v: position %d holds item %d, a sort over views puts item %d there", c.fields, i, a[i].Seq, b[i].Seq)
 			}
 		}
+	}
+}
+
+// A compare field is read as a member chain: a path through a root the item
+// does not hold is the TypeError of reading a property of undefined, from
+// the sort over keys as from the sort over views, however many items.
+func TestSortItemsByKeysThrowsAtAMissingStep(t *testing.T) {
+	cs := compareFrom(jsval.Walker{}, []any{"nope.deeper"}, nil, true)
+	if cs == nil || cs.roots == nil {
+		t.Fatal("want a comparator over paths")
+	}
+	mk := func(n int) []*scene.Item {
+		items := make([]*scene.Item, n)
+		for i := range items {
+			items[i] = &scene.Item{Seq: uint64(i + 1), Bounds: scene.NewBounds(), Datum: jsval.Obj(jsval.NewObject(0))}
+		}
+		return items
+	}
+	throws := func(f func()) (msg string) {
+		defer func() {
+			if r := recover(); r != nil {
+				th, ok := r.(*jsval.Thrown)
+				if !ok {
+					panic(r)
+				}
+				msg = th.Msg
+			}
+		}()
+		f()
+		return ""
+	}
+	byKeys := throws(func() { (&runView{g: newGraph(context.Background())}).sortItemsByKeys(mk(3), cs) })
+	byViews := throws(func() { (&runView{g: newGraph(context.Background())}).sortItemsByViews(mk(3), cs.cmp) })
+	if byKeys == "" || byKeys != byViews {
+		t.Errorf("sort over keys throws %q, over views %q", byKeys, byViews)
+	}
+	if msg := throws(func() { (&runView{g: newGraph(context.Background())}).sortItemsByKeys(mk(1), cs) }); msg != "" {
+		t.Errorf("one item compares nothing, yet the sort threw %q", msg)
 	}
 }

@@ -47,7 +47,7 @@ func wrapCondition(cc *compileCtx, o wrapConditionOpts) Value {
 		return wrapCondition58(o)
 	}
 	var valueRefs []Value
-	if cond := o.channelDef.Get("condition"); isConditionalDef(o.channelDef) && cond.IsTruthy() {
+	if cond := o.channelDef.Get("condition"); isConditionalDef(cc, o.channelDef) && cond.IsTruthy() {
 		for _, c := range arrayOf(cond) {
 			cc.work(1)
 			cvr := o.mainRefFn(c)
@@ -120,7 +120,14 @@ func markDefProperties(cc *compileCtx, mark Value, ignore encodeIgnore) Value {
 		if prop == "aria" || prop == "width" || prop == "height" {
 			continue
 		}
-		if hasProperty(mark, prop) && ignore[prop] != "ignore" {
+		// hasProperty(mark, prop) in 6.4; 5.8 tests mark[prop] !== undefined,
+		// which reads through the mark's prototype (one its copy's
+		// "__proto__" set).
+		has := hasProperty(mark, prop)
+		if cc.v5 {
+			has = !mark.Get(prop).IsUndefined()
+		}
+		if has && ignore[prop] != "ignore" {
 			m.Set(prop, signalOrValueRef(cc, mark.Get(prop)))
 		}
 	}
@@ -130,27 +137,28 @@ func markDefProperties(cc *compileCtx, mark Value, ignore encodeIgnore) Value {
 // ---- color ----
 
 func colorEncode(m *unitModel, filledOpt Value) Value {
+	cc := m.ctx
 	markDef, encoding, config := m.markDef, m.encoding, m.config
-	markType := markDef.Get("type").AsString()
+	markType := markDef.Get("type")
 	filled := filledOpt
 	if filled.IsNullish() {
-		filled = getMarkPropOrConfigSimple("filled", markDef, config)
+		filled = getMarkPropOrConfigSimple(cc, "filled", markDef, config)
 	}
 	transparentIfNeeded := undef
-	if contains([]string{"bar", "point", "circle", "square", "geoshape"}, markType) {
+	if strIn(markType, "bar", "point", "circle", "square", "geoshape") {
 		transparentIfNeeded = jsval.Str("transparent")
 	}
 	filledTrue := filled.IsBool() && filled.BoolValue()
 	filledFalse := filled.IsBool() && !filled.BoolValue()
-	fillChannel := ""
-	if filledTrue {
-		fillChannel = "color"
-	}
+	// getMarkPropOrConfig(filled === true ? 'color' : undefined, ...): an
+	// undefined channel is read as the key "undefined" (mark[undefined],
+	// config[type][undefined], a style's), not "" (C89 of the 2026-10-18
+	// audit).
 	var defaultFill Value
-	if fillChannel != "" {
-		defaultFill = getMarkPropOrConfig("color", markDef, config, "fill", false)
+	if filledTrue {
+		defaultFill = getMarkPropOrConfig(cc, "color", markDef, config, "fill", false)
 	} else {
-		defaultFill = getMarkPropOrConfig("", markDef, config, "fill", false)
+		defaultFill = getMarkPropOrConfig(cc, undefinedKey, markDef, config, "fill", false)
 	}
 	if defaultFill.IsNullish() {
 		var cm Value
@@ -163,9 +171,9 @@ func colorEncode(m *unitModel, filledOpt Value) Value {
 	}
 	var defaultStroke Value
 	if filledFalse {
-		defaultStroke = getMarkPropOrConfig("color", markDef, config, "stroke", false)
+		defaultStroke = getMarkPropOrConfig(cc, "color", markDef, config, "stroke", false)
 	} else {
-		defaultStroke = getMarkPropOrConfig("", markDef, config, "stroke", false)
+		defaultStroke = getMarkPropOrConfig(cc, undefinedKey, markDef, config, "stroke", false)
 	}
 	if defaultStroke.IsNullish() {
 		if filledFalse {
@@ -228,7 +236,7 @@ func nonPosition(channel string, m *unitModel, opt nonPositionOpts) Value {
 	defaultRef, defaultValue := opt.defaultRef, opt.defaultValue
 	if defaultRef.IsUndefined() {
 		if defaultValue.IsNullish() {
-			defaultValue = getMarkPropOrConfig(channel, markDef, config, opt.vgChannel, cc.v5 || !isConditionalDef(channelDef))
+			defaultValue = getMarkPropOrConfig(cc, channel, markDef, config, opt.vgChannel, cc.v5 || !isConditionalDef(cc, channelDef))
 		}
 		if !defaultValue.IsUndefined() {
 			defaultRef = signalOrValueRef(m.ctx, defaultValue)
@@ -283,7 +291,7 @@ func zindexEncode(m *unitModel) Value {
 	cc := m.b().ctx
 
 	order := m.encoding.Get("order")
-	if !isPathMarkName(m.mark()) && isValueDef(order) {
+	if !isPathMark(m.mark()) && isValueDef(order) {
 		return wrapCondition(cc, wrapConditionOpts{
 			model: m, channelDef: order, vgChannel: "zindex",
 			mainRefFn: func(cd Value) Value { return signalOrValueRef(m.ctx, cd.Get("value")) },
@@ -293,7 +301,7 @@ func zindexEncode(m *unitModel) Value {
 }
 
 func ariaEncode(m *unitModel) Value {
-	enable := getMarkPropOrConfigSimple("aria", m.markDef, m.config)
+	enable := getMarkPropOrConfigSimple(m.ctx, "aria", m.markDef, m.config)
 	if enable.IsBool() && !enable.BoolValue() {
 		return mkv()
 	}
@@ -310,11 +318,11 @@ func ariaRoleDescription(m *unitModel) Value {
 	if m.config.Get("aria").IsBool() && !m.config.Get("aria").BoolValue() {
 		return mkv()
 	}
-	desc := getMarkPropOrConfigSimple("ariaRoleDescription", m.markDef, m.config)
+	desc := getMarkPropOrConfigSimple(m.ctx, "ariaRoleDescription", m.markDef, m.config)
 	if !desc.IsNullish() {
 		return mkv("ariaRoleDescription", mkv("value", desc))
 	}
-	if vgMarkIndex[m.mark()] {
+	if vgMarkIndex[propKey(m.ctx, m.mark())] {
 		return mkv()
 	}
 	return mkv("ariaRoleDescription", mkv("value", m.mark()))
@@ -330,7 +338,7 @@ func descriptionEncode(m *unitModel) Value {
 			mainRefFn: func(cd Value) Value { return textRef(cc, cd, m.config, "datum") },
 		})
 	}
-	dv := getMarkPropOrConfigSimple("description", m.markDef, m.config)
+	dv := getMarkPropOrConfigSimple(m.ctx, "description", m.markDef, m.config)
 	if !dv.IsNullish() {
 		return mkv("description", signalOrValueRef(m.ctx, dv))
 	}
@@ -366,10 +374,10 @@ func descriptionEncode(m *unitModel) Value {
 		if idx > 0 {
 			sep = "; "
 		}
-		parts = append(parts, `"`+sep+key+`: " + (`+value+`)`)
+		parts = append(parts, cc.cat(`"`, sep, key, `: " + (`, value, `)`))
 		idx++
 	}
-	return mkv("description", mkv("signal", strings.Join(parts, " + ")))
+	return mkv("description", mkv("signal", joinCC(cc, parts, " + ")))
 }
 
 // ---- tooltip ----
@@ -394,7 +402,7 @@ func tooltipEncode(m *unitModel, reactiveGeom bool) Value {
 		if cd.IsNull() {
 			return undef
 		}
-		markTooltip := getMarkPropOrConfigSimple("tooltip", markDef, config)
+		markTooltip := getMarkPropOrConfigSimple(cc, "tooltip", markDef, config)
 		if markTooltip.IsBool() && markTooltip.BoolValue() {
 			markTooltip = mkv("content", "encoding")
 		}
@@ -473,7 +481,7 @@ func tooltipData(cc *compileCtx, encoding Value, stack *stackProperties, config 
 			cc.work(1)
 			titleParts = append(titleParts, joinItem(x)) // array(title).join(', ')
 		}
-		key := strings.Join(titleParts, ", ")
+		key := joinCC(cc, titleParts, ", ")
 		if !cc.v5 {
 			key = strings.ReplaceAll(key, `"`, `\"`)
 		}
@@ -489,7 +497,7 @@ func tooltipData(cc *compileCtx, encoding Value, stack *stackProperties, config 
 				startField := vgField(cc, fd, fieldRefOption{expr: expr})
 				endField := vgField(cc, fd2, fieldRefOption{expr: expr})
 				format, formatType := getFormatMixins(fd)
-				value = tipValue{binFormatExpression(startField, endField, format, formatType, jsval.Obj(formatConfig)), true}
+				value = tipValue{binFormatExpression(cc, startField, endField, format, formatType, jsval.Obj(formatConfig)), true}
 				hasValue = true
 				toSkip[channel2] = true
 			}
@@ -529,10 +537,10 @@ func tooltipRefForEncoding(cc *compileCtx, encoding Value, stack *stackPropertie
 	var kv []string
 	for _, k := range data.keysView() {
 		cc.work(1)
-		kv = append(kv, `"`+k+`": `+data.m[k].text())
+		kv = append(kv, cc.cat(`"`, k, `": `, data.m[k].text()))
 	}
 	if len(kv) > 0 {
-		return mkv("signal", "{"+strings.Join(kv, ", ")+"}")
+		return mkv("signal", "{"+joinCC(cc, kv, ", ")+"}")
 	}
 	return undef
 }

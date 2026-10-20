@@ -30,6 +30,14 @@ type Grid struct {
 	// ScaleXY is a data grid's scale given as an array, [sx, sy] (missing or
 	// non-numeric entries are NaN, which the transform reads as 1).
 	ScaleXY []float64
+	// TranslateText holds the text of a translate entry that is a non-empty
+	// string (TranslateIsText marks which): `coordinate * s + t` then
+	// concatenates, and the coordinate is that text.
+	// ValuesNullish is "undefined" or "null" when the grid object has no
+	// values array (nullish): the contour reads values[0] of it.
+	ValuesNullish   string
+	TranslateText   [2]string
+	TranslateIsText [2]bool
 }
 
 // DensityParams configures 2-D kernel density estimation.
@@ -67,12 +75,12 @@ func Density(ctx context.Context, data []jsval.Value, p DensityParams, counts bo
 		dx, dy = p.Size[0], p.Size[1]
 	}
 	if !(dx >= 0 && dy >= 0) {
-		return Grid{}, errors.New("contour: invalid size")
+		return Grid{}, errInvalidSize
 	}
 	k := 2
 	if p.CellSize != 0 {
 		if !(p.CellSize >= 1) {
-			return Grid{}, errors.New("contour: invalid cell size")
+			return Grid{}, errors.New("invalid cell size")
 		}
 		kf := math.Floor(jsmath.Log(p.CellSize) / math.Ln2)
 		if kf > 30 {
@@ -88,7 +96,7 @@ func Density(ctx context.Context, data []jsval.Value, p DensityParams, counts bo
 	case 2:
 		bw = [2]float64{p.Bandwidth[0], p.Bandwidth[1]}
 	default:
-		return Grid{}, errors.New("contour: invalid bandwidth")
+		return Grid{}, errors.New("invalid bandwidth")
 	}
 
 	rx := int(toInt32(radius(bw[0], data, x))) >> k // blur x-radius
@@ -139,36 +147,36 @@ func Density(ctx context.Context, data []jsval.Value, p DensityParams, counts bo
 		}
 	}
 
-	// Each pass is a sweep of the raster.
-	passes := 0
-	if rx > 0 {
-		passes += 3
-	}
-	if ry > 0 {
-		passes += 3
-	}
-	if err := meter.Work(int64(passes) * n * m); err != nil {
-		led.Free(gridValueBytes * n * m)
-		return Grid{}, err
+	// Each pass is a sweep of the raster, a line at a time, each line
+	// charged to the meter as it is swept (ADR 0010).
+	var err error
+	pass := func(blur func(n, m int, source, target []float32, r int, meter *budget.Meter) error, src, dst []float32, r int) {
+		if err == nil {
+			err = blur(nn, mm, src, dst, r, &meter)
+		}
 	}
 	switch {
 	case rx > 0 && ry > 0:
-		blurX(nn, mm, values0, values1, rx)
-		blurY(nn, mm, values1, values0, ry)
-		blurX(nn, mm, values0, values1, rx)
-		blurY(nn, mm, values1, values0, ry)
-		blurX(nn, mm, values0, values1, rx)
-		blurY(nn, mm, values1, values0, ry)
+		pass(blurX, values0, values1, rx)
+		pass(blurY, values1, values0, ry)
+		pass(blurX, values0, values1, rx)
+		pass(blurY, values1, values0, ry)
+		pass(blurX, values0, values1, rx)
+		pass(blurY, values1, values0, ry)
 	case rx > 0:
-		blurX(nn, mm, values0, values1, rx)
-		blurX(nn, mm, values1, values0, rx)
-		blurX(nn, mm, values0, values1, rx)
+		pass(blurX, values0, values1, rx)
+		pass(blurX, values1, values0, rx)
+		pass(blurX, values0, values1, rx)
 		values = values1
 	case ry > 0:
-		blurY(nn, mm, values0, values1, ry)
-		blurY(nn, mm, values1, values0, ry)
-		blurY(nn, mm, values0, values1, ry)
+		pass(blurY, values0, values1, ry)
+		pass(blurY, values1, values0, ry)
+		pass(blurY, values0, values1, ry)
 		values = values1
+	}
+	if err != nil {
+		led.Free(gridValueBytes * n * m)
+		return Grid{}, err
 	}
 
 	// Scale to points per square pixel (counts) or to a probability density.
@@ -274,9 +282,12 @@ func quantileSorted(v []float64, p float64) float64 {
 	return v[i0] + float64((v[i0+1]-v[i0])*(i-float64(i0)))
 }
 
-func blurX(n, m int, source, target []float32, r int) {
+func blurX(n, m int, source, target []float32, r int, meter *budget.Meter) error {
 	w := r<<1 + 1
 	for j := 0; j < m; j++ {
+		if err := meter.Work(int64(n + r)); err != nil {
+			return err
+		}
 		row := j * n
 		sr := 0.0
 		for i := 0; i < n+r; i++ {
@@ -291,11 +302,15 @@ func blurX(n, m int, source, target []float32, r int) {
 			}
 		}
 	}
+	return nil
 }
 
-func blurY(n, m int, source, target []float32, r int) {
+func blurY(n, m int, source, target []float32, r int, meter *budget.Meter) error {
 	w := r<<1 + 1
 	for i := 0; i < n; i++ {
+		if err := meter.Work(int64(m + r)); err != nil {
+			return err
+		}
 		sr := 0.0
 		for j := 0; j < m+r; j++ {
 			if j < m {
@@ -309,4 +324,5 @@ func blurY(n, m int, source, target []float32, r int) {
 			}
 		}
 	}
+	return nil
 }

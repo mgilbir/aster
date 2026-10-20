@@ -4,7 +4,7 @@
 import { createRequire } from 'node:module';
 import path from 'node:path';
 
-const require = createRequire(path.join(process.env.NODE_PATH, 'x.js'));
+const require = createRequire(path.resolve(process.env.NODE_PATH, 'x.js'));
 export const vega = await import(require.resolve('vega'));
 
 // runTransforms evaluates upstream Vega transforms over `values` and returns the

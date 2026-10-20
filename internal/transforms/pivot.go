@@ -16,10 +16,13 @@ type PivotParams struct {
 	Field Field
 	// Value supplies the values aggregated into each column.
 	Value Field
-	// Op is the aggregate op (default "sum").
+	// Op is the aggregate op (default "sum"); the runtime passes upstream's
+	// internal __count__ for the string "count", as Pivot.js does.
 	Op string
-	// Limit, when positive, keeps only the first Limit columns in sorted order.
-	Limit int
+	// Limit, when not nil, is upstream's truthy `limit` as a number: the
+	// sorted columns are cut to list.slice(0, limit), JavaScript's slice
+	// (a fraction truncated, a negative one counted from the end, NaN 0).
+	Limit *float64
 	// Key optionally overrides the group cell key, as in Aggregate.
 	Key  Field
 	Rand Rand
@@ -32,14 +35,20 @@ type PivotParams struct {
 // contribute NaN, which the aggregator ignores, so a column with no matching
 // tuples is undefined (0 for count).
 func Pivot(ctx context.Context, data []jsval.Value, p PivotParams) ([]jsval.Value, error) {
+	// `(_.op === 'count' ? '__count__' : _.op) || 'sum'`: the caller maps
+	// the string "count" to __count__, the missing and valid values of the
+	// column, which leaves out a NaN.
 	op := p.Op
 	if op == "" {
 		op = "sum"
 	}
-	if !IsAggregateOp(op) {
+	if _, ok := opKinds[op]; !ok {
 		return nil, errUnknownOp(op)
 	}
 	kf := keysOf(ctx)
+	// The keys are collected in a plain object (`if (!map[k])`), keyed by
+	// String(k): a value that names a member of Object.prototype finds it
+	// there and makes no column.
 	seen := map[string]bool{}
 	var keys []jsval.Value
 	for i, t := range data {
@@ -47,7 +56,9 @@ func Pivot(ctx context.Context, data []jsval.Value, p PivotParams) ([]jsval.Valu
 			return nil, err
 		}
 		k := p.Field.Apply(t)
-		if s := kf.String(k); !seen[s] {
+		// pivotKeys tests `!map[k]` on a plain object: a name every object
+		// inherits finds that member, truthy, and is never collected.
+		if s := kf.String(k); !seen[s] && !jsval.ObjectPrototypeHas(s) {
 			seen[s] = true
 			keys = append(keys, k)
 		}
@@ -67,8 +78,8 @@ func Pivot(ctx context.Context, data []jsval.Value, p PivotParams) ([]jsval.Valu
 	for ; undefs > 0; undefs-- {
 		keys = append(keys, jsval.Undefined)
 	}
-	if p.Limit > 0 && len(keys) > p.Limit {
-		keys = keys[:p.Limit]
+	if p.Limit != nil {
+		keys = keys[:jsSliceEnd(*p.Limit, len(keys))]
 	}
 
 	// Every tuple is offered to every column: rows x columns accessor calls.
@@ -79,39 +90,38 @@ func Pivot(ctx context.Context, data []jsval.Value, p PivotParams) ([]jsval.Valu
 	for i, k := range keys {
 		k := k
 		name := kf.String(k)
-		var get Accessor
-		mop := op
-		if op == "count" {
-			// upstream swaps in the internal missing+valid counter, which
-			// counts every tuple of the column, null values included; `valid`
-			// over a constant 1 does the same here.
-			mop = "valid"
-			get = func(t jsval.Value) jsval.Value {
-				if jsval.SameRef(p.Field.Apply(t), k) {
-					return jsval.Num(1)
-				}
-				return jsval.Num(math.NaN())
+		get := func(t jsval.Value) jsval.Value {
+			if jsval.SameRef(p.Field.Apply(t), k) {
+				return p.Value.Apply(t)
 			}
-		} else {
-			get = func(t jsval.Value) jsval.Value {
-				if jsval.SameRef(p.Field.Apply(t), k) {
-					return p.Value.Apply(t)
-				}
-				return jsval.Num(math.NaN())
-			}
+			return jsval.Num(math.NaN())
 		}
-		measures[i] = Measure{Op: mop, Field: NamedField(name, nil, get), As: name}
+		measures[i] = Measure{Op: op, Field: NamedField(name, nil, get), As: name, Param: math.NaN()}
 	}
 	out, err := Aggregate(ctx, data, AggregateParams{GroupBy: p.GroupBy, Measures: measures, Key: p.Key, Rand: p.Rand})
 	if err != nil {
 		return nil, err
 	}
-	if len(keys) == 0 {
-		// An empty measure list is not "count" upstream: cells carry only the
-		// group-by fields. Aggregate substitutes a count, so drop it again.
-		for _, t := range out {
-			t.ObjValue().Delete("count")
-		}
-	}
 	return out, nil
+}
+
+// jsSliceEnd is the end Array.prototype.slice(0, end) cuts a list of n at:
+// end truncated toward zero (NaN is 0), counted from the list's end when
+// negative, and clamped to [0, n].
+func jsSliceEnd(end float64, n int) int {
+	switch {
+	case math.IsNaN(end):
+		return 0
+	case end < 0:
+		end = math.Ceil(end) + float64(n)
+		if end < 0 {
+			return 0
+		}
+	default:
+		end = math.Floor(end)
+	}
+	if end > float64(n) {
+		return n
+	}
+	return int(end)
 }

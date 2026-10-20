@@ -191,7 +191,7 @@ func TestUpstreamD3Color(t *testing.T) {
 		}
 		r.Check(c, got, false)
 	}
-	r.Done(450)
+	r.Done(590)
 }
 
 // unreplayable reports whether an argument is an instance of d3's base Color class, which a test

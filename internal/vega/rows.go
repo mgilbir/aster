@@ -118,7 +118,7 @@ func (v *runView) holdCreated(n *opNode, before int64, out []jsval.Value) {
 	var created, createdEx, passedEx int64
 	for i, t := range out {
 		v.g.rows(i, len(out), 1)
-		o := t.ObjValue()
+		o := jsval.Tuple(t)
 		if o == nil {
 			continue
 		}
@@ -194,6 +194,32 @@ func (v *runView) chargeRun(n int64) {
 	v.runBytes += n
 }
 
+// releaseRun gives back n bytes chargeRun charged, for state dropped before
+// the run is over (a sort's temporary item views, a replaced cache entry).
+func (v *runView) releaseRun(n int64) {
+	v.led.Free(n)
+	v.lists -= n
+	v.runBytes -= n
+}
+
+// envItem is what an element of an array the expression environment hands an
+// expression holds, as expr's perItem: the Value and the slack of what it
+// refers to.
+const envItem = 24
+
+// chargeItems charges what an expression-environment method (domain(),
+// range(), gradient(), data() of a mark, …) is about to hand an expression:
+// a step per 16 elements made, and, past 256 elements (an array that size
+// is free in an expression too), the elements' bytes for the rest of the
+// run, as the evaluator charges an array it builds. A formula can keep what
+// it is handed in every row, and an encoder can call it for every item.
+func (v *runView) chargeItems(n int) {
+	v.g.work(n/16 + 1)
+	if n > 256 {
+		v.chargeRun(int64(n) * envItem)
+	}
+}
+
 // releaseLists gives the ledger back the tuple lists charged: once the
 // render is over they are garbage, the scenegraph keeping the tuples only.
 func (v *runView) releaseLists() {
@@ -219,7 +245,7 @@ func aliases(out []jsval.Value, in *flowPulse) bool {
 // unheld reports a tuple of out that no operator holds (see checkHeld).
 func unheld(out []jsval.Value) bool {
 	for _, t := range out {
-		if o := t.ObjValue(); o != nil && o.TupleID() == 0 {
+		if o := jsval.Tuple(t); o != nil && o.TupleID() == 0 {
 			return true
 		}
 	}

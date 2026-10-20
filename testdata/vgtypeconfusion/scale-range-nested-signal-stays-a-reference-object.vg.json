@@ -1,0 +1,1 @@
+{"width":100,"height":100,"signals":[{"name":"k","value":2}],"scales":[{"name":"s","type":"linear","domain":[0,1],"range":[[{"signal":"k"},3],[1,2]]}],"marks":[{"type":"text","encode":{"enter":{"text":{"signal":"join(range('s'),'|')"}}}}]}

@@ -97,7 +97,7 @@ func TestUpstreamD3Path(t *testing.T) {
 			r.Check(c, upstream.Undefined(), false)
 		}
 	}
-	r.Done(100)
+	r.Done(144)
 }
 
 func TestUpstreamVegaScenegraphPathParse(t *testing.T) {
@@ -127,5 +127,5 @@ func TestUpstreamVegaScenegraphPathParse(t *testing.T) {
 		}
 		r.Check(c, out, false)
 	}
-	r.Done(30)
+	r.Done(39)
 }

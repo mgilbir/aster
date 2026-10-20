@@ -2,6 +2,7 @@ package vegalite
 
 import (
 	"reflect"
+	"strconv"
 
 	"github.com/mgilbir/aster/internal/jsval"
 )
@@ -28,6 +29,8 @@ type jsRealm struct {
 	hosts map[string]*jsHost // "" is Object.prototype; else the member of that name
 	// protos are the prototypes assigned to jsval objects used as maps.
 	protos map[*Object]jsProto
+	// scope is the compilation's conversion scope (compileCtx.conv).
+	scope *jsval.ConversionScope
 }
 
 // jsHost is a built-in object a plain object reaches through its prototype:
@@ -56,7 +59,7 @@ type jsRef struct {
 
 func (c *compileCtx) realm() *jsRealm {
 	if c.jsr == nil {
-		c.jsr = &jsRealm{}
+		c.jsr = &jsRealm{scope: c.conv}
 	}
 	return c.jsr
 }
@@ -148,8 +151,25 @@ func (r *jsRealm) inherited(p jsProto, key string) jsRef {
 		switch v := p.obj.(type) {
 		case Value:
 			if v.IsObj() {
-				if x, ok := v.ObjValue().Get(key); ok {
+				// The assigned object's own chain, which may end in null.
+				if x, ok := v.ObjValue().ChainGet(key); ok {
 					return jsRef{found: true, val: x}
+				}
+				if !v.ObjValue().InheritsObjectPrototype() {
+					return jsRef{}
+				}
+			}
+			if v.IsArr() {
+				// An array prototype: its elements, its length, and
+				// Array.prototype's members (fill, keys, ...).
+				if i, ok := arrayIndex(key); ok && int(i) < v.Len() {
+					return jsRef{found: true, val: v.Index(int(i))}
+				}
+				switch {
+				case key == "length":
+					return jsRef{found: true, val: jsval.Int(v.Len())}
+				case jsval.ArrayPrototypeMember(key):
+					return jsRef{found: true, val: jsval.NativeFunction(key)}
 				}
 			}
 		case *omap[any]:
@@ -213,17 +233,60 @@ func (r *jsRealm) write(ref jsRef, key string, x any) {
 	}
 }
 
+// jsRead is o[key] on a jsval object upstream uses as a plain object: its
+// own value, else what its prototype holds (one "__proto__" assigned, or
+// Object.prototype).
+func jsRead(r *jsRealm, o *Object, key string) Value {
+	if v, ok := o.Get(key); ok {
+		return v
+	}
+	return r.inherited(r.protos[o], key).value()
+}
+
 // jsAssign is o[key] = v on a jsval object upstream uses as a plain object.
 // An own "__proto__" (JSON.parse makes one) is an ordinary property.
 func jsAssign(r *jsRealm, o *Object, key string, v Value) {
-	if key == "__proto__" && !o.Has(key) {
-		if r.protos == nil {
-			r.protos = map[*Object]jsProto{}
+	if key == "__proto__" && protoSetterApplies(o) {
+		if v.IsObj() || v.IsArr() || v.IsNull() {
+			if v.IsObj() && onChain(v.ObjValue(), o) {
+				throw("Cyclic __proto__ value")
+			}
+			if r.protos == nil {
+				r.protos = map[*Object]jsProto{}
+			}
+			r.protos[o] = protoAssigned(r.protos[o], v)
+			o.SetPrototype(v, r.scope) // read through by Value.Get
 		}
-		r.protos[o] = protoAssigned(r.protos[o], v)
 		return
 	}
 	o.Set(key, v)
+}
+
+// protoSetterApplies says whether o.__proto__ = x reaches Object.prototype's
+// setter, which replaces the prototype: not when o holds "__proto__" itself
+// or a prototype on its chain holds it as data (the assignment then makes
+// o's own property), nor when the chain ends in null (no setter: likewise).
+func protoSetterApplies(o *Object) bool {
+	if _, ok := o.ChainGet("__proto__"); ok {
+		return false
+	}
+	return o.InheritsObjectPrototype()
+}
+
+// onChain says whether o is p or on p's prototype chain (a prototype that
+// would make the chain a cycle).
+func onChain(p, o *Object) bool {
+	for depth := 0; depth <= jsval.MaxValueDepth; depth++ {
+		if p == o {
+			return true
+		}
+		q := p.Prototype()
+		if !q.IsObj() {
+			return false
+		}
+		p = q.ObjValue()
+	}
+	return false
 }
 
 // jsHasKey is `key in o` on a jsval object upstream uses as a plain object.
@@ -468,6 +531,7 @@ func duplicate(cc *compileCtx, v Value) Value {
 	switch v.Kind() {
 	case jsval.KindArr:
 		items := v.Items()
+		cc.alloc(arrayBytes(len(items)))
 		out := make([]Value, len(items))
 		for i, it := range items {
 			out[i] = duplicate(cc, it)
@@ -477,13 +541,99 @@ func duplicate(cc *compileCtx, v Value) Value {
 		if jsval.IsFunction(v) {
 			return v
 		}
+		// The clone package: child = Object.create(getPrototypeOf(parent)),
+		// then `for (i in parent)` child[i] = clone(parent[i]), skipping a
+		// key the prototype holds as a data property (none when the
+		// prototype is null). An assignment of "__proto__" goes through
+		// Object.prototype's setter, so an object, an array or null becomes
+		// the copy's prototype rather than its key (unless the copy's chain
+		// holds "__proto__" as data or ends in null: then it is a key).
 		o := v.ObjValue()
+		cc.alloc(objectBytes(o.Len()))
+		proto := o.Prototype()
 		c := jsval.NewObject(o.Len())
+		c.SetPrototype(proto, cc.conv)
+		skip := func(k string) bool {
+			switch {
+			case proto.IsUndefined():
+				return k != "__proto__" && skipsInClone58(cc, k)
+			case proto.IsNull():
+				return false
+			case proto.IsObj():
+				return proto.ObjValue().Has(k)
+			}
+			// An array prototype owns its indexes and its length.
+			if i, ok := arrayIndex(k); ok {
+				return int(i) < proto.Len()
+			}
+			return k == "length"
+		}
 		digit := false // a key that may be an array index
+		copyKey := func(k string, val Value) {
+			cc.work(1)
+			if skip(k) {
+				return
+			}
+			x := duplicate(cc, val)
+			if k == "__proto__" && protoSetterApplies(c) {
+				if x.IsObj() && onChain(x.ObjValue(), c) {
+					throw("Cyclic __proto__ value")
+				}
+				if x.IsObj() || x.IsArr() || x.IsNull() {
+					c.SetPrototype(x, cc.conv)
+				}
+				return
+			}
+			digit = digit || (len(k) > 0 && k[0] >= '0' && k[0] <= '9')
+			c.Set(k, x)
+		}
 		for i := 0; i < o.Len(); i++ {
-			if k := o.KeyAt(i); !skipsInClone58(cc, k) {
-				digit = digit || (len(k) > 0 && k[0] >= '0' && k[0] <= '9')
-				c.Set(k, duplicate(cc, o.ValueAt(i)))
+			copyKey(o.KeyAt(i), o.ValueAt(i))
+		}
+		// for…in goes on to the prototype chain's keys the object does not
+		// shadow: the first prototype's are skipped (it holds them), a
+		// deeper one's are copied, as read through the chain; then, on a
+		// chain that reaches Object.prototype through a prototype of the
+		// object's own, the members upstream wrote on Object.prototype in
+		// this compilation (enumerable, and not held by that prototype).
+		seen := map[string]bool{}
+		q, objectProto := proto, false
+		for depth := 0; depth <= jsval.MaxValueDepth; depth++ {
+			var keys []string
+			switch {
+			case q.IsObj():
+				keys = q.ObjValue().Keys()
+			case q.IsArr():
+				for i := 0; i < q.Len(); i++ {
+					keys = append(keys, strconv.Itoa(i))
+				}
+			}
+			for _, k := range keys {
+				if o.Has(k) || seen[k] {
+					continue
+				}
+				seen[k] = true
+				copyKey(k, v.Get(k))
+			}
+			if !q.IsObj() {
+				objectProto = q.IsArr()
+				break
+			}
+			q = q.ObjValue().Prototype()
+			if q.IsUndefined() {
+				objectProto = true
+				break
+			}
+		}
+		if objectProto && cc.jsr != nil {
+			if h := cc.jsr.hosts[""]; h != nil {
+				for _, k := range h.props.keyList() {
+					if o.Has(k) || seen[k] {
+						continue
+					}
+					seen[k] = true
+					copyKey(k, cc.jsr.inherited(jsProto{}, k).value())
+				}
 			}
 		}
 		if digit {

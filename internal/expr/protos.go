@@ -1,60 +1,81 @@
 package expr
 
-// The string-named members each kind of value inherits from its prototype in
-// node (Object.getOwnPropertyNames of Object.prototype, Array.prototype,
-// RegExp.prototype, Date.prototype), which the `in` operator finds, and the
-// object literal keys vega-expression's code generator rejects (vega-util's
-// DisallowedObjectProperties). TestFunctionTable checks them against
-// testdata/functions.json, which testdata/gen_functions.mjs records.
+import "github.com/mgilbir/aster/internal/jsval"
 
-// objectProtoMembers are Object.prototype's: what every object inherits.
-var objectProtoMembers = map[string]bool{
-	"__defineGetter__": true, "__defineSetter__": true, "__lookupGetter__": true,
-	"__lookupSetter__": true, "__proto__": true, "constructor": true, "hasOwnProperty": true,
-	"isPrototypeOf": true, "propertyIsEnumerable": true, "toLocaleString": true, "toString": true,
-	"valueOf": true,
+// The string-named members the d3 colours rgb(), hsl(), lab() and hcl() make
+// inherit from their class's prototype and d3's Color.prototype (C156), which
+// the `in` operator finds and a property read answers. The built-in
+// prototypes (Object's, Array's, String's, Number's, Boolean's, RegExp's and
+// Date's) are jsval's, the one table of them (jsval.ObjectProto and so on);
+// these are the colours', which only the expression language has.
+// TestFunctionTable checks them against testdata/functions.json, which
+// testdata/gen_functions.mjs records.
+//
+// A function member reads as one shared inert function (jsval.NewProto) that
+// prints as native code and that the engine never calls: an expression can
+// only call the functions of its own table. A d3 colour's methods print as
+// native code too, where d3's print their source.
+
+// member is a function member: the name of the function it holds and its length.
+func member(name string, arity int) jsval.ProtoMember {
+	return jsval.ProtoMember{Fn: name, Arity: arity}
 }
 
-// arrayProtoMembers are Array.prototype's.
-var arrayProtoMembers = map[string]bool{
-	"at": true, "concat": true, "constructor": true, "copyWithin": true, "entries": true,
-	"every": true, "fill": true, "filter": true, "find": true, "findIndex": true, "findLast": true,
-	"findLastIndex": true, "flat": true, "flatMap": true, "forEach": true, "includes": true,
-	"indexOf": true, "join": true, "keys": true, "lastIndexOf": true, "length": true, "map": true,
-	"pop": true, "push": true, "reduce": true, "reduceRight": true, "reverse": true, "shift": true,
-	"slice": true, "some": true, "sort": true, "splice": true, "toLocaleString": true,
-	"toReversed": true, "toSorted": true, "toSpliced": true, "toString": true, "unshift": true,
-	"values": true, "with": true,
+// colorProto is d3-color's Color.prototype, which every colour class extends.
+var colorProto = jsval.ProtoTable{
+	"constructor": member("Color", 0), "copy": member("copy", 1), "displayable": member("displayable", 0),
+	"formatHex": member("color_formatHex", 0), "formatHex8": member("color_formatHex8", 0),
+	"formatHsl": member("color_formatHsl", 0), "formatRgb": member("color_formatRgb", 0),
+	"hex": member("color_formatHex", 0), "toString": member("color_formatRgb", 0),
 }
 
-// regexpProtoMembers are RegExp.prototype's.
-var regexpProtoMembers = map[string]bool{
-	"compile": true, "constructor": true, "dotAll": true, "exec": true, "flags": true, "global": true,
-	"hasIndices": true, "ignoreCase": true, "multiline": true, "source": true, "sticky": true,
-	"test": true, "toString": true, "unicode": true, "unicodeSets": true,
+// rgbProto, hslProto, labProto and hclProto are d3-color's Rgb, Hsl, Lab and Hcl prototypes.
+var rgbProto = jsval.ProtoTable{
+	"brighter": member("brighter", 1), "clamp": member("clamp", 0), "constructor": member("Rgb", 4), "darker": member("darker", 1),
+	"displayable": member("displayable", 0), "formatHex": member("rgb_formatHex", 0), "formatHex8": member("rgb_formatHex8", 0),
+	"formatRgb": member("rgb_formatRgb", 0), "hex": member("rgb_formatHex", 0), "rgb": member("rgb", 0),
+	"toString": member("rgb_formatRgb", 0),
 }
 
-// dateProtoMembers are Date.prototype's.
-var dateProtoMembers = map[string]bool{
-	"constructor": true, "getDate": true, "getDay": true, "getFullYear": true, "getHours": true,
-	"getMilliseconds": true, "getMinutes": true, "getMonth": true, "getSeconds": true,
-	"getTime": true, "getTimezoneOffset": true, "getUTCDate": true, "getUTCDay": true,
-	"getUTCFullYear": true, "getUTCHours": true, "getUTCMilliseconds": true, "getUTCMinutes": true,
-	"getUTCMonth": true, "getUTCSeconds": true, "getYear": true, "setDate": true, "setFullYear": true,
-	"setHours": true, "setMilliseconds": true, "setMinutes": true, "setMonth": true,
-	"setSeconds": true, "setTime": true, "setUTCDate": true, "setUTCFullYear": true,
-	"setUTCHours": true, "setUTCMilliseconds": true, "setUTCMinutes": true, "setUTCMonth": true,
-	"setUTCSeconds": true, "setYear": true, "toDateString": true, "toGMTString": true,
-	"toISOString": true, "toJSON": true, "toLocaleDateString": true, "toLocaleString": true,
-	"toLocaleTimeString": true, "toString": true, "toTemporalInstant": true, "toTimeString": true,
-	"toUTCString": true, "valueOf": true,
+var hslProto = jsval.ProtoTable{
+	"brighter": member("brighter", 1), "clamp": member("clamp", 0), "constructor": member("Hsl", 4), "darker": member("darker", 1),
+	"displayable": member("displayable", 0), "formatHsl": member("formatHsl", 0), "rgb": member("rgb", 0),
+}
+
+var labProto = jsval.ProtoTable{
+	"brighter": member("brighter", 1), "constructor": member("Lab", 4), "darker": member("darker", 1), "rgb": member("rgb", 0),
+}
+
+var hclProto = jsval.ProtoTable{
+	"brighter": member("brighter", 1), "constructor": member("Hcl", 4), "darker": member("darker", 1), "rgb": member("rgb", 0),
+}
+
+// colourForIn are the inherited members a for-in loop visits on a colour of
+// each class (d3 defines its methods as enumerable), after the colour's own
+// channels, in the order it visits them.
+var colourForIn = map[string][]string{
+	"Rgb": {"brighter", "darker", "rgb", "clamp", "displayable", "hex", "formatHex", "formatHex8", "formatRgb", "toString", "constructor", "copy", "formatHsl"},
+	"Hsl": {"brighter", "darker", "rgb", "clamp", "displayable", "formatHsl", "constructor", "copy", "hex", "formatHex", "formatHex8", "formatRgb", "toString"},
+	"Lab": {"brighter", "darker", "rgb", "constructor", "copy", "displayable", "hex", "formatHex", "formatHex8", "formatHsl", "formatRgb", "toString"},
+	"Hcl": {"brighter", "darker", "rgb", "constructor", "copy", "displayable", "hex", "formatHex", "formatHex8", "formatHsl", "formatRgb", "toString"},
 }
 
 // disallowedProperties are the object literal keys code generation rejects:
-// Object.prototype's methods, __proto__ and then.
+// vega-util's DisallowedObjectProperties, Object.prototype's methods,
+// __proto__ and then.
 var disallowedProperties = map[string]bool{
-	"__defineGetter__": true, "__defineSetter__": true, "__lookupGetter__": true,
-	"__lookupSetter__": true, "__proto__": true, "constructor": true, "hasOwnProperty": true,
-	"isPrototypeOf": true, "propertyIsEnumerable": true, "then": true, "toLocaleString": true,
-	"toString": true, "valueOf": true,
+	"__defineGetter__": true, "__defineSetter__": true, "__lookupGetter__": true, "__lookupSetter__": true,
+	"__proto__": true, "constructor": true, "hasOwnProperty": true, "isPrototypeOf": true,
+	"propertyIsEnumerable": true, "then": true, "toLocaleString": true, "toString": true, "valueOf": true,
 }
+
+var (
+	colorP   = jsval.NewProto(colorProto, jsval.ObjectProto)
+	colourPs = map[string]*jsval.Proto{
+		"Rgb": jsval.NewProto(rgbProto, colorP), "Hsl": jsval.NewProto(hslProto, colorP),
+		"Lab": jsval.NewProto(labProto, colorP), "Hcl": jsval.NewProto(hclProto, colorP),
+	}
+)
+
+// objectProtoMember reports whether key names a member of Object.prototype.
+func objectProtoMember(key string) bool { return jsval.ObjectPrototypeHas(key) }

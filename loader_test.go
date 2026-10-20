@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -72,16 +73,40 @@ func TestHTTPLoaderDomainWithPortMatchesWithoutPort(t *testing.T) {
 	}
 }
 
+// Only http(s) is fetched. A link to another scheme is a link (vega-loader's
+// sanitize writes it, so Sanitize returns it), and Load refuses it; the
+// allow-list still refuses javascript:.
 func TestHTTPLoaderRejectNonHTTPSchemes(t *testing.T) {
+	var requests atomic.Int32
 	l := &aster.HTTPLoader{
 		AllowedDomains: []string{"example.com"},
+		Client: &http.Client{Transport: rtFunc(func(*http.Request) (*http.Response, error) {
+			requests.Add(1)
+			return nil, errors.New("must not be requested")
+		})},
 	}
 	for _, scheme := range []string{"ftp", "javascript", "data", "file"} {
 		uri := scheme + "://example.com/payload"
-		_, err := l.Sanitize(context.Background(), uri)
-		if err == nil {
-			t.Errorf("expected rejection of scheme %q", scheme)
+		got, err := l.Sanitize(context.Background(), uri)
+		if scheme == "javascript" {
+			if err == nil {
+				t.Errorf("Sanitize(%q) = %q, want the allow-list's refusal", uri, got)
+			}
+		} else if scheme == "file" {
+			if err != nil || got != "example.com/payload" { // vega-loader drops file://
+				t.Errorf("Sanitize(%q) = %q, %v", uri, got, err)
+			}
+		} else if err != nil || got != uri {
+			t.Errorf("Sanitize(%q) = %q, %v: want the link as written", uri, got, err)
 		}
+		for _, u := range []string{uri, got} {
+			if _, err := l.Load(context.Background(), u); err == nil {
+				t.Errorf("Load(%q) succeeded: only http(s) is fetched", u)
+			}
+		}
+	}
+	if n := requests.Load(); n != 0 {
+		t.Errorf("%d requests were made", n)
 	}
 }
 
@@ -126,11 +151,16 @@ func TestHTTPLoaderAbsoluteIgnoresBaseURL(t *testing.T) {
 	}
 }
 
-func TestHTTPLoaderRelativeRejectedWithoutBaseURL(t *testing.T) {
+// A relative URI with no BaseURL is a link upstream writes as it is: Sanitize
+// returns it, and Load refuses it, since it cannot be fetched.
+func TestHTTPLoaderRelativeWithoutBaseURL(t *testing.T) {
 	l := &aster.HTTPLoader{}
-	_, err := l.Sanitize(context.Background(), "cars.json")
-	if err == nil {
-		t.Fatal("expected error for relative URI without BaseURL")
+	got, err := l.Sanitize(context.Background(), "cars.json")
+	if err != nil || got != "cars.json" {
+		t.Fatalf("Sanitize = %q, %v; want the URI as it is", got, err)
+	}
+	if _, err := l.Load(context.Background(), got); err == nil {
+		t.Fatal("Load fetched a relative URI")
 	}
 }
 
@@ -165,7 +195,8 @@ func TestHTTPLoaderBaseURLPathTraversal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("path traversal in URL resolves cleanly: %v", err)
 	}
-	// URL resolution cleans the path; domain is still checked.
+	// The string is vega-loader's join (the dots stay); fetch cleans the path
+	// when it requests it, and the domain is still checked.
 	if !strings.HasPrefix(got, "https://cdn.example.com/") {
 		t.Errorf("resolved URL should stay on allowed domain: %s", got)
 	}
@@ -684,3 +715,7 @@ func TestFileLoaderLoadAfterClose(t *testing.T) {
 		}
 	}
 }
+
+type rtFunc func(*http.Request) (*http.Response, error)
+
+func (f rtFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }

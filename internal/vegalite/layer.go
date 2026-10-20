@@ -179,23 +179,25 @@ func (l *layerModel) assembleSelectionData(acc *selDataAcc) {
 
 func (l *layerModel) assembleGroupStyle() Value {
 	cc := l.b().ctx
-	seen := map[string]bool{}
-	var styles []string
+	// A Set of the styles as given (SameValueZero: an array is one style
+	// by reference, never by its text).
+	seen := map[jsval.InternKey]bool{}
+	var styles []Value
 	for _, c := range l.kids {
 		cc.work(modelStep)
 		for _, s := range arrayOf(c.assembleGroupStyle()) {
 			cc.work(1)
-			if !seen[s.AsString()] {
-				seen[s.AsString()] = true
-				styles = append(styles, s.AsString())
+			if k := s.MapKey(); !seen[k] {
+				seen[k] = true
+				styles = append(styles, s)
 			}
 		}
 	}
 	switch {
 	case len(styles) > 1:
-		return strsVal(styles)
+		return jsval.Arr(styles)
 	case len(styles) == 1:
-		return jsval.Str(styles[0])
+		return styles[0]
 	}
 	return undef
 }

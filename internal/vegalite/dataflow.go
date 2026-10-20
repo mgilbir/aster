@@ -319,12 +319,17 @@ func (s *sourceNode) assemble() *Object {
 // ---- helpers for hashing ----
 
 func setToHashString(cc *compileCtx, s *sset) string {
+	// Set.prototype.toJSON as Vega-Lite patches it:
+	// `Set(${[...this].map((x) => stringify(x)).join(',')})`, each name
+	// JSON.stringify's (no U+2028 escape, unlike stringValue's).
+	// A member added as a value other than a string (a group-by of ["a"])
+	// is that value's stringify, as the Set holds it.
 	parts := make([]string, 0, s.size())
-	for _, x := range s.list() {
+	for _, x := range s.values() {
 		cc.work(1)
-		parts = append(parts, jsonString(x))
+		parts = append(parts, stringify(cc, x))
 	}
-	return "Set(" + strings.Join(parts, ",") + ")"
+	return "Set(" + joinCC(cc, parts, ",") + ")"
 }
 
 // moveChildrenLive reparents b's children to dst the way upstream does:

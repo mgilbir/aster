@@ -72,96 +72,85 @@ func (n *xformNode) defaultName(def Value) string {
 	return vgField(cc, def, fieldRefOption{})
 }
 
+// dependentFields is each node's dependentFields: Sets of the transform's
+// values as given (a field of ["a"] is that array, read as an access path
+// by fieldIntersection, and no "a"), with the TypeErrors of the iterations
+// upstream makes over them.
 func (n *xformNode) dependentFields() *sset {
 	cc := n.cc
 	t := n.tv()
 	out := newSset()
+	add := func(vs ...Value) {
+		for _, v := range vs {
+			cc.work(1)
+			out.addValue(v)
+		}
+	}
+	// (x ?? []).forEach(out.add, out)
+	forEachOf := func(v Value, expr string) []Value {
+		if v.IsNullish() {
+			return nil
+		}
+		return listOf(v, expr, "forEach")
+	}
+	// ...(x ?? []): a spread, of any iterable
+	spreadOf := func(v Value) []Value {
+		if v.IsNullish() {
+			return nil
+		}
+		return iterateNew(v)
+	}
+	// list.map((w) => w.field).filter((f) => f !== undefined)
+	fieldsOf := func(v Value, expr string) []Value {
+		var fs []Value
+		for _, w := range listOf(v, expr, "map") {
+			cc.work(1)
+			if f := jsGet(w, "field"); !f.IsUndefined() {
+				fs = append(fs, f)
+			}
+		}
+		return fs
+	}
 	switch n.kind {
 	case "window":
-		for _, g := range strItems(n.cc, t.Get("groupby")) {
-			cc.work(1)
-			out.add(g)
-		}
+		add(forEachOf(t.Get("groupby"), "(this.transform.groupby ?? [])")...)
 		// (this.transform.sort ?? []).forEach((m) => out.add(m.field))
-		var sorts []Value
-		if s := t.Get("sort"); !s.IsNullish() {
-			sorts = listOf(s, "(this.transform.sort ?? [])", "forEach")
+		for _, m := range forEachOf(t.Get("sort"), "(this.transform.sort ?? [])") {
+			add(jsGet(m, "field"))
 		}
-		for _, m := range sorts {
-			cc.work(1)
-			out.addValue(jsGet(m, "field"))
-		}
-		for _, w := range t.Get("window").Items() {
-			cc.work(1)
-			if f := w.Get("field"); !f.IsUndefined() {
-				out.add(f.AsString())
-			}
-		}
+		add(fieldsOf(t.Get("window"), "this.transform.window")...)
 	case "joinaggregate":
-		for _, g := range strItems(n.cc, t.Get("groupby")) {
-			cc.work(1)
-			out.add(g)
+		// if (groupby) groupby.forEach(...)
+		if g := t.Get("groupby"); g.IsTruthy() {
+			add(listOf(g, "this.transform.groupby", "forEach")...)
 		}
-		for _, w := range t.Get("joinaggregate").Items() {
-			cc.work(1)
-			if f := w.Get("field"); !f.IsUndefined() {
-				out.add(f.AsString())
-			}
-		}
+		add(fieldsOf(t.Get("joinaggregate"), "this.transform.joinaggregate")...)
 	case "fold":
-		for _, f := range strItems(n.cc, t.Get("fold")) {
-			cc.work(1)
-			out.add(f)
-		}
+		add(iterateNew(t.Get("fold"))...) // new Set(this.transform.fold)
 	case "extent":
-		out.add(t.Get("extent").AsString())
+		add(t.Get("extent"))
 	case "flatten":
-		for _, f := range strItems(n.cc, t.Get("flatten")) {
-			cc.work(1)
-			out.add(f)
-		}
+		add(iterateNew(t.Get("flatten"))...)
 	case "pivot":
-		out.add(t.Get("pivot").AsString())
-		out.add(t.Get("value").AsString())
-		for _, g := range strItems(n.cc, t.Get("groupby")) {
-			cc.work(1)
-			out.add(g)
-		}
+		add(t.Get("pivot"), t.Get("value"))
+		add(spreadOf(t.Get("groupby"))...)
 	case "density":
-		out.add(t.Get("density").AsString())
-		for _, g := range strItems(n.cc, t.Get("groupby")) {
-			cc.work(1)
-			out.add(g)
-		}
+		add(t.Get("density"))
+		add(spreadOf(t.Get("groupby"))...)
 	case "quantile":
-		out.add(t.Get("quantile").AsString())
-		for _, g := range strItems(n.cc, t.Get("groupby")) {
-			cc.work(1)
-			out.add(g)
-		}
+		add(t.Get("quantile"))
+		add(spreadOf(t.Get("groupby"))...)
 	case "regression":
-		out.add(t.Get("regression").AsString())
-		out.add(t.Get("on").AsString())
-		for _, g := range strItems(n.cc, t.Get("groupby")) {
-			cc.work(1)
-			out.add(g)
-		}
+		add(t.Get("regression"), t.Get("on"))
+		add(spreadOf(t.Get("groupby"))...)
 	case "loess":
-		out.add(t.Get("loess").AsString())
-		out.add(t.Get("on").AsString())
-		for _, g := range strItems(n.cc, t.Get("groupby")) {
-			cc.work(1)
-			out.add(g)
-		}
+		add(t.Get("loess"), t.Get("on"))
+		add(spreadOf(t.Get("groupby"))...)
 	case "lookup":
-		out.add(t.Get("lookup").AsString())
+		add(t.Get("lookup"))
 	case "impute":
-		out.add(t.Get("impute").AsString())
-		out.add(t.Get("key").AsString())
-		for _, g := range strItems(n.cc, t.Get("groupby")) {
-			cc.work(1)
-			out.add(g)
-		}
+		add(t.Get("impute"), t.Get("key"))
+		add(spreadOf(t.Get("groupby"))...)
 	}
 	return out
 }
@@ -666,15 +655,6 @@ func (n *stackNode) clone() dfNode {
 
 func (n *stackNode) addDimensions(fields []string) { n.st.facetby = append(n.st.facetby, fields...) }
 
-func (n *stackNode) getGroupbyFields() []string {
-	vs := n.getGroupbyFieldsV()
-	out := make([]string, len(vs))
-	for i, v := range vs {
-		out[i] = v.AsString()
-	}
-	return out
-}
-
 // getGroupbyFieldsV is getGroupbyFields with a transform's group-by entries
 // as given (a null stays null in the output).
 func (n *stackNode) getGroupbyFieldsV() []Value {
@@ -715,16 +695,18 @@ func (n *stackNode) dependentFields() *sset {
 	cc := n.cc
 	out := newSset()
 	out.addValue(n.st.stackFieldValue())
-	for _, f := range n.getGroupbyFields() {
+	// The group-by and sort fields as given: a transform's ["a"] is not
+	// its text.
+	for _, f := range n.getGroupbyFieldsV() {
 		cc.work(1)
-		out.add(f)
+		out.addValue(f)
 	}
 	for _, f := range n.st.facetby {
 		out.add(f)
 	}
-	for _, f := range strItems(n.cc, n.st.sort.Get("field")) {
+	for _, f := range n.st.sort.Get("field").Items() {
 		cc.work(1)
-		out.add(f)
+		out.addValue(f)
 	}
 	return out
 }
@@ -1117,7 +1099,7 @@ func (n *facetNode) dependentFields() *sset {
 	for _, ch := range facetChannels {
 		if info := n.channels[ch]; info != nil {
 			if info.sortField.IsTruthy() {
-				dep.add(info.sortField.Get("field").AsString())
+				dep.addValue(info.sortField.Get("field"))
 			}
 			if info.sortIndexField != "" {
 				dep.add(info.sortIndexField)
@@ -1133,7 +1115,7 @@ func (n *facetNode) getChildIndependentFieldsWithStep() map[string]string {
 	for _, channel := range positionScaleChannels {
 		cs, ok := n.childModel.b().comp.scales.get(channel)
 		if ok && cs != nil && !cs.merged {
-			typ, rng := cs.get("type").AsString(), cs.get("range")
+			typ, rng := cs.get("type"), cs.get("range")
 			if hasDiscreteDomain(typ) && isVgRangeStep(n.cc, rng) {
 				domain := assembleDomain(n.childModel, channel)
 				if field := getFieldFromDomain(n.cc, domain); field != "" {

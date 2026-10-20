@@ -1,0 +1,1 @@
+{"width":300,"height":100,"padding":5,"data":[{"name":"t","values":[{"d":1325462400000,"v":1},{"d":1326000000000,"v":2}],"transform":[{"type":"timeunit","field":"d","units":["day"],"signal":"tbin"}]}],"marks":[{"type":"symbol","from":{"data":"t"},"encode":{"enter":{"x":{"field":"unit0"},"y":{"field":"v"}}}}]}

@@ -125,49 +125,32 @@ func CompareBy(w jsval.Walker, fields []Field, orders []string) Comparator {
 	}
 }
 
-// StableComparator is vega-dataflow's stableCompare: cmp, with ties broken by
-// tuple id, which is the order the tuples were ingested in. A nil comparator
-// stays nil.
-func StableComparator(cmp Comparator) Comparator {
-	if cmp == nil {
-		return nil
-	}
-	return func(a, b jsval.Value) int {
-		if c := cmp(a, b); c != 0 {
-			return c
-		}
-		return TupleIDOrder(a, b)
-	}
-}
+// IDStable is a comparator whose ties are broken by tuple id, which is the
+// order the tuples were ingested in: vega-dataflow's stableCompare, which
+// every sort of tuples upstream goes through (collect, window, stack,
+// dotbin, the values of a scale, a hierarchy's siblings). SortTuples takes
+// only this type, so a sort cannot leave the tie-break out; StableComparator
+// is the one way to make one.
+type IDStable struct{ cmp Comparator }
 
-// TupleIDOrder orders two tuples by tuple id (a value that is not a tuple has
-// id 0).
-func TupleIDOrder(a, b jsval.Value) int {
-	var ia, ib uint32
-	if o := a.ObjValue(); o != nil {
-		ia = o.TupleID()
+// StableComparator is vega-dataflow's stableCompare(cmp). A nil comparator
+// gives the zero IDStable, with which SortTuples leaves its data as it is.
+func StableComparator(cmp Comparator) IDStable { return IDStable{cmp} }
+
+// Compare is cmp(a, b), or the order of their tuple ids when that is 0.
+func (s IDStable) Compare(a, b jsval.Value) int {
+	if c := s.cmp(a, b); c != 0 {
+		return c
 	}
-	if o := b.ObjValue(); o != nil {
-		ib = o.TupleID()
-	}
-	switch {
-	case ia < ib:
-		return -1
-	case ia > ib:
-		return 1
-	}
-	return 0
+	return jsval.TupleIDOrder(a, b)
 }
 
 // SortTuples sorts data in place exactly as V8's Array.prototype.sort does
 // (see package jssort): stable, and producing upstream's order even when the
 // comparator is inconsistent, as vega-util's compare is across mixed types.
-// A nil comparator leaves it untouched.
-func SortTuples(data []jsval.Value, cmp Comparator) {
-	if cmp == nil {
-		return
-	}
-	if len(data) < 2 {
+// The zero IDStable leaves it untouched. Each comparison is cmp's.
+func SortTuples(data []jsval.Value, cmp IDStable) {
+	if cmp.cmp == nil || len(data) < 2 {
 		return
 	}
 	// Sorting an index permutation moves 4 bytes per step instead of a Value.
@@ -175,7 +158,7 @@ func SortTuples(data []jsval.Value, cmp Comparator) {
 	for i := range idx {
 		idx[i] = int32(i)
 	}
-	jssort.Sort(idx, func(a, b int32) int { return cmp(data[a], data[b]) })
+	jssort.Sort(idx, func(a, b int32) int { return cmp.Compare(data[a], data[b]) })
 	sorted := make([]jsval.Value, len(data))
 	for i, j := range idx {
 		sorted[i] = data[j]
@@ -271,7 +254,10 @@ func ExtentOf(w jsval.Walker, tuples []jsval.Value, f Field) (lo, hi jsval.Value
 // property of its argument and throws. The null field has no accessor and
 // yields nil.
 func ReadsUndefined(f Field) error {
-	if f.IsNil() {
+	if f.Uncallable {
+		return &jsval.Thrown{Name: "TypeError", Msg: "f is not a function"}
+	}
+	if f.IsNil() || f.Identity {
 		return nil
 	}
 	prop := f.Name

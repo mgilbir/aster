@@ -34,6 +34,9 @@ type TimeFormat struct {
 	// every call throws (a %c, %x or %X whose pattern d3 cannot format).
 	maxOut int
 	thrown *jsval.Thrown
+	// member is the Object.prototype member the memo returns for this
+	// specifier (see callMember), or empty.
+	member string
 }
 
 // Format is d3.timeFormat(specifier) in the given zone (UTC for utcFormat).
@@ -188,6 +191,9 @@ func (d *fmtDate) isoThursday(z Zone) float64 {
 func (f *TimeFormat) appendMax(dst []byte, t float64, max int) (out []byte, ok bool, err error) {
 	if f.thrown != nil {
 		return dst, false, f.thrown
+	}
+	if f.member != "" {
+		return callMember(dst, f.member, DateToString(t, f.zone), true), true, nil
 	}
 	d := fmtDate{t: timeClip(t)}
 	if d.valid = Valid(d.t); d.valid {
@@ -469,33 +475,7 @@ func appendPadFloat(dst []byte, v float64, fill byte, width int) []byte {
 // a signed six-digit year outside 0..9999. ok is false for an Invalid Date
 // (where JavaScript throws a RangeError).
 func ISOFormat(t float64) (s string, ok bool) {
-	if t = timeClip(t); !Valid(t) {
-		return "", false
-	}
-	fl := UTC.Fields(t)
-	var b []byte
-	switch {
-	case fl.Year >= 0 && fl.Year <= 9999:
-		b = appendPad(b, fl.Year, '0', 4)
-	case fl.Year < 0:
-		b = append(b, '-')
-		b = appendPad(b, -fl.Year, '0', 6)
-	default:
-		b = append(b, '+')
-		b = appendPad(b, fl.Year, '0', 6)
-	}
-	b = append(b, '-')
-	b = appendPad(b, fl.Month+1, '0', 2)
-	b = append(b, '-')
-	b = appendPad(b, fl.Day, '0', 2)
-	b = append(b, 'T')
-	b = appendPad(b, fl.Hour, '0', 2)
-	b = append(b, ':')
-	b = appendPad(b, fl.Minute, '0', 2)
-	b = append(b, ':')
-	b = appendPad(b, fl.Second, '0', 2)
-	b = append(b, '.')
-	b = appendPad(b, fl.Millisecond, '0', 3)
-	b = append(b, 'Z')
-	return string(b), true
+	t = timeClip(t)
+	b, ok := jsval.AppendISODate(nil, t)
+	return string(b), ok
 }

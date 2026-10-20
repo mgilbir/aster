@@ -197,7 +197,9 @@ func NewQuantize() *Quantize {
 func (q *Quantize) rescale() {
 	n := q.n
 	if n < 0 {
-		n = 0 // d3 throws (new Array(-1)) for an empty range
+		// new Array(-1) for an empty range: the RangeError leaves the
+		// thresholds as they were.
+		panic(errArrayLength())
 	}
 	q.domain = make([]float64, n)
 	for i := 0; i < n; i++ {
@@ -397,7 +399,10 @@ func (t *Threshold) Copy() Scale {
 // entry of the bin containing it (cycling through the range).
 type BinOrdinal struct {
 	meta
+	// domain is the bin edges as numbers; null marks the edges vega-util's
+	// toNumber left null (a null or empty one), which compare with nothing.
 	domain []float64
+	null   []bool
 	rng    []jsval.Value
 }
 
@@ -414,7 +419,11 @@ func (b *BinOrdinal) Apply(x jsval.Value) jsval.Value {
 	var pos int
 	switch {
 	case f == f:
-		pos = bisectRight(b.domain, f, 0, len(b.domain))
+		if b.null == nil {
+			pos = bisectRight(b.domain, f, 0, len(b.domain))
+		} else {
+			pos = b.bisectNull(f)
+		}
 	case x.IsNum():
 		return jsval.Undefined // x !== x
 	case x.IsTimestamp():
@@ -425,11 +434,47 @@ func (b *BinOrdinal) Apply(x jsval.Value) jsval.Value {
 	return rangeAt(b.rng, (pos-1)%len(b.rng))
 }
 
-// Domain returns the bin edges.
-func (b *BinOrdinal) Domain() []jsval.Value { return numsToValues(b.domain) }
+// bisectNull is d3's bisectRight over edges some of which are null:
+// ascending(null, x) is NaN, which sends the search left.
+func (b *BinOrdinal) bisectNull(x float64) int {
+	lo, hi := 0, len(b.domain)
+	for lo < hi {
+		mid := int(uint(lo+hi) >> 1)
+		if !b.null[mid] && b.domain[mid] <= x {
+			lo = mid + 1
+		} else {
+			hi = mid
+		}
+	}
+	return lo
+}
 
-// SetDomain is scale.domain(d): every entry goes through toNumber.
-func (b *BinOrdinal) SetDomain(d []jsval.Value) { b.domain = valuesToNums(d) }
+// Domain returns the bin edges.
+func (b *BinOrdinal) Domain() []jsval.Value {
+	out := numsToValues(b.domain)
+	for i, n := range b.null {
+		if n {
+			out[i] = jsval.Null
+		}
+	}
+	return out
+}
+
+// SetDomain is scale.domain(d): every entry goes through vega-util's
+// toNumber, which keeps null (and makes the empty string null).
+func (b *BinOrdinal) SetDomain(d []jsval.Value) {
+	b.domain = valuesToNums(d)
+	b.null = nil
+	for i, v := range d {
+		if v.IsNullish() || (v.IsStr() && v.StrValue() == "") {
+			if b.null == nil {
+				b.null = make([]bool, len(d))
+			}
+			b.null[i] = true
+			b.domain[i] = 0
+		}
+	}
+}
 
 // Range returns a copy of the range.
 func (b *BinOrdinal) Range() []jsval.Value { return cloneValues(b.rng) }
@@ -443,6 +488,9 @@ func (b *BinOrdinal) HasTickFormat() bool { return true }
 // Copy is bin-ordinal's copy.
 func (b *BinOrdinal) Copy() Scale {
 	n := &BinOrdinal{meta: meta{typ: b.typ, walk: b.walk}, domain: append([]float64(nil), b.domain...), rng: cloneValues(b.rng)}
+	if b.null != nil {
+		n.null = append([]bool(nil), b.null...)
+	}
 	return n
 }
 

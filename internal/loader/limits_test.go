@@ -6,8 +6,11 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/mgilbir/aster/internal/budget"
@@ -90,5 +93,69 @@ func TestFallbackLoaderLimitIsFinal(t *testing.T) {
 	}
 	if asked {
 		t.Error("the next child was asked after the limit")
+	}
+}
+
+// Loads that share an allowance (the images of one call, fetched in
+// parallel) charge it as they read, a chunk at a time, so together they read
+// no more than it and one chunk each, however they interleave (C19), the
+// file and the HTTP loader alike: what they charge stays within it, and each
+// reads at most one chunk past what it charged (the chunk it was refused).
+func TestLoadsSharingAnAllowanceStopTogether(t *testing.T) {
+	const loads, size, allowance = 8, 3 << 20, 8 << 20
+	dir := t.TempDir()
+	body := bytes.Repeat([]byte("x"), size)
+	if err := os.WriteFile(filepath.Join(dir, "f"), body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var served atomic.Int64
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// No Content-Length: the loader cannot refuse before it reads.
+		for off := 0; off < size; off += 64 << 10 {
+			n, err := w.Write(body[off : off+64<<10])
+			served.Add(int64(n))
+			if err != nil {
+				return
+			}
+			w.(http.Flusher).Flush()
+		}
+	}))
+	t.Cleanup(ts.Close)
+	for name, l := range map[string]Loader{
+		"file": &FileLoader{BaseDir: dir},
+		"http": &HTTPLoader{AllowPrivateNetworks: true},
+	} {
+		uri := "f"
+		if name == "http" {
+			uri = ts.URL + "/f"
+		}
+		shared := budget.NewAllowance(allowance)
+		var wg sync.WaitGroup
+		var ok, limited atomic.Int32
+		var streamed atomic.Int64
+		for range loads {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				b := &budget.Budget{MaxLoadBytes: 32 << 20, Shared: shared}
+				data, err := l.Load(budget.With(context.Background(), b), uri)
+				streamed.Add(b.Streamed())
+				switch {
+				case err == nil && len(data) == size:
+					ok.Add(1)
+				case errors.Is(err, budget.ErrLimit):
+					limited.Add(1)
+				default:
+					t.Errorf("%s: %d bytes, %v", name, len(data), err)
+				}
+			}()
+		}
+		wg.Wait()
+		if got := streamed.Load(); got > allowance {
+			t.Errorf("%s: the loads charged %d bytes, past the %d allowance", name, got, allowance)
+		}
+		if ok.Load() > allowance/size || limited.Load() == 0 {
+			t.Errorf("%s: %d loads succeeded and %d hit the limit, of %d of %d bytes in %d", name, ok.Load(), limited.Load(), loads, size, allowance)
+		}
 	}
 }

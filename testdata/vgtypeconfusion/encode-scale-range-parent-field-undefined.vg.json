@@ -1,0 +1,4 @@
+{"width":100,"height":100,
+"data":[{"name":"g","values":[{"a":1,"sc":"s1"}]},{"name":"p","values":[{"v":1},{"v":2}]}],
+"scales":[{"name":"s1","type":"linear","domain":[0,3],"range":[0,100]}],
+"marks":[{"type":"group","from":{"data":"g"},"marks":[{"type":"symbol","from":{"data":"p"},"encode":{"enter":{"x":{"scale":{"parent":"scx"},"range":0.5}}}}]}]}

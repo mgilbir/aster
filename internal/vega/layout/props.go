@@ -71,26 +71,6 @@ func extraStr(it *scene.Item, name string) string {
 	return ""
 }
 
-// orientOf is item.orient: the typed field, or an untyped property the
-// runtime may have stored instead.
-func orientOf(it *scene.Item) string {
-	if it.Orient() != "" {
-		return it.Orient()
-	}
-	return extraStr(it, "orient")
-}
-
-// setNum is upstream's set(item, property, value) for x and y: assign, and
-// report whether the value changed (an unset property always counts as
-// changed, NaN never equals itself).
-func setNum(n *scene.Num, v float64) bool {
-	if n.Set() && n.Val() == v {
-		return false
-	}
-	*n = scene.N(v)
-	return true
-}
-
 // xy reads item.x / item.y for arithmetic (undefined is NaN).
 func xOf(it *scene.Item) float64 { return it.X.Val() }
 func yOf(it *scene.Item) float64 { return it.Y.Val() }
@@ -144,4 +124,11 @@ func newBoundsSet(x1, y1, x2, y2 float64) scene.Bounds {
 	b := scene.NewBounds()
 	b.Set(x1, y1, x2, y2)
 	return b
+}
+
+// assign is item[prop] = v for a numeric property whose field is n: the
+// number replaces whatever the property was given (see scene.Item.Raw).
+func assign(it *scene.Item, prop string, n *scene.Num, v float64) {
+	*n = scene.N(v)
+	it.ForgetRaw(prop)
 }

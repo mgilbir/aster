@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/mgilbir/aster/internal/jsval"
+	"github.com/mgilbir/aster/internal/svgpdf"
 	"github.com/mgilbir/aster/internal/text"
 	"github.com/mgilbir/aster/internal/transforms"
 	"github.com/mgilbir/aster/internal/transforms/wordcloud"
@@ -82,10 +83,10 @@ func (c *Converter) StagesForTest(spec []byte, lite bool) (map[string]time.Durat
 	if err != nil {
 		return nil, err
 	}
-	if _, err := c.svgToPNG(ctx, svg, nil); err != nil {
+	if _, err := c.svgToPNG(ctx, svg, defaultPNGConfig()); err != nil {
 		return nil, err
 	}
-	if _, _, err := c.svgToPDF(ctx, svg, nil, false); err != nil {
+	if _, _, err := c.svgToPDF(ctx, svg, svgpdf.TextEmbed, false, true); err != nil {
 		return nil, err
 	}
 	return stages, nil
@@ -122,7 +123,8 @@ func (c *Converter) RenderPreparedForTest(spec []byte, lite bool) (func() error,
 		defer release()
 		ctx, cancel := c.opContext(context.Background())
 		defer cancel()
-		defer recoverInto(&err)
+		stage := "rendering Vega"
+		defer c.recoverStage(ctx, &stage, &err)
 		opts := vega.Options{
 			Loader:   c.cfg.loader,
 			Location: c.location,
@@ -141,6 +143,9 @@ func (c *Converter) RenderPreparedForTest(spec []byte, lite bool) (func() error,
 	}, nil
 }
 
+// IsEngineBugForTest is isEngineBug, for the external tests' gates.
+var IsEngineBugForTest = isEngineBug
+
 // RaceSlowdownForTest is raceSlowdown, for the external tests' time limits.
 const RaceSlowdownForTest = raceSlowdown
 
@@ -157,20 +162,42 @@ func LimitsForTest(n uint64) map[string]int64 {
 		"scene items":            int64(l.MaxItems),
 		"facet cells (subflows)": int64(l.MaxSubflows),
 		"dataflow operators":     int64(l.MaxOperators),
-		"loaded bytes (data and images of one call, together)":                l.MaxLoadBytes,
-		"parsed JSON (spec and data)":                                         l.MaxParseBytes,
-		"expression strings and arrays":                                       l.MaxStringBytes,
-		"bitmaps the heatmap transform paints":                                l.MaxCanvasBytes,
-		"SVG output":                                                          int64(c.svgBytes),
-		"specification size":                                                  int64(c.specBytes),
-		"glyphs of one shaped run of text":                                    c.shaping.RunBytes,
-		"rasterizer canvas memory (PNG, and the `label` transform's drawing)": int64(r.MaxCanvasBytes),
-		"rasterizer pixels per canvas (PNG)":                                  int64(r.MaxPixels),
-		"rasterizer path points held at once (PNG)":                           int64(r.MaxPathSegments),
-		"pixels of one image (SVG, PNG and PDF output)":                       int64((&Converter{lim: c}).imagePixels()),
-		"memory charged to the call's ledger":                                 c.ledger.MaxBytes,
-		"Vega-Lite views":                                                     int64(c.vlViews),
+		"loaded bytes (data and images of one call, together)":                  l.MaxLoadBytes,
+		"parsed JSON (spec and data)":                                           l.MaxParseBytes,
+		"expression strings and arrays":                                         l.MaxStringBytes,
+		"bitmaps the heatmap transform paints":                                  l.MaxCanvasBytes,
+		"SVG output":                                                            int64(c.svgBytes),
+		"specification size":                                                    int64(c.specBytes),
+		"glyphs of one shaped run of text":                                      c.shaping.RunBytes,
+		"rasterizer canvas memory (PNG, and the `label` transform's drawing)":   int64(r.MaxCanvasBytes),
+		"rasterizer pixels per canvas (PNG)":                                    int64(r.MaxPixels),
+		"rasterizer path points held at once (PNG)":                             int64(r.MaxPathSegments),
+		"pixels of one image (SVG, PNG and PDF output)":                         int64((&Converter{lim: c}).imagePixels()),
+		"SVG input to `SVGToPNG`, bytes":                                        int64(r.MaxInputBytes),
+		"SVG input to `SVGToPNG`, elements (a run of text is one)":              int64(r.MaxElements),
+		"style sheets of SVG input to `SVGToPNG`, bytes":                        int64(r.MaxStyleBytes),
+		"style sheets of SVG input to `SVGToPNG`, rules":                        int64(r.MaxCSSRules),
+		"pixels of one filter region (PNG)":                                     int64(r.MaxFilterPixels),
+		"memory charged to the call's ledger":                                   c.ledger.MaxBytes,
+		"Vega-Lite views":                                                       int64(c.vlViews),
+		"SVG a chart's PDF is drawn from (`VegaToPDF`, `VegaLiteToPDF`), bytes": int64(c.pdfChart.MaxInputBytes),
+		"SVG a chart's PDF is drawn from, elements":                             int64(c.pdfChart.MaxElements),
+		"SVG a chart's PDF is drawn from, path segments":                        int64(c.pdfChart.MaxPathSegments),
+		"SVG a chart's PDF is drawn from, text bytes":                           int64(c.pdfChart.MaxTextBytes),
+		"SVG input to `SVGToPDF`, bytes":                                        int64(c.pdfInput.MaxInputBytes),
+		"SVG input to `SVGToPDF`, elements":                                     int64(c.pdfInput.MaxElements),
+		"SVG input to `SVGToPDF`, path segments":                                int64(c.pdfInput.MaxPathSegments),
+		"SVG input to `SVGToPDF`, text bytes":                                   int64(c.pdfInput.MaxTextBytes),
 	}
+}
+
+// WithWordcloudBoxForTest lays out the wordcloud transform's words with
+// wordcloud.BoxRenderer (every rune 0.6 em, every word a box) instead of the
+// canvas renderer: the model of the oracle's deterministic wordcloud canvas
+// (Oracle.WordcloudBoxSVG), which does not depend on how a platform's
+// node-canvas rasterizes glyphs.
+func WithWordcloudBoxForTest() Option {
+	return func(c *config) { c.wordcloudBoxForTest = true }
 }
 
 // WithFontSetFailureForTest makes the Converter's fonts fail to load.
@@ -183,4 +210,11 @@ func WithFontSetFailureForTest() Option {
 var FixedLimitsForTest = map[string]int64{
 	"maxImageBytes": maxImageBytes, "maxImagePixels": maxImagePixels,
 	"pixelOps": int64(deriveLimits(0, 0).pixelOps), "pixelOpsPerPixel": int64(deriveLimits(0, 0).pixelOpsPerPixel),
+}
+
+// PDFLimitsForTest are the PDF writer's bounds for a chart's SVG and for
+// SVG input under WithMemoryLimit(n), and the SVG output budget.
+func PDFLimitsForTest(n uint64) (chart, input svgpdf.Limits, svgBytes int) {
+	c := deriveLimits(n, 0)
+	return c.pdfLimits(true), c.pdfLimits(false), c.svgBytes
 }

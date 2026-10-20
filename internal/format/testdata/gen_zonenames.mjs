@@ -2,16 +2,16 @@
 // of tzdata (zones and links): ICU's long name of the zone's current
 // metazone, standard or daylight as V8's DST flag for the instant says
 // (C121 of the 2026-10-18 audit).
-//   node testdata/gen_zonenames.mjs /usr/share/zoneinfo/tzdata.zi samples > /tmp/samples.json
+//   node testdata/gen_zonenames.mjs testdata/tzdata.zi samples > /tmp/samples.json
 //     every month of 1970-2037 for each name, which zonenames_gen.go reads
 //     to make zonenames_table.go;
-//   node testdata/gen_zonenames.mjs /usr/share/zoneinfo/tzdata.zi vectors | gzip -n -9 > testdata/zonenames.json.gz
+//   node testdata/gen_zonenames.mjs testdata/tzdata.zi vectors | gzip -n -9 > testdata/zonenames.json.gz
 //     a few instants a name, inside and outside 1970-2037, with V8's text
 //     and offset, which TestDateToStringZoneNames replays.
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 const [, self, zi, mode] = process.argv;
-if (process.env.TZ) {
+if (process.env.ZONENAMES_ZONE) { // the child: one name's samples, run with TZ set to it
   const ts = [];
   if (mode === 'samples') {
     for (let y = 1970; y <= 2037; y++) for (let m = 0; m < 12; m++) ts.push(Date.UTC(y, m, 15, 12));
@@ -28,7 +28,7 @@ if (process.env.TZ) {
     : l.startsWith('L ') ? [l.split(' ')[2]] : []));
   const out = { node: process.version, tz: process.versions.tz, zones: {} };
   for (const z of names.sort()) {
-    out.zones[z] = JSON.parse(execFileSync(process.execPath, [self, zi, mode], { env: { ...process.env, TZ: z } }).toString());
+    out.zones[z] = JSON.parse(execFileSync(process.execPath, [self, zi, mode], { env: { ...process.env, TZ: z, ZONENAMES_ZONE: z } }).toString());
   }
   process.stdout.write(JSON.stringify(out));
 }

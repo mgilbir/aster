@@ -12,6 +12,7 @@
 ./internal/expr	FuzzParse	10
 ./internal/expr	FuzzCompileEval	10
 ./internal/vegalite	FuzzEventSelector	10
+./internal/vegalite	FuzzExprDepsAcceptsAsParse	10
 ./internal/geo	FuzzTopoJSON	10
 ./internal/geo	FuzzPath	5
 ./internal/scene	FuzzFromJSON	10

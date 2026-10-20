@@ -1,6 +1,10 @@
 package raster
 
-import "math"
+import (
+	"fmt"
+	"math"
+	"unsafe"
+)
 
 // tightBounds returns the exact bounding box of p, including the extrema of
 // curve segments (usvg's "object bounding box" is computed the same way).
@@ -101,6 +105,9 @@ func transformRect(rc rect, m matrix) rect {
 	return b.r
 }
 
+// docStateBytes is what an entry of docStates holds.
+const docStateBytes = memoEntryBytes + int64(unsafe.Sizeof(state{}))
+
 // inheritedState returns the computed style of n from its document ancestors
 // (mask, pattern, marker and filter content inherits from where it is defined,
 // not from the element referencing it). The transform is not applied.
@@ -122,8 +129,14 @@ func (r *renderer) inheritedState(n *node) *state {
 	}
 	if len(r.docStates) > 1<<16 {
 		clear(r.docStates)
+		r.ledger.Free(r.docStateBytes)
+		r.memoBytes -= r.docStateBytes
+		r.docStateBytes = 0
 	}
-	r.docStates[n] = &s
+	if r.memo(docStateBytes) {
+		r.docStates[n] = &s
+		r.docStateBytes += docStateBytes
+	}
 	return &s
 }
 
@@ -158,14 +171,15 @@ func (r *renderer) addElemBBox(k *node, parent *state, acc *bbox) {
 	default:
 		return
 	}
-	if isDisplayNone(k) || !r.budget() {
+	if isDisplayNone(k) || !r.budgetFor(k) {
 		return
 	}
 	r.nest++
-	held := r.livePts // the geometry built for k's box is dropped with it
-	defer func() { r.nest--; r.livePts = held }()
+	// The geometry and text layout built for k's box are dropped with it.
+	held, text := r.livePts, r.textBytes
+	defer func() { r.nest--; r.livePts = held; r.releaseText(text) }()
 	if r.nest > r.lim.MaxDepth*2 {
-		r.fail(errRasterLimit)
+		r.fail(fmt.Errorf("raster: element nesting too deep: %w", errLimit))
 		return
 	}
 	ks := *parent
@@ -251,19 +265,12 @@ func (r *renderer) contentBBox(k *node, ks *state) (rect, bool) {
 		h := ks.length(k.str(aHeight), 1, ks.vh)
 		return r.viewportBBox(k, ks, x, y, w, h)
 	case tagUse:
-		href := k.str(aHref)
-		if len(href) < 2 || href[0] != '#' {
-			return rect{}, false
-		}
-		target := r.doc.ids[href[1:]]
+		target := r.useTarget(k)
 		if target == nil {
 			return rect{}, false
 		}
-		for p := k; p != nil; p = p.parent {
-			if p == target {
-				return rect{}, false
-			}
-		}
+		r.enterUse(k)
+		defer r.exitUse()
 		x := ks.length(k.str(aX), 0, 0)
 		y := ks.length(k.str(aY), 1, 0)
 		var b bbox

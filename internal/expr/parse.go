@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"sort"
 	"strings"
-	"unicode"
 	"unicode/utf8"
 
 	"github.com/mgilbir/aster/internal/budget"
@@ -177,20 +177,32 @@ func hexVal(c byte) int {
 }
 
 // isIdentifierStart is upstream's: $ _ letters, backslash (an escape), and
-// non-ASCII letters.
+// the non-ASCII characters of its own table (idtables.go). Upstream tests
+// UTF-16 code units, so a character outside the Basic Multilingual Plane,
+// whose first unit is a high surrogate, is never part of an identifier (C105).
 func isIdentifierStart(r rune) bool {
 	if r < 0x80 {
 		return r == '$' || r == '_' || r == '\\' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z'
 	}
-	return unicode.In(r, unicode.Lu, unicode.Ll, unicode.Lt, unicode.Lm, unicode.Lo, unicode.Nl)
+	return inUnitRanges(idStartRanges, r)
 }
 
 func isIdentifierPart(r rune) bool {
 	if r < 0x80 {
 		return r == '$' || r == '_' || r == '\\' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9'
 	}
-	return r == 0x200C || r == 0x200D ||
-		unicode.In(r, unicode.Lu, unicode.Ll, unicode.Lt, unicode.Lm, unicode.Lo, unicode.Nl, unicode.Mn, unicode.Mc, unicode.Nd, unicode.Pc)
+	return inUnitRanges(idPartRanges, r)
+}
+
+// inUnitRanges reports whether r is a code unit in one of the sorted [lo, hi]
+// pairs of ranges.
+func inUnitRanges(ranges []uint16, r rune) bool {
+	if r > 0xFFFF {
+		return false
+	}
+	c := uint16(r)
+	i := sort.Search(len(ranges)/2, func(i int) bool { return ranges[2*i+1] >= c })
+	return i < len(ranges)/2 && ranges[2*i] <= c
 }
 
 func (p *parser) runeAt(i int) (rune, int) {
@@ -857,10 +869,11 @@ func (p *parser) parsePrimary() *Node {
 	switch {
 	case t.kind == tIdent || t.kind == tKeyword && t.val == "if":
 		return identNode(p.lex().val)
-	case t.kind == tString && (t.val == "if" || disallowedProperties[t.val]):
+	case t.kind == tString && (t.val == "if" || objectProtoMember(t.val)):
 		// upstream tests `legalKeywords[lookahead.value]` on a plain object
 		// for every token: a string literal whose value is "if" or the name
-		// of an Object.prototype property is read as an identifier.
+		// of an Object.prototype member (not "then", which only vega-util's
+		// DisallowedObjectProperties adds) is read as an identifier (C98).
 		return identNode(p.lex().val)
 	case t.kind == tString || t.kind == tNum:
 		if t.octal {

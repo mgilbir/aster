@@ -5,6 +5,7 @@ import (
 	"math"
 
 	"github.com/mgilbir/aster/internal/budget"
+	"github.com/mgilbir/aster/internal/jsval"
 )
 
 // Geometry is a GeoJSON MultiPolygon with the contour level attached, as
@@ -13,6 +14,10 @@ import (
 type Geometry struct {
 	Value       float64
 	Coordinates [][][][2]float64
+	// Raw, when HasRaw, is the threshold as given, the value the contour
+	// carries (Value is it as a number).
+	Raw    jsval.Value
+	HasRaw bool
 }
 
 type seg [2][2]float64

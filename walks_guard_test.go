@@ -74,12 +74,13 @@ func TestEngineWalksUseTheCallsWalker(t *testing.T) {
 			pkg = "aster"
 		}
 		for _, decl := range f.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok {
-				continue
+			// A package-level declaration (a var's initializer, a function
+			// literal assigned at package level) is scanned too, as "init".
+			name := pkg + ".init"
+			if fn, ok := decl.(*ast.FuncDecl); ok {
+				name = pkg + "." + funcName(fn)
 			}
-			name := pkg + "." + funcName(fn)
-			ast.Inspect(fn, func(n ast.Node) bool {
+			ast.Inspect(decl, func(n ast.Node) bool {
 				if detachedWalk(n, jsval) {
 					found[name]++
 					where[name] = append(where[name], fset.Position(n.Pos()).String())

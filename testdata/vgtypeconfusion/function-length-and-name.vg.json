@@ -1,0 +1,1 @@
+{"width": 40, "height": 20, "data": [{"name": "d", "values": [{"a": [1, 2], "s": "x"}]}], "marks": [{"type": "text", "from": {"data": "d"}, "encode": {"enter": {"y": {"value": 10}, "text": {"signal": "length(pathShape('M0,0')) + ',' + pathShape('M0,0').name + ',' + (datum.a.map ? 'f' : 'u') + ',' + datum.s.toFixed + ',' + length(datum.a.slice)"}}}}]}

@@ -28,6 +28,10 @@ type StackParams struct {
 	Offset string
 	// As names the two output fields; empty entries default to y0 and y1.
 	As [2]string
+	// AsExact reports that As are the names as the runtime resolved them
+	// (`_.as || defaults`, then each entry's text): an empty one is the
+	// empty name, not the default.
+	AsExact bool
 }
 
 // errCircular is the TypeError JSON.stringify throws on a value that
@@ -147,10 +151,10 @@ func (j *stringifier) append(dst []byte, v jsval.Value, depth int) ([]byte, erro
 // Math.abs, so NaN poisons a whole stack exactly as upstream.
 func Stack(ctx context.Context, data []jsval.Value, p StackParams) ([]jsval.Value, error) {
 	y0, y1 := p.As[0], p.As[1]
-	if y0 == "" {
+	if y0 == "" && !p.AsExact {
 		y0 = "y0"
 	}
-	if y1 == "" {
+	if y1 == "" && !p.AsExact {
 		y1 = "y1"
 	}
 	get := func(t jsval.Value) float64 { return 1 }
@@ -199,11 +203,11 @@ func Stack(ctx context.Context, data []jsval.Value, p StackParams) ([]jsval.Valu
 		if s > maxSum {
 			maxSum = s
 		}
-		SortTuples(g, p.Sort)
+		SortTuples(g, StableComparator(p.Sort)) // stableCompare(_.sort)
 	}
 
 	set := func(t jsval.Value, a, b float64) {
-		if o := t.ObjValue(); o != nil {
+		if o := jsval.FieldsFor(t, y0); o != nil {
 			o.Set(y0, jsval.Num(a))
 			o.Set(y1, jsval.Num(b))
 		}

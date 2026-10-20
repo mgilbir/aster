@@ -17,10 +17,9 @@ const cloudRadians = math.Pi / 180
 // Work limits. Specifications are untrusted, so the spec-driven loops are
 // bounded far above anything a real chart needs.
 const (
-	MaxWords       = 50000
-	maxArea        = 1 << 28 // pixels of the placement board
-	maxSpiralSteps = 1 << 24
-	maxSpriteWork  = 1 << 28 // sprite pixels cut out of the sheets in one layout
+	MaxWords      = 50000
+	maxArea       = 1 << 28 // pixels of the placement board
+	maxSpriteWork = 1 << 28 // sprite pixels cut out of the sheets in one layout
 )
 
 // Spiral names the search path a word follows away from its start position.
@@ -175,14 +174,15 @@ func (l *layout) place(tag *word, bounds *[2][2]int) (bool, error) {
 		dt = 1
 	}
 	t := -dt
-	for steps := 0; ; steps++ {
-		if steps&4095 == 0 {
-			if err := l.ctx.Err(); err != nil {
-				return false, err
-			}
-			if steps > maxSpiralSteps {
-				return false, nil
-			}
+	// The spiral leaves the board's diagonal after a number of steps the
+	// board's size bounds (a few hundred million on the largest board), and
+	// upstream follows it that far: each step is work of the call, which
+	// the deadline stops (ADR 0011: a word upstream places is never dropped
+	// for a step count).
+	m := budget.NewMeter(l.ctx)
+	for {
+		if err := m.Work(1); err != nil {
+			return false, err
 		}
 		t += dt
 		fx, fy := s(t)
@@ -342,11 +342,13 @@ func (l *layout) makeSprite(words []*word, di int) error {
 		w32 := w >> 5
 		h := d.y1 - d.y0
 		// A word wider than the sheet still gets a sprite upstream; the cut
-		// costs its area, so the total is bounded.
-		if l.work += w * h; l.work > maxSpriteWork || w < 0 || h < 0 {
+		// costs its area, so the total is bounded. A negative font size
+		// makes a negative height, whose sprite upstream cuts no row of and
+		// places without drawing (every loop over its rows is empty).
+		if l.work += max(w*h, 0); l.work > maxSpriteWork {
 			return fmt.Errorf("wordcloud: words are too large to lay out: %w", budget.ErrLimit)
 		}
-		need := h * w32
+		need := max(h*w32, 0)
 		if need > len(l.sprite) {
 			l.sprite = append(l.sprite, make([]int32, need-len(l.sprite))...)
 		}

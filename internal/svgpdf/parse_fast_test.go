@@ -32,7 +32,7 @@ func sameTree(a, b *element) bool {
 // whether the scanner accepted.
 func checkFastParse(t *testing.T, svg string) bool {
 	t.Helper()
-	lim := Limits{}.withDefaults()
+	lim := Limits{}.WithDefaults()
 	fast, ok, err := parseSVGFast(context.Background(), svg, lim)
 	if err != nil {
 		t.Fatalf("%q: %v", svg, err)
@@ -143,7 +143,7 @@ func BenchmarkParseSVG(b *testing.B) {
 		}
 		docs = append(docs, string(d))
 	}
-	lim := Limits{}.withDefaults()
+	lim := Limits{}.WithDefaults()
 	for _, mode := range []struct {
 		name  string
 		parse func(context.Context, string, Limits) (*element, error)

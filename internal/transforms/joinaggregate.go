@@ -2,6 +2,7 @@ package transforms
 
 import (
 	"context"
+	"math"
 
 	"github.com/mgilbir/aster/internal/jsval"
 )
@@ -9,7 +10,7 @@ import (
 // JoinAggregateParams configures JoinAggregate.
 type JoinAggregateParams struct {
 	GroupBy  []Field
-	Measures []Measure // empty means a single count
+	Measures []Measure // nil means a single count; empty, none
 	// Key optionally overrides the cell key computed from GroupBy.
 	Key Field
 	// Rand feeds ci0/ci1; nil means DefaultRand.
@@ -26,14 +27,14 @@ type JoinAggregateParams struct {
 // group-by values, then counts, then the other measures) and returns data.
 func JoinAggregate(ctx context.Context, data []jsval.Value, p JoinAggregateParams) ([]jsval.Value, error) {
 	measures := p.Measures
-	if len(measures) == 0 {
+	if measures == nil {
 		measures = []Measure{{Op: "count"}}
 	}
 	// joinaggregate's parameter definition has no aggregate_params, so upstream
 	// never passes a decay to exponential here (its result is NaN).
 	measures = append([]Measure(nil), measures...)
 	for i := range measures {
-		measures[i].Param = 0
+		measures[i].Param = math.NaN()
 	}
 	ms, err := newMeasureSet(measures, p.Rand)
 	if err != nil {
@@ -100,11 +101,11 @@ func JoinAggregate(ctx context.Context, data []jsval.Value, p JoinAggregateParam
 		if jc == nil {
 			return nil, &jsval.Thrown{Name: "TypeError", Msg: "Cannot read properties of undefined (reading 'tuple')"}
 		}
-		o := t.ObjValue()
-		if o == nil {
+		src := jc.tuple
+		if src.Len() == 0 {
 			continue
 		}
-		src := jc.tuple
+		o := jsval.FieldsFor(t, src.KeyAt(0))
 		for j := 0; j < src.Len(); j++ {
 			o.Set(src.KeyAt(j), src.ValueAt(j))
 		}

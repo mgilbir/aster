@@ -1,0 +1,1 @@
+{"data":{"values":[{"a":1,"b":2,"c":3}]},"layer":[{"mark":"line","encoding":{"x":{"field":"a","type":"quantitative"},"y":{"field":"b","type":"quantitative","axis":{"title":["a",null]}}}},{"mark":"line","encoding":{"x":{"field":"a","type":"quantitative"},"y":{"field":"c","type":"quantitative","axis":{"title":"b"}}}}]}

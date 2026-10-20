@@ -1,0 +1,2 @@
+{"width":200,"height":100,"data":[{"name":"t","values":[[1,2],[3,4],["a"]],"transform":[{"type":"formula","as":"f","expr":"5"}]},{"name":"d","source":"t","transform":[{"type":"formula","as":"g","expr":"datum[0]"}]}],
+"marks":[{"type":"text","from":{"data":"d"},"encode":{"enter":{"text":{"signal":"datum.f+'|'+datum.g+'|'+datum[0]+'|'+isArray(datum)"},"y":{"signal":"datum.y||0"}}}}]}

@@ -43,6 +43,10 @@ type Budget struct {
 	// with them (Hold), so that MaxRows bounds their memory (MaxRows *
 	// RowBytes) and not just their number.
 	RowBytes int64
+	// Shared, when set, is an allowance this Budget's loads share with
+	// others running at once: LoadLeft is at most what is left of it, and a
+	// loader charges it as it reads (Stream).
+	Shared *Allowance
 
 	rows   int64
 	excess int64
@@ -52,6 +56,10 @@ type Budget struct {
 	loaded    int64
 	points    int64
 	canvas    int64
+	// streamed is what Stream charged to Shared; sharedBound whether Shared
+	// was the bound met (see SharedBound).
+	streamed    int64
+	sharedBound bool
 }
 
 // Held is what one holder of rows holds of a Budget: a dataflow operator
@@ -218,12 +226,24 @@ func (b *Budget) Loaded() int64 {
 	return b.loaded
 }
 
-// LoadLeft is how many more bytes may be loaded (MaxInt64 when unlimited).
+// LoadLeft is how many more bytes may be loaded (MaxInt64 when unlimited):
+// within MaxLoadBytes, and what is left of the shared allowance when there
+// is one, which then records that it was the smaller (SharedBound).
 func (b *Budget) LoadLeft() int64 {
-	if b == nil || b.MaxLoadBytes <= 0 {
+	if b == nil {
 		return math.MaxInt64
 	}
-	return max(b.MaxLoadBytes-b.loaded, 0)
+	left := int64(math.MaxInt64)
+	if b.MaxLoadBytes > 0 {
+		left = max(b.MaxLoadBytes-b.loaded, 0)
+	}
+	if b.Shared != nil {
+		if s := b.Shared.Left(); s < left {
+			b.sharedBound = true
+			left = s
+		}
+	}
+	return left
 }
 
 // RowsLeft is how many more rows may be created (MaxInt64 when unlimited),

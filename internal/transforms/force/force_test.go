@@ -228,9 +228,16 @@ func TestErrors(t *testing.T) {
 	if err := Run(ctx, nil, p); err != nil {
 		t.Fatal(err)
 	}
-	bad := []jsval.Value{obj("x", N(math.Inf(1)), "y", N(0)), obj("x", N(1), "y", N(2)), obj("x", N(1), "y", N(2))}
-	if err := Run(ctx, bad, p); err != nil {
+	nan := []jsval.Value{obj("x", N(math.NaN()), "y", N(0)), obj("x", N(1), "y", N(2)), obj("x", N(1), "y", N(2))}
+	if err := Run(ctx, nan, p); err != nil {
 		t.Fatal(err)
+	}
+	// An infinite position never ends upstream (d3-quadtree's cover doubles
+	// toward it forever: node runs testdata's force with x: 1e309 until it
+	// is killed), and is refused (ADR 0011).
+	bad := []jsval.Value{obj("x", N(math.Inf(1)), "y", N(0)), obj("x", N(1), "y", N(2)), obj("x", N(1), "y", N(2))}
+	if err := Run(ctx, bad, p); !errors.Is(err, budget.ErrLimit) {
+		t.Fatalf("infinite position: %v, want ErrLimit", err)
 	}
 	cctx, cancel := context.WithCancel(ctx)
 	cancel()

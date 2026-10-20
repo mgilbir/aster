@@ -1,0 +1,2 @@
+{"width": 40, "height": 20, "marks": [{"type": "symbol", "encode": {"enter": {"x": {"value": 5}, "y": {"value": 5}, "shape": {"value": false}}}},
+ {"type": "symbol", "encode": {"enter": {"x": {"value": 15}, "y": {"value": 5}, "shape": {"value": ["square"]}}}}]}

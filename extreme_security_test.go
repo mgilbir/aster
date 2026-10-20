@@ -149,7 +149,7 @@ func runMutations(t *testing.T, mode string) {
 					} else {
 						_, err = c.VegaToSVG([]byte(j.spec))
 					}
-					if err != nil && strings.Contains(err.Error(), "internal error") {
+					if isEngineBug(err) {
 						done <- "PANIC " + err.Error()
 						return
 					}

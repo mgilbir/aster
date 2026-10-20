@@ -137,6 +137,10 @@ func ToNumber(v Value) float64 {
 			}
 			return math.NaN()
 		}
+	case KindObj:
+		if o := v.obj(); o.str == nil {
+			checkToPrimitive(o)
+		}
 	}
 	return math.NaN()
 }

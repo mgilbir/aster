@@ -185,6 +185,12 @@ type TickCount struct {
 	// d3's ticks treat both as 10, but vega-scale also computes with the
 	// count, where null is 0 and undefined NaN (tickLog, formatSpan).
 	Null bool
+	// Opaque marks a count that is a JavaScript object or function: truthy
+	// whatever number it reads as (N). vega-encode's `tickCount(...) || null`
+	// keeps it (the member of Object.prototype a vega-time unit name finds, a
+	// {} or an [] given as the interval), where a NaN or 0 count it reads as
+	// would be replaced by null.
+	Opaque bool
 }
 
 // number is the count as JavaScript arithmetic reads it: N, 0 for null, NaN

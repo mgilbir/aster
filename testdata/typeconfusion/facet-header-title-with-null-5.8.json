@@ -1,0 +1,3 @@
+{"data":{"values":[{"a":1,"b":2,"c":3}]},
+ "facet":{"row":{"field":"a","type":"nominal","title":["x",null,"y"]}},
+ "spec":{"facet":{"row":{"field":"b","type":"nominal"}},"spec":{"mark":"point","encoding":{"x":{"field":"c","type":"quantitative"}}}}}

@@ -1,0 +1,1 @@
+{"data":{"values":[{"a":1,"b":2,"c":3}]},"layer":[{"mark":"point","encoding":{"color":{"field":"b","type":"quantitative","legend":{"title":["a",null]}}}},{"mark":"point","encoding":{"color":{"field":"c","type":"quantitative","legend":{"title":"b"}}}}]}

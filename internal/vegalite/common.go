@@ -1,7 +1,7 @@
 package vegalite
 
 import (
-	"strings"
+	"unsafe"
 
 	"github.com/mgilbir/aster/internal/jsval"
 )
@@ -58,14 +58,14 @@ func exprFromSignalRefOrValue(cc *compileCtx, ref Value) string {
 	if isSignalRef(cc, ref) {
 		return signalOf(ref)
 	}
-	return stringValue(ref)
+	return stringValue(cc, ref)
 }
 
 func exprFromValueRefOrSignalRef(cc *compileCtx, ref Value) string {
 	if isSignalRef(cc, ref) {
 		return signalOf(ref)
 	}
-	return stringValue(ref.Get("value"))
+	return stringValue(cc, ref.Get("value"))
 }
 
 func signalOrStringValue(cc *compileCtx, v Value) Value {
@@ -80,7 +80,7 @@ func signalOrStringValue(cc *compileCtx, v Value) Value {
 		// so a 0 or false is falsy where the expression is tested.
 		return v
 	}
-	return jsval.Str(stringValue(v))
+	return jsval.Str(stringValue(cc, v))
 }
 
 // getStyles is [].concat(mark.type, mark.style ?? []).
@@ -100,10 +100,10 @@ func getStyles(mark Value) []Value {
 	return out
 }
 
-func getStyleConfig(p string, styles []Value, styleIndex Value) Value {
+func getStyleConfig(cc *compileCtx, p string, styles []Value, styleIndex Value) Value {
 	v := undef
 	for _, s := range styles {
-		sc := jsGet(styleIndex, s.AsString()) // styleConfigIndex[style]: a TypeError without one
+		sc := jsGet(styleIndex, propKey(cc, s)) // styleConfigIndex[style]: a TypeError without one
 		if hasProperty(sc, p) {
 			v = sc.Get(p)
 		}
@@ -111,40 +111,43 @@ func getStyleConfig(p string, styles []Value, styleIndex Value) Value {
 	return v
 }
 
-func getMarkStyleConfig(prop string, mark Value, styleIndex Value) Value {
-	return getStyleConfig(prop, getStyles(mark), styleIndex)
+func getMarkStyleConfig(cc *compileCtx, prop string, mark Value, styleIndex Value) Value {
+	return getStyleConfig(cc, prop, getStyles(mark), styleIndex)
 }
 
 // getMarkConfig looks a property up in style configs, then the mark-type
 // config, then the general mark config. With vgChannel the Vega channel name is
 // tried first at each level.
-func getMarkConfig(channel string, mark Value, config Value, vgChannel string) Value {
-	cfg := getMarkStyleConfig(channel, mark, config.Get("style"))
+func getMarkConfig(cc *compileCtx, channel string, mark Value, config Value, vgChannel string) Value {
+	cfg := getMarkStyleConfig(cc, channel, mark, config.Get("style"))
 	// config[mark.type][channel] and config.mark[channel] are read
 	// unguarded (all of getFirstDefined's arguments are evaluated): a mark
 	// config set to a falsy value is absent from the config, and reading it
 	// is a TypeError.
-	mt := config.Get(mark.Get("type").AsString())
+	mt := config.Get(propKey(cc, mark.Get("type")))
 	if vgChannel != "" {
 		return firstDefined(cfg, cfg, jsGet(mt, vgChannel), jsGet(mt, channel), jsGet(config.Get("mark"), vgChannel))
 	}
 	return firstDefined(undef, cfg, undef, jsGet(mt, channel), jsGet(config.Get("mark"), channel))
 }
 
-// getMarkPropOrConfig reads the mark property, falling back to config.
-func getMarkPropOrConfig(channel string, mark Value, config Value, vgChannel string, ignoreVgConfig bool) Value {
-	if vgChannel != "" && hasProperty(mark, vgChannel) {
+// getMarkPropOrConfig reads the mark property, falling back to config. The
+// Vega channel is the mark's own defined property in 6.4 (hasProperty), and
+// any defined read of it in 5.8 (`mark[vgChannel] !== undefined`, which
+// reads through a prototype a "__proto__" assignment gave the mark).
+func getMarkPropOrConfig(cc *compileCtx, channel string, mark Value, config Value, vgChannel string, ignoreVgConfig bool) Value {
+	if vgChannel != "" && (hasProperty(mark, vgChannel) || (cc != nil && cc.v5 && !mark.Get(vgChannel).IsUndefined())) {
 		return mark.Get(vgChannel)
 	} else if v := mark.Get(channel); !v.IsUndefined() {
 		return v
 	} else if ignoreVgConfig && (vgChannel == "" || vgChannel == channel) {
 		return undef
 	}
-	return getMarkConfig(channel, mark, config, vgChannel)
+	return getMarkConfig(cc, channel, mark, config, vgChannel)
 }
 
-func getMarkPropOrConfigSimple(channel string, mark, config Value) Value {
-	return getMarkPropOrConfig(channel, mark, config, "", false)
+func getMarkPropOrConfigSimple(cc *compileCtx, channel string, mark, config Value) Value {
+	return getMarkPropOrConfig(cc, channel, mark, config, "", false)
 }
 
 // sortParams builds the field/order arrays of a Vega compare.
@@ -200,7 +203,7 @@ func mergeTitleFieldDefs(cc *compileCtx, f1, f2 []Value) []Value {
 			cc.work(1)
 			for _, m := range merged {
 				cc.work(1)
-				if deepEqual(m, fd) {
+				if deepEqual(cc, m, fd) {
 					continue direct
 				}
 			}
@@ -221,7 +224,7 @@ outer:
 		k := stringify(cc, fd)
 		for _, i := range tm.byKey[k] {
 			cc.work(1)
-			if deepEqual(tm.items[i], fd) {
+			if deepEqual(cc, tm.items[i], fd) {
 				continue outer
 			}
 		}
@@ -247,22 +250,69 @@ type titleMerge struct {
 	byKey map[string][]int
 }
 
-// mergeTitle charges cc by the titles' text: merged across views, a title
-// grows with each, as upstream's does.
+// mergeTitle is upstream's mergeTitle, [...array(t1), ...array(t2)]
+// .join(', '). Merged across views, a title grows with each, and upstream
+// copies the whole of it at each view: quadratic in the views. A title this
+// function made, and still the whole of its buffer, is extended in place
+// instead (titleAcc): the text is the same, and each view costs its own
+// title.
 func mergeTitle(cc *compileCtx, t1, t2 Value) Value {
-	cc.work(1 + int64(len(t1.AsString())+len(t2.AsString()))/16)
-	if deepEqual(t1, t2) || !t2.IsTruthy() {
+	if deepEqual(cc, t1, t2) || !t2.IsTruthy() {
 		return t1
 	} else if !t1.IsTruthy() {
 		return t2
 	}
-	var parts []string
-	for _, x := range append(append([]Value(nil), arrayOf(t1)...), arrayOf(t2)...) {
-		cc.work(1)
-		parts = append(parts, x.AsString())
+	// [...array(title1), ...array(title2)].join(', '): null and undefined
+	// elements are written as "" (C86 of the 2026-10-18 audit).
+	var b *sbuf
+	if t1.IsStr() && cc != nil {
+		b = cc.titleAcc[titleKeyOf(t1.StrValue())]
 	}
-	return jsval.Str(strings.Join(parts, ", "))
+	if b == nil {
+		nb := newSbuf(cc)
+		b = &nb
+		for i, x := range arrayOf(t1) {
+			cc.work(1)
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			b.WriteString(titleElemText(cc, x))
+		}
+	} else {
+		delete(cc.titleAcc, titleKeyOf(t1.StrValue()))
+	}
+	for _, x := range arrayOf(t2) {
+		cc.work(1)
+		b.WriteString(", ")
+		b.WriteString(titleElemText(cc, x))
+	}
+	out := b.String()
+	if cc != nil {
+		if cc.titleAcc == nil {
+			cc.titleAcc = map[titleKey]*sbuf{}
+		}
+		cc.titleAcc[titleKeyOf(out)] = b
+	}
+	return jsval.Str(out)
 }
+
+// titleElemText is an element of a merged title as Array.prototype.join
+// writes it: "" for null and undefined, else its String.
+func titleElemText(cc *compileCtx, x Value) string {
+	if x.IsNullish() {
+		return ""
+	}
+	return cc.walker().String(x)
+}
+
+// titleKey is where a string's bytes are and how many: the string a buffer
+// made last (and only it) has its buffer's key.
+type titleKey struct {
+	p *byte
+	n int
+}
+
+func titleKeyOf(s string) titleKey { return titleKey{unsafe.StringData(s), len(s)} }
 
 // mergeTitleComponent merges two title components (text or field-def lists).
 func mergeTitleComponent(cc *compileCtx, v1, v2 withExplicit) withExplicit {

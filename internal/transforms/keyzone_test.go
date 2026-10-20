@@ -61,7 +61,7 @@ func TestTransformPackagesKeyDatesLikeString(t *testing.T) {
 		return func(v jsval.Value) jsval.Value { return v.Get(k) }
 	}
 
-	tree, _, err := hierarchy.Nest(rows, []hierarchy.Accessor{get("d")}, str, false)
+	tree, _, err := hierarchy.Nest(context.Background(), rows, []hierarchy.Accessor{get("d")}, str, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestTransformPackagesKeyDatesLikeString(t *testing.T) {
 	}
 
 	srows := []jsval.Value{obj("id", jsval.Timestamp(0)), obj("id", jsval.Int(7), "p", jsval.Timestamp(0))}
-	st, err := hierarchy.Stratify(srows, get("id"), get("p"), str)
+	st, err := hierarchy.Stratify(context.Background(), srows, get("id"), get("p"), str)
 	if err != nil || st.NodeByKey(str(jsval.Timestamp(0))) == nil {
 		t.Errorf("stratify by date: %v", err)
 	}

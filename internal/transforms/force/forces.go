@@ -155,7 +155,11 @@ func (f *collideForce) apply(float64) {
 			f.xs[i] = nodes[i].x + nodes[i].vx
 			f.ys[i] = nodes[i].y + nodes[i].vy
 		}
-		f.tree.build(f.xs, f.ys)
+		f.tree.led = budget.LedgerFrom(f.s.ctx)
+		if err := f.tree.build(f.xs, f.ys); err != nil {
+			f.s.err = err
+			return
+		}
 		f.tree.visitAfter(prepare)
 		for i := range nodes {
 			if f.s.halt(i) {
@@ -220,7 +224,11 @@ func (f *nbodyForce) apply(alpha float64) {
 	for i := range nodes {
 		f.xs[i], f.ys[i] = nodes[i].x, nodes[i].y
 	}
-	tree.build(f.xs, f.ys)
+	tree.led = budget.LedgerFrom(f.s.ctx)
+	if err := tree.build(f.xs, f.ys); err != nil {
+		f.s.err = err
+		return
+	}
 	tree.visitAfter(func(q int32) {
 		nd := &tree.nodes[q]
 		var strength float64
@@ -316,11 +324,17 @@ func (f *nbodyForce) apply(alpha float64) {
 
 // Link is the spring force between linked nodes.
 type Link struct {
-	Links      []jsval.Value // tuples with source and target
-	ID         Accessor      // node id; nil means the node's index
+	Links []jsval.Value // tuples with source and target
+	ID    Accessor      // node id; nil means the node's index
+	// IDNull is link.id(null): d3 calls the id on the first node, a
+	// TypeError.
+	IDNull     bool
 	Distance   Param
 	Strength   *Param  // nil: 1 / min(degree(source), degree(target))
 	Iterations float64 // as Collide's
+	// Fault, when set, is the error forceLink's initialize raises for the
+	// links it was given (links.length of null).
+	Fault error
 }
 
 // NewLink returns a Link with Vega's defaults (distance 30, one iteration).
@@ -340,6 +354,9 @@ type linkForce struct {
 }
 
 func (f *linkForce) initialize(s *sim) error {
+	if f.cfg.Fault != nil {
+		return f.cfg.Fault
+	}
 	var err error
 	if f.iters, err = forceIterations("link", f.cfg.Iterations); err != nil {
 		return err
@@ -347,6 +364,9 @@ func (f *linkForce) initialize(s *sim) error {
 	f.s = s
 	links := f.cfg.Links
 	n, m := len(s.nodes), len(links)
+	if f.cfg.IDNull && n > 0 {
+		return &jsval.Thrown{Name: "TypeError", Msg: "id is not a function"}
+	}
 	// d3's nodeById, a Map: ids are SameValueZero keys, an array or object
 	// by reference.
 	byID := make(map[jsval.InternKey]int32, n)
@@ -361,13 +381,13 @@ func (f *linkForce) initialize(s *sim) error {
 	}
 	byObj := map[*jsval.Object]int32{}
 	resolve := func(v jsval.Value) (int32, bool) {
-		if v.IsObj() {
+		if v.IsObjectLike() {
 			if len(byObj) == 0 {
 				for i, o := range s.objs {
 					byObj[o] = int32(i)
 				}
 			}
-			i, ok := byObj[v.ObjValue()]
+			i, ok := byObj[jsval.Fields(v)]
 			return i, ok
 		}
 		i, ok := byID[v.MapKey()]
@@ -376,10 +396,10 @@ func (f *linkForce) initialize(s *sim) error {
 	f.src, f.tgt = make([]int32, m), make([]int32, m)
 	count := make([]float64, n)
 	for i, lv := range links {
-		if !lv.IsObj() {
+		if !lv.IsObjectLike() {
 			return fmt.Errorf("force: link %d is not an object", i)
 		}
-		lo := lv.ObjValue()
+		lo := jsval.Fields(lv)
 		lo.Set("index", jsval.Int(i))
 		for _, end := range [2]struct {
 			key string
@@ -392,7 +412,7 @@ func (f *linkForce) initialize(s *sim) error {
 				return fmt.Errorf("node not found: %s", jsval.StringPrefix(v, jsval.MessageBytes))
 			}
 			*end.dst = idx
-			if !v.IsObj() {
+			if !v.IsObjectLike() {
 				lo.Set(end.key, s.vals[idx])
 			}
 			count[idx]++

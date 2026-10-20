@@ -353,3 +353,84 @@ func PairSurrogates(b []byte, from int) []byte {
 	}
 	return b[:w]
 }
+
+// DecodeRune is one step of the WHATWG UTF-8 decoder (what TextDecoder and
+// Response.text(), which upstream's loaders read text with, do): the
+// character b starts with and its length, or, where b does not start with
+// a valid sequence, U+FFFD for its maximal subpart (a lead byte and the
+// continuation bytes that can follow it, at least one byte): a truncated
+// sequence is one U+FFFD, not one a byte as Go's []rune conversion gives.
+func DecodeRune(b []byte) (rune, int) {
+	if len(b) == 0 {
+		return utf8.RuneError, 0
+	}
+	c := b[0]
+	if c < utf8.RuneSelf {
+		return rune(c), 1
+	}
+	var need int
+	lo, hi := byte(0x80), byte(0xBF)
+	switch {
+	case c >= 0xC2 && c <= 0xDF:
+		need = 1
+	case c == 0xE0:
+		need, lo = 2, 0xA0
+	case c == 0xED:
+		need, hi = 2, 0x9F
+	case c >= 0xE1 && c <= 0xEF:
+		need = 2
+	case c == 0xF0:
+		need, lo = 3, 0x90
+	case c == 0xF4:
+		need, hi = 3, 0x8F
+	case c >= 0xF1 && c <= 0xF3:
+		need = 3
+	default:
+		return utf8.RuneError, 1
+	}
+	for i := 1; i <= need; i++ {
+		if i >= len(b) || b[i] < lo || b[i] > hi {
+			return utf8.RuneError, i
+		}
+		lo, hi = 0x80, 0xBF
+	}
+	r, n := utf8.DecodeRune(b[:need+1])
+	return r, n
+}
+
+// AppendDecoded appends the text the WHATWG UTF-8 decoder makes of b: b
+// itself when it is valid UTF-8, else each maximal subpart of an invalid
+// sequence as one U+FFFD (DecodeRune).
+func AppendDecoded(dst, b []byte) []byte {
+	if utf8.Valid(b) {
+		return append(dst, b...)
+	}
+	for len(b) > 0 {
+		r, n := DecodeRune(b)
+		if r == utf8.RuneError { // an invalid subpart, or U+FFFD itself
+			dst = append(dst, "\uFFFD"...)
+		} else {
+			dst = append(dst, b[:n]...)
+		}
+		b = b[n:]
+	}
+	return dst
+}
+
+// DecodedLen is len(AppendDecoded(nil, b)), without making it.
+func DecodedLen(b []byte) int {
+	if utf8.Valid(b) {
+		return len(b)
+	}
+	n := 0
+	for len(b) > 0 {
+		r, w := DecodeRune(b)
+		if r == utf8.RuneError {
+			n += 3
+		} else {
+			n += w
+		}
+		b = b[w:]
+	}
+	return n
+}

@@ -68,6 +68,16 @@ type ScaleProvider interface {
 	Gradient(ref, p0, p1, count, group jsval.Value) jsval.Value
 }
 
+// EncodeScaleProvider is what a ScaleProvider also implements to serve the
+// helpers mark encoders call, which resolve their scale directly:
+// `_["%name"](value)` and `_["%name"].range()`. A name that is no scale makes
+// those throw, where scale() and range() answer undefined.
+type EncodeScaleProvider interface {
+	EncodeScale(ref, v jsval.Value) jsval.Value
+	EncodeRange(ref jsval.Value) jsval.Value
+	EncodeBandwidth(ref jsval.Value) jsval.Value
+}
+
 // GeoProvider serves the projection functions. projection is a name or
 // undefined (geoArea/geoBounds/geoCentroid then use the unprojected d3-geo
 // functions).

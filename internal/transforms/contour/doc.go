@@ -34,7 +34,8 @@ const (
 )
 
 var (
-	errInvalidSize = errors.New("contour: invalid size")
+	// d3-contour's and vega's density2D's own messages
+	errInvalidSize = errors.New("invalid size")
 	errTooLarge    = fmt.Errorf("%w: contour: raster larger than %d cells", budget.ErrLimit, MaxGridCells)
 )
 

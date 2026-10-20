@@ -54,6 +54,13 @@ func ParseMarkType(s string) (MarkType, bool) {
 	return MarkInvalid, false
 }
 
+// IsGroup is upstream's `mark.marktype === 'group'`: a group mark whose
+// type was given as the string.
+func (m *Mark) IsGroup() bool { return m.Type == MarkGroup && !m.LooseType }
+
+// IsText is `mark.marktype === 'text'`.
+func (m *Mark) IsText() bool { return m.Type == MarkText && !m.LooseType }
+
 // Nested reports whether the mark type draws all its items as one element
 // (area, line, trail): the SVG has a single path built from every item, and the
 // bounds are shared by all items.
@@ -69,6 +76,12 @@ type PathFunc func(ctx PathContext) string
 // path generator): draw into ctx, or return the path data when ctx is nil. An
 // empty string means the shape has no geometry and no `d` attribute is written.
 type ShapeFunc func(ctx PathContext, item *Item) string
+
+// TruthyEmptyPath is what a path generator returns, when called without a
+// context, for a value that is truthy but whose String() is empty (pathShape
+// of an empty array): upstream tests the value (`if (def.path)`), so a clip
+// path draws a <path d=""> rather than a rectangle.
+const TruthyEmptyPath = "\x00"
 
 // Scenegraph is the root of a scene. Root is a group mark (role "frame", name
 // "root") holding a single group item; the mark hierarchy hangs below it.
@@ -100,8 +113,17 @@ func (s *Scenegraph) RootItem() *Item { return s.Root.Items[0] }
 
 // MarkDef describes a mark to add to a group.
 type MarkDef struct {
-	Type           MarkType
-	Name           string
+	Type MarkType
+	// LooseType reports a type given as a value that is not a string (an
+	// array, say), which vega names by its String(): it draws as that type,
+	// but none of upstream's strict comparisons (`marktype === 'group'`)
+	// holds for it.
+	LooseType bool
+	Name      string
+	// Named reports a truthy name, which the class attribute names even when
+	// its String() is empty; Described the same of the description.
+	Named          bool
+	Described      bool
 	Role           string
 	Clip           bool
 	ClipPath       PathFunc
@@ -119,7 +141,10 @@ func (s *Scenegraph) AddMark(def MarkDef, group *Item, index int) *Mark {
 	}
 	m := &Mark{
 		Type:           def.Type,
+		LooseType:      def.LooseType,
 		Name:           def.Name,
+		Named:          def.Named || def.Name != "",
+		Described:      def.Described || def.Description != "",
 		Role:           def.Role,
 		Clip:           def.Clip,
 		ClipPath:       def.ClipPath,
@@ -144,8 +169,12 @@ func (s *Scenegraph) AddMark(def MarkDef, group *Item, index int) *Mark {
 // scenegraph "mark" object).
 type Mark struct {
 	Type MarkType
-	Role string
-	Name string
+	// LooseType, Named and Described are MarkDef's.
+	LooseType bool
+	Named     bool
+	Described bool
+	Role      string
+	Name      string
 	// Description is the mark-level aria-label; Aria is the mark-level
 	// aria toggle (only an explicit false matters).
 	Description string

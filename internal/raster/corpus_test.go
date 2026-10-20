@@ -56,7 +56,11 @@ func TestCorpus(t *testing.T) {
 	var rows []row
 	for _, f := range sel {
 		name := strings.TrimSuffix(filepath.Base(f), ".vl.json")
-		svg := corpusSVG(t, name)
+		svg, upstreamErr := corpusSVG(t, name)
+		if upstreamErr != "" {
+			t.Logf("%s: upstream does not render it: %s", name, upstreamErr)
+			continue
+		}
 		ours, err := Render(svg, Options{})
 		ref := refPNG(t, svg, 1)
 		if ref == nil {
@@ -99,6 +103,13 @@ func TestCorpus(t *testing.T) {
 	// sample is dominated by a few thin-outline geo charts.
 	if !testing.Short() && cnt > 0 && (totMAE/float64(cnt) > 0.15 || totOver/float64(cnt) > 0.1) {
 		t.Errorf("corpus mean MAE %.4f / %%>24 %.4f exceeds the limit", totMAE/float64(cnt), totOver/float64(cnt))
+	}
+	// Every image of the default sample is compared today: resvg renders
+	// all of them, and upstream renders every example. A gate that compares
+	// fewer measures less than it says (resvg not loading once made it
+	// compare none, and pass; C51, C72, audit 2026-10-18).
+	if os.Getenv("RASTER_CORPUS_N") == "" && cnt < len(sel) {
+		t.Errorf("compared %d of the %d sampled images; every one must be (see the log for the ones left out)", cnt, len(sel))
 	}
 	if cnt > 0 {
 		t.Logf("corpus: %d images, mean MAE %.4f, mean %%>24 %.4f", cnt, totMAE/float64(cnt), totOver/float64(cnt))

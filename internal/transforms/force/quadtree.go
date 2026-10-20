@@ -1,6 +1,13 @@
 package force
 
-import "math"
+import (
+	"errors"
+	"fmt"
+	"math"
+	"unsafe"
+
+	"github.com/mgilbir/aster/internal/budget"
+)
 
 // qnode is one cell of the quadtree. Nodes live in an arena and refer to each
 // other by index (0 means "none"), so building a tree allocates nothing once
@@ -28,11 +35,26 @@ type quadtree struct {
 	x0, y0, x1, y1 float64
 	xs, ys         []float64
 	stack, post    []qframe
+	// led is charged for the arena before it grows (held so far), err is
+	// what stopped a build.
+	led  *budget.Ledger
+	held int64
+	err  error
 }
 
-// maxQuadDepth bounds the split loop for points that differ by less than the
-// floating point resolution of the current cell.
-const maxQuadDepth = 1100
+// maxQuadDepth bounds the split loop of two distinct points. A cell holds
+// its points in [x0, x1) and every split halves it, so two distinct doubles
+// are in different quadrants once the cell is narrower than their distance,
+// at most about 2,100 halvings from the widest extent (2^1024) to the
+// smallest distance (2^-1074): d3 ends there too, and the bound is a
+// backstop no input reaches.
+const maxQuadDepth = 2200
+
+const qnodeBytes = int64(unsafe.Sizeof(qnode{}))
+
+// errInfiniteNode is a node at an infinite position: d3-quadtree's cover
+// doubles its extent toward it forever.
+var errInfiniteNode = fmt.Errorf("%w: force: a node's position is infinite, which upstream's quadtree never covers", budget.ErrLimit)
 
 func (t *quadtree) reset() {
 	t.nodes = append(t.nodes[:0], qnode{}) // index 0 is the nil node
@@ -41,39 +63,56 @@ func (t *quadtree) reset() {
 }
 
 func (t *quadtree) newNode(leaf bool, data int32) int32 {
+	if n := int64(len(t.nodes)+1) * qnodeBytes; n > t.held && t.err == nil {
+		// charge ahead, doubling: the arena is kept for the simulation
+		grow := max(n, 2*t.held) - t.held
+		if err := t.led.Alloc(grow); err != nil {
+			t.err = err
+		} else {
+			t.held += grow
+		}
+	}
 	t.nodes = append(t.nodes, qnode{leaf: leaf, data: data})
 	return int32(len(t.nodes) - 1)
 }
 
-// build indexes the points (xs[i], ys[i]) for i in [0,len(xs)). Points with a
-// non-finite coordinate are ignored: d3 skips NaN, and an infinite coordinate
-// would make its extent-doubling loop run forever.
-func (t *quadtree) build(xs, ys []float64) {
+// build indexes the points (xs[i], ys[i]) for i in [0,len(xs)). Points with
+// a NaN coordinate are skipped, as d3 skips them; an infinite coordinate is
+// errInfiniteNode, where d3's extent-doubling loop runs forever (ADR 0011).
+// The arena is charged to the ledger before it grows.
+func (t *quadtree) build(xs, ys []float64) error {
 	t.reset()
 	t.xs, t.ys = xs, ys
 	x0, y0 := math.Inf(1), math.Inf(1)
 	x1, y1 := math.Inf(-1), math.Inf(-1)
 	for i := range xs {
 		x, y := xs[i], ys[i]
-		if !finite(x) || !finite(y) {
+		if math.IsNaN(x) || math.IsNaN(y) {
 			continue
+		}
+		if math.IsInf(x, 0) || math.IsInf(y, 0) {
+			return errInfiniteNode
 		}
 		x0, x1 = math.Min(x0, x), math.Max(x1, x)
 		y0, y1 = math.Min(y0, y), math.Max(y1, y)
 	}
 	if x0 > x1 || y0 > y1 {
-		return
+		return nil
 	}
 	t.cover(x0, y0)
 	t.cover(x1, y1)
 	for i := range xs {
-		if finite(xs[i]) && finite(ys[i]) {
+		if t.err != nil {
+			return t.err
+		}
+		if !math.IsNaN(xs[i]) && !math.IsNaN(ys[i]) {
 			t.add(int32(i))
 		}
 	}
+	return t.err
 }
 
-func finite(f float64) bool { return !math.IsNaN(f) && !math.IsInf(f, 0) }
+var errQuadDepth = errors.New("force: quadtree deeper than any two distinct points need")
 
 func b2i(b bool) int {
 	if b {
@@ -182,8 +221,10 @@ func (t *quadtree) add(d int32) {
 			t.nodes[parent].child[i] = leaf
 			return
 		}
-		if depth > maxQuadDepth {
-			// Indistinguishable at this resolution: treat as coincident.
+		if depth > maxQuadDepth || t.err != nil {
+			if t.err == nil {
+				t.err = errQuadDepth
+			}
 			t.nodes[parent].child[i] = leaf
 			t.nodes[leaf].next = node
 			return

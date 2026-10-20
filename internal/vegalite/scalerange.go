@@ -50,7 +50,7 @@ func parseRangeForChannel(channel string, u *unitModel) withExplicit {
 	specifiedScale := u.specifiedScales.Lookup(channel)
 	size := u.size
 	merged := u.getScaleComponent(channel)
-	scaleType := merged.get("type").AsString()
+	scaleType := merged.get("type")
 	for _, property := range []string{"range", "scheme"} {
 		if sv := specifiedScale.Get(property); !sv.IsUndefined() {
 			supported := scaleTypeSupportProperty(scaleType, property)
@@ -104,7 +104,7 @@ func parseRangeForChannel(channel string, u *unitModel) withExplicit {
 			if channel == chXOffset {
 				positionChannel = chX
 			}
-			if mustScale(u.getScaleComponent(positionChannel)).get("type").AsString() == "band" {
+			if strIs(mustScale(u.getScaleComponent(positionChannel)).get("type"), "band") {
 				if step := getOffsetStep(sizeValue, scaleType); step.IsTruthy() {
 					return makeExplicit(step)
 				}
@@ -128,7 +128,7 @@ func parseScheme(cc *compileCtx, scheme Value) Value {
 	return mkv("scheme", scheme)
 }
 
-func fullWidthOrHeightRange(channel string, m *unitModel, scaleType string, center bool) Value {
+func fullWidthOrHeightRange(channel string, m *unitModel, scaleType Value, center bool) Value {
 	sizeType := getSizeChannel(channel)
 	sizeSignal := m.getName(sizeType)
 	sn := func(name string) string { return m.getSignalName(name) }
@@ -151,12 +151,12 @@ func defaultRange(channel string, u *unitModel) Value {
 	size, config, mark, encoding := u.size, u.config, u.mark(), u.encoding
 	typ := channelDefType(getFieldOrDatumDef(cc, encoding.Get(channel)))
 	merged := u.getScaleComponent(channel)
-	scaleType := merged.get("type").AsString()
+	scaleType := merged.get("type")
 	spec := u.specifiedScales.Lookup(channel)
 	domain, domainMid := spec.Get("domain"), spec.Get("domainMid")
 	switch channel {
 	case chX, chY:
-		if scaleType == "point" || scaleType == "band" {
+		if strIn(scaleType, "point", "band") {
 			positionSize := getDiscretePositionSize(cc, channel, size, config.Get("view"))
 			if isStep(positionSize) {
 				return mkv("step", getPositionStep(positionSize, u, channel))
@@ -198,7 +198,7 @@ func defaultRange(channel string, u *unitModel) Value {
 	case chShape:
 		return jsval.Str("symbol")
 	case chColor, chFill, chStroke:
-		if scaleType == "ordinal" {
+		if strIs(scaleType, "ordinal") {
 			if typ == "nominal" {
 				return jsval.Str("category")
 			}
@@ -207,7 +207,7 @@ func defaultRange(channel string, u *unitModel) Value {
 		if !domainMid.IsUndefined() {
 			return jsval.Str("diverging")
 		}
-		if mark == "rect" || mark == "geoshape" {
+		if strIn(mark, "rect", "geoshape") {
 			return jsval.Str("heatmap")
 		}
 		return jsval.Str("ramp")
@@ -217,14 +217,16 @@ func defaultRange(channel string, u *unitModel) Value {
 	return undef
 }
 
-func getStepFor(step Value, offsetIsDiscrete bool) string {
+// getStepFor is step.for ?? 'offset' (for a discrete offset), as given:
+// upstream compares it with ===, so ["offset"] is neither.
+func getStepFor(step Value, offsetIsDiscrete bool) Value {
 	if offsetIsDiscrete {
 		if f := step.Get("for"); !f.IsNullish() {
-			return f.AsString()
+			return f
 		}
-		return "offset"
+		return jsval.Str("offset")
 	}
-	return "position"
+	return jsval.Str("position")
 }
 
 func getPositionStep(step Value, u *unitModel, channel string) Value {
@@ -235,11 +237,11 @@ func getPositionStep(step Value, u *unitModel, channel string) Value {
 	offsetChannel := getOffsetScaleChannel(channel)
 	offsetDef := encoding.Get(offsetChannel)
 	stepFor := getStepFor(step, isFieldOrDatumDef(cc, offsetDef) && isDiscreteType(channelDefType(offsetDef)))
-	if stepFor == "offset" && channelHasFieldOrDatum(cc, encoding, offsetChannel) {
+	if strIs(stepFor, "offset") && channelHasFieldOrDatum(cc, encoding, offsetChannel) {
 		offsetCmpt := mustScale(u.getScaleComponent(offsetChannel))
 		offsetScaleName := u.scaleName(offsetChannel, false)
 		stepCount := "domain('" + offsetScaleName + "').length"
-		if offsetCmpt.get("type").AsString() == "band" {
+		if strIs(offsetCmpt.get("type"), "band") {
 			inner := coalesce(offsetCmpt.get("paddingInner"), offsetCmpt.get("padding"), jsval.Int(0))
 			outer := coalesce(offsetCmpt.get("paddingOuter"), offsetCmpt.get("padding"), jsval.Int(0))
 			stepCount = "bandspace(" + stepCount + ", " + inner.AsString() + ", " + outer.AsString() + ")"
@@ -250,14 +252,14 @@ func getPositionStep(step Value, u *unitModel, channel string) Value {
 	return step.Get("step")
 }
 
-func getOffsetStep(step Value, offsetScaleType string) Value {
-	if getStepFor(step, hasDiscreteDomain(offsetScaleType)) == "offset" {
+func getOffsetStep(step Value, offsetScaleType Value) Value {
+	if strIs(getStepFor(step, hasDiscreteDomain(offsetScaleType)), "offset") {
 		return mkv("step", step.Get("step"))
 	}
 	return undef
 }
 
-func getOffsetRange(channel string, u *unitModel, offsetScaleType string) Value {
+func getOffsetRange(channel string, u *unitModel, offsetScaleType Value) Value {
 	cc := u.b().ctx
 
 	positionChannel := chY
@@ -271,10 +273,10 @@ func getOffsetRange(channel string, u *unitModel, offsetScaleType string) Value 
 		}
 		return fullWidthOrHeightRange(positionChannel, u, offsetScaleType, true)
 	}
-	positionScaleType := pc.get("type").AsString()
+	positionScaleType := pc.get("type")
 	positionScaleName := u.scaleName(positionChannel, false)
 	markDef, config := u.markDef, u.config
-	if positionScaleType == "band" {
+	if strIs(positionScaleType, "band") {
 		size := getDiscretePositionSize(cc, positionChannel, u.size, u.config.Get("view"))
 		if isStep(size) {
 			if step := getOffsetStep(size, offsetScaleType); step.IsTruthy() {
@@ -335,8 +337,8 @@ func getDiscretePositionSize(cc *compileCtx, channel string, size *Object, view 
 	return getViewConfigDiscreteSize(view, sizeChannel)
 }
 
-func defaultContinuousToDiscreteCount(cc *compileCtx, scaleType string, config Value, domain Value, channel string) Value {
-	switch scaleType {
+func defaultContinuousToDiscreteCount(cc *compileCtx, scaleType Value, config Value, domain Value, channel string) Value {
+	switch s, _ := scaleType.Strict(); s {
 	case "quantile":
 		return config.Get("scale").Get("quantileCount")
 	case "quantize":
@@ -364,9 +366,9 @@ func interpolateRange(ctx *compileCtx, rangeMin, rangeMax, cardinality Value) Va
 	return sig(f())
 }
 
-func sizeRangeMin(mark string, config Value) Value {
+func sizeRangeMin(mark Value, config Value) Value {
 	sc := config.Get("scale")
-	switch mark {
+	switch s, _ := mark.Strict(); s {
 	case "bar", "tick":
 		return sc.Get("minBandSize")
 	case "line", "trail", "rule":
@@ -376,14 +378,14 @@ func sizeRangeMin(mark string, config Value) Value {
 	case "point", "square", "circle":
 		return sc.Get("minSize")
 	}
-	throw("Invalid channel size for mark %s.", mark)
+	throw("size dropped as it is incompatible with \"%s\".", mark.AsString()) // log.message.incompatibleChannel
 	return undef
 }
 
-func sizeRangeMax(mark string, size *Object, u *unitModel, config Value) Value {
+func sizeRangeMax(mark Value, size *Object, u *unitModel, config Value) Value {
 	sc := config.Get("scale")
 	xy := [2]Value{getBinStepSignal(u, chX), getBinStepSignal(u, chY)}
-	switch mark {
+	switch s, _ := mark.Strict(); s {
 	case "bar", "tick":
 		if !sc.Get("maxBandSize").IsUndefined() {
 			return sc.Get("maxBandSize")
@@ -409,7 +411,7 @@ func sizeRangeMax(mark string, size *Object, u *unitModel, config Value) Value {
 			return "pow(" + jsval.JSNumberString(maxSizeRangeStepRatio) + " * " + signalOf(pointStep) + ", 2)"
 		})
 	}
-	throw("Invalid channel size for mark %s.", mark)
+	throw("size dropped as it is incompatible with \"%s\".", mark.AsString()) // log.message.incompatibleChannel
 	return undef
 }
 

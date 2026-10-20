@@ -134,7 +134,7 @@ func (s *pathString) LineEnd() {
 	}
 	s.point = 2
 }
-func (s *pathString) Sphere() {}
+func (s *pathString) Sphere() { sphereUnsupported() }
 
 func (s *pathString) Point(x, y float64) {
 	switch s.point {

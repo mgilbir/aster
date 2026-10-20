@@ -4,9 +4,8 @@ import (
 	"math"
 	"strings"
 
-	pdf0 "github.com/mgilbir/pdf0"
-
 	"github.com/mgilbir/aster/internal/csscolor"
+	pdf0 "github.com/mgilbir/pdf0"
 )
 
 // Links. Vega wraps a mark with an href in <a xlink:href="…">. Its contents

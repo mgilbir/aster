@@ -1,6 +1,10 @@
 package hierarchy
 
-import "math"
+import (
+	"math"
+
+	"github.com/mgilbir/aster/internal/budget"
+)
 
 // separation gives the spacing between adjacent nodes.
 type separation func(a, b *Node) float64
@@ -46,14 +50,30 @@ func (t *tidyNode) nextRight() *tidyNode {
 	return t.thread
 }
 
-// tidy is d3.tree(): Reingold-Tilford layout in linear time.
-func tidy(root *Node, sep separation, sz sizing) {
+// tidy is d3.tree(): Reingold-Tilford layout in linear time. Every node of
+// every pass, and every step of the contours apportion walks, is a step of
+// work charged to m: a tree of MaxNodes takes seconds, which the deadline
+// must be able to end.
+func tidy(m *budget.Meter, root *Node, sep separation, sz sizing) error {
 	pre := make([]*Node, 0, 16)
 	root.eachBefore(func(n *Node) { pre = append(pre, n) })
-	for _, n := range pre {
+	// each loop below is a pass over the nodes, charged a batch at a time
+	step := func(i int) error {
+		if i&1023 == 0 {
+			return m.Work(int64(min(1024, len(pre)-i)))
+		}
+		return nil
+	}
+	for i, n := range pre {
+		if err := step(i); err != nil {
+			return err
+		}
 		n.tn = &tidyNode{n: n}
 	}
-	for _, n := range pre {
+	for i, n := range pre {
+		if err := step(i); err != nil {
+			return err
+		}
 		t := n.tn
 		t.anc = t
 		if len(n.Children) > 0 {
@@ -72,24 +92,40 @@ func tidy(root *Node, sep separation, sz sizing) {
 	t.parent = phantom
 
 	post := root.postOrder()
-	for _, n := range post {
-		firstWalk(n.tn, sep)
+	for i, n := range post {
+		if i&1023 == 0 {
+			if err := m.Work(int64(min(1024, len(post)-i))); err != nil {
+				return err
+			}
+		}
+		if err := firstWalk(m, n.tn, sep); err != nil {
+			return err
+		}
 	}
 	phantom.m = -t.z
-	for _, n := range pre {
+	for i, n := range pre {
+		if err := step(i); err != nil {
+			return err
+		}
 		v := n.tn
 		v.n.X = v.z + v.parent.m
 		v.m += v.parent.m
 	}
 
 	if sz.nodeSize {
-		for _, n := range pre {
+		for i, n := range pre {
+			if err := step(i); err != nil {
+				return err
+			}
 			n.X *= sz.dx
 			n.Y = float64(n.Depth) * sz.dy
 		}
 	} else {
 		left, right, bottom := root, root, root
-		for _, n := range pre {
+		for i, n := range pre {
+			if err := step(i); err != nil {
+				return err
+			}
 			if n.X < left.X {
 				left = n
 			}
@@ -111,7 +147,10 @@ func tidy(root *Node, sep separation, sz sizing) {
 			by = 1
 		}
 		ky := sz.dy / by
-		for _, n := range pre {
+		for i, n := range pre {
+			if err := step(i); err != nil {
+				return err
+			}
 			n.X = (n.X + tx) * kx
 			n.Y = float64(n.Depth) * ky
 		}
@@ -119,9 +158,10 @@ func tidy(root *Node, sep separation, sz sizing) {
 	for _, n := range pre {
 		n.tn = nil
 	}
+	return nil
 }
 
-func firstWalk(v *tidyNode, sep separation) {
+func firstWalk(m *budget.Meter, v *tidyNode, sep separation) error {
 	siblings := v.parent.children
 	var w *tidyNode
 	if v.i > 0 {
@@ -143,7 +183,9 @@ func firstWalk(v *tidyNode, sep separation) {
 	if anc == nil {
 		anc = siblings[0]
 	}
-	v.parent.ancDef = apportion(v, w, anc, sep)
+	var err error
+	v.parent.ancDef, err = apportion(m, v, w, anc, sep)
+	return err
 }
 
 func executeShifts(v *tidyNode) {
@@ -173,9 +215,11 @@ func nextAncestor(vim, v, ancestor *tidyNode) *tidyNode {
 	return ancestor
 }
 
-func apportion(v, w, ancestor *tidyNode, sep separation) *tidyNode {
+// apportion walks the contours of v's subtree and its left siblings', a
+// step of work each (the walks are linear in the tree in total).
+func apportion(m *budget.Meter, v, w, ancestor *tidyNode, sep separation) (*tidyNode, error) {
 	if w == nil {
-		return ancestor
+		return ancestor, nil
 	}
 	vip, vop, vim := v, v, w
 	vom := vip.parent.children[0]
@@ -185,6 +229,9 @@ func apportion(v, w, ancestor *tidyNode, sep separation) *tidyNode {
 		vip = vip.nextLeft()
 		if vim == nil || vip == nil {
 			break
+		}
+		if err := m.Work(1); err != nil {
+			return nil, err
 		}
 		vom = vom.nextLeft()
 		vop = vop.nextRight()
@@ -209,14 +256,22 @@ func apportion(v, w, ancestor *tidyNode, sep separation) *tidyNode {
 		vom.m += sip - som
 		ancestor = v
 	}
-	return ancestor
+	return ancestor, nil
 }
 
 // cluster is d3.cluster(): the dendrogram layout, all leaves at one depth.
-func cluster(root *Node, sep separation, sz sizing) {
+// Each node of each pass is a step of work charged to m.
+func cluster(m *budget.Meter, root *Node, sep separation, sz sizing) error {
 	var previous *Node
 	x := 0.0
+	var err error
 	root.eachAfter(func(n *Node) {
+		if err != nil {
+			return
+		}
+		if err = m.Work(1); err != nil {
+			return
+		}
 		if len(n.Children) > 0 {
 			sum, maxY := 0.0, 0.0
 			for _, c := range n.Children {
@@ -243,9 +298,18 @@ func cluster(root *Node, sep separation, sz sizing) {
 	for len(right.Children) > 0 {
 		right = right.Children[len(right.Children)-1]
 	}
+	if err != nil {
+		return err
+	}
 	x0 := left.X - sep(left, right)/2
 	x1 := right.X + sep(right, left)/2
 	root.eachAfter(func(n *Node) {
+		if err != nil {
+			return
+		}
+		if err = m.Work(1); err != nil {
+			return
+		}
 		if sz.nodeSize {
 			n.X = (n.X - root.X) * sz.dx
 			n.Y = (root.Y - n.Y) * sz.dy
@@ -258,4 +322,5 @@ func cluster(root *Node, sep separation, sz sizing) {
 		n.X = (n.X - x0) / (x1 - x0) * sz.dx
 		n.Y = (1 - ny) * sz.dy
 	})
+	return err
 }

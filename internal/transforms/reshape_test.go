@@ -167,8 +167,11 @@ func TestPivotGolden(t *testing.T) {
 				GroupBy: fieldList(s.Get("groupby")),
 				Field:   FieldOf(s.Get("field").StrValue()),
 				Value:   FieldOf(s.Get("value").StrValue()),
-				Op:      s.Get("op").StrValue(),
-				Limit:   int(s.Get("limit").NumValue()),
+				Op:      pivotGoldenOp(s.Get("op").StrValue()),
+			}
+			if l := s.Get("limit"); l.IsTruthy() {
+				n := jsval.ToNumber(l)
+				p.Limit = &n
 			}
 			got, err := Pivot(context.Background(), cloneTuples(c.Input), p)
 			reshapeCheck(t, c, got, err)
@@ -325,7 +328,9 @@ func rawField(t *testing.T, name, field string) jsval.Value {
 	t.Helper()
 	for _, c := range loadRaw(t, "reshape.json").Items() {
 		if c.Get("name").StrValue() == name {
-			return c.Get(field)
+			// In lib.mjs's dialect: undefined is {"$":"undef"}, which an
+			// older lib.mjs wrote as null.
+			return decodeDialect(c.Get(field))
 		}
 	}
 	t.Fatal("no case " + name)
@@ -387,3 +392,12 @@ func BenchmarkLookup(b *testing.B) {
 }
 
 func readTestdata(file string) ([]byte, error) { return os.ReadFile(filepath.Join("testdata", file)) }
+
+// pivotGoldenOp is the op the runtime hands Pivot for a pivot's op: the
+// string "count" is upstream's internal __count__.
+func pivotGoldenOp(op string) string {
+	if op == "count" {
+		return "__count__"
+	}
+	return op
+}

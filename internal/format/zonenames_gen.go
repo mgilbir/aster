@@ -4,7 +4,7 @@
 // testdata/gen_zonenames.mjs (samples mode), on a host whose zoneinfo is the
 // tzdata release node's ICU carries:
 //
-//	node testdata/gen_zonenames.mjs /usr/share/zoneinfo/tzdata.zi samples > /tmp/samples.json
+//	node testdata/gen_zonenames.mjs testdata/tzdata.zi samples > /tmp/samples.json
 //	go run zonenames_gen.go /tmp/samples.json
 //
 // V8 prints ICU's long name of a zone's current metazone, the daylight one

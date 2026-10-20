@@ -6,6 +6,7 @@ import (
 
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
+	"github.com/mgilbir/aster/internal/testutil"
 )
 
 func evalBudget(t *testing.T, src string, b *StringBudget) (jsval.Value, error) {
@@ -103,6 +104,29 @@ func TestStringOfArrayChargedOnce(t *testing.T) {
 		}
 		if used := int64(1<<20) - s.Strings.left; used > 4*2*105_000 {
 			t.Errorf("%s: charged %d bytes for about %d", src, used, 105_000)
+		}
+	}
+}
+
+// timeSequence charges each date it adds to its array before it makes the
+// next (C106): a sequence past the string budget stops when the budget is
+// spent, having allocated about what it was allowed, where it once built
+// every date first (32 MB for four million) and charged the array after.
+func TestTimeSequenceChargedAsItGrows(t *testing.T) {
+	const budgetBytes = 1 << 20
+	for _, src := range []string{
+		"timeSequence('milliseconds', 0, 4e6)",
+		"utcSequence('milliseconds', 0, 4e6)",
+	} {
+		var err error
+		got := allocated(func() { _, err = evalBudget(t, src, NewStringBudget(budgetBytes)) })
+		if !errors.Is(err, budget.ErrLimit) {
+			t.Fatalf("%s: err = %v, want ErrLimit", src, err)
+		}
+		// The array is charged as it doubles (at most twice its length) and
+		// the copy it grows from is garbage: a few times the budget.
+		if !testutil.RaceEnabled && got > 4*budgetBytes {
+			t.Errorf("%s under a %d-byte budget allocated %d bytes", src, budgetBytes, got)
 		}
 	}
 }

@@ -2,7 +2,6 @@ package raster
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -41,7 +40,7 @@ type FontRequest struct {
 	// Families is the font-family list in order, unquoted; generic families
 	// ("sans-serif", "serif", ...) appear by name.
 	Families []string
-	Weight   int // 100..900
+	Weight   int // 1..1000 (text.ParseFontWeight)
 	Italic   bool
 }
 
@@ -72,13 +71,16 @@ type FontData struct {
 type textShaper struct {
 	m     *text.Measurer
 	known map[string]bool // lower-case family names that exist
-	faces *faceCache      // shared with the shaper's bound views
+	last  *knownMemo      // shared with the shaper's bound views
 }
 
-// faceCache maps the measurer's faces to the Face each is drawn through.
-type faceCache struct {
-	mu sync.Mutex
-	m  map[*text.Face]*textFace
+// knownMemo is anyKnown's answer for the family list asked last: a <text>
+// shapes run after run in its element's list, which the document may make
+// long, and each run would read it again.
+type knownMemo struct {
+	sync.Mutex
+	families []string
+	known    bool
 }
 
 // BoundShaper returns s shaping under b (see text.ShapingBudget) when s is
@@ -89,7 +91,7 @@ func BoundShaper(s Shaper, b *text.ShapingBudget) Shaper {
 	if !ok || b == nil {
 		return s
 	}
-	return &textShaper{m: ts.m.Bounded(b), known: ts.known, faces: ts.faces}
+	return &textShaper{m: ts.m.Bounded(b), known: ts.known, last: ts.last}
 }
 
 var builtinFamilies = []string{
@@ -119,7 +121,7 @@ func NewShaper(fonts ...FontData) (Shaper, error) {
 	if err != nil {
 		return nil, fmt.Errorf("raster: creating text shaper: %w", err)
 	}
-	return &textShaper{m: m, known: known, faces: &faceCache{m: map[*text.Face]*textFace{}}}, nil
+	return &textShaper{m: m, known: known, last: &knownMemo{}}, nil
 }
 
 // NewShaperWithOptions returns a Shaper over a text.Measurer built from opts,
@@ -143,7 +145,7 @@ func NewShaperWithOptions(opts ...text.Option) (Shaper, error) {
 // built with; build it with text.WithExactAdvances for resvg-identical
 // placement. Family resolution is entirely the measurer's.
 func NewShaperFromMeasurer(m *text.Measurer) Shaper {
-	return &textShaper{m: m, faces: &faceCache{m: map[*text.Face]*textFace{}}}
+	return &textShaper{m: m}
 }
 
 var defaultShaper struct {
@@ -157,48 +159,26 @@ func getDefaultShaper() (Shaper, error) {
 	return defaultShaper.s, defaultShaper.err
 }
 
-// familyUnquote strips quotes from a font-family name and turns commas into
-// spaces; a Replacer is safe for concurrent use and costly to build.
-var familyUnquote = strings.NewReplacer("'", "", "\"", "", ",", " ")
-
 func (s *textShaper) Shape(txt string, req FontRequest, size float64) []ShapedGlyph {
 	if size <= 0 || txt == "" {
 		return nil
 	}
-	fams := make([]string, 0, len(req.Families))
-	found := false
-	for _, f := range req.Families {
-		f = familyUnquote.Replace(f)
-		if f = strings.TrimSpace(f); f == "" {
-			continue
-		}
-		fams = append(fams, "'"+f+"'")
-		if s.known == nil || s.known[csscolor.ASCIILower(f)] {
-			found = true
-		}
+	// The font as the element states it, read by the text package as the
+	// PDF writer reads it, and resolved to faces as layout resolves the
+	// font it measured with: never through a font string to be read back,
+	// so the weight is the element's own (C31).
+	families := req.Families
+	if s.known != nil && !s.anyKnown(families) {
+		families = serif
 	}
-	if !found {
-		fams = []string{"serif"}
-	}
-	w := (req.Weight + 50) / 100 * 100
-	if w < 100 {
-		w = 100
-	} else if w > 900 {
-		w = 900
-	}
-	css := ""
-	if req.Italic {
-		css = "italic "
-	}
-	css += strconv.Itoa(w) + " " + strconv.FormatFloat(size, 'f', -1, 64) + "px " + strings.Join(fams, ",")
-	runs, _ := s.m.ShapeText(txt, css)
+	runs, _ := s.m.ShapeFont(txt, text.CSSFont{Italic: req.Italic, Weight: req.Weight, Size: size, Family: families})
 	n := 0
 	for _, r := range runs {
 		n += len(r.Glyphs)
 	}
 	out := make([]ShapedGlyph, 0, n)
 	for _, r := range runs {
-		face := s.face(r.Face)
+		face := faceOf(r.Face)
 		k := 1.0
 		if r.ShapedSize > 0 {
 			k = r.Size / r.ShapedSize
@@ -210,16 +190,49 @@ func (s *textShaper) Shape(txt string, req FontRequest, size float64) []ShapedGl
 	return out
 }
 
-func (s *textShaper) face(f *text.Face) *textFace {
-	s.faces.mu.Lock()
-	defer s.faces.mu.Unlock()
-	if tf, ok := s.faces.m[f]; ok {
-		return tf
+// serif is the family list of text NewShaper's shaper draws when its list
+// names no registered family, as resvg does.
+var serif = []string{"serif"}
+
+// anyKnown reports whether one of the families the text package considers
+// (the first text.MaxFamilies) is registered.
+func (s *textShaper) anyKnown(families []string) bool {
+	if len(families) == 0 {
+		return false
 	}
-	tf := &textFace{f: f}
-	s.faces.m[f] = tf
-	return tf
+	s.last.Lock()
+	defer s.last.Unlock()
+	if len(s.last.families) == len(families) && &s.last.families[0] == &families[0] {
+		return s.last.known
+	}
+	s.last.families, s.last.known = families, s.findKnown(families)
+	return s.last.known
 }
+
+// findKnown is anyKnown, read.
+func (s *textShaper) findKnown(families []string) bool {
+	for i, f := range families {
+		if i == text.MaxFamilies {
+			break
+		}
+		if s.known[csscolor.ASCIILower(strings.TrimSpace(f))] {
+			return true
+		}
+	}
+	return false
+}
+
+// faceOf is the Face f is drawn through. It is kept with f (text.Face.Annex)
+// rather than in a cache of this package keyed by f, so that it goes when
+// the Measurer drops f (a system face past its bound) instead of keeping it
+// and its tables for the life of the converter (C27); and it is one value
+// per face, which the outline caches key on.
+func faceOf(f *text.Face) *textFace {
+	return f.Annex(textFaceKey{}, func() any { return &textFace{f: f} }).(*textFace)
+}
+
+// textFaceKey is the key this package's Face of a text.Face is kept under.
+type textFaceKey struct{}
 
 type textFace struct {
 	f    *text.Face
@@ -318,4 +331,14 @@ func closeContours(p *path) *path {
 		out.verbs = append(out.verbs, vClose)
 	}
 	return out
+}
+
+// TextFace is the face of the text package a Face made by this package's
+// shapers draws from.
+func TextFace(f Face) (*text.Face, bool) {
+	tf, ok := f.(*textFace)
+	if !ok {
+		return nil, false
+	}
+	return tf.f, true
 }

@@ -64,7 +64,7 @@ func findSource(cc *compileCtx, data Value, sources []dfNode) *sourceNode {
 		}
 		switch {
 		case isInlineData(data) && isInlineData(otherData):
-			if deepEqual(data.Get("values"), otherData.Get("values")) {
+			if deepEqual(cc, data.Get("values"), otherData.Get("values")) {
 				return os
 			}
 		case isUrlData(data) && isUrlData(otherData):
@@ -196,7 +196,7 @@ func parseTransformArray(head dfNode, m Model, ap *ancestorParse) dfNode {
 			field := t.Get("field").AsString()
 			if ap.getWithExplicit(field).value.IsUndefined() {
 				head = newParseNode(head, mk(field, derivedType))
-				ap.set(field, jsval.Str(derivedType), false)
+				ap.set(cc, field, jsval.Str(derivedType), false)
 			}
 			n := makeTimeUnitFromTransform(cc, head, t)
 			head, transformNode = n, n
@@ -259,9 +259,11 @@ func parseTransformArray(head dfNode, m Model, ap *ancestorParse) dfNode {
 		}
 		adoptCC(head, cc)
 		if transformNode != nil && derivedType != "" {
-			for _, field := range transformNode.producedFields().list() {
+			// ancestorParse.set(field, ...): each member as a property key,
+			// so "a" and ["a"] set the one key.
+			for _, field := range transformNode.producedFields().values() {
 				cc.work(1)
-				ap.set(field, jsval.Str(derivedType), false)
+				ap.set(cc, propKey(cc, field), jsval.Str(derivedType), false)
 			}
 		}
 	}
@@ -360,7 +362,7 @@ func getImplicitFromEncoding(m Model) *Object {
 		})
 	}
 	if u := asUnit(m); u != nil {
-		if isPathMarkName(u.mark()) && !u.encoding.Get("order").IsTruthy() {
+		if isPathMark(u.mark()) && !u.encoding.Get("order").IsTruthy() {
 			dim := chX
 			if markDefOrient(u.markDef) == "horizontal" {
 				dim = chY
@@ -517,8 +519,8 @@ func parseDataFor(m Model) *dataComponent {
 			adoptCC(head, cc)
 		}
 	} else if u != nil {
-		invalid := getMarkPropOrConfigSimple("invalid", u.markDef, u.config)
-		marksMode, scalesMode = getDataSourcesForHandlingInvalidValues(invalid, isPathMarkName(u.mark()))
+		invalid := getMarkPropOrConfigSimple(u.ctx, "invalid", u.markDef, u.config)
+		marksMode, scalesMode = getDataSourcesForHandlingInvalidValues(invalid, isPathMark(u.mark()))
 		if marksMode != scalesMode && scalesMode == "include-invalid-values" {
 			preFilterInvalid = makeOutputNode(dsPreFilterInvalid, m, head)
 			head = preFilterInvalid
@@ -639,11 +641,11 @@ func getScaleDataSourceForHandlingInvalidValues(invalid Value, isPath bool) data
 	return dsPostFilterInvalid
 }
 
-func getScaleInvalidDataMode(markDef, config Value, scaleChannel, scaleType string, isCountAggregate bool) string {
-	if scaleType == "" || !hasContinuousDomain(scaleType) || isCountAggregate {
+func getScaleInvalidDataMode(cc *compileCtx, markDef, config Value, scaleChannel string, scaleType Value, isCountAggregate bool) string {
+	if !scaleType.IsTruthy() || !hasContinuousDomain(scaleType) || isCountAggregate {
 		return "always-valid"
 	}
-	invalidMode := normalizeInvalidDataMode(getMarkPropOrConfigSimple("invalid", markDef, config), isPathMarkName(markDef.Get("type").AsString()))
+	invalidMode := normalizeInvalidDataMode(getMarkPropOrConfigSimple(cc, "invalid", markDef, config), isPathMark(markDef.Get("type")))
 	if !config.Get("scale").Get("invalid").Get(scaleChannel).IsUndefined() {
 		return "show"
 	}

@@ -1,0 +1,1 @@
+{"width":120,"height":60,"data":[{"name":"t","values":[{"grid":{"width":2,"height":1,"values":[1,2]}}],"transform":[{"type":"heatmap","field":"grid","opacity":{}}]}],"marks":[{"type":"image","from":{"data":"t"},"encode":{"enter":{"image":{"field":"image"},"width":{"value":20},"height":{"value":10},"smooth":{"value":false}}}}]}

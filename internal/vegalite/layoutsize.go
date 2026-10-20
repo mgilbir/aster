@@ -150,7 +150,7 @@ func defaultUnitSize(u *unitModel, sizeType string) Value {
 	config := u.config
 	sc := u.getScaleComponent(channel)
 	if sc != nil {
-		scaleType := sc.get("type").AsString()
+		scaleType := sc.get("type")
 		rng := sc.get("range")
 		if hasDiscreteDomain(scaleType) {
 			size := getViewConfigDiscreteSize(config.Get("view"), sizeType)
@@ -160,7 +160,7 @@ func defaultUnitSize(u *unitModel, sizeType string) Value {
 			return size
 		}
 		return getViewConfigContinuousSize(config.Get("view"), sizeType)
-	} else if u.hasProjection() || u.mark() == "arc" {
+	} else if u.hasProjection() || strIs(u.mark(), "arc") {
 		return getViewConfigContinuousSize(config.Get("view"), sizeType)
 	}
 	size := getViewConfigDiscreteSize(config.Get("view"), sizeType)
@@ -196,7 +196,7 @@ func sizeSignals(m Model, sizeType string) []Value {
 	if size.IsStr() && size.StrValue() == "step" {
 		sc := b.getScaleComponent(channel)
 		if sc != nil {
-			typ, rng := sc.get("type").AsString(), sc.get("range")
+			typ, rng := sc.get("type"), sc.get("range")
 			if hasDiscreteDomain(typ) && isVgRangeStep(m.b().ctx, rng) {
 				scaleName := b.scaleName(channel, false)
 				if b.parent != nil && isFacetModel(b.parent) {
@@ -211,7 +211,7 @@ func sizeSignals(m Model, sizeType string) []Value {
 			}
 		}
 		throw("layout size is step although width/height is not step.")
-	} else if size.IsStr() && size.StrValue() == "container" {
+	} else if looseEq(size, "container") { // size == 'container'
 		isWidth := strings.HasSuffix(name, "width")
 		expr := "containerSize()[1]"
 		ch := "height"
@@ -234,11 +234,11 @@ func stepSignal(cc *compileCtx, scaleName string, rng Value) Value {
 }
 
 func sizeExpr(cc *compileCtx, scaleName string, sc *scaleComponent, cardinality string) string {
-	typ := sc.get("type").AsString()
+	typ := sc.get("type")
 	padding := sc.get("padding")
 	paddingOuter := firstDefined(sc.get("paddingOuter"), padding)
 	paddingInner := sc.get("paddingInner")
-	if typ == "band" {
+	if strIs(typ, "band") {
 		if paddingInner.IsUndefined() {
 			paddingInner = padding
 		}

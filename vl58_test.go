@@ -37,11 +37,15 @@ func TestVegaLite58MatchesNode(t *testing.T) {
 		if err != nil {
 			t.Fatalf("oracle: %v", err)
 		}
+		got, err := c.VegaLiteToVega(spec)
+		if isEngineBug(err) {
+			t.Errorf("%s: the engine panics: %v", name, err)
+			continue
+		}
 		if want.Err != "" {
 			t.Logf("%s: vega-lite 5.8.0: %s", name, firstLine(want.Err))
 			continue
 		}
-		got, err := c.VegaLiteToVega(spec)
 		if err != nil {
 			t.Errorf("%s: %v", name, err)
 			continue

@@ -1,0 +1,2 @@
+{"width": 60, "height": 40, "autosize": "pad", "marks": [{"type": "path", "encode": {"enter": {"x": {"value": "5"}, "y": {"value": 3}, "path": {"value": "M0,0L10,10"}, "scaleX": {"value": "1"}, "scaleY": {"value": {"a": 1}}, "stroke": {"value": "black"}}}},
+ {"type": "path", "encode": {"enter": {"x": {"value": 1}, "y": {"value": "2"}, "path": {"value": "M1,1L3,4"}, "stroke": {"value": "black"}}}}]}

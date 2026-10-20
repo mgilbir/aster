@@ -58,6 +58,15 @@ regular expression is `KindPattern` compiled with `github.com/mgilbir/goecma262`
   `Walker.Join` for `Array.prototype.join`; `PlainMap` for upstream's `{}`
   used as a map; `v.InternKey()` (d3's InternMap) or `v.MapKey()` (a `Map`)
   to key values by identity, never their text.
+- In the Vega-Lite compiler a specification's keyword (a mark or scale
+  type, an orient, a selection's type) stays a `Value` up to the site that
+  reads it, and the site reads it as upstream does there: `strIs`, `strIn`,
+  `setHas` for `===`, `switch`, `includes` and `Set.has`; `propKey` for
+  `obj[v]`; `tmpl` for a template literal; `looseEq` for `==`. An
+  undefined name is the key `"undefined"`, never `""`. Never compare a
+  value's text with a name: `TestKeywordsAreNotComparedAsText` fails on it
+  unless `internal/vegalite/testdata/keyword-text.allow` says why upstream
+  compares the text there ([ADR 0026](adr/0026-keywords-read-as-upstream-reads-them.md)).
 - A walk of a value (its String, JSON, stringValue, a deep or relational
   comparison, an elementwise interpolation) is made with the call's
   `jsval.Walker`, which the run's state carries (the view, its operators'
@@ -66,21 +75,77 @@ regular expression is `KindPattern` compiled with `github.com/mgilbir/goecma262`
   The detached forms (`AsString`, `jsval.Equal`, …) are for a
   specification's literals; `TestEngineWalksUseTheCallsWalker` holds every
   other use to a reviewed entry in `scripts/walk.allow`.
+- An expression function evaluates its arguments when and in the order
+  upstream's generated code does (vega-expression's code generators: `clamp`
+  evaluates lo, hi, then v; the date getters, `upper`, `lower`, `trim` and
+  `length` read only their first argument; `split`, `substring` and `test`
+  convert the first before they evaluate the rest; the event functions read
+  `event` first), compares its arguments as given where upstream does, and
+  answers for every kind of argument what upstream's answers. The builtins
+  differential (`internal/expr/testdata/gen_builtins.mjs`) checks each function
+  against upstream with nominal and edge arguments and with each argument
+  wrapped in `warn()`; a function without such cases fails
+  `TestBuiltinsDifferentialCoversEveryFunction`.
+- The members a built-in prototype holds (Object's, Array's, String's,
+  Number's, Boolean's, RegExp's, Date's, Function's), each with its function's
+  name and length, are one table, `jsval/protos.go`: `jsval.Member`, `Prop`,
+  `Inherited` and the evaluator's `in` operator all read it, and each member
+  is one shared inert function. `internal/jsval/testdata/gen_protonames.mjs`
+  records it from node and `TestPrototypeNamesMatchNode` checks it; only the
+  d3 colours' prototypes, which are the expression language's own, live in
+  `internal/expr/protos.go` (checked by `TestFunctionTable`). Never list a
+  prototype's members a second time.
+- A test fixture's encoding of what JSON cannot carry (the serialized
+  scenegraph's `{"$num": "Infinity"}`, `$gid`/`$gref` gradient identity and
+  recorded `{"path", "ops"}` generators) is read by its loader only
+  (`scene.FromJSON`), never where a live value is read: `Item.Set` reads a
+  value as JavaScript does, whatever keys an object a spec computes has
+  (`TestRecordingConventionsStayInTheLoader`).
 
 ### Tuples
 
-A datum is a `jsval.Value` of kind object. Identity is the
-`*jsval.Object` pointer. Transforms that derive new tuples create new objects;
+A datum is a `jsval.Value` of kind object. Its identity is its tuple id
+(`Object.TupleID`), given when it is ingested, as vega-dataflow's `tupleid`:
+where upstream keys tuples by id (a `modify()` or `setdata()` change set,
+`treelinks`, `isTuple`), so does the engine, never by the equality of fields.
+Ingest copies an object from outside the run and the copy keeps its id, so
+within one operator's flow the `*jsval.Object` pointer stands for the same
+tuple. Transforms that derive new tuples create new objects;
 transforms that annotate (formula, stack, window, …) write fields into the
 object they were given, as upstream does, so do not share one object between two
 unrelated datasets without copying.
+
+Tuples are sorted with `transforms.SortTuples`, which takes only an
+`IDStable` comparator (`StableComparator`, vega-dataflow's `stableCompare`):
+ties go by tuple id, the order of ingestion, as every sort of tuples upstream
+breaks them.
+
+### Transform parameters
+
+A transform reads its parameters as its upstream code reads them, never from
+the definition's defaults, which vega-parser does not apply: an absent
+parameter is `undefined`, and `_.x || d`, `_.x != null`, `_.x !== false`
+each read null, 0 and "" differently ([ADR 0028](adr/0028-transforms-read-their-parameters-as-upstreams-code.md)).
+`TestTransformsMatchNode` sweeps every parameter of every transform absent,
+null and falsy against node. Where upstream keeps a map keyed by data in a
+plain object, a key Object.prototype has finds its member there
+(`jsval.PlainMap`, the `inheritedKey` helpers): reproduce what that does.
 
 ### Errors, not panics
 
 Anything reachable from a specification returns an
 error or is reported; it never panics. A top-level `recover` in the
 public API converts an unexpected panic into an error, but relying on it is a
-bug.
+bug. In the root package it is `recoverStage`, which makes a stage's panic
+the stage's error through `stageErr`, so a bound or a deadline reached deep
+inside a stage is named as one returned would be.
+
+The caller's code (a Loader's methods, the error handler, a `WithSignal`
+value's `MarshalJSON`) is called only through `Converter.callback`: the one
+boundary that marks the goroutine as inside a call, for `Close`, and turns a
+panic in that code into its error, whatever goroutine runs it. A goroutine
+the library starts recovers a panic first thing, since no other recover
+reaches it. `TestPanicBoundaries` checks the three on the source ([ADR 0021](adr/0021-caller-code-behind-one-boundary.md)).
 
 What upstream logs and carries on past (a failed load, an operator's
 exception, a warning) is reported, never dropped: through the dataflow's
@@ -129,6 +194,20 @@ Specifications and data are untrusted.
   they allocate; `TestEveryBuiltinIsMetered` holds every function of the table
   to it. The rasterizer's
   canvas and pixel budgets, the shaping budget, the SVG size.
+- The expression environment (the methods of `internal/vega`'s `rtContext`
+  that `expr`'s interfaces name) is held to the same
+  ([ADR 0025](adr/0025-expression-environment-state-bounded-by-the-call.md)): a method that keeps
+  state for the call charges the ledger for it as it records it (a `modify()`
+  change set, given back once applied), an array it hands an expression past
+  256 elements is charged as the evaluator charges its own (`domain()`,
+  `gradient()`), and a value that stands for engine state (a shape generator,
+  a guide's operator reference) is a Go value on its object
+  (`jsval.HostFunction`, `Object.SetHost`): garbage once nothing refers to it,
+  and no JSON a specification or its data spell can stand for one.
+  `TestEveryEnvMethodIsMetered` enumerates the methods and calls each
+  repeatedly. Every dataflow operator polls through the rows it visits:
+  `TestEveryOperatorPollsThroughout` enumerates the operator registry, so a
+  new operator needs a case or a reason it visits no rows.
 - Every bound is derived from `WithMemoryLimit` in one function,
   `deriveLimits` (limits.go), and documented in [limits.md](limits.md), which
   `TestLimitsDocMatchesCode` checks.
@@ -154,18 +233,41 @@ Specifications and data are untrusted.
   `TestParsePollsThroughout`. JSON an input supplies (a specification, a
   `values` string, a loaded file) is parsed with `jsval.ParseJSONContext`,
   which polls as it reads.
+- The Vega-Lite compiler charges its memory to the call's ledger as well as
+  its work ([ADR 0019](adr/0019-vega-lite-compiler-byte-meter.md)). In
+  `internal/vegalite` a string whose length the specification controls is
+  built only through `sbuf` (a metered `strings.Builder`), `joinCC`,
+  `cc.cat` or `jsReplaceAll`, each charged before it allocates; no other
+  function holds a `strings.Builder`, joins or repeats a list, replaces with
+  a replacement that is not a constant, appends to a string in a loop or
+  dedupes a list by a scan in a loop, unless `TestNoUnmeteredBuilders`
+  allows it with why it is linear in one input. A copy or merge per child,
+  per node or per frame (an ancestor parse, a field set, a parse merged
+  into its parent, a union of domains) is made linear (shared until
+  written, merged in place on the larger side, extended in place) and
+  charged with `cc.alloc`; a new family of such copies gets a spec in
+  `complexitySpecs` and `TestCompileAllocGrowsLinearly`. What a view
+  compiles once per view it is copied into (the config, a layer's shared
+  encoding, the selections pushed into it) is weighed in `countViews`
+  before any view is built.
 - An input that once exhausted a bound goes into the bounded-input corpus
   (`testdata/security/bounded`, run by `TestBoundedInputs` in every test run;
   see [testing.md](testing.md#robustness)).
 - Nothing attacker-controlled is written raw into the SVG: every attribute and
   text goes through the escaping writer (which also drops characters XML 1.0
-  forbids), CSS-bound values (`blend`) are allow-listed, and image and link URLs
+  forbids), a CSS-bound value (`blend`) is written only when it cannot break
+  out of its declaration (none of `; { } ( ) : \ " ' /` nor a control character; upstream
+  writes any value, so such a value is the one deliberate divergence), and image and link URLs
   pass both the `Loader` and vega-loader's scheme allow-list. In `internal/svg`
   this holds by construction: only markup.go touches the output buffer, and
   raw markup (names, constant values) is of type `lit`, which a string variable
   cannot become without a conversion `TestNoRawMarkup` rejects. A value that is
   a word where a number is expected (`x: "wide"`) is spec text too: upstream
-  prints it, and it is escaped like any other.
+  prints it, and it is escaped like any other. The writer owns the size bound
+  and the deadline the same way: each method that appends checks the size
+  where it writes (and polls the context every 64 KiB of output), the error is
+  sticky and later writes are no-ops, so no caller checks the size and one
+  item cannot grow the document past it.
 - No reflection-based evaluation, no access to the host from expressions:
   the expression language can only call the whitelisted function table.
 - Data loading and image/link URLs only through the configured `Loader`.
@@ -215,7 +317,9 @@ Everything a render mutates hangs off values the render creates: the
 dataflow, the scenegraph, projections (and the pipelines they cache for a
 `geo.Path`), the `Random`, the budget, the ledger. A compiled
 `expr.Program` is immutable and shared between renders through
-`expr.CompileCached`. New package-level mutable state needs a lock and an
+`expr.CompileCached`. The HTTP transports `internal/loader` derives from a
+caller's `*http.Transport` are a cache keyed by a weak pointer to it, under a
+lock, dropped with it. New package-level mutable state needs a lock and an
 entry in this list; `TestConcurrentConverterSharesNothing` (run it with
 `-race`, and with `ASTER_STRESS_FULL=1` for the whole corpus) is the guard.
 

@@ -1,0 +1,1 @@
+{"width":120,"height":60,"data":[{"name":"t","values":[],"transform":[{"type":"sequence","start":0,"stop":2,"as":false},{"type":"identifier","as":"k_"}]}],"marks":[{"type":"text","from":{"data":"t"},"encode":{"enter":{"y":{"signal":"12*datum.k_"},"text":{"signal":"datum.data + '|' + datum['false']"}}}}]}

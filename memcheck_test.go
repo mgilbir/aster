@@ -529,12 +529,17 @@ func (r memRow) outcome() string {
 func (r memRow) liveRatio() float64  { return r.live.PeakLive / float64(r.limit>>20) }
 func (r memRow) inUseRatio() float64 { return r.inUse.PeakInUse / float64(r.limit>>20) }
 
-// holds reports whether the row meets the contract: refused with ErrLimit, or
-// within memcheckK times the limit. An error of another kind has no claim on
-// the budget but is shown, and its peak is held to the same bound.
+// holds reports whether the row meets the contract: within memcheckK times
+// the limit, and refused with ErrLimit at the scales past the budget (as the
+// smoke test asserts). Any other error means the case's spec no longer
+// exercises the budget (a typo in a formula ends it at 0 MiB), so it holds
+// nothing at any scale, nor does an "ok" past the budget, which means a
+// charge stopped working (C53, audit 2026-10-18).
 func (r memRow) holds() bool {
-	switch r.outcome() {
-	case "HEAPCAP", "PANIC":
+	switch out := r.outcome(); {
+	case out == "HEAPCAP", out == "PANIC", out == "error":
+		return false
+	case r.scale >= 1 && out != "limit":
 		return false
 	}
 	return r.liveRatio() <= memcheckK

@@ -3,6 +3,7 @@ package text
 import (
 	"strings"
 	"unsafe"
+	"weak"
 )
 
 // entry is a registered font: a loaded face, or a system font not yet read.
@@ -13,10 +14,34 @@ type entry struct {
 	italic bool
 
 	face   *Face
-	path   string // system font file, when face is nil
-	index  int    // the face's index in path, a collection
-	dead   bool   // loading path failed; never retry
-	custom bool   // given with WithFont
+	names  []string // every family name of a system face (see familyNames)
+	path   string   // system font file, when face is nil
+	index  int      // the face's index in path, a collection
+	dead   bool     // loading path failed; never retry
+	custom bool     // given with WithFont
+	// lists are the font lists a system entry is a candidate of, which may
+	// remember its face (see keepSystemFace); weak, so that a list the
+	// cache drops goes. swept is their number after the last sweep.
+	lists []weak.Pointer[faceList]
+	swept int
+}
+
+// listed records that list l has e among its candidates. The weak pointers
+// of lists gone are swept out as they double, so they stay within twice
+// the lists alive.
+func (e *entry) listed(l *faceList) {
+	e.lists = append(e.lists, weak.Make(l))
+	if len(e.lists) <= 2*max(e.swept, 8) {
+		return
+	}
+	alive := e.lists[:0]
+	for _, w := range e.lists {
+		if w.Value() != nil {
+			alive = append(alive, w)
+		}
+	}
+	clear(e.lists[len(alive):])
+	e.lists, e.swept = alive, len(alive)
 }
 
 // load returns the entry's face, reading a system font on first use.
@@ -29,7 +54,7 @@ func (e *entry) load(m *Measurer) *Face {
 		e.dead = true
 		return nil
 	}
-	m.applyPalette(f)
+	m.applyPalette(f, e.names...)
 	e.face = f
 	m.keepSystemFace(e)
 	return f
@@ -43,9 +68,11 @@ func (e *entry) load(m *Measurer) *Face {
 const maxSystemFaces = 64
 
 // keepSystemFace records that e's system face was loaded, dropping the
-// oldest loaded one past maxSystemFaces. The font lists and the last font
-// resolved, which remember faces by rune, are cleared with it, so that
-// nothing the Measurer keeps holds a dropped face. m.mu is held.
+// oldest loaded one past maxSystemFaces. The font lists it is a candidate
+// of, the only ones that can remember its face by rune, forget what they
+// resolved, so that nothing the Measurer keeps holds a dropped face; the
+// other lists stay as they are (C113: clearing them all rebuilt every list
+// on every eviction). m.mu is held.
 func (m *Measurer) keepSystemFace(e *entry) {
 	m.sysLoaded = append(m.sysLoaded, e)
 	if len(m.sysLoaded) <= maxSystemFaces {
@@ -54,9 +81,19 @@ func (m *Measurer) keepSystemFace(e *entry) {
 	old := m.sysLoaded[0]
 	m.sysLoaded = append(m.sysLoaded[:0], m.sysLoaded[1:]...)
 	old.face = nil
-	m.listCache.Clear()
-	m.last.font, m.last.list = "", nil
-	m.lastParts.list = nil
+	for _, w := range old.lists {
+		if l := w.Value(); l != nil {
+			l.forget()
+			m.listResets++
+		}
+	}
+	old.lists, old.swept = nil, 0
+}
+
+// forget drops what the list resolved runes to.
+func (l *faceList) forget() {
+	l.ascii, l.seen = [128]*Face{}, [128]bool{}
+	clear(l.runes)
 }
 
 // bestMatch picks, among candidates, the entries closest to the requested
@@ -191,8 +228,8 @@ func (l *faceList) size() int64 {
 // faces builds (or recalls) the candidate list for a parsed CSS font.
 //
 // Order, mirroring the reference resolver: one best-matching face per
-// requested family (with "serif", "monospace", "cursive" and "fantasy"
-// first redirected to their configured concrete families), the configured
+// requested family (a generic family such as "sans-serif" or "serif" first
+// redirected, where it stands, to its configured concrete family), the configured
 // default family, then metric-compatible aliases of everything requested,
 // then the fallback chain. By default that is every registered face that
 // fits the weight and style, and then every registered face at all; of
@@ -207,14 +244,11 @@ func (m *Measurer) faces(css CSSFont) *faceList {
 	}
 	families := make([]string, 0, len(css.Family)+4)
 	for _, fam := range css.Family {
-		switch strings.ToLower(fam) {
-		case "serif":
-			families = append(families, m.serifFamily)
-		case "monospace":
-			families = append(families, m.monospaceFamily)
-		case "cursive", "fantasy":
-			// No bundled face; both map to the sans-serif default.
-			families = append(families, m.fallbackFamily)
+		// A generic family always matches, where it stands in the list
+		// (CSS Fonts 4, 5.1): the families after it draw only what its
+		// font lacks (C112).
+		if g := m.generic(fam); g != "" {
+			families = append(families, g)
 		}
 		families = append(families, fam)
 	}
@@ -261,8 +295,29 @@ func (m *Measurer) faces(css CSSFont) *faceList {
 		push(m.fallback)
 	}
 
+	for _, e := range l.cands {
+		if e.path != "" {
+			e.listed(l)
+		}
+	}
 	m.listCache.Put(key, l, l.size())
 	return l
+}
+
+// generic is the configured family a CSS generic family names, or "" for a
+// family that is not one. system-ui and the ui- families are the platform's
+// interface fonts, which here are the configured ones; cursive and fantasy
+// have no bundled face and draw in the sans-serif default.
+func (m *Measurer) generic(fam string) string {
+	switch ASCIILower(fam) {
+	case "serif", "ui-serif":
+		return m.serifFamily
+	case "monospace", "ui-monospace":
+		return m.monospaceFamily
+	case "sans-serif", "system-ui", "ui-sans-serif", "cursive", "fantasy":
+		return m.fallbackFamily
+	}
+	return ""
 }
 
 // familyEntries returns the faces of a normalised family: those given with
