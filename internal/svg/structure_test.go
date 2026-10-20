@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"go/ast"
-	"go/importer"
 	"go/parser"
 	"go/token"
 	"go/types"
@@ -19,6 +18,7 @@ import (
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/scene"
 	"github.com/mgilbir/aster/internal/svgcheck"
+	"github.com/mgilbir/aster/internal/testutil"
 )
 
 // hostile is a string that, written into the output without escaping, closes
@@ -220,7 +220,7 @@ func TestNoRawMarkup(t *testing.T) {
 		t.Fatalf("parsed only %d files", len(files))
 	}
 	info := &types.Info{Types: map[ast.Expr]types.TypeAndValue{}, Instances: map[*ast.Ident]types.Instance{}}
-	conf := types.Config{Importer: importer.ForCompiler(fset, "source", nil)}
+	conf := types.Config{Importer: testutil.SourceImporter(fset)}
 	pkg, err := conf.Check("github.com/mgilbir/aster/internal/svg", fset, files, info)
 	if err != nil {
 		t.Fatal(err)

@@ -17,7 +17,7 @@
 //
 // Usage:  node record-upstream-tests.mjs <clone of the package's repository> <package>
 // Writes: testdata/upstream-vectors-cache/<package>.json (git-ignored; see scripts/record-upstream-vectors.sh)
-import {readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, rmSync} from 'fs';
+import {readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, rmSync, realpathSync} from 'fs';
 import {basename, dirname, join, resolve} from 'path';
 import {fileURLToPath, pathToFileURL} from 'url';
 import {register} from 'module';
@@ -870,7 +870,11 @@ function installedVersion(packageName) {
 
 // Resolved now: the recorder changes directory to each package's own while it runs its tests.
 const [, , checkoutArgument, ...packages] = process.argv;
-const checkout = checkoutArgument && resolve(checkoutArgument);
+// The real path: the test files' imports are matched against the checkout to send them to the
+// installed package, and a module's URL is its real path, so a checkout reached through a symlink
+// left d3-color's tests on its own source, whose colours the recorder does not see (125 of its
+// cases failed and were skipped, silently).
+const checkout = checkoutArgument && realpathSync(resolve(checkoutArgument));
 if (packages.length > 1) {
   console.error('record one package per process: tuple ids are a module-level counter');
   process.exit(2);
