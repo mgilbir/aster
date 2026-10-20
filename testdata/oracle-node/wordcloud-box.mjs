@@ -31,9 +31,10 @@ export function boxContext(width, height) {
     translate(x, y) { this.tx += x; this.ty += y; },
     rotate(a) { this.ang += a; },
     fontPx() { return +/(\d+)px/.exec(this.font)[1]; },
-    measureText(t) { return { width: [...t].length * 0.6 * this.fontPx() }; },
+    // a canvas draws and measures the text of any value: String(t)
+    measureText(t) { return { width: [...String(t)].length * 0.6 * this.fontPx() }; },
     box(t, grow) {
-      const p = this.fontPx(), half = [...t].length * 0.6 * p / 2;
+      const p = this.fontPx(), half = [...String(t)].length * 0.6 * p / 2;
       const x0 = -half - grow, x1 = half + grow, y0 = -0.8 * p - grow, y1 = 0.2 * p + grow;
       const s = Math.sin(this.ang), c = Math.cos(this.ang);
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;

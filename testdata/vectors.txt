@@ -78,4 +78,5 @@ internal/format | TZLIST=America/New_York,America/Sao_Paulo,Australia/Lord_Howe,
 internal/vega | - | gen_node_records.mjs crossfilter | > testdata/crossfilter.node.json | internal/vega/testdata/crossfilter/* | any
 internal/vega | - | gen_node_records.mjs prefacet | > testdata/prefacet.node.json | internal/vega/testdata/prefacet/* | any
 internal/vega | - | gen_node_records.mjs accessors | > testdata/expr-accessor-names.node.json | internal/vega/testdata/expr-accessor-names.vg.json | any
+internal/vega | - | testdata/gen_transforms.mjs | > testdata/transforms.node.json | internal/fonts/dejavu/DejaVuSans*.ttf | linux-x64
 internal/vega | - | gen_config.mjs | > config_default.json | - | any
