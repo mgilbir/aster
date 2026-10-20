@@ -494,7 +494,7 @@ func makeFilterInvalid(parent dfNode, m *unitModel, marks, scales string) dfNode
 	filter := reduceFieldDef(fieldDefModel(m), func(agg *omap[Value], fd Value, channel string) *omap[Value] {
 		if isScaleChannel(cc, channel) {
 			if sc := m.getScaleComponent(channel); sc != nil {
-				mode := getScaleInvalidDataMode(m.markDef, m.config, channel, sc.get("type"), isCountingAggregateOp(fd.Get("aggregate")))
+				mode := getScaleInvalidDataMode(m.ctx, m.markDef, m.config, channel, sc.get("type"), isCountingAggregateOp(fd.Get("aggregate")))
 				if mode != "show" && mode != "always-valid" {
 					agg.assign(fd.Get("field").AsString(), fd)
 				}
@@ -513,7 +513,7 @@ func makeFilterInvalid(parent dfNode, m *unitModel, marks, scales string) dfNode
 func makeFilterInvalid58(parent dfNode, m *unitModel) dfNode {
 	cc := m.b().ctx
 
-	if invalid := getMarkPropOrConfigSimple("invalid", m.markDef, m.config); !(invalid.IsStr() && invalid.StrValue() == "filter") {
+	if invalid := getMarkPropOrConfigSimple(m.ctx, "invalid", m.markDef, m.config); !(invalid.IsStr() && invalid.StrValue() == "filter") {
 		return nil
 	}
 	filter := reduceFieldDef(fieldDefModel(m), func(agg *omap[Value], fd Value, channel string) *omap[Value] {

@@ -207,7 +207,7 @@ func parseSingleChannelDomain(scaleType Value, domain Value, u *unitModel, chann
 	timeUnit := fod.Get("timeUnit")
 	dsType := dsMain
 	if !cc.v5 {
-		dsType = getScaleDataSourceForHandlingInvalidValues(getMarkConfig("invalid", markDef, config, ""), isPathMark(mark))
+		dsType = getScaleDataSourceForHandlingInvalidValues(getMarkConfig(cc, "invalid", markDef, config, ""), isPathMark(mark))
 	}
 	switch {
 	case isDomainUnionWith(cc, domain):

@@ -309,7 +309,7 @@ func mergeNamed(cc *compileCtx, a, b Value) Value {
 	var out []Value
 	add := func(it Value) {
 		cc.work(1)
-		n := propKey(jsGet(it, "name"))
+		n := propKey(cc, jsGet(it, "name"))
 		if !jsSeen(nil, seen, n) {
 			seen[n] = true
 			out = append(out, it)

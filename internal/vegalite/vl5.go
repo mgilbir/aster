@@ -75,7 +75,7 @@ func allFieldsInvalidPredicate58(m *unitModel, invalid bool, channels []string, 
 // wrapAllFieldsInvalid58 hides marks whose scaled fields are all invalid when
 // the mark's `invalid` is "hide".
 func wrapAllFieldsInvalid58(m *unitModel, channel string, valueRef Value) Value {
-	if inv := getMarkPropOrConfigSimple("invalid", m.markDef, m.config); inv.IsStr() && inv.StrValue() == "hide" && valueRef.IsTruthy() && !isPathMark(m.mark()) {
+	if inv := getMarkPropOrConfigSimple(m.ctx, "invalid", m.markDef, m.config); inv.IsStr() && inv.StrValue() == "hide" && valueRef.IsTruthy() && !isPathMark(m.mark()) {
 		if test := allFieldsInvalidPredicate58(m, true, scaleChannels, false); test != "" {
 			refs := []Value{mkv("test", test, "value", jsval.Null)}
 			refs = append(refs, arrayOf(valueRef)...)
@@ -90,7 +90,7 @@ func wrapAllFieldsInvalid58(m *unitModel, channel string, valueRef Value) Value 
 
 // definedEncode58 breaks paths at invalid positions unless `invalid` is falsy.
 func definedEncode58(m *unitModel) Value {
-	if getMarkPropOrConfigSimple("invalid", m.markDef, m.config).IsTruthy() {
+	if getMarkPropOrConfigSimple(m.ctx, "invalid", m.markDef, m.config).IsTruthy() {
 		if signal := allFieldsInvalidPredicate58(m, false, positionScaleChannels, true); signal != "" {
 			return mkv("defined", mkv("signal", signal))
 		}
@@ -106,7 +106,7 @@ func midPointRefWithPositionInvalidTest58(cc *compileCtx, p midPointParams) Valu
 		if isPathMark(p.markDef.Get("type")) {
 			return ref
 		}
-		if getMarkPropOrConfigSimple("invalid", p.markDef, p.config).IsNull() {
+		if getMarkPropOrConfigSimple(cc, "invalid", p.markDef, p.config).IsNull() {
 			test := fieldValidPredicate(vgField(cc, p.channelDef, fieldRefOption{expr: "datum"}), false)
 			var zero Value
 			if getMainRangeChannel(p.channel) == chY {
@@ -407,7 +407,7 @@ func rectBinPosition58(fd, fd2 Value, channel string, m *unitModel) Value {
 	}
 	spacing := 0.0
 	if isXorY(channel) {
-		if b := getMarkPropOrConfigSimple("binSpacing", markDef, config); !b.IsNullish() {
+		if b := getMarkPropOrConfigSimple(cc, "binSpacing", markDef, config); !b.IsNullish() {
 			spacing = jsval.ToNumber(b)
 		}
 	}
@@ -463,7 +463,7 @@ func tick58(m *unitModel) Value {
 		vgSizeChannel, vgThicknessChannel = "width", "height"
 	}
 	thick := jsval.NewObject(1)
-	thick.Set(vgThicknessChannel, signalOrValueRef(m.ctx, getMarkPropOrConfigSimple("thickness", markDef, config)))
+	thick.Set(vgThicknessChannel, signalOrValueRef(m.ctx, getMarkPropOrConfigSimple(m.ctx, "thickness", markDef, config)))
 	return withBase(m, mkIgnore("ignore", "ignore", "include", "ignore", "ignore", "ignore"),
 		pointPosition(chX, m, pointPositionOpts{defaultPos: "mid", vgChannel: "xc"}),
 		pointPosition(chY, m, pointPositionOpts{defaultPos: "mid", vgChannel: "yc"}),

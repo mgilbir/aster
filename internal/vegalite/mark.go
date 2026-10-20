@@ -121,10 +121,10 @@ var markCompilers = map[string]markCompiler{
 	}},
 	"text": {vgMark: "text", encodeEntry: func(m *unitModel) Value {
 		align, baseline := undef, undef
-		if getMarkPropOrConfigSimple("align", m.markDef, m.config).IsUndefined() {
+		if getMarkPropOrConfigSimple(m.ctx, "align", m.markDef, m.config).IsUndefined() {
 			align = jsval.Str("center")
 		}
-		if getMarkPropOrConfigSimple("baseline", m.markDef, m.config).IsUndefined() {
+		if getMarkPropOrConfigSimple(m.ctx, "baseline", m.markDef, m.config).IsUndefined() {
 			baseline = jsval.Str("middle")
 		}
 		return withBase(m, mkIgnore("include", "include", "include", "ignore", "ignore", "include"),
@@ -153,7 +153,7 @@ var markCompilers = map[string]markCompiler{
 			vgc = "yc"
 		}
 		thick := jsval.NewObject(1)
-		thick.Set(vgThicknessChannel, signalOrValueRef(m.ctx, getMarkPropOrConfigSimple("thickness", m.markDef, m.config)))
+		thick.Set(vgThicknessChannel, signalOrValueRef(m.ctx, getMarkPropOrConfigSimple(m.ctx, "thickness", m.markDef, m.config)))
 		return withBase(m, mkIgnore("ignore", "ignore", "include", "ignore", "ignore", "ignore"),
 			rectPosition(m, vgSizeAxis),
 			pointPosition(vgThicknessAxis, m, pointPositionOpts{defaultPos: "mid", vgChannel: vgc}),
@@ -184,7 +184,7 @@ func definedEncode(m *unitModel) Value {
 		if !scaleType.IsTruthy() {
 			return
 		}
-		mode := getScaleInvalidDataMode(m.markDef, m.config, channel, scaleType, isCountingAggregateOp(fd.Get("aggregate")))
+		mode := getScaleInvalidDataMode(m.ctx, m.markDef, m.config, channel, scaleType, isCountingAggregateOp(fd.Get("aggregate")))
 		if shouldBreakPath(mode) {
 			opt := fieldRefOption{expr: "datum"}
 			if m.stack != nil && m.stack.impute {
@@ -221,7 +221,7 @@ func parseMarkGroups(m *unitModel) []Value {
 	} else if strIs(mark, "bar") {
 		hasCornerRadius := false
 		for _, p := range vgCornerRadiusChannels {
-			if getMarkPropOrConfigSimple(p, m.markDef, m.config).IsTruthy() {
+			if getMarkPropOrConfigSimple(m.ctx, p, m.markDef, m.config).IsTruthy() {
 				hasCornerRadius = true
 			}
 		}
@@ -288,7 +288,7 @@ func getGroupsForStackedBarWithCornerRadius(m *unitModel) []Value {
 	}
 	uo := update.ObjValue()
 	for _, key := range vgCornerRadiusChannels {
-		configValue := getMarkConfig(key, m.markDef, m.config, "")
+		configValue := getMarkConfig(cc, key, m.markDef, m.config, "")
 		if uo.Lookup(key).IsTruthy() {
 			groupUpdate.Set(key, uo.Lookup(key))
 			uo.Delete(key)
@@ -312,7 +312,7 @@ func getGroupsForStackedBarWithCornerRadius(m *unitModel) []Value {
 	for _, prop := range []string{"stroke", "strokeWidth", "strokeJoin", "strokeCap", "strokeDash", "strokeDashOffset", "strokeMiterLimit", "strokeOpacity"} {
 		if v := uo.Lookup(prop); v.IsTruthy() {
 			groupUpdate.Set(prop, v)
-		} else if cv := getMarkConfig(prop, m.markDef, m.config, ""); !cv.IsUndefined() {
+		} else if cv := getMarkConfig(cc, prop, m.markDef, m.config, ""); !cv.IsUndefined() {
 			groupUpdate.Set(prop, signalOrValueRef(m.ctx, cv))
 		}
 	}
@@ -346,7 +346,7 @@ func getSort(m *unitModel) Value {
 	order := encoding.Get("order")
 	isNullOrFalse := func(v Value) bool { return v.IsNull() || (v.IsBool() && !v.BoolValue()) }
 	if (!order.IsArr() && isValueDef(order) && isNullOrFalse(order.Get("value"))) ||
-		(!order.IsTruthy() && isNullOrFalse(getMarkPropOrConfigSimple("order", markDef, config))) {
+		(!order.IsTruthy() && isNullOrFalse(getMarkPropOrConfigSimple(cc, "order", markDef, config))) {
 		return undef
 	} else if (order.IsArr() || isFieldDef(cc, order)) && stack == nil {
 		f, o := sortParams(cc, order, fieldRefOption{expr: "datum"})
@@ -387,8 +387,8 @@ func getMarkGroup(m *unitModel, fromPrefix string) []Value {
 			}
 		}
 	}
-	aria := getMarkPropOrConfigSimple("aria", markDef, config)
-	mc := markCompilers[propKey(mark)]
+	aria := getMarkPropOrConfigSimple(cc, "aria", markDef, config)
+	mc := markCompilers[propKey(cc, mark)]
 	var post Value
 	if mc.postEncodingTransform != nil {
 		post = mc.postEncodingTransform(m)

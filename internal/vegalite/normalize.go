@@ -424,7 +424,7 @@ func normalizeBinExtent(bin Value) Value {
 func normalizePredicateCompat(op Value, p *normParams) Value {
 	normSel := func(o Value) Value {
 		return normalizeLogicalComposition(p.cc, o, func(param Value) Value {
-			name := propKey(param)
+			name := propKey(p.cc, param)
 			// selectionPredicates is a plain object: for a name every
 			// object inherits, selectionPredicates[param] ??= [] keeps the
 			// inherited member, and its push is no function (C81 of the
@@ -1141,7 +1141,7 @@ func (pathOverlayNormalizer) run(spec Value, p *normParams, normalize func(Value
 	encoding := normalizeEncoding(cc, e, config)
 	markDef := markDefOf(cc, mark)
 	// Run only for a string type (hasMatchingType's switch is strict).
-	pointOverlay, hasPoint := getPointOverlay(markDef, config.Get(propKey(markDef.Get("type"))), encoding)
+	pointOverlay, hasPoint := getPointOverlay(markDef, config.Get(propKey(cc, markDef.Get("type"))), encoding)
 	lineOverlay, hasLine := undef, false
 	if strIs(markDef.Get("type"), "area") {
 		lineOverlay, hasLine = getLineOverlay(markDef, config.Get("area"))
@@ -1152,7 +1152,7 @@ func (pathOverlayNormalizer) run(spec Value, p *normParams, normalize func(Value
 		first.Set("params", params)
 	}
 	m := jsval.NewObject(4)
-	areaOpacity := getMarkPropOrConfigSimple("opacity", markDef, config).IsNullish() && getMarkPropOrConfigSimple("fillOpacity", markDef, config).IsNullish()
+	areaOpacity := getMarkPropOrConfigSimple(cc, "opacity", markDef, config).IsNullish() && getMarkPropOrConfigSimple(cc, "fillOpacity", markDef, config).IsNullish()
 	if cc.v5 {
 		// 5.8 looks at the mark definition only, not at the config.
 		areaOpacity = markDef.Get("opacity").IsUndefined() && markDef.Get("fillOpacity").IsUndefined()

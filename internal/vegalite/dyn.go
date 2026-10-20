@@ -1095,9 +1095,15 @@ func looseEq(v Value, s string) bool {
 const undefinedKey = "undefined"
 
 // propKey is v read as a property key (obj[v], `v in obj`): String(v), so
-// ["bar"] names "bar" and undefined "undefined". A key compared with a name
+// ["bar"] names "bar" and undefined "undefined". The text of an array or
+// object is built on the compilation's walker, which charges its ledger. A key compared with a name
 // is a property lookup; a keyword compared with one is strIs.
-func propKey(v Value) string { return v.AsString() }
+func propKey(cc *compileCtx, v Value) string {
+	if v.IsStr() {
+		return v.StrValue()
+	}
+	return cc.walker().String(v)
+}
 
 // strIn is contains(names, v) (indexOf, includes, Set.has): v is one of
 // names, compared strictly, as strIs does.

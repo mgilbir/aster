@@ -421,7 +421,7 @@ func defaultType(cc *compileCtx, fd Value, channel string) string {
 		// SCALE_CATEGORY_INDEX[fieldDef.scale.type]: the type as a key, so
 		// ["log"] is numeric here (and no log scale after).
 		if st := fd.Get("scale").Get("type"); st.IsTruthy() {
-			switch scaleCategory[propKey(st)] {
+			switch scaleCategory[propKey(cc, st)] {
 			case "numeric", "discretizing":
 				return "quantitative"
 			case "time":
@@ -707,7 +707,7 @@ func getBandPosition(cc *compileCtx, fd, fd2 Value, markDef, config Value) Value
 			if cc.v5 && isRectBasedMark(cc, markDef.Get("type")) {
 				return jsval.Int(0)
 			}
-			return getMarkConfig("timeUnitBandPosition", markDef, config, "")
+			return getMarkConfig(cc, "timeUnitBandPosition", markDef, config, "")
 		} else if isBinning(bin) {
 			return jsval.Num(0.5)
 		}
@@ -731,7 +731,7 @@ func getBandSize(cc *compileCtx, channel string, fd, fd2 Value, markDef, config 
 	if isFieldDef(cc, fd) {
 		timeUnit, bin := fd.Get("timeUnit"), fd.Get("bin")
 		if timeUnit.IsTruthy() && !fd2.IsTruthy() {
-			return mkv("band", getMarkConfig("timeUnitBandSize", markDef, config, ""))
+			return mkv("band", getMarkConfig(cc, "timeUnitBandSize", markDef, config, ""))
 		} else if isBinning(bin) && !hasDiscreteDomain(scaleType) {
 			return mkv("band", 1)
 		}

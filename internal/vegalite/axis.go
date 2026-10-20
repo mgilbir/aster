@@ -157,7 +157,7 @@ func parseLayerAxes(m *layerModel) {
 					// of Object.prototype, whose ++ makes NaN, never > 0 (a
 					// Go map's missing zero would count it: C88 of the
 					// 2026-10-18 audit).
-					orient := propKey(we.value)
+					orient := propKey(cc, we.value)
 					count, isOrient := axisCount[orient]
 					if isOrient && count > 0 && !we.explicit {
 						opposite := oppositeOrient[orient]
@@ -305,7 +305,7 @@ func parseAxis(channel string, m *unitModel) *axisComponent {
 	if !axis.IsUndefined() {
 		disable = jsval.Bool(!axis.IsTruthy())
 	} else {
-		disable, _ = getAxisConfig("disable", config.Get("style"), axis.Get("style"), axisConfigs)
+		disable, _ = getAxisConfig(cc, "disable", config.Get("style"), axis.Get("style"), axisConfigs)
 	}
 	axisComponent.set("disable", disable, !axis.IsUndefined())
 	if disable.IsTruthy() {
@@ -334,7 +334,7 @@ func parseAxis(channel string, m *unitModel) *axisComponent {
 			var configValue Value
 			var configFrom string
 			if isAxisProperty(property) && property != "values" {
-				configValue, configFrom = getAxisConfig(property, config.Get("style"), axis.Get("style"), axisConfigs)
+				configValue, configFrom = getAxisConfig(cc, property, config.Get("style"), axis.Get("style"), axisConfigs)
 			}
 			hasConfigValue := !configValue.IsUndefined()
 			if hasValue && !hasConfigValue {
@@ -510,7 +510,7 @@ func getLabelAngle(cc *compileCtx, fod Value, axis Value, channel string, styleC
 		}
 		return normalizeAngle(labelAngle)
 	}
-	angle, _ := getAxisConfig("labelAngle", styleConfig, axis.Get("style"), axisConfigs)
+	angle, _ := getAxisConfig(cc, "labelAngle", styleConfig, axis.Get("style"), axisConfigs)
 	if !angle.IsUndefined() {
 		return normalizeAngle(angle)
 	}
@@ -817,8 +817,8 @@ func getAxisConfigStyle(cc *compileCtx, types []string, config Value) Value {
 
 // getAxisConfig finds a property in the style config, then vlOnlyAxisConfig,
 // vgAxisConfig, axisConfigStyle; it returns the value and where it came from.
-func getAxisConfig(property string, styleConfigIndex Value, style Value, cfgs axisConfigSet) (Value, string) {
-	if sc := getStyleConfig(property, arrayOf(style), styleConfigIndex); !sc.IsUndefined() {
+func getAxisConfig(cc *compileCtx, property string, styleConfigIndex Value, style Value, cfgs axisConfigSet) (Value, string) {
+	if sc := getStyleConfig(cc, property, arrayOf(style), styleConfigIndex); !sc.IsUndefined() {
 		return sc, "style"
 	}
 	for _, from := range []struct {

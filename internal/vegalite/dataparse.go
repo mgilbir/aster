@@ -263,7 +263,7 @@ func parseTransformArray(head dfNode, m Model, ap *ancestorParse) dfNode {
 			// so "a" and ["a"] set the one key.
 			for _, field := range transformNode.producedFields().values() {
 				cc.work(1)
-				ap.set(cc, propKey(field), jsval.Str(derivedType), false)
+				ap.set(cc, propKey(cc, field), jsval.Str(derivedType), false)
 			}
 		}
 	}
@@ -519,7 +519,7 @@ func parseDataFor(m Model) *dataComponent {
 			adoptCC(head, cc)
 		}
 	} else if u != nil {
-		invalid := getMarkPropOrConfigSimple("invalid", u.markDef, u.config)
+		invalid := getMarkPropOrConfigSimple(u.ctx, "invalid", u.markDef, u.config)
 		marksMode, scalesMode = getDataSourcesForHandlingInvalidValues(invalid, isPathMark(u.mark()))
 		if marksMode != scalesMode && scalesMode == "include-invalid-values" {
 			preFilterInvalid = makeOutputNode(dsPreFilterInvalid, m, head)
@@ -641,11 +641,11 @@ func getScaleDataSourceForHandlingInvalidValues(invalid Value, isPath bool) data
 	return dsPostFilterInvalid
 }
 
-func getScaleInvalidDataMode(markDef, config Value, scaleChannel string, scaleType Value, isCountAggregate bool) string {
+func getScaleInvalidDataMode(cc *compileCtx, markDef, config Value, scaleChannel string, scaleType Value, isCountAggregate bool) string {
 	if !scaleType.IsTruthy() || !hasContinuousDomain(scaleType) || isCountAggregate {
 		return "always-valid"
 	}
-	invalidMode := normalizeInvalidDataMode(getMarkPropOrConfigSimple("invalid", markDef, config), isPathMark(markDef.Get("type")))
+	invalidMode := normalizeInvalidDataMode(getMarkPropOrConfigSimple(cc, "invalid", markDef, config), isPathMark(markDef.Get("type")))
 	if !config.Get("scale").Get("invalid").Get(scaleChannel).IsUndefined() {
 		return "show"
 	}

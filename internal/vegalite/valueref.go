@@ -239,7 +239,7 @@ func getConditionalValueRefForIncludingInvalidValue(cc *compileCtx, scaleChannel
 	}
 	fd := getFieldDef(cc, channelDef)
 	isCount := fd.IsTruthy() && isCountingAggregateOp(fd.Get("aggregate"))
-	mode := getScaleInvalidDataMode(markDef, config, scaleChannel, scaleType, isCount)
+	mode := getScaleInvalidDataMode(cc, markDef, config, scaleChannel, scaleType, isCount)
 	if fd.IsTruthy() && mode == "show" {
 		includeAs := coalesce(config.Get("scale").Get("invalid").Get(scaleChannel), jsval.Str("zero-or-min"))
 		o := mk("test", fieldValidPredicate(vgField(cc, fd, fieldRefOption{expr: "datum"}), false))

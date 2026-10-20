@@ -142,7 +142,7 @@ func colorEncode(m *unitModel, filledOpt Value) Value {
 	markType := markDef.Get("type")
 	filled := filledOpt
 	if filled.IsNullish() {
-		filled = getMarkPropOrConfigSimple("filled", markDef, config)
+		filled = getMarkPropOrConfigSimple(cc, "filled", markDef, config)
 	}
 	transparentIfNeeded := undef
 	if strIn(markType, "bar", "point", "circle", "square", "geoshape") {
@@ -301,7 +301,7 @@ func zindexEncode(m *unitModel) Value {
 }
 
 func ariaEncode(m *unitModel) Value {
-	enable := getMarkPropOrConfigSimple("aria", m.markDef, m.config)
+	enable := getMarkPropOrConfigSimple(m.ctx, "aria", m.markDef, m.config)
 	if enable.IsBool() && !enable.BoolValue() {
 		return mkv()
 	}
@@ -318,11 +318,11 @@ func ariaRoleDescription(m *unitModel) Value {
 	if m.config.Get("aria").IsBool() && !m.config.Get("aria").BoolValue() {
 		return mkv()
 	}
-	desc := getMarkPropOrConfigSimple("ariaRoleDescription", m.markDef, m.config)
+	desc := getMarkPropOrConfigSimple(m.ctx, "ariaRoleDescription", m.markDef, m.config)
 	if !desc.IsNullish() {
 		return mkv("ariaRoleDescription", mkv("value", desc))
 	}
-	if vgMarkIndex[propKey(m.mark())] {
+	if vgMarkIndex[propKey(m.ctx, m.mark())] {
 		return mkv()
 	}
 	return mkv("ariaRoleDescription", mkv("value", m.mark()))
@@ -338,7 +338,7 @@ func descriptionEncode(m *unitModel) Value {
 			mainRefFn: func(cd Value) Value { return textRef(cc, cd, m.config, "datum") },
 		})
 	}
-	dv := getMarkPropOrConfigSimple("description", m.markDef, m.config)
+	dv := getMarkPropOrConfigSimple(m.ctx, "description", m.markDef, m.config)
 	if !dv.IsNullish() {
 		return mkv("description", signalOrValueRef(m.ctx, dv))
 	}
@@ -402,7 +402,7 @@ func tooltipEncode(m *unitModel, reactiveGeom bool) Value {
 		if cd.IsNull() {
 			return undef
 		}
-		markTooltip := getMarkPropOrConfigSimple("tooltip", markDef, config)
+		markTooltip := getMarkPropOrConfigSimple(cc, "tooltip", markDef, config)
 		if markTooltip.IsBool() && markTooltip.BoolValue() {
 			markTooltip = mkv("content", "encoding")
 		}

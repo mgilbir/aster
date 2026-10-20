@@ -53,6 +53,14 @@ func (o *Object) EnsureTupleID() uint32 {
 // SetTupleID sets the tuple id.
 func (o *Object) SetTupleID(id uint32) { o.tid = id }
 
+// A CopyHook is a host payload that is told when its object is copied
+// (Clone, a Cloner's copy), and answers the payload of the copy: the
+// embedding program's way to follow an object it tracks through the copies
+// the engine makes of it.
+type CopyHook interface {
+	Copied(dst *Object) any
+}
+
 // SetHost attaches an opaque host payload to the object.
 func (o *Object) SetHost(h any) { o.host = h }
 
@@ -481,6 +489,9 @@ func (o *Object) Clone() *Object {
 		c.vals = append(c.vals, o.vals...)
 		c.str = o.str
 		c.host = o.host
+		if h, ok := c.host.(CopyHook); ok {
+			c.host = h.Copied(c)
+		}
 		c.tid = o.tid
 		c.nidx = o.nidx
 	}
