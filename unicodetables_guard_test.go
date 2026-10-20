@@ -21,7 +21,9 @@ import (
 // it and not only those that read a specification, to not importing the
 // module at all: a use that is not JavaScript's text semantics is to be
 // listed here, with why, once there is one.
-var xTextAllowed = map[string]string{}
+var xTextAllowed = map[string]string{
+	"internal/text/system.go:golang.org/x/text/encoding/charmap": "decodes Mac OS Roman font names in a system font's name table: a fixed legacy encoding whose table no Unicode version changes, and no JavaScript reads",
+}
 
 func TestNoXTextInTheEngine(t *testing.T) {
 	tools := toolPackages(t)
