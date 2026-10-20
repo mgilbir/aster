@@ -5,23 +5,19 @@ import (
 	"math"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/mgilbir/aster/internal/jsval"
+	"github.com/mgilbir/aster/internal/nodetz"
 	"github.com/mgilbir/aster/internal/upstream"
 )
 
 // Replays of upstream's own tests (see internal/upstream) for the number and time formatting this
 // package ports: d3-format, d3-time, d3-time-format.
 
-// zoneOf is the local calendar upstream's tests ran in.
+// zoneOf is the local calendar upstream's tests ran in, in node's tzdata.
 func zoneOf(t *testing.T, r *upstream.Replay) Zone {
 	t.Helper()
-	loc, err := time.LoadLocation(r.File.TimeZone)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return Local(loc)
+	return Local(nodetz.MustLoad(t, r.File.TimeZone))
 }
 
 // fnResult is the answer for a call that returns a function (or null): the recorded function marker

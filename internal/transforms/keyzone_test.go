@@ -4,10 +4,10 @@ import (
 	"context"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/jsval"
+	"github.com/mgilbir/aster/internal/nodetz"
 	"github.com/mgilbir/aster/internal/transforms/contour"
 	"github.com/mgilbir/aster/internal/transforms/hierarchy"
 )
@@ -30,11 +30,7 @@ func TestDatesWithinASecondShareAKey(t *testing.T) {
 		t.Errorf("key %q", got)
 	}
 	// The same instant is another day's text in another zone.
-	tokyo, err := time.LoadLocation("Asia/Tokyo")
-	if err != nil {
-		t.Skip("no tz database")
-	}
-	loc := format.Local(tokyo)
+	loc := format.Local(nodetz.MustLoad(t, "Asia/Tokyo"))
 	if got := KeyOf(NewKeys(loc, jsval.Walker{}), d)(rows[0]); !strings.HasPrefix(got, "Thu Jan 01 1970 09:00:00 GMT+0900 (") {
 		t.Errorf("Tokyo key %q", got)
 	}
@@ -50,11 +46,7 @@ func TestDatesWithinASecondShareAKey(t *testing.T) {
 // keyed "100" and "600" where upstream makes one keyed String(date). They
 // take the transforms' one key function, KeyStringer, from the caller.
 func TestTransformPackagesKeyDatesLikeString(t *testing.T) {
-	tokyo, err := time.LoadLocation("Asia/Tokyo")
-	if err != nil {
-		t.Skip("no tz database")
-	}
-	ctx := WithZone(context.Background(), format.Local(tokyo))
+	ctx := WithZone(context.Background(), format.Local(nodetz.MustLoad(t, "Asia/Tokyo")))
 	str := KeyStringer(ctx)
 	rows := []jsval.Value{obj("d", jsval.Timestamp(100), "id", jsval.Int(1)), obj("d", jsval.Timestamp(600), "id", jsval.Int(2))}
 	get := func(k string) func(jsval.Value) jsval.Value {

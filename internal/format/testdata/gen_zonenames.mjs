@@ -1,11 +1,12 @@
 // Records the zone name V8's Date.prototype.toString prints, for every name
 // of tzdata (zones and links): ICU's long name of the zone's current
 // metazone, standard or daylight as V8's DST flag for the instant says
-// (C121 of the 2026-10-18 audit).
-//   node testdata/gen_zonenames.mjs testdata/tzdata.zi samples > /tmp/samples.json
+// (C121 of the 2026-10-18 audit). The names are those of
+// internal/nodetz/tzdata.zi, the release node's ICU carries.
+//   node testdata/gen_zonenames.mjs ../nodetz/tzdata.zi samples > /tmp/samples.json
 //     every month of 1970-2037 for each name, which zonenames_gen.go reads
 //     to make zonenames_table.go;
-//   node testdata/gen_zonenames.mjs testdata/tzdata.zi vectors | gzip -n -9 > testdata/zonenames.json.gz
+//   node testdata/gen_zonenames.mjs ../nodetz/tzdata.zi vectors | gzip -n -9 > testdata/zonenames.json.gz
 //     a few instants a name, inside and outside 1970-2037, with V8's text
 //     and offset, which TestDateToStringZoneNames replays.
 import { execFileSync } from 'node:child_process';

@@ -63,8 +63,8 @@ func padInt(n, w int) string {
 }
 
 // zoneName is a zone's two names in zoneLongNames, standard and daylight,
-// and the instant from which ICU calls its offset daylight where tzdata
-// calls it standard (0: never).
+// and the instant from which ICU calls its offset daylight where node's
+// tzdata release calls it standard (0: never).
 type zoneName struct {
 	std, dst     uint16
 	daylightFrom int64
@@ -77,8 +77,11 @@ type zoneName struct {
 // 2038-01-19 at the "equivalent time" of ECMA-262 (the same month, day and
 // time in a year from 2008 to 2037 that starts on the same weekday and has
 // the same length), so a July of 1800 in New York prints "Eastern Daylight
-// Time". The names (zonenames_table.go) are recorded from node; a zone name
-// missing there (a zone tzdata names that ICU does not, or keeps as a zone of its own: "EET", "Eire") prints its tzdata abbreviation.
+// Time". The names (zonenames_table.go) are recorded from node, for its
+// tzdata release (2026c); the DST flag is the host's zoneinfo's, so a host
+// whose release models a zone otherwise names it by that release's flag
+// (ADR 0029). A name missing from the table (one a later release adds)
+// prints its tzdata abbreviation.
 func zoneLongName(loc *time.Location, ms int64) string {
 	e, ok := zoneNameTable[loc.String()]
 	if !ok {

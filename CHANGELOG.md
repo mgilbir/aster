@@ -58,7 +58,7 @@ What changed between versions, for users of the library and the CLI. Breaking ch
 
 - Dates are what `new Date(+v)` makes of a number (C119): `utcFormat(-0.5, …)` is in 1970, `%Q` of 1.5 is `1`, and floors, offsets, ranges and vega-time's day numbers of fractional instants match Vega. Day and week numbers (`%j %U %W %V`, `dayofyear`, `week`, `isoweek`) are d3's interval counts, which differ from civil arithmetic in a year a zone left local mean time (C120), and vega-time's UTC day and week numbers of years 0 to 99 read the year as Date.UTC does (C161). ([ADR 0029](docs/adr/0029-calendar-follows-d3-intervals.md))
 
-- `String(date)` in a zone other than UTC names the zone as V8 does, "Eastern Standard Time" rather than "EST" (C121).
+- `String(date)` in a zone other than UTC names the zone as V8 does, "Eastern Standard Time" rather than "EST", for every tzdata name (C121). The names are V8's for node's tzdata release (2026c), the zone's rules the host's: a host whose release has moved a zone to its summer offset all year since (Winnipeg in 2026e) names that zone by its own release's rules ([ADR 0029](docs/adr/0029-calendar-follows-d3-intervals.md)).
 
 - Date strings: U+2028, U+2029 and U+0085 are not white space to `Date.parse`, and a NUL ends the text, as in V8 (C123).
 

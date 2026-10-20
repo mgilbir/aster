@@ -3,18 +3,15 @@ package transforms
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/jsval"
+	"github.com/mgilbir/aster/internal/nodetz"
 )
 
 func TestTimeUnitGolden(t *testing.T) {
 	// timeunit.json was recorded with TZ=America/New_York.
-	ny, err := time.LoadLocation("America/New_York")
-	if err != nil {
-		t.Skip("tz database unavailable:", err)
-	}
+	ny := nodetz.MustLoad(t, "America/New_York")
 	for _, c := range loadGolden(t, "timeunit.json") {
 		t.Run(c.Name, func(t *testing.T) {
 			spec := param(c, 0)

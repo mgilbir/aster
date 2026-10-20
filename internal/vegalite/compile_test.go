@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/mgilbir/aster/internal/jsval"
+	"github.com/mgilbir/aster/internal/nodetz"
 )
 
 // corpusFloor is the number of corpus specifications that must compile to
@@ -426,7 +427,7 @@ func TestThemes(t *testing.T) {
 // references with TZ=Europe/Amsterdam, or re-record them all under another
 // zone and change this.
 var goldenZone = func() *time.Location {
-	loc, err := time.LoadLocation("Europe/Amsterdam")
+	loc, err := nodetz.Load("Europe/Amsterdam")
 	if err != nil {
 		panic(err)
 	}

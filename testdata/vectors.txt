@@ -23,7 +23,7 @@ internal/format | TZ=Australia/Lord_Howe | testdata/gen_time.mjs | > testdata/ti
 internal/format | - | testdata/gen_duck.mjs | > testdata/duck.json.gz | - | any
 internal/format | TZLIST=UTC,America/New_York,Africa/Monrovia | testdata/gen_calendar.mjs | > testdata/calendar.jsonl.gz | - | any
 internal/format | TZLIST=UTC,America/New_York | testdata/gen_dateparse.mjs | > testdata/dateparse.jsonl.gz | - | any
-internal/format | - | testdata/gen_zonenames.mjs testdata/tzdata.zi vectors | > testdata/zonenames.json.gz | internal/format/testdata/tzdata.zi | any
+internal/format | - | testdata/gen_zonenames.mjs ../nodetz/tzdata.zi vectors | > testdata/zonenames.json.gz | internal/nodetz/tzdata.zi | any
 
 internal/geo/testdata | - | gen_geo.mjs | files points.json.gz paths.json.gz fit.json.gz measures.json graticule.json.gz topo.json.gz digits.json angle.json geoms.json.gz random.json.gz | testdata/vega-datasets/data/* | darwin-arm64
 internal/geo/testdata | - | gen_nan.mjs | > nan.json | - | any

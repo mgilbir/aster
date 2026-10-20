@@ -4,11 +4,10 @@ import (
 	"context"
 	"math"
 	"testing"
-	"time"
-	_ "time/tzdata"
 
 	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/jsval"
+	"github.com/mgilbir/aster/internal/nodetz"
 )
 
 func TestRegistryMetadata(t *testing.T) {
@@ -264,11 +263,7 @@ func TestSchemeRegistry(t *testing.T) {
 }
 
 func TestNewInZone(t *testing.T) {
-	loc, err := time.LoadLocation("Asia/Kolkata")
-	if err != nil {
-		t.Skip("no tzdata")
-	}
-	z := format.Local(loc)
+	z := format.Local(nodetz.MustLoad(t, "Asia/Kolkata"))
 	s, ok := NewIn(TypeTime, z)
 	if !ok || s.Type() != TypeTime {
 		t.Fatal("NewIn")

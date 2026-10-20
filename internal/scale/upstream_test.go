@@ -5,10 +5,10 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/jsval"
+	"github.com/mgilbir/aster/internal/nodetz"
 	"github.com/mgilbir/aster/internal/upstream"
 )
 
@@ -325,11 +325,7 @@ func configure(s Scale, step upstream.Step, local format.Zone) bool {
 
 func TestUpstreamD3Scale(t *testing.T) {
 	r := upstream.Start(t, "d3-scale")
-	loc, err := time.LoadLocation(r.File.TimeZone)
-	if err != nil {
-		t.Fatal(err)
-	}
-	local := format.Local(loc)
+	local := format.Local(nodetz.MustLoad(t, r.File.TimeZone))
 	locale, err := format.NewLocale(jsval.Undefined, jsval.Undefined, local)
 	if err != nil {
 		t.Fatal(err)

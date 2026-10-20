@@ -13,6 +13,7 @@ import (
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/jsval"
+	"github.com/mgilbir/aster/internal/nodetz"
 	"github.com/mgilbir/aster/internal/testutil"
 )
 
@@ -366,11 +367,7 @@ func TestSeededRandom(t *testing.T) {
 }
 
 func TestClockAndZone(t *testing.T) {
-	loc, err := time.LoadLocation("America/New_York")
-	if err != nil {
-		t.Skip("no tzdata")
-	}
-	l, _ := format.NewLocale(jsval.Undefined, jsval.Undefined, format.Local(loc))
+	l, _ := format.NewLocale(jsval.Undefined, jsval.Undefined, format.Local(nodetz.MustLoad(t, "America/New_York")))
 	p, _ := Compile("[now(), hours(now()), utchours(now()), timezoneoffset(now()), timeFormat(now(), '%H:%M'), utcFormat(now(), '%H:%M')]")
 	s := NewScope(nil)
 	s.Locale = l
