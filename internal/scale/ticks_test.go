@@ -6,6 +6,8 @@ import (
 	"math"
 	"os"
 	"testing"
+
+	"github.com/mgilbir/aster/internal/jsmath"
 )
 
 // decNum decodes the generator's number encoding: plain numbers, or the strings
@@ -103,5 +105,36 @@ func BenchmarkTicks(b *testing.B) {
 func BenchmarkTickStep(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		_ = TickStep(0.001, 3.7, 10)
+	}
+}
+
+// TestFloorLog10MatchesV8 pins the fast path of floorLog10 to the exact
+// jsmath.Log10 over powers of ten, their neighbours and a dense sweep.
+func TestFloorLog10MatchesV8(t *testing.T) {
+	check := func(x float64) {
+		t.Helper()
+		if got, want := floorLog10(x), math.Floor(jsmath.Log10(x)); got != want && !(math.IsNaN(got) && math.IsNaN(want)) {
+			t.Fatalf("floorLog10(%v) = %v, want %v", x, got, want)
+		}
+	}
+	for _, x := range []float64{0, math.Copysign(0, -1), -1, math.NaN(), math.Inf(1), math.Inf(-1), math.MaxFloat64, 5e-324, 2.2250738585072014e-308} {
+		check(x)
+	}
+	for e := -323; e <= 308; e++ {
+		p := math.Pow(10, float64(e))
+		check(p)
+		for range 5 {
+			check(math.Nextafter(p, 0))
+			check(math.Nextafter(p, math.Inf(1)))
+			p = math.Nextafter(p, math.Inf(1))
+		}
+	}
+	x := 1e-300
+	for i := 0; i < 2_000_000; i++ {
+		check(x)
+		x *= 1.0007
+		if x > 1e300 {
+			x = 1e-300
+		}
 	}
 }
