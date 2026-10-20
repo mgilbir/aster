@@ -17,6 +17,31 @@ type eventParser struct {
 	cc            *compileCtx
 	defaultSource string
 	depth         int // nesting of between selectors being parsed
+
+	// root is the selector, trimmed, and the parsers pass spans of it, so
+	// that a position in a span is a position in root, which nextComma and
+	// nextClose are keyed by: nextComma[i] is the first ',' at or after i at
+	// the same level of "[{" and "]}" as i, and nextClose[i] the first ']' at
+	// the level of "[" and "]" (len(root) if none; evFind without the scan).
+	// A between selector rescans the rest of the selector for its closing
+	// bracket, and its parts for their commas, at every level it nests, so
+	// that a selector of any length refused at maxEventNesting levels was
+	// read maxEventNesting times over; the index reads it twice.
+	root                 string
+	nextComma, nextClose []int32
+}
+
+// span is the part root[lo:hi] of the selector being parsed.
+type span struct{ lo, hi int }
+
+func (p *eventParser) text(sp span) string { return p.root[sp.lo:sp.hi] }
+
+// trim is jsval.JSTrim of sp's text, as a span.
+func (p *eventParser) trim(sp span) span {
+	t := p.text(sp)
+	lead := len(t) - len(jsval.JSTrimStart(t))
+	t = jsval.JSTrim(t)
+	return span{sp.lo + lead, sp.lo + lead + len(t)}
 }
 
 // maxEventNesting bounds how deeply between selectors ("[[a, b] > c, d] > e")
@@ -42,11 +67,16 @@ func parseSelector(cc *compileCtx, selector, source string) []Value {
 	if source == "" {
 		source = "view"
 	}
-	p := &eventParser{cc: cc, defaultSource: source}
-	parts := p.parseMerge(jsval.JSTrim(selector))
+	p := &eventParser{cc: cc, defaultSource: source, root: jsval.JSTrim(selector)}
+	if len(p.root) >= jsval.MaxLevelText {
+		exceeded("Event selector too long")
+	}
+	p.nextComma = jsval.NextAtLevel(p.root, ',', "[{", "]}")
+	p.nextClose = jsval.NextAtLevel(p.root, ']', "[", "]")
+	parts := p.parseMerge(span{0, len(p.root)})
 	out := make([]Value, len(parts))
-	for i, s := range parts {
-		out[i] = p.parseOne(s)
+	for i, sp := range parts {
+		out[i] = p.parseOne(sp)
 	}
 	return out
 }
@@ -67,53 +97,51 @@ func evFind(s string, i int, endChar byte, pushChar, popChar string) int {
 	return i
 }
 
-func (p *eventParser) parseMerge(s string) []string {
-	var out []string
-	n := len(s)
-	start, i := 0, 0
-	for i < n {
-		i = evFind(s, i, ',', "[{", "]}")
+func (p *eventParser) parseMerge(sp span) []span {
+	var out []span
+	start, i := sp.lo, sp.lo
+	for i < sp.hi {
+		i = min(int(p.nextComma[i]), sp.hi)
 		p.cc.work(1 + int64(i-start)/16)
-		out = append(out, jsval.JSTrim(s[start:i]))
+		out = append(out, p.trim(span{start, i}))
 		i++
 		start = i
 	}
 	if len(out) == 0 {
-		throw("Empty event selector: %s", s)
+		throw("Empty event selector: %s", p.text(sp))
 	}
 	return out
 }
 
-func (p *eventParser) parseOne(s string) Value {
+func (p *eventParser) parseOne(sp span) Value {
 	// A part is read a few times over: a step per 4 bytes.
-	p.cc.work(4 + int64(len(s))/4)
-	if len(s) > 0 && s[0] == '[' {
-		return p.parseBetween(s)
+	p.cc.work(4 + int64(sp.hi-sp.lo)/4)
+	if sp.lo < sp.hi && p.root[sp.lo] == '[' {
+		return p.parseBetween(sp)
 	}
-	return p.parseStream(s)
+	return p.parseStream(p.text(sp))
 }
 
-func (p *eventParser) parseBetween(s string) Value {
+func (p *eventParser) parseBetween(sp span) Value {
 	p.depth++
 	defer func() { p.depth-- }()
 	if p.depth > maxEventNesting {
-		exceeded("Event selector nested too deeply: %s", s[:min(len(s), 40)])
+		exceeded("Event selector nested too deeply: %s", p.text(sp)[:min(sp.hi-sp.lo, 40)])
 	}
-	n := len(s)
-	i := evFind(s, 1, ']', "[", "]")
-	if i == n {
-		throw("Empty between selector: %s", s)
+	i := min(int(p.nextClose[sp.lo+1]), sp.hi)
+	if i == sp.hi {
+		throw("Empty between selector: %s", p.text(sp))
 	}
-	b := p.parseMerge(s[1:i])
+	b := p.parseMerge(span{sp.lo + 1, i})
 	if len(b) != 2 {
-		throw("Between selector must have two elements: %s", s)
+		throw("Between selector must have two elements: %s", p.text(sp))
 	}
-	s = jsval.JSTrim(s[i+1:])
-	if len(s) == 0 || s[0] != '>' {
-		throw("Expected '>' after between selector: %s", s)
+	rest := p.trim(span{i + 1, sp.hi})
+	if rest.lo == rest.hi || p.root[rest.lo] != '>' {
+		throw("Expected '>' after between selector: %s", p.text(rest))
 	}
 	between := arr(p.parseOne(b[0]), p.parseOne(b[1]))
-	stream := p.parseOne(jsval.JSTrim(s[1:]))
+	stream := p.parseOne(p.trim(span{rest.lo + 1, rest.hi}))
 	if stream.Get("between").IsTruthy() {
 		return mkv("between", between, "stream", stream)
 	}
