@@ -6,8 +6,11 @@
 // across types. The order upstream produces then depends on which pairs the
 // algorithm happens to compare, so reproducing it takes V8's algorithm, not
 // just any stable sort. This is a port of V8's TimSort
-// (third_party/v8/builtins/array-sort.tq, V8 11.3 as shipped in Node 20),
-// itself derived from CPython's listsort.
+// (third_party/v8/builtins/array-sort.tq), itself derived from CPython's
+// listsort. The parts ported (binary insertion, run detection, the
+// merge-collapse invariants, galloping, merge low and high) are unchanged
+// in the V8 the oracle pins, 13.6 in node 24.21.0, which reproduces the
+// recorded vectors (testdata/sort.json.gz) byte for byte.
 //
 // The port keeps V8's guards for inconsistent comparators, so no comparator
 // can make it index out of range or loop forever.

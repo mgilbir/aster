@@ -11,10 +11,10 @@ import (
 	"strings"
 	"testing"
 	"time"
-	_ "time/tzdata"
 
 	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/jsval"
+	"github.com/mgilbir/aster/internal/nodetz"
 )
 
 // goldenFile is the recorded output of testdata/gen_expr.mjs: every expression
@@ -234,9 +234,11 @@ func (e *testEnv) InData(name, field string, v jsval.Value) (int, bool) {
 	if !ok {
 		return 0, false
 	}
+	// The runtime's index, like upstream's fastmap, keys values by their
+	// String.
 	n := 0
 	for _, row := range t.Items() {
-		if sameValueZero(row.Get(field), v) {
+		if row.Get(field).AsString() == v.AsString() {
 			n++
 		}
 	}
@@ -416,9 +418,5 @@ func TestGoldenUTC(t *testing.T) { runGolden(t, "expr_utc.json.gz", time.UTC) }
 // TestGoldenNewYork replays the date-related cases recorded with
 // TZ=America/New_York, exercising DST-aware local time.
 func TestGoldenNewYork(t *testing.T) {
-	loc, err := time.LoadLocation("America/New_York")
-	if err != nil {
-		t.Skip("no tzdata")
-	}
-	runGolden(t, "expr_ny.json.gz", loc)
+	runGolden(t, "expr_ny.json.gz", nodetz.MustLoad(t, "America/New_York"))
 }

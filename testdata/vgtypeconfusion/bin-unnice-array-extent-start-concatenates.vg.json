@@ -1,0 +1,1 @@
+{"width":120,"height":60,"data":[{"name":"t","values":[{"g":"a","v":1},{"g":"b","v":5},{"g":"a","v":3}],"transform":[{"type":"bin","field":"v","extent":[[1],10],"step":2,"nice":false},{"type":"identifier","as":"k_"}]}],"marks":[{"type":"text","from":{"data":"t"},"encode":{"enter":{"y":{"signal":"12*datum.k_"},"text":{"signal":"datum.bin0 + '|' + datum.bin1"}}}}]}

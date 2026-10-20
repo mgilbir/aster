@@ -4,10 +4,10 @@ import (
 	"context"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/jsval"
+	"github.com/mgilbir/aster/internal/nodetz"
 	"github.com/mgilbir/aster/internal/transforms/contour"
 	"github.com/mgilbir/aster/internal/transforms/hierarchy"
 )
@@ -23,19 +23,15 @@ func TestDatesWithinASecondShareAKey(t *testing.T) {
 	if err != nil || len(out) != 2 || out[0].Get("count").NumValue() != 2 {
 		t.Errorf("aggregate: %v, %d groups", err, len(out))
 	}
-	if k := KeyOf(format.Zone{}, d); k(rows[0]) != k(rows[1]) || k(rows[0]) == k(rows[2]) {
+	if k := KeyOf(NewKeys(format.Zone{}, jsval.Walker{}), d); k(rows[0]) != k(rows[1]) || k(rows[0]) == k(rows[2]) {
 		t.Errorf("keys %q %q %q", k(rows[0]), k(rows[1]), k(rows[2]))
 	}
-	if got := KeyOf(format.Zone{}, d)(rows[0]); got != "Thu Jan 01 1970 00:00:00 GMT+0000 (Coordinated Universal Time)" {
+	if got := KeyOf(NewKeys(format.Zone{}, jsval.Walker{}), d)(rows[0]); got != "Thu Jan 01 1970 00:00:00 GMT+0000 (Coordinated Universal Time)" {
 		t.Errorf("key %q", got)
 	}
 	// The same instant is another day's text in another zone.
-	tokyo, err := time.LoadLocation("Asia/Tokyo")
-	if err != nil {
-		t.Skip("no tz database")
-	}
-	loc := format.Local(tokyo)
-	if got := KeyOf(loc, d)(rows[0]); !strings.HasPrefix(got, "Thu Jan 01 1970 09:00:00 GMT+0900 (") {
+	loc := format.Local(nodetz.MustLoad(t, "Asia/Tokyo"))
+	if got := KeyOf(NewKeys(loc, jsval.Walker{}), d)(rows[0]); !strings.HasPrefix(got, "Thu Jan 01 1970 09:00:00 GMT+0900 (") {
 		t.Errorf("Tokyo key %q", got)
 	}
 	out, err = Aggregate(WithZone(context.Background(), loc), rows, AggregateParams{GroupBy: []Field{d}})
@@ -50,18 +46,14 @@ func TestDatesWithinASecondShareAKey(t *testing.T) {
 // keyed "100" and "600" where upstream makes one keyed String(date). They
 // take the transforms' one key function, KeyStringer, from the caller.
 func TestTransformPackagesKeyDatesLikeString(t *testing.T) {
-	tokyo, err := time.LoadLocation("Asia/Tokyo")
-	if err != nil {
-		t.Skip("no tz database")
-	}
-	ctx := WithZone(context.Background(), format.Local(tokyo))
+	ctx := WithZone(context.Background(), format.Local(nodetz.MustLoad(t, "Asia/Tokyo")))
 	str := KeyStringer(ctx)
 	rows := []jsval.Value{obj("d", jsval.Timestamp(100), "id", jsval.Int(1)), obj("d", jsval.Timestamp(600), "id", jsval.Int(2))}
 	get := func(k string) func(jsval.Value) jsval.Value {
 		return func(v jsval.Value) jsval.Value { return v.Get(k) }
 	}
 
-	tree, _, err := hierarchy.Nest(rows, []hierarchy.Accessor{get("d")}, str, false)
+	tree, _, err := hierarchy.Nest(context.Background(), rows, []hierarchy.Accessor{get("d")}, str, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +62,7 @@ func TestTransformPackagesKeyDatesLikeString(t *testing.T) {
 	}
 
 	srows := []jsval.Value{obj("id", jsval.Timestamp(0)), obj("id", jsval.Int(7), "p", jsval.Timestamp(0))}
-	st, err := hierarchy.Stratify(srows, get("id"), get("p"), str)
+	st, err := hierarchy.Stratify(context.Background(), srows, get("id"), get("p"), str)
 	if err != nil || st.NodeByKey(str(jsval.Timestamp(0))) == nil {
 		t.Errorf("stratify by date: %v", err)
 	}

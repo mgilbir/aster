@@ -10,11 +10,13 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
+	"weak"
 
 	"github.com/mgilbir/aster/internal/budget"
 )
@@ -24,8 +26,15 @@ import (
 // AllowedDomains restricts which hostnames may be accessed. If empty, all
 // domains are permitted. Names are compared case-insensitively, ignoring one
 // trailing dot, and only ASCII names are accepted: write an internationalized
-// name in its punycode form. BaseURL enables resolution of relative URIs; if
-// empty, only absolute HTTP(S) URLs are accepted.
+// name in its punycode form. BaseURL is put before a relative URI as
+// vega-loader's baseURL is; without an absolute one only absolute HTTP(S) URLs
+// can be fetched.
+//
+// Sanitize returns the string vega-loader's sanitize makes of a URI (see
+// SanitizeURI), the link or image URL Vega writes and then loads. Load
+// requests the URL that fetch makes of that string, the URL Standard's parse,
+// and the policy below is checked on that URL, so that what is checked is what
+// is requested.
 //
 // The same scheme/userinfo/AllowedDomains policy is enforced on every HTTP
 // redirect hop, so an allowed host cannot redirect the request to a
@@ -37,17 +46,35 @@ import (
 // unspecified ranges, in every spelling (decimal, octal or hex IPv4, IPv4
 // mapped, NAT64 and 6to4 IPv6). A specification names the URLs, so without
 // this a hostile one could make the server fetch from its own network. The
-// check is made on the address a connection is actually made to, not on the
-// name, so DNS rebinding and redirects cannot get around it. It is enforced
-// on the connections of the default client and of any Client whose Transport
-// is an *http.Transport, on every path it dials: its DialContext and
-// DialTLSContext, and the deprecated Dial and DialTLS, are wrapped with the
-// check, and when it sets no plain dial function the connection is made by
-// the guarded dialer rather than net/http's own (ErrPrivateAddress, which
-// does not say what address a name resolved to). Any other
-// http.RoundTripper decides for itself where it connects, as the caller
-// wrote it to: for those only address literals and localhost names are
-// refused, and AllowedDomains is the tool to confine them.
+// check is made on the addresses a name resolves to, before anything is sent
+// to them, and on the address a connection is actually made to, so DNS
+// rebinding and redirects cannot get around it. It is enforced on the
+// connections of the default client and of any Client whose Transport is an
+// *http.Transport, on every path it dials:
+//
+//   - the default dialer, which also makes the plain connections of a
+//     Transport that sets no plain dial function, checks each address before
+//     its socket connects;
+//   - a caller's DialContext (or the deprecated Dial) is given the vetted
+//     public addresses of the name, as literals, one at a time, never the
+//     name: the request's Host and TLS server name are still the name;
+//   - a caller's DialTLSContext (or DialTLS), which takes the server name from
+//     the address, is given the name once the loader's own resolution found
+//     a public address for it; the connection it makes is checked again, so a
+//     name that rebinds between the two lookups is refused, after its
+//     connection and ClientHello.
+//
+// A refused connection's error wraps ErrPrivateAddress, and any other failed
+// dial to a name is the same opaque error: neither says what address a name
+// resolved to, nor whether a port answered. Any other http.RoundTripper
+// decides for itself where it connects, as the caller wrote it to: for those
+// only address literals and localhost names are refused, and AllowedDomains
+// is the tool to confine them.
+//
+// The checked transport made from a caller's *http.Transport is shared by
+// every HTTPLoader built around that Transport, so they share its connection
+// pool, and is dropped once the Transport is garbage; it closes a connection
+// left idle for 90 s when the Transport sets no IdleConnTimeout.
 //
 // A proxy is honoured: the HTTP_PROXY, HTTPS_PROXY and NO_PROXY environment
 // variables for the default client (as http.DefaultTransport does), and the
@@ -70,7 +97,7 @@ import (
 type HTTPLoader struct {
 	Client           *http.Client
 	AllowedDomains   []string      // if non-empty, only these hostnames are permitted
-	BaseURL          string        // if set, relative URIs are resolved against this URL
+	BaseURL          string        // if set, put before relative URIs (vega-loader's baseURL); absolute to fetch them
 	MaxResponseBytes int64         // response body cap; 0 = 64 MiB default, negative = unlimited
 	Timeout          time.Duration // per-request limit; 0 = 60 s default, negative = none
 
@@ -84,24 +111,12 @@ type HTTPLoader struct {
 	//
 	// Deprecated: use AllowPrivateNetworks to opt out.
 	BlockPrivateNetworks bool
-
-	mu     sync.Mutex // guards cached
-	cached derivedTransport
 }
 
 // proxyFromEnvironment selects the proxy of the default client. A variable so
 // that a test can stand in for the environment, which net/http reads once per
 // process.
 var proxyFromEnvironment = http.ProxyFromEnvironment
-
-// derivedTransport is the transport made from the last base transport seen,
-// kept so that connections are reused from one load to the next.
-type derivedTransport struct {
-	base  *http.Transport // nil: the loader's own default
-	allow bool
-	rt    http.RoundTripper
-	ok    bool
-}
 
 const (
 	// defaultMaxResponseBytes bounds response bodies when MaxResponseBytes is 0.
@@ -126,6 +141,41 @@ func loadCap(ctx context.Context, configured int64, field string) (max int64, ca
 	return configured, field
 }
 
+// streamChunk is the most one read takes before it is charged to a shared
+// allowance (budget.Stream): what a load reading past the call's allowance
+// can hold beyond it.
+const streamChunk = 32 << 10
+
+// readBody reads r whole. When the load's budget shares the call's allowance
+// with loads running at once (the images PNG and PDF output fetch in
+// parallel), every chunk read is charged to it as it is read, so that the
+// loads together stop where the call's allowance ends rather than each read
+// up to what was left when it started (C19).
+func readBody(ctx context.Context, r io.Reader) ([]byte, error) {
+	if b := budget.From(ctx); b.Streams() {
+		r = &streamReader{r: r, b: b}
+	}
+	return io.ReadAll(r)
+}
+
+type streamReader struct {
+	r io.Reader
+	b *budget.Budget
+}
+
+func (s *streamReader) Read(p []byte) (int, error) {
+	if len(p) > streamChunk {
+		p = p[:streamChunk]
+	}
+	n, err := s.r.Read(p)
+	if n > 0 {
+		if e := s.b.Stream(int64(n)); e != nil {
+			return 0, e
+		}
+	}
+	return n, err
+}
+
 // NewHTTPLoader creates a loader that allows HTTP(S) requests.
 // If client is nil, the client described on HTTPLoader is used.
 func NewHTTPLoader(client *http.Client) *HTTPLoader {
@@ -133,6 +183,9 @@ func NewHTTPLoader(client *http.Client) *HTTPLoader {
 }
 
 func (l *HTTPLoader) Load(ctx context.Context, uri string) ([]byte, error) {
+	if l == nil {
+		return nil, errNilLoader("*HTTPLoader")
+	}
 	timeout := l.Timeout
 	if timeout == 0 {
 		timeout = defaultHTTPTimeout
@@ -142,10 +195,19 @@ func (l *HTTPLoader) Load(ctx context.Context, uri string) ([]byte, error) {
 		ctx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, uri, nil)
+	// The URL requested is the one fetch would request for this string (the
+	// URL Standard's parse), and the policy is checked on that URL, so that
+	// what is checked is what is fetched. Load is safe when called directly,
+	// without Sanitize in front of it.
+	target, canonical, err := l.target(uri)
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, canonical, nil)
 	if err != nil {
 		return nil, fmt.Errorf("aster: failed to create request for %q: %w", uri, err)
 	}
+	req.URL, req.Host = target, target.Host
 
 	// The client is a shallow copy, so the policy-enforcing CheckRedirect
 	// below does not mutate a caller-supplied client. Every redirect target is
@@ -153,11 +215,6 @@ func (l *HTTPLoader) Load(ctx context.Context, uri string) ([]byte, error) {
 	// then through the caller's own CheckRedirect (if any), so a stricter
 	// caller-supplied redirect policy still applies.
 	client := l.client()
-	// Re-validate the initial URL independently of Sanitize so Load is safe
-	// even when called directly.
-	if err := l.checkURL(req.URL); err != nil {
-		return nil, err
-	}
 	callerCheck := client.CheckRedirect
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		if len(via) >= maxRedirects {
@@ -190,7 +247,7 @@ func (l *HTTPLoader) Load(ctx context.Context, uri string) ([]byte, error) {
 
 	max, capName := loadCap(ctx, l.MaxResponseBytes, "HTTPLoader.MaxResponseBytes")
 	if max < 0 {
-		data, err := io.ReadAll(resp.Body)
+		data, err := readBody(ctx, resp.Body)
 		if err != nil {
 			return nil, fmt.Errorf("aster: failed to read response from %q: %w", uri, err)
 		}
@@ -204,7 +261,7 @@ func (l *HTTPLoader) Load(ctx context.Context, uri string) ([]byte, error) {
 	}
 	// Read one byte past the cap to distinguish "exactly at the cap" from
 	// "exceeds it".
-	data, err := io.ReadAll(io.LimitReader(resp.Body, max+1))
+	data, err := readBody(ctx, io.LimitReader(resp.Body, max+1))
 	if err != nil {
 		return nil, fmt.Errorf("aster: failed to read response from %q: %w", uri, err)
 	}
@@ -214,32 +271,61 @@ func (l *HTTPLoader) Load(ctx context.Context, uri string) ([]byte, error) {
 	return data, nil
 }
 
+// Sanitize returns the string vega-loader's sanitize makes of uri with the
+// loader's BaseURL (SanitizeURI): the link or image URL Vega writes, and the
+// string it then hands to Load. A URI the allow-list refuses is an error.
+//
+// A result that fetch would request, an absolute http or https URL, is also
+// held to the access policy (no userinfo, AllowedDomains, no private address),
+// on the URL Load would request, and refused when it fails it or cannot be
+// parsed as one. Any other result, a relative reference (BaseURL empty or
+// itself relative), mailto:, tel: and the like, is returned as it is: it is a
+// valid link, and Load refuses it, since it cannot be fetched.
+//
+// Sanitize does not resolve names: it also vets the links of a chart, so a
+// specification could otherwise make the server look up any number of hosts.
+// Names are checked where a connection is made (see Load).
 func (l *HTTPLoader) Sanitize(_ context.Context, uri string) (string, error) {
-	parsed, err := url.Parse(uri)
+	if l == nil {
+		return "", errNilLoader("*HTTPLoader")
+	}
+	href, err := SanitizeURI(uri, URIOptions{BaseURL: l.BaseURL})
 	if err != nil {
-		return "", fmt.Errorf("aster: invalid URI %q: %w", uri, err)
-	}
-
-	// Resolve relative URIs against BaseURL if configured.
-	if parsed.Scheme == "" {
-		if l.BaseURL == "" {
-			return "", fmt.Errorf("aster: relative URI %q not allowed (no BaseURL configured)", uri)
-		}
-		base, err := url.Parse(l.BaseURL)
-		if err != nil {
-			return "", fmt.Errorf("aster: invalid BaseURL %q: %w", l.BaseURL, err)
-		}
-		parsed = base.ResolveReference(parsed)
-	}
-
-	// Sanitize also vets the links of a chart, so it does not resolve names: a
-	// specification could otherwise make the server look up any number of
-	// hosts. Names are checked where a connection is made (see Load).
-	if err := l.checkURL(parsed); err != nil {
 		return "", err
 	}
+	if _, _, err := l.target(href); err != nil && !errors.Is(err, errNotRequest) {
+		return "", err
+	}
+	return href, nil
+}
 
-	return parsed.String(), nil
+// target is the URL fetch would request for s and the string it is requested
+// by (its serialization), or an error when s is not an absolute http or https
+// URL (errNotRequest), cannot be parsed as one, or fails the access policy.
+// The policy is checked on the URL net/http will use, parsed from the
+// serialization; its scheme and host must be what the URL Standard's parse
+// found, so that no parser disagreement can make one name checked and
+// another connected to.
+func (l *HTTPLoader) target(s string) (*url.URL, string, error) {
+	ru, err := parseRequestURL(s)
+	if err != nil {
+		if errors.Is(err, errNotRequest) {
+			return nil, "", fmt.Errorf("%w: it cannot be fetched (is BaseURL set, and absolute?)", err)
+		}
+		return nil, "", err
+	}
+	canonical := ru.String()
+	u, err := url.Parse(canonical)
+	if err != nil {
+		return nil, "", fmt.Errorf("aster: not a URL net/http can request: %w", errBadURL)
+	}
+	if u.Scheme != ru.scheme || u.Host != ru.hostport() || u.User != nil || u.Opaque != "" {
+		return nil, "", fmt.Errorf("aster: not a URL net/http can request: %w", errBadURL)
+	}
+	if err := l.checkURL(u); err != nil {
+		return nil, "", err
+	}
+	return u, canonical, nil
 }
 
 // checkURL enforces the HTTPLoader access policy on a fully-resolved URL, as
@@ -309,18 +395,90 @@ func (l *HTTPLoader) transport(base http.RoundTripper) http.RoundTripper {
 	t, _ := base.(*http.Transport)
 	switch {
 	case base == nil || base == http.DefaultTransport:
-		t = nil
+		return derived.defaultTransport(l.AllowPrivateNetworks)
 	case t == nil:
 		return base // another RoundTripper: the caller's own egress
 	case l.AllowPrivateNetworks:
 		return base // nothing to check
 	}
 
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if d := &l.cached; d.ok && d.base == t && d.allow == l.AllowPrivateNetworks {
-		return d.rt
+	return derived.get(t)
+}
+
+// derived holds the checked transports, one per base transport, shared by
+// every HTTPLoader (C28): a loader made per request around one shared
+// *http.Transport pools its connections in one derived transport, as the
+// caller meant the shared one to, rather than in a clone of its own that
+// nothing closes. The checked transport depends on the base alone (a loader
+// that allows private networks uses the base as it is). An entry is keyed by
+// a weak pointer to its base, and dropped, its idle connections closed, once
+// the base is garbage: the cache holds no more transports than the caller
+// keeps alive, and nothing of the base (the derived transport is a copy).
+var derived = derivedTransports{byBase: map[weak.Pointer[http.Transport]]*http.Transport{}}
+
+type derivedTransports struct {
+	mu sync.Mutex
+	// def are the loader's own, for nil and http.DefaultTransport: checked,
+	// and for AllowPrivateNetworks not.
+	def, open *http.Transport
+	byBase    map[weak.Pointer[http.Transport]]*http.Transport
+}
+
+// defaultTransport is the loader's own transport, checked unless allow.
+func (d *derivedTransports) defaultTransport(allow bool) *http.Transport {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	p := &d.def
+	if allow {
+		p = &d.open
 	}
+	if *p == nil {
+		*p = checkedTransport(nil, allow)
+	}
+	return *p
+}
+
+// get is the checked transport for base t.
+func (d *derivedTransports) get(t *http.Transport) *http.Transport {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	key := weak.Make(t)
+	if rt := d.byBase[key]; rt != nil {
+		return rt
+	}
+	rt := checkedTransport(t, false)
+	d.byBase[key] = rt
+	runtime.AddCleanup(t, d.drop, key)
+	return rt
+}
+
+// drop forgets the transport derived from a base that is garbage.
+func (d *derivedTransports) drop(key weak.Pointer[http.Transport]) {
+	d.mu.Lock()
+	rt := d.byBase[key]
+	delete(d.byBase, key)
+	d.mu.Unlock()
+	if rt != nil {
+		rt.CloseIdleConnections()
+	}
+}
+
+// size is how many base transports have a derived one, for the tests.
+func (d *derivedTransports) size() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return len(d.byBase)
+}
+
+// idleConnTimeout bounds how long a derived transport keeps an idle
+// connection when its base sets no bound (a zero IdleConnTimeout, as an
+// &http.Transport{...} literal has): http.DefaultTransport's.
+const idleConnTimeout = 90 * time.Second
+
+// checkedTransport is base (nil: the loader's own default) with every dial
+// checked against private networks; allow (for the default alone) checks
+// nothing.
+func checkedTransport(t *http.Transport, allow bool) *http.Transport {
 	var rt *http.Transport
 	if t == nil {
 		rt = &http.Transport{
@@ -332,10 +490,15 @@ func (l *HTTPLoader) transport(base http.RoundTripper) http.RoundTripper {
 			ResponseHeaderTimeout:  30 * time.Second,
 			ExpectContinueTimeout:  time.Second,
 			MaxResponseHeaderBytes: 64 << 10,
-			Proxy:                  proxyFromEnvironment,
+			// Read at each request, so that a test standing in for the
+			// environment reaches the shared transport.
+			Proxy: func(r *http.Request) (*url.URL, error) { return proxyFromEnvironment(r) },
 		}
 	} else {
 		rt = t.Clone()
+		if rt.IdleConnTimeout <= 0 {
+			rt.IdleConnTimeout = idleConnTimeout
+		}
 	}
 	px := &proxies{}
 	if rt.Proxy != nil {
@@ -351,24 +514,28 @@ func (l *HTTPLoader) transport(base http.RoundTripper) http.RoundTripper {
 	dial, dialTLS := dialFuncs(t)
 	rt.Dial, rt.DialTLS = nil, nil //nolint:staticcheck // replaced by their checked context forms
 	if dial != nil {
-		rt.DialContext = checkedDial(dial, px)
+		// A plain connection: the transport makes the TLS handshake over
+		// it, with the request's host as the server name, so the caller's
+		// function can be given the vetted address itself.
+		rt.DialContext = checkedDial(dial, px, true)
 	} else {
 		direct := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
 		guarded := *direct
-		if !l.AllowPrivateNetworks {
+		if !allow {
 			guarded.Control = denyPrivate
 		}
 		rt.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 			if px.has(addr) {
 				return direct.DialContext(ctx, network, addr)
 			}
+			// The guarded dialer resolves the name and checks each address
+			// before its socket connects (denyPrivate): no SYN reaches a
+			// private one.
 			c, err := guarded.DialContext(ctx, network, addr)
-			if errors.Is(err, ErrPrivateAddress) {
-				// The *net.OpError names the address the name resolved to,
-				// which is the network's to know, not the spec's.
-				return nil, errPrivate
+			if err != nil && !allow {
+				return nil, dialError(ctx, addr, err)
 			}
-			return c, err
+			return c, err // allowed private networks: the error as it is
 		}
 		if t == nil || t.DialContext == nil && t.DialTLSContext == nil && t.Dial == nil && t.DialTLS == nil { //nolint:staticcheck // as above
 			// Setting DialContext turns off net/http's automatic HTTP/2;
@@ -376,8 +543,11 @@ func (l *HTTPLoader) transport(base http.RoundTripper) http.RoundTripper {
 			rt.ForceAttemptHTTP2 = true
 		}
 	}
-	rt.DialTLSContext = checkedDial(dialTLS, px)
-	l.cached = derivedTransport{base: t, allow: l.AllowPrivateNetworks, rt: rt, ok: true}
+	// A TLS dial function makes the handshake itself, with the server name
+	// it reads from the address it is given: it is given the name, checked
+	// before (on the loader's own resolution) and after (on the address it
+	// reached).
+	rt.DialTLSContext = checkedDial(dialTLS, px, false)
 	return rt
 }
 
@@ -429,24 +599,134 @@ func proxyAddr(u *url.URL) string {
 	return net.JoinHostPort(u.Hostname(), port)
 }
 
-// checkedDial wraps a caller's dial function: a connection it makes to a
-// private address is closed, unless it is to one of the transport's proxies.
-// A nil dial stays nil.
-func checkedDial(dial func(context.Context, string, string) (net.Conn, error), px *proxies) func(context.Context, string, string) (net.Conn, error) {
+// lookupNetIP resolves a host name for the check of a caller's dial
+// function: a variable so that a test can stand in for DNS.
+var lookupNetIP = func(ctx context.Context, network, host string) ([]netip.Addr, error) {
+	return net.DefaultResolver.LookupNetIP(ctx, network, host)
+}
+
+// checkedDial wraps a caller's dial function so that it reaches no private
+// address, and sends nothing to one (C18: it was checked only on the
+// connection it had made, so an open port of the internal network saw a
+// connection, and a closed one's error named the address and the port's
+// state). Unless addr is one of the transport's proxies, the name is
+// resolved here and refused when it has no public address, before the
+// function is called; then:
+//
+//   - byAddress: the function is given each public address in turn, as a
+//     literal, so it connects where the check looked (no second resolution
+//     to rebind);
+//   - otherwise (a TLS dial function, which needs the name for the server
+//     name it sends), it is given the name, and may resolve it again: a
+//     rebinding between the two lookups can reach a private address, which
+//     the check of the connection made then refuses, after its SYN and
+//     ClientHello.
+//
+// Either way the connection made is checked too (a function may go where it
+// likes), and an error for a name says neither where it resolved to nor how
+// the connection failed (dialError). A nil dial stays nil.
+func checkedDial(dial func(context.Context, string, string) (net.Conn, error), px *proxies, byAddress bool) func(context.Context, string, string) (net.Conn, error) {
 	if dial == nil {
 		return nil
 	}
 	return func(ctx context.Context, network, addr string) (net.Conn, error) {
-		c, err := dial(ctx, network, addr)
-		if err != nil || px.has(addr) {
-			return c, err
+		if px.has(addr) {
+			return dial(ctx, network, addr)
 		}
-		if tcp, ok := c.RemoteAddr().(*net.TCPAddr); ok && privateAddr(tcp.AddrPort().Addr()) {
-			_ = c.Close()
+		host, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, dialError(ctx, addr, err)
+		}
+		targets, err := publicAddrs(ctx, network, host)
+		if err != nil {
+			return nil, err
+		}
+		if !byAddress {
+			targets = []string{addr}
+		} else {
+			for i, a := range targets {
+				targets[i] = net.JoinHostPort(a, port)
+			}
+		}
+		var lastErr error
+		for _, target := range targets {
+			c, err := dial(ctx, network, target)
+			if err != nil {
+				lastErr = err
+				continue
+			}
+			if tcp, ok := c.RemoteAddr().(*net.TCPAddr); ok && privateAddr(tcp.AddrPort().Addr()) {
+				_ = c.Close()
+				return nil, errPrivate
+			}
+			return c, nil
+		}
+		return nil, dialError(ctx, addr, lastErr)
+	}
+}
+
+// publicAddrs are the public addresses host resolves to, as literals, or
+// errPrivate when it has none but private ones; host itself when it is a
+// literal, public.
+func publicAddrs(ctx context.Context, network, host string) ([]string, error) {
+	if a, ok := hostAddr(host); ok {
+		if privateAddr(a) {
 			return nil, errPrivate
 		}
-		return c, nil
+		return []string{host}, nil
 	}
+	ipNet := "ip"
+	switch network {
+	case "tcp4":
+		ipNet = "ip4"
+	case "tcp6":
+		ipNet = "ip6"
+	}
+	addrs, err := lookupNetIP(ctx, ipNet, host)
+	if err != nil {
+		return nil, dialError(ctx, host, err)
+	}
+	var public []string
+	for _, a := range addrs {
+		if !privateAddr(a) {
+			public = append(public, a.Unmap().String())
+		}
+	}
+	if len(public) == 0 {
+		if len(addrs) > 0 {
+			return nil, errPrivate
+		}
+		return nil, dialError(ctx, host, errors.New("no address"))
+	}
+	return public, nil
+}
+
+// errDial is the error of a connection to a name that could not be made:
+// the name did not resolve, or no address it resolved to answered. It says
+// no more, for the error reaches whoever wrote the URL, and the resolution
+// and the state of the ports of the network the loader runs in are not
+// theirs to know (C18).
+var errDial = errors.New("aster: could not connect to the host")
+
+// dialError is err for a dial to addr (host:port, or a host), opaque unless
+// the host is an address literal, which the URL said already: a refused
+// address is errPrivate, the end of the call's context its error, and any
+// other failure errDial.
+func dialError(ctx context.Context, addr string, err error) error {
+	if errors.Is(err, ErrPrivateAddress) {
+		return errPrivate
+	}
+	if cerr := ctx.Err(); cerr != nil {
+		return fmt.Errorf("%w: %w", errDial, cerr)
+	}
+	host := addr
+	if h, _, splitErr := net.SplitHostPort(addr); splitErr == nil {
+		host = h
+	}
+	if _, ok := hostAddr(strings.Trim(host, "[]")); ok {
+		return err
+	}
+	return errDial
 }
 
 // denyPrivate is a net.Dialer Control function: it sees the address a socket

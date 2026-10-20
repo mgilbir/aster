@@ -31,7 +31,7 @@ func newRotation(deltaLambda, deltaPhi, deltaGamma float64) rotation {
 
 func wrapLambda(lambda float64) float64 {
 	if abs(lambda) > pi {
-		lambda -= float64(jsRound(lambda/tau) * tau)
+		lambda -= float64(jsmath.Round(lambda/tau) * tau)
 	}
 	return lambda
 }

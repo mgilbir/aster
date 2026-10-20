@@ -18,10 +18,7 @@ func Identifier(ctx context.Context, data []jsval.Value, as string, counter *flo
 		if err := poll(ctx, i); err != nil {
 			return nil, err
 		}
-		o := t.ObjValue()
-		if o == nil {
-			continue
-		}
+		o := jsval.FieldsFor(t, as)
 		if cur := o.Lookup(as); cur.IsTruthy() {
 			o.Set(as, cur)
 			continue

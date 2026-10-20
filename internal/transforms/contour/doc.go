@@ -19,7 +19,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsmath"
@@ -35,7 +34,8 @@ const (
 )
 
 var (
-	errInvalidSize = errors.New("contour: invalid size")
+	// d3-contour's and vega's density2D's own messages
+	errInvalidSize = errors.New("invalid size")
 	errTooLarge    = fmt.Errorf("%w: contour: raster larger than %d cells", budget.ErrLimit, MaxGridCells)
 )
 
@@ -54,18 +54,6 @@ func checkCtx(ctx context.Context) error {
 		return nil
 	}
 	return ctx.Err()
-}
-
-// jsRound is Math.round: halves round toward +Infinity.
-func jsRound(x float64) float64 {
-	if math.IsNaN(x) || math.IsInf(x, 0) {
-		return x
-	}
-	r := math.Floor(x)
-	if x-r >= 0.5 {
-		r++
-	}
-	return r
 }
 
 // toInt32 is JavaScript's ToInt32 applied to a double (used by |0 and >>).

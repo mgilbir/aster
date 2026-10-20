@@ -1,8 +1,6 @@
 package vegalite
 
 import (
-	"strings"
-
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -248,11 +246,16 @@ func (m *modelBase) getName(text string) string {
 	if m.nameV.IsTruthy() {
 		prefix = m.name + "_"
 	}
+	// Every name a view generates copies the view's name (twice: joined,
+	// then made a variable name), as many times as the view has scales,
+	// data sets, selections: charged, so a long name cannot be copied
+	// unseen once per selection.
+	m.ctx.alloc(2 * int64(len(prefix)+len(text)))
 	return varName(prefix + text)
 }
 
 func (m *modelBase) getDataName(t dataSourceType) string {
-	return m.getName(strings.ToLower(t.String()))
+	return m.getName(jsval.JSLower(t.String()))
 }
 
 func (m *modelBase) requestDataName(t dataSourceType) string {
@@ -286,7 +289,7 @@ func (m *modelBase) getSizeSignalRef(layoutSizeType string) Value {
 		sizeType := getSizeTypeFromLayoutSizeType(layoutSizeType)
 		channel := getPositionScaleChannel(sizeType)
 		if sc, ok := m.comp.scales.get(channel); ok && sc != nil && !sc.merged {
-			typ := sc.get("type").AsString()
+			typ := sc.get("type")
 			rng := sc.get("range")
 			if hasDiscreteDomain(typ) && isVgRangeStep(m.ctx, rng) {
 				scaleName := sc.get("name").AsString()
@@ -323,13 +326,15 @@ func getSizeTypeFromLayoutSizeType(t string) string {
 	return t
 }
 
-// scaleTypeOf is the type of the channel's scale, "" when the channel has none
-// (for example when the specification sets `scale: null`).
-func (m *modelBase) scaleTypeOf(channel string) string {
+// scaleTypeOf is the type of the channel's scale as the specification or
+// the defaults give it (a Value: upstream compares it strictly), undefined
+// when the channel has none (for example when the specification sets
+// `scale: null`).
+func (m *modelBase) scaleTypeOf(channel string) Value {
 	if sc := m.getScaleComponent(channel); sc != nil {
-		return sc.get("type").AsString()
+		return sc.get("type")
 	}
-	return ""
+	return undef
 }
 
 // mustScale is a scale component upstream reads without checking that it
@@ -355,12 +360,7 @@ func (m *modelBase) getScaleComponent(channel string) *scaleComponent {
 	return nil
 }
 
-func (m *modelBase) getScaleType(channel string) string {
-	if sc := m.getScaleComponent(channel); sc != nil {
-		return sc.get("type").AsString()
-	}
-	return ""
-}
+func (m *modelBase) getScaleType(channel string) Value { return m.scaleTypeOf(channel) }
 
 // trySelectionComponent is getSelectionComponent for callers that catch the
 // throw. Upstream keeps a model's selections in a plain object, so a name every
@@ -493,7 +493,7 @@ func (m *modelBase) assembleLayout() Value {
 	}
 	spacing := m.layout.Lookup("spacing")
 	layout := omit(jsval.Obj(m.layout), "spacing")
-	titleBand := assembleLayoutTitleBand(m.comp.layoutHeaders, m.config)
+	titleBand := assembleLayoutTitleBand(m.ctx, m.comp.layoutHeaders, m.config)
 	out := jsval.NewObject(8)
 	out.Set("padding", spacing)
 	spread(out, jsval.Obj(m.self.assembleDefaultLayout()))

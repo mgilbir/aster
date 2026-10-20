@@ -11,6 +11,10 @@ import (
 // Limits bounds the resources an SVG document may consume during conversion.
 // Zero fields select the defaults.
 type Limits struct {
+	// Input names the SVG in the error of a bound it passes: "SVG input"
+	// unless set ("the chart's SVG", for a chart the caller gave as a
+	// specification).
+	Input           string
 	MaxInputBytes   int // SVG source size
 	MaxElements     int // parsed elements
 	MaxPathSegments int // path segments, summed over all paths (after arc conversion)
@@ -32,7 +36,11 @@ const (
 	defaultMaxImgPixels  = 64 << 20
 )
 
-func (l Limits) withDefaults() Limits {
+// WithDefaults is l with its zero fields set to the defaults.
+func (l Limits) WithDefaults() Limits {
+	if l.Input == "" {
+		l.Input = "SVG input"
+	}
 	if l.MaxInputBytes <= 0 {
 		l.MaxInputBytes = defaultMaxInputBytes
 	}

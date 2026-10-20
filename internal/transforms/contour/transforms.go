@@ -18,16 +18,33 @@ type ContourParams struct {
 	// Values is a row-major grid to contour. nil means "estimate the density
 	// of the input tuples"; an empty non-nil slice is a (degenerate) grid.
 	Values []float64
+	// ValuesExtent, when not nil, are the given values as the thresholds'
+	// extent reads them (vega-util's extent skips null: NaN here), where
+	// Values are them as the marching compares them (null is 0).
+	ValuesExtent []float64
+	// ThresholdValues: see IsocontourParams.
+	ThresholdValues []jsval.Value
 	// Density estimation inputs, see DensityParams.
 	X, Y, Weight Accessor
 	CellSize     float64
 	Bandwidth    []float64
 	// Thresholds, when non-nil (even if empty), overrides Count and Nice.
 	Thresholds []float64
-	// Count is the desired number of contours; zero means 10.
-	Count  float64
-	Nice   bool
-	Smooth *bool // nil means true
+	// Count is the desired number of contours; zero means 10 (NaN is NaN:
+	// the caller applies `_.count || 10`).
+	Count float64
+	// CountExact reports a Count the caller resolved (`_.count || 10` of a
+	// truthy value that is 0 as a number stays 0), and CountPlusOne its
+	// `count + 1` as JavaScript adds it.
+	CountExact   bool
+	CountPlusOne float64
+	// ExtentSet: ExtentLo and ExtentHi are the numbers of vega-util's extent of
+	// the raw values (the first valid one starts both; later ones compare with
+	// JavaScript's < and >), NaN for none.
+	ExtentSet          bool
+	ExtentLo, ExtentHi float64
+	Nice               bool
+	Smooth             *bool // nil means true
 }
 
 func boolOr(b *bool, def bool) bool {
@@ -73,15 +90,36 @@ func Contour(ctx context.Context, source []jsval.Value, p ContourParams) ([]jsva
 	thresholds := p.Thresholds
 	if thresholds == nil {
 		count := p.Count
-		if count == 0 || math.IsNaN(count) {
+		if count == 0 && !p.CountExact {
 			count = 10
 		}
+		ext := values
+		if p.ValuesExtent != nil && !density {
+			ext = p.ValuesExtent
+		}
 		var err error
-		if thresholds, err = Quantize(count, p.Nice, !density)(values); err != nil {
+		k1 := count + 1
+		if p.CountExact {
+			k1 = p.CountPlusOne
+		}
+		if p.ExtentSet && !density {
+			// the extent of the raw values, as given (ExtentSet)
+			thresholds, err = quantizeAt(count, k1, p.Nice, true, p.ExtentLo, p.ExtentHi)
+		} else {
+			thresholds, err = quantizeK1(count, k1, p.Nice, !density)(ext)
+		}
+		if err != nil {
 			return nil, err
 		}
 	}
 	geoms, err := Contours(ctx, values, int(w), int(h), thresholds, boolOr(p.Smooth, true))
+	if err == nil && p.ThresholdValues != nil {
+		for k := range geoms {
+			if k < len(p.ThresholdValues) {
+				geoms[k].Raw, geoms[k].HasRaw = p.ThresholdValues[k], true
+			}
+		}
+	}
 	if density {
 		releaseGrid(ctx, grid)
 	}
@@ -130,10 +168,14 @@ type IsocontourParams struct {
 	// Thresholds, when non-nil, overrides Levels/Nice/Resolve/Zero.
 	Thresholds []float64
 	Levels     float64 // zero means 10
-	Nice       bool
-	Shared     bool  // resolve: "shared" instead of "independent"
-	Zero       *bool // nil means true
-	Smooth     *bool // nil means true
+	// LevelsExact reports Levels the caller resolved, LevelsPlusOne its
+	// `levels + 1` (see ContourParams.CountExact).
+	LevelsExact   bool
+	LevelsPlusOne float64
+	Nice          bool
+	Shared        bool  // resolve: "shared" instead of "independent"
+	Zero          *bool // nil means true
+	Smooth        *bool // nil means true
 	// Scale and Translate post-transform the coordinates. One element is a
 	// uniform scale; two are [sx, sy]. ScaleFn/TranslateFn compute them per
 	// tuple and take precedence when set. Unset scale falls back to the
@@ -142,6 +184,17 @@ type IsocontourParams struct {
 	ScaleFn, TranslateFn func(datum jsval.Value) []float64
 	As                   string // output field; "" means "contour"
 	NoAs                 bool   // as: null, so the geometry is the tuple
+	// ThresholdValues, when not nil, are the thresholds as given, which
+	// the contours carry as their value (Thresholds are them as numbers,
+	// as the marching compares them). ThresholdsNotArray reports truthy
+	// thresholds that are no array: upstream calls them on each grid, a
+	// TypeError.
+	ThresholdValues    []jsval.Value
+	ThresholdsNotArray bool
+	// Transform, when set, replaces Scale, Translate and their functions:
+	// the scale and translation of a tuple's contours, given the tuple
+	// and its grid as values (apply false: none), or an error.
+	Transform func(datum, grid jsval.Value) (sx, sy, tx, ty float64, apply bool, err error)
 }
 
 // Isocontour computes level sets for the raster grid of every source tuple.
@@ -152,6 +205,24 @@ func Isocontour(ctx context.Context, source []jsval.Value, p IsocontourParams) (
 	field := p.Field
 	if field == nil {
 		field = func(v jsval.Value) jsval.Value { return v }
+	}
+	// Upstream's order of failures: the shared levels first take d3's max
+	// of every grid's values, a TypeError for values that are not iterable;
+	// then each grid's size is d3-contour's, whose width and height must be
+	// numbers of at least 0 (a tuple that is no grid has neither).
+	if p.Thresholds == nil && p.Shared {
+		for _, t := range source {
+			if vs := field(t).Get("values"); !vs.IsArr() && !vs.IsStr() {
+				return nil, &jsval.Thrown{Name: "TypeError", Msg: "values is not iterable"}
+			}
+		}
+	}
+	for _, t := range source {
+		fv := field(t)
+		w, h := math.Floor(jsval.ToNumber(fv.Get("width"))), math.Floor(jsval.ToNumber(fv.Get("height")))
+		if !(w >= 0 && h >= 0) {
+			return nil, errInvalidSize
+		}
 	}
 	grids := make([]Grid, len(source))
 	defer func() {
@@ -175,10 +246,14 @@ func Isocontour(ctx context.Context, source []jsval.Value, p IsocontourParams) (
 		shared = p.Thresholds
 	} else {
 		levels := p.Levels
-		if levels == 0 || math.IsNaN(levels) {
+		if levels == 0 && !p.LevelsExact {
 			levels = 10
 		}
-		quant = Quantize(levels, p.Nice, boolOr(p.Zero, true))
+		k1 := levels + 1
+		if p.LevelsExact {
+			k1 = p.LevelsPlusOne
+		}
+		quant = quantizeK1(levels, k1, p.Nice, boolOr(p.Zero, true))
 		if p.Shared {
 			maxes := make([]float64, len(grids))
 			for i, g := range grids {
@@ -198,6 +273,9 @@ func Isocontour(ctx context.Context, source []jsval.Value, p IsocontourParams) (
 	var out []jsval.Value
 	for i, t := range source {
 		g := grids[i]
+		if p.ThresholdsNotArray {
+			return nil, &jsval.Thrown{Name: "TypeError", Msg: "tz is not a function"}
+		}
 		tz := shared
 		if p.Thresholds == nil && !p.Shared {
 			var err error
@@ -205,11 +283,33 @@ func Isocontour(ctx context.Context, source []jsval.Value, p IsocontourParams) (
 				return nil, err
 			}
 		}
+		if g.ValuesNullish != "" && len(tz) > 0 {
+			// contour(grid.values, tz) maps tz over isorings(values, ...),
+			// which reads values[0] of it.
+			return nil, &jsval.Thrown{Name: "TypeError", Msg: "Cannot read properties of " + g.ValuesNullish + " (reading '0')"}
+		}
 		geoms, err := Contours(ctx, g.Values, g.Width, g.Height, tz, smooth)
 		if err != nil {
 			return nil, err
 		}
-		p.transformPaths(geoms, g, t)
+		if p.ThresholdValues != nil {
+			for k := range geoms {
+				if k < len(p.ThresholdValues) {
+					geoms[k].Raw, geoms[k].HasRaw = p.ThresholdValues[k], true
+				}
+			}
+		}
+		if p.Transform != nil {
+			sx, sy, tx, ty, apply, err := p.Transform(t, field(t))
+			if err != nil {
+				return nil, err
+			}
+			if apply {
+				transformGeometries(geoms, g, sx, sy, tx, ty)
+			}
+		} else {
+			p.transformPaths(geoms, g, t)
+		}
 		vertices, err := chargeValues(led, geoms)
 		if err != nil {
 			return nil, err
@@ -221,7 +321,7 @@ func Isocontour(ctx context.Context, source []jsval.Value, p IsocontourParams) (
 			} else {
 				o = jsval.ObjectOf(as, geom.ToValue())
 			}
-			if to := t.ObjValue(); to != nil {
+			if to := jsval.Fields(t); to != nil {
 				for k := 0; k < to.Len(); k++ {
 					o.Set(to.KeyAt(k), to.ValueAt(k))
 				}
@@ -251,8 +351,12 @@ func (p *IsocontourParams) transformPaths(geoms []Geometry, g Grid, datum jsval.
 		t = p.TranslateFn(datum)
 	} else if p.Translate != nil {
 		t = p.Translate
+		g.TranslateIsText = [2]bool{} // parameters are numbers here
 	} else {
 		t = g.Translate
+	}
+	if p.TranslateFn != nil {
+		g.TranslateIsText = [2]bool{}
 	}
 	if (len(s) == 0 || (len(s) == 1 && s[0] == 1)) && t == nil {
 		return
@@ -297,8 +401,17 @@ func transformGeometries(geoms []Geometry, g Grid, sx, sy, tx, ty float64) {
 					}
 				}
 				for k := range ring {
-					ring[k][0] = float64((ring[k][0]-g.X1)*sx) + tx
-					ring[k][1] = float64((ring[k][1]-g.Y1)*sy) + ty
+					x, y := float64((ring[k][0]-g.X1)*sx), float64((ring[k][1]-g.Y1)*sy)
+					if g.TranslateIsText[0] {
+						ring[k][0] = jsval.StringToNumber(jsval.JSNumberString(x) + g.TranslateText[0])
+					} else {
+						ring[k][0] = x + tx
+					}
+					if g.TranslateIsText[1] {
+						ring[k][1] = jsval.StringToNumber(jsval.JSNumberString(y) + g.TranslateText[1])
+					} else {
+						ring[k][1] = y + ty
+					}
 				}
 			}
 		}
@@ -357,6 +470,11 @@ func KDE2D(ctx context.Context, source []jsval.Value, p KDE2DParams) ([]jsval.Va
 			}
 			key := sb.String()
 			g := index[key]
+			if g == nil && jsval.ObjectPrototypeHas(key) {
+				// `g = map[k]` of a plain object finds Object.prototype's
+				// member of that name, which has no push
+				return nil, &jsval.Thrown{Name: "TypeError", Msg: "g.push is not a function"}
+			}
 			if g == nil {
 				g = &group{dims: dims}
 				index[key] = g

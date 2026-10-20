@@ -11,6 +11,11 @@
 # Test binary, built with `go test -c`
 *.test
 
+# The commands, as `go build ./cmd/aster` (or ./cmd/vendor-datasets) writes
+# them in the repository root
+/aster
+/vendor-datasets
+
 # Code coverage profiles and other test artifacts
 *.out
 coverage.*

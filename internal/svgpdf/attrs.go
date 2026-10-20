@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/mgilbir/aster/internal/csscolor"
 	"github.com/mgilbir/aster/internal/textcut"
 )
 
@@ -139,7 +140,7 @@ func parseLength(s string, c lengthCtx) (float64, bool) {
 		return 0, false
 	}
 	var px float64
-	switch unit := strings.ToLower(s[n:]); unit {
+	switch unit := csscolor.ASCIILower(s[n:]); unit {
 	case "em":
 		px = v * c.fontSize
 	case "ex":
@@ -264,7 +265,7 @@ func declarations(e *element, buf []decl) ([]decl, error) {
 	}
 	for d := range strings.SplitSeq(style, ";") {
 		name, value, ok := strings.Cut(d, ":")
-		name = strings.ToLower(strings.TrimSpace(name))
+		name = csscolor.ASCIILower(strings.TrimSpace(name))
 		if !ok {
 			continue // empty, or no colon: a malformed declaration
 		}
@@ -294,74 +295,6 @@ var pdfBlendModes = map[string]string{
 // fontSizeKeywords are CSS's absolute font-size keywords, in px.
 var fontSizeKeywords = map[string]float64{
 	"xx-small": 9, "x-small": 10, "small": 13, "medium": 16, "large": 18, "x-large": 24, "xx-large": 32,
-}
-
-// parseFontWeight reads a CSS font-weight given the inherited one: a keyword,
-// a relative keyword, or a number from 1 to 1000.
-func parseFontWeight(s string, inherited int) (int, bool) {
-	switch s = strings.TrimSpace(s); s {
-	case "normal":
-		return 400, true
-	case "bold":
-		return 700, true
-	case "bolder": // CSS Fonts 4, 2.2.1
-		switch {
-		case inherited < 350:
-			return 400, true
-		case inherited < 550:
-			return 700, true
-		}
-		return max(inherited, 900), true
-	case "lighter":
-		switch {
-		case inherited < 550:
-			return min(inherited, 100), true
-		case inherited < 750:
-			return 400, true
-		}
-		return 700, true
-	}
-	v, ok := parseNumber(s)
-	if !ok || v < 1 || v > 1000 {
-		return 0, false
-	}
-	return int(v), true
-}
-
-// parseFontFamilies reads a CSS font-family list: names, quoted or not,
-// separated by commas. ok is false for a list with no name.
-func parseFontFamilies(s string) ([]string, bool) {
-	var out []string
-	for len(s) > 0 {
-		s = strings.TrimLeft(s, " \t\n\r\f,")
-		if s == "" {
-			break
-		}
-		var name string
-		if q := s[0]; q == '"' || q == '\'' {
-			end := strings.IndexByte(s[1:], q)
-			if end < 0 {
-				name, s = s[1:], ""
-			} else {
-				name, s = s[1:1+end], s[end+2:]
-			}
-		} else {
-			end := strings.IndexByte(s, ',')
-			if end < 0 {
-				name, s = s, ""
-			} else {
-				name, s = s[:end], s[end+1:]
-			}
-			name = strings.TrimSpace(name)
-			if strings.Contains(name, "  ") || strings.ContainsAny(name, "\t\n\r\f") {
-				name = strings.Join(strings.Fields(name), " ")
-			}
-		}
-		if name != "" {
-			out = append(out, name)
-		}
-	}
-	return out, len(out) > 0
 }
 
 // parseDashArray reads stroke-dasharray: none, or lengths of zero or more.

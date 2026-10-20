@@ -4,27 +4,14 @@ import (
 	"encoding/base64"
 	"math"
 	"math/big"
-	"strconv"
 	"strings"
-	"sync"
 	"unicode/utf8"
 	"unsafe"
-
-	"golang.org/x/text/cases"
-	"golang.org/x/text/language"
 
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
-func isJSSpace(r rune) bool {
-	switch r {
-	case '\t', '\n', '\v', '\f', '\r', ' ', 0xA0, 0x1680, 0x2028, 0x2029, 0x202F, 0x205F, 0x3000, 0xFEFF:
-		return true
-	}
-	return r >= 0x2000 && r <= 0x200A
-}
-
-func trimJSSpace(s string) string { return strings.TrimFunc(s, isJSSpace) }
+func trimJSSpace(s string) string { return jsval.JSTrim(s) }
 
 // sliceIndex resolves a relative index argument of slice/substring style
 // methods against length n (negative counts from the end).
@@ -89,39 +76,16 @@ func (s *Scope) padded(c string, left float64, str string, right float64) string
 	return b.String()
 }
 
-var (
-	upperCaser = cases.Upper(language.Und)
-	lowerCaser = cases.Lower(language.Und)
-	caseMu     sync.Mutex
-)
+// jsUpper and jsLower are toUpperCase / toLowerCase (jsval.JSUpper,
+// jsval.JSLower).
+func jsUpper(s string) string { return jsval.JSUpper(s) }
 
-// jsUpper and jsLower are toUpperCase / toLowerCase: full Unicode case mapping
-// (ß -> SS, final sigma, İ). cases.Caser is stateful, hence the lock; ASCII
-// strings never reach it.
-func jsUpper(s string) string {
-	if isASCII(s) {
-		return strings.ToUpper(s)
-	}
-	caseMu.Lock()
-	defer caseMu.Unlock()
-	upperCaser.Reset()
-	return upperCaser.String(s)
-}
-
-func jsLower(s string) string {
-	if isASCII(s) {
-		return strings.ToLower(s)
-	}
-	caseMu.Lock()
-	defer caseMu.Unlock()
-	lowerCaser.Reset()
-	return lowerCaser.String(s)
-}
+func jsLower(s string) string { return jsval.JSLower(s) }
 
 // jsParseFloat is the global parseFloat: the longest prefix that is a decimal
 // literal (or Infinity), after leading whitespace.
 func jsParseFloat(str string) float64 {
-	str = strings.TrimLeftFunc(str, isJSSpace)
+	str = jsval.JSTrimStart(str)
 	i := 0
 	if i < len(str) && (str[i] == '+' || str[i] == '-') {
 		i++
@@ -165,18 +129,13 @@ func jsParseFloat(str string) float64 {
 			i = k
 		}
 	}
-	f, err := strconv.ParseFloat(str[:i], 64)
-	if err != nil {
-		if ne, ok := err.(*strconv.NumError); !ok || ne.Err != strconv.ErrRange {
-			return math.NaN()
-		}
-	}
+	f, _ := jsval.ParseDecimal(str[:i])
 	return f
 }
 
 // jsParseInt is the global parseInt(string, radix).
 func jsParseInt(str string, radix int32) float64 {
-	str = strings.TrimLeftFunc(str, isJSSpace)
+	str = jsval.JSTrimStart(str)
 	sign := 1.0
 	if str != "" && (str[0] == '+' || str[0] == '-') {
 		if str[0] == '-' {
@@ -213,13 +172,21 @@ func jsParseInt(str string, radix int32) float64 {
 	}
 	digits := str[:end]
 	if r == 10 {
-		f, _ := strconv.ParseFloat(digits, 64)
+		// V8 reads a decimal prefix as a numeric literal, rounded once.
+		f, _ := jsval.ParseDecimal(digits)
 		return sign * f
 	}
-	// big.Int parses in time quadratic in the digits. Past 1100 significant
-	// digits the value is beyond the largest double in any radix (2^1100), so
-	// it is Infinity without parsing.
+	// V8 skips the leading zeros before it reads the digits; in the generic
+	// case that decides where its parts begin.
 	digits = strings.TrimLeft(digits, "0")
+	if r&(r-1) != 0 {
+		return sign * parseIntGeneric(digits, r)
+	}
+	// A power-of-two radix is read exactly and rounded once, to nearest even,
+	// as V8's InternalStringToIntDouble does. big.Int parses in time
+	// quadratic in the digits. Past 1100 significant digits the value is
+	// beyond the largest double in any radix (2^1100), so it is Infinity
+	// without parsing.
 	if len(digits) > 1100 {
 		return sign * math.Inf(1)
 	}
@@ -227,6 +194,32 @@ func jsParseInt(str string, radix int32) float64 {
 	z.SetString(digits, r)
 	f, _ := new(big.Float).SetInt(&z).Float64()
 	return sign * f
+}
+
+// parseIntGeneric reads digits (all valid in radix r) as V8 does for a radix
+// that is neither 10 nor a power of two (NumberParseIntHelper's generic
+// case): in parts of as many digits as keep the part's multiplier within 32
+// bits, each folded into a double as result*multiplier + part. Past 2^53 the
+// result accumulates rounding error, which ECMA-262 allows for these radices
+// and V8 has, so it is reproduced rather than rounded exactly (C104).
+func parseIntGeneric(digits string, r int) float64 {
+	const maxMultiplier = 0xFFFFFFFF / 36
+	radix := uint32(r)
+	result := 0.0
+	for i := 0; i < len(digits); {
+		part, multiplier := uint32(0), uint32(1)
+		for i < len(digits) {
+			m := multiplier * radix
+			if m > maxMultiplier {
+				break
+			}
+			part = part*radix + uint32(digitValue(digits[i]))
+			multiplier = m
+			i++
+		}
+		result = float64(result*float64(multiplier)) + float64(part) // no FMA: V8 rounds the product
+	}
+	return result
 }
 
 func digitValue(c byte) int {
@@ -384,8 +377,17 @@ func (s *Scope) caseGrown(was int, out string) {
 	}
 }
 
+// stringFirst is the String(a) the generated code applies to the first
+// argument of substring and split before it evaluates the others.
+func stringFirst(s *Scope, v jsval.Value) jsval.Value {
+	if v.IsStr() {
+		return v
+	}
+	return jsval.Str(s.str(v))
+}
+
 func init() {
-	def("length", &funcDef{min: 1, fn: func(s *Scope, args []jsval.Value) jsval.Value { return s.getProp(args[0], "length") },
+	def("length", &funcDef{min: 1, argc: 1, fn: func(s *Scope, args []jsval.Value) jsval.Value { return s.getProp(args[0], "length") },
 		// length(1) generates `1.length`, which is a syntax error upstream.
 		check: func(n *Node) error {
 			if bareInteger(n.Elems[0]) {
@@ -403,18 +405,18 @@ func init() {
 		s.workBytes(len(str))
 		return jsval.Num(jsParseInt(str, toInt32(s.num(arg(args, 1)))))
 	})
-	fnMin("upper", 1, func(s *Scope, args []jsval.Value) jsval.Value {
+	def("upper", &funcDef{min: 1, argc: 1, fn: func(s *Scope, args []jsval.Value) jsval.Value {
 		return jsval.Str(s.caseMapped(s.str(args[0]), jsUpper))
-	})
-	fnMin("lower", 1, func(s *Scope, args []jsval.Value) jsval.Value {
+	}})
+	def("lower", &funcDef{min: 1, argc: 1, fn: func(s *Scope, args []jsval.Value) jsval.Value {
 		return jsval.Str(s.caseMapped(s.str(args[0]), jsLower))
-	})
-	fnMin("trim", 1, func(s *Scope, args []jsval.Value) jsval.Value {
+	}})
+	def("trim", &funcDef{min: 1, argc: 1, fn: func(s *Scope, args []jsval.Value) jsval.Value {
 		str := s.str(args[0])
 		s.workBytes(len(str))
 		return jsval.Str(trimJSSpace(str))
-	})
-	fnMin("substring", 1, func(s *Scope, args []jsval.Value) jsval.Value {
+	}})
+	def("substring", &funcDef{min: 1, first: stringFirst, fn: func(s *Scope, args []jsval.Value) jsval.Value {
 		str := s.str(args[0])
 		n := utf16Len(str)
 		clampIdx := func(v jsval.Value, def int) int {
@@ -435,8 +437,8 @@ func init() {
 			a, b = b, a
 		}
 		return jsval.Str(s.substr(str, a, b))
-	})
-	fnMin("split", 1, func(s *Scope, args []jsval.Value) jsval.Value {
+	}})
+	def("split", &funcDef{min: 1, first: stringFirst, fn: func(s *Scope, args []jsval.Value) jsval.Value {
 		str := s.str(args[0])
 		sep, lim := arg(args, 1), arg(args, 2)
 		limit := uint32(math.MaxUint32)
@@ -453,9 +455,14 @@ func init() {
 			return jsval.Arr(s.regexpSplit(sep.PatternOf(), str, limit))
 		}
 		return jsval.Arr(s.stringSplit(str, s.str(sep), limit))
-	})
+	}})
 	fn("btoa", func(s *Scope, args []jsval.Value) jsval.Value {
-		str := s.str(arg(args, 0))
+		if len(args) == 0 {
+			// The platform's btoa takes one argument, which may be
+			// undefined but must be there.
+			typeError("The \"input\" argument must be specified")
+		}
+		str := s.str(args[0])
 		s.chargeBytes(len(str) + base64.StdEncoding.EncodedLen(len(str)))
 		s.workBytes(len(str))
 		b := make([]byte, 0, len(str))
@@ -545,10 +552,11 @@ func init() {
 		}
 		return jsval.PatternValue(s.compilePattern(source, flags))
 	})
-	fnMin("test", 1, func(s *Scope, args []jsval.Value) jsval.Value {
-		p := s.toPattern(args[0])
-		return jsval.Bool(s.patternTest(p, s.str(arg(args, 1))))
-	})
+	def("test", &funcDef{min: 1, first: func(s *Scope, v jsval.Value) jsval.Value { return jsval.PatternValue(s.toPattern(v)) },
+		fn: func(s *Scope, args []jsval.Value) jsval.Value {
+			p := s.toPattern(args[0])
+			return jsval.Bool(s.patternTest(p, s.str(arg(args, 1))))
+		}})
 
 	fn("replace", func(s *Scope, args []jsval.Value) jsval.Value {
 		str, pat, repl := arg(args, 0), arg(args, 1), s.str(arg(args, 2))

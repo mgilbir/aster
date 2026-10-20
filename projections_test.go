@@ -256,7 +256,7 @@ func TestCustomProjectionFailures(t *testing.T) {
 		for _, props := range []string{`"scale": 80`, `"fit": {"signal": "data('world')"}, "size": [500, 300]`, `"clipAngle": 60`} {
 			fuzzutil.Within(t, 60*time.Second, fmt.Sprintf("hostile %d {%s}", i, props), func() {
 				_, err := hc.VegaToSVG([]byte(worldSpec("h", props)))
-				if err != nil && strings.Contains(err.Error(), "internal error") {
+				if isEngineBug(err) {
 					t.Errorf("hostile %d {%s}: %v", i, props, err)
 				}
 			})

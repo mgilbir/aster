@@ -3,6 +3,7 @@ package transforms
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 
 	"github.com/mgilbir/aster/internal/budget"
@@ -18,11 +19,11 @@ func measuresFrom(spec jsval.Value) []Measure {
 	as := spec.Get("as")
 	var ms []Measure
 	for i, op := range ops {
-		m := Measure{Op: op}
+		m := Measure{Op: op, Param: math.NaN()}
 		if f := fields.Index(i); f.IsStr() {
 			m.Field = FieldOf(f.StrValue())
 		}
-		if i < len(params) && params[i] == params[i] {
+		if i < len(params) && params[i] == params[i] && params[i] != 0 {
 			m.Param = params[i]
 		}
 		if a := as.Index(i); a.IsStr() {

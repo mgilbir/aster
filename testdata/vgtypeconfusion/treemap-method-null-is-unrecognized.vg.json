@@ -1,0 +1,1 @@
+{"width":120,"height":60,"data":[{"name":"t","values":[{"id":1},{"id":2,"p":1},{"id":3,"p":1}],"transform":[{"type":"stratify","key":"id","parentKey":"p"},{"type":"treemap","size":[100,50],"method":{"signal":"null"}}]}],"marks":[{"type":"text","from":{"data":"t"},"encode":{"enter":{"y":{"signal":"12*datum.id"},"text":{"signal":"datum.x0"}}}}]}

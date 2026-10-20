@@ -6,15 +6,17 @@ Aster is a Go implementation of Vega and Vega-Lite whose correctness is defined 
 
 ```bash
 git clone https://github.com/mgilbir/aster && cd aster
-go build ./...          # everything is committed; works offline
+go build ./...          # everything is committed; offline once the module cache has the dependencies (go mod download)
 make test               # go test -short ./... — no node needed
 ```
 
-For the comparison with upstream (most changes need it), install the pinned oracle once. It needs node; the version is pinned in `testdata/oracle-node/package.json` (volta):
+For the comparison with upstream (most changes need it), install the pinned oracle once. It needs node; the version is pinned in `testdata/oracle-node/package.json` (volta). The two scripts fetch what is too large to commit, and keep it up to date when run again:
 
 ```bash
 (cd testdata/oracle-node && npm ci) && (cd testdata/oracle-node-vl5 && npm ci)
 (cd testdata/mermaid && npm ci)    # renders the docs' diagrams (TestDocsMermaid)
+scripts/record-upstream-vectors.sh # upstream's own test suites, recorded (TestUpstream*)
+scripts/fetch-corpora.sh           # the external corpora (TestCorpusWild, TestCorpusDeneb)
 ASTER_ORACLE=require go test ./...
 ```
 

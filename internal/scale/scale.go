@@ -40,7 +40,18 @@ type meta struct {
 	// work is what SetWork installed: it is told the steps of the scale's
 	// loops over its domain, a batch at a time.
 	work func(steps int)
+	// walk is what SetWalker installed: the call's Walker, which walks the
+	// values the scale reads as text or interpolates element by element.
+	walk jsval.Walker
 }
+
+// SetWalker installs the Walker of the call the scale belongs to (ADR 0018).
+// A copy of the scale keeps it. Without one the scale walks with the
+// detached Walker.
+func (m *meta) SetWalker(w jsval.Walker) { m.walk = w }
+
+// walker is the Walker SetWalker installed.
+func (m *meta) walker() jsval.Walker { return m.walk }
 
 // workBatch is how many domain values a scale's loops go between two reports
 // of their work.
@@ -174,6 +185,12 @@ type TickCount struct {
 	// d3's ticks treat both as 10, but vega-scale also computes with the
 	// count, where null is 0 and undefined NaN (tickLog, formatSpan).
 	Null bool
+	// Opaque marks a count that is a JavaScript object or function: truthy
+	// whatever number it reads as (N). vega-encode's `tickCount(...) || null`
+	// keeps it (the member of Object.prototype a vega-time unit name finds, a
+	// {} or an [] given as the interval), where a NaN or 0 count it reads as
+	// would be replaced by null.
+	Opaque bool
 }
 
 // number is the count as JavaScript arithmetic reads it: N, 0 for null, NaN

@@ -3,9 +3,9 @@ package aster
 import (
 	"fmt"
 	"maps"
-	"strings"
 
 	"github.com/mgilbir/aster/internal/geo"
+	"github.com/mgilbir/aster/internal/jsval"
 )
 
 // Projection is a cartographic projection type that specifications can name
@@ -90,6 +90,6 @@ func WithProjection(name string, p Projection) Option {
 		if c.projections == nil {
 			c.projections = geo.Registry{}
 		}
-		c.projections[strings.ToLower(name)] = ct
+		c.projections[jsval.JSLower(name)] = ct // looked up by type.toLowerCase()
 	}
 }

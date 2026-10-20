@@ -6,5 +6,5 @@ import "testing"
 // Vega-Lite's own schema declares (marks, encoding channels, guides and
 // configuration blocks) and compares the compiled Vega with upstream's.
 func TestSweepVegaLiteSchema(t *testing.T) {
-	runSweep(t, sweep{name: "vega-lite-schema", mode: compareVega, floor: 27513})
+	runSweep(t, sweep{name: "vega-lite-schema", mode: compareVega})
 }

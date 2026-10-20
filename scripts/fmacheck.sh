@@ -76,7 +76,7 @@ awk -v root="$root" '
 	n = split(loc, p, ":"); line = p[n]; file = substr(loc, 1, length(loc) - length(line) - 1)
 	if (index(file, root "/internal/") != 1) next
 	rel = substr(file, length(root) + 2)
-	if (rel ~ /^internal\/(jsmath|raster|csscolor|text|svgpdf|fontsubset|fonts|loader|pngopt|cmd)\// && rel !~ /^internal\/raster\/(filter|filterprims|filterspec|turbulence|lighting|feimage)\.go$/) next
+	if (rel ~ /^internal\/(jsmath|raster|csscolor|text|svgpdf|fontsubset|fonts|loader|pngopt|cmd)\// && rel !~ /^internal\/raster\/(filter[a-z0-9_]*|turbulence|lighting|feimage)\.go$/) next
 	print rel "\t" line "\t" fn
 }' "$tmp/asm.txt" | sort -u >"$tmp/raw.txt"
 

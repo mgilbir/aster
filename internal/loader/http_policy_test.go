@@ -84,15 +84,9 @@ func TestHTTPLoaderAllowlistTricks(t *testing.T) {
 		"http://evil.com/allowed.com",
 		"http://allowed.com.evil.com/",
 		"http://evilallowed.com/",
-		"http://allowed.com\\@evil.com/",
 		"http://allowed.com%2eevil.com/",
 		"http://allowed.com%00.evil.com/",
 		"http://allowed.com\x00.evil.com/",
-		"http://allowed.com/\r\nHost: evil.com",
-		"http:///allowed.com/x",
-		"http:allowed.com/x",
-		"http:\\\\allowed.com/x",
-		"//allowed.com/x",
 		"http://bücher.de/",     // not the punycode form
 		"http://ａllowed.com/",   // fullwidth a
 		"http://allowed。com/",   // ideographic full stop
@@ -104,6 +98,36 @@ func TestHTTPLoaderAllowlistTricks(t *testing.T) {
 		}
 		if _, err := l.Load(context.Background(), uri); err == nil {
 			t.Errorf("Load(%q) succeeded", uri)
+		}
+	}
+	// Strings the URL Standard reads as a request to the allowed host, which
+	// net/url reads as no host or another: fetch goes to allowed.com, so the
+	// loader does, and nowhere else (the path is only a path).
+	var got []string
+	ok := &HTTPLoader{AllowedDomains: l.AllowedDomains, Client: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		got = append(got, r.URL.Host+" "+r.URL.RequestURI())
+		return respond(r, 200, "[]"), nil
+	})}}
+	for uri, want := range map[string]string{
+		"http://allowed.com\\@evil.com/x":       "allowed.com /@evil.com/x",
+		"http://allowed.com/\r\nHost: evil.com": "allowed.com /Host:%20evil.com",
+		"http:///allowed.com/x":                 "allowed.com /x",
+		"http:allowed.com/x":                    "allowed.com /x",
+		"http:\\\\allowed.com/x":                "allowed.com /x",
+		"//allowed.com/x":                       "allowed.com /x", // Sanitize: http://allowed.com/x
+		"http://allo\twed.c\nom/x":              "allowed.com /x",
+	} {
+		got = nil
+		// The engine's way: Load gets what Sanitize returned.
+		s, err := ok.Sanitize(context.Background(), uri)
+		if err != nil {
+			t.Errorf("Sanitize(%q): %v", uri, err)
+		}
+		if _, err := ok.Load(context.Background(), s); err != nil {
+			t.Errorf("Load(%q): %v", s, err)
+		}
+		if len(got) != 1 || got[0] != want {
+			t.Errorf("Load(%q) requested %q, want %q", uri, got, want)
 		}
 	}
 	for _, uri := range []string{

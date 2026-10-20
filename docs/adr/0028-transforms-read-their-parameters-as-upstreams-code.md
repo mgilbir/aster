@@ -1,0 +1,27 @@
+# 0028: A transform reads its parameters as upstream's transform code does
+
+**Status:** accepted, 2026-10-19.
+
+## Context
+
+Each Vega transform declares its parameters in a definition (`Sample.Definition`, `Wordcloud.Definition`, recorded in `internal/vega/definitions.json`), with types and defaults. vega-parser uses the definition to parse a specification, but never applies its defaults: an absent parameter reaches the transform as `undefined`, and what that means is whatever the transform's own code does with it (`_.size`, `_.fontSizeRange || ...`, `_.interval !== false`, `_.offset == null ? 1 : ...`). The engine's glue had two sources of truth: it read some parameters as the code does and others from the definition, so a `sample` without a size sampled 1,000 tuples where upstream keeps none, and a `wordcloud` without a `fontSizeRange` scaled the sizes into [10, 50] where upstream draws them as given (audit 2026-10-18, C35). A null parameter had the same two readings, and a falsy one (0, "") a third.
+
+The audit found other places where the transforms followed their own idea of the data rather than upstream's code: ties of a sort left in the order a previous sort made instead of the ingestion order (C36), because breaking them by tuple id had to be remembered at each sort; upstream's maps keyed by data are plain objects, where a key that names a member of `Object.prototype` finds that member (C135); and ADR 0011's licence to refuse was used for inputs upstream finishes (a `bin` base below 1, C132) while inputs upstream never finishes were quietly cut short (a force node at an infinite position, a wordcloud's spiral, C133).
+
+## Decision
+
+- **An absent parameter is upstream's transform code with `undefined`; a definition's default is documentation.** The glue reads every parameter as the transform's code reads it: `_.x || d` (any falsy value is the default), `_.x != null ? _.x : d` (only null and undefined are), `_.x !== false`, `_.x === undefined ? d : _.x`, or the value as it is. A d3 setter that vega calls only for a parameter that is there (`if (p in _) layout[p](_[p])`) converts as d3 does (`+x`: null is 0). An array parameter given as null is the TypeError of vega-parser's `value.map`.
+- **`TestTransformsMatchNode` holds every parameter of every transform to it.** `internal/vega/testdata/gen_transforms.mjs` builds, for every transform in the definitions, a specification with every parameter set and then each optional parameter absent, null and falsy (0, "", false, true), its sub-parameters included (a density's distribution, a force's forces), and records upstream's first error, its warnings and its data in `transforms.node.json`; the test replays them all. The same file holds hand-written cases of the audit's other classes. The file records a hash of its generator, which the test checks, so the two cannot drift.
+- **Ties of a sort go by tuple id, by construction.** `transforms.SortTuples` takes only an `IDStable` comparator, which `StableComparator` (vega-dataflow's `stableCompare`) is the only way to make, and a hierarchy layout breaks ties of its sort by the tuple ids of the nodes' data whatever the caller passes. Upstream sorts tuples only through `stableCompare`, so no sort of tuples can leave it out.
+- **A map upstream keys by data is a plain object.** Where upstream groups, counts or looks up by a value's text in `{}` (partition, impute, pivot, countpattern, nest, kde2d, window, an aggregate's cross product and its `distinct`, a lookup's index), a key that names a member of `Object.prototype` (`constructor`, `toString`, `__proto__`) does what it does upstream: it finds the member, which makes no group, a TypeError (`g.push is not a function`), or, for `__proto__`, no key at all. This is upstream's bug, reproduced as the rule of ADR 0013 asks: the output of a specification upstream renders is upstream's.
+- **ADR 0011 refuses only what upstream does not finish.** An input is refused with `ErrLimit` only where upstream's algorithm provably never ends (a bin step search with a base below 1, d3-quadtree covering an infinite position); one upstream finishes is computed, however long it takes, within the call's deadline (a wordcloud's spiral on a large board, a curve over a reversed extent), and its rows and memory are charged as they are made.
+
+## Why
+
+One rule, the transform's code, leaves nothing to a per-site judgement that the next site gets wrong, and the sweep makes a site that departs from it a test failure, absent and null and falsy alike. Upstream's identity rules (tuple ids, plain objects) are part of its output; reproducing them by construction is cheaper than reviewing each site. A refusal of an input upstream finishes is a divergence ADR 0011 does not license.
+
+## Consequences
+
+- Behaviour changes, each toward upstream: a `sample` with no `size` keeps no tuple, a `wordcloud` with no `fontSizeRange` draws its sizes as given, aggregates of unmatched `fields` and `ops` fail with upstream's error, a `bin` with a base of 1 or less bins (a NaN step for 1), a force node at an infinite position fails with `ErrLimit` instead of being dropped, data values named after `Object.prototype` members behave as upstream's.
+- The sweep runs in every `go test` (no node needed); regenerating it needs node and the oracle's modules.
+- Upstream's own failures are reproduced with their messages (`Unmatched number of fields and aggregate ops.`, `values.push is not a function`), as ADR 0013 holds for Vega-Lite.

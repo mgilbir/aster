@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"go/types"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -16,6 +18,7 @@ import (
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/scene"
 	"github.com/mgilbir/aster/internal/svgcheck"
+	"github.com/mgilbir/aster/internal/testutil"
 )
 
 // hostile is a string that, written into the output without escaping, closes
@@ -43,6 +46,9 @@ func renderStructure(t *testing.T, sg *scene.Scenegraph, label string) string {
 			t.Errorf("%s: unexpected error %v", label, err)
 		}
 		return ""
+	}
+	if len(out) > opt.MaxBytes {
+		t.Errorf("%s: a %d-byte document returned under MaxBytes %d", label, len(out), opt.MaxBytes)
 	}
 	if err := svgcheck.Check(out); err != nil {
 		t.Errorf("%s: %v\n%s", label, err, out)
@@ -190,13 +196,16 @@ func TestStructureCheckCatchesInjectedMarkup(t *testing.T) {
 // TestNoRawMarkup keeps the writer's discipline (see lit): outside
 // markup.go no code touches the output buffer, and nothing converts a value
 // to lit, so every byte of spec or data text goes through an escaping method.
+// The conversions are found by type, not by spelling: lit(s), (lit)(s), a
+// conversion to an alias of lit, and a generic function instantiated with lit
+// (whose T(s) converts to lit) all count (C153, audit 2026-10-18).
 func TestNoRawMarkup(t *testing.T) {
 	fset := token.NewFileSet()
 	names, err := filepath.Glob("*.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	files := 0
+	var files []*ast.File
 	for _, name := range names {
 		if strings.HasSuffix(name, "_test.go") {
 			continue
@@ -205,7 +214,34 @@ func TestNoRawMarkup(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		files++
+		files = append(files, f)
+	}
+	if len(files) < 5 {
+		t.Fatalf("parsed only %d files", len(files))
+	}
+	info := &types.Info{Types: map[ast.Expr]types.TypeAndValue{}, Instances: map[*ast.Ident]types.Instance{}}
+	conf := types.Config{Importer: testutil.SourceImporter(fset)}
+	pkg, err := conf.Check("github.com/mgilbir/aster/internal/svg", fset, files, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	obj := pkg.Scope().Lookup("lit")
+	if obj == nil {
+		t.Fatal("no type lit")
+	}
+	litType := obj.Type()
+	noRawMarkup(t, fset, files, info, litType)
+}
+
+// noRawMarkup reports every write to the output buffer outside markup.go and
+// every conversion to litType in files.
+func noRawMarkup(t interface {
+	Helper()
+	Errorf(format string, args ...any)
+}, fset *token.FileSet, files []*ast.File, info *types.Info, litType types.Type) {
+	t.Helper()
+	for _, f := range files {
+		name := filepath.Base(fset.Position(f.Pos()).Filename)
 		ast.Inspect(f, func(n ast.Node) bool {
 			switch n := n.(type) {
 			case *ast.SelectorExpr:
@@ -213,14 +249,56 @@ func TestNoRawMarkup(t *testing.T) {
 					t.Errorf("%s: the output buffer is written outside markup.go", fset.Position(n.Pos()))
 				}
 			case *ast.CallExpr:
-				if id, ok := n.Fun.(*ast.Ident); ok && id.Name == "lit" {
+				if tv, ok := info.Types[n.Fun]; ok && tv.IsType() && types.Identical(tv.Type, litType) {
 					t.Errorf("%s: a value converted to lit reaches the output unescaped", fset.Position(n.Pos()))
 				}
 			}
 			return true
 		})
 	}
-	if files < 5 {
-		t.Fatalf("parsed only %d files", files)
+	for id, inst := range info.Instances {
+		for i := range inst.TypeArgs.Len() {
+			if types.Identical(inst.TypeArgs.At(i), litType) {
+				t.Errorf("%s: %s is instantiated with lit, so a conversion inside it reaches the output unescaped", fset.Position(id.Pos()), id.Name)
+			}
+		}
 	}
 }
+
+// The check finds a conversion to lit however it is spelled: these files
+// convert a value to lit each way, and each must be reported.
+func TestNoRawMarkupFindsEveryConversion(t *testing.T) {
+	const src = `package svg
+type lit string
+type alias = lit
+func conv[T ~string](s string) T { return T(s) }
+func a(s string) lit { return lit(s) }
+func b(s string) lit { return (lit)(s) }
+func c(s string) lit { return alias(s) }
+func d(s string) lit { return conv[lit](s) }
+func e(s string) lit { return conv[alias](s) }
+`
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "planted.go", src, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info := &types.Info{Types: map[ast.Expr]types.TypeAndValue{}, Instances: map[*ast.Ident]types.Instance{}}
+	pkg, err := (&types.Config{}).Check("svg", fset, []*ast.File{f}, info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := &recorder{}
+	noRawMarkup(rec, fset, []*ast.File{f}, info, pkg.Scope().Lookup("lit").Type())
+	if len(rec.errs) != 5 {
+		t.Errorf("reported %d conversions, want 5:\n%s", len(rec.errs), strings.Join(rec.errs, "\n"))
+	}
+}
+
+// recorder collects a check's errors instead of failing the test.
+type recorder struct{ errs []string }
+
+func (r *recorder) Errorf(format string, args ...any) {
+	r.errs = append(r.errs, fmt.Sprintf(format, args...))
+}
+func (r *recorder) Helper() {}

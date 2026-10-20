@@ -1,0 +1,1 @@
+{"width":100,"height":50,"signals":[{"name":"grammar","value":"utc"}],"scales":[{"name":"when","type":"linear","domain":[1705276800000,1729036800000],"range":{"scheme":"viridis"}}],"legends":[{"fill":"when","type":"gradient","formatType":{"signal":"grammar"},"format":"__proto__","orient":"top-right","gradientLength":120,"direction":"horizontal"}]}

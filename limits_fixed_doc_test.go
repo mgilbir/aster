@@ -2,7 +2,6 @@ package aster_test
 
 import (
 	"go/constant"
-	"go/importer"
 	"go/token"
 	"go/types"
 	"os"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/mgilbir/aster"
 	"github.com/mgilbir/aster/internal/raster"
+	"github.com/mgilbir/aster/internal/testutil"
 	"github.com/mgilbir/aster/internal/vega"
 )
 
@@ -36,7 +36,7 @@ func TestFixedLimitsDocMatchesCode(t *testing.T) {
 		t.Fatal("docs/limits.md has no fixed:begin/end block")
 	}
 
-	imp := importer.ForCompiler(token.NewFileSet(), "source", nil)
+	imp := testutil.SourceImporter(token.NewFileSet())
 	pkgs := map[string]*types.Package{}
 	// c is the value of the constant pkg.name, exported or not.
 	c := func(path, name string) int64 {
@@ -72,6 +72,7 @@ func TestFixedLimitsDocMatchesCode(t *testing.T) {
 		"geographic path points":         {{int64(vl.MaxPoints)}},
 		"projection `clipAngle`":         {{c("geo", "maxClipRadians")}},
 		"dataflow evaluations":           {{int64(vl.MaxVisits)}},
+		"layout loops stepped by text":   {{c("vega/layout", "gridLoopPerCell")}, {c("vega/layout", "gridLoopBase")}, {c("vega/layout", "trellisLoopPerItem")}, {c("vega/layout", "trellisLoopBase")}},
 		"re-evaluations":                 {{int64(vl.MaxReruns)}, {int64(vl.MaxReruns)}, {c("vega", "maxRunDepth")}},
 		"delimited data (CSV, TSV, DSV)": {{c("vega", "maxDSVColumns")}, {c("vega", "dsvCellsPerRow")}},
 		"warnings":                       {{c("vega", "MaxWarningText")}, {c("vega", "maxWarnings")}},
@@ -79,19 +80,20 @@ func TestFixedLimitsDocMatchesCode(t *testing.T) {
 			{root["maxImageBytes"], int64(rl.MaxImageBytes), c("svgpdf", "defaultMaxImgBytes")},
 			{root["maxImagePixels"], int64(rl.MaxImagePixels), c("svgpdf", "defaultMaxImgPixels")},
 		},
-		"HTTP response body":              {{c("loader", "defaultMaxResponseBytes")}},
-		"file":                            {{c("loader", "defaultMaxResponseBytes")}},
-		"JSON nesting":                    {{c("jsval", "MaxJSONDepth")}, {c("jsval", "MaxValueDepth")}},
-		"expression nesting":              {{c("expr", "MaxDepth"), c("vegalite", "MaxExprDepth")}},
-		"one string an expression builds": {{c("expr", "MaxStringLength")}, {c("expr", "v8MaxStringLength")}},
-		"a regular expression compiled from a string": {{c("expr", "MaxPatternLength")}, {c("github.com/mgilbir/goecma262/compiler", "MaxProgramSize")}},
+		"HTTP response body":    {{c("loader", "defaultMaxResponseBytes")}},
+		"file":                  {{c("loader", "defaultMaxResponseBytes")}},
+		"JSON nesting":          {{c("jsval", "MaxJSONDepth")}, {c("jsval", "MaxValueDepth")}},
+		"Vega-Lite view weight": {{c("vegalite", "viewWeightBytes")}},
+		"expression nesting":    {{c("expr", "MaxDepth"), c("vegalite", "MaxExprDepth")}},
+		"one string an expression builds or a value prints as": {{c("expr", "MaxStringLength"), c("jsval", "MaxStringLength")}, {c("expr", "v8MaxStringLength")}},
+		"a walk of a value made outside a call":                {{c("jsval", "MaxDetachedWalk")}, {c("jsval", "maxDetachedBytes")}},
+		"a regular expression compiled from a string":          {{c("expr", "MaxPatternLength")}, {c("github.com/mgilbir/goecma262/compiler", "MaxProgramSize")}},
 		"a regular expression search": {
 			{c("github.com/mgilbir/goecma262/vm", "DefaultMaxSteps")}, {c("github.com/mgilbir/goecma262/vm", "DefaultStepsPerByte")},
 			{c("github.com/mgilbir/goecma262/vm", "DefaultMaxMemory")}, {c("github.com/mgilbir/goecma262/vm", "DefaultMemoryPerByte")},
 		},
-		"SVG input to `SVGToPNG`":                 {{int64(rl.MaxInputBytes)}, {int64(rl.MaxElements)}, {int64(rl.MaxDepth)}},
-		"style sheets of SVG input to `SVGToPNG`": {{int64(rl.MaxStyleBytes)}, {int64(rl.MaxCSSRules)}, {int64(rl.MaxCSSWork)}},
-		"one filter region (PNG)":                 {{int64(rl.MaxFilterPixels)}},
+		"SVG input to `SVGToPNG`":                 {{int64(rl.MaxDepth)}},
+		"style sheets of SVG input to `SVGToPNG`": {{int64(rl.MaxCSSWork)}},
 		"filter primitives (PNG)":                 {{c("raster", "maxConvolveTaps")}, {c("raster", "maxTurbulenceOctaves")}, {int64(rl.MaxLayerDepth)}},
 		"pixel work of one PNG render": {
 			{root["pixelOps"], c("raster", "defaultMaxPixelOps")}, {root["pixelOpsPerPixel"], c("raster", "defaultPixelOpsPer")},
@@ -100,9 +102,8 @@ func TestFixedLimitsDocMatchesCode(t *testing.T) {
 			{c("raster", "maxGradCacheBytes")}, {c("raster", "maxGradCacheEntries")}, {c("raster", "maxOutlineCacheBytes")},
 			{c("raster", "maxOutlineEntries")}, {c("raster", "maxSVGGlyphBytes")}, {c("raster", "maxSVGGlyphDocs")},
 		},
-		"SVG input to `SVGToPDF`": {
-			{c("svgpdf", "defaultMaxInputBytes")}, {c("svgpdf", "defaultMaxElements")}, {c("svgpdf", "defaultMaxSegments")},
-			{c("svgpdf", "defaultMaxTextBytes")}, {c("svgpdf", "maxGlyphCacheBytes")}, {c("svgpdf", "maxPaintedBytes")}, {c("svgpdf", "maxDashes")},
+		"PDF output": {
+			{c("svgpdf", "maxGlyphCacheBytes")}, {c("svgpdf", "maxPaintedBytes")}, {c("svgpdf", "maxDashes")},
 		},
 		"fonts":        {{c("text", "maxFontBytes")}, {c("text", "maxSystemFontBytes")}, {c("text", "maxSystemFaces")}, {c("text", "programCacheBytes")}, {c("text", "programCacheMaxEntry")}},
 		"text shaping": nil, // "about sixty times": DefaultShapingWork's comment derives it
@@ -121,10 +122,13 @@ func TestFixedLimitsDocMatchesCode(t *testing.T) {
 		"ticks, labels and legend entries of one guide": {{c("scale", "MaxTicks")}},
 		"values a scale's `ticks` lists":                {{c("scale", "maxTickValues")}, {c("scale", "maxLogIter")}, {c("format", "MaxRangeLen")}},
 		"colours sampled from a scheme (`schemeCount`)": {{c("scale", "MaxSchemeSamples")}},
-		"`config.locale.number`":                        {{c("format", "MaxLocaleSymbol")}, {c("format", "MaxLocaleText")}},
+		"`config.locale.number`":                        {{c("format", "MaxLocaleSymbol")}, {c("format", "MaxLocaleText")}, {c("format", "MaxGroupSteps")}},
 		"`config.locale.time`": {
 			{c("format", "MaxLocalePattern")}, {c("format", "MaxLocaleExpansion")}, {c("format", "MaxLocaleName")}, {c("format", "MaxLocaleNames")},
+			{c("format", "maxParseNesting")},
 		},
+		"time labels": nil, // the call's ledger room: no fixed number
+		"`graticule`": {{c("geo", "maxGraticulePoints")}},
 		"format memos of one call (`format`, `timeFormat`, `timeParse` and labels)": {{c("format", "formatMemoBytes")}, {c("format", "formatMemoMaxEntry")}},
 	}
 	seen := map[string]bool{}

@@ -1,0 +1,4 @@
+{"data":{"url":"data/barley.json"},
+ "mark":{"type":"bar","tooltip":true},
+ "config":{"customFormatTypes":true},
+ "encoding":{"x":{"aggregate":"sum","field":"yield","type":"quantitative","stack":"normalize","formatType":"myFormat","format":"x"},"y":{"field":"variety","type":"nominal"},"color":{"field":"site","type":"nominal"}}}

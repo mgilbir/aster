@@ -43,7 +43,7 @@ func ColourGlyphImage(ctx context.Context, f *text.Face, gid int, fg shape.Color
 	if f == nil || ppem <= 0 {
 		return nil, box, errors.New("raster: no face or size to paint a glyph at")
 	}
-	tf := &textFace{f: f}
+	tf := faceOf(f)
 	b := &colourBounds{face: tf}
 	if err := tf.Paint(uint32(gid), shape.PaintOptions{Foreground: fg, PPEM: ppem}, b); err != nil {
 		return nil, box, err
@@ -138,7 +138,7 @@ func ColourGlyphBounds(f *text.Face, gid int, opts shape.PaintOptions) (box shap
 	if f == nil {
 		return box, false
 	}
-	tf := &textFace{f: f}
+	tf := faceOf(f)
 	b := &colourBounds{face: tf}
 	if err := tf.Paint(uint32(gid), opts, b); err != nil || !b.ok {
 		return box, false

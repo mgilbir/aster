@@ -3,14 +3,23 @@
 // with what upstream renders, compiles and rasterizes for the same input.
 //
 // Answers are cached in testdata/oracle-cache (git-ignored) under a key that
-// covers the oracle's versions, script and lockfile, so they are recreated
-// whenever any of them change and never need to be committed.
+// covers every input the oracle's answers depend on (see inputFiles): its
+// versions and platform, its scripts and lockfile, the datasets it serves and
+// the fonts it measures with. So they are recreated whenever any of them
+// change and never need to be committed.
 //
 // Without node or the installed modules the tests that need the oracle skip;
 // with ASTER_ORACLE=require (as in CI) they fail instead. Install with
 //
 //	(cd testdata/oracle-node && npm ci)
 //	(cd testdata/oracle-node-vl5 && npm ci)   # Vega-Lite 5.8 compilation
+//
+// node must be the version the module set pins (package.json's volta.node):
+// another V8 rounds some arithmetic differently in the last bit, and those
+// differences would read as the engine's. Another node is refused, as if the
+// oracle were not installed, unless ASTER_ORACLE_ANY_NODE=1 says to use it
+// anyway (its version is part of the cache key, so its answers never mix with
+// the pinned node's).
 package oracle
 
 import (
@@ -26,6 +35,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -57,6 +67,12 @@ var answerTimeout = 2 * time.Minute
 // fail" look like agreement).
 var ErrNoAnswer = errors.New("oracle: no answer in time")
 
+// ErrFailed is the error of a request the oracle could not answer for a
+// reason of its own (oracle.mjs reports it as oracleErr: resvg-napi did not
+// load, a generator threw, a request it cannot parse). Like ErrNoAnswer it is
+// not upstream's answer: it is never cached, and the test that asked fails.
+var ErrFailed = errors.New("oracle: failed")
+
 // legacyTimeout is how a timeout used to be recorded, as upstream's error, in
 // the cache; such an entry is not an answer and is asked again.
 const legacyTimeout = "oracle: no answer within "
@@ -71,6 +87,10 @@ type Result struct {
 	Err  string          `json:"err,omitempty"`
 	// Warnings are what the Vega-Lite compiler logged (Compile only).
 	Warnings []string `json:"warnings,omitempty"`
+
+	// fontRejected: the answer involved a font string the canvas refused
+	// (oracle.mjs), so it depends on what the process measured before.
+	fontRejected bool
 }
 
 // Oracle serves a module set from a small pool of node processes, so callers
@@ -92,6 +112,10 @@ type proc struct {
 	stdin  io.WriteCloser
 	lines  chan []byte // stdout, one response per line; closed when node exits
 	nextID int
+	// fontDir is the process's fontconfig directory (oracle.mjs): made here
+	// and removed when the process is stopped, since a process killed in a
+	// replacement or a timeout runs no exit handler of its own.
+	fontDir string
 }
 
 var oracles sync.Map // set → *Oracle
@@ -130,18 +154,37 @@ func ForZone(t testing.TB, set, zone string) *Oracle {
 	if _, err := os.Stat(filepath.Join(root, set, "node_modules", "vega")); err != nil {
 		return unavailable("%s/node_modules missing", set)
 	}
-	h := sha256.New()
-	for _, f := range []string{script, filepath.Join(set, "package-lock.json")} {
-		b, err := os.ReadFile(filepath.Join(root, f))
-		if err != nil {
-			return unavailable("%v", err)
-		}
-		h.Write(b)
+	pin, err := pinnedNode(filepath.Join(root, set, "package.json"))
+	if err != nil {
+		return unavailable("%v", err)
 	}
+	h := sha256.New()
+	inputs, err := inputsHash(root)
+	if err != nil {
+		return unavailable("%v", err)
+	}
+	h.Write(inputs)
+	lock, err := os.ReadFile(filepath.Join(root, set, "package-lock.json"))
+	if err != nil {
+		return unavailable("%v", err)
+	}
+	h.Write(lock)
 	o := &Oracle{root: root, set: set, zone: zone, free: make(chan *proc, poolSize())}
 	first, err := o.start()
 	if err != nil {
 		return unavailable("%v", err)
+	}
+	if v := nodeVersion.FindStringSubmatch(o.version); v == nil || v[1] != pin {
+		got := "an unknown node"
+		if v != nil {
+			got = "node " + v[1]
+		}
+		if os.Getenv("ASTER_ORACLE_ANY_NODE") != "1" {
+			first.stop()
+			return unavailable("%s is not the node %s pins (volta.node %s): another V8 differs in the last bit; "+
+				"put node %s first on PATH, or set ASTER_ORACLE_ANY_NODE=1 to use this one", got, set, pin, pin)
+		}
+		t.Logf("oracle: %s, not the pinned node %s (ASTER_ORACLE_ANY_NODE=1): its last-bit arithmetic may differ", got, pin)
 	}
 	o.free <- first
 	for i := 1; i < cap(o.free); i++ {
@@ -155,6 +198,81 @@ func ForZone(t testing.TB, set, zone string) *Oracle {
 	}
 	return actual.(*Oracle)
 }
+
+// nodeVersion reads "node v24.21.0" from the oracle's version line.
+var nodeVersion = regexp.MustCompile(`node v(\d+\.\d+\.\d+)`)
+
+// pinnedNode is the node version a module set pins: volta.node in its
+// package.json, which CI's setup-node reads too.
+func pinnedNode(pkgJSON string) (string, error) {
+	b, err := os.ReadFile(pkgJSON)
+	if err != nil {
+		return "", err
+	}
+	var p struct {
+		Volta struct {
+			Node string `json:"node"`
+		} `json:"volta"`
+	}
+	if err := json.Unmarshal(b, &p); err != nil {
+		return "", fmt.Errorf("%s: %w", pkgJSON, err)
+	}
+	if p.Volta.Node == "" {
+		return "", fmt.Errorf("%s pins no node version (volta.node)", pkgJSON)
+	}
+	return p.Volta.Node, nil
+}
+
+// inputFiles are the files and directories, relative to the repository root,
+// whose content oracle.mjs reads: its scripts, the dataset URL patterns and
+// the datasets it serves, and the fonts it measures and rasterizes with. All
+// of them, with the module set's lockfile and the version line (node, its
+// platform, the text stack), make the cache key, so editing any input asks
+// node again instead of reusing an answer made from the old one (C77, audit
+// 2026-10-18). A sweep generator's source is part of its own request
+// (Generate).
+var inputFiles = []string{
+	script,
+	"testdata/oracle-node/wordcloud-box.mjs",
+	"testdata/oracle-node/dataset-urls.json",
+	"testdata/vega-datasets",
+	"testdata/data",
+	"internal/fonts/dejavu",
+	"internal/fonts/liberation",
+	"internal/fonts/notoemoji",
+}
+
+// inputsHash hashes the names and contents of inputFiles, once per process.
+var inputsHash = func() func(root string) ([]byte, error) {
+	var once sync.Once
+	var sum []byte
+	var err error
+	return func(root string) ([]byte, error) {
+		once.Do(func() {
+			h := sha256.New()
+			for _, in := range inputFiles {
+				err = filepath.WalkDir(filepath.Join(root, in), func(path string, d os.DirEntry, werr error) error {
+					if werr != nil || d.IsDir() {
+						return werr
+					}
+					b, rerr := os.ReadFile(path)
+					if rerr != nil {
+						return rerr
+					}
+					rel, _ := filepath.Rel(root, path)
+					_, _ = fmt.Fprintf(h, "%s\x00%d\x00", filepath.ToSlash(rel), len(b)) // a hash never fails a write
+					h.Write(b)
+					return nil
+				})
+				if err != nil {
+					return
+				}
+			}
+			sum = h.Sum(nil)
+		})
+		return sum, err
+	}
+}()
 
 // poolSize is the number of node processes per module set: ASTER_ORACLE_PROCS,
 // else half the CPUs, between 1 and 8.
@@ -179,9 +297,19 @@ func (o *Oracle) Compile(spec []byte) (Result, error) {
 }
 
 // PNG is resvg's rasterization of svg at scale, with the engine's default
-// fonts (VL6 only).
+// fonts (VL6 only). resvg-napi missing from the module set is ErrFailed, not
+// a rejection of svg.
 func (o *Oracle) PNG(svg []byte, scale float64) (Result, error) {
 	return o.ask(map[string]any{"op": "png", "svg": string(svg), "scale": scale})
+}
+
+// WordcloudBoxSVG is upstream's rendering of a Vega spec with the wordcloud
+// layout drawing on the deterministic canvas of
+// testdata/oracle-node/wordcloud-box.mjs (which wordcloud.BoxRenderer
+// reproduces) instead of node-canvas, whose glyph rasterization depends on the
+// platform: the transform compared the same on every platform.
+func (o *Oracle) WordcloudBoxSVG(spec []byte) (Result, error) {
+	return o.ask(map[string]any{"op": "svg", "spec": string(spec), "wordcloud": "box"})
 }
 
 // SignalWrite is one View.signal(name, value) call.
@@ -257,7 +385,20 @@ func (o *Oracle) node(req map[string]any) (Result, error) {
 			return Result{}, err
 		}
 	}
-	return p.ask(req)
+	res, err := p.ask(req)
+	if err == nil && res.fontRejected && p.nextID > 1 {
+		// The canvas kept the font it held when it refused one, and the
+		// process held what earlier requests left: the answer is a fresh
+		// process's only if this process was fresh. Ask a fresh one.
+		p.stop()
+		var np *proc
+		if np, err = o.start(); err != nil {
+			return Result{}, err
+		}
+		p = np
+		res, err = p.ask(req)
+	}
+	return res, err
 }
 
 // cachePath is where the answer to req is cached: its key covers the
@@ -302,15 +443,22 @@ func (p *proc) ask(req map[string]any) (Result, error) {
 			// (oracle.mjs): the answer stands, but a later one from this
 			// process would not be a fresh process's, so it is replaced.
 			Tainted string `json:"tainted"`
+			// FontRejected: see Result.
+			FontRejected bool `json:"fontRejected"`
+			// OracleErr is the oracle failing to answer: no answer.
+			OracleErr string `json:"oracleErr"`
 		}
 		if err := json.Unmarshal(out, &got); err != nil || got.ID != p.nextID {
 			p.stop()
 			return res, fmt.Errorf("oracle: bad response %.200q", out)
 		}
-		res = Result{SVG: got.SVG, Vega: got.Veg, Data: got.Data, Err: got.Err, Warnings: got.Warn}
 		if got.Tainted != "" {
 			p.stop()
 		}
+		if got.OracleErr != "" {
+			return Result{}, fmt.Errorf("%w: %s", ErrFailed, got.OracleErr)
+		}
+		res = Result{SVG: got.SVG, Vega: got.Veg, Data: got.Data, Err: got.Err, Warnings: got.Warn, fontRejected: got.FontRejected}
 		if got.PNG != "" {
 			if res.PNG, err = base64.StdEncoding.DecodeString(got.PNG); err != nil {
 				return res, fmt.Errorf("oracle: bad PNG: %w", err)
@@ -329,21 +477,28 @@ func (p *proc) ask(req map[string]any) (Result, error) {
 func (o *Oracle) start() (*proc, error) {
 	// Run in the module set's directory, so a node version manager (volta)
 	// applies the version pinned in its package.json; CI installs the same.
+	fontDir, err := os.MkdirTemp("", "aster-oracle-fonts-")
+	if err != nil {
+		return nil, err
+	}
 	cmd := exec.Command("node", filepath.Join(o.root, script))
 	cmd.Dir = filepath.Join(o.root, o.set)
 	cmd.Env = append(os.Environ(), "TZ="+o.zone, "NODE_PATH="+filepath.Join(o.root, o.set, "node_modules"),
-		"ASTER_ORACLE_PARENT="+strconv.Itoa(os.Getpid()))
+		"ASTER_ORACLE_PARENT="+strconv.Itoa(os.Getpid()), "ASTER_ORACLE_FONTDIR="+fontDir)
 	cmd.Stderr = os.Stderr
 	ownGroup(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
+		_ = os.RemoveAll(fontDir)
 		return nil, err
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		_ = os.RemoveAll(fontDir)
 		return nil, err
 	}
 	if err := cmd.Start(); err != nil {
+		_ = os.RemoveAll(fontDir)
 		return nil, err
 	}
 	lines := make(chan []byte, 1)
@@ -355,7 +510,7 @@ func (o *Oracle) start() (*proc, error) {
 			lines <- append([]byte(nil), sc.Bytes()...)
 		}
 	}()
-	p := &proc{o: o, cmd: cmd, stdin: stdin, lines: lines}
+	p := &proc{o: o, cmd: cmd, stdin: stdin, lines: lines, fontDir: fontDir}
 	select {
 	case line, ok := <-lines:
 		var ready struct {
@@ -388,6 +543,7 @@ func (p *proc) stop() {
 	killGroup(p.cmd)
 	_ = p.cmd.Wait() // killed: the error says so
 	p.cmd = nil
+	_ = os.RemoveAll(p.fontDir)
 }
 
 // repoRoot finds the module root from the working directory (a test runs in

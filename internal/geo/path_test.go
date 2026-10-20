@@ -68,10 +68,35 @@ type goldenPaths struct {
 
 // checkPath compares a generated path with a recorded one: null, the full
 // string, or {len, sha}.
+// pathThrew is what stringOf answers for a path that threw upstream's
+// exception (a *jsval.Thrown panic).
+const pathThrew = "\x00threw"
+
+// stringOf is p.String(g), or pathThrew when it throws a JavaScript
+// exception.
+func stringOf(p *Path, g jsval.Value) (s string, ok bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			if _, is := r.(*jsval.Thrown); !is {
+				panic(r)
+			}
+			s, ok = pathThrew, true
+		}
+	}()
+	return p.String(g)
+}
+
 func checkPath(t *testing.T, label string, got string, ok bool, raw json.RawMessage) {
 	t.Helper()
 	if string(raw) == `"ERR"` || string(raw) == `"undefined"` {
+		if got != pathThrew && string(raw) == `"ERR"` {
+			t.Errorf("%s: got %q, want upstream's exception", label, trunc(got))
+		}
 		return // upstream threw
+	}
+	if got == pathThrew {
+		t.Errorf("%s: threw, want %s", label, trunc(string(raw)))
+		return
 	}
 	if string(raw) == "null" {
 		if ok {
@@ -149,7 +174,7 @@ func TestPathStrings(t *testing.T) {
 		path := proj.Path()
 		for _, group := range []map[string]json.RawMessage{c.Small, c.Big} {
 			for k, raw := range group {
-				s, ok := path.String(geoms[k])
+				s, ok := stringOf(path, geoms[k])
 				checkPath(t, c.ID+"/"+k, s, ok, raw)
 			}
 		}
@@ -173,7 +198,7 @@ func TestRandomConfigurations(t *testing.T) {
 		p := projFromGolden(t, c.Type, c.Props)
 		label := c.Type + " #" + jsvalInt(i) + " " + string(c.Props)
 		for k, raw := range c.Out {
-			s, ok := p.Path().String(geoms[k])
+			s, ok := stringOf(p.Path(), geoms[k])
 			checkPath(t, label+"/"+k, s, ok, raw)
 		}
 		for j, pt := range pts {

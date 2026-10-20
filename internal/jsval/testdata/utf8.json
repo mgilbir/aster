@@ -1,0 +1,182 @@
+[
+ {
+  "in": "f09f98",
+  "out": "efbfbd"
+ },
+ {
+  "in": "f09f9841",
+  "out": "efbfbd41"
+ },
+ {
+  "in": "e282",
+  "out": "efbfbd"
+ },
+ {
+  "in": "e28241",
+  "out": "efbfbd41"
+ },
+ {
+  "in": "c3",
+  "out": "efbfbd"
+ },
+ {
+  "in": "c341",
+  "out": "efbfbd41"
+ },
+ {
+  "in": "80",
+  "out": "efbfbd"
+ },
+ {
+  "in": "8080",
+  "out": "efbfbdefbfbd"
+ },
+ {
+  "in": "bf41",
+  "out": "efbfbd41"
+ },
+ {
+  "in": "c0af",
+  "out": "efbfbdefbfbd"
+ },
+ {
+  "in": "c1bf",
+  "out": "efbfbdefbfbd"
+ },
+ {
+  "in": "e080af",
+  "out": "efbfbdefbfbdefbfbd"
+ },
+ {
+  "in": "eda080",
+  "out": "efbfbdefbfbdefbfbd"
+ },
+ {
+  "in": "edbfbf",
+  "out": "efbfbdefbfbdefbfbd"
+ },
+ {
+  "in": "f4908080",
+  "out": "efbfbdefbfbdefbfbdefbfbd"
+ },
+ {
+  "in": "f5",
+  "out": "efbfbd"
+ },
+ {
+  "in": "ff",
+  "out": "efbfbd"
+ },
+ {
+  "in": "fe",
+  "out": "efbfbd"
+ },
+ {
+  "in": "f8888080",
+  "out": "efbfbdefbfbdefbfbdefbfbd"
+ },
+ {
+  "in": "f09f98f09f9880",
+  "out": "efbfbdf09f9880"
+ },
+ {
+  "in": "e2",
+  "out": "efbfbd"
+ },
+ {
+  "in": "e28228",
+  "out": "efbfbd28"
+ },
+ {
+  "in": "f0",
+  "out": "efbfbd"
+ },
+ {
+  "in": "f090",
+  "out": "efbfbd"
+ },
+ {
+  "in": "f09080",
+  "out": "efbfbd"
+ },
+ {
+  "in": "f4",
+  "out": "efbfbd"
+ },
+ {
+  "in": "f48f",
+  "out": "efbfbd"
+ },
+ {
+  "in": "f48fbf",
+  "out": "efbfbd"
+ },
+ {
+  "in": "f48fbfbf",
+  "out": "f48fbfbf"
+ },
+ {
+  "in": "e0a0",
+  "out": "efbfbd"
+ },
+ {
+  "in": "e0a080",
+  "out": "e0a080"
+ },
+ {
+  "in": "eda0",
+  "out": "efbfbdefbfbd"
+ },
+ {
+  "in": "ed9f",
+  "out": "efbfbd"
+ },
+ {
+  "in": "ed9fbf",
+  "out": "ed9fbf"
+ },
+ {
+  "in": "efbfbd",
+  "out": "efbfbd"
+ },
+ {
+  "in": "41c2",
+  "out": "41efbfbd"
+ },
+ {
+  "in": "c280",
+  "out": "c280"
+ },
+ {
+  "in": "df",
+  "out": "efbfbd"
+ },
+ {
+  "in": "dfbf",
+  "out": "dfbf"
+ },
+ {
+  "in": "f1808080",
+  "out": "f1808080"
+ },
+ {
+  "in": "f180",
+  "out": "efbfbd"
+ },
+ {
+  "in": "f18080",
+  "out": "efbfbd"
+ },
+ {
+  "in": "41f1808041",
+  "out": "41efbfbd41"
+ },
+ {
+  "in": "e1bfc0",
+  "out": "efbfbdefbfbd"
+ },
+ {
+  "in": "f3bfbfc0",
+  "out": "efbfbdefbfbd"
+ }
+]

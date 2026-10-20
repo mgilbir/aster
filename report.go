@@ -43,7 +43,7 @@ const maxWarningText = vega.MaxWarningText
 
 // decide is the handler's answer for err; without a handler a Warning goes on
 // and anything else ends the call. A Warning reaches the handler cut to
-// maxWarningText.
+// maxWarningText bytes and an ellipsis.
 func (r *callReport) decide(err error) error {
 	if w, ok := err.(Warning); ok {
 		err = Warning(textcut.Cut(string(w), maxWarningText))
@@ -58,9 +58,7 @@ func (r *callReport) decide(err error) error {
 	if r.c == nil {
 		return r.handler(err)
 	}
-	var out error
-	r.c.callback(func() { out = r.handler(err) })
-	return out
+	return r.c.callback("the error handler", func() error { return r.handler(err) })
 }
 
 // vega is vega.Options.Report: the dataflow's own types become the public

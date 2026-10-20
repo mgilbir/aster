@@ -102,7 +102,7 @@ func Parse(s string) (c RGBA, ok bool) {
 		return c, false
 	}
 	if i := strings.IndexByte(s, '('); i > 0 && strings.HasSuffix(s, ")") {
-		fn := strings.ToLower(strings.TrimSpace(s[:i]))
+		fn := ASCIILower(strings.TrimSpace(s[:i]))
 		args := splitColorArgs(s[i+1 : len(s)-1])
 		switch fn {
 		case "rgb", "rgba":
@@ -158,13 +158,7 @@ func Parse(s string) (c RGBA, ok bool) {
 		}
 		return c, false
 	}
-	ls := s
-	for i := 0; i < len(ls); i++ {
-		if ls[i] >= 'A' && ls[i] <= 'Z' {
-			ls = strings.ToLower(ls)
-			break
-		}
-	}
+	ls := ASCIILower(s)
 	if ls == "transparent" {
 		return RGBA{0, 0, 0, 0}, true
 	}

@@ -5,9 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	"golang.org/x/text/cases"
-	"golang.org/x/text/language"
-
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
 	ecma262 "github.com/mgilbir/goecma262"
@@ -29,13 +26,18 @@ type CountPatternParams struct {
 	// As is the [text, count] output pair; empty entries default to "text" and
 	// "count".
 	As [2]string
+	// AsExact reports that As are the names as the runtime resolved them
+	// (`_.as || defaults`, then each entry's text): an empty one is the
+	// empty name, not the default.
+	AsExact bool
 }
 
 // CountPattern tokenizes a text field with a regular expression and counts the
 // tokens, generating one {text, count} tuple per distinct token. Order follows
 // JavaScript object key order (integer-like tokens ascending first, then first
-// appearance), because upstream iterates a plain object. Like upstream it
-// fails on values that are not strings.
+// appearance), because upstream iterates a plain object, and a token that
+// names a member of Object.prototype makes no row. Like upstream it fails on
+// values that are not strings.
 func CountPattern(ctx context.Context, data []jsval.Value, p CountPatternParams) ([]jsval.Value, error) {
 	pattern := p.Pattern
 	if pattern == "" {
@@ -59,18 +61,18 @@ func CountPattern(ctx context.Context, data []jsval.Value, p CountPatternParams)
 	// (FindAll searches the whole text).
 	matchRe, stopRe := match.Re.WithContext(ctx), stop.Re.WithContext(ctx)
 	textName, countName := p.As[0], p.As[1]
-	if textName == "" {
+	if textName == "" && !p.AsExact {
 		textName = "text"
 	}
-	if countName == "" {
+	if countName == "" && !p.AsExact {
 		countName = "count"
 	}
 	var conv func(string) string
 	switch p.Case {
 	case "upper":
-		conv = cases.Upper(language.Und).String
+		conv = jsval.JSUpper
 	case "lower":
-		conv = cases.Lower(language.Und).String
+		conv = jsval.JSLower
 	}
 	counts := map[string]int{}
 	var order []string
@@ -80,7 +82,7 @@ func CountPattern(ctx context.Context, data []jsval.Value, p CountPatternParams)
 		}
 		v := p.Field.Apply(t)
 		if !v.IsStr() {
-			return nil, fmt.Errorf("countpattern: value of %q is %s, not a string", p.Field.Name, v.Kind())
+			return nil, tokenizeTypeError(v, p.Case)
 		}
 		text := v.StrValue()
 		if conv != nil {
@@ -99,6 +101,13 @@ func CountPattern(ctx context.Context, data []jsval.Value, p CountPatternParams)
 				return nil, searchFailed(err)
 			}
 			if isStop {
+				continue
+			}
+			// counts and tuples are plain objects: counts[tok] of a name every
+			// object inherits is that member, truthy, so the count becomes
+			// a string ("1function Object() ..."), and tuples[tok] is the
+			// member as well, so no row is ever added for the token.
+			if jsval.ObjectPrototypeHas(tok) {
 				continue
 			}
 			if _, ok := counts[tok]; !ok {
@@ -122,6 +131,26 @@ func CountPattern(ctx context.Context, data []jsval.Value, p CountPatternParams)
 		out = append(out, jsval.Obj(o))
 	}
 	return out, nil
+}
+
+// tokenizeTypeError is the TypeError of upstream's tokenize for a value that
+// is no string: the case conversion it calls first, else text.match.
+func tokenizeTypeError(v jsval.Value, tcase string) error {
+	method := "match"
+	switch tcase {
+	case "upper":
+		method = "toUpperCase"
+	case "lower":
+		method = "toLowerCase"
+	}
+	if v.IsNullish() {
+		of := "undefined"
+		if v.IsNull() {
+			of = "null"
+		}
+		return &jsval.Thrown{Name: "TypeError", Msg: "Cannot read properties of " + of + " (reading '" + method + "')"}
+	}
+	return &jsval.Thrown{Name: "TypeError", Msg: "text." + method + " is not a function"}
 }
 
 // newCountPattern compiles one of the operator's patterns under ctx, paid

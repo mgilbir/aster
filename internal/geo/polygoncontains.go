@@ -76,7 +76,7 @@ func polygonContains(polygon [][]cpoint, lambda, phi float64) bool {
 				} else {
 					phiArc = asin(intersection[2])
 				}
-				if phi > phiArc || phi == phiArc && (arc[0] != 0 || arc[1] != 0) {
+				if phi > phiArc || phi == phiArc && (truthy(arc[0]) || truthy(arc[1])) {
 					if antimeridian != (delta >= 0) {
 						winding++
 					} else {

@@ -2,6 +2,7 @@ package transforms
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"slices"
@@ -40,6 +41,9 @@ const (
 	opArgmax
 	opExponential
 	opExponentialB
+	// opCountValues is upstream's internal __count__ (pivot's count): the
+	// missing and valid values, so a NaN is not counted.
+	opCountValues
 )
 
 var opKinds = map[string]opKind{
@@ -50,6 +54,8 @@ var opKinds = map[string]opKind{
 	"ci0": opCI0, "ci1": opCI1, "median": opMedian, "q1": opQ1, "q3": opQ3,
 	"min": opMin, "max": opMax, "argmin": opArgmin, "argmax": opArgmax,
 	"exponential": opExponential, "exponentialb": opExponentialB,
+	// not one of ValidAggregateOps, but in upstream's table all the same
+	"__count__": opCountValues,
 }
 
 // ValidAggregateOps lists the operation names aggregate, joinaggregate and
@@ -83,16 +89,28 @@ func (k opKind) index() int {
 	return 0
 }
 
+// errNullAggregateField is upstream's error for a measure with no field.
+var errNullAggregateField = errors.New("Null aggregate field specified.")
+
 // Measure is one aggregation: an operation over a field with an optional
 // parameter (the decay of exponential) and output name.
 type Measure struct {
 	Op    string
 	Field Field // the null Field is only valid for "count"
-	// Param is aggregate_params[i]; 0 means unset (upstream turns a falsy
-	// parameter into null).
+	// Param is aggregate_params[i]; NaN means null (upstream turns a falsy
+	// parameter into null, and an exponential without one decays by
+	// undefined: NaN).
 	Param float64
 	// As is the output field; empty means the derived default (MeasureName).
 	As string
+	// AsExact: As is the final name, empty included (`as[i]` that is truthy
+	// but converts to ""), not a request for the default.
+	AsExact bool
+	// CountMeasure marks a count named by an op that is not the string
+	// "count" (["count"]): upstream's `op === 'count'` fails for it, so it
+	// is not one of the count fields but a measure of its field, whose value
+	// is the cell's count all the same.
+	CountMeasure bool
 }
 
 type measureOut struct {
@@ -143,9 +161,21 @@ type measureSet struct {
 	// ctx is polled by the statistics that cost a pass over the data each
 	// (bootstrap intervals); err records its cancellation for the caller.
 	ctx context.Context
-	err error
+	// w walks the values the measures compare (min, max, argmin, argmax
+	// of arrays compare their String): the call's Walker.
+	w jsval.Walker
+	// keys is String(v) of the call.
+	keys Keys
+	err  error
 	// names lists output field names in the order they were requested.
 	names []string
+}
+
+// setContext sets the call the measures run in.
+func (s *measureSet) setContext(ctx context.Context) {
+	s.ctx = ctx
+	s.w = jsval.WalkerFor(ctx)
+	s.keys = keysOf(ctx)
 }
 
 // newMeasureSet compiles measures. Upstream groups the measures of one field
@@ -154,19 +184,21 @@ func newMeasureSet(ms []Measure, rnd Rand) (*measureSet, error) {
 	if rnd == nil {
 		rnd = DefaultRand
 	}
-	s := &measureSet{countOnly: true, rand: rnd, ctx: context.Background()}
+	s := &measureSet{countOnly: true, rand: rnd}
+	s.setContext(context.Background())
 	byName := map[string]*measureGroup{}
 	for _, m := range ms {
 		kind, ok := opKinds[m.Op]
+		// Aggregate.init checks the field before it looks the op up
+		if m.Field.IsNil() && (m.Op != "count" || m.CountMeasure) {
+			return nil, errNullAggregateField
+		}
 		if !ok {
 			return nil, fmt.Errorf("unknown aggregate op %q", m.Op)
 		}
-		if m.Field.IsNil() && m.Op != "count" {
-			return nil, fmt.Errorf("null aggregate field specified")
-		}
-		name := MeasureName(m.Op, m.Field.Name, m.As)
+		name := m.Name()
 		s.names = append(s.names, name)
-		if kind == opCount {
+		if kind == opCount && !m.CountMeasure {
 			s.counts = append(s.counts, name)
 			continue
 		}
@@ -178,9 +210,10 @@ func newMeasureSet(ms []Measure, rnd Rand) (*measureSet, error) {
 			s.groups = append(s.groups, g)
 		}
 		g.outs = append(g.outs, measureOut{name: name, kind: kind, idx: kind.index()})
-		if kind == opExponential && m.Param != 0 {
-			// Every exponential output of the field shares the last parameter
-			// (upstream keys its operator table by op name).
+		if kind == opExponential {
+			// Every exponential output of the field shares the last one's
+			// parameter, null included (upstream keys its operator table by
+			// op name).
 			g.expR = m.Param
 		}
 	}
@@ -255,7 +288,7 @@ func (s *measureSet) add(c *cell, t jsval.Value) {
 		return
 	}
 	for i, g := range s.groups {
-		g.add(&c.aggs[i], g.field.Get(t), t)
+		g.add(s, &c.aggs[i], g.field.Get(t), t)
 	}
 }
 
@@ -266,13 +299,14 @@ func (s *measureSet) rem(c *cell, t jsval.Value) {
 		return
 	}
 	for i, g := range s.groups {
-		g.rem(&c.aggs[i], g.field.Get(t))
+		g.rem(s.w, &c.aggs[i], g.field.Get(t))
 	}
 }
 
 func isEmptyString(v jsval.Value) bool { return v.IsStr() && v.StrValue() == "" }
 
-func (g *measureGroup) add(m *mstate, v, t jsval.Value) {
+func (g *measureGroup) add(s *measureSet, m *mstate, v, t jsval.Value) {
+	w := s.w
 	if v.IsNullish() || isEmptyString(v) {
 		m.missing++
 		return
@@ -296,7 +330,14 @@ func (g *measureGroup) add(m *mstate, v, t jsval.Value) {
 		m.mean += m.meanD / float64(m.valid)
 	}
 	if g.exp {
-		m.exp = float64(g.expR*m.exp) + x
+		// m.exp = m.exp_r * m.exp + v: a value that adds as text (a
+		// string, an array, an object, a date) makes the sum a string,
+		// which the next product and the output read back as a number.
+		if r := float64(g.expR * m.exp); addsText(v) {
+			m.exp = jsval.StringToNumber(jsval.JSNumberString(r) + w.String(v))
+		} else {
+			m.exp = r + x
+		}
 	}
 	if g.variance {
 		m.dev += float64(m.meanD * (x - m.mean))
@@ -304,21 +345,21 @@ func (g *measureGroup) add(m *mstate, v, t jsval.Value) {
 	// argmin/argmax run before min/max, so they compare against the previous
 	// extremum; the first value therefore never sets them and the extent of the
 	// stored tuples is used instead (see write).
-	if g.argmin && Less(v, m.min) {
+	if g.argmin && Less(w, v, m.min) {
 		m.argmin = t
 	}
-	if g.argmax && Greater(v, m.max) {
+	if g.argmax && Greater(w, v, m.max) {
 		m.argmax = t
 	}
-	if g.wantMin && (m.min.IsUndefined() || Less(v, m.min)) {
+	if g.wantMin && (m.min.IsUndefined() || Less(w, v, m.min)) {
 		m.min = v
 	}
-	if g.wantMax && (m.max.IsUndefined() || Greater(v, m.max)) {
+	if g.wantMax && (m.max.IsUndefined() || Greater(w, v, m.max)) {
 		m.max = v
 	}
 }
 
-func (g *measureGroup) rem(m *mstate, v jsval.Value) {
+func (g *measureGroup) rem(w jsval.Walker, m *mstate, v jsval.Value) {
 	if v.IsNullish() || isEmptyString(v) {
 		m.missing--
 		return
@@ -352,16 +393,16 @@ func (g *measureGroup) rem(m *mstate, v jsval.Value) {
 		m.dev -= float64(m.meanD * (x - m.mean))
 	}
 	// A removed extremum invalidates the running one (NaN marks "recompute").
-	if g.argmin && LessEq(v, m.min) {
+	if g.argmin && LessEq(w, v, m.min) {
 		m.argmin = jsval.Undefined
 	}
-	if g.argmax && GreaterEq(v, m.max) {
+	if g.argmax && GreaterEq(w, v, m.max) {
 		m.argmax = jsval.Undefined
 	}
-	if g.wantMin && LessEq(v, m.min) {
+	if g.wantMin && LessEq(w, v, m.min) {
 		m.min = jsval.Num(math.NaN())
 	}
-	if g.wantMax && GreaterEq(v, m.max) {
+	if g.wantMax && GreaterEq(w, v, m.max) {
 		m.max = jsval.Num(math.NaN())
 	}
 }
@@ -387,7 +428,8 @@ func (s *measureSet) write(c *cell, t *jsval.Object) {
 // It is reproduced faithfully, including a quirk that is visible in output:
 // the extent, quartile and interval caches share ONE "current accessor" slot
 // (owner) and none of them is invalidated when tuples come and go. Only
-// values(), called before each output is written, clears the owner. So when
+// values() clears the owner: called before a cell's outputs are written, and
+// by the values and distinct outputs. So when
 // median/q1/q3/ci run before min/max/argmin/argmax for the same field, the
 // latter find the owner already set and reuse an extent computed for an earlier
 // row (window frames) or an earlier field (aggregate cells).
@@ -395,7 +437,7 @@ type storeMemo struct {
 	owner  int // 1-based measureGroup index of the accessor last memoised, 0 for none
 	ext    [2]jsval.Value
 	extOK  bool
-	q      [3]float64
+	q      [3]jsval.Value
 	qOK    bool
 	ci     [2]float64
 	ciOK   bool // the interval has been computed at least once
@@ -418,18 +460,22 @@ func (g *measureGroup) write(s *measureSet, id int, m *mstate, c *cell, t *jsval
 			return [2]jsval.Value{}
 		}
 		if memo.owner != id || !memo.extOK {
-			lo, hi := ExtentIndex(len(data), func(i int) jsval.Value { return get(data[i]) })
+			lo, hi := ExtentIndex(s.w, len(data), func(i int) jsval.Value { return get(data[i]) })
 			memo.ext = [2]jsval.Value{elemAt(data, lo), elemAt(data, hi)}
 			memo.extOK, memo.owner = true, id
 		}
 		return memo.ext
 	}
-	quart := func() [3]float64 {
+	quart := func() [3]jsval.Value {
 		if readsHoles() {
-			return [3]float64{math.NaN(), math.NaN(), math.NaN()}
+			return [3]jsval.Value{}
 		}
 		if memo.owner != id || !memo.qOK {
-			memo.q = Quartiles(data, get)
+			q, err := Quartiles(s.ctx, data, get)
+			if err != nil {
+				s.err = err
+			}
+			memo.q = q
 			memo.qOK, memo.owner = true, id
 		}
 		return memo.q
@@ -439,7 +485,7 @@ func (g *measureGroup) write(s *measureSet, id int, m *mstate, c *cell, t *jsval
 			return [2]float64{}, false
 		}
 		if memo.owner != id || !memo.ciOK {
-			lo, hi, ok, err := BootstrapCICtx(s.ctx, data, 1000, 0.05, get, s.rand)
+			lo, hi, ok, err := BootstrapCI(s.ctx, data, 1000, 0.05, get, s.rand)
 			if err != nil {
 				s.err = err
 			}
@@ -452,13 +498,19 @@ func (g *measureGroup) write(s *measureSet, id int, m *mstate, c *cell, t *jsval
 		var v jsval.Value
 		switch o.kind {
 		case opValues:
+			// TupleStore.values() forgets the memo's accessor
+			memo.owner = 0
 			if s.store != nil {
 				v = s.store.share(t, o.name)
 			} else {
 				v = jsval.Arr(slices.Clone(data))
 			}
+		case opCount:
+			v = jsval.Int(c.num)
 		case opMissing:
 			v = jsval.Int(m.missing)
+		case opCountValues:
+			v = jsval.Int(m.missing + m.valid)
 		case opValid:
 			v = jsval.Int(m.valid)
 		case opSum:
@@ -488,14 +540,29 @@ func (g *measureGroup) write(s *measureSet, id int, m *mstate, c *cell, t *jsval
 				v = jsval.Num(math.Sqrt(math.Max(0, m.dev) / (valid * (valid - 1))))
 			}
 		case opDistinct:
+			// TupleStore.distinct reads values(), which forgets the memo's
+			// accessor: a later min, max, arg or quartile of another field
+			// computes its own.
+			memo.owner = 0
 			if readsHoles() {
 				break
 			}
+			// `if (!hasOwnProperty(map, s)) { map[s] = 1; ++count }` over
+			// a plain object: "__proto__" is never an own key, so every
+			// occurrence of it counts
 			seen := make(map[string]struct{}, 16)
+			protos := 0
 			for i := len(data) - 1; i >= 0; i-- {
-				seen[keyString(get(data[i]), zoneOf(s.ctx))] = struct{}{}
+				// TupleStore.distinct tests hasOwnProperty(map, s) on a plain
+				// object: `map['__proto__'] = 1` sets no property, so every
+				// "__proto__" value counts as a new one.
+				if k := s.keys.String(get(data[i])); k == ProtoKey {
+					protos++
+				} else {
+					seen[k] = struct{}{}
+				}
 			}
-			v = jsval.Int(len(seen))
+			v = jsval.Int(len(seen) + protos)
 		case opCI0, opCI1:
 			if r, ok := ci(); ok {
 				v = jsval.Num(r[o.kind-opCI0])
@@ -509,9 +576,7 @@ func (g *measureGroup) write(s *measureSet, id int, m *mstate, c *cell, t *jsval
 			case opQ3:
 				idx = 2
 			}
-			if f := q[idx]; !math.IsNaN(f) {
-				v = jsval.Num(f)
-			}
+			v = q[idx] // undefined for no values, NaN as d3 computes it
 		case opMin:
 			if m.min.IsNum() && math.IsNaN(m.min.NumValue()) {
 				m.min = jsval.Undefined
@@ -571,4 +636,12 @@ func validOr(m *mstate, v jsval.Value) jsval.Value {
 		return jsval.Undefined
 	}
 	return v
+}
+
+// Name is the output field: measureName(op, accessorName(field), as).
+func (m Measure) Name() string {
+	if m.AsExact {
+		return m.As
+	}
+	return MeasureName(m.Op, m.Field.Name, m.As)
 }

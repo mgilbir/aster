@@ -72,7 +72,7 @@ func powp(base float64) func(float64) float64 {
 	case math.E:
 		return jsmath.Exp // d3-scale's Math.exp
 	}
-	return func(x float64) float64 { return jsPow(base, x) }
+	return func(x float64) float64 { return jsmath.Pow(base, x) }
 }
 
 func logp(base float64) func(float64) float64 {
@@ -80,9 +80,9 @@ func logp(base float64) func(float64) float64 {
 	case math.E:
 		return jsmath.Log // d3-scale's Math.log
 	case 10:
-		return log10
+		return jsmath.Log10
 	case 2:
-		return log2
+		return jsmath.Log2
 	}
 	lb := jsmath.Log(base)
 	return func(x float64) float64 { return jsmath.Log(x) / lb }
@@ -95,9 +95,9 @@ func reflectFn(f func(float64) float64) func(float64) float64 {
 func transformPow(e float64) func(float64) float64 {
 	return func(x float64) float64 {
 		if x < 0 {
-			return -jsPow(-x, e)
+			return -jsmath.Pow(-x, e)
 		}
-		return jsPow(x, e)
+		return jsmath.Pow(x, e)
 	}
 }
 
@@ -116,11 +116,11 @@ func transformSquare(x float64) float64 {
 }
 
 func transformSymlog(c float64) func(float64) float64 {
-	return func(x float64) float64 { return jsSign(x) * jsmath.Log1p(math.Abs(x/c)) }
+	return func(x float64) float64 { return jsmath.Sign(x) * jsmath.Log1p(math.Abs(x/c)) }
 }
 
 func transformSymexp(c float64) func(float64) float64 {
-	return func(x float64) float64 { return jsSign(x) * jsmath.Expm1(math.Abs(x)) * c }
+	return func(x float64) float64 { return jsmath.Sign(x) * jsmath.Expm1(math.Abs(x)) * c }
 }
 
 // refresh recomputes logs/pows for the current base (log kind). It is the
@@ -364,7 +364,7 @@ func (t *tspec) logNice(d []float64) []float64 {
 func (t *tspec) logKeep(count float64, tickCount int) func(d float64) bool {
 	k := math.Max(1, t.base*count/float64(tickCount))
 	return func(d float64) bool {
-		i := d / t.pows(jsRound(t.logs(d)))
+		i := d / t.pows(jsmath.Round(t.logs(d)))
 		if i*t.base < t.base-0.5 {
 			i *= t.base
 		}

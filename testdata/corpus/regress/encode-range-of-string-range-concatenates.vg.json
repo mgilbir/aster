@@ -1,0 +1,6 @@
+{"data":[{"name":"d","values":[{"c":"a","v":1},{"c":"b","v":5}]}],
+ "scales":[{"name":"col","type":"ordinal","domain":["a","b"],"range":["red","blue"]},
+  {"name":"lin","type":"linear","domain":[0,10],"range":[0,100]}],
+ "marks":[{"type":"text","from":{"data":"d"},"encode":{"enter":{"text":{"scale":"col","range":0.5},"y":{"signal":"datum.v*4"}}}},
+  {"type":"text","from":{"data":"d"},"encode":{"enter":{"text":{"scale":"lin","range":0.25},"x":{"value":60},"y":{"signal":"datum.v*4"}}}},
+  {"type":"text","from":{"data":"d"},"encode":{"enter":{"text":{"scale":"col","range":1},"x":{"value":120},"y":{"signal":"datum.v*4"}}}}]}

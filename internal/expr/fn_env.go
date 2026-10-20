@@ -34,8 +34,15 @@ func indataVisitor(c *compiler, n *Node) error {
 	if err != nil {
 		return err
 	}
+	// Upstream's indataVisitor adds the index parameter only, not the data
+	// set's tuples: an expression that reads indata() is re-evaluated when
+	// the index changes, not the data set.
+	// vega-parser makes the index with scope.fieldRef(field), which takes a
+	// string and fails on any other literal.
+	if f := n.Elems[1].Value; !f.IsStr() {
+		return cerr("Unsupported field reference: %s", f.AsString())
+	}
 	c.addIndex(IndexDep{Data: name, Field: field})
-	c.addData(name)
 	c.require(name)
 	return nil
 }
@@ -98,11 +105,11 @@ func init() {
 		}
 		return jsval.Arr(nil)
 	})
-	defv("indata", 3, indataVisitor, func(s *Scope, args []jsval.Value) jsval.Value {
+	defv("indata", 2, indataVisitor, func(s *Scope, args []jsval.Value) jsval.Value {
 		if s.indata == nil {
 			return jsval.Undefined
 		}
-		if n, ok := s.indata.InData(s.str(args[0]), s.str(args[1]), args[2]); ok {
+		if n, ok := s.indata.InData(s.str(args[0]), s.str(args[1]), arg(args, 2)); ok {
 			return jsval.Int(n)
 		}
 		return jsval.Undefined
@@ -161,16 +168,38 @@ func init() {
 	funcTable["gradient"].fn = wrapGradient(funcTable["gradient"].fn)
 	// The internal helpers mark encoders call resolve their scale directly.
 	scaleFn("_scale", func(sp ScaleProvider, a []jsval.Value) jsval.Value {
+		if ep, ok := sp.(EncodeScaleProvider); ok {
+			return ep.EncodeScale(a[0], arg(a, 1))
+		}
 		return sp.Scale(a[0], arg(a, 1), jsval.Undefined)
 	}, jsval.Undefined)
-	scaleFn("_range", func(sp ScaleProvider, a []jsval.Value) jsval.Value { return sp.Range(a[0], jsval.Undefined) }, jsval.Arr(nil))
-	scaleFn("_bandwidth", func(sp ScaleProvider, a []jsval.Value) jsval.Value { return sp.Bandwidth(a[0], jsval.Undefined) }, jsval.Num(0))
+	scaleFn("_range", func(sp ScaleProvider, a []jsval.Value) jsval.Value {
+		if ep, ok := sp.(EncodeScaleProvider); ok {
+			return ep.EncodeRange(a[0])
+		}
+		return sp.Range(a[0], jsval.Undefined)
+	}, jsval.Arr(nil))
+	scaleFn("_bandwidth", func(sp ScaleProvider, a []jsval.Value) jsval.Value {
+		if ep, ok := sp.(EncodeScaleProvider); ok {
+			return ep.EncodeBandwidth(a[0])
+		}
+		return sp.Bandwidth(a[0], jsval.Undefined)
+	}, jsval.Num(0))
+	// Their code is `_[scale](v)`, `_[scale].range()` and
+	// `this.__bandwidth(_[scale])`: the arguments past those are not
+	// generated, and _scale without its value is a code generation error.
+	funcTable["_scale"].min, funcTable["_scale"].argc = 2, 2
+	funcTable["_range"].argc = 1
+	funcTable["_bandwidth"].argc = 1
 	// bandspace is pure: vega-scale's bandSpace.
+	// `count ? (space > 0 ? space : 1) : 0` tests count as given: the string
+	// '0' is a count, of space 1 (C101).
 	fn("bandspace", func(s *Scope, args []jsval.Value) jsval.Value {
-		count, inner, outer := s.orZero(arg(args, 0)), s.orZero(arg(args, 1)), s.orZero(arg(args, 2))
+		countV := orZeroV(arg(args, 0))
+		count, inner, outer := s.num(countV), s.orZero(arg(args, 1)), s.orZero(arg(args, 2))
 		space := count - inner + outer*2
 		switch {
-		case count == 0:
+		case !countV.IsTruthy():
 			return jsval.Num(0)
 		case space > 0:
 			return jsval.Num(space)
@@ -362,26 +391,28 @@ func init() {
 	}
 	symlogT := func(c float64) transform {
 		return transform{
-			lift: func(x float64) float64 { return jsSign(x) * jsmath.Log1p(math.Abs(x/c)) },
+			lift: func(x float64) float64 { return jsmath.Sign(x) * jsmath.Log1p(math.Abs(x/c)) },
 			ground: func(x float64) float64 {
-				return float64(jsSign(x)*jsmath.Expm1(math.Abs(x))) * c
+				return float64(jsmath.Sign(x)*jsmath.Expm1(math.Abs(x))) * c
 			},
 		}
 	}
 	pan := func(name string, mk func(s *Scope, domain jsval.Value, args []jsval.Value) transform) {
 		fn(name, func(s *Scope, args []jsval.Value) jsval.Value {
-			dom := s.domainItems(arg(args, 0))
+			dom := arg(args, 0)
 			t := mk(s, dom, args)
-			d0, d1 := t.lift(in(s, t, dom.Index(0))), t.lift(in(s, t, dom.Index(dom.Len()-1)))
+			e0, e1 := s.domainEnds(dom)
+			d0, d1 := t.lift(in(s, t, e0)), t.lift(in(s, t, e1))
 			dd := float64((d1 - d0) * s.num(arg(args, 1)))
 			return jsval.ArrOf(jsval.Num(t.ground(d0-dd)), jsval.Num(t.ground(d1-dd)))
 		})
 	}
 	zoom := func(name string, mk func(s *Scope, domain jsval.Value, args []jsval.Value) transform) {
 		fn(name, func(s *Scope, args []jsval.Value) jsval.Value {
-			dom := s.domainItems(arg(args, 0))
+			dom := arg(args, 0)
 			t := mk(s, dom, args)
-			d0, d1 := t.lift(in(s, t, dom.Index(0))), t.lift(in(s, t, dom.Index(dom.Len()-1)))
+			e0, e1 := s.domainEnds(dom)
+			d0, d1 := t.lift(in(s, t, e0)), t.lift(in(s, t, e1))
 			var da float64
 			if anchor := arg(args, 1); !anchor.IsNullish() {
 				da = t.lift(in(s, t, anchor))
@@ -396,7 +427,8 @@ func init() {
 	}
 	pan("panLinear", func(*Scope, jsval.Value, []jsval.Value) transform { return linear })
 	zoom("zoomLinear", func(*Scope, jsval.Value, []jsval.Value) transform { return linear })
-	signOf := func(s *Scope, d jsval.Value) float64 { return jsSign(s.num(d.Index(0))) }
+	// panLog and zoomLog read Math.sign(domain[0]) before anything else.
+	signOf := func(s *Scope, d jsval.Value) float64 { return jsmath.Sign(s.num(s.getIndex(d, jsval.Num(0)))) }
 	pan("panLog", func(s *Scope, d jsval.Value, _ []jsval.Value) transform { return logT(signOf(s, d)) })
 	zoom("zoomLog", func(s *Scope, d jsval.Value, _ []jsval.Value) transform { return logT(signOf(s, d)) })
 	pan("panPow", func(s *Scope, _ jsval.Value, a []jsval.Value) transform { return powT(s.num(arg(a, 2))) })
@@ -405,23 +437,15 @@ func init() {
 	zoom("zoomSymlog", func(s *Scope, _ jsval.Value, a []jsval.Value) transform { return symlogT(s.num(arg(a, 3))) })
 }
 
-// domainItems checks pan/zoom's precondition that the domain is a non-empty
-// array ("Domain array must not be empty").
-func (s *Scope) domainItems(d jsval.Value) jsval.Value {
-	if !d.IsArr() || d.Len() == 0 {
+// domainEnds is pan and zoom's precondition, `domain.length > 0` ("Domain
+// array must not be empty"), and their reads of domain[0] and
+// domain[domain.length - 1]: of an array, or of a string or an object with a
+// length, as JavaScript reads them.
+func (s *Scope) domainEnds(d jsval.Value) (first, last jsval.Value) {
+	if !s.gt(s.getProp(d, "length"), jsval.Num(0)) {
 		throw("Error", "Domain array must not be empty")
 	}
-	return d
-}
-
-func jsSign(x float64) float64 {
-	switch {
-	case x > 0:
-		return 1
-	case x < 0:
-		return -1
-	}
-	return x // 0, -0 or NaN
+	return s.getIndex(d, jsval.Num(0)), s.lastOf(d)
 }
 
 // touches reads event.touches[0] and event.touches[1].

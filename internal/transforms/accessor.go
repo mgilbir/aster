@@ -22,6 +22,18 @@ type Field struct {
 	// then "".
 	Name    string
 	Unnamed bool
+	// RawName, when HasRawName, is the accessor's name as upstream holds it
+	// where field(f) was given something that is no one-segment path: the
+	// value f itself (a number, an array of several segments), not its text.
+	RawName    jsval.Value
+	HasRawName bool
+	// Identity: the access path has no segment, so the accessor returns its
+	// argument as it is (and reads no property of undefined).
+	Identity bool
+	// Uncallable: the value stands where an accessor is expected but is a
+	// list of them (a Field operator given an array makes one), truthy and no
+	// function: calling it is a TypeError, reading its name gives undefined.
+	Uncallable bool
 	// Fields are the tuple fields the accessor reads (accessorFields).
 	Fields []string
 }
@@ -35,11 +47,24 @@ func (f Field) Key() string {
 	return f.Name
 }
 
+// UncallableField is a truthy value that is no function in a field's place.
+func UncallableField() Field {
+	return Field{
+		Get: func(jsval.Value) jsval.Value {
+			panic(&jsval.Thrown{Name: "TypeError", Msg: "f is not a function"})
+		},
+		Unnamed: true, Uncallable: true,
+	}
+}
+
 // NameValue is accessorName(f) as a value: undefined for an unnamed
 // accessor.
 func (f Field) NameValue() jsval.Value {
 	if f.Unnamed {
 		return jsval.Undefined
+	}
+	if f.HasRawName {
+		return f.RawName
 	}
 	return jsval.Str(f.Name)
 }
@@ -64,7 +89,7 @@ func FieldOf(path string) Field {
 	if len(segs) == 1 {
 		name = segs[0]
 	}
-	return Field{Get: getter(segs), Name: name, Fields: []string{name}}
+	return Field{Get: getter(segs), Name: name, Fields: []string{name}, Identity: len(segs) == 0}
 }
 
 // FieldOfStrict is FieldOf with the accessor's JavaScript semantics for a
@@ -91,9 +116,9 @@ func NamedField(name string, fields []string, get Accessor) Field {
 	return Field{Get: get, Name: name, Fields: fields}
 }
 
-// PathAccessor reads the path from a tuple as a field accessor does; the
-// empty path is the tuple itself.
-func PathAccessor(path []string) Accessor { return getter(path) }
+// PathAccessorStrict is PathAccessor with a member chain's semantics for a
+// missing step (see strictGetter): a TypeError, raised as a panic.
+func PathAccessorStrict(path []string) Accessor { return strictGetter(path) }
 
 // getter is vega-util's getter: plain property reads along the path. Unlike a
 // JavaScript member chain it answers Undefined instead of throwing when an
@@ -146,7 +171,9 @@ func propOrThrow(v jsval.Value, key string) jsval.Value {
 	return prop(v, key)
 }
 
-// prop is JavaScript's v[key] for the values datum fields hold.
+// prop is JavaScript's v[key] for the values datum fields hold: an
+// object's member (own or inherited), an array's or a string's length and
+// elements, and the prototype methods any value has (jsval.Member).
 func prop(v jsval.Value, key string) jsval.Value {
 	switch v.Kind() {
 	case jsval.KindObj:
@@ -158,12 +185,10 @@ func prop(v jsval.Value, key string) jsval.Value {
 		if i, ok := arrayIndex(key); ok {
 			return v.Index(i)
 		}
-	case jsval.KindStr:
-		if key == "length" {
-			return jsval.Int(utf16Len(v.StrValue()))
-		}
+	case jsval.KindUndefined, jsval.KindNull:
+		return jsval.Undefined
 	}
-	return jsval.Undefined
+	return jsval.Member(v, key)
 }
 
 func arrayIndex(s string) (int, bool) {
@@ -178,18 +203,6 @@ func arrayIndex(s string) (int, bool) {
 		n = n*10 + int(s[i]-'0')
 	}
 	return n, true
-}
-
-func utf16Len(s string) int {
-	n := 0
-	for _, r := range s {
-		if r >= 0x10000 {
-			n += 2
-		} else {
-			n++
-		}
-	}
-	return n
 }
 
 // MeasureName is upstream's output naming rule for an aggregate-like measure:
@@ -207,110 +220,82 @@ func MeasureName(op, field, as string) string {
 // KeyFunc maps a tuple to a group key string.
 type KeyFunc func(jsval.Value) string
 
-// appendKeyValue appends String(v) to dst without allocating for the common
-// string and number cases. A date is written as Date.prototype.toString does in
-// the zone z, so dates within one second share a key.
-func appendKeyValue(dst []byte, v jsval.Value, z format.Zone) []byte {
+// Keys turns values into the keys the transforms group, pivot and look up
+// by: String(v), with a date written as Date.prototype.toString writes it in
+// the view's zone (to the second), also inside an array, which String
+// joins. The String of an array is a walk of it, made with the call's
+// Walker, so a key's cost is bounded by the call however its value shares
+// its parts (ADR 0018). It is the one way the transforms, and the transform
+// packages through KeyStringer, turn a value into a key.
+type Keys struct {
+	z format.Zone
+	w jsval.Walker
+}
+
+// NewKeys is the Keys of a call that runs with the Walker w in the zone z.
+func NewKeys(z format.Zone, w jsval.Walker) Keys {
+	return Keys{z: z, w: w.WithDateText(func(dst []byte, ms float64) []byte {
+		return append(dst, format.DateToString(ms, z)...)
+	})}
+}
+
+// keysOf is the Keys of the call ctx belongs to.
+func keysOf(ctx context.Context) Keys { return NewKeys(zoneOf(ctx), jsval.WalkerFor(ctx)) }
+
+// String is the key of v.
+func (k Keys) String(v jsval.Value) string {
+	switch v.Kind() {
+	case jsval.KindStr:
+		return v.StrValue()
+	case jsval.KindTimestamp:
+		return format.DateToString(v.NumValue(), k.z)
+	}
+	return k.w.String(v)
+}
+
+// Append appends the key of v to dst without allocating for the common string
+// and number cases.
+func (k Keys) Append(dst []byte, v jsval.Value) []byte {
 	switch v.Kind() {
 	case jsval.KindStr:
 		return append(dst, v.StrValue()...)
 	case jsval.KindNum:
 		return jsval.AppendJSNumber(dst, v.NumValue())
 	case jsval.KindTimestamp:
-		return append(dst, format.DateToString(v.NumValue(), z)...)
+		return append(dst, format.DateToString(v.NumValue(), k.z)...)
 	}
-	return append(dst, keyString(v, z)...)
+	return k.w.AppendString(dst, v)
 }
 
-// keyString is String(v) with a date in the zone z, as Date.prototype.
-// toString writes it (to the second, in the view's local zone), also inside
-// an array, which String joins. It is the one way the transforms, and the
-// transform packages through KeyStringer, turn a value into a group key, a
-// column name or a lookup key.
-func keyString(v jsval.Value, z format.Zone) string {
-	switch v.Kind() {
-	case jsval.KindTimestamp:
-		return format.DateToString(v.NumValue(), z)
-	case jsval.KindArr:
-		if hasDate(v, 0) {
-			return string(appendJoined(nil, v, z, 0))
-		}
-	}
-	return v.AsString()
-}
-
-// hasDate reports a date anywhere in array v (nested arrays included, to
-// jsval.MaxValueDepth, past which String gives up as AsString does).
-func hasDate(v jsval.Value, depth int) bool {
-	if depth > jsval.MaxValueDepth {
-		return false
-	}
-	for _, it := range v.Items() {
-		switch it.Kind() {
-		case jsval.KindTimestamp:
-			return true
-		case jsval.KindArr:
-			if hasDate(it, depth+1) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// appendJoined is Array.prototype.join(",") with keyString for the items:
-// null and undefined write nothing.
-func appendJoined(dst []byte, v jsval.Value, z format.Zone, depth int) []byte {
-	if depth > jsval.MaxValueDepth {
-		return dst
-	}
-	for i, it := range v.Items() {
-		if i > 0 {
-			dst = append(dst, ',')
-		}
-		switch it.Kind() {
-		case jsval.KindNull, jsval.KindUndefined:
-		case jsval.KindArr:
-			dst = appendJoined(dst, it, z, depth+1)
-		default:
-			dst = append(dst, keyString(it, z)...)
-		}
-	}
-	return dst
-}
-
-// KeyStringer is String(v) with dates in the zone of ctx's view (keyString),
-// for the transform packages, which key on values (nest, stratify, kde2d
-// groups, wordcloud text) and cannot import this one.
-func KeyStringer(ctx context.Context) func(jsval.Value) string {
-	z := zoneOf(ctx)
-	return func(v jsval.Value) string { return keyString(v, z) }
-}
+// KeyStringer is Keys.String for the call of ctx, for the transform
+// packages, which key on values (nest, stratify, kde2d groups, wordcloud
+// text) and cannot import this one.
+func KeyStringer(ctx context.Context) func(jsval.Value) string { return keysOf(ctx).String }
 
 // keyAppender is KeyOf in append form: it writes the key of t onto dst, so a
 // caller can look the key up in a map (m[string(b)]) without allocating.
-func keyAppender(fields []Field, z format.Zone) func(dst []byte, t jsval.Value) []byte {
+func keyAppender(fields []Field, k Keys) func(dst []byte, t jsval.Value) []byte {
 	switch len(fields) {
 	case 0:
 		return func(dst []byte, _ jsval.Value) []byte { return dst }
 	case 1:
 		g := fields[0].Get
-		return func(dst []byte, t jsval.Value) []byte { return appendKeyValue(dst, g(t), z) }
+		return func(dst []byte, t jsval.Value) []byte { return k.Append(dst, g(t)) }
 	}
 	return func(dst []byte, t jsval.Value) []byte {
 		for i, f := range fields {
 			if i > 0 {
 				dst = append(dst, '|')
 			}
-			dst = appendKeyValue(dst, f.Get(t), z)
+			dst = k.Append(dst, f.Get(t))
 		}
 		return dst
 	}
 }
 
-// KeyOf is vega-util's key(fields): the values' string forms joined with '|',
-// a date in the zone z. No fields give the constant key "".
-func KeyOf(z format.Zone, fields ...Field) KeyFunc {
+// KeyOf is vega-util's key(fields): the values' keys joined with '|'. No
+// fields give the constant key "".
+func KeyOf(k Keys, fields ...Field) KeyFunc {
 	if len(fields) == 0 {
 		return func(jsval.Value) string { return "" }
 	}
@@ -321,11 +306,11 @@ func KeyOf(z format.Zone, fields ...Field) KeyFunc {
 				return v.StrValue()
 			} else {
 				var buf [32]byte
-				return string(appendKeyValue(buf[:0], v, z))
+				return string(k.Append(buf[:0], v))
 			}
 		}
 	}
-	app := keyAppender(fields, z)
+	app := keyAppender(fields, k)
 	return func(t jsval.Value) string {
 		var buf [64]byte
 		return string(app(buf[:0], t))
@@ -333,4 +318,4 @@ func KeyOf(z format.Zone, fields ...Field) KeyFunc {
 }
 
 // KeyOfPaths is KeyOf over field paths, the form the `key` helper takes.
-func KeyOfPaths(z format.Zone, paths ...string) KeyFunc { return KeyOf(z, FieldsOf(paths...)...) }
+func KeyOfPaths(k Keys, paths ...string) KeyFunc { return KeyOf(k, FieldsOf(paths...)...) }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/binary"
+	"encoding/json"
 	"flag"
 	"io"
 	"math"
@@ -303,6 +304,34 @@ func runNode(t testing.TB, v *vecFunc, args []float64) []float64 {
 	return bytesToFloats(out.Bytes())
 }
 
+// checkRecordingPlatform refuses to record a function's vectors on a node
+// whose answers are not the ones the engine follows: V8's own functions as
+// V8 computes them on arm64 (jsmath follows clang's fused multiply-adds
+// there; x86-64 rounds some results differently in the last bit), the C
+// library's (libm) as glibc computes them, so on Linux. Recording on another
+// platform would silently replace the vectors' truth with that platform's.
+func checkRecordingPlatform(t *testing.T, v *vecFunc) {
+	t.Helper()
+	var cmd *exec.Cmd
+	if d := os.Getenv("JSMATH_NODE_DOCKER"); d != "" {
+		cmd = exec.Command("docker", append(append([]string{"run", "--rm"}, strings.Fields(d)...), "node", "-p", "process.platform + '-' + process.arch")...)
+	} else {
+		cmd = exec.Command("node", "-p", "process.platform + '-' + process.arch")
+		cmd.Dir = filepath.Join("..", "..", "testdata", "oracle-node")
+	}
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("node: %v", err)
+	}
+	platform := strings.TrimSpace(string(out))
+	switch {
+	case v.libm && !strings.HasPrefix(platform, "linux-"):
+		t.Fatalf("%s comes from the C library: record it with node on Linux (glibc), not %s", v.name, platform)
+	case !v.libm && !strings.HasSuffix(platform, "-arm64"):
+		t.Fatalf("%s is V8's: record it with node on arm64, which jsmath follows, not %s", v.name, platform)
+	}
+}
+
 // skipLibm skips a comparison with node for a function that V8 leaves to the C
 // library when node runs on macOS, whose libm is not the one ported.
 func skipLibm(t *testing.T, v *vecFunc) {
@@ -344,6 +373,7 @@ func TestV8Vectors(t *testing.T) {
 		t.Run(v.name, func(t *testing.T) {
 			if *update {
 				skipLibm(t, v)
+				checkRecordingPlatform(t, v)
 				args := genArgs(v, 0, recordedCount)
 				res := runNode(t, v, args)
 				var buf bytes.Buffer
@@ -379,10 +409,32 @@ func TestV8Vectors(t *testing.T) {
 
 // TestV8Live records fresh arguments with node on the fly; it is the wide net
 // used while developing (-live=200000) and is skipped by default.
+//
+// The package follows V8 on arm64 (see the package comment). Node on x86-64
+// differs in the last bit for a share of arguments in 17 of the 20
+// functions, so there the differences are expected: they are reported, not
+// failed, and for the recorded baseline's run (testdata/live_x64.json:
+// node, -live and -liveseed as recorded) their count per function must be
+// the recorded one, so that a change in this package, or a node whose
+// results differ, shows. On arm64 node no difference is allowed.
 func TestV8Live(t *testing.T) {
 	if *liveN == 0 {
 		t.Skip("set -live=N to compare against node")
 	}
+	arch, version := nodeArch(t)
+	var base struct {
+		Node  string
+		Arch  string
+		N     int
+		Seed  uint64
+		Count map[string]int
+	}
+	if raw, err := os.ReadFile(filepath.Join("testdata", "live_x64.json")); err != nil {
+		t.Fatal(err)
+	} else if err := json.Unmarshal(raw, &base); err != nil {
+		t.Fatal(err)
+	}
+	sameRun := arch == base.Arch && version == base.Node && *liveN == base.N && *liveSeed == base.Seed
 	names := os.Getenv("JSMATH_FUNCS")
 	for _, v := range vecFuncs {
 		if names != "" && !bytes.Contains([]byte(","+names+","), []byte(","+v.name+",")) {
@@ -396,7 +448,44 @@ func TestV8Live(t *testing.T) {
 				os.WriteFile(filepath.Join(dir, v.name+".args"), floatsToBytes(args), 0o644)
 				os.WriteFile(filepath.Join(dir, v.name+".v8"), floatsToBytes(want), 0o644)
 			}
-			compare(t, v, args, want)
+			if arch == "arm64" {
+				compare(t, v, args, want)
+				return
+			}
+			bad := differences(v, args, want)
+			t.Logf("%s: %d of %d differ from node %s on %s (expected: this package follows arm64 V8)", v.name, bad, len(want), version, arch)
+			if sameRun && bad != base.Count[v.name] {
+				t.Errorf("%s: %d differ from node on %s, the recorded baseline %d: the package or node changed", v.name, bad, arch, base.Count[v.name])
+			}
 		})
 	}
+}
+
+// nodeArch is process.arch and process.version of the node runNode uses.
+func nodeArch(t *testing.T) (arch, version string) {
+	if os.Getenv("JSMATH_NODE_DOCKER") != "" {
+		return runtime.GOARCH, "" // a container's node: the host's architecture
+	}
+	cmd := exec.Command("node", "-p", "process.arch + ' ' + process.version")
+	cmd.Dir = filepath.Join("..", "..", "testdata", "oracle-node")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("node: %v", err)
+	}
+	f := strings.Fields(string(out))
+	if len(f) != 2 {
+		t.Fatalf("node printed %q", out)
+	}
+	return f[0], f[1]
+}
+
+// differences counts the arguments whose result differs from want.
+func differences(v *vecFunc, args, want []float64) int {
+	bad := 0
+	for i := range want {
+		if !sameFloat(v.call(args[i*v.arity:(i+1)*v.arity]), want[i]) {
+			bad++
+		}
+	}
+	return bad
 }

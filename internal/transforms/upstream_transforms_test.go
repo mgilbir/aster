@@ -4,10 +4,10 @@ import (
 	"context"
 	"math"
 	"testing"
-	"time"
 
 	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/jsval"
+	"github.com/mgilbir/aster/internal/nodetz"
 	"github.com/mgilbir/aster/internal/upstream"
 )
 
@@ -23,11 +23,7 @@ import (
 // or a formula are JavaScript closures that the recording holds only by the fields they read.
 func TestUpstreamVegaTransforms(t *testing.T) {
 	r := upstream.Start(t, "vega-transforms")
-	loc, err := time.LoadLocation(r.File.TimeZone)
-	if err != nil {
-		t.Fatal(err)
-	}
-	local := format.Local(loc)
+	local := format.Local(nodetz.MustLoad(t, r.File.TimeZone))
 	ctx := context.Background()
 	collected := map[int]*collectState{}
 
@@ -185,7 +181,7 @@ func TestUpstreamVegaTransforms(t *testing.T) {
 			r.Skip(c.Op + ", which is " + plumbing[c.Op])
 		}
 	}
-	r.Done(280)
+	r.Done(298)
 }
 
 func dateOrNumber(v any) float64 {

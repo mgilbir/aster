@@ -58,7 +58,7 @@ func convert(svg string, shaper TextShaper, opts Options, usage bool) (pdf []byt
 			pdf, uses, err = nil, nil, fmt.Errorf("svgpdf: internal error: %v", p)
 		}
 	}()
-	lim := opts.Limits.withDefaults()
+	lim := opts.Limits.WithDefaults()
 	opts.Limits = lim
 	root, err := parseSVG(opts.Context, svg, lim)
 	if err != nil {

@@ -1,0 +1,1 @@
+{"width":100,"height":100,"data":[{"name":"t","values":[{"n":1},{"n":2}]},{"name":"f","values":["n","n"]}],"marks":[{"type":"group","from":{"data":"t"},"marks":[{"type":"line","from":{"data":"f"},"encode":{"enter":{"y":{"scale":"datum.x","field":{"parent":{"datum":"data"}}}}}}]}]}

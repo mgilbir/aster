@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/mgilbir/aster/internal/budget"
 )
 
 // parseSVGFast is a direct scanner for the well-formed, plain markup Vega's
@@ -20,6 +22,15 @@ import (
 // so a document's tree, and the error for a bad document, are exactly those of
 // encoding/xml. The only error it returns itself is a cancelled context.
 func parseSVGFast(ctx context.Context, svg string, lim Limits) (root *element, ok bool, err error) {
+	led := budget.LedgerFrom(ctx)
+	// What it charged goes back when it hands the document to encoding/xml,
+	// which charges the tree it builds itself.
+	var charged int64
+	defer func() {
+		if !ok && err == nil {
+			led.Free(charged)
+		}
+	}()
 	var (
 		stack    []*element
 		elements int
@@ -103,11 +114,21 @@ func parseSVGFast(ctx context.Context, svg string, lim Limits) (root *element, o
 			}
 		}
 		if len(slab) == cap(slab) {
+			// The tree is the input's to size: charged before it is made
+			// (ADR 0010), with each element's place in its parent's list.
+			if err := led.Alloc(256 * (elementBytes + 8)); err != nil {
+				return nil, false, err
+			}
+			charged += 256 * (elementBytes + 8)
 			slab = make([]element, 0, 256)
 		}
 		slab = append(slab, element{name: name})
 		el := &slab[len(slab)-1]
 		if len(attrs) == cap(attrs) {
+			if err := led.Alloc(1024 * attributeBytes); err != nil {
+				return nil, false, err
+			}
+			charged += 1024 * attributeBytes
 			attrs = make([]attribute, 0, 1024)
 		}
 		first := len(attrs)

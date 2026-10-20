@@ -15,8 +15,11 @@ aster svg -i chart.vl.json -signal cutoff=10 -signal 'label=Q3 sales'
 aster svg -i chart.vl.json -lenient                          # render past failed loads
 aster svg -i examples/cars.vl.json -allow-file examples      # data/cars.json from examples/data/
 aster svg -i chart.vl.json -base-url https://cdn.jsdelivr.net/npm/vega-datasets@3.2.1/
-aster png -i chart.vl.json -font 'Inter=Inter.ttf' -theme dark.json -timezone Europe/Madrid -memory-limit 256MiB
+aster png -i chart.vl.json -font 'Inter=Inter.ttf' -default-font Inter -theme dark.json -timezone Europe/Madrid -memory-limit 256MiB
+aster version                                                # aster's version, and the Vega and Vega-Lite it follows
 ```
+
+The input is `-i FILE`, or standard input: with `-i -`, or with no `-i` when standard input is a pipe or a file. A terminal is never read unless `-i -` asks for it, and an argument that is not a flag is an error, not an input: `aster svg chart.vl.json` fails and says to use `-i` ([ADR 0017](adr/0017-cli-input-is-a-flag.md)).
 
 ## Vega or Vega-Lite?
 
@@ -34,15 +37,18 @@ The `$schema`'s *version* does not choose the compiler: a `v5.json` spec is comp
 
 | Flag | `svg` | `png` | `pdf` | `compile` | Meaning |
 |---|:-:|:-:|:-:|:-:|---|
-| `-i file` | ✓ | ✓ | ✓ | ✓ | input spec; `-` or omitted: stdin |
+| `-i file` | ✓ | ✓ | ✓ | ✓ | input spec; `-`: stdin; omitted: stdin when it is a pipe or a file (a terminal needs `-i -`) |
 | `-o file` | ✓ | ✓ | ✓ | ✓ | output; omitted: stdout |
 | `-version v` | ✓ | ✓ | ✓ | ✓ | Vega-Lite compiler: `6.4` (default) or `5.8`, or the full `6.4.3`, `5.8.0` (a leading `v` is accepted) |
 | `-from lang` | ✓ | ✓ | ✓ | | `auto` (default), `vega` or `vega-lite` |
 | `-timeout d` | ✓ | ✓ | ✓ | ✓ | per render, e.g. `60s`; default 30s; `0` disables |
 | `-memory-limit size` | ✓ | ✓ | ✓ | ✓ | `WithMemoryLimit`: bytes, or with a unit (`KiB`, `MiB`, `GiB`, `KB`, `MB`, `GB`), e.g. `256MiB`; see [limits.md](limits.md) |
 | `-theme file` | ✓ | ✓ | ✓ | ✓ | `WithTheme`: a JSON file holding a Vega config object |
-| `-timezone zone` | ✓ | ✓ | ✓ | ✓ | `WithTimezone`: an IANA zone, e.g. `America/New_York`; default UTC |
-| `-font family=file` | ✓ | ✓ | ✓ | | `WithFont`: register a font file (TrueType, OpenType, WOFF, a collection) under a family name (repeatable) |
+| `-timezone zone` | ✓ | ✓ | ✓ | ✓ | `WithTimezone`: an IANA zone, e.g. `America/New_York`; default UTC. For `compile`, it is the zone of a selection parameter's DateTime initial value, which Vega-Lite compiles to a timestamp; other DateTimes compile to `datetime()`, which the render evaluates in its own zone |
+| `-font family=file` | ✓ | ✓ | ✓ | | `WithFont`: register a font file (TrueType, OpenType, WOFF, a collection) under a family name (repeatable). It draws the text of a spec that names that family; for the rest, see `-default-font` |
+| `-default-font family` | ✓ | ✓ | ✓ | | `WithDefaultFontFamily`: the family generic `sans-serif`, Vega's default font, means (default Liberation Sans); one given with `-font`, or embedded |
+| `-default-serif-font family` | ✓ | ✓ | ✓ | | `WithDefaultSerifFamily`: the family `serif` means (default Liberation Serif) |
+| `-default-monospace-font family` | ✓ | ✓ | ✓ | | `WithDefaultMonospaceFamily`: the family `monospace` means (default Liberation Mono) |
 | `-allow-file dir` | ✓ | ✓ | ✓ | | load data and images named by a relative path from the files under `dir` (`FileLoader`; repeatable, the first that has the file serves it) |
 | `-allow-http` | ✓ | ✓ | ✓ | | load data and images over HTTP(S) from public hosts |
 | `-allow-domain host` | ✓ | ✓ | ✓ | | only from this host (repeatable); implies `-allow-http` |
@@ -62,15 +68,15 @@ With `-allow-file` and HTTP loading (`-allow-http`, `-allow-domain`, `-base-url`
 |---|---|
 | 0 | the output was written (warnings may have been printed) |
 | 1 | any error: unreadable input, a spec that is invalid or is neither Vega nor Vega-Lite detectably, a failed load or evaluation error (without `-lenient`), a limit, a timeout, an unwritable output |
-| 2 | an invalid command line: no command, an unknown command or flag (the flag package's usage is printed), or a flag value that is not valid (`-text x`, `-from x`, `-timeout -1s`, `-scale 0`, an unknown `-version` or `-timezone`, a `-memory-limit` that is not a size, a `-theme` or `-font` file that is missing or does not load, an `-allow-file` directory that does not open, a `-base-url` that is not an absolute http(s) URL) |
+| 2 | an invalid command line: no command, an unknown command or flag, an argument that is not a flag, no input (no `-i`, and standard input a terminal), or a flag value that is not valid (`-text x`, `-from x`, `-timeout -1s`, `-scale 0`, an unknown `-version` or `-timezone`, a `-memory-limit` that is not a size, a `-theme` or `-font` file that is missing or does not load, a `-default-font` family no font provides, an `-allow-file` directory that does not open, a `-base-url` that is not an absolute http(s) URL) |
 
-Messages go to stderr, prefixed `aster:`. Vega's and the Vega-Lite compiler's warnings (`compile` prints the compiler's too) are printed as `aster: warning: …` and do not change the exit status. With `-lenient`, errors the render goes past are printed as `aster: ignored: …`. A load no flag allowed adds a hint: `-allow-file` or `-base-url` for a relative URL, `-allow-http` or `-allow-domain` for an http(s) one. See [errors.md](errors.md) for what counts as an error.
+Messages go to stderr, prefixed `aster:`. A command's usage error (a flag or a flag value, an argument, no input) is one line, ending with the command that prints that command's usage (`aster svg -h`); no command, or an unknown one, lists the commands. Vega's and the Vega-Lite compiler's warnings (`compile` prints the compiler's too) are printed as `aster: warning: …` and do not change the exit status. With `-lenient`, errors the render goes past are printed as `aster: ignored: …`. A load no flag allowed adds a hint: `-allow-file` or `-base-url` for a relative URL, `-allow-http` or `-allow-domain` for an http(s) one. A relative URL the `-allow-file` directories do not have names them; with several loaders, every loader's failure is printed, in order. See [errors.md](errors.md) for what counts as an error.
 
 ## Library-only
 
 These have no flag: use the library (see [api.md](api.md)).
 
-- fonts beyond `-font`: `WithFontFace`, `WithFontInstance`, `WithFontPalette`, `WithFontFallback`, `WithDefault*Family`, `WithSystemFonts`;
+- fonts beyond `-font` and `-default-*font`: `WithFontFace`, `WithFontInstance`, `WithFontPalette`, `WithFontFallback`, `WithSystemFonts`;
 - `WithTextMeasurement`, `WithHarfBuzzTextMetrics`, `WithContext`;
 - custom loaders, `StaticLoader`, `HTTPLoader`'s `Client`, `MaxResponseBytes` and `Timeout`, `FileLoader.MaxBytes`;
 - `WithQuantizePNG`, PDF font usage (`…PDFUsage`, `SubsetFont`);

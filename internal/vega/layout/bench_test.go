@@ -21,9 +21,9 @@ func BenchmarkGridLayout(b *testing.B) {
 		it.Bounds.Set(-5, -5, 35, 25)
 		items[i] = it
 	}
-	opt := &gridOptions{alignCol: each, alignRow: each, padCol: 5, padRow: 5, columns: 10, centerCol: true}
+	opt := &gridOptions{alignCol: each, alignRow: each, padCol: jsval.Num(5), padRow: jsval.Num(5), columns: 10, centerCol: true}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		gridLayout(items, opt)
+		_, _ = gridLayout(items, opt)
 	}
 }

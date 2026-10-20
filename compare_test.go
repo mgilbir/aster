@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -61,9 +62,10 @@ var corpusSets = []corpusSet{
 // equal to upstream's). Any other status than the listed one fails the test,
 // a better one too, so the list stays exact; -compare.update rewrites it.
 //
-// A status may list "|"-separated alternatives for the few specs whose
-// oracle answer depends on the platform node runs on (its text shaping, or
-// V8's last-bit trigonometry on x86-64); the reason says which gives which.
+// A spec whose oracle answer depends on the platform node runs on (its text
+// shaping, or V8's last-bit trigonometry on x86-64) lists one status per
+// platform, keyed to the oracle's version line (ok@arm64|differ@x64; see
+// expect_test.go); the reason says why.
 const expectFile = "testdata/oracle-expect.txt"
 
 // pinnedNow is the instant the oracle pins Date.now and new Date() to
@@ -180,13 +182,14 @@ func TestCompareWithNode(t *testing.T) {
 		}
 	}
 	scoreboard(t, results)
-	// A floor, so a corpus directory that moved or emptied fails instead of
-	// comparing less.
-	const corpusFloor = 1422
-	if *compareSets == compareSetsDefault && *compareFilter == "" && len(results) < corpusFloor {
+	// A floor at the corpus's size, so a corpus directory that moved or
+	// emptied fails instead of comparing less; raise it as specs are added.
+	const corpusFloor = 1464
+	complete := *compareSets == compareSetsDefault && *compareFilter == ""
+	if complete && len(results) < corpusFloor {
 		t.Errorf("compared %d specs, fewer than the corpus floor of %d", len(results), corpusFloor)
 	}
-	checkExpectations(t, expectFile, *compareUpdate, results)
+	checkExpectations(t, expectFile, *compareUpdate, complete, platformKeys(t, o.Version()), results)
 }
 
 func compareOne(t *testing.T, o *oracle.Oracle, c *aster.Converter, set corpusSet, spec []byte) specResult {
@@ -203,15 +206,18 @@ func compareOne(t *testing.T, o *oracle.Oracle, c *aster.Converter, set corpusSe
 		got, gerr = c.VegaToSVG(spec, asUpstream)
 	}
 	var problems []string
-	switch {
-	case gerr != nil && want.Err != "":
-		r.svg, r.detail = "both-error", "engine: "+firstLine(gerr.Error())+" | node: "+firstLine(want.Err)
-	case gerr != nil:
-		r.svg, r.detail = "engine-error", firstLine(gerr.Error())
-		problems = append(problems, "engine-error")
-	case want.Err != "":
-		r.svg, r.detail = "node-error", firstLine(want.Err)
-		problems = append(problems, "node-error")
+	switch out := errorOutcome(gerr, want.Err); out {
+	case statusInternalError:
+		r.svg, r.detail = out, firstLine(gerr.Error())
+		problems = append(problems, out)
+	case "both-error":
+		r.svg, r.detail = out, "engine: "+firstLine(gerr.Error())+" | node: "+firstLine(want.Err)
+	case "engine-error":
+		r.svg, r.detail = out, firstLine(gerr.Error())
+		problems = append(problems, out)
+	case "node-error":
+		r.svg, r.detail = out, firstLine(want.Err)
+		problems = append(problems, out)
 	default:
 		d, err := svgdiff.Compare([]byte(got), []byte(want.SVG), svgTolerance)
 		switch {
@@ -228,8 +234,22 @@ func compareOne(t *testing.T, o *oracle.Oracle, c *aster.Converter, set corpusSe
 			problems = append(problems, "differ")
 		}
 	}
+	// Upstream compiled the spec: the engine's compilation must equal it,
+	// and an engine that fails to compile it differs too, even when both
+	// then fail (node rendering, the engine compiling), which would
+	// otherwise read as agreement (C74, audit 2026-10-18).
 	if set.lite && len(want.Vega) > 0 {
-		if vg, err := c.VegaLiteToVega(spec); err == nil {
+		vg, err := c.VegaLiteToVega(spec)
+		switch {
+		case isEngineBug(err):
+			if !slices.Contains(problems, statusInternalError) {
+				problems = append(problems, statusInternalError)
+			}
+			r.detail += vegaDetailMarker + firstLine(err.Error())
+		case err != nil:
+			problems = append(problems, "vega-differ")
+			r.detail += vegaDetailMarker + "the engine does not compile it: " + firstLine(err.Error())
+		default:
 			g, err1 := jsval.ParseJSON(vg)
 			w, err2 := jsval.ParseJSON(want.Vega)
 			if err1 != nil || err2 != nil || !jsval.Equal(g, w) {
@@ -245,7 +265,7 @@ func compareOne(t *testing.T, o *oracle.Oracle, c *aster.Converter, set corpusSe
 }
 
 func scoreboard(t *testing.T, results []specResult) {
-	cols := []string{"identical", "equal", "differ", "engine-error", "node-error", "both-error"}
+	cols := []string{"identical", "equal", "differ", "engine-error", "node-error", "both-error", statusInternalError}
 	type tally struct {
 		n, vegaDiffer int
 		by            map[string]int

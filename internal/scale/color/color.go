@@ -56,17 +56,8 @@ var (
 
 var nan = math.NaN()
 
-// jsRound is JavaScript's Math.round: round half towards +Infinity.
-func jsRound(x float64) float64 {
-	r := math.Floor(x)
-	if x-r >= 0.5 {
-		return r + 1
-	}
-	return r
-}
-
 func clampi(v float64) float64 {
-	r := jsRound(v)
+	r := jsmath.Round(v)
 	if r != r { // `|| 0`
 		return 0
 	}

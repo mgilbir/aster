@@ -219,25 +219,50 @@ func fontConfig(font Value) *Object {
 
 // ---- vega-util mergeConfig / writeConfig ----
 
-func isLegalKey(k string) bool { return k != "__proto__" && k != "constructor" && k != "prototype" }
+// isLegalKey is vega-util's: version 2 (Vega-Lite 6.4) refuses
+// "__proto__", "constructor" and "prototype"; 1.17 (5.8) only "__proto__".
+func isLegalKey(cc *compileCtx, k string) bool {
+	if cc != nil && cc.v5 {
+		return k != "__proto__"
+	}
+	return k != "__proto__" && k != "constructor" && k != "prototype"
+}
 
 // writeConfig writes value at output[key]. recurse is nil (shallow), or a
 // predicate over child keys; recurseAll makes every level recurse.
+//
+// output is a plain object: an object value merges into output[key] when
+// that is an object, and for a name every object inherits (toString, or
+// constructor where it is legal) that is the built-in, which the write
+// changes for the rest of the compilation and the output never shows. The
+// recursion table ({layout: 1}) is a plain object too, so such a key
+// recurses.
 func writeConfig(cc *compileCtx, output *Object, key string, value Value, recurseAll bool, recurseKeys map[string]bool) {
-	if !isLegalKey(key) {
+	if !isLegalKey(cc, key) {
 		return
 	}
 	if value.IsObj() {
 		var target *Object
-		if cur := output.Lookup(key); cur.IsObj() || cur.IsArr() {
-			if cur.IsObj() {
-				target = cur.ObjValue()
-			} else {
-				// An array is an object in JS; keys are written as properties on it. Rare; replace.
-				target = jsval.NewObject(4)
-				output.Set(key, jsval.Obj(target))
+		cur, own := output.Get(key)
+		switch {
+		case own && cur.IsObj():
+			target = cur.ObjValue()
+		case !own && isInheritedKey(key):
+			if cc == nil {
+				return
 			}
-		} else {
+			ref := cc.realm().inherited(jsProto{}, key)
+			vo := value.ObjValue()
+			for i := 0; i < vo.Len(); i++ {
+				cc.work(1)
+				if k := vo.KeyAt(i); isLegalKey(cc, k) {
+					cc.realm().write(ref, k, vo.ValueAt(i))
+				}
+			}
+			return
+		default:
+			// An array is an object in JS; keys are written as properties
+			// on it. Rare; replace.
 			target = jsval.NewObject(4)
 			output.Set(key, jsval.Obj(target))
 		}
@@ -245,9 +270,9 @@ func writeConfig(cc *compileCtx, output *Object, key string, value Value, recurs
 		for i := 0; i < vo.Len(); i++ {
 			cc.work(1)
 			k := vo.KeyAt(i)
-			if recurseAll || recurseKeys[k] {
+			if recurseAll || recurseKeys[k] || (recurseKeys != nil && isInheritedKey(k)) {
 				writeConfig(cc, target, k, vo.ValueAt(i), false, nil)
-			} else if isLegalKey(k) {
+			} else if isLegalKey(cc, k) {
 				target.Set(k, vo.ValueAt(i))
 			}
 		}
@@ -256,31 +281,42 @@ func writeConfig(cc *compileCtx, output *Object, key string, value Value, recurs
 	output.Set(key, value)
 }
 
-// mergeNamed is vega-util's: `if (!map[item.name])` reads a plain object,
-// so a name every object inherits counts as already added.
+// mergeNamed is vega-util's mergeNamed(a, b) (b's items first): `if
+// (!map[item.name])` reads a plain object, so a name every object inherits
+// counts as already added. Version 2 (Vega-Lite 6.4) returns a when b is
+// null or undefined; 1.17 (5.8) calls b.forEach whatever b is (C82 of the
+// 2026-10-18 audit). Both call forEach on b and then a, and read each
+// item's name, with JavaScript's TypeErrors.
 func mergeNamed(cc *compileCtx, a, b Value) Value {
 	if a.IsNullish() {
 		return b
 	}
-	if b.IsNullish() {
+	if b.IsNullish() && !(cc != nil && cc.v5) {
 		return a
+	}
+	forEach := func(list Value, name string, f func(Value)) {
+		switch {
+		case list.IsNullish():
+			throw("Cannot read properties of %s (reading 'forEach')", nullishName(list))
+		case !list.IsArr():
+			throw("%s.forEach is not a function", name)
+		}
+		for _, it := range list.Items() {
+			f(it)
+		}
 	}
 	seen := map[string]bool{}
 	var out []Value
 	add := func(it Value) {
 		cc.work(1)
-		n := it.Get("name").AsString()
+		n := propKey(cc, jsGet(it, "name"))
 		if !jsSeen(nil, seen, n) {
 			seen[n] = true
 			out = append(out, it)
 		}
 	}
-	for _, it := range b.Items() {
-		add(it)
-	}
-	for _, it := range a.Items() {
-		add(it)
-	}
+	forEach(b, "b", add)
+	forEach(a, "a", add)
 	return jsval.Arr(out)
 }
 

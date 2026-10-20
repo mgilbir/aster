@@ -323,10 +323,10 @@ func (s *sim) setNodes(vals []jsval.Value) error {
 	const initialRadius = 10
 	initialAngle := math.Pi * (3 - math.Sqrt(5))
 	for i, v := range vals {
-		if !v.IsObj() {
+		if !v.IsObjectLike() {
 			return fmt.Errorf("force: node %d is not an object", i)
 		}
-		o := v.ObjValue()
+		o := jsval.Fields(v)
 		s.objs[i] = o
 		nd := &s.nodes[i]
 		if fx := o.Lookup("fx"); !fx.IsNullish() {

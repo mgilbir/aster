@@ -275,15 +275,16 @@ func TestCustomCopy(t *testing.T) {
 			t.Errorf("%v: copy projects to (%v, %v), original to (%v, %v)", pt, x1, y1, x0, y0)
 		}
 	}
-	// A parameter of 0 is not copied (copy() tests it for truthiness): the
-	// copy has the default, 45.
+	// A parameter of 0 is copied (C163, audit 2026-10-18): copy() runs
+	// `if (p[prop]) c[prop](p[prop]())`, which tests that the projection has
+	// the method, not the value's truthiness.
 	o.Set("parallel", jsval.Num(0))
 	p, err = ConfigureProjection(bg, customPorts, nil, o, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := p.Copy().(*standard).params["parallel"]; got != 45 {
-		t.Errorf("parallel 0 copied as %v, want the default 45", got)
+	if got := p.Copy().(*standard).params["parallel"]; got != 0 {
+		t.Errorf("parallel 0 copied as %v", got)
 	}
 }
 

@@ -20,16 +20,29 @@
 // The functions here use the fused form on every platform, written with explicit
 // math.FMA calls placed where clang contracts (the left product of an add or
 // subtract first, else the right one), so results are platform independent and
-// equal V8 on arm64, the platform the recorded test vectors come from. On x86-64
-// V8 the last bit can differ from these results for a small fraction of
-// arguments (in practice only a few functions and only near rounding ties).
+// equal V8 on arm64, the platform the recorded test vectors come from (the
+// owner's decision, 2026-10-18: the engine stays on arm64 V8).
+//
+// Node on x86-64 differs from these results in the last bit, and not only
+// near rounding ties: measured with node 24.21.0 over 100,000 arguments per
+// function (go test -run TestV8Live -args -live=100000, the baseline in
+// testdata/live_x64.json), 17 of the 20 functions differ, from 19 arguments
+// (tanh) to 753 (tan), 0.02% to 0.75%: exp 39, expm1 52, log 306, log1p 85,
+// log10 307, sinh 58, cosh 25, tanh 19, asinh 117, acosh 28, atanh 40,
+// sin 491, cos 444, atan 82, asin 171, acos 76, tan 753; pow, log2 and cbrt
+// agree. Math.log10(92) and Math.exp(-656) are such arguments. A chart
+// rendered here can therefore differ by an ulp, and in a printed number,
+// from one rendered by node on x86-64 (docs/testing.md lists the oracle's
+// known exceptions).
 //
 // Math.hypot is different: V8 computes it in generated code with separate
 // multiply and add, which Hypot mirrors.
 //
 // Testing: vectors_test.go replays recorded V8 arguments and results
 // (testdata/v8_*.bin.gz) and, with -live=N, compares fresh
-// arguments against a running node. testdata/eval_v8.mjs is the evaluator.
+// arguments against a running node: exactly on arm64 node, and against the
+// recorded count of differences on x86-64 node. testdata/eval_v8.mjs is the
+// evaluator.
 // The pow vectors come from node on Linux (JSMATH_NODE_DOCKER, see runNode).
 package jsmath
 

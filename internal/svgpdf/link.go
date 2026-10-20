@@ -4,6 +4,7 @@ import (
 	"math"
 	"strings"
 
+	"github.com/mgilbir/aster/internal/csscolor"
 	pdf0 "github.com/mgilbir/pdf0"
 )
 
@@ -44,7 +45,7 @@ func linkURI(href string) string {
 			return ""
 		}
 	}
-	if !linkSchemes[strings.ToLower(scheme)] {
+	if !linkSchemes[csscolor.ASCIILower(scheme)] { // the scheme is ASCII (checked above)
 		return ""
 	}
 	var b strings.Builder

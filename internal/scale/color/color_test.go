@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"github.com/mgilbir/aster/internal/jsmath"
 )
 
 type described struct {
@@ -353,8 +355,8 @@ func FuzzParse(f *testing.F) {
 
 func TestJSRound(t *testing.T) {
 	for _, c := range []struct{ in, want float64 }{{2.5, 3}, {-2.5, -2}, {0.49999999999999994, 0}, {-0.5, 0}, {1.5, 2}, {254.5, 255}} {
-		if got := jsRound(c.in); got != c.want {
-			t.Errorf("jsRound(%v)=%v want %v", c.in, got, c.want)
+		if got := jsmath.Round(c.in); got != c.want {
+			t.Errorf("jsmath.Round(%v)=%v want %v", c.in, got, c.want)
 		}
 	}
 }

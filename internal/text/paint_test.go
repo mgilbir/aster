@@ -222,7 +222,7 @@ func TestWithFontPalette(t *testing.T) {
 		// One the font does not have is its first.
 		{[]Option{WithFontPalette("colourtest", 7)}, "Solid {230 26 26 255} false|PopClip|PushClipGlyph|Solid {26 51 230 255}"},
 		// Another family's palette is not this one's.
-		{[]Option{WithFontPalette("Other", 1)}, "Solid {230 26 26 255} false|PopClip|PushClipGlyph|Solid {26 51 230 255}"},
+		{[]Option{WithFontPalette("Liberation Serif", 1)}, "Solid {230 26 26 255} false|PopClip|PushClipGlyph|Solid {26 51 230 255}"},
 	} {
 		m, err := New(append([]Option{WithFont("ColourTest", data)}, c.opts...)...)
 		if err != nil {
@@ -236,5 +236,9 @@ func TestWithFontPalette(t *testing.T) {
 		if got := strings.Join(rec.calls, "|"); !strings.Contains(got, c.want) {
 			t.Errorf("painted %s, want %s", got, c.want)
 		}
+	}
+	// A family with no font is a mistake New reports (C57).
+	if _, err := New(WithFont("ColourTest", data), WithFontPalette("Other", 1)); err == nil {
+		t.Error("New accepted a palette for a family with no font")
 	}
 }

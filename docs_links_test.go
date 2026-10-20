@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -19,11 +20,13 @@ var (
 	mdRefUse = regexp.MustCompile(`\[([^\]\n]*)\]\[([^\]\n]*)\]`)
 	// mdHTML is the href or src of an HTML element.
 	mdHTML = regexp.MustCompile(`(?i)<[a-z]+\s[^>]*?\b(?:href|src)\s*=\s*["']([^"']+)["']`)
-	// mdPathSpan is a code span holding a path into the repository.
-	mdPathSpan = regexp.MustCompile("`((?:testdata|internal|docs|scripts|cmd)/[^`\\s]*)`")
+	// mdPathSpan is a code span, which may name a path into the repository.
+	mdPathSpan = regexp.MustCompile("`([^`\\s]+)`")
+	// mdFileName is a bare file name, as `compare_test.go` or `Makefile`.
+	mdFileName = regexp.MustCompile(`^(?:[\w.-]+\.(?:go|md|mod|sum|sh|yml|yaml|mjs|allow|txt)|Makefile)$`)
 	mdHeading  = regexp.MustCompile(`(?m)^ {0,3}#+\s+(.*?)\s*#*\s*$`)
-	slugStrip  = regexp.MustCompile("[`*_]")
-	slugDelete = regexp.MustCompile(`[^\p{L}\p{N}_\- ]`)
+	slugStrip  = regexp.MustCompile("[`*]")
+	slugDelete = regexp.MustCompile(`[^\p{L}\p{N}\p{M}_\- ]`)
 )
 
 // Every relative link in the repository's tracked Markdown resolves, to a
@@ -35,10 +38,16 @@ var (
 func TestDocsLinks(t *testing.T) {
 	files := trackedFiles(t, "*.md")
 	tracked := map[string]bool{}
+	topDirs := map[string]bool{}   // the repository's top-level directories
+	baseNames := map[string]bool{} // the name of every tracked file
 	for _, f := range trackedFiles(t, "*") {
 		tracked[f] = true
+		baseNames[path.Base(f)] = true
 		for d := path.Dir(f); d != "."; d = path.Dir(d) {
 			tracked[d] = true
+			if path.Dir(d) == "." {
+				topDirs[d] = true
+			}
 		}
 	}
 	anchors := map[string]map[string]bool{}
@@ -49,9 +58,7 @@ func TestDocsLinks(t *testing.T) {
 		a := map[string]bool{}
 		if b, err := os.ReadFile(p); err == nil {
 			prose, _ := splitMarkdown(string(b))
-			for _, m := range mdHeading.FindAllStringSubmatch(prose, -1) {
-				a[slug(m[1])] = true
-			}
+			a = headingAnchors(prose)
 		}
 		anchors[p] = a
 		return a
@@ -106,9 +113,13 @@ func TestDocsLinks(t *testing.T) {
 			}
 		}
 	}
-	// A repository path named in code (`testdata/security/x.vg.json`) is
-	// a reference too: it must name a tracked file or directory, so that a
-	// file moved or deleted does not leave the docs pointing at nothing.
+	// A repository path named in code (`testdata/security/x.vg.json`,
+	// `.github/workflows/ci.yml`, `compare_test.go`, `Makefile`) is a
+	// reference too: it must name a tracked file or directory, so that a file
+	// moved or deleted does not leave the docs pointing at nothing. A span is
+	// a path when it starts with one of the repository's top-level
+	// directories (or a directory beside the document); a bare file name must
+	// be the name of a tracked file.
 	paths := 0
 	for _, p := range files {
 		// An audit or a history records the tree it read, as it was; only
@@ -125,6 +136,20 @@ func TestDocsLinks(t *testing.T) {
 				continue // a pattern or a placeholder, not a path
 			}
 			rp, _, _ = strings.Cut(rp, ":") // file.go:123
+			if !strings.Contains(rp, "/") {
+				if !mdFileName.MatchString(rp) || record {
+					continue // not a file name
+				}
+				paths++
+				if !baseNames[rp] {
+					t.Errorf("%s: names %s, which is not the name of a tracked file", p, rp)
+				}
+				continue
+			}
+			first, _, _ := strings.Cut(rp, "/")
+			if first == "" || first == "." || first == ".." || !topDirs[first] && !tracked[path.Join(path.Dir(p), first)] {
+				continue // not a path into the repository (github.com/…, data/cars.json)
+			}
 			if i := strings.LastIndex(rp, "."); i > strings.LastIndex(rp, "/") && i+1 < len(rp) && rp[i+1] >= 'A' && rp[i+1] <= 'Z' {
 				rp = rp[:i] // internal/budget.Ledger: the package's directory
 			}
@@ -146,13 +171,32 @@ func TestDocsLinks(t *testing.T) {
 	}
 }
 
-// slug is GitHub's anchor for a heading: lower case, markup and punctuation
-// dropped, spaces as hyphens.
+// slug is GitHub's anchor for a heading (github-slugger): lower case, the
+// code and emphasis markup dropped, punctuation but '-' and '_' dropped,
+// spaces as hyphens.
 func slug(h string) string {
 	h = strings.ToLower(strings.TrimSpace(h))
 	h = slugStrip.ReplaceAllString(h, "")
 	h = slugDelete.ReplaceAllString(h, "")
 	return strings.ReplaceAll(h, " ", "-")
+}
+
+// headingAnchors are the anchors GitHub gives the headings of a document's
+// prose: a slug already taken gets the first free suffix -1, -2, ..., as
+// github-slugger's occurrences count does.
+func headingAnchors(prose string) map[string]bool {
+	anchors := map[string]bool{}
+	occurrences := map[string]int{}
+	for _, m := range mdHeading.FindAllStringSubmatch(prose, -1) {
+		s := slug(m[1])
+		orig := s
+		for anchors[s] {
+			occurrences[orig]++
+			s = orig + "-" + strconv.Itoa(occurrences[orig])
+		}
+		anchors[s] = true
+	}
+	return anchors
 }
 
 // fence is a fenced code block of a Markdown document.

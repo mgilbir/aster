@@ -1,0 +1,2 @@
+{"data":[{"name":"d","values":[{"a":3},{"a":1},{"a":2}],"transform":[{"type":"collect","sort":{"field":"a"},"signal":"cs"},{"type":"extent","field":"a","signal":"ex"}]}],
+ "marks":[{"type":"text","encode":{"enter":{"y":{"value":0},"text":{"signal":"'' + length(cs) + '|' + pluck(cs, 'a') + '|' + ex"}}}}]}

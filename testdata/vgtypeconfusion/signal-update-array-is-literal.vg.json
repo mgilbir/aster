@@ -1,0 +1,1 @@
+{"width": 40, "height": 20, "signals": [{"name": "s", "update": [1, 2]}], "marks": [{"type": "text", "encode": {"enter": {"text": {"signal": "s"}, "y": {"value": 10}}}}]}

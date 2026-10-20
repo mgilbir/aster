@@ -15,8 +15,21 @@ var errTooManyThresholds = fmt.Errorf("contour: too many contour levels: %w", bu
 // evenly spaced interior levels, on "nice" tick steps when nice is set.
 // Upstream's `count || 10` default is the caller's job.
 func Quantize(k float64, nice, zero bool) func(values []float64) ([]float64, error) {
+	return quantizeK1(k, k+1, nice, zero)
+}
+
+// quantizeK1 is Quantize whose `k + 1` is k1, as JavaScript's + makes it
+// for a k that is no number ("3" + 1 is "31", read as 31).
+func quantizeK1(k, k1 float64, nice, zero bool) func(values []float64) ([]float64, error) {
 	return func(values []float64) ([]float64, error) {
 		lo, hi := extent(values)
+		return quantizeAt(k, k1, nice, zero, lo, hi)
+	}
+}
+
+// quantizeAt is the threshold generator once the extent [lo, hi] is known.
+func quantizeAt(k, k1 float64, nice, zero bool, lo, hi float64) ([]float64, error) {
+	{
 		start := lo
 		if zero {
 			start = math.Min(lo, 0)
@@ -26,7 +39,7 @@ func Quantize(k float64, nice, zero bool) func(values []float64) ([]float64, err
 		if nice {
 			step = tickStep(start, hi, k)
 		} else {
-			step = span / (k + 1)
+			step = span / k1
 		}
 		return rangeSteps(start+step, hi, step)
 	}
@@ -93,8 +106,8 @@ func tickSpec(start, stop, count float64) (i1, i2, inc float64) {
 	}
 	if power < 0 {
 		inc = jsmath.Pow(10, -power) / factor
-		i1 = jsRound(float64(start * inc))
-		i2 = jsRound(float64(stop * inc))
+		i1 = jsmath.Round(float64(start * inc))
+		i2 = jsmath.Round(float64(stop * inc))
 		if i1/inc < start {
 			i1++
 		}
@@ -104,8 +117,8 @@ func tickSpec(start, stop, count float64) (i1, i2, inc float64) {
 		inc = -inc
 	} else {
 		inc = jsmath.Pow(10, power) * factor
-		i1 = jsRound(start / inc)
-		i2 = jsRound(stop / inc)
+		i1 = jsmath.Round(start / inc)
+		i2 = jsmath.Round(stop / inc)
 		if i1*inc < start {
 			i1++
 		}

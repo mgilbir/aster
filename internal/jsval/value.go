@@ -9,7 +9,6 @@ package jsval
 
 import (
 	"math"
-	"strings"
 	"unsafe"
 )
 
@@ -99,7 +98,41 @@ func (v Value) arr() *arrayBox { return (*arrayBox)(v.p) }
 func (v Value) obj() *Object   { return (*Object)(v.p) }
 func (v Value) pat() *Pattern  { return (*Pattern)(v.p) }
 
-type arrayBox struct{ items []Value }
+// arrayBox is an array: its elements, and props, the object that holds the
+// named own properties JavaScript lets an array have and its tuple id, nil
+// until a tuple's field is written into it (Fields). Upstream ingests an
+// array row as a tuple like any object: it gets an id, and transforms write
+// their fields into it (a pie's angles, a formula's value). Named
+// properties are what a member read finds before Array.prototype's, and
+// what JSON.stringify, String() and the array's length ignore.
+//
+// The elements are a pointer and a length rather than a slice: nothing grows
+// an array in place, so the capacity word is dropped to make room for props
+// within the 24 bytes the box had. (A box in a parser slab is not rounded up
+// to a size class, so a word more is paid for by every array of a document.)
+type arrayBox struct {
+	ptr   *Value
+	n     int
+	props *Object
+}
+
+// list is the elements, a slice of exactly n of them.
+func (b *arrayBox) list() []Value {
+	if b.ptr == nil {
+		return nil
+	}
+	return unsafe.Slice(b.ptr, b.n)
+}
+
+// set makes items the elements.
+func (b *arrayBox) set(items []Value) {
+	b.n = len(items)
+	if len(items) == 0 {
+		b.ptr = nil
+		return
+	}
+	b.ptr = &items[0]
+}
 
 // Small arrays are allocated together with their elements: one allocation
 // instead of two, which matters for the coordinate pairs of a map.
@@ -147,32 +180,41 @@ func MakeArr(n int) (Value, []Value) {
 		b = &arrayBox{}
 	case n == 1:
 		x := &arrayBox1{}
-		x.items, b = x.buf[:], &x.arrayBox
+		x.set(x.buf[:])
+		b = &x.arrayBox
 	case n == 2:
 		x := &arrayBox2{}
-		x.items, b = x.buf[:], &x.arrayBox
+		x.set(x.buf[:])
+		b = &x.arrayBox
 	case n == 3:
 		x := &arrayBox3{}
-		x.items, b = x.buf[:], &x.arrayBox
+		x.set(x.buf[:])
+		b = &x.arrayBox
 	case n == 4:
 		x := &arrayBox4{}
-		x.items, b = x.buf[:], &x.arrayBox
+		x.set(x.buf[:])
+		b = &x.arrayBox
 	case n == 5:
 		x := &arrayBox5{}
-		x.items, b = x.buf[:], &x.arrayBox
+		x.set(x.buf[:])
+		b = &x.arrayBox
 	case n == 6:
 		x := &arrayBox6{}
-		x.items, b = x.buf[:], &x.arrayBox
+		x.set(x.buf[:])
+		b = &x.arrayBox
 	case n == 7:
 		x := &arrayBox7{}
-		x.items, b = x.buf[:], &x.arrayBox
+		x.set(x.buf[:])
+		b = &x.arrayBox
 	case n == 8:
 		x := &arrayBox8{}
-		x.items, b = x.buf[:], &x.arrayBox
+		x.set(x.buf[:])
+		b = &x.arrayBox
 	default:
-		b = &arrayBox{items: make([]Value, n)}
+		b = &arrayBox{}
+		b.set(make([]Value, n))
 	}
-	return ref(KindArr, unsafe.Pointer(b)), b.items
+	return ref(KindArr, unsafe.Pointer(b)), b.list()
 }
 
 var (
@@ -207,7 +249,11 @@ func Timestamp(epochMillis float64) Value {
 }
 
 // Arr makes an array that takes ownership of items.
-func Arr(items []Value) Value { return ref(KindArr, unsafe.Pointer(&arrayBox{items: items})) }
+func Arr(items []Value) Value {
+	b := &arrayBox{}
+	b.set(items)
+	return ref(KindArr, unsafe.Pointer(b))
+}
 
 // ArrOf makes an array from the given values.
 func ArrOf(items ...Value) Value { return Arr(items) }
@@ -286,14 +332,14 @@ func (v Value) Items() []Value {
 	if v.Kind() != KindArr {
 		return nil
 	}
-	return v.arr().items
+	return v.arr().list()
 }
 
 // Len is the length of an array or the number of keys of an object.
 func (v Value) Len() int {
 	switch v.Kind() {
 	case KindArr:
-		return len(v.arr().items)
+		return len(v.arr().list())
 	case KindObj:
 		return v.obj().Len()
 	}
@@ -316,13 +362,121 @@ func (v Value) PatternOf() *Pattern {
 	return v.pat()
 }
 
-// Get reads a property of an object, answering Undefined when v is not an
-// object or has no such key.
+// Get reads a property of an object (or a named own property of an array),
+// answering Undefined when v is neither or has no such key. An object with a
+// prototype (SetPrototype) answers through it for a key it does not hold.
 func (v Value) Get(key string) Value {
-	if v.Kind() != KindObj {
-		return Undefined
+	switch v.Kind() {
+	case KindObj:
+		o := v.obj()
+		if val, ok := o.Get(key); ok || o.host == nil {
+			return val
+		}
+		val, _ := o.protoGet(key)
+		return val
+	case KindArr:
+		if pr := v.arr().props; pr != nil {
+			return pr.Lookup(key)
+		}
 	}
-	return v.obj().Lookup(key)
+	return Undefined
+}
+
+// ArrayProps is the object holding an array's named own properties and its
+// tuple id, nil for an array that has none and for any other value.
+func (v Value) ArrayProps() *Object {
+	if v.Kind() != KindArr {
+		return nil
+	}
+	return v.arr().props
+}
+
+// Fields is the object a tuple's fields are written into, and its tuple id
+// kept in: an object itself, an array's named-property object (made on first
+// use), nil for any other value (a primitive, into which upstream's strict
+// assignment throws).
+func Fields(v Value) *Object {
+	switch v.Kind() {
+	case KindObj:
+		return v.obj()
+	case KindArr:
+		b := v.arr()
+		if b.props == nil {
+			b.props = NewObject(0)
+		}
+		return b.props
+	}
+	return nil
+}
+
+// FieldsFor is Fields for upstream's `t[key] = value` into a tuple: a
+// primitive tuple (a Load transform's rows are not wrapped) throws the
+// TypeError of that strict-mode assignment, raised as a *Thrown panic, which
+// the dataflow logs as the operator's error.
+func FieldsFor(t Value, key string) *Object {
+	if o := Fields(t); o != nil {
+		return o
+	}
+	switch t.Kind() {
+	case KindNull, KindUndefined:
+		of := "undefined"
+		if t.IsNull() {
+			of = "null"
+		}
+		panic(&Thrown{Name: "TypeError", Msg: "Cannot set properties of " + of + " (setting '" + key + "')"})
+	case KindStr, KindNum, KindBool:
+		kind := map[Kind]string{KindStr: "string", KindNum: "number", KindBool: "boolean"}[t.Kind()]
+		panic(&Thrown{Name: "TypeError", Msg: "Cannot create property '" + key + "' on " + kind + " '" + StringPrefix(t, MessageBytes) + "'"})
+	}
+	// A date or a pattern: an object upstream, whose fields jsval does not
+	// hold. The write is lost.
+	return NewObject(0)
+}
+
+// TupleIDOrder orders two tuples by tuple id: `tupleid(a) - tupleid(b)`, the
+// tie-break of upstream's stableCompare. A tie (NaN) when either is no tuple.
+func TupleIDOrder(a, b Value) int {
+	var ia, ib uint32
+	if o := Tuple(a); o != nil {
+		ia = o.TupleID()
+	}
+	if o := Tuple(b); o != nil {
+		ib = o.TupleID()
+	}
+	switch {
+	case ia == 0 || ib == 0:
+		return 0
+	case ia < ib:
+		return -1
+	case ia > ib:
+		return 1
+	}
+	return 0
+}
+
+// Tuple is the object of a tuple, for reading its fields and its id: an
+// object itself, an array's named-property object (nil while it has none),
+// nil for any other value. Fields is its form for writing.
+func Tuple(v Value) *Object {
+	switch v.Kind() {
+	case KindObj:
+		return v.obj()
+	case KindArr:
+		return v.arr().props
+	}
+	return nil
+}
+
+// CopyArray is a shallow copy of an array: its elements and its named own
+// properties (a copy of them, with the tuple id).
+func CopyArray(v Value) Value {
+	b := v.arr()
+	nv, items := MakeArr(len(b.list()))
+	copy(items, b.list())
+	if b.props != nil {
+		nv.arr().props = b.props.Clone()
+	}
+	return nv
 }
 
 // Index reads an array element, answering Undefined out of range.
@@ -330,7 +484,7 @@ func (v Value) Index(i int) Value {
 	if v.Kind() != KindArr {
 		return Undefined
 	}
-	items := v.arr().items
+	items := v.arr().list()
 	if i < 0 || i >= len(items) {
 		return Undefined
 	}
@@ -356,7 +510,7 @@ func (v Value) AsDouble() float64 {
 	case KindBool:
 		return v.n()
 	case KindStr:
-		return parseLooseDouble(strings.TrimSpace(v.s()))
+		return parseLooseDouble(JSTrim(v.s()))
 	case KindArr:
 		// A chain of one-element arrays is followed in a loop, not by
 		// recursion, whatever its depth.
@@ -399,57 +553,34 @@ func (v Value) AsBoolean() bool {
 }
 
 // AsString is JavaScript's String(x) for the variants this model holds,
-// except that a Timestamp is written as its epoch number (callers that need
-// Date.prototype.toString format it themselves). Array elements that are
-// nullish are written as "" (Array.prototype.join).
-func (v Value) AsString() string { return v.asString(0) }
-
-func (v Value) asString(depth int) string {
-	if depth > MaxValueDepth {
-		return ""
-	}
+// except that a Timestamp is written as its epoch number: this detached form
+// has no time zone. The call's Walker writes a date, in an array too, as
+// Date.prototype.toString in the view's zone (ContextWithDateText). Array
+// elements that are nullish are written as "" (Array.prototype.join).
+//
+// The String of an array is a walk of it, and this is the detached walk (see
+// Walker): the String of a value an expression or a transform built is taken
+// with the call's Walker (Walker.String), which the call's budgets bound.
+func (v Value) AsString() string {
 	switch v.Kind() {
-	case KindStr:
-		return v.s()
-	case KindNum, KindTimestamp:
-		return JSNumberString(v.n())
-	case KindBool:
-		if v.n() != 0 {
-			return "true"
-		}
-		return "false"
-	case KindNull:
-		return "null"
-	case KindUndefined:
-		return "undefined"
 	case KindArr:
-		var b strings.Builder
-		for i, it := range v.Items() {
-			if i > 0 {
-				b.WriteByte(',')
-			}
-			if !it.IsNullish() {
-				b.WriteString(it.asString(depth + 1))
-			}
-		}
-		return b.String()
+		return Walker{}.String(v)
 	case KindObj:
-		if o := v.ObjValue(); o != nil && o.str != nil {
-			return o.str(o)
-		}
-		return "[object Object]"
-	case KindPattern:
-		return v.PatternOf().String()
+		return objectString(v.obj())
 	}
-	return ""
+	return v.primString()
 }
 
-// String implements fmt.Stringer for debugging; it writes compact JSON-like
-// text and is not a JavaScript conversion.
+// String implements fmt.Stringer for messages and debugging: compact
+// JSON-like text, not a JavaScript conversion. It shows at most the first
+// previewBytes bytes of the value's text, followed by "…" when there is more,
+// so a message about a value costs no more than its preview.
 func (v Value) String() string {
 	switch v.Kind() {
 	case KindStr:
-		return quoteJSON(v.s())
+		if len(v.s()) <= previewBytes {
+			return quoteJSON(v.s())
+		}
 	case KindUndefined:
 		return "undefined"
 	case KindTimestamp:
@@ -457,59 +588,36 @@ func (v Value) String() string {
 	case KindPattern:
 		return v.PatternOf().String()
 	}
-	return string(AppendJSON(nil, v))
+	b := Walker{}.appendJSONPrefix(nil, v, previewBytes)
+	if len(b) > previewBytes {
+		b = append(cutUTF8(b, previewBytes), "…"...)
+	}
+	return string(b)
 }
 
-// Equal is deep structural equality (not JavaScript ===). NaN equals NaN.
-func Equal(a, b Value) bool { return equal(a, b, 0) }
+// previewBytes is how much of a value's text String shows.
+const previewBytes = 1 << 10
 
-func equal(a, b Value, depth int) bool {
-	if a.Kind() != b.Kind() || depth > MaxValueDepth {
-		return false
+// cutUTF8 is b cut to at most n bytes at a character boundary.
+func cutUTF8(b []byte, n int) []byte {
+	if len(b) <= n {
+		return b
 	}
-	switch a.Kind() {
-	case KindUndefined, KindNull:
-		return true
-	case KindBool:
-		return a.n() == b.n()
-	case KindNum, KindTimestamp:
+	for n > 0 && b[n]&0xC0 == 0x80 {
+		n--
+	}
+	return b[:n]
+}
+
+// Equal is deep structural equality (not JavaScript ===). NaN equals NaN;
+// an array or object equals itself without a walk. It is the detached walk
+// (see Walker): values an expression or a transform built are compared with
+// the call's Walker (Walker.Equal).
+func Equal(a, b Value) bool {
+	if a.Kind() == KindNum && b.Kind() == KindNum {
 		return a.n() == b.n() || (math.IsNaN(a.n()) && math.IsNaN(b.n()))
-	case KindStr:
-		return a.s() == b.s()
-	case KindArr:
-		x, y := a.Items(), b.Items()
-		if len(x) != len(y) {
-			return false
-		}
-		for i := range x {
-			if !equal(x[i], y[i], depth+1) {
-				return false
-			}
-		}
-		return true
-	case KindObj:
-		x, y := a.ObjValue(), b.ObjValue()
-		if x == y {
-			return true
-		}
-		if x.host != nil || y.host != nil {
-			return false
-		}
-		if x.Len() != y.Len() {
-			return false
-		}
-		for i := 0; i < x.Len(); i++ {
-			bv, ok := y.Get(x.KeyAt(i))
-			if !ok || !equal(x.ValueAt(i), bv, depth+1) {
-				return false
-			}
-		}
-		return true
-	case KindPattern:
-		p, q := a.PatternOf(), b.PatternOf()
-		return p.Source == q.Source && p.Flags == q.Flags
 	}
-	return false
+	return Walker{}.Equal(a, b)
 }
 
 // SameRef reports whether two arrays/objects/patterns are the same reference
@@ -595,4 +703,57 @@ func (v Value) Key() Key {
 	default:
 		return Key{k: k}
 	}
+}
+
+// InternKey is a comparable form of a Value as d3's InternMap and InternSet
+// file it, for map keys: the value's valueOf() (a Date is its time value,
+// an array, object or pattern itself), compared as a JavaScript Map compares
+// keys (SameValueZero: NaN matches NaN, -0 matches 0, strings by content,
+// objects by reference). So a Date and its number are one key, two arrays of
+// the same elements are two, and an array is the same key however it is
+// reached, which no walk of it decides: a value of any size is a key in
+// O(1). Key differs only where JavaScript's === does: NaN, and dates.
+type InternKey struct {
+	k    Kind
+	bits uint64
+	s    string
+	r    unsafe.Pointer
+}
+
+// InternKey returns v's InternKey.
+func (v Value) InternKey() InternKey {
+	switch k := v.Kind(); k {
+	case KindNum, KindTimestamp:
+		f := v.n()
+		switch {
+		case f != f:
+			return InternKey{k: KindNum, bits: canonicalNaN}
+		case f == 0:
+			return InternKey{k: KindNum} // -0 and 0
+		}
+		return InternKey{k: KindNum, bits: math.Float64bits(f)}
+	case KindBool:
+		return InternKey{k: k, bits: v.x}
+	case KindStr:
+		return InternKey{k: k, s: v.s()}
+	case KindArr, KindObj, KindPattern:
+		return InternKey{k: k, r: v.p}
+	default:
+		return InternKey{k: k}
+	}
+}
+
+// canonicalNaN stands for every NaN in an InternKey.
+var canonicalNaN = math.Float64bits(math.NaN())
+
+// MapKey is the InternKey of v as a JavaScript Map keys it, without
+// InternMap's valueOf(): SameValueZero, so a Date is not its number. A date
+// is held here by its time value, not as an object of its own, so two
+// Dates of the same time are one key (in JavaScript they are two).
+func (v Value) MapKey() InternKey {
+	k := v.InternKey()
+	if v.Kind() == KindTimestamp {
+		k.k = KindTimestamp
+	}
+	return k
 }

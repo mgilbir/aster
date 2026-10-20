@@ -46,6 +46,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -283,6 +284,37 @@ func Start(t testing.TB, pkg string) *Replay {
 	return rep
 }
 
+// Packages are the packages scripts/record-upstream-vectors.sh records
+// (VEGA_PACKAGES and D3_PACKAGES there; TestPackagesMatchTheRecorder keeps the
+// two lists equal).
+var Packages = []string{
+	"vega-transforms", "vega-time", "vega-scenegraph", "vega-expression", "vega-statistics", "vega-encode",
+	"vega-scale", "vega-functions", "vega-crossfilter", "vega-event-selector", "vega-format", "vega-geo",
+	"vega-regression", "vega-hierarchy", "vega-voronoi", "vega-force",
+	"d3-array", "d3-time", "d3-time-format", "d3-format", "d3-dsv", "d3-geo", "d3-color", "d3-shape", "d3-scale",
+	"d3-interpolate", "d3-path", "d3-hierarchy", "d3-ease", "d3-scale-chromatic",
+}
+
+// nodeArchs are the values of node's process.arch, which a recording names
+// (File.Arch).
+var nodeArchs = []string{"arm", "arm64", "ia32", "loong64", "mips", "mipsel", "ppc", "ppc64", "riscv64", "s390", "s390x", "x64"}
+
+// checkPackageKey refuses a known-divergences package that no replay would
+// ever load: a package the recorder does not record (vega-statistic), or an
+// architecture node never reports (x86_64; node says x64). Such a line would
+// be accepted and never asserted, while its author believes it pinned (C76,
+// audit 2026-10-18).
+func checkPackageKey(key string) error {
+	pkg, arch, hasArch := strings.Cut(key, "@")
+	if !slices.Contains(Packages, pkg) {
+		return fmt.Errorf("package %q is not one the recorder records (upstream.Packages)", pkg)
+	}
+	if hasArch && !slices.Contains(nodeArchs, arch) {
+		return fmt.Errorf("architecture %q is not a value of node's process.arch (%s)", arch, strings.Join(nodeArchs, ", "))
+	}
+	return nil
+}
+
 func loadKnown(root string) (map[string]map[string]knownEntry, error) {
 	out := map[string]map[string]knownEntry{}
 	fh, err := os.Open(filepath.Join(root, divergencesFile))
@@ -304,6 +336,9 @@ func loadKnown(root string) (map[string]map[string]knownEntry, error) {
 		if len(parts) != 4 || strings.TrimSpace(parts[3]) == "" ||
 			(parts[2] != "-" && !strings.HasPrefix(parts[2], "sha256:")) {
 			return nil, fmt.Errorf("%s:%d: want <package> TAB <signature> TAB <answers: sha256:… or -> TAB <reason>", divergencesFile, n)
+		}
+		if err := checkPackageKey(parts[0]); err != nil {
+			return nil, fmt.Errorf("%s:%d: %w", divergencesFile, n, err)
 		}
 		if out[parts[0]] == nil {
 			out[parts[0]] = map[string]knownEntry{}

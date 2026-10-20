@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -26,6 +27,7 @@ func TestNoUnreviewedFusedMultiplyAdd(t *testing.T) {
 	if _, err := exec.LookPath("sh"); err != nil {
 		t.Skip("sh not available")
 	}
+	subprocessInputs(t, "scripts/fmacheck.sh", "scripts/fmacheck.allow")
 	out, err := exec.Command("sh", "scripts/fmacheck.sh").CombinedOutput()
 	if err != nil {
 		t.Fatalf("fmacheck.sh: %v\n%s", err, out)
@@ -64,5 +66,65 @@ func TestFusedMultiplyAddCheckFailsOnStaleEntries(t *testing.T) {
 	}
 	if n := strings.Count(string(out), "\n  internal/"); n != 1 {
 		t.Errorf("%d entries reported, want the planted one only:\n%s", n, out)
+	}
+}
+
+// fmacheck.sh's comment says which of internal/raster's files it checks (the
+// filter primitives, which port resvg's arithmetic product by product), and
+// its awk regex decides it: the two must name the same files (C148, audit
+// 2026-10-18: the comment said filter*.go, the regex named three of them).
+func TestFusedMultiplyAddCheckRasterFilesAsDocumented(t *testing.T) {
+	b, err := os.ReadFile("scripts/fmacheck.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(b)
+	// The comment's list, across its "# " line breaks.
+	var comment strings.Builder
+	for _, l := range strings.Split(script, "\n") {
+		if strings.HasPrefix(l, "#") {
+			comment.WriteString(strings.TrimPrefix(strings.TrimPrefix(l, "#"), " ") + " ")
+		}
+	}
+	m := regexp.MustCompile(`filter primitives \(([^)]*)\)`).FindStringSubmatch(comment.String())
+	if m == nil {
+		t.Fatal("fmacheck.sh's comment no longer lists the raster files it checks; reword the test with the script")
+	}
+	var globs []string
+	for _, g := range strings.Split(m[1], ",") {
+		globs = append(globs, strings.TrimSpace(g))
+	}
+	r := regexp.MustCompile(`rel !~ /(\^internal\\/raster\\/[^ ]*\$)/`).FindStringSubmatch(script)
+	if r == nil {
+		t.Fatal("fmacheck.sh has no raster exception regex; reword the test with the script")
+	}
+	re, err := regexp.Compile(strings.ReplaceAll(r[1], `\/`, `/`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := filepath.Glob("internal/raster/*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	used := map[string]bool{}
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		name := filepath.Base(f)
+		documented := false
+		for _, g := range globs {
+			if ok, _ := filepath.Match(g, name); ok {
+				documented, used[g] = true, true
+			}
+		}
+		if checked := re.MatchString("internal/raster/" + name); checked != documented {
+			t.Errorf("internal/raster/%s: fmacheck.sh checks it: %v; its comment says %v", name, checked, documented)
+		}
+	}
+	for _, g := range globs {
+		if !used[g] {
+			t.Errorf("fmacheck.sh's comment names %s, which matches no file of internal/raster", g)
+		}
 	}
 }

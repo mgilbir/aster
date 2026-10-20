@@ -22,7 +22,7 @@ var (
 func tickSpec(start, stop, count float64) (i1, i2, inc float64) {
 	for {
 		step := (stop - start) / math.Max(0, count)
-		power := math.Floor(log10(step))
+		power := math.Floor(jsmath.Log10(step))
 		err := step / pow10n(power)
 		factor := 1.0
 		switch {
@@ -35,8 +35,8 @@ func tickSpec(start, stop, count float64) (i1, i2, inc float64) {
 		}
 		if power < 0 {
 			inc = pow10n(-power) / factor
-			i1 = jsRound(start * inc)
-			i2 = jsRound(stop * inc)
+			i1 = jsmath.Round(start * inc)
+			i2 = jsmath.Round(stop * inc)
 			if i1/inc < start {
 				i1++
 			}
@@ -46,8 +46,8 @@ func tickSpec(start, stop, count float64) (i1, i2, inc float64) {
 			inc = -inc
 		} else {
 			inc = pow10n(power) * factor
-			i1 = jsRound(start / inc)
-			i2 = jsRound(stop / inc)
+			i1 = jsmath.Round(start / inc)
+			i2 = jsmath.Round(stop / inc)
 			if i1*inc < start {
 				i1++
 			}

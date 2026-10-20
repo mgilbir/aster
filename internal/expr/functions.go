@@ -31,6 +31,15 @@ type funcDef struct {
 	check func(n *Node) error
 	// visit is the dependency visitor of vega-functions.
 	visit func(c *compiler, n *Node) error
+	// argc, when not 0, is how many arguments upstream's generated code
+	// reads: vega-expression writes `String(a).toUpperCase()`,
+	// `new Date(a).getMonth()` and `a.length` from the first argument alone,
+	// so the others are neither compiled nor evaluated.
+	argc int
+	// first, when set, converts the first argument as the generated code
+	// does before it evaluates the others: `String(a).split(b, c)`,
+	// `RegExp(a).test(b)` (an invalid pattern throws before b runs).
+	first func(s *Scope, v jsval.Value) jsval.Value
 }
 
 var funcTable = map[string]*funcDef{}
@@ -48,8 +57,6 @@ func fn(name string, f builtinFn) { def(name, &funcDef{fn: f}) }
 func pred(name string, p func(v jsval.Value) bool) {
 	def(name, &funcDef{pred1: p, fn: func(s *Scope, args []jsval.Value) jsval.Value { return jsval.Bool(p(arg(args, 0))) }})
 }
-
-func fnMin(name string, min int, f builtinFn) { def(name, &funcDef{fn: f, min: min}) }
 
 func lookupFunc(name string) *funcDef { return funcTable[name] }
 
@@ -80,13 +87,21 @@ func (c *compiler) call(n *Node) (node, error) {
 			return nil, err
 		}
 	}
-	args := make([]node, len(n.Elems))
-	for i, a := range n.Elems {
+	elems := n.Elems
+	if d.argc > 0 && len(elems) > d.argc {
+		elems = elems[:d.argc]
+	}
+	args := make([]node, len(elems))
+	for i, a := range elems {
 		f, err := c.compile(a)
 		if err != nil {
 			return nil, err
 		}
 		args[i] = f
+	}
+	if d.first != nil && len(args) > 0 {
+		a0, first := args[0], d.first
+		args[0] = func(s *Scope) jsval.Value { return first(s, a0(s)) }
 	}
 	switch {
 	case d.math1 != nil:
@@ -238,7 +253,8 @@ func init() {
 			return a[2](s)
 		}, nil
 	}})
-	// clamp(v, lo, hi) is Math.max(lo, Math.min(hi, v)).
+	// clamp(v, lo, hi) is Math.max(lo, Math.min(hi, v)), which evaluates lo,
+	// hi and then v (C100).
 	def("clamp", &funcDef{special: func(c *compiler, n *Node) (node, error) {
 		if len(n.Elems) < 3 {
 			return nil, cerr("Missing arguments to clamp function.")
@@ -251,17 +267,45 @@ func init() {
 			return nil, err
 		}
 		return func(s *Scope) jsval.Value {
-			v, lo, hi := a[0](s), a[1](s), a[2](s)
+			lo, hi, v := a[1](s), a[2](s), a[0](s)
 			return jsval.Num(jsMax2(s.num(lo), jsMin2(s.num(hi), s.num(v))))
 		}, nil
 	}})
+	// The event functions are event.vega.<name>(...): the generated code
+	// reads `event` before it evaluates the arguments, so where the function
+	// has no event (an operator's update, a formula) the ReferenceError comes
+	// first.
 	for _, name := range [...]string{"view", "item", "group", "xy", "x", "y"} {
 		name := name
-		fn(name, func(s *Scope, args []jsval.Value) jsval.Value {
-			if s.view == nil {
-				return jsval.Undefined
+		def(name, &funcDef{special: func(c *compiler, n *Node) (node, error) {
+			a, err := c.argNodes(n)
+			if err != nil {
+				return nil, err
 			}
-			return s.view.EventFunction(name, append([]jsval.Value(nil), args...))
-		})
+			return func(s *Scope) jsval.Value {
+				// Generated as `event.vega.<name>(...)`: an expression with
+				// no event parameter has no `event`, and an event that
+				// carries no vega extension (an update by a scale or signal
+				// passes a Pulse; a headless run has no pointer event) has no
+				// `event.vega`; both are read before the arguments. An
+				// embedding that sets no event at all keeps the provider's
+				// answer.
+				if s.NoEvent {
+					throw("ReferenceError", "event is not defined")
+				}
+				if !s.Event.IsNullish() && s.Event.Get("vega").IsNullish() {
+					typeError("Cannot read properties of undefined (reading '%s')", name)
+				}
+				args := make([]jsval.Value, len(a))
+				for i, f := range a {
+					args[i] = f(s)
+				}
+				s.work(1)
+				if s.view == nil {
+					return jsval.Undefined
+				}
+				return s.view.EventFunction(name, args)
+			}, nil
+		}})
 	}
 }

@@ -18,7 +18,7 @@ func sortFromSpec(spec jsval.Value) Comparator {
 	if !spec.IsObj() {
 		return nil
 	}
-	return CompareBy(fieldList(spec.Get("field")), strList(spec.Get("order")))
+	return CompareBy(jsval.Walker{}, fieldList(spec.Get("field")), strList(spec.Get("order")))
 }
 
 func windowParamsFromSpec(spec jsval.Value) WindowParams {
@@ -42,14 +42,14 @@ func windowParamsFromSpec(spec jsval.Value) WindowParams {
 	aparams := numListOpt(spec.Get("aggregate_params"))
 	as := spec.Get("as")
 	for i, op := range ops {
-		s := WindowOpSpec{Op: op, Param: math.NaN()}
+		s := WindowOpSpec{Op: op, Param: math.NaN(), AggParam: math.NaN()}
 		if f := fields.Index(i); f.IsStr() {
 			s.Field = FieldOf(f.StrValue())
 		}
 		if i < len(params) {
 			s.Param = params[i]
 		}
-		if i < len(aparams) && aparams[i] == aparams[i] {
+		if i < len(aparams) && aparams[i] == aparams[i] && aparams[i] != 0 {
 			s.AggParam = aparams[i]
 		}
 		if a := as.Index(i); a.IsStr() {
@@ -206,7 +206,7 @@ func TestWindowNoPanicOnEdgeFrames(t *testing.T) {
 	data := []jsval.Value{obj("v", jsval.Num(1)), obj("v", jsval.Num(2)), obj("v", jsval.Num(3))}
 	for _, fr := range [][]FrameBound{{{Offset: 3}, {Offset: 1}}, {{Offset: 5}, {Offset: 9}}, {{Offset: -9}, {Offset: -5}}} {
 		_, err := Window(context.Background(), cloneTuples(data), WindowParams{
-			Sort: CompareBy(FieldsOf("v"), nil), SortField: "v", Frame: fr,
+			Sort: CompareBy(jsval.Walker{}, FieldsOf("v"), nil), SortField: "v", Frame: fr,
 			Ops: []WindowOpSpec{{Op: "sum", Field: FieldOf("v")}, {Op: "first_value", Field: FieldOf("v")}, {Op: "last_value", Field: FieldOf("v")}, {Op: "median", Field: FieldOf("v")}},
 		})
 		// A range frame that starts past the last row or ends before the
@@ -223,13 +223,18 @@ func TestWindowErrors(t *testing.T) {
 	for _, ops := range [][]WindowOpSpec{
 		{{Op: "ntile", Param: 0}},
 		{{Op: "nth_value", Field: FieldOf("v"), Param: math.NaN()}},
-		{{Op: "lag"}},
+		{{Op: "first_value"}}, // field(...) of a null field
 		{{Op: "sum"}},
 		{{Op: "bogus", Field: FieldOf("v")}},
 	} {
 		if _, err := Window(context.Background(), data, WindowParams{Ops: ops}); err == nil {
 			t.Errorf("%v: want error", ops[0].Op)
 		}
+	}
+	// A null field fails where the operation reads it, as upstream's
+	// field(...) does: lag reads none on the first row.
+	if _, err := Window(context.Background(), data, WindowParams{Ops: []WindowOpSpec{{Op: "lag"}}}); err != nil {
+		t.Errorf("lag of one row: %v", err)
 	}
 }
 
@@ -244,7 +249,7 @@ func windowBenchData(n int) []jsval.Value {
 func BenchmarkWindowSumRank100k(b *testing.B) {
 	base := windowBenchData(100_000)
 	p := WindowParams{
-		Sort: CompareBy(FieldsOf("t"), nil), GroupBy: FieldsOf("g"),
+		Sort: CompareBy(jsval.Walker{}, FieldsOf("t"), nil), GroupBy: FieldsOf("g"),
 		Frame: []FrameBound{{Offset: -5}, {Offset: 0}},
 		Ops:   []WindowOpSpec{{Op: "sum", Field: FieldOf("x")}, {Op: "rank"}, {Op: "mean", Field: FieldOf("x")}},
 	}

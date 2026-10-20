@@ -63,6 +63,12 @@ func main() {
 	allow := flag.String("allow", "scripts/recursion.allow", "the allowlist")
 	cut := flag.String("cut", "", "comma-separated functions to remove from the call graph before looking for cycles (with -list)")
 	flag.Parse()
+	if flag.NArg() > 0 {
+		// The flag package stops at the first argument that is not a flag:
+		// the flags after it would be ignored.
+		fmt.Fprintf(os.Stderr, "recursionaudit: unexpected argument %q\n", flag.Arg(0))
+		os.Exit(2)
+	}
 
 	pkgs, err := goList()
 	if err != nil {

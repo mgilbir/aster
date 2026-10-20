@@ -4,6 +4,8 @@ import (
 	"math"
 	"strconv"
 	"strings"
+
+	"github.com/mgilbir/aster/internal/text"
 )
 
 type paintKind uint8
@@ -56,7 +58,7 @@ type state struct {
 	// space (see renderer.host).
 	nonScaling bool
 
-	families      []string
+	families      string // the font-family list as written (see fontFamilies)
 	fontSize      float64
 	fontWeight    int
 	italic        bool
@@ -71,6 +73,10 @@ type state struct {
 	vw, vh float64 // viewport size for percentage lengths
 }
 
+// initialFamilies is the font-family list of text that states none, the
+// text package's (the PDF writer's too), in the form a state keeps a list.
+var initialFamilies = strings.Join(text.InitialFontFamily(), ", ")
+
 func initialState(vw, vh float64) state {
 	return state{
 		ctm:           identity,
@@ -84,7 +90,7 @@ func initialState(vw, vh float64) state {
 		visible:       true,
 		filterLinear:  true,
 		paintOrder:    [3]uint8{0, 1, 2},
-		families:      []string{"serif"},
+		families:      initialFamilies, // as the PDF writer's
 		// CSS's initial font-size, medium, which browsers (for which Vega
 		// writes its SVG), the keyword table below and the PDF writer take
 		// as 16px. resvg takes 12 (usvg's Options::font_size, a tool
@@ -237,75 +243,15 @@ func parseURLRef(s string) (string, bool) {
 	return ref[1:], true
 }
 
-func parseFontFamilies(s string) []string {
-	var out []string
-	for len(s) > 0 {
-		s = strings.TrimLeft(s, " \t\n,")
-		if s == "" {
-			break
-		}
-		var name string
-		if s[0] == '"' || s[0] == '\'' {
-			q := s[0]
-			end := strings.IndexByte(s[1:], q)
-			if end < 0 {
-				name = s[1:]
-				s = ""
-			} else {
-				name = s[1 : 1+end]
-				s = s[end+2:]
-			}
-		} else {
-			end := strings.IndexByte(s, ',')
-			if end < 0 {
-				name, s = s, ""
-			} else {
-				name, s = s[:end], s[end+1:]
-			}
-			name = strings.TrimSpace(name)
-		}
-		if name != "" {
-			out = append(out, name)
-		}
-	}
-	return out
-}
-
-func parseFontWeight(s string, cur int) int {
-	switch strings.TrimSpace(s) {
-	case "normal":
-		return 400
-	case "bold":
-		return 700
-	case "bolder":
-		if cur < 400 {
-			return 400
-		} else if cur < 600 {
-			return 700
-		}
-		return 900
-	case "lighter":
-		if cur > 700 {
-			return 700
-		} else if cur > 500 {
-			return 400
-		}
-		return 100
-	}
-	v, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
-	if err != nil || v < 1 || v > 1000 {
-		return cur
-	}
-	return int(v)
-}
-
 func parseDashArray(st *state, s string) []float64 {
 	s = strings.TrimSpace(s)
 	if s == "" || s == "none" {
 		return nil
 	}
 	var out []float64
-	for _, f := range strings.FieldsFunc(s, func(r rune) bool { return r == ',' || r == ' ' || r == '\t' || r == '\n' }) {
+	// Read as a sequence: the list is refused past 256 values, and an
+	// attribute of megabytes must not be split whole first.
+	for f := range strings.FieldsFuncSeq(s, func(r rune) bool { return r == ',' || r == ' ' || r == '\t' || r == '\n' }) {
 		v, u, ok := parseLength(f)
 		if !ok {
 			return nil
@@ -424,8 +370,13 @@ func (st *state) applyProp(id attrID, val string) {
 			st.visible = false
 		}
 	case aFontFamily:
-		if f := parseFontFamilies(val); len(f) > 0 {
-			st.families = f
+		// font-family, font-weight and font-style are read by the text
+		// package, as the PDF writer reads them, so the two draw the face
+		// layout measured (C31). The family list is kept as written and
+		// read where text is laid out (fontFamilies): an element is drawn as
+		// often as it is used, and the list is the document's to make long.
+		if text.NamesFontFamily(val) {
+			st.families = val
 		}
 	case aFontSize:
 		val = strings.TrimSpace(val)
@@ -452,13 +403,12 @@ func (st *state) applyProp(id attrID, val string) {
 			}
 		}
 	case aFontWeight:
-		st.fontWeight = parseFontWeight(val, st.fontWeight)
+		if w, ok := text.ParseFontWeight(val, st.fontWeight); ok {
+			st.fontWeight = w
+		}
 	case aFontStyle:
-		switch strings.TrimSpace(val) {
-		case "italic", "oblique":
-			st.italic = true
-		case "normal":
-			st.italic = false
+		if italic, ok := text.ParseFontStyle(val); ok {
+			st.italic = italic
 		}
 	case aTextAnchor:
 		switch strings.TrimSpace(val) {
@@ -483,7 +433,7 @@ func (st *state) applyProp(id attrID, val string) {
 		}
 	case aTextDecoration:
 		var d uint8
-		for _, f := range strings.Fields(val) {
+		for f := range strings.FieldsSeq(val) {
 			switch f {
 			case "underline":
 				d |= 1
@@ -650,7 +600,7 @@ func parsePaintOrder(val string) [3]uint8 {
 	var out [3]uint8
 	var seen [3]bool
 	n := 0
-	for _, f := range strings.Fields(val) {
+	for f := range strings.FieldsSeq(val) {
 		var k int
 		switch f {
 		case "normal":

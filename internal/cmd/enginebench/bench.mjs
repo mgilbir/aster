@@ -64,14 +64,20 @@ if (vega.textMetrics.width !== vega.textMetrics.measureWidth) {
   process.exit(2);
 }
 
-// In-memory datasets, with the CDN URLs mapped onto the local copy (main.go's
-// memLoader does the same).
+// In-memory datasets, with the URLs that serve copies of vega-datasets mapped
+// onto the local copy, as testdata/oracle-node/dataset-urls.json lists them
+// for the oracle (main.go's memLoader does the same).
 const dataDirs = ['testdata/vega-datasets', 'testdata/data'].map((d) => path.resolve(d));
-const cdn = /^https?:\/\/(?:cdn\.jsdelivr\.net\/npm\/vega-datasets@[^/]+|raw\.githubusercontent\.com\/vega\/vega-datasets\/[^/]+|vega\.github\.io\/vega-datasets)\/(data\/.+)$/;
+const datasetURLs = JSON.parse(fs.readFileSync(path.resolve('testdata/oracle-node/dataset-urls.json'), 'utf8')).patterns.map(
+  (p) => new RegExp(p),
+);
 const cache = new Map();
 const localize = (uri) => {
-  const m = cdn.exec(uri);
-  return m ? m[1] : uri;
+  for (const re of datasetURLs) {
+    const m = re.exec(uri);
+    if (m) return m[1];
+  }
+  return uri;
 };
 const loader = vega.loader();
 // sanitize also serves hyperlink hrefs, so only load rejects non-local URIs.

@@ -1,0 +1,3 @@
+{"width":300,"height":60,"padding":5,"data":[{"name":"A","values":[[1,2],{"a":1}]},
+{"name":"B","source":"A","transform":[{"type":"aggregate","groupby":["constructor"],"ops":["count"],"as":["n"]}]}],
+"marks":[{"type":"text","from":{"data":"B"},"encode":{"update":{"x":{"value":0},"y":{"signal":"datum.n * 20"},"text":{"signal":"'gr ' + datum.n + ' ' + datum.constructor"}}}}]}

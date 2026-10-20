@@ -4,76 +4,50 @@ import (
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
-// ordKey is the identity of a domain value in d3's InternMap: primitives by
-// SameValueZero, and objects by their valueOf() (a Date is its epoch number).
-type ordKey struct {
-	kind jsval.Kind
-	n    float64
-	s    string
-}
-
-// keyOf returns the map key of v. ok is false for values interned by
-// reference (arrays, objects, patterns), which live in a side list.
-func keyOf(v jsval.Value) (ordKey, bool) {
-	switch v.Kind() {
-	case jsval.KindNum, jsval.KindTimestamp:
-		n := v.NumValue()
-		if n != n {
-			// NaN never equals itself as a struct field, so it gets a fixed key.
-			return ordKey{kind: jsval.KindNum, s: "NaN"}, true
-		}
-		if n == 0 {
-			n = 0 // -0 and +0 are the same key (SameValueZero)
-		}
-		return ordKey{kind: jsval.KindNum, n: n}, true
-	case jsval.KindStr:
-		return ordKey{kind: jsval.KindStr, s: v.StrValue()}, true
-	case jsval.KindBool:
-		return ordKey{kind: jsval.KindBool, n: v.NumValue()}, true
-	case jsval.KindNull, jsval.KindUndefined:
-		return ordKey{kind: v.Kind()}, true
-	}
-	return ordKey{}, false
-}
-
 // Ordinal is d3.scaleOrdinal: an ordered domain of distinct values mapped
 // cyclically onto a range. By default its domain grows implicitly: applying the
 // scale to an unseen value appends it (d3's `implicit` unknown).
 type Ordinal struct {
 	meta
-	domain   []jsval.Value
-	index    map[ordKey]int
-	refs     []int // indexes in domain of by-reference values
-	rng      []jsval.Value
+	domain []jsval.Value
+	// index is d3's InternMap: each value's position in domain by its
+	// jsval.InternKey (a Date by its time value, -0 as 0, NaN as NaN, an
+	// array or object by reference), found in O(1) whatever it holds.
+	index map[jsval.InternKey]int
+	// strs is index for the strings, which most domains are: a map keyed by
+	// the string alone hashes less.
+	strs map[string]int
+	rng  []jsval.Value
+	// probes counts the domain entries lookups compare with. Nothing reads
+	// it but the tests, which check that interning is O(1) a value by
+	// counting at n and 2n instead of timing it.
+	probes   int64
 	unknown  jsval.Value
 	implicit bool
 }
 
 // NewOrdinal is d3.scaleOrdinal with an empty domain and range.
 func NewOrdinal() *Ordinal {
-	return &Ordinal{index: map[ordKey]int{}, implicit: true}
+	return &Ordinal{index: map[jsval.InternKey]int{}, strs: map[string]int{}, implicit: true}
 }
 
 func (o *Ordinal) lookup(v jsval.Value) (int, bool) {
-	if k, ok := keyOf(v); ok {
-		i, found := o.index[k]
+	o.probes++
+	if s, ok := v.Strict(); ok {
+		i, found := o.strs[s]
 		return i, found
 	}
-	for _, i := range o.refs {
-		if jsval.SameRef(o.domain[i], v) {
-			return i, true
-		}
-	}
-	return 0, false
+	i, found := o.index[v.InternKey()]
+	return i, found
 }
 
 func (o *Ordinal) add(v jsval.Value) int {
 	i := len(o.domain)
 	o.domain = append(o.domain, v)
-	if k, ok := keyOf(v); ok {
-		o.index[k] = i
+	if s, ok := v.Strict(); ok {
+		o.strs[s] = i
 	} else {
-		o.refs = append(o.refs, i)
+		o.index[v.InternKey()] = i
 	}
 	return i
 }
@@ -102,8 +76,8 @@ func (o *Ordinal) Domain() []jsval.Value { return cloneValues(o.domain) }
 // SetDomain replaces the domain, dropping duplicates (first occurrence wins).
 func (o *Ordinal) SetDomain(d []jsval.Value) {
 	o.domain = make([]jsval.Value, 0, len(d))
-	o.index = make(map[ordKey]int, len(d))
-	o.refs = o.refs[:0]
+	o.index = map[jsval.InternKey]int{}
+	o.strs = make(map[string]int, len(d))
 	for i, v := range d {
 		o.charge(i, len(d))
 		if _, ok := o.lookup(v); ok {
@@ -135,6 +109,7 @@ func (o *Ordinal) SetImplicit() { o.unknown, o.implicit = jsval.Undefined, true 
 func (o *Ordinal) Copy() Scale {
 	n := NewOrdinal()
 	n.typ = o.typ
+	n.walk = o.walk
 	n.SetDomain(o.domain)
 	n.rng = cloneValues(o.rng)
 	n.unknown, n.implicit = o.unknown, o.implicit

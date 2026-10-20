@@ -1,0 +1,1 @@
+{"data":{"values":[{"a":"x","Year":1}]},"mark":"point","params":[{"name":"animation_frame","select":{"type":"point","fields":["Year"],"on":"timer"}}],"encoding":{"x":{"field":"a","type":"nominal"}}}

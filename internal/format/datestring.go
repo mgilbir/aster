@@ -2,8 +2,10 @@ package format
 
 import (
 	"math"
-	"unicode"
+	"strings"
 	"unicode/utf8"
+
+	"github.com/mgilbir/aster/internal/jsval"
 )
 
 // ParseDate is Date.parse (and new Date(string)) as V8 implements it, with z
@@ -28,6 +30,10 @@ import (
 // composers), so odd inputs such as "1/2/3" or "2000-1-1" resolve as in
 // Chrome and Node.
 func ParseDate(s string, z Zone) float64 {
+	// V8's tokenizer reads a NUL as the end of the input, wherever it is.
+	if i := strings.IndexByte(s, 0); i >= 0 {
+		s = s[:i]
+	}
 	p := dateParser{sc: newDateScanner(s)}
 	tok, ok := p.parseES5()
 	if !ok {
@@ -270,7 +276,11 @@ func (sc *dateScanner) skipSymbol(c rune) bool {
 	return false
 }
 
-func isDateSpace(r rune) bool { return unicode.IsSpace(r) || r == 0xFEFF }
+// isDateSpace is white space to V8's date tokenizer: ECMAScript's
+// WhiteSpace (TAB, VT, FF, SP, NBSP, U+FEFF, the Space_Separator category)
+// and LF and CR, but not U+2028 and U+2029, nor U+0085 (recorded from node
+// in testdata/dateparse.jsonl.gz).
+func isDateSpace(r rune) bool { return r != 0x2028 && r != 0x2029 && jsval.IsJSSpace(r) }
 
 func (sc *dateScanner) scan() dateToken {
 	s := sc.s

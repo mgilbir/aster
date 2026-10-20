@@ -3,10 +3,10 @@ package scale
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/mgilbir/aster/internal/format"
 	"github.com/mgilbir/aster/internal/jsval"
+	"github.com/mgilbir/aster/internal/nodetz"
 	"github.com/mgilbir/aster/internal/upstream"
 )
 
@@ -44,11 +44,7 @@ func stepsOf(raw any) []upstream.Step {
 
 func TestUpstreamVegaScale(t *testing.T) {
 	r := upstream.Start(t, "vega-scale")
-	loc, err := time.LoadLocation(r.File.TimeZone)
-	if err != nil {
-		t.Fatal(err)
-	}
-	local := format.Local(loc)
+	local := format.Local(nodetz.MustLoad(t, r.File.TimeZone))
 	for i := range r.File.Calls {
 		c := &r.File.Calls[i]
 		if c.Oversized != nil {
@@ -133,7 +129,7 @@ func TestUpstreamVegaScale(t *testing.T) {
 			r.Skip("unmapped " + c.Fn)
 		}
 	}
-	r.Done(60)
+	r.Done(84)
 }
 
 // stepsOfChain reads an origin's recorded chain: a list of [method, args].

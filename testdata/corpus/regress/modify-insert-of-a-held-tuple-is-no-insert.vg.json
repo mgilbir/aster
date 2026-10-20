@@ -1,0 +1,3 @@
+{"data":[{"name":"d","values":[{"a":1},{"a":2}],"on":[{"trigger":"r","insert":"r"}]}],
+ "signals":[{"name":"r","update":"length(data('d')) == 2 ? data('d')[0] : null"}],
+ "marks":[{"type":"text","from":{"data":"d"},"encode":{"enter":{"text":{"field":"a"},"y":{"signal":"datum.a*12"}}}}]}

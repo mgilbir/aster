@@ -7,6 +7,11 @@
 //	aster pdf -i input.vl.json -o output.pdf
 //	cat spec.json | aster svg > output.svg      # stdin/stdout
 //	aster compile -i input.vl.json              # Vega-Lite → Vega JSON
+//	aster version
+//
+// The input is -i FILE, or standard input with -i -, or without -i when
+// standard input is a pipe or a file; a terminal is never read unless -i -
+// asks for it. A positional argument is an error, not an input.
 //
 // Whether the input is Vega or Vega-Lite is read from its $schema, or else
 // from its top-level properties (see detectSpec); -from overrides both.
@@ -15,7 +20,10 @@
 // given, which renders past them as a browser does and prints each.
 //
 // Exit status: 0 on success, 1 on any error, 2 for an invalid command line:
-// an unknown command or flag, or a flag value that is not valid.
+// an unknown command or flag, a flag value that is not valid, an argument
+// that is not a flag, or no input. Messages go to stderr prefixed "aster: ";
+// a command's usage error is one line, the flag package's included, and no
+// command or an unknown one lists the commands.
 package main
 
 import (
@@ -28,6 +36,9 @@ import (
 	"math"
 	"net/url"
 	"os"
+	"runtime"
+	"runtime/debug"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -45,9 +56,7 @@ func cliMain(args []string, stderr io.Writer) int {
 		return 0
 	}
 	var ue *usageError
-	if errors.As(err, &ue) && ue.printed {
-		return 2 // the flag package printed it, and the usage
-	}
+	usage := errors.As(err, &ue)
 	// The library's errors already begin "aster: "; only add the program
 	// prefix to errors that don't (flag values, file I/O), so as not to
 	// print "aster: aster: ...".
@@ -57,7 +66,7 @@ func cliMain(args []string, stderr io.Writer) int {
 	} else {
 		_, _ = fmt.Fprintf(stderr, "aster: %s\n", msg)
 	}
-	if ue != nil {
+	if usage {
 		return 2
 	}
 	return 1
@@ -65,8 +74,7 @@ func cliMain(args []string, stderr io.Writer) int {
 
 // usageError is an invalid command line, which exits with status 2.
 type usageError struct {
-	err     error
-	printed bool // by the flag package, with the usage
+	err error
 }
 
 func (e *usageError) Error() string { return e.err.Error() }
@@ -77,15 +85,42 @@ func invalid(fs *flag.FlagSet, format string, args ...any) error {
 	return &usageError{err: fmt.Errorf(format+" (see aster %s -h)", append(args, fs.Name())...)}
 }
 
-// parse parses args with fs, which continues on error: the flag package has
-// printed the error and the usage, and the exit status is 2.
+// parse parses args with fs. An error is a usage error, printed as every
+// other is, on one line prefixed "aster: " (the flag package's own printing
+// of it, and of the whole usage, is silenced); -h prints the usage. An
+// argument that is not a flag is refused: the input is -i and the output -o,
+// and the flag package stops at the first non-flag, so the flags after it
+// would be dropped without a word (C49, audit 2026-10-18).
 func parse(fs *flag.FlagSet, args []string) error {
 	fs.Init(fs.Name(), flag.ContinueOnError)
-	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return err
-		}
-		return &usageError{err: err, printed: true}
+	fs.SetOutput(io.Discard)
+	fs.Usage = func() {}
+	err := fs.Parse(args)
+	if errors.Is(err, flag.ErrHelp) {
+		fs.SetOutput(os.Stderr)
+		fmt.Fprintf(os.Stderr, "usage: aster %s [flags]\n\nFlags:\n", fs.Name())
+		fs.PrintDefaults()
+		return err
+	}
+	if err != nil {
+		return &usageError{err: fmt.Errorf("%w (see aster %s -h)", err, fs.Name())}
+	}
+	if fs.NArg() > 0 {
+		return invalid(fs, "unexpected argument %q: the input is given with -i FILE and the output with -o FILE, and no flag after an argument is read", fs.Arg(0))
+	}
+	return nil
+}
+
+// checkInput refuses to read a terminal implicitly: with no -i, standard
+// input is the input only when it is a pipe or a file. A device (a terminal,
+// /dev/null) would wait for typing with no prompt, or read as empty, when
+// the likelier cause is a forgotten -i; -i - reads it anyway.
+func checkInput(fs *flag.FlagSet, path string) error {
+	if path != "" {
+		return nil
+	}
+	if fi, err := os.Stdin.Stat(); err == nil && fi.Mode()&(os.ModeDevice|os.ModeCharDevice) != 0 {
+		return invalid(fs, "no input: give -i FILE, or -i - to read standard input, which is a terminal or a device")
 	}
 	return nil
 }
@@ -97,6 +132,7 @@ Commands:
   png      Render spec to PNG
   pdf      Render spec to vector PDF
   compile  Compile Vega-Lite to Vega JSON
+  version  Print the version of aster and of the Vega and Vega-Lite it follows
 
 Run "aster <command> -h" for command-specific flags.`
 
@@ -115,12 +151,55 @@ func run(args []string) error {
 		return runPDF(args[1:])
 	case "compile":
 		return runCompile(args[1:])
+	case "version", "-version", "--version":
+		if len(args) > 1 {
+			return &usageError{err: fmt.Errorf("unexpected argument %q: version takes none", args[1])}
+		}
+		fmt.Print(versionText())
+		return nil
 	case "-h", "--help", "help":
 		fmt.Println(usage)
 		return nil
 	default:
 		return &usageError{err: fmt.Errorf("unknown command %q\n\n%s", command, usage)}
 	}
+}
+
+// versionText is what aster version prints: the module's version as the Go
+// toolchain stamped it (a tagged release, or "(devel)" with the commit for a
+// build from a checkout), and the versions of Vega and Vega-Lite the engine
+// follows.
+func versionText() string {
+	version := "(unknown)"
+	if bi, ok := debug.ReadBuildInfo(); ok {
+		version = bi.Main.Version
+		var rev, modified string
+		for _, s := range bi.Settings {
+			switch s.Key {
+			case "vcs.revision":
+				rev = s.Value
+			case "vcs.modified":
+				if s.Value == "true" {
+					modified = "+dirty"
+				}
+			}
+		}
+		// A tagged or pseudo-version names the commit already; a build
+		// that has neither is "(devel)".
+		if rev != "" && (version == "" || version == "(devel)") {
+			version += " " + rev[:min(12, len(rev))] + modified
+		}
+	}
+	vs, _ := aster.AvailableVersions()
+	var vega, lite []string
+	for i := len(vs) - 1; i >= 0; i-- {
+		if !slices.Contains(vega, vs[i].VegaVersion) {
+			vega = append(vega, vs[i].VegaVersion)
+		}
+		lite = append(lite, vs[i].VegaLiteVersion)
+	}
+	return fmt.Sprintf("aster %s\nVega %s; Vega-Lite %s (-version)\n%s %s/%s\n",
+		version, strings.Join(vega, ", "), strings.Join(lite, " and "), runtime.Version(), runtime.GOOS, runtime.GOARCH)
 }
 
 // stringList collects a repeatable string flag.
@@ -238,6 +317,7 @@ type commonOpts struct {
 	allowFiles   stringList
 	baseURL      string
 	fonts        []aster.Option
+	defaultFonts [3]string // sans-serif, serif, monospace
 	from         string
 	lenient      bool
 }
@@ -261,6 +341,9 @@ func registerCommonOpts(fs *flag.FlagSet) *commonOpts {
 		co.fonts = append(co.fonts, aster.WithFont(family, b))
 		return nil
 	})
+	fs.StringVar(&co.defaultFonts[0], "default-font", "", "the family the generic sans-serif (Vega's default font) means, e.g. one registered with -font (default: Liberation Sans)")
+	fs.StringVar(&co.defaultFonts[1], "default-serif-font", "", "the family the generic serif means (default: Liberation Serif)")
+	fs.StringVar(&co.defaultFonts[2], "default-monospace-font", "", "the family the generic monospace means (default: Liberation Mono)")
 	fs.StringVar(&co.from, "from", "auto", "input language: vega, vega-lite, or auto (from $schema, else from the top-level properties)")
 	fs.BoolVar(&co.lenient, "lenient", false, "render past failed data and image loads and evaluation errors, as a browser does, printing each to stderr")
 	return co
@@ -291,8 +374,13 @@ func (co *commonOpts) lite(spec []byte) (bool, error) {
 		return false, nil
 	default:
 		k, err := detectSpec(spec)
-		if err != nil {
+		if errors.Is(err, errCannotTell) {
+			// Only here can -from help: an input that is not a JSON object
+			// is an error in either language.
 			return false, fmt.Errorf("%w; pass -from vega or -from vega-lite", err)
+		}
+		if err != nil {
+			return false, err
 		}
 		return k == specVegaLite, nil
 	}
@@ -330,6 +418,10 @@ func (co *commonOpts) withLoadHint(err error) error {
 	switch {
 	case perr == nil && u.Scheme == "" && len(co.allowFiles) == 0 && co.baseURL == "":
 		return fmt.Errorf("%w (a relative URL: pass -allow-file DIR to read it from the files under DIR, or -base-url URL to load it over HTTP; or -lenient to render without it)", err)
+	case perr == nil && u.Scheme == "" && len(co.allowFiles) > 0:
+		// The library's FileLoader does not name its directory (its errors
+		// reach whoever wrote the spec); here the user chose it.
+		return fmt.Errorf("%w (looked for it under -allow-file %s, against which a relative URL resolves, not against the spec's directory)", err, strings.Join(quoted(co.allowFiles), ", "))
 	case perr == nil && (u.Scheme == "http" || u.Scheme == "https") && !co.httpAllowed():
 		return fmt.Errorf("%w (pass -allow-http or -allow-domain to load over HTTP, or -lenient to render without it)", err)
 	}
@@ -342,6 +434,11 @@ func (co *commonOpts) options() ([]aster.Option, error) {
 		return nil, err
 	}
 	opts = append(opts, co.fonts...)
+	for i, with := range []func(string) aster.Option{aster.WithDefaultFontFamily, aster.WithDefaultSerifFamily, aster.WithDefaultMonospaceFamily} {
+		if co.defaultFonts[i] != "" {
+			opts = append(opts, with(co.defaultFonts[i]))
+		}
+	}
 	// Files first, then HTTP: a relative URL is a file under one of the
 	// directories when there is one, else it is resolved against -base-url.
 	var loaders []aster.Loader
@@ -363,6 +460,15 @@ func (co *commonOpts) options() ([]aster.Option, error) {
 		opts = append(opts, aster.WithLoader(aster.NewFallbackLoader(loaders...)))
 	}
 	return opts, nil
+}
+
+// quoted is each of ss quoted.
+func quoted(ss []string) []string {
+	q := make([]string, len(ss))
+	for i, s := range ss {
+		q[i] = strconv.Quote(s)
+	}
+	return q
 }
 
 // signalFlag collects the repeatable -signal name=value flag of the rendering
@@ -402,6 +508,9 @@ func render(fs *flag.FlagSet, co *commonOpts, input *string, args []string, chec
 	if err := co.check(); err != nil {
 		return nil, nil, false, err
 	}
+	if err := checkInput(fs, *input); err != nil {
+		return nil, nil, false, err
+	}
 	if check != nil {
 		if err := check(); err != nil {
 			return nil, nil, false, err
@@ -435,7 +544,7 @@ func closeInto(c *aster.Converter, err *error) {
 
 func runSVG(args []string) (err error) {
 	fs := flag.NewFlagSet("svg", flag.ContinueOnError)
-	input := fs.String("i", "", "input spec file (- or omit for stdin)")
+	input := fs.String("i", "", "input spec file; - for stdin (omitted: stdin, when it is a pipe or a file)")
 	output := fs.String("o", "", "output SVG file (omit for stdout)")
 	co := registerCommonOpts(fs)
 	signals := registerSignals(fs)
@@ -463,7 +572,7 @@ func runSVG(args []string) (err error) {
 
 func runPNG(args []string) (err error) {
 	fs := flag.NewFlagSet("png", flag.ContinueOnError)
-	input := fs.String("i", "", "input spec file (- or omit for stdin)")
+	input := fs.String("i", "", "input spec file; - for stdin (omitted: stdin, when it is a pipe or a file)")
 	output := fs.String("o", "", "output PNG file (omit for stdout)")
 	scale := fs.Float64("scale", 1.0, "scale factor; 2 produces 2x dimensions")
 	recode := fs.Bool("recode", false, "losslessly re-encode the PNG into a smaller equivalent format")
@@ -504,7 +613,7 @@ func runPNG(args []string) (err error) {
 
 func runPDF(args []string) (err error) {
 	fs := flag.NewFlagSet("pdf", flag.ContinueOnError)
-	input := fs.String("i", "", "input spec file (- or omit for stdin)")
+	input := fs.String("i", "", "input spec file; - for stdin (omitted: stdin, when it is a pipe or a file)")
 	output := fs.String("o", "", "output PDF file (omit for stdout)")
 	textMode := fs.String("text", "embed", "PDF text mode: embed (subset fonts, selectable text), named (no font program; the assembling document must embed the same font), or outlines (glyphs as paths)")
 	co := registerCommonOpts(fs)
@@ -545,10 +654,13 @@ func runPDF(args []string) (err error) {
 
 func runCompile(args []string) (err error) {
 	fs := flag.NewFlagSet("compile", flag.ContinueOnError)
-	input := fs.String("i", "", "input Vega-Lite spec file (- or omit for stdin)")
+	input := fs.String("i", "", "input Vega-Lite spec file; - for stdin (omitted: stdin, when it is a pipe or a file)")
 	output := fs.String("o", "", "output Vega JSON file (omit for stdout)")
 	co := registerConfigOpts(fs)
 	if err := parse(fs, args); err != nil {
+		return err
+	}
+	if err := checkInput(fs, *input); err != nil {
 		return err
 	}
 	opts, err := co.options()
@@ -581,13 +693,16 @@ func runCompile(args []string) (err error) {
 		return err
 	}
 
-	// Pretty-print the output JSON.
-	var pretty json.RawMessage = vgSpec
-	formatted, err := json.MarshalIndent(pretty, "", "  ")
-	if err != nil {
-		formatted = vgSpec
+	// Pretty-print the output JSON. json.Indent keeps the strings as the
+	// compiler wrote them, as upstream's JSON.stringify does: marshalling
+	// would escape <, > and & for HTML (C69, audit 2026-10-18).
+	var formatted bytes.Buffer
+	if err := json.Indent(&formatted, vgSpec, "", "  "); err != nil {
+		formatted.Reset()
+		formatted.Write(vgSpec)
 	}
-	return writeOutput(*output, append(formatted, '\n'))
+	formatted.WriteByte('\n')
+	return writeOutput(*output, formatted.Bytes())
 }
 
 func readInput(path string) ([]byte, error) {
@@ -657,11 +772,14 @@ func detectSpec(spec []byte) (specKind, error) {
 	case len(vega) > 0 && len(lite) == 0:
 		return specVega, nil
 	case len(lite) > 0:
-		return 0, fmt.Errorf("cannot tell whether the input is Vega or Vega-Lite: it has no $schema, and has Vega-Lite's %s and Vega's %s",
-			strings.Join(lite, ", "), strings.Join(vega, ", "))
+		return 0, fmt.Errorf("%w: it has no $schema, and has Vega-Lite's %s and Vega's %s",
+			errCannotTell, strings.Join(lite, ", "), strings.Join(vega, ", "))
 	}
-	return 0, errors.New("cannot tell whether the input is Vega or Vega-Lite: it has no $schema and none of the properties that tell them apart")
+	return 0, fmt.Errorf("%w: it has no $schema and none of the properties that tell them apart", errCannotTell)
 }
+
+// errCannotTell is detectSpec's error for a JSON object it cannot classify.
+var errCannotTell = errors.New("cannot tell whether the input is Vega or Vega-Lite")
 
 // has lists the keys of top among names.
 func has(top map[string]json.RawMessage, names []string) []string {

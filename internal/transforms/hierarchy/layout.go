@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -24,12 +25,15 @@ type Common struct {
 	// Field sizes nodes: values are summed up the tree. When nil the leaves
 	// are counted instead.
 	Field Accessor
-	// Sort orders siblings, after Field has been applied.
+	// Sort orders siblings, after Field has been applied. Ties go by the
+	// tuple ids of the nodes' data (`stableCompare(_.sort, d => d.data)`),
+	// which is the order they were ingested in, whatever order a sort
+	// upstream of the layout left them in.
 	Sort Compare
-	// TupleID, if set, returns a tuple's dataflow id (NaN when it has none).
-	// vega breaks comparator ties by ascending tuple id; without it ties keep
-	// their current order, which is the same for data in ingestion order.
-	TupleID func(jsval.Value) float64
+	// AsExact reports that As holds every output slot's name as upstream
+	// resolves them (`_.as || fields`, each as[i] the key it names): an
+	// empty one is the empty name.
+	AsExact bool
 	// As overrides the output field names, one per output slot (see each
 	// layout). Missing trailing entries fall back to the defaults.
 	As []string
@@ -41,10 +45,20 @@ func Float(f float64) *float64 { return &f }
 
 var errNoTree = errors.New("hierarchy layout transform requires a backing tree data source")
 
-func prepare(root *Node, c Common) {
+// Each node summed and each comparison is a step of work charged to m, which
+// polls the call's context: the field and the comparator can be expressions
+// (ADR 0010).
+func prepare(m *budget.Meter, root *Node, c Common) error {
+	var err error
 	if c.Field != nil {
 		f := c.Field
 		root.sum(func(n *Node) float64 {
+			if err != nil {
+				return 0
+			}
+			if err = m.Work(1); err != nil {
+				return 0
+			}
 			v := jsval.ToNumber(f(n.Data))
 			if v != v {
 				return 0
@@ -54,22 +68,25 @@ func prepare(root *Node, c Common) {
 	} else {
 		root.count()
 	}
+	if err != nil {
+		return err
+	}
 	if c.Sort != nil {
-		cmp, id := c.Sort, c.TupleID
+		cmp := c.Sort
 		root.sortChildren(func(a, b *Node) int {
+			if err != nil {
+				return 0 // the sort is abandoned with the call
+			}
+			if err = m.Work(1); err != nil {
+				return 0
+			}
 			if r := cmp(a, b); r != 0 {
 				return r
 			}
-			if id != nil {
-				if d := id(a.Data) - id(b.Data); d < 0 {
-					return -1
-				} else if d > 0 {
-					return 1
-				}
-			}
-			return 0
+			return jsval.TupleIDOrder(a.Data, b.Data)
 		})
 	}
+	return err
 }
 
 type prop uint8
@@ -116,23 +133,54 @@ func (p prop) get(n *Node) jsval.Value {
 
 // writeFields copies the layout result of every node into its tuple: the
 // slot i property goes to as[i]; the last slot is always the child count.
-func writeFields(root *Node, props []prop, defaults, as []string) {
+// Each node written is a step of work per field, charged to m.
+func writeFields(m *budget.Meter, root *Node, props []prop, defaults, as []string, exact bool) error {
 	names := make([]string, len(props))
 	for i := range names {
 		names[i] = defaults[i]
-		if i < len(as) && as[i] != "" {
+		if i < len(as) && (as[i] != "" || exact) {
 			names[i] = as[i]
 		}
 	}
+	var err error
 	root.each(func(n *Node) {
-		if !n.Data.IsObj() {
+		if err != nil {
 			return
 		}
-		o := n.Data.ObjValue()
+		if err = m.Work(int64(len(props))); err != nil {
+			return
+		}
+		o := jsval.Fields(n.Data)
+		if o == nil {
+			// `t[as[i]] = ...` where the datum is no object (a nest leaf's
+			// values can be anything): a primitive is a TypeError; a date
+			// or a pattern takes the property, which nothing reads
+			err = setOnPrimitive(n.Data, names[0])
+			return
+		}
 		for i, p := range props {
 			o.Set(names[i], p.get(n))
 		}
 	})
+	return err
+}
+
+// setOnPrimitive is the TypeError of setting the property name on v in
+// strict mode (jsval.FieldsFor's), nil for a value that is an object in
+// JavaScript.
+func setOnPrimitive(v jsval.Value, name string) error {
+	switch v.Kind() {
+	case jsval.KindNull, jsval.KindUndefined:
+		of := "undefined"
+		if v.IsNull() {
+			of = "null"
+		}
+		return &jsval.Thrown{Name: "TypeError", Msg: "Cannot set properties of " + of + " (setting '" + name + "')"}
+	case jsval.KindStr, jsval.KindNum, jsval.KindBool:
+		kind := map[jsval.Kind]string{jsval.KindStr: "string", jsval.KindNum: "number", jsval.KindBool: "boolean"}[v.Kind()]
+		return &jsval.Thrown{Name: "TypeError", Msg: "Cannot create property '" + name + "' on " + kind + " '" + jsval.StringPrefix(v, jsval.MessageBytes) + "'"}
+	}
+	return nil
 }
 
 func size(dx, dy float64, s []float64) (float64, float64) {
@@ -184,7 +232,10 @@ func LayoutTree(ctx context.Context, t *Tree, p TreeParams) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	prepare(t.Root, p.Common)
+	m := budget.NewMeter(ctx)
+	if err := prepare(&m, t.Root, p.Common); err != nil {
+		return err
+	}
 	sz := sizing{dx: 1, dy: 1, nodeSize: false}
 	if len(p.Size) >= 2 {
 		sz.dx, sz.dy, sz.nodeSize = p.Size[0], p.Size[1], false
@@ -196,13 +247,16 @@ func LayoutTree(ctx context.Context, t *Tree, p TreeParams) error {
 	if p.UniformSeparation {
 		sep = sepFuncs[1]
 	}
+	var err error
 	if method == "tidy" {
-		tidy(t.Root, sep, sz)
+		err = tidy(&m, t.Root, sep, sz)
 	} else {
-		cluster(t.Root, sep, sz)
+		err = cluster(&m, t.Root, sep, sz)
 	}
-	writeFields(t.Root, treeProps, treeNames, p.As)
-	return nil
+	if err != nil {
+		return err
+	}
+	return writeFields(&m, t.Root, treeProps, treeNames, p.As, p.AsExact)
 }
 
 // PackParams configures [LayoutPack].
@@ -223,7 +277,10 @@ func LayoutPack(ctx context.Context, t *Tree, p PackParams) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	prepare(t.Root, p.Common)
+	m := budget.NewMeter(ctx)
+	if err := prepare(&m, t.Root, p.Common); err != nil {
+		return err
+	}
 	dx, dy := size(1, 1, p.Size)
 	pad := 0.0
 	if p.Padding != nil {
@@ -237,8 +294,7 @@ func LayoutPack(ctx context.Context, t *Tree, p PackParams) error {
 	if err := pack(ctx, t.Root, radius, dx, dy, pad); err != nil {
 		return err
 	}
-	writeFields(t.Root, packProps, packNames, p.As)
-	return nil
+	return writeFields(&m, t.Root, packProps, packNames, p.As, p.AsExact)
 }
 
 // PartitionParams configures [LayoutPartition].
@@ -258,15 +314,19 @@ func LayoutPartition(ctx context.Context, t *Tree, p PartitionParams) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	prepare(t.Root, p.Common)
+	m := budget.NewMeter(ctx)
+	if err := prepare(&m, t.Root, p.Common); err != nil {
+		return err
+	}
 	dx, dy := size(1, 1, p.Size)
 	pad := 0.0
 	if p.Padding != nil {
 		pad = *p.Padding
 	}
-	partition(t.Root, dx, dy, pad, p.Round)
-	writeFields(t.Root, rectProps, rectNames, p.As)
-	return nil
+	if err := partition(&m, t.Root, dx, dy, pad, p.Round); err != nil {
+		return err
+	}
+	return writeFields(&m, t.Root, rectProps, rectNames, p.As, p.AsExact)
 }
 
 // TreemapParams configures [LayoutTreemap]. Padding parameters are applied in
@@ -349,10 +409,14 @@ func LayoutTreemap(ctx context.Context, t *Tree, p TreemapParams) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	prepare(t.Root, p.Common)
-	cfg.layout(t.Root)
-	writeFields(t.Root, rectProps, rectNames, p.As)
-	return nil
+	m := budget.NewMeter(ctx)
+	if err := prepare(&m, t.Root, p.Common); err != nil {
+		return err
+	}
+	if err := cfg.layout(&m, t.Root); err != nil {
+		return err
+	}
+	return writeFields(&m, t.Root, rectProps, rectNames, p.As, p.AsExact)
 }
 
 // NodeFieldPath builds a NodeField from a dotted path resolved against the
@@ -389,9 +453,20 @@ func NodeFieldPath(path string) NodeField {
 		case "y1":
 			v = jsval.Num(n.Y1)
 		default:
-			return jsval.Undefined
+			// a name the node has no property of: undefined, and a step
+			// past it reads undefined
+			v = jsval.Undefined
 		}
+		// The comparator reads the path as a member chain (vega-util's
+		// getter): a step into null or undefined is a TypeError.
 		for _, k := range parts[1:] {
+			if v.IsNullish() {
+				nm := "undefined"
+				if v.IsNull() {
+					nm = "null"
+				}
+				panic(&jsval.Thrown{Name: "TypeError", Msg: "Cannot read properties of " + nm + " (reading '" + k + "')"})
+			}
 			v = v.Get(k)
 		}
 		return v
@@ -401,17 +476,28 @@ func NodeFieldPath(path string) NodeField {
 // TreeLinks generates the {source, target} tuples of vega's TreeLinks
 // transform: one per parent-child edge whose both ends satisfy valid (nil
 // accepts every tuple). Edges are produced breadth-first, as tree.each does.
-func TreeLinks(t *Tree, valid func(jsval.Value) bool) ([]jsval.Value, error) {
+func TreeLinks(ctx context.Context, t *Tree, valid func(jsval.Value) bool) ([]jsval.Value, error) {
 	if t == nil || t.Root == nil {
 		return nil, errors.New("TreeLinks transform requires a tree data source.")
 	}
+	m := budget.NewMeter(ctx)
 	var out []jsval.Value
+	var err error
 	t.Root.each(func(n *Node) {
+		if err == nil {
+			err = m.Work(1)
+		}
+		if err != nil {
+			return
+		}
 		p := n.Parent
 		if p == nil || (valid != nil && !(valid(n.Data) && valid(p.Data))) {
 			return
 		}
 		out = append(out, jsval.Obj(jsval.ObjectOf("source", p.Data, "target", n.Data)))
 	})
+	if err != nil {
+		return nil, err
+	}
 	return out, nil
 }

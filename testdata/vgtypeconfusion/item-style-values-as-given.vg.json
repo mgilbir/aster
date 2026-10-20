@@ -1,0 +1,5 @@
+{"width": 60, "height": 40, "marks": [
+ {"type": "text", "encode": {"enter": {"x": {"value": 5}, "y": {"value": 10}, "text": {"value": "a"}, "fontWeight": {"value": ""}, "fontStyle": {"value": []}, "fontVariant": {"value": 0}, "font": {"value": 0}}}},
+ {"type": "rect", "encode": {"enter": {"x": {"value": 5}, "y": {"value": 20}, "width": {"value": 5}, "height": {"value": 5}, "strokeWidth": {"signal": "null"}, "strokeCap": {"value": ""}, "strokeJoin": {"value": [1]}, "opacity": {"signal": "null"}, "stroke": {"value": 0}, "fill": {"value": ["transparent"]}}}},
+ {"type": "rect", "encode": {"enter": {"x": {"value": 15}, "y": {"value": 20}, "width": {"value": 5}, "height": {"value": 5}, "strokeWidth": {"value": 9}, "stroke": {"value": []}}}}
+]}

@@ -1,0 +1,3 @@
+{"width":100,"height":50,"padding":4,"data":[{"name":"pts","values":[{"v":1},{"v":2}]},{"name":"g","values":[{"ys":["a"],"xs":"a"}]}],
+"scales":[{"name":"a","domain":[0,1],"range":[0,10]}],
+"marks":[{"type":"group","from":{"data":"g"},"marks":[{"type":"symbol","from":{"data":"pts"},"encode":{"enter":{"x":{"scale":{"parent":"xs"},"field":"v"},"y":{"scale":{"parent":"ys"},"field":"v"}}}}]}]}

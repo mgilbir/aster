@@ -40,7 +40,7 @@ flowchart LR
 | text measurement and shaping | `text` (forme) | node-canvas / the browser's canvas |
 | SVG → PNG | `raster`, `pngopt` | resvg (the reference it is tested against) |
 | SVG → PDF | `svgpdf`, `fontsubset` | none |
-| JavaScript's numbers, `Math` and sort | `jsval`, `jsmath`, `jssort` | V8, bit for bit |
+| JavaScript's numbers, `Math` and sort | `jsval`, `jsmath`, `jssort` | V8, bit for bit (`Math` as arm64 V8 computes it; node on x86-64 differs in the last bit for 0.02–0.75% of arguments of 17 functions, see `jsmath`) |
 | resource budgets, the per-call ledger, byte-bounded caches | `budget`, `bcache` | none (aster's own bounds) |
 | loaders | `loader` | vega-loader's policy |
 | image references, CSS colours, embedded fonts | `imageref`, `csscolor`, `fonts/liberation`, `fonts/notoemoji` | none |
@@ -101,22 +101,24 @@ Each package imports only packages of lower layers, so there are no cycles and t
 0: bcache budget csscolor fonts/dejavu fonts/liberation fonts/notoemoji fontsubset jsmath jssort textcut
 1: imageref jsval loader pngopt text
 2: format geo raster scale/color scene transforms/contour transforms/force transforms/hierarchy transforms/label transforms/voronoi transforms/wordcloud
-3: expr geo/geoscene scale svg svgpdf transforms vega/layout vegalite
-4: vega/guides
+3: expr geo/geoscene scale svg svgpdf transforms vega/layout
+4: vega/guides vegalite
 5: vega
 6: aster
-tools: cmd/enginebench cmd/recursionaudit fuzzutil oracle svgcheck svgdiff testutil upstream
+tools: cmd/enginebench cmd/recursionaudit cmd/testsummary cmd/vectors fuzzutil fuzzutil/confusion nodetz oracle svgcheck svgdiff testutil upstream vectors
 ```
 <!-- layers:end -->
 
-`tools` are not part of the engine: the commands and the test harness (`oracle` drives upstream in node, `svgcheck` checks the structure of the engine's SVG, `svgdiff` compares SVG, `upstream` replays upstream's test suites, `fuzzutil` serves the fuzz targets, `testutil` holds the race slowdown that keeps time-based tests independent of the machine). `internal/fonts/dejavu` is imported by tests only.
+`tools` are not part of the engine: the commands and the test harness (`oracle` drives upstream in node, `svgcheck` checks the structure of the engine's SVG, `svgdiff` compares SVG, `upstream` replays upstream's test suites, `fuzzutil` serves the fuzz targets and `fuzzutil/confusion` the type-confusion differentials, `nodetz` holds the time zones of node's tzdata release, which tests that compare with node's recordings read in place of the host's, `testutil` holds the race slowdown that keeps time-based tests independent of the machine, and builds synthetic fonts for tests). `internal/fonts/dejavu` is imported by tests only.
 
 <!-- deps:begin (checked by TestDependencyStatement) -->
 Beyond the standard library, a program that imports aster builds these modules, and no others:
 
-- `golang.org/x/text`;
+- `golang.org/x/text`, to decode Mac OS Roman font names (pdf0 also normalises a PDF password with it);
 - `github.com/mgilbir/forme` (text shaping), `github.com/mgilbir/goecma262` (regular expressions) and `github.com/mgilbir/pdf0` (PDF writing), the owner's;
 - through pdf0, also the owner's: `github.com/mgilbir/golittlecms` (colour management), `github.com/mgilbir/gopenjpeg` (JPEG 2000) and `github.com/mgilbir/formalis` (electronic invoices).
+
+The engine imports x/text only for that fixed legacy encoding (`internal/text`): JavaScript's case mapping is jsval's tables, recorded from node, not x/text's, whose tables follow the Go toolchain's Unicode version (`TestNoXTextInTheEngine` lists the one use).
 <!-- deps:end -->
 
 `golang.org/x/image` is required by tests only.

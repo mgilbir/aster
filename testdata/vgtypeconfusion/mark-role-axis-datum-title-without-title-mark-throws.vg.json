@@ -1,0 +1,1 @@
+{"width":50,"height":50,"data":[{"name":"t","values":[{"title":"x","domain":1,"grid":1}]}],"marks":[{"type":"rect","role":"axis","from":{"data":"t"},"encode":{"enter":{"x":{"value":1},"y":{"value":1},"orient":{"value":"left"},"width":{"value":10},"height":{"value":10}}}}]}

@@ -49,6 +49,27 @@ func poll(ctx context.Context, i int) error {
 	return nil
 }
 
+// meteredAccessor is f with each call a step of work charged to ctx's
+// ledger, which polls ctx: for a helper that reads every row through f and
+// meters nothing itself (a fit's passes over its points). Once ctx is done
+// f is no longer called and the rows read as undefined, which every such
+// helper skips quickly; err reports the context's error, to return when the
+// helper is over.
+func meteredAccessor(ctx context.Context, f Accessor) (get Accessor, err func() error) {
+	m := budget.NewMeter(ctx)
+	var done error
+	get = func(v jsval.Value) jsval.Value {
+		if done != nil {
+			return jsval.Undefined
+		}
+		if done = m.Work(1); done != nil {
+			return jsval.Undefined
+		}
+		return f(v)
+	}
+	return get, func() error { return done }
+}
+
 // dimValues reads the group-by values of t.
 func dimValues(fields []Field, t jsval.Value) []jsval.Value {
 	out := make([]jsval.Value, len(fields))

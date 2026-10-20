@@ -116,12 +116,15 @@ func comparatorFrom(v any) (Comparator, bool) {
 		}
 		ords = append(ords, o)
 	}
-	return CompareBy(fields, ords), true
+	return CompareBy(jsval.Walker{}, fields, ords), true
 }
 
 // stringsFrom decodes an array of strings, in which null is the empty string.
 func stringsFrom(v any) []string {
-	items, _ := v.([]any)
+	items, ok := v.([]any)
+	if !ok {
+		return nil // absent, which is not an empty list
+	}
 	out := make([]string, len(items))
 	for i, it := range items {
 		out[i], _ = it.(string)

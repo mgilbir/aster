@@ -3,7 +3,7 @@
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import fs from 'node:fs';
-const require = createRequire(path.join(process.env.NODE_PATH, 'x.js'));
+const require = createRequire(path.resolve(process.env.NODE_PATH, 'x.js'));
 const d3 = await import(require.resolve('d3-color'));
 const src = fs.readFileSync(path.join(process.env.NODE_PATH, 'd3-color/src/color.js'), 'utf8');
 const names = [...src.matchAll(/^\s+([a-z]+): 0x[0-9a-f]+,?$/gm)].map(m => m[1]);

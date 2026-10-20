@@ -13,12 +13,49 @@ import (
 // spherical excess (Cagnoli's theorem summed over triangles with the south
 // pole), normalised to [0, 4pi) per ring.
 type sphereAreaStream struct {
-	sum, ringSum     adder
-	inPolygon        bool
-	mode             int // 0 ignore, 1 first point of ring, 2 following
+	sum, ringSum adder
+	inPolygon    bool
+	mode         int // 0 ignore, 1 first point of ring, 2 following
+	*areaModule
+}
+
+// areaModule is the state d3-geo's area module keeps between calls (module
+// variables, not reset by area()): the first point of the last ring and the
+// previous point. A ring without points ends with areaPoint(lambda00, phi00),
+// so it reads what the last ring left, or undefined (NaN) before any.
+type areaModule struct {
 	lambda00, phi00  float64
 	lambda0          float64
 	cosPhi0, sinPhi0 float64
+}
+
+func newAreaModule() areaModule {
+	return areaModule{lambda00: nan, phi00: nan, lambda0: nan, cosPhi0: nan, sinPhi0: nan}
+}
+
+// boundsModule is the bounds module's state kept between calls: the first
+// point of the last ring.
+type boundsModule struct{ lambda00, phi00 float64 }
+
+// centroidModule is the centroid module's state kept between calls.
+type centroidModule struct {
+	lambda00, phi00 float64
+	x0, y0, z0      float64
+}
+
+// MeasureState holds the module-level variables of d3-geo's area, bounds and
+// centroid, which upstream shares between every call of a process. One
+// belongs to a render: its calls see what the earlier ones left, the first
+// sees undefined.
+type MeasureState struct {
+	area areaModule
+	bnd  boundsModule
+	cen  centroidModule
+}
+
+// NewMeasureState is the state of a fresh process.
+func NewMeasureState() *MeasureState {
+	return &MeasureState{area: newAreaModule(), bnd: boundsModule{nan, nan}, cen: centroidModule{nan, nan, nan, nan, nan}}
 }
 
 func (s *sphereAreaStream) LineStart() {
@@ -88,7 +125,12 @@ func (s *sphereAreaStream) areaPoint(lambda, phi float64) {
 // GeoArea is d3.geoArea: the spherical area of a GeoJSON object in steradians.
 // The walk meters its work into the ledger in ctx and stops with ctx's error.
 func GeoArea(ctx context.Context, object jsval.Value) (float64, error) {
-	s := &sphereAreaStream{}
+	return GeoAreaWith(ctx, NewMeasureState(), object)
+}
+
+// GeoAreaWith is GeoArea over the module state of a render.
+func GeoAreaWith(ctx context.Context, ms *MeasureState, object jsval.Value) (float64, error) {
+	s := &sphereAreaStream{areaModule: &ms.area}
 	if err := streamBounded(ctx, object, func(b *walkBound) Stream { return meterInput(s, b) }); err != nil {
 		return nan, err
 	}
@@ -99,13 +141,14 @@ func GeoArea(ctx context.Context, object jsval.Value) (float64, error) {
 type boundsState struct {
 	lambda0, phi0, lambda1, phi1 float64
 	lambda2                      float64 // previous lambda
-	lambda00, phi00              float64
-	p0                           vec3
-	has0                         bool
-	deltaSum                     adder
-	ranges                       []*[2]float64
-	rng                          *[2]float64
-	area                         sphereAreaStream
+	*boundsModule
+	p0       vec3
+	has0     bool
+	deltaSum adder
+	ranges   []*[2]float64
+	rng      *[2]float64
+	err      error // the exception upstream throws at a line without points
+	area     sphereAreaStream
 
 	inPolygon bool
 	inLine    bool // point is linePoint
@@ -187,11 +230,15 @@ func (s *boundsState) PolygonEnd() {
 }
 
 // setRange records the current longitude extent in the current range. Upstream
-// writes through a range that may not exist (a line without points) and throws;
-// here that is a no-op.
+// writes through a range that may not exist (a line without points) and
+// throws; the error is kept in err and GeoBounds returns it.
 func (s *boundsState) setRange() {
 	if s.rng != nil {
 		s.rng[0], s.rng[1] = s.lambda0, s.lambda1
+	} else if s.err == nil {
+		// `range[0] = lambda0` with no range: the module-level range is null
+		// until a point makes one.
+		s.err = &jsval.Thrown{Name: "TypeError", Msg: "Cannot set properties of null (setting '0')"}
 	}
 }
 
@@ -305,9 +352,18 @@ func rangeContains(r *[2]float64, x float64) bool {
 //
 // The walk meters its work into the ledger in ctx and stops with ctx's error.
 func GeoBounds(ctx context.Context, object jsval.Value) ([2][2]float64, error) {
-	s := &boundsState{lambda0: math.Inf(1), phi0: math.Inf(1), lambda1: math.Inf(-1), phi1: math.Inf(-1)}
+	return GeoBoundsWith(ctx, NewMeasureState(), object)
+}
+
+// GeoBoundsWith is GeoBounds over the module state of a render.
+func GeoBoundsWith(ctx context.Context, ms *MeasureState, object jsval.Value) ([2][2]float64, error) {
+	s := &boundsState{boundsModule: &ms.bnd, lambda0: math.Inf(1), phi0: math.Inf(1), lambda1: math.Inf(-1), phi1: math.Inf(-1)}
+	s.area.areaModule = &ms.area
 	if err := streamBounded(ctx, object, func(b *walkBound) Stream { return meterInput(s, b) }); err != nil {
 		return [2][2]float64{{nan, nan}, {nan, nan}}, err
+	}
+	if s.err != nil {
+		return [2][2]float64{{nan, nan}, {nan, nan}}, s.err
 	}
 
 	if n := len(s.ranges); n > 0 {

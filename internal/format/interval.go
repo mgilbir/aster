@@ -298,6 +298,7 @@ func (iv Interval) passes(t float64) bool {
 
 // Floor is interval.floor(t): the latest boundary at or before t.
 func (iv Interval) Floor(t float64) float64 {
+	t = timeClip(t) // floori(date = new Date(+date)): a fractional time is cut toward zero
 	if iv.filter == 0 {
 		return iv.baseFloor(t)
 	}
@@ -333,10 +334,10 @@ func (iv Interval) Floor(t float64) float64 {
 
 // Ceil is interval.ceil(t): the earliest boundary at or after t.
 func (iv Interval) Ceil(t float64) float64 {
-	if !Valid(t) {
+	d := iv.Floor(t - 1) // floori(date = new Date(date - 1)): t - 1 is clipped, not t
+	if !Valid(d) {
 		return math.NaN()
 	}
-	d := iv.Floor(t - 1)
 	if iv.weekSearch() {
 		return iv.weekNext(d)
 	}
@@ -359,6 +360,7 @@ func (iv Interval) Round(t float64) float64 {
 // moves one boundary at a time, as d3 does, so the work grows with the step;
 // it is charged to the ledger in ctx, and stops with ctx's error.
 func (iv Interval) Offset(ctx context.Context, t, step float64) (float64, error) {
+	t = timeClip(t) // new Date(+date)
 	if iv.filter == 0 {
 		return iv.baseOffset(t, math.Floor(step)), nil
 	}
@@ -458,6 +460,21 @@ func (iv Interval) Range(ctx context.Context, start, stop, step float64) ([]floa
 
 // rangeN is Range bounded by max dates (at most MaxRangeLen).
 func (iv Interval) rangeN(ctx context.Context, start, stop, step float64, max int) ([]float64, error) {
+	var out []float64
+	if err := iv.rangeEach(ctx, start, stop, step, max, func(t float64) { out = append(out, t) }); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// RangeEach is Range calling each with every date in turn instead of
+// collecting them, so that a caller can charge what it keeps of each before
+// the next is made.
+func (iv Interval) RangeEach(ctx context.Context, start, stop, step float64, each func(t float64)) error {
+	return iv.rangeEach(ctx, start, stop, step, MaxRangeLen, each)
+}
+
+func (iv Interval) rangeEach(ctx context.Context, start, stop, step float64, max int, each func(t float64)) error {
 	max = min(max, MaxRangeLen)
 	tooMany := ErrRangeTooLarge
 	if max < MaxRangeLen {
@@ -466,39 +483,38 @@ func (iv Interval) rangeN(ctx context.Context, start, stop, step float64, max in
 	step = math.Floor(step)
 	cur := iv.Ceil(start)
 	if !(cur < stop) || !(step > 0) { // also handles Invalid Date
-		return nil, nil
+		return nil
 	}
 	if iv.certainlyTooLong(stop-cur, step, max) {
-		return nil, tooMany
+		return tooMany
 	}
 	m := budget.NewMeter(ctx)
-	var out []float64
-	for {
+	for n := 1; ; n++ {
 		prev := cur
-		out = append(out, prev)
-		if len(out) > max {
-			return nil, tooMany
+		if n > max {
+			return tooMany
 		}
+		each(prev)
 		if err := m.Work(1); err != nil {
-			return nil, err
+			return err
 		}
 		if iv.weekSearch() {
 			// floor(offset(cur, step)): the step-th boundary after cur
-			for n := step; n > 0 && Valid(cur); n-- {
+			for k := step; k > 0 && Valid(cur); k-- {
 				cur = iv.weekNext(cur)
 				if err := m.Work(64); err != nil {
-					return nil, err
+					return err
 				}
 			}
 		} else {
 			next, err := iv.offsetWith(&m, cur, step)
 			if err != nil {
-				return nil, err
+				return err
 			}
 			cur = iv.Floor(next)
 		}
 		if !(prev < cur && cur < stop) {
-			return out, nil
+			return nil
 		}
 	}
 }
@@ -546,6 +562,7 @@ func (iv Interval) Count(start, end float64) (n float64, ok bool) {
 	if iv.filter > 0 || (iv.kind == kYear && iv.k > 0) {
 		return math.NaN(), false
 	}
+	start, end = timeClip(start), timeClip(end) // t0.setTime(+start), t1.setTime(+end)
 	return math.Floor(iv.baseCount(iv.baseFloor(start), iv.baseFloor(end))), true
 }
 
