@@ -178,7 +178,9 @@ Specifications and data are untrusted.
   see [testing.md](testing.md#robustness)).
 - Nothing attacker-controlled is written raw into the SVG: every attribute and
   text goes through the escaping writer (which also drops characters XML 1.0
-  forbids), CSS-bound values (`blend`) are allow-listed, and image and link URLs
+  forbids), a CSS-bound value (`blend`) is written only when it cannot break
+  out of its declaration (none of `; { } ( ) : \ " ' /` nor a control character; upstream
+  writes any value, so such a value is the one deliberate divergence), and image and link URLs
   pass both the `Loader` and vega-loader's scheme allow-list. In `internal/svg`
   this holds by construction: only markup.go touches the output buffer, and
   raw markup (names, constant values) is of type `lit`, which a string variable
