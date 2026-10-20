@@ -384,6 +384,9 @@ func (c *Converter) renderSVG(ctx context.Context, spec jsval.Value) (out string
 		opts.TextMeasurer = canvas
 		opts.WordcloudText = wordcloud.NewCanvasRenderer(m)
 	}
+	if c.cfg.wordcloudBoxForTest {
+		opts.WordcloudText = wordcloud.BoxRenderer{}
+	}
 	if st := stagesFrom(ctx); st != nil {
 		opts.Stages = st
 		if m != nil {

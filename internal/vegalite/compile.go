@@ -38,13 +38,19 @@ type Options struct {
 	// Context, when set, bounds the compilation: every loop the
 	// specification sizes charges its work to the ledger in it
 	// (budget.LedgerFrom), or polls it when there is none, and Compile
-	// returns the context's error once it is done. Nil means no bound.
+	// returns the context's error once it is done. The memory the
+	// specification makes the compiler allocate (its strings, its copies) is
+	// charged to that ledger before it is allocated, and past the ledger's
+	// bound Compile returns an error wrapping budget.ErrLimit (see mem.go).
+	// Nil means no bound.
 	Context context.Context
-	// MaxViews bounds the views the compilation creates, counted before
+	// MaxViews bounds the views the compilation creates, weighed before
 	// normalization builds them: every view of the specification, a
 	// repeat's spec once per repeated value (and per combination of row,
-	// column and layer values). Past it Compile returns an error wrapping
-	// budget.ErrLimit. Zero means DefaultMaxViews.
+	// column and layer values), a unit view weighing more for the
+	// selections it receives and the text it compiles (see countViews).
+	// Past it Compile returns an error wrapping budget.ErrLimit. Zero means
+	// DefaultMaxViews.
 	MaxViews int
 	// Warn, when set, is told each warning the compiler logs, with upstream
 	// Vega-Lite's text, where upstream's compiler calls log.warn. An error it
@@ -90,6 +96,10 @@ func Compile(spec jsval.Value, opts Options) (out jsval.Value, err error) {
 		return jsval.Undefined, err
 	}
 	cc := &compileCtx{v5: v5, loc: opts.Location, ctx: opts.Context, meter: budget.NewMeter(opts.Context), maxViews: opts.MaxViews, warnFn: opts.Warn}
+	if opts.Context != nil {
+		cc.ledger = budget.LedgerFrom(opts.Context)
+	}
+	defer cc.releaseAhead()
 	if cc.maxViews <= 0 {
 		cc.maxViews = DefaultMaxViews
 	}
@@ -111,6 +121,7 @@ func Compile(spec jsval.Value, opts Options) (out jsval.Value, err error) {
 }
 
 func compileSpec(cc *compileCtx, inputSpec jsval.Value, opts Options) jsval.Value {
+	cc.configBytes = specBytes(cc, opts.Config, 0) + specBytes(cc, inputSpec.Get("config"), 0)
 	config := initConfig(cc, jsval.Obj(mergeConfig(cc, opts.Config, inputSpec.Get("config"))))
 	spec := normalize(cc, inputSpec, config)
 	model := buildModel(cc, spec, nil, "", jsval.NewObject(0), config, 0)

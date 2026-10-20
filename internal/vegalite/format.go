@@ -6,12 +6,12 @@ import (
 
 // Label and tooltip formatting expressions — vega-lite/src/compile/format.ts.
 
-func customFormatExpr(formatType, field string, format Value) string {
+func customFormatExpr(cc *compileCtx, formatType, field string, format Value) string {
 	f := ""
 	if format.IsTruthy() {
-		f = ", " + stringify(nil, format)
+		f = ", " + stringify(cc, format)
 	}
-	return formatType + "(" + field + f + ")"
+	return cc.cat(formatType, "(", field, f, ")")
 }
 
 type formatSignalOpts struct {
@@ -66,9 +66,9 @@ func formatSignalRef(cc *compileCtx, o formatSignalOpts) Value {
 	format = numberFormat(typ, format, config, o.normalizeStack)
 	if isFieldDef(cc, fod) && isBinning(fod.Get("bin")) {
 		endField := vgField(cc, fod, fieldRefOption{expr: expr, binSuffix: "end"})
-		return sig(binFormatExpression(field, endField, format, formatType, config))
+		return sig(binFormatExpression(cc, field, endField, format, formatType, config))
 	} else if format.IsTruthy() || channelDefType(fod) == "quantitative" {
-		return sig(formatExpr(field, format))
+		return sig(formatExpr(cc, field, format))
 	}
 	return sig("isValid(" + field + ") ? " + field + ` : ""+` + field)
 }
@@ -89,9 +89,9 @@ func formatCustomType(cc *compileCtx, fod, format, formatType Value, expr string
 	}
 	if field != "datum.value" && isFieldDef(cc, fod) && isBinning(fod.Get("bin")) {
 		endField := vgField(cc, fod, fieldRefOption{expr: expr, binSuffix: "end"})
-		return sig(binFormatExpression(field, endField, format, formatType, config))
+		return sig(binFormatExpression(cc, field, endField, format, formatType, config))
 	}
-	return sig(customFormatExpr(formatType.AsString(), field, format))
+	return sig(customFormatExpr(cc, formatType.AsString(), field, format))
 }
 
 // guideFormat returns the format of an axis/legend; undefined when a custom
@@ -166,31 +166,31 @@ func timeFormat(specified Value, timeUnit string, config Value, omitTimeFormatCo
 	return config.Get("timeFormat")
 }
 
-func formatExpr(field string, format Value) string {
+func formatExpr(cc *compileCtx, field string, format Value) string {
 	f := ""
 	if format.IsTruthy() {
 		f = format.AsString()
 	}
-	return "format(" + field + ", \"" + f + "\")"
+	return cc.cat("format(", field, ", \"", f, "\")")
 }
 
-func binNumberFormatExpr(field string, format, formatType Value, config Value) string {
+func binNumberFormatExpr(cc *compileCtx, field string, format, formatType Value, config Value) string {
 	if isCustomFormatType(formatType) {
-		return customFormatExpr(formatType.AsString(), field, format)
+		return customFormatExpr(cc, formatType.AsString(), field, format)
 	}
 	f := undef
 	if format.IsStr() {
 		f = format
 	}
-	return formatExpr(field, coalesce(f, config.Get("numberFormat")))
+	return formatExpr(cc, field, coalesce(f, config.Get("numberFormat")))
 }
 
-func binFormatExpression(startField, endField string, format, formatType Value, config Value) string {
+func binFormatExpression(cc *compileCtx, startField, endField string, format, formatType Value, config Value) string {
 	if format.IsUndefined() && formatType.IsUndefined() && config.Get("customFormatTypes").IsTruthy() && config.Get("numberFormatType").IsTruthy() {
-		return binFormatExpression(startField, endField, config.Get("numberFormat"), config.Get("numberFormatType"), config)
+		return binFormatExpression(cc, startField, endField, config.Get("numberFormat"), config.Get("numberFormatType"), config)
 	}
-	start := binNumberFormatExpr(startField, format, formatType, config)
-	end := binNumberFormatExpr(endField, format, formatType, config)
+	start := binNumberFormatExpr(cc, startField, format, formatType, config)
+	end := binNumberFormatExpr(cc, endField, format, formatType, config)
 	return fieldValidPredicate(startField, false) + ` ? "null" : ` + start + ` + "` + binRangeDelimiter + `" + ` + end
 }
 
@@ -198,9 +198,9 @@ func timeFormatExpression(cc *compileCtx, field, timeUnit string, format, format
 	if timeUnit == "" || format.IsTruthy() {
 		if timeUnit == "" && formatType.IsTruthy() {
 			if cc.v5 {
-				return formatType.AsString() + "(" + field + ", '" + format.AsString() + "')"
+				return cc.cat(formatType.AsString(), "(", field, ", '", format.AsString(), "')")
 			}
-			return formatType.AsString() + "(" + field + ", " + stringifyJS(format) + ")"
+			return cc.cat(formatType.AsString(), "(", field, ", ", stringifyJSCC(cc, format), ")")
 		}
 		if !format.IsStr() {
 			format = rawTimeFormat
@@ -210,9 +210,9 @@ func timeFormatExpression(cc *compileCtx, field, timeUnit string, format, format
 			fn = "utc"
 		}
 		if cc.v5 {
-			return fn + "Format(" + field + ", '" + format.AsString() + "')"
+			return cc.cat(fn, "Format(", field, ", '", format.AsString(), "')")
 		}
-		return fn + "Format(" + field + ", " + stringifyJS(format) + ")"
+		return cc.cat(fn, "Format(", field, ", ", stringifyJSCC(cc, format), ")")
 	}
 	return formatExpression(timeUnit, field, isUTCScale)
 }

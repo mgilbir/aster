@@ -4,7 +4,7 @@
 //     node testdata/gen_time.mjs | gzip -9 > testdata/time_UTC.json.gz
 import { createRequire } from 'node:module';
 import path from 'node:path';
-const require = createRequire(path.join(process.env.NODE_PATH, 'x.js'));
+const require = createRequire(path.resolve(process.env.NODE_PATH, 'x.js'));
 const d3 = await import(require.resolve('d3-time'));
 const tf = await import(require.resolve('d3-time-format'));
 const vt = await import(require.resolve('vega-time'));

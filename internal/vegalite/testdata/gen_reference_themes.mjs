@@ -1,14 +1,14 @@
 // Records upstream's output for gallery and fixture specs compiled under each
 // named theme config of themes.json (the vega-themes configs). Each line:
 //   {"name":"group/file.vl","theme":"dark","vega":{...}}
-// Usage: NODE_PATH=<node_modules with vega-lite@6.4.3> node gen_reference_themes.mjs > reference_themes.jsonl
+// Usage: TZ=Europe/Amsterdam NODE_PATH=<node_modules with vega-lite@6.4.3> node gen_reference_themes.mjs > reference_themes.jsonl
 // For the Vega-Lite 5.8 references, point NODE_PATH at testdata/oracle-node-vl5/node_modules and write reference_themes_vl5.jsonl.gz.
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-const require = createRequire(path.join(process.env.NODE_PATH, 'x.js'));
+const require = createRequire(path.resolve(process.env.NODE_PATH, 'x.js'));
 const vl = await import(require.resolve('vega-lite'));
 const here = path.dirname(fileURLToPath(import.meta.url));
 const themes = JSON.parse(fs.readFileSync(path.join(here, 'themes.json'), 'utf8'));

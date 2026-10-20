@@ -20,6 +20,9 @@ func makeImplicit(v Value) withExplicit { return withExplicit{false, v} }
 // which is why the order in which properties are set decides output order.
 type split struct {
 	explicit, implicit jsObj
+	// share is what shareable found while the split has not changed since
+	// (0: not asked).
+	share int8
 }
 
 func newSplit() *split { return &split{} }
@@ -33,9 +36,75 @@ func newSplitOf(explicit, implicit *Object) *split {
 }
 
 func (s *split) clone(cc *compileCtx) *split {
+	cc.alloc(int64(s.explicit.Len()+s.implicit.Len()) * jsObjEntryBytes)
 	c := &split{}
 	s.explicit.deepCloneInto(cc, &c.explicit)
 	s.implicit.deepCloneInto(cc, &c.implicit)
+	return c
+}
+
+// jsObjEntryBytes is what one key of a jsObj costs: its entry and its share
+// of the index.
+const jsObjEntryBytes = 64
+
+// shareable says whether a clone of s may read s itself until it is first
+// written, its copy made then (copyShared) the same as clone would make now:
+// every value is a primitive (duplicate gives it back as it is), and the
+// keys read the same in the copy: in 6.4 (structuredClone) neither side has
+// a prototype assigned, which the copy would drop; in 5.8 (the clone
+// package, which keeps the prototype) no key is one the copy leaves out,
+// none named as Object.prototype's members are and nothing written on
+// Object.prototype in this compilation (checked at each clone: it can
+// change).
+func (s *split) shareable(cc *compileCtx) bool {
+	if cc != nil && cc.v5 {
+		if r := cc.jsr; r != nil {
+			if h := r.hosts[""]; h != nil && h.props.len() > 0 {
+				return false
+			}
+		}
+	}
+	if s.share == 0 {
+		s.share = 1
+		for _, j := range []*jsObj{&s.explicit, &s.implicit} {
+			if !(cc != nil && cc.v5) && j.proto != nil {
+				s.share = 2
+			}
+			for i := range j.es {
+				cc.work(1)
+				e := &j.es[i]
+				if e.dead() {
+					continue
+				}
+				if v := e.v; v.IsObj() || v.IsArr() || (cc != nil && cc.v5 && isInheritedKey(e.k)) {
+					s.share = 2
+				}
+			}
+		}
+	}
+	return s.share == 1
+}
+
+// copyShared is the copy clone would have made of s when s was found
+// shareable: the same entries, in the same order, and in 5.8 the same
+// prototypes.
+func (s *split) copyShared(cc *compileCtx) *split {
+	cc.alloc(int64(s.explicit.Len()+s.implicit.Len()) * jsObjEntryBytes)
+	c := &split{}
+	for _, p := range [][2]*jsObj{{&s.explicit, &c.explicit}, {&s.implicit, &c.implicit}} {
+		from, to := p[0], p[1]
+		from.tidy()
+		if cc != nil && cc.v5 {
+			to.proto = from.proto
+		}
+		if len(from.es) == 0 {
+			continue
+		}
+		cc.work(int64(len(from.es)))
+		to.es = append(make([]jsObjEntry, 0, len(from.es)), from.es...)
+		to.live = int32(len(to.es))
+		to.reindex()
+	}
 	return c
 }
 
@@ -99,6 +168,7 @@ func (s *split) setWithExplicit(key string, w withExplicit) {
 // holds; split has many callers that do not carry the compilation, so it
 // must not be slower than that (C4).
 func (s *split) set(key string, v Value, explicit bool) {
+	s.share = 0
 	if explicit {
 		s.implicit.Delete(key)
 		s.explicit.Set(key, v)

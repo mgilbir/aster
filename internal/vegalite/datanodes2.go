@@ -176,7 +176,7 @@ func rangeFormula(m fieldDefModel, fd Value, channel string, config Value) (form
 		}
 		startField := vgField(cc, fd, fieldRefOption{expr: "datum"})
 		endField := vgField(cc, fd, fieldRefOption{expr: "datum", binSuffix: "end"})
-		return vgField(cc, fd, fieldRefOption{binSuffix: "range", forAs: true}), binFormatExpression(startField, endField, guide.Get("format"), guide.Get("formatType"), config)
+		return vgField(cc, fd, fieldRefOption{binSuffix: "range", forAs: true}), binFormatExpression(cc, startField, endField, guide.Get("format"), guide.Get("formatType"), config)
 	}
 	return "", ""
 }
@@ -411,14 +411,16 @@ func makeTimeUnitFromTransform(cc *compileCtx, parent dfNode, t Value) *timeUnit
 	return newTimeUnitNode(parent, tu)
 }
 
+// merge is upstream's TimeUnitNode.merge: `this.timeUnits =
+// {...this.timeUnits}`, then other's components it lacks. The copy only
+// keeps an object others may hold from changing, and the node owns its map
+// (every maker makes it new, and clone copies it), so other's components
+// are added in place, with the same keys in the same order: copied per
+// merge, siblings merged one at a time were quadratic (C26: audit
+// 2026-10-18).
 func (n *timeUnitNode) merge(other *timeUnitNode) {
 	cc := n.cc
-	c := newOmap[*Object]()
-	for _, k := range n.timeUnits.keysView() {
-		cc.work(1)
-		c.set(k, n.timeUnits.m[k])
-	}
-	n.timeUnits = c
+	cc.alloc(int64(other.timeUnits.len()) * prefixEntryBytes)
 	for _, k := range other.timeUnits.keysView() {
 		cc.work(1)
 		if !n.timeUnits.has(k) {
@@ -429,7 +431,8 @@ func (n *timeUnitNode) merge(other *timeUnitNode) {
 	other.remove()
 }
 
-func (n *timeUnitNode) removeFormulas(fields *sset) {
+// removeFormulas drops the formulas whose field is one of fields.
+func (n *timeUnitNode) removeFormulas(fields func(string) bool) {
 	cc := n.cc
 	nf := newOmap[*Object]()
 	for _, k := range n.timeUnits.keysView() {
@@ -441,7 +444,7 @@ func (n *timeUnitNode) removeFormulas(fields *sset) {
 		} else {
 			fieldAs = c.Lookup("field").AsString() + "_end"
 		}
-		if !fields.has(fieldAs) {
+		if !fields(fieldAs) {
 			nf.set(k, c)
 		}
 	}

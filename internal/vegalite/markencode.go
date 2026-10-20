@@ -366,10 +366,10 @@ func descriptionEncode(m *unitModel) Value {
 		if idx > 0 {
 			sep = "; "
 		}
-		parts = append(parts, `"`+sep+key+`: " + (`+value+`)`)
+		parts = append(parts, cc.cat(`"`, sep, key, `: " + (`, value, `)`))
 		idx++
 	}
-	return mkv("description", mkv("signal", strings.Join(parts, " + ")))
+	return mkv("description", mkv("signal", joinCC(cc, parts, " + ")))
 }
 
 // ---- tooltip ----
@@ -473,7 +473,7 @@ func tooltipData(cc *compileCtx, encoding Value, stack *stackProperties, config 
 			cc.work(1)
 			titleParts = append(titleParts, joinItem(x)) // array(title).join(', ')
 		}
-		key := strings.Join(titleParts, ", ")
+		key := joinCC(cc, titleParts, ", ")
 		if !cc.v5 {
 			key = strings.ReplaceAll(key, `"`, `\"`)
 		}
@@ -489,7 +489,7 @@ func tooltipData(cc *compileCtx, encoding Value, stack *stackProperties, config 
 				startField := vgField(cc, fd, fieldRefOption{expr: expr})
 				endField := vgField(cc, fd2, fieldRefOption{expr: expr})
 				format, formatType := getFormatMixins(fd)
-				value = tipValue{binFormatExpression(startField, endField, format, formatType, jsval.Obj(formatConfig)), true}
+				value = tipValue{binFormatExpression(cc, startField, endField, format, formatType, jsval.Obj(formatConfig)), true}
 				hasValue = true
 				toSkip[channel2] = true
 			}
@@ -529,10 +529,10 @@ func tooltipRefForEncoding(cc *compileCtx, encoding Value, stack *stackPropertie
 	var kv []string
 	for _, k := range data.keysView() {
 		cc.work(1)
-		kv = append(kv, `"`+k+`": `+data.m[k].text())
+		kv = append(kv, cc.cat(`"`, k, `": `, data.m[k].text()))
 	}
 	if len(kv) > 0 {
-		return mkv("signal", "{"+strings.Join(kv, ", ")+"}")
+		return mkv("signal", "{"+joinCC(cc, kv, ", ")+"}")
 	}
 	return undef
 }

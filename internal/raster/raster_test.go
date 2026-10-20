@@ -43,7 +43,11 @@ func TestSizeRounding(t *testing.T) {
 		for _, c := range cases {
 			w, h := mustRender(t, c.svg, Options{Scale: c.scale})
 			ref := refPNG(t, []byte(c.svg), c.scale)
-			if ref != nil && (ref.Rect.Dx() != w || ref.Rect.Dy() != h) {
+			if ref == nil {
+				t.Errorf("%s scale %v: resvg rejects it, so nothing was compared", c.svg, c.scale)
+				continue
+			}
+			if ref.Rect.Dx() != w || ref.Rect.Dy() != h {
 				t.Errorf("%s scale %v: resvg is %dx%d, we are %dx%d", c.svg, c.scale, ref.Rect.Dx(), ref.Rect.Dy(), w, h)
 			}
 		}

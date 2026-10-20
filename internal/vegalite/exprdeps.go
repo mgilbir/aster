@@ -175,7 +175,7 @@ func (p *exprParser) next(regexOK bool) {
 		p.tok = p.val
 	case c == '\'' || c == '"':
 		p.pos += w
-		var sb strings.Builder
+		sb := newSbuf(cc)
 		for {
 			cc.work(1)
 			if p.pos >= len(p.src) {
@@ -197,17 +197,17 @@ func (p *exprParser) next(regexOK bool) {
 				p.pos += w3
 				switch e {
 				case 'n':
-					sb.WriteByte('\n')
+					sb.PutByte('\n')
 				case 't':
-					sb.WriteByte('\t')
+					sb.PutByte('\t')
 				case 'r':
-					sb.WriteByte('\r')
+					sb.PutByte('\r')
 				case 'b':
-					sb.WriteByte('\b')
+					sb.PutByte('\b')
 				case 'f':
-					sb.WriteByte('\f')
+					sb.PutByte('\f')
 				case 'v':
-					sb.WriteByte('\v')
+					sb.PutByte('\v')
 				case 'x':
 					if p.pos+2 <= len(p.src) {
 						if n, err := strconv.ParseUint(p.src[p.pos:p.pos+2], 16, 32); err == nil {
@@ -581,7 +581,7 @@ func getDependentFields(cc *compileCtx, expression string) *sset {
 		if n.kind == "Member" && startsWithDatum(n) {
 			names := exprNames(n)
 			if len(names) > 0 {
-				deps.add(strings.Join(names[1:], "."))
+				deps.add(joinCC(cc, names[1:], "."))
 			}
 		}
 	})

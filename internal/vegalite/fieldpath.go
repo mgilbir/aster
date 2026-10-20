@@ -1,6 +1,8 @@
 package vegalite
 
 import (
+	"math/bits"
+	"math/rand/v2"
 	"strings"
 	"unicode/utf16"
 
@@ -126,7 +128,7 @@ func replacePathInFieldV(v Value) string {
 func removePathFromFieldV(v Value) string { return strings.Join(splitAccessPathV(v), ".") }
 
 func flatAccessWithDatumV(v Value, datum string) string {
-	return datum + "[" + jsonString(strings.Join(splitAccessPathV(v), ".")) + "]"
+	return datum + "[" + jsonString(nil, strings.Join(splitAccessPathV(v), ".")) + "]"
 }
 
 // accessPathDepthV is accessPathDepth of a spec value: 0 for a falsy one.
@@ -177,9 +179,11 @@ func accessPathWithDatumV(cc *compileCtx, path Value, datum string) string {
 
 // accessPathWithDatumPieces writes upstream's guard of each prefix of the
 // path in turn. The expression is quadratic in the pieces, as upstream's is
-// (a field of k pieces makes k prefixes of up to k): it is written once,
-// each piece quoted once, and charged to cc as it grows, a step per 16
-// bytes, so a long field path is paid for and polled, not built unseen.
+// (a field of k pieces makes k prefixes of up to k): its size is worked out
+// first and charged to cc's byte meter before the buffer is allocated (C3:
+// audit 2026-10-18), so a long field path fails at the call's budget
+// instead of being allocated in one step; it is then written once, each
+// piece quoted once, and charged as work as it grows, a step per 16 bytes.
 func accessPathWithDatumPieces(cc *compileCtx, pieces []string, datum string) string {
 	if len(pieces) == 0 {
 		return ""
@@ -187,7 +191,7 @@ func accessPathWithDatumPieces(cc *compileCtx, pieces []string, datum string) st
 	qs := make([]string, len(pieces))
 	for i, p := range pieces {
 		cc.work(1)
-		qs[i] = jsonString(p)
+		qs[i] = jsonString(cc, p)
 	}
 	// The size is known: made at once, the buffer is not copied as it grows.
 	size, prefix := 0, len(datum)+1 // datum[
@@ -196,7 +200,7 @@ func accessPathWithDatumPieces(cc *compileCtx, pieces []string, datum string) st
 		prefix += len(q) + 2 // the piece and "][" or "]"
 		size += prefix + 4*min(i, 1)
 	}
-	var b strings.Builder
+	b := newSbuf(cc)
 	b.Grow(size)
 	prefix = len(datum) + 1
 	for i, q := range qs {
@@ -205,14 +209,14 @@ func accessPathWithDatumPieces(cc *compileCtx, pieces []string, datum string) st
 		}
 		cc.work(int64(prefix+len(q)+2*i) / 16)
 		b.WriteString(datum)
-		b.WriteByte('[')
+		b.PutByte('[')
 		for j := 0; j <= i; j++ {
 			if j > 0 {
 				b.WriteString("][")
 			}
 			b.WriteString(qs[j])
 		}
-		b.WriteByte(']')
+		b.PutByte(']')
 		prefix += len(q) + 2
 	}
 	return b.String()
@@ -220,7 +224,7 @@ func accessPathWithDatumPieces(cc *compileCtx, pieces []string, datum string) st
 
 // flatAccessWithDatum accesses a flattened field: datum["a.b"].
 func flatAccessWithDatum(path, datum string) string {
-	return datum + "[" + jsonString(strings.Join(splitAccessPath(path), ".")) + "]"
+	return datum + "[" + jsonString(nil, strings.Join(splitAccessPath(path), ".")) + "]"
 }
 
 func accessWithDatumToUnescapedPath(p string) string {
@@ -270,42 +274,188 @@ func internalField(name string) string {
 
 func isInternalField(name string) bool { return strings.HasPrefix(name, "__") }
 
-// prefixGenerator returns every prefix of every dotted path: "a.b.c" gives
-// a, a[b], a[b][c].
+// prefixGenerator is upstream's prefixGenerator: every prefix of every
+// path of a, each piece but the first wrapped in brackets ("a.b.c" gives a,
+// a[b], a[b][c]). Joined, the prefixes of a path of k pieces are quadratic
+// in k (C11: audit 2026-10-18); fieldIntersection answers the question they
+// were made for without them, and keeps this, metered, for a hash
+// collision.
 func prefixGenerator(cc *compileCtx, a *sset) map[string]bool {
 	out := make(map[string]bool)
 	for _, x := range a.list() {
 		cc.work(1)
 		split := splitAccessPathV(a.value(x))
-		wrapped := make([]string, len(split))
+		b := newSbuf(cc)
 		for i, y := range split {
 			cc.work(1)
 			if i == 0 {
-				wrapped[i] = y
+				b.WriteString(y)
 			} else {
-				wrapped[i] = "[" + y + "]"
+				b.PutByte('[')
+				b.WriteString(y)
+				b.PutByte(']')
 			}
-		}
-		for i := range wrapped {
-			cc.work(1)
-			out[strings.Join(wrapped[:i+1], "")] = true
+			// Each prefix is a view of the one buffer, which only grows by
+			// appending: the strings take no memory of their own.
+			cc.alloc(prefixEntryBytes)
+			out[b.String()] = true
 		}
 	}
 	return out
 }
 
 // fieldIntersection is upstream's: true when either set is unknown (nil) or
-// the two share a field path prefix.
+// the two share a field path prefix, that is, when prefixGenerator(a) and
+// prefixGenerator(b) share a string. The prefixes of a path are not made:
+// each is known by a hash of its text, extended a piece at a time, and its
+// length, so the sets are compared in time and memory linear in their
+// pieces (C11: audit 2026-10-18). A hash that matches is checked against the
+// text; should two different prefixes ever share a hash, the answer is the
+// one the prefixes themselves give (prefixGenerator).
+//
+// Each set's members are split in order, a's first, so a path upstream's
+// splitAccessPath throws on throws here at the same member.
 func fieldIntersection(cc *compileCtx, a, b *sset) bool {
 	if a == nil || b == nil {
 		return true
 	}
-	pa, pb := prefixGenerator(cc, a), prefixGenerator(cc, b)
-	for k := range pa {
-		cc.work(1)
-		if pb[k] {
+	pa, na := splitMembers(cc, a)
+	pb, nb := splitMembers(cc, b)
+	if na == 0 || nb == 0 {
+		return false
+	}
+	// Index the prefixes of the set with more pieces, probe with the other.
+	large, small, nl := pa, pb, na
+	if nb > na {
+		large, small, nl = pb, pa, nb
+	}
+	cc.alloc(int64(nl) * prefixEntryBytes)
+	defer cc.free(int64(nl) * prefixEntryBytes) // a scratch index
+	index := make(map[prefixKey]prefixRef, nl)
+	for m, pieces := range large {
+		forEachPrefix(cc, pieces, func(k prefixKey, i int) bool {
+			if _, ok := index[k]; !ok {
+				index[k] = prefixRef{int32(m), int32(i)}
+			}
+			return true
+		})
+	}
+	found, collided := false, false
+	for _, pieces := range small {
+		forEachPrefix(cc, pieces, func(k prefixKey, i int) bool {
+			r, ok := index[k]
+			if !ok {
+				return true
+			}
+			if wrappedPrefix(cc, large[r.member][:r.piece+1]) == wrappedPrefix(cc, pieces[:i+1]) {
+				found = true
+				return false
+			}
+			collided = true
+			return true
+		})
+		if found {
 			return true
 		}
 	}
+	if collided {
+		pga, pgb := prefixGenerator(cc, a), prefixGenerator(cc, b)
+		for k := range pga {
+			cc.work(1)
+			if pgb[k] {
+				return true
+			}
+		}
+	}
 	return false
+}
+
+// prefixEntryBytes is what one entry of fieldIntersection's index costs:
+// its key, its value and the map's share of a bucket.
+const prefixEntryBytes = 48
+
+// prefixKey is a path prefix's hash and length; prefixRef where it is: the
+// member of the set and its last piece.
+type (
+	prefixKey struct {
+		h uint64
+		n int
+	}
+	prefixRef struct{ member, piece int32 }
+)
+
+// splitMembers splits each member of s as upstream's prefixGenerator does,
+// in order, and counts the pieces.
+func splitMembers(cc *compileCtx, s *sset) ([][]string, int) {
+	out := make([][]string, 0, s.size())
+	n := 0
+	for _, x := range s.list() {
+		cc.work(1)
+		p := splitAccessPathV(s.value(x))
+		out = append(out, p)
+		n += len(p)
+	}
+	return out, n
+}
+
+// forEachPrefix calls f with the key of each prefix of a path, the first
+// piece as it is and each other wrapped in brackets, until f returns false.
+func forEachPrefix(cc *compileCtx, pieces []string, f func(k prefixKey, i int) bool) {
+	var h uint64
+	n := 0
+	for i, y := range pieces {
+		cc.work(1 + int64(len(y))>>4)
+		if i > 0 {
+			h = prefixHashByte(h, '[')
+		}
+		for j := 0; j < len(y); j++ {
+			h = prefixHashByte(h, y[j])
+		}
+		n += len(y)
+		if i > 0 {
+			h = prefixHashByte(h, ']')
+			n += 2
+		}
+		if !f(prefixKey{h, n}, i) {
+			return
+		}
+	}
+}
+
+// wrappedPrefix is the text of a prefix (prefixGenerator's string), made to
+// check a hash that matched: at most twice per call.
+func wrappedPrefix(cc *compileCtx, pieces []string) string {
+	b := newSbuf(cc)
+	for i, y := range pieces {
+		if i > 0 {
+			b.PutByte('[')
+		}
+		b.WriteString(y)
+		if i > 0 {
+			b.PutByte(']')
+		}
+	}
+	return b.String()
+}
+
+// The hash of a prefix is a polynomial in its bytes modulo the Mersenne
+// prime 2^61-1, at a base drawn when the process starts, so a specification
+// cannot be written to make two prefixes collide (a collision is only ever
+// slower, never wrong).
+const prefixHashMod = 1<<61 - 1
+
+var prefixHashBase = rand.Uint64N(prefixHashMod-256) + 256
+
+// prefixHashByte extends the hash h by the byte c.
+func prefixHashByte(h uint64, c byte) uint64 {
+	hi, lo := bits.Mul64(h, prefixHashBase)
+	// (hi·2^64 + lo) mod 2^61-1, with 2^64 = 8 (mod 2^61-1).
+	r := (lo & prefixHashMod) + (lo >> 61) + (hi << 3)
+	r = (r & prefixHashMod) + (r >> 61)
+	r += uint64(c) + 1
+	r = (r & prefixHashMod) + (r >> 61)
+	if r >= prefixHashMod {
+		r -= prefixHashMod
+	}
+	return r
 }

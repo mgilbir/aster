@@ -176,6 +176,15 @@ func LimitsForTest(n uint64) map[string]int64 {
 	}
 }
 
+// WithWordcloudBoxForTest lays out the wordcloud transform's words with
+// wordcloud.BoxRenderer (every rune 0.6 em, every word a box) instead of the
+// canvas renderer: the model of the oracle's deterministic wordcloud canvas
+// (Oracle.WordcloudBoxSVG), which does not depend on how a platform's
+// node-canvas rasterizes glyphs.
+func WithWordcloudBoxForTest() Option {
+	return func(c *config) { c.wordcloudBoxForTest = true }
+}
+
 // WithFontSetFailureForTest makes the Converter's fonts fail to load.
 func WithFontSetFailureForTest() Option {
 	return func(c *config) { c.fontFailForTest = true }

@@ -4,7 +4,7 @@
 import { createRequire } from 'node:module';
 import path from 'node:path';
 
-const require = createRequire(path.join(process.env.NODE_PATH, 'x.js'));
+const require = createRequire(path.resolve(process.env.NODE_PATH, 'x.js'));
 const es = await import(require.resolve('vega-event-selector'));
 const parseSelector = es.default ?? es.parseSelector;
 const ve = await import(require.resolve('vega-expression'));

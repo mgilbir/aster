@@ -88,7 +88,7 @@ func TestUpstreamVegaExpressionParse(t *testing.T) {
 		}
 		r.Check(c, astNode(n, false), false)
 	}
-	r.Done(100)
+	r.Done(146)
 }
 
 func argAtUpstream(args []any, i int) any {
