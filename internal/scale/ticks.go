@@ -22,7 +22,7 @@ var (
 // kept for the rest (and for subnormal, zero, negative, infinite and NaN steps).
 func floorLog10(x float64) float64 {
 	if x >= 0x1p-1022 && x < math.MaxFloat64 {
-		l := math.Log10(x)
+		l := float64(math.Log10(x)) // rounded: on arm64 the product inside Log10 would fuse with the subtraction below
 		if f := l - math.Floor(l); f > 1e-9 && f < 1-1e-9 {
 			return math.Floor(l)
 		}
