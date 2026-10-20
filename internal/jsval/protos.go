@@ -29,11 +29,23 @@ type Proto struct {
 	members ProtoTable
 	funcs   map[string]Value
 	parent  *Proto
+	// longest is the length of the longest member of p and of the
+	// prototypes it inherits from: a longer key is no member, answered
+	// without hashing it, so a read with a megabyte key costs what a short
+	// one does (a map lookup hashes its whole key, on every item a pluck or
+	// a path reads).
+	longest int
 }
 
 // NewProto makes the prototype with these members that inherits from parent.
 func NewProto(members ProtoTable, parent *Proto) *Proto {
 	p := &Proto{members: members, funcs: make(map[string]Value, len(members)), parent: parent}
+	if parent != nil {
+		p.longest = parent.longest
+	}
+	for key := range members {
+		p.longest = max(p.longest, len(key))
+	}
 	type fnKey struct {
 		name  string
 		arity int
@@ -57,6 +69,9 @@ func NewProto(members ProtoTable, parent *Proto) *Proto {
 // Has reports whether key is a member of p or of a prototype it inherits
 // from (the `in` operator).
 func (p *Proto) Has(key string) bool {
+	if p == nil || len(key) > p.longest {
+		return false
+	}
 	for ; p != nil; p = p.parent {
 		if _, ok := p.members[key]; ok {
 			return true
@@ -68,6 +83,9 @@ func (p *Proto) Has(key string) bool {
 // Get is the inherited member key: its function, or undefined for a member
 // that is no function (which the value answers itself) or no member at all.
 func (p *Proto) Get(key string) Value {
+	if p == nil || len(key) > p.longest {
+		return Undefined
+	}
 	for ; p != nil; p = p.parent {
 		if _, ok := p.members[key]; ok {
 			return p.funcs[key] // undefined for an accessor
@@ -78,6 +96,9 @@ func (p *Proto) Get(key string) Value {
 
 // own is the function p itself holds under key.
 func (p *Proto) own(key string) (Value, bool) {
+	if len(key) > p.longest {
+		return Undefined, false
+	}
 	f, ok := p.funcs[key]
 	return f, ok
 }
