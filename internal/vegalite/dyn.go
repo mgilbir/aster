@@ -494,6 +494,12 @@ func deepClone(cc *compileCtx, v Value) Value {
 		}
 		return jsval.Arr(out)
 	case jsval.KindObj:
+		if jsval.IsFunction(v) {
+			// structuredClone refuses a function (a DataCloneError) as a
+			// value or a member; the one a specification's "__proto__" array
+			// gives an object (its fill, its values) is read as a property.
+			throw("%s could not be cloned.", v.AsString())
+		}
 		o := v.ObjValue()
 		cc.alloc(objectBytes(o.Len()))
 		c := jsval.NewObject(o.Len())
@@ -600,6 +606,7 @@ func stringifyTo(cc *compileCtx, b *sbuf, v Value) bool {
 // expressions (see jsval.StringValue). Vega-Lite 5.8 is built on vega-util
 // 1.17, whose stringValue differs (stringValue117).
 func stringValue(cc *compileCtx, v Value) string {
+	rejectFunctionText(cc, v, 0)
 	if cc != nil && cc.v5 {
 		b := newSbuf(cc)
 		stringValue117(cc, &b, v, 0)
@@ -621,6 +628,34 @@ func stringValue(cc *compileCtx, v Value) string {
 }
 
 func jsonString(cc *compileCtx, s string) string { return stringValue(cc, jsval.Str(s)) }
+
+// rejectFunctionText is the TypeError stringValue raises for a function, or
+// an array holding one: a function is an object, so it takes the JSON branch,
+// and JSON.stringify(function) is undefined, which has no replaceAll (vega-util
+// 2.x, Vega-Lite 6.4) or replace (1.17, 5.8). A function reaches here as a
+// member a specification's "__proto__" array gives an object (its reverse,
+// its values) that the compiler reads as the property's value. An object
+// holding one is stringified without it.
+func rejectFunctionText(cc *compileCtx, v Value, depth int) {
+	switch {
+	case v.IsArr():
+		if depth > jsval.MaxValueDepth {
+			throw("Maximum call stack size exceeded")
+		}
+		for _, it := range v.Items() {
+			if it.IsArr() || it.IsObj() {
+				cc.work(1)
+				rejectFunctionText(cc, it, depth+1)
+			}
+		}
+	case v.IsObj() && jsval.IsFunction(v):
+		method := "replaceAll"
+		if cc != nil && cc.v5 {
+			method = "replace"
+		}
+		throw("Cannot read properties of undefined (reading '%s')", method)
+	}
+}
 
 // stringValue117 is vega-util 1.17's stringValue, as Vega-Lite 5.8 calls it
 // (C83 of the 2026-10-18 audit): `'[' + x.map($) + ']'`, so a null or

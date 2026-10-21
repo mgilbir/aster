@@ -252,7 +252,12 @@ var calledFields = map[string]bool{"Project.fields": true, "Fold.fields": true, 
 // nullFieldDefaults are the required field parameters a null accessor
 // leaves at the transform's default rather than calling: kde2d's params()
 // sets x and y only when `_[p] != null` (density2D reads d[0], d[1]).
-var nullFieldDefaults = map[string]bool{"KDE2D.x": true, "KDE2D.y": true}
+//
+// Impute's field is called only by the methods that read it (mean, median,
+// min and max), as a TypeError at the first tuple; the constant method never
+// calls it, and the imputed tuples' property is named accessorName(null),
+// "null". The transform itself fails where upstream does.
+var nullFieldDefaults = map[string]bool{"KDE2D.x": true, "KDE2D.y": true, "Impute.field": true}
 
 type txFn func(n *opNode, p *opParams, in []jsval.Value) ([]jsval.Value, error)
 

@@ -147,6 +147,11 @@ func (e *entry) param(name string, v P) *entry {
 type flowSpec struct {
 	operators []*entry
 	updates   []*updateSpec
+	// streamErr is the error the first of the scope's event streams raises
+	// when the runtime registers it with the view (see viewEventListener):
+	// "" for none. A sub-scope's streams are parsed when its context is made,
+	// inside the dataflow, so the error is the dataflow's, not the view's.
+	streamErr string
 }
 
 // updateSpec is an event-driven signal update. Only internal streams (signal
@@ -426,11 +431,13 @@ type Scope struct {
 	opts   *parseOptions
 
 	parentScope *Scope
-	signals     map[string]*entry
-	lambdas     map[string]*entry
-	scales      map[string]*entry
-	data        map[string]*dataScope
-	fields      map[string]P
+	// streamErr: see flowSpec.
+	streamErr string
+	signals   map[string]*entry
+	lambdas   map[string]*entry
+	scales    map[string]*entry
+	data      map[string]*dataScope
+	fields    map[string]P
 
 	operators []*entry
 	updates   []*updateSpec
@@ -515,7 +522,7 @@ func (s *Scope) fork() *Scope {
 
 func (s *Scope) toRuntime() *flowSpec {
 	s.finish()
-	return &flowSpec{operators: s.operators, updates: s.updates}
+	return &flowSpec{operators: s.operators, updates: s.updates, streamErr: s.streamErr}
 }
 
 // finish records on each entry the names it is registered under so that the

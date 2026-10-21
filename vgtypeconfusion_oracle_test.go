@@ -218,7 +218,12 @@ func vgConfusionCorpus(t *testing.T) []string {
 // and the SVGs must be equal as the corpus comparison holds them
 // (svgTolerance). An engine panic is never agreement. A render the engine
 // stops at one of its documented bounds (ErrLimit, the timeout) is counted
-// and logged, not compared: the bound is the engine's policy (ADR 0005).
+// and logged, not compared: the bound is the engine's policy (ADR 0005). A
+// mutant node does not answer in time is logged and not compared, but still
+// rendered, so that an engine panic is not hidden. A mutant that ends node (a
+// heap exhausted: upstream cannot render it, though it throws no error) when
+// a fresh process asked the same does too, is upstream's failure and counted
+// with the reason node gave: the engine must fail too, or stop at a bound.
 func TestVegaTypeConfusionMatchesNode(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow: renders 1,500 mutants in node")
@@ -254,10 +259,12 @@ func TestVegaTypeConfusionMatchesNode(t *testing.T) {
 	}
 
 	type outcome struct {
-		m       vgMutant
-		diff    string // "" when the engine agrees
-		limited bool   // the engine stopped at a bound
-		noAns   bool   // node did not answer in time
+		m        vgMutant
+		diff     string // "" when the engine agrees
+		limited  bool   // the engine stopped at a bound
+		noAns    bool   // node did not answer in time
+		died     string // why node died answering (a fresh process too), when it did
+		hasDeath bool
 	}
 	jobs := make(chan vgMutant)
 	results := make(chan outcome)
@@ -267,15 +274,19 @@ func TestVegaTypeConfusionMatchesNode(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for m := range jobs {
-				want, err := o.SVG(false, m.spec)
-				// No answer in time, or node died answering (upstream
-				// exhausted its heap or stack): not an answer to compare.
-				if errors.Is(err, oracle.ErrNoAnswer) || err != nil && strings.Contains(err.Error(), "node exited") {
-					results <- outcome{m: m, noAns: true}
+				want, died, err := vegaOracleAnswer(o, m.spec)
+				switch {
+				case errors.Is(err, oracle.ErrNoAnswer):
+					// No answer in time: not upstream's answer to compare. The
+					// engine still renders it, so that a panic is not hidden.
+					results <- outcome{m: m, noAns: true, diff: vegaMutantPanics(c, m.spec)}
 					continue
-				}
-				if err != nil {
+				case err != nil:
 					results <- outcome{m: m, diff: "oracle: " + err.Error()}
+					continue
+				case died != "":
+					d, limited := vegaMutantDiffers(c, want, m.spec)
+					results <- outcome{m: m, diff: d, limited: limited, died: died, hasDeath: true}
 					continue
 				}
 				d, limited := vegaMutantDiffers(c, want, m.spec)
@@ -301,11 +312,19 @@ func TestVegaTypeConfusionMatchesNode(t *testing.T) {
 
 	groups := map[string][]outcome{}
 	compared, limited, noAnswer := 0, 0, 0
+	died := map[string]int{} // upstream's failures by the reason node gave
 	for r := range results {
 		switch {
-		case r.noAns:
+		case r.noAns && r.diff == "":
 			noAnswer++
 			continue
+		case r.hasDeath:
+			// Counted apart, with the reason; compared like any input
+			// upstream fails on (the engine must fail, or stop at a bound).
+			died[r.died]++
+			if r.limited {
+				continue
+			}
 		case r.limited:
 			limited++
 			continue
@@ -317,7 +336,10 @@ func TestVegaTypeConfusionMatchesNode(t *testing.T) {
 		key := r.m.label + ": " + diffClass(r.diff)
 		groups[key] = append(groups[key], r)
 	}
-	t.Logf("seed %d: %d mutants compared, %d stopped at an engine bound, %d unanswered by node (timed out or died)", *vgConfusionSeed, compared, limited, noAnswer)
+	t.Logf("seed %d: %d mutants compared, %d stopped at an engine bound, %d unanswered by node (timed out)", *vgConfusionSeed, compared, limited, noAnswer)
+	for reason, n := range died {
+		t.Logf("seed %d: %d mutants upstream fails on by ending node (%s)", *vgConfusionSeed, n, reason)
+	}
 	keys := make([]string, 0, len(groups))
 	for k := range groups {
 		keys = append(keys, k)
@@ -362,6 +384,34 @@ func vgConfusionWorkers() int {
 		}
 	}
 	return 4
+}
+
+// vegaOracleAnswer is node's answer to a mutant. A mutant that ends node (and
+// a fresh process asked the same: the oracle asks one when the dead process
+// had answered before) is upstream's failure, as a throw is: it is answered
+// with an error saying why, and died is the reason node gave.
+func vegaOracleAnswer(o *oracle.Oracle, spec []byte) (want oracle.Result, died string, err error) {
+	want, err = o.SVG(false, spec)
+	if errors.Is(err, oracle.ErrDied) {
+		died = oracle.DiedReason(err)
+		if died == "" {
+			died = "no reason given"
+		}
+		return oracle.Result{Err: "node died: " + died}, died, nil
+	}
+	return want, "", err
+}
+
+// vegaMutantPanics renders a mutant node gave no answer to, and describes an
+// engine panic ("" otherwise): without an answer to compare with, a panic is
+// still the engine's failure. Any other outcome of the render (an SVG, an
+// error, a bound) is not compared.
+func vegaMutantPanics(c *aster.Converter, mutant []byte) string {
+	_, gerr := c.VegaToSVG(mutant, asUpstream)
+	if isEngineBug(gerr) {
+		return fmt.Sprintf("the engine panics (%q), node gave no answer", firstLine(gerr.Error()))
+	}
+	return ""
 }
 
 // vegaMutantDiffers renders mutant with the engine and compares it with node's
@@ -413,7 +463,7 @@ func TestVegaTypeConfusionRegressionsMatchNode(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		want, err := o.SVG(false, mutant)
+		want, _, err := vegaOracleAnswer(o, mutant)
 		if err != nil {
 			t.Fatalf("oracle: %v", err)
 		}

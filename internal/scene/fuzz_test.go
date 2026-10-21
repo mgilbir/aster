@@ -10,8 +10,13 @@ import (
 	"github.com/mgilbir/aster/internal/fuzzutil"
 )
 
-// sentinels are the errors a scene that upstream cannot draw gives.
-var sentinels = []error{ErrUnknownInterpolate, ErrUnknownOrient, ErrNoShapeGenerator, ErrCurveNoArea, ErrInvalidPath, errPathParamCount, errPathParamType, errNegativeRadius}
+// sentinels are the errors a scene that upstream cannot draw gives. The last
+// two are the TypeErrors upstream's bounds computation raises for a value of
+// the wrong type (a path that is no string, a text that is neither a string
+// nor an array while a line break is set), which ADR 0013 has the engine
+// raise where upstream does: a scene document may hold any value there.
+var sentinels = []error{ErrUnknownInterpolate, ErrUnknownOrient, ErrNoShapeGenerator, ErrCurveNoArea, ErrInvalidPath, errPathParamCount, errPathParamType, errNegativeRadius,
+	ErrPathMatch, ErrTextSplit}
 
 // FuzzFromJSON reads arbitrary documents as serialized scenegraphs and bounds
 // what it accepts, as the renderer does: nothing panics, nothing runs away,

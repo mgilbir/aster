@@ -98,13 +98,22 @@ func mergeProjectionIfNoConflict(cc *compileCtx, first, second *projectionCompon
 	if sizeEq {
 		if allShared {
 			return first
-		} else if first.explicit.Len() == 0 {
+		} else if explicitIsEmpty(cc, first) {
 			return second
-		} else if second.explicit.Len() == 0 {
+		} else if explicitIsEmpty(cc, second) {
 			return first
 		}
 	}
 	return nil
+}
+
+// explicitIsEmpty is deepEqual(p.explicit, {}): it reads the explicit
+// object's valueOf, toString and constructor, which a specification's
+// projection may hold as data (a TypeError, as upstream's), so it is not a
+// count of the keys.
+func explicitIsEmpty(cc *compileCtx, p *projectionComponent) bool {
+	cc.work(int64(p.explicit.Len()))
+	return deepEqual(cc, jsval.Obj(p.explicit.object()), jsval.Obj(jsval.NewObject(0)))
 }
 
 func parseNonUnitProjections(m Model) *projectionComponent {
