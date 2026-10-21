@@ -24,6 +24,7 @@ package oracle
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -66,6 +67,39 @@ var answerTimeout = 2 * time.Minute
 // not count it as upstream rejecting the input (which would make "both
 // fail" look like agreement).
 var ErrNoAnswer = errors.New("oracle: no answer in time")
+
+// ErrDied is the error of a request that ended node: the process exited
+// while it was answering, as V8 does when the heap is exhausted ("FATAL ERROR:
+// Ineffective mark-compacts near heap limit Allocation failed - JavaScript
+// heap out of memory"), and a fresh process asked the same request died too.
+// The error's text carries the reason node gave. Like ErrNoAnswer it is never
+// cached (whether node can answer depends on the host's heap limit), but
+// unlike it, it is a verdict on the input: upstream cannot render it, so a
+// test classifies it as upstream's failure and says why.
+var ErrDied = errors.New("oracle: node exited")
+
+// diedError is ErrDied with the reason node gave.
+type diedError struct{ reason string }
+
+func (e *diedError) Error() string {
+	if e.reason == "" {
+		return ErrDied.Error()
+	}
+	return ErrDied.Error() + ": " + e.reason
+}
+
+func (e *diedError) Is(target error) bool { return target == ErrDied }
+
+// DiedReason is the reason node gave for exiting while it answered err (an
+// error that is ErrDied), such as "JavaScript heap out of memory"; "" when it
+// gave none.
+func DiedReason(err error) string {
+	var d *diedError
+	if errors.As(err, &d) {
+		return d.reason
+	}
+	return ""
+}
 
 // ErrFailed is the error of a request the oracle could not answer for a
 // reason of its own (oracle.mjs reports it as oracleErr: resvg-napi did not
@@ -116,6 +150,9 @@ type proc struct {
 	// and removed when the process is stopped, since a process killed in a
 	// replacement or a timeout runs no exit handler of its own.
 	fontDir string
+	// stderr watches what the process writes to its standard error for the
+	// reason it gives when it dies.
+	stderr *stderrWatch
 }
 
 var oracles sync.Map // set → *Oracle
@@ -386,6 +423,18 @@ func (o *Oracle) node(req map[string]any) (Result, error) {
 		}
 	}
 	res, err := p.ask(req)
+	if errors.Is(err, ErrDied) && p.nextID > 1 {
+		// The process died after answering earlier requests: what it held
+		// (the heap they filled, the state they left) is part of why, so it is
+		// no verdict on this request. Ask a fresh process; if that dies too,
+		// upstream cannot render the input.
+		var np *proc
+		if np, err = o.start(); err != nil {
+			return Result{}, err
+		}
+		p = np
+		res, err = p.ask(req)
+	}
 	if err == nil && res.fontRejected && p.nextID > 1 {
 		// The canvas kept the font it held when it refused one, and the
 		// process held what earlier requests left: the answer is a fresh
@@ -428,8 +477,8 @@ func (p *proc) ask(req map[string]any) (Result, error) {
 	select {
 	case out, ok := <-p.lines:
 		if !ok {
-			p.stop()
-			return res, errors.New("oracle: node exited")
+			p.stop() // waits for the process, so its last words are read
+			return res, &diedError{reason: p.stderr.fatal()}
 		}
 		var got struct {
 			ID   int             `json:"id"`
@@ -485,7 +534,8 @@ func (o *Oracle) start() (*proc, error) {
 	cmd.Dir = filepath.Join(o.root, o.set)
 	cmd.Env = append(os.Environ(), "TZ="+o.zone, "NODE_PATH="+filepath.Join(o.root, o.set, "node_modules"),
 		"ASTER_ORACLE_PARENT="+strconv.Itoa(os.Getpid()), "ASTER_ORACLE_FONTDIR="+fontDir)
-	cmd.Stderr = os.Stderr
+	watch := &stderrWatch{out: os.Stderr}
+	cmd.Stderr = watch
 	ownGroup(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -510,7 +560,7 @@ func (o *Oracle) start() (*proc, error) {
 			lines <- append([]byte(nil), sc.Bytes()...)
 		}
 	}()
-	p := &proc{o: o, cmd: cmd, stdin: stdin, lines: lines, fontDir: fontDir}
+	p := &proc{o: o, cmd: cmd, stdin: stdin, lines: lines, fontDir: fontDir, stderr: watch}
 	select {
 	case line, ok := <-lines:
 		var ready struct {
@@ -563,4 +613,73 @@ func repoRoot() (string, error) {
 		}
 		dir = parent
 	}
+}
+
+// stderrWatch passes a process's standard error on, except the report V8
+// writes when it dies of an exhausted heap (its last garbage collections and
+// a native stack trace, a hundred lines of addresses): that is kept for the
+// error of the request that ended the process (ErrDied) and not printed, so a
+// test's log does not read as the oracle crashing.
+type stderrWatch struct {
+	out io.Writer
+
+	mu     sync.Mutex
+	part   []byte // an unfinished line
+	report bool   // inside V8's fatal-error report
+	reason string // its "FATAL ERROR:" line, without the prefix
+}
+
+func (w *stderrWatch) Write(b []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.part = append(w.part, b...)
+	for {
+		i := bytes.IndexByte(w.part, '\n')
+		if i < 0 {
+			break
+		}
+		w.line(w.part[:i+1])
+		w.part = w.part[i+1:]
+	}
+	if len(w.part) > 1<<16 { // no newline in 64 KiB: not a report line
+		_, _ = w.out.Write(w.part)
+		w.part = nil
+	}
+	return len(b), nil
+}
+
+func (w *stderrWatch) line(l []byte) {
+	t := strings.TrimSpace(string(l))
+	switch {
+	case strings.HasPrefix(t, "<--- Last few GCs --->"):
+		w.report = true
+	case strings.HasPrefix(t, "FATAL ERROR: "):
+		w.report = true
+		if w.reason == "" {
+			w.reason = fatalReason(t)
+		}
+	}
+	if !w.report {
+		_, _ = w.out.Write(l)
+	}
+}
+
+// fatalReason is the cause in V8's "FATAL ERROR: <where> Allocation failed -
+// JavaScript heap out of memory" line: what follows the last " - ".
+func fatalReason(line string) string {
+	line = strings.TrimPrefix(line, "FATAL ERROR: ")
+	if i := strings.LastIndex(line, " - "); i >= 0 {
+		return line[i+3:]
+	}
+	return line
+}
+
+// fatal is the reason the process gave for dying ("" when it gave none).
+func (w *stderrWatch) fatal() string {
+	if w == nil {
+		return ""
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.reason
 }

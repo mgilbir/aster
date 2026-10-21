@@ -317,7 +317,7 @@ func parseEventStream(stream jsval.Value, scope *Scope, depth int) {
 		if strictIs(specGet(stream, "type"), "timer") {
 			stream = obj("between", specGet(stream, "between"), "filter", specGet(stream, "filter"))
 		} else {
-			viewEventListener(stream)
+			viewEventListener(stream, scope)
 		}
 	default:
 		perr("Invalid stream specification: %s", stringValue(stream))
@@ -379,11 +379,26 @@ func streamParameters(stream jsval.Value, scope *Scope, depth int) {
 // a method with parameters is scanned as a list of handlers (its length),
 // which reads the type of undefined, and any other has no push. A type that
 // is no string or array has no indexOf. The stream never fires in a static render,
-// but the view fails before it renders.
-func viewEventListener(stream jsval.Value) {
+// but the view fails before it renders. A sub-scope's streams are registered
+// when its context is made, by the dataflow, which logs the error and goes
+// on: the scope records the first (flowSpec.streamErr).
+func viewEventListener(stream jsval.Value, scope *Scope) {
+	msg := viewListenerError(stream)
+	switch {
+	case msg == "":
+	case scope.parentScope == nil:
+		perr("%s", msg)
+	case scope.streamErr == "":
+		scope.streamErr = msg
+	}
+}
+
+// viewListenerError is the error registering the stream with the view raises
+// ("" for none).
+func viewListenerError(stream jsval.Value) string {
 	src := specGet(stream, "source")
 	if src.IsTruthy() && !strictIs(src, "scope") && !strictIs(src, "view") {
-		return
+		return ""
 	}
 	t := specGet(stream, "type")
 	var name string
@@ -405,17 +420,17 @@ func viewEventListener(stream jsval.Value) {
 		}
 		name = specText(jsval.Arr(items))
 	default:
-		perr("name.indexOf is not a function")
+		return "name.indexOf is not a function"
 	}
 	if name == "__proto__" {
-		perr("(h[name] || h[name]).push is not a function")
+		return "(h[name] || h[name]).push is not a function"
 	}
 	f, inherited := jsval.Inherited(name)
 	if !inherited {
-		return
+		return ""
 	}
 	if n := jsval.Member(f, "length"); n.IsNum() && n.NumValue() > 0 {
-		perr("Cannot read properties of undefined (reading 'type')")
+		return "Cannot read properties of undefined (reading 'type')"
 	}
-	perr("(h[name] || h[name]).push is not a function")
+	return "(h[name] || h[name]).push is not a function"
 }

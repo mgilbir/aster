@@ -1,0 +1,1 @@
+{"width":80,"height":40,"signals":[{"name":"c","value":1}],"marks":[{"type":"group","signals":[{"name":"a","value":0,"on":[{"events":{"signal":"c"},"update":"5"},{"events":{"type":{}},"update":"7"}]}],"marks":[{"type":"text","encode":{"enter":{"text":{"signal":"'a=' + a"},"x":{"value":4},"y":{"value":14}}}}]}]}

@@ -236,12 +236,15 @@ func lineString(it *Item, v jsval.Value) string {
 	return jsval.ToWellFormed(it.Walker().String(v))
 }
 
-// MultiLineOffset is the extra height of a multi-line text block.
+// MultiLineOffset is the extra height of a multi-line text block. A single
+// line is 0 * lineHeight, which is NaN when the line height is infinite (a
+// font size of Infinity), as upstream's is.
 func MultiLineOffset(it *Item) float64 {
+	n := 0.0
 	if l := TextLines(it); l.Multi {
-		return float64(l.N-1) * LineHeight(it)
+		n = float64(l.N - 1)
 	}
-	return 0
+	return n * LineHeight(it)
 }
 
 // TextValue returns the text to display for one line: trimmed, and truncated

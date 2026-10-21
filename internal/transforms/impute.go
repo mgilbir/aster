@@ -258,13 +258,21 @@ func Impute(ctx context.Context, data []jsval.Value, p ImputeParams) ([]jsval.Va
 					present := make([]jsval.Value, 0, len(g.vals))
 					for j := range g.vals {
 						if tv := cell(g, j); !tv.IsUndefined() {
+							if p.Field.IsNil() { // getField's `f(t)` with f null
+								panic(&jsval.Thrown{Name: "TypeError", Msg: "f is not a function"})
+							}
 							present = append(present, p.Field.Get(tv))
 						}
 					}
 					value = imputeReduce(keys.w, method, present)
 				}
 			}
-			t.Set(p.Field.Key(), value)
+			// accessorName(null) is null, a property named "null"
+			fieldKey := p.Field.Key()
+			if p.Field.IsNil() {
+				fieldKey = "null"
+			}
+			t.Set(fieldKey, value)
 			out = append(out, jsval.Obj(t))
 		}
 	}

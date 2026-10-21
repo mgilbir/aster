@@ -44,7 +44,6 @@ internal/vega.addSortField	2	# spec: a literal of the specification, read as the
 internal/vega.aggrField	3	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)
 internal/vega.analyzeData	1	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)
 internal/vega.collectSignals	2	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)
-internal/vega.domainFieldRef	1	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)
 internal/vega.getDataRef	1	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)
 internal/vega.mergeNamed	1	# spec: the configuration, merged as the view is parsed
 internal/vega.ordinalMultipleDomain	1	# spec: a literal of the specification, read as the view is parsed (tree-shaped, as large as the specification)

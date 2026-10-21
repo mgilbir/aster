@@ -145,6 +145,11 @@ func (c *rtContext) parse(spec *flowSpec) *rtContext {
 		c.g.work(1)
 		c.parseOperatorParameters(e)
 	}
+	// parse streams: the first the view refuses ends the parse, before the
+	// updates and the linking of the operators
+	if spec.streamErr != "" {
+		fail("%s", spec.streamErr)
+	}
 	for _, u := range spec.updates {
 		c.g.work(1)
 		c.parseUpdate(u)
