@@ -29,6 +29,9 @@ func TestParseCSSFontCanvasGrammar(t *testing.T) {
 		{"lighter 10px x", false, 100, 10, "x"},
 		{"bolder 10px x", false, 700, 10, "x"},
 		{"1in x", false, 400, 96, "x"},
+		{"1.5.5px x", false, 400, 1.5, "x"},
+		{"12PX x", false, 400, 12, "x"},
+		{"2CM x", false, 400, 2 * float64(float32(37.8)), "x"},
 		// A string node-canvas rejects is the defaults, as before.
 		{"12 Arial", false, 400, 11, "sans-serif"},
 		{"1200 12px Arial", false, 400, 11, "sans-serif"},

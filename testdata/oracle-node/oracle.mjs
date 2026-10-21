@@ -107,6 +107,8 @@ const require = createRequire(path.join(path.resolve(process.env.NODE_PATH), 'x.
     conf,
     `<?xml version="1.0"?>\n<!DOCTYPE fontconfig SYSTEM "fonts.dtd">\n<fontconfig>\n` +
       ['dejavu', 'liberation', 'notoemoji'].map((d) => `  <dir>${path.join(repo, 'internal/fonts', d)}</dir>\n`).join('') +
+      // the oracle's own tests plant host fonts here (internal/oracle)
+      (process.env.ASTER_ORACLE_TEST_FONTCONF || '') +
       `  <cachedir>${path.join(dir, 'cache')}</cachedir>\n</fontconfig>\n`,
   );
   process.env.FONTCONFIG_FILE = conf;
@@ -162,11 +164,18 @@ const known = new Set(faces.map(([, family]) => family.toLowerCase()));
 
 // mapFonts rewrites the family list of a CSS font shorthand
 // ("italic bold 11px \"Helvetica Neue\", sans-serif") to one registered family.
+// The pattern is the engine's (canvasFontFamilyRe in internal/text): a size
+// with any unit the canvas parser reads, in either case, white space and
+// newlines as the canvas parser reads them, and a font with no family at all
+// ("12px", "12px ": the canvas then takes the host's default family). A string
+// it does not match is given to the canvas as it is, with whatever family list
+// it has; see unmappedFont for what happens when the canvas accepts one.
+const fontFamilyRe = /^([\s\S]*?\d[\d.]*(?:px|pt|em|rem|cm|mm|in|pc|%)(?:[\t\n\f\r ]*\/[\t\n\f\r ]*[^\t\n\f\r ]+)?)(?:[\t\n\f\r ]+([\s\S]*))?$/i;
 function mapFonts(font) {
-  const m = /^(.*?\d[\d.]*(?:px|pt|em|rem|%)(?:\s*\/\s*\S+)?\s+)(.+)$/.exec(font);
+  const m = fontFamilyRe.exec(font);
   if (!m) return font;
   let family = 'DejaVu Sans';
-  for (let f of m[2].split(',')) {
+  for (let f of (m[2] || '').split(',')) {
     f = f.trim().replace(/^["']|["']$/g, '');
     if (known.has(f.toLowerCase())) {
       family = f;
@@ -178,7 +187,7 @@ function mapFonts(font) {
     }
     if (/^(sans-serif|serif|cursive|fantasy)$/i.test(f)) break;
   }
-  return m[1] + `"${family}", "Noto Emoji"`;
+  return m[1] + ` "${family}", "Noto Emoji"`;
 }
 const proto = canvas.CanvasRenderingContext2D.prototype;
 const fontProp = Object.getOwnPropertyDescriptor(proto, 'font');
@@ -194,10 +203,44 @@ const fontProp = Object.getOwnPropertyDescriptor(proto, 'font');
 // a rejected one: the cost is a repeated answer, never a wrong one.
 let fontRejected = false;
 const fontAccepted = new Map();
+// The canvas accepts a font string the pattern above does not match only if it
+// is one the pattern should have matched; its family list would then be
+// resolved by the host, and the answer is not one the engine can be compared
+// with (the answer is marked, see unmappedFont).
+const scratch = canvas.createCanvas(1, 1).getContext('2d');
+const accepts = (font) =>
+  ['1px Sentinel1', '2px Sentinel2'].some((sentinel) => {
+    fontProp.set.call(scratch, sentinel);
+    const held = fontProp.get.call(scratch);
+    fontProp.set.call(scratch, font);
+    return fontProp.get.call(scratch) !== held;
+  });
+// A new context starts at the canvas default, 10px sans-serif, and keeps its
+// font when it is given a string it rejects. Left to the canvas, "sans-serif"
+// is resolved by the host (Pango's own font map: a macOS system font on
+// macOS, fontconfig's choice on Linux), and the font a rejected string leaves
+// behind would be the host's. So every context is given, as soon as it is
+// made, what the engine means by "10px sans-serif": the font mapFonts makes
+// of it. (The engine's context starts at the same string and resolves it
+// through its default family; internal/text/canvasctx.go.)
+const initialFont = mapFonts('10px sans-serif');
+const initialized = new WeakSet();
+const getContext = canvas.Canvas.prototype.getContext;
+canvas.Canvas.prototype.getContext = function (...args) {
+  const ctx = getContext.apply(this, args);
+  if (ctx instanceof canvas.CanvasRenderingContext2D && !initialized.has(ctx)) {
+    initialized.add(ctx);
+    fontProp.set.call(ctx, initialFont);
+    fontAccepted.set(initialFont, fontProp.get.call(ctx));
+  }
+  return ctx;
+};
+let unmappedFont = '';
 Object.defineProperty(proto, 'font', {
   ...fontProp,
   set(v) {
     const mapped = mapFonts(String(v));
+    if (mapped === String(v) && !fontFamilyRe.test(mapped) && accepts(mapped)) unmappedFont = mapped;
     const before = fontProp.get.call(this);
     fontProp.set.call(this, mapped);
     const after = fontProp.get.call(this);
@@ -509,6 +552,7 @@ const renderCanary = async () => {
 };
 const canaryBefore = await renderCanary();
 fontRejected = false;
+unmappedFont = '';
 const canaryChanged = async () => {
   try {
     return (await renderCanary()) !== canaryBefore;
@@ -532,6 +576,10 @@ const answer = async (res) => {
   if (fontRejected) {
     res.fontRejected = true;
     fontRejected = false;
+  }
+  if (unmappedFont) {
+    res.oracleErr = `the canvas accepted a font string whose families are not mapped: ${JSON.stringify(unmappedFont)}`;
+    unmappedFont = '';
   }
   const changed = changedBuiltin();
   if (changed) {
