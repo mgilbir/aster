@@ -7,8 +7,13 @@ import (
 )
 
 // canvasFontFamilyRe splits a font into what precedes the family list, up to
-// the first size with a unit (and an optional line-height), and the list.
-var canvasFontFamilyRe = regexp.MustCompile(`^(.*?\d[\d.]*(?:px|pt|em|rem|%)(?:\s*/\s*\S+)?\s+)(.+)$`)
+// the first size with a unit (and an optional line-height), and the list. It
+// is the same pattern, flag for flag, as fontFamilyRe in the oracle
+// (testdata/oracle-node/oracle.mjs): the units node-canvas reads in either
+// case, newlines inside the string, and white space as its tokenizer reads
+// it, and a font with no family at all; so that the family a font names is
+// replaced the same way on both sides.
+var canvasFontFamilyRe = regexp.MustCompile(`(?is)^(.*?\d[\d.]*(?:px|pt|em|rem|cm|mm|in|pc|%)(?:[\t\n\f\r ]*/[\t\n\f\r ]*[^\t\n\f\r ]+)?)(?:[\t\n\f\r ]+(.*))?$`)
 
 // ValidCanvasFont reports whether a canvas 2D context accepts s as its font:
 // node-canvas parses the CSS2 font shorthand strictly and, for a string it
@@ -204,7 +209,16 @@ loop:
 		t.pos = begin
 		return token{typ: tokInvalid}
 	}
-	v, err := strconv.ParseFloat(t.in[begin:t.pos], 64)
+	// The tokenizer takes every digit and point as one number ("1.5.5"), and
+	// node-canvas reads its value with strtod, which stops at the second
+	// point: 1.5.5px is 1.5px.
+	text := t.in[begin:t.pos]
+	if i := strings.IndexByte(text, '.'); i >= 0 {
+		if j := strings.IndexByte(text[i+1:], '.'); j >= 0 {
+			text = text[:i+1+j]
+		}
+	}
+	v, err := strconv.ParseFloat(text, 64)
 	if err != nil && v == 0 {
 		return token{typ: tokInvalid}
 	}

@@ -29,6 +29,20 @@ func TestValidCanvasFont(t *testing.T) {
 		"10px 'unterminated":                                     true,
 		"12px":                                                   true,
 		"10px ":                                                  true,
+		// the units node-canvas reads, in either case, and a size it reads
+		// with strtod (the oracle swaps the family of all of these the same way)
+		"12PX Foo":         true,
+		"12cm Foo":         true,
+		"12MM Foo":         true,
+		"1IN Foo":          true,
+		"2pc Foo":          true,
+		"12PT\nFoo":        true,
+		"bold 12px\nFoo":   true,
+		"1.5.5px Foo":      true,
+		"12vw Foo":         false,
+		"12ex Foo":         false,
+		"large serif":      false,
+		"Infinitypx serif": false,
 		"Franklin Gothic Medium', 'Arial Narrow', Arial, sans-serif 10px sans-serif": false, // a style that is none of the three
 		"Ubuntu 10px sans-serif":      false, // Vega-Lite's subtitleFontStyle: "Ubuntu"
 		"12 sans-serif":               false,

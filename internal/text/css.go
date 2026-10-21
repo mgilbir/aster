@@ -54,7 +54,7 @@ func ParseCSSFont(s string) CSSFont {
 func parseCanvasFont(s string) (CSSFont, bool) {
 	fam, hasFam := "", false
 	if m := canvasFontFamilyRe.FindStringSubmatch(s); m != nil {
-		s, fam, hasFam = m[1]+`"DejaVu Sans"`, m[2], true
+		s, fam, hasFam = m[1]+` "DejaVu Sans"`, m[2], true
 	}
 	p := &fontParser{tk: tokenizer{in: s}, weight: weightNormal}
 	p.cur = p.tk.next()
