@@ -342,7 +342,7 @@ func call[T any](c *Converter, rc renderConfig, f func(ctx context.Context) (T, 
 	if err != nil {
 		return zero, err
 	}
-	out, err := f(ctx)
+	out, err := runStages(c, ctx, f)
 	if err == nil && ctx.Err() != nil {
 		err = c.stageErr(ctx, "rendering", ctx.Err())
 	}
@@ -350,6 +350,17 @@ func call[T any](c *Converter, rc renderConfig, f func(ctx context.Context) (T, 
 		return zero, err
 	}
 	return out, nil
+}
+
+// runStages runs f, the stages of one call, with the last of the boundaries
+// under them: a stage has its own recoverStage, which names it, but a stage
+// that polls the call's context from outside one would otherwise let the
+// panic that carries the deadline (or a limit) reach the caller, which the
+// public API never does (ADR 0021).
+func runStages[T any](c *Converter, ctx context.Context, f func(ctx context.Context) (T, error)) (out T, err error) {
+	stage := "rendering"
+	defer c.recoverStage(ctx, &stage, &err)
+	return f(ctx)
 }
 
 // svgInput is rc for a method whose input is SVG, which renders no

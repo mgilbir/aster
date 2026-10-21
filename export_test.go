@@ -218,3 +218,11 @@ func PDFLimitsForTest(n uint64) (chart, input svgpdf.Limits, svgBytes int) {
 	c := deriveLimits(n, 0)
 	return c.pdfLimits(true), c.pdfLimits(false), c.svgBytes
 }
+
+// ContextWithStageHookForTest returns ctx carrying f, which every stage of a
+// call made under it (WithContext) reports to as it ends, as the stage timer
+// does. A test that cancels ctx from f ends the call at an exact stage
+// boundary, whatever the machine's speed, which no timeout can do.
+func ContextWithStageHookForTest(ctx context.Context, f func(stage string)) context.Context {
+	return context.WithValue(ctx, stagesKey{}, func(s string, _ time.Duration) { f(s) })
+}

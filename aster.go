@@ -647,8 +647,18 @@ func (c *Converter) VegaLiteToVega(spec []byte, opts ...RenderOption) ([]byte, e
 		if err != nil {
 			return nil, err
 		}
-		return jsval.WalkerFor(ctx).AppendJSON(nil, vg), nil
+		return c.writeVega(ctx, vg)
 	})
+}
+
+// writeVega writes the compiled Vega spec as JSON. The write polls the call's
+// context and its ledger, and stops by panicking with their error, so it runs
+// under recoverStage like every stage that does: a deadline that fell after
+// the compile once panicked out of the call from here.
+func (c *Converter) writeVega(ctx context.Context, vg jsval.Value) (out []byte, err error) {
+	stage := "writing Vega"
+	defer c.recoverStage(ctx, &stage, &err)
+	return jsval.WalkerFor(ctx).AppendJSON(nil, vg), nil
 }
 
 // compileVegaLite parses a Vega-Lite spec and compiles it to Vega with the
