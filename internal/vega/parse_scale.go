@@ -1,7 +1,9 @@
 package vega
 
 import (
+	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/scale"
@@ -171,14 +173,34 @@ func domainFieldRef(data jsval.Value, scope *Scope) jsval.Value {
 	}
 	name := "_:vega:_" + strconv.Itoa(root.fieldRefs)
 	root.fieldRefs++
-	if data.IsArr() {
+	if data.IsArr() && !slices.ContainsFunc(data.Items(), isSignalObj) {
 		coll := mk("collect")
 		coll.ingest = &ingestSpec{values: data}
 		scope.addDataPipeline(name, []*entry{coll, mk("sieve")})
 	} else {
-		// Upstream feeds the set with `setdata(name, signal)` whenever the
-		// signal changes; a loader that reads the signal's value does the same.
-		load := mk("load", "values", scope.signalRef(data.Get("signal").AsString()))
+		// Upstream feeds the set with `setdata(name, values)` whenever a
+		// signal changes: values is the signal, or an array literal written
+		// from the array's entries (a signal's source, any other entry as
+		// JSON); a loader that reads that value does the same.
+		code := specText(specGet(data, "signal"))
+		if data.IsArr() {
+			var b strings.Builder
+			b.WriteByte('[')
+			for i, v := range data.Items() {
+				scope.work(1)
+				if i > 0 {
+					b.WriteByte(',')
+				}
+				if isSignalObj(v) {
+					b.WriteString(specText(v.Get("signal")))
+				} else {
+					b.WriteString(stringValue(v))
+				}
+			}
+			b.WriteByte(']')
+			code = b.String()
+		}
+		load := mk("load", "values", scope.signalRef(code))
 		scope.addDataPipeline(name, []*entry{load, mk("collect"), mk("sieve")})
 	}
 	return obj("data", sv(name), "field", sv("data"))
