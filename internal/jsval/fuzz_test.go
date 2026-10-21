@@ -47,7 +47,13 @@ func toAny(v Value) any {
 // a lone surrogate escape, which encoding/json replaces too, ParseJSON keeps
 // as JSON.parse does (the values are compared after ToWellFormed); both read
 // a number outside float64 as +-Inf (which json.Unmarshal reports as an
-// error, so those documents are not compared as values). What ParseJSON accepts, AppendJSON writes as valid JSON that
+// error, so those documents are not compared as values). Invalid UTF-8
+// is the one place they differ: ParseJSON decodes it as node's TextDecoder
+// does, one U+FFFD for each maximal subpart (AppendDecoded), where
+// encoding/json replaces a byte at a time, so the value is compared with
+// what encoding/json reads of the document decoded that way (the decoder is
+// itself held to node's TextDecoder by TestMalformedUTF8DecodesAsWHATWG).
+// What ParseJSON accepts, AppendJSON writes as valid JSON that
 // parses again and writes the same bytes: non-finite numbers become null,
 // so the second round is the one compared.
 func FuzzParseJSON(f *testing.F) {
@@ -93,7 +99,7 @@ func parseJSONProps(t *testing.T, data []byte) {
 		t.Fatalf("%q: accepted, but encoding/json rejects it", data)
 	}
 	var want any
-	if json.Unmarshal(data, &want) == nil && !reflect.DeepEqual(toAny(v), want) {
+	if json.Unmarshal(AppendDecoded(nil, data), &want) == nil && !reflect.DeepEqual(toAny(v), want) {
 		t.Fatalf("%q: parsed as %v, encoding/json reads %v", data, toAny(v), want)
 	}
 	out := AppendJSON(nil, v)
