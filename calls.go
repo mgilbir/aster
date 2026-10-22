@@ -334,8 +334,15 @@ func call[T any](c *Converter, rc renderConfig, f func(ctx context.Context) (T, 
 	defer release()
 	// The call's own goroutine runs only the engine and the callbacks it
 	// makes (the error handler, a projection's functions, the Loader): a
-	// Close from it is from inside the call, and must not wait for it.
-	defer c.markInside()()
+	// Close from it is from inside the call, and must not wait for it. The
+	// error handler and the Loader mark their goroutine themselves
+	// (callback); a projection's functions are too hot to, so the call marks
+	// its goroutine for them, when it has any. The mark reads the goroutine's
+	// id from a stack trace, a few microseconds that a call without custom
+	// projections does not pay.
+	if c.cfg.projections != nil {
+		defer c.markInside()()
+	}
 	ctx, cancel := c.opContext(rc.ctx)
 	defer cancel()
 	ctx, err := c.withRender(ctx, rc)
