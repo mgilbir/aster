@@ -9,7 +9,7 @@ import (
 
 // countpattern's case parameter is toUpperCase and toLowerCase of the pinned
 // node, not the Go toolchain's Unicode: U+019B has an upper case since Unicode
-// 16, which Go 1.26 does not know (the answers are node 24.21.0's).
+// 16, which Go 1.26 did not know (the answers are node 24.21.0's).
 func TestCountPatternCaseIsJavaScripts(t *testing.T) {
 	for _, c := range []struct {
 		mode, text string
