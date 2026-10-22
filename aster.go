@@ -458,7 +458,7 @@ func (c *Converter) renderSVG(ctx context.Context, spec jsval.Value) (out string
 		// An SVG past this size is not a chart anybody can use.
 		MaxBytes: c.lim.svgBytes,
 		DateText: func(dst []byte, ms float64) []byte {
-			return append(dst, format.DateToString(ms, format.Local(c.location))...)
+			return format.AppendDateToString(dst, ms, format.Local(c.location))
 		},
 	}
 	if res.HasBackground {

@@ -257,6 +257,7 @@ Output is byte for byte what it was.
 - The seeded random numbers that `ci0` and `ci1` aggregates (Vega-Lite's error bars and bands with a confidence interval) draw a thousand resamples from take the generator's remainder as an integer where it is one, which is exact, instead of with `math.Mod`: such charts render in a sixth to a tenth of the time.
 - Rows parsed from a loaded data file become the data set's tuples, as upstream ingests them, instead of being copied first; inline values are still copied. A render of the Vega-Lite examples allocates 7–10% less, of the Vega gallery 12–16% less.
 - A call no longer reads its goroutine's id from a stack trace unless the `Converter` has custom projections, whose functions run on the call's goroutine without the callback boundary that marks the others (a few microseconds a call: rendering an empty Vega specification takes 46 µs instead of 52 µs).
+- A date's text (`String(date)`: the keys of an aggregate, a stack or a join grouped by a date, and dates in labels and values) is written into the text it is part of, instead of being built from a dozen small strings: charts grouped by month allocate about half as often (the Vega-Lite example of bars by month, 53,238 allocations to 20,318) and render 10–20% faster.
 
 ## v0.2.0 (2026-10-14)
 

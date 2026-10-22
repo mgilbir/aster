@@ -3,7 +3,6 @@ package format
 import (
 	"math"
 	"strconv"
-	"strings"
 	"time"
 )
 
@@ -18,48 +17,69 @@ var (
 // tzdata does, the zone's abbreviation. It is exact to the second: two dates
 // within one second print alike.
 func DateToString(t float64, z Zone) string {
+	var buf [96]byte
+	return string(AppendDateToString(buf[:0], t, z))
+}
+
+// AppendDateToString appends DateToString(t, z) to dst. Group keys, labels
+// and the text of values print dates with it without a string per date.
+func AppendDateToString(dst []byte, t float64, z Zone) []byte {
 	if t = timeClip(t); !Valid(t) {
-		return "Invalid Date"
+		return append(dst, "Invalid Date"...)
 	}
 	f := z.Fields(t)
 	off := -int(z.TimezoneOffset(t)) // minutes east of UTC
-	var b strings.Builder
-	b.WriteString(dayNames[f.Weekday])
-	b.WriteByte(' ')
-	b.WriteString(monthNames[f.Month])
-	b.WriteByte(' ')
-	b.WriteString(padInt(f.Day, 2))
-	b.WriteByte(' ')
+	dst = append(dst, dayNames[f.Weekday]...)
+	dst = append(dst, ' ')
+	dst = append(dst, monthNames[f.Month]...)
+	dst = append(dst, ' ')
+	dst = appendPadInt(dst, f.Day, 2)
+	dst = append(dst, ' ')
 	if f.Year < 0 {
-		b.WriteByte('-')
-		b.WriteString(padInt(-f.Year, 4))
+		dst = append(dst, '-')
+		dst = appendPadInt(dst, -f.Year, 4)
 	} else {
-		b.WriteString(padInt(f.Year, 4))
+		dst = appendPadInt(dst, f.Year, 4)
 	}
-	b.WriteByte(' ')
-	b.WriteString(padInt(f.Hour, 2) + ":" + padInt(f.Minute, 2) + ":" + padInt(f.Second, 2))
-	b.WriteString(" GMT")
+	dst = append(dst, ' ')
+	dst = appendPadInt(dst, f.Hour, 2)
+	dst = append(dst, ':')
+	dst = appendPadInt(dst, f.Minute, 2)
+	dst = append(dst, ':')
+	dst = appendPadInt(dst, f.Second, 2)
+	dst = append(dst, " GMT"...)
 	if off < 0 {
-		b.WriteByte('-')
+		dst = append(dst, '-')
 		off = -off
 	} else {
-		b.WriteByte('+')
+		dst = append(dst, '+')
 	}
-	b.WriteString(padInt(off/60, 2) + padInt(off%60, 2))
+	dst = appendPadInt(dst, off/60, 2)
+	dst = appendPadInt(dst, off%60, 2)
 	name := "Coordinated Universal Time"
 	if loc := z.Location(); !z.IsUTC() && loc != time.UTC {
 		name = zoneLongName(loc, int64(t))
 	}
-	b.WriteString(" (" + name + ")")
-	return b.String()
+	dst = append(dst, " ("...)
+	dst = append(dst, name...)
+	return append(dst, ')')
 }
 
-func padInt(n, w int) string {
-	s := strconv.Itoa(n)
-	for len(s) < w {
-		s = "0" + s
+// appendPadInt appends the decimal text of n with zeros put in front of it
+// until it is w bytes long.
+func appendPadInt(dst []byte, n, w int) []byte {
+	start := len(dst)
+	dst = strconv.AppendInt(dst, int64(n), 10)
+	if pad := w - (len(dst) - start); pad > 0 {
+		for range pad {
+			dst = append(dst, 0)
+		}
+		copy(dst[start+pad:], dst[start:len(dst)-pad])
+		for i := range pad {
+			dst[start+i] = '0'
+		}
 	}
-	return s
+	return dst
 }
 
 // zoneName is a zone's two names in zoneLongNames, standard and daylight,

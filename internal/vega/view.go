@@ -407,7 +407,7 @@ func newView(ctx context.Context, opts Options, locale jsval.Value) *runView {
 	// view's zone, for every walk of the call.
 	zone := v.zone
 	ctx = jsval.ContextWithDateText(ctx, func(dst []byte, ms float64) []byte {
-		return append(dst, format.DateToString(ms, zone)...)
+		return format.AppendDateToString(dst, ms, zone)
 	})
 	v.ctx = ctx
 	v.walk = jsval.WalkerFor(ctx)
@@ -415,7 +415,7 @@ func newView(ctx context.Context, opts Options, locale jsval.Value) *runView {
 	// An item's property that is a Date prints as Date.prototype.toString
 	// does in the view's zone (the + of a bound function concatenates it).
 	v.sg.SetWalker(v.walk.WithDateText(func(dst []byte, ms float64) []byte {
-		return append(dst, format.DateToString(ms, v.zone)...)
+		return format.AppendDateToString(dst, ms, v.zone)
 	}))
 	switch {
 	case opts.Locale != nil:
