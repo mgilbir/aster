@@ -475,7 +475,12 @@ func appendPadFloat(dst []byte, v float64, fill byte, width int) []byte {
 // a signed six-digit year outside 0..9999. ok is false for an Invalid Date
 // (where JavaScript throws a RangeError).
 func ISOFormat(t float64) (s string, ok bool) {
-	t = timeClip(t)
-	b, ok := jsval.AppendISODate(nil, t)
+	b, ok := AppendISO(nil, t)
 	return string(b), ok
+}
+
+// AppendISO appends ISOFormat(t) to dst; for an Invalid Date it returns dst
+// as it was and false.
+func AppendISO(dst []byte, t float64) ([]byte, bool) {
+	return jsval.AppendISODate(dst, timeClip(t))
 }
