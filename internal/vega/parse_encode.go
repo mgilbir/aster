@@ -148,7 +148,7 @@ func (c *encCompiler) parseBlock(block jsval.Value, typ string) *encodeSet {
 // the documented shape is then evaluated by closures (canonicalEntry), any
 // other by that source.
 func (c *encCompiler) compile(enc jsval.Value) valueFn {
-	if literalReference(enc) {
+	if c.literalReference(enc) {
 		return c.entry(enc)
 	}
 	var src string
@@ -179,19 +179,26 @@ func (c *encCompiler) compile(enc jsval.Value) valueFn {
 	return func(ev *encEval) jsval.Value { return f.evalEnc(ev) }
 }
 
-// literalReference reports a reference made only of members whose types
-// make its source parse: a literal value or a field named by a plain
-// identifier, a scale named by a string, numbers for band, offset, mult and
-// exponent, and round. Its source (`5`, `_scale("x", datum.a)+3`) cannot fail
-// to parse and depends on nothing but what canonicalEntry registers, so
-// parsing it would only repeat what the types already prove. It is most of a
-// chart's references.
-func literalReference(enc jsval.Value) bool {
-	if !enc.IsObj() {
+// literalReference reports a reference whose source cannot fail to parse
+// and depends on nothing but what canonicalEntry registers, so that parsing
+// it would only repeat what its types already prove: a literal value, a
+// field named by a plain identifier (or a group or parent reference to
+// one), a signal whose expression parses on its own (the source holds it in
+// parentheses, `(signal)`, which parses where the signal does, and entry
+// parses the signal itself, registering what it reads), a scale named by a
+// string with a numeric range, band, offset, mult and exponent, round, and
+// as offset, mult or exponent a reference of these kinds. It is nearly every
+// reference of a chart.
+func (c *encCompiler) literalReference(enc jsval.Value) bool {
+	return c.literalAt(enc, 0) && canonicalEntry(enc, 0)
+}
+
+func (c *encCompiler) literalAt(enc jsval.Value, depth int) bool {
+	if !enc.IsObj() || depth > 8 {
 		return false
 	}
 	o := enc.ObjValue()
-	n := 0 // value or field
+	n := 0 // value, field or signal
 	for i := 0; i < o.Len(); i++ {
 		v := o.ValueAt(i)
 		switch o.KeyAt(i) {
@@ -203,13 +210,13 @@ func literalReference(enc jsval.Value) bool {
 			}
 			n++
 		case "field":
-			if !v.IsStr() || v.StrValue() == "" {
+			if !plainIdentifier(v) && !groupFieldReference(v) {
 				return false
 			}
-			for _, r := range v.StrValue() {
-				if !(r == '_' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9') {
-					return false
-				}
+			n++
+		case "signal":
+			if !v.IsStr() || v.StrValue() == "" || !c.parses(v.StrValue()) {
+				return false
 			}
 			n++
 		case "scale":
@@ -220,8 +227,12 @@ func literalReference(enc jsval.Value) bool {
 			if !v.IsNum() && !v.IsBool() {
 				return false
 			}
-		case "offset", "mult", "exponent":
+		case "range":
 			if !v.IsNum() {
+				return false
+			}
+		case "offset", "mult", "exponent":
+			if !v.IsNum() && !c.literalAt(v, depth+1) {
 				return false
 			}
 		case "round":
@@ -232,7 +243,56 @@ func literalReference(enc jsval.Value) bool {
 			return false
 		}
 	}
-	return n <= 1 && canonicalEntry(enc, 0)
+	return n <= 1
+}
+
+// plainIdentifier reports a non-empty string of ASCII letters, digits and
+// underscores: a field whose source, `datum["name"]`, is a string literal
+// the parser reads as one.
+func plainIdentifier(v jsval.Value) bool {
+	if !v.IsStr() || v.StrValue() == "" {
+		return false
+	}
+	for _, r := range v.StrValue() {
+		if !(r == '_' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9') {
+			return false
+		}
+	}
+	return !quirkyLiteral(v.StrValue())
+}
+
+// groupFieldReference reports {"group": name} or {"parent": name}, with a
+// numeric level or none, of a plain identifier: the source
+// `item.mark.group["name"]` (`...datum["name"]` for parent).
+func groupFieldReference(v jsval.Value) bool {
+	if !v.IsObj() {
+		return false
+	}
+	o := v.ObjValue()
+	keys := 0
+	for i := 0; i < o.Len(); i++ {
+		switch o.KeyAt(i) {
+		case "group", "parent":
+			if !plainIdentifier(o.ValueAt(i)) {
+				return false
+			}
+			keys++
+		case "level":
+			if !o.ValueAt(i).IsNum() {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return keys == 1
+}
+
+// parses reports whether the expression code compiles on its own. A failure
+// is left to the reference's source, whose parse error upstream reports.
+func (c *encCompiler) parses(code string) bool {
+	_, err := expr.CompileCachedContext(c.scope.opts.ctx, code)
+	return err == nil
 }
 
 // rule compiles a production rule list whose rules canonicalRules accepts:
