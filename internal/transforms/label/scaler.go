@@ -55,7 +55,17 @@ func newScaler(ctx context.Context, width, height, padding float64, text [2]*str
 	return &scaler{width: width, height: height, padding: padding, ratio: ratio, w: w, h: h, text: text, ledger: budget.LedgerFrom(ctx)}, nil
 }
 
-func (s *scaler) scale(v float64) int  { return toInt32((v + s.padding) / s.ratio) }
+func (s *scaler) scale(v float64) int { return toInt32((v + s.padding) / s.ratio) }
+
+// scaleJS is scale of a coordinate that can be text: `v + padding`
+// concatenates then.
+func (s *scaler) scaleJS(v jsv) int {
+	if v.str {
+		return toInt32(jsval.StringToNumber(v.s+jsval.JSNumberString(s.padding)) / s.ratio)
+	}
+	return s.scale(v.f)
+}
+
 func (s *scaler) invert(v int) float64 { return float64(float64(v)*s.ratio) - s.padding }
 
 // bitmap is a new layout bitmap, charged.

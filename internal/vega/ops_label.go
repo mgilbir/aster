@@ -5,6 +5,7 @@ import (
 	"math"
 
 	"github.com/mgilbir/aster/internal/budget"
+	"github.com/mgilbir/aster/internal/csscolor"
 	"github.com/mgilbir/aster/internal/jsval"
 	"github.com/mgilbir/aster/internal/raster"
 	"github.com/mgilbir/aster/internal/scene"
@@ -101,7 +102,12 @@ func facLabel(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 			l.Ref = t
 			// d.fontSize, d.x, d.y as given, read by arithmetic: null is 0.
 			l.FontSize = jsval.ToNumber(t.Get("fontSize"))
-			l.X, l.Y = jsval.ToNumber(t.Get("x")), jsval.ToNumber(t.Get("y"))
+			var xs, ys *string
+			l.X, xs = labelCoord(t, "x")
+			l.Y, ys = labelCoord(t, "y")
+			if xs != nil || ys != nil {
+				l.Strs = &label.Texts{X: xs, Y: ys}
+			}
 			if !t.Text().IsNullish() {
 				l.Text = t.Walker().String(t.Text())
 			}
@@ -126,6 +132,13 @@ func facLabel(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 		}
 		opts.Rasterizer = &labelPainter{v: v}
 
+		var placedText map[*label.Label][2]*string
+		opts.PlacedText = func(l *label.Label, x, y *string) {
+			if placedText == nil {
+				placedText = make(map[*label.Label][2]*string)
+			}
+			placedText[l] = [2]*string{x, y}
+		}
 		placed, err := label.Layout(n.g.ctx, labels, opts)
 		if err != nil {
 			failErr(err)
@@ -134,7 +147,8 @@ func facLabel(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 			t := pl.Label.Ref.(*scene.Item)
 			x, y := jsval.Undefined, jsval.Undefined
 			if pl.HasPos {
-				x, y = jsval.Num(pl.X), jsval.Num(pl.Y)
+				pt := placedText[pl.Label]
+				x, y = labelValue(pl.X, pt[0]), labelValue(pl.Y, pt[1])
 			}
 			align, baseline := jsval.Undefined, jsval.Undefined
 			if pl.Align != "" {
@@ -153,6 +167,26 @@ func facLabel(c *rtContext, n *opNode, e *entry) (any, transform, func(*opNode, 
 	}), nil
 }
 
+// labelCoord is a position as the layout reads it: the number it converts to,
+// and its text when upstream adds to it as a string.
+func labelCoord(it *scene.Item, prop string) (float64, *string) {
+	v := it.Get(prop)
+	n := jsval.ToNumber(v)
+	if v.IsStr() || v.IsArr() || v.IsObj() || v.IsTimestamp() {
+		s := it.Walker().String(v)
+		return n, &s
+	}
+	return n, nil
+}
+
+// labelValue is the value a placed coordinate is written as.
+func labelValue(n float64, text *string) jsval.Value {
+	if text != nil {
+		return jsval.Str(*text)
+	}
+	return jsval.Num(n)
+}
+
 // labelBase describes the item a text item annotates: the datum of a text
 // mark derived from another mark is the view of that mark's item; with plain
 // data there is no base (nil).
@@ -167,9 +201,30 @@ func labelBase(v *runView, t *scene.Item, markIndex int) *label.Base {
 	}
 	base := &label.Base{
 		MarkType: strictTypeName(b.Mark),
-		X:        b.X.Val(), Y: b.Y.Val(),
-		Bounds: label.Box{X1: b.Bounds.X1, Y1: b.Bounds.Y1, X2: b.Bounds.X2, Y2: b.Bounds.Y2},
-		Ref:    b,
+		Bounds:   label.Box{X1: b.Bounds.X1, Y1: b.Bounds.Y1, X2: b.Bounds.X2, Y2: b.Bounds.Y2},
+		Ref:      b,
+	}
+	base.X, base.Y = b.X.Val(), b.Y.Val()
+	// base.Strs is made only for a coordinate that is text.
+	texts := func() *label.BaseTexts {
+		if base.Strs == nil {
+			base.Strs = new(label.BaseTexts)
+		}
+		return base.Strs
+	}
+	if n, s := labelCoord(b, "x"); s != nil {
+		base.X, texts().X = n, s
+	}
+	if n, s := labelCoord(b, "y"); s != nil {
+		base.Y, texts().Y = n, s
+	}
+	if b.Bounds.HasStrings() {
+		for i := range 4 {
+			if c := b.Bounds.Coord(i); !c.IsNum() {
+				s := b.Walker().String(c)
+				texts().Bounds[i] = &s
+			}
+		}
 	}
 	if b.Mark.IsGroup() {
 		base.Marks = make([]label.SubMark, len(b.Items))
@@ -208,7 +263,11 @@ func labelBase(v *runView, t *scene.Item, markIndex int) *label.Base {
 // holding the supersampled canvas.
 // It is not cairo's exact coverage: on an unusual shape a sliver could still
 // differ. Text is shaped with the engine's fonts, not the canvas's.
-type labelPainter struct{ v *runView }
+type labelPainter struct {
+	v *runView
+	// styles is each mask's canvas fill and stroke style (see canvasColors).
+	styles map[*label.Mask]*canvasStyle
+}
 
 func (lp *labelPainter) Draw(m *label.Mask, items []any, outline bool) {
 	list := make([]*scene.Item, 0, len(items))
@@ -263,6 +322,8 @@ func (lp *labelPainter) paint(m *label.Mask, typ scene.MarkType, items []*scene.
 		canvasOpacities(&c)
 		if outline {
 			outlineItem(&c)
+		} else if i == 0 || !typ.Nested() {
+			lp.canvasColors(m, &c)
 		}
 		mark.Items[i] = &c
 	}
@@ -310,6 +371,59 @@ func (lp *labelPainter) paint(m *label.Mask, typ scene.MarkType, items []*scene.
 		}
 		cov.Row(y, func(x int) { m.Set(x, y) })
 	}
+}
+
+// canvasStyle is the fillStyle and strokeStyle of a canvas context: black
+// until a draw assigns one.
+type canvasStyle struct{ fill, stroke scene.Paint }
+
+// canvasColors gives the copy of an item the colours upstream's canvas draws
+// it with. Assigning a style the canvas cannot parse (a word that is no
+// colour, a number, an array, an object) is ignored, so the item is drawn in
+// the style the context was left with: the last one a draw assigned it, and
+// black before any, where the SVG document the bitmap is drawn from would
+// leave the colour unparsed and draw nothing. One context draws all the marks
+// to avoid, so the style carries over from one item to the next.
+func (lp *labelPainter) canvasColors(m *label.Mask, it *scene.Item) {
+	st := lp.styles[m]
+	if st == nil {
+		if lp.styles == nil {
+			lp.styles = make(map[*label.Mask]*canvasStyle)
+		}
+		st = &canvasStyle{fill: scene.Color("#000"), stroke: scene.Color("#000")}
+		lp.styles[m] = st
+	}
+	// Whether the draw reaches fill() and stroke(): an item with no opacity
+	// draws nothing, a fill with none, a stroke with none or no width.
+	opacity := it.Opacity.Or(1)
+	if opacity == 0 {
+		return
+	}
+	if it.Fill.Truthy() && opacity*it.FillOpacity.Or(1) > 0 {
+		canvasAssign(it, &it.Fill, &st.fill, "fill")
+	}
+	if it.Stroke.Truthy() && it.StrokeWidth.Or(1) > 0 && opacity*it.StrokeOpacity.Or(1) > 0 {
+		canvasAssign(it, &it.Stroke, &st.stroke, "stroke")
+	}
+}
+
+// canvasAssign is `context.fillStyle = p` (or strokeStyle): a colour the
+// canvas parses becomes the context's style; any other is ignored, and the
+// item takes the style the context holds. A colour the context already holds
+// needs no parsing, and an item that keeps its colour is not copied.
+func canvasAssign(it *scene.Item, p, style *scene.Paint, name string) {
+	if p.Gradient() != nil || (p.IsString() && (style.IsString() && p.Str() == style.Str() || canvasParses(p.Str()))) {
+		*style = *p
+		return
+	}
+	*p = *style
+	it.Raw = maps.Clone(it.Raw) // it is a copy of the item, whose Raw it shares
+	it.ForgetRaw(name)
+}
+
+func canvasParses(s string) bool {
+	_, ok := csscolor.Parse(s)
+	return ok
 }
 
 // canvasOpacities gives the copy of an item the opacities upstream's canvas

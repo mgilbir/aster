@@ -1,0 +1,3 @@
+{"width":100,"height":60,"padding":4,"data":[{"name":"pts","values":[{"x":50,"t":"a"},{"x":20,"t":"b"}]}],
+"marks":[{"type":"symbol","name":"points","from":{"data":"pts"},"encode":{"enter":{"x":{"field":"x"},"y":{"value":"30"}}}},
+{"type":"text","from":{"data":"points"},"encode":{"enter":{"text":{"field":"datum.t"},"fontSize":{"value":10}}},"transform":[{"type":"label","size":[100,60]}]}]}

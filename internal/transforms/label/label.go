@@ -20,6 +20,19 @@ import (
 // Box is an axis-aligned bounding box.
 type Box struct{ X1, Y1, X2, Y2 float64 }
 
+// Texts are the positions of a label that upstream holds as text (a nil entry
+// is a number): the layout concatenates to such a coordinate, as JavaScript's
+// + does, and reads the number it converts to everywhere else (the number
+// stays in the float field).
+type Texts struct{ X, Y *string }
+
+// BaseTexts are the positions and bounds coordinates (x1, y1, x2, y2) of a
+// base item that are text.
+type BaseTexts struct {
+	X, Y   *string
+	Bounds [4]*string
+}
+
 // Point is one sample of a line or area mark. X2/Y2 are only meaningful when
 // the matching Has flag is set (area marks with a second baseline).
 type Point struct {
@@ -40,6 +53,8 @@ type Base struct {
 	MarkType string
 	X, Y     float64 // position, used for line and area marks
 	Bounds   Box
+	// Strs is nil unless a position or a bounds coordinate is text.
+	Strs *BaseTexts
 	// Marks are the marks nested in a group base item, indexed by
 	// Options.MarkIndex.
 	Marks []SubMark
@@ -52,7 +67,9 @@ type Label struct {
 	Text     string
 	FontSize float64
 	X, Y     float64 // the text item's own position (used without a base mark)
-	Base     *Base   // nil when there is no base mark
+	// Strs is nil unless the position is text.
+	Strs *Texts
+	Base *Base // nil when there is no base mark
 	// Tuple is the data tuple Apply writes results to; unused by Layout.
 	Tuple jsval.Value
 	// Ref is an opaque handle for the caller, handed back in Placement.Label
@@ -120,7 +137,10 @@ type Options struct {
 	MarkIndex        int
 	AvoidMarks       [][]any // item handles of extra marks to avoid
 	NoAvoidBaseMark  bool    // upstream avoidBaseMark=false
-	Method           string  // "naive" (default), "reduced-search", "floodfill"
+	// PlacedText, when set, is called for a label placed at a coordinate that
+	// is text (see Texts), with that text (nil for a number).
+	PlacedText func(l *Label, x, y *string)
+	Method     string // "naive" (default), "reduced-search", "floodfill"
 
 	TextWidth  func(l *Label) float64
 	Rasterizer Rasterizer
@@ -222,6 +242,16 @@ func Layout(ctx context.Context, labels []Label, o Options) ([]Placement, error)
 	infPadding := o.UnboundedPadding || math.IsInf(o.Padding, 1)
 	isNaiveGroupArea := isGroupArea && method == "naive"
 
+	// Only input that holds a coordinate as text takes the placement that
+	// concatenates; a number takes the plain one.
+	var tp *textPath
+	for i := range labels {
+		if labels[i].Strs != nil || (labels[i].Base != nil && labels[i].Base.Strs != nil) {
+			tp = &textPath{bnd: make(map[*item][6]jsv), out: make(map[*item][2]*string)}
+			break
+		}
+	}
+
 	data := make([]*item, len(labels))
 	maxTextWidth, maxTextHeight := -1.0, -1.0
 	for i := range labels {
@@ -233,6 +263,9 @@ func Layout(ctx context.Context, labels []Label, o Options) ([]Placement, error)
 		maxTextWidth = jsMax(maxTextWidth, d.textWidth)
 		maxTextHeight = jsMax(maxTextHeight, l.FontSize)
 		data[i] = d
+		if tp != nil {
+			tp.bnd[d] = boundaryJS(l, marktype, grouptype, lineAnchor, o.MarkIndex)
+		}
 	}
 
 	padding := o.Padding
@@ -279,6 +312,11 @@ func Layout(ctx context.Context, labels []Label, o Options) ([]Placement, error)
 			}
 			if avoidBaseMark {
 				for _, d := range data {
+					if tp != nil {
+						b := tp.bnd[d]
+						bms[0].set(sc.scaleJS(b[0]), sc.scaleJS(b[3]))
+						continue
+					}
 					bms[0].set(sc.scale(d.boundary[0]), sc.scale(d.boundary[3]))
 				}
 			}
@@ -303,7 +341,11 @@ func Layout(ctx context.Context, labels []Label, o Options) ([]Placement, error)
 			place = p.naive
 		}
 	} else {
-		place = markPlacer(sc, bms, anchors, offsets, o.TextWidth)
+		if tp != nil {
+			place = markPlacerJS(sc, bms, anchors, offsets, o.TextWidth, tp)
+		} else {
+			place = markPlacer(sc, bms, anchors, offsets, o.TextWidth)
+		}
 	}
 
 	out := make([]Placement, len(data))
@@ -320,6 +362,11 @@ func Layout(ctx context.Context, labels []Label, o Options) ([]Placement, error)
 			p.Opacity = 1
 		}
 		out[i] = p
+		if tp != nil && o.PlacedText != nil {
+			if t, ok := tp.out[d]; ok {
+				o.PlacedText(d.label, t[0], t[1])
+			}
+		}
 	}
 	return out, nil
 }
