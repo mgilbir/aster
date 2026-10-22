@@ -235,7 +235,7 @@ type Keys struct {
 // NewKeys is the Keys of a call that runs with the Walker w in the zone z.
 func NewKeys(z format.Zone, w jsval.Walker) Keys {
 	return Keys{z: z, w: w.WithDateText(func(dst []byte, ms float64) []byte {
-		return append(dst, format.DateToString(ms, z)...)
+		return format.AppendDateToString(dst, ms, z)
 	})}
 }
 
@@ -262,7 +262,7 @@ func (k Keys) Append(dst []byte, v jsval.Value) []byte {
 	case jsval.KindNum:
 		return jsval.AppendJSNumber(dst, v.NumValue())
 	case jsval.KindTimestamp:
-		return append(dst, format.DateToString(v.NumValue(), k.z)...)
+		return format.AppendDateToString(dst, v.NumValue(), k.z)
 	}
 	return k.w.AppendString(dst, v)
 }

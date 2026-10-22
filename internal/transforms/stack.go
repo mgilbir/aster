@@ -86,11 +86,13 @@ func (j *stringifier) append(dst []byte, v jsval.Value, depth int) ([]byte, erro
 		j.text(dst)
 		return dst, nil
 	case jsval.KindTimestamp:
-		iso, ok := format.ISOFormat(v.NumValue())
+		// The ISO text has nothing JSON escapes: it is quoted as it is
+		// written.
+		out, ok := format.AppendISO(append(dst, '"'), v.NumValue())
 		if !ok {
 			return append(dst, "null"...), nil
 		}
-		dst = jsval.AppendQuoted(dst, iso)
+		dst = append(out, '"')
 		j.text(dst)
 		return dst, nil
 	case jsval.KindArr, jsval.KindObj:

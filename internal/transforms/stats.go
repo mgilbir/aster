@@ -7,6 +7,7 @@ import (
 	"slices"
 
 	"github.com/mgilbir/aster/internal/budget"
+	"github.com/mgilbir/aster/internal/jsmath"
 	"github.com/mgilbir/aster/internal/jsval"
 )
 
@@ -22,7 +23,7 @@ func LCG(seed float64) Rand {
 	return func() float64 {
 		// The explicit conversion stops the compiler fusing the multiply-add,
 		// which would change the rounding.
-		seed = math.Mod(float64(1103515245*seed)+12345, 2147483647)
+		seed = jsmath.Rem(float64(1103515245*seed)+12345, 2147483647)
 		return seed / 2147483647
 	}
 }
