@@ -12,7 +12,8 @@ import (
 
 // golang.org/x/text keeps Unicode tables of its own, several of them chosen by
 // the Go version that builds it (cases and unicode/norm have one set for each
-// Unicode version Go ships: Go 1.26 builds Unicode 15's, Go 1.27 Unicode 17's).
+// Unicode version Go ships; Go 1.27, the module's minimum, ships Unicode 17,
+// the pinned node's, and a later Go may ship 18 while node stays on 17).
 // Text the engine maps with them is mapped by the toolchain's Unicode, not by
 // the pinned node's, so the engine would answer differently by the Go that
 // built it (audit 2026-10-18: U+019B.toUpperCase() under Go 1.26). JavaScript's

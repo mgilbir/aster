@@ -4,6 +4,10 @@ What changed between versions, for users of the library and the CLI. Breaking ch
 
 ## Unreleased
 
+### Build
+
+- **breaking:** the module requires Go 1.27 (it was 1.26). Regular expressions run on goecma262, which takes its Unicode data from Go's standard library (`unicode.SimpleFold` for the `i` flag, `unicode.Categories` and `Scripts` for `\p{...}`): Go 1.26 ships Unicode 15 and Go 1.27 Unicode 17, which is the pinned node's (V8, ICU 78), so under Go 1.26 a regular expression differed from node's for the characters Unicode 16 and 17 added (`/\p{L}/u` on `U+10D4A`, `/\u{A7CB}/iu` against `U+0264`). `TestToolchainUnicodeIsNodes` fails when the toolchain's Unicode is not the version the case tables were recorded from.
+
 ### Security
 
 - SVG given to `SVGToPNG` is bounded by `WithMemoryLimit(n)`, as a specification is (C8, C22, C23, audit 2026-10-18): its size (n/4, at most 256 MiB), its elements (n/128, at most 4,000,000; a run of text inside `<text>` now counts as one), its style sheets' bytes (n/64, at most 4 MiB) and rules (n/1024, at most 100,000), and the pixels of one filter region (n/8, at most 32 Mi); the defaults are unchanged. The tree the SVG parses to, its style rules and what they give each element, and its text as it is laid out (characters and glyphs) are charged to the call's ledger as they are built: a 60 MiB document of short runs of text held 1.7 GB under `WithMemoryLimit(64 MiB)`, and a 3 MiB `<text>` of characters placed one by one 368 MiB; both now fail with `ErrLimit`. Parsing polls the deadline about every 16 KiB of input (a 40 MiB document overran a 100 ms timeout by 1.8 s).

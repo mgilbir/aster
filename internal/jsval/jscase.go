@@ -9,8 +9,11 @@ import (
 // mappings are tables recorded from the pinned node (casetables.go, written
 // by testdata/gen_casetables.mjs), not Go's: the unicode package and
 // golang.org/x/text change with the Go toolchain (Go 1.26 has Unicode 15,
-// Go 1.27 Unicode 17), and the engine answers as the pinned node does
-// whichever toolchain builds it. TestNoGoCaseOrSpaceInTheEngine keeps
+// Go 1.27 Unicode 17, which is node's; a later Go may move on while node
+// does not), and the engine answers as the pinned node does whichever
+// toolchain builds it. The regular expressions do take the toolchain's
+// Unicode (goecma262), which is why go.mod requires Go 1.27
+// (TestToolchainUnicodeIsNodes). TestNoGoCaseOrSpaceInTheEngine keeps
 // golang.org/x/text/cases out of the rest of the engine.
 //
 // V8 maps a string by ICU's root-locale full case mapping: every code point

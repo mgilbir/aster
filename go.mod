@@ -1,6 +1,6 @@
 module github.com/mgilbir/aster
 
-go 1.26.0
+go 1.27.0
 
 require (
 	github.com/mgilbir/forme v0.10.0

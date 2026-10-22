@@ -5,7 +5,7 @@ Go library and CLI that renders [Vega](https://vega.github.io/vega/) and [Vega-L
 Reach for it when a Go program (a report generator, a server, a CLI pipeline) has to turn chart specs into images without shipping node or a browser. Aster implements the Vega runtime (following Vega 6.4.0) and the Vega-Lite compiler (6.4.3, and 5.8.0) in Go, measures text with [forme](https://github.com/mgilbir/forme), and has its own rasterizer and PDF writer. Its output is checked against upstream Vega running in node on thousands of specs ([how](docs/testing.md)).
 
 ```
-go get github.com/mgilbir/aster                     # library; Go 1.26+
+go get github.com/mgilbir/aster                     # library; Go 1.27+
 go install github.com/mgilbir/aster/cmd/aster@latest # CLI
 ```
 
