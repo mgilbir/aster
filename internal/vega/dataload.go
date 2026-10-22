@@ -47,7 +47,7 @@ func (v *runView) seedCollect(c *rtContext, n *opNode, e *entry) {
 			data = nil
 		}
 		v.holdSrcRows(n, data)
-		v.ingestRows(data)
+		v.ingestParsed(data)
 	case e.ingest != nil:
 		data = v.parseValues(e.ingest.values, e.ingest.format)
 		if v.nullRow(data) >= 0 {
@@ -85,6 +85,21 @@ func (v *runView) ingestRows(data []jsval.Value) {
 	for i := range data {
 		v.work(1)
 		data[i] = ingestTupleWith(&cl, data[i])
+	}
+}
+
+// ingestParsed ingests rows parsed from a loaded body, none of them null:
+// they are new and nothing else holds them, so an object row becomes the
+// tuple itself, as upstream's ingest makes it, without the copy ingestRows
+// makes of rows that may be the specification's.
+func (v *runView) ingestParsed(data []jsval.Value) {
+	for i, t := range data {
+		v.work(1)
+		if t.IsObj() {
+			t.ObjValue().EnsureTupleID()
+			continue
+		}
+		data[i] = ingestTuple(t)
 	}
 }
 
