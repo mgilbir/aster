@@ -129,8 +129,8 @@ internal/svg ^BenchmarkRender10k$
 internal/raster ^BenchmarkGolden|^BenchmarkColourGlyphs$
 internal/svgpdf ^BenchmarkConvert$|^BenchmarkConvertColour$
 internal/vegalite CompileBar|CompileTrellis|CompileSplom
-internal/vega Scatter1k|Scatter20k|Facet200x10
-internal/transforms ^Benchmark(AggregateSumMean100k|Bin100k|Stack100k)$
+internal/vega Scatter1k|Scatter20k|Facet200x10|NestedRefs|ParseHeavy
+internal/transforms ^Benchmark(AggregateSumMean100k|Bin100k|Stack100k|AggregateCI)$
 EOF
 }
 

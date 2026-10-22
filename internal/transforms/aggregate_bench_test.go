@@ -45,3 +45,23 @@ func BenchmarkAggregateMedian100k(b *testing.B) {
 		}
 	}
 }
+
+// BenchmarkAggregateCI is Vega-Lite's error bar with a confidence interval:
+// ci0 and ci1 per group draw a thousand bootstrap resamples each from the
+// seeded generator, so the generator's arithmetic is most of the time (its
+// remainder through math.Mod made this five to ten times slower).
+func BenchmarkAggregateCI(b *testing.B) {
+	data := aggBenchData(500)
+	p := AggregateParams{
+		GroupBy:  FieldsOf("c"),
+		Measures: []Measure{{Op: "ci0", Field: FieldOf("x")}, {Op: "ci1", Field: FieldOf("x")}, {Op: "mean", Field: FieldOf("x")}},
+		Rand:     LCG(123456789),
+	}
+	b.ReportAllocs()
+	b.ResetTimer() // the input is built once; allocs/op is one run's
+	for i := 0; i < b.N; i++ {
+		if _, err := Aggregate(context.Background(), data, p); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
