@@ -29,6 +29,7 @@ type Path struct {
 	led  *budget.Ledger // the bound call's, charged for the path text as it is built
 	lim  *pointCharge   // reused wrapper around str or cs for an unprojected path
 	cs   *pathContextStream
+	tee  *teeStream // cs and str at once, for DrawString
 
 	// walking is set while a string walk is in progress; still set at the next
 	// call means the last walk was cut short (a limit panic) and left the
@@ -174,6 +175,52 @@ func (p *Path) contextStream() *pathContextStream {
 	}
 	return p.cs
 }
+
+// DrawString draws the object onto the path's context, as Draw does, and
+// returns the path data String returns for it, from one walk of the
+// projection's pipeline (rotation, clipping, resampling) into both: a
+// shape's bounds and its SVG come from the same geometry. Without a context
+// it is String.
+func (p *Path) DrawString(object jsval.Value) (string, bool) {
+	if p.ctx == nil {
+		return p.String(object)
+	}
+	if p.str == nil || p.walking {
+		p.str = newPathString(p.digits)
+	}
+	p.str.led = p.led
+	if !object.IsTruthy() {
+		return p.str.result()
+	}
+	cs := p.contextStream()
+	r := p.radius
+	if p.radiusFn != nil {
+		r = p.radiusFn(object)
+	}
+	cs.pointRadius(r)
+	p.str.pointRadius(r)
+	if p.tee == nil || p.tee.ctx != cs || p.tee.str != p.str {
+		p.tee = &teeStream{ctx: cs, str: p.str}
+	}
+	p.stream(object, p.tee)
+	return p.str.result()
+}
+
+// teeStream streams to a path's drawing context and its string at once.
+// Like both of them, it is a sink a projection may keep its pipeline for.
+type teeStream struct {
+	ctx *pathContextStream
+	str *pathString
+}
+
+func (*teeStream) reusableSink() {}
+
+func (t *teeStream) Point(x, y float64) { t.ctx.Point(x, y); t.str.Point(x, y) }
+func (t *teeStream) LineStart()         { t.ctx.LineStart(); t.str.LineStart() }
+func (t *teeStream) LineEnd()           { t.ctx.LineEnd(); t.str.LineEnd() }
+func (t *teeStream) PolygonStart()      { t.ctx.PolygonStart(); t.str.PolygonStart() }
+func (t *teeStream) PolygonEnd()        { t.ctx.PolygonEnd(); t.str.PolygonEnd() }
+func (t *teeStream) Sphere()            { t.ctx.Sphere(); t.str.Sphere() }
 
 // Area is the planar area of the projected object.
 func (p *Path) Area(object jsval.Value) float64 {
