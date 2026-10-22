@@ -249,6 +249,12 @@ What changed between versions, for users of the library and the CLI. Breaking ch
 - A `FallbackLoader` whose children all fail reports every child's failure, in order, each matched by `errors.Is` and `errors.As`; it reported only the last, so a file missing from a `FileLoader` read as the refusal of the `HTTPLoader` after it (C70). One child's failure is still returned as it is.
 - A `FileLoader` read error says that the URL is relative to its `BaseDir` and gives the cause without `os.Root`'s operation name (`statat data/cars.json: no such file or directory`); it still wraps the `*fs.PathError`, and still does not name the directory, since the error reaches whoever wrote the spec.
 
+### Performance
+
+Output is byte for byte what it was.
+
+- A field reference nested in another (`{"field": {"datum": {"parent": "x.data"}}}`) and a scale named by a field reference (`{"scale": {"parent": "xscale"}}`) are compiled to the encoder's own code again, instead of from the JavaScript source upstream generates for them, which read the parent group through `item.mark.group` and so built the item, its mark and its group chain as values for every evaluation. The gallery's brushing scatter plots render in 10.7 ms instead of 49 ms, and its parallel coordinates in 10.1 ms instead of 23 ms (Linux x86-64), as fast as before v0.2.0's fixes made them slow.
+
 ## v0.2.0 (2026-10-14)
 
 ### Security

@@ -315,7 +315,10 @@ func canonicalEntry(enc jsval.Value, depth int) bool {
 		}
 	}
 	if s := enc.Get("scale"); !s.IsNullish() {
-		if !(s.IsStr() || s.IsObj() && s.Get("signal").IsStr() && s.Get("signal").IsTruthy()) {
+		// A scale reference is a name, a signal, or a field reference whose
+		// value names the scale (entry.js's scaleRef: `field(scale)`).
+		if !(s.IsStr() || s.IsObj() && s.Get("signal").IsStr() && s.Get("signal").IsTruthy() ||
+			s.IsObj() && !s.Get("signal").IsTruthy() && canonicalFieldAt(s, depth+1)) {
 			return false
 		}
 		if r := enc.Get("range"); !r.IsNullish() && !r.IsNum() {
@@ -340,16 +343,20 @@ func canonicalEntry(enc jsval.Value, depth int) bool {
 	return true
 }
 
-// canonicalField reports whether a field reference is a path or a single
-// level of signal, datum, group or parent reference to a path, which
-// fieldObj compiles as entry.js's source reads it.
-func canonicalField(f jsval.Value) bool {
+// canonicalField reports whether a field reference is a path, or a signal,
+// datum, group or parent reference to a path or to a canonical reference
+// (field.js's resolveField of a nested one, `object[inner]`), which fieldObj
+// compiles as entry.js's source reads it.
+func canonicalField(f jsval.Value) bool { return canonicalFieldAt(f, 0) }
+
+func canonicalFieldAt(f jsval.Value, depth int) bool {
 	if f.IsStr() {
 		return f.StrValue() != ""
 	}
-	if !f.IsObj() {
+	if !f.IsObj() || depth > 8 {
 		return false
 	}
+	key := func(k jsval.Value) bool { return k.IsStr() || k.IsObj() && canonicalFieldAt(k, depth+1) }
 	switch {
 	case f.Get("signal").IsTruthy():
 		return f.Get("signal").IsStr()
@@ -359,9 +366,9 @@ func canonicalField(f jsval.Value) bool {
 			k = f.Get("group")
 		}
 		l := f.Get("level")
-		return k.IsStr() && (l.IsUndefined() || l.IsNum())
+		return key(k) && (l.IsUndefined() || l.IsNum())
 	case f.Get("datum").IsTruthy():
-		return f.Get("datum").IsStr()
+		return key(f.Get("datum"))
 	}
 	return false
 }
