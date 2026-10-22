@@ -10,6 +10,7 @@ import (
 
 	"github.com/mgilbir/aster/internal/budget"
 	"github.com/mgilbir/aster/internal/format"
+	"github.com/mgilbir/aster/internal/jsmath"
 	"github.com/mgilbir/aster/internal/jsval"
 	ecma262 "github.com/mgilbir/goecma262"
 )
@@ -69,7 +70,7 @@ type Random struct {
 // linear congruential generator, so a seeded run matches Vega's seeded run.
 func NewLCG(seed float64) func() float64 {
 	return func() float64 {
-		seed = math.Mod(float64(1103515245*seed)+12345, 2147483647) // no FMA: the product rounds first, as in JS
+		seed = jsmath.Rem(float64(1103515245*seed)+12345, 2147483647) // no FMA: the product rounds first, as in JS
 		return seed / 2147483647
 	}
 }

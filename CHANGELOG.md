@@ -254,6 +254,7 @@ What changed between versions, for users of the library and the CLI. Breaking ch
 Output is byte for byte what it was.
 
 - A field reference nested in another (`{"field": {"datum": {"parent": "x.data"}}}`) and a scale named by a field reference (`{"scale": {"parent": "xscale"}}`) are compiled to the encoder's own code again, instead of from the JavaScript source upstream generates for them, which read the parent group through `item.mark.group` and so built the item, its mark and its group chain as values for every evaluation. The gallery's brushing scatter plots render in 10.7 ms instead of 49 ms, and its parallel coordinates in 10.1 ms instead of 23 ms (Linux x86-64), as fast as before v0.2.0's fixes made them slow.
+- The seeded random numbers that `ci0` and `ci1` aggregates (Vega-Lite's error bars and bands with a confidence interval) draw a thousand resamples from take the generator's remainder as an integer where it is one, which is exact, instead of with `math.Mod`: such charts render in a sixth to a tenth of the time.
 
 ## v0.2.0 (2026-10-14)
 
